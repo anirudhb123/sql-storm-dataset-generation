@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS Depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- First level supplier
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.Depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal < sh.s_acctbal -- All suppliers below the current hierarchy level
+), OrderStats AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           o.o_orderstatus,
+           COUNT(l.l_orderkey) AS TotalLineItems,
+           SUM(l.l_discount) AS TotalDiscount,
+           AVG(l.l_extendedprice) OVER (PARTITION BY o.o_orderstatus) AS AvgExtendedPrice
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus
+),
+ProductStats AS (
+    SELECT p.p_partkey,
+           SUM(ps.ps_availqty) AS TotalAvailable,
+           COUNT(DISTINCT ps.ps_suppkey) AS TotalSuppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT rh.r_name,
+       COUNT(DISTINCT c.c_custkey) AS TotalCustomers,
+       SUM(o.o_totalprice) AS TotalOrderValue,
+       AVG(o.TotalLineItems) AS AvgOrderSize,
+       GROUP_CONCAT(DISTINCT p.p_name) AS PopularProducts,
+       MAX(ps.TotalAvailable) AS MaxAvailable,
+       COALESCE(MAX(sh.s_acctbal), 0) AS MaxSupplierBalance -- Handle potential NULLs
+FROM region rh
+JOIN nation n ON rh.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN Customer c ON s.s_suppkey = c.c_nationkey
+JOIN OrderStats o ON c.c_custkey = o.o_orderkey
+JOIN ProductStats ps ON o.o_orderkey = ps.p_partkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey -- Include supplier hierarchy
+WHERE o.o_orderstatus IN ('O', 'F') -- Filter by order status
+GROUP BY rh.r_name
+HAVING SUM(o.o_totalprice) > 50000 -- Only consider regions with significant total order value
+ORDER BY TotalOrderValue DESC;

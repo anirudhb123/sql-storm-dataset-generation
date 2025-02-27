@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        COALESCE(CT.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS ScoreRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS HasUpvote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) CT ON CT.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS RecentEdits,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, '2024-10-01')
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId AS PostIdentifier,
+    p.Title AS PostTitle,
+    p.ViewCount,
+    p.Score,
+    p.CommentCount,
+    p.ScoreRank,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pha.RecentEdits,
+    pha.EditCount,
+    CASE 
+        WHEN p.HasUpvote = 1 THEN 'Yes'
+        ELSE 'No'
+    END AS Upvoted
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostHistoryAggregates pha ON pha.PostId = p.PostId
+WHERE 
+    p.TotalComments > 0 AND 
+    (p.ScoreRank = 1 OR p.ViewCount > 100)
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC
+LIMIT 50;

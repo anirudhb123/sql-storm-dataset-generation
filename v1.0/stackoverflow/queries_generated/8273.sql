@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND p.PostTypeId IN (1, 2) -- Only Questions and Answers
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        u.Location
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    ur.UserId,
+    ur.DisplayName AS UserOwner,
+    ur.Reputation AS UserReputation,
+    ur.Location AS UserLocation,
+    rp.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.PostRank = 1 AND rp.OwnerUserId = ur.UserId
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.Score DESC;

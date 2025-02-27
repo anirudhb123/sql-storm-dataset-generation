@@ -1,0 +1,59 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    ak.name AS actor_name,
+    t.title,
+    mh.production_year,
+    COUNT(DISTINCT m.id) AS related_movies_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mh.depth DESC) AS rank_within_actor,
+    MAX(c.role_id) AS max_role_id,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(MAX(ci.note), 'No Note') AS summary_note
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+JOIN 
+    aka_name ak ON c.person_id = ak.person_id 
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+WHERE
+    mh.production_year >= 2000
+GROUP BY 
+    ak.name, t.title, mh.production_year, mh.depth, ak.person_id
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+ORDER BY 
+    mh.production_year DESC, rank_within_actor;

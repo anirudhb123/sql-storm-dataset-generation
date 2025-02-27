@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 500000
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.supplier_rank <= 5
+)
+SELECT 
+    ts.r_regionkey, 
+    ts.r_name, 
+    ts.s_suppkey, 
+    ts.s_name, 
+    ts.total_supply_cost
+FROM 
+    TopSuppliers ts
+JOIN 
+    HighValueNations hvn ON hvn.n_nationkey = ts.s_nationkey 
+ORDER BY 
+    ts.r_regionkey, ts.total_supply_cost DESC;

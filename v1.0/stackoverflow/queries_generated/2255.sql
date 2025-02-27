@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Id = t.ExcerptPostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserVotes AS (
+    SELECT 
+        v.PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END) AS TotalVotes 
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.ViewCount, 
+    rp.Score, 
+    rp.Rank, 
+    COALESCE(uv.TotalVotes, 0) AS NetVotes, 
+    bu.BadgeCount,
+    (CASE 
+        WHEN rp.Score > 10 THEN 'High Score' 
+        WHEN rp.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score' 
+    END) AS ScoreCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    BadgedUsers bu ON u.Id = bu.UserId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC;

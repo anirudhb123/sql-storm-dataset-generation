@@ -1,0 +1,96 @@
+WITH Recursive ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS latest_movie_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.movie_title,
+        am.production_year
+    FROM 
+        ActorMovies am
+    WHERE 
+        am.latest_movie_order = 1
+        AND am.production_year > 2000
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+ActorWithCompany AS (
+    SELECT 
+        fm.actor_id,
+        fm.actor_name,
+        fm.movie_title,
+        fm.production_year,
+        COALESCE(cd.companies, 'No Companies') AS companies_involved
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        CompanyDetails cd ON fm.movie_title = cd.movie_id
+),
+KeywordInfo AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+
+SELECT 
+    AMC.actor_name,
+    AMC.movie_title,
+    AMC.production_year,
+    AMC.companies_involved,
+    KI.keywords_list,
+    CASE 
+        WHEN AMC.production_year IS NULL THEN 'Unknown Year'
+        ELSE 'Year ' || AMC.production_year 
+    END AS Production_Year_Info
+FROM 
+    ActorWithCompany AMC
+LEFT JOIN 
+    KeywordInfo KI ON AMC.movie_title = KI.movie_id
+WHERE 
+    AMC.actor_name LIKE '%Smith%' 
+    AND AMC.companies_involved IS NOT NULL
+    AND (AMC.production_year BETWEEN 2000 AND 2023 OR AMC.production_year IS NULL)
+ORDER BY 
+    AMC.production_year DESC
+LIMIT 50;
+
+This SQL query utilizes several advanced SQL features, including:
+- Common Table Expressions (CTEs) for better organization.
+- Recursive CTE to extract actor-movie relationships.
+- Filtering of movies produced after 2000.
+- String aggregation to compile company names.
+- Use of COALESCE for handling NULL values.
+- The concatenation of strings and case statements for output formatting.
+- Complex conditions in the final WHERE clause, showcasing the handling of NULL logic and a LIKE search pattern. 
+- Results are ordered by production year, limiting the output for performance benchmarking.

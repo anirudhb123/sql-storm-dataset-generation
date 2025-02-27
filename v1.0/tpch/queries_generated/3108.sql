@@ -1,0 +1,82 @@
+WITH CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+    HAVING
+        SUM(o.o_totalprice) > 5000
+),
+SupplierParts AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM
+        supplier s
+    INNER JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+PartSales AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS unique_orders
+    FROM
+        lineitem l
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2022-01-01'
+        AND l.l_returnflag = 'N'
+    GROUP BY
+        l.l_partkey
+),
+TopParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ps.total_available,
+        ps.s_name AS supplier_name,
+        COALESCE(ps.total_available, 0) AS available_quantity,
+        ps.s_suppkey
+    FROM
+        part p
+    LEFT JOIN
+        SupplierParts ps ON p.p_partkey = ps.ps_partkey
+    WHERE
+        p.p_retailprice > 100
+)
+SELECT
+    co.c_name,
+    tp.p_name,
+    tp.available_quantity,
+    ps.total_sales,
+    ps.unique_orders
+FROM
+    CustomerOrders co
+JOIN
+    lineitem li ON li.l_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey = co.c_custkey
+    )
+JOIN
+    PartSales ps ON li.l_partkey = ps.l_partkey
+JOIN
+    TopParts tp ON tp.p_partkey = li.l_partkey
+WHERE
+    tp.available_quantity IS NOT NULL
+ORDER BY
+    co.total_spent DESC,
+    ps.total_sales DESC
+LIMIT 10;

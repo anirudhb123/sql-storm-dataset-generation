@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s_name,
+        SUM(ps_availqty) AS total_available_quantity,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, ps_partkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        r.r_name AS region_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        CUBE(o.o_orderstatus) AS order_status_cube
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    hvp.p_partkey,
+    hvp.p_name,
+    hvp.p_retailprice,
+    rs.s_name AS supplier_name,
+    rs.total_available_quantity,
+    os.lineitem_count,
+    os.total_revenue,
+    os.order_status_cube
+FROM 
+    HighValueParts hvp
+JOIN 
+    RankedSuppliers rs ON hvp.p_partkey = rs.ps_partkey AND rs.rank = 1
+JOIN 
+    OrderStats os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY')))
+WHERE 
+    hvp.region_name = 'EUROPE'
+ORDER BY 
+    os.total_revenue DESC;

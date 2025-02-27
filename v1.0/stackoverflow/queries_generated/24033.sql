@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(voteScore, 0)) AS TotalVoteScore,
+        RANK() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(voteScore, 0)) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            v.PostId,
+            SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) - 
+            SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS voteScore
+        FROM Votes v
+        JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+        GROUP BY v.PostId
+    ) AS postVotes ON p.Id = postVotes.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostReasons AS (
+    SELECT
+        ph.PostId,
+        GROUP_CONCAT(DISTINCT cr.Name ORDER BY cr.Id) AS CloseReasons,
+        COUNT(ph.Id) AS ClosureCount
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS VARCHAR)
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY ph.PostId
+)
+SELECT
+    u.DisplayName,
+    ph.PostId,
+    ph.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    CASE WHEN ph.ClosureCount IS NULL THEN 'Open' ELSE 'Closed' END AS PostStatus,
+    COALESCE(cr.CloseReasons, 'No Closure Reason') AS CloseReasons,
+    CONCAT('UserRank: ', ua.UserRank, ' | Post Count: ', ua.PostCount, ' | Total Vote Score: ', COALESCE(ua.TotalVoteScore, 0)) AS UserStats,
+    STRING_AGG(pt.Name, ', ') AS PostTypes
+FROM RecursivePostHierarchy ph
+LEFT JOIN Comments c ON c.PostId = ph.PostId
+LEFT JOIN Users u ON u.Id = ph.OwnerId
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN ClosedPostReasons cr ON cr.PostId = ph.PostId
+LEFT JOIN PostTypes pt ON pt.Id = (
+    SELECT PostTypeId
+    FROM Posts
+    WHERE Id = ph.PostId
+)
+GROUP BY u.DisplayName, ph.PostId, ph.Title, cr.CloseReasons, ph.ClosureCount, ua.UserRank, ua.PostCount, ua.TotalVoteScore
+ORDER BY u.DisplayName, ph.PostId;

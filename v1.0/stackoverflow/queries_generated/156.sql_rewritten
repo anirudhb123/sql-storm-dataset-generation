@@ -1,0 +1,66 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsAsked,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersGiven,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotesReceived,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotesReceived,
+        RANK() OVER (ORDER BY COALESCE(SUM(V.VoteTypeId = 2), 0) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[]) 
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+RecentUserEdits AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.UserId ORDER BY PH.CreationDate DESC) AS EditNumber
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6, 10) 
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.QuestionsAsked,
+    UA.AnswersGiven,
+    UA.UpVotesReceived,
+    UA.DownVotesReceived,
+    PT.TagName,
+    RE.EditNumber,
+    RE.Comment,
+    RE.CreationDate
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PopularTags PT ON PT.PostCount > 50 
+LEFT JOIN 
+    RecentUserEdits RE ON RE.UserId = UA.UserId
+WHERE 
+    UA.VoteRank <= 10 
+ORDER BY 
+    UA.UserId, RE.CreationDate DESC;

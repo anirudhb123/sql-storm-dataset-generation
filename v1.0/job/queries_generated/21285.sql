@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ka.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ka.name) AS rn,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY t.id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND (ci.note IS NULL OR ci.note <> 'Cameo')
+), MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        i.info AS movie_info,
+        i.info_type_id,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY i.created_at DESC) AS info_rn
+    FROM 
+        movie_info m
+    JOIN 
+        (SELECT * FROM movie_info_idx WHERE note IS NULL) AS i
+    ON 
+        m.movie_id = i.movie_id
+), ActorRoleCounts AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    GROUP BY 
+        ka.name
+), KeywordStats AS (
+    SELECT 
+        mw.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mw
+    JOIN 
+        keyword k ON mw.keyword_id = k.id
+    GROUP BY 
+        mw.movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_name,
+    COALESCE(mk.keyword_count, 0) AS keyword_count,
+    COALESCE(arc.role_count, 0) AS role_count,
+    rm.company_count,
+    CASE 
+        WHEN rm.rn = 1 THEN 'Lead Actor' 
+        ELSE 'Supporting Actor' 
+    END AS actor_role_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    KeywordStats mk ON rm.movie_title = (SELECT title FROM aka_title WHERE id = rm.movie_title_limit)
+LEFT JOIN 
+    ActorRoleCounts arc ON rm.actor_name = arc.actor_name
+WHERE 
+    (rm.production_year BETWEEN 2020 AND 2023 OR rm.company_count > 2)
+    AND rm.actor_name IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, 
+    keyword_count DESC;

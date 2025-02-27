@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        TotalRevenue.total_revenue
+    FROM 
+        supplier s
+    LEFT JOIN 
+        TopSuppliers TotalRevenue ON s.s_suppkey = TotalRevenue.ps_suppkey
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(sd.total_revenue), 0) AS total_supplier_revenue,
+    AVG(o.o_totalprice) AS avg_order_value,
+    STRING_AGG(DISTINCT sd.s_name, ', ') AS supplier_names
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.total_revenue > 0
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_supplier_revenue DESC,
+    avg_order_value DESC
+FETCH FIRST 10 ROWS ONLY;

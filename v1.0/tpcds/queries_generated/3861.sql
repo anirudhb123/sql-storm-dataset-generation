@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+WebSalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+AggregateReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr_return_amt_inc_tax) AS total_web_returns,
+        COUNT(*) AS web_return_count
+    FROM 
+        web_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(cr.total_returns, 0) AS store_return_count,
+    COALESCE(cr.total_return_value, 0) AS total_store_return_value,
+    COALESCE(ws.total_sales, 0) AS total_web_sales,
+    COALESCE(ws.total_orders, 0) AS total_web_orders,
+    COALESCE(ar.total_web_returns, 0) AS total_web_returns,
+    COALESCE(ar.web_return_count, 0) AS web_return_count
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    WebSalesData ws ON cd.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    AggregateReturns ar ON cd.c_customer_sk = ar.returning_customer_sk
+WHERE 
+    (cd.cd_gender = 'F' AND cd.cd_marital_status = 'M' AND cd.cd_education_status LIKE '%University%')
+    OR 
+    (cd.cd_gender = 'M' AND cd.cd_marital_status = 'S' AND cd.cd_education_status LIKE '%College%')
+ORDER BY 
+    total_web_sales DESC, 
+    total_store_return_value DESC
+LIMIT 100;

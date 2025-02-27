@@ -1,0 +1,95 @@
+WITH RecursivePostChain AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rpc.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostChain rpc ON p.ParentId = rpc.PostId
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownvoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS UserPostRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY
+        p.Id
+),
+PostHierarchy AS (
+    SELECT
+        rpc.PostId,
+        rpc.Title,
+        p.OwnerUserId,
+        ps.CommentCount,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ps.BadgeCount,
+        rpc.Level
+    FROM
+        RecursivePostChain rpc
+    JOIN
+        Posts p ON rpc.PostId = p.Id
+    JOIN
+        PostStats ps ON p.Id = ps.PostId
+),
+TopPosts AS (
+    SELECT 
+        Title, 
+        CommentCount, 
+        UpvoteCount, 
+        DownvoteCount,
+        Level,
+        ROW_NUMBER() OVER (ORDER BY UpvoteCount DESC) AS Rnk
+    FROM 
+        PostHierarchy
+    WHERE 
+        Level = 1
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    ph.CommentCount,
+    ph.UpvoteCount,
+    ph.DownvoteCount,
+    ph.BadgeCount,
+    CASE 
+        WHEN ph.CommentCount IS NULL THEN 'No Comments'
+        ELSE 'Has Comments'
+    END AS CommentStatus,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM Tags t 
+        JOIN Posts p2 ON t.ExcerptPostId = p2.Id
+        WHERE p2.Id = ph.PostId
+    ), 'No Tags') AS RelatedTags
+FROM 
+    PostHierarchy ph
+JOIN 
+    TopPosts tp ON ph.Title = tp.Title
+WHERE 
+    tp.Rnk <= 10
+ORDER BY 
+    ph.UpvoteCount DESC NULLS LAST;

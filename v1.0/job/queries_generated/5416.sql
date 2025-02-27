@@ -1,0 +1,43 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        r.role, 
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS rn
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.role
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn = 1
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    COUNT(DISTINCT ak.name) AS aka_names,
+    ARRAY_AGG(DISTINCT ct.kind) AS company_types
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    aka_title ak ON ak.movie_id = md.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = md.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+GROUP BY 
+    md.title, 
+    md.production_year
+ORDER BY 
+    md.production_year DESC, 
+    aka_names DESC;

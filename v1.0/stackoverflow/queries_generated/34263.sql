@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 -- Only questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentActivity AS (
+    SELECT 
+        c.UserId AS CommentUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN c.CreationDate >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentCommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(ur.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ra.CommentCount, 0) AS TotalComments,
+        COALESCE(ra.RecentCommentCount, 0) AS RecentComments,
+        ur.Reputation,
+        ur.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM
+        Users u
+    LEFT JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        RecentActivity ra ON u.Id = ra.CommentUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 5 -- Top 5 scored posts per user
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.QuestionCount,
+    tu.TotalComments,
+    tp.Title AS TopPostTitle,
+    tp.Score AS TopPostScore,
+    tp.CreationDate AS TopPostDate
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    TopPosts tp ON tu.Id = tp.OwnerUserId
+WHERE 
+    tu.UserRank <= 10 -- Top 10 users based on reputation
+ORDER BY 
+    tu.Reputation DESC, tp.Score DESC;

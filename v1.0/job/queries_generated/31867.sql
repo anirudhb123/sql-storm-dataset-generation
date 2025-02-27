@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        ak.title,
+        ak.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title ak ON ak.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        ak.production_year >= 2000
+),
+CastStatistics AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END)::numeric AS avg_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ms.total_cast,
+        ms.avg_roles,
+        ROW_NUMBER() OVER (ORDER BY ms.total_cast DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastStatistics ms ON mh.movie_id = ms.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = tm.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    mwk.keywords,
+    COALESCE(cn.name, 'Unknown Company') AS production_company,
+    ('% of Cast Assigned Roles: ' || ROUND(tm.avg_roles * 100, 2) || '%') AS role_stats
+FROM 
+    MoviesWithKeywords mwk
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT movie_id FROM complete_cast WHERE movie_id = mwk.movie_id LIMIT 1)
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+JOIN 
+    TopMovies tm ON tm.title = mwk.title
+WHERE 
+    mwk.production_year > 2010
+    AND mwk.keywords LIKE '%Action%'
+ORDER BY 
+    mwk.production_year DESC,
+    tm.total_cast DESC;

@@ -1,0 +1,88 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN VT.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VT.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN P.PostTypeId = 1 AND PH.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS TitleOrBodyEdits
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate > (NOW() - INTERVAL '1 year')
+    GROUP BY 
+        PH.PostId
+),
+PostScoreStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Score
+)
+SELECT 
+    U.DisplayName AS User,
+    U.TotalVotes,
+    U.Upvotes,
+    U.Downvotes,
+    T.TagName,
+    PH.FirstEditDate,
+    PH.LastEditDate,
+    PH.EditCount,
+    PSS.PostId,
+    PSS.Score,
+    PSS.TotalUpvotes,
+    PSS.TotalDownvotes,
+    CASE 
+        WHEN PSS.Score > 0 THEN 'Positive' 
+        WHEN PSS.Score < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS ScoreCategory
+FROM 
+    UserVoteStats U
+CROSS JOIN 
+    TopTags T
+LEFT JOIN 
+    PostHistoryDetails PH ON PH.PostId = (SELECT Id FROM Posts WHERE Tags LIKE '%' || T.TagName || '%' LIMIT 1)
+LEFT JOIN 
+    PostScoreStats PSS ON PSS.PostId = (SELECT Id FROM Posts WHERE Tags LIKE '%' || T.TagName || '%' LIMIT 1)
+WHERE 
+    U.TotalVotes IS NOT NULL
+ORDER BY 
+    U.TotalVotes DESC, U.DisplayName ASC;

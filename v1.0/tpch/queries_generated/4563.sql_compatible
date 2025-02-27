@@ -1,0 +1,37 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), OrderTotals AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+), OrderDelivery AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           DATEDIFF(day, o.o_orderdate, l.l_commitdate) AS days_to_commit
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.o_orderkey
+    WHERE l.l_shipdate <= o.o_orderdate
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(ot.total_lineitem_price) AS total_revenue,
+    AVG(od.days_to_commit) AS avg_days_to_commit,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    MAX(rs.s_acctbal) AS max_supplier_acctbal,
+    CASE 
+        WHEN SUM(ot.total_lineitem_price) IS NULL THEN 'No Revenue'
+        ELSE CAST(SUM(ot.total_lineitem_price) AS VARCHAR)
+    END AS revenue_output
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank <= 5
+LEFT JOIN OrderTotals ot ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN 
+    (SELECT p.p_partkey FROM part p WHERE p.p_size > 20))
+LEFT JOIN OrderDelivery od ON ot.o_orderkey = od.o_orderkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(ot.total_lineitem_price) > 100000
+ORDER BY total_revenue DESC;

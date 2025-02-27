@@ -1,0 +1,48 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 0
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON rh.r_regionkey = n.n_regionkey
+    JOIN region r ON n.n_nationkey = r.r_regionkey
+),
+customer_summaries AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+part_supplier_summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+lineitem_ranking AS (
+    SELECT l.*, 
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+)
+SELECT 
+    r.r_name AS region_name,
+    c.c_name AS customer_name,
+    cs.order_count,
+    cs.total_spent,
+    p.p_name AS part_name,
+    pss.total_available,
+    pss.avg_supply_cost,
+    l.l_orderkey,
+    l.price_rank
+FROM region_hierarchy r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN customer_summaries cs ON cs.c_custkey = s.s_suppkey  -- Assuming a relationship
+LEFT JOIN lineitem_ranking l ON l.l_partkey = p.p_partkey
+WHERE cs.total_spent > 1000.00
+  AND l.price_rank <= 5
+  AND (ps.ps_availqty IS NOT NULL OR ps.ps_supplycost IS NULL)
+ORDER BY r.r_name, cs.total_spent DESC;

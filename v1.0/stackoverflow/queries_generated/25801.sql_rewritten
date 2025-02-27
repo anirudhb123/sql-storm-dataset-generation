@@ -1,0 +1,70 @@
+WITH TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(u.Reputation) AS AvgReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS Contributors
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        t.TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        STRING_AGG(DISTINCT c.Text, ' | ') AS Comments,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body
+),
+Contributors AS (
+    SELECT 
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(b.Reputation, 0)) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.AvgReputation,
+    t.Contributors,
+    r.Title AS RecentPostTitle,
+    r.CreationDate AS RecentPostCreationDate,
+    r.Comments AS RecentPostComments,
+    r.Upvotes AS RecentPostUpvotes,
+    r.Downvotes AS RecentPostDownvotes,
+    c.DisplayName AS Contributor,
+    c.TotalViews,
+    c.TotalReputation
+FROM 
+    TagUsage t
+LEFT JOIN 
+    RecentPosts r ON t.TagName = ANY(STRING_TO_ARRAY(r.Body, ' '))  
+LEFT JOIN 
+    Contributors c ON r.Upvotes >= 10  
+ORDER BY 
+    t.PostCount DESC, r.CreationDate DESC;

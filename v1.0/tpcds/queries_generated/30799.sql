@@ -1,0 +1,72 @@
+
+WITH RECURSIVE eligible_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(sr_item_sk) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    HAVING 
+        COUNT(sr_item_sk) > 5
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        COUNT(sr_item_sk) + ec.return_count
+    FROM 
+        eligible_customers ec
+    JOIN 
+        customer c ON ec.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    WHERE 
+        ec.return_count < 10
+    GROUP BY 
+        c.c_customer_sk
+), ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ss_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_month IS NOT NULL
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+), recent_dates AS (
+    SELECT 
+        d.d_date
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date >= CURRENT_DATE - INTERVAL '2 MONTH'
+)
+SELECT 
+    rc.c_customer_id,
+    rc.cd_gender,
+    rc.total_sales,
+    COALESCE(ec.return_count, 0) AS return_count,
+    d.d_date,
+    CASE
+        WHEN rc.sales_rank <= 10 THEN 'Top Performer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    eligible_customers ec ON rc.c_customer_id = ec.c_customer_sk
+CROSS JOIN 
+    recent_dates d
+WHERE 
+    rc.total_sales > 1000
+ORDER BY 
+    total_sales DESC, rc.cd_gender;

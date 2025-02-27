@@ -1,0 +1,94 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(AVG(v.BountyAmount), 0) AS AvgBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVoteCount,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    rp.Level AS PostLevel,
+    u.DisplayName AS OwnerName,
+    u.TotalBounty,
+    u.BadgeCount,
+    pvs.VoteCount,
+    pvs.AvgBounty,
+    cp.CloseVoteCount,
+    cp.FirstCloseDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON p.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostVoteStatistics pvs ON p.Id = pvs.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+LEFT JOIN 
+    RecursivePostCTE rp ON p.Id = rp.Id
+WHERE 
+    (p.AcceptedAnswerId IS NULL OR p.AcceptedAnswerId IN (SELECT Id FROM Posts WHERE Score >= 5))
+    AND (p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year')
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

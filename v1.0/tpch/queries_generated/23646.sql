@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+        AND o.o_orderstatus IN ('O', 'F')
+),
+CustomerSupplier AS (
+    SELECT 
+        c.c_custkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        customer c
+    JOIN 
+        supplier s ON c.c_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        c.c_custkey, s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    CASE 
+        WHEN c.total_available IS NULL THEN 'No Supply'
+        ELSE CONCAT('Available: ', c.total_available)
+    END AS availability,
+    r.o_orderstatus,
+    COUNT(*) OVER (PARTITION BY r.o_orderstatus) AS status_count,
+    MAX(CASE WHEN r.o_orderstatus = 'O' THEN r.o_totalprice ELSE 0 END) AS max_open_price
+FROM 
+    part p
+LEFT JOIN 
+    CustomerSupplier c ON c.s_suppkey = (
+        SELECT MIN(s.s_suppkey)
+        FROM supplier s 
+        WHERE s.s_acctbal > p.p_retailprice 
+        LIMIT 1
+    )
+FULL OUTER JOIN 
+    RankedOrders r ON r.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_quantity > 50 AND l.l_discount < 0.1
+    )
+WHERE 
+    p.p_size BETWEEN 1 AND 20
+    AND (p.p_comment IS NULL OR p.p_comment != 'Excess Stock')
+ORDER BY 
+    p.p_partkey DESC,
+    rnk DESC NULLS LAST;

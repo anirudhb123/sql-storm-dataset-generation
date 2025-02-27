@@ -1,0 +1,68 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        ca.ca_city, 
+        ca.ca_state, 
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemInfo AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_product_name, 
+        i.i_item_desc, 
+        i.i_current_price
+    FROM 
+        item i
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        c.customer_id,
+        i.i_item_id,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        d.d_date
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        ItemInfo i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    COUNT(DISTINCT si.ws_order_number) AS total_orders,
+    SUM(si.ws_ext_sales_price) AS total_spent,
+    AVG(si.ws_sales_price) AS average_order_value
+FROM 
+    CustomerInfo ci
+JOIN 
+    SalesInfo si ON ci.c_customer_id = si.customer_id
+WHERE 
+    ci.cd_gender = 'F' AND 
+    si.d_date BETWEEN '2022-01-01' AND '2023-01-01'
+GROUP BY 
+    ci.full_name, 
+    ci.ca_city, 
+    ci.ca_state, 
+    ci.ca_country
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

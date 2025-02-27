@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        1 AS level
+    FROM web_sales
+    GROUP BY ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        w.ws_item_sk,
+        SUM( cs.cs_sales_price ) AS total_sales,
+        COUNT(cs.cs_order_number) AS order_count,
+        level + 1
+    FROM catalog_sales cs
+    JOIN SalesCTE w ON cs.cs_item_sk = w.ws_item_sk
+    GROUP BY w.ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        s.ws_item_sk, 
+        s.total_sales,
+        s.order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.ws_item_sk ORDER BY s.total_sales DESC) AS rank
+    FROM SalesCTE s
+    WHERE s.total_sales > 1000
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    f.ws_item_sk,
+    f.total_sales,
+    f.order_count,
+    a.ca_city,
+    a.ca_state,
+    a.customer_count
+FROM FilteredSales f
+JOIN AddressInfo a ON f.ws_item_sk = a.ca_address_sk
+WHERE f.rank = 1
+ORDER BY f.total_sales DESC
+LIMIT 50;
+

@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(c.id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+PopularActors AS (
+    SELECT
+        ak.name,
+        ak.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        aka_name ak
+    JOIN
+        cast_info c ON ak.person_id = c.person_id
+    WHERE
+        ak.name IS NOT NULL
+    GROUP BY
+        ak.name, ak.person_id
+    HAVING
+        COUNT(DISTINCT c.movie_id) > 5
+),
+MovieGenres AS (
+    SELECT
+        m.id AS movie_id,
+        k.keyword AS genre
+    FROM
+        aka_title m
+    JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    COALESCE(pa.name, 'Unknown Actor') AS main_actor,
+    rm.cast_count,
+    ARRAY_AGG(DISTINCT mg.genre) AS genres
+FROM
+    RankedMovies rm
+LEFT JOIN
+    PopularActors pa ON rm.rank = 1 AND pa.movie_count > 3 
+LEFT JOIN
+    MovieGenres mg ON rm.id = mg.movie_id
+WHERE
+    (rm.production_year <> 2023 OR rm.cast_count < 5) 
+GROUP BY
+    rm.title, rm.production_year, pa.name
+HAVING
+    (rm.cast_count > 2 AND ARRAY_LENGTH(genres, 1) >= 1) 
+ORDER BY
+    rm.production_year DESC, rm.cast_count DESC;

@@ -1,0 +1,61 @@
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS line_item_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    co.total_spent,
+    co.order_count,
+    ps.p_name,
+    ps.p_retailprice,
+    ps.p_brand,
+    COALESCE(pdetails.total_available, 0) AS available_quantity,
+    ol.order_value,
+    ol.line_item_rank
+FROM 
+    customer c
+JOIN 
+    CustomerOrderSummary co ON c.c_custkey = co.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    PartSupplierDetails pdetails ON ps.ps_partkey = pdetails.ps_partkey
+LEFT JOIN 
+    OrderLineSummary ol ON ol.l_orderkey = l.l_orderkey
+WHERE 
+    co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary) 
+    AND ps.p_retailprice > 100
+ORDER BY 
+    co.total_spent DESC, 
+    ol.order_value ASC;

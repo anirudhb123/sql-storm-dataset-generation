@@ -1,0 +1,80 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 2452109 AND 2452135 
+    GROUP BY
+        ws_item_sk, ws_sales_price, ws_net_profit
+
+    UNION ALL
+
+    SELECT
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        cs_sales_price,
+        cs_net_profit,
+        level + 1
+    FROM
+        catalog_sales
+    JOIN
+        SalesCTE ON cs_item_sk = ws_item_sk
+    GROUP BY
+        cs_item_sk, cs_sales_price, cs_net_profit, level
+),
+CustomerData AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM
+        customer AS c
+    JOIN
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+ItemSummary AS (
+    SELECT
+        i.i_item_id,
+        COALESCE(SUM(os.total_quantity), 0) AS total_sales_quantity,
+        COALESCE(MAX(os.ws_sales_price), 0) AS max_sales_price,
+        COALESCE(SUM(os.ws_net_profit), 0) AS total_net_profit
+    FROM
+        item AS i
+    LEFT JOIN
+        SalesCTE AS os ON i.i_item_sk = os.ws_item_sk
+    GROUP BY
+        i.i_item_id
+)
+SELECT 
+    cu.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    it.i_item_id,
+    it.total_sales_quantity,
+    it.max_sales_price,
+    it.total_net_profit,
+    CASE 
+        WHEN cu.total_net_profit > 10000 THEN 'High Value'
+        WHEN cu.total_net_profit > 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    CustomerData AS cu
+JOIN 
+    customer_demographics AS cd ON cu.c_customer_id = cd.cd_gender
+JOIN 
+    ItemSummary AS it ON it.total_net_profit = cu.total_net_profit
+WHERE 
+    cd.cd_marital_status IS NOT NULL
+ORDER BY 
+    cu.total_net_profit DESC;

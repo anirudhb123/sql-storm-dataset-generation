@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        P.OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY ph.CreationDate DESC) AS ClosedRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerUserId,
+        rb.GoldBadges,
+        rb.SilverBadges,
+        rb.BronzeBadges,
+        pc.CommentCount,
+        cp.ClosedRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges rb ON rp.OwnerUserId = rb.UserId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    OwnerUserId,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    COALESCE(CommentCount, 0) AS TotalComments,
+    ClosedRank
+FROM 
+    CombinedData
+WHERE 
+    ScoreRank <= 5 OR (ClosedRank IS NOT NULL AND ClosedRank <= 10)
+ORDER BY 
+    Score DESC, CreationDate DESC;

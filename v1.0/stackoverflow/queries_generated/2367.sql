@@ -1,0 +1,106 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(e.EditCount, 0) AS EditCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS UpVotes
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) v ON rp.PostId = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS DownVotes
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 3
+        GROUP BY 
+            PostId
+    ) d ON rp.PostId = d.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edits
+        GROUP BY 
+            PostId
+    ) e ON rp.PostId = e.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON rp.PostId = c.PostId
+)
+SELECT 
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.Score,
+    ps.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.EditCount,
+    ps.CommentCount,
+    (SELECT COUNT(*)
+     FROM Posts p
+     WHERE p.CreationDate < ps.CreationDate AND p.Score > ps.Score) AS ScoreRank,
+    CASE 
+        WHEN ps.Score >= 10 THEN 'High'
+        WHEN ps.Score BETWEEN 5 AND 9 THEN 'Medium'
+        ELSE 'Low'
+    END AS ScoreCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostStats ps
+LEFT JOIN 
+    Posts p ON ps.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(p.Tags, ',')) AS TagName
+    ) t ON true
+WHERE 
+    ps.PostRank = 1
+GROUP BY 
+    ps.PostId, ps.Title, ps.OwnerDisplayName, ps.Score, ps.ViewCount, ps.UpVotes, ps.DownVotes, ps.EditCount, ps.CommentCount, ps.CreationDate
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

@@ -1,0 +1,72 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY
+        n.n_name
+),
+DateRange AS (
+    SELECT 
+        DISTINCT o_orderdate 
+    FROM 
+        orders
+    WHERE 
+        o_orderdate BETWEEN '1996-01-01' AND '1997-12-31'
+),
+SalesRanking AS (
+    SELECT 
+        nation_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales
+),
+QuantitativeAnalysis AS (
+    SELECT 
+        d.o_orderdate,
+        COALESCE(SUM(r.total_sales), 0) AS daily_sales,
+        AVG(r.total_sales) OVER () AS avg_sales,
+        COUNT(DISTINCT r.nation_name) AS distinct_nations,
+        CASE 
+            WHEN COUNT(DISTINCT r.nation_name) = 0 THEN NULL
+            ELSE SUM(r.total_sales) / COUNT(DISTINCT r.nation_name)
+        END AS avg_sales_per_nation
+    FROM 
+        DateRange d
+    LEFT JOIN 
+        RegionalSales r ON 1=1
+    GROUP BY 
+        d.o_orderdate
+)
+SELECT 
+    s.nation_name,
+    s.total_sales,
+    d.o_orderdate,
+    d.daily_sales,
+    d.avg_sales,
+    d.distinct_nations,
+    d.avg_sales_per_nation,
+    CASE 
+        WHEN s.sales_rank = 1 THEN 'Top Performer'
+        WHEN s.sales_rank IS NULL THEN 'No Sales'
+        ELSE 'Regular'
+    END AS performance_label
+FROM 
+    SalesRanking s
+LEFT JOIN 
+    QuantitativeAnalysis d ON s.nation_name = d.nation_name OR d.nation_name IS NULL
+WHERE 
+    d.daily_sales IS NOT NULL
+ORDER BY 
+    d.o_orderdate DESC, s.total_sales DESC
+LIMIT 100 OFFSET 10;

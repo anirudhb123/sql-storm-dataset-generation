@@ -1,0 +1,60 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderCount AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN ps.part_count > 5 THEN ps.total_supply_cost ELSE 0 END) AS total_cost_for_high_supply,
+    AVG(o.o_totalprice) AS average_order_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CustomerOrderCount co ON c.c_custkey = co.c_custkey
+LEFT JOIN 
+    SupplierStats ps ON c.c_custkey = ps.s_suppkey
+LEFT JOIN 
+    lineitem l ON co.order_count > 0 
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_customers DESC,
+    average_order_value DESC;

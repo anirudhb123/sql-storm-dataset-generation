@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title AS movie_title, 
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000
+), CastWithRoles AS (
+    SELECT 
+        ci.movie_id, 
+        ak.name AS actor_name, 
+        rt.role AS role_name, 
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+), MoviesWithKeywords AS (
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title
+), FinalResults AS (
+    SELECT 
+        mwk.movie_title,
+        mwk.keyword_count,
+        COUNT(distinct cwr.actor_name) AS total_actors,
+        STRING_AGG(DISTINCT cwr.actor_name, ', ') AS actors_list
+    FROM 
+        MoviesWithKeywords mwk
+    LEFT JOIN 
+        CastWithRoles cwr ON mwk.movie_id = cwr.movie_id
+    GROUP BY 
+        mwk.movie_title, mwk.keyword_count
+)
+SELECT 
+    fr.movie_title,
+    fr.keyword_count,
+    fr.total_actors,
+    CASE 
+        WHEN fr.total_actors > 0 THEN 'Actors Present'
+        ELSE 'No Actors'
+    END AS actor_status
+FROM 
+    FinalResults fr
+WHERE 
+    fr.keyword_count > 1
+ORDER BY 
+    fr.keyword_count DESC, fr.movie_title ASC;
+
+This SQL query consists of several CTEs. It starts by creating a hierarchy of movies linked through `movie_link`, then retrieves the cast information with their respective roles and ranks them. Next, it aggregates keyword information for the movies and compiles the final results, listing movies along with their actor counts and keyword counts. The query outputs results where the keyword count is greater than one, providing a status based on actor presence.

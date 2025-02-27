@@ -1,0 +1,67 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+PurchaseAnalysis AS (
+    SELECT 
+        CustomerDetails.c_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent,
+        AVG(ws.ws_sales_price) AS avg_order_value
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerDetails ON ws.ws_bill_customer_sk = CustomerDetails.c_customer_sk
+    GROUP BY 
+        CustomerDetails.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_first_name, 
+        c.c_last_name, 
+        pa.total_orders, 
+        pa.total_spent,
+        pa.avg_order_value,
+        ROW_NUMBER() OVER (ORDER BY pa.total_spent DESC) AS rank
+    FROM 
+        PurchaseAnalysis pa
+    JOIN 
+        CustomerDetails c ON pa.c_customer_sk = c.c_customer_sk
+    WHERE 
+        pa.total_spent > 1000
+)
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    pa.total_orders,
+    pa.total_spent,
+    pa.avg_order_value,
+    c.ca_city,
+    c.ca_state,
+    CASE 
+        WHEN c.cd_gender = 'M' THEN 'Male' 
+        ELSE 'Female' 
+    END AS gender,
+    c.cd_marital_status AS marital_status,
+    pa.rank
+FROM 
+    HighValueCustomers pa
+JOIN 
+    CustomerDetails c ON pa.c_customer_sk = c.c_customer_sk
+ORDER BY 
+    pa.rank;

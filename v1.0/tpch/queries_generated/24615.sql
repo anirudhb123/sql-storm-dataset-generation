@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey AS suppkey, s.s_name AS name, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL) 
+      AND s.s_comment IS NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON s.s_suppkey = sh.suppkey + 1
+    WHERE sh.level < 5
+), 
+PartAggregate AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           MAX(p.p_retailprice) AS max_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+RankedOrders AS (
+    SELECT co.c_custkey,
+           co.order_count,
+           co.avg_order_value,
+           RANK() OVER (ORDER BY co.avg_order_value DESC) AS rank_value
+    FROM CustomerOrders co
+    WHERE co.order_count > 3
+)
+SELECT 
+    ph.p_partkey,
+    ph.total_supply_cost,
+    ph.supplier_count,
+    ph.max_price,
+    COALESCE(ro.order_count, 0) AS order_count,
+    COALESCE(ro.avg_order_value, 0) AS avg_order_value,
+    sh.level AS supplier_level
+FROM PartAggregate ph
+LEFT JOIN RankedOrders ro ON ph.total_supply_cost > ro.avg_order_value * 2
+LEFT JOIN SupplierHierarchy sh ON sh.suppkey = (SELECT MIN(s.s_suppkey) FROM supplier s WHERE s.s_acctbal IS NOT NULL)
+WHERE ph.max_price IS NOT NULL
+AND ph.supplier_count > 1
+EXCEPT
+SELECT DISTINCT ph.p_partkey
+FROM PartAggregate ph
+WHERE ph.max_price IS NULL
+ORDER BY ph.total_supply_cost DESC
+LIMIT 50;

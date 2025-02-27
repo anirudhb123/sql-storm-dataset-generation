@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        DENSE_RANK() OVER (PARTITION BY sr.customer_sk ORDER BY sr.returned_date_sk DESC) AS return_rank,
+        sr.return_quantity,
+        sr.return_amt,
+        COALESCE(sr.return_amt, 0) + COALESCE(sr.return_tax, 0) AS total_return_value
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+),
+SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+HighValueReturns AS (
+    SELECT 
+        rr.*,
+        ss.total_quantity_sold,
+        ss.total_profit,
+        CASE 
+            WHEN rr.total_return_value > 1000 THEN 'High'
+            WHEN rr.total_return_value BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS return_value_category
+    FROM RankedReturns rr
+    LEFT JOIN SalesSummary ss 
+        ON rr.item_sk = ss.ws_item_sk 
+        AND rr.returned_date_sk = ss.ws_sold_date_sk
+    WHERE rr.return_rank = 1
+),
+FinalReport AS (
+    SELECT 
+        r.returned_date_sk,
+        r.return_time_sk,
+        r.item_sk,
+        r.customer_sk,
+        r.return_quantity,
+        r.total_return_value,
+        r.return_value_category,
+        COALESCE(r.total_profit, 0) AS total_profit,
+        CASE 
+            WHEN r.return_value_category = 'High' AND r.total_profit > 500 THEN 'Prominent'
+            ELSE 'Not Prominent'
+        END AS prominence_status
+    FROM HighValueReturns r
+)
+
+SELECT
+    f.return_value_category,
+    COUNT(*) AS number_of_returns,
+    AVG(f.total_return_value) AS avg_return_value,
+    SUM(f.total_profit) AS total_profit
+FROM FinalReport f
+GROUP BY f.return_value_category WITH ROLLUP
+HAVING COUNT(*) IS NOT NULL
+ORDER BY CASE 
+    WHEN f.return_value_category IS NULL THEN 1
+    ELSE 0 END, f.return_value_category;

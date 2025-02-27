@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COALESCE(a.name, 'Unknown Actor') AS actor_name,
+        COALESCE(CT.kind, 'Other Role') AS actor_role,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        role_type CT ON c.role_id = CT.id
+),
+movie_keyword_aggregates AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    c.actor_name,
+    c.actor_role,
+    c.actor_rank,
+    COALESCE(mka.keywords, 'No Keywords') AS movie_keywords,
+    CASE 
+        WHEN r.year_rank = 1 THEN 'First Movie of the Year'
+        WHEN r.year_rank <= 5 THEN 'Top 5 Movies of the Year'
+        ELSE 'Other'
+    END AS movie_rank_category,
+    COUNT(DISTINCT c.actor_name) OVER () AS total_unique_actors,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = r.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')) AS box_office_info_count
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    cast_details c ON r.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keyword_aggregates mka ON r.movie_id = mka.movie_id
+WHERE 
+    r.production_year >= 2000
+ORDER BY 
+    r.production_year DESC, 
+    r.title, 
+    c.actor_rank
+LIMIT 100;

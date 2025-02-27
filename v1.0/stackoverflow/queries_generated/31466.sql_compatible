@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AnswerCount, p.OwnerUserId
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), UserWithPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COALESCE(rb.BadgeNames, 'No Badges') AS Badges,
+        COALESCE(rb.BadgeCount, 0) AS BadgeCount,
+        COUNT(p.PostId) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts p ON u.Id = p.UserPostRank
+    LEFT JOIN 
+        UserBadges rb ON u.Id = rb.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Location, rb.BadgeNames, rb.BadgeCount
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Location,
+        Badges,
+        BadgeCount,
+        PostCount,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, Reputation DESC) AS TotalRank
+    FROM 
+        UserWithPosts
+), RecursiveCTE AS (
+    SELECT 
+        UserId, DisplayName, Reputation, Location, Badges, BadgeCount, PostCount, TotalScore, TotalRank 
+    FROM 
+        TopUsers
+    WHERE 
+        TotalRank <= 10
+
+    UNION ALL 
+
+    SELECT 
+        u.UserId, u.DisplayName, u.Reputation, u.Location, u.Badges, u.BadgeCount, u.PostCount, u.TotalScore, t.TotalRank
+    FROM 
+        UserWithPosts u
+    JOIN 
+        RecursiveCTE t ON u.Reputation > t.Reputation
+    WHERE 
+        t.TotalRank < 10
+)
+SELECT 
+    r.DisplayName,
+    r.Reputation,
+    r.TotalScore,
+    r.Badges,
+    r.PostCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = r.UserId AND v.VoteTypeId = 2) AS Upvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = r.UserId AND v.VoteTypeId = 3) AS Downvotes
+FROM 
+    RecursiveCTE r
+ORDER BY 
+    r.TotalRank;

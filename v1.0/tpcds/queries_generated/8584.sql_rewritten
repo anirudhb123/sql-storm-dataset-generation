@@ -1,0 +1,36 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_gmt_offset BETWEEN -8.00 AND -7.00 
+    GROUP BY 
+        ws.web_site_sk
+),
+top_sales AS (
+    SELECT 
+        w.web_site_name, 
+        r.total_quantity, 
+        r.total_net_profit
+    FROM 
+        ranked_sales r
+    JOIN 
+        web_site w ON r.web_site_sk = w.web_site_sk
+    WHERE 
+        r.rank <= 3 
+)
+SELECT 
+    ts.web_site_name, 
+    ts.total_quantity, 
+    ts.total_net_profit,
+    ROUND(ts.total_net_profit / NULLIF(ts.total_quantity, 0), 2) AS avg_profit_per_item
+FROM 
+    top_sales ts
+ORDER BY 
+    ts.total_net_profit DESC;

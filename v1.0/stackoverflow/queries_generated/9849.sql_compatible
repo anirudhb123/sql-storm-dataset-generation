@@ -1,0 +1,82 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges,
+        MAX(P.CreationDate) AS LastActiveDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        PT.Name AS PostType,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount, P.Score, P.CreationDate, PT.Name
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY UA.TotalUpvotes DESC) AS RankByUpvotes,
+        RANK() OVER (ORDER BY UA.TotalDownvotes DESC) AS RankByDownvotes
+    FROM UserActivity UA
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        PS.PostType,
+        RANK() OVER (ORDER BY PS.ViewCount DESC) AS RankByViews,
+        RANK() OVER (ORDER BY PS.Score DESC) AS RankByScore
+    FROM PostStats PS
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.LastActiveDate,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalBadges,
+    PU.RankByPosts,
+    PU.RankByUpvotes,
+    PU.RankByDownvotes,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.ViewCount,
+    P.Score AS PostScore,
+    P.PostType AS PostType,
+    PP.RankByViews,
+    PP.RankByScore
+FROM UserActivity U
+JOIN TopUsers PU ON U.UserId = PU.UserId
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+JOIN TopPosts PP ON P.PostId = PP.PostId
+WHERE U.Reputation >= 1000
+ORDER BY U.LastActiveDate DESC, P.ViewCount DESC;

@@ -1,0 +1,62 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS orders_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1995
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_spent,
+        cs.orders_count,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.rnk <= 10
+),
+average_spent AS (
+    SELECT 
+        AVG(total_spent) AS avg_spent_per_customer
+    FROM 
+        top_customers
+),
+customer_details AS (
+    SELECT 
+        tc.c_customer_id, 
+        tc.total_spent,
+        tc.orders_count,
+        COALESCE((SELECT COUNT(*) FROM web_returns wr WHERE wr.wr_returning_customer_sk = tc.c_customer_id), 0) AS returns_count,
+        CASE 
+            WHEN tc.total_spent > (SELECT avg_spent FROM average_spent) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS spending_category
+    FROM 
+        top_customers tc
+)
+SELECT 
+    cd.c_customer_id,
+    cd.total_spent,
+    cd.orders_count,
+    cd.returns_count,
+    cd.spending_category
+FROM 
+    customer_details cd
+WHERE 
+    cd.returns_count = (SELECT MAX(returns_count) FROM customer_details)
+ORDER BY 
+    cd.total_spent DESC;

@@ -1,0 +1,59 @@
+WITH RecursivePriceCTE AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        CASE 
+            WHEN i.i_current_price IS NULL THEN 0 
+            ELSE i.i_current_price 
+        END AS current_price,
+        i.i_item_desc,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY i.i_current_price DESC) AS price_rank
+    FROM item i
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+),
+CustomerAggregates AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT wr.return_order_number) AS total_returns,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_sk
+),
+IncomeSegmentCounts AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM household_demographics hd
+    JOIN customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY hd.hd_income_band_sk
+),
+DetailedReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_return_tax) AS total_return_tax
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+)
+SELECT 
+    ca.c_customer_sk,
+    ca.total_sales,
+    ca.total_returns,
+    ips.i_item_id,
+    ips.i_product_name,
+    ips.current_price AS price_at_rank,
+    irc.customer_count AS segment_customer_count,
+    COALESCE(dr.return_count, 0) AS product_return_count,
+    COALESCE(dr.total_return_amount, 0) AS total_returned_amount
+FROM CustomerAggregates ca
+JOIN RecursivePriceCTE ips ON ca.total_sales > 1000 AND ips.price_rank <= 5
+LEFT JOIN IncomeSegmentCounts irc ON ca.c_customer_sk = irc.hd_income_band_sk
+LEFT JOIN DetailedReturns dr ON ips.i_item_sk = dr.cr_item_sk
+WHERE ca.sales_rank < 50
+ORDER BY ca.total_sales DESC, ips.current_price ASC
+LIMIT 100;

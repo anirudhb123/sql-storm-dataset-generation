@@ -1,0 +1,87 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.ParentId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        MIN(PH.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+),
+PostTypesCount AS (
+    SELECT 
+        P.PostTypeId,
+        COUNT(DISTINCT P.Id) AS PostTypeCount
+    FROM 
+        Posts P
+    GROUP BY 
+        P.PostTypeId
+),
+FinalStatistics AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Score,
+        PS.ViewCount,
+        PS.OwnerDisplayName,
+        PS.CommentCount,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        COALESCE(CP.CloseCount, 0) AS CloseCount,
+        COALESCE(CP.FirstCloseDate, 'No closings') AS FirstCloseDate,
+        CASE 
+            WHEN PTC.PostTypeCount > 100 THEN 'Very Active'
+            WHEN PTC.PostTypeCount > 10 THEN 'Moderately Active'
+            ELSE 'Less Active'
+        END AS ActivityLevel
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        ClosedPosts CP ON PS.PostId = CP.PostId
+    JOIN 
+        PostTypesCount PTC ON PS.PostId = PTC.PostTypeId
+    WHERE 
+        PS.PostRank = 1
+)
+SELECT 
+    F.*,
+    CONCAT('Total Votes: ', COALESCE(F.UpVoteCount, 0) - COALESCE(F.DownVoteCount, 0)) AS VoteBalance,
+    CASE 
+        WHEN F.CloseCount > 0 THEN 'This post has been closed.'
+        ELSE 'This post remains open.'
+    END AS CloseStatus
+FROM 
+    FinalStatistics F
+WHERE 
+    F.ViewCount > 100
+ORDER BY 
+    F.Score DESC,
+    F.CreationDate DESC;

@@ -1,0 +1,54 @@
+
+WITH enhanced_customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        CASE 
+            WHEN cd.cd_dep_count > 0 THEN 'Has Dependents'
+            ELSE 'No Dependents'
+        END AS dependents_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ecd.full_name,
+    ecd.cd_gender,
+    ecd.cd_marital_status,
+    ecd.full_address,
+    ecd.ca_city,
+    ecd.ca_state,
+    COALESCE(ss.total_quantity, 0) AS total_quantity,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN ss.total_sales IS NOT NULL AND ss.total_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM 
+    enhanced_customer_data ecd
+LEFT JOIN 
+    sales_summary ss ON ecd.c_customer_id = ss.ws_bill_customer_sk
+WHERE 
+    ecd.ca_state IN ('CA', 'NY')
+ORDER BY 
+    ecd.full_name;

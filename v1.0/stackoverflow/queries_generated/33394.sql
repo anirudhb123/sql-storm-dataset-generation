@@ -1,0 +1,50 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id AS TagId, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 0 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, rh.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rh ON t.ExcerptPostId = rh.TagId
+),
+
+RecentPosts AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId, u.DisplayName AS OwnerName,
+           DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRanking
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days' 
+),
+
+PostStatistics AS (
+    SELECT rp.OwnerUserId, rp.OwnerName, COUNT(rp.PostId) AS TotalPosts,
+           SUM(CASE WHEN rp.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewPosts,
+           AVG(rp.ViewCount) AS AverageViews
+    FROM RecentPosts rp
+    GROUP BY rp.OwnerUserId, rp.OwnerName
+),
+
+TopUsers AS (
+    SELECT ps.OwnerUserId, ps.OwnerName, ps.TotalPosts, ps.HighViewPosts, ps.AverageViews,
+           ROW_NUMBER() OVER (ORDER BY ps.HighViewPosts DESC, ps.TotalPosts DESC) AS Rank
+    FROM PostStatistics ps
+)
+
+SELECT tu.OwnerUserId, tu.OwnerName, tu.TotalPosts, tu.HighViewPosts, 
+       tu.AverageViews, th.TagCount, 
+       COALESCE(be.BadgeCount, 0) AS BadgeCount
+FROM TopUsers tu
+LEFT JOIN (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+) be ON tu.OwnerUserId = be.UserId
+LEFT JOIN (
+    SELECT TagId, COUNT(*) AS TagCount
+    FROM RecursiveTagHierarchy
+    GROUP BY TagId
+) th ON th.TagId IN (SELECT DISTINCT UNNEST(string_to_array(p.Tags, '><'))::int FROM Posts p)
+WHERE tu.Rank <= 10
+ORDER BY tu.HighViewPosts DESC, tu.TotalPosts DESC;

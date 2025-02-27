@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE((SELECT SUM(v.VoteTypeId) FROM Votes v WHERE v.PostId = p.Id), 0) AS VoteSum,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class = 1)::int AS GoldBadges,
+        SUM(b.Class = 2)::int AS SilverBadges,
+        SUM(b.Class = 3)::int AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COALESCE(NULLIF(SUM(CASE WHEN p.Score IS NULL OR p.Score < 0 THEN 0 ELSE p.Score END), 0), NULL) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstCloseDate,
+        ARRAY_AGG(DISTINCT ph.Comment) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseReasons
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.VoteSum,
+    us.DisplayName,
+    us.PostsCreated,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    pha.FirstCloseDate,
+    pha.CloseReasons
+FROM 
+    RankedPosts ps
+JOIN 
+    UserStats us ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+LEFT JOIN 
+    PostHistoryAnalysis pha ON ps.PostId = pha.PostId
+WHERE 
+    (ps.Rank <= 5 OR (ps.ViewCount > 100 AND ps.VoteSum > 10))
+ORDER BY 
+    ps.CreationDate DESC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;
+

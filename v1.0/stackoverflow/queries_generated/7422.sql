@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND p.Score > 0
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.rn <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.OwnerReputation
+),
+TopPosts AS (
+    SELECT * 
+    FROM PostDetails
+    ORDER BY Score DESC, CreationDate DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.ViewCount, 
+    tp.OwnerReputation, 
+    tp.CommentCount, 
+    tp.UpVoteCount,
+    pt.Name AS PostType
+FROM 
+    TopPosts tp
+JOIN 
+    PostTypes pt ON tp.PostId = (SELECT TOP 1 Id FROM Posts WHERE Id = tp.PostId)
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

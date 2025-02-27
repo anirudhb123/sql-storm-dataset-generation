@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.ws_item_sk) AS total_net_profit,
+        COUNT(*) OVER (PARTITION BY ws.ws_item_sk) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    WHERE 
+        ws.ws_sales_price > 100 -- Filter for items with high sales price
+        AND cs.cs_sales_price IS NOT NULL
+),
+MaxProfitItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.rn,
+        rs.total_net_profit,
+        CASE 
+            WHEN rs.order_count > 10 THEN 'High Volume'
+            WHEN rs.order_count BETWEEN 5 AND 10 THEN 'Moderate Volume'
+            ELSE 'Low Volume'
+        END AS sale_volume_category
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1 -- Get only the top instance of each item based on net profit
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        mp.total_net_profit,
+        mp.sale_volume_category
+    FROM 
+        item i
+    JOIN 
+        MaxProfitItems mp ON i.i_item_sk = mp.ws_item_sk
+)
+SELECT 
+    id.i_item_id,
+    id.i_product_name,
+    COALESCE(id.total_net_profit, 0) AS total_net_profit,
+    id.sale_volume_category,
+    CASE 
+        WHEN id.total_net_profit IS NULL THEN 'Profit Unknown'
+        WHEN id.total_net_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+        WHEN id.total_net_profit > 1000 THEN 'High Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    ItemDetails id
+FULL OUTER JOIN 
+    (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_quantity > 0) ws_items ON id.ws_item_sk = ws_items.ws_item_sk
+WHERE 
+    id.sale_volume_category IS NOT NULL
+ORDER BY 
+    id.total_net_profit DESC NULLS LAST;

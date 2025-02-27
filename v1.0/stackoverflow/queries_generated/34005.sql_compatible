@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Score,
+        COALESCE(E.EditCount, 0) AS EditCount,
+        COALESCE(E.LastClosedDate, CAST('1970-01-01' AS TIMESTAMP)) AS LastClosedDate,
+        COALESCE(E.LastReopenedDate, CAST('1970-01-01' AS TIMESTAMP)) AS LastReopenedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistorySummary E ON p.Id = E.PostId
+)
+SELECT 
+    ub.UserId,
+    u.DisplayName,
+    SUM(ps.Score) AS TotalScore,
+    SUM(CASE WHEN ps.EditCount > 0 THEN 1 ELSE 0 END) AS ActiveEditedPosts,
+    MAX(ps.LastClosedDate) AS LastClosedPostDate,
+    MAX(ps.LastReopenedDate) AS LastReopenedPostDate,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    UserBadges ub
+JOIN 
+    Users u ON ub.UserId = u.Id
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+JOIN 
+    PostScores ps ON rp.Id = ps.Id
+WHERE 
+    (ub.BadgeCount > 1 OR rp.RecentPostRank = 1)
+    AND (COALESCE(ps.LastClosedDate, CAST('1970-01-01' AS TIMESTAMP)) < COALESCE(ps.LastReopenedDate, CAST('1970-01-01' AS TIMESTAMP))
+         OR COALESCE(ps.LastClosedDate, CAST('1970-01-01' AS TIMESTAMP)) IS NULL)
+GROUP BY 
+    ub.UserId, u.DisplayName, ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    TotalScore DESC
+LIMIT 10;

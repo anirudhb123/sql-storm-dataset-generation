@@ -1,0 +1,96 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.id AS cast_id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    WHERE 
+        c.note IS NULL OR c.note != 'Cameo'
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        COUNT(DISTINCT m.id) AS company_count,
+        AVG(COALESCE(mi.info IS NOT NULL, 0)::int) AS has_info_score
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies m ON m.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.movie_id
+    WHERE 
+        (t.production_year BETWEEN 1990 AND 2020 OR t.kind_id IN (1, 2))
+    GROUP BY 
+        t.title, t.production_year, a.name
+),
+TitleRanked AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_name,
+        md.company_count,
+        md.has_info_score,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.company_count DESC, md.has_info_score DESC) AS title_rank
+    FROM 
+        MovieDetails md
+),
+FilteredTitles AS (
+    SELECT 
+        title,
+        production_year,
+        actor_name,
+        company_count,
+        has_info_score
+    FROM 
+        TitleRanked
+    WHERE 
+        title_rank <= 3
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.actor_name,
+    ft.company_count,
+    ft.has_info_score,
+    COALESCE(STRING_AGG(DISTINCT c.role_id::text, ', ') FILTER (WHERE c.role_id IS NOT NULL), 'No Roles') AS roles,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id IN (
+        SELECT movie_id FROM aka_title WHERE title = ft.title
+    )
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    cast_info c ON c.movie_id IN (
+        SELECT movie_id FROM aka_title WHERE title = ft.title
+    )
+GROUP BY 
+    ft.title, ft.production_year, ft.actor_name, ft.company_count, ft.has_info_score
+ORDER BY 
+    ft.production_year DESC, ft.company_count DESC
+LIMIT 50 OFFSET 0;
+
+### Explanation of the Query:
+
+1. **Recursive CTE**: `RecursiveCTE` is defined to get cast information, excluding those with a specific note. It ranks roles for each movie.
+
+2. **MovieDetails CTE**: This CTE aggregates movie details including the title, production year, actor names, the count of companies involved with the movie, and a score indicating if additional info is present.
+
+3. **TitleRanked CTE**: This ranks the movies by year based on the count of companies and if any associated information exists.
+
+4. **FilteredTitles CTE**: This filters to only include the top 3 movies per production year.
+
+5. **Final SELECT Statement**: The final selection gathers the relevant titles and combines them with keyword and role details using outer joins. It utilizes string aggregation, filters for non-null roles, and counts keywords. The results are then ordered and limited for testing performance while capturing complex relationships. 
+
+This query showcases complex semantics and structure, incorporating CTEs, aggregates, outer joins, window functions, and string operations to test performance effectively.

@@ -1,0 +1,84 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_per_gender
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+filtered_sales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 100
+    GROUP BY 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_bill_customer_sk,
+        ws.ws_net_profit
+),
+inventory_with_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inv_quantity_on_hand,
+        CASE 
+            WHEN inv.inv_quantity_on_hand IS NULL THEN 'Unknown Stock'
+            WHEN inv.inv_quantity_on_hand = 0 THEN 'Out of Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM inventory inv
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk > 10000
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    fs.total_quantity,
+    fs.ws_net_profit,
+    COALESCE(ic.inv_quantity_on_hand, 0) AS available_stock,
+    CASE 
+        WHEN fs.total_quantity > 100 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS volume_category,
+    cs.total_spent,
+    COUNT(DISTINCT rc.rank_per_gender) OVER() AS gender_representatives
+FROM ranked_customers rc
+LEFT JOIN filtered_sales fs ON rc.c_customer_sk = fs.ws_bill_customer_sk
+LEFT JOIN inventory_with_status ic ON fs.ws_item_sk = ic.inv_item_sk
+LEFT JOIN customer_sales cs ON rc.c_customer_sk = cs.c_customer_sk
+WHERE rc.rank_per_gender <= 5 
+  AND fs.ws_net_profit IS NOT NULL 
+  AND fs.ws_net_profit > (
+        SELECT AVG(ws.ws_net_profit) 
+        FROM web_sales ws
+        WHERE ws.ws_sold_date_sk > 10000
+    )
+GROUP BY 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    fs.total_quantity,
+    fs.ws_net_profit,
+    cs.total_spent
+ORDER BY rc.cd_gender, rc.cd_marital_status, fs.total_quantity DESC
+LIMIT 50;

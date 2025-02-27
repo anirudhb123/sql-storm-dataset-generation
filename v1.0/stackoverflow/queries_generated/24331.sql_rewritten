@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserID,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(b.Class, 0)) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FilteredUserStats AS (
+    SELECT 
+        us.UserID,
+        us.PostsCount,
+        us.TotalBounty,
+        us.BadgeCount,
+        RANK() OVER (ORDER BY us.TotalBounty DESC) AS RankByBounty
+    FROM 
+        UserStats us
+    WHERE 
+        us.PostsCount > 5
+),
+EarliestPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate ASC) AS EarliestPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate,
+        STRING_AGG(CASE WHEN ph.Comment IS NOT NULL THEN ph.Comment ELSE 'No Comment' END, ', ') AS CloseComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT rp.PostID) AS HighScoringPosts,
+    us.PostsCount,
+    us.TotalBounty,
+    us.BadgeCount,
+    CASE 
+        WHEN fur.UserID IS NOT NULL THEN 'Qualified' 
+        ELSE 'Not Qualified' 
+    END AS Qualification,
+    COALESCE(e.FirstCloseDate, 'No Closure') AS FirstCloseDate,
+    COALESCE(e.CloseComments, 'N/A') AS CloseComments
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.RankByScore <= 5
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserID
+LEFT JOIN 
+    FilteredUserStats fur ON u.Id = fur.UserID
+LEFT JOIN 
+    EarliestPosts e ON u.Id = e.OwnerUserId
+LEFT JOIN 
+    CloseReasons cr ON e.Id = cr.PostId
+WHERE 
+    u.Reputation > 1000 
+    AND u.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+GROUP BY 
+    u.Id, us.PostsCount, us.TotalBounty, us.BadgeCount, fur.UserID, e.FirstCloseDate, e.CloseComments
+ORDER BY 
+    TotalBounty DESC, u.DisplayName;

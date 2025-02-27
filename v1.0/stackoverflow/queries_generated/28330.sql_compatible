@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        COALESCE(VoteCounts.UpVotes, 0) AS UpVotes,
+        COALESCE(VoteCounts.DownVotes, 0) AS DownVotes,
+        COALESCE(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), 'No Tags') AS ProcessedTags,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) AS VoteCounts ON P.Id = VoteCounts.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, U.DisplayName, VoteCounts.UpVotes, VoteCounts.DownVotes
+),
+RecentPosts AS (
+    SELECT
+        PostId,
+        Title,
+        Body,
+        OwnerDisplayName,
+        CreationDate,
+        ProcessedTags,
+        ROW_NUMBER() OVER (ORDER BY CreationDate DESC) AS RecentRank
+    FROM 
+        RankedPosts
+    WHERE 
+        UserPostRank = 1
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.OwnerDisplayName,
+    RP.CreationDate,
+    RP.ProcessedTags,
+    DATEDIFF('2024-10-01 12:34:56', RP.CreationDate) AS DaysSincePosted,
+    RP.Body,
+    RP.AnswerCount,
+    (RP.UpVotes - RP.DownVotes) AS NetVotes,
+    CASE 
+        WHEN DATEDIFF('2024-10-01 12:34:56', RP.CreationDate) <= 7 THEN 'New'
+        WHEN DATEDIFF('2024-10-01 12:34:56', RP.CreationDate) <= 30 THEN 'Trending'
+        ELSE 'Established'
+    END AS PostStatus
+FROM 
+    RecentPosts RP
+ORDER BY 
+    RP.CreationDate DESC;

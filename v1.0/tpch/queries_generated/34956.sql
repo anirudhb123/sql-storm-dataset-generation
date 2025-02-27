@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 3 AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+NationSupplier AS (
+    SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_name
+),
+
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment
+),
+
+RegionPerformance AS (
+    SELECT r.r_name, SUM(os.total_revenue) AS total_region_revenue
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY r.r_name
+)
+
+SELECT 
+    np.n_name AS nation_name, 
+    np.supplier_count AS supplier_count, 
+    rp.total_region_revenue AS total_revenue, 
+    np.supplier_count * COALESCE(rp.total_region_revenue, 0) AS revenue_per_supplier
+FROM NationSupplier np
+FULL OUTER JOIN RegionPerformance rp ON np.n_name = rp.r_name
+WHERE np.supplier_count > 0 OR rp.total_region_revenue IS NOT NULL
+ORDER BY revenue_per_supplier DESC, np.n_name;

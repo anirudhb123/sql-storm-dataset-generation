@@ -1,0 +1,30 @@
+SELECT
+    CONCAT('Part: ', p_name, ' | Brand: ', p_brand, ' | Size: ', p_size, 
+           ' | Retail Price: $', FORMAT(p_retailprice, 2), 
+           ' | Comment: ', p_comment) AS part_details,
+    r_name AS region_name,
+    n_name AS nation_name,
+    s_name AS supplier_name,
+    COUNT(DISTINCT o_orderkey) AS total_orders,
+    SUM(l_quantity) AS total_quantity
+FROM
+    part
+JOIN
+    partsupp ON p_partkey = ps_partkey
+JOIN
+    supplier ON ps_suppkey = s_suppkey
+JOIN
+    nation ON s_nationkey = n_nationkey
+JOIN
+    region ON n_regionkey = r_regionkey
+JOIN
+    lineitem ON p_partkey = l_partkey
+JOIN
+    orders ON l_orderkey = o_orderkey
+WHERE
+    p_name LIKE '%widget%'
+    AND o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY
+    p_partkey, r_name, n_name, s_name
+ORDER BY
+    total_quantity DESC, p_name;

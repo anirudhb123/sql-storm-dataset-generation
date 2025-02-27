@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.ss_store_sk,
+        ss.ss_item_sk,
+        ss.ss_quantity,
+        ss.ss_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_store_sk ORDER BY ss.ss_net_paid DESC) AS rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 10000 AND 20000
+),
+CustomerTotals AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+ItemPerformance AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_sold,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_revenue
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ct.total_spent,
+    SUM(ip.total_sold) AS total_units_sold,
+    SUM(ip.total_revenue) AS total_revenue,
+    AVG(CASE WHEN ip.total_sold > 0 THEN ip.total_revenue / ip.total_sold ELSE NULL END) AS avg_revenue_per_unit,
+    (SELECT COUNT(*) FROM customer_demographics WHERE cd_income_band_sk = (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound <= ct.total_spent AND ib_upper_bound >= ct.total_spent )) AS income_band_count
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    CustomerTotals ct ON c.c_customer_sk = ct.c_customer_sk
+JOIN 
+    ItemPerformance ip ON ip.i_item_sk IN (SELECT item_sk FROM RankedSales WHERE ss_store_sk IN (SELECT DISTINCT ss_store_sk FROM store_sales WHERE ss_sold_date_sk BETWEEN 10000 AND 20000))
+GROUP BY 
+    ca.ca_city, ca.ca_state, ct.total_spent
+HAVING 
+    COUNT(DISTINCT ct.c_customer_sk) > 5
+ORDER BY 
+    total_revenue DESC;

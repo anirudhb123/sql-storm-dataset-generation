@@ -1,0 +1,85 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d.d_year AS year,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+    UNION ALL
+    SELECT 
+        st.year + 1 AS year,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        SalesTrend st
+    JOIN 
+        date_dim d ON d.d_year = st.year + 1
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        st.year + 1
+),
+TopStores AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+    ORDER BY 
+        total_profit DESC
+    LIMIT 5
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        st.s_store_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales_count
+    FROM 
+        TopStores st
+    JOIN 
+        web_sales ws ON st.s_store_id = ws.ws_ship_addr_sk
+    GROUP BY 
+        st.s_store_id
+)
+SELECT 
+    sd.s_store_id, 
+    sd.total_sales_amount, 
+    sd.total_sales_count,
+    ct.cd_gender,
+    ct.hd_buy_potential,
+    SUM(CASE WHEN ws.ws_ext_sales_price IS NULL THEN 1 ELSE 0 END) AS null_sales_count,
+    AVG(CASE WHEN cd.cd_income_band_sk IS NOT NULL THEN 1 ELSE NULL END) AS avg_income_band,
+    MAX(ROW_NUMBER() OVER (PARTITION BY ct.cd_gender ORDER BY sd.total_sales_amount DESC)) AS rank
+FROM 
+    SalesData sd
+LEFT JOIN 
+    CustomerDemographics ct ON sd.s_store_id = ct.c_customer_sk
+LEFT JOIN 
+    web_sales ws ON sd.s_store_id = ws.ws_ship_addr_sk
+GROUP BY 
+    sd.s_store_id, sd.total_sales_amount, sd.total_sales_count, ct.cd_gender, ct.hd_buy_potential
+ORDER BY 
+    sd.total_sales_amount DESC
+FETCH FIRST 10 ROWS ONLY;

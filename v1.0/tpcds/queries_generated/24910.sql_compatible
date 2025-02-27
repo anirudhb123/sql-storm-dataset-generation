@@ -1,0 +1,75 @@
+
+WITH Ranked_Sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_quantity IS NOT NULL
+        AND ws_sales_price > 0
+),
+Customer_Average AS (
+    SELECT 
+        c.c_customer_sk,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+Sales_By_Income AS (
+    SELECT 
+        h.hd_income_band_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        household_demographics h ON c.c_current_cdemo_sk = h.hd_demo_sk
+    GROUP BY 
+        h.hd_income_band_sk
+),
+Web_Returns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS unique_orders
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_amt > 0
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    s.store_name,
+    COALESCE(SUM(r.total_returns), 0) AS total_returns,
+    COALESCE(SUM(sales.total_quantity), 0) AS total_sales_quantity,
+    COALESCE(AVG(ca.avg_purchase_estimate), 0) AS avg_customer_purchase
+FROM 
+    store s
+LEFT JOIN 
+    Sales_By_Income sales ON s.s_store_sk = sales.hd_income_band_sk
+LEFT JOIN 
+    Web_Returns r ON s.s_store_sk = r.wr_returning_customer_sk
+LEFT JOIN 
+    Customer_Average ca ON ca.c_customer_sk = s.s_store_sk
+WHERE 
+    (r.total_returns IS NOT NULL OR sales.total_quantity IS NOT NULL)
+    AND (s.s_floor_space > 500 OR s.s_tax_percentage IS NULL)
+GROUP BY 
+    s.store_name
+HAVING 
+    COUNT(DISTINCT sales.hd_income_band_sk) > 1
+ORDER BY 
+    total_returns DESC, avg_customer_purchase DESC
+FETCH FIRST 10 ROWS ONLY;

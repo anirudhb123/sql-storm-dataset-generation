@@ -1,0 +1,57 @@
+WITH Movie_Info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.name) AS companies,
+        GROUP_CONCAT(DISTINCT p.name) AS cast_members
+    FROM 
+        title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+
+Ranked_Movies AS (
+    SELECT 
+        mi.*,
+        ROW_NUMBER() OVER (ORDER BY mi.production_year DESC) AS rank
+    FROM 
+        Movie_Info mi
+    WHERE 
+        keywords IS NOT NULL
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.keywords,
+    rm.companies,
+    rm.cast_members,
+    rm.rank
+FROM 
+    Ranked_Movies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.rank;
+
+This query first collects comprehensive movie information, including titles, production years, associated keywords, production companies, and cast members for movies produced after the year 2000. It then ranks these movies by production year in descending order and finally selects the top 10 movies based on this ranking. The use of `GROUP_CONCAT` helps in aggregating potential many-to-many relationships across keywords, companies, and cast members efficiently.

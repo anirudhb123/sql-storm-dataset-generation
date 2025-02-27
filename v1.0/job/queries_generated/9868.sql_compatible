@@ -1,0 +1,33 @@
+
+SELECT 
+    t.title AS movie_title,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    MIN(m.production_year) AS earliest_production_year,
+    AVG(CASE WHEN mi.info_type_id = it.id THEN LENGTH(mi.info) END) AS avg_info_length
+FROM 
+    title t
+JOIN 
+    aka_title at ON at.movie_id = t.id
+JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+JOIN 
+    cast_info c ON c.movie_id = cc.movie_id
+JOIN 
+    aka_name a ON a.person_id = c.person_id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+JOIN 
+    info_type it ON it.id = mi.info_type_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name cn ON cn.id = mc.company_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    earliest_production_year DESC;

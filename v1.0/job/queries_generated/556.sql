@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rank_title,
+        COALESCE(SUM(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info c ON mt.id = c.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT m.name, ', ') AS genres,
+        MAX(CASE WHEN it.info = 'description' THEN mi.info END) AS description
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mi.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank_title,
+        mf.genres,
+        mf.description
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieInfo mf ON rm.movie_id = mf.movie_id
+    WHERE 
+        rm.production_year >= 2000 AND
+        rm.cast_count > (SELECT AVG(cast_count) FROM RankedMovies)
+)
+SELECT 
+    title,
+    production_year,
+    genres,
+    description,
+    CASE 
+        WHEN genres IS NOT NULL THEN 'Has Genres'
+        ELSE 'No Genres'
+    END AS genre_status
+FROM 
+    FilteredMovies
+ORDER BY 
+    production_year DESC, 
+    genre_status DESC, 
+    title;

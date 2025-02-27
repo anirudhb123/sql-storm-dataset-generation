@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mh.movie_id) AS cast_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(cn.country_code, 'Unknown') AS production_country,
+    CASE 
+        WHEN rm.production_year = 2022 THEN 'Recent'
+        WHEN rm.production_year >= 2010 THEN 'Moderate'
+        ELSE 'Older'
+    END AS age_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    rm.rank_by_cast <= 10
+AND 
+    (cn.country_code IS NOT NULL OR mc.note IS NOT NULL)  
+ORDER BY 
+    rm.rank_by_cast;

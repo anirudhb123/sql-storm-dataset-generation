@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ka.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(*) AS movie_count
+    FROM cast_info ci
+    JOIN aka_name ka ON ci.person_id = ka.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.person_id, ka.name, rt.role
+    HAVING COUNT(*) > 1
+),
+MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        AVG(mv.info_length) AS avg_info_length
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN LATERAL (
+        SELECT LENGTH(info) AS info_length
+        FROM movie_info mi
+        WHERE mi.movie_id = mt.id
+    ) mv ON true
+    GROUP BY mt.id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ar.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ar.role_name, 'Role Undisclosed') AS role_name,
+    md.keyword_count,
+    md.avg_info_length
+FROM MovieHierarchy mh
+LEFT JOIN ActorRoles ar ON ar.movie_id = mh.movie_id
+JOIN MovieDetails md ON md.movie_id = mh.movie_id
+ORDER BY mh.production_year DESC, mh.title;

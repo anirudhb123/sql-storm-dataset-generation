@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 50
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 1
+)
+SELECT 
+    r.r_name AS region_name,
+    STRING_AGG(DISTINCT rp.s_name ORDER BY rp.s_name) AS top_suppliers,
+    COUNT(DISTINCT hv.p_partkey) AS high_value_parts
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    RankedSuppliers rp ON s.s_suppkey = rp.s_suppkey
+JOIN 
+    HighValueParts hv ON hv.num_suppliers > 2
+WHERE 
+    rp.rnk <= 3
+GROUP BY 
+    r.r_name
+ORDER BY 
+    region_name;

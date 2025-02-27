@@ -1,0 +1,89 @@
+WITH RecursiveMoviePaths AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        lm.linked_movie_id,
+        l.title,
+        l.production_year,
+        r.depth + 1,
+        CONCAT(r.path, ' -> ', l.title)
+    FROM 
+        movie_link lm
+    JOIN 
+        title l ON lm.linked_movie_id = l.id
+    JOIN 
+        RecursiveMoviePaths r ON lm.movie_id = r.movie_id
+    WHERE 
+        r.depth < 5
+),
+TopDirectors AS (
+    SELECT 
+        c.person_id, 
+        COUNT(c.movie_id) AS total_movies,
+        RANK() OVER (ORDER BY COUNT(c.movie_id) DESC) AS rnk
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name LIKE 'Steven%' OR a.name LIKE 'Quentin%'
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(c.movie_id) > 1
+),
+MoviesWithNulls AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(size.info, 'No Info') AS movie_info,
+        k.keyword AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        keyword k ON m.id = k.id
+    CROSS JOIN 
+        (SELECT NULL AS info) AS size
+    WHERE 
+        m.production_year IS NOT NULL
+)
+SELECT 
+    p.path,
+    t.title,
+    t.production_year,
+    d.person_id,
+    d.total_movies,
+    COUNT(DISTINCT kw.keyword) AS keyword_count
+FROM 
+    RecursiveMoviePaths p
+JOIN 
+    aka_title t ON p.movie_id = t.id
+LEFT JOIN 
+    TopDirectors d ON d.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = t.id)
+LEFT JOIN 
+    MoviesWithNulls mn ON mn.title = t.title
+LEFT JOIN 
+    movie_keyword kw ON t.id = kw.movie_id
+GROUP BY 
+    p.path,
+    t.title,
+    t.production_year,
+    d.person_id,
+    d.total_movies
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 3
+ORDER BY 
+    p.depth, d.total_movies DESC NULLS LAST;

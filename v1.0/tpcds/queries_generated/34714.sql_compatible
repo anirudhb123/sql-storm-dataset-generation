@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        1 AS Level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        cs_quantity,
+        cs_net_profit,
+        Level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) AND Level < 3
+),
+CustomerProfits AS (
+    SELECT 
+        customer.c_customer_sk,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+    GROUP BY 
+        customer.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_sk,
+        total_profit,
+        DENSE_RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        CustomerProfits
+),
+PromotionData AS (
+    SELECT 
+        p_promo_sk, 
+        p_promo_name, 
+        COUNT(DISTINCT ws_order_number) AS promo_count
+    FROM 
+        web_sales
+    LEFT JOIN 
+        promotion ON ws_promo_sk = p_promo_sk
+    GROUP BY 
+        p_promo_sk, 
+        p_promo_name
+),
+WarehouseCount AS (
+    SELECT
+        w.w_warehouse_name,
+        COUNT(DISTINCT ss_store_sk) AS store_count
+    FROM 
+        store_sales ss 
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_name
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.total_profit,
+    pd.promo_count,
+    wc.store_count,
+    ps.promo_name
+FROM 
+    TopCustomers tc
+JOIN 
+    PromotionData pd ON tc.c_customer_sk = pd.promo_count
+JOIN 
+    WarehouseCount wc ON wc.store_count > 5
+LEFT JOIN 
+    (SELECT w.w_warehouse_name AS promo_name 
+     FROM warehouse w
+     WHERE w.w_warehouse_sq_ft > 10000) ps ON wc.store_count > 5
+WHERE 
+    tc.profit_rank <= 10
+ORDER BY 
+    tc.total_profit DESC;

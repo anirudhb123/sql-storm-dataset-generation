@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY[mt.title] AS hierarchy_path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000 -- Base case for recursion: movies from the year 2000 onwards
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mh.hierarchy_path || m.title
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    STRING_AGG(DISTINCT co.name, ', ') AS production_companies,
+    COUNT(DISTINCT mk.keyword) AS num_keywords,
+    AVG(COALESCE(mv.rating, 0)) AS avg_movie_rating,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS keyword_rank
+FROM
+    cast_info ci
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN
+    company_name co ON mc.company_id = co.id
+LEFT JOIN
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN ( -- Subquery to fetch movie ratings from an assumed ratings table
+    SELECT
+        movie_id,
+        AVG(rating) AS rating
+    FROM
+        movie_ratings
+    GROUP BY
+        movie_id
+) mv ON at.id = mv.movie_id
+WHERE
+    ak.name IS NOT NULL
+GROUP BY
+    ak.name, at.title, at.production_year
+HAVING
+    COUNT(DISTINCT mk.keyword) > 5  -- Filtering actors with more than five distinct keywords in their movies
+ORDER BY
+    avg_movie_rating DESC, 
+    actor_name ASC;

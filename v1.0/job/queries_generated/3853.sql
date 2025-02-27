@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_by_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieStatistics AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        rank_by_year,
+        cast_count,
+        (CASE 
+            WHEN cast_count > 5 THEN 'Large Ensemble'
+            WHEN cast_count BETWEEN 3 AND 5 THEN 'Moderate Ensemble'
+            ELSE 'Small Cast'
+        END) AS ensemble_type
+    FROM 
+        RankedMovies
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.ensemble_type,
+    COALESCE(ai.name, 'Unknown') AS director_name,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(COALESCE(mi.info_length, 0)) AS avg_info_length
+FROM 
+    MovieStatistics ms
+LEFT JOIN 
+    movie_companies mc ON ms.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON ms.movie_id = mi.movie_id
+LEFT JOIN 
+    aka_name ai ON ms.movie_id = ai.person_id AND ai.person_id = (SELECT person_id FROM cast_info ci WHERE ci.movie_id = ms.movie_id AND ci.nr_order = 1)
+WHERE 
+    ms.production_year >= 2000
+GROUP BY 
+    ms.movie_id, ms.title, ms.production_year, ms.ensemble_type, ai.name
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 
+ORDER BY 
+    ms.production_year DESC, ms.cast_count DESC;

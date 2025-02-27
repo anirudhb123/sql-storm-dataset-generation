@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(wr_item_sk) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.rc_customer_sk,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        COALESCE(cr.return_count, 0) AS return_count
+    FROM 
+        (SELECT DISTINCT ws_bill_customer_sk AS rc_customer_sk FROM web_sales) cr
+    LEFT JOIN 
+        CustomerReturns ON CustomerReturns.wr_returning_customer_sk = cr.rc_customer_sk
+)
+SELECT 
+    s.s_store_name,
+    SUM(ss.ss_net_profit) AS total_store_profit,
+    AVG(CASE WHEN hrc.total_return_amt > 0 THEN hrc.return_count END) AS avg_return_count
+FROM 
+    store s
+LEFT JOIN 
+    store_sales ss ON s.s_store_sk = ss.ss_store_sk
+LEFT JOIN 
+    HighReturnCustomers hrc ON hrc.rc_customer_sk = ss.ss_customer_sk
+WHERE 
+    EXTRACT(WEEK FROM ss.ss_sold_date_sk) = EXTRACT(WEEK FROM CURRENT_DATE)
+GROUP BY 
+    s.s_store_name
+ORDER BY 
+    total_store_profit DESC
+FETCH FIRST 10 ROWS ONLY;

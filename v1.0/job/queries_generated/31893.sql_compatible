@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link mk ON mh.movie_id = mk.movie_id
+    JOIN 
+        aka_title mt ON mk.linked_movie_id = mt.id 
+    WHERE 
+        mt.production_year >= 2000
+)
+
+SELECT 
+    mv.movie_title,
+    mv.production_year,
+    c.name AS company_name,
+    k.keyword AS movie_keyword,
+    COALESCE(a.name, 'Unknown Actor') AS main_actor_name,
+    COUNT(DISTINCT rc.role_id) AS role_count,
+    SUM(CASE 
+        WHEN pi.info IS NOT NULL AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(pi.info AS INTEGER)
+        ELSE 0 
+    END) AS total_budget,
+    ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY NULLIF(mv.production_year, 2021) DESC, mv.movie_title) AS rank_within_year
+  
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    movie_companies mc ON mv.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget')
+LEFT JOIN 
+    role_type rc ON ci.role_id = rc.id
+GROUP BY 
+    mv.movie_id, mv.movie_title, mv.production_year, c.name, k.keyword, a.name, rank_within_year
+HAVING 
+    COUNT(DISTINCT rc.role_id) > 0 AND 
+    SUM(CASE 
+        WHEN pi.info IS NOT NULL AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(pi.info AS INTEGER)
+        ELSE 0 
+    END) > 0
+ORDER BY 
+    mv.production_year DESC, rank_within_year;

@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+),
+SupplierExtended AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetail AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_ordered
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(o.o_totalprice) AS total_revenue,
+    AVG(p.p_retailprice) AS avg_part_price,
+    MAX(c.total_spent) AS max_customer_spent,
+    MAX(c.total_orders) AS max_customer_orders,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_discounted_revenue
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    CustomerOrderStats c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderstatus IN ('O', 'F')
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_revenue DESC;

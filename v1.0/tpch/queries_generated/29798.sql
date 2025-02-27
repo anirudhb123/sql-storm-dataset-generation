@@ -1,0 +1,63 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        CONCAT(s.s_name, ' (', s.s_suppkey, ') - Balance: $', FORMAT(s.s_acctbal, 2)) AS SupplierInfo
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+PopularParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        p.p_name,
+        p.p_brand,
+        COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name, p.p_brand
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent,
+        STRING_AGG(DISTINCT CONCAT(o.o_orderkey, ': ', FORMAT(o.o_totalprice, 2)), ', ') AS OrderDetails
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name AS RegionName,
+    COUNT(DISTINCT d.s_suppkey) AS ActiveSuppliers,
+    SUM(p.TotalAvailable) AS TotalPartsAvailable,
+    SUM(c.TotalSpent) AS TotalRevenue,
+    SUM(c.OrderCount) AS TotalOrders,
+    STRING_AGG(DISTINCT d.SupplierInfo, '; ') AS SupplierList
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier d ON n.n_nationkey = d.s_nationkey
+LEFT JOIN 
+    PopularParts p ON TRUE
+LEFT JOIN 
+    CustomerOrders c ON TRUE
+WHERE 
+    r.r_name LIKE 'S%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT d.s_suppkey) > 5;

@@ -1,0 +1,98 @@
+WITH CTE_UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        
+        (U.Reputation * 0.8 + COALESCE(B.Count, 0) * 0.2) AS WeightedScore,
+        (ROW_NUMBER() OVER (ORDER BY U.CreationDate DESC)) AS UserRank 
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS Count
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+),
+CTE_PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(P.Score) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+CTE_PostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    P.PostCount,
+    P.QuestionCount,
+    P.AnswerCount,
+    P.TotalScore,
+    P.TotalViews,
+    PH.EditCount,
+    PH.LastEditDate,
+    CASE 
+        WHEN U.LastAccessDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserActivityStatus,
+    
+    'User ' || U.DisplayName || ' (Rep: ' || U.Reputation || ', Posts: ' || P.PostCount || 
+    ') has ' || COALESCE(P.HalfRankedViewed, 'not appeared') || ' in half-ranked views.' AS StatusMessage
+FROM 
+    CTE_UserScores U
+JOIN 
+    CTE_PostStats P ON U.UserId = P.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        PH.PostId,
+        SUM(PHE.EditCount) AS EditCount
+    FROM 
+        CTE_PostHistory PH
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS EditCount
+        FROM 
+            PostHistory 
+        WHERE 
+            PostHistoryTypeId = 4 
+        GROUP BY 
+            PostId
+    ) PHE ON PH.PostId = PHE.PostId
+    GROUP BY 
+        PH.PostId
+) PH ON P.PostCount = PH.EditCount
+WHERE 
+    (U.Reputation > 1000 OR P.TotalScore > 50)
+    AND COALESCE(P.QuestionCount, 0) > 0 
+ORDER BY 
+    UserActivityStatus DESC, 
+    U.Reputation DESC
+LIMIT 100;

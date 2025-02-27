@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || at.title AS VARCHAR(255))
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mv.movie_id,
+    mv.title,
+    mv.production_year,
+    COALESCE((SELECT COUNT(DISTINCT ci.person_id)
+              FROM cast_info ci
+              WHERE ci.movie_id = mv.movie_id), 0) AS total_cast,
+    COUNT(DISTINCT k.keyword) AS total_keywords,
+    MAX(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS max_order,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+    COUNT(mcn.id) AS production_companies,
+    mv.path
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    cast_info ci ON mv.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_companies mcn ON mv.movie_id = mcn.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = mv.movie_id)
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year, mv.path
+HAVING 
+    COUNT(DISTINCT k.keyword) > 5 
+ORDER BY 
+    mv.production_year DESC, total_cast DESC;

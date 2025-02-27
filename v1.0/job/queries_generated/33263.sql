@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        alc.id AS movie_id,
+        alc.title,
+        alc.production_year,
+        alc.kind_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title alc ON alc.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    m.id,
+    m.title,
+    m.production_year,
+    c.name AS company_name,
+    CONCAT(a.name, ' - ', r.role) AS actor_role,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS ranking,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.id AND mi.info_type_id = 1) AS info_count,
+    CASE
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        ELSE TO_CHAR(m.production_year)
+    END AS year_display
+FROM
+    movie_hierarchy m
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN
+    company_name c ON c.id = mc.company_id AND c.country_code = 'USA'
+JOIN
+    complete_cast cc ON cc.movie_id = m.movie_id
+JOIN
+    cast_info ci ON ci.movie_id = m.movie_id
+JOIN
+    aka_name a ON a.person_id = ci.person_id
+JOIN
+    role_type r ON r.id = ci.role_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = m.movie_id
+WHERE
+    m.kind_id IN (SELECT k.id FROM kind_type k WHERE k.kind LIKE '%Drama%')
+GROUP BY
+    m.id, m.title, m.production_year, c.name, a.name, r.role
+HAVING
+    COUNT(DISTINCT a.id) > 1 OR COUNT(DISTINCT mk.id) > 5
+ORDER BY
+    m.production_year DESC, actor_role ASC;

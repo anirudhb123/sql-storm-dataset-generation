@@ -1,0 +1,32 @@
+
+WITH DateRange AS (
+    SELECT d_date_sk, d_date
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+CustomerDetails AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, 
+           hd.hd_income_band_sk, hd.hd_buy_potential, hd.hd_dep_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesSummary AS (
+    SELECT ws.web_site_sk, ws.ws_bill_customer_sk, SUM(ws.ws_sales_price) AS total_sales, COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    JOIN DateRange dr ON ws.ws_sold_date_sk = dr.d_date_sk
+    GROUP BY ws.web_site_sk, ws.ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT cs.c_customer_sk, cs.total_sales, cs.order_count
+    FROM CustomerDetails cd
+    JOIN SalesSummary cs ON cd.c_customer_sk = cs.ws_bill_customer_sk
+    ORDER BY cs.total_sales DESC
+    LIMIT 10
+)
+SELECT tc.c_customer_sk, tc.total_sales, tc.order_count, cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, 
+       hd.hd_income_band_sk, hd.hd_buy_potential, hd.hd_dep_count
+FROM TopCustomers tc
+JOIN CustomerDetails cd ON tc.c_customer_sk = cd.c_customer_sk
+JOIN household_demographics hd ON cd.hd_income_band_sk = hd.hd_income_band_sk
+ORDER BY tc.total_sales DESC;

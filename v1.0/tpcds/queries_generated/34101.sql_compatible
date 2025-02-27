@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sold_date_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        ws_ship_mode_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_quantity DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_sold_date_sk,
+        cs_quantity,
+        cs_ext_sales_price,
+        cs_ship_mode_sk,
+        ROW_NUMBER() OVER (PARTITION BY cs_order_number ORDER BY cs_quantity DESC) AS rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND cs_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+)
+SELECT 
+    ca.city AS address_city,
+    SUM(sc.ws_quantity + COALESCE(cs.cs_quantity, 0)) AS total_quantity,
+    SUM(sc.ws_ext_sales_price + COALESCE(cs.cs_ext_sales_price, 0)) AS total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate
+FROM 
+    Sales_CTE sc
+LEFT JOIN 
+    store_sales cs ON sc.ws_item_sk = cs.ss_item_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk = cs.ss_customer_sk OR c.c_customer_sk = sc.ws_bill_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    ca.city, cd.cd_gender, cd.cd_marital_status
+HAVING 
+    total_sales > (SELECT AVG(avg_sales.total_sales)
+                    FROM (
+                        SELECT 
+                            SUM(ws_ext_sales_price) AS total_sales 
+                        FROM 
+                            web_sales 
+                        GROUP BY 
+                            ws_order_number) AS avg_sales)
+ORDER BY 
+    total_quantity DESC
+LIMIT 100;

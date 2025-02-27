@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(0 AS INTEGER) AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+movie_info_extended AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info Available') AS info_description,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        m.id, m.title, mi.info
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ae.actor_name,
+    ae.role_type,
+    me.info_description,
+    me.keywords,
+    RANK() OVER (ORDER BY mh.depth) AS movie_rank
+FROM 
+    movie_hierarchy mh
+JOIN 
+    actor_roles ae ON mh.movie_id = ae.movie_id
+JOIN 
+    movie_info_extended me ON mh.movie_id = me.movie_id
+WHERE 
+    mh.depth = 1  -- Filter for direct links only
+    AND me.keywords IS NOT NULL
+    AND LENGTH(ae.actor_name) > 5  -- Actor names longer than 5 characters
+ORDER BY 
+    movie_rank, me.info_description;

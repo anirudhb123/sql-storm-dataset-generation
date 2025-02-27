@@ -1,0 +1,64 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpVotes,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownVotes,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        RCT.Name AS Reason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes RCT ON PH.Comment::int = RCT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(UP.PostCount, 0) AS TotalPosts,
+    COALESCE(UP.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(UP.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(UP.AvgScore, 0) AS AverageScore,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.OwnerDisplayName AS RecentPostOwner,
+    CP.Reason AS ClosureReason
+FROM 
+    UserEngagement U
+FULL OUTER JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerDisplayName
+FULL OUTER JOIN 
+    ClosedPosts CP ON RP.Id = CP.PostId
+WHERE 
+    U.PostCount IS NOT NULL OR RP.Id IS NOT NULL OR CP.PostId IS NOT NULL
+ORDER BY 
+    U.DisplayName ASC
+LIMIT 100;

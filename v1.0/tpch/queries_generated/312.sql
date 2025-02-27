@@ -1,0 +1,52 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+)
+
+SELECT 
+    n.n_name AS nation,
+    COALESCE(SUM(ss.total_sales), 0) AS total_supplier_sales,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customer_count,
+    AVG(od.order_value) AS average_order_value,
+    COUNT(od.o_orderkey) AS total_orders
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN HighValueCustomers hvc ON hvc.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = n.n_nationkey
+)
+FULL OUTER JOIN OrderDetails od ON od.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderkey IS NOT NULL
+)
+GROUP BY n.n_name
+ORDER BY total_supplier_sales DESC, high_value_customer_count DESC;

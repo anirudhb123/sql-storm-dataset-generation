@@ -1,0 +1,82 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(COALESCE(DATEDIFF(SECOND, p.CreationDate, p.LastActivityDate), 0)) AS AvgPostActivityDuration
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        CommentCount, 
+        UpVotes, 
+        DownVotes, 
+        AvgPostActivityDuration
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation > 1000
+    ORDER BY 
+        Reputation DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount AS PostCommentCount,
+        AVG(COALESCE(DATEDIFF(SECOND, p.CreationDate, p.LastActivityDate), 0)) AS AvgPostLifetime
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+),
+PostInteractions AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount,
+        SUM(CASE WHEN pl.LinkTypeId = 3 THEN 1 ELSE 0 END) AS DuplicateCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    ps.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.PostCommentCount,
+    pi.RelatedPostCount,
+    pi.DuplicateCount,
+    tu.AvgPostActivityDuration,
+    ps.AvgPostLifetime
+FROM 
+    TopUsers tu
+JOIN 
+    Posts ps ON tu.UserId = ps.OwnerUserId
+JOIN 
+    PostInteractions pi ON ps.Id = pi.PostId
+ORDER BY 
+    tu.Reputation DESC, ps.ViewCount DESC;

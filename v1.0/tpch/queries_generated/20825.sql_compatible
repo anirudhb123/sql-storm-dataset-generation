@@ -1,0 +1,46 @@
+
+WITH RECURSIVE nation_summary AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal,
+           COUNT(CASE WHEN s.s_acctbal IS NULL THEN 1 END) AS null_supplier_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+), part_stats AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_retailprice,
+           AVG(COALESCE(l.l_discount, 0)) AS avg_discount,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_qty,
+           SUM(COALESCE(l.l_tax, 0)) AS total_tax
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), order_stats AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank,
+           COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus
+) 
+SELECT ns.n_name,
+       ps.p_name,
+       ps.p_retailprice,
+       ps.avg_discount,
+       os.price_rank,
+       os.unique_customers,
+       COALESCE(ns.total_acctbal, -1) AS adjusted_acctbal,
+       ns.null_supplier_acctbal,
+       CASE 
+           WHEN ns.supplier_count = 0 THEN 'No Suppliers Available' 
+           ELSE CAST(ns.total_acctbal / NULLIF(ns.supplier_count, 0) AS DECIMAL(12, 2)) 
+       END AS avg_acctbal_per_supplier
+FROM nation_summary ns
+FULL OUTER JOIN part_stats ps ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name ILIKE '%' || REPLACE(ps.p_name, 'part ', '') || '%' LIMIT 1)
+JOIN order_stats os ON os.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o WHERE o.o_orderkey IS NOT NULL)
+WHERE ns.null_supplier_acctbal > 0 OR ps.total_returned_qty > 0
+ORDER BY ns.n_name, ps.p_name;

@@ -1,0 +1,62 @@
+WITH regional_sales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        n.n_name, r.r_name
+),
+top_sales AS (
+    SELECT 
+        nation_name, 
+        region_name, 
+        total_sales
+    FROM 
+        regional_sales
+    WHERE 
+        sales_rank <= 3
+)
+SELECT 
+    ts.nation_name,
+    ts.region_name,
+    ts.total_sales,
+    COUNT(DISTINCT ps.suppkey) AS supplier_count,
+    AVG(s.s_acctbal) AS average_account_balance,
+    COALESCE(MAX(ps.ps_supplycost), 0) AS max_supply_cost,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    top_sales ts
+LEFT JOIN 
+    partsupp ps ON ts.nation_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+        WHERE s.s_suppkey = ps.ps_suppkey
+    )
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    ts.nation_name, 
+    ts.region_name, 
+    ts.total_sales
+ORDER BY 
+    ts.total_sales DESC;

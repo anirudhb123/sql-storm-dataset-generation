@@ -1,0 +1,72 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+),
+PostsWithAnswers AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(P.AnswerCount, 0) AS TotalAnswers,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        PHT.Name AS HistoryType,
+        U.DisplayName AS ClosedBy
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    LEFT JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE 
+        PHT.Name = 'Post Closed'
+),
+PostsWithClosedInfo AS (
+    SELECT 
+        PWA.PostId,
+        PWA.Title,
+        PWA.CreationDate,
+        PWA.Score,
+        PWA.TotalAnswers,
+        PCH.ClosedDate,
+        PCH.ClosedBy,
+        R.UserRank
+    FROM 
+        PostsWithAnswers PWA
+    LEFT JOIN 
+        ClosedPostHistory PCH ON PWA.PostId = PCH.PostId
+    LEFT JOIN 
+        RankedUsers R ON PWA.OwnerDisplayName = R.DisplayName
+)
+SELECT 
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.TotalAnswers,
+    COALESCE(P.ClosedDate, 'No Closure') AS ClosedDate,
+    COALESCE(P.ClosedBy, 'Not Closed') AS ClosedBy,
+    P.UserRank
+FROM 
+    PostsWithClosedInfo P
+WHERE 
+    P.Score > 0 AND (P.ClosedDate IS NULL OR P.ClosedDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+ORDER BY 
+    P.Score DESC,
+    P.UserRank ASC
+LIMIT 100;

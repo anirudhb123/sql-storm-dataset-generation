@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseComment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+AcceptedAnswers AS (
+    SELECT 
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.AcceptedAnswerId IS NOT NULL
+    GROUP BY 
+        p.AcceptedAnswerId, 
+        p.OwnerUserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(cp.CloseDate, 'No Closure') AS CloseDate,
+    COALESCE(cp.CloseComment, 'N/A') AS CloseComment,
+    rp.OwnerDisplayName,
+    aa.AnswerCount,
+    CASE 
+        WHEN rp.Score > 100 THEN 'Highly Upvoted'
+        WHEN rp.Score > 50 THEN 'Moderately Upvoted'
+        ELSE 'Needs Attention'
+    END AS PostType,
+    CONCAT('Post titled "', rp.Title, '" was created by ', rp.OwnerDisplayName, 
+           ' and has ', rp.ViewCount, ' views.') AS Summary
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostHistory cp ON rp.PostId = cp.PostId AND cp.CloseRank = 1
+LEFT JOIN 
+    AcceptedAnswers aa ON rp.PostId = aa.AcceptedAnswerId
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 10;

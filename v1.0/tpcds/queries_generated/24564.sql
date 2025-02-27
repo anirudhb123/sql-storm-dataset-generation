@@ -1,0 +1,69 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity_purchased,
+        SUM(ws.ws_sales_price) AS total_sales_amount
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk
+    FROM 
+        CustomerPurchases c
+    WHERE 
+        c.total_sales_amount > (
+            SELECT AVG(total_sales_amount) 
+            FROM CustomerPurchases
+        )
+),
+InventoryChecks AS (
+    SELECT 
+        inv.inv_item_sk,
+        AVG(inv.inv_quantity_on_hand) AS avg_quantity_on_hand
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_date_sk IN (SELECT DISTINCT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    hvc.c_customer_sk,
+    i.inv_item_sk,
+    COALESCE(rr.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(rr.total_returned_amount, 0) AS total_returned_amount,
+    ic.avg_quantity_on_hand
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    RankedReturns rr ON hvc.c_customer_sk = rr.sr_customer_sk
+JOIN 
+    InventoryChecks ic ON rr.sr_item_sk = ic.inv_item_sk
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM store s
+        WHERE s.s_store_sk = rr.sr_store_sk 
+        AND s.s_tax_precentage IS NULL
+    )
+ORDER BY 
+    total_returned_quantity DESC, 
+    avg_quantity_on_hand ASC
+FETCH FIRST 100 ROWS ONLY;

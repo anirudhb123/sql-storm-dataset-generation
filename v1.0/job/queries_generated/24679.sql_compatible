@@ -1,0 +1,48 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           0 AS level 
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           mh.level + 1 
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON mt.id = ml.linked_movie_id
+    WHERE mh.level < 3  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mi.id) AS movie_info_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    SUM(COALESCE(info_len.length, 0)) AS total_info_length,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT mi.id) DESC) AS rank
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN aka_title at ON mh.movie_id = at.id
+LEFT JOIN movie_info mi ON mi.movie_id = at.id
+LEFT JOIN (
+    SELECT movie_id, 
+           SUM(LENGTH(info)) AS length 
+    FROM movie_info 
+    GROUP BY movie_id
+) info_len ON info_len.movie_id = at.id
+LEFT JOIN movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN keyword kw ON kw.id = mk.keyword_id
+WHERE ak.name IS NOT NULL
+GROUP BY ak.name, at.id, at.title, at.production_year, ak.person_id
+HAVING COUNT(DISTINCT mi.id) > 1 
+   AND SUM(COALESCE(info_len.length, 0)) < 1000 
+   AND at.production_year <= (EXTRACT(YEAR FROM DATE '2024-10-01') - 10) 
+ORDER BY rank, total_info_length DESC;

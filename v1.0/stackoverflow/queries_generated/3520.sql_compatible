@@ -1,0 +1,58 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(c.Id), 0) AS CommentsMade,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS EngagementRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), HighEngagementUsers AS (
+    SELECT UserId, DisplayName, Upvotes, Downvotes, CommentsMade, TotalViews
+    FROM UserEngagement
+    WHERE EngagementRank <= 10
+), PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        COALESCE(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - p.CreationDate)) / 3600, 0) AS AgeInHours,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AcceptedAnswerId
+)
+SELECT 
+    u.DisplayName AS EngagedUser,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    u.Upvotes,
+    u.Downvotes,
+    u.CommentsMade,
+    p.AgeInHours AS PostAgeHours,
+    'Engagement Level: ' || CASE WHEN u.Upvotes > u.Downvotes THEN 'Positive' ELSE 'Negative' END AS EngagementLevel
+FROM 
+    HighEngagementUsers u
+JOIN 
+    PostStatistics p ON u.UserId = p.OwnerUserId
+WHERE 
+    p.ScoreRank <= 5 
+ORDER BY 
+    u.Upvotes DESC, p.Score DESC;

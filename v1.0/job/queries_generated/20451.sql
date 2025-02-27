@@ -1,0 +1,74 @@
+WITH RecursiveTitle AS (
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        NULL AS parent_id,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.production_year = (
+            SELECT MAX(production_year) FROM aka_title
+        )
+    UNION ALL
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        rt.id AS parent_id,
+        rt.level + 1
+    FROM
+        aka_title t
+    INNER JOIN RecursiveTitle rt ON t.episode_of_id = rt.id
+),
+ActorCount AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+TitleWithActors AS (
+    SELECT
+        rt.id AS title_id,
+        rt.title,
+        rt.production_year,
+        ac.actor_count,
+        ROW_NUMBER() OVER (PARTITION BY rt.production_year ORDER BY ac.actor_count DESC) AS rn
+    FROM
+        RecursiveTitle rt
+    LEFT JOIN ActorCount ac ON rt.id = ac.movie_id
+)
+SELECT
+    t.title,
+    COALESCE(t.actor_count, 0) AS actor_count,
+    CASE 
+        WHEN t.actor_count IS NULL THEN 'No Actors'
+        WHEN t.rn <= 3 THEN 'Top 3'
+        ELSE 'Other'
+    END AS actor_category,
+    tsales.total_sales,
+    CONCAT('Title: ', t.title, ' from ', t.production_year, ' has ', COALESCE(t.actor_count, 0), ' actors.') AS narrative
+FROM
+    TitleWithActors t
+LEFT JOIN (
+    SELECT
+        movie_id,
+        SUM(CASE WHEN year = EXTRACT(YEAR FROM CURRENT_DATE) THEN sales ELSE 0 END) AS total_sales
+    FROM
+        sales_data
+    GROUP BY
+        movie_id
+) tsales ON t.title_id = tsales.movie_id
+WHERE
+    t.production_year IS NOT NULL
+ORDER BY
+    t.production_year DESC,
+    t.actor_count DESC
+LIMIT 20;
+This SQL query utilizes Common Table Expressions (CTEs) to create a recursive structure to gather details about titles, their production years, and actor counts. It implements various SQL features like window functions, outer joins, and string expressions to provide a narrative description for each title's details, while also incorporating conditions and categories to enrich the query's results. The combination of these constructs enables a complex performance benchmark scenario.

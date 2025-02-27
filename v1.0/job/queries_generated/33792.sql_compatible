@@ -1,0 +1,52 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title AS movie_title,
+           mt.production_year,
+           mt.kind_id,
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT mt.id,
+           mt.title,
+           mt.production_year,
+           mt.kind_id,
+           mh.level + 1
+    FROM aka_title mt
+    INNER JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT m.movie_id,
+           m.movie_title,
+           m.production_year,
+           m.level,
+           ROW_NUMBER() OVER (PARTITION BY m.level ORDER BY m.production_year DESC) AS rank
+    FROM movie_hierarchy m
+)
+SELECT 
+    COALESCE(cast.name, 'Unknown') AS cast_member,
+    COALESCE(a.title, 'Untitled') AS movie_title,
+    mr.production_year,
+    mr.level,
+    mr.rank,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = a.id) AS total_cast,
+    (SELECT COUNT(DISTINCT kc.keyword_id)
+     FROM movie_keyword kc 
+     WHERE kc.movie_id = a.id) AS total_keywords,
+    CASE 
+        WHEN mr.rank <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS ranking_group
+FROM ranked_movies mr
+LEFT JOIN aka_title a ON mr.movie_id = a.id
+LEFT JOIN cast_info ci ON a.id = ci.movie_id
+LEFT JOIN aka_name cast ON ci.person_id = cast.person_id
+WHERE mr.production_year IS NOT NULL
+  AND (mr.rank <= 5 OR mr.level = 1)
+GROUP BY cast.name, a.title, mr.production_year, mr.level, mr.rank
+ORDER BY mr.production_year DESC, mr.rank;

@@ -1,0 +1,69 @@
+
+WITH MovieRankings AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        COUNT(c.id) AS number_of_roles,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name
+    ORDER BY 
+        number_of_roles DESC
+    LIMIT 10
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        STRING_AGG(DISTINCT t.title ORDER BY t.production_year) AS movies,
+        COUNT(DISTINCT t.id) AS total_movies,
+        SUM(CASE WHEN t.production_year = 2023 THEN 1 ELSE 0 END) AS movies_in_2023
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT t.id) > 5
+)
+SELECT 
+    m.movie_title, 
+    m.production_year, 
+    m.actor_name, 
+    m.number_of_roles, 
+    m.keywords,
+    ad.movies AS actor_movies,
+    ad.total_movies,
+    ad.movies_in_2023
+FROM 
+    MovieRankings m
+JOIN 
+    ActorDetails ad ON m.actor_name = ad.actor_name
+GROUP BY 
+    m.movie_title, 
+    m.production_year, 
+    m.actor_name, 
+    m.number_of_roles, 
+    m.keywords,
+    ad.movies, 
+    ad.total_movies, 
+    ad.movies_in_2023
+ORDER BY 
+    m.number_of_roles DESC;

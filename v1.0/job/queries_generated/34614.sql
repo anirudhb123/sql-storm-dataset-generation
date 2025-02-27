@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT cc.subject_id) OVER (PARTITION BY mt.id) AS total_cast_members,
+    STRING_AGG(ki.keyword, ', ') FILTER (WHERE ki.keyword IS NOT NULL) AS movie_keywords,
+    AVG(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mt.id) AS avg_keyword_presence,
+    COALESCE(ci.note, 'No notes available') AS cast_note,
+    ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS cast_order
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title AS mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword AS mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword AS ki ON mk.keyword_id = ki.id
+WHERE 
+    mt.production_year >= 2000
+    AND ak.name IS NOT NULL
+    AND ak.name != ''
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%extra%')
+ORDER BY 
+    mt.production_year DESC, ak.name;

@@ -1,0 +1,97 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE(NULLIF(p.ClosedDate, '1970-01-01 00:00:00'), NULL) AS ClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title, 
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.ViewCount,
+        CASE 
+            WHEN rp.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 
+),
+VoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount, 
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.AnswerCount,
+    fp.ViewCount,
+    fp.Status,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ps.EditCount, 0) AS EditCount,
+    COALESCE(ps.LastEdited, 'Never') AS LastEdited
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    VoteSummary vs ON fp.PostId = vs.PostId
+LEFT JOIN 
+    Users u ON fp.OwnerDisplayName = u.DisplayName
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistorySummary ps ON fp.PostId = ps.PostId
+ORDER BY 
+    fp.Score DESC,
+    fp.ViewCount DESC;

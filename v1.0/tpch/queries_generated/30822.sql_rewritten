@@ -1,0 +1,56 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ts.total_revenue
+    FROM TotalSales ts
+    JOIN customer c ON ts.c_custkey = c.c_custkey
+    WHERE ts.rnk <= 10
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+SalesDetails AS (
+    SELECT 
+        ts.c_custkey,
+        ts.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spend,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_tax) AS avg_tax,
+        COALESCE(MAX(l.l_shipdate), '2100-01-01') AS last_ship_date
+    FROM TopCustomers ts
+    JOIN orders o ON ts.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY ts.c_custkey, ts.c_name
+)
+SELECT 
+    sd.c_custkey,
+    sd.c_name,
+    sd.total_spend,
+    s.num_parts,
+    s.total_cost,
+    CASE 
+        WHEN sd.last_ship_date < cast('1998-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 'Inactive'
+        ELSE 'Active'
+    END AS cust_status,
+    RANK() OVER (ORDER BY sd.total_spend DESC) AS customer_rank
+FROM SalesDetails sd
+LEFT JOIN SupplierStats s ON s.num_parts > 0
+ORDER BY sd.total_spend DESC;

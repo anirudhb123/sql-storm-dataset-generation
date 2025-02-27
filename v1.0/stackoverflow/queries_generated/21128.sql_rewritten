@@ -1,0 +1,91 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId
+),
+APIForRankedUsers AS (
+    SELECT 
+        ur.Id,
+        ur.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(COALESCE(ps.UpVotes, 0)) AS AvgUpVotes,
+        AVG(COALESCE(ps.DownVotes, 0)) AS AvgDownVotes
+    FROM UserReputation ur
+    LEFT JOIN Posts p ON ur.Id = p.OwnerUserId
+    LEFT JOIN PostStatistics ps ON p.Id = ps.PostId
+    WHERE ur.Reputation > 1000
+    GROUP BY ur.Id, ur.Reputation
+),
+FinalResults AS (
+    SELECT 
+        ar.Id AS UserId,
+        ar.Reputation,
+        ar.PostCount,
+        ar.AvgUpVotes,
+        ar.AvgDownVotes,
+        CASE 
+            WHEN ar.PostCount = 0 THEN 'No Posts'
+            WHEN ar.AvgUpVotes > ar.AvgDownVotes THEN 'Positive Contributor'
+            WHEN ar.AvgDownVotes > ar.AvgUpVotes THEN 'Negative Contributor'
+            ELSE 'Neutral Contributor'
+        END AS ContributorType
+    FROM APIForRankedUsers ar
+    WHERE ar.ReputationRank <= 10
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS UserRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+FinalOutput AS (
+    SELECT 
+        fr.UserId,
+        fr.Reputation,
+        fr.PostCount,
+        fr.AvgUpVotes,
+        fr.AvgDownVotes,
+        tp.Title AS TopPost,
+        tp.UpVotes AS TopPostUpVotes,
+        tp.DownVotes AS TopPostDownVotes,
+        tp.CommentCount AS TopPostCommentCount
+    FROM FinalResults fr
+    FULL OUTER JOIN TopPosts tp ON fr.UserId = tp.OwnerUserId
+    WHERE fr.UserId IS NOT NULL OR tp.Title IS NOT NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TopPost IS NULL THEN 'N/A'
+        ELSE 'Available'
+    END AS TopPostStatus
+FROM FinalOutput
+ORDER BY Reputation DESC, TopPostUpVotes DESC;

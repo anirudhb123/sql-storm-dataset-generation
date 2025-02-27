@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rank
+    FROM 
+        aka_title mt
+),
+ActorMovies AS (
+    SELECT 
+        ka.person_id,
+        km.title,
+        km.production_year,
+        COUNT(DISTINCT mc.company_id) AS production_company_count,
+        SUM(CASE WHEN km.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_count
+    FROM 
+        cast_info ci
+    JOIN 
+        ranked_movies km ON ci.movie_id = km.movie_id
+    LEFT JOIN 
+        movie_companies mc ON km.movie_id = mc.movie_id
+    GROUP BY 
+        ka.person_id, km.title, km.production_year
+),
+TopActors AS (
+    SELECT 
+        ka.id,
+        ka.name,
+        AVG(am.production_company_count) AS avg_company_count
+    FROM 
+        aka_name ka
+    JOIN 
+        ActorMovies am ON ka.person_id = am.person_id
+    GROUP BY 
+        ka.id, ka.name
+)
+SELECT 
+    ta.name,
+    ta.avg_company_count,
+    COUNT(DISTINCT am.pre_2000_count) AS total_pre_2000_movies,
+    STRING_AGG(DISTINCT rm.title, ', ') AS movie_titles
+FROM 
+    TopActors ta
+LEFT JOIN 
+    ActorMovies am ON ta.id = am.person_id
+JOIN 
+    RankedMovies rm ON am.movie_id = rm.movie_id
+WHERE 
+    ta.avg_company_count IS NOT NULL
+GROUP BY 
+    ta.name, ta.avg_company_count
+HAVING 
+    COUNT(DISTINCT rm.production_year) > 5
+ORDER BY 
+    ta.avg_company_count DESC, ta.name;

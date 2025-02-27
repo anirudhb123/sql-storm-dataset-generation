@@ -1,0 +1,30 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    t.TagName AS PostTag,
+    ph.CreationDate AS LastEditDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.PostTypeId = 1  -- Filtering for Questions only
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName, t.TagName, ph.CreationDate
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;  -- Limiting to the latest 100 questions for benchmarking

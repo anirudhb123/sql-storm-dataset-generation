@@ -1,0 +1,102 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+HighPriceItems AS (
+    SELECT 
+        ws_item_sk
+    FROM 
+        RankedSales
+    WHERE 
+        price_rank = 1
+    UNION ALL
+    SELECT 
+        cs_item_sk
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sales_price IS NOT NULL AND cs_sales_price > (
+            SELECT AVG(ws_sales_price)
+            FROM web_sales
+            WHERE ws_item_sk IN (
+                SELECT ws_item_sk
+                FROM HighPriceItems
+            )
+        )
+),
+SalesData AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_quantity) AS total_sales,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store_sales
+    WHERE 
+        ss_item_sk IN (SELECT * FROM HighPriceItems)
+    GROUP BY 
+        s_store_sk
+),
+ReturnStatistics AS (
+    SELECT 
+        sr_store_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    WHERE 
+        sr_store_sk IS NOT NULL
+    GROUP BY 
+        sr_store_sk
+),
+FinalReport AS (
+    SELECT 
+        s.s_store_sk,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.total_profit, 0) AS total_profit,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_value, 0) AS total_return_value,
+        CASE 
+            WHEN COALESCE(sd.total_sales, 0) > 0 
+            THEN (COALESCE(sd.total_profit, 0) / NULLIF(sd.total_sales, 0)) * 100 
+            ELSE 0 
+        END AS profit_margin,
+        CASE 
+            WHEN rs.total_returns IS NOT NULL AND rs.total_return_value > 0 THEN 
+                'Return Significant' 
+            ELSE 
+                'Return Insignificant' 
+        END AS return_status
+    FROM 
+        store s
+    LEFT JOIN 
+        SalesData sd ON s.s_store_sk = sd.s_store_sk
+    LEFT JOIN 
+        ReturnStatistics rs ON s.s_store_sk = rs.sr_store_sk
+)
+SELECT 
+    f.s_store_sk,
+    f.total_sales,
+    f.total_profit,
+    f.total_returns,
+    f.total_return_value,
+    f.profit_margin,
+    f.return_status,
+    CASE 
+        WHEN f.profit_margin > 50 THEN 'High'
+        WHEN f.profit_margin BETWEEN 20 AND 50 THEN 'Medium'
+        ELSE 'Low'
+    END AS profit_category
+FROM 
+    FinalReport f
+WHERE 
+    f.total_sales + f.total_profit IS NOT NULL
+ORDER BY 
+    f.total_sales DESC, f.total_profit DESC;

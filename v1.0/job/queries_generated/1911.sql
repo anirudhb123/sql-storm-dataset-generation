@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        tm.production_year, 
+        tm.title, 
+        tm.cast_count,
+        COALESCE((SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = at.id AND mi.info_type_id = 2), 0) AS info_count
+    FROM 
+        RankedMovies tm
+    WHERE 
+        tm.rank <= 3
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type,
+        (SELECT COUNT(*) 
+         FROM movie_info mi 
+         WHERE mi.movie_id = mc.movie_id) AS total_info
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    mca.company_name,
+    mca.company_type,
+    mca.total_info,
+    CASE 
+        WHEN tm.cast_count > 10 THEN 'Large Cast'
+        WHEN tm.cast_count BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieCompanies mca ON tm.production_year = (SELECT DISTINCT production_year FROM aka_title WHERE id = mca.movie_id)
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

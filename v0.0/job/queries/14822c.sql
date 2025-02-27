@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.note < '(presents) (as Universal - International) (as A Universal-International Picture)' AND mi.info < '[while drunk in the confession booth]::Paul Smecker: I put evil men behind bars, but the law has miles of red tape and loopholes for these cocksuckers to slip through.' AND t.id < 1132218 AND t.kind_id < 4 AND ct.id = 1;

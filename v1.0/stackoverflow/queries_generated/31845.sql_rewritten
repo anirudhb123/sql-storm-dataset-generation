@@ -1,0 +1,75 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > DATEADD(MONTH, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+),
+PostHistoryCTE AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate AS EditDate,
+        PHT.Name AS ChangeType,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    R.DisplayName AS ActiveUser,
+    R.Reputation,
+    R.UserRank,
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.CommentCount,
+    RP.UpVotes,
+    RP.DownVotes,
+    PH.ChangeType,
+    PH.EditDate,
+    PH.Comment AS EditComment
+FROM 
+    RankedUsers R
+JOIN 
+    RecentPosts RP ON R.UserId = RP.OwnerDisplayName
+LEFT JOIN 
+    PostHistoryCTE PH ON RP.PostId = PH.PostId AND PH.EditRank = 1 
+WHERE 
+    R.UserRank < 100
+ORDER BY 
+    RP.ViewCount DESC, R.Reputation DESC;

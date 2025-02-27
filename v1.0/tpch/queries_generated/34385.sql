@@ -1,0 +1,49 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey 
+    GROUP BY r.r_name
+    
+    UNION ALL
+    
+    SELECT 
+        r.r_name AS region,
+        (SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) FROM lineitem l WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31') AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey 
+    WHERE 
+        r.r_name IS NOT NULL
+)
+SELECT 
+    r.r_name AS region,
+    COALESCE(SUM(ls.total_sales), 0) AS yearly_sales,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    MIN(s.s_acctbal) AS min_supplier_balance,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    ROUND(AVG(s.s_acctbal), 2) AS avg_supplier_balance
+FROM 
+    region r
+LEFT JOIN RegionalSales ls ON r.r_name = ls.region
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+WHERE 
+    (ls.sales_rank IS NULL OR ls.total_sales > 1000) 
+    AND (s.s_acctbal IS NOT NULL AND s.s_acctbal >= 50.00)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    yearly_sales DESC, r.r_name;

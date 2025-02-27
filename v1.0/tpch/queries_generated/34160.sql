@@ -1,0 +1,50 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1 
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+TopSuppliers AS (
+    SELECT ps.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.s_suppkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(total_sales) FROM (
+            SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+            FROM lineitem l
+            GROUP BY l.suppkey
+        ) AS subquery_avg
+    )
+),
+CustomerAnalysis AS (
+    SELECT c.c_custkey, c.c_name, SUM(COALESCE(o.o_totalprice, 0)) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+),
+SupplierRegion AS (
+    SELECT r.r_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS regional_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY r.r_name
+)
+SELECT ch.level, ca.c_name, ca.total_spent, sr.r_name, sr.regional_supply_cost,
+       ROW_NUMBER() OVER(PARTITION BY ch.level ORDER BY ca.total_spent DESC) AS rank_customers,
+       RANK() OVER(ORDER BY sr.regional_supply_cost DESC) AS rank_region_cost
+FROM OrderHierarchy ch
+JOIN CustomerAnalysis ca ON ch.o_custkey = ca.c_custkey
+JOIN SupplierRegion sr ON sr.r_name IS NOT NULL
+WHERE ca.total_orders > 5
+ORDER BY ch.level, ca.total_spent DESC;

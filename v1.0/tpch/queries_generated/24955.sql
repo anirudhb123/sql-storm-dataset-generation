@@ -1,0 +1,100 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey,
+        1 AS depth 
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal > 1000
+    UNION ALL 
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey,
+        sh.depth + 1 
+    FROM 
+        supplier s 
+    JOIN 
+        supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey 
+    WHERE 
+        s.s_acctbal < sh.s_acctbal
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey, 
+        COUNT(*) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+filtered_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            WHEN c.c_acctbal < 500 THEN 'Low Value Customer'
+            ELSE 'Valued Customer'
+        END AS customer_type
+    FROM 
+        customer c 
+    WHERE 
+        c.c_name IS NOT NULL 
+        AND c.c_acctbal IS NOT NULL 
+        AND c.c_mktsegment NOT LIKE '%Retail%'
+),
+nation_report AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    nation_report.n_name AS supplier_nation,
+    order_summary.total_lineitems,
+    order_summary.total_revenue,
+    filtered_customers.customer_type,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN supplier_hierarchy.depth IS NULL THEN 'Not Hierarchical'
+        ELSE CONCAT('Hierarchy Level: ', supplier_hierarchy.depth)
+    END AS hierarchy_status
+FROM 
+    part p 
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+LEFT JOIN 
+    order_summary ON ps.ps_partkey = order_summary.o_orderkey 
+LEFT JOIN 
+    filtered_customers ON filtered_customers.c_custkey = orders.o_custkey 
+LEFT JOIN 
+    nation_report ON nation_report.n_name = n.n_name 
+LEFT JOIN 
+    supplier_hierarchy ON supplier_hierarchy.s_suppkey = s.s_suppkey 
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey 
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    AND (supplier_hierarchy.depth IS NOT NULL OR filtered_customers.c_custkey IS NOT NULL) 
+ORDER BY 
+    total_revenue DESC 
+LIMIT 100;

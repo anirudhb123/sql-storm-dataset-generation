@@ -1,0 +1,59 @@
+
+WITH recent_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales AS ws
+    JOIN 
+        customer AS c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        r.r_reason_desc,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        COALESCE(rs.total_sales, 0) AS total_sales
+    FROM 
+        warehouse AS w
+    LEFT JOIN 
+        reason AS r ON r.r_reason_sk IN (1, 2, 3)  -- Sample reasons for returns
+    LEFT JOIN 
+        recent_sales AS rs ON w.w_warehouse_sk = rs.web_site_sk
+),
+demographic_analysis AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS num_customers,
+        SUM(ss.total_quantity) AS total_quantity_sold,
+        SUM(ss.total_sales) AS total_sales_value
+    FROM 
+        customer_demographics AS cd
+    JOIN 
+        customer AS c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender
+)
+SELECT 
+    d.cd_gender,
+    SUM(d.num_customers) AS num_customers,
+    SUM(d.total_quantity_sold) AS total_quantity_sold,
+    SUM(d.total_sales_value) AS total_sales_value,
+    AVG(ss.total_sales) AS avg_sales_per_warehouse
+FROM 
+    demographic_analysis AS d
+JOIN 
+    sales_summary AS ss ON d.cd_demo_sk = ss.w_warehouse_id
+GROUP BY 
+    d.cd_gender
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10;

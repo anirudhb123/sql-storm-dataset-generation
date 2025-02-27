@@ -1,0 +1,85 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        MAX(P.CreationDate) AS LastPostDate,
+        MAX(U.CreationDate) AS AccountCreationDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 0 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVoteCount,
+        (SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId IN (10, 11)) AS ClosureHistory
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+),
+UserRankings AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalPosts,
+        UA.UpVotes,
+        UA.DownVotes,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC, UA.UpVotes DESC) AS Rank
+    FROM 
+        UserActivity UA
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Score,
+        NTILE(10) OVER (ORDER BY PS.Score DESC) AS ScoreDecile
+    FROM 
+        PostStatistics PS
+)
+SELECT 
+    U.DisplayName, 
+    U.TotalPosts, 
+    U.UpVotes, 
+    U.DownVotes, 
+    UP.Rank,
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.Score,
+    T.ScoreDecile
+FROM 
+    UserRankings U
+JOIN 
+    TopPosts T ON U.UpVotes = T.Score
+WHERE 
+    U.AccountCreationDate < (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+ORDER BY 
+    UP.Rank,
+    T.Score DESC
+LIMIT 100;

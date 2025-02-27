@@ -1,0 +1,82 @@
+
+WITH RecursiveVotes AS (
+    SELECT
+        V.PostId,
+        V.UserId,
+        V.VoteTypeId,
+        V.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY V.PostId ORDER BY V.CreationDate DESC) AS VoteRank
+    FROM Votes V
+),
+UserScores AS (
+    SELECT
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(B.Id) AS BadgeCount,
+        AVG(U.Reputation) AS AvgReputation
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostWithHistory AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS HistoryDate,
+        PH.UserId AS HistoryUserId,
+        PH.Comment,
+        PH.Text AS NewValue
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE
+        PH.PostHistoryTypeId IN (10, 11, 12) 
+),
+FilteredPosts AS (
+    SELECT
+        P.PostId,
+        P.Title,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN PostWithHistory PH ON P.Id = PH.PostId
+    LEFT JOIN LATERAL (
+        SELECT
+            UNNEST(string_to_array(P.Tags, '>')) AS TagName
+    ) T ON TRUE
+    GROUP BY P.PostId, P.Title
+),
+FinalBenchmark AS (
+    SELECT
+        FP.PostId,
+        FP.Title,
+        FP.CloseCount,
+        FP.ReopenCount,
+        U.AvgReputation,
+        U.UpVotes,
+        U.DownVotes,
+        CASE
+            WHEN FP.CloseCount > 0 THEN 'Closed'
+            WHEN FP.ReopenCount > 0 THEN 'Reopened'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM FilteredPosts FP
+    JOIN UserScores U ON U.UserId IN (
+        SELECT DISTINCT PH.HistoryUserId
+        FROM PostWithHistory PH
+        WHERE PH.PostId = FP.PostId
+    )
+    WHERE U.AvgReputation IS NOT NULL
+)
+SELECT
+    *,
+    CASE
+        WHEN AVG(UpVotes) OVER() > 10 THEN 'High Activity'
+        ELSE 'Low Activity'
+    END AS ActivityCategory
+FROM FinalBenchmark
+ORDER BY CloseCount DESC, ReopenCount ASC, AvgReputation DESC
+LIMIT 50;

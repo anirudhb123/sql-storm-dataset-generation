@@ -1,0 +1,37 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(SUBSTRING_INDEX(ca_street_name, ' ', 1)) AS first_word,
+        TRIM(SUBSTRING_INDEX(ca_street_name, ' ', -1)) AS last_word,
+        LENGTH(TRIM(ca_street_name)) - LENGTH(REPLACE(TRIM(ca_street_name), ' ', '')) + 1 AS word_count,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+FilteredAddresses AS (
+    SELECT 
+        ca_address_sk,
+        first_word,
+        last_word,
+        word_count,
+        ca_city,
+        ca_state
+    FROM 
+        AddressParts
+    WHERE 
+        ca_city LIKE 'New%' AND ca_state = 'CA' 
+)
+SELECT 
+    fa.ca_city,
+    fa.ca_state,
+    COUNT(*) AS address_count,
+    STRING_AGG(DISTINCT CONCAT(fa.first_word, ' ', fa.last_word), ', ') AS unique_name_combinations,
+    AVG(fa.word_count) AS avg_word_count
+FROM 
+    FilteredAddresses fa
+GROUP BY 
+    fa.ca_city, fa.ca_state
+ORDER BY 
+    address_count DESC, avg_word_count ASC;

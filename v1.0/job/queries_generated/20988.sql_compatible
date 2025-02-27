@@ -1,0 +1,93 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mt.kind_id,
+        1 AS depth,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(m.production_year AS VARCHAR)
+        END AS formatted_year
+    FROM 
+        aka_title m
+    JOIN 
+        kind_type mt ON m.kind_id = mt.id
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        mh.depth + 1,
+        mh.formatted_year
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.depth < 5  
+),
+
+person_roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        rt.role AS role_name
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        rt.role IS NOT NULL
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.formatted_year,
+    pt.name AS person_name,
+    pr.role_name,
+    COALESCE(ks.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN mh.kind_id IS NULL THEN 'Not Available'
+        ELSE kt.kind
+    END AS kind_description,
+    COUNT(CASE WHEN cc.note IS NOT NULL THEN 1 END) AS non_null_cast_notes,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mh.movie_id) AS unique_cast_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    person_roles pr ON mh.movie_id = pr.movie_id
+LEFT JOIN 
+    aka_name pt ON pr.person_id = pt.person_id
+LEFT JOIN 
+    keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    kind_type kt ON mh.kind_id = kt.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+WHERE 
+    mh.depth = 1
+    AND (mh.production_year >= 2000 OR mh.production_year IS NULL)
+GROUP BY 
+    mh.movie_id, mh.title, mh.formatted_year, pt.name, pr.role_name, ks.keywords, kt.kind
+ORDER BY 
+    mh.production_year DESC NULLS LAST, mh.title ASC;

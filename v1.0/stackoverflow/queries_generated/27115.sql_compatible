@@ -1,0 +1,61 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount, 
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AvgScore,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS UsersEngaged
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = Posts.TagId
+    JOIN 
+        Users U ON Posts.OwnerUserId = U.Id
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+PostHistoryStats AS (
+    SELECT
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 24 THEN 1 END) AS EditSuggestionAppliedCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeletionUndeletionCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+EngagedUsers AS (
+    SELECT 
+        P.Id AS PostId, 
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS EngagedUserNames
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Users U ON C.UserId = U.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    T.TagName,
+    TS.PostCount AS NumberOfPosts,
+    TS.TotalViews AS TotalViews,
+    TS.AvgScore AS AverageScore,
+    PH.CloseReopenCount AS TotalCloseReopenOperations,
+    PH.EditSuggestionAppliedCount AS TotalEditSuggestionsApplied,
+    PH.DeletionUndeletionCount AS TotalDeletionsUndeletions,
+    EU.EngagedUserNames AS EngagedUsers
+FROM 
+    TagStats TS
+LEFT JOIN 
+    PostHistoryStats PH ON TS.PostCount = PH.PostId
+LEFT JOIN 
+    EngagedUsers EU ON PH.PostId = EU.PostId
+LIMIT 100;

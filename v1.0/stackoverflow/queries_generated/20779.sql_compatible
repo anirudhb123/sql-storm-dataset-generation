@@ -1,0 +1,69 @@
+
+WITH RankedTags AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount, 
+        DENSE_RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY t.Id, t.TagName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Class) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM Badges b
+    GROUP BY b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeNames, 'None') AS BadgeNames,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE u.Reputation IS NOT NULL
+),
+PostInsights AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= '2020-01-01' 
+    GROUP BY p.Id, p.Title, p.ViewCount, p.AnswerCount
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.BadgeNames,
+    pt.PostId,
+    pt.Title,
+    pt.ViewCount,
+    pt.AnswerCount,
+    pt.UpVotes,
+    pt.DownVotes,
+    tt.TagName,
+    r.TagId,
+    r.Rank
+FROM TopUsers tu
+JOIN PostInsights pt ON tu.UserId = pt.OwnerUserId
+LEFT JOIN RankedTags r ON r.TagId IN (
+    SELECT CAST(unnest(string_to_array(pt.Title, ' ')) AS int)
+)
+LEFT JOIN Tags tt ON r.TagId = tt.Id
+WHERE tu.UserRank <= 10 
+AND pt.UserPostRank = 1
+ORDER BY tu.Reputation DESC, pt.ViewCount DESC;

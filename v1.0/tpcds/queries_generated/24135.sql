@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_net_profit,
+        RANK() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_net_profit DESC) AS profit_rank
+    FROM 
+        catalog_sales cs
+    INNER JOIN 
+        item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2 WHERE i2.i_category = i.i_category)
+        AND cs.cs_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) 
+), 
+aggregate_sales AS (
+    SELECT 
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_quantity,
+        COUNT(DISTINCT cd.cd_demo_sk) AS distinct_customers,
+        COUNT(DISTINCT CASE 
+            WHEN cd.cd_gender = 'M' THEN cd.cd_demo_sk 
+            END) AS male_customers,
+        COUNT(DISTINCT CASE 
+            WHEN cd.cd_marital_status = 'S' THEN cd.cd_demo_sk 
+            END) AS single_customers,
+        SUM(sv.ws_net_profit) AS total_web_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        ranked_sales rs ON ws.ws_order_number = rs.cs_order_number
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023 AND d.d_moy = 1 LIMIT 1)
+        AND (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023 AND d.d_moy = 12 ORDER BY d.d_date_sk DESC LIMIT 1)
+        AND (rs.profit_rank IS NULL OR rs.profit_rank <= 5)
+)
+SELECT 
+    a.total_web_quantity,
+    a.distinct_customers,
+    a.male_customers,
+    a.single_customers,
+    a.total_web_profit,
+    (SELECT 
+        COUNT(DISTINCT w.w_web_site_id) 
+     FROM 
+        web_site w 
+     WHERE 
+        w.web_rec_start_date <= CURRENT_DATE 
+        AND (w.web_rec_end_date IS NULL OR w.web_rec_end_date > CURRENT_DATE)
+    ) AS active_websites
+FROM 
+    aggregate_sales a
+FULL OUTER JOIN 
+    (SELECT 
+        COUNT(*) AS active_items 
+     FROM 
+        item i 
+     WHERE 
+        i.i_rec_start_date <= CURRENT_DATE 
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    ) b ON TRUE
+WHERE 
+    a.total_web_quantity > (SELECT AVG(total_web_quantity) FROM aggregate_sales) 
+    OR a.total_web_profit IS NULL;

@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UserReputation
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT PH.Id) AS EditCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id
+),
+UserTopPosts AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        P.PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY U.UserId ORDER BY P.Score DESC) AS PostRank
+    FROM TopUsers U
+    JOIN Posts P ON U.UserId = P.OwnerUserId
+)
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation AS Reputation,
+    PA.PostId,
+    PA.Title AS PostTitle,
+    PA.Score,
+    PA.ViewCount,
+    T.UPVotes AS UserUpVotes,
+    T.DownVotes AS UserDownVotes,
+    PA.TotalComments,
+    T.Rank
+FROM PostAnalytics PA
+JOIN TopUsers T ON T.UserId = PA.OwnerUserId
+JOIN UserTopPosts U ON U.PostId = PA.PostId
+WHERE U.PostRank <= 5
+ORDER BY T.Rank, PA.Score DESC;

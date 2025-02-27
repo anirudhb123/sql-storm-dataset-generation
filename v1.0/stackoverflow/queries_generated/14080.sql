@@ -1,0 +1,35 @@
+-- Performance benchmarking query to analyze Posts and their related data
+
+SELECT 
+    p.Id AS PostID,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    u.DisplayName AS OwnerName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+    pt.Name AS PostType,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    LATERAL STRING_TO_ARRAY(p.Tags, ',') AS tags_array ON TRUE
+LEFT JOIN 
+    Tags t ON TRIM(tags_array) = t.TagName
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY 
+    p.Id, u.DisplayName, pt.Name
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC
+LIMIT 100;

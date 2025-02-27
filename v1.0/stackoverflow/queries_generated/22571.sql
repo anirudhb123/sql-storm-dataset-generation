@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '>')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MIN(ph.CreatedDate) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS FirstCloseDate,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseVotes,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenVotes
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    cp.FirstCloseDate,
+    cp.CloseVotes,
+    cp.ReopenVotes,
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.AvgReputation,
+    us.TotalViews,
+    CASE 
+        WHEN cp.FirstCloseDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN rp.Tags IS NOT NULL THEN ARRAY_LENGTH(rp.Tags, 1)
+        ELSE 0 
+    END AS TagCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+WHERE 
+    rp.Score > 5 
+    AND (us.AvgReputation IS NULL OR us.AvgReputation > 100)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 100;

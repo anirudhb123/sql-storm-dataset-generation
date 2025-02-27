@@ -1,0 +1,84 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank,
+        QuestionCount,
+        AnswerCount,
+        TotalScore
+    FROM 
+        UserPostStats
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.PostTypeId,
+        PH.Comment,
+        PH.Text,
+        P.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY PH.UserId ORDER BY PH.CreationDate DESC) AS PostHistoryRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= DATEADD(MONTH, -3, GETDATE())
+)
+SELECT 
+    U.DisplayName,
+    T.Rank,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.TotalScore,
+    R.PostId,
+    R.Title,
+    R.PostTypeId,
+    R.CreationDate AS RecentActionDate,
+    R.Comment,
+    R.Text AS PostHistoryText,
+    COALESCE(PHText.PostId, -1) AS LastActionPostId,
+    COUNT(*) OVER (PARTITION BY U.Id) AS TotalActions
+FROM 
+    TopUsers T
+JOIN 
+    Users U ON T.UserId = U.Id
+LEFT JOIN 
+    RecentPostHistory R ON U.Id = R.UserId AND R.PostHistoryRank <= 2
+LEFT OUTER JOIN (
+    SELECT 
+        UserId, 
+        PostId, 
+        MAX(CreationDate) AS LastActionDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        UserId, 
+        PostId
+) PHText ON U.Id = PHText.UserId AND R.PostId = PHText.PostId
+WHERE 
+    T.Rank <= 10
+ORDER BY 
+    T.Rank, 
+    TotalActions DESC, 
+    R.RecentActionDate DESC;

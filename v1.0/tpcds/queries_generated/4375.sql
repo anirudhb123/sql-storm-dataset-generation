@@ -1,0 +1,77 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        COUNT(DISTINCT ws_bill_customer_sk) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    WHERE 
+        c.current_addr_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_id
+),
+PromotionData AS (
+    SELECT 
+        p.promo_id,
+        SUM(ws.net_profit) AS total_profit_promo,
+        COUNT(DISTINCT ws.order_number) AS total_orders_promo
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.promo_sk = ws.promo_sk
+    WHERE 
+        p.discount_active = 'Y'
+    GROUP BY 
+        p.promo_id
+),
+TopWebsite AS (
+    SELECT 
+        web_site_id,
+        total_net_profit,
+        total_orders,
+        unique_customers
+    FROM 
+        SalesData
+    WHERE 
+        rank_profit <= 5
+),
+ReturnsStats AS (
+    SELECT 
+        wr.returned_date_sk,
+        COUNT(DISTINCT wr.order_number) AS total_returns,
+        SUM(wr.return_amt) AS total_returned_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returned_date_sk
+)
+SELECT 
+    tw.web_site_id,
+    tw.total_net_profit,
+    tw.total_orders,
+    tw.unique_customers,
+    pd.total_profit_promo,
+    pd.total_orders_promo,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_returned_amt, 0) AS total_return_amount
+FROM 
+    TopWebsite tw
+LEFT JOIN 
+    PromotionData pd ON pd.promo_id IN (
+        SELECT DISTINCT ws.promo_sk 
+        FROM web_sales ws 
+        WHERE ws.bill_customer_sk IN (
+            SELECT c.customer_sk 
+            FROM customer c 
+            WHERE c.current_addr_sk IS NOT NULL
+        )
+    )
+LEFT JOIN 
+    ReturnsStats rs ON rs.returned_date_sk = CAST(CURRENT_DATE AS INT) -- Replace with a relevant date if necessary
+ORDER BY 
+    total_net_profit DESC, total_orders DESC;

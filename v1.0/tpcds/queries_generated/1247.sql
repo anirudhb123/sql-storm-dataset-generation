@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) as SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+SalesSummary AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_ext_sales_price) AS TotalSales,
+        COUNT(DISTINCT rs.ws_order_number) AS OrderCount
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.SalesRank <= 10
+    GROUP BY 
+        rs.ws_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        ss.TotalSales
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesSummary ss ON c.c_customer_sk = (SELECT DISTINCT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_item_sk IN (SELECT ws_item_sk FROM RankedSales) LIMIT 1)
+)
+
+SELECT 
+    cs.c_customer_id,
+    cs.TotalSales,
+    COALESCE(cs.TotalSales / NULLIF((SELECT SUM(TotalSales) FROM SalesSummary), 0), 0) AS SalesRatio,
+    CASE 
+        WHEN cs.TotalSales > (SELECT AVG(TotalSales) FROM SalesSummary) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS SalesPerformance
+FROM 
+    CustomerSales cs
+WHERE 
+    cs.TotalSales IS NOT NULL
+ORDER BY 
+    cs.TotalSales DESC;

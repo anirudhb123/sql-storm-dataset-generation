@@ -1,0 +1,87 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        Title, 
+        OwnerUserId, 
+        CreationDate, 
+        CAST(Title AS VARCHAR) AS FullHierarchy
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        CONCAT(rh.FullHierarchy, ' > ', p.Title) AS FullHierarchy
+    FROM 
+        Posts AS p
+    INNER JOIN 
+        RecursivePostHierarchy AS rh ON rh.Id = p.ParentId
+)
+
+, UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.Reputation,
+    um.TotalPosts,
+    um.QuestionCount,
+    um.AnswerCount,
+    COALESCE(subquery.TotalVotes, 0) AS TotalVotes,
+    COALESCE(p.PostCount, 0) AS TotalPostCount,
+    CONCAT('User has ', CAST(um.Reputation AS VARCHAR), ' reputation. Posts: ', CAST(um.TotalPosts AS VARCHAR)) AS UserBio,
+    (SELECT COUNT(DISTINCT t.Id) 
+     FROM Tags AS t 
+     JOIN Posts AS po ON t.Id = ANY(string_to_array(po.Tags, ',')::text[]) 
+     WHERE po.OwnerUserId = um.UserId) AS TagCount
+FROM 
+    UserMetrics AS um
+LEFT JOIN (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts AS p
+    JOIN 
+        Votes AS v ON p.Id = v.PostId
+    GROUP BY 
+        p.OwnerUserId
+) AS subquery ON um.UserId = subquery.OwnerUserId 
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(Id) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'
+    GROUP BY 
+        OwnerUserId
+) AS p ON um.UserId = p.OwnerUserId
+ORDER BY 
+    um.Reputation DESC, 
+    um.TotalPosts DESC
+LIMIT 10;

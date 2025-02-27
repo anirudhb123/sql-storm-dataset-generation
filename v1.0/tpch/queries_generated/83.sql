@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS RN
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 10000
+), FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+), CombinedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COALESCE(r.RegionTotal, 0) AS RegionTotal
+    FROM 
+        orders o
+    LEFT JOIN (
+        SELECT 
+            n.r_regionkey,
+            SUM(ol.TotalRevenue) AS RegionTotal
+        FROM 
+            (SELECT 
+                n.n_nationkey,
+                n.r_regionkey,
+                li.TotalRevenue
+            FROM 
+                nation n
+            JOIN 
+                FilteredLineItems li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+            ) ol
+            GROUP BY 
+                n.r_regionkey
+        ) r ON o.o_orderkey = r.n_nationkey
+    ) combined ON o.o_orderkey = combined.o_orderkey
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+)
+SELECT 
+    cvc.c_name,
+    cvc.TotalSpent,
+    rs.s_name AS TopSupplier,
+    rs.s_acctbal AS SupplierBalance,
+    co.o_orderdate,
+    co.RegionTotal
+FROM 
+    HighValueCustomers cvc
+JOIN 
+    CombinedOrders co ON cvc.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = co.o_orderkey)
+LEFT JOIN 
+    RankedSuppliers rs ON rs.RN = 1
+WHERE 
+    co.RegionTotal IS NOT NULL
+ORDER BY 
+    cvc.TotalSpent DESC, rs.s_acctbal DESC;

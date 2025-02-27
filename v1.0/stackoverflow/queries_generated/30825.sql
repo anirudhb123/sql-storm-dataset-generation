@@ -1,0 +1,68 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY u.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeList
+    FROM 
+        Badges b
+    GROUP BY b.UserId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted
+),
+FilteredPostHistory AS (
+    SELECT 
+        rph.PostId,
+        MAX(CASE WHEN rph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN rph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS IsReopened,
+        MAX(CASE WHEN rph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS IsDeleted
+    FROM 
+        RecentPostHistory rph
+    WHERE 
+        rph.rn = 1
+    GROUP BY rph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionsCount,
+    ups.AnswersCount,
+    ups.TotalViews,
+    ups.TotalBounty,
+    COALESCE(ub.BadgeList, 'No Badges') AS BadgeList,
+    COALESCE(fph.IsClosed, 0) AS IsClosed,
+    COALESCE(fph.IsReopened, 0) AS IsReopened,
+    COALESCE(fph.IsDeleted, 0) AS IsDeleted
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    UserBadges ub ON ups.UserId = ub.UserId
+LEFT JOIN 
+    FilteredPostHistory fph ON ups.UserId IN (
+        SELECT OwnerUserId FROM Posts WHERE Id = fph.PostId
+    )
+ORDER BY 
+    ups.TotalViews DESC, ups.PostCount DESC;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserId AS ClosedBy,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserId
+),
+RecentUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+),
+PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        unnest(string_to_array(p.Tags, ', ')) AS Tag
+    FROM 
+        Posts p
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    COALESCE(cp.CloseDate, 'Not Closed') AS CloseDate,
+    COALESCE(cp.CloseReasonCount, 0) AS TotalCloseReasons,
+    tu.UserRank,
+    COUNT(pt.Tag) AS TagCount,
+    STRING_AGG(pt.Tag, ', ') AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    RecentUsers tu ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = tu.UserId)
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, 
+    rp.AnswerCount, rp.CommentCount, cp.CloseDate, cp.CloseReasonCount, tu.UserRank
+HAVING 
+    COUNT(pt.Tag) > 3
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

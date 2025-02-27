@@ -1,0 +1,78 @@
+
+WITH RECURSIVE InventoryCTE AS (
+    SELECT 
+        inv_date_sk, 
+        inv_item_sk, 
+        inv_warehouse_sk, 
+        inv_quantity_on_hand
+    FROM 
+        inventory
+    WHERE 
+        inv_quantity_on_hand > 100  -- Starting condition for CTE
+    UNION ALL
+    SELECT 
+        inv_date_sk, 
+        inv_item_sk, 
+        inv_warehouse_sk, 
+        inv_quantity_on_hand - 10  -- Simulating some operation
+    FROM 
+        InventoryCTE
+    WHERE 
+        inv_quantity_on_hand > 10
+),
+TopSellingItems AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+    ORDER BY 
+        total_quantity_sold DESC
+    LIMIT 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        COUNT(cs.cs_order_number) AS orders_count, 
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING 
+        SUM(cs.cs_net_profit) > 1000
+)
+SELECT 
+    ca.ca_city, 
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers, 
+    AVG(cs.total_profit) AS avg_profit,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    MAX(inv.inv_quantity_on_hand) AS max_inventory
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    CustomerStats cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    InventoryCTE inv ON inv.inv_item_sk IN (SELECT ws_item_sk FROM TopSellingItems)
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    unique_customers DESC;

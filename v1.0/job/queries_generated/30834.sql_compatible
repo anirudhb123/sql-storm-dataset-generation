@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000  
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        m.production_year >= 2000 
+)
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(ci.role_id) AS roles_count,
+    SUM(mi.info_length) AS total_info_length,
+    MAX(mi.info) AS longest_info
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title t ON mh.movie_id = t.id
+LEFT JOIN (
+    SELECT
+        mi.movie_id,
+        LENGTH(mi.info) AS info_length
+    FROM
+        movie_info mi
+    WHERE
+        mi.info IS NOT NULL
+) mi ON t.id = mi.movie_id
+WHERE
+    a.name IS NOT NULL
+GROUP BY
+    a.name, t.title
+HAVING
+    COUNT(ci.role_id) > 1  
+ORDER BY
+    roles_count DESC,
+    total_info_length DESC;

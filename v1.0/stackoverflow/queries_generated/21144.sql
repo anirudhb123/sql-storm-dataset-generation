@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(CASE WHEN v.VoteTypeId IN (2, 3) THEN p.Score ELSE NULL END) OVER (PARTITION BY u.Id) AS AvgScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostInfo AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(COUNT(pl.RelatedPostId), 0) AS RelatedPostCount,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AcceptedAnswerId
+),
+TopUserPosts AS (
+    SELECT 
+        us.UserId, 
+        us.DisplayName, 
+        us.Reputation, 
+        pi.PostId,
+        pi.Title,
+        pi.Score,
+        RANK() OVER (PARTITION BY us.UserId ORDER BY pi.Score DESC) AS PostRank
+    FROM UserStats us
+    JOIN Posts p ON us.UserId = p.OwnerUserId
+    JOIN PostInfo pi ON p.Id = pi.PostId
+    WHERE us.Reputation > 1000
+)
+SELECT 
+    u.UserId, 
+    u.DisplayName, 
+    u.Reputation,
+    COUNT(DISTINCT p.PostId) AS TotalPosts,
+    SUM(COALESCE(p.Score, 0)) AS TotalScore,
+    STRING_AGG(DISTINCT CONCAT('[', p.Title, '](', 'https://stackoverflow.com/q/', p.PostId, ')'), ', ') AS PostLinks,
+    CASE 
+        WHEN MIN(pi.FirstClosedDate) IS NOT NULL THEN 'Closed on ' || TO_CHAR(MIN(pi.FirstClosedDate), 'YYYY-MM-DD HH24:MI:SS')
+        ELSE 'Never Closed'
+    END AS ClosureStatus
+FROM UserStats u
+LEFT JOIN TopUserPosts t ON u.UserId = t.UserId
+LEFT JOIN PostInfo pi ON t.PostId = pi.PostId
+GROUP BY u.UserId, u.DisplayName, u.Reputation
+HAVING COUNT(DISTINCT p.PostId) > 5 AND SUM(COALESCE(p.Score, 0)) > 50
+ORDER BY u.Reputation DESC, TotalScore DESC
+FETCH FIRST 10 ROWS ONLY;

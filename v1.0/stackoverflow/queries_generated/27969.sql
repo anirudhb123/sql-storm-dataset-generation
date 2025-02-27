@@ -1,0 +1,73 @@
+WITH ProcessedTags AS (
+    SELECT 
+        Id AS TagId,
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 AND Tags IS NOT NULL
+),
+FilteredUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+TagStatistics AS (
+    SELECT 
+        PT.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(U.Reputation) AS AvgReputation,
+        COUNT(DISTINCT P.OwnerUserId) AS UniqueUsers
+    FROM 
+        ProcessedTags PT
+    JOIN 
+        Posts P ON PT.TagId = ANY(string_to_array(P.Tags, '><')::int[]) -- Using Postgres string manipulation
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        PT.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AvgReputation,
+        UniqueUsers,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.AvgReputation,
+    T.UniqueUsers,
+    CASE 
+        WHEN T.TagRank <= 5 THEN 'Top Tag'
+        WHEN T.TagRank <= 10 THEN 'Popular Tag'
+        ELSE 'Regular Tag'
+    END AS TagCategory
+FROM 
+    TopTags T
+ORDER BY 
+    T.TotalViews DESC, 
+    T.PostCount DESC;

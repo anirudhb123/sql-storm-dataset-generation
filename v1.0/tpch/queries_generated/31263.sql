@@ -1,0 +1,87 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey AS supplier_key,
+        s.s_name AS supplier_name,
+        s.s_nationkey AS nation_key,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.nation_key
+    WHERE 
+        s.s_acctbal > 1000
+),
+ProductWithSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        SupplierHierarchy sh ON ps.ps_suppkey = sh.supplier_key
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(SUM(pr.total_cost), 0) AS product_cost,
+    COALESCE(SUM(cr.total_spent), 0) AS customer_spent,
+    SUM(r.total_revenue) AS total_revenue
+FROM 
+    region r
+LEFT JOIN 
+    NationRevenue n ON r.r_regionkey = n.n_nationkey
+LEFT JOIN 
+    ProductWithSupplier pr ON r.r_regionkey = pr.p_partkey % (SELECT COUNT(*) FROM part)  -- simplified join for benchmarking
+LEFT JOIN 
+    CustomerOrderStats cr ON cr.c_custkey BETWEEN 1 AND 10  -- assuming a range for demo
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

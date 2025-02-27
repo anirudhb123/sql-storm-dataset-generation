@@ -1,0 +1,73 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+customer_returns AS (
+    SELECT 
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_refunded_cash,
+        c.c_customer_sk,
+        COUNT(*) OVER (PARTITION BY c.c_customer_sk) AS return_count
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        sr_return_amt > 0
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        SUM(ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+average_sales AS (
+    SELECT 
+        ss.ss_item_sk,
+        AVG(ss.ss_net_profit) AS avg_sales_per_item
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.ss_item_sk
+)
+SELECT 
+    rc.c_customer_sk,
+    CONCAT(rc.c_first_name, ' ', rc.c_last_name) AS full_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.sr_return_amt, 0) AS total_return_amount,
+    COALESCE(ss.total_net_profit, 0) AS total_net_profit_from_web,
+    ROUND(AVG(as.avg_sales_per_item), 2) AS average_sales_per_item
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    customer_returns cr ON rc.c_customer_sk = cr.c_customer_sk
+LEFT JOIN 
+    sales_summary ss ON rc.c_customer_sk = ss.ws_bill_customer_sk
+LEFT JOIN 
+    average_sales as ON rc.c_customer_sk = as.ss_item_sk
+WHERE 
+    rc.rn <= 10
+ORDER BY 
+    rc.cd_gender, total_return_amount DESC, total_net_profit_from_web DESC;

@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER(PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COALESCE(SUM(mk.keyword IS NOT NULL)::int, 0) AS keyword_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopKeywords AS (
+    SELECT 
+        kw.keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        keyword kw
+    JOIN 
+        movie_keyword mk ON kw.id = mk.keyword_id
+    GROUP BY 
+        kw.keyword
+    HAVING 
+        COUNT(mk.movie_id) > 10
+),
+PopularRoles AS (
+    SELECT 
+        ci.role_id,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.role_id
+    HAVING 
+        COUNT(ci.person_id) > 50
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rk.role_id,
+        pr.info AS person_info,
+        rk.role_count,
+        rk.role_id IS NOT NULL AS has_popular_role
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        cast_info ci ON rm.movie_id = ci.movie_id
+    LEFT JOIN 
+        PopularRoles rk ON ci.role_id = rk.role_id
+    LEFT JOIN 
+        person_info pr ON ci.person_id = pr.person_id
+    WHERE 
+        rm.keyword_count > 5 OR rk.role_count IS NOT NULL
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    STRING_AGG(DISTINCT (CASE WHEN md.has_popular_role THEN 'Popular Role' ELSE 'Other Role' END), ', ') AS role_type,
+    COUNT(DISTINCT md.person_info) AS unique_person_info
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TopKeywords tk ON md.title ILIKE '%' || tk.keyword || '%'
+WHERE 
+    md.title_rank <= 5 
+GROUP BY 
+    md.movie_id, md.title, md.production_year
+ORDER BY 
+    md.production_year DESC, md.title;

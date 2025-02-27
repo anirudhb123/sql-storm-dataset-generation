@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(info.info, 'No Info Available') AS additional_info
+    FROM 
+        title m
+    LEFT JOIN movie_info info ON m.id = info.movie_id 
+    WHERE 
+        m.production_year > 2000
+),
+FilteredMovies AS (
+    SELECT
+        mt.title,
+        mt.production_year,
+        COALESCE(ac.actor_count, 0) AS total_actors
+    FROM 
+        MoviesWithInfo mt
+    LEFT JOIN ActorCount ac ON mt.movie_id = ac.movie_id
+    WHERE 
+        mt.production_year IN (SELECT production_year FROM RankedTitles WHERE year_rank <= 5)
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.total_actors,
+    CASE 
+        WHEN fm.total_actors > 10 THEN 'Highly Featured'
+        WHEN fm.total_actors BETWEEN 5 AND 10 THEN 'Moderately Featured'
+        ELSE 'Low Featured' 
+    END AS feature_rating,
+    CONCAT(fm.title, ' - ', COALESCE(fm.additional_info, 'No Info')) AS title_info
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.total_actors IS NOT NULL
+ORDER BY 
+    fm.production_year DESC, fm.total_actors DESC
+LIMIT 20;

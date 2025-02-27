@@ -1,0 +1,33 @@
+WITH supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name, s.s_acctbal
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    s.s_name AS supplier_name, 
+    s.nation AS supplier_nation,
+    c.c_name AS customer_name,
+    coalesce(ls.order_revenue, 0) AS total_revenue,
+    si.total_cost AS supplier_cost,
+    CASE 
+        WHEN coalesce(ls.order_revenue, 0) > si.total_cost THEN 'Profitable'
+        ELSE 'Not Profitable'
+    END AS profitability
+FROM supplier_info si
+JOIN customer_orders c ON si.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = c.o_orderkey)))
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+ORDER BY profitability, total_revenue DESC;

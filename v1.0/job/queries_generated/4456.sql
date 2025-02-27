@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+ActorDetails AS (
+    SELECT 
+        n.name AS actor_name,
+        a.title,
+        a.production_year,
+        ca.nr_order
+    FROM 
+        TopMovies a
+    JOIN 
+        cast_info ca ON a.movie_id = ca.movie_id
+    JOIN 
+        aka_name n ON ca.person_id = n.person_id
+)
+SELECT 
+    md.company_name,
+    COUNT(DISTINCT c.id) AS total_movies,
+    AVG(TIMESTAMPDIFF(YEAR, a.production_year, CURRENT_DATE)) AS average_age,
+    STRING_AGG(DISTINCT ad.actor_name, ', ') AS leading_actors
+FROM 
+    movie_companies mc
+JOIN 
+    company_name md ON mc.company_id = md.id
+JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+JOIN 
+    TopMovies t ON mc.movie_id = t.id
+LEFT JOIN 
+    ActorDetails ad ON t.title = ad.title
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+WHERE 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget') 
+    AND md.country_code IS NOT NULL
+GROUP BY 
+    md.company_name
+HAVING 
+    total_movies > 10
+ORDER BY 
+    average_age DESC;

@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_status
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -12, GETDATE())
+),
+SupplierAggregates AS (
+    SELECT
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_suppkey
+),
+CustomerNationInfo AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Undefined'
+            ELSE 'Defined'
+        END AS acctbal_status
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal > 1000
+),
+PartCounts AS (
+    SELECT
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT
+    cni.c_name,
+    cni.nation_name,
+    COUNT(ro.o_orderkey) AS orders_placed,
+    AVG(ro.o_totalprice) AS avg_order_value,
+    pa.supplier_count,
+    sa.total_supply_cost,
+    CASE 
+        WHEN sa.total_supply_cost IS NOT NULL THEN 'High'
+        ELSE 'Low'
+    END AS supply_cost_status
+FROM CustomerNationInfo cni
+LEFT JOIN RankedOrders ro ON cni.c_custkey = ro.o_custkey
+LEFT JOIN SupplierAggregates sa ON sa.ps_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    WHERE li.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+LEFT JOIN PartCounts pa ON pa.p_partkey = ro.o_orderkey
+WHERE cni.acctbal_status = 'Defined'
+GROUP BY cni.c_name, cni.nation_name, pa.supplier_count, sa.total_supply_cost
+HAVING COUNT(ro.o_orderkey) > 10
+ORDER BY avg_order_value DESC, supply_cost_status;

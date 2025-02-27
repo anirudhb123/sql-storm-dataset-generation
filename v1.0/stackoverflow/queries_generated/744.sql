@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(up.UpVotes, 0) - COALESCE(dn.DownVotes, 0) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS v ON p.Id = v.PostId
+), MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10
+), PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS EditCount, 
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    mu.TotalPosts,
+    mu.DisplayName AS MostActiveUser,
+    pha.EditCount,
+    pha.LastEditDate,
+    CASE 
+        WHEN rp.NetVotes > 0 THEN 'Positive'
+        WHEN rp.NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    MostActiveUsers mu ON mu.TotalPosts = (SELECT MAX(TotalPosts) FROM MostActiveUsers)
+LEFT JOIN 
+    PostHistoryAnalysis pha ON rp.PostId = pha.PostId
+WHERE 
+    rp.Rank <= 5 AND rp.Score > 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

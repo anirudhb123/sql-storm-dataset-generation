@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueOrders AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_suppkey, 
+        l.l_discount, 
+        l.l_extendedprice
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_extendedprice > 50000
+    AND 
+        l.l_discount BETWEEN 0.1 AND 0.2
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        s.s_name AS supplier_name,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_ordered
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name
+)
+SELECT 
+    c.c_name,
+    c.total_orders,
+    c.total_spent,
+    p.p_name,
+    sp.supplier_name,
+    R.supplier_rank,
+    sp.total_quantity_ordered,
+    H.l_orderkey,
+    H.l_discount,
+    H.l_extendedprice
+FROM 
+    CustomerOrders c
+JOIN 
+    SupplierPartDetails sp ON sp.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s.s_suppkey FROM RankedSuppliers R WHERE R.supplier_rank = 1))
+LEFT JOIN 
+    HighValueOrders H ON H.l_partkey = sp.ps_partkey
+WHERE 
+    (c.total_orders > 10 OR c.total_spent > 10000)
+ORDER BY 
+    c.total_spent DESC, sp.total_quantity_ordered ASC;

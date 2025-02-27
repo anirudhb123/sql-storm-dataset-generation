@@ -1,0 +1,90 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM 
+        aka_title t
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_info AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        CASE 
+            WHEN COUNT(DISTINCT mc.company_id) > 0 THEN 'Produced'
+            ELSE 'Not Produced'
+        END AS production_status
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast c ON mc.movie_id = c.movie_id
+    GROUP BY 
+        m.movie_id
+),
+cast_info_ranked AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.note,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_rank
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NOT NULL
+),
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(it.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    at.title AS movie_title,
+    at.production_year,
+    CAST(COALESCE(rt.title_rank, 0) AS INTEGER) AS title_rank,
+    co.production_status,
+    ck.keywords,
+    cii.person_id,
+    cii.note AS cast_note,
+    CASE 
+        WHEN cii.cast_rank IS NULL THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status,
+    is.info_details AS additional_info
+FROM 
+    ranked_titles rt
+FULL OUTER JOIN 
+    aka_title at ON rt.title_id = at.id
+LEFT JOIN 
+    company_info co ON at.id = co.movie_id
+LEFT JOIN 
+    movie_keywords ck ON at.id = ck.movie_id
+LEFT JOIN 
+    cast_info_ranked cii ON at.id = cii.movie_id AND cii.cast_rank < 5
+LEFT JOIN 
+    info_summary is ON at.id = is.movie_id
+WHERE 
+    at.production_year IS NOT NULL
+    AND (at.kind_id IS NULL OR at.kind_id IN (1, 2, 3))  -- Adjust this depending on desired movie kinds
+ORDER BY 
+    at.production_year DESC, 
+    at.title ASC;

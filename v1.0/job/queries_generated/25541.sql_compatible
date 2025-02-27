@@ -1,0 +1,72 @@
+
+WITH MovieCast AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        c.person_id,
+        a.name AS actor_name,
+        r.role AS role,
+        t.production_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+    WHERE 
+        t.production_year >= 2000
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mc.movie_id,
+        MIN(m.production_year) AS first_year,
+        MAX(m.production_year) AS last_year,
+        COUNT(DISTINCT mc.actor_name) AS actor_count,
+        STRING_AGG(DISTINCT k.keywords, '; ') AS all_keywords,
+        STRING_AGG(DISTINCT co.companies, '; ') AS all_companies
+    FROM 
+        MovieCast mc
+    JOIN 
+        MovieKeywords k ON mc.movie_id = k.movie_id
+    JOIN 
+        MovieCompanies co ON mc.movie_id = co.movie_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.first_year,
+    m.last_year,
+    m.actor_count,
+    m.all_keywords,
+    m.all_companies
+FROM 
+    MovieDetails m
+WHERE 
+    m.actor_count > 5
+ORDER BY 
+    m.first_year DESC;

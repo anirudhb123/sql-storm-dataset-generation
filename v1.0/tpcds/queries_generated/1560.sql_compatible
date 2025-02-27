@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_online_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales AS cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+SalesStats AS (
+    SELECT 
+        c.c_customer_sk AS customer_id,
+        COALESCE(cs.total_online_sales, 0) AS online_sales,
+        COALESCE(cs.total_catalog_sales, 0) AS catalog_sales,
+        COALESCE(cs.total_store_sales, 0) AS store_sales,
+        (COALESCE(cs.total_online_sales, 0) + COALESCE(cs.total_catalog_sales, 0) + COALESCE(cs.total_store_sales, 0)) AS total_sales,
+        CASE 
+            WHEN COALESCE(cs.total_online_sales, 0) > 1000 THEN 'High Value Customer'
+            WHEN COALESCE(cs.total_catalog_sales, 0) > 1000 THEN 'High Value Customer'
+            ELSE 'Regular Customer'
+        END AS customer_value_category
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+), 
+Ranking AS (
+    SELECT 
+        customer_id,
+        online_sales,
+        catalog_sales,
+        store_sales,
+        total_sales,
+        customer_value_category,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesStats
+)
+SELECT 
+    r.customer_id,
+    r.online_sales,
+    r.catalog_sales,
+    r.store_sales,
+    r.total_sales,
+    r.customer_value_category,
+    r.sales_rank,
+    (SELECT COUNT(*) FROM Ranking WHERE total_sales < r.total_sales) AS lower_sales_count
+FROM 
+    Ranking r
+WHERE 
+    r.customer_value_category = 'High Value Customer'
+ORDER BY 
+    r.sales_rank;

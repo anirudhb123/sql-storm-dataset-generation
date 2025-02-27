@@ -1,0 +1,68 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE
+        s.s_acctbal > 100.00
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+avg_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales_val 
+    FROM 
+        regional_sales
+),
+high_sales AS (
+    SELECT 
+        n.n_name,
+        rs.total_sales
+    FROM 
+        nation n
+    JOIN 
+        regional_sales rs ON n.n_nationkey = rs.n_nationkey
+    WHERE 
+        rs.total_sales > (SELECT avg_sales_val FROM avg_sales)
+)
+SELECT 
+    n.r_name,
+    COALESCE(SUM(hs.total_sales), 0) AS total_high_sales,
+    COUNT(DISTINCT c.c_custkey) AS customer_count
+FROM 
+    region n
+LEFT OUTER JOIN 
+    high_sales hs ON n.r_name = hs.n_name
+LEFT JOIN 
+    customer c ON c.c_nationkey = hs.n_nationkey
+GROUP BY 
+    n.r_name
+HAVING 
+    COALESCE(SUM(hs.total_sales), 0) > 0
+ORDER BY 
+    total_high_sales DESC
+LIMIT 10;

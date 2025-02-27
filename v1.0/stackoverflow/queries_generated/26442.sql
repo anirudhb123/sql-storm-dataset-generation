@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY SUBSTRING(p.Tags FROM '\w+') ORDER BY p.Score DESC) AS RankInTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Only UpMod votes
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+TopPostsInTags AS (
+    SELECT 
+        rp.Tag AS TagName,
+        rp.PostId,
+        rp.Title,
+        rp.CommentCount,
+        rp.ViewCount,
+        rp.Score
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.RankInTag <= 5  -- Get the top 5 posts for each tag
+),
+PostInsights AS (
+    SELECT 
+        t.TagName,
+        COUNT(tp.PostId) AS TopPostsCount,
+        SUM(tp.ViewCount) AS TotalViews,
+        AVG(tp.Score) AS AverageScore,
+        STRING_AGG(tp.Title, '; ') AS TopPostTitles
+    FROM 
+        TopPostsInTags tp
+    JOIN 
+        (SELECT DISTINCT UNNEST(SUBSTRING(Tags FROM '\w+')) AS Tag FROM Posts) t ON tp.TagName = t.Tag
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    TagName,
+    TopPostsCount,
+    TotalViews,
+    AverageScore,
+    TopPostTitles
+FROM 
+    PostInsights
+ORDER BY 
+    TotalViews DESC, AverageScore DESC
+LIMIT 10;

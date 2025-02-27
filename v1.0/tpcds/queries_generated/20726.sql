@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.ws_item_sk) AS total_net_profit 
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL AND 
+        ws.ws_sales_price > 10
+),
+SalesSummaries AS (
+    SELECT 
+        rs.ws_item_sk,
+        MAX(rs.ws_sales_price) AS max_sales_price,
+        MIN(rs.ws_sales_price) AS min_sales_price,
+        COUNT(DISTINCT rs.ws_quantity) AS distinct_quantity_count, 
+        CASE 
+            WHEN COUNT(DISTINCT rs.ws_quantity) = 0 THEN 'No Sales'
+            ELSE 'Sales Recorded'
+        END AS sales_status
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.price_rank = 1
+    GROUP BY 
+        rs.ws_item_sk
+)
+SELECT 
+    s.item_id,
+    ss.max_sales_price,
+    ss.min_sales_price,
+    ss.distinct_quantity_count,
+    ss.sales_status,
+    CASE 
+        WHEN ss.max_sales_price IS NOT NULL AND ss.min_sales_price IS NOT NULL THEN ss.max_sales_price - ss.min_sales_price
+        ELSE NULL
+    END AS price_difference,
+    COALESCE(NULLIF(ss.max_sales_price, ss.min_sales_price), 0) AS adjusted_price_difference
+FROM 
+    SalesSummaries ss
+LEFT JOIN 
+    (SELECT 
+         i.i_item_sk, 
+         i.i_item_id 
+     FROM item i) s 
+ON ss.ws_item_sk = s.i_item_sk 
+WHERE 
+    ss.sales_status = 'Sales Recorded'
+ORDER BY 
+    price_difference DESC 
+LIMIT 10
+UNION ALL
+SELECT 
+    'TOTAL_RECORDS' AS item_id,
+    COUNT(*) AS max_sales_price,
+    COUNT(DISTINCT ws_item_sk) AS min_sales_price,
+    NULL AS distinct_quantity_count,
+    'Total Count' AS sales_status,
+    NULL AS price_difference,
+    NULL AS adjusted_price_difference
+FROM web_sales
+WHERE 
+    ws_sales_price < 0;

@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(pi.id) AS avg_person_info_id
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    INNER JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title, 
+        production_year, 
+        total_cast, 
+        avg_person_info_id,
+        ROW_NUMBER() OVER (ORDER BY total_cast DESC) AS movie_rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    fm.movie_title, 
+    fm.production_year, 
+    fm.total_cast, 
+    fm.avg_person_info_id,
+    ct.kind AS company_type
+FROM 
+    FilteredMovies fm
+JOIN 
+    movie_companies mc ON mc.movie_id = fm.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    fm.movie_rank <= 10
+ORDER BY 
+    fm.total_cast DESC;

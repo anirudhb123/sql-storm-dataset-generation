@@ -1,0 +1,48 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws 
+    INNER JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year BETWEEN 2020 AND 2023
+    GROUP BY ws.ws_item_sk
+),
+RefundsData AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_refunds
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(sd.total_quantity, 0) AS total_quantity,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.total_refunds, 0) AS total_refunds,
+        (COALESCE(sd.total_sales, 0) - COALESCE(rd.total_refunds, 0)) AS net_sales,
+        (COALESCE(sd.total_quantity, 0) - COALESCE(rd.total_returns, 0)) AS net_quantity
+    FROM SalesData sd
+    FULL OUTER JOIN RefundsData rd ON sd.ws_item_sk = rd.wr_item_sk 
+    FULL OUTER JOIN item i ON COALESCE(sd.ws_item_sk, rd.wr_item_sk) = i.i_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    c.ca_city,
+    SUM(cs.total_sales) AS total_sales,
+    SUM(cs.net_sales) AS net_sales,
+    AVG(cs.net_quantity) AS avg_quantity_sold,
+    MAX(cs.total_returns) AS max_returns,
+    COUNT(DISTINCT cs.order_count) AS unique_orders
+FROM CombinedSales cs
+LEFT JOIN customer_address c ON c.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = cs.ws_item_sk))
+WHERE c.ca_city IS NOT NULL
+GROUP BY i.i_item_id, i.i_item_desc, c.ca_city
+HAVING SUM(cs.total_sales) > 1000
+ORDER BY net_sales DESC;

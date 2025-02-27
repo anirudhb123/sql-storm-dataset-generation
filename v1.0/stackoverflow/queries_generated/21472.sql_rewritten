@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') 
+        AND p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AcceptedAnswerId, p.OwnerUserId
+),
+PostVoteCounts AS (
+    SELECT 
+        postId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+DetailedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosed,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopened
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(dph.LastClosed, 'Never Closed') AS LastClosedInfo,
+    COALESCE(dph.LastReopened, 'Never Reopened') AS LastReopenedInfo,
+    rpc.UpVotes,
+    rpc.DownVotes,
+    CASE
+        WHEN rpc.UpVotes > rpc.DownVotes THEN 'Positively Received'
+        WHEN rpc.UpVotes < rpc.DownVotes THEN 'Negatively Received'
+        ELSE 'Neutral'
+    END AS PostReception,
+    rp.CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts rpc ON rp.PostId = rpc.PostId
+LEFT JOIN 
+    DetailedPostHistory dph ON rp.PostId = dph.PostId
+WHERE 
+    rp.RankPerUser <= 5 
+ORDER BY 
+    rp.Score DESC NULLS LAST, 
+    rp.ViewCount DESC;

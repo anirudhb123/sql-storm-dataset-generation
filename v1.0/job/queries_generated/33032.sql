@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+) 
+SELECT 
+    a.id AS actor_id,
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    MIN(mh.production_year) AS first_movie_year,
+    MAX(mh.production_year) AS latest_movie_year,
+    STRING_AGG(DISTINCT ak.name || ' plays ' || rt.role, ', ') AS roles,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_count,
+    T.id AS title_id,
+    T.title AS movie_title,
+    T.production_year AS year,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY mh.level) AS role_level
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    title T ON mh.movie_id = T.id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.level < 3
+    AND (ak.surname_pcode IS NOT NULL OR ak.name_pcode_nf IS NOT NULL)
+GROUP BY 
+    ak.id, T.id
+ORDER BY 
+    movie_count DESC, first_movie_year ASC;

@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS rank_per_site
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+AggregatedReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_return_quantity,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cr.cr_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        cd.cd_demo_sk,
+        c.c_customer_id,
+        c.c_preferred_cust_flag,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other' 
+        END AS marital_status_desc
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.marital_status_desc,
+    COUNT(rs.ws_order_number) AS total_orders,
+    COALESCE(SUM(ar.total_return_quantity), 0) AS total_returns,
+    COALESCE(SUM(ar.total_return_amount), 0) AS total_return_amount,
+    AVG(CASE WHEN rs.rank_per_site <= 10 THEN ws.ws_ext_sales_price END) AS avg_top_sales_price
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    RankedSales rs ON ci.c_customer_id = rs.web_site_sk
+LEFT JOIN 
+    AggregatedReturns ar ON ar.cr_item_sk = rs.ws_order_number
+GROUP BY 
+    ci.c_customer_id, ci.marital_status_desc
+HAVING 
+    COUNT(rs.ws_order_number) > 5
+    AND COALESCE(SUM(ar.total_return_quantity), 0) < 50
+ORDER BY 
+    total_orders DESC, total_returns ASC;

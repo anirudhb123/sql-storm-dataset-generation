@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+AggLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate > '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+OrderInfo AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice, REPLACE(o.o_comment, 'ALL', 'NONE') AS modified_comment,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+)
+SELECT
+    p.p_name,
+    SUM(Agg.total_revenue) AS total_revenue,
+    COUNT(DISTINCT oi.o_orderkey) AS order_count,
+    COALESCE(SUM(s.s_acctbal), 0) AS total_supplier_balance,
+    COUNT(DISTINCT n.n_nationkey) AS unique_nations,
+    CASE
+        WHEN SUM(Agg.total_revenue) > 50000 THEN 'High'
+        WHEN SUM(Agg.total_revenue) BETWEEN 10000 AND 50000 THEN 'Medium'
+        ELSE 'Low'
+    END AS revenue_category
+FROM part p
+LEFT JOIN AggLineItems Agg ON p.p_partkey = Agg.l_orderkey
+LEFT JOIN OrderInfo oi ON Agg.l_orderkey = oi.o_orderkey
+LEFT JOIN supplier s ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT oi.o_orderkey) >= 5
+ORDER BY total_revenue DESC;

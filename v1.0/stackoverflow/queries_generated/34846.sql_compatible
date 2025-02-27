@@ -1,0 +1,65 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Posts p2 ON p2.ParentId = p.Id
+    JOIN 
+        RecursivePostCTE rp ON p2.OwnerUserId = rp.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    SUM(CASE WHEN post.Level = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN post.Level > 1 THEN 1 ELSE 0 END) AS AnswerCount,
+    AVG(COALESCE(v.BountyAmount, 0)) AS AverageBounty,
+    COUNT(DISTINCT bh.Id) AS BadgesCount,
+    SUM(v.Score) AS TotalVotes,
+    STRING_AGG(th.Tag, ', ') AS TagNames
+FROM 
+    Users u
+LEFT JOIN 
+    RecursivePostCTE post ON u.Id = post.OwnerUserId
+LEFT JOIN 
+    Votes v ON post.PostId = v.PostId
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT TRIM(value) AS Tag
+        FROM 
+            UNNEST(SPLIT(p.Tags, ',')) AS value
+    ) th ON th.Tag IS NOT NULL
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    SUM(post.Level) > 0
+ORDER BY 
+    TotalVotes DESC, UserId
+LIMIT 100;

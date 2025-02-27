@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS UserDisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+        AND p.Tags IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(DISTINCTht.Name, ', ') AS HistoryTypes,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId IN (2, 3)) AS TotalVotes -- Sum upvotes (2) & downvotes (3)
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.CreationDate, rp.UserDisplayName, rp.Reputation
+),
+TagAnalysis AS (
+    SELECT 
+        f.Tags,
+        COUNT(f.PostId) AS PostCount,
+        AVG(f.Reputation) AS AvgReputation,
+        SUM(f.CommentCount) AS TotalComments,
+        SUM(f.TotalVotes) AS TotalVotes
+    FROM 
+        FilteredPosts f
+    WHERE 
+        f.TagRank <= 5  -- Only consider top 5 recent posts per tag
+    GROUP BY 
+        f.Tags
+)
+SELECT 
+    ta.Tags,
+    ta.PostCount,
+    ta.AvgReputation,
+    ta.TotalComments,
+    ta.TotalVotes,
+    CASE 
+        WHEN ta.PostCount > 10 THEN 'Highly Active'
+        WHEN ta.PostCount BETWEEN 5 AND 10 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS ActivityLevel
+FROM 
+    TagAnalysis ta
+ORDER BY 
+    ta.PostCount DESC, 
+    ta.AvgReputation DESC;

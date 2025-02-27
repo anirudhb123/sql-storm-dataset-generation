@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierAverageCost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(rnk.rnk, 0) AS supplier_rank,
+    CASE 
+        WHEN s_avg.avg_supply_cost IS NOT NULL 
+        THEN s_avg.avg_supply_cost - p.p_retailprice 
+        ELSE NULL 
+    END AS cost_difference,
+    cust_order.order_count,
+    cust_order.total_spent
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rnk ON p.p_partkey = rnk.s_suppkey
+LEFT JOIN 
+    SupplierAverageCost s_avg ON p.p_partkey = s_avg.ps_partkey
+LEFT JOIN 
+    CustomerOrders cust_order ON cust_order.c_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_acctbal IS NOT NULL 
+        ORDER BY c.c_acctbal DESC 
+        LIMIT 1
+    )
+WHERE 
+    p.p_retailprice > 100.00 
+    AND (supplier_rank < 5 OR supplier_rank IS NULL)
+ORDER BY 
+    cost_difference DESC NULLS LAST;

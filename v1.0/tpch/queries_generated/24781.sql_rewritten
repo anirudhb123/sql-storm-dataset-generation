@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+MaxSupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        MAX(ps.ps_supplycost) AS max_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.shipmode,
+        l.returnflag,
+        COUNT(*) OVER (PARTITION BY l.l_orderkey) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.05 OR l.l_returnflag = 'R'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_acctbal,
+        r.r_name AS region_name,
+        SUM(f.l_quantity) AS total_quantity 
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        FilteredLineItems f ON f.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (SELECT MAX(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = f.l_partkey))
+    GROUP BY 
+        s.s_suppkey, s.s_acctbal, r.r_name
+)
+SELECT 
+    c.c_name,
+    COALESCE(s.total_quantity, 0) AS total_supplied_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COUNT(DISTINCT CASE WHEN ro.order_rank = 1 THEN o.o_orderkey END) AS highest_spending_orders,
+    SUM(CASE 
+            WHEN s.total_quantity IS NULL THEN 0 
+            ELSE s.total_quantity END) AS adjusted_total_quantity
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+LEFT JOIN 
+    SupplierStats s ON c.c_custkey = (
+        SELECT s_nationkey FROM supplier WHERE s_suppkey IN (
+            SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT l_partkey FROM FilteredLineItems WHERE l_orderkey = o.o_orderkey)
+        )
+    )
+WHERE 
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(s.total_quantity) > (SELECT AVG(total_quantity) FROM SupplierStats) OR COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_supplied_quantity DESC, highest_spending_orders ASC;

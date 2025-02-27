@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-12-31'
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_mfgr,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_retailprice,
+        (ps.ps_supplycost * 1.1) AS adjusted_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE WHEN s.s_acctbal IS NOT NULL THEN s.s_acctbal ELSE 0 END) AS avg_supplier_account_balance,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    RankedOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    PartSupplierInfo psi ON l.l_partkey = psi.p_partkey
+WHERE 
+    o.rn = 1
+    AND l.l_shipdate BETWEEN o.o_orderdate AND o.o_orderdate + INTERVAL '30 DAY'
+GROUP BY 
+    r.r_name
+HAVING 
+    AVG(l.l_quantity) > (SELECT AVG(l2.l_quantity) FROM lineitem l2)
+ORDER BY 
+    total_revenue DESC;

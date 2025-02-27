@@ -1,0 +1,43 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 
+           c_birth_year, 0 AS level 
+    FROM customer
+    WHERE c_current_addr_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, 
+           c.c_birth_year, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.level < 5
+), 
+SalesData AS (
+    SELECT ws.bill_customer_sk, SUM(ws.net_profit) AS total_profit, 
+           COUNT(ws.order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.sold_date_sk >= 20200101
+    GROUP BY ws.bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, 
+           SUM(s.total_profit) AS demographic_profit
+    FROM SalesData s
+    JOIN customer c ON s.bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+AddressStats AS (
+    SELECT ca.ca_state, COUNT(DISTINCT c.c_customer_sk) AS customer_count, 
+           AVG(cd.total_profit) AS avg_profit
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN SalesData sd ON c.c_customer_sk = sd.bill_customer_sk
+    JOIN CustomerDemographics cd ON cd.cd_gender = 'F' 
+    GROUP BY ca.ca_state
+)
+SELECT a.ca_state, a.customer_count, a.avg_profit,
+       RANK() OVER (ORDER BY a.avg_profit DESC) AS state_rank
+FROM AddressStats a
+WHERE a.customer_count > 100
+ORDER BY a.avg_profit DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

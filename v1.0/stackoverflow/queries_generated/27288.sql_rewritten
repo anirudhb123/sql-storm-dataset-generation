@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>')::int[])
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, U.DisplayName, p.PostTypeId
+),
+Benchmarking AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.TagsArray,
+        CASE 
+            WHEN rp.Rank <= 10 THEN 'Top 10'
+            WHEN rp.Rank <= 50 THEN 'Top 50'
+            ELSE 'Others'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 100
+)
+SELECT 
+    RankCategory,
+    COUNT(PostId) AS TotalPosts,
+    AVG(ViewCount) AS AverageViews,
+    AVG(Score) AS AverageScore,
+    STRING_AGG(DISTINCT OwnerDisplayName, ', ') AS Owners,
+    STRING_AGG(DISTINCT unnest(TagsArray), ', ') AS AllTags,
+    COUNT(DISTINCT PostId) AS PostCount
+FROM 
+    Benchmarking
+GROUP BY 
+    RankCategory
+ORDER BY 
+    RankCategory;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) as Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.Title,
+    rp.CommentCount,
+    rp.AnswerCount,
+    tc.TagName,
+    tc.PostCount,
+    ur.DisplayName AS UserDisplayName,
+    ur.Reputation,
+    ur.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TagCounts tc ON rp.Tags LIKE CONCAT('%>', tc.TagName, '<%')
+JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+WHERE 
+    rp.Rank = 1 AND ur.Reputation > 1000 -- Filter for posts with at least one comment and where the user has reputation greater than 1000
+ORDER BY 
+    rp.CommentCount DESC, 
+    rp.AnswerCount DESC;

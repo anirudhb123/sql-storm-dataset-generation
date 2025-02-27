@@ -1,0 +1,67 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(u.Reputation) AS AvgReputation,
+        DATE_PART('year', age(MAX(p.CreationDate))) AS AccountAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  -- Edit Title or Body
+),
+HighScorePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 10
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AvgReputation,
+    ups.AccountAge,
+    re.PostId,
+    re.UserDisplayName AS Editor,
+    re.CreationDate AS EditDate,
+    hsp.Title AS HighScoringPost,
+    hsp.Score AS HighScore,
+    CASE 
+        WHEN hsp.Score IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsHighScorer
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentEdits re ON ups.UserId = re.UserDisplayName
+LEFT JOIN 
+    HighScorePosts hsp ON hsp.Id IN (SELECT ParentId FROM Posts WHERE OwnerUserId = ups.UserId)
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.AvgReputation DESC, ups.TotalPosts DESC;

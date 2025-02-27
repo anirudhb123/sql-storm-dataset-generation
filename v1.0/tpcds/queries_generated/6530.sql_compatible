@@ -1,0 +1,57 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        customer c
+    JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), 
+SalesData AS (
+    SELECT 
+        ws.ws_ship_mode_sk,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_ship_mode_sk
+),
+ReturnComparison AS (
+    SELECT 
+        sr.sm_ship_mode_sk,
+        COALESCE(c.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(s.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(c.total_returned_amount, 0) AS total_returned_amount,
+        COALESCE(s.total_sales_amount, 0) AS total_sales_amount,
+        CASE 
+            WHEN COALESCE(s.total_sales_quantity, 0) = 0 THEN 0
+            ELSE COALESCE(c.total_returned_quantity, 0) / NULLIF(COALESCE(s.total_sales_quantity, 0), 0)
+        END AS return_rate
+    FROM 
+        ship_mode sr
+    LEFT JOIN 
+        CustomerReturns c ON sr.sm_ship_mode_sk = c.c_customer_id
+    LEFT JOIN 
+        SalesData s ON sr.sm_ship_mode_sk = s.ws_ship_mode_sk
+)
+SELECT 
+    sm.sm_ship_mode_id,
+    sm.sm_type,
+    rc.total_returned_quantity,
+    rc.total_sales_quantity,
+    rc.return_rate,
+    rc.total_returned_amount,
+    rc.total_sales_amount
+FROM 
+    ship_mode sm
+JOIN 
+    ReturnComparison rc ON sm.sm_ship_mode_sk = rc.sm_ship_mode_sk
+WHERE 
+    rc.return_rate > 0.1
+ORDER BY 
+    rc.return_rate DESC;

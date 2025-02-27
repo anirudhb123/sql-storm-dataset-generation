@@ -1,0 +1,79 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+), PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM 
+        Tags 
+    JOIN 
+        Posts P ON Tags.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        Tags.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+), PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        PS.UserId,
+        PS.UserDisplayName,
+        PH.CreationDate AS LastEdited,
+        PH.Comment AS EditComment,
+        PH.PostHistoryTypeId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Users PS ON P.OwnerUserId = PS.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    U.PostCount,
+    U.CommentCount,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.UserRank,
+    PT.TagName,
+    PT.UsageCount,
+    PD.Title,
+    PD.Score,
+    PD.ViewCount,
+    PD.LastEdited,
+    COALESCE(PD.EditComment, 'No edits made') AS LastEditComment
+FROM 
+    UserStatistics U
+JOIN 
+    PopularTags PT ON U.PostCount > 0
+LEFT JOIN 
+    PostDetails PD ON U.UserId = PD.UserId
+WHERE 
+    U.Reputation > 100 AND
+    (U.Views IS NOT NULL OR U.TotalUpvotes > U.TotalDownvotes)
+ORDER BY 
+    U.UserRank, U.Reputation DESC, PT.UsageCount DESC;

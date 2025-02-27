@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.partkey AS p_partkey,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date,
+        MIN(o.o_orderdate) AS first_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartRegion AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS distinct_nations,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY p.p_partkey, p.p_name, r.r_name
+)
+SELECT 
+    pr.p_partkey,
+    pr.p_name,
+    pr.r_name,
+    COALESCE(cs.total_order_value, 0) AS customer_total_order_value,
+    COALESCE(cs.order_count, 0) AS customer_order_count,
+    rs.s_name AS cheapest_supplier,
+    rs.ps_supplycost AS cheapest_supply_cost,
+    pr.total_available_qty,
+    pr.distinct_nations,
+    CASE 
+        WHEN pr.distinct_nations > 0 THEN 'Multiple Nations' 
+        ELSE 'Single Nation or None' 
+    END AS nations_status
+FROM PartRegion pr
+LEFT JOIN CustomerOrders cs ON pr.p_partkey IN (
+    SELECT ps.p_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+)
+LEFT JOIN RankedSuppliers rs ON pr.p_partkey = rs.p_partkey AND rs.rn = 1
+WHERE pr.total_available_qty > (
+    SELECT AVG(total_available_qty) 
+    FROM PartRegion
+)
+AND pr.r_name IS NOT NULL
+ORDER BY 
+    pr.total_available_qty DESC,
+    pr.p_name ASC;

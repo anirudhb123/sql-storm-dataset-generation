@@ -1,0 +1,72 @@
+
+WITH customer_productivity AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        PERCENT_RANK() OVER (PARTITION BY c.c_current_cdemo_sk ORDER BY SUM(ws.ws_quantity) DESC) AS quantity_rank
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_current_cdemo_sk
+),
+demographic_analysis AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buying_power,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_buy_potential
+),
+date_range AS (
+    SELECT 
+        d.d_date_sk, 
+        d.d_date,
+        CASE WHEN d.d_dow IN (0, 6) THEN 'Weekend' ELSE 'Weekday' END AS day_type
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2022-01-01' AND '2022-12-31'
+),
+sales_performance AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.ss_quantity) AS total_sales,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM 
+        store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk
+)
+SELECT 
+    d.d_date,
+    da.customer_count,
+    cp.c_customer_sk,
+    cp.total_quantity,
+    COALESCE(sp.total_sales, 0) AS total_sales,
+    da.buying_power,
+    CASE 
+        WHEN cp.quantity_rank > 0.5 THEN 'Moderate Customer'
+        ELSE 'Loyal Customer' 
+    END AS customer_type,
+    CASE 
+        WHEN sp.avg_sales_price IS NULL THEN 'Price Data Not Available'
+        ELSE CONCAT('Average Price: $', FORMAT(sp.avg_sales_price, 2)) 
+    END AS sales_info,
+    d.day_type
+FROM 
+    date_range d
+JOIN customer_productivity cp ON d.d_date_sk = cp.c_current_cdemo_sk
+LEFT JOIN demographic_analysis da ON cp.c_current_cdemo_sk = da.cd_demo_sk
+LEFT JOIN sales_performance sp ON d.d_date_sk = sp.s_store_sk
+WHERE 
+    (sp.transaction_count > 5 OR sp.total_sales IS NULL)
+ORDER BY 
+    d.d_date, 
+    customer_count DESC;

@@ -1,0 +1,57 @@
+WITH RecursiveTagExclusions AS (
+    SELECT Id, TagName, ExcerptPostId, WikiPostId, Count
+    FROM Tags
+    WHERE IsModeratorOnly = 0 -- Exclude moderator-only tags
+    UNION ALL
+    SELECT t.Id, t.TagName, t.ExcerptPostId, t.WikiPostId, t.Count
+    FROM Tags t
+    INNER JOIN RecursiveTagExclusions rte ON t.Id <> rte.Id AND t.Count < rte.Count -- Get related tags with lower count
+),
+PostsSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(distinct c.Id) AS CommentCount,
+        COALESCE(AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount, -- Upvote count
+        COALESCE(AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount -- Downvote count
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 -- Filter for questions only
+    GROUP BY p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.Score,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    COALESCE(phs.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(phs.LastReopenedDate, 'Never Reopened') AS LastReopenedDate,
+    phs.CloseReopenCount,
+    STRING_AGG(rt.TagName, ', ') AS RelatedTags
+FROM PostsSummary ps
+LEFT JOIN PostHistorySummary phs ON ps.PostId = phs.PostId
+LEFT JOIN PostLinks pl ON pl.PostId = ps.PostId
+LEFT JOIN RecursiveTagExclusions rt ON rt.ExcerptPostId = pl.RelatedPostId
+WHERE ps.Score > 0
+GROUP BY ps.PostId, ps.Title, ps.CreationDate, ps.ViewCount, ps.CommentCount, 
+         ps.Score, phs.LastClosedDate, phs.LastReopenedDate, phs.CloseReopenCount
+ORDER BY ps.Score DESC, ps.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY; -- Pagination handling
+

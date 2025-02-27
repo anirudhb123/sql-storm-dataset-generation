@@ -1,0 +1,68 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level,
+        p.CreationDate,
+        p.AnswerCount,
+        p.CommentCount,
+        p.ViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        Level + 1,
+        p2.CreationDate,
+        p2.AnswerCount,
+        p2.CommentCount,
+        p2.ViewCount
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    p.Title,
+    r.Level,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+    CASE 
+        WHEN PH.Score > 0 THEN 'Highly Rated'
+        WHEN PH.Score BETWEEN -3 AND 0 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    COUNT(DISTINCT PH.Id) AS Edits,
+    DATEDIFF(DAY, MIN(PH.CreationDate), GETDATE()) AS DaysSinceFirstEdit
+FROM 
+    RecursivePostHierarchy r
+INNER JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON r.PostId = v.PostId
+LEFT JOIN 
+    PostHistory PH ON r.PostId = PH.PostId
+LEFT JOIN 
+    Posts p ON PH.PostId = p.Id
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' + t.TagName + '%'
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.DisplayName, u.Reputation, r.Title, r.Level
+HAVING 
+    COUNT(DISTINCT c.Id) > 5 
+ORDER BY 
+    u.Reputation DESC, r.Level ASC;

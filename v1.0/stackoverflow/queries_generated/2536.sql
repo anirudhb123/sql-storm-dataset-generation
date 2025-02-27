@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.PostCount,
+    up.TotalViews,
+    up.TotalScore,
+    rp.Title AS TopPostTitle,
+    rp.ViewCount AS TopPostViews,
+    rp.Score AS TopPostScore,
+    cp.CloseCount,
+    cp.CloseReasons
+FROM UserPostStats up
+LEFT JOIN RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.Rank = 1
+LEFT JOIN ClosedPosts cp ON rp.Id = cp.PostId
+WHERE up.TotalScore > 100
+ORDER BY up.TotalScore DESC, up.TotalViews DESC
+LIMIT 10;

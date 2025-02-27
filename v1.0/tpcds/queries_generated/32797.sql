@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20220101 AND 20220131
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returned_quantity,
+        SUM(wr.return_amt) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+RankedSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.total_quantity,
+        s.total_net_profit,
+        COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(r.total_return_amt, 0) AS total_return_amt,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY s.total_net_profit DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesCTE s ON c.c_customer_sk = s.ws_item_sk
+    LEFT JOIN 
+        CustomerReturns r ON c.c_customer_sk = r.returning_customer_sk
+)
+SELECT 
+    r.c_customer_sk,
+    r.c_first_name,
+    r.c_last_name,
+    r.total_quantity,
+    r.total_net_profit,
+    r.total_returned_quantity,
+    r.total_return_amt,
+    (r.total_net_profit - r.total_return_amt) AS net_revenue 
+FROM 
+    RankedSales r
+WHERE 
+    r.rank = 1 AND 
+    r.total_net_profit > 1000
+ORDER BY 
+    net_revenue DESC
+LIMIT 10;

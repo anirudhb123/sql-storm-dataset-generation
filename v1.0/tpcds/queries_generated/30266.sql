@@ -1,0 +1,57 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk,
+        sr_return_quantity, 
+        sr_return_amt,
+        sr_return_tax,
+        1 AS recursion_level
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+    
+    UNION ALL
+    
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk,
+        sr_return_quantity + cr_return_quantity AS total_return_quantity,
+        sr_return_amt + cr_return_amount AS total_return_amt,
+        sr_return_tax + cr_return_tax AS total_return_tax,
+        recursion_level + 1
+    FROM store_returns sr
+    JOIN catalog_returns cr ON sr.item_sk = cr.item_sk
+    WHERE sr.returned_date_sk = cr.returned_date_sk AND recursion_level < 5
+),
+AggregatedData AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(cr.total_return_quantity, 0)) AS total_return_quantity,
+        SUM(COALESCE(cr.total_return_amt, 0)) AS total_return_amt,
+        SUM(COALESCE(cr.total_return_tax, 0)) AS total_return_tax
+    FROM customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    GROUP BY c.c_first_name, c.c_last_name
+),
+SalesInformation AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk, ws.ws_order_number
+)
+SELECT 
+    a.c_first_name,
+    a.c_last_name,
+    a.total_return_quantity,
+    a.total_return_amt,
+    a.total_return_tax,
+    si.total_sales,
+    si.rank
+FROM AggregatedData a
+JOIN SalesInformation si ON a.sr_item_sk = si.ws_item_sk
+WHERE a.total_return_amt > (SELECT AVG(a.total_return_amt) FROM AggregatedData a2)
+ORDER BY a.total_return_quantity DESC, si.total_sales DESC;

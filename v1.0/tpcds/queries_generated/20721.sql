@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity
+    FROM 
+        web_sales
+), 
+SelectedSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_net_profit,
+        rs.total_quantity,
+        CASE 
+            WHEN rs.profit_rank = 1 THEN 'Top Seller'
+            ELSE 'Other Seller'
+        END AS seller_category
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.total_quantity > (
+            SELECT 
+                AVG(total_quantity) 
+            FROM 
+                (SELECT SUM(ws_quantity) AS total_quantity FROM web_sales GROUP BY ws_item_sk) AS avg_quantities
+        )
+), 
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name,
+        ss.ws_net_profit,
+        CASE 
+            WHEN c.c_birth_year IS NULL THEN 'Unknown Birth Year'
+            ELSE CAST(c.c_birth_year AS CHAR)
+        END AS birth_year,
+        sd.shop_description
+    FROM 
+        customer c
+    JOIN 
+        (SELECT DISTINCT ws_ship_customer_sk, ws_net_profit FROM web_sales) ss ON c.c_customer_sk = ss.ws_ship_customer_sk
+    LEFT JOIN 
+        (SELECT DISTINCT s_store_sk, 'Online Store' AS shop_description FROM store) sd ON sd.s_store_sk = (
+            SELECT TOP 1 s_store_sk FROM store WHERE s_number_employees IS NOT NULL ORDER BY s_number_employees DESC
+        )
+)
+SELECT 
+    cp.c_customer_id,
+    cp.c_first_name,
+    cp.c_last_name,
+    cp.birth_year,
+    ss.seller_category,
+    SUM(cp.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT cp.ws_order_number) AS total_orders
+FROM 
+    CustomerPurchases cp
+JOIN 
+    SelectedSales ss ON cp.ws_net_profit = ss.ws_net_profit
+WHERE 
+    cp.birth_year LIKE '%1' OR cp.birth_year IS NULL
+GROUP BY 
+    cp.c_customer_id, cp.c_first_name, cp.c_last_name, cp.birth_year, ss.seller_category
+HAVING 
+    SUM(cp.ws_net_profit) > (
+        SELECT 
+            MAX(total_profit) 
+        FROM 
+            (SELECT SUM(ws_net_profit) AS total_profit FROM CustomerPurchases GROUP BY c_customer_id) AS customer_totals
+    )
+ORDER BY 
+    total_profit DESC, cp.c_last_name ASC;

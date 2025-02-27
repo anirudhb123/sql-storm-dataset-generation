@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS hierarchy_level
+    FROM title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.hierarchy_level + 1
+    FROM movie_link m
+    JOIN title t ON m.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(*) OVER (PARTITION BY ca.person_id) AS role_count
+    FROM cast_info ca
+    JOIN aka_name ak ON ca.person_id = ak.person_id
+    JOIN role_type rt ON ca.role_id = rt.id
+),
+YearlyKeywords AS (
+    SELECT 
+        mt.production_year,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN aka_title at ON mk.movie_id = at.movie_id
+    JOIN title mt ON at.movie_id = mt.id
+    GROUP BY mt.production_year
+),
+AggregateStats AS (
+    SELECT 
+        mh.production_year,
+        COUNT(DISTINCT mh.movie_id) AS total_movies,
+        AVG(COALESCE(ar.role_count, 0)) AS avg_roles_per_actor
+    FROM MovieHierarchy mh
+    LEFT JOIN ActorRoles ar ON mh.movie_id = ar.movie_id
+    GROUP BY mh.production_year
+)
+
+SELECT 
+    ags.production_year,
+    ags.total_movies,
+    ags.avg_roles_per_actor,
+    COALESCE(yk.keywords, 'No Keywords') AS keywords_in_year
+FROM AggregateStats ags
+LEFT JOIN YearlyKeywords yk ON ags.production_year = yk.production_year
+WHERE ags.total_movies > 10
+ORDER BY ags.production_year DESC
+LIMIT 5;

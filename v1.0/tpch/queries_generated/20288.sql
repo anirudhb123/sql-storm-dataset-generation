@@ -1,0 +1,102 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey, 
+        o_custkey, 
+        o_orderdate, 
+        o_totalprice, 
+        ROW_NUMBER() OVER(PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM 
+        orders
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS line_count,
+        AVG(l.l_tax) AS avg_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    c.c_name,
+    r.r_name AS region_name,
+    COALESCE(SUM(ls.revenue), 0) AS total_revenue,
+    COUNT(DISTINCT CASE WHEN ls.line_count > 1 THEN ls.l_orderkey END) AS multi_line_orders,
+    MAX(pt.p_retailprice) AS max_part_price,
+    CASE 
+        WHEN s.total_supply_cost IS NULL THEN 'No Supplier Data'
+        ELSE s.parts_supplied || ' parts supplied'
+    END AS supplier_info
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemSummary ls ON o.o_orderkey = ls.l_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    CustomerRegion cr ON c.c_custkey = cr.c_custkey
+LEFT OUTER JOIN 
+    FilteredParts pt ON pt.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (
+            SELECT s.s_suppkey 
+            FROM supplier s 
+            WHERE s.s_acctbal IS NOT NULL
+        )
+    )
+LEFT JOIN 
+    SupplierDetails s ON pt.p_partkey = ANY (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps
+        WHERE ps.ps_suppkey = s.s_suppkey
+    )
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, c.c_name, r.r_name, s.total_supply_cost
+HAVING 
+    MAX(pt.price_rank) IS NOT NULL OR s.parts_supplied > 0
+ORDER BY 
+    total_revenue DESC, o.o_orderdate ASC
+LIMIT 100;

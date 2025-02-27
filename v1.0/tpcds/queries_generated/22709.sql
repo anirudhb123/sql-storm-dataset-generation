@@ -1,0 +1,66 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (ORDER BY ws.ws_net_profit DESC) AS order_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 500
+),
+PromotionalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 5
+)
+SELECT 
+    rc.c_customer_id,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    COALESCE(hv.order_rank, 0) AS high_value_order_rank,
+    COALESCE(pr.total_returns, 0) AS total_returns,
+    COUNT(DISTINCT hs.ss_ticket_number) AS unique_store_sales_tickets
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    HighValueOrders hv ON rc.c_customer_sk = hv.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales hs ON rc.c_customer_sk = hs.ss_customer_sk
+LEFT JOIN 
+    PromotionalReturns pr ON hv.ws_item_sk = pr.sr_item_sk
+WHERE 
+    (rc.purchase_rank = 1 AND rc.cd_gender = 'F') 
+    OR (rc.cd_marital_status = 'S' AND rc.cd_purchase_estimate > 1000)
+GROUP BY 
+    rc.c_customer_id, rc.cd_gender, rc.cd_marital_status, hv.order_rank, pr.total_returns
+HAVING 
+    (total_returns > 10 OR high_value_order_rank IS NOT NULL)
+ORDER BY 
+    total_returns DESC, high_value_order_rank ASC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM customer) / 2;

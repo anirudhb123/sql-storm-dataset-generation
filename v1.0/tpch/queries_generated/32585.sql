@@ -1,0 +1,46 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_name, l.l_quantity, l.l_discount, l.l_extendedprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS net_revenue,
+    COALESCE(SUM(od.o_totalprice), 0) AS total_order_value,
+    COUNT(DISTINCT od.o_orderkey) AS order_count,
+    rs.r_name AS region_name
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN OrderDetails od ON l.l_orderkey = od.o_orderkey
+LEFT JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name = od.c_name LIMIT 1)
+LEFT JOIN region rs ON n.n_regionkey = rs.r_regionkey
+WHERE p.p_size IS NOT NULL
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_mfgr, rs.r_name
+HAVING SUM(l.l_quantity) > 0
+ORDER BY net_revenue DESC, total_order_value DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS p_name,
+    NULL AS p_brand,
+    'Total' AS p_mfgr,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS net_revenue,
+    COALESCE(SUM(od.o_totalprice), 0) AS total_order_value,
+    COUNT(DISTINCT od.o_orderkey) AS order_count,
+    NULL AS region_name
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN OrderDetails od ON l.l_orderkey = od.o_orderkey
+WHERE p.p_size IS NOT NULL;

@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = o.o_orderkey AND l.l_returnflag = 'R') AS return_count
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND (EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NOT NULL) 
+        OR NOT EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey))
+),
+ExtensiveLineitems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        COUNT(l.l_linenumber) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey, l.l_suppkey
+    HAVING 
+        COUNT(l.l_linenumber) > 1 
+        AND SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+),
+FinalResult AS (
+    SELECT 
+        fo.o_orderkey,
+        fo.o_totalprice,
+        fo.o_orderdate,
+        fo.return_count,
+        rk.s_name,
+        e.item_count,
+        e.total_price_after_discount
+    FROM 
+        FilteredOrders fo
+    LEFT JOIN 
+        ExtensiveLineitems e ON fo.o_orderkey = e.l_orderkey
+    LEFT JOIN 
+        RankedSuppliers rk ON rk.s_suppkey = (SELECT ps.ps_suppkey 
+                                               FROM partsupp ps 
+                                               WHERE ps.ps_partkey IN (SELECT l.l_partkey 
+                                                                       FROM lineitem l 
+                                                                       WHERE l.l_orderkey = fo.o_orderkey)
+                                               ORDER BY ps.ps_supplycost DESC 
+                                               LIMIT 1)
+    WHERE 
+        (fo.return_count > 0 OR (fo.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate < fo.o_orderdate)))
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_price_after_discount IS NULL THEN 'No Line Items'
+        WHEN total_price_after_discount > 1000 THEN 'High Value'
+        ELSE 'Regular' 
+    END AS order_category
+FROM 
+    FinalResult
+ORDER BY 
+    fo.o_orderdate DESC, rk.s_name ASC, return_count DESC;

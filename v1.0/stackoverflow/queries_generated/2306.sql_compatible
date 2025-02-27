@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.AnswerCount, 
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank = 1
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN tp.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    u.DisplayName AS UserDisplayName
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    (SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+     FROM 
+        Votes 
+     GROUP BY 
+        PostId) v ON tp.PostId = v.PostId
+LEFT JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+WHERE 
+    tp.ViewCount > 100
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+LIMIT 10;

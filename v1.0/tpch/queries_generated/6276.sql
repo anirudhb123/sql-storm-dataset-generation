@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_mktsegment
+),
+TopRevenue AS (
+    SELECT 
+        r.c_mktsegment, 
+        SUM(ro.total_revenue) AS segment_revenue
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer r ON ro.o_custkey = r.c_custkey
+    WHERE 
+        ro.revenue_rank <= 10
+    GROUP BY 
+        r.c_mktsegment
+)
+SELECT 
+    s.s_name, 
+    s.s_acctbal,
+    n.n_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    TopRevenue tr ON s.s_suppkey = ps.ps_suppkey
+GROUP BY 
+    s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+HAVING 
+    SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_supply_cost) FROM supplier)
+ORDER BY 
+    total_supply_cost DESC;

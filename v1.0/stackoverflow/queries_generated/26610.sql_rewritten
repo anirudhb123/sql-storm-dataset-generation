@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(vb.VoteValue) AS TotalVotes,
+        SUM(CASE WHEN p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 1 ELSE 0 END) AS RecentPosts,
+        avg(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN (
+        SELECT 
+            v.UserId,
+            v.PostId,
+            CASE WHEN vt.Name = 'UpMod' THEN 1
+                 WHEN vt.Name = 'DownMod' THEN -1 
+            END AS VoteValue
+        FROM Votes v
+        JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    ) vb ON u.Id = vb.UserId
+    GROUP BY u.Id, u.DisplayName
+), HighActivityUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalVotes,
+        RecentPosts,
+        AvgReputation,
+        DENSE_RANK() OVER (ORDER BY TotalPosts DESC) AS UserRank
+    FROM UserActivity
+    WHERE TotalPosts > 0
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalVotes,
+    u.RecentPosts,
+    ROUND(u.AvgReputation, 2) AS AverageReputation,
+    ARRAY_AGG(DISTINCT t.TagName) AS TopTagsUsed,
+    ARRAY_AGG(pd.Title) AS RecentPostTitles
+FROM HighActivityUsers u
+JOIN Posts p ON u.UserId = p.OwnerUserId 
+LEFT JOIN (
+    SELECT 
+        p.Id, 
+        STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')))::text) AS TagName
+    FROM Posts p
+    GROUP BY p.Id
+) t ON p.Id = t.Id
+LEFT JOIN (
+    SELECT 
+        p.Id, 
+        p.Title
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+) pd ON pd.Id = p.Id
+WHERE u.UserRank <= 10  
+GROUP BY u.DisplayName, u.TotalPosts, u.TotalVotes, u.TotalComments, u.RecentPosts
+ORDER BY u.TotalPosts DESC;

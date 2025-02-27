@@ -1,0 +1,66 @@
+
+WITH AddressConcatenation AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+DemographicsJoin AS (
+    SELECT
+        cu.c_customer_sk,
+        CONCAT(cu.c_first_name, ' ', cu.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country
+    FROM customer cu
+    JOIN customer_demographics cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressConcatenation ad ON cu.c_current_addr_sk = ad.ca_address_sk
+),
+DateFormatting AS (
+    SELECT 
+        d.d_date_sk,
+        TO_CHAR(d.d_date, 'DD-Month-YYYY') AS formatted_date,
+        d.d_day_name,
+        d.d_month_seq,
+        d.d_year
+    FROM date_dim d
+),
+SalesData AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_sales
+    FROM store_sales ss
+    GROUP BY ss.ss_item_sk
+)
+SELECT
+    dem.full_name,
+    dem.cd_gender,
+    dem.cd_marital_status,
+    dem.cd_education_status,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ad.ca_country,
+    dt.formatted_date,
+    sd.total_quantity,
+    sd.total_sales
+FROM DemographicsJoin dem
+JOIN DateFormatting dt ON dt.d_date_sk = DATE_PART('day', CURRENT_DATE)  -- Replace with relevant date logic
+LEFT JOIN SalesData sd ON sd.ss_item_sk = dem.c_customer_sk  -- Assuming item_sk corresponds to customer_sk for demonstration
+WHERE dem.cd_gender = 'F' 
+  AND dem.cd_marital_status = 'M' 
+  AND dt.d_year = 2023
+ORDER BY sd.total_sales DESC
+LIMIT 100;

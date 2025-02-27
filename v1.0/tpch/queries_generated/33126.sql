@@ -1,0 +1,39 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = 1  -- Assuming regionkey 1 for example
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+ranked_orders AS (
+    SELECT o.orderkey, o.totalprice, 
+           RANK() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC) AS price_rank
+    FROM orders o
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_discount) AS avg_discount,
+    MAX(l.l_extendedprice) AS max_price,
+    COALESCE(SUM(NULLIF(s.s_acctbal, 0)), 0) AS total_supplier_balance,
+    CASE 
+        WHEN AVG(o.o_totalprice) IS NULL THEN 'NO ORDERS'
+        ELSE CONCAT('Average Order Price: $', ROUND(AVG(o.o_totalprice), 2))
+    END AS order_details
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN ranked_orders o ON l.l_orderkey = o.orderkey
+LEFT JOIN nation_hierarchy nh ON s.s_nationkey = nh.n_nationkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+  AND (s.s_acctbal > 1000 OR s.s_acctbal IS NULL)
+GROUP BY p.p_partkey, p.p_name
+HAVING total_quantity > 1000
+ORDER BY total_quantity DESC
+LIMIT 10;

@@ -1,0 +1,46 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name, ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+AggregatedSales AS (
+    SELECT lo.l_partkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_sales
+    FROM lineitem lo
+    WHERE lo.l_shipdate >= '2023-01-01'
+      AND lo.l_shipdate <= '2023-12-31'
+    GROUP BY lo.l_partkey
+)
+SELECT c.c_name AS customer_name,
+       COALESCE(SUM(os.total_price), 0) AS customer_total_spent,
+       p.p_name AS part_name,
+       ps.avail_qty AS available_quantity,
+       COALESCE(as.total_sales, 0) AS part_total_sales
+FROM customer c
+LEFT JOIN (
+    SELECT c_custkey, SUM(o_totalprice) AS total_price
+    FROM CustomerOrders
+    GROUP BY c_custkey
+) AS os ON c.c_custkey = os.c_custkey
+LEFT JOIN PartSupplierDetails ps ON ps.ps_suppkey IN (
+    SELECT ps_suppkey
+    FROM partsupp
+    WHERE ps_availqty > 0
+)
+LEFT JOIN AggregatedSales as ON as.l_partkey = ps.p_partkey
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY c.c_name, p.p_name, ps.avail_qty
+HAVING customer_total_spent > 1000
+ORDER BY customer_name, part_name;

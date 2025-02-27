@@ -1,0 +1,57 @@
+
+WITH RECURSIVE revenue_cte AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+high_revenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(r.total_revenue, 0) AS total_revenue,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(r.total_revenue, 0) DESC) AS revenue_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        revenue_cte r ON c.c_custkey = r.c_custkey
+)
+SELECT 
+    hr.c_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    CASE 
+        WHEN c.c_acctbal IS NULL THEN 'No Balance'
+        ELSE CAST(c.c_acctbal AS VARCHAR)
+    END AS account_balance_status,
+    RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_cost_rank
+FROM 
+    high_revenue hr
+JOIN 
+    partsupp ps ON hr.c_custkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON hr.c_custkey = c.c_custkey
+WHERE 
+    hr.revenue_rank <= 10
+GROUP BY 
+    hr.c_custkey, hr.c_name, c.c_acctbal
+UNION ALL
+SELECT 
+    'TOTAL' AS c_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    NULL AS account_balance_status
+FROM 
+    partsupp ps
+GROUP BY 
+    ps.ps_partkey
+ORDER BY 
+    supply_cost_rank;

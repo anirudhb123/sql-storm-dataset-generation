@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.id AS root_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    kh.keyword AS Keyword,
+    COUNT(DISTINCT c.movie_id) AS Movie_Count,
+    AVG(f.rating) AS Average_Rating,
+    MAX(mh.production_year) AS Latest_Production_Year,
+    STRING_AGG(DISTINCT p.name, ', ') AS Actors,
+    COUNT(DISTINCT mp.company_id) AS Production_Companies
+FROM 
+    movie_keyword mk
+JOIN 
+    keyword kh ON mk.keyword_id = kh.id
+JOIN 
+    complete_cast cc ON cc.movie_id = mk.movie_id
+JOIN 
+    cast_info c ON c.movie_id = cc.movie_id
+JOIN 
+    Person p ON p.id = c.person_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    movie_companies mp ON mp.movie_id = c.movie_id
+LEFT JOIN 
+    (SELECT 
+         movie_id,
+         AVG(rating) AS rating
+     FROM 
+         movie_info 
+     WHERE 
+         info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+     GROUP BY 
+         movie_id) f ON f.movie_id = c.movie_id
+WHERE 
+    kh.keyword IS NOT NULL
+GROUP BY 
+    kh.keyword
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 1
+ORDER BY 
+    Movie_Count DESC, Average_Rating DESC;

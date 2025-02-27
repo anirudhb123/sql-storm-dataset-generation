@@ -1,0 +1,45 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 1 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_analysis AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_performance AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 0
+    GROUP BY ps.ps_suppkey
+),
+lineitem_review AS (
+    SELECT l.l_orderkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    COALESCE(c.total_spent, 0) AS customer_total_spent,
+    COALESCE(sp.total_supply_cost, 0) AS supplier_total_supply_cost,
+    lr.avg_discounted_price
+FROM nation_hierarchy n
+LEFT JOIN customer_analysis c ON n.n_nationkey = c.c_custkey
+LEFT JOIN supplier_performance sp ON n.n_nationkey = sp.ps_suppkey
+LEFT JOIN lineitem_review lr ON lr.l_orderkey = (SELECT MAX(o.o_orderkey) FROM orders)
+WHERE n.level < 3
+ORDER BY n.n_name, c.c_name
+OFFSET (SELECT COUNT(*) FROM nation_hierarchy) LIMIT 10;

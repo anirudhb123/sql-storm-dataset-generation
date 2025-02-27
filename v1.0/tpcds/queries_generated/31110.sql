@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_item_sk, 
+        ss_quantity, 
+        ss_net_profit, 
+        1 AS level
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        ss.item_sk, 
+        ss.ss_quantity, 
+        ss.ss_net_profit, 
+        sh.level + 1
+    FROM 
+        store_sales AS ss
+    JOIN 
+        sales_hierarchy AS sh ON ss.ss_item_sk = sh.ss_item_sk
+    WHERE 
+        sh.level < 5
+),
+total_sales AS (
+    SELECT 
+        sh.ss_item_sk, 
+        SUM(sh.ss_quantity) AS total_quantity, 
+        SUM(sh.ss_net_profit) AS total_profit
+    FROM 
+        sales_hierarchy AS sh
+    GROUP BY 
+        sh.ss_item_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        COUNT(CASE WHEN c.c_current_addr_sk IS NOT NULL THEN 1 END) AS address_count,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    ca.ca_city, 
+    SUM(ts.total_quantity) AS total_quantity, 
+    AVG(ts.total_profit) AS avg_profit, 
+    cd.address_count, 
+    cd.customer_count
+FROM 
+    total_sales AS ts
+JOIN 
+    item AS i ON ts.ss_item_sk = i.i_item_sk
+JOIN 
+    customer AS c ON c.c_current_hdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    ca.ca_city, cd.address_count, cd.customer_count
+HAVING 
+    SUM(ts.total_quantity) > 100
+ORDER BY 
+    total_quantity DESC
+LIMIT 10;

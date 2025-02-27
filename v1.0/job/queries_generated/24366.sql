@@ -1,0 +1,79 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        CASE 
+            WHEN c.note IS NOT NULL THEN c.note 
+            ELSE 'No Special Note' 
+        END AS special_note,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id AND c.nr_order = 1
+    WHERE 
+        m.production_year IS NOT NULL
+        AND mi.info IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        special_note
+    FROM 
+        RecursiveMovieCTE
+    WHERE 
+        year_rank <= 5
+),
+KeywordCount AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+FinalResult AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.special_note,
+        kc.keyword_count,
+        CASE 
+            WHEN kc.keyword_count > 5 THEN 'Rich in Keywords'
+            ELSE 'Few Keywords'
+        END AS keyword_richness
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        KeywordCount kc ON fm.movie_id = kc.movie_id
+)
+SELECT 
+    fr.title, 
+    fr.production_year,
+    fr.special_note,
+    fr.keyword_count,
+    fr.keyword_richness,
+    COALESCE(dic.role_type, 'Unknown Role') AS lead_role
+FROM 
+    FinalResult fr
+LEFT JOIN 
+    (SELECT DISTINCT 
+        ci.movie_id,
+        rt.role AS role_type 
+     FROM 
+        cast_info ci 
+     INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+     WHERE 
+        ci.nr_order = 1) dic ON fr.movie_id = dic.movie_id
+ORDER BY 
+    fr.production_year ASC,
+    fr.keyword_count DESC NULLS LAST;

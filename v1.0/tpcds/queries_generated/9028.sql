@@ -1,0 +1,42 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        d.d_year AS sales_year,
+        d.d_month_seq AS sales_month,
+        s.s_store_name AS store_name,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq, s.s_store_name
+),
+average_sales AS (
+    SELECT 
+        sales_year,
+        sales_month,
+        MAX(total_sales) AS max_sales,
+        AVG(total_sales) AS avg_sales,
+        SUM(total_orders) AS total_orders
+    FROM 
+        aggregated_sales
+    GROUP BY 
+        sales_year, sales_month
+)
+SELECT 
+    a.sales_year,
+    a.sales_month,
+    a.max_sales,
+    a.avg_sales,
+    a.total_orders,
+    RANK() OVER (PARTITION BY a.sales_year ORDER BY a.max_sales DESC) AS sales_rank
+FROM 
+    average_sales a
+WHERE 
+    a.avg_sales > (SELECT AVG(avg_sales) FROM average_sales b WHERE a.sales_year = b.sales_year)
+ORDER BY 
+    a.sales_year, sales_rank;

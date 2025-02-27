@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS TagName
+        ) t ON true
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+PostHistoryAggregation AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MIN(ph.CreationDate) AS FirstChangeDate,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.PostHistoryTypeId
+),
+VotesSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.TagsList,
+    COALESCE(pa.HistoryCount, 0) AS HistoryCount,
+    pa.FirstChangeDate,
+    pa.LastChangeDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Scoring Post'
+        WHEN rp.ScoreRank BETWEEN 2 AND 5 THEN 'High Performer'
+        ELSE 'Needs Attention'
+    END AS PostClassification
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryAggregation pa ON rp.PostId = pa.PostId
+LEFT JOIN 
+    VotesSummary vs ON rp.PostId = vs.PostId
+WHERE 
+    rp.ViewCount IS NOT NULL 
+    AND EXISTS (SELECT 1 FROM Posts sub WHERE sub.OwnerUserId = rp.OwnerUserId AND sub.ViewCount > rp.ViewCount)
+ORDER BY 
+    rp.Score DESC,
+    rp.CommentCount DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

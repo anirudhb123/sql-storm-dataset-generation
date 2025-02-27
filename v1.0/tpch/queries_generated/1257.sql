@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+), 
+SupplierAggregates AS (
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerBalance AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    s.s_acctbal, 
+    ra.o_orderkey, 
+    ra.o_orderdate, 
+    ra.o_totalprice,
+    ca.total_spent,
+    COALESCE(sa.total_available, 0) AS available_qty,
+    CASE 
+        WHEN ca.total_spent IS NULL THEN 'No Purchases'
+        ELSE CONCAT('Spent: $', CAST(ca.total_spent AS VARCHAR(20)))
+    END AS customer_status
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN RankedOrders ra ON ra.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O' 
+    AND o.o_orderkey IN (
+        SELECT o2.o_orderkey 
+        FROM orders o2 
+        WHERE o2.o_orderdate IS NOT NULL
+    )
+)
+LEFT JOIN CustomerBalance ca ON s.s_nationkey = ca.c_custkey
+LEFT JOIN SupplierAggregates sa ON p.p_partkey = sa.ps_partkey
+WHERE (s.s_acctbal IS NOT NULL OR 1=1)
+  AND (p.p_size BETWEEN 1 AND 100 OR p.p_brand IS NULL)
+ORDER BY ra.o_orderdate DESC, s.s_name ASC;

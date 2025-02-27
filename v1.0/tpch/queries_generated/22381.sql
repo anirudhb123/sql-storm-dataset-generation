@@ -1,0 +1,74 @@
+WITH RankedSales AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS sales_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps_partkey, ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        r_name,
+        n_name,
+        s_name,
+        total_sales
+    FROM 
+        RankedSales rs
+    JOIN 
+        supplier s ON rs.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.sales_rank = 1
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT 
+        f.c_custkey,
+        f.c_name,
+        ts.s_name,
+        ts.total_sales,
+        (CASE 
+            WHEN f.total_spent IS NULL THEN 'No Orders'
+            ELSE f.total_spent 
+        END) AS spending_status,
+        COALESCE(f.total_spent, 0) AS normalized_spending
+    FROM 
+        FilteredCustomers f
+    FULL OUTER JOIN 
+        TopSuppliers ts ON f.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c WHERE c.c_nationkey IN (1, 2) AND f.total_spent IS NOT NULL)
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(fr.normalized_spending), 0) AS total_normalized_spending,
+    COUNT(DISTINCT fr.c_custkey) AS customer_count
+FROM 
+    region r
+LEFT JOIN 
+    FinalReport fr ON r.r_regionkey = (CASE WHEN fr.s_name IS NOT NULL THEN 1 ELSE 2 END)  -- Emulating a bizarre condition
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(fr.c_custkey) > 5 OR MAX(fr.total_normalized_spending) > 1000
+ORDER BY 
+    total_normalized_spending DESC, r.r_name ASC;

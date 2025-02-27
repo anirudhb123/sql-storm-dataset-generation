@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (
+            SELECT MAX(d.d_date_sk) 
+            FROM date_dim d 
+            WHERE d.d_year = 2023
+        )
+),
+TotalSales AS (
+    SELECT 
+        rs.ws_item_sk, 
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales_value,
+        COUNT(rs.ws_order_number) AS order_count
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        rs.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.total_sales_value,
+        ts.order_count,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.return_count, 0) AS return_count
+    FROM 
+        TotalSales ts
+    LEFT JOIN 
+        CustomerReturns cr ON ts.ws_item_sk = cr.sr_item_sk
+)
+SELECT 
+    s.warehouse,
+    sw.store_name,
+    sw.total_sales_value,
+    sw.order_count,
+    sw.total_returned,
+    sw.return_count,
+    CASE 
+        WHEN sw.total_sales_value = 0 THEN 0 
+        ELSE (sw.total_returned::decimal / sw.total_sales_value) * 100 
+    END AS return_percentage
+FROM 
+    SalesWithReturns sw
+JOIN 
+    inventory i ON sw.ws_item_sk = i.inv_item_sk
+JOIN 
+    warehouse s ON i.inv_warehouse_sk = s.w_warehouse_sk
+WHERE 
+    sw.total_sales_value > 0
+ORDER BY 
+    return_percentage DESC;

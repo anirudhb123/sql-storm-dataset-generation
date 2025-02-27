@@ -1,0 +1,74 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY CHAR_LENGTH(t.title) DESC) AS title_length_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyAndMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mi.info) AS total_movie_info,
+        SUM(CASE WHEN m.production_year IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_year
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    LEFT JOIN 
+        aka_title m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+TopCasting AS (
+    SELECT 
+        c.movie_id,
+        ka.name AS actor_name,
+        rc.role AS role_name,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ka ON c.person_id = ka.person_id
+    JOIN 
+        role_type rc ON c.role_id = rc.id
+    WHERE 
+        c.nr_order IS NOT NULL
+)
+SELECT 
+    t.title,
+    t.production_year,
+    cmi.company_name,
+    cmi.company_type,
+    cmi.total_movie_info,
+    COALESCE(tc.actor_name, 'Unknown Actor') AS actor_name,
+    tc.role_name,
+    CASE 
+        WHEN cmi.movies_with_year > 0 THEN 'Movies with year info'
+        ELSE 'No year information'
+    END AS year_info_status,
+    CASE 
+        WHEN t.title_length_rank <= 5 THEN 'Top 5 longest titles'
+        ELSE 'Longer titles'
+    END AS title_length_category
+FROM 
+    RankedTitles t
+LEFT JOIN 
+    CompanyAndMovieInfo cmi ON t.title_id = cmi.movie_id
+LEFT JOIN 
+    TopCasting tc ON t.title_id = tc.movie_id AND tc.actor_rank <= 3
+WHERE 
+    t.title IS NOT NULL
+    AND (cmi.total_movie_info > 1 OR cmi.company_type LIKE '%Production%')
+ORDER BY 
+    t.production_year DESC, cmi.total_movie_info DESC NULLS LAST;

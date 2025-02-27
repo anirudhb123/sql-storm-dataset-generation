@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_rank AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band_sk,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+), 
+return_summary AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt 
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+final_results AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_amt, 0) AS total_return_amt,
+        SUM(ci.total_orders) AS order_count,
+        SUM(CASE WHEN sr.return_quantity > 0 THEN 1 ELSE 0 END) AS positive_returns,
+        SUM(CASE WHEN sr.return_quantity IS NULL THEN 1 ELSE 0 END) AS null_returns,
+        ARRAY_AGG(DISTINCT item.i_item_desc) FILTER (WHERE item.i_item_sk IN (SELECT ws_item_sk FROM sales_rank WHERE price_rank <= 5)) AS top_items
+    FROM customer_info ci
+    LEFT JOIN return_summary rs ON ci.c_customer_sk = rs.sr_customer_sk
+    LEFT JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN item ON ws.ws_item_sk = item.i_item_sk
+    LEFT JOIN store_returns sr ON ci.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        ci.c_customer_sk, 
+        ci.c_first_name, 
+        ci.c_last_name, 
+        ci.cd_gender, 
+        rs.total_returns, 
+        rs.total_return_amt
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_gender,
+    fr.total_returns,
+    fr.total_return_amt,
+    fr.order_count,
+    fr.positive_returns,
+    fr.null_returns,
+    (fr.total_returns * 100.0 / NULLIF(fr.order_count, 0)) AS return_rate,
+    fr.top_items
+FROM final_results fr
+WHERE fr.order_count > 0
+AND fr.total_returns > 0
+ORDER BY fr.return_rate DESC
+LIMIT 100;

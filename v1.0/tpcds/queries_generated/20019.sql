@@ -1,0 +1,73 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+PositiveReturns AS (
+    SELECT 
+        r1.sr_item_sk,
+        SUM(r1.sr_return_quantity) AS total_returns,
+        SUM(r1.sr_return_amt) AS total_return_amount,
+        AVG(r1.sr_return_tax) AS average_tax
+    FROM 
+        RankedReturns r1
+    GROUP BY 
+        r1.sr_item_sk
+    HAVING 
+        SUM(r1.sr_return_quantity) > (SELECT AVG(r2.sr_return_quantity) FROM RankedReturns r2)
+),
+WebSalesWithReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        COALESCE(pr.total_returns, 0) AS returns_count,
+        COALESCE(pr.total_return_amount, 0) AS returns_amount
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        PositiveReturns pr ON ws.ws_item_sk = pr.sr_item_sk
+    WHERE 
+        ws.ws_sales_price > 0
+    GROUP BY 
+        ws.ws_item_sk, pr.total_returns, pr.total_return_amount
+),
+FinalStats AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(ws.total_sold, 0) AS total_sold,
+        COALESCE(ws.returns_count, 0) AS total_returns,
+        COALESCE(ws.returns_amount, 0) AS total_returns_amount,
+        (COALESCE(ws.total_sold, 0) - COALESCE(ws.returns_count, 0)) AS net_sales,
+        CASE 
+            WHEN COALESCE(ws.total_sold, 0) = 0 THEN NULL
+            ELSE (COALESCE(ws.returns_amount, 0) / NULLIF(ws.total_sold, 0)) * 100 
+        END AS return_rate
+    FROM 
+        web_sales_with_returns ws
+    JOIN 
+        item ON ws.ws_item_sk = item.i_item_sk
+)
+SELECT 
+    fs.i_item_id,
+    fs.i_item_desc,
+    fs.total_sold,
+    fs.total_returns,
+    fs.total_returns_amount,
+    fs.net_sales,
+    fs.return_rate
+FROM 
+    FinalStats fs
+WHERE 
+    fs.return_rate > 10 
+ORDER BY 
+    fs.return_rate DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

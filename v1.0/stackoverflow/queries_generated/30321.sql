@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopens,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(ph.Id) AS TotalEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopUserPosts AS (
+    SELECT 
+        up.UserId,
+        up.SurfaceDivision,
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Rank
+    FROM 
+        UserPerformance up
+    JOIN 
+        RankedPosts rp ON rp.Rank <= 5  -- Top 5 posts per type
+    ORDER BY 
+        up.Reputation DESC
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    SUM(COALESCE(TopUserPosts.Score, 0)) AS TotalScore,
+    COUNT(DISTINCT TopUserPosts.PostId) AS NumberOfTopPosts,
+    phs.CloseReopens,
+    phs.LastEditDate,
+    phs.TotalEdits
+FROM 
+    UserPerformance u
+LEFT JOIN 
+    TopUserPosts ON TopUserPosts.UserId = u.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId = TopUserPosts.PostId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, phs.CloseReopens, phs.LastEditDate
+HAVING 
+    SUM(COALESCE(TopUserPosts.Score, 0)) > 0
+ORDER BY 
+    TotalScore DESC
+LIMIT 10;

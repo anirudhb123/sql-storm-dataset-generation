@@ -1,0 +1,56 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey
+    FROM nation n
+    JOIN nation_hierarchy nh ON nh.n_regionkey = n.n_nationkey
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+lineitem_analysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        MIN(l.l_shipdate) AS first_shipdate,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ss.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    COALESCE(la.net_revenue, 0) AS order_net_revenue,
+    COALESCE(cus.total_orders, 0) AS customer_orders_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_line_items,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY la.net_revenue DESC) AS revenue_rank
+FROM nation_hierarchy ns
+LEFT JOIN supplier_summary ss ON ns.n_nationkey = ss.s_suppkey
+LEFT JOIN customer_order_summary cus ON ss.s_suppkey = cus.c_custkey
+LEFT JOIN lineitem_analysis la ON cus.c_custkey = la.l_orderkey
+LEFT JOIN lineitem l ON la.l_orderkey = l.l_orderkey
+WHERE ss.total_avail_qty > 0
+GROUP BY ns.n_name, ss.s_name, cs.c_name, la.net_revenue, cus.total_orders
+ORDER BY ns.n_name, revenue_rank;

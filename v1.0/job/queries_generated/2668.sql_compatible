@@ -1,0 +1,78 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+CastSummary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT pa.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name pa ON ci.person_id = pa.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        cs.total_cast,
+        cs.cast_names,
+        mc.company_names,
+        mc.company_types
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastSummary cs ON rt.title_id = cs.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rt.title_id = mc.movie_id
+    WHERE 
+        rt.title_rank <= 5  
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(fm.cast_names, 'No Cast') AS cast_list,
+    COALESCE(fm.company_names, 'No Companies') AS company_list,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN mi.info END) AS budget
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.title_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON fm.title_id = mi.movie_id
+WHERE 
+    (fm.production_year IS NOT NULL OR fm.production_year BETWEEN 2000 AND 2020) 
+    AND (mi.info IS NOT NULL OR mi.note IS NULL)
+GROUP BY 
+    fm.title, fm.production_year, fm.cast_names, fm.company_names
+ORDER BY 
+    fm.production_year DESC, keyword_count DESC;

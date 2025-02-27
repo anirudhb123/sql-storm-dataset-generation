@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS movie_count,
+        COALESCE((SELECT p.info FROM person_info p WHERE p.info_type_id = (SELECT id FROM info_type WHERE info = 'bio') AND p.person_id = ca.person_id FETCH FIRST 1 ROW ONLY), 'N/A') AS person_bio
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ca ON ca.movie_id = at.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MovieWithJointRoles AS (
+    SELECT 
+        am.title, 
+        ca.person_id,
+        STRING_AGG(DISTINCT rt.role, ', ' ORDER BY rt.role) AS roles,
+        COUNT(ca.role_id) AS role_count
+    FROM 
+        dirty_movie am
+    JOIN 
+        cast_info ca ON ca.movie_id = am.movie_id
+    JOIN 
+        role_type rt ON rt.id = ca.role_id
+    GROUP BY 
+        am.title, ca.person_id
+),
+RecentMovies AS (
+    SELECT 
+        title, 
+        production_year,
+        movie_count,
+        rn
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5 AND movie_count > 10
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    mwj.roles,
+    ci.company_names,
+    ci.company_count,
+    CASE 
+      WHEN ci.company_count > 5 THEN 'High'
+      WHEN ci.company_count BETWEEN 3 AND 5 THEN 'Medium'
+      ELSE 'Low'
+    END AS company_engagement,
+    COALESCE(mw.person_bio, 'Not available') AS person_bio,
+    CASE 
+      WHEN rm.title LIKE '%(200%' THEN 'Special Release'
+      ELSE 'Regular Release'
+    END AS release_type,
+    DENSE_RANK() OVER (ORDER BY rm.production_year DESC) AS year_rank
+FROM 
+    RecentMovies rm
+LEFT JOIN 
+    MovieWithJointRoles mwj ON mwj.title = rm.title
+LEFT JOIN 
+    CompanyInfo ci ON ci.movie_id = rm.movie_id
+LEFT JOIN 
+    aka_name an ON an.person_id = mwj.person_id
+WHERE 
+    rm.production_year < (SELECT AVG(production_year) FROM aka_title)
+    OR mwj.roles LIKE '%Director%'
+ORDER BY 
+    rm.production_year DESC, 
+    mwj.role_count DESC;

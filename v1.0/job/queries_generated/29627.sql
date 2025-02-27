@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank_within_year
+    FROM 
+        title m
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        m.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_within_year <= 5
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        a.gender,
+        COUNT(DISTINCT cc.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    WHERE 
+        cc.status_id = 1 -- assuming status_id = 1 indicates that the actor is active
+    GROUP BY 
+        a.id
+)
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    ad.name AS actor_name,
+    ad.gender,
+    ad.total_movies
+FROM 
+    TopMovies tm
+JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+JOIN 
+    aka_name ad ON ci.person_id = ad.person_id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title, 
+    ad.name;

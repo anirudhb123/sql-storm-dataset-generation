@@ -1,0 +1,63 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk,
+        ws.order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws_sales_price DESC) AS rank,
+        ws.sales_price,
+        ws.ext_discount_amt,
+        COALESCE(ws.net_paid_inc_tax, 0) AS net_paid,
+        ws.quantity,
+        DATEADD(day, 7, d.date) AS ship_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.year >= 2000 AND d.month_seq BETWEEN 1 AND 12
+),
+AggregatedReturns AS (
+    SELECT 
+        cr.item_sk,
+        SUM(cr.return_quantity) AS total_returns,
+        SUM(cr.return_amt) AS total_return_amt,
+        COUNT(DISTINCT cr.order_number) AS return_count
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr.item_sk
+),
+SalesReturns AS (
+    SELECT 
+        r.item_sk,
+        r.rank,
+        r.sales_price,
+        COALESCE(ar.total_returns, 0) AS total_returns,
+        COALESCE(ar.total_return_amt, 0) AS total_return_amt,
+        r.net_paid
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        AggregatedReturns ar ON r.item_sk = ar.item_sk
+)
+SELECT 
+    CASE 
+        WHEN sr.total_returns > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    AVG(sr.sales_price) AS avg_sales_price,
+    SUM(sr.net_paid) AS total_net_paid,
+    SUM(sr.total_return_amt) AS total_returned_amt,
+    COUNT(*) AS involved_sales
+FROM 
+    SalesReturns sr
+WHERE 
+    sr.rank = 1
+    AND sr.net_paid > 0
+GROUP BY 
+    return_status
+HAVING 
+    COUNT(*) > (SELECT COUNT(*) / 10 FROM SalesReturns) 
+ORDER BY 
+    total_net_paid DESC

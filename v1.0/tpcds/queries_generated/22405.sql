@@ -1,0 +1,91 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        RANK() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales,
+        COALESCE(SUM(sr.returned_value), 0) AS total_returns,
+        COALESCE(COUNT(DISTINCT ws.ws_order_number), 0) AS order_count,
+        (CASE 
+            WHEN COUNT(DISTINCT ws.ws_order_number) > 0 THEN ROUND((COALESCE(SUM(ws.ws_sales_price), 0) - COALESCE(SUM(sr.returned_value), 0)) / COUNT(DISTINCT ws.ws_order_number), 2) 
+            ELSE 0 
+        END) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN (
+        SELECT 
+            sr_customer_sk,
+            SUM(sr_return_amt_inc_tax) AS returned_value
+        FROM 
+            store_returns
+        GROUP BY 
+            sr_customer_sk
+    ) sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, ca.ca_city, ca.ca_state
+    HAVING 
+        (total_sales - total_returns) > 100
+    ORDER BY 
+        total_sales DESC
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    ci.ca_state,
+    ci.total_sales,
+    ci.total_returns,
+    ci.order_count,
+    ci.avg_order_value,
+    rr.total_return_quantity,
+    (CASE 
+        WHEN rr.return_rank = 1 THEN 'Top Returner' 
+        ELSE 'Regular Returner' 
+    END) AS returner_type
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    RankedReturns rr ON ci.c_customer_id = rr.sr_customer_sk
+WHERE 
+    ci.cd_gender IS NOT NULL
+    AND (ci.total_sales + ci.total_returns) IS NOT NULL
+    AND ci.order_count > 0
+UNION ALL
+SELECT 
+    'Unknown' AS c_customer_id,
+    NULL AS cd_gender,
+    NULL AS cd_marital_status,
+    ca.ca_city,
+    ca.ca_state,
+    0 AS total_sales,
+    0 AS total_returns,
+    0 AS order_count,
+    0 AS avg_order_value,
+    0 AS total_return_quantity,
+    'No Returns' AS returner_type
+FROM 
+    customer_address ca
+WHERE 
+    NOT EXISTS (SELECT 1 FROM CustomerInfo ci WHERE ci.ca_city = ca.ca_city)
+ORDER BY 
+    total_sales DESC NULLS LAST;

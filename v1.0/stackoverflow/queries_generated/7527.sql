@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        pt.TagName,
+        rp.PostRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PopularTags pt ON pt.TagPostCount > 0
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.TagName,
+    pd.PostRank
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PostRank <= 10
+ORDER BY 
+    pd.PostRank, pd.Score DESC;

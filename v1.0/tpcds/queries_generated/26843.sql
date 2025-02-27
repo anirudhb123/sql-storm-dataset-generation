@@ -1,0 +1,50 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+AggregateData AS (
+    SELECT 
+        city,
+        state,
+        COUNT(*) AS customer_count,
+        AVG(purchase_estimate) AS avg_purchase_estimate,
+        MIN(purchase_estimate) AS min_purchase_estimate,
+        MAX(purchase_estimate) AS max_purchase_estimate,
+        STRING_AGG(DISTINCT gender) AS genders,
+        STRING_AGG(DISTINCT marital_status) AS marital_statuses,
+        STRING_AGG(DISTINCT education_status) AS education_statuses
+    FROM 
+        CustomerDetails
+    GROUP BY 
+        city, state
+)
+SELECT 
+    city,
+    state,
+    customer_count,
+    avg_purchase_estimate,
+    min_purchase_estimate,
+    max_purchase_estimate,
+    SPLIT_PART(genders, ',', 1) AS primary_gender,
+    SPLIT_PART(marital_statuses, ',', 1) AS primary_marital_status,
+    SPLIT_PART(education_statuses, ',', 1) AS primary_education_status
+FROM 
+    AggregateData
+WHERE 
+    customer_count > 10
+ORDER BY 
+    city, state;

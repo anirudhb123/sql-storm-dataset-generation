@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        unnest(string_to_array(Tags, '><'))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ut.TagName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    CASE 
+        WHEN rp.Score > 5 THEN 'Very Popular'
+        WHEN rp.Score BETWEEN 1 AND 5 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN PopularTags ut ON rp.PostId IN (
+    SELECT p.Id 
+    FROM Posts p 
+    WHERE p.Tags LIKE CONCAT('%', ut.TagName, '%')
+)
+LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC;

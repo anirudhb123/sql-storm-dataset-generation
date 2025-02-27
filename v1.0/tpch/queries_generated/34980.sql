@@ -1,0 +1,94 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.order_level + 1
+    FROM 
+        orders o
+    INNER JOIN OrderHierarchy oh ON o.o_custkey = oh.o_orderkey
+    WHERE 
+        oh.order_level < 5
+),
+LineitemTotals AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        COUNT(p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.avg_acctbal,
+        ss.part_count,
+        ROW_NUMBER() OVER (ORDER BY ss.avg_acctbal DESC) as rn
+    FROM 
+        supplier s
+    INNER JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey 
+    WHERE 
+        ss.avg_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    oh.o_orderdate,
+    lt.total_revenue,
+    ts.s_name AS supplier_name,
+    ts.avg_acctbal,
+    ts.part_count
+FROM 
+    CustomerOrders co
+LEFT JOIN OrderHierarchy oh ON co.order_count = oh.order_level
+LEFT JOIN LineitemTotals lt ON co.c_custkey = lt.l_orderkey
+LEFT JOIN TopSuppliers ts ON co.order_count >= 3
+WHERE 
+    (co.total_spent IS NULL OR co.total_spent > 1000)
+    AND (co.order_count > 0 AND (co.total_spent IS NOT NULL AND lt.total_revenue IS NOT NULL))
+ORDER BY 
+    co.c_name, lt.total_revenue DESC;

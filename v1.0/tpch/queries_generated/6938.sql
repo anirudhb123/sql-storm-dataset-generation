@@ -1,0 +1,33 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(*) AS top_supplier_count,
+        SUM(rs.total_supply_value) AS total_supply_value_by_region
+    FROM region r
+    JOIN RankedSuppliers rs ON r.r_regionkey = rs.nation
+    WHERE rs.supply_rank <= 3
+    GROUP BY r.r_name
+)
+SELECT 
+    region_name,
+    top_supplier_count,
+    total_supply_value_by_region,
+    CASE 
+        WHEN total_supply_value_by_region > 1000000 THEN 'High Value'
+        WHEN total_supply_value_by_region BETWEEN 500000 AND 1000000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS supply_value_category
+FROM TopSuppliers
+ORDER BY total_supply_value_by_region DESC;

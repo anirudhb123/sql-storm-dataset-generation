@@ -1,0 +1,78 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_city ORDER BY cd.cd_purchase_estimate DESC) AS city_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+high_value_customers AS (
+    SELECT 
+        c_info.c_customer_id,
+        c_info.c_first_name,
+        c_info.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer_info c_info
+    LEFT JOIN 
+        web_sales ws ON c_info.c_customer_id = ws.ws_bill_customer_sk 
+    GROUP BY 
+        c_info.c_customer_id, c_info.c_first_name, c_info.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) > (
+            SELECT 
+                AVG(total_profit)
+            FROM (
+                SELECT 
+                    SUM(ws2.ws_net_profit) AS total_profit
+                FROM 
+                    web_sales ws2
+                GROUP BY 
+                    ws2.ws_bill_customer_sk
+            ) AS avg_profit)
+),
+orders_analysis AS (
+    SELECT 
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_items_ordered,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_month_seq IN (1, 2, 3)
+        )
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.ca_city,
+    c.ca_state,
+    COALESCE(cvc.total_profit, 0) AS customer_profit,
+    oa.total_orders,
+    oa.total_items_ordered,
+    oa.total_sales
+FROM 
+    customer_info c
+LEFT JOIN 
+    high_value_customers cvc ON c.c_customer_id = cvc.c_customer_id
+CROSS JOIN 
+    orders_analysis oa
+WHERE 
+    c.city_rank = 1
+ORDER BY 
+    customer_profit DESC, c.c_last_name ASC;

@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        c.person_id,
+        RANK() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS role_rank,
+        t.production_year,
+        tk.keyword AS movie_keyword
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword tk ON mk.keyword_id = tk.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+),
+DirectorInfo AS (
+    SELECT 
+        p.person_id,
+        p.name,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM 
+        person_info pi
+    JOIN 
+        aka_name p ON pi.person_id = p.person_id
+    JOIN 
+        movie_companies mc ON p.person_id = mc.company_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+    GROUP BY 
+        p.person_id, p.name
+),
+FinalOutput AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        di.name AS director_name, 
+        di.movie_count,
+        COALESCE(rm.movie_keyword, 'No Keyword') AS keyword_used
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DirectorInfo di ON rm.person_id = di.person_id
+    WHERE 
+        di.movie_count > 5 OR di.movie_count IS NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN director_name IS NULL THEN 'Independent Movie'
+        ELSE 'Studio Movie'
+    END AS movie_type
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, director_name ASC;

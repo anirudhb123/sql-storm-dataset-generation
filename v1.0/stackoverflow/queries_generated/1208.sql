@@ -1,0 +1,51 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        MAX(P.CreationDate) AS LastActiveDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        TotalScore,
+        AverageViews,
+        LastActiveDate,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY QuestionCount DESC) AS QuestionRank
+    FROM UserStats
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        C.UserDisplayName AS CommentAuthor,
+        C.Text AS CommentText,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY C.CreationDate DESC) AS CommentRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    TU.DisplayName,
+    TU.QuestionCount,
+    TU.TotalScore,
+    TU.AverageViews,
+    COALESCE(RP.Title, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(RP.CommentAuthor, 'No Comments') AS LastCommentAuthor,
+    COALESCE(RP.CommentText, 'No Comments') AS LastCommentText
+FROM TopUsers TU
+LEFT JOIN RecentPosts RP ON TU.UserId = RP.PostId
+WHERE TU.ScoreRank <= 10 OR TU.QuestionRank <= 10
+ORDER BY TU.TotalScore DESC, TU.QuestionCount DESC
+FETCH FIRST 20 ROWS ONLY;

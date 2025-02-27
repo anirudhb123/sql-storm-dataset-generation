@@ -1,0 +1,52 @@
+-- Performance benchmarking query for Stack Overflow schema
+WITH UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        u.VIEWS,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.Reputation, u.CreationDate, u.Views
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.CommentCount,
+        p.AnswerCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.CommentCount, p.AnswerCount
+)
+SELECT
+    u.UserId,
+    u.Reputation,
+    u.CreationDate,
+    u.ViewCount AS UserViews,
+    u.PostCount AS UserPostCount,
+    u.TotalScore AS UserTotalScore,
+    u.TotalViews AS UserTotalViews,
+    u.TotalBounty AS UserTotalBounty,
+    p.PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.Score AS PostScore,
+    p.ViewCount AS PostViewCount,
+    p.CommentCount AS PostCommentCount,
+    p.AnswerCount AS PostAnswerCount,
+    p.VoteCount AS PostVoteCount
+FROM UserStats u
+JOIN PostStats p ON u.UserId = p.OwnerUserId
+ORDER BY u.TotalScore DESC, p.Score DESC;

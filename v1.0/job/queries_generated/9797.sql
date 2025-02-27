@@ -1,0 +1,30 @@
+SELECT 
+    akn.name AS aka_name,
+    ttl.title AS movie_title,
+    cnt.name AS company_name,
+    cst.kind AS cast_role,
+    minfo.info AS movie_info,
+    COUNT(mk.id) AS keyword_count
+FROM 
+    aka_name akn
+JOIN 
+    cast_info cst ON akn.person_id = cst.person_id
+JOIN 
+    complete_cast cct ON cst.movie_id = cct.movie_id
+JOIN 
+    title ttl ON cct.movie_id = ttl.id
+JOIN 
+    movie_companies mcom ON ttl.id = mcom.movie_id
+JOIN 
+    company_name cnt ON mcom.company_id = cnt.id
+LEFT JOIN 
+    movie_info minfo ON ttl.id = minfo.movie_id
+LEFT JOIN 
+    movie_keyword mk ON ttl.id = mk.movie_id
+WHERE 
+    ttl.production_year BETWEEN 2000 AND 2023
+    AND cnt.country_code = 'USA'
+GROUP BY 
+    akn.name, ttl.title, cnt.name, cst.kind, minfo.info
+ORDER BY 
+    keyword_count DESC, ttl.title ASC;

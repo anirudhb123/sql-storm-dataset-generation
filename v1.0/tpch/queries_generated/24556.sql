@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(NULLIF(SUBSTRING_INDEX(p.p_comment, ' ', 1), ''), 'UNKNOWN') AS first_word,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_comment
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        CASE 
+            WHEN n.n_regionkey IS NULL THEN 'UNKNOWN'
+            WHEN n.n_name IS NOT NULL THEN n.n_name
+            ELSE 'NAME MISSING'
+        END AS nation_name
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrdersWithDiscounts AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_discount) AS total_discount,
+        CASE 
+            WHEN SUM(l.l_discount) > 0 THEN 'DISCOUNTED'
+            ELSE 'REGULAR'
+        END AS order_type
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    nd.nation_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    SUM(fp.supplier_count) AS total_parts_supplied,
+    AVG(owd.o_totalprice) AS avg_order_value,
+    STRING_AGG(DISTINCT fp.first_word, ', ') AS distinct_first_words
+FROM 
+    RankedSuppliers rs
+JOIN 
+    NationDetails nd ON rs.s_suppkey = nd.n_nationkey
+LEFT JOIN 
+    FilteredParts fp ON fp.supplier_count > 0
+LEFT JOIN 
+    OrdersWithDiscounts owd ON rs.s_suppkey = owd.o_orderkey
+WHERE 
+    nd.n_name IS NOT NULL OR nd.n_regionkey IS NULL
+GROUP BY 
+    nd.nation_name
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 5
+ORDER BY 
+    avg_order_value DESC, supplier_count ASC;

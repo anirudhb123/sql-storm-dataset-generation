@@ -1,0 +1,88 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(u.Reputation) OVER(PARTITION BY CASE 
+            WHEN u.Reputation > 1000 THEN 'High'
+            WHEN u.Reputation > 100 THEN 'Medium'
+            ELSE 'Low' END) AS AvgReputationGroup
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounties,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ROW_NUMBER() OVER(ORDER BY ua.TotalBounties DESC) AS Rank
+    FROM 
+        UserActivity ua
+    JOIN 
+        PostStats ps ON ua.TotalPosts > 0
+    WHERE 
+        ua.TotalComments > 5
+)
+SELECT 
+    au.DisplayName,
+    au.TotalBounties,
+    au.TotalPosts,
+    au.TotalComments,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    CASE 
+        WHEN au.TotalBounties > 100 THEN 'Expert'
+        WHEN au.TotalBounties > 50 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel,
+    MAX(ps.ViewCount) OVER() AS MaxPostViews,
+    ROW_NUMBER() OVER(ORDER BY au.TotalComments DESC) AS CommentRank,
+    AVG(ua.AvgReputationGroup) OVER() AS GlobalAvgReputation
+FROM 
+    ActiveUsers au
+JOIN 
+    PostStats ps ON au.TotalPosts > ps.CommentCount
+WHERE 
+    ps.CommentCount > 0
+ORDER BY 
+    au.Rank, au.TotalComments DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;
+

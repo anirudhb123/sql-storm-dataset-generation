@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year > 2000 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank,
+        COUNT(c.person_id) AS cast_count
+    FROM MovieHierarchy m
+    LEFT JOIN cast_info c ON m.movie_id = c.movie_id
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(genre_counts.genre_count, 0) AS genre_count
+    FROM RankedMovies rm
+    LEFT JOIN (
+        SELECT 
+            mt.id AS movie_id,
+            COUNT(DISTINCT kt.keyword) AS genre_count
+        FROM aka_title mt
+        JOIN movie_keyword mk ON mt.id = mk.movie_id
+        JOIN keyword kt ON mk.keyword_id = kt.id
+        GROUP BY mt.id
+    ) genre_counts ON rm.movie_id = genre_counts.movie_id
+    WHERE rm.rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    CASE 
+        WHEN tm.genre_count > 5 THEN 'Diverse Genres'
+        ELSE 'Limited Genres'
+    END AS genre_diversity,
+    CASE 
+        WHEN tm.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(tm.production_year AS VARCHAR) 
+    END AS year_display,
+    SUBSTR(tm.title, 1, 20) AS short_title
+FROM TopMovies tm
+ORDER BY tm.production_year DESC, tm.cast_count DESC
+LIMIT 10;

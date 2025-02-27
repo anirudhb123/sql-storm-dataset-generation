@@ -1,0 +1,99 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation > 2000 THEN 'High'
+            WHEN u.Reputation > 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users u
+),
+PostActions AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) AS ActionCount,
+        STRING_AGG(DISTINCT COALESCE(ph.Comment, 'No Comment'), '; ') AS ActionComments
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        UserReputation ur
+    JOIN 
+        Posts p ON ur.UserId = p.OwnerUserId
+    GROUP BY 
+        ur.UserId, ur.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        ru.Reputation,
+        pa.ActionCount,
+        pa.ActionComments,
+        tu.PostCount,
+        tu.TotalScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostActions pa ON rp.PostId = pa.PostId
+    LEFT JOIN 
+        UserReputation ru ON rp.OwnerUserId = ru.UserId
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.UserId
+    WHERE 
+        rp.UserRank <= 3
+)
+
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    COALESCE(f.CommentCount, 0) AS TotalComments,
+    COALESCE(f.Reputation, 0) AS UserReputation,
+    COALESCE(f.ActionCount, 0) AS TotalActions,
+    COALESCE(f.ActionComments, 'No Actions') AS ActionDetails,
+    COALESCE(f.PostCount, 0) AS UserPostCount,
+    COALESCE(f.TotalScore, 0) AS UserTotalScore
+FROM 
+    FinalResults f
+WHERE 
+    f.Score > 10 
+    AND (f.Reputation IS NULL OR f.ReputationLevel = 'High')
+ORDER BY 
+    f.Score DESC, 
+    f.UserPostCount DESC 
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

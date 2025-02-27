@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS post_id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS owner_display_name,
+        p.Tags,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS comment_count,
+        SUM(v.VoteTypeId = 2) AS upvote_count,
+        SUM(v.VoteTypeId = 3) AS downvote_count,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS tag_rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*, 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS tag_names
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostsTags pt ON rp.post_id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        rp.tag_rank <= 5 
+    GROUP BY 
+        rp.post_id, rp.Title, rp.Body, rp.CreationDate, rp.OwnerUserId, rp.owner_display_name, rp.Tags, rp.Score
+)
+SELECT 
+    fp.post_id,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.owner_display_name,
+    fp.tag_names,
+    fp.Score,
+    fp.comment_count,
+    fp.upvote_count,
+    fp.downvote_count,
+    CASE 
+        WHEN fp.Score >= 10 THEN 'Popular'
+        WHEN fp.Score >= 5 THEN 'Moderate'
+        ELSE 'Less Popular' 
+    END AS popularity_category
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.comment_count > 5 
+ORDER BY 
+    fp.Score DESC,
+    fp.CreationDate DESC
+LIMIT 50;

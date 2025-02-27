@@ -1,0 +1,88 @@
+WITH RECURSIVE price_history AS (
+    SELECT 
+        i_item_sk,
+        i_current_price,
+        ROW_NUMBER() OVER (PARTITION BY i_item_sk ORDER BY i_rec_start_date DESC) AS rn
+    FROM 
+        item
+    WHERE 
+        i_rec_start_date < cast('2002-10-01' as date)
+),
+top_customers AS (
+    SELECT 
+        c_customer_sk,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY 
+        c_customer_sk
+    HAVING 
+        total_profit > (SELECT AVG(total_profit) FROM (
+            SELECT 
+                SUM(ws_net_profit) AS total_profit 
+            FROM 
+                web_sales 
+            GROUP BY 
+                ws_ship_customer_sk
+        ) AS avg_profit)
+),
+inventory_status AS (
+    SELECT 
+        inv_date_sk,
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory
+    GROUP BY 
+        inv_date_sk, inv_item_sk
+),
+day_of_week AS (
+    SELECT 
+        d_dow,
+        COUNT(*) AS total_sales
+    FROM 
+        date_dim dd
+    JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d_dow
+),
+extended_profit AS (
+    SELECT 
+        t.total_profit,
+        CASE 
+            WHEN t.total_profit IS NULL THEN 'No Profit'
+            WHEN t.total_profit > 10000 THEN 'High Profit'
+            ELSE 'Moderate Profit'
+        END AS profit_category
+    FROM 
+        top_customers t
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(ws.ws_net_profit) AS total_web_profit,
+    (SELECT AVG(i_current_price) FROM price_history WHERE rn = 1) AS avg_latest_price,
+    (SELECT SUM(total_quantity) FROM inventory_status WHERE inv_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price < 20)) AS low_price_inventory,
+    (SELECT MAX(total_sales) FROM day_of_week) AS max_sales_day,
+    e.profit_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    extended_profit e ON c.c_customer_sk = e.c_customer_sk
+WHERE 
+    ca.ca_country IS NOT NULL 
+    AND (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+GROUP BY 
+    ca.ca_city, ca.ca_state, e.profit_category
+ORDER BY 
+    total_web_profit DESC, ca.ca_city;

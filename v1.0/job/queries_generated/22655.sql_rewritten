@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        COALESCE(mt.linked_movie_id, 0) AS linked_movie_id,
+        1 AS level
+    FROM title m
+    LEFT JOIN movie_link mt ON m.id = mt.movie_id
+    WHERE m.production_year BETWEEN 1990 AND 2020
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        mt.linked_movie_id,
+        level + 1
+    FROM title m
+    JOIN MovieHierarchy mh ON mh.linked_movie_id = m.id
+    LEFT JOIN movie_link mt ON m.id = mt.movie_id
+),
+
+FilteredMovies AS (
+    
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        STRING_AGG(DISTINCT co.name, ', ') AS production_companies,
+        CASE WHEN COUNT(DISTINCT ci.person_id) > 5 THEN 'Ensemble Cast' ELSE 'Small Cast' END AS cast_size
+    FROM MovieHierarchy mv
+    LEFT JOIN complete_cast cc ON mv.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN movie_companies mc ON mv.movie_id = mc.movie_id
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    WHERE co.country_code IS NOT NULL
+    GROUP BY mv.movie_id, mv.title
+),
+
+RankedMovies AS (
+    
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.num_cast_members,
+        fm.production_companies,
+        fm.cast_size,
+        RANK() OVER (PARTITION BY fm.cast_size ORDER BY fm.num_cast_members DESC) AS rank_within_cast_size,
+        LEAD(fm.num_cast_members, 1, 0) OVER (ORDER BY fm.num_cast_members DESC) AS next_movie_cast_size
+    FROM FilteredMovies fm
+)
+
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.num_cast_members,
+    rm.production_companies,
+    rm.cast_size,
+    rm.rank_within_cast_size,
+    Case 
+        WHEN rm.rank_within_cast_size > 5 THEN 'Top Performer' 
+        ELSE 'Needs Improvement' 
+    END AS performance_category,
+    CASE 
+        WHEN rm.next_movie_cast_size IS NULL THEN 'No subsequent movie'
+        WHEN rm.num_cast_members IS NULL THEN 'No cast information available'
+        ELSE 'Upcoming Movie Cast Size: ' || rm.next_movie_cast_size 
+    END AS next_movie_info
+FROM RankedMovies rm
+RIGHT OUTER JOIN title t ON rm.movie_id = t.id
+WHERE (rm.num_cast_members IS NOT NULL OR t.production_year BETWEEN 1990 AND 2020)
+ORDER BY rm.num_cast_members DESC NULLS LAST, t.title;

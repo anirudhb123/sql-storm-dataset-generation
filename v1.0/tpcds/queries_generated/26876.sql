@@ -1,0 +1,59 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length,
+        SUBSTR(ca_city, 1, 1) AS city_initial,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+), GenderIncome AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(hd_income_band_sk) AS avg_income_band 
+    FROM 
+        customer_demographics
+    JOIN 
+        household_demographics ON customer_demographics.cd_demo_sk = household_demographics.hd_demo_sk
+    GROUP BY 
+        cd_gender
+), DailySales AS (
+    SELECT 
+        d_date,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON web_sales.ws_sold_date_sk = date_dim.d_date_sk
+    GROUP BY 
+        d_date
+)
+SELECT 
+    as.full_address,
+    as.city_initial,
+    as.ca_state,
+    as.ca_zip,
+    gi.cd_gender,
+    gi.customer_count,
+    gi.avg_income_band,
+    ds.total_sales,
+    CASE 
+        WHEN ds.total_sales IS NULL THEN 'No Sales'
+        WHEN ds.total_sales < 1000 THEN 'Low Sales'
+        WHEN ds.total_sales BETWEEN 1000 AND 5000 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM 
+    AddressStats as
+JOIN 
+    GenderIncome gi ON as.ca_state = 'NY' -- Filter for a specific state
+LEFT JOIN 
+    DailySales ds ON CAST(as.ca_address_sk AS INTEGER) % (SELECT COUNT(*) FROM DailySales) = 
+                     CAST(ds.d_date AS INTEGER) % (SELECT COUNT(*) FROM DailySales)
+WHERE 
+    LENGTH(as.full_address) > 30
+ORDER BY 
+    sales_category, as.full_address;

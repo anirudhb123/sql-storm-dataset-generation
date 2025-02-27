@@ -1,0 +1,46 @@
+WITH movie_summary AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT c.person_id) AS total_cast, 
+        COUNT(DISTINCT m.company_id) AS total_companies,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes
+    FROM aka_title AS a
+    LEFT JOIN cast_info AS c ON a.id = c.movie_id
+    LEFT JOIN movie_companies AS m ON a.id = m.movie_id
+    LEFT JOIN complete_cast AS cc ON a.id = cc.movie_id
+    LEFT JOIN company_name AS cn ON m.company_id = cn.id
+    LEFT JOIN person_info AS pi ON c.person_id = pi.person_id
+    LEFT JOIN role_type AS rt ON c.role_id = rt.id
+    WHERE a.production_year >= 2000
+    GROUP BY a.title, a.production_year
+),
+detailed_movie_info AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        COALESCE((SELECT STRING_AGG(DISTINCT pi.info, ', ') 
+                   FROM person_info pi 
+                   WHERE pi.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = ms.movie_id)), 'No Info') AS person_info,
+        ms.total_cast,
+        ms.total_companies,
+        ms.cast_with_notes
+    FROM movie_summary AS ms
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.total_cast,
+    dmi.total_companies,
+    dmi.cast_with_notes,
+    CASE 
+        WHEN dmi.total_companies > 0 THEN 'Companies Available' 
+        ELSE 'No Companies' 
+    END AS company_status,
+    CASE 
+        WHEN dmi.cast_with_notes > 0 THEN 'Some Cast Members have Notes' 
+        ELSE 'No Cast Notes' 
+    END AS cast_notes_status
+FROM detailed_movie_info AS dmi
+WHERE dmi.total_cast > 5
+ORDER BY dmi.production_year DESC, dmi.title;

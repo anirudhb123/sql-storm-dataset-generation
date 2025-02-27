@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        IIF(l.l_returnflag = 'Y', 'Returned', 'Not Returned') AS return_status,
+        l.l_shipmode,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_item_rank
+    FROM 
+        lineitem l
+)
+SELECT 
+    r.n_name AS nation_name,
+    COUNT(DISTINCT cu.c_custkey) AS high_value_customer_count,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    AVG(lp.total_available_qty) AS avg_available_qty,
+    SUM(lp.avg_supply_cost * lp.total_available_qty) AS total_cost_of_supplies,
+    MAX(LOP.o_orderdate) AS latest_order_date
+FROM 
+    nation r
+LEFT JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierParts lp ON s.s_suppkey = lp.ps_suppkey
+LEFT JOIN 
+    HighValueCustomers cu ON s.s_nationkey = cu.c_nationkey
+LEFT JOIN 
+    RankedOrders LOP ON cu.c_custkey = LOP.o_custkey
+LEFT JOIN 
+    DetailedLineItems l ON LOP.o_orderkey = l.l_orderkey
+GROUP BY 
+    r.n_name
+HAVING 
+    COUNT(DISTINCT cu.c_custkey) > 0
+ORDER BY 
+    total_orders DESC, high_value_customer_count DESC;

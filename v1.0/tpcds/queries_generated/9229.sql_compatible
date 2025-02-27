@@ -1,0 +1,60 @@
+
+WITH TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    ORDER BY 
+        total_spent DESC
+    LIMIT 10
+), CustomerDemographics AS (
+    SELECT 
+        cd.cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status 
+    FROM 
+        customer_demographics AS cd
+    WHERE 
+        cd.cdemo_sk IN (SELECT c.c_current_cdemo_sk FROM customer AS c WHERE c.c_customer_sk IN (SELECT c.c_customer_sk FROM TopCustomers))
+), WebSalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales AS ws
+    JOIN 
+        TopCustomers ON ws.ws_bill_customer_sk = TopCustomers.c_customer_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ws.total_quantity,
+    ws.total_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    item AS i
+JOIN 
+    WebSalesData AS ws ON i.i_item_sk = ws.ws_item_sk
+JOIN 
+    customer AS c ON c.c_current_cdemo_sk IN (SELECT cd.cdemo_sk FROM CustomerDemographics AS cd)
+JOIN 
+    CustomerDemographics AS cd ON c.c_current_cdemo_sk = cd.cdemo_sk
+ORDER BY 
+    ws.total_profit DESC
+LIMIT 5;

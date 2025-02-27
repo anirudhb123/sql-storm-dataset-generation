@@ -1,0 +1,68 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ext_sales_price DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+filtered_sales AS (
+    SELECT 
+        rs1.ws_item_sk,
+        rs1.ws_order_number,
+        rs1.ws_quantity,
+        rs1.ws_sales_price,
+        COALESCE((SELECT AVG(ws_sales_price) FROM web_sales ws2 WHERE ws2.ws_item_sk = rs1.ws_item_sk), 0) AS avg_sales_price,
+        CASE 
+            WHEN rs1.ws_quantity > 10 THEN 'High Volume'
+            WHEN rs1.ws_quantity BETWEEN 5 AND 10 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS volume_category
+    FROM 
+        ranked_sales rs1
+    WHERE 
+        rs1.rnk = 1
+)
+SELECT 
+    fa.ws_item_sk,
+    MAX(fa.ws_order_number) AS max_order_number,
+    SUM(fa.ws_quantity) AS total_quantity,
+    SUM(fa.ws_sales_price * fa.ws_quantity) AS total_sales_value,
+    CASE 
+        WHEN COUNT(DISTINCT fa.volume_category) > 1 THEN 'Diverse Sales'
+        ELSE 'Consolidated Sales'
+    END AS sales_type
+FROM 
+    filtered_sales fa
+GROUP BY 
+    fa.ws_item_sk
+HAVING 
+    SUM(fa.ws_quantity) > 5
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    cs.cs_item_sk, 
+    NULL AS cs_order_number, 
+    SUM(cs.cs_quantity) AS total_quantity, 
+    SUM(cs.cs_net_paid) AS total_sales_value, 
+    'Catalog Sales' AS sales_type
+FROM 
+    catalog_sales cs
+WHERE 
+    cs.cs_sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_year = 2023 AND d_month_seq IN (1, 2, 3))
+GROUP BY 
+    cs.cs_item_sk
+HAVING 
+    SUM(cs.cs_quantity) <= 5
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10;

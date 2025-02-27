@@ -1,0 +1,63 @@
+WITH UserVoteSummary AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM
+        Users U
+    LEFT JOIN
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN
+        Posts P ON V.PostId = P.Id
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PostTagSummary AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.AnswerCount,
+        ARRAY_AGG(DISTINCT TRIM(BOTH '<>' FROM UNNEST(STRING_TO_ARRAY(P.Tags, '><')))) AS TagsList
+    FROM
+        Posts P
+    GROUP BY
+        P.Id, P.Title, P.ViewCount, P.AnswerCount
+),
+PopularTags AS (
+    SELECT
+        UNNEST(TagsList) AS TagName,
+        COUNT(*) AS TagFrequency
+    FROM
+        PostTagSummary
+    GROUP BY
+        TagName
+    ORDER BY
+        TagFrequency DESC
+    LIMIT 10
+)
+SELECT
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    P.Title,
+    P.ViewCount,
+    P.AnswerCount,
+    T.TagName
+FROM
+    UserVoteSummary U
+JOIN
+    Posts P ON U.TotalPosts > 0
+JOIN
+    PostTagSummary PS ON P.Id = PS.PostId
+JOIN
+    PopularTags T ON T.TagName = ANY(PS.TagsList)
+WHERE
+    U.UpVotes > U.DownVotes
+ORDER BY
+    U.UpVotes DESC, U.DownVotes ASC, PS.ViewCount DESC;

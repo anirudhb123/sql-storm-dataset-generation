@@ -1,0 +1,38 @@
+
+SELECT 
+    ak.name AS aka_name,
+    m.title AS movie_title,
+    c.nr_order AS cast_order,
+    pt.name AS person_title,
+    ct.kind AS company_type,
+    COUNT(DISTINCT m.id) AS total_movies,
+    AVG(m.production_year) AS avg_production_year
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    title m ON c.movie_id = m.id
+JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+JOIN 
+    info_type it ON pi.info_type_id = it.id
+LEFT JOIN 
+    role_type rt ON c.role_id = rt.id
+LEFT JOIN 
+    aka_title at ON m.id = at.movie_id
+WHERE 
+    m.production_year >= 2000 
+    AND cn.country_code = 'USA'
+    AND it.info LIKE '%award%'
+GROUP BY 
+    ak.name, m.title, c.nr_order, pt.name, ct.kind
+ORDER BY 
+    total_movies DESC, avg_production_year ASC
+LIMIT 10;

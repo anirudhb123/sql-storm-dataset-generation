@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only for Questions
+),
+PopularPostAggregates AS (
+    SELECT 
+        rp.Tags,
+        COUNT(rp.PostId) AS PostCount,
+        AVG(rp.Score) AS AverageScore,
+        MAX(rp.ViewCount) AS MaxViewCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByTags <= 5 -- Top 5 ranked posts by Tags
+    GROUP BY 
+        rp.Tags
+),
+TopTags AS (
+    SELECT 
+        Tags,
+        PostCount,
+        AverageScore,
+        MaxViewCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS PopularityRank
+    FROM 
+        PopularPostAggregates
+)
+SELECT 
+    tt.Tags,
+    tt.PostCount,
+    tt.AverageScore,
+    tt.MaxViewCount,
+    STRING_AGG(rp.Title, '; ') AS TopPostTitles
+FROM 
+    TopTags tt
+JOIN 
+    RankedPosts rp ON rp.Tags = tt.Tags
+WHERE 
+    tt.PopularityRank <= 10 -- Get top 10 tags
+GROUP BY 
+    tt.Tags, 
+    tt.PostCount, 
+    tt.AverageScore, 
+    tt.MaxViewCount
+ORDER BY 
+    tt.PopularityRank;
+

@@ -1,0 +1,61 @@
+
+WITH ranked_sales AS (
+    SELECT ws.web_site_id,
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS total_orders,
+           RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_id, ws.web_site_sk
+),
+customer_summary AS (
+    SELECT c.c_customer_id,
+           d.cd_gender,
+           d.cd_marital_status,
+           CASE 
+               WHEN d.cd_purchase_estimate IS NULL THEN 'UNKNOWN'
+               WHEN d.cd_purchase_estimate < 1000 THEN 'LOW'
+               WHEN d.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'MEDIUM'
+               ELSE 'HIGH'
+           END AS purchase_band
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+returned_orders AS (
+    SELECT sr_item_sk,
+           COUNT(sr_ticket_number) AS total_returns,
+           SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+sales_with_returns AS (
+    SELECT ws.*,
+           COALESCE(ro.total_returns, 0) AS total_returned_qty,
+           COALESCE(ro.total_returned_amount, 0) AS total_returned_amt
+    FROM web_sales ws
+    LEFT JOIN returned_orders ro ON ws.ws_item_sk = ro.sr_item_sk
+),
+final_report AS (
+    SELECT cs.c_customer_id,
+           s.total_sales,
+           s.total_orders,
+           r.total_returned_qty,
+           r.total_returned_amt,
+           DENSE_RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM customer_summary cs
+    JOIN ranked_sales s ON cs.c_customer_id = s.web_site_id
+    LEFT JOIN sales_with_returns r ON r.ws_bill_customer_sk = cs.c_customer_sk
+)
+SELECT fr.c_customer_id,
+       fr.total_sales,
+       fr.total_orders,
+       fr.total_returned_qty,
+       fr.total_returned_amt,
+       CASE 
+           WHEN fr.total_sales - fr.total_returned_amt < 0 THEN 'LOSS'
+           ELSE 'PROFIT'
+       END AS profit_loss_status
+FROM final_report fr
+WHERE fr.total_sales > 10000
+ORDER BY fr.sales_rank;

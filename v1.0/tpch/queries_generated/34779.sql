@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal >= 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), 
+PartStatistics AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), 
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count, 
+       AVG(p.total_avail_qty) AS avg_avail_qty, 
+       SUM(CASE WHEN s.level > 1 THEN s.s_acctbal END) AS high_level_supplier_balance,
+       MAX(od.order_total) AS max_recent_order_total
+FROM region r 
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN PartStatistics p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost > 50)
+LEFT JOIN OrderDetails od ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = od.o_orderkey % (SELECT COUNT(*) FROM customer))
+GROUP BY r.r_name
+HAVING nation_count > 1 AND avg_avail_qty IS NOT NULL
+ORDER BY r.r_name;

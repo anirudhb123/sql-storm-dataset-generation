@@ -1,0 +1,63 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        d.d_year,
+        SUM(ws.ws_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2019 AND 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.cd_purchase_estimate, d.d_year
+),
+top_customers AS (
+    SELECT 
+        c_year,
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        total_spent,
+        total_orders
+    FROM 
+        ranked_customers
+    WHERE 
+        rank <= 10
+    ORDER BY 
+        c_year, total_spent DESC
+)
+SELECT 
+    tc.c_year,
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.total_spent,
+    tc.total_orders,
+    AVG(total_spent) OVER (PARTITION BY tc.c_year) AS avg_spent_in_year,
+    COUNT(*) OVER (PARTITION BY tc.c_year) AS num_top_customers
+FROM 
+    top_customers tc
+JOIN 
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+WHERE 
+    ca.ca_state = 'CA'
+ORDER BY 
+    tc.c_year, tc.total_spent DESC;

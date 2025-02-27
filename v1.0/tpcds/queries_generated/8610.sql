@@ -1,0 +1,65 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential,
+        DATE_FORMAT(ADD_MONTHS(DATE(NOW()), -1), '%Y-%m-01') AS start_date,
+        DATE_FORMAT(NOW(), '%Y-%m-01') AS end_date
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN (YEAR(CURDATE()) - 40) AND (YEAR(CURDATE()) - 20)
+),
+sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_data cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    WHERE 
+        DATE(ws.ws_sold_date_sk) BETWEEN start_date AND end_date
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+average_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales,
+        AVG(order_count) AS avg_orders
+    FROM 
+        sales_data
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    hd.hd_income_band_sk,
+    hd.hd_buy_potential,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(sd.order_count, 0) AS order_count,
+    av.avg_sales,
+    av.avg_orders
+FROM 
+    customer_data cd
+LEFT JOIN 
+    sales_data sd ON cd.c_customer_sk = sd.ws_bill_customer_sk,
+    average_sales av
+WHERE 
+    hd.hd_income_band_sk IS NOT NULL
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

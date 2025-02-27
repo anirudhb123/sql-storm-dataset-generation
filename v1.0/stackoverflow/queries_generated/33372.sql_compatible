@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS QuestionTitle,
+        p.Score AS QuestionScore,
+        u.DisplayName AS QuestionOwner,
+        p.CreationDate AS QuestionDate,
+        0 AS Level,
+        NULL AS AnswerId,
+        NULL AS AnswerScore,
+        NULL AS AnswerOwner,
+        NULL AS AnswerDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        ph.QuestionTitle,
+        ph.QuestionScore,
+        ph.QuestionOwner,
+        ph.QuestionDate,
+        ph.Level + 1 AS Level,
+        p.Id AS AnswerId,
+        p.Score AS AnswerScore,
+        u.DisplayName AS AnswerOwner,
+        p.CreationDate AS AnswerDate
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 2 
+), RankedPosts AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.QuestionTitle,
+        ph.QuestionScore,
+        ph.QuestionOwner,
+        ph.QuestionDate,
+        COUNT(ph.AnswerId) AS TotalAnswers,
+        RANK() OVER (ORDER BY ph.QuestionScore DESC, COUNT(ph.AnswerId) DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy ph
+    GROUP BY 
+        ph.PostId, ph.QuestionTitle, ph.QuestionScore, ph.QuestionOwner, ph.QuestionDate
+), PopularTags AS (
+    
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS Tag, 
+        COUNT(*) AS TagCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ','))
+    ORDER BY 
+        TagCount DESC, TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.QuestionTitle,
+    rp.QuestionScore,
+    rp.QuestionOwner,
+    rp.QuestionDate,
+    rp.TotalAnswers,
+    pt.Tag AS PopularTag,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON pt.Tag = ANY(STRING_TO_ARRAY(rp.QuestionTitle, ' ')) 
+WHERE 
+    rp.Rank <= 10 
+ORDER BY 
+    rp.QuestionScore DESC, rp.TotalAnswers DESC;

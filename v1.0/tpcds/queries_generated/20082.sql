@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_sales_price,
+        ws.ws_discount_amt,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) - 365 FROM date_dim)
+        AND ws.ws_sales_price IS NOT NULL
+),
+HighValueReturns AS (
+    SELECT
+        wr.reason_sk,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM
+        web_returns wr
+    WHERE
+        wr.wr_return_quantity > 5 OR wr.wr_return_amt > 100
+    GROUP BY
+        wr.reason_sk
+),
+CombinedData AS (
+    SELECT
+        cs.cs_order_number,
+        COALESCE(rs.ws_sales_price, 0) AS sales_price,
+        COALESCE(wr.total_return_amount, 0) AS return_amount,
+        CASE
+            WHEN rs.price_rank IS NOT NULL THEN 'High Price'
+            ELSE 'Regular Price'
+        END AS price_category
+    FROM
+        catalog_sales cs
+    LEFT JOIN RankedSales rs ON cs.cs_order_number = rs.ws_order_number
+    LEFT JOIN HighValueReturns wr ON cs.cs_order_number = wr.reason_sk
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    SUM(cd.sales_price) AS total_sales,
+    SUM(cd.return_amount) AS total_returns,
+    COUNT(cd.price_category) AS transaction_count
+FROM
+    customer c
+JOIN CombinedData cd ON c.c_customer_sk = cd.cs_order_number
+WHERE
+    c.c_birth_year BETWEEN 1980 AND 1990
+    AND (c.c_preferred_cust_flag = 'Y' OR c.c_email_address IS NOT NULL)
+GROUP BY
+    c.c_first_name,
+    c.c_last_name
+HAVING
+    SUM(cd.sales_price) > 1000
+ORDER BY
+    total_sales DESC,
+    transaction_count
+LIMIT 10;

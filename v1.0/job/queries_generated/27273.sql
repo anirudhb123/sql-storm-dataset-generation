@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        ARRAY_AGG(DISTINCT m.keyword) AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword m ON mk.keyword_id = m.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title_id, title, production_year, company_count, company_names, keywords
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_count,
+    tm.company_names,
+    (SELECT STRING_AGG(DISTINCT ak.name, ', ')
+     FROM aka_title ak 
+     WHERE ak.movie_id = tm.title_id) AS aka_names,
+    (SELECT STRING_AGG(DISTINCT p.info, '; ')
+     FROM person_info p
+     JOIN cast_info ci ON ci.movie_id = tm.title_id
+     WHERE ci.person_id = p.person_id) AS cast_info,
+    (SELECT STRING_AGG(DISTINCT rt.role, ', ')
+     FROM role_type rt
+     JOIN cast_info ci ON rt.id = ci.role_id
+     WHERE ci.movie_id = tm.title_id) AS role_types
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.company_count DESC;
+
+This SQL query aims to benchmark string processing performance by analyzing movie data, extracting various aggregates, and joining multiple tables. The query first identifies the top 5 movies for each production year based on the number of associated companies and gathers relevant details including alternate titles, cast information, and their respective roles. Finally, it organizes the results, focusing on the latest production years and the highest company counts.

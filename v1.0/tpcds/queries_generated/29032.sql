@@ -1,0 +1,58 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+promotions_info AS (
+    SELECT 
+        p.p_promo_id,
+        p.p_promo_name,
+        p.p_start_date_sk,
+        p.p_end_date_sk
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+),
+sales_info AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.address,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    pi.p_promo_name,
+    pi.p_promo_id,
+    si.total_profit,
+    si.order_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_info si ON ci.c_customer_id = si.ws_bill_customer_sk
+LEFT JOIN 
+    promotions_info pi ON pi.p_end_date_sk >= 20231001 AND pi.p_start_date_sk <= 20231031
+WHERE 
+    ci.cd_gender = 'F' AND ci.cd_marital_status = 'M'
+ORDER BY 
+    si.total_profit DESC 
+LIMIT 50;

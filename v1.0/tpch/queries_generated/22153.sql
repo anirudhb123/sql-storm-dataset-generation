@@ -1,0 +1,43 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'UNITED STATES')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           COUNT(ps.ps_partkey) AS part_count, 
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT n.n_name, 
+       s.s_name, 
+       COALESCE(o.total_price, 0) AS order_total,
+       ss.part_count, 
+       ss.total_supply_cost,
+       CASE 
+           WHEN n.n_name IS NULL THEN 'Unknown'
+           ELSE n.n_name
+       END AS nation_name,
+       COUNT(DISTINCT o.o_orderkey) FILTER (WHERE o.order_rank = 1) OVER (PARTITION BY n.n_nationkey) AS orders_by_nation
+FROM NationHierarchy n
+FULL OUTER JOIN SupplierStats ss ON n.n_nationkey = ss.s_suppkey
+LEFT JOIN OrderSummary o ON ss.s_suppkey = o.o_custkey
+WHERE (ss.part_count > 5 OR (ss.total_supply_cost IS NULL))
+ORDER BY orders_by_nation DESC, order_total DESC
+LIMIT 100 OFFSET 50;

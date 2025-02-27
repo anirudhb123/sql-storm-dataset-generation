@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+), EligibleCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_mktsegment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_acctbal > (SELECT AVG(s.s_acctbal) FROM supplier s)
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+    HAVING TotalSpent > 10000
+), SupplierParts AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS PartCount
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND ps.ps_availqty > 0
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    coalesce(ec.c_name, 'Unknown Customer') AS CustomerName,
+    COALESCE(SP.s_name, 'No Supplier') AS SupplierName,
+    avg(r_ordered.value) AS AverageOrderValue,
+    p.p_name AS PartName,
+    p.p_retailprice AS RetailPrice
+FROM RankedOrders r
+FULL OUTER JOIN EligibleCustomers ec ON r.o_orderkey = ec.c_custkey
+JOIN lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierParts SP ON SP.PartCount > 5
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+WHERE r.OrderRank <= 5 AND 
+      (l.l_returnflag IS NULL OR l.l_returnflag <> 'R') AND 
+      (r.o_totalprice BETWEEN 100 AND 10000 OR (l.l_discount IS NOT NULL AND l.l_discount > 0.1))
+GROUP BY ec.c_name, SP.s_name, p.p_name, p.p_retailprice
+HAVING COUNT(l.l_lineitemkey) < (SELECT COUNT(*) FROM lineitem) / 2
+ORDER BY AverageOrderValue DESC, p.p_retailprice ASC
+LIMIT 50;

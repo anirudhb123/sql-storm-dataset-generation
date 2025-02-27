@@ -1,0 +1,27 @@
+
+SELECT 
+    (SELECT COUNT(*) FROM Posts) AS TotalPosts,
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT COUNT(*) FROM Votes) AS TotalVotes,
+    (SELECT AVG(Score) FROM Posts) AS AveragePostScore,
+    (SELECT AVG(Reputation) FROM Users) AS AverageUserReputation
+UNION ALL
+
+SELECT 
+    PostTypeId,
+    COUNT(*) AS PostCount
+FROM 
+    Posts
+GROUP BY 
+    PostTypeId
+
+UNION ALL
+
+SELECT 
+    Id AS PostId,
+    Score 
+FROM 
+    Posts
+ORDER BY 
+    Score DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_sk
+), 
+WarehouseSales AS (
+    SELECT 
+        ws.w_warehouse_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit_web
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.w_warehouse_sk
+), 
+StoreReturns AS (
+    SELECT 
+        sr.sr_store_sk,
+        SUM(sr.sr_net_loss) AS total_return_loss
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_store_sk
+)
+SELECT 
+    c.customer_id,
+    cs.total_net_profit,
+    cs.total_transactions,
+    ws.total_net_profit_web,
+    sr.total_return_loss
+FROM 
+    CustomerSales cs
+JOIN 
+    customer c ON cs.c_customer_sk = c.c_customer_sk
+JOIN 
+    WarehouseSales ws ON ws.w_warehouse_sk = c.c_current_addr_sk
+JOIN 
+    StoreReturns sr ON sr.sr_store_sk = c.c_current_addr_sk
+WHERE 
+    cs.total_net_profit > 1000
+ORDER BY 
+    total_net_profit DESC
+LIMIT 100;

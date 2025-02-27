@@ -1,0 +1,63 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_orders,
+        c.c_custkey
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey, 
+        r.r_regionkey, 
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+FinalReport AS (
+    SELECT 
+        si.s_name AS supplier_name,
+        ci.total_orders AS customer_total_orders,
+        si.total_supply_cost AS total_supply_cost,
+        nr.r_name AS region_name,
+        si.s_nationkey
+    FROM 
+        SupplierInfo si
+    JOIN 
+        CustomerOrders ci ON si.s_nationkey = ci.c_nationkey
+    JOIN 
+        NationRegion nr ON si.s_nationkey = nr.n_nationkey
+)
+SELECT 
+    region_name, 
+    COUNT(supplier_name) AS num_suppliers, 
+    AVG(customer_total_orders) AS avg_order_value, 
+    SUM(total_supply_cost) AS total_cost
+FROM 
+    FinalReport
+GROUP BY 
+    region_name
+ORDER BY 
+    total_cost DESC, 
+    num_suppliers DESC;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.PostTypeId
+),
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        COALESCE(p.ExcerptPostId, -1) AS ExcerptPostId,
+        COALESCE(p.WikiPostId, -1) AS WikiPostId
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.ExcerptPostId = p.Id
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(ph.Id) AS TotalHistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerUserId,
+    rp.PostTypeId,
+    rp.VoteCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    td.TagName,
+    td.Count AS TagUsageCount,
+    pha.FirstEditDate,
+    pha.CloseReopenCount,
+    pha.TotalHistoryCount,
+    CASE 
+        WHEN rp.UserPostRank = 1 THEN 'Most Recent Post by User'
+        ELSE 'Older Post'
+    END AS PostComment,
+    CASE 
+        WHEN rp.VoteCount IS NULL AND rp.PostTypeId IN (1, 2) THEN 'Unvoted Question/Answer'
+        WHEN rp.VoteCount IS NOT NULL THEN 'Voted'
+        ELSE NULL 
+    END AS VoteState
+FROM 
+    RankedPosts rp
+JOIN 
+    TagDetails td ON td.WikiPostId = rp.PostId
+LEFT JOIN 
+    PostHistoryAggregated pha ON pha.PostId = rp.PostId
+WHERE 
+    (rp.PostTypeId = 1 OR rp.PostTypeId = 2)
+    AND (rp.CreationDate >= NOW() - INTERVAL '1 year')
+ORDER BY 
+    rp.VoteCount DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

@@ -1,0 +1,83 @@
+
+WITH RecursiveMovieActors AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        a.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COALESCE(NULLIF(m.note, ''), 'No notes available') AS movie_note,
+        COUNT(DISTINCT cc.id) AS total_casts,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        movie_info m ON t.id = m.movie_id
+    WHERE
+        t.production_year BETWEEN 1990 AND 2023
+    GROUP BY
+        t.id, t.title, t.production_year, k.keyword, m.note
+),
+ActorStats AS (
+    SELECT
+        movie_id,
+        actor_name,
+        COUNT(*) AS appearances,
+        MAX(actor_rank) AS highest_rank
+    FROM
+        RecursiveMovieActors
+    GROUP BY
+        movie_id, actor_name
+),
+TopActors AS (
+    SELECT
+        actor_name,
+        SUM(appearances) AS total_appearances
+    FROM
+        ActorStats
+    GROUP BY
+        actor_name
+    HAVING
+        SUM(appearances) > 5
+    ORDER BY
+        total_appearances DESC
+    LIMIT 10
+)
+SELECT
+    md.title,
+    md.production_year,
+    ta.actor_name,
+    md.total_casts,
+    md.avg_order,
+    COALESCE(ta.appearances, 0) AS appearances,
+    md.movie_note
+FROM
+    MovieDetails md
+LEFT JOIN
+    TopActors ta ON md.movie_id = ta.movie_id
+WHERE
+    md.keyword IS NOT NULL
+    AND (md.production_year % 2 = 0 OR md.production_year IN (SELECT DISTINCT production_year FROM MovieDetails WHERE keyword = 'Drama'))
+ORDER BY
+    md.production_year DESC, md.title
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

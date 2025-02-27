@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.AcceptedAnswerId,
+        COALESCE(a.Score, 0) AS AcceptedAnswerScore, 
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+    GROUP BY 
+        p.Id, p.Title, p.AcceptedAnswerId
+),
+UserPosts AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(rp.Id) AS TotalPosts, 
+        SUM(rp.CommentCount) AS TotalComments,
+        SUM(rp.VoteCount) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.DisplayName, 
+    up.TotalPosts, 
+    up.TotalComments, 
+    up.TotalVotes,
+    CASE 
+        WHEN up.TotalVotes > 0 THEN 'Active'
+        WHEN up.TotalPosts > 10 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorStatus
+FROM 
+    UserPosts up
+JOIN 
+    Users u ON up.UserId = u.Id
+WHERE 
+    up.TotalPosts > 0
+ORDER BY 
+    up.TotalVotes DESC, up.TotalComments DESC;

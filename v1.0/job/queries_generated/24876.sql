@@ -1,0 +1,71 @@
+WITH MovieBreakdown AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ca.name, 'Unknown Actor') AS actor_name,
+        ka.name AS keyword,
+        cc.kind AS company_kind,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ca.nr_order) AS actor_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    LEFT JOIN 
+        aka_name na ON ca.person_id = na.person_id 
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword ka ON mk.keyword_id = ka.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        comp_cast_type cct ON ca.person_role_id = cct.id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND (m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Fiction%') 
+             OR (m.title ILIKE '%Sequel%' AND m.production_year > 2000))
+),
+ActorRatings AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_id) AS total_movies,
+        AVG(COALESCE(rating, 0)) AS average_rating
+    FROM 
+        MovieBreakdown
+    LEFT JOIN 
+        (
+            SELECT 
+                movie_id,
+                AVG(CAST(SUBSTRING(info FROM 'Rating: (\d+\.\d+)') AS NUMERIC)) AS rating
+            FROM 
+                movie_info
+            WHERE 
+                info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+            GROUP BY 
+                movie_id
+        ) movie_ratings ON MovieBreakdown.movie_id = movie_ratings.movie_id
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    a.actor_name,
+    a.total_movies,
+    a.average_rating,
+    STRING_AGG(DISTINCT mb.title, ', ') AS movies,
+    MAX(a.average_rating) OVER () AS highest_rating_in_group
+FROM 
+    ActorRatings a
+LEFT JOIN 
+    MovieBreakdown mb ON a.actor_name = mb.actor_name
+GROUP BY 
+    a.actor_name, a.total_movies, a.average_rating
+HAVING 
+    COUNT(DISTINCT mb.movie_id) > 3
+ORDER BY 
+    a.average_rating DESC NULLS LAST,
+    a.total_movies DESC;

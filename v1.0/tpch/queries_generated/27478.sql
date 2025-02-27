@@ -1,0 +1,29 @@
+SELECT 
+    CONCAT_WS(' - ', p.p_name, s.s_name, c.c_name) AS detailed_info,
+    UPPER(REPLACE(p.p_comment, 's', 'z')) AS modified_comment,
+    LENGTH(p.p_comment) AS original_comment_length,
+    LENGTH(UPPER(REPLACE(p.p_comment, 's', 'z'))) AS modified_comment_length,
+    SUBSTRING_INDEX(c.c_address, ' ', 2) AS address_prefix,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10 AND 
+    c.c_acctbal > 5000
+GROUP BY 
+    detailed_info, modified_comment, original_comment_length, modified_comment_length, address_prefix, region_name
+ORDER BY 
+    total_orders DESC, modified_comment_length ASC;

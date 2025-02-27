@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.CommentCount) AS TotalComments,
+        SUM(rp.Upvotes) AS TotalUpvotes,
+        SUM(rp.Downvotes) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalScore,
+    up.TotalViews,
+    up.TotalComments,
+    up.TotalUpvotes,
+    up.TotalDownvotes,
+    up.TotalPosts / NULLIF(up.TotalScore, 0) AS PostsToScoreRatio
+FROM 
+    UserPerformance up
+ORDER BY 
+    PostsToScoreRatio DESC
+LIMIT 10;

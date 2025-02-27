@@ -1,0 +1,69 @@
+
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS UpDownDifference,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COALESCE(COUNT(c.Id), 0) AS TotalComments,
+        COUNT(DISTINCT ps.PostId) AS TotalPosts,
+        SUM(ps.Score) AS TotalPostScore,
+        COUNT(DISTINCT CASE WHEN ps.PostTypeId = 1 THEN ps.PostId END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN ps.PostTypeId = 2 THEN ps.PostId END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN 
+        Comments c ON ps.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views
+),
+EngagementRank AS (
+    SELECT 
+        ue.*,
+        RANK() OVER (ORDER BY ue.TotalCommentScore + ue.TotalPostScore DESC) AS EngagementRank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    es.UserId,
+    es.DisplayName,
+    es.Reputation,
+    es.TotalPosts,
+    es.TotalComments,
+    es.TotalPostScore,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    es.EngagementRank
+FROM 
+    EngagementRank es
+LEFT JOIN 
+    PostStatistics ps ON ps.UserPostRank <= 3 AND ps.UpDownDifference > (SELECT AVG(UpDownDifference) FROM PostStatistics)
+WHERE 
+    es.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    es.EngagementRank, ps.Score DESC;

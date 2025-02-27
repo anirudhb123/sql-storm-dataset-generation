@@ -1,0 +1,60 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT CONCAT(a.name, ' as ', r.role), ', ') AS cast_members,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies,
+        COUNT(DISTINCT m.id) AS related_movies_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    LEFT JOIN 
+        title linked_title ON ml.linked_movie_id = linked_title.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ranked_movies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        cast_members,
+        keywords,
+        companies,
+        related_movies_count,
+        ROW_NUMBER() OVER (ORDER BY production_year DESC) AS rank
+    FROM 
+        movie_details
+)
+SELECT 
+    rm.rank,
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_members,
+    rm.keywords,
+    rm.companies,
+    rm.related_movies_count
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.related_movies_count > 1
+ORDER BY 
+    rm.rank
+LIMIT 10;

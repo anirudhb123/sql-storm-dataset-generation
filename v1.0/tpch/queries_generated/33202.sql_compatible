@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_ranking AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_part_details AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        COALESCE(ps.ps_availqty * (p.p_retailprice - ps.ps_supplycost), 0) AS profit
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT 
+    sr.rank, 
+    sr.c_name,
+    COALESCE(SUM(spd.profit), 0) AS total_profit,
+    COUNT(DISTINCT spd.p_partkey) AS unique_parts_supplied
+FROM sales_ranking sr
+LEFT JOIN supplier_part_details spd ON sr.c_custkey = spd.s_suppkey
+GROUP BY sr.rank, sr.c_name
+HAVING COALESCE(SUM(spd.profit), 0) > 10000
+ORDER BY sr.rank
+UNION ALL
+SELECT 
+    NULL AS rank, 
+    'Total Profit' AS c_name, 
+    SUM(spd.profit) AS total_profit,
+    COUNT(DISTINCT spd.p_partkey) AS unique_parts_supplied 
+FROM supplier_part_details spd
+WHERE spd.profit IS NOT NULL
+GROUP BY spd.s_suppkey;

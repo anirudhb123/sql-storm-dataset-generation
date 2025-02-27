@@ -1,0 +1,46 @@
+
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        s.s_name AS supplier_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CONCAT(p.p_name, ' | ', s.s_name) AS part_supplier_info
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+FilteredDetails AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        supplier_name,
+        s_acctbal,
+        ps_availqty,
+        ps_supplycost,
+        LENGTH(part_supplier_info) AS info_length
+    FROM 
+        PartSupplierDetails
+    WHERE 
+        s_acctbal > 1000
+)
+SELECT 
+    p_partkey,
+    p_name,
+    supplier_name,
+    ps_availqty,
+    ps_supplycost,
+    info_length,
+    REPLACE(UPPER(part_supplier_info), ' ', '-') AS formatted_info,
+    SUBSTRING(part_supplier_info, 1, 20) AS short_info
+FROM 
+    FilteredDetails
+ORDER BY 
+    info_length DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,13 @@
+SELECT 
+    p.p_brand, 
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count, 
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+GROUP BY 
+    p.p_brand 
+ORDER BY 
+    supplier_count DESC
+LIMIT 10;

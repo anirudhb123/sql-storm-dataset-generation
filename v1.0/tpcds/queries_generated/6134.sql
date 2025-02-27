@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY COUNT(sr_ticket_number) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, sr_item_sk
+),
+BestSellingItems AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    ORDER BY 
+        total_sold DESC
+    LIMIT 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics
+    JOIN 
+        customer
+    ON 
+        cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_education_status
+),
+ReturnDemographics AS (
+    SELECT 
+        r.reason_desc,
+        COUNT(sr.ticket_number) AS reason_count
+    FROM 
+        store_returns sr
+    JOIN 
+        reason r ON sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        r.reason_desc
+    ORDER BY 
+        reason_count DESC
+)
+SELECT 
+    BSI.ws_item_sk,
+    BSI.total_sold,
+    BSI.total_profit,
+    RD.reason_desc,
+    RD.reason_count,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    CD.cd_education_status,
+    CD.customer_count
+FROM 
+    BestSellingItems BSI
+JOIN 
+    RankedReturns RR ON BSI.ws_item_sk = RR.sr_item_sk
+JOIN 
+    CustomerDemographics CD ON CD.customer_count > 1000
+JOIN 
+    ReturnDemographics RD ON RR.return_count = RD.reason_count
+WHERE 
+    RR.return_rank = 1
+ORDER BY 
+    BSI.total_profit DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank,
+        COUNT(DISTINCT m.company_id) OVER (PARTITION BY a.id) AS production_companies_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies m ON a.id = m.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        production_companies_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+CharacterCount AS (
+    SELECT 
+        title,
+        SUM(LENGTH(title) - LENGTH(REPLACE(title, ' ', '')) + 1) AS character_count
+    FROM 
+        TopMovies
+    GROUP BY 
+        title
+),
+EnrichedMovies AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.production_companies_count,
+        cc.character_count
+    FROM 
+        TopMovies tm
+    JOIN 
+        CharacterCount cc ON tm.title = cc.title
+)
+SELECT 
+    em.title,
+    em.production_year,
+    em.production_companies_count,
+    em.character_count,
+    CASE 
+        WHEN em.production_companies_count > 1 THEN 'Multiple Companies'
+        ELSE 'Single Company'
+    END AS company_status,
+    CASE 
+        WHEN em.character_count >= 40 THEN 'Long Title'
+        ELSE 'Short Title'
+    END AS title_length
+FROM 
+    EnrichedMovies em
+ORDER BY 
+    em.production_year DESC, 
+    em.character_count DESC;

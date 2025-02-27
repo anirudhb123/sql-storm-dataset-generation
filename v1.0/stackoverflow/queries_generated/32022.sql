@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        NTILE(10) OVER (ORDER BY P.Score DESC) AS ScoreRank,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS NewestPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND P.ViewCount > 100
+),
+RecentChanges AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+),
+PostStatistics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.AnswerCount,
+        COALESCE(RC.ChangerDisplayName, 'No Recent Changes') AS LastChanger,
+        COUNT(RC.PostId) AS ChangeCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN (
+        SELECT 
+            R.PostId,
+            U.DisplayName AS ChangerDisplayName
+        FROM 
+            RecentChanges R
+        LEFT JOIN 
+            Users U ON R.UserId = U.Id
+        WHERE 
+            R.ChangeRank = 1
+    ) RC ON RP.PostId = RC.PostId
+    GROUP BY 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.AnswerCount,
+        RC.ChangerDisplayName
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.OwnerDisplayName,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.LastChanger,
+    PS.ChangeCount,
+    CASE 
+        WHEN PS.ScoreRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostType,
+    CASE 
+        WHEN PS.ChangeCount > 0 THEN 'Recently Edited'
+        ELSE 'No Recent Edits'
+    END AS EditStatus,
+    (SELECT STRING_AGG(CT.Name, ', ') 
+     FROM CloseReasonTypes CT 
+     WHERE CT.Id IN (
+         SELECT PH.Comment::int 
+         FROM PostHistory PH 
+         WHERE PH.PostId = PS.PostId AND PH.PostHistoryTypeId = 10
+     )) AS CloseReasons
+FROM 
+    PostStatistics PS
+WHERE 
+    PS.ChangeCount > 0
+ORDER BY 
+    PS.Score DESC, PS.CreationDate DESC
+OPTION (MAXRECURSION 0);

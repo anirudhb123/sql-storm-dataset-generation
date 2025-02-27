@@ -1,0 +1,65 @@
+
+WITH actor_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(c.movie_id) > 1
+),
+movie_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+detailed_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keywords,
+        ARRAY_AGG(DISTINCT a.actor_name) AS actors
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keywords k ON t.id = k.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keywords
+)
+SELECT 
+    dm.title,
+    dm.production_year,
+    dm.keywords,
+    CARDINALITY(dm.actors) AS actor_count,
+    STRING_AGG(DISTINCT a.actor_name, ', ') AS actor_list
+FROM 
+    detailed_movies dm
+LEFT JOIN 
+    unnest(dm.actors) AS a ON true
+WHERE 
+    dm.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    dm.title, dm.production_year, dm.keywords
+ORDER BY 
+    actor_count DESC, dm.title ASC;

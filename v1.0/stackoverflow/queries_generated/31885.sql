@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    
+    UNION ALL
+    
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        p2.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p2.ParentId = p.Id
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+)
+, PostAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        MAX(ph.CreationDate) AS LatestActivityDate
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId
+    GROUP BY 
+        ph.PostId
+)
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.BadgeCount,
+    u.PostsCount,
+    pa.CommentCount,
+    pa.UpvoteCount,
+    pa.DownvoteCount,
+    ph.Title,
+    ph.LatestActivityDate
+FROM 
+    UserReputation u
+JOIN 
+    PostAggregates pa ON pa.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserId)
+JOIN 
+    RecursivePostHierarchy ph ON ph.PostId = pa.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, pa.UpvoteCount DESC
+LIMIT 10;
+

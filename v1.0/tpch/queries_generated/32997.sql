@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > 2000
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal > 1500
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    sr.supp_name,
+    COALESCE(c.customer_name, 'No Orders') AS customer_name,
+    COALESCE(cp.total_available, 0) AS total_available_parts,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    COUNT(ro.o_orderkey) AS total_orders,
+    MAX(ro.order_rank) AS highest_order_rank
+FROM SupplierHierarchy sr
+LEFT JOIN RankedOrders ro ON sr.s_suppkey = ro.o_orderkey
+LEFT JOIN CustomerOrders co ON ro.c_custkey = co.c_custkey
+LEFT JOIN PartSupplierInfo cp ON sr.s_suppkey = cp.p_partkey
+WHERE sr.hierarchy_level <= 3
+GROUP BY sr.supp_name, co.customer_name, cp.total_available
+ORDER BY total_spent DESC NULLS LAST;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 10
+),
+
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+
+PostDetails AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.Score,
+        rv.VoteCount,
+        rv.UpVotes,
+        rv.DownVotes,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Unaccepted'
+        END AS AnswerStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.Id = rv.PostId
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.Id = rp.Id
+)
+
+SELECT 
+    pd.OwnerDisplayName,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.VoteCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.AnswerStatus,
+    CASE 
+        WHEN pd.Rank = 1 THEN 'Most Recent Post'
+        ELSE NULL
+    END AS PostRankStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pd.Id) AS CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts post
+     JOIN Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(post.Tags, 2, length(post.Tags) - 2), '>'))::int[])
+     WHERE post.Id = pd.Id) AS Tags
+FROM 
+    PostDetails pd
+WHERE 
+    pd.AnswerStatus = 'Accepted' 
+    OR pd.Score >= (SELECT AVG(Score) FROM Posts) * 0.8
+ORDER BY 
+    pd.Score DESC NULLS LAST,
+    pd.CreationDate DESC;

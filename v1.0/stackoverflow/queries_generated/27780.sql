@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) as Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate
+),
+
+EnhancedPostStats AS (
+    SELECT 
+        r.*,
+        CASE 
+            WHEN r.VoteCount > 10 THEN 'Highly Voted'
+            WHEN r.VoteCount BETWEEN 5 AND 10 THEN 'Moderately Voted'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = r.PostId AND ph.PostHistoryTypeId = 10) AS CloseCount, -- Count of times post has been closed
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = (SELECT Id FROM Users WHERE DisplayName = r.OwnerDisplayName)) AS UserBadgesCount 
+    FROM 
+        RankedPosts r
+)
+
+SELECT 
+    eps.PostId,
+    eps.Title,
+    eps.OwnerDisplayName,
+    eps.CommentCount,
+    eps.VoteCount,
+    eps.EngagementLevel,
+    eps.CloseCount,
+    eps.UserBadgesCount,
+    eps.TagList
+FROM 
+    EnhancedPostStats eps
+ORDER BY 
+    eps.VoteCount DESC, eps.CommentCount DESC
+LIMIT 100; -- Limit to top 100 posts

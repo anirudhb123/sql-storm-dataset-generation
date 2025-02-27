@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 HAVING COUNT(*) FILTER (WHERE c2.c_mktsegment = c.c_mktsegment) > 5)
+    GROUP BY 
+        c.c_custkey
+),
+
+SupplierProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rank = 1
+),
+
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+
+SELECT 
+    p.p_name,
+    pd.s_name AS top_supplier,
+    COALESCE(cs.order_count, 0) AS customer_order_count,
+    ns.supplier_count,
+    ns.total_acctbal AS total_supplier_acctbal,
+    CASE 
+        WHEN pd.ps_availqty IS NULL THEN 'Unavailable' 
+        ELSE 'Available' 
+    END AS availability
+FROM 
+    SupplierProductDetails pd
+LEFT JOIN 
+    CustomerOrders cs ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2))
+LEFT JOIN 
+    NationSummary ns ON pd.s_name IS NOT NULL AND ns.supplier_count > 10
+WHERE 
+    pd.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    p.p_name, pd.s_acctbal DESC;

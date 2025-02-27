@@ -1,0 +1,61 @@
+WITH RECURSIVE OrdersCTE AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        1 AS OrderLevel
+    FROM orders 
+    WHERE o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        OrderLevel + 1
+    FROM orders o
+    INNER JOIN OrdersCTE oc ON o.o_custkey = oc.o_custkey 
+    WHERE o.o_orderdate > oc.o_orderdate
+),
+PartSupplierSales AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY ps.ps_partkey
+),
+MaxRevenue AS (
+    SELECT 
+        ps.ps_partkey,
+        total_revenue,
+        ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM PartSupplierSales ps
+)
+SELECT 
+    p.p_name, 
+    p.p_brand,
+    p.p_container, 
+    p.p_retailprice,
+    COALESCE(mr.total_revenue, 0) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE 
+        WHEN c.c_acctbal IS NULL THEN 1 
+        ELSE 0 
+    END) AS null_account_balances
+FROM part p
+LEFT JOIN MaxRevenue mr ON p.p_partkey = mr.ps_partkey AND mr.revenue_rank <= 10
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN customer c ON c.c_nationkey = s.s_nationkey
+LEFT JOIN OrdersCTE o ON c.c_custkey = o.o_custkey
+WHERE (p.p_retailprice > 100 OR p.p_size < 10)
+AND (s.s_acctbal IS NOT NULL) 
+GROUP BY p.p_name, p.p_brand, p.p_container, p.p_retailprice, mr.total_revenue
+ORDER BY total_revenue DESC;

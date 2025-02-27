@@ -1,0 +1,75 @@
+
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+lineitem_analysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    ns.n_name,
+    cs.c_name,
+    ss.total_available_qty,
+    ss.total_supply_cost,
+    COALESCE(li.total_revenue, 0) AS order_revenue,
+    COALESCE(li.unique_parts, 0) AS unique_parts_count,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN cs.total_spent > 10000 THEN 'High Value Customer'
+        ELSE 'Regular Customer' 
+    END AS customer_value_segment
+FROM 
+    nation_summary ns
+JOIN 
+    supplier_summary ss ON ss.total_available_qty > 0
+LEFT JOIN 
+    customer_orders cs ON ns.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    lineitem_analysis li ON cs.c_custkey = li.l_orderkey
+ORDER BY 
+    ns.n_name ASC, 
+    cs.total_spent DESC;

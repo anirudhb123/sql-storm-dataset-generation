@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank_year
+    FROM title AS t
+    WHERE t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY ca.movie_id ORDER BY ca.nr_order) AS role_rank
+    FROM cast_info AS ca
+    JOIN aka_name AS a ON ca.person_id = a.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(*) OVER (PARTITION BY mk.movie_id) AS keyword_count
+    FROM movie_keyword AS mk
+    JOIN keyword AS k ON mk.keyword_id = k.id
+),
+ComplexStats AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword_summary,
+        mk.keyword_count,
+        COUNT(DISTINCT ar.actor_name) AS total_actors,
+        AVG(ar.role_rank) AS average_role_rank
+    FROM RankedMovies AS rm
+    LEFT JOIN MovieKeywords AS mk ON rm.title_id = mk.movie_id
+    LEFT JOIN ActorRoles AS ar ON rm.title_id = ar.movie_id
+    GROUP BY rm.title_id, rm.title, mk.keyword, mk.keyword_count
+)
+SELECT 
+    cs.title_id,
+    cs.title,
+    cs.keyword_summary,
+    cs.keyword_count,
+    cs.total_actors,
+    cs.average_role_rank,
+    CASE 
+        WHEN cs.keyword_count > 5 THEN 'High Keyword Load'
+        WHEN cs.keyword_count BETWEEN 3 AND 5 THEN 'Medium Keyword Load'
+        ELSE 'Low Keyword Load' 
+    END AS keyword_load_category,
+    CASE 
+        WHEN cs.total_actors IS NULL THEN 'No Actors'
+        ELSE 'Has Actors'
+    END AS actor_status
+FROM ComplexStats AS cs
+WHERE cs.average_role_rank IS NOT NULL
+ORDER BY cs.keyword_count DESC, cs.total_actors ASC
+FETCH FIRST 50 ROWS ONLY;

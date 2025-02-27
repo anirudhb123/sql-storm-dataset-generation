@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        PostTypeId,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        rh.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rh ON p.ParentId = rh.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,   
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes, 
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount, 
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount   
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostClosureStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        (UpVotes - DownVotes) AS NetVote,
+        RANK() OVER (ORDER BY (UpVotes - DownVotes) DESC) AS Rank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.Id AS PostId,
+    p.ViewCount,
+    ph.CloseCount,
+    ph.LastClosedDate,
+    u.DisplayName AS PostOwner,
+    tu.DisplayName AS TopUser,
+    tu.NetVote
+FROM 
+    Posts p
+JOIN 
+    PostClosureStats ph ON p.Id = ph.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId AND tu.Rank <= 10
+WHERE 
+    p.CreationDate >= DATE '2021-01-01' 
+    AND (p.Tagged = TRUE OR p.ViewCount > 100)
+ORDER BY 
+    p.ViewCount DESC, 
+    ph.CloseCount DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

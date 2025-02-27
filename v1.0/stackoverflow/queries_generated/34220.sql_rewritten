@@ -1,0 +1,103 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM
+        Posts p
+        INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges
+    FROM
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostTypeSummary AS (
+    SELECT
+        pt.Id AS PostTypeId,
+        pt.Name AS PostTypeName,
+        COUNT(p.Id) AS PostCount
+    FROM
+        PostTypes pt
+        LEFT JOIN Posts p ON pt.Id = p.PostTypeId
+    GROUP BY
+        pt.Id, pt.Name
+),
+PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        r.Level AS HierarchyLevel,
+        u.DisplayName AS OwnerDisplayName,
+        u.EmailHash,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TotalVotes,
+        COALESCE(b.TotalBadges, 0) AS UserBadges,
+        CASE 
+            WHEN r.Level = 1 THEN 'Question'
+            ELSE 'Answer'
+        END AS PostType,
+        (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM
+        Posts p
+        JOIN RecursivePostHierarchy r ON p.Id = r.PostId
+        LEFT JOIN PostVoteSummary ps ON p.Id = ps.PostId
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN UserReputation b ON u.Id = b.Id
+)
+SELECT
+    pa.PostId,
+    pa.Title,
+    pa.HierarchyLevel,
+    pa.OwnerDisplayName,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.TotalVotes,
+    pa.UserBadges,
+    pa.PostType,
+    pa.CommentCount,
+    pt.PostTypeName,
+    ROW_NUMBER() OVER (PARTITION BY pa.PostType ORDER BY pa.TotalVotes DESC) AS PostRank
+FROM
+    PostAnalytics pa
+    JOIN PostTypeSummary pt ON pa.PostType = CASE 
+        WHEN pt.PostTypeId = 1 THEN 'Question'
+        ELSE 'Answer'
+    END
+WHERE
+    pa.UpVotes > pa.DownVotes
+ORDER BY
+    pa.TotalVotes DESC;

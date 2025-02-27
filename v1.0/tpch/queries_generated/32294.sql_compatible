@@ -1,0 +1,59 @@
+
+WITH RecursiveSupplierCTE AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, r.level + 1
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE r.level < 3
+),
+AggLineItems AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS item_count,
+           AVG(l.l_tax) AS avg_tax
+    FROM lineitem l 
+    WHERE l.l_shipdate < DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY l.l_orderkey
+),
+NationSummary AS (
+    SELECT n.n_nationkey, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderstatus,
+           o.o_totalprice,
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank
+    FROM orders o
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_retailprice,
+    r.r_name AS region_name,
+    ns.supplier_count,
+    ns.total_acctbal,
+    SUM(ali.total_revenue) AS total_order_revenue,
+    AVG(ali.avg_tax) AS avg_lineitem_tax,
+    CASE 
+        WHEN COUNT(DISTINCT fo.o_orderkey) > 0 THEN 'Has Orders'
+        ELSE 'No Orders'
+    END AS order_status
+FROM part p
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT MIN(s_nationkey) FROM supplier WHERE s_suppkey = ANY(SELECT s_suppkey FROM RecursiveSupplierCTE)))
+LEFT JOIN NationSummary ns ON ns.n_nationkey = (SELECT MIN(s_nationkey) FROM supplier WHERE s_suppkey = ANY(SELECT s_suppkey FROM RecursiveSupplierCTE))
+LEFT JOIN AggLineItems ali ON ali.l_orderkey = (SELECT o.o_orderkey FROM FilteredOrders o WHERE o.status_rank = 1 AND o.o_orderkey NOT IN (SELECT DISTINCT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F'))
+LEFT JOIN FilteredOrders fo ON fo.o_orderkey = ali.l_orderkey
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice, r.r_name, ns.supplier_count, ns.total_acctbal
+ORDER BY total_order_revenue DESC, p.p_partkey;

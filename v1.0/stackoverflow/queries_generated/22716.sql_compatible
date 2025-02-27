@@ -1,0 +1,78 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        AVG(COALESCE(vote.VoteTypeId, 0)) AS AvgVoteType,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId AND vote.VoteTypeId IN (2, 3) 
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(p.Tags, '<>')) AS TagName
+        ) t ON TRUE
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopPosters AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank
+    FROM 
+        UserPostStats
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostOrder
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01' AS DATE) - INTERVAL '30 days')
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.QuestionCount,
+    CASE 
+        WHEN u.AvgVoteType IS NULL THEN 'No votes'
+        ELSE CASE 
+            WHEN u.AvgVoteType > 2 THEN 'More Upvotes'
+            WHEN u.AvgVoteType < 2 THEN 'More Downvotes'
+            ELSE 'Balanced Votes'
+        END 
+    END AS VoteAnalysis,
+    t.PostRank,
+    r.PostId,
+    r.Title,
+    r.CreationDate
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    TopPosters t ON u.UserId = t.UserId
+LEFT JOIN 
+    RecentPosts r ON u.UserId = r.OwnerUserId AND r.RecentPostOrder = 1
+WHERE 
+    u.Reputation > 100
+    OR (u.QuestionCount > 0 AND u.TotalCommentScore > 10)
+ORDER BY 
+    u.Reputation DESC, 
+    t.PostRank;

@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk 
+                                  FROM date_dim d 
+                                  WHERE d.d_year = 2022 
+                                  AND d.d_moy IN (SELECT DISTINCT d_moy FROM date_dim WHERE d_holiday = 'Y'))
+), 
+CustomerWithReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(sr.sr_returned_date_sk) AS return_count,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_id
+), 
+ItemStatistics AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM item i
+    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023 LIMIT 1)
+                                  AND (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023 ORDER BY d.d_date_sk DESC LIMIT 1)
+    GROUP BY i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    cwr.c_customer_id,
+    CASE 
+        WHEN cwr.return_count IS NULL THEN 'No Returns' 
+        ELSE CONCAT('Returned ', cwr.return_count, ' Items')
+    END AS return_status,
+    COALESCE(rk.ws_item_sk::TEXT, 'N/A') AS best_selling_item,
+    CASE 
+        WHEN rk.ws_sales_price IS NULL OR rk.ws_net_profit IS NULL THEN 'No Sales Recorded'
+        ELSE FORMAT('Best Selling Item: %s, Price: $%.2f, Net Profit: $%.2f', 
+                    rk.ws_item_sk, 
+                    rk.ws_sales_price, 
+                    rk.ws_net_profit)
+    END AS best_selling_item_info,
+    ist.total_profit,
+    ist.avg_sales_price
+FROM CustomerWithReturns cwr
+LEFT JOIN RankedSales rk ON rk.rn = 1
+LEFT JOIN ItemStatistics ist ON ist.i_item_sk = rk.ws_item_sk
+WHERE cwr.return_count IS NOT NULL OR (cwr.return_count IS NULL AND EXISTS (SELECT 1 
+                                                                           FROM store_sales ss 
+                                                                           WHERE ss.ss_customer_sk = cwr.c_customer_sk))
+ORDER BY cwr.return_count DESC, ist.total_profit DESC;

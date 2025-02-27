@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TagWikis,
+        SUM(CASE WHEN BH.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgesReceived
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges BH ON U.Id = BH.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+), PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        PT.Name AS PostType
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+), PostHistoryStats AS (
+    SELECT
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+
+SELECT
+    UR.DisplayName,
+    UR.Reputation,
+    UR.TotalPosts,
+    UR.Questions,
+    UR.Answers,
+    UR.TagWikis,
+    UR.BadgesReceived,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PHS.EditCount,
+    PHS.LastEditDate
+FROM UserReputation UR
+JOIN PostStats PS ON UR.UserId = PS.OwnerUserId
+LEFT JOIN PostHistoryStats PHS ON PS.PostId = PHS.PostId
+ORDER BY UR.Reputation DESC, PS.CreationDate DESC
+LIMIT 100;

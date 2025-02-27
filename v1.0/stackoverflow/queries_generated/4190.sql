@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' AND
+        p.Score > 0
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(p.Score) > 100
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    tu.DisplayName AS TopUser,
+    tu.TotalScore,
+    tu.PostCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.OwnerRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 10;
+

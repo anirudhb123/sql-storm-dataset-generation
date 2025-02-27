@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_partkey, rs.s_suppkey, rs.s_name, rs.s_acctbal
+    FROM RankedSuppliers rs
+    JOIN partsupp s ON rs.s_partkey = s.ps_partkey
+    WHERE rs.rank <= 3
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    cu.c_custkey, 
+    cu.c_name, 
+    ts.s_name, 
+    ts.s_acctbal, 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_value
+FROM CustomerOrderSummary cu
+JOIN orders o ON cu.c_custkey = o.o_custkey
+JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN TopSuppliers ts ON li.l_partkey = ts.s_partkey
+WHERE li.l_shipdate < DATEADD(YEAR, -1, GETDATE())
+GROUP BY cu.c_custkey, cu.c_name, ts.s_name, ts.s_acctbal
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY total_value DESC;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+HighScoringUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS NumPosts,
+        SUM(b.Class = 1) AS GoldBadges, 
+        SUM(b.Class = 2) AS SilverBadges, 
+        SUM(b.Class = 3) AS BronzeBadges,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.NumPosts,
+    ru.GoldBadges,
+    ru.SilverBadges,
+    ru.BronzeBadges,
+    p.Title AS PostTitle,
+    p.Score,
+    p.CommentCount,
+    p.TotalBounty
+FROM 
+    HighScoringUsers ru
+JOIN 
+    RankedPosts p ON ru.UserId = p.OwnerUserId
+WHERE 
+    p.RankByScore = 1
+ORDER BY 
+    ru.Reputation DESC,
+    p.Score DESC
+LIMIT 10;

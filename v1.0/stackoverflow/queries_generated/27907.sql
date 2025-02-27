@@ -1,0 +1,44 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.AnswerCount DESC) AS RankByAnswers,
+        STUFF(
+            (SELECT ',' + t.TagName
+             FROM Tags t
+             JOIN Posts p2 ON p2.Tags LIKE '%<' + t.TagName + '>%' 
+             WHERE p2.Id = p.Id 
+             FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 
+            1, 1, '') AS TagList
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.PostTypeId = 1 -- only Questions
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.ViewCount,
+    r.AnswerCount,
+    r.RankByViews,
+    r.RankByAnswers,
+    r.TagList
+FROM 
+    Users u
+JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+WHERE 
+    (r.RankByViews <= 3 OR r.RankByAnswers <= 3) 
+ORDER BY 
+    u.Reputation DESC, r.ViewCount DESC;

@@ -1,0 +1,56 @@
+WITH PostTagCount AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(DISTINCT Tags.TagName) AS TagCount,
+        Posts.Title,
+        Posts.CreationDate,
+        Users.DisplayName AS OwnerDisplayName,
+        Posts.ViewCount
+    FROM Posts
+    JOIN Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN unnest(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')) AS TagName ON TRUE
+    LEFT JOIN Tags ON Tags.TagName = TagName
+    WHERE Posts.PostTypeId = 1  
+    GROUP BY Posts.Id, Posts.Title, Posts.CreationDate, Users.DisplayName, Posts.ViewCount
+),
+PostVoteStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        SUM(CASE WHEN VoteTypes.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypes.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN VoteTypes.Name = 'AcceptedByOriginator' THEN 1 ELSE 0 END) AS AcceptedCount
+    FROM Posts
+    LEFT JOIN Votes ON Votes.PostId = Posts.Id
+    LEFT JOIN VoteTypes ON Votes.VoteTypeId = VoteTypes.Id
+    WHERE Posts.PostTypeId = 1  
+    GROUP BY Posts.Id
+),
+UserBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        COUNT(CASE WHEN Badges.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Badges.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Badges.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Users
+    LEFT JOIN Badges ON Badges.UserId = Users.Id
+    GROUP BY Users.Id
+)
+SELECT 
+    PostTagCount.PostId,
+    PostTagCount.Title,
+    PostTagCount.TagCount,
+    PostVoteStats.UpVotes,
+    PostVoteStats.DownVotes,
+    PostVoteStats.AcceptedCount,
+    UserBadges.GoldBadges,
+    UserBadges.SilverBadges,
+    UserBadges.BronzeBadges,
+    PostTagCount.OwnerDisplayName,
+    PostTagCount.CreationDate,
+    PostTagCount.ViewCount
+FROM PostTagCount
+JOIN PostVoteStats ON PostTagCount.PostId = PostVoteStats.PostId
+JOIN Users ON PostTagCount.OwnerDisplayName = Users.DisplayName
+JOIN UserBadges ON Users.Id = UserBadges.UserId
+ORDER BY PostTagCount.ViewCount DESC, PostTagCount.TagCount DESC
+LIMIT 10;

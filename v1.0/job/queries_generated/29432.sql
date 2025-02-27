@@ -1,0 +1,44 @@
+WITH MovieData AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        ak.name AS actor_name,
+        r.role AS actor_role,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        aka_title at
+        JOIN cast_info ci ON at.id = ci.movie_id
+        JOIN aka_name ak ON ci.person_id = ak.person_id
+        JOIN role_type r ON ci.role_id = r.id
+        LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+        LEFT JOIN company_name c ON mc.company_id = c.id
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        at.id, ak.person_id, at.title, at.production_year, r.role
+),
+KeywordCount AS (
+    SELECT 
+        md.movie_title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        MovieData md
+        LEFT JOIN movie_keyword mk ON md.movie_title = (SELECT title FROM aka_title WHERE id = md.id)
+    GROUP BY 
+        md.movie_title
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_name,
+    md.actor_role,
+    md.company_count,
+    md.company_names,
+    kc.keyword_count
+FROM 
+    MovieData md
+    LEFT JOIN KeywordCount kc ON md.movie_title = kc.movie_title
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

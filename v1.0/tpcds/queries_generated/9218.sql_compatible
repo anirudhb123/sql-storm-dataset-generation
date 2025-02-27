@@ -1,0 +1,46 @@
+
+WITH DateRange AS (
+    SELECT d_date_sk, d_date
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+CustomerReturns AS (
+    SELECT sr.returned_date_sk, sr.item_sk, sr.return_quantity, sr.return_amt
+    FROM store_returns sr
+    JOIN Customer c ON sr.customer_sk = c.customer_sk
+    WHERE c.preferred_cust_flag = 'Y'
+),
+SalesData AS (
+    SELECT ws.bill_customer_sk, ws.item_sk, SUM(ws.quantity) AS total_quantity_sold, SUM(ws.net_profit) AS total_net_profit
+    FROM web_sales ws
+    JOIN DateRange dr ON ws.sold_date_sk = dr.d_date_sk
+    GROUP BY ws.bill_customer_sk, ws.item_sk
+),
+ReturnsSummary AS (
+    SELECT cr.item_sk, SUM(cr.return_quantity) AS total_return_quantity, SUM(cr.return_amt) AS total_return_amt
+    FROM CustomerReturns cr
+    GROUP BY cr.item_sk
+),
+FinalReport AS (
+    SELECT 
+        sd.bill_customer_sk,
+        sd.item_sk,
+        sd.total_quantity_sold,
+        sd.total_net_profit,
+        COALESCE(rs.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(rs.total_return_amt, 0) AS total_return_amt
+    FROM SalesData sd
+    LEFT JOIN ReturnsSummary rs ON sd.item_sk = rs.item_sk
+)
+SELECT 
+    fr.bill_customer_sk,
+    fr.item_sk,
+    fr.total_quantity_sold,
+    fr.total_net_profit,
+    fr.total_return_quantity,
+    fr.total_return_amt,
+    (fr.total_net_profit - fr.total_return_amt) AS net_profit_after_returns
+FROM FinalReport fr
+WHERE fr.total_quantity_sold > 100
+ORDER BY net_profit_after_returns DESC
+LIMIT 50;

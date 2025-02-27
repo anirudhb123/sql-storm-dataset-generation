@@ -1,0 +1,27 @@
+WITH SupplierTotals AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+), CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), RegionNation AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT
+    rnr.r_name,
+    CONCAT('Supplier ', s.s_suppkey, ' offers total supply cost: $', FORMAT(st.total_supply_cost, 2)) AS supply_info,
+    COALESCE(co.total_orders, 0) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY rnr.r_name ORDER BY st.total_supply_cost DESC) AS rank
+FROM SupplierTotals st
+JOIN supplier s ON s.s_suppkey = st.ps_suppkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = s.s_nationkey
+JOIN RegionNation rnr ON rnr.n_nationkey = s.s_nationkey
+WHERE st.total_supply_cost > (
+    SELECT AVG(total_supply_cost) FROM SupplierTotals
+) AND s.s_acctbal IS NOT NULL
+ORDER BY rnr.r_name, st.total_supply_cost DESC;

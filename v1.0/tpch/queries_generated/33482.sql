@@ -1,0 +1,75 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING
+        SUM(o.o_totalprice) IS NOT NULL
+),
+TopCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        tp.total_spent
+    FROM
+        SalesCTE tp
+    WHERE
+        tp.rank <= 10
+),
+MTD_Sales AS (
+    SELECT
+        EXTRACT(YEAR FROM o.o_orderdate) AS sales_year,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS mtd_sales
+    FROM
+        lineitem l
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY
+        EXTRACT(YEAR FROM o.o_orderdate)
+),
+SupplierSummary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+        NULLIF(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+)
+SELECT
+    c.c_name AS Customer_Name,
+    tc.total_spent AS Total_Spent,
+    s.s_name AS Supplier_Name,
+    ss.parts_count AS Parts_Count,
+    ss.total_supply_cost AS Total_Supply_Cost,
+    mtd.sales_year AS Year,
+    mtd.mtd_sales AS Month_To_Date_Sales
+FROM
+    TopCustomers tc
+JOIN
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    MTD_Sales mtd ON EXTRACT(YEAR FROM o.o_orderdate) = mtd.sales_year
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey) 
+WHERE
+    r.r_name LIKE '%Europe%' 
+ORDER BY 
+    tc.total_spent DESC, ss.total_supply_cost ASC;

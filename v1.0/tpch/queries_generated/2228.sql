@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+FilteredNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name LIKE 'Asia%'
+)
+SELECT 
+    f.n_nationkey,
+    f.n_name,
+    COUNT(DISTINCT s.s_suppkey) AS distinct_suppliers,
+    SUM(spd.ps_availqty) AS total_available_quantity,
+    SUM(spd.ps_supplycost * spd.ps_availqty) AS total_supply_value,
+    COALESCE(MAX(ro.o_orderdate), 'No Orders') AS last_order_date,
+    AVG(cos.total_spent) AS average_customer_spending
+FROM 
+    FilteredNation f
+LEFT JOIN 
+    SupplierPartDetails spd ON f.n_nationkey = spd.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = f.n_nationkey))
+LEFT JOIN 
+    CustomerOrderStats cos ON f.n_nationkey = cos.c_custkey
+GROUP BY 
+    f.n_nationkey,
+    f.n_name
+HAVING 
+    SUM(spd.ps_availqty) > 100
+ORDER BY 
+    total_supply_value DESC 
+FETCH FIRST 10 ROWS ONLY;

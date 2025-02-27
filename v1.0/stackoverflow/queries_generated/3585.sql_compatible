@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName,
+    ua.UpVotesCount,
+    ua.DownVotesCount,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    CASE 
+        WHEN rp.PostRank <= 5 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostType,
+    COALESCE(NULLIF(ua.UpVotesCount - ua.DownVotesCount, 0), 'No Votes') AS VoteBalance
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

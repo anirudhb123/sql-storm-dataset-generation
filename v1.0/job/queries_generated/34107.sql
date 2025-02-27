@@ -1,0 +1,40 @@
+WITH recursive movie_hierarchy AS (
+    SELECT
+        mt.title AS movie_title,
+        mt.production_year,
+        ml.linked_movie_id,
+        0 AS level
+    FROM title mt
+    JOIN movie_link ml ON mt.id = ml.movie_id
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        mt.title AS movie_title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN title mt ON mh.linked_movie_id = mt.id
+    JOIN movie_link ml ON mt.id = ml.movie_id
+)
+SELECT
+    mk.keyword,
+    COUNT(DISTINCT ch.name) AS character_count,
+    COUNT(DISTINCT ct.kind) AS company_types,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_note_presence,
+    STRING_AGG(DISTINCT mh.movie_title || ' (' || mh.production_year || ')', ', ') AS linked_movies
+FROM movie_keyword mk
+JOIN movie_info mi ON mk.movie_id = mi.movie_id
+JOIN aka_name an ON mi.movie_id = an.id
+LEFT JOIN char_name ch ON an.id = ch.imdb_id
+LEFT JOIN company_name cn ON mk.movie_id = cn.imdb_id
+LEFT JOIN movie_companies mc ON mk.movie_id = mc.movie_id
+LEFT JOIN comp_cast_type ct ON mc.company_type_id = ct.id
+LEFT JOIN cast_info ci ON mk.movie_id = ci.movie_id
+JOIN movie_hierarchy mh ON mh.linked_movie_id = mk.movie_id
+WHERE mk.keyword IS NOT NULL
+AND mh.level < 3
+GROUP BY mk.keyword
+ORDER BY character_count DESC, company_types DESC;

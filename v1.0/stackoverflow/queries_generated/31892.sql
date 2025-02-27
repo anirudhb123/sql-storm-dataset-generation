@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.RankByScore <= 5 THEN 'Top Score' 
+            WHEN rp.RankByViews <= 5 THEN 'Top Views'
+            ELSE 'Regular'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 24 THEN ph.CreationDate END) AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.PostCategory,
+    ub.BadgeCount,
+    phd.ClosedDate,
+    phd.LastEdited
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.PostCategory = 'Top Score'
+    OR ub.BadgeCount > 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

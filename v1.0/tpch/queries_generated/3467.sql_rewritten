@@ -1,0 +1,71 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+RankedOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.total_extended_price,
+        RANK() OVER (PARTITION BY od.o_orderdate ORDER BY od.total_extended_price DESC) AS rank_order
+    FROM 
+        OrderDetails od
+)
+SELECT 
+    cs.c_name,
+    ss.s_name,
+    ss.total_supply_cost,
+    cs.total_orders,
+    cs.order_count,
+    ro.o_orderdate,
+    ro.total_extended_price,
+    ro.rank_order
+FROM 
+    CustomerOrders cs
+JOIN 
+    SupplierStats ss ON ss.total_parts > 0 
+LEFT JOIN 
+    RankedOrders ro ON ro.rank_order = 1 
+                 AND ro.o_orderdate = cast('1998-10-01' as date) - INTERVAL '1 day'
+WHERE 
+    cs.total_orders > 1000 
+    AND ss.total_supply_cost IS NOT NULL
+ORDER BY 
+    ss.total_supply_cost DESC, 
+    cs.total_orders DESC;

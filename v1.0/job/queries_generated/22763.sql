@@ -1,0 +1,70 @@
+WITH RecursiveMovieCTE AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        CASE WHEN k.keyword IS NULL THEN 'UNKNOWN' ELSE k.keyword END AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS role_order
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        cast_info c ON m.id = c.movie_id
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        COUNT(DISTINCT co.id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name co ON mc.company_id = co.id
+    WHERE
+        co.country_code IS NOT NULL
+    GROUP BY
+        mc.movie_id
+),
+RoleStatistics AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS unique_actor_count,
+        COUNT(c.role_id) AS total_roles,
+        AVG(DISTINCT c.nr_order) AS avg_role_order
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+)
+
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.keyword,
+    COALESCE(ci.companies, 'NO COMPANIES') AS companies,
+    ci.company_count,
+    rs.unique_actor_count,
+    rs.total_roles,
+    rs.avg_role_order,
+    CASE
+        WHEN rs.total_roles > 0 THEN CAST(rs.total_roles AS FLOAT) / NULLIF(rs.unique_actor_count, 0)
+        ELSE NULL
+    END AS average_roles_per_actor
+FROM
+    RecursiveMovieCTE r
+LEFT JOIN
+    CompanyInfo ci ON r.movie_id = ci.movie_id
+LEFT JOIN
+    RoleStatistics rs ON r.movie_id = rs.movie_id
+WHERE
+    r.production_year IS NOT NULL
+    AND r.production_year <= (SELECT EXTRACT(YEAR FROM CURRENT_DATE) FROM dual) 
+    AND r.keyword NOT IN ('INVALID', '')
+ORDER BY
+    r.production_year DESC,
+    r.keyword ASC,
+    r.title;

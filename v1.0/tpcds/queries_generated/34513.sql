@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+high_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.total_sales > (SELECT AVG(total_sales) FROM sales_data)
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_paid
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+customer_ranks AS (
+    SELECT 
+        customer_id,
+        total_paid,
+        RANK() OVER (ORDER BY total_paid DESC) AS customer_rank
+    FROM 
+        top_customers
+),
+final_report AS (
+    SELECT 
+        ch.customer_id,
+        ch.total_paid,
+        hs.total_sales,
+        hs.total_quantity
+    FROM 
+        customer_ranks ch
+    LEFT JOIN 
+        high_sales hs ON hs.ws_item_sk = (SELECT TOP 1 ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = ch.customer_id ORDER BY ws_net_profit DESC)
+    WHERE 
+        ch.customer_rank <= 10
+)
+SELECT 
+    f.customer_id,
+    f.total_paid,
+    COALESCE(f.total_sales, 0) AS total_sales,
+    COALESCE(f.total_quantity, 0) AS total_quantity,
+    CASE WHEN f.total_sales IS NOT NULL THEN 'High Value' ELSE 'Low Value' END AS customer_type
+FROM 
+    final_report f
+ORDER BY 
+    f.total_paid DESC;

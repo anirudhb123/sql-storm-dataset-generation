@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        (SELECT COUNT(*) 
+         FROM partsupp ps2 
+         WHERE ps2.ps_partkey = p.p_partkey) AS total_suppliers
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+DateFilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        DATE_TRUNC('month', o.o_orderdate) AS order_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey, DATE_TRUNC('month', o.o_orderdate)
+),
+HighValueCustoms AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name,
+    rs.s_name,
+    rs.p_name,
+    rs.p_retailprice,
+    COALESCE(dfo.total_revenue, 0) AS total_revenue,
+    hvc.total_spent,
+    CASE 
+        WHEN hvc.total_spent IS NOT NULL AND hvc.total_spent > 10000 THEN 'VIP Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type,
+    COUNT(DISTINCT rs.supply_rank) AS distinct_supply_count
+FROM RankedSuppliers rs
+LEFT JOIN nation n ON rs.s_nationkey = n.n_nationkey
+LEFT JOIN DateFilteredOrders dfo ON dfo.o_custkey = rs.c_custkey
+LEFT JOIN HighValueCustoms hvc ON hvc.c_custkey = rs.c_custkey
+WHERE rs.supply_rank <= 3 AND rs.total_suppliers > 5
+GROUP BY n.n_name, rs.s_name, rs.p_name, rs.p_retailprice, dfo.total_revenue, hvc.total_spent
+HAVING COUNT(rs.s_suppkey) >= 2 OR (hvc.total_spent IS NOT NULL AND hvc.order_count > 3)
+ORDER BY n.n_name, total_revenue DESC NULLS LAST;

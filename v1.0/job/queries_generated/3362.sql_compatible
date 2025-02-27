@@ -1,0 +1,54 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        company_name cn ON cn.id IN (
+            SELECT mc.company_id 
+            FROM movie_companies mc 
+            WHERE mc.movie_id = t.id AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+        )
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT title, production_year, actor_count
+    FROM RankedMovies
+    WHERE rank <= 5
+),
+ActorInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        i.info AS actor_info
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    LEFT JOIN 
+        person_info i ON i.person_id = a.person_id AND i.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography')
+)
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    tm.actor_count,
+    ARRAY_AGG(DISTINCT ai.actor_name) AS actors,
+    STRING_AGG(DISTINCT ai.actor_info, '; ') AS biographies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorInfo ai ON ai.movie_title = tm.title AND ai.production_year = tm.production_year
+GROUP BY 
+    tm.title, tm.production_year, tm.actor_count
+ORDER BY 
+    tm.production_year DESC, tm.actor_count DESC;

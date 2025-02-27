@@ -1,0 +1,31 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rn,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY l.l_suppkey) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+), TopSuppliers AS (
+    SELECT r.r_name, rs.s_suppkey, rs.s_name, rs.s_acctbal, rs.total_revenue
+    FROM RankedSuppliers rs
+    JOIN nation n ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey)
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rs.rn = 1 AND rs.total_revenue > 10000
+), BottomSuppliers AS (
+    SELECT r.r_name, rs.s_suppkey, rs.s_name, rs.s_acctbal
+    FROM RankedSuppliers rs
+    JOIN nation n ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey)
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rs.rn > 1 OR (rs.total_revenue IS NULL AND rs.s_acctbal < 500)
+)
+SELECT r.r_name,
+       COALESCE(ts.s_name, bs.s_name) AS supplier_name,
+       COALESCE(ts.total_revenue, 0) AS total_revenue,
+       COALESCE(bs.s_acctbal, 0) AS bottom_acct_balance
+FROM region r
+LEFT JOIN TopSuppliers ts ON r.r_name = ts.r_name
+FULL OUTER JOIN BottomSuppliers bs ON r.r_name = bs.r_name
+WHERE (ts.total_revenue IS NOT NULL OR bs.s_acctbal IS NOT NULL)
+  AND (ts.s_suppkey IS NOT NULL OR bs.s_suppkey IS NOT NULL)
+ORDER BY r.r_name, ts.total_revenue DESC, bs.s_acctbal ASC;

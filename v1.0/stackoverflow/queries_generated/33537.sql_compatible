@@ -1,0 +1,76 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpVotes,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownVotes
+    FROM
+        Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate
+),
+RecentPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS AuthorDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM
+        Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+CloseReasons AS (
+    SELECT
+        PH.PostId,
+        C.Name AS CloseReason
+    FROM
+        PostHistory PH
+    JOIN CloseReasonTypes C ON CAST(PH.Comment AS INTEGER) = C.Id
+    WHERE
+        PH.PostHistoryTypeId = 10
+),
+UserScores AS (
+    SELECT
+        U.Id AS UserId,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM
+        Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    GROUP BY
+        U.Id
+)
+
+SELECT
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.LastAccessDate,
+    UA.PostCount,
+    UA.UpVotes,
+    UA.DownVotes,
+    COUNT(DISTINCT RP.PostId) AS RecentPostsCount,
+    SUM(COALESCE(RP.Score, 0)) AS TotalRecentScore,
+    COALESCE(GROUP_CONCAT(DISTINCT CR.CloseReason), 'No Closures') AS CloseReasons
+FROM
+    UserActivity UA
+LEFT JOIN RecentPosts RP ON UA.UserId = RP.AuthorDisplayName AND RP.RN <= 5
+LEFT JOIN CloseReasons CR ON RP.PostId = CR.PostId
+GROUP BY
+    UA.UserId, UA.DisplayName, UA.Reputation, UA.LastAccessDate, UA.PostCount, UA.UpVotes, UA.DownVotes
+ORDER BY
+    UA.Reputation DESC, RecentPostsCount DESC
+LIMIT 100;

@@ -1,0 +1,65 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_shipdate) AS lineitem_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+    SUM(COALESCE(cos.total_order_value, 0)) AS total_customer_order_value,
+    AVG(ot.net_revenue) AS avg_order_revenue,
+    MAX(CASE WHEN p.p_size = (SELECT MAX(p2.p_size) FROM part p2) THEN p.p_name END) AS largest_part_name
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    customer c ON s.s_suppkey = c.c_nationkey
+LEFT JOIN 
+    CustomerOrderSummary cos ON c.c_custkey = cos.c_custkey
+LEFT JOIN 
+    OrdersWithLineItems ot ON c.c_custkey = ot.o_orderkey
+LEFT JOIN 
+    PartSupplierDetails psd ON psd.p_partkey = ot.o_orderkey
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_customer_order_value DESC;

@@ -1,0 +1,45 @@
+
+WITH RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_in_nation
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT rc.*
+    FROM RankedCustomers rc
+    WHERE rc.rank_in_nation <= 3
+),
+SupplierStats AS (
+    SELECT ps.ps_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count,
+           SUM(ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_suppkey
+),
+NationalSuppliers AS (
+    SELECT ns.n_nationkey, s.s_suppkey, s.s_name, ss.total_cost
+    FROM nation ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+    JOIN SupplierStats ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE s.s_acctbal BETWEEN 1000 AND 10000
+),
+MaxShippingCost AS (
+    SELECT l.l_suppkey, MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_ship_cost
+    FROM lineitem l
+    GROUP BY l.l_suppkey
+),
+FinalResults AS (
+    SELECT tc.c_name, ns.s_name, ns.total_cost, msc.max_ship_cost
+    FROM TopCustomers tc
+    JOIN NationalSuppliers ns ON tc.c_nationkey = ns.n_nationkey
+    LEFT JOIN MaxShippingCost msc ON ns.s_suppkey = msc.l_suppkey
+    WHERE (ns.total_cost > 5000 AND msc.max_ship_cost IS NOT NULL)
+       OR (ns.total_cost <= 5000 AND msc.max_ship_cost IS NULL)
+)
+SELECT DISTINCT fr.c_name, fr.s_name, fr.total_cost, COALESCE(fr.max_ship_cost, 0) AS max_shipping_cost
+FROM FinalResults fr
+ORDER BY fr.total_cost DESC, fr.c_name ASC, fr.s_name DESC
+LIMIT 10;

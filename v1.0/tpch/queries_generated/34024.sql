@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON ps.ps_partkey = sc.ps_partkey
+    WHERE ps.ps_availqty > 0 AND s.s_suppkey <> sc.s_suppkey
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(ts.total_revenue) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN TotalSales ts ON o.o_orderkey = ts.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY customer_revenue DESC
+    LIMIT 5
+)
+SELECT p.p_name, p.p_brand, p.p_type, 
+       COALESCE(MAX(sc.ps_availqty), 0) AS max_available,
+       COALESCE(SUM(ts.total_revenue), 0) AS total_revenue_generated,
+       COUNT(DISTINCT tc.c_custkey) AS distinct_customers
+FROM part p
+LEFT JOIN SupplyChain sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN TotalSales ts ON ts.o_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    JOIN customer c ON o.o_custkey = c.c_custkey 
+    WHERE c.c_custkey IN (SELECT c_custkey FROM TopCustomers) AND r_regionkey = 0
+)
+LEFT JOIN TopCustomers tc ON tc.customer_revenue > 0
+GROUP BY p.p_name, p.p_brand, p.p_type
+HAVING MAX(sc.ps_availqty) > 0 OR COUNT(DISTINCT tc.c_custkey) > 0
+ORDER BY total_revenue_generated DESC, p.p_name;

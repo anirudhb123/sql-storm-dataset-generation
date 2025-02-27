@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopTags AS (
+    SELECT 
+        TRIM(tag) AS TagName,
+        COUNT(*) AS TagPostCount
+    FROM (
+        SELECT 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag
+        FROM 
+            Posts p
+        WHERE 
+            p.PostTypeId = 1
+    ) AS Tags
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 10 
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.ViewCount,
+        rp.AnswerCount,
+        tt.TagName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags tt ON tt.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+    WHERE 
+        rp.TagRank <= 5 
+),
+PostVoteSummary AS (
+    SELECT 
+        p.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.PostId
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.Body,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pvs.Upvotes,
+    pvs.Downvotes,
+    pd.TagName
+FROM 
+    PostDetails pd
+JOIN 
+    PostVoteSummary pvs ON pd.PostId = pvs.PostId
+ORDER BY 
+    pd.ViewCount DESC, 
+    pd.CreationDate DESC;

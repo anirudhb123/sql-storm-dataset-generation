@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Depth
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END ELSE 0 END) AS ReputationScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostTagDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS tagname ON TRUE
+    JOIN Tags t ON t.TagName = tagname
+    GROUP BY p.Id
+),
+PostWithHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        ph.Comment,
+        ph.CreationDate AS HistoryDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 24  
+)
+
+SELECT 
+    r.PostId,
+    r.Title AS PostTitle,
+    r.Depth,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(up.ReputationScore, 0) AS OwnerReputation,
+    pt.Tags,
+    ph.Comment AS SuggestedEditComment,
+    ph.HistoryDate,
+    ROW_NUMBER() OVER (PARTITION BY r.PostId ORDER BY ph.HistoryDate DESC) AS EditRank
+FROM RecursivePostHierarchy r
+JOIN Users u ON r.OwnerUserId = u.Id
+JOIN UserReputation up ON u.Id = up.UserId
+LEFT JOIN PostTagDetails pt ON pt.PostId = r.PostId
+LEFT JOIN PostWithHistory ph ON ph.PostId = r.PostId
+WHERE r.Depth < 3  
+AND (up.ReputationScore > 100 OR r.Depth = 0)  
+ORDER BY r.PostId, EditRank DESC;

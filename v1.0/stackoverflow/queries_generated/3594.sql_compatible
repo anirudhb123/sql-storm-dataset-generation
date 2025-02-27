@@ -1,0 +1,59 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(v.CreationDate) OVER (PARTITION BY u.Id) AS AvgVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgVoteDate,
+        UserRank
+    FROM UserActivity
+    WHERE Reputation > 1000
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY p.Id
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    COALESCE(cp.CloseCount, 0) AS ClosedPostCount,
+    CASE 
+        WHEN u.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorType,
+    CASE 
+        WHEN cp.LastClosedDate IS NULL THEN 'No Closed Posts'
+        WHEN cp.LastClosedDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 'Recently Closed'
+        ELSE 'Active Closing'
+    END AS ClosePostActivity
+FROM TopUsers u
+LEFT JOIN ClosedPosts cp ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+ORDER BY u.Reputation DESC, u.DisplayName ASC;

@@ -1,0 +1,44 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id, m.title, mh.level + 1
+    FROM aka_title m
+    JOIN movie_hierarchy mh ON mh.movie_id = m.episode_of_id
+)
+, cast_statistics AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) AS credited_cast,
+        COUNT(CASE WHEN c.note IS NULL THEN 1 END) AS uncredited_cast
+    FROM cast_info c
+    GROUP BY c.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    COALESCE(cs.total_cast, 0) AS total_cast,
+    COALESCE(cs.credited_cast, 0) AS credited_cast,
+    COALESCE(cs.uncast_cast, 0) AS uncredited_cast,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    COUNT(DISTINCT ci.id) AS company_count,
+    MAX(CASE WHEN ci.company_id IS NOT NULL THEN ci.note ELSE 'N/A' END) AS company_note,
+    STRING_AGG(DISTINCT pi.info, '; ') AS person_infos
+FROM movie_hierarchy mh
+LEFT JOIN cast_statistics cs ON mh.movie_id = cs.movie_id 
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id 
+LEFT JOIN company_name cn ON mc.company_id = cn.id 
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id 
+LEFT JOIN keyword k ON mk.keyword_id = k.id 
+LEFT JOIN complete_cast ci ON mh.movie_id = ci.movie_id 
+LEFT JOIN person_info pi ON ci.subject_id = pi.person_id
+WHERE mh.level <= 3 
+GROUP BY mh.movie_id, mh.title
+HAVING COUNT(DISTINCT ci.id) > 1
+ORDER BY mh.title ASC, COALESCE(cs.total_cast, 0) DESC
+LIMIT 50;

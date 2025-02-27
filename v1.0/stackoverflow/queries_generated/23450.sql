@@ -1,0 +1,77 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowAsc,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.LastActivityDate >= NOW() - INTERVAL '30 days'
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class::int), 0) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS PostedCount,
+        COUNT(DISTINCT v.Id) AS VotesReceivedCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBadges,
+        ua.PostedCount,
+        ua.VotesReceivedCount,
+        CASE 
+            WHEN rp.Score >= 10 THEN 'High'
+            WHEN rp.Score BETWEEN 5 AND 9 THEN 'Medium'
+            ELSE 'Low'
+        END AS ScoreCategory
+    FROM 
+        RecentPosts rp
+    JOIN 
+        UserActivity ua ON rp.OwnerUserId = ua.UserId
+    WHERE 
+        rp.RowAsc = 1
+)
+SELECT 
+    ps.*,
+    COALESCE(NULLIF(ps.VotesReceivedCount, 0), CAST(NULL AS int)) AS AdjustedVotesReceived,
+    CASE 
+        WHEN ps.TotalBadges > 5 THEN 'Active Contributor'
+        ELSE 'Novice Contributor'
+    END AS ContributorStatus
+FROM 
+    PostSummary ps
+WHERE 
+    ps.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+ORDER BY 
+    ps.Score DESC,
+    ps.ViewCount DESC
+LIMIT 100;
+
+-- Additional performance benchmarks can be observed through execution times and row counts 
+-- by utilizing EXPLAIN ANALYZE for comparative analysis with different query structures.

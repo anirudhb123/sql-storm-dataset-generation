@@ -1,0 +1,60 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        NTILE(5) OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rating_quantile,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_in_kind
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.id) AS total_roles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, a.name, r.role
+), 
+FilteredMovies AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title mt ON mk.movie_id = mt.id
+    WHERE 
+        k.keyword ILIKE '%action%' OR k.keyword ILIKE '%drama%'
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    cd.actor_name,
+    cd.role_name,
+    fm.keyword_count,
+    tt.rating_quantile
+FROM 
+    RankedTitles tt
+LEFT JOIN 
+    CastDetails cd ON tt.title_id = cd.movie_id
+LEFT JOIN 
+    FilteredMovies fm ON tt.title_id = fm.movie_id
+WHERE 
+    tt.rating_quantile <= 3
+    AND (fm.keyword_count IS NULL OR fm.keyword_count > 2)
+ORDER BY 
+    tt.production_year DESC, cd.actor_name;

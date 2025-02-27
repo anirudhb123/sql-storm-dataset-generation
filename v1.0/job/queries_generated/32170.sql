@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        mh.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title t ON m.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT m.movie_id) AS linked_movies,
+    AVG(t.production_year) OVER (PARTITION BY a.id) AS avg_production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_collected,
+    CASE 
+        WHEN COUNT(DISTINCT mk.keyword_id) = 0 THEN 'No keywords'
+        ELSE 'Keywords present'
+    END AS keyword_status
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year IS NOT NULL 
+    AND (ci.note IS NULL OR ci.note != 'Cameo')
+GROUP BY 
+    actor_name, t.title, t.production_year, a.id
+ORDER BY 
+    COUNT(DISTINCT m.movie_id) DESC, 
+    avg_production_year DESC
+LIMIT 100;
+
+### Explanation:
+- The query begins with a recursive Common Table Expression (CTE) called `MovieHierarchy`, which builds a hierarchy of movies starting from those produced after the year 2000, including linked movies.
+- The main query retrieves the names of actors alongside the movies they appeared in, counting unique linked movies for those titles.
+- An aggregate function `AVG` calculates the average production year for each actor using a window function.
+- The `STRING_AGG` function collects keywords from a joined table.
+- A conditional expression checks for the presence of keywords, categorizing the results as ‘No keywords’ or ‘Keywords present’.
+- It employs `LEFT JOIN`s to include additional related data, ensuring actors with no links or keywords still appear in the results.
+- Finally, the results are ordered by the count of linked movies and average production year, limited to the top 100 results for performance benchmarking.

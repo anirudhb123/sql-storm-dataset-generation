@@ -1,0 +1,65 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales_qty,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_amt
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+), 
+ItemInfo AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category,
+        i.i_current_price
+    FROM 
+        item i
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    is.total_sales_qty,
+    is.total_sales_amt,
+    ii.i_item_desc,
+    ii.i_brand,
+    ii.i_category,
+    ii.i_current_price
+FROM 
+    CustomerInfo ci
+JOIN 
+    ItemSales is ON ci.c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = is.ws_item_sk)
+JOIN 
+    ItemInfo ii ON is.ws_item_sk = ii.i_item_sk
+WHERE 
+    ci.cd_gender = 'F' AND
+    ci.cd_marital_status = 'M' AND
+    ci.cd_purchase_estimate > 500
+ORDER BY 
+    total_sales_amt DESC
+LIMIT 100;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Trim(BOTH '<>' FROM Tags), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName) AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 12) -- Edit Title, Edit Body, Post Deleted
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Author,
+    rp.CommentCount,
+    COALESCE(phs.ChangeCount, 0) AS EditCount,
+    COALESCE(phs.Editors, 'N/A') AS LastEditedBy,
+    pt.TagName AS PopularTag
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+CROSS JOIN 
+    PopularTags pt
+WHERE 
+    rp.PostRank = 1 -- Get the latest post per user
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, pt.TagCount DESC
+LIMIT 10;

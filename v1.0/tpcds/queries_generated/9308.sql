@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        SUM(ss_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) as sales_rank
+    FROM 
+        store_sales 
+    GROUP BY 
+        s_store_sk, ss_item_sk
+),
+TopStores AS (
+    SELECT 
+        store.s_store_name,
+        store.s_city,
+        store.s_state,
+        RankedSales.ss_item_sk,
+        RankedSales.total_sales
+    FROM 
+        store 
+    JOIN 
+        RankedSales ON store.s_store_sk = RankedSales.s_store_sk
+    WHERE 
+        RankedSales.sales_rank <= 5
+),
+CustomerParticipation AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_addr_sk,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_first_name, c.c_last_name, c.c_current_addr_sk
+    HAVING 
+        total_spent > 1000
+),
+SalesSummary AS (
+    SELECT 
+        t.s_store_name,
+        t.s_city,
+        t.s_state,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_spent
+    FROM 
+        TopStores t
+    JOIN 
+        CustomerParticipation c ON t.ss_item_sk = c.c_current_addr_sk
+)
+SELECT 
+    s_store_name,
+    s_city,
+    s_state,
+    COUNT(DISTINCT c_first_name) AS participating_customers,
+    SUM(total_spent) AS total_revenue
+FROM 
+    SalesSummary
+GROUP BY 
+    s_store_name, s_city, s_state
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

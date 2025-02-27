@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+top_items AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_desc,
+        SUM(ss.total_quantity) AS total_quantity_sold,
+        SUM(ss.total_sales) AS total_sales_value
+    FROM sales_summary ss
+    JOIN item ON ss.ws_item_sk = item.i_item_sk
+    WHERE ss.rank <= 5
+    GROUP BY item.i_item_sk, item.i_item_desc
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ti.total_quantity_sold,
+        ti.total_sales_value,
+        CASE 
+            WHEN ci.cd_gender = 'F' THEN 'Female'
+            WHEN ci.cd_gender = 'M' THEN 'Male'
+            ELSE 'Other'
+        END AS gender,
+        (SELECT ib_lower_bound FROM income_band ib WHERE ib.ib_income_band_sk = ci.cd_income_band_sk) AS income_lower,
+        (SELECT ib_upper_bound FROM income_band ib WHERE ib.ib_income_band_sk = ci.cd_income_band_sk) AS income_upper
+    FROM top_items ti
+    JOIN customer_info ci ON ti.total_quantity_sold > 100
+)
+SELECT 
+    s.c_first_name AS Customer_First_Name,
+    s.c_last_name AS Customer_Last_Name,
+    s.gender,
+    s.income_lower AS Income_Lower_Bound,
+    s.income_upper AS Income_Upper_Bound,
+    SUM(CASE WHEN s.total_sales_value >= 1000 THEN 1 ELSE 0 END) AS high_value_sales_count,
+    COUNT(*) OVER (PARTITION BY s.gender) AS gender_based_count
+FROM sales_data s
+GROUP BY s.c_first_name, s.c_last_name, s.gender, s.income_lower, s.income_upper
+ORDER BY total_quantity_sold DESC
+LIMIT 10;

@@ -1,0 +1,41 @@
+WITH MovieCounts AS (
+    SELECT 
+        a.title, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS has_note_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON a.movie_id = cc.movie_id
+    LEFT JOIN 
+        company_name cn ON a.movie_id = cn.imdb_id
+    LEFT JOIN 
+        movie_info mi ON a.movie_id = mi.movie_id AND mi.note IS NOT NULL
+    LEFT JOIN 
+        movie_companies mc ON a.movie_id = mc.movie_id
+    GROUP BY 
+        a.title
+),
+TopMovies AS (
+    SELECT 
+        title,
+        actor_count,
+        has_note_count,
+        RANK() OVER (ORDER BY actor_count DESC) AS rank
+    FROM 
+        MovieCounts
+)
+SELECT 
+    title, 
+    actor_count, 
+    has_note_count, 
+    rank,
+    CONCAT('This movie features ', actor_count, ' actors and has ', has_note_count, ' notes.') AS description
+FROM 
+    TopMovies
+WHERE 
+    rank <= 10
+ORDER BY 
+    actor_count DESC;

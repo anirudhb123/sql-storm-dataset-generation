@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(ws_sold_date_sk) FROM web_sales) 
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk + 1,
+        ws_item_sk,
+        SUM(ws_quantity),
+        SUM(ws_net_profit)
+    FROM sales_trends
+    WHERE ws_item_sk IS NOT NULL
+    GROUP BY ws_item_sk
+),
+item_performance AS (
+    SELECT
+        i_item_sk,
+        i_product_name,
+        COALESCE(SUM(st.total_quantity), 0) AS total_units_sold,
+        COALESCE(SUM(st.total_profit), 0) AS total_profit_generated
+    FROM item i
+    LEFT JOIN sales_trends st ON i.i_item_sk = st.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_product_name
+),
+top_items AS (
+    SELECT 
+        ip.i_item_sk,
+        ip.i_product_name,
+        ip.total_units_sold,
+        ip.total_profit_generated,
+        DENSE_RANK() OVER (ORDER BY ip.total_profit_generated DESC) AS profit_rank
+    FROM item_performance ip
+)
+SELECT 
+    a.ca_city,
+    a.ca_state,
+    ti.i_product_name,
+    ti.total_units_sold,
+    ti.total_profit_generated,
+    CASE 
+        WHEN ti.total_profit_generated IS NULL THEN 'No Profit'
+        ELSE 'Profitable'
+    END AS profit_status
+FROM customer_address a
+JOIN customer c ON a.ca_address_sk = c.c_current_addr_sk
+JOIN top_items ti ON ti.total_units_sold > 1000
+WHERE c.c_customer_sk IN (
+    SELECT sr_customer_sk
+    FROM store_returns 
+    WHERE sr_return_quantity > 0 
+    GROUP BY sr_customer_sk
+)
+OR ti.total_profit_generated IS NOT NULL
+ORDER BY a.ca_city, a.ca_state, ti.total_profit_generated DESC;

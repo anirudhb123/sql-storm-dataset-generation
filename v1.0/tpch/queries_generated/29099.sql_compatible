@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        CONCAT('Brand: ', p.p_brand, ', Name: ', p.p_name) AS part_description
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 50.00
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    r.r_name AS region_name,
+    rs.s_name AS supplier_name,
+    fp.part_description,
+    co.c_name AS customer_name,
+    co.total_orders,
+    co.total_spent
+FROM 
+    RankedSuppliers rs
+JOIN 
+    region r ON rs.s_nationkey = r.r_regionkey
+JOIN 
+    FilteredParts fp ON rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = fp.p_partkey)
+JOIN 
+    CustomerOrders co ON co.total_spent > 1000.00
+WHERE 
+    rs.rank <= 3
+ORDER BY 
+    r.r_name, co.total_spent DESC, fp.part_description;

@@ -1,0 +1,82 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+AggregatedSales AS (
+    SELECT 
+        s.ws_sold_date_sk,
+        s.ws_item_sk,
+        SUM(s.total_quantity) AS aggregated_quantity,
+        SUM(s.total_sales) AS aggregated_sales
+    FROM 
+        SalesCTE s
+    GROUP BY 
+        s.ws_sold_date_sk, s.ws_item_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesWithDemographics AS (
+    SELECT 
+        a.aggregated_quantity,
+        a.aggregated_sales,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender
+    FROM 
+        AggregatedSales a
+    LEFT JOIN 
+        web_sales ws ON a.ws_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        CustomerDetails c ON ws.ws_bill_customer_sk = c.c_customer_sk
+),
+RankedSales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY aggregated_sales DESC) AS rank
+    FROM 
+        SalesWithDemographics
+)
+SELECT 
+    COALESCE(c.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(c.c_last_name, 'Unknown') AS customer_last_name,
+    s.aggregated_quantity,
+    s.aggregated_sales,
+    s.rank
+FROM 
+    RankedSales s
+LEFT JOIN 
+    CustomerDetails c ON s.c_customer_sk = c.c_customer_sk
+WHERE 
+    (s.aggregated_sales IS NOT NULL AND s.aggregated_sales > 0)
+    OR (s.aggregated_quantity IS NOT NULL AND s.aggregated_quantity > 0)
+ORDER BY 
+    s.rank
+LIMIT 50;

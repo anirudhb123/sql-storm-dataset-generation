@@ -1,0 +1,59 @@
+
+WITH sales_summary AS (
+    SELECT 
+        customer.c_customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS avg_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    JOIN 
+        customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    GROUP BY 
+        customer.c_customer_id
+),
+demographics_summary AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT cs_order_number) AS orders_count,
+        SUM(cs_ext_sales_price) AS total_sales,
+        AVG(cs_net_profit) AS avg_profit
+    FROM 
+        catalog_sales
+    JOIN 
+        customer ON catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
+    JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+profitability_analysis AS (
+    SELECT 
+        ss.c_customer_id,
+        ss.total_sales,
+        ss.avg_profit,
+        ds.orders_count,
+        ds.total_sales AS demo_total_sales,
+        ds.avg_profit AS demo_avg_profit
+    FROM 
+        sales_summary ss
+    JOIN 
+        demographics_summary ds ON ss.total_sales > ds.total_sales
+)
+SELECT 
+    p.c_customer_id,
+    p.total_sales,
+    p.avg_profit,
+    d.orders_count AS demographic_orders,
+    d.demo_total_sales,
+    d.demo_avg_profit
+FROM 
+    profitability_analysis p
+JOIN 
+    demographics_summary d ON p.total_sales > d.total_sales
+WHERE 
+    p.avg_profit > 1000
+ORDER BY 
+    p.total_sales DESC
+LIMIT 100;

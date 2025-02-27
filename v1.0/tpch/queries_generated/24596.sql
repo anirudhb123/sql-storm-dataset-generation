@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighVolumeCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationParts AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(n.parts_supplied, 0) AS parts_supplied,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * l.l_discount ELSE 0 END) AS total_discounted_revenue,
+    AVG(l.l_quantity) OVER (PARTITION BY r.r_regionkey) AS avg_quantity_per_region
+FROM 
+    region r
+LEFT JOIN 
+    NationParts n ON r.r_regionkey = n.n_nationkey
+LEFT JOIN 
+    HighVolumeCustomers c ON r.r_regionkey IN (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+GROUP BY 
+    r.r_name, n.parts_supplied, c.total_spent
+HAVING 
+    SUM(l.l_quantity) IS NOT NULL
+    AND COUNT(DISTINCT l.l_orderkey) > (SELECT AVG(order_count) FROM (SELECT COUNT(DISTINCT l_orderkey) AS order_count FROM lineitem GROUP BY l_partkey) AS avg_orders)
+ORDER BY 
+    r.r_name ASC;

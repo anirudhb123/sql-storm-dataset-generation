@@ -1,0 +1,84 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rnk
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_custkey,
+        c.c_name,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE
+        o.o_orderdate >= (DATE '1998-10-01' - INTERVAL '1 year')
+),
+SupplierSales AS (
+    SELECT
+        o.o_orderkey,
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        l.l_shipdate BETWEEN o.o_orderdate AND (o.o_orderdate + INTERVAL '30 days')
+    GROUP BY
+        o.o_orderkey, s.s_suppkey
+),
+FilteredSales AS (
+    SELECT
+        s.s_suppkey,
+        SUM(ss.total_sales) AS total_supp_sales
+    FROM
+        SupplierSales ss
+    JOIN
+        RankedSuppliers s ON ss.s_suppkey = s.s_suppkey
+    WHERE
+        s.rnk = 1
+    GROUP BY
+        s.s_suppkey
+)
+SELECT
+    r.s_suppkey,
+    r.s_name,
+    COALESCE(fs.total_supp_sales, 0) AS supplier_sales,
+    COUNT(ro.o_orderkey) AS recent_orders,
+    AVG(ro.o_totalprice) AS avg_recent_order_price
+FROM
+    RankedSuppliers r
+LEFT JOIN
+    FilteredSales fs ON r.s_suppkey = fs.s_suppkey
+LEFT JOIN
+    RecentOrders ro ON ro.c_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IS NULL)
+    )
+WHERE
+    r.rnk <= 5
+GROUP BY
+    r.s_suppkey, r.s_name
+ORDER BY
+    supplier_sales DESC, recent_orders DESC, avg_recent_order_price ASC;

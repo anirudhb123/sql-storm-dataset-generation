@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000  -- Filtering for modern movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,  -- Using linked movies to build hierarchy
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    kh.keyword AS movie_keyword,
+    a.id AS actor_id,
+    a.name AS actor_name,
+    th.title AS movie_title,
+    th.production_year,
+    COUNT(*) OVER (PARTITION BY kh.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY kh.keyword ORDER BY th.production_year DESC) AS recent_movies_rank
+FROM 
+    MovieHierarchy mh
+JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+JOIN 
+    keyword kh ON mk.keyword_id = kh.id
+LEFT JOIN 
+    cast_info ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    aka_name a ON ca.person_id = a.person_id
+LEFT JOIN 
+    aka_title th ON mh.movie_id = th.id
+WHERE 
+    a.name IS NOT NULL  -- Ensuring actor name is not null
+    AND th.production_year IS NOT NULL  -- Ensuring production year is not null
+    AND a.id IS NOT NULL  -- Ensuring actor ID is not null
+ORDER BY 
+    kh.keyword, 
+    mh.production_year DESC;

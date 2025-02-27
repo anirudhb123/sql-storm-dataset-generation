@@ -1,0 +1,105 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id, 
+        ParentId, 
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    
+    SELECT 
+        TRIM(REGEXP_REPLACE(Tags, '[<>]', '')) AS TagName, 
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TRIM(REGEXP_REPLACE(Tags, '[<>]', ''))
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+PostHistorySummary AS (
+    
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(*) AS TotalEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName, 
+    u.Reputation, 
+    pa.PostCount,
+    pa.QuestionCount,
+    pa.AnswerCount,
+    pa.UpVoteCount,
+    pa.DownVoteCount,
+    COUNT(DISTINCT pt.TagName) AS DistinctPopularTags,
+    phs.ClosedDate, 
+    phs.ReopenedDate, 
+    phs.TotalEdits
+FROM 
+    UserActivity pa
+JOIN 
+    Users u ON pa.UserId = u.Id
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    (SELECT TagName FROM PopularTags ORDER BY UsageCount DESC LIMIT 5) pt ON true
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.DisplayName, 
+    u.Reputation, 
+    pa.PostCount, 
+    pa.QuestionCount, 
+    pa.AnswerCount, 
+    pa.UpVoteCount, 
+    pa.DownVoteCount,
+    phs.ClosedDate, 
+    phs.ReopenedDate, 
+    phs.TotalEdits
+ORDER BY 
+    u.Reputation DESC;

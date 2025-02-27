@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_paid) AS Total_Sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_paid) DESC) AS Sales_Rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_id, ws.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(wr.returned_date_sk) AS Total_Returns
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        customer c ON wr.returning_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_customer_sk IS NOT NULL
+    GROUP BY 
+        wr.returning_customer_sk
+),
+CombinedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COALESCE(cr.Total_Returns, 0) AS Return_Count,
+        COALESCE(rs.Total_Sales, 0) AS Sales_Amount
+    FROM 
+        CustomerReturns cr
+    FULL OUTER JOIN 
+        (SELECT 
+            r.returning_customer_sk, 
+            SUM(ws.net_paid) AS Total_Sales
+         FROM 
+            web_sales ws
+         JOIN 
+            web_returns r ON ws.ws_order_number = r.wr_order_number
+         GROUP BY 
+            r.returning_customer_sk) rs 
+    ON 
+        cr.returning_customer_sk = rs.returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.Return_Count,
+        cr.Sales_Amount,
+        CASE 
+            WHEN cr.Return_Count > 0 THEN (cr.Sales_Amount / NULLIF(cr.Return_Count, 0))
+            ELSE NULL 
+        END AS Average_Sale_Per_Return
+    FROM 
+        CombinedReturns cr
+)
+SELECT 
+    fr.returning_customer_sk,
+    fr.Return_Count,
+    fr.Sales_Amount,
+    fr.Average_Sale_Per_Return,
+    CASE 
+        WHEN fr.Return_Count IS NULL THEN 'No Returns'
+        WHEN fr.Average_Sale_Per_Return > 100 THEN 'High Value Returner'
+        ELSE 'Regular Returner'
+    END AS Customer_Type
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.Sales_Amount DESC
+LIMIT 10;

@@ -1,0 +1,70 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes,
+        SUM(CASE WHEN V.VoteTypeId = 7 THEN 1 ELSE 0 END) AS ReopenVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments
+    FROM Posts P
+    WHERE P.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+PostAnalytics AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.AnswerCount,
+        PS.CommentCount,
+        PS.CreationDate,
+        COALESCE(CP.CloseCount, 0) AS CloseCount,
+        U.DisplayName AS OwnerName,
+        US.TotalVotes,
+        US.UpVotes,
+        US.DownVotes
+    FROM PostStats PS
+    JOIN Users U ON PS.OwnerUserId = U.Id
+    LEFT JOIN ClosedPosts CP ON PS.PostId = CP.PostId
+    LEFT JOIN UserVoteStats US ON U.Id = US.UserId
+)
+SELECT 
+    PA.*,
+    CASE 
+        WHEN PA.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN PA.TotalVotes > PA.UpVotes + PA.DownVotes THEN 'Suspicious Activity'
+        ELSE 'Normal Activity'
+    END AS ActivityNote
+FROM PostAnalytics PA
+WHERE PA.AnswerCount > 0 
+AND PA.CloseCount = 0
+ORDER BY PA.Score DESC, PA.ViewCount DESC
+LIMIT 100;

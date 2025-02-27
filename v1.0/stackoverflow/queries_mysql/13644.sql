@@ -1,0 +1,15 @@
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AverageScore,
+    AVG(p.ViewCount) AS AverageViewCount,
+    COUNT(DISTINCT p.OwnerUserId) AS TotalUsers
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name, p.Score, p.ViewCount, p.OwnerUserId
+ORDER BY 
+    TotalPosts DESC;

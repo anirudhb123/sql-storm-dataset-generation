@@ -1,0 +1,54 @@
+-- Performance Benchmarking Query
+WITH PostData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01'  -- Consider posts created in 2023
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(V.Score) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes V ON p.Id = V.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.OwnerDisplayName,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.TotalVotes
+FROM 
+    PostData pd
+JOIN 
+    UserStatistics us ON pd.OwnerDisplayName = us.DisplayName
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC; 
+

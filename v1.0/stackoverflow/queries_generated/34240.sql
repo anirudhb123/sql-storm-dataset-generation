@@ -1,0 +1,60 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        AcceptedAnswerId IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        rp.PostLevel + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+)
+
+SELECT 
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(COALESCE(p.Score, 0)) AS TotalScore,
+    SUM(CASE WHEN bh.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN bh.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN bh.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    MAX(p.LastActivityDate) AS LastActiveDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    PostsTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.PostId
+WHERE 
+    u.Reputation > 1000 AND 
+    p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+    (p.Score > 0 OR r.PostLevel IS NOT NULL)
+GROUP BY 
+    u.Id
+ORDER BY 
+    TotalScore DESC, 
+    LastActiveDate DESC;

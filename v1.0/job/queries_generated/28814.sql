@@ -1,0 +1,62 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        rn = ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title)
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        a.name AS actor_name,
+        rt.title,
+        rt.production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        RankedTitles rt ON ci.movie_id = rt.title_id
+),
+
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+
+SELECT 
+    cd.actor_name,
+    cd.title,
+    cd.production_year,
+    ci.company_name,
+    ci.company_type,
+    COUNT(*) OVER (PARTITION BY cd.title ORDER BY cd.actor_name) AS actor_count
+FROM 
+    CastDetails cd
+LEFT JOIN 
+    CompanyInfo ci ON cd.movie_id = ci.movie_id
+WHERE 
+    cd.actor_name ILIKE '%Smith%'
+ORDER BY 
+    cd.production_year DESC, 
+    cd.actor_name;
+This SQL query benchmarks string processing by joining multiple tables related to movies and their casts, filtering for a specific actor's name pattern, and ordering the results efficiently based on various attributes.

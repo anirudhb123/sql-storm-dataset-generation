@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND cn.country_code < '[gi]' AND n.md5sum IN ('1c1a41ee35fbe4d0f061c70903dcb826', '252c618862c525091a43daeafad3859a', '2e6881ea511dd0da42647232fbe800dc', '2eb024d9619c1dadd1430f2112f5c48b', 'a64b0404571808dd079f7ef671e07e6e', 'f4243d9094df1bd88f94221291fe7eac') AND t.title < 'Married on MySpace';

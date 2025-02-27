@@ -1,0 +1,60 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        d.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cs.total_sales) AS total_sales_amount,
+        COUNT(cs.order_count) AS total_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+
+SalesByDemo AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        SUM(total_sales_amount) AS total_sales
+    FROM 
+        CustomerDemographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+)
+
+SELECT 
+    sbd.cd_gender,
+    sbd.cd_marital_status,
+    sbd.total_sales,
+    CASE 
+        WHEN sbd.total_sales < 10000 THEN 'Low Sales'
+        WHEN sbd.total_sales BETWEEN 10000 AND 50000 THEN 'Medium Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM 
+    SalesByDemo sbd
+ORDER BY 
+    sbd.total_sales DESC;

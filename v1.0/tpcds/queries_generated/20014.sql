@@ -1,0 +1,86 @@
+
+WITH CustomerMetrics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_dep_count,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'No Dependents'
+            WHEN cd.cd_dep_count > 0 THEN 'Has Dependents'
+            ELSE 'No Dependents'
+        END AS dependent_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+ReturnData AS (
+    SELECT 
+        sr_customer_sk,
+        COALESCE(SUM(sr_return_amt), 0) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+FinalStats AS (
+    SELECT 
+        cm.c_customer_sk,
+        cm.c_customer_id,
+        cm.cd_gender,
+        cm.cd_marital_status,
+        COALESCE(sd.total_net_profit, 0) AS total_net_profit,
+        COALESCE(rd.total_returned_amount, 0) AS total_returned_amount,
+        (COALESCE(sd.order_count, 0) * 1.0 / NULLIF(cd.cd_dep_count, 0)) AS avg_order_per_dependent
+    FROM 
+        CustomerMetrics cm
+    LEFT JOIN 
+        SalesData sd ON cm.c_customer_sk = sd.ws_bill_customer_sk
+    LEFT JOIN 
+        ReturnData rd ON cm.c_customer_sk = rd.sr_customer_sk
+)
+
+SELECT 
+    f.c_customer_id,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.total_net_profit,
+    f.total_returned_amount,
+    f.avg_order_per_dependent,
+    CASE 
+        WHEN f.total_net_profit > (SELECT AVG(total_net_profit) FROM FinalStats) THEN 'Above Average Profit'
+        ELSE 'Below Average Profit'
+    END AS profitability_status
+FROM 
+    FinalStats f
+WHERE 
+    f.total_returned_amount < f.total_net_profit * 0.1
+ORDER BY 
+    f.total_net_profit DESC
+LIMIT 100
+OFFSET 0
+UNION ALL
+SELECT 
+    'Total Count' AS c_customer_id,
+    NULL AS cd_gender,
+    NULL AS cd_marital_status,
+    COUNT(*) AS total_net_profit,
+    NULL AS total_returned_amount,
+    NULL AS avg_order_per_dependent,
+    NULL AS profitability_status
+FROM 
+    FinalStats;

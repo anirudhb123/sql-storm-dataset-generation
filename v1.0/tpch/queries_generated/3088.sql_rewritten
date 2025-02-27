@@ -1,0 +1,37 @@
+WITH SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+
+CustomerOrder AS (
+    SELECT o.o_orderkey, o.o_custkey, c.c_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey, c.c_name
+), 
+
+NationsSuppliers AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+
+SELECT r.r_name, ns.supplier_count, COALESCE(SUM(sc.total_supply_cost), 0) AS total_cost,
+       STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names,
+       CASE 
+           WHEN COUNT(DISTINCT co.o_orderkey) > 10 THEN 'High Volume'
+           ELSE 'Low Volume'
+       END AS order_volume_category
+FROM region r
+LEFT JOIN NationsSuppliers ns ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = 'YourNation')  
+LEFT JOIN SupplierCost sc ON (sc.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))  
+LEFT JOIN CustomerOrder co ON co.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal > 1000)  
+GROUP BY r.r_name, ns.supplier_count
+HAVING SUM(sc.total_supply_cost) IS NOT NULL OR COUNT(DISTINCT co.o_orderkey) IS NOT NULL
+ORDER BY r.r_name;

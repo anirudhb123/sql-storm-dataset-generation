@@ -1,0 +1,84 @@
+WITH recursive actor_movies AS (
+    SELECT 
+        c.person_id AS actor_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year) AS movie_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND a.name IS NOT NULL
+),
+top_actors AS (
+    SELECT 
+        am.actor_id,
+        COUNT(*) AS movie_count,
+        MAX(am.production_year) AS latest_movie_year
+    FROM 
+        actor_movies am
+    GROUP BY 
+        am.actor_id
+    HAVING 
+        COUNT(*) > 5                  -- Filter actors with more than 5 movies
+        AND MAX(am.production_year) < 2020  -- Actors whose latest movie is before 2020
+),
+actor_info AS (
+    SELECT 
+        ta.actor_id,
+        a.name AS actor_name,
+        pi.info AS bio_info
+    FROM 
+        top_actors ta
+    JOIN 
+        aka_name a ON ta.actor_id = a.person_id
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+        AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+),
+movies_info AS (
+    SELECT 
+        am.movie_title,
+        am.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        actor_movies am
+    JOIN 
+        cast_info c ON am.movie_title = (SELECT title FROM aka_title WHERE movie_id = c.movie_id)
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = am.movie_title)
+    GROUP BY 
+        am.movie_title, am.production_year
+),
+final_report AS (
+    SELECT 
+        ai.actor_name,
+        ai.bio_info,
+        mi.movie_title,
+        mi.production_year,
+        mi.total_cast,
+        mi.production_companies
+    FROM 
+        actor_info ai
+    JOIN 
+        movies_info mi ON ai.actor_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = (SELECT id FROM aka_title WHERE title = mi.movie_title))
+)
+SELECT 
+    fr.actor_name,
+    fr.bio_info,
+    fr.movie_title,
+    fr.production_year,
+    fr.total_cast,
+    fr.production_companies
+FROM 
+    final_report fr
+WHERE 
+    fr.total_cast > 10                     -- Movies with more than 10 cast members
+    AND (fr.bio_info IS NOT NULL OR fr.bio_info IS NULL) -- Filter for NULL or non-NULL bios (bizarre condition)
+ORDER BY 
+    fr.production_year DESC, fr.actor_name;

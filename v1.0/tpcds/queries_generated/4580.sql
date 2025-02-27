@@ -1,0 +1,47 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_paid_inc_tax) AS avg_order_value
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_bill_customer_sk
+),
+CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        ROW_NUMBER() OVER (ORDER BY ss.total_sales DESC) AS sales_rank,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM customer c
+    JOIN SalesSummary ss ON c.c_customer_sk = ss.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PromotionsUsed AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_promo_sk) AS promo_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    cr.c_customer_sk,
+    cr.sales_rank,
+    cr.cd_gender,
+    cr.cd_marital_status,
+    cr.cd_education_status,
+    pu.promo_count,
+    CASE 
+        WHEN su.total_sales IS NULL THEN 'No Sales'
+        ELSE ROUND(su.total_sales, 2)
+    END AS total_sales,
+    COALESCE(su.order_count, 0) AS order_count,
+    COALESCE(su.avg_order_value, 0) AS avg_order_value
+FROM CustomerRank cr
+LEFT JOIN SalesSummary su ON cr.c_customer_sk = su.ws_bill_customer_sk
+LEFT JOIN PromotionsUsed pu ON cr.c_customer_sk = pu.ws_bill_customer_sk
+ORDER BY cr.sales_rank
+LIMIT 100;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.bill_customer_sk
+),
+CustomerPurchase AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        NULLIF(cd.cd_credit_rating, 'Unrated') AS credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cp.c_customer_sk,
+        cp.c_first_name,
+        cp.c_last_name,
+        cp.cd_gender,
+        cp.cd_marital_status,
+        cp.cd_purchase_estimate,
+        sd.total_profit,
+        sd.total_orders
+    FROM 
+        CustomerPurchase cp
+    JOIN 
+        SalesData sd ON cp.c_customer_sk = sd.bill_customer_sk
+    WHERE 
+        sd.rank <= 10 
+        AND cp.cd_purchase_estimate > 5000
+)
+SELECT 
+    hvc.c_customer_sk,
+    CONCAT(hvc.c_first_name, ' ', hvc.c_last_name) AS full_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_purchase_estimate,
+    hvc.total_profit,
+    hvc.total_orders,
+    CASE 
+        WHEN hvc.cd_gender = 'F' THEN 'Female'
+        WHEN hvc.cd_gender = 'M' THEN 'Male'
+        ELSE 'Other'
+    END AS gender_description,
+    COALESCE(hvc.total_orders * 0.1, 0) AS estimated_delivery_cost
+FROM 
+    HighValueCustomers hvc
+ORDER BY 
+    hvc.total_profit DESC
+LIMIT 5;

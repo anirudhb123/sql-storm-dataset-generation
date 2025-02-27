@@ -1,0 +1,80 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.Tags,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= '2020-01-01'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagAggregates AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        MAX(p.Score) AS MaxPostScore,
+        MIN(p.Score) AS MinPostScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName,
+    us.PostCount,
+    us.UpvoteCount,
+    us.DownvoteCount,
+    ts.MaxPostScore,
+    ts.MinPostScore,
+    ts.PostCount AS TagPostCount,
+    COALESCE(rn.TagHistoryCount, 0) AS RecentTagHistoryCount
+FROM 
+    UserStatistics us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    TagAggregates ts ON ts.PostCount > 10
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS TagHistoryCount
+    FROM 
+        RecursiveCTE
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 10)  -- Title edits, body edits, closure events
+    GROUP BY 
+        PostId
+) rn ON rn.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    us.PostCount > 0 
+ORDER BY 
+    us.UpvoteCount - us.DownvoteCount DESC, 
+    us.AvgScore DESC;

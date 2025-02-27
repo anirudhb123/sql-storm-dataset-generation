@@ -1,0 +1,114 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty Start and Close
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRow
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened posts
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalMetrics AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        COALESCE(up.RecentPostCount, 0) AS RecentPostCount,
+        COALESCE(cl.CloseCount, 0) AS ClosedPostCount
+    FROM 
+        UserActivities ua
+    LEFT JOIN 
+        (SELECT 
+            OwnerUserId,
+            COUNT(*) AS RecentPostCount
+         FROM 
+            RecentPosts
+         GROUP BY 
+            OwnerUserId) up ON ua.UserId = up.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE -1 END) AS CloseCount
+         FROM 
+            ClosedPosts ph
+         GROUP BY 
+            PostId) cl ON cl.PostId IN (SELECT Id FROM RecentPosts)
+)
+SELECT 
+    fm.UserId,
+    fm.DisplayName,
+    fm.Reputation,
+    fm.RecentPostCount,
+    fm.ClosedPostCount,
+    COALESCE(t.Tags, 'No Tags') AS Tags,
+    CASE 
+        WHEN fm.RecentPostCount > 0 THEN 'Active'
+        WHEN fm.ClosedPostCount > 0 THEN 'Inactive'
+        ELSE 'Neutral' 
+    END AS ActivityStatus
+FROM 
+    FinalMetrics fm
+LEFT JOIN 
+    (SELECT 
+        DISTINCT unnest(string_to_array(Tags, '>')) AS Tags, PostId 
+     FROM 
+        Posts WHERE Tags IS NOT NULL) t ON fm.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = t.PostId)
+ORDER BY 
+    fm.Reputation DESC, 
+    fm.DisplayName;

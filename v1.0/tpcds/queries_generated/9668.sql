@@ -1,0 +1,46 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count,
+        AVG(ss.ss_sales_price) AS avg_sales_price
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1995
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        c.total_sales,
+        c.transaction_count,
+        c.avg_sales_price,
+        RANK() OVER (ORDER BY c.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales c
+)
+SELECT 
+    tc.customer_id,
+    tc.total_sales,
+    tc.transaction_count,
+    tc.avg_sales_price,
+    d.d_year,
+    COUNT(ws.ws_order_number) AS web_orders
+FROM 
+    TopCustomers tc
+JOIN 
+    web_sales ws ON tc.customer_id = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    tc.sales_rank <= 10
+    AND d.d_year = 2023
+GROUP BY 
+    tc.customer_id, tc.total_sales, tc.transaction_count, tc.avg_sales_price, d.d_year
+ORDER BY 
+    tc.total_sales DESC;

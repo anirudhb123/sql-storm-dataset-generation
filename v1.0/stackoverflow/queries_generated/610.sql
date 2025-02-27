@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+UserPosts AS (
+    SELECT 
+        up.UserId,
+        COUNT(up.Id) AS TotalPosts,
+        SUM(CASE WHEN up.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Posts up
+    GROUP BY 
+        up.UserId
+),
+AggregatedData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(up.TotalPosts, 0) AS TotalPosts,
+        COALESCE(up.TotalAnswers, 0) AS TotalAnswers,
+        ur.Reputation,
+        ur.BadgeCount
+    FROM 
+        Users u
+        LEFT JOIN UserPosts up ON u.Id = up.UserId
+        LEFT JOIN UserReputation ur ON u.Id = ur.UserId
+)
+SELECT 
+    ad.DisplayName,
+    ad.TotalPosts,
+    ad.TotalAnswers,
+    ad.Reputation,
+    ad.BadgeCount,
+    rp.Title AS LastQuestion,
+    rp.CreationDate AS LastQuestionDate,
+    rp.Score AS LastQuestionScore
+FROM 
+    AggregatedData ad
+    LEFT JOIN RankedPosts rp ON ad.UserId = rp.OwnerUserId AND rp.rn = 1
+WHERE 
+    ad.Reputation > 1000 
+    AND ad.BadgeCount > 3
+ORDER BY 
+    ad.Reputation DESC, ad.TotalPosts DESC
+LIMIT 10;

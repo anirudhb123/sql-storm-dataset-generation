@@ -1,0 +1,72 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+filtered_sales AS (
+    SELECT
+        rs.web_site_sk,
+        rs.web_name,
+        rs.total_sales,
+        CASE 
+            WHEN rs.order_count = 0 THEN NULL
+            ELSE ROUND(rs.total_sales / rs.order_count, 2)
+        END AS avg_sales_per_order
+    FROM 
+        ranked_sales rs
+    WHERE 
+        rs.sales_rank <= 5
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        COALESCE(NULLIF(cd.cd_credit_rating, ''), 'Unknown') AS credit_status,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY c.c_birth_year DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_gender IN ('M', 'F') AND
+        (cd.cd_marital_status IS NULL OR cd.cd_marital_status IN ('S', 'M'))
+),
+sales_analysis AS (
+    SELECT 
+        ci.ca_city,
+        SUM(fs.total_sales) AS city_total_sales,
+        COUNT(fs.web_name) AS active_websites,
+        AVG(fs.avg_sales_per_order) AS avg_sales_per_order
+    FROM 
+        filtered_sales fs
+    JOIN 
+        web_site ws ON fs.web_site_sk = ws.web_site_sk
+    JOIN 
+        customer_info ci ON ci.c_customer_id = ws.web_site_id
+    GROUP BY 
+        ci.ca_city
+)
+SELECT 
+    sa.ca_city,
+    sa.city_total_sales,
+    sa.active_websites,
+    sa.avg_sales_per_order,
+    RANK() OVER (ORDER BY sa.city_total_sales DESC) AS city_rank
+FROM 
+    sales_analysis sa
+WHERE 
+    sa.avg_sales_per_order IS NOT NULL
+ORDER BY 
+    sa.city_rank, sa.ca_city;

@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.season_nr,
+        mt.episode_nr,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Series%')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.season_nr,
+        at.episode_nr,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title at ON at.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.depth AS link_depth,
+    CASE 
+        WHEN pm.gender = 'M' THEN 'Male'
+        WHEN pm.gender = 'F' THEN 'Female'
+        ELSE 'Unknown'
+    END AS gender,
+    COALESCE(SUM(CASE WHEN cm.kind = 'Production' THEN 1 ELSE 0 END), 0) AS production_count,
+    COUNT(DISTINCT c.id) AS cast_count
+FROM movie_hierarchy mh
+JOIN cast_info c ON c.movie_id = mh.movie_id
+JOIN aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN person_info pm ON pm.person_id = ak.person_id
+JOIN movie_companies mc ON mc.movie_id = mh.movie_id
+JOIN company_type ct ON ct.id = mc.company_type_id
+FULL OUTER JOIN comp_cast_type cm ON cm.id = c.role_id
+JOIN aka_title at ON at.id = mh.movie_id
+WHERE mh.production_year IS NOT NULL
+AND mh.depth <= 3
+AND ak.name IS NOT NULL
+AND (ct.kind ILIKE '%Production%' OR ct.kind ILIKE '%Distributor%')
+GROUP BY ak.name, at.title, mh.depth, pm.gender
+ORDER BY link_depth DESC, production_count DESC, actor_name ASC
+LIMIT 50;

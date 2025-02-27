@@ -1,0 +1,34 @@
+
+WITH StringMetrics AS (
+    SELECT
+        ca_city,
+        ca_state,
+        COUNT(*) AS total_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        SUM(CASE WHEN ca_city LIKE 'New%' THEN 1 ELSE 0 END) AS new_city_count
+    FROM customer_address
+    GROUP BY ca_city, ca_state
+),
+CustomerInfo AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    GROUP BY cd_gender, cd_marital_status
+)
+SELECT
+    sm.sm_type,
+    sm.sm_carrier,
+    sm.sm_code,
+    STRING_AGG(DISTINCT ca.ca_city, ', ') AS cities_with_new_addresses,
+    SUM(cm.total_addresses) AS total_addresses,
+    AVG(sm.avg_street_name_length) AS average_street_name_length,
+    SUM(ci.total_customers) AS total_customers,
+    AVG(ci.avg_purchase_estimate) AS average_purchase_estimate
+FROM ship_mode sm
+LEFT JOIN StringMetrics cm ON 1=1  -- Cartesian join for demonstration
+LEFT JOIN CustomerInfo ci ON 1=1  -- Cartesian join for demonstration
+GROUP BY sm.sm_type, sm.sm_carrier, sm.sm_code
+ORDER BY total_addresses DESC, total_customers DESC;

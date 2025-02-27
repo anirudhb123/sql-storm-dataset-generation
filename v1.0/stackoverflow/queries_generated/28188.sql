@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts from the last year
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoreQuestions,
+        COALESCE(SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativeScoreQuestions,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.DisplayName,
+        us.TotalQuestions,
+        us.PositiveScoreQuestions,
+        us.NegativeScoreQuestions,
+        us.TotalBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStatistics us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.RankByScore <= 5  -- Top 5 ranked questions for each user
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.DisplayName,
+    p.TotalQuestions,
+    p.PositiveScoreQuestions,
+    p.NegativeScoreQuestions,
+    p.TotalBadges
+FROM 
+    PostsWithBadges p
+ORDER BY 
+    p.Score DESC, p.CreationDate ASC;
+
+This query benchmarks string processing by focusing on the top questions from users within the last year, calculating user statistics including badges and score classification, while also preparing for further string manipulation and processing evaluations in the result set.

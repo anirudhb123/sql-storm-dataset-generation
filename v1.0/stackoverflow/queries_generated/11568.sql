@@ -1,0 +1,26 @@
+-- Performance Benchmarking Query
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+    AVG(p.ViewCount) AS AverageViewCount,
+    AVG(DATEDIFF(MINUTE, p.CreationDate, GETDATE())) AS AverageAgeMinutes,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(b.Reputation) AS AverageUserReputation,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS TotalGoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS TotalSilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS TotalBronzeBadges
+FROM 
+    Posts p
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

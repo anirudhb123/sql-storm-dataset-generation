@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title mt ON ak.movie_id = mt.id
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        cast_count,
+        aka_names,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    tm.cast_count,
+    tm.aka_names,
+    k.keyword AS associated_keyword,
+    c.name AS company_name,
+    c.country_code
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.cast_count DESC, tm.movie_title ASC;
+
+This query identifies the top 10 movies based on the number of unique cast members and provides a detailed view that includes alternative names for the movies, associated keywords, and the companies involved with each film. The use of Common Table Expressions (CTEs) aids in organizing the logic of the query and making it more readable. The use of `STRING_AGG` helps compile a list of alternative names, while the ranking mechanism ensures only the most relevant results are included.

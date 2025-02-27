@@ -1,0 +1,66 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+),
+TopMovies AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_title) AS movie_count
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(movie_title) > 5
+),
+MovieKeywords AS (
+    SELECT 
+        t.title,
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+),
+KeywordStats AS (
+    SELECT 
+        movie_title,
+        STRING_AGG(keyword, ', ') AS keywords 
+    FROM 
+        MovieKeywords
+    GROUP BY 
+        title
+),
+FinalOutput AS (
+    SELECT 
+        tm.actor_name,
+        tm.movie_count,
+        ks.keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        KeywordStats ks ON tm.movie_title = ks.movie_title
+)
+SELECT 
+    actor_name,
+    movie_count,
+    COALESCE(keywords, 'No keywords found') AS keywords
+FROM 
+    FinalOutput
+ORDER BY 
+    movie_count DESC, actor_name;

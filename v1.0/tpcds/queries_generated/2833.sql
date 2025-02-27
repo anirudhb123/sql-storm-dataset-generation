@@ -1,0 +1,61 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.sold_date_sk = (SELECT MAX(w2.sold_date_sk) FROM web_sales w2)
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_state = 'CA' OR ca.ca_state = 'NY'
+),
+sales_summary AS (
+    SELECT 
+        sa.web_site_sk,
+        COUNT(sa.ws_order_number) AS total_orders,
+        SUM(sa.ws_net_paid) AS total_revenue
+    FROM 
+        web_sales sa
+    GROUP BY 
+        sa.web_site_sk
+)
+SELECT 
+    r.web_name,
+    r.net_profit,
+    ss.total_orders,
+    ss.total_revenue,
+    a.ca_city,
+    a.ca_state
+FROM 
+    ranked_sales r
+LEFT JOIN 
+    sales_summary ss ON r.web_site_sk = ss.web_site_sk
+JOIN 
+    address_info a ON r.web_site_sk IN (
+        SELECT 
+            cd.c_current_addr_sk 
+        FROM 
+            customer cd
+        WHERE 
+            cd.c_current_cdemo_sk IS NOT NULL
+    )
+WHERE 
+    r.rn = 1
+ORDER BY 
+    r.net_profit DESC,
+    ss.total_revenue DESC
+LIMIT 10;

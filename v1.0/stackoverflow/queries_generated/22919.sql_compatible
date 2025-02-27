@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.OwnerUserId, p.Score
+),
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS pRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 19) 
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.Author,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(ph.LastAction, 'No recent history') AS LastAction,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN rp.Rank > 10 THEN 'Not a top post'
+        ELSE 'Top post'
+    END AS PostRankStatus,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Posts WHERE Tags LIKE '%SQL%') THEN 'SQL tag present'
+        ELSE 'No SQL tag'
+    END AS TagStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    (SELECT PostId, STRING_AGG(CAST(PostHistoryTypeId AS text), ', ') AS LastAction
+     FROM RecentPostHistory
+     WHERE pRank = 1 
+     GROUP BY PostId) ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.Author = ub.UserId
+WHERE 
+    rp.CommentCount > 5 
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

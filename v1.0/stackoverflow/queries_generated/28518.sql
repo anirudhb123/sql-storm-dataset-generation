@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(v.VoteTypeId = 2) DESC) AS RankByUpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByUpVotes <= 5 -- Top 5 Questions per User
+)
+SELECT 
+    fp.OwnerDisplayName,
+    COUNT(fp.PostId) AS QuestionCount,
+    SUM(fp.UpVotes) AS TotalUpVotes,
+    SUM(fp.DownVotes) AS TotalDownVotes,
+    STRING_AGG(fp.Title, '; ') AS QuestionTitles,
+    STRING_AGG(fp.Body, ' | ') AS CombinedBody,
+    STRING_AGG(fp.Tags, ', ') AS CombinedTags
+FROM 
+    FilteredPosts fp
+GROUP BY 
+    fp.OwnerDisplayName
+ORDER BY 
+    QuestionCount DESC, TotalUpVotes DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+WITH Recursive Actors AS (
+    SELECT akn.id AS actor_id, akn.name AS actor_name, akn.person_id, 0 AS level
+    FROM aka_name akn
+    WHERE akn.name ILIKE 'Johnny%'
+
+    UNION ALL
+
+    SELECT akn.id AS actor_id, akn.name AS actor_name, akn.person_id, level + 1
+    FROM aka_name akn
+    INNER JOIN cast_info ci ON akn.person_id = ci.person_id
+    INNER JOIN title ti ON ci.movie_id = ti.id
+    INNER JOIN aka_title ati ON ti.id = ati.movie_id
+    WHERE ci.role_id IN (SELECT id FROM role_type WHERE role LIKE '%actor%') 
+          AND level < 2
+          AND akn.name NOT IN (SELECT actor_name FROM Actors)
+)
+
+, MovieRoles AS (
+    SELECT ti.title, ci.note AS role_description, ti.production_year, 
+           ROW_NUMBER() OVER (PARTITION BY ti.id ORDER BY ci.nr_order) AS role_order
+    FROM title ti
+    JOIN cast_info ci ON ti.id = ci.movie_id
+    JOIN aka_name akn ON ci.person_id = akn.person_id
+    WHERE akn.name ILIKE 'Johnny%'
+)
+
+, CompanyInfo AS (
+    SELECT mc.movie_id, c.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+
+, KeywordUsage AS (
+    SELECT mk.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+
+SELECT DISTINCT 
+    a.actor_id,
+    a.actor_name,
+    mr.title,
+    mr.role_description,
+    mr.production_year,
+    ci.company_name,
+    ci.company_type,
+    ku.keywords
+FROM Actors a
+JOIN MovieRoles mr ON a.actor_id = mr.role_order
+LEFT JOIN CompanyInfo ci 
+    ON mr.production_year = ci.movie_id
+FULL OUTER JOIN KeywordUsage ku 
+    ON ku.movie_id = mr.production_year
+WHERE 
+    (ci.company_name IS NOT NULL OR ku.keywords IS NOT NULL)
+    AND a.actor_id IS NOT NULL
+ORDER BY mr.production_year DESC, a.actor_name;

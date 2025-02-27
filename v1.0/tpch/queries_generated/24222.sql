@@ -1,0 +1,38 @@
+WITH RECURSIVE recursive_part AS (
+    SELECT p_partkey, p_name, p_retailprice, CAST(0 AS decimal(12,2)) AS cumulative_discount
+    FROM part
+    WHERE p_retailprice > 100.00
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, rp.cumulative_discount + (p.p_retailprice * 0.10) AS cumulative_discount
+    FROM part p
+    JOIN recursive_part rp ON p.p_partkey <> rp.p_partkey AND p.p_retailprice < rp.cumulative_discount
+), 
+customer_orders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+null_replacement AS (
+    SELECT n.n_name, COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost, r.r_name
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_name, r.r_name
+),
+sales_ranking AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY c.c_custkey, c.c_name, n.n_name
+)
+SELECT DISTINCT rp.p_partkey, rp.p_name, rp.cumulative_discount, 
+                nr.total_supply_cost, so.sales_rank
+FROM recursive_part rp
+LEFT JOIN null_replacement nr ON rp.p_name LIKE '%' || nr.r_name || '%'
+LEFT JOIN sales_ranking so ON so.c_sales_rank <= 5 AND so.sales_rank IS NOT NULL 
+WHERE rp.cumulative_discount IS NOT NULL AND rp.p_retailprice IS NOT NULL
+ORDER BY rp.p_partkey
+FETCH FIRST 10 ROWS ONLY;

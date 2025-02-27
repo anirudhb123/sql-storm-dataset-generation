@@ -1,0 +1,52 @@
+WITH movie_details AS (
+    SELECT
+        t.title,
+        t.production_year,
+        c.kind AS company_type,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM
+        title t
+    JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN
+        company_type c ON mc.company_type_id = c.id
+    JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        role_type r ON ci.role_id = r.id
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        a.name LIKE '%Smith%' -- Filter for actors with 'Smith' in their name
+    GROUP BY
+        t.title, t.production_year, c.kind, a.name, r.role
+),
+benchmark AS (
+    SELECT
+        COUNT(*) AS total_movies,
+        AVG(production_year) AS average_production_year,
+        COUNT(DISTINCT actor_name) AS total_actors,
+        COUNT(DISTINCT company_type) AS total_companies,
+        STRING_AGG(DISTINCT actor_role, ', ') AS unique_roles,
+        STRING_AGG(DISTINCT keywords, ', ') AS all_keywords
+    FROM
+        movie_details
+)
+
+SELECT
+    b.total_movies,
+    b.average_production_year,
+    b.total_actors,
+    b.total_companies,
+    b.unique_roles,
+    b.all_keywords
+FROM
+    benchmark b;

@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.AcceptedAnswerId,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT AVG(v.BountyAmount) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (8, 9)) AS AvgBounty,
+        (SELECT SUM(COALESCE(ph.RevisionGUID, '')::int) FROM PostHistory ph WHERE ph.PostId = rp.PostId AND ph.PostHistoryTypeId = 5) AS BodyEditCount
+    FROM 
+        RankedPosts rp
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        SUM(b.Class) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostLinkStatistics AS (
+    SELECT
+        pl.PostId,
+        COUNT(*) AS RelatedPostCount,
+        STRING_AGG(pl.RelatedPostId::text, ', ') AS RelatedPostIds
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.CreationDate,
+    ps.CommentCount,
+    COALESCE(ub.BadgeNames, 'No badges') AS UserBadges,
+    COALESCE(uls.TotalBadgeClass, 0) AS UserBadgeClassSum,
+    pls.RelatedPostCount,
+    pls.RelatedPostIds,
+    CASE 
+        WHEN ps.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    CASE
+        WHEN ps.BodyEditCount > 0 THEN CONCAT('Edited ', ps.BodyEditCount, ' times')
+        ELSE 'Never Edited'
+    END AS BodyEditInfo
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    UserBadges ub ON ps.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostLinkStatistics pls ON ps.PostId = pls.PostId
+LEFT JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+WHERE 
+    ps.Score > 0
+ORDER BY 
+    ps.Score DESC NULLS LAST, 
+    ps.CreationDate DESC
+LIMIT 100;

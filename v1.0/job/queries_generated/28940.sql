@@ -1,0 +1,68 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+PersonTitles AS (
+    SELECT
+        a.person_id,
+        a.name AS actor_name,
+        rt.title AS movie_title,
+        rt.production_year
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        RankedTitles rt ON ci.movie_id = rt.title_id
+    WHERE
+        a.name ILIKE '%Smith%'  -- Finding actors with 'Smith' in their names
+),
+CompanyMovies AS (
+    SELECT
+        cn.name AS company_name,
+        mt.title AS movie_title,
+        mt.production_year
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        aka_title mt ON mc.movie_id = mt.id
+    WHERE
+        cn.country_code = 'USA'
+),
+KeywordMovies AS (
+    SELECT
+        mk.movie_id,
+        k.keyword
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        k.keyword LIKE 'Action%'  -- Filtering keywords starting with 'Action'
+)
+SELECT
+    pt.actor_name,
+    pt.movie_title AS actor_movie,
+    cm.company_name AS producing_company,
+    km.keyword AS movie_keyword,
+    pt.production_year
+FROM
+    PersonTitles pt
+LEFT JOIN
+    CompanyMovies cm ON pt.movie_title = cm.movie_title AND pt.production_year = cm.production_year
+LEFT JOIN
+    KeywordMovies km ON pt.movie_title = km.movie_id
+WHERE
+    pt.production_year >= 2000  -- Filtering for movies produced after the year 2000
+ORDER BY
+    pt.production_year DESC, pt.actor_name, pt.movie_title;

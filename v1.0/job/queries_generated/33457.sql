@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.path || e.id
+    FROM
+        aka_title e
+    JOIN
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    ARRAY_AGG(DISTINCT a.name) AS actors,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    MIN(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS director, -- assuming info_type_id=1 is "director"
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT a.id) DESC) AS actor_rank
+FROM
+    aka_title m
+LEFT JOIN
+    cast_info a ON m.id = a.movie_id
+LEFT JOIN
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN
+    movie_keyword mk ON m.id = mk.movie_id
+WHERE
+    m.production_year >= 2000
+    AND m.production_year <= 2023
+    AND a.nr_order IS NOT NULL
+GROUP BY
+    m.id, m.title, m.production_year
+HAVING
+    COUNT(DISTINCT a.id) >= 3 -- Filter out movies with less than 3 actors
+ORDER BY
+    m.production_year DESC,
+    actor_rank
+LIMIT 50;

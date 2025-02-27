@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserTagInteractions AS (
+    SELECT 
+        ua.UserId,
+        pt.TagName,
+        COUNT(DISTINCT p.Id) AS PostsWithTag
+    FROM 
+        UserActivity ua
+    JOIN 
+        Posts p ON ua.UserId = p.OwnerUserId
+    JOIN 
+        PopularTags pt ON p.Tags LIKE '%' || pt.TagName || '%'
+    GROUP BY 
+        ua.UserId, pt.TagName
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    COUNT(DISTINCT ut.TagName) AS UniqueTagsInteractedWith,
+    SUM(ut.PostsWithTag) AS TotalPostsWithPopularTags
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    UserTagInteractions ut ON ua.UserId = ut.UserId
+GROUP BY 
+    ua.UserId, ua.DisplayName, ua.Reputation
+ORDER BY 
+    ua.Reputation DESC, UniqueTagsInteractedWith DESC
+LIMIT 20;

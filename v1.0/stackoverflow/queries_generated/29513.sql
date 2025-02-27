@@ -1,0 +1,60 @@
+WITH UserTagStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersGiven,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  -- Questions
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2  -- Answers
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%' AND p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+),
+UserEfficiency AS (
+    SELECT 
+        uts.UserId,
+        uts.DisplayName,
+        uts.QuestionsAsked,
+        uts.AnswersGiven,
+        uts.TotalViews,
+        uts.TotalScore,
+        COALESCE(ts.QuestionCount, 0) AS TagsUsed,
+        CASE 
+            WHEN uts.QuestionsAsked > 0 THEN ROUND(uts.TotalScore::numeric / uts.QuestionsAsked, 2)
+            ELSE 0
+        END AS AvgScorePerQuestion
+    FROM 
+        UserTagStats uts
+    LEFT JOIN 
+        TagStats ts ON uts.UserId = ts.TagName  -- Tag count linkage
+)
+SELECT 
+    ue.DisplayName,
+    ue.QuestionsAsked,
+    ue.AnswersGiven,
+    ue.TotalViews,
+    ue.TotalScore,
+    ue.TagsUsed,
+    ue.AvgScorePerQuestion
+FROM 
+    UserEfficiency ue
+ORDER BY 
+    ue.TotalScore DESC 
+LIMIT 10;

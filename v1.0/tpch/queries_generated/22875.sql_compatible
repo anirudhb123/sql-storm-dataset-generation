@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice > 10000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS order_value_category
+    FROM orders o 
+    WHERE o.o_orderstatus IN ('F', 'P') AND o.o_orderdate > DATE '1996-01-01'
+),
+QualifiedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_discount * l.l_extendedprice) AS total_discounted_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1998-10-01'
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 10 AND SUM(l.l_discount * l.l_extendedprice) > 5000.00
+)
+SELECT 
+    p.p_name,
+    p.p_partkey,
+    COALESCE(hp.o_orderkey, 0) AS order_key,
+    r.s_name AS top_supplier,
+    rs.s_acctbal AS supplier_acct_bal,
+    rp.total_discounted_sales AS parts_total_discounts,
+    hp.order_value_category
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN HighValueOrders hp ON l.l_orderkey = hp.o_orderkey
+LEFT JOIN RankedSuppliers rs ON p.p_partkey = rs.ps_partkey AND rs.rnk = 1
+LEFT JOIN QualifiedParts rp ON p.p_partkey = rp.p_partkey
+LEFT JOIN nation n ON rs.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE p.p_retailprice IS NOT NULL AND p.p_size IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 100)
+ORDER BY p.p_partkey, supplier_acct_bal DESC NULLS LAST;

@@ -1,0 +1,54 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT m.id) DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        a.id, a.title, a.production_year, k.keyword
+),
+filtered_movies AS (
+    SELECT 
+        title,
+        production_year,
+        ARRAY_AGG(DISTINCT keyword) AS keywords
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 5
+    GROUP BY 
+        title, production_year
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.keywords,
+    a.name AS actor_name,
+    COUNT(DISTINCT c.person_role_id) AS num_roles
+FROM 
+    filtered_movies m
+JOIN 
+    complete_cast x ON m.title = x.movie_id
+JOIN 
+    cast_info c ON x.subject_id = c.id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+WHERE 
+    m.production_year >= 2000 -- Focus on movies post-2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    m.title, m.production_year, m.keywords, a.name
+ORDER BY 
+    m.production_year DESC, num_roles DESC;

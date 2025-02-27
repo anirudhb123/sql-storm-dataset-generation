@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_title
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ARRAY_AGG(DISTINCT p.name) AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(a.actor_count, 0) AS actor_count,
+    COALESCE(h.rank_title, 0) AS rank_title,
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Classic'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_age_category,
+    STRING_AGG(DISTINCT a.actor_names::text, ', ') AS actors
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    ActorRoles a ON m.movie_id = a.movie_id
+LEFT JOIN 
+    (SELECT movie_id, rank_title FROM RankedMovies) h ON m.movie_id = h.movie_id
+WHERE 
+    m.title ILIKE '%love%' OR m.title ILIKE '%adventure%'
+GROUP BY 
+    m.movie_id, m.title, m.production_year, h.rank_title
+ORDER BY 
+    m.production_year DESC, actor_count DESC;

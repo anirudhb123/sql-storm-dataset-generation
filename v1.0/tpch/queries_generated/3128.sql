@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+        AND o.o_orderdate < DATE '2023-12-31'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Balance Not Available'
+            ELSE 'Balance Available'
+        END AS account_balance_status
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemSummary AS (
+    SELECT 
+        DISTINCT l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-07-01' AND DATE '2023-09-30'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    coalesce(cd.c_name, 'No Customer') AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    si.s_name AS supplier_name,
+    si.total_available_quantity,
+    lis.net_revenue,
+    lis.item_count,
+    o.order_rank
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    CustomerDetails cd ON o.o_custkey = cd.c_custkey
+LEFT JOIN 
+    LineItemSummary lis ON o.o_orderkey = lis.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON si.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey
+        )
+    )
+WHERE 
+    o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+ORDER BY 
+    o.o_orderdate DESC, 
+    o.o_totalprice DESC;

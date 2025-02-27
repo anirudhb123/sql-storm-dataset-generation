@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+), Nations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+), Result AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        n.supplier_count,
+        n.total_cost,
+        COUNT(ro.o_orderkey) AS order_count,
+        SUM(ro.o_totalprice) AS total_order_value
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        RankedOrders ro ON n.n_nationkey = ro.c_nationkey
+    GROUP BY 
+        r.r_name, n.n_name, n.supplier_count, n.total_cost
+)
+SELECT 
+    region_name,
+    nation_name,
+    supplier_count,
+    total_cost,
+    order_count,
+    total_order_value
+FROM 
+    Result
+WHERE 
+    order_count > 0
+ORDER BY 
+    total_order_value DESC, supplier_count DESC;

@@ -1,0 +1,47 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT a.name) AS cast_members,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        c.kind AS company_type,
+        GROUP_CONCAT(DISTINCT pt.info) AS person_info
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        person_info pt ON a.person_id = pt.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.id, t.title, t.production_year, c.kind
+)
+
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.cast_members,
+    md.keywords,
+    md.company_type,
+    COUNT(DISTINCT md.person_info) AS total_person_info_count
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.movie_id, md.movie_title, md.production_year, md.company_type
+ORDER BY 
+    md.production_year DESC, md.movie_title;
+
+This SQL query is designed to aggregate and benchmark string processing on movie details from multiple tables, including cast members, keywords, company types, and person information, while filtering for movies released between 2000 and 2020. It utilizes Common Table Expressions (CTE) and grouping to compile a consolidated view of each movie's characteristics.

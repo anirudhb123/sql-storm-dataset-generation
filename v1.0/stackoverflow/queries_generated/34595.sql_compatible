@@ -1,0 +1,89 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        1 AS Level,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentEditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+    UNION ALL
+    SELECT 
+        ph2.PostId,
+        ph2.CreationDate,
+        ph2.UserId,
+        ph2.PostHistoryTypeId,
+        Level + 1,
+        ph2.UserDisplayName,
+        ph2.Comment,
+        ROW_NUMBER() OVER(PARTITION BY ph2.PostId ORDER BY ph2.CreationDate DESC)
+    FROM 
+        PostHistory ph2
+    INNER JOIN 
+        RecursivePostHistory rph ON rph.PostId = ph2.PostId
+    WHERE 
+        ph2.CreationDate < rph.CreationDate
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.LastActivityDate,
+        p.AgreeCount,
+        p.Score,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        MAX(COALESCE(RP.CreationDate, p.CreationDate)) AS LastEditDate,
+        UNT.PERFECT_POST_ID as perfectPostId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY MAX(COALESCE(RP.CreationDate, p.CreationDate)) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory RP ON p.Id = RP.PostId
+    LEFT JOIN 
+        (SELECT 
+            MAX(ph.Comment) AS PERFECT_POST_ID,
+            ph.PostId
+        FROM 
+            PostHistory ph
+        WHERE 
+            ph.PostHistoryTypeId = 24 
+        GROUP BY 
+            ph.PostId) UNT ON p.Id = UNT.PostId
+    WHERE 
+        p.CreationDate < (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+    GROUP BY 
+        p.Id, p.Title, p.LastActivityDate, p.AgreeCount, p.Score
+    HAVING 
+        COUNT(DISTINCT RP.UserId) > 0 
+)
+SELECT 
+    cpd.PostId,
+    cpd.Title,
+    cpd.LastActivityDate,
+    cpd.Score,
+    CASE 
+        WHEN cpd.EditCount > 10 THEN 'Highly Edited'
+        WHEN cpd.EditCount BETWEEN 5 AND 10 THEN 'Moderately Edited'
+        ELSE 'Slightly Edited'
+    END AS EditIntensity,
+    cpd.LastEditDate,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Comments cm 
+            WHERE cm.PostId = cpd.PostId AND cm.Score < 0
+        ) THEN 'Contains Negative Comment'
+        ELSE 'No Negative Comment'
+    END AS CommentSentiment
+FROM 
+    ClosedPostDetails cpd
+WHERE 
+    cpd.Rank <= 10 
+ORDER BY 
+    cpd.Score DESC, cpd.LastEditDate DESC;

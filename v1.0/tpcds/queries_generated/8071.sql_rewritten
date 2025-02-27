@@ -1,0 +1,57 @@
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential,
+        ca.ca_city,
+        ca.ca_state,
+        DATE_PART('year', cast('2002-10-01' as date)) - c.c_birth_year AS age
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        c.customer_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN customer_info c ON ws.ws_bill_customer_sk = c.c_customer_id
+    GROUP BY c.customer_id
+),
+average_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales,
+        AVG(total_orders) AS avg_orders
+    FROM sales_summary
+),
+high_value_customers AS (
+    SELECT 
+        c.customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ss.total_sales,
+        ss.total_orders,
+        ci.hd_income_band_sk,
+        ci.hd_buy_potential
+    FROM sales_summary ss
+    JOIN customer_info ci ON ss.customer_id = ci.c_customer_id
+    WHERE ss.total_sales > (SELECT avg_sales * 1.5 FROM average_sales)
+)
+SELECT 
+    hvc.customer_id,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_sales,
+    hvc.total_orders,
+    hvc.hd_income_band_sk,
+    hvc.hd_buy_potential
+FROM high_value_customers hvc
+ORDER BY hvc.total_sales DESC
+LIMIT 10;

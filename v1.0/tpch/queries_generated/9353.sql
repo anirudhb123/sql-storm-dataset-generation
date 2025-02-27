@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sum(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY sum(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderAggregates AS (
+    SELECT 
+        o.o_orderkey,
+        sum(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        o.o_orderdate,
+        o.o_orderpriority
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderpriority
+)
+SELECT 
+    r.r_name,
+    r.total_supply_cost,
+    hvc.c_name AS customer_name,
+    oa.total_revenue,
+    oa.o_orderpriority 
+FROM 
+    RankedSuppliers r
+JOIN 
+    HighValueCustomers hvc ON r.rank <= 5
+JOIN 
+    OrderAggregates oa ON hvc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = oa.o_orderkey)
+WHERE 
+    r.total_supply_cost > 100000
+ORDER BY 
+    r.r_name, hvc.c_acctbal DESC, oa.total_revenue DESC;

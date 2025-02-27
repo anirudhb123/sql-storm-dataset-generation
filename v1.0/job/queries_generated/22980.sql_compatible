@@ -1,0 +1,72 @@
+
+WITH ranked_movies AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM
+        aka_title at
+    LEFT JOIN cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY
+        at.id, at.title, at.production_year
+),
+actor_roles AS (
+    SELECT
+        ki.movie_id,
+        rol.role AS role_name,
+        COUNT(*) AS role_count
+    FROM
+        cast_info ki
+    JOIN role_type rol ON ki.role_id = rol.id
+    GROUP BY
+        ki.movie_id, rol.role
+),
+popular_words AS (
+    SELECT
+        word,
+        COUNT(*) AS occurrence
+    FROM (
+        SELECT
+            UNNEST(STRING_TO_ARRAY(LOWER(title), ' ')) AS word
+        FROM
+            aka_title
+    ) AS words
+    WHERE
+        word NOT IN ('the', 'and', 'of', 'a', 'in', 'to')
+    GROUP BY
+        word
+    ORDER BY
+        occurrence DESC
+    LIMIT 5
+),
+movie_info_agg AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS info_summary
+    FROM
+        movie_info mi
+    GROUP BY
+        mi.movie_id
+)
+
+SELECT
+    rm.movie_id,
+    rm.title,
+    COALESCE(rm.production_year, 'Unknown') AS production_year,
+    COALESCE(rm.actor_count, 0) AS total_actors,
+    COALESCE(ar.role_name, 'No role found') AS most_common_role,
+    COALESCE(ma.info_summary, 'No info available') AS aggregated_info,
+    pw.word AS popular_word
+FROM
+    ranked_movies rm
+LEFT JOIN actor_roles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN movie_info_agg ma ON rm.movie_id = ma.movie_id
+CROSS JOIN popular_words pw
+WHERE
+    rm.rank <= 10
+    AND (rm.production_year IS NOT NULL OR ar.role_name IS NOT NULL)
+ORDER BY
+    rm.actor_count DESC,
+    rm.title ASC;

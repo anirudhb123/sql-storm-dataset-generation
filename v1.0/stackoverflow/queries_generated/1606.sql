@@ -1,0 +1,76 @@
+WITH UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(u.Reputation) AS AvgReputation
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id
+),
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate > NOW() - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalAnswers,
+        ua.AvgReputation,
+        ROW_NUMBER() OVER (ORDER BY ua.TotalPosts DESC) AS UserRank
+    FROM
+        UserActivity ua
+    WHERE
+        ua.TotalPosts > 0
+),
+CommentStats AS (
+    SELECT
+        c.PostId,
+        COUNT(c.Id) AS TotalComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM
+        Comments c
+    GROUP BY
+        c.PostId
+)
+SELECT
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalAnswers,
+    tu.AvgReputation,
+    rp.Title AS MostRecentPost,
+    rp.CreationDate AS RecentPostDate,
+    cs.TotalComments,
+    cs.LastCommentDate,
+    CASE 
+        WHEN cs.TotalComments IS NULL THEN 'No Comments'
+        ELSE 'Has Comments'
+    END AS CommentStatus
+FROM
+    TopUsers tu
+LEFT JOIN
+    RecentPosts rp ON tu.UserId = rp.OwnerDisplayName AND rp.RecentPostRank = 1
+LEFT JOIN
+    CommentStats cs ON rp.PostId = cs.PostId
+WHERE
+    tu.UserRank <= 10
+ORDER BY
+    tu.TotalPosts DESC;

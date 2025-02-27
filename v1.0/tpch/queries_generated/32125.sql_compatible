@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > 1000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE_SUB('1998-10-01', INTERVAL 1 YEAR)
+),
+CombinedData AS (
+    SELECT c.c_name, c.c_acctbal, lo.l_orderkey, lo.l_extendedprice,
+           COALESCE(lo.l_discount * lo.l_extendedprice, 0) AS discount_value,
+           r.r_name AS region_name
+    FROM customer c
+    LEFT JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+    LEFT JOIN lineitem lo ON ro.o_orderkey = lo.l_orderkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE lo.l_discount IS NOT NULL OR lo.l_tax IS NOT NULL
+)
+SELECT cd.c_name, 
+       SUM(cd.l_extendedprice) AS total_sales, 
+       AVG(cd.discount_value) AS avg_discount_value,
+       COUNT(DISTINCT cd.l_orderkey) AS order_count,
+       SUM(CASE WHEN cd.l_extendedprice IS NULL THEN 1 ELSE 0 END) AS null_price_count,
+       COUNT(DISTINCT sh.s_suppkey) AS sup_count
+FROM CombinedData cd
+LEFT JOIN SupplierHierarchy sh ON cd.c_acctbal > 1000
+GROUP BY cd.c_name
+HAVING SUM(cd.l_extendedprice) > 50000
+ORDER BY total_sales DESC
+LIMIT 10;

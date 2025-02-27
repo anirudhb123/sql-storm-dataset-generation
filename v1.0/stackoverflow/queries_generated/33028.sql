@@ -1,0 +1,76 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        CreationDate,
+        CAST(Score AS INT) AS Score,
+        Tags,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        CAST(p.Score AS INT) + r.Score AS Score,
+        p.Tags,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursiveCTE r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2 -- Get answers to previous questions
+)
+, UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN vt.Name = 'AcceptedByOriginator' THEN 1 END) AS AcceptedVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(distinct p.Id) AS TotalPosts,
+    COUNT(distinct CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(distinct CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    SUM(COALESCE(ph.Score, 0)) AS TotalScore, -- Using COALESCE to handle NULL values
+    COUNT(distinct b.Id) AS TotalBadges,
+    COALESCE(uv.UpVotes, 0) AS UserUpVotes,
+    COALESCE(uv.DownVotes, 0) AS UserDownVotes,
+    COALESCE(uv.AcceptedVotes, 0) AS UserAcceptedVotes,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'Recognized Expert'
+        WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Emerging Expert'
+        ELSE 'Beginner' 
+    END AS UserLevel
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN
+    UserVotes uv ON u.Id = uv.UserId 
+LEFT JOIN 
+    RecursiveCTE r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId 
+WHERE 
+    u.Reputation IS NOT NULL
+GROUP BY 
+    u.Id, uv.UpVotes, uv.DownVotes, uv.AcceptedVotes
+ORDER BY 
+    TotalScore DESC, UserName ASC;

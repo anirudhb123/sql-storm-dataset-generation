@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount,
+        STRING_AGG(C.UserDisplayName, ', ') AS Commenters
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.Score,
+    RP.AnswerCount,
+    COALESCE(PC.CommentCount, 0) AS CommentCount,
+    COALESCE(PC.Commenters, 'No comments') AS Commenters,
+    COALESCE(PHD.FirstEditDate, 'Never') AS FirstEdit,
+    COALESCE(PHD.LastEditDate, 'Never') AS LastEdit,
+    PHD.CloseReopenCount,
+    UR.Reputation AS UserReputation,
+    UR.UserRank AS UserReputationRank
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostComments PC ON RP.PostId = PC.PostId
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.PostId = PHD.PostId
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+WHERE 
+    RP.RankByScore <= 5
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;

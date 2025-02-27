@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+HighSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        RankedSales.ws_sales_price
+    FROM 
+        item
+    JOIN 
+        RankedSales ON item.i_item_sk = RankedSales.ws_item_sk
+    WHERE 
+        RankedSales.rank = 1
+),
+CustomerReturns AS (
+    SELECT
+        customer.c_customer_id,
+        SUM(COALESCE(sr_return_amt, 0)) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM
+        store_returns sr
+    LEFT JOIN 
+        customer ON sr.sr_customer_sk = customer.c_customer_sk
+    GROUP BY 
+        customer.c_customer_id
+)
+SELECT 
+    customer.c_customer_id,
+    customer.c_first_name,
+    customer.c_last_name,
+    COALESCE(r.total_return_amt, 0) AS total_return_amount,
+    COALESCE(r.return_count, 0) AS return_count,
+    COALESCE(hs.ws_sales_price, 0) AS max_sales_price,
+    CASE 
+        WHEN COALESCE(r.total_return_amt, 0) > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM 
+    customer
+LEFT JOIN 
+    CustomerReturns r ON customer.c_customer_id = r.c_customer_id
+LEFT JOIN 
+    HighSales hs ON customer.c_customer_sk = hs.i_item_sk
+WHERE 
+    (customer.c_birth_year BETWEEN 1975 AND 1995)
+    AND (SELECT COUNT(*) 
+         FROM web_page wp 
+         WHERE wp.wp_customer_sk = customer.c_customer_sk) > 5
+ORDER BY 
+    total_return_amount DESC, customer.c_last_name ASC;

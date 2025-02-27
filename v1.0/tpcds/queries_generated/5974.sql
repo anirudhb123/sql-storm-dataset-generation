@@ -1,0 +1,55 @@
+
+WITH CustomerReturnDetails AS (
+    SELECT
+        cr.returned_date_sk,
+        cr.returned_time_sk,
+        cr.item_sk,
+        cr.return_quantity,
+        cr.return_amount,
+        cr.return_tax,
+        cr.return_amt_inc_tax,
+        cr.refunded_customer_sk,
+        cu.first_name,
+        cu.last_name,
+        cu.email_address,
+        ca.city,
+        ca.state
+    FROM catalog_returns cr
+    JOIN customer cu ON cr.returned_customer_sk = cu.customer_sk
+    JOIN customer_address ca ON cu.current_addr_sk = ca.address_sk
+),
+SalesDetails AS (
+    SELECT
+        ws.item_sk,
+        SUM(ws.quantity) AS total_quantity_sold,
+        SUM(ws.net_paid) AS total_net_paid,
+        SUM(ws.net_profit) AS total_net_profit
+    FROM web_sales ws
+    GROUP BY ws.item_sk
+),
+ReturnPerformance AS (
+    SELECT
+        cr.returned_date_sk,
+        DATEADD(day, 7, d.date) AS return_window,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amount) AS total_returned_amount,
+        SUM(cr.return_tax) AS total_returned_tax,
+        COUNT(DISTINCT cr.refunded_customer_sk) AS unique_customers_returned
+    FROM CustomerReturnDetails cr
+    JOIN date_dim d ON cr.returned_date_sk = d.date_sk
+    WHERE d.d_year = 2023
+    GROUP BY cr.returned_date_sk
+)
+SELECT
+    p.promo_name,
+    r.total_returned_quantity,
+    r.total_returned_amount,
+    r.total_returned_tax,
+    s.total_quantity_sold,
+    s.total_net_paid,
+    s.total_net_profit,
+    r.unique_customers_returned
+FROM ReturnPerformance r
+JOIN promotion p ON p.promo_sk = (SELECT TOP 1 ws.promo_sk FROM web_sales ws WHERE ws.item_sk IN (SELECT item_sk FROM SalesDetails) ORDER BY ws.sold_date_sk DESC)
+JOIN SalesDetails s ON s.item_sk IN (SELECT item_sk FROM CustomerReturnDetails)
+ORDER BY r.total_returned_amount DESC;

@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostHistoricalEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t 
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 100 
+    ORDER BY 
+        TagCount DESC
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseHistoryCount,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    uvc.UpVotes,
+    uvc.DownVotes,
+    phe.EditCount,
+    phe.LastEditDate,
+    cpd.CloseHistoryCount,
+    cpd.FirstClosedDate,
+    pt.TagName,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserVoteCounts uvc ON up.Id = uvc.UserId
+LEFT JOIN 
+    PostHistoricalEdits phe ON rp.PostId = phe.PostId
+LEFT JOIN 
+    ClosedPostDetails cpd ON rp.PostId = cpd.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT UNNEST(string_to_array(rp.Tags, ',')))
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC, 
+    up.Reputation DESC
+LIMIT 50;

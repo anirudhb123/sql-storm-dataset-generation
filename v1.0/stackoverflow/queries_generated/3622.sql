@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AverageBounty 
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.OwnerUserId
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserId AS CloserId
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+), PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AverageBounty,
+        cp.CloseDate,
+        INNER_QUERY.Reputation AS CloserReputation
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN 
+        Users INNER_QUERY ON cp.CloserId = INNER_QUERY.Id
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.AverageBounty,
+    COALESCE(pd.CloseDate, 'Not Closed') AS ActualCloseDate,
+    (CASE 
+        WHEN pd.AverageBounty IS NULL THEN 'No Bounty'
+        WHEN pd.AverageBounty < 50 THEN 'Low Bounty'
+        ELSE 'High Bounty'
+     END) AS BountyCategory,
+    (SELECT COUNT(*) FROM Posts WHERE AcceptedAnswerId = pd.PostId) AS AnswerCount
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PostRank = 1
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 100;

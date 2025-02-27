@@ -1,0 +1,57 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts AS p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.ViewCount,
+        a.CreationDate,
+        a.OwnerUserId,
+        Level + 1 AS Level
+    FROM 
+        Posts AS a
+    INNER JOIN 
+        Posts AS q ON a.ParentId = q.Id
+    WHERE 
+        q.PostTypeId = 1  
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.CreationDate AS UserCreationDate,
+    COUNT(DISTINCT ph.PostId) AS TotalPosts,
+    SUM(COALESCE(ph.ViewCount, 0)) AS TotalViews,
+    AVG(ph.ViewCount) AS AverageViews,
+    MAX(ph.CreationDate) AS LastPostDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users AS u
+LEFT JOIN 
+    Posts AS p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy AS ph ON ph.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(p.Tags, '<>, ')) AS TagName) AS t ON TRUE
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)  
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, u.CreationDate
+HAVING 
+    COUNT(DISTINCT ph.PostId) > 1  
+ORDER BY 
+    TotalPosts DESC, 
+    TotalViews DESC
+LIMIT 100;

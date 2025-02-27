@@ -1,0 +1,67 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score,
+        COUNT(DISTINCT CASE WHEN c.Id IS NOT NULL THEN c.Id END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.PostTypeId, p.CreationDate, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ActualCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY ph.PostId, ph.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        ub.UserId, 
+        ub.BadgeCount,
+        COUNT(DISTINCT pd.PostId) AS PostCount
+    FROM UserBadgeCounts ub
+    JOIN PostDetails pd ON ub.UserId = pd.OwnerUserId
+    WHERE ub.BadgeCount > 0 AND pd.RecentPostRank <= 3
+    GROUP BY ub.UserId, ub.BadgeCount
+    HAVING COUNT(DISTINCT pd.PostId) > 5
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    COALESCE(SUM(c.CommentCount), 0) AS TotalComments,
+    COALESCE(SUM(td.Score), 0) AS TotalScore,
+    COUNT(DISTINCT CASE WHEN cp.PostId IS NOT NULL THEN cp.PostId END) AS ClosedPostCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(u.LastAccessDate) AS LastActivity
+FROM Users u
+LEFT JOIN PostDetails td ON u.Id = td.OwnerUserId
+LEFT JOIN ClosedPosts cp ON td.PostId = cp.PostId
+LEFT JOIN LATERAL (
+    SELECT unnest(string_to_array(substring(td.Tags, 2, length(td.Tags)-2), '><')) AS TagName
+    FROM Posts p
+    WHERE p.Id = td.PostId
+) AS t ON true
+LEFT JOIN TopUsers tu ON u.Id = tu.UserId 
+WHERE u.Reputation > 100
+GROUP BY u.Id, u.DisplayName, u.Reputation
+HAVING COUNT(DISTINCT td.PostId) > 10
+ORDER BY TotalScore DESC, LastActivity DESC
+LIMIT 50;

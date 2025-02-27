@@ -1,0 +1,102 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT 
+                AVG(p2.p_retailprice) 
+            FROM 
+                part p2
+            WHERE 
+                p2.p_size BETWEEN 5 AND 20
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice
+    HAVING 
+        COUNT(l.l_linenumber) > 5
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    SUM(fo.o_totalprice) AS total_order_value,
+    AVG(r.s_acctbal) AS average_supplier_balance,
+    COUNT(DISTINCT hp.p_partkey) AS high_value_part_count
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    FilteredOrders fo ON c.c_custkey = fo.o_orderkey
+LEFT JOIN 
+    RankedSuppliers r ON r.rnk = 1
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey = (
+        SELECT 
+            ps.ps_partkey
+        FROM 
+            PartSupplierInfo ps
+        WHERE 
+            ps.max_supply_cost > 100.00
+        LIMIT 1
+    )
+WHERE 
+    c.total_spent IS NOT NULL AND 
+    r.s_suppkey IS NOT NULL
+GROUP BY 
+    c.c_custkey, c.c_name
+ORDER BY 
+    total_order_value DESC
+LIMIT 10
+OFFSET (
+    SELECT 
+        COUNT(*)
+    FROM 
+        customer
+) % 5;

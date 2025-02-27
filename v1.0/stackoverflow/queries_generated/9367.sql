@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        pt.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pt.TagName,
+    pt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PostLinks pl ON rp.PostId = pl.PostId
+JOIN 
+    PopularTags pt ON pl.RelatedPostId = pt.TagCount
+WHERE 
+    rp.PostRank <= 3
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

@@ -1,0 +1,71 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerTopPurchases AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+SELECT 
+    r.r_name AS region_name,
+    s.s_name AS supplier_name,
+    SUM(ss.total_revenue) AS supplier_total_revenue,
+    SUM(ctp.total_spent) AS customer_total_spent,
+    MAX(hvc.c_acctbal) AS max_customer_acctbal
+FROM 
+    region r
+LEFT OUTER JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN 
+    CustomerTopPurchases ctp ON ctp.total_orders > 10 
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey = ctp.c_custkey
+WHERE 
+    ss.total_revenue IS NOT NULL OR ctp.total_orders IS NOT NULL
+GROUP BY 
+    r.r_name, s.s_name
+HAVING 
+    SUM(ss.total_revenue) > 100000 OR COUNT(ctp.c_custkey) > 5
+ORDER BY 
+    r.r_name, supplier_total_revenue DESC;

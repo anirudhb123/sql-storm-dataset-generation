@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= DATEADD(MONTH, -6, GETDATE()) 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName, p.PostTypeId
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        COUNT(*) AS EditCount,
+        JSON_AGG(DISTINCT ph.UserDisplayName) AS Editors
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ph.PostId, ph.CreationDate, pht.Name
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.*,
+        phd.EditCount,
+        phd.Editors
+    FROM RankedPosts rp
+    LEFT JOIN PostHistoryData phd ON rp.PostId = phd.PostId
+    WHERE rp.Rank <= 5
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.CreationDate,
+    trp.ViewCount,
+    trp.Score,
+    trp.OwnerDisplayName,
+    trp.CommentCount,
+    trp.UpVotes,
+    trp.DownVotes,
+    COALESCE(trp.EditCount, 0) AS EditCount,
+    COALESCE(trp.Editors, '[]') AS Editors,
+    CASE 
+        WHEN trp.Score > 10 THEN 'Popular'
+        WHEN trp.Score BETWEEN 1 AND 10 THEN 'Moderate'
+        ELSE 'Unpopular' 
+    END AS Popularity
+FROM TopRankedPosts trp
+ORDER BY trp.Score DESC, trp.ViewCount DESC;

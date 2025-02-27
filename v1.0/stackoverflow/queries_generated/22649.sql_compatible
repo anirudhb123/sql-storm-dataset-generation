@@ -1,0 +1,81 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) DESC) AS Rank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserPostActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        AVG(EXTRACT(EPOCH FROM COALESCE(p.LastActivityDate, '2024-10-01 12:34:56'::timestamp) - p.CreationDate)) AS AvgActivityDuration
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY u.DisplayName
+),
+PostClosingDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserDisplayName AS Editor,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId 
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        COALESCE(MAX(ph.CreationDate), 'Never') AS LastActionDate
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName AS User_Name,
+    ue.UpVotes,
+    ue.DownVotes,
+    ua.TotalPosts,
+    ua.Questions,
+    ua.Answers,
+    ua.AvgActivityDuration,
+    ps.PostId,
+    ps.Title AS Post_Title,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    ps.CommentCount,
+    ps.LastActionDate,
+    pc.Editor AS Last_Modifier,
+    pc.EditDate AS Last_Edit_Date,
+    pc.CloseReason AS Recent_Close_Reason
+FROM UserEngagement ue
+JOIN UserPostActivity ua ON ue.DisplayName = ua.DisplayName
+LEFT JOIN PostStatistics ps ON ps.CommentCount > 0 
+LEFT JOIN PostClosingDetails pc ON ps.PostId = pc.PostId AND pc.EditRank = 1
+WHERE ue.Rank <= 10
+ORDER BY ue.UpVotes DESC, ua.TotalPosts DESC, ue.Reputation DESC;

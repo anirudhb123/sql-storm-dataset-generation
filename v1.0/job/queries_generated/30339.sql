@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.path || et.title 
+    FROM 
+        aka_title et
+    JOIN 
+        movie_link ml ON et.movie_id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mv.title AS Movie_Title,
+    mv.production_year AS Production_Year,
+    COUNT(DISTINCT ca.person_id) AS Cast_Count,
+    STRING_AGG(DISTINCT a.name, ', ') AS Actors,
+    ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY COUNT(ca.person_id) DESC) AS Year_Rank
+FROM 
+    movie_hierarchy mv
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.id
+LEFT JOIN 
+    aka_name a ON ca.person_id = a.person_id
+WHERE 
+    mv.production_year IS NOT NULL
+    AND mv.production_year > 2000
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year
+HAVING 
+    COUNT(DISTINCT a.id) > 1
+ORDER BY 
+    mv.production_year DESC, 
+    Cast_Count DESC
+LIMIT 10;
+
+-- This query builds a recursive CTE to establish a hierarchy of movies, 
+-- counts the number of distinct cast members for each movie, 
+-- aggregates the actor names into a string, 
+-- assigns a ranking based on the number of cast members per production year, 
+-- and filters for movies produced after 2000 with more than one distinct actor.

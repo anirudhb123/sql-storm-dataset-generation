@@ -1,0 +1,66 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        SUM(CASE 
+                WHEN V.VoteTypeId = 2 THEN 1 
+                ELSE 0 
+            END) AS UpvoteCount,
+        SUM(CASE 
+                WHEN V.VoteTypeId = 3 THEN 1 
+                ELSE 0 
+            END) AS DownvoteCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.LastActivityDate,
+        U.DisplayName AS OwnerDisplayName
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+),
+BadgeCount AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.CommentCount,
+    UA.VoteCount,
+    UA.UpvoteCount,
+    UA.DownvoteCount,
+    COALESCE(BC.BadgeCount, 0) AS BadgeCount,
+    PS.PostId,
+    PS.Title AS PostTitle,
+    PS.CreationDate AS PostCreationDate,
+    PS.Score AS PostScore,
+    PS.ViewCount AS PostViewCount,
+    PS.AnswerCount AS PostAnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.FavoriteCount AS PostFavoriteCount,
+    PS.LastActivityDate AS PostLastActivityDate,
+    PS.OwnerDisplayName AS PostOwnerDisplayName
+FROM UserActivity UA
+LEFT JOIN BadgeCount BC ON UA.UserId = BC.UserId
+LEFT JOIN PostStatistics PS ON UA.UserId = PS.OwnerUserId
+ORDER BY UA.Reputation DESC, UA.PostCount DESC;

@@ -1,0 +1,88 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank_by_actors
+    FROM 
+        aka_title AS a
+    LEFT JOIN 
+        cast_info AS ca ON a.id = ca.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_actors <= 5
+),
+
+MovieNotes AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(m.note, '; ') AS combined_notes
+    FROM 
+        movie_info AS m
+    WHERE 
+        m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Note')
+    GROUP BY 
+        m.movie_id
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.actor_count,
+        mn.combined_notes,
+        mk.keywords
+    FROM 
+        TopMovies AS tm
+    LEFT JOIN 
+        MovieNotes AS mn ON tm.title = (SELECT title FROM aka_title AS a WHERE a.id = tm.title LIMIT 1) 
+    LEFT JOIN 
+        MovieKeywords AS mk ON tm.title = (SELECT title FROM aka_title AS a WHERE a.id = mk.movie_id LIMIT 1)
+)
+
+SELECT 
+    fr.title, 
+    fr.production_year,
+    fr.actor_count,
+    COALESCE(fr.combined_notes, 'No notes available') AS notes,
+    COALESCE(fr.keywords, 'No keywords available') AS keywords,
+    CASE 
+        WHEN fr.actor_count > 10 THEN 'Ensemble Cast'
+        WHEN fr.actor_count BETWEEN 5 AND 10 THEN 'Average Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_type,
+    CASE 
+        WHEN fr.keywords IS NULL THEN '[No Keywords]'
+        ELSE fr.keywords
+    END AS processed_keywords
+FROM 
+    FinalResults AS fr
+WHERE 
+    fr.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fr.production_year DESC, fr.actor_count DESC;

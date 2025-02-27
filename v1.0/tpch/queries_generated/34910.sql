@@ -1,0 +1,68 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS level
+    FROM nation n
+    WHERE n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+), price_stats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+), top_customers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 10000
+    ORDER BY total_spent DESC
+    LIMIT 10
+), supplier_availability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        pa.total_available,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    LEFT JOIN supplier_availability pa ON p.p_partkey = pa.ps_partkey
+), final AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        nh.n_name AS nation_name,
+        ps.total_price,
+        pd.price_rank
+    FROM price_stats ps
+    JOIN orders o ON ps.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+    JOIN part_details pd ON o.o_orderkey % 10 = pd.p_partkey -- Mock join condition
+    WHERE pd.total_available IS NOT NULL
+      AND pd.price_rank <= 5
+      AND o.o_orderdate BETWEEN '2023-01-01' AND CURRENT_DATE
+)
+SELECT 
+    f.o_orderkey,
+    f.c_name,
+    f.nation_name,
+    f.total_price,
+    COALESCE(f.price_rank, 'N/A') AS price_rank_status
+FROM final f
+ORDER BY f.total_price DESC, f.nation_name, f.c_name;
+

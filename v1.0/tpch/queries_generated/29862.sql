@@ -1,0 +1,24 @@
+SELECT 
+    SUBSTRING(p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(l_extendedprice) AS avg_extended_price,
+    SUM(CASE WHEN l_discount > 0.1 THEN l_extendedprice * (1 - l_discount) ELSE 0 END) AS total_discounted_price,
+    STRING_AGG(DISTINCT CONCAT(c_name, ' (', c_acctbal, ')'), '; ') AS customer_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_size IN (10, 20, 30)
+    AND l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    short_name
+ORDER BY 
+    supplier_count DESC, avg_extended_price DESC
+LIMIT 50;

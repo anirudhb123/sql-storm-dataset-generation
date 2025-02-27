@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY
+        o.o_orderkey, o.o_orderstatus
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+    ORDER BY
+        total_supply_cost DESC
+    LIMIT 10
+),
+CustomerRegions AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS region,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name, n.n_name
+)
+SELECT
+    r.region,
+    COUNT(DISTINCT cr.c_custkey) AS customer_count,
+    SUM(cr.total_spent) AS total_revenue,
+    AVG(cr.total_spent) AS average_spent,
+    (SELECT COUNT(*) FROM RankedOrders WHERE rank_sales <= 10) AS top_order_count,
+    (SELECT COUNT(*) FROM TopSuppliers) AS top_supplier_count
+FROM
+    CustomerRegions cr
+JOIN
+    nation n ON cr.region = n.n_name
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY
+    r.region
+ORDER BY
+    total_revenue DESC;

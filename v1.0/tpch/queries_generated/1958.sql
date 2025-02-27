@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        MAX(l.l_tax) AS max_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ss.supplier_count, 0) AS supplier_count,
+        COALESCE(ss.avg_supplycost, 0) AS avg_supplycost,
+        COALESCE(ls.total_revenue, 0) AS total_revenue,
+        COALESCE(cs.total_spent, 0) AS total_spent,
+        COUNT(DISTINCT co.c_custkey) AS customer_count
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierStats ss ON p.p_partkey = ss.ps_partkey
+    LEFT JOIN 
+        LineItemSummary ls ON p.p_partkey = ls.l_partkey
+    LEFT JOIN 
+        CustomerOrders co ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+    LEFT JOIN 
+        orders o ON o.o_orderkey IN (SELECT o2.o_orderkey FROM RankedOrders o2 WHERE o2.o_orderkey = o.o_orderkey)
+    GROUP BY 
+        p.p_partkey, p.p_name, ss.supplier_count, ss.avg_supplycost, ls.total_revenue, cs.total_spent
+)
+SELECT 
+    fs.p_partkey,
+    fs.p_name,
+    fs.supplier_count,
+    fs.avg_supplycost,
+    fs.total_revenue,
+    fs.total_spent,
+    fs.customer_count
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.total_revenue > 1000 
+    OR fs.total_spent > 500 
+ORDER BY 
+    fs.total_revenue DESC, fs.total_spent DESC;

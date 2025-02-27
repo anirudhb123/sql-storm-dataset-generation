@@ -1,0 +1,46 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        r.role AS role_name,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS rank
+    FROM title t
+    JOIN cast_info c ON t.id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+),
+KeywordCounts AS (
+    SELECT 
+        t.id AS title_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY t.id
+),
+CombinedData AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.actor_name,
+        rt.role_name,
+        kc.keyword_count,
+        rt.rank
+    FROM RankedTitles rt
+    JOIN KeywordCounts kc ON rt.title_id = kc.title_id
+)
+SELECT 
+    cd.title,
+    cd.production_year,
+    cd.actor_name,
+    cd.role_name,
+    cd.keyword_count,
+    STRING_AGG(DISTINCT rt.role_name, ', ') AS all_roles
+FROM CombinedData cd
+JOIN RankedTitles rt ON cd.title_id = rt.title_id
+WHERE rt.rank = 1  
+GROUP BY cd.title_id, cd.title, cd.production_year, cd.actor_name, cd.role_name, cd.keyword_count
+ORDER BY cd.production_year DESC, cd.title;

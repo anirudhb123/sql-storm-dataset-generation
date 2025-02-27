@@ -1,0 +1,25 @@
+WITH UserBadges AS (
+    SELECT u.Id AS UserId, b.Name AS BadgeName, COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, b.Name
+),
+PostStats AS (
+    SELECT p.OwnerUserId, COUNT(p.Id) AS PostCount, SUM(p.Score) AS TotalScore, COUNT(DISTINCT p.Tags) AS UniqueTags
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.OwnerUserId
+),
+TopVotedPosts AS (
+    SELECT p.Id, p.Title, p.Score, u.DisplayName AS OwnerDisplayName
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Questions only
+    ORDER BY p.Score DESC
+    LIMIT 5
+)
+SELECT ub.UserId, ub.BadgeName, ub.BadgeCount, ps.PostCount, ps.TotalScore, ps.UniqueTags, tvp.Title AS TopPostTitle, tvp.Score AS TopPostScore
+FROM UserBadges ub
+JOIN PostStats ps ON ub.UserId = ps.OwnerUserId
+LEFT JOIN TopVotedPosts tvp ON ps.OwnerUserId = tvp.OwnerUserId
+ORDER BY ub.BadgeCount DESC, ps.TotalScore DESC;

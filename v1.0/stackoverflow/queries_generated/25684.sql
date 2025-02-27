@@ -1,0 +1,59 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        t.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryEntries,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS ChangeTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        ph.PostId
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        Rank() OVER (ORDER BY PostsCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostsCount > 5 -- Only include tags with significant activity
+)
+SELECT 
+    ts.TagName,
+    ts.PostsCount,
+    ts.TotalViews,
+    ts.AvgScore,
+    ts.ActiveUsers,
+    phs.HistoryEntries,
+    phs.LastEdited,
+    phs.ChangeTypes
+FROM 
+    TagStats ts
+LEFT JOIN 
+    PostHistorySummary phs ON ts.PostsCount > 0
+JOIN 
+    TopTags tt ON ts.TagName = tt.TagName
+WHERE 
+    tt.TagRank <= 10 -- Limit to top 10 tags
+ORDER BY 
+    ts.PostsCount DESC;

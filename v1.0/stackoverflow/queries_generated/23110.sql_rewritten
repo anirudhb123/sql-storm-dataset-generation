@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        U.Reputation AS OwnerReputation,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn
+    FROM
+        Posts p
+        LEFT JOIN Users U ON p.OwnerUserId = U.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, U.Reputation
+),
+EligiblePosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerReputation,
+        rp.CommentCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.rn <= 10 AND  
+        rp.OwnerReputation >= (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL)  
+),
+TaggedPosts AS (
+    SELECT 
+        ep.PostId,
+        ARRAY_AGG(DISTINCT TRIM(UNNEST(string_to_array(p.Tags, '>,<')))) AS Tags,  
+        ep.Title,
+        ep.CreationDate,
+        ep.Score,
+        ep.OwnerReputation,
+        ep.CommentCount
+    FROM
+        EligiblePosts ep
+        JOIN Posts p ON ep.PostId = p.Id
+    GROUP BY 
+        ep.PostId, ep.Title, ep.CreationDate, ep.Score, ep.OwnerReputation, ep.CommentCount
+),
+TopTags AS (
+    SELECT
+        Tags,
+        COUNT(*) AS TagCount
+    FROM (
+        SELECT
+            Tags
+        FROM
+            TaggedPosts
+        WHERE
+            CommentCount > 0  
+    ) AS Sub
+    GROUP BY Tags
+    ORDER BY TagCount DESC
+    LIMIT 5  
+),
+PostHistories AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.CreationDate
+    FROM
+        PostHistory ph
+        JOIN TaggedPosts t ON ph.PostId = t.PostId
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11)  
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.OwnerReputation,
+    tp.CommentCount,
+    t.Tags,
+    ph.UserDisplayName AS LastEditor,
+    ph.Comment AS EditComment,
+    ph.CreationDate AS EditDate
+FROM 
+    TaggedPosts tp
+LEFT JOIN 
+    PostHistories ph ON tp.PostId = ph.PostId
+JOIN 
+    TopTags t ON t.Tags = ANY(tp.Tags)
+WHERE
+    ph.UserDisplayName IS NOT NULL OR anonymous IS FALSE  
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

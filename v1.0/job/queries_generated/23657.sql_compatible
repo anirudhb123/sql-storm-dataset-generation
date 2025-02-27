@@ -1,0 +1,67 @@
+
+WITH RECURSIVE ActorMovies AS (
+    SELECT
+        ka.name AS actor_name,
+        kt.title AS movie_title,
+        kt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ka.id ORDER BY kt.production_year DESC) AS rn
+    FROM
+        aka_name ka
+    JOIN cast_info ci ON ka.person_id = ci.person_id
+    JOIN aka_title kt ON ci.movie_id = kt.movie_id
+    WHERE
+        ka.name IS NOT NULL
+        AND kt.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT
+        actor_name,
+        COUNT(movie_title) AS movie_count
+    FROM
+        ActorMovies
+    GROUP BY
+        actor_name
+),
+FilteredActors AS (
+    SELECT
+        actor_name,
+        movie_count
+    FROM
+        ActorMovieCount
+    WHERE
+        movie_count > 5
+)
+SELECT
+    fa.actor_name,
+    fa.movie_count,
+    (SELECT COUNT(*) FROM cast_info ci2 WHERE ci2.person_id IN (SELECT person_id FROM aka_name WHERE name = fa.actor_name)) AS co_actor_count,
+    (SELECT STRING_AGG(DISTINCT kt.title, ', ' ORDER BY kt.production_year DESC)
+     FROM aka_title kt
+     JOIN cast_info ci ON kt.movie_id = ci.movie_id
+     WHERE ci.person_id IN (SELECT person_id FROM aka_name WHERE name = fa.actor_name)) AS movie_titles
+FROM
+    FilteredActors fa
+LEFT JOIN (
+    SELECT
+        kt.production_year,
+        COUNT(*) AS distinct_roles
+    FROM
+        aka_title kt
+    JOIN cast_info ci ON kt.movie_id = ci.movie_id
+    GROUP BY
+        kt.production_year
+) AS YearlyRoles ON YearlyRoles.production_year = (
+    SELECT MAX(production_year)
+    FROM aka_title
+    WHERE title IN (SELECT movie_title FROM ActorMovies WHERE actor_name = fa.actor_name)
+)
+WHERE
+    fa.actor_name IS NOT NULL
+GROUP BY
+    fa.actor_name,
+    fa.movie_count,
+    co_actor_count
+ORDER BY
+    fa.movie_count DESC,
+    co_actor_count ASC
+LIMIT 10;

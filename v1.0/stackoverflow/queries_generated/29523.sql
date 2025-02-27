@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(a.Id) AS TotalAnswers,
+        COALESCE(SUM(vt.VoteTypeId = 2) - SUM(vt.VoteTypeId = 3), 0) AS NetVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY SUBSTRING(p.Tags FROM '([^<>]+)(?:>|<|$)') ORDER BY COALESCE(SUM(vt.VoteTypeId = 2) - SUM(vt.VoteTypeId = 3), 0) DESC) AS RankByTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY
+        p.Id, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.Author,
+        rp.TotalAnswers,
+        rp.NetVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByTag <= 3 -- Top 3 ranked questions per tag
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    fp.CreationDate,
+    fp.Author,
+    fp.TotalAnswers,
+    fp.NetVoteCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(fp.Tags, '><')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.Author, fp.TotalAnswers, fp.NetVoteCount
+ORDER BY 
+    fp.NetVoteCount DESC, fp.CreationDate DESC
+LIMIT 50;

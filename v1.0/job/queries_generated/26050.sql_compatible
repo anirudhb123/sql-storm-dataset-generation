@@ -1,0 +1,58 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        a.name AS actor_name,
+        c.kind AS role_type
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND t.production_year BETWEEN 2000 AND 2020
+),
+keyword_count AS (
+    SELECT
+        movie_title,
+        COUNT(movie_keyword) AS keyword_count
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_title
+),
+top_movies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.actor_name,
+        t.keyword_count
+    FROM 
+        movie_details md
+    JOIN 
+        keyword_count t ON md.movie_title = t.movie_title
+    WHERE 
+        t.keyword_count >= 5
+    ORDER BY 
+        t.keyword_count DESC, md.production_year DESC
+    LIMIT 10
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.actor_name,
+    'This movie has ' || tm.keyword_count || ' significant keywords associated with it.' AS movie_info
+FROM 
+    top_movies tm
+ORDER BY 
+    tm.production_year DESC;

@@ -1,0 +1,40 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_custkey, 1 AS Level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.o_custkey, h.Level + 1
+    FROM orders oh
+    JOIN OrderHierarchy h ON oh.o_custkey = h.o_custkey
+    WHERE oh.o_orderstatus = 'O' AND oh.o_orderdate > h.o_orderdate
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, SUM(o.o_totalprice) AS TotalSpent, 
+           COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rnk
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, AVG(ps.ps_supplycost) AS AvgSupplyCost,
+           COUNT(DISTINCT ps.ps_partkey) AS DistinctPartsSupplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT cs.c_name, cs.TotalSpent, ss.s_name, ss.AvgSupplyCost, ss.DistinctPartsSupplied,
+       CASE 
+           WHEN cs.TotalSpent IS NULL THEN 'No Orders'
+           WHEN cs.TotalSpent > 10000 THEN 'High Spender'
+           WHEN cs.TotalSpent BETWEEN 1000 AND 10000 THEN 'Medium Spender'
+           ELSE 'Low Spender'
+       END AS SpendingCategory,
+       (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)) AS TotalLineItems
+FROM CustomerSummary cs
+FULL OUTER JOIN SupplierStats ss ON cs.rnk <= 10
+WHERE cs.OrderCount > 0 OR ss.DistinctPartsSupplied > 0
+ORDER BY cs.TotalSpent DESC NULLS LAST, ss.AvgSupplyCost DESC;

@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+),
+TopSales AS (
+    SELECT 
+        rs.web_site_sk,
+        SUM(rs.ws_ext_sales_price) AS total_sales
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.sales_rank <= 5
+    GROUP BY 
+        rs.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        COUNT(*) AS return_count,
+        SUM(sr.return_amt_inc_tax) AS total_returned
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim) 
+    GROUP BY 
+        sr.returned_date_sk, sr.return_time_sk
+)
+SELECT 
+    w.w_warehouse_id,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    (COALESCE(ts.total_sales, 0) - COALESCE(cr.total_returned, 0)) AS net_sales,
+    (CASE 
+        WHEN COALESCE(ts.total_sales, 0) > 0 THEN (COALESCE(cr.total_returned, 0) / COALESCE(ts.total_sales, 0)) * 100 
+        ELSE NULL 
+    END) AS return_percentage
+FROM 
+    warehouse w
+LEFT JOIN 
+    TopSales ts ON w.w_warehouse_sk = ts.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON cr.returned_date_sk = cr.returned_date_sk
+ORDER BY 
+    net_sales DESC;

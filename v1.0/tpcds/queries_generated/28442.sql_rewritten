@@ -1,0 +1,64 @@
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        STRING_AGG(DISTINCT ca_city, ', ') AS cities,
+        STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_type || ' ' || ca_street_number, '; ') AS full_addresses
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 50000
+),
+DateAnalysis AS (
+    SELECT 
+        d_year,
+        COUNT(DISTINCT d_date_sk) AS active_days,
+        SUM(CASE WHEN d_weekend = 'Y' THEN 1 ELSE 0 END) AS weekend_days,
+        SUM(CASE WHEN d_holiday = 'Y' THEN 1 ELSE 0 END) AS holiday_days
+    FROM
+        date_dim
+    GROUP BY 
+        d_year
+),
+FinalBenchmark AS (
+    SELECT 
+        AS.ca_state,
+        AS.unique_addresses,
+        AS.cities,
+        D.active_days,
+        D.weekend_days,
+        D.holiday_days,
+        COUNT(DISTINCT C.c_customer_id) AS customer_count,
+        AVG(DM.cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT DM.cd_gender, ', ') AS gender_distribution
+    FROM 
+        AddressStats AS AS
+    JOIN 
+        DateAnalysis AS D ON D.d_year = YEAR(cast('2002-10-01' as date))
+    LEFT JOIN 
+        customer AS C ON C.c_current_addr_sk IN (SELECT ca_address_sk FROM customer_address WHERE ca_state = AS.ca_state)
+    LEFT JOIN 
+        Demographics AS DM ON DM.cd_demo_sk = C.c_current_cdemo_sk
+    GROUP BY 
+        AS.ca_state, AS.unique_addresses, AS.cities, D.active_days, D.weekend_days, D.holiday_days
+)
+SELECT 
+    *,
+    CONCAT('State: ', ca_state, ', Unique Addresses: ', unique_addresses, ', Cities: ', cities, ', Active Days: ', active_days, ', Weekend Days: ', weekend_days, ', Holiday Days: ', holiday_days, ', Customer Count: ', customer_count, ', Avg Purchase Estimate: ', avg_purchase_estimate, ', Gender Distribution: ', gender_distribution) AS benchmark_summary
+FROM 
+    FinalBenchmark
+ORDER BY 
+    unique_addresses DESC
+LIMIT 10;

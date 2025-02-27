@@ -1,0 +1,44 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS segment_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1994-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+),
+TopRevenue AS (
+    SELECT 
+        r.c_mktsegment, 
+        COUNT(*) AS number_of_orders, 
+        SUM(total_revenue) AS total_segment_revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.segment_rank <= 10
+    GROUP BY 
+        r.c_mktsegment
+)
+SELECT 
+    r.r_name AS region_name, 
+    t.c_mktsegment, 
+    t.number_of_orders, 
+    t.total_segment_revenue
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+JOIN 
+    TopRevenue t ON c.c_mktsegment = t.c_mktsegment
+ORDER BY 
+    r.r_name, t.total_segment_revenue DESC;

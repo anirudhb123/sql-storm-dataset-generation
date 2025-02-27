@@ -1,0 +1,78 @@
+WITH TagList AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(TRIM(SUBSTRING(t.TagName, 1, 35)), ', ') AS FormattedTags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        p.CreationDate,
+        ul.UserId AS LastEditorId,
+        ul.UserDisplayName,
+        tl.FormattedTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, UserId, UserDisplayName FROM Posts) ul ON p.LastEditorUserId = ul.UserId
+    LEFT JOIN 
+        TagList tl ON p.Id = tl.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.ViewCount > 100
+),
+HighScoringPosts AS (
+    SELECT 
+        pd.*,
+        ur.DisplayName AS UserDisplayName
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserReputation ur ON ur.Reputation > 1000
+    WHERE 
+        pd.VoteCount > 5
+    ORDER BY 
+        pd.CreationDate DESC
+)
+
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.Body,
+    hsp.CommentCount,
+    hsp.VoteCount,
+    hsp.CreationDate,
+    hsp.UserDisplayName,
+    hsp.FormattedTags
+FROM 
+    HighScoringPosts hsp
+JOIN 
+    PostHistory ph ON hsp.PostId = ph.PostId
+WHERE 
+    ph.PostHistoryTypeId = 4 
+ORDER BY 
+    hsp.VoteCount DESC, 
+    hsp.CommentCount DESC;

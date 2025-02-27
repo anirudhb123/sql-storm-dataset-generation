@@ -1,0 +1,65 @@
+
+WITH RECURSIVE nation_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, n.n_nationkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, n.n_nationkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN nation_suppliers ns ON s.s_suppkey <> ns.s_suppkey
+    WHERE s.s_acctbal > COALESCE(ns.s_acctbal, 0)
+),
+tagged_parts AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           p.p_container,
+           p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_container ORDER BY p.p_retailprice DESC) AS price_rank,
+           DENSE_RANK() OVER (ORDER BY p.p_retailprice DESC) AS overall_rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice > 0
+),
+complex_orders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+           CASE 
+               WHEN COUNT(DISTINCT l.l_partkey) > 5 THEN 'High Variety'
+               ELSE 'Low Variety'
+           END AS part_variety
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT p.p_name, 
+       p.p_retailprice,
+       ns.n_name AS supplier_nation,
+       co.total_amount,
+       co.part_variety,
+       CASE 
+           WHEN p.p_retailprice < 10 THEN 'Cheap'
+           WHEN p.p_retailprice BETWEEN 10 AND 100 THEN 'Moderate'
+           ELSE 'Expensive'
+       END AS price_category
+FROM tagged_parts p
+LEFT JOIN nation_suppliers ns ON ns.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey
+)
+JOIN complex_orders co ON co.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l 
+    WHERE l.l_partkey = p.p_partkey
+    AND l.l_shipmode IN ('AIR', 'GROUND')
+    AND l.l_returnflag = 'N'
+)
+WHERE p.price_rank = 1
+  AND ns.n_name IS NOT NULL
+  AND co.total_amount > 100
+ORDER BY price_category DESC, p.p_retailprice ASC;

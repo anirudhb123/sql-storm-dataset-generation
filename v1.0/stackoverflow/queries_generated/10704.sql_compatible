@@ -1,0 +1,59 @@
+
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount, 
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(u.UpVotes) AS TotalUpvotes,
+        SUM(u.DownVotes) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ue.UserId,
+    ue.DisplayName,
+    ue.PostsCount,
+    ue.CommentsCount,
+    ue.TotalUpvotes,
+    ue.TotalDownvotes
+FROM 
+    PostSummary ps
+JOIN 
+    UserEngagement ue ON ps.UserId = ue.UserId 
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC
+LIMIT 100;

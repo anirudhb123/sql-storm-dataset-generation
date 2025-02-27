@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_sold_date_sk,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+inventory_data AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand,
+        COUNT(DISTINCT inv.inv_date_sk) AS inventory_days
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+top_items AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_quantity) DESC) AS item_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    cs.total_net_profit,
+    cs.avg_sales_price,
+    cs.order_count,
+    ti.total_sales_quantity,
+    id.total_quantity_on_hand,
+    FIND_IN_SET(id.total_quantity_on_hand, 
+        (SELECT GROUP_CONCAT(inv.total_quantity_on_hand ORDER BY inv.total_quantity_on_hand DESC)
+         FROM inventory_data inv
+         WHERE inv.inv_item_sk IN (SELECT ws_item_sk FROM top_items WHERE item_rank <= 10)
+         GROUP BY inv.inv_item_sk)) AS ranked_inventory
+FROM 
+    customer_sales cs
+JOIN 
+    customer c ON cs.c_customer_id = c.c_customer_id
+LEFT JOIN 
+    inventory_data id ON id.inv_item_sk IN (SELECT ws_item_sk FROM top_items WHERE item_rank <= 10)
+JOIN 
+    top_items ti ON ti.ws_item_sk = cs.ws_item_sk
+WHERE 
+    cs.total_net_profit > 1000
+    AND EXISTS (
+        SELECT 1
+        FROM sales_cte s
+        WHERE s.ws_order_number = cs.order_count
+        AND s.rn = 1
+    )
+ORDER BY 
+    cs.total_net_profit DESC;

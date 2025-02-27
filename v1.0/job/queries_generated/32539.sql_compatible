@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+  SELECT 
+    id, 
+    title, 
+    production_year, 
+    episode_of_id, 
+    season_nr, 
+    episode_nr, 
+    0 AS level
+  FROM 
+    aka_title
+  WHERE 
+    episode_of_id IS NULL 
+
+  UNION ALL
+  
+  SELECT 
+    t.id, 
+    t.title, 
+    t.production_year, 
+    t.episode_of_id, 
+    t.season_nr, 
+    t.episode_nr, 
+    mh.level + 1
+  FROM 
+    aka_title t
+  JOIN 
+    MovieHierarchy mh ON t.episode_of_id = mh.id
+),
+
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+
+AverageInfo AS (
+    SELECT 
+        mi.movie_id,
+        AVG(LENGTH(mi.info)) AS avg_info_length
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    at.title,
+    at.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    COALESCE(avg_info.avg_info_length, 0) AS avg_info_length,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_in_year,
+    COALESCE(NULLIF(at.season_nr, 0), 'N/A') AS season_info,
+    CASE 
+        WHEN at.production_year < 2000 THEN 'Classic'
+        WHEN at.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_label
+FROM 
+    aka_title at
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = at.id
+LEFT JOIN 
+    KeywordCounts kc ON kc.movie_id = at.id
+LEFT JOIN 
+    AverageInfo avg_info ON avg_info.movie_id = at.id
+WHERE 
+    at.kind_id IN (1, 2) 
+GROUP BY 
+    at.id, at.title, at.production_year, at.season_nr, kc.keyword_count, avg_info.avg_info_length
+ORDER BY 
+    at.production_year DESC, total_cast DESC
+FETCH FIRST 50 ROWS ONLY;

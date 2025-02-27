@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AcceptedAnswerId,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        p.Title AS PostTitle,
+        ph.CreationDate AS EditDate,
+        pt.Name AS PostHistoryName,
+        U.DisplayName AS EditorDisplayName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    LEFT JOIN 
+        Users U ON ph.UserId = U.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE())
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.UpvoteCount,
+    tp.DownvoteCount,
+    COALESCE(MAX(phd.EditorDisplayName), 'No Edits') AS LastEditor,
+    MAX(phd.EditDate) AS LastEditDate,
+    CONCAT('Post Score:', tp.Score, ' | Views:', tp.ViewCount, 
+           ' | Comments:', tp.CommentCount, ' | Upvotes:', tp.UpvoteCount,
+           ' | Downvotes:', tp.DownvoteCount) AS Summary
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryDetails phd ON tp.PostId = phd.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, 
+    tp.CommentCount, tp.UpvoteCount, tp.DownvoteCount
+HAVING 
+    SUM(tp.UpvoteCount - tp.DownvoteCount) > 10
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,32 @@
+
+WITH RECURSIVE supplier_cte AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_supplycost, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_supplycost, ps.ps_availqty
+    FROM supplier_cte scte
+    JOIN partsupp ps ON scte.ps_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+),
+aggregated_data AS (
+    SELECT n.n_name AS nation_name,
+           COUNT(DISTINCT scte.s_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available_quantity,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier_cte scte
+    JOIN nation n ON scte.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON scte.ps_partkey = ps.ps_partkey
+    GROUP BY n.n_name
+)
+SELECT nation_name,
+       supplier_count,
+       total_available_quantity,
+       total_cost,
+       RANK() OVER (ORDER BY total_cost DESC) AS cost_rank
+FROM aggregated_data
+WHERE supplier_count > 10
+ORDER BY total_cost DESC, supplier_count DESC
+FETCH FIRST 10 ROWS ONLY;

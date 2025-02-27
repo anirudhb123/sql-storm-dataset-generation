@@ -1,0 +1,46 @@
+WITH ActorMovies AS (
+    SELECT a.name AS actor_name, 
+           t.title AS movie_title,
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') 
+      AND a.name IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT c.name AS company_name,
+           t.title AS movie_title,
+           t.production_year,
+           COUNT(mc.movie_id) AS num_movies
+    FROM company_name c
+    JOIN movie_companies mc ON c.id = mc.company_id
+    JOIN aka_title t ON mc.movie_id = t.movie_id
+    WHERE c.country_code = 'USA'
+    GROUP BY c.name, t.title, t.production_year
+),
+TopActors AS (
+    SELECT actor_name, 
+           COUNT(movie_title) AS total_movies
+    FROM ActorMovies
+    GROUP BY actor_name
+    HAVING COUNT(movie_title) > 5
+),
+RecentMovies AS (
+    SELECT DISTINCT movie_title, production_year
+    FROM ActorMovies 
+    WHERE rn = 1
+)
+SELECT a.actor_name, 
+       COALESCE(com.company_name, 'Independent') AS company_name,
+       m.movie_title,
+       m.production_year,
+       a.total_movies
+FROM RecentMovies m
+LEFT OUTER JOIN CompanyMovies com ON m.movie_title = com.movie_title 
+LEFT JOIN TopActors a ON m.movie_title IN (
+    SELECT movie_title
+    FROM ActorMovies
+)
+ORDER BY m.production_year DESC, a.actor_name;

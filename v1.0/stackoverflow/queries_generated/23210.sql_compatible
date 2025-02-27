@@ -1,0 +1,75 @@
+
+WITH UserAggregates AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - U.CreationDate) / 3600.0)) AS AverageAccountAge_Hours,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    WHERE P.IsModeratorOnly = 0 
+    GROUP BY P.Id, P.OwnerUserId, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+PostEngagement AS (
+    SELECT 
+        PI.PostId,
+        PI.Title,
+        PI.CreationDate,
+        PI.Score,
+        PI.ViewCount,
+        PI.CommentCount,
+        COALESCE(UA.DisplayName, 'Community User') AS OwnerDisplayName,
+        UA.Reputation AS OwnerReputation,
+        CASE 
+            WHEN PI.ViewCount IS NULL THEN 'No Views Yet' 
+            WHEN PI.ViewCount = 0 THEN 'No Engagement Yet' 
+            ELSE 'Engaged'
+        END AS EngagementStatus
+    FROM PostInfo PI
+    LEFT JOIN UserAggregates UA ON PI.OwnerUserId = UA.UserId
+)
+SELECT 
+    PE.Title, 
+    PE.OwnerDisplayName,
+    PE.OwnerReputation,
+    PE.CreationDate,
+    PE.Score,
+    PE.ViewCount,
+    PE.CommentCount,
+    PE.EngagementStatus,
+    (SELECT COUNT(*) 
+     FROM Posts P2 
+     WHERE P2.ParentId = PE.PostId 
+     AND P2.PostTypeId = 2) AS AnswerCount,
+    CASE 
+         WHEN PE.CommentCount > 5 THEN 'Popular' 
+         ELSE 'Less Popular' 
+    END AS PopularityStatus,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM PostEngagement PE
+LEFT JOIN Tags T ON T.WikiPostId IN (SELECT Id FROM Posts WHERE Id = PE.PostId)
+GROUP BY PE.Title, PE.OwnerDisplayName, PE.OwnerReputation, PE.CreationDate, PE.Score, PE.ViewCount, PE.CommentCount, PE.EngagementStatus
+ORDER BY PE.Score DESC, PE.CreationDate ASC
+LIMIT 100;

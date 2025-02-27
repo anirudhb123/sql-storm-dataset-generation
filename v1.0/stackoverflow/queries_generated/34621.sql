@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+        AND p.Score > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, b.Class
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE())
+),
+RecentLinks AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.CreationDate >= DATEADD(month, -3, GETDATE())
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    u.DisplayName,
+    p.Title,
+    p.CreationDate,
+    rp.Score,
+    rb.BadgeCount,
+    COALESCE(rl.RelatedPostCount, 0) AS RelatedPosts,
+    ph.Comment,
+    ph.CreationDate AS HistoryDate
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    RecentLinks rl ON rp.Id = rl.PostId
+WHERE 
+    (rp.Rank = 1 OR rp.PostCount > 5)
+    AND (rb.BadgeCount IS NULL OR rb.Class = 1)  -- Only display gold badges or no badges
+ORDER BY 
+    rp.Score DESC, 
+    u.Reputation DESC;

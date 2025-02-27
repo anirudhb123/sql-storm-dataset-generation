@@ -1,0 +1,51 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year BETWEEN 2000 AND 2023
+),
+actor_counts AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    ac.actor_count,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY rt.production_year ORDER BY rt.title) AS total_actors_up_to_year,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY rt.production_year) - COUNT(DISTINCT ci.person_id) OVER (PARTITION BY rt.production_year ORDER BY rt.title) AS new_actors
+FROM
+    ranked_titles rt
+LEFT JOIN
+    actor_counts ac ON rt.title_id = ac.movie_id
+LEFT JOIN
+    movie_keywords mk ON rt.title_id = mk.movie_id
+LEFT JOIN
+    cast_info ci ON rt.title_id = ci.movie_id
+WHERE
+    rt.title_rank <= 5 OR rt.production_year IS NULL
+ORDER BY
+    rt.production_year DESC, rt.title;

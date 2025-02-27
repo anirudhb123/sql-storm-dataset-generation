@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate ASC) AS rn,
+        COUNT(*) OVER (PARTITION BY pt.Name) AS TotalPosts,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM
+        Posts p
+    JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int[])
+    WHERE
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+UserScore AS (
+    SELECT
+        u.Id AS UserId,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        u.Id
+),
+ClosedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY
+        p.Id
+)
+SELECT
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.TagsList,
+    CASE
+        WHEN r.rn = 1 THEN 'Top Post'
+        WHEN r.rn <= 5 THEN 'Top 5 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    COALESCE(c.ClosedDate, 'Not Closed') AS ClosureStatus,
+    COALESCE(u.TotalBounty, 0) AS UserTotalBounty,
+    COUNT(DISTINCT c.PostId) OVER () AS TotalClosedPosts
+FROM
+    RankedPosts r
+LEFT JOIN
+    ClosedPosts c ON r.PostId = c.PostId
+LEFT JOIN
+    Users u ON u.Id = r.PostId
+WHERE
+    (r.TotalPosts > 10 AND r.ViewCount > 100) OR
+    (r.TotalPosts <= 10 AND r.Score >= 10)
+ORDER BY
+    r.ViewCount DESC, r.Score DESC
+LIMIT 100;

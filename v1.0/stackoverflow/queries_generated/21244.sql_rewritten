@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId = 10 
+),
+PostsWithBadges AS (
+    SELECT
+        u.Id AS UserId,
+        MAX(b.Class) AS HighestBadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+UserStats AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(rb.HighestBadgeClass, 0) AS HighestBadgeClass,
+        COALESCE(cp.ClosedCount, 0) AS ClosedCount
+    FROM
+        Users u
+    LEFT JOIN
+        PostsWithBadges b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT
+            p.OwnerUserId,
+            COUNT(*) AS ClosedCount
+        FROM
+            ClosedPosts cp
+        JOIN
+            Posts p ON cp.PostId = p.Id
+        GROUP BY
+            p.OwnerUserId
+    ) cp ON u.Id = cp.OwnerUserId
+)
+SELECT
+    us.DisplayName,
+    us.BadgeCount,
+    us.HighestBadgeClass,
+    us.ClosedCount,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount
+FROM
+    UserStats us
+JOIN
+    RankedPosts rp ON us.Id = rp.OwnerUserId
+WHERE
+    us.ClosedCount > 0
+    AND rp.rn <= 5 
+ORDER BY
+    us.BadgeCount DESC, 
+    rp.Score DESC,
+    rp.ViewCount DESC;

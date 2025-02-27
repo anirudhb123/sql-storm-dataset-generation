@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.OwnerUserId
+), 
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosureDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenDate,
+        COUNT(DISTINCT ph.UserId) AS EditorCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT ph.PostId) AS TotalEditedPosts
+    FROM 
+        Users u
+    JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT ph.PostId) > 5 
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        phd.ClosureDate,
+        phd.ReopenDate,
+        phd.EditorCount,
+        COALESCE(mu.TotalEditedPosts, 0) AS ActiveEditorCount,
+        rp.TotalBounty,
+        CASE 
+            WHEN phd.ClosureDate IS NOT NULL AND (phd.ReopenDate IS NULL OR phd.ReopenDate < phd.ClosureDate) 
+            THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    LEFT JOIN 
+        MostActiveUsers mu ON rp.OwnerUserId = mu.UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.PostStatus,
+    ps.ActiveEditorCount,
+    ps.TotalBounty,
+    CASE 
+        WHEN ps.EditorCount IS NULL THEN 'No Edits' 
+        WHEN ps.EditorCount > 10 THEN 'Highly Edited' 
+        ELSE 'Edited' 
+    END AS EditLevel
+FROM 
+    PostSummary ps
+WHERE 
+    ps.TotalBounty > 0 OR ps.ViewCount > 100
+ORDER BY 
+    ps.Score DESC, ps.ViewCount ASC
+LIMIT 100
+OFFSET 0;

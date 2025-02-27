@@ -1,0 +1,90 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_within_year
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    WHERE
+        a.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+top_movies AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        r.cast_count
+    FROM 
+        ranked_movies r
+    WHERE 
+        r.rank_within_year <= 5
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+movie_infos AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info, '; ') AS additional_info
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE '%cast%'
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.cast_count,
+    COALESCE(mk.keywords, 'None') AS keywords,
+    COALESCE(mi.additional_info, 'No additional information') AS additional_info
+FROM 
+    top_movies t
+LEFT JOIN 
+    movie_keywords mk ON t.title = (SELECT title FROM aka_title WHERE id = mk.movie_id LIMIT 1)
+LEFT JOIN 
+    movie_infos mi ON t.production_year = (SELECT production_year FROM aka_title WHERE id = mi.movie_id LIMIT 1)
+WHERE 
+    t.cast_count >= (
+        SELECT 
+            AVG(cast_count) 
+        FROM 
+            ranked_movies
+    )
+ORDER BY 
+    t.production_year DESC, 
+    t.cast_count DESC
+LIMIT 50;
+
+-- Additional options for performance monitoring could be:
+EXPLAIN ANALYZE
+WITH ranked_movies AS (
+    ... -- same as above
+)
+SELECT ...
+;
+
+This SQL query performs the following intricate operations:
+
+- It defines multiple Common Table Expressions (CTEs) to modularly organize the data processing logic, ranking movies by the number of cast members who participated in them, filtering out to get only the top 5 per year.
+- It aggregates keywords and additional information related to movies, including handling potential NULL values gracefully using COALESCE.
+-  It uses correlated subqueries to maintain references to the movie IDs when joining additional datasets.
+-  It performs a final query to filter the results based on the average cast count and orders the outcome by the production year and cast count.
+- Finally, it includes an EXPLAIN ANALYZE statement to assist in performance benchmarking.
+
+This example incorporates both SQL complexity and practical use, focusing on performance and thorough SQL features.

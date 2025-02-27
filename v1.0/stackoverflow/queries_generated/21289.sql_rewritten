@@ -1,0 +1,95 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        (P.AnswerCount - COALESCE(PrevHelpful.AnswerCount, 0)) AS NewAnswersCount,
+        (P.ViewCount - COALESCE(PrevHelpful.ViewCount, 0)) AS NewViewsCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            AnswerCount, 
+            ViewCount 
+        FROM 
+            Posts 
+        WHERE 
+            CreationDate < cast('2024-10-01' as date) - INTERVAL '1 day'
+        ) AS PrevHelpful ON P.Id = PrevHelpful.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        T.TagName
+),
+ScoreThreshold AS (
+    SELECT 
+        UserId,
+        Reputation
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > (SELECT AVG(Reputation) FROM UserStats)
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    P.PostId,
+    P.Score AS PostScore,
+    P.NewAnswersCount,
+    P.NewViewsCount,
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.CommentCount
+FROM 
+    UserStats U
+JOIN 
+    PostDetails P ON U.UserId = P.OwnerUserId
+JOIN 
+    TagStats T ON P.PostId IN (
+        SELECT Id 
+        FROM Posts 
+        WHERE Tags LIKE '%' || T.TagName || '%'
+    )
+WHERE 
+    U.UserId IN (SELECT UserId FROM ScoreThreshold)
+ORDER BY 
+    U.Reputation DESC, 
+    P.Score DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

@@ -1,0 +1,62 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_qty,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt_inc_tax
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+), 
+HighReturnCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        d.cd_gender,
+        d.cd_marital_status,
+        cr.total_returned_qty,
+        cr.total_returned_amt_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY d.cd_gender ORDER BY cr.total_returned_amt_inc_tax DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    JOIN 
+        CustomerDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    WHERE 
+        cr.total_returned_qty > 0
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    COALESCE(cr.total_returned_qty, 0) AS returned_qty,
+    COALESCE(cr.total_returned_amt_inc_tax, 0.00) AS returned_amt,
+    CASE 
+        WHEN d.cd_purchase_estimate IS NULL THEN 'Unknown'
+        ELSE CAST(d.cd_purchase_estimate AS VARCHAR)
+    END AS purchase_estimate,
+    DATE '2002-10-01' - MAKEDATE(c.c_birth_year, c.c_birth_month * 100 + c.c_birth_day) AS age_in_days
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+JOIN 
+    HighReturnCustomers hr ON hr.c_customer_id = c.c_customer_id
+WHERE 
+    hr.rn <= 10
+ORDER BY 
+    d.cd_gender, COALESCE(cr.total_returned_amt_inc_tax, 0.00) DESC;

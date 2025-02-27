@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.CommentCount,
+    ub.BadgeCount,
+    uvs.Upvotes,
+    uvs.Downvotes,
+    COALESCE(NULLIF(ub.BadgeCount, 0), 'No Badges') AS BadgeInfo,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'High Reputation User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    TopPosts p
+LEFT JOIN 
+    Users u ON p.CommentCount > 0 AND u.Id = 
+    (SELECT UserId FROM Comments c WHERE c.PostId = p.PostId ORDER BY c.CreationDate DESC LIMIT 1)
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    UserVoteStats uvs ON u.Id = uvs.UserId
+WHERE 
+    p.Score > 0
+ORDER BY 
+    p.Score DESC, p.Title ASC
+LIMIT 10;

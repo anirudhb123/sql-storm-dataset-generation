@@ -1,0 +1,47 @@
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        CONCAT(s.s_address, ', ', n.n_name, ' (', r.r_name, ')') AS supplier_location,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        PartSupplierDetails p
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        total_supply_value > 10000
+)
+SELECT 
+    pd.p_name,
+    pd.supplier_name,
+    pd.supplier_location,
+    pd.ps_availqty,
+    pd.ps_supplycost,
+    pd.ps_comment,
+    hv.supplier_count,
+    hv.total_supply_value
+FROM 
+    PartSupplierDetails pd
+JOIN 
+    HighValueSuppliers hv ON pd.p_partkey = hv.p_partkey
+ORDER BY 
+    hv.total_supply_value DESC, pd.p_name;

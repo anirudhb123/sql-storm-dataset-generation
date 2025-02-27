@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartAggregates AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS available_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(p.p_retailprice) AS average_retail_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        CASE 
+            WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders'
+            ELSE 'Orders Present'
+        END AS order_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(pa.available_qty, 0) AS available_quantity,
+    sa.total_available_qty,
+    sa.total_supply_cost,
+    c.c_name AS customer_name,
+    co.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY co.order_status ORDER BY co.total_spent DESC) AS customer_rank
+FROM 
+    PartAggregates pa
+LEFT JOIN 
+    SupplierDetails sa ON pa.available_qty > 0 AND sa.total_available_qty IS NOT NULL
+LEFT JOIN 
+    CustomerOrderSummary co ON co.total_orders > 0
+WHERE 
+    pa.supplier_count > 1
+ORDER BY 
+    available_quantity DESC, total_spent DESC;

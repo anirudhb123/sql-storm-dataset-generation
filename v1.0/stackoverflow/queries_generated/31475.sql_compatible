@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score > 0 
+        AND p.PostTypeId = 1
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT TRIM(value) FROM STRING_SPLIT(rp.Tags, ','))) AS Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUser AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        COUNT(*) OVER (PARTITION BY ph.PostId, ph.PostHistoryTypeId) AS HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    mcp.PostId,
+    mcp.Title,
+    mcp.ViewCount,
+    mcp.Score,
+    mcp.CommentCount,
+    mcp.Tags,
+    tu.DisplayName AS TopUser,
+    tu.Reputation AS TopUserReputation,
+    phd.HistoryCount,
+    phd.UserDisplayName AS HistoryEditor,
+    phd.Comment,
+    phd.CreationDate AS HistoryDate
+FROM 
+    MostCommentedPosts mcp
+LEFT JOIN 
+    TopUser tu ON tu.UserRank = 1
+LEFT JOIN 
+    PostHistoryDetails phd ON mcp.PostId = phd.PostId AND phd.HistoryRank = 1
+WHERE 
+    mcp.CommentCount > 5
+ORDER BY 
+    mcp.Score DESC, mcp.ViewCount DESC;

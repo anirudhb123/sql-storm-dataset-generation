@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    YEAR(t.production_year) AS production_year,
+    COUNT(DISTINCT cc.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')
+WHERE 
+    a.name IS NOT NULL 
+    AND ci.nr_order IS NOT NULL 
+    AND mi.info IS NOT NULL
+GROUP BY 
+    a.id, t.id 
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 1
+ORDER BY 
+    actor_rank, total_movies DESC;

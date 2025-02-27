@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation > 1000 THEN 'High Reputation'
+            WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS Reputation_Category
+    FROM Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        H.PostId,
+        H.CreationDate,
+        H.UserDisplayName,
+        C.Name AS CloseReason
+    FROM PostHistory H
+    JOIN CloseReasonTypes C ON C.Id = CAST(H.Comment AS INT)
+    WHERE H.PostHistoryTypeId IN (10, 11) 
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        R.Reputation_Category,
+        PS.TotalPosts,
+        PS.TotalQuestions,
+        PS.TotalAnswers,
+        PS.TotalScore,
+        PS.TotalViews,
+        ROW_NUMBER() OVER (PARTITION BY R.Reputation_Category ORDER BY PS.TotalScore DESC) AS Rank
+    FROM UserReputation R
+    JOIN PostStatistics PS ON R.UserId = PS.OwnerUserId
+    WHERE R.Reputation > 0
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation_Category,
+    PS.TotalPosts,
+    PS.TotalQuestions,
+    PS.TotalAnswers,
+    PS.TotalScore,
+    PS.TotalViews,
+    C.CloseReason,
+    C.CreationDate AS CloseDate
+FROM TopUsers U
+LEFT JOIN ClosedPosts C ON U.DisplayName = C.UserDisplayName
+WHERE U.Rank <= 5
+ORDER BY U.Reputation_Category, U.TotalScore DESC;

@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM
+        web_sales AS ws
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+HighProfit AS (
+    SELECT
+        rb.web_site_sk,
+        SUM(rb.ws_net_profit) AS total_net_profit,
+        COUNT(rb.ws_order_number) AS total_orders
+    FROM
+        RankedSales AS rb
+    WHERE
+        rb.sales_rank <= 5
+    GROUP BY
+        rb.web_site_sk
+),
+CustomerReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+)
+SELECT
+    w.w_warehouse_name,
+    COALESCE(hp.total_net_profit, 0) AS total_high_profit,
+    COALESCE(hp.total_orders, 0) AS total_high_profit_orders,
+    cr.total_returns,
+    cr.total_return_amount
+FROM
+    warehouse AS w
+LEFT JOIN
+    HighProfit AS hp ON w.w_warehouse_sk = hp.web_site_sk
+LEFT JOIN
+    CustomerReturns AS cr ON cr.sr_item_sk IN (SELECT cs_item_sk FROM catalog_sales WHERE cs_order_number IN (SELECT ws_order_number FROM RankedSales))
+WHERE
+    COALESCE(hp.total_net_profit, 0) > 0 OR cr.total_returns IS NOT NULL
+ORDER BY
+    total_high_profit DESC, cr.total_return_amount DESC;

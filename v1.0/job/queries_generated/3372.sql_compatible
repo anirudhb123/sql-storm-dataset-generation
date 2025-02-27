@@ -1,0 +1,66 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+top_titles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year
+    FROM 
+        ranked_titles
+    WHERE 
+        rn <= 5
+),
+actor_count AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 10
+),
+casting_details AS (
+    SELECT 
+        tt.title_id,
+        tt.title,
+        a.actor_name,
+        ac.movies_count
+    FROM 
+        top_titles tt
+    JOIN 
+        cast_info ci ON tt.title_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        actor_count ac ON a.name = ac.actor_name
+)
+SELECT 
+    cd.title,
+    cd.actor_name,
+    cd.movies_count,
+    COALESCE(mi.info, 'No Additional Info') AS additional_info
+FROM 
+    casting_details cd
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = cd.title_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+WHERE 
+    cd.movies_count > 5
+ORDER BY 
+    cd.title, cd.actor_name;

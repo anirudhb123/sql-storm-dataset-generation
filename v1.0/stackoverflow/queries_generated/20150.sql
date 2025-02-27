@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS Rank,
+        COUNT(V.Id) AS VoteCount,
+        AVG(U.Reputation) FILTER (WHERE U.Reputation IS NOT NULL) AS AvgUserReputation
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, P.Score, P.PostTypeId
+), 
+AggregatedUserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CRT.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.Score,
+    RP.CreationDate,
+    RP.Rank,
+    RP.VoteCount,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(CR.CloseReasons, 'No reasons') AS CloseReasons,
+    CASE 
+        WHEN RP.Score > 10 THEN 'High Score' 
+        ELSE 'Low Score' 
+    END AS ScoreCategory,
+    CASE 
+        WHEN RP.ViewCount > 1000 THEN 'Popular' 
+        ELSE 'Not Popular' 
+    END AS Popularity
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    AggregatedUserBadges UB ON RP.PostId = UB.UserId -- Assuming same Id for demonstration
+LEFT JOIN 
+    CloseReasons CR ON RP.PostId = CR.PostId
+WHERE 
+    RP.Rank <= 5
+ORDER BY 
+    RP.Rank, RP.ViewCount DESC;

@@ -1,0 +1,93 @@
+WITH PostAgg AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p 
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.AcceptedAnswerId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        b.Name, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b 
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId, b.Name
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph 
+    GROUP BY 
+        ph.PostId
+),
+UserPostInfo AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(pa.AcceptedAnswerCount), 0) AS AcceptedAnswers
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN (
+            SELECT 
+                OwnerUserId, 
+                COUNT(*) AS AcceptedAnswerCount
+            FROM 
+                Posts 
+            WHERE 
+                PostTypeId = 1 AND AcceptedAnswerId IS NOT NULL
+            GROUP BY OwnerUserId
+        ) pa ON u.Id = pa.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    up.DisplayName, 
+    up.Reputation,
+    up.TotalPosts,
+    up.AcceptedAnswers,
+    pa.Title AS PostTitle,
+    pa.Score,
+    pa.CommentCount, 
+    pa.UpVoteCount, 
+    pa.DownVoteCount,
+    phd.ClosedDate,
+    phd.EditCount,
+    phd.LastEditDate,
+    ub.BadgeName,
+    ub.BadgeCount
+FROM 
+    UserPostInfo up
+    LEFT JOIN PostAgg pa ON up.UserId = pa.OwnerUserId
+    LEFT JOIN PostHistoryDetails phd ON pa.PostId = phd.PostId
+    LEFT JOIN (
+        SELECT UserId, Name AS BadgeName, BadgeCount
+        FROM UserBadges 
+        WHERE BadgeCount > 5
+    ) ub ON up.UserId = ub.UserId
+WHERE 
+    pa.Rank <= 5 
+ORDER BY 
+    up.Reputation DESC, pa.Score DESC;

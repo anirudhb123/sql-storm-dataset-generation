@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.AnswerCount,
+        U.DisplayName AS OwnerName,
+        PHT.Name AS PostHistoryType,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TagsCounts AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Tags, '><')) AS TagName,
+        COUNT(*) AS Count
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        Count
+    FROM 
+        TagsCounts
+    ORDER BY 
+        Count DESC
+    LIMIT 10
+),
+PostViews AS (
+    SELECT
+        PostId,
+        SUM(ViewCount) AS TotalViews
+    FROM
+        Posts
+    GROUP BY
+        PostId
+),
+Benchmark AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.OwnerName, 
+        rp.ViewCount, 
+        rp.AnswerCount, 
+        pt.TagName,
+        pv.TotalViews,
+        rp.PostHistoryType
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+    JOIN 
+        PostViews pv ON rp.PostId = pv.PostId
+    WHERE
+        rp.Rank = 1  
+)
+
+SELECT 
+    b.Title, 
+    b.OwnerName, 
+    b.ViewCount, 
+    b.AnswerCount, 
+    b.TagName, 
+    b.TotalViews,
+    MAX(b.PostHistoryType) AS MostRecentHistoryType
+FROM 
+    Benchmark b
+GROUP BY 
+    b.Title, b.OwnerName, b.ViewCount, b.AnswerCount, b.TagName, b.TotalViews
+ORDER BY 
+    b.TotalViews DESC, b.AnswerCount DESC;

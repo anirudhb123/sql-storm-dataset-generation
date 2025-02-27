@@ -1,0 +1,87 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost * 0.9 AS ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty IS NULL
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+),
+FinalSummary AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(COALESCE(l.l_tax, 0) * 0.1) AS total_tax_adjustment,
+        SUM(fo.o_totalprice) AS total_order_value,
+        AVG(rcte.ps_supplycost) AS avg_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        customer c ON s.s_suppkey = c.c_custkey
+    LEFT JOIN 
+        FilteredOrders fo ON c.c_custkey = fo.o_orderkey
+    LEFT JOIN 
+        RecursiveCTE rcte ON rcte.p_partkey = fo.o_orderkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    f.region_name,
+    f.customer_count,
+    f.total_tax_adjustment,
+    f.total_order_value,
+    CASE 
+        WHEN f.avg_supply_cost IS NULL THEN 'No Supply Cost'
+        WHEN f.avg_supply_cost = 0 THEN 'Zero Cost'
+        ELSE CAST(f.avg_supply_cost AS VARCHAR(255))
+    END AS avg_supply_cost_status
+FROM 
+    FinalSummary f
+WHERE 
+    f.total_order_value > (
+        SELECT 
+            AVG(total_line_value) 
+        FROM 
+            FilteredOrders
+        WHERE 
+            total_line_value IS NOT NULL
+    )
+ORDER BY 
+    f.total_order_value DESC, 
+    f.customer_count ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

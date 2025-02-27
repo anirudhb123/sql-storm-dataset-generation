@@ -1,0 +1,56 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+),
+ReturnData AS (
+    SELECT
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_returns,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    JOIN 
+        web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    GROUP BY 
+        wr.wr_web_page_sk
+),
+CombinedData AS (
+    SELECT 
+        sd.web_site_id,
+        sd.total_sales,
+        sd.order_count,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.return_count, 0) AS return_count,
+        (sd.total_sales - COALESCE(rd.total_returns, 0)) AS net_sales
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnData rd ON sd.web_site_id = rd.wr_web_page_sk
+)
+SELECT 
+    cd.web_site_id,
+    cd.total_sales,
+    cd.order_count,
+    cd.total_returns,
+    cd.return_count,
+    cd.net_sales,
+    cd.rank
+FROM 
+    CombinedData cd
+WHERE 
+    cd.net_sales > 0
+ORDER BY 
+    cd.net_sales DESC 
+FETCH FIRST 10 ROWS ONLY;

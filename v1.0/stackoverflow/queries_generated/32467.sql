@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+
+VoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id
+),
+
+PostHistoryDetail AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS Comments,
+        MAX(ph.UserDisplayName) AS LastModifiedBy
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY
+        ph.PostId, ph.CreationDate
+),
+
+CombinedStats AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        rs.UpVotes,
+        rs.DownVotes,
+        COALESCE(ph.Comments, 'No Comments') AS HistoryComments,
+        ph.LastModifiedBy,
+        rp.RankByViews,
+        rp.CommentCount
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        VoteSummary rs ON rp.PostId = rs.PostId
+    LEFT JOIN
+        PostHistoryDetail ph ON rp.PostId = ph.PostId
+)
+
+SELECT
+    cs.PostId,
+    cs.Title,
+    cs.ViewCount,
+    cs.CreationDate,
+    cs.Score,
+    cs.UpVotes,
+    cs.DownVotes,
+    cs.HistoryComments,
+    cs.LastModifiedBy,
+    cs.RankByViews,
+    cs.CommentCount
+FROM
+    CombinedStats cs
+WHERE
+    cs.RankByViews <= 3 -- Top 3 most viewed posts per user
+ORDER BY
+    cs.ViewCount DESC, cs.Score DESC;

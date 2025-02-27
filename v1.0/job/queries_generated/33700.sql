@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year > 2000 -- Select movies produced after 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mtx.title,
+        mtx.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        aka_title mtx ON ml.linked_movie_id = mtx.id
+    WHERE 
+        mtx.production_year > 2000
+),
+cast_summary AS (
+    SELECT 
+        c.person_id,
+        COUNT(c.movie_id) AS movie_count,
+        STRING_AGG(a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.person_id
+),
+ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    r.cast_count,
+    cs.movie_count AS actor_movie_count,
+    cs.actor_names,
+    mh.level
+FROM 
+    movie_hierarchy mh
+JOIN 
+    ranked_movies r ON mh.movie_id = r.movie_id
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.person_id
+WHERE 
+    r.rank <= 10 -- Top 10 movies with the most cast members
+ORDER BY 
+    mh.production_year DESC,
+    mh.level ASC;

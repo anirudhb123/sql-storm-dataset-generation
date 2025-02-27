@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCTE AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MIN(ci.nr_order) AS first_role_order 
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+MovieCompanyCTE AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    STRING_AGG(DISTINCT act.name, ', ') AS actors,
+    ARRAY_AGG(DISTINCT mc.company_name) AS production_companies,
+    STRING_AGG(DISTINCT mk.keyword ORDER BY mk.keyword) AS keywords,
+    SUM(CASE WHEN act.movie_count > 3 THEN 1 ELSE 0 END) AS prolific_actors,
+    COUNT(DISTINCT act.person_id) AS total_actors,
+    MAX(mk.keyword_rank) AS max_keyword_rank 
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    ActorCTE act ON m.movie_id = act.movie_count
+LEFT JOIN 
+    MovieCompanyCTE mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+WHERE 
+    m.production_year > (SELECT AVG(production_year) FROM aka_title) 
+    AND m.title IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_name) > 2
+ORDER BY 
+    m.production_year DESC;

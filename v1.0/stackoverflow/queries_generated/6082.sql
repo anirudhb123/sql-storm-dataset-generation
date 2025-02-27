@@ -1,0 +1,43 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankView
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.ViewCount,
+    COUNT(c.Id) AS CommentCount,
+    JSON_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(rp.Tags, '<>')) AS TagName
+    ) t ON TRUE
+WHERE 
+    rp.RankScore <= 5 OR rp.RankView <= 5
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.OwnerDisplayName, rp.Score, rp.ViewCount
+ORDER BY 
+    rp.RankScore, rp.RankView
+LIMIT 100;

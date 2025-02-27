@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.OwnerUserId, 
+        p.PostTypeId, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS total_posts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountySpent,
+        COALESCE(SUM(v2.BountyAmount), 0) AS TotalBountyReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 8  -- BountyStart
+    LEFT JOIN 
+        Votes v2 ON u.Id = v2.UserId AND v2.VoteTypeId = 9  -- BountyClose
+    GROUP BY 
+        u.Id
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(ph.Id) AS ChangesCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    u.DisplayName AS OwnerDisplayName,
+    ub.BadgeCount AS UserBadgeCount,
+    ua.TotalBountySpent,
+    ua.TotalBountyReceived,
+    COALESCE(p_history.HistoryTypes, 'No history') AS PostHistoryTypes,
+    COALESCE(p_history.ChangesCount, 0) AS ChangesCount,
+    COALESCE(p_history.LastChangeDate, 'Never') AS LastChangeDate
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostHistorySummary p_history ON rp.PostId = p_history.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.CreationDate DESC,
+    ub.BadgeCount DESC,
+    rp.PostId
+LIMIT 100;

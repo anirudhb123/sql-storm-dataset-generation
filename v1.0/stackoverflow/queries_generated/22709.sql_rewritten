@@ -1,0 +1,80 @@
+WITH RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RecentActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+ConsolidatedPostData AS (
+    SELECT 
+        rpa.PostId,
+        rpa.Title,
+        rpa.PostTypeId,
+        rpa.CommentCount,
+        rpa.UpVoteCount,
+        rpa.DownVoteCount,
+        CASE 
+            WHEN rpa.UpVoteCount > rpa.DownVoteCount THEN 'Positive'
+            WHEN rpa.UpVoteCount < rpa.DownVoteCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes'
+            ELSE 'No'
+        END AS HasAcceptedAnswer
+    FROM 
+        RecentPostActivity rpa
+    JOIN 
+        Posts p ON rpa.PostId = p.Id
+    WHERE 
+        rpa.RecentActivity = 1
+),
+PreviousPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    cp.Title,
+    cp.CommentCount,
+    cp.UpVoteCount - cp.DownVoteCount AS NetVotes,
+    cp.Sentiment,
+    cp.HasAcceptedAnswer,
+    COALESCE(ps.HistoryCount, 0) AS HistoryCount,
+    ps.LastHistoryDate,
+    CASE 
+        WHEN ps.LastHistoryDate IS NOT NULL AND ps.LastHistoryDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days' THEN 'Recently Updated'
+        ELSE 'Stale'
+    END AS UpdateStatus,
+    ARRAY_AGG(DISTINCT SUBSTRING(p.Tags, 0, 50)) AS SampleTags,
+    (SELECT COUNT(*) FROM Posts pp WHERE pp.CreatorUserId IS NULL AND pp.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AS OldPostsCount
+FROM 
+    ConsolidatedPostData cp
+LEFT JOIN 
+    PreviousPostStats ps ON cp.PostId = ps.PostId
+LEFT JOIN 
+    Posts p ON cp.PostId = p.Id
+GROUP BY 
+    cp.Title, cp.CommentCount, cp.UpVoteCount, cp.Sentiment, cp.HasAcceptedAnswer, ps.HistoryCount, ps.LastHistoryDate
+ORDER BY 
+    cp.UpVoteCount DESC, cp.CommentCount DESC;

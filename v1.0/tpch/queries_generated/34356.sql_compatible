@@ -1,0 +1,45 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON oh.o_custkey = o.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+TopRegions AS (
+    SELECT r.r_regionkey, r.r_name, SUM(o.o_totalprice) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY r.r_regionkey, r.r_name
+    ORDER BY total_sales DESC
+    LIMIT 5
+)
+SELECT oh.o_orderkey, oh.o_orderdate, ali.total_revenue, ali.total_quantity,
+       COALESCE(tp.total_sales, 0) AS region_sales, COALESCE(sp.total_supply_cost, 0) AS supply_cost,
+       CASE 
+           WHEN ali.total_quantity > 10 THEN 'Bulk Order'
+           ELSE 'Standard Order'
+       END AS order_type
+FROM OrderHierarchy oh
+LEFT JOIN AggregatedLineItems ali ON oh.o_orderkey = ali.l_orderkey
+LEFT JOIN TopRegions tp ON oh.o_orderkey = tp.r_regionkey
+LEFT JOIN SupplierParts sp ON sp.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = oh.o_custkey)))
+WHERE ali.total_revenue > 1000.00
+ORDER BY oh.o_orderdate DESC, ali.total_revenue DESC;

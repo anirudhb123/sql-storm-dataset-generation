@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, U.DisplayName
+),
+FilteredRankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.OwnerDisplayName,
+        RP.CommentCount,
+        RP.VoteCount
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.RN = 1 
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(SPLIT_PART(P.Tags, '><', 1)::int[]) 
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10 
+),
+TagPostAssociations AS (
+    SELECT 
+        FRP.PostId,
+        FRP.Title,
+        FRP.OwnerDisplayName,
+        PT.TagName
+    FROM 
+        FilteredRankedPosts FRP
+    JOIN 
+        Tags PT ON PT.Id = ANY(SPLIT_PART(FRP.Body, '><', 1)::int[]) 
+)
+SELECT 
+    FRP.PostId,
+    FRP.Title,
+    FRP.OwnerDisplayName,
+    PT.TagName,
+    FRP.CommentCount,
+    FRP.VoteCount,
+    COUNT(DISTINCT TA.TagName) AS AssociatedTagCount
+FROM 
+    FilteredRankedPosts FRP
+LEFT JOIN 
+    TagPostAssociations TA ON FRP.PostId = TA.PostId
+LEFT JOIN 
+    PopularTags PT ON TA.TagName = PT.TagName
+GROUP BY 
+    FRP.PostId, FRP.Title, FRP.OwnerDisplayName, PT.TagName, FRP.CommentCount, FRP.VoteCount
+ORDER BY 
+    FRP.VoteCount DESC, FRP.CommentCount DESC
+LIMIT 50;

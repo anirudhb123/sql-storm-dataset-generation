@@ -1,0 +1,54 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_units_sold,
+        SUM(cs_ext_sales_price) AS total_sales,
+        AVG(cs_sales_price) AS avg_sales_price
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 2452002 AND 2452005
+    GROUP BY 
+        cs_item_sk
+), 
+popular_items AS (
+    SELECT 
+        i.i_item_id,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country,
+        s.s_store_name,
+        sa.total_units_sold,
+        sa.total_sales,
+        sa.avg_sales_price
+    FROM 
+        aggregated_sales sa
+    JOIN 
+        item i ON sa.cs_item_sk = i.i_item_sk
+    JOIN 
+        store s ON s.s_store_sk = i.i_store_sk
+    JOIN 
+        customer_address a ON a.ca_address_sk = s.s_store_sk
+    WHERE 
+        sa.total_units_sold > 1000
+        AND a.ca_state IN ('CA', 'NY')
+)
+SELECT 
+    pi.i_item_id,
+    pi.ca_city,
+    pi.ca_state,
+    pi.ca_country,
+    pi.s_store_name,
+    pi.total_units_sold,
+    pi.total_sales,
+    pi.avg_sales_price,
+    d.d_year,
+    d.d_month_seq
+FROM 
+    popular_items pi
+JOIN 
+    date_dim d ON d.d_date_sk IN (SELECT DISTINCT ss.d_date_sk FROM store_sales ss WHERE ss.ss_item_sk = pi.cs_item_sk)
+ORDER BY 
+    pi.total_sales DESC
+LIMIT 100;

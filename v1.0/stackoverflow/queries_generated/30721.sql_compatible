@@ -1,0 +1,56 @@
+
+WITH RECURSIVE UserRankings AS (
+    SELECT 
+        Id,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+TopUsers AS (
+    SELECT 
+        Id, 
+        DisplayName, 
+        Reputation 
+    FROM UserRankings
+    WHERE Rank <= 10
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY p.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ps.TotalPosts,
+        ps.AvgScore,
+        ps.TotalViews
+    FROM TopUsers u
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+),
+ClosedPostStats AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS TotalClosedPosts,
+        MAX(ph.CreationDate) AS LatestClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    COALESCE(ups.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ups.AvgScore, 0) AS AvgScore,
+    COALESCE(ups.TotalViews, 0) AS TotalViews,
+    COALESCE(cps.TotalClosedPosts, 0) AS TotalClosedPosts,
+    cps.LatestClosedDate
+FROM UserPostStats ups
+LEFT JOIN ClosedPostStats cps ON ups.UserId = cps.UserId
+ORDER BY ups.Reputation DESC;

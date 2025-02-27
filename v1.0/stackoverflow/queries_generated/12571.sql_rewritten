@@ -1,0 +1,67 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,  
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,  
+        SUM(b.Class = 1) AS TotalGoldBadges,  
+        SUM(b.Class = 2) AS TotalSilverBadges,  
+        SUM(b.Class = 3) AS TotalBronzeBadges  
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(c.ClosedDate, 'Open') AS PostStatus,
+        u.DisplayName AS OwnerName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts c ON p.AcceptedAnswerId = c.Id
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.TotalComments,
+    ue.TotalUpVotes,
+    ue.TotalDownVotes,
+    ue.TotalGoldBadges,
+    ue.TotalSilverBadges,
+    ue.TotalBronzeBadges,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.AnswerCount,
+    pa.CommentCount,
+    pa.PostStatus,
+    pa.OwnerName
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    PostActivity pa ON ue.UserId = pa.OwnerUserId
+ORDER BY 
+    ue.TotalPosts DESC, ue.TotalUpVotes DESC;

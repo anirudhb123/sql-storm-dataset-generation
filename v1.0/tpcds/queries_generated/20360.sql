@@ -1,0 +1,84 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk, cr_item_sk
+), 
+CustomerSales AS (
+    SELECT 
+        ws_ship_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_net_paid) AS total_sales_amount
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws_ship_customer_sk, ws_item_sk
+), 
+SalesReturns AS (
+    SELECT 
+        cs.ws_ship_customer_sk,
+        cs.ws_item_sk,
+        COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+        SUM(CASE 
+            WHEN r.total_returned_quantity > 0 
+            THEN cs.total_sold_quantity * (r.total_returned_quantity::decimal / NULLIF(cs.total_sold_quantity, 0))
+            ELSE cs.total_sold_quantity
+        END) AS adjusted_sold_quantity,
+        MAX(r.total_returned_amount) AS max_returned_amount,
+        MIN(CASE 
+            WHEN r.total_returned_quantity IS NULL THEN 0 
+            ELSE r.total_returned_amount 
+        END) AS min_returned_amount
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        CustomerReturns r ON cs.ws_item_sk = r.cr_item_sk AND cs.ws_ship_customer_sk = r.cr_returning_customer_sk
+    GROUP BY 
+        cs.ws_ship_customer_sk, cs.ws_item_sk
+), 
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        SUM(sr.adjusted_sold_quantity) AS total_adjusted_quantity,
+        AVG(sr.max_returned_amount) AS average_max_returned,
+        COUNT(DISTINCT sr.ws_item_sk) AS distinct_items_returned
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        store_returns sr ON sr.sr_customer_sk = ss.ss_customer_sk
+    JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year >= 1980 AND 
+        s.s_country = 'USA'
+    GROUP BY 
+        c.customer_id
+)
+SELECT 
+    tc.customer_id,
+    tc.total_adjusted_quantity,
+    tc.average_max_returned,
+    tc.distinct_items_returned,
+    ROW_NUMBER() OVER (ORDER BY tc.total_adjusted_quantity DESC) AS ranking,
+    CASE 
+        WHEN tc.total_adjusted_quantity > 500 THEN 'High'
+        WHEN tc.total_adjusted_quantity BETWEEN 100 AND 500 THEN 'Medium'
+        ELSE 'Low'
+    END AS customer_category
+FROM 
+    TopCustomers tc
+WHERE 
+    tc.average_max_returned IS NOT NULL
+ORDER BY 
+    tc.total_adjusted_quantity DESC, tc.customer_id;

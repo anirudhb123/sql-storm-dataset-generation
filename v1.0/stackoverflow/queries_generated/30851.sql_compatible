@@ -1,0 +1,87 @@
+
+WITH RecursiveUserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        DisplayName,
+        NULL AS ParentId,
+        CreationDate
+    FROM Users
+    WHERE Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.DisplayName,
+        ur.Id AS ParentId,
+        u.CreationDate
+    FROM Users u
+    JOIN RecursiveUserReputation ur ON u.Reputation < ur.Reputation
+), 
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS CloseVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, 
+        p.Title, 
+        p.AcceptedAnswerId, 
+        p.CreationDate
+), 
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+
+AggregateUserStats AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+        COALESCE(ub.HighestBadgeClass, 0) AS MaxBadgeClass
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+)
+
+SELECT 
+    p.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.CloseVotes,
+    u.DisplayName AS Author,
+    u.Reputation,
+    u.TotalBadges,
+    CASE 
+        WHEN ps.CloseVotes > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    ROW_NUMBER() OVER (PARTITION BY CASE WHEN ps.CloseVotes > 0 THEN 1 ELSE 0 END ORDER BY ps.VoteCount DESC) AS Rank
+FROM PostStatistics ps
+JOIN Posts p ON ps.PostId = p.Id
+JOIN AggregateUserStats u ON p.OwnerUserId = u.Id
+WHERE (u.Reputation > 1000 OR u.TotalBadges > 3)
+  AND (ps.CommentCount > 0 OR ps.Upvotes > 5)
+ORDER BY Rank, ps.VoteCount DESC;

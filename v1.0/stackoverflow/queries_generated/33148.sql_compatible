@@ -1,0 +1,81 @@
+
+WITH RecursivePostLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        1 AS Level
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.LinkTypeId = 3  
+
+    UNION ALL
+
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        rpl.Level + 1
+    FROM 
+        PostLinks pl
+    JOIN 
+        RecursivePostLinks rpl ON pl.PostId = rpl.RelatedPostId
+    WHERE 
+        pl.LinkTypeId = 3  
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+),
+ScoreRankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(ps.UpVotes, 0) AS UpVotes,
+        COALESCE(ps.DownVotes, 0) AS DownVotes,
+        ps.CommentCount,
+        ps.BadgeCount,
+        p.CreationDate,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteStats ps ON p.Id = ps.PostId
+)
+SELECT 
+    srp.Id,
+    srp.Title,
+    srp.Score,
+    srp.UpVotes,
+    srp.DownVotes,
+    srp.CommentCount,
+    srp.BadgeCount,
+    srp.CreationDate,
+    CASE 
+        WHEN rpl.PostId IS NOT NULL THEN 'Related'
+        ELSE 'Not Related'
+    END AS RelationStatus
+FROM 
+    ScoreRankedPosts srp
+LEFT JOIN 
+    RecursivePostLinks rpl ON srp.Id = rpl.PostId
+WHERE 
+    srp.ScoreRank <= 10  
+    AND srp.CommentCount > 5  
+ORDER BY 
+    srp.Score DESC;

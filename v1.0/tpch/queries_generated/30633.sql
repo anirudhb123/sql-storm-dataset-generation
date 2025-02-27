@@ -1,0 +1,45 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey
+
+    UNION ALL
+
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN SalesCTE s ON c.c_custkey = s.c_custkey
+    WHERE o.o_orderdate < DATE '2023-01-01'
+    GROUP BY c.c_custkey
+),
+RankedSales AS (
+    SELECT s.c_custkey, s.total_sales,
+           RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM SalesCTE s
+)
+SELECT r.n_name, COUNT(DISTINCT s.c_custkey) AS customer_count,
+       SUM(ps.ps_supplycost * li.l_quantity) AS total_supply_cost,
+       AVG(o.o_totalprice) AS avg_order_value,
+       STRING_AGG(s.s_name, ', ') AS supplier_names
+FROM RankedSales rs
+JOIN customer c ON rs.c_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN lineitem li ON li.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey AND
+          o.o_orderstatus = 'F'
+)
+LEFT JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE n.n_regionkey = (
+    SELECT r.r_regionkey
+    FROM region r
+    WHERE r.r_name = 'Europe'
+)
+GROUP BY r.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY customer_count DESC
+LIMIT 10;

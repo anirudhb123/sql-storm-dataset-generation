@@ -1,0 +1,56 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT c.id AS cast_id, c.person_id, c.movie_id, 1 AS level
+    FROM cast_info c
+    WHERE c.person_role_id = (SELECT id FROM role_type WHERE role = 'Lead Actor')
+
+    UNION ALL
+
+    SELECT c.id, c.person_id, c.movie_id, ah.level + 1
+    FROM cast_info c
+    JOIN actor_hierarchy ah ON c.movie_id = ah.movie_id
+    WHERE c.person_role_id <> (SELECT id FROM role_type WHERE role = 'Lead Actor')
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(m.note, 'No note') AS movie_note,
+        COUNT(DISTINCT a.cast_id) AS total_actors
+    FROM aka_title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN actor_hierarchy ah ON cc.subject_id = ah.person_id
+    LEFT JOIN movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+    GROUP BY t.id, t.title, t.production_year, m.note
+),
+top_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.movie_note,
+        md.total_actors,
+        RANK() OVER (ORDER BY md.total_actors DESC) AS actor_rank
+    FROM movie_details md
+    WHERE md.production_year >= 2000
+    AND md.movie_note IS NOT NULL
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    tm.movie_note,
+    tm.total_actors,
+    CASE 
+        WHEN tm.actor_rank <= 10 THEN 'Top 10 Movies'
+        ELSE 'Other Movies'
+    END AS ranking_category
+FROM top_movies tm
+WHERE tm.actor_rank <= 15
+ORDER BY tm.actor_rank, tm.production_year DESC;

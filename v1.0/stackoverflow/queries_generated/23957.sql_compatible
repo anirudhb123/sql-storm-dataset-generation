@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN LATERAL (
+        SELECT DISTINCT 
+            UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS TagName
+    ) t ON TRUE
+    WHERE p.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+    GROUP BY p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstCloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(v.UpVotes, 0) + COALESCE(v.DownVotes, 0)) AS TotalVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = u.Id 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+SELECT 
+    r.UserRank,
+    r.Title AS PostTitle,
+    r.Score AS PostScore,
+    r.UpVoteCount,
+    r.DownVoteCount,
+    ph.CloseDate,
+    ph.FirstCloseDate,
+    ph.CloseReopenCount,
+    ua.DisplayName AS Author,
+    ua.TotalPosts AS UserTotalPosts,
+    ua.TotalVotes AS UserTotalVotes,
+    ua.BadgeCount AS UserBadgeCount
+FROM RankedPosts r
+LEFT JOIN PostHistoryAggregates ph ON r.PostId = ph.PostId
+JOIN UserActivity ua ON r.UserRank = 1 AND ua.UserId = r.OwnerUserId
+WHERE r.UserRank <= 5
+ORDER BY r.UserRank, r.Score DESC, r.CreationDate DESC;

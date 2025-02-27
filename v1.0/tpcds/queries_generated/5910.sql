@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS average_sales_price,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male' 
+            WHEN cd.cd_gender = 'F' THEN 'Female' 
+            ELSE 'Other' 
+        END AS gender,
+        DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        d.d_month_seq IN (1, 2)
+    GROUP BY 
+        c.c_customer_sk, gender, sales_month
+),
+ranked_sales AS (
+    SELECT 
+        customer_sk,
+        total_sales,
+        order_count,
+        average_sales_price,
+        gender,
+        sales_month,
+        RANK() OVER (PARTITION BY gender ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    customer_sk,
+    total_sales,
+    order_count,
+    average_sales_price,
+    gender,
+    sales_month
+FROM 
+    ranked_sales
+WHERE 
+    sales_rank <= 10
+ORDER BY 
+    gender, total_sales DESC;

@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+        AND p.Score > 10
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        AVG(COALESCE(b.Class, 0)) AS AvgBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::VARCHAR::INT = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+PostTagSummary AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::INTEGER[])
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.TotalVotes,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.AvgBadgeClass,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    COALESCE(c.ClosedDate, 'Not Closed') AS ClosedDate,
+    COALESCE(c.CloseReason, 'N/A') AS CloseReason,
+    ts.TagName,
+    ts.PostCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts p ON ua.UserId = p.OwnerUserId
+LEFT JOIN 
+    ClosedPosts c ON p.PostId = c.PostId
+LEFT JOIN 
+    PostTagSummary ts ON ts.PostCount > 0
+WHERE 
+    (ts.PostCount IS NOT NULL OR p.AnswerCount > 5)
+    AND COALESCE(p.AnswerCount, 0) > (SELECT AVG(AnswerCount) FROM RankedPosts)
+ORDER BY 
+    u.Reputation DESC, p.Score DESC;

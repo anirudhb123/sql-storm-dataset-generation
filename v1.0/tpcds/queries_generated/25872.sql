@@ -1,0 +1,65 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        LENGTH(c.c_email_address) AS email_length,
+        LOWER(c.c_email_address) AS lowercase_email
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_gender = 'F' AND cd.cd_purchase_estimate > 500
+),
+sales_info AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_net_paid_inc_tax,
+        ws.ws_ship_date_sk,
+        DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month,
+        ws.ws_web_page_sk
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        ws.ws_net_paid_inc_tax > 100
+),
+detailed_sales AS (
+    SELECT 
+        c.customer_id,
+        c.full_name,
+        c.email_length,
+        s.sales_month,
+        COUNT(s.ws_order_number) AS orders_count,
+        SUM(s.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer_info c
+    LEFT JOIN 
+        sales_info s ON c.c_customer_id = s.ws_order_number
+    GROUP BY 
+        c.customer_id, c.full_name, c.email_length, s.sales_month
+)
+SELECT 
+    d.customer_id,
+    d.full_name,
+    d.email_length,
+    d.sales_month,
+    d.orders_count,
+    d.total_spent
+FROM 
+    detailed_sales d
+WHERE 
+    d.total_spent IS NOT NULL
+ORDER BY 
+    d.total_spent DESC, 
+    d.orders_count DESC;

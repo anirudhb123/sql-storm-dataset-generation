@@ -1,0 +1,70 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        c.role_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn,
+        COALESCE(t.note, 'No Note') AS title_note
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.production_year > 2000
+),
+FilteredMovies AS (
+    SELECT 
+        md.*,
+        LENGTH(md.title) AS title_length
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.rn <= 3
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+CombinedResults AS (
+    SELECT 
+        fm.aka_id,
+        fm.person_id,
+        fm.title,
+        fm.production_year,
+        fm.title_note,
+        fm.title_length,
+        mc.companies
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        MovieCompanyDetails mc ON fm.title_id = mc.movie_id
+)
+SELECT 
+    cr.*,
+    CASE 
+        WHEN cr.title_length > 30 THEN 'Long Title'
+        WHEN cr.title_length BETWEEN 15 AND 30 THEN 'Medium Title'
+        ELSE 'Short Title'
+    END AS title_category,
+    DENSE_RANK() OVER (PARTITION BY cr.person_id ORDER BY cr.production_year DESC) AS release_rank,
+    COALESCE(cr.companies, 'Unknown Company') AS associated_companies
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.companies IS NULL OR cr.title LIKE '%Adventure%'
+ORDER BY 
+    cr.release_rank, cr.production_year DESC
+LIMIT 10;

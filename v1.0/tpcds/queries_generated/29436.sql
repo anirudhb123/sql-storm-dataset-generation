@@ -1,0 +1,75 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(', Suite ', ca.ca_suite_number) ELSE '' END) AS address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        DATE_FORMAT(DD.d_date, '%Y-%m') AS sales_month,
+        ci.full_name,
+        ci.c_customer_id,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo ci ON ws.ws_bill_customer_sk = ci.c_customer_id
+    JOIN 
+        date_dim DD ON ws.ws_sold_date_sk = DD.d_date_sk
+),
+MonthlySales AS (
+    SELECT 
+        sales_month,
+        ca_city,
+        ca_state,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        SUM(ws_quantity) AS total_units_sold,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        SalesInfo
+    GROUP BY 
+        sales_month, ca_city, ca_state, cd_gender, cd_marital_status, cd_education_status
+)
+SELECT 
+    sales_month,
+    ca_city,
+    ca_state,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    total_units_sold,
+    total_sales,
+    ROUND(total_sales / NULLIF(total_units_sold, 0), 2) AS avg_sales_per_unit
+FROM 
+    MonthlySales
+ORDER BY 
+    sales_month, total_sales DESC;

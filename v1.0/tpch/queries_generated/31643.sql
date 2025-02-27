@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, NULL AS parent_suppkey
+    FROM supplier
+    WHERE s_acctbal > 7000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+),
+TopRegions AS (
+    SELECT r.r_regionkey, r.r_name,
+           SUM(CASE WHEN o.o_orderstatus = 'O' THEN l.l_extendedprice * (1 - l.l_discount) END) AS total_revenue
+    FROM region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    JOIN orders o ON o.o_orderkey = l.l_orderkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+RevenueComparison AS (
+    SELECT r.r_name,
+           COALESCE(th.total_revenue, 0) AS total_revenue,
+           COALESCE(th.avg_revenue, 0) AS avg_revenue
+    FROM TopRegions r
+    LEFT JOIN (
+        SELECT r.r_name,
+               AVG(total_revenue) AS avg_revenue
+        FROM TopRegions
+        GROUP BY r.r_name
+    ) th ON th.r_name = r.r_name
+),
+RankedRevenue AS (
+    SELECT r.r_name, r.total_revenue,
+           RANK() OVER (ORDER BY r.total_revenue DESC) AS revenue_rank
+    FROM RevenueComparison r
+)
+SELECT r.r_name,
+       r.total_revenue,
+       r.revenue_rank,
+       (SELECT COUNT(*) FROM supplier s WHERE s.s_acctbal < r.total_revenue) AS smaller_suppliers_count
+FROM RankedRevenue r
+WHERE r.total_revenue > (
+    SELECT AVG(total_revenue)
+    FROM RankedRevenue
+)
+AND r.revenue_rank < 10
+ORDER BY r.revenue_rank;

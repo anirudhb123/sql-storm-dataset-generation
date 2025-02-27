@@ -1,0 +1,58 @@
+
+WITH ProcessedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+               CASE 
+                   WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' THEN CONCAT(' Suite ', TRIM(ca_suite_number)) 
+                   ELSE '' 
+               END) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+FilteredDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        CONCAT('Gender: ', TRIM(cd_gender), 
+               ', Status: ', TRIM(cd_marital_status), 
+               ', Education: ', TRIM(cd_education_status)) AS ProcessedDemographics
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+SalesInfo AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_paid) AS TotalSales,
+        COUNT(ws.order_number) AS OrderCount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    a.ca_address_sk,
+    a.FullAddress,
+    d.ProcessedDemographics,
+    s.TotalSales,
+    s.OrderCount
+FROM 
+    ProcessedAddresses a
+JOIN 
+    customer c ON a.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    FilteredDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+LEFT JOIN 
+    SalesInfo s ON c.c_customer_sk = s.bill_customer_sk
+WHERE 
+    a.ca_state = 'CA'
+GROUP BY 
+    a.ca_address_sk, a.FullAddress, d.ProcessedDemographics, s.TotalSales, s.OrderCount
+ORDER BY 
+    s.TotalSales DESC
+LIMIT 100;

@@ -1,0 +1,97 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.id AS title_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+distinct_companies AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(CASE WHEN ri.role = 'director' THEN 1 ELSE 0 END) AS has_director
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type ri ON ci.role_id = ri.id
+    GROUP BY 
+        ci.movie_id
+),
+shortest_title AS (
+    SELECT 
+        title_id,
+        title,
+        LENGTH(title) AS title_length
+    FROM 
+        ranked_titles
+    WHERE 
+        rn = 1
+),
+final_report AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        cc.company_names,
+        cc.company_types,
+        k.keyword_count,
+        cd.actor_count,
+        cd.has_director,
+        st.title_length
+    FROM 
+        ranked_titles t
+    LEFT JOIN 
+        distinct_companies cc ON t.title_id = cc.movie_id
+    LEFT JOIN 
+        movie_keywords k ON t.title_id = k.movie_id
+    LEFT JOIN 
+        cast_details cd ON t.title_id = cd.movie_id
+    LEFT JOIN 
+        shortest_title st ON t.title_id = st.title_id
+    WHERE 
+        (cd.has_director = 1 OR cd.actor_count > 5)
+        AND t.production_year >= 1990
+)
+
+SELECT 
+    title,
+    production_year,
+    COALESCE(company_names, 'No Companies') AS company_names,
+    COALESCE(company_types, 'No Types') AS company_types,
+    COALESCE(keyword_count, 0) AS keyword_count,
+    COALESCE(actor_count, 0) AS actor_count,
+    COALESCE(has_director, 0) AS has_director,
+    title_length
+FROM 
+    final_report
+ORDER BY 
+    production_year DESC, title;

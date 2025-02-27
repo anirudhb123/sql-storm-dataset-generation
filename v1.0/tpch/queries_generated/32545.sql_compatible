@@ -1,0 +1,44 @@
+
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000.00
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, cc.level + 1
+    FROM customer c
+    JOIN CustomerCTE cc ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE c.c_acctbal > (cc.c_acctbal * 0.8)
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM part p
+    LEFT JOIN SupplierSummary ss ON p.p_partkey = ss.ps_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    po.o_orderkey AS order_key,
+    po.o_totalprice AS total_order_price,
+    pd.p_name AS part_name,
+    pd.p_retailprice AS part_price,
+    (pd.p_retailprice * (1 - li.l_discount)) AS final_price,
+    SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_quantity ELSE 0 END) AS total_returns,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY po.o_orderdate) AS order_rank
+FROM CustomerCTE c
+JOIN lineditem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders o WHERE o.order_rank <= 5)
+JOIN orders po ON po.o_orderkey = li.l_orderkey
+JOIN PartDetails pd ON pd.p_partkey = li.l_partkey
+GROUP BY c.c_name, po.o_orderkey, po.o_totalprice, pd.p_name, pd.p_retailprice
+HAVING SUM(li.l_quantity) > 10
+ORDER BY total_returns DESC, c.c_name;

@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        COUNT(DISTINCT p.p_partkey) AS total_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerRankings AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        NTILE(5) OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    COALESCE(s.total_parts_supplied, 0) AS total_parts_supplied,
+    COALESCE(s.total_available_qty, 0) AS total_available_qty,
+    CASE 
+        WHEN r.order_rank = 1 THEN 'Highest'
+        WHEN r.order_rank = 2 THEN 'Second Highest'
+        ELSE 'Others'
+    END AS order_priority,
+    COALESCE(c.total_spent, 0) AS total_spent_by_customer,
+    CASE 
+        WHEN c.customer_rank = 1 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    LineItemStats li ON r.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierDetails s ON li.line_item_count > 5
+LEFT JOIN 
+    CustomerRankings c ON r.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    (r.o_orderdate IS NOT NULL AND r.o_orderkey IS NOT NULL) 
+    OR (r.o_orderstatus IS NULL AND r.o_totalprice > 1000)
+ORDER BY 
+    r.o_orderdate DESC, total_spent_by_customer DESC;

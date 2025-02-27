@@ -1,0 +1,74 @@
+WITH PostTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM
+        Posts p
+    JOIN
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON t.TagName IS NOT NULL
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        p.Id
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotesCount,  
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotesCount,  
+        COALESCE(SUM(c.Id IS NOT NULL), 0) AS CommentCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        u.Id
+),
+TopQuestions AS (
+    SELECT
+        p.Id AS QuestionId,
+        p.Title,
+        p.Score,
+        p.Tags,
+        pc.TagCount,
+        ue.UpVotesCount,
+        ue.DownVotesCount,
+        ue.CommentCount
+    FROM
+        Posts p
+    JOIN
+        PostTagCounts pc ON p.Id = pc.PostId
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    JOIN
+        UserEngagement ue ON u.Id = ue.UserId
+    WHERE
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+    ORDER BY
+        p.Score DESC,
+        pc.TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    tq.QuestionId,
+    tq.Title,
+    tq.Score,
+    tq.TagCount,
+    tq.UpVotesCount,
+    tq.DownVotesCount,
+    tq.CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopQuestions tq
+JOIN 
+    unnest(string_to_array(substring(tq.Tags, 2, length(tq.Tags)-2), '><')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY 
+    tq.QuestionId, tq.Title, tq.Score, tq.TagCount, tq.UpVotesCount, tq.DownVotesCount, tq.CommentCount
+ORDER BY 
+    tq.Score DESC;

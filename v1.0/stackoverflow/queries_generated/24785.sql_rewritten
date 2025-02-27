@@ -1,0 +1,92 @@
+WITH RECURSIVE PostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        pc.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostChain pc ON p.Id = pc.ParentId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionsAsked
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ScoreStatistics AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        (u.Upvotes - u.Downvotes) AS Score,
+        ROW_NUMBER() OVER (ORDER BY (u.Upvotes - u.Downvotes) DESC) AS Rank
+    FROM 
+        UserActivity u
+    WHERE 
+        u.QuestionsAsked > 0
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastActivity,
+        p.Title,
+        c.CommentCount,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, c.CommentCount, p.Title
+)
+SELECT 
+    psa.Rank,
+    psa.DisplayName,
+    p.Title,
+    p.LastActivity,
+    p.CloseReopenCount,
+    CASE 
+        WHEN psa.Rank <= 10 THEN 'Top Contributor'
+        WHEN psa.Rank BETWEEN 11 AND 50 THEN 'Active Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorType,
+    MAX(pc.Level) AS MaxAnswerChain
+FROM 
+    ScoreStatistics psa
+JOIN 
+    PostHistoryAnalysis p ON psa.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostChain pc ON p.PostId = pc.PostId
+WHERE 
+    p.CloseReopenCount > 0
+GROUP BY 
+    psa.Rank, psa.DisplayName, p.Title, p.LastActivity, p.CloseReopenCount
+ORDER BY 
+    psa.Rank;

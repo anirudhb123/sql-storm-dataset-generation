@@ -1,0 +1,45 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(p.DownVotes, 0)) AS TotalDownVotes,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        AverageScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    tu.Rank,
+    tu.DisplayName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.AverageScore
+FROM 
+    TopUsers tu
+WHERE 
+    tu.Rank <= 10;

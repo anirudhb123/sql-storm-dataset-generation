@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        CAST(NULL AS INTEGER) AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+, cast_roles AS (
+    SELECT 
+        ci.movie_id,
+        ct.kind AS role_name,
+        COUNT(*) AS number_of_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.movie_id, ct.kind
+)
+, movies_with_cast AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        cr.role_name,
+        COALESCE(cr.number_of_cast, 0) AS number_of_cast
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_roles cr ON mh.movie_id = cr.movie_id
+)
+SELECT 
+    mwc.movie_id,
+    mwc.movie_title,
+    mwc.production_year,
+    mwc.role_name,
+    mwc.number_of_cast,
+    (SELECT STRING_AGG(DISTINCT ak.name, ', ')
+     FROM aka_name ak 
+     INNER JOIN cast_info ci ON ak.person_id = ci.person_id 
+     WHERE ci.movie_id = mwc.movie_id) AS cast_names,
+    CASE 
+        WHEN mwc.number_of_cast IS NULL THEN 'No Cast'
+        WHEN mwc.number_of_cast = 0 THEN 'Uncast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM 
+    movies_with_cast mwc
+WHERE 
+    mwc.production_year BETWEEN 2000 AND 2020
+    AND (mwc.number_of_cast = (SELECT MAX(number_of_cast) FROM movies_with_cast 
+                               WHERE production_year = mwc.production_year)
+         OR mwc.role_name IS NOT NULL)
+ORDER BY 
+    mwc.production_year DESC, 
+    mwc.number_of_cast DESC
+LIMIT 50;

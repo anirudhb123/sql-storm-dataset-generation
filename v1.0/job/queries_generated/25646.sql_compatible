@@ -1,0 +1,44 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        t.kind AS movie_kind,
+        c.name AS company_name,
+        c.country_code,
+        p.name AS person_name,
+        p.gender
+    FROM aka_title a
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN kind_type t ON a.kind_id = t.id
+    JOIN movie_companies mc ON a.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN cast_info ci ON a.id = ci.movie_id
+    JOIN aka_name p ON ci.person_id = p.person_id
+    WHERE a.production_year BETWEEN 2000 AND 2023
+      AND k.keyword IS NOT NULL
+      AND p.name IS NOT NULL
+),
+AggregatedData AS (
+    SELECT 
+        movie_title,
+        COUNT(DISTINCT person_name) AS total_cast,
+        COUNT(DISTINCT movie_keyword) AS total_keywords,
+        ARRAY_AGG(DISTINCT company_name) AS production_companies,
+        ARRAY_AGG(DISTINCT country_code) AS country_codes,
+        MAX(production_year) AS latest_production_year
+    FROM MovieDetails
+    GROUP BY movie_title
+)
+SELECT 
+    movie_title,
+    total_cast,
+    total_keywords,
+    production_companies,
+    country_codes,
+    latest_production_year
+FROM AggregatedData
+WHERE total_cast > 5
+ORDER BY latest_production_year DESC, movie_title;

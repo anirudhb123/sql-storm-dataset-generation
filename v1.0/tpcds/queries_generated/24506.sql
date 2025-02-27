@@ -1,0 +1,71 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        1 AS level
+    FROM 
+        customer_address
+    WHERE 
+        ca_street_name IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ca_address_sk,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        level + 1 
+    FROM 
+        customer_address ca
+    JOIN 
+        address_hierarchy ah ON ah.ca_address_sk = ca.ca_address_sk
+    WHERE 
+        ca.city IS NOT NULL
+)
+SELECT 
+    c.c_customer_id,
+    SUM(ws.ws_sales_price) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    MAX(ws.ws_net_profit) OVER (PARTITION BY c.c_customer_id) AS max_profit,
+    COALESCE(MAX(NULLIF(ca.ca_state, 'CA')), 'Unknown') as state_info,
+    COUNT(DISTINCT sr_returning_customer_sk) AS return_count,
+    STRING_AGG(DISTINCT p.p_promo_name) AS promo_names,
+    CASE 
+        WHEN SUM(ws.ws_sales_price) > 1000 THEN 'High Value'
+        WHEN SUM(ws.ws_sales_price) BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    customer c 
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN 
+    promotion p ON ws.ws_promo_sk = p.p_promo_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    (SELECT 
+         sm.sm_ship_mode_sk,
+         COUNT(*) AS shipping_count
+     FROM 
+         ship_mode sm
+     LEFT JOIN 
+         web_sales ws2 ON sm.sm_ship_mode_sk = ws2.ws_ship_mode_sk
+     GROUP BY 
+         sm.sm_ship_mode_sk) AS shipping_stats ON TRUE
+WHERE 
+    c.c_birth_year = 1985
+    AND (c.c_current_cdemo_sk IS NOT NULL OR c.c_current_hdemo_sk IS NOT NULL)
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    SUM(ws.ws_sales_price) > 0
+ORDER BY 
+    total_sales DESC
+LIMIT 100 OFFSET 10;

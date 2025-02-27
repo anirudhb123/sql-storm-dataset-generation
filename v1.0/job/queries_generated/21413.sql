@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND mt.production_year >= 2000
+        AND mt.title IS NOT NULL
+),
+CountRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS distinct_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id, 
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cr.distinct_roles,
+        mc.companies
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CountRoles cr ON rm.movie_id = cr.movie_id
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_id = mc.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(m.distinct_roles, 0) AS total_distinct_roles,
+    COALESCE(m.companies, 'No Companies') AS production_companies,
+    (SELECT COUNT(*) 
+     FROM aka_name an 
+     WHERE an.person_id IN (
+         SELECT ci.person_id 
+         FROM cast_info ci 
+         WHERE ci.movie_id = m.movie_id
+     ) 
+     AND an.name IS NOT NULL) AS total_actors,
+    CASE 
+        WHEN m.production_year > 2010 THEN 'Modern'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Contemporary'
+        ELSE 'Classic'
+    END AS era,
+    NULLIF(FLOOR(AVG(CASE WHEN mc.note IS NOT NULL THEN 1 END) - COUNT(mc.note)), 0) AS missing_notes
+FROM 
+    MoviesWithDetails m
+GROUP BY 
+    m.movie_id
+ORDER BY 
+    m.production_year DESC, 
+    total_distinct_roles DESC 
+LIMIT 10;

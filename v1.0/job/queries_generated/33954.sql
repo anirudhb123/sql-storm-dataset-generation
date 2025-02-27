@@ -1,0 +1,54 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.nr_order = 1  -- Start with lead actors
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info ci ON ah.person_id = ci.movie_id  -- Chaining actors by movie
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    STRING_AGG(DISTINCT ah.actor_name, ', ') AS lead_and_supporting_actors,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    AVG(CASE WHEN (mi.info_type_id IS NOT NULL) THEN LENGTH(mi.info) ELSE NULL END) AS avg_info_length,
+    SUM(CASE WHEN (kc.keyword IS NOT NULL AND kc.keyword ILIKE '%action%') THEN 1 ELSE 0 END) AS action_movie_count
+FROM 
+    title m
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    actor_hierarchy ah ON ci.person_id = ah.person_id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    m.id
+ORDER BY 
+    COUNT(DISTINCT ci.person_id) DESC, 
+    m.production_year DESC;

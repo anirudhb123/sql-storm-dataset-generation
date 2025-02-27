@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_floor_space,
+           0 AS level
+    FROM store
+    WHERE s_closed_date_sk IS NULL
+
+    UNION ALL
+
+    SELECT s.store_sk, s.s_store_name, s.s_number_employees, s.s_floor_space,
+           sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_manager = sh.s_store_sk
+),
+
+customer_sales AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+
+warehouse_sales AS (
+    SELECT w.w_warehouse_id, SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS order_count
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+),
+
+returns_info AS (
+    SELECT sr_item_sk, SUM(sr_return_quantity) AS total_returns,
+           SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+
+aggregated_info AS (
+    SELECT cs.c_customer_sk, cs.c_first_name, cs.c_last_name,
+           ws.total_sales AS warehouse_sales, 
+           ri.total_returns, ri.total_returned,
+           (ws.total_sales - COALESCE(ri.total_returned, 0)) AS net_sales
+    FROM customer_sales cs
+    LEFT JOIN warehouse_sales ws ON cs.c_customer_sk = ws.w_warehouse_id
+    LEFT JOIN returns_info ri ON cs.c_customer_sk = ri.sr_item_sk
+),
+
+ranked_sales AS (
+    SELECT a.*, 
+           RANK() OVER(PARTITION BY a.c_customer_sk ORDER BY a.net_sales DESC) AS sales_rank
+    FROM aggregated_info a
+)
+
+SELECT sh.s_store_name, 
+       r.c_first_name, r.c_last_name, 
+       r.warehouse_sales, r.total_returns, 
+       r.net_sales
+FROM sales_hierarchy sh
+LEFT JOIN ranked_sales r ON sh.s_store_sk = r.c_customer_sk
+WHERE r.sales_rank = 1
+ORDER BY sh.s_store_name, r.net_sales DESC;

@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS actor_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY mc.company_id) AS company_rank
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_count,
+    COALESCE(cd.company_name, 'Independent') AS production_company,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) AS info_count
+FROM 
+    RankedMovies AS rm
+LEFT JOIN 
+    CompanyDetails AS cd ON rm.production_year = cd.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON rm.production_year = mk.movie_id
+LEFT JOIN 
+    movie_info AS mi ON rm.production_year = mi.movie_id
+LEFT JOIN 
+    person_info AS pi ON pi.person_id = (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.production_year LIMIT 1)
+WHERE 
+    rm.year_rank <= 5
+GROUP BY 
+    rm.movie_title, 
+    rm.production_year, 
+    rm.actor_count, 
+    cd.company_name
+ORDER BY 
+    rm.production_year DESC, 
+    keyword_count DESC;

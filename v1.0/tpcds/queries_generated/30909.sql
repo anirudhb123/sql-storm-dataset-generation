@@ -1,0 +1,83 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss.sold_date_sk, 
+        ss.item_sk, 
+        ss.quantity, 
+        ss.net_paid, 
+        1 AS level
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk = (SELECT MAX(sold_date_sk) FROM store_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        ss.sold_date_sk, 
+        ss.item_sk, 
+        ss.quantity, 
+        ss.net_paid, 
+        level + 1
+    FROM 
+        store_sales ss
+    JOIN SalesCTE s ON ss.sold_date_sk = s.sold_date_sk - level
+    WHERE 
+        level < 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+), 
+ItemSales AS (
+    SELECT 
+        i.i_item_sk, 
+        SUM(ws.ws_quantity) AS total_sold, 
+        AVG(ws.ws_net_paid) AS avg_price_sold
+    FROM 
+        item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        s.total_sold, 
+        s.avg_price_sold,
+        ROW_NUMBER() OVER (ORDER BY s.total_sold DESC) as rank
+    FROM 
+        ItemSales s
+    JOIN item i ON s.i_item_sk = i.i_item_sk
+)
+SELECT 
+    c.c_first_name, 
+    c.c_last_name, 
+    ci.total_orders,
+    ci.total_spent,
+    ti.i_item_id, 
+    ti.total_sold, 
+    ti.avg_price_sold
+FROM 
+    CustomerInfo ci
+JOIN 
+    TopItems ti ON ci.total_orders > 0
+WHERE 
+    (ci.total_spent IS NOT NULL AND ci.total_spent > 1000)
+    OR (ti.total_sold IS NULL)
+    OR (ci.total_orders = 0 AND ti.rank <= 10)
+ORDER BY 
+    ci.total_spent DESC, ti.total_sold DESC;

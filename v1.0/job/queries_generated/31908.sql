@@ -1,0 +1,70 @@
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        1 AS depth
+    FROM
+        cast_info ci
+    WHERE
+        ci.nr_order = 1  -- starting point for the hierarchy
+    UNION ALL
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ch.depth + 1
+    FROM
+        cast_info ci
+    JOIN
+        cast_hierarchy ch ON ci.movie_id = ch.movie_id
+    WHERE
+        ci.nr_order > ch.depth  -- deeper levels in the hierarchy
+),
+title_info AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS num_cast_members,
+        AVG(ch.depth) AS avg_cast_depth
+    FROM
+        title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        cast_hierarchy ch ON ch.movie_id = t.id
+    GROUP BY
+        t.id
+),
+keyword_summary AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    ti.title,
+    ti.production_year,
+    ti.num_cast_members,
+    ti.avg_cast_depth,
+    COALESCE(ks.keywords, 'No Keywords') AS keywords
+FROM
+    title_info ti
+LEFT JOIN
+    keyword_summary ks ON ti.title_id = ks.movie_id
+WHERE
+    ti.num_cast_members >= 5
+    AND ti.production_year >= 2000
+ORDER BY
+    ti.production_year DESC,
+    ti.num_cast_members DESC;
+
+In this query:
+- The CTE `cast_hierarchy` recursively builds a hierarchy of cast members based on their order in the cast list.
+- The `title_info` CTE summarizes information about each title, including the number of cast members and the average depth of the cast hierarchy.
+- The `keyword_summary` CTE aggregates keywords for each movie into a single string.
+- The final SELECT combines data from these CTEs, filtering for titles with at least five cast members and produced since the year 2000, and ordering the results by production year and the number of cast members. The use of `COALESCE` handles cases where no keywords exist.

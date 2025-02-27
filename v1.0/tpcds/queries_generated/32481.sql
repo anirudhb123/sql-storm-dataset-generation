@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk AS customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year < 1985
+    GROUP BY 
+        ws.bill_customer_sk
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address
+    FROM 
+        customer_address ca
+)
+SELECT 
+    a.ca_city,
+    a.ca_state,
+    a.ca_country,
+    SUM(ss.total_profit) AS city_profit,
+    AVG(ss.order_count) AS avg_orders,
+    COUNT(DISTINCT ss.customer_id) AS customer_count
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    address_info a ON ss.customer_id = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = ss.customer_id)
+WHERE 
+    ss.rnk = 1
+GROUP BY 
+    a.ca_city, a.ca_state, a.ca_country
+HAVING 
+    city_profit > 1000
+ORDER BY 
+    city_profit DESC
+UNION ALL
+SELECT 
+    'Total' AS ca_city,
+    'N/A' AS ca_state,
+    'N/A' AS ca_country,
+    SUM(city_profit) AS city_profit,
+    AVG(avg_orders) AS avg_orders,
+    COUNT(customer_count) AS customer_count
+FROM 
+    (
+        SELECT 
+            a.ca_city,
+            SUM(ss.total_profit) AS city_profit,
+            AVG(ss.order_count) AS avg_orders,
+            COUNT(DISTINCT ss.customer_id) AS customer_count
+        FROM 
+            sales_summary ss
+        LEFT JOIN 
+            address_info a ON ss.customer_id = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = ss.customer_id)
+        WHERE 
+            ss.rnk = 1
+        GROUP BY 
+            a.ca_city
+    ) AS city_summary
+WHERE city_profit > 1000;

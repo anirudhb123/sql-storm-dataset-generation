@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_nationkey, s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), 
+
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+           SUM(COALESCE(sh.s_acctbal, 0)) AS total_acctbal
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+), 
+
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_mfgr,
+           p.p_retailprice * (1 - ABS(CAST(SUBSTRING(p.p_comment, 1, 1) AS INTEGER) % 2)) AS adjusted_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS brand_rank
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps 
+                       WHERE ps.ps_supplycost > (SELECT AVG(ps.ps_supplycost) FROM partsupp ps))
+)
+
+SELECT ns.n_name, 
+       pd.p_name, 
+       pd.adjusted_retailprice,
+       RANK() OVER (PARTITION BY ns.n_name ORDER BY pd.adjusted_retailprice DESC) AS price_rank
+FROM NationStats ns
+JOIN PartDetails pd ON ns.supplier_count > 0
+WHERE EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey IN (SELECT o.o_orderkey
+                           FROM orders o
+                           WHERE o.o_orderstatus = 'F')
+    AND l.l_shipdate >= '2023-01-01' 
+    AND l.l_shipdate < '2024-01-01'
+) 
+AND ns.total_acctbal IS NOT NULL
+ORDER BY ns.n_name, price_rank
+FETCH FIRST 100 ROWS ONLY;

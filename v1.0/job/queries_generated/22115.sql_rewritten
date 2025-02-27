@@ -1,0 +1,87 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        NULL::INTEGER AS parent_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title, 
+        at.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'related')
+),
+
+cast_info_data AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        MAX(ax.info) AS longest_note
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id,
+            info 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'note')) ax 
+    ON 
+        ci.movie_id = ax.movie_id
+    GROUP BY 
+        ci.movie_id
+),
+
+final_output AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ct.actor_count, 0) AS actor_count,
+        COALESCE(ct.actor_names, 'No Actors Found') AS actor_names,
+        COALESCE(ct.longest_note, 'No Notes Available') AS longest_note,
+        CASE 
+            WHEN mh.level IS NULL THEN 'Standalone'
+            ELSE 'Part of Franchise'
+        END AS movie_status
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info_data ct ON mh.movie_id = ct.movie_id
+)
+
+SELECT 
+    title, 
+    production_year, 
+    actor_count, 
+    actor_names,
+    longest_note,
+    movie_status
+FROM 
+    final_output
+WHERE 
+    production_year IS NOT NULL
+ORDER BY 
+    actor_count DESC, 
+    production_year DESC NULLS LAST
+LIMIT 100;

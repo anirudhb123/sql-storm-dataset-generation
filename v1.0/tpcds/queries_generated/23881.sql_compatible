@@ -1,0 +1,72 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_returned_date_sk,
+        sr_return_time_sk,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rank_return
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+CustomerPurchaseStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c_customer_sk
+    FROM 
+        CustomerPurchaseStats
+    WHERE 
+        total_spent > 1000
+),
+ReturnDetails AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.sr_returned_date_sk,
+        rr.sr_return_time_sk,
+        ranked_cust.c_customer_sk
+    FROM 
+        RankedReturns rr
+    JOIN 
+        HighValueCustomers ranked_cust ON rr.sr_item_sk IN (
+            SELECT cs.cs_item_sk 
+            FROM catalog_sales cs 
+            WHERE cs.cs_order_number IN (
+                SELECT ws.ws_order_number 
+                FROM web_sales ws 
+                WHERE ws.ws_bill_customer_sk = ranked_cust.c_customer_sk
+            )
+        )
+)
+SELECT 
+    COALESCE(SUM(r.sr_return_quantity), 0) AS total_returned_quantity,
+    COALESCE(SUM(r.sr_return_amt), 0) AS total_returned_amount,
+    COALESCE(AVG(r.sr_return_quantity), 0) AS avg_returned_quantity,
+    COUNT(DISTINCT r.sr_item_sk) AS unique_items_returned,
+    COUNT(DISTINCT hvc.c_customer_sk) AS unique_customers_returning
+FROM 
+    ReturnDetails r
+LEFT JOIN 
+    HighValueCustomers hvc ON r.c_customer_sk = hvc.c_customer_sk
+WHERE 
+    r.sr_returned_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 
+    AND (SELECT MAX(d_date_sk) FROM date_dim)
+AND COALESCE(r.sr_returned_date_sk, 0) IS NOT NULL
+GROUP BY 
+    hvc.c_customer_sk
+HAVING 
+    COUNT(DISTINCT r.sr_item_sk) > 1
+ORDER BY 
+    total_returned_amount DESC;

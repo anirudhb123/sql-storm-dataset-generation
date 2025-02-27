@@ -1,0 +1,79 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL
+), 
+LatestComments AS (
+    SELECT 
+        c.PostId,
+        c.CreationDate,
+        c.Text,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS CommentRank
+    FROM 
+        Comments c
+), 
+PostVotingSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS CloseVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+) 
+SELECT 
+    u.DisplayName AS TopUser,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    pp.PostId,
+    pp.Title,
+    pp.Score AS PostScore,
+    pp.ViewCount,
+    COALESCE(lc.Text, 'No comments yet') AS LatestComment,
+    COALESCE(lc.CreationDate, 'N/A') AS CommentDate,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.CloseVotes,
+    pvs.TotalVotes
+FROM 
+    Users u
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    PopularPosts pp ON u.Id = pp.OwnerUserId 
+LEFT JOIN 
+    LatestComments lc ON pp.PostId = lc.PostId AND lc.CommentRank = 1
+JOIN 
+    PostVotingSummary pvs ON pp.PostId = pvs.PostId
+WHERE 
+    ub.GoldCount + ub.SilverCount + ub.BronzeCount > 0 
+    AND pp.Rank <= 3
+ORDER BY 
+    ub.GoldCount DESC, pp.Score DESC
+LIMIT 10;

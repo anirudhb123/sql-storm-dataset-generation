@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score >= 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON tag.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))::int)
+    GROUP BY 
+        tag.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.PositivePosts,
+    us.NegativePosts,
+    us.BadgeCount,
+    pt.TagName,
+    us.LastActivity
+FROM 
+    UserStats us
+JOIN 
+    PopularTags pt ON us.PostCount > 0
+WHERE 
+    us.Reputation > 500
+ORDER BY 
+    us.Reputation DESC, us.LastActivity DESC;

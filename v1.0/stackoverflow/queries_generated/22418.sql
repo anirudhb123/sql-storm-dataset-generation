@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '90 days'
+      AND 
+        p.ParentId IS NULL  -- Only consider questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        PostRank,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5  -- Select the top 5 posts per type
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN pht.Name = 'Edit Body' THEN 1 END) AS EditCount,
+        COUNT(CASE WHEN pht.Name = 'Post Reopened' THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    h.PostId,
+    h.Title,
+    h.CreationDate,
+    COALESCE(rv.TotalVotes, 0) AS TotalVotes,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    COALESCE(phto.LastClosedDate, 'No closure date') AS LastClosedDate,
+    COALESCE(phto.EditCount, 0) AS EditCount,
+    COALESCE(phto.ReopenCount, 0) AS ReopenCount,
+    RANK() OVER (ORDER BY COALESCE(rv.UpVotes - rv.DownVotes, 0) DESC) AS VoteBasedRanking
+FROM 
+    HighScoringPosts h
+LEFT JOIN 
+    RecentVotes rv ON h.PostId = rv.PostId
+LEFT JOIN 
+    PostHistoryStats phto ON h.PostId = phto.PostId
+ORDER BY 
+    VoteBasedRanking,
+    h.Score DESC;

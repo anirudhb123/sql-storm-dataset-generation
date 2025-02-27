@@ -1,0 +1,79 @@
+WITH ranked_titles AS (
+    SELECT 
+        ak.name AS aka_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+filtered_titles AS (
+    SELECT 
+        r.aka_name,
+        r.title,
+        r.production_year
+    FROM 
+        ranked_titles r
+    WHERE 
+        r.title_rank <= 3  -- Top 3 titles per person
+),
+
+company_info AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+),
+
+keyword_info AS (
+    SELECT 
+        m.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+),
+
+complete_info AS (
+    SELECT 
+        f.aka_name,
+        f.title,
+        f.production_year,
+        ci.company_name,
+        ci.company_type,
+        kv.keyword
+    FROM 
+        filtered_titles f
+    LEFT JOIN 
+        company_info ci ON f.title = ci.movie_id
+    LEFT JOIN 
+        keyword_info kv ON f.title = kv.movie_id
+)
+
+SELECT 
+    aka_name,
+    title,
+    production_year,
+    STRING_AGG(DISTINCT company_name, ', ') AS companies,
+    STRING_AGG(DISTINCT company_type, ', ') AS company_types,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords
+FROM 
+    complete_info
+GROUP BY 
+    aka_name, title, production_year
+ORDER BY 
+    production_year DESC;

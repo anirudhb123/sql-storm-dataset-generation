@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(NULLIF(p.CreationDate, p.LastEditDate), p.LastEditDate) AS LastActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Filter to include only questions
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        PostId
+),
+ClosedQuestions AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Close history
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(pvc.Upvotes, 0) AS Upvotes,
+    COALESCE(pvc.Downvotes, 0) AS Downvotes,
+    COALESCE(cq.LastCloseDate, 'No Closing Date') AS LastCloseDate,
+    COALESCE(cq.CloseReasonNames, 'Not Closed') AS CloseReasonNames,
+    DENSE_RANK() OVER (ORDER BY rp.LastActivity DESC) AS ActivityRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.PostId = pvc.PostId
+LEFT JOIN 
+    ClosedQuestions cq ON rp.PostId = cq.PostId
+WHERE 
+    rp.PostRank <= 3  -- Only show top 3 posts per user
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

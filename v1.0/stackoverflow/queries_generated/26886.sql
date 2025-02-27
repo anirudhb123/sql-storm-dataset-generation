@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagCounts AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        PopularTags
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5 -- Only consider tags used in more than 5 questions
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        ROW_NUMBER() OVER (ORDER BY TagUsageCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    tt.Tag AS PopularTag
+FROM 
+    RankedPosts rp
+JOIN 
+    TopTags tt ON tt.Tag = ANY(string_to_array(rp.Tags, '>'))
+WHERE 
+    rp.TagRank = 1
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 10; -- Fetch top 10 posts with the highest view count by the most popular tags

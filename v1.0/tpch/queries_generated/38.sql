@@ -1,0 +1,65 @@
+WITH SupplierSummary AS (
+    SELECT s_suppkey,
+           s_name,
+           SUM(ps_availqty) AS total_available_quantity,
+           AVG(ps_supplycost) AS avg_supply_cost
+    FROM supplier
+    JOIN partsupp ON supplier.s_suppkey = partsupp.ps_suppkey
+    GROUP BY s_suppkey, s_name
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus <> 'C' OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+NationRegion AS (
+    SELECT n.n_name,
+           r.r_name,
+           COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+),
+OrderLineStats AS (
+    SELECT l.l_orderkey,
+           COUNT(*) AS total_line_items,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           SUM(l.l_tax) AS total_tax_collected
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT cs.c_name,
+       ss.s_name,
+       n.n_name AS supplier_nation,
+       r.r_name AS supplier_region,
+       cs.total_orders,
+       cs.total_spent,
+       oss.total_available_quantity,
+       ols.total_line_items,
+       ols.total_revenue,
+       ols.total_tax_collected,
+       (CASE 
+            WHEN cs.total_spent > 10000 THEN 'High Value'
+            WHEN cs.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END) AS customer_value_segment
+FROM CustomerOrderStats cs
+JOIN SupplierSummary ss ON cs.total_orders > 5
+JOIN OrderLineStats ols ON ols.l_orderkey IN (SELECT o.o_orderkey 
+                                            FROM orders o 
+                                            WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN nation n ON ss.s_suppkey IN (SELECT ps.ps_suppkey 
+                                        FROM partsupp ps 
+                                        WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                FROM part p 
+                                                                WHERE p.p_retailprice > 100))
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE ss.total_available_quantity IS NOT NULL
+ORDER BY cs.total_spent DESC, ols.total_revenue DESC;

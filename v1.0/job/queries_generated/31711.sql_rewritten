@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::text AS parent_movie,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.title AS parent_movie,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    string_agg(DISTINCT an.name, ', ') AS actor_names,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mo.info_length) AS avg_info_length,
+    mh.parent_movie,
+    mh.production_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id, 
+        LENGTH(info) AS info_length 
+     FROM 
+        movie_info
+     WHERE 
+        info IS NOT NULL) mo ON mo.movie_id = mh.movie_id
+WHERE 
+    mh.production_year IS NOT NULL 
+GROUP BY 
+    mh.movie_id, mh.parent_movie, mh.production_year
+HAVING 
+    COUNT(DISTINCT an.name) > 1 
+ORDER BY 
+    mh.production_year DESC, keyword_count DESC
+LIMIT 50;

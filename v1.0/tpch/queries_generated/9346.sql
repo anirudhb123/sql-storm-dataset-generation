@@ -1,0 +1,22 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_nationkey, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+), 
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_name, ro.c_nationkey
+    FROM RankedOrders ro
+    WHERE ro.price_rank <= 5
+), 
+OrderSummary AS (
+    SELECT to.c_nationkey, SUM(to.o_totalprice) as total_price, COUNT(to.o_orderkey) as order_count
+    FROM TopOrders to
+    GROUP BY to.c_nationkey
+)
+SELECT n.n_name, n.n_regionkey, os.total_price, os.order_count, 
+       RANK() OVER (ORDER BY os.total_price DESC) as rank_by_total_price
+FROM OrderSummary os
+JOIN nation n ON os.c_nationkey = n.n_nationkey
+ORDER BY os.total_price DESC, n.n_name ASC;

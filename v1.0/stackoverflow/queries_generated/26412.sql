@@ -1,0 +1,70 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Tags.TAGS, '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+TopUsers AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(Votes.VoteTypeId = 2) AS Upvotes,
+        SUM(Votes.VoteTypeId = 3) AS Downvotes,
+        SUM(Votes.VoteTypeId = 2) - SUM(Votes.VoteTypeId = 3) AS NetVotes
+    FROM 
+        Users
+    JOIN 
+        Votes ON Users.Id = Votes.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        ht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        ph.Text AS HistoryText
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    tu.DisplayName AS TopUser,
+    tu.Upvotes,
+    tu.Downvotes,
+    tu.NetVotes,
+    rph.Title AS RecentPostTitle,
+    rph.HistoryType,
+    rph.HistoryText,
+    rph.HistoryDate
+FROM 
+    TagStats ts
+JOIN 
+    TopUsers tu ON ts.PostCount > 10  -- limiting users to those with posts linked to tags with >10 posts
+LEFT JOIN 
+    RecentPostHistory rph ON rph.Title IS NOT NULL
+ORDER BY 
+    ts.TotalViews DESC, ts.AverageScore DESC
+LIMIT 10;

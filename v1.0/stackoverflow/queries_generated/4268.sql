@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation
+    FROM 
+        Users
+    GROUP BY 
+        UserId
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    COALESCE(pr.CloseReasons, 'Not Closed') AS CloseReasons,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount,
+    COALESCE(u.TotalReputation, 0) AS UserReputation,
+    rp.CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostCloseReasons pr ON rp.PostId = pr.PostId
+LEFT JOIN 
+    PostsWithBadges pb ON rp.PostId = pb.PostId
+LEFT JOIN 
+    UserReputation u ON rp.OwnerDisplayName = u.UserId
+WHERE 
+    rp.CommentCount > 5
+ORDER BY 
+    rp.CreationDate DESC;

@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplyCTE AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, c.c_custkey, c.c_name, c.c_acctbal, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT s.s_name, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_value
+    FROM SupplyCTE s
+    WHERE s.rn = 1
+    GROUP BY s.s_name
+    HAVING SUM(ps.ps_availqty * ps.ps_supplycost) > 10000
+),
+StatusCounts AS (
+    SELECT o.o_orderstatus, COUNT(*) AS order_count
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY o.o_orderstatus
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           CASE WHEN c.c_acctbal IS NULL THEN 'Unverified' ELSE 'Verified' END AS status
+    FROM customer c
+)
+
+SELECT DISTINCT
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    s.s_name AS supplier_name,
+    coalesce(sc.order_count, 0) AS status_order_count,
+    cd.status AS customer_status,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue
+FROM customer c
+LEFT JOIN CustomerOrders o ON c.c_custkey = o.c_custkey AND o.order_rank = 1
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN SupplyCTE s ON l.l_partkey = s.ps_partkey
+LEFT JOIN StatusCounts sc ON o.o_orderstatus = sc.o_orderstatus
+JOIN CustomerDetails cd ON c.c_custkey = cd.c_custkey
+WHERE c.c_acctbal BETWEEN 100 AND 100000 AND s.ps_availqty < 100
+GROUP BY c.c_name, o.o_orderkey, s.s_name, sc.order_count, cd.status
+HAVING COUNT(l.l_orderkey) > 2
+ORDER BY total_revenue DESC NULLS LAST
+LIMIT 20;

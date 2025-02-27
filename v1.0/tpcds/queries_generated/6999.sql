@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_quantity,
+        rs.total_net_paid
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.rank <= 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ts.total_net_paid) AS total_spent
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        TopItems ts ON ws.ws_item_sk = ts.ws_item_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_spent
+FROM 
+    CustomerStats cs
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 20;

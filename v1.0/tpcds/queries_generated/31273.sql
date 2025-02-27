@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450000 AND 2450050
+    GROUP BY 
+        ws_order_number, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_sales_price) AS total_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs_order_number ORDER BY SUM(cs_sales_price) DESC) AS rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 2450000 AND 2450050
+    GROUP BY 
+        cs_order_number, cs_item_sk
+),
+combined_sales AS (
+    SELECT 
+        s.ws_order_number AS order_number,
+        s.total_quantity,
+        s.total_sales_price,
+        COALESCE(c.total_quantity, 0) AS catalog_quantity,
+        COALESCE(c.total_sales_price, 0) AS catalog_sales_price
+    FROM 
+        (SELECT * FROM sales_cte WHERE ws_order_number IS NOT NULL) s
+    FULL OUTER JOIN 
+        (SELECT * FROM sales_cte WHERE cs_order_number IS NOT NULL) c
+    ON 
+        s.ws_order_number = c.cs_order_number
+)
+SELECT 
+    cs.order_number,
+    cs.total_quantity + cs.catalog_quantity AS combined_quantity,
+    cs.total_sales_price + cs.catalog_sales_price AS combined_sales_price,
+    DENSE_RANK() OVER (ORDER BY (cs.total_sales_price + cs.catalog_sales_price) DESC) AS sales_rank,
+    CASE 
+        WHEN cs.total_sales_price IS NULL AND cs.catalog_sales_price IS NULL THEN 'No Sales'
+        WHEN cs.total_sales_price < 1000 THEN 'Low Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM 
+    combined_sales cs
+WHERE 
+    cs.combined_quantity > 0
+ORDER BY 
+    cs.combined_sales_price DESC
+LIMIT 50;

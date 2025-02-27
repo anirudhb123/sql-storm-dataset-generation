@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_discount_amt,
+        ws.ws_net_paid,
+        ws.ws_ship_mode_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number DESC) AS rn
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'S') AND
+        ws.ws_sales_price > (SELECT AVG(ws_ext_sales_price) FROM web_sales WHERE ws_web_site_sk = ws.ws_web_site_sk)
+)
+SELECT 
+    COALESCE(sm.sm_type, 'Unknown') as Ship_Mode,
+    COUNT(DISTINCT s.ws_order_number) AS Total_Orders,
+    SUM(s.ws_quantity) AS Total_Quantity,
+    SUM(s.ws_net_paid) AS Total_Sales,
+    AVG(s.ws_ext_discount_amt) AS Average_Discount,
+    SUM(CASE WHEN s.ws_quantity > 5 THEN 1 ELSE 0 END) AS High_Quantity_Orders
+FROM 
+    SalesCTE s
+LEFT JOIN 
+    ship_mode sm ON s.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE 
+    s.rn = 1  -- Select only the latest order per web site
+GROUP BY 
+    sm.sm_type
+UNION ALL
+SELECT 
+    'Legacy' AS Ship_Mode,
+    COUNT(1) AS Total_Orders,
+    SUM(COALESCE(sr_return_quantity, 0)) AS Total_Quantity,
+    SUM(COALESCE(sr_return_amt, 0)) AS Total_Sales,
+    NULL AS Average_Discount,
+    SUM(COALESCE(sr_return_quantity, 0) > 5) AS High_Quantity_Orders
+FROM 
+    store_returns sr 
+WHERE 
+    sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+HAVING 
+    SUM(COALESCE(sr_return_amt, 0)) > 1000
+ORDER BY 
+    Total_Sales DESC NULLS LAST;

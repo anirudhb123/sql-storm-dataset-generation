@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        COALESCE(au.UpVotes, 0) AS UpVotes,
+        COALESCE(ad.DownVotes, 0) AS DownVotes,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+                SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes
+         GROUP BY PostId) au ON p.Id = au.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount 
+         FROM Posts 
+         WHERE PostTypeId = 2 
+         GROUP BY PostId) a ON p.Id = a.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+),
+TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY TagName
+),
+TopTags AS (
+    SELECT 
+        TagName
+    FROM 
+        TagCounts
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.AnswerCount,
+    rp.CommentCount,
+    tt.TagName
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON rp.PostId = p.Id
+JOIN 
+    TopTags tt ON tt.TagName = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 20;

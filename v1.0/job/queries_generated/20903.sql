@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS starring_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM
+        aka_title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN comp_cast_type cct ON c.person_role_id = cct.id
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+    WHERE
+        cct.kind IS NOT NULL OR a.name IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT
+        *,
+        CASE WHEN starring_count > 5 THEN 'Blockbuster' ELSE 'Indie' END AS type
+    FROM
+        RankedMovies
+    WHERE
+        year_rank <= 10
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT
+        tm.title,
+        tm.production_year,
+        tm.type,
+        COALESCE(mk.keywords, 'No keywords') AS keywords
+    FROM
+        TopMovies tm
+    LEFT JOIN MovieKeywords mk ON tm.id = mk.movie_id
+)
+SELECT
+    mwk.title,
+    mwk.production_year,
+    mwk.type,
+    mwk.keywords,
+    ARRAY_AGG(DISTINCT a.name) AS cast_names
+FROM
+    MoviesWithKeywords mwk
+LEFT JOIN cast_info ci ON mwk.id = ci.movie_id
+LEFT JOIN aka_name a ON ci.person_id = a.person_id AND a.md5sum IS NOT NULL
+GROUP BY
+    mwk.title, mwk.production_year, mwk.type, mwk.keywords
+HAVING 
+    COUNT(DISTINCT a.id) > 0
+ORDER BY
+    mwk.production_year DESC, 
+    mwk.title ASC;
+

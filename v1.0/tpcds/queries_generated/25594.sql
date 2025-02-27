@@ -1,0 +1,68 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk, 
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, COALESCE(ca_suite_number, '')) AS full_address, 
+        ca_city, 
+        ca_state 
+    FROM 
+        customer_address 
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_sk, 
+        CONCAT(c_first_name, ' ', c_last_name) AS customer_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        c_email_address,
+        ca_address_sk 
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count 
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk 
+),
+HighlightedCustomers AS (
+    SELECT 
+        cd.customer_name,
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ad.full_address,
+        sd.total_sales,
+        sd.order_count 
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        AddressDetails ad ON cd.ca_address_sk = ad.ca_address_sk
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_sk = sd.customer_sk 
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_purchase_estimate > 1000 
+)
+SELECT 
+    customer_name,
+    full_address,
+    cd_gender,
+    cd_marital_status,
+    total_sales,
+    order_count,
+    CASE 
+        WHEN order_count > 5 THEN 'Frequent Shopper' 
+        ELSE 'Occasional Shopper' 
+    END AS shopper_category 
+FROM 
+    HighlightedCustomers 
+ORDER BY 
+    total_sales DESC;

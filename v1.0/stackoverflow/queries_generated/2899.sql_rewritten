@@ -1,0 +1,63 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AnswerAccepted,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.CommentCount,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY ua.BadgeCount DESC) AS RankByBadges
+    FROM UserActivity ua
+    WHERE ua.PostCount > 0
+),
+PostLinksSummary AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostsCount,
+        STRING_AGG(pl.RelatedPostId::text, ', ') AS RelatedPostIds
+    FROM PostLinks pl
+    GROUP BY pl.PostId
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.PostCount,
+    tu.CommentCount,
+    p.Title AS RecentPostTitle,
+    p.CreationDate AS RecentPostDate,
+    ps.RelatedPostsCount,
+    ps.RelatedPostIds,
+    CASE 
+        WHEN tu.RankByPosts <= 10 THEN 'Top Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorTier
+FROM TopUsers tu
+LEFT JOIN PostSummary p ON p.RecentPostRank = 1
+LEFT JOIN PostLinksSummary ps ON p.PostId = ps.PostId
+WHERE tu.PostCount > 5
+ORDER BY tu.PostCount DESC, tu.CommentCount DESC;

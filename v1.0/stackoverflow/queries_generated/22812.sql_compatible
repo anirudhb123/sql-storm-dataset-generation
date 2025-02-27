@@ -1,0 +1,92 @@
+
+WITH UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(DISTINCT P.Id) DESC) AS RN
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostMetrics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= DATEADD(year, -1, '2024-10-01') 
+    GROUP BY P.Id, P.Title, P.ViewCount
+    HAVING (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) - (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 3) > 0
+),
+BountifulPosts AS (
+    SELECT
+        PM.PostId,
+        PM.Title,
+        PM.ViewCount,
+        PM.TotalComments,
+        PM.UpVotes,
+        PM.DownVotes,
+        PA.UserId,
+        U.DisplayName
+    FROM PostMetrics PM
+    JOIN Votes PA ON PM.PostId = PA.PostId AND PA.VoteTypeId = 8 
+    JOIN Users U ON PA.UserId = U.Id
+    WHERE PM.UpVotes > 0
+),
+LastEditedPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.LastEditDate,
+        CASE 
+            WHEN P.LastEditorUserId IS NULL THEN 'Community'
+            ELSE U.DisplayName
+        END AS LastEditor,
+        P.Title
+    FROM Posts P
+    LEFT JOIN Users U ON P.LastEditorUserId = U.Id
+    WHERE P.LastEditDate IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY PH.PostId
+),
+RankedUsers AS (
+    SELECT
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UA.PostCount,
+        UA.CommentCount,
+        UA.TotalBounty,
+        RANK() OVER (ORDER BY UA.Reputation DESC) AS UserRank
+    FROM UserActivity UA
+    WHERE UA.PostCount > 0 
+)
+SELECT 
+    RU.DisplayName AS UserName,
+    RU.Reputation AS UserReputation,
+    COALESCE(BP.Title, 'No Bountiful Posts') AS BountifulPostTitle,
+    COALESCE(LP.LastEditor, 'No Edits') AS LastEditor,
+    COALESCE(CP.CloseCount, 0) AS TotalClosedPosts,
+    RANK() OVER (ORDER BY RU.Reputation DESC) AS FinalUserRank
+FROM RankedUsers RU
+LEFT JOIN BountifulPosts BP ON RU.UserId = BP.UserId
+LEFT JOIN LastEditedPosts LP ON BP.PostId = LP.PostId
+LEFT JOIN ClosedPosts CP ON BP.PostId = CP.PostId
+WHERE RU.UserRank <= 10 
+ORDER BY RU.Reputation DESC;

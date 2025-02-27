@@ -1,0 +1,87 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.AcceptedAnswerId, 
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with questions
+
+    UNION ALL
+    
+    SELECT 
+        p2.Id, 
+        p2.Title, 
+        p2.AcceptedAnswerId, 
+        p2.CreationDate,
+        p2.Score,
+        p2.ViewCount,
+        p2.Body,
+        rp.PostLevel + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE rp ON p2.ParentId = rp.Id  -- Recursively join to get answers
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only questions and answers
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    COALESCE(ub.TotalBadges, 0) AS UserBadges,
+    COALESCE(ub.HighestBadgeClass, 0) AS HighestBadgeClass,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer' 
+        ELSE 'No Accepted Answer' 
+    END AS AnswerStatus,
+    ROW_NUMBER() OVER (PARTITION BY rp.PostLevel ORDER BY rp.ViewCount DESC) AS RankByViewCount
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    PostVotes v ON rp.Id = v.PostId
+LEFT JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    rp.Score > 0 -- Only consider posts with positive score
+ORDER BY 
+    rp.PostLevel, rp.ViewCount DESC;

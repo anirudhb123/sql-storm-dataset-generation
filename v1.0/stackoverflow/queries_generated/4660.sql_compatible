@@ -1,0 +1,66 @@
+
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        (U.UpVotes - U.DownVotes) AS NetGains
+    FROM Users U
+    WHERE U.Reputation > 0
+),
+PostWithStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS LinkedPosts
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN PostLinks PL ON PL.PostId = P.Id
+    GROUP BY P.Id, P.OwnerUserId, P.PostTypeId, P.Title, P.CreationDate, P.Score
+),
+AcceptedAnswers AS (
+    SELECT 
+        P1.Id AS QuestionId,
+        P2.Id AS AcceptedAnswerId,
+        P1.Title AS QuestionTitle,
+        P2.Title AS AnswerTitle
+    FROM Posts P1
+    INNER JOIN Posts P2 ON P1.AcceptedAnswerId = P2.Id
+    WHERE P1.PostTypeId = 1
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        COUNT(*) AS EditCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY PH.PostId, PH.CreationDate
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    SUM(PW.Score) AS TotalPostScore,
+    COUNT(DISTINCT PW.PostId) AS TotalPosts,
+    COALESCE(SUM(RE.EditCount), 0) AS TotalEdits,
+    COALESCE(AA.QuestionId, 0) AS QuestionId,
+    COALESCE(AA.QuestionTitle, '') AS QuestionTitle,
+    COALESCE(AA.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+    COALESCE(AA.AnswerTitle, '') AS AnswerTitle,
+    US.Reputation,
+    US.NetGains
+FROM UserScore US
+JOIN UserScore U ON U.UserId = US.UserId
+LEFT JOIN PostWithStats PW ON PW.OwnerUserId = U.UserId
+LEFT JOIN AcceptedAnswers AA ON PW.PostId = AA.QuestionId
+LEFT JOIN RecentEdits RE ON PW.PostId = RE.PostId
+GROUP BY U.Id, U.DisplayName, US.Reputation, US.NetGains, AA.QuestionId, AA.QuestionTitle, AA.AcceptedAnswerId, AA.AnswerTitle
+ORDER BY TotalPostScore DESC, U.Reputation DESC
+LIMIT 10;

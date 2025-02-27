@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+), 
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+        JOIN Tags t ON p.Tags LIKE '%' + t.TagName + '%'
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 12 THEN 1 ELSE 0 END), 0) AS SpamReports
+    FROM 
+        Users u
+        LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10,11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12,13) THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    pt.Tags,
+    ua.DisplayName AS UserName,
+    ua.UpVotes,
+    ua.DownVotes,
+    ph.CloseCount,
+    ph.DeleteCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+JOIN 
+    UserActivity ua ON rp.OwnerDisplayName = ua.DisplayName
+LEFT JOIN 
+    PostHistoryAggregates ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostId
+OPTION (RECOMPILE);

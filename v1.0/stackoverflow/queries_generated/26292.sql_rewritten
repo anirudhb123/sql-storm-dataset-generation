@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.TagCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 10 
+),
+PostStatistics AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.TagCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        TopPosts p
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId
+    LEFT JOIN 
+        Comments c ON p.PostId = c.PostId
+    GROUP BY 
+        p.PostId, p.Title, p.Score, p.ViewCount, p.TagCount
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.TagCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    (ps.UpVotes * 1.0 / NULLIF(ps.UpVotes + ps.DownVotes, 0)) * 100 AS UpVotePercentage,
+    CASE 
+        WHEN ps.TagCount > 5 THEN 'High' 
+        WHEN ps.TagCount BETWEEN 3 AND 5 THEN 'Medium' 
+        ELSE 'Low' 
+    END AS TagDiversity,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation
+FROM 
+    PostStatistics ps
+JOIN 
+    TopPosts tp ON ps.PostId = tp.PostId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

@@ -1,0 +1,59 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_net_profit,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_income_band_sk
+    FROM 
+        CustomerSales cs
+    JOIN 
+        CustomerDemographics cd ON cs.c_customer_id = cd.cd_demo_sk
+)
+SELECT 
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.ib_income_band_sk,
+    COUNT(ss.c_customer_id) AS customer_count,
+    SUM(ss.total_sales) AS total_sales_amount,
+    AVG(ss.avg_net_profit) AS average_net_profit_per_customer
+FROM 
+    SalesSummary ss
+GROUP BY 
+    ss.cd_gender, 
+    ss.cd_marital_status, 
+    ss.ib_income_band_sk
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10;

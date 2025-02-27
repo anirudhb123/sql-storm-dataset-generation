@@ -1,0 +1,91 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(vs.VoteCount, 0)) AS VoteCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) vs ON p.Id = vs.PostId
+    GROUP BY u.Id, u.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+
+QualifiedUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.Reputation,
+        ue.PostCount,
+        ue.CommentCount,
+        ue.BadgeCount,
+        ue.VoteCount,
+        DENSE_RANK() OVER (ORDER BY ue.Reputation DESC) AS ReputationRank
+    FROM UserEngagement ue
+    WHERE ue.Reputation > 1000 
+    AND ue.PostCount > 5
+    HAVING COUNT(DISTINCT ue.PostCount) > 3
+),
+
+FinalStats AS (
+    SELECT 
+        pu.UserId,
+        pu.Reputation,
+        pu.PostCount,
+        p.PostId,
+        p.Title,
+        p.Score,
+        p.LastUpdated,
+        COALESCE(ps.TotalComments, 0) AS TotalComments,
+        COALESCE(ps.HistoryCount, 0) AS HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY pu.UserId ORDER BY ps.Score DESC) AS PostRank
+    FROM QualifiedUsers pu
+    LEFT JOIN PostStats ps ON pu.PostCount = ps.TotalComments
+    LEFT JOIN Posts p ON pu.PostCount = p.Id
+)
+
+SELECT 
+    fs.UserId,
+    fs.Reputation,
+    fs.PostCount,
+    fs.PostId,
+    fs.Title,
+    fs.Score,
+    fs.LastUpdated,
+    fs.TotalComments,
+    fs.HistoryCount,
+    CASE 
+        WHEN fs.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostClassification
+FROM FinalStats fs
+WHERE 
+    fs.PostId IS NOT NULL
+ORDER BY fs.Reputation DESC, fs.Score DESC;

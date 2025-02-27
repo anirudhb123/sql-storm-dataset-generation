@@ -1,0 +1,47 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT 
+        owi.o_orderkey, 
+        owi.o_orderdate, 
+        owi.total_revenue, 
+        owi.line_item_count,
+        CASE 
+            WHEN owi.line_item_count > 5 THEN 'High'
+            ELSE 'Standard'
+        END AS order_type
+    FROM OrdersWithLineItems owi
+    WHERE owi.total_revenue > 1000
+)
+SELECT 
+    rnk.s_name AS supplier_name,
+    rnk.s_acctbal AS supplier_account_balance,
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.total_revenue,
+    hvo.line_item_count,
+    hvo.order_type
+FROM RankedSuppliers rnk
+FULL OUTER JOIN HighValueOrders hvo ON rnk.rnk = 1 
+WHERE rnk.s_suppkey IS NOT NULL OR hvo.o_orderkey IS NOT NULL
+ORDER BY rnk.s_name, hvo.total_revenue DESC;

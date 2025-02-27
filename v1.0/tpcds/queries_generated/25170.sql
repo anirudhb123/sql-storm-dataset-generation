@@ -1,0 +1,63 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        ca_city
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+DetailedInfo AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ai.full_address,
+        ai.ca_city,
+        ai.ca_state,
+        si.total_quantity,
+        si.total_profit
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        AddressInfo ai ON ci.ca_city = ai.ca_city
+    JOIN 
+        SalesInfo si ON ci.c_customer_sk = si.ws_item_sk -- Assuming ws_item_sk is mapped to customer for testing
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    CONCAT(full_address, ', ', ca_city, ', ', ca_state) AS complete_address,
+    total_quantity,
+    total_profit
+FROM 
+    DetailedInfo
+WHERE 
+    total_profit > 1000
+ORDER BY 
+    total_profit DESC
+LIMIT 50;

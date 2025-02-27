@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM Posts p
+    LEFT JOIN Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, U.DisplayName
+),
+UserVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId IN (1, 2)
+    GROUP BY p.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LatestChangeDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+),
+FinalResult AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        COALESCE(uv.UpVotes, 0) AS UpVotes,
+        COALESCE(uv.DownVotes, 0) AS DownVotes,
+        ph.PostHistoryTypeId,
+        ph.LatestChangeDate,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'No Status'
+        END AS PostStatus
+    FROM RankedPosts rp
+    LEFT JOIN UserVotes uv ON rp.PostId = uv.PostId
+    LEFT JOIN PostHistoryInfo ph ON rp.PostId = ph.PostId
+)
+SELECT 
+    PostId, Title, CreationDate, ViewCount, OwnerDisplayName, AnswerCount, UpVotes, DownVotes, PostStatus
+FROM FinalResult
+WHERE OwnerPostRank = 1 
+  AND PostStatus IN ('Closed', 'Reopened')
+ORDER BY CreationDate DESC
+LIMIT 100;

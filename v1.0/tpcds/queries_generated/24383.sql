@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesStats AS (
+    SELECT 
+        cc.cc_call_center_id,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+        COUNT(DISTINCT w.web_site_id || ws.ws_order_number) AS total_orders
+    FROM call_center cc
+    LEFT JOIN web_sales ws ON cc.cc_call_center_sk = ws.ws_bill_customer_sk
+    LEFT JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY cc.cc_call_center_id
+),
+DateHighlights AS (
+    SELECT 
+        dd.d_date,
+        dd.d_month_seq,
+        COUNT(*) AS sales_count,
+        SUM(ws.ws_net_profit) AS total_sales
+    FROM date_dim dd
+    LEFT JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY dd.d_date, dd.d_month_seq
+),
+InventoryCheck AS (
+    SELECT 
+        i.i_item_id,
+        SUM(CASE 
+            WHEN inv.inv_quantity_on_hand < 50 THEN 1 ELSE 0 END) AS low_stock_items,
+        COUNT(DISTINCT inv.inv_warehouse_sk) AS total_warehouses
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_id
+)
+SELECT 
+    cl.cc_call_center_id,
+    COALESCE(ss.total_net_profit, 0) AS call_center_net_profit,
+    COALESCE(ss.total_orders, 0) AS call_center_orders,
+    dh.sales_count,
+    dh.total_sales,
+    ic.low_stock_items,
+    ic.total_warehouses,
+    CASE 
+        WHEN dh.total_sales IS NULL THEN 'NO SALES'
+        WHEN dh.total_sales > 10000 THEN 'HIGH SALES'
+        ELSE 'NORMAL SALES' 
+    END AS sales_category
+FROM call_center cl
+LEFT JOIN SalesStats ss ON cl.cc_call_center_id = ss.cc_call_center_id
+LEFT JOIN DateHighlights dh ON MONTH(dh.d_date) = MONTH(CURRENT_DATE)
+LEFT JOIN InventoryCheck ic ON 1=1
+WHERE cl.cc_employees > 20
+  AND (cl.cc_closed_date_sk IS NULL OR cl.cc_closed_date_sk > CURRENT_DATE)
+ORDER BY sales_category DESC, call_center_net_profit DESC
+LIMIT 100;

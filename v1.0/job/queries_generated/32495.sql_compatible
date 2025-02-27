@@ -1,0 +1,41 @@
+
+WITH RECURSIVE ActorMovies AS (
+    SELECT c.person_id, c.movie_id, t.title, t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM cast_info c
+    JOIN title t ON c.movie_id = t.id
+    WHERE c.nr_order = 1
+    UNION ALL
+    SELECT am.person_id, c.movie_id, t.title, t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY am.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM ActorMovies am
+    JOIN cast_info c ON am.movie_id = c.movie_id
+    JOIN title t ON c.movie_id = t.id
+    WHERE c.person_id != am.person_id
+),
+FilteredActors AS (
+    SELECT DISTINCT person_id
+    FROM ActorMovies
+    WHERE movie_rank <= 5
+),
+TopActors AS (
+    SELECT qa.person_id, ak.name, COUNT(DISTINCT am.movie_id) AS movie_count
+    FROM FilteredActors qa
+    JOIN cast_info c ON qa.person_id = c.person_id
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    JOIN ActorMovies am ON c.person_id = am.person_id
+    WHERE ak.name IS NOT NULL
+    GROUP BY qa.person_id, ak.name
+    HAVING COUNT(DISTINCT am.movie_id) > 5
+)
+SELECT a.name, a.movie_count, m.title, t.production_year,
+       (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.id AND mi.info_type_id = 1) AS additional_info_count,
+       STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM TopActors a
+JOIN movie_info m ON a.person_id = m.movie_id
+JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT OUTER JOIN aka_title t ON t.id = m.movie_id
+GROUP BY a.name, a.movie_count, m.title, t.production_year
+ORDER BY a.movie_count DESC, t.production_year DESC
+LIMIT 10;

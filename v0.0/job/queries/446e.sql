@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.company_type_id = 1 AND n.md5sum IN ('1b093324e365d2777765fa3a8fe3ad6d', '3e0f255b5e4c67a2de90f2ba87c2fd66', '46fd9e3c7b032834a8d7b73e2fe21636', '7ca430b123897000d97960489c8e3cf8', 'a7759569c0d49aa2bbded01537afef16', 'b49ff6d29d0b945db38acca98f2e6f5a', 'c1708c9b768cfb3971d69d3ce7bc9fff') AND t.title > 'Drôle de pastis' AND t.kind_id < 7;

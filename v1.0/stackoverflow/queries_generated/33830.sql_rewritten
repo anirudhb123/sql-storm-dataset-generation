@@ -1,0 +1,40 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation IS NOT NULL 
+),
+RecentPostsCTE AS (
+    SELECT p.Id AS PostId, p.OwnerUserId, p.CreationDate, 
+           p.Title, p.Score, p.ViewCount,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostHistoryCTE AS (
+    SELECT ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, 
+           COUNT(*) AS EditCount FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6, 10) 
+    GROUP BY ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+),
+JoinedData AS (
+    SELECT u.Id AS UserId, u.DisplayName, 
+           r.Rank AS ReputationRank, r.Reputation,
+           rp.PostId, rp.Title AS RecentPostTitle, 
+           rp.Score AS RecentPostScore, rp.ViewCount AS RecentPostViewCount,
+           ph.EditCount
+    FROM RecentPostsCTE rp
+    LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN UserReputationCTE r ON u.Id = r.Id
+    LEFT JOIN PostHistoryCTE ph ON rp.PostId = ph.PostId
+)
+SELECT jd.UserId, jd.DisplayName, jd.Reputation, jd.ReputationRank,
+       COUNT(DISTINCT jd.PostId) AS TotalPosts, 
+       SUM(CASE WHEN jd.EditCount IS NOT NULL THEN jd.EditCount ELSE 0 END) AS TotalEdits,
+       COALESCE(MAX(jd.RecentPostScore), 0) AS MaxPostScore,
+       COALESCE(MAX(jd.TotalPosts), 0) AS MaxPostsPerUser
+FROM JoinedData jd
+GROUP BY jd.UserId, jd.DisplayName, jd.Reputation, jd.ReputationRank
+HAVING COUNT(DISTINCT jd.PostId) > 5
+ORDER BY jd.Reputation DESC
+LIMIT 10;

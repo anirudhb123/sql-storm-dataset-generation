@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankView
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+        AND p.Score IS NOT NULL
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+), 
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(v.Id) > 10
+), 
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COALESCE(p.Title, 'No associated post') AS PostTitle
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.WikiPostId = p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerReputation,
+    CASE 
+        WHEN rp.RankScore = 1 THEN 'Top Scoring'
+        WHEN rp.RankView = 1 THEN 'Most Viewed'
+        ELSE 'Regular'
+    END AS PostCategory,
+    COALESCE(cp.CloseReason, 'Open') AS CloseReason,
+    COALESCE(cp.ClosedBy, 'N/A') AS ClosedBy,
+    tu.DisplayName AS ActiveUser,
+    tu.VoteCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    MostActiveUsers tu ON rp.OwnerUserId = tu.Id
+LEFT JOIN 
+    TagDetails td ON td.TagId = ANY(string_to_array(rp.Tags, ',')::int[]) 
+WHERE 
+    rp.RankScore <= 10
+    OR rp.RankView <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, ActiveUser DESC;

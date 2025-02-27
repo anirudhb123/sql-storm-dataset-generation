@@ -1,0 +1,96 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPosts,
+        AVG(V.BountyAmount) AS AverageBounty,
+        MAX(P.CreationDate) AS LatestPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  -- BountyStart
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(
+            (SELECT COUNT(*) 
+             FROM Votes V 
+             WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpvoteCount,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS CloseDate,
+        R.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes R ON PH.Comment::int = R.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10  -- Post Closed
+),
+ActiveUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.UpvotedPosts,
+        UA.DownvotedPosts,
+        UA.AverageBounty,
+        UA.LatestPostDate,
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.CommentCount,
+        PS.ViewCount,
+        PS.CreationDate,
+        COALESCE(CP.CloseDate, 'No Close Date') AS CloseDate,
+        COALESCE(CP.CloseReason, 'Not Applicable') AS CloseReason
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostStatistics PS ON UA.PostCount > 0
+    LEFT JOIN 
+        ClosedPosts CP ON PS.PostId = CP.PostId
+    WHERE 
+        UA.PostCount > 2 AND 
+        UA.LatestPostDate >= (NOW() - INTERVAL '1 year')
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    ROUND(U.AverageBounty * (1.0 + (COALESCE(CP.CloseDate, '0'::timestamp)::timestamp IS NOT NULL)::int), 2) AS AdjustedAverageBounty,
+    COUNT(DISTINCT PS.PostId) AS TotalPosts,
+    SUM(PS.CommentCount) AS TotalComments,
+    SUM(PS.ViewCount) AS TotalViews,
+    P.ScoreRank
+FROM 
+    ActiveUsers U
+JOIN 
+    PostStatistics PS ON U.PostId = PS.PostId
+LEFT JOIN 
+    ClosedPosts CP ON PS.PostId = CP.PostId
+GROUP BY 
+    U.UserId, U.DisplayName, U.AverageBounty, P.ScoreRank
+ORDER BY 
+    AdjustedAverageBounty DESC, TotalPosts DESC
+LIMIT 10;

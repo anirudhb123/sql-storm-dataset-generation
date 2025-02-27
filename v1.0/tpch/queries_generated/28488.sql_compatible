@@ -1,0 +1,28 @@
+
+SELECT 
+    CONCAT('Part: ', p.p_name, ' | Brand: ', p.p_brand, ' | Type: ', p.p_type) AS part_info,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(ps.ps_availqty) AS average_availability,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(l.l_quantity) AS max_quantity_per_order,
+    SUBSTRING_INDEX(p.p_comment, ' ', 3) AS comment_excerpt,
+    CASE 
+        WHEN AVG(s.s_acctbal) > 10000 THEN 'High Value Suppliers'
+        ELSE 'Regular Suppliers' 
+    END AS supplier_value_category
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+GROUP BY 
+    p.p_name, p.p_brand, p.p_type, p.p_comment
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+ORDER BY 
+    average_availability DESC;

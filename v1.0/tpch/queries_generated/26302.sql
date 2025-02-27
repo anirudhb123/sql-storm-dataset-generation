@@ -1,0 +1,22 @@
+SELECT 
+    CONCAT(c.c_name, ' from ', s.s_name) AS supplier_customer,
+    REPLACE(REPLACE(PAD(CHAR(s.s_acctbal, 12, ' ')), ' ', '.'), '.', '-') AS formatted_acctbal,
+    SUBSTRING_INDEX(s.s_comment, ' ', 5) AS short_comment,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_quantity) AS total_quantity,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_discount END) AS max_discount_if_returned
+FROM 
+    supplier s 
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+GROUP BY 
+    s.s_suppkey, c.c_custkey 
+HAVING 
+    total_orders > 10 
+ORDER BY 
+    total_quantity DESC 
+LIMIT 20;

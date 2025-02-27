@@ -1,0 +1,29 @@
+WITH RECURSIVE PostGenerator AS (
+    SELECT 1 AS PostId, 
+           1 AS PostTypeId, 
+           cast('2024-10-01 12:34:56' as timestamp) AS CreationDate, 
+           'Sample Title ' || 1 AS Title, 
+           'Sample Body for post number ' || 1 AS Body, 
+           0 AS Score, 
+           'tag1,tag2' AS Tags,
+           0 AS AnswerCount,
+           0 AS CommentCount,
+           0 AS FavoriteCount
+    UNION ALL
+    SELECT PostId + 1, 
+           PostTypeId, 
+           cast('2024-10-01 12:34:56' as timestamp), 
+           'Sample Title ' || (PostId + 1), 
+           'Sample Body for post number ' || (PostId + 1), 
+           Score, 
+           Tags,
+           AnswerCount,
+           CommentCount,
+           FavoriteCount
+    FROM PostGenerator
+    WHERE PostId < 10000  
+)
+
+INSERT INTO Posts (Id, PostTypeId, CreationDate, Title, Body, Score, Tags, AnswerCount, CommentCount, FavoriteCount)
+SELECT PostId, PostTypeId, CreationDate, Title, Body, Score, Tags, AnswerCount, CommentCount, FavoriteCount
+FROM PostGenerator;

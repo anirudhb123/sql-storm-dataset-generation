@@ -1,0 +1,90 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+NameCount AS (
+    SELECT 
+        ak.person_id,
+        COUNT(DISTINCT ak.name) AS distinct_name_count
+    FROM 
+        aka_name ak
+    GROUP BY 
+        ak.person_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS distinct_company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS total_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TitleMetrics AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        COALESCE(nc.distinct_name_count, 0) AS name_count,
+        COALESCE(cc.distinct_company_count, 0) AS company_count,
+        COALESCE(cr.total_roles, 0) AS role_count,
+        CASE 
+            WHEN COALESCE(nc.distinct_name_count, 0) > 5 
+            THEN 'Popular Name'
+            ELSE 'Less Known'
+        END AS name_rarity,
+        CASE 
+            WHEN COALESCE(cc.distinct_company_count, 0) > 2 
+            THEN 'Major Studio'
+            ELSE 'Independent'
+        END AS production_type,
+        CASE 
+            WHEN COALESCE(cr.total_roles, 0) > 3 
+            THEN 'Rich Cast'
+            ELSE 'Sparse Cast'
+        END AS cast_density
+    FROM 
+        RankedMovies rm
+    LEFT JOIN NameCount nc ON nm.person_id IN (
+        SELECT person_id 
+        FROM aka_name 
+        WHERE imdb_index = COALESCE((SELECT imdb_index FROM aka_title WHERE id = rm.title_id), '')
+    )
+    LEFT JOIN CompanyCounts cc ON cc.movie_id = rm.title_id
+    LEFT JOIN CastRoles cr ON cr.movie_id = rm.title_id
+)
+SELECT 
+    tm.title_id,
+    tm.title,
+    tm.production_year,
+    tm.name_count,
+    tm.company_count,
+    tm.role_count,
+    tm.name_rarity,
+    tm.production_type,
+    tm.cast_density
+FROM 
+    TitleMetrics tm
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2023
+    AND (tm.name_rarity = 'Popular Name' OR tm.production_type = 'Independent')
+ORDER BY 
+    tm.production_year DESC,
+    tm.name_count DESC,
+    tm.role_count ASC
+LIMIT 50;

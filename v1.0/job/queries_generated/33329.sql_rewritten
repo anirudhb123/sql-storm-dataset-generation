@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS mc
+    JOIN 
+        movie_hierarchy AS mh ON mc.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS mt ON mt.id = mc.linked_movie_id
+)
+
+SELECT 
+    mh.title AS original_movie,
+    mh.production_year AS year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    MAX(mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS popular_keyword, 
+    CASE 
+        WHEN COUNT(DISTINCT c.person_id) > 10 THEN 'Large Cast'
+        WHEN COUNT(DISTINCT c.person_id) BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    COUNT(DISTINCT COALESCE(mc.company_id, -1)) AS company_count 
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    aka_name AS a ON c.person_id = a.person_id
+WHERE 
+    mh.level <= 3 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    year DESC
+LIMIT 50;

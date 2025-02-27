@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+), 
+TopSuppliers AS (
+    SELECT 
+        rnk,
+        s_suppkey,
+        s_name,
+        nation_name,
+        total_supply_cost
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rnk <= 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ts.nation_name,
+    ts.s_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.total_order_value) AS total_order_revenue
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrders co ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = ts.s_name))
+GROUP BY 
+    ts.nation_name, ts.s_name
+ORDER BY 
+    ts.nation_name, total_order_revenue DESC;

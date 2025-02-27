@@ -1,0 +1,59 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.kind_id IN (1, 2) 
+),
+movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(m.name, 'Unknown Company') AS production_company
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS unique_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rt.actor_name,
+    md.title,
+    md.production_year,
+    md.production_company,
+    kc.unique_keywords,
+    CASE 
+        WHEN kc.unique_keywords IS NULL THEN 'No Keywords'
+        WHEN kc.unique_keywords >= 5 THEN 'Rich in Keywords'
+        ELSE 'Moderate Keywords'
+    END AS keyword_richness
+FROM 
+    ranked_titles rt
+JOIN 
+    movie_details md ON rt.movie_title = md.title
+LEFT JOIN 
+    keyword_count kc ON md.title_id = kc.movie_id
+WHERE 
+    rt.movie_rank <= 3
+ORDER BY 
+    rt.actor_name, md.production_year DESC;

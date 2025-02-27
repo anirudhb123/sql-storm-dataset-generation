@@ -1,0 +1,80 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AverageUserReputation
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[]) 
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+
+ClosedPosts AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        PostHistory.UserDisplayName AS CloserUser,
+        PostHistory.CreationDate AS CloseDate,
+        CloseReasonTypes.Name AS CloseReason
+    FROM 
+        Posts 
+    JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId AND PostHistory.PostHistoryTypeId = 10
+    JOIN 
+        CloseReasonTypes ON PostHistory.Comment::text = CloseReasonTypes.Id::text
+),
+
+PopularQuestions AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.Score,
+        Users.DisplayName AS Owner,
+        Votes.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Posts
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Posts.Id, Users.DisplayName
+    HAVING 
+        COUNT(Votes.Id) > 10
+    ORDER BY 
+        Posts.Score DESC
+    LIMIT 5
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageUserReputation,
+    cp.PostId AS ClosedPostId,
+    cp.Title AS ClosedPostTitle,
+    cp.CloserUser,
+    cp.CloseDate,
+    cp.CloseReason,
+    pq.Title AS PopularQuestionTitle,
+    pq.Owner
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    ClosedPosts cp ON ts.PostCount > 0
+LEFT JOIN 
+    PopularQuestions pq ON ts.PostCount >= 3
+ORDER BY 
+    ts.TotalViews DESC, 
+    ts.AverageUserReputation DESC;

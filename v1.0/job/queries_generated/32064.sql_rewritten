@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(cast_info.nr_order, 0) AS cast_order,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC, cast_order) AS year_rank
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        cast_info ON m.movie_id = cast_info.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_order,
+        rm.year_rank
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 5
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(SUM(mk.id), 0) AS keyword_count,
+    string_agg(DISTINCT c.name, ', ') AS company_names
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_keyword mk ON f.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON f.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+GROUP BY 
+    f.title, f.production_year
+ORDER BY 
+    f.production_year DESC, keyword_count DESC;

@@ -1,0 +1,86 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' AND p.PostTypeId = 1 THEN 1 ELSE 0 END) AS RecentQuestions
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY UserId
+    ) v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), UserVoteSummary AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY ua.UserId ORDER BY COALESCE(ua.TotalVotes, 0) DESC) AS VoteRank,
+        DENSE_RANK() OVER (ORDER BY ua.Reputation DESC) AS ReputationRank
+    FROM UserActivity ua
+), RecentQuestionStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY u.Id
+), FinalSummary AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ua.TotalPosts, 0) AS TotalPosts,
+        COALESCE(rr.QuestionsAsked, 0) AS RecentQuestionsAsked,
+        COALESCE(rr.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(rr.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(b.TotalBadges, 0) AS TotalBadges,
+        u.EmailHash
+    FROM UserVoteSummary u
+    LEFT JOIN RecentQuestionStats rr ON u.UserId = rr.UserId
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS TotalBadges 
+        FROM Badges 
+        GROUP BY UserId
+    ) b ON u.UserId = b.UserId
+), SortedSummary AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC, TotalPosts DESC, TotalUpVotes DESC) AS GlobalRank
+    FROM FinalSummary
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation IS NULL THEN 'No Reputation Yet'
+        WHEN Reputation < 100 THEN 'Novice User'
+        WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate User'
+        ELSE 'Expert User'
+    END AS UserTier,
+    CASE
+        WHEN TotalPosts = 0 AND TotalBadges = 0 THEN 'Inactive'
+        WHEN TotalPosts > 0 AND TotalBadges = 0 THEN 'New Contributor'
+        WHEN TotalBadges > 0 THEN 'Engaged Contributor'
+        ELSE 'Unknown Status'
+    END AS EngagementCategory
+FROM SortedSummary
+WHERE (TotalPosts > 5 OR TotalUpVotes > 20) AND EmailHash IS NOT NULL
+ORDER BY GlobalRank, Reputation DESC
+LIMIT 10;

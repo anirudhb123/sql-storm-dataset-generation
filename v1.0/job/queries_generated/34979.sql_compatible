@@ -1,0 +1,55 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id,
+        1 AS level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ah.person_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT c.id) AS total_cast_members,
+    STRING_AGG(DISTINCT CONCAT(n.name, ' (', rt.role, ')'), ', ') AS full_cast,
+    AVG(CASE 
+            WHEN m.info IS NOT NULL THEN CAST(m.info AS numeric)
+            ELSE 0 
+        END) AS avg_rating
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON a.person_id = ah.person_id
+JOIN 
+    aka_title t ON t.id = ah.movie_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = ah.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = ah.movie_id 
+LEFT JOIN 
+    movie_info m ON m.movie_id = ah.movie_id AND m.info_type_id = 1 
+JOIN 
+    role_type rt ON rt.id = c.role_id
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.id) > 5
+ORDER BY 
+    avg_rating DESC NULLS LAST;

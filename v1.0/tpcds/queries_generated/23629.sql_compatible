@@ -1,0 +1,82 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk
+            FROM date_dim d
+            WHERE d.d_year = (SELECT MAX(d_year) FROM date_dim)
+        )
+),
+SalesSummary AS (
+    SELECT
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders
+    FROM
+        RankedSales rs
+    WHERE
+        rs.profit_rank = 1
+    GROUP BY
+        rs.ws_item_sk
+),
+WarehouseInfo AS (
+    SELECT
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        COUNT(s.s_store_sk) AS store_count
+    FROM
+        warehouse w
+    LEFT JOIN store s ON w.w_warehouse_sk = s.s_warehouse_sk
+    GROUP BY
+        w.w_warehouse_sk, w.w_warehouse_name
+),
+FinalSummary AS (
+    SELECT
+        sa.ws_item_sk,
+        si.i_item_desc,
+        si.i_current_price,
+        sa.total_quantity,
+        sa.total_net_profit,
+        wi.w_warehouse_name,
+        wi.store_count,
+        CASE 
+            WHEN sa.total_net_profit IS NULL THEN 'No Sales'
+            WHEN sa.total_quantity > 100 THEN 'High Volume'
+            ELSE 'Standard'
+        END AS sales_category
+    FROM
+        SalesSummary sa
+    JOIN item si ON sa.ws_item_sk = si.i_item_sk
+    LEFT JOIN WarehouseInfo wi ON si.i_manager_id = wi.w_warehouse_sk
+)
+SELECT
+    fs.ws_item_sk,
+    fs.i_item_desc,
+    fs.i_current_price,
+    COALESCE(fs.total_quantity, 0) AS total_quantity,
+    COALESCE(fs.total_net_profit, 0.00) AS total_net_profit,
+    fs.w_warehouse_name,
+    fs.store_count,
+    CASE 
+        WHEN fs.sales_category = 'High Volume' THEN 'Champions'
+        WHEN fs.total_net_profit < 50 THEN 'Underperformers'
+        ELSE 'Potential'
+    END AS performance_category
+FROM
+    FinalSummary fs
+WHERE
+    fs.total_quantity > 0
+ORDER BY
+    fs.total_net_profit DESC,
+    fs.total_quantity ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

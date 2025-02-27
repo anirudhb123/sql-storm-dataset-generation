@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+),
+actor_counts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+keyword_movies AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_type_id) AS distinct_company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(ac.actor_count, 0) AS actor_count,
+    COALESCE(km.keywords, 'No keywords') AS keywords,
+    COALESCE(cmi.company_names, 'No companies') AS company_names,
+    cmi.distinct_company_types
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    actor_counts ac ON rm.movie_id = ac.movie_id
+LEFT JOIN 
+    keyword_movies km ON rm.movie_id = km.movie_id
+LEFT JOIN 
+    company_movie_info cmi ON rm.movie_id = cmi.movie_id
+WHERE 
+    rm.rn <= 10 AND 
+    (CROSS JOIN (SELECT 1) AS dummy WHERE rm.production_year IS NOT NULL) 
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

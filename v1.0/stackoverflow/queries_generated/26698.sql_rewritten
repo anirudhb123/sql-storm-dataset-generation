@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(NULLIF(p.Body, ''), 'No Content') AS Body,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+),
+FilteredUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Location,
+        u.AboutMe,
+        B.Name AS BadgeName,
+        COUNT(B.Id) AS BadgeCount
+    FROM
+        Users u
+        LEFT JOIN Badges B ON u.Id = B.UserId
+    GROUP BY
+        u.Id, B.Name
+),
+PostWithTags AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM
+        Posts p
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY
+        p.Id
+),
+UserPostSummary AS (
+    SELECT
+        fu.UserId,
+        fu.DisplayName,
+        fu.Reputation,
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Score,
+        rp.ViewCount,
+        rw.TagList,
+        rp.CreationDate,
+        rp.PostRank
+    FROM
+        FilteredUsers fu
+        JOIN RankedPosts rp ON fu.UserId = rp.OwnerUserId
+        JOIN PostWithTags rw ON rp.PostId = rw.PostId
+)
+SELECT
+    ups.UserId,
+    ups.DisplayName,
+    ups.Reputation,
+    ups.PostId,
+    ups.Title,
+    ups.Body,
+    ups.Score,
+    ups.ViewCount,
+    ups.TagList,
+    ups.CreationDate
+FROM
+    UserPostSummary ups
+WHERE
+    ups.PostRank = 1 
+ORDER BY
+    ups.Reputation DESC, ups.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(COALESCE(od.total_price, 0)) AS total_revenue,
+    COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+    SUM(ps.total_avail_qty) AS total_avail_qty,
+    AVG(ps.avg_supply_cost) AS avg_supply_cost
+FROM CustomerOrders c
+LEFT JOIN OrderDetails od ON c.order_count = od.supplier_count
+LEFT JOIN PartStats ps ON ps.total_avail_qty > (SELECT AVG(total_avail_qty) FROM PartStats)
+LEFT JOIN SupplierHierarchy s ON s.level = 0
+WHERE c.total_spent > 1000
+GROUP BY c.c_name
+HAVING AVG(NULLIF(c.order_count, 0)) > 2
+ORDER BY total_revenue DESC NULLS LAST;

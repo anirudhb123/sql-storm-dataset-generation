@@ -1,0 +1,45 @@
+WITH RECURSIVE complex_calculation AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rn,
+        SUM(ps.ps_supplycost) OVER (PARTITION BY p.p_partkey) AS total_supply_cost
+    FROM part p 
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 100 
+      AND ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+), relevant_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) as total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' 
+      AND l.l_shipdate < CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY o.o_orderkey, o.o_orderdate
+), dense_ranked_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_price,
+        DENSE_RANK() OVER (ORDER BY ro.total_price DESC) AS price_rank
+    FROM relevant_orders ro
+)
+SELECT
+    nc.n_name,
+    COALESCE(cc.p_name, 'Unknown Part') as part_name,
+    COALESCE(ROUND(SUM(oco.total_price) - SUM(cc.total_supply_cost), 2), 0.00) AS profit_margin,
+    RANK() OVER (PARTITION BY nc.n_nationkey ORDER BY COALESCE(SUM(oco.total_price) - SUM(cc.total_supply_cost), 0.00) DESC) as nation_rank
+FROM nation nc
+LEFT JOIN complex_calculation cc ON nc.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = cc.p_partkey))
+LEFT JOIN dense_ranked_orders oco ON cc.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = oco.o_orderkey)
+GROUP BY nc.n_name, cc.p_name
+HAVING profit_margin > (SELECT AVG(profit_margin) FROM (SELECT 
+                                                                COALESCE(SUM(oco.total_price) - SUM(cc.total_supply_cost), 0.00) AS profit_margin 
+                                                            FROM nation nc
+                                                            LEFT JOIN complex_calculation cc ON nc.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = cc.p_partkey))
+                                                            LEFT JOIN dense_ranked_orders oco ON cc.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = oco.o_orderkey)
+                                                            GROUP BY nc.n_name, cc.p_name) AS sub_avg)
+ORDER BY nation_rank, profit_margin DESC;

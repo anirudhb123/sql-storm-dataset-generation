@@ -1,0 +1,92 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTagStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.Id) AS TagCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL string_to_array(P.Tags, ',') AS tag ON TRUE
+    JOIN 
+        Tags T ON T.TagName = tag
+    WHERE 
+        P.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+PostHistoryAggregation AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        MIN(PH.CreationDate) AS FirstSeen,
+        COUNT(PH.Id) AS EditCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenCount,
+        MAX(PH.CreationDate) AS LastAction
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+FinalPostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        PS.TagCount,
+        PS.Tags,
+        PH.EditCount,
+        PH.CloseOpenCount,
+        P.AuthorizedUserId AS OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.FirstSeen, DATE '1900-01-01') AS FirstEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostTagStats PS ON P.Id = PS.PostId
+    LEFT JOIN 
+        PostHistoryAggregation PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    FPS.PostId,
+    FPS.Title,
+    FPS.ViewCount,
+    FPS.TagCount,
+    FPS.Tags,
+    COALESCE(US.UpVotes, 0) AS UserUpVotes,
+    FPS.EditCount,
+    FPS.CloseOpenCount,
+    FPS.OwnerUserId,
+    FPS.OwnerDisplayName,
+    CASE 
+        WHEN FPS.CloseOpenCount > 0 THEN 'Closed/Reopened'
+        ELSE 'Active'
+    END AS PostState,
+    COALESCE(US.TotalVotes, 0) AS TotalVotesByOwner
+FROM 
+    FinalPostStats FPS
+LEFT JOIN 
+    UserVoteStats US ON FPS.OwnerUserId = US.UserId
+WHERE 
+    FPS.ViewCount >= (SELECT AVG(ViewCount) FROM Posts WHERE CreationDate >= DATE '2024-10-01' - INTERVAL '5 years') 
+    AND FPS.FirstEditDate IS NOT NULL
+ORDER BY 
+    FPS.ViewCount DESC, FPS.EditCount ASC, UserUpVotes DESC
+LIMIT 100 OFFSET 0;

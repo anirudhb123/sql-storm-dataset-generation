@@ -1,0 +1,70 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    s.s_name AS supplier_name,
+    ss.total_supply_cost,
+    co.total_order_value,
+    lis.net_revenue,
+    lis.revenue_rank
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    CustomerOrders co ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey
+            FROM part p
+            WHERE p.p_size >= 10
+        )
+    )
+LEFT JOIN 
+    LineItemSummary lis ON co.c_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_acctbal > 
+            (SELECT AVG(c2.c_acctbal)
+             FROM customer c2
+             WHERE c2.c_nationkey IS NOT NULL)
+    )
+WHERE 
+    ss.total_parts > 10
+ORDER BY 
+    ss.total_supply_cost DESC, 
+    co.total_order_value ASC;

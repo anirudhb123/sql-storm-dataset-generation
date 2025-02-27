@@ -1,0 +1,78 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_in_segment
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_mktsegment
+),
+Top_Sales AS (
+    SELECT 
+        segment,
+        total_sales
+    FROM 
+        (SELECT 
+            c.c_mktsegment AS segment,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+            ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS segment_rank
+        FROM 
+            lineitem l
+        JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        JOIN 
+            customer c ON o.o_custkey = c.c_custkey
+        GROUP BY 
+            c.c_mktsegment) AS ranked_sales
+    WHERE 
+        segment_rank <= 10
+),
+Supplier_Info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    r.r_name AS region,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_discount) AS average_discount,
+    COALESCE(SUM(si.total_available), 0) AS total_availabilities,
+    COALESCE(ss.total_sales, 0) AS total_sales_for_segment 
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    Supplier_Info si ON s.s_suppkey = si.s_suppkey
+LEFT JOIN 
+    Top_Sales ss ON ss.segment = c.c_mktsegment
+GROUP BY 
+    p.p_name, p.p_brand, r.r_name, ss.segment
+HAVING 
+    SUM(l.l_quantity) > 1000 AND 
+    AVG(l.l_discount) < 0.05
+ORDER BY 
+    total_quantity DESC, average_discount ASC;

@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        mk.movie_id, 
+        mt.title, 
+        mt.production_year, 
+        COUNT(ki.id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, mt.title, mt.production_year
+), 
+MovieCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        R.movie_id,
+        R.title,
+        R.production_year,
+        R.keyword_count,
+        MC.cast_count,
+        MC.cast_names,
+        R.keywords
+    FROM 
+        RankedMovies R
+    LEFT JOIN 
+        MovieCast MC ON R.movie_id = MC.movie_id
+)
+
+SELECT 
+    MD.title,
+    MD.production_year,
+    MD.keyword_count,
+    MD.cast_count,
+    MD.keywords,
+    CASE 
+        WHEN MD.cast_count IS NULL THEN 'No Cast' 
+        ELSE MD.cast_names 
+    END AS cast_details
+FROM 
+    MovieDetails MD
+ORDER BY 
+    MD.production_year DESC, 
+    MD.keyword_count DESC;

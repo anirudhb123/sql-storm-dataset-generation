@@ -1,0 +1,95 @@
+
+WITH income_distribution AS (
+    SELECT 
+        ib_income_band_sk,
+        COUNT(DISTINCT cd_demo_sk) AS demographic_count,
+        SUM(cd_purchase_estimate) AS total_estimated_purchases
+    FROM 
+        customer_demographics
+    JOIN 
+        household_demographics ON cd_demo_sk = hd_demo_sk
+    LEFT JOIN 
+        income_band ON hd_income_band_sk = ib_income_band_sk
+    GROUP BY 
+        ib_income_band_sk
+),
+product_stats AS (
+    SELECT 
+        i.item_id,
+        AVG(i.i_current_price) AS avg_price,
+        COUNT(ws_order_number) AS sales_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        item AS i
+    LEFT JOIN 
+        web_sales AS ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        i.item_id
+),
+return_issues AS (
+    SELECT 
+        cr_item_sk,
+        COUNT(DISTINCT cr_returning_customer_sk) AS return_customers,
+        SUM(cr_return_amount) AS total_returned
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+ranked_items AS (
+    SELECT 
+        ps.item_id,
+        ps.avg_price,
+        ps.sales_count,
+        ps.total_profit,
+        ROW_NUMBER() OVER (ORDER BY ps.total_profit DESC) AS rank
+    FROM 
+        product_stats AS ps
+    INNER JOIN 
+        return_issues AS ri ON ps.item_id = ri.cr_item_sk
+    WHERE 
+        ri.return_customers > 5
+),
+final_result AS (
+    SELECT 
+        id.ib_income_band_sk,
+        r.item_id,
+        r.avg_price,
+        r.sales_count,
+        r.total_profit,
+        id.demographic_count,
+        CASE 
+            WHEN id.total_estimated_purchases > 10000 THEN 'High'
+            WHEN id.total_estimated_purchases BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS purchase_category
+    FROM 
+        income_distribution AS id
+    JOIN 
+        ranked_items AS r ON (r.sales_count IS NOT NULL AND id.demographic_count IS NOT NULL)
+)
+SELECT 
+    f.ib_income_band_sk,
+    f.item_id,
+    f.avg_price,
+    f.sales_count,
+    f.total_profit,
+    f.demographic_count,
+    f.purchase_category
+FROM 
+    final_result AS f
+WHERE 
+    f.purchase_category = 'High' 
+    OR EXISTS (
+        SELECT 1 
+        FROM customer AS c 
+        WHERE c.c_birth_year IS NOT NULL 
+          AND (c.c_birth_year % 2) = 0 
+          AND LENGTH(c.c_email_address) > 20
+    )
+ORDER BY 
+    f.total_profit DESC, 
+    f.demographic_count ASC
+OFFSET 50 ROWS FETCH NEXT 100 ROWS ONLY;

@@ -1,0 +1,72 @@
+WITH SupplierPartCounts AS (
+    SELECT 
+        ps.s_suppkey,
+        COUNT(*) AS part_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.order_total) AS avg_order_value
+    FROM 
+        CustomerOrders o
+    INNER JOIN 
+        customer c ON o.c_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    r.r_name AS region, 
+    n.n_name AS nation,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    sp.part_count,
+    tc.total_orders,
+    tc.avg_order_value,
+    CASE 
+        WHEN sp.total_supply_cost IS NULL THEN 'No Supply Cost'
+        ELSE CAST(sp.total_supply_cost AS VARCHAR)
+    END AS supply_cost,
+    CONCAT(n.n_name, ' - ', r.r_name) AS location
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierPartCounts sp ON s.s_suppkey = sp.s_suppkey
+LEFT JOIN 
+    TopCustomers tc ON s.s_suppkey = tc.c_custkey
+WHERE 
+    (sp.total_available_quantity IS NOT NULL AND sp.total_available_quantity > 100)
+    OR (tc.avg_order_value IS NOT NULL AND tc.avg_order_value > 50.00)
+ORDER BY 
+    r.r_name, n.n_name, s.s_name;

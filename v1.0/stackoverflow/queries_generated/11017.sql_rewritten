@@ -1,0 +1,2 @@
+SELECT 'Total Posts', pg_sleep(0), COUNT(*)
+FROM Posts;

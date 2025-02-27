@@ -1,0 +1,73 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk 
+                                  FROM date_dim 
+                                  WHERE d_year = 2022 AND d_moy IN (6, 7))
+),
+summary AS (
+    SELECT
+        r.web_site_id,
+        SUM(r.ws_quantity) AS total_quantity,
+        AVG(r.ws_sales_price) AS average_price,
+        COUNT(DISTINCT r.ws_order_number) AS order_count,
+        r.ws_item_sk
+    FROM ranked_sales r
+    WHERE r.price_rank <= 10
+    GROUP BY r.web_site_id, r.ws_item_sk
+),
+inventory_data AS (
+    SELECT 
+        i.inv_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_inventory
+    FROM inventory i
+    JOIN date_dim d ON i.inv_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    GROUP BY i.inv_item_sk
+),
+sales_inventory AS (
+    SELECT 
+        s.web_site_id,
+        s.total_quantity,
+        s.average_price,
+        COALESCE(i.total_inventory, 0) AS total_inventory,
+        CASE 
+            WHEN i.total_inventory IS NULL THEN 'No Inventory' 
+            ELSE 'Has Inventory' 
+        END AS inventory_status
+    FROM summary s
+    LEFT JOIN inventory_data i ON s.ws_item_sk = i.inv_item_sk
+)
+SELECT 
+    si.web_site_id,
+    si.total_quantity,
+    si.average_price,
+    si.total_inventory,
+    si.inventory_status,
+    CASE 
+        WHEN si.total_quantity > si.total_inventory THEN 'Stock Running Low'
+        ELSE 'Sufficient Stock'
+    END AS stock_status,
+    CASE 
+        WHEN si.inventory_status = 'Has Inventory' AND si.average_price < 50 THEN 
+            (SELECT COUNT(DISTINCT c.c_customer_id) 
+             FROM customer c 
+             WHERE c.c_current_cdemo_sk IN 
+                 (SELECT cd.cd_demo_sk 
+                  FROM customer_demographics cd 
+                  WHERE cd.cd_income_band_sk IN 
+                      (SELECT ib.ib_income_band_sk 
+                       FROM income_band ib 
+                       WHERE ib.ib_lower_bound < 50000)))
+        ELSE NULL
+    END AS potential_customers
+FROM sales_inventory si
+ORDER BY si.web_site_id;

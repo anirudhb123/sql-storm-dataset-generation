@@ -1,0 +1,98 @@
+WITH RECURSIVE RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' AND p.PostTypeId = 1  -- Only questions created in the last 30 days
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        RecentPosts rp ON p.ParentId = rp.Id
+    WHERE 
+        Level < 3  -- Depth limit for answers
+    
+),
+RankedPosts AS (
+    SELECT 
+        rp.*,
+        DENSE_RANK() OVER (PARTITION BY rp.OwnerDisplayName ORDER BY rp.CreationDate DESC) AS Rank
+    FROM 
+        RecentPosts rp
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostSummary AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.OwnerDisplayName,
+        ub.BadgeCount,
+        ub.HighestBadgeClass,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerDisplayName = ub.UserId
+)
+
+SELECT 
+    ps.Id,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.OwnerDisplayName,
+    COALESCE(ps.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN ps.HighestBadgeClass = 1 THEN 'Gold' 
+        WHEN ps.HighestBadgeClass = 2 THEN 'Silver' 
+        WHEN ps.HighestBadgeClass = 3 THEN 'Bronze' 
+        ELSE 'None' 
+    END AS HighestBadge,
+    ps.Rank
+FROM 
+    PostSummary ps
+WHERE 
+    ps.Rank = 1 -- Select the latest post by each user
+ORDER BY 
+    ps.CreationDate DESC;
+

@@ -1,0 +1,46 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        s_store_sk, 
+        SUM(ss_quantity) AS total_quantity, 
+        SUM(ss_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM store_sales
+    GROUP BY s_store_sk
+),
+top_stores AS (
+    SELECT 
+        r.s_store_sk, 
+        r.total_quantity, 
+        r.total_sales, 
+        c.c_first_name, 
+        c.c_last_name,
+        c.c_birth_year,
+        ca.ca_city,
+        ca.ca_state
+    FROM ranked_sales r
+    JOIN store s ON r.s_store_sk = s.s_store_sk
+    JOIN customer c ON s.s_store_sk = c.c_current_addr_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE r.sales_rank <= 10
+),
+sales_by_month AS (
+    SELECT 
+        d.d_year, 
+        d.d_month_seq, 
+        SUM(ws_ext_sales_price) AS monthly_sales
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+)
+SELECT 
+    coalesce(ts.s_sales_rank, 0) AS store_rank,
+    ts.total_sales AS store_sales,
+    ts.total_quantity AS store_quantity,
+    sbm.monthly_sales AS web_sales_monthly,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count
+FROM top_stores ts
+LEFT JOIN sales_by_month sbm ON ts.s_store_sk = sbm.d_month_seq
+LEFT JOIN customer c ON ts.s_store_sk = c.c_current_addr_sk
+GROUP BY store_rank, ts.total_sales, ts.total_quantity, sbm.monthly_sales
+ORDER BY store_rank ASC;

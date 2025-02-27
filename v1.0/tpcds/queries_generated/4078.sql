@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rnk
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+),
+AggregateSales AS (
+    SELECT 
+        item.i_item_id,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_revenue
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    WHERE 
+        rs.rnk = 1
+    GROUP BY 
+        item.i_item_id
+),
+TopItems AS (
+    SELECT 
+        AS.item_id, 
+        AS.total_orders, 
+        AS.total_revenue,
+        RANK() OVER (ORDER BY AS.total_revenue DESC) AS revenue_rank
+    FROM 
+        AggregateSales AS
+)
+SELECT 
+    ti.item_id,
+    ti.total_orders,
+    ti.total_revenue,
+    (SELECT COUNT(*) FROM customer c WHERE c.c_birth_year = EXTRACT(YEAR FROM CURRENT_DATE) - 30) AS potential_customers,
+    (CASE 
+        WHEN ti.total_revenue IS NULL THEN 0 
+        ELSE ti.total_revenue * 0.1 
+     END) AS estimated_income 
+FROM 
+    TopItems ti 
+LEFT JOIN 
+    customer_demographics cd ON ti.item_id = CAST(cd.cd_demo_sk AS CHAR)
+WHERE 
+    ti.revenue_rank <= 10 
+OR 
+    (ti.total_orders > 100 AND ti.total_revenue IS NOT NULL)
+ORDER BY 
+    ti.total_revenue DESC;

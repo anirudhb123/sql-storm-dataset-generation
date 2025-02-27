@@ -1,0 +1,52 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+
+top_titles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.kind_id,
+        rt.cast_count
+    FROM 
+        ranked_titles rt
+    WHERE 
+        rt.rank <= 5
+)
+
+SELECT 
+    tt.title,
+    tt.production_year,
+    kt.kind AS title_kind,
+    ak.name AS actor_name,
+    ci.note AS actor_note,
+    ct.kind AS role_kind
+FROM 
+    top_titles tt
+JOIN 
+    aka_title at ON at.title = tt.title
+LEFT JOIN 
+    cast_info ci ON tt.title_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    role_type ct ON ci.role_id = ct.id
+JOIN 
+    kind_type kt ON tt.kind_id = kt.id
+WHERE 
+    tt.production_year > 2000
+ORDER BY 
+    tt.production_year DESC, tt.cast_count DESC;

@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_paid DESC) AS rank,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), TotalSales AS (
+    SELECT 
+        web_site_id,
+        SUM(ws_net_paid) AS total_net_sales
+    FROM 
+        RankedSales
+    GROUP BY 
+        web_site_id
+), TopWebsites AS (
+    SELECT 
+        web_site_id,
+        total_net_sales,
+        DENSE_RANK() OVER (ORDER BY total_net_sales DESC) AS sales_rank
+    FROM 
+        TotalSales
+    WHERE 
+        total_net_sales > (SELECT AVG(total_net_sales) FROM TotalSales)
+)
+SELECT 
+    t.web_site_id,
+    t.total_net_sales,
+    r.c_first_name,
+    r.c_last_name,
+    r.cd_gender
+FROM 
+    TopWebsites t
+LEFT JOIN 
+    RankedSales r ON t.web_site_id = r.web_site_id AND r.rank <= 5
+ORDER BY 
+    t.total_net_sales DESC, 
+    r.c_last_name ASC 
+LIMIT 10;

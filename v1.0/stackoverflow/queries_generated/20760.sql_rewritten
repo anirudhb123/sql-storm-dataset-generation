@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '><')) AS TagName) t ON true
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        TotalBounty,
+        UpVotes,
+        DownVotes,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 10
+),
+UserAggregates AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsWithBadges AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalViews,
+        ua.AverageScore,
+        tp.TotalBounty,
+        tp.UpVotes,
+        tp.DownVotes,
+        COALESCE(STRING_AGG(DISTINCT b.Name, ', '), 'No Badges') AS Badges
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        UserAggregates ua ON tp.PostId = ua.UserId  
+    LEFT JOIN 
+        Badges b ON ua.UserId = b.UserId
+    GROUP BY 
+        tp.PostId, tp.Title, ua.DisplayName, ua.PostCount, ua.TotalViews, ua.AverageScore, tp.TotalBounty, tp.UpVotes, tp.DownVotes
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes = 0 AND DownVotes = 0 THEN 'No Votes'
+        WHEN UpVotes > DownVotes THEN 'Favorited'
+        ELSE 'Disputed'
+    END AS VoteStatus,
+    CASE 
+        WHEN TotalBounty IS NULL THEN 'Bounty Not Available'
+        ELSE TotalBounty::TEXT || ' Points'
+    END AS BountyStatus
+FROM 
+    PostsWithBadges
+ORDER BY 
+    Score DESC, TotalViews DESC
+LIMIT 50;

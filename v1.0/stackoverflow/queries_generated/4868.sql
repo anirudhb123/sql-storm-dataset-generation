@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Rank DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.Score,
+        CASE 
+            WHEN rp.rn = 1 THEN 'Owner's Best Post'
+            ELSE 'Others'
+        END AS PostRankType
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 0
+),
+UserSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        CASE 
+            WHEN COUNT(b.Id) > 0 THEN 'Badged User'
+            ELSE 'Regular User'
+        END AS UserType
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    tp.Title,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.Score,
+    us.UserType
+FROM 
+    UserSummary us
+JOIN 
+    TopPosts tp ON us.UserId = tp.PostId
+ORDER BY 
+    us.Reputation DESC, tp.Score DESC
+OFFSET 10 LIMIT 10;

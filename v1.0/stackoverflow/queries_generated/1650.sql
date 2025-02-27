@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+RecentVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS UpvoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.VoteTypeId = 2 AND 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(rv.UpvoteCount, 0) AS RecentUpvotes,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.UserPostRank = 1 THEN 'Latest Post by User'
+        ELSE 'Older Post by User'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+WHERE 
+    rp.CommentCount > 5 
+    AND (rp.Score + COALESCE(rv.UpvoteCount, 0)) > 20
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50
+UNION
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    SUM(v.BountyAmount) AS BountyThisPost,
+    COUNT(DISTINCT c.Id) AS TotalComments
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.PostTypeId = 2 
+GROUP BY 
+    p.Id
+HAVING 
+    BountyThisPost > 0
+ORDER BY 
+    BountyThisPost DESC
+LIMIT 50;

@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        d.name AS director_name,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies b ON a.id = b.movie_id
+    LEFT JOIN 
+        company_name c ON b.company_id = c.id
+    LEFT JOIN 
+        cast_info d ON a.id = d.movie_id AND d.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    WHERE 
+        b.company_type_id IN (SELECT id FROM company_type WHERE kind LIKE '%Production%')
+),
+GenreCount AS (
+    SELECT 
+        a.movie_id,
+        COUNT(DISTINCT b.keyword) AS genre_count
+    FROM 
+        movie_keyword a
+    JOIN 
+        keyword b ON a.keyword_id = b.id
+    GROUP BY 
+        a.movie_id
+),
+MoviesWithGenre AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        g.genre_count,
+        COALESCE(d.name, 'Unknown') AS director_name
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        GenreCount g ON rm.id = g.movie_id
+    LEFT JOIN 
+        aka_name d ON d.person_id = (SELECT person_id FROM cast_info WHERE movie_id = rm.id AND nr_order = 1)
+)
+SELECT 
+    title,
+    production_year,
+    genre_count,
+    director_name,
+    CASE 
+        WHEN genre_count IS NULL THEN 'No Genres Listed'
+        WHEN genre_count >= 3 THEN 'Diverse Genres'
+        ELSE 'Limited Genres'
+    END AS genre_description
+FROM 
+    MoviesWithGenre
+WHERE 
+    director_name NOT LIKE 'Unknown'
+ORDER BY 
+    production_year DESC,
+    genre_count DESC
+LIMIT 50;

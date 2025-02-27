@@ -1,0 +1,62 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+    ORDER BY 
+        p.Score DESC, p.ViewCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    tp.PostId,
+    tp.Title AS TopPostTitle,
+    tp.CreationDate AS TopPostDate,
+    tp.Score AS TopPostScore,
+    tp.ViewCount AS TopPostViews,
+    tp.CommentCount AS TopPostComments
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    TopPosts tp ON ua.UserId = tp.OwnerDisplayName
+ORDER BY 
+    ua.Reputation DESC, ua.UpVotes DESC;

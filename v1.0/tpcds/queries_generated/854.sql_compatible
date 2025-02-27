@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sold_date_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+),
+LatestSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_sales_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1
+),
+CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        SUM(wr.return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr.returning_customer_sk) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.refunded_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    COALESCE(SUM(ls.ws_sales_price), 0) AS total_sales,
+    COALESCE(cr.total_return_amt, 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(SUM(ls.ws_sales_price), 0) > COALESCE(cr.total_return_amt, 0) THEN 'Profitable'
+        ELSE 'Unprofitable'
+    END AS financial_status
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    LatestSales ls ON c.c_customer_sk = ls.ws_item_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.refunded_customer_sk
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (c.c_birth_year BETWEEN 1980 AND 2000) 
+    AND (c.c_email_address LIKE '%@example.com' OR c.c_current_cdemo_sk IS NULL)
+GROUP BY 
+    c.c_customer_id, ca.ca_city, cr.total_return_amt
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,71 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        PostTypeId,
+        AcceptedAnswerId,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+
+SELECT
+    u.DisplayName as User,
+    p.Title as QuestionTitle,
+    p.Score as QuestionScore,
+    COUNT(a.Id) as AnswerCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) as TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) as TotalDownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') as Tags,
+    MAX(b.Date) as LastBadgeDate,
+    MAX(CASE WHEN b.Class = 1 THEN b.Name END) as GoldBadge,
+    MAX(CASE WHEN b.Class = 2 THEN b.Name END) as SilverBadge,
+    MAX(CASE WHEN b.Class = 3 THEN b.Name END) as BronzeBadge
+FROM
+    Users u
+JOIN
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN
+    Posts a ON p.Id = a.ParentId
+LEFT JOIN
+    Votes v ON v.PostId = p.Id
+LEFT JOIN
+    PostLinks pl ON pl.PostId = p.Id
+LEFT JOIN
+    Tags t ON t.Id = pl.RelatedPostId
+LEFT JOIN
+    Badges b ON b.UserId = u.Id
+WHERE
+    p.LastActivityDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+GROUP BY
+    u.DisplayName, p.Title, p.Score, p.Id, p.AcceptedAnswerId, p.ParentId, 
+    p.CreationDate, p.OwnerUserId, p.PostTypeId
+HAVING
+    COUNT(a.Id) > 1 AND 
+    SUM(v.BountyAmount) > 0 AND 
+    MAX(b.Date) IS NOT NULL
+ORDER BY
+    QuestionScore DESC, AnswerCount DESC;

@@ -1,0 +1,51 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(b.Class) AS TotalBadges,
+        AVG(EXTRACT(EPOCH FROM (now() - u.CreationDate))) AS AvgAccountAgeInSeconds
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Comments c ON u.Id = c.UserId
+        LEFT JOIN Votes v ON u.Id = v.UserId
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUserActivity AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        ua.TotalBadges,
+        ua.AvgAccountAgeInSeconds,
+        RANK() OVER (ORDER BY ua.TotalUpVotes DESC) AS UpVoteRank,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS PostRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalComments,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.TotalBadges,
+    tu.AvgAccountAgeInSeconds,
+    tu.UpVoteRank,
+    tu.PostRank
+FROM 
+    TopUserActivity tu
+WHERE 
+    tu.UpVoteRank <= 10 AND tu.PostRank <= 10
+ORDER BY 
+    tu.TotalUpVotes DESC, tu.TotalPosts DESC;

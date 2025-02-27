@@ -1,0 +1,56 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_container,
+        CONCAT(p.p_brand, ' - ', p.p_type, ' - ', p.p_name) AS full_description,
+        LENGTH(p.p_comment) AS comment_length,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_type, p.p_container, p.p_comment
+),
+RegionNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    pd.full_description,
+    pd.comment_length,
+    rn.region_name,
+    co.c_name,
+    SUM(co.o_totalprice) AS total_spent,
+    AVG(pd.supplier_count) OVER () AS avg_suppliers_per_part
+FROM 
+    PartDetails pd
+JOIN 
+    RegionNations rn ON rn.n_nationkey = CAST(SUBSTRING(pd.full_description FROM '\s(\d+)$') AS INTEGER)
+JOIN 
+    CustomerOrders co ON pd.p_partkey = CAST(SUBSTRING(co.c_name FROM '\s(\d+)$') AS INTEGER)
+GROUP BY 
+    pd.full_description, pd.comment_length, rn.region_name, co.c_name
+ORDER BY 
+    total_spent DESC, pd.comment_length DESC;

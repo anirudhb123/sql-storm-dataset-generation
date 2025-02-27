@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(
+            (
+                SELECT MAX(ph.CreationDate) 
+                FROM PostHistory ph 
+                WHERE ph.PostId = p.Id 
+                AND ph.PostHistoryTypeId = 10
+            ), 
+            NULL
+        ) AS LastClosedDate,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01'
+),
+PostWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        bp.PostId AS BadgePostId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts bp ON u.Id = bp.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS AllComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        pc.AllComments,
+        rp.LastClosedDate,
+        CASE 
+            WHEN rp.LastClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        CASE 
+            WHEN rp.UpVotes > 10 THEN 'Highly Rated'
+            ELSE 'Moderately Rated'
+        END AS RatingCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostWithBadges b ON rp.PostId = b.BadgePostId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    WHERE 
+        rp.rn = 1
+        AND (rp.Score IS NOT NULL OR rp.ViewCount IS NOT NULL)
+)
+SELECT 
+    *,
+    COUNT(*) OVER () AS TotalRows
+FROM 
+    FinalResults
+WHERE
+    (UserBadgeCount IS NULL OR UserBadgeCount > 0)
+ORDER BY 
+    CreationDate DESC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

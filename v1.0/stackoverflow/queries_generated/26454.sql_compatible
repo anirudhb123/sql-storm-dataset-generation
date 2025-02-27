@@ -1,0 +1,68 @@
+
+WITH TagCounts AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '>'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1 
+    GROUP BY
+        TagName
+),
+UserEngagement AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM
+        TagCounts
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        CommentsMade,
+        TotalUpvotes,
+        TotalDownvotes,
+        RANK() OVER (ORDER BY QuestionsAsked DESC) AS UserRank
+    FROM
+        UserEngagement
+)
+SELECT
+    TU.DisplayName AS TopUser,
+    TU.QuestionsAsked,
+    TU.CommentsMade,
+    TU.TotalUpvotes,
+    TU.TotalDownvotes,
+    TT.TagName AS PopularTag,
+    TT.PostCount AS TagPostCount
+FROM
+    TopUsers TU
+JOIN
+    TopTags TT ON TU.QuestionsAsked > 5 
+WHERE
+    TU.UserRank <= 10 
+    AND TT.TagRank <= 10 
+ORDER BY
+    TU.UserRank, TT.TagPostCount DESC;

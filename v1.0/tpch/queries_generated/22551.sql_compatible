@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3 
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COALESCE(ts.total_revenue, 0) AS total_revenue
+    FROM part p
+    LEFT JOIN TotalSales ts ON p.p_partkey = ts.l_partkey
+    WHERE COALESCE(ts.total_revenue, 0) > p.p_retailprice * 0.5
+),
+RankedSuppliers AS (
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal,
+           RANK() OVER (PARTITION BY sh.s_nationkey ORDER BY sh.s_acctbal DESC) AS rank
+    FROM SupplierHierarchy sh
+)
+SELECT n.n_name, p.p_name, s.s_name, s.s_acctbal, ph.total_revenue
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey
+JOIN HighValueParts p ON s.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+    ORDER BY ps.ps_supplycost ASC
+    FETCH FIRST 1 ROW ONLY
+)
+FULL OUTER JOIN (
+    SELECT COUNT(*) AS part_count, SUM(p.p_retailprice) AS total_value, p.p_size
+    FROM part p
+    WHERE p.p_size IS NOT NULL AND p.p_comment IS NOT NULL
+    GROUP BY p.p_size
+) AS ph ON ph.part_count > 10
+WHERE (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+  AND (p.p_name LIKE 'A%' OR p.p_name LIKE 'Z%')
+ORDER BY n.n_name, p.p_name;

@@ -1,0 +1,51 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositiveScore,
+        SUM(CASE WHEN p.Score < 0 THEN p.Score ELSE 0 END) AS NegativeScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostScoreRanked AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        CASE 
+            WHEN p.Score >= 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreCategory
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+FrequentTags AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+    GROUP BY TagName
+    HAVING COUNT(*) >= 5
+)
+SELECT 
+    uvs.DisplayName,
+    uvs.Upvotes,
+    uvs.Downvotes,
+    p.Title,
+    p.Score,
+    psg.Rank,
+    psg.ScoreCategory,
+    ft.TagName,
+    ft.TagCount
+FROM UserVoteStats uvs
+JOIN PostScoreRanked psg ON uvs.UserId = psg.PostId
+LEFT JOIN FrequentTags ft ON psg.PostId = ft.TagName
+WHERE (uvs.Upvotes - uvs.Downvotes) > 0
+ORDER BY uvs.Upvotes DESC, psg.Score DESC;

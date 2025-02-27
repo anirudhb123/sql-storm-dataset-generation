@@ -1,0 +1,69 @@
+
+WITH UserVotings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        COALESCE(A.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        (SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT ParentId AS AcceptedAnswerId FROM Posts WHERE PostTypeId = 1) A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) C ON P.Id = C.PostId
+)
+SELECT 
+    U.DisplayName AS User,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViews,
+    PD.CommentCount,
+    UV.TotalVotes,
+    UV.Upvotes,
+    UV.Downvotes,
+    CASE 
+        WHEN UV.TotalVotes IS NULL THEN 'No Votes Yet'
+        WHEN UV.TotalVotes > 100 THEN 'Voting Champion'
+        ELSE 'Average Voter'
+    END AS VotingStatus,
+    (SELECT 
+        STRING_AGG(CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN PH.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Other History' 
+        END, ', ') 
+     FROM 
+        PostHistory PH 
+     WHERE 
+        PH.PostId = P.Id) AS PostHistoryStatus
+FROM 
+    PostDetails P
+JOIN 
+    UserVotings UV ON P.AcceptedAnswerId = UV.UserId
+LEFT JOIN 
+    Users U ON P.AcceptedAnswerId = U.Id
+WHERE 
+    P.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+    AND (P.CloseReopenCount IS NULL OR P.CloseReopenCount = 0)
+ORDER BY 
+    P.Score DESC,
+    P.ViewCount DESC
+LIMIT 50;

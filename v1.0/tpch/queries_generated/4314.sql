@@ -1,0 +1,58 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name
+    FROM SupplierStats s
+    WHERE s.total_available_quantity > (SELECT AVG(total_available_quantity) FROM SupplierStats)
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighSpenders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM CustomerOrderStats c
+    WHERE c.total_spending > 1000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_linenumber) AS total_line_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    SUM(ods.total_order_value) AS total_value,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS fulfilled_orders,
+    AVG(NULLIF(cs.total_spending, 0)) AS avg_customer_spending
+FROM orders o
+FULL OUTER JOIN OrderDetails ods ON o.o_orderkey = ods.o_orderkey
+LEFT JOIN HighSpenders cs ON cs.c_custkey = o.o_custkey
+LEFT JOIN TopSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey LIMIT 1))
+WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY supplier_name
+HAVING SUM(ods.total_order_value) > 5000
+ORDER BY total_value DESC;

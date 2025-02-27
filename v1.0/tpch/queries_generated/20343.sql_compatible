@@ -1,0 +1,54 @@
+
+WITH RECURSIVE historical_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= DATEADD(year, -5, CAST('1998-10-01' AS DATE))
+), supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment IS NULL OR s_comment NOT LIKE '%no comment%')
+    GROUP BY s.s_suppkey
+), ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        COUNT(li.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS item_count,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) OVER (PARTITION BY o.o_orderkey) AS order_net_value,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+), region_summary AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        AVG(o.o_totalprice) AS avg_order_value,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN orders o ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+    GROUP BY n.n_regionkey, r.r_name
+    HAVING AVG(o.o_totalprice) > 500
+)
+SELECT 
+    ps.s_suppkey,
+    SUM(ps.ps_availqty) AS total_availability,
+    COALESCE(MAX(ro.order_net_value), 0) AS highest_order_value,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT CONCAT(n.n_name, ' - ', r.r_name) ORDER BY n.n_name) AS region_supplier_info
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN ranked_orders ro ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN region_summary rs ON r.r_regionkey = rs.n_regionkey
+WHERE ps.ps_availqty > (SELECT MAX(total_avail_qty) FROM supplier_summary)
+AND (s.s_comment IS NULL OR s.s_comment NOT LIKE '%discontinued%')
+GROUP BY ps.s_suppkey
+ORDER BY total_availability DESC, highest_order_value DESC;

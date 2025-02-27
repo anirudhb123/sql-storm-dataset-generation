@@ -1,0 +1,75 @@
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.id AS movie_id,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        MAX(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS has_male,
+        MAX(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS has_female
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        name p ON a.person_id = p.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_names,
+        keyword_count,
+        RANK() OVER (ORDER BY keyword_count DESC) AS rank
+    FROM 
+        movie_details
+    WHERE 
+        production_year IS NOT NULL
+        AND production_year = (SELECT MAX(production_year) FROM title)
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_names,
+    tm.keyword_count,
+    CASE 
+        WHEN tm.has_male = 1 AND tm.has_female = 1 THEN 'Mixed Gender Cast'
+        WHEN tm.has_male = 1 THEN 'Male Only Cast'
+        WHEN tm.has_female = 1 THEN 'Female Only Cast'
+        ELSE 'No Cast Information'
+    END AS cast_gender_info
+FROM 
+    top_movies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.keyword_count DESC;
+
+-- Additionally, to handle NULL logic and obscure semantics:
+SELECT 
+    COALESCE(NULLIF(tm.title, ''), 'Untitled') AS safe_title,
+    ISNULL(tm.production_year, 'Unknown Year') AS safe_year,
+    tm.cast_names
+FROM 
+    top_movies tm
+WHERE 
+    NOT (tm.cast_names IS NULL OR tm.cast_names = '')
+    OR EXISTS (
+        SELECT 1 FROM movie_info mi 
+        WHERE mi.movie_id = tm.movie_id
+        AND mi.info IS DISTINCT FROM ''
+    )
+ORDER BY 
+    safe_year DESC;

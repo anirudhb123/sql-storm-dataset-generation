@@ -1,0 +1,28 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.rank <= 5 
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT c.c_custkey) AS top_customers_count,
+       AVG(c.c_acctbal) AS average_acct_balance,
+       SUM(p.ps_supplycost * p.ps_availqty) AS total_supply_cost,
+       MAX(o.o_totalprice) AS max_order_value,
+       SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS fulfilled_orders_total
+FROM nation n
+LEFT JOIN customer_hierarchy c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN partsupp p ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey LIMIT 1)
+WHERE c.rank <= 3
+GROUP BY n.n_name
+HAVING SUM(CASE WHEN c.c_acctbal IS NULL THEN 1 ELSE 0 END) = 0
+ORDER BY total_supply_cost DESC
+LIMIT 10;

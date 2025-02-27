@@ -1,0 +1,99 @@
+WITH RECURSIVE UserScoreCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        0 AS Level,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.EmailHash
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        US.Level + 1,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.EmailHash
+    FROM 
+        Users U
+    JOIN 
+        UserScoreCTE US ON U.Id = US.UserId
+    WHERE 
+        U.Reputation > US.Reputation
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+UserPostActivity AS (
+    SELECT 
+        P.OwnerUserId AS UserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS Answers,
+        COUNT(CASE WHEN P.PostTypeId = 10 THEN 1 END) AS ClosedPosts
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserVoteStatistics AS (
+    SELECT 
+        V.UserId,
+        COUNT(V.Id) AS VoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    UBad.GoldBadges,
+    UBad.SilverBadges,
+    UBad.BronzeBadges,
+    UAct.TotalPosts,
+    UAct.Questions,
+    UAct.Answers,
+    UAct.ClosedPosts,
+    UVote.VoteCount,
+    UVote.Upvotes,
+    UVote.Downvotes,
+    ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges UBad ON U.Id = UBad.UserId
+LEFT JOIN 
+    UserPostActivity UAct ON U.Id = UAct.UserId
+LEFT JOIN 
+    UserVoteStatistics UVote ON U.Id = UVote.UserId
+WHERE 
+    U.Reputation IS NOT NULL
+ORDER BY 
+    UserRank
+LIMIT 100;

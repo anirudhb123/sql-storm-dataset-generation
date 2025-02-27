@@ -1,0 +1,88 @@
+
+WITH RECURSIVE order_calc AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) * (1 + l.l_tax) ELSE 0 END) AS total_returned,
+        COUNT(DISTINCT l.l_orderkey) AS total_lines
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+part_return_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END), 0) AS total_returned_quantity,
+        COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN o.o_orderkey END) AS unique_return_orders
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    ps.ps_supplycost,
+    rs.total_returned,
+    ns.supplier_count,
+    ns.total_account_balance,
+    ns.avg_account_balance,
+    ps.ps_availqty,
+    (CASE 
+        WHEN rs.total_returned IS NULL OR rs.total_returned = 0 THEN 'No Returns' 
+        ELSE 'Returns Exist' 
+    END) AS return_status
+FROM 
+    partsupp ps 
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    order_calc rs ON rs.o_orderkey = (SELECT MAX(o_orderkey) FROM orders WHERE o_orderdate < rs.o_orderdate)
+JOIN 
+    nation_summary ns ON ns.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT MIN(c.c_custkey) FROM customer))
+WHERE 
+    ps.ps_availqty IS NOT NULL AND ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_partkey = ps.ps_partkey)
+UNION ALL
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    0 AS ps_supplycost,
+    0 AS total_returned,
+    ns.supplier_count,
+    ns.total_account_balance,
+    ns.avg_account_balance,
+    NULL AS ps_availqty,
+    NULL AS return_status
+FROM 
+    part p
+LEFT JOIN 
+    nation_summary ns ON ns.n_nationkey = (SELECT MAX(n_nationkey) FROM nation)
+WHERE 
+    p.p_partkey NOT IN (SELECT ps_partkey FROM partsupp) 
+ORDER BY 
+    p.p_partkey ASC, 
+    return_status DESC;

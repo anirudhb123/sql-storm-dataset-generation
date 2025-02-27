@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY AVG(r.nr_order) DESC) AS rank,
+        t.id AS movie_id
+    FROM 
+        title t
+    JOIN 
+        complete_cast c ON t.id = c.movie_id
+    JOIN 
+        cast_info r ON c.subject_id = r.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorsInMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT r.nr_order) AS role_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info r ON a.person_id = r.person_id
+    JOIN 
+        title t ON r.movie_id = t.id
+    WHERE 
+        r.nr_order IS NOT NULL
+    GROUP BY 
+        a.name, t.title, t.production_year
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        SUM(role_count) AS total_roles
+    FROM 
+        ActorsInMovies
+    GROUP BY 
+        actor_name
+    HAVING 
+        SUM(role_count) > 5
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    ta.actor_name,
+    COALESCE(ta.total_roles, 0) AS total_roles,
+    COUNT(DISTINCT kv.keyword) AS keywords_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TopActors ta ON rm.rank = 1
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rm.movie_id
+LEFT JOIN 
+    keyword kv ON mk.keyword_id = kv.id
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    rm.movie_title, rm.production_year, ta.actor_name
+ORDER BY 
+    rm.production_year DESC, keywords_count DESC;

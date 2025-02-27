@@ -1,0 +1,62 @@
+WITH VolumeCTE AS (
+    SELECT 
+        l_partkey,
+        SUM(l_quantity) AS total_quantity,
+        AVG(l_discount) AS average_discount,
+        SUM(l_extendedprice * (1 - l_discount)) AS net_revenue
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        l_partkey
+),
+HighVolume AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        v.total_quantity,
+        v.net_revenue
+    FROM 
+        part p
+    JOIN 
+        VolumeCTE v ON p.p_partkey = v.l_partkey
+    WHERE 
+        v.total_quantity > (SELECT AVG(total_quantity) FROM VolumeCTE)
+),
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    hv.p_name,
+    hv.total_quantity,
+    CASE 
+        WHEN hv.total_quantity > 1000 THEN 'Bulk Supply'
+        WHEN hv.total_quantity IS NULL THEN 'No Supply'
+        ELSE 'Regular Supply'
+    END AS supply_type,
+    sr.region_name,
+    SUM(sr.s_acctbal) OVER (PARTITION BY sr.region_name) AS total_balance_per_region
+FROM 
+    HighVolume hv
+LEFT JOIN 
+    SupplierRegion sr ON sr.s_suppkey IN (
+        SELECT ps_suppkey
+        FROM partsupp ps
+        WHERE ps_partkey = hv.p_partkey
+        AND ps_availqty > 0
+    )
+ORDER BY 
+    hv.net_revenue DESC NULLS LAST, 
+    hv.p_name ASC;

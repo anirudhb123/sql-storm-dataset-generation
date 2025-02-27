@@ -1,0 +1,97 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AnswerCount,
+        p.OwnerUserId,
+        1 AS Level,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.AnswerCount,
+        a.OwnerUserId,
+        rp.Level + 1,
+        a.CreationDate
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePosts rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        DATEDIFF('2024-10-01 12:34:56', p.CreationDate) AS DaysSinceCreated
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId) v ON v.PostId = p.Id
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.UpVotes) AS TotalUpVotes,
+        SUM(ps.DownVotes) AS TotalDownVotes,
+        COUNT(ps.PostId) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStats ps ON ps.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalViews,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.PostCount,
+    rp.Level AS PostHierarchyLevel,
+    COUNT(DISTINCT rp.PostId) AS AnswerCountForTopUsers
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecursivePosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    tu.PostCount > 0  
+GROUP BY 
+    tu.UserId, 
+    tu.DisplayName, 
+    tu.TotalViews, 
+    tu.TotalUpVotes, 
+    tu.TotalDownVotes, 
+    tu.PostCount, 
+    rp.Level
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0
+ORDER BY 
+    tu.TotalViews DESC, tu.TotalUpVotes DESC;

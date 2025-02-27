@@ -1,0 +1,53 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS supply_rank
+    FROM partsupp
+    WHERE ps_availqty <= (
+        SELECT AVG(ps_availqty) FROM partsupp
+    )
+), 
+customer_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(SUM(l_extendedprice * (1 - l_discount))) 
+        FROM lineitem 
+        GROUP BY l_orderkey
+    )
+), 
+supply_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN supply_chain sc ON s.s_suppkey = sc.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING total_supply_cost > 1000 
+    AND s.s_acctbal IS NOT NULL
+), 
+region_summary AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+)
+
+SELECT DISTINCT c.c_name, co.o_orderkey, sc.s_name, sc.total_supply_cost, r.r_name, 
+       COUNT(*) OVER (PARTITION BY r.r_name) AS orders_per_region
+FROM customer c
+JOIN customer_orders co ON c.c_custkey = co.o_custkey
+JOIN supply_info sc ON co.o_orderkey = (
+    SELECT p.o_orderkey 
+    FROM lineitem l 
+    JOIN orders p ON l.l_orderkey = p.o_orderkey 
+    WHERE l.l_suppkey = sc.s_suppkey 
+    ORDER BY p.o_orderkey DESC 
+    LIMIT 1
+)
+LEFT JOIN region_summary r ON r.nation_count > 5
+WHERE c.c_acctbal IS NOT NULL 
+  AND char_length(c.c_name) = 
+      (SELECT MAX(char_length(c2.c_name)) FROM customer c2)
+ORDER BY r.r_name, c.c_name DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

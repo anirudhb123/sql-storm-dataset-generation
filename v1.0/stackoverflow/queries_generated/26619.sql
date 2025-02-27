@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+                          FROM Posts p WHERE p.Id = t.ExcerptPostId)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        ViewCount, 
+        Score, 
+        OwnerDisplayName, 
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 5 -- Top 5 per post type
+)
+
+SELECT 
+    tp.*, 
+    ph.UserDisplayName AS LastEditor,
+    ph.CreationDate AS LastEditDate,
+    ph.Comment AS EditComment
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId 
+                   AND ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, Tags
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

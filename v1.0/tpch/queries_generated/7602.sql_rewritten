@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        r.c_name,
+        r.revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.revenue_rank <= 10
+)
+
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.c_name,
+    o.revenue,
+    n.n_name AS supplier_nation,
+    p.p_brand,
+    p.p_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    SUM(ps.ps_supplycost) AS total_supply_cost,
+    STRING_AGG(DISTINCT ps.ps_comment) AS unique_supply_comments
+FROM 
+    TopOrders o
+JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, o.c_name, n.n_name, p.p_brand, p.p_name
+ORDER BY 
+    o.revenue DESC;

@@ -1,0 +1,80 @@
+WITH RecursiveTitleData AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS row_num
+    FROM 
+        title t
+),
+ActorMovieCount AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id
+),
+TopActors AS (
+    SELECT 
+        person_id
+    FROM 
+        ActorMovieCount
+    WHERE 
+        movie_count >= 5
+),
+CompanyMovieData AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FilteredMovies AS (
+    SELECT 
+        r.title_id,
+        r.title,
+        cm.company_name,
+        cm.company_type,
+        ROW_NUMBER() OVER (PARTITION BY r.production_year ORDER BY r.title_id) AS movie_rank
+    FROM 
+        RecursiveTitleData r
+    LEFT JOIN 
+        CompanyMovieData cm ON r.title_id = cm.movie_id
+    WHERE 
+        r.production_year >= 2000
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(f.company_name, 'Independent') AS production_company,
+    f.movie_rank,
+    COUNT(DISTINCT a.person_id) AS actor_count,
+    CONCAT('Year: ', f.production_year, ' | Title: ', f.title) AS title_info,
+    CASE 
+        WHEN f.company_type IS NULL THEN 'Unknown Type'
+        ELSE f.company_type
+    END AS company_type_info
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    cast_info c ON f.title_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+WHERE 
+    a.person_id IN (SELECT person_id FROM TopActors)
+GROUP BY 
+    f.title, f.production_year, f.company_name, f.movie_rank, f.company_type
+HAVING 
+    COUNT(DISTINCT a.person_id) > 2 
+ORDER BY 
+    f.production_year DESC, f.movie_rank;

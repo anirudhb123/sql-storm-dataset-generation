@@ -1,0 +1,57 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS avg_order_value,
+    COALESCE(SUM(sp.total_available), 0) AS total_available_parts,
+    COALESCE(cu.total_spent, 0) AS total_spent 
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedOrders o ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM SupplierParts sp WHERE sp.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size = 20)))
+LEFT JOIN 
+    CustomerOrders cu ON n.n_nationkey = cu.c_custkey 
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+WHERE 
+    o.rn <= 5 OR o.o_orderdate IS NULL
+GROUP BY 
+    n.n_name, r.r_name, cu.total_spent
+ORDER BY 
+    total_orders DESC, avg_order_value DESC;

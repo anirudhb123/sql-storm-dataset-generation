@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oc.level + 1
+    FROM orders o
+    INNER JOIN OrderCTE oc ON o.o_orderkey = oc.o_orderkey
+    WHERE oc.level < 5
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_retailprice > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_name AS customer_name,
+    COUNT(DISTINCT ol.l_orderkey) AS orders_related_to_part,
+    MAX(ss.total_supplycost) AS max_supplier_cost,
+    HVP.p_name AS highest_value_part
+FROM CustomerOrders cs
+LEFT JOIN lineitem ol ON cs.total_spent > 2000 AND ol.l_orderkey IN (SELECT o_orderkey FROM OrderCTE)
+LEFT JOIN SupplierStats ss ON ss.part_count > 10
+LEFT JOIN HighValueParts HVP ON HVP.rn = 1
+GROUP BY cs.c_name, HVP.p_name
+HAVING MAX(ss.total_supplycost) IS NOT NULL
+ORDER BY customer_name;

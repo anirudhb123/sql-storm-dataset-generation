@@ -1,0 +1,83 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_sold,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sold,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY COALESCE(SUM(ss.ss_quantity), 0) DESC) AS rank,
+        (SELECT MAX(inv.inv_quantity_on_hand) 
+         FROM inventory inv
+         WHERE inv.inv_item_sk = i.i_item_sk) AS max_inventory
+    FROM 
+        item i
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01' AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+    GROUP BY 
+        i.i_item_sk, i.i_item_id, i.i_product_name
+), 
+SalesSummary AS (
+    SELECT 
+        ih.i_item_id,
+        ih.i_product_name,
+        ih.total_sold,
+        ih.total_web_sold,
+        ih.max_inventory,
+        CASE 
+            WHEN ih.total_sold >= 500 THEN 'High Seller'
+            WHEN ih.total_sold BETWEEN 200 AND 499 THEN 'Medium Seller'
+            ELSE 'Low Seller'
+        END AS sales_category,
+        CASE 
+            WHEN ih.max_inventory IS NULL 
+                THEN 'No Inventory'
+            WHEN ih.max_inventory < 50 
+                THEN 'Low Stock'
+            ELSE 'In Stock' 
+        END AS inventory_status
+    FROM 
+        ItemHierarchy ih
+    WHERE 
+        ih.rank = 1
+), 
+ReturnAnalysis AS (
+    SELECT 
+        wr.wr_order_number,
+        wr.wr_return_quantity,
+        wr.wr_return_amt,
+        wr.wr_return_tax
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_return_quantity IS NOT NULL AND 
+        wr.wr_return_amt > 0
+)
+SELECT 
+    ss.i_item_id,
+    ss.i_product_name,
+    ss.total_sold,
+    ss.total_web_sold,
+    ss.max_inventory,
+    ss.sales_category,
+    ss.inventory_status,
+    (SELECT COALESCE(SUM(ra.wr_return_quantity), 0) 
+     FROM ReturnAnalysis ra 
+     WHERE ra.wr_order_number IN (SELECT ws.ws_order_number 
+                                   FROM web_sales ws 
+                                   WHERE ws.ws_item_sk = ss.i_item_id)) AS total_web_returns,
+    CASE 
+        WHEN ss.sales_category = 'High Seller' AND ss.inventory_status = 'Low Stock' 
+            THEN 'Reorder Now!'
+        ELSE NULL 
+    END AS restock_advice
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.total_sold DESC, 
+    ss.sales_category = 'High Seller' DESC;

@@ -1,0 +1,57 @@
+
+WITH movie_years AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names
+    FROM
+        aka_title ak
+    JOIN
+        title mt ON ak.movie_id = mt.id
+    GROUP BY
+        mt.id, mt.title, mt.production_year
+),
+cast_info_summary AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM
+        cast_info ci
+    JOIN
+        char_name cn ON ci.person_id = cn.imdb_id
+    GROUP BY
+        ci.movie_id
+),
+keyword_summary AS (
+    SELECT
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    my.movie_id,
+    my.movie_title,
+    my.production_year,
+    my.aka_names,
+    COALESCE(cs.total_cast, 0) AS total_cast,
+    COALESCE(cs.cast_names, '') AS cast_names,
+    COALESCE(ks.total_keywords, 0) AS total_keywords,
+    COALESCE(ks.keywords, '') AS keywords
+FROM
+    movie_years my
+LEFT JOIN
+    cast_info_summary cs ON my.movie_id = cs.movie_id
+LEFT JOIN
+    keyword_summary ks ON my.movie_id = ks.movie_id
+WHERE
+    my.production_year >= 2000
+ORDER BY
+    my.production_year DESC, my.movie_title;

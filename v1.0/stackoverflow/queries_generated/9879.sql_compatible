@@ -1,0 +1,67 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01 12:34:56')
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.AvgScore, 0) AS AvgScore,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        UserBadges ub
+    LEFT JOIN 
+        PostStats ps ON ub.UserId = ps.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgScore,
+    TotalViews,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    RANK() OVER (ORDER BY PostCount DESC, TotalViews DESC, AvgScore DESC) AS Rank
+FROM 
+    UserPerformance
+ORDER BY 
+    Rank
+FETCH FIRST 100 ROWS ONLY;

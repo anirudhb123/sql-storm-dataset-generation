@@ -1,0 +1,43 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 1 AS lvl
+    FROM customer c
+    WHERE c.c_acctbal > 5000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.lvl + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.lvl < 3
+),
+SalesData AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        c.c_nationkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_orderkey, c.c_nationkey
+),
+RankedSales AS (
+    SELECT 
+        n.n_name,
+        SUM(sd.total_sales) AS region_sales,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(sd.total_sales) DESC) AS sales_rank
+    FROM SalesData sd
+    JOIN nation n ON sd.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name, n.n_regionkey
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    ph.p_retailprice,
+    COALESCE(r.region_sales, 0) AS region_sales,
+    CASE 
+        WHEN r.sales_rank <= 3 THEN 'Top Seller'
+        ELSE 'Regular Seller'
+    END AS seller_status
+FROM part ph
+LEFT JOIN RankedSales r ON ph.p_partkey = r.n_regionkey
+WHERE ph.p_retailprice > (SELECT AVG(p_retailprice) FROM part WHERE p_container IS NOT NULL)
+AND ph.p_comment LIKE '%special%'
+ORDER BY ph.p_retailprice DESC, seller_status;

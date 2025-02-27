@@ -1,0 +1,39 @@
+WITH SupplierTotals AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+),
+PartSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_partkey
+),
+RegionPerformance AS (
+    SELECT r.r_regionkey, r.r_name, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders_region, 
+    SUM(l.l_extendedprice) AS total_sales_region
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT rp.r_name, SUM(rp.total_sales_region) AS total_sales_in_region,
+       ST.total_supplycost, CO.total_orders, CO.total_revenue
+FROM RegionPerformance rp
+JOIN SupplierTotals ST ON rp.total_orders_region > 100
+JOIN CustomerOrders CO ON CO.total_orders > 10
+GROUP BY rp.r_name, ST.total_supplycost, CO.total_orders, CO.total_revenue
+ORDER BY total_sales_in_region DESC, total_supplycost DESC;

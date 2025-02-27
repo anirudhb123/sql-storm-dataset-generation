@@ -1,0 +1,90 @@
+WITH RecursiveTagCount AS (
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        1 AS Level
+    FROM Tags T
+    WHERE T.Count > 10 -- Starting point, tags with more than 10 occurrences
+
+    UNION ALL
+
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        RTC.Level + 1
+    FROM Tags T
+    INNER JOIN RecursiveTagCount RTC ON T.Id = RTC.Id -- Recursive join to count tags
+    WHERE RTC.Level < 5
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PV.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(CR.CommentCount, 0) AS CommentCount,
+        GREATEST(COALESCE(P.AnnualViews, 0), 500) * 1.0 / NULLIF(EXTRACT(EPOCH FROM (NOW() - P.CreationDate)), 0) AS ViewsPerSecond,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS UpVoteCount FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) PV ON P.Id = PV.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) CR ON P.Id = CR.PostId
+    LEFT JOIN 
+        (SELECT Id, Tags FROM Posts) T ON T.Id = P.Id
+    GROUP BY 
+        P.Id, PV.UpVoteCount, CR.CommentCount
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT PH.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        PH.PostId, PH.CreationDate
+),
+
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.Score,
+        PS.UpVoteCount,
+        PS.CommentCount,
+        E.EditCount,
+        E.EditComments,
+        ARRAY_AGG(DISTINCT RT.TagName) AS RecursiveTags,
+        PS.ViewsPerSecond
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        PostHistoryDetails E ON PS.PostId = E.PostId
+    LEFT JOIN 
+        RecursiveTagCount RT ON PS.Tags @> ARRAY[RT.TagName] -- Using array to find matching tags
+    GROUP BY 
+        PS.PostId, PS.Title, PS.CreationDate, PS.Score, PS.UpVoteCount, PS.CommentCount, E.EditCount, E.EditComments, PS.ViewsPerSecond
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN ViewsPerSecond > 1 THEN 'High'
+        WHEN ViewsPerSecond BETWEEN 0.5 AND 1 THEN 'Medium'
+        ELSE 'Low'
+    END AS ViewRateCategory
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, UpVoteCount DESC;

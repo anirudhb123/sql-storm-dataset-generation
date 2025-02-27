@@ -1,0 +1,77 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_size,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_size
+),
+TopParts AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.p_brand,
+        rp.p_size,
+        rp.supplier_count,
+        rp.total_supply_cost
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rn <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice) AS total_lineitem_price,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+FinalResult AS (
+    SELECT 
+        tp.p_partkey,
+        tp.p_name,
+        tp.p_brand,
+        tp.p_size,
+        co.c_custkey,
+        co.c_name,
+        co.order_count,
+        co.total_lineitem_price
+    FROM 
+        TopParts tp
+    JOIN 
+        CustomerOrders co ON tp.supplier_count >= 3
+    WHERE 
+        tp.total_supply_cost > 10000
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.p_brand,
+    f.p_size,
+    f.c_custkey,
+    f.c_name,
+    f.order_count,
+    f.total_lineitem_price
+FROM 
+    FinalResult f
+ORDER BY 
+    f.p_brand, f.order_count DESC, f.total_lineitem_price DESC;

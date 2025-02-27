@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Start from top-level posts (questions)
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoterCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopPostWithBadges AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.Reputation,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass,
+        ps.CommentCount,
+        ps.UniqueVoterCount,
+        ps.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY ps.CommentCount DESC, ps.TotalBounty DESC) AS Ranking
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostStatistics ps ON p.Id = ps.PostId
+    WHERE 
+        b.Class = 1  -- Consider only Gold badges
+)
+SELECT 
+    p.Id,
+    p.Title,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ps.CommentCount, 0) AS CommentCount,
+    COALESCE(ps.UniqueVoterCount, 0) AS UniqueVoterCount,
+    COALESCE(ps.TotalBounty, 0) AS TotalBounty,
+    COALESCE(b.BadgeName, 'No Badge') AS BadgeName,
+    ps.LastVoteDate,
+    r.Level AS HierarchyLevel
+FROM 
+    TopPostWithBadges b
+JOIN 
+    Posts p ON b.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN 
+    PostStatistics ps ON p.Id = ps.PostId
+WHERE 
+    p.CreationDate > NOW() - INTERVAL '30 days'  -- Limit to posts created in the last 30 days
+ORDER BY 
+    r.Level, 
+    ps.CommentCount DESC, 
+    ps.TotalBounty DESC;

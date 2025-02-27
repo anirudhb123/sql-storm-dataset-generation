@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sales_price > 0
+    GROUP BY
+        ws.ws_item_sk
+),
+customer_analysis AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_store_purchases,
+        COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate,
+        MAX(ws.ws_net_paid) AS max_web_purchase
+    FROM
+        customer c
+        LEFT JOIN store_sales s ON c.c_customer_sk = s.ss_customer_sk
+        LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        c.c_customer_sk
+),
+final_analysis AS (
+    SELECT
+        ca.ca_city,
+        SUM(r.total_quantity) AS total_quantity_sold,
+        SUM(r.total_profit) AS total_profit_earned,
+        COUNT(DISTINCT ca.ca_address_sk) AS unique_addresses,
+        AVG(cu.avg_purchase_estimate) AS avg_estimate_per_customer
+    FROM
+        customer_address ca
+        LEFT JOIN ranked_sales r ON r.ws_item_sk IN (
+            SELECT
+                ws.ws_item_sk
+            FROM
+                web_sales ws
+            JOIN
+                customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+            WHERE
+                c.c_birth_month = EXTRACT(MONTH FROM CURRENT_DATE) OR
+                (c.c_birth_month IS NULL AND c.c_birth_year = 2020)
+        )
+        LEFT JOIN customer_analysis cu ON cu.c_customer_sk = ca.ca_address_sk
+    WHERE
+        ca.ca_state IS NOT NULL AND
+        ca.ca_country = 'USA'
+    GROUP BY
+        ca.ca_city
+)
+SELECT
+    fa.ca_city,
+    fa.total_quantity_sold,
+    fa.total_profit_earned,
+    fa.unique_addresses,
+    fa.avg_estimate_per_customer,
+    CASE 
+        WHEN fa.total_profit_earned > 100000 THEN 'High Profit'
+        WHEN fa.total_profit_earned BETWEEN 50000 AND 100000 THEN 'Moderate Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM
+    final_analysis fa
+WHERE
+    fa.avg_estimate_per_customer IS NOT NULL
+ORDER BY
+    fa.total_profit_earned DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS ranking
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk
+),
+RecentReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(sr_returned_date_sk) FROM store_returns)
+    GROUP BY 
+        sr_item_sk
+),
+TopStores AS (
+    SELECT 
+        sh.s_store_sk,
+        sh.total_sales,
+        ROW_NUMBER() OVER (ORDER BY sh.total_sales DESC) AS store_rank
+    FROM 
+        SalesHierarchy sh
+    WHERE 
+        sh.ranking <= 5
+)
+SELECT 
+    s.s_store_name,
+    s.s_city,
+    s.s_state,
+    COALESCE(r.total_returned, 0) AS total_returned,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    t.total_sales
+FROM 
+    store s
+LEFT JOIN 
+    TopStores t ON s.s_store_sk = t.s_store_sk
+LEFT JOIN 
+    RecentReturns r ON t.s_store_sk = r.sr_item_sk -- assuming item_sk linked to store context
+WHERE 
+    s.s_state IN ('NY', 'CA')
+ORDER BY 
+    t.total_sales DESC, 
+    r.total_return_amount DESC;

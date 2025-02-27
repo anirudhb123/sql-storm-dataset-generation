@@ -1,0 +1,69 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL 
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS title_rank
+    FROM 
+        MovieHierarchy mh
+),
+CastInfoWithRole AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ci.nr_order AS cast_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COUNT(c.role_name) AS num_actors,
+    STRING_AGG(DISTINCT c.actor_name, ', ') AS actor_names,
+    MAX(rm.title_rank) AS max_title_rank
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastInfoWithRole c ON rm.movie_id = c.movie_id
+WHERE 
+    rm.production_year BETWEEN 2005 AND 2020
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, rm.title_rank
+HAVING 
+    COUNT(c.role_name) >= 3
+ORDER BY 
+    num_actors DESC,
+    rm.production_year DESC,
+    rm.title;

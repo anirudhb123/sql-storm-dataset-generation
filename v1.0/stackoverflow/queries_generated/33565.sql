@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        0 AS Level 
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        rph.Level + 1 
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreQuestions,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        c.Name AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph 
+    JOIN 
+        CloseReasonTypes c ON ph.Comment = CAST(c.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ps.Title AS PostTitle,
+    ps.CreationDate AS PostCreationDate,
+    us.DisplayName AS UserName,
+    us.QuestionCount,
+    us.PositiveScoreQuestions,
+    us.AvgScore,
+    uStats.TotalBadges,
+    pStats.VoteCount,
+    pStats.UpVotes,
+    pStats.DownVotes,
+    COALESCE(cp.CloseReason, 'Not Closed') AS LastCloseReason,
+    cp.CreationDate AS LastClosedDate,
+    COALESCE(rph.Level, -1) AS PostLevel
+FROM 
+    Posts ps
+JOIN 
+    Users us ON ps.OwnerUserId = us.Id
+LEFT JOIN 
+    UserStatistics uStats ON us.Id = uStats.UserId
+LEFT JOIN 
+    PostVoteStatistics pStats ON ps.Id = pStats.PostId
+LEFT JOIN 
+    ClosedPosts cp ON ps.Id = cp.PostId AND cp.rn = 1
+LEFT JOIN 
+    RecursivePostHierarchy rph ON ps.Id = rph.Id
+WHERE 
+    ps.Score > 10
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 50;

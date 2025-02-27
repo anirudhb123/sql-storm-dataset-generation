@@ -1,0 +1,40 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_month IN (1, 2, 3)
+    GROUP BY 
+        ws.web_site_sk
+),
+TopSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.total_sales,
+        s.web_name
+    FROM 
+        RankedSales r
+    JOIN 
+        web_site s ON r.web_site_sk = s.web_site_sk
+    WHERE 
+        r.sales_rank <= 10
+)
+SELECT 
+    ts.web_name,
+    ts.total_sales,
+    c.cc_name,
+    cc.cc_employees
+FROM 
+    TopSales ts
+JOIN 
+    call_center cc ON cc.cc_call_center_id = CONCAT('CC', ts.web_site_sk)
+JOIN 
+    customer c ON c.c_current_cdemo_sk = ts.web_site_sk
+ORDER BY 
+    ts.total_sales DESC;

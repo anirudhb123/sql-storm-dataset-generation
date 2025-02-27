@@ -1,0 +1,36 @@
+
+WITH RECURSIVE top_suppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, ROW_NUMBER() OVER (ORDER BY s_acctbal DESC) AS rnk
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+),
+order_stats AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+supplier_revenue AS (
+    SELECT ps.ps_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_suppkey
+),
+combined_data AS (
+    SELECT c.c_name, c.c_acctbal, o.total_revenue, o.order_count, sr.supplier_revenue,
+           COALESCE(sr.supplier_revenue, 0) AS adjusted_supplier_revenue,
+           CASE WHEN sr.supplier_revenue IS NULL THEN 'No Revenue' ELSE 'Has Revenue' END AS revenue_status
+    FROM customer c
+    LEFT JOIN order_stats o ON c.c_custkey = o.o_custkey
+    LEFT JOIN supplier_revenue sr ON c.c_custkey = sr.ps_suppkey
+)
+SELECT c.c_name, c.c_acctbal, COALESCE(o.total_revenue, 0) AS total_revenue,
+       COALESCE(o.order_count, 0) AS order_count, COALESCE(sr.supplier_revenue, 0) AS supplier_revenue,
+       RANK() OVER (ORDER BY COALESCE(o.total_revenue, 0) DESC) AS revenue_rank,
+       (SELECT COUNT(*) FROM region r WHERE EXISTS (SELECT 1 FROM nation n WHERE n.n_regionkey = r.r_regionkey AND n.n_nationkey = c.c_nationkey)) AS region_count
+FROM combined_data c
+JOIN top_suppliers t ON c.c_acctbal > t.s_acctbal
+WHERE c.c_acctbal > 1000 AND (t.rnk <= 10 OR o.total_revenue IS NULL)
+ORDER BY total_revenue DESC, c.c_name;

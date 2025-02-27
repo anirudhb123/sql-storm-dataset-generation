@@ -1,0 +1,52 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_nationkey = nh.n_regionkey
+),
+AggregatedSupplier AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty * ps.ps_supplycost) > 1000
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, 
+           CASE 
+               WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) 
+               ELSE l.l_extendedprice 
+           END AS net_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+),
+SupplierPerformance AS (
+    SELECT s.s_name, AVG(l.net_price) AS average_price
+    FROM AggregatedSupplier s
+    JOIN FilteredLineItems l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_name
+    HAVING AVG(l.net_price) IS NOT NULL
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice) AS total_revenue,
+    COALESCE(SUM(sp.average_price), 0) AS avg_supplier_price,
+    n.level
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedOrders o ON n.n_nationkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierPerformance sp ON l.l_suppkey = sp.s_suppkey
+WHERE r.r_name NOT IN (SELECT DISTINCT r_name FROM region WHERE r_comment LIKE '%obsolete%')
+GROUP BY r.r_name, n.level
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC NULLS LAST;

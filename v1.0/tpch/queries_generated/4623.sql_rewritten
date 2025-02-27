@@ -1,0 +1,83 @@
+WITH SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+OrderLineTotals AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(ol.order_total) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderLineTotals ol ON o.o_orderkey = ol.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+RankedCustomers AS (
+    SELECT 
+        cust.c_custkey,
+        cust.order_count,
+        cust.total_spent,
+        RANK() OVER (ORDER BY cust.total_spent DESC) AS rank_payment
+    FROM 
+        CustomerOrders cust
+),
+FilteredSuppliers AS (
+    SELECT 
+        sp.ps_partkey,
+        sp.s_name,
+        sp.total_avail_qty,
+        sp.avg_supply_cost
+    FROM 
+        SupplierParts sp
+    WHERE 
+        sp.total_avail_qty > (SELECT AVG(total_avail_qty) FROM SupplierParts)
+)
+SELECT 
+    rc.c_custkey,
+    rc.order_count,
+    rc.total_spent,
+    fs.s_name,
+    fs.total_avail_qty,
+    fs.avg_supply_cost
+FROM 
+    RankedCustomers rc
+OUTER JOIN 
+    FilteredSuppliers fs ON fs.ps_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        JOIN 
+            orders o ON l.l_orderkey = o.o_orderkey
+        WHERE 
+            o.o_orderstatus = 'O' AND
+            o.o_orderkey IN (SELECT o_o.orderkey FROM orders o_o WHERE o_o.o_orderdate >= '1997-01-01')
+    )
+WHERE 
+    rc.rank_payment <= 10 OR fs.avg_supply_cost < (SELECT AVG(avg_supply_cost) FROM SupplierParts)
+ORDER BY 
+    rc.total_spent DESC, fs.avg_supply_cost ASC;

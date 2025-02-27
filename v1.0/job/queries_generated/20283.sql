@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           COALESCE(mt.season_nr, 0) AS season, 
+           COALESCE(mt.episode_nr, 0) AS episode, 
+           0 AS level
+    FROM aka_title mt
+    WHERE mt.id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, 
+           m.title, 
+           COALESCE(m.season_nr, mh.season + 1) AS season, 
+           COALESCE(m.episode_nr, mh.episode + 1) AS episode, 
+           mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN aka_title m ON mh.movie_id = m.episode_of_id
+    WHERE mh.level < 10 -- Limit to prevent infinite recursion
+),
+movie_statistics AS (
+    SELECT 
+        at.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_info_length,
+        COUNT(DISTINCT COALESCE(mc.company_id, -1)) AS total_companies -- Using -1 for NULLs
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN movie_info mi ON at.id = mi.movie_id
+    LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+    GROUP BY at.title
+),
+enhanced_stats AS (
+    SELECT 
+        ms.title,
+        ms.total_cast,
+        ms.total_keywords,
+        ms.avg_info_length,
+        ms.total_companies,
+        ROW_NUMBER() OVER (ORDER BY ms.total_cast DESC) AS cast_rank,
+        ROW_NUMBER() OVER (ORDER BY ms.total_keywords DESC) AS keyword_rank,
+        CASE 
+            WHEN ms.total_cast IS NULL THEN 'No Cast'
+            WHEN ms.total_cast = 0 THEN 'No Cast Info'
+            ELSE 'Has Cast'
+        END AS cast_status
+    FROM movie_statistics ms
+)
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.season, 
+    mh.episode,
+    es.total_cast,
+    es.total_keywords,
+    es.avg_info_length,
+    es.total_companies,
+    es.cast_rank,
+    es.keyword_rank,
+    es.cast_status
+FROM movie_hierarchy mh
+FULL OUTER JOIN enhanced_stats es ON mh.title = es.title
+WHERE (mh.season = 2 OR mh.episode > 5) -- Bizarre condition for filtering
+  AND (es.cast_rank < 20 OR es.total_keywords = 0) -- Include entries with no keywords
+ORDER BY mh.level, es.total_cast DESC NULLS LAST;

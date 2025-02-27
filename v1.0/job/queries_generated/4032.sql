@@ -1,0 +1,68 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredTitles AS (
+    SELECT
+        person_id,
+        name,
+        title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        title_rank = 1
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+TitleInfo AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        info.info AS title_additional_info,
+        ROW_NUMBER() OVER (PARTITION BY title.id ORDER BY info.id) AS info_rank
+    FROM 
+        title
+    LEFT JOIN 
+        movie_info_info info ON title.id = info.movie_id
+)
+SELECT 
+    ft.name AS actor_name,
+    ft.title AS latest_title,
+    ft.production_year,
+    cm.company_count,
+    COALESCE(cm.companies, 'No Companies') AS companies_involved,
+    ti.title_additional_info
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    CompanyMovies cm ON ft.title = cm.movie_id
+LEFT JOIN 
+    TitleInfo ti ON ft.title = ti.title_id AND ti.info_rank <= 3
+WHERE 
+    (ft.name IS NOT NULL AND ft.name <> '')
+    AND (cm.company_count > 0 OR cm.company_count IS NULL)
+ORDER BY 
+    ft.production_year DESC, ft.name;

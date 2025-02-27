@@ -1,0 +1,32 @@
+WITH UserReputation AS (
+    SELECT Id AS UserId, Reputation, COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id, Reputation
+),
+TopUsers AS (
+    SELECT UserId, Reputation, PostCount
+    FROM UserReputation
+    WHERE PostCount > 0
+    ORDER BY Reputation DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, p.Score, p.ViewCount, COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.OwnerUserId IN (SELECT UserId FROM TopUsers)
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount
+),
+VoteSummary AS (
+    SELECT v.PostId, SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+)
+SELECT u.DisplayName, pd.Title, pd.Score, pd.ViewCount, pd.CommentCount, vs.UpVotes, vs.DownVotes
+FROM TopUsers u
+JOIN PostDetails pd ON u.UserId = pd.PostId
+LEFT JOIN VoteSummary vs ON pd.PostId = vs.PostId
+ORDER BY u.Reputation DESC, pd.ViewCount DESC;

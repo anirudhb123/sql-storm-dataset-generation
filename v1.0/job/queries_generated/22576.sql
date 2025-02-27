@@ -1,0 +1,60 @@
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        c.id AS company_id,
+        c.name AS company_name,
+        p.name AS person_name,
+        r.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY p.name) AS role_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        t.production_year > 2000 
+        AND (c.country_code IS NULL OR c.country_code <> 'USA') 
+        AND (mi.info IS NOT NULL OR mi.note IS NOT NULL)
+),
+aggregated_data AS (
+    SELECT
+        movie_title,
+        COUNT(DISTINCT company_id) AS company_count,
+        COUNT(DISTINCT person_name) AS cast_count,
+        STRING_AGG(DISTINCT company_name, ', ') AS companies_involved
+    FROM 
+        movie_data
+    WHERE 
+        role_rank <= 3
+    GROUP BY 
+        movie_title
+)
+SELECT 
+    md.movie_title,
+    md.company_count,
+    md.cast_count,
+    md.companies_involved,
+    COALESCE((
+        SELECT 
+            GROUP_CONCAT(DISTINCT opening_info.info ORDER BY opening_info.id) 
+        FROM
+            movie_info opening_info
+        WHERE 
+            opening_info.movie_id = md.movie_id 
+            AND opening_info.info_type_id IN (SELECT id FROM info_type WHERE info IN ('Opening', 'Synopsis'))
+    ), '') AS opening_synopsis
+FROM 
+    aggregated_data md
+ORDER BY 
+    md.cast_count DESC, 
+    md.company_count ASC
+LIMIT 10;

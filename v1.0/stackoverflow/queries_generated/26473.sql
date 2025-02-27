@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostsTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.VoteCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1  -- Select only the most recent post per user
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.VoteCount,
+    rp.Tags,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+    (SELECT AVG(VoteTypeId) FROM Votes v WHERE v.PostId = rp.PostId) AS AvgVoteType -- Average of vote types related to the post
+FROM 
+    RecentPosts rp
+WHERE 
+    rp.CreationDate > CURRENT_DATE - INTERVAL '30 days'  -- Posts created in the last 30 days
+ORDER BY 
+    rp.VoteCount DESC, rp.CreationDate DESC
+LIMIT 10;

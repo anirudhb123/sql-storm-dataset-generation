@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS year_movie_count
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+
+ActorsInMovies AS (
+    SELECT
+        c.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY ak.name) AS actor_rank,
+        rn.title_rank,
+        rn.year_movie_count
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN
+        RankedMovies rn ON c.movie_id = rn.movie_id
+),
+
+DistinctGenres AS (
+    SELECT DISTINCT
+        kt.keyword AS genre
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword kt ON mk.keyword_id = kt.id
+)
+
+SELECT
+    a.movie_id,
+    a.title,
+    a.actor_name,
+    a.title_rank,
+    a.year_movie_count,
+    g.genre,
+    COUNT(mk.movie_id) OVER (PARTITION BY a.movie_id) AS keyword_count
+FROM
+    RankedMovies rm
+JOIN
+    ActorsInMovies a ON rm.movie_id = a.movie_id
+LEFT JOIN
+    movie_keyword mk ON a.movie_id = mk.movie_id
+LEFT JOIN
+    DistinctGenres g ON mk.keyword_id = g.id
+WHERE
+    (a.actor_rank = 1 OR a.title_rank < 5) 
+    AND (rm.year_movie_count > 10 OR g.genre IS NULL)
+ORDER BY
+    a.production_year DESC, a.actor_name;
+
+-- The above query benchmarks performance across various aspects of the dataset:
+-- 1. It relies on CTEs for intermediate calculations to keep the main query clean and organized.
+-- 2. Incorporates outer join to include movies that may not have associated keywords.
+-- 3. Uses window functions to rank titles and actors while capturing movie count per year.
+-- 4. Demonstrates semantic corner cases via movie filtering based on actor rank and genre presence.
+-- 5. Explicitly checks for NULL conditions to ensure they're contemplated where genre may be absent.

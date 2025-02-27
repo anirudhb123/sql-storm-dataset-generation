@@ -1,0 +1,52 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT c.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT c.id) DESC) AS rank_per_year
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info c ON at.movie_id = c.movie_id
+    GROUP BY
+        at.id, at.title, at.production_year
+),
+ActorNationality AS (
+    SELECT
+        ak.person_id,
+        cn.country_code,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY cn.country_code) AS nat_rank
+    FROM
+        aka_name ak
+    LEFT JOIN
+        company_name cn ON ak.md5sum = cn.md5sum
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    COALESCE(an.country_code, 'Unknown') AS country_code,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    CASE
+        WHEN rm.actor_count > 10 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_type
+FROM
+    RankedMovies rm
+LEFT JOIN
+    cast_info ci ON rm.title_id = ci.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = rm.title_id
+LEFT JOIN
+    ActorNationality an ON ci.person_id = an.person_id AND an.nat_rank = 1
+WHERE
+    rm.production_year IS NOT NULL
+    AND rm.rank_per_year <= 5
+GROUP BY
+    rm.title, rm.production_year, rm.actor_count, an.country_code
+HAVING
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY
+    rm.production_year DESC, rm.actor_count DESC, rm.title;

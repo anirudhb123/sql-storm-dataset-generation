@@ -1,0 +1,100 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.AcceptedAnswerId,
+        P2.ParentId,
+        RPH.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        RPH.PostId,
+        RPH.Title,
+        RPH.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        COALESCE((SELECT SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) FROM Votes V WHERE V.PostId = RPH.PostId), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(C.Id) FROM Comments C WHERE C.PostId = RPH.PostId), 0) AS CommentCount,
+        COALESCE((
+            SELECT SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END)
+            FROM PostHistory PH
+            WHERE PH.PostId = RPH.PostId
+        ), 0) AS ClosedCount,
+        COALESCE((
+            SELECT SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END)
+            FROM PostHistory PH
+            WHERE PH.PostId = RPH.PostId
+        ), 0) AS ReopenedCount
+    FROM 
+        RecursivePostHierarchy RPH
+    LEFT JOIN 
+        Users U ON RPH.OwnerUserId = U.Id
+),
+FinalPostStats AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.OwnerDisplayName,
+        PD.Reputation,
+        PD.UpVotes,
+        PD.CommentCount,
+        PD.ClosedCount,
+        PD.ReopenedCount,
+        ROW_NUMBER() OVER (PARTITION BY PD.OwnerUserId ORDER BY PD.UpVotes DESC) AS UserRank
+    FROM 
+        PostDetails PD
+)
+SELECT 
+    FPS.PostId,
+    FPS.Title,
+    FPS.OwnerDisplayName,
+    FPS.Reputation,
+    FPS.UpVotes,
+    FPS.CommentCount,
+    FPS.ClosedCount,
+    FPS.ReopenedCount,
+    UR.BadgeCount,
+    UR.TotalBounty
+FROM 
+    FinalPostStats FPS
+LEFT JOIN 
+    UserReputation UR ON FPS.OwnerDisplayName = UR.DisplayName
+WHERE 
+    FPS.ClosedCount > 0 OR FPS.ReopenedCount > 0
+ORDER BY 
+    FPS.UpVotes DESC, FPS.Reputation DESC;

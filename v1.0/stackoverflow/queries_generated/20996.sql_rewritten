@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.ExcerptPostId = P.Id OR T.WikiPostId = P.Id
+    GROUP BY 
+        P.Id
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COALESCE(NULLIF(U.Reputation, 0), 1) AS ReputationScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    GROUP BY 
+        U.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        PH.UserId,
+        P.Title,
+        P.OwnerUserId,
+        PH.PostHistoryTypeId,
+        CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            ELSE 'Edited'
+        END AS ChangeType,
+        COUNT(*) OVER (PARTITION BY PH.PostId) AS ChangeCount,
+        LEAD(PH.CreationDate) OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate) AS NextChangeDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalBounties,
+    U.Upvotes,
+    U.Downvotes,
+    U.ReputationScore,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.Rank,
+    PHD.ChangeCount,
+    PHD.ChangeType,
+    PHD.NextChangeDate,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        PostLinks PL 
+     WHERE 
+        PL.PostId = RP.PostId AND PL.LinkTypeId = 3) AS DuplicateLinkCount,
+    COALESCE(STRING_AGG(DISTINCT TG.TagName, ', '), 'No Tags') AS RelatedTags
+FROM 
+    UserStats U
+LEFT JOIN 
+    RankedPosts RP ON U.UserId = RP.PostId
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.PostId = PHD.PostId
+LEFT JOIN 
+    LATERAL unnest(RP.Tags) AS TG(TagName) ON true
+WHERE 
+    U.ReputationScore > 100
+    AND (PHD.NextChangeDate IS NULL OR PHD.NextChangeDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+ORDER BY 
+    U.PostCount DESC, 
+    RP.Score DESC;

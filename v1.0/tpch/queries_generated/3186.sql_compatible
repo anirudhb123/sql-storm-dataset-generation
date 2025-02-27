@@ -1,0 +1,73 @@
+
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_availqty,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY (ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue_after_discount,
+        COUNT(li.l_orderkey) AS lineitem_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(total_supply_cost) AS total_cost
+    FROM 
+        SupplierPartDetails s
+    WHERE 
+        rn = 1 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+
+SELECT 
+    cd.c_custkey,
+    cd.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(cd.revenue_after_discount) AS total_revenue,
+    COALESCE(ts.total_cost, 0) AS top_supplier_cost
+FROM 
+    CustomerOrderDetails cd
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT li.l_suppkey 
+        FROM orders o 
+        JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+        WHERE o.o_orderkey = cd.o_orderkey
+    )
+GROUP BY 
+    cd.c_custkey, cd.c_name
+HAVING 
+    SUM(cd.revenue_after_discount) > 10000
+ORDER BY 
+    total_revenue DESC;

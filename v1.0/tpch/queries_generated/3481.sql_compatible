@@ -1,0 +1,71 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        sp.ps_suppkey,
+        sp.supplier_revenue,
+        RANK() OVER (ORDER BY sp.supplier_revenue DESC) AS revenue_rank
+    FROM 
+        SupplierPerformance sp
+),
+CompositeResults AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_revenue,
+        os.unique_customers,
+        ts.supplier_revenue,
+        ts.revenue_rank,
+        CASE 
+            WHEN ts.revenue_rank IS NOT NULL THEN 'Top Supplier'
+            ELSE 'Other Supplier'
+        END AS supplier_category
+    FROM 
+        OrderSummary os
+    LEFT JOIN 
+        TopSuppliers ts ON os.o_orderkey = ts.ps_suppkey
+)
+SELECT 
+    cr.o_orderkey,
+    cr.total_revenue,
+    cr.unique_customers,
+    cr.supplier_revenue,
+    cr.supplier_category,
+    CASE 
+        WHEN cr.total_revenue > 10000 THEN 'High Revenue'
+        WHEN cr.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category,
+    EXTRACT(YEAR FROM cr.o_orderdate) AS order_year
+FROM 
+    CompositeResults cr
+WHERE 
+    cr.supplier_category = 'Top Supplier' OR (cr.total_revenue < 1000 AND cr.supplier_category = 'Other Supplier')
+ORDER BY 
+    cr.total_revenue DESC, cr.o_orderkey;

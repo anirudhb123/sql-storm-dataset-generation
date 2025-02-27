@@ -1,0 +1,52 @@
+
+WITH RECURSIVE min_price AS (
+    SELECT ps_partkey, MIN(ps_supplycost) AS min_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+max_price AS (
+    SELECT ps_partkey, MAX(ps_supplycost) AS max_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+),
+discounted_lineitem AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           (CASE WHEN l.l_discount IS NULL THEN 0 
+                 ELSE l.l_extendedprice * (1 - l.l_discount) END) AS effective_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate >= DATE '1997-01-01'
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 5
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.nation_name,
+           ROW_NUMBER() OVER (PARTITION BY s.nation_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier_details s
+)
+SELECT p.p_partkey, p.p_name, np.min_cost, mp.max_cost, sd.s_name, sd.nation_name,
+       COALESCE(CASE WHEN sd.rank = 1 THEN 'Highest Acct Balance' END, 'Other') AS account_status,
+       SUM(dl.effective_price) AS total_discounted_price
+FROM part p
+JOIN min_price np ON p.p_partkey = np.ps_partkey
+JOIN max_price mp ON p.p_partkey = mp.ps_partkey
+JOIN discounted_lineitem dl ON dl.l_partkey = p.p_partkey
+LEFT JOIN ranked_suppliers sd ON sd.s_suppkey IN (
+    SELECT ps_supkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = p.p_partkey
+)
+GROUP BY p.p_partkey, p.p_name, np.min_cost, mp.max_cost, sd.s_name, sd.nation_name, sd.rank
+HAVING SUM(dl.effective_price) > 5000
+ORDER BY total_discounted_price DESC
+FETCH FIRST 10 ROWS ONLY;

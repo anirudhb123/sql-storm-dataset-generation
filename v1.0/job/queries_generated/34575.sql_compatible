@@ -1,0 +1,55 @@
+
+WITH RECURSIVE movie_cast_hierarchy AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        ka.title AS movie_title,
+        1 AS recursion_level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title ka ON c.movie_id = ka.movie_id
+    WHERE 
+        ka.production_year > 2000
+    
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        ka.title AS movie_title,
+        mch.recursion_level + 1
+    FROM 
+        movie_cast_hierarchy mch
+    JOIN 
+        cast_info mc ON mch.movie_id = mc.movie_id
+    JOIN 
+        aka_name a ON mc.person_id = a.person_id
+    JOIN 
+        aka_title ka ON mc.movie_id = ka.movie_id
+    WHERE 
+        ka.production_year IS NOT NULL
+        AND mch.actor_name <> a.name
+)
+
+SELECT 
+    m.movie_title,
+    COUNT(DISTINCT m.person_id) AS total_actors,
+    STRING_AGG(m.actor_name, ', ') AS actor_names,
+    AVG(m.recursion_level) AS avg_recursion_level,
+    MAX(mh.title) AS last_movie_title
+FROM 
+    movie_cast_hierarchy m
+LEFT JOIN 
+    aka_title mh ON m.movie_id = mh.movie_id
+GROUP BY 
+    m.movie_title
+HAVING 
+    COUNT(DISTINCT m.person_id) > 5
+ORDER BY 
+    total_actors DESC, 
+    m.movie_title;

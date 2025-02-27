@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        p.OwnerUserId,
+        p.Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+
+HighScoringPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.ScoreRank <= 10 THEN 'Top 10'
+            WHEN rp.ScoreRank <= 20 THEN 'Top 20'
+            ELSE 'Others'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, '><'))) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        Tag
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    up.DisplayName AS Author,
+    hp.Title,
+    hp.CreationDate,
+    hp.Score,
+    hp.ViewCount,
+    hp.ScoreCategory,
+    ub.TotalBadges,
+    ub.BadgeNames,
+    pt.PostCount AS RelatedTagCount
+FROM 
+    HighScoringPosts hp
+JOIN 
+    Users up ON hp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    PopularTags pt ON hp.Tags LIKE '%' || pt.Tag || '%'
+WHERE 
+    hp.CommentCount > 5
+    AND hp.PostId NOT IN (SELECT PostId FROM Votes v WHERE v.VoteTypeId = 3) 
+    AND hp.ViewCount IS NOT NULL
+ORDER BY 
+    hp.Score DESC, 
+    hp.ViewCount DESC;

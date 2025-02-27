@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(t.title, 'Untitled') AS movie_title,
+        COALESCE(c.company_name, 'Unknown Company') AS company_name,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COALESCE(NULLIF(mc2.company_name, ''), 'Unknown Company') AS company_name,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_companies mc2 ON mh.movie_id = mc2.movie_id
+    LEFT JOIN 
+        company_name c2 ON mc2.company_id = c2.id
+)
+, CastStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS unique_cast_count,
+        COUNT(ci.id) AS total_cast_entries
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS title,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS most_recent
+    FROM 
+        title t
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.company_name,
+    mh.production_year,
+    COALESCE(cs.unique_cast_count, 0) AS unique_cast_count,
+    COALESCE(cs.total_cast_entries, 0) AS total_cast_entries,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category,
+    CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM movie_keyword mk
+            JOIN keyword k ON mk.keyword_id = k.id
+            WHERE mk.movie_id = mh.movie_id AND k.keyword = 'Award'
+        ) THEN 'Award-Winning'
+        ELSE 'Not Award-Winning'
+    END AS award_status,
+    STRING_AGG(DISTINCT COALESCE(CONCAT(cn.name, ' (', rt.role, ')'), 'Not applicable'), ', ') AS cast_list
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastStats cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    char_name cn ON cc.subject_id = cn.id
+LEFT JOIN 
+    role_type rt ON cc.status_id = rt.id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.company_name, mh.production_year, cs.unique_cast_count, cs.total_cast_entries
+HAVING 
+    COUNT(DISTINCT cn.id) > 0
+ORDER BY 
+    mh.production_year DESC, mh.movie_title;

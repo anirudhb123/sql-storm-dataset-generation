@@ -1,0 +1,75 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        AVG(B.Class) AS AvgBadgeClass,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.Reputation,
+        U.BadgeCount,
+        U.AvgBadgeClass,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM UserBadges U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score AS PostScore,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer, 
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVoteCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY P.Id, P.OwnerUserId, P.Score, P.CreationDate, P.AcceptedAnswerId
+),
+UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(P.PostScore) AS TotalPostScore,
+        SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN P.Score < 0 THEN -P.Score ELSE 0 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN RecentPosts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.Reputation,
+    U.DisplayName,
+    UBad.BadgeCount,
+    UBad.BadgeNames,
+    UScores.TotalPostScore,
+    UScores.TotalUpVotes,
+    UScores.TotalDownVotes,
+    (CASE 
+        WHEN UScores.TotalPostScore IS NULL THEN 'No Activity'
+        WHEN UScores.TotalPostScore >= 100 THEN 'Active Contributor'
+        ELSE 'Moderate Activity' 
+     END) AS ActivityStatus,
+    (CASE 
+        WHEN UBad.AvgBadgeClass > 2 THEN 'High Badge Holder'
+        WHEN UBad.AvgBadgeClass IS NULL THEN 'No Badges'
+        ELSE 'Regular Badge Holder' 
+     END) AS BadgeStatus
+FROM Users U
+JOIN UserBadges UBad ON U.Id = UBad.UserId
+LEFT JOIN UserScores UScores ON U.Id = UScores.UserId
+LEFT JOIN TopUsers TU ON U.Id = TU.UserId
+WHERE 
+    U.LastAccessDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    AND (UBad.BadgeCount > 0 OR UScores.TotalPostScore > 0)
+ORDER BY U.Reputation DESC, UBad.BadgeCount DESC, UScores.TotalPostScore DESC;

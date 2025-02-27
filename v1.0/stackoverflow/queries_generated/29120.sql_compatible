@@ -1,0 +1,59 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(COALESCE(vote_ratings.Score, 0)) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            Score,
+            RANK() OVER (PARTITION BY PostId ORDER BY Score DESC) AS rank
+        FROM 
+            Votes
+    ) AS vote_ratings ON p.Id = vote_ratings.PostId AND vote_ratings.rank = 1
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        BadgeCount,
+        TotalBounties,
+        AverageScore,
+        RANK() OVER (ORDER BY Reputation DESC, PostCount DESC) AS UserRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserRank,
+    DisplayName,
+    Reputation,
+    PostCount,
+    AnswerCount,
+    BadgeCount,
+    TotalBounties,
+    AverageScore
+FROM 
+    TopUsers
+WHERE 
+    UserRank <= 10
+ORDER BY 
+    UserRank;

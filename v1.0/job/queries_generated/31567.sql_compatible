@@ -1,0 +1,47 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel of: ', mh.title) AS title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+)
+
+SELECT 
+    m.movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    AVG(p.info) AS avg_person_age
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = m.movie_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'age')
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5 AND AVG(p.info) IS NOT NULL
+ORDER BY 
+    m.production_year DESC, total_cast DESC;

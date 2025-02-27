@@ -1,0 +1,70 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_with_role AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        MAX(rt.role) AS predominant_role
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+title_keyword AS (
+    SELECT 
+        mt.title,
+        GROUP_CONCAT(mk.keyword) AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    ch.cast_count,
+    ch.predominant_role,
+    tk.keywords,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = m.id 
+     AND status_id IS NOT NULL) AS complete_cast_count
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_with_role ch ON m.movie_id = ch.movie_id
+LEFT JOIN 
+    title_keyword tk ON m.title = tk.title
+WHERE 
+    ch.cast_count > 5
+ORDER BY 
+    m.production_year DESC, 
+    ch.cast_count DESC
+LIMIT 10;

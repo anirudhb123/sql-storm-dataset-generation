@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        aka_title t
+),
+MovieCast AS (
+    SELECT
+        c.movie_id,
+        p.name AS actor_name,
+        p.surname_pcode,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mc.actor_name,
+        mc.surname_pcode
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCast mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        rm.rank <= 5
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        STRING_AGG(DISTINCT fm.actor_name, ', ') AS actors
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        KeywordCounts kc ON fm.movie_id = kc.movie_id
+    GROUP BY 
+        fm.title, fm.production_year
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.keyword_count,
+    fo.actors
+FROM 
+    FinalOutput fo
+WHERE 
+    (fo.keyword_count > 0 OR fo.actors IS NOT NULL)
+    AND fo.production_year IS NOT NULL
+ORDER BY 
+    fo.production_year DESC, 
+    fo.title;

@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND 
+        o.o_orderdate < DATE '2023-10-01'
+),
+supplier_part_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+detailed_line_items AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-10-01'
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+    COALESCE(s.total_available, 0) AS total_available_parts,
+    AVG(s.avg_supply_cost) AS average_supply_cost,
+    MAX(o.o_totalprice) AS max_order_value
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    ranked_orders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN 
+    detailed_line_items l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier_part_stats s ON l.l_partkey = s.ps_partkey
+WHERE 
+    c.c_acctbal > 500 AND 
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+GROUP BY 
+    c.c_name, r.r_name
+HAVING 
+    SUM(l.l_quantity) > 1000 OR COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    net_revenue DESC, total_orders ASC;

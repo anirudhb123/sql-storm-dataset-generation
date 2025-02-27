@@ -1,0 +1,103 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+aggregate_vars AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(CASE WHEN ws_quantity > 0 THEN ws_quantity ELSE NULL END) AS average_quantity,
+        MAX(total_quantity) AS max_item_quantity,
+        MIN(total_quantity) AS min_item_quantity
+    FROM 
+        ranked_sales
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        ws_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ag.total_net_profit,
+        ag.order_count,
+        ag.average_quantity,
+        ag.max_item_quantity,
+        ag.min_item_quantity,
+        CASE 
+            WHEN ag.total_net_profit IS NULL THEN 'No Sales'
+            WHEN ag.total_net_profit > 5000 THEN 'High Value'
+            ELSE 'Regular Value' 
+        END AS value_category
+    FROM 
+        item i
+    LEFT JOIN 
+        aggregate_vars ag ON i.i_item_sk = ag.ws_item_sk
+),
+stores_ranking AS (
+    SELECT 
+        s.s_store_id,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales,
+        SUM(ss_net_profit) AS total_store_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ss_net_profit) DESC) AS store_rank
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.total_net_profit,
+    id.order_count,
+    id.average_quantity,
+    sr.s_store_id,
+    sr.total_sales,
+    sr.total_store_profit,
+    COUNT(ws.web_page_sk) AS total_page_views,
+    CASE 
+        WHEN sr.total_sales > 100 THEN 'Popular Store'
+        ELSE 'Less Known Store' 
+    END AS store_status,
+    COALESCE(NULLIF(id.total_net_profit, 0), 'Zero Profit') as profit_status
+FROM 
+    item_details id
+LEFT JOIN 
+    web_page wp ON id.i_item_id = SUBSTRING(wp.wp_web_page_id, 1, 16)
+LEFT JOIN 
+    stores_ranking sr ON sr.total_sales = (
+        SELECT MAX(total_sales) 
+        FROM stores_ranking 
+        WHERE store_rank <= 10
+    )
+WHERE 
+    id.average_quantity IS NOT NULL
+GROUP BY 
+    id.i_item_id,
+    id.i_item_desc,
+    id.total_net_profit,
+    id.order_count,
+    id.average_quantity,
+    sr.s_store_id,
+    sr.total_sales,
+    sr.total_store_profit
+HAVING 
+    id.total_net_profit IS NOT NULL 
+    AND id.order_count > 0
+ORDER BY 
+    id.total_net_profit DESC, 
+    sr.total_store_profit DESC;

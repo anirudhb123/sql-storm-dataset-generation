@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    -- Get all answers and their respective questions recursively
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Title,
+        P.AcceptedAnswerId,
+        P.ParentId,
+        P.Score,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        A.Id,
+        A.PostTypeId,
+        A.Title,
+        A.AcceptedAnswerId,
+        A.ParentId,
+        A.Score,
+        Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostHierarchy Q ON A.ParentId = Q.PostId
+    WHERE 
+        A.PostTypeId = 2 -- Answers
+),
+CommentDetails AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS Badges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(CH.CommentCount, 0) AS CommentCount,
+        COALESCE(CH.LastCommentDate, '1970-01-01') AS LastCommentDate,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UB.Badges, 'None') AS Badges,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS UserRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        CommentDetails CH ON P.Id = CH.PostId
+    LEFT JOIN 
+        UserBadges UB ON P.OwnerUserId = UB.UserId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.LastCommentDate,
+    PS.BadgeCount,
+    PS.Badges,
+    PH.*
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    RecursivePostHierarchy PH ON PS.PostId = PH.PostId
+WHERE 
+    PS.Score > 10 -- Filter for posts with a high score
+ORDER BY 
+    PS.BadgeCount DESC, PS.Score DESC, PS.ViewCount DESC;

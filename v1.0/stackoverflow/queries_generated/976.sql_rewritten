@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(RP.PostId) AS TotalPosts,
+        SUM(RP.ViewCount) AS TotalViews,
+        AVG(RP.Score) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        RankedPosts RP ON U.Id = RP.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalViews,
+        U.AvgScore,
+        RANK() OVER (ORDER BY U.TotalViews DESC) AS ViewRank
+    FROM 
+        UserPostStats U
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.TotalViews,
+    COALESCE(TO_CHAR(T.AvgScore, 'FM999.00'), 'N/A') AS AvgScore,
+    CASE 
+        WHEN T.ViewRank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributor'
+    END AS ContributorStatus
+FROM 
+    TopUsers T
+WHERE 
+    T.TotalPosts > 5
+ORDER BY 
+    T.ViewRank;

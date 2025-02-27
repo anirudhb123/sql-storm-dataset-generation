@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        ws.ws_sales_price,
+        COALESCE(ws.ws_net_paid, 0) AS net_paid,
+        COALESCE(ws.ws_ext_discount_amt, 0) AS ext_discount_amt,
+        DATEADD(DAY, -1 * ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC), CAST(d.d_date AS DATE)) AS sales_rollback_date,
+        CASE 
+            WHEN ws.ws_sales_price IS NULL THEN 'Not Available'
+            WHEN ws.ws_sales_price < 100 THEN 'Low Price'
+            WHEN ws.ws_sales_price BETWEEN 100 AND 500 THEN 'Medium Price'
+            ELSE 'High Price'
+        END AS price_category
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+),
+ReturnCounts AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    WHERE cr.cr_returned_date_sk IS NOT NULL
+    GROUP BY cr.cr_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status
+)
+
+SELECT 
+    rs.ws_item_sk,
+    rs.sales_rank,
+    rs.ws_quantity,
+    rs.ws_sales_price,
+    rc.total_returns,
+    ci.total_orders,
+    ci.total_spent,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    CASE 
+        WHEN rc.total_returns IS NULL THEN 'No Returns'
+        WHEN rc.total_returns = 0 THEN 'No Returns'
+        WHEN rc.total_returns > 5 THEN 'High Return'
+        ELSE 'Normal Return'
+    END AS return_status
+FROM RankedSales rs
+LEFT JOIN ReturnCounts rc ON rs.ws_item_sk = rc.cr_item_sk
+LEFT JOIN CustomerInfo ci ON ci.total_orders > 0
+WHERE rs.sales_rank = 1
+AND (rs.net_paid - rs.ext_discount_amt) > 50
+ORDER BY rs.ws_sales_price DESC, return_status ASC;
+

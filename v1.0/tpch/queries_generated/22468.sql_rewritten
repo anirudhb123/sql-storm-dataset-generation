@@ -1,0 +1,60 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level
+    FROM nation
+    WHERE n_name LIKE 'A%'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+price_summary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY p.p_partkey
+),
+supply_info AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+final_summary AS (
+    SELECT 
+        p.p_name,
+        ps.total_revenue,
+        si.avg_supply_cost,
+        si.max_avail_qty,
+        CASE 
+            WHEN ps.total_revenue IS NULL THEN 'No Revenue'
+            WHEN ps.total_orders > 5 THEN 'High Demand'
+            ELSE 'Low Demand'
+        END AS demand_category
+    FROM price_summary ps
+    JOIN part p ON ps.p_partkey = p.p_partkey
+    LEFT JOIN supply_info si ON p.p_partkey = si.ps_partkey
+    WHERE ps.total_revenue IS NOT NULL
+)
+
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    fs.p_name AS product_name,
+    fs.total_revenue,
+    fs.avg_supply_cost,
+    fs.max_avail_qty,
+    fs.demand_category,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_nationkey ORDER BY fs.total_revenue DESC) AS product_rank
+FROM final_summary fs
+JOIN nation ns ON ns.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'Mid%')
+JOIN nation_hierarchy nh ON ns.n_nationkey = nh.n_nationkey
+WHERE fs.total_revenue > (SELECT AVG(total_revenue) FROM final_summary WHERE total_revenue IS NOT NULL)
+ORDER BY region_name, nation_name, product_rank;

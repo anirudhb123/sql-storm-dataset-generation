@@ -1,0 +1,67 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopRatedMovies AS (
+    SELECT 
+        m.movie_id,
+        ROUND(AVG(rating.rating), 2) AS avg_rating
+    FROM
+        movie_info m
+    JOIN 
+        (SELECT movie_id, MAX(rating) AS rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating') GROUP BY movie_id) rating
+    ON 
+        m.movie_id = rating.movie_id
+    GROUP BY 
+        m.movie_id
+    HAVING 
+        ROUND(AVG(rating.rating), 2) > 8.0
+),
+ActorRoles AS (
+    SELECT 
+        DISTINCT a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role IS NOT NULL
+    GROUP BY 
+        a.name, r.role
+    HAVING 
+        COUNT(c.movie_id) > 5
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(r.title_rank, 0) AS title_rank,
+    ar.actor_name,
+    ar.role_name,
+    ar.movie_count,
+    CASE 
+        WHEN t.id IS NULL THEN 'No Title Found'
+        ELSE 'Title Found'
+    END AS title_status
+FROM 
+    TopRatedMovies tm
+LEFT JOIN 
+    RankedTitles r ON tm.movie_id = r.title_id
+JOIN 
+    ActorRoles ar ON ar.movie_count > 0
+LEFT JOIN 
+    aka_title t ON t.id = tm.movie_id
+WHERE 
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+ORDER BY 
+    t.production_year DESC, r.title_rank;

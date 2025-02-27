@@ -1,0 +1,66 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(AVG(V.BountyAmount), 0) AS AverageBounty,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.Id IS NOT NULL THEN 1 END) AS HistoryCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(S.Score, 0)) AS TotalScore,
+        SUM(PS.Upvotes) AS TotalUpvotes,
+        SUM(PS.Downvotes) AS TotalDownvotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostStats PS ON P.Id = PS.PostId
+    LEFT JOIN (
+        SELECT PostId, SUM(Score) AS Score
+        FROM Votes 
+        WHERE VoteTypeId = 2 
+        GROUP BY PostId
+    ) S ON P.Id = S.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    R.UserRank,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalScore,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    PS.AverageBounty,
+    STRING_AGG(T.TagName, ', ') AS Tags
+FROM UserPostStats U
+JOIN RankedUsers R ON U.UserId = R.Id
+LEFT JOIN Posts P ON U.TotalPosts > 0 AND P.OwnerUserId = U.UserId
+LEFT JOIN LATERAL (
+    SELECT 
+        T.TagName
+    FROM Tags T
+    WHERE T.ExcerptPostId = P.Id OR T.WikiPostId = P.Id
+) AS T ON TRUE
+JOIN PostStats PS ON P.Id = PS.PostId
+WHERE U.TotalPosts > 10
+GROUP BY R.UserRank, U.DisplayName, U.TotalPosts, U.TotalScore, U.TotalUpvotes, U.TotalDownvotes, PS.AverageBounty
+ORDER BY R.UserRank;

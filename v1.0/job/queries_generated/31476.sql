@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ai.movie_id,
+        COUNT(DISTINCT ai.person_id) AS num_actors,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info ai
+    INNER JOIN 
+        aka_name ak ON ai.person_id = ak.person_id
+    LEFT JOIN 
+        MovieHierarchy mh ON ai.movie_id = mh.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ai.actor_names,
+        ai.num_actors
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorInfo ai ON mh.movie_id = ai.movie_id
+    WHERE 
+        mh.level = 1 AND
+        (ao.num_actors IS NULL OR ao.num_actors > 2) -- Exclude movies with 2 or fewer actors
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_names,
+    fm.num_actors,
+    CASE 
+        WHEN fm.num_actors IS NULL THEN 'No Actors'
+        ELSE CAST(fm.num_actors AS text)
+    END AS actor_count_status
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.num_actors DESC NULLS LAST
+LIMIT 10;
+
+-- This query retrieves up to 10 movies produced since 2000 that have more than 2 actors,
+-- leveraging recursive CTEs to build a movie hierarchy and aggregating actor information.
+-- It utilizes window functions, outer joins, string aggregation, and NULL logic to filter and 
+-- present the results in a meaningful way, designed for performance benchmarking.

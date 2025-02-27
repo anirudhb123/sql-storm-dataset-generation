@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.LastActivityDate DESC) AS ActivityRank,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+        AND (p.Title IS NOT NULL OR p.Body IS NOT NULL)
+        AND p.Score IS NOT NULL
+),
+
+ClosedPosts AS (
+    SELECT DISTINCT
+        ph.PostId,
+        ph.CreationDate,
+        cht.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cht ON ph.Comment::int = cht.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+),
+
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(b.Id) > 5
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Author,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.ActivityRank,
+    rp.VoteCount,
+    cp.CloseReason,
+    bu.BadgeCount,
+    bu.HighestBadgeClass
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    BadgedUsers bu ON rp.Author = bu.UserId
+WHERE 
+    rp.ActivityRank <= 5 
+ORDER BY 
+    COALESCE(rp.Score, -1) DESC, 
+    COALESCE(cp.CreationDate, cast('2024-10-01 12:34:56' as timestamp)) ASC
+LIMIT 100;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           1 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL 
+
+    SELECT m.id AS movie_id, 
+           m.title, 
+           mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title m2 ON m2.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON mh.movie_id = m2.id
+    WHERE m2.production_year >= 2000
+),
+ActorMovieInfo AS (
+    SELECT c.movie_id, 
+           a.name AS actor_name,
+           COUNT(DISTINCT c.id) OVER (PARTITION BY c.movie_id) AS actor_count,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    WHERE c.person_role_id IN (SELECT id FROM role_type WHERE role IN ('Lead', 'Supporting'))
+),
+FilteredMovies AS (
+    SELECT mh.movie_id,
+           mh.title,
+           am.actor_count,
+           am.actor_name
+    FROM MovieHierarchy mh
+    LEFT JOIN ActorMovieInfo am ON mh.movie_id = am.movie_id
+    WHERE am.actor_count > 1 OR am.actor_name IS NULL
+)
+SELECT
+    fm.title,
+    COALESCE(am.actor_name, 'No Actors') AS filtered_actor_name,
+    COALESCE(am.actor_count, 0) AS total_actors,
+    CASE 
+        WHEN am.actor_count IS NOT NULL THEN 'Has Actors'
+        ELSE 'No Actors Available'
+    END AS actor_status,
+    CONCAT('Movie Title: ', fm.title, ', Actor Count: ', COALESCE(am.actor_count, 0)) AS summary
+FROM FilteredMovies fm
+LEFT JOIN ActorMovieInfo am ON fm.movie_id = am.movie_id
+ORDER BY fm.title;

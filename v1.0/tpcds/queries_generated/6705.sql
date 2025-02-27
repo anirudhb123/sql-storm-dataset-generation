@@ -1,0 +1,72 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(cr.return_quantity) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_return_tax) AS total_return_tax
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        addr.ca_city,
+        addr.ca_state,
+        addr.ca_country
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address addr ON c.c_current_addr_sk = addr.ca_address_sk
+),
+ReturnCustomerDetails AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        cr.total_returns,
+        cr.total_return_amount,
+        cr.total_return_tax
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        CustomerReturns cr ON cd.c_customer_sk = cr.returning_customer_sk
+)
+SELECT 
+    rcd.c_customer_sk,
+    rcd.c_first_name,
+    rcd.c_last_name,
+    rcd.cd_gender,
+    rcd.cd_marital_status,
+    rcd.cd_purchase_estimate,
+    rcd.cd_credit_rating,
+    rcd.ca_city,
+    rcd.ca_state,
+    rcd.ca_country,
+    rcd.total_returns,
+    rcd.total_return_amount,
+    rcd.total_return_tax
+FROM 
+    ReturnCustomerDetails rcd
+WHERE 
+    rcd.total_returns > 5
+ORDER BY 
+    rcd.total_return_amount DESC
+LIMIT 10;

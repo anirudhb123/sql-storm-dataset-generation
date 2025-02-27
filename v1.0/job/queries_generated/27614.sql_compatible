@@ -1,0 +1,74 @@
+
+WITH MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT c.kind) AS company_types,
+        ARRAY_AGG(DISTINCT a.name) AS actor_names,
+        ARRAY_AGG(DISTINCT r.role) AS roles
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+), 
+FilteredMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        keywords, 
+        company_types,
+        actor_names,
+        roles
+    FROM 
+        MovieInfo
+    WHERE 
+        production_year >= 2000
+    AND 
+        ARRAY_LENGTH(keywords, 1) > 0
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    STRING_AGG(DISTINCT an.name, ', ') AS actors,
+    STRING_AGG(DISTINCT rt.role, ', ') AS roles
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    complete_cast cc ON fm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.id = ci.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year
+ORDER BY 
+    fm.production_year DESC, fm.title;

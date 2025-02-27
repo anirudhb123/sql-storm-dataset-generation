@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserStats
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        PT.Name AS PostType,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName, PT.Name
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation AS UserReputation,
+    AP.Title AS ActivePostTitle,
+    AP.Score AS PostScore,
+    AP.CommentCount,
+    AP.UpVotes,
+    AP.DownVotes,
+    AP.CreationDate AS PostCreationDate,
+    TU.TotalQuestions AS UserQuestions,
+    TU.TotalAnswers AS UserAnswers
+FROM 
+    TopUsers TU
+JOIN 
+    ActivePosts AP ON TU.UserId = AP.OwnerUserId
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.TotalScore DESC, AP.Score DESC;

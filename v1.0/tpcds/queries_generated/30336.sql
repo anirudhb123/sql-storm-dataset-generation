@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_bill_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sw.c_customer_sk,
+        SUM(cs.cs_ext_sales_price) + h.total_sales AS total_sales,
+        h.level + 1
+    FROM 
+        sales_hierarchy h
+    JOIN 
+        web_sales ws ON h.customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    JOIN 
+        customer sw ON ws.ws_ship_customer_sk = sw.c_customer_sk
+    WHERE 
+        h.level < 5
+    GROUP BY 
+        sw.c_customer_sk, h.total_sales
+),
+ranked_sales AS (
+    SELECT 
+        customer_sk,
+        total_sales,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_hierarchy
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        c.c_customer_sk,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, c.c_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    rs.sales_rank,
+    cd.net_profit,
+    CASE 
+        WHEN cd.net_profit > 1000 THEN 'High'
+        WHEN cd.net_profit BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS profit_band
+FROM 
+    customer_demographics cd
+LEFT JOIN 
+    ranked_sales rs ON cd.c_customer_sk = rs.customer_sk
+WHERE 
+    (cd.cd_gender = 'F' OR cd.cd_marital_status = 'S')
+    AND cd.net_profit IS NOT NULL
+ORDER BY 
+    total_sales DESC, profit_band
+LIMIT 100;

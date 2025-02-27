@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ss_net_paid) DESC) as rnk
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+customer_details AS (
+    SELECT 
+        ca.ca_address_id,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_credit_rating,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        d.d_day_name,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.total_transactions, 0) AS total_transactions
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales ws WHERE ws.bill_customer_sk = c.c_customer_sk)
+    LEFT JOIN sales_summary ss ON c.c_customer_id = ss.c_customer_id
+    WHERE d.d_year >= 2020
+),
+high_value_customers AS (
+    SELECT 
+        customer_id,
+        total_sales,
+        total_transactions,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank
+    FROM sales_summary
+    WHERE total_sales > 1000
+)
+SELECT 
+    cd.ca_address_id,
+    cd.cd_marital_status,
+    cd.cd_gender,
+    cd.cd_credit_rating,
+    cd.d_year,
+    cd.d_month_seq,
+    cd.d_week_seq,
+    cd.d_day_name,
+    cd.total_sales,
+    cd.total_transactions,
+    COALESCE(hv.total_sales, 0) AS high_value_sales
+FROM customer_details cd
+LEFT JOIN high_value_customers hv ON cd.c_customer_id = hv.customer_id
+WHERE (cd.total_sales > 0 OR cd.total_transactions > 0)
+ORDER BY cd.total_sales DESC, cd.d_year, cd.d_month_seq;

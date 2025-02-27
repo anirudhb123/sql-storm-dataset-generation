@@ -1,0 +1,49 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        DENSE_RANK() OVER (PARTITION BY (SELECT STRING_AGG(DISTINCT unnest(string_to_array(p.Tags, '><')))) ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.ViewCount, p.Score, p.Body, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (PARTITION BY rp.TagRank ORDER BY rp.ViewCount DESC) AS RankWithinTag
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 
+)
+SELECT 
+    CONCAT('Post Title: ', tp.Title, ' (', tp.OwnerName, ')') AS PostSummary,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.AnswerCount,
+    SUBSTRING(tp.Body, 1, 200) AS PreviewBody 
+FROM 
+    TopPosts tp
+WHERE 
+    tp.RankWithinTag <= 3 
+ORDER BY 
+    tp.TagRank, tp.RankWithinTag;

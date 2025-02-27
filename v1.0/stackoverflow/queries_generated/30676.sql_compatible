@@ -1,0 +1,73 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    
+    SELECT Id, Title, ParentId, OwnerUserId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, ph.Level + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserReputation AS (
+    
+    SELECT OwnerUserId, AVG(Reputation) AS AvgReputation
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.AcceptedAnswerId IS NOT NULL
+    GROUP BY OwnerUserId
+),
+PostActivity AS (
+    
+    SELECT Id, Title, LastActivityDate,
+           CASE
+               WHEN Score > 10 THEN 'Highly Active'
+               WHEN Score BETWEEN 1 AND 10 THEN 'Moderately Active'
+               ELSE 'Inactive'
+           END AS ActivityLevel
+    FROM Posts
+),
+PostHistoryStats AS (
+    
+    SELECT p.Id AS PostId, 
+           COUNT(ph.Id) AS EditCount,
+           MAX(ph.CreationDate) AS LastEditDate,
+           JSON_AGG(DISTINCT ph.Comment) AS CloseReasons
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY p.Id
+),
+TopInfluencers AS (
+    
+    SELECT u.DisplayName, COUNT(a.Id) AS AcceptedCount, ur.AvgReputation
+    FROM Users u
+    JOIN Posts q ON u.Id = q.OwnerUserId
+    JOIN Posts a ON a.AcceptedAnswerId = q.Id
+    JOIN UserReputation ur ON u.Id = ur.OwnerUserId
+    GROUP BY u.DisplayName, ur.AvgReputation
+    ORDER BY AcceptedCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ph.Level,
+    pa.LastActivityDate,
+    pa.ActivityLevel,
+    phs.EditCount,
+    phs.LastEditDate,
+    CASE 
+        WHEN phs.CloseReasons IS NULL THEN 'No Closure' 
+        ELSE CAST(phs.CloseReasons AS text) 
+    END AS RecentCloseReasons,
+    ti.DisplayName AS TopInfluencer,
+    ti.AcceptedCount,
+    ti.AvgReputation
+FROM PostHierarchy ph
+LEFT JOIN PostActivity pa ON ph.Id = pa.Id
+LEFT JOIN PostHistoryStats phs ON ph.Id = phs.PostId
+LEFT JOIN TopInfluencers ti ON ph.OwnerUserId = ti.DisplayName 
+ORDER BY ph.Level, pa.LastActivityDate DESC;

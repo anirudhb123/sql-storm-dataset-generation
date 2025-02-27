@@ -1,0 +1,98 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserID,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(*) AS TotalEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+PopularTags AS (
+    SELECT 
+        TRIM(t.TagName) AS Tag,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5  
+),
+RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 100  
+    UNION ALL
+    SELECT 
+        pp.Id,
+        pp.Score,
+        r.Level + 1
+    FROM 
+        Posts pp
+    JOIN 
+        PostLinks pl ON pp.Id = pl.RelatedPostId
+    JOIN 
+        RecursiveCTE r ON pl.PostId = r.PostID
+)
+SELECT 
+    up.UserID,
+    up.Reputation,
+    COUNT(DISTINCT rp.PostID) AS PostsRanked,
+    SUM(PH.CloseCount) AS TotalCloses,
+    SUM(PH.ReopenCount) AS TotalReopens,
+    STRING_AGG(DISTINCT pt.Tag, ', ') AS PopularTags,
+    COUNT(DISTINCT rc.PostID) AS RelatedPostCount
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserID = rp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary PH ON PH.UserId = up.UserID
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 0
+LEFT JOIN 
+    RecursiveCTE rc ON rc.Score >= 100
+WHERE 
+    up.Reputation > 1000  
+GROUP BY 
+    up.UserID, up.Reputation
+ORDER BY 
+    up.Reputation DESC;

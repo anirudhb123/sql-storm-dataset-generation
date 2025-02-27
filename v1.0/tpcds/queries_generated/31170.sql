@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+), 
+highest_sales AS (
+    SELECT 
+        DISTINCT item.i_item_id,
+        item.i_item_desc,
+        ct.total_net_profit,
+        DATE_FORMAT(DATE_ADD(DATE(DATE_ADD(DATE(DATE_ADD(CURRENT_DATE(), INTERVAL 1 DAY), INTERVAL -1 MONTH)), INTERVAL -1 DAY), INTERVAL 1 DAY), '%Y-%m-%d') AS profit_date
+    FROM sales_cte ct
+    JOIN item ON ct.ws_item_sk = item.i_item_sk
+    WHERE ct.rank = 1
+),
+customer_return_data AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amount) AS total_returned_amount,
+        COUNT(DISTINCT cr_returning_customer_sk) AS unique_returning_customers
+    FROM catalog_returns
+    GROUP BY cr_item_sk
+),
+final_report AS (
+    SELECT 
+        hs.i_item_id,
+        hs.i_item_desc,
+        hs.total_net_profit,
+        cr.total_returned_quantity,
+        cr.total_returned_amount,
+        cr.unique_returning_customers,
+        (COALESCE(cr.total_returned_quantity, 0) + COALESCE(cr.unique_returning_customers, 0)) AS total_interactions
+    FROM highest_sales hs
+    LEFT JOIN customer_return_data cr ON hs.i_item_id = cr.cr_item_sk
+)
+SELECT 
+    f.i_item_id,
+    f.i_item_desc,
+    f.total_net_profit,
+    f.total_returned_quantity,
+    f.total_returned_amount,
+    f.unique_returning_customers,
+    f.total_interactions,
+    CASE 
+        WHEN f.total_net_profit > 1000 THEN 'High Profit'
+        WHEN f.total_net_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+        ELSE 'Low Profit' 
+    END AS profit_category
+FROM final_report f
+ORDER BY f.total_net_profit DESC
+LIMIT 50;

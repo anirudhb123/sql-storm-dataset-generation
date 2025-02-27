@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(COUNT(p.Id), 0) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS VoteCount,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    upc.PostCount,
+    rp.Title AS TopPostTitle,
+    rp.ViewCount AS TopPostViews,
+    ps.TotalBounty,
+    ps.VoteCount,
+    REPLACE(REPLACE(REPLACE(ps.Title, '<', '&lt;'), '>', '&gt;'), '&', '&amp;') AS SafeTitle,
+    COALESCE(re.LastEditDate, 'No edits') AS LastEdit,
+    CASE 
+        WHEN upc.PostCount = 0 THEN 'Newbie'
+        WHEN upc.PostCount BETWEEN 1 AND 5 THEN 'Emerging Contributor'
+        WHEN upc.PostCount BETWEEN 6 AND 20 THEN 'Contributor'
+        ELSE 'Established Contributor'
+    END AS ContributionLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostCounts upc ON u.Id = upc.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PostStatistics ps ON rp.Id = ps.PostId
+LEFT JOIN 
+    RecentEdits re ON rp.Id = re.PostId AND u.Id = re.UserId
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    u.Reputation DESC;

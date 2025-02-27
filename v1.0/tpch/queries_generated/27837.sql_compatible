@@ -1,0 +1,27 @@
+
+WITH RecursivePartNames AS (
+    SELECT DISTINCT p_name,
+        LENGTH(p_name) AS name_length,
+        SUBSTRING(p_name, 1, 1) AS first_character,
+        SUBSTRING(p_name, LENGTH(p_name), 1) AS last_character
+    FROM part
+    WHERE p_size > 10
+),
+AggregatedParts AS (
+    SELECT first_character,
+        last_character,
+        COUNT(*) AS part_count,
+        SUM(name_length) AS total_length,
+        AVG(name_length) AS avg_length
+    FROM RecursivePartNames
+    GROUP BY first_character, last_character
+),
+FormattedOutput AS (
+    SELECT CONCAT('From ', first_character, ' to ', last_character, ' there are ', part_count, 
+                  ' parts with total name length of ', total_length, 
+                  ' and average name length of ', ROUND(avg_length, 2)) AS formatted_summary
+    FROM AggregatedParts
+)
+SELECT formatted_summary
+FROM FormattedOutput
+ORDER BY first_character, last_character;

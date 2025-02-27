@@ -1,0 +1,70 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(cn.name, 'Unknown Company') AS production_company,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        '(related)' AS production_company,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.production_company,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_company ORDER BY mh.level, mh.production_year DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.production_company,
+    MAX(CASE WHEN ci.role_id = 1 THEN ak.name END) AS main_actor,
+    COUNT(DISTINCT kw.keyword) AS total_keywords,
+    COUNT(DISTINCT mc.company_id) AS total_companies
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rm.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+WHERE 
+    rm.rn = 1 -- Only get the highest level related movies
+GROUP BY 
+    rm.title, rm.production_year, rm.production_company
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    rm.production_year DESC;
+

@@ -1,0 +1,52 @@
+
+WITH TotalReturns AS (
+    SELECT
+        CASE 
+            WHEN sr_return_qty IS NOT NULL THEN 'Store'
+            WHEN wr_return_qty IS NOT NULL THEN 'Web'
+        END AS return_source,
+        COALESCE(SUM(sr_return_qty), 0) AS total_store_return_qty,
+        COALESCE(SUM(wr_return_qty), 0) AS total_web_return_qty,
+        COUNT(DISTINCT COALESCE(sr_ticket_number, wr_order_number)) AS total_returns,
+        AVG(COALESCE(sr_return_amt, wr_return_amt)) AS avg_return_amount
+    FROM
+        store_returns AS sr
+    FULL OUTER JOIN web_returns AS wr ON sr.returning_customer_sk = wr.returning_customer_sk
+    GROUP BY
+        return_source
+),
+CustomerDemographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM
+        customer_demographics
+)
+SELECT
+    cd.gender,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    SUM(COALESCE(tr.total_store_return_qty, 0) + COALESCE(tr.total_web_return_qty, 0)) AS total_return_quantity,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate,
+    SUM(CASE 
+            WHEN tr.return_source = 'Store' THEN tr.total_store_return_qty 
+            ELSE 0 
+        END) AS store_returns,
+    SUM(CASE 
+            WHEN tr.return_source = 'Web' THEN tr.total_web_return_qty 
+            ELSE 0 
+        END) AS web_returns
+FROM
+    customer AS c
+JOIN CustomerDemographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN TotalReturns AS tr ON 1=1
+WHERE
+    cd_purchase_estimate > 100
+GROUP BY
+    cd.gender
+HAVING
+    COUNT(DISTINCT c.c_customer_id) > 5
+ORDER BY
+    cd.gender;

@@ -1,0 +1,115 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(uv.UpvoteCount, 0) AS UpvoteCount,
+        COALESCE(dv.DownvoteCount, 0) AS DownvoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS PostNumber
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS UpvoteCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2
+        GROUP BY 
+            PostId
+    ) uv ON p.Id = uv.PostId 
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS DownvoteCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 3
+        GROUP BY 
+            PostId
+    ) dv ON p.Id = dv.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId 
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, uv.UpvoteCount, dv.DownvoteCount, c.CommentCount, p.CreationDate, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.UpvoteCount) AS TotalUpvotes,
+        SUM(ps.DownvoteCount) AS TotalDownvotes,
+        COUNT(ps.PostId) AS PostCount,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.UpvoteCount) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pu.DisplayName,
+    pu.TotalUpvotes,
+    pu.TotalDownvotes,
+    pu.PostCount,
+    COALESCE(th.ChildPosts, 0) AS ChildPosts,
+    (CASE 
+        WHEN pu.TotalUpvotes - pu.TotalDownvotes > 0 THEN 'Positive' 
+        WHEN pu.TotalUpvotes - pu.TotalDownvotes < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END) AS VoteSentiment
+FROM 
+    TopUsers pu
+LEFT JOIN (
+    SELECT 
+        ParentId, COUNT(*) AS ChildPosts
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NOT NULL
+    GROUP BY 
+        ParentId
+) th ON pu.UserId = th.ParentId
+WHERE 
+    pu.Rank <= 10
+ORDER BY 
+    pu.TotalUpvotes DESC;

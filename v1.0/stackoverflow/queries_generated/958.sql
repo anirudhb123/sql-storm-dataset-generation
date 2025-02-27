@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS upvote_count,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS downvote_count,
+        COALESCE(b.Name, 'None') AS BadgeName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId AND b.Class = 1
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.upvote_count,
+    rp.downvote_count,
+    phs.HistoryCount,
+    phs.LastEditedDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.Id = phs.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Posts' AS Title,
+    COUNT(*) AS Score,
+    NULL AS ViewCount,
+    NULL AS upvote_count,
+    NULL AS downvote_count,
+    NULL AS HistoryCount,
+    NULL AS LastEditedDate
+FROM 
+    Posts
+WHERE 
+    CreationDate > CURRENT_DATE - INTERVAL '30 days'
+ORDER BY 
+    Score DESC;

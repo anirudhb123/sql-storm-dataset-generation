@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        ws.sold_date_sk, 
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY ws.sold_date_sk) AS row_num
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+    GROUP BY 
+        ws.sold_date_sk
+    UNION ALL
+    SELECT 
+        st.sold_date_sk - 1 AS sold_date_sk,
+        (SELECT SUM(ws.ext_sales_price) FROM web_sales ws WHERE ws.sold_date_sk = st.sold_date_sk - 1) AS total_sales,
+        (SELECT COUNT(DISTINCT ws.order_number) FROM web_sales ws WHERE ws.sold_date_sk = st.sold_date_sk - 1) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY st.sold_date_sk) AS row_num
+    FROM 
+        sales_trend st
+    WHERE 
+        st.row_num < 30
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        SUM(ws.ext_sales_price) AS total_spent,
+        cd.cd_gender,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_buy_potential
+)
+SELECT 
+    cs.full_name,
+    cs.total_spent,
+    cs.cd_gender,
+    COALESCE(cs.hd_buy_potential, 'Undefined') AS buy_potential,
+    st.sold_date_sk,
+    st.total_sales,
+    st.total_orders
+FROM 
+    customer_sales cs
+JOIN 
+    sales_trend st ON cs.total_spent > 1000
+ORDER BY 
+    cs.total_spent DESC, st.sold_date_sk
+LIMIT 50;

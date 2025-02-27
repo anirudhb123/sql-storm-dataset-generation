@@ -1,0 +1,46 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.AnswerCount,
+    us.QuestionCount,
+    us.TotalBounty,
+    tu.TagName,
+    tu.PostCount AS TagPostCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    TagUsage tu ON us.PostCount > 0
+ORDER BY 
+    us.PostCount DESC, us.TotalBounty DESC;

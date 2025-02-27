@@ -1,0 +1,82 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        0 AS level
+    FROM
+        title t
+    WHERE
+        t.episode_of_id IS NULL  -- Start with root titles (not episodes)
+
+    UNION ALL
+
+    SELECT
+        e.id AS title_id,
+        e.title,
+        e.production_year,
+        e.episode_of_id,
+        th.level + 1
+    FROM
+        title_hierarchy th
+    JOIN
+        title e ON th.title_id = e.episode_of_id
+),
+
+name_aggregates AS (
+    SELECT
+        a.person_id,
+        STRING_AGG(a.name, ', ') AS all_names,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        MIN(c.nr_order) AS earliest_role_order
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        a.person_id
+),
+
+average_movie_year AS (
+    SELECT
+        person_id,
+        AVG(t.production_year) AS avg_year 
+    FROM 
+        name_aggregates na
+    JOIN 
+        cast_info ci ON na.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    JOIN 
+        title t ON at.movie_id = t.id
+    GROUP BY 
+        person_id
+)
+
+SELECT 
+    na.all_names,
+    COALESCE(na.movie_count, 0) AS total_movies,
+    ay.avg_year,
+    th.title,
+    th.level,
+    CASE 
+        WHEN avg_year IS NULL THEN 'N/A'
+        ELSE CAST(avg_year AS TEXT)
+    END AS avg_year_label,
+    COUNT(DISTINCT CASE 
+        WHEN c.note IS NOT NULL THEN c.movie_id 
+    END) AS noteworthy_movies
+    
+FROM 
+    name_aggregates na
+LEFT JOIN 
+    average_movie_year ay ON na.person_id = ay.person_id
+LEFT JOIN 
+    cast_info c ON na.person_id = c.person_id
+LEFT JOIN 
+    title_hierarchy th ON c.movie_id = th.title_id
+GROUP BY 
+    na.person_id, na.all_names, ay.avg_year, th.title, th.level
+ORDER BY 
+    total_movies DESC, earliest_role_order ASC;

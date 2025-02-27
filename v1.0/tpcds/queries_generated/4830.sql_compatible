@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2451975 AND 2452000
+),
+ItemProfits AS (
+    SELECT
+        i.i_item_id,
+        COALESCE(SUM(rs.ws_net_profit), 0) AS total_profit
+    FROM
+        item i
+    LEFT JOIN
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    GROUP BY
+        i.i_item_id
+),
+CustomerReturns AS (
+    SELECT
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count
+    FROM
+        store_returns sr
+    GROUP BY
+        sr.sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM
+        customer_demographics cd
+    WHERE
+        cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+)
+SELECT
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cp.total_profit, 0) AS total_profit,
+    cr.total_return_amt,
+    cr.return_count
+FROM
+    CustomerDemographics cd
+LEFT JOIN
+    CustomerReturns cr ON cd.cd_demo_sk = cr.sr_customer_sk
+LEFT JOIN
+    ItemProfits cp ON cp.i_item_id = (
+        SELECT i.i_item_id
+        FROM item i
+        WHERE i.i_item_sk = (
+            SELECT ws.ws_item_sk
+            FROM web_sales ws
+            WHERE ws.ws_bill_customer_sk = cr.sr_customer_sk
+            ORDER BY ws.ws_net_profit DESC
+            LIMIT 1
+        )
+    )
+WHERE
+    cr.return_count > 0
+ORDER BY
+    total_profit DESC, return_count DESC;

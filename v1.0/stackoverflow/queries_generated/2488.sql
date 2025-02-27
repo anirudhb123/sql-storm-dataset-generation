@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUM(vb.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(vb.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vb ON p.Id = vb.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(COALESCE(vb.VoteTypeId = 2, 0)::int) AS AvgUpVotes, 
+        AVG(COALESCE(vb.VoteTypeId = 3, 0)::int) AS AvgDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes vb ON p.Id = vb.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    rp.Score,
+    up.UserId,
+    up.Reputation,
+    up.PostCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ROW_NUMBER() OVER (ORDER BY up.Reputation DESC) AS ReputationRank
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.OwnerUserId = up.UserId
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC, up.Reputation DESC
+LIMIT 10;

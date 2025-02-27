@@ -1,0 +1,66 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ss.ss_net_paid) AS total_sales, 
+        COUNT(DISTINCT ss.ss_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2459202 AND 2459208 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+), 
+SalesRanking AS (
+    SELECT 
+        cs.c_customer_sk, 
+        cs.total_sales, 
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cs.total_sales,
+        sr.sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        CustomerDemographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    JOIN 
+        SalesRanking sr ON cs.c_customer_sk = sr.c_customer_sk
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.cd_education_status,
+    fr.total_sales,
+    fr.sales_rank
+FROM 
+    FinalReport fr
+WHERE 
+    fr.sales_rank <= 10;

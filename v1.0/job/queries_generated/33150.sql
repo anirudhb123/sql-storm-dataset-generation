@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1 AS level
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_performance AS (
+    SELECT 
+        a.person_id,
+        ak.name,
+        COUNT(ci.movie_id) AS total_movies,
+        AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year ELSE 0 END) AS avg_production_year,
+        RANK() OVER (ORDER BY COUNT(ci.movie_id) DESC) AS rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        a.person_id, ak.name
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ap.name AS actor_name,
+    ap.total_movies,
+    ap.avg_production_year,
+    CASE 
+        WHEN ap.rank <= 10 THEN 'TOP'
+        WHEN ap.rank <= 50 THEN 'MID'
+        ELSE 'LOW'
+    END AS performance_tier
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_performance ap ON ap.person_id IN (
+        SELECT DISTINCT ci.person_id 
+        FROM cast_info ci
+        JOIN aka_title at ON ci.movie_id = at.id
+        WHERE at.id = mh.movie_id
+    )
+WHERE 
+    mh.level <= 3
+ORDER BY 
+    mh.production_year DESC, 
+    ap.total_movies DESC;

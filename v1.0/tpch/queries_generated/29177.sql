@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS Rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        p.p_name,
+        p.p_size,
+        p.p_type,
+        p.p_retailprice,
+        p.p_comment
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 5000
+),
+CustomerNationCounts AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(c.c_custkey) AS customer_count
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(p.p_retailprice) AS total_part_value,
+    MAX(CASE WHEN ro.Rank = 1 THEN ro.o_orderdate END) AS last_order_date,
+    cn.customer_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedOrders ro ON n.n_nationkey = ro.o_orderkey
+LEFT JOIN 
+    SupplierParts p ON p.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps)
+LEFT JOIN 
+    CustomerNationCounts cn ON n.n_nationkey = cn.c_nationkey
+WHERE 
+    r.r_name LIKE '%e%'
+GROUP BY 
+    r.r_name, cn.customer_count
+ORDER BY 
+    total_orders DESC, total_part_value DESC;

@@ -1,0 +1,65 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        ca.ca_street_address AS full_address,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type AS street_details
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+WebSalesDetails AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_ship_mode_sk,
+        ws.ws_bill_customer_sk
+    FROM 
+        web_sales ws
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        CustomerAddressDetails cad
+    JOIN 
+        web_sales ws ON cad.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON cad.c_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+AggregatedResults AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(cad.customer_full_name) AS total_customers,
+        SUM(cd.total_net_profit) AS overall_net_profit
+    FROM 
+        CustomerDemographics cd
+    JOIN 
+        CustomerAddressDetails cad ON cd.cd_demo_sk = cad.c_customer_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    total_customers,
+    overall_net_profit,
+    (overall_net_profit / NULLIF(total_customers, 0)) AS average_net_profit_per_customer
+FROM 
+    AggregatedResults
+ORDER BY 
+    overall_net_profit DESC;

@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TotalOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F' -- finished orders only
+    GROUP BY c.c_custkey
+),
+HighValueParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost) > 50000
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, s.s_name, s.s_acctbal
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT DISTINCT c.c_name, lh.l_shipmode, p.p_name, 
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank,
+       SUM(CASE 
+           WHEN lh.l_returnflag = 'R' THEN 1 
+           ELSE 0 END) AS return_count,
+       AVG(hi.total_orders) AS avg_orders_per_cust
+FROM lineitem lh
+JOIN orders o ON lh.l_orderkey = o.o_orderkey
+JOIN TotalOrders hi ON o.o_custkey = hi.c_custkey
+JOIN PartSuppliers p ON lh.l_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy sh ON p.s_acctbal = sh.s_acctbal
+WHERE p.p_name LIKE '%widget%' 
+      AND sh.level < 3
+      AND EXISTS (SELECT 1 
+                  FROM nation n 
+                  WHERE n.n_nationkey = sh.s_nationkey 
+                  AND n.n_name IS NOT NULL)
+GROUP BY c.c_name, lh.l_shipmode, p.p_name
+HAVING return_count > 0
+ORDER BY p.p_name, return_count DESC;

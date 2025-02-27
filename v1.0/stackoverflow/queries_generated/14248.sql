@@ -1,0 +1,65 @@
+-- Performance benchmarking query for analyzing post activity and user engagement
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(v.CreationDate) AS AvgVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerDisplayName,
+    ps.TotalComments,
+    ua.UserId,
+    ua.DisplayName AS UserDisplayName,
+    ua.TotalPosts,
+    ua.TotalViews,
+    ua.TotalScore,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ps.AvgVoteDate
+FROM 
+    PostStats ps
+JOIN 
+    UserActivity ua ON ps.OwnerDisplayName = ua.DisplayName
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

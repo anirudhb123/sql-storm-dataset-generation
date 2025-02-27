@@ -1,0 +1,61 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        MAX(h.CreationDate) AS LastEdited,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'UpMod') AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'DownMod') AS DownvoteCount,
+        SUM(b.Class = 1)::int AS GoldBadgeCount,
+        SUM(b.Class = 2)::int AS SilverBadgeCount,
+        SUM(b.Class = 3)::int AS BronzeBadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id 
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.LastEdited,
+        ps.CommentCount,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY ps.UpvoteCount DESC, ps.CommentCount DESC) AS Rank
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.CommentCount > 0
+)
+SELECT 
+    t.Title AS PostTitle,
+    t.CommentCount,
+    t.UpvoteCount,
+    t.DownvoteCount,
+    ps.GoldBadgeCount,
+    ps.SilverBadgeCount,
+    ps.BronzeBadgeCount,
+    CASE 
+        WHEN t.Rank <= 10 THEN 'Top Post' 
+        ELSE 'Regular Post' 
+    END AS PostCategory
+FROM 
+    TopPosts t
+JOIN 
+    PostStats ps ON t.PostId = ps.PostId
+WHERE 
+    ps.LastEdited >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    t.UpvoteCount DESC, 
+    t.CommentCount DESC;

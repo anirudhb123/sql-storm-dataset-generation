@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name,
+           SUM(ps.ps_availqty) AS total_availqty,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_custkey
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    AND o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+),
+CustomerMetrics AS (
+    SELECT c.c_custkey, c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT ps.p_name, r.s_name, ps.total_availqty, ps.avg_supplycost, cm.order_count, cm.total_spent,
+           CASE WHEN cm.total_spent IS NULL THEN 'No Orders' ELSE 'Orders Made' END AS order_status
+    FROM PartSuppliers ps
+    LEFT JOIN RankedSuppliers r ON ps.ps_suppkey = r.s_suppkey AND r.rn <= 5
+    LEFT JOIN CustomerMetrics cm ON cm.last_order_date <= DATEADD(DAY, -30, GETDATE())
+    WHERE ps.avg_supplycost < 100.00
+)
+SELECT f.*, 
+       COALESCE(f.total_spent / NULLIF(f.order_count, 0), 0) AS average_spent_per_order,
+       CASE 
+           WHEN f.total_availqty IS NULL THEN 'No Availability' 
+           ELSE CAST(f.total_availqty AS VARCHAR) 
+       END AS availability_status
+FROM FinalReport f
+WHERE f.total_spent IS NOT NULL OR f.order_count IS NOT NULL
+ORDER BY f.avg_supplycost DESC, f.total_spent DESC
+LIMIT 100 OFFSET 5;

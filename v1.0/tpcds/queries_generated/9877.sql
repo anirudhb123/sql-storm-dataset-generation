@@ -1,0 +1,59 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amt,
+        SUM(sr.return_tax) AS total_return_tax,
+        COUNT(DISTINCT wr.order_number) AS total_web_returns,
+        SUM(wr.return_amt) AS total_web_return_amt,
+        SUM(wr.return_tax) AS total_web_return_tax
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.s_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+AvgReturnStats AS (
+    SELECT 
+        AVG(total_returns) AS avg_total_returns,
+        AVG(total_return_amt) AS avg_total_return_amt,
+        AVG(total_return_tax) AS avg_total_return_tax,
+        AVG(total_web_returns) AS avg_total_web_returns,
+        AVG(total_web_return_amt) AS avg_total_web_return_amt,
+        AVG(total_web_return_tax) AS avg_total_web_return_tax
+    FROM 
+        CustomerStats
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_returns,
+    cs.total_return_amt,
+    cs.total_return_tax,
+    cs.total_web_returns,
+    cs.total_web_return_amt,
+    cs.total_web_return_tax,
+    ar.avg_total_returns,
+    ar.avg_total_return_amt,
+    ar.avg_total_return_tax,
+    ar.avg_total_web_returns,
+    ar.avg_total_web_return_amt,
+    ar.avg_total_web_return_tax
+FROM 
+    CustomerStats cs
+CROSS JOIN 
+    AvgReturnStats ar
+ORDER BY 
+    cs.total_returns DESC
+LIMIT 100;

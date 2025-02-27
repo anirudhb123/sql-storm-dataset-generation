@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartAvgPrices AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+NationOrderSummary AS (
+    SELECT n.n_name, COUNT(DISTINCT o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F') OR o.o_orderstatus IS NULL
+    GROUP BY n.n_name
+),
+LineitemStats AS (
+    SELECT l.l_partkey, SUM(l.l_quantity) AS total_quantity,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_partkey
+    HAVING SUM(l.l_discount) > 0.10 OR COUNT(l.l_returnflag) = 0
+)
+SELECT 
+    n.n_name,
+    COALESCE(p.p_name, 'Unknown Part') AS part_name,
+    AVG(p.avg_cost) AS avg_supply_cost,
+    COALESCE(ls.total_quantity, 0) AS lineitem_quantity,
+    COALESCE(ls.total_extended_price, 0) AS lineitem_extended_price,
+    sha.level AS supplier_hierarchy_level
+FROM NationOrderSummary nos
+LEFT JOIN nation n ON n.n_name = nos.n_name
+LEFT JOIN PartAvgPrices p ON n.n_nationkey = p.p_partkey
+LEFT JOIN LineitemStats ls ON p.p_partkey = ls.l_partkey
+INNER JOIN SupplierHierarchy sha ON n.n_nationkey = sha.s_nationkey
+WHERE n.n_regionkey IS NOT NULL
+GROUP BY n.n_name, p.p_name, ls.total_quantity, ls.total_extended_price, sha.level
+ORDER BY n.n_name, avg_supply_cost DESC, lineitem_extended_price ASC;

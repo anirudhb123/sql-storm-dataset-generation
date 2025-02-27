@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rank,
+        COUNT(*) OVER (PARTITION BY a.kind_id) AS total_movies
+    FROM aka_title a
+    WHERE a.production_year IS NOT NULL
+),
+TopRankedMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.rank,
+        rm.total_movies,
+        (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = rm.id) AS actor_count,
+        (SELECT STRING_AGG(DISTINCT cn.name, ', ') 
+         FROM company_name cn
+         JOIN movie_companies mc ON cn.id = mc.company_id
+         WHERE mc.movie_id = rm.id) AS production_companies
+    FROM RankedMovies rm
+    WHERE rm.rank <= 3
+),
+CastDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ci.person_id,
+        p.name AS actor_name,
+        r.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY t.title ORDER BY ci.nr_order) AS actor_order
+    FROM TopRankedMovies t
+    JOIN cast_info ci ON ci.movie_id = t.id
+    JOIN role_type r ON ci.role_id = r.id
+    JOIN aka_name p ON ci.person_id = p.person_id
+    WHERE ci.nr_order IS NOT NULL
+)
+SELECT 
+    cd.title,
+    cd.production_year,
+    cd.actor_name,
+    cd.actor_role,
+    COALESCE(cd.actor_order, 0) AS actor_order,
+    COALESCE(tm.total_movies, 0) AS total_movies,
+    tm.production_companies,
+    (SELECT AVG(rating) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = cd.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS avg_rating
+FROM CastDetails cd
+LEFT JOIN TopRankedMovies tm ON cd.title = tm.title AND cd.production_year = tm.production_year
+ORDER BY cd.production_year DESC, cd.actor_order
+LIMIT 50;

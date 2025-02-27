@@ -1,0 +1,71 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        CA.ca_address_sk,
+        CONCAT(CA.ca_street_number, ' ', CA.ca_street_name, ' ', CA.ca_street_type) AS full_address,
+        CA.ca_city,
+        CA.ca_state,
+        CA.ca_zip,
+        CA.ca_country
+    FROM 
+        customer_address CA
+),
+DemographicsInfo AS (
+    SELECT 
+        C.c_customer_sk,
+        C.c_first_name,
+        C.c_last_name,
+        C.c_email_address,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_education_status,
+        CD.cd_purchase_estimate,
+        IB.ib_lower_bound,
+        IB.ib_upper_bound
+    FROM 
+        customer C
+    JOIN 
+        customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    LEFT JOIN 
+        household_demographics HD ON C.c_customer_sk = HD.hd_demo_sk
+    LEFT JOIN 
+        income_band IB ON HD.hd_income_band_sk = IB.ib_income_band_sk
+),
+SalesInfo AS (
+    SELECT 
+        WS.ws_bill_customer_sk,
+        SUM(WS.ws_net_paid) AS total_sales
+    FROM 
+        web_sales WS
+    GROUP BY 
+        WS.ws_bill_customer_sk
+)
+SELECT 
+    DI.c_first_name,
+    DI.c_last_name,
+    DI.c_email_address,
+    DI.full_address,
+    DI.ca_city,
+    DI.ca_state,
+    SI.total_sales,
+    DI.cd_gender,
+    DI.cd_marital_status,
+    DI.cd_education_status,
+    CASE 
+        WHEN SI.total_sales IS NULL THEN 'No Sales'
+        WHEN SI.total_sales < 100 THEN 'Low Value'
+        WHEN SI.total_sales BETWEEN 100 AND 500 THEN 'Medium Value'
+        ELSE 'High Value'
+    END AS customer_value
+FROM 
+    AddressInfo DI
+JOIN 
+    DemographicsInfo DI ON DI.ca_address_sk = DI.c_current_addr_sk
+LEFT JOIN 
+    SalesInfo SI ON DI.c_customer_sk = SI.ws_bill_customer_sk
+WHERE 
+    DI.ca_state = 'CA' AND
+    DI.cd_gender = 'F' AND
+    DI.cd_education_status LIKE '%College%'
+ORDER BY 
+    total_sales DESC;

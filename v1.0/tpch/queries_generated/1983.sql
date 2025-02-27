@@ -1,0 +1,36 @@
+WITH SupplyCost AS (
+    SELECT ps_partkey,
+           ps_suppkey,
+           ps_availqty,
+           ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost) AS rank
+    FROM partsupp
+), TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(sc.ps_supplycost * sc.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN SupplyCost sc ON s.s_suppkey = sc.ps_suppkey
+    WHERE sc.rank = 1
+    GROUP BY s.s_suppkey, s.s_name
+), CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT t.supp_name,
+       t.total_supply_cost AS supplier_total_cost,
+       c.c_name AS customer_name,
+       co.total_spent,
+       (CASE
+            WHEN co.order_count > 5 THEN 'Frequent'
+            ELSE 'Occasional'
+        END) AS customer_status
+FROM TopSuppliers t
+FULL OUTER JOIN CustomerOrders co ON t.s_suppkey = co.c_custkey
+WHERE t.total_supply_cost IS NOT NULL OR co.total_spent IS NOT NULL
+ORDER BY supplier_total_cost DESC NULLS LAST, total_spent ASC NULLS FIRST;

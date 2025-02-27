@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+), high_performance_items AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        rs.total_quantity,
+        rs.total_sales,
+        COALESCE(a.ca_city, 'Unknown City') AS city,
+        COALESCE(cc.cc_name, 'Unknown CC') AS call_center_name
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    LEFT JOIN 
+        customer c ON c.c_customer_sk = (
+            SELECT 
+                ws.ws_bill_customer_sk
+            FROM 
+                web_sales ws
+            WHERE 
+                ws.ws_item_sk = rs.ws_item_sk
+            ORDER BY 
+                ws.ws_sold_date_sk DESC 
+            LIMIT 1
+        )
+    LEFT JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    LEFT JOIN 
+        call_center cc ON MOD(c.c_customer_sk, 10) = MOD(cc.cc_call_center_sk, 10)
+    WHERE 
+        rs.rnk = 1 AND
+        rs.total_sales > (SELECT AVG(total_sales) FROM ranked_sales)
+)
+SELECT 
+    hi.i_item_id,
+    hi.i_item_desc, 
+    hi.total_quantity,
+    hi.total_sales,
+    hi.city,
+    hi.call_center_name,
+    CASE WHEN hi.total_quantity IS NULL THEN 'No sales' ELSE 'Sales recorded' END AS sales_status,
+    CASE 
+        WHEN hi.total_sales IS NULL OR hi.total_sales = 0 THEN 'No Revenue'
+        WHEN hi.total_sales > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM 
+    high_performance_items hi
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM store_sales ss 
+        WHERE ss.ss_item_sk = hi.i_item_id
+        GROUP BY ss.ss_item_sk
+        HAVING SUM(ss.ss_net_profit) > 500
+    )
+ORDER BY 
+    hi.total_sales DESC;

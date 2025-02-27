@@ -1,0 +1,67 @@
+WITH relevant_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mk.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.role_id) AS role_ids
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+actor_counts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+full_movie_info AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.movie_keyword,
+        ac.actor_count,
+        ci.company_name,
+        ci.company_type
+    FROM 
+        relevant_movies rm
+    LEFT JOIN 
+        actor_counts ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        company_info ci ON rm.movie_id = ci.movie_id
+)
+SELECT 
+    fmi.title,
+    fmi.production_year,
+    fmi.movie_keyword,
+    fmi.actor_count,
+    STRING_AGG(DISTINCT CONCAT(ci.company_name, ' [', ci.company_type, ']'), '; ') AS companies
+FROM 
+    full_movie_info fmi
+LEFT JOIN 
+    company_info ci ON fmi.movie_id = ci.movie_id
+GROUP BY 
+    fmi.title, fmi.production_year, fmi.movie_keyword, fmi.actor_count
+ORDER BY 
+    fmi.production_year DESC, fmi.actor_count DESC;

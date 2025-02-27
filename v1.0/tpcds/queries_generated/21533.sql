@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.customer_sk,
+        ws.item_sk,
+        ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.customer_sk ORDER BY ws_ext_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+IncomeDetails AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+FinalSales AS (
+    SELECT 
+        cs.c_customer_id,
+        SUM(cs.ws_ext_sales_price) AS total_sales,
+        AVG(cs.ws_ext_sales_price) AS average_sales
+    FROM RankedSales rs
+    JOIN CustomerDetails cs ON rs.customer_sk = cs.c_customer_id
+    LEFT JOIN IncomeDetails id ON cs.c_customer_id = id.hd_demo_sk
+    WHERE id.ib_upper_bound IS NOT NULL
+    GROUP BY cs.c_customer_id
+)
+SELECT 
+    fs.c_customer_id,
+    COALESCE(fs.total_sales, 0) AS total_sales,
+    COALESCE(fs.average_sales, 0) AS average_sales,
+    COALESCE(cd.ca_city, 'Unknown') AS city,
+    CASE 
+        WHEN fs.total_sales > 10000 THEN 'High Value'
+        WHEN fs.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM FinalSales fs
+FULL OUTER JOIN CustomerDetails cd ON fs.c_customer_id = cd.c_customer_id
+WHERE (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NOT NULL) 
+AND (cd.cd_purchase_estimate IS NOT NULL OR cd.ca_city IS NOT NULL)
+ORDER BY fs.total_sales DESC, cd.ca_city
+LIMIT 100;

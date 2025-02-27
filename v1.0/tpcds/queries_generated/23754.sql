@@ -1,0 +1,90 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        r.total_net_profit,
+        r.order_count,
+        CASE 
+            WHEN c.c_preferred_cust_flag = 'Y' THEN 'Preferred'
+            ELSE 'Not Preferred'
+        END AS customer_status,
+        COALESCE((
+            SELECT 
+                wd.d_day_name 
+            FROM 
+                date_dim wd 
+            WHERE 
+                wd.d_date_sk = (
+                    SELECT 
+                        MAX(d_date_sk) 
+                    FROM 
+                        date_dim 
+                    WHERE 
+                        d_date BETWEEN '2023-01-01' AND '2023-12-31'
+                )
+        ), 'Unknown') AS last_purchase_day
+    FROM 
+        ranked_sales r
+    INNER JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        r.profit_rank <= 10
+),
+sales_inventory AS (
+    SELECT 
+        i.i_item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_stock,
+        SUM(ws.ws_quantity) AS total_sales
+    FROM 
+        inventory inv
+    JOIN 
+        web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+inventory_status AS (
+    SELECT 
+        i.i_item_id,
+        CASE 
+            WHEN total_stock > 100 THEN 'Overstocked'
+            WHEN total_sales > total_stock THEN 'Understocked'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM 
+        sales_inventory i
+)
+SELECT 
+    tc.ws_bill_customer_sk,
+    tc.total_net_profit,
+    tc.order_count,
+    tc.customer_status,
+    tc.last_purchase_day,
+    is.stock_status
+FROM 
+    top_customers tc
+LEFT JOIN 
+    inventory_status is ON tc.ws_bill_customer_sk = is.i_item_id
+WHERE 
+    total_net_profit > (
+        SELECT 
+            AVG(total_net_profit) 
+        FROM 
+            top_customers
+    ) OR is.stock_status IS NOT NULL
+ORDER BY 
+    tc.total_net_profit DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

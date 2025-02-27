@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByTags,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount
+), TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByTags <= 5 -- Top 5 per tag
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.RelatedTags,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT 
+        UserId, COUNT(*) AS BadgeCount
+     FROM 
+        Badges
+     GROUP BY
+        UserId) b ON u.Id = b.UserId
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

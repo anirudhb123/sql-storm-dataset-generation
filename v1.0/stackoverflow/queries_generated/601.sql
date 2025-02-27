@@ -1,0 +1,44 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostAggregates AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.AnswerCount,
+        P.ViewCount,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) DESC) AS PopularityRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY P.Id
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.PostCount,
+    PA.Title,
+    PA.ViewCount,
+    PA.AnswerCount,
+    PA.CommentCount,
+    PA.PopularityRank
+FROM UserReputation UR
+JOIN PostAggregates PA ON UR.UserId = P.OwnerUserId
+WHERE UR.Reputation > 1000
+  AND (PA.AnswerCount > 0 OR PA.CommentCount > 5)
+ORDER BY UR.Reputation DESC, PA.PopularityRank ASC
+LIMIT 10;

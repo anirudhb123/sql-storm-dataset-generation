@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS Level
+    FROM customer c
+    WHERE c.c_custkey = (SELECT MIN(cust.c_custkey) FROM customer cust)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.Level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+),
+ProductSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS SupplyCost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT *
+    FROM RankedSuppliers
+    WHERE Rank <= 3
+)
+SELECT ch.c_name, 
+       CASE 
+           WHEN ps.TotalAvailable IS NULL THEN 'Out of Stock' 
+           ELSE CAST(ps.TotalAvailable AS varchar) 
+       END AS AvailableQty,
+       os.o_orderdate,
+       os.TotalSales,
+       ts.s_name AS TopSupplier
+FROM CustomerHierarchy ch
+LEFT JOIN ProductSummary ps ON ps.TotalAvailable > 100
+LEFT JOIN OrderSummary os ON os.o_orderdate = cast('1998-10-01' as date)
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size >= 20))
+WHERE ch.Level = 0
+ORDER BY ch.c_name, os.o_orderdate DESC;

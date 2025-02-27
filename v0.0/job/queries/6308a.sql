@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mi.info IN ('Anton LaVey: It seems that most religions now are buying oats for a dead horse.', 'Contains "We Want Our Mummy", "Restless Knights", "Yes, We Have No Bonanza".', 'France:21 November 2004', 'Kababaihan ng Maynila, Rajah Sulayman Park, Malate, Manila, Metro Manila, Philippines', 'La fórmula del amor (The formula of love)', 'Portugal:6 February 2009', 'The sword Freddy uses when he pretends to be a Cambodian ninja is actually from Cambodia. Travis got it when his sister and brother-in-law took a trip to Vietnam and Cambodia.', '[repeated line]::Lacy Baldwin: One, two, three, four, five, six, seven, eight! Dynamite! Our team is dynamite!') AND t.id < 1129473;

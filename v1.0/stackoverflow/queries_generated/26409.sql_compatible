@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        (SELECT PostId, MAX(CreationDate) AS CreationDate FROM Votes GROUP BY PostId) v ON v.PostId = p.Id
+    LEFT JOIN 
+        LATERAL (SELECT STRING_AGG(t.TagName, ', ') AS TagName FROM Tags t WHERE t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::integer[])) AS tag_agg) AS t ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body
+),
+RecentActivePosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.LastVoteDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 
+        AND rp.LastVoteDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+)
+SELECT 
+    rap.PostId,
+    rap.Title,
+    rap.Body,
+    rap.Tags,
+    rap.CommentCount,
+    rap.AnswerCount,
+    COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+FROM 
+    RecentActivePosts rap
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rap.PostId) 
+GROUP BY 
+    rap.PostId, rap.Title, rap.Body, rap.Tags, rap.CommentCount, rap.AnswerCount
+ORDER BY 
+    rap.AnswerCount DESC, rap.CommentCount DESC;

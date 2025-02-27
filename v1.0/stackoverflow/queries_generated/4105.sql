@@ -1,0 +1,47 @@
+WITH UserReputation AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           u.Reputation,
+           RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+PostStats AS (
+    SELECT p.OwnerUserId,
+           COUNT(p.Id) AS PostCount,
+           SUM(COALESCE(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END, 0)) AS QuestionCount,
+           SUM(COALESCE(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END, 0)) AS AnswerCount,
+           SUM(p.ViewCount) AS TotalViews,
+           AVG(p.Score) AS AverageScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+PostHistoryRecent AS (
+    SELECT ph.PostId, 
+           ph.UserId, 
+           ph.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+)
+SELECT u.DisplayName AS UserName,
+       ur.Reputation AS UserReputation,
+       ps.PostCount,
+       ps.QuestionCount,
+       ps.AnswerCount,
+       ps.TotalViews,
+       ps.AverageScore,
+       phr.UserId AS LastEditorId,
+       phr.CreationDate AS LastEditDate,
+       COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount,
+       STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM UserReputation ur
+JOIN PostStats ps ON ur.UserId = ps.OwnerUserId
+LEFT JOIN PostHistoryRecent phr ON phr.UserId = ur.UserId AND phr.rn = 1
+LEFT JOIN PostLinks pl ON pl.PostId = ps.OwnerUserId
+LEFT JOIN Posts p ON p.OwnerUserId = ur.UserId
+LEFT JOIN UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON true
+WHERE ur.Reputation > 1000
+  AND (ps.AnswerCount > 0 OR ps.QuestionCount > 0)
+GROUP BY ur.UserId, ur.DisplayName, ur.Reputation, ps.PostCount, ps.QuestionCount, ps.AnswerCount, 
+         ps.TotalViews, ps.AverageScore, phr.UserId, phr.CreationDate
+ORDER BY ur.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,32 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT v.UserId) AS UniqueVoterCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    u.Reputation AS OwnerReputation
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, '<>')) AS tag_id(tag) 
+LEFT JOIN 
+    Tags t ON t.TagName = tag_id.tag
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' -- filter posts from last year
+GROUP BY 
+    p.Id, u.Reputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100; -- Limit the number of results for benchmarking

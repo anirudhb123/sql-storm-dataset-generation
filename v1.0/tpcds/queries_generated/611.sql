@@ -1,0 +1,53 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS rank_return
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+TopItems AS (
+    SELECT 
+        ir.i_item_id,
+        ir.i_item_desc,
+        rt.return_count,
+        rt.total_return_amt
+    FROM 
+        RankedReturns rt
+    JOIN 
+        item ir ON rt.sr_item_sk = ir.i_item_sk
+    WHERE 
+        rt.rank_return <= 10
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    COALESCE(sd.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(sd.total_sales, 0.00) AS total_sales,
+    ti.return_count,
+    ti.total_return_amt,
+    CASE 
+        WHEN COALESCE(sd.total_quantity_sold, 0) > 0 THEN (COALESCE(sd.total_sales, 0.00) / COALESCE(sd.total_quantity_sold, 1)) 
+        ELSE 0 
+    END AS avg_sale_per_item
+FROM 
+    TopItems ti
+LEFT JOIN 
+    SalesData sd ON ti.sr_item_sk = sd.ws_item_sk
+ORDER BY 
+    ti.total_return_amt DESC, ti.i_item_id;

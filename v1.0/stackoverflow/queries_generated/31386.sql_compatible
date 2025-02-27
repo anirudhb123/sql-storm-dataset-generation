@@ -1,0 +1,75 @@
+
+WITH RecursivePosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Level,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id, p.ParentId, p.OwnerUserId, p.Title, p.CreationDate
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        rp.Level + 1 AS Level,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 2  
+    GROUP BY p.Id, p.ParentId, rp.Level, p.OwnerUserId, p.Title, p.CreationDate
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Level,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.UpVotes,
+        rp.DownVotes,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM RecursivePosts rp
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY rp.PostId, rp.Level, rp.Title, rp.CreationDate, rp.OwnerUserId, u.DisplayName
+),
+TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    GROUP BY p.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.Level,
+    pd.UpVotes,
+    pd.DownVotes,
+    COALESCE(tp.Tags, 'No tags') AS Tags,                   
+    pd.GoldBadges,
+    pd.SilverBadges,
+    pd.BronzeBadges
+FROM PostDetails pd
+LEFT JOIN TaggedPosts tp ON pd.PostId = tp.PostId
+ORDER BY pd.UpVotes DESC, pd.CreationDate DESC;

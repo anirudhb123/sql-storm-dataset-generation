@@ -1,0 +1,77 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title mt ON mt.id = m.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = m.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS production_companies,
+        COUNT(DISTINCT mt.company_type_id) AS total_company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON co.id = mc.company_id
+    JOIN 
+        company_type mt ON mt.id = mc.company_type_id
+    WHERE 
+        co.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cr.total_cast, 0) AS total_cast,
+    COALESCE(cr.cast_names, 'No Cast') AS cast_names,
+    COALESCE(ci.production_companies, 'No Production Companies') AS production_companies,
+    COALESCE(ci.total_company_types, 0) AS total_company_types,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS movie_rank,
+    CASE 
+        WHEN mh.production_year < 2010 THEN 'Before 2010'
+        ELSE '2010 and After'
+    END AS production_period
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastRoles cr ON cr.movie_id = mh.movie_id
+LEFT JOIN 
+    MovieCompanyInfo ci ON ci.movie_id = mh.movie_id
+WHERE 
+    mh.level <= 2
+ORDER BY 
+    mh.production_year DESC, mh.title;

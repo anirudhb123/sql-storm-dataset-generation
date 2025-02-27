@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS depth
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+OrderRevenue AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           COALESCE(SUM(or.total_revenue), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN OrderRevenue or ON o.o_orderkey = or.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT nh.n_name AS nation_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       SUM(ss.total_available) AS total_parts_available,
+       AVG(cs.total_spent) AS avg_customer_spent
+FROM NationHierarchy nh
+LEFT JOIN supplier s ON s.s_nationkey = nh.n_nationkey
+LEFT JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = nh.n_nationkey
+)
+GROUP BY nh.n_nationkey, nh.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY avg_customer_spent DESC
+LIMIT 10;

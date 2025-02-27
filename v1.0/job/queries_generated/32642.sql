@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Start with movies from 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mk.title,
+        mk.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mk ON ml.linked_movie_id = mk.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS num_cast_members,
+    AVG(CASE WHEN ti.info IS NOT NULL THEN NULLIF(ti.info::numeric, 0) ELSE 0 END) AS avg_duration,
+    COUNT(DISTINCT mk.keyword) AS unique_keywords,
+    STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration' LIMIT 1)
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    num_cast_members > 5  -- Filter for movies with more than 5 cast members
+ORDER BY 
+    mh.production_year DESC, 
+    avg_duration DESC;

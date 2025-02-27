@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Novice'
+            WHEN u.Reputation BETWEEN 100 AND 999 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationLevel
+    FROM 
+        Users u
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    ur.Reputation,
+    ur.ReputationLevel,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    cp.ClosedDate AS PostClosedDate,
+    p.Score AS PostScore
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    Users ur ON p.OwnerUserId = ur.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    p.PostRank = 1
+GROUP BY 
+    p.Title, 
+    p.CreationDate, 
+    ur.Reputation, 
+    ur.ReputationLevel, 
+    cp.ClosedDate, 
+    p.Score
+ORDER BY 
+    p.Score DESC, 
+    ur.Reputation DESC;

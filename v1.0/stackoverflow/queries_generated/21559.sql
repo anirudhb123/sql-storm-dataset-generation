@@ -1,0 +1,59 @@
+WITH UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostsCount,
+        AVG(uv.TotalUpvotes) AS AvgUpvotes
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN UserVoteStatistics uv ON p.OwnerUserId = uv.UserId
+    GROUP BY t.TagName
+    HAVING COUNT(pt.PostId) > 10
+),
+HighActivityUsers AS (
+    SELECT 
+        uas.UserId,
+        COUNT(*) FILTER (WHERE p.ViewCount IS NULL) AS NullViewCountPosts,
+        COUNT(*) FILTER (WHERE p.ViewCount IS NOT NULL) AS NonNullViewCountPosts,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM UserVoteStatistics uas
+    JOIN Posts p ON uas.UserId = p.OwnerUserId
+    GROUP BY uas.UserId
+    HAVING COUNT(p.ViewCount) > 5
+),
+FinalReport AS (
+    SELECT 
+        u.DisplayName,
+        ut.TotalUpvotes,
+        ut.TotalDownvotes,
+        ut.TotalPosts,
+        pt.PostsCount AS PopularTagPostCount,
+        ht.NullViewCountPosts,
+        ht.NonNullViewCountPosts,
+        ht.AvgViewCount,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM Users u
+    JOIN UserVoteStatistics ut ON u.Id = ut.UserId
+    JOIN PopularTags pt ON pt.TagName = 'sql'
+    LEFT JOIN HighActivityUsers ht ON u.Id = ht.UserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalUpvotes > TotalDownvotes THEN 'Positive Reputation'
+        ELSE 'Negative Reputation'
+    END AS ReputationClassification
+FROM FinalReport
+ORDER BY TotalPosts DESC, PopularTagPostCount DESC;

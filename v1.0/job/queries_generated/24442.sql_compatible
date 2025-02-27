@@ -1,0 +1,108 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+), 
+
+cast_details AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        kc.role AS character_name,
+        ka.md5sum AS person_md5,
+        ROW_NUMBER() OVER (PARTITION BY ka.person_id ORDER BY ka.name) AS rn
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        role_type kc ON ci.role_id = kc.id
+),
+
+keywords_exp AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+movie_summary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        kd.keywords,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(COALESCE(pi.info_type_id, 0)) AS avg_info_type_id
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        keywords_exp kd ON mh.movie_id = kd.movie_id
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, kd.keywords
+),
+
+final_output AS (
+    SELECT 
+        ms.title AS movie_title,
+        ms.production_year,
+        ms.keywords,
+        ms.total_cast,
+        CASE 
+            WHEN ms.avg_info_type_id IS NULL THEN 'No Info'
+            ELSE CONCAT('Average Info Type ID: ', ms.avg_info_type_id)
+        END AS info_summary,
+        ROW_NUMBER() OVER (ORDER BY ms.total_cast DESC) AS rank
+    FROM 
+        movie_summary ms
+)
+
+SELECT 
+    fo.movie_title,
+    fo.production_year,
+    fo.keywords,
+    fo.total_cast,
+    fo.info_summary,
+    COALESCE(NULLIF(fo.rank, 0), 'Not Ranked') AS rank_display
+FROM 
+    final_output fo
+WHERE 
+    fo.total_cast > 5
+ORDER BY 
+    fo.production_year DESC, 
+    fo.rank ASC
+FETCH FIRST 10 ROWS ONLY;

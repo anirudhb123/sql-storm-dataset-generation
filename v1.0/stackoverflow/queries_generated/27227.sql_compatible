@@ -1,0 +1,66 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.ViewCount, p.Score
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        U.UserId,
+        U.DisplayName,
+        U.QuestionCount,
+        U.BadgesCount,
+        U.TotalUpVotes,
+        U.TotalDownVotes,
+        COALESCE(pd.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM PostDetails pd
+    JOIN UserActivity U ON pd.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+)
+SELECT 
+    pe.Title,
+    pe.ViewCount,
+    pe.QuestionCount,
+    pe.BadgesCount,
+    pe.TotalUpVotes,
+    pe.TotalDownVotes,
+    pd.TagList,
+    COALESCE(pd.LastEditDate, 'No Edits') AS LastEdit,
+    CASE 
+        WHEN pe.AcceptedAnswerId > 0 THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM PostEngagement pe
+JOIN PostDetails pd ON pe.PostId = pd.PostId
+ORDER BY pe.ViewCount DESC
+LIMIT 50;

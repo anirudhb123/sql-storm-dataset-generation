@@ -1,0 +1,57 @@
+WITH UserBadges AS (
+    SELECT Users.Id AS UserId,
+           Users.DisplayName,
+           SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    GROUP BY Users.Id, Users.DisplayName
+),
+PopularTags AS (
+    SELECT Tags.TagName,
+           COUNT(Posts.Id) AS PostCount,
+           SUM(Posts.ViewCount) AS TotalViews
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = Posts.Tags::text::purity
+    GROUP BY Tags.TagName
+    HAVING COUNT(Posts.Id) >= 10 -- Only consider tags with at least 10 posts
+),
+UserPostStatistics AS (
+    SELECT Posts.OwnerUserId,
+           COUNT(Posts.Id) AS TotalPosts,
+           SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+           SUM(Posts.Score) AS TotalScore
+    FROM Posts
+    GROUP BY Posts.OwnerUserId
+),
+RankedUsers AS (
+    SELECT u.UserId,
+           u.DisplayName,
+           u.GoldBadges,
+           u.SilverBadges,
+           u.BronzeBadges,
+           p.TotalPosts,
+           p.Questions,
+           p.Answers,
+           p.TotalScore,
+           ROW_NUMBER() OVER (ORDER BY p.TotalScore DESC) AS ScoreRank
+    FROM UserBadges u
+    JOIN UserPostStatistics p ON u.UserId = p.OwnerUserId
+)
+SELECT ru.DisplayName,
+       ru.GoldBadges,
+       ru.SilverBadges,
+       ru.BronzeBadges,
+       ru.TotalPosts,
+       ru.Questions,
+       ru.Answers,
+       ru.TotalScore,
+       pt.TagName,
+       pt.PostCount,
+       pt.TotalViews
+FROM RankedUsers ru
+JOIN PopularTags pt ON ru.TotalPosts > pt.PostCount * 0.5  -- Users with posts more than half of the popular tags post count
+WHERE ru.ScoreRank <= 10 -- Select top 10 users based on score
+ORDER BY ru.TotalScore DESC, pt.TotalViews DESC;

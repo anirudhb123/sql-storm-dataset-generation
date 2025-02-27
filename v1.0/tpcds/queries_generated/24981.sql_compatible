@@ -1,0 +1,54 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+Popular_Items AS (
+    SELECT 
+        i.i_item_id,
+        sc.total_sales,
+        sc.order_count,
+        COUNT(DISTINCT wr.return_quantity) AS return_count,
+        i.i_product_name,
+        CASE 
+            WHEN COUNT(wr.returning_customer_sk) > 0 THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM Sales_CTE AS sc
+    JOIN item AS i ON sc.ws_item_sk = i.i_item_sk
+    LEFT JOIN web_returns AS wr ON wr.wr_item_sk = i.i_item_sk
+    WHERE sc.sales_rank <= 10 AND sc.total_sales IS NOT NULL
+    GROUP BY i.i_item_id, sc.total_sales, sc.order_count, i.i_product_name
+),
+Sales_Analysis AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(ws.ws_net_profit) AS promo_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_orders,
+        STRING_AGG(DISTINCT w.w_warehouse_name, ', ') AS warehouses
+    FROM web_sales AS ws
+    JOIN promotion AS p ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN warehouse AS w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY p.p_promo_name
+)
+SELECT
+    pi.i_product_name,
+    pi.return_status,
+    sa.promo_profit,
+    sa.promo_orders,
+    CASE 
+        WHEN pi.return_count = 0 THEN 'No returns'
+        ELSE 'Contains returns'
+    END AS return_summary,
+    NULLIF(SUM(sa.promo_profit) OVER () - AVG(sa.promo_profit) OVER (), 0) AS adjusted_profit
+FROM Popular_Items AS pi
+LEFT JOIN Sales_Analysis AS sa ON pi.total_sales > 1000
+WHERE pi.return_status IS NOT NULL
+GROUP BY pi.i_product_name, pi.return_status, sa.promo_profit, sa.promo_orders, pi.return_count
+ORDER BY pi.total_sales DESC, pi.return_count DESC
+LIMIT 50;

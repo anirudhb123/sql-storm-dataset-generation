@@ -1,0 +1,62 @@
+WITH RECURSIVE movement_patterns AS (
+    SELECT 
+        c.id AS cast_id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_position,
+        COALESCE(aka.name, 'Unknown Actor') AS actor_name
+    FROM cast_info c
+    LEFT JOIN aka_name aka ON c.person_id = aka.person_id
+),
+movie_year_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) as keywords
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id
+),
+collaborations AS (
+    SELECT 
+        m.production_year,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        COUNT(DISTINCT mp.cast_id) AS total_cast
+    FROM movie_companies mc
+    JOIN movie_year_info m ON mc.movie_id = m.movie_id
+    JOIN cast_info mp ON mc.movie_id = mp.movie_id
+    GROUP BY m.production_year
+),
+ranked_movies AS (
+    SELECT 
+        mv.*, 
+        ROW_NUMBER() OVER(PARTITION BY mv.production_year ORDER BY mv.title) AS year_rank,
+        RANK() OVER(PARTITION BY mv.production_year ORDER BY cb.total_companies DESC) AS company_rank
+    FROM movie_year_info mv
+    JOIN collaborations cb ON mv.production_year = cb.production_year
+)
+SELECT 
+    r.production_year,
+    r.title,
+    r.keywords,
+    r.year_rank,
+    r.company_rank,
+    CASE 
+        WHEN r.company_rank IS NULL THEN 'No companies recorded' 
+        ELSE 'Companies present' 
+    END AS company_status,
+    NULLIF(aka_actor.actor_name, 'Unknown Actor') AS first_actor_name
+FROM ranked_movies r
+LEFT JOIN (
+    SELECT 
+        distinct m.production_year,
+        mv.actor_name
+    FROM movement_patterns mv
+    JOIN movie_year_info m ON mv.movie_id = m.movie_id
+    WHERE mv.actor_position = 1
+) aka_actor ON r.production_year = aka_actor.production_year
+WHERE r.production_year IS NOT NULL
+ORDER BY r.production_year, r.title;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_sold_date_sk, ss_item_sk, SUM(ss_quantity) AS total_quantity, 
+           SUM(ss_net_paid) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk DESC) AS rn
+    FROM store_sales
+    GROUP BY ss_sold_date_sk, ss_item_sk
+),
+CustomerAddress AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country
+    FROM customer_address
+    WHERE ca_state IN ('NY', 'CA')
+),
+CustomerReturns AS (
+    SELECT sr_customer_sk, SUM(sr_return_amt_inc_tax) AS total_returns,
+           SUM(sr_return_quantity) AS total_returned_quantity
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT cd_demo_sk, cd_gender, COUNT(c_customer_sk) AS customer_count
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_demo_sk, cd_gender
+),
+SalesGrowth AS (
+    SELECT s.ss_sold_date_sk AS sold_date, 
+           MAX(s.total_sales) AS max_sales, 
+           MIN(s.total_sales) AS min_sales, 
+           AVG(s.total_sales) AS avg_sales
+    FROM SalesCTE s
+    JOIN date_dim d ON d.d_date_sk = s.ss_sold_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY s.ss_sold_date_sk
+    HAVING MAX(s.total_sales) > 1000
+)
+SELECT d.d_day_name, 
+       ca.ca_city, 
+       ca.ca_country, 
+       SUM(sg.avg_sales) AS average_sales_growth,
+       SUM(cd.customer_count) AS total_customers,
+       COALESCE(cr.total_returns, 0) AS total_returns_amount,
+       COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity
+FROM SalesGrowth sg
+JOIN date_dim d ON d.d_date_sk = sg.sold_date
+LEFT JOIN CustomerAddress ca ON ca.ca_city = 'Los Angeles'
+LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk = 1
+LEFT JOIN CustomerReturns cr ON cr.sr_customer_sk = cd.customer_count
+GROUP BY d.d_day_name, ca.ca_city, ca.ca_country
+ORDER BY d.d_day_name;

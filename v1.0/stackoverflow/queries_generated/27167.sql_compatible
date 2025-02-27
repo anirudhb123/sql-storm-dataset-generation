@@ -1,0 +1,72 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+PostHistoryMetrics AS (
+    SELECT 
+        postHistory.UserId,
+        COUNT(CASE WHEN postHistory.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN postHistory.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        COUNT(*) AS TotalHistoryRecords
+    FROM 
+        PostHistory postHistory
+    INNER JOIN 
+        Posts ON postHistory.PostId = Posts.Id
+    WHERE 
+        postHistory.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        postHistory.UserId
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.BadgeCount,
+    ua.TotalViews,
+    ua.TotalScore,
+    phm.CloseReopenCount,
+    phm.DeleteUndeleteCount,
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount
+FROM 
+    UserActivity ua
+JOIN 
+    PostHistoryMetrics phm ON ua.UserId = phm.UserId
+JOIN 
+    TagCounts tc ON tc.PostCount > 0
+ORDER BY 
+    ua.TotalScore DESC, 
+    tc.PostCount DESC
+LIMIT 10;

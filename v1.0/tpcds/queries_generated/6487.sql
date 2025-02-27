@@ -1,0 +1,32 @@
+
+WITH customer_info AS (
+    SELECT c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_education_status, cd.cd_purchase_estimate, cd.cd_credit_rating,
+           hd.hd_income_band_sk, hd.hd_buy_potential, hd.hd_dep_count, hd.hd_vehicle_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT ws.ws_bill_customer_sk, SUM(ws.ws_sales_price) AS total_sales, SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_customer_sk
+),
+date_range AS (
+    SELECT d.d_year, d.d_month_seq, d.d_day_name
+    FROM date_dim d
+    WHERE d.d_date BETWEEN DATE '2022-01-01' AND DATE '2023-12-31'
+),
+combined_data AS (
+    SELECT ci.c_customer_id, ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status, 
+           sd.total_sales, sd.total_profit, dr.d_year, dr.d_month_seq, dr.d_day_name
+    FROM customer_info ci
+    LEFT JOIN sales_data sd ON ci.c_customer_id = sd.ws_bill_customer_sk
+    LEFT JOIN date_range dr ON EXTRACT(YEAR FROM CURRENT_DATE) = dr.d_year
+)
+SELECT cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+       cd.total_sales, cd.total_profit, dr.d_year, dr.d_month_seq
+FROM combined_data cd
+JOIN date_range dr ON cd.d_year = dr.d_year
+WHERE cd.total_sales > 1000 AND cd.cd_gender = 'F'
+ORDER BY cd.total_profit DESC, cd.total_sales DESC;

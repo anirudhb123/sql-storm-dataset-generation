@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey, 
+        n.n_nationkey,
+        r.r_regionkey,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY c.c_acctbal DESC) AS row_num
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(r.s_name, 'NONE') AS supplier_name,
+    COALESCE(total_orders.total_value, 0) AS total_order_value,
+    cr.row_num,
+    (SELECT MAX(o.o_totalprice) FROM orders o WHERE o.o_custkey IN 
+        (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = cr.n_nationkey)) AS max_nation_order_value
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers r ON p.p_partkey = r.ps_partkey AND r.rank_acctbal = 1
+LEFT JOIN 
+    FilteredOrders total_orders ON total_orders.o_custkey = r.s_suppkey
+JOIN 
+    CustomerRegions cr ON cr.c_custkey = total_orders.o_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    AND cr.row_num <= 5
+ORDER BY 
+    p.p_partkey, total_order_value DESC;

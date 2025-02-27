@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Score,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Score,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+, PostStats AS (
+    SELECT 
+        r.PostId,
+        r.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT ph.Id) AS TotalPostHistoryRecords
+    FROM 
+        RecursivePostHierarchy r
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON r.PostId = ph.PostId
+    GROUP BY 
+        r.PostId, r.OwnerUserId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    ur.DisplayName,
+    ur.Reputation,
+    ps.TotalComments,
+    ps.TotalPostHistoryRecords,
+    RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+FROM 
+    Posts p
+JOIN 
+    PostStats ps ON p.Id = ps.PostId
+JOIN 
+    UserReputation ur ON ps.OwnerUserId = ur.UserId
+WHERE 
+    p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    AND ur.Reputation > 1000 
+ORDER BY 
+    ps.TotalComments DESC, ur.Reputation DESC;

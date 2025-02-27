@@ -1,0 +1,80 @@
+
+WITH sales_summary AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+),
+customer_overview AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cs.cs_ext_sales_price) AS total_sales
+    FROM 
+        customer_demographics cd
+    JOIN 
+        catalog_sales cs ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+warehouse_performance AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        AVG(store.net_profit) AS avg_net_profit
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    JOIN (
+        SELECT 
+            ss.ss_store_sk,
+            SUM(ss.ss_net_profit) AS net_profit
+        FROM 
+            store_sales ss
+        GROUP BY 
+            ss.ss_store_sk
+    ) store ON w.w_warehouse_sk = store.ss_store_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+final_report AS (
+    SELECT 
+        s.d_year,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.total_sales AS customer_sales,
+        w.warehouse_id,
+        w.total_quantity,
+        w.avg_net_profit AS warehouse_avg_profit,
+        s.total_sales AS total_web_sales,
+        s.avg_net_profit AS avg_web_profit
+    FROM 
+        sales_summary s
+    CROSS JOIN 
+        customer_overview c
+    JOIN 
+        warehouse_performance w ON w.warehouse_id IS NOT NULL
+)
+SELECT 
+    d_year,
+    cd_gender,
+    cd_marital_status,
+    SUM(customer_sales) AS total_customer_sales,
+    SUM(total_quantity) AS total_warehouse_quantity,
+    SUM(total_web_sales) AS total_web_sales,
+    AVG(warehouse_avg_profit) AS avg_warehouse_profit,
+    AVG(avg_web_profit) AS avg_web_profit
+FROM 
+    final_report
+GROUP BY 
+    d_year, cd_gender, cd_marital_status
+ORDER BY 
+    d_year, cd_gender, cd_marital_status;

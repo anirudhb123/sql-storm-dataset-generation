@@ -1,0 +1,41 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name,
+           RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, n.n_name AS nation_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal)
+        FROM customer c2
+        WHERE c2.c_nationkey = c.c_nationkey
+    )
+), TopOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name AS customer_name
+    FROM orders o
+    JOIN HighValueCustomers hvc ON o.o_custkey = hvc.c_custkey
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate >= DATE '1997-01-01' AND o2.o_orderdate < DATE '1997-10-01'
+    )
+), LineItemsWithDiscount AS (
+    SELECT l.l_orderkey, l.l_extendedprice, l.l_discount
+    FROM lineitem l
+    JOIN TopOrders to ON l.l_orderkey = to.o_orderkey
+    WHERE l.l_discount > 0.1
+), FinalSummary AS (
+    SELECT r.r_name AS region_name, SUM(lwd.l_extendedprice * (1 - lwd.l_discount)) AS total_revenue
+    FROM LineItemsWithDiscount lwd
+    JOIN orders o ON lwd.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name
+)
+SELECT region_name, total_revenue
+FROM FinalSummary
+ORDER BY total_revenue DESC;

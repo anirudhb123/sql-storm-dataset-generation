@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        1 AS level
+    FROM 
+        movie_link ml 
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'SEQUEL')
+    UNION ALL
+    SELECT 
+        mh.movie_id, 
+        ml.linked_movie_id, 
+        mh.level + 1 AS level
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    ct.kind AS company_type,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    AVG(m.production_year) AS avg_production_year,
+    COUNT(DISTINCT mh.linked_movie_id) AS sequels_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date') THEN pi.info END) AS birth_date,
+    COUNT(*) FILTER (WHERE t.production_year IS NULL) AS null_production_year_count
+FROM 
+    aka_name a 
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON t.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND (mi.info IS NULL OR mi.note LIKE '%noteworthy%') 
+GROUP BY 
+    a.name, t.title, ct.kind
+HAVING 
+    num_companies > 1 
+    AND AVG(m.production_year) > 2000 
+ORDER BY 
+    sequels_count DESC, actor_name;

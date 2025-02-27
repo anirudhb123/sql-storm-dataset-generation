@@ -1,0 +1,33 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           p.ViewCount,
+           p.AnswerCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+      AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           u.Reputation,
+           COUNT(bp.Id) AS PostCount,
+           SUM(COALESCE(bp.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN RankedPosts bp ON u.Id = bp.OwnerUserId
+    WHERE u.Reputation > 1000 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING COUNT(bp.Id) > 0
+)
+SELECT tu.DisplayName, 
+       tu.Reputation, 
+       tu.PostCount, 
+       tu.TotalScore,
+       (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tu.UserId) AS BadgeCount,
+       (SELECT COUNT(*) FROM Comments c WHERE c.UserId = tu.UserId) AS CommentCount
+FROM TopUsers tu
+ORDER BY tu.PostCount DESC, tu.TotalScore DESC
+LIMIT 10;

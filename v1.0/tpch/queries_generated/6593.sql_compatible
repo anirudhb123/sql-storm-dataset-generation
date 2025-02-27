@@ -1,0 +1,71 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supply,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+MostExpensiveSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supply_cost
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_supply_cost = (SELECT MAX(total_supply_cost) FROM SupplierStats)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        o.o_orderdate,
+        o.o_custkey
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+CustomerOrderCount AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    m.s_name AS Supplier_Name,
+    c.c_name AS Customer_Name,
+    o.total_order_value AS Total_Order_Value,
+    cc.order_count AS Total_Orders,
+    m.total_supply_cost AS Total_Supply_Cost
+FROM 
+    MostExpensiveSuppliers m
+JOIN 
+    CustomerOrderCount cc ON m.s_suppkey = (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey))
+JOIN 
+    OrderSummary o ON cc.c_custkey = o.o_custkey
+ORDER BY 
+    m.total_supply_cost DESC, 
+    o.total_order_value DESC;

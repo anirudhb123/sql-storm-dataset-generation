@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, COUNT(DISTINCT ps.ps_supplycost) AS unique_supply_costs,
+           AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' OR o.o_orderdate IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionNation AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT p.p_partkey, p.p_name, COALESCE(ps.unique_supply_costs, 0) AS unique_supply_costs,
+       COALESCE(ps.avg_avail_qty, 0) AS avg_avail_qty,
+       cs.total_spent, cs.order_count, rn.r_name
+FROM part p
+LEFT JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN CustomerOrderSummary cs ON cs.order_count > 0
+LEFT JOIN RegionNation rn ON rn.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ps.ps_suppkey LIMIT 1)
+WHERE p.p_retailprice > 50
+ORDER BY total_spent DESC NULLS LAST, avg_avail_qty DESC, p.p_partkey;

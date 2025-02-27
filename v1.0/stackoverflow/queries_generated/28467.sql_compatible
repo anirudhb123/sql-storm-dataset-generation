@@ -1,0 +1,60 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT ph.PostId) AS PostEdits,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        SUM(v.VoteTypeId) AS TotalVotes,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000 
+        AND u.CreationDate < DATE_SUB('2024-10-01', INTERVAL 1 YEAR)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsWithTag,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsWithTag,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersWithTag
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostEdits,
+    ua.PostsCreated,
+    ua.QuestionsAsked,
+    ua.AnswersProvided,
+    ua.TotalVotes,
+    ua.TotalBadges,
+    ts.TagName,
+    ts.PostsWithTag,
+    ts.QuestionsWithTag,
+    ts.AnswersWithTag
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    TagStatistics ts ON ts.PostsWithTag > 0
+ORDER BY 
+    ua.TotalVotes DESC, ua.QuestionsAsked DESC, ua.PostsCreated DESC
+LIMIT 50;

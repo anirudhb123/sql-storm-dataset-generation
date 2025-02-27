@@ -1,0 +1,81 @@
+WITH UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        SUM(CASE WHEN b.TagBased = 1 THEN 1 ELSE 0 END) AS TagBasedCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVoteStats AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 6 THEN 1 END) AS CloseVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostHistoryDetail AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Closed, Reopened, Deleted, Undeleted
+),
+UserActivityStats AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.MaxBadgeClass,
+    ub.BadgeNames,
+    uas.PostsCount,
+    uas.CommentsCount,
+    uas.TotalBounty,
+    ps.PostId,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CloseVotes,
+    phd.HistoryRank,
+    phd.CreationDate AS PostHistoryDate,
+    phd.Comment AS PostHistoryComment,
+    CASE WHEN phd.PostHistoryTypeId IS NOT NULL THEN 'Yes' ELSE 'No' END AS HasHistoryRecord
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN UserActivityStats uas ON u.Id = uas.UserId
+LEFT JOIN PostVoteStats ps ON ps.PostId IN (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = u.Id
+)
+LEFT JOIN PostHistoryDetail phd ON phd.PostId IN (
+    SELECT p.Id 
+    FROM Posts p
+    WHERE p.OwnerUserId = u.Id
+)
+WHERE 
+    (ub.BadgeCount > 2 OR uas.PostsCount > 5)
+    AND (uas.TotalBounty >= 100 OR ps.UpVotes > ps.DownVotes)
+ORDER BY u.Reputation DESC, ub.MaxBadgeClass DESC, uas.PostsCount DESC;
+

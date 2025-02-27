@@ -1,0 +1,74 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        1 AS level
+    FROM partsupp 
+    WHERE ps_availqty > 100
+        
+    UNION ALL
+    
+    SELECT 
+        p.ps_partkey, 
+        p.ps_suppkey, 
+        p.ps_availqty - sc.ps_availqty AS remaining_availqty, 
+        p.ps_supplycost * 1.05 AS new_supplycost,
+        sc.level + 1
+    FROM partsupp p
+    JOIN supply_chain sc ON p.ps_suppkey = sc.ps_suppkey
+    WHERE p.ps_availqty < sc.ps_availqty
+),
+
+frequent_customers AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 10
+),
+
+top_nations AS (
+    SELECT 
+        n.n_name, 
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY n.n_name
+    HAVING SUM(s.s_acctbal) > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(sc.remaining_availqty, 0) AS avail_qty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS retail_rank
+    FROM part p
+    LEFT JOIN supply_chain sc ON p.p_partkey = sc.ps_partkey
+    WHERE p.p_size NOT IN (SELECT NULLIF(v.value, '') FROM (VALUES ('10'), ('20'), ('')) AS v(value))
+)
+
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_retailprice,
+    pd.avail_qty,
+    CASE 
+        WHEN pd.avail_qty = 0 THEN 'Out of stock'
+        WHEN pd.retail_rank = 1 THEN 'Top Retail'
+        ELSE 'Available'
+    END AS stock_status,
+    nc.n_name AS nation_name,
+    fc.order_count
+FROM part_details pd
+CROSS JOIN frequent_customers fc
+LEFT JOIN top_nations nc ON fc.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c WHERE c.c_custkey >= 1)
+WHERE pd.avail_qty > 0 AND 
+      pd.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY pd.p_retailprice DESC, nc.n_name;

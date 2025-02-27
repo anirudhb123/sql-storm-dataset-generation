@@ -1,0 +1,81 @@
+WITH RecursiveActorMovie AS (
+    SELECT
+        a.id AS actor_id,
+        t.id AS movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS actor_movie_order,
+        COUNT(c.movie_id) OVER (PARTITION BY a.id) AS total_movies
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+        AND t.production_year >= 2000
+),
+FilteredMovies AS (
+    SELECT
+        actor_id,
+        movie_id,
+        title,
+        actor_movie_order,
+        total_movies
+    FROM
+        RecursiveActorMovie
+    WHERE
+        total_movies > 5
+),
+MovieKeywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+),
+MovieCompanyDetails AS (
+    SELECT
+        m.id AS movie_id,
+        MAX(c.name) AS company_name,
+        MIN(ct.kind) AS company_type,
+        COUNT(*) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        m.id
+)
+SELECT
+    fa.actor_id,
+    a.name AS actor_name,
+    fm.title AS movie_title,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(mcd.company_name, 'Independent') AS company_name,
+    mcd.company_count,
+    fa.total_movies
+FROM
+    FilteredMovies fm
+JOIN
+    aka_name a ON fm.actor_id = a.id
+LEFT JOIN
+    MovieKeywords mk ON fm.movie_id = mk.movie_id
+LEFT JOIN
+    MovieCompanyDetails mcd ON fm.movie_id = mcd.movie_id
+WHERE
+    LENGTH(a.name) > 3
+    AND a.id NOT IN (SELECT person_id FROM person_info WHERE info_type_id = 1)
+    AND EXISTS (SELECT 1 FROM chase_scene cs WHERE cs.movie_id = fm.movie_id AND cs.duration > 120)
+ORDER BY
+    total_movies DESC, 
+    fm.actor_movie_order;

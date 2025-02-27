@@ -1,0 +1,70 @@
+WITH TagWordCount AS (
+    SELECT 
+        P.Id AS PostId,
+        UNNEST(string_to_array(TRIM(BOTH '<>' FROM P.Tags), '> <')) AS Tag
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Only consider questions to benchmark tag processing
+),
+TagFrequency AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        TagWordCount
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        Frequency,
+        ROW_NUMBER() OVER (ORDER BY Frequency DESC) AS TagRank
+    FROM 
+        TagFrequency
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativeScorePosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagRankedUserStats AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalPosts,
+        U.PositiveScorePosts,
+        U.NegativeScorePosts,
+        T.Tag,
+        T.Frequency AS TagFrequency,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY T.Frequency DESC) AS UserTagRank
+    FROM 
+        UserPostStats U
+    JOIN 
+        TopTags T ON U.TotalPosts > 0  -- Include users with at least 1 post
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.PositiveScorePosts,
+    U.NegativeScorePosts,
+    T.Tag,
+    T.TagFrequency
+FROM 
+    TagRankedUserStats T
+JOIN 
+    UserPostStats U ON T.DisplayName = U.DisplayName
+WHERE 
+    T.UserTagRank <= 3  -- Limit to top 3 tags for each user
+ORDER BY 
+    U.TotalPosts DESC, 
+    T.TagFrequency DESC;

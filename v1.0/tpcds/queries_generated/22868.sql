@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) 
+                             FROM web_sales ws2 
+                             WHERE ws2.ws_ship_date_sk IS NOT NULL)
+),
+AddressWithCustomer AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS city_rank
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state IS NOT NULL
+),
+CustomerPromotions AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(p.p_promo_name, 'No Promotion') AS promo_name,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        promotion p ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        c.c_customer_sk, promo_name
+)
+SELECT 
+    Address.ca_city,
+    Address.ca_state,
+    COUNT(DISTINCT Sales.ws_order_number) AS total_orders,
+    SUM(Sales.ws_sales_price) AS total_sales,
+    AVG(Sales.ws_sales_price) AS avg_sales_price,
+    CASE 
+        WHEN SUM(Sales.ws_sales_price) > 10000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    RankedSales Sales
+JOIN 
+    AddressWithCustomer Address ON Sales.web_site_sk = Address.ca_address_sk
+JOIN 
+    CustomerPromotions PromoDetails ON PromoDetails.c_customer_sk = Address.c_customer_id
+WHERE 
+    Address.city_rank < 5
+GROUP BY 
+    Address.ca_city, Address.ca_state
+HAVING 
+    SUM(Sales.ws_sales_price) IS NOT NULL
+ORDER BY 
+    3 DESC, 4 DESC;

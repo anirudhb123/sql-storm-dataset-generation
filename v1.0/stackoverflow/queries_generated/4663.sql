@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        AVG(p.Score) AS AvgQuestionScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    us.QuestionCount,
+    us.GoldBadges,
+    us.AvgQuestionScore,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.Id), 0) AS CommentCount
+FROM 
+    UserStats us
+JOIN 
+    Users u ON us.Id = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.ScoreRank = 1
+WHERE 
+    us.QuestionCount > 0
+ORDER BY 
+    us.AvgQuestionScore DESC,
+    us.GoldBadges DESC
+LIMIT 10
+UNION ALL
+SELECT
+    -1 AS UserId,
+    'Community Users' AS DisplayName,
+    0 AS QuestionCount,
+    0 AS GoldBadges,
+    AVG(p.Score) AS AvgQuestionScore,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount
+FROM 
+    Posts p
+WHERE 
+    p.PostTypeId = 1 AND 
+    p.OwnerUserId = -1
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score
+ORDER BY 
+    AvgQuestionScore DESC
+LIMIT 10;

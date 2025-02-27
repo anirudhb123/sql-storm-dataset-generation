@@ -1,0 +1,56 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               COALESCE(CONCAT(' Suite ', ca.ca_suite_number), ''), 
+               ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_ship_mode_sk,
+        d.d_week_seq,
+        d.d_year,
+        sm.sm_type
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+),
+AggregatedSales AS (
+    SELECT 
+        cs.c_customer_id,
+        SUM(sd.ws_sales_price) AS total_sales,
+        SUM(sd.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count,
+        AVG(sd.ws_sales_price) AS avg_order_value
+    FROM CustomerInfo cs
+    JOIN SalesData sd ON cs.c_customer_id = CAST(sd.ws_order_number AS CHAR)
+    GROUP BY cs.c_customer_id
+)
+SELECT 
+    ci.c_customer_id,
+    ci.full_name,
+    ci.full_address,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    as.total_sales,
+    as.total_profit,
+    as.order_count,
+    as.avg_order_value
+FROM CustomerInfo ci
+LEFT JOIN AggregatedSales as ON ci.c_customer_id = as.c_customer_id
+WHERE as.total_sales > 5000 
+    AND ci.cd_gender = 'F'
+ORDER BY as.total_sales DESC, ci.full_name;

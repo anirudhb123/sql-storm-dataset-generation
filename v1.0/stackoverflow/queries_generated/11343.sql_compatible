@@ -1,0 +1,38 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.Reputation AS OwnerReputation,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id) AS VoteCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Badges B WHERE B.UserId = P.OwnerUserId) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+
+SELECT 
+    PS.OwnerDisplayName,
+    PS.OwnerReputation,
+    COUNT(PS.PostId) AS TotalPosts,
+    SUM(PS.ViewCount) AS TotalViews,
+    SUM(PS.Score) AS TotalScore,
+    SUM(PS.AnswerCount) AS TotalAnswers,
+    SUM(PS.VoteCount) AS TotalVotes,
+    SUM(PS.CommentCount) AS TotalComments,
+    SUM(PS.BadgeCount) AS TotalBadges
+FROM 
+    PostStats PS
+GROUP BY 
+    PS.OwnerDisplayName, PS.OwnerReputation
+ORDER BY 
+    TotalPosts DESC, TotalScore DESC
+LIMIT 10;

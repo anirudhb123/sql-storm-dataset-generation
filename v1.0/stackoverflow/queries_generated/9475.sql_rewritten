@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.Rank <= 10 AND rp.PostTypeId = 1
+),
+TopAnswers AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title AS AnswerTitle, 
+        rp.CreationDate AS AnswerDate, 
+        rp.Score AS AnswerScore,
+        rp.OwnerDisplayName AS AnswerOwner
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.Rank <= 10 AND rp.PostTypeId = 2
+),
+Combined AS (
+    SELECT 
+        tq.PostId AS QuestionId,
+        tq.Title AS QuestionTitle,
+        tq.CreationDate AS QuestionDate,
+        tq.Score AS QuestionScore,
+        tq.ViewCount AS QuestionViewCount,
+        ta.PostId AS AnswerId,
+        ta.AnswerTitle,
+        ta.AnswerDate,
+        ta.AnswerScore,
+        ta.AnswerOwner
+    FROM 
+        TopQuestions tq
+    LEFT JOIN 
+        TopAnswers ta ON tq.PostId = ta.QuestionId
+)
+SELECT 
+    c.QuestionId,
+    c.QuestionTitle,
+    c.QuestionDate,
+    c.QuestionScore,
+    c.QuestionViewCount,
+    c.AnswerId,
+    c.AnswerTitle,
+    c.AnswerDate,
+    c.AnswerScore,
+    c.AnswerOwner
+FROM 
+    Combined c
+ORDER BY 
+    c.QuestionScore DESC, 
+    c.QuestionViewCount DESC;

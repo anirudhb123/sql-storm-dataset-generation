@@ -1,0 +1,45 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CANVAS(STRING_AGG(DISTINCT ca.ca_city, ', ')) AS cities,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender, cd.cd_marital_status ORDER BY c.c_customer_sk) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+ProcessedData AS (
+    SELECT 
+        rc.full_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_education_status,
+        CONCAT('Customer ID: ', rc.c_customer_sk, ', Gender: ', rc.cd_gender, 
+               ', Marital Status: ', rc.cd_marital_status, 
+               ', Cities: ', rc.cities) AS customer_info
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rn <= 10
+)
+SELECT 
+    pd.customer_info, 
+    LENGTH(pd.customer_info) AS string_length,
+    UPPER(pd.customer_info) AS uppercase_info,
+    REGEXP_REPLACE(pd.customer_info, '[^A-Za-z0-9 ]', '') AS cleaned_info
+FROM 
+    ProcessedData pd
+ORDER BY 
+    pd.string_length DESC
+LIMIT 100;

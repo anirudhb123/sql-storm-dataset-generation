@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount ASC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'UpMod') OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'DownMod') OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS PostCount,
+        SUM(rp.Score) AS TotalScore,
+        AVG(rp.ViewCount) AS AvgViewCount,
+        MAX(rp.ViewCount) AS MaxViewCount,
+        MIN(rp.ViewCount) AS MinViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CAST(pht.Name AS VARCHAR), ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+FinalStats AS (
+    SELECT
+        ups.UserId,
+        ups.DisplayName,
+        ups.PostCount,
+        ups.TotalScore,
+        ups.AvgViewCount,
+        ups.MaxViewCount,
+        ups.MinViewCount,
+        phs.EditCount,
+        phs.LastEditDate,
+        phs.EditTypes,
+        CASE 
+            WHEN ups.PostCount > 10 THEN 'High Contributor'
+            WHEN ups.TotalScore > 1000 THEN 'Top Scorer'
+            ELSE 'Regular Contributor'
+        END AS ContributorType
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        PostHistoryStats phs ON ups.PostCount > 0  -- Only interested in users with posts
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.PostCount,
+    fs.TotalScore,
+    fs.AvgViewCount,
+    fs.MaxViewCount,
+    fs.MinViewCount,
+    fs.EditCount,
+    fs.LastEditDate,
+    fs.EditTypes,
+    fs.ContributorType
+FROM 
+    FinalStats fs
+WHERE 
+    fs.PostCount > 5 
+    AND (fs.EditCount > 0 OR fs.TotalScore > 500)
+ORDER BY 
+    fs.TotalScore DESC, fs.PostCount DESC
+LIMIT 50;

@@ -1,0 +1,61 @@
+
+WITH RankedCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY c.c_birth_year DESC) AS rn
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_credit_rating IS NOT NULL
+),
+SalesSummary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+AggregateData AS (
+    SELECT
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        ss.total_sales,
+        ss.order_count
+    FROM
+        RankedCustomers rc
+    LEFT JOIN SalesSummary ss ON rc.c_customer_sk = ss.ws_bill_customer_sk
+    WHERE
+        rc.rn = 1
+)
+SELECT
+    ad.c_customer_sk,
+    ad.c_first_name,
+    ad.c_last_name,
+    ad.cd_gender,
+    ad.cd_marital_status,
+    COALESCE(ad.total_sales, 0) AS total_sales,
+    COALESCE(ad.order_count, 0) AS order_count,
+    CASE
+        WHEN ad.total_sales > 1000 THEN 'High Value'
+        WHEN ad.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM
+    AggregateData ad
+WHERE
+    ad.cd_gender = 'F'
+ORDER BY
+    total_sales DESC
+LIMIT 50;

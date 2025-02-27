@@ -1,0 +1,96 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        AVG(v.BountyAmount) AS AvgBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Users u
+        LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), NULL) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(v.VoteTypeId = 10) AS CloseVotes,
+        CASE 
+            WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN TRUE
+            ELSE FALSE 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        MAX(CreationDate) AS LastActive
+    FROM 
+        Users
+    GROUP BY 
+        UserId
+),
+UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(t.Id) FILTER (WHERE t.IsRequired = 1) AS RequiredTagCount
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        u.Id
+),
+FrequentVoters AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+        JOIN Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(v.Id) > 5
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.AvgBounty,
+    pm.Title AS PostTitle,
+    pm.CommentCount,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.CloseVotes,
+    COUNT(DISTINCT CASE WHEN pm.HasAcceptedAnswer THEN pm.AcceptedAnswerId END) OVER(PARTITION BY u.Id) AS AcceptedAnswersCount,
+    COUNT(DISTINCT t.TagName) AS TotalTags,
+    COALESCE(ut.RequiredTagCount, 0) AS RequiredTags,
+    CASE 
+        WHEN au.LastActive > NOW() - INTERVAL '1 month' THEN 'Active'
+        ELSE 'Inactive' 
+    END AS UserStatus,
+    COUNT(DISTINCT fv.UserId) AS FrequentVotersCount
+FROM 
+    UserReputation ur
+    INNER JOIN Users u ON ur.UserId = u.Id
+    LEFT JOIN PostMetrics pm ON u.Id = pm.OwnerUserId
+    LEFT JOIN UserTags ut ON u.Id = ut.UserId
+    LEFT JOIN ActiveUsers au ON u.Id = au.UserId
+    LEFT JOIN FrequentVoters fv ON u.Id = fv.UserId
+WHERE 
+    ur.Reputation > 100
+GROUP BY 
+    u.DisplayName, ur.Reputation, ur.AvgBounty, pm.Title, pm.CommentCount, pm.UpVotes, pm.DownVotes, pm.CloseVotes, ut.RequiredTagCount, au.LastActive
+ORDER BY 
+    ur.Reputation DESC, TotalTags ASC NULLS LAST;

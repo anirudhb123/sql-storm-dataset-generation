@@ -1,0 +1,96 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Get all titles and their direct links
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ml.linked_movie_id AS linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    -- Recursive case: Link to further connected movies
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ml.linked_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+),
+
+-- CTE for getting detailed movie information
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        array_agg(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COALESCE(NULLIF(AVG(CASE WHEN pi.info_type_id IS NOT NULL THEN 1 END), 0), 0) AS avg_info_types
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON pi.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mh.movie_id)
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+
+-- CTE for getting cast information
+cast_info_summary AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT ak.name) AS cast_names,
+        cc.kind AS role_type
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        comp_cast_type cc ON ci.person_role_id = cc.id
+    GROUP BY 
+        ci.movie_id, cc.kind
+)
+
+-- Final Select to bring everything together with additional filtering
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    cs.cast_names,
+    cs.role_type,
+    md.company_count,
+    md.avg_info_types,
+    CASE 
+        WHEN md.avg_info_types > 1 THEN 'Rich Information'
+        ELSE 'Limited Information'
+    END AS info_rating
+FROM 
+    movie_details md
+LEFT JOIN 
+    cast_info_summary cs ON md.movie_id = cs.movie_id
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pt.Name AS PostType,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostType,
+    rp.Owner,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    tc.TagName,
+    tc.PostCount,
+    ur.TotalBadges,
+    ur.VoteCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TagCounts tc ON rp.Tags LIKE CONCAT('%', tc.TagName, '%')
+JOIN 
+    UserReputation ur ON ur.DisplayName = rp.Owner
+WHERE 
+    rp.OwnerPostRank = 1
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC, ur.TotalBadges DESC;

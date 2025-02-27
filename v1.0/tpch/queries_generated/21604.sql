@@ -1,0 +1,60 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_custkey
+    FROM orders
+    WHERE o_orderdate >= CURRENT_DATE - INTERVAL '30' DAY
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    JOIN RecentOrders ro ON o.o_orderdate < ro.o_orderdate
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '60' DAY
+), SupplierCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), LineItemStats AS (
+    SELECT l.l_orderkey, 
+           COUNT(*) AS line_item_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), NationalSupplier AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name LIKE '%land%'
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 10)
+)
+SELECT r.o_orderkey, r.o_orderdate, r.o_totalprice,
+       li.line_item_count, li.total_revenue, 
+       fp.p_name, fp.retailprice, 
+       s.nation_name, 
+       CASE 
+           WHEN li.total_revenue IS NULL THEN 'No Revenue'
+           ELSE FORMAT(li.total_revenue::decimal, 'Currency')
+       END AS formatted_revenue,
+       COALESCE(fp.supplier_count, 0) AS total_suppliers
+FROM RecentOrders r
+LEFT JOIN LineItemStats li ON r.o_orderkey = li.l_orderkey
+LEFT JOIN FilteredParts fp ON EXISTS (
+    SELECT 1 
+    FROM lineitem l 
+    WHERE l.l_orderkey = r.o_orderkey 
+    AND l.l_partkey = fp.p_partkey
+)
+LEFT JOIN NationalSupplier s ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size BETWEEN 5 AND 10)
+)
+WHERE r.o_totalprice > (
+    SELECT AVG(o.o_totalprice) 
+    FROM orders o 
+    WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '90' DAY
+)
+ORDER BY r.o_orderdate DESC, total_revenue DESC
+LIMIT 100;

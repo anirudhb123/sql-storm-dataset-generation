@@ -1,0 +1,72 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM Tags T
+    INNER JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.CommentId), 0) AS CommentCount,
+        COALESCE(MAX(V.CreationDate), '1900-01-01') AS LastVoteDate,
+        P.ViewCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+ClosedPostReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CASE WHEN PH.PostHistoryTypeId = 10 THEN CR.Name END, '; ') AS CloseReasons
+    FROM PostHistory PH
+    INNER JOIN CloseReasonTypes CR ON CAST(PH.Comment AS INTEGER) = CR.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.TotalPosts,
+    T.TagName,
+    T.PostCount,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.CommentCount,
+    P.LastVoteDate,
+    P.ViewCount,
+    COALESCE(CR.CloseReasons, 'None') AS CloseReasons
+FROM UserVoteSummary U
+CROSS JOIN (
+    SELECT TagName, PostCount FROM PopularTags WHERE TagRank <= 10
+) T
+LEFT JOIN PostActivity P ON P.PostId IN (
+    SELECT Id FROM Posts WHERE Tags LIKE '%' || T.TagName || '%'
+)
+LEFT JOIN ClosedPostReasons CR ON CR.PostId = P.PostId
+WHERE U.TotalUpVotes > U.TotalDownVotes 
+  AND (P.CommentCount > 0 OR P.ViewCount >= 100)
+ORDER BY U.TotalUpVotes DESC, P.ViewCount DESC, P.CreationDate DESC
+LIMIT 100;

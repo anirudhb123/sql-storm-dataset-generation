@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Top 5 questions per user
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT bp.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges bp ON u.Id = bp.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    p.AnswerCount,
+    u.UserId,
+    u.Reputation,
+    u.BadgeCount
+FROM 
+    TopPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

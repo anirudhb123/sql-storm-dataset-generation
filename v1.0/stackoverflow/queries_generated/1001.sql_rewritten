@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+MostActiveUser AS (
+    SELECT 
+        Owner,
+        COUNT(PostId) AS PostCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+    GROUP BY 
+        Owner
+    ORDER BY 
+        PostCount DESC
+    LIMIT 1
+),
+PostHistoryAnalytics AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.CreationDate,
+        p.AcceptedAnswerId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    AND 
+        ph.PostHistoryTypeId IN (10, 11, 19, 20) 
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Owner,
+    r.CommentCount,
+    r.UpVotes,
+    r.DownVotes,
+    a.AcceptedAnswerId,
+    COALESCE(h.Comment, 'No Comments') AS LastHistoryComment,
+    COALESCE(h.CreationDate, 'No History') AS LastHistoryDate
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    MostActiveUser mu ON r.Owner = mu.Owner
+LEFT JOIN 
+    PostHistoryAnalytics h ON r.PostId = h.PostId
+WHERE 
+    mu.PostCount IS NOT NULL
+ORDER BY 
+    r.CommentCount DESC
+LIMIT 10;

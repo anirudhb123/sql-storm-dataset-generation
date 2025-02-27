@@ -1,0 +1,48 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_brand,
+           p.p_retailprice,
+           RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+),
+SupplierAvailability AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+      AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+    GROUP BY c.c_custkey
+),
+CountryStats AS (
+    SELECT n.n_name,
+           AVG(c.c_acctbal) AS avg_acctbal,
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+)
+SELECT COALESCE(cp.n_name, 'Unknown') AS nation_name,
+       SUM(COALESCE(ca.total_spent, 0)) AS total_customer_spending,
+       MAX(COALESCE(av.total_avail_qty, 0)) AS max_availability,
+       STRING_AGG(rp.p_name, ', ') AS top_parts,
+       AVG(cs.avg_acctbal) AS avg_balance
+FROM CountryStats cs
+FULL OUTER JOIN CustomerOrders ca ON cs.customer_count = (SELECT COUNT(*) FROM customer WHERE c_acctbal BETWEEN 0 AND 1000)
+FULL OUTER JOIN SupplierAvailability av ON av.ps_partkey = (SELECT p.p_partkey FROM part p ORDER BY p.p_retailprice LIMIT 1)
+LEFT JOIN RankedParts rp ON rp.price_rank <= 5
+LEFT JOIN nation cp ON cp.n_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = 'CANADA')
+WHERE cs.customer_count IS NOT NULL OR av.total_avail_qty IS NOT NULL
+GROUP BY cp.n_name
+HAVING AVG(cs.avg_acctbal) < 1000 OR COUNT(rp.p_partkey) > 5
+ORDER BY nation_name DESC, total_customer_spending DESC;

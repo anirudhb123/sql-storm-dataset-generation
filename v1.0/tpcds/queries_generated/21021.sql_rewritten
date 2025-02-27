@@ -1,0 +1,75 @@
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001 AND dd.d_dow NOT IN (6, 7) 
+    GROUP BY 
+        ws.web_site_sk, ws.ws_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        sd.web_site_sk,
+        AVG(sd.total_profit) AS avg_profit,
+        SUM(sd.total_quantity) AS total_quantity
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rank <= 5
+    GROUP BY 
+        sd.web_site_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+FilteredCustomerData AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.gender,
+        cd.total_orders,
+        cd.total_profit,
+        CASE 
+            WHEN cd.total_orders > 10 THEN 'High Volume'
+            WHEN cd.total_orders BETWEEN 5 AND 10 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS volume_category
+    FROM 
+        CustomerData cd
+    WHERE 
+        cd.total_profit IS NOT NULL
+)
+SELECT 
+    fs.web_site_sk,
+    fs.avg_profit,
+    fc.gender,
+    fc.volume_category,
+    COUNT(fc.c_customer_sk) AS customer_count
+FROM 
+    AggregateSales fs
+JOIN 
+    FilteredCustomerData fc ON fc.total_orders > fs.total_quantity
+GROUP BY 
+    fs.web_site_sk, fc.gender, fc.volume_category
+HAVING 
+    COUNT(fc.c_customer_sk) > 1
+ORDER BY 
+    fs.avg_profit DESC, customer_count DESC;

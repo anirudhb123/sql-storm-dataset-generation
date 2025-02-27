@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Date DESC) AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+), 
+PostInteraction AS (
+    SELECT 
+        rp.Id AS PostId,
+        COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(cp.CloseReasons, 'No close reasons') AS CloseReasons,
+        rp.Score,
+        rp.ViewCount,
+        CASE 
+            WHEN rp.Score > 100 THEN 'Highly Active'
+            WHEN rp.Score BETWEEN 50 AND 100 THEN 'Moderately Active'
+            ELSE 'Less Active' 
+        END AS ActivityLevel,
+        COALESCE(rp.VoteCount, 0) AS VoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.Id = cp.PostId
+)
+
+SELECT 
+    p.Title,
+    pi.UserBadgeCount,
+    pi.CloseReasons,
+    pi.ActivityLevel,
+    pi.Score,
+    pi.ViewCount,
+    CASE 
+        WHEN pi.ViewCount > 1000 THEN 'Popular Post'
+        WHEN pi.ViewCount BETWEEN 100 AND 1000 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed' 
+    END AS ViewStatus
+FROM 
+    PostInteraction pi
+JOIN 
+    Posts p ON pi.PostId = p.Id
+WHERE 
+    pi.UserBadgeCount > 0
+ORDER BY 
+    pi.Score DESC, 
+    pi.ViewCount DESC
+LIMIT 50;

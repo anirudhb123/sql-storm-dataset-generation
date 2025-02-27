@@ -1,0 +1,64 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        p2.CreationDate,
+        p2.Score,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE rpc ON p2.ParentId = rpc.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+    COALESCE(p2.AverageScore, 0) AS AverageScore,
+    STUFF((
+        SELECT ',' + t.TagName
+        FROM Tags t
+        INNER JOIN Posts p ON t.WikiPostId = p.Id
+        WHERE p.OwnerUserId = u.Id
+        FOR XML PATH('')), 1, 1, '') AS UserTags,
+    STRING_AGG(CONVERT(varchar, rp.Id), ', ') AS RelatedPostIDs
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        AVG(Score) AS AverageScore
+    FROM 
+        Posts
+    GROUP BY 
+        PostId) p2 ON p.Id = p2.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    RecursivePostCTE rp ON p.Id = rp.Id
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.DisplayName, p2.AverageScore
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    TotalUpVotes DESC, UserName ASC;

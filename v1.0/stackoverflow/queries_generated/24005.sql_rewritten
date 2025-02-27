@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS UserPostCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+ClosedPostDetails AS (
+    SELECT
+        ph.PostId,
+        p.Title,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        STRING_AGG(COALESCE(c.Comment, 'No reason provided'), '; ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, p.Title
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rb.BadgeCount AS UserBadgeCount,
+    rb.BadgeNames AS UserBadgeNames,
+    cp.LastCloseDate,
+    cp.CloseReasons,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    CASE 
+        WHEN rp.UserPostCount > 10 THEN 'Active User'
+        WHEN rp.UserPostCount BETWEEN 5 AND 10 THEN 'Moderate User'
+        ELSE 'New User'
+    END AS UserActivityLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.RankByScore <= 5 AND
+    (rp.UpvoteCount - rp.DownvoteCount > 0 OR cp.LastCloseDate IS NOT NULL)
+ORDER BY 
+    rp.RankByScore;

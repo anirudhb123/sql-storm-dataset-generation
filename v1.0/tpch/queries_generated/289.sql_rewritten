@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL OR c.c_acctbal < 1000 THEN 'Low Value'
+            WHEN c.c_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Value'
+            ELSE 'High Value'
+        END AS value_segment
+    FROM 
+        customer c
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(ho.total_order_value) AS total_recent_orders,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_acctbal, ')'), '; ') AS suppliers_info
+FROM 
+    nation ns
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    RecentOrders ho ON c.c_custkey = ho.o_custkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_nationkey = ns.n_nationkey AND s.rnk <= 3
+WHERE 
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    ns.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_recent_orders DESC;

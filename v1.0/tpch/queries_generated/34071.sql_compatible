@@ -1,0 +1,50 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, oh.o_totalprice + o.o_totalprice, oh.level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_custkey
+    WHERE oh.level < 5
+),
+MaxPartPrice AS (
+    SELECT ps.ps_partkey, MAX(ps.ps_supplycost) AS max_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierCounts AS (
+    SELECT n.n_nationkey, COUNT(s.s_suppkey) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey
+),
+GroupedLineItem AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM lineitem l
+    WHERE l.l_shipdate > '1997-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(SC.supplier_count, 0) AS supplier_count,
+    COALESCE(SUM(G.total_extended_price), 0) AS total_ep,
+    COALESCE(MAX(MP.max_supplycost), 0) AS max_supplycost,
+    RANK() OVER (PARTITION BY p.p_type ORDER BY SUM(G.total_extended_price) DESC) AS type_rank,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 'Has Orders'
+        ELSE 'No Orders'
+    END AS order_status
+FROM part p
+LEFT JOIN GroupedLineItem G ON p.p_partkey = G.l_orderkey
+LEFT JOIN SupplierCounts SC ON p.p_partkey = SC.n_nationkey
+LEFT JOIN MaxPartPrice MP ON p.p_partkey = MP.ps_partkey
+LEFT JOIN orders o ON G.l_orderkey = o.o_orderkey
+WHERE p.p_size > 10 AND (p.p_comment IS NOT NULL OR p.p_container IS NOT NULL)
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, SC.supplier_count, p.p_type
+ORDER BY total_ep DESC, type_rank ASC;

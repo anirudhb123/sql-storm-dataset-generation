@@ -1,0 +1,79 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.Views, u.UpVotes, u.DownVotes
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        COALESCE(uh.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(uh.Reputation, 0) AS OwnerReputation,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users uh ON p.OwnerUserId = uh.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount, p.CreationDate, uh.DisplayName, uh.Reputation
+),
+PopularPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Score,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.CommentCount,
+        pd.CreationDate,
+        us.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY us.DisplayName ORDER BY pd.Score DESC) AS Rank
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserStats us ON pd.OwnerDisplayName = us.DisplayName
+    WHERE 
+        pd.ViewCount > 1000 AND pd.AnswerCount > 5
+)
+SELECT 
+    pp.OwnerDisplayName,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.CommentCount,
+    pp.CreationDate
+FROM 
+    PopularPosts pp
+WHERE 
+    pp.Rank <= 3
+ORDER BY 
+    pp.OwnerDisplayName, pp.Score DESC;

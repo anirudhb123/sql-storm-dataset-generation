@@ -1,0 +1,67 @@
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY n.n_name) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        n.n_name
+), RankedSales AS (
+    SELECT 
+        nation_name, 
+        total_sales,
+        order_count,
+        sales_rank,
+        CASE 
+            WHEN total_sales IS NULL THEN 'No Sales'
+            ELSE 'Sales Present'
+        END AS sales_status
+    FROM 
+        RegionalSales
+), TopSales AS (
+    SELECT 
+        nation_name,
+        total_sales,
+        order_count,
+        sales_status
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 3
+), SupplierParts AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS part_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    r.nation_name AS "Top Nation",
+    r.total_sales AS "Total Sales",
+    r.order_count AS "Number of Orders",
+    r.sales_status AS "Sales Status",
+    s.s_name AS "Supplier Name",
+    s.p_name AS "Part Name",
+    s.ps_supplycost AS "Supply Cost"
+FROM 
+    TopSales r
+FULL OUTER JOIN 
+    SupplierParts s ON r.nation_name IS NOT DISTINCT FROM s.s_name
+WHERE 
+    r.total_sales > 100000 OR s.ps_supplycost < 50
+ORDER BY 
+    r.total_sales DESC NULLS LAST, s.ps_supplycost ASC;

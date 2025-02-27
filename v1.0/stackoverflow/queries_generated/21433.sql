@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.IsModeratorOnly IS NULL AND
+        p.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        p.Id
+), 
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.UpVotes >= 10 AND rp.DownVotes = 0 THEN 'Highly Positive'
+            WHEN rp.UpVotes < 5 THEN 'Needs Improvement'
+            ELSE 'Moderately Rated'
+        END AS Rating
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 50
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.Rating,
+    CASE 
+        WHEN fp.CommentCount IS NULL THEN 'No Comments'
+        ELSE 'Has Comments'
+    END AS CommentStatus,
+    COALESCE((
+        SELECT 
+            STRING_AGG(b.Name, ', ') 
+        FROM 
+            Badges b 
+        WHERE 
+            EXISTS (SELECT 1 FROM Users u WHERE u.Id = b.UserId AND u.Reputation > 1000)
+            AND b.UserId IN (SELECT DISTINCT u.Id FROM Posts p INNER JOIN Users u ON p.OwnerUserId = u.Id WHERE p.Id = fp.PostId)
+    ), 'No Badges') AS UserBadges
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.Rating != 'Needs Improvement'
+ORDER BY 
+    fp.Score DESC, 
+    fp.CreationDate DESC
+LIMIT 100;

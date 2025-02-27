@@ -1,0 +1,49 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TopSales AS (
+    SELECT 
+        p_name,
+        s_name,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        rank = 1
+)
+SELECT 
+    ts.p_name,
+    ts.s_name,
+    ts.total_sales,
+    c.c_mktsegment,
+    c.c_acctbal
+FROM 
+    TopSales ts
+JOIN 
+    orders o ON o.o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey IN (SELECT p_partkey FROM part WHERE p_name = ts.p_name))
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+ORDER BY 
+    ts.total_sales DESC;

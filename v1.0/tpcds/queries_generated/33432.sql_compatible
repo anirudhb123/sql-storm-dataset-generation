@@ -1,0 +1,86 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        ws_item_sk,
+        total_quantity,
+        total_profit
+    FROM 
+        SalesCTE
+    WHERE 
+        rn <= 10
+),
+AddressInfo AS (
+    SELECT 
+        ca_address_sk, 
+        ca_city, 
+        ca_state,
+        ca_zip,
+        ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_city) AS city_rank
+    FROM 
+        customer_address
+    WHERE 
+        ca_city IS NOT NULL
+),
+DemographicInfo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        COUNT(c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics
+    LEFT JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_purchase_estimate
+),
+SalesAnalysis AS (
+    SELECT 
+        ti.ws_item_sk,
+        ti.total_quantity,
+        ti.total_profit,
+        ai.ca_city,
+        ai.ca_state,
+        di.cd_gender,
+        di.cd_marital_status,
+        di.customer_count
+    FROM 
+        TopItems ti
+    LEFT JOIN 
+        address_info ai ON ai.city_rank <= 5
+    LEFT JOIN 
+        demographic_info di ON di.customer_count > 0
+    WHERE 
+        (di.cd_marital_status = 'M' OR di.cd_gender = 'F')
+)
+SELECT 
+    sa.ws_item_sk,
+    sa.total_quantity,
+    sa.total_profit,
+    sa.ca_city,
+    sa.ca_state,
+    sa.cd_gender,
+    sa.cd_marital_status,
+    sa.customer_count
+FROM 
+    SalesAnalysis sa
+WHERE 
+    sa.total_profit IS NOT NULL
+ORDER BY 
+    sa.total_profit DESC
+LIMIT 100 OFFSET 0;

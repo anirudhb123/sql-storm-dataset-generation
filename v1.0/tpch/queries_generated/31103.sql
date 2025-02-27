@@ -1,0 +1,57 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > 1000 AND ch.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_custkey
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) * 1.5 FROM orders o2
+    )
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 100
+),
+ProcessedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_shipmode = 'AIR'
+    GROUP BY l.l_orderkey, l.l_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(pl.total_price) AS total_order_value
+    FROM HighValueOrders o
+    JOIN ProcessedLineItems pl ON o.o_orderkey = pl.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    c.c_name, 
+    r.r_name AS region, 
+    SUM(os.total_order_value) AS grand_total,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(c.c_acctbal) AS highest_acct_balance,
+    COUNT(DISTINCT s.s_suppkey) AS supplied_part_count
+FROM CustomerHierarchy ch
+JOIN customer c ON ch.c_custkey = c.c_custkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN OrderSummary os ON os.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    INNER JOIN HighValueOrders h ON o.o_orderkey = h.o_orderkey
+) 
+LEFT JOIN partsupp ps ON c.c_custkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY c.c_name, r.r_name
+ORDER BY grand_total DESC
+LIMIT 10;

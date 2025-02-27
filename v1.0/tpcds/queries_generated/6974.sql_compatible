@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT
+        ss_ss_item_sk,
+        SUM(ss_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ss_ss_item_sk ORDER BY SUM(ss_sales_price) DESC) AS rank
+    FROM
+        store_sales
+    WHERE
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ss_ss_item_sk
+),
+TopItems AS (
+    SELECT
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_sales
+    FROM
+        RankedSales rs
+    JOIN
+        item i ON rs.ss_ss_item_sk = i.i_item_sk
+    WHERE
+        rs.rank <= 10
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY
+        c.c_customer_id
+)
+SELECT
+    ti.i_item_desc,
+    cs.c_customer_id,
+    cs.total_spent,
+    ti.total_sales
+FROM
+    TopItems ti
+JOIN
+    CustomerSales cs ON cs.c_customer_id IN (
+        SELECT 
+            DISTINCT c.c_customer_id 
+        FROM 
+            customer c
+        JOIN 
+            customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        WHERE 
+            cd.cd_gender = 'F' AND cd.cd_marital_status = 'S'
+    )
+ORDER BY
+    ti.total_sales DESC, cs.total_spent DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(mi.info, ''), 'No Info') AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rn
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    WHERE m.production_year >= 2000
+),
+CastCTE AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rn
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+),
+MovieInfoSummary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT mi.info ORDER BY mi.info) AS all_info
+    FROM movie_info mi
+    JOIN movie_companies mc ON mi.movie_id = mc.movie_id
+    GROUP BY mc.movie_id
+),
+Ranking AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        c.actor_name,
+        c.role_name,
+        ms.all_info,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS movie_rank
+    FROM MovieCTE m
+    LEFT JOIN CastCTE c ON m.movie_id = c.movie_id
+    LEFT JOIN MovieInfoSummary ms ON m.movie_id = ms.movie_id
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(r.actor_name, 'Unknown Actor') AS actor_name,
+    r.role_name,
+    r.all_info,
+    r.movie_rank
+FROM Ranking r
+WHERE r.movie_rank <= 5
+ORDER BY r.production_year DESC, r.actor_name;

@@ -1,0 +1,69 @@
+WITH RecursiveTagCTE AS (
+    SELECT 
+        Id,
+        TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Tags
+    GROUP BY 
+        Id, TagName
+), 
+PopularPostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(uc.UserCount, 0) AS UniqueCommenters
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(DISTINCT UserId) AS UserCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) uc ON p.Id = uc.PostId
+    WHERE 
+        p.Score > 10
+), 
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdited,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    pt.TagName,
+    ph.LastEdited,
+    ph.EditorCount,
+    ph.CloseCount,
+    CASE 
+        WHEN ph.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    ROW_NUMBER() OVER (PARTITION BY pt.TagName ORDER BY p.Score DESC) AS Rank
+FROM 
+    PopularPostsCTE p
+JOIN 
+    PostTags pt ON p.PostId = pt.PostId
+JOIN 
+    RecursiveTagCTE rt ON pt.TagId = rt.Id
+JOIN 
+    PostHistoryStats ph ON p.PostId = ph.PostId
+ORDER BY 
+    rt.TagCount DESC, 
+    p.Score DESC;

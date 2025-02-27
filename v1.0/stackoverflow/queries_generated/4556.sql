@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+        p.Score > 0
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        b.Class,
+        COUNT(b.Id) as TotalBadges
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId, b.Class
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ub.TotalBadges,
+        COALESCE(SUM(v.CreationDate IS NOT NULL), 0) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, ub.TotalBadges
+), PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate AS PostDate,
+    us.DisplayName AS Author,
+    us.Reputation,
+    COALESCE(pc.CommentCount, 0) AS Comments,
+    us.UpVotes,
+    us.DownVotes,
+    RANK() OVER (PARTITION BY us.UserId ORDER BY p.Score DESC) AS PostRank,
+    CASE 
+        WHEN ub.Class IS NOT NULL THEN CONCAT('Badge Level: ', ub.Class)
+        ELSE 'No Badge'
+    END AS BadgeStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Posts p ON rp.PostId = p.Id
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    UserBadges ub ON us.UserId = ub.UserId
+LEFT JOIN 
+    PostComments pc ON p.Id = pc.PostId
+WHERE 
+    rp.RankByScore <= 5
+ORDER BY 
+    p.Score DESC, us.Reputation DESC;

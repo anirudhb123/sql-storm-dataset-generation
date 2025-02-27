@@ -1,0 +1,43 @@
+
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice > 500
+), 
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty,
+           COALESCE(ps.ps_supplycost, 0) AS supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS supplier_rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice BETWEEN 10 AND 100
+), 
+top_suppliers AS (
+    SELECT DISTINCT ps.ps_suppkey
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_mfgr = 'Manufacturer#1'
+    AND ps.ps_availqty > 100
+),
+aggregate_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    INNER JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT c.c_name, SUM(a.total_revenue) AS total_revenue,
+       COALESCE(MAX(ps.supply_cost), 0) AS max_supply_cost,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       CUME_DIST() OVER (ORDER BY SUM(a.total_revenue) DESC) AS revenue_distribution
+FROM cust_orders c
+LEFT JOIN aggregate_summary a ON c.o_orderkey = a.o_orderkey
+LEFT JOIN part_supplier ps ON (c.o_orderkey IN (
+    SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.p_partkey
+) OR ps.supplier_rank = 1)
+WHERE c.rn <= 5
+AND c.o_orderkey IS NOT NULL
+GROUP BY c.c_name
+HAVING SUM(a.total_revenue) > 1000 AND MAX(ps.supply_cost) IS NOT NULL
+ORDER BY revenue_distribution DESC, total_revenue ASC;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ss.sold_date_sk,
+        SUM(ss.sales_price * ss.quantity) AS total_sales,
+        COUNT(DISTINCT ss.customer_sk) AS customer_count,
+        DENSE_RANK() OVER (PARTITION BY ss.sold_date_sk ORDER BY SUM(ss.sales_price * ss.quantity) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.sold_date_sk
+),
+PromotionSummary AS (
+    SELECT 
+        p.promo_id,
+        COUNT(cs.order_number) AS promo_sales_count,
+        SUM(cs.net_paid) AS total_promo_sales
+    FROM 
+        promotion p
+    LEFT JOIN 
+        catalog_sales cs ON p.promo_sk = cs.promo_sk
+    GROUP BY 
+        p.promo_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender, 
+        COUNT(*) AS demographic_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    d.d_date AS sales_date,
+    sd.total_sales,
+    sd.customer_count,
+    ps.promo_id,
+    ps.promo_sales_count,
+    ps.total_promo_sales,
+    cd.cd_gender,
+    cd.demographic_count
+FROM 
+    date_dim d
+LEFT JOIN 
+    SalesData sd ON d.d_date_sk = sd.sold_date_sk
+LEFT JOIN 
+    PromotionSummary ps ON ps.promo_sales_count > 0
+LEFT JOIN 
+    CustomerDemographics cd ON cd.demographic_count > 0
+WHERE 
+    d.d_year = 2023
+ORDER BY 
+    d.d_date, sd.total_sales DESC NULLS LAST;

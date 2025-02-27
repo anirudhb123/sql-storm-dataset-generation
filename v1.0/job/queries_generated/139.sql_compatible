@@ -1,0 +1,54 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(cc.id) AS total_cast,
+        AVG(NULLIF(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END, 0)) AS avg_order_position,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.total_cast,
+        md.avg_order_position,
+        RANK() OVER (ORDER BY md.total_cast DESC) AS cast_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year BETWEEN 1990 AND 2020
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.total_cast,
+    tm.avg_order_position,
+    COALESCE(tk.keyword_list, 'No keywords') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keyword_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+) tk ON tm.movie_title = tk.movie_id
+WHERE 
+    tm.cast_rank <= 10
+ORDER BY 
+    tm.cast_rank;

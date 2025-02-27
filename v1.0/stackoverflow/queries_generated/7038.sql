@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagUsage DESC
+    LIMIT 10
+),
+RecentEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags modifications
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.AnswerCount,
+    us.BadgeCount,
+    pt.TagName,
+    re.Title AS EditedPostTitle,
+    re.UserDisplayName AS Editor,
+    re.CreationDate AS EditDate,
+    re.Comment AS EditComment
+FROM 
+    UserStats us
+CROSS JOIN 
+    PopularTags pt
+LEFT JOIN 
+    RecentEdits re ON re.EditRank = 1
+ORDER BY 
+    us.Reputation DESC, pt.TagUsage DESC;

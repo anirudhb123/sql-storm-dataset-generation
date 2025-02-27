@@ -1,0 +1,35 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.level + 1
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus = 'O' AND co.level < 5
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    co.c_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    COALESCE(AVG(cs.total_sales), 0) AS avg_supplier_sales,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns,
+    RANK() OVER (PARTITION BY co.c_custkey ORDER BY COUNT(DISTINCT co.o_orderkey) DESC) AS order_rank
+FROM CustomerOrders co
+LEFT JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierSales cs ON l.l_suppkey = cs.s_suppkey
+GROUP BY co.c_name, co.c_custkey
+HAVING COUNT(DISTINCT co.o_orderkey) > 1 
+   AND SUM(CASE WHEN l.l_tax IS NOT NULL THEN l.l_tax ELSE 0 END) > 100
+ORDER BY total_orders DESC, avg_supplier_sales DESC;

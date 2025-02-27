@@ -1,0 +1,57 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS LatestPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Location,
+    U.CreationDate AS UserSince,
+    U.LastAccessDate,
+    COALESCE(US.Upvotes - US.Downvotes, 0) AS NetVotes,
+    PS.PostId,
+    PS.Title AS LatestPostTitle,
+    PS.CreationDate AS LatestPostDate,
+    PS.Score AS LatestPostScore,
+    PS.ViewCount AS LatestPostViews
+FROM 
+    Users U
+LEFT JOIN 
+    UserVoteStats US ON U.Id = US.UserId
+LEFT JOIN 
+    PostStats PS ON U.Id = PS.OwnerUserId AND PS.LatestPostRank = 1
+WHERE 
+    US.PostCount > 0 
+    OR EXISTS (
+        SELECT 1
+        FROM Posts P
+        WHERE P.OwnerUserId = U.Id AND P.AcceptedAnswerId IS NOT NULL
+    )
+ORDER BY 
+    NetVotes DESC NULLS LAST,
+    U.Reputation DESC;

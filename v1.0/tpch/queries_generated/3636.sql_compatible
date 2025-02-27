@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_revenue
+    FROM
+        orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+SupplierStats AS (
+    SELECT
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.s_suppkey
+),
+CustomerPurchases AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+FinalStats AS (
+    SELECT
+        r.n_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        SUM(cs.total_spent) AS overall_spent,
+        AVG(o.total_revenue) AS avg_order_revenue
+    FROM
+        nation r
+    LEFT JOIN customer c ON r.n_nationkey = c.c_nationkey
+    LEFT JOIN CustomerPurchases cs ON c.c_custkey = cs.c_custkey
+    LEFT JOIN RankedOrders o ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+    GROUP BY
+        r.n_nationkey
+)
+SELECT
+    r.r_name,
+    fs.unique_customers,
+    fs.overall_spent,
+    fs.avg_order_revenue
+FROM
+    region r
+LEFT JOIN FinalStats fs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = fs.n_nationkey)
+WHERE
+    fs.unique_customers IS NOT NULL
+ORDER BY
+    fs.unique_customers DESC, fs.overall_spent DESC;

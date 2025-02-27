@@ -1,0 +1,70 @@
+WITH RegionalSupplier AS (
+    SELECT 
+        r.r_name AS region_name, 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        region r 
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey 
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey 
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS rank_order 
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+LineItemsDiscounts AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_price 
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_returnflag = 'N' 
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    rs.region_name, 
+    rs.s_name, 
+    COALESCE(co.rank_order, 0) AS cust_order_rank,
+    li.discounted_price,
+    CASE 
+        WHEN li.discounted_price > 1000 THEN 'High Value'
+        WHEN li.discounted_price BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS value_category,
+    COUNT(DISTINCT li.l_orderkey) OVER (PARTITION BY rs.region_name) AS order_count
+FROM 
+    RegionalSupplier rs
+LEFT OUTER JOIN 
+    CustomerOrders co ON rs.s_suppkey = co.c_custkey
+LEFT OUTER JOIN 
+    LineItemsDiscounts li ON co.o_orderkey = li.l_orderkey
+WHERE 
+    rs.r_name LIKE 'Eu%' 
+    OR (rs.s_acctbal IS NULL AND NOT EXISTS (
+        SELECT 1 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = rs.s_suppkey
+    ))
+ORDER BY 
+    rs.region_name, 
+    value_category DESC, 
+    rs.s_name;

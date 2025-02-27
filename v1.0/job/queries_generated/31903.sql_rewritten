@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        ARRAY[m.title] AS path
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL  
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.path || m.title
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        string_agg(DISTINCT ak.name, ', ') AS cast_names,
+        COUNT(DISTINCT ci.id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_information AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'N/A') AS movie_info,
+        COALESCE(kw.keyword, 'No keywords') AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+),
+final_results AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cd.cast_names,
+        cd.cast_count,
+        mi.movie_info,
+        mi.keyword,
+        mh.path,
+        mh.level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN 
+        movie_information mi ON mh.movie_id = mi.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    cast_names,
+    cast_count,
+    movie_info,
+    keyword,
+    path,
+    level
+FROM 
+    final_results
+WHERE 
+    production_year IS NOT NULL
+ORDER BY
+    production_year DESC, level, title;

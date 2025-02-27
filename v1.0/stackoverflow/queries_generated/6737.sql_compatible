@@ -1,0 +1,67 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE vt.Name = 'UpMod') AS Upvotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE vt.Name = 'DownMod') AS Downvotes,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.CreationDate > DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.AcceptedAnswerId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.HasAcceptedAnswer,
+        (ps.Upvotes - ps.Downvotes) AS NetVotes,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        UserBadges ub ON ps.PostId IN (SELECT ParentId FROM Posts WHERE ParentId IS NOT NULL)
+    ORDER BY 
+        ps.Score DESC, NetVotes DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.HasAcceptedAnswer,
+    tp.NetVotes,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges
+FROM 
+    TopPosts tp
+WHERE 
+    tp.HasAcceptedAnswer = 1 OR tp.NetVotes > 0
+ORDER BY 
+    tp.NetVotes DESC;

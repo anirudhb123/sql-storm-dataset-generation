@@ -1,0 +1,58 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+),
+SupplierPart AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_retailprice,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS SupplierRank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+NationSum AS (
+    SELECT n.n_name, 
+           SUM(s.s_acctbal) AS TotalBalance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+OrderDetail AS (
+    SELECT lo.l_orderkey, 
+           SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS TotalItemPrice,
+           lo.l_returnflag,
+           lo.l_linestatus,
+           COUNT(lo.l_orderkey) AS LineItemCount
+    FROM lineitem lo
+    WHERE lo.l_shipdate >= DATE '1997-01-01'
+    GROUP BY lo.l_orderkey, lo.l_returnflag, lo.l_linestatus
+)
+SELECT o.o_orderkey, 
+       o.o_orderdate, 
+       o.o_totalprice, 
+       sp.p_name, 
+       sp.p_retailprice, 
+       sp.s_name AS SupplierName, 
+       od.TotalItemPrice, 
+       ns.TotalBalance AS NationalTotalBalance
+FROM RankedOrders o
+LEFT JOIN OrderDetail od ON o.o_orderkey = od.l_orderkey
+JOIN SupplierPart sp ON sp.SupplierRank = 1
+JOIN NationSum ns ON ns.n_name = (
+    SELECT n.n_name 
+    FROM nation n 
+    JOIN customer c ON n.n_nationkey = c.c_nationkey 
+    WHERE c.c_custkey = o.o_custkey
+)
+WHERE o.OrderRank = 1 
+  AND (od.LineItemCount > 5 OR od.TotalItemPrice > 5000)
+ORDER BY o.o_orderdate DESC, o.o_orderkey;

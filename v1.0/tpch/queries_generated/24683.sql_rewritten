@@ -1,0 +1,88 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS p_comment,
+        SUBSTRING(p.p_name, 1, 3) AS short_name
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10 AND p.p_retailprice < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        MAX(l.l_discount) AS max_discount,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND l.l_shipdate <= cast('1998-10-01' as date)
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierOrderCounts AS (
+    SELECT 
+        ps.ps_suppkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+FinalReport AS (
+    SELECT 
+        r.r_name,
+        r.r_regionkey,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(od.total_amount) AS total_sales,
+        MAX(ps.o_orderdate) AS last_order_date,
+        AVG(COALESCE(s.s_acctbal, 0)) AS avg_account_balance
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        OrderDetails od ON c.c_custkey = od.o_orderkey
+    LEFT JOIN 
+        SupplierOrderCounts so ON so.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        RankedSuppliers s ON so.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT c.c_custkey) > 10 AND AVG(s.s_acctbal) > 1000
+)
+SELECT 
+    COUNT(DISTINCT f.r_regionkey) AS region_with_high_sales,
+    MIN(f.total_sales) AS min_sales_in_region,
+    MAX(f.last_order_date) AS most_recent_order_date
+FROM 
+    FinalReport f
+WHERE 
+    f.total_sales > 10000 AND f.customer_count IS NOT NULL
+ORDER BY 
+    min_sales_in_region DESC
+LIMIT 5;

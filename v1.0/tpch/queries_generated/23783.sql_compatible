@@ -1,0 +1,86 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= (CAST('1998-10-01' AS DATE) - INTERVAL '1 YEAR')
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate < oh.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost, COUNT(ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey
+    HAVING COUNT(ps.ps_partkey) > 5
+),
+customer_ranks AS (
+    SELECT c.c_custkey, RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+lineitem_analysis AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(*) FILTER (WHERE l.l_returnflag = 'Y') AS returns
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+nations_with_comment_length AS (
+    SELECT n.n_nationkey, CHAR_LENGTH(n.n_comment) AS comment_length
+    FROM nation n
+    WHERE n.n_comment IS NOT NULL
+)
+SELECT DISTINCT
+    p.p_partkey,
+    p.p_name,
+    MAX(p.p_retailprice) OVER (PARTITION BY p.p_brand) AS max_brand_price,
+    COALESCE(r.r_name, 'Unknown') AS region_name, 
+    cs.rank AS customer_rank,
+    SUM(l.net_revenue) AS total_revenue,
+    n.comment_length,
+    CASE WHEN SUM(l.returns) > 0 THEN 'Returned' ELSE 'Not Returned' END AS return_status
+FROM part p
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = (
+        SELECT c.c_nationkey 
+        FROM customer c 
+        WHERE c.c_custkey IN (
+            SELECT DISTINCT o.o_custkey 
+            FROM orders o 
+            JOIN order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+        )
+        LIMIT 1
+    )
+    LIMIT 1
+)
+JOIN customer_ranks cs ON cs.c_custkey = (
+    SELECT DISTINCT o.o_custkey 
+    FROM orders o 
+    JOIN order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+    LIMIT 1
+)
+JOIN lineitem_analysis l ON l.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+) 
+JOIN nations_with_comment_length n ON n.n_nationkey = (
+    SELECT DISTINCT c.c_nationkey 
+    FROM customer c 
+    WHERE c.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        JOIN order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+    )
+    LIMIT 1
+)
+GROUP BY p.p_partkey, p.p_name, r.r_name, cs.rank, n.comment_length;

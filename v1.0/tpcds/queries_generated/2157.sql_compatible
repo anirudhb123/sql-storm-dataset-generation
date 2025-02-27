@@ -1,0 +1,69 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022 
+        AND dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.ws_web_site_sk
+),
+HighRevenueSites AS (
+    SELECT 
+        sd.ws_web_site_sk,
+        sd.total_quantity,
+        sd.total_revenue,
+        RANK() OVER (ORDER BY sd.total_revenue DESC) AS revenue_rank
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_revenue > 100000
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        h.ws_web_site_sk,
+        h.total_quantity,
+        h.total_revenue,
+        ccr.total_returns,
+        ccr.total_return_amount,
+        CASE 
+            WHEN ccr.total_returns IS NOT NULL AND ccr.total_return_amount > 0 THEN 
+                ROUND((h.total_revenue / ccr.total_return_amount), 2)
+            ELSE 
+                NULL
+        END AS revenue_per_return
+    FROM 
+        HighRevenueSites h
+    LEFT JOIN 
+        CustomerReturns ccr ON h.ws_web_site_sk = ccr.wr_returning_customer_sk
+)
+SELECT 
+    f.ws_web_site_sk,
+    f.total_quantity,
+    f.total_revenue,
+    f.total_returns,
+    f.total_return_amount,
+    f.revenue_per_return
+FROM 
+    FinalReport f
+WHERE 
+    f.revenue_rank <= 10
+ORDER BY 
+    f.total_revenue DESC;

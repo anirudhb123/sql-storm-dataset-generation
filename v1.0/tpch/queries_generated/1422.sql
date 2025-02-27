@@ -1,0 +1,64 @@
+WITH DailySales AS (
+    SELECT 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderdate
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(p.p_retailprice) AS avg_retail_price,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY AVG(p.p_retailprice) DESC) AS price_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+
+SELECT 
+    ds.o_orderdate,
+    ds.total_sales,
+    ds.total_orders,
+    ss.s_name AS supplier_name,
+    ps.p_brand,
+    ps.total_available_qty,
+    ps.avg_retail_price,
+    ps.price_rank
+FROM 
+    DailySales ds
+FULL OUTER JOIN 
+    SupplierStats ss ON ds.o_orderdate = (SELECT MAX(o_orderdate) FROM orders WHERE o_orderdate <= ds.o_orderdate)
+LEFT JOIN 
+    PartSummary ps ON ps.total_available_qty > 50 
+WHERE 
+    ds.total_sales > 10000
+ORDER BY 
+    ds.o_orderdate DESC, 
+    ss.total_supply_cost DESC NULLS LAST

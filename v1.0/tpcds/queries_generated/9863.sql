@@ -1,0 +1,75 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ss.ss_ext_sales_price, 0) + COALESCE(cs.cs_ext_sales_price, 0) + COALESCE(ws.ws_ext_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_sales_count,
+        COUNT(DISTINCT ws.ws_order_number) AS web_sales_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ib.ib_income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        SUM(cs.total_sales) AS total_sales,
+        SUM(cs.store_sales_count) AS total_store_sales,
+        SUM(cs.catalog_sales_count) AS total_catalog_sales,
+        SUM(cs.web_sales_count) AS total_web_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        cs.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT 
+    gender,
+    marital_status,
+    education_status,
+    COUNT(DISTINCT c_customer_id) AS customer_count,
+    SUM(total_sales) AS total_sales,
+    AVG(total_store_sales) AS avg_store_sales,
+    AVG(total_catalog_sales) AS avg_catalog_sales,
+    AVG(total_web_sales) AS avg_web_sales,
+    MIN(ib_lower_bound) AS min_income,
+    MAX(ib_upper_bound) AS max_income
+FROM 
+    SalesSummary
+GROUP BY 
+    gender, marital_status, education_status
+ORDER BY 
+    total_sales DESC;

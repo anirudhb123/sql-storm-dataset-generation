@@ -1,0 +1,33 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    rs.s_name AS supplier_name,
+    rs.order_count,
+    rs.total_revenue
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation ns ON rs.s_nationkey = ns.n_nationkey
+JOIN 
+    region r ON ns.n_regionkey = r.r_regionkey
+WHERE 
+    rs.rank <= 3
+ORDER BY 
+    r.r_name, ns.n_name, rs.total_revenue DESC;

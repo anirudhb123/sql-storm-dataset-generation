@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY(SELECT DISTINCT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) AS TagName) AS TagsArray,
+        COALESCE(SUM(vt.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(vt.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(SUM(b.Id IS NOT NULL) OVER (PARTITION BY p.OwnerUserId), 0) AS BadgesCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1    -- Only considering Questions
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        ARRAY_TO_STRING(rp.TagsArray, ', ') AS Tags,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.BadgesCount,
+        rp.Rank,
+        CASE WHEN rp.UpVotes > rp.DownVotes THEN 'Popular' ELSE 'Less Popular' END AS PopularityStatus
+    FROM 
+        RankedPosts rp
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.Tags,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.BadgesCount,
+    ps.PopularityStatus,
+    ph.Comment AS LastEditComment,
+    ph.CreationDate AS LastEditDate
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PostHistory ph ON ps.PostId = ph.PostId 
+WHERE 
+    ph.Created = (SELECT MAX(ph2.CreationDate) FROM PostHistory ph2 WHERE ph2.PostId = ps.PostId AND ph2.PostHistoryTypeId IN (4, 5)) 
+ORDER BY 
+    ps.Rank;

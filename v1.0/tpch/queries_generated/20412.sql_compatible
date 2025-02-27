@@ -1,0 +1,45 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate > DATEADD(YEAR, -1, CAST('1998-10-01' AS DATE))
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_availqty) * p.p_retailprice AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE (p.p_size BETWEEN 15 AND 30 OR p.p_type LIKE '%metal%')
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 5
+),
+CombinedData AS (
+    SELECT ro.o_orderkey, fp.p_name, fp.total_avail_qty, fp.total_value,
+           ss.s_name, ss.avg_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY fp.p_name ORDER BY fp.total_value DESC) AS rank_part
+    FROM RankedOrders ro
+    FULL OUTER JOIN FilteredParts fp ON ro.o_orderkey = fp.p_partkey
+    LEFT JOIN SupplierStats ss ON ss.parts_supplied = fp.total_avail_qty
+    WHERE ss.avg_acctbal IS NOT NULL OR fp.total_value IS NULL
+)
+SELECT c.c_custkey, c.c_name, cd.o_orderkey, cd.p_name,
+       COALESCE(cd.total_avail_qty, 0) AS avail_qty,
+       cd.total_value AS part_value,
+       CASE 
+           WHEN cd.total_value IS NULL THEN 'Value Not Available'
+           ELSE 'Value Available'
+       END AS value_status
+FROM customer c
+JOIN CombinedData cd ON c.c_custkey = cd.o_orderkey
+WHERE cd.rank_part <= 10
+ORDER BY c.c_custkey, cd.o_orderkey;

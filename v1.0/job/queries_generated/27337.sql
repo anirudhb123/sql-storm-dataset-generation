@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        COUNT(mc.company_id) AS company_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(mc.company_id) DESC) AS rank_within_year
+    FROM
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.kind_id,
+        rm.company_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_within_year <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        tm.company_count,
+        ARRAY_AGG(DISTINCT p.name) AS actors,
+        ARRAY_AGG(DISTINCT mk.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year, tm.company_count
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.company_count,
+    STRING_AGG(DISTINCT md.actors::text, ', ') AS actor_list,
+    STRING_AGG(DISTINCT md.keywords::text, ', ') AS keyword_list
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.company_count
+ORDER BY 
+    md.production_year DESC, md.company_count DESC;

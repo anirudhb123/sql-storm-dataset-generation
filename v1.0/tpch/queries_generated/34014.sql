@@ -1,0 +1,45 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_nationkey IN (SELECT n_regionkey FROM region)
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+suppliers_part AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+ranked_customers AS (
+    SELECT co.c_custkey, co.c_name, co.total_spent,
+           RANK() OVER (ORDER BY co.total_spent DESC) AS rank,
+           ROW_NUMBER() OVER (PARTITION BY co.order_count > 5 ORDER BY co.total_spent DESC) AS top_spender
+    FROM customer_orders co
+)
+SELECT r.r_name, 
+       n.n_name,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT so.s_suppkey) AS unique_suppliers,
+       MAX(s.total_avail_qty) AS max_supply_qty
+FROM region r
+JOIN nation_hierarchy n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN lineitem l ON l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+LEFT JOIN suppliers_part s ON l.l_suppkey = s.s_suppkey
+JOIN ranked_customers rc ON rc.rank <= 10
+WHERE rc.total_spent > 1000
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(l.l_orderkey) > 5 OR SUM(l.l_extendedprice) > 50000
+ORDER BY r.r_name, n.n_name;

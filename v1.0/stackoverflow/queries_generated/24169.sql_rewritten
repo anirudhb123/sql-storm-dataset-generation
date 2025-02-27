@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) FILTER (WHERE c.PostId IS NOT NULL) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) OVER (PARTITION BY p.OwnerUserId) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        CreationDate,
+        OwnerDisplayName,
+        ScoreRank,
+        CommentCount,
+        BadgeCount
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    COALESCE(CASE 
+        WHEN tp.CommentCount > 0 THEN 'Has Comments' 
+        ELSE 'No Comments'
+    END, 'Unknown') AS CommentStatus,
+    CASE 
+        WHEN tp.BadgeCount > 5 THEN 'High Achiever' 
+        WHEN tp.BadgeCount BETWEEN 1 AND 5 THEN 'Regular Contributor'
+        ELSE 'New User'
+    END AS UserLevel,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS DownVotes,
+    CASE 
+        WHEN EXISTS (SELECT 1 
+                     FROM PostHistory ph 
+                     WHERE ph.PostId = tp.PostId 
+                     AND ph.PostHistoryTypeId = 10) 
+        THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    (SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM 
+        Tags t 
+     JOIN 
+        LATERAL unnest(string_to_array(tp.Tags, '><')) AS tag ON t.TagName = tag) AS TagsList
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate ASC
+LIMIT 50;

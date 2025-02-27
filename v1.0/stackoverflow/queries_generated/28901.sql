@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN LATERAL unnest(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS tag ON true
+    LEFT JOIN Tags t ON tag = t.TagName
+    WHERE p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        Tags,
+        ROW_NUMBER() OVER (ORDER BY Score DESC, ViewCount DESC) AS Ranking
+    FROM RankedPosts
+    WHERE BadgeCount > 0  -- Only posts by users with badges
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    STRING_AGG(rp.Tags, ', ') AS AllTags
+FROM TopRankedPosts rp
+WHERE rp.Ranking <= 10  -- Top 10 ranked posts
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.OwnerDisplayName, rp.CommentCount
+ORDER BY rp.Score DESC, rp.ViewCount DESC;

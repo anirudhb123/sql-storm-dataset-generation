@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name AS Part_Name,
+    CONCAT('Manufacturer: ', p.p_mfgr, ', Brand: ', p.p_brand, ', Type: ', p.p_type) AS Product_Details,
+    SUM(l.l_quantity) AS Total_Quantity_Sold,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS Average_Selling_Price,
+    r.r_name AS Region_Name,
+    n.n_name AS Nation_Name,
+    COUNT(DISTINCT c.c_custkey) AS Unique_Customers,
+    STRING_AGG(s.s_name, ', ') AS Supplier_Names
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON l.l_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, r.r_name, n.n_name
+ORDER BY 
+    Total_Quantity_Sold DESC, Average_Selling_Price DESC;

@@ -1,0 +1,79 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorBirthdays AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        p.gender,
+        pi.info AS birthday
+    FROM 
+        name p
+    LEFT JOIN 
+        person_info pi ON p.id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth date')
+    WHERE 
+        p.gender = 'M'
+),
+FilteredCompanyNames AS (
+    SELECT 
+        c.id AS company_id,
+        c.name,
+        c.country_code
+    FROM 
+        company_name c
+    WHERE 
+        c.name ILIKE '%studio%' AND c.country_code IS NOT NULL
+),
+Association AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS production_companies
+    FROM 
+        complete_cast m
+    JOIN 
+        cast_info ca ON m.movie_id = ca.movie_id
+    LEFT JOIN 
+        movie_companies mc ON ca.movie_id = mc.movie_id
+    LEFT JOIN 
+        FilteredCompanyNames cn ON mc.company_id = cn.company_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.title_rank,
+    ab.name AS actor_name,
+    ab.birthday,
+    aa.actor_count,
+    aa.production_companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorBirthdays ab ON ab.person_id IN (
+        SELECT 
+            ca.person_id 
+        FROM 
+            cast_info ca 
+        WHERE 
+            ca.movie_id = rm.movie_id
+    )
+LEFT JOIN 
+    Association aa ON aa.movie_id = rm.movie_id
+WHERE 
+    rm.title_rank = 1 
+    AND (EXTRACT(YEAR FROM DATE '2024-10-01') - COALESCE(NULLIF(ab.birthday, ''), DATE '1970-01-01')) >= 18 
+         OR ab.birthday IS NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

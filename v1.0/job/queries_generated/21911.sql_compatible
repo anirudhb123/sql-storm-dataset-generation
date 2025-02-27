@@ -1,0 +1,87 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        r.role,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS aggregated_info
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cc.company_count, 0) AS company_count,
+        COALESCE(ar.actor_count, 0) AS actor_count,
+        mi.aggregated_info,
+        CASE 
+            WHEN rm.production_year < 2000 THEN 'Classic'
+            WHEN rm.production_year >= 2000 AND rm.production_year < 2010 THEN 'Modern Classic'
+            ELSE 'Contemporary'
+        END AS era_category
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyCounts cc ON rm.movie_id = cc.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+    LEFT JOIN 
+        MovieInfo mi ON rm.movie_id = mi.movie_id
+)
+SELECT 
+    FinalResults.*,
+    CASE 
+        WHEN actor_count > 10 THEN 'Star-Studded'
+        WHEN actor_count BETWEEN 5 AND 10 THEN 'Ensemble Cast'
+        ELSE 'Limited Cast'
+    END AS cast_size_category
+FROM 
+    FinalResults
+WHERE 
+    FinalResults.aggregated_info IS NOT NULL 
+    AND FinalResults.movie_id IN (
+        SELECT mk.movie_id FROM movie_keyword mk 
+        WHERE mk.keyword_id IN (
+            SELECT k.id FROM keyword k WHERE k.keyword LIKE 'adventure%'
+        )
+    )
+ORDER BY 
+    FinalResults.production_year DESC, title_rank;

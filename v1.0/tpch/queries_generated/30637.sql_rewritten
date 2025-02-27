@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_nationkey IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+),
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM nation n
+    LEFT JOIN partsupp ps ON n.n_nationkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+SalesByRegion AS (
+    SELECT r.r_regionkey, SUM(ps.ps_supplycost) AS regional_supplycost
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN partsupp ps ON n.n_nationkey = ps.ps_suppkey
+    GROUP BY r.r_regionkey
+),
+FinalResults AS (
+    SELECT p.p_name, ps.total_sales, ns.total_supplycost, sr.regional_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.total_sales ORDER BY ps.total_sales DESC) AS rank
+    FROM PartSales ps
+    JOIN NationSales ns ON ps.p_partkey = ns.n_nationkey
+    JOIN SalesByRegion sr ON sr.regional_supplycost > ns.total_supplycost
+    WHERE ns.total_supplycost IS NOT NULL
+)
+SELECT * 
+FROM FinalResults
+WHERE rank <= 10
+ORDER BY total_sales DESC, regional_supplycost ASC;

@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+FilteredPart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'Price Not Available' 
+            ELSE 'Price Available' 
+        END AS price_availability
+    FROM part p
+    WHERE p.p_container IN ('BOX', 'PACK')
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+    HAVING SUM(o.o_totalprice) > 5000
+),
+OrderDetails AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue,
+        AVG(li.l_tax) AS average_tax
+    FROM lineitem li
+    WHERE li.l_shipdate >= '1997-01-01' AND li.l_shipdate < '1998-01-01'
+    GROUP BY li.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(tp.total_spent, 0)) AS total_spent_by_customers,
+    AVG(COALESCE(li.net_revenue, 0)) AS average_revenue_per_order,
+    STRING_AGG(DISTINCT pp.price_availability, ', ') AS price_availability_summary
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN TotalOrders tp ON c.c_custkey = tp.o_custkey
+LEFT JOIN OrderDetails li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN RankedSuppliers rs ON rs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM FilteredPart p))
+WHERE n.n_nationkey IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 AND SUM(COALESCE(tp.total_spent, 0)) > 10000
+ORDER BY customer_count DESC, total_spent_by_customers DESC
+LIMIT 10;

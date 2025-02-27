@@ -1,0 +1,51 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(p.Score) DESC) AS ScoreRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorId,
+        ph.CreationDate,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ph.CreationDate) OVER (PARTITION BY ph.PostId) AS MedianEditDate,
+        ph.Comment
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5)  
+),
+PostViews AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ViewCount,
+        NTILE(4) OVER (ORDER BY p.ViewCount DESC) AS ViewQuartile
+    FROM Posts p
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.AcceptedAnswers,
+    ups.TotalScore,
+    rph.MedianEditDate,
+    COUNT(DISTINCT p.Id) AS TotalEditedPosts,
+    SUM(CASE WHEN pv.ViewQuartile = 1 THEN 1 ELSE 0 END) AS HighViewPosts,
+    MIN(pv.ViewCount) AS MinViewCount,
+    MAX(pv.ViewCount) AS MaxViewCount
+FROM UserPostStats ups
+LEFT JOIN RecentPostHistory rph ON ups.UserId = rph.EditorId
+LEFT JOIN Posts p ON p.OwnerUserId = ups.UserId
+LEFT JOIN PostViews pv ON p.Id = pv.PostId
+WHERE ups.ScoreRank <= 10
+GROUP BY 
+    ups.UserId, 
+    ups.DisplayName, 
+    rph.MedianEditDate
+ORDER BY ups.TotalScore DESC;

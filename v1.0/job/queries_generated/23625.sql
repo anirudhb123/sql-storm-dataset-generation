@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(cnk.kind, 'Unknown') AS kind,
+        1 AS depth
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year >= 2000
+        AND (ct.kind IS NULL OR ct.kind NOT LIKE '%Independent%')
+
+    UNION ALL
+
+    SELECT 
+        b.movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(cnk.kind, 'Unknown') AS kind,
+        depth + 1
+    FROM 
+        movie_link bl
+    JOIN 
+        movie_chain b ON bl.movie_id = b.movie_id
+    JOIN 
+        aka_title t ON bl.linked_movie_id = t.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        (b.depth < 2 OR (b.depth = 2 AND t.production_year BETWEEN 2010 AND 2015))
+)
+SELECT 
+    hk.kind AS genre,
+    COUNT(DISTINCT mc.movie_id) AS num_movies,
+    MAX(mc.production_year) AS last_year,
+    STRING_AGG(DISTINCT am.name, ', ') AS actors,
+    SUM(CASE 
+            WHEN mc.production_year < 2015 THEN 1 
+            ELSE 0 
+        END) AS pre_2015_count,
+    ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - (SELECT MIN(pi.created_at) 
+        FROM person_info pi 
+        WHERE pi.person_id IN (SELECT DISTINCT c.person_id 
+                               FROM cast_info c 
+                               WHERE c.movie_id = mc.movie_id)
+    ))/60)), 2) AS avg_response_time_in_minutes
+FROM 
+    movie_chain mc
+LEFT JOIN 
+    cast_info ci ON mc.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name am ON ci.person_id = am.person_id
+LEFT JOIN 
+    kind_type hk ON mc.kind_id = hk.id
+WHERE 
+    mc.kind = 'Drama'
+GROUP BY 
+    hk.kind
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 5
+ORDER BY 
+    last_year DESC;

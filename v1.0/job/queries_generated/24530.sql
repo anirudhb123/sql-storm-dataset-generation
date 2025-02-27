@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(episodes.season_nr, 0) AS season,
+        COALESCE(episodes.episode_nr, 0) AS episode,
+        0 AS depth
+    FROM aka_title mt
+    LEFT OUTER JOIN aka_title episodes ON mt.id = episodes.episode_of_id
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        mt.id,
+        mt.title,
+        COALESCE(episodes.season_nr, 0),
+        COALESCE(episodes.episode_nr, 0),
+        mh.depth + 1
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    m.produced_year AS production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY m.production_year DESC) AS row_num
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN title t ON ci.movie_id = t.id
+JOIN movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.production_year,
+        mh.season,
+        mh.episode
+    FROM aka_title mt
+    LEFT JOIN movie_hierarchy mh ON mt.id = mh.movie_id
+) m ON t.id = m.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name <> '' 
+    AND t.production_year IS NOT NULL 
+    AND t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.id, t.id, m.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+    AND m.season IS NOT NULL
+ORDER BY 
+    a.name ASC,
+    m.production_year DESC,
+    row_num ASC;

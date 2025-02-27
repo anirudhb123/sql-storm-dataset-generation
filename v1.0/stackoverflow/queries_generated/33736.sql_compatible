@@ -1,0 +1,85 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(VoteCounts.VoteCount, 0) AS TotalVotes,
+        COALESCE(P.ANSWER_COUNT, 0) AS AnswerCount,
+        P.CreationDate,
+        P.Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId, 
+                COUNT(*) AS VoteCount 
+            FROM 
+                Votes 
+            GROUP BY 
+                PostId
+        ) AS VoteCounts ON P.Id = VoteCounts.PostId
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+CloseReasonStats AS (
+    SELECT 
+        PH.Text AS CloseReason, 
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.Text
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    PS.Title AS PostTitle,
+    PS.TotalVotes,
+    PS.AnswerCount,
+    PS.CreationDate,
+    TR.TagName,
+    TR.PostCount,
+    TR.TotalViews,
+    CRS.CloseReason,
+    CRS.CloseCount
+FROM 
+    UserVoteCounts U
+JOIN 
+    PostStatistics PS ON U.UserId = PS.OwnerUserId
+JOIN 
+    TagStatistics TR ON PS.Tags LIKE CONCAT('%', TR.TagName, '%')
+LEFT JOIN 
+    CloseReasonStats CRS ON CRS.CloseCount > 0
+WHERE 
+    U.VoteCount > 10
+ORDER BY 
+    PS.TotalVotes DESC, 
+    TR.PostCount DESC, 
+    PS.CreationDate DESC;

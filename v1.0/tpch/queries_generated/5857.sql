@@ -1,0 +1,29 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, 
+           RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+    FROM RankedSuppliers s
+    WHERE s.rank <= 3
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           l.l_partkey, l.l_extendedprice, l.l_discount, t.s_name AS supplier_name
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN TopSuppliers t ON ps.ps_suppkey = t.s_suppkey
+)
+SELECT od.o_orderkey, COUNT(od.l_partkey) AS part_count, 
+       SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_revenue,
+       MIN(od.o_orderdate) AS first_order_date, 
+       MAX(od.o_orderdate) AS last_order_date,
+       AVG(od.l_extendedprice) AS avg_price_per_part 
+FROM OrderDetails od
+GROUP BY od.o_orderkey
+HAVING SUM(od.l_extendedprice * (1 - od.l_discount)) > 1000
+ORDER BY total_revenue DESC
+LIMIT 10;

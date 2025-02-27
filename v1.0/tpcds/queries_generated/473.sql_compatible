@@ -1,0 +1,82 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+RankedCustomers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        CustomerSales cs
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk AS customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        COALESCE(rp.total_returned, 0) AS total_returns,
+        rh.revenue_history
+    FROM
+        customer c
+    LEFT JOIN (
+        SELECT 
+            wr_returning_customer_sk,
+            SUM(wr_return_amt) AS total_returned
+        FROM 
+            web_returns 
+        GROUP BY 
+            wr_returning_customer_sk
+    ) rp ON c.c_customer_sk = rp.wr_returning_customer_sk
+    LEFT JOIN (
+        SELECT
+            ws_bill_customer_sk,
+            SUM(ws_ext_sales_price) AS revenue_history
+        FROM
+            web_sales
+        GROUP BY
+            ws_bill_customer_sk
+    ) rh ON c.c_customer_sk = rh.ws_bill_customer_sk
+    WHERE 
+        c.c_customer_sk IN (SELECT c_customer_sk FROM RankedCustomers WHERE sales_rank <= 100)
+)
+SELECT 
+    cvc.customer_id,
+    cvc.full_name,
+    COALESCE(hvc.revenue_history, 0) AS revenue,
+    COALESCE(hvc.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(hvc.total_returns, 0) > 0 THEN 'Returns Exist' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM (
+    SELECT
+        DISTINCT
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        (COALESCE(rk.total_sales, 0) + COALESCE(total_returns, 0)) AS compound_value
+    FROM
+        CustomerSales cs
+    LEFT JOIN RankedCustomers rk ON cs.c_customer_sk = rk.c_customer_sk
+) AS cvc
+LEFT JOIN HighValueCustomers hvc ON cvc.c_customer_sk = hvc.customer_id
+WHERE
+    cvc.compound_value > 1000
+ORDER BY 
+    cvc.compound_value DESC;

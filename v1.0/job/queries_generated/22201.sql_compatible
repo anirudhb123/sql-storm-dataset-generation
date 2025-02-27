@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        ak.person_id,
+        ak.name AS actor_name,
+        COUNT(CAST(movie_id AS INTEGER)) AS movie_count,
+        STRING_AGG(t.title, ', ') AS movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.person_id, ak.name
+),
+FilteredActors AS (
+    SELECT 
+        ad.actor_name,
+        ad.movie_count,
+        ad.movies,
+        RANK() OVER (ORDER BY ad.movie_count DESC) AS actor_rank
+    FROM 
+        ActorDetails ad
+    WHERE 
+        ad.movie_count > 10
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+HighRankedMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = rm.movie_id AND mi.info_type_id = 1) AS info_count,
+        (SELECT STRING_AGG(k.keyword, ', ') FROM movie_keyword mk JOIN keyword k ON mk.keyword_id = k.id WHERE mk.movie_id = rm.movie_id) AS keywords
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 3
+)
+SELECT 
+    fa.actor_name,
+    fa.movie_count,
+    cm.company_name,
+    cm.company_type,
+    hr.title,
+    hr.production_year,
+    hr.info_count,
+    hr.keywords
+FROM 
+    FilteredActors fa
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id IN (SELECT movie_id FROM cast_info WHERE subject_id = fa.movie_count)
+LEFT JOIN 
+    CompanyMovies cm ON mc.movie_id = cm.movie_id
+JOIN 
+    HighRankedMovies hr ON mc.movie_id = hr.movie_id
+WHERE 
+    fa.actor_rank < 5
+ORDER BY 
+    fa.movie_count DESC, 
+    hr.production_year DESC;

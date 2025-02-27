@@ -1,0 +1,73 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+SupplierLimit AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(p.ps_partkey) AS supply_count
+    FROM 
+        partsupp p
+    JOIN 
+        supplier s ON p.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey 
+    HAVING 
+        COUNT(p.ps_partkey) > 10
+)
+SELECT 
+    p.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    t.total_price,
+    r.rnk,
+    CASE 
+        WHEN r.rnk IS NULL THEN 'No Ranking'
+        WHEN r.rnk <= 5 THEN 'Top 5 Supplier'
+        ELSE 'Lower Tier Supplier' 
+    END AS supplier_tier,
+    'Region: ' || COALESCE(n.r_name, 'Unknown') AS region,
+    CASE 
+        WHEN MAX(s.s_acctbal) IS NULL THEN 'Insufficient Data'
+        ELSE CAST(MAX(s.s_acctbal) AS VARCHAR)
+    END AS max_supplier_account_balance
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers r ON ps.ps_suppkey = r.s_suppkey
+LEFT JOIN 
+    HighValueOrders t ON r.rnk <= 5
+LEFT JOIN 
+    nation n ON r.s_suppkey = n.n_nationkey
+LEFT JOIN 
+    SupplierLimit l ON r.s_suppkey = l.s_suppkey
+GROUP BY 
+    p.p_name, s.s_name, t.total_price, r.rnk, n.r_name
+ORDER BY 
+    t.total_price DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

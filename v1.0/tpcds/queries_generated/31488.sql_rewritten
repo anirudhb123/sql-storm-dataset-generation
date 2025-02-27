@@ -1,0 +1,62 @@
+WITH RECURSIVE sales_rank AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim) 
+),
+customer_spending AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(ws.net_paid, cs.net_paid, ss.net_paid, 0)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+high_spending_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_spent
+    FROM 
+        customer_spending cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM customer_spending) 
+),
+item_summary AS (
+    SELECT 
+        ir.ws_item_sk,
+        SUM(ir.ws_sales_price) AS total_revenue,
+        COUNT(ir.ws_item_sk) AS total_sold
+    FROM 
+        web_sales ir
+    JOIN high_spending_customers hsc ON ir.ws_bill_customer_sk = hsc.c_customer_sk
+    GROUP BY 
+        ir.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    isr.total_revenue,
+    isr.total_sold,
+    (SELECT MAX(total_revenue) FROM item_summary) AS max_revenue,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) FROM customer c) AS total_customers,
+    CASE 
+        WHEN isr.total_revenue = 0 THEN NULL
+        ELSE (isr.total_revenue / (SELECT SUM(total_revenue) FROM item_summary) * 100)
+    END AS revenue_percentage
+FROM 
+    item i
+JOIN item_summary isr ON i.i_item_sk = isr.ws_item_sk
+WHERE 
+    isr.total_sold > 100
+ORDER BY 
+    isr.total_revenue DESC
+LIMIT 10;

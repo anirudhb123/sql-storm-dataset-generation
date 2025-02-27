@@ -1,0 +1,38 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_order_number) AS cumulative_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank,
+        COALESCE(sm.sm_type, 'Not Specified') AS shipping_type
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+        AND ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_dow IN (1, 2, 3, 4, 5)
+        )
+)
+
+SELECT 
+    r.web_site_id,
+    COUNT(r.ws_order_number) AS total_orders,
+    MAX(r.cumulative_net_profit) AS max_cumulative_profit,
+    AVG(CASE WHEN r.shipping_type = 'Ground' THEN r.ws_quantity END) AS avg_ground_quantity,
+    SUM(CASE WHEN r.profit_rank <= 10 THEN r.ws_quantity ELSE 0 END) AS top_ten_sales_quantity
+FROM 
+    RankedSales r
+GROUP BY 
+    r.web_site_id
+HAVING 
+    COUNT(r.ws_order_number) > 50
+ORDER BY 
+    total_orders DESC;

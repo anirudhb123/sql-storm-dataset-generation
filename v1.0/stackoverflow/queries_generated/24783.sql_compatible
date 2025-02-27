@@ -1,0 +1,77 @@
+
+WITH UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        SUM(CASE WHEN v.VoteTypeId = 8 THEN v.BountyAmount ELSE 0 END) AS TotalBountySpent
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        p.AnswerCount,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.AnswerCount, p.ViewCount, p.Score
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId IS NOT NULL), 0) AS VotesCount,
+        COUNT(b.Id) AS BadgesCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName AS UserName,
+    ups.Upvotes,
+    ups.Downvotes,
+    ups.TotalBountySpent,
+    pa.Title,
+    pa.PostId,
+    pa.CreationDate,
+    pa.Upvotes AS PostUpvotes,
+    pa.Downvotes AS PostDownvotes,
+    pa.CommentCount,
+    pa.AnswerCount,
+    pa.ViewCount,
+    pa.Score,
+    au.VotesCount AS TotalUserVotes,
+    au.BadgesCount
+FROM UserVoteStatistics ups
+JOIN ActiveUsers au ON ups.UserId = au.UserId
+JOIN PostActivity pa ON ups.UserId = pa.OwnerUserId
+JOIN TopPosts tp ON pa.PostId = tp.Id
+WHERE 
+    tp.PostRank <= 10 
+    AND (pa.Upvotes - pa.Downvotes) > 0
+ORDER BY 
+    ups.TotalBountySpent DESC, 
+    pa.Score DESC;

@@ -1,0 +1,94 @@
+
+WITH movie_rank AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rank,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_movies
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        COALESCE(CAST(SUBSTRING(ci.note, '[0-9]+') AS integer), 0) AS actor_order
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+
+keyword_info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+complete_info AS (
+    SELECT 
+        mr.movie_id,
+        mr.title,
+        mr.production_year,
+        cd.actor_name,
+        cd.role,
+        cd.actor_order,
+        ci.company_name,
+        ci.company_type,
+        ki.keywords,
+        mr.total_movies
+    FROM 
+        movie_rank mr
+    LEFT JOIN 
+        cast_details cd ON mr.movie_id = cd.movie_id
+    LEFT JOIN 
+        company_info ci ON mr.movie_id = ci.movie_id
+    LEFT JOIN 
+        keyword_info ki ON mr.movie_id = ki.movie_id
+)
+
+SELECT 
+    ci.movie_id,
+    ci.title,
+    ci.production_year,
+    ci.actor_name,
+    ci.role,
+    ci.actor_order,
+    ci.company_name,
+    ci.company_type,
+    COALESCE(NULLIF(ci.keywords, ''), 'No keywords') AS keywords,
+    ROUND(100.0 * COUNT(DISTINCT ci.actor_name) / NULLIF(MAX(ci.total_movies), 0), 2) AS actor_share_percentage
+FROM 
+    complete_info ci
+WHERE 
+    ci.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    ci.movie_id, ci.title, ci.production_year, ci.actor_name, ci.role, ci.actor_order, ci.company_name, ci.company_type
+ORDER BY 
+    ci.production_year DESC, ci.title ASC;

@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS RankByBalance
+    FROM 
+        supplier s
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_totalprice > (
+            SELECT 
+                AVG(o2.o_totalprice) 
+            FROM 
+                orders o2
+        )
+), 
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS TotalAvailable
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size > (SELECT AVG(p2.p_size) FROM part p2)
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_brand
+)
+SELECT 
+    n.n_name, 
+    COUNT(DISTINCT o.o_orderkey) AS HighValueOrderCount, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+    (CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN SUM(l.l_extendedprice * (1 - l.l_discount)) / COUNT(DISTINCT o.o_orderkey) 
+        ELSE 0 
+    END) AS AvgRevenuePerOrder,
+    COALESCE((SELECT 
+                   MIN(RankByBalance) 
+               FROM 
+                   RankedSuppliers rs 
+               WHERE 
+                   rs.RankByBalance < 3 
+                   AND rs.s_suppkey IN (SELECT ps.ps_suppkey FROM SupplierPartInfo ps)), 
+               'No High Balance Supplier') AS MinRankForHighBalanceSuppliers
+FROM 
+    nation n
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    n.n_name IN (SELECT DISTINCT n2.n_name FROM nation n2 WHERE n2.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA'))
+    AND s.s_acctbal IS NOT NULL
+GROUP BY 
+    n.n_name
+ORDER BY 
+    HighValueOrderCount DESC, TotalRevenue DESC
+LIMIT 10;

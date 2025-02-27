@@ -1,0 +1,66 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(NULLIF(uh.UserId, -1), 0) AS UserId,
+        COALESCE(NULLIF(uh.Reputation, -1), 0) AS Reputation,
+        COALESCE(NULLIF(uh.CreationDate, '1970-01-01 00:00:00'), '1970-01-01 00:00:00') AS UserCreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users uh ON p.OwnerUserId = uh.Id
+),
+VotesStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        MAX(CreationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.UserId,
+    ps.Reputation,
+    ps.UserCreationDate,
+    vs.UpVotes,
+    vs.DownVotes,
+    vs.TotalVotes,
+    phs.EditCount,
+    phs.LastEditDate
+FROM 
+    PostStats ps
+LEFT JOIN 
+    VotesStats vs ON ps.PostId = vs.PostId
+LEFT JOIN 
+    PostHistoryStats phs ON ps.PostId = phs.PostId
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 100;

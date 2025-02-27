@@ -1,0 +1,103 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        m.kind_id,
+        0 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        linked.movie_id,
+        l.linked_movie_id AS movie_title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link l ON mh.movie_id = l.movie_id
+    JOIN
+        aka_title m ON l.linked_movie_id = m.id
+    WHERE
+        l.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.depth,
+        ROW_NUMBER() OVER (PARTITION BY mh.depth ORDER BY mh.production_year DESC) AS rank
+    FROM
+        MovieHierarchy mh
+),
+DirectorRoles AS (
+    SELECT
+        c.movie_id,
+        r.role AS director_role,
+        COUNT(c.person_id) AS num_directors
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    WHERE
+        r.role = 'Director'
+    GROUP BY
+        c.movie_id, r.role
+),
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        COALESCE(mi.info, 'No Information') AS info_details,
+        COALESCE(mk.keyword, 'General') AS keyword
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+),
+FinalResult AS (
+    SELECT
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        di.director_role,
+        di.num_directors,
+        mi.info_details,
+        mi.keyword
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        DirectorRoles di ON rm.movie_id = di.movie_id
+    LEFT JOIN
+        MovieInfo mi ON rm.movie_id = mi.movie_id
+    WHERE
+        rm.rank <= 5 AND  
+        rm.production_year IS NOT NULL
+)
+SELECT
+    fr.movie_id,
+    fr.movie_title,
+    fr.production_year,
+    COALESCE(fr.director_role, 'Unknown') AS director_role,
+    fr.num_directors,
+    fr.info_details,
+    fr.keyword,
+    CASE 
+        WHEN fr.production_year < 2000 THEN 'Classic'
+        WHEN fr.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM
+    FinalResult fr
+ORDER BY
+    fr.production_year DESC,
+    fr.movie_title;

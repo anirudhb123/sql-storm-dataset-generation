@@ -1,0 +1,29 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus, COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(fo.line_count) AS total_line_items,
+    AVG(rs.total_cost) AS avg_supplier_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN customer c ON s.s_nsuppkey = c.c_nationkey
+JOIN FilteredOrders fo ON c.c_custkey = fo.o_custkey
+JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 100
+ORDER BY avg_supplier_cost DESC
+LIMIT 10;

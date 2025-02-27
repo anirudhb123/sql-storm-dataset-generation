@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01'
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        MAX(CASE 
+            WHEN s.s_acctbal IS NULL THEN 0 
+            ELSE s.s_acctbal 
+        END) AS max_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+country_performance AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_quantity) AS avg_quantity_per_order
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(cp.total_sales, 0) AS total_sales,
+    COALESCE(cp.order_count, 0) AS order_count,
+    ss.unique_parts,
+    ss.total_supplycost,
+    COUNT(DISTINCT ro.o_orderkey) AS high_value_orders,
+    MAX(ro.o_totalprice) AS highest_order_value
+FROM 
+    region r
+LEFT JOIN 
+    country_performance cp ON r.r_name = cp.n_name
+LEFT JOIN 
+    supplier_summary ss ON ss.unique_parts > 2
+LEFT JOIN 
+    ranked_orders ro ON ro.o_orderdate < CURRENT_DATE AND ro.o_orderstatus = 'O'
+GROUP BY 
+    r.r_name, ss.unique_parts, ss.total_supplycost
+HAVING 
+    total_sales > 10000 OR order_count > 5
+ORDER BY 
+    r.r_name, total_sales DESC, unique_parts ASC;

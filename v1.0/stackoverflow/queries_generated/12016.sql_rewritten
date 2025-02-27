@@ -1,0 +1,62 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.Id IS NOT NULL THEN 1 END) AS HistoryCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes,
+        COUNT(B.Id) AS BadgesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.CommentCount,
+    PS.HistoryCount,
+    US.UserId,
+    US.DisplayName,
+    US.PostsCount,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    US.BadgesCount
+FROM 
+    PostStatistics PS
+JOIN 
+    Users U ON PS.PostId = U.Id
+JOIN 
+    UserStatistics US ON U.Id = US.UserId
+ORDER BY 
+    PS.UpVotes DESC, PS.DownVotes ASC;

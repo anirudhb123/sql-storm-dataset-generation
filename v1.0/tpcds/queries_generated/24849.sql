@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.item_sk, 
+        ws.order_number, 
+        ws.sales_price, 
+        DENSE_RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws.sales_price DESC) AS price_rank,
+        COALESCE(NULLIF(ws.net_paid_inc_ship_tax, 0), NULL) AS adjusted_net_paid
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - INTERVAL '30 days'
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk, 
+        SUM(wr.return_quantity) AS total_returned,
+        AVG(wr.net_loss) AS avg_loss
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ca.city, 
+        ca.state,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        customer_address ca
+    JOIN 
+        web_sales ws ON ca_ca_address_sk = ws.ship_addr_sk
+    GROUP BY 
+        ca.city, ca.state
+)
+SELECT 
+    s.city, 
+    s.state,
+    s.total_sales,
+    s.unique_customers,
+    r.total_returned,
+    r.avg_loss,
+    CASE 
+        WHEN s.total_sales > 10000 THEN 'High Performer'
+        WHEN s.total_sales BETWEEN 5000 AND 10000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    SalesSummary s
+LEFT JOIN 
+    CustomerReturns r ON s.unique_customers = r.returning_customer_sk
+WHERE 
+    s.total_sales IS NOT NULL
+ORDER BY 
+    s.total_sales DESC
+LIMIT 
+    10 OFFSET 5
+UNION ALL
+SELECT 
+    'UNKNOWN' AS city, 
+    'UNKNOWN' AS state, 
+    SUM(ss.ext_sales_price) AS total_sales, 
+    COUNT(DISTINCT ss.customer_sk) AS unique_customers, 
+    0 AS total_returned, 
+    NULL AS avg_loss
+FROM 
+    store_sales ss
+WHERE 
+    ss.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    AND ss.net_profit IS NOT NULL
+HAVING 
+    COUNT(DISTINCT ss.customer_sk) > 0
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

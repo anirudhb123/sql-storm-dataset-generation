@@ -1,0 +1,53 @@
+WITH SupplierSummary AS (
+    SELECT s.s_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+PartDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM part p
+    WHERE p.p_retailprice >= 100.00
+),
+FilteredSuppliers AS (
+    SELECT ss.s_suppkey,
+           ss.total_supply_cost,
+           ss.part_count
+    FROM SupplierSummary ss
+    WHERE ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierSummary)
+),
+FinalReport AS (
+    SELECT c.c_name,
+           cs.total_order_value,
+           fs.total_supply_cost,
+           fs.part_count,
+           pd.p_name
+    FROM CustomerOrderSummary cs
+    JOIN customer c ON cs.c_custkey = c.c_custkey
+    FULL OUTER JOIN FilteredSuppliers fs ON fs.s_suppkey = c.c_nationkey
+    LEFT JOIN PartDetails pd ON pd.p_partkey = fs.part_count
+)
+SELECT fr.c_name,
+       COALESCE(fr.total_order_value, 0) AS total_order_value,
+       COALESCE(fr.total_supply_cost, 0) AS total_supply_cost,
+       pd.p_name,
+       CASE
+           WHEN fr.total_order_value IS NULL THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status
+FROM FinalReport fr
+LEFT JOIN part p ON fr.part_count = p.p_partkey
+WHERE fr.total_supply_cost > 5000 AND (fr.total_order_value IS NOT NULL OR pd.p_name IS NOT NULL)
+ORDER BY fr.total_order_value DESC, fr.total_supply_cost ASC;

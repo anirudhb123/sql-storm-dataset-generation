@@ -1,0 +1,59 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END), P.CreationDate) AS ClosedDate,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END), P.CreationDate) AS ReopenedDate
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.PostTypeId = 1
+    GROUP BY P.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        U.CreationDate,
+        B.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    JOIN UserBadgeCounts B ON U.Id = B.UserId
+    WHERE U.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM Posts P
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName AS TopUser, 
+    PS.Title AS RecentPostTitle, 
+    PS.ViewCount AS PostViews,
+    CASE 
+        WHEN PS.ClosedDate IS NOT NULL THEN 'Closed'
+        WHEN PS.ReopenedDate IS NOT NULL THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    T.Reputation AS UserReputation,
+    T.BadgeCount
+FROM TopUsers T
+JOIN PostStatistics PS ON PS.ClosedDate IS NULL
+LEFT JOIN RecentPosts RP ON RP.Id = PS.PostId
+WHERE T.UserRank <= 10
+ORDER BY T.Reputation DESC, PS.Score DESC
+LIMIT 100;

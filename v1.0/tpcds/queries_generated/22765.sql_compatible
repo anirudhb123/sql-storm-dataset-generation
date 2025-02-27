@@ -1,0 +1,80 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returned_quantity,
+        SUM(wr.return_amt) AS total_returned_amount,
+        ROW_NUMBER() OVER(PARTITION BY wr.returning_customer_sk ORDER BY SUM(wr.return_amt) DESC) AS rn
+    FROM
+        web_returns wr
+    GROUP BY
+        wr.returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CA.total_returned_quantity,
+        CA.total_returned_amount
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN CustomerReturns CA ON c.c_customer_sk = CA.returning_customer_sk
+    WHERE
+        cd.cd_purchase_estimate > (SELECT AVG(cd2.cd_purchase_estimate) FROM customer_demographics cd2)
+        AND (cd.cd_gender = 'M' OR cd.cd_marital_status = 'S')
+),
+CustomerStats AS (
+    SELECT
+        cvc.c_customer_sk,
+        cvc.c_first_name,
+        cvc.c_last_name,
+        COALESCE(cvc.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cvc.total_returned_amount, 0) AS total_returned_amount,
+        SUM(ws.ws_net_profit) AS total_sales_profit
+    FROM
+        HighValueCustomers cvc
+    LEFT JOIN web_sales ws ON cvc.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        cvc.c_customer_sk, cvc.c_first_name, cvc.c_last_name, total_returned_quantity, total_returned_amount
+),
+FinalStats AS (
+    SELECT
+        css.c_customer_sk,
+        css.c_first_name,
+        css.c_last_name,
+        css.total_returned_quantity,
+        css.total_returned_amount,
+        css.total_sales_profit,
+        CASE 
+            WHEN css.total_sales_profit > 1000 THEN 'High Value'
+            WHEN css.total_sales_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_category,
+        DENSE_RANK() OVER(ORDER BY css.total_sales_profit DESC) AS profit_rank
+    FROM
+        CustomerStats css
+)
+SELECT 
+    fs.c_customer_sk,
+    fs.c_first_name,
+    fs.c_last_name,
+    fs.total_returned_quantity,
+    fs.total_returned_amount,
+    fs.total_sales_profit,
+    fs.customer_value_category,
+    fs.profit_rank,
+    CASE 
+        WHEN fs.total_returned_quantity = 0 THEN NULL
+        ELSE fs.total_sales_profit / fs.total_returned_quantity
+    END AS avg_profit_per_return
+FROM 
+    FinalStats fs
+WHERE 
+    fs.profit_rank <= 10
+ORDER BY 
+    fs.total_sales_profit DESC;

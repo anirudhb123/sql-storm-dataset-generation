@@ -1,0 +1,87 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_item_sk,
+        wr_order_number,
+        wr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY wr_item_sk ORDER BY wr_order_number DESC) AS rn
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity > 0
+),
+PopularItems AS (
+    SELECT 
+        i_item_id,
+        COUNT(*) AS return_count
+    FROM 
+        RankedReturns rr
+    JOIN 
+        item i ON rr.wr_item_sk = i.i_item_sk
+    GROUP BY 
+        i_item_id
+    HAVING 
+        COUNT(*) > (
+            SELECT 
+                AVG(return_count)
+            FROM 
+                (SELECT 
+                    COUNT(*) AS return_count
+                FROM 
+                    RankedReturns
+                GROUP BY 
+                    wr_item_sk) AS subquery
+        ) 
+),
+AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(COALESCE(cd_dep_count, 0)) AS avg_dep_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca_state
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    ai.i_item_id,
+    ai.total_profit,
+    aas.ca_state,
+    aas.customer_count,
+    aas.avg_dep_count,
+    CASE 
+        WHEN ai.total_profit IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS Sales_Indicator
+FROM 
+    (SELECT 
+        pi.i_item_id, 
+        sd.total_profit
+    FROM 
+        PopularItems pi
+    LEFT JOIN 
+        SalesData sd ON pi.i_item_id = sd.ws_item_sk) ai
+JOIN 
+    AddressStats aas ON ai.i_item_id IN (SELECT 
+                                            ws_item_sk 
+                                         FROM 
+                                            web_sales 
+                                         WHERE 
+                                            ws_sales_price > 100) 
+ORDER BY 
+    aas.customer_count DESC, ai.total_profit DESC
+LIMIT 50;

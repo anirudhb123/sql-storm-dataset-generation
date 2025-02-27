@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.web_site_sk, ws_item_sk
+),
+TopWebsiteSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_item_sk,
+        r.total_quantity,
+        r.total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank = 1
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.order_count,
+        cs.total_profit
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_profit > (SELECT AVG(total_profit) FROM CustomerSales)
+)
+SELECT 
+    t.ws_item_sk,
+    t.total_sales,
+    w.web_name,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(hvc.order_count, 0) AS high_value_order_count
+FROM 
+    TopWebsiteSales t
+JOIN 
+    web_site w ON t.web_site_sk = w.web_site_sk
+JOIN 
+    customer c ON c.c_current_cdemo_sk IN (SELECT cd_demo_sk FROM customer_demographics WHERE cd_credit_rating = 'G')
+LEFT JOIN 
+    HighValueCustomers hvc ON c.c_customer_sk = hvc.c_customer_sk
+WHERE 
+    t.total_sales > 1000
+ORDER BY 
+    t.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        CAST(d.d_date AS DATE) AS sales_date,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY CAST(d.d_date AS DATE) ORDER BY SUM(ws.ws_net_profit) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_id, d.d_date
+),
+TopSales AS (
+    SELECT
+        web_site_id,
+        sales_date,
+        total_quantity,
+        total_profit
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT
+    t.web_site_id,
+    t.sales_date,
+    t.total_quantity,
+    t.total_profit,
+    c.c_first_name,
+    c.c_last_name,
+    c.c_email_address
+FROM 
+    TopSales t
+JOIN 
+    web_site w ON t.web_site_id = w.web_site_id
+JOIN 
+    customer c ON w.web_site_sk = c.c_current_addr_sk
+WHERE 
+    c.c_preferred_cust_flag = 'Y'
+ORDER BY 
+    t.sales_date DESC, t.total_profit DESC;

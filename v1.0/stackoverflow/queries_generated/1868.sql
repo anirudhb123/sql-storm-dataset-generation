@@ -1,0 +1,56 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation, 
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+), 
+PostVoteCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 4 THEN 1 END) AS Favorites
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.OwnerUserId
+), 
+TopUsers AS (
+    SELECT 
+        U.UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        P.UpVotes,
+        P.DownVotes,
+        P.Favorites,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM UserReputation U
+    JOIN PostVoteCounts P ON U.UserId = P.OwnerUserId
+    WHERE U.Reputation > 1000
+)
+SELECT 
+    T.DisplayName,
+    T.Reputation,
+    COALESCE(T.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(T.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(T.Favorites, 0) AS TotalFavorites,
+    CASE 
+        WHEN T.Reputation >= 5000 THEN 'Gold'
+        WHEN T.Reputation BETWEEN 1000 AND 4999 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS Badge
+FROM TopUsers T
+WHERE T.UserRank <= 50
+ORDER BY T.Reputation DESC
+LIMIT 25
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    SUM(Reputation) AS Reputation,
+    SUM(COALESCE(UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(DownVotes, 0)) AS TotalDownVotes,
+    SUM(COALESCE(Favorites, 0)) AS TotalFavorites,
+    NULL AS Badge
+FROM TopUsers;

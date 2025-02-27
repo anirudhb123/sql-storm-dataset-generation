@@ -1,0 +1,97 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m2.id,
+        CONCAT(m2.title, ' (linked to ', m1.title, ')') AS title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON m2.id = ml.linked_movie_id
+    JOIN 
+        aka_title m1 ON mh.movie_id = m1.id
+    WHERE 
+        mh.level < 5  
+),
+high_rating_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        AVG(COALESCE(mr.rating, 0)) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        LATERAL (
+        SELECT
+            CAST(SUBSTRING(mi.info FROM '[0-9]+') AS FLOAT) AS rating
+        FROM 
+            movie_info mi_sub
+        WHERE 
+            mi_sub.movie_id = t.id
+        LIMIT 1
+        ) AS mr ON TRUE
+    GROUP BY 
+        t.id, t.title
+    HAVING 
+        AVG(COALESCE(mr.rating, 0)) > 8.0
+),
+cast_summary AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT c.person_id) AS unique_cast_count,
+        STRING_AGG(DISTINCT a.name ORDER BY a.name) AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+final_report AS (
+    SELECT 
+        m.title AS movie_title,
+        ch.unique_cast_count,
+        ch.cast_names,
+        h.average_rating,
+        CASE 
+            WHEN h.average_rating IS NULL THEN 'No Rating'
+            WHEN h.average_rating >= 8.0 THEN 'Highly Rated'
+            ELSE 'Moderately Rated' 
+        END AS rating_category
+    FROM 
+        high_rating_movies h
+    LEFT JOIN 
+        cast_summary ch ON h.title_id = ch.movie_id
+    LEFT JOIN 
+        movie_hierarchy mh ON h.title_id = mh.movie_id
+)
+SELECT 
+    fr.movie_title,
+    fr.unique_cast_count,
+    fr.cast_names,
+    fr.average_rating,
+    fr.rating_category,
+    (SELECT COUNT(*) FROM company_name WHERE country_code = 'USA') AS usa_companies_count
+FROM 
+    final_report fr
+WHERE 
+    fr.unique_cast_count IS NOT NULL
+ORDER BY 
+    fr.average_rating DESC NULLS LAST, 
+    fr.movie_title ASC
+LIMIT 10;

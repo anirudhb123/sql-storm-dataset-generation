@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458922 AND 2458987 -- Example date range
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_sales,
+        r.order_count
+    FROM 
+        RankedSales r
+    JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        r.sales_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+),
+SalesSummary AS (
+    SELECT 
+        tc.c_customer_id,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.total_sales,
+        tc.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        TopCustomers tc
+    JOIN 
+        CustomerDemographics cd ON tc.c_customer_id = cd.cd_demo_sk
+)
+SELECT 
+    s.c_customer_id,
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    s.order_count,
+    s.cd_gender,
+    s.cd_marital_status,
+    s.cd_education_status
+FROM 
+    SalesSummary s
+ORDER BY 
+    s.total_sales DESC, s.order_count DESC;

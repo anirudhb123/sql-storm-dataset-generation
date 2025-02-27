@@ -1,0 +1,57 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        CONCAT(p.p_brand, ' ', p.p_type) AS combined_description,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost < 100)
+),
+NationSupplierCount AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n 
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.p_partkey,
+    r.combined_description,
+    n.n_name,
+    ns.supplier_count,
+    od.o_orderkey,
+    od.total_revenue
+FROM 
+    RankedParts r
+JOIN 
+    NationSupplierCount ns ON r.p_mfgr LIKE CONCAT('%', ns.n_name, '%')
+JOIN 
+    OrderDetails od ON r.rank = 1 AND od.revenue_rank <= 10
+WHERE 
+    r.p_name LIKE 'Swiss%'
+ORDER BY 
+    od.total_revenue DESC;

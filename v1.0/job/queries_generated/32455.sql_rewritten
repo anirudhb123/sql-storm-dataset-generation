@@ -1,0 +1,37 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year BETWEEN 2000 AND 2010
+     
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1 AS level
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON m.id = ml.linked_movie_id
+)
+, RankedMovies AS (
+    SELECT mh.movie_id, mh.title, mh.production_year, mh.level,
+           ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rn,
+           COUNT(*) OVER (PARTITION BY mh.production_year) AS total_movies
+    FROM MovieHierarchy mh
+)
+SELECT DISTINCT
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(a.name, 'Unknown Actor') AS actor_name,
+    COALESCE(c.kind, 'No Role Assigned') AS role,
+    (SELECT COUNT(*) FROM aka_name WHERE person_id IN 
+        (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = m.id)
+    ) AS actor_count,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = m.id) AS keywords
+FROM RankedMovies m
+LEFT JOIN cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN aka_name a ON ci.person_id = a.person_id
+LEFT JOIN role_type c ON ci.role_id = c.id
+WHERE m.rn <= 5
+ORDER BY m.production_year DESC, actor_count DESC NULLS LAST
+LIMIT 100;

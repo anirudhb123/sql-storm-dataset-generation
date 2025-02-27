@@ -1,0 +1,90 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid_inc_tax IS NOT NULL 
+        AND ws.ws_quantity > 0
+),
+unique_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT w.ws_order_number) AS web_order_count,
+        SUM(w.ws_net_profit) AS total_web_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales w ON c.c_customer_sk = w.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+        AND c.c_preferred_cust_flag = 'Y'
+    GROUP BY 
+        c.c_customer_sk
+),
+high_profit_items AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        ranked_sales rs ON i.i_item_sk = rs.ws_item_sk AND rs.rn = 1
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+    HAVING 
+        SUM(CASE WHEN rs.ws_item_sk IS NOT NULL THEN ws.ws_net_profit ELSE 0 END) < 10000
+),
+customer_with_returns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returns
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.return_quantity IS NOT NULL
+    GROUP BY 
+        cr.returning_customer_sk
+),
+final_report AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        uc.web_order_count,
+        uc.total_web_profit,
+        COALESCE(ct.total_returns, 0) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        unique_customers uc ON c.c_customer_sk = uc.c_customer_sk
+    LEFT JOIN 
+        customer_with_returns ct ON c.c_customer_sk = ct.returning_customer_sk
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.web_order_count,
+    fr.total_web_profit,
+    fr.total_returns,
+    CASE 
+        WHEN fr.total_web_profit > 5000 AND fr.total_returns > 0 THEN 'High Value'
+        WHEN fr.total_web_profit BETWEEN 2000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_segment
+FROM 
+    final_report fr
+WHERE 
+    fr.web_order_count IS NOT NULL 
+ORDER BY 
+    fr.total_web_profit DESC, 
+    fr.total_returns ASC
+LIMIT 100;

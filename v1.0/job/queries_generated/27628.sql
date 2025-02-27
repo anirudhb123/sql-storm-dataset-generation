@@ -1,0 +1,48 @@
+WITH RankedNames AS (
+    SELECT 
+        a.name AS actor_name,
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name, a.person_id
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_count
+    FROM 
+        RankedNames
+    WHERE 
+        rn <= 5
+),
+MoviesWithGenres AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword AS genre
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    ta.actor_name,
+    COUNT(DISTINCT mwg.title) AS movie_count,
+    STRING_AGG(DISTINCT mwg.genre, ', ') AS genres
+FROM 
+    TopActors ta
+JOIN 
+    cast_info c ON ta.person_id = c.person_id
+JOIN 
+    MoviesWithGenres mwg ON c.movie_id = mwg.id
+GROUP BY 
+    ta.actor_name
+ORDER BY 
+    movie_count DESC;

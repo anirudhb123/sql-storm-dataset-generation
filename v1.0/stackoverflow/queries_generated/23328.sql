@@ -1,0 +1,102 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND P.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts RP
+    INNER JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    WHERE 
+        RP.RecentPostRank = 1 AND 
+        U.Reputation > 1000
+),
+PostPerformance AS (
+    SELECT 
+        TP.PostId,
+        TP.Title,
+        TP.ViewCount,
+        TP.Score,
+        COALESCE(COUNT(C.VoteTypeId), 0) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN C.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN C.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        TopPosts TP
+    LEFT JOIN 
+        Votes V ON TP.PostId = V.PostId
+    LEFT JOIN 
+        Comments C ON TP.PostId = C.PostId
+    GROUP BY 
+        TP.PostId, TP.Title, TP.ViewCount, TP.Score
+),
+FilteredPosts AS (
+    SELECT 
+        PP.*,
+        CASE 
+            WHEN PP.Score > 50 THEN 'High Score'
+            WHEN PP.Score BETWEEN 11 AND 50 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        PostPerformance PP
+),
+FinalResult AS (
+    SELECT 
+        FP.PostId,
+        FP.Title,
+        FP.ViewCount,
+        FP.Score,
+        FP.TotalVotes,
+        FP.UpVotes,
+        FP.DownVotes,
+        FP.ScoreCategory
+    FROM 
+        FilteredPosts FP
+    WHERE 
+        FP.TotalVotes > 0
+        OR FP.ScoreCategory = 'High Score'
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.ViewCount,
+    FR.Score,
+    FR.TotalVotes,
+    FR.UpVotes,
+    FR.DownVotes,
+    FR.ScoreCategory,
+    COALESCE(PH.Comment, 'No significant changes') AS PostHistoryComment
+FROM 
+    FinalResult FR
+LEFT JOIN 
+    PostHistory PH ON FR.PostId = PH.PostId 
+WHERE 
+    PH.CreationDate = (
+        SELECT 
+            MAX(PH2.CreationDate) 
+        FROM 
+            PostHistory PH2 
+        WHERE 
+            PH2.PostId = FR.PostId 
+            AND PH2.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    )
+ORDER BY 
+    FR.ViewCount DESC, FR.Score DESC;

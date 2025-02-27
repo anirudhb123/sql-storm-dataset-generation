@@ -1,0 +1,68 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(V.CreationDate IS NOT NULL), 0) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        C.CommentCount,
+        P.ViewCount,
+        T.TagName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY PostId) C ON P.Id = C.PostId
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE CONCAT('%<', T.TagName, '>%') 
+    WHERE 
+        P.CreationDate > current_date - interval '1 year'
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.BadgeCount,
+    UR.QuestionCount,
+    UR.AnswerCount,
+    UR.VoteCount,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.CommentCount,
+    PS.ViewCount,
+    STRING_AGG(DISTINCT PS.TagName, ', ') AS Tags
+FROM 
+    UserReputation UR
+LEFT JOIN 
+    PostStatistics PS ON UR.UserId = PS.OwnerUserId
+GROUP BY 
+    UR.UserId, UR.DisplayName, UR.Reputation, UR.BadgeCount, UR.QuestionCount, 
+    UR.AnswerCount, UR.VoteCount, PS.PostId, PS.Title, PS.CreationDate, 
+    PS.Score, PS.CommentCount, PS.ViewCount
+ORDER BY 
+    UR.Reputation DESC, PS.Score DESC;

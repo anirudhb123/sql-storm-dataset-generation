@@ -1,0 +1,78 @@
+
+WITH RankedPromotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_promo_sk ORDER BY p.p_start_date_sk DESC) AS promo_rank,
+        p.p_channel_email,
+        p.p_channel_tv
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        MAX(ws.ws_net_profit) AS max_profit,
+        MIN(ws.ws_net_paid) AS min_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        (SELECT DISTINCT 
+             ws_item_sk, p.p_promo_sk
+         FROM 
+             web_sales
+         JOIN 
+             RankedPromotions rp ON ws.ws_item_sk = rp.p_promo_sk) AS PromoMap 
+    ON 
+        ws.ws_item_sk = PromoMap.ws_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    sd.total_quantity,
+    sd.total_net_paid,
+    sd.total_discount,
+    sd.max_profit,
+    sd.min_paid,
+    CASE 
+        WHEN sd.order_count > 10 THEN 'High Volume'
+        WHEN sd.order_count BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS sales_volume,
+    COALESCE(SUBSTRING(i.i_item_desc, 1, 50), 'No Description') AS item_description,
+    cp.cp_catalog_page_id,
+    (SELECT COUNT(*) 
+     FROM store_sales ss 
+     WHERE ss.ss_item_sk = sd.ws_item_sk 
+      AND ss.ss_sold_date_sk = 
+         (SELECT MAX(ss_inner.ss_sold_date_sk) 
+          FROM store_sales ss_inner 
+          WHERE ss_inner.ss_item_sk = ss.ss_item_sk)
+     ) AS store_sales_count
+FROM 
+    item i
+LEFT JOIN 
+    SalesData sd ON i.i_item_sk = sd.ws_item_sk
+LEFT JOIN 
+    catalog_page cp ON i.i_item_sk = cp.cp_catalog_page_sk
+LEFT JOIN 
+    (SELECT DISTINCT cs.cs_item_sk 
+     FROM catalog_sales cs 
+     WHERE cs.cs_net_paid_inc_tax > 
+         (SELECT AVG(cs_inner.cs_net_paid_inc_tax) 
+          FROM catalog_sales cs_inner WHERE cs_inner.cs_item_sk = cs.cs_item_sk)
+    ) AS HighNetPaidItems ON i.i_item_sk = HighNetPaidItems.cs_item_sk
+WHERE 
+    i.i_current_price IS NOT NULL
+    AND (i.i_size IS NOT NULL OR i.i_color IS NULL)
+    AND (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk IS NULL) > 100
+ORDER BY 
+    sd.total_quantity DESC, 
+    sd.max_profit ASC;

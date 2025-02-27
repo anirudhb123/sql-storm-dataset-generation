@@ -1,0 +1,68 @@
+WITH RECURSIVE price_history AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty,
+        ps_supplycost, 
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM 
+        partsupp
+    WHERE 
+        ps_supplycost IS NOT NULL
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01' 
+        AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+final_summary AS (
+    SELECT 
+        c.c_name, 
+        c.c_acctbal, 
+        COALESCE(tp.total_sales, 0) AS total_sales,
+        COALESCE(AVG(ph.ps_supplycost), 0) AS avg_supplycost
+    FROM 
+        customer c
+    LEFT JOIN 
+        top_suppliers tp ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    LEFT JOIN 
+        price_history ph ON tp.s_suppkey = ph.ps_suppkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_name, c.c_acctbal, tp.total_sales
+    HAVING 
+        COALESCE(avg_supplycost, 0) BETWEEN 50 AND 200
+)
+SELECT 
+    fs.c_name,
+    fs.c_acctbal,
+    CASE 
+        WHEN fs.total_sales > 0 THEN 'High Value Customer'
+        WHEN fs.total_sales = 0 THEN 'New Customer'
+        ELSE 'Undefined'
+    END AS customer_type,
+    RANK() OVER (ORDER BY fs.total_sales DESC) AS sales_rank
+FROM 
+    final_summary fs
+WHERE 
+    (fs.avg_supplycost IS NOT NULL AND fs.avg_supplycost < 100)
+    OR (fs.c_acctbal > 5000 AND fs.total_sales IS NULL)
+ORDER BY 
+    fs.total_sales DESC, fs.c_name ASC
+OFFSET 10 ROWS
+FETCH NEXT 5 ROWS ONLY;

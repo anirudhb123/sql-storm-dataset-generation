@@ -1,0 +1,41 @@
+
+WITH UserPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(C.Id) AS TotalComments,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(TIMESTAMPDIFF(SECOND, U.CreationDate, P.CreationDate)) AS AvgPostAge,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalViews,
+    TotalScore,
+    AvgPostAge,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    UserPostActivity
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC
+LIMIT 100;

@@ -1,0 +1,86 @@
+
+WITH RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ra.PostId,
+        ra.Title,
+        ra.CreationDate
+    FROM 
+        Users u
+    INNER JOIN 
+        RecentPostActivity ra ON u.Id = ra.OwnerUserId
+    WHERE 
+        ra.rn = 1
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VotesCount,
+        SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    ur.BadgeCount,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    uvs.VotesCount,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    COUNT(DISTINCT p.Id) AS PostedQuestions,
+    COUNT(DISTINCT c.Id) FILTER (WHERE c.Score > 0) AS PositiveComments,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount
+FROM 
+    TopUsers tu
+JOIN 
+    UserReputation ur ON tu.UserId = ur.UserId
+JOIN 
+    UserVoteStats uvs ON tu.UserId = uvs.UserId
+LEFT JOIN 
+    Posts p ON tu.PostId = p.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 
+GROUP BY 
+    tu.DisplayName, tu.Reputation, ur.BadgeCount, ur.GoldBadges, ur.SilverBadges, ur.BronzeBadges, uvs.VotesCount, uvs.UpVotes, uvs.DownVotes, TotalBountyAmount
+ORDER BY 
+    tu.Reputation DESC, TotalBountyAmount DESC 
+LIMIT 10;

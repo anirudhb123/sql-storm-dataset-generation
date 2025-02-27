@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+), RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank,
+        CASE WHEN p.CreationDate < NOW() - INTERVAL '1 year' THEN 'Old' ELSE 'Recent' END AS PostAge
+    FROM 
+        Posts p
+), UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+), VoteDetails AS (
+    SELECT 
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId, vt.Name
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    up.Reputation,
+    up.TotalPosts,
+    up.PositiveScorePosts,
+    ph.Level AS PostHierarchyLevel,
+    COALESCE(vd.VoteCount, 0) AS TotalVotes,
+    CASE 
+        WHEN vd.VoteType = 'UpMod' THEN 'Yes'
+        ELSE 'No'
+    END AS HasUpVotes
+FROM 
+    RankedPosts p
+JOIN 
+    UserStatistics up ON p.OwnerUserId = up.UserId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+LEFT JOIN 
+    VoteDetails vd ON p.Id = vd.PostId
+WHERE 
+    up.Reputation > 100
+    AND p.Rank <= 3
+    AND p.PostAge = 'Recent'
+ORDER BY 
+    p.ViewCount DESC, 
+    up.TotalPosts DESC;
+

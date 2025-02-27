@@ -1,0 +1,67 @@
+WITH TagCounts AS (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags AS tag
+    JOIN 
+        Posts AS p ON tag.Id = p.Tags
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        tag.TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ContributionCount,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        tc.TagName,
+        tc.PostCount,
+        ROW_NUMBER() OVER (ORDER BY tc.PostCount DESC) AS TagRank
+    FROM 
+        TagCounts tc
+),
+UserScore AS (
+    SELECT 
+        mau.DisplayName,
+        mau.ContributionCount,
+        mau.TotalComments,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM
+        MostActiveUsers mau
+    LEFT JOIN 
+        Badges b ON mau.DisplayName = b.UserId
+    GROUP BY 
+        mau.DisplayName, mau.ContributionCount, mau.TotalComments
+)
+SELECT 
+    ut.DisplayName,
+    ut.ContributionCount,
+    ut.TotalComments,
+    ut.TotalBadges,
+    tt.TagName,
+    tt.PostCount
+FROM 
+    UserScore ut
+JOIN 
+    TopTags tt ON ut.ContributionCount > tt.PostCount
+WHERE 
+    tt.TagRank <= 5
+ORDER BY 
+    ut.ContributionCount DESC, tt.PostCount DESC;
+
+This query examines string processing through multiple string manipulations and joins to analyze user contributions associated with tags within a year, reflecting both content creation and user engagement through comments and badges.

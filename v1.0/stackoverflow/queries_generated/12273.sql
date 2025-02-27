@@ -1,0 +1,34 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    MAX(ph.CreationDate) AS LastEditDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    LATERAL unnest(string_to_array(p.Tags, ',')) AS tag(tagname) ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = tag.tagname
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.PostTypeId IN (1, 2) -- Filter for questions and answers
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

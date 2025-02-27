@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostViewCounts AS (
+    SELECT 
+        OwnerUserId,
+        SUM(ViewCount) AS TotalViewCount
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+RecentPostHistory AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM PostHistory ph
+    JOIN Posts p ON p.Id = ph.PostId
+    WHERE ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(pvc.TotalViewCount, 0) AS TotalPostViews,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    ub.BadgeNames,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.Condition IS NOT NULL) AS ConditionalPosts,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AS RecentPostsCount,
+    (SELECT MAX(Res.Level) FROM RecursivePostHierarchy Res WHERE Res.Id IN 
+        (SELECT DISTINCT ParentId FROM Posts WHERE OwnerUserId = u.Id) 
+    ) AS MaxPostHierarchyLevel,
+    RANK() OVER (PARTITION BY u.Id ORDER BY COUNT(ph.Id) DESC) AS HistoryRank
+FROM Users u
+LEFT JOIN PostViewCounts pvc ON u.Id = pvc.OwnerUserId
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN RecentPostHistory ph ON u.Id = ph.UserId
+GROUP BY 
+    u.DisplayName,
+    u.Reputation,
+    pvc.TotalViewCount,
+    ub.BadgeCount,
+    ub.BadgeNames
+ORDER BY 
+    u.Reputation DESC, 
+    TotalPostViews DESC;

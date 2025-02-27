@@ -1,0 +1,72 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostHistoryTypeId,
+        ph.PostId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(v.Id) AS VoteCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(u.Reputation) AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        RecursivePostHistory ph ON ph.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+PostRankings AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        VoteCount,
+        ClosedDate,
+        ReopenedDate,
+        CommentCount,
+        OwnerReputation,
+        RANK() OVER (ORDER BY VoteCount DESC, CreationDate ASC) AS PostRank
+    FROM 
+        ClosedPosts
+)
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.CreationDate,
+    COALESCE(pr.ClosedDate, 'Not Closed') AS ClosedStatus,
+    COALESCE(pr.ReopenedDate, 'Not Reopened') AS ReopenedStatus,
+    pr.VoteCount,
+    pr.CommentCount,
+    pr.OwnerReputation,
+    CASE 
+        WHEN pr.ReopenedDate IS NOT NULL THEN 'Reopened'
+        WHEN pr.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    PostRankings pr
+WHERE 
+    pr.PostRank <= 10 
+ORDER BY 
+    pr.VoteCount DESC, pr.CreationDate ASC;

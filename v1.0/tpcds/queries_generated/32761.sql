@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(distinct ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_ship_mode_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_ship_mode_sk 
+    HAVING 
+        SUM(ws_ext_sales_price) > 0
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        COUNT(distinct cs_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY cs_ship_mode_sk ORDER BY SUM(cs_ext_sales_price) DESC) AS rank
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_sold_date_sk, cs_ship_mode_sk 
+    HAVING 
+        SUM(cs_ext_sales_price) > 0
+)
+SELECT 
+    dd.d_date AS sales_date,
+    COALESCE(SUM(s.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT s.total_orders) AS total_orders,
+    sm.sm_type AS shipping_method,
+    (SELECT AVG(cr_return_amount)
+     FROM catalog_returns cr 
+     WHERE cr_returned_date_sk = dd.d_date_sk) AS avg_catalog_return_amount
+FROM 
+    date_dim dd
+LEFT JOIN 
+    SalesCTE s ON dd.d_date_sk = s.ws_sold_date_sk OR dd.d_date_sk = s.cs_sold_date_sk
+LEFT JOIN 
+    ship_mode sm ON s.rank = 1 AND sm.sm_ship_mode_sk = s.rank 
+WHERE 
+    dd.d_year = 2023
+GROUP BY 
+    dd.d_date, sm.sm_type
+ORDER BY 
+    sales_date;

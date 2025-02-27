@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           1 AS level,
+           mt.episode_of_id
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           mh.level + 1,
+           mt.episode_of_id
+    FROM aka_title mt
+    JOIN MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+    WHERE mt.production_year >= 2000
+),
+TopMovies AS (
+    SELECT mh.movie_id,
+           mh.title,
+           mh.production_year,
+           COUNT(ci.id) AS cast_count
+    FROM MovieHierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    WHERE mh.level = 1
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+    HAVING COUNT(ci.id) > 5
+),
+MovieDetails AS (
+    SELECT tm.movie_id,
+           tm.title,
+           tm.production_year,
+           COALESCE(mt.info, 'N/A') AS note,
+           ARRAY_AGG(DISTINCT com.name) FILTER (WHERE com.name IS NOT NULL) AS companies
+    FROM TopMovies tm
+    LEFT JOIN movie_info mi ON tm.movie_id = mi.movie_id
+    LEFT JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN company_name com ON mc.company_id = com.id
+    LEFT JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY tm.movie_id, tm.title, tm.production_year
+),
+RankedMovies AS (
+    SELECT md.*,
+           ROW_NUMBER() OVER (ORDER BY md.production_year DESC) AS rank,
+           COUNT(*) OVER () AS total_movies
+    FROM MovieDetails md
+)
+SELECT rm.title,
+       rm.production_year,
+       rm.companies,
+       rm.note,
+       CASE 
+           WHEN rm.rank <= 10 THEN 'Top 10 Movies Since 2000' 
+           ELSE 'Other Movies'
+       END AS category,
+       (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = rm.movie_id) AS total_cast
+FROM RankedMovies rm
+WHERE rm.companies IS NOT NULL
+ORDER BY rm.production_year DESC, rm.rank;

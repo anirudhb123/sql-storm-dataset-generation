@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ma.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    cast.role_id,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mp.info::numeric) AS average_rating,
+    ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY AVG(mp.info::numeric) DESC) AS rank
+FROM 
+    cast_info cast
+INNER JOIN 
+    aka_name ma ON cast.person_id = ma.person_id
+INNER JOIN 
+    aka_title mt ON cast.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    movie_info mp ON mt.id = mp.movie_id AND mp.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+OUTER APPLY (
+    SELECT 
+        COUNT(*) 
+    FROM 
+        movie_companies mc2 
+    WHERE 
+        mc2.movie_id = mt.id AND 
+        mc2.company_type_id = (SELECT id FROM company_type WHERE kind = 'production')
+) AS production_company_count
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = mt.id
+WHERE 
+    ma.name IS NOT NULL 
+    AND mt.production_year > 2000  
+    AND (CAST(mt.title AS TEXT) LIKE '%Action%' OR mk.keyword IS NOT NULL)
+GROUP BY 
+    ma.name, mt.title, mt.production_year, cast.role_id
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 2 AND 
+    AVG(mp.info::numeric) IS NOT NULL
+ORDER BY 
+    rank, mt.production_year DESC;
+
+This SQL query involves a recursive Common Table Expression (CTE) to build a hierarchy of movies and their related links. It incorporates outer joins to handle possible missing data, employs window functions for ranking, and uses various predicates and conditions to filter the results based on movie attributes and associated keywords, while retrieving meaningful information about actors and their roles in the context of specific movie criteria.

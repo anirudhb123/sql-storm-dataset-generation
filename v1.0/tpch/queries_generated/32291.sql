@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '2023-01-01'
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierData AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 10 AND 20
+    GROUP BY ps.ps_partkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT cs.c_name AS customer_name, 
+       cs.total_orders, 
+       cs.total_spent, 
+       cs.last_order_date, 
+       ph.p_name AS part_name,
+       ps.avg_supply_cost,
+       (SELECT COUNT(*) 
+        FROM lineitem l
+        WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+          AND l.l_returnflag = 'R') AS returns,
+       nr.r_name AS region_name
+FROM CustomerStats cs
+JOIN PartSupplierData ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p)
+JOIN OrderHierarchy oh ON cs.c_custkey = oh.o_custkey
+LEFT JOIN RankedSuppliers sr ON sr.s_suppkey IN 
+    (SELECT ps.ps_suppkey FROM partsupp ps)
+LEFT JOIN nation n ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN NationRegion nr ON n.n_nationkey = nr.n_nationkey
+WHERE cs.total_orders > 0
+  AND cs.last_order_date IS NOT NULL
+  AND ps.avg_supply_cost IS NOT NULL
+ORDER BY cs.total_spent DESC, customer_name;

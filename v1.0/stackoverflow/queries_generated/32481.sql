@@ -1,0 +1,69 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, DisplayName, Reputation, CreationDate,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           1 AS Level
+    FROM Users
+    WHERE Reputation > 0
+    
+    UNION ALL
+    
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+           ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation
+    WHERE ur.Level < 5  -- Limit to top 5 levels of reputation
+),
+
+PostAndVoteCTE AS (
+    SELECT p.Id AS PostId, p.Title, p.OwnerUserId, p.CreationDate,
+           COALESCE(v.VoteCount, 0) AS VoteCount,
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(v.VoteCount, 0) DESC) AS VoteRanking
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts from the last year
+),
+
+UserPosts AS (
+    SELECT ur.Id AS UserId, ur.DisplayName, 
+           COUNT(DISTINCT p.PostId) AS PostCount,
+           SUM(pa.VoteCount) AS TotalVotes
+    FROM UserReputationCTE ur
+    LEFT JOIN PostAndVoteCTE pa ON ur.Id = pa.OwnerUserId
+    LEFT JOIN Posts p ON p.OwnerUserId = ur.Id
+    GROUP BY ur.Id, ur.DisplayName
+)
+
+SELECT u.DisplayName,
+       u.Reputation, 
+       u.PostCount,
+       u.TotalVotes,
+       CASE 
+           WHEN u.Reputation >= 1000 THEN 'Gold'
+           WHEN u.Reputation >= 500 THEN 'Silver'
+           WHEN u.Reputation >= 100 THEN 'Bronze'
+           ELSE 'No Badge' 
+       END AS ReputationBadge,
+       STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM UserPosts u
+LEFT JOIN Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN (
+    SELECT p.Id, 
+           STRING_AGG(t.TagName, ', ') AS TagName
+    FROM Posts p
+    CROSS APPLY STRING_SPLIT(p.Tags, ',') AS t
+    GROUP BY p.Id
+) t ON p.Id = t.Id
+WHERE u.PostCount > 0
+GROUP BY u.DisplayName, u.Reputation, u.PostCount, u.TotalVotes
+ORDER BY u.Reputation DESC, u.TotalVotes DESC;

@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+HighlightedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, tc.total_value
+    FROM customer c
+    LEFT JOIN TotalOrderValue tc ON c.c_custkey = tc.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 20000
+)
+SELECT DISTINCT
+    p.p_name,
+    r.r_name AS region_name,
+    SUM(ps.ps_availqty) AS total_availability,
+    AVG(c.c_acctbal) AS average_customer_balance,
+    COUNT(DISTINCT h.c_custkey) AS highlighted_customers_count
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighlightedCustomers h ON s.s_nationkey = h.c_custkey
+WHERE p.p_retailprice IS NOT NULL
+AND (p.p_size BETWEEN 1 AND 20 OR p.p_comment LIKE '%special%')
+GROUP BY p.p_name, r.r_name
+HAVING SUM(ps.ps_availqty) > 100
+ORDER BY total_availability DESC, average_customer_balance DESC
+LIMIT 10;

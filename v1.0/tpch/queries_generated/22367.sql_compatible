@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey,
+           s.s_name AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey,
+           CONCAT(sh.hierarchy_path, ' -> ', s.s_name)
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON sh.nationkey = s.s_nationkey AND sh.s_suppkey <> s.s_suppkey
+    WHERE sh.s_acctbal > s.s_acctbal
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_total,
+           CASE 
+               WHEN SUM(li.l_discount) > 0.5 THEN 'High Discount'
+               ELSE 'Regular'
+           END AS discount_category
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+SupplierRegion AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, 
+           CASE 
+               WHEN SUM(ps.ps_supplycost) IS NULL THEN 'No Cost'
+               ELSE 'Cost Available'
+           END AS cost_status
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+)
+SELECT sh.s_suppkey, sh.s_name, sh.hierarchy_path, ps.p_partkey, ps.p_name, 
+       ps.total_sales, o.order_total, o.discount_category, sr.cost_status
+FROM SupplierHierarchy sh
+LEFT JOIN PartSales ps ON sh.s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = ps.p_partkey FETCH FIRST 1 ROW ONLY)
+JOIN HighValueOrders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal = o.order_total FETCH FIRST 1 ROW ONLY)
+JOIN SupplierRegion sr ON sh.s_suppkey = sr.s_suppkey
+WHERE ps.rank_sales = 1 
+  AND o.order_total > (
+      SELECT AVG(order_total) FROM HighValueOrders
+      WHERE discount_category = 'High Discount'
+  )
+ORDER BY ps.total_sales DESC, o.order_total ASC;

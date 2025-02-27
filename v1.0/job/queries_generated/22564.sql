@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mt.id) AS company_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+TopRanked AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        company_count
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5
+),
+ActorsInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS aka_id,
+        c.movie_id,
+        c.nr_order,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+)
+SELECT 
+    tr.title, 
+    COALESCE(ai.actor_name, 'Unknown Actor') AS actor_name, 
+    tr.production_year,
+    CASE 
+        WHEN tr.company_count > 1 THEN 'Multiple Companies' 
+        ELSE 'Single Company' 
+    END AS company_type,
+    COUNT(DISTINCT ai.aka_id) AS unique_actors,
+    STRING_AGG(DISTINCT mk.keyword, ', ') FILTER (WHERE mk.keyword IS NOT NULL) AS keywords
+FROM 
+    TopRanked tr
+LEFT JOIN 
+    ActorsInfo ai ON tr.movie_id = ai.movie_id
+LEFT JOIN 
+    movie_keyword mk ON tr.movie_id = mk.movie_id
+GROUP BY 
+    tr.movie_id, tr.title, tr.production_year, tr.company_count
+HAVING 
+    COUNT(DISTINCT ai.aka_id) > 0 
+    AND tr.company_count = (
+        SELECT COUNT(DISTINCT mc.company_id) 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = tr.movie_id
+    )
+ORDER BY 
+    tr.production_year DESC, 
+    unique_actors DESC;

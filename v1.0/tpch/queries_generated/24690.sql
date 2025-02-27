@@ -1,0 +1,40 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_address, c_nationkey, c_acctbal, c_mktsegment, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    UNION ALL
+    SELECT cu.c_custkey, cu.c_name, cu.c_address, cu.c_nationkey, cu.c_acctbal, cu.c_mktsegment, ch.level + 1
+    FROM customer cu
+    JOIN CustomerHierarchy ch ON cu.c_nationkey = ch.c_nationkey
+    WHERE cu.c_acctbal < ch.c_acctbal
+),
+RenamedParts AS (
+    SELECT p_partkey, CONCAT('New_', p_name) AS p_name, p_mfgr, p_brand, p_size, p_container, p_retailprice, p_comment
+    FROM part
+    WHERE p_retailprice IS NOT NULL AND p_size IN (SELECT DISTINCT p_size FROM part WHERE p_size < 20)
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_cost > (SELECT AVG(total_cost) FROM (SELECT SUM(ps_supplycost * ps_availqty) AS total_cost
+                                                       FROM supplier s
+                                                       JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+                                                       GROUP BY s.s_suppkey) AS avg_suppliers)
+),
+DiscountedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, 
+           l.l_extendedprice * (1 - l.l_discount) AS adjusted_price
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.1 AND 0.2
+)
+SELECT ch.level, np.p_name, SUM(dli.adjusted_price) AS total_revenue
+FROM CustomerHierarchy ch
+LEFT OUTER JOIN DiscountedLineItems dli ON ch.c_custkey = dli.l_orderkey
+JOIN RenamedParts np ON dli.l_partkey = np.p_partkey
+JOIN TopSuppliers ts ON dli.l_suppkey = ts.s_suppkey
+WHERE ch.level <= 3 AND np.p_container IS NOT NULL
+GROUP BY ch.level, np.p_name
+ORDER BY total_revenue DESC, ch.level ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

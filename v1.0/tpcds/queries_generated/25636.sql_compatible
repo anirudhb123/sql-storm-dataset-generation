@@ -1,0 +1,63 @@
+
+WITH CustomerFullDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+GenderIncomeAnalysis AS (
+    SELECT 
+        gender,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        AVG(purchase_estimate) AS avg_purchase_estimate
+    FROM (
+        SELECT 
+            cd_gender AS gender,
+            c.c_customer_id,
+            cd.cd_purchase_estimate
+        FROM 
+            CustomerFullDetails
+    ) AS CBT
+    GROUP BY 
+        gender
+),
+CityWiseCustomerCount AS (
+    SELECT 
+        ca_city,
+        COUNT(DISTINCT c_customer_id) AS city_customer_count
+    FROM 
+        CustomerFullDetails
+    GROUP BY 
+        ca_city
+),
+FinalBenchmarkResults AS (
+    SELECT 
+        GIA.gender,
+        GIA.customer_count,
+        GIA.avg_purchase_estimate,
+        CW.city_customer_count
+    FROM 
+        GenderIncomeAnalysis GIA
+    JOIN 
+        CityWiseCustomerCount CW ON CW.city_customer_count > 10
+)
+SELECT 
+    gender,
+    customer_count,
+    avg_purchase_estimate,
+    city_customer_count
+FROM 
+    FinalBenchmarkResults
+ORDER BY 
+    customer_count DESC;

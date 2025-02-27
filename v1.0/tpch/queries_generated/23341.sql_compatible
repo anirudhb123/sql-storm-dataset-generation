@@ -1,0 +1,40 @@
+
+WITH RECURSIVE ExceedingBudget AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS TotalSpent
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, eb.TotalSpent + COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0)
+    FROM ExceedingBudget eb
+    JOIN orders o ON eb.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1996-01-01' 
+      AND l.l_shipdate < '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal, eb.TotalSpent
+), FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal < (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+), ExpensiveParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COUNT(ps.s_suppkey) AS SupplierCount
+    FROM part p
+    INNER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) AND COUNT(ps.s_suppkey) > 2
+)
+SELECT 
+    eb.c_name AS CustomerName,
+    eb.TotalSpent AS TotalSpent,
+    ps.s_name AS SupplierName,
+    ep.p_name AS ExpensivePart,
+    ep.SupplierCount,
+    CASE 
+        WHEN eb.TotalSpent IS NULL THEN 'No Orders'
+        WHEN eb.TotalSpent >= (SELECT AVG(TotalSpent) FROM ExceedingBudget) THEN 'High Roller'
+        ELSE 'Budget Conscious'
+    END AS SpendingCategory
+FROM ExceedingBudget eb
+FULL OUTER JOIN FilteredSuppliers ps ON eb.TotalSpent > ps.s_acctbal
+FULL OUTER JOIN ExpensiveParts ep ON ps.s_suppkey IN (SELECT ps_sub.ps_suppkey FROM partsupp ps_sub WHERE ps_sub.ps_partkey = ep.p_partkey)
+WHERE eb.TotalSpent IS NOT NULL OR ps.s_name IS NOT NULL
+ORDER BY eb.TotalSpent DESC NULLS LAST, ep.SupplierCount DESC, CustomerName;

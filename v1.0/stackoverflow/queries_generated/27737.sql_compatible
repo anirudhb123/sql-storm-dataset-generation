@@ -1,0 +1,47 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AverageUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageUserReputation,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    t.AverageUserReputation,
+    CASE 
+        WHEN t.PostCount > 100 THEN 'Highly Active'
+        WHEN t.PostCount BETWEEN 50 AND 100 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS ActivityLevel
+FROM 
+    TopTags t
+WHERE 
+    t.TagRank <= 10
+ORDER BY 
+    t.PostCount DESC;

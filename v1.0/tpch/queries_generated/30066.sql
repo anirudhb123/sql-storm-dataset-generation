@@ -1,0 +1,59 @@
+WITH RECURSIVE price_ranks AS (
+    SELECT
+        ps.partkey,
+        ps.suppkey,
+        ps.availqty,
+        ps.supplycost,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.supplycost DESC) AS rank
+    FROM
+        partsupp ps
+),
+
+customer_orders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DATE_PART('year', o.o_orderdate) AS order_year
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+)
+
+SELECT
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    p.p_name AS part_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY total_revenue DESC) AS revenue_rank
+FROM
+    lineitem l
+LEFT OUTER JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+INNER JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+INNER JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+INNER JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+INNER JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+INNER JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN
+    customer_orders co ON co.o_orderkey = o.o_orderkey
+WHERE
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND (l.l_returnflag <> 'R' OR l.l_returnflag IS NULL)
+GROUP BY
+    n.n_name, r.r_name, p.p_name
+HAVING
+    total_revenue > 1000
+ORDER BY
+    nation_name, total_revenue DESC;

@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available_quantity, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        n.n_name AS nation_name, 
+        c.c_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal < 5000
+)
+SELECT 
+    c.c_name AS customer_name, 
+    s.s_name AS supplier_name, 
+    ss.total_available_quantity, 
+    os.total_revenue
+FROM 
+    CustomerInfo c
+JOIN 
+    OrderStats os ON c.c_custkey = os.o_custkey
+JOIN 
+    SupplierStats ss ON ss.total_supply_cost > 10000
+JOIN 
+    partsupp ps ON ps.ps_partkey IN (
+        SELECT ps_partkey 
+        FROM part 
+        WHERE p_size BETWEEN 10 AND 20
+    )
+WHERE 
+    os.total_revenue > 10000
+ORDER BY 
+    customer_name, supplier_name;

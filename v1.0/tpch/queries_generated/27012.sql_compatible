@@ -1,0 +1,49 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_name,
+        p.p_type,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_comment LIKE '%popular%'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        SUBSTRING(s.s_comment, 1, 50) AS short_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 100000.00
+)
+SELECT 
+    rp.p_name,
+    rp.p_type,
+    rp.p_brand,
+    si.s_name,
+    si.nation_name,
+    si.short_comment,
+    CONCAT('The product ', rp.p_name, ' of type ', rp.p_type, ' is highly priced at ', rp.p_retailprice, '. Available from supplier ', si.s_name, ' located in ', si.s_address, '.')
+        AS product_overview
+FROM 
+    RankedParts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+WHERE 
+    rp.rn <= 5
+ORDER BY 
+    rp.p_type, rp.p_retailprice DESC;

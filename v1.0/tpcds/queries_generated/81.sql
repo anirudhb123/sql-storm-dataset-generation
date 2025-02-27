@@ -1,0 +1,71 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 0
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+customer_spending AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M' 
+    GROUP BY 
+        c.c_customer_sk
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    WHERE 
+        inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv.inv_item_sk
+)
+
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    cs.total_spent,
+    cs.total_orders,
+    ir.total_quantity,
+    COALESCE(rs.total_sales, 0) AS web_sales,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Purchases'
+        WHEN cs.total_spent <= 100 THEN 'Low Spender'
+        WHEN cs.total_spent BETWEEN 101 AND 500 THEN 'Medium Spender'
+        ELSE 'High Spender'
+    END AS spending_category
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_spending cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    inventory_status ir ON ir.inv_item_sk = (SELECT i.i_item_sk FROM item i ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN 
+    ranked_sales rs ON rs.web_site_sk = c.c_current_addr_sk
+WHERE 
+    ca.ca_state = 'CA'
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

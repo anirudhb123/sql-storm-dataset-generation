@@ -1,0 +1,75 @@
+
+WITH RECURSIVE cte_movies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword_used,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mk.keyword) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+),
+cte_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END) AS lead_roles
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NOT NULL
+    GROUP BY 
+        ci.movie_id
+),
+cte_company_info AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS total_companies,
+        STRING_AGG(co.name, ', ' ORDER BY co.name) AS companies_list
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        co.name IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+),
+cte_final AS (
+    SELECT 
+        cm.movie_id,
+        cm.title,
+        cm.production_year,
+        cm.keyword_used,
+        cc.total_cast,
+        cc.lead_roles,
+        cc.total_cast - COALESCE(cp.total_companies, 0) AS cast_company_difference
+    FROM 
+        cte_movies cm
+    JOIN 
+        cte_cast cc ON cm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cte_company_info cp ON cm.movie_id = cp.movie_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_cast > 10 AND lead_roles > 5 THEN 'Blockbuster'
+        WHEN total_cast <= 10 AND lead_roles < 2 THEN 'Indie Film'
+        ELSE 'Average Film'
+    END AS film_category
+FROM 
+    cte_final
+WHERE 
+    (production_year BETWEEN 2010 AND 2023 OR keyword_used LIKE '%action%')
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = cte_final.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info LIKE '%failed%')
+    )
+ORDER BY 
+    production_year DESC, 
+    film_category DESC;

@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t 
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id 
+    GROUP BY 
+        mk.movie_id
+),
+CompleteCast AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.subject_id) AS total_cast
+    FROM 
+        complete_cast mc 
+    GROUP BY 
+        mc.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title, 
+        COALESCE(kw.keywords_list, 'No keywords') AS keywords,
+        COALESCE(cc.total_cast, 0) AS cast_count,
+        CASE 
+            WHEN cc.total_cast > 10 THEN 'Large'
+            WHEN cc.total_cast BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Small' 
+        END AS cast_size
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        MovieKeywords kw ON t.id = kw.movie_id
+    LEFT JOIN 
+        CompleteCast cc ON t.id = cc.movie_id
+)
+SELECT 
+    dm.title, 
+    dm.production_year, 
+    dm.keywords, 
+    dm.cast_count, 
+    dm.cast_size,
+    rk.rank
+FROM 
+    DetailedMovieInfo dm
+JOIN 
+    RankedMovies rk ON dm.production_year = rk.production_year
+WHERE 
+    rk.rank <= 5 
+ORDER BY 
+    dm.production_year DESC, 
+    dm.cast_count DESC;

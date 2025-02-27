@@ -1,0 +1,14 @@
+title: SQLStorm v1.0 Umbra Benchmark (24h)
+repetitions: 10
+warmup: 10
+timeout: 10
+fetch_result: false
+output: results/v1.0/umbra
+systems:
+   -  title: Umbra
+      dbms: umbra
+      parameter:
+         version:
+            - "25.01"
+      settings:
+         usedirectio: true

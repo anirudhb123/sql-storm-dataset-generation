@@ -1,0 +1,76 @@
+
+WITH RECURSIVE CustomerReturnStats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+PopularItems AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        i.i_item_id
+    ORDER BY 
+        total_sold DESC
+    LIMIT 10
+),
+WeeklySales AS (
+    SELECT 
+        d.d_year,
+        d.d_week_seq,
+        SUM(ss.ss_sales_price) AS weekly_sales
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_week_seq
+),
+StoreAddress AS (
+    SELECT 
+        s.s_store_id,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ca.ca_city) AS rnk
+    FROM 
+        store s
+    JOIN 
+        customer_address ca ON s.s_street_number = ca.ca_street_number
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cs.total_returns,
+    pi.i_item_id,
+    pi.total_sold,
+    ws.weekly_sales,
+    sa.ca_city,
+    sa.ca_state
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturnStats cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    PopularItems pi ON pi.total_sold > 100
+JOIN 
+    WeeklySales ws ON ws.d_year = EXTRACT(YEAR FROM CURRENT_DATE)
+JOIN 
+    StoreAddress sa ON sa.s_store_id = c.c_current_addr_sk
+WHERE 
+    c.c_birth_year IS NULL OR c.c_first_shipto_date_sk > 0
+ORDER BY 
+    cs.total_returns DESC, 
+    pi.total_sold DESC;

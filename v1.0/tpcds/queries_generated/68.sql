@@ -1,0 +1,69 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COUNT(DISTINCT sr.ticket_number) AS store_return_count,
+        COUNT(DISTINCT wr_order_number) AS web_return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+IncomeStats AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer_demographics cd 
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        cd_purchase_estimate IS NOT NULL
+    GROUP BY 
+        cd_demo_sk
+),
+ReturnStats AS (
+    SELECT 
+        c.c_customer_id,
+        cr.c_return_total
+    FROM 
+        (SELECT 
+            c.c_customer_id,
+            COALESCE(SUM(sr_return_amt_inc_tax), 0) + COALESCE(SUM(wr_return_amt_inc_tax), 0) AS c_return_total
+         FROM 
+            customer c
+         LEFT JOIN 
+            store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+         LEFT JOIN 
+            web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+         GROUP BY 
+            c.c_customer_id) cr
+    WHERE 
+        cr.c_return_total > 1000
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_store_returns,
+    cs.total_web_returns,
+    iscs.customer_count,
+    iscs.avg_purchase_estimate,
+    r_stats.c_return_total
+FROM 
+    CustomerReturns cs
+JOIN 
+    IncomeStats iscs ON cs.c_customer_id = iscs.cd_demo_sk
+LEFT JOIN 
+    ReturnStats r_stats ON cs.c_customer_id = r_stats.c_customer_id
+WHERE 
+    (cs.total_store_returns + cs.total_web_returns) > 5
+ORDER BY 
+    cs.total_store_returns DESC,
+    cs.total_web_returns DESC;

@@ -1,0 +1,83 @@
+WITH RECURSIVE MovieCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.role_id,
+        1 AS depth
+    FROM cast_info c
+    WHERE c.person_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.role_id,
+        mc.depth + 1
+    FROM cast_info c
+    INNER JOIN MovieCast mc ON c.movie_id = mc.movie_id
+    WHERE mc.depth < 5
+),
+MovieTitles AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        MAX(t.production_year) AS latest_year
+    FROM aka_title t
+    GROUP BY t.id, t.title
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM cast_info c
+    INNER JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+    GROUP BY a.person_id
+    HAVING COUNT(DISTINCT c.movie_id) > 5
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        r.role,
+        COUNT(m.movie_id) OVER (PARTITION BY a.id) AS total_movies
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN role_type r ON ci.role_id = r.id
+    LEFT JOIN MovieCast mc ON mc.person_id = a.person_id
+    LEFT JOIN MovieTitles m ON mc.movie_id = m.movie_id
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id,
+        kt.keyword AS genre
+    FROM movie_keyword mk
+    JOIN keyword kt ON mk.keyword_id = kt.id
+    JOIN MovieTitles mt ON mk.movie_id = mt.movie_id
+)
+SELECT 
+    ad.actor_id,
+    ad.name,
+    ad.role,
+    COALESCE(mg.genre, 'Unknown') AS genre,
+    ad.total_movies,
+    mt.latest_year
+FROM ActorDetails ad
+LEFT JOIN MovieGenres mg ON ad.actor_id = mg.movie_id
+LEFT JOIN MovieTitles mt ON ad.total_movies = mt.movie_id
+WHERE ad.total_movies > 10
+ORDER BY ad.total_movies DESC, ad.name
+LIMIT 50;
+
+
+This SQL query includes various complex constructs:
+
+1. **Recursive CTE:** The `MovieCast` CTE recursively collects data on movie casts.
+2. **Aggregate Functions:** Used to count movies per actor and find the latest production year.
+3. **Window Functions:** Employed to partition actor details based on movie counts.
+4. **Outer Joins:** To include genres and handle NULL values gracefully.
+5. **Complicated Predicates:** The `HAVING` clause filters actors based on the number of movies.
+6. **Set Operators and NULL Logic:** COALESCE is used to handle potential NULLs in genres.
+   
+This query benchmarks performance based on complex joins and aggregations across the tables defined in your schema.

@@ -1,0 +1,56 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        count(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY at.production_year DESC) AS title_rank
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title, 
+        rt.production_year,
+        rt.company_count,
+        ra.name AS director_name
+    FROM 
+        RankedTitles rt
+    JOIN 
+        cast_info ci ON rt.title = ci.movie_id 
+    JOIN 
+        aka_name ra ON ci.person_id = ra.person_id 
+    WHERE 
+        ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+        AND rt.title_rank = 1
+),
+KeyWordCounts AS (
+    SELECT 
+        mt.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.company_count,
+    ft.director_name,
+    kwc.keyword_count
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    KeyWordCounts kwc ON ft.movie_id = kwc.movie_id
+WHERE 
+    ft.company_count > 3
+ORDER BY 
+    ft.production_year DESC, ft.title;
+
+This SQL query benchmarks string processing by handling join operations across multiple tables, counting distinct companies per title, filtering results based on specific conditions, and finally aggregating keyword counts. It utilizes Common Table Expressions (CTEs) to structure the query logically and improve readability.

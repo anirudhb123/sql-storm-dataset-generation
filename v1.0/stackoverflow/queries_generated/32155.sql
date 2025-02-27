@@ -1,0 +1,79 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS UpVotesReceived
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id AND V.VoteTypeId = 2
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(P.Id) > 0
+),
+RecentEdits AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS EditDate,
+        PH.UserDisplayName,
+        PH.Comment AS EditComment
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    ORDER BY 
+        PH.CreationDate DESC
+)
+
+SELECT 
+    R.TagId,
+    R.TagName,
+    R.PostCount,
+    A.UserId,
+    A.DisplayName,
+    A.PostsCreated,
+    A.UpVotesReceived,
+    E.PostId,
+    E.Title,
+    E.EditDate,
+    E.UserDisplayName AS LastEditedBy,
+    E.EditComment
+FROM 
+    RecursiveTagCounts R
+JOIN 
+    MostActiveUsers A ON A.PostsCreated > 10  -- Users who created more than 10 posts
+LEFT JOIN 
+    RecentEdits E ON E.PostId = (
+        SELECT 
+            P.Id
+        FROM 
+            Posts P
+        WHERE 
+            P.Tags LIKE '%' || R.TagName || '%'
+        ORDER BY 
+            P.LastEditDate DESC
+        LIMIT 1
+    )
+WHERE 
+    R.PostCount > 5  -- Tags with more than 5 associated posts
+ORDER BY 
+    R.PostCount DESC, A.UpVotesReceived DESC;

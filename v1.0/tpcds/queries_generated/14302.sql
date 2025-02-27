@@ -1,0 +1,18 @@
+
+SELECT 
+    ca.city AS address_city,
+    COUNT(DISTINCT c.customer_id) AS total_customers,
+    SUM(ws.net_profit) AS total_net_profit
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.bill_customer_sk
+WHERE 
+    ws.sold_date_sk BETWEEN 1 AND 100
+GROUP BY 
+    ca.city
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

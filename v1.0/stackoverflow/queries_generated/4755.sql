@@ -1,0 +1,33 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, Views,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostStats AS (
+    SELECT OwnerUserId, COUNT(*) AS PostCount, 
+           SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           AVG(ViewCount) AS AvgViews
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+RecentPosts AS (
+    SELECT Id, Title, OwnerUserId, CreationDate,
+           RANK() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS RecentRank
+    FROM Posts
+    WHERE CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+BadgesEarned AS (
+    SELECT UserId, COUNT(*) AS BadgeCount,
+           STRING_AGG(Name, ', ') AS Badges
+    FROM Badges
+    GROUP BY UserId
+)
+SELECT ur.DisplayName, ur.Reputation, ps.PostCount, ps.QuestionCount, ps.AnswerCount, ps.AvgViews, 
+       rp.Title, rp.CreationDate, be.BadgeCount, be.Badges
+FROM UserReputation ur
+LEFT JOIN PostStats ps ON ur.Id = ps.OwnerUserId
+LEFT JOIN RecentPosts rp ON ur.Id = rp.OwnerUserId AND rp.RecentRank = 1
+LEFT JOIN BadgesEarned be ON ur.Id = be.UserId
+WHERE ur.Reputation > 1000 AND ps.PostCount > 5
+ORDER BY ur.Reputation DESC, ps.PostCount DESC;

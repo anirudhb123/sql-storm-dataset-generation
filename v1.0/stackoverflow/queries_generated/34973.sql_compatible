@@ -1,0 +1,96 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p 
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        t.TagName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.TagName IN (SELECT value FROM STRING_SPLIT(p.Tags, ','))
+    GROUP BY 
+        p.Id, p.Title, t.TagName, p.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        COUNT(PostId) AS TagPostCount
+    FROM 
+        PostsWithTags
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalBounty,
+    ups.QuestionsCount,
+    ups.AnswersCount,
+    COUNT(DISTINCT pwh.TagName) AS UniqueTags,
+    MAX(pwh.CreationDate) AS LastPostDate,
+    CASE 
+        WHEN ups.TotalBounty > 0 THEN 'Active Contributor'
+        ELSE 'Standard User'
+    END AS UserStatus
+FROM 
+    UserPostStats ups
+INNER JOIN 
+    Users u ON ups.UserId = u.Id
+LEFT JOIN 
+    PostsWithTags pwh ON u.Id = pwh.PostId
+WHERE 
+    ups.TotalPosts > 0
+GROUP BY 
+    u.DisplayName, ups.TotalPosts, ups.TotalBounty, ups.QuestionsCount, ups.AnswersCount
+HAVING 
+    COUNT(DISTINCT pwh.TagName) > 5
+ORDER BY 
+    ups.TotalBounty DESC, LastPostDate DESC
+LIMIT 10;

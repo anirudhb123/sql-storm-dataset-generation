@@ -1,0 +1,47 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON n.n_regionkey = rh.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE rh.level < 5
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available_qty, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price, COUNT(*) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, od.total_price, od.total_items,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY od.total_price DESC) AS price_rank
+    FROM customer c
+    JOIN order_details od ON c.c_custkey = od.o_orderkey
+),
+final_selection AS (
+    SELECT rh.r_name, cs.c_name, cs.total_price, cs.total_items,
+           COALESCE(ss.total_available_qty, 0) AS total_avail_qty,
+           COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM region_hierarchy rh
+    LEFT JOIN customer_orders cs ON rh.level = cs.price_rank
+    LEFT JOIN supplier_summary ss ON ss.s_suppkey = cs.total_items
+)
+SELECT r_name, c_name, total_price, total_items, total_avail_qty, total_supply_cost
+FROM final_selection
+WHERE total_price BETWEEN 1000 AND 10000
+ORDER BY total_price DESC, total_items ASC
+LIMIT 50 OFFSET 10;

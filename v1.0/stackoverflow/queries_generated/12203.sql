@@ -1,0 +1,61 @@
+-- Performance Benchmarking SQL Query for StackOverflow Schema
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.Id IS NOT NULL) AS VoteCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(com.CommentCount, 0) AS CommentCount,
+        COALESCE(c.CreationDate, '1900-01-01'::timestamp) AS ClosedDate
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) com ON p.Id = com.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            MIN(CreationDate) AS CreationDate 
+        FROM PostHistory 
+        WHERE PostHistoryTypeId = 10 -- Closed posts
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.BadgeCount,
+    us.VoteCount,
+    us.AnswerCount,
+    us.QuestionCount,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.ClosedDate
+FROM UserStats us
+JOIN PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY us.Reputation DESC, ps.ViewCount DESC
+LIMIT 100;
+

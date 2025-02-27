@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT s.s_nationkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        p.p_name,
+        sc.total_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+    WHERE 
+        sc.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierCosts)
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    ts.r_name,
+    ts.p_name,
+    ts.total_supply_cost,
+    COALESCE(l.l_discount, 0) AS applied_discount,
+    COUNT(DISTINCT c.c_custkey) OVER (PARTITION BY ts.r_name) AS customer_count,
+    CASE
+        WHEN o.o_totalprice > 1000 THEN 'Large Order'
+        ELSE 'Standard Order'
+    END AS order_type
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN 
+    TopSuppliers ts ON l.l_partkey = ts.p_partkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderdate > DATE '1998-10-01' - INTERVAL '1 YEAR'
+ORDER BY 
+    ts.total_supply_cost DESC, 
+    o.o_orderdate ASC;

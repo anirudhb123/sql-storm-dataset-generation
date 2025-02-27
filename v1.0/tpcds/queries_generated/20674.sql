@@ -1,0 +1,62 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_ext_sales_price) AS total_revenue,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    INNER JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_current_cdemo_sk IN (
+        SELECT cd_demo_sk 
+        FROM customer_demographics 
+        WHERE cd_gender = 'F' AND cd_marital_status = 'S' 
+          AND cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    )
+    GROUP BY ws.ws_item_sk
+),
+inventory_data AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+),
+final_data AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_sales,
+        sd.total_revenue,
+        id.total_inventory,
+        CASE 
+            WHEN id.total_inventory IS NOT NULL THEN 
+                ROUND(sd.total_sales::decimal / id.total_inventory, 2)
+            ELSE 
+                NULL 
+        END AS sales_to_inventory_ratio
+    FROM sales_data sd
+    LEFT JOIN inventory_data id ON sd.ws_item_sk = id.inv_item_sk
+)
+SELECT 
+    fd.ws_item_sk,
+    fd.total_sales,
+    fd.total_revenue,
+    fd.total_inventory,
+    COALESCE(fd.sales_to_inventory_ratio, 0) AS adjusted_sales_to_inventory_ratio,
+    ROW_NUMBER() OVER (ORDER BY fd.total_revenue DESC) AS revenue_rank
+FROM final_data fd
+WHERE fd.total_sales > 100
+  AND (fd.sales_to_inventory_ratio IS NULL OR fd.sales_to_inventory_ratio < 1)
+UNION ALL
+SELECT 
+    NULL AS ws_item_sk,
+    0 AS total_sales,
+    SUM(ws.ws_ext_sales_price) AS revenue,
+    NULL AS total_inventory,
+    0 AS adjusted_sales_to_inventory_ratio,
+    NULL AS revenue_rank
+FROM web_sales ws
+WHERE ws.ws_sold_date_sk NOT IN (SELECT DISTINCT sr_returned_date_sk FROM store_returns WHERE sr_return_quantity > 0)
+  AND ws.ws_ship_date_sk < (SELECT MAX(d_date) FROM date_dim WHERE d_year = 2023)
+GROUP BY HAVING SUM(ws.ws_quantity) < 50
+ORDER BY revenue DESC;

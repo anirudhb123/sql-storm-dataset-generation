@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b 
+    GROUP BY 
+        b.UserId
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        COALESCE(phc.EditCount, 0) AS EditCount,
+        COALESCE(phc.CloseReopenCount, 0) AS CloseReopenCount,
+        COALESCE(uh.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(uh.HighestBadgeClass, 0) AS UserHighestBadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVotes pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        PostHistoryCounts phc ON p.Id = phc.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges uh ON u.Id = uh.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.UpVotes,
+    p.DownVotes,
+    p.EditCount,
+    p.CloseReopenCount,
+    rh.Level AS HierarchyLevel,
+    CASE 
+        WHEN p.UserBadgeCount > 5 THEN 'Active Contributor' 
+        ELSE 'New Contributor' 
+    END AS ContributorType
+FROM 
+    PostSummary p
+JOIN 
+    RecursivePostHierarchy rh ON p.PostId = rh.PostId
+ORDER BY 
+    rh.Level ASC, p.UpVotes DESC;

@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    WHERE 
+        p.PostTypeId = 1 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+),
+TagsWithCounts AS (
+    SELECT 
+        TRIM(value) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        FilteredPosts,
+        UNNEST(SPLIT(TRIM(BOTH '<>' FROM Tags), '><')) AS value
+    GROUP BY 
+        TagName
+),
+AggregatedResults AS (
+    SELECT 
+        tp.TagName,
+        tp.TagCount,
+        COUNT(*) AS PostCount,
+        STRING_AGG(fp.Title, ', ') AS TopPostTitles,
+        STRING_AGG(fp.CreationDate::text ORDER BY fp.CreationDate) AS LatestPosts
+    FROM 
+        TagsWithCounts tp
+    JOIN 
+        FilteredPosts fp ON fp.Tags LIKE CONCAT('%', tp.TagName, '%')
+    GROUP BY 
+        tp.TagName, tp.TagCount
+)
+SELECT 
+    ag.TagName,
+    ag.TagCount,
+    ag.PostCount,
+    ag.TopPostTitles,
+    ag.LatestPosts
+FROM 
+    AggregatedResults ag
+WHERE 
+    ag.TagCount >= 3
+ORDER BY 
+    ag.TagCount DESC, ag.PostCount DESC;

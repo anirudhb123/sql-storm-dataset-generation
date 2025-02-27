@@ -1,0 +1,61 @@
+
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        u.DisplayName AS OwnerDisplayName, 
+        EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - p.CreationDate)) AS AgeInSeconds,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE((SELECT COUNT(DISTINCT pl.RelatedPostId) 
+                  FROM PostLinks pl 
+                  WHERE pl.PostId = p.Id AND pl.LinkTypeId = 3), 0) AS DuplicateCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+), 
+RankedPosts AS (
+    SELECT 
+        fp.*,
+        ROW_NUMBER() OVER (ORDER BY fp.AgeInSeconds DESC, fp.CommentCount DESC) AS PostRank
+    FROM 
+        FilteredPosts fp
+), 
+AggregatedTags AS (
+    SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        p.Id AS PostId
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>')::int[])
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.DuplicateCount,
+    ag.TagList,
+    rp.PostRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedTags ag ON rp.PostId = ag.PostId
+WHERE 
+    rp.PostRank <= 10 
+ORDER BY 
+    rp.PostRank;

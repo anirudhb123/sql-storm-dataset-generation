@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(day, -30, GETDATE())
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        spd.s_suppkey,
+        spd.s_name,
+        spd.ps_partkey
+    FROM 
+        SupplierPartDetails spd
+    WHERE 
+        spd.total_available > 1000
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        lo.l_partkey,
+        lo.l_quantity,
+        lo.l_extendedprice,
+        lo.l_discount,
+        lo.l_tax,
+        r.r_name AS region_name
+    FROM 
+        lineitem lo
+    JOIN 
+        orders o ON lo.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    od.region_name,
+    COUNT(DISTINCT od.l_orderkey) AS total_orders,
+    SUM(CASE WHEN od.l_discount > 0 THEN (od.l_extendedprice * (1 - od.l_discount)) ELSE od.l_extendedprice END) AS total_revenue,
+    COUNT(DISTINCT CASE WHEN od.l_tax IS NULL THEN od.l_quantity END) AS null_tax_count,
+    (SELECT COUNT(*) FROM TopSuppliers ts WHERE ts.ps_partkey = od.l_partkey) AS supplier_count
+FROM 
+    OrderDetails od
+JOIN 
+    RankedOrders ro ON od.l_orderkey = ro.o_orderkey
+WHERE 
+    ro.order_rank <= 5
+GROUP BY 
+    od.region_name
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        COALESCE(mi.info, 'No info available') AS additional_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_count,
+    m.additional_info,
+    string_agg(distinct CONCAT(aka.name, ' (', rt.role, ')'), ', ') AS cast_details
+FROM 
+    MoviesWithInfo m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+JOIN 
+    role_type rt ON ci.role_id = rt.id
+WHERE 
+    m.rank <= 5 AND 
+    m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year, m.actor_count, m.additional_info
+ORDER BY 
+    m.production_year DESC, m.actor_count DESC;

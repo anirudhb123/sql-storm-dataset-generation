@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE
+        s.s_acctbal IS NOT NULL 
+),
+MaxCostParts AS (
+    SELECT 
+        ps.ps_partkey,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+        AVG(li.l_quantity) AS avg_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        li.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+AggregatedCustomerData AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Not Available') AS supplier_name,
+    p.p_retailprice,
+    MAX(ac.order_count) AS order_count,
+    SUM(CASE 
+            WHEN ra.rnk = 1 THEN p.p_retailprice * 0.1 
+            ELSE 0 
+        END) AS discount,
+    COUNT(DISTINCT o.o_orderkey) AS unique_orders  
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey AND ps.ps_supplycost = (SELECT MAX(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey) LIMIT 1)
+LEFT JOIN 
+    OrderAnalysis o ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_orderkey = o.o_orderkey)
+LEFT JOIN 
+    AggregatedCustomerData ac ON ac.order_count > 0
+WHERE 
+    p.p_size IS NOT NULL 
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, p.p_retailprice
+HAVING 
+    SUM(CASE WHEN MAX(o.revenue) > 100000 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    p.p_partkey DESC;

@@ -1,0 +1,54 @@
+
+WITH Address_With_Details AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' THEN 
+                   CONCAT(' Suite ', ca_suite_number) 
+               ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+Customer_Groups AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(c.c_customer_sk) AS customer_count,
+        MAX(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_flag,
+        MAX(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_flag
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd_demo_sk
+),
+Sales_Aggregates AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    a.full_address,
+    c.customer_count,
+    s.total_sales,
+    s.total_orders
+FROM 
+    Address_With_Details a
+LEFT JOIN 
+    Customer_Groups c ON a.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_current_cdemo_sk = c.cd_demo_sk)
+LEFT JOIN 
+    Sales_Aggregates s ON c.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_current_addr_sk = a.ca_address_sk)
+WHERE 
+    a.ca_state = 'CA'
+ORDER BY 
+    total_sales DESC, customer_count DESC
+LIMIT 100;

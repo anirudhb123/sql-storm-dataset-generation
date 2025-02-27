@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        JSON_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag ON TRUE
+        LEFT JOIN Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.Score DESC, 
+        p.CreationDate DESC
+    LIMIT 100
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Body,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        r.OwnerName,
+        r.CommentCount,
+        r.Tags,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.Comment AS HistoryComment
+    FROM 
+        RankedPosts r
+        LEFT JOIN PostHistory ph ON r.PostId = ph.PostId
+        LEFT JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.OwnerName,
+    pd.CommentCount,
+    pd.Tags,
+    JSON_BUILD_OBJECT(
+        'HistoryDate', pd.HistoryDate,
+        'HistoryType', pd.HistoryType,
+        'HistoryComment', pd.HistoryComment
+    ) AS HistoryDetails
+FROM 
+    PostDetails pd
+WHERE 
+    pd.HistoryType IS NOT NULL
+ORDER BY 
+    pd.CreationDate DESC;

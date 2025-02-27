@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(SUM(dur.length), 0) AS total_duration,
+    COUNT(DISTINCT mc.company_id) AS number_of_production_companies,
+    ROW_NUMBER() OVER(PARTITION BY ak.name ORDER BY mt.production_year DESC) AS movie_rank,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS associated_keywords
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+JOIN 
+    keyword k ON k.id = mk.keyword_id
+JOIN 
+    movie_hierarchy mt ON mt.movie_id = ci.movie_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         SUM(length) AS length
+     FROM 
+         (SELECT 
+              movie_id, 
+              /* Assume hypothetical length calculation */
+              60 * (season_nr * 1 + episode_nr * 0.5) AS length
+          FROM 
+              aka_title 
+          WHERE 
+              kind_id IN (SELECT id FROM kind_type WHERE kind = 'episode')
+         ) AS durations
+     GROUP BY 
+         movie_id) dur ON dur.movie_id = mt.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND mt.production_year > 2000
+    AND (mt.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'episode')) OR mt.id IS NULL)
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+ORDER BY 
+    total_duration DESC, movie_rank ASC;

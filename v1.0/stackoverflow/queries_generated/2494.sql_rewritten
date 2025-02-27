@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 MONTH'
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(rb.BadgeNames, 'No Badges') AS RecentBadges,
+    CASE 
+        WHEN rp.ViewCount > 100 THEN 'High Traffic'
+        WHEN rp.ViewCount BETWEEN 50 AND 100 THEN 'Moderate Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentBadges rb ON rp.OwnerUserId = rb.UserId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 10;

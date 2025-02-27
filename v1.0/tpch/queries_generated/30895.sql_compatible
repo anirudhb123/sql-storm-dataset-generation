@@ -1,0 +1,44 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.level * 1000
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+top_regions AS (
+    SELECT n.n_regionkey, r.r_name, SUM(l.l_extendedprice) AS total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT r.r_name, 
+       COALESCE(TH.total_sales, 0) AS total_sales, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       MAX(os.total_revenue) AS highest_order_revenue,
+       AVG(os.total_revenue) AS avg_order_revenue,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM region r 
+LEFT JOIN top_regions TH ON r.r_name = TH.r_name
+LEFT JOIN customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+LEFT JOIN order_summary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = c.c_nationkey
+WHERE sh.level < 5
+GROUP BY r.r_name
+ORDER BY total_sales DESC, highest_order_revenue DESC;

@@ -1,0 +1,72 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicsData AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        LOWER(cd_education_status) AS education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        c_birth_month || '/' || c_birth_day || '/' || c_birth_year AS birth_date
+    FROM 
+        customer
+),
+AggregatedData AS (
+    SELECT 
+        d.d_year,
+        COUNT(DISTINCT cd.cd_demo_sk) AS total_customers,
+        COUNT(DISTINCT c.c_customer_id) AS unique_emails,
+        SUM(cd.cd_purchase_estimate) AS total_purchase_estimate
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        customer c ON c.c_first_shipto_date_sk = d.d_date_sk
+    LEFT JOIN 
+        DemographicsData cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    a.full_address,
+    d.education_status,
+    c.full_name,
+    c.birth_date,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    a.ca_country,
+    ag.total_customers,
+    ag.unique_emails,
+    ag.total_purchase_estimate
+FROM 
+    AddressData a
+JOIN 
+    CustomerData c ON c.c_customer_sk = (SELECT c_customer_sk FROM customer WHERE c_current_addr_sk = a.ca_address_sk LIMIT 1)
+JOIN 
+    DemographicsData d ON c.c_current_cdemo_sk = d.cd_demo_sk
+JOIN 
+    AggregatedData ag ON ag.d_year = EXTRACT(YEAR FROM CURRENT_DATE)
+WHERE 
+    d.cd_gender = 'F' AND
+    d.cd_marital_status = 'M' AND
+    a.ca_country = 'USA'
+ORDER BY 
+    a.ca_city, c.full_name;

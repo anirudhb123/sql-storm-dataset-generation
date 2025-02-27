@@ -1,0 +1,56 @@
+WITH MovieRoles AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        a.name AS actor_name,
+        r.role AS role_type,
+        COUNT(c.id) AS num_roles
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        m.id, t.title, a.name, r.role
+),
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        SUM(num_roles) AS total_roles
+    FROM 
+        MovieRoles
+    GROUP BY 
+        movie_id, movie_title
+    HAVING 
+        SUM(num_roles) > 1
+),
+GenreInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword AS genre
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+
+SELECT 
+    pm.movie_title,
+    STRING_AGG(DISTINCT gi.genre, ', ') AS genres,
+    STRING_AGG(DISTINCT mr.actor_name || ' (' || mr.role_type || ')', ', ') AS cast_info
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    GenreInfo gi ON pm.movie_id = gi.movie_id
+LEFT JOIN 
+    MovieRoles mr ON pm.movie_id = mr.movie_id
+GROUP BY 
+    pm.movie_title
+ORDER BY 
+    pm.total_roles DESC;

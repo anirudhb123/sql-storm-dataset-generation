@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId, u.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore,
+        AVG(Score) AS AverageScore
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+    GROUP BY 
+        OwnerUserId
+    ORDER BY 
+        TotalScore DESC 
+    LIMIT 10
+)
+SELECT 
+    uc.DisplayName,
+    tc.PostCount,
+    tc.TotalScore,
+    tc.AverageScore,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tc.OwnerUserId) AS BadgeCount 
+FROM 
+    TopContributors tc
+JOIN 
+    Users uc ON tc.OwnerUserId = uc.Id
+ORDER BY 
+    tc.TotalScore DESC;

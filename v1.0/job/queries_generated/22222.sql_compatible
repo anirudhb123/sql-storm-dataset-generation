@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.year AS production_year,
+        mt.title,
+        ROW_NUMBER() OVER (PARTITION BY mt.year ORDER BY mt.year DESC) AS year_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.year IS NOT NULL
+),
+
+ActorsCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+
+MoviesWithActors AS (
+    SELECT 
+        rm.production_year,
+        rm.title,
+        ac.actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorsCount ac ON rm.title = ac.movie_id
+)
+
+SELECT 
+    mw.production_year,
+    mw.title,
+    COALESCE(mw.actor_count, 0) AS total_actors,
+    (SELECT AVG(actor_count) FROM ActorsCount) AS avg_actors,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    MoviesWithActors mw
+LEFT JOIN 
+    movie_companies mc ON mw.title = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    mw.actor_count IS NOT NULL 
+    AND mw.production_year > 2000 
+    AND EXISTS (
+        SELECT 1 
+        FROM complete_cast cc 
+        WHERE cc.movie_id = mw.title
+    )
+GROUP BY 
+    mw.production_year, 
+    mw.title,
+    mw.actor_count
+HAVING 
+    COUNT(DISTINCT cn.id) > 1
+ORDER BY 
+    mw.production_year DESC, 
+    total_actors DESC
+LIMIT 10;

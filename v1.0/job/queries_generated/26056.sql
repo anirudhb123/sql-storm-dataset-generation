@@ -1,0 +1,53 @@
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.note AS cast_note,
+        ARRAY_AGG(DISTINCT a.name) AS actor_names
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, c.note
+),
+keyword_data AS (
+    SELECT 
+        m.movie_id,
+        k.keyword,
+        k.phonetic_code
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+),
+final_data AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.cast_note,
+        md.actor_names,
+        kd.keyword
+    FROM 
+        movie_data md
+    LEFT JOIN 
+        keyword_data kd ON md.movie_id = kd.movie_id
+)
+SELECT 
+    fd.movie_title,
+    fd.production_year,
+    fd.cast_note,
+    fd.actor_names,
+    STRING_AGG(fd.keyword, ', ') AS keywords
+FROM 
+    final_data fd
+GROUP BY 
+    fd.movie_title, fd.production_year, fd.cast_note, fd.actor_names
+ORDER BY 
+    fd.production_year DESC, fd.movie_title;

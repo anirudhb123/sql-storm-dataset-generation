@@ -1,0 +1,47 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        RANK() OVER (PARTITION BY at.production_year ORDER BY at.title) AS rank_per_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IN (SELECT id FROM role_type WHERE role = 'actor')
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rt.title, 
+    rt.production_year, 
+    fc.actor_count,
+    CASE 
+        WHEN fc.actor_count IS NULL THEN 'No cast found'
+        ELSE 'Has cast'
+    END AS cast_status
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    filtered_cast fc ON rt.title = (SELECT title FROM aka_title WHERE movie_id = fc.movie_id LIMIT 1)
+WHERE 
+    rt.rank_per_year = 1
+ORDER BY 
+    rt.production_year DESC, fc.actor_count DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Title Unavailable' AS title, 
+    NULL AS production_year, 
+    NULL AS actor_count, 
+    'Title Not Classified' AS cast_status
+WHERE 
+    NOT EXISTS (SELECT 1 FROM ranked_titles);

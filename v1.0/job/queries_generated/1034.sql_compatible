@@ -1,0 +1,56 @@
+
+WITH MovieStatistics AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_info_length
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.title, at.production_year
+),
+ActorRankings AS (
+    SELECT 
+        ci.person_id,
+        COUNT(*) AS movies_played,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS rank
+    FROM 
+        cast_info ci
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        ci.person_id
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.actor_count,
+    ms.keyword_count,
+    ms.avg_info_length,
+    ar.movies_played,
+    ar.rank
+FROM 
+    MovieStatistics ms
+LEFT JOIN 
+    ActorRankings ar ON ms.actor_count > 5 AND ar.movies_played > 2
+WHERE 
+    ms.production_year > 2000
+ORDER BY 
+    ms.production_year DESC, ms.actor_count DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

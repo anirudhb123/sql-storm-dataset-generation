@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ChangeDate,
+        pht.Name AS ChangeType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+ModifiedRecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title, 
+        (SELECT STRING_AGG(u.DisplayName, ', ') 
+         FROM Comments c 
+         JOIN Users u ON c.UserId = u.Id 
+         WHERE c.PostId = p.Id) AS Commenters,
+        COALESCE(rp.Score, 0) AS RecentScore,
+        COALESCE(pvp.ClosedDate, NULL) AS PostClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        TopPosts rp ON p.Id = rp.PostId
+    LEFT JOIN 
+        RecentPostHistory rph ON p.Id = rph.PostId AND rph.ChangeRank = 1
+    LEFT JOIN 
+        (SELECT PostId, MAX(ClosedDate) AS ClosedDate FROM Posts WHERE ClosedDate IS NOT NULL GROUP BY PostId) pvp 
+        ON p.Id = pvp.PostId
+    WHERE 
+        p.ViewCount > 1000
+)
+SELECT 
+    mp.PostId,
+    mp.Title,
+    mp.Commenters,
+    mp.RecentScore,
+    CASE 
+        WHEN mp.PostClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    ub.BadgeCount,
+    ub.HighestBadgeClass
+FROM 
+    ModifiedRecentPosts mp
+JOIN 
+    UserBadges ub ON mp.PostId IN (SELECT DISTINCT p.OwnerUserId FROM Posts p WHERE p.Id = mp.PostId)
+ORDER BY 
+    mp.RecentScore DESC,
+    mp.Title ASC;

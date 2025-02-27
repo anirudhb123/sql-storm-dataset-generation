@@ -1,0 +1,68 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mt.production_year AS year,
+        mk.keyword AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mk.keyword) AS keyword_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+), CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+), OverlappingDetails AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        COALESCE(cd.cast_count, 0) AS total_cast,
+        md.keyword,
+        md.year,
+        md.keyword_rank
+    FROM 
+        MovieDetails md
+    FULL JOIN 
+        CastDetails cd ON md.movie_id = cd.movie_id
+    WHERE 
+        md.keyword IS NOT NULL
+)
+SELECT 
+    od.movie_id,
+    od.title,
+    od.total_cast,
+    od.keyword,
+    od.year,
+    (od.total_cast * CASE 
+        WHEN od.year < 2000 THEN 1
+        WHEN od.year BETWEEN 2000 AND 2010 THEN 1.5
+        ELSE 2 
+    END) AS weighted_cast,
+    CASE 
+        WHEN od.keyword IS NULL THEN 'No Keywords'
+        ELSE 'Has Keywords' 
+    END AS keyword_status,
+    CASE 
+        WHEN od.keyword_rank = 1 THEN 'Top Keyword'
+        WHEN od.keyword_rank IS NULL THEN 'Undefined Rank'
+        ELSE 'Other Rank' 
+    END AS keyword_rank_status
+FROM 
+    OverlappingDetails od
+WHERE 
+    od.total_cast >= 1
+ORDER BY 
+    weighted_cast DESC, od.year ASC
+LIMIT 10;

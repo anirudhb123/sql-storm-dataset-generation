@@ -1,0 +1,85 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title AS t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT
+        c.id AS cast_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(DISTINCT c.movie_id) OVER (PARTITION BY a.id) AS movie_count
+    FROM
+        cast_info AS c
+    JOIN
+        aka_name AS a ON c.person_id = a.person_id
+    JOIN
+        role_type AS r ON c.role_id = r.id
+    WHERE
+        r.role IS NOT NULL
+),
+FamousActors AS (
+    SELECT
+        actor_name,
+        SUM(movie_count) AS total_movies
+    FROM
+        ActorRoles
+    GROUP BY
+        actor_name
+    HAVING
+        SUM(movie_count) > 5
+),
+SubqueryMovies AS (
+    SELECT
+        DISTINCT m.id AS movie_id
+    FROM
+        movie_keyword AS mk
+    JOIN
+        keyword AS k ON mk.keyword_id = k.id
+    WHERE
+        k.keyword LIKE '%action%'
+),
+MoviesWithInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mi.info AS movie_info,
+        m.production_year
+    FROM
+        title AS m
+    LEFT JOIN
+        movie_info AS mi ON m.id = mi.movie_id
+    WHERE
+        m.id IN (SELECT movie_id FROM SubqueryMovies)
+)
+SELECT
+    mt.movie_id,
+    mt.movie_title,
+    CASE
+        WHEN fi.total_movies IS NOT NULL THEN fi.total_movies
+        ELSE 0
+    END AS famous_actor_count,
+    COALESCE(mt.movie_info, 'No Info Available') AS movie_info,
+    CASE 
+        WHEN mt.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(mt.production_year AS TEXT) 
+    END AS production_year,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_link WHERE linked_movie_id = mt.movie_id) THEN 'Has Links'
+        ELSE 'No Links'
+    END AS link_status
+FROM
+    MoviesWithInfo AS mt
+LEFT JOIN
+    FamousActors AS fi ON mt.movie_title LIKE '%' || fi.actor_name || '%'
+ORDER BY
+    famous_actor_count DESC, 
+    mt.movie_title ASC;

@@ -1,0 +1,84 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS num_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM cast_info ci
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY ci.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+comp_cast AS (
+    SELECT 
+        cc.movie_id,
+        STRING_AGG(DISTINCT ckt.kind, ', ') AS comp_kinds
+    FROM complete_cast cc
+    JOIN movie_companies mc ON mc.movie_id = cc.movie_id
+    JOIN company_type ckt ON mc.company_type_id = ckt.id
+    GROUP BY cc.movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    fc.num_cast,
+    fc.cast_names,
+    mk.keywords,
+    cc.comp_kinds,
+    CASE 
+        WHEN fc.num_cast > 5 THEN 'Star Ensemble'
+        WHEN fc.num_cast IS NULL THEN 'Missing Cast Info'
+        ELSE 'Small Cast'
+    END AS cast_quality,
+    COALESCE(NULLIF(mh.production_year, 0), 'Unknown Year') AS display_year
+FROM movie_hierarchy mh
+LEFT JOIN filtered_cast fc ON mh.movie_id = fc.movie_id
+LEFT JOIN movie_keywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN comp_cast cc ON mh.movie_id = cc.movie_id
+WHERE 
+    mh.level = 0 
+    AND (fc.num_cast IS NOT NULL OR mk.keywords IS NOT NULL)
+
+GROUP BY 
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    fc.num_cast,
+    fc.cast_names,
+    mk.keywords,
+    cc.comp_kinds,
+    mh.level
+
+ORDER BY mh.production_year DESC, mh.title
+LIMIT 100 OFFSET 10;

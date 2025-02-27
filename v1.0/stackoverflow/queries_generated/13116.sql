@@ -1,0 +1,45 @@
+-- Performance benchmarking query
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= '2023-01-01' -- Filter for posts created in 2023
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, U.DisplayName
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.VoteCount,
+    COUNT(B.Id) AS BadgeCount
+FROM 
+    PostStats PS
+LEFT JOIN 
+    Badges B ON PS.OwnerDisplayName = B.UserId
+GROUP BY 
+    PS.PostId, PS.Title, PS.CreationDate, PS.Score, PS.ViewCount, PS.AnswerCount, PS.CommentCount, PS.VoteCount
+ORDER BY 
+    PS.ViewCount DESC; -- Order by the number of views for performance benchmarking

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound, 
+           (ib_lower_bound + ib_upper_bound) / 2 AS mid_range
+    FROM income_band
+), customer_data AS (
+    SELECT c.c_customer_sk, c.c_customer_id, c.c_first_name, 
+           c.c_last_name, c.c_birth_country, cd.cd_gender, 
+           cd.cd_marital_status, cd.cd_purchase_estimate, 
+           cd.cd_credit_rating, cd.cd_dep_count,
+           ib.ib_lower_bound, ib.ib_upper_bound, 
+           CASE 
+               WHEN cd.cd_purchase_estimate IS NULL THEN 'No Estimate'
+               WHEN cd.cd_purchase_estimate BETWEEN 0 AND 50000 THEN 'Low'
+               WHEN cd.cd_purchase_estimate BETWEEN 50001 AND 100000 THEN 'Medium'
+               WHEN cd.cd_purchase_estimate > 100000 THEN 'High'
+               ELSE 'Out of Range'
+           END AS purchase_category
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    FULL OUTER JOIN income_ranges ib ON cd.cd_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+    WHERE c.c_birth_country IS NOT NULL 
+      AND (cd.cd_gender IS NOT NULL OR cd.cd_credit_rating IS NOT NULL)
+), date_stats AS (
+    SELECT d.d_year, 
+           COUNT(DISTINCT d.d_date_sk) AS total_days,
+           AVG(d.d_dow) AS avg_day_of_week
+    FROM date_dim d
+    GROUP BY d.d_year
+), sales_stats AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+), detailed_report AS (
+    SELECT cd.c_customer_sk, cd.c_customer_id, cd.c_first_name, cd.c_last_name,
+           cd.purchase_category, ds.d_year,
+           ss.total_profit,
+           ss.total_quantity,
+           ds.total_days
+    FROM customer_data cd
+    JOIN date_stats ds ON 1=1
+    LEFT JOIN sales_stats ss ON cd.c_customer_sk = ss.ws_sold_date_sk
+    WHERE (cd.ib_lower_bound IS NOT NULL OR cd.ib_upper_bound IS NOT NULL) 
+      AND (cd.purchase_category != 'No Estimate' OR cd.total_quantity IS NOT NULL)
+)
+SELECT dr.*, 
+       CASE 
+           WHEN dr.total_profit IS NULL THEN 'No Profit Data'
+           WHEN dr.total_profit > 1000 THEN 'High Profit'
+           ELSE 'Low or No Profit'
+       END AS profit_category,
+       COALESCE(dr.total_quantity, 0) AS effective_quantity,
+       (SELECT COUNT(DISTINCT ws.ws_order_number) FROM web_sales ws WHERE ws.ws_bill_customer_sk = dr.c_customer_sk) AS order_count
+FROM detailed_report dr
+ORDER BY dr.d_year DESC, dr.total_profit DESC;

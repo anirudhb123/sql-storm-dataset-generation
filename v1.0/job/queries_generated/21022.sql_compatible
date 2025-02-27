@@ -1,0 +1,60 @@
+
+WITH RECURSIVE actor_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    WHERE t.production_year IS NOT NULL
+),
+actor_awards AS (
+    SELECT 
+        am.actor_id,
+        COUNT(DISTINCT award.id) AS award_count
+    FROM actor_movies am
+    LEFT JOIN person_info pi ON am.actor_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info='Award')
+    LEFT JOIN movie_info mv ON am.movie_id = mv.movie_id 
+    LEFT JOIN movie_info_idx mvi ON mv.movie_id = mvi.movie_id AND mvi.info_type_id = (SELECT id FROM info_type WHERE info='Award')
+    LEFT JOIN (SELECT DISTINCT id, person_id FROM aka_name WHERE name LIKE '%Award%') award ON pi.info LIKE '%' || award.id || '%'
+    GROUP BY am.actor_id
+),
+top_actors AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        COALESCE(a.award_count, 0) AS award_count
+    FROM actor_movies am
+    LEFT JOIN actor_awards a ON am.actor_id = a.actor_id
+    WHERE COALESCE(a.award_count, 0) > 0 OR am.movie_rank <= 3
+),
+movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        (SELECT COUNT(DISTINCT mc.company_id) FROM movie_companies mc WHERE mc.movie_id = t.id) AS company_count
+    FROM aka_title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    WHERE t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+    GROUP BY t.id, t.title
+)
+SELECT 
+    ta.actor_name,
+    ms.title,
+    ms.production_year,
+    ms.cast_count,
+    ms.keyword_count,
+    ms.company_count
+FROM top_actors ta
+JOIN actor_movies am ON ta.actor_id = am.actor_id
+JOIN movie_summary ms ON am.movie_id = ms.movie_id
+WHERE ms.cast_count > 10
+ORDER BY ms.keyword_count DESC, ms.cast_count ASC
+FETCH FIRST 10 ROWS ONLY;

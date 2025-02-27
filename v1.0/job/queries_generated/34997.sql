@@ -1,0 +1,35 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 
+           COALESCE(m.production_year, 0) AS production_year, 
+           m.kind_id,
+           1 AS depth
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, 
+           COALESCE(m.production_year, 0) AS production_year, 
+           m.kind_id,
+           mh.depth + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT DISTINCT 
+    a.name AS actor_name, 
+    m.title AS movie_title, 
+    m.production_year, 
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY m.production_year DESC) AS recent_movie_rank,
+    COUNT(DISTINCT mc.company_id) OVER (PARTITION BY a.name) AS num_companies,
+    ARRAY_AGG(DISTINCT c.kind ORDER BY c.kind) AS company_types
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN movie_hierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN company_type c ON mc.company_type_id = c.id
+WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+AND a.name IS NOT NULL
+GROUP BY a.name, m.title, m.production_year
+HAVING COUNT(DISTINCT ci.role_id) > 1
+ORDER BY recent_movie_rank, a.name;

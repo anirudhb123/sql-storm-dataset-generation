@@ -1,0 +1,88 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+MaxAccountBalances AS (
+    SELECT 
+        r.r_regionkey,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey
+),
+OrdersWithDiscounts AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice * (1 - SUM(l.l_discount) OVER (PARTITION BY o.o_orderkey)) AS discounted_price,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'R' AND
+        l.l_discount IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(s1.s_name, 'Top Supplier') AS top_supplier,
+    COALESCE(m.max_acctbal, 0) AS max_balance,
+    CASE 
+        WHEN o.discounted_price IS NULL THEN 'No Orders'
+        ELSE 'Ordered'
+    END AS order_status,
+    COUNT(DISTINCT c.c_custkey) AS customer_count
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    (SELECT s_suppkey FROM RankedSuppliers WHERE rnk = 1) s1 ON s.s_suppkey = s1.s_suppkey
+LEFT JOIN 
+    MaxAccountBalances m ON m.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.n_nationkey)
+LEFT JOIN 
+    OrdersWithDiscounts o ON o.o_orderkey = ps.ps_partkey
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey = o.o_orderkey
+WHERE 
+    (p.p_retailprice BETWEEN 10.00 AND 100.00 OR p.p_size IS NULL)
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 5000)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, s.s_name, m.max_acctbal, o.discounted_price
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    p.p_partkey DESC 
+    NULLS LAST;

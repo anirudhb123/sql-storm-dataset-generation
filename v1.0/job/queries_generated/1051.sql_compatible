@@ -1,0 +1,65 @@
+
+WITH movie_ratings AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    LEFT JOIN 
+        (SELECT movie_id, rating FROM rating_table) r ON m.id = r.movie_id
+    GROUP BY 
+        m.id
+),
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+company_roles AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(mr.avg_rating, 0) AS average_rating,
+    COALESCE(ar.actor_count, 0) AS number_of_actors,
+    COALESCE(ar.actor_names, 'None') AS actors,
+    COALESCE(cr.company_name, 'Independent') AS production_company,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    title t
+LEFT JOIN 
+    movie_ratings mr ON t.id = mr.movie_id
+LEFT JOIN 
+    actor_roles ar ON t.id = ar.movie_id
+LEFT JOIN 
+    company_roles cr ON t.id = cr.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    (t.production_year > 2000 OR t.production_year IS NULL)
+    AND (mr.avg_rating IS NOT NULL OR ar.actor_count IS NOT NULL)
+GROUP BY 
+    t.id, t.title, t.production_year, mr.avg_rating, ar.actor_count, ar.actor_names, cr.company_name
+ORDER BY 
+    average_rating DESC, t.title ASC
+LIMIT 50;

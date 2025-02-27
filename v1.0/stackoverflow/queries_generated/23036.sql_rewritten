@@ -1,0 +1,108 @@
+WITH UserRankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.Score,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.Score, p.CreationDate
+), FilteredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users)  
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        p.Title,
+        ph.Comment,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+), UserWithPostCount AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), UnionPostLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        lt.Name AS LinkType
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+    UNION ALL
+    SELECT 
+        pl.RelatedPostId AS PostId,
+        pl.PostId AS RelatedPostId,
+        lt.Name AS LinkType
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes lt ON pl.LinkTypeId = lt.Id
+), ActiveUsersPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        pp.PostId,
+        pp.Title,
+        pp.CreationDate,
+        pp.CommentCount
+    FROM 
+        FilteredUsers u
+    JOIN 
+        UserRankedPosts pp ON u.UserId = pp.OwnerUserId
+    WHERE 
+        pp.PostRank <= 5
+)
+SELECT 
+    a.UserId,
+    a.DisplayName,
+    up.PostId,
+    up.Title,
+    COALESCE(up.CommentCount, 0) AS TotalComments,
+    COUNT(DISTINCT pl.RelatedPostId) AS TotalLinkedPosts,
+    SUM(CASE WHEN rph.UserId IS NOT NULL THEN 1 ELSE 0 END) AS ActivePostHistoryCount
+FROM 
+    ActiveUsersPosts up
+LEFT JOIN 
+    UnionPostLinks pl ON up.PostId = pl.PostId
+LEFT JOIN 
+    RecentPostHistory rph ON up.PostId = rph.PostId
+GROUP BY 
+    a.UserId, a.DisplayName, up.PostId, up.Title
+HAVING 
+    AVG(up.CommentCount) > 0
+    AND COUNT(pl.RelatedPostId) > 0
+ORDER BY 
+    a.UserId;

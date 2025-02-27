@@ -1,0 +1,64 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+supplier_part_info AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS supplier_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name AS customer_name,
+    spi.p_name,
+    spi.p_brand,
+    spi.supplier_name,
+    spi.supplier_acctbal,
+    COUNT(*) AS total_items,
+    SUM(spi.ps_supplycost * (SELECT SUM(l.l_quantity) FROM lineitem l WHERE l.l_orderkey = to.o_orderkey AND l.l_partkey = spi.ps_partkey)) AS total_supplycost
+FROM 
+    top_orders to
+JOIN 
+    lineitem li ON to.o_orderkey = li.l_orderkey
+JOIN 
+    supplier_part_info spi ON li.l_partkey = spi.ps_partkey
+GROUP BY 
+    to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name, spi.p_name, spi.p_brand, spi.supplier_name, spi.supplier_acctbal
+ORDER BY 
+    to.o_totalprice DESC;

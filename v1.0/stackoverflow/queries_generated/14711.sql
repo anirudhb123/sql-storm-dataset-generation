@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(DATEDIFF(SECOND, p.CreationDate, GETDATE()), 0)) AS AvgPostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation, u.UpVotes, u.DownVotes
+), 
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagPostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+),
+BadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.TotalScore,
+    us.AvgPostAge,
+    ts.TagPostCount,
+    ts.TotalViews,
+    ts.AvgScore,
+    bs.BadgeCount,
+    bs.HighestBadgeClass
+FROM 
+    UserStats us
+LEFT JOIN 
+    TagStats ts ON ts.TagPostCount IS NOT NULL
+LEFT JOIN 
+    BadgeStats bs ON us.UserId = bs.UserId
+ORDER BY 
+    us.TotalScore DESC, us.PostCount DESC;

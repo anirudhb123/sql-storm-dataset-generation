@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(t.id) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+CastDetails AS (
+    SELECT 
+        c.id,
+        c.movie_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COUNT(DISTINCT a.id) AS num_cast_members
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.id, c.movie_id
+), 
+CompanyCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.total_titles,
+    ct.cast_names,
+    ct.num_cast_members,
+    COALESCE(cc.num_companies, 0) AS num_companies,
+    (CASE 
+        WHEN rt.total_titles > 10 THEN 'Many Titles' 
+        WHEN rt.total_titles = 0 THEN 'No Titles' 
+        ELSE 'Few Titles' 
+     END) AS title_quantity,
+    (CASE 
+        WHEN cc.num_companies IS NULL THEN 'No Companies'
+        ELSE 'Has Companies'
+     END) AS company_presence,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails ct ON rt.title_id = ct.movie_id
+LEFT JOIN 
+    CompanyCount cc ON rt.title_id = cc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON rt.title_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    rt.title_id, rt.production_year, rt.total_titles, ct.cast_names, 
+    ct.num_cast_members, cc.num_companies
+ORDER BY 
+    rt.production_year DESC, rt.title_rank
+LIMIT 100 OFFSET CASE WHEN (SELECT COUNT(*) FROM RankedTitles) > 1000 THEN 100 ELSE 0 END;

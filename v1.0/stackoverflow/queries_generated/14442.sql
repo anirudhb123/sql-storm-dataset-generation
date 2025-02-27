@@ -1,0 +1,20 @@
+-- Performance benchmarking query to retrieve user statistics, post counts, and average vote scores
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+    SUM(v.BountyAmount) AS TotalBounty,
+    AVG(v.Score) AS AverageVoteScore
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    u.Reputation DESC;

@@ -1,0 +1,28 @@
+WITH SupplierPartCost AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT nr.n_name AS nation_name, 
+       SUM(s.energy_supply_cost) AS total_cost,
+       COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       AVG(co.total_sales) AS avg_order_value
+FROM NationRegion nr
+JOIN SupplierPartCost s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20))
+JOIN CustomerOrderDetails co ON co.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > '2023-01-01')
+GROUP BY nr.n_name
+HAVING total_cost > 100000
+ORDER BY total_cost DESC;

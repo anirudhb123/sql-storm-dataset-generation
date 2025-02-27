@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        b.Name AS BadgeName,
+        b.Class
+    FROM 
+        Posts p
+    INNER JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        b.Class = 1  -- Gold badges only
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score AS PostScore,
+    u.DisplayName AS Author,
+    u.PostCount,
+    u.TotalScore,
+    COALESCE(b.BadgeName, 'No Badge') AS Badge,
+    COALESCE(cp.CloseCount, 0) AS TotalClosed,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostsWithBadges b ON tp.PostId = b.PostId
+LEFT JOIN 
+    ClosedPosts cp ON tp.PostId = cp.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(tp.Tags, ',')) AS t(TagName) ON TRUE
+GROUP BY 
+    tp.PostId, u.Id, b.BadgeName, cp.CloseCount
+ORDER BY 
+    tp.Score DESC, u.TotalScore DESC;

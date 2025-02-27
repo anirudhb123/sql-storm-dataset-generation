@@ -1,0 +1,54 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank_retail
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 10
+),
+SupplierJoin AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supplycost,
+        CASE 
+            WHEN COUNT(DISTINCT ps.ps_partkey) = 0 THEN 'No Parts'
+            ELSE 'Has Parts'
+        END AS part_status
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+        AND l.l_shipdate > cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    r.p_retailprice,
+    s.s_name,
+    s.total_supplycost,
+    s.part_status,
+    o.o_orderdate,
+    o.net_revenue,
+    CASE 
+        WHEN o.net_revenue > 1000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM RankedParts r
+JOIN SupplierJoin s ON r.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN FilteredOrders o ON r.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+WHERE r.rank_retail = 1
+    AND (s.s_acctbal IS NULL OR s.s_acctbal < 100)
+ORDER BY r.p_retailprice DESC, o.net_revenue ASC
+LIMIT 50;

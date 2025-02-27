@@ -1,0 +1,40 @@
+
+WITH RECURSIVE RegionalSales AS (
+    SELECT n.n_nationkey,
+           r.r_regionkey,
+           r.r_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT rs.n_nationkey,
+           rs.r_regionkey,
+           rs.r_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) + rs.total_sales
+    FROM RegionalSales rs
+    JOIN supplier s ON rs.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY rs.n_nationkey, rs.r_regionkey, rs.r_name, rs.total_sales
+),
+SalesRanking AS (
+    SELECT r.r_name,
+           SUM(rs.total_sales) AS total_sales,
+           RANK() OVER (ORDER BY SUM(rs.total_sales) DESC) AS sales_rank
+    FROM RegionalSales rs
+    JOIN region r ON rs.r_regionkey = r.r_regionkey
+    GROUP BY r.r_name
+)
+SELECT s.r_name,
+       COALESCE(s.total_sales, 0) AS total_sales,
+       CASE WHEN s.sales_rank <= 10 THEN 'Top 10 Region' ELSE 'Other' END AS sales_category
+FROM SalesRanking s
+LEFT JOIN region r ON s.r_name = r.r_name
+WHERE s.total_sales > 0
+ORDER BY s.sales_rank;

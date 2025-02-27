@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(YEAR, -1, '2024-10-01')
+),
+MergedPosts AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        COALESCE(a.AcceptedAnswerId, 'No Accepted Answer') AS AcceptedAnswer,
+        r.RankByViewCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Posts a ON r.AcceptedAnswerId = a.Id
+)
+SELECT 
+    u.DisplayName AS OwnerDisplayName,
+    m.Title,
+    m.ViewCount,
+    m.AcceptedAnswer,
+    MAX(m.RankByViewCount) OVER (PARTITION BY m.AcceptedAnswer) AS MaxRankByViewCount,
+    AVG(COALESCE(c.Score, 0)) AS AverageCommentScore,
+    ARRAY_AGG(DISTINCT t.TagName) AS TagsUsed
+FROM 
+    MergedPosts m
+JOIN 
+    Users u ON m.PostId IN (
+        SELECT p.Id 
+        FROM Posts p WHERE p.OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    Comments c ON c.PostId = m.PostId
+LEFT JOIN 
+    Posts p ON m.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT unnest(string_to_array(p.Tags, ',')) AS TagName
+    ) t ON TRUE
+WHERE 
+    m.RankByViewCount <= 5
+GROUP BY 
+    u.DisplayName, m.Title, m.ViewCount, m.AcceptedAnswer
+ORDER BY 
+    m.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts p ON a.ParentId = p.Id
+    INNER JOIN 
+        RecursivePostCTE rp ON p.Id = rp.PostId
+)
+SELECT 
+    up.DisplayName,
+    COUNT(DISTINCT pp.PostId) AS QuestionCount,
+    COALESCE(SUM(vt.VoteCount), 0) AS TotalVotes,
+    AVG(COALESCE(res.Score, 0)) AS AvgScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users up
+LEFT JOIN 
+    Posts pp ON up.Id = pp.OwnerUserId 
+LEFT JOIN (
+    SELECT 
+        PostId, 
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes
+    WHERE 
+        VoteTypeId IN (2, 3)  
+    GROUP BY 
+        PostId
+) vt ON pp.Id = vt.PostId
+LEFT JOIN 
+    RecursivePostCTE res ON pp.Id = res.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(pp.Tags, ',') AS tag_ids ON pp.Tags IS NOT NULL
+LEFT JOIN 
+    Tags t ON t.TagId = tag_ids
+WHERE 
+    up.Reputation > 100  
+GROUP BY 
+    up.Id, up.DisplayName
+HAVING 
+    COUNT(DISTINCT pp.PostId) > 5  
+ORDER BY 
+    TotalVotes DESC
+LIMIT 10;

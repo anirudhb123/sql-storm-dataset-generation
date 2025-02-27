@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    mk.movie_id,
+    mt.title AS movie_title,
+    COALESCE(ak.name, 'Unknown Artist') AS artist_name,
+    COUNT(DISTINCT v.id) AS viewership_count,
+    SUM(CASE WHEN cn.country_code IS NULL THEN 1 ELSE 0 END) AS foreign_restaurants,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    RANK() OVER (PARTITION BY mt.production_year ORDER BY v.created_at DESC) AS year_rank
+FROM
+    movie_hierarchy mk
+LEFT JOIN
+    cast_info ci ON ci.movie_id = mk.movie_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN
+    movie_keyword mw ON mw.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kw ON kw.id = mw.keyword_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = mk.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info LIKE 'viewership%')
+LEFT JOIN
+    company_name cn ON cn.imdb_id = mk.movie_id
+LEFT JOIN
+    title mt ON mt.id = mk.movie_id
+LEFT JOIN
+    complete_cast cc ON cc.movie_id = mk.movie_id
+LEFT JOIN
+    movie_info_idx v ON v.movie_id = mk.movie_id
+WHERE
+    mt.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'short'))
+    AND mk.level > 0
+    AND ak.name IS NOT NULL
+GROUP BY
+    mk.movie_id, mt.title, ak.name
+HAVING
+    SUM(CASE WHEN mi.info IS NULL THEN 1 ELSE 0 END) > 2
+    AND COUNT(DISTINCT kw.keyword) > 1
+ORDER BY
+    year_rank, foreign_restaurants DESC;

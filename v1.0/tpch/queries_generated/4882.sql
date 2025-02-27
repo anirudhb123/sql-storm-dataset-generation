@@ -1,0 +1,43 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.n_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        n.n_nationkey,
+        ss.total_supply_cost,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS rnk
+    FROM 
+        nation n
+    LEFT JOIN 
+        SupplierStats ss ON n.n_nationkey = ss.n_nationkey
+)
+SELECT 
+    t.n_name,
+    COALESCE(t.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(t.supplier_count, 0) AS supplier_count,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_order_value
+FROM 
+    TopNations t
+LEFT JOIN 
+    customer c ON c.c_nationkey = t.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    t.rnk <= 5
+GROUP BY 
+    t.n_name, t.total_supply_cost, t.supplier_count
+ORDER BY 
+    t.total_supply_cost DESC;

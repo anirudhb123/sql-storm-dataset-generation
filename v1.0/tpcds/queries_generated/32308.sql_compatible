@@ -1,0 +1,46 @@
+
+WITH RECURSIVE StoreHierarchy AS (
+    SELECT s_store_sk, s_store_id, s_store_name, s_manager, s_division_id, 
+           CAST(s_store_name AS VARCHAR(100)) AS hierarchy
+    FROM store
+    WHERE s_manager IS NOT NULL
+    UNION ALL
+    SELECT s.s_store_sk, s.s_store_id, s.s_store_name, s.s_manager, s.s_division_id, 
+           CONCAT(sh.hierarchy, ' -> ', s.s_store_name) AS hierarchy
+    FROM store s
+    JOIN StoreHierarchy sh ON s.s_manager = sh.s_store_id
+),
+SalesData AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid_inc_tax) AS total_sales,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_sold_date_sk ORDER BY SUM(ss.ss_net_paid_inc_tax) DESC) AS sales_rank
+    FROM store_sales ss
+    GROUP BY ss.ss_sold_date_sk
+),
+DateInfo AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        CASE WHEN d.d_month_seq IN (1, 2, 3) THEN 'Q1'
+             WHEN d.d_month_seq IN (4, 5, 6) THEN 'Q2'
+             WHEN d.d_month_seq IN (7, 8, 9) THEN 'Q3'
+             ELSE 'Q4' END AS fiscal_quarter
+    FROM date_dim d
+)
+SELECT 
+    d.d_date, 
+    s.total_quantity,
+    s.total_sales, 
+    s.avg_sales_price,
+    sh.s_store_name,
+    sh.hierarchy,
+    di.fiscal_quarter
+FROM SalesData s
+JOIN DateInfo d ON s.ss_sold_date_sk = d.d_date_sk
+JOIN StoreHierarchy sh ON sh.s_store_sk = ss.ss_store_sk
+WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+      AND s.sales_rank <= 10
+ORDER BY d.d_date, s.total_sales DESC;

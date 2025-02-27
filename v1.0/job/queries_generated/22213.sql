@@ -1,0 +1,81 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_row,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS year_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+TitleStats AS (
+    SELECT 
+        production_year,
+        COUNT(title_id) AS titles_count,
+        MAX(title) AS latest_title,
+        MIN(year_row) AS min_row,
+        MAX(year_row) AS max_row
+    FROM 
+        RecursiveTitleCTE
+    GROUP BY 
+        production_year
+),
+
+MovieDetails AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        c.name AS company_name,
+        r.role AS role_name,
+        p.name AS person_name,
+        IFNULL(m.info, 'No Info') AS movie_info
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON at.movie_id = cc.movie_id
+    LEFT JOIN 
+        role_type r ON cc.role_id = r.id
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id
+    LEFT JOIN 
+        movie_info m ON at.movie_id = m.movie_id AND m.info_type_id = 1
+    WHERE 
+        c.country_code IS NOT NULL OR p.info IS NULL
+),
+
+AggregatedMovieData AS (
+    SELECT 
+        production_year,
+        COUNT(title_id) AS total_movies,
+        AVG(LENGTH(title)) AS avg_title_length,
+        COUNT(DISTINCT company_name) FILTER (WHERE company_name IS NOT NULL) AS distinct_companies
+    FROM 
+        MovieDetails
+    GROUP BY 
+        production_year
+)
+
+SELECT 
+    ac.production_year,
+    ac.titles_count,
+    COALESCE(md.total_movies, 0) AS total_movies,
+    COALESCE(md.avg_title_length, 0) AS avg_title_length,
+    COALESCE(md.distinct_companies, 0) AS distinct_companies,
+    CASE 
+        WHEN ac.titles_count = 0 THEN 'No titles' 
+        ELSE 'Titles available' 
+    END AS title_status
+FROM 
+    TitleStats ac
+FULL OUTER JOIN 
+    AggregatedMovieData md ON ac.production_year = md.production_year
+ORDER BY 
+    ac.production_year DESC NULLS LAST;

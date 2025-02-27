@@ -1,0 +1,59 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_name, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        ps.ps_availqty * ps.ps_supplycost AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+LineItemDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    sp.s_name, 
+    sp.p_name, 
+    COUNT(DISTINCT co.o_orderkey) AS TotalOrders, 
+    SUM(lid.TotalRevenue) AS TotalRevenueGenerated,
+    SUM(sp.TotalSupplyCost) AS TotalSupplyCost 
+FROM 
+    SupplierParts sp
+LEFT JOIN 
+    LineItemDetails lid ON sp.p_name = lid.o_orderkey
+LEFT JOIN 
+    CustomerOrders co ON lid.o_orderkey = co.o_orderkey
+GROUP BY 
+    sp.s_name, 
+    sp.p_name
+HAVING 
+    SUM(sp.ps_availqty) > 100
+ORDER BY 
+    TotalRevenueGenerated DESC, 
+    TotalSupplyCost ASC;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(CAST(SUBSTRING(mt.title FROM '([0-9]+)') AS integer), 0) AS release_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (1, 2)  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(CAST(SUBSTRING(mt.title FROM '([0-9]+)') AS integer), 0) AS release_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT m.id) AS movies_count,
+    AVG(EXTRACT(YEAR FROM (CAST('2024-10-01' AS DATE) - TO_DATE(CAST(m.production_year AS TEXT), 'YYYY'))) / 365.25) AS avg_age,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    COUNT(DISTINCT CASE WHEN c.role_id IS NOT NULL THEN c.id ELSE NULL END) AS cast_member_count
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title m ON mk.movie_id = m.id
+LEFT JOIN 
+    cast_info c ON c.movie_id = m.id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON m.id = mh.movie_id
+WHERE 
+    mk.keyword IN ('action', 'drama', 'comedy') 
+    AND (m.production_year BETWEEN 1990 AND 2023 OR m.production_year IS NULL)
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT m.id) > 10
+ORDER BY 
+    movies_count DESC, avg_age ASC;

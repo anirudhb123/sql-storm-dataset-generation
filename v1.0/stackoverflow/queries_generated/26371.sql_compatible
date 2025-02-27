@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Body, 
+        rp.Tags, 
+        rp.CommentCount, 
+        rp.UpVoteCount, 
+        rp.DownVoteCount,
+        (rp.UpVoteCount - rp.DownVoteCount) AS Score,
+        LENGTH(rp.Body) - LENGTH(REPLACE(rp.Body, ' ', '')) + 1 AS WordCount 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RowNum = 1 
+)
+SELECT 
+    fp.PostId, 
+    fp.Title, 
+    fp.CommentCount,
+    fp.Score,
+    fp.WordCount,
+    ARRAY(SELECT 
+              DISTINCT TRIM(Tag) AS Tag 
+           FROM 
+              unnest(string_to_array(fp.Tags, '<>')) AS Tag)
+    AS DistinctTags 
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.Score > 0 
+ORDER BY 
+    fp.Score DESC, 
+    fp.CommentCount DESC
+LIMIT 10;

@@ -1,0 +1,82 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- starting with questions
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.PostTypeId,
+        a.Title,
+        a.Body,
+        a.OwnerUserId,
+        a.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN RecursivePosts rp ON a.ParentId = rp.Id
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes v
+    INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(uv.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(uv.DownVoteCount, 0) AS DownVoteCount,
+        RANK() OVER (ORDER BY COALESCE(uv.UpVoteCount, 0) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN UserVoteCounts uv ON u.Id = uv.UserId
+),
+TopQuestions AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.CreationDate,
+        rp.Level,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN Posts a ON rp.Id = a.ParentId AND a.PostTypeId = 2 -- answers
+    LEFT JOIN Votes v ON rp.Id = v.PostId AND v.VoteTypeId = 8 -- bounty start
+    GROUP BY 
+        rp.Id, rp.Title, rp.OwnerUserId, rp.CreationDate, rp.Level
+)
+SELECT 
+    tq.Title,
+    u.DisplayName AS Author,
+    tq.CreationDate AS QuestionDate,
+    tq.AnswerCount,
+    tq.TotalBounty,
+    u.UpVoteCount,
+    u.DownVoteCount
+FROM 
+    TopQuestions tq
+JOIN MostActiveUsers u ON tq.OwnerUserId = u.UserId
+WHERE 
+    tq.AnswerCount > 0 AND 
+    u.Reputation > 1000
+ORDER BY 
+    tq.TotalBounty DESC, 
+    tq.AnswerCount DESC;

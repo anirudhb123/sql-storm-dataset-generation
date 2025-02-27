@@ -1,0 +1,83 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND t.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        p.name AS actor_name,
+        r.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+movie_info_filtered AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS info_details
+    FROM 
+        movie_info mi 
+    WHERE 
+        mi.note IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+),
+popular_keywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+    HAVING 
+        COUNT(*) > 1
+),
+final_results AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        cd.actor_name,
+        cd.role_name,
+        mif.info_details,
+        pk.keyword,
+        pk.keyword_count
+    FROM 
+        ranked_titles rt
+    LEFT JOIN 
+        cast_details cd ON rt.title_id = cd.movie_id
+    LEFT JOIN 
+        movie_info_filtered mif ON rt.title_id = mif.movie_id
+    LEFT JOIN 
+        popular_keywords pk ON rt.title_id = pk.movie_id
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    ARRAY_AGG(DISTINCT actor_name || ' (' || role_name || ')') AS cast,
+    info_details,
+    ARRAY_AGG(DISTINCT keyword ORDER BY keyword_count DESC) AS keywords
+FROM 
+    final_results
+GROUP BY 
+    title_id, title, production_year, info_details
+ORDER BY 
+    production_year DESC, title;

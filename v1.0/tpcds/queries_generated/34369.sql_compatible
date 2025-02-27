@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS ProfitRank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT cs_sold_date_sk, cs_item_sk, cs_quantity, cs_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_net_profit DESC) AS ProfitRank
+    FROM catalog_sales
+    WHERE cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+ProfitSummary AS (
+    SELECT item.i_item_id, 
+           SUM(COALESCE(SalesCTE.ws_quantity, 0)) AS TotalWebSales,
+           SUM(COALESCE(SalesCTE.cs_quantity, 0)) AS TotalCatalogSales,
+           SUM(COALESCE(SalesCTE.ws_net_profit, 0) + COALESCE(SalesCTE.cs_net_profit, 0)) AS TotalNetProfit
+    FROM SalesCTE
+    JOIN item ON SalesCTE.ws_item_sk = item.i_item_sk OR SalesCTE.cs_item_sk = item.i_item_sk
+    GROUP BY item.i_item_id
+),
+CustomerReturns AS (
+    SELECT sr_item_sk, 
+           COUNT(DISTINCT sr_ticket_number) AS TotalStoreReturns,
+           SUM(sr_return_amt_inc_tax) AS TotalReturnAmount
+    FROM store_returns
+    WHERE sr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY sr_item_sk
+),
+FinalReport AS (
+    SELECT ps.i_item_id,
+           ps.TotalWebSales,
+           ps.TotalCatalogSales,
+           ps.TotalNetProfit,
+           COALESCE(cr.TotalStoreReturns, 0) AS TotalStoreReturns,
+           COALESCE(cr.TotalReturnAmount, 0) AS TotalReturnAmount
+    FROM ProfitSummary ps
+    LEFT JOIN CustomerReturns cr ON ps.i_item_id = cr.sr_item_sk
+)
+
+SELECT f.i_item_id,
+       f.TotalWebSales,
+       f.TotalCatalogSales,
+       f.TotalNetProfit,
+       f.TotalStoreReturns,
+       f.TotalReturnAmount,
+       CASE 
+           WHEN f.TotalNetProfit IS NOT NULL AND f.TotalNetProfit > 0 THEN 'Profitable'
+           ELSE 'Non-Profitable'
+       END AS ProfitabilityStatus
+FROM FinalReport f
+WHERE f.TotalNetProfit IS NOT NULL
+ORDER BY f.TotalNetProfit DESC
+FETCH FIRST 10 ROWS ONLY;

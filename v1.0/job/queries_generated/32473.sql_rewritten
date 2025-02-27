@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id AS root_movie
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m2.linked_movie_id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1,
+        mh.root_movie
+    FROM 
+        movie_link m2
+    JOIN 
+        MovieHierarchy mh ON m2.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.root_movie,
+    mh.title AS root_title,
+    mh.production_year AS root_year,
+    ARRAY_AGG(mh2.title) AS linked_titles,
+    COUNT(mh2.movie_id) AS links_count,
+    AVG(movie_info.info::int) AS avg_movie_info,
+    STRING_AGG(DISTINCT pf.person_name, ', ') AS cast_members
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_info ON mh.movie_id = movie_info.movie_id 
+LEFT JOIN 
+    movie_link ml ON mh.movie_id = ml.movie_id
+LEFT JOIN 
+    aka_title mh2 ON ml.linked_movie_id = mh2.id
+LEFT JOIN 
+    (SELECT ca.movie_id, a.name AS person_name
+     FROM cast_info ca
+     JOIN aka_name a ON ca.person_id = a.person_id) pf ON mh.movie_id = pf.movie_id
+GROUP BY 
+    mh.root_movie, mh.root_title, mh.root_year
+HAVING 
+    COUNT(DISTINCT mh2.movie_id) > 5
+ORDER BY 
+    links_count DESC, root_year DESC;

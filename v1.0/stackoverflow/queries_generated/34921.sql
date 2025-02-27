@@ -1,0 +1,91 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        rt.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy rt ON t.ExcerptPostId = rt.Id
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditOrder
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title or Edit Body
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COALESCE(uts.TotalVotes, 0) AS UserTotalVotes,
+    COALESCE(uts.UpVotes, 0) AS UserUpVotes,
+    COALESCE(uts.DownVotes, 0) AS UserDownVotes,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    ph.LastEditDate AS LastEdited,
+    rt.TagName AS RelatedTag,
+    rt.Level AS TagHierarchyLevel,
+    CASE 
+        WHEN p.ClosedDate IS NULL THEN 'Open'
+        ELSE 'Closed'
+    END AS PostStatus,
+    GROUP_CONCAT(DISTINCT ce.Text) AS CommentTexts
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteSummary uts ON u.Id = uts.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    RecentPostEdits ph ON p.Id = ph.PostId AND ph.EditOrder = 1
+LEFT JOIN 
+    Posts po ON p.AcceptedAnswerId = po.Id
+LEFT JOIN 
+    RecursiveTagHierarchy rt ON p.Tags LIKE CONCAT('%', rt.TagName, '%')
+LEFT JOIN 
+    Comments ce ON ce.PostId = p.Id
+WHERE 
+    u.Reputation > 100 AND 
+    (p.Score IS NOT NULL OR (p.ViewCount > 100 AND p.AnswerCount > 0))
+GROUP BY 
+    u.Id, 
+    p.Id, 
+    rt.TagName, 
+    rt.Level
+ORDER BY 
+    u.Reputation DESC, p.Score DESC
+LIMIT 100;

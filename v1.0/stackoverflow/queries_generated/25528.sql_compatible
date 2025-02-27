@@ -1,0 +1,60 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS AuthorName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        TaggedPosts
+    GROUP BY 
+        Tag
+),
+RankedTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.Tags,
+    tp.AuthorName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    rt.Tag,
+    rt.PostCount AS TagPostCount,
+    rt.Rank
+FROM 
+    TaggedPosts tp
+JOIN 
+    RankedTags rt ON tp.Tags LIKE CONCAT('%', rt.Tag, '%')
+ORDER BY 
+    tp.CreationDate DESC, rt.Rank;

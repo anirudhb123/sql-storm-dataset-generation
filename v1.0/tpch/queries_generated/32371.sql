@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey AS suppkey, s_name AS suppname, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy sh ON ps.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_size > 10 AND p.p_retailprice < 100
+    )
+    WHERE sh.level < 2
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 5000
+),
+NationWithComments AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count,
+           STRING_AGG(s.s_comment, '; ') AS supplier_comments
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+RankedSuppliers AS (
+    SELECT suppkey, suppname, s_acctbal,
+           RANK() OVER (ORDER BY s_acctbal DESC) AS rank
+    FROM SupplierHierarchy
+)
+SELECT n.n_name AS nation_name, ns.supplier_count, ns.supplier_comments, 
+       rs.suppname AS top_supplier, rs.s_acctbal AS top_account_balance,
+       coalesce(cs.total_spent, 0) AS customer_total_spent
+FROM NationWithComments ns
+JOIN RankedSuppliers rs ON ns.supplier_count > 0
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey = (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = ns.n_name)
+    ORDER BY c.c_acctbal DESC
+    LIMIT 1
+)
+WHERE ns.supplier_count > 0
+ORDER BY ns.n_name, rs.rank;

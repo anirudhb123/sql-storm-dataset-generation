@@ -1,0 +1,39 @@
+WITH region_summary AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(s.s_acctbal) AS total_supplier_balance
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+customer_expenditure AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+popular_parts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT r.r_name, 
+       COALESCE(cs.total_spent, 0) AS total_customer_expenditure,
+       COALESCE(ps.total_available, 0) AS total_available_parts,
+       ps.supplier_count,
+       rs.total_supplier_balance,
+       ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY COALESCE(cs.total_spent, 0) DESC) AS customer_rank
+FROM region_summary rs
+FULL OUTER JOIN (
+    SELECT c.c_custkey, SUM(l.l_extendedprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.o_orderkey
+    GROUP BY c.c_custkey
+) cs ON rs.nation_count > 0  
+FULL JOIN popular_parts ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 15)
+WHERE rs.total_supplier_balance IS NOT NULL OR cs.total_spent IS NOT NULL
+ORDER BY r.r_name, customer_rank;

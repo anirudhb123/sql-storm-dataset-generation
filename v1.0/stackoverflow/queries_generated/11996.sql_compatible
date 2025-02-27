@@ -1,0 +1,48 @@
+
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalBadges,
+    RP.PostId,
+    RP.Title AS MostRecentPostTitle,
+    RP.CreationDate AS MostRecentPostDate,
+    RP.Score AS MostRecentPostScore
+FROM UserStats U
+LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerDisplayName AND RP.rn = 1
+ORDER BY U.TotalPosts DESC, U.TotalUpvotes DESC;

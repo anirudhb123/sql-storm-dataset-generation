@@ -1,0 +1,60 @@
+
+WITH TopProducts AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        SUM(w.ws_ext_sales_price) AS total_sales
+    FROM 
+        item i
+    JOIN 
+        web_sales w ON i.i_item_sk = w.ws_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_product_name
+    ORDER BY 
+        total_sales DESC
+    LIMIT 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_returned_date_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_returned_date_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        D.d_date,
+        COALESCE(SUM(s.ws_ext_sales_price), 0) AS total_sales,
+        COALESCE(R.return_count, 0) AS total_returns,
+        COALESCE(R.total_return_amount, 0) AS return_amount
+    FROM 
+        date_dim D
+    LEFT JOIN 
+        web_sales s ON D.d_date_sk = s.ws_sold_date_sk
+    LEFT JOIN 
+        CustomerReturns R ON D.d_date_sk = R.sr_returned_date_sk
+    GROUP BY 
+        D.d_date
+)
+SELECT 
+    S.d_date AS date,
+    S.total_sales,
+    S.total_returns,
+    S.return_amount,
+    (CASE 
+        WHEN S.total_sales > 0 THEN (S.return_amount / S.total_sales) * 100 
+        ELSE 0 
+    END) AS return_percentage,
+    (SELECT COUNT(DISTINCT c.c_customer_id)
+     FROM customer c 
+     WHERE c.c_current_cdemo_sk IN (SELECT cd_demo_sk 
+                                      FROM customer_demographics 
+                                      WHERE cd_marital_status = 'M')
+     ) AS married_customer_count
+FROM 
+    SalesAndReturns S
+ORDER BY 
+    S.d_date DESC;

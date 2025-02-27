@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    th.title AS movie_title,
+    th.production_year,
+    COALESCE(pi.info, 'Unknown') AS additional_info,
+    COUNT(*) OVER (PARTITION BY th.id ORDER BY th.title) AS actor_count,
+    ROW_NUMBER() OVER (PARTITION BY th.id ORDER BY a.name) AS row_num,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS company_types,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS total_budget,
+    NULLIF(MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'BoxOffice') THEN CAST(mi.info AS INTEGER) END), 0) AS box_office
+
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title th ON mh.movie_id = th.id
+LEFT JOIN 
+    movie_companies mc ON th.id = mc.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN 
+    movie_info mi ON th.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    th.production_year >= 2000 
+    AND (pi.info IS NULL OR pi.info != '')
+GROUP BY 
+    a.name, th.title, th.production_year, pi.info
+ORDER BY 
+    movie_title ASC, actor_count DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS sale_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+), RegionSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(st.total_sales) AS region_sales
+    FROM 
+        SalesTrend st
+    JOIN 
+        supplier s ON s.s_suppkey = (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            JOIN part p ON p.p_partkey = ps.ps_partkey 
+            WHERE ps.ps_availqty > 0 
+            ORDER BY ps.ps_supplycost ASC 
+            LIMIT 1
+        )
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+), RankedRegionSales AS (
+    SELECT 
+        nation_name, 
+        region_sales,
+        RANK() OVER (ORDER BY region_sales DESC) AS sales_rank
+    FROM 
+        RegionSales
+)
+SELECT 
+    r.nation_name, 
+    r.region_sales,
+    COALESCE(r.sales_rank, 0) AS rank,
+    CASE 
+        WHEN r.region_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    RankedRegionSales r
+FULL OUTER JOIN 
+    region rg ON rg.r_name = r.nation_name
+WHERE 
+    (r.region_sales IS NOT NULL OR rg.r_regionkey IS NULL)
+ORDER BY 
+    r.region_sales DESC NULLS LAST;

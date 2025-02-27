@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.ViewCount IS NOT NULL
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+
+PostCommentStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+
+PostTypeCounts AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    WHERE 
+        p.LastActivityDate IS NOT NULL
+    GROUP BY 
+        p.PostTypeId
+)
+
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    COALESCE(rp.RankByScore, 0) AS PostScoreRank,
+    p.Title,
+    p.ViewCount,
+    pcs.CommentCount,
+    pcs.AvgCommentScore,
+    cp.CloseDate,
+    cp.CloseReason
+FROM 
+    Users up
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    RankedPosts rp ON rp.PostId = (
+        SELECT 
+            pp.Id 
+        FROM 
+            Posts pp 
+        WHERE 
+            pp.OwnerUserId = up.Id 
+        ORDER BY 
+            pp.Score DESC 
+        LIMIT 1)
+LEFT JOIN 
+    PostCommentStats pcs ON pcs.PostId = rp.PostId
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = rp.PostId
+WHERE 
+    up.CreationDate < (cast('2024-10-01' as date) - INTERVAL '6 months')
+    AND (ub.BadgeCount IS NULL OR ub.BadgeCount > 5)
+ORDER BY 
+    up.Reputation DESC, 
+    COALESCE(rp.RankByScore, 0) ASC
+LIMIT 100;

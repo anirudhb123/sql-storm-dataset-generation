@@ -1,0 +1,85 @@
+
+WITH recent_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+sales_rank AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_profit,
+        ROW_NUMBER() OVER (ORDER BY rs.total_profit DESC) AS profit_rank
+    FROM 
+        recent_sales rs
+    WHERE 
+        rs.rn = 1
+),
+top_items AS (
+    SELECT 
+        sr.ws_item_sk,
+        sr.total_quantity,
+        sr.total_profit
+    FROM 
+        sales_rank sr
+    WHERE 
+        sr.profit_rank <= 10
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_net_paid,
+        MAX(ws.ws_net_profit) AS max_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+item_performance AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ti.total_quantity,
+        ti.total_profit,
+        cs.order_count,
+        cs.avg_net_paid,
+        cs.max_net_profit
+    FROM 
+        item i
+    JOIN 
+        top_items ti ON i.i_item_sk = ti.ws_item_sk
+    LEFT JOIN 
+        customer_stats cs ON cs.c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+)
+SELECT 
+    ip.i_item_id,
+    ip.i_item_desc,
+    ip.total_quantity,
+    ip.total_profit,
+    COALESCE(ip.order_count, 0) AS order_count,
+    COALESCE(ip.avg_net_paid, 0) AS avg_net_paid,
+    COALESCE(ip.max_net_profit, 0) AS max_net_profit
+FROM 
+    item_performance ip
+UNION ALL
+SELECT 
+    'Total',
+    NULL,
+    SUM(total_quantity),
+    SUM(total_profit),
+    SUM(order_count),
+    AVG(avg_net_paid),
+    MAX(max_net_profit)
+FROM 
+    item_performance
+WHERE 
+    total_quantity IS NOT NULL;

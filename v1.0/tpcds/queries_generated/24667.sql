@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price < (SELECT AVG(i2.i_current_price) 
+                              FROM item i2 
+                              WHERE i2.i_category = i.i_category) 
+        AND i.i_class IN (SELECT DISTINCT c_class 
+                          FROM item WHERE i_status = 'active')
+),
+
+TopReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_return_quantity IS NOT NULL
+    GROUP BY 
+        cr.cr_item_sk 
+    HAVING 
+        SUM(cr.cr_return_quantity) > 0
+),
+
+SalesAndReturns AS (
+    SELECT 
+        r.ws_item_sk AS item_sk,
+        COALESCE(SUM(r.ws_quantity), 0) AS total_sold,
+        COALESCE(rt.total_returns, 0) AS total_returned,
+        COALESCE(rt.total_return_amount, 0) AS return_amount,
+        (COALESCE(SUM(r.ws_quantity), 0) - COALESCE(rt.total_returns, 0)) AS net_sales
+    FROM 
+        web_sales r
+    LEFT JOIN 
+        TopReturns rt ON r.ws_item_sk = rt.cr_item_sk
+    GROUP BY 
+        r.ws_item_sk
+)
+
+SELECT 
+    sa.item_sk,
+    sa.total_sold,
+    sa.total_returned,
+    sa.return_amount,
+    (CASE 
+        WHEN sa.total_sold = 0 THEN NULL 
+        ELSE ROUND(100.0 * sa.total_returned / sa.total_sold, 2) 
+    END) AS return_rate_percentage,
+    (SELECT COUNT(DISTINCT ws_bill_customer_sk) 
+     FROM web_sales 
+     WHERE ws_item_sk = sa.item_sk) AS unique_buyers
+FROM 
+    SalesAndReturns sa
+JOIN 
+    RankedSales rs ON sa.item_sk = rs.ws_item_sk 
+WHERE 
+    rs.profit_rank = 1
+ORDER BY 
+    return_rate_percentage DESC NULLS LAST
+LIMIT 10;

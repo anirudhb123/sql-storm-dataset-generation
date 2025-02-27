@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.ViewCount DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+),
+FilteredPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount
+    FROM
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 3 
+        AND rp.RecentPostRank = 1 
+),
+TagStatistics AS (
+    SELECT
+        UNNEST(string_to_array(STRING_AGG(DISTINCT Tags, ','), ',')) AS Tag,
+        COUNT(*) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore
+    FROM
+        FilteredPosts
+    GROUP BY
+        UNNEST(string_to_array(STRING_AGG(DISTINCT Tags, ','), ','))
+)
+SELECT
+    ts.Tag,
+    ts.TotalPosts,
+    ts.TotalViews,
+    ts.TotalScore,
+    ROUND(ts.TotalScore / NULLIF(ts.TotalPosts, 0), 2) AS AverageScorePerPost,
+    STRING_AGG(fp.Title, '; ') AS RecentPostTitles
+FROM
+    TagStatistics ts
+LEFT JOIN
+    FilteredPosts fp ON ts.Tag = ANY(string_to_array(fp.Tags, ','))
+GROUP BY
+    ts.Tag, ts.TotalPosts, ts.TotalViews, ts.TotalScore
+ORDER BY
+    ts.TotalViews DESC;

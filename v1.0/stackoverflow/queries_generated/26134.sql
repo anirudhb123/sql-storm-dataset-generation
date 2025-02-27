@@ -1,0 +1,46 @@
+WITH TagPopularity AS (
+    SELECT
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS WikiCount
+    FROM Tags T
+    LEFT JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY T.TagName
+),
+UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionsCount,
+        AnswersCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS PopularityRank
+    FROM TagPopularity
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionsCount,
+    U.AnswersCount,
+    TT.TagName,
+    TT.PostCount AS TagPostCount,
+    TT.QuestionsCount AS TagQuestionsCount,
+    TT.AnswersCount AS TagAnswersCount
+FROM UserReputation U
+INNER JOIN TopTags TT ON TT.PopularityRank <= 10
+WHERE U.PostCount > 0
+ORDER BY U.Reputation DESC, TT.PostCount DESC;

@@ -1,0 +1,67 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS UsersEngaged,
+        STRING_AGG(DISTINCT u.EmailHash, ', ') AS UserEmails
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS TotalComments,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        COALESCE(b.BadgeCount, 0) AS TotalBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount 
+         FROM Votes 
+         GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount 
+         FROM Badges 
+         GROUP BY UserId) b ON p.OwnerUserId = b.UserId
+),
+TopPostEngagement AS (
+    SELECT 
+        pe.*,
+        ROW_NUMBER() OVER (ORDER BY pe.ViewCount DESC) AS Rank
+    FROM 
+        PostEngagement pe
+)
+SELECT 
+    t.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    tpe.Title,
+    tpe.ViewCount,
+    tpe.TotalComments,
+    tpe.TotalVotes,
+    tpe.Rank
+FROM 
+    TagStatistics ts
+JOIN 
+    TopPostEngagement tpe ON ts.PostCount > 0
+WHERE 
+    ts.PostCount > 5 AND 
+    tpe.Rank <= 10
+ORDER BY 
+    ts.TotalViews DESC, tpe.TotalVotes DESC;

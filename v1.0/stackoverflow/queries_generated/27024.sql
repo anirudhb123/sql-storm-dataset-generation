@@ -1,0 +1,88 @@
+WITH TagCounts AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 10  -- Only tags with more than 10 questions
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ubc.UserId,
+        ubc.DisplayName,
+        ubc.BadgeCount,
+        RANK() OVER (ORDER BY ubc.BadgeCount DESC) AS UserRank
+    FROM 
+        UserBadgeCounts ubc
+    WHERE 
+        ubc.BadgeCount > 0
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, c.CommentCount
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount AS TotalPosts,
+    ARRAY_AGG(DISTINCT u.DisplayName) AS TopUsersWithBadges,
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.VoteCount
+FROM 
+    TopTags tt
+JOIN 
+    PostActivity pa ON tt.TagName = ANY(STRING_TO_ARRAY(pa.Title, ' '))  -- Assuming tag matches title words for this example
+JOIN 
+    TopUsers u ON pa.CommentCount > 5  -- Filter to only users with significant post activity
+GROUP BY 
+    tt.TagName, tt.PostCount, pa.PostId, pa.Title, pa.ViewCount, pa.CommentCount
+ORDER BY 
+    tt.PostCount DESC, pa.ViewCount DESC;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteTypeId::int = 2, 0)::int) AS UpVotesCount,
+        SUM(COALESCE(v.VoteTypeId::int = 3, 0)::int) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.UpVotesCount,
+    ups.DownVotesCount,
+    COALESCE(cr.CloseCount, 0) AS CloseCount,
+    COALESCE(cr.CloseReasonNames, 'No Close Reason') AS CloseReasonNames
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    CloseReasons cr ON p.Id = cr.PostId
+WHERE 
+    p.Rank <= 5
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

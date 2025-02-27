@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) as Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostScore AS (
+    SELECT 
+        p.Id,
+        p.Score,
+        COALESCE(v.UpVotes, 0) as UpVotes,
+        COALESCE(v.DownVotes, 0) as DownVotes,
+        (COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) as UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) as DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        c.Name AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        CloseReasonTypes c ON CAST(ph.Comment AS INT) = c.Id
+)
+SELECT 
+    rp.Title AS PopularPostTitle,
+    rp.ViewCount,
+    ps.Score AS PostScore,
+    ps.NetVotes,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    RankedPosts rp
+JOIN 
+    PostScore ps ON rp.Id = ps.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.Id
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.ViewCount DESC, ps.NetVotes DESC
+UNION ALL
+SELECT 
+    'Total Posts' AS PopularPostTitle,
+    COUNT(*) AS ViewCount,
+    NULL AS PostScore, 
+    NULL AS NetVotes, 
+    NULL AS ClosedDate, 
+    NULL AS CloseReason
+FROM 
+    Posts
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 year';

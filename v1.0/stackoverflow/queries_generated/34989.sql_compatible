@@ -1,0 +1,90 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        PostTypeId,
+        ParentId,
+        CreationDate,
+        1 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Votes v
+    INNER JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        v.UserId
+),
+TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(p.Tags, '>')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+)
+SELECT
+    ph.Id AS PostId,
+    ph.CreationDate,
+    ph.Level,
+    u.DisplayName AS UserDisplayName,
+    COALESCE(uv.VoteCount, 0) AS TotalVotes,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    tg.Tag,
+    tu.Reputation AS UserReputation,
+    tu.TotalBadges
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    Posts p ON ph.Id = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVotes uv ON u.Id = uv.UserId
+LEFT JOIN 
+    TaggedPosts tg ON p.Id = tg.PostId
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.Id
+WHERE 
+    ph.Level <= 2  
+    AND (p.PostTypeId = 1 OR p.PostTypeId = 2)  
+ORDER BY 
+    ph.CreationDate DESC,
+    uv.VoteCount DESC;

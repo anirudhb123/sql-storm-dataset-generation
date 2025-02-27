@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS TagCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE p.PostTypeId = 1 
+    GROUP BY t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS TagRank
+    FROM TagStatistics
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Author,
+    rp.Score,
+    tt.TagName,
+    tt.TagCount,
+    tt.TotalViews,
+    tt.TotalScore
+FROM RankedPosts rp
+JOIN TopTags tt ON tt.TagName = ANY(STRING_TO_ARRAY(rp.Tags, '<>'))
+WHERE rp.Rank <= 5 
+ORDER BY rp.Score DESC, rp.CreationDate DESC;

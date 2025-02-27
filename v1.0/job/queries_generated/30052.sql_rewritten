@@ -1,0 +1,88 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        aka_name a
+    WHERE 
+        a.name ILIKE 'John%'
+    
+    UNION ALL
+    
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ah.level + 1 AS level
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        title t ON c.movie_id = t.id
+    INNER JOIN 
+        ActorHierarchy ah ON t.id = c.movie_id
+    WHERE 
+        ah.level < 3
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        string_agg(DISTINCT c.kind_id::text, ', ') AS company_kinds,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COALESCE(AVG(mi.info::numeric), 0) AS avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        mv.company_kinds,
+        mv.actor_count,
+        mv.avg_rating
+    FROM 
+        MovieDetails mv
+    WHERE 
+        mv.actor_count > 5 AND 
+        mv.avg_rating > 7.0 
+)
+SELECT 
+    ah.actor_id,
+    ah.actor_name,
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.company_kinds
+FROM 
+    ActorHierarchy ah
+LEFT JOIN 
+    FilteredMovies f ON ah.actor_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.movie_id IN (
+                SELECT 
+                    movie_id 
+                FROM 
+                    FilteredMovies
+            )
+    )
+ORDER BY 
+    f.production_year DESC, ah.actor_name;

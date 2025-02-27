@@ -1,0 +1,43 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           n.n_name AS nation_name,
+           SUM(ps.ps_availqty) AS total_available_qty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+PartDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_brand,
+           p.p_type,
+           AVG(p.p_retailprice) AS avg_retail_price,
+           COUNT(l.l_linekey) AS total_orders
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+BenchmarkResults AS (
+    SELECT sd.s_name,
+           sd.nation_name,
+           pd.p_name,
+           pd.avg_retail_price,
+           sd.total_available_qty,
+           sd.total_supply_value,
+           pd.total_orders,
+           CONCAT('Supplier: ', sd.s_name, ', Nation: ', sd.nation_name,
+                  ', Part: ', pd.p_name, ', Avg Price: $', ROUND(pd.avg_retail_price, 2),
+                  ', Total Available: ', sd.total_available_qty, 
+                  ', Total Supply Value: $', ROUND(sd.total_supply_value, 2), 
+                  ', Total Orders: ', pd.total_orders) AS benchmark_summary
+    FROM SupplierDetails sd
+    JOIN PartDetails pd ON sd.total_available_qty > 0 AND pd.total_orders > 0
+    ORDER BY sd.total_supply_value DESC, pd.avg_retail_price DESC
+)
+SELECT benchmark_summary
+FROM BenchmarkResults
+WHERE total_orders > 10
+LIMIT 10;

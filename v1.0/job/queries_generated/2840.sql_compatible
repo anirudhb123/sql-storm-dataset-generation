@@ -1,0 +1,67 @@
+
+WITH MovieStats AS (
+    SELECT
+        a.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(m.prod_year) AS average_production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        aka_title a
+    LEFT JOIN
+        movie_companies mc ON a.movie_id = mc.movie_id
+    LEFT JOIN
+        cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        (SELECT title_id, production_year AS prod_year FROM aka_title) m ON a.id = m.title_id
+    GROUP BY
+        a.title
+),
+ActorRoles AS (
+    SELECT
+        r.role AS role_name,
+        COUNT(DISTINCT c.person_id) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        r.role
+)
+SELECT
+    ms.title,
+    ms.actor_count,
+    ms.company_count,
+    ms.average_production_year,
+    ms.keywords,
+    ar.role_name,
+    ar.role_count
+FROM
+    MovieStats ms
+LEFT JOIN
+    ActorRoles ar ON ms.actor_count > ar.role_count
+WHERE
+    ms.average_production_year IS NOT NULL
+AND
+    ar.role_count IS NOT NULL
+ORDER BY
+    ms.actor_count DESC,
+    ms.title ASC
+LIMIT 50
+UNION ALL
+SELECT
+    'TOTAL' AS title,
+    SUM(ms.actor_count) AS actor_count,
+    SUM(ms.company_count) AS company_count,
+    AVG(ms.average_production_year) AS average_production_year,
+    NULL AS keywords,
+    NULL AS role_name,
+    SUM(ar.role_count) AS role_count
+FROM
+    MovieStats ms
+LEFT JOIN
+    ActorRoles ar ON ms.actor_count > ar.role_count;

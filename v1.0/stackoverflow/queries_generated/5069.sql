@@ -1,0 +1,34 @@
+WITH UserReputation AS (
+    SELECT u.Id AS UserId, u.Reputation, COUNT(DISTINCT p.Id) AS PostCount, SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+), 
+ActiveBadges AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount, MAX(b.Date) AS LastBadgeDate
+    FROM Badges b
+    WHERE b.Date >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY b.UserId
+),
+PostActivity AS (
+    SELECT p.OwnerUserId, COUNT(c.Id) AS CommentCount, COUNT(DISTINCT v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.OwnerUserId
+)
+SELECT u.Id, u.DisplayName, 
+       COALESCE(ur.Reputation, 0) AS Reputation, 
+       COALESCE(ur.PostCount, 0) AS PostCount, 
+       COALESCE(ur.TotalViews, 0) AS TotalViews, 
+       COALESCE(ab.BadgeCount, 0) AS BadgeCount, 
+       COALESCE(ab.LastBadgeDate, 'Never') AS LastBadgeDate, 
+       COALESCE(pa.CommentCount, 0) AS CommentCount, 
+       COALESCE(pa.VoteCount, 0) AS VoteCount
+FROM Users u
+LEFT JOIN UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN ActiveBadges ab ON u.Id = ab.UserId
+LEFT JOIN PostActivity pa ON u.Id = pa.OwnerUserId
+WHERE u.Reputation > 1000
+ORDER BY u.Reputation DESC, PostCount DESC
+LIMIT 100;

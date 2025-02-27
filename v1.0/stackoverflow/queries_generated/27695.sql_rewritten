@@ -1,0 +1,50 @@
+WITH PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        unnest(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS PostCount,
+        SUM(CASE WHEN U.QuestionCount > 0 THEN 1 ELSE 0 END) AS UserCount
+    FROM 
+        PostTags PT
+    LEFT JOIN 
+        UserActivity U ON PT.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.UserId)
+    GROUP BY 
+        Tag
+)
+SELECT 
+    TS.Tag,
+    TS.PostCount,
+    TS.UserCount,
+    COALESCE(ROUND(100.0 * TS.PostCount / NULLIF(SUM(TS.PostCount) OVER (), 0), 2), 0) AS PercentageOfTotalPosts,
+    COALESCE(ROUND(100.0 * TS.UserCount / NULLIF(COUNT(DISTINCT U.Id) OVER (), 0), 2), 0) AS PercentageOfActiveUsers
+FROM 
+    TagStatistics TS
+JOIN 
+    Users U ON U.Reputation > 50  
+ORDER BY 
+    TS.PostCount DESC, 
+    TS.Tag ASC;

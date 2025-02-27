@@ -1,0 +1,61 @@
+
+WITH TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RegionStats AS (
+    SELECT n.n_regionkey, r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_regionkey, r.r_name
+),
+OrdersWithRank AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+)
+
+SELECT
+    p.p_name,
+    COALESCE(t.total_supply_cost, 0) AS total_supplier_cost,
+    r.customer_count,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice
+FROM part p
+LEFT JOIN TopSuppliers t ON p.p_partkey = (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM TopSuppliers AS s)
+    LIMIT 1
+)
+FULL OUTER JOIN RegionStats r ON r.n_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey = (
+        SELECT c.c_nationkey
+        FROM customer c
+        WHERE c.c_custkey = (
+            SELECT o.o_custkey
+            FROM orders o
+            WHERE o.o_orderkey = (
+                SELECT o2.o_orderkey
+                FROM OrdersWithRank o2
+                WHERE o2.price_rank = 1
+            )
+        )
+    )
+)
+INNER JOIN OrdersWithRank o ON o.o_orderkey = (
+    SELECT o3.o_orderkey
+    FROM orders o3
+    WHERE o3.o_orderdate = o.o_orderdate
+    LIMIT 1
+)
+WHERE p.p_retailprice IS NOT NULL
+AND (t.total_supply_cost IS NOT NULL OR r.customer_count > 0)
+ORDER BY p.p_name;

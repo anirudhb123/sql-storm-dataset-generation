@@ -1,0 +1,40 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ca.ca_country = 'USA'
+        AND cd.cd_gender = 'F'
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id
+),
+TopWebsites AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        total_orders 
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    tw.web_site_id,
+    tw.total_sales,
+    tw.total_orders,
+    (tw.total_sales / NULLIF(tw.total_orders, 0)) AS average_order_value,
+    ROUND((tw.total_sales * 0.08), 2) AS estimated_tax
+FROM 
+    TopWebsites tw
+ORDER BY 
+    tw.total_sales DESC;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ch.linked_movie_id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ch ON mh.movie_id = ch.movie_id
+    JOIN 
+        aka_title m ON m.id = ch.linked_movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_count,
+    AVG(COALESCE(EXTRACT(EPOCH FROM pi.info), 0)) AS avg_person_age,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    SUM(CASE WHEN ai.note IS NOT NULL THEN 1 ELSE 0 END) AS non_null_notes,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY at.production_year DESC) AS role_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate')
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    cast_info ai ON ci.movie_id = ai.movie_id AND ai.note IS NOT NULL
+WHERE 
+    a.name IS NOT NULL 
+    AND at.production_year BETWEEN 2015 AND 2023
+    AND EXISTS (SELECT 1 FROM MovieHierarchy mh WHERE mh.movie_id = at.id)
+GROUP BY 
+    a.name, at.title, at.production_year, a.person_id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    role_rank,
+    a.name ASC,
+    at.production_year DESC
+LIMIT 100;

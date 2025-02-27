@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal)
+            FROM supplier s2
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+),
+HighVolumeOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+RegionNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    rnk,
+    s.s_name AS supplier_name,
+    hn.n_name AS nation_name,
+    SUM(c.c_acctbal) AS total_customer_balance,
+    COUNT(ho.o_orderkey) AS high_volume_orders_count,
+    COALESCE(MAX(ho.total_revenue), 0) AS max_order_revenue,
+    'Region: ' || rn.r_name || ' | Supplier: ' || s.s_name AS description
+FROM 
+    RankedSuppliers s
+LEFT JOIN 
+    RegionNations rn ON s.s_nationkey = rn.n_nationkey
+LEFT JOIN 
+    HighVolumeOrders ho ON s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')))
+LEFT JOIN 
+    customer c ON c.c_nationkey = rn.n_nationkey
+WHERE 
+    s.rnk <= 5
+GROUP BY 
+    rnk, s.s_name, hn.n_name, rn.r_name
+ORDER BY 
+    total_customer_balance DESC NULLS LAST, s.s_name;

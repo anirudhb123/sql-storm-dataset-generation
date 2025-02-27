@@ -1,0 +1,62 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN C.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS Rank,
+        DENSE_RANK() OVER (PARTITION BY EXTRACT(YEAR FROM P.CreationDate) ORDER BY P.ViewCount DESC) AS YearlyRank
+    FROM Posts P
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PopularPosts AS (
+    SELECT 
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.AnswerCount,
+        UserEngagement.DisplayName AS TopUser,
+        UserEngagement.Upvotes,
+        UserEngagement.Downvotes
+    FROM PostStats PS
+    JOIN UserEngagement ON PS.Rank <= 10
+    WHERE PS.ViewCount IS NOT NULL
+)
+SELECT 
+    PP.Title, 
+    PP.Score, 
+    PP.ViewCount, 
+    PP.AnswerCount, 
+    PP.TopUser, 
+    PP.Upvotes,
+    PP.Downvotes
+FROM PopularPosts PP
+JOIN (
+    SELECT 
+        Title,
+        COUNT(*) AS TagCount 
+    FROM Posts 
+    WHERE Tags IS NOT NULL
+    GROUP BY Title
+    HAVING COUNT(*) > 1
+) AS T ON PP.Title = T.Title
+ORDER BY PP.Score DESC, PP.ViewCount DESC;

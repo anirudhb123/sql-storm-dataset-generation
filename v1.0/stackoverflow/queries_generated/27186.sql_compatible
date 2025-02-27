@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS AuthorName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+),
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) ) AS TagName,
+        COUNT(*) AS QuestionCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularityCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')))
+),
+CloseReasonStats AS (
+    SELECT 
+        ph.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON CAST(ph.Comment AS INT) = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.Comment
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.AuthorName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(ts.QuestionCount, 0) AS QuestionsTagged,
+        COALESCE(crs.CloseCount, 0) AS CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        TagStatistics ts ON ts.TagName = ANY(string_to_array(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><'))
+    LEFT JOIN 
+        CloseReasonStats crs ON crs.CloseReason = ANY(string_to_array(SUBSTRING(rp.Body, 1, 255), ' '))
+    WHERE 
+        rp.TagRank <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.AuthorName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.AuthorName,
+    ps.CommentCount,
+    ps.QuestionsTagged,
+    ps.CloseReasons
+FROM 
+    PostSummary ps
+ORDER BY 
+    ps.QuestionsTagged DESC, ps.CommentCount DESC, ps.CloseReasons DESC;

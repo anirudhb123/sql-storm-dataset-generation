@@ -1,0 +1,60 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS item_sales_rank
+    FROM web_sales AS ws
+    WHERE ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+top_selling_items AS (
+    SELECT 
+        s.ws_item_sk,
+        s.total_quantity_sold,
+        s.total_sales,
+        i.i_product_name,
+        i.i_category,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM sales_summary AS s
+    JOIN item AS i ON s.ws_item_sk = i.i_item_sk
+    WHERE s.item_sales_rank <= 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        IFNULL(hd.hd_income_band_sk, -1) AS income_band
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ti.ws_item_sk,
+    ti.total_quantity_sold,
+    ti.total_sales,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    CASE 
+        WHEN ci.cd_purchase_estimate IS NULL THEN 'Unknown'
+        ELSE ci.cd_purchase_estimate 
+    END AS purchase_estimate,
+    COALESCE(inb.ib_lower_bound, 0) AS income_lower_bound
+FROM top_selling_items AS ti
+JOIN customer_info AS ci ON ci.c_customer_sk IN (
+    SELECT DISTINCT ws_bill_customer_sk 
+    FROM web_sales 
+    WHERE ws_item_sk = ti.ws_item_sk
+)
+LEFT JOIN income_band AS inb ON ci.income_band = inb.ib_income_band_sk
+WHERE ti.total_sales > (SELECT AVG(total_sales) FROM top_selling_items)
+ORDER BY ti.total_sales DESC, ci.c_last_name ASC;

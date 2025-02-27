@@ -1,0 +1,117 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+),
+
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TagPostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+),
+
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Level,
+        u.DisplayName AS Owner,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    aps.Level,
+    aps.Title,
+    aps.Owner,
+    us.UpVotesCount,
+    us.DownVotesCount,
+    ts.TagPostCount,
+    ts.TotalViews,
+    ROW_NUMBER() OVER (PARTITION BY aps.Level ORDER BY aps.VoteCount DESC, aps.CommentCount DESC) AS Rank
+FROM 
+    ActivePosts aps
+LEFT JOIN 
+    UserStats us ON aps.Owner = us.DisplayName
+LEFT JOIN 
+    TagStatistics ts ON ts.TagPostCount > 0
+ORDER BY 
+    aps.Level, Rank;

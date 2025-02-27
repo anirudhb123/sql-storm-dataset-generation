@@ -1,0 +1,70 @@
+
+WITH PostAnalyses AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN A.Id IS NOT NULL THEN 1 END) AS AnswerCount,
+        MAX(V.CreationDate) AS LastVoteDate,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+    FROM 
+        Posts P 
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Tags T ON T.Id = ANY (string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '> <')::text[])
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags
+),
+TagHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.Text,
+        (SELECT COUNT(*) FROM PostHistory PH2 WHERE PH2.PostId = PH.PostId AND PH2.PostHistoryTypeId = 10) AS CloseCount,
+        (SELECT COUNT(*) FROM PostHistory PH3 WHERE PH3.PostId = PH.PostId AND PH3.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  
+),
+FinalBenchmark AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CommentCount,
+        PA.AnswerCount,
+        PA.LastVoteDate,
+        TH.CloseCount,
+        TH.ReopenCount,
+        PA.AssociatedTags,
+        (SELECT COUNT(*) FROM Badges B WHERE B.UserId IN (SELECT U.Id FROM Users U WHERE U.DisplayName = PA.Title)) AS UserBadgeCount
+    FROM 
+        PostAnalyses PA
+    LEFT JOIN 
+        TagHistories TH ON PA.PostId = TH.PostId
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN CloseCount > 0 THEN 'Closed'
+        WHEN ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    GREATEST(CommentCount, AnswerCount) AS EngagementLevel
+FROM 
+    FinalBenchmark
+ORDER BY 
+    EngagementLevel DESC, LastVoteDate DESC;

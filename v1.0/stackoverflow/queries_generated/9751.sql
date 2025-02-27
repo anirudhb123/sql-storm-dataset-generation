@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosedPostReasons AS (
+    SELECT 
+        PH.PostId,
+        GROUP_CONCAT(CRT.Name) AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CRT ON PH.Comment = CAST(CRT.Id AS VARCHAR)
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+PopularTags AS (
+    SELECT 
+        Tags, 
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '90 days'
+    GROUP BY 
+        Tags
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.OwnerDisplayName,
+    RP.Score,
+    RP.AnswerCount,
+    RP.CommentCount,
+    CPR.CloseReasons,
+    PT.TagCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPostReasons CPR ON RP.PostId = CPR.PostId
+JOIN 
+    PopularTags PT ON PT.Tags = RP.Tags
+WHERE 
+    RP.Rank <= 10
+ORDER BY 
+    RP.Score DESC;

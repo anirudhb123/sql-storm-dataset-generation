@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY DATE_TRUNC('month', o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank 
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+), 
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderdate, 
+        ro.o_totalprice 
+    FROM 
+        RankedOrders ro 
+    WHERE 
+        ro.order_rank <= 5
+), 
+SupplierInfo AS (
+    SELECT 
+        ps.ps_supplycost, 
+        p.p_brand, 
+        SUM(l.l_quantity) AS total_quantity 
+    FROM 
+        partsupp ps 
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey 
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey 
+    JOIN 
+        TopOrders to ON l.l_orderkey = to.o_orderkey 
+    GROUP BY 
+        ps.ps_supplycost, p.p_brand 
+    HAVING 
+        SUM(l.l_quantity) > 100
+)
+SELECT 
+    s.s_name, 
+    s.s_acctbal, 
+    si.p_brand, 
+    si.total_quantity, 
+    si.ps_supplycost 
+FROM 
+    SupplierInfo si 
+JOIN 
+    supplier s ON si.ps_supplycost = s.s_suppkey 
+ORDER BY 
+    si.total_quantity DESC, 
+    si.ps_supplycost DESC 
+LIMIT 10;

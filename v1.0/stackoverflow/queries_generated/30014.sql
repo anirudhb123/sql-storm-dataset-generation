@@ -1,0 +1,50 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, ParentId, Title, CreationDate
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, p.CreationDate
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= now() - interval '1 year'
+    GROUP BY p.Id, p.OwnerUserId
+),
+UserRankings AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        SUM(pm.UpVoteCount) AS TotalUpVotes,
+        SUM(pm.DownVoteCount) AS TotalDownVotes,
+        COUNT(pm.PostId) AS PostCount,
+        RANK() OVER (ORDER BY SUM(pm.UpVoteCount) DESC) AS UpVoteRank
+    FROM Users u
+    LEFT JOIN PostMetrics pm ON u.Id = pm.OwnerUserId
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(u.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(u.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(u.PostCount, 0) AS PostCount,
+    COALESCE(rph.Title, 'N/A') AS TopLevelPostTitle,
+    COALESCE(rph.CreationDate, '2022-01-01') AS TopLevelPostDate
+FROM UserRankings ur
+JOIN Users u ON u.Id = ur.UserId
+LEFT JOIN RecursivePostHierarchy rph ON rph.Id = (
+    SELECT Id FROM Posts p WHERE p.OwnerUserId = u.Id ORDER BY p.CreationDate LIMIT 1
+) 
+WHERE ur.UpVoteRank <= 10
+ORDER BY ur.UpVoteRank;

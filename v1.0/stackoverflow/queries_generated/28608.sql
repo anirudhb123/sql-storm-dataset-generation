@@ -1,0 +1,63 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditHistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.AvgScore,
+    ts.TagName,
+    ts.PostCount AS TagPostCount,
+    ts.QuestionsCount AS TagQuestionsCount,
+    ts.AnswersCount AS TagAnswersCount,
+    phs.EditHistoryCount,
+    phs.LastEditDate
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    TagStats ts ON ups.QuestionCount > 0
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+WHERE 
+    ups.TotalPosts > 0
+ORDER BY 
+    ups.AvgScore DESC, ups.TotalPosts DESC;

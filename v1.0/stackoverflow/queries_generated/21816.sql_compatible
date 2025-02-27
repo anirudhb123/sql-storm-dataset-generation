@@ -1,0 +1,83 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS LatestHistory
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13, 14)
+), UserBadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), RankedUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.CommentCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        COALESCE(ubs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ubs.Badges, 'None') AS Badges,
+        RANK() OVER (ORDER BY ua.PostCount DESC, ua.UpVotes DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        UserBadgeSummary ubs ON ua.UserId = ubs.UserId
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.PostCount,
+    ru.CommentCount,
+    ru.UpVotes,
+    ru.DownVotes,
+    ru.BadgeCount,
+    ru.Badges,
+    COALESCE(rp.Title, 'No Recent Activity') AS RecentPostTitle,
+    COALESCE(rp.HistoryDate, 'N/A') AS LastEditDate,
+    CASE 
+        WHEN ru.CommentCount > 100 AND ru.BadgeCount > 5 THEN 'Active Contributor'
+        WHEN ru.DownVotes > ru.UpVotes THEN 'Needs Improvement'
+        ELSE 'Regular User'
+    END AS UserStatus
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecentPostHistory rp ON ru.UserId = rp.UserId AND rp.LatestHistory = 1
+WHERE 
+    ru.UserRank <= 50
+ORDER BY 
+    ru.UserRank;

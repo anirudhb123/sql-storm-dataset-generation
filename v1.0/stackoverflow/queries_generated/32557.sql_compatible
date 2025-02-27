@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.LastActivityDate,
+        u.DisplayName AS Owner,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.LastActivityDate, u.DisplayName, p.OwnerUserId
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.LastActivityDate,
+        rp.Owner,
+        rp.AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY rp.LastActivityDate DESC) AS RecentRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 3  
+),
+ClosedOrMigratedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ChangeDate,
+        
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId IN (36, 17) THEN 'Migrated'
+            ELSE 'Other'
+        END AS ChangeType
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 36, 17)  
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rb.UserId,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Badges b ON rp.Owner = b.UserId
+    LEFT JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        b.Date >= DATE '2024-10-01' - INTERVAL '30 days'  
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    pwb.BadgeName,
+    pwb.BadgeClass,
+    COALESCE(cop.ChangeType, 'Active') AS PostStatus,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    PostsWithBadges pwb
+LEFT JOIN 
+    ClosedOrMigratedPosts cop ON pwb.PostId = cop.PostId
+LEFT JOIN 
+    Comments c ON pwb.PostId = c.PostId
+GROUP BY 
+    pwb.PostId, pwb.Title, pwb.BadgeName, pwb.BadgeClass, cop.ChangeType
+HAVING 
+    SUM(CASE WHEN c.Score > 0 THEN 1 ELSE 0 END) > 5  
+ORDER BY 
+    pwb.ViewCount DESC, pwb.Title ASC;

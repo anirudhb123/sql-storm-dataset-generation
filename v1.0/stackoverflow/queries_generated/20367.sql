@@ -1,0 +1,106 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostAcceptance AS (
+    SELECT 
+        p.Id AS PostId,
+        p.AcceptedAnswerId,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS IsAccepted
+    FROM 
+        Posts p
+),
+UserPostActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN pa.IsAccepted = 1 THEN 1 ELSE 0 END) AS AcceptedPosts
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostAcceptance pa ON p.Id = pa.PostId
+    GROUP BY 
+        p.OwnerUserId
+),
+TagPostCount AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        us.TotalVotes,
+        upa.TotalPosts,
+        upa.AcceptedPosts,
+        ROW_NUMBER() OVER (ORDER BY us.TotalVotes DESC, upa.AcceptedPosts DESC) AS Rank
+    FROM 
+        UserVoteSummary us
+    JOIN 
+        UserPostActivity upa ON us.UserId = upa.OwnerUserId
+),
+TagVotes AS (
+    SELECT 
+        t.TagName,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName,
+    u.TotalVotes,
+    u.TotalPosts,
+    u.AcceptedPosts,
+    t.TagName,
+    tc.PostCount,
+    COALESCE(tv.TotalUpVotes, 0) AS UpVotesByTag,
+    COALESCE(tv.TotalDownVotes, 0) AS DownVotesByTag,
+    CASE 
+        WHEN tv.TotalUpVotes IS NULL THEN 'No Votes' 
+        ELSE 'Votes Exist' 
+    END AS VoteStatus,
+    CASE 
+        WHEN u.TotalVotes > 100 THEN 'High Activity' 
+        ELSE 'Normal Activity' 
+    END AS ActivityStatus
+FROM 
+    TopUsers u
+JOIN 
+    TagPostCount tc ON u.UserId IN (SELECT DISTINCT p.OwnerUserId FROM Posts p WHERE p.Tags IS NOT NULL)
+LEFT JOIN 
+    TagVotes tv ON tc.TagName = tv.TagName
+WHERE 
+    u.Rank <= 10
+ORDER BY 
+    u.TotalVotes DESC, u.AcceptedPosts DESC;

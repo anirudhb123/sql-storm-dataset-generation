@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_tree AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        1 AS level
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL
+
+    SELECT 
+        st.c_custkey, 
+        st.c_name, 
+        SUM(o.o_totalprice) + COALESCE(SUM(st.total_spent), 0) AS total_spent,
+        st.level + 1
+    FROM 
+        sales_tree st
+    LEFT JOIN 
+        orders o ON st.c_custkey = o.o_custkey
+    GROUP BY 
+        st.c_custkey, st.c_name, st.level
+),
+
+ranked_sales AS (
+    SELECT 
+        c.n_nationkey,
+        st.c_name, 
+        st.total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.n_nationkey ORDER BY st.total_spent DESC) AS sales_rank
+    FROM 
+        sales_tree st
+    JOIN 
+        customer c ON st.c_custkey = c.c_custkey
+)
+
+SELECT 
+    n.n_name,
+    COALESCE(s.sales_rank, 0) AS sales_rank,
+    COALESCE(s.total_spent, 0.00) AS total_spent
+FROM 
+    nation n
+LEFT JOIN 
+    ranked_sales s ON n.n_nationkey = s.n_nationkey
+WHERE 
+    (s.sales_rank <= 5 OR s.sales_rank IS NULL)
+ORDER BY 
+    n.n_name, s.sales_rank;

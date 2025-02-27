@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.id::text AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        h.level + 1,
+        h.path || '->' || e.id::text
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy h ON e.episode_of_id = h.movie_id
+),
+
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        a.name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+),
+
+movie_info_and_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(mi.info, ', ') AS info,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_info mi
+    JOIN 
+        aka_title m ON mi.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    mc.name AS company_name,
+    r.name AS actor_name,
+    r.role_rank,
+    m.info,
+    COALESCE(m.keywords, 'No Keywords') AS keywords
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_companies mc ON h.movie_id = mc.movie_id
+LEFT JOIN 
+    ranked_cast r ON h.movie_id = r.movie_id
+LEFT JOIN 
+    movie_info_and_keywords m ON h.movie_id = m.movie_id
+WHERE 
+    h.level = 1
+    AND (mc.company_name IS NOT NULL OR r.name IS NOT NULL)
+    AND h.production_year > 2000
+ORDER BY 
+    h.production_year DESC, h.movie_id;
+

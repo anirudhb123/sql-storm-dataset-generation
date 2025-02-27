@@ -1,0 +1,106 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2)
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        'Answer' AS PostType,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2
+),
+AggregatedUserStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) FILTER (WHERE p.PostType = 'Question') AS TotalQuestions,
+        COUNT(p.Id) FILTER (WHERE p.PostType = 'Answer') AS TotalAnswers,
+        MAX(p.CreationDate) AS LastPostDate,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecursivePostHierarchy p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryWithBadges AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(b.Id) AS BadgeCount 
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Badges b ON ph.UserId = b.UserId
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+FinalResults AS (
+    
+    SELECT 
+        aus.UserId,
+        aus.DisplayName,
+        aus.TotalScore,
+        aus.TotalQuestions,
+        aus.TotalAnswers,
+        aus.LastPostDate,
+        aus.AverageScore,
+        COALESCE(pb.BadgeCount, 0) AS TotalBadges
+    FROM 
+        AggregatedUserStats aus
+    LEFT JOIN 
+        PostHistoryWithBadges pb ON aus.UserId = pb.UserId
+    WHERE 
+        aus.TotalQuestions > 0
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.TotalScore,
+    f.TotalQuestions,
+    f.TotalAnswers,
+    f.LastPostDate,
+    f.AverageScore,
+    f.TotalBadges,
+    CASE 
+        WHEN f.TotalScore IS NULL THEN 'No Activity'
+        WHEN f.TotalScore < 100 THEN 'Low Activity'
+        WHEN f.TotalScore >= 100 AND f.TotalScore <= 500 THEN 'Moderate Activity'
+        ELSE 'High Activity'
+    END AS ActivityLevel
+FROM 
+    FinalResults f
+ORDER BY 
+    f.TotalScore DESC;

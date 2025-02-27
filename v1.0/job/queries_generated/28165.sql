@@ -1,0 +1,65 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+full_cast AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role,
+        COALESCE(n.gender, 'Unknown') AS gender
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+    LEFT JOIN
+        name n ON a.person_id = n.imdb_id
+),
+popular_movies AS (
+    SELECT
+        rc.production_year,
+        COUNT(fc.actor_name) AS actor_count
+    FROM
+        ranked_titles rc
+    JOIN
+        full_cast fc ON rc.title_id = fc.movie_id
+    WHERE
+        rc.rank <= 5
+    GROUP BY
+        rc.production_year
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    pt.production_year,
+    pt.actor_count,
+    GROUP_CONCAT(mk.keywords) AS movie_keywords_list
+FROM
+    popular_movies pt
+LEFT JOIN
+    movie_keywords mk ON mk.movie_id IN (
+        SELECT DISTINCT movie_id
+        FROM full_cast
+    )
+GROUP BY
+    pt.production_year, pt.actor_count
+ORDER BY
+    pt.production_year ASC;

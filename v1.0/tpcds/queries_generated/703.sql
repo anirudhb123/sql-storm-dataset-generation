@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM
+        store_returns
+    GROUP BY
+        sr_customer_sk
+),
+AverageDemographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        AVG(d_count) AS average_dependent_count
+    FROM (
+        SELECT
+            c.c_current_cdemo_sk,
+            cd.cd_gender,
+            cd.cd_marital_status,
+            cd.cd_purchase_estimate,
+            cd.cd_dep_count as d_count,
+            COALESCE(cd.cd_dep_employed_count, 0) AS cd_dep_employed_count,
+            COALESCE(cd.cd_dep_college_count, 0) AS cd_dep_college_count
+        FROM
+            customer c
+        JOIN
+            customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    ) AS InnerDemo
+    GROUP BY
+        c_current_cdemo_sk, cd_gender, cd_marital_status, cd_purchase_estimate, cd_credit_rating
+),
+ReturnsSummary AS (
+    SELECT
+        cr.s_store_sk,
+        SUM(cr.total_returns) AS store_total_returns,
+        SUM(cr.total_return_amount) AS store_total_return_amount
+    FROM
+        CustomerReturns cr
+    JOIN
+        customer c ON cr.s_store_sk = c.c_current_addr_sk
+    GROUP BY
+        cr.s_store_sk
+)
+SELECT
+    s.s_store_id,
+    s.s_store_name,
+    rs.store_total_returns,
+    rs.store_total_return_amount,
+    ad.cd_gender,
+    ad.average_dependent_count,
+    ROW_NUMBER() OVER (PARTITION BY ad.cd_gender ORDER BY rs.store_total_return_amount DESC) AS rank_by_return_value
+FROM
+    store s
+LEFT JOIN
+    ReturnsSummary rs ON s.s_store_sk = rs.s_store_sk
+LEFT JOIN
+    AverageDemographics ad ON ad.cd_demo_sk = s.s_store_sk
+WHERE
+    rs.store_total_return_amount IS NOT NULL
+    AND ad.average_dependent_count > (
+        SELECT AVG(average_dependent_count) FROM AverageDemographics
+    )
+ORDER BY
+    s.s_store_name ASC, rs.store_total_returns DESC;

@@ -1,0 +1,42 @@
+-- Performance benchmarking query to gather usage statistics across various tables
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        COUNT(DISTINCT Id) AS BadgeCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Reputation
+),
+PostStats AS (
+    SELECT 
+        Id AS PostId,
+        PostTypeId,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        COUNT(DISTINCT Votes.Id) AS VoteCount,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id, PostTypeId
+),
+AggregatedResults AS (
+    SELECT 
+        'UserStatistics' AS Source, 
+        COUNT(*) AS RecordCount FROM UserStats
+    UNION ALL
+    SELECT 
+        'PostStatistics', 
+        COUNT(*) FROM PostStats
+)
+SELECT 
+    Source, 
+    RecordCount 
+FROM 
+    AggregatedResults;

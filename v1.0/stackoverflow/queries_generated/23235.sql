@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    WHERE rp.PostTypeId = 1 AND rp.PostRank <= 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        p.Score,
+        ph.Comment,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Open'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Undeleted'
+            ELSE 'Other'
+        END AS HistoryType
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= NOW() - INTERVAL '6 months'
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        string_agg(cr.Name, ', ') AS CloseReasonNames
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+SELECT 
+    tq.Title,
+    tq.CreationDate,
+    tq.OwnerDisplayName,
+    tq.Score,
+    tq.ViewCount,
+    tq.CommentCount,
+    COALESCE(cr.CloseReasonNames, 'No Closure') AS RecentCloseReasons,
+    COUNT(DISTINCT v.UserId) AS UpvoteCount,
+    MAX(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END) AS LastUpvoteDate,
+    SUM(CASE WHEN phd.HistoryType = 'Closed/Open' THEN 1 ELSE 0 END) AS ClosureOperationsCount,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY phd.CreationDate) AS MedianHistoryOperationDate
+FROM TopQuestions tq
+LEFT JOIN Votes v ON tq.Id = v.PostId
+LEFT JOIN PostHistoryDetails phd ON tq.Id = phd.PostId
+LEFT JOIN CloseReasons cr ON tq.Id = cr.PostId
+GROUP BY 
+    tq.Title, 
+    tq.CreationDate, 
+    tq.OwnerDisplayName, 
+    tq.Score, 
+    tq.ViewCount, 
+    tq.CommentCount, 
+    cr.CloseReasonNames
+ORDER BY 
+    tq.Score DESC;

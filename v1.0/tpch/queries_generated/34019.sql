@@ -1,0 +1,71 @@
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        COUNT(DISTINCT l.l_orderkey) AS unique_order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' 
+    GROUP BY c.c_custkey, c.c_name
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+top_parts AS (
+    SELECT 
+        pd.p_partkey,
+        pd.p_name,
+        pd.p_retailprice,
+        pd.p_comment
+    FROM part_details pd
+    WHERE pd.price_rank <= 5
+),
+final_report AS (
+    SELECT 
+        os.c_name,
+        ns.n_name AS supplier_nation,
+        tp.p_name,
+        os.total_spent,
+        os.order_count,
+        ns.avg_account_balance
+    FROM order_summary os
+    JOIN customer c ON os.c_custkey = c.c_custkey
+    LEFT JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    LEFT JOIN nation_summary ns ON s.s_nationkey = ns.n_nationkey
+    LEFT JOIN top_parts tp ON tp.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost = (SELECT MIN(ps_sub.ps_supplycost) 
+                                   FROM partsupp ps_sub 
+                                   WHERE ps_sub.ps_partkey = tp.p_partkey)
+    )
+)
+SELECT 
+    f.c_name,
+    f.supplier_nation,
+    f.p_name,
+    f.total_spent,
+    f.order_count,
+    COALESCE(f.avg_account_balance, 0) AS avg_account_balance
+FROM final_report f
+WHERE f.total_spent > (SELECT AVG(total_spent) FROM order_summary)
+ORDER BY f.total_spent DESC, f.order_count DESC;

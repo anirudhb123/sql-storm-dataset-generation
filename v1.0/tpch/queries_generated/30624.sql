@@ -1,0 +1,35 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+LineitemDetails AS (
+    SELECT l.*, 
+           (l.l_extendedprice * (1 - l.l_discount)) AS net_price,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+)
+SELECT p.p_name,
+       SUM(ld.net_price) AS total_sales,
+       COUNT(DISTINCT lo.o_orderkey) AS order_count,
+       sr.r_name AS region_name,
+       s.s_name AS supplier_name
+FROM part p
+JOIN LineitemDetails ld ON p.p_partkey = ld.l_partkey
+LEFT JOIN RecentOrders lo ON ld.l_orderkey = lo.o_orderkey
+JOIN supplier s ON ld.l_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region sr ON n.n_regionkey = sr.r_regionkey
+WHERE ld.price_rank <= 3
+GROUP BY p.p_name, sr.r_name, s.s_name
+HAVING SUM(ld.net_price) IS NOT NULL AND COUNT(DISTINCT lo.o_orderkey) > 5
+ORDER BY total_sales DESC, p.p_name
+LIMIT 10;

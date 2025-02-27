@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER(PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), 
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) OVER(PARTITION BY p.p_partkey) AS total_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(DISTINCT o.o_orderkey) OVER(PARTITION BY c.c_custkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice IS NOT NULL AND o.o_orderstatus = 'O' 
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(COALESCE(o.o_totalprice, 0)) AS total_revenue,
+    AVG(COALESCE(lp.l_extendedprice, 0)) AS avg_lineitem_price,
+    COUNT(DISTINCT p.p_partkey) FILTER (WHERE p.total_availqty > 100) AS popular_parts_count
+FROM nation ns
+LEFT JOIN customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN CustomerOrders o ON c.c_custkey = o.c_custkey
+LEFT JOIN FilteredParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50)
+LEFT JOIN lineitem lp ON lp.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = lp.l_orderkey AND o.o_totalprice > ANY (SELECT AVG(o2.o_totalprice) FROM orders o2))
+GROUP BY ns.n_name
+HAVING SUM(COALESCE(o.o_totalprice, 0) - COALESCE(lp.l_discount, 0)) > 10000 
+   OR COUNT(DISTINCT p.p_partkey) = 0
+ORDER BY total_revenue DESC
+LIMIT 10;

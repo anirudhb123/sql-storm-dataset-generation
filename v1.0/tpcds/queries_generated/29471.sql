@@ -1,0 +1,73 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+FormattedSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(sa.total_sales, 0) AS total_sales,
+        COALESCE(sa.total_quantity, 0) AS total_quantity,
+        CASE 
+            WHEN COALESCE(sa.total_sales, 0) = 0 THEN 'No Sales'
+            WHEN COALESCE(sa.total_sales, 0) < 1000 THEN 'Low Sales'
+            WHEN COALESCE(sa.total_sales, 0) BETWEEN 1000 AND 10000 THEN 'Moderate Sales'
+            ELSE 'High Sales'
+        END AS sales_category
+    FROM 
+        item i
+    LEFT JOIN 
+        ItemSales sa ON i.i_item_sk = sa.ws_item_sk
+),
+SalesReport AS (
+    SELECT 
+        cd.full_name,
+        cd.ca_city,
+        cd.ca_state,
+        fs.i_item_id,
+        fs.i_item_desc,
+        fs.total_sales,
+        fs.total_quantity,
+        fs.sales_category
+    FROM 
+        CustomerData cd
+    JOIN 
+        FormattedSales fs ON cd.c_customer_sk = fs.total_quantity -- Assume mapping for demonstration purposes
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    i_item_id,
+    i_item_desc,
+    FORMAT(total_sales, 'C', 'en-US') AS formatted_sales,
+    total_quantity,
+    sales_category
+FROM 
+    SalesReport
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

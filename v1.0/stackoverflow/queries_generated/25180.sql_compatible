@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 
+),
+PostDetails AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.Tags,
+        fp.OwnerDisplayName,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Comments c ON fp.PostId = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Body, fp.Tags, fp.OwnerDisplayName, fp.CreationDate, fp.ViewCount, fp.Score
+)
+SELECT 
+    pd.*,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(pd.Tags, 2, length(pd.Tags) - 2), '><'))::integer)
+                     WHERE t.TagName IS NOT NULL)
+GROUP BY 
+    pd.PostId, pd.Title, pd.Body, pd.Tags, pd.OwnerDisplayName, pd.CreationDate, pd.ViewCount, pd.Score
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

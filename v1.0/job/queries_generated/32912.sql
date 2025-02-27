@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        cmt.movie_id,
+        CONCAT(ah.movie_title, ' -> ', cmt.title) AS movie_title,
+        cmt.production_year,
+        mh.level + 1,
+        path || cmt.title
+    FROM
+        aka_title cmt
+    JOIN
+        MovieHierarchy mh ON cmt.episode_of_id = mh.movie_id
+)
+SELECT
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(n.gender, 'Unknown') AS gender,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    STRING_AGG(DISTINCT n.name, ', ') AS actors,
+    MAX(cct.kind) AS company_type_used,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS awards_count
+FROM
+    MovieHierarchy m
+LEFT JOIN
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN
+    name n ON ci.person_id = n.imdb_id
+LEFT JOIN
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN
+    movie_info mi ON m.movie_id = mi.movie_id
+WHERE 
+    m.production_year >= 2000
+    AND m.production_year <= 2023
+GROUP BY
+    m.id, m.title, m.production_year, n.gender
+HAVING
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY
+    m.production_year DESC,
+    cast_count DESC
+LIMIT 50;

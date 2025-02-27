@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+PivotedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS item_count,
+        MAX(l.l_shipdate) AS latest_shipdate,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+NullFilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ps.ps_availqty, 0) AS availability,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice 
+        END AS adjusted_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_brand LIKE 'Brand%'
+)
+SELECT 
+    n.n_name,
+    SUM(li.total_revenue) AS total_revenue_generated,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    MAX(li.latest_shipdate) AS last_shipdate,
+    COUNT(rd.s_suppkey) AS supplier_count,
+    AVG(CASE 
+            WHEN rd.rank = 1 THEN rd.s_acctbal 
+            ELSE NULL 
+        END) AS avg_top_supplier_account_balance
+FROM 
+    RecentOrders ro
+JOIN 
+    PivotedLineItems li ON ro.o_orderkey = li.l_orderkey
+JOIN 
+    RankedSuppliers rd ON rd.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM NullFilteredParts p
+        LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+        WHERE p.availability > 10
+    )
+JOIN 
+    customer c ON c.c_custkey = ro.o_custkey
+JOIN 
+    nation n ON n.n_nationkey = c.c_nationkey
+WHERE 
+    (li.item_count > 2 OR li.distinct_parts > 5)
+    AND (n.n_name IS NOT NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(li.total_revenue) > 10000
+ORDER BY 
+    total_revenue_generated DESC
+LIMIT 10;

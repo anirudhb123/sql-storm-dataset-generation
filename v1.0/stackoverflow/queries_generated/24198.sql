@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.AcceptedAnswerId IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+ClosedPostCount AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ClosedCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    rb.BadgeCount,
+    rb.BadgeNames,
+    p_h.HistoryTypes,
+    p_h.LastHistoryDate,
+    COALESCE(cpc.ClosedCount, 0) AS ClosedCount
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges rb ON p.OwnerUserId = rb.UserId
+LEFT JOIN 
+    PostHistoryInfo p_h ON p.Id = p_h.PostId
+LEFT JOIN 
+    ClosedPostCount cpc ON p.Id = cpc.PostId
+WHERE 
+    p.Rank <= 5
+    AND (p.Score > 100 OR p.ViewCount > 1000)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM Votes v
+        WHERE v.PostId = p.Id AND v.VoteTypeId = 3
+    )
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

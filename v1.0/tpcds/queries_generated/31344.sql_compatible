@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_order_number, ws_item_sk, ws_quantity, ws_sales_price, 
+           ws_ext_sales_price, ws_ext_tax, 
+           ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_item_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+inventory_summary AS (
+    SELECT inv_item_sk, SUM(inv_quantity_on_hand) AS total_stock
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+customer_info AS (
+    SELECT c_customer_sk, c_preferred_cust_flag, cd_gender, cd_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_and_inventory AS (
+    SELECT s.ws_order_number, s.ws_item_sk, s.ws_quantity, s.ws_sales_price, 
+           s.ws_ext_sales_price, s.ws_ext_tax, 
+           inv.total_stock, 
+           ci.c_preferred_cust_flag, ci.cd_gender,
+           COALESCE(ci.cd_income_band_sk, -1) AS income_band
+    FROM sales_cte s
+    LEFT JOIN inventory_summary inv ON s.ws_item_sk = inv.inv_item_sk
+    LEFT JOIN customer_info ci ON s.ws_order_number = ci.c_customer_sk
+)
+SELECT 
+    si.ws_order_number,
+    si.ws_item_sk,
+    si.ws_quantity,
+    si.ws_sales_price,
+    si.ws_ext_sales_price,
+    si.ws_ext_tax,
+    si.total_stock,
+    si.c_preferred_cust_flag,
+    CASE 
+        WHEN si.cd_gender = 'F' AND si.income_band = 1 THEN 'Female Low Income'
+        WHEN si.cd_gender = 'F' AND si.income_band > 1 THEN 'Female High Income'
+        WHEN si.cd_gender = 'M' AND si.income_band = 1 THEN 'Male Low Income'
+        WHEN si.cd_gender = 'M' AND si.income_band > 1 THEN 'Male High Income'
+        ELSE 'Unknown'
+    END AS customer_segment,
+    COUNT(*) OVER (PARTITION BY si.ws_item_sk) AS order_count,
+    AVG(si.ws_sales_price) OVER (PARTITION BY si.ws_item_sk) AS avg_sales_price,
+    RANK() OVER (ORDER BY SUM(si.ws_ext_sales_price) DESC) AS sales_rank
+FROM sales_and_inventory si
+WHERE si.total_stock IS NOT NULL
+ORDER BY sales_rank
+FETCH FIRST 100 ROWS ONLY;

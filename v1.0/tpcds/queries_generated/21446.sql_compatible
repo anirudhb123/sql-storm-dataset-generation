@@ -1,0 +1,58 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        CASE 
+            WHEN cr_returned_date_sk IS NOT NULL THEN cr_returning_customer_sk 
+            ELSE NULL 
+        END AS returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_qty,
+        SUM(cr_return_amount) AS total_return_amount,
+        DENSE_RANK() OVER (PARTITION BY cr_refunded_customer_sk ORDER BY SUM(cr_return_amount) DESC) AS rank_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk, cr_refunded_customer_sk
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_qty,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighValueReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        total_returned_qty,
+        total_return_amount
+    FROM 
+        CustomerReturns
+    WHERE 
+        rank_return_amount = 1 
+        AND total_return_amount > 100
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(hr.total_returned_qty, 0) AS top_returned_quantity,
+    COALESCE(hr.total_return_amount, 0) AS top_return_amount,
+    i.ws_item_sk AS i_item_id,  -- Changed to use correct alias
+    i.i_item_desc,
+    i.i_current_price,
+    CASE 
+        WHEN hr.total_returned_qty > i.total_sold_qty * 0.1 THEN 'High Return Rate' 
+        ELSE 'Normal Return Rate' 
+    END AS return_rate_category
+FROM 
+    customer c
+LEFT JOIN 
+    HighValueReturns hr ON c.c_customer_sk = hr.returning_customer_sk
+LEFT JOIN 
+    ItemSales i ON hr.returning_customer_sk = i.ws_item_sk  -- Corrected column name to reference proper join
+WHERE 
+    (c.c_birth_year IS NULL OR c.c_birth_year < 1980)
+    AND (i.total_sales_amount IS NULL OR i.total_sales_amount <= 1000)
+ORDER BY 
+    c.c_customer_id, top_returned_quantity DESC;  -- Fixed ordering to use alias

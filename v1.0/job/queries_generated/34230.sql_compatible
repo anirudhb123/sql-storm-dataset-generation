@@ -1,0 +1,51 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(c.title, 'N/A') AS episode_of,
+        1 AS level
+    FROM
+        aka_title m
+    LEFT JOIN 
+        aka_title c ON m.episode_of_id = c.id
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(c.title, 'N/A') AS episode_of,
+        h.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_hierarchy h ON m.episode_of_id = h.movie_id
+)
+
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.episode_of,
+    COUNT(DISTINCT c.person_id) AS num_cast,
+    COUNT(DISTINCT m.id) AS num_movie_companies,
+    AVG(CASE WHEN p.info IS NOT NULL THEN 1 ELSE 0 END) AS avg_person_info
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    cast_info c ON h.movie_id = c.movie_id
+LEFT JOIN 
+    movie_companies m ON h.movie_id = m.movie_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Birthdate')
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.episode_of
+HAVING 
+    AVG(CASE WHEN p.info IS NOT NULL THEN 1 ELSE 0 END) > 0.5
+ORDER BY 
+    h.production_year DESC,
+    num_cast DESC,
+    h.title;

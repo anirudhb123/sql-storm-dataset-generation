@@ -1,0 +1,27 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, c.c_name, 
+           p.p_brand, p.p_type, l.l_quantity, l.l_extendedprice
+    FROM RankedOrders ro
+    JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN customer c ON ro.o_orderkey = c.c_custkey
+    WHERE ro.rank <= 10 AND s.s_acctbal > 5000
+)
+SELECT r.r_name, COUNT(DISTINCT to.o_orderkey) AS order_count, 
+       SUM(to.l_extendedprice) AS total_revenue, 
+       AVG(to.o_totalprice) AS avg_order_value
+FROM TopOrders to
+JOIN supplier s ON to.s_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

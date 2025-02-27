@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    at.title AS movie_title,
+    COUNT(DISTINCT cc.subject_id) AS complete_cast_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    AVG(CASE WHEN mi.note IS NOT NULL THEN 1 ELSE NULL END) OVER (PARTITION BY at.production_year) AS avg_mi_notes_flagged,
+    MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Birth Date') THEN pi.info END) AS actor_birth_date
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    a.name IS NOT NULL
+    AND at.production_year >= 2000
+    AND (LOWER(at.title) LIKE '%adventure%' OR LOWER(at.title) LIKE '%action%')
+GROUP BY 
+    a.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT cc.subject_id) > 0
+ORDER BY 
+    avg_mi_notes_flagged DESC, complete_cast_count DESC;

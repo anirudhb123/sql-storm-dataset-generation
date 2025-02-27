@@ -1,0 +1,53 @@
+WITH RecursiveMovieAverages AS (
+    SELECT 
+        mt.title AS movie_title,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS avg_title_length,
+        AVG(CASE WHEN mi.info_type_id = 2 THEN LENGTH(mi.info) END) AS avg_note_length
+    FROM 
+        title mt
+    JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    GROUP BY 
+        mt.title
+),
+CastInfoDetails AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(aka.name) AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+    GROUP BY 
+        ci.person_id
+),
+TopMovies AS (
+    SELECT 
+        mv.movie_title,
+        mca.avg_title_length,
+        mca.avg_note_length,
+        cd.actor_name,
+        cd.movie_count
+    FROM 
+        RecursiveMovieAverages mca
+    JOIN 
+        CastInfoDetails cd ON cd.movie_count > 5
+    ORDER BY 
+        mca.avg_title_length DESC,
+        mca.avg_note_length DESC
+    LIMIT 10
+)
+SELECT 
+    tm.movie_title,
+    tm.avg_title_length,
+    tm.avg_note_length,
+    tm.actor_name,
+    tm.movie_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.avg_title_length > 30
+ORDER BY 
+    tm.movie_count DESC;
+

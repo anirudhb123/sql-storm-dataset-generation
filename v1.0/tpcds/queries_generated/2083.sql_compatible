@@ -1,0 +1,70 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_net_paid
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_order_number
+), 
+ranked_sales AS (
+    SELECT 
+        ws_item_sk AS ss_item_sk,
+        total_sales,
+        order_count,
+        avg_net_paid,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+), 
+customer_details AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'No Estimate'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+item_details AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        i.i_current_price,
+        COALESCE(i.i_brand, 'Unknown') AS item_brand
+    FROM 
+        item i
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    i.i_item_desc,
+    j.total_sales,
+    j.order_count,
+    j.avg_net_paid,
+    c.cd_gender AS customer_gender,
+    i.item_brand
+FROM 
+    ranked_sales j
+JOIN 
+    customer_details c ON c.c_customer_sk = j.ws_customer_sk
+JOIN 
+    item_details i ON i.i_item_sk = j.ss_item_sk
+WHERE 
+    j.sales_rank = 1 
+    AND c.cd_gender = 'M'
+    AND j.total_sales > (SELECT AVG(total_sales) FROM ranked_sales) 
+ORDER BY 
+    j.total_sales DESC
+LIMIT 100;

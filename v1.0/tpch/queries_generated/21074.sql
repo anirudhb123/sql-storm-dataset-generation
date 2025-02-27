@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_comment LIKE '%trusted%'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TopCustomers AS (
+    SELECT c_custkey, c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c_custkey, c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+PartSupply AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    INNER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+HighValueLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_extendedprice * (1 - l.l_discount) AS net_price
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.20 AND l.l_returnflag = 'N'
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT r.r_name, 
+       COALESCE(c.total_spent, 0) AS total_spent,
+       COALESCE(sh.supp_count, 0) AS trusted_suppliers,
+       p.avg_supplycost
+FROM region r
+LEFT JOIN (
+    SELECT n.n_regionkey, SUM(c.total_spent) AS total_spent
+    FROM nation n
+    LEFT JOIN TopCustomers c ON n.n_nationkey = c.c_custkey
+    GROUP BY n.n_regionkey
+) c ON r.r_regionkey = c.n_regionkey
+LEFT JOIN (
+    SELECT n.n_nationkey, COUNT(DISTINCT sh.s_suppkey) AS supp_count
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_nationkey
+) sh ON r.r_regionkey = (SELECT r_regionkey FROM nation WHERE n_nationkey = sh.n_nationkey)
+JOIN PartSupply p ON p.p_partkey IN (SELECT l.l_partkey FROM HighValueLineItems l WHERE l.l_orderkey IN 
+    (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O'))
+WHERE EXISTS (SELECT 1 FROM CustomerRank cr WHERE cr.rank <= 10 AND cr.c_custkey = c.c_custkey)
+ORDER BY r.r_name, total_spent DESC;

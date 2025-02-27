@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.LastActivityDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        CreationDate,
+        LastActivityDate,
+        OwnerDisplayName,
+        AnswerCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '>')) AS TagName,
+        COUNT(*) AS Count
+    FROM 
+        TopPosts
+    GROUP BY 
+        TagName
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Body,
+    p.Tags,
+    p.CreationDate,
+    p.OwnerDisplayName,
+    p.AnswerCount,
+    p.UpVotes,
+    p.DownVotes,
+    tc.TagName,
+    tc.Count
+FROM 
+    TopPosts p
+LEFT JOIN 
+    TagCounts tc ON tc.TagName = UNNEST(string_to_array(p.Tags, '>'))
+ORDER BY 
+    p.UpVotes DESC, 
+    p.AnswerCount DESC;

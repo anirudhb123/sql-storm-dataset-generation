@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesGrowth AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+    HAVING 
+        SUM(ws.ws_net_profit) > 1000000
+    UNION ALL
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    JOIN 
+        SalesGrowth sg ON d.d_year = sg.d_year + 1
+    GROUP BY 
+        d.d_year
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+    GROUP BY 
+        sr_returned_date_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id
+    ORDER BY 
+        total_spent DESC
+    LIMIT 10
+)
+SELECT 
+    d.d_year,
+    COALESCE(sg.total_profit, 0) AS web_sales_profit,
+    COALESCE(cr.total_returns, 0) AS total_store_returns,
+    tc.c_customer_id,
+    tc.total_spent
+FROM 
+    date_dim d
+LEFT JOIN 
+    SalesGrowth sg ON d.d_year = sg.d_year
+LEFT JOIN 
+    CustomerReturns cr ON d.d_date_sk = cr.sr_returned_date_sk
+LEFT JOIN 
+    TopCustomers tc ON tc.total_spent IS NOT NULL
+WHERE 
+    d.d_year BETWEEN 2021 AND 2023
+ORDER BY 
+    d.d_year, web_sales_profit DESC;

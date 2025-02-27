@@ -1,0 +1,92 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS QuestionsCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpVotes,
+        DownVotes,
+        PostsCount,
+        QuestionsCount,
+        AvgPostScore,
+        VoteRank
+    FROM 
+        UserStatistics
+    WHERE 
+        VoteRank <= 10
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.ID), 0) AS CommentsCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 AND PH.CreationDate <= P.LastActivityDate THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 52 AND PH.CreationDate <= P.LastActivityDate THEN 1 ELSE 0 END), 0) AS HotQuestions
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Title, P.CreationDate
+), 
+DesirablePosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.CommentsCount,
+        PS.CloseCount,
+        PS.HotQuestions,
+        ROW_NUMBER() OVER (PARTITION BY PS.OwnerUserId ORDER BY PS.CommentsCount DESC, PS.CreationDate DESC) AS RN,
+        JSON_AGG(DISTINCT PHT.Name) AS History
+    FROM 
+        PostStatistics PS
+    JOIN 
+        PostHistory PH ON PS.PostId = PH.PostId
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PS.PostId, PS.Title, PS.CreationDate, PS.CommentsCount, PS.CloseCount, PS.HotQuestions, PS.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.UpVotes,
+    U.DownVotes,
+    D.Title,
+    D.CommentsCount,
+    D.CloseCount,
+    D.HotQuestions,
+    D.History
+FROM 
+    TopUsers U
+JOIN 
+    DesirablePosts D ON U.UserId = D.OwnerUserId
+WHERE 
+    D.RN = 1
+ORDER BY 
+    U.Reputation DESC, D.CommentsCount DESC;

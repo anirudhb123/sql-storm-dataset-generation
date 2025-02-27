@@ -1,0 +1,30 @@
+WITH supplier_stats AS (
+    SELECT 
+        s.n_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+)
+SELECT 
+    r.r_name,
+    ss.supplier_count,
+    ss.total_avail_qty,
+    ss.avg_supply_cost,
+    co.order_count,
+    co.total_revenue
+FROM region r
+LEFT JOIN supplier_stats ss ON r.r_regionkey = ss.n_nationkey
+LEFT JOIN customer_orders co ON r.r_regionkey = co.c_nationkey
+ORDER BY r.r_name;

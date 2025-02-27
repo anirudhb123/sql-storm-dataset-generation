@@ -1,0 +1,35 @@
+
+WITH String_Processed AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        REPLACE(LOWER(c.c_email_address), '@', ' at ') AS email_obfuscated,
+        TRIM(c.c_salutation) AS salutation_trimmed,
+        CASE 
+            WHEN cd.gender = 'M' THEN 'Mr.'
+            WHEN cd.gender = 'F' THEN 'Ms.'
+            ELSE 'Mx.'
+        END AS formal_title,
+        CONCAT('Address:', ca.ca_street_number, ' ', ca.ca_street_name, ', ', ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    SUBSTR(full_name, 1, 20) AS name_excerpt,
+    LENGTH(full_name) AS full_name_length,
+    email_obfuscated,
+    salutation_trimmed,
+    formal_title,
+    full_address,
+    COUNT(*) OVER() AS total_customers
+FROM 
+    String_Processed
+WHERE 
+    LENGTH(full_name) > 10
+ORDER BY 
+    full_name_length DESC
+FETCH FIRST 100 ROWS ONLY;

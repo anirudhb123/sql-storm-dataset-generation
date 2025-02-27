@@ -1,0 +1,62 @@
+
+WITH RatedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(COALESCE(r.rating, 0)) AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        (SELECT movie_id, rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) r ON t.id = r.movie_id
+    GROUP BY 
+        t.title, 
+        t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count, 
+        avg_rating,
+        RANK() OVER (ORDER BY avg_rating DESC, actor_count DESC) AS rank
+    FROM 
+        RatedMovies
+),
+MovieKeywords AS (
+    SELECT 
+        m.title, 
+        k.keyword
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    tm.actor_count,
+    tm.avg_rating,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.title
+WHERE 
+    tm.rank <= 10
+GROUP BY 
+    tm.title, 
+    tm.production_year, 
+    tm.actor_count, 
+    tm.avg_rating
+HAVING 
+    tm.avg_rating > 5 AND COUNT(mk.keyword) > 3
+ORDER BY 
+    tm.avg_rating DESC, 
+    tm.title;

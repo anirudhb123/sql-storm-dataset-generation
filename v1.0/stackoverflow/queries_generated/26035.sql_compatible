@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(co.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::integer[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Body, p.CreationDate, p.Score, p.ViewCount, p.Tags
+),
+TaggedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.TagList,
+        rp.HasAcceptedAnswer,
+        ROW_NUMBER() OVER (PARTITION BY unnest(rp.TagList) ORDER BY rp.Score DESC, rp.ViewCount DESC) AS TagRank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    tp.TagList,
+    COUNT(tp.PostId) AS TotalPosts,
+    SUM(tp.HasAcceptedAnswer) AS TotalAcceptedAnswers,
+    AVG(tp.Score) AS AvgScore,
+    AVG(tp.ViewCount) AS AvgViewCount
+FROM 
+    TaggedPosts tp
+WHERE 
+    tp.TagRank <= 5 
+GROUP BY 
+    tp.TagList
+ORDER BY 
+    TotalPosts DESC, AvgScore DESC;

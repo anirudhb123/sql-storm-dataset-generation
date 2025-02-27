@@ -1,0 +1,63 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        1 AS level
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderstatus = 'O'
+    
+    UNION ALL
+
+    SELECT 
+        oh.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        oh.level + 1
+    FROM 
+        OrderHierarchy oh
+    JOIN 
+        orders o ON oh.o_orderkey = o.o_custkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS total_returned_price,
+    AVG(l.l_discount) AS avg_discount,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    r.r_name AS region_name,
+    CASE 
+        WHEN SUM(l.l_extendedprice) IS NULL THEN 'No Sales' 
+        ELSE 'Sales Present' 
+    END AS sales_info
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, r.r_name
+HAVING 
+    SUM(l.l_extendedprice) > 1000
+ORDER BY 
+    total_returned_price DESC, avg_discount ASC
+LIMIT 10;

@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(ct.id) OVER (PARTITION BY t.id) AS cast_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN
+        aka_name an ON ci.person_id = an.person_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+
+TitleKeywords AS (
+    SELECT
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY
+        mt.movie_id
+),
+
+PersonNotableInfo AS (
+    SELECT
+        pi.person_id,
+        STRING_AGG(DISTINCT pi.info, '; ') AS notable_info
+    FROM
+        person_info pi
+    WHERE
+        pi.info IS NOT NULL
+        AND pi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%notable%')
+    GROUP BY
+        pi.person_id
+)
+
+SELECT
+    rt.title,
+    rt.production_year,
+    rt.title_rank,
+    rt.cast_count,
+    tk.keywords,
+    (SELECT COUNT(DISTINCT ci.person_id)
+     FROM cast_info ci
+     WHERE ci.movie_id = rt.title_id AND ci.role_id IN (
+         SELECT id FROM role_type WHERE role LIKE 'Lead%')
+     ) AS lead_actors,
+    pn.notable_info
+FROM
+    RankedTitles rt
+LEFT JOIN
+    TitleKeywords tk ON rt.title_id = tk.movie_id
+LEFT JOIN
+    PersonNotableInfo pn ON rt.id = pn.person_id
+WHERE
+    rt.title_rank <= 5
+    AND rt.cast_count > 0
+    AND rt.production_year > (SELECT AVG(production_year) FROM aka_title)
+ORDER BY
+    rt.production_year DESC, rt.title_rank
+FETCH FIRST 10 ROWS ONLY;

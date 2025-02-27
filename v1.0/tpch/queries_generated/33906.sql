@@ -1,0 +1,67 @@
+WITH RECURSIVE sales_by_region(r_region, total_sales) AS (
+    SELECT 
+        r_name, 
+        SUM(o_totalprice) 
+    FROM 
+        region 
+    LEFT JOIN 
+        nation ON r_regionkey = n_regionkey 
+    LEFT JOIN 
+        supplier ON n_nationkey = s_nationkey 
+    LEFT JOIN 
+        partsupp ON s_suppkey = ps_suppkey 
+    LEFT JOIN 
+        part ON ps_partkey = p_partkey 
+    LEFT JOIN 
+        lineitem ON p_partkey = l_partkey 
+    LEFT JOIN 
+        orders ON l_orderkey = o_orderkey 
+    GROUP BY 
+        r_name
+    UNION ALL
+    SELECT 
+        r_region, 
+        SUM(total_sales) * 1.1 
+    FROM 
+        sales_by_region 
+    WHERE 
+        total_sales IS NOT NULL 
+    GROUP BY 
+        r_region
+), ranked_sales AS (
+    SELECT 
+        r_region, 
+        total_sales, 
+        RANK() OVER (ORDER BY total_sales DESC) as sales_rank 
+    FROM 
+        sales_by_region
+), filtered_sales AS (
+    SELECT 
+        r_region, 
+        total_sales 
+    FROM 
+        ranked_sales 
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    f.r_region, 
+    f.total_sales,
+    COALESCE(p.p_comment, 'No comments available') AS part_comment,
+    COUNT(DISTINCT s.s_suppkey) AS num_suppliers
+FROM 
+    filtered_sales f 
+LEFT JOIN 
+    partsupp ps ON ps.ps_supplycost = f.total_sales 
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey 
+WHERE 
+    f.total_sales > (SELECT AVG(total_sales) FROM filtered_sales)
+GROUP BY 
+    f.r_region, f.total_sales, p.p_comment
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 1 
+ORDER BY 
+    f.total_sales DESC;

@@ -1,0 +1,63 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 100.00
+
+    UNION ALL
+
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_custkey = o.o_custkey AND o.o_orderdate > oh.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierAggregates AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    o.o_orderkey,
+    c.c_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_value,
+    r.r_name AS region,
+    ph.supp_partkey,
+    s.total_supply_cost AS max_supply_cost,
+    p.p_name,
+    pc.order_count,
+    o.o_orderdate,
+    ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank_per_nation
+FROM orders o
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN region r ON c.c_nationkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey = c.c_nationkey
+    )
+LEFT OUTER JOIN (
+    SELECT ps.ps_partkey, MIN(ps.ps_supplycost) AS supp_partkey
+    FROM partsupp ps
+    JOIN SupplierAggregates sa ON ps.ps_partkey = sa.ps_partkey
+    WHERE sa.total_supply_cost IS NOT NULL
+    GROUP BY ps.ps_partkey
+) ph ON l.l_partkey = ph.supp_partkey
+JOIN SupplierAggregates s ON l.l_partkey = s.ps_partkey
+JOIN PartDetails p ON l.l_partkey = p.p_partkey
+JOIN CustomerOrderCounts pc ON c.c_custkey = pc.c_custkey
+WHERE (o.o_orderdate BETWEEN '1994-01-01' AND '1995-12-31' OR o.o_totalprice IS NULL)
+AND (p.supplier_count > 1 OR p.supplier_count IS NULL)
+GROUP BY o.o_orderkey, c.c_name, r.r_name, ph.supp_partkey, s.total_supply_cost, p.p_name, pc.order_count, o.o_orderdate
+HAVING total_value > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+ORDER BY o.o_orderdate DESC, rank_per_nation ASC;

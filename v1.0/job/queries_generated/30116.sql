@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mt.id AS movie_id,
+        CAST(NULL AS INTEGER) AS episode_id,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mt.id AS movie_id,
+        mc.linked_movie_id AS episode_id,
+        mh.depth + 1 AS depth
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link mc ON mh.movie_id = mc.movie_id
+    WHERE 
+        mh.episode_id IS NULL
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.id) AS character_count,
+    AVG(mh.depth) AS avg_episode_depth,
+    STRING_AGG(DISTINCT mt.title, ', ') AS movies,
+    CASE 
+        WHEN COUNT(DISTINCT mt.id) > 5 THEN 'Prolific Actor'
+        ELSE 'Regular Actor'
+    END AS actor_type
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    char_name ch ON ci.role_id = ch.id
+LEFT JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name <> ''
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mt.id) > 2
+ORDER BY 
+    character_count DESC, avg_episode_depth ASC
+LIMIT 10;

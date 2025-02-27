@@ -1,0 +1,30 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT n.n_name AS nation_name,
+           r.r_name AS region_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_name, r.r_name
+    UNION ALL
+    SELECT n.n_name,
+           r.r_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) + rs.total_sales AS total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN regional_sales rs ON n.n_name = rs.nation_name
+    WHERE (l.l_shipdate - l.l_orderdate) > INTERVAL '10 DAY'
+    GROUP BY n.n_name, r.r_name, rs.total_sales
+)
+SELECT region_name, SUM(total_sales) AS total_sales_amount
+FROM regional_sales
+GROUP BY region_name
+ORDER BY total_sales_amount DESC;

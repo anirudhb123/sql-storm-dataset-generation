@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rank,
+        SUM(ws.net_profit) OVER (PARTITION BY ws.web_site_sk) AS total_profit,
+        COUNT(*) OVER (PARTITION BY ws.web_site_sk) AS sales_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+)
+
+SELECT 
+    e.web_site_id,
+    COALESCE(e.total_profit, 0) AS total_web_profit,
+    COALESCE(e.sales_count, 0) AS total_sales_count,
+    COALESCE(r.first_order_number, 0) AS first_ranked_order
+FROM 
+    (SELECT 
+        w.web_site_id,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS sales_count
+    FROM 
+        web_site w
+    LEFT JOIN 
+        web_sales ws ON w.web_site_sk = ws.ws_web_site_sk
+    GROUP BY 
+        w.web_site_id
+    ) e
+LEFT JOIN 
+    (SELECT 
+        web_site_sk,
+        MIN(ws_order_number) AS first_order_number 
+    FROM 
+        RankedSales
+    WHERE 
+        rank = 1
+    GROUP BY 
+        web_site_sk
+    ) r ON e.web_site_id = r.web_site_sk 
+WHERE 
+    (e.total_profit > (SELECT AVG(total_profit) FROM (SELECT SUM(ws.net_profit) AS total_profit FROM web_sales ws GROUP BY ws.web_site_sk) AS avg_profit))
+    OR e.total_sales_count < (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_sold_date_sk IS NOT NULL)
+ORDER BY 
+    e.total_profit DESC
+LIMIT 10

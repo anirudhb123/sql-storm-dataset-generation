@@ -1,0 +1,70 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+MostValuableCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_sales_price, 0)) AS total_sales
+    FROM 
+        CustomerDetails c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+    HAVING 
+        SUM(COALESCE(ws.ws_sales_price, 0)) > (
+            SELECT AVG(total) FROM (
+                SELECT SUM(ws_sales_price) AS total 
+                FROM web_sales 
+                GROUP BY ws_bill_customer_sk
+            ) AS avg_total
+        )
+),
+ShippingStats AS (
+    SELECT 
+        sm.sm_type AS shipping_method,
+        COUNT(ws.ws_order_number) AS number_of_orders,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_type
+)
+SELECT 
+    mv.c_customer_id,
+    mv.total_sales,
+    ss.shipping_method,
+    ss.number_of_orders,
+    ss.average_profit
+FROM 
+    MostValuableCustomers mv
+JOIN 
+    ShippingStats ss ON mv.c_customer_id IN (
+        SELECT 
+            ws.ws_bill_customer_sk 
+        FROM 
+            web_sales ws 
+        JOIN 
+            ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+        GROUP BY 
+            ws.ws_bill_customer_sk, sm.sm_type
+    )
+ORDER BY 
+    mv.total_sales DESC;

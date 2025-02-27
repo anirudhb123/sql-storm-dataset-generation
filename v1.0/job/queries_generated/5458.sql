@@ -1,0 +1,43 @@
+WITH movie_details AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT co.name) AS companies
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        a.id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_names,
+    md.keywords,
+    COUNT(DISTINCT mk.keyword_id) AS unique_keyword_count,
+    COUNT(DISTINCT mc.company_id) AS unique_company_count
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_info mi ON md.movie_id = mi.movie_id
+WHERE 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Summary')
+GROUP BY 
+    md.movie_id;

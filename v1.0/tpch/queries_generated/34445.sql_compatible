@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           s.s_comment, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           s.s_comment, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+
+AvgLineItemCost AS (
+    SELECT l.l_partkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) / NULLIF(SUM(l.l_quantity), 0) AS avg_cost
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (ORDER BY s.s_acctbal DESC) AS ranking
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+)
+
+SELECT p.p_partkey, 
+       p.p_name, 
+       p.p_brand, 
+       p.p_retailprice, 
+       COALESCE(sh.hierarchy_level, 0) AS supplier_hierarchy_level,
+       al.avg_cost,
+       ts.ranking
+FROM part p
+LEFT JOIN AvgLineItemCost al ON p.p_partkey = al.l_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT c.c_nationkey 
+                                                     FROM customer c 
+                                                     WHERE c.c_custkey IN (SELECT o.o_custkey 
+                                                                           FROM orders o 
+                                                                           WHERE o.o_orderstatus = 'F'))
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey IN (SELECT ps.ps_suppkey 
+                                               FROM partsupp ps 
+                                               WHERE ps.ps_partkey = p.p_partkey)
+WHERE p.p_size > 10 AND 
+      (p.p_container IS NOT NULL OR p.p_brand <> 'Brand#23')
+ORDER BY ts.ranking NULLS LAST, p.p_retailprice DESC;

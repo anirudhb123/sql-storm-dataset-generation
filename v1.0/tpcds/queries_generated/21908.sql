@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DATE(d_date) AS sale_date
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk 
+    WHERE 
+        d_year = 2023 
+    GROUP BY 
+        ws_item_sk, d_date
+),
+RankedSales AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.total_sales,
+        sd.order_count,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        SalesData sd
+)
+SELECT 
+    ca.city AS customer_city, 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(COALESCE(rs.total_sales, 0)) AS total_sales_from_city,
+    AVG(rs.order_count) AS avg_orders_per_customer,
+    (SELECT MAX(total_sales) FROM RankedSales) AS max_sales,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_customer_id) > 10 THEN 'High'
+        WHEN COUNT(DISTINCT c.c_customer_id) BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low' 
+    END AS customer_density
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk = ca.ca_address_sk 
+LEFT JOIN 
+    RankedSales rs ON rs.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_class_id = 1)
+WHERE 
+    ca.ca_state = 'CA' 
+    AND ca.ca_city IS NOT NULL 
+GROUP BY 
+    ca.city
+HAVING 
+    SUM(rs.total_sales) > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY 
+    total_sales_from_city DESC
+FETCH FIRST 10 ROWS ONLY;

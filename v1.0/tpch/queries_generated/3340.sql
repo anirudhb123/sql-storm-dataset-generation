@@ -1,0 +1,59 @@
+WITH PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+NationInfo AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.psi_partkey,
+    p.p_name,
+    COALESCE(ps.ps_availqty, 0) AS available_quantity,
+    ps.ps_supplycost AS supply_cost,
+    n.n_name AS nation_name,
+    n.region_name,
+    c.total_spent,
+    p.p_retailprice - (ps.ps_supplycost * 1.1) AS adjusted_price
+FROM 
+    PartSupplierInfo p
+LEFT JOIN 
+    NationInfo n ON n.n_nationkey = (
+        SELECT s.s_nationkey 
+        FROM supplier s 
+        WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+    )
+LEFT JOIN 
+    CustomerOrders c ON c.total_spent > 10000
+WHERE 
+    p.rn = 1
+    AND (p.ps_supplycost IS NOT NULL OR p.ps_availqty > 50)
+ORDER BY 
+    adjusted_price DESC
+LIMIT 50;

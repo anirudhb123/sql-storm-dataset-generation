@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.RankByScore,
+        rp.CommentCount,
+        COALESCE(NULLIF(rp.UpVoteCount - rp.DownVoteCount, 0), 1) AS TotalVotes,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostsTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.OwnerDisplayName, rp.RankByScore, rp.CommentCount
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.TotalVotes,
+    pd.RankByScore,
+    pd.Tags,
+    CASE 
+        WHEN pd.RankByScore = 1 THEN 'Top Post'
+        WHEN pd.RankByScore <= 5 THEN 'High Performer'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM 
+    PostDetails pd
+WHERE 
+    pd.TotalVotes >= 0
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 50;

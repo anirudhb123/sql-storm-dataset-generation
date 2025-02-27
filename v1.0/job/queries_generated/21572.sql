@@ -1,0 +1,42 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_per_year
+    FROM aka_title at
+    WHERE at.production_year IS NOT NULL
+), 
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+), 
+TopMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        ac.total_actors,
+        rt.role AS movie_role
+    FROM RankedMovies rm
+    LEFT JOIN ActorCount ac ON rm.id = ac.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = ac.movie_id
+    LEFT JOIN role_type rt ON ci.role_id = rt.id
+    WHERE rm.rank_per_year <= 5 -- Top 5 movies per year
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    COALESCE(tm.total_actors, 0) AS actor_count,
+    LISTAGG(DISTINCT tm.movie_role, ', ') WITHIN GROUP (ORDER BY tm.movie_role) AS roles
+FROM TopMovies tm
+GROUP BY tm.movie_title, tm.production_year
+ORDER BY tm.production_year DESC, actor_count DESC
+LIMIT 20;
+
+-- Including a check for NULLs in various joins and ensuring proper handling of outer joins.
+-- This complex query retrieves the top 5 movies per year, the count of actors, and distinct roles played, 
+-- demonstrating the use of CTEs, window functions, and aggregation with considerations for NULLs.
+

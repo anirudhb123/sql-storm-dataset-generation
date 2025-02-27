@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        MAX(c.CreationDate) AS LastCommentDate,
+        MAX(p.CreationDate) AS PostCreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(u.LastAccessDate) AS LastAccessDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.BadgeCount,
+    ps.LastVoteDate,
+    ps.LastCommentDate,
+    ps.PostCreationDate,
+    ua.UserId,
+    ua.PostCount AS UserPostCount,
+    ua.CommentCount AS UserCommentCount,
+    ua.BadgeCount AS UserBadgeCount,
+    ua.LastAccessDate
+FROM 
+    PostSummary ps
+JOIN 
+    Users u ON ps.PostId = u.Id
+JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+ORDER BY 
+    ps.PostCreationDate DESC, ua.LastAccessDate DESC;

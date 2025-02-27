@@ -1,0 +1,53 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS balance_rank
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           ps.ps_supplycost,
+           ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+HighValuePartSuppliers AS (
+    SELECT ps_partkey,
+           ps_suppkey
+    FROM partsupp
+    WHERE ps_supplycost * ps_availqty > (
+        SELECT AVG(ps_supplycost * ps_availqty)
+        FROM partsupp
+    )
+)
+SELECT co.c_custkey,
+       co.c_name,
+       SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_extendedprice ELSE 0 END) AS total_returns,
+       SUM(CASE WHEN li.l_returnflag <> 'R' THEN li.l_extendedprice ELSE 0 END) AS total_sales,
+       COUNT(DISTINCT li.l_orderkey) AS order_count,
+       p.p_name,
+       AVG(ld.l_discount) AS average_discount,
+       COUNT(DISTINCT CASE WHEN rs.balance_rank = 1 THEN rs.s_suppkey END) AS top_suppliers_count
+FROM CustomerOrders co
+LEFT JOIN lineitem li ON co.c_custkey = li.l_orderkey
+LEFT JOIN PartSupplierDetails p ON li.l_partkey = p.p_partkey
+LEFT JOIN RankedSuppliers rs ON p.ps_suppkey = rs.s_suppkey
+LEFT JOIN HighValuePartSuppliers hv ON p.p_partkey = hv.ps_partkey
+WHERE co.total_spent IS NOT NULL
+  AND (co.order_count > 1 OR co.c_name LIKE '%Limited%')
+GROUP BY co.c_custkey, co.c_name, p.p_name
+ORDER BY total_sales DESC, total_returns DESC;

@@ -1,0 +1,67 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, ViewCount, CreationDate, CAST(0 AS INT) AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.ViewCount, p.CreationDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostsWithVoteCount AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        (COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS NetVotes
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+),
+TopPosts AS (
+    SELECT 
+        pwh.Id,
+        pwh.Title,
+        pwh.ViewCount,
+        pwh.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY pwh.ViewCount DESC) AS Rank
+    FROM PostsWithVoteCount pwh
+    WHERE pwh.NetVotes > 0
+    ORDER BY pwh.ViewCount DESC
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.PositivePosts,
+    us.NegativePosts,
+    us.TotalBadges,
+    tp.Title AS TopPostTitle,
+    tp.ViewCount AS TopPostViewCount,
+    tp.CreationDate AS TopPostCreationDate,
+    rh.Level AS PostLevel
+FROM UserStats us
+LEFT JOIN TopPosts tp ON us.UserId = tp.Id
+LEFT JOIN RecursivePostHierarchy rh ON tp.Id = rh.Id
+WHERE us.TotalPosts > 10
+ORDER BY us.TotalPosts DESC, tp.ViewCount DESC;

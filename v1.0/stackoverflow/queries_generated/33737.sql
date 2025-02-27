@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, ',') AS tag ON tag.value != ''
+    LEFT JOIN 
+        Tags t ON t.TagName = tag.value
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.AnswerCount, p.PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        MAX(u.LastAccessDate) AS LastActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        DATEDIFF(DAY, ph.CreationDate, GETDATE()) AS DaysClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = p.ExcerptPostId
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+)
+SELECT 
+    up.DisplayName AS UserName,
+    rp.Title AS PostTitle,
+    rp.Tags AS AssociatedTags,
+    rp.Score AS PostScore,
+    ua.PostCount AS UserPosts,
+    ua.TotalUpVotes AS UserUpVotes,
+    ua.TotalDownVotes AS UserDownVotes,
+    cp.DaysClosed AS DaysSinceClosed,
+    pt.TagName AS PopularTag,
+    COUNT(DISTINCT pt.PostCount) OVER (PARTITION BY pt.TagName) AS TagUsageCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserActivity ua ON rp.PostId = ua.UserId
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = rp.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(STRING_SPLIT(rp.Tags, ', '))
+WHERE 
+    rp.Rank <= 5 -- Top 5 posts by score in each PostType
+    AND ua.LastActivity >= DATEADD(MONTH, -1, GETDATE()) -- Users active in the last month
+ORDER BY 
+    rp.Score DESC, ua.PostCount DESC;

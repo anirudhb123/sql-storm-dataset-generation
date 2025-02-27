@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(rp.Score), 0) AS TotalScore,
+        COUNT(rp.Id) AS TotalPosts,
+        COUNT(DISTINCT rp.Id) AS DistinctPosts,
+        MAX(rp.TotalBounty) AS MaxBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ups.DisplayName,
+    ups.TotalViews,
+    ups.TotalScore,
+    ups.TotalPosts,
+    ups.DistinctPosts,
+    ups.MaxBounty,
+    CASE 
+        WHEN ups.MaxBounty IS NULL THEN 'No Bounties'
+        ELSE 'Has Bounties'
+    END AS BountyStatus,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = ups.UserId AND p.ViewCount > 1000) AS PopularPostsCount
+FROM 
+    UserPostStats ups
+ORDER BY 
+    ups.TotalScore DESC,
+    ups.TotalPosts DESC
+LIMIT 10;

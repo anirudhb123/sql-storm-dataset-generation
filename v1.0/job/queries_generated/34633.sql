@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(m.title, ' (Sequel)') AS title,
+        m.production_year + 1 AS production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+),
+
+ActorsRanked AS (
+    SELECT 
+        a.person_id,
+        na.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY COUNT(ci.movie_id) DESC) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name na ON ci.person_id = na.person_id
+    GROUP BY 
+        a.person_id, na.name
+),
+
+MoviesKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    ar.actor_name AS Leading_Actor,
+    ak.movie_count AS Total_Movies_Featuring_Actor,
+    mk.keywords AS Associated_Keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    ActorsRanked ar ON cc.subject_id = ar.person_id AND ar.actor_rank = 1
+LEFT JOIN 
+    MoviesKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level < 3 -- Limit to a specific hierarchy depth
+    AND mh.production_year >= 2000
+    AND mk.keywords IS NOT NULL -- Ensure there are associated keywords
+ORDER BY 
+    mh.production_year DESC, 
+    Total_Movies_Featuring_Actor DESC;
+
+This query performs a complex analysis of movie titles, focusing on sequels and their associated leading actors, while also retrieving keywords related to these films using several SQL constructs like CTEs, outer joins, window functions, and string aggregation.

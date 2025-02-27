@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        mt.production_year,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        at.production_year,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.actor_count,
+        COALESCE(mi.info, 'N/A') AS movie_info
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorCounts ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.actor_count,
+    mi.movie_info,
+    CASE 
+        WHEN mi.actor_count IS NULL THEN 'No actors found'
+        WHEN mi.actor_count > 5 THEN 'Large cast'
+        ELSE 'Regular cast'
+    END AS cast_size_category,
+    ROW_NUMBER() OVER (PARTITION BY mi.production_year ORDER BY mi.actor_count DESC) AS rank_within_year
+FROM 
+    MovieInfo mi
+WHERE 
+    mi.production_year IS NOT NULL
+ORDER BY 
+    mi.production_year DESC,
+    mi.actor_count DESC;

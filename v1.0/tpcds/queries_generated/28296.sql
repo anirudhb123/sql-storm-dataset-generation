@@ -1,0 +1,58 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+), 
+OrderDetails AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+Combined AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.ca_city,
+        cd.ca_state,
+        od.order_count,
+        od.total_spent
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        OrderDetails od ON cd.c_customer_sk = od.ws_bill_customer_sk
+)
+SELECT 
+    c_customer_id,
+    CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+    ca_city,
+    ca_state,
+    COALESCE(order_count, 0) AS order_count,
+    COALESCE(total_spent, 0.00) AS total_spent
+FROM 
+    Combined
+ORDER BY 
+    total_spent DESC
+LIMIT 20;

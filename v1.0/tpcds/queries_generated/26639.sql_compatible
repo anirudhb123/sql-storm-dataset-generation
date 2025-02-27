@@ -1,0 +1,58 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_education_status,
+        rc.cd_purchase_estimate
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rnk <= 10
+),
+RecentWebSales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_date >= DATE '2002-10-01' - INTERVAL '1 month'
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_education_status,
+    hvc.cd_purchase_estimate,
+    COALESCE(rws.total_sales, 0) AS total_sales
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    RecentWebSales rws ON hvc.c_customer_id = rws.ws_bill_customer_sk
+ORDER BY 
+    hvc.cd_purchase_estimate DESC;

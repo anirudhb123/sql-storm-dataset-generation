@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returned_amount
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+    (COALESCE(rs.total_sales, 0) - COALESCE(cr.total_returned_amount, 0)) AS net_sales,
+    MAX(CASE WHEN rs.sales_rank = 1 THEN rs.total_sales END) OVER () AS highest_sales
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rs ON ca.ca_address_sk = rs.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON cr.wr_returning_customer_sk = rs.web_site_sk
+WHERE 
+    ca.ca_country = 'USA' AND
+    (ca.ca_state IS NOT NULL OR ca.ca_city IS NOT NULL)
+GROUP BY 
+    ca.ca_city,
+    rs.total_sales,
+    cr.total_returned_amount
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

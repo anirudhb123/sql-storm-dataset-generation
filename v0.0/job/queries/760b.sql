@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND t.kind_id = 7 AND mc.note IN ('(1948) (USA) (theatrical) (reissue) (edited version)', '(2008) (USA) (DVD) (Included in "Marco Ferreri Collection")', '(2012) (Indonesia) (TV)', '(2013) (China) (video)', '(????) (New Zealand) (VHS)', '(USA) (video)', '(as Media Pro Pictures)') AND t.phonetic_code IS NOT NULL;

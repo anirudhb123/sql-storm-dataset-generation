@@ -1,0 +1,82 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        s.s_acctbal
+    FROM 
+        supplier s
+),
+FilteredSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal 
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rn <= 3
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY 
+        l.l_suppkey
+),
+TopSales AS (
+    SELECT 
+        ts.l_suppkey,
+        ts.total_revenue,
+        ROW_NUMBER() OVER (ORDER BY ts.total_revenue DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(fs.s_name, 'No Supplier') AS supplier_name,
+    ROUND(AVG(COALESCE(ts.total_revenue, 0)), 2) AS average_supplier_revenue,
+    COALESCE(co.order_count, 0) AS customer_order_count,
+    r.r_name, 
+    CASE 
+        WHEN co.order_count IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    FilteredSuppliers fs ON ps.ps_suppkey = fs.s_suppkey
+LEFT JOIN 
+    TopSales ts ON ts.l_suppkey = fs.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT MIN(c.c_custkey) FROM customer c) 
+JOIN 
+    nation n ON fs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    p.p_partkey, p.p_name, fs.s_name, co.order_count, r.r_name
+HAVING 
+    (p.p_size > 10 AND COUNT(ps.ps_partkey) > 2) 
+    OR (COALESCE(ts.total_revenue, 0) > 10000 AND r.r_name LIKE 'E%')
+ORDER BY 
+    average_supplier_revenue DESC, p.p_partkey;

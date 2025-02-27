@@ -1,0 +1,23 @@
+-- Performance benchmarking query to analyze user activity over posts and their interactions
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(p.Id) AS PostCount,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+    SUM(c.Id IS NOT NULL) AS CommentCount,
+    SUM(v.Id IS NOT NULL) AS VoteCount,
+    AVG(u.Reputation) AS AverageReputation,
+    MAX(u.CreationDate) AS LatestAccountCreation
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    PostCount DESC;

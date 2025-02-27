@@ -1,0 +1,90 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= NOW() - INTERVAL '1 YEAR' -- Only considering posts from the last year
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes > 0 THEN p.UpVotes ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN p.DownVotes > 0 THEN p.DownVotes ELSE 0 END) AS TotalDownVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        UNNEST(string_to_array(p.Tags, '><')) AS t(TagName)
+    GROUP BY
+        p.Id
+),
+ClosingReasons AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN
+        CloseReasonTypes cr ON ph.Comment::INT = cr.Id
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen reasons
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.Tags,
+    ps.TotalBounty,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    cr.CloseReasons
+FROM
+    UserActivity ua
+JOIN
+    PostStats ps ON ua.UserId = ps.PostId
+LEFT JOIN 
+    ClosingReasons cr ON ps.PostId = cr.PostId
+WHERE
+    ua.TotalPosts > 0
+ORDER BY
+    ua.TotalPosts DESC, ps.Score DESC;

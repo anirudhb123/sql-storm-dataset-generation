@@ -1,0 +1,50 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS sales_rank
+    FROM web_sales ws
+    INNER JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 366
+    GROUP BY ws.web_site_id, ws.ws_sold_date_sk
+),
+ReturnData AS (
+    SELECT
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_quantity) AS total_return_quantity
+    FROM web_returns wr
+    GROUP BY wr.wr_web_page_sk
+),
+CombinedData AS (
+    SELECT
+        sd.web_site_id,
+        sd.total_quantity,
+        sd.avg_net_profit,
+        rd.total_return_quantity,
+        COALESCE(sd.total_orders, 0) AS total_orders
+    FROM SalesData sd
+    LEFT JOIN ReturnData rd ON sd.ws_sold_date_sk = rd.wr_web_page_sk
+)
+SELECT
+    cd.web_site_id,
+    cd.total_quantity,
+    cd.avg_net_profit,
+    cd.total_orders,
+    CASE
+        WHEN cd.total_return_quantity IS NULL THEN 'No Returns'
+        WHEN cd.total_return_quantity = 0 THEN 'No Returns'
+        ELSE 'Returns Exist'
+    END AS return_status,
+    CASE
+        WHEN cd.total_orders > 10 THEN 'High Volume'
+        WHEN cd.total_orders BETWEEN 1 AND 10 THEN 'Low Volume'
+        ELSE 'No Orders'
+    END AS order_volume_status
+FROM CombinedData cd
+WHERE cd.avg_net_profit > 0
+ORDER BY cd.avg_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

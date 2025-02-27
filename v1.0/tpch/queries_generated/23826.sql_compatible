@@ -1,0 +1,65 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returned_items,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rn,
+        MAX(l.l_tax) AS max_tax,
+        STRING_AGG(DISTINCT l.l_shipmode) AS ship_modes_used
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(cs.total_spent) AS avg_customer_spent,
+    SUM(COALESCE(la.net_revenue, 0)) AS total_revenue,
+    ARRAY_AGG(DISTINCT la.ship_modes_used) AS distinct_ship_modes,
+    SUM(ss.total_avail_qty) AS total_supplier_parts
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CustomerOrders cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_orderkey = cs.c_custkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = s.s_suppkey
+WHERE 
+    n.n_name NOT LIKE '%land%'
+    AND ss.total_parts IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(ss.total_avail_qty) > 1000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,53 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        (SELECT COUNT(*) FROM Badges WHERE UserId = U.Id) AS BadgeCount,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = U.Id) AS PostCount,
+        (SELECT SUM(Score) FROM Votes V WHERE V.UserId = U.Id) AS TotalVoteScore
+    FROM Users U
+),
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.OwnerUserId) AS UniqueWriters
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.Id, T.TagName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        PT.Name AS PostType,
+        (SELECT COUNT(C.Id) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id) AS VoteCount
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE P.CreationDate > NOW() - INTERVAL '1 year'
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.BadgeCount,
+    ST.TagName,
+    ST.PostCount,
+    ST.TotalViews,
+    ST.UniqueWriters,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.PostType,
+    PD.CommentCount,
+    PD.VoteCount
+FROM UserReputation UR
+JOIN TagStats ST ON UR.PostCount > 5
+JOIN PostDetails PD ON PD.VoteCount > 10
+ORDER BY UR.Reputation DESC, ST.TotalViews DESC, PD.CommentCount DESC;

@@ -1,0 +1,68 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserPostCounts
+    WHERE 
+        PostCount > 0
+), 
+FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        pt.Name AS PostTypeName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostOrder
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) pc ON p.Id = pc.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    AND 
+        p.ViewCount IS NOT NULL
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT fp.PostId) AS TotalPosts,
+    SUM(fp.ViewCount) AS TotalViews,
+    SUM(fp.CommentCount) AS TotalComments,
+    STRING_AGG(DISTINCT fp.PostTypeName, ', ') AS PostTypes,
+    MAX(fp.CreationDate) AS LatestPostDate
+FROM 
+    Users u
+JOIN 
+    FilteredPosts fp ON u.Id = fp.OwnerUserId
+JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+WHERE 
+    tu.UserRank <= 10
+GROUP BY 
+    u.Id
+ORDER BY 
+    TotalPosts DESC, TotalViews DESC;

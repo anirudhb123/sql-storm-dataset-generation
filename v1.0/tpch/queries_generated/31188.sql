@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(s.s_name AS VARCHAR(255)) AS full_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CONCAT(sh.full_name, ' -> ', s.s_name), sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+NationSupplierCount AS (
+    SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_name
+),
+TotalSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY o.o_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cs.total_sales, RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM customer c
+    JOIN TotalSales cs ON c.c_custkey = cs.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND cs.total_sales > 1000
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ns.supplier_count,
+    COALESCE(tc.c_name, 'No Customer') AS top_customer,
+    COALESCE(tc.total_sales, 0) AS top_customer_sales
+FROM NationSupplierCount ns
+LEFT JOIN TopCustomers tc ON ns.n_name = tc.c_name
+ORDER BY ns.supplier_count DESC, tc.total_sales DESC;

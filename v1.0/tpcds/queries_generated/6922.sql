@@ -1,0 +1,68 @@
+
+WITH TotalSales AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_paid_inc_tax) AS average_order_value
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_ship_date_sk
+),
+SalesByRegion AS (
+    SELECT 
+        c.c_country,
+        d.d_month_seq,
+        SUM(ws.ws_net_profit) AS regional_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_ship_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_country,
+        d.d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    GROUP BY 
+        cd.cd_gender,
+        cd.cd_marital_status
+)
+SELECT 
+    tr.ws_ship_date_sk,
+    tr.total_net_profit,
+    tr.total_orders,
+    tr.average_order_value,
+    sr.c_country,
+    sr.regional_net_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.avg_purchase_estimate
+FROM 
+    TotalSales tr
+JOIN 
+    SalesByRegion sr ON tr.ws_ship_date_sk = sr.ws_ship_date_sk
+JOIN 
+    CustomerDemographics cd ON cd.cd_purchase_estimate IN (
+        SELECT 
+            DISTINCT cd_purchase_estimate 
+        FROM 
+            customer_demographics 
+        WHERE 
+            cd_gender = 'F' AND cd_marital_status = 'M'
+    )
+ORDER BY 
+    tr.ws_ship_date_sk DESC, 
+    sr.regional_net_profit DESC;

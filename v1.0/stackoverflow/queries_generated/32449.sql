@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.OwnerUserId,
+        1 AS Level,
+        P.CreationDate,
+        COALESCE(P.Score, 0) AS Score
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.ParentId,
+        P2.OwnerUserId,
+        RP.Level + 1,
+        P2.CreationDate,
+        COALESCE(P2.Score, 0) AS Score
+    FROM Posts P2
+    INNER JOIN RecursivePostHierarchy RP ON P2.ParentId = RP.PostId
+),
+PostMetrics AS (
+    SELECT 
+        PH.PostId,
+        PH.Title,
+        PH.Level,
+        PH.OwnerUserId,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount
+    FROM RecursivePostHierarchy PH
+    LEFT JOIN Comments C ON PH.PostId = C.PostId
+    LEFT JOIN Votes V ON PH.PostId = V.PostId AND V.VoteTypeId IN (2, 3) -- Upvotes and downvotes
+    GROUP BY PH.PostId, PH.Title, PH.Level, PH.OwnerUserId
+),
+UsersWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+ActiveUserPostStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        P.PostId,
+        P.Title,
+        P.CommentCount,
+        P.VoteCount,
+        P.TotalBountyAmount,
+        B.BadgeCount
+    FROM UsersWithBadges B
+    JOIN PostMetrics P ON P.OwnerUserId = B.UserId
+    JOIN Users U ON U.Id = P.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY VoteCount DESC, TotalBountyAmount DESC) AS PostRank
+    FROM ActiveUserPostStats
+)
+SELECT 
+    RP.UserId,
+    RP.DisplayName,
+    RP.PostId,
+    RP.Title,
+    RP.CommentCount,
+    RP.VoteCount,
+    RP.TotalBountyAmount,
+    RP.BadgeCount,
+    RP.PostRank
+FROM RankedPosts RP
+WHERE 
+    RP.BadgeCount > 0
+ORDER BY RP.PostRank
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;
+

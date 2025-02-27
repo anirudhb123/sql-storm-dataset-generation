@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderstatus,
+        r.total_revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.order_rank <= 5 
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_brand,
+        p.p_mfgr,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_brand, p.p_mfgr
+),
+NationSupplier AS (
+    SELECT 
+        s.s_name,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_name, n.n_name
+),
+CombinedResults AS (
+    SELECT 
+        h.o_orderkey,
+        h.o_orderstatus,
+        COALESCE(sp.total_availqty, 0) AS total_avail_parts,
+        ns.total_acctbal
+    FROM 
+        HighValueOrders h
+    LEFT JOIN 
+        SupplierParts sp ON h.total_revenue > 100000 AND sp.total_availqty >= 50
+    FULL OUTER JOIN 
+        NationSupplier ns ON ns.total_acctbal IS NOT NULL
+    WHERE 
+        h.o_orderstatus IN ('F', 'O')
+)
+SELECT 
+    c.o_orderkey,
+    c.o_orderstatus,
+    c.total_avail_parts,
+    c.total_acctbal,
+    CASE 
+        WHEN c.total_avail_parts = 0 THEN 'No Parts Available'
+        ELSE 'Parts Available'
+    END AS availability_status,
+    STRING_AGG(DISTINCT CONCAT(ns.n_name, ': ', ns.total_acctbal), ', ') AS nation_balances
+FROM 
+    CombinedResults c
+LEFT JOIN 
+    NationSupplier ns ON c.total_acctbal = ns.total_acctbal
+GROUP BY 
+    c.o_orderkey, c.o_orderstatus, c.total_avail_parts, c.total_acctbal
+ORDER BY 
+    c.o_orderstatus DESC, c.total_acctbal DESC
+LIMIT 100 OFFSET 0;

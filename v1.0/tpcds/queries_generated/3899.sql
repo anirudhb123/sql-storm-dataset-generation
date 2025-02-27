@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT
+        i_item_id,
+        i_item_desc,
+        r.rank_type AS item_rank,
+        rs.total_sales,
+        rs.total_profit
+    FROM 
+        item AS i 
+    JOIN (
+        SELECT 
+            ws_item_sk,
+            RANK() OVER (ORDER BY total_profit DESC) AS rank_type
+        FROM 
+            RankedSales
+        WHERE 
+            total_sales > 100
+    ) AS r ON i.i_item_sk = r.ws_item_sk
+    JOIN RankedSales AS rs ON rs.ws_item_sk = r.ws_item_sk
+),
+StoreInfo AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        COUNT(ss_ticket_number) AS total_transactions
+    FROM 
+        store 
+    LEFT JOIN 
+        store_sales ON store_sales.ss_store_sk = store.s_store_sk
+    GROUP BY 
+        s_store_sk, s_store_name
+),
+MonthDate AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_tax) AS total_revenue
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON web_sales.ws_sold_date_sk = date_dim.d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_sales,
+    ti.total_profit,
+    si.s_store_name,
+    dim.d_year,
+    dim.d_month_seq,
+    dim.total_orders,
+    dim.total_revenue
+FROM 
+    TopItems ti
+JOIN 
+    StoreInfo si ON si.s_store_sk = (SELECT s_store_sk FROM store_sales WHERE ss_item_sk = ti.ws_item_sk GROUP BY s_store_sk ORDER BY SUM(ss_net_profit) DESC LIMIT 1)
+JOIN 
+    MonthDate dim ON ti.total_profit > 1000
+WHERE 
+    ti.item_rank < 6
+ORDER BY 
+    dim.d_year DESC, dim.d_month_seq DESC, ti.total_profit DESC;

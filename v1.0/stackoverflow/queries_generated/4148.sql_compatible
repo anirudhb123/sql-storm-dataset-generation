@@ -1,0 +1,53 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+PostClosure AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    CASE 
+        WHEN pc.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    pc.CloseDate AS LastClosedDate
+FROM UserStats us
+JOIN Users u ON us.UserId = u.Id
+LEFT JOIN PostClosure pc ON pc.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN RecentPosts rp ON rp.Id = pc.PostId AND rp.rn = 1
+WHERE us.Reputation > 500
+ORDER BY u.Reputation DESC, us.TotalPosts DESC;

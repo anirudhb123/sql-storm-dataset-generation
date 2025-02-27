@@ -1,0 +1,72 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mk.linked_movie_id,
+        mk.title,
+        mk.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        movie_hierarchy mh ON mk.movie_id = mh.movie_id
+    WHERE 
+        mk.linked_movie_id IS NOT NULL
+),
+ranked_movies AS (
+    SELECT 
+        m.title,
+        COALESCE(ct.kind, 'Unknown') AS company_type,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank,
+        COUNT(mh.movie_id) OVER (PARTITION BY m.production_year) AS hierarchy_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_hierarchy mh ON mh.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+        AND (m.id % 2 = 0 OR m.title LIKE '%A%')  
+),
+string_agg_movies AS (
+    SELECT 
+        production_year,
+        STRING_AGG(title, ', ') AS all_titles
+    FROM 
+        ranked_movies
+    GROUP BY 
+        production_year
+)
+SELECT 
+    r.production_year,
+    r.all_titles,
+    COALESCE(NULLIF(SUM(CASE 
+        WHEN r.company_type ILIKE 'Production%' THEN 1 
+        ELSE 0 END), 0), 0) AS production_count,
+    COUNT(DISTINCT rm.title_rank) AS unique_title_count,
+    MAX(rm.hierarchy_count) AS max_hierarchy_depth
+FROM 
+    string_agg_movies r
+LEFT JOIN 
+    ranked_movies rm ON rm.production_year = r.production_year
+LEFT JOIN 
+    movie_hierarchy h ON h.movie_id = rm.movie_id
+GROUP BY 
+    r.production_year
+ORDER BY 
+    r.production_year DESC;

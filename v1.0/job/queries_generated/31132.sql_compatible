@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT ak2.name, ', ') AS co_actors,
+    CASE 
+        WHEN COUNT(DISTINCT mk.keyword) = 0 THEN 'No keywords'
+        ELSE 'Has keywords'
+    END AS keyword_status
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_title at ON at.id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci2 ON ci2.movie_id = mh.movie_id AND ci2.person_id != ci.person_id
+LEFT JOIN 
+    aka_name ak2 ON ak2.person_id = ci2.person_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, at.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.id) > 1 
+ORDER BY 
+    mh.production_year DESC, keyword_count DESC;

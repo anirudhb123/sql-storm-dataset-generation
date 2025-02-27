@@ -1,0 +1,72 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        o_orderstatus,
+        1 AS level
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+AggregatedCustomerData AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+SupplierValue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END) AS returned_price,
+        SUM(l.l_discount) AS total_discount,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT 
+    oh.o_orderkey,
+    acd.c_name,
+    acd.total_spent,
+    acd.order_count,
+    sv.total_value AS supplier_value,
+    fl.returned_price,
+    fl.total_discount,
+    fl.distinct_suppliers
+FROM OrderHierarchy oh
+JOIN AggregatedCustomerData acd ON oh.o_custkey = acd.c_custkey
+LEFT JOIN SupplierValue sv ON acd.c_custkey = sv.s_suppkey
+LEFT JOIN FilteredLineItems fl ON oh.o_orderkey = fl.l_orderkey
+WHERE acd.rank_within_nation <= 5
+AND fl.total_discount > 0
+ORDER BY acd.total_spent DESC, oh.o_orderdate;

@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalBounty,
+        TotalBadges,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM UserReputation
+    WHERE Reputation > 0
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(tp.PostCount, 0) AS TotalPosts,
+    COALESCE(tp.TotalBounty, 0) AS TotalBounty,
+    COALESCE(tp.TotalBadges, 0) AS TotalBadges,
+    COUNT(DISTINCT pc.Id) AS ClosedPosts,
+    ARRAY_AGG(DISTINCT t.TagName) AS TopTags,
+    MAX(rp.CreationDate) AS LastPostDate
+FROM TopUsers u
+LEFT JOIN RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.PostRank <= 5
+LEFT JOIN Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+LEFT JOIN (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY p.OwnerUserId
+) tp ON u.UserId = tp.OwnerUserId
+LEFT JOIN UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS t(TagName) ON t.TagName IS NOT NULL
+WHERE u.UserRank <= 10
+GROUP BY u.UserId, u.DisplayName, u.Reputation, tp.PostCount, tp.TotalBounty, tp.TotalBadges
+ORDER BY u.Reputation DESC;

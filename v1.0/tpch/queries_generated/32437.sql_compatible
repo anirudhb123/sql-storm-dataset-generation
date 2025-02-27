@@ -1,0 +1,39 @@
+
+WITH RECURSIVE CustomerOrderCTE AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrderCTE co ON co.o_orderkey < o.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+),
+LineItemSummary AS (
+    SELECT l.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM lineitem l
+    GROUP BY l.o_orderkey
+),
+SupplierProfit AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY ps.ps_partkey
+)
+SELECT co.c_name,
+       COUNT(DISTINCT co.o_orderkey) AS num_orders,
+       COALESCE(SUM(ls.total_revenue), 0) AS total_revenue,
+       COALESCE(SUM(sp.total_cost), 0) AS total_cost,
+       ROUND(COALESCE(SUM(ls.total_revenue), 0) - COALESCE(SUM(sp.total_cost), 0), 2) AS profit
+FROM CustomerOrderCTE co
+LEFT JOIN LineItemSummary ls ON co.o_orderkey = ls.o_orderkey
+LEFT JOIN SupplierProfit sp ON ls.o_orderkey = sp.ps_partkey
+WHERE co.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+GROUP BY co.c_custkey, co.c_name
+ORDER BY profit DESC;

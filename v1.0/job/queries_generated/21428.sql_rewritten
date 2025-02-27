@@ -1,0 +1,108 @@
+WITH RECURSIVE MoviePaths AS (
+    SELECT 
+        m.id AS movie_id,
+        ARRAY[m.id] AS path_array,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000 
+    UNION ALL
+    SELECT 
+        mc.linked_movie_id,
+        path_array || mc.linked_movie_id,
+        depth + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        MoviePaths mp ON mc.movie_id = mp.movie_id
+    WHERE 
+        array_position(mp.path_array, mc.linked_movie_id) IS NULL 
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_order
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT cg.id) AS character_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        char_name cg ON a.imdb_index = cg.imdb_index
+    WHERE 
+        c.note IS NULL OR c.note <> ''
+    GROUP BY 
+        c.movie_id, a.name
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        co.country_code IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(cd.actor_name, 'Unknown Actor') AS main_actor,
+        COALESCE(cd.character_count, 0) AS character_count,
+        ARRAY_AGG(DISTINCT mk.keyword ORDER BY mk.keyword_order) AS keywords,
+        COUNT(DISTINCT cmp.company_name) AS company_count,
+        mp.path_array AS path_to_movies,
+        mp.depth AS movie_depth
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        CastDetails cd ON mt.id = cd.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        CompanyInfo cmp ON mt.id = cmp.movie_id
+    LEFT JOIN 
+        MoviePaths mp ON mt.id = mp.movie_id
+    WHERE 
+        (mt.production_year BETWEEN 2000 AND 2023)
+        AND (mt.kind_id IS NOT NULL OR cd.actor_name IS NOT NULL)
+    GROUP BY 
+        mt.id, mt.title, cd.actor_name, cd.character_count, mp.path_array, mp.depth
+    HAVING 
+        COUNT(DISTINCT mk.keyword) > 0 
+    ORDER BY 
+        movie_depth DESC, movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    main_actor,
+    character_count,
+    keywords,
+    company_count,
+    path_to_movies
+FROM 
+    FinalResults
+WHERE 
+    (keywords IS NOT NULL AND char_length(main_actor) > 5)
+    OR (company_count > 1 AND path_to_movies IS NOT NULL)
+    OR (character_count < 2 AND keywords[1] IS NOT NULL)
+LIMIT 50;

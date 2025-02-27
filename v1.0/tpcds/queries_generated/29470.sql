@@ -1,0 +1,31 @@
+
+SELECT 
+    CONCAT(cc.cc_name, ' - ', ca.ca_city, ', ', ca.ca_state) AS location_label,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    SUM(ws.ws_sales_price) AS total_sales,
+    AVG(CASE 
+            WHEN cd.cd_gender = 'M' THEN 1 
+            ELSE 0 
+        END) AS male_ratio,
+    MAX(DISTINCT ca.ca_zip) AS max_zip,
+    ARRAY_AGG(DISTINCT wp.wp_url) AS website_urls
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    call_center cc ON cc.cc_call_center_sk = ws.ws_call_center_sk
+JOIN 
+    web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+GROUP BY 
+    cc.cc_name, ca.ca_city, ca.ca_state
+ORDER BY 
+    total_sales DESC, unique_customers DESC
+LIMIT 100;

@@ -1,0 +1,71 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+    WHERE 
+        Reputation > 0
+), 
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        p.CreationDate,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPost
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.ReputationRank,
+    ps.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    NOW() - ps.CreationDate AS TimeSinceCreated,
+    cp.CloseCount,
+    cp.FirstClosedDate,
+    CASE 
+        WHEN cp.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    UserReputation u
+JOIN 
+    PostStats ps ON u.UserId = ps.OwnerUserId
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId
+WHERE 
+    ps.LatestPost = 1
+ORDER BY 
+    u.Reputation DESC, ps.ViewCount DESC
+LIMIT 100;

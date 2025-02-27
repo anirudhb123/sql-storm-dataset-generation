@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC, SUM(v.VoteTypeId = 2) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+), 
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        CommentCount, 
+        UpVoteCount, 
+        DownVoteCount
+    FROM 
+        RankedPosts 
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    up.DisplayName AS UserDisplayName,
+    tp.Title,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Users up ON up.Id = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+LEFT JOIN 
+    Badges b ON b.UserId = up.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(tp.Tags, ',') AS tag_ids ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = tag_ids
+GROUP BY 
+    up.DisplayName, tp.Title, tp.CommentCount, tp.UpVoteCount, tp.DownVoteCount
+ORDER BY 
+    tp.UpVoteCount DESC, tp.CommentCount DESC;

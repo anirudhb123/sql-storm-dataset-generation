@@ -1,0 +1,64 @@
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        YEAR(m.production_year) as year,
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        COALESCE(cast.name, 'No Cast') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name cast ON ci.person_id = cast.person_id
+    WHERE 
+        m.production_year > 2000
+),
+CompanyMetrics AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.year,
+        r.keyword,
+        r.actor_name,
+        r.actor_order,
+        COALESCE(cm.company_count, 0) AS company_count,
+        COALESCE(cm.companies, 'No Companies') AS companies
+    FROM 
+        RecursiveMovieInfo r
+    LEFT JOIN 
+        CompanyMetrics cm ON r.movie_id = cm.movie_id
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.year,
+    f.keyword,
+    f.actor_name,
+    f.actor_order,
+    f.company_count,
+    f.companies
+FROM 
+    FinalOutput f
+WHERE 
+    f.company_count > 1
+ORDER BY 
+    f.year DESC, f.actor_order ASC
+LIMIT 50;

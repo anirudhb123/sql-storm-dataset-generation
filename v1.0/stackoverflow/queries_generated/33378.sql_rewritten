@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        child.Id AS PostId,
+        child.ParentId,
+        child.Title,
+        child.CreationDate,
+        Level + 1
+    FROM
+        Posts child
+    INNER JOIN
+        RecursivePostHierarchy parent ON child.ParentId = parent.PostId
+    WHERE
+        child.PostTypeId = 2  
+),
+PostVotes AS (
+    SELECT
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM
+        Votes v
+    INNER JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        v.PostId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId AND b.Class = 1  
+    GROUP BY
+        u.Id
+),
+PostWithMeta AS (
+    SELECT
+        p.Id,
+        p.Title,
+        ph.PostId AS AnswerId,
+        ph.Level,
+        pv.UpVotes,
+        pv.DownVotes,
+        ub.BadgeCount
+    FROM
+        Posts p
+    LEFT JOIN
+        RecursivePostHierarchy ph ON p.Id = ph.ParentId
+    LEFT JOIN
+        PostVotes pv ON p.Id = pv.PostId
+    LEFT JOIN
+        UserBadges ub ON p.OwnerUserId = ub.UserId
+    WHERE
+        p.PostTypeId = 1  
+)
+SELECT
+    p.Title,
+    COALESCE(SUM(CASE WHEN pwnp.AnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AnswerCount,
+    AVG(COALESCE(p.UpVotes, 0) - COALESCE(p.DownVotes, 0)) AS Score,
+    p.BadgeCount
+FROM
+    PostWithMeta p
+LEFT JOIN
+    (SELECT DISTINCT PostId, AnswerId FROM PostWithMeta) pwnp ON p.Id = pwnp.PostId
+GROUP BY
+    p.Title, p.BadgeCount
+HAVING
+    AVG(COALESCE(p.UpVotes, 0) - COALESCE(p.DownVotes, 0)) > 0  
+ORDER BY
+    AnswerCount DESC,
+    Score DESC
+LIMIT 10;

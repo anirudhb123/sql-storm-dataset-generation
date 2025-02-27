@@ -1,0 +1,78 @@
+WITH RecursivePostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        1 AS Level,
+        NULL AS ParentId
+    FROM 
+        Posts p
+    WHERE 
+        p.AcceptedAnswerId IS NULL  -- Starting with questions without accepted answers
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        rp.Level + 1,
+        rp.PostId
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostsCTE rp ON a.ParentId = rp.PostId
+)
+, UserVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+, RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'  -- Recent history
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.CreationDate,
+    r.Level,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN COUNT(DISTINCT c.Id) > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    ph.Comments AS RecentHistoryComments
+FROM 
+    RecursivePostsCTE r
+LEFT JOIN 
+    UserVotes uv ON r.PostId = uv.PostId
+LEFT JOIN 
+    Comments c ON r.PostId = c.PostId
+LEFT JOIN 
+    RecentPostHistory ph ON r.PostId = ph.PostId
+GROUP BY 
+    r.PostId, r.Title, r.Score, r.CreationDate, r.Level, uv.UpVotes, uv.DownVotes, ph.Comments
+ORDER BY 
+    r.Level, r.Score DESC
+LIMIT 100;

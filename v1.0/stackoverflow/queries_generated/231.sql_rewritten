@@ -1,0 +1,81 @@
+WITH PostVoteCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 12 THEN 1 ELSE 0 END), 0) AS SpamVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+), RecentPostEdits AS (
+    SELECT 
+        PH.PostId, 
+        PH.UserId, 
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5) 
+), PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        PVC.UpVotes,
+        PVC.DownVotes,
+        PVC.SpamVotes,
+        RPE.UserId AS LastEditorId,
+        U.DisplayName AS LastEditorName,
+        RPE.CreationDate AS LastEditDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostVoteCounts PVC ON P.Id = PVC.PostId
+    LEFT JOIN 
+        RecentPostEdits RPE ON P.Id = RPE.PostId AND RPE.EditRank = 1
+    LEFT JOIN 
+        Users U ON RPE.UserId = U.Id
+    WHERE 
+        P.ViewCount > 1000 
+        AND PVC.UpVotes - PVC.DownVotes > 5
+), PostsWithTags AS (
+    SELECT 
+        P.Title, 
+        T.TagName, 
+        PP.ViewCount 
+    FROM 
+        PopularPosts PP
+    LEFT JOIN 
+        Posts P ON PP.PostId = P.Id
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                TRIM(UNNEST(string_to_array(P.Tags, '>'))) AS TagName 
+        ) T ON TRUE
+)
+SELECT 
+    PWT.Title,
+    STRING_AGG(PWT.TagName, ', ') AS Tags,
+    PWT.ViewCount,
+    P.ViewCount AS TotalPostViews,
+    U.DisplayName AS LastEditorName,
+    COALESCE(PVC.SpamVotes, 0) AS SpamVotes
+FROM 
+    PostsWithTags PWT
+LEFT JOIN 
+    PopularPosts PP ON PWT.Title = PP.Title
+LEFT JOIN 
+    PostVoteCounts PVC ON PP.PostId = PVC.PostId
+LEFT JOIN 
+    Users U ON PP.LastEditorId = U.Id
+GROUP BY 
+    PWT.Title, PWT.ViewCount, U.DisplayName
+HAVING 
+    COUNT(PWT.TagName) >= 2
+ORDER BY 
+    PWT.ViewCount DESC
+LIMIT 10;

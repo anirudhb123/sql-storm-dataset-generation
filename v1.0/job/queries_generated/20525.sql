@@ -1,0 +1,87 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.id) AS movie_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL 
+        AND t.kind_id IN (
+            SELECT 
+                id 
+            FROM 
+                kind_type 
+            WHERE 
+                kind NOT LIKE '%unknown%'
+                AND kind NOT IN (SELECT kind FROM comp_cast_type WHERE kind LIKE '%guest%')
+        )
+),
+actor_titles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(*) AS num_roles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        c.role_id IS NOT NULL
+    GROUP BY 
+        c.movie_id, a.name
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+celebrity_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        string_agg(DISTINCT ak.name, ', ') AS cast_names,
+        COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+        COALESCE(ar.num_roles, 0) AS total_roles
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        actor_titles ar ON rm.movie_id = ar.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (
+            SELECT person_id FROM cast_info WHERE movie_id = rm.movie_id
+        )
+    LEFT JOIN 
+        movie_keywords mk ON rm.movie_id = mk.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN production_year < 2000 THEN 'Classic'
+        WHEN production_year >= 2000 AND production_year <= 2010 THEN 'Modern Classic'
+        ELSE 'Contemporary'
+    END AS movie_category,
+    CASE 
+        WHEN total_roles > 5 THEN 'Ensemble Cast'
+        ELSE 'Lead Cast'
+    END AS cast_type
+FROM 
+    celebrity_movies 
+WHERE 
+    production_year IS NOT NULL 
+    AND movie_id IS NOT NULL
+ORDER BY 
+    production_year DESC, title
+LIMIT 100;

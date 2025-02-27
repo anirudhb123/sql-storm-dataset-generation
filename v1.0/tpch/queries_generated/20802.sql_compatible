@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+AggregateOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        COUNT(DISTINCT l.l_linenumber) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+MaxSupplierParts AS (
+    SELECT 
+        ps_partkey, 
+        MAX(supplier_count) AS max_count
+    FROM SupplierParts
+    GROUP BY ps_partkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(SUM(l.l_extendedprice), 0) AS total_lineitem_revenue,
+    (SELECT COUNT(DISTINCT ps.ps_suppkey) 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey = p.p_partkey) AS total_suppliers,
+    (SELECT COUNT(DISTINCT rn.s_suppkey) 
+     FROM RankedSuppliers rn 
+     WHERE rn.rn <= 5 AND rn.s_acctbal IS NOT NULL) AS top_supplier_count,
+    CASE 
+       WHEN MAX(sp.max_count) > 2 THEN 'High Supply'
+       ELSE 'Low Supply'
+    END AS supply_category
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN MaxSupplierParts sp ON p.p_partkey = sp.ps_partkey
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+HAVING COALESCE(SUM(l.l_extendedprice), 0) IS NOT NULL 
+   OR (SELECT COUNT(DISTINCT o.o_orderkey) 
+       FROM AggregateOrders o 
+       WHERE o.customer_count > 0) > 1
+ORDER BY total_lineitem_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

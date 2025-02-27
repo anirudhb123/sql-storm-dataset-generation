@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind ILIKE '%movie%')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mc.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON a.id = ml.linked_movie_id
+    JOIN 
+        MovieChain mc ON mc.movie_id = ml.movie_id
+)
+SELECT 
+    mc.movie_id,
+    mc.title,
+    mc.production_year,
+    mc.depth,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors_names,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mc.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')) AS awards_count,
+    COALESCE(SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') THEN CAST(mi.info AS INTEGER) ELSE 0 END), 0) AS total_box_office
+FROM 
+    MovieChain mc
+LEFT JOIN 
+    complete_cast cc ON mc.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mc.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mc.movie_id
+WHERE 
+    mc.depth <= 3
+GROUP BY 
+    mc.movie_id, mc.title, mc.production_year, mc.depth
+ORDER BY 
+    total_box_office DESC,
+    actor_count DESC
+LIMIT 15;
+
+This SQL query uses a recursive common table expression (CTE) to find linked movies up to a depth of 3. It counts distinct actors for each movie, aggregates their names, and calculates the total awards and box office revenue. It includes complex joins and aggregations to gather data from different tables, while applying filters and organizing the results to showcase the top movies based on box office earnings and the number of actors.

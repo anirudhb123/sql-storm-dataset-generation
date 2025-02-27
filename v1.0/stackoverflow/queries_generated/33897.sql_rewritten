@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        PostId
+),
+HighlightedBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    WHERE 
+        Class = 1 
+    GROUP BY 
+        UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (4, 5)) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    COALESCE(hb.BadgeNames, 'No Gold Badges') AS GoldBadges,
+    COALESCE(phd.LastEditDate, 'Not Edited') AS LastEdit,
+    phd.EditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    HighlightedBadges hb ON rp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = hb.UserId)
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    rp.PostTypeId, rp.Score DESC;

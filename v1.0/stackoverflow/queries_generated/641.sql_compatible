@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+PostHistoryLatest AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS LastEditDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS MaxEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalBounties DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerName,
+    rp.CommentCount,
+    COALESCE(ph.LastEditDate, 'Never') AS LastEditDate,
+    pu.DisplayName AS TopUser
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryLatest ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    TopUsers pu ON pu.TotalBounties = (SELECT MAX(TotalBounties) FROM TopUsers)
+WHERE 
+    rp.CommentCount > 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

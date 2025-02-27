@@ -1,0 +1,47 @@
+WITH RankedCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+),
+AggSupplier AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+FilteredNations AS (
+    SELECT n.n_nationkey, 
+           n.n_name,
+           COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_comment NOT LIKE '%obsolete%'
+    GROUP BY n.n_nationkey, n.n_name
+),
+CombinedData AS (
+    SELECT rc.c_custkey, 
+           rc.c_name, 
+           rc.c_acctbal, 
+           asu.total_cost, 
+           fn.n_name AS nation_name,
+           fn.supplier_count
+    FROM RankedCustomers rc
+    LEFT JOIN AggSupplier asu ON rc.c_custkey = asu.s_suppkey
+    JOIN FilteredNations fn ON rc.c_nationkey = fn.n_nationkey
+    WHERE rc.rank = 1
+      AND (asu.part_count IS NULL OR asu.total_cost > 1000)
+)
+SELECT cd.nation_name,
+       COUNT(cd.c_custkey) AS total_high_value_customers,
+       AVG(cd.c_acctbal) AS avg_acct_balance,
+       SUM(CASE WHEN cd.total_cost IS NULL THEN 0 ELSE cd.total_cost END) AS total_supplier_cost,
+       STRING_AGG(cd.c_name, ', ') AS customer_names
+FROM CombinedData cd
+GROUP BY cd.nation_name
+HAVING SUM(cd.total_cost) > (SELECT AVG(total_cost) FROM AggSupplier)
+   AND COUNT(cd.c_custkey) > 5
+ORDER BY total_high_value_customers DESC;

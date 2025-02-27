@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+),
+AggregatedInfo AS (
+    
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS total_cast_members,
+        AVG(ta.production_year) AS avg_year,
+        MAX(ta.production_year) AS latest_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title ta ON ci.movie_id = ta.movie_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ai.total_cast_members,
+    ai.avg_year AS average_production_year,
+    ai.latest_year,
+    CASE 
+        WHEN ai.total_cast_members IS NULL THEN 'No Cast'
+        WHEN ai.total_cast_members > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    AggregatedInfo ai ON mh.movie_id = ai.movie_id
+WHERE 
+    mh.level = 0 OR (mh.level > 0 AND ai.avg_year IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

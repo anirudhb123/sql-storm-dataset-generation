@@ -1,0 +1,51 @@
+
+WITH sales_data AS (
+    SELECT 
+        w.warehouse_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_sale,
+        w.warehouse_sq_ft,
+        COUNT(DISTINCT ws_ship_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.warehouse_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2)
+        AND ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        w.warehouse_id, w.warehouse_sq_ft
+),
+performance_metrics AS (
+    SELECT
+        warehouse_id,
+        total_sales,
+        order_count,
+        avg_sale,
+        warehouse_sq_ft,
+        unique_customers,
+        (total_sales / NULLIF(warehouse_sq_ft, 0)) AS sales_per_sq_ft
+    FROM 
+        sales_data
+)
+SELECT
+    warehouse_id,
+    total_sales,
+    avg_sale,
+    order_count,
+    unique_customers,
+    sales_per_sq_ft
+FROM 
+    performance_metrics
+ORDER BY 
+    sales_per_sq_ft DESC,
+    total_sales DESC
+LIMIT 10;

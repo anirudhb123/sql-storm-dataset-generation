@@ -1,0 +1,106 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+RegionSummary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COALESCE(NULLIF(s.s_acctbal, 0), 99999) AS adjusted_balance
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PartSupplierStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TotalOrderValue AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        CASE 
+            WHEN COUNT(s.s_suppkey) = 0 THEN 'No Suppliers'
+            ELSE 'Has Suppliers' 
+        END AS supplier_status
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    rp.s_name AS supplier_name,
+    rs.r_name AS region_name,
+    ps.p_name AS part_name,
+    ps.supplier_count,
+    ps.total_available_qty,
+    ps.total_supply_cost,
+    CASE
+        WHEN SUM(t.total_value) IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status,
+    COALESCE(rs.nation_count, 0) AS nations_linked
+FROM 
+    RankedSuppliers rp
+JOIN 
+    RegionSummary rs ON rs.total_supplier_balance > 1000000
+JOIN 
+    PartSupplierStats ps ON ps.total_available_qty > 1000
+LEFT JOIN 
+    TotalOrderValue t ON t.total_value < (SELECT AVG(total_value) FROM TotalOrderValue)
+LEFT JOIN 
+    SupplierNations d ON d.n_nationkey = rp.s_suppkey
+WHERE 
+    rp.rn = 1
+    AND (rp.s_acctbal > 5000 OR rp.s_acctbal IS NULL)
+GROUP BY 
+    rp.s_name, ps.p_name, rs.r_name, d.nations_linked
+ORDER BY 
+    ps.total_supply_cost DESC, order_status ASC;

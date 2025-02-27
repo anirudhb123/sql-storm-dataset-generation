@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS sales_count,
+        1 AS level
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ss_store_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sh.ss_store_sk,
+        sh.total_profit + sh.previous_profit,
+        sh.sales_count + sh.previous_sales_count,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales s ON sh.ss_store_sk = s.ss_store_sk
+    WHERE
+        sh.level < 5
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_state,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_state
+), 
+aggregated_sales AS (
+    SELECT 
+        sh.ss_store_sk,
+        sh.total_profit,
+        sh.sales_count,
+        cs.ca_state,
+        DENSE_RANK() OVER (PARTITION BY cs.ca_state ORDER BY sh.total_profit DESC) AS state_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer_summary cs ON sh.ss_store_sk = cs.c_customer_sk
+)
+SELECT 
+    a.ss_store_sk,
+    a.total_profit,
+    a.sales_count,
+    a.ca_state
+FROM 
+    aggregated_sales a
+WHERE 
+    (total_profit, sales_count) IN (
+        SELECT 
+            total_profit, sales_count
+        FROM 
+            aggregated_sales
+        WHERE 
+            state_rank = 1
+    )
+ORDER BY 
+    a.ca_state, a.total_profit DESC;

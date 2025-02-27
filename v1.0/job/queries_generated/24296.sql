@@ -1,0 +1,83 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopRankedMovies AS (
+    SELECT 
+        title_id, title, production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 10
+),
+ActorMovieDetails AS (
+    SELECT 
+        c.id AS cast_id,
+        a.name AS actor_name,
+        t.title,
+        t.production_year
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name a ON c.person_id = a.person_id
+    INNER JOIN 
+        aka_title t ON c.movie_id = t.movie_id 
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+FilteredActorMovieDetails AS (
+    SELECT 
+        amd.actor_name,
+        amd.title,
+        amd.production_year,
+        COUNT(*) OVER(PARTITION BY amd.actor_name) AS total_movies
+    FROM 
+        ActorMovieDetails amd
+    WHERE 
+        amd.production_year BETWEEN 2000 AND 2020
+),
+FinalResults AS (
+    SELECT 
+        famd.actor_name, 
+        famd.title, 
+        famd.production_year,
+        CASE 
+            WHEN famd.total_movies > 5 THEN 'Prolific Actor'
+            ELSE 'Emerging Actor'
+        END AS actor_status
+    FROM 
+        FilteredActorMovieDetails famd
+)
+
+SELECT 
+    fr.actor_name,
+    fr.title,
+    fr.production_year,
+    fr.actor_status,
+    COALESCE(k.keyword, 'No Keywords') AS keywords,
+    ci.company_name AS production_company,
+    COALESCE(CAST(mi.info AS VARCHAR), 'No Info') AS additional_info
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    movie_keyword mk ON fr.title = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON fr.title = mc.movie_id
+LEFT JOIN 
+    company_name ci ON mc.company_id = ci.id
+LEFT JOIN 
+    movie_info mi ON fr.title = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+WHERE 
+    fr.production_year IS NOT NULL
+ORDER BY 
+    fr.actor_name, fr.production_year DESC;
+

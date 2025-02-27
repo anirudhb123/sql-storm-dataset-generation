@@ -1,0 +1,47 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           o_orderstatus, o_orderpriority
+    FROM orders
+    WHERE o_orderstatus = 'O'  
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           o.o_orderstatus, o.o_orderpriority
+    FROM orders o
+    INNER JOIN order_hierarchy oh ON o.o_orderkey > oh.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+),
+avg_supplier_cost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+)
+SELECT RANK() OVER (PARTITION BY n.n_nationkey ORDER BY total_revenue DESC) AS revenue_rank,
+       s.s_name, s.total_revenue, s.s_acctbal,
+       R.r_name AS region_name,
+       oh.o_orderdate, oh.o_totalprice
+FROM supplier_info s
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region R ON n.n_regionkey = R.r_regionkey
+JOIN order_hierarchy oh ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    )
+)
+WHERE s.total_revenue > (
+    SELECT AVG(total_revenue)
+    FROM supplier_info
+) OR s.s_acctbal IS NULL
+ORDER BY revenue_rank, s.s_name;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.depth + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.depth,
+    COALESCE(cast_names.cast_list, 'No Cast') AS cast_list,
+    keyword_list.keywords,
+    STRING_AGG(DISTINCT info.info ORDER BY info_type_id) AS additional_info
+FROM 
+    movie_hierarchy h
+LEFT JOIN (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(CONCAT(a.name, ' (', r.role, ')') ORDER BY c.nr_order) AS cast_list
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+) cast_names ON h.movie_id = cast_names.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+) keyword_list ON h.movie_id = keyword_list.movie_id
+LEFT JOIN (
+    SELECT 
+        mi.movie_id,
+        mi.info_type_id,
+        mi.info
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.note IS NOT NULL
+) info ON h.movie_id = info.movie_id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.depth, cast_names.cast_list, keyword_list.keywords
+ORDER BY 
+    h.production_year DESC, h.depth ASC;

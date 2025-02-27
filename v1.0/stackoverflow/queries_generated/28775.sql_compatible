@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        p.LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.CreationDate DESC) AS TagRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag_name ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, 
+        p.CommentCount, p.OwnerUserId, p.LastEditDate
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        rp.LastEditDate,
+        rp.Tags,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    WHERE 
+        rp.TagRank <= 5  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.Score, rp.ViewCount, 
+        rp.AnswerCount, rp.CommentCount, u.DisplayName, rp.LastEditDate, rp.Tags
+),
+FinalRanking AS (
+    SELECT 
+        pd.*, 
+        ROW_NUMBER() OVER (ORDER BY pd.Score DESC, pd.TotalUpVotes DESC, pd.CreationDate DESC) AS OverallRank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    OwnerDisplayName,
+    LastEditDate,
+    Tags,
+    TotalComments,
+    TotalUpVotes,
+    OverallRank
+FROM 
+    FinalRanking
+WHERE 
+    OverallRank <= 50  
+ORDER BY 
+    OverallRank;

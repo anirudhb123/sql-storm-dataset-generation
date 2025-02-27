@@ -1,0 +1,68 @@
+WITH RankedUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.CreationDate IS NOT NULL::int) AS VoteCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.PostTypeId, P.AcceptedAnswerId
+),
+UserPostDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        PS.PostId,
+        PS.CommentCount,
+        PS.VoteCount,
+        PS.CloseVoteCount,
+        CASE 
+            WHEN PS.CloseVoteCount = 0 THEN 'Active' 
+            ELSE 'Closed' 
+        END AS PostStatus
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostStats PS ON P.Id = PS.PostId
+)
+SELECT 
+    R.DisplayName,
+    R.UserRank,
+    U.CommentCount,
+    U.VoteCount,
+    U.PostStatus,
+    CASE 
+        WHEN R.BadgeCount > 5 THEN 'Elite'
+        WHEN R.BadgeCount BETWEEN 1 AND 5 THEN 'Regular'
+        ELSE 'Newcomer' 
+    END AS UserCategory,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+FROM UserPostDetails U
+JOIN RankedUsers R ON U.UserId = R.UserId
+LEFT JOIN (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS TagName
+    FROM Posts P
+    JOIN LATERAL string_to_array(P.Tags, ',') AS tag ON true
+    JOIN Tags T ON T.TagName = TRIM(BOTH ' ' FROM tag)
+    GROUP BY P.Id
+) T ON U.PostId = T.PostId
+GROUP BY R.DisplayName, R.UserRank, U.CommentCount, U.VoteCount, U.PostStatus
+ORDER BY R.UserRank, U.VoteCount DESC
+LIMIT 100;

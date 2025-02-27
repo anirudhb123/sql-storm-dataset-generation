@@ -1,0 +1,57 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        ps.ps_supplycost AS supply_cost,
+        ps.ps_availqty AS available_quantity
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        o.o_orderdate AS order_date,
+        o.o_totalprice AS total_price
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' -- 'O' for 'open' orders
+),
+LineItemDetails AS (
+    SELECT 
+        lo.l_orderkey AS order_key,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue
+    FROM 
+        lineitem lo
+    WHERE 
+        lo.l_shipdate >= DATE '2021-01-01' 
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    cp.supplier_name,
+    cp.part_name,
+    cp.available_quantity,
+    co.customer_name,
+    co.order_key,
+    co.order_date,
+    co.total_price,
+    lid.revenue
+FROM 
+    SupplierParts cp
+JOIN 
+    LineItemDetails lid ON cp.supply_cost <= (SELECT AVG(ps_supplycost) FROM partsupp)
+JOIN 
+    CustomerOrders co ON lid.order_key = co.order_key
+WHERE 
+    cp.available_quantity > 50
+ORDER BY 
+    cp.supplier_name, co.order_date DESC
+LIMIT 100;

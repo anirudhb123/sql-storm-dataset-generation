@@ -1,0 +1,60 @@
+
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+PartDemandRanking AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+    ORDER BY 
+        total_quantity DESC
+    LIMIT 10
+)
+SELECT 
+    spd.s_name AS supplier_name,
+    pp.p_name AS part_name,
+    pp.ps_supplycost AS supply_cost,
+    pp.ps_availqty AS available_quantity,
+    cd.total_orders AS customer_order_count,
+    cd.total_spent AS customer_total_spent,
+    pdr.total_quantity AS part_total_quantity
+FROM 
+    SupplierPartDetails pp
+JOIN 
+    CustomerOrderSummary cd ON pp.s_suppkey = cd.c_custkey
+JOIN 
+    PartDemandRanking pdr ON pp.p_partkey = pdr.l_partkey
+WHERE 
+    pp.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+    AND pp.ps_availqty > 500
+ORDER BY 
+    cd.total_spent DESC, pp.p_name;

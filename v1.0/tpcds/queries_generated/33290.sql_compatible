@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_net_paid) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_bill_customer_sk ORDER BY SUM(cs_net_paid) DESC) AS sales_rank
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_bill_customer_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_buy_potential,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        st.s_store_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(SUM(ss.ss_net_paid), 0) DESC) AS store_sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        store st ON st.s_store_sk = (
+            SELECT 
+                ss_store_sk 
+            FROM 
+                store_sales 
+            WHERE 
+                ss_customer_sk = c.c_customer_sk 
+            GROUP BY 
+                ss_store_sk 
+            ORDER BY 
+                SUM(ss_net_paid) DESC 
+            LIMIT 1
+        )
+    LEFT JOIN 
+        store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        hd.hd_income_band_sk, st.s_store_name
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.income_band,
+    st.s_store_name,
+    st_sales.total_sales,
+    st_sales.order_count
+FROM 
+    customer_info ci 
+JOIN 
+    sales_totals st_sales ON ci.c_customer_sk = st_sales.customer_sk
+LEFT JOIN 
+    store st ON st.s_store_sk = (
+        SELECT 
+            s_store_sk 
+        FROM 
+            store_sales 
+        WHERE 
+            ss_customer_sk = ci.c_customer_sk 
+        ORDER BY 
+            ss_net_paid DESC 
+        LIMIT 1
+    )
+WHERE 
+    ci.store_sales_rank = 1 
+    AND st_sales.sales_rank <= 10 
+ORDER BY 
+    st_sales.total_sales DESC
+LIMIT 20;

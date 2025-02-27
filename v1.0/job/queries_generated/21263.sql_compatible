@@ -1,0 +1,58 @@
+
+WITH RECURSIVE TitleData AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS row_num
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+), 
+RecentTitles AS (
+    SELECT 
+        actor_name, 
+        movie_title,
+        production_year,
+        row_num
+    FROM TitleData
+    WHERE row_num <= 3
+), 
+TitleKeywords AS (
+    SELECT 
+        t.title AS movie_title, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY t.title
+),
+CompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        m.note
+    FROM movie_companies m
+    JOIN company_name c ON m.company_id = c.id
+    JOIN company_type ct ON m.company_type_id = ct.id
+    WHERE c.name IS NOT NULL
+)
+SELECT 
+    rt.actor_name,
+    rt.movie_title,
+    rt.production_year,
+    tk.keywords,
+    COALESCE(ci.company_name, 'No Company') AS company_name,
+    COALESCE(ci.company_type, 'N/A') AS company_type,
+    (SELECT AVG(m.production_year) FROM aka_title m) AS avg_movie_year,
+    CASE 
+        WHEN rt.production_year < (SELECT AVG(production_year) FROM aka_title) THEN 'Below Average Year'
+        ELSE 'Above or Equal Average Year'
+    END AS year_comparison
+FROM RecentTitles rt
+LEFT JOIN TitleKeywords tk ON rt.movie_title = tk.movie_title
+LEFT JOIN CompanyInfo ci ON rt.movie_title = (SELECT t.title FROM aka_title t WHERE t.id IN (SELECT movie_id FROM cast_info WHERE person_id = (SELECT person_id FROM aka_name WHERE name = rt.actor_name)))
+ORDER BY rt.actor_name, rt.production_year DESC;

@@ -1,0 +1,72 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        rp.rn + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy rp ON p.Id = rp.ParentId
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    u.DisplayName AS OwnerDisplayName,
+    CASE 
+        WHEN bp.Id IS NOT NULL THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    ph.PostHistoryTypeId,
+    ph.CreationDate AS HistoryCreationDate,
+    ph.Comment AS CloseComment,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+    COALESCE(
+        (SELECT STRING_AGG(Tags.TagName, ', ') 
+         FROM Tags 
+         WHERE Tags.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')::int[]))),
+         'No Tags'
+    ) AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges bp ON u.Id = bp.UserId
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Votes v2 
+        WHERE v2.PostId = p.Id AND v2.VoteTypeId IN (2, 3)
+    )
+AND 
+    ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted
+AND 
+    p.CreationDate > NOW() - INTERVAL '1 year'
+GROUP BY 
+    p.Title, u.DisplayName, bp.Id, ph.PostHistoryTypeId, ph.CreationDate, ph.Comment, p.Id
+ORDER BY 
+    CommentCount DESC NULLS LAST, UpvoteCount DESC;
+
+-- Handle NULL logic, complex conditions, and unusual semantics

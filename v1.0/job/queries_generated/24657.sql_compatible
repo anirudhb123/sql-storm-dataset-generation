@@ -1,0 +1,69 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.id] AS path,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.path || mc.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mc.linked_movie_id = mt.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY m.production_year DESC) AS movie_rank,
+    COALESCE(ri.info, 'No additional info') AS additional_info,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Year Unknown'
+        ELSE 'Year Known'
+    END AS year_status,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM movie_keyword mk 
+            WHERE mk.movie_id = m.movie_id 
+            AND mk.keyword_id = (
+                SELECT id FROM keyword WHERE keyword = 'Drama'
+            )
+        ) THEN 'Contains Drama'
+        ELSE 'No Drama'
+    END AS drama_status
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    movie_hierarchy m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_info ri ON m.movie_id = ri.movie_id 
+    AND ri.info_type_id = (SELECT id FROM info_type WHERE info = 'Description')
+WHERE 
+    a.name ILIKE '%Steve%' 
+    AND m.production_year > 2000
+    AND m.kind_id IN (1, 2) 
+GROUP BY 
+    a.name, m.title, m.production_year, ri.info, h.movie_rank
+ORDER BY 
+    movie_rank, actor_name;

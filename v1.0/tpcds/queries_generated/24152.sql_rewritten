@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS site_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+HighProfitSites AS (
+    SELECT 
+        web_site_sk,
+        total_quantity,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        site_rank = 1
+),
+CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        SUM(sr.return_quantity) AS total_returned
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity IS NOT NULL
+    GROUP BY 
+        sr.returned_date_sk
+),
+AggregatedReturns AS (
+    SELECT 
+        dr.d_date,
+        COALESCE(cr.total_returned, 0) AS total_returned
+    FROM 
+        date_dim dr
+    LEFT JOIN 
+        CustomerReturns cr ON dr.d_date_sk = cr.returned_date_sk
+)
+SELECT 
+    hs.web_site_sk,
+    hs.total_quantity,
+    hs.total_net_profit,
+    ar.d_date,
+    ar.total_returned,
+    CASE 
+        WHEN ar.total_returned > 0 THEN (hs.total_net_profit / NULLIF(ar.total_returned, 0)) * 100
+        ELSE 0
+    END AS profit_per_return
+FROM 
+    HighProfitSites hs
+JOIN 
+    AggregatedReturns ar ON ar.d_date >= cast('2002-10-01' as date) - INTERVAL '30 days'
+ORDER BY 
+    hs.total_net_profit DESC, ar.total_returned ASC;

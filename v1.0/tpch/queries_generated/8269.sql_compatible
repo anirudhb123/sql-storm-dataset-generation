@@ -1,0 +1,33 @@
+
+WITH FrequentSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 5
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name AS customer_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+)
+SELECT 
+    od.o_orderdate AS order_date,
+    od.customer_name,
+    COUNT(fs.s_suppkey) AS supplier_count,
+    SUM(od.total_lineitem_value) AS total_value,
+    AVG(od.total_lineitem_value) AS average_value
+FROM OrderDetails od
+JOIN FrequentSuppliers fs ON fs.part_count > 5 
+GROUP BY od.o_orderdate, od.customer_name
+ORDER BY total_value DESC
+FETCH FIRST 10 ROWS ONLY;

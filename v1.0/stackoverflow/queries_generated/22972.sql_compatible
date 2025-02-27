@@ -1,0 +1,86 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.Score ELSE 0 END) AS QuestionScore,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN P.Score ELSE 0 END) AS AnswerScore,
+        AVG(P.ViewCount) AS AvgViews,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation IS NOT NULL
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus,
+        (
+            SELECT COUNT(C.Id)
+            FROM Comments C
+            WHERE C.PostId = P.Id
+        ) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore,
+        P.OwnerUserId
+    FROM Posts P
+),
+HighScoringPosts AS (
+    SELECT 
+        PD.*,
+        U.DisplayName AS OwnerName,
+        US.Reputation AS OwnerReputation
+    FROM PostDetails PD
+    JOIN Users U ON PD.OwnerUserId = U.Id
+    JOIN UserStats US ON U.Id = US.UserId
+    WHERE PD.RankByScore <= 10
+),
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE P.ClosedDate IS NOT NULL
+      AND PH.PostHistoryTypeId IN (10, 11) 
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 5
+)
+SELECT 
+    UPS.DisplayName AS UserName,
+    UPS.Reputation,
+    HPP.PostId,
+    HPP.Title,
+    HPP.PostStatus,
+    HPP.CommentCount,
+    COALESCE(SUM(CASE WHEN CP.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostCount,
+    PT.TagName AS PopularTag
+FROM HighScoringPosts HPP
+LEFT JOIN ClosedPostHistory CP ON HPP.PostId = CP.PostId
+LEFT JOIN UserStats UPS ON HPP.OwnerUserId = UPS.UserId
+LEFT JOIN (
+    SELECT TagName
+    FROM PopularTags
+    WHERE TagRank <= 5
+) PT ON HPP.Tags LIKE '%' || PT.TagName || '%'
+GROUP BY UPS.DisplayName, UPS.Reputation, HPP.PostId, HPP.Title, HPP.PostStatus, HPP.CommentCount, PT.TagName
+ORDER BY UPS.Reputation DESC, HPP.PostStatus ASC, HPP.Title;

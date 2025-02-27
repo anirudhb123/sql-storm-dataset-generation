@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Base case: Fetching all movies and their IDs, starting from the top-level movies
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t 
+    WHERE 
+        t.episode_of_id IS NULL
+    
+    UNION ALL
+
+    -- Recursive case: Fetching episodes linked to each movie
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title t
+    INNER JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(k.keyword, 'No Keywords') AS keyword,
+    ARRAY_AGG(DISTINCT CONCAT(a.name, ' (Role: ', r.role, ')')) AS cast_details,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    AVG(CASE 
+        WHEN ti.info_type_id IS NOT NULL THEN LENGTH(ti.info) 
+        ELSE NULL 
+    END) AS avg_info_length,
+    ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank_by_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    name a ON ci.person_id = a.id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, k.keyword
+ORDER BY 
+    mh.production_year DESC, mh.title;

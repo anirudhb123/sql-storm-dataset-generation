@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM
+        supplier s
+),
+UltraCloseOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(*) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    AND 
+        l.l_shipdate BETWEEN cast('1998-10-01' as date) - INTERVAL '1 year' AND cast('1998-10-01' as date)
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        COUNT(*) > 5
+),
+CustomerPreferences AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT l.l_shipmode) AS unique_ship_modes,
+        SUM(li.l_quantity) AS total_quantity_ordered
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        c.c_mktsegment IN ('Wholesale', 'Retail')
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    r.r_name AS supplier_region,
+    COALESCE(rs.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(uc.total_revenue, 0) AS revenue_from_ultra_close_orders,
+    cp.unique_ship_modes,
+    cp.total_quantity_ordered
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rn = 1
+LEFT JOIN 
+    region r ON rs.s_nationkey = r.r_regionkey
+LEFT JOIN 
+    UltraCloseOrders uc ON uc.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_address LIKE CONCAT('%', p.p_comment, '%') LIMIT 1)
+LEFT JOIN 
+    CustomerPreferences cp ON cp.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%' || p.p_name || '%')
+WHERE 
+    p.p_size > 10
+AND 
+    (p.p_comment IS NULL OR p.p_comment <> '')
+ORDER BY 
+    p.p_partkey ASC,
+    revenue_from_ultra_close_orders DESC
+LIMIT 100 OFFSET 0;

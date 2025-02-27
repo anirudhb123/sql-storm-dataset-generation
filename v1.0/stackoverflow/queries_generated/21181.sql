@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositivePosts,
+        MAX(p.CreationDate) AS LastPostDate,
+        MIN(p.CreationDate) AS FirstPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.PositivePosts,
+    up.LastPostDate,
+    up.FirstPostDate,
+    STRING_AGG(DISTINCT rp.Title, ', ') AS RecentPostTitles,
+    COALESCE(SUM(pd.UpVotes), 0) AS TotalUpVotes,
+    COALESCE(SUM(pd.DownVotes), 0) AS TotalDownVotes,
+    CASE 
+        WHEN up.LastPostDate IS NULL THEN 'No Posts'
+        WHEN up.LastPostDate < NOW() - INTERVAL '1 month' THEN 'Inactive'
+        ELSE 'Active'
+    END AS ActivityStatus,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Posts p1 
+     WHERE 
+        p1.OwnerUserId = up.UserId 
+        AND p1.CreationDate < up.LastPostDate) AS PostsBeforeLast
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.rn <= 5
+LEFT JOIN 
+    PostVoteDetails pd ON pd.PostId = rp.PostId
+GROUP BY 
+    up.UserId, up.DisplayName, up.TotalPosts, up.PositivePosts, up.LastPostDate, up.FirstPostDate
+ORDER BY 
+    TotalPosts DESC, up.LastPostDate DESC;

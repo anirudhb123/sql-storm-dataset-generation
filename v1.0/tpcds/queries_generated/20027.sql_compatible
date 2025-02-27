@@ -1,0 +1,89 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), 
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ws.ws_ship_customer_sk,
+        CASE 
+            WHEN ws.ws_net_paid_inc_tax IS NULL THEN 0
+            ELSE ws.ws_net_profit / NULLIF(ws.ws_net_paid_inc_tax, 0)
+        END AS profit_margin
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid_inc_tax > 0
+), 
+AggregatedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_net_profit) AS total_net_profit,
+        AVG(sd.profit_margin) AS avg_profit_margin
+    FROM 
+        SalesData sd
+    GROUP BY 
+        sd.ws_item_sk
+), 
+TopSellingProducts AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        agg.total_net_profit,
+        agg.avg_profit_margin,
+        RANK() OVER (ORDER BY agg.total_net_profit DESC) AS product_rank
+    FROM 
+        item i
+    JOIN 
+        AggregatedSales agg ON i.i_item_sk = agg.ws_item_sk
+    WHERE
+        i.i_item_desc LIKE '%Widget%'
+        OR (SELECT COUNT(*) FROM web_sales WHERE ws_item_sk = i.i_item_sk) > 100  
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.ca_country,
+    p.i_item_desc,
+    p.total_net_profit,
+    p.avg_profit_margin
+FROM 
+    CustomerInfo ci
+JOIN 
+    TopSellingProducts p ON ci.c_customer_id IN (
+        SELECT 
+            ws.ws_ship_customer_sk
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.ws_item_sk = p.ws_item_sk
+        GROUP BY 
+            ws.ws_ship_customer_sk
+    )
+WHERE 
+    ci.purchase_rank = 1
+AND 
+    (ci.cd_marital_status IS NOT NULL OR ci.cd_gender = 'F')
+AND 
+    (CASE 
+        WHEN ci.cd_purchase_estimate < 500 THEN 'Low Value'
+        ELSE 'High Value'
+    END) = 'High Value'
+ORDER BY 
+    ci.c_last_name, ci.c_first_name;

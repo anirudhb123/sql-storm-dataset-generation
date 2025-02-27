@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' -- change to the desired date range
+    GROUP BY 
+        p.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        AnswerCount, 
+        CommentCount, 
+        FavoriteCount, 
+        OwnerReputation,
+        RANK() OVER (ORDER BY Score DESC) AS RankScore,
+        RANK() OVER (ORDER BY ViewCount DESC) AS RankViews
+    FROM 
+        PostStats
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    OwnerReputation,
+    CommentCount,
+    FavoriteCount,
+    RankScore,
+    RankViews
+FROM 
+    TopPosts
+WHERE 
+    RankScore <= 10 OR RankViews <= 10
+ORDER BY 
+    RankScore, RankViews;

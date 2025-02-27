@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(rp.Score, 0)) AS TotalScore,
+        SUM(COALESCE(rp.ViewCount, 0)) AS TotalViews,
+        COUNT(rp.PostId) AS PostCount,
+        MAX(rp.ScoreRank) AS MaxScoreRank,
+        MAX(rp.ViewRank) AS MaxViewRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalScore,
+    us.TotalViews,
+    us.PostCount,
+    us.MaxScoreRank,
+    us.MaxViewRank,
+    COUNT(b.Id) AS BadgeCount,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    ARRAY_AGG(DISTINCT pt.Name) AS PostTypeNames
+FROM 
+    UserScores us
+LEFT JOIN 
+    Badges b ON us.UserId = b.UserId
+LEFT JOIN 
+    Posts p ON us.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    us.UserId, us.DisplayName
+ORDER BY 
+    us.TotalScore DESC, us.TotalViews DESC
+LIMIT 10;

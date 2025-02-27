@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.ws_order_number,
+        o.ws_sold_date_sk,
+        o.ws_quantity,
+        o.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY o.ws_order_number ORDER BY o.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales o
+    WHERE 
+        o.ws_sold_date_sk IS NOT NULL AND 
+        o.ws_quantity > 0
+),
+CustomerRewards AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN d.d_year IS NULL THEN 'Unknown'
+            WHEN d.d_year < 2000 THEN 'Pre-Y2K'
+            WHEN d.d_year BETWEEN 2000 AND 2010 THEN 'Millennium ' || CAST(d.d_year AS TEXT)
+            ELSE 'Future'
+        END AS year_category,
+        SUM(o.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT o.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedOrders r ON c.c_customer_sk = r.ws_bill_customer_sk
+    LEFT JOIN 
+        date_dim d ON r.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, 
+        CASE 
+            WHEN d.d_year IS NULL THEN 'Unknown'
+            WHEN d.d_year < 2000 THEN 'Pre-Y2K'
+            WHEN d.d_year BETWEEN 2000 AND 2010 THEN 'Millennium ' || CAST(d.d_year AS TEXT)
+            ELSE 'Future'
+        END
+),
+SeasonalAnalysis AS (
+    SELECT 
+        year_category,
+        SUM(total_profit) AS annual_profit,
+        AVG(order_count) AS average_orders
+    FROM 
+        CustomerRewards
+    GROUP BY 
+        year_category
+),
+TopCustomers AS (
+    SELECT 
+        r.c_customer_sk,
+        r.total_profit,
+        ROW_NUMBER() OVER (ORDER BY r.total_profit DESC) AS rank
+    FROM 
+        CustomerRewards r
+    WHERE 
+        r.total_profit IS NOT NULL
+)
+SELECT 
+    s.year_category,
+    s.annual_profit,
+    s.average_orders,
+    COALESCE(tc.total_profit, 0) AS top_customer_profit
+FROM 
+    SeasonalAnalysis s
+LEFT JOIN 
+    TopCustomers tc ON tc.rank = 1
+WHERE 
+    s.annual_profit BETWEEN (SELECT AVG(annual_profit) FROM SeasonalAnalysis) AND
+    (SELECT MAX(annual_profit) FROM SeasonalAnalysis)
+ORDER BY 
+    s.annual_profit DESC;

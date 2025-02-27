@@ -1,0 +1,78 @@
+WITH movie_keywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM
+        aka_title m
+    JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id,
+        m.title
+),
+actor_movies AS (
+    SELECT
+        a.person_id,
+        a.name AS actor_name,
+        ARRAY_AGG(DISTINCT m.title) AS movies
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title m ON c.movie_id = m.id
+    GROUP BY
+        a.person_id,
+        a.name
+),
+company_details AS (
+    SELECT
+        c.id AS company_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        company_name c
+    JOIN
+        movie_companies mc ON c.id = mc.company_id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+movie_infos AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        ARRAY_AGG(DISTINCT mi.info) AS info_entries
+    FROM
+        aka_title m
+    JOIN
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY
+        m.id,
+        m.title
+)
+SELECT
+    m.movie_id,
+    m.movie_title,
+    k.keywords,
+    a.actor_name,
+    a.movies,
+    c.company_name,
+    c.company_type,
+    i.info_entries
+FROM
+    movie_keywords k
+JOIN
+    actor_movies a ON k.movie_id IN (SELECT UNNEST(a.movies))
+JOIN
+    movie_infos i ON k.movie_id = i.movie_id
+JOIN
+    movie_companies mc ON k.movie_id = mc.movie_id
+JOIN
+    company_details c ON mc.company_id = c.company_id
+WHERE
+    k.keywords @> ARRAY['action', 'drama']  
+ORDER BY
+    m.movie_title ASC;

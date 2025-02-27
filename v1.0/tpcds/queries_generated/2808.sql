@@ -1,0 +1,44 @@
+
+WITH sales_summary AS (
+    SELECT
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(*) AS total_transactions
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+),
+customer_summary AS (
+    SELECT
+        c_customer_sk,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c_customer_sk
+),
+inventory_status AS (
+    SELECT
+        inv_item_sk,
+        inv_quantity_on_hand,
+        ROW_NUMBER() OVER (PARTITION BY inv_item_sk ORDER BY inv_date_sk DESC) AS rn
+    FROM inventory
+)
+SELECT
+    cs.cs_item_sk,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    inv.inv_quantity_on_hand,
+    CASE
+        WHEN inv.inv_quantity_on_hand IS NULL THEN 'Out of Stock'
+        WHEN inv.inv_quantity_on_hand < 10 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM catalog_sales cs
+FULL OUTER JOIN sales_summary ss ON cs.cs_item_sk = ss.cs_item_sk
+LEFT JOIN customer_summary cs ON cs.cs_bill_customer_sk = cs.cs_item_sk
+LEFT JOIN inventory_status inv ON cs.cs_item_sk = inv.inv_item_sk AND inv.rn = 1
+WHERE 
+    (ss.total_sales > 1000 OR COALESCE(cs.total_orders, 0) > 5)
+    AND inv.inv_quantity_on_hand IS NOT NULL
+ORDER BY total_sales DESC, stock_status ASC;

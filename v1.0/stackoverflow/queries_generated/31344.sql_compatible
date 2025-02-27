@@ -1,0 +1,56 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        CAST(0 AS INT) AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        R.Depth + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+)
+
+SELECT 
+    U.DisplayName AS Author,
+    COUNT(DISTINCT RPH.PostId) AS TotalPosts,
+    SUM(CASE WHEN PH.Comment IS NOT NULL THEN 1 ELSE 0 END) AS EditCount,
+    AVG(P.Score) AS AverageScore,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    MAX(P.CreationDate) AS MostRecentPost,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+FROM 
+    RecursivePostHierarchy RPH
+LEFT JOIN 
+    Users U ON RPH.OwnerUserId = U.Id
+LEFT JOIN 
+    Posts P ON RPH.PostId = P.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+LEFT JOIN 
+    Tags T ON T.Id IN (SELECT unnest(string_to_array(P.Tags, '<>'))::int[]) 
+WHERE 
+    P.ViewCount > 100 
+GROUP BY 
+    U.DisplayName, U.Reputation, P.Score
+HAVING 
+    SUM(U.Reputation) > 1000 
+ORDER BY 
+    TotalPosts DESC, AverageScore DESC
+LIMIT 50;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOpenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        phc.CloseOpenCount,
+        phc.DeleteUndeleteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        PostHistoryCounts phc ON rp.PostId = phc.PostId
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.CreationDate,
+    cd.Score,
+    cd.OwnerDisplayName,
+    cd.CommentCount,
+    COALESCE(cd.GoldBadges, 0) AS GoldBadges,
+    COALESCE(cd.SilverBadges, 0) AS SilverBadges,
+    COALESCE(cd.BronzeBadges, 0) AS BronzeBadges,
+    cd.CloseOpenCount,
+    cd.DeleteUndeleteCount
+FROM 
+    CombinedData cd
+WHERE 
+    cd.Score > (SELECT AVG(Score) FROM Posts)
+ORDER BY 
+    cd.Score DESC
+LIMIT 10;

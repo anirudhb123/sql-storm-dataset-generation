@@ -1,0 +1,96 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers,
+        SUM(Posts.CommentCount) AS TotalComments
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '>,<')::int[])
+    WHERE 
+        Posts.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        Tags.TagName
+),
+
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN Posts.AnswerCount END) AS TotalQuestions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN Posts.AnswerCount END) AS TotalAnswers
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    WHERE 
+        Users.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        Users.Id
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        PH.UserId AS EditorId,
+        PH.UserDisplayName AS EditorDisplayName,
+        PH.CreationDate AS EditDate,
+        PH.Comment AS EditComment
+    FROM 
+        Posts
+    JOIN 
+        PostHistory PH ON Posts.Id = PH.PostId
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+),
+
+BenchmarkResults AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        TS.TagName,
+        TS.PostCount AS TagPostCount,
+        TS.TotalViews AS TagTotalViews,
+        TS.TotalAnswers AS TagTotalAnswers,
+        UA.PostCount AS UserPostCount,
+        UA.TotalViews AS UserTotalViews,
+        UA.TotalQuestions,
+        UA.TotalAnswers AS UserTotalAnswers,
+        PHD.EditComment AS RecentEditComment
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        TagStatistics TS ON TS.PostCount > 0
+    LEFT JOIN 
+        PostHistoryDetails PHD ON PHD.EditorId = UA.UserId
+    JOIN 
+        Users U ON U.Id = UA.UserId
+    ORDER BY 
+        UA.TotalViews DESC,
+        TagPostCount DESC
+)
+
+SELECT 
+    BR.UserId,
+    BR.DisplayName,
+    BR.TagName,
+    BR.TagPostCount,
+    BR.TagTotalViews,
+    BR.TagTotalAnswers,
+    BR.UserPostCount,
+    BR.UserTotalViews,
+    BR.TotalQuestions,
+    BR.UserTotalAnswers,
+    BR.RecentEditComment
+FROM 
+    BenchmarkResults BR
+WHERE 
+    BR.TagPostCount > 5
+ORDER BY 
+    BR.UserTotalViews DESC, 
+    BR.TagTotalViews DESC;

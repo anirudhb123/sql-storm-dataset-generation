@@ -1,0 +1,55 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    u.DisplayName AS User, 
+    ub.BadgeCount, 
+    ub.GoldBadgeCount, 
+    ub.SilverBadgeCount, 
+    ub.BronzeBadgeCount,
+    rp.PostId, 
+    rp.CreationDate AS RecentPostDate,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    COALESCE(pv.TotalVotes, 0) AS TotalVotes,
+    CASE 
+        WHEN ub.Reputation IS NULL THEN 'No Reputation' 
+        ELSE CASE 
+            WHEN ub.Reputation > 1000 THEN 'High Reputation' 
+            ELSE 'Low Reputation' 
+        END 
+    END AS ReputationCategory
+FROM UserBadges ub
+JOIN RecentPosts rp ON ub.UserId = rp.OwnerUserId
+LEFT JOIN PostVotes pv ON rp.PostId = pv.PostId
+WHERE ub.BadgeCount > 0 OR rp.rn <= 3
+ORDER BY ub.BadgeCount DESC, rp.CreationDate DESC

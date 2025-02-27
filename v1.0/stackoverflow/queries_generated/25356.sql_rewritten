@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        r.UserId AS TopUserID,
+        r.UserDisplayName AS TopUserDisplayName,
+        r.Rank AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            UserId,
+            UserDisplayName,
+            RANK() OVER (PARTITION BY PostId ORDER BY Score DESC) AS Rank
+        FROM 
+            Votes v
+        JOIN 
+            Users u ON v.UserId = u.Id
+    ) r ON p.Id = r.PostId
+    WHERE 
+        p.PostTypeId = 1  
+)
+
+SELECT 
+    rp.PostID,
+    rp.Title,
+    rp.CreationDate,
+    rp.Body,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags,
+    MAX(rp.TopUserDisplayName) AS TopUserDisplayName,
+    MAX(rp.UserRank) AS TopUserRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON rp.PostID = c.PostId
+LEFT JOIN 
+    Posts a ON rp.PostID = a.ParentId
+LEFT JOIN 
+    UNNEST(string_to_array(rp.Tags, ',')) AS tag_name ON true
+JOIN 
+    Tags t ON TRIM(tag_name) = t.TagName
+GROUP BY 
+    rp.PostID, rp.Title, rp.CreationDate, rp.Body, rp.Score, rp.ViewCount
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

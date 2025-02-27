@@ -1,0 +1,47 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_quantity) AS total_quantity_sold, 
+        SUM(ws.ws_sales_price) AS total_sales_amount 
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk 
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk 
+    WHERE 
+        d.d_year = 2022 
+    GROUP BY 
+        c.c_customer_id
+), 
+demographics_summary AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        COUNT(hd.hd_demo_sk) AS household_count, 
+        AVG(hd.hd_income_band_sk) AS avg_income_band 
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    ss.c_customer_id, 
+    ss.total_quantity_sold, 
+    ss.total_sales_amount, 
+    ds.household_count, 
+    ds.avg_income_band 
+FROM 
+    sales_summary ss
+JOIN 
+    demographics_summary ds ON ss.c_customer_id = ds.cd_demo_sk
+WHERE 
+    ss.total_sales_amount > 1000
+ORDER BY 
+    ss.total_quantity_sold DESC, 
+    ss.total_sales_amount DESC 
+LIMIT 100;

@@ -1,0 +1,42 @@
+WITH movie_rating AS (
+    SELECT 
+        t.id AS title_id,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN CAST(mi.info AS FLOAT) END) AS avg_rating
+    FROM title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    WHERE mi.info_type_id IN (1, 2) 
+    GROUP BY t.id
+),
+actor_counts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title mt ON mk.movie_id = mt.id
+    GROUP BY mt.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(r.avg_rating, 0) AS average_rating,
+    COALESCE(ac.actor_count, 0) AS number_of_actors,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM title t
+LEFT JOIN movie_rating r ON t.id = r.title_id
+LEFT JOIN actor_counts ac ON t.id = ac.movie_id
+LEFT JOIN movies_with_keywords mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year >= 2000 
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND (t.title ILIKE '%adventure%' OR t.title ILIKE '%action%')
+ORDER BY 
+    average_rating DESC NULLS LAST,
+    number_of_actors DESC;

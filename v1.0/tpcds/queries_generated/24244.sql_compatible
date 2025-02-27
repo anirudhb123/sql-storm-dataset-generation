@@ -1,0 +1,85 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+DailySales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_weekend = 'Y'
+    GROUP BY 
+        d.d_date
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    ds.total_sales,
+    ds.total_orders,
+    COALESCE(band.ib_lower_bound, 0) AS income_lower_bound,
+    COALESCE(band.ib_upper_bound, 999999) AS income_upper_bound,
+    RANK() OVER (ORDER BY ds.total_sales DESC) AS sales_rank,
+    r.rrn AS reason_id
+FROM 
+    CustomerDetails cs
+JOIN 
+    DailySales ds ON ds.total_orders > 10
+LEFT JOIN 
+    income_band band ON band.ib_income_band_sk = cs.hd_income_band_sk
+LEFT JOIN 
+    (SELECT DISTINCT r_reason_desc, r_reason_sk AS rrn
+     FROM reason 
+     WHERE r_reason_desc LIKE '%defective%'
+    ) r ON r.rrn IS NULL
+WHERE 
+    cs.cd_gender = 'F' 
+    AND cs.cd_marital_status = 'M'
+    AND EXISTS (
+        SELECT 1 
+        FROM RankedSales rs
+        WHERE rs.ws_item_sk IN (
+            SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cs.c_customer_id
+        )
+        AND rs.profit_rank = 1
+    )
+GROUP BY 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    ds.total_sales,
+    ds.total_orders,
+    band.ib_lower_bound,
+    band.ib_upper_bound,
+    r.rrn
+ORDER BY 
+    cs.c_first_name ASC,
+    cs.c_last_name DESC
+LIMIT 100;

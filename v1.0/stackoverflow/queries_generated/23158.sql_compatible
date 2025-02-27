@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'  
+),
+PostScores AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.ScoreRank,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId AND v.VoteTypeId IN (8, 9)  
+    LEFT JOIN 
+        Badges b ON b.UserId IN (SELECT p.OwnerUserId FROM Posts p WHERE p.Id = rp.PostId)
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.ScoreRank
+),
+FinalPostData AS (
+    SELECT 
+        ps.*,
+        CASE 
+            WHEN ps.ScoreRank <= 5 THEN 'Top Performer'
+            WHEN ps.ScoreRank IS NULL THEN 'Unranked'
+            ELSE 'Average Performer'
+        END AS PerformanceCategory,
+        CASE 
+            WHEN ps.CommentCount > 10 THEN 'High Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        PostScores ps
+)
+SELECT 
+    fpd.PostId,
+    fpd.Title,
+    fpd.ViewCount,
+    fpd.Score,
+    fpd.PerformanceCategory,
+    fpd.TotalBounties,
+    fpd.BadgeCount,
+    fpd.EngagementLevel,
+    CASE 
+        WHEN fpd.Score IS NULL THEN 'Score not available'
+        ELSE CAST(fpd.Score AS VARCHAR)
+    END AS ScoreDisplay,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COALESCE(MAX(cm.Text), 'No comments') AS LastCommentText
+FROM 
+    FinalPostData fpd
+LEFT JOIN 
+    Comments c ON fpd.PostId = c.PostId
+LEFT JOIN 
+    Comments cm ON cm.PostId = fpd.PostId AND cm.CreationDate = (
+        SELECT MAX(CreationDate) FROM Comments WHERE PostId = fpd.PostId
+    )
+GROUP BY 
+    fpd.PostId, fpd.Title, fpd.ViewCount, fpd.Score, fpd.PerformanceCategory, 
+    fpd.TotalBounties, fpd.BadgeCount, fpd.EngagementLevel, 
+    fpd.ScoreRank
+ORDER BY 
+    fpd.Score DESC NULLS LAST, fpd.TotalBounties DESC;

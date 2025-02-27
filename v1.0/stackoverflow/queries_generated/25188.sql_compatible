@@ -1,0 +1,82 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePostsCount,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePostsCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        ARRAY_AGG(DISTINCT TAGS.TagName) AS Tags,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS HistoryDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        (SELECT 
+            P.Id AS PostId, 
+            UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS TagName
+        FROM 
+            Posts P) AS TAGS ON P.Id = TAGS.PostId
+    WHERE 
+        P.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, P.ViewCount, P.Score, PH.PostHistoryTypeId
+),
+MostActiveUsers AS (
+    SELECT 
+        UR.DisplayName,
+        UR.Reputation,
+        SUM(COALESCE(PA.ViewCount, 0)) AS TotalViewCount,
+        SUM(COALESCE(PA.Score, 0)) AS TotalScore,
+        ARRAY_AGG(DISTINCT PA.PostId) AS PostIds
+    FROM 
+        UserReputation UR
+    LEFT JOIN 
+        PostAnalysis PA ON UR.UserId = PA.PostId
+    WHERE 
+        UR.Reputation > 1000
+    GROUP BY 
+        UR.DisplayName, UR.Reputation
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostsCount,
+    U.CommentsCount,
+    U.PositivePostsCount,
+    U.NegativePostsCount,
+    U.BadgesCount,
+    MA.TotalViewCount,
+    MA.TotalScore,
+    MA.PostIds
+FROM 
+    UserReputation U
+JOIN 
+    MostActiveUsers MA ON U.DisplayName = MA.DisplayName
+ORDER BY 
+    U.Reputation DESC, MA.TotalViewCount DESC
+LIMIT 10;

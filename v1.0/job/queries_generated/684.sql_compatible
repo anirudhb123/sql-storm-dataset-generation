@@ -1,0 +1,55 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN aka_title at ON t.id = at.movie_id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    GROUP BY t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM ranked_movies
+    WHERE rn <= 5
+),
+actor_movie_counts AS (
+    SELECT 
+        a.name, 
+        COUNT(DISTINCT t.id) AS movie_count 
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN title t ON c.movie_id = t.id
+    WHERE a.name IS NOT NULL 
+    GROUP BY a.name
+),
+movies_with_keywords AS (
+    SELECT 
+        m.title, 
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.title
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    COALESCE(amc.movie_count, 0) AS actor_count, 
+    COALESCE(mwk.keywords, ARRAY[]::TEXT[]) AS keywords,
+    CASE 
+        WHEN h.has_notes > 0.5 THEN 'Has notes' 
+        ELSE 'No notes' 
+    END AS notes_status
+FROM top_movies tm
+LEFT JOIN actor_movie_counts amc ON tm.title = amc.name
+LEFT JOIN movies_with_keywords mwk ON tm.title = mwk.title
+LEFT JOIN ranked_movies h ON tm.title = h.title AND tm.production_year = h.production_year
+ORDER BY tm.production_year DESC, actor_count DESC;

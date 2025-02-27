@@ -1,0 +1,70 @@
+WITH UserScoreStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(vt.Id = 2) AS UpVotes,
+        SUM(vt.Id = 3) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation IS NOT NULL
+    GROUP BY u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(DISTINCT ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY p.Id, p.OwnerUserId
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 0
+    ORDER BY TotalViews DESC
+),
+ScoringMatrix AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.UpVotes,
+        us.DownVotes,
+        COALESCE(c.CloseCount, 0) AS ClosePostCount,
+        COALESCE(c.LastClosedDate, '1970-01-01'::timestamp) AS LastClosed,
+        COALESCE(t.PostCount, 0) AS TagPostCount,
+        COALESCE(t.TotalViews, 0) AS TagViews
+    FROM UserScoreStats us
+    LEFT JOIN ClosedPosts c ON us.UserId = c.OwnerUserId
+    LEFT JOIN TagUsage t ON us.UserId = t.PostCount
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    UpVotes,
+    DownVotes,
+    ClosePostCount,
+    LastClosed,
+    TagPostCount,
+    TagViews,
+    CASE 
+        WHEN Reputation >= 1000 THEN 'High Contributor'
+        WHEN UpVotes > DownVotes THEN 'Positive Contributor'
+        ELSE 'Needs Improvement'
+    END AS ContributorType
+FROM ScoringMatrix
+WHERE TagPostCount > 0 OR ClosePostCount > 0
+ORDER BY Reputation DESC, UpVotes DESC NULLS LAST;

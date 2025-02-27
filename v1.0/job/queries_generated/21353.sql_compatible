@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year BETWEEN 2000 AND 2023
+),
+ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT ca.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info ca
+    JOIN 
+        role_type r ON ca.role_id = r.id
+    GROUP BY 
+        ca.person_id
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 3
+),
+MoviesWithCompany AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name || ' (' || ct.kind || ')', ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+TopMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mr.companies,
+        COALESCE(ar.movie_count, 0) AS actor_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        MoviesWithCompany mr ON m.movie_id = mr.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON ar.person_id IN (SELECT ca.person_id FROM cast_info ca WHERE ca.movie_id = m.movie_id)
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    CASE 
+        WHEN tm.actor_count > 5 THEN 'Many Actors'
+        WHEN tm.actor_count IS NULL OR tm.actor_count = 0 THEN 'No Actors'
+        ELSE 'Some Actors'
+    END AS actor_status,
+    tm.companies,
+    rm.total_movies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    (SELECT production_year, COUNT(*) AS total_movies 
+     FROM RankedMovies 
+     GROUP BY production_year) AS rm ON tm.production_year = rm.production_year
+WHERE 
+    tm.actor_count > 0 OR tm.companies IS NOT NULL
+ORDER BY 
+    tm.production_year DESC, tm.title ASC;

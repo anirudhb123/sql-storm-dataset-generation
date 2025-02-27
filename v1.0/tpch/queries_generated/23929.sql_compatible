@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+SupplierPartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        s.s_suppkey, 
+        s.s_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 0 
+            ELSE ps.ps_availqty * ps.ps_supplycost 
+        END AS total_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_discount) AS average_discount,
+        COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS order_line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(sf.total_cost) AS supplier_part_cost_sum,
+    SUM(os.total_revenue) AS total_revenue_sum,
+    AVG(COALESCE(ch.c_acctbal, 0)) AS avg_customer_balance,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names_list
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierPartDetails sf ON sf.p_partkey IS NOT NULL
+LEFT JOIN OrderSummary os ON os.total_revenue > 1000
+LEFT JOIN CustomerHierarchy ch ON ch.c_nationkey = n.n_nationkey
+WHERE r.r_name NOT LIKE '%East%'
+GROUP BY r.r_name
+HAVING AVG(COALESCE(ch.c_acctbal, 0)) IS NOT NULL
+   OR COUNT(DISTINCT n.n_nationkey) > 1
+UNION ALL
+SELECT 
+    NULL, 
+    NULL, 
+    SUM(sf2.total_cost) AS supplementary_supplier_part_cost_sum,
+    MAX(os2.total_revenue) AS maximum_order_revenue_sum,
+    NULL AS avg_customer_balance,
+    NULL AS part_names_list
+FROM SupplierPartDetails sf2
+FULL OUTER JOIN OrderSummary os2 ON sf2.ps_supplycost > os2.total_revenue
+WHERE sf2.ps_supplycost IS NOT NULL OR os2.total_revenue IS NOT NULL
+HAVING COUNT(sf2.p_partkey) > 0;

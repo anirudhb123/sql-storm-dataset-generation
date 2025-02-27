@@ -1,0 +1,51 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_return_time_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_quantity DESC) AS rnk
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+TopReturns AS (
+    SELECT
+        rr.sr_item_sk,
+        rr.sr_return_quantity,
+        rr.sr_return_amt,
+        COALESCE(cc.cc_name, 'Unknown') AS call_center_name,
+        dr.d_day_name,
+        dd.d_date
+    FROM RankedReturns rr
+    LEFT JOIN call_center cc ON rr.sr_customer_sk = cc.cc_call_center_sk
+    JOIN date_dim dd ON rr.sr_returned_date_sk = dd.d_date_sk
+    JOIN date_dim dr ON dr.d_date = dd.d_date - INTERVAL '1 DAY'
+    WHERE rr.rnk <= 5
+),
+InventoryStatus AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    t.i_item_id,
+    t.i_item_desc,
+    tr.sr_return_quantity AS top_return_quantity,
+    tr.sr_return_amt AS top_return_amount,
+    COALESCE(is.total_quantity, 0) AS total_inventory,
+    CASE 
+        WHEN tr.sr_return_quantity > 10 THEN 'High Return'
+        WHEN tr.sr_return_quantity BETWEEN 5 AND 10 THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM TopReturns tr
+JOIN item t ON tr.sr_item_sk = t.i_item_sk
+LEFT JOIN InventoryStatus is ON t.i_item_sk = is.inv_item_sk
+WHERE (tr.sr_return_amt IS NOT NULL OR tr.sr_return_amt > 0)
+    AND tr.call_center_name <> 'Unknown'
+ORDER BY tr.sr_return_amt DESC, tr.sr_return_quantity ASC;

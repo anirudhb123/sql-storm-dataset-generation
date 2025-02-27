@@ -1,0 +1,68 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+recent_titles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        rt.cast_count,
+        DENSE_RANK() OVER (ORDER BY rt.production_year DESC) AS recent_rank
+    FROM 
+        ranked_titles rt
+    WHERE 
+        rt.cast_count > 1
+),
+title_info AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rs.recent_rank,
+        CASE 
+            WHEN EXISTS (
+                SELECT 1 
+                FROM movie_info mi 
+                WHERE mi.movie_id = rt.title_id 
+                AND mi.info_type_id = 1
+            ) THEN 'Has Info' 
+            ELSE 'No Info' 
+        END AS info_status
+    FROM 
+        recent_titles rt
+    LEFT JOIN 
+        movie_info mi ON rt.title_id = mi.movie_id
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.cast_count,
+    ti.recent_rank,
+    ti.info_status,
+    STRING_AGG(DISTINCT concat(c.name, ' (', rt.cast_count, ')'), ', ') AS cast_members
+FROM 
+    title_info ti
+LEFT JOIN 
+    cast_info ci ON ti.title_id = ci.movie_id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+WHERE 
+    ti.info_status = 'Has Info'
+GROUP BY 
+    ti.title_id, ti.title, ti.production_year, ti.cast_count, ti.recent_rank
+HAVING 
+    ti.recent_rank <= 5 AND 
+    (COUNT(DISTINCT ci.person_id) IS NULL OR COUNT(DISTINCT ci.person_id) > 0)
+ORDER BY 
+    ti.production_year DESC, 
+    ti.title ASC;

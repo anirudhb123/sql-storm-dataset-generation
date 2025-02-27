@@ -1,0 +1,36 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier
+), FilteredOrders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_orderstatus ORDER BY o_orderdate) AS order_rn
+    FROM orders
+    WHERE o_totalprice > 1000
+), CustomerAverage AS (
+    SELECT c_custkey, AVG(o_totalprice) AS avg_order_value
+    FROM customer
+    JOIN FilteredOrders ON customer.c_custkey = FilteredOrders.o_custkey
+    GROUP BY c_custkey
+), NationalSummary AS (
+    SELECT n.n_nationkey, AVG(ca.avg_order_value) AS avg_value_per_nation
+    FROM nation n
+    LEFT JOIN CustomerAverage ca ON n.n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = ca.c_custkey)
+    GROUP BY n.n_nationkey
+)
+SELECT p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+       ns.avg_value_per_nation, 
+       CASE 
+           WHEN ns.avg_value_per_nation IS NULL THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status,
+       '1998-10-01 12:34:56' AS queried_at
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey AND ts.rn <= 5
+INNER JOIN NationalSummary ns ON ns.n_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = ts.s_nationkey)
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 50)
+GROUP BY p.p_name, ns.avg_value_per_nation
+HAVING SUM(ps.ps_supplycost) > 1000
+ORDER BY supplier_count DESC, p.p_name;

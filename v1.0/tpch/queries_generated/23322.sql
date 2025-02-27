@@ -1,0 +1,36 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATEADD(month, -6, GETDATE())
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate < co.o_orderdate
+)
+
+SELECT 
+    n.n_name,
+    p.p_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    ROW_NUMBER() OVER(PARTITION BY n.n_name ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS rank,
+    COALESCE(MAX(s.s_comment), 'No comments') AS supplier_comment
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem li ON p.p_partkey = li.l_partkey
+JOIN customer_orders co ON co.o_orderkey = li.l_orderkey
+LEFT JOIN orders o ON co.o_orderkey = o.o_orderkey
+WHERE p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice > 100.00)
+  AND li.l_shipdate >= '2022-01-01'
+GROUP BY n.n_name, p.p_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+   OR COUNT(ii.l_returnflag) FILTER (WHERE li.l_returnflag = 'R') >= 1
+ORDER BY total_sales DESC, n.n_name;

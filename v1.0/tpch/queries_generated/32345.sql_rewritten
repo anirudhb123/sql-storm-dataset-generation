@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderstatus, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O' 
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, o.orderdate, o.orderstatus, o.totalprice, oh.level + 1
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '30 days'
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS orders_count 
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+MinMaxAvgPrice AS (
+    SELECT p.p_partkey,
+           MIN(p.p_retailprice) AS min_price,
+           MAX(p.p_retailprice) AS max_price,
+           AVG(p.p_retailprice) AS avg_price
+    FROM part p
+    GROUP BY p.p_partkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           cs.total_spent,
+           ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM CustomerSummary cs
+    JOIN customer c ON cs.c_custkey = c.c_custkey
+    WHERE cs.total_spent IS NOT NULL
+)
+SELECT tc.c_name,
+       tc.total_spent,
+       mp.min_price,
+       mp.max_price,
+       mp.avg_price,
+       ps.total_supply_cost
+FROM TopCustomers tc
+LEFT JOIN MinMaxAvgPrice mp ON tc.c_custkey = mp.p_partkey
+LEFT JOIN PartSupplier ps ON mp.p_partkey = ps.ps_partkey
+WHERE tc.rank <= 10
+ORDER BY tc.total_spent DESC;

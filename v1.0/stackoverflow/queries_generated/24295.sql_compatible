@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+
+RecentPostLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        l.Name AS LinkTypeName
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes l ON pl.LinkTypeId = l.Id
+    WHERE 
+        l.Name LIKE '%Duplicate%'
+),
+
+AggregatedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.OwnerDisplayName,
+        COALESCE(cb.GoldBadges, 0) AS GoldBadges,
+        COALESCE(cb.SilverBadges, 0) AS SilverBadges,
+        COALESCE(cb.BronzeBadges, 0) AS BronzeBadges,
+        rp.CommentCount,
+        ph.CloseReason,
+        COALESCE(pl.RelatedPostId, -1) AS RelatedPostId  
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges cb ON rp.OwnerDisplayName = cb.UserId
+    LEFT JOIN 
+        ClosedPostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        RecentPostLinks pl ON rp.PostId = pl.PostId
+)
+
+SELECT 
+    ap.PostId,
+    ap.Title,
+    ap.Score,
+    ap.OwnerDisplayName,
+    ap.GoldBadges,
+    ap.SilverBadges,
+    ap.BronzeBadges,
+    ap.CommentCount,
+    CASE 
+        WHEN ap.CloseReason IS NOT NULL THEN 'Closed: ' || ap.CloseReason 
+        ELSE 'Open' 
+    END AS PostStatus,
+    CASE 
+        WHEN ap.RelatedPostId = -1 THEN 'No related post' 
+        ELSE 'Related to Post ID ' || ap.RelatedPostId 
+    END AS RelationStatus
+FROM 
+    AggregatedPostData ap
+WHERE 
+    ap.ScoreRank <= 5
+ORDER BY 
+    ap.Score DESC NULLS LAST;

@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostPerformance AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        us.UserId,
+        us.DisplayName,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.TotalViews,
+        CASE 
+            WHEN rp.Score > 100 THEN 'High Scorer'
+            WHEN rp.Score BETWEEN 50 AND 100 THEN 'Moderate Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.DisplayName,
+    pp.GoldBadges,
+    pp.SilverBadges,
+    pp.BronzeBadges,
+    pp.TotalViews,
+    pp.ScoreCategory
+FROM 
+    PostPerformance pp
+WHERE 
+    pp.TotalViews > 1000
+ORDER BY 
+    pp.Score DESC, pp.ViewCount DESC
+LIMIT 10
+UNION
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.DisplayName,
+    pp.GoldBadges,
+    pp.SilverBadges,
+    pp.BronzeBadges,
+    pp.TotalViews,
+    pp.ScoreCategory
+FROM 
+    PostPerformance pp
+WHERE 
+    pp.ScoreCategory = 'Low Scorer'
+ORDER BY 
+    pp.TotalViews DESC
+LIMIT 5
+OFFSET 0;

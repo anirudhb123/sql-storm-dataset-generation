@@ -1,0 +1,65 @@
+WITH TagsArray AS (
+    SELECT 
+        t.Id AS TagId, 
+        UNNEST(string_to_array(substring(t.TagName, 2, length(t.TagName)-2), '><')) AS TagName
+    FROM Tags t
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount, 
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        ta.TagName, 
+        COUNT(pl.RelatedPostId) AS TagUsageCount
+    FROM PostLinks pl
+    JOIN TagsArray ta ON pl.PostId = ta.TagId
+    GROUP BY ta.TagName
+    ORDER BY TagUsageCount DESC
+    LIMIT 10
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(ua.PostCount, 0) AS UserPostCount,
+        COALESCE(ua.QuestionCount, 0) AS UserQuestionCount,
+        COALESCE(ua.AnswerCount, 0) AS UserAnswerCount,
+        STRING_AGG(DISTINCT ta.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN UserActivity ua ON p.OwnerUserId = ua.UserId
+    LEFT JOIN TagsArray ta ON p.Tags LIKE '%' || ta.TagName || '%'
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, ua.UserPostCount, ua.UserQuestionCount, ua.UserAnswerCount
+),
+FinalReport AS (
+    SELECT 
+        pa.Title,
+        pa.CreationDate,
+        pa.Score,
+        pa.ViewCount,
+        ua.DisplayName,
+        ua.PostCount AS UserPostTotal,
+        ua.QuestionCount AS UserQuestions,
+        GROUP_CONCAT(DISTINCT pt.TagName ORDER BY pt.TagName) AS PopTags
+    FROM PostAnalytics pa
+    LEFT JOIN UserActivity ua ON ua.UserId = pa.UserId
+    LEFT JOIN PopularTags pt ON pt.TagName = ANY (STRING_TO_ARRAY(pa.Tags, ', '))
+    GROUP BY pa.Title, pa.CreationDate, pa.Score, pa.ViewCount, ua.DisplayName, ua.PostCount, ua.QuestionCount
+)
+SELECT * FROM FinalReport ORDER BY ViewCount DESC, Score DESC
+LIMIT 100;

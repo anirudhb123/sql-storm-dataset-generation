@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.net_profit, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) as rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+),
+TopSales AS (
+    SELECT 
+        web_site_sk, 
+        net_profit 
+    FROM 
+        RankedSales 
+    WHERE 
+        rank <= 5
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk, 
+        COALESCE(ca.ca_city, 'Unknown') as city, 
+        COUNT(DISTINCT c.c_customer_id) as customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk 
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city
+),
+JoinedData AS (
+    SELECT 
+        ts.web_site_sk, 
+        ts.net_profit, 
+        ad.city, 
+        ad.customer_count 
+    FROM 
+        TopSales ts
+    JOIN 
+        AddressDetails ad ON ts.web_site_sk = ad.ca_address_sk
+)
+SELECT 
+    jd.web_site_sk,
+    jd.city,
+    jd.customer_count,
+    jd.net_profit,
+    CASE 
+        WHEN jd.net_profit > 10000 THEN 'High Profit'
+        WHEN jd.net_profit IS NULL THEN 'Profit Not Available'
+        ELSE 'Low Profit'
+    END as profit_status,
+    CASE 
+        WHEN jd.customer_count IS NULL THEN 'No Customers' 
+        ELSE 'Customers Found' 
+    END as customer_status
+FROM 
+    JoinedData jd
+ORDER BY 
+    jd.web_site_sk DESC
+LIMIT 10;

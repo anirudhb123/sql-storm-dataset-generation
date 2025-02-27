@@ -1,0 +1,47 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN Posts.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPosts,
+        AVG(Users.Reputation) AS AverageUserReputation
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><'))::int[]
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        AcceptedAnswers,
+        PopularPosts,
+        AverageUserReputation,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank,
+        RANK() OVER (ORDER BY AcceptedAnswers DESC) AS AcceptedAnswersRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    TT.TagName,
+    TT.PostCount,
+    TT.AcceptedAnswers,
+    TT.PopularPosts,
+    TT.AverageUserReputation,
+    CASE 
+        WHEN TT.Rank <= 10 THEN 'Top 10 by Posts'
+        WHEN TT.AcceptedAnswersRank <= 10 THEN 'Top 10 by Accepted Answers'
+        ELSE 'Other'
+    END AS TagCategory
+FROM 
+    TopTags TT
+WHERE 
+    TT.PostCount > 0
+ORDER BY 
+    TT.PostCount DESC, 
+    TT.AcceptedAnswers DESC;

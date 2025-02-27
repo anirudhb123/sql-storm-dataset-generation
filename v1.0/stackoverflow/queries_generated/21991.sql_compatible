@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRank,
+    COALESCE(b.Name, 'No Badge') AS UserBadge,
+    EXISTS (
+        SELECT 1 
+        FROM Badges b 
+        WHERE b.UserId = u.Id AND b.Class = 1
+    ) AS HasGoldBadge,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'Experienced'
+        ELSE 'Newcomer'
+    END AS UserExperience,
+    ARRAY_AGG(DISTINCT t.TagName) AS PostTags,
+    pht.UserDisplayName AS LastEditor
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.PostId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Posts pht ON pht.LastEditorUserId = u.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(rp.Title, ' ')) AS TagName
+    ) t ON TRUE
+WHERE 
+    rp.ScoreRank <= 5
+GROUP BY 
+    u.DisplayName, rp.Title, rp.CreationDate, rp.Score, rp.CommentCount, 
+    rp.UpVotes, rp.DownVotes, rp.ScoreRank, b.Name, u.Reputation, pht.UserDisplayName
+ORDER BY 
+    rp.Score DESC, UserName ASC
+LIMIT 100;

@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_order,
+        CONCAT('Order ', CAST(o.o_orderkey AS CHAR), ' placed on ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD')) AS order_description
+    FROM
+        orders o
+    WHERE
+        o.o_orderstatus IN ('O', 'F')
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationClaims AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_totalprice) AS max_order_value,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS open_orders_total,
+        MIN(s.s_acctbal) AS min_account_balance
+    FROM
+        nation n
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        n.n_nationkey, n.n_name
+),
+FinalReport AS (
+    SELECT 
+        n.n_name,
+        ns.total_avail_qty,
+        ns.part_count,
+        oc.order_count,
+        oc.max_order_value,
+        COALESCE(oc.open_orders_total, 0) AS total_open_orders,
+        ns.average_supply_cost,
+        CASE 
+            WHEN oc.min_account_balance IS NULL THEN 'No Account'
+            WHEN oc.min_account_balance < 0 THEN 'Negative Balance'
+            ELSE 'Satisfactory Balance'
+        END AS balance_status
+    FROM
+        NationClaims oc
+    JOIN
+        SupplierStats ns ON oc.n_nationkey = ns.s_suppkey
+)
+SELECT 
+    r.r_name AS region_name,
+    fr.n_name AS nation_name,
+    fr.total_avail_qty,
+    fr.part_count,
+    fr.order_count,
+    fr.max_order_value,
+    fr.balance_status,
+    fr.average_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    FinalReport fr ON n.n_nationkey = fr.n_nationkey
+ORDER BY 
+    fr.part_count DESC, 
+    fr.order_count ASC, 
+    fr.total_avail_qty DESC;

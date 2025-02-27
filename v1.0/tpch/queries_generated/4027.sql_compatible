@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FinalReport AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+        s.s_name AS top_supplier,
+        c.c_name AS top_customer,
+        RANK() OVER (ORDER BY COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) DESC) AS revenue_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        RankedSuppliers s ON p.p_partkey = s.s_partkey AND s.rank = 1
+    LEFT JOIN 
+        CustomerOrders c ON c.order_count = (SELECT MAX(order_count) FROM CustomerOrders)
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_name, c.c_name
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.total_revenue,
+    f.top_supplier,
+    f.top_customer
+FROM 
+    FinalReport f
+WHERE 
+    f.total_revenue > (SELECT AVG(total_revenue) FROM FinalReport) 
+    OR f.top_supplier IS NULL
+ORDER BY 
+    f.total_revenue DESC, f.top_customer ASC;

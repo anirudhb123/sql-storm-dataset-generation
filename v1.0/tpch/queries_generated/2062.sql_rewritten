@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartWithSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        sa.total_availqty,
+        sa.avg_supplycost
+    FROM 
+        part p
+    LEFT JOIN SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(cs.total_spend, 0) AS total_spend,
+    pw.p_name,
+    pw.p_brand,
+    pw.p_retailprice,
+    CASE 
+        WHEN pw.total_availqty IS NULL THEN 'Out of Stock'
+        WHEN pw.total_availqty < 100 THEN 'Limited Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    customer c
+LEFT JOIN CustomerSpend cs ON c.c_custkey = cs.c_custkey
+JOIN PartWithSupplier pw ON pw.p_retailprice > 50
+WHERE 
+    (c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)) OR
+    (c.c_acctbal IS NULL)
+ORDER BY 
+    total_spend DESC, 
+    c.c_name
+FETCH FIRST 100 ROWS ONLY;

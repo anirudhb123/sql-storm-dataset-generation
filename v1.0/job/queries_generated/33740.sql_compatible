@@ -1,0 +1,67 @@
+
+WITH RECURSIVE YearlyProduction AS (
+    SELECT 
+        ci.movie_id,
+        t.production_year,
+        COUNT(*) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    INNER JOIN 
+        title t ON cc.movie_id = t.id
+    GROUP BY 
+        ci.movie_id, t.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        t.id, 
+        t.title, 
+        ym.production_year, 
+        ym.total_cast,
+        ym.noted_cast,
+        RANK() OVER (PARTITION BY ym.production_year ORDER BY ym.noted_cast DESC) AS rank_noted
+    FROM 
+        title t
+    JOIN 
+        YearlyProduction ym ON t.id = ym.movie_id
+    WHERE 
+        ym.total_cast > 0
+)
+
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    COALESCE(tm.noted_cast, 0) AS noted_cast,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         movie_keyword mk
+     WHERE 
+         mk.movie_id = tm.id
+    ) AS keyword_count,
+    COALESCE(SUM(CASE WHEN mci.info IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_info_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON tm.id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = tm.id
+WHERE 
+    tm.noted_cast > 0
+GROUP BY 
+    tm.id, tm.title, tm.production_year
+HAVING 
+    COUNT(DISTINCT cn.id) > 1 
+ORDER BY 
+    tm.production_year DESC, 
+    noted_cast DESC
+LIMIT 10;

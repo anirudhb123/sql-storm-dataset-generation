@@ -1,0 +1,50 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name LIKE '%land%'
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+HighValueOrderSupplier AS (
+    SELECT 
+        oo.o_orderkey,
+        si.s_name,
+        si.n_name,
+        oo.revenue
+    FROM RankedOrders oo
+    LEFT JOIN SupplierInfo si ON oo.o_orderkey % 10 = si.s_suppkey % 10
+    WHERE oo.revenue_rank <= 5 AND si.total_supply_cost > (
+        SELECT AVG(si2.total_supply_cost)
+        FROM SupplierInfo si2
+        WHERE si2.n_name IS NOT NULL
+    )
+)
+SELECT 
+    h.o_orderkey,
+    h.s_name,
+    h.n_name,
+    COALESCE(h.revenue, 0) AS revenue,
+    CASE 
+        WHEN h.n_name IS NULL THEN 'No Nation'
+        ELSE h.n_name
+    END AS nation_desc,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = h.o_orderkey AND l.l_tax IS NOT NULL) AS item_count
+FROM HighValueOrderSupplier h
+FULL OUTER JOIN region r ON h.n_name IS NULL OR r.r_name = h.n_name
+WHERE (r.r_regionkey IS NOT NULL OR h.n_name IS NULL)
+ORDER BY h.revenue DESC NULLS LAST;

@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    WHERE ws_sold_date_sk IS NOT NULL
+    GROUP BY ws_item_sk
+),
+SalesDetails AS (
+    SELECT
+        ss_item_sk,
+        cs_item_sk,
+        ss_sales_price,
+        cs_sales_price AS catalog_sales_price,
+        ss_quantity - COALESCE(cs_quantity, 0) AS quantity_diff,
+        CASE
+            WHEN ss_sales_price IS NULL THEN 'No Sale'
+            WHEN cs_sales_price IS NULL THEN 'Catalog Only'
+            ELSE 'Both'
+        END AS sale_type
+    FROM store_sales ss
+    FULL OUTER JOIN catalog_sales cs ON ss.ss_item_sk = cs.cs_item_sk AND ss.ss_ticket_number = cs.cs_order_number
+)
+SELECT
+    ca.city AS address_city,
+    SUM(COALESCE(s.total_quantity, 0)) AS total_sold,
+    AVG(COALESCE(s.avg_sales_price, 0)) AS average_sales_price,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    MAX(CASE WHEN d.d_holiday = 'Y' THEN 'Holiday Sales' ELSE 'Regular Sales' END) AS sales_type,
+    STRING_AGG(DISTINCT p.p_promo_name) AS applied_promotions
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN SalesSummary s ON s.ws_item_sk IN (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+LEFT JOIN date_dim d ON d.d_date_sk = s.ws_sold_date_sk
+LEFT JOIN promotion p ON s.ws_item_sk = p.p_item_sk AND (s.total_quantity > 0 OR p.p_discount_active = 'Y')
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.city
+HAVING COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY total_sold DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

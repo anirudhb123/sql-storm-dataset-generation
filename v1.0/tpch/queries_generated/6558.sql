@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COUNT(ps.ps_partkey) AS parts_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+), HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value 
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_name
+    HAVING 
+        total_supply_value > (
+            SELECT 
+                AVG(total_supply_value) 
+            FROM 
+                (SELECT 
+                    SUM(ps_supplycost * ps_availqty) AS total_supply_value 
+                FROM 
+                    supplier s 
+                JOIN 
+                    partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+                GROUP BY 
+                    s.s_suppkey) AS avg_values
+        )
+)
+SELECT 
+    r.region_name,
+    COUNT(DISTINCT h.s_suppkey) AS high_value_supplier_count,
+    AVG(ranked.parts_count) AS avg_parts_per_supplier,
+    MAX(ranked.total_supply_value) AS max_supply_value_per_supplier
+FROM 
+    HighValueSuppliers h
+JOIN 
+    RankedSuppliers ranked ON h.s_suppkey = ranked.s_suppkey
+JOIN 
+    nation n ON h.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.region_name
+ORDER BY 
+    high_value_supplier_count DESC;

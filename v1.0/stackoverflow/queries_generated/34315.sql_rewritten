@@ -1,0 +1,79 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount
+    FROM 
+        RecursiveCTE
+    WHERE 
+        UserRank <= 10
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Title,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        p.Title
+),
+TagPopularity AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = p.Id
+    GROUP BY 
+        t.TagName
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName AS TopUser,
+        u.Reputation AS UserReputation,
+        p.Title AS EditedPostTitle,
+        phs.EditCount,
+        phs.LastEditDate,
+        tp.TagName AS PopularTag,
+        tp.PostCount AS TagPostCount
+    FROM 
+        TopUsers u
+    JOIN 
+        PostHistoryStats phs ON phs.EditCount > 0
+    JOIN 
+        TagPopularity tp ON tp.TagRank <= 5
+)
+SELECT 
+    TOP 20
+    *
+FROM 
+    FinalResults
+ORDER BY 
+    UserReputation DESC, TagPostCount DESC;

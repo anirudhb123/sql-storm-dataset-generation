@@ -1,0 +1,70 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS title_count
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+person_info_with_roles AS (
+    SELECT 
+        ak.person_id,
+        ro.role AS role_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        role_type ro ON ci.role_id = ro.id
+    GROUP BY 
+        ak.person_id, ro.role
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(mc.note, 'No additional info') AS additional_info
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    pit.role_name,
+    pit.movie_count,
+    cd.company_name,
+    cd.company_type,
+    cd.additional_info,
+    CASE 
+        WHEN rt.title_rank = 1 THEN 'First Title of Year'
+        ELSE 'Subsequent Title'
+    END AS title_label,
+    CASE 
+        WHEN cd.company_type LIKE '%Distributor%' THEN 'Includes Distribution'
+        ELSE 'Other Company Type'
+    END AS company_label
+FROM 
+    ranked_titles rt
+FULL OUTER JOIN 
+    person_info_with_roles pit ON rt.production_year = (SELECT MAX(production_year) FROM ranked_titles) 
+    AND pit.movie_count > 0
+LEFT JOIN 
+    company_details cd ON rt.title IS NOT NULL AND cd.movie_id IN (
+        SELECT movie_id FROM aka_title WHERE title = rt.title
+    )
+WHERE 
+    (rt.production_year IS NOT NULL AND pit.role_name IS NOT NULL) 
+    OR cd.company_name IS NOT NULL
+ORDER BY 
+    rt.production_year DESC, 
+    pit.movie_count DESC, 
+    rt.title ASC;

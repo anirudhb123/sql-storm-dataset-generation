@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating') 
+        AND t.production_year IS NOT NULL
+),
+GoldenYears AS (
+    SELECT 
+        production_year, 
+        AVG(m.rating) AS avg_rating 
+    FROM 
+        RankedMovies m
+    WHERE 
+        m.rank_per_year <= 3 
+    GROUP BY 
+        production_year
+    HAVING 
+        COUNT(m.movie_id) >= 5
+),
+TopMovies AS (
+    SELECT 
+        r.movie_id, 
+        r.title, 
+        r.production_year, 
+        g.avg_rating
+    FROM 
+        RankedMovies r
+    JOIN 
+        GoldenYears g ON r.production_year = g.production_year
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.id) AS total_movies,
+    COALESCE(SUM(m.note IS NOT NULL AND m.note LIKE '%best%'), 0) AS best_movies_count,
+    STRING_AGG(DISTINCT t.title, ', ' ORDER BY t.title) AS titles
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    TopMovies m ON c.movie_id = m.movie_id 
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id 
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name <> ''
+    AND EXTRACT(YEAR FROM cast('2024-10-01' as date)) - m.production_year <= 25 
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT c.id) > 1
+ORDER BY 
+    total_movies DESC 
+LIMIT 10;

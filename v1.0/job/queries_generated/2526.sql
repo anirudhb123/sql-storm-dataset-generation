@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        r.role AS actor_role,
+        COUNT(ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+MoviesWithActors AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ar.actor_role,
+        ar.actor_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        ActorRoles ar ON m.id = ar.movie_id
+    WHERE 
+        m.production_year >= 2000
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mw.movie_id,
+        mw.title,
+        mw.production_year,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        MoviesWithActors mw
+    LEFT JOIN 
+        movie_keyword mk ON mw.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mw.movie_id, mw.title, mw.production_year
+)
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    COALESCE(mwk.actor_role, 'No Role Assigned') AS role,
+    COALESCE(mwk.actor_count, 0) AS actor_count,
+    mwk.keywords,
+    CAST(EXTRACT(YEAR FROM CURRENT_DATE) AS INTEGER) - mwk.production_year AS years_since_release
+FROM 
+    MoviesWithKeywords mwk
+WHERE 
+    mwk.actor_count > (SELECT AVG(actor_count) FROM ActorRoles)
+ORDER BY 
+    mwk.production_year DESC,
+    mwk.title ASC;

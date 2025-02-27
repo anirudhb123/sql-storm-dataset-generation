@@ -1,0 +1,39 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_amt DESC) AS ReturnRank
+    FROM store_returns
+), 
+ReturnSummary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(SUM(rr.sr_return_quantity), 0) AS total_returned_quantity,
+        COALESCE(SUM(rr.sr_return_amt), 0) AS total_returned_amount
+    FROM item
+    LEFT JOIN RankedReturns rr ON item.i_item_sk = rr.sr_item_sk AND rr.ReturnRank <= 5
+    GROUP BY item.i_item_id, item.i_item_desc
+), 
+DateSales AS (
+    SELECT 
+        dd.d_date,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales
+    FROM date_dim dd
+    LEFT JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY dd.d_date
+)
+SELECT 
+    rs.i_item_id,
+    rs.i_item_desc,
+    rs.total_returned_quantity,
+    rs.total_returned_amount,
+    ds.total_sales,
+    (rs.total_returned_amount / NULLIF(ds.total_sales, 0)) * 100 AS return_percentage
+FROM ReturnSummary rs
+JOIN DateSales ds ON ds.d_date BETWEEN DATEADD(MONTH, -1, CURRENT_DATE) AND CURRENT_DATE
+WHERE rs.total_returned_quantity > 10
+ORDER BY return_percentage DESC
+LIMIT 10;

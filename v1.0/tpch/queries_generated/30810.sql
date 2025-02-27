@@ -1,0 +1,60 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN nation_hierarchy nh ON n.n_nationkey = nh.n_regionkey
+),
+sales_summary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+part_supplier_summary AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+ranked_sales AS (
+    SELECT 
+        ss.c_custkey,
+        ss.total_spent,
+        ss.orders_count,
+        RANK() OVER (ORDER BY ss.total_spent DESC) AS sales_rank
+    FROM sales_summary ss
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r_ns.n_name AS nation_name,
+    ps.p_name,
+    ps.avg_supply_cost,
+    ss.total_spent,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY r_ns.n_name ORDER BY ss.total_spent DESC) AS nation_rank
+FROM ranked_sales ss
+JOIN nation_hierarchy nh ON ss.c_custkey = nh.n_nationkey
+LEFT JOIN part_supplier_summary ps ON ps.unique_suppliers > 3
+LEFT JOIN filtered_orders fo ON fo.total_lineitem_revenue > 10000
+JOIN region r_ns ON nh.n_regionkey = r_ns.r_regionkey 
+GROUP BY r_ns.n_name, ps.p_name, ps.avg_supply_cost, ss.total_spent
+HAVING COUNT(DISTINCT fo.o_orderkey) > 5
+ORDER BY nation_rank, ss.total_spent DESC;

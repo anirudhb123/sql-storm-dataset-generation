@@ -1,0 +1,56 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, 0 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_nationkey IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT ch.c_custkey, ch.c_name, ch.c_nationkey, ch.level + 1
+    FROM customer AS ch
+    INNER JOIN CustomerHierarchy AS ch_parent ON ch.c_nationkey = ch_parent.c_nationkey
+    WHERE ch.custkey <> ch_parent.c_custkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(*) AS supply_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, sa.supp_count,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    LEFT JOIN (
+        SELECT partkey, COUNT(DISTINCT suppkey) AS supp_count
+        FROM PartSupplier
+        GROUP BY ps_partkey
+    ) AS sa ON p.p_partkey = sa.partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FinalResult AS (
+    SELECT ch.c_name, ch.level, COUNT(DISTINCT os.o_orderkey) AS order_count,
+           SUM(od.total_sales) AS total_sales_for_period,
+           MAX(pd.p_retailprice) AS highest_part_retailprice
+    FROM CustomerHierarchy ch
+    LEFT JOIN OrderSummary od ON ch.c_custkey = od.o_custkey
+    LEFT JOIN PartDetails pd ON pd.rn = 1
+    GROUP BY ch.c_name, ch.level
+)
+SELECT fr.c_name, fr.level, fr.order_count, fr.total_sales_for_period, 
+       CASE 
+           WHEN fr.total_sales_for_period IS NULL THEN 'No Sales'
+           ELSE 'Sales Exist'
+       END AS sales_status,
+       COALESCE(NULLIF(fr.highest_part_retailprice, 0), 'No Retail Price Available') AS highest_price_info
+FROM FinalResult fr
+WHERE fr.level IN (0, 1)
+ORDER BY fr.order_count DESC, fr.total_sales_for_period ASC NULLS FIRST;

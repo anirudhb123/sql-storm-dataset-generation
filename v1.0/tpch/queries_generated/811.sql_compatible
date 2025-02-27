@@ -1,0 +1,57 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders AS o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier AS s
+    JOIN 
+        partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_name,
+        sd.total_supplycost,
+        sd.total_parts,
+        RANK() OVER (ORDER BY sd.total_supplycost DESC) AS rank
+    FROM 
+        SupplierDetails AS sd
+    WHERE 
+        sd.total_parts > 5
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    o.o_orderdate,
+    COALESCE(ts.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(ts.total_supplycost, 0) AS supplier_cost,
+    ROUND(l.l_discount * l.l_extendedprice, 2) AS discount_amount,
+    CASE 
+        WHEN l.l_returnflag = 'R' THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM 
+    RankedOrders AS o
+LEFT JOIN 
+    lineitem AS l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    TopSuppliers AS ts ON l.l_suppkey = ts.s_name
+WHERE 
+    o.price_rank <= 10
+ORDER BY 
+    o.o_orderdate DESC, o.o_totalprice DESC;

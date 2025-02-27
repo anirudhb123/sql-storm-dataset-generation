@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+MostRecentVotes AS (
+    
+    SELECT 
+        v.PostId,
+        v.UserId,
+        ROW_NUMBER() OVER (PARTITION BY v.PostId ORDER BY v.CreationDate DESC) AS rn
+    FROM 
+        Votes v
+),
+UserStatistics AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    MAX(v.CreationDate) AS LastVoteDate,
+    COUNT(DISTINCT CASE WHEN hp.PostId IS NOT NULL THEN hp.PostId END) AS ChildPostsCount,
+    (SELECT COUNT(DISTINCT ph.Id) FROM PostHistory ph WHERE ph.PostId = p.Id) AS HistoryChangeCount,
+    u_stats.TotalUpVotes - u_stats.TotalDownVotes AS NetVotes,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.WikiPostId = (SELECT WikiPostId FROM Tags tt WHERE tt.Id = p.Id)) AS RelatedTags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    MostRecentVotes v ON p.Id = v.PostId AND v.rn = 1
+LEFT JOIN 
+    RecursivePostHierarchy hp ON hp.ParentId = p.Id
+LEFT JOIN 
+    UserStatistics u_stats ON u.Id = u_stats.UserId
+WHERE 
+    p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+GROUP BY 
+    p.Id, p.Title, u.DisplayName, u_stats.TotalUpVotes, u_stats.TotalDownVotes
+ORDER BY 
+    NetVotes DESC, CommentCount DESC
+LIMIT 50;

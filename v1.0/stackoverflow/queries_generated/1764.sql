@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(u.Reputation, 0) AS UserReputation,
+        COALESCE(u.Location, 'Unknown') AS UserLocation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.Reputation, u.Location
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(cpr.CloseReasons, 'No close reasons') AS CloseReasons,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    rp.UserReputation,
+    rp.UserLocation
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.Rank <= 5 AND rp.UserReputation > 100  -- Focus on the top 5 recent posts from active users
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC;

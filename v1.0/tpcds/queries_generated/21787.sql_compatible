@@ -1,0 +1,55 @@
+
+WITH RECURSIVE demographic_analysis AS (
+    SELECT 
+        cd_gender,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT cd_demo_sk) AS demo_count
+    FROM customer_demographics
+    GROUP BY cd_gender
+    HAVING COUNT(DISTINCT cd_demo_sk) > 5
+),
+inventory_analysis AS (
+    SELECT 
+        i_item_sk,
+        SUM(COALESCE(inv_quantity_on_hand, 0)) AS total_quantity,
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(inv_quantity_on_hand, 0)) DESC) AS rank
+    FROM inventory
+    GROUP BY i_item_sk
+),
+sales_analysis AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        SUM(ws_quantity) AS total_quantity_sold
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_item_sk
+)
+SELECT 
+    s.s_store_name,
+    d.cd_gender,
+    ia.total_quantity,
+    sa.total_net_profit,
+    d.avg_purchase_estimate,
+    CASE 
+        WHEN sa.total_net_profit IS NULL THEN 'No Sales'
+        WHEN sa.total_net_profit > 1000 THEN 'High Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    CASE 
+        WHEN d.avg_purchase_estimate IS NULL THEN 'No Estimate'
+        WHEN d.avg_purchase_estimate BETWEEN 0 AND 100 THEN 'Low Estimate'
+        WHEN d.avg_purchase_estimate BETWEEN 101 AND 500 THEN 'Medium Estimate'
+        ELSE 'High Estimate'
+    END AS estimate_category
+FROM store s
+LEFT JOIN demographic_analysis d ON s.s_store_sk = (SELECT MAX(c_current_cdemo_sk) FROM customer WHERE c_current_addr_sk IS NOT NULL)
+LEFT JOIN inventory_analysis ia ON ia.i_item_sk = (SELECT MIN(i_item_sk) FROM item)
+LEFT JOIN sales_analysis sa ON sa.ws_item_sk = ia.i_item_sk
+WHERE 
+    (d.demo_count > 10 OR d.cd_gender IS NULL)
+    AND s.s_closed_date_sk IS NULL
+ORDER BY 
+    d.avg_purchase_estimate DESC,
+    sa.total_net_profit DESC
+LIMIT 10;

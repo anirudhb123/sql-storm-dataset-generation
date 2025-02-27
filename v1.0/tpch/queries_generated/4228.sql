@@ -1,0 +1,59 @@
+WITH PartSupplierStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationStatistics AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    p.p_name, 
+    COALESCE(cs.order_count, 0) AS customer_order_count, 
+    COALESCE(cs.total_spent, 0.00) AS total_spent,
+    ns.supplier_count,
+    ns.total_account_balance,
+    CASE 
+        WHEN ps.total_supply_cost IS NULL THEN 'No Supply'
+        ELSE TO_CHAR(ps.total_supply_cost, 'FM$999,999,999.00')
+    END AS formatted_supply_cost
+FROM 
+    PartSupplierStats ps
+LEFT JOIN 
+    CustomerOrders cs ON ps.p_partkey = cs.c_custkey
+JOIN 
+    NationStatistics ns ON ns.total_account_balance > 100000
+WHERE 
+    ps.rn = 1
+ORDER BY 
+    ps.total_supply_cost DESC, 
+    cs.total_spent DESC;

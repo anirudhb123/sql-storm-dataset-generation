@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+PartAvailability AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerRanking AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+)
+SELECT 
+    c.c_name AS customer_name,
+    p.p_name AS part_name,
+    COALESCE(pa.total_available, 0) AS available_quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High'
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS revenue_category
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN PartAvailability pa ON l.l_partkey = pa.p_partkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE o.o_orderdate >= DATE '1997-01-01'
+GROUP BY c.c_custkey, c.c_name, p.p_name, pa.total_available
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY revenue DESC;

@@ -1,0 +1,66 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')::int[])
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 9) THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostImpact AS (
+    SELECT 
+        p.Title,
+        p.Id AS PostId,
+        p.CreationDate,
+        COALESCE(ps.PostCount, 0) AS RelatedTagCount,
+        COALESCE(ue.UpVotesReceived, 0) - COALESCE(ue.DownVotesReceived, 0) AS UserNetVotes,
+        ue.CommentCount,
+        p.Score,
+        p.ViewCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        TagStatistics ps ON p.Tags LIKE '%' || ps.TagName || '%'
+    LEFT JOIN 
+        UserEngagement ue ON p.OwnerUserId = ue.UserId
+)
+SELECT 
+    pi.Title,
+    pi.PostId,
+    pi.CreationDate,
+    pi.RelatedTagCount,
+    pi.UserNetVotes,
+    pi.CommentCount,
+    pi.Score,
+    pi.ViewCount
+FROM 
+    PostImpact pi
+WHERE 
+    pi.CreationDate >= '2020-01-01' 
+ORDER BY 
+    pi.Score DESC, 
+    pi.ViewCount DESC
+LIMIT 50;

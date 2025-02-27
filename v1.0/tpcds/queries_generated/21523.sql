@@ -1,0 +1,82 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        COUNT(*) OVER (PARTITION BY ws.ws_item_sk) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2022
+        )
+),
+customer_returns AS (
+    SELECT 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_date_sk >= 20220101
+    GROUP BY 
+        sr_customer_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        COALESCE(car.total_returns, 0) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN customer_returns car ON c.c_customer_sk = car.sr_customer_sk
+),
+final_report AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.gender,
+        cs.buy_potential,
+        SUM(rs.ws_sales_price) AS total_sales,
+        SUM(CASE WHEN rs.rank_profit = 1 THEN rs.ws_sales_price ELSE 0 END) AS top_sales,
+        COUNT(*) AS sales_count,
+        (SELECT COUNT(DISTINCT ws2.ws_order_number) 
+         FROM web_sales ws2 
+         WHERE ws2.ws_item_sk IN (SELECT ws_item_sk FROM ranked_sales WHERE rank_profit = 1) 
+           AND ws2.ws_bill_customer_sk = cs.c_customer_sk
+        ) AS top_item_orders,
+        CASE 
+            WHEN cs.total_returns > 0 THEN 'Yes'
+            ELSE 'No' 
+        END AS has_returns
+    FROM 
+        customer_stats cs
+    JOIN ranked_sales rs ON cs.c_customer_sk = rs.ws_item_sk
+    GROUP BY 
+        cs.c_customer_sk, cs.gender, cs.buy_potential
+)
+SELECT 
+    f.c_customer_sk,
+    f.gender,
+    f.buy_potential,
+    f.total_sales,
+    f.top_sales,
+    f.sales_count,
+    f.top_item_orders,
+    f.has_returns,
+    CASE 
+        WHEN f.sales_count > 20 THEN 'High Activity'
+        ELSE 'Low Activity' 
+    END AS activity_level
+FROM 
+    final_report f
+WHERE 
+    f.total_sales IS NOT NULL
+ORDER BY 
+    f.total_sales DESC NULLS LAST;

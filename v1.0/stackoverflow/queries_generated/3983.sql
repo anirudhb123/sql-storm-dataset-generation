@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+), UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        u.Views,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+), TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    u.TotalBounties,
+    ts.TagName,
+    ts.PostCount,
+    ts.UpvotedPostCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation u ON u.UserId = rp.OwnerUserId
+LEFT JOIN 
+    TagStatistics ts ON ts.TagName IN (SELECT UNNEST(string_to_array(rp.Tags, '><'))) 
+WHERE 
+    rp.rn = 1
+  AND 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

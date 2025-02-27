@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        r.c_customer_id,
+        r.c_first_name,
+        r.c_last_name,
+        r.total_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rank <= 10
+),
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    tc.c_customer_id, 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    ws.w_warehouse_id, 
+    ws.order_count, 
+    ws.total_sales,
+    ws.total_sales - tc.total_profit AS profit_difference
+FROM 
+    TopCustomers tc
+JOIN 
+    WarehouseStats ws ON tc.c_customer_id IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_warehouse_sk IN (SELECT w_warehouse_sk FROM warehouse))
+ORDER BY 
+    ws.total_sales DESC, 
+    tc.total_profit DESC;

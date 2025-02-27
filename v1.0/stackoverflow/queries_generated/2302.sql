@@ -1,0 +1,78 @@
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalUpvotes,
+        TotalDownvotes,
+        QuestionCount,
+        AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalUpvotes DESC) AS ReputationRank
+    FROM 
+        UserScore
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    ru.TotalUpvotes,
+    ru.TotalDownvotes,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    pt.TagName AS PopularTag
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecentPosts rp ON ru.UserId = rp.OwnerUserId AND rp.RecentRank = 1
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 10
+WHERE 
+    ru.ReputationRank <= 10 
+ORDER BY 
+    ru.Reputation DESC, 
+    ru.TotalUpvotes DESC, 
+    pt.PostCount DESC;

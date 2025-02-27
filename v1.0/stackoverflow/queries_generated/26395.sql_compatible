@@ -1,0 +1,89 @@
+
+WITH PopularTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+    HAVING 
+        COUNT(p.Id) > 5 
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS ActivePostCount,
+        SUM(CASE WHEN p.CreationDate > NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 10 
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        pt.Name AS PostTypeName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON v.PostId = p.Id
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '>')) AS t(TagName) ON t.TagName IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+BenchmarkQuery AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.VoteCount,
+        ARRAY_AGG(DISTINCT pt.TagName) AS RelatedTags,
+        au.DisplayName AS ActiveUserName
+    FROM 
+        PostStats ps
+    JOIN 
+        PopularTags pt ON pt.TagName = ANY(ps.Tags)
+    JOIN 
+        ActiveUsers au ON au.ActivePostCount > 5
+    GROUP BY 
+        ps.PostId, ps.Title, ps.Score, ps.ViewCount, ps.CommentCount, ps.VoteCount, au.DisplayName
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS PopularityRank
+FROM 
+    BenchmarkQuery
+ORDER BY 
+    PopularityRank
+LIMIT 50;

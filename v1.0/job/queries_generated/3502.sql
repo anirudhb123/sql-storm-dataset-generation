@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(kw.keyword, ', ' ORDER BY kw.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mk.movie_id
+),
+PersonNames AS (
+    SELECT 
+        a.name,
+        a.person_id,
+        COALESCE(NULLIF(a.name_pcode_nf, ''), 'N/A') AS name_pcode_nf_label
+    FROM 
+        aka_name a
+),
+RecentMovies AS (
+    SELECT 
+        tm.title, 
+        tm.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.title = mk.title
+    WHERE 
+        rm.rank <= 10
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    pm.name,
+    pm.name_pcode_nf_label,
+    CASE 
+        WHEN rm.production_year > 2000 THEN 'Modern'
+        WHEN rm.production_year BETWEEN 1990 AND 2000 THEN '90s Classic'
+        ELSE 'Older'
+    END AS era,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    RecentMovies rm
+LEFT JOIN 
+    complete_cast cc ON rm.title = cc.movie_id
+LEFT JOIN 
+    PersonNames pm ON cc.subject_id = pm.person_id
+LEFT JOIN 
+    movie_info mi ON rm.title = mi.movie_id 
+WHERE 
+    mi.info_type_id IS NULL 
+    OR (mi.info IS NOT NULL AND mi.note IS NULL)
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

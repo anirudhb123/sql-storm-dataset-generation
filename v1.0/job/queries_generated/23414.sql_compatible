@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.id AS actor_id,
+    a.name AS actor_name,
+    COUNT(DISTINCT cc.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT CONCAT(mt.title, ' (', mt.production_year, ')') ORDER BY mt.production_year DESC) AS movie_list,
+    AVG(COALESCE(mr.rating, 0)) AS average_rating,
+    CASE 
+        WHEN COUNT(DISTINCT cc.movie_id) > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS status
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info cc ON a.person_id = cc.person_id
+LEFT JOIN 
+    aka_title mt ON cc.movie_id = mt.id
+LEFT JOIN LATERAL (
+    SELECT 
+        AVG(r.rating) AS rating
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, AVG(CAST(info AS float)) AS rating 
+         FROM movie_info 
+         WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+         GROUP BY movie_id) r ON r.movie_id = cc.movie_id
+    WHERE 
+        md5sum IS NOT NULL
+) AS mr ON TRUE
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.id, a.name
+HAVING 
+    COUNT(DISTINCT CASE WHEN mt.production_year IS NOT NULL THEN cc.movie_id END) > 5
+ORDER BY 
+    total_movies DESC,
+    a.actor_name ASC
+LIMIT 10;

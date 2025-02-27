@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer_demographics cd 
+    WHERE 
+        cd.cd_purchase_estimate > 10000
+),
+HighValueReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 5
+),
+OverallReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_web_returned,
+        SUM(wr_return_amt) AS total_web_returned_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    r.sales_rank,
+    wa.w_warehouse_name,
+    ws.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(hv.total_returned, 0) AS total_store_returned,
+    COALESCE(ow.total_web_returned, 0) AS total_web_returned
+FROM 
+    RankedSales r
+JOIN 
+    warehouse wa ON r.web_site_sk = wa.w_warehouse_sk
+LEFT JOIN 
+    CustomerDemographics cd ON r.web_site_sk = cd.cd_demo_sk
+LEFT JOIN 
+    HighValueReturns hv ON hv.sr_item_sk = r.web_site_sk
+LEFT JOIN 
+    OverallReturns ow ON ow.wr_item_sk = r.web_site_sk
+WHERE 
+    r.sales_rank = 1 
+    AND (
+        cd.cd_gender = 'F' 
+        OR (cd.cd_marital_status IS NULL AND cd.cd_purchase_estimate > 20000)
+    )
+ORDER BY 
+    r.total_sales DESC;

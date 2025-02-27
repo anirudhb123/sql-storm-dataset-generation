@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    WHERE sh.hierarchy_level < 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(YEAR, -1, '1998-10-01')
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'Unknown' 
+               ELSE CAST(p.p_retailprice AS VARCHAR)
+           END AS price_str
+    FROM part p
+    WHERE p.p_size > 25
+      AND p.p_comment NOT LIKE '%defective%'
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+    JOIN FilteredParts fp ON ps.ps_partkey = fp.p_partkey
+)
+SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS num_customers,
+       SUM(o.o_totalprice) AS total_sales,
+       (SELECT SUM(sp.ps_availqty) FROM SupplierParts sp WHERE sp.ps_suppkey IN 
+           (SELECT sh.s_suppkey FROM SupplierHierarchy sh)) AS total_available_quantity,
+       STRING_AGG(DISTINCT fp.price_str, ', ') AS unique_prices,
+       MAX(sh.hierarchy_level) AS max_hierarchy_level
+FROM nation n
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN RecentOrders o ON o.o_custkey = c.c_custkey
+LEFT JOIN FilteredParts fp ON fp.p_partkey IN 
+    (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey IN 
+    (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN 
+        (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey))
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+ORDER BY total_sales DESC
+LIMIT 10;

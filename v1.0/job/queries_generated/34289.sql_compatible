@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    cn.name AS Company_Name,
+    COUNT(DISTINCT ci.person_id) AS Cast_Count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Alternate_Names,
+    AVG(CASE WHEN p.gender IS NULL THEN 0 ELSE 1 END) AS Gender_Complete,
+    ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY ci.nr_order) AS Cast_Order
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id
+WHERE 
+    m.level <= 2
+    AND (cn.country_code IS NULL OR cn.country_code <> 'USA')
+GROUP BY 
+    m.movie_id, m.title, m.production_year, cn.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    m.production_year DESC, Cast_Count DESC;

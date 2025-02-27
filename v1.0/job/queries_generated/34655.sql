@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    INNER JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    avg_rating.avg_rating,
+    COALESCE(kwd.keywords, 'None') AS keywords,
+    CASE 
+        WHEN avg_rating.avg_rating IS NULL THEN 'No rating available'
+        ELSE 'Rated'
+    END AS rating_status
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        AVG(rating) AS avg_rating
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        movie_id
+) AS avg_rating ON m.movie_id = avg_rating.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mk.movie_id
+) AS kwd ON m.movie_id = kwd.movie_id
+WHERE 
+    (m.level > 1 OR m.production_year < 2010)
+GROUP BY 
+    m.movie_id, m.title, m.production_year, avg_rating.avg_rating, kwd.keywords
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    m.production_year DESC, actor_count DESC
+LIMIT 100;
+
+This SQL query performs several complex operations including a recursive common table expression (CTE) to build a hierarchy of movies produced after 2000, and it aggregates information about actors, ratings, and keywords associated with those movies. It uses various types of joins to gather all necessary data while applying various filters and conditions to ensure the results are relevant and organized, thus providing a comprehensive performance benchmark in the context of movie metadata analysis.

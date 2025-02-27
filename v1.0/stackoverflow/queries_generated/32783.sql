@@ -1,0 +1,94 @@
+WITH RecursiveTagCTE AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE Count > 100
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, rtc.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagCTE rtc ON t.Id = rtc.Id + 1
+    WHERE t.Count > 100
+),
+
+LatestPostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year'
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id
+),
+
+UserActivitySummary AS (
+    SELECT 
+        u.DisplayName,
+        COALESCE(latest.Title, 'No Posts') AS LatestPostTitle,
+        COALESCE(tagged.TagCount, 0) AS TagCount,
+        COALESCE(votes.Upvotes, 0) AS TotalUpvotes,
+        COALESCE(votes.Downvotes, 0) AS TotalDownvotes,
+        COALESCE(comments.CommentCount, 0) AS TotalComments
+    FROM Users u
+    LEFT JOIN LatestPostCTE latest ON u.Id = latest.PostId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(DISTINCT Tags) AS TagCount
+        FROM (
+            SELECT 
+                p.OwnerUserId,
+                unnest(string_to_array(p.Tags, ',')) AS Tags
+            FROM Posts p
+        ) AS TagList
+        GROUP BY OwnerUserId
+    ) tagged ON u.Id = tagged.OwnerUserId
+    LEFT JOIN MostActiveUsers votes ON u.Id = votes.Id
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY UserId
+    ) comments ON u.Id = comments.UserId
+)
+
+SELECT 
+    uas.DisplayName,
+    uas.LatestPostTitle,
+    uas.TagCount,
+    uas.TotalUpvotes,
+    uas.TotalDownvotes,
+    uas.TotalComments,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT b.Id) AS TotalBadgesAwarded,
+    AVG(u.Reputation) AS AverageReputation
+FROM UserActivitySummary uas
+LEFT JOIN Posts p ON uas.DisplayName = p.OwnerDisplayName
+LEFT JOIN Badges b ON uas.DisplayName = b.UserId
+GROUP BY 
+    uas.DisplayName, 
+    uas.LatestPostTitle, 
+    uas.TagCount, 
+    uas.TotalUpvotes, 
+    uas.TotalDownvotes,
+    uas.TotalComments
+ORDER BY 
+    uas.TotalPosts DESC,
+    uas.TotalUpvotes DESC
+FETCH FIRST 10 ROWS ONLY;
+

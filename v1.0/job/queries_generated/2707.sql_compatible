@@ -1,0 +1,72 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(STRING_AGG(DISTINCT cn.name, ', '), 'No Companies') AS companies,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, 
+        t.title, 
+        t.production_year
+),
+actor_info AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(DISTINCT t.id) AS total_movies,
+        AVG(COALESCE(t.production_year, 0)) AS average_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    GROUP BY 
+        ci.person_id
+),
+keyword_info AS (
+    SELECT 
+        mk.keyword, 
+        COUNT(DISTINCT t.id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title t ON mk.movie_id = t.id
+    WHERE 
+        mk.keyword IS NOT NULL
+    GROUP BY 
+        mk.keyword
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    md.companies, 
+    md.actor_count, 
+    ai.total_movies AS movies_per_actor, 
+    ai.average_year AS avg_release_year_per_actor,
+    ki.keyword,
+    ki.movie_count
+FROM 
+    movie_details md
+LEFT JOIN 
+    actor_info ai ON ai.person_id IS NOT NULL
+LEFT JOIN 
+    keyword_info ki ON ki.keyword IS NOT NULL
+WHERE 
+    md.production_year IS NOT NULL
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_count DESC, 
+    ki.movie_count DESC;

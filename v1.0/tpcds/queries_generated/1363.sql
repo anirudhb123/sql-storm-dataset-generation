@@ -1,0 +1,65 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+), recent_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy IN (6, 7)) 
+    GROUP BY 
+        ws_bill_customer_sk
+), aggregated_data AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        coalesce(rs.total_sales, 0) AS total_sales,
+        coalesce(rs.order_count, 0) AS order_count
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        recent_sales rs ON ci.c_customer_sk = rs.ws_bill_customer_sk
+    WHERE 
+        ci.rnk = 1
+)
+SELECT 
+    ad.c_first_name,
+    ad.c_last_name,
+    ad.cd_gender,
+    ad.cd_marital_status,
+    ad.total_sales,
+    CASE 
+        WHEN ad.total_sales > 10000 THEN 'High Spender'
+        WHEN ad.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Spender'
+        ELSE 'Low Spender'
+    END AS spending_category,
+    COALESCE(NULLIF(ad.order_count, 0), 'No Orders') AS order_info
+FROM 
+    aggregated_data ad
+WHERE 
+    ad.cd_gender = 'F'
+ORDER BY 
+    ad.total_sales DESC
+LIMIT 10;

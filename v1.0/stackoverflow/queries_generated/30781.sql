@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN v.VoteCount ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN v.VoteCount ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 5 THEN v.VoteCount ELSE 0 END), 0) AS Favorites,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecentVotes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(substring(p.Tags from 2 for char_length(p.Tags) - 2))::varchar AS TagName) t ON TRUE
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    psh.PostId,
+    psh.Title,
+    psh.PostTypeId,
+    psh.Level,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.Favorites,
+    ps.CommentCount,
+    ps.Tags,
+    CASE 
+        WHEN psh.Level = 1 THEN 'Top Level Post'
+        WHEN psh.Level > 1 THEN CONCAT('Level ', psh.Level)
+        ELSE 'Unknown Level'
+    END AS PostLevelDescription
+FROM 
+    RecursivePostHierarchy psh
+LEFT JOIN 
+    PostStatistics ps ON psh.PostId = ps.Id
+WHERE 
+    psh.Title ILIKE '%SQL%'
+ORDER BY 
+    psh.Level ASC, ps.UpVotes DESC NULLS LAST;

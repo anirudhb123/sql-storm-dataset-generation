@@ -1,0 +1,55 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        s.s_nationkey AS supplier_nationkey,
+        s.s_acctbal AS supplier_account_balance,
+        CONCAT('Supplier ', s.s_name, ' has an account balance of $', FORMAT(s.s_acctbal, 2)) AS supplier_info
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 10000
+), 
+PartDetails AS (
+    SELECT 
+        p.p_partkey AS part_key,
+        p.p_name AS part_name,
+        p.p_container AS part_container,
+        p.p_retailprice AS part_retail_price,
+        REPLACE(p.p_comment, 'good', 'excellent') AS modified_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_size >= 10
+), 
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey AS order_key,
+        c.c_name AS customer_name,
+        o.o_orderdate AS order_date,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > 1000
+    GROUP BY 
+        o.o_orderkey, c.c_name, o.o_orderdate
+)
+SELECT 
+    si.supplier_info,
+    pd.part_name,
+    pd.modified_comment,
+    co.customer_name,
+    co.order_date,
+    co.item_count
+FROM 
+    SupplierInfo si
+JOIN 
+    PartDetails pd ON si.supplier_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+JOIN 
+    CustomerOrders co ON co.order_date BETWEEN '1996-01-01' AND '1997-12-31'
+ORDER BY 
+    co.item_count DESC, si.supplier_name;

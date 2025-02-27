@@ -1,0 +1,75 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag,
+        COUNT(p.Id) AS Occurrences
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ps.UpVotes,
+        ps.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY ps.UpVotes DESC, ps.DownVotes ASC) AS Rank
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.AvgReputation,
+    rp.Title AS TopPostTitle,
+    rp.CreationDate AS PostCreationDate,
+    pt.Tag AS PopularTag,
+    pt.Occurrences AS TagOccurrences
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RankedPosts rp ON ups.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.Id LIMIT 1)
+LEFT JOIN 
+    PopularTags pt ON ups.QuestionCount > 0
+WHERE 
+    ups.AvgReputation IS NOT NULL
+ORDER BY 
+    ups.AvgReputation DESC, ups.PostCount DESC;

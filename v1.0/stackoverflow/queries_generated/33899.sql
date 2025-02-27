@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(CAST(NULLIF(UPPER(p.Body), '') AS varchar), 'No content available') AS BodyContent
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass   -- MAX to determine highest badge class earned by user
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(p.Tags, ',')) AS Tag,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(p.Id) > 10
+),
+PostHistoryJoin AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- focus on editing history
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rb.BadgeCount,
+    rb.MaxBadgeClass,
+    COUNT(DISTINCT pt.Tag) AS PopularTagCount,
+    phj.HistoryRank,
+    phj.UserId AS LastEditedBy,
+    phj.Comment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+LEFT JOIN 
+    PopularTags pt ON pt.Tag = ANY(string_to_array(rp.Tags, ','))
+LEFT JOIN 
+    PostHistoryJoin phj ON rp.PostId = phj.PostId AND phj.HistoryRank = 1
+WHERE 
+    rp.Rank <= 10 -- Get top 10 posts in their categories
+GROUP BY 
+    rp.PostId, rb.BadgeCount, rb.MaxBadgeClass, phj.HistoryRank, phj.UserId, phj.Comment
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_number_employees, 
+        s_market_id, 
+        s_division_id,
+        1 AS level
+    FROM store
+    WHERE s_store_sk = (SELECT MIN(s_store_sk) FROM store)
+
+    UNION ALL
+
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_number_employees,
+        s.s_market_id,
+        s.s_division_id,
+        sh.level + 1
+    FROM store s
+    JOIN SalesHierarchy sh ON s.s_division_id = sh.s_division_id
+    WHERE sh.level < 10  -- Limit recursion depth
+),
+
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    LEFT JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+
+TopItems AS (
+    SELECT 
+        sd.ws_item_sk, 
+        sd.total_sales,
+        sd.total_net_profit,
+        RANK() OVER (ORDER BY sd.total_net_profit DESC) AS rank
+    FROM SalesData sd
+    WHERE sd.total_sales > 1000
+)
+
+SELECT 
+    sh.s_store_name,
+    ti.ws_item_sk,
+    ti.total_sales,
+    ti.total_net_profit,
+    CASE 
+        WHEN ti.total_net_profit IS NULL THEN 'No Profit'
+        ELSE 'Profit Generated'
+    END AS profit_status
+FROM SalesHierarchy sh
+FULL OUTER JOIN TopItems ti ON sh.s_store_sk = (
+    SELECT MIN(ss.s_store_sk)
+    FROM store_sales ss
+    JOIN web_sales ws ON ss.ss_item_sk = ws.ws_item_sk
+    WHERE ss.ss_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+)
+WHERE ti.rank <= 10
+ORDER BY sh.s_store_name, ti.total_net_profit DESC;

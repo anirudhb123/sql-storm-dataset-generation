@@ -1,0 +1,51 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_parent_customer_sk, 1 AS level
+    FROM customer
+    WHERE c_parent_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_parent_customer_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_parent_customer_sk = ch.c_customer_sk
+),
+latest_returns AS (
+    SELECT cr.returning_customer_sk, SUM(cr.return_quantity) AS total_returned
+    FROM web_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+prices AS (
+    SELECT i.i_item_sk, 
+        COALESCE(i.i_current_price, 0.00) AS current_price,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category_id ORDER BY i.i_current_price DESC) AS price_rank
+    FROM item i
+    WHERE i.i_rec_end_date IS NULL
+),
+customer_stats AS (
+    SELECT cd.cd_gender,
+           cd.cd_marital_status,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+           MAX(cd.cd_credit_rating) AS max_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    lr.total_returned,
+    cs.customer_count,
+    p.i_item_sk,
+    p.current_price
+FROM customer_hierarchy ch
+LEFT JOIN latest_returns lr ON ch.c_customer_sk = lr.returning_customer_sk
+JOIN customer_stats cs ON cs.customer_count > 10 
+      OR (cs.customer_count IS NULL AND cs.avg_purchase_estimate IS NOT NULL)
+JOIN prices p ON p.price_rank <= 3
+WHERE (p.current_price > 50.00 OR lr.total_returned IS NULL)
+   AND NOT EXISTS(
+       SELECT 1 
+       FROM store_sales ss
+       WHERE ss.ss_customer_sk = ch.c_customer_sk AND ss.ss_sales_price < p.current_price
+       )
+ORDER BY ch.level DESC, lr.total_returned DESC;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) FILTER (WHERE v.BountyAmount IS NOT NULL) AS AverageBounty,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS TagName
+    ) t ON true
+    GROUP BY p.Id
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0) * 100) AS TotalBadgeScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+
+PostHistories AS (
+    SELECT 
+        ph.UserDisplayName,
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.UserId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE ph.Comment IS NOT NULL OR ph.Text IS NOT NULL
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalBadgeScore,
+    us.TotalPosts,
+    us.LastPostDate,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Rank,
+    rp.CommentCount,
+    rp.AverageBounty,
+    rp.Tags,
+    ph.UserDisplayName AS HistoryUser,
+    ph.CreationDate AS HistoryCreationDate,
+    ph.Comment AS HistoryComment,
+    ph.PostHistoryType
+FROM UserStats us
+JOIN RankedPosts rp ON us.TotalPosts > 0
+LEFT JOIN PostHistories ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+WHERE us.TotalBadgeScore > 0
+ORDER BY us.TotalBadgeScore DESC, rp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

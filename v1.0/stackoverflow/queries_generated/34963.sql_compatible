@@ -1,0 +1,61 @@
+
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer,
+        AVG(v.BountyAmount) AS AverageBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+HighScoringPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.CommentCount DESC, ps.AverageBountyAmount DESC) AS Rank
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.HasAcceptedAnswer = 1
+)
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT ps.PostId) AS TotalPosts,
+    SUM(CASE WHEN hsp.Rank <= 5 THEN 1 ELSE 0 END) AS TopPostsCount,
+    ubc.BadgeCount,
+    SUM(COALESCE(ps.CommentCount, 0)) AS TotalComments,
+    COALESCE(ROUND(AVG(ps.AverageBountyAmount), 2), 0) AS AverageBounty
+FROM 
+    Users u
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    HighScoringPosts hsp ON ps.PostId = hsp.PostId
+LEFT JOIN 
+    UserBadgeCounts ubc ON u.Id = ubc.UserId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, ubc.BadgeCount
+ORDER BY 
+    TotalComments DESC, TotalPosts DESC;

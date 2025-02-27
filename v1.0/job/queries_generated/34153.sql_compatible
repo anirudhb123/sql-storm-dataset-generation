@@ -1,0 +1,52 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    ARRAY_AGG(DISTINCT mk.keyword) AS keywords,
+    MAX(CASE WHEN m.production_year = 2022 THEN 'Yes' ELSE 'No' END) AS released_in_2022,
+    COUNT(DISTINCT ch.id) FILTER (WHERE ch.name IS NOT NULL) AS char_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    char_name ch ON a.person_id = ch.imdb_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT m.movie_id) > 5
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

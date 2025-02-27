@@ -1,0 +1,55 @@
+
+WITH AddressDetails AS (
+    SELECT
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM
+        customer_address
+),
+CustomerDetails AS (
+    SELECT
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        ca.city,
+        ca.state
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        AddressDetails ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesDetails AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        cd.full_name,
+        cd.city,
+        cd.state
+    FROM
+        web_sales ws
+    JOIN
+        CustomerDetails cd ON ws.ws_bill_customer_sk = c_customer_sk
+)
+SELECT
+    full_name,
+    city,
+    state,
+    SUM(ws_sales_price * ws_quantity) AS total_sales,
+    COUNT(DISTINCT ws_order_number) AS unique_orders,
+    AVG(ws_sales_price) AS avg_order_value
+FROM
+    SalesDetails
+GROUP BY
+    full_name,
+    city,
+    state
+ORDER BY
+    total_sales DESC
+LIMIT 100;

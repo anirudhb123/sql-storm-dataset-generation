@@ -1,0 +1,80 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+MovieStats AS (
+    SELECT 
+        t.movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        MAX(a.actor_order) AS max_actors_in_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        RecursiveCTE a ON a.movie_id = t.movie_id
+    GROUP BY 
+        t.movie_id, t.title, t.production_year
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        COALESCE(ks.keyword_list, 'No Keywords') AS keywords,
+        ms.total_actors,
+        ms.total_keywords,
+        ms.max_actors_in_cast
+    FROM 
+        MovieStats ms
+    LEFT JOIN 
+        KeywordStats ks ON ms.movie_id = ks.movie_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_actors > 10 THEN 'Large Cast'
+        WHEN total_actors BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    CASE 
+        WHEN production_year IS NULL THEN 'N/A'
+        ELSE EXTRACT(YEAR FROM DATE '2024-10-01') - production_year
+    END AS years_since_release
+FROM 
+    FinalOutput
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM aka_title at 
+        WHERE at.production_year >= 2000 
+        AND at.title ILIKE '%' || 'action' || '%'
+        AND at.movie_id = FinalOutput.movie_id
+    )
+ORDER BY 
+    total_keywords DESC,
+    title ASC
+LIMIT 100;

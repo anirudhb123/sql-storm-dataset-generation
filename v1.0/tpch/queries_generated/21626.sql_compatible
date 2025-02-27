@@ -1,0 +1,64 @@
+
+WITH RECURSIVE supplier_category AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           p.p_partkey,
+           p.p_name,
+           p.p_brand,
+           p.p_retailprice,
+           p.p_comment,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size < 10 AND s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey,
+           s.s_name,
+           p.p_partkey,
+           p.p_name,
+           p.p_brand,
+           p.p_retailprice,
+           CONCAT(p.p_comment, ' - ', COALESCE(s.s_comment, 'No Comment')) AS p_comment,
+           RANK() OVER (PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC)
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size >= 10 AND s.s_acctbal IS NULL
+),
+high_value_orders AS (
+    SELECT o.o_orderkey,
+           c.c_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts,
+           MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+           DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+filtered_categories AS (
+    SELECT s.s_suppkey,
+           COUNT(*) AS supplier_count,
+           SUM(p.p_retailprice) AS total_inventory_value
+    FROM supplier_category s
+    INNER JOIN part p ON s.p_partkey = p.p_partkey
+    WHERE s.rank <= 5 
+    GROUP BY s.s_suppkey
+)
+SELECT n.n_name,
+       r.r_name,
+       COUNT(DISTINCT hc.o_orderkey) AS total_high_value_orders,
+       MAX(fc.total_inventory_value) AS highest_inventory_value,
+       SUM(fs.total_order_value) AS combined_order_value
+FROM nation n
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN high_value_orders hc ON n.n_nationkey = hc.c_custkey
+LEFT JOIN filtered_categories fc ON hc.c_custkey = fc.s_suppkey
+WHERE r.r_name LIKE '%West%' OR r.r_name IS NULL
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT hc.o_orderkey) > 0
+ORDER BY highest_inventory_value DESC
+LIMIT 10 OFFSET 5;

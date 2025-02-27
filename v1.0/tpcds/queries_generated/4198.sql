@@ -1,0 +1,55 @@
+
+WITH income_distribution AS (
+    SELECT 
+        ib_income_band_sk,
+        SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+        COUNT(*) AS total_count
+    FROM 
+        customer_demographics
+    LEFT JOIN household_demographics ON customer_demographics.cd_demo_sk = household_demographics.hd_demo_sk
+    LEFT JOIN income_band ON household_demographics.hd_income_band_sk = income_band.ib_income_band_sk
+    GROUP BY 
+        ib_income_band_sk
+), 
+sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        cs_total_sales.total_sales,
+        cs_total_sales.avg_net_profit,
+        (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = c.c_customer_sk) AS purchase_count
+    FROM 
+        customer c
+    JOIN sales_summary cs_total_sales ON cs_total_sales.web_site_sk = (SELECT MIN(ws.web_site_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = c.c_customer_sk)
+    WHERE 
+        c.c_birth_year >= 1980
+)
+SELECT 
+    cd.cd_gender,
+    id.ib_income_band_sk,
+    id.male_count,
+    id.female_count,
+    SUM(cs.total_sales) AS sales_total,
+    AVG(cs.avg_net_profit) AS avg_profit,
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers
+FROM 
+    customer_sales cs
+JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN income_distribution id ON cd.cd_demo_sk = id.ib_income_band_sk
+GROUP BY 
+    cd.cd_gender, id.ib_income_band_sk
+HAVING 
+    SUM(cs.total_sales) > 10000
+ORDER BY 
+    cd.cd_gender, id.ib_income_band_sk;

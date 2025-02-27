@@ -1,0 +1,77 @@
+WITH RECURSIVE category_hierarchy AS (
+    SELECT 
+        i_item_sk, 
+        i_category, 
+        i_subcategory, 
+        1 AS level
+    FROM 
+        item
+    WHERE 
+        i_category IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.i_item_sk, 
+        c.i_category, 
+        c.i_subcategory,
+        ch.level + 1
+    FROM 
+        item c 
+    JOIN 
+        category_hierarchy ch ON c.i_item_sk = ch.i_item_sk AND c.i_category = ch.i_category AND c.i_subcategory <> ch.i_subcategory
+), 
+customer_age_demo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        (EXTRACT(YEAR FROM cast('2002-10-01' as date)) - c.c_birth_year) AS age,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+final_report AS (
+    SELECT 
+        ca.i_category,
+        ch.level AS category_level,
+        cd.age,
+        cd.cd_gender,
+        cs.total_quantity_sold,
+        cs.total_net_profit
+    FROM 
+        category_hierarchy ch
+    LEFT JOIN 
+        sales_summary cs ON ch.i_item_sk = cs.web_site_sk
+    JOIN 
+        customer_age_demo cd ON cd.c_customer_sk = ch.i_item_sk
+    WHERE 
+        cd.age >= 18 AND 
+        cd.cd_gender = 'F'
+)
+SELECT 
+    fr.i_category,
+    fr.category_level,
+    COUNT(DISTINCT fr.c_customer_sk) AS num_customers,
+    SUM(fr.total_quantity_sold) AS total_quantity,
+    AVG(fr.total_net_profit) AS avg_net_profit
+FROM 
+    final_report fr
+GROUP BY 
+    fr.i_category, fr.category_level
+ORDER BY 
+    total_quantity DESC,
+    avg_net_profit DESC
+LIMIT 100;

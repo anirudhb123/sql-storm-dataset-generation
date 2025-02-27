@@ -1,0 +1,92 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        1 AS level
+    FROM 
+        title
+    WHERE 
+        title.id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        tt.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 5
+),
+HighestRatedMovies AS (
+    SELECT 
+        mi.movie_id,
+        AVG(CAST(info.info AS FLOAT)) AS avg_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info = 'rating'
+    GROUP BY 
+        mi.movie_id
+),
+MovieCompanyCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.name) AS company_rank
+    FROM 
+        title m
+    INNER JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    INNER JOIN 
+        company_name c ON mc.company_id = c.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+TitleKeywordCTE AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword kw ON mt.keyword_id = kw.id
+    GROUP BY 
+        mt.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(h.avg_rating, 0) AS avg_rating,
+    COALESCE(k.keywords, 'No keywords') AS keywords,
+    COALESCE(cc.company_name, 'No production company') AS company_name,
+    cc.company_rank,
+    mh.level AS hierarchy_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    HighestRatedMovies h ON mh.movie_id = h.movie_id
+LEFT JOIN 
+    TitleKeywordCTE k ON mh.movie_id = k.movie_id
+LEFT JOIN 
+    MovieCompanyCTE cc ON mh.movie_id = cc.movie_id AND cc.company_rank = 1
+ORDER BY 
+    avg_rating DESC, 
+    hierarchy_level,
+    mh.title
+FETCH FIRST 50 ROWS ONLY;

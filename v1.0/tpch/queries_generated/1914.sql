@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierProductStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(so.total_spent, 0) AS total_customer_spent,
+    COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT ro.o_orderkey) AS completed_orders,
+    STRING_AGG(DISTINCT c.c_name) AS customer_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CustomerOrderDetails so ON c.c_custkey = so.c_custkey
+LEFT JOIN 
+    SupplierProductStats sp ON sp.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            part p ON ps.ps_partkey = p.p_partkey 
+        WHERE 
+            p.p_retailprice > 100
+        LIMIT 1
+    )
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'F'
+    )
+GROUP BY 
+    r.r_name, so.total_spent, sp.total_supply_cost
+ORDER BY 
+    r.r_name;

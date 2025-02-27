@@ -1,0 +1,48 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        AVG(U.Reputation) AS AvgReputation
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        MAX(P.CreationDate) AS LastActivityDate,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY P.Id, P.OwnerUserId, P.Title
+),
+TopPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.LastActivityDate,
+        PA.TotalViews,
+        RANK() OVER (ORDER BY PA.TotalViews DESC) AS ViewRank
+    FROM PostActivity PA
+    WHERE PA.OwnerUserId IS NOT NULL
+)
+SELECT 
+    UPS.DisplayName,
+    UPS.VoteCount,
+    UPS.Upvotes,
+    UPS.Downvotes,
+    TP.Title,
+    TP.LastActivityDate,
+    TP.TotalViews
+FROM UserVoteStats UPS
+JOIN TopPosts TP ON UPS.UserId = TP.OwnerUserId
+WHERE (UPS.VoteCount > 10 OR (UPS.Upvotes - UPS.Downvotes) > 5)
+ORDER BY TP.ViewRank, UPS.Upvotes DESC;

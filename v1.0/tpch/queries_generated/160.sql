@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') AND
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS sales_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CombinedResults AS (
+    SELECT 
+        r.r_name,
+        p.p_partkey,
+        p.p_name,
+        ps.total_available,
+        ps.avg_supplycost,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(s.sales_count, 0) AS sales_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        SupplierDetails ps ON s.s_suppkey = ps.s_suppkey
+    LEFT JOIN 
+        PartSales s ON ps.s_suppkey = s.p_partkey
+)
+SELECT 
+    cr.r_name,
+    cr.p_name,
+    cr.total_sales,
+    cr.total_available,
+    cr.avg_supplycost,
+    COUNT(ro.o_orderkey) AS num_orders
+FROM 
+    CombinedResults cr
+LEFT JOIN 
+    RankedOrders ro ON cr.p_partkey = ro.o_orderkey
+WHERE 
+    cr.total_sales > 1000 AND 
+    cr.total_available IS NOT NULL
+GROUP BY 
+    cr.r_name, cr.p_name, cr.total_sales, cr.total_available, cr.avg_supplycost
+HAVING 
+    COUNT(ro.o_orderkey) > 5
+ORDER BY 
+    cr.total_sales DESC, cr.p_name;

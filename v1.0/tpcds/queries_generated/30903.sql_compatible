@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = DATE '2002-10-01' - INTERVAL '1 year')
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        sd.total_profit + SUM(ss.ss_net_profit),
+        sd.total_sales + COUNT(DISTINCT ss.ss_ticket_number)
+    FROM 
+        store_sales ss
+    JOIN 
+        sales_data sd ON ss.ss_store_sk = sd.ss_store_sk
+    JOIN 
+        store s ON s.s_store_sk = sd.ss_store_sk
+    WHERE 
+        ss.ss_sold_date_sk < (SELECT MAX(ss_sold_date_sk) FROM store_sales) 
+        AND ss.ss_sold_date_sk >= (SELECT MIN(ss_sold_date_sk) FROM store_sales)
+    GROUP BY 
+        s.s_store_sk, sd.total_profit, sd.total_sales
+),
+store_details AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        COALESCE(MAX(ss_net_profit), 0) AS highest_single_sale,
+        COUNT(ss_ticket_number) AS total_transactions
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s_store_sk, s_store_name
+)
+SELECT 
+    sd.s_store_name,
+    base.total_sales,
+    base.total_profit,
+    sd.highest_single_sale,
+    sd.total_transactions,
+    CASE 
+        WHEN base.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Data Available'
+    END AS sales_status,
+    ROW_NUMBER() OVER (ORDER BY base.total_profit DESC) AS rnk
+FROM 
+    sales_data base
+JOIN 
+    store_details sd ON base.ss_store_sk = sd.s_store_sk
+WHERE 
+    base.total_profit > 0
+ORDER BY 
+    base.total_profit DESC;

@@ -1,0 +1,78 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.created_at DESC) AS rank
+    FROM
+        title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorRoleCounts AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS role_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM
+        cast_info ci
+    LEFT JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.person_id
+),
+CompanyMovieCounts AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    GROUP BY
+        mc.movie_id
+),
+TitleKeywordCounts AS (
+    SELECT
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.movie_id
+),
+FinalSelection AS (
+    SELECT
+        rt.title,
+        rt.production_year,
+        COALESCE(rac.role_count, 0) AS actor_count,
+        COALESCE(cmc.company_count, 0) AS company_count,
+        COALESCE(tkc.keyword_count, 0) AS keyword_count
+    FROM
+        RankedTitles rt
+    LEFT JOIN ActorRoleCounts rac ON rt.title_id IN (
+        SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id IN (
+            SELECT DISTINCT person_id FROM aka_name
+        )
+    )
+    LEFT JOIN CompanyMovieCounts cmc ON rt.title_id = cmc.movie_id
+    LEFT JOIN TitleKeywordCounts tkc ON rt.title_id = tkc.movie_id
+    WHERE
+        rt.rank = 1
+)
+SELECT
+    fs.title,
+    fs.production_year,
+    fs.actor_count,
+    fs.company_count,
+    fs.keyword_count,
+    CASE
+        WHEN fs.actor_count > 5 THEN 'Popular'
+        WHEN fs.actor_count = 0 THEN 'Uncertain'
+        ELSE 'Unknown'
+    END AS popularity_status
+FROM
+    FinalSelection fs
+WHERE
+    fs.production_year IS NOT NULL
+ORDER BY
+    fs.production_year DESC, fs.actor_count DESC
+LIMIT 20;

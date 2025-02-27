@@ -1,0 +1,87 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    INNER JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        MAX(l.l_tax) AS max_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ord.order_rank,
+    ord.o_orderkey,
+    ord.o_orderdate,
+    ord.o_totalprice,
+    ord.c_mktsegment,
+    COALESCE(p.product_name, 'Unknown Product') AS product_name,
+    COALESCE(s.supplier_info, 'No Supplier Info') AS supplier_info,
+    pl.distinct_suppliers,
+    pl.total_supply_value,
+    ls.total_line_revenue,
+    ls.avg_quantity,
+    ls.max_tax
+FROM 
+    OrderHierarchy ord
+LEFT JOIN 
+    (SELECT 
+         p.p_partkey, 
+         p.p_name AS product_name 
+     FROM 
+         part p) p ON p.p_partkey = (
+         SELECT ps.ps_partkey 
+         FROM partsupp ps 
+         WHERE ps.ps_supplycost = (
+             SELECT MAX(ps2.ps_supplycost) 
+             FROM partsupp ps2 
+             WHERE ps2.ps_partkey = p.p_partkey
+         ) LIMIT 1
+     )
+LEFT JOIN 
+    (SELECT 
+         s.s_suppkey, 
+         CONCAT(s.s_name, ' - ', s.s_address) AS supplier_info 
+     FROM 
+         supplier s) s ON s.s_suppkey = (
+         SELECT ps.ps_suppkey 
+         FROM partsupp ps 
+         WHERE ps.ps_partkey = p.p_partkey 
+         ORDER BY ps.ps_supplycost DESC LIMIT 1
+     )
+JOIN 
+    PartSupplierStats pl ON pl.ps_partkey = p.p_partkey
+JOIN 
+    LineItemSummary ls ON ls.l_orderkey = ord.o_orderkey
+WHERE 
+    ord.order_rank <= 10
+ORDER BY 
+    ord.o_orderdate DESC, 
+    pl.total_supply_value DESC;

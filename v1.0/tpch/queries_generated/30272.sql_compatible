@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(100)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CONCAT(sh.hierarchy_path, ' > ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 
+                        WHERE s2.s_suppkey <> sh.s_suppkey)
+),
+TotalOrderValue AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+ExceedingOrders AS (
+    SELECT o.o_custkey, SUM(t.total_value) AS total_order_value
+    FROM TotalOrderValue t
+    JOIN orders o ON t.o_orderkey = o.o_orderkey
+    GROUP BY o.o_custkey
+    HAVING SUM(t.total_value) > 10000
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(sh.hierarchy_path, 'No suppliers') AS supplier_hierarchy,
+    eo.total_order_value
+FROM customer c
+LEFT JOIN ExceedingOrders eo ON c.c_custkey = eo.o_custkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_acctbal = c.c_acctbal
+WHERE c.c_mktsegment = 'BUILDING' 
+  AND (c.c_acctbal IS NOT NULL OR eo.total_order_value IS NULL)
+ORDER BY eo.total_order_value DESC NULLS LAST
+LIMIT 10;

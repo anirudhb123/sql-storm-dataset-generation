@@ -1,0 +1,51 @@
+WITH RankedNations AS (
+    SELECT n.n_name, 
+           n.n_nationkey, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS rank
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, n.n_nationkey, n.n_regionkey
+),
+PopularParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(l.l_quantity) AS total_quantity,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_quantity) > 100
+),
+SupplierDetails AS (
+    SELECT s.s_name, 
+           s.s_nationkey, 
+           COALESCE(SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice END), 0) AS total_filled_orders,
+           COALESCE(SUM(CASE WHEN l.l_discount > 0.1 THEN 1 ELSE 0 END), 0) AS discount_count,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY total_filled_orders DESC) AS supplier_rank
+    FROM supplier s
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_name, s.s_nationkey
+)
+SELECT n.n_name, 
+       pp.p_name, 
+       sd.s_name,
+       pp.total_quantity,
+       sd.total_filled_orders,
+       sd.discount_count,
+       CASE 
+           WHEN sd.discount_count > 5 THEN 'Highly Discounted'
+           ELSE 'Regular Pricing'
+       END AS pricing_strategy
+FROM RankedNations n
+JOIN PopularParts pp ON n.n_nationkey = (
+    SELECT s.s_nationkey
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = pp.p_partkey)
+    LIMIT 1
+)
+JOIN SupplierDetails sd ON sd.s_nationkey = n.n_nationkey
+WHERE n.rank <= 3 AND sd.supplier_rank <= 3
+ORDER BY n.n_name, pp.total_quantity DESC, sd.total_filled_orders DESC;

@@ -1,0 +1,50 @@
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_order_value,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer AS c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND d.d_year = 2001
+        AND d.d_month_seq IN (1, 2, 3)  
+    GROUP BY 
+        ws.web_site_id, d.d_year, d.d_month_seq, d.d_week_seq
+),
+WarehouseData AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse AS w
+    JOIN 
+        inventory AS inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_order_value,
+    wd.w_warehouse_id,
+    wd.total_inventory,
+    (sd.total_sales / NULLIF(wd.total_inventory, 0)) AS sales_to_inventory_ratio
+FROM 
+    SalesData AS sd
+JOIN 
+    WarehouseData AS wd ON sd.web_site_id = wd.w_warehouse_id
+ORDER BY 
+    sales_to_inventory_ratio DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopNOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+    ORDER BY total_sales DESC
+    LIMIT 10
+),
+NationsRegion AS (
+    SELECT n.n_name, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT
+    nh.n_name,
+    nh.r_name,
+    nh.supplier_count,
+    ROW_NUMBER() OVER (PARTITION BY nh.r_name ORDER BY nh.supplier_count DESC) AS nation_rank,
+    COALESCE(THO.total_sales, 0) AS highest_order_total
+FROM NationsRegion nh
+LEFT JOIN (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+) AS THO ON nh.n_name = (
+    SELECT n.n_name
+    FROM nation n
+    WHERE n.n_nationkey = (
+        SELECT s.s_nationkey
+        FROM supplier s
+        WHERE s.s_suppkey = o.o_custkey
+        LIMIT 1
+    )
+)
+WHERE nh.supplier_count > (
+    SELECT AVG(supplier_count) from NationsRegion
+)
+ORDER BY nh.r_name, nh.supplier_count DESC;

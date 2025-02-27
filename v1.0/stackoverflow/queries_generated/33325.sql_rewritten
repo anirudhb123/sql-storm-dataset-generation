@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS UserRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    p.Title,
+    u.DisplayName AS Author,
+    p.CreationDate,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.CommentCount,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    r.Level AS PostLevel
+FROM PostStatistics ps
+JOIN Posts p ON ps.Id = p.Id
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserBadges ub ON ub.UserId = u.Id
+LEFT JOIN RecursivePostHierarchy r ON p.Id = r.PostId
+WHERE ps.Upvotes - ps.Downvotes > 10 
+    AND EXISTS (
+        SELECT 1 
+        FROM Comments c 
+        WHERE c.PostId = p.Id 
+        AND c.CreationDate > DATEADD(DAY, -30, GETDATE())
+    )
+ORDER BY p.CreationDate DESC, ps.CommentCount DESC;

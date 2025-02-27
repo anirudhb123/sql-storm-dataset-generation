@@ -1,0 +1,51 @@
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_name,
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450496 AND 2454176 
+    GROUP BY 
+        s.s_store_name, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        store_name,
+        customer_id,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+SalesSummary AS (
+    SELECT 
+        store_name,
+        COUNT(customer_id) AS num_customers,
+        SUM(total_sales) AS total_revenue,
+        AVG(total_sales) AS average_sales
+    FROM 
+        TopCustomers
+    GROUP BY 
+        store_name
+)
+SELECT 
+    ss.store_name,
+    ss.num_customers,
+    ss.total_revenue,
+    ss.average_sales,
+    d.d_year,
+    d.d_month_seq
+FROM 
+    SalesSummary ss
+JOIN 
+    date_dim d ON d.d_date_sk IN (2450496, 2454176) 
+ORDER BY 
+    total_revenue DESC, store_name ASC;

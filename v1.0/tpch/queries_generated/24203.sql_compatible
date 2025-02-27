@@ -1,0 +1,76 @@
+
+WITH RECURSIVE price_changes AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost IS NOT NULL
+),
+region_counts AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nations_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey
+),
+complex_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns,
+        MAX(l.l_extendedprice) AS max_extended_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(MAX(pc.ps_supplycost), 0) AS max_supply_cost,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE 
+            WHEN rc.nations_count > 1 THEN 1 
+            ELSE 0 END) AS multicountry_orders,
+    SUM(CASE 
+            WHEN co.total_returns > 0 THEN co.o_totalprice 
+            ELSE 0 
+        END) AS total_returned_sales,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    JSON_AGG(DISTINCT (CASE 
+            WHEN (l.l_discount > 0.20 AND l.l_returnflag = 'N') THEN l.l_comment 
+            ELSE NULL 
+        END)) AS non_return_discount_comments
+FROM 
+    part p
+LEFT JOIN 
+    price_changes pc ON p.p_partkey = pc.ps_partkey AND pc.rn = 1
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    region_counts rc ON rc.r_regionkey = c.c_nationkey
+LEFT JOIN 
+    complex_orders co ON co.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND p.p_size IN (SELECT DISTINCT p3.p_size FROM part p3 WHERE p3.p_container IS NOT NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, rc.nations_count, co.total_returns, co.o_totalprice
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 2
+ORDER BY 
+    max_supply_cost DESC, customer_count ASC;

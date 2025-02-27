@@ -1,0 +1,69 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    
+    UNION ALL
+
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        oh.c_name,
+        oh.order_rank
+    FROM 
+        OrderHierarchy oh
+    JOIN 
+        orders o ON oh.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate < oh.o_orderdate
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT OUTER JOIN 
+    (SELECT 
+         DISTINCT c.c_nationkey, 
+         SUM(l.l_extendedprice) AS supply_value
+     FROM 
+         lineitem l
+     JOIN 
+         partsupp ps ON l.l_partkey = ps.ps_partkey
+     WHERE 
+         ps.ps_availqty < (SELECT AVG(ps_availqty) FROM partsupp)
+     GROUP BY 
+         c.c_nationkey) AS LowSupply ON LowSupply.c_nationkey = n.n_nationkey
+WHERE 
+    r.r_name IS NOT NULL 
+    AND LowSupply.supply_value IS NOT NULL
+    AND o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+GROUP BY 
+    r.r_name
+HAVING 
+    total_revenue > 1000000
+ORDER BY 
+    total_revenue DESC;

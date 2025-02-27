@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+),
+
+CommentsWithPostScore AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.PostId,
+        c.Text,
+        COALESCE(p.Score, 0) AS PostScore,
+        CASE 
+            WHEN c.UserId IS NULL THEN 'Anonymous'
+            ELSE u.DisplayName 
+        END AS Commenter
+    FROM 
+        Comments c
+    LEFT JOIN 
+        Posts p ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON c.UserId = u.Id
+),
+
+PostTagCounts AS (
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT pl.PostId) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        PostLinks pl ON t.Id = pl.LinkTypeId
+    GROUP BY 
+        t.Id, t.TagName
+),
+
+RecentPostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(ph.Comment AS INT))
+            WHEN ph.PostHistoryTypeId = 12 THEN 'Deleted'
+            ELSE 'Other Change'
+        END AS ChangeComment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 month'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.UserPostRank,
+    c.CommentId,
+    c.Text AS CommentText,
+    c.Commenter,
+    pt.TagName,
+    pt.PostCount,
+    pht.ChangeComment,
+    pht.CreationDate AS HistoryDate,
+    CASE 
+        WHEN rp.UpVoteCount > 0 AND rp.DownVoteCount = 0 THEN 'High Upvotes'
+        WHEN rp.UpVoteCount = 0 AND rp.DownVoteCount > 0 THEN 'High Downvotes'
+        ELSE 'Mixed Votes'
+    END AS VoteStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CommentsWithPostScore c ON rp.PostId = c.PostId
+LEFT JOIN 
+    PostTagCounts pt ON rp.PostId = pt.TagId
+LEFT JOIN 
+    RecentPostHistories pht ON rp.PostId = pht.PostId
+WHERE 
+    (rp.UserPostRank = 1 OR pht.UserId IS NOT NULL)
+AND 
+    (rp.Score > 0 OR pt.PostCount > 5)
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;
+

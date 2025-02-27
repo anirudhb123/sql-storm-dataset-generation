@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    p.p_name,
+    COALESCE(s.s_name, 'N/A') AS supplier_name,
+    MAX(r.r_name) AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(os.total_revenue) AS avg_order_value,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COUNT(DISTINCT sh.s_suppkey) AS unique_suppliers
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN OrderStats os ON o.o_orderkey = os.o_orderkey
+LEFT JOIN TopCustomers c ON o.o_custkey = c.c_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+WHERE 
+    p.p_retailprice > 100 
+    AND l.l_discount BETWEEN 0.05 AND 0.2
+    AND (s.s_acctbal IS NULL OR s.s_acctbal >= 1000)
+GROUP BY p.p_name, s.s_name, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10 
+    AND AVG(os.total_revenue) > 2000
+ORDER BY total_cost DESC;

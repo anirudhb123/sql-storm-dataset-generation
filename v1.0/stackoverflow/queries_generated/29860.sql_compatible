@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TopTags AS (
+    SELECT 
+        UNNEST(SPLIT(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><')) AS Tag
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank = 1
+),
+TagsFrequency AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        TopTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        Frequency DESC
+),
+MostFrequentTags AS (
+    SELECT 
+        Tag
+    FROM 
+        TagsFrequency
+    WHERE 
+        Frequency > 10 
+),
+CommentStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        AVG(c.Score) AS AvgCommentScore
+    FROM 
+        Posts p
+    JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    ts.Frequency AS TagFrequency,
+    cs.CommentCount,
+    cs.AvgCommentScore
+FROM 
+    RankedPosts rp
+JOIN 
+    MostFrequentTags mt ON rp.Tags LIKE '%' || mt.Tag || '%'
+JOIN 
+    CommentStats cs ON rp.PostId = cs.PostId
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 100;

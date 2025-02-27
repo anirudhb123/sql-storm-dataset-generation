@@ -1,0 +1,60 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(COALESCE(v.VoteTypeId = 2, 0)) - SUM(COALESCE(v.VoteTypeId = 3, 0)) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS RecentPostCreationDate,
+    rp.ViewCount AS RecentPostViews,
+    rp.Score AS RecentPostScore,
+    ( SELECT COUNT(*) 
+      FROM Comments c 
+      WHERE c.PostId = rp.PostId ) AS CommentCount,
+    CASE 
+        WHEN ua.Rank < 5 THEN 'Top Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorType
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RecentPosts rp ON ua.UserId = rp.OwnerUserId AND rp.RecentRank = 1
+WHERE 
+    ua.Reputation > 100
+ORDER BY 
+    ua.Reputation DESC, ua.UpVotes DESC;

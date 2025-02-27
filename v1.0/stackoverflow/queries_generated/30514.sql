@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(ans.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts ans ON p.Id = ans.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '30 DAYS'
+),
+RankedPosts AS (
+    SELECT 
+        fp.*,
+        RANK() OVER (PARTITION BY fp.OwnerDisplayName ORDER BY fp.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (ORDER BY fp.ViewCount DESC) AS RowNum
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    rph.Level,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rpm.UpVotes,
+    rpm.DownVotes,
+    rpm.AnswerCount,
+    rph2.Title AS ParentTitle,
+    COUNT(rp2.Id) AS RelatedPostsCount,
+    COALESCE(rph2.OwnerDisplayName, 'N/A') AS ParentOwner
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rp.Id = rph.Id
+LEFT JOIN 
+    Posts rp2 ON rp.ParentId = rp2.Id
+LEFT JOIN 
+    RecentPostHistory rpm ON rp.Id = rpm.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph2 ON rp.ParentId = rph2.Id
+GROUP BY 
+    rph.Level, rp.Title, rp.OwnerDisplayName, rp.CreationDate, rp.Score, rpm.UpVotes, rpm.DownVotes, rpm.AnswerCount, rph2.Title, rph2.OwnerDisplayName
+HAVING 
+    COUNT(rp2.Id) > 0 OR rph.Level = 0
+ORDER BY 
+    rph.Level, rp.Score DESC;

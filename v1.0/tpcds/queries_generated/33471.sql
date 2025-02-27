@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_cdemo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+TopProfitableItems AS (
+    SELECT *
+    FROM SalesData
+    WHERE rank_profit <= 10
+),
+CustomerCount AS (
+    SELECT 
+        cd_gender,
+        COUNT(c.c_customer_sk) AS gender_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd_gender
+)
+SELECT 
+    ca.ca_country,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(cd.avg_purchase_estimate) AS avg_purchase_by_gender,
+    SUM(tp.total_profit) AS total_profit_from_top_items
+FROM customer_address ca
+LEFT JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN CustomerCount cd ON 1=1
+LEFT JOIN TopProfitableItems tp ON c.c_customer_sk IN (SELECT sr_customer_sk FROM store_returns WHERE sr_item_sk = tp.ws_item_sk)
+WHERE ca.ca_state IS NOT NULL
+GROUP BY ca.ca_country, ca.ca_state
+HAVING COUNT(DISTINCT c.c_customer_sk) > 5
+ORDER BY total_profit_from_top_items DESC;

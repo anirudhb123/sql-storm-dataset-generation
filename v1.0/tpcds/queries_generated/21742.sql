@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        COALESCE(ws.ws_net_profit, 0) AS net_profit
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+      AND (ws.ws_sales_price IS NOT NULL OR ws.ws_net_profit IS NOT NULL)
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ranked.ws_sales_price) AS total_spent,
+        COUNT(DISTINCT ranked.ws_order_number) AS order_count
+    FROM RankedSales ranked
+    JOIN customer c ON c.c_customer_sk = ranked.ws_item_sk
+    GROUP BY c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_spent,
+        cs.order_count,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS row_num
+    FROM CustomerSpending cs
+    WHERE cs.order_count > 5
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.total_spent,
+    tc.order_count,
+    (SELECT COUNT(DISTINCT cs.c_customer_sk) FROM CustomerSpending cs WHERE cs.total_spent > tc.total_spent) AS rank,
+    (SELECT MAX(DISTINCT wr.web_page_sk) 
+     FROM web_returns wr 
+     WHERE wr.wr_returned_date_sk BETWEEN 
+         (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM CURRENT_DATE) - 1) 
+         AND 
+         (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM CURRENT_DATE))) AS latest_web_page
+FROM TopCustomers tc
+WHERE tc.row_num <= 10 
+ORDER BY tc.total_spent DESC
+LIMIT 5
+OFFSET COALESCE(NULLIF((SELECT COUNT(*) FROM customer WHERE c_birth_year > 1980), 0), 1);

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.VoteCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.PostId = u.Id
+    WHERE 
+        rp.UserRank <= 5 -- Top 5 posts per user
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate AS PostCreationDate,
+    tp.LastActivityDate AS PostLastActivityDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.VoteCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.PostLastActivityDate DESC
+LIMIT 10;

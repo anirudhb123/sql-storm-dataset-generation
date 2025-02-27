@@ -1,0 +1,49 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, ts.TotalSupplyCost + SUM(ps.ps_supplycost * ps.ps_availqty)
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN TopSuppliers ts ON ts.s_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.TotalSupplyCost
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+    AND c.c_acctbal IS NOT NULL
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, r.r_name, SUM(ps.ps_availqty) AS TotalAvailable
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+),
+OrderLineStats AS (
+    SELECT l.l_orderkey, COUNT(*) AS LineCount, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    so.s_suppkey,
+    so.s_name,
+    si.r_name,
+    oi.o_orderkey,
+    oi.o_orderdate,
+    oi.TotalRevenue,
+    ROW_NUMBER() OVER(PARTITION BY si.r_name ORDER BY oi.TotalRevenue DESC) AS rnk
+FROM TopSuppliers so
+JOIN SupplierInfo si ON si.s_suppkey = so.s_suppkey
+JOIN RecentOrders oi ON oi.o_orderkey = si.s_suppkey
+JOIN OrderLineStats ol ON ol.l_orderkey = oi.o_orderkey
+WHERE si.TotalAvailable > 50
+AND oi.o_totalprice > 100
+ORDER BY so.TotalSupplyCost DESC, si.r_name, rnk
+LIMIT 10;

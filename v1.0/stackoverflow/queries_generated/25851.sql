@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')) AS tagName
+        JOIN Tags t ON t.TagName = tagName
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.Score, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(ph.UserDisplayName || ': ' || ph.Comment, '; ') AS CloseComments,
+        MIN(ph.CreationDate) AS CloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN ph.PostId IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.Tags,
+    cp.CloseComments,
+    cp.CloseDate,
+    au.DisplayName AS ActiveUserName,
+    au.Reputation,
+    au.PostsCount,
+    au.ClosedPostsCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    ActiveUsers au ON rp.OwnerDisplayName = au.DisplayName
+WHERE 
+    rp.Rank <= 5 -- Limiting to top 5 posts per type
+ORDER BY 
+    rp.PostId, au.Reputation DESC;

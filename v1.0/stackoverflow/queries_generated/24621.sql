@@ -1,0 +1,63 @@
+WITH RankedUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY CASE WHEN Reputation IS NULL THEN 'NULL' ELSE 'NOT NULL' END ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(vote.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(vote.VoteTypeId = 3), 0) AS Downvotes,
+        MAX(CASE WHEN postHistory.PostHistoryTypeId = 10 THEN postHistory.CreationDate END) AS ClosedDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes vote ON p.Id = vote.PostId
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN PostHistory postHistory ON p.Id = postHistory.PostId
+    GROUP BY p.Id, pt.Name
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges, 
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges, 
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+CombinedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ub.GoldBadges, 0) AS Gold,
+        COALESCE(ub.SilverBadges, 0) AS Silver,
+        COALESCE(ub.BronzeBadges, 0) AS Bronze,
+        COALESCE(ps.CommentCount, 0) AS TotalComments,
+        COALESCE(ps.Upvotes, 0) AS TotalUpvotes,
+        COALESCE(ps.Downvotes, 0) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+    WHERE u.Reputation IS NOT NULL
+)
+SELECT 
+    r.Id AS UserId,
+    r.DisplayName,
+    r.Reputation AS UserReputation,
+    cs.Gold,
+    cs.Silver,
+    cs.Bronze,
+    COALESCE(MAX(ps.ClosedDate), '1970-01-01') AS MostRecentClosedPostDate,
+    RANK() OVER (ORDER BY r.Reputation DESC) AS UserRank
+FROM RankedUsers r
+LEFT JOIN CombinedStats cs ON r.Id = cs.UserId
+LEFT JOIN PostStatistics ps ON cs.UserId = ps.OwnerUserId
+GROUP BY r.Id, cs.Gold, cs.Silver, cs.Bronze, r.Reputation
+HAVING COUNT(ps.PostId) > 1 OR COALESCE(cs.Upvotes, 0) >= 10 OR (cs.Gold + cs.Silver + cs.Bronze) > 0
+ORDER BY UserRank, r.Reputation DESC;

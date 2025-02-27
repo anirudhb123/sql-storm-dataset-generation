@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        oo.o_orderkey,
+        oo.total_revenue,
+        s.s_name AS supplier_name,
+        c.c_name AS customer_name,
+        p.p_name AS part_name,
+        RANK() OVER (ORDER BY oo.total_revenue DESC) AS revenue_rank
+    FROM 
+        RankedOrders oo
+    LEFT JOIN 
+        lineitem l ON oo.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN 
+        customer c ON oo.o_orderkey = c.c_custkey
+    LEFT JOIN 
+        part p ON p.p_partkey = l.l_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        c.c_acctbal > 1000 
+)
+SELECT 
+    TO_CHAR(order_rank, '9999') AS order_rank,
+    TO_CHAR(revenue_rank, '9999') AS revenue_rank,
+    COALESCE(supplier_name, 'Unknown') AS supplier_name,
+    COALESCE(customer_name, 'Unknown') AS customer_name,
+    STARTSWITH(part_name, 'A') AS is_part_name_startswith_A,
+    total_revenue
+FROM 
+    TopOrders
+WHERE 
+    revenue_rank <= 10
+ORDER BY 
+    total_revenue DESC;

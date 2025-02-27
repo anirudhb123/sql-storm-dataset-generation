@@ -1,0 +1,85 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+movie_cast AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM
+        cast_info c
+    JOIN
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY
+        mk.movie_id
+),
+final_movies AS (
+    SELECT
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        COALESCE(mc.cast_count, 0) AS cast_count,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        mh.level
+    FROM
+        movie_hierarchy mv
+    LEFT JOIN
+        movie_cast mc ON mv.movie_id = mc.movie_id
+    LEFT JOIN
+        movie_keywords mk ON mv.movie_id = mk.movie_id
+)
+SELECT
+    f.title,
+    f.production_year,
+    f.cast_count,
+    CASE 
+        WHEN f.level = 1 THEN 'Top Level Movie'
+        ELSE 'Linked Movie'
+    END AS movie_type,
+    f.keywords,
+    ROUND((EXTRACT(EPOCH FROM TIMESTAMP '2024-10-01 12:34:56') - EXTRACT(EPOCH FROM TIMESTAMP (f.production_year || '-01-01')))/31557600, 2) AS age_years
+FROM
+    final_movies f
+WHERE 
+    (f.production_year >= 2000 AND f.cast_count > 5) OR 
+    (f.keywords LIKE '%Action%' AND f.cast_count IS NOT NULL)
+ORDER BY
+    f.production_year DESC,
+    f.cast_count DESC
+LIMIT 50;

@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND it1.id < 50 AND ci.note IS NOT NULL AND n.name_pcode_cf = 'W2346' AND mi.info > '"Sehnsucht nach dem Glück". In: "Illustrierter Film-Kurier" (Vienna, Austria), Filmpropaganda Ges.m.b.H., Iss. 1105, 1935, Pg. 8' AND ci.role_id > 9;

@@ -1,0 +1,66 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        d.d_year AS SalesYear,
+        SUM(ss.ss_net_profit) AS TotalNetProfit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS TotalTransactions,
+        SUM(ss.ss_quantity) AS TotalQuantitySold
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2023
+    GROUP BY 
+        d.d_year
+), CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS TotalWebOrders,
+        SUM(ws.ws_net_paid) AS TotalWebSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        chd.hd_buy_potential,
+        c_total.TotalWebOrders,
+        c_total.TotalWebSpent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics chd ON cd.cd_demo_sk = chd.hd_demo_sk
+    JOIN 
+        CustomerDetails c_total ON c.c_customer_sk = c_total.c_customer_sk
+    WHERE 
+        c_total.TotalWebSpent > 1000
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.hd_buy_potential,
+    ss.SalesYear,
+    ss.TotalNetProfit,
+    ss.TotalTransactions,
+    ss.TotalQuantitySold
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    SalesSummary ss ON ss.SalesYear = EXTRACT(YEAR FROM CURRENT_DATE)
+ORDER BY 
+    ss.TotalNetProfit DESC, 
+    hvc.c_last_name, 
+    hvc.c_first_name;

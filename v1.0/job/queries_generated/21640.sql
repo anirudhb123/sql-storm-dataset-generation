@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        DENSE_RANK() OVER (ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+MovieSummary AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        COALESCE(cd.actor_count, 0) AS total_actors,
+        COALESCE(cd.actor_names, 'N/A') AS leading_actors
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        CastDetails cd ON r.movie_id = cd.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword
+    FROM 
+        MovieSummary ms
+    LEFT JOIN 
+        movie_keyword mk ON ms.movie_id = mk.movie_id
+)
+SELECT 
+    mwk.movie_id,
+    mwk.title,
+    mwk.production_year,
+    mwk.total_actors,
+    mwk.leading_actors,
+    mwk.movie_keyword,
+    CASE 
+        WHEN mwk.production_year BETWEEN 1970 AND 2000 THEN 'Classic'
+        WHEN mwk.production_year > 2000 THEN 'Modern'
+        ELSE 'Historical'
+    END AS movie_category,
+    i.value AS info_value
+FROM 
+    MoviesWithKeywords mwk
+JOIN 
+    movie_info i ON mwk.movie_id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    mwk.total_actors >= 2
+    AND mwk.movie_keyword LIKE '%Drama%'
+    AND mwk.production_year IS NOT NULL
+ORDER BY 
+    mwk.production_year DESC,
+    mwk.title ASC
+LIMIT 100;

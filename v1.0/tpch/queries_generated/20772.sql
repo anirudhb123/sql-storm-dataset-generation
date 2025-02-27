@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+), 
+CustomerOrderCount AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), 
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), 
+TopParts AS (
+    SELECT *,
+           CASE 
+               WHEN total_avail_qty IS NULL THEN 'Not Available'
+               WHEN total_avail_qty > 100 THEN 'High Stock'
+               ELSE 'Low Stock'
+           END AS stock_status
+    FROM PartSupplierDetails
+    WHERE rn = 1
+)
+SELECT c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_orderstatus, 
+       p.p_name AS part_name, p.stock_status,
+       CASE 
+           WHEN o.o_orderstatus = 'O' THEN 'Open Order'
+           ELSE 'Closed Order'
+       END AS order_status_desc,
+       COALESCE(n.n_name, 'Unknown') AS nation_name,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN TopParts p ON l.l_partkey = p.p_partkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+WHERE o.o_orderdate >= '2023-01-01' 
+AND (c.c_acctbal IS NOT NULL OR c.c_name LIKE '%Corp%')
+GROUP BY c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_orderstatus, p.p_name, p.stock_status, n.n_name
+HAVING total_revenue IS NOT NULL
+ORDER BY total_revenue DESC
+LIMIT 50;

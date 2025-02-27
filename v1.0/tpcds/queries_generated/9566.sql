@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_ext_sales_price) AS avg_order_value,
+        DATEDIFF(DAY, MIN(ws_sold_date_sk), MAX(ws_sold_date_sk)) AS sales_period_days
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_bill_customer_sk
+), 
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        ib_income_band_sk
+    FROM customer_demographics
+    JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+    JOIN income_band ON hd_income_band_sk = ib_income_band_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.ib_income_band_sk,
+        s.total_sales,
+        s.order_count,
+        s.avg_order_value
+    FROM customer c
+    JOIN demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN sales_summary s ON c.c_customer_sk = s.customer_id
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ci.total_sales,
+    ci.order_count,
+    ci.avg_order_value
+FROM customer_info ci
+JOIN income_band ib ON ci.ib_income_band_sk = ib.ib_income_band_sk
+WHERE ci.order_count > 10 AND ci.total_sales > 5000
+ORDER BY ci.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.company_id IN (145674, 163349, 175866, 208630, 22116, 67226) AND t.kind_id > 1 AND mi.info > 'FAIR: Throughout the movie, the Gotham City Police Department uniform and cars show GPD and GCPD inconsistently. It is not uncommon for police forces to change vehicle liveries and/or styles of their uniforms every once in a while. New vehicles would be added to their fleet and given the new livery - to change every other older vehicle in the fleet to the same new livery would not be cost-effective.';

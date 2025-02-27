@@ -1,0 +1,62 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice
+)
+SELECT 
+    sd.s_name AS supplier_name,
+    ps.p_name AS part_name,
+    ps.total_available,
+    ps.avg_supply_cost,
+    os.total_quantity,
+    os.unique_suppliers,
+    os.o_totalprice,
+    os.o_orderdate
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    OrderSummary os ON ps.ps_partkey = os.l_orderkey
+WHERE 
+    sd.s_acctbal > 1000
+    AND os.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+ORDER BY 
+    os.o_orderdate DESC, 
+    os.unique_suppliers DESC;

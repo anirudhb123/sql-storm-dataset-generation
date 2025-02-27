@@ -1,0 +1,86 @@
+WITH RECURSIVE UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+), PostRanked AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '><')) AS t(TagName) ON true
+    WHERE 
+        p.Score > 0 -- Only consider posts with a score greater than zero
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), UserBadges AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), PostMetrics AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(uv.UpVotes, 0) AS UpVotes,
+        COALESCE(uv.DownVotes, 0) AS DownVotes,
+        pm.CommentCount,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        PostRanked pm
+    LEFT JOIN 
+        UserVotes uv ON pm.OwnerUserId = uv.UserId
+    LEFT JOIN 
+        UserBadges ub ON pm.OwnerUserId = ub.Id
+    WHERE 
+        pm.Rank <= 3 -- Get the top 3 posts per user
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.UpVotes,
+    p.DownVotes,
+    p.CommentCount,
+    p.BadgeCount,
+    p.BadgeNames,
+    CASE 
+        WHEN p.BadgeCount > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    CASE 
+        WHEN p.CommentCount > 10 THEN 'Highly Commented'
+        ELSE 'Less Commented'
+    END AS CommentStatus
+FROM 
+    PostMetrics p
+ORDER BY 
+    p.UpVotes DESC, p.PostId ASC
+LIMIT 100;

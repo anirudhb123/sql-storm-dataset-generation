@@ -1,0 +1,42 @@
+WITH UserBadges AS (
+    SELECT U.Id AS UserId, U.DisplayName, COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+), 
+PostDetails AS (
+    SELECT P.Id AS PostId, P.Title, P.OwnerUserId, P.CreationDate, P.Tags,
+           CASE
+               WHEN P.AcceptedAnswerId IS NOT NULL THEN 1
+               ELSE 0
+           END AS HasAcceptedAnswer,
+           COALESCE(COUNT(A.Id), 0) AS AnswerCount,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Posts A ON P.Id = A.ParentId AND P.PostTypeId = 1
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.PostTypeId = 1
+    GROUP BY P.Id, P.Title, P.OwnerUserId, P.CreationDate, P.Tags
+), 
+TopPosts AS (
+    SELECT PD.PostId, PD.Title, U.DisplayName AS OwnerName, 
+           PD.CreationDate, PD.Tags, PD.HasAcceptedAnswer,
+           (PD.UpVotes - PD.DownVotes) AS Score,
+           UB.BadgeCount
+    FROM PostDetails PD
+    JOIN Users U ON PD.OwnerUserId = U.Id
+    JOIN UserBadges UB ON U.Id = UB.UserId
+    WHERE PD.Score > 0
+    ORDER BY PD.Score DESC
+    LIMIT 10
+)
+SELECT TP.PostId, TP.Title, TP.OwnerName, TP.CreationDate,
+       TP.Tags, TP.HasAcceptedAnswer, TP.Score, TP.BadgeCount,
+       STRING_AGG(DISTINCT T.TagName, ', ') AS CombinedTags
+FROM TopPosts TP
+LEFT JOIN STRING_TO_ARRAY(TP.Tags, '<>') AS TagArray ON true 
+LEFT JOIN Tags T ON T.TagName = TagArray
+GROUP BY TP.PostId, TP.Title, TP.OwnerName, TP.CreationDate,
+         TP.HasAcceptedAnswer, TP.Score, TP.BadgeCount
+ORDER BY TP.Score DESC;

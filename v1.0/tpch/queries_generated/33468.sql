@@ -1,0 +1,47 @@
+WITH RECURSIVE cte_supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, c.level + 1
+    FROM partsupp ps
+    JOIN cte_supplier c ON ps.ps_suppkey = c.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty < (
+        SELECT AVG(ps_availqty) FROM partsupp
+    ) AND c.level < 5
+),
+top_nations AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+    ORDER BY supplier_count DESC
+    LIMIT 10
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as price_rank
+    FROM orders o
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+       COALESCE(s.s_name, 'Unknown') as supplier_name,
+       CASE 
+           WHEN l.l_discount > 0.1 THEN 'Discounted'
+           ELSE 'Regular Price'
+       END as price_category,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY p.p_partkey ORDER BY o.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as total_sales
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN cte_supplier cs ON l.l_suppkey = cs.s_suppkey
+LEFT JOIN top_nations tn ON cs.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = tn.s_nationkey)
+WHERE p.p_retailprice > 50 
+AND l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal > 100)
+ORDER BY p.p_partkey, total_sales DESC;

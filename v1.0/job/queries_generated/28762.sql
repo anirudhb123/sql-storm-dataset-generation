@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        cast_info ca ON a.id = ca.movie_id
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    WHERE 
+        a.production_year >= 2000
+        AND a.title LIKE '%Adventure%'
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id
+),
+
+TopRankedMovies AS (
+    SELECT *
+    FROM RankedMovies
+    WHERE rank <= 5
+),
+
+ActorStatistics AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT a.id) AS appear_count,
+        STRING_AGG(DISTINCT tm.movie_title, ', ') AS movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ca ON ak.person_id = ca.person_id
+    JOIN 
+        aka_title a ON ca.movie_id = a.id
+    JOIN 
+        TopRankedMovies tm ON a.title = tm.movie_title
+    GROUP BY 
+        ak.name
+)
+
+SELECT 
+    tr.movie_title,
+    tr.production_year,
+    tr.cast_count,
+    as.name AS top_actor,
+    as.appear_count,
+    as.movies
+FROM 
+    TopRankedMovies tr
+JOIN 
+    ActorStatistics as ON tr.actors LIKE '%' || as.name || '%'
+ORDER BY 
+    tr.production_year DESC, 
+    tr.cast_count DESC;

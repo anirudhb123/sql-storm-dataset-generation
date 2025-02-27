@@ -1,0 +1,94 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.depth < 3
+),
+ActorRoleInfo AS (
+    SELECT 
+        ak.name AS actor_name, 
+        rt.role, 
+        COALESCE(COUNT(ci.id), 0) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ak.name, rt.role
+),
+MovieKeywordInfo AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        array_agg(k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.id, mt.title
+),
+PerformanceMetrics AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ak.actor_name,
+        ar.role,
+        ar.role_count,
+        mk.keywords,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY ar.role_count DESC) AS actor_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorRoleInfo ar ON ar.role_count > 0
+    LEFT JOIN 
+        MovieKeywordInfo mk ON mh.movie_id = mk.movie_id
+)
+
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.production_year,
+    pm.actor_name,
+    pm.role,
+    pm.role_count,
+    pm.keywords,
+    CASE 
+        WHEN pm.actor_rank = 1 THEN 'Lead Actor'
+        WHEN pm.actor_rank <= 3 THEN 'Supporting Actor'
+        ELSE 'Cameo'
+    END AS actor_status
+FROM 
+    PerformanceMetrics pm
+WHERE 
+    pm.keywords IS NOT NULL
+    AND pm.production_year > 2010
+ORDER BY 
+    pm.production_year DESC, 
+    pm.role_count DESC;

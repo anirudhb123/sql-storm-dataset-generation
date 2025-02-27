@@ -1,0 +1,40 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_mktsegment
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, l.l_partkey, l.l_quantity, l.l_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+),
+BestPartSupplies AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    JOIN RankedSuppliers r ON ps.ps_suppkey = r.s_suppkey
+    WHERE r.rank <= 3
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COALESCE(b.total_avail, 0) AS total_available, 
+       c.c_mktsegment
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN OrderDetails o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN BestPartSupplies b ON p.p_partkey = b.ps_partkey
+JOIN HighValueCustomers c ON o.o_orderkey IN (
+    SELECT o2.o_orderkey
+    FROM orders o2
+    WHERE o2.o_custkey = c.c_custkey
+)
+WHERE p.p_retailprice < 10000 
+  AND (c.c_mktsegment = 'Building' OR c.c_mktsegment IS NULL)
+GROUP BY p.p_name, c.c_mktsegment
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_revenue DESC, total_orders ASC;

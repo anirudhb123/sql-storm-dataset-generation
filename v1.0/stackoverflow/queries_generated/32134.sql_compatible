@@ -1,0 +1,68 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.AnswerCount, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        pp.Id, 
+        pp.Title, 
+        pp.CreationDate, 
+        pp.Score, 
+        pp.AnswerCount, 
+        r.Level + 1
+    FROM 
+        Posts pp
+    INNER JOIN 
+        RecursivePostCTE r ON pp.ParentId = r.PostId
+    WHERE 
+        pp.PostTypeId = 2 
+)
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(u.DisplayName, 'Anonymous') AS AnswerOwner,
+    a.AnswerCreationDate AS AnswerCreationDate,
+    r.Level AS AnswerLevel,
+    COUNT(v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.PostId
+LEFT JOIN 
+    Users u ON r.PostId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+LEFT JOIN 
+    (SELECT 
+        ans.ParentId, 
+        COUNT(*) AS AnswerCount,
+        MIN(ans.CreationDate) AS AnswerCreationDate
+     FROM 
+        Posts ans
+     WHERE 
+        ans.PostTypeId = 2
+     GROUP BY 
+        ans.ParentId) a ON p.Id = a.ParentId
+LEFT JOIN 
+    PostsTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, u.DisplayName, a.AnswerCount, a.AnswerCreationDate, r.Level
+ORDER BY 
+    COUNT(v.Id) DESC, 
+    p.CreationDate DESC
+LIMIT 100;

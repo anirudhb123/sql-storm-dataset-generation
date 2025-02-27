@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+
+TopQuestionDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Body,
+        rp.OwnerDisplayName,
+        ph.Comment AS PostHistoryComment,
+        pht.Name AS PostHistoryType,
+        json_agg(v.VoteTypeId) AS VoteTypes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.Rank = 1 -- Get latest question per user
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.Body, rp.OwnerDisplayName, ph.Comment, pht.Name
+),
+
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(t.Count) AS TotalCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+
+FinalBenchmark AS (
+    SELECT 
+        tq.PostId,
+        tq.Title,
+        tq.CreationDate,
+        tq.ViewCount,
+        tq.Score,
+        tq.OwnerDisplayName,
+        tq.PostHistoryComment,
+        tq.PostHistoryType,
+        ts.TagName,
+        ts.PostCount,
+        ts.TotalCount,
+        COUNT(DISTINCT tq.VoteTypes) AS UniqueVoteTypes
+    FROM 
+        TopQuestionDetails tq
+    LEFT JOIN 
+        TagStatistics ts ON tq.MessageBody LIKE '%' || ts.TagName || '%'
+    GROUP BY 
+        tq.PostId, tq.Title, tq.CreationDate, tq.ViewCount, tq.Score, tq.OwnerDisplayName, tq.PostHistoryComment, tq.PostHistoryType, ts.TagName, ts.PostCount, ts.TotalCount
+)
+
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    PostHistoryComment,
+    PostHistoryType,
+    TagName,
+    PostCount AS TagPostCount,
+    TotalCount AS TagTotalCount,
+    UniqueVoteTypes
+FROM 
+    FinalBenchmark
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 50;

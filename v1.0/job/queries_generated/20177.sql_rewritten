@@ -1,0 +1,72 @@
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        1 AS level,
+        ARRAY[ci.person_id] AS path
+    FROM cast_info ci
+    WHERE ci.movie_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        ch.level + 1,
+        ch.path || ci.person_id
+    FROM cast_info ci
+    JOIN cast_hierarchy ch ON ci.movie_id = ch.movie_id
+    WHERE NOT ci.person_id = ANY(ch.path)  
+),
+
+movie_details AS (
+    SELECT
+        mt.title,
+        mt.production_year,
+        COALESCE(NULLIF(mk.keyword, ''), 'No Keywords') AS keyword,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN aka_name ak ON ak.id = mk.keyword_id
+    WHERE mt.production_year BETWEEN 2000 AND 2023
+    GROUP BY mt.title, mt.production_year
+),
+
+average_cast_levels AS (
+    SELECT
+        movie_id,
+        AVG(level) AS avg_level
+    FROM cast_hierarchy
+    GROUP BY movie_id
+),
+
+final_summary AS (
+    SELECT
+        md.title,
+        md.production_year,
+        md.keyword,
+        COALESCE(ac.avg_level, 0) AS average_cast_depth,
+        CASE
+            WHEN COALESCE(ac.avg_level, 0) > 3 THEN 'Deep Cast'
+            ELSE 'Shallow Cast'
+        END AS cast_depth_label
+    FROM movie_details md
+    LEFT JOIN average_cast_levels ac ON ac.movie_id = md.id
+)
+
+SELECT
+    title,
+    production_year,
+    keyword,
+    average_cast_depth,
+    cast_depth_label,
+    CASE
+        WHEN production_year IS NULL THEN 'Unknown Year'
+        WHEN production_year < 2000 THEN 'Before 2000'
+        WHEN production_year >= 2000 AND production_year <= 2010 THEN '2000s Era'
+        ELSE '2011 and Beyond'
+    END AS year_category
+FROM final_summary
+WHERE keyword IS NOT NULL
+ORDER BY production_year DESC, cast_depth_label, title
+LIMIT 100;

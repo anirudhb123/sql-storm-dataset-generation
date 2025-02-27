@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_net_paid_inc_tax) AS total_sales,
+        1 AS level
+    FROM
+        catalog_sales
+    GROUP BY
+        cs_bill_customer_sk
+    UNION ALL
+    SELECT
+        s.ss_customer_sk AS customer_sk,
+        SUM(s.ss_net_paid_inc_tax) AS total_sales,
+        sh.level + 1
+    FROM
+        store_sales s
+    JOIN
+        SalesHierarchy sh ON s.ss_customer_sk = sh.customer_sk
+    GROUP BY
+        s.ss_customer_sk
+),
+AggregateSales AS (
+    SELECT
+        customer_sk,
+        SUM(total_sales) AS grand_total_sales,
+        COUNT(*) AS sales_count
+    FROM
+        SalesHierarchy
+    GROUP BY
+        customer_sk
+),
+TopCustomers AS (
+    SELECT
+        customer_sk,
+        grand_total_sales,
+        RANK() OVER (ORDER BY grand_total_sales DESC) AS sales_rank
+    FROM
+        AggregateSales
+)
+SELECT
+    ca.ca_address_id,
+    cd.cd_gender,
+    tc.grand_total_sales,
+    tc.sales_rank
+FROM
+    TopCustomers tc
+LEFT JOIN
+    customer c ON c.c_customer_sk = tc.customer_sk
+LEFT JOIN
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE
+    cd.cd_gender IS NOT NULL
+    AND tc.grand_total_sales > (
+        SELECT AVG(grand_total_sales) FROM AggregateSales
+    )
+ORDER BY
+    tc.sales_rank
+LIMIT 10;

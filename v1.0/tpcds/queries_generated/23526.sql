@@ -1,0 +1,72 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+store_sales_summary AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS order_count
+    FROM store_sales ss
+    GROUP BY ss.ss_sold_date_sk, ss.ss_item_sk
+),
+combine_sales AS (
+    SELECT 
+        sold_date_sk,
+        item_sk,
+        total_quantity,
+        total_sales,
+        order_count
+    FROM sales_summary
+    UNION ALL
+    SELECT 
+        sold_date_sk,
+        item_sk,
+        total_quantity,
+        total_sales,
+        order_count
+    FROM store_sales_summary
+),
+final_summary AS (
+    SELECT 
+        cs.sold_date_sk,
+        cs.item_sk,
+        MAX(total_sales) AS max_sales,
+        MIN(total_quantity) AS min_quantity,
+        AVG(order_count) AS average_orders
+    FROM combine_sales cs
+    GROUP BY cs.sold_date_sk, cs.item_sk
+    HAVING COUNT(*) > 1 AND MAX(total_sales) IS NOT NULL
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    fs.max_sales,
+    fs.min_quantity,
+    fs.average_orders
+FROM ranked_customers rc
+JOIN final_summary fs ON rc.c_customer_sk = (SELECT sr_returning_customer_sk FROM store_returns sr WHERE sr_ticket_number = (fs.item_sk % 100) LIMIT 1)
+WHERE rc.rn <= 10
+ORDER BY fs.max_sales DESC, rc.c_last_name ASC
+LIMIT 50;

@@ -1,0 +1,25 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.kind AS character_name, 
+    co.name AS company_name, 
+    mk.keyword AS movie_keyword
+FROM 
+    aka_name a 
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id 
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id 
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id 
+JOIN 
+    comp_cast_type cct ON ci.person_role_id = cct.id 
+JOIN 
+    company_name co ON co.id = (SELECT mc.company_id FROM movie_companies mc WHERE mc.movie_id = t.id LIMIT 1) 
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id 
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023 
+    AND mk.keyword LIKE '%action%' 
+ORDER BY 
+    a.name, t.production_year DESC;

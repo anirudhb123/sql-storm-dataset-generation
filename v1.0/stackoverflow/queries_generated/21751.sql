@@ -1,0 +1,75 @@
+WITH PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+RecentPostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(urs.Reputation, 0) AS UserReputation,
+    ps.PostId,
+    ps.UpVotes,
+    ps.DownVotes,
+    rpi.Title AS RecentPostTitle,
+    rpi.CreationDate AS RecentPostDate,
+    CASE 
+        WHEN ps.UpVotes - ps.DownVotes > 0 THEN 'Positive' 
+        WHEN ps.UpVotes - ps.DownVotes < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS OverallSentiment,
+    CASE 
+        WHEN ps.UpVotes IS NULL THEN 'No votes yet' 
+        ELSE CAST(ps.UpVotes AS varchar) || ' upvotes' 
+    END AS UpvoteStatus,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    UserReputation urs 
+LEFT JOIN 
+    Users u ON u.Id = urs.UserId
+LEFT JOIN 
+    PostVoteSummary ps ON ps.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    Comments c ON c.PostId = ps.PostId
+LEFT JOIN 
+    RecentPostInfo rpi ON rpi.OwnerUserId = u.Id AND rpi.PostRank = 1
+WHERE 
+    u.Reputation IS NOT NULL
+GROUP BY 
+    u.DisplayName, urs.Reputation, ps.PostId, ps.UpVotes, ps.DownVotes, rpi.Title, rpi.CreationDate
+HAVING 
+    COUNT(c.Id) > 0 OR ps.UpVotes IS NOT NULL
+ORDER BY 
+    UserReputation DESC, ps.UpVotes DESC NULLS LAST;

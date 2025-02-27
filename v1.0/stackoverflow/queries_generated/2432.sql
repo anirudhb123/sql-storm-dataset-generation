@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.ViewCount > 100 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts po ON u.Id = po.OwnerUserId
+    LEFT JOIN 
+        Votes v ON po.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON po.Id = c.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        r.PostId AS RelatedPostId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts r ON ph.PostId = r.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 AND 
+        r.ViewCount > 50
+), 
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        rp.Title,
+        ua.TotalBounty,
+        ua.CommentCount,
+        COUNT(DISTINCT cp.PostId) AS ClosedCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserActivity ua ON rp.Rank = 1
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        ClosedPosts cp ON cp.UserId = u.Id
+    WHERE 
+        u.Location IS NOT NULL
+    GROUP BY 
+        u.DisplayName, rp.Title, ua.TotalBounty, ua.CommentCount
+)
+SELECT 
+    DisplayName, 
+    Title, 
+    TotalBounty, 
+    CommentCount, 
+    COALESCE(ClosedCount, 0) AS ClosedCount,
+    CASE 
+        WHEN TotalBounty > 500 THEN 'High Bounty User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    FinalResults
+ORDER BY 
+    TotalBounty DESC, 
+    CommentCount DESC;

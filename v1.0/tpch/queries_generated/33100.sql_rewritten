@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS unique_customers,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS status_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           (p.p_retailprice + ps.ps_supplycost) AS adjusted_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0 OR ps.ps_supplycost IS NULL
+),
+RankedOrders AS (
+    SELECT os.o_orderkey, os.total_revenue, os.o_orderdate,
+           CASE WHEN os.unique_customers > 10 THEN 'High' 
+                WHEN os.unique_customers BETWEEN 5 AND 10 THEN 'Medium' 
+                ELSE 'Low' END AS customer_segment
+    FROM OrderSummary os
+)
+SELECT r.r_name, SUM(ps.ps_availqty) AS total_available_qty,
+       AVG(ss.s_acctbal) AS avg_supplier_balance,
+       COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+       COUNT(DISTINCT ro.unique_customers) AS total_unique_customers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN PartSupplier ps ON ps.p_partkey = (
+    SELECT ps2.ps_partkey 
+    FROM partsupp ps2 
+    WHERE ps2.ps_availqty = (SELECT MAX(ps3.ps_availqty) FROM partsupp ps3)
+    LIMIT 1
+)
+LEFT JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT o.o_orderkey FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+GROUP BY r.r_name
+HAVING AVG(ss.s_acctbal) IS NOT NULL AND total_orders > 5
+ORDER BY total_available_qty DESC, avg_supplier_balance DESC;

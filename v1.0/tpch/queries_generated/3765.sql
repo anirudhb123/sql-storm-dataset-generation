@@ -1,0 +1,56 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_name, s.s_acctbal, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        ss.s_name,
+        ss.total_sales,
+        n.n_name AS nation_name
+    FROM 
+        SupplierSales ss
+    JOIN 
+        nation n ON ss.s_nationkey = n.n_nationkey
+    WHERE 
+        ss.sales_rank <= 3
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 10
+)
+SELECT 
+    ts.s_name AS supplier_name,
+    ts.total_sales,
+    ts.nation_name,
+    fc.c_name AS customer_name,
+    fc.order_count,
+    fc.avg_order_value
+FROM 
+    TopSuppliers ts
+FULL OUTER JOIN 
+    FrequentCustomers fc ON ts.total_sales > fc.avg_order_value 
+WHERE 
+    ts.total_sales IS NOT NULL OR fc.order_count IS NOT NULL
+ORDER BY 
+    ts.total_sales DESC, fc.order_count DESC;

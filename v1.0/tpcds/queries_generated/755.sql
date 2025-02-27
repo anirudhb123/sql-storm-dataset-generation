@@ -1,0 +1,70 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN 'Has Income Band'
+            ELSE 'No Income Band'
+        END AS income_band_status
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_web_sales,
+        cs.total_catalog_sales,
+        cs.total_store_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.income_band_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cs.total_web_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        CustomerDemographics cd ON cs.c_customer_id = cd.cd_demo_sk
+)
+SELECT 
+    c.c_customer_id,
+    cs.total_web_sales,
+    cs.total_catalog_sales,
+    cs.total_store_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.income_band_status,
+    COALESCE(cs.total_web_sales, 0) + COALESCE(cs.total_catalog_sales, 0) + COALESCE(cs.total_store_sales, 0) AS total_sales,
+    CASE 
+        WHEN total_sales > 10000 THEN 'High Value'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    CustomerSales cs
+JOIN 
+    CustomerDemographics cd ON cs.c_customer_id = cd.cd_demo_sk
+WHERE 
+    (cd.cd_gender = 'F' AND cs.total_web_sales IS NOT NULL) 
+    OR (cd.cd_gender = 'M' AND cs.total_store_sales IS NOT NULL)
+ORDER BY 
+    total_sales DESC;

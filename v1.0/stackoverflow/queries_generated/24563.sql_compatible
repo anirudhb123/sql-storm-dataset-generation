@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName,
+        pt.Name AS EditType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+        AND pt.Name LIKE 'Edit%'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users)
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    COALESCE(re.EditType, 'No Edits') AS RecentEditType,
+    COALESCE(re.EditDate, 'N/A') AS RecentEditDate,
+    tu.DisplayName AS TopUserName,
+    tu.Reputation AS TopUserReputation
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+LEFT JOIN 
+    TopUsers tu ON rp.Upvotes > 10 AND tu.UserRank <= 5
+WHERE 
+    rp.RankDate = 1 
+    AND (rp.Score > 5 OR rp.ViewCount > 100)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

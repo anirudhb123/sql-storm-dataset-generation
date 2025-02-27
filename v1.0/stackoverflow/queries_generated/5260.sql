@@ -1,0 +1,60 @@
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(B.Class = 1) AS GoldBadges,
+        SUM(B.Class = 2) AS SilverBadges,
+        SUM(B.Class = 3) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        U.DisplayName AS OwnerDisplayName, 
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= current_date - interval '1 year'
+    GROUP BY P.Id, U.DisplayName
+)
+SELECT 
+    UM.UserId, 
+    UM.DisplayName, 
+    UM.Reputation, 
+    UM.QuestionsAsked, 
+    UM.AnswersGiven, 
+    UM.AcceptedAnswers, 
+    UM.CommentsMade, 
+    UM.GoldBadges, 
+    UM.SilverBadges, 
+    UM.BronzeBadges, 
+    PM.PostId, 
+    PM.Title, 
+    PM.OwnerDisplayName, 
+    PM.CreationDate, 
+    PM.Score,
+    PM.ViewCount,
+    PM.CommentCount,
+    PM.UpVotes,
+    PM.DownVotes
+FROM UserMetrics UM
+JOIN PostMetrics PM ON UM.UserId = PM.OwnerUserId
+ORDER BY UM.Reputation DESC, PM.Score DESC
+LIMIT 100;

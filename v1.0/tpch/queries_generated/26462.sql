@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    COUNT(DISTINCT o.o_orderkey) AS order_count, 
+    SUM(l.l_quantity) AS total_quantity, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUBSTRING_INDEX(p.p_mfgr, ' ', 1) AS manufacturer_prefix,
+    CONCAT(s.s_name, ' - ', p.p_name) AS supplier_part_combo
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_comment LIKE '%fragile%'
+    AND s.s_comment NOT LIKE '%not available%'
+    AND o.o_orderstatus = 'O'
+GROUP BY 
+    p.p_name, s.s_name, manufacturer_prefix
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_revenue DESC, order_count DESC;

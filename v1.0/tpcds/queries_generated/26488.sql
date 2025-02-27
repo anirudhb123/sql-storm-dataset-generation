@@ -1,0 +1,65 @@
+
+WITH CustomerAddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_street_number, ca.ca_street_name, ca.ca_street_type
+),
+PopularCities AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT ca.ca_address_sk) AS address_count
+    FROM 
+        customer_address ca
+    GROUP BY 
+        ca.ca_city
+    HAVING 
+        address_count > 5
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+FinalResult AS (
+    SELECT 
+        cadz.full_address,
+        pc.address_count,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerAddressDetails cadz
+    JOIN 
+        PopularCities pc ON cadz.ca_city = pc.ca_city
+    JOIN 
+        CustomerDemographics cd ON cadz.ca_city = cd.ca_city
+)
+SELECT 
+    full_address,
+    address_count,
+    cd_gender,
+    cd_marital_status
+FROM 
+    FinalResult
+WHERE 
+    cd_gender = 'F' AND address_count > 10
+ORDER BY 
+    address_count DESC, full_address;

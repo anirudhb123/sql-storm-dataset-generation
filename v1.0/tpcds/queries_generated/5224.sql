@@ -1,0 +1,45 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DATEADD(DAY, 1, d_date) AS sales_date
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year = 2022
+    GROUP BY 
+        ws_item_sk, d_date
+), 
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    s.ws_item_sk,
+    s.total_sales,
+    s.avg_sales_price,
+    s.order_count,
+    c.male_count,
+    c.female_count,
+    c.avg_purchase_estimate
+FROM 
+    sales_data s
+JOIN 
+    customer_summary c ON s.ws_item_sk = c.c_customer_sk
+ORDER BY 
+    s.total_sales DESC
+LIMIT 100;

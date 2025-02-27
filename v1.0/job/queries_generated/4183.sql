@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS ranking
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+), 
+MovieCredits AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        complete_cast mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        mc.movie_id
+), 
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mc.cast_count, 0) AS total_cast,
+        mc.cast_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCredits mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        rm.ranking <= 10
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    COALESCE(tm.cast_names, 'No Cast Available') AS cast_list,
+    CASE 
+        WHEN tm.production_year < 2000 THEN 'Classic'
+        WHEN tm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

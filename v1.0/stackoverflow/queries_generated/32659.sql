@@ -1,0 +1,111 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostScoreSummary AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS UserRank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+),
+PostHistoryDetailed AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PHT.Name AS ChangeType,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    U.DisplayName AS Author,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.Score,
+    PS.UserRank,
+    PH.UserId AS EditedBy,
+    PH.ChangeType AS LastEditType,
+    PH.CreationDate AS LastEditDate,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    COALESCE(PH.Comment, 'No Comments') AS LastEditComment,
+    CASE 
+        WHEN P.ViewCount > 1000 THEN 'High Traffic'
+        WHEN P.ViewCount BETWEEN 500 AND 1000 THEN 'Moderate Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficCategory,
+    (SELECT COUNT(*)
+     FROM PostLinks PL
+     WHERE PL.PostId = P.Id) AS RelatedPostsCount
+FROM 
+    Posts P
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostScoreSummary PS ON P.Id = PS.Id
+LEFT JOIN 
+    PostHistoryDetailed PH ON P.Id = PH.PostId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    P.CreationDate >= '2023-01-01'
+    AND (UB.BadgeCount IS NULL OR UB.BadgeCount > 0)
+ORDER BY 
+    PS.Score DESC,
+    P.Title;

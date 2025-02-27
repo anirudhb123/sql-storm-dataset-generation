@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.ViewCount > 100
+), PostsWithVotes AS (
+    SELECT 
+        rp.Id, 
+        rp.Title, 
+        rp.Score, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.Id = v.PostId
+    GROUP BY 
+        rp.Id, rp.Title, rp.Score
+), ImportantUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), UserPostStats AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        ImportantUsers u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.PositivePosts,
+    ups.NegativePosts,
+    pw.UpVotes,
+    pw.DownVotes,
+    p.Title,
+    p.Score,
+    p.CreationDate
+FROM 
+    UserPostStats ups
+JOIN 
+    PostsWithVotes pw ON ups.TotalPosts > 5
+JOIN 
+    Posts p ON p.OwnerUserId = ups.DisplayName
+WHERE 
+    EXISTS (SELECT 1 FROM Comments c WHERE c.PostId = p.Id AND c.CreationDate >= NOW() - INTERVAL '1 month')
+ORDER BY 
+    ups.Reputation DESC, pw.UpVotes - pw.DownVotes DESC
+LIMIT 10;

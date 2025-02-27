@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number, 
+        ws_sales_price,
+        ws_quantity, 
+        ws_ext_discount_amt, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_net_profit DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= 2452474 
+), RankedSales AS (
+    SELECT 
+        s_ss.store_sk,
+        s_ss.ss_item_sk,
+        SUM(s_ss.ss_quantity) AS total_sold,
+        SUM(s_ss.ss_net_profit) AS total_profit
+    FROM store_sales s_ss
+    INNER JOIN SalesCTE s_cte ON s_ss.ss_order_number = s_cte.ws_order_number
+    GROUP BY s_ss.store_sk, s_ss.ss_item_sk
+), TopStores AS (
+    SELECT 
+        store_sk,
+        RANK() OVER (ORDER BY total_profit DESC) AS store_rank
+    FROM RankedSales
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    STRING_AGG(i.i_item_id, ', ') AS sold_items,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+FROM customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN RankedSales rs ON ws.ws_order_number = rs.ss_order_sk
+LEFT JOIN item i ON rs.ss_item_sk = i.i_item_sk
+WHERE rs.store_sk IN (SELECT store_sk FROM TopStores WHERE store_rank <= 10)
+GROUP BY c.c_customer_id, ca.ca_city
+HAVING SUM(ws.ws_quantity) > 10
+ORDER BY total_profit DESC
+LIMIT 100;

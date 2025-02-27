@@ -1,0 +1,68 @@
+WITH customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+top_spenders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent,
+        RANK() OVER (ORDER BY co.total_spent DESC) AS spend_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_orders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_spent > 0
+    HAVING 
+        COUNT(o.o_orderkey) > 2
+),
+part_supplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    ts.c_name AS customer_name,
+    ts.total_spent AS total_spent,
+    ps.p_name AS part_name,
+    ps.unique_suppliers AS unique_supplier_count,
+    ps.total_supply_cost AS total_supply_cost,
+    COALESCE(DATEDIFF(NOW(), MAX(l.l_shipdate)), 30) AS days_since_last_purchase,
+    CASE 
+        WHEN ts.spend_rank <= 10 THEN 'Top Spender'
+        ELSE 'Regular Spender'
+    END AS spender_category
+FROM 
+    top_spenders ts
+JOIN 
+    orders o ON ts.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    part_supplier ps ON ps.unique_suppliers > 2
+WHERE 
+    l.l_discount BETWEEN 0.10 AND 0.20
+GROUP BY 
+    ts.c_custkey, ts.c_name, ps.p_name, ps.unique_suppliers, ps.total_supply_cost
+ORDER BY 
+    ts.total_spent DESC, ps.total_supply_cost ASC
+LIMIT 50;

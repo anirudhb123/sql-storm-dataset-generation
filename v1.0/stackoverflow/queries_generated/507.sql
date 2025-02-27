@@ -1,0 +1,64 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(p.Score), 0) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.ANSWERCOUNT,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' AND p.Score > 0
+),
+TopUsers AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        us.UpVotes,
+        us.DownVotes,
+        us.TotalPosts,
+        us.TotalScore,
+        RANK() OVER (ORDER BY us.TotalScore DESC) AS ScoreRank
+    FROM 
+        UserVoteStats us
+    JOIN 
+        Users u ON us.UserId = u.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.UpVotes,
+    tu.DownVotes,
+    pd.PostRank,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score AS PostScore,
+    COALESCE(pd.ViewCount, 0) AS ViewCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    PostDetails pd ON tu.UserId = pd.PostId
+WHERE 
+    tu.ScoreRank <= 10
+ORDER BY 
+    tu.TotalScore DESC, pd.CreationDate DESC
+LIMIT 100;

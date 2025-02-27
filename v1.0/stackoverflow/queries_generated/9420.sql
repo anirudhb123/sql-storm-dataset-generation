@@ -1,0 +1,40 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 100
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalUpVotes DESC) AS UserRank
+    FROM UserStatistics
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalComments,
+    TU.TotalUpVotes,
+    TU.TotalDownVotes,
+    TU.TotalBadges,
+    RANK() OVER (ORDER BY TU.TotalPosts DESC, TU.TotalUpVotes DESC) AS OverallRank
+FROM TopUsers TU
+WHERE TU.UserRank <= 10
+ORDER BY TU.OverallRank;

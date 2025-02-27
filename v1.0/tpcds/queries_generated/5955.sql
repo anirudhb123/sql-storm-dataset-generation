@@ -1,0 +1,55 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_web_sales,
+        SUM(cs.cs_net_paid_inc_tax) AS total_catalog_sales,
+        SUM(ss.ss_net_paid_inc_tax) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_credit_rating,
+        SUM(cs.total_web_sales) AS total_web_sales,
+        SUM(cs.total_catalog_sales) AS total_catalog_sales,
+        SUM(cs.total_store_sales) AS total_store_sales
+    FROM 
+        customer_sales cs
+    JOIN
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.cd_credit_rating
+),
+sales_summary AS (
+    SELECT 
+        cd.*,
+        total_web_sales + total_catalog_sales + total_store_sales AS overall_sales,
+        RANK() OVER (ORDER BY (total_web_sales + total_catalog_sales + total_store_sales) DESC) AS sales_rank
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    cd_credit_rating,
+    overall_sales,
+    sales_rank
+FROM 
+    sales_summary
+WHERE 
+    sales_rank <= 10
+ORDER BY 
+    overall_sales DESC;

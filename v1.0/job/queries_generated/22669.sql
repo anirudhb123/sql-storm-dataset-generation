@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE mh.depth < 5  -- limit recursion to a maximum depth of 5
+)
+
+SELECT 
+    COALESCE(ak.name, cn.name, 'Unknown') AS entity_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+    MAX(CASE 
+        WHEN mi.info_type_id IS NOT NULL THEN CONCAT('Info: ', mi.info) 
+        ELSE 'No Additional Info' 
+    END) AS movie_info,
+    SUM(CASE 
+        WHEN ci.role_id IS NULL THEN 0 
+        ELSE 1 
+    END) AS roles_count,
+    AVG(NULLIF(mh.production_year, 0)) OVER (PARTITION BY mh.movie_id) AS avg_year
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN company_name cn ON ak.md5sum = cn.md5sum  -- gather company names with a bizarre join condition
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    cm.name, mh.title, mh.production_year
+HAVING COUNT(DISTINCT ci.person_id) >= 3  -- filtering only movies with at least 3 unique cast members
+ORDER BY 
+    mh.production_year DESC, CAST(mh.title AS TEXT)
+FETCH FIRST 100 ROWS ONLY;
+
+-- Complex Null Logic and String Manipulation
+SELECT 
+    mh.movie_id, 
+    mh.title,
+    CASE 
+        WHEN COALESCE(mh.production_year, 0) = 0 THEN 'Year Not Available'
+        ELSE CAST(mh.production_year AS TEXT)
+    END AS production_year_str,
+    CASE 
+        WHEN ak.name IS NULL THEN 'Unknown Actor'
+        WHEN ak.name IS NOT NULL AND ak.surname_pcode IS NULL THEN CONCAT(ak.name, ' (Pcode: N/A)')
+        ELSE ak.name
+    END AS actor_summary
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    ak.name NOT LIKE '%Unknown%' 
+    AND mh.title IS NOT NULL
+ORDER BY mh.production_year DESC NULLS LAST
+OFFSET 10 ROWS;  -- Skipping the top 10 entries based on the results of earlier queries

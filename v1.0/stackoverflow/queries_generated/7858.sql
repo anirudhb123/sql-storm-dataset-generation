@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.ViewCount, 
+        rp.Score, 
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 100
+)
+SELECT 
+    tp.*,
+    u.DisplayName AS OwnerName,
+    b.Name AS BadgeName,
+    pt.Name AS PostTypeName
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Date <= tp.CreationDate
+LEFT JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+WHERE 
+    tp.ViewCount > 100
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

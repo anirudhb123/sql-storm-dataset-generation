@@ -1,0 +1,80 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_per_year,
+        MAX(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS has_note
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND t.kind_id = 1  -- Assuming '1' is a feature film
+),
+selected_titles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.cast_count,
+        rt.rank_per_year,
+        COALESCE(NULLIF(rt.has_note, 0), 'N/A') AS has_note
+    FROM 
+        ranked_titles rt
+    WHERE 
+        rt.rank_per_year <= 5  -- Top 5 movies per production year
+),
+company_movies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+final_output AS (
+    SELECT 
+        st.title,
+        st.production_year,
+        st.cast_count,
+        st.has_note,
+        COALESCE(cm.companies, 'Independent') AS companies
+    FROM 
+        selected_titles st
+    LEFT JOIN 
+        company_movies cm ON st.title_id = cm.movie_id
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.has_note,
+    f.companies
+FROM 
+    final_output f
+WHERE 
+    (f.has_note = '1' OR f.companies LIKE '%Warner Bros%')
+    AND f.cast_count > 2
+ORDER BY 
+    f.production_year DESC, f.cast_count DESC;
+
+### Explanation
+1. **Common Table Expressions (CTEs)**:
+   - `ranked_titles`: This CTE calculates the number of distinct cast members for movies grouped by `movie_id` and ranks them by the cast count within their production year.
+   - `selected_titles`: Filters the top 5 movies per production year based on their cast count and formats the `has_note` column.
+   - `company_movies`: Aggregates the names of companies associated with a movie, grouped by `movie_id`.
+   - `final_output`: Combines selected titles with associated companies, providing a fallback for independent films.
+
+2. **Main Query**: 
+   - It selects from the `final_output`, filtering for movies that either have a note or are associated with "Warner Bros", ensuring that the cast count is greater than 2, and then orders the results by production year and cast count.
+
+3. **Use of SQL Constructs**:
+   - Window functions (`COUNT`, `ROW_NUMBER`, `MAX`) are used for ranking and counting.
+   - `STRING_AGG` for concatenating company names.
+   - `LEFT JOIN` to include movies without companies.
+   - The `COALESCE` and `NULLIF` functions help handle NULL values effectively.
+   - The `WHERE` clause includes complicated predicates ensuring the logical conditions for filtering are met.

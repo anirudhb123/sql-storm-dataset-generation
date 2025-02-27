@@ -1,0 +1,77 @@
+
+WITH TagDetails AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY
+        t.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        LastPostDate,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM
+        TagDetails
+    WHERE
+        PostCount > 0
+    LIMIT 10
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ContributionCount,
+        SUM(CASE WHEN v.VoteTypeId IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN
+        Comments c ON c.UserId = u.Id
+    GROUP BY
+        u.Id, u.DisplayName
+    HAVING
+        COUNT(DISTINCT p.Id) > 0
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        ContributionCount,
+        VoteCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ContributionCount DESC) AS Rank
+    FROM
+        UserEngagement
+    LIMIT 10
+)
+SELECT
+    tt.TagName,
+    tt.PostCount AS TotalPosts,
+    tt.QuestionCount,
+    tt.AnswerCount,
+    tt.LastPostDate,
+    tu.DisplayName AS TopContributingUser,
+    tu.ContributionCount,
+    tu.VoteCount,
+    tu.CommentCount
+FROM
+    TopTags tt
+JOIN
+    TopUsers tu ON tu.ContributionCount = (SELECT MAX(ContributionCount) FROM TopUsers)
+ORDER BY
+    tt.PostCount DESC, tu.ContributionCount DESC;

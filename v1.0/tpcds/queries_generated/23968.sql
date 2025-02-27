@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        cr_returning_customer_sk,
+        COUNT(*) AS total_item_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_returning_customer_sk
+    HAVING
+        COUNT(*) > 1
+    UNION ALL
+    SELECT
+        wr_returning_customer_sk,
+        COUNT(*) AS total_item_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM
+        web_returns
+    GROUP BY
+        wr_returning_customer_sk
+    HAVING
+        COUNT(*) > 1
+),
+FrequentReturners AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_item_returns, 0) + COALESCE(wr.total_item_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) + COALESCE(wr.total_return_amount, 0) AS total_return_value
+    FROM
+        customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN CustomerReturns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+),
+RankedReturners AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY total_returns DESC, total_return_value DESC) AS rank
+    FROM
+        FrequentReturners
+)
+SELECT
+    cr.c_customer_id,
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.total_returns,
+    cr.total_return_value,
+    CASE
+        WHEN cr.total_return_value IS NULL THEN 'No returns'
+        WHEN cr.total_returns > 1000 THEN 'High spender'
+        ELSE 'Regular'
+    END AS customer_segment
+FROM
+    RankedReturners cr
+WHERE
+    cr.rank <= 10
+    AND (cr.total_returns IS NOT NULL OR cr.total_returns > 0)
+    AND cr.total_return_value > (SELECT AVG(total_return_value) FROM RankedReturners)
+ORDER BY
+    cr.total_returns DESC;

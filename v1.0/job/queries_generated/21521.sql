@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL 
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5  -- Limit depth to prevent infinite recursion
+)
+SELECT 
+    mh.title AS linked_movie_title,
+    mh.production_year AS linked_year,
+    COALESCE(c.name, 'Unknown') AS company_name,
+    COUNT(DISTINCT cst.kind) AS total_cast_type,
+    AVG(CHAR_LENGTH(m.title)) OVER (PARTITION BY m.id) AS avg_title_length,
+    MIN(pi.info) FILTER (WHERE pi.info_type_id = (SELECT id FROM info_type WHERE info = 'bio')) AS person_bio 
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id AND ci.nr_order IS NOT NULL
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    comp_cast_type cst ON ci.role_id = cst.id
+JOIN 
+    aka_title m ON mh.movie_id = m.id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+    AND (c.country_code IS NULL OR c.country_code <> 'US') 
+    AND (c.name LIKE '%Productions%' OR c.name IS NULL) 
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, c.name
+HAVING 
+    COUNT(DISTINCT cc.subject_id) > 3 
+    OR MIN(cc.status_id) IS NULL
+ORDER BY 
+    avg_title_length DESC, linked_year ASC;

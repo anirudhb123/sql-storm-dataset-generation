@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    INNER JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    INNER JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    mg.movie_title,
+    mg.production_year,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    COALESCE(SUM(mi.info LIKE '%Award%')::int, 0) AS awards_count
+FROM 
+    movie_hierarchy mg
+LEFT JOIN 
+    complete_cast cc ON mg.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mg.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+WHERE  
+    mg.production_year >= 2000
+GROUP BY 
+    mg.movie_id, mg.movie_title, mg.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    mg.production_year DESC, cast_count DESC;
+
+This query constructs a recursive Common Table Expression (CTE) to build a hierarchy of movies based on their links. It then combines various joins to aggregate data such as cast count, actor names, and awards received. The output is filtered to include only movies produced after 2000 with more than five cast members, sorted by production year and cast count.

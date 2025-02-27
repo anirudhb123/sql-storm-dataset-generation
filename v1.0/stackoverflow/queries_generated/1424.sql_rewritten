@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostViews AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 months'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.Score,
+    pv.TotalBounty,
+    pv.VoteCount
+FROM 
+    TopUsers u
+JOIN 
+    RankedPosts pp ON u.UserId = pp.OwnerUserId AND pp.PostRank <= 3
+LEFT JOIN 
+    PostViews pv ON pp.PostId = pv.PostId
+WHERE 
+    pv.TotalBounty IS NOT NULL
+ORDER BY 
+    u.Reputation DESC, pp.Score DESC;

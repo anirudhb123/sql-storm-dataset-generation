@@ -1,0 +1,96 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(CASE 
+                WHEN l.l_returnflag = 'R' THEN l.l_quantity * l.l_extendedprice * (1 - l.l_discount) 
+                ELSE 0 
+            END) AS return_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING 
+        SUM(l.l_quantity) > 100
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal >= (SELECT AVG(c2.c_acctbal) FROM customer c2) 
+    GROUP BY 
+        c.c_custkey
+),
+QualifiedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 20)
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 50  
+),
+FinalReport AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(ho.o_totalprice) AS high_value_order_total,
+        SUM(COALESCE(ho.return_value, 0)) AS total_return_value,
+        STRING_AGG(DISTINCT p.p_name, ', ' ORDER BY p.p_name) AS popular_parts
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrderCounts coc ON c.c_custkey = coc.c_custkey
+    LEFT JOIN 
+        HighValueOrders ho ON coc.order_count IS NOT NULL
+    LEFT JOIN 
+        QualifiedParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    f.total_orders,
+    f.high_value_order_total,
+    f.total_return_value,
+    CASE 
+        WHEN f.high_value_order_total > 10000 THEN 'Gold' 
+        WHEN f.high_value_order_total BETWEEN 5000 AND 10000 THEN 'Silver' 
+        ELSE 'Bronze' 
+    END AS customer_tier,
+    COALESCE(NULLIF(f.popular_parts, ''), 'No parts available') AS part_list
+FROM 
+    FinalReport f
+WHERE 
+    f.total_orders IS NOT NULL AND f.total_orders > 0
+ORDER BY 
+    f.high_value_order_total DESC, f.c_name;

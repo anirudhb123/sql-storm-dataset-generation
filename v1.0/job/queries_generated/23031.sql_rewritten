@@ -1,0 +1,43 @@
+WITH RECURSIVE RecursiveTitle AS (
+    SELECT t.id, t.title, t.production_year, 
+           CASE WHEN t.season_nr IS NOT NULL THEN 'Episode' ELSE 'Movie' END AS title_type
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT t.id, t.title, t.production_year, 
+           CASE WHEN t.season_nr IS NOT NULL THEN 'Episode' ELSE 'Movie' END AS title_type
+    FROM title t
+    INNER JOIN RecursiveTitle rt ON rt.id = t.episode_of_id
+),
+RankedActors AS (
+    SELECT ak.person_id, ak.name, 
+           RANK() OVER (PARTITION BY ak.person_id ORDER BY c.nr_order) AS actor_rank,
+           COUNT(*) OVER (PARTITION BY ak.person_id) AS total_roles
+    FROM aka_name ak
+    INNER JOIN cast_info c ON ak.person_id = c.person_id
+),
+FilteredMovies AS (
+    SELECT t.id AS movie_id, t.title, t.production_year, 
+           COALESCE(mi.info, 'No Info') AS movie_info,
+           COALESCE(MAX(mk.keyword), 'None') AS movie_keyword
+    FROM title t
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Description')
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY t.id, t.title, t.production_year
+)
+SELECT 
+    rt.title, rt.production_year, 
+    ra.name AS actor_name, 
+    ra.actor_rank, 
+    fm.movie_info,
+    fm.movie_keyword
+FROM RecursiveTitle rt
+LEFT JOIN RankedActors ra ON rt.id = ra.person_id
+LEFT JOIN FilteredMovies fm ON rt.id = fm.movie_id
+WHERE rt.title_type = 'Movie'
+    AND (ra.total_roles IS NULL OR ra.total_roles > 1)
+ORDER BY rt.production_year DESC, ra.actor_rank ASC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM title) / 10;

@@ -1,0 +1,82 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Comments c 
+            WHERE c.PostId = p.Id
+        ), 0) AS CommentCount,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Badges b 
+            WHERE b.UserId = p.OwnerUserId
+        ), 0) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        RANK() OVER (ORDER BY ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY Score DESC) AS ScoreRank
+    FROM 
+        PostDetails
+),
+
+PostStatistics AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerDisplayName,
+        p.CommentCount,
+        p.BadgeCount,
+        CASE 
+            WHEN ViewRank <= 10 THEN 'Top Views'
+            WHEN ScoreRank <= 10 THEN 'Top Score'
+            ELSE 'Regular'
+        END AS PostCategory
+    FROM 
+        PopularPosts p
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.BadgeCount,
+    ps.PostCategory,
+    EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - ps.CreationDate)) AS AgeInSeconds,
+    (CASE 
+        WHEN ps.Score >= 100 THEN 'Highly Popular'
+        WHEN ps.Score BETWEEN 50 AND 99 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+     END) AS Popularity
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.CommentCount > 0
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

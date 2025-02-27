@@ -1,0 +1,81 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+
+    UNION ALL
+
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + ns.total_sales AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        nation_sales ns ON n.n_nationkey <> ns.n_nationkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, ns.total_sales
+),
+ranked_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(ns.total_sales, 0) AS total_sales,
+        RANK() OVER (ORDER BY COALESCE(ns.total_sales, 0) DESC) AS sales_rank
+    FROM 
+        nation n
+    LEFT JOIN 
+        nation_sales ns ON n.n_nationkey = ns.n_nationkey
+),
+filtered_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        rs.total_sales,
+        rs.sales_rank
+    FROM 
+        ranked_sales rs
+    JOIN 
+        nation n ON n.n_nationkey = rs.n_nationkey
+    WHERE 
+        rs.total_sales > (
+            SELECT 
+                AVG(total_sales) 
+            FROM 
+                ranked_sales
+        )
+)
+SELECT 
+    f.n_nationkey,
+    f.n_name,
+    f.total_sales,
+    f.sales_rank,
+    CASE 
+        WHEN f.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    filtered_sales f
+ORDER BY 
+    f.sales_rank;

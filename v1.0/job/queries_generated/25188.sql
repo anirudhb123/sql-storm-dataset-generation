@@ -1,0 +1,54 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year AS production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.name, m.title, m.production_year
+),
+GenreMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        k.kind AS genre
+    FROM 
+        aka_title m
+    JOIN 
+        kind_type k ON m.kind_id = k.id
+),
+MoviesWithGenres AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        g.genre
+    FROM 
+        ActorMovies am
+    JOIN 
+        GenreMovies g ON am.movie_title = g.movie_id
+)
+SELECT 
+    actor_id,
+    actor_name,
+    movie_title,
+    production_year,
+    STRING_AGG(DISTINCT genre, ', ') AS genres,
+    STRING_AGG(DISTINCT keywords, ', ') AS all_keywords
+FROM 
+    MoviesWithGenres
+GROUP BY 
+    actor_id, actor_name, movie_title, production_year
+ORDER BY 
+    production_year DESC, actor_name;

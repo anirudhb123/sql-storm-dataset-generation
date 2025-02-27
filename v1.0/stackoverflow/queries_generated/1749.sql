@@ -1,0 +1,51 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+), RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.OwnerDisplayName,
+        P.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    U.TotalPosts,
+    U.QuestionCount,
+    U.AnswerCount,
+    RPH.Title,
+    RPH.CreationDate AS RecentActivityDate
+FROM 
+    UserVoteSummary U
+LEFT JOIN 
+    RecentPostHistory RPH ON RPH.PostId IN (SELECT PostId FROM Posts P WHERE P.OwnerUserId = U.UserId AND P.PostTypeId = 1)
+WHERE 
+    U.TotalPosts > 0
+ORDER BY 
+    U.Reputation DESC NULLS LAST 
+LIMIT 100;

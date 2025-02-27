@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ai.name AS actor_name,
+        ct.kind AS role_type,
+        COALESCE(COUNT(DISTINCT cc.movie_id), 0) AS movie_count
+    FROM 
+        cast_info cc
+    JOIN 
+        aka_name ai ON cc.person_id = ai.person_id
+    JOIN 
+        role_type ct ON cc.role_id = ct.id
+    GROUP BY 
+        ai.name, ct.kind
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code = 'USA'
+),
+KeywordDetails AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ar.actor_name,
+    ar.role_type,
+    ar.movie_count,
+    ci.company_name,
+    ci.company_type,
+    kd.keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    KeywordDetails kd ON rm.movie_id = kd.movie_id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    ar.movie_count DESC NULLS LAST;

@@ -1,0 +1,94 @@
+-- Performance benchmarking query to analyze post statistics, user activity, and voting patterns
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SELECT COUNT(*) 
+         FROM Posts AS a 
+         WHERE a.AcceptedAnswerId = p.Id) AS AcceptedAnswerCount
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Comments AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.VoteCount) AS TotalVotes
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges AS b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId 
+    ) AS v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CombinedStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.PostCount,
+        us.BadgeCount,
+        us.TotalVotes,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.AcceptedAnswerCount
+    FROM 
+        UserStats AS us
+    LEFT JOIN 
+        PostStats AS ps ON us.UserId = ps.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    TotalVotes,
+    PostId,
+    Title,
+    ViewCount,
+    Score,
+    CommentCount,
+    VoteCount,
+    UpVotes,
+    DownVotes,
+    AcceptedAnswerCount
+FROM 
+    CombinedStats
+ORDER BY 
+    Reputation DESC, 
+    Score DESC;

@@ -1,0 +1,72 @@
+WITH RecursiveVoteCount AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        COALESCE(ans.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(vtc.VoteCount, 0) AS LatestVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        (SELECT 
+            ParentId, 
+            COUNT(Id) AS AnswerCount 
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2 
+         GROUP BY 
+            ParentId) ans ON p.Id = ans.ParentId
+    LEFT JOIN 
+        RecursiveVoteCount vtc ON p.Id = vtc.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+)
+SELECT 
+    ps.Id,
+    ps.Title,
+    ps.CreationDate,
+    ps.TotalComments,
+    ps.TotalAnswers,
+    ps.LatestVoteCount,
+    CASE 
+        WHEN ps.TotalComments < 5 THEN 'Low Engagement'
+        WHEN ps.TotalComments BETWEEN 5 AND 10 THEN 'Moderate Engagement'
+        ELSE 'High Engagement'
+    END AS EngagementLevel,
+    COALESCE(pt.Name, 'Unknown') AS PostType
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostTypes pt ON ps.Id = pt.Id
+WHERE 
+    ps.LatestVoteCount > (
+        SELECT 
+            AVG(VoteCount)
+        FROM 
+            RecursiveVoteCount
+    )
+ORDER BY 
+    ps.CreatedDate DESC;
+

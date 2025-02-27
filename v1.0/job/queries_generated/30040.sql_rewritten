@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.id AS root_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL 
+
+    UNION ALL
+
+    
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        aka_title et
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON mt.id = mh.movie_id
+    WHERE 
+        et.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ah.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    AVG(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE NULL END) AS average_rating,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.root_movie_id ORDER BY ah.name) AS actor_rank
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+JOIN 
+    aka_name ah ON ah.person_id = cc.subject_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id IN (1, 2) 
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+WHERE 
+    mh.production_year > 2000 
+GROUP BY 
+    ah.name, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, actor_rank;

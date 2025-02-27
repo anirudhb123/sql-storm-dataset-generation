@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 as level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+SalesData AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY c.c_custkey
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, sd.total_sales,
+           RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN SalesData sd ON c.c_custkey = sd.c_custkey
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, p.p_name, p.p_size, s.s_name, ps.ps_supplycost,
+           RANK() OVER (PARTITION BY p.p_size ORDER BY ps.ps_supplycost) AS cost_rank
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+FilteredSuppliers AS (
+    SELECT sh.s_name, sh.s_acctbal FROM SupplierHierarchy sh
+    WHERE sh.level = (SELECT MAX(level) FROM SupplierHierarchy)
+)
+SELECT r.*,
+       COALESCE(sd.total_sales, 0) AS total_sales,
+       psd.ps_supplycost AS supplier_cost,
+       CASE 
+           WHEN sd.total_sales > 100000 THEN 'High Value'
+           ELSE 'Low Value'
+       END AS customer_type
+FROM RankedCustomers r
+LEFT JOIN SupplierPartDetails psd ON r.c_custkey = psd.ps_partkey
+LEFT JOIN FilteredSuppliers fs ON fs.s_name = psd.s_name
+WHERE fs.s_acctbal IS NOT NULL
+ORDER BY r.sales_rank, psd.cost_rank
+LIMIT 100;

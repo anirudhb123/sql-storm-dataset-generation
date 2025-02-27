@@ -1,0 +1,65 @@
+WITH Region_Supplier AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+), 
+
+Customer_Order AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS ordrank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+), 
+
+LineItem_Details AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue,
+        COUNT(DISTINCT li.l_suppkey) AS total_suppliers
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_returnflag = 'N'
+    GROUP BY 
+        li.l_orderkey
+)
+
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(s.s_name, 'No Suppliers') AS supplier_name,
+    co.c_name AS customer_name,
+    COALESCE(ldr.net_revenue, 0) AS total_revenue,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    MAX(co.o_totalprice) AS max_order_value,
+    SUM(CASE WHEN co.ordrank = 1 THEN 1 ELSE 0 END) AS top_order_count
+FROM 
+    Region_Supplier r
+LEFT JOIN 
+    LineItem_Details ldr ON ldr.l_orderkey IN (SELECT o.o_orderkey FROM Order o WHERE o.o_orderstatus = 'F')
+RIGHT JOIN 
+    Customer_Order co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE CONCAT('%', r.s_name, '%') LIMIT 1)
+GROUP BY 
+    r.r_name, s.s_name, co.c_name
+HAVING 
+    SUM(ldr.net_revenue) > 1000 OR COUNT(DISTINCT co.o_orderkey) = 0
+ORDER BY 
+    region_name, total_revenue DESC;

@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+)
+SELECT 
+    rph.Title AS PostTitle,
+    rph.CreationDate AS PostCreationDate,
+    CASE
+        WHEN rph.Level = 1 THEN 'Original Post'
+        ELSE CONCAT('Response Level ', rph.Level)
+    END AS PostLevel,
+    u.DisplayName AS UserName,
+    u.Reputation AS UserReputation,
+    uR.Rank AS UserRank,
+    COUNT(c.Id) AS CommentCount,
+    AVG(v.BountyAmount) AS AverageBounty,
+    MAX(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END) AS LastUpvoteDate,
+    STRING_AGG(DISTINCT tags.TagName, ', ') AS RelatedTags
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Posts p ON rph.Id = p.Id 
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId 
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id 
+LEFT JOIN 
+    Tags tags ON tags.WikiPostId = p.Id 
+LEFT JOIN 
+    UserReputation uR ON u.Id = uR.UserId
+WHERE 
+    rph.CreationDate > NOW() - INTERVAL '1 year'
+GROUP BY 
+    rph.Id, PostTitle, PostCreationDate, PostLevel, UserName, UserReputation, uR.Rank 
+ORDER BY 
+    UserReputation DESC, PostCreationDate DESC;
+

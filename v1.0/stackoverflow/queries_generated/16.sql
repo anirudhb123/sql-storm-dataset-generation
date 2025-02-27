@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only questions
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+TopContributors AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        SUM(CASE WHEN rp.UserRank = 1 THEN 1 ELSE 0 END) AS TopQuestionsCount
+    FROM UserStats us
+    JOIN RankedPosts rp ON us.UserId = rp.OwnerUserId
+    GROUP BY us.UserId, us.DisplayName, us.Reputation
+    HAVING SUM(CASE WHEN rp.UserRank = 1 THEN 1 ELSE 0 END) > 0
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        ctr.Name AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    JOIN CloseReasonTypes ctr ON CAST(ph.Comment AS INT) = ctr.Id
+    WHERE ph.PostHistoryTypeId = 10  -- Post Closed
+),
+FinalResults AS (
+    SELECT 
+        tc.UserId,
+        tc.DisplayName,
+        tc.Reputation,
+        tc.TopQuestionsCount,
+        COUNT(DISTINCT cp.Id) AS ClosedQuestionsCount
+    FROM TopContributors tc
+    LEFT JOIN ClosedPosts cp ON tc.UserId = cp.Id
+    GROUP BY tc.UserId, tc.DisplayName, tc.Reputation, tc.TopQuestionsCount
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.Reputation,
+    fr.TopQuestionsCount,
+    fr.ClosedQuestionsCount,
+    CASE 
+        WHEN fr.TopQuestionsCount > 5 THEN 'Expert'
+        WHEN fr.TopQuestionsCount BETWEEN 3 AND 5 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS ContributionLevel
+FROM FinalResults fr
+ORDER BY fr.Reputation DESC, fr.TopQuestionsCount DESC;

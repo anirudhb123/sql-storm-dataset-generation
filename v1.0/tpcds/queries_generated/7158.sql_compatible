@@ -1,0 +1,52 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        d.d_month_seq,
+        d.d_year
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.ws_item_sk, d.d_month_seq, d.d_year
+),
+RankedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        sd.total_profit,
+        ROW_NUMBER() OVER (PARTITION BY sd.d_year ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        SalesData AS sd
+)
+SELECT 
+    it.i_item_id,
+    it.i_item_desc,
+    rs.total_quantity,
+    rs.total_sales,
+    rs.total_profit,
+    rs.sales_rank,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM 
+    RankedSales AS rs
+JOIN 
+    item AS it ON rs.ws_item_sk = it.i_item_sk
+JOIN 
+    customer AS c ON c.c_customer_sk = (SELECT c1.c_customer_sk 
+                                         FROM web_sales AS ws1 
+                                         WHERE ws1.ws_item_sk = rs.ws_item_sk 
+                                         ORDER BY ws1.ws_sold_date_sk DESC 
+                                         LIMIT 1)
+JOIN 
+    customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    rs.sales_rank <= 10
+ORDER BY 
+    rs.total_sales DESC, 
+    rs.total_profit DESC;

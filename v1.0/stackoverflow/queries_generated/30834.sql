@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE u.Reputation > 1000
+),
+PostViews AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '6 MONTH'
+    GROUP BY p.Id
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    pv.CommentCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    CASE 
+        WHEN pv.UpVotes IS NULL AND pv.DownVotes IS NULL THEN 'No Votes'
+        WHEN pv.UpVotes > pv.DownVotes THEN 'Positive Feedback'
+        WHEN pv.UpVotes < pv.DownVotes THEN 'Negative Feedback'
+        ELSE 'Neutral'
+    END AS VoteFeedback,
+    CASE 
+        WHEN rp.Score IS NULL THEN 0
+        ELSE GREATEST(rp.Score, 0) 
+    END AS EffectiveScore
+FROM TopUsers up
+JOIN RankedPosts rp ON up.UserId = rp.OwnerUserId
+JOIN PostViews pv ON rp.PostId = pv.PostId
+WHERE up.UserRank <= 10
+ORDER BY up.Reputation DESC, rp.PostRank;

@@ -1,0 +1,61 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+), PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Owner,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+    HAVING 
+        COUNT(C.Id) > 0 OR SUM(V.VoteTypeId = 2) > 10 -- Posts with comments or more than 10 Upvotes
+), TopTags AS (
+    SELECT 
+        T.TagName,
+        TC.PostCount,
+        ROW_NUMBER() OVER (ORDER BY TC.PostCount DESC) AS Rank
+    FROM 
+        RecursiveTagCounts TC
+    JOIN 
+        Tags T ON TC.TagName = T.TagName
+    WHERE 
+        TC.PostCount > 5 -- Tags associated with more than 5 posts
+)
+SELECT 
+    TP.Title AS PopularPostTitle,
+    TP.CreationDate,
+    TP.Owner AS PostOwner,
+    TT.TagName AS AssociatedTag,
+    TT.PostCount AS TagPostCount
+FROM 
+    PopularPosts TP
+JOIN 
+    Posts P ON TP.Id = P.Id
+JOIN 
+    string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><') AS TagIds ON P.Id = ANY(TagIds)
+JOIN 
+    TopTags TT ON TT.TagName = TagIds
+ORDER BY 
+    TT.Rank, TP.UpvoteCount DESC
+LIMIT 10;

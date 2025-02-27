@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    
+    UNION ALL
+
+    SELECT
+        lm.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1 AS level
+    FROM movie_link lm
+    JOIN title t ON lm.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON lm.movie_id = mh.movie_id
+    WHERE mh.level < 3 
+),
+
+AggregatedKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+
+DirectorInformation AS (
+    SELECT
+        ci.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS directors
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ci.role_id = (SELECT id FROM role_type WHERE role = 'director')
+    GROUP BY ci.movie_id
+),
+
+CompleteMovieInfo AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ak.name, 'Unknown') AS director,
+        ak.keywords,
+        (SELECT COUNT(*) FROM similar_movies(mh.movie_id)) AS similar_movies_count
+    FROM MovieHierarchy mh
+    LEFT JOIN AggregatedKeywords ak ON mh.movie_id = ak.movie_id
+    LEFT JOIN DirectorInformation d ON mh.movie_id = d.movie_id
+)
+
+SELECT
+    cmi.movie_id,
+    cmi.title,
+    cmi.production_year,
+    cmi.director,
+    COALESCE(cmi.keywords, 'No keywords') AS keywords,
+    cmi.similar_movies_count
+FROM CompleteMovieInfo cmi
+WHERE cmi.production_year IS NOT NULL
+    AND cmi.similar_movies_count > 0
+ORDER BY cmi.production_year DESC, cmi.title
+LIMIT 50;

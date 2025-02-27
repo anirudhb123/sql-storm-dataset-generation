@@ -1,0 +1,78 @@
+WITH RECURSIVE ActorHierarchy AS (
+    
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        c.role_id,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.nr_order = 1
+    
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        c.role_id,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        c.person_id !== ah.person_id  
+),
+
+RankedMovies AS (
+    
+    SELECT 
+        a.movie_id,
+        COUNT(DISTINCT a.person_id) AS actor_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT a.person_id) DESC) AS rank
+    FROM 
+        cast_info a
+    GROUP BY 
+        a.movie_id
+),
+
+ActorMovieTitles AS (
+    
+    SELECT 
+        t.title,
+        ak.name AS actor_name,
+        ak.name_pcode_nf,
+        ak.name_pcode_cf,
+        m.production_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON c.movie_id = t.movie_id
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    JOIN 
+        movie_info m ON m.movie_id = t.movie_id
+    WHERE 
+        m.info LIKE '%blockbuster%'
+)
+
+SELECT 
+    rm.movie_id,
+    am.actor_name,
+    am.production_year,
+    ah.level,
+    COALESCE(rm.actor_count, 0) AS total_actors,
+    STRING_AGG(DISTINCT am.title, ', ') AS movie_titles
+FROM 
+    RankedMovies rm
+FULL OUTER JOIN 
+    ActorMovieTitles am ON rm.movie_id = am.movie_id
+JOIN 
+    ActorHierarchy ah ON ah.movie_id = rm.movie_id
+GROUP BY 
+    rm.movie_id, am.actor_name, am.production_year, ah.level
+HAVING 
+    COUNT(am.actor_name) > 1
+ORDER BY 
+    total_actors DESC, am.actor_name;

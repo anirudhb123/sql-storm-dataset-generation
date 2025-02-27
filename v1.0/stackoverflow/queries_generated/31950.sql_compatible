@@ -1,0 +1,111 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.Body,
+        P2.CreationDate,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostCTE R ON P2.ParentId = R.PostId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        AVG(U.Reputation) AS AvgReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+ClosedQuestions AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes C ON CAST(PH.Comment AS INTEGER) = C.Id 
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+OverallStats AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COALESCE(CNT.AnswerCount, 0) AS AnswerCount,
+        COALESCE(CNT.CommentCount, 0) AS CommentCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AcceptanceStatus,
+        COALESCE(B.TotalBounty, 0) AS UserBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UserStats B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        (SELECT P.Id, COUNT(C.Id) AS CommentCount, SUM(COALESCE(C.Score, 0)) AS AnswerCount
+         FROM Posts P
+         LEFT JOIN Comments C ON P.Id = C.PostId
+         WHERE P.PostTypeId = 1  
+         GROUP BY P.Id) AS CNT ON P.Id = CNT.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.AcceptanceStatus,
+    PH.CloseReason,
+    (SELECT STRING_AGG(Tag.TagName, ', ') 
+     FROM (SELECT Tag.TagName 
+           FROM TopTags Tag 
+           WHERE Tag.PostCount < 15 
+           ORDER BY Tag.PostCount DESC 
+           LIMIT 3) AS Tag) AS TopTags
+FROM 
+    OverallStats PS
+LEFT JOIN 
+    ClosedQuestions PH ON PS.Id = PH.PostId
+ORDER BY 
+    PS.AnswerCount DESC, PS.CommentCount DESC;

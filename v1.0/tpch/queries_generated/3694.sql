@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplies AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(o.o_orderkey) AS number_of_orders,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS revenue,
+    ps.p_name AS part_name,
+    ps.total_available,
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_account_balance
+FROM 
+    CustomerOrders c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    PartSupplies ps ON li.l_partkey = ps.p_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.p_partkey = (SELECT ps1.ps_partkey FROM partsupp ps1 WHERE ps1.ps_supplycost = ps.avg_supply_cost ORDER BY ps1.ps_availqty DESC LIMIT 1) 
+WHERE 
+    o.o_orderstatus = 'F'
+GROUP BY 
+    c.c_name, ps.p_name, ps.total_available, s.s_name, s.s_acctbal
+HAVING 
+    revenue > 1000
+ORDER BY 
+    revenue DESC;

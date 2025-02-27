@@ -1,0 +1,36 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE sh.level < 3
+),
+TopPartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, AVG(l.l_discount) AS avg_discount,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY AVG(l.l_discount) DESC) AS rank
+    FROM part p
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand
+    HAVING COUNT(l.l_orderkey) > 1
+)
+SELECT n.n_name, s.s_name, pp.p_name, pp.avg_discount
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.n_nationkey
+LEFT JOIN Supplier s ON sh.s_suppkey = s.s_suppkey
+JOIN RankedParts pp ON pp.rank <= 5
+WHERE pp.p_brand IS NOT NULL
+  AND n.n_name NOT LIKE '%invalid%'
+ORDER BY n.n_name, pp.avg_discount DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

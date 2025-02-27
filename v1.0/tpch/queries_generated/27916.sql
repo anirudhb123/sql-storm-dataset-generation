@@ -1,0 +1,58 @@
+WITH supplier_products AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS product_name,
+        p.p_brand AS brand,
+        p.p_mfgr AS manufacturer,
+        CONCAT(s.s_name, ' - ', p.p_name, ' [', p.p_brand, ']') AS full_description
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        o.o_orderdate AS order_date,
+        o.o_totalprice AS total_price,
+        o.o_comment AS order_comment,
+        CONCAT(c.c_name, ' - Order #', o.o_orderkey, ' on ', CAST(o.o_orderdate AS varchar), ' [$', CAST(o.o_totalprice AS decimal(12, 2)), ']') AS order_summary
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+product_summary AS (
+    SELECT 
+        pp.product_name,
+        COUNT(DISTINCT COALESCE(co.order_key, 0)) AS order_count,
+        SUM(co.total_price) AS total_revenue,
+        STRING_AGG(DISTINCT co.order_summary, '; ') AS order_details
+    FROM 
+        supplier_products pp
+    LEFT JOIN 
+        lineitem l ON pp.product_name = l.l_partkey
+    LEFT JOIN 
+        customer_orders co ON l.l_orderkey = co.order_key
+    GROUP BY 
+        pp.product_name
+)
+SELECT 
+    ps.supplier_name,
+    ps.full_description,
+    ps.brand,
+    ps.manufacturer,
+    ps.product_name,
+    ps.order_count,
+    ps.total_revenue,
+    ps.order_details
+FROM 
+    supplier_products ps
+JOIN 
+    product_summary pd ON ps.product_name = pd.product_name
+ORDER BY 
+    ps.supplier_name, 
+    ps.product_name;

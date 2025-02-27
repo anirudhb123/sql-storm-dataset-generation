@@ -1,0 +1,82 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_size DESC) AS BrandRank
+    FROM 
+        part p
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comments') AS SuppComment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) * 0.9 
+            FROM supplier s2 
+            WHERE s2.s_acctbal IS NOT NULL
+        )
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+), 
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS ReturnsCount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    r.r_name AS RegionName,
+    np.n_name AS NationName,
+    COALESCE(MAX(CASE WHEN rp.BrandRank = 1 THEN rp.p_name END), 'No top part') AS TopPart,
+    COALESCE(SUM(CASE WHEN ls.ReturnsCount > 0 THEN ls.TotalRevenue ELSE 0 END), 0) AS TotalRevenueFromReturns,
+    AVG(cd.TotalSpent) AS AvgSpentByCustomers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN 
+    RankedParts rp ON sd.s_suppkey = (
+        SELECT TOP 1 ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = rp.p_partkey 
+        ORDER BY ps.ps_supplycost
+    )
+LEFT JOIN 
+    LineItemSummary ls ON ls.l_orderkey IN (SELECT DISTINCT o.o_orderkey FROM orders o)
+LEFT JOIN 
+    CustomerOrders cd ON cd.c_custkey = ls.l_orderkey
+WHERE 
+    r.r_name NOT IN ('ASIA', 'EUROPE')
+GROUP BY 
+    r.r_name, np.n_name
+ORDER BY 
+    TotalRevenueFromReturns DESC, AvgSpentByCustomers DESC
+FETCH FIRST 10 ROWS ONLY;

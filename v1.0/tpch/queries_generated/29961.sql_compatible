@@ -1,0 +1,63 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        CONCAT('Supplier: ', s.s_name, ' | Address: ', s.s_address, ' | Balance: $', FORMAT(s.s_acctbal, 2)) AS supplier_info
+    FROM 
+        supplier s
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        CONCAT('Nation: ', n.n_name, ' | Region: ', r.r_name) AS nation_info
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_container,
+        CONCAT('Part: ', p.p_name, ' | Container: ', p.p_container) AS part_info
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrder AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        c.c_name,
+        o.o_totalprice,
+        CONCAT('Order Key: ', o.o_orderkey, ' | Customer: ', c.c_name, ' | Total Price: $', FORMAT(o.o_totalprice, 2)) AS order_info
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+)
+SELECT 
+    sd.supplier_info,
+    nd.nation_info,
+    pd.part_info,
+    co.order_info
+FROM 
+    SupplierDetails sd
+JOIN 
+    NationDetails nd ON sd.s_nationkey = nd.n_nationkey
+JOIN 
+    PartSupplier pd ON pd.ps_suppkey = sd.s_suppkey
+JOIN 
+    CustomerOrder co ON co.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'CustomerX' LIMIT 1)
+WHERE 
+    sd.s_acctbal > 50000
+ORDER BY 
+    sd.s_name, nd.n_name, pd.p_name;

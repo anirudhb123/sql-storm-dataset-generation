@@ -1,0 +1,37 @@
+WITH RECURSIVE part_costs AS (
+    SELECT ps.partkey, SUM(ps.ps_supplycost) as total_cost
+    FROM partsupp ps
+    GROUP BY ps.partkey
+),
+required_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE((SELECT AVG(total_cost) 
+                     FROM part_costs 
+                     WHERE partkey = p.p_partkey), 0) as avg_supply_cost
+    FROM part p
+),
+qualified_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           (SELECT COUNT(*) 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey) as line_count
+    FROM orders o 
+    WHERE o.o_orderstatus IN ('F', 'O')
+    AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate < CURRENT_DATE - INTERVAL '1 year')
+)
+SELECT rp.p_name,
+       np.n_name,
+       SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) as total_revenue,
+       COUNT(DISTINCT coalesce(o.o_orderkey, -1)) as order_count,
+       MAX(rp.p_retailprice) * AVERAGE(rp.avg_supply_cost) as retail_to_cost_ratio
+FROM required_parts rp
+LEFT OUTER JOIN lineitem l ON l.l_partkey = rp.p_partkey
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN supplier s ON s.s_suppkey = l.l_suppkey
+LEFT JOIN nation np ON s.s_nationkey = np.n_nationkey
+WHERE l.l_returnflag = 'N'
+AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY rp.p_name, np.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

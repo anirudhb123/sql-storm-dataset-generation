@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Depth,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        p.OwnerUserId,
+        p.Tags,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        
+    UNION ALL
+    
+    SELECT 
+        p2.Id,
+        p2.ParentId,
+        ph.Depth + 1,
+        p2.Title,
+        p2.CreationDate,
+        p2.ViewCount,
+        p2.Score,
+        p2.Body,
+        p2.OwnerUserId,
+        p2.Tags,
+        ph.HasAcceptedAnswer
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p2.ParentId = ph.PostId
+    WHERE 
+        p2.PostTypeId = 2  
+),
+
+HighestScorePosts AS (
+    SELECT 
+        PostId,
+        MAX(Score) AS MaxScore
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        PostId
+),
+
+AggregateTagData AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, ',')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TagName
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Depth,
+    ph.Score,
+    ph.ViewCount,
+    ph.HasAcceptedAnswer,
+    hsp.MaxScore,
+    agg.TagName,
+    agg.PostCount,
+    CASE 
+        WHEN ph.ViewCount IS NULL THEN 'No views' 
+        ELSE CONCAT(ph.ViewCount, ' views') 
+    END AS ViewString
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    HighestScorePosts hsp ON ph.PostId = hsp.PostId
+LEFT JOIN 
+    AggregateTagData agg ON ph.Tags ILIKE '%' || agg.TagName || '%'
+WHERE 
+    ph.Depth <= 2  
+    AND (ph.ViewCount > 100 OR ph.Score > 5)  
+ORDER BY 
+    ph.Depth, ph.Score DESC NULLS LAST, ph.CreationDate DESC;

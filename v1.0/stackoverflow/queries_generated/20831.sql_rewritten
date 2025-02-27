@@ -1,0 +1,99 @@
+WITH RankedUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM
+        Users u
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Id END) AS ReopenCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.OwnerUserId, p.PostTypeId
+),
+UserPostStats AS (
+    SELECT
+        r.UserId,
+        r.DisplayName,
+        COALESCE(SUM(pd.UpVotes - pd.DownVotes), 0) AS NetVotes,
+        COALESCE(SUM(pd.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(pd.CloseCount), 0) AS TotalClosures,
+        COALESCE(SUM(pd.ReopenCount), 0) AS TotalReopens,
+        COUNT(pd.PostId) AS TotalPosts
+    FROM
+        RankedUsers r
+    LEFT JOIN
+        PostDetails pd ON r.UserId = pd.OwnerUserId
+    GROUP BY
+        r.UserId, r.DisplayName
+),
+UserBadgeSummary AS (
+    SELECT
+        u.UserId,
+        u.BadgeCount,
+        u.BadgeNames,
+        us.NetVotes,
+        us.TotalComments,
+        us.TotalClosures,
+        us.TotalReopens,
+        us.TotalPosts
+    FROM
+        UserBadges u
+    LEFT JOIN
+        UserPostStats us ON u.UserId = us.UserId
+)
+SELECT
+    UserId,
+    DisplayName,
+    Reputation,
+    BadgeCount,
+    BadgeNames,
+    NetVotes,
+    TotalComments,
+    TotalClosures,
+    TotalReopens,
+    TotalPosts,
+    CASE 
+        WHEN TotalPosts > 10 THEN 'Active'
+        WHEN NetVotes > 20 THEN 'Popular'
+        ELSE 'Moderate'
+    END AS Status
+FROM
+    UserBadgeSummary ub
+LEFT JOIN 
+    RankedUsers ru ON ub.UserId = ru.UserId
+WHERE
+    BadgeCount > 0
+ORDER BY
+    Reputation DESC, TotalPosts DESC;

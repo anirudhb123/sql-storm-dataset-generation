@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mi.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mi.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mcp ON mt.movie_id = mcp.movie_id
+    JOIN 
+        movie_info mi ON mt.movie_id = mi.movie_id
+    JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    WHERE 
+        mcp.company_type_id = (SELECT id FROM company_type WHERE kind = 'Producer')
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+        AND mi.production_year IS NOT NULL
+        AND mt.title IS NOT NULL
+    GROUP BY 
+        mt.title, mi.production_year
+),
+
+YearlyActorStats AS (
+    SELECT
+        production_year,
+        AVG(actor_count) AS avg_actor_count,
+        SUM(actor_count) AS total_actors,
+        MAX(actor_count) AS max_actor_count,
+        MIN(actor_count) AS min_actor_count
+    FROM 
+        RankedMovies
+    GROUP BY 
+        production_year
+),
+
+PopularGenres AS (
+    SELECT
+        kt.keyword,
+        COUNT(mk.movie_id) AS genre_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        kt.keyword IS NOT NULL
+    GROUP BY 
+        kt.keyword
+    HAVING 
+        COUNT(mk.movie_id) > 5  
+),
+
+ComprehensiveResults AS (
+    SELECT 
+        ya.production_year,
+        ya.avg_actor_count,
+        ya.total_actors,
+        ya.max_actor_count,
+        ya.min_actor_count,
+        pg.keyword AS popular_genre
+    FROM 
+        YearlyActorStats ya
+    LEFT JOIN 
+        PopularGenres pg ON ya.production_year % 2 = 0 
+)
+
+SELECT 
+    cr.production_year,
+    cr.avg_actor_count,
+    cr.total_actors,
+    cr.max_actor_count,
+    cr.min_actor_count,
+    COALESCE(cr.popular_genre, 'No Genre Found') AS popular_genre_description
+FROM 
+    ComprehensiveResults cr
+WHERE 
+    (cr.avg_actor_count IS NOT NULL AND cr.total_actors > 100) 
+    OR (cr.avg_actor_count IS NULL AND cr.max_actor_count BETWEEN 1 AND 50)
+ORDER BY 
+    cr.production_year, cr.avg_actor_count DESC;

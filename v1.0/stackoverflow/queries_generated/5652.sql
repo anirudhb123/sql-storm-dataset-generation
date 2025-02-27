@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        LastActivityDate, 
+        OwnerDisplayName, 
+        CommentCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    trp.*, 
+    pt.Name AS PostTypeName, 
+    ph.Timestamp AS LastHistoryChange
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    PostTypes pt ON trp.PostId IN (SELECT p.Id FROM Posts p WHERE p.PostTypeId = pt.Id)
+LEFT JOIN 
+    PostHistory ph ON trp.PostId = ph.PostId
+WHERE 
+    ph.CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM PostHistory 
+        WHERE PostId = trp.PostId
+    )
+ORDER BY 
+    trp.VoteCount DESC, 
+    trp.CommentCount DESC;

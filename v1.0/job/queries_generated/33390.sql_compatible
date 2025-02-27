@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM title m
+    WHERE m.production_year = (SELECT MAX(production_year) FROM title)
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        mh.level + 1,
+        mh.movie_id
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+
+PerformanceBenchmark AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        tk.keyword,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        AVG(mi.info) AS avg_info_length,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_exists_count
+    FROM title t
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_name cn ON cn.id = mc.company_id
+    LEFT JOIN cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN movie_keyword tk ON tk.movie_id = t.id
+    LEFT JOIN movie_info mi ON mi.movie_id = t.id
+    GROUP BY t.id, t.title, tk.keyword, cn.name
+)
+
+SELECT 
+    pb.title_id, 
+    pb.title, 
+    pb.cast_count, 
+    pb.avg_info_length,
+    pb.rank, 
+    pb.company_name,
+    mh.level AS movie_hierarchy_level,
+    mh.parent_movie_id
+FROM PerformanceBenchmark pb 
+LEFT JOIN MovieHierarchy mh ON pb.title_id = mh.movie_id
+WHERE pb.cast_count > 5
+  AND pb.avg_info_length IS NOT NULL
+ORDER BY pb.rank, pb.title;

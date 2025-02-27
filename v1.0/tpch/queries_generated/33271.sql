@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT p.p_name, 
+       SUM(l.l_quantity) AS total_quantity, 
+       SUM(l.l_extendedprice) AS total_revenue,
+       CASE WHEN SUM(l.l_discount) > 0.1 THEN 'High discount' ELSE 'Normal discount' END AS discount_status,
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS row_num,
+       sh.s_name AS supplier_name,
+       c.c_name AS customer_name
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+JOIN TopCustomers c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+GROUP BY p.p_partkey, sh.s_name, c.c_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY total_revenue DESC
+LIMIT 10;

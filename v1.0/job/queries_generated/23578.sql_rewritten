@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(DISTINCT ci.id) OVER (PARTITION BY mt.id) AS actor_count,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.id) DESC) AS rank
+    FROM 
+        aka_title mt
+        LEFT JOIN cast_info ci ON ci.movie_id = mt.id
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+HighestRatedMovies AS (
+    SELECT
+        movie_id,
+        title,
+        MAX(actor_count) AS max_actor_count
+    FROM 
+        RankedMovies
+    GROUP BY 
+        movie_id, title
+),
+NullTitleMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(mt.title, 'Unknown Title') AS safe_title,
+        mt.production_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title IS NULL
+),
+CastDetails AS (
+    SELECT 
+        p.name AS actor_name,
+        GROUP_CONCAT(DISTINCT mt.title) AS movies,
+        COUNT(DISTINCT mt.id) AS total_movies
+    FROM 
+        aka_name p
+        LEFT JOIN cast_info ci ON p.person_id = ci.person_id
+        LEFT JOIN aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        p.name
+    HAVING 
+        COUNT(DISTINCT mt.id) > 1
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.actor_count,
+    n.safe_title AS null_movie_title,
+    c.actor_name,
+    c.movies AS movies_with_actor,
+    c.total_movies
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    NullTitleMovies n ON r.movie_id = n.movie_id
+LEFT JOIN 
+    CastDetails c ON r.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = (SELECT person_id FROM aka_name WHERE name = c.actor_name))
+WHERE 
+    r.rank <= 3
+ORDER BY 
+    r.production_year DESC, 
+    r.actor_count DESC
+LIMIT 20;

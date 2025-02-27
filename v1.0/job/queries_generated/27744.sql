@@ -1,0 +1,65 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        array_agg(DISTINCT k.keyword) AS keywords,
+        COUNT(cc.person_id) AS cast_count 
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+popular_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        RANK() OVER (ORDER BY cast_count DESC) AS popularity_rank
+    FROM 
+        ranked_movies
+    WHERE 
+        card_count > 0
+),
+top_genres AS (
+    SELECT 
+        mv.title,
+        kt.kind,
+        COUNT(*) AS genre_count
+    FROM 
+        popular_movies mv
+    JOIN 
+        movie_companies mc ON mv.movie_id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        kind_type kt ON ct.id = kt.id
+    GROUP BY 
+        mv.title, kt.kind
+    ORDER BY 
+        genre_count DESC
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.keywords,
+    COUNT(t.genre) AS genre_count
+FROM 
+    popular_movies pm
+JOIN 
+    top_genres t ON pm.title = t.title
+WHERE 
+    pm.popularity_rank <= 10
+GROUP BY 
+    pm.title, pm.production_year, pm.keywords
+ORDER BY 
+    pm.production_year DESC, genre_count DESC;

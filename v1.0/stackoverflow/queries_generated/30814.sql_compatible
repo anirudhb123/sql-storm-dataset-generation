@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        ParentId, 
+        0 AS Level 
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        r.Level + 1 
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+TopTags AS (
+    
+    SELECT 
+        TRIM(UNNEST(string_to_array(Tags, ','))) AS Tag,
+        COUNT(*) AS TagCount
+    FROM Posts
+    WHERE Tags IS NOT NULL
+    GROUP BY Tag
+    ORDER BY TagCount DESC
+    LIMIT 10
+),
+PostHistoryDetails AS (
+    
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 24 THEN ph.CreationDate END) AS LastEditedDate,
+        STRING_AGG(DISTINCT ph.Comment) AS EditComments
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(r.Level, 0) AS PostLevel,
+    u.TotalPosts,
+    u.TotalComments,
+    u.UpVotes,
+    u.DownVotes,
+    u.TotalScore,
+    t.Tag,
+    ph.ClosedDate,
+    ph.LastEditedDate,
+    ph.EditComments
+FROM Posts p
+LEFT JOIN RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN UserPostStats u ON p.OwnerUserId = u.UserId
+LEFT JOIN TopTags t ON p.Tags LIKE CONCAT('%', t.Tag, '%')
+LEFT JOIN PostHistoryDetails ph ON p.Id = ph.PostId
+WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+ORDER BY u.TotalScore DESC, ph.ClosedDate DESC, u.TotalPosts DESC
+LIMIT 100;

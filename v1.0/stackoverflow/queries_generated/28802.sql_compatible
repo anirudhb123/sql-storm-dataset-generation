@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 5  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.Tags,
+    u.DisplayName AS OwnerName,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT b.Name, ', ') AS UserBadges,
+    ARRAY_AGG(DISTINCT ph.UserDisplayName || ': ' || ph.Comment) AS PostHistoryComments
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON fp.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostHistory ph ON fp.PostId = ph.PostId
+WHERE 
+    b.Class = 1  
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.Score, fp.ViewCount, fp.AnswerCount, fp.CommentCount, fp.Tags, u.DisplayName
+ORDER BY 
+    fp.Score DESC;

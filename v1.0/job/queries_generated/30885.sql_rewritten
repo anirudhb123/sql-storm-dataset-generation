@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.kind_id,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        aka_title e
+    INNER JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    mh.level AS hierarchy_level,
+    COALESCE(NULLIF(comp.name, ''), 'Unknown Company') AS company_name,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    ROW_NUMBER() OVER(PARTITION BY a.name ORDER BY mt.production_year DESC) AS movie_rank,
+    (SELECT COUNT(DISTINCT c.cast_info.id) 
+     FROM cast_info c 
+     WHERE c.movie_id = mt.id) AS num_cast_members
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name comp ON mc.company_id = comp.id
+LEFT JOIN 
+    movie_keyword mw ON mt.id = mw.movie_id
+LEFT JOIN 
+    keyword kw ON mw.keyword_id = kw.id
+JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year >= 2000
+    AND (comp.country_code IS NULL OR comp.country_code != 'US')
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, mt.title, mt.production_year, mh.level, comp.name
+ORDER BY 
+    actor_name, movie_rank;

@@ -1,0 +1,60 @@
+WITH RankedSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+),
+TotalOrderByNation AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        n.n_name
+    FROM 
+        RankedSupplier rs
+    JOIN 
+        nation n ON rs.rn = 1 AND rs.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty > 5)
+),
+SupplierOrderSummary AS (
+    SELECT 
+        ts.s_suppkey,
+        ts.s_name,
+        ts.s_acctbal,
+        tn.total_order_value,
+        CASE 
+            WHEN ts.s_acctbal >= 1000 THEN 'High Value Supplier'
+            ELSE 'Standard Supplier'
+        END AS supplier_category
+    FROM 
+        TopSuppliers ts
+    LEFT JOIN 
+        TotalOrderByNation tn ON ts.s_suppkey = tn.n_nationkey
+)
+SELECT 
+    sos.s_suppkey,
+    sos.s_name,
+    sos.s_acctbal,
+    COALESCE(sos.total_order_value, 0) AS total_order_value,
+    sos.supplier_category
+FROM 
+    SupplierOrderSummary sos
+WHERE 
+    sos.s_acctbal IS NOT NULL
+ORDER BY 
+    total_order_value DESC, sos.s_name ASC;

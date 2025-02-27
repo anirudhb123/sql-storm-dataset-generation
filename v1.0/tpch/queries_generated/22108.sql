@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 0.9, sc.level + 1
+    FROM supplier_chain sc
+    JOIN supplier s ON sc.s_nationkey = s.s_nationkey AND level < 5
+    WHERE s.s_acctbal IS NOT NULL
+),
+
+part_summary AS (
+    SELECT p.p_partkey, p.p_brand, 
+           COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers,
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           MAX(p.p_retailprice) AS max_price,
+           CASE WHEN AVG(COALESCE(l.l_discount, 0)) > 0.5 THEN 'High Discount' ELSE 'Normal Discount' END AS discount_status
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    GROUP BY p.p_partkey, p.p_brand
+),
+
+filtered_customers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 0
+),
+
+comprehensive_analysis AS (
+    SELECT ps.p_partkey, ps.num_suppliers, ps.total_supply_cost, ps.max_price, ps.discount_status,
+           COUNT(DISTINCT fc.c_custkey) AS unique_customers,
+           SUM(CASE WHEN fc.order_count > 5 THEN 1 ELSE 0 END) AS frequent_buyers,
+           MAX(CASE WHEN fc.order_count > 10 THEN 'Loyal Customer' ELSE 'Occasional Buyer' END) AS customer_status
+    FROM part_summary ps
+    LEFT JOIN filtered_customers fc ON ps.p_partkey IN (
+        SELECT l.l_partkey FROM lineitem l INNER JOIN orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE o.o_totalprice > ps.total_supply_cost
+    )
+    GROUP BY ps.p_partkey, ps.num_suppliers, ps.total_supply_cost, ps.max_price, ps.discount_status
+)
+
+SELECT c.n_name, ca.p_partkey, ca.max_price, 
+       RANK() OVER (PARTITION BY c.n_name ORDER BY ca.max_price DESC) AS price_rank,
+       COALESCE(NULLIF(ca.discount_status, 'High Discount'), 'No Discount') AS effective_discount_status
+FROM comprehensive_analysis ca
+JOIN supplier s ON ca.num_suppliers > 0
+JOIN nation c ON s.s_nationkey = c.n_nationkey
+WHERE ca.unique_customers > 10
+ORDER BY c.n_name, price_rank;

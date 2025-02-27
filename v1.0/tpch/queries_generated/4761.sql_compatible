@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        *
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    AVG(l.l_extendedprice - l.l_discount) AS avg_price,
+    TRIM(LEADING '0' FROM CAST(AVG(l.l_tax) AS CHAR)) AS avg_tax_rate,
+    c.c_name AS customer_name,
+    ts.s_name AS top_supplier_name
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerOrders c ON c.order_count > 0
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, c.c_name, ts.s_name
+HAVING 
+    SUM(l.l_quantity) > 50
+ORDER BY 
+    total_quantity DESC, avg_price DESC;

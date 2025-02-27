@@ -1,0 +1,37 @@
+
+WITH SupplierCost AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HeavyOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l.l_extendedprice * (1 - l.l_discount)) FROM lineitem)
+),
+SupplierRegions AS (
+    SELECT n.n_regionkey, SUM(sc.total_cost) AS total_region_cost
+    FROM nation n
+    JOIN SupplierCost sc ON n.n_nationkey = sc.s_suppkey
+    GROUP BY n.n_regionkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(sr.total_region_cost, 0) AS region_total_cost,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_orders,
+    SUM(ho.total_order_value) AS total_revenue
+FROM region r
+LEFT JOIN SupplierRegions sr ON r.r_regionkey = sr.n_regionkey
+LEFT JOIN HeavyOrders ho ON ho.o_custkey IN 
+    (SELECT c.c_custkey 
+     FROM customer c 
+     WHERE c.c_nationkey IN 
+         (SELECT n.n_nationkey 
+          FROM nation n 
+          WHERE n.n_regionkey = r.r_regionkey))
+GROUP BY r.r_name, sr.total_region_cost
+ORDER BY region_total_cost DESC, total_revenue DESC;

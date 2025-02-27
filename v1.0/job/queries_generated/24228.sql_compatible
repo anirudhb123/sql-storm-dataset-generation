@@ -1,0 +1,115 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5 
+),
+
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS role_count
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    ak.actor_name,
+    ar.role,
+    ar.role_count,
+    mk.keywords,
+    ci.companies,
+    CASE 
+        WHEN mk.keywords IS NULL THEN 'No Keywords'
+        ELSE mk.keywords
+    END AS keywords_info,
+    ARRAY_LENGTH(ci.companies) AS company_count,
+    CASE 
+        WHEN ARRAY_LENGTH(ci.companies) = 0 THEN 'Independent'
+        ELSE 'Company Collaborated'
+    END AS production_status
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    actor_roles AS ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    movie_keywords AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    company_info AS ci ON mh.movie_id = ci.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+    AND (
+        ar.role_count > 0 OR 
+        mk.keywords IS NOT NULL OR 
+        ARRAY_LENGTH(ci.companies) IS NOT NULL
+    )
+GROUP BY 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    ak.actor_name,
+    ar.role,
+    ar.role_count,
+    mk.keywords,
+    ci.companies
+ORDER BY 
+    mh.production_year DESC,
+    mh.movie_title
+LIMIT 100 OFFSET 0;

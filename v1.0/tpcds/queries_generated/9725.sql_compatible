@@ -1,0 +1,54 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_web_site_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_web_site_sk
+),
+customer_summary AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT cd_demo_sk) AS demographics_count,
+        COUNT(DISTINCT c_first_shipto_date_sk) AS first_shipto_date_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c_customer_sk
+),
+date_summary AS (
+    SELECT 
+        d_date_sk,
+        d_year,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ss.total_sales) AS total_yearly_sales
+    FROM sales_summary ss
+    JOIN date_dim d ON ss.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d_date_sk, d_year
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(DISTINCT ws_order_number) AS promotion_usage_count,
+        SUM(ws_sales_price) AS total_promoted_sales
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_sk
+)
+SELECT 
+    ds.d_year,
+    SUM(ss.total_quantity) AS total_items_sold,
+    SUM(ss.total_sales) AS total_revenue,
+    SUM(ss.total_profit) AS net_profit,
+    AVG(cs.demographics_count) AS average_demographics_count,
+    AVG(cs.first_shipto_date_count) AS average_first_shipto_date_count,
+    COUNT(DISTINCT ps.p_promo_sk) AS active_promotions,
+    SUM(ps.total_promoted_sales) AS total_sales_from_promotions
+FROM date_summary ds
+JOIN sales_summary ss ON ds.d_date_sk = ss.ws_sold_date_sk
+JOIN customer_summary cs ON cs.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales)
+JOIN promotion_summary ps ON ps.promotion_usage_count > 0
+GROUP BY ds.d_year
+ORDER BY ds.d_year DESC;

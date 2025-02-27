@@ -1,0 +1,53 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        COALESCE(CONCAT('Year: ', rm.production_year, ' - ',  rm.title), 'Unknown Title') AS movie_info
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+),
+NullCheck AS (
+    SELECT 
+        md.*,
+        COALESCE(NULLIF(md.actor_count, 0), 'No actors') AS actor_status
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    md.movie_info,
+    CASE 
+        WHEN md.actor_count > 0 THEN 'Has actors' 
+        ELSE 'No actors' 
+    END AS actor_presence,
+    COALESCE(cc.kind, 'Unknown') AS company_type
+FROM 
+    NullCheck md
+LEFT JOIN 
+    movie_companies mc ON md.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cc ON mc.company_type_id = cc.id
+WHERE 
+    md.actor_status = 'Has actors'
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

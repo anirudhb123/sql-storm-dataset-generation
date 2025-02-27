@@ -1,0 +1,61 @@
+WITH SupplierAggregates AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_orders,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+),
+FrequentItems AS (
+    SELECT l.l_partkey,
+           SUM(l.l_quantity) AS total_quantity,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_partkey
+    HAVING SUM(l.l_quantity) > 100
+),
+TopRegions AS (
+    SELECT n.n_nationkey,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey
+    ORDER BY order_count DESC
+    LIMIT 5
+)
+SELECT c.c_name AS customer_name,
+       sa.s_name AS supplier_name,
+       fa.l_partkey AS frequent_part,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS customer_rank
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN FrequentItems fa ON l.l_partkey = fa.l_partkey
+JOIN SupplierAggregates sa ON sa.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = l.l_partkey
+)
+WHERE o.o_orderdate >= '1997-01-01'
+  AND o.o_orderdate <= '1997-12-31'
+  AND c.c_nationkey IN (SELECT n.n_nationkey FROM TopRegions)
+GROUP BY c.c_name, sa.s_name, fa.l_partkey
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 500
+ORDER BY customer_rank, revenue DESC;

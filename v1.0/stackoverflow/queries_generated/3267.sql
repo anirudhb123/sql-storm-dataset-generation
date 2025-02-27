@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.CloseVotes
+FROM 
+    Users u
+JOIN 
+    UserBadges up ON u.Id = up.UserId
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.UserPostRank <= 3
+JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+WHERE 
+    up.BadgeCount > 0
+ORDER BY 
+    up.BadgeCount DESC, rp.CreationDate DESC;

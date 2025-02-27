@@ -1,0 +1,81 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+MostCommonTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.CommentCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        RANK() OVER (ORDER BY ua.QuestionCount DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.QuestionCount > 0
+),
+TopTags AS (
+    SELECT 
+        mt.Tag,
+        mt.PostCount,
+        COUNT(DISTINCT au.UserId) AS ActiveUserCount,
+        SUM(au.UpVotes) AS TotalUpVotes,
+        SUM(au.DownVotes) AS TotalDownVotes
+    FROM 
+        MostCommonTags mt
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || mt.Tag || '%'
+    JOIN 
+        UserActivity ua ON ua.QuestionCount > 0
+    JOIN 
+        ActiveUsers au ON au.QuestionCount > 0
+    GROUP BY 
+        mt.Tag, mt.PostCount
+)
+SELECT 
+    tt.Tag,
+    tt.PostCount,
+    tt.ActiveUserCount,
+    tt.TotalUpVotes,
+    tt.TotalDownVotes,
+    RANK() OVER (ORDER BY tt.PostCount DESC) AS TagRank
+FROM 
+    TopTags tt
+ORDER BY 
+    tt.PostCount DESC;

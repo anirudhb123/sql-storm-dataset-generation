@@ -1,0 +1,72 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        CASE 
+            WHEN SUM(wr_return_amt_inc_tax) > 1000 THEN 'High Value'
+            WHEN SUM(wr_return_amt_inc_tax) BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS return_value_category
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY c.c_last_name) AS state_rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ReturnStats AS (
+    SELECT 
+        ci.c_customer_sk, 
+        ci.c_first_name, 
+        ci.c_last_name, 
+        SUM(cr.return_quantity) AS total_return_quantity, 
+        COUNT(cr.cr_order_number) AS total_catalog_returns,
+        ci.ca_city,
+        ci.return_value_category
+    FROM CustomerInfo ci
+    LEFT JOIN catalog_returns cr ON ci.c_customer_sk = cr.cr_returning_customer_sk
+    WHERE cr.cr_return_quantity > 0
+    GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.ca_city, ci.return_value_category
+),
+DetailedReturnStats AS (
+    SELECT 
+        rs.c_customer_sk, 
+        rs.c_first_name, 
+        rs.c_last_name, 
+        rs.total_return_quantity, 
+        rs.total_catalog_returns,
+        CASE 
+            WHEN rs.total_catalog_returns > 0 THEN 'Returned Customer'
+            ELSE 'Non-returned Customer'
+        END AS customer_return_status,
+        ROW_NUMBER() OVER (ORDER BY rs.total_return_quantity DESC) AS return_rank
+    FROM ReturnStats rs
+)
+SELECT 
+    drs.c_customer_sk,
+    drs.c_first_name,
+    drs.c_last_name,
+    drs.total_return_quantity,
+    drs.total_catalog_returns,
+    drs.customer_return_status,
+    drs.return_rank,
+    ci.return_value_category,
+    ci.ca_city,
+    ci.ca_state
+FROM DetailedReturnStats drs
+JOIN CustomerReturns cr ON drs.c_customer_sk = cr.wr_returning_customer_sk
+LEFT JOIN CustomerInfo ci ON drs.c_customer_sk = ci.c_customer_sk
+WHERE drs.customer_return_status = 'Returned Customer'
+ORDER BY drs.return_rank, total_return_quantity DESC;

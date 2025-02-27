@@ -1,0 +1,48 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS title_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        ranked_movies rm ON ci.movie_id = rm.movie_id
+    GROUP BY 
+        ci.person_id
+)
+SELECT 
+    ak.name AS actor_name,
+    rm.title,
+    rm.production_year,
+    amc.movie_count,
+    COALESCE(amc.movie_count, 0) AS movie_count_non_null,
+    CASE 
+        WHEN amc.movie_count IS NULL THEN 'No Movies'
+        ELSE 'Has Movies'
+    END AS movie_status,
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = rm.movie_id) AS keyword_count,
+    (SELECT STRING_AGG(DISTINCT mk.keyword, ', ') FROM movie_keyword mk WHERE mk.movie_id = rm.movie_id) AS keywords
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    ranked_movies rm ON ci.movie_id = rm.movie_id
+LEFT JOIN 
+    actor_movie_counts amc ON ak.person_id = amc.person_id
+WHERE 
+    ak.name IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, 
+    ak.name;

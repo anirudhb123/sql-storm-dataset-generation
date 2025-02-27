@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 3
+),
+ProductSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey
+),
+SupplierProduct AS (
+    SELECT 
+        s.s_suppkey, 
+        p.p_partkey, 
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+RankedProducts AS (
+    SELECT 
+        ps.p_partkey,
+        ps.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY sh.level ORDER BY ps.total_sales DESC) AS sale_rank
+    FROM ProductSales ps
+    JOIN SupplierHierarchy sh ON ps.p_partkey IN (SELECT sp.p_partkey 
+                                                  FROM SupplierProduct sp 
+                                                  WHERE sp.s_suppkey = sh.s_suppkey)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    rp.total_sales,
+    CASE 
+        WHEN rp.sale_rank <= 5 THEN 'Top Seller' 
+        ELSE 'Standard' 
+    END AS status,
+    COALESCE(n.n_name, 'Unknown Nation') AS supplier_nation,
+    SUM(sp.ps_supplycost * sp.ps_availqty) AS total_supply_cost
+FROM part p
+LEFT JOIN RankedProducts rp ON p.p_partkey = rp.p_partkey
+LEFT JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN SupplierProduct sp ON p.p_partkey = sp.p_partkey
+GROUP BY p.p_partkey, p.p_name, rp.total_sales, rp.sale_rank, n.n_name
+HAVING SUM(sp.ps_supplycost * sp.ps_availqty) > 10000
+ORDER BY rp.total_sales DESC;

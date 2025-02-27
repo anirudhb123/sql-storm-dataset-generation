@@ -1,0 +1,80 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+CastStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(CASE 
+                WHEN ci.role_id IS NOT NULL THEN 1 
+                ELSE 0 
+            END) AS avg_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mt.kind, 'Unknown') AS movie_kind,
+        COALESCE(SUM(mk.keyword), 'No Keywords') AS movie_keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        kind_type mt ON m.kind_id = mt.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    GROUP BY 
+        m.id, mt.kind
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    minfo.movie_kind,
+    cstat.total_cast,
+    cstat.avg_roles,
+    CASE 
+        WHEN cstat.total_cast IS NULL THEN 'No Cast Data' 
+        ELSE CAST(cstat.total_cast AS TEXT)
+    END AS total_cast_display,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = mh.movie_id) AS keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastStats cstat ON mh.movie_id = cstat.movie_id
+LEFT JOIN 
+    MovieInfo minfo ON mh.movie_id = minfo.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, minfo.movie_kind, cstat.total_cast, cstat.avg_roles
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC
+LIMIT 100;

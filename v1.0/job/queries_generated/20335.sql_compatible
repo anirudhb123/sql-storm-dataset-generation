@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsWithMovies AS (
+    SELECT 
+        a.name AS actor_name, 
+        m.title, 
+        m.production_year, 
+        COALESCE(ci.note, 'No Note') AS role_note,
+        CASE 
+            WHEN ci.role_id IS NOT NULL THEN 'Official Role' 
+            ELSE 'Uncredited Role' 
+        END AS role_type,
+        RANK() OVER (PARTITION BY m.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.movie_id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+),
+MoviesWithKeyword AS (
+    SELECT 
+        mk.movie_id AS title_id,
+        COUNT(*) AS movie_count_with_keywords
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    r.title, 
+    r.production_year, 
+    r.year_rank, 
+    r.keyword_count, 
+    a.actor_name, 
+    a.role_note, 
+    a.role_type, 
+    a.role_order
+FROM 
+    RankedMovies r
+JOIN 
+    ActorsWithMovies a ON r.title = a.title AND r.production_year = a.production_year
+LEFT JOIN 
+    MoviesWithKeyword mk ON r.title_id = mk.title_id
+WHERE 
+    r.year_rank <= 5
+    AND r.keyword_count > 0
+    AND a.role_order = 1
+ORDER BY 
+    r.production_year DESC, 
+    mk.movie_count_with_keywords DESC, 
+    a.actor_name 
+LIMIT 100;

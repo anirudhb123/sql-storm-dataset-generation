@@ -1,0 +1,60 @@
+WITH 
+    MovieStats AS (
+        SELECT 
+            a.title AS movie_title, 
+            a.production_year,
+            COUNT(DISTINCT cc.person_id) AS cast_count,
+            COUNT(DISTINCT mc.company_id) FILTER (WHERE ct.kind = 'Production') AS production_companies,
+            COUNT(DISTINCT mc.company_id) FILTER (WHERE ct.kind = 'Distribution') AS distribution_companies
+        FROM 
+            aka_title a
+            LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+            LEFT JOIN movie_companies mc ON a.id = mc.movie_id
+            LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+        WHERE 
+            a.production_year IS NOT NULL
+        GROUP BY 
+            a.id, a.title, a.production_year
+    ),
+    
+    CastDetails AS (
+        SELECT 
+            p.name, 
+            ci.movie_id,
+            ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY p.name) AS role_order
+        FROM 
+            cast_info ci
+            JOIN aka_name p ON ci.person_id = p.person_id
+    ),
+    
+    KeywordCounts AS (
+        SELECT 
+            mk.movie_id,
+            COUNT(mk.keyword_id) AS keyword_count
+        FROM 
+            movie_keyword mk
+        GROUP BY 
+            mk.movie_id
+    )
+    
+SELECT 
+    ms.movie_title,
+    ms.production_year,
+    ms.cast_count,
+    ms.production_companies,
+    ms.distribution_companies,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    STRING_AGG(DISTINCT cd.name, ', ' ORDER BY cd.role_order) AS cast_list,
+    COUNT(DISTINCT cd.name) FILTER (WHERE cd.name IS NOT NULL AND cd.name <> '') AS non_null_cast_count
+FROM 
+    MovieStats ms
+    LEFT JOIN CastDetails cd ON ms.movie_id = cd.movie_id
+    LEFT JOIN KeywordCounts kc ON ms.movie_id = kc.movie_id
+WHERE 
+    ms.cast_count > 0
+    AND (ms.production_companies > 0 OR ms.distribution_companies > 0)
+GROUP BY 
+    ms.movie_title, ms.production_year, ms.cast_count, ms.production_companies, ms.distribution_companies, kc.keyword_count
+ORDER BY 
+    ms.production_year DESC, 
+    ms.cast_count DESC;

@@ -1,0 +1,41 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(V.BountyAmount) AS AverageBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM Posts P
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalQuestions,
+    UA.TotalAnswers,
+    UA.AverageBounty,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate
+FROM UserActivity UA
+LEFT JOIN RecentPosts RP ON UA.UserId = RP.OwnerUserId AND RP.rn = 1
+WHERE UA.TotalPosts > 5 
+  AND UA.Reputation > 100
+  AND (RP.CreationDate IS NOT NULL OR UA.AverageBounty IS NOT NULL)
+ORDER BY UA.Reputation DESC, UA.TotalPosts DESC;

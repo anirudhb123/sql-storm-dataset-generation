@@ -1,0 +1,69 @@
+WITH RecursiveTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ARRAY[t.title] AS title_path
+    FROM
+        title t
+    WHERE
+        t.season_nr IS NULL  
+    
+    UNION ALL
+
+    SELECT
+        e.id AS title_id,
+        e.title,
+        e.production_year,
+        e.kind_id,
+        rt.title_path || e.title
+    FROM
+        title e
+    JOIN
+        RecursiveTitles rt ON e.episode_of_id = rt.title_id
+    WHERE
+        e.season_nr IS NOT NULL  
+),
+
+AggregatedData AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(DISTINCT p.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT ec.id) AS episode_count,
+        ARRAY_AGG(DISTINCT rt.title_path ORDER BY rt.production_year) AS title_episodes
+    FROM
+        complete_cast cc
+    JOIN
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN
+        aka_name p ON ci.person_id = p.person_id
+    JOIN
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        RecursiveTitles rt ON ci.movie_id = rt.title_id
+    LEFT JOIN 
+        title t ON ci.movie_id = t.id
+    LEFT JOIN 
+        title ec ON t.episode_of_id = ec.id
+    GROUP BY
+        c.movie_id
+)
+
+SELECT
+    ad.movie_id,
+    ad.cast_names,
+    ad.keywords,
+    ad.episode_count,
+    ad.title_episodes
+FROM
+    AggregatedData ad
+JOIN
+    title t ON ad.movie_id = t.id
+WHERE
+    t.production_year BETWEEN 2000 AND 2023  
+ORDER BY
+    t.production_year DESC, ad.movie_id;

@@ -1,0 +1,73 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity,
+        SUM(ws_net_profit) OVER (PARTITION BY ws_item_sk) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_profit IS NOT NULL AND 
+        ws_web_page_sk IS NOT NULL
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cs.sales_price IS NULL THEN 1 END) AS null_sales_price_count,
+        COUNT(*) AS total_sales_count,
+        SUM(cs.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT OUTER JOIN (
+        SELECT 
+            ws_item_sk, 
+            ws_order_number, 
+            ws_net_profit,
+            ws_bill_customer_sk
+        FROM 
+            web_sales
+        WHERE 
+            ws_ship_date_sk IS NOT NULL
+    ) cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+income_bracket_summary AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        household_demographics ib
+    JOIN 
+        customer c ON ib.hd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ib.ib_lower_bound < 50000
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    cs.c_customer_sk, 
+    cs.total_sales_count,
+    cs.null_sales_price_count,
+    cs.total_net_profit,
+    rs.ws_item_sk,
+    rs.rn,
+    ibs.customer_count,
+    ibs.avg_purchase_estimate
+FROM 
+    customer_sales cs
+JOIN 
+    ranked_sales rs ON cs.total_sales_count > 10
+LEFT JOIN 
+    income_bracket_summary ibs ON cs.c_customer_sk = ibs.ib_income_band_sk
+WHERE 
+    (cs.total_net_profit > 1000 OR cs.null_sales_price_count > 5)
+    AND (ibs.customer_count IS NULL OR ibs.avg_purchase_estimate > 200)
+ORDER BY 
+    cs.total_net_profit DESC, 
+    ibs.customer_count ASC
+LIMIT 50;

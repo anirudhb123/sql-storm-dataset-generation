@@ -1,0 +1,52 @@
+
+WITH RECURSIVE customer_cte AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk
+    FROM customer c
+    JOIN customer_cte cc ON c.c_current_cdemo_sk = cc.c_current_cdemo_sk
+    WHERE c.c_customer_sk <> cc.c_customer_sk
+),
+sku_sales AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity_sold, SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+high_demand_items AS (
+    SELECT i_item_sk, i_item_id, i_product_name, total_quantity_sold, total_sales
+    FROM item
+    JOIN sku_sales ON item.i_item_sk = sku_sales.ws_item_sk
+    WHERE total_quantity_sold > (
+        SELECT AVG(total_quantity_sold)
+        FROM sku_sales
+    )
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    AVG(total_sales) AS avg_sales,
+    COUNT(DISTINCT cc.c_customer_sk) AS customer_count,
+    STRING_AGG(DISTINCT CONCAT_WS(' ', ci.c_first_name, ci.c_last_name), ', ') AS customer_names
+FROM customer_address ca
+JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN customer_cte cc ON c.c_customer_sk = cc.c_customer_sk
+LEFT JOIN high_demand_items hdi ON hdi.i_item_sk IN (
+    SELECT ws_item_sk
+    FROM web_sales
+    WHERE ws_ship_customer_sk = c.c_customer_sk
+)
+WHERE 
+    cd.cd_marital_status IS NOT NULL
+    AND (cd.cd_gender = 'F' OR cd.cd_gender = 'M')
+    AND hdi.total_sales IS NOT NULL
+GROUP BY ca.ca_city, ca.ca_state, cd.cd_gender, cd.cd_marital_status
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    avg_sales DESC NULLS LAST;

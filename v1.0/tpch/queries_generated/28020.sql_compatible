@@ -1,0 +1,54 @@
+
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        LENGTH(p.p_comment) AS comment_length,
+        REPLACE(UPPER(p.p_comment), ' ', '-') AS modified_comment
+    FROM part p
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        SUBSTRING_INDEX(s.s_comment, ' ', 5) AS short_comment
+    FROM supplier s
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        o.o_clerk,
+        o.o_shippriority,
+        CONCAT('Order ', o.o_orderkey, ': ', o.o_comment) AS order_info
+    FROM orders o
+)
+SELECT 
+    pd.p_name,
+    pd.p_brand,
+    pd.p_type,
+    pd.p_retailprice,
+    sd.s_name AS supplier_name,
+    sd.short_comment,
+    od.o_orderkey,
+    od.o_orderstatus,
+    od.order_info,
+    CONCAT('Comment Length: ', pd.comment_length, ', Modified Comment: ', pd.modified_comment) AS comment_info
+FROM PartDetails pd
+JOIN partsupp ps ON pd.p_partkey = ps.ps_partkey
+JOIN SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+JOIN OrderDetails od ON od.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') LIMIT 1)
+WHERE pd.p_size > 10
+ORDER BY pd.p_retailprice DESC, od.o_orderdate DESC
+LIMIT 100;

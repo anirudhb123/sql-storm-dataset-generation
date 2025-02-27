@@ -1,0 +1,35 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    p.info AS actor_biography,
+    k.keyword AS movie_keyword,
+    ct.kind AS company_type,
+    c.name AS company_name,
+    COUNT(DISTINCT m.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT c.name, ', ') AS companies_involved
+FROM 
+    aka_title t
+JOIN 
+    cast_info ci ON ci.movie_id = t.id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+JOIN 
+    person_info p ON p.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name c ON c.id = mc.company_id
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+WHERE 
+    t.production_year >= 2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    t.id, a.id, p.id, ct.id, c.id
+ORDER BY 
+    total_movies DESC, movie_title;

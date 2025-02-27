@@ -1,0 +1,78 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(sr_returning_customer_sk) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnAmount,
+        RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        rr.returning_customer_sk,
+        rr.TotalReturns,
+        rr.TotalReturnAmount
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rank = 1
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cd.cd_gender,
+        hd.hd_buy_potential,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS MaritalStatus
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+WebSaleSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS TotalSpent,
+        COUNT(ws_order_number) AS TotalOrders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ci.c_email_address,
+    ci.cd_gender,
+    cr.TotalReturns,
+    cr.TotalReturnAmount,
+    ws.TotalSpent,
+    ws.TotalOrders,
+    COALESCE(ws.TotalSpent, 0) - COALESCE(cr.TotalReturnAmount, 0) AS NetSpent,
+    (CASE 
+        WHEN COALESCE(ws.TotalSpent, 0) > 0 THEN 
+            ROUND((COALESCE(100.0 * cr.TotalReturnAmount / ws.TotalSpent, 0)), 2)
+        ELSE 0 
+    END) AS ReturnPercentage
+FROM 
+    CustomerInfo ci
+JOIN 
+    HighReturnCustomers cr ON ci.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    WebSaleSummary ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    cr.TotalReturns > 1
+    AND ci.cd_gender IS NOT NULL
+    AND ci.hd_buy_potential IS NOT NULL
+ORDER BY 
+    ReturnPercentage DESC, 
+    cr.TotalReturnAmount DESC;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_data AS (
+  SELECT 
+    ss_sold_date_sk,
+    ss_item_sk,
+    SUM(ss_quantity) AS total_quantity,
+    SUM(ss_net_profit) AS total_profit,
+    ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+  FROM 
+    store_sales
+  GROUP BY 
+    ss_sold_date_sk, ss_item_sk
+),
+item_profit AS (
+  SELECT 
+    i_item_sk,
+    i_item_id,
+    i_product_name,
+    COALESCE(SUM(total_profit), 0) AS total_profit,
+    COUNT(*) AS sales_count
+  FROM 
+    sales_data sd
+  JOIN 
+    item i ON sd.ss_item_sk = i.i_item_sk
+  GROUP BY 
+    i_item_sk, i_item_id, i_product_name
+),
+top_items AS (
+  SELECT 
+    item_id,
+    product_name,
+    total_profit,
+    sales_count,
+    DENSE_RANK() OVER (ORDER BY total_profit DESC) AS rank
+  FROM 
+    item_profit
+)
+SELECT 
+  ti.item_id,
+  ti.product_name,
+  ti.total_profit,
+  ti.sales_count,
+  d.d_date AS sales_date,
+  ca.ca_city,
+  ca.ca_state,
+  CASE 
+    WHEN ti.total_profit IS NULL THEN 'No Sales'
+    ELSE 'Sales Recorded'
+  END AS sales_status
+FROM 
+  top_items ti
+LEFT OUTER JOIN 
+  date_dim d ON d.d_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+LEFT OUTER JOIN 
+  customer_address ca ON ca.ca_address_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = (SELECT MIN(ss_customer_sk) FROM store_sales))
+WHERE 
+  ti.rank <= 10 AND ti.total_profit > 0
+ORDER BY 
+  ti.total_profit DESC;

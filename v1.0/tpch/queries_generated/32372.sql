@@ -1,0 +1,40 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.level * (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = ch.c_nationkey)
+),
+TotalSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+),
+HighSpender AS (
+    SELECT c.c_custkey, c.c_name, th.total_spent, 
+           RANK() OVER (ORDER BY th.total_spent DESC) AS spender_rank
+    FROM customer c
+    JOIN TotalSales th ON c.c_custkey = th.o_custkey
+    WHERE th.total_spent > 1000
+)
+SELECT ch.c_name AS customer_name, 
+       ch.level AS hierarchy_level, 
+       hs.total_spent AS spending_amount,
+       r.r_name AS region_name,
+       SUM(ps.ps_supplycost) AS total_supply_cost
+FROM CustomerHierarchy ch
+LEFT JOIN supplier s ON s.s_nationkey = ch.c_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN HighSpender hs ON hs.c_custkey = ch.c_custkey
+JOIN nation n ON n.n_nationkey = ch.c_nationkey
+JOIN region r ON r.r_regionkey = n.n_regionkey
+GROUP BY ch.c_name, ch.level, hs.total_spent, r.r_name
+HAVING SUM(ps.ps_supplycost) IS NOT NULL
+ORDER BY ch.level, hs.spending_amount DESC;

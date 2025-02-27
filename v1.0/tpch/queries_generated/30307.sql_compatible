@@ -1,0 +1,64 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+part_supplier_details AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+    GROUP BY ps.ps_partkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+active_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(d.total_supply_value, 0) AS supply_value
+    FROM supplier s
+    LEFT JOIN part_supplier_details d ON s.s_suppkey = d.ps_partkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    AND COALESCE(d.total_supply_value, 0) > 1000
+)
+SELECT 
+    n.n_name AS nation_name,
+    c.c_custkey AS customer_key,
+    c.order_count,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.s_acctbal,
+    s.supply_value,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY c.total_spent DESC) AS spending_rank
+FROM nation_hierarchy n
+JOIN customer_order_summary c ON n.n_nationkey = c.c_custkey
+JOIN active_suppliers s ON s.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = (
+        SELECT psd.ps_partkey 
+        FROM part_supplier_details psd 
+        ORDER BY psd.total_supply_value DESC 
+        FETCH FIRST 1 ROW ONLY
+    )
+)
+WHERE c.order_count > 5
+ORDER BY n.n_nationkey, c.total_spent DESC;

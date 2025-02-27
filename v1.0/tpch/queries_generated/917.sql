@@ -1,0 +1,46 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+TopProducts AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_partkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SuppliersInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 500
+)
+SELECT 
+    p.p_name, 
+    COALESCE(tp.total_revenue, 0) AS total_revenue,
+    si.nation_name,
+    COUNT(DISTINCT ro.o_orderkey) AS order_count
+FROM part p
+LEFT JOIN TopProducts tp ON p.p_partkey = tp.l_partkey
+JOIN SuppliersInfo si ON si.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey
+)
+LEFT JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_partkey = p.p_partkey
+)
+WHERE p.p_retailprice > 50.00
+GROUP BY p.p_name, si.nation_name, tp.total_revenue
+ORDER BY total_revenue DESC, p.p_name;

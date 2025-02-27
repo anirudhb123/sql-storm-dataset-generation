@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+part_aggregate AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '1996-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+customer_exceeded AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+)
+SELECT DISTINCT r.r_name,
+    SUM(COALESCE(ps.ps_supplycost, 0) * pa.total_avail_qty) AS total_supply_cost,
+    AVG(os.total_order_value) AS avg_order_value,
+    COUNT(DISTINCT ce.c_custkey) AS high_value_customers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+LEFT JOIN part_aggregate pa ON ps.ps_partkey = pa.p_partkey
+LEFT JOIN order_summary os ON os.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderdate > '1996-01-01' AND o.o_orderstatus = 'O'
+)
+LEFT JOIN customer_exceeded ce ON ce.c_custkey IN (
+    SELECT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+)
+GROUP BY r.r_name
+ORDER BY total_supply_cost DESC, avg_order_value ASC;

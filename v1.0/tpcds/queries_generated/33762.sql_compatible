@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_profit) AS total_profit, 
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER(ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+    UNION ALL
+    SELECT 
+        WS.ws_bill_customer_sk, 
+        SUM(WS.ws_net_profit) + S.total_profit, 
+        COUNT(WS.ws_order_number) + S.order_count,
+        ROW_NUMBER() OVER(ORDER BY (SUM(WS.ws_net_profit) + S.total_profit) DESC) AS rank
+    FROM web_sales WS
+    JOIN SalesCTE S ON WS.ws_bill_customer_sk = S.ws_bill_customer_sk
+    WHERE S.rank < 10
+    GROUP BY WS.ws_bill_customer_sk, S.total_profit, S.order_count
+),
+CustomerInfo AS (
+    SELECT 
+        C.c_customer_id,
+        C.c_first_name,
+        C.c_last_name,
+        CA.ca_city,
+        CA.ca_state,
+        COALESCE(S.total_profit, 0) AS total_profit,
+        COALESCE(S.order_count, 0) AS order_count
+    FROM customer C
+    LEFT JOIN customer_address CA ON C.c_current_addr_sk = CA.ca_address_sk
+    LEFT JOIN SalesCTE S ON C.c_customer_sk = S.ws_bill_customer_sk
+),
+StoresWithSales AS (
+    SELECT 
+        S.s_store_id,
+        SUM(SS.ss_net_profit) AS store_profit,
+        COUNT(SS.ss_ticket_number) AS store_orders
+    FROM store S
+    LEFT JOIN store_sales SS ON S.s_store_sk = SS.ss_store_sk
+    GROUP BY S.s_store_id
+)
+SELECT 
+    CI.c_customer_id,
+    CI.c_first_name,
+    CI.c_last_name,
+    CI.ca_city,
+    CI.ca_state,
+    C.ws_net_paid_inc_tax,
+    COALESCE(SWS.store_profit, 0) AS store_profit,
+    CI.order_count,
+    (CASE 
+        WHEN CI.total_profit > 1000 THEN 'High Value'
+        WHEN CI.total_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' END) AS customer_value
+FROM CustomerInfo CI
+LEFT JOIN web_sales C ON CI.c_customer_id = C.ws_bill_customer_sk
+LEFT JOIN StoresWithSales SWS ON SWS.store_profit > 0
+WHERE CI.total_profit IS NOT NULL
+AND (CI.ca_state IS NOT NULL OR CI.ca_city IS NOT NULL)
+ORDER BY CI.total_profit DESC, CI.c_last_name, CI.c_first_name
+LIMIT 50;

@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        c.kind AS company_type,
+        p.gender
+    FROM
+        RankedMovies m
+    LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN company_type c ON mc.company_type_id = c.id
+    LEFT JOIN complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN name p ON ci.person_id = p.imdb_id
+    WHERE
+        (p.gender IS NULL OR p.gender = 'F')
+        AND (m.production_year > 2000 OR m.title LIKE 'A%')
+),
+PersonStats AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count,
+        COUNT(DISTINCT CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS role_count
+    FROM
+        cast_info ci
+    JOIN complete_cast cc ON ci.movie_id = cc.movie_id
+    WHERE
+        cc.status_id = 1
+    GROUP BY
+        ci.person_id
+)
+SELECT
+    md.title,
+    m.production_year,
+    md.keyword,
+    md.company_type,
+    ps.movie_count,
+    ps.role_count
+FROM
+    MovieDetails md
+LEFT JOIN PersonStats ps ON ps.person_id = (SELECT p.id FROM name p WHERE p.gender = 'F' AND p.id = md.movie_id LIMIT 1)
+WHERE
+    md.rank < 10
+ORDER BY
+    md.production_year DESC,
+    md.title;

@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level,
+        0 AS parent_id
+    FROM
+        title m
+    WHERE
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+)
+SELECT
+    t.title AS movie_title,
+    t.production_year,
+    a.name AS actor_name,
+    COALESCE(cct.kind, 'Unknown') AS cast_type,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+FROM
+    title t
+LEFT JOIN
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN
+    comp_cast_type cct ON ci.person_role_id = cct.id
+LEFT JOIN
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+WHERE
+    t.production_year IS NOT NULL
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+    AND a.name IS NOT NULL
+GROUP BY
+    t.id, a.name, cct.kind
+HAVING
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY
+    actor_rank,
+    t.production_year DESC;
+
+This query constructs a recursive Common Table Expression (CTE) that creates a hierarchy of movies produced after 2000. It then retrieves movie details along with actors linked to these movies, their roles, associated companies, and keywords. This includes aggregation (like counting distinct companies and concatenating keywords) and employs COALESCE to manage NULLs in cast types. The use of a window function (ROW_NUMBER) ranks actors per movie, ensuring an interesting combination of many SQL concepts for performance benchmarking.

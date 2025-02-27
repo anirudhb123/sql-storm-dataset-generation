@@ -1,0 +1,52 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswerCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, DisplayName, QuestionCount, AnswerCount, AcceptedAnswerCount, CommentCount,
+        RANK() OVER (ORDER BY QuestionCount DESC) AS QuestionRank,
+        RANK() OVER (ORDER BY AnswerCount DESC) AS AnswerRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserId, DisplayName, QuestionCount, AnswerCount, AcceptedAnswerCount, CommentCount
+FROM 
+    TopUsers
+WHERE 
+    QuestionRank <= 10 OR AnswerRank <= 10
+ORDER BY 
+    COALESCE(QuestionRank, AnswerRank)
+LIMIT 20
+UNION ALL
+SELECT 
+    NULL AS UserId, 
+    'Total' AS DisplayName, 
+    SUM(QuestionCount) AS QuestionCount, 
+    SUM(AnswerCount) AS AnswerCount, 
+    SUM(AcceptedAnswerCount) AS AcceptedAnswerCount, 
+    SUM(CommentCount) AS CommentCount
+FROM 
+    TopUsers
+HAVING 
+    SUM(QuestionCount) > 0
+    OR SUM(AnswerCount) > 0
+ORDER BY 
+    QuestionCount DESC NULLS LAST
+

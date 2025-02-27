@@ -1,0 +1,79 @@
+WITH RECURSIVE Price_CTE AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS RankCost
+    FROM partsupp
+    WHERE ps_availqty > 0
+), Supplier_Info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS PartCount
+    FROM supplier s
+    JOIN Price_CTE ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), Nation_Info AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS SupplierCount,
+        SUM(s.s_acctbal) AS TotalAcctBal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+), Order_Summary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS TotalOrderPrice,
+        AVG(o.o_orderdate) AS AvgOrderDate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 1000
+), Line_Stats AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(l.l_orderkey) AS OrderCount,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN cast('1998-10-01' as date) - INTERVAL '1 year' AND cast('1998-10-01' as date)
+    GROUP BY l.l_partkey
+), Combined AS (
+    SELECT 
+        ns.n_name,
+        ns.SupplierCount,
+        ns.TotalAcctBal,
+        si.PartCount,
+        os.TotalOrderPrice,
+        ls.Revenue
+    FROM Nation_Info ns
+    JOIN Supplier_Info si ON ns.SupplierCount = si.PartCount
+    JOIN Order_Summary os ON os.TotalOrderPrice > 0
+    LEFT JOIN Line_Stats ls ON si.PartCount = ls.OrderCount
+    WHERE ls.Revenue IS NOT NULL
+    UNION ALL
+    SELECT 
+        n.n_name,
+        n.SupplierCount,
+        n.TotalAcctBal,
+        0 AS PartCount,
+        0 AS TotalOrderPrice,
+        0 AS Revenue
+    FROM Nation_Info n
+    WHERE n.SupplierCount = 0
+    ORDER BY TotalOrderPrice DESC, Revenue DESC
+)
+SELECT 
+    c.n_name AS NationName,
+    COALESCE(SUM(c.SupplierCount), 0) AS total_suppliers,
+    COALESCE(SUM(c.TotalAcctBal), 0.00) AS total_acctbalance,
+    COALESCE(SUM(c.PartCount), 0) AS total_parts,
+    COALESCE(SUM(c.TotalOrderPrice), 0.00) AS total_price,
+    COALESCE(SUM(c.Revenue), 0.00) AS total_revenue
+FROM Combined c
+GROUP BY c.n_name
+HAVING COUNT(*) > 0
+ORDER BY total_price DESC NULLS LAST;

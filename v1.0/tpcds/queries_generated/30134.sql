@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_sold_date_sk,
+        SUM(s.ss_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, s.ss_sold_date_sk
+
+    UNION ALL
+
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        s.ss_sold_date_sk,
+        sh.total_net_profit + SUM(s.ss_net_profit) AS total_net_profit
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales s ON sh.ss_sold_date_sk = s.ss_sold_date_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, s.ss_sold_date_sk, sh.total_net_profit
+),
+aggregated_sales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS total_web_sales_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+customer_ranking AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COUNT(DISTINCT c.c_customer_sk) DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.total_net_profit,
+    as.w_warehouse_id,
+    as.total_web_sales_profit,
+    cr.cd_gender,
+    cr.total_customers,
+    cr.gender_rank
+FROM 
+    sales_hierarchy ch
+JOIN 
+    aggregated_sales as ON ch.ss_sold_date_sk = as.w_warehouse_id
+JOIN 
+    customer_ranking cr ON ch.c_customer_sk = cr.total_customers 
+WHERE 
+    ch.total_net_profit > 1000 
+    AND cr.gender_rank = 1
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

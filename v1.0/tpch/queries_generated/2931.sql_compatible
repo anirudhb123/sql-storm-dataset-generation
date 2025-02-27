@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F' OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region,
+    ns.n_name AS nation,
+    fs.c_name AS customer_name,
+    fs.total_spent,
+    rs.s_name AS top_supplier,
+    rs.total_cost
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    FilteredCustomers fs ON fs.c_custkey IS NOT NULL
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = (
+        SELECT 
+            s.s_suppkey 
+        FROM 
+            supplier s
+        JOIN 
+            partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        WHERE 
+            s.s_nationkey = ns.n_nationkey
+        ORDER BY 
+            SUM(ps.ps_supplycost * ps.ps_availqty) DESC
+        LIMIT 1
+    )
+LEFT JOIN
+    partsupp ps ON ps.ps_partkey = (
+        SELECT 
+            l.l_partkey 
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_shipdate > DATE '1998-10-01' - INTERVAL '30 day'
+        ORDER BY 
+            l.l_extendedprice DESC 
+        LIMIT 1
+    )
+WHERE 
+    fs.total_spent > 1000
+ORDER BY 
+    fs.total_spent DESC NULLS LAST;

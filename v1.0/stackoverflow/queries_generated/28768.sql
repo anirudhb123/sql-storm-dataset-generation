@@ -1,0 +1,60 @@
+WITH TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AverageUserReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS Contributors
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY
+        t.TagName
+),
+RecentEdits AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors,
+        COUNT(*) AS EditCount
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY
+        ph.PostId
+),
+CombinedStatistics AS (
+    SELECT
+        ts.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.AverageUserReputation,
+        ts.Contributors,
+        re.LastEditDate,
+        re.EditCount
+    FROM
+        TagStatistics ts
+    LEFT JOIN
+        RecentEdits re ON ts.PostCount > 0 -- Only include tags with associated posts
+)
+SELECT
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AverageUserReputation,
+    Contributors,
+    COALESCE(LastEditDate, 'No Edits') AS LastEditDate,
+    COALESCE(EditCount, 0) AS EditCount
+FROM
+    CombinedStatistics
+ORDER BY
+    PostCount DESC, 
+    QuestionCount DESC, 
+    AnswerCount DESC;

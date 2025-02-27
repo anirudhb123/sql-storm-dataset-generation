@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        title.production_year,
+        genre.kind AS genre,
+        COUNT(cast.person_id) AS actor_count
+    FROM 
+        title
+    JOIN 
+        aka_title AS genre ON title.id = genre.movie_id
+    JOIN 
+        cast_info AS cast ON title.id = cast.movie_id
+    WHERE 
+        title.production_year >= 2000
+    GROUP BY 
+        title.id, title.title, title.production_year, genre.kind
+), 
+TopGenres AS (
+    SELECT 
+        genre, 
+        AVG(actor_count) AS avg_actor_count
+    FROM 
+        RankedTitles
+    GROUP BY 
+        genre
+    ORDER BY 
+        avg_actor_count DESC
+    LIMIT 5
+), 
+DetailedInfo AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        genre.genre,
+        AVG(cast_info.actor_count) AS average_actors_in_genre,
+        STRING_AGG(DISTINCT name.name, ', ') AS actor_names
+    FROM 
+        RankedTitles title
+    JOIN 
+        TopGenres genre ON title.genre = genre.genre
+    JOIN 
+        cast_info AS cast ON title.title_id = cast.movie_id
+    JOIN 
+        aka_name AS name ON cast.person_id = name.person_id
+    GROUP BY 
+        title.title, title.production_year, genre.genre
+)
+SELECT 
+    movie_title,
+    production_year,
+    genre,
+    average_actors_in_genre,
+    actor_names
+FROM 
+    DetailedInfo
+ORDER BY 
+    production_year DESC, average_actors_in_genre DESC;

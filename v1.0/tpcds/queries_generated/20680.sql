@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND (ws.ws_quantity IS NOT NULL AND ws.ws_quantity > 0)
+),
+SalesSummary AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(CASE WHEN r.rs_net_profit IS NULL THEN 0 ELSE r.rs_net_profit END) AS total_profit,
+        COUNT(DISTINCT r.ws_order_number) AS total_orders
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rn <= 10
+    GROUP BY 
+        r.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr.customer_sk,
+        SUM(sr.return_quantity) AS total_returns,
+        COUNT(DISTINCT sr.ticket_number) AS return_orders
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        sr.return_quantity IS NOT NULL
+    GROUP BY 
+        sr.customer_sk
+),
+ProfitMarkets AS (
+    SELECT 
+        s.s_market_id,
+        SUM(ss.ss_net_profit) AS market_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        s.s_state IN (SELECT DISTINCT ca_state FROM customer_address WHERE ca_country = 'USA')
+    GROUP BY 
+        s.s_market_id
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.total_returns,
+    cs.return_orders,
+    ps.market_profit,
+    ss.total_profit,
+    ss.total_orders
+FROM 
+    CustomerReturns cs
+LEFT JOIN 
+    ProfitMarkets ps ON ps.s_market_id = (SELECT TOP 1 s_market_id FROM store GROUP BY s_market_id ORDER BY RAND() LIMIT 1)
+INNER JOIN 
+    SalesSummary ss ON ss.web_site_sk = (SELECT TOP 1 ws.web_site_sk FROM web_site ws ORDER BY RAND())
+WHERE 
+    cs.total_returns > (SELECT AVG(total_returns) FROM CustomerReturns)
+    OR (cs.total_returns IS NULL AND cs.return_orders IS NULL)
+ORDER BY 
+    cs.total_returns DESC, ss.total_profit DESC;

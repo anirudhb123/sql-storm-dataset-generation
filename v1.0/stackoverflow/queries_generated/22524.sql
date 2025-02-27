@@ -1,0 +1,81 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AvgScore,
+        JSON_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL (
+            SELECT unnest(string_to_array(P.Tags, '>')) AS TagName
+        ) AS T ON TRUE
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+UserPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        COALESCE(S.PostCount, 0) AS PostCount,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        COALESCE(B.GoldBadges, 0) AS GoldBadges,
+        COALESCE(B.SilverBadges, 0) AS SilverBadges,
+        COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(S.TotalViews, 0) AS TotalViews,
+        COALESCE(S.AvgScore, 0) AS AvgScore,
+        (SELECT COUNT(DISTINCT C.Id) FROM Comments C WHERE C.UserId = U.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges B ON U.Id = B.UserId
+    LEFT JOIN 
+        PostStats S ON U.Id = S.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY UA.Reputation DESC, UA.PostCount DESC) AS UserRank
+    FROM 
+        UserPostActivity UA
+)
+SELECT 
+    U.*,
+    CASE 
+        WHEN U.Reputation > 1000 AND U.BadgeCount > 5 THEN 'Expert'
+        WHEN U.Reputation > 500 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel,
+    CASE 
+        WHEN U.PostCount = 0 THEN 'No Posts'
+        WHEN U.CommentCount > 100 THEN 'Highly Engaged'
+        ELSE 'Moderately Engaged'
+    END AS EngagementLevel
+FROM 
+    RankedUsers U
+WHERE 
+    U.TotalViews > 50
+    AND (U.Tags IS NOT NULL OR U.PostCount > 0)
+ORDER BY 
+    U.UserRank, 
+    NULLIF(U.AvgScore, 0) DESC, 
+    U.DisplayName;

@@ -1,0 +1,95 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+), UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), BadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), PostScoreSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostOrder
+    FROM 
+        Posts p
+), PostActivitySummary AS (
+    SELECT 
+        PostId,
+        SUM(Score) OVER (PARTITION BY PostId) AS TotalScore,
+        COUNT(CASE WHEN RecentPostOrder = 1 THEN 1 END) AS IsRecent
+    FROM 
+        PostScoreSummary
+)
+
+SELECT 
+    u.DisplayName,
+    ue.PostCount,
+    ue.TotalBounty,
+    ue.CommentCount,
+    bs.GoldBadges,
+    bs.SilverBadges,
+    bs.BronzeBadges,
+    ph.PostId AS TopDiscussionPostId,
+    ph.Title AS TopDiscussionTitle,
+    ps.TotalScore AS PostScore,
+    ps.IsRecent AS IsRecentPost
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    BadgeSummary bs ON ue.UserId = bs.UserId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON ph.OwnerUserId = ue.UserId
+LEFT JOIN 
+    PostActivitySummary ps ON ph.PostId = ps.PostId
+WHERE 
+    ue.PostCount > 0
+ORDER BY 
+    ue.PostCount DESC, ue.TotalBounty DESC;

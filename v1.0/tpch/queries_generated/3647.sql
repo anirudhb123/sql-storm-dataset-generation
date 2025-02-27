@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+NationStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplied_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    ns.n_name,
+    COALESCE(hc.c_name, 'No high value customer') AS high_value_customer,
+    COALESCE(hc.c_acctbal, 0) AS high_value_customer_balance,
+    rs.s_name AS top_supplier,
+    rs.total_cost AS top_supplier_cost,
+    ns.supplier_count,
+    ns.total_supplied_cost
+FROM 
+    NationStats ns
+LEFT JOIN 
+    RankedSuppliers rs ON ns.n_name = (SELECT n_name FROM nation WHERE n_nationkey = rs.s_nationkey)
+LEFT JOIN 
+    HighValueCustomers hc ON hc.rank = 1
+WHERE 
+    ns.total_supplied_cost > 100000
+ORDER BY 
+    ns.total_supplied_cost DESC, ns.n_name;

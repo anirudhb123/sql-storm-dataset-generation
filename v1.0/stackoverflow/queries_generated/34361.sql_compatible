@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy r ON p2.ParentId = r.PostId
+    WHERE 
+        p2.PostTypeId = 2  
+),
+PostEngagement AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+RecentUsersWithBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Date >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    r.PostId AS PostId,
+    r.Title AS QuestionTitle,
+    pe.TotalUpvotes,
+    pe.TotalDownvotes,
+    pe.CommentCount,
+    u.UserId,
+    u.DisplayName AS BadgeOwner,
+    ub.BadgeCount,
+    ROW_NUMBER() OVER (PARTITION BY r.PostId ORDER BY r.Level DESC) AS AnswerLevel
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    PostEngagement pe ON r.PostId = pe.PostId
+LEFT JOIN 
+    RecentUsersWithBadges ub ON r.PostId = ub.UserId
+WHERE 
+    pe.TotalUpvotes - pe.TotalDownvotes > 0  
+ORDER BY 
+    pe.TotalUpvotes DESC, AnswerLevel;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS Author,
+        COALESCE(v.Count, 0) AS VoteCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS Count 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+),
+TagsArray AS (
+    SELECT 
+        p.PostId,
+        STRING_AGG(TRIM(UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))), ', ') AS Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.VoteCount,
+        rp.CommentCount,
+        ta.Tags,
+        ROUND((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - rp.CreationDate)) / 3600)::numeric, 2) AS AgeInHours
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TagsArray ta ON rp.PostId = ta.PostId
+    WHERE 
+        rp.RN = 1 -- Select only the latest activity
+    ORDER BY 
+        rp.VoteCount DESC, AgeInHours ASC
+    LIMIT 10
+)
+SELECT 
+    PostId,
+    Title,
+    Author,
+    VoteCount,
+    CommentCount,
+    Tags,
+    AgeInHours
+FROM 
+    TopPosts;

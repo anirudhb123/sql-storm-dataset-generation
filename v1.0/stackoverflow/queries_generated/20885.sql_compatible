@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(DATE('2024-10-01'), INTERVAL 1 YEAR) 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(b.Class) AS TotalBadgeClass,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 50 OR u.Views > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopComments AS (
+    SELECT 
+        c.PostId,
+        c.UserId,
+        COUNT(c.Id) AS TotalComments,
+        SUM(c.Score) AS TotalScore
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= DATE_SUB(DATE('2024-10-01'), INTERVAL 1 MONTH)
+    GROUP BY 
+        c.PostId, c.UserId
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.CreationDate,
+    u.DisplayName AS PostOwner,
+    u.VoteCount,
+    u.TotalBadgeClass,
+    COALESCE(tc.TotalComments, 0) AS TotalComments,
+    COALESCE(tc.TotalScore, 0) AS TotalCommentScore,
+    COALESCE(pp.RankByScore, -1) AS ScoreRank,
+    CASE 
+        WHEN pp.Score > (SELECT AVG(Score) FROM Posts) THEN 'Above Average'
+        WHEN pp.Score < (SELECT AVG(Score) FROM Posts) THEN 'Below Average'
+        ELSE 'Average'
+    END AS ScoreStatus
+FROM 
+    RankedPosts pp
+JOIN 
+    UserActivity u ON pp.OwnerUserId = u.UserId
+LEFT JOIN 
+    TopComments tc ON pp.PostId = tc.PostId
+LEFT JOIN 
+    Posts p ON pp.PostId = p.Id
+WHERE 
+    pp.RankByScore <= 5
+  AND 
+    (pp.Title LIKE '%SQL%' OR pp.Title LIKE '%Database%')
+ORDER BY 
+    pp.Score DESC, pp.CreationDate DESC
+LIMIT 50;

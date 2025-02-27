@@ -1,0 +1,82 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    INNER JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id  
+),
+cast_summary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+company_info AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.id
+),
+final_output AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(cs.total_cast, 0) AS total_cast,
+        COALESCE(cs.cast_names, 'No Cast') AS cast_names,
+        COALESCE(ci.companies, 'No Companies') AS companies,
+        COALESCE(ci.total_companies, 0) AS total_companies,
+        mh.level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_summary cs ON mh.movie_id = cs.movie_id
+    LEFT JOIN 
+        company_info ci ON mh.movie_id = ci.movie_id
+)
+SELECT 
+    fo.*,
+    CASE 
+        WHEN fo.total_cast = 0 AND fo.total_companies = 0 THEN 'This movie has no cast and no associated companies.'
+        WHEN fo.total_cast = 0 THEN 'This movie has no cast.'
+        WHEN fo.total_companies = 0 THEN 'This movie has no companies.'
+        ELSE 'Data complete.'
+    END AS status_message
+FROM 
+    final_output fo
+ORDER BY 
+    fo.production_year DESC, 
+    fo.title;

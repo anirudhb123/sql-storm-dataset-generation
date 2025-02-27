@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS TotalBadges,
+        COALESCE(b.BadgeNames, 'None') AS BadgeDetails,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PerformanceMetrics AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalBadges,
+        us.BadgeDetails,
+        us.TotalViews,
+        us.AvgPostScore,
+        rp.Title,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.UpVotes = 0 THEN 'No Upvotes'
+            WHEN rp.DownVotes = 0 THEN 'No Downvotes'
+            ELSE CASE
+                WHEN rp.UpVotes > rp.DownVotes THEN 'Positive Feedback'
+                ELSE 'Negative Feedback'
+            END
+        END AS FeedbackType,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'Highly Viewed'
+            WHEN rp.ViewCount BETWEEN 100 AND 1000 THEN 'Moderately Viewed'
+            ELSE 'Low Views'
+        END AS ViewFrequency
+    FROM 
+        UserStats us
+    JOIN 
+        RankedPosts rp ON us.UserId = rp.PostId
+    WHERE 
+        rp.rn <= 3 -- Only take top 3 recent posts per user
+)
+SELECT 
+    pm.DisplayName,
+    pm.Title,
+    pm.TotalBadges,
+    pm.BadgeDetails,
+    pm.TotalViews,
+    pm.AvgPostScore,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.CommentCount,
+    pm.FeedbackType,
+    pm.ViewFrequency
+FROM 
+    PerformanceMetrics pm
+WHERE 
+    pm.TotalViews IS NOT NULL
+ORDER BY 
+    pm.TotalViews DESC, 
+    pm.UpVotes DESC
+LIMIT 50 
+OFFSET 10; -- Pagination
+

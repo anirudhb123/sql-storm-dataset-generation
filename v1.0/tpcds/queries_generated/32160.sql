@@ -1,0 +1,79 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sold_date_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+
+    UNION ALL
+
+    SELECT 
+        w.ws_item_sk,
+        w.ws_order_number,
+        w.ws_sold_date_sk,
+        w.ws_sales_price,
+        w.ws_quantity,
+        w.ws_ext_sales_price,
+        cte.level + 1
+    FROM 
+        web_sales w
+    JOIN 
+        SalesCTE cte ON w.ws_order_number = cte.ws_order_number
+    WHERE 
+        cte.level < 5  -- Limit depth of recursion for performance
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_quantity) AS total_sold,
+        SUM(s.ws_ext_sales_price) AS total_sales_price,
+        COUNT(DISTINCT s.ws_order_number) AS order_count,
+        COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(r.total_return_amt, 0) AS total_return_amt
+    FROM 
+        web_sales s
+    LEFT JOIN 
+        CustomerReturns r ON s.ws_item_sk = r.sr_item_sk
+    GROUP BY 
+        s.ws_item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_sold,
+    ss.total_sales_price,
+    ss.order_count,
+    ss.total_returned_quantity,
+    ss.total_return_amt,
+    IIF(ss.total_returned_quantity > 0, (ss.total_returned_quantity::decimal / NULLIF(ss.total_sold, 0)) * 100, 0) AS return_rate,
+    ROW_NUMBER() OVER (ORDER BY ss.total_sales_price DESC) AS sales_rank
+FROM 
+    SalesSummary ss
+JOIN 
+    item i ON ss.ws_item_sk = i.i_item_sk
+WHERE 
+    i.i_current_price > 0
+AND 
+    (ss.total_sold > 100 OR ss.total_returned_quantity > 10)
+ORDER BY 
+    sales_rank
+FETCH FIRST 10 ROWS ONLY;

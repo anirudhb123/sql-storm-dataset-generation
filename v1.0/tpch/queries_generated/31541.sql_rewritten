@@ -1,0 +1,57 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS orders_count,
+           CASE 
+               WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders' 
+               ELSE 'Active Customer' 
+           END AS customer_status
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+SupplierAverageCost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+PartAvailability AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 5
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.orders_count,
+    cs.customer_status,
+    pa.p_name,
+    pa.total_available,
+    ts.s_name,
+    ts.part_count,
+    COUNT(DISTINCT oh.o_orderkey) AS orders_in_hierarchy
+FROM CustomerSummary cs
+LEFT JOIN PartAvailability pa ON pa.total_available > 0
+LEFT JOIN TopSuppliers ts ON ts.part_count > 5
+LEFT JOIN OrderHierarchy oh ON oh.o_custkey = cs.c_custkey 
+WHERE cs.total_spent > 1000
+GROUP BY cs.c_name, cs.total_spent, cs.orders_count, cs.customer_status, pa.p_name, pa.total_available, ts.s_name, ts.part_count
+HAVING AVG(COALESCE(pa.total_available, 0)) > 10
+ORDER BY cs.total_spent DESC, cs.orders_count DESC;

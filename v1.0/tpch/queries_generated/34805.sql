@@ -1,0 +1,54 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey IN (SELECT DISTINCT n_regionkey FROM nation)
+
+    UNION ALL
+
+    SELECT rh.r_regionkey, rh.r_name, rh.r_comment, level + 1
+    FROM RegionHierarchy rh
+    JOIN nation n ON rh.r_regionkey = n.n_regionkey
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(s.s_acctbal) AS avg_account_balance,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopRegions AS (
+    SELECT
+        rh.r_name,
+        SUM(os.total_revenue) AS region_revenue
+    FROM RegionHierarchy rh
+    LEFT JOIN OrderSummary os ON os.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY rh.r_name
+)
+SELECT 
+    tr.r_name,
+    tr.region_revenue,
+    sp.s_name AS supplier_name,
+    sp.total_cost,
+    sp.part_count
+FROM TopRegions tr
+JOIN SupplierPerformance sp ON sp.total_cost > 100000
+WHERE tr.region_revenue > (SELECT AVG(region_revenue) FROM TopRegions)
+ORDER BY tr.region_revenue DESC, sp.total_cost DESC
+LIMIT 10;

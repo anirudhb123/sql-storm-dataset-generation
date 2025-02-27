@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01')
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        AVG(p.Score) AS AveragePostScore,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosed,
+        COUNT(*) AS NumberOfCloseVotes
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+MostLinkedPosts AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+), 
+RecentHighScorePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        r.Score,
+        r.ViewCount,
+        u.DisplayName,
+        r.Rank
+    FROM 
+        RankedPosts r
+    JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    JOIN 
+        Posts p ON r.PostId = p.Id
+    WHERE 
+        r.Rank = 1  
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    COALESCE(up.AveragePostScore, 0) AS AverageScore,
+    COALESCE(up.TotalPosts, 0) AS TotalPosts,
+    COALESCE(up.TotalViewCount, 0) AS TotalViews,
+    COALESCE(cp.NumberOfCloseVotes, 0) AS CloseVotes,
+    COALESCE(ml.LinkCount, 0) AS LinksCount,
+    rhs.PostId,
+    rhs.Title AS RecentPostTitle,
+    rhs.Score AS RecentPostScore,
+    rhs.ViewCount AS RecentPostViewCount,
+    rhs.DisplayName AS OwnerName
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    ClosedPosts cp ON up.UserId = cp.PostId
+LEFT JOIN 
+    MostLinkedPosts ml ON up.UserId = ml.PostId
+LEFT JOIN 
+    RecentHighScorePosts rhs ON up.UserId = rhs.OwnerUserId
+WHERE 
+    up.TotalPosts > 0
+ORDER BY 
+    up.AveragePostScore DESC,
+    up.TotalPosts DESC;

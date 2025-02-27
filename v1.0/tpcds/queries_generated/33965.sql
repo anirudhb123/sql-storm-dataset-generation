@@ -1,0 +1,92 @@
+
+WITH RECURSIVE Income_CTE AS (
+    SELECT 
+        hd_demo_sk,
+        ib_income_band_sk,
+        hd_buy_potential,
+        hd_dep_count,
+        hd_vehicle_count,
+        1 AS level
+    FROM 
+        household_demographics
+    WHERE 
+        hd_buy_potential = 'High'
+    
+    UNION ALL
+    
+    SELECT 
+        hd.hd_demo_sk,
+        hd.ib_income_band_sk,
+        hd.hd_buy_potential,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count,
+        cte.level + 1
+    FROM 
+        household_demographics hd
+    JOIN 
+        Income_CTE cte ON hd.ib_income_band_sk = cte.ib_income_band_sk AND cte.level < 3
+),
+
+Sales_Summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws 
+    GROUP BY 
+        ws.bill_customer_sk
+),
+
+High_Income_Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        hd.ib_income_band_sk IN (SELECT ib_income_band_sk FROM Income_CTE)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+
+Final_Sales AS (
+    SELECT 
+        h.c_customer_sk,
+        h.c_first_name,
+        h.c_last_name,
+        COALESCE(s.total_sales, 0) AS web_total_sales,
+        COALESCE(s.total_orders, 0) AS web_total_orders
+    FROM 
+        High_Income_Customers h
+    LEFT JOIN 
+        Sales_Summary s ON h.c_customer_sk = s.bill_customer_sk
+    WHERE 
+        h.rn = 1
+)
+
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.web_total_sales,
+    f.web_total_orders,
+    CASE 
+        WHEN f.web_total_sales > 1000 THEN 'High Value'
+        WHEN f.web_total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    Final_Sales f
+WHERE 
+    f.web_total_orders > 5
+ORDER BY 
+    f.web_total_sales DESC
+LIMIT 10;

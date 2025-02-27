@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '6 MONTH'
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_nationkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT s.*,
+           RANK() OVER (ORDER BY total_supply_cost DESC) AS supplier_rank
+    FROM SupplierDetails s
+),
+NationWithRegions AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           r.r_name,
+           ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY n.n_name) AS region_rank
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT o.o_orderkey,
+       o.o_orderdate,
+       o.o_totalprice,
+       CASE 
+           WHEN o.o_totalprice > 10000 THEN 'High Value Order'
+           WHEN o.o_totalprice BETWEEN 5000 AND 10000 THEN 'Medium Value Order'
+           ELSE 'Low Value Order'
+       END AS order_value_category,
+       ps.s_name AS supplier_name,
+       ps.total_supply_cost,
+       nr.n_name AS nation_name,
+       nr.r_name AS region_name
+FROM RankedOrders o
+LEFT JOIN TopSuppliers ps ON ps.s_suppkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+LEFT JOIN NationWithRegions nr ON nr.n_nationkey = (
+    SELECT c.c_nationkey
+    FROM customer c
+    WHERE c.c_custkey = o.o_custkey
+    AND c.c_acctbal IS NOT NULL
+    FETCH FIRST 1 ROW ONLY
+)
+WHERE o.o_orderstatus = 'O' AND EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = o.o_orderkey
+      AND l.l_discount > 0.1
+      AND l.l_returnflag IS NULL
+)
+ORDER BY o.o_orderdate DESC, ps.total_supply_cost DESC;

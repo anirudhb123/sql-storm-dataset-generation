@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_name LIKE 'A%'
+    
+    UNION ALL
+    
+    SELECT nh.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation_hierarchy nh
+    JOIN nation n ON nh.n_nationkey = n.n_nationkey - 1 -- Hypothetical connection
+)
+, part_summary AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+, customer_orders AS (
+    SELECT c.c_custkey,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER(PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT r.r_name,
+       p.p_name,
+       COALESCE(c.total_spent, 0) AS total_spent,
+       CASE 
+           WHEN p.total_avail_qty IS NULL THEN 'Supply Unavailable'
+           ELSE CONCAT('Available Qty: ', p.total_avail_qty)
+       END AS availability_comment,
+       (SELECT COUNT(DISTINCT l.l_orderkey)
+        FROM lineitem l
+        WHERE l.l_partkey = p.p_partkey AND l.l_discount BETWEEN 0.05 AND 0.15) AS discount_order_count
+FROM region r
+LEFT JOIN nation_hierarchy nh ON r.r_regionkey = nh.n_regionkey
+LEFT JOIN part_summary p ON nh.n_nationkey = p.p_partkey
+LEFT JOIN customer_orders c ON p.p_partkey = c.c_custkey
+FULL OUTER JOIN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost > (SELECT AVG(ps1.ps_supplycost) FROM partsupp ps1) ) AS high_cost_parts ON p.p_partkey = high_cost_parts.ps_partkey
+WHERE r.r_name IS NOT NULL 
+AND (nh.level IS NULL OR nh.level < 3)
+ORDER BY r.r_name, p.p_name;

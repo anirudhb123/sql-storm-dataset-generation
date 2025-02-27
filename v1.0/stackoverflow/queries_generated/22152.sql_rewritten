@@ -1,0 +1,79 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank,
+        LEAD(Reputation) OVER (ORDER BY Reputation DESC) AS NextHighestReputation
+    FROM 
+        Users
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(vote.VoteTypeId = 2) - SUM(vote.VoteTypeId = 3), 0) AS NetScore,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.Comment IS NOT NULL 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.Rank,
+    p.Title,
+    pa.NetScore,
+    pa.CommentCount,
+    phd.HistoryTypes,
+    phd.EditCount,
+    phd.LastEditDate,
+    (SELECT Count(*) FROM Posts WHERE OwnerUserId = u.Id AND PostTypeId = 1) AS QuestionCount
+FROM 
+    Users u
+JOIN 
+    UserReputation ur ON u.Id = ur.Id
+LEFT JOIN
+    PostActivity pa ON pa.PostId IN (
+        SELECT PostId
+        FROM PostLinks pl
+        WHERE pl.RelatedPostId IN (
+            SELECT Id FROM Posts WHERE PostTypeId = 1
+        )
+    )
+LEFT JOIN 
+    PostHistoryDetails phd ON phd.PostId IN (
+        SELECT PostId
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id
+    )
+WHERE 
+    ur.Reputation BETWEEN 100 AND 1000
+    AND (ur.NextHighestReputation IS NULL OR ur.Reputation >= ur.NextHighestReputation * 0.5)
+ORDER BY 
+    ur.Rank, pa.NetScore DESC;

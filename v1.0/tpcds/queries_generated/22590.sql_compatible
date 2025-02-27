@@ -1,0 +1,79 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity_sold, 
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2001)
+    GROUP BY 
+        ws.ws_item_sk
+), 
+ReturnsData AS (
+    SELECT 
+        cr.cr_item_sk, 
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+), 
+FinalMetrics AS (
+    SELECT 
+        i.i_item_id, 
+        sd.total_quantity_sold, 
+        rd.total_returns, 
+        COALESCE(sd.total_quantity_sold, 0) - COALESCE(rd.total_returns, 0) AS net_sales,
+        CASE 
+            WHEN COALESCE(sd.total_quantity_sold, 0) = 0 THEN NULL 
+            ELSE (COALESCE(rd.total_returns, 0) * 100.0) / COALESCE(sd.total_quantity_sold, 1)
+        END AS return_rate_percentage
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesData sd ON i.i_item_sk = sd.ws_item_sk
+    LEFT JOIN 
+        ReturnsData rd ON i.i_item_sk = rd.cr_item_sk
+), 
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        fm.i_item_id,
+        fm.net_sales,
+        (SELECT COUNT(*) FROM RankedCustomers rc WHERE rc.c_customer_sk = c.c_customer_sk AND rc.gender_rank <= 5) AS gender_top_count
+    FROM 
+        customer c
+    JOIN 
+        FinalMetrics fm ON fm.i_item_id IN (SELECT wp.wp_web_page_id FROM web_page wp WHERE wp.wp_customer_sk = c.c_customer_sk)
+    WHERE 
+        c.c_birth_year < (SELECT MAX(d.d_year) FROM date_dim d WHERE d.d_current_year = 'Y') 
+)
+
+SELECT 
+    cs.c_customer_sk, 
+    COUNT(cs.gender_top_count) AS top_gender_count,
+    SUM(cs.net_sales) AS total_net_sales,
+    AVG(cs.return_rate_percentage) AS average_return_rate
+FROM 
+    CustomerSales cs
+GROUP BY 
+    cs.c_customer_sk
+HAVING 
+    COUNT(cs.gender_top_count) > 0
+ORDER BY 
+    total_net_sales DESC
+LIMIT 10;

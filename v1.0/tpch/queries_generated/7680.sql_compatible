@@ -1,0 +1,29 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name AS customer_name, l.l_extendedprice AS total_price
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.customer_name, oh.total_price + l.l_extendedprice
+    FROM OrderHierarchy oh
+    JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    WHERE l.l_orderkey = oh.o_orderkey
+)
+
+SELECT r.r_name AS region, 
+       SUM(oh.total_price) AS total_revenue,
+       COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+       AVG(oh.total_price) AS avg_order_value,
+       MAX(oh.total_price) AS max_order_value
+FROM OrderHierarchy oh
+JOIN customer c ON oh.customer_name = c.c_name
+JOIN supplier s ON c.c_nationkey = s.s_nationkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING SUM(oh.total_price) > 1000000
+ORDER BY total_revenue DESC;

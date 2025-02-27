@@ -1,0 +1,64 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '>'::text))::int[]
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostActivity AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        COALESCE(h.CreationDate, p.CreationDate) AS LastActiveDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.BadgeCount,
+    us.TotalBounty,
+    tt.TagName,
+    pa.Title,
+    pa.CreationDate,
+    pa.LastActiveDate
+FROM 
+    UserStats us
+CROSS JOIN 
+    TopTags tt
+JOIN 
+    PostActivity pa ON us.UserId = pa.OwnerUserId
+ORDER BY 
+    us.Reputation DESC, us.PostCount DESC;

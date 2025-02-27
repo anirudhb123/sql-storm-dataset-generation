@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesByWarehouse AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(ss.ss_ticket_number) AS total_sales
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        store_sales ss ON w.w_warehouse_sk = ss.ss_store_sk
+    GROUP BY 
+        w.w_warehouse_id
+    UNION ALL
+    SELECT 
+        w.w_warehouse_id,
+        sbw.total_net_profit + COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+        sbw.total_sales + COUNT(ws.ws_order_number) AS total_sales
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    INNER JOIN 
+        SalesByWarehouse sbw ON w.w_warehouse_id = sbw.w_warehouse_id
+    GROUP BY 
+        w.w_warehouse_id, sbw.total_net_profit, sbw.total_sales
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesAndDemographics AS (
+    SELECT 
+        sbw.w_warehouse_id,
+        sbw.total_net_profit,
+        sbw.total_sales,
+        cd.cd_gender AS gender,
+        cd.cd_marital_status AS marital_status,
+        cd.customer_count,
+        cd.avg_purchase_estimate
+    FROM 
+        SalesByWarehouse sbw
+    JOIN 
+        CustomerDemographics cd ON cd.cd_gender IN ('F', 'M') AND cd.customer_count > 5
+)
+SELECT 
+    s.w_warehouse_id,
+    s.total_net_profit,
+    s.total_sales,
+    s.gender,
+    s.marital_status,
+    s.customer_count,
+    s.avg_purchase_estimate,
+    CASE 
+        WHEN s.total_net_profit > 10000 THEN 'High Performer'
+        WHEN s.total_net_profit IS NULL THEN 'No Sales'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    SalesAndDemographics s
+ORDER BY 
+    s.total_net_profit DESC;

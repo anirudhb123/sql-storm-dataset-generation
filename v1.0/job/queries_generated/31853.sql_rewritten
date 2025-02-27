@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        )
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    co.name AS company_name,
+    COUNT(DISTINCT ca.person_id) AS total_cast,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    SUM(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS role_count,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN EXTRACT(YEAR FROM cast('2024-10-01' as date)) - m.production_year END) AS average_age
+FROM 
+    movie_companies mc
+JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+LEFT JOIN 
+    complete_cast c ON mc.movie_id = c.movie_id
+LEFT JOIN 
+    cast_info ca ON c.subject_id = ca.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mc.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    role_type r ON ca.role_id = r.id
+JOIN 
+    MovieHierarchy mh ON mc.movie_id = mh.movie_id
+WHERE 
+    co.country_code IS NOT NULL 
+    AND (mi.info IS NULL OR mi.note IS NOT NULL)
+GROUP BY 
+    co.name
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 10
+ORDER BY 
+    average_age DESC;

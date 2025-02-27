@@ -1,0 +1,52 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(u.Reputation) OVER () AS AvgReputation,
+        MAX(u.LastAccessDate) AS LastActive
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > COALESCE((SELECT AVG(Reputation) FROM Users), 0)
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalBounty,
+        LastActive,
+        RANK() OVER (ORDER BY TotalBounty DESC) AS Rank
+    FROM UserActivity
+    WHERE PostCount > 5 AND LastActive >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalBounty,
+    cpd.PostId,
+    cpd.Title,
+    cpd.ClosedBy,
+    cpd.ClosedDate,
+    cpd.Comment
+FROM TopUsers tu
+LEFT JOIN ClosedPostDetails cpd ON tu.UserId = cpd.ClosedBy
+WHERE tu.Rank <= 10
+ORDER BY tu.TotalBounty DESC, cpd.ClosedDate DESC;

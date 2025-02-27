@@ -1,0 +1,35 @@
+WITH HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000000
+),
+RegionPartners AS (
+    SELECT n.n_name, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total, 
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate <= DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.n_name AS nation_name,
+    r.r_name AS region_name,
+    s.s_name AS supplier_name,
+    os.order_total,
+    os.o_orderdate
+FROM RegionPartners r
+LEFT JOIN HighValueSuppliers s ON r.supplier_count > 5
+JOIN OrderSummary os ON os.order_total > 50000 AND os.rank <= 10
+WHERE r.r_name IS NOT NULL
+ORDER BY r.r_name, os.order_total DESC;

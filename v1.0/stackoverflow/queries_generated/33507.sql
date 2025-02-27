@@ -1,0 +1,98 @@
+WITH RecursivePosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ParentId,
+        RP.Depth + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePosts RP ON P.ParentId = RP.Id
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.Reputation, U.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+FinalStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.PostCount,
+        U.CommentCount,
+        U.UpVotes,
+        U.DownVotes,
+        COALESCE(SUM(PH.ChangeCount), 0) AS TotalChanges
+    FROM 
+        UserStats U
+    LEFT JOIN 
+        PostHistoryStats PH ON U.PostCount > 0 AND PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+    GROUP BY 
+        U.UserId, U.DisplayName, U.Reputation, U.PostCount, U.CommentCount, U.UpVotes, U.DownVotes
+)
+SELECT 
+    F.UserId,
+    F.DisplayName,
+    F.Reputation,
+    F.PostCount,
+    F.CommentCount,
+    F.UpVotes,
+    F.DownVotes,
+    F.TotalChanges,
+    RANK() OVER (ORDER BY F.Reputation DESC) AS ReputationRank,
+    CASE 
+        WHEN F.UpVotes > F.DownVotes THEN 'Positive'
+        WHEN F.UpVotes < F.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    COUNT(DISTINCT RP.Id) AS AnswerHierarchyCount
+FROM 
+    FinalStats F
+LEFT JOIN 
+    RecursivePosts RP ON RP.Depth > 1
+GROUP BY 
+    F.UserId, F.DisplayName, F.Reputation, F.PostCount, F.CommentCount, F.UpVotes, F.DownVotes, F.TotalChanges
+ORDER BY 
+    F.Reputation DESC, F.TotalChanges DESC;

@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        PH.UserId AS ClosedBy,
+        P.Title,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS CloseEventRanking
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+),
+ReputationOfClosers AS (
+    SELECT 
+        U.Id AS CloserId,
+        U.DisplayName,
+        U.Reputation
+    FROM 
+        Users U
+    JOIN 
+        ClosedPosts CP ON U.Id = CP.ClosedBy
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    P.Title AS PostTitle,
+    PS.TotalComments AS NumberOfComments,
+    PS.TotalVotes AS NumberOfVotes,
+    PS.TotalBounties AS TotalBountyAmount,
+    C.ClosedDate,
+    C.ClosedBy,
+    RC.CloserId AS CloserUserId,
+    RC.DisplayName AS CloserUserName,
+    RC.Reputation AS CloserUserReputation
+FROM 
+    UserReputation U
+JOIN 
+    PostStatistics PS ON U.Reputation >= PS.TotalVotes 
+LEFT JOIN 
+    ClosedPosts C ON PS.PostId = C.PostId AND C.CloseEventRanking = 1 
+LEFT JOIN 
+    ReputationOfClosers RC ON C.ClosedBy = RC.CloserId
+WHERE 
+    PS.PostTypeId = 1 
+ORDER BY 
+    U.Reputation DESC, PS.TotalVotes DESC;

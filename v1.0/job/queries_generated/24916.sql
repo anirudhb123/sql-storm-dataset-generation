@@ -1,0 +1,80 @@
+WITH RecursiveCast AS (
+    SELECT ci.person_id, 
+           ci.movie_id,
+           ct.kind AS role_type,
+           ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_order
+    FROM cast_info ci
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+),
+MovieFacts AS (
+    SELECT mt.movie_id,
+           mt.title,
+           mt.production_year,
+           COUNT(cc.person_id) AS total_cast,
+           SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM aka_title mt
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id 
+    WHERE mt.production_year IS NOT NULL
+    GROUP BY mt.movie_id, mt.title, mt.production_year
+),
+MovieDetails AS (
+    SELECT mf.movie_id,
+           mf.title,
+           mf.production_year,
+           mf.total_cast,
+           mf.keyword_count,
+           (SELECT STRING_AGG(DISTINCT cn.name, ', ') 
+            FROM char_name cn
+            JOIN cast_info ci ON cn.imdb_id = ci.person_id
+            WHERE ci.movie_id = mf.movie_id) AS cast_names
+    FROM MovieFacts mf
+    WHERE mf.total_cast > 0
+),
+TrendingMovies AS (
+    SELECT *,
+           CASE 
+               WHEN production_year = (SELECT MAX(production_year) FROM MovieFacts) THEN 'Trending'
+               ELSE 'Classic'
+           END AS movie_trend
+    FROM MovieDetails
+),
+FilteredMovies AS (
+    SELECT *,
+           CASE WHEN keyword_count > 3 THEN 'High' ELSE 'Low' END AS keyword_strength
+    FROM TrendingMovies
+    WHERE movie_trend = 'Trending' OR (movie_trend = 'Classic' AND total_cast > 10)
+)
+
+SELECT fm.title,
+       fm.production_year,
+       fm.total_cast,
+       fm.keyword_count,
+       fm.cast_names,
+       fm.keyword_strength,
+       RANK() OVER (ORDER BY fm.total_cast DESC) AS cast_rank,
+       COALESCE((SELECT AVG(total_cast) FROM FilteredMovies), 0) AS avg_cast_count
+FROM FilteredMovies fm
+WHERE fm.production_year BETWEEN 2000 AND 2023
+ORDER BY cast_rank, keyword_strength DESC
+LIMIT 50;
+
+WITH titles_by_year AS (
+    SELECT mt.production_year,
+           COUNT(*) AS title_count
+    FROM aka_title mt
+    GROUP BY mt.production_year
+),
+null_checks AS (
+    SELECT year,
+           CASE 
+               WHEN title_count IS NULL THEN 'No titles'
+               ELSE title_count::text
+           END AS title_info
+    FROM titles_by_year
+    LEFT JOIN LATERAL (
+        SELECT DISTINCT production_year AS year
+        FROM aka_title
+    ) AS years ON true
+)
+SELECT * FROM null_checks;

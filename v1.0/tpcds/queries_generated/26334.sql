@@ -1,0 +1,69 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Mr. ' || c.c_last_name
+            ELSE 'Ms. ' || c.c_last_name
+        END AS salutation,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        d.d_year,
+        d.d_month_seq,
+        CONCAT(p.p_promo_name, ': ' , p.p_channel_details) AS promo_details
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+),
+AggregatedData AS (
+    SELECT 
+        c.full_name,
+        c.salutation,
+        c.ca_city,
+        c.ca_state,
+        SUM(s.ws_quantity) AS total_quantity,
+        SUM(s.ws_net_profit) AS total_profit
+    FROM 
+        CustomerData c
+    JOIN 
+        SalesData s ON c.c_customer_sk = s.ws_bill_customer_sk
+    GROUP BY 
+        c.full_name, c.salutation, c.ca_city, c.ca_state
+)
+
+SELECT 
+    ad.full_name,
+    ad.salutation,
+    ad.ca_city,
+    ad.ca_state,
+    ad.total_quantity,
+    ad.total_profit,
+    RANK() OVER (ORDER BY ad.total_profit DESC) AS profit_rank
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.total_quantity > 10
+ORDER BY 
+    ad.total_profit DESC;

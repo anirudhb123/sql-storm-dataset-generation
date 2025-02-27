@@ -1,0 +1,40 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_sk
+),
+TopSales AS (
+    SELECT
+        rs.web_site_sk,
+        rs.total_sales,
+        rs.total_orders,
+        RANK() OVER (ORDER BY rs.total_sales DESC) AS sales_rank
+    FROM
+        RankedSales rs
+    WHERE
+        rs.rank <= 10
+)
+SELECT
+    ws.web_site_id,
+    ws.web_name,
+    ts.total_sales,
+    ts.total_orders,
+    ts.sales_rank,
+    ROUND(ts.total_sales / NULLIF(ts.total_orders, 0), 2) AS avg_order_value
+FROM
+    web_site ws
+JOIN
+    TopSales ts ON ws.web_site_sk = ts.web_site_sk
+ORDER BY
+    ts.sales_rank;

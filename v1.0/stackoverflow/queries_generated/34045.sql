@@ -1,0 +1,94 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        MAX(COALESCE(p.CreationDate, '1900-01-01'::timestamp)) AS LastPostDate,
+        CASE 
+            WHEN COUNT(p.Id) > 0 THEN 'Active'
+            ELSE 'Inactive'
+        END AS ActivityStatus
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostAnalytics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Level,
+        up.DisplayName AS Owner,
+        ups.TotalPosts,
+        ups.Questions,
+        ups.Answers,
+        ups.AvgScore,
+        ra.LastPostDate,
+        ra.ActivityStatus
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        Users u ON ph.PostId = u.Id
+    LEFT JOIN 
+        UserPostStats ups ON u.Id = ups.UserId
+    LEFT JOIN 
+        RecentActivity ra ON u.Id = ra.UserId
+)
+SELECT 
+    pa.Title,
+    pa.Level,
+    pa.Owner,
+    pa.TotalPosts,
+    pa.Questions,
+    pa.Answers,
+    pa.AvgScore,
+    pa.LastPostDate,
+    ra.ActivityStatus,
+    STRING_AGG(DISTINCT COALESCE(c.Text, 'No Comments'), '; ') AS Comments
+FROM 
+    PostAnalytics pa
+LEFT JOIN 
+    Comments c ON pa.PostId = c.PostId
+GROUP BY 
+    pa.Title, pa.Level, pa.Owner, pa.TotalPosts, pa.Questions, pa.Answers, 
+    pa.AvgScore, pa.LastPostDate, ra.ActivityStatus
+ORDER BY 
+    pa.Level, pa.Title;

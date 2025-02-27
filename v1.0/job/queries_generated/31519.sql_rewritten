@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || lt.title AS VARCHAR(255))
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+    WHERE 
+        lt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level AS hierarchy_level,
+    mh.path AS movie_path,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS num_roles,
+    COALESCE(GROUP_CONCAT(DISTINCT ak.name), 'No Aliases') AS aliases
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, mh.path
+ORDER BY 
+    mh.production_year DESC, mh.level ASC;

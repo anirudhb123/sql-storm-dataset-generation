@@ -1,0 +1,54 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 5 THEN 1 END) AS Favorites,
+        SUM(COALESCE(CASE WHEN V.UserId IS NOT NULL THEN 1 ELSE 0 END, 0)) AS TotalInteractions
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostInteraction AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(SUM(CASE WHEN C.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN PH.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS EditCount,
+        COUNT(DISTINCT V.UserId) AS UniqueVoters
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND (PH.PostHistoryTypeId IN (4, 5, 6) OR 
+        (PH.PostHistoryTypeId = 10 AND PH.Comment IS NOT NULL))
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount
+),
+RankedPostInteractions AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        CommentCount,
+        EditCount,
+        UniqueVoters,
+        RANK() OVER (ORDER BY (ViewCount + CommentCount * 2 + UniqueVoters * 3) DESC) AS InteractionRank
+    FROM PostInteraction
+)
+SELECT 
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    U.Favorites,
+    R.Title,
+    R.ViewCount,
+    R.CommentCount,
+    R.EditCount,
+    R.UniqueVoters,
+    R.InteractionRank
+FROM UserVoteStats U
+JOIN RankedPostInteractions R ON R.UniqueVoters > 0
+WHERE U.Reputation > 100
+ORDER BY U.Favorites DESC, R.InteractionRank ASC
+LIMIT 10;

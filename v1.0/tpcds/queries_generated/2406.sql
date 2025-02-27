@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c 
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_id) AS customer_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesRanked AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs.c_customer_id ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+)
+
+SELECT 
+    cr.customer_id,
+    cr.total_sales,
+    cr.order_count,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM 
+    SalesRanked cr 
+JOIN 
+    CustomerDemographics cd ON cr.c_customer_id = cd.cd_demo_sk
+WHERE 
+    cr.sales_rank = 1
+    AND (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M')
+ORDER BY 
+    cr.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

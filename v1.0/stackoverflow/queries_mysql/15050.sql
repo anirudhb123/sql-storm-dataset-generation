@@ -1,0 +1,20 @@
+
+SELECT 
+    P.Title, 
+    U.DisplayName AS OwnerDisplayName, 
+    P.ViewCount, 
+    P.CreationDate 
+FROM 
+    Posts P 
+JOIN 
+    Users U ON P.OwnerUserId = U.Id 
+WHERE 
+    P.PostTypeId = 1 
+GROUP BY 
+    P.Title, 
+    U.DisplayName, 
+    P.ViewCount, 
+    P.CreationDate 
+ORDER BY 
+    P.CreationDate DESC 
+LIMIT 10;

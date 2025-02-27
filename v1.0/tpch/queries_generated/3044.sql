@@ -1,0 +1,55 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rn
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.order_count,
+    cs.total_spent,
+    ss.s_name AS supplier_name,
+    ss.total_available_quantity,
+    ss.average_supply_cost,
+    l.revenue AS total_revenue,
+    COALESCE(l.revenue, 0) * 1.1 AS adjusted_revenue
+FROM 
+    CustomerOrders cs
+JOIN 
+    SupplierStats ss ON (cs.c_custkey % 10) = (ss.s_suppkey % 10)
+LEFT JOIN 
+    LineItemDetails l ON cs.order_count > 10 AND l.rn = 1
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY 
+    cs.total_spent DESC, ss.average_supply_cost ASC

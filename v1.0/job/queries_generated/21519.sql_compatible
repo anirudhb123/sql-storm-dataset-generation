@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(cast_info.person_id, 0) AS main_actor_id,
+        COUNT(cast_info.id) AS actor_count,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ON mt.movie_id = cast_info.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, cast_info.person_id
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ci.person_id,
+        mh.actor_count + (CASE WHEN ci.person_id IS NOT NULL THEN 1 ELSE 0 END) AS actor_count,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    WHERE 
+        mh.level < 5 
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.actor_count,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    ROUND(AVG(CAST(pi.info AS FLOAT)), 2) AS avg_person_info,
+    STRING_AGG(DISTINCT c.name, ', ') AS actor_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON mh.main_actor_id = pi.person_id 
+LEFT JOIN 
+    char_name c ON c.imdb_id = mh.main_actor_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.actor_count
+HAVING
+    mh.actor_count > (SELECT COALESCE(AVG(actor_count), 0) FROM MovieHierarchy)
+ORDER BY 
+    mh.production_year DESC, mh.actor_count DESC;

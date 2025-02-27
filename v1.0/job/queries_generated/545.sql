@@ -1,0 +1,74 @@
+WITH movie_details AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        c.name AS company_name,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+actor_details AS (
+    SELECT 
+        n.name,
+        count(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name n
+    JOIN 
+        cast_info ci ON n.person_id = ci.person_id
+    GROUP BY 
+        n.name
+    HAVING 
+        count(DISTINCT ci.movie_id) > 5
+),
+company_types AS (
+    SELECT 
+        DISTINCT ct.kind
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+ranked_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC) AS movie_rank
+    FROM 
+        movie_details md
+    WHERE 
+        EXISTS (
+            SELECT 1
+            FROM actor_details ad
+            WHERE ad.movie_count > 5 
+            AND ad.name IN (SELECT n.name FROM aka_name n WHERE n.id = ci.person_id)
+        )
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.company_name,
+    rm.keyword,
+    COALESCE(ct.kind, 'Unknown') AS company_type,
+    CASE 
+        WHEN rm.rn IS NULL THEN 'Not Ranked'
+        ELSE CAST(rm.rn AS TEXT)
+    END AS ranking
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    company_types ct ON rm.company_name = ct.kind
+WHERE 
+    rm.movie_rank <= 10
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

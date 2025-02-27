@@ -1,0 +1,103 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+LatestPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.ClosedDate IS NOT NULL
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  
+    GROUP BY 
+        ph.PostId
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    upc.PostCount,
+    lp.PostId AS LatestPostId,
+    lp.Title AS LatestPostTitle,
+    lp.CreationDate AS LatestPostCreationDate,
+    lp.Score AS LatestPostScore,
+    lp.ViewCount AS LatestPostViewCount,
+    c.PostId AS ClosedPostId,
+    c.Title AS ClosedPostTitle,
+    c.CreationDate AS ClosedPostCreationDate,
+    pga.EditCount,
+    pga.LastEditDate,
+    tt.TagName AS TopTag,
+    tt.PostCount AS TopTagPostCount
+FROM 
+    Users u
+JOIN 
+    UserPostCounts upc ON u.Id = upc.UserId
+LEFT JOIN 
+    LatestPosts lp ON u.Id = lp.OwnerDisplayName 
+LEFT JOIN 
+    ClosedPosts c ON lp.PostId = c.PostId 
+LEFT JOIN 
+    PostHistoryAggregates pga ON lp.PostId = pga.PostId
+JOIN 
+    TopTags tt ON lp.Title LIKE '%' || tt.TagName || '%'
+WHERE 
+    u.Reputation > 1000  
+ORDER BY 
+    u.Reputation DESC, lp.CreationDate DESC, tt.PostCount DESC;

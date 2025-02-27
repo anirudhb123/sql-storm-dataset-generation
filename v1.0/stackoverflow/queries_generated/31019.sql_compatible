@@ -1,0 +1,79 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        0 AS Level
+    FROM Users u
+    WHERE u.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE u.Reputation > 500
+),
+TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN LATERAL string_to_array(p.Tags, ',') AS TagArray ON TRUE
+    JOIN Tags t ON t.TagName = TRIM(BOTH '<>' FROM TagArray)
+    GROUP BY p.Id, p.Title, p.AcceptedAnswerId, p.CreationDate
+),
+VoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PopularPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Tags,
+        vc.UpVotes,
+        vc.DownVotes
+    FROM TaggedPosts tp
+    JOIN VoteCounts vc ON tp.PostId = vc.PostId
+    WHERE vc.UpVotes > vc.DownVotes
+    ORDER BY vc.UpVotes DESC
+    LIMIT 10
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.BadgeCount,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Tags,
+    pp.UpVotes,
+    pp.DownVotes
+FROM UserWithBadges up
+LEFT JOIN PopularPosts pp ON up.UserId = pp.PostId
+WHERE up.BadgeCount > 0
+ORDER BY up.BadgeCount DESC, pp.UpVotes DESC;

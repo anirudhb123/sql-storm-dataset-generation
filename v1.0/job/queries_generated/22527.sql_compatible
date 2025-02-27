@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM
+        movie_link AS ml
+    JOIN
+        title AS m ON ml.linked_movie_id = m.id
+    JOIN
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+actor_movie_counts AS (
+    SELECT
+        cast.person_id,
+        COUNT(DISTINCT cast.movie_id) AS total_movies
+    FROM
+        cast_info AS cast
+    JOIN
+        movie_hierarchy AS mh ON cast.movie_id = mh.movie_id
+    GROUP BY
+        cast.person_id
+    HAVING
+        COUNT(DISTINCT cast.movie_id) > 5
+),
+actor_details AS (
+    SELECT
+        a.name,
+        a.person_id AS actor_id,
+        COALESCE(info.info, 'No Info') AS additional_info,
+        ac.total_movies
+    FROM
+        aka_name AS a
+    LEFT JOIN
+        actor_movie_counts AS ac ON a.person_id = ac.person_id
+    LEFT JOIN
+        person_info AS info ON a.person_id = info.person_id
+        AND info.info_type_id = (SELECT id FROM info_type WHERE info = 'Bio') 
+),
+top_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.depth ORDER BY mh.production_year DESC) AS rn
+    FROM
+        movie_hierarchy AS mh
+    WHERE
+        mh.depth <= 2
+)
+SELECT
+    ad.name AS actor_name,
+    ad.additional_info,
+    tm.title AS top_movie,
+    tm.production_year,
+    ad.total_movies
+FROM
+    actor_details AS ad
+JOIN
+    top_movies AS tm ON ad.total_movies IS NOT NULL 
+WHERE
+    ad.total_movies > (SELECT AVG(total_movies) FROM actor_movie_counts)
+ORDER BY
+    ad.total_movies DESC,
+    tm.production_year DESC;

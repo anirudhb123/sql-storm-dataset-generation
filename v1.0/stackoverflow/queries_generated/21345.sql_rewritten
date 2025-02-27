@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+),
+AggregatedHistories AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT CONCAT(ph.UserDisplayName, ' ', ph.Comment), ', ') AS CloseComments
+    FROM 
+        Posts p
+    JOIN 
+        PostHistoryDetails ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+FinalStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.TotalBounties,
+        COALESCE(ap.CloseComments, 'No comments') AS Closures,
+        SUM(CASE WHEN up UpVotes > down DownVotes THEN 1 ELSE 0 END) AS PositiveNetVotes,
+        COUNT(DISTINCT r.PostId) AS TopPostsContributed
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        AggregatedHistories ap ON us.UserId = ap.PostId
+    LEFT JOIN 
+        RankedPosts r ON us.UserId = r.PostId
+    GROUP BY 
+        us.UserId, us.DisplayName, us.Reputation, us.TotalPosts, us.TotalBounties, ap.CloseComments
+)
+SELECT 
+    fs.*,
+    CASE 
+        WHEN fs.Reputation > 1000 THEN 'Gold'
+        WHEN fs.Reputation BETWEEN 500 AND 1000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS UserBadge,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Posts p WHERE p.OwnerUserId = fs.UserId AND p.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '3 years') 
+        THEN 'Active for over 3 years' 
+        ELSE 'Newer User' 
+    END AS UserTenure,
+    COALESCE(fs.TotalPosts + fs.UpVotes - fs.DownVotes, 0) AS NetEngagementScore
+FROM 
+    FinalStats fs
+ORDER BY 
+    fs.Reputation DESC, fs.TotalPosts DESC
+LIMIT 50;

@@ -1,0 +1,50 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY Users.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        Posts.Id AS PostId, 
+        Title,
+        COALESCE(NULLIF(Score, 0), 0) AS EffectiveScore,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY COALESCE(ClosedDate, LastActivityDate) DESC) AS CloseOrder
+    FROM Posts
+    LEFT JOIN PostHistory ON Posts.Id = PostHistory.PostId AND PostHistory.PostHistoryTypeId = 10 
+    WHERE Posts.PostTypeId = 1
+), 
+TopUsers AS (
+    SELECT 
+        u.UserId, 
+        u.Reputation, 
+        r.PostCount, 
+        r.UpVotes, 
+        r.DownVotes 
+    FROM UserReputation r
+    JOIN Users u ON r.UserId = u.Id
+    WHERE r.Reputation > (SELECT AVG(Reputation) FROM Users)
+    ORDER BY r.Reputation DESC
+    LIMIT 5
+)
+SELECT 
+    t.UserId,
+    u.DisplayName,
+    t.Reputation,
+    t.PostCount,
+    t.UpVotes,
+    t.DownVotes,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    STRING_AGG(cp.Title, ', ') AS ClosedPostTitles
+FROM TopUsers t
+JOIN Users u ON t.UserId = u.Id
+LEFT JOIN ClosedPosts cp ON t.UserId = cp.OwnerUserId AND cp.CloseOrder IS NOT NULL
+GROUP BY t.UserId, u.DisplayName, t.Reputation, t.PostCount, t.UpVotes, t.DownVotes
+HAVING COUNT(DISTINCT cp.PostId) > 0
+ORDER BY t.Reputation DESC;

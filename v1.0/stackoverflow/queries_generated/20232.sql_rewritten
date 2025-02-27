@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosureCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate
+),
+TopActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.Reputation,
+        ua.CommentCount,
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        UserActivity ua
+    JOIN 
+        RankedPosts rp ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    WHERE 
+        ua.CommentCount > 5 
+)
+SELECT 
+    t.UserId,
+    u.DisplayName,
+    u.Location,
+    u.EmailHash,
+    t.PostId,
+    t.Title,
+    t.Score,
+    COALESCE(cp.ClosureCount, 0) AS ClosureCount
+FROM 
+    TopActiveUsers t
+JOIN 
+    Users u ON t.UserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON t.PostId = cp.PostId
+WHERE 
+    t.Score > 10
+ORDER BY 
+    t.Score DESC, 
+    u.Reputation DESC
+LIMIT 100;

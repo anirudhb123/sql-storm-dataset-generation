@@ -1,0 +1,64 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName AS Tag,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts 
+    INNER JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(Posts.Tags FROM 2 FOR LENGTH(Posts.Tags) - 2), '><')) AS Tags ON TRUE
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Tags.TagName
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        UpvoteCount,
+        DownvoteCount,
+        (UpvoteCount - DownvoteCount) AS NetVotes
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 5 
+    ORDER BY 
+        NetVotes DESC
+    LIMIT 10
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        SUM(CASE WHEN Votes.UserId IS NOT NULL THEN 1 ELSE 0 END) AS VotesCast
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts ON U.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON U.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON U.Id = Votes.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+)
+SELECT 
+    UEng.DisplayName,
+    UEng.Reputation,
+    PT.Tag,
+    PT.PostCount,
+    PT.UpvoteCount,
+    PT.DownvoteCount,
+    PT.NetVotes
+FROM 
+    UserEngagement UEng
+JOIN 
+    PopularTags PT ON PT.NetVotes > UEng.Reputation  
+ORDER BY 
+    UEng.Reputation DESC, PT.NetVotes DESC;

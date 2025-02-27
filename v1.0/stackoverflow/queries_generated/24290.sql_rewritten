@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalBounty,
+        us.TotalBadges,
+        us.TotalPosts,
+        us.TotalComments,
+        IFNULL(ph.ClosedDate, 'No Closure') AS ClosedStatus,
+        RANK() OVER (ORDER BY rp.Score DESC) AS PostRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+    LEFT JOIN 
+        Posts ph ON rp.PostId = ph.Id
+    WHERE 
+        rp.RN = 1
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.DisplayName,
+    tp.Reputation,
+    tp.TotalBounty,
+    tp.TotalBadges,
+    tp.TotalPosts,
+    tp.TotalComments,
+    tp.ClosedStatus,
+    tp.PostRank
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Reputation >= (SELECT AVG(Reputation) FROM Users) 
+    AND tp.PostRank <= 10
+ORDER BY 
+    tp.PostRank;

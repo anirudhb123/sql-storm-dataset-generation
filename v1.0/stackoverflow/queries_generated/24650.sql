@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank,
+        STUFF((SELECT ',' + t.TagName
+               FROM Tags t
+               WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, ','))::int)
+               FOR XML PATH('')), 1, 1, '') AS AllTags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation >= 100
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        us.DisplayName AS UserName,
+        us.PostCount,
+        us.PositivePosts,
+        us.NegativePosts,
+        rp.AllTags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStatistics us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.PostRank <= 3
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.UserName,
+    pd.PostCount,
+    pd.PositivePosts,
+    pd.NegativePosts,
+    pd.AllTags,
+    COALESCE(phf.CommentsCount, 0) AS TotalComments,
+    COALESCE(phf.VotesCount, 0) AS TotalVotes,
+    CASE 
+        WHEN pd.Score > 0 THEN 'Positive'
+        WHEN pd.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostSentiment
+FROM 
+    PostDetails pd
+LEFT JOIN (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentsCount,
+        COUNT(v.Id) AS VotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+) phf ON pd.PostId = phf.PostId
+ORDER BY 
+    pd.Score DESC, pd.PostCount DESC, pd.PositivePosts DESC;

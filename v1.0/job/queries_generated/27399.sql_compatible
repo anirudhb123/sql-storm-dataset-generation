@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast_count
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    GROUP BY 
+        a.title, a.production_year
+),
+
+ActorRoles AS (
+    SELECT 
+        an.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT a.title, ', ') AS movies
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        aka_title a ON c.movie_id = a.id
+    GROUP BY 
+        an.name, r.role
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_count,
+    rm.actor_names,
+    ar.actor_name,
+    ar.role_name,
+    ar.movie_count,
+    ar.movies
+FROM 
+    RankedMovies rm
+JOIN 
+    ActorRoles ar ON rm.actor_names LIKE '%' || ar.actor_name || '%'
+WHERE 
+    rm.rank_by_cast_count <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

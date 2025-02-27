@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT ph.PostId) AS PostsEdited,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId AND ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId AND c.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ActiveUsers AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        ua.PostsEdited,
+        ua.CommentsMade,
+        ua.UpVotesReceived,
+        ROW_NUMBER() OVER (ORDER BY ua.UpVotesReceived DESC) AS UserRank
+    FROM 
+        RecentUserActivity ua
+    JOIN 
+        Users u ON u.Id = ua.UserId
+    WHERE 
+        ua.PostsEdited > 0 OR ua.CommentsMade > 0
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+
+SELECT 
+    au.DisplayName AS ActiveUser,
+    au.PostsEdited,
+    au.CommentsMade,
+    au.UpVotesReceived,
+    COUNT(DISTINCT rp.PostId) AS QuestionsFromUser,
+    COALESCE(
+        (SELECT STRING_AGG(cp.Title, ', ') 
+         FROM ClosedPosts cp 
+         WHERE cp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = au.UserId)), 
+        'No closed posts') AS ClosedPosts,
+    CASE 
+        WHEN au.UpVotesReceived IS NULL THEN 'No votes yet'
+        WHEN au.UpVotesReceived >= 10 THEN 'Popular user!'
+        ELSE 'Newcomer'
+    END AS UserStatus
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    RankedPosts rp ON au.UserId = rp.OwnerUserId
+WHERE 
+    au.UserRank < 10
+GROUP BY 
+    au.DisplayName, au.PostsEdited, au.CommentsMade, au.UpVotesReceived
+ORDER BY 
+    au.UpVotesReceived DESC, au.PostsEdited DESC;

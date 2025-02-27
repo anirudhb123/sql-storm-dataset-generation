@@ -1,0 +1,77 @@
+
+WITH CustomerAddressProcessed AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type)) AS formatted_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDemographicsProcessed AS (
+    SELECT 
+        cd_demo_sk,
+        CONCAT(UPPER(cd_gender), '-', cd_marital_status) AS gender_marital,
+        cd_education_status,
+        cd_credit_rating,
+        cd_purchase_estimate,
+        cd_dep_count
+    FROM 
+        customer_demographics
+),
+DateDimProcessed AS (
+    SELECT 
+        d_date_sk,
+        d_date,
+        DATE_FORMAT(d_date, '%Y-%m-%d') AS formatted_date,
+        d_day_name,
+        d_month_seq,
+        d_year
+    FROM 
+        date_dim
+),
+AggregateReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        a.formatted_address,
+        d.formatted_date,
+        d.d_year,
+        dm.gender_marital,
+        ar.total_return_quantity,
+        ar.total_return_amount
+    FROM 
+        customer c
+    JOIN 
+        CustomerAddressProcessed a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        CustomerDemographicsProcessed dm ON c.c_current_cdemo_sk = dm.cd_demo_sk
+    JOIN 
+        AggregateReturns ar ON ar.sr_returned_date_sk = c.c_first_shipto_date_sk
+    JOIN 
+        DateDimProcessed d ON d.d_date_sk = c.c_first_sales_date_sk
+    WHERE 
+        dm.cd_purchase_estimate > 1000
+    ORDER BY 
+        d.d_year DESC, ar.total_return_amount DESC
+)
+SELECT 
+    *,
+    CHAR_LENGTH(formatted_address) AS address_length,
+    CHAR_LENGTH(gender_marital) AS gender_marital_length
+FROM 
+    FinalBenchmark
+LIMIT 100;

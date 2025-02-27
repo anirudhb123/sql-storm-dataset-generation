@@ -1,0 +1,70 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoreCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(p.FavoriteCount, 0) AS FavoriteCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.PositiveScoreCount,
+    ts.NegativeScoreCount,
+    ur.DisplayName,
+    ur.AverageReputation,
+    ur.TotalBadges,
+    pe.Title,
+    pe.ViewCount,
+    pe.AnswerCount,
+    pe.CommentCount,
+    pe.FavoriteCount,
+    pe.UpVotes,
+    pe.DownVotes
+FROM 
+    TagStatistics ts
+JOIN 
+    UserReputation ur ON ur.TotalBadges > 0
+JOIN 
+    PostEngagement pe ON pe.ViewCount > 100
+ORDER BY 
+    ts.PostCount DESC, ur.AverageReputation DESC
+LIMIT 50;

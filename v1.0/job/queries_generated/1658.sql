@@ -1,0 +1,52 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        COALESCE(AVG(cast.nr_order), 0) AS average_order,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COALESCE(AVG(cast.nr_order), 0) DESC) AS rank_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info cast ON cc.subject_id = cast.person_id 
+    GROUP BY 
+        m.id
+),
+top_movies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        average_order 
+    FROM 
+        ranked_movies 
+    WHERE 
+        rank_order <= 10
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        string_agg(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.average_order,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = tm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')) AS box_office_count,
+    (SELECT MIN(m.production_year) FROM aka_title m WHERE m.id IN (SELECT linked_movie_id FROM movie_link ml WHERE ml.movie_id = tm.movie_id)) AS earliest_linked_movie_year
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_keywords mk ON tm.movie_id = mk.movie_id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.average_order DESC;

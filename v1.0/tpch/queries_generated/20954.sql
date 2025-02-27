@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '2 years'
+), 
+SupplierPartStats AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+MostExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size = p.p_size) 
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 5
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COALESCE(SUM(li.l_quantity), 0) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    (SELECT COUNT(*) FROM RankedOrders ro WHERE ro.o_orderkey = o.o_orderkey) AS order_rank,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 
+            ROUND(AVG(o.o_totalprice), 2) 
+        ELSE 
+            NULL 
+    END AS avg_order_price,
+    STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE p.p_brand LIKE 'Brand%') AS popular_parts
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem li ON ps.ps_partkey = li.l_partkey
+LEFT JOIN 
+    orders o ON li.l_orderkey = o.o_orderkey 
+WHERE 
+    s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_comment IS NOT NULL)
+    AND (li.l_returnflag = 'N' OR li.l_returnflag IS NULL)
+    AND (CURRENT_DATE - o.o_orderdate) < INTERVAL '30 days' 
+GROUP BY 
+    r.r_name, n.n_name, s.s_name 
+ORDER BY 
+    total_quantity DESC
+LIMIT 10;

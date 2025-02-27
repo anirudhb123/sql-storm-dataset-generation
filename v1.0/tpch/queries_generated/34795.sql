@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sc.depth + 1
+    FROM partsupp ps
+    JOIN SupplyChain sc ON ps.ps_suppkey = sc.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_revenue,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price,
+    MAX(l.l_tax) AS max_tax
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+RIGHT JOIN 
+    SupplyChain sc ON sc.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND l.l_returnflag = 'N'
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(o.o_totalprice) > 50000
+ORDER BY 
+    customer_count DESC;

@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        s_nationkey,
+        s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier
+),
+PartDetails AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_brand,
+        p_type,
+        p_retailprice,
+        p_size
+    FROM part
+    WHERE p_size > 10 AND p_retailprice < 100.00
+),
+CustomerDetails AS (
+    SELECT 
+        c_custkey,
+        c_name,
+        c_nationkey,
+        c_acctbal
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_mktsegment = 'BUILDING'
+),
+SalesData AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        COUNT(*) AS total_lines
+    FROM orders o
+    INNER JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    INNER JOIN CustomerDetails c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_orderkey, c.c_custkey
+),
+TopSales AS (
+    SELECT 
+        sd.o_orderkey,
+        sd.c_custkey,
+        sd.total_sales,
+        RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM SalesData sd
+)
+SELECT 
+    ts.o_orderkey,
+    ts.c_custkey,
+    ts.total_sales,
+    ts.sales_rank,
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    rs.s_name AS supplier_name,
+    COALESCE(NULLIF(c.c_acctbal, 0), 'No Balance') AS account_balance
+FROM TopSales ts
+LEFT JOIN lineitem l ON ts.o_orderkey = l.l_orderkey
+LEFT JOIN PartDetails p ON l.l_partkey = p.p_partkey
+LEFT JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rn = 1
+JOIN CustomerDetails c ON ts.c_custkey = c.c_custkey
+WHERE ts.sales_rank <= 10
+ORDER BY ts.total_sales DESC, ts.o_orderkey, p.p_partkey;

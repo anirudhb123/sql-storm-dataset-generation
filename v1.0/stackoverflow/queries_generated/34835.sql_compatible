@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.PostTypeId, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 0  
+          AND rp.rn <= 5  
+),
+PostWithBadges AS (
+    SELECT 
+        fp.*,
+        b.Name AS BadgeName
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Badges b ON fp.OwnerUserId = b.UserId
+    WHERE 
+        b.Date >= fp.CreationDate  
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    p.Score,
+    p.CommentCount,
+    p.UpVotes,
+    p.DownVotes,
+    COALESCE(b.BadgeName, 'No Badge') AS BadgeName
+FROM 
+    PostWithBadges p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT
+        o.o_orderkey,
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        1 AS level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY o.o_orderkey, c.c_name
+    UNION ALL
+    SELECT
+        oh.o_orderkey,
+        oh.customer_name,
+        oh.total_revenue * 1.1 AS total_revenue, -- simulated growth
+        level + 1
+    FROM OrderHierarchy oh
+)
+SELECT
+    n.n_name AS nation_name,
+    SUM(oh.total_revenue) AS national_revenue,
+    COUNT(DISTINCT oh.o_orderkey) AS order_count,
+    STRING_AGG(oh.customer_name, ', ') AS customers
+FROM OrderHierarchy oh
+JOIN supplier s ON oh.o_orderkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost = (
+        SELECT MAX(ps_supplycost) FROM partsupp
+        WHERE ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 0)
+    )
+)
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING SUM(oh.total_revenue) > (
+    SELECT AVG(total_revenue) FROM (
+        SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE o.o_orderdate >= DATE '2023-01-01'
+        GROUP BY o.o_orderkey
+    ) AS avg_revenue
+)
+ORDER BY national_revenue DESC
+LIMIT 10;

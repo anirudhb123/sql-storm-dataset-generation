@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        mk.keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.title = mk.movie_id
+    WHERE 
+        rm.rank_within_year <= 5
+),
+MovieCompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name || ' (' || ct.kind || ')', ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    tm.title, 
+    tm.production_year,
+    tm.cast_count, 
+    COALESCE(tm.keywords, 'No keywords') AS keywords, 
+    COALESCE(mci.companies, 'No companies') AS companies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieCompanyInfo mci ON tm.title = mci.movie_id
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2023 
+    AND (tm.keywords IS NOT NULL OR mci.companies IS NOT NULL)
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

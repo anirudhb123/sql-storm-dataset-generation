@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(*) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= 2458849 -- Example date condition (YYYY-MM-DD in Julian)
+    GROUP BY 
+        ws.bill_customer_sk, ws.item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        d.d_month_seq,
+        cd.cd_gender,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY d.d_year DESC, d.d_month_seq DESC) AS recent_purchase
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+), ranked_customers AS (
+    SELECT 
+        ci.*,
+        ss.total_sales,
+        ss.order_count,
+        ss.rank_sales
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        sales_summary ss ON ci.c_customer_sk = ss.bill_customer_sk
+    WHERE 
+        ci.recent_purchase = 1
+)
+SELECT 
+    r.c_first_name,
+    r.c_last_name,
+    r.ca_city,
+    r.d_year,
+    r.d_month_seq,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    COALESCE(r.order_count, 0) AS order_count,
+    CASE 
+        WHEN r.rank_sales = 1 THEN 'Top Customer'
+        WHEN r.rank_sales IS NULL THEN 'No Sales'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM 
+    ranked_customers r
+WHERE 
+    (r.d_year = 2023 OR r.d_year IS NULL) 
+    AND (r.ca_city IS NOT NULL OR r.ca_city <> '')
+ORDER BY 
+    r.total_sales DESC, r.order_count DESC;

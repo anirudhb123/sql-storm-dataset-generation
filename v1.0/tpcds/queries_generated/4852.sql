@@ -1,0 +1,61 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rn,
+        SUM(ws.net_profit) OVER (PARTITION BY ws.web_site_sk) AS total_net_profit
+    FROM web_sales ws
+    WHERE ws.net_profit > 0
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+high_value_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.total_orders,
+        ci.total_profit,
+        RANK() OVER (ORDER BY ci.total_profit DESC) AS rank
+    FROM customer_info ci
+    WHERE ci.total_orders > 5 AND ci.total_profit > 1000
+),
+inventory_analysis AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.total_orders,
+    hvc.total_profit,
+    inv.total_quantity,
+    rs.web_sales_price,
+    rs.total_net_profit
+FROM high_value_customers hvc
+LEFT JOIN inventory_analysis inv ON hvc.total_orders = inv.total_quantity
+LEFT JOIN ranked_sales rs ON hvc.c_customer_sk = rs.web_site_sk
+WHERE hvc.rank <= 10
+ORDER BY hvc.total_profit DESC, hvc.c_last_name;

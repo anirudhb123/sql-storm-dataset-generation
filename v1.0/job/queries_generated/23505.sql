@@ -1,0 +1,87 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS depth 
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year > 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.depth + 1 
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        AVG(EXTRACT(YEAR FROM current_date) - at.production_year) AS avg_movie_age
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        aka_title at ON c.movie_id = at.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.id
+),
+movie_details AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year, 
+        ah.actor_name,
+        ah.total_movies,
+        ah.avg_movie_age
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN
+        actor_info ah ON mh.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id IN (SELECT person_id FROM aka_name WHERE name LIKE '%Smith%'))
+),
+summary AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        COALESCE(md.total_movies, 0) AS total_movies,
+        COALESCE(md.avg_movie_age, 0) AS avg_movie_age,
+        CASE 
+            WHEN md.production_year < 2010 THEN 'Older'
+            WHEN md.production_year >= 2010 AND md.production_year < 2021 THEN 'Recent'
+            ELSE 'New'
+        END AS movie_age_category
+    FROM 
+        movie_details md
+)
+
+SELECT 
+    sm.movie_id, 
+    sm.title, 
+    sm.total_movies,
+    sm.avg_movie_age,
+    sm.movie_age_category,
+    CASE 
+        WHEN sm.avg_movie_age > 10 THEN 'Veteran Actor'
+        ELSE 'Emerging Talent'
+    END AS actor_status
+FROM 
+    summary sm
+WHERE 
+    sm.total_movies > 5 
+ORDER BY 
+    sm.avg_movie_age DESC, sm.title ASC;
+

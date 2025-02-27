@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_value,
+        o.o_orderstatus
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) > 5000
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+),
+DistinctRegions AS (
+    SELECT 
+        DISTINCT r.r_regionkey, r.r_name
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal < 500
+)
+SELECT 
+    ds.r_name,
+    cs.order_count,
+    cs.total_spent,
+    COALESCE(AVG(hvo.total_value), 0) AS avg_order_value,
+    STRING_AGG(ss.s_name, ', ') AS supplier_names
+FROM 
+    DistinctRegions ds
+LEFT JOIN 
+    CustomerStats cs ON cs.c_custkey IS NOT NULL
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = CASE WHEN cs.order_count > 0 THEN hvo.o_orderkey END
+LEFT JOIN 
+    RankedSuppliers ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+WHERE 
+    (cs.total_spent IS NOT NULL OR hvo.total_value IS NOT NULL)
+GROUP BY 
+    ds.r_name, cs.order_count, cs.total_spent
+HAVING 
+    (COUNT(ss.s_suppkey) > 2 OR cs.order_count = 0)
+ORDER BY 
+    ds.r_name;

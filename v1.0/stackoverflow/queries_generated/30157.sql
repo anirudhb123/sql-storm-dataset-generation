@@ -1,0 +1,70 @@
+WITH RecursiveUserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        V.VoteTypeId,
+        COUNT(V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, V.VoteTypeId
+),
+RecentPostActivities AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(H.Id) AS HistoryCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory H ON P.Id = H.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title
+),
+FilteredPosts AS (
+    SELECT 
+        RPA.PostId,
+        RPA.Title,
+        RPA.CommentCount,
+        RPA.HistoryCount,
+        RPA.Upvotes,
+        RPA.Downvotes,
+        RPA.ActivityRank
+    FROM 
+        RecentPostActivities RPA
+    WHERE 
+        RPA.CommentCount > 5 AND 
+        RPA.Upvotes > 10 
+)
+SELECT 
+    F.Title,
+    F.CommentCount,
+    F.Upvotes,
+    F.Downvotes,
+    V.UserId,
+    U.DisplayName,
+    V.VoteCount
+FROM 
+    FilteredPosts F
+LEFT JOIN 
+    RecursiveUserVotes V ON V.VoteRank = 1
+JOIN
+    Users U ON U.Id = V.UserId
+WHERE 
+    F.Upvotes BETWEEN 10 AND 100
+ORDER BY 
+    F.Upvotes DESC, 
+    F.CommentCount DESC;

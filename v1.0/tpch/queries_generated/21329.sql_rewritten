@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+HighValueOrders AS (
+    SELECT 
+        orderkey,
+        o_orderstatus,
+        total_revenue
+    FROM 
+        RankedOrders
+    WHERE 
+        revenue_rank <= 5
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name
+),
+FinalSelection AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        hvo.total_revenue,
+        ns.n_name,
+        ns.total_supply_cost,
+        CASE 
+            WHEN hvo.total_revenue IS NULL THEN 'No Revenue'
+            ELSE 'Revenue Exists'
+        END AS revenue_status
+    FROM 
+        HighValueOrders hvo
+    FULL OUTER JOIN 
+        NationSupplier ns ON hvo.o_orderstatus = LEFT(ns.n_name, 1)
+)
+SELECT 
+    f.o_orderkey,
+    f.o_orderstatus,
+    COALESCE(f.total_revenue, 0) AS effective_revenue,
+    f.n_name,
+    f.total_supply_cost,
+    CONCAT(f.revenue_status, ': ', COALESCE(f.total_supply_cost::text, '0')) AS status_report
+FROM 
+    FinalSelection f
+WHERE 
+    (f.total_revenue IS NULL OR f.total_supply_cost > 1000)
+    AND (EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = f.o_orderkey AND l.l_shipmode IS NOT NULL))
+ORDER BY 
+    f.effective_revenue DESC, f.n_name ASC;

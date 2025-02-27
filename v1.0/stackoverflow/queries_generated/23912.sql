@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(v.PostId) OVER (PARTITION BY p.Id) AS VoteCount,
+        COALESCE(NULLIF(p.Title, ''), 'Untitled Post') AS SafeTitle,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTR(p.Tags, 2, LENGTH(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate
+),
+PopularBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastEarned
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold Badges
+    GROUP BY 
+        b.UserId
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rb.BadgeCount,
+        rb.LastEarned,
+        CASE 
+            WHEN rb.BadgeCount IS NOT NULL THEN 'Badged User'
+            ELSE 'Non-badged User'
+        END AS UserStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PopularBadges rb ON rp.PostId IN (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    pwb.Score,
+    pwb.CreationDate,
+    COALESCE(pwb.BadgeCount, 0) AS BadgeCount,
+    pwb.LastEarned,
+    pwb.UserStatus,
+    CASE 
+        WHEN pwb.Score >= 10 THEN 'High Score'
+        WHEN pwb.Score BETWEEN 5 AND 9 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+FROM 
+    PostsWithBadges pwb
+LEFT JOIN 
+    Comments c ON pwb.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON pwb.PostId = v.PostId
+GROUP BY 
+    pwb.PostId, pwb.Title, pwb.Score, pwb.CreationDate, pwb.BadgeCount, pwb.LastEarned, pwb.UserStatus
+ORDER BY 
+    pwb.Score DESC, pwb.PostId
+LIMIT 100
+OFFSET 0;

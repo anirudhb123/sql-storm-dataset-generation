@@ -1,0 +1,71 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PremiumCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.order_count,
+        co.total_spent,
+        RANK() OVER (ORDER BY co.total_spent DESC) AS spending_rank
+    FROM 
+        CustomerOrders co
+    WHERE 
+        co.total_spent > 10000
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        sps.total_available_qty,
+        sps.avg_supply_cost
+    FROM 
+        SupplierPartStats sps
+    JOIN 
+        partsupp ps ON sps.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        sps.avg_supply_cost < 50
+)
+SELECT 
+    pc.c_name AS customer_name,
+    pc.total_spent AS customer_spending,
+    hvs.s_name AS supplier_name,
+    hvs.total_available_qty,
+    hvs.avg_supply_cost,
+    CASE 
+        WHEN pc.spending_rank BETWEEN 1 AND 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    PremiumCustomers pc
+JOIN 
+    HighValueSuppliers hvs ON pc.order_count > 0
+ORDER BY 
+    pc.total_spent DESC, hvs.total_available_qty ASC;

@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    cd.c_name,
+    cd.nation_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lineitem_value,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COUNT(DISTINCT hs.s_suppkey) AS high_value_suppliers_count,
+    AVG(ROUND(oh.o_totalprice / NULLIF(cd.order_count, 0), 2)) AS avg_order_value,
+    MAX(ro.price_rank) AS max_order_price_rank
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    orders o ON cd.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers hs ON l.l_suppkey = hs.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+GROUP BY 
+    cd.c_name, cd.nation_name
+ORDER BY 
+    total_lineitem_value DESC
+LIMIT 50;

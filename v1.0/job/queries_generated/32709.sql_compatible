@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        '' AS parent_title
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mh.title AS parent_title
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.person_id,
+        r.role AS role,
+        COUNT(*) AS roles_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.person_id, r.role
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        role,
+        roles_count,
+        RANK() OVER (PARTITION BY role ORDER BY roles_count DESC) AS role_rank
+    FROM 
+        CastRoles
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ARRAY_AGG(DISTINCT ka.name) AS actor_names,
+        (SELECT COUNT(*) 
+         FROM movie_keyword mk 
+         WHERE mk.movie_id = mh.movie_id) AS keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mh.movie_id
+    LEFT JOIN 
+        aka_name ka ON ka.person_id = ci.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_names,
+    md.keyword_count,
+    ta.role,
+    ta.roles_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TopActors ta ON ta.person_id = ANY(md.actor_names::text[])
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+    AND ta.roles_count IS NOT NULL
+ORDER BY 
+    md.production_year DESC, 
+    ta.roles_count DESC, 
+    md.title;

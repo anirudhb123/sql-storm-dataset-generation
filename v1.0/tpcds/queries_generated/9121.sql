@@ -1,0 +1,64 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        dd.d_year = 2022 AND 
+        dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_id
+),
+customer_demo AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(sd.total_sales) AS total_sales_by_demo
+    FROM 
+        sales_data sd
+    JOIN 
+        customer c ON sd.unique_customers = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+warehouse_sales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_quantity) AS warehouse_quantity,
+        AVG(ws.ws_net_profit) AS warehouse_avg_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.total_sales_by_demo,
+    ws.warehouse_id,
+    ws.warehouse_quantity,
+    ws.warehouse_avg_profit
+FROM 
+    customer_demo cd
+JOIN 
+    warehouse_sales ws ON cd.total_sales_by_demo > 10000
+ORDER BY 
+    total_sales_by_demo DESC, 
+    warehouse_avg_profit DESC
+LIMIT 10;

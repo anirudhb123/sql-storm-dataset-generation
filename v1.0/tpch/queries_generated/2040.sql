@@ -1,0 +1,64 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(co.order_count, 0) AS order_count,
+    COALESCE(co.total_spent, 0.00) AS total_spent,
+    COALESCE(co.last_order_date, 'No Orders') AS last_order_date,
+    COUNT(spi.p_partkey) AS supply_parts,
+    AVG(spi.total_cost) AS avg_supply_cost,
+    STRING_AGG(DISTINCT CONCAT(spi.p_name, ' (', spi.ps_availqty, ')'), ', ') AS available_parts
+FROM 
+    CustomerOrders co
+FULL OUTER JOIN 
+    RankedOrders r ON co.c_custkey = r.o_custkey
+LEFT JOIN 
+    SupplierPartInfo spi ON r.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = r.o_custkey)
+GROUP BY 
+    c.c_name
+ORDER BY 
+    total_spent DESC
+LIMIT 50;

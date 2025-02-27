@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cust.c_custkey,
+        cust.c_name,
+        cust.total_spent,
+        nh.n_name AS nation_name
+    FROM 
+        CustomerOrders cust
+    JOIN 
+        nation nh ON cust.c_custkey = nh.n_nationkey
+    WHERE 
+        cust.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT 
+    p.p_name,
+    p.p_container,
+    SUM(l.l_quantity) AS total_quantity,
+    COALESCE(AVG(l.l_extendedprice * (1 - l.l_discount)), 0) AS avg_discounted_price,
+    MAX(s.s_name) AS top_supplier_name 
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rank = 1
+LEFT JOIN 
+    HighValueCustomers hvc ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+WHERE 
+    p.p_size > 10
+GROUP BY 
+    p.p_name, 
+    p.p_container
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, 
+    avg_discounted_price DESC;

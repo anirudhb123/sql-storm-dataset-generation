@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > 0
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000.00
+),
+RegionAggregates AS (
+    SELECT r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, AVG(s.s_acctbal) AS avg_acct_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT 
+    rn.n_name AS nation_name,
+    rp.r_name AS region_name,
+    sp.s_name AS supplier_name,
+    sp.total_supply_cost,
+    ho.order_value,
+    ra.avg_acct_balance
+FROM NationHierarchy rn
+JOIN RegionAggregates ra ON rn.n_regionkey = ra.r_regionkey
+LEFT JOIN SupplierPerformance sp ON rn.n_nationkey = sp.s_suppkey
+LEFT JOIN HighValueOrders ho ON ho.o_custkey = rn.n_nationkey
+WHERE sp.total_supply_cost IS NOT NULL
+ORDER BY ra.supplier_count DESC, ho.order_value DESC
+LIMIT 100;

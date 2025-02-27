@@ -1,0 +1,57 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id, 
+        a.name AS actor_name,
+        a.surname_pcode,
+        1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.nr_order = 1  -- Select leading actors for base case
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        a.surname_pcode,
+        ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON ah.person_id = c.person_id
+    WHERE c.nr_order > 1  -- Recursive case to find all levels of actors
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(c.person_id) AS actor_count
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    GROUP BY t.title, t.production_year, k.keyword
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS actor_rank
+    FROM MovieDetails
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    ah.actor_name,
+    ah.surname_pcode,
+    CASE 
+        WHEN tm.actor_count IS NULL THEN 'No Actors'
+        ELSE 'Has Actors'
+    END AS Actor_Status
+FROM TopMovies tm
+LEFT JOIN ActorHierarchy ah ON tm.actor_count = (SELECT MAX(actor_count) FROM TopMovies WHERE production_year = tm.production_year)
+WHERE tm.actor_rank <= 5  -- Top 5 movies by actor count each year
+ORDER BY tm.production_year DESC, tm.actor_count DESC;

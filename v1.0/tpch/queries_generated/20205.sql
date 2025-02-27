@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+OrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(SUM(ro.total_revenue), 0) AS total_spent,
+        COUNT(DISTINCT ro.o_orderkey) AS order_count,
+        AVG(ro.total_revenue) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    os.c_custkey, 
+    os.c_name, 
+    os.total_spent, 
+    os.order_count, 
+    os.avg_order_value, 
+    rs.s_name AS top_supplier,
+    CASE 
+        WHEN os.order_count > 0 THEN ROUND(COALESCE(os.total_spent / os.order_count, 0), 2)
+        ELSE NULL
+    END AS avg_spent_per_order,
+    CASE 
+        WHEN os.total_spent IS NULL OR os.total_spent = 0 THEN 'No Orders' 
+        ELSE 'Orders Made' 
+    END AS order_status
+FROM 
+    OrderStats os
+LEFT JOIN 
+    RankedSuppliers rs ON os.custkey = rs.s_custkey AND rs.rank = 1
+WHERE 
+    os.total_spent > (SELECT AVG(total_spent) FROM OrderStats) 
+    AND os.custkey NOT IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_name LIKE '%Test%' ESCAPE '\'
+    )
+ORDER BY 
+    os.total_spent DESC NULLS LAST;

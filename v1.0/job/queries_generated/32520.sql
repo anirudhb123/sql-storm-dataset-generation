@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 3
+),
+ActorsInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ct.kind AS role_kind,
+        ci.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ai.actor_name,
+        ai.role_kind,
+        ai.actor_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorsInfo ai ON mh.movie_id = ai.movie_id
+    WHERE 
+        (ai.actor_rank IS NULL OR ai.actor_rank <= 3)
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    GROUP_CONCAT(fm.actor_name || ' (' || fm.role_kind || ')') AS actors_list,
+    COUNT(fm.actor_name) AS total_actors,
+    CASE 
+        WHEN COUNT(fm.actor_name) IS NULL THEN 'No Actors'
+        ELSE 'Has Actors' 
+    END AS actor_status
+FROM 
+    FilteredMovies fm
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year
+ORDER BY 
+    fm.production_year DESC, total_actors DESC;
+
+This SQL query includes:
+- A recursive CTE to build a hierarchy of movies linked to each other from the year 2000 onwards.
+- A second CTE (`ActorsInfo`) that gathers actor names, their roles, and ranks them based on the movie they are associated with.
+- A final CTE (`FilteredMovies`) that combines movie and actor data and applies a filter to limit the actor results.
+- An aggregation that concatenates actor names along with their roles, counts the total number of actors, and provides a status indicating whether actors are present. 
+- Utilization of string expressions, window functions, and NULL logic.

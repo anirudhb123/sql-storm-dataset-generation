@@ -1,0 +1,34 @@
+
+WITH RECURSIVE CTE_SupplierBalance AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), 
+CTE_Orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderstatus
+), 
+CTE_NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, 
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN COALESCE(o.total_revenue, 0) ELSE 0 END) AS finalized_revenue
+    FROM nation n
+    LEFT JOIN CTE_Orders o ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, COALESCE(CASE WHEN ns.rank < 5 THEN ns.s_acctbal END, 0) AS supplier_balance,
+       CASE 
+           WHEN nr.finalized_revenue IS NULL THEN 'No Revenue'
+           ELSE FORMAT(nr.finalized_revenue, 'C') 
+       END AS revenue_display
+FROM region r
+LEFT JOIN CTE_NationRevenue nr ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'F' LIMIT 1)))
+FULL OUTER JOIN CTE_SupplierBalance ns ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = ns.s_suppkey)
+WHERE (r.r_name IS NOT NULL OR ns.s_name IS NOT NULL)
+ORDER BY r.r_name ASC, supplier_balance DESC 
+LIMIT 100 
+OFFSET (SELECT COUNT(*) FROM supplier WHERE s_acctbal IS NOT NULL) / 2;

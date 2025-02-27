@@ -1,0 +1,83 @@
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(t.TagName) AS TagArray
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag ON true 
+    JOIN 
+        Tags t ON t.TagName = tag 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        pt.Name IN ('Post Closed', 'Post Reopened')
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,  -- UpVotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount  -- DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+FinalBenchmark AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Body,
+        tp.OwnerDisplayName,
+        tp.TagArray,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        cp.CreationDate AS ClosedDate,
+        cp.Comment AS CloseComment,
+        cp.Text AS CloseReasonDetail,
+        COUNT(*) FILTER (WHERE cp.PostId IS NOT NULL) AS ClosureEvents
+    FROM 
+        TaggedPosts tp
+    LEFT JOIN 
+        PostStats ps ON tp.PostId = ps.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON tp.PostId = cp.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.Body, tp.OwnerDisplayName, tp.TagArray, ps.CommentCount, ps.UpVoteCount, ps.DownVoteCount, cp.CreationDate, cp.Comment, cp.Text
+)
+SELECT 
+    *,
+    CASE 
+        WHEN CommentCount > 10 THEN 'High Interaction'
+        WHEN UpVoteCount > 50 THEN 'Popular'
+        WHEN DownVoteCount > 10 THEN 'Controversial'
+        ELSE 'Normal Engagement'
+    END AS EngagementType
+FROM 
+    FinalBenchmark
+ORDER BY 
+    ClosingEvents DESC, CommentCount DESC, UpVoteCount DESC;

@@ -1,0 +1,72 @@
+WITH address_data AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_street_address,
+        LOWER(ca_city) AS city_lower,
+        CONCAT(ca_state, ' ', ca_zip) AS state_zip
+    FROM
+        customer_address
+),
+demographic_data AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        LOWER(cd_credit_rating) AS credit_rating_lower,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM
+        customer_demographics
+),
+date_data AS (
+    SELECT
+        d_date_sk,
+        d_year,
+        d_month_seq,
+        d_day_name,
+        d_current_month,
+        d_current_quarter,
+        d_current_year
+    FROM
+        date_dim
+),
+sales_data AS (
+    SELECT
+        ws.web_site_sk,
+        ws_order_number,
+        ws_net_paid,
+        ws_ext_sales_price,
+        EXTRACT(YEAR FROM cast('2002-10-01' as date)) - d.d_year AS year_difference
+    FROM
+        web_sales ws
+    JOIN
+        date_data d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_current_month = 'Y'
+        AND d.d_current_year = 'Y'
+)
+SELECT
+    a.full_street_address,
+    d.cd_gender,
+    d.cd_purchase_estimate,
+    s.ws_order_number,
+    s.ws_net_paid,
+    s.ws_ext_sales_price,
+    CONCAT(d.cd_gender, '_', d.cd_marital_status) AS demographic_key,
+    COUNT(*) OVER (PARTITION BY d.cd_gender, d.cd_marital_status) AS demographic_count,
+    AVG(s.ws_ext_sales_price) OVER (PARTITION BY d.cd_gender, d.cd_marital_status) AS avg_sales_price,
+    MAX(s.year_difference) AS max_year_difference
+FROM
+    address_data a
+JOIN
+    customer c ON a.ca_address_sk = c.c_current_addr_sk
+JOIN
+    demographic_data d ON c.c_current_cdemo_sk = d.cd_demo_sk
+JOIN
+    sales_data s ON c.c_customer_sk = s.ws_bill_customer_sk
+ORDER BY
+    a.full_street_address, d.cd_gender, s.ws_net_paid DESC
+LIMIT 100;

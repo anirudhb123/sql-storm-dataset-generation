@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ca ON a.id = ca.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.companies, 'No Companies') AS companies,
+    CASE 
+        WHEN arm.actor_count_rank IS NULL THEN 'Sole Feature'
+        ELSE 'Featured with ' || arm.actor_count_rank || ' leading actors'
+    END AS actor_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieKeywords k ON rm.id = k.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON rm.id = ci.movie_id
+LEFT JOIN 
+    RankedMovies arm ON rm.production_year = arm.production_year AND rm.actor_count_rank = arm.actor_count_rank
+WHERE 
+    rm.actor_count_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

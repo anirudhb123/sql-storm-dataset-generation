@@ -1,0 +1,22 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    p.Score,
+    p.ViewCount,
+    c.CommentCount,
+    t.TagName
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+WHERE 
+    p.PostTypeId = 1 -- Only questions
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10;

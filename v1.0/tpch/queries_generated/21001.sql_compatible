@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name AS customer_name,
+           CASE WHEN o.o_totalprice > 1000 THEN 'High' ELSE 'Low' END AS order_value,
+           RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS yearly_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+BizarrePart AS (
+    SELECT p.p_partkey, LENGTH(p.p_name) AS name_length,
+           COALESCE(MAX(p.p_retailprice), 0) AS max_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+    HAVING COALESCE(MAX(p.p_retailprice), 0) IS NOT NULL OR MIN(l.l_extendedprice) IS NULL
+)
+SELECT s.s_name, s.s_acctbal, h.o_orderkey, h.order_value, h.yearly_rank,
+       p.p_partkey, p.max_price, ps.total_avail_qty, ps.avg_supply_cost
+FROM SupplierHierarchy s
+LEFT JOIN HighValueOrders h ON h.customer_name = (
+    SELECT c.c_name FROM customer c WHERE c.c_nationkey = s.s_nationkey LIMIT 1
+)
+FULL OUTER JOIN BizarrePart p ON p.p_partkey = (
+    SELECT MIN(p2.p_partkey) FROM part p2 WHERE LENGTH(p2.p_name) > 10
+)
+JOIN PartSupplierStats ps ON ps.ps_partkey = (
+    SELECT MAX(ps2.ps_partkey) FROM partsupp ps2 WHERE ps2.ps_availqty > 50
+)
+WHERE s.level IS NOT NULL AND h.yearly_rank <= 10
+ORDER BY s.s_acctbal DESC, h.o_totalprice DESC
+OFFSET 5 ROWS FETCH NEXT 15 ROWS ONLY;

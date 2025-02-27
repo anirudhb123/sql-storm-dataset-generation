@@ -1,0 +1,65 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_date.sold_date_sk AS sale_date,
+        ws.net_paid AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_paid DESC) AS rank_per_website,
+        SUM(ws.net_paid) OVER (PARTITION BY ws.web_site_sk) AS total_per_website
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ws_date ON ws.ws_sold_date_sk = ws_date.d_date_sk
+    WHERE 
+        ws.net_paid > (SELECT AVG(net_paid) FROM web_sales WHERE ws.web_site_sk = web_site_sk)
+),
+filtered_sales AS (
+    SELECT 
+        rs.web_site_sk,
+        COUNT(*) AS transaction_count,
+        SUM(rs.total_revenue) AS revenue_sum,
+        AVG(rs.total_revenue) AS average_revenue,
+        MAX(rs.total_revenue) AS max_revenue,
+        MIN(rs.total_revenue) AS min_revenue
+    FROM 
+        ranked_sales rs
+    WHERE 
+        rs.rank_per_website <= 10
+    GROUP BY 
+        rs.web_site_sk
+),
+combined_data AS (
+    SELECT 
+        ws.web_site_sk,
+        COALESCE(fs.transaction_count, 0) AS transaction_count,
+        COALESCE(fs.revenue_sum, 0) AS total_revenue,
+        COALESCE(fs.average_revenue, 0) AS average_revenue,
+        COALESCE(fs.max_revenue, -1) AS max_revenue,
+        COALESCE(fs.min_revenue, -1) AS min_revenue
+    FROM 
+        web_site ws
+    LEFT JOIN 
+        filtered_sales fs ON ws.web_site_sk = fs.web_site_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(cd.cd_purchase_estimate) AS total_estimate,
+    SUM(cd.cd_dep_count) AS total_dependents,
+    AVG(cd.cd_dep_employed_count) AS avg_employed_dependents,
+    GROUP_CONCAT(DISTINCT (CASE WHEN cs.total_revenue > 1000 THEN 'High' ELSE 'Low' END)) AS revenue_category
+FROM 
+    customer_demographics cd
+JOIN 
+    customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN 
+    combined_data cs ON cs.web_site_sk = c.c_current_addr_sk
+WHERE 
+    cd.cd_gender IS NOT NULL 
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+HAVING 
+    SUM(cd.cd_purchase_estimate) > 50000
+ORDER BY 
+    cd.cd_gender ASC, cd.cd_marital_status DESC;

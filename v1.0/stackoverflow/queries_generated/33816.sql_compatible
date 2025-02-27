@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RecentBadges AS (
+    SELECT 
+        UserId,
+        Name,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    WHERE 
+        Date >= CURRENT_DATE - INTERVAL '6 month'
+    GROUP BY 
+        UserId, Name
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+),
+FinalResult AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(bad.BadgeCount, 0) AS UserBadgeCount,
+        phct.UserDisplayName AS LastChangedBy,
+        phct.CreationDate AS LastChangedDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteSummary pvs ON rp.PostId = pvs.PostId
+    LEFT JOIN 
+        RecentBadges bad ON rp.OwnerDisplayName = bad.UserId
+    LEFT JOIN 
+        PostHistoryCTE phct ON rp.PostId = phct.PostId AND phct.HistoryRank = 1
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes - DownVotes > 10 THEN 'Popular'
+        WHEN UpVotes - DownVotes < 0 THEN 'Unpopular'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM 
+    FinalResult
+WHERE
+    UpVotes > 0 OR DownVotes > 0
+ORDER BY 
+    CreationDate DESC;

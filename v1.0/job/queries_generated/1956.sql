@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+), MovieComp AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+), MoviesWithInfo AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        COALESCE(mk.keyword_count, 0) AS keyword_count,
+        COALESCE(mc.companies, 'No Companies') AS companies,
+        COALESCE(mc.company_count, 0) AS company_count
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        MovieComp mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN
+        movie_info mi ON rm.movie_id = mi.movie_id
+), FilteredMovies AS (
+    SELECT
+        mwi.*,
+        CASE
+            WHEN mwi.keyword_count > 3 THEN 'Highly Tagged'
+            WHEN mwi.keyword_count BETWEEN 1 AND 3 THEN 'Moderately Tagged'
+            ELSE 'Un-tagged'
+        END AS tag_status
+    FROM
+        MoviesWithInfo mwi
+    WHERE
+        mwi.production_year >= 2000
+)
+
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.title_rank,
+    f.companies,
+    f.company_count,
+    f.keyword_count,
+    f.tag_status
+FROM
+    FilteredMovies f
+WHERE
+    f.tag_status <> 'Un-tagged'
+ORDER BY
+    f.production_year DESC,
+    f.title_rank;

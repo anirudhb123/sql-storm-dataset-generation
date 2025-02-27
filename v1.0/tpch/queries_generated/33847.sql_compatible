@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+AvgSupplierCost AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE(asc.avg_cost, 0) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN AvgSupplierCost asc ON p.p_partkey = asc.ps_partkey
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT ch.c_name AS cust_name,
+       ph.p_name,
+       ph.p_retailprice,
+       (SELECT COUNT(*) 
+        FROM HighValueOrders order_vals 
+        WHERE order_vals.total_value > (ph.p_retailprice * 5)
+       ) AS potential_growth,
+       (SELECT COUNT(*)
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+        AND o.o_custkey IN (SELECT c_custkey FROM CustomerPurchases WHERE total_spent > 10000)
+       ) AS lines_shipped
+FROM CustomerPurchases ch
+JOIN PartDetails ph ON ph.avg_supply_cost < 50
+LEFT JOIN SupplierHierarchy sh ON ch.c_custkey = sh.s_suppkey
+WHERE ch.total_spent IS NOT NULL
+ORDER BY potential_growth DESC, lines_shipped DESC;

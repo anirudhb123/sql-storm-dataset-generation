@@ -1,0 +1,63 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        MAX(p.CreationDate) AS LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.GoldBadges + ub.SilverBadges + ub.BronzeBadges AS TotalBadges,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY ub.GoldBadges DESC, TotalBadges DESC) AS Rank
+    FROM 
+        UserBadges ub
+    JOIN 
+        PostStats ps ON ub.UserId = ps.PostId
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalBadges,
+    tu.CommentCount,
+    tu.UpVotes,
+    tu.DownVotes,
+    COALESCE(tu.UpVotes - tu.DownVotes, 0) AS NetVotes,
+    CASE
+        WHEN tu.Rank <= 10 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    TopUsers tu
+WHERE 
+    tu.TotalBadges > 0 OR tu.CommentCount > 0
+ORDER BY 
+    tu.Rank
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

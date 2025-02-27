@@ -1,0 +1,93 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE
+        ws_sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 3)
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned,
+        COUNT(DISTINCT cr.order_number) AS total_orders
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+    HAVING 
+        SUM(cr.return_quantity) > 5
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    WHERE 
+        ca.ca_city IS NOT NULL AND 
+        (ca.ca_state = 'CA' OR ca.ca_state = 'NY')
+    GROUP BY 
+        ca.ca_city, ca.ca_state
+),
+IncomeBands AS (
+    SELECT 
+        h.hd_income_band_sk,
+        h.hd_buy_potential,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        household_demographics h
+    LEFT JOIN 
+        customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    WHERE
+        h.hd_income_band_sk IS NOT NULL
+    GROUP BY 
+        h.hd_income_band_sk, h.hd_buy_potential
+)
+SELECT 
+    a.ca_city,
+    a.ca_state,
+    COALESCE(r.total_returned, 0) AS total_returns,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    i.hd_buy_potential,
+    i.customer_count AS income_customers,
+    ROW_NUMBER() OVER (PARTITION BY a.ca_city ORDER BY COALESCE(s.total_sales, 0) DESC) AS city_rank
+FROM 
+    AddressDetails a
+LEFT JOIN 
+    (SELECT 
+         ws_item_sk, 
+         SUM(ws_quantity) AS total_sales 
+    FROM 
+         web_sales 
+    WHERE 
+         ws_sold_date_sk > 20190515 
+    GROUP BY 
+         ws_item_sk
+    HAVING 
+         COUNT(ws_order_number) > 10) s ON s.ws_item_sk = a.customer_count
+LEFT JOIN 
+    CustomerReturns r ON r.returning_customer_sk = a.customer_count
+LEFT JOIN 
+    IncomeBands i ON i.hd_buy_potential = (SELECT 
+                                              MAX(hd_buy_potential)
+                                          FROM 
+                                              household_demographics 
+                                          WHERE 
+                                              hd_income_band_sk IN (SELECT ib_income_band_sk 
+                                                                    FROM income_band 
+                                                                    WHERE ib_lower_bound < s.total_sales 
+                                                                    AND ib_upper_bound > s.total_sales))
+WHERE 
+    a.customer_count > 10 
+ORDER BY 
+    a.ca_city, total_sales DESC;

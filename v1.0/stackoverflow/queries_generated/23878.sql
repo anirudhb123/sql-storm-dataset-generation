@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS GlobalRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2022-01-01' AND 
+        p.Score IS NOT NULL
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN cr.Name
+            ELSE 'Other'
+        END AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostsWithHistory AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        phd.CloseReason,
+        ub.BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.UserRank = 1
+),
+FinalResults AS (
+    SELECT 
+        p.PoId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(p.CloseReason, 'No Close Reason') AS CloseReason,
+        COALESCE(p.BadgeCount, 0) AS BadgeCount
+    FROM 
+        PostsWithHistory p
+)
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.Score,
+    pr.ViewCount,
+    pr.CloseReason,
+    pr.BadgeCount,
+    CASE 
+        WHEN pr.Score > 10 THEN 'High Score'
+        WHEN pr.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN pr.BadgeCount > 5 THEN 'Highly Accomplished'
+        ELSE 'Needs Improvement'
+    END AS UserAchievement
+FROM 
+    FinalResults pr
+WHERE 
+    pr.BadgeCount > 0 OR pr.CloseReason IS NOT NULL;

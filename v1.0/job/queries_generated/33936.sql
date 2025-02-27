@@ -1,0 +1,43 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id AS movie_id, m.title, m.production_year, h.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy h ON ml.movie_id = h.movie_id
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.id) AS rank
+    FROM movie_hierarchy mh
+),
+company_details AS (
+    SELECT
+        c.name AS company_name,
+        c.country_code,
+        mc.movie_id
+    FROM company_name c
+    JOIN movie_companies mc ON c.id = mc.company_id
+    WHERE c.country_code IS NOT NULL
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT rc.movie_id) AS total_movies,
+    COUNT(DISTINCT co.movie_id) AS total_company_movies,
+    AVG(CASE WHEN co.company_name IS NOT NULL THEN 1 ELSE 0 END) AS avg_movies_with_companies
+FROM movie_keyword mk
+LEFT JOIN aka_title at ON mk.movie_id = at.id
+LEFT JOIN ranked_movies rm ON mk.movie_id = rm.movie_id
+LEFT JOIN company_details co ON co.movie_id = at.id
+LEFT JOIN cast_info ci ON ci.movie_id = mk.movie_id
+WHERE mk.keyword IS NOT NULL
+  AND (atm.production_year BETWEEN 2010 AND 2023 OR ci.note IS NOT NULL)
+GROUP BY mk.keyword
+HAVING AVG(COALESCE(co.company_name, 'Unknown')) IS NOT NULL
+ORDER BY total_movies DESC
+LIMIT 100;

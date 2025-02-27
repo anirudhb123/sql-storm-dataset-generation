@@ -1,0 +1,47 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_net_paid
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 10000 AND 20000
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+top_items AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(total_quantity) AS overall_quantity,
+        SUM(total_net_paid) AS overall_net_paid
+    FROM sales_summary
+    GROUP BY ss_item_sk
+    HAVING SUM(total_quantity) > 100
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        (SELECT COUNT(*) FROM customer_demographics WHERE cd_dep_count > 2 AND cd_demo_sk = c.c_current_cdemo_sk) AS high_dep_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year < 1980
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.overall_quantity,
+    ti.overall_net_paid,
+    ROW_NUMBER() OVER (PARTITION BY ci.c_gender ORDER BY ti.overall_net_paid DESC) AS rank
+FROM customer_info ci
+JOIN top_items ti ON ci.c_customer_sk = ti.ss_item_sk
+LEFT OUTER JOIN customer_address ca ON ca.ca_address_sk = ci.c_current_addr_sk
+WHERE (ci.high_dep_count IS NULL OR ci.high_dep_count = 0)
+  AND ci.cd_marital_status = 'M'
+ORDER BY overall_net_paid DESC
+LIMIT 10;

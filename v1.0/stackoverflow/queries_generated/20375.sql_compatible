@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -12, CURRENT_TIMESTAMP) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS Earnings
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostLinksAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(pl.Id) AS RelatedPosts,
+        SUM(CASE WHEN pl.LinkTypeId = 3 THEN 1 ELSE 0 END) AS DuplicateLinks 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId 
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    ub.TotalBadges,
+    ub.Earnings,
+    pla.RelatedPosts,
+    pla.DuplicateLinks,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsClosed,
+    CASE 
+        WHEN rp.CommentCount > 10 THEN 'Hot Topic'
+        WHEN rp.Score > 100 THEN 'Top Scorer'
+        ELSE 'Regular Post' 
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostLinksAnalysis pla ON rp.PostId = pla.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.ScoreRank <= 10 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk,
+        ws.order_number,
+        RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws_net_profit DESC) AS rank_profit,
+        SUM(ws_ext_sales_price) OVER (PARTITION BY ws.item_sk) AS total_sales,
+        AVG(ws_net_paid) OVER (PARTITION BY ws.item_sk) AS avg_net_paid,
+        COUNT(DISTINCT ws_bill_customer_sk) OVER (PARTITION BY ws.item_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450000 AND 2451000
+        AND ws_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_type LIKE '%Air%')
+),
+CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.returning_customer_sk,
+        COUNT(sr.return_quantity) AS total_returns,
+        SUM(sr.return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr.returned_date_sk, 
+        sr.return_time_sk, 
+        sr.returning_customer_sk
+),
+ProfitAnalysis AS (
+    SELECT 
+        rs.item_sk,
+        rs.order_number,
+        rs.total_sales,
+        rs.avg_net_paid,
+        rs.unique_customers,
+        CASE 
+            WHEN rs.total_sales IS NULL THEN 'No Sales'
+            WHEN rs.total_sales = 0 THEN 'Zero Sales'
+            ELSE 'Sales Exist'
+        END AS sales_status,
+        COUNT(cr.returning_customer_sk) AS return_count
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.order_number = cr.returning_customer_sk
+    WHERE
+        rs.rank_profit = 1 OR rs.unique_customers > 10
+    GROUP BY 
+        rs.item_sk, 
+        rs.order_number, 
+        rs.total_sales, 
+        rs.avg_net_paid, 
+        rs.unique_customers, 
+        sales_status
+)
+SELECT 
+    item_sk,
+    order_number,
+    total_sales,
+    avg_net_paid,
+    unique_customers,
+    sales_status,
+    return_count,
+    CASE 
+        WHEN return_count IS NOT NULL AND return_count > 0 
+        THEN 'Returns Present' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    ProfitAnalysis
+WHERE 
+    total_sales > 50000 OR sales_status = 'No Sales'
+ORDER BY 
+    total_sales DESC, 
+    unique_customers ASC
+LIMIT 100 OFFSET 25;

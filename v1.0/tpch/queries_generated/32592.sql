@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (
+        SELECT n_nationkey
+        FROM nation
+        WHERE n_name = 'USA'
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 10
+),
+OrdersSummary AS (
+    SELECT o_custkey, SUM(o_totalprice) AS total_spent
+    FROM orders
+    GROUP BY o_custkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, os.total_spent
+    FROM customer c
+    LEFT JOIN OrdersSummary os ON c.c_custkey = os.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    ch.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(cs.total_spent) AS total_spent_by_nation,
+    AVG(ps.avg_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    MAX(CASE WHEN cs.total_spent IS NULL THEN 'No Orders' ELSE 'Has Orders' END) AS order_status
+FROM nation ch
+JOIN customer cs ON cs.c_nationkey = ch.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = ch.n_nationkey
+LEFT JOIN PartSupplier ps ON ps.p_partkey IN (
+    SELECT DISTINCT l.l_partkey
+    FROM lineitem l
+    JOIN orders o ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+)
+WHERE ch.r_regionkey IS NOT NULL
+GROUP BY ch.n_name
+ORDER BY nation_name DESC
+LIMIT 10;

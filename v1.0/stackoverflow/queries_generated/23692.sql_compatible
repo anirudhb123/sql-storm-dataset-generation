@@ -1,0 +1,86 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesReceived,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesReceived,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS TotalVoteInteractions,
+        AVG(U.Reputation) OVER (PARTITION BY U.Location) AS AvgReputationInLocation,
+        CASE 
+            WHEN AVG(U.Reputation) OVER (PARTITION BY U.Location) IS NULL THEN 'Unknown'
+            ELSE CAST(AVG(U.Reputation) OVER (PARTITION BY U.Location) AS VARCHAR)
+        END AS AvgReputationClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Location, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        COUNT(C) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS RankByUpVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+HighlyVotedPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        U.DisplayName,
+        U.Reputation
+    FROM 
+        PostStats PS
+    JOIN 
+        Users U ON PS.OwnerUserId = U.Id
+    WHERE 
+        PS.UpVotes - PS.DownVotes > 10
+)
+SELECT 
+    H.PostId,
+    H.Title,
+    H.CommentCount,
+    H.UpVotes,
+    H.DownVotes,
+    H.DisplayName,
+    H.Reputation,
+    CASE 
+        WHEN H.Reputation > 1000 THEN 'Expert'
+        WHEN H.Reputation > 100 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserExpertiseLevel,
+    CASE 
+        WHEN H.CommentCount = 0 THEN 'No comments'
+        ELSE 'Has comments'
+    END AS CommentsState,
+    COALESCE(
+        (SELECT STRING_AGG(Name, ', ') 
+         FROM PostHistory PH 
+         WHERE PH.PostId = H.PostId AND PH.PostHistoryTypeId IN (1, 2, 4) 
+         ORDER BY PH.CreationDate DESC), 
+        'No history available'
+    ) AS RecentPostHistory
+FROM 
+    HighlyVotedPosts H
+ORDER BY 
+    H.UpVotes DESC
+LIMIT 50;

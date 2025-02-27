@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m 
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255)) 
+    FROM 
+        aka_title m 
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id 
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON m.id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mk.keyword AS keyword,
+    ARRAY_AGG(DISTINCT mh.path) AS movie_paths,
+    NTILE(3) OVER (PARTITION BY mk.keyword ORDER BY COUNT(DISTINCT mh.movie_id)) AS keyword_rank
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+LEFT JOIN 
+    aka_title to ON to.id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = to.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = to.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name NOT LIKE '%test%'
+    AND (mk.keyword IS NULL OR mk.keyword NOT IN ('horror', 'action'))
+GROUP BY 
+    ak.name, mk.keyword
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY 
+    keyword_rank, ak.name;

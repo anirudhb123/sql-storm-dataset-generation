@@ -1,0 +1,53 @@
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS total_movies
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ca.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ca ON ci.person_id = ca.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_details AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        cs.total_cast,
+        cs.actor_names,
+        r.year_rank,
+        r.total_movies
+    FROM 
+        ranked_movies r
+    LEFT JOIN 
+        cast_summary cs ON r.title = cs.movie_id
+    JOIN 
+        aka_title tm ON tm.title = r.title
+)
+SELECT 
+    md.production_year,
+    COUNT(DISTINCT md.title) AS movie_count,
+    AVG(md.total_cast)::numeric(10, 2) AS average_cast_size,
+    MAX(md.actor_names) AS most_common_actors,
+    STRING_AGG(md.title, ' | ') AS movie_list
+FROM 
+    movie_details md
+GROUP BY 
+    md.production_year
+HAVING 
+    COUNT(DISTINCT md.title) > 3
+ORDER BY 
+    md.production_year DESC
+LIMIT 10;

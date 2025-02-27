@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        COALESCE(NULLIF(mt.season_nr, 0), 'Season N/A') AS season_info,
+        ARRAY[mt.id] AS movie_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id, 
+        et.title, 
+        et.production_year, 
+        COALESCE(NULLIF(et.season_nr, 0), 'Season N/A') AS season_info,
+        mh.movie_path || et.id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ARRAY_AGG(DISTINCT mh.title) AS movies,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mt.name, ', ') AS companies,
+    SUM(CASE 
+        WHEN c.nr_order IS NULL THEN 0 
+        ELSE c.nr_order 
+    END) AS total_order,
+    AVG(CASE 
+        WHEN ci.production_year = 0 THEN NULL 
+        ELSE ci.production_year 
+    END) AS avg_production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(mh.movie_id) DESC) AS rank_by_movies
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name mt ON mc.company_id = mt.id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name NOT LIKE '%deleted%'
+GROUP BY 
+    ak.id, ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY 
+    movie_count DESC, 
+    actor_name ASC
+LIMIT 10;

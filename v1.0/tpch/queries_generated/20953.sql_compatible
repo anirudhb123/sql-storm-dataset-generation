@@ -1,0 +1,98 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+),
+supplier_high_value AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey IN 
+                        (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY'))
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        COUNT(l.l_orderkey) > 5
+),
+filtered_suppliers AS (
+    SELECT 
+        DISTINCT ps.ps_partkey, 
+        ps.ps_suppkey,
+        r.r_name
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier_high_value shv ON ps.ps_suppkey = shv.s_suppkey
+    LEFT JOIN 
+        region r ON shv.s_nationkey = r.r_regionkey
+),
+final_selection AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        COALESCE(r.r_name, 'Unknown Region') AS region_name,
+        rp.p_name,
+        rp.p_retailprice,
+        summ.total_revenue
+    FROM 
+        filtered_suppliers ps
+    JOIN 
+        ranked_parts rp ON ps.ps_partkey = rp.p_partkey
+    LEFT JOIN 
+        order_summary summ ON summ.o_custkey = 
+            (SELECT c.c_custkey 
+             FROM customer c 
+             WHERE c.c_nationkey = 
+                 (SELECT n.n_nationkey 
+                  FROM nation n 
+                  WHERE n.n_name = 'GERMANY')) 
+    WHERE 
+        rp.rn = 1 AND 
+        rp.p_retailprice IS NOT NULL
+)
+SELECT 
+    fs.region_name,
+    fs.p_name,
+    COUNT(DISTINCT fs.ps_suppkey) AS supplier_count,
+    SUM(fs.total_revenue) AS total_revenue_sum,
+    AVG(fs.p_retailprice) AS average_price,
+    STRING_AGG(DISTINCT fs.p_comment, ', ') AS comments
+FROM 
+    final_selection fs
+WHERE 
+    fs.total_revenue IS NOT NULL
+GROUP BY 
+    fs.region_name, fs.p_name
+ORDER BY 
+    fs.region_name, average_price DESC;

@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) as rn
+    FROM 
+        aka_title a
+    JOIN 
+        movie_info m ON a.movie_id = m.movie_id
+    WHERE 
+        m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Genre')
+),
+CorrelationExample AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS starring_count
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type ci ON c.role_id = ci.id
+    GROUP BY 
+        c.movie_id
+),
+KeywordSummary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.kind_id,
+    COALESCE(cs.actor_count, 0) AS actor_count,
+    COALESCE(cs.starring_count, 0) AS starring_count,
+    ks.keywords,
+    CASE 
+        WHEN rm.production_year < 2000 THEN 'Classic'
+        ELSE 'Contemporary'
+    END AS movie_age_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CorrelationExample cs ON rm.id = cs.movie_id
+LEFT JOIN 
+    KeywordSummary ks ON rm.id = ks.movie_id
+WHERE 
+    rm.rn <= 5 
+    AND (ks.keywords IS NOT NULL OR cs.actor_count > 2)
+ORDER BY 
+    rm.production_year DESC,
+    actor_count DESC;

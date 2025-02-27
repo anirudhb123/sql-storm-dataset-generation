@@ -1,0 +1,18 @@
+
+SELECT 
+    s.s_name AS supplier_name, 
+    COUNT(DISTINCT ps.ps_partkey) AS part_count, 
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    (SELECT AVG(p.p_retailprice) 
+     FROM part p 
+     JOIN partsupp ps_sub ON p.p_partkey = ps_sub.ps_partkey 
+     WHERE ps_sub.ps_suppkey = ps.ps_suppkey) AS avg_part_price,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ') AS part_names
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+WHERE s.s_acctbal > 500.00
+GROUP BY s.s_name, total_available_quantity
+HAVING COUNT(DISTINCT ps.ps_partkey) > 10
+ORDER BY total_available_quantity DESC
+LIMIT 10;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE DailySales AS (
+    SELECT 
+        d.d_date, 
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+    UNION ALL
+    SELECT 
+        d.d_date,
+        ds.total_sales + COALESCE(SUM(ws.ws_ext_sales_price), 0)
+    FROM DailySales ds
+    JOIN date_dim d ON d.d_date > ds.d_date
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date, ds.total_sales
+),
+SalesRanked AS (
+    SELECT 
+        d.d_date, 
+        SUM(ws.ws_ext_sales_price) AS daily_total_sales,
+        RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_date BETWEEN '2023-01-01' AND '2023-01-31'
+    GROUP BY d.d_date
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        c.c_current_cdemo_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesByGender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_sales_by_gender
+    FROM web_sales ws
+    JOIN CustomerDetails cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+    GROUP BY cd.cd_gender
+),
+FinalReport AS (
+    SELECT 
+        ds.d_date,
+        ds.total_sales AS total_sales,
+        sr.sales_rank,
+        cb.total_sales_by_gender 
+    FROM DailySales ds
+    JOIN SalesRanked sr ON ds.total_sales = sr.daily_total_sales
+    JOIN SalesByGender cb ON cb.total_sales_by_gender = ds.total_sales
+)
+SELECT 
+    fr.d_date,
+    fr.total_sales,
+    fr.sales_rank,
+    fr.total_sales_by_gender,
+    CASE 
+        WHEN fr.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist' 
+    END AS Sales_Status
+FROM FinalReport fr
+ORDER BY fr.d_date DESC;

@@ -1,0 +1,51 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        title.id AS movie_id, 
+        title.title AS movie_title, 
+        title.production_year,
+        NULL AS parent_movie_id
+    FROM title
+    WHERE production_year IS NOT NULL
+    UNION ALL
+    
+    SELECT 
+        aka_title.id AS movie_id, 
+        aka_title.title AS movie_title, 
+        aka_title.production_year,
+        aka_title.episode_of_id AS parent_movie_id
+    FROM aka_title
+    JOIN movie_hierarchy mh ON aka_title.episode_of_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS all_cast_names
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT mt.info_type_id) AS info_count,
+        MAX(CASE WHEN mt.info_type_id = 1 THEN mt.info END) AS director_info 
+    FROM movie_info mi
+    JOIN movie_info_idx mt ON mi.movie_id = mt.movie_id
+    GROUP BY mi.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    cs.total_cast,
+    cs.all_cast_names,
+    mis.info_count,
+    mis.director_info
+FROM movie_hierarchy mh
+LEFT JOIN cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE mh.production_year >= 2000
+ORDER BY mh.production_year DESC, cs.total_cast DESC
+LIMIT 100;

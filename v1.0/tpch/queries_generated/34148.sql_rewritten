@@ -1,0 +1,46 @@
+WITH RECURSIVE nation_supp AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ns.depth + 1
+    FROM supplier s
+    JOIN nation_supp ns ON s.s_nationkey = ns.s_nationkey
+    WHERE ns.depth < 3
+),
+
+part_suppliers AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, 
+           ROW_NUMBER() OVER(PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS cost_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost
+    FROM part p
+    JOIN part_suppliers ps ON p.p_partkey = ps.p_partkey
+    WHERE ps.cost_rank = 1 AND p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT s.s_suppkey) AS num_suppliers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE s.s_suppkey IN (SELECT s1.s_suppkey FROM nation_supp s1)
+  AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY n.n_name
+HAVING total_revenue > (SELECT SUM(total_revenue) / COUNT(DISTINCT n1.n_nationkey) FROM (
+    SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue 
+    FROM supplier s2 
+    JOIN orders o2 ON s2.s_suppkey = o2.o_custkey 
+    JOIN lineitem l2 ON o2.o_orderkey = l2.l_orderkey 
+    GROUP BY s2.s_nationkey) AS rc)
+ORDER BY total_revenue DESC
+LIMIT 10;

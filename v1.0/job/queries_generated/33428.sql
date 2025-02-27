@@ -1,0 +1,85 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        1 AS generation
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.person_role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci2.person_id, 
+        ci2.movie_id,
+        ah.generation + 1
+    FROM 
+        cast_info ci2
+    JOIN 
+        actor_hierarchy ah ON ci2.movie_id = ah.movie_id
+    WHERE 
+        ci2.person_id != ah.person_id
+),
+ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(a.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(a.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info a ON m.id = a.movie_id
+    GROUP BY 
+        m.id
+),
+movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword,
+        COUNT(DISTINCT kw.id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id, k.keyword
+),
+movies_with_links AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(ml.linked_movie_id) AS link_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(r.actor_count, 0) AS actor_count,
+    COALESCE(mw.keyword_count, 0) AS keyword_count,
+    COALESCE(ml.link_count, 0) AS link_count,
+    CASE 
+        WHEN r.actor_count > 0 THEN (CASE WHEN actor_count >= 5 THEN 'Popular' ELSE 'Indie' END)
+        ELSE 'Unknown'
+    END AS movie_type
+FROM 
+    aka_title m
+LEFT JOIN 
+    ranked_movies r ON m.id = r.movie_id
+LEFT JOIN 
+    movie_info_with_keywords mw ON m.id = mw.movie_id
+LEFT JOIN 
+    movies_with_links ml ON m.id = ml.movie_id
+WHERE 
+    m.production_year >= 2000
+ORDER BY 
+    m.production_year DESC, actor_count DESC;

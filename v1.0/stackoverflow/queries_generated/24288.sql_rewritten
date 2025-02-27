@@ -1,0 +1,87 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.OwnerUserId, 
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.CommentCount, 0) AS CommentCount,
+        COALESCE(ps.FavoriteCount, 0) AS FavoriteCount,
+        COALESCE(p.Likes, 0) AS Likes, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, 
+               COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS AnswerCount, 
+               COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS CommentCount, 
+               SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS FavoriteCount
+        FROM Posts
+        GROUP BY PostId
+    ) ps ON p.Id = ps.PostId
+),
+LatestPostActivities AS (
+    SELECT 
+        p.Id AS PostId,
+        p.LastActivityDate,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM Posts p
+),
+FlaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS FlagCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 10
+    GROUP BY p.Id
+),
+AggregatedPostData AS (
+    SELECT 
+        ps.PostId,
+        ps.OwnerUserId,
+        ps.AnswerCount,
+        ps.CommentCount,
+        ps.FavoriteCount,
+        la.LastActivityDate,
+        la.PostStatus,
+        fb.FlagCount,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM PostStatistics ps
+    JOIN LatestPostActivities la ON ps.PostId = la.PostId
+    LEFT JOIN FlaggedPosts fb ON ps.PostId = fb.PostId
+    LEFT JOIN UserBadges ub ON ps.OwnerUserId = ub.UserId
+)
+SELECT 
+    apd.PostId,
+    apd.OwnerUserId,
+    apd.AnswerCount,
+    apd.CommentCount,
+    apd.FavoriteCount,
+    apd.LastActivityDate,
+    apd.PostStatus,
+    COALESCE(apd.FlagCount, 0) AS TotalFlags,
+    CASE 
+        WHEN apd.BadgeCount > 5 THEN 'Gold Member'
+        WHEN apd.BadgeCount BETWEEN 3 AND 5 THEN 'Silver Member'
+        ELSE 'Bronze Member'
+    END AS MembershipLevel,
+    CASE 
+        WHEN apd.LastActivityDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserActivityStatus
+FROM AggregatedPostData apd
+WHERE (apd.PostStatus = 'Open' OR apd.PostStatus = 'Answered')
+AND (apd.FlagCount IS NULL OR apd.FlagCount < 3)
+ORDER BY apd.AnswerCount DESC, apd.CommentCount DESC
+FETCH FIRST 10 ROWS ONLY;

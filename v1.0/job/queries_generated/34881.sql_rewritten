@@ -1,0 +1,42 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        m.title as linked_movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_title,
+        mh.production_year,
+        m.title as linked_movie_title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_title = (SELECT title FROM aka_title WHERE id = ml.movie_id)
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mh.linked_movie_title) AS number_of_linked_movies,
+    MAX(mh.depth) AS max_depth
+FROM 
+    MovieHierarchy mh
+GROUP BY 
+    mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mh.linked_movie_title) > 5
+ORDER BY 
+    mh.production_year DESC, number_of_linked_movies DESC;

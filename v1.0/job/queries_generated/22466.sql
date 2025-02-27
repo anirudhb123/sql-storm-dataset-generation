@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        m.movie_title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1,
+        mh.path || ml.linked_movie_id
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        mh.level < 5  -- limit to depth of 5
+),
+
+CastAggregates AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS unique_cast_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id
+),
+
+KeywordStats AS (
+    SELECT
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(ca.total_cast, 0) AS total_cast,
+    COALESCE(ca.unique_cast_names, 'No cast available') AS unique_cast_names,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    CASE
+        WHEN mh.production_year IS NULL THEN 'Unknown Year'
+        WHEN mh.production_year < 2000 THEN 'Before 2000'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN '2000s'
+        ELSE 'Post 2010'
+    END AS production_period,
+    COUNT(*) OVER (PARTITION BY mh.production_year) AS movies_per_year,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.movie_id) AS row_in_year,
+    ARRAY_AGG(DISTINCT mt.title ORDER BY mt.production_year, mt.title) FILTER (WHERE mt.kind_id IS NOT NULL) AS related_titles
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastAggregates ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    KeywordStats ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    aka_title mt ON mt.id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, ca.total_cast, ca.unique_cast_names, ks.keyword_count
+HAVING 
+    COALESCE(ca.total_cast, 0) > 0 OR COALESCE(ks.keyword_count, 0) > 0
+ORDER BY 
+    mh.production_year DESC, mh.movie_id;
+

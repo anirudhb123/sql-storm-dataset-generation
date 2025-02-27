@@ -1,0 +1,68 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 0 AND U.LastAccessDate > NOW() - INTERVAL '1 year'
+    GROUP BY U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN C.Score > 0 THEN 1 ELSE 0 END) AS PositiveComments
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY P.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        MIN(PH.CreationDate) AS FirstActivity,
+        MAX(PH.CreationDate) AS LastActivity
+    FROM PostHistory PH
+    GROUP BY PH.PostId, PH.UserId, PH.PostHistoryTypeId
+)
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.UserRank,
+    RP.PostId,
+    RP.Title AS PostTitle,
+    RP.CreationDate AS PostCreation,
+    PH.UserId AS HistorianUserId,
+    PH.HistoryCount,
+    PH.FirstActivity,
+    PH.LastActivity,
+    RP.CommentCount,
+    RP.PositiveComments,
+    CASE 
+        WHEN PH.HistoryCount > 5 THEN 'High Activity'
+        WHEN PH.HistoryCount IS NULL THEN 'No Activity'
+        ELSE 'Medium Activity' 
+    END AS ActivityLevel,
+    STRING_AGG(DISTINCT HT.Name, ', ') AS HistoryTypes
+FROM RankedUsers RU
+LEFT JOIN RecentPosts RP ON RU.UserId = RP.OwnerUserId
+LEFT JOIN PostHistoryStats PH ON RP.PostId = PH.PostId AND PH.UserId = RU.UserId
+LEFT JOIN PostHistoryTypes HT ON PH.PostHistoryTypeId = HT.Id
+WHERE (RP.CommentCount > 0 OR RP.PositiveComments > 0)
+  AND RU.Reputation > 1000
+  AND (PH.FirstActivity IS NULL OR PH.FirstActivity < NOW() - INTERVAL '1 month')
+GROUP BY RU.DisplayName, RU.Reputation, RU.UserRank,
+         RP.PostId, RP.Title, RP.CreationDate,
+         PH.UserId, PH.HistoryCount, PH.FirstActivity, PH.LastActivity
+ORDER BY RU.Reputation DESC, RP.CommentCount DESC, ActivityLevel;

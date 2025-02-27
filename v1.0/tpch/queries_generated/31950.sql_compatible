@@ -1,0 +1,64 @@
+
+WITH RECURSIVE supply_chain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        c.c_custkey
+),
+supplier_performance AS (
+    SELECT
+        sc.s_suppkey,
+        sc.s_name,
+        SUM(sc.ps_availqty * sc.ps_supplycost) AS total_supply_value
+    FROM 
+        supply_chain sc
+    WHERE
+        sc.rank <= 5
+    GROUP BY 
+        sc.s_suppkey, sc.s_name
+)
+SELECT 
+    COALESCE(cp.c_custkey, 'N/A') AS customer_id,
+    sp.s_name AS supplier_name,
+    sp.total_supply_value,
+    cp.total_spent,
+    COALESCE(cp.order_count, 0) AS order_count,
+    CASE 
+        WHEN cp.total_spent IS NULL THEN 'No Orders'
+        WHEN sp.total_supply_value IS NULL THEN 'No Supply'
+        ELSE 'Active'
+    END AS order_supply_status
+FROM 
+    supplier_performance sp
+FULL OUTER JOIN 
+    customer_orders cp ON sp.s_suppkey = cp.c_custkey
+WHERE 
+    sp.total_supply_value > 10000 
+    OR cp.total_spent IS NULL
+ORDER BY 
+    sp.s_name, customer_id;

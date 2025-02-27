@@ -1,0 +1,81 @@
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+        AND p.PostTypeId = 1  -- Only questions
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS PostsCreated,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        UserId
+),
+PostEngagement AS (
+    SELECT 
+        f.PostId,
+        f.Title,
+        f.OwnerDisplayName,
+        t.TagCount,
+        ua.PostsCreated,
+        ua.TotalComments,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes
+    FROM 
+        FilteredPosts f
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS TagCount 
+        FROM 
+            PostTags 
+        GROUP BY 
+            PostId
+    ) t ON f.PostId = t.PostId
+    LEFT JOIN UserActivity ua ON f.OwnerUserId = ua.UserId
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.OwnerDisplayName,
+    COALESCE(pe.TagCount, 0) AS NumberOfTags,
+    pe.PostsCreated,
+    pe.TotalComments,
+    pe.TotalUpVotes,
+    pe.TotalDownVotes,
+    ARRAY_AGG(DISTINCT ts.TagName) AS Tags
+FROM 
+    PostEngagement pe
+LEFT JOIN 
+    TagStatistics ts ON ts.PostCount > 1
+GROUP BY 
+    pe.PostId, pe.Title, pe.OwnerDisplayName, pe.TagCount, pe.PostsCreated, pe.TotalComments, pe.TotalUpVotes, pe.TotalDownVotes
+ORDER BY 
+    pe.TotalUpVotes DESC, pe.TotalComments DESC, pe.PostId;

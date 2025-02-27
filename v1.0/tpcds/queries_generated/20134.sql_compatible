@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        ws.ws_net_profit,
+        ws.ws_ship_date_sk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459202 AND 2459225
+        AND ws.ws_net_profit > 0
+), InventorySnap AS (
+    SELECT 
+        inv.inv_date_sk,
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_date_sk, inv.inv_item_sk
+), JoinData AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_order_number,
+        rs.profit_rank,
+        rs.ws_net_profit,
+        COALESCE(DENSE_RANK() OVER (PARTITION BY inv.total_inventory ORDER BY rs.ws_net_profit DESC), -1) AS inv_rank
+    FROM 
+        RankedSales rs
+    INNER JOIN 
+        InventorySnap inv ON rs.ws_ship_date_sk = inv.inv_date_sk
+    WHERE 
+        inv.total_inventory > 0
+)
+SELECT 
+    jd.web_site_sk,
+    COUNT(DISTINCT jd.ws_order_number) AS total_orders,
+    SUM(jd.ws_net_profit) AS total_profit,
+    MAX(jd.profit_rank) AS highest_profit_rank,
+    AVG(CASE WHEN jd.inv_rank <> -1 THEN jd.inv_rank ELSE NULL END) AS average_inventory_rank
+FROM 
+    JoinData jd
+GROUP BY 
+    jd.web_site_sk
+HAVING 
+    SUM(jd.ws_net_profit) > (SELECT AVG(total_profit) FROM JoinData)
+ORDER BY 
+    total_profit DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

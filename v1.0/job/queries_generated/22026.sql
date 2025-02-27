@@ -1,0 +1,90 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title AS title,
+        a.production_year,
+        a.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS a ON a.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy AS mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.depth < 2  -- Limit the depth of recursion for larger datasets.
+),
+
+actor_roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        cp.kind AS role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info AS ci
+    JOIN 
+        comp_cast_type AS cp ON cp.id = ci.person_role_id
+    GROUP BY 
+        ci.person_id, ci.movie_id, cp.kind
+),
+
+ranked_actors AS (
+    SELECT 
+        ar.person_id,
+        ar.role,
+        COUNT(ar.role_count) OVER (PARTITION BY ar.person_id ORDER BY ar.role_count DESC) AS rnk,
+        a.name
+    FROM 
+        actor_roles AS ar
+    JOIN 
+        aka_name AS a ON a.person_id = ar.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_total
+    FROM 
+        movie_keyword AS mk
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    ARRAY_AGG(DISTINCT r.name) AS actors,
+    k.keyword_total,
+    CASE 
+        WHEN k.keyword_total IS NULL THEN 'No Keywords'
+        ELSE 'Keywords Found'
+    END AS keyword_status,
+    COALESCE(COUNT(DISTINCT r.person_id), 0) FILTER (WHERE r.rnk <= 3) AS top_roles
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    keyword_count AS k ON k.movie_id = mh.movie_id
+LEFT JOIN 
+    ranked_actors AS r ON r.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, k.keyword_total
+HAVING 
+    AVG(mh.production_year) > 2000  -- Filter only modern movies based on production year
+ORDER BY 
+    mh.production_year DESC, keyword_total DESC;

@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        RANK() OVER (PARTITION BY k.keyword ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+UpcomingMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS rated_cast_percent
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    WHERE 
+        t.production_year > EXTRACT(YEAR FROM DATE '2024-10-01')
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        um.total_cast, 
+        um.rated_cast_percent
+    FROM 
+        RankedMovies rm
+    JOIN 
+        UpcomingMovies um ON rm.title = um.title
+    WHERE 
+        rm.year_rank = 1 AND 
+        um.total_cast > 5 AND 
+        um.rated_cast_percent < 0.75
+)
+SELECT 
+    fm.title, 
+    fm.production_year, 
+    COALESCE(NULLIF(fm.total_cast, 0), 'No cast information') AS cast_info,
+    CASE 
+        WHEN fm.rated_cast_percent < 0.5 THEN 'Needs Attention'
+        ELSE 'Good to Go'
+    END AS status
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

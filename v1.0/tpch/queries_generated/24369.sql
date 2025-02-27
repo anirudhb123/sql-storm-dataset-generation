@@ -1,0 +1,53 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        o.orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.custkey ORDER BY o.orderdate DESC) as order_rank
+    FROM orders o
+    WHERE o.orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+SupplierShare AS (
+    SELECT 
+        ps.suppkey,
+        SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.suppkey,
+        s.name,
+        ss.total_cost,
+        ROW_NUMBER() OVER (ORDER BY ss.total_cost DESC) as rank
+    FROM supplier s
+    JOIN SupplierShare ss ON s.suppkey = ss.suppkey
+    WHERE s.acctbal IS NOT NULL
+),
+SalesDetails AS (
+    SELECT 
+        c.custkey,
+        COUNT(DISTINCT o.orderkey) AS order_count,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.custkey ORDER BY SUM(l.extendedprice * (1 - l.discount)) DESC) as sales_rank
+    FROM customer c
+    JOIN orders o ON c.custkey = o.custkey
+    JOIN lineitem l ON o.orderkey = l.orderkey
+    WHERE l.shipdate >= DATE '2023-01-01' 
+    GROUP BY c.custkey
+)
+SELECT 
+    r.name AS region_name,
+    n.name AS nation_name,
+    COALESCE(s.name, 'No Supplier') AS supplier_name,
+    SUM(sd.total_sales) AS total_sales,
+    COUNT(DISTINCT sd.order_count) AS unique_order_count,
+    AVG(sd.total_sales) AS avg_sales_per_order,
+    COUNT(DISTINCT TOP.suppkey) AS supplier_count
+FROM region r
+JOIN nation n ON r.regionkey = n.regionkey
+LEFT JOIN TopSuppliers TOP ON TOP.rank <= 10
+LEFT JOIN SalesDetails sd ON sd.custkey = ANY (SELECT c.custkey FROM customer c WHERE c.custkey IS NOT NULL AND c.mktsegment = 'BUILDING')
+GROUP BY r.name, n.name, s.name
+HAVING COUNT(*) > 5 OR SUM(total_sales) IS NULL
+ORDER BY total_sales DESC NULLS LAST;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, 1 AS level
+    FROM item
+    WHERE i_current_price > 100.00
+    UNION ALL
+    SELECT i.i_item_sk, i.i_item_id, CONCAT(i_h.i_item_desc, ' -> ', i.i_item_desc), i.i_current_price, ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON i.item_id = LPAD(CAST(ih.i_item_sk AS TEXT), 16, '0') -- Simulating recursion by item_id linkage
+    WHERE ih.level < 5
+),
+customer_data AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_age_group, COUNT(o.ws_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT ws_bill_customer_sk, ws_order_number 
+        FROM web_sales 
+        WHERE ws_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+    ) o ON c.c_customer_sk = o.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_age_group
+),
+ranked_orders AS (
+    SELECT cd.c_customer_sk, cd.c_first_name, cd.c_last_name, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY o.order_count DESC) AS order_rank,
+           o.order_count
+    FROM customer_data cd
+    JOIN (
+        SELECT COUNT(ws_order_number) AS order_count, ws_bill_customer_sk
+        FROM web_sales 
+        GROUP BY ws_bill_customer_sk
+    ) o ON cd.c_customer_sk = o.ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT r.c_customer_sk, r.c_first_name, r.c_last_name, r.order_count
+    FROM ranked_orders r
+    WHERE r.order_rank <= 5
+)
+SELECT 
+    ch.c_customer_sk, 
+    ch.c_first_name,
+    ch.c_last_name, 
+    i_h.i_item_id, 
+    i_h.i_item_desc, 
+    COALESCE(t.order_count, 0) AS total_orders,
+    COALESCE(CASE WHEN i_h.level >= 2 THEN 1 ELSE 0 END, 0) AS is_higher_level
+FROM item_hierarchy i_h
+LEFT JOIN top_customers ch ON i_h.i_item_sk = ch.c_customer_sk 
+LEFT JOIN (
+    SELECT c_customer_sk, COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY c_customer_sk
+) t ON ch.c_customer_sk = t.c_customer_sk
+ORDER BY total_orders DESC, i_h.i_item_desc;

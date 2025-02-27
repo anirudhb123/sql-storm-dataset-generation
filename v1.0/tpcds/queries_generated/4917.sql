@@ -1,0 +1,77 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        SUM(ws.ws_net_profit) AS total_web_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+income_summary AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_revenue
+    FROM 
+        income_band ib
+    LEFT JOIN 
+        catalog_sales cs ON ib.ib_income_band_sk = (SELECT cd.cd_income_band_sk 
+                                                      FROM customer_demographics cd 
+                                                      JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk 
+                                                      WHERE c.c_customer_sk = cs.cs_bill_customer_sk)
+    GROUP BY 
+        ib.ib_income_band_sk
+),
+returns_summary AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+combined_summary AS (
+    SELECT 
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.total_web_orders,
+        cs.total_web_profit,
+        is.total_catalog_sales,
+        is.total_catalog_revenue,
+        COALESCE(rs.total_returned, 0) AS total_returned
+    FROM 
+        customer_summary cs
+    LEFT JOIN 
+        income_summary is ON cs.cd_income_band_sk = is.ib_income_band_sk
+    LEFT JOIN 
+        returns_summary rs ON cs.c_customer_sk = rs.sr_customer_sk
+)
+SELECT 
+    *,
+    (total_web_profit - total_returned) AS net_profit,
+    CASE 
+        WHEN total_catalog_sales > 100 THEN 'High Spender'
+        WHEN total_catalog_sales > 50 THEN 'Medium Spender'
+        ELSE 'Low Spender' 
+    END AS spending_category
+FROM 
+    combined_summary
+WHERE 
+    total_web_orders > 0
+ORDER BY 
+    net_profit DESC
+LIMIT 100;

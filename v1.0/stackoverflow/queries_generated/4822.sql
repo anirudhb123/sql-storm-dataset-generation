@@ -1,0 +1,67 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 month'
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PT.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes PT ON PH.Comment::int = PT.Id -- Assuming Comment stores the CloseReasonId
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    COALESCE(RT.TagName, 'No Tags') AS MostRecentTag,
+    COALESCE(PT.PostCount, 0) AS PopularPostCount,
+    CP.CloseReason,
+    COUNT(CASE WHEN C.UserId IS NOT NULL THEN 1 END) AS CommentCount
+FROM 
+    RecentPosts RP
+LEFT JOIN 
+    PopularTags PT ON PT.TagName = ANY(string_to_array(RP.Tags, ','))
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+LEFT JOIN 
+    Comments C ON RP.PostId = C.PostId 
+WHERE 
+    RP.rn = 1
+GROUP BY 
+    RP.PostId, RP.Title, RP.CreationDate, RP.Score, RT.TagName, CP.CloseReason
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC
+LIMIT 50;

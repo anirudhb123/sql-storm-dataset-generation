@@ -1,0 +1,90 @@
+WITH SupplierStats AS (
+    SELECT 
+        s_nationkey, 
+        COUNT(DISTINCT s_suppkey) AS total_suppliers,
+        SUM(s_acctbal) AS total_account_balance,
+        AVG(s_acctbal) AS avg_account_balance
+    FROM supplier
+    GROUP BY s_nationkey
+),
+PartDetails AS (
+    SELECT 
+        p_partkey, 
+        p_brand,
+        p_size,
+        p_retailprice,
+        p_comment,
+        CASE 
+            WHEN p_size < 10 THEN 'small' 
+            WHEN p_size BETWEEN 10 AND 20 THEN 'medium'
+            ELSE 'large' 
+        END AS size_category
+    FROM part
+    WHERE p_retailprice > (
+        SELECT AVG(p_retailprice) FROM part
+    )
+),
+LineItemSummary AS (
+    SELECT 
+        l_orderkey, 
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS revenue_rank
+    FROM lineitem
+    GROUP BY l_orderkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > 100
+),
+CustomerDetails AS (
+    SELECT 
+        c_nationkey, 
+        COUNT(CASE WHEN c_acctbal IS NULL THEN 1 END) AS null_balance_count,
+        MAX(c_acctbal) AS max_balance,
+        MIN(c_acctbal) AS min_balance
+    FROM customer
+    GROUP BY c_nationkey
+),
+NationSupplierRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(ss.total_suppliers, 0) AS total_suppliers,
+        COALESCE(ss.total_account_balance, 0) AS total_account_balance,
+        COALESCE(ss.avg_account_balance, 0) AS avg_account_balance,
+        COALESCE(ls.total_revenue, 0) AS total_revenue
+    FROM nation n
+    LEFT JOIN SupplierStats ss ON n.n_nationkey = ss.s_nationkey
+    LEFT JOIN LineItemSummary ls ON n.n_nationkey = (
+        SELECT s_nationkey FROM supplier WHERE s_suppkey IN (
+            SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (
+                SELECT p_partkey FROM PartDetails
+            )
+        ) LIMIT 1
+    )
+),
+FinalReport AS (
+    SELECT 
+        n.n_name, 
+        ns.total_suppliers, 
+        ns.total_account_balance, 
+        ns.avg_account_balance, 
+        (CASE WHEN ns.total_revenue > 0 THEN 'Profitable' ELSE 'Not Profitable' END) AS revenue_status,
+        cd.null_balance_count,
+        cd.max_balance,
+        cd.min_balance
+    FROM NationSupplierRevenue ns
+    LEFT JOIN CustomerDetails cd ON ns.n_nationkey = cd.c_nationkey
+)
+SELECT 
+    fr.n_name,
+    fr.total_suppliers,
+    fr.total_account_balance,
+    fr.avg_account_balance,
+    fr.revenue_status,
+    fr.null_balance_count,
+    fr.max_balance,
+    fr.min_balance
+FROM FinalReport fr
+WHERE fr.avg_account_balance > (
+    SELECT AVG(avg_account_balance) FROM SupplierStats
+) 
+OR fr.null_balance_count > 5
+ORDER BY fr.total_account_balance DESC, fr.revenue_status;

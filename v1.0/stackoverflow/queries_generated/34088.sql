@@ -1,0 +1,96 @@
+WITH RecursivePosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        1 AS Depth
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        rp.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+),
+PostVotes AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostWithVotes AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        COALESCE(rv.UpVotes, 0) - COALESCE(rv.DownVotes, 0) AS ScoreDifference,
+        CASE 
+            WHEN p.ParentId IS NOT NULL THEN 'Answer'
+            ELSE 'Question'
+        END AS PostType,
+        rp.Depth
+    FROM Posts p
+    LEFT JOIN PostVotes rv ON p.Id = rv.PostId
+    LEFT JOIN RecursivePosts rp ON p.Id = rp.PostId
+),
+ClosedPostCount AS (
+    SELECT
+        COUNT(*) AS ClosedPostCount
+    FROM Posts
+    WHERE ClosedDate IS NOT NULL
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+    HAVING COUNT(DISTINCT p.Id) > 5
+),
+FinalOutput AS (
+    SELECT
+        pw.Title,
+        pw.CreationDate,
+        pw.UpVotes,
+        pw.DownVotes,
+        pw.ScoreDifference,
+        pw.PostType,
+        tp.DisplayName,
+        tp.TotalBadges,
+        tp.TotalPosts,
+        c.ClosedPostCount
+    FROM PostWithVotes pw
+    JOIN TopUsers tp ON pw.Depth = 1 -- join to get only top users who created questions
+    CROSS JOIN ClosedPostCount c
+    WHERE pw.ScoreDifference > 10
+)
+
+SELECT 
+    Title, 
+    CreationDate, 
+    UpVotes, 
+    DownVotes, 
+    ScoreDifference, 
+    PostType, 
+    DisplayName, 
+    TotalBadges, 
+    TotalPosts, 
+    ClosedPostCount
+FROM FinalOutput
+ORDER BY CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

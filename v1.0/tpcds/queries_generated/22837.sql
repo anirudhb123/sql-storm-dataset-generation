@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        ws.ws_net_profit,
+        ws.ws_net_paid,
+        w.w_warehouse_name,
+        ca.ca_city,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status,
+        DATEADD(DAY, - (DATEDIFF(DAY, 0, d.d_date) % 30), d.d_date) AS month_start
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        (ws.ws_net_profit IS NOT NULL OR ws.ws_net_paid > 100 OR ws.ws_net_paid IS NULL)
+)
+SELECT 
+    r.ws_item_sk,
+    r.ws_order_number,
+    r.ws_net_profit,
+    r.w_warehouse_name,
+    r.ca_city,
+    r.cd_gender,
+    r.marital_status,
+    COALESCE(r.ws_net_paid, 0) AS net_paid,
+    COUNT(*) OVER (PARTITION BY r.ws_item_sk) AS total_orders,
+    SUM(r.ws_net_profit) OVER (PARTITION BY r.ws_item_sk) AS total_net_profit,
+    CASE 
+        WHEN r.rn = 1 THEN 'Top Sales'
+        ELSE 'Other Sales'
+    END AS sales_classification
+FROM 
+    RankedSales r
+WHERE 
+    r.rn <= 5
+UNION ALL
+SELECT 
+    NULL AS ws_item_sk,
+    NULL AS ws_order_number,
+    NULL AS ws_net_profit,
+    w.w_warehouse_name,
+    NULL AS ca_city,
+    NULL AS cd_gender,
+    'Total' AS marital_status,
+    SUM(r.ws_net_paid) AS net_paid,
+    COUNT(*) AS total_orders,
+    SUM(r.ws_net_profit) AS total_net_profit,
+    'Warehouse Summary' AS sales_classification
+FROM 
+    RankedSales r
+JOIN 
+    warehouse w ON r.w_warehouse_name = w.w_warehouse_name
+GROUP BY 
+    w.w_warehouse_name
+ORDER BY 
+    ws_item_sk DESC NULLS LAST, ws_order_number DESC NULLS FIRST;

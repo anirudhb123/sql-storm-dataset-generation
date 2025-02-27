@@ -1,0 +1,49 @@
+WITH RECURSIVE CustomerOrderCount AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    UNION ALL
+    SELECT coc.c_custkey, coc.c_name, coc.order_count + 1
+    FROM CustomerOrderCount coc
+    WHERE coc.order_count < 10
+),
+SupplierPartDetails AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredOrderPayments AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_payment
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shippingdate BETWEEN '2023-01-01' AND '2023-12-31' 
+    GROUP BY o.o_orderkey
+),
+NationRegionDetails AS (
+    SELECT n.n_name, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    co.c_name,
+    co.order_count,
+    sr.s_name AS supplier_name,
+    sr.p_name AS part_name,
+    fr.total_payment,
+    nr.supplier_count,
+    CASE 
+        WHEN fr.total_payment IS NULL THEN 'No Payments'
+        ELSE 'Payments Exist'
+    END AS payment_status
+FROM CustomerOrderCount co
+LEFT JOIN SupplierPartDetails sr ON co.order_count = sr.rn
+LEFT JOIN FilteredOrderPayments fr ON co.custkey = fr.o_orderkey
+LEFT JOIN NationRegionDetails nr ON sr.s_suppliername = nr.n_name
+WHERE co.order_count > 5
+AND (nr.supplier_count IS NULL OR nr.supplier_count > 1)
+ORDER BY co.order_count DESC, fr.total_payment DESC;

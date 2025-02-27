@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_quantity, 
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+item_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(sc.ws_quantity) AS total_quantity,
+        SUM(sc.ws_ext_sales_price) AS total_sales,
+        AVG(sc.ws_net_profit) AS avg_net_profit
+    FROM sales_cte sc
+    JOIN item i ON sc.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+),
+top_items AS (
+    SELECT 
+        i_item_id, 
+        total_quantity, 
+        total_sales, 
+        avg_net_profit,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM item_sales
+)
+SELECT 
+    ti.i_item_id, 
+    ti.total_quantity, 
+    ti.total_sales, 
+    ti.avg_net_profit, 
+    ci.c_first_name || ' ' || ci.c_last_name AS customer_full_name,
+    da.ca_city, 
+    da.ca_state 
+FROM top_items ti
+LEFT JOIN web_sales ws ON ti.i_item_id = ws.ws_item_sk
+LEFT JOIN customer ci ON ws.ws_ship_customer_sk = ci.c_customer_sk
+LEFT JOIN customer_address da ON ci.c_current_addr_sk = da.ca_address_sk
+WHERE sales_rank <= 10 
+AND da.ca_state IS NOT NULL
+ORDER BY ti.total_sales DESC;
+

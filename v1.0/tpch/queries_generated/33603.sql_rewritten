@@ -1,0 +1,49 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_sales, 
+        COUNT(o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+region_sales AS (
+    SELECT 
+        r.r_name,
+        SUM(ss.total_sales) AS total_region_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN sales_summary ss ON n.n_nationkey = ss.c_custkey
+    GROUP BY r.r_name
+),
+part_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_part_sales,
+        COUNT(DISTINCT li.l_orderkey) AS total_orders,
+        AVG(li.l_quantity) AS avg_quantity
+    FROM part p
+    JOIN lineitem li ON p.p_partkey = li.l_partkey
+    WHERE li.l_shipdate BETWEEN '1997-01-01' AND cast('1998-10-01' as date)
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region_name,
+    ps.p_name AS part_name,
+    ps.total_part_sales,
+    rs.total_region_sales,
+    CASE 
+        WHEN ps.total_part_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Found'
+    END AS sales_status,
+    COALESCE(ps.avg_quantity, 0) AS average_order_quantity,
+    ss.order_count AS customer_order_count,
+    ss.sales_rank
+FROM region_sales rs
+FULL OUTER JOIN part_sales ps ON ps.total_part_sales / NULLIF(rs.total_region_sales, 0) > 0
+JOIN sales_summary ss ON ss.total_sales > (SELECT AVG(total_sales) FROM sales_summary)
+ORDER BY rs.total_region_sales DESC, ps.total_part_sales DESC;

@@ -1,0 +1,75 @@
+-- Performance benchmarking query for Stack Overflow schema
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        pt.Name AS PostType
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.UserId,
+        us.Reputation,
+        us.PostCount,
+        us.BadgeCount,
+        us.UpVotes,
+        us.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY us.Reputation DESC) AS Rank
+    FROM 
+        UserStats us
+)
+SELECT 
+    tu.Rank,
+    tu.UserId,
+    tu.Reputation,
+    tu.PostCount,
+    tu.BadgeCount,
+    tu.UpVotes,
+    tu.DownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.PostType
+FROM 
+    TopUsers tu
+JOIN 
+    PostStats ps ON tu.UserId = ps.OwnerUserId
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.Rank;

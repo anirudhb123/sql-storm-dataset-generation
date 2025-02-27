@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        s.ss_sold_date_sk,
+        SUM(s.ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(s.ss_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address, s.ss_sold_date_sk
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        s.ss_sold_date_sk,
+        SUM(s.ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(s.ss_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    JOIN 
+        sales_hierarchy sh ON c.c_customer_sk = sh.c_customer_sk
+    WHERE 
+        sh.total_sales < (SELECT AVG(total_sales) FROM sales_hierarchy)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address, s.ss_sold_date_sk
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    sh.c_customer_sk,
+    sh.c_first_name,
+    sh.c_last_name,
+    sh.c_email_address,
+    ah.ca_city,
+    ah.ca_state,
+    ah.customer_count,
+    (CASE 
+        WHEN sh.total_sales IS NULL THEN 0 
+        ELSE sh.total_sales 
+     END) AS total_sales
+FROM 
+    sales_hierarchy sh
+FULL OUTER JOIN 
+    address_info ah ON sh.c_customer_sk = ah.customer_count
+WHERE 
+    (sh.total_sales > 100 OR sh.total_sales IS NULL)
+ORDER BY 
+    total_sales DESC;

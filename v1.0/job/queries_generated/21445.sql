@@ -1,0 +1,95 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year) AS rank_per_year,
+        COUNT(c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+MoviesWithRoles AS (
+    SELECT 
+        r.movie_id,
+        r.person_id,
+        rt.role,
+        COALESCE(c.name, cn.name) AS actor_name
+    FROM 
+        cast_info r
+    JOIN 
+        role_type rt ON r.role_id = rt.id
+    LEFT JOIN 
+        aka_name c ON r.person_id = c.person_id
+    LEFT JOIN 
+        char_name cn ON cn.imdb_id = r.person_id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    STRING_AGG(DISTINCT mw.actor_name || ' (' || mw.role || ')', '; ') AS cast_details
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+LEFT JOIN 
+    MoviesWithRoles mw ON rm.movie_id = mw.movie_id
+WHERE 
+    rm.rank_per_year < 5
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, rm.cast_count
+ORDER BY 
+    rm.production_year DESC, rm.title
+HAVING 
+    COUNT(mw.person_id) > 0
+    AND MAX(mw.role) IS NOT NULL;
+
+-- The following is a second part to illustrate set operations and NULL logic.
+
+SELECT 
+    DISTINCT mv.title, 
+    mv.production_year
+FROM 
+    aka_title mv
+WHERE 
+    mv.production_year IN (SELECT DISTINCT production_year FROM aka_title WHERE production_year IS NOT NULL)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM complete_cast mc
+        WHERE mc.movie_id = mv.id
+          AND mc.status_id = (SELECT id FROM info_type WHERE info = 'Canceled')
+    )
+UNION
+SELECT 
+    mv.title, 
+    NULL AS production_year
+FROM 
+    aka_title mv
+WHERE 
+    NOT EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = mv.id
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Not Available')
+    );

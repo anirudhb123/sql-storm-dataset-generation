@@ -1,0 +1,32 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws.customer_sk, SUM(ws.ext_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.customer_sk
+    HAVING SUM(ws.ext_sales_price) > 1000
+    UNION ALL
+    SELECT c.customer_sk, COALESCE(SUM(ss.ext_sales_price), 0) AS total_sales
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY c.customer_sk
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate,
+    SUM(s.total_sales) AS total_sales,
+    MAX(s.total_sales) AS highest_sale,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', ') AS customer_names
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN Sales_CTE s ON s.customer_sk = c.c_customer_sk
+WHERE ca.ca_state = 'CA'
+  AND (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M')
+GROUP BY ca.ca_city
+HAVING COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY customer_count DESC
+LIMIT 10;

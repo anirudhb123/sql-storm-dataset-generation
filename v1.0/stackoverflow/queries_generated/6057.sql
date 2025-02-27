@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2)
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN 1 ELSE 0 END) AS TotalAcceptedAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 1
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastRevisionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    tc.DisplayName AS TopContributor,
+    tc.TotalPosts,
+    tc.TotalAcceptedAnswers,
+    ph.RevisionCount,
+    ph.LastRevisionDate
+FROM 
+    RankedPosts rp
+JOIN 
+    TopContributors tc ON rp.OwnerUserId = tc.UserId
+JOIN 
+    PostHistoryStats ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.PostRank <= 3
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

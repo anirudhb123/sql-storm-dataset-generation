@@ -1,0 +1,85 @@
+
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, 
+        ss_item_sk
+),
+top_stores AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(total_quantity) AS store_total_quantity, 
+        SUM(total_sales) AS store_total_sales
+    FROM 
+        order_summary
+    WHERE 
+        sales_rank <= 5  -- only take top 5 items based on sales
+    GROUP BY 
+        ss_store_sk
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM  
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        c.c_birth_year >= (EXTRACT(YEAR FROM CURRENT_DATE) - 18)  -- customers over 18
+),
+sales_details AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) 
+                                FROM date_dim 
+                                WHERE d_year = (EXTRACT(YEAR FROM CURRENT_DATE) - 1))  -- sales from last year
+),
+final_report AS (
+    SELECT 
+        sd.ss_store_sk,
+        SUM(sd.total_quantity) AS total_quantity,
+        SUM(CASE WHEN cd.income_band = -1 THEN 0 ELSE sd.ss_net_paid END) AS total_known_income_sales,
+        AVG(CASE WHEN cd.income_band != -1 THEN sd.ss_net_paid ELSE NULL END) AS avg_known_income_sales,
+        COUNT(DISTINCT cd.c_customer_sk) AS unique_customer_count
+    FROM 
+        order_summary sd
+    LEFT JOIN 
+        customer_details cd ON sd.ss_item_sk = cd.c_customer_sk
+    JOIN 
+        top_stores ts ON sd.ss_store_sk = ts.ss_store_sk
+    GROUP BY
+        sd.ss_store_sk
+)
+SELECT 
+    ts.ss_store_sk,
+    ts.store_total_quantity,
+    ts.store_total_sales,
+    COALESCE(fr.total_quantity, 0) AS recent_total_quantity,
+    COALESCE(fr.total_known_income_sales, 0) AS recent_total_known_income_sales,
+    COALESCE(fr.avg_known_income_sales, 0) AS recent_avg_known_income_sales,
+    COALESCE(fr.unique_customer_count, 0) AS recent_unique_customer_count
+FROM 
+    top_stores ts
+LEFT JOIN 
+    final_report fr ON ts.ss_store_sk = fr.ss_store_sk
+ORDER BY 
+    ts.store_total_sales DESC;

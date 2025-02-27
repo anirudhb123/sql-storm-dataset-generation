@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id, v.VoteTypeId HAVING v.VoteTypeId = 2) AS UpVotesCount,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id, v.VoteTypeId HAVING v.VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(pb.UpVotesCount, 0)) AS TotalUpVotes,
+        SUM(COALESCE(pb.DownVotesCount, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts pb ON u.Id = pb.OwnerUserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.PostRank,
+        COALESCE(tu.TotalUpVotes, 0) AS UserUpVotes,
+        COALESCE(tu.TotalDownVotes, 0) AS UserDownVotes,
+        GREATEST(COALESCE(tu.TotalUpVotes, 0) - COALESCE(tu.TotalDownVotes, 0), 0) AS NetUpVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.UserId
+    WHERE 
+        rp.PostRank = 1
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.UserUpVotes,
+    tp.UserDownVotes,
+    tp.NetUpVotes,
+    CASE 
+        WHEN tp.NetUpVotes > 50 THEN 'Highly Favorable'
+        WHEN tp.NetUpVotes BETWEEN 20 AND 50 THEN 'Favorably Received'
+        WHEN tp.NetUpVotes BETWEEN 0 AND 20 THEN 'Mixed Reviews'
+        ELSE 'Poor Reception'
+    END AS ReceptionStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(p.Tags, '<>')) AS TagName) t ON true
+WHERE 
+    p.PostTypeId = 1
+GROUP BY 
+    tp.Title, tp.Score, tp.UserUpVotes, tp.UserDownVotes, tp.NetUpVotes
+HAVING 
+    SUM(CASE WHEN p.ClosedDate IS NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    tp.Score DESC, tp.NetUpVotes DESC;

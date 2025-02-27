@@ -1,0 +1,41 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees,
+           s_floor_space, s_state,
+           (SELECT COUNT(DISTINCT ws_order_number) 
+            FROM web_sales 
+            WHERE ws_ship_addr_sk = c.c_current_addr_sk) AS online_sales_count
+    FROM store s
+    JOIN customer c ON s_store_sk = c.c_current_addr_sk
+    WHERE s_closed_date_sk IS NULL
+
+    UNION ALL
+
+    SELECT s_store_sk, s_store_name, s_number_employees,
+           s_floor_space, s_state,
+           online_sales_count + (SELECT COUNT(DISTINCT ws_order_number) 
+                                  FROM web_sales 
+                                  WHERE ws_ship_addr_sk = c.c_current_addr_sk) 
+    FROM sales_hierarchy sh
+    JOIN store s ON sh.s_store_sk = s.s_store_sk
+    JOIN customer c ON s_store_sk = c.c_current_addr_sk
+    WHERE sh.online_sales_count < (SELECT AVG(ws_quantity) 
+                                    FROM web_sales) 
+    AND s_closed_date_sk IS NULL
+)
+
+SELECT sh.s_store_name,
+       sh.s_state,
+       COUNT(c.c_customer_sk) AS customer_count,
+       SUM(ss_net_profit) AS total_net_profit,
+       AVG(sh.s_floor_space) AS avg_floor_space,
+       MAX(sh.online_sales_count) AS max_online_sales,
+       MIN(sh.online_sales_count) AS min_online_sales
+FROM sales_hierarchy sh
+LEFT JOIN store_sales ss ON sh.s_store_sk = ss.ss_store_sk
+LEFT JOIN customer c ON c.c_current_addr_sk = sh.s_store_sk
+WHERE c.c_birth_year IS NOT NULL
+  AND sh.online_sales_count IS NOT NULL
+GROUP BY sh.s_store_name, sh.s_state
+HAVING SUM(ss.ss_net_profit) > 0
+ORDER BY total_net_profit DESC;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2459586 AND 2459671 
+),
+cumulative_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.ws_sales_price,
+        SUM(sd.ws_sales_price * sd.ws_quantity) OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.rn ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS total_sales,
+        COUNT(sd.ws_quantity) OVER (PARTITION BY sd.ws_item_sk) AS total_orders
+    FROM 
+        sales_data sd
+),
+top_items AS (
+    SELECT 
+        cs.ws_item_sk,
+        cs.total_sales,
+        cs.total_orders,
+        ROW_NUMBER() OVER (ORDER BY cs.total_sales DESC) AS ranking
+    FROM 
+        cumulative_sales cs
+)
+SELECT 
+    ti.ws_item_sk,
+    i.i_item_desc,
+    ti.total_sales,
+    ti.total_orders,
+    CASE 
+        WHEN ti.total_orders = 0 THEN 'N/A'
+        ELSE ROUND(ti.total_sales / NULLIF(ti.total_orders, 0), 2)
+    END AS average_sales_per_order,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT sr_returning_customer_sk) 
+        FROM 
+            store_returns sr 
+        WHERE 
+            sr_item_sk = ti.ws_item_sk
+    ), 0) AS total_returns
+FROM 
+    top_items ti
+JOIN 
+    item i ON ti.ws_item_sk = i.i_item_sk
+WHERE 
+    ti.ranking <= 10
+ORDER BY 
+    ti.total_sales DESC;

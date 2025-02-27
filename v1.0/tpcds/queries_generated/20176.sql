@@ -1,0 +1,55 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        sr_reason_sk,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY sr_return_quantity DESC) AS rn,
+        SUM(sr_return_quantity) OVER (PARTITION BY sr_returning_customer_sk) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) OVER (PARTITION BY sr_returning_customer_sk) AS return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+HighReturnCustomers AS (
+    SELECT 
+        r.rc_returning_customer_sk,
+        r.sr_reason_sk,
+        r.total_returns,
+        r.return_count
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.return_count > 5 AND r.total_returns > 100
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        r.rc_returning_customer_sk,
+        r.total_returns
+    FROM 
+        HighReturnCustomers r
+    JOIN customer c ON r.rc_returning_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    cu.c_customer_id,
+    cu.c_first_name,
+    cu.c_last_name,
+    cu.cd_gender,
+    COALESCE(NULLIF(cu.cd_marital_status, 'S'), 'Unknown') AS marital_status,
+    SUM(CASE WHEN ca.ca_state = 'CA' THEN 1 ELSE 0 END) AS ca_count,
+    AVG(CASE WHEN cu.total_returns > 150 THEN cu.total_returns ELSE NULL END) AS avg_high_returns,
+    STRING_AGG(DISTINCT CONCAT(ca.ca_city, ', ', ca.ca_country), '; ') AS cities_with_returns
+FROM 
+    CustomerDetails cu
+LEFT OUTER JOIN customer_address ca ON cu.rc_returning_customer_sk = ca.ca_address_sk
+GROUP BY 
+    cu.c_customer_id, cu.c_first_name, cu.c_last_name, cu.cd_gender, cu.cd_marital_status
+ORDER BY 
+    avg_high_returns DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

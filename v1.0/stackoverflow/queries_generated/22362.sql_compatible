@@ -1,0 +1,83 @@
+
+WITH PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes, 
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (6, 10)) AS CloseVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 4) AS FavoriteVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostWithVoteSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes,
+        COALESCE(vs.CloseVotes, 0) AS CloseVotes,
+        COALESCE(vs.FavoriteVotes, 0) AS FavoriteVotes,
+        COALESCE(vs.TotalVotes, 0) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary vs ON p.Id = vs.PostId
+),
+RankedPosts AS (
+    SELECT 
+        pws.*,
+        RANK() OVER (ORDER BY pws.Score DESC, pws.ViewCount DESC) AS Rank
+    FROM 
+        PostWithVoteSummary pws
+),
+ClosedPosts AS (
+    SELECT 
+        pws.*,
+        COUNT(ph.Id) AS CloseHistoryCount
+    FROM 
+        RankedPosts pws
+    LEFT JOIN 
+        PostHistory ph ON pws.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY 
+        pws.Id, pws.Title, pws.CreationDate, pws.Score, pws.ViewCount, pws.UpVotes, pws.DownVotes, pws.CloseVotes, pws.FavoriteVotes, pws.TotalVotes, pws.Rank
+)
+SELECT 
+    cp.Id,
+    cp.Title,
+    cp.CreationDate,
+    cp.Score,
+    cp.ViewCount,
+    cp.UpVotes,
+    cp.DownVotes,
+    cp.CloseVotes,
+    cp.FavoriteVotes,
+    cp.TotalVotes,
+    cp.Rank,
+    cp.CloseHistoryCount,
+    CASE 
+        WHEN cp.CloseHistoryCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))::integer))
+    ) AS TagsList,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = cp.Id
+    ) AS CommentCount
+FROM 
+    ClosedPosts cp
+WHERE 
+    cp.Rank <= 50
+ORDER BY 
+    cp.Rank
+LIMIT 10;

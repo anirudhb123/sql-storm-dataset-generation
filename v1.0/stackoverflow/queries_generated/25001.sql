@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id 
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Get top 5 questions per tag
+),
+TagsWithCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        TagName
+),
+AggregatedResults AS (
+    SELECT 
+        tp.TagName,
+        tp.TagCount,
+        COUNT(*) AS PostCount,
+        ARRAY_AGG(fp.Title) AS TopPostTitles,
+        ARRAY_AGG(fp.CreationDate ORDER BY fp.CreationDate) AS LatestPosts
+    FROM 
+        TagsWithCounts tp
+    JOIN 
+        FilteredPosts fp ON fp.Tags ILIKE '%' || tp.TagName || '%'
+    GROUP BY 
+        tp.TagName, tp.TagCount
+)
+SELECT 
+    ag.TagName,
+    ag.TagCount,
+    ag.PostCount,
+    ag.TopPostTitles,
+    ag.LatestPosts
+FROM 
+    AggregatedResults ag
+WHERE 
+    ag.TagCount >= 3
+ORDER BY 
+    ag.TagCount DESC, ag.PostCount DESC;
+

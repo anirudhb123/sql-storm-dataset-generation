@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC, ws.ws_order_number DESC) as rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ext_sales_price > (SELECT AVG(ws_inner.ws_ext_sales_price) FROM web_sales ws_inner WHERE ws_inner.ws_web_site_sk = ws.ws_web_site_sk)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_credit_rating,
+        COALESCE(SUM(ss.ss_net_profit), 0) as total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_credit_rating
+    HAVING 
+        SUM(ss.ss_net_profit) IS NOT NULL AND 
+        SUM(ss.ss_net_profit) > 10000
+),
+ProductReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) as total_returns,
+        SUM(cr.cr_net_loss) as total_loss
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr.cr_item_sk
+)
+SELECT 
+    r.web_site_sk,
+    r.ws_order_number,
+    r.ws_ext_sales_price,
+    h.c_customer_id,
+    h.c_first_name,
+    h.c_last_name,
+    h.total_profit,
+    p.total_returns,
+    p.total_loss,
+    CASE 
+        WHEN p.total_returns IS NULL OR p.total_returns = 0 THEN 'No Returns' 
+        WHEN p.total_returns > 5 THEN 'High Returns'
+        ELSE 'Normal Returns' 
+    END AS return_status
+FROM 
+    RankedSales r
+JOIN 
+    HighValueCustomers h ON r.web_site_sk = h.c_customer_id
+LEFT JOIN 
+    ProductReturns p ON r.ws_order_number = p.cr_item_sk
+WHERE 
+    r.rnk = 1 AND 
+    h.total_profit IS NOT NULL AND 
+    h.total_profit <> 0
+ORDER BY 
+    r.ws_ext_sales_price DESC, 
+    h.total_profit DESC;

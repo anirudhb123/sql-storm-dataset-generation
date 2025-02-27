@@ -1,0 +1,52 @@
+WITH movie_stats AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+rated_movies AS (
+    SELECT 
+        ms.movie_id,
+        ms.movie_title,
+        ms.production_year,
+        ms.keywords,
+        ms.cast_count,
+        ms.actors,
+        AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN mi.info::float END) AS average_rating
+    FROM 
+        movie_stats ms
+    LEFT JOIN 
+        movie_info mi ON ms.movie_id = mi.movie_id
+    GROUP BY 
+        ms.movie_id, ms.movie_title, ms.production_year, ms.keywords, ms.cast_count, ms.actors
+)
+SELECT 
+    r.movie_id,
+    r.movie_title,
+    r.production_year,
+    r.keywords,
+    r.cast_count,
+    r.actors,
+    r.average_rating
+FROM 
+    rated_movies r
+WHERE 
+    r.average_rating IS NOT NULL
+ORDER BY 
+    r.average_rating DESC, r.production_year DESC
+LIMIT 10;

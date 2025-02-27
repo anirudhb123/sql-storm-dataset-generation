@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sold_date_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid > 100
+        AND ws_quantity IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS total_quantity,
+        SUM(rs.ws_net_paid) AS total_revenue
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn <= 10
+    GROUP BY 
+        rs.ws_item_sk
+),
+WarehouseShipping AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_shipments,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) IS NOT NULL
+)
+SELECT 
+    COALESCE(ts.ws_item_sk, ws.ws_item_sk) AS item_id,
+    ts.total_quantity,
+    ts.total_revenue,
+    ws.total_shipments,
+    ws.total_net_paid
+FROM 
+    TopSales ts
+FULL OUTER JOIN 
+    WarehouseShipping ws ON ts.ws_item_sk = ws.ws_item_sk
+WHERE 
+    (ts.total_revenue > 500 OR ws.total_shipments IS NULL)
+    AND (ts.ws_item_sk IS NOT NULL OR ws.total_shipments IS NOT NULL)
+ORDER BY 
+    total_revenue DESC NULLS LAST, 
+    total_shipments ASC NULLS FIRST;

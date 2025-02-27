@@ -1,0 +1,46 @@
+WITH RECURSIVE customer_cte AS (
+    SELECT c_custkey, c_name, c_acctbal, c_mktsegment
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_mktsegment
+    FROM customer c
+    INNER JOIN customer_cte cte ON c.c_custkey = cte.c_custkey + 1
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment IS NOT NULL
+),
+supplier_aggregate AS (
+    SELECT s.s_nationkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name, COALESCE(SUM(sa.total_supplycost), 0) AS national_supplycost
+    FROM nation n
+    LEFT JOIN supplier_aggregate sa ON n.n_nationkey = sa.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+detailed_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+final_selection AS (
+    SELECT cte.c_custkey, cte.c_name, ni.n_name, ni.national_supplycost, do.order_total
+    FROM customer_cte cte
+    JOIN nation_info ni ON cte.c_custkey % 5 = ni.n_nationkey
+    LEFT JOIN detailed_orders do ON do.o_orderkey = cte.c_custkey
+    WHERE ni.national_supplycost > (SELECT AVG(national_supplycost) FROM nation_info)
+    OR (cte.c_name LIKE '%Inc%' AND do.order_total IS NOT NULL)
+)
+SELECT f.c_custkey, f.c_name, f.n_name, f.national_supplycost, 
+    CASE 
+        WHEN f.order_total IS NULL THEN 'No Orders'
+        WHEN f.national_supplycost IS NULL THEN 'No Suppliers'
+        ELSE 'Active Customer'
+    END AS status
+FROM final_selection f
+ORDER BY f.national_supplycost DESC, f.c_name ASC
+LIMIT 50;

@@ -1,0 +1,74 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+lineitem_details AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-06-01' AND DATE '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.total_supply_cost,
+    lo.l_orderkey,
+    lo.net_revenue,
+    lo.item_count,
+    ro.o_orderstatus,
+    ro.o_orderdate
+FROM 
+    customer_summary c
+LEFT JOIN 
+    ranked_orders ro ON c.order_count > 0 AND ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    lineitem_details lo ON ro.o_orderkey = lo.l_orderkey
+JOIN 
+    supplier_info s ON s.total_supply_cost > 10000
+WHERE 
+    c.total_spent IS NOT NULL 
+    AND s.s_name IS NOT NULL
+ORDER BY 
+    c.total_spent DESC, lo.net_revenue DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        mt.production_year
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        at.production_year
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    COUNT(DISTINCT mk.keyword) AS num_keywords,
+    ROUND(AVG(CASE WHEN mi.info IS NOT NULL THEN LENGTH(mi.info) ELSE 0 END), 2) AS avg_info_length
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.production_year BETWEEN 2000 AND 2023
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%extra%')
+GROUP BY 
+    ak.name, mt.title, mh.level
+ORDER BY 
+    ak.name, mt.title, mh.level DESC;

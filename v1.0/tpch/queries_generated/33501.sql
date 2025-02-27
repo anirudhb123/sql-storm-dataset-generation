@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplyData AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+           COALESCE(AVG(ps.ps_supplycost), 0) AS avg_supply_cost,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ph.s_name AS supplier_name,
+       c.c_name AS customer_name,
+       pc.p_name AS part_name,
+       poc.total_available,
+       poc.avg_supply_cost,
+       cc.order_count,
+       ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY poc.total_available DESC) AS rank
+FROM SupplierHierarchy sh
+JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+INNER JOIN customer c ON s.s_nationkey = c.c_nationkey
+JOIN CustomerOrderCounts cc ON c.c_custkey = cc.c_custkey
+LEFT JOIN PartSupplyData poc ON c.c_custkey = (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE 'Widget%'))
+WHERE cc.order_count > 5
+ORDER BY supplier_name, customer_name, total_available DESC;

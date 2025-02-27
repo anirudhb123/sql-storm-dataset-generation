@@ -1,0 +1,60 @@
+WITH Supplier_Average_Cost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+Customer_Account_Balance AS (
+    SELECT c.c_custkey, 
+           SUM(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS total_order_value,
+           c.c_acctbal
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_acctbal
+),
+Part_Supplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+Nation_Customer AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT c.c_custkey) > 0
+)
+SELECT p.p_partkey, 
+       p.p_name, 
+       p.supplier_count, 
+       p.total_available_qty, 
+       COALESCE(s.avg_cost, 0) AS supplier_avg_cost, 
+       CASE 
+           WHEN ca.total_order_value IS NULL THEN 'No Orders Made' 
+           WHEN ca.total_order_value > 10000 THEN 'High Value Customer' 
+           ELSE 'Regular Customer' 
+       END AS customer_status,
+       CASE 
+           WHEN n.customer_count IS NULL THEN 'No Customers in Nation' 
+           ELSE CAST(n.customer_count AS VARCHAR)
+       END AS customers_in_nation
+FROM Part_Supplier p
+LEFT JOIN Supplier_Average_Cost s ON p.p_partkey = s.s_partkey
+LEFT JOIN Customer_Account_Balance ca ON ca.c_custkey = 
+    (SELECT c.c_custkey 
+     FROM customer c 
+     WHERE c.c_acctbal = (SELECT MAX(c2.c_acctbal) 
+                          FROM customer c2 
+                          WHERE c2.c_nationkey IN (SELECT n.n_nationkey 
+                                                     FROM nation n)))
+
+LEFT JOIN Nation_Customer n ON 1=1
+WHERE (p.total_available_qty IS NOT NULL OR p.supplier_count IS NOT NULL)
+  AND p.total_available_qty > (SELECT AVG(total_available_qty) FROM Part_Supplier)
+ORDER BY p.p_partkey DESC
+FETCH FIRST 10 ROWS ONLY;

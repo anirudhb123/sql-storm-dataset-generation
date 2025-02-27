@@ -1,0 +1,44 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS city,
+        ca.state AS state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count,
+        SUM(ss.ss_sales_price) AS total_sales
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        ca.city, ca.state
+), 
+ExtendedDetails AS (
+    SELECT 
+        city,
+        state,
+        customer_count,
+        sales_count,
+        total_sales,
+        RANK() OVER (PARTITION BY state ORDER BY total_sales DESC) AS state_sales_rank
+    FROM 
+        AddressDetails
+)
+
+SELECT 
+    ed.city, 
+    ed.state, 
+    ed.customer_count, 
+    ed.sales_count,
+    ed.total_sales,
+    ed.state_sales_rank,
+    ROW_NUMBER() OVER (ORDER BY ed.total_sales DESC) as overall_sales_rank
+FROM 
+    ExtendedDetails ed
+WHERE 
+    ed.customer_count > 0
+ORDER BY 
+    ed.total_sales DESC, 
+    ed.state_sales_rank;

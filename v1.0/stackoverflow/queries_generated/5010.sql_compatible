@@ -1,0 +1,32 @@
+
+WITH RecentActivePosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount, p.Score, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' AND p.PostTypeId IN (1, 2)
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostComments AS (
+    SELECT c.PostId, COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT u.DisplayName, 
+       r.Title AS PostTitle, 
+       rb.BadgeCount, 
+       pc.CommentCount, 
+       r.ViewCount,
+       r.Score,
+       r.CreationDate
+FROM RecentActivePosts r
+JOIN Users u ON r.OwnerUserId = u.Id
+JOIN UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN PostComments pc ON r.Id = pc.PostId
+WHERE r.PostRank = 1
+ORDER BY r.Score DESC, r.ViewCount DESC
+LIMIT 100;

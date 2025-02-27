@@ -1,0 +1,94 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        ps.ps_availqty > 0
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        CASE 
+            WHEN COUNT(o.o_orderkey) > 5 THEN 'Frequent' 
+            ELSE 'Occasional' 
+        END AS customer_type
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierRevenue AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_suppkey
+    HAVING 
+        HAVING SUM(l.l_extendedprice) > 10000
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        order_total >= ALL (SELECT AVG(order_total) 
+                             FROM (SELECT 
+                                        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+                                    FROM 
+                                        orders o 
+                                    JOIN 
+                                        lineitem l ON o.o_orderkey = l.l_orderkey
+                                    GROUP BY 
+                                        o.o_orderkey) AS InnerQuery)
+)
+
+SELECT 
+    hs.s_suppkey,
+    hs.s_name,
+    hs.s_acctbal,
+    hc.c_custkey,
+    hc.c_name,
+    hc.customer_type,
+    CASE 
+        WHEN sr.total_revenue IS NULL THEN 'No Revenue'
+        ELSE sr.total_revenue
+    END AS supplier_revenue
+FROM 
+    RankedSuppliers hs
+FULL OUTER JOIN 
+    HighValueCustomers hc ON hs.s_suppkey = hc.c_custkey
+LEFT JOIN 
+    SupplierRevenue sr ON hs.s_suppkey = sr.l_suppkey
+WHERE 
+    (hs.rank <= 3 OR hc.customer_type = 'Frequent')
+AND 
+    (hc.c_acctbal IS NOT NULL OR hs.s_acctbal > 0)
+ORDER BY 
+    hc.customer_type DESC, 
+    hs.s_acctbal DESC;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE ActorFilmography AS (
+    SELECT 
+        ka.name AS actor_name,
+        kt.title AS movie_title,
+        kt.production_year,
+        1 AS level
+    FROM 
+        aka_name ka 
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    JOIN 
+        aka_title kt ON c.movie_id = kt.id
+    WHERE 
+        ka.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ka.name AS actor_name,
+        kt.title AS movie_title,
+        kt.production_year,
+        af.level + 1
+    FROM 
+        ActorFilmography af
+    JOIN 
+        cast_info c ON af.actor_name = ka.name
+    JOIN 
+        aka_title kt ON c.movie_id = kt.id
+    WHERE 
+        kt.production_year IS NOT NULL
+        AND af.level < 5  
+),
+
+KeywordCount AS (
+    SELECT 
+        ka.person_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    GROUP BY 
+        ka.person_id
+),
+
+RankedActors AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year,
+        ROW_NUMBER() OVER (PARTITION BY actor_name ORDER BY production_year DESC) AS rank
+    FROM 
+        ActorFilmography
+)
+
+SELECT 
+    a.actor_name,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    ra.movie_title,
+    ra.production_year,
+    ra.rank
+FROM 
+    RankedActors ra 
+LEFT JOIN 
+    KeywordCount kc ON ra.actor_name = (SELECT ka.name FROM aka_name ka WHERE ka.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = ra.movie_title) LIMIT 1)
+LEFT JOIN 
+    aka_name a ON a.name = ra.actor_name
+WHERE 
+    ra.rank <= 2
+ORDER BY 
+    a.actor_name, 
+    ra.production_year DESC;

@@ -1,0 +1,34 @@
+-- Performance benchmarking query to get statistics on Posts, Users, and Comments
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(c.CommentCount, 0) AS TotalComments,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    COUNT(pt.Id) AS TotalTags,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id) AS TotalVotes,
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = p.Id) AS TotalHistoryRecords
+FROM
+    Posts p
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS CommentCount
+    FROM Comments
+    GROUP BY PostId
+) c ON p.Id = c.PostId
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT PostId, COUNT(*) AS TotalTags
+    FROM (
+        SELECT DISTINCT unnest(string_to_array(trim(both '{}' from Tags), '><')) AS Tag, PostId
+        FROM Posts
+    ) AS tag_list
+    GROUP BY PostId
+) pt ON p.Id = pt.PostId
+WHERE
+    p.CreationDate >= '2023-01-01'  -- Filtering posts created in the year 2023
+GROUP BY
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.Reputation, c.CommentCount
+ORDER BY
+    p.ViewCount DESC;  -- Order by most viewed posts

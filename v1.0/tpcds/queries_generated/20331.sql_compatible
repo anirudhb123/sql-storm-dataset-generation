@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rnk
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+), 
+TotalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_item_sk
+), 
+SalesWithReturns AS (
+    SELECT 
+        rs.ws_item_sk, 
+        rs.ws_order_number, 
+        rs.ws_sales_price, 
+        rs.ws_quantity, 
+        COALESCE(tr.total_returns, 0) AS total_returns
+    FROM RankedSales rs
+    LEFT JOIN TotalReturns tr ON rs.ws_item_sk = tr.sr_item_sk
+)
+SELECT 
+    swr.ws_item_sk, 
+    swr.ws_order_number,
+    swr.ws_sales_price, 
+    swr.ws_quantity,
+    swr.total_returns,
+    (swr.ws_quantity - swr.total_returns) AS net_sales,
+    CASE 
+        WHEN swr.ws_sales_price IS NULL THEN 'Price Not Available' 
+        ELSE CONCAT('Price: $', CAST(swr.ws_sales_price AS VARCHAR))
+    END AS price_description,
+    CASE 
+        WHEN swr.total_returns = 0 THEN 'No Returns'
+        ELSE 'Returns Exist'
+    END AS return_status,
+    (SELECT COUNT(*) FROM catalog_sales WHERE cs_item_sk = swr.ws_item_sk) AS catalog_count,
+    (SELECT COUNT(*) FROM item WHERE i_item_sk = swr.ws_item_sk AND (i_current_price < 50 OR i_item_desc LIKE '%special%')) AS special_offer_count
+FROM SalesWithReturns swr
+WHERE swr.rnk = 1
+GROUP BY 
+    swr.ws_item_sk, 
+    swr.ws_order_number, 
+    swr.ws_sales_price, 
+    swr.ws_quantity, 
+    swr.total_returns, 
+    swr.rnk
+ORDER BY net_sales DESC 
+LIMIT 10;

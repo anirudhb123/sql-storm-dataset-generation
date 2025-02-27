@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+recent_sales AS (
+    SELECT 
+        ss_item_sk,
+        total_quantity,
+        total_sales,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+    WHERE 
+        total_quantity > 10
+), 
+inventory_data AS (
+    SELECT 
+        i.i_item_sk,
+        inv.inv_quantity_on_hand,
+        (i.i_current_price * inv.inv_quantity_on_hand) AS inventory_value
+    FROM 
+        item i
+    JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    WHERE 
+        inv.inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+)
+SELECT 
+    r.ss_item_sk AS ws_item_sk,
+    r.total_quantity,
+    r.total_sales,
+    COALESCE(i.inv_quantity_on_hand, 0) AS current_inventory,
+    COALESCE(i.inventory_value, 0) AS inventory_value,
+    CASE 
+        WHEN r.total_sales > 5000 THEN 'High Performer'
+        WHEN r.total_sales BETWEEN 1000 AND 5000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    recent_sales r
+LEFT JOIN 
+    inventory_data i ON r.ss_item_sk = i.i_item_sk
+WHERE 
+    r.sales_rank <= 10 
+ORDER BY 
+    r.total_sales DESC;

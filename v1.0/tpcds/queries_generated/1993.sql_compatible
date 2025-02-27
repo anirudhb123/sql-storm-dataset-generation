@@ -1,0 +1,38 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesByMonth AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(cs.total_sales) AS monthly_sales
+    FROM 
+        date_dim d
+    JOIN 
+        CustomerSales cs ON d.d_date_sk IN (SELECT DISTINCT ws.ws_sold_date_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = cs.c_customer_sk)
+    GROUP BY 
+        d.d_month_seq
+)
+SELECT 
+    COALESCE(sb.d_month_seq, 'No sales') AS month,
+    COALESCE(sm.monthly_sales, 0) AS total_sales
+FROM 
+    (SELECT DISTINCT d.d_month_seq FROM date_dim d) sb
+LEFT JOIN 
+    SalesByMonth sm ON sb.d_month_seq = sm.d_month_seq
+ORDER BY 
+    sb.d_month_seq;

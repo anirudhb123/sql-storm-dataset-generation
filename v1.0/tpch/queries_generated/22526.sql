@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey 
+                                                   FROM nation n 
+                                                   WHERE n.n_name = 'GERMANY') 
+    WHERE s.s_acctbal > 2000 AND sh.level < 5
+),
+PartPriorities AS (
+    SELECT DISTINCT p.p_partkey, 
+           COUNT(DISTINCT l.l_orderkey) AS order_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+      AND l.l_returnflag = 'N'
+    GROUP BY p.p_partkey
+)
+SELECT DISTINCT r.r_name, 
+       COALESCE(NULLIF(sh.level, 1), sh.level + 10) AS Supplier_Level,
+       pp.order_count,
+       COALESCE(pp.total_revenue, 0) AS Revenue,
+       CASE WHEN pp.order_count > 100 THEN 'High Volume' 
+            WHEN pp.order_count > 50 THEN 'Medium Volume'
+            ELSE 'Low Volume' END AS Volume_Category,
+       CONCAT('Supplier: ', sh.s_name, ' (Level ', sh.level, ') - ', pp.total_revenue) AS Supplier_Details
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN PartPriorities pp ON pp.p_partkey = (SELECT p.p_partkey 
+                                               FROM part p
+                                               WHERE p.p_size = (SELECT MAX(p2.p_size)
+                                                                  FROM part p2))
+WHERE r.r_name IN ('EUROPE', 'ASIA')
+  AND (sh.level IS NULL OR sh.level BETWEEN 1 AND 3)
+ORDER BY r.r_name, Supplier_Level DESC, Revenue DESC;

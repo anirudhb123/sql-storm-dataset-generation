@@ -1,0 +1,82 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationalityRevenue AS (
+    SELECT 
+        n.n_name AS nation,
+        SUM(od.total_revenue) AS nation_revenue
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY 
+        n.n_name
+),
+PartSupplierStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0.00) AS total_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    ns.nation,
+    p.p_partkey,
+    p.p_name,
+    ps.total_avail_qty,
+    ps.total_cost,
+    od.total_revenue,
+    CASE 
+        WHEN od.total_revenue IS NULL THEN 'No Revenue'
+        WHEN od.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category,
+    COUNT(DISTINCT rs.s_suppkey) AS total_suppliers,
+    AVG(rs.s_acctbal) AS avg_supplier_acctbal
+FROM 
+    NationalityRevenue ns
+FULL OUTER JOIN 
+    OrderDetails od ON ns.nation = od.o_orderkey
+LEFT JOIN 
+    partsupp ps ON od.o_orderkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+GROUP BY 
+    ns.nation, p.p_partkey, p.p_name, ps.total_avail_qty, ps.total_cost, od.total_revenue
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 0 OR od.total_revenue IS NULL
+ORDER BY 
+    ns.nation, revenue_category DESC;

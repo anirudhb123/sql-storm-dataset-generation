@@ -1,0 +1,64 @@
+WITH RECURSIVE Shipment_CTE AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_linenumber) AS row_num
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate > '2023-01-01'
+), 
+Top_Suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_supply_cost DESC 
+    LIMIT 10
+), 
+Customer_Order_Sums AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_customer_spending
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    AVG(cs.total_customer_spending) AS avg_customer_spending,
+    STUFF(STRING_AGG(DISTINCT s.s_name, ', ') WITHIN GROUP (ORDER BY s.s_name), 1, 2, '') AS top_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    Customer_Order_Sums cs ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey LIMIT 1)
+WHERE 
+    l.l_returnflag = 'N' 
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC;

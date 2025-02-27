@@ -1,0 +1,48 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_sales_price, ws_quantity, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN '2021-01-01' AND '2021-12-31'
+),
+Inventory_CTE AS (
+    SELECT inv_date_sk, inv_item_sk, SUM(inv_quantity_on_hand) AS total_quantity
+    FROM inventory
+    GROUP BY inv_date_sk, inv_item_sk
+),
+Customer_Profit AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           SUM(ws.ws_net_profit) AS total_profit, 
+           RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank,
+           cd.cd_gender,
+           CASE 
+               WHEN cd.cd_marital_status = 'M' THEN 'Married'
+               ELSE 'Single'
+           END AS marital_status
+    FROM web_sales AS ws
+    JOIN customer AS c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+Max_Profit_Customer AS (
+    SELECT c_customer_sk, total_profit, marital_status
+    FROM Customer_Profit
+    WHERE profit_rank <= 10
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    SUM(mi.total_quantity) AS total_inventory,
+    cp.total_profit,
+    cp.marital_status
+FROM customer AS c
+LEFT JOIN Inventory_CTE AS mi ON mi.inv_item_sk IN (
+    SELECT ws_item_sk 
+    FROM Sales_CTE
+    WHERE rn = 1
+)
+LEFT JOIN Max_Profit_Customer AS cp ON cp.c_customer_sk = c.c_customer_sk
+WHERE cp.total_profit IS NOT NULL OR total_inventory > 100
+GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cp.total_profit, cp.marital_status
+ORDER BY total_inventory DESC, cp.total_profit DESC;

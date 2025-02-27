@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_name, s_suppkey, s_acctbal, s_comment, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.n_nationkey, s.s_name, s.s_suppkey, (sh.s_acctbal + s.s_acctbal) AS s_acctbal,
+           CONCAT(sh.s_comment, ' | ', s.s_comment), 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY (sh.s_acctbal + s.s_acctbal) DESC)
+    FROM nation s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.s_nationkey
+)
+, PartSupplierRanks AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, 
+           RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS cost_rank
+    FROM partsupp
+    WHERE ps_availqty >= 0
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       SUM(COALESCE(l.l_discount, 0)) AS total_discount,
+       STRING_AGG(DISTINCT r.r_name, ', ') AS regions,
+       RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+FROM part p
+LEFT JOIN PartSupplierRanks ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN supplier sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE p.p_size BETWEEN 1 AND 50 
+  AND (p.p_retailprice * 0.95 > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+      OR p.p_brand = 'Brand#45')
+  AND EXISTS (SELECT 1 
+              FROM customer c 
+              WHERE c.c_nationkey = n.n_nationkey 
+                AND c.c_acctbal IS NOT NULL 
+                AND NOT (c.c_acctbal = 0 OR c.c_acctbal = sh.s_acctbal))
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+HAVING COUNT(DISTINCT sh.s_nationkey) > 1
+ORDER BY price_rank ASC, supplier_count DESC;

@@ -1,0 +1,76 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+InventoryStatus AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(CASE WHEN inv.inv_quantity_on_hand < 10 THEN 1 ELSE 0 END) AS low_stock_count
+    FROM 
+        item i
+    JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+SalesWithInventory AS (
+    SELECT 
+        s.total_quantity,
+        s.total_profit,
+        i.low_stock_count
+    FROM 
+        SalesSummary s
+    LEFT JOIN 
+        InventoryStatus i ON s.web_site_sk = i.i_item_sk  
+),
+FinalReport AS (
+    SELECT 
+        CASE 
+            WHEN cd.customer_count > 100 THEN 'High Demographic'
+            ELSE 'Low Demographic'
+        END AS demographic_status,
+        ss.total_quantity,
+        ss.total_profit,
+        ss.low_stock_count
+    FROM 
+        SalesWithInventory ss
+    JOIN 
+        CustomerDemographics cd ON ss.total_orders = cd.customer_count 
+)
+SELECT 
+    demographic_status,
+    SUM(total_quantity) AS aggregated_quantity,
+    SUM(total_profit) AS aggregated_profit,
+    SUM(low_stock_count) AS aggregated_low_stock
+FROM 
+    FinalReport
+GROUP BY 
+    demographic_status
+ORDER BY 
+    aggregated_profit DESC
+LIMIT 10;

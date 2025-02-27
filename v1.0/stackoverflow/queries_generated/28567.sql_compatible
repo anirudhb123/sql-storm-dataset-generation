@@ -1,0 +1,78 @@
+
+WITH TagStats AS (
+    SELECT 
+        LOWER(TRIM(SUBSTRING(TAGS FROM 2 FOR LENGTH(TAGS) - 2))) AS Tag,
+        COUNT(*) AS TagUseCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        LOWER(TRIM(SUBSTRING(TAGS FROM 2 FOR LENGTH(TAGS) - 2)))
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        (U.UpVotes - U.DownVotes) AS NetVotes,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COALESCE(PH.Comments, 0) AS EditComments
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS Comments
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) PH ON P.Id = PH.PostId
+)
+SELECT 
+    T.Tag,
+    T.TagUseCount,
+    UR.UserId,
+    UR.Reputation,
+    UR.NetVotes,
+    UR.QuestionCount,
+    UR.AnswerCount,
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.LastActivityDate,
+    PA.ViewCount,
+    PA.AnswerCount AS TotalAnswerCount,
+    PA.CommentCount,
+    PA.FavoriteCount,
+    PA.EditComments
+FROM 
+    TagStats T
+JOIN 
+    PostActivity PA ON PA.Title ILIKE '%' || T.Tag || '%'
+JOIN 
+    Users U ON PA.PostId IN (SELECT DISTINCT PostId FROM Votes WHERE UserId = U.Id)
+JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+WHERE 
+    T.TagUseCount > 10  
+ORDER BY 
+    T.TagUseCount DESC, 
+    UR.Reputation DESC;

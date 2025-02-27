@@ -1,0 +1,58 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        ps.* 
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.Rank <= 10
+)
+SELECT 
+    u.DisplayName,
+    upt.UpVotesCount,
+    upt.DownVotesCount,
+    tp.Title AS PostTitle,
+    tp.Score AS PostScore,
+    tp.ViewCount AS PostViewCount,
+    tp.AnswerCount AS PostAnswerCount,
+    tp.CommentCount AS PostCommentCount,
+    tp.PostType
+FROM 
+    UserVoteStats upt
+JOIN 
+    Comments c ON upt.UserId = c.UserId
+JOIN 
+    TopPosts tp ON c.PostId = tp.PostId
+ORDER BY 
+    upt.TotalVotes DESC, 
+    tp.Score DESC;

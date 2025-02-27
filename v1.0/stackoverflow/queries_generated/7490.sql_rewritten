@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.OwnerDisplayName,
+        rp.TotalComments
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1 AND rp.Score > 10
+)
+SELECT 
+    pp.*,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN PostsTags pt ON pp.PostId = pt.PostId 
+     WHERE t.Id = pt.TagId) AS TagsAssociated
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.ViewCount DESC, pp.Score DESC
+LIMIT 10;

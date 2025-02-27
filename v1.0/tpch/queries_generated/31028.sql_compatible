@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        s.c_custkey,
+        s.c_name,
+        s.s_name AS top_supplier,
+        ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS rank
+    FROM 
+        SalesCTE s
+    JOIN 
+        partsupp ps ON s.c_custkey = ps.ps_partkey
+    JOIN 
+        supplier sup ON ps.ps_suppkey = sup.s_suppkey
+    WHERE 
+        s.sales_rank <= 5
+),
+RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(s.total_sales) AS region_sales
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        SalesCTE s ON c.c_custkey = s.c_custkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    r.region_sales,
+    COALESCE(tc.top_supplier, 'N/A') AS top_supplier
+FROM 
+    RegionSales r
+LEFT JOIN 
+    (SELECT 
+        rs.r_name, 
+        FIRST_VALUE(tc.s_name) OVER (PARTITION BY rs.r_name ORDER BY tc.rank) AS top_supplier 
+    FROM 
+        RegionSales rs 
+    JOIN 
+        TopCustomers tc ON rs.region_sales = tc.rank
+    GROUP BY 
+        rs.r_name) tc ON tc.r_name = r.r_name
+WHERE 
+    r.region_sales > (SELECT AVG(region_sales) FROM RegionSales)
+ORDER BY 
+    r.region_sales DESC;

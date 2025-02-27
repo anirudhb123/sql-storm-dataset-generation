@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    WHERE 
+        c.country_code = 'USA' 
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON at.movie_id = ml.linked_movie_id
+)
+
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.movie_title) AS rank,
+    (SELECT AVG(length(note)) FROM cast_info ci WHERE ci.movie_id = m.movie_id) AS avg_note_length
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, m.movie_title, m.production_year
+HAVING 
+    AVG(length(a.name)) > 5
+ORDER BY 
+    m.production_year DESC, total_cast DESC;

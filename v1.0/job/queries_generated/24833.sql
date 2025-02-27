@@ -1,0 +1,63 @@
+WITH RecursiveRoleCTE AS (
+    SELECT 
+        c.id,
+        c.person_id,
+        c.movie_id,
+        c.person_role_id,
+        c.nr_order,
+        c.role_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS rn
+    FROM cast_info c
+    WHERE c.nr_order IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        array_agg(DISTINCT ak.name) AS aka_names,
+        t.production_year,
+        COALESCE(avg(r.role_id), 0) AS avg_role_id,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM aka_title ak
+    JOIN title t ON ak.movie_id = t.id
+    LEFT JOIN RecursiveRoleCTE r ON r.movie_id = t.id
+    LEFT JOIN cast_info c ON c.movie_id = t.id
+    GROUP BY t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        aka_names, 
+        production_year, 
+        avg_role_id, 
+        cast_count
+    FROM MovieDetails
+    WHERE production_year >= 2000 
+      AND cast_count > 5 
+      AND avg_role_id IS NOT NULL
+),
+MaxRole AS (
+    SELECT 
+        production_year,
+        MAX(avg_role_id) AS max_avg_role_id
+    FROM FilteredMovies
+    GROUP BY production_year
+)
+SELECT 
+    f.title,
+    f.aka_names,
+    f.production_year,
+    f.avg_role_id,
+    (CASE
+        WHEN f.production_year = (SELECT MAX(production_year) FROM FilteredMovies) THEN 'Latest'
+        ELSE 'Earlier'
+     END) AS movie_recency,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT c.note, ', ' ORDER BY c.note)
+        FROM cast_info c
+        WHERE c.movie_id = (SELECT m.id FROM title m WHERE m.title = f.title)
+    ), 'No notes available') AS notes
+FROM FilteredMovies f
+JOIN MaxRole m ON f.production_year = m.production_year
+WHERE f.avg_role_id = m.max_avg_role_id
+ORDER BY f.production_year DESC, f.cast_count DESC
+LIMIT 10;

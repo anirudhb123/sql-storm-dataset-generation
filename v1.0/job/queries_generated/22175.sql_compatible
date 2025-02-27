@@ -1,0 +1,91 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_info AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords
+    FROM 
+        aka_name AS a
+    LEFT JOIN 
+        cast_info AS ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword AS mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword AS kt ON mk.keyword_id = kt.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+),
+complex_movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(mc.company_id, 0) AS company_id,
+        ct.kind AS company_type,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL AND ci.note <> '' THEN 1 ELSE 0 END) AS has_note_flag
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year, mc.company_id, ct.kind
+),
+final_result AS (
+    SELECT 
+        r.title_id,
+        r.title,
+        r.production_year,
+        a.name AS actor_name,
+        a.movie_count,
+        m.cast_count,
+        m.company_type,
+        m.has_note_flag,
+        CASE 
+            WHEN m.cast_count > 10 THEN 'Popular'
+            WHEN m.cast_count <= 10 AND m.cast_count > 0 THEN 'Indie'
+            ELSE 'No Cast'
+        END AS classification
+    FROM 
+        ranked_titles r
+    LEFT JOIN 
+        actor_info a ON r.title_id = a.person_id
+    LEFT JOIN 
+        complex_movie_data m ON r.title_id = m.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    movie_count,
+    cast_count,
+    company_type,
+    classification,
+    CONCAT('Movie: ', title, ' | Year: ', production_year, ' | Actors: ', COALESCE(actor_name, 'None'), ' | Classification: ', classification) AS details
+FROM 
+    final_result
+WHERE 
+    (production_year BETWEEN 2000 AND 2023) 
+    AND (classification IS NOT NULL)
+ORDER BY 
+    production_year DESC, title;

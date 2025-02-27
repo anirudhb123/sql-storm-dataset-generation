@@ -1,0 +1,61 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2458849 AND 2458900 -- Date range example
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status
+),
+negative_profit AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_negative_profit
+    FROM web_sales
+    WHERE ws_net_profit < 0
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_net_profit) < -1000 -- considering items with substantial negative profits
+),
+excluded_items AS (
+    SELECT ws_item_sk
+    FROM ranked_sales
+    WHERE profit_rank > 5 -- Exclude top profit items
+),
+item_thresholds AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(SUM(inv_quantity_on_hand), 0) AS total_quantity
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk AND inv.inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY i.i_item_sk, i.i_item_desc
+    HAVING total_quantity < 10
+)
+SELECT
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    SUM(ci.total_orders) AS total_customer_orders,
+    IFNULL(np.total_negative_profit, 0) AS sum_negative_profit,
+    GROUP_CONCAT(DISTINCT it.i_item_desc) AS low_stock_items
+FROM customer_info ci
+LEFT JOIN negative_profit np ON ci.c_current_cdemo_sk = np.ws_item_sk
+LEFT JOIN item_thresholds it ON (ci.c_current_cdemo_sk = it.i_item_sk AND it.i_item_sk NOT IN (SELECT * FROM excluded_items))
+GROUP BY ci.c_customer_sk, ci.cd_gender, ci.cd_marital_status
+HAVING total_customer_orders > 0
+ORDER BY sum_negative_profit DESC, total_customer_orders ASC

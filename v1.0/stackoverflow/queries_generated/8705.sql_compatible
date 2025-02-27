@@ -1,0 +1,70 @@
+
+WITH PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.Views,
+        COUNT(V.Id) AS VoteCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN B.Id IS NOT NULL THEN 1 END) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.Views
+    HAVING 
+        COUNT(V.Id) > 20 
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostsCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges, 
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges, 
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedPosts AS (
+    SELECT 
+        PP.*,
+        ROW_NUMBER() OVER (ORDER BY PP.Score DESC, PP.Views DESC) AS Rank
+    FROM 
+        PopularPosts PP
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.Views,
+    RP.VoteCount,
+    RP.CommentCount,
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostsCount,
+    US.GoldBadges,
+    US.SilverBadges,
+    US.BronzeBadges
+FROM 
+    RankedPosts RP
+JOIN 
+    UserStats US ON US.UserId IN (SELECT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+WHERE 
+    RP.Rank <= 10;

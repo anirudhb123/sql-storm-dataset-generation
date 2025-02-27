@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate <= DATE '2021-12-31'
+),
+TopSuppliers AS (
+    SELECT
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM
+        partsupp ps
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        s.s_acctbal > 1000.00
+    GROUP BY
+        ps.ps_suppkey
+    ORDER BY
+        total_cost DESC
+    LIMIT 5
+),
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        c.c_acctbal IS NOT NULL
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+FinalSummary AS (
+    SELECT
+        co.c_custkey,
+        co.c_name,
+        co.total_spent,
+        co.order_count,
+        COUNT(DISTINCT l.l_orderkey) AS line_items_count
+    FROM
+        CustomerOrderSummary co
+    LEFT JOIN
+        lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders r WHERE r.order_rank <= 5)
+    GROUP BY
+        co.c_custkey, co.c_name, co.total_spent, co.order_count
+)
+SELECT
+    fs.c_custkey,
+    fs.c_name,
+    fs.total_spent,
+    fs.order_count,
+    fs.line_items_count,
+    ts.total_cost AS supplier_cost
+FROM
+    FinalSummary fs
+LEFT JOIN
+    TopSuppliers ts ON fs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')))
+WHERE
+    fs.total_spent > 1000
+ORDER BY
+    fs.total_spent DESC, fs.order_count DESC;

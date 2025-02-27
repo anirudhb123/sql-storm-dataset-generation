@@ -1,0 +1,69 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    WHERE u.Reputation IS NOT NULL
+    GROUP BY u.Id, u.DisplayName
+), 
+RankedUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank,
+        NTILE(5) OVER (ORDER BY Reputation DESC) AS ReputationTier
+    FROM Users
+),
+PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        p.Score,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS DeletedDate
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    GROUP BY p.Id, p.Score
+),
+TopPosts AS (
+    SELECT 
+        p.*,
+        pa.CommentCount,
+        pa.Score,
+        pa.ClosedDate,
+        pa.DeletedDate,
+        CASE 
+            WHEN pa.DeletedDate IS NOT NULL THEN 'Deleted'
+            WHEN pa.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM Posts p
+    JOIN PostAnalysis pa ON pa.PostId = p.Id
+    WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month')
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COUNT(tp.PostId) AS ActivePosts,
+    SUM(CASE WHEN tp.PostStatus = 'Active' THEN 1 ELSE 0 END) AS CountActive,
+    SUM(CASE WHEN tp.PostStatus = 'Closed' THEN 1 ELSE 0 END) AS CountClosed,
+    SUM(CASE WHEN tp.PostStatus = 'Deleted' THEN 1 ELSE 0 END) AS CountDeleted,
+    AVG(us.TotalUpvotes - us.TotalDownvotes) AS AverageNetVotes
+FROM UserStats us
+LEFT JOIN TopPosts tp ON tp.OwnerUserId = us.UserId
+GROUP BY us.UserId, us.DisplayName, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+HAVING AVG(us.TotalUpvotes - us.TotalDownvotes) > 0
+ORDER BY us.GoldBadges DESC, CountActive DESC, us.DisplayName ASC;

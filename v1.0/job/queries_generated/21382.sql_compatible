@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS title_rank
+    FROM aka_title t
+    WHERE t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+),
+ActorMovies AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        COALESCE(ci.note, 'No Note') AS role_note,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        am.actor_name,
+        am.role_note,
+        am.actor_order,
+        mk.keyword_list
+    FROM RankedMovies rm
+    LEFT JOIN ActorMovies am ON rm.movie_id = am.movie_id
+    LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+    WHERE rm.title_rank <= 5 
+      AND (am.role_note IS NULL OR am.role_note LIKE '%main%')
+),
+FinalOutput AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        COUNT(DISTINCT fm.actor_name) AS total_actors,
+        CASE 
+            WHEN fm.keyword_list IS NULL THEN 'No Keywords'
+            ELSE fm.keyword_list
+        END AS keywords
+    FROM FilteredMovies fm
+    GROUP BY fm.title, fm.production_year
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.total_actors,
+    f.keywords
+FROM FinalOutput f
+WHERE f.total_actors > 2
+ORDER BY f.production_year DESC, f.title ASC
+
+UNION 
+
+SELECT 
+    'N/A' AS title,
+    NULL AS production_year,
+    COUNT(*) AS total_actors,
+    'Multiple Entries' AS keywords
+FROM ActorMovies
+WHERE actor_order > 2
+GROUP BY actor_order
+HAVING COUNT(*) > 10;

@@ -1,0 +1,68 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        TotalComments,
+        TotalBountyEarned,
+        RANK() OVER (ORDER BY TotalBountyEarned DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        QuestionsAsked > 0 OR AnswersGiven > 0
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS TotalEdits,
+        COUNT(DISTINCT PH.PostId) AS DistinctPostsEdited,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' AS timestamp) - PH.CreationDate))) AS AvgTimeEditLast
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        Users U ON PH.UserId = U.Id
+    GROUP BY 
+        PH.UserId
+)
+SELECT 
+    U.DisplayName,
+    UA.QuestionsAsked,
+    UA.AnswersGiven,
+    UA.TotalComments,
+    UA.TotalBountyEarned,
+    PHS.TotalEdits,
+    PHS.DistinctPostsEdited,
+    PHS.AvgTimeEditLast,
+    Tu.UserRank
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostHistorySummary PHS ON UA.UserId = PHS.UserId
+JOIN 
+    TopUsers Tu ON UA.UserId = Tu.UserId
+WHERE 
+    UA.QuestionsAsked > 5 OR UA.AnswersGiven > 10
+ORDER BY 
+    Tu.UserRank, UA.TotalBountyEarned DESC
+LIMIT 10;

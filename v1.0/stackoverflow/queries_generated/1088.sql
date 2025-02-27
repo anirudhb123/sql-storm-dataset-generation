@@ -1,0 +1,66 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank,
+        AVG(COALESCE(CAST(SUBSTRING(C.Body, 1, 100) AS varchar), '')) 
+            OVER(PARTITION BY P.Id) AS ShortBody
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.AnswerCount,
+        UA.QuestionCount,
+        UA.UpVotes,
+        UA.DownVotes,
+        RANK() OVER (ORDER BY UA.UpVotes DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.QuestionCount > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.UpVotes,
+    TU.DownVotes,
+    PS.Title,
+    PS.ViewCount,
+    PS.CreationDate,
+    PS.ShortBody
+FROM 
+    TopUsers TU
+JOIN 
+    PostStatistics PS ON TU.UserId = PS.OwnerUserId
+WHERE 
+    TU.UserRank <= 10
+    AND PS.Rank = 1
+ORDER BY 
+    TU.UpVotes DESC, PS.ViewCount DESC;

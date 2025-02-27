@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        COALESCE(l.l_tax, 0) AS tax_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' 
+      AND o.o_orderdate < '2024-01-01'
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        MIN(ps.ps_supplycost) AS min_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+
+SELECT 
+    p.p_name,
+    r.r_name AS region,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_sales,
+    ROUND(AVG(s.s_acctbal), 2) AS avg_supplier_acct_balance,
+    COUNT(DISTINCT od.o_orderkey) AS order_count
+FROM part p
+JOIN SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN RankedSuppliers s ON sa.min_supplycost = s.s_suppkey AND s.rank = 1
+JOIN region r ON s.s_nationkey = r.r_regionkey
+LEFT JOIN OrderDetails od ON p.p_partkey = od.l_partkey
+WHERE p.p_size > 10 
+  AND od.l_quantity IS NOT NULL 
+  AND od.l_returnflag = 'N'
+GROUP BY p.p_name, r.r_name
+HAVING SUM(od.l_extendedprice * (1 - od.l_discount)) > 10000
+ORDER BY total_sales DESC, avg_supplier_acct_balance ASC;

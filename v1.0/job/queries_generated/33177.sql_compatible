@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.imdb_index,
+        0 AS level
+    FROM title m
+    WHERE m.id IS NOT NULL
+   
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        sub_m.title,
+        sub_m.production_year,
+        sub_m.imdb_index,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title sub_m ON ml.linked_movie_id = sub_m.id
+), ActorStats AS (
+    SELECT
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(COALESCE(m.production_year, 0)) AS avg_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    LEFT JOIN aka_title at ON c.movie_id = at.movie_id
+    LEFT JOIN movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN title m ON c.movie_id = m.id
+    GROUP BY ak.id, ak.name
+), TopActors AS (
+    SELECT
+        actor_id,
+        actor_name,
+        movie_count,
+        avg_year,
+        keywords,
+        RANK() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM ActorStats
+    WHERE movie_count > 5
+)
+SELECT
+    ma.movie_id,
+    ma.title,
+    ma.production_year,
+    CONCAT(a.actor_name, ' (Rank: ', COALESCE(ta.actor_rank, 0), ')') AS actor_info,
+    COALESCE(ta.keywords, 'No keywords') AS keyword_list
+FROM MovieHierarchy ma
+JOIN cast_info ci ON ma.movie_id = ci.movie_id
+JOIN aka_name a ON ci.person_id = a.person_id
+LEFT JOIN TopActors ta ON a.id = ta.actor_id
+WHERE ma.production_year IN (
+    SELECT DISTINCT production_year FROM title WHERE production_year > 2000
+)
+ORDER BY ma.production_year DESC, ma.title;

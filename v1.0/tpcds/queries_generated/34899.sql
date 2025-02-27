@@ -1,0 +1,67 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+Customer_Demo AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_college_count,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY ca.ca_city) AS city_rank
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+),
+Returns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+)
+SELECT
+    s.sk,
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(sc.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(sc.total_net_profit, 0) AS total_net_profit,
+    COUNT(DISTINCT cd.c_customer_sk) AS total_customers,
+    SUM(r.return_count) AS total_returns,
+    SUM(r.total_return_value) AS total_return_value,
+    COUNT(DISTINCT cd.city_rank) AS unique_cities,
+    CASE 
+        WHEN SUM(r.total_return_value) > 0 THEN 'High Returns'
+        ELSE 'Normal Returns'
+    END AS return_status
+FROM
+    Sales_CTE sc
+JOIN item i ON i.i_item_sk = sc.ws_item_sk
+LEFT JOIN Customer_Demo cd ON i.i_item_sk = cd.c_customer_sk
+LEFT JOIN Returns r ON i.i_item_sk = r.sr_item_sk
+GROUP BY
+    s.sk, i.i_item_id, i.i_product_name
+HAVING
+    total_net_profit > 1000
+ORDER BY
+    total_net_profit DESC
+LIMIT 50;

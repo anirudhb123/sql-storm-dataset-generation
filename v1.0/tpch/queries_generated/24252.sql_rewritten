@@ -1,0 +1,96 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_lineitem_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01'
+),
+ValidSuppliers AS (
+    SELECT 
+        DISTINCT s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0 OR 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost 
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+FinalOutput AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        p.p_name AS part_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        cf.total_lineitem_sales AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        ValidSuppliers vs ON n.n_nationkey = vs.s_nationkey
+    JOIN 
+        partsupp ps ON vs.s_suppkey = ps.ps_suppkey
+    JOIN 
+        FilteredParts p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        RankedOrders o ON o.o_orderkey IN (SELECT DISTINCT o2.o_orderkey FROM orders o2 WHERE EXISTS (SELECT 1 FROM lineitem l2 WHERE l2.l_orderkey = o2.o_orderkey AND l2.l_returnflag = 'R'))
+    GROUP BY 
+        r.r_name, n.n_name, p.p_name, cf.total_lineitem_sales
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 5
+    ORDER BY 
+        total_sales DESC, order_count DESC
+)
+SELECT 
+    region_name,
+    nation_name,
+    part_name,
+    order_count,
+    total_sales
+FROM 
+    FinalOutput
+UNION ALL
+SELECT 
+    r.r_name,
+    n.n_name,
+    'Total Sales' AS part_name,
+    COUNT(DISTINCT o.o_orderkey),
+    SUM(cf.total_lineitem_sales)
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    RankedOrders o ON o.o_orderkey IS NOT NULL
+FULL OUTER JOIN 
+    FilteredParts p ON p.p_partkey IS NULL
+WHERE 
+    r.r_comment LIKE '%important%'
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(cf.total_lineitem_sales) IS NOT NULL;

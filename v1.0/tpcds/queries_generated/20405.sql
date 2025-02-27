@@ -1,0 +1,47 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+      AND ca_zip IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip
+    FROM customer_address AS ca
+    JOIN AddressCTE AS cte ON ca_state = cte.ca_state AND ca_zip <> cte.ca_zip
+), CustomerStats AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           COUNT(ss.ss_ticket_number) AS total_store_sales,
+           SUM(ss.ss_net_paid) AS total_net_paid,
+           SUM(ss.ss_ext_sales_price) AS total_ext_sales_price,
+           DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ss.ss_net_paid) DESC) AS gender_rank
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE cd.cd_marital_status = 'M'
+      AND (cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) 
+                                       FROM customer_demographics WHERE cd_marital_status = 'M'))
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+), ItemStats AS (
+    SELECT i.i_item_sk, i.i_item_desc, SUM(ws.ws_quantity) AS total_quantity_sold,
+           AVG(ws.ws_sales_price) AS avg_sales_price,
+           CASE WHEN COUNT(ws.ws_order_number) > 0 THEN 'sold' ELSE 'not sold' END AS sales_status
+    FROM item AS i
+    LEFT JOIN web_sales AS ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+)
+SELECT cs.c_first_name, cs.c_last_name, cs.cd_gender, cs.total_store_sales, cs.total_net_paid,
+       COALESCE(it.total_quantity_sold, 0) AS total_quantity_sold,
+       it.avg_sales_price, it.sales_status,
+       CASE 
+           WHEN it.total_quantity_sold IS NOT NULL THEN 'Item sold!' 
+           ELSE 'Item unsold.'
+       END AS item_sale_status,
+       ROW_NUMBER() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_net_paid DESC) AS row_num,
+       a.ca_city, a.ca_state, a.ca_zip
+FROM CustomerStats AS cs
+JOIN AddressCTE AS a ON cs.c_customer_sk = a.ca_address_sk
+LEFT JOIN ItemStats AS it ON cs.total_store_sales = it.total_quantity_sold
+WHERE (a.ca_city LIKE 'New%' OR a.ca_state = 'CA')
+  AND (cs.total_net_paid > 500 OR (it.total_quantity_sold IS NULL AND cs.gender_rank <= 5))
+ORDER BY cs.total_net_paid DESC, row_num;

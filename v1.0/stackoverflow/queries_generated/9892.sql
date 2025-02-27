@@ -1,0 +1,79 @@
+WITH TopUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.UserId IS NOT NULL) AS TotalVotes,
+        COUNT(b.Id) AS TotalBadges,
+        AVG(u.Reputation) AS AvgReputation
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    WHERE
+        u.CreationDate < NOW() - INTERVAL '1 year' -- Users created over a year ago
+    GROUP BY
+        u.Id
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.UserId IS NOT NULL) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '6 months' -- Active posts in the last 6 months
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.DisplayName AS UserDisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(a.AnswerCount) AS AnswersGiven,
+        SUM(a.Score) AS TotalPostScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            Id, 
+            AnswerCount, 
+            Score 
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2) a ON p.Id = a.Id
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalVotes,
+    tu.TotalBadges,
+    tu.AvgReputation,
+    ap.Title AS ActivePostTitle,
+    ap.TotalComments AS ActivePostComments,
+    ap.TotalVotes AS ActivePostVotes,
+    ups.PostsCreated,
+    ups.AnswersGiven,
+    ups.TotalPostScore
+FROM 
+    TopUsers tu
+JOIN 
+    ActivePosts ap ON tu.UserId = ap.OwnerUserId
+JOIN 
+    UserPostStats ups ON tu.DisplayName = ups.UserDisplayName
+ORDER BY 
+    tu.TotalVotes DESC, 
+    ups.PostsCreated DESC
+LIMIT 10;

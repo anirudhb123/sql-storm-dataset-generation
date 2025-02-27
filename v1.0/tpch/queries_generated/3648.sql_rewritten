@@ -1,0 +1,87 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01'
+), 
+supplier_stats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+), 
+part_supplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ss.total_supply_value,
+        ss.unique_parts
+    FROM 
+        part p
+    LEFT JOIN supplier_stats ss ON 
+        ss.ps_suppkey = (
+            SELECT 
+                ps.ps_suppkey
+            FROM 
+                partsupp ps
+            WHERE 
+                ps.ps_partkey = p.p_partkey
+            ORDER BY 
+                ps.ps_supplycost DESC
+            LIMIT 1
+        )
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    c.c_name, 
+    COALESCE(p.p_name, 'No Supplier') AS part_name,
+    COALESCE(p.total_supply_value, 0) AS supply_value,
+    COALESCE(c.total_orders, 0) AS orders_count,
+    COALESCE(c.total_spent, 0) AS total_amount_spent,
+    CASE 
+        WHEN c.total_orders > 10 THEN 'High Volume' 
+        WHEN c.total_orders BETWEEN 5 AND 10 THEN 'Medium Volume' 
+        ELSE 'Low Volume' 
+    END AS customer_volume_category
+FROM 
+    customer_orders c
+FULL OUTER JOIN part_supplier p ON c.c_custkey = (
+    SELECT 
+        o.o_custkey
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderkey = (
+            SELECT 
+                MAX(o2.o_orderkey)
+            FROM 
+                orders o2
+            WHERE 
+                o2.o_orderdate <= cast('1998-10-01' as date)
+            LIMIT 1
+        )
+)
+WHERE 
+    c.total_spent > 1000 OR p.total_supply_value IS NULL;

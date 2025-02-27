@@ -1,0 +1,64 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id AS TagId, TagName, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, th.Level + 1
+    FROM Tags t
+    JOIN PostLinks pl ON pl.RelatedPostId = t.Id
+    JOIN TagHierarchy th ON pl.PostId = th.TagId
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 1) AS GoldBadges,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 2) AS SilverBadges,
+        STRING_AGG(b.Name, ', ') FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.ViewCount,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS Rank
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+    AND (p.AnswerCount > 0 OR p.ClosedDate IS NOT NULL)
+)
+
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount,
+    bh.Level AS TagLevel,
+    tp.Id AS PostId,
+    tp.Title,
+    tp.CreationDate AS PostCreationDate,
+    tp.ViewCount,
+    tp.AcceptedAnswerId,
+    COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS Score
+FROM Users u
+JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN TagHierarchy bh ON bh.TagId = ANY(string_to_array(substring(tp.Tags, 2, length(tp.Tags) - 2), '><'))
+JOIN TopPosts tp ON u.Id = tp.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+) v ON tp.Id = v.PostId
+WHERE tp.Rank <= 5
+ORDER BY ub.BadgeCount DESC, tp.ViewCount DESC;

@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes,
+        Pb.UserId AS OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank
+    FROM Posts p
+    LEFT JOIN Users Pb ON p.OwnerUserId = Pb.Id
+    WHERE 
+        Pb.Reputation > 1000 AND
+        p.CreationDate >= '2020-01-01'
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastUpdate,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosureCount
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY ph.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        pa.LastUpdate,
+        pa.PostHistoryTypes,
+        pa.ClosureCount
+    FROM RankedPosts rp
+    LEFT JOIN PostHistoryAggregate pa ON rp.PostId = pa.PostId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.LastUpdate,
+    COALESCE(pd.PostHistoryTypes, 'No history') AS PostHistoryTypes,
+    CASE 
+        WHEN pd.ClosureCount > 0 THEN 'Closed ' || pd.ClosureCount || ' times'
+        ELSE 'Active'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pd.PostId) AS CommentCount
+FROM PostDetails pd
+WHERE pd.OwnerPostRank = 1
+AND pd.Score > (SELECT AVG(Score) FROM Posts) 
+ORDER BY pd.Score DESC
+LIMIT 10;
+
+-- This query retrieves the top active posts from users with a reputation over 1000, 
+-- considering their score above average and filtering through the closure history.
+

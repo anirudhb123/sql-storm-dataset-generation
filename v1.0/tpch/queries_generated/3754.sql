@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS ranking
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(rs.s_suppkey) AS num_suppliers,
+        SUM(rs.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    LEFT JOIN 
+        RankedSuppliers rs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_nationkey)
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    ts.num_suppliers,
+    ts.total_acctbal,
+    CASE 
+        WHEN ps.ps_supplycost < ts.total_acctbal / NULLIF(ts.num_suppliers, 0) THEN 'Below Average'
+        ELSE 'Above Average'
+    END AS supply_cost_comparison
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    TopSuppliers ts ON ts.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey))
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = p.p_type)
+ORDER BY 
+    p.p_name ASC, 
+    ps.ps_supplycost DESC;

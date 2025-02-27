@@ -1,0 +1,46 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), RankedSupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_sales,
+        s.order_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales s
+)
+SELECT 
+    r.n_name AS nation_name,
+    rs.s_name AS supplier_name,
+    rs.total_sales,
+    rs.order_count,
+    rs.sales_rank
+FROM 
+    RankedSupplierSales rs
+JOIN 
+    supplier s ON rs.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name = 'ASIA' AND rs.sales_rank <= 10
+ORDER BY 
+    rs.sales_rank;

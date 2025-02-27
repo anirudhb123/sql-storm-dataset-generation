@@ -1,0 +1,86 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 1 ELSE 0 END) AS PostsLast30Days
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(v.TotalVotes, 0) AS TotalVotes,
+        LEAD(p.CreationDate) OVER (ORDER BY p.CreationDate DESC) AS NextPostDate
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS TotalVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+)
+
+SELECT 
+    r.Id AS PostId,
+    r.Title,
+    r.Level,
+    r.CreationDate,
+    r.Score,
+    ps.ViewCount,
+    ps.TotalVotes,
+    CASE 
+        WHEN au.TotalPosts IS NOT NULL THEN 'Active Contributor'
+        ELSE 'Lurker'
+    END AS UserStatus
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    PostStatistics ps ON r.Id = ps.PostId
+LEFT JOIN 
+    RecentActiveUsers au ON r.OwnerUserId = au.UserId
+WHERE 
+    r.Score > (SELECT AVG(Score) FROM Posts) 
+    AND r.CreationDate BETWEEN TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR' AND TIMESTAMP '2024-10-01 12:34:56'
+ORDER BY 
+    r.Level, r.CreationDate DESC;

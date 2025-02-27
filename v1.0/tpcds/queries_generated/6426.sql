@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid_inc_tax) AS average_order_value,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        c.total_sales,
+        c.order_count,
+        c.average_order_value,
+        RANK() OVER (ORDER BY c.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales c
+),
+CustomerDemographics AS (
+    SELECT 
+        uc.c_customer_id,
+        uc.total_sales,
+        uc.order_count,
+        uc.average_order_value,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        TopCustomers uc
+    JOIN 
+        customer_demographics cd ON uc.c_customer_id = c.c_customer_id
+    WHERE 
+        uc.sales_rank <= 10
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT cd.c_customer_id) AS num_customers,
+    SUM(cd.total_sales) AS total_sales_value,
+    AVG(cd.average_order_value) AS avg_order_value
+FROM 
+    CustomerDemographics cd
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    total_sales_value DESC;

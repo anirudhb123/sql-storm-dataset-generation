@@ -1,0 +1,33 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC)
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.rank <= 5
+)
+SELECT s.s_name AS Supplier_Name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Sales,
+       n.n_name AS Nation,
+       r.r_name AS Region,
+       COUNT(DISTINCT o.o_orderkey) AS Order_Count
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE o.o_orderstatus = 'O' 
+AND s.s_acctbal > 1000.00
+AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+AND (sh.rank IS NULL OR sh.rank <= 3)
+GROUP BY s.s_name, n.n_name, r.r_name
+ORDER BY Total_Sales DESC, Order_Count DESC
+LIMIT 10;

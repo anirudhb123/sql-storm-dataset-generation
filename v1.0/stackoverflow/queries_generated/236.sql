@@ -1,0 +1,83 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(a.TotalAnswers, 0) AS TotalAnswers,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            ParentId, COUNT(*) AS TotalAnswers 
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2 
+         GROUP BY 
+            ParentId) a ON p.Id = a.ParentId
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY
+        p.Id, a.TotalAnswers
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.PostId) AS TagPostCount 
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags ILIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName 
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(b.Class, 0)) AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.TotalAnswers,
+    ut.DisplayName AS OwnerDisplayName,
+    ut.TotalBounty,
+    ut.BadgeClass,
+    so.TagName,
+    CASE
+        WHEN rp.Score > 100 THEN 'Hot Post'
+        ELSE 'Regular Post'
+    END AS PostType
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Users ut ON rp.OwnerUserId = ut.Id
+LEFT JOIN 
+    PopularTags so ON rp.Tags ILIKE '%' || so.TagName || '%'
+WHERE 
+    ut.Reputation >= 1000
+    AND (rp.CommentCount > 5 OR rp.TotalAnswers > 0)
+ORDER BY 
+    rp.CreationDate DESC;

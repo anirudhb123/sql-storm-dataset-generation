@@ -1,0 +1,54 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+    WHERE Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadge,
+        MAX(B.Date) AS LastBadgeDate
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    T.TagName,
+    UB.BadgeCount,
+    UB.GoldBadge,
+    A.ReputationRank,
+    COALESCE(T.PostCount, 0) AS PopularTagPostCount,
+    CASE WHEN U.LastPostDate IS NULL THEN 'No Posts' 
+         ELSE TO_CHAR(U.LastPostDate, 'YYYY-MM-DD') END AS LastPostFormatted,
+    CASE WHEN UB.BadgeCount > 0 THEN 'Has Badges' ELSE 'No Badges' END AS BadgeStatus
+FROM TopUsers A
+JOIN Users U ON A.UserId = U.Id
+LEFT JOIN PopularTags T ON T.TagName IN (SELECT unnest(string_to_array(P.Tags, ' ')) FROM Posts P WHERE P.OwnerUserId = U.Id)
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+ORDER BY A.ReputationRank, U.DisplayName
+LIMIT 100;

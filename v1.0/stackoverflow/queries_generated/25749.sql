@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS LatestPostRank,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostsTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges, 
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.Body,
+    ra.CreationDate,
+    ra.ViewCount,
+    ra.Score,
+    ra.OwnerDisplayName,
+    ua.Reputation AS OwnerReputation,
+    ua.TotalPosts,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    ra.CommentCount,
+    ra.TagsList
+FROM 
+    RankedPosts ra
+JOIN 
+    UserAggregates ua ON ra.OwnerDisplayName = ua.DisplayName
+WHERE 
+    ra.LatestPostRank = 1
+ORDER BY 
+    ra.Score DESC, ra.ViewCount DESC
+LIMIT 10;

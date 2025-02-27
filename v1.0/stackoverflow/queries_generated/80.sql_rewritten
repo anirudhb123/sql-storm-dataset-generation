@@ -1,0 +1,59 @@
+WITH RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        COALESCE(uc.UserCount, 0) AS UserCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(DISTINCT UserId) AS UserCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) uc ON p.Id = uc.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, uc.UserCount
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate,
+    ra.LastActivityDate,
+    ra.UserCount,
+    ra.CommentCount,
+    ra.UpVotes,
+    ra.DownVotes,
+    ra.RankByScore,
+    COALESCE(cp.LastCloseDate, 'No Closure') AS LastCloseDate
+FROM 
+    RecentActivity ra
+LEFT JOIN 
+    ClosedPosts cp ON ra.PostId = cp.PostId
+WHERE 
+    ra.RankByScore <= 5
+ORDER BY 
+    ra.Score DESC;

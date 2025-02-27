@@ -1,0 +1,22 @@
+-- Performance benchmarking query to analyze the number of posts, users, and votes in the StackOverflow schema.
+-- This query will join multiple tables to provide insights into post counts, user metrics, and voting activity.
+
+SELECT 
+    p.PostTypeId,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT u.Id) AS TotalUsers,
+    COUNT(v.Id) AS TotalVotes,
+    AVG(u.Reputation) AS AverageReputation,
+    AVG(DATEDIFF(NOW(), u.CreationDate)) AS AvgAccountAgeDays,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    p.PostTypeId
+ORDER BY 
+    TotalPosts DESC;

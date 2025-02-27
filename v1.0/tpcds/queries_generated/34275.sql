@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+item_statistics AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_product_name,
+        AVG(i_current_price) AS avg_price,
+        COUNT(*) AS item_count,
+        MAX(total_sales) AS max_sales
+    FROM 
+        item i
+    LEFT JOIN 
+        sales_trends st ON i.i_item_sk = st.ws_item_sk
+    GROUP BY 
+        i_item_sk, i_item_id, i_product_name
+),
+promotional_effects AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.promo_id
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    is.avg_price,
+    is.max_sales,
+    COALESCE(pe.total_net_paid, 0) AS total_net_paid,
+    COALESCE(pe.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN is.avg_price > 20 THEN 'High Price'
+        WHEN is.avg_price BETWEEN 10 AND 20 THEN 'Medium Price'
+        ELSE 'Low Price'
+    END AS price_category
+FROM 
+    item i
+JOIN 
+    item_statistics is ON i.i_item_sk = is.i_item_sk
+LEFT JOIN 
+    promotional_effects pe ON is.item_count = pe.total_orders
+WHERE 
+    is.max_sales > 100 
+    AND (i.i_item_id LIKE 'A%' OR i.i_item_id LIKE 'B%')
+ORDER BY 
+    total_net_paid DESC, 
+    avg_price ASC;

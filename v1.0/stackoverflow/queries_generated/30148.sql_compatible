@@ -1,0 +1,65 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        CAST(0 AS BIGINT) AS Level
+    FROM Users U
+    WHERE U.Reputation >= 1000  
+
+    UNION ALL
+
+    SELECT
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        CTE.Level + 1
+    FROM Users U
+    INNER JOIN UserReputationCTE CTE ON U.Reputation < CTE.Reputation  
+    WHERE CTE.Level < 5  
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COUNT(V.Id) AS VoteCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2  
+    LEFT JOIN LATERAL unnest(string_to_array(P.Tags, '>')) AS Tag ON true  
+    LEFT JOIN Tags T ON T.TagName = TRIM(BOTH '<>' FROM Tag)  
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score
+    HAVING P.Score > 10 AND COUNT(V.Id) > 5  
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    PP.PostId,
+    PP.Title AS PopularPostTitle,
+    PP.CreationDate AS PostCreationDate,
+    PP.Score AS PostScore,
+    PP.VoteCount,
+    UB.BadgeCount,
+    UB.BadgeNames
+FROM Users U
+INNER JOIN UserReputationCTE CTE ON U.Id = CTE.UserId
+LEFT JOIN PopularPosts PP ON U.Id = PP.PostId  
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    CTE.Level = 0  
+    AND (PP.VoteCount IS NOT NULL OR UB.BadgeCount > 0)  
+ORDER BY U.Reputation DESC, PP.Score DESC;

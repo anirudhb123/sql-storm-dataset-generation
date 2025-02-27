@@ -1,0 +1,21 @@
+SELECT
+    SUBSTRING(p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_avail_qty,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    MAX(p.p_retailprice) AS max_retail_price
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY
+    short_name
+HAVING
+    SUM(ps.ps_availqty) > 50 AND
+    AVG(p.p_retailprice) < 100
+ORDER BY
+    total_avail_qty DESC
+LIMIT 10;

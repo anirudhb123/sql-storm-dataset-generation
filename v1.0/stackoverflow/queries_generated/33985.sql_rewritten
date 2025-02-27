@@ -1,0 +1,63 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.Score, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.Score, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId 
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT rp.PostId) AS QuestionCount,
+    SUM(CASE WHEN rp.Score > 0 THEN 1 ELSE 0 END) AS PositiveQuestions,
+    SUM(CASE WHEN rp.Score < 0 THEN 1 ELSE 0 END) AS NegativeQuestions,
+    SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN 'UpVote' 
+                              WHEN v.VoteTypeId = 3 THEN 'DownVote' 
+                              ELSE NULL END, ', ') AS Votes,
+    AVG(DATEDIFF(MINUTE, rp.CreationDate, GETDATE())) AS AvgAgeInMinutes
+FROM 
+    Users u
+LEFT JOIN 
+    RecursivePostCTE rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON c.UserId = u.Id
+LEFT JOIN 
+    Votes v ON v.UserId = u.Id
+LEFT JOIN 
+    PostTypes pt ON pt.Id IN (SELECT DISTINCT p.PostTypeId FROM Posts p WHERE p.OwnerUserId = u.Id)
+
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5 
+ORDER BY 
+    QuestionCount DESC, 
+    UserName ASC;

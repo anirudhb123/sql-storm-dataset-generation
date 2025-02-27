@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        s.s_store_name,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY w.w_warehouse_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        store s ON s.s_store_sk = ws.ws_ship_addr_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_dow IN (1, 2, 3, 4, 5) 
+        )
+    GROUP BY 
+        w.w_warehouse_name, s.s_store_name, ws.ws_sales_price, ws.ws_quantity
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(DISTINCT cr.cr_order_number) AS return_count,
+        SUM(cr.cr_return_amt_inc_tax) AS total_returned
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(r.return_count, 0) AS total_returns,
+    COALESCE(r.total_returned, 0.00) AS returned_amt,
+    s.warehouse_name,
+    SUM(sales.ws_net_profit) AS total_sales_profit
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns r ON c.c_customer_sk = r.returning_customer_sk
+JOIN 
+    RankedSales sales ON sales.w_warehouse_name = c.c_last_name  -- Unusual condition for bizarre behavior simulation
+WHERE 
+    (COALESCE(r.return_count, 0) > 5 OR c.c_birth_month % 2 = 0)  -- Return count conditions and obscured logic
+GROUP BY 
+    c.c_first_name, c.c_last_name, r.return_count, r.total_returned, s.warehouse_name
+HAVING 
+    SUM(sales.ws_net_profit) > 1000   -- Ensuring only profitable relationships
+ORDER BY 
+    total_returns DESC, returned_amt DESC NULLS LAST;

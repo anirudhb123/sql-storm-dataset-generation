@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_ws_net_profit DESC) AS rank
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+),
+DailyRevenue AS (
+    SELECT 
+        dd.d_date,
+        SUM(ws.ws_net_paid_inc_tax) as total_revenue,
+        AVG(ws.ws_net_paid_inc_tax) AS average_revenue,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY dd.d_date
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+),
+HighProductivityStores AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        COUNT(DISTINCT cs_order_number) AS total_sales
+    FROM store s
+    LEFT JOIN catalog_sales c ON s.s_store_sk = c.cs_warehouse_sk
+    WHERE s.s_number_employees > 100
+    GROUP BY s.s_store_sk, s.s_store_name
+    HAVING COUNT(DISTINCT cs_order_number) > 50
+)
+
+SELECT 
+    dd.d_date,
+    dr.total_revenue,
+    dr.average_revenue,
+    dr.unique_customers,
+    cdem.gender,
+    cdem.customer_count,
+    hps.total_sales
+FROM DailyRevenue dr
+JOIN HighProductivityStores hps ON dr.total_revenue > 1000
+JOIN CustomerDemographics cdem ON cdem.customer_count > 10
+LEFT JOIN RankedSales rs ON cdem.cd_demo_sk = rs.bill_customer_sk
+WHERE rs.rank = 1 OR rs.rank IS NULL
+ORDER BY dd.d_date DESC, dr.total_revenue DESC;

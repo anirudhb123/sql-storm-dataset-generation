@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT 
+        s.s_store_name,
+        SUM(ss.ss_qty) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_sales,
+        SUM(ss.ss_ext_discount_amt) AS total_discount,
+        CAST(d.d_date AS DATE) AS sales_date
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 
+        AND d.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        s.s_store_name, d.d_date
+),
+PromotionData AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(cs.cs_quantity) AS promo_quantity,
+        SUM(cs.cs_sales_price) AS promo_sales
+    FROM 
+        catalog_sales cs
+    JOIN 
+        promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_name
+),
+InventoryData AS (
+    SELECT 
+        i.i_item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    sd.s_store_name,
+    sd.total_quantity,
+    sd.total_sales,
+    sd.total_discount,
+    pd.promo_quantity,
+    pd.promo_sales,
+    id.total_inventory,
+    sd.sales_date
+FROM 
+    SalesData sd
+LEFT JOIN 
+    PromotionData pd ON sd.sales_date = pd.promo_quantity
+LEFT JOIN 
+    InventoryData id ON sd.s_store_name = id.i_item_id
+ORDER BY 
+    sd.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

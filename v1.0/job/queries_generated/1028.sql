@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+ActorsInMovies AS (
+    SELECT 
+        a.name,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    GROUP BY 
+        a.name, at.title, at.production_year
+),
+MovieDetails AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        COALESCE(rm.company_count, 0) AS company_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        RankedMovies rm ON at.title = rm.title 
+    LEFT JOIN 
+        ActorsInMovies ai ON at.title = ai.title AND at.production_year = ai.production_year
+    GROUP BY 
+        at.title, at.production_year
+)
+
+SELECT 
+    title,
+    production_year,
+    actors,
+    company_count,
+    CASE 
+        WHEN company_count > 5 THEN 'High Production'
+        WHEN company_count BETWEEN 3 AND 5 THEN 'Medium Production'
+        ELSE 'Low Production'
+    END AS production_type
+FROM 
+    MovieDetails
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = (SELECT id FROM aka_title WHERE title = MovieDetails.title AND production_year = MovieDetails.production_year)
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+    )
+ORDER BY 
+    production_year DESC, 
+    company_count DESC;
+

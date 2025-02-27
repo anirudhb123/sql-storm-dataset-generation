@@ -1,0 +1,38 @@
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN nation_supplier ns ON ns.n_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > ns.s_acctbal AND ns.s_acctbal IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE li.l_shipdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+supplier_revenue AS (
+    SELECT s.s_suppkey, SUM(oss.total_revenue) AS supplier_revenue
+    FROM nation_supplier ns
+    JOIN partsupp ps ON ns.s_suppkey = ps.ps_suppkey
+    JOIN order_summary oss ON ps.ps_partkey = oss.o_orderkey
+    GROUP BY ns.s_suppkey
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, sr.supplier_revenue,
+           RANK() OVER (ORDER BY sr.supplier_revenue DESC) AS revenue_rank
+    FROM supplier s
+    LEFT JOIN supplier_revenue sr ON s.s_suppkey = sr.s_suppkey
+)
+SELECT ns.n_name, r.s_name, r.supplier_revenue, r.revenue_rank
+FROM ranked_suppliers r
+JOIN nation_supplier ns ON r.s_suppkey = ns.s_suppkey
+WHERE r.revenue_rank <= 10
+AND ns.n_name IS NOT NULL
+ORDER BY r.supplier_revenue DESC;

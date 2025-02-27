@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_order_number
+), CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+), AddressDemo AS (
+    SELECT 
+        ca.ca_address_sk,
+        cd.cd_demo_sk,
+        CONCAT(c.first_name, ' ', c.last_name) AS full_name,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        COALESCE(cd.cd_marital_status, 'U') AS marital_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ad.full_name,
+    ad.gender,
+    ad.marital_status,
+    s.total_quantity,
+    s.total_sales,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN s.total_sales > 1000 THEN 'High Value'
+        WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    AddressDemo ad
+LEFT JOIN 
+    SalesCTE s ON ad.cd_demo_sk = s.ws_order_number
+LEFT JOIN 
+    CustomerReturns r ON ad.c_customer_sk = r.wr_returning_customer_sk
+WHERE 
+    ad.marital_status <> 'S'
+    AND ad.gender IN ('M', 'F')
+ORDER BY 
+    s.total_sales DESC
+LIMIT 100;

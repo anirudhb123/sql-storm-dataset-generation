@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score, -- Upvotes minus Downvotes
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.CreationDate
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.EditCount,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 10 -- Only consider posts with a score greater than 10
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.EditCount,
+    (SELECT STRING_AGG(tag.TagName, ', ') 
+     FROM Tags AS tag 
+     WHERE tag.Id IN (SELECT UNNEST(string_to_array(fp.Tags, '<>')::int[]))) AS TagNames
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Rank, fp.CreationDate DESC
+LIMIT 50;

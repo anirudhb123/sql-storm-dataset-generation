@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = DATE '2023-01-01')
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    INNER JOIN 
+        customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    WHERE 
+        wr.wr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+Combined AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.ws_ext_sales_price,
+        cr.total_return_amt,
+        cr.return_count
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON cr.wr_returning_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_customer_id = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_order_number = rs.ws_order_number))
+    WHERE 
+        rs.rank = 1
+)
+SELECT 
+    cb.ws_item_sk,
+    SUM(cb.ws_sales_price) AS total_sales_price,
+    AVG(cb.ws_ext_sales_price) AS average_ext_sales_price,
+    COALESCE(SUM(cb.total_return_amt), 0) AS total_returns,
+    COUNT(DISTINCT cb.ws_order_number) AS sale_count
+FROM 
+    Combined cb
+GROUP BY 
+    cb.ws_item_sk
+HAVING 
+    AVG(cb.ws_ext_sales_price) > 50
+ORDER BY 
+    total_sales_price DESC
+LIMIT 10;

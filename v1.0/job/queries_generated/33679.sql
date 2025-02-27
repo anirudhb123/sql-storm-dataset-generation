@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS main_roles
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.movie_id
+),
+movie_info_with_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mwk.keyword_id,
+        mwk.keyword AS keyword,
+        COALESCE(mi.info, 'No information') AS info_text
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mwk ON mt.id = mwk.movie_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+),
+final_result AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cs.total_cast,
+        cs.actor_names,
+        cs.main_roles,
+        COALESCE(miwk.keyword, 'N/A') AS keyword,
+        COALESCE(miwk.info_text, 'N/A') AS info_text,
+        mh.depth
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_summary cs ON mh.movie_id = cs.movie_id
+    LEFT JOIN movie_info_with_keywords miwk ON mh.movie_id = miwk.movie_id
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.total_cast,
+    fr.actor_names,
+    fr.main_roles,
+    fr.keyword,
+    fr.info_text,
+    fr.depth
+FROM final_result fr
+WHERE fr.production_year >= 2000
+ORDER BY fr.depth, fr.total_cast DESC, fr.production_year ASC;

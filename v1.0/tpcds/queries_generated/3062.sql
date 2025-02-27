@@ -1,0 +1,61 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk, i.i_item_desc
+), return_summary AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(wr.wr_return_amt) AS total_returned
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        wr.wr_item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+)
+SELECT 
+    ss.i_item_desc,
+    ss.total_sales,
+    ss.order_count,
+    COALESCE(rs.return_count, 0) AS return_count,
+    COALESCE(rs.total_returned, 0) AS total_returned,
+    ci.total_orders,
+    ci.total_spent
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    return_summary rs ON ss.ws_item_sk = rs.wr_item_sk
+LEFT JOIN 
+    customer_info ci ON ci.total_orders > 10
+WHERE 
+    ss.sales_rank = 1
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

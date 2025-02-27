@@ -1,0 +1,55 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.imdb_index AS movie_index,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        c.note AS cast_note,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000 AND
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+    GROUP BY 
+        t.title, t.production_year, t.imdb_index, a.name, r.role, c.note
+    ORDER BY 
+        t.production_year DESC,
+        t.title
+),
+actor_statistics AS (
+    SELECT 
+        actor_name, 
+        COUNT(DISTINCT movie_index) AS movie_count,
+        MIN(production_year) AS first_appearance,
+        MAX(production_year) AS last_appearance,
+        STRING_AGG(DISTINCT keywords, ', ') AS all_keywords
+    FROM 
+        movie_details
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    actor_name,
+    movie_count,
+    first_appearance,
+    last_appearance,
+    all_keywords
+FROM 
+    actor_statistics
+WHERE 
+    movie_count > 5
+ORDER BY 
+    last_appearance DESC, 
+    movie_count DESC;

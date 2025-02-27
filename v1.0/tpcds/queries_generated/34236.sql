@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS rnk
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        ss.total_sales,
+        ss.order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        sales_summary ss ON c.c_customer_sk = ss.ws_bill_customer_sk
+    WHERE 
+        ss.total_sales > (
+            SELECT 
+                AVG(total_sales)
+            FROM 
+                sales_summary
+        )
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_credit_rating,
+    hvc.total_sales,
+    hvc.order_count,
+    COALESCE(i.i_item_desc, 'No Description') AS latest_item_desc,
+    COALESCE(IIF(ws_ext_discount_amt IS NULL, 0, ws_ext_discount_amt), 0) AS total_discount,
+    COUNT(DISTINCT ws_order_number) AS unique_orders
+FROM 
+    high_value_customers hvc
+LEFT JOIN 
+    web_sales ws ON hvc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+WHERE 
+    hvc.order_count > 5 AND 
+    hvc.cd_gender = 'M' AND 
+    hvc.cd_credit_rating IS NOT NULL
+GROUP BY 
+    hvc.c_customer_sk, 
+    hvc.c_first_name, 
+    hvc.c_last_name, 
+    hvc.cd_gender, 
+    hvc.cd_marital_status, 
+    hvc.cd_credit_rating, 
+    hvc.total_sales, 
+    hvc.order_count, 
+    i.i_item_desc
+HAVING 
+    SUM(ws.ws_net_profit) > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

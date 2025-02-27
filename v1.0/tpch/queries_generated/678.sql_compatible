@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_shippriority, 
+        RANK() OVER (PARTITION BY o.o_shippriority ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrdersWithCustomer AS (
+    SELECT 
+        o.o_orderkey, 
+        c.c_name, 
+        o.o_totalprice, 
+        COALESCE(o.o_totalprice - SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey), 0) AS net_total
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_name, o.o_totalprice
+)
+SELECT 
+    r.o_orderkey, 
+    r.o_orderdate, 
+    r.o_totalprice, 
+    r.o_shippriority, 
+    r.rank_order, 
+    COALESCE(o.c_name, 'Unassigned') AS supplier_name, 
+    COALESCE(s.supply_value, 0) AS total_supply_value, 
+    CASE 
+        WHEN r.net_total > 1000 THEN 'High Value'
+        WHEN r.net_total BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierStats s ON r.o_orderkey = s.s_suppkey
+JOIN 
+    OrdersWithCustomer o ON r.o_orderkey = o.o_orderkey
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+), 
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+), 
+sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_item_sk) AS unique_items
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.order_count, 0) AS order_count,
+    COALESCE(ss.unique_items, 0) AS unique_items,
+    CASE 
+        WHEN cd.cd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE 'Defined'
+    END AS income_status,
+    CASE 
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        ELSE 'Male'
+    END AS gender_desc,
+    s.total_net_profit
+FROM 
+    customer_details cd
+LEFT JOIN 
+    sales_summary ss ON cd.c_customer_sk = ss.c_customer_sk
+LEFT JOIN 
+    sales_cte s ON cd.c_customer_sk = s.web_site_sk AND s.rank = 1
+WHERE 
+    (cd.cd_marital_status IS NOT NULL AND cd.cd_marital_status = 'M')
+    OR (cd.cd_gender = 'F' AND ss.total_sales > 1000)
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        p.CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01' AND 
+        p.Score > 0
+),
+PostTags AS (
+    SELECT 
+        rp.PostId,
+        unnest(string_to_array(trim(both '<>' FROM rp.Tags), '>')) AS Tag
+    FROM 
+        RankedPosts rp
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5
+),
+DetailedPostInfo AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        ARRAY_AGG(pt.Tag) AS Tags,
+        rp.AcceptedAnswerId,
+        rp.AnswerCount,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.Rank <= 3 THEN 'Top Post' 
+            ELSE 'Regular Post' 
+        END AS PostCategory,
+        COALESCE(b.Name, 'No Badges') AS UserBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId AND b.Class = 1  
+    GROUP BY 
+        rp.PostId
+    ORDER BY 
+        rp.Score DESC
+)
+SELECT 
+    dpi.PostId,
+    dpi.Title,
+    dpi.OwnerDisplayName,
+    dpi.CreationDate,
+    dpi.ViewCount,
+    dpi.Score,
+    dpi.Tags,
+    dpi.PostCategory,
+    dpi.UserBadges
+FROM 
+    DetailedPostInfo dpi
+JOIN 
+    PopularTags pt ON pt.Tag = ANY(dpi.Tags)
+WHERE 
+    dpi.PostCategory = 'Top Post'
+ORDER BY 
+    dpi.Score DESC, dpi.ViewCount DESC
+LIMIT 50;

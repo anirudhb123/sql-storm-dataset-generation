@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 2000 AND sh.level < 5
+),
+NationCustomerSales AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY n.n_name
+),
+AvailableParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           COALESCE(aps.total_avail_qty, 0) AS available_quantity,
+           (SELECT COUNT(*) FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN AvailableParts aps ON p.p_partkey = aps.ps_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(o.o_totalprice) AS total_revenue,
+    AVG(CASE WHEN ps.p_retailprice IS NOT NULL THEN ps.p_retailprice ELSE 0 END) AS avg_retail_price,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN PartSupplierDetails ps ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+WHERE o.o_orderdate >= DATE '1997-01-01'
+GROUP BY n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

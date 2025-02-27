@@ -1,0 +1,68 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount, 
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews, 
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(SUBSTRING(Posts.Tags, 2, LENGTH(Posts.Tags)-2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+), 
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Votes.Id) AS TotalVotes,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViewsByUser
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY 
+        Users.DisplayName
+), 
+PostHistorySummary AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        COUNT(PostHistory.Id) AS RevisionCount,
+        MAX(PostHistory.CreationDate) AS LastRevisionDate
+    FROM 
+        Posts
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    GROUP BY 
+        Posts.Id, Posts.Title
+)
+SELECT 
+    Ts.TagName,
+    Ts.PostCount,
+    Ts.TotalViews,
+    Ts.TotalAnswers,
+    UA.DisplayName AS TopUser,
+    UA.TotalVotes,
+    UA.TotalComments,
+    UA.TotalViewsByUser,
+    PHS.RevisionCount,
+    PHS.LastRevisionDate
+FROM 
+    TagStats Ts
+JOIN 
+    UserActivity UA ON UA.TotalVotes = (
+        SELECT MAX(TotalVotes) FROM UserActivity
+    )
+JOIN 
+    PostHistorySummary PHS ON PHS.PostId = (
+        SELECT PostId FROM Posts ORDER BY LastActivityDate DESC LIMIT 1
+    )
+ORDER BY 
+    Ts.TotalViews DESC, 
+    Ts.PostCount DESC;

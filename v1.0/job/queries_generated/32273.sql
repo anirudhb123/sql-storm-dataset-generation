@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+CastRoleInfo AS (
+    SELECT 
+        c.movie_id,
+        c.role_id,
+        r.role,
+        COUNT(c.id) AS num_roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, c.role_id, r.role
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        SUM(CASE WHEN r.role IS NOT NULL THEN c.num_roles ELSE 0 END) AS total_roles,
+        RANK() OVER (PARTITION BY mh.level ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastRoleInfo c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level
+)
+SELECT 
+    rv.rank,
+    mh.title,
+    mh.production_year,
+    rv.total_cast,
+    rv.total_roles,
+    CASE 
+        WHEN rv.total_roles IS NULL THEN 'No Roles' 
+        ELSE CAST(rv.total_roles AS text) 
+    END AS roles_info
+FROM 
+    RankedMovies rv
+JOIN 
+    MovieHierarchy mh ON rv.movie_id = mh.movie_id
+WHERE 
+    rv.rank <= 10 
+ORDER BY 
+    mh.production_year DESC, rv.rank ASC;

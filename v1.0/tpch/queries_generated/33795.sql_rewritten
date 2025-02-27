@@ -1,0 +1,33 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 1000
+),
+TotalOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, ROW_NUMBER() OVER (ORDER BY ps.total_cost DESC) AS part_rank
+    FROM part p
+    JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT rh.s_name, rh.level, tp.total_spent, rp.p_name, rp.part_rank
+FROM SupplierHierarchy rh
+LEFT JOIN TotalOrders tp ON rh.s_nationkey = tp.c_custkey
+JOIN RankedParts rp ON rp.part_rank <= 5
+WHERE rh.level IS NOT NULL
+ORDER BY rh.level DESC, tp.total_spent DESC NULLS LAST;

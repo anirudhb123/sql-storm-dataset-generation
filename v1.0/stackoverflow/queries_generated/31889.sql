@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2  -- Start with answers
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.ParentId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionsCount,
+        AnswersCount,
+        TotalScore,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+)
+SELECT 
+    pu.DisplayName,
+    pu.TotalPosts,
+    pu.QuestionsCount,
+    pu.AnswersCount,
+    pu.TotalScore,
+    pu.TotalBounty,
+    p.Title,
+    p.Score,
+    COALESCE(pcr.CloseReason, 'Not Closed') AS CloseReason,
+    COUNT(rph.PostId) AS ChildAnswersCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopUsers pu
+JOIN 
+    Posts p ON pu.UserId = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.ParentId
+LEFT JOIN 
+    PostCloseReasons pcr ON p.Id = pcr.PostId AND pcr.rn = 1
+LEFT JOIN 
+    STRING_SPLIT(p.Tags, '>') t ON t.Value IS NOT NULL  -- Get tags
+WHERE 
+    pu.ScoreRank <= 10  -- Top 10 users by score
+GROUP BY 
+    pu.UserId, pu.DisplayName, pu.TotalPosts, pu.QuestionsCount, pu.AnswersCount, pu.TotalScore, pu.TotalBounty, p.Id, p.Title, p.Score, pcr.CloseReason
+ORDER BY 
+    pu.TotalScore DESC;

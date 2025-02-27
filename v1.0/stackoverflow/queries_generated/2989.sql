@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RecentPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        us.DisplayName AS OwnerDisplayName,
+        us.TotalBounty
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserScores us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.PostRank = 1
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(cp.CreationDate, 'No close data') AS PostClosedDate,
+    COALESCE(cp.UserDisplayName, 'N/A') AS ClosedBy,
+    us.AverageBounty,
+    us.TotalPosts
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+JOIN 
+    UserScores us ON rp.OwnerDisplayName = us.DisplayName
+WHERE 
+    rp.Score > 0 
+    AND (us.TotalBounty IS NOT NULL OR us.TotalPosts > 0)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount ASC;

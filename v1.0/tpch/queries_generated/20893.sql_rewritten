@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CASE 
+            WHEN p.p_retailprice > 100.00 THEN 'High'
+            WHEN p.p_retailprice BETWEEN 50.00 AND 100.00 THEN 'Medium'
+            ELSE 'Low'
+        END as price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IS NOT NULL
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(DISTINCT li.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        li.l_shipdate <= cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    SUM(COALESCE(os.total_revenue, 0)) AS total_revenue,
+    COUNT(DISTINCT hp.p_partkey) AS high_value_parts,
+    STRING_AGG(DISTINCT hs.s_name ORDER BY hs.s_acctbal DESC) AS top_suppliers
+FROM 
+    nation r
+LEFT JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers hs ON s.s_suppkey = hs.s_suppkey AND hs.rn <= 3
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    HighValueParts hp ON ps.ps_partkey = hp.p_partkey
+LEFT JOIN 
+    OrderStats os ON s.s_suppkey = os.o_orderkey 
+WHERE 
+    r.r_comment LIKE '%important%'
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 5000.00)
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(os.total_revenue, 0)) > 10000.00 OR COUNT(DISTINCT hp.p_partkey) > 5
+ORDER BY 
+    total_revenue DESC, r.r_name ASC;

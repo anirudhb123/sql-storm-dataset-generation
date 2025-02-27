@@ -1,0 +1,51 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk >= (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = cast('2002-10-01' as date) - INTERVAL '1 YEAR')
+    GROUP BY 
+        ws.web_site_sk
+), 
+customer_returns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.refunded_customer_sk
+), 
+address_info AS (
+    SELECT 
+        c.c_customer_sk,
+        a.ca_city,
+        a.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+)
+SELECT 
+    r.sales_rank,
+    a.ca_city,
+    a.ca_state,
+    COALESCE(SUM(cr.total_return_amt), 0) AS total_returns,
+    ri.total_sales
+FROM 
+    ranked_sales r
+JOIN 
+    address_info a ON r.web_site_sk = a.c_customer_sk
+LEFT JOIN 
+    customer_returns cr ON a.c_customer_sk = cr.refunded_customer_sk
+WHERE 
+    (a.ca_state IS NOT NULL AND a.ca_state <> 'ZZ') 
+    AND r.sales_rank <= 5
+GROUP BY 
+    r.sales_rank, a.ca_city, a.ca_state, ri.total_sales
+ORDER BY 
+    total_returns DESC
+LIMIT 10;

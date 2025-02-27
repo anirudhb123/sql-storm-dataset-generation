@@ -1,0 +1,54 @@
+WITH UserVoteAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        COUNT(c.Id) AS CommentCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+RankedUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.UpVotes,
+        ua.DownVotes,
+        p.PostId,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.CommentCount,
+        ps.Score,
+        RANK() OVER (ORDER BY ua.UpVotes - ua.DownVotes DESC, ua.TotalVotes DESC) AS UserRank
+    FROM UserVoteAggregates ua
+    JOIN Posts p ON p.OwnerUserId = ua.UserId
+    JOIN PostStats ps ON ps.PostId = p.Id
+)
+SELECT 
+    ru.UserId,
+    u.DisplayName,
+    ru.UpVotes,
+    ru.DownVotes,
+    ru.UpVoteCount,
+    ru.DownVoteCount,
+    ru.CommentCount,
+    ru.Score,
+    ru.UserRank
+FROM RankedUsers ru
+JOIN Users u ON ru.UserId = u.Id
+WHERE ru.UserRank <= 10
+ORDER BY ru.UserRank;

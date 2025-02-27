@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000 AND s_comment NOT LIKE '%bad%'
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 10000 AND sh.level < 5
+),
+ProductMetrics AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+DiscountedSales AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.10
+    GROUP BY l.l_orderkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(ds.total_sales) AS total_order_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(ds.total_sales) DESC) AS sales_rank
+    FROM orders o
+    LEFT JOIN DiscountedSales ds ON o.o_orderkey = ds.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    pm.supplier_count,
+    pm.total_avail_qty,
+    pm.avg_supply_cost,
+    ro.total_order_sales,
+    ro.sales_rank,
+    s.s_name,
+    s.s_acctbal
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN ProductMetrics pm ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = pm.p_partkey)
+LEFT JOIN RankedOrders ro ON ro.total_order_sales IS NOT NULL
+WHERE n.n_name LIKE 'A%' 
+  AND (s.s_acctbal IS NOT NULL AND s.s_acctbal > 20000)
+ORDER BY r.r_name, pm.avg_supply_cost DESC, ro.total_order_sales DESC;

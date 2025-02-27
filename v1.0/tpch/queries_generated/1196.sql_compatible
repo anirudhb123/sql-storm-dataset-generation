@@ -1,0 +1,35 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY r.r_name
+)
+
+SELECT 
+    r.region_name,
+    r.total_sales,
+    r.order_count,
+    COALESCE(ROUND(r.total_sales / NULLIF(r.order_count, 0), 2), 0) AS avg_sale_per_order
+FROM RegionalSales r
+WHERE r.rank <= 3
+ORDER BY r.total_sales DESC
+
+UNION ALL
+
+SELECT 
+    'Total' AS region_name,
+    SUM(total_sales) AS total_sales,
+    SUM(order_count) AS order_count,
+    COALESCE(ROUND(SUM(total_sales) / NULLIF(SUM(order_count), 0), 2), 0) AS avg_sale_per_order
+FROM RegionalSales;

@@ -1,0 +1,70 @@
+
+WITH CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        AVG(ws.ws_ext_sales_price) AS avg_order_value
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        cs.avg_order_value,
+        DENSE_RANK() OVER (ORDER BY cs.total_spent DESC) AS spend_rank
+    FROM
+        CustomerStats cs
+    WHERE
+        cs.total_orders > 0
+),
+RecentSales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_revenue
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk FROM date_dim d
+            WHERE d.d_date BETWEEN DATEADD(MONTH, -3, CURRENT_DATE) AND CURRENT_DATE
+        )
+    GROUP BY
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT
+        ri.i_item_sk,
+        ri.i_product_name,
+        ri.i_brand,
+        rs.total_quantity,
+        rs.total_revenue,
+        DENSE_RANK() OVER (ORDER BY rs.total_revenue DESC) AS revenue_rank
+    FROM
+        item ri
+    JOIN
+        RecentSales rs ON ri.i_item_sk = rs.ws_item_sk
+)
+SELECT
+    tc.c_customer_sk,
+    tc.total_orders,
+    tc.total_spent,
+    ti.i_item_sk,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_revenue
+FROM
+    TopCustomers tc
+JOIN
+    TopItems ti ON tc.total_orders >= 5
+WHERE
+    tc.spend_rank <= 10 AND ti.revenue_rank <= 5
+ORDER BY
+    tc.total_spent DESC, ti.total_revenue DESC;

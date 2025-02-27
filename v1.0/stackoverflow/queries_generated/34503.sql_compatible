@@ -1,0 +1,90 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        UR.Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        UserReputation UR ON U.Reputation < UR.Reputation
+    WHERE 
+        UR.Level < 5 
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(VoteCount.UpVotes, 0) AS UpVotes,
+        COALESCE(VoteCount.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) VoteCount ON P.Id = VoteCount.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, P.Score
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+)
+SELECT 
+    PU.UserId,
+    PU.DisplayName,
+    PU.Reputation,
+    PA.PostId,
+    PA.Title,
+    PA.ViewCount,
+    PA.Score,
+    PA.CommentCount,
+    PA.UpVotes,
+    PA.DownVotes,
+    PA.PostRank,
+    T.ReputationRank
+FROM 
+    PostAnalysis PA
+JOIN 
+    Users PU ON PA.OwnerUserId = PU.Id
+LEFT JOIN 
+    TopUsers T ON PU.Id = T.UserId
+WHERE 
+    PA.ViewCount > 100
+    AND (PA.Score > 10 OR PA.CommentCount > 5)
+ORDER BY 
+    PU.Reputation DESC, 
+    PA.ViewCount DESC;

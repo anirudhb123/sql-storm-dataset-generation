@@ -1,0 +1,91 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        DENSE_RANK() OVER (ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS ScoreRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalScore,
+        ScoreRank
+    FROM 
+        RecursiveUserActivity
+    WHERE 
+        ScoreRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(l.LinkTypeId, 0) AS LinkTypeId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount
+         FROM 
+            Comments
+         GROUP BY 
+            PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, LinkTypeId
+         FROM 
+            PostLinks) l ON p.Id = l.PostId
+    WHERE 
+        p.CreationDate > '2023-01-01'
+),
+UserPostDetails AS (
+    SELECT 
+        au.UserId,
+        au.DisplayName,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.AnswerCount,
+        ps.CreationDate
+    FROM 
+        TopActiveUsers au
+    JOIN 
+        Posts ps ON au.UserId = ps.OwnerUserId
+)
+SELECT 
+    upd.UserId,
+    upd.DisplayName,
+    COUNT(upd.PostId) AS UserPostCount,
+    SUM(COALESCE(upd.ViewCount, 0)) AS TotalViews,
+    SUM(COALESCE(upd.CommentCount, 0)) AS TotalComments,
+    SUM(COALESCE(upd.AnswerCount, 0)) AS TotalAnswers,
+    MAX(upd.CreationDate) AS LatestPostDate,
+    CASE 
+        WHEN SUM(COALESCE(upd.CommentCount, 0)) = 0 THEN 'No Comments'
+        ELSE 'Comments Exist'
+    END AS CommentsStatus
+FROM 
+    UserPostDetails upd
+GROUP BY 
+    upd.UserId, upd.DisplayName
+HAVING 
+    SUM(COALESCE(upd.ViewCount, 0)) > 1000
+ORDER BY 
+    UserPostCount DESC, TotalViews DESC;

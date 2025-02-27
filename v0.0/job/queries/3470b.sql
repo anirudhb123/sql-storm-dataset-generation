@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.company_type_id = 1 AND t.phonetic_code IS NOT NULL AND t.episode_of_id > 182024 AND mi.info = 'The Raptors have caused New York City to be overrun by gigantic, mutant vegetation: plants to release ozone-destroying fluorocarbons instead of oxygen. The Extreme Ones must get to the root of the problem before the plants destroy New York - and the ozone layer!';

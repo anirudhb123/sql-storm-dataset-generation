@@ -1,0 +1,63 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6)  
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 100 
+    GROUP BY u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[]) 
+    GROUP BY t.TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS RecentRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+)
+SELECT 
+    up.DisplayName,
+    up.PostsCount,
+    up.UpVotes,
+    up.DownVotes,
+    r.Title AS RecentPostTitle,
+    r.CreationDate AS RecentPostDate,
+    r.ViewCount,
+    r.Score,
+    th.TagName AS PopularTag,
+    ph.HistoryDate AS LatestEditDate,
+    ph.Comment AS EditComment
+FROM UserActivity up
+JOIN RecentPosts r ON up.PostsCount > 0
+LEFT JOIN RecursivePostHistory ph ON r.Id = ph.PostId AND ph.HistoryRank = 1
+LEFT JOIN TagStats th ON th.PostCount > 10
+WHERE up.UpVotes - up.DownVotes > 10 
+ORDER BY up.PostsCount DESC, r.CreationDate DESC
+LIMIT 50;

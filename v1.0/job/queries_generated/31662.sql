@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM aka_title t
+    JOIN movie_link ml ON t.id = ml.movie_id
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Related')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.linked_movie_id
+    JOIN aka_title t ON ml.movie_id = t.id
+    WHERE ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Related')
+),
+
+cast_summary AS (
+    SELECT
+        ci.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+
+info_summary AS (
+    SELECT
+        mi.movie_id,
+        COUNT(DISTINCT CASE WHEN it.info = 'Rating' THEN mi.info END) AS rating_count,
+        STRING_AGG(DISTINCT CASE WHEN it.info = 'Genre' THEN mi.info END, ', ') AS genres
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cs.cast_names, 'No Cast Available') AS cast_names,
+    COALESCE(cs.total_cast, 0) AS total_cast, 
+    COALESCE(is.rating_count, 0) AS rating_count,
+    COALESCE(is.genres, 'No Genres Available') AS genres,
+    mh.level
+FROM movie_hierarchy mh
+LEFT JOIN cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN info_summary is ON mh.movie_id = is.movie_id
+ORDER BY mh.production_year DESC, mh.level, mh.title;
+
+This SQL query demonstrates a multi-layered approach to performance benchmarking by employing:
+- Recursive CTEs to build a hierarchy of movies based on their relationships.
+- Aggregating cast information with string concatenation to create a summary of actors for each movie.
+- Gathering additional information regarding the movies such as genres and rating counts.
+- Utilizing outer joins to ensure all movies (including those without casts or info) are represented in the output.
+- To ensure comprehensive results, COALESCE is used to deal with NULL values effectively.

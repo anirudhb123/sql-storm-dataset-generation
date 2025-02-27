@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+filtered_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status,
+        r.r_reason_desc,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+)
+SELECT 
+    fc.c_customer_id,
+    fc.cd_gender,
+    fc.marital_status,
+    SUM(fs.total_sales) AS total_sales,
+    AVG(fc.purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT fs.order_count) AS unique_orders,
+    FIRST_VALUE(fc.r_reason_desc) OVER (PARTITION BY fc.c_customer_id ORDER BY fc.r_reason_desc) AS first_reason,
+    MAX(CASE 
+        WHEN fs.sales_rank = 1 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END) AS customer_type
+FROM 
+    filtered_customers fc
+LEFT JOIN 
+    ranked_sales fs ON fc.c_customer_id = fs.ws_bill_customer_sk
+GROUP BY 
+    fc.c_customer_id, fc.cd_gender, fc.marital_status
+HAVING 
+    SUM(fs.total_sales) > (SELECT AVG(total_sales) * 1.5 FROM ranked_sales)
+ORDER BY 
+    total_sales DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,62 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) - COALESCE(SUM(v.VoteTypeId = 3), 0) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+), TopUsers AS (
+    SELECT 
+        Us.UserId,
+        Us.DisplayName,
+        Us.TotalUpVotes,
+        Us.TotalDownVotes,
+        Us.PostCount
+    FROM 
+        UserStatistics Us
+    WHERE 
+        Us.Rank <= 10
+)
+SELECT 
+    Tu.DisplayName,
+    Tu.TotalUpVotes,
+    Tu.TotalDownVotes,
+    Tu.PostCount,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate
+FROM 
+    TopUsers Tu
+LEFT JOIN 
+    RecentPosts rp ON Tu.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+ORDER BY 
+    Tu.TotalUpVotes DESC, Tu.TotalDownVotes ASC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total Users' AS DisplayName,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    COUNT(*) AS PostCount,
+    NULL AS RecentPostTitle,
+    NULL AS RecentPostDate
+FROM 
+    UserStatistics;

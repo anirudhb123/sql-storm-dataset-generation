@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           CASE WHEN m.episode_of_id IS NULL THEN 1 ELSE 0 END AS is_top_level
+    FROM aka_title m
+    WHERE m.production_year >= 2000  -- Focus on movies produced in or after 2000
+    UNION ALL
+    SELECT m.id, m.title, m.production_year, 0
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_counts AS (
+    SELECT c.movie_id, COUNT(c.person_id) AS cast_count
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+title_info AS (
+    SELECT t.title, t.production_year, 
+           CASE WHEN c.cast_count IS NULL THEN 0 ELSE c.cast_count END AS total_cast
+    FROM aka_title t
+    LEFT JOIN cast_counts c ON t.id = c.movie_id
+),
+ranked_titles AS (
+    SELECT ti.title, ti.production_year, ti.total_cast,
+           RANK() OVER (PARTITION BY ti.production_year ORDER BY ti.total_cast DESC) AS rank
+    FROM title_info ti
+),
+company_info AS (
+    SELECT mc.movie_id, c.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+final_info AS (
+    SELECT mh.movie_id, mh.title, mh.production_year, 
+           COALESCE(ri.rank, 0) AS title_rank, 
+           c.name AS company_name, ci.company_type
+    FROM movie_hierarchy mh
+    LEFT JOIN ranked_titles ri ON mh.movie_id = ri.movie_id
+    LEFT JOIN company_info c ON mh.movie_id = c.movie_id
+)
+SELECT f.title, f.production_year, f.title_rank,
+       STRING_AGG(DISTINCT f.company_name, ', ') AS company_names
+FROM final_info f
+WHERE f.title_rank <= 5  -- Top 5 titles per year
+GROUP BY f.title, f.production_year, f.title_rank
+ORDER BY f.production_year DESC, f.title_rank;

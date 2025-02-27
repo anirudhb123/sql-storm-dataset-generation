@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS rank_price
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT r.sr_ticket_number) AS total_returns,
+        COUNT(DISTINCT w.web_page_sk) AS total_web_visits,
+        SUM(i.i_current_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns r ON c.c_customer_sk = r.sr_customer_sk
+    LEFT JOIN 
+        web_page w ON c.c_customer_sk = w.wp_customer_sk
+    LEFT JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    LEFT JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighSpenders AS (
+    SELECT 
+        c.c_customer_sk,
+        cs.total_returns,
+        cs.total_web_visits,
+        cs.total_spent
+    FROM 
+        customer c
+    JOIN 
+        CustomerStats cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE 
+        cs.total_spent > 1000
+),
+IncomeData AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_income_band_sk
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cus.c_customer_id,
+    cus.c_first_name,
+    cus.c_last_name,
+    COALESCE(id.ib_income_band_sk, -1) AS income_band,
+    hs.total_returns,
+    hs.total_web_visits,
+    hs.total_spent
+FROM 
+    customer cus
+LEFT JOIN 
+    HighSpenders hs ON cus.c_customer_sk = hs.c_customer_sk
+LEFT JOIN 
+    IncomeData id ON cus.c_current_hdemo_sk = id.hd_demo_sk
+WHERE 
+    (hs.total_returns IS NOT NULL OR hs.total_web_visits IS NOT NULL)
+ORDER BY 
+    hs.total_spent DESC, 
+    cus.c_last_name ASC
+LIMIT 100;

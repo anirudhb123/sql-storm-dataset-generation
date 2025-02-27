@@ -1,0 +1,66 @@
+
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_amount,
+        DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate) AS ship_rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+HighValueOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.total_spent,
+        COALESCE(l.total_line_amount, 0) AS total_line_amount
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        LineItemDetails l ON co.c_custkey = l.l_orderkey
+    WHERE 
+        co.total_spent > 10000
+)
+SELECT 
+    hvo.c_name,
+    hvo.total_spent,
+    hvo.total_line_amount,
+    sa.total_supply_cost,
+    (CASE 
+        WHEN sa.total_supply_cost IS NULL THEN 'No Supplies' 
+        ELSE 'Supplier Exists' 
+     END) AS supplier_status
+FROM 
+    HighValueOrders hvo
+LEFT JOIN 
+    SupplierAggregates sa ON hvo.c_custkey = sa.s_suppkey
+ORDER BY 
+    hvo.total_spent DESC, hvo.c_name;

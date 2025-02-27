@@ -1,0 +1,79 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN P.PostTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        T.TagName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(string_to_array(P.Tags, '><')) AS T(TagName)
+    GROUP BY 
+        P.Id
+),
+PopularUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+),
+CommentsCount AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.QuestionCount,
+    UR.AnswerCount,
+    UR.CloseCount,
+    TP.Title,
+    TP.Body,
+    TP.Tags,
+    PU.ReputationRank,
+    CC.CommentCount
+FROM 
+    UserReputation UR
+JOIN 
+    TaggedPosts TP ON UR.UserId = TP.PostId
+JOIN 
+    PopularUsers PU ON UR.UserId = PU.DisplayName
+JOIN 
+    CommentsCount CC ON TP.PostId = CC.PostId
+WHERE 
+    UR.Reputation > 1000
+ORDER BY 
+    UR.Reputation DESC, 
+    CC.CommentCount DESC
+LIMIT 50;

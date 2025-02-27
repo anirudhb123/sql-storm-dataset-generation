@@ -1,0 +1,75 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE 
+        sh.level < 5
+),
+PartSupplierCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+RelevantLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        l.l_shipdate
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipmode IN ('AIR', 'SHIP')
+    GROUP BY 
+        l.l_orderkey, l.l_shipdate
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(r.supplier_count, 0) AS supplier_count,
+    SUM(CASE 
+        WHEN rh.level IS NOT NULL THEN r.total_revenue 
+        ELSE 0 
+    END) AS total_revenue_by_supplier,
+    SUBSTRING(n.n_name, 1, 3) AS nation_prefix
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierCounts r ON p.p_partkey = r.ps_partkey
+LEFT JOIN 
+    RelevantLineItems rh ON rh.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate <= DATE '1997-12-31'
+    )
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT MIN(s.n_nationkey) FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey))
+GROUP BY 
+    p.p_partkey, p.p_name, r.supplier_count, n.n_name
+HAVING 
+    COALESCE(r.supplier_count, 0) > 5 
+ORDER BY 
+    total_revenue_by_supplier DESC, p.p_name ASC;

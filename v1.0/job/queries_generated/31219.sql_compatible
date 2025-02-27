@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 'Unknown Year') AS production_year,
+        COALESCE(ca.name, 'No Actor') AS actor_name,
+        ca.nr_order,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ca.name, 'No Actor') AS actor_name,
+        ca.nr_order,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ca ON mh.movie_id = ca.movie_id
+    WHERE 
+        mh.level < 5
+),
+
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.actor_name,
+        mh.nr_order,
+        kc.keyword_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY kc.keyword_count DESC) AS rank_per_year
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        KeywordCounts kc ON mh.movie_id = kc.movie_id
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_name,
+    tm.nr_order,
+    COALESCE(ca.kind, 'Unknown Role') AS kind_of_role,
+    (SELECT AVG(COALESCE(mv.info, 0)::FLOAT) 
+     FROM movie_info mv 
+     WHERE mv.movie_id = tm.movie_id 
+     AND mv.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')) AS average_rating,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    comp_cast_type ca ON mc.company_type_id = ca.id
+WHERE 
+    (SELECT RANK() OVER (PARTITION BY tm.production_year ORDER BY dk.keyword_count DESC) 
+     FROM KeywordCounts dk 
+     WHERE dk.movie_id = tm.movie_id) <= 5 
+GROUP BY 
+    tm.title, tm.production_year, tm.actor_name, tm.nr_order, ca.kind
+ORDER BY 
+    tm.production_year, keyword_count DESC, tm.nr_order;

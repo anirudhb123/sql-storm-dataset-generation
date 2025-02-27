@@ -1,0 +1,66 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amount,
+        sr_refunded_cash,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_amount DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        MAX(w.ws_net_profit) AS max_profit
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales w ON c.c_customer_sk = w.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+), 
+HighValueReturns AS (
+    SELECT 
+        r.sr_item_sk,
+        SUM(r.sr_return_quantity) AS total_returned,
+        SUM(r.sr_return_amount) AS total_return_amount,
+        COALESCE(SUM(CASE WHEN r.sr_return_quantity > 10 THEN r.sr_return_amount END), 0) AS high_volume_return_amount
+    FROM 
+        store_returns r
+    WHERE 
+        r.sr_return_quantity > 0
+        AND r.sr_return_amount IS NOT NULL
+    GROUP BY 
+        r.sr_item_sk
+    HAVING 
+        SUM(r.sr_return_quantity) > 50
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    hr.total_returned,
+    hr.total_return_amount,
+    hr.high_volume_return_amount,
+    COALESCE(rr.sr_return_quantity, 0) AS return_quantity,
+    rr.sr_refunded_cash,
+    AVG(CASE WHEN ci.max_profit IS NULL THEN 0 ELSE ci.max_profit END) AS avg_max_profit
+FROM 
+    CustomerInfo ci
+LEFT JOIN HighValueReturns hr ON hr.sr_item_sk IN (SELECT sr_item_sk FROM RankedReturns WHERE rn = 1)
+LEFT JOIN RankedReturns rr ON ci.c_customer_sk = rr.sr_item_sk
+GROUP BY 
+    ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status, 
+    hr.total_returned, hr.total_return_amount, hr.high_volume_return_amount, 
+    rr.sr_return_quantity, rr.sr_refunded_cash
+ORDER BY 
+    avg_max_profit DESC;

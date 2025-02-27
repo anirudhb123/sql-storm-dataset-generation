@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '><')) AS TagName ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TagName
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.TagsArray
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 10  -- Filtering for popular posts with score greater than 10
+),
+RecentActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) AS ActivePosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.LastAccessDate > current_timestamp - interval '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.LastAccessDate
+    ORDER BY 
+        ActivePosts DESC
+    LIMIT 10
+)
+SELECT 
+    pp.Title AS PopularPostTitle,
+    pp.OwnerDisplayName AS PopularOwner,
+    pp.CreationDate AS PopularCreationDate,
+    pp.ViewCount AS PopularViewCount,
+    pp.Score AS PopularScore,
+    pp.CommentCount AS PopularCommentCount,
+    array_to_string(pp.TagsArray, ', ') AS PopularTags,
+    rau.DisplayName AS RecentActiveUser,
+    rau.Reputation AS RecentUserReputation,
+    rau.ActivePosts AS RecentUserActivePosts
+FROM 
+    PopularPosts pp
+JOIN 
+    RecentActiveUsers rau ON pp.OwnerDisplayName = rau.DisplayName
+ORDER BY 
+    pp.Score DESC, rau.Reputation DESC;

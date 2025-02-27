@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate DESC) AS RankInCategory,
+        pt.Name AS PostType,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 DAY' AND
+        p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.Score, u.DisplayName, pt.Name
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, Title, ViewCount, AnswerCount, Score, OwnerDisplayName,
+        Upvotes, Downvotes, CommentCount, RankInCategory, PostType
+    FROM 
+        RankedPosts
+    WHERE 
+        RankInCategory <= 10
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.ViewCount,
+    t.AnswerCount,
+    t.Score,
+    t.OwnerDisplayName,
+    t.Upvotes,
+    t.Downvotes,
+    t.CommentCount,
+    t.PostType,
+    pt2.Name AS RelatedPostType,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+FROM 
+    TopRankedPosts t
+LEFT JOIN 
+    PostLinks pl ON t.PostId = pl.PostId
+LEFT JOIN 
+    PostTypes pt2 ON pl.RelatedPostId = pt2.Id
+GROUP BY 
+    t.PostId, t.Title, t.ViewCount, t.AnswerCount, t.Score, t.OwnerDisplayName, 
+    t.Upvotes, t.Downvotes, t.CommentCount, t.PostType
+ORDER BY 
+    t.Score DESC, t.ViewCount DESC;

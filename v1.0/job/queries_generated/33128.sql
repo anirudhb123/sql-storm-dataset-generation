@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS depth
+    FROM title m
+    WHERE m.season_nr IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ep.id AS movie_id,
+        ep.title,
+        mh.depth + 1
+    FROM title ep
+    JOIN MovieHierarchy mh ON ep.episode_of_id = mh.movie_id
+),
+ActorPerformance AS (
+    SELECT 
+        a.person_id,
+        COUNT(*) AS total_movies,
+        AVG(COALESCE(CAST(mi.info AS NUMERIC), 0)) AS average_rating,
+        STRING_AGG(DISTINCT t.kind_id::text, ', ') AS kinds_played
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    JOIN title t ON t.id = c.movie_id
+    LEFT JOIN movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'rating'
+    )
+    WHERE t.production_year >= 2000
+    GROUP BY a.person_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name cn ON cn.id = mc.company_id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    mh.title AS episode_title,
+    mh.depth,
+    ap.total_movies,
+    ap.average_rating,
+    cm.company_names,
+    cm.total_companies
+FROM MovieHierarchy mh
+LEFT JOIN ActorPerformance ap ON ap.person_id IN (
+    SELECT c.person_id 
+    FROM cast_info c 
+    WHERE c.movie_id = mh.movie_id
+)
+LEFT JOIN CompanyMovies cm ON cm.movie_id = mh.movie_id
+ORDER BY mh.depth, ap.average_rating DESC
+LIMIT 50;

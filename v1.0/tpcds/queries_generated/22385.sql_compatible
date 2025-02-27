@@ -1,0 +1,67 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        c.c_birth_year,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_birth_year DESC) AS rn
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ch.c_birth_year,
+        ROW_NUMBER() OVER (PARTITION BY ch.c_customer_id ORDER BY ch.c_birth_year DESC) AS rn
+    FROM CustomerHierarchy AS ch
+    JOIN customer AS c ON ch.c_customer_sk = c.c_current_cdemo_sk
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE ch.rn <= 2
+),
+FilteredSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_sold_date
+    FROM web_sales AS ws
+    WHERE ws.ws_sales_price > 100
+    GROUP BY ws.ws_item_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(fs.total_net_profit, 0) AS total_net_profit,
+        COALESCE(ABS(DATEDIFF(CAST('2002-10-01' AS DATE), ds.d_date)), 0) AS days_since_last_sale
+    FROM item AS i
+    LEFT JOIN FilteredSales AS fs ON i.i_item_sk = fs.ws_item_sk
+    LEFT JOIN date_dim AS ds ON ds.d_date_sk = fs.last_sold_date
+),
+StoreSales AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM store_sales AS ss
+    JOIN item AS i ON ss.ss_item_sk = i.i_item_sk
+    GROUP BY ss.ss_item_sk
+)
+SELECT 
+    isales.i_item_id,
+    isales.total_net_profit,
+    isales.days_since_last_sale,
+    COALESCE(ssales.total_store_sales, 0) AS total_store_sales,
+    (isales.total_net_profit - COALESCE(ssales.total_store_sales, 0)) AS profit_after_store_sales
+FROM ItemSales AS isales
+LEFT JOIN StoreSales AS ssales ON isales.i_item_sk = ssales.ss_item_sk
+WHERE isales.total_net_profit > 0
+AND isales.days_since_last_sale BETWEEN 0 AND 365
+ORDER BY profit_after_store_sales DESC
+LIMIT 10;

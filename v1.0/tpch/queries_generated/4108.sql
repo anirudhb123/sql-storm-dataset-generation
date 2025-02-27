@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_comment,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_comment
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+CustomerLifetime AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS lifetime_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sd.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN cl.lifetime_value IS NULL THEN 0
+        ELSE cl.lifetime_value
+    END AS customer_lifetime_value,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS return_value,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS popularity_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON l.l_suppkey = sd.s_suppkey
+LEFT JOIN 
+    CustomerLifetime cl ON ro.o_custkey = cl.c_custkey
+WHERE 
+    p.p_retailprice > 50.00
+GROUP BY 
+    p.p_partkey, p.p_name, sd.s_name, cl.lifetime_value
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    popularity_rank;

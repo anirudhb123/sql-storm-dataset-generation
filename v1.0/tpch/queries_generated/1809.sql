@@ -1,0 +1,59 @@
+WITH Total_Supplier_Cost AS (
+    SELECT
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_suppkey
+),
+Supplier_Info AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(t.total_cost, 0) AS total_cost
+    FROM
+        supplier s
+    LEFT JOIN
+        Total_Supplier_Cost t ON s.s_suppkey = t.s_suppkey
+),
+Top_Suppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY s.total_cost DESC) AS rnk
+    FROM
+        Supplier_Info s
+    WHERE
+        s.total_cost > 0
+)
+SELECT
+    n.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(c.c_acctbal) AS avg_customer_balance,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    STRING_AGG(s.s_name, ', ') AS supplier_names
+FROM
+    lineitem l
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+JOIN
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE
+    l.l_shipdate >= '2023-01-01'
+    AND l.l_returnflag = 'N'
+GROUP BY
+    n.n_name
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+    AND COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY
+    total_orders DESC
+LIMIT 10;

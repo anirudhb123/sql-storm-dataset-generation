@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1 AS depth
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    STRING_AGG(DISTINCT ac.role_id::text, ', ') AS roles,
+    COUNT(DISTINCT mh.movie_id) AS linked_movies_count,
+    ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS movie_rank
+FROM
+    aka_name ak
+JOIN
+    cast_info ac ON ak.person_id = ac.person_id
+JOIN
+    aka_title at ON ac.movie_id = at.id
+LEFT JOIN
+    movie_link ml ON at.id = ml.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND at.production_year BETWEEN 2000 AND 2023
+    AND ac.role_id IS NOT NULL
+GROUP BY
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY
+    movie_rank, actor_name;

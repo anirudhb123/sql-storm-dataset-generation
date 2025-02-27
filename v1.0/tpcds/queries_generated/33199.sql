@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_ext_sales_price) DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address
+),
+total_sales_summary AS (
+    SELECT 
+        c.c_state,
+        SUM(sh.total_sales) AS state_sales,
+        COUNT(DISTINCT sh.c_customer_sk) AS unique_customers
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_state
+),
+best_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    WHERE 
+        sh.rn = 1
+)
+SELECT 
+    bc.c_customer_sk,
+    bc.c_first_name,
+    bc.c_last_name,
+    bc.c_email_address,
+    ts.state_sales,
+    ts.unique_customers,
+    CASE 
+        WHEN ts.state_sales > 10000 THEN 'High Roller'
+        WHEN ts.state_sales BETWEEN 5000 AND 10000 THEN 'Average Joe'
+        ELSE 'Newbie'
+    END AS customer_category
+FROM 
+    best_customers bc
+JOIN 
+    total_sales_summary ts ON ts.c_state = SUBSTRING(bc.c_email_address, LOCATE('@', bc.c_email_address) + 1, 2)
+WHERE 
+    bc.sales_rank <= 10
+ORDER BY 
+    ts.state_sales DESC, 
+    bc.c_first_name, 
+    bc.c_last_name;

@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+        AND (p.Body IS NOT NULL AND p.Body != '')
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    CASE 
+        WHEN cp.ClosedDate IS NOT NULL THEN DATEDIFF(DAY, cp.ClosedDate, CURRENT_TIMESTAMP) 
+        ELSE NULL 
+    END AS DaysSinceClosed,
+    rp.CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes,  
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVotes   
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.RecentPostRank = 1 
+ORDER BY 
+    COALESCE(DaysSinceClosed, 0) DESC,  
+    rp.Score DESC;

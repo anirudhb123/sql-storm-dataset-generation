@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(tp.PostId) AS PostCount,
+        SUM(tp.ViewCount) AS TotalViews,
+        AVG(tp.Score) AS AvgScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN 
+        TopRankedPosts tp ON tp.PostId = p.Id
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ps.TagName,
+    ps.PostCount,
+    ps.TotalViews,
+    ps.AvgScore,
+    COUNT(DISTINCT b.UserId) AS BadgeHolders
+FROM 
+    PostStats ps
+LEFT JOIN 
+    Badges b ON b.UserId IN (SELECT DISTINCT OwnerUserId FROM TopRankedPosts)
+GROUP BY 
+    ps.TagName, ps.PostCount, ps.TotalViews, ps.AvgScore
+ORDER BY 
+    ps.PostCount DESC, ps.TotalViews DESC;

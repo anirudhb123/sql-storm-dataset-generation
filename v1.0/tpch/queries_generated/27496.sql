@@ -1,0 +1,52 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(p.ps_partkey) AS parts_count,
+        SUM(p.ps_supplycost) AS total_supplycost,
+        MAX(s.s_acctbal) AS max_acctbal,
+        STRING_AGG(DISTINCT p.p_mfgr, ', ') AS manufacturers
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, r.r_name
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    sd.s_name AS supplier_name,
+    sd.nation_name,
+    sd.region_name,
+    sd.parts_count,
+    sd.total_supplycost,
+    cd.c_name AS customer_name,
+    cd.orders_count,
+    cd.total_spent,
+    sd.manufacturers
+FROM 
+    SupplierDetails sd
+JOIN 
+    CustomerOrderDetails cd ON sd.parts_count > 5 AND cd.total_spent > 5000
+ORDER BY 
+    sd.total_supplycost DESC, cd.total_spent ASC
+LIMIT 10;

@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        SUM(COALESCE(p.AnswerCount, 0)) OVER (PARTITION BY p.OwnerUserId) AS TotalAnswers,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS FirstDeletedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate AS PostCreation,
+    p.Score AS PostScore,
+    p.ViewCount AS TotalViews,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(b.HighestBadgeClass, 0) AS MaxBadge,
+    COALESCE(h.CloseReopenCount, 0) AS CloseReopenCount,
+    h.LastClosedDate,
+    h.FirstDeletedDate,
+    p.Tags
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges b ON p.OwnerUserId = b.UserId
+LEFT JOIN 
+    PostHistoryInfo h ON p.Id = h.PostId
+WHERE 
+    p.PostRank = 1
+    AND p.TotalAnswers > 5
+    AND (b.BadgeCount IS NULL OR b.BadgeCount > 0)
+    AND (h.LastClosedDate IS NULL OR h.LastClosedDate < (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'))
+ORDER BY 
+    p.Score DESC,
+    p.TotalViews DESC
+LIMIT 100;

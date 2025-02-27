@@ -1,0 +1,70 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_id) AS customer_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesRanking AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+),
+IncomeRanges AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        CASE 
+            WHEN ib.ib_lower_bound IS NULL OR ib.ib_upper_bound IS NULL THEN 'Unknown'
+            ELSE CONCAT('$', ib.ib_lower_bound, ' - $', ib.ib_upper_bound)
+        END AS income_range
+    FROM 
+        income_band ib
+)
+SELECT 
+    sr.c_customer_id,
+    sr.total_sales,
+    CASE 
+        WHEN cd.customer_count > 0 THEN cd.cd_gender
+        ELSE 'Not Disclosed'
+    END AS gender,
+    CASE 
+        WHEN cd.customer_count > 0 THEN cd.cd_marital_status
+        ELSE 'Not Disclosed'
+    END AS marital_status,
+    ir.income_range,
+    sr.sales_rank
+FROM 
+    SalesRanking sr
+LEFT JOIN 
+    CustomerDemographics cd ON sr.c_customer_id = cd.cd_demo_sk
+LEFT JOIN 
+    IncomeRanges ir ON cd.cd_demo_sk = ir.ib_income_band_sk
+WHERE 
+    sr.sales_rank <= 10
+    AND (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NOT NULL)
+ORDER BY 
+    sr.sales_rank;

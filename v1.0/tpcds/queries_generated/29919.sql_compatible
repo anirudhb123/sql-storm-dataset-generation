@@ -1,0 +1,67 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca.address_sk,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS full_address,
+        ca.city,
+        ca.state,
+        ca.zip
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.city IS NOT NULL 
+        AND ca.state IS NOT NULL
+),
+CustomerInfo AS (
+    SELECT 
+        c.customer_sk,
+        CONCAT(c.first_name, ' ', c.last_name) AS full_name,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        cd.purchase_estimate,
+        cd.credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.first_name IS NOT NULL 
+        AND c.last_name IS NOT NULL
+),
+SalesInfo AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(ws.order_number) AS sales_count,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d.date_sk FROM date_dim d WHERE d.year = 2023)
+    GROUP BY 
+        ws.item_sk
+)
+SELECT 
+    ci.full_name,
+    ci.gender,
+    ci.marital_status,
+    ai.full_address,
+    ai.city,
+    ai.state,
+    si.total_sales,
+    si.sales_count,
+    si.unique_customers
+FROM 
+    CustomerInfo ci
+JOIN 
+    AddressInfo ai ON ci.customer_sk = ai.address_sk
+JOIN 
+    SalesInfo si ON ci.customer_sk = si.item_sk
+WHERE 
+    ci.purchase_estimate > 1000 
+    AND ai.state = 'CA'
+ORDER BY 
+    si.total_sales DESC, 
+    si.unique_customers DESC
+LIMIT 100;

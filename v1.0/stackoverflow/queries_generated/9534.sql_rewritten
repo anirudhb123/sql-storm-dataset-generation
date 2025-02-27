@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.PostTypeId
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10 OR rp.ViewRank <= 10
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+AggregateResults AS (
+    SELECT 
+        trp.PostId,
+        trp.Title,
+        u.UserId,
+        u.DisplayName,
+        u.PostCount,
+        u.CommentCount,
+        u.GoldBadges,
+        u.SilverBadges,
+        u.BronzeBadges
+    FROM 
+        TopRankedPosts trp
+    JOIN 
+        Users u ON trp.OwnerUserId = u.Id
+)
+SELECT 
+    ar.PostId,
+    ar.Title,
+    ar.DisplayName AS Owner,
+    ar.PostCount,
+    ar.CommentCount,
+    ar.GoldBadges,
+    ar.SilverBadges,
+    ar.BronzeBadges
+FROM 
+    AggregateResults ar
+ORDER BY 
+    ar.PostId;

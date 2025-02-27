@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal * 0.8
+),
+AggregatedSales AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY l.l_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT l.l_suppkey FROM lineitem l WHERE l.l_shipdate > CURRENT_DATE - INTERVAL '60 days')
+    AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = s.s_nationkey)
+),
+RankedSales AS (
+    SELECT asu.l_suppkey, asu.total_sales, RANK() OVER (ORDER BY asu.total_sales DESC) AS sales_rank
+    FROM AggregatedSales asu
+),
+CombinedResults AS (
+    SELECT DISTINCT sh.s_suppkey, sh.s_name, sh.level, ts.total_sales
+    FROM SupplierHierarchy sh
+    LEFT JOIN TopSuppliers ts ON sh.s_suppkey = ts.s_suppkey
+)
+SELECT cr.s_suppkey, cr.s_name, COALESCE(cr.total_sales, 0) AS total_sales, sh.level
+FROM CombinedResults cr
+LEFT JOIN RankedSales rs ON cr.s_suppkey = rs.l_suppkey
+WHERE cr.total_sales IS NOT NULL OR rs.sales_rank IS NULL
+ORDER BY cr.total_sales DESC, sh.level ASC;

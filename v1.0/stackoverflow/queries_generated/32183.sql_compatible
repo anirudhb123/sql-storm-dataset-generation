@@ -1,0 +1,81 @@
+
+WITH RecursivePosts AS (
+    
+    SELECT 
+        Id, 
+        Title, 
+        PostTypeId, 
+        AcceptedAnswerId, 
+        ParentId, 
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL 
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.PostTypeId, 
+        p.AcceptedAnswerId, 
+        p.ParentId, 
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostVoteCounts AS (
+    
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagsWithPostCounts AS (
+    
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    rp.Title AS QuestionTitle,
+    rp.CreationDate AS QuestionDate,
+    COUNT(DISTINCT c.Id) AS CommentCount, 
+    COALESCE(pvc.UpVotes, 0) AS UpVotes,
+    COALESCE(pvc.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN (COALESCE(pvc.UpVotes, 0) - COALESCE(pvc.DownVotes, 0)) > 0 THEN 'Positive' 
+        WHEN (COALESCE(pvc.UpVotes, 0) - COALESCE(pvc.DownVotes, 0)) < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS VoteSentiment,
+    twc.TagName AS MostPopularTag,
+    twc.PostCount AS MostPopularTagPostCount
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    Comments c ON rp.Id = c.PostId AND rp.PostTypeId = 1 
+LEFT JOIN 
+    PostVoteCounts pvc ON rp.Id = pvc.PostId
+LEFT JOIN 
+    (SELECT TagName, PostCount FROM TagsWithPostCounts ORDER BY PostCount DESC LIMIT 1) AS twc 
+WHERE 
+    rp.PostTypeId = 1 
+GROUP BY 
+    rp.Title, rp.CreationDate, pvc.UpVotes, pvc.DownVotes, twc.TagName, twc.PostCount
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 
+ORDER BY 
+    QuestionDate DESC, UpVotes DESC;

@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 -- Considering only Questions
+),
+TagStats AS (
+    SELECT
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0)) AS TotalUpVotes,
+        SUM(COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0)) AS TotalDownVotes
+    FROM
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('<', t.TagName, '>') -- Assuming tags are enclosed in angle brackets
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        t.TagName
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    ts.TagName AS AssociatedTag,
+    ts.PostCount AS TagPostCount,
+    ts.TotalUpVotes AS TagTotalUpVotes,
+    ts.TotalDownVotes AS TagTotalDownVotes
+FROM
+    RankedPosts rp
+JOIN 
+    TagStats ts ON rp.Title LIKE CONCAT('%', ts.TagName, '%') -- Matching tags found in the title
+WHERE
+    rp.RecentRank <= 10 -- Get top 10 recent questions
+ORDER BY
+    rp.CreationDate DESC;

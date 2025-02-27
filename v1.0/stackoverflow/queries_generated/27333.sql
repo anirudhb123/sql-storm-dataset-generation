@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        ts.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Posts p 
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        LATERAL (SELECT UNNEST(string_to_array(p.Tags, '><')) AS TagName) ts ON TRUE
+    WHERE 
+        p.PostTypeId = 1 -- Filter for Questions only
+        AND p.CreationDate >= '2023-01-01' -- Only consider posts from 2023
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+ActivePosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.Reputation,
+        rp.TagName,
+        cp.LastClosed
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostID = cp.PostId
+)
+SELECT 
+    ap.PostID,
+    ap.Title,
+    ap.Body,
+    ap.CreationDate,
+    ap.OwnerDisplayName,
+    ap.Reputation,
+    COUNT(DISTINCT ap.TagName) AS TagCount,
+    CASE 
+        WHEN ap.LastClosed IS NULL THEN 'Active'
+        ELSE 'Closed on: ' || TO_CHAR(ap.LastClosed, 'YYYY-MM-DD')
+    END AS PostStatus
+FROM 
+    ActivePosts ap
+WHERE 
+    ap.VoteRank = 1 -- Get the most recent vote for each post
+GROUP BY 
+    ap.PostID, ap.Title, ap.Body, ap.CreationDate, ap.OwnerDisplayName, ap.Reputation, ap.LastClosed
+ORDER BY 
+    ap.Reputation DESC, ap.CreationDate DESC
+LIMIT 100; -- Limit the output to 100 posts for benchmarking

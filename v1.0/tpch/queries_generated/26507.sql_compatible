@@ -1,0 +1,46 @@
+
+WITH PartSupplierInfo AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CONCAT('Supplier ', s.s_name, ' provides part ', p.p_name, ' with availability ', ps.ps_availqty, ' and supply cost ', FORMAT(ps.ps_supplycost, 2)) AS description
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 10
+),
+CustomerOrderInfo AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        CONCAT(c.c_name, ' has made ', COUNT(o.o_orderkey), ' orders with a total expenditure of ', FORMAT(SUM(o.o_totalprice), 2)) AS order_summary
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+)
+SELECT 
+    psi.p_name,
+    psi.s_name,
+    psi.ps_availqty,
+    psi.ps_supplycost,
+    psi.description,
+    coi.c_name,
+    coi.total_orders,
+    coi.total_spent,
+    coi.order_summary
+FROM 
+    PartSupplierInfo psi
+JOIN 
+    CustomerOrderInfo coi ON LENGTH(psi.s_name) = LENGTH(coi.c_name)
+ORDER BY 
+    psi.ps_availqty DESC, coi.total_spent DESC;

@@ -1,0 +1,106 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        rph.Level + 1,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserVoteStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 END), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+FilteredPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.CommentCount,
+        ps.EditCount,
+        COALESCE(uh.UserId, -1) AS TopActiveUserId
+    FROM 
+        PostStats ps
+    LEFT JOIN (
+        SELECT 
+            p.Id AS PostId, 
+            v.UserId, 
+            ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY COUNT(v.Id) DESC) AS rank
+        FROM 
+            Posts p
+        LEFT JOIN 
+            Votes v ON p.Id = v.PostId
+        GROUP BY 
+            p.Id, v.UserId
+    ) uh ON ps.PostId = uh.PostId AND uh.rank = 1
+)
+
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Upvotes - f.Downvotes AS NetScore,
+    f.CommentCount,
+    f.EditCount,
+    COALESCE(u.DisplayName, 'No User') AS TopActiveUser,
+    ph.Level AS PostHierarchyLevel,
+    ph.CreationDate AS FirstPostDate
+FROM 
+    FilteredPosts f
+LEFT JOIN 
+    Users u ON f.TopActiveUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy ph ON f.PostId = ph.PostId
+WHERE 
+    f.CommentCount > 0
+ORDER BY 
+    NetScore DESC, f.CommentCount DESC
+LIMIT 100;

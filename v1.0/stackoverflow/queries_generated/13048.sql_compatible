@@ -1,0 +1,48 @@
+
+WITH PostStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(DATEDIFF(SECOND, p.CreationDate, CURRENT_TIMESTAMP), 0)) AS AvgPostAgeInSeconds
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+),
+
+UserStatistics AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        AVG(DATEDIFF(SECOND, u.CreationDate, CURRENT_TIMESTAMP)) AS AvgAccountAgeInSeconds
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+)
+
+SELECT 
+    ps.PostType,
+    ps.TotalPosts,
+    ps.TotalViews,
+    ps.TotalScore,
+    ps.AvgPostAgeInSeconds,
+    us.DisplayName AS UserName,
+    us.TotalBadges,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.AvgAccountAgeInSeconds
+FROM 
+    PostStatistics ps
+JOIN 
+    UserStatistics us ON ps.TotalPosts > 0
+ORDER BY 
+    ps.TotalPosts DESC, us.TotalBadges DESC;

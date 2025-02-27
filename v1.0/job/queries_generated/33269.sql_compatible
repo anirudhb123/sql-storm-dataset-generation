@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5
+),
+
+CastSummary AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS movies_titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title at ON c.movie_id = at.id
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+),
+
+PersonInfo AS (
+    SELECT 
+        p.id AS person_id,
+        n.name AS person_name,
+        pi.info AS additional_info
+    FROM 
+        aka_name n
+    JOIN 
+        person_info pi ON n.person_id = pi.person_id
+    JOIN 
+        CastSummary cs ON n.person_id = cs.person_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    cs.movies_count,
+    cs.movies_titles,
+    pi.person_name,
+    COALESCE(pi.additional_info, 'No info available') AS additional_info,
+    COUNT(DISTINCT ki.keyword) AS associated_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    CastSummary cs ON c.person_id = cs.person_id
+LEFT JOIN 
+    person_info pi ON c.person_id = pi.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+WHERE 
+    mh.level <= 3
+GROUP BY 
+    mh.movie_id, mh.title, cs.movies_count, cs.movies_titles, pi.person_name, pi.additional_info
+ORDER BY 
+    mh.title ASC;

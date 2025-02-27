@@ -1,0 +1,62 @@
+
+WITH RECURSIVE supplier_order_count AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+region_supplier_details AS (
+    SELECT r.r_name,
+           n.n_name AS nation_name,
+           s.s_name,
+           COALESCE(s.s_acctbal, 0) AS account_balance,
+           RANK() OVER (PARTITION BY r.r_name ORDER BY COALESCE(s.s_acctbal, 0) DESC) AS rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+),
+high_value_suppliers AS (
+    SELECT r.r_name,
+           rs.nation_name,
+           AVG(rs.account_balance) AS avg_balance
+    FROM region_supplier_details rs
+    WHERE rs.rank <= 5
+    GROUP BY r.r_name, rs.nation_name
+),
+outer_joined_orders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           COALESCE(o.o_orderdate, DATE '2000-01-01') AS order_date,
+           ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    FULL OUTER JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+final_result AS (
+    SELECT so.s_name,
+           so.order_count,
+           hvs.avg_balance,
+           CASE 
+               WHEN hvs.avg_balance IS NULL THEN 'No Balance'
+               WHEN hvs.avg_balance > 10000 THEN 'High'
+               ELSE 'Low'
+           END AS supplier_status,
+           oo.order_date,
+           oo.price_rank
+    FROM supplier_order_count so
+    LEFT JOIN high_value_suppliers hvs ON so.s_name = hvs.nation_name
+    LEFT JOIN outer_joined_orders oo ON so.order_count > 0
+    WHERE hvs.avg_balance IS NOT NULL OR oo.o_orderkey IS NULL
+)
+SELECT DISTINCT fr.s_name,
+                fr.order_count,
+                fr.supplier_status,
+                MAX(fr.price_rank) AS max_price_rank,
+                STRING_AGG(DISTINCT CAST(fr.order_date AS VARCHAR), ', ') AS order_dates
+FROM final_result fr
+GROUP BY fr.s_name, fr.order_count, fr.supplier_status
+HAVING MAX(fr.price_rank) > 10
+ORDER BY fr.order_count DESC, fr.s_name;

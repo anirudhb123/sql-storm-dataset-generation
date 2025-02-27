@@ -1,0 +1,85 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank_within_segment
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+),
+SupplierAggregate AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+        AVG(s.s_acctbal) AS average_balance
+    FROM 
+        supplier s
+    GROUP BY 
+        s.s_nationkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        COUNT(*) AS num_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+CustomerOrderCounts AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_custkey
+    HAVING 
+        SUM(l.l_extendedprice) IS NOT NULL
+),
+FinalReport AS (
+    SELECT 
+        r.r_name,
+        c.c_name,
+        SUM(o.total_order_value) AS total_spent,
+        COALESCE(SUM(s.unique_suppliers), 0) AS unique_suppliers_count,
+        COALESCE(MAX(rank_within_segment), 0) AS highest_rank
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        CustomerOrderCounts o ON rc.c_custkey = o.o_custkey
+    LEFT JOIN 
+        SupplierAggregate s ON rc.c_nationkey = s.s_nationkey
+    LEFT JOIN 
+        nation n ON rc.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name, c.c_name
+    ORDER BY 
+        total_spent DESC, highest_rank ASC
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS report_rank,
+    *,
+    CASE 
+        WHEN total_spent IS NULL THEN 'No Orders'
+        ELSE 'Orders Found'
+    END AS order_status
+FROM 
+    FinalReport
+WHERE 
+    (unique_suppliers_count > 3 AND total_spent IS NOT NULL)
+    OR (highest_rank = 1 AND total_spent > 10000)
+ORDER BY 
+    total_spent DESC, report_rank;

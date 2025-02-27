@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '3 months'
+    GROUP BY 
+        v.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(rv.VoteCount, 0) AS TotalVotes,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        CASE 
+            WHEN rp.Rank <= 5 
+            THEN 'Top Post' 
+            ELSE 'Regular Post' 
+        END AS PostType,
+        CASE 
+            WHEN rp.Score IS NULL THEN 'No Score' 
+            WHEN rp.Score < 0 THEN 'Negative Score'
+            ELSE 'Positive Score'
+        END AS ScoreDescription
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+),
+PostsWithPurpose AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.TotalVotes,
+        p.UpVotes,
+        p.DownVotes,
+        p.PostType,
+        p.ScoreDescription,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        PostDetails p
+    LEFT JOIN 
+        PostsTags pt ON p.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        p.PostId, p.Title, p.OwnerDisplayName, p.CreationDate, p.Score, p.ViewCount, p.TotalVotes, p.UpVotes, p.DownVotes, p.PostType, p.ScoreDescription
+)
+SELECT 
+    pp.*,
+    CASE 
+        WHEN pp.TotalVotes > 50 THEN 'Very Active'
+        WHEN pp.TotalVotes BETWEEN 20 AND 50 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS ActivityLevel,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pp.PostId) AS CommentCount
+FROM 
+    PostsWithPurpose pp
+WHERE 
+    pp.CreationDate BETWEEN '2022-01-01' AND '2023-12-31'
+ORDER BY 
+    pp.ViewCount DESC
+LIMIT 100;

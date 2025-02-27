@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ps.p_partkey,
+    ps.supplier_count,
+    ps.average_supply_cost,
+    COALESCE(hv.net_value, 0) AS net_order_value,
+    CASE 
+        WHEN ps.average_supply_cost IS NULL THEN 'Cost Not Available'
+        WHEN ps.average_supply_cost < 100 THEN 'Low Cost'
+        WHEN ps.average_supply_cost BETWEEN 100 AND 500 THEN 'Medium Cost'
+        ELSE 'High Cost'
+    END AS cost_category,
+    COUNT(DISTINCT CASE WHEN rs.supply_rank = 1 THEN rs.s_suppkey END) AS top_supplier_count
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    PartStatistics ps ON ps.p_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p WHERE p.p_size > 10
+    )
+LEFT JOIN 
+    HighValueOrders hv ON hv.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'F'
+        AND o.o_orderdate < CURRENT_DATE - INTERVAL '1 YEAR'
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = ps.p_partkey
+    )
+WHERE 
+    n.n_nationkey IS NOT NULL
+GROUP BY 
+    r.r_name, n.n_name, ps.p_partkey, ps.supplier_count, ps.average_supply_cost, hv.net_value
+ORDER BY 
+    r.r_name, n.n_name, ps.p_partkey;

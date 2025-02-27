@@ -1,0 +1,39 @@
+
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_name LIKE 'A%'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN region_hierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(s.s_acctbal) AS avg_balance
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_orders AS (
+    SELECT customer_orders.*, 
+           ROW_NUMBER() OVER (PARTITION BY c_custkey ORDER BY total_spent DESC) AS rank,
+           DENSE_RANK() OVER (ORDER BY total_spent DESC) AS dense_rank
+    FROM customer_orders
+)
+SELECT r.r_name, s.s_name, s.total_available, co.total_spent, co.order_count, 
+       COALESCE(co.rank, 0) AS customer_rank, 
+       CASE WHEN co.order_count IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status
+FROM region_hierarchy r
+FULL OUTER JOIN supplier_stats s ON r.r_regionkey = s.s_suppkey
+LEFT JOIN ranked_orders co ON s.s_suppkey = co.c_custkey
+WHERE s.total_available IS NOT NULL OR co.total_spent IS NOT NULL
+ORDER BY r.r_name, s.s_name;

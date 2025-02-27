@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' AND
+        p.Score > 0
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        AVG(COALESCE(up.Views, 0)) AS AvgViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(ViewCount) AS Views 
+         FROM 
+            Posts 
+         GROUP BY 
+            PostId) up ON p.Id = up.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    us.TotalScore,
+    us.TotalPosts,
+    us.TotalBadges,
+    us.AvgViews,
+    rp.Title,
+    rp.CommentCount,
+    rp.Score,
+    CASE 
+        WHEN us.TotalPosts > 10 THEN 'Active Contributor'
+        WHEN us.TotalPosts BETWEEN 1 AND 10 THEN 'New Contributor'
+        ELSE 'No Contributions'
+    END AS ContributorStatus
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    us.AvgViews > 50
+    AND rp.PostRank = 1
+ORDER BY 
+    us.TotalScore DESC, us.TotalPosts DESC
+LIMIT 100;

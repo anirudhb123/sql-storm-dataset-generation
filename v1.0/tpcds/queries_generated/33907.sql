@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SalesCTE (customer_sk, total_sales, level) AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_paid) AS total_sales,
+           1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451960 AND 2451970  -- Example date range
+    GROUP BY ws_bill_customer_sk
+
+    UNION ALL
+
+    SELECT ws_bill_customer_sk,
+           SUM(ws_net_paid) + p.total_sales AS total_sales,
+           level + 1
+    FROM web_sales ws
+    JOIN SalesCTE p ON ws.ws_bill_customer_sk = p.customer_sk
+    WHERE ws_sold_date_sk BETWEEN 2451960 AND 2451970
+    GROUP BY ws_bill_customer_sk, p.total_sales, level
+),
+FilterSales AS (
+    SELECT customer_sk, total_sales,
+           ROW_NUMBER() OVER (PARTITION BY customer_sk ORDER BY total_sales DESC) AS rn
+    FROM SalesCTE
+)
+SELECT c.c_customer_id, 
+       ca.ca_city, 
+       ca.ca_state, 
+       fs.total_sales,
+       COALESCE(d.d_date, 'N/A') AS sale_date,
+       CASE 
+           WHEN fs.total_sales IS NULL THEN 'No Sales' 
+           ELSE 'Sales Exist' 
+       END AS sales_status
+FROM customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN FilterSales fs ON c.c_customer_sk = fs.customer_sk AND fs.rn = 1
+LEFT JOIN date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk)
+                                      FROM web_sales ws2
+                                      WHERE ws2.ws_bill_customer_sk = c.c_customer_sk)
+WHERE ca.ca_state IN ('NY', 'CA') 
+  AND fs.total_sales > (SELECT AVG(total_sales) 
+                         FROM FilterSales)
+ORDER BY fs.total_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

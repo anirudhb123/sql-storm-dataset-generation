@@ -1,0 +1,60 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, 0 AS level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_cdemo_sk, level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_current_cdemo_sk = c.c_current_cdemo_sk
+    WHERE level < 3
+), sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk
+        FROM date_dim d
+        WHERE d.d_year = 2023
+    )
+    GROUP BY ws.ws_order_number, ws.ws_item_sk
+), return_data AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+), final_report AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        SUM(sd.total_sales) AS total_sales,
+        SUM(sd.total_profit) AS total_profit,
+        COALESCE(SUM(rd.total_returns), 0) AS total_returns,
+        COALESCE(SUM(rd.total_return_amt), 0) AS total_return_amt,
+        COUNT(DISTINCT ch.c_customer_sk) AS unique_customers
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN sales_data sd ON sd.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price < 100)
+    LEFT JOIN return_data rd ON sd.ws_item_sk = rd.sr_item_sk
+    LEFT JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    GROUP BY ca.ca_city, ca.ca_state
+    HAVING SUM(sd.total_sales) > 5000
+)
+SELECT 
+    city,
+    state,
+    total_sales,
+    total_profit,
+    total_returns,
+    total_return_amt,
+    ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+FROM final_report
+ORDER BY total_sales DESC
+LIMIT 10;

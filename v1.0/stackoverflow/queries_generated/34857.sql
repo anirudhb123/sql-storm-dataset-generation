@@ -1,0 +1,87 @@
+WITH RECURSIVE UserPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.OwnerUserId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        up.Level + 1
+    FROM Posts p
+    INNER JOIN UserPosts up ON p.ParentId = up.PostId
+    WHERE up.Level < 5 -- Limit depth to avoid infinite recursion
+),
+PostStatistics AS (
+    SELECT
+        up.OwnerUserId,
+        COUNT(up.PostId) AS TotalPosts,
+        SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END) AS TotalViews,
+        SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS TotalScore,
+        AVG(CASE WHEN p.CreationDate IS NOT NULL THEN DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate) ELSE NULL END) AS AvgPostAge
+    FROM UserPosts up
+    JOIN Posts p ON up.PostId = p.Id
+    GROUP BY up.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(ps.TotalPosts, 0) AS PostCount,
+        COALESCE(ps.TotalViews, 0) AS ViewCount,
+        COALESCE(ps.TotalScore, 0) AS Score,
+        COALESCE(ps.AvgPostAge, 0) AS AvgAge
+    FROM Users u
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+),
+RankedUsers AS (
+    SELECT
+        UserId,
+        Reputation,
+        PostCount,
+        ViewCount,
+        Score,
+        AvgAge,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM UserReputation
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        Reputation,
+        PostCount,
+        ViewCount,
+        Score,
+        AvgAge
+    FROM RankedUsers
+    WHERE Rank <= 10
+)
+SELECT
+    tu.UserId,
+    u.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.ViewCount,
+    tu.Score,
+    tu.AvgAge,
+    (
+        SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM Posts p
+        JOIN STRING_SPLIT(p.Tags, ',') t ON p.Id = p.Id
+        WHERE p.OwnerUserId = tu.UserId
+    ) AS TagsUsed
+FROM TopUsers tu
+JOIN Users u ON tu.UserId = u.Id
+ORDER BY tu.Rank;

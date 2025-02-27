@@ -1,0 +1,52 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(CAST.id) AS cast_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        RANK() OVER (PARTITION BY t.kind_id ORDER BY COUNT(CAST.id) DESC) AS rank_with_cast
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info CAST ON t.id = CAST.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+), 
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        keywords
+    FROM 
+        ranked_movies
+    WHERE 
+        rank_with_cast <= 3
+)
+
+SELECT 
+    m.title,
+    COALESCE(SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS confirmed_cast_count,
+    t.kind AS movie_type,
+    nm.name AS featured_actor,
+    nm.gender
+FROM 
+    top_movies m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name nm ON ci.person_id = nm.person_id
+JOIN 
+    kind_type t ON t.id = (SELECT kind_id FROM aka_title WHERE id = m.movie_id LIMIT 1)
+GROUP BY 
+    m.title, m.movie_id, t.kind, nm.name, nm.gender
+ORDER BY 
+    m.production_year DESC, confirmed_cast_count DESC;

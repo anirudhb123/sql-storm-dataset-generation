@@ -1,0 +1,75 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    UNION ALL
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        ch.level + 1
+    FROM 
+        customer c
+    JOIN 
+        customer_hierarchy ch ON c.c_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            WHERE n.n_name LIKE 'N%'
+            LIMIT 1
+        ) 
+    WHERE 
+        c.c_acctbal < (SELECT AVG(c3.c_acctbal) FROM customer c3)
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    RANK() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    CASE 
+        WHEN MAX(l.l_tax) IS NULL THEN 'No Tax'
+        ELSE 'Tax Applied' 
+    END AS tax_status
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey AND ps.ps_availqty > 0
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2 
+        WHERE p2.p_size > 20
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM customer_hierarchy ch 
+        WHERE ch.c_custkey = o.o_custkey 
+        AND ch.level = 2
+    )
+GROUP BY 
+    p.p_name, r.r_regionkey
+HAVING 
+    total_revenue > (
+        SELECT COUNT(*) 
+        FROM supplier 
+        WHERE s_acctbal IS NOT NULL
+    )
+ORDER BY 
+    revenue_rank, total_orders DESC;

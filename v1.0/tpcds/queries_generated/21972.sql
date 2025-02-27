@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+DiscountedSales AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_sales_price,
+        cs.cs_ext_discount_amt,
+        (cs.cs_sales_price - cs.cs_ext_discount_amt) AS net_sales_price
+    FROM catalog_sales cs
+    WHERE cs.cs_ext_discount_amt IS NOT NULL
+),
+StoreSalesSummary AS (
+    SELECT
+        ss.ss_store_sk,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count
+    FROM store_sales ss
+    WHERE ss.ss_sales_price > 0
+    GROUP BY ss.ss_store_sk
+),
+CustomerReturnStats AS (
+    SELECT 
+        sr.sr_customer_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        SUM(sr.sr_return_amt) AS total_returned
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity > 0
+    GROUP BY sr.sr_customer_sk
+)
+SELECT 
+    ca.ca_address_id,
+    cd.cd_gender,
+    SUM(COALESCE(rs.ws_sales_price, ds.net_sales_price, 0)) AS total_spent,
+    COALESCE(MAX(cr.return_count), 0) AS return_frequency,
+    COUNT(DISTINCT cr.sr_customer_sk) FILTER (WHERE cr.total_returned > 0) AS return_customers,
+    COUNT(DISTINCT cp.cp_catalog_page_id) AS tricky_catalog_page_count
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN RankedSales rs ON c.c_customer_sk = rs.ws_order_number
+LEFT JOIN DiscountedSales ds ON rs.ws_item_sk = ds.cs_item_sk
+LEFT JOIN StoreSalesSummary ss ON c.c_customer_sk = ss.ss_store_sk
+LEFT JOIN CustomerReturnStats cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN catalog_page cp ON cp.cp_catalog_page_sk IN (SELECT DISTINCT cp_catalog_page_sk FROM catalog_sales)
+WHERE ca.ca_state = 'CA'
+GROUP BY ca.ca_address_id, cd.cd_gender
+HAVING total_spent > 1000
+ORDER BY total_spent DESC, ca.ca_address_id ASC
+LIMIT 10
+OFFSET CAST(NULLIF(DATE_PART('dow', CURRENT_DATE), 0) AS integer) -- bizarre offset based on current day of week
+;

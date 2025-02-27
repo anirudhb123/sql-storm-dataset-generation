@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AggregatedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > '1995-01-01'
+    GROUP BY o.o_orderkey
+),
+FilteredRegions AS (
+    SELECT r.r_regionkey, COUNT(n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    WHERE n.n_name IS NOT NULL
+    GROUP BY r.r_regionkey
+    HAVING COUNT(n.n_nationkey) > 1
+),
+TopPartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_supplycost < 100
+)
+SELECT 
+    p.p_name, 
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(CASE WHEN o.o_totalprice > 1000 THEN o.o_totalprice / NULLIF(l.l_quantity, 0) END) AS average_price,
+    (SELECT COUNT(DISTINCT c.c_custkey) FROM customer c WHERE c.c_nationkey IN 
+        (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (
+            SELECT r.r_regionkey FROM FilteredRegions
+        ))
+    ) AS customer_count,
+    (SELECT MAX(sh.level) FROM SupplierHierarchy sh WHERE sh.s_acctbal > 5000) AS max_hierarchy_level
+FROM part p 
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN TopPartSuppliers tps ON p.p_partkey = tps.ps_partkey
+WHERE p.p_retailprice IS NOT NULL
+GROUP BY p.p_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY total_quantity DESC, average_price DESC
+FETCH FIRST 10 ROWS ONLY;

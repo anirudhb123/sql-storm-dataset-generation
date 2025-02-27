@@ -1,0 +1,67 @@
+-- Performance benchmarking query to analyze user activity and post engagement in the Stack Overflow schema
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+        SUM(V.Id IS NOT NULL) AS TotalVotes,
+        SUM(B.Id IS NOT NULL) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id) AS VoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'  -- Filtering posts created in the last year
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalQuestions,
+    UA.TotalAnswers,
+    UA.TotalComments,
+    UA.TotalVotes,
+    UA.TotalBadges,
+    PE.PostId,
+    PE.Title,
+    PE.ViewCount,
+    PE.Score,
+    PE.CreationDate,
+    PE.CommentCount,
+    PE.VoteCount
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostEngagement PE ON UA.UserId = PE.OwnerDisplayName
+ORDER BY 
+    UA.Reputation DESC, 
+    PE.ViewCount DESC
+LIMIT 100;  -- Limit to top 100 users based on reputation and post engagement

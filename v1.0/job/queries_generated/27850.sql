@@ -1,0 +1,54 @@
+WITH MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aliases,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS companies
+    FROM
+        aka_title t
+    LEFT JOIN
+        aka_name ak ON ak.person_id = t.id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        t.id
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        GROUP_CONCAT(DISTINCT n.name ORDER BY n.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT rt.role ORDER BY rt.role) AS roles
+    FROM
+        cast_info ci
+    LEFT JOIN
+        name n ON ci.person_id = n.imdb_id
+    LEFT JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.aliases,
+    md.keywords,
+    cd.cast_names,
+    cd.roles
+FROM
+    MovieDetails md
+LEFT JOIN
+    CastDetails cd ON md.movie_id = cd.movie_id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

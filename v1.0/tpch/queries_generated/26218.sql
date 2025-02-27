@@ -1,0 +1,44 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_type, 
+           p.p_size, 
+           p.p_retailprice, 
+           p.p_comment, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_name LIKE '%widget%'
+), SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_address, 
+           s.s_phone, 
+           ps.ps_availqty, 
+           ps.ps_supplycost,
+           ps.ps_comment,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), CustomSummary AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT rp.p_name AS part_name, 
+       rp.p_brand AS brand, 
+       rp.p_retailprice AS retail_price, 
+       sd.s_name AS supplier_name, 
+       sd.ps_availqty AS available_quantity, 
+       cs.c_name AS customer_name, 
+       cs.total_orders, 
+       cs.total_spent
+FROM RankedParts rp
+JOIN SupplierDetails sd ON rp.p_partkey = sd.ps_partkey
+JOIN CustomSummary cs ON sd.s_suppkey = cs.c_custkey
+WHERE rp.rn <= 5 AND sd.supplier_rank <= 3
+ORDER BY rp.p_retailprice DESC, cs.total_spent DESC;

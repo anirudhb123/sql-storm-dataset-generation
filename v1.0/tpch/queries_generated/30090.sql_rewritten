@@ -1,0 +1,37 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, 
+           ROW_NUMBER() OVER (PARTITION BY o_orderstatus ORDER BY o_orderdate DESC) AS OrderRank
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+),
+SupplierAggregate AS (
+    SELECT ps.s_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, 
+           CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END AS DiscountedPrice
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R' AND l.l_shipdate <= cast('1998-10-01' as date)
+)
+SELECT
+    p.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    SUM(fli.DiscountedPrice) AS TotalDiscountedPrice,
+    AVG(sa.TotalSupplyCost) AS AvgSupplyCost,
+    r.r_name,
+    n.n_name
+FROM part p
+LEFT JOIN FilteredLineItems fli ON p.p_partkey = fli.l_partkey
+LEFT JOIN OrderHierarchy o ON fli.l_orderkey = o.o_orderkey
+JOIN supplier s ON fli.l_suppkey = s.s_suppkey
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN region r ON s.s_nationkey = r.r_regionkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+WHERE p.p_size > 10 AND o.o_orderstatus IN ('O', 'F')
+GROUP BY p.p_name, r.r_name, n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5 AND AVG(sa.TotalSupplyCost) IS NOT NULL
+ORDER BY TotalDiscountedPrice DESC
+LIMIT 50;

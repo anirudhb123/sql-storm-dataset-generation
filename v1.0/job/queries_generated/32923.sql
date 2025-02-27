@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: select top-level movies without parent linkage
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    -- Recursive case: find episodes linked to their parent movies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.level,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    MIN(mi.info) AS first_release_info,
+    MAX(ci.note) AS last_cast_note,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    CASE 
+        WHEN AVG(ci.nr_order) IS NULL THEN 'No Order Info'
+        ELSE TO_CHAR(AVG(ci.nr_order), '9.99')
+    END AS avg_cast_order
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Release Date')
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.title, mh.level
+ORDER BY 
+    mh.level, total_cast DESC
+LIMIT 100;

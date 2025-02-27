@@ -1,0 +1,68 @@
+WITH KeywordSearch AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount,
+        ph.CreationDate AS LastEditDate,
+        u.DisplayName AS LastEditorName,
+        p.ViewCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(json_agg(DISTINCT b.Name) FILTER (WHERE b.Date IS NOT NULL), '[]') AS AwardedBadges
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 4 -- Edit Title
+    LEFT JOIN 
+        Users u ON p.LastEditorUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.ViewCount > 1000
+    GROUP BY 
+        p.Id, ph.CreationDate, u.DisplayName
+),
+KeywordRanking AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        TagCount,
+        LastEditDate,
+        LastEditorName,
+        ViewCount,
+        UpVoteCount,
+        DownVoteCount,
+        CommentCount,
+        AwardedBadges,
+        (UpVoteCount - DownVoteCount) AS NetVoteScore,
+        ROW_NUMBER() OVER (ORDER BY NetVoteScore DESC, LastEditDate DESC) AS Rank
+    FROM 
+        KeywordSearch
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    Tags,
+    TagCount,
+    LastEditDate,
+    LastEditorName,
+    ViewCount,
+    UpVoteCount,
+    DownVoteCount,
+    CommentCount,
+    AwardedBadges,
+    Rank
+FROM 
+    KeywordRanking
+WHERE 
+    Rank <= 10; -- Top 10 posts by NetVoteScore

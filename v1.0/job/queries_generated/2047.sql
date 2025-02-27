@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        a.person_id,
+        COUNT(*) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        RankedMovies t ON c.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    as.person_id,
+    as.movie_count,
+    cs.company_count,
+    cs.companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorStats as ON rm.movie_id = as.movie_count
+LEFT JOIN 
+    CompanyStats cs ON rm.movie_id = cs.movie_id
+WHERE 
+    rm.year_rank <= 5 
+    AND (as.movie_count IS NULL OR as.movie_count > 1)
+ORDER BY 
+    rm.production_year DESC, 
+    as.movie_count DESC;

@@ -1,0 +1,80 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS CloseDate,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph 
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, ph.UserDisplayName, ph.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(uv.UpVotes, 0) AS UpVotes,
+        COALESCE(uv.DownVotes, 0) AS DownVotes,
+        COUNT(DISTINCT rp.PostId) AS RecentPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserVoteCounts uv ON u.Id = uv.UserId
+    LEFT JOIN 
+        RecentPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.DisplayName, u.Reputation, uv.UpVotes, uv.DownVotes
+)
+SELECT 
+    t.DisplayName,
+    t.Reputation,
+    t.UpVotes,
+    t.DownVotes,
+    rp.Title,
+    rp.CreationDate,
+    cp.CloseCount,
+    COALESCE(cp.UserDisplayName, 'Not Closed') AS ClosedBy
+FROM 
+    TopUsers t
+LEFT JOIN 
+    RecentPosts rp ON t.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    (t.UpVotes - t.DownVotes) > 5
+ORDER BY 
+    t.Reputation DESC, t.UpVotes DESC;

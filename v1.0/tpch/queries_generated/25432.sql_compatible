@@ -1,0 +1,22 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Cost: $', FORMAT(ps.ps_supplycost, 2)) AS detailed_info,
+    SUBSTRING(p.p_comment, 1, 20) AS brief_comment,
+    REPLACE(s.s_comment, 'satisfied', 'Satisfied') AS adjusted_comment,
+    CHAR_LENGTH(p.p_name) AS name_length,
+    REGEXP_REPLACE(s.s_address, '[0-9]', '') AS sanitized_address
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+AND 
+    s.s_acctbal > 1000
+GROUP BY 
+    s.s_name, p.p_name, ps.ps_supplycost, p.p_comment, s.s_comment, p.p_name
+ORDER BY 
+    detailed_info DESC
+LIMIT 50;

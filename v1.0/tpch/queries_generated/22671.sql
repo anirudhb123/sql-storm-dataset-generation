@@ -1,0 +1,85 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+filtered_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.n_nationkey 
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.n_nationkey = s.n_nationkey)
+),
+order_dates AS (
+    SELECT 
+        o.o_orderdate,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_orderdate
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(l.l_tax) AS avg_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    SUM(CASE 
+            WHEN l.l_returnflag = 'R' THEN 1 
+            ELSE 0 
+        END) AS returned_items,
+    SUM(ls.total_sales) AS total_revenue,
+    AVG(ls.avg_tax) AS average_tax,
+    MAX(rp.p_retailprice) AS max_part_price
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    filtered_suppliers fs ON n.n_nationkey = fs.n_nationkey
+LEFT JOIN 
+    orders o ON fs.s_suppkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    lineitem_summary ls ON l.l_orderkey = ls.l_orderkey
+JOIN 
+    ranked_parts rp ON rp.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < (
+            SELECT AVG(ps2.ps_supplycost) 
+            FROM partsupp ps2 
+            WHERE ps2.ps_partkey = ps.ps_partkey
+        )
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC
+OFFSET 1 ROWS FETCH NEXT 10 ROWS ONLY;

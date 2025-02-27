@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerName,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.ID) AS CommentCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(STRING_TO_ARRAY(P.Tags, ',')) AS TagName) AS TagArray ON true
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagArray.TagName)
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, U.DisplayName, P.CreationDate, P.LastActivityDate, P.ViewCount, P.Score
+),
+AggregateUserData AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.Score) AS TotalScore,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.ViewCount) AS AvgViewsPerPost,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserInteractionRankings AS (
+    SELECT 
+        A.UserId,
+        A.DisplayName,
+        A.TotalScore,
+        A.TotalPosts,
+        A.TotalViews,
+        A.AvgViewsPerPost,
+        A.BadgeCount,
+        RANK() OVER (ORDER BY A.TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY A.TotalPosts DESC) AS PostsRank
+    FROM 
+        AggregateUserData A
+)
+
+SELECT 
+    R.PostId,
+    R.Title,
+    R.OwnerName,
+    R.CreationDate,
+    R.LastActivityDate,
+    R.ViewCount,
+    R.Score,
+    R.CommentCount,
+    R.Tags,
+    U.ScoreRank,
+    U.PostsRank,
+    U.TotalScore,
+    U.TotalPosts,
+    U.TotalViews
+FROM 
+    RankedPosts R
+JOIN 
+    UserInteractionRankings U ON R.OwnerName = U.DisplayName
+ORDER BY 
+    R.Score DESC, 
+    R.LastActivityDate DESC;

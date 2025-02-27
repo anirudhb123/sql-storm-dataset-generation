@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        sr_return_quantity,
+        COALESCE(SUM(sr_return_amt), 0) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        kr.total_return_amount,
+        kr.total_returns,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY kr.total_return_amount DESC) AS return_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        CustomerReturns kr ON c.c_customer_sk = kr.sr_customer_sk
+    WHERE 
+        kr.total_return_amount > 1000
+),
+HighestReturn AS (
+    SELECT 
+        c.customer_name,
+        c.total_return_amount,
+        (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = c.c_customer_sk) AS total_sales_orders,
+        RANK() OVER (ORDER BY c.total_return_amount DESC) AS sales_return_rank
+    FROM 
+        (SELECT 
+            CONCAT(first_name, ' ', last_name) AS customer_name,
+            total_return_amount,
+            c_customer_sk
+        FROM 
+            TopCustomers) c
+)
+SELECT 
+    hr.customer_name,
+    hr.total_return_amount,
+    hr.total_sales_orders,
+    CASE 
+        WHEN hr.sales_return_rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS return_category,
+    STRING_AGG(DISTINCT ca.ca_city, ', ') AS cities_returned_from
+FROM 
+    HighestReturn hr
+JOIN 
+    customer_address ca ON hr.c_customer_sk = ca.ca_address_sk
+GROUP BY 
+    hr.customer_name, hr.total_return_amount, hr.total_sales_orders, hr.sales_return_rank
+HAVING 
+    hr.total_sales_orders > 0
+ORDER BY 
+    hr.total_return_amount DESC;

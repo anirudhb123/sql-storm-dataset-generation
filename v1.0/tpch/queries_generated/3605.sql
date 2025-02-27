@@ -1,0 +1,67 @@
+WITH SupplierCosts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 10000
+),
+LineitemStatistics AS (
+    SELECT
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_orderkey
+)
+SELECT 
+    c.c_custkey,
+    coalesce(cs.total_orders, 0) AS total_orders,
+    coalesce(cs.total_spent, 0) AS total_spent,
+    s.s_name AS supplier_name,
+    h.total_supply_cost AS high_value_supplier_cost,
+    l.item_count,
+    l.total_revenue
+FROM 
+    CustomerOrders cs
+FULL OUTER JOIN 
+    LineitemStatistics l ON cs.c_custkey = l.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers h ON h.total_supply_cost > 5000
+LEFT JOIN 
+    supplier s ON s.s_suppkey = h.s_suppkey
+WHERE 
+    l.total_revenue IS NOT NULL OR cs.total_orders IS NOT NULL
+ORDER BY 
+    total_spent DESC, total_orders ASC;

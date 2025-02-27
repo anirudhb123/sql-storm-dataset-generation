@@ -1,0 +1,75 @@
+
+WITH CTE_CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+CTE_WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns,
+        SUM(wr_return_amt) AS total_web_return_amount
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+CTE_CombinedReturns AS (
+    SELECT 
+        COALESCE(ca.ca_address_sk, ca.ca_address_id) AS address_info,
+        COALESCE(c.returning_count, 0) AS customer_return_count,
+        COALESCE(w.returning_web_count, 0) AS web_return_count,
+        (COALESCE(c.returning_count, 0) + COALESCE(w.returning_web_count, 0)) AS total_return_count
+    FROM (
+        SELECT 
+            cr.returning_customer_sk,
+            cr.total_returns AS returning_count
+        FROM CTE_CustomerReturns cr
+    ) c
+    FULL OUTER JOIN (
+        SELECT 
+            wr.returning_customer_sk,
+            wr.total_web_returns AS returning_web_count
+        FROM CTE_WebReturns wr
+    ) w ON c.returning_customer_sk = w.returning_customer_sk
+    LEFT JOIN customer ctm ON ctm.c_customer_sk = COALESCE(c.returning_customer_sk, w.returning_customer_sk)
+    LEFT JOIN customer_address ca ON ca.ca_address_sk = ctm.c_current_addr_sk
+),
+CTE_ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+    GROUP BY ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        RANK() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM CTE_ItemSales ts
+    JOIN item i ON i.i_item_sk = ts.ws_item_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cb.address_info,
+    cr.total_return_amount,
+    wr.total_web_return_amount,
+    CASE 
+        WHEN cr.total_return_amount IS NULL THEN 'No Returns' 
+        WHEN cr.total_return_amount < 100 THEN 'Low Returns' 
+        ELSE 'High Returns' 
+    END AS return_category,
+    ti.i_item_desc,
+    ti.sales_rank
+FROM CTE_CombinedReturns cb
+JOIN customer c ON cb.address_info = COALESCE(c.c_current_addr_sk, c.c_customer_id)
+LEFT JOIN CTE_CustomerReturns cr ON cb.returning_customer_sk = cr.returning_customer_sk
+LEFT JOIN CTE_WebReturns wr ON cb.returning_customer_sk = wr.returning_customer_sk
+LEFT JOIN TopItems ti ON ti.sales_rank <= 10
+WHERE c.c_birth_month IS NOT NULL 
+  AND (c.c_birth_year IS NULL OR c.c_birth_year BETWEEN 1980 AND 1990)
+ORDER BY cb.total_return_count DESC NULLS LAST, c.c_last_name, ti.sales_rank;

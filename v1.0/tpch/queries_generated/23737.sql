@@ -1,0 +1,41 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal < (SELECT AVG(c_acctbal) FROM customer)
+),
+
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_cost > (SELECT AVG(total_cost) FROM (
+        SELECT SUM(ps_supplycost * ps_availqty) AS total_cost
+        FROM supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        GROUP BY s.s_suppkey
+    ) AS subquery)
+
+)
+
+SELECT cust.c_name, cust.c_acctbal, supp.s_name, supp.total_cost, 
+       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l_extendedprice) OVER (PARTITION BY cust.c_custkey) AS median_price,
+       COALESCE(MAX(CASE WHEN l_returnflag = 'Y' THEN l_extendedprice END), 'No Returns') AS max_returned_price,
+       COUNT(DISTINCT CASE WHEN cust.c_mktsegment = 'BUILDING' THEN o.o_orderkey END) AS building_orders
+FROM customer cust
+LEFT JOIN orders o ON cust.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+RIGHT JOIN HighValueSuppliers supp ON supp.s_suppkey = l.l_suppkey
+WHERE (l_discount + l_tax) NOT BETWEEN 0.5 AND 1.0 
+  AND l_shipdate > '2023-01-01'
+  AND EXISTS (SELECT 1 FROM region r WHERE r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = cust.c_nationkey) AND r.r_name LIKE '%East%')
+GROUP BY cust.c_name, cust.c_acctbal, supp.s_name, supp.total_cost
+HAVING COUNT(o.o_orderkey) > 10
+ORDER BY cust.c_name ASC, supp.total_cost DESC;

@@ -1,0 +1,58 @@
+
+WITH TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        P.Id AS PostId
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+),
+UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagStats AS (
+    SELECT 
+        TC.TagName,
+        COUNT(TC.PostId) AS PostCount,
+        COUNT(DISTINCT U.Id) AS UserCount,
+        SUM(COALESCE(UBADGE.BadgeCount, 0)) AS TotalBadges
+    FROM 
+        TagCounts TC
+    LEFT JOIN 
+        Posts P ON TC.PostId = P.Id
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        UserBadgeCounts UBADGE ON U.Id = UBADGE.UserId
+    GROUP BY 
+        TC.TagName
+)
+
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.UserCount,
+    T.TotalBadges,
+    
+    STRING_AGG(DISTINCT U.DisplayName, ', ') AS UsersWhoAsked,
+    STRING_AGG(DISTINCT B.Name, ', ') AS BadgesHeld
+FROM 
+    TagStats T
+LEFT JOIN 
+    Users U ON U.Id IN (SELECT OwnerUserId FROM Posts WHERE Tags LIKE '%' || T.TagName || '%')
+LEFT JOIN 
+    Badges B ON B.UserId = U.Id
+GROUP BY 
+    T.TagName, T.PostCount, T.UserCount, T.TotalBadges
+ORDER BY 
+    T.PostCount DESC;

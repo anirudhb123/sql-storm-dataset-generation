@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 -- We are only considering Questions
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(b.Class * 10, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        us.TotalBounties,
+        us.TotalBadges,
+        RANK() OVER (ORDER BY us.TotalBounties + us.TotalBadges DESC) AS OverallRank
+    FROM 
+        Users u
+    INNER JOIN 
+        UserScores us ON u.Id = us.UserId
+)
+SELECT 
+    ru.PostId,
+    ru.Title,
+    ru.CreationDate,
+    ru.Score,
+    ru.ViewCount,
+    tu.DisplayName AS TopUser,
+    tu.OverallRank
+FROM 
+    RankedPosts ru
+LEFT JOIN 
+    TopUsers tu ON ru.OwnerUserId = tu.UserId
+WHERE 
+    ru.Rank = 1
+ORDER BY 
+    ru.Score DESC, ru.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

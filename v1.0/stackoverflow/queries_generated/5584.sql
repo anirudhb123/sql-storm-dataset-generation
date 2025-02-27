@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, u.DisplayName, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        pt.Name AS PostTypeName,
+        (SELECT COUNT(DISTINCT ph.Id) 
+         FROM PostHistory ph 
+         WHERE ph.PostId = rp.PostId AND ph.CreationDate >= NOW() - INTERVAL '1 year') AS EditCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostTypeId = pt.Id
+    WHERE 
+        rp.RankByScore <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.EditCount,
+    tp.PostTypeName
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CommentCount DESC;

@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')  -- only take movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    INNER JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    INNER JOIN 
+        aka_title AS lt ON ml.linked_movie_id = lt.id
+),
+
+cast_by_movie AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ca.nr_order) AS actor_order
+    FROM 
+        cast_info AS ca
+    JOIN 
+        aka_name AS ak ON ca.person_id = ak.person_id
+    JOIN 
+        role_type AS rt ON ca.role_id = rt.id
+),
+
+recent_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT cbm.actor_name) AS actor_count
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        cast_by_movie AS cbm ON mh.movie_id = cbm.movie_id
+    WHERE 
+        mh.production_year >= 2000
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+)
+
+SELECT 
+    mv.movie_title,
+    mv.production_year,
+    mv.actor_count,
+    (CASE 
+        WHEN mv.actor_count IS NULL THEN 'No Actors'
+        ELSE TO_CHAR(mv.actor_count)
+    END) AS actor_count_display,
+    (SELECT 
+        STRING_AGG(DISTINCT cbm.actor_name, ', ') 
+     FROM 
+        cast_by_movie AS cbm 
+     WHERE 
+        cbm.movie_id = mv.movie_id
+    ) AS actors_list,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        movie_info AS mi 
+     WHERE 
+        mi.movie_id = mv.movie_id AND 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+    ) AS plot_info_count
+FROM 
+    recent_movies AS mv
+ORDER BY 
+    mv.production_year DESC, mv.actor_count DESC
+LIMIT 10;

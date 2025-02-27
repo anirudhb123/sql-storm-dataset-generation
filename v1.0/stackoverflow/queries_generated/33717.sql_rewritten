@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.PostTypeId,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy ph ON ph.PostId = a.ParentId
+    WHERE 
+        a.PostTypeId = 2  
+),
+PostStats AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount, 
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = ph.PostId
+    GROUP BY 
+        ph.PostId, ph.Title, ph.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.GoldBadgeCount,
+        ps.SilverBadgeCount,
+        ps.BronzeBadgeCount,
+        CASE 
+            WHEN ps.UpVoteCount > ps.DownVoteCount THEN 'Positive'
+            WHEN ps.UpVoteCount < ps.DownVoteCount THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment
+    FROM 
+        PostStats ps
+)
+SELECT 
+    rs.PostId,
+    rs.Title,
+    rs.CreationDate,
+    rs.CommentCount,
+    rs.UpVoteCount,
+    rs.DownVoteCount,
+    rs.GoldBadgeCount,
+    rs.SilverBadgeCount,
+    rs.BronzeBadgeCount,
+    rs.Sentiment,
+    ROW_NUMBER() OVER (ORDER BY rs.CreationDate DESC) AS Rank
+FROM 
+    FinalResults rs
+WHERE 
+    rs.CommentCount > 0 
+ORDER BY 
+    rs.UpVoteCount DESC, 
+    rs.CreationDate DESC
+LIMIT 10;

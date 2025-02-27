@@ -1,0 +1,65 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AliasUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+        AND p.PostTypeId = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(ur.PostCount, 0) AS UserPostCount,
+    COALESCE(ur.Reputation, 0) AS UserReputation,
+    ph.EditCount,
+    ph.LastEditDate
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryAggregate ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.rn = 1 
+    AND (ph.EditCount IS NULL OR ph.EditCount > 2)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 10;

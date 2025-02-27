@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.kind_id, 'Unknown') AS kind_id,
+        m.production_year,
+        0 AS level
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        COALESCE(t.kind_id, 'Unknown') AS kind_id,
+        t.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN title t ON ml.linked_movie_id = t.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    k.keyword AS genre,
+    m.company_name,
+    COALESCE(c.role_id, 'No Role') AS role_id,
+    COUNT(DISTINCT r.role) OVER (PARTITION BY a.id ORDER BY a.name) AS roles_count,
+    COALESCE(pi.info, 'No Info') AS person_info
+FROM aka_name AS a
+JOIN cast_info AS c ON a.person_id = c.person_id
+JOIN movie_companies AS mc ON c.movie_id = mc.movie_id
+JOIN company_name AS m ON mc.company_id = m.id
+JOIN title AS t ON c.movie_id = t.id
+LEFT JOIN movie_keyword AS mk ON t.id = mk.movie_id
+LEFT JOIN keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN person_info AS pi ON a.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info='Biography')
+LEFT JOIN role_type AS r ON c.role_id = r.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND (c.note IS NULL OR c.note NOT LIKE '%uncredited%')
+    AND EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') AND mi.info::float >= 7.0
+    )
+ORDER BY 
+    t.production_year DESC,
+    a.name;

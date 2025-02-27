@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        GROUP_CONCAT(DISTINCT c.role_id) AS role_ids,
+        GROUP_CONCAT(DISTINCT co.name) AS company_names
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        company_name co ON ci.movie_id = co.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PersonInfo AS (
+    SELECT 
+        p.id AS person_id,
+        p.name AS person_name,
+        pi.info AS person_bio,
+        r.role AS role_name
+    FROM 
+        aka_name p
+    JOIN 
+        cast_info ci ON p.person_id = ci.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        p.name LIKE '%Smith%'
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.movie_keyword,
+    md.company_names,
+    pi.person_name,
+    pi.person_bio,
+    pi.role_name
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    PersonInfo pi ON md.movie_id = pi.person_id
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

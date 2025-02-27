@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS LatestVote
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id 
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY PostId) a ON a.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.ViewCount > 100
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        CommentCount,
+        AnswerCount,
+        VoteCount,
+        DENSE_RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM 
+        RankedPosts
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.VoteCount
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Rank <= 10
+ORDER BY 
+    tp.Rank;

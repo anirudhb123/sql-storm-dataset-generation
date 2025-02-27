@@ -1,0 +1,51 @@
+WITH RECURSIVE recent_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) + ro.total_spent AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN recent_orders ro ON ro.o_orderkey = o.o_orderkey
+    WHERE o.o_orderdate < ro.o_orderdate
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+
+customer_details AS (
+    SELECT c.c_custkey, c.c_name, n.n_name AS nation_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY c.c_custkey, c.c_name, n.n_name
+)
+
+SELECT DISTINCT cd.c_name, cd.nation_name, COALESCE(ro.total_spent, 0) AS recent_amount, 
+       CASE 
+           WHEN cd.total_spent > 10000 THEN 'High Value'
+           WHEN cd.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value
+FROM customer_details cd
+LEFT JOIN recent_orders ro ON cd.c_name = ro.c_name
+WHERE cd.total_spent > (SELECT AVG(total_spent) FROM customer_details)
+AND cd.nation_name IN (SELECT r_name FROM region WHERE r_regionkey IN 
+    (SELECT n_regionkey FROM nation WHERE n_name LIKE 'U%'))
+ORDER BY recent_amount DESC, cd.c_name ASC;

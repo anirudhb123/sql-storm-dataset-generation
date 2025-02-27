@@ -1,0 +1,62 @@
+
+WITH CustomerAddressInfo AS (
+    SELECT 
+        ca_city, 
+        ca_state, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_address_sk
+    FROM 
+        customer_address
+),
+CustomerDemoInfo AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        cd_education_status, 
+        cd_credit_rating,
+        cd_demo_sk
+    FROM 
+        customer_demographics
+),
+CustomerInfo AS (
+    SELECT 
+        c_first_name || ' ' || c_last_name AS full_name,
+        c_email_address,
+        ca.ca_city AS addr_city,
+        ca.ca_state AS addr_state,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        CustomerAddressInfo ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        CustomerDemoInfo cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    full_name,
+    addr_city,
+    addr_state,
+    full_address,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    CASE 
+        WHEN cd_gender = 'M' THEN CONCAT('Mr. ', full_name) 
+        WHEN cd_gender = 'F' THEN CONCAT('Ms. ', full_name) 
+        ELSE full_name 
+    END AS salutation,
+    LENGTH(full_address) AS address_length,
+    CASE 
+        WHEN cd_marital_status = 'S' THEN 'Single' 
+        WHEN cd_marital_status = 'M' THEN 'Married' 
+        ELSE 'Other' 
+    END AS marital_status_description
+FROM 
+    CustomerInfo
+WHERE 
+    addr_city IS NOT NULL
+ORDER BY 
+    addr_state, addr_city, full_name;

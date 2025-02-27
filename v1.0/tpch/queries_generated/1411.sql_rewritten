@@ -1,0 +1,82 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+supplier_part_counts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+),
+filtered_counts AS (
+    SELECT 
+        c.c_custkey,
+        cc.order_count,
+        cc.total_spent,
+        CASE 
+            WHEN cc.total_spent > 1000 THEN 'High'
+            WHEN cc.total_spent BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS spending_category
+    FROM 
+        customer c
+    JOIN 
+        customer_orders cc ON c.c_custkey = cc.c_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    p.p_name AS part_name,
+    COALESCE(supplier_count, 0) AS supplier_count,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    AVG(ro.o_totalprice) AS avg_order_value,
+    f.spending_category
+FROM 
+    part p
+LEFT JOIN 
+    supplier_part_counts spc ON p.p_partkey = spc.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    ranked_orders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    customer c ON ro.o_custkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    filtered_counts f ON c.c_custkey = f.c_custkey
+WHERE 
+    p.p_retailprice > 50.00
+    AND (n.n_name IS NOT NULL OR f.spending_category BETWEEN 'Medium' AND 'High')
+GROUP BY 
+    n.n_name,
+    p.p_name,
+    supplier_count,
+    f.spending_category
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC, 
+    nation_name ASC;

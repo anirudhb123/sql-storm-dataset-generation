@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rank
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.net_profit > (SELECT AVG(ws2.net_profit) 
+                          FROM web_sales AS ws2 
+                          WHERE ws2.web_site_sk IS NOT NULL)
+),
+profit_analysis AS (
+    SELECT 
+        r.web_site_sk,
+        r.net_profit,
+        r.rank,
+        COUNT(*) OVER (PARTITION BY r.web_site_sk) AS total_sales,
+        CASE 
+            WHEN r.net_profit IS NULL THEN 'NO PROFIT'
+            WHEN r.net_profit = 0 THEN 'ZERO PROFIT'
+            WHEN r.net_profit BETWEEN 1 AND 100 THEN 'LOW PROFIT'
+            WHEN r.net_profit BETWEEN 101 AND 1000 THEN 'MODERATE PROFIT'
+            ELSE 'HIGH PROFIT'
+        END AS profit_category
+    FROM 
+        ranked_sales AS r
+),
+selected_stores AS (
+    SELECT 
+        s.store_sk,
+        s.store_name,
+        s.city,
+        s.state,
+        s.zip
+    FROM 
+        store AS s
+    WHERE 
+        s.state IN ('CA', 'TX')
+),
+final_selection AS (
+    SELECT 
+        sa.store_name,
+        pa.profit_category,
+        pa.net_profit,
+        sa.city,
+        sa.state
+    FROM 
+        selected_stores AS sa
+    LEFT JOIN 
+        profit_analysis AS pa ON sa.store_sk = pa.web_site_sk
+    WHERE 
+        pa.rank = 1 OR pa.rank IS NULL
+)
+SELECT 
+    f.store_name,
+    f.profit_category,
+    COALESCE(f.net_profit, 0) AS net_profit,
+    f.city,
+    f.state
+FROM 
+    final_selection AS f
+ORDER BY 
+    f.profit_category DESC,
+    f.net_profit DESC
+LIMIT 50;

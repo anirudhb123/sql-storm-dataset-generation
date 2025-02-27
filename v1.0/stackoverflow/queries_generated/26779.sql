@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TagUsage AS (
+    SELECT 
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS TagName,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT U.Id) AS UsersWithTag,
+        COUNT(DISTINCT P.Id) AS QuestionsWithTag
+    FROM 
+        TagUsage TU
+    JOIN 
+        Tags T ON TU.TagName = T.TagName
+    JOIN 
+        Posts P ON TU.OwnerUserId = P.OwnerUserId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        UsersWithTag,
+        QuestionsWithTag,
+        RANK() OVER (ORDER BY UsersWithTag DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.QuestionCount,
+    UR.CommentCount,
+    UR.GoldBadges,
+    UR.SilverBadges,
+    UR.BronzeBadges,
+    TT.TagName,
+    TT.UsersWithTag,
+    TT.QuestionsWithTag,
+    TT.TagRank
+FROM 
+    UserReputation UR
+JOIN 
+    TopTags TT ON TT.UsersWithTag > 5  -- Filter for tags with more than 5 users
+ORDER BY 
+    UR.Reputation DESC,
+    TT.TagRank ASC;

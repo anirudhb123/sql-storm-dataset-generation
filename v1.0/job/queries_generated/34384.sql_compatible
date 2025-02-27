@@ -1,0 +1,40 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT m.id AS movie_id, 
+           t.title, 
+           t.production_year, 
+           NULL AS parent_movie_id
+    FROM aka_title t
+    JOIN movie_companies mc ON mc.movie_id = t.id
+    WHERE mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+    
+    UNION ALL
+    
+    
+    SELECT lm.id AS movie_id, 
+           lt.title, 
+           lt.production_year,
+           mh.movie_id AS parent_movie_id
+    FROM movie_link ml
+    JOIN aka_title lt ON lt.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title, 
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    COUNT(DISTINCT mk.keyword) AS associated_keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS row_num
+FROM movie_hierarchy mh
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name a ON a.person_id = ci.person_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+WHERE mh.production_year >= 2000
+  AND LOWER(mh.title) LIKE '%action%'
+GROUP BY mh.movie_id, mh.title, mh.production_year
+HAVING COUNT(DISTINCT ci.person_id) > 5
+ORDER BY mh.production_year DESC, total_cast DESC;

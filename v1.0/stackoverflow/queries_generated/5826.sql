@@ -1,0 +1,56 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Tags t ON t.WikiPostId = p.Id OR t.ExcerptPostId = p.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.CommentCount,
+        ua.UpVoteCount,
+        ua.DownVoteCount,
+        ua.BadgeCount,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS PostRank
+    FROM UserActivity ua
+)
+SELECT 
+    tu.DisplayName AS TopUser, 
+    tu.PostCount, 
+    tu.CommentCount, 
+    tu.UpVoteCount, 
+    tu.DownVoteCount, 
+    ps.Title AS TopPostTitle, 
+    ps.Score AS TopPostScore, 
+    ps.ViewCount AS TopPostViews, 
+    ps.Tags
+FROM TopUsers tu
+JOIN PostStatistics ps ON tu.UserId = ps.Owner
+WHERE tu.PostRank <= 10
+ORDER BY tu.PostCount DESC, tu.DisplayName;

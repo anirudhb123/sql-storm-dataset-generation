@@ -1,0 +1,64 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_id END) AS female_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_id END) AS male_customers,
+        SUM(COALESCE(cd.cd_purchase_estimate, 0)) AS total_estimated_purchases,
+        AVG(CASE WHEN cd.cd_credit_rating = 'Good' THEN cd.cd_purchase_estimate END) AS avg_good_credit_purchases,
+        (SELECT COUNT(*) FROM customer_address ca WHERE ca.ca_country = 'USA') AS total_us_addresses,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cd.cd_purchase_estimate) OVER (PARTITION BY cd.cd_marital_status) AS median_purchase_by_marital_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+StorePerformance AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        SUM(CASE WHEN ss.ss_sales_price > 100 THEN 1 ELSE 0 END) AS high_value_sales_count
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+),
+InventoryStatus AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory,
+        COUNT(DISTINCT CASE WHEN inv.inv_quantity_on_hand IS NULL THEN inv.inv_item_sk END) AS null_inventory_count
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.female_customers,
+    cs.male_customers,
+    cs.total_estimated_purchases,
+    cs.avg_good_credit_purchases,
+    sp.total_sales,
+    sp.total_transactions,
+    is.total_inventory,
+    is.null_inventory_count,
+    (SELECT COUNT(DISTINCT s.s_store_sk) FROM store s WHERE s.s_closed_date_sk IS NULL) AS active_stores,
+    case when cs.total_estimated_purchases IS NULL THEN 'No Estimates' ELSE 'Has Estimates' END AS purchase_status
+FROM 
+    CustomerStats cs
+JOIN 
+    StorePerformance sp ON cs.c_customer_sk % 100 = sp.total_transactions % 100  -- Correlation logic for demonstration
+JOIN 
+    InventoryStatus is ON is.inv_item_sk = (SELECT MAX(i.i_item_sk) FROM item i)  -- Linking to the highest item id
+WHERE 
+    EXISTS (SELECT 1 FROM web_sales ws WHERE ws.ws_bill_customer_sk = cs.c_customer_sk)
+AND 
+    (sp.total_sales > (SELECT AVG(total_sales) FROM StorePerformance WHERE total_sales IS NOT NULL) OR sp.total_transactions IS NULL)
+ORDER BY 
+    cs.total_estimated_purchases DESC NULLS LAST;

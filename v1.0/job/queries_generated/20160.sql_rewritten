@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, m.production_year, 0 AS hierarchy_level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title AS movie_title, m.production_year, mh.hierarchy_level + 1
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.movie_id
+    INNER JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+
+, CastStatistics AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(CASE WHEN ci.note IS NOT NULL THEN 1 END) AS total_cast_members,
+        COUNT(DISTINCT ci.person_id) AS distinct_persons,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors_names
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    cs.total_cast_members,
+    cs.distinct_persons,
+    cs.avg_order,
+    cs.actors_names,
+    CASE 
+        WHEN cs.total_cast_members > 10 THEN 'Large Cast'
+        WHEN cs.total_cast_members BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    COALESCE(cs.actors_names, 'No cast info available') AS display_actors
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastStatistics cs ON mh.movie_id = cs.movie_id
+WHERE 
+    mh.production_year > (SELECT AVG(production_year) FROM aka_title WHERE production_year IS NOT NULL) 
+    OR mh.movie_title LIKE '%Adventure%'
+ORDER BY 
+    mh.production_year DESC,
+    cs.total_cast_members DESC
+FETCH FIRST 10 ROWS ONLY;

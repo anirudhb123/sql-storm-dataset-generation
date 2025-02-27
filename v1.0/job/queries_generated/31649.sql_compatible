@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT ci.subject_id) AS cast_count,
+    SUM(mk.keyword_count) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS rn,
+    COALESCE(ak.name, 'No Actor Name') AS display_name
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+INNER JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    (SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+     FROM 
+        movie_keyword mk
+     GROUP BY 
+        mk.movie_id) mk ON mt.id = mk.movie_id
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT ci.subject_id) > 1 OR SUM(mk.keyword_count) IS NULL
+ORDER BY 
+    mt.production_year DESC, ak.name ASC;

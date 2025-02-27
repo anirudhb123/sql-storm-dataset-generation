@@ -1,0 +1,40 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title AS PostTitle,
+        u.DisplayName AS OwnerName,
+        p.CreationDate AS PostDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, u.DisplayName, p.CreationDate, pt.Name
+)
+
+SELECT 
+    rp.PostID,
+    rp.PostTitle,
+    rp.OwnerName,
+    rp.PostDate,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.PostType
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostType, rp.Score DESC, rp.PostDate DESC;

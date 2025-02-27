@@ -1,0 +1,95 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.id AS cast_id,
+        p.person_id,
+        p.name AS actor_name,
+        ct.kind AS role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    WHERE 
+        ct.kind IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(mi.info_text, ', ' ORDER BY mi.info_type_id) AS details,
+        MAX(CASE WHEN it.info = 'Rating' THEN mi.info END) AS rating
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    GROUP BY 
+        m.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS total_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+),
+FinalResults AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        cd.actor_name,
+        cd.role,
+        mi.details,
+        mi.rating,
+        cm.company_name,
+        cm.company_type,
+        ROW_NUMBER() OVER (PARTITION BY r.production_year, cm.company_type ORDER BY r.title) AS company_rank
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        CastDetails cd ON r.movie_id = cd.movie_id
+    LEFT JOIN 
+        MovieInfo mi ON r.movie_id = mi.movie_id
+    LEFT JOIN 
+        CompanyDetails cm ON r.movie_id = cm.movie_id
+    WHERE 
+        cm.total_movies IS NULL OR cm.total_movies > 1
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    actor_name,
+    role,
+    details,
+    rating,
+    company_name,
+    company_type,
+    company_rank
+FROM 
+    FinalResults
+WHERE 
+    (company_rank BETWEEN 1 AND 3)
+    AND (rating IS NULL OR rating > 7.5)
+ORDER BY 
+    production_year DESC, title ASC;

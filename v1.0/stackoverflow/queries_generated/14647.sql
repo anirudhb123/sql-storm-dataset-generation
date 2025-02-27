@@ -1,0 +1,53 @@
+-- Performance benchmarking query to analyze Posts, Users, and Votes
+
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.DisplayName,
+    up.PostCount,
+    up.TotalBounties,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    DATEDIFF(NOW(), ps.CreationDate) AS DaysSinceCreation
+FROM 
+    UserPostCounts up
+JOIN 
+    PostStatistics ps ON up.UserId = ps.OwnerUserId
+ORDER BY 
+    up.TotalBounties DESC, 
+    up.PostCount DESC, 
+    ps.Score DESC
+LIMIT 100;

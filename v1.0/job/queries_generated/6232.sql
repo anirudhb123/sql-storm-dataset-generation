@@ -1,0 +1,32 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    r.role AS role_name,
+    cc.kind AS comp_cast_type,
+    cn.name AS company_name,
+    ti.info AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND cn.country_code = 'USA'
+    AND r.role LIKE '%lead%'
+ORDER BY 
+    t.production_year DESC, a.name;

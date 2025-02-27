@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighCostSuppliers AS (
+    SELECT * 
+    FROM RankedSuppliers 
+    WHERE rnk <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    s.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    co.total_spent,
+    s.total_cost
+FROM 
+    HighCostSuppliers s
+JOIN 
+    nation n ON s.n_regionkey = n.n_nationkey
+JOIN 
+    CustomerOrders co ON s.s_suppkey = co.c_custkey
+WHERE 
+    s.total_cost > 10000
+ORDER BY 
+    s.total_cost DESC, co.total_spent DESC;

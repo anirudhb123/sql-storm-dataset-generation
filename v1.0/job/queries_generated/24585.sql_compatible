@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS rank_in_year,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.id
+),
+TopRankedMovies AS (
+    SELECT *
+    FROM RankedMovies
+    WHERE rank_in_year <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        k.keyword,
+        comp.company_name,
+        COALESCE(mi.info, 'No additional info') AS movie_info
+    FROM 
+        TopRankedMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name comp ON mc.company_id = comp.id
+    LEFT JOIN 
+        movie_info mi ON tm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.keyword, 'No keywords') AS keyword,
+    COALESCE(md.company_name, 'No Company Listed') AS company_name,
+    COUNT(ci.person_id) AS total_cast,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    STRING_AGG(DISTINCT CONCAT(n.name, ' (', n.gender, ')'), ', ') AS cast_details
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+LEFT JOIN 
+    name n ON ci.person_id = n.id
+GROUP BY 
+    md.title, md.production_year, md.keyword, md.company_name
+HAVING 
+    COUNT(ci.person_id) >= 3 AND 
+    md.production_year IS NOT NULL 
+ORDER BY 
+    md.production_year DESC, md.title ASC;

@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(vt.VoteTypeId = 2) AS UpVoteCount,
+        SUM(vt.VoteTypeId = 3) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT tg.TagName) AS TagsArray,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes vt ON vt.PostId = p.Id
+    LEFT JOIN 
+        LATERAL (
+            SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+        ) tg ON true
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS ActivityDate,
+        p.Title,
+        CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN cr.Name ELSE NULL END AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        CloseReasonTypes cr ON (ph.Comment::int = cr.Id AND ph.PostHistoryTypeId IN (10, 11))
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(vt.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(vt.VoteTypeId = 3) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN p.ViewCount >= 100 THEN 1 ELSE 0 END) AS PopularPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes vt ON vt.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000  
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.TagsArray,
+    ra.ActivityDate,
+    ra.CloseReason,
+    tu.DisplayName AS TopUser,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.TotalBadges,
+    tu.PopularPosts
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId
+LEFT JOIN 
+    TopUsers tu ON rp.AnswerCount > 0 AND rp.UpVoteCount > 10
+WHERE 
+    rp.rn = 1  
+ORDER BY 
+    rp.UpVoteCount DESC, 
+    rp.AnswerCount DESC, 
+    rp.CreationDate DESC;

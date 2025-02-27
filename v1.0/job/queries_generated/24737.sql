@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        COALESCE(ct.kind, 'Unknown') AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM title m
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+), 
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(aka.name, ', ' ORDER BY aka.name) AS actor_names
+    FROM cast_info ci
+    JOIN aka_name aka ON ci.person_id = aka.person_id
+    GROUP BY ci.movie_id
+), 
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No additional info') AS extra_info,
+        CASE 
+            WHEN m.production_year IS NOT NULL THEN (EXTRACT(YEAR FROM NOW()) - m.production_year) 
+            ELSE NULL 
+        END AS age_of_movie
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.company_type,
+    md.actor_count,
+    md.actor_names,
+    mi.extra_info,
+    COALESCE(mi.age_of_movie, 'Upcoming') AS movie_age,
+    CASE 
+        WHEN m.keywords IS NULL THEN 'No Keywords'
+        ELSE m.keywords
+    END AS keywords
+FROM MovieHierarchy mh
+LEFT JOIN CastDetails md ON mh.movie_id = md.movie_id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+) AS m ON mh.movie_id = m.movie_id
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE mh.rn = 1 AND (mh.production_year >= 2000 OR mh.company_type != 'Unknown')
+ORDER BY mh.production_year DESC, md.actor_count DESC;

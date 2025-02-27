@@ -1,0 +1,68 @@
+
+WITH Recursive_Actors AS (
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        COALESCE(char_name.name, 'Unknown') AS character_name,
+        cast_info.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY cast_info.nr_order) AS actor_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        char_name ON c.person_id = char_name.imdb_id
+), 
+Movie_Stats AS (
+    SELECT 
+        m.title, 
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS total_keywords,
+        MAX(CASE WHEN ci.nr_order = 1 THEN a.actor_name END) AS lead_actor,
+        CASE 
+            WHEN MAX(m.production_year) < 1990 THEN 'Classic'
+            WHEN MAX(m.production_year) BETWEEN 1990 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS movie_era
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.title, m.production_year
+), 
+Imdb_Rank AS (
+    SELECT 
+        title,
+        ROW_NUMBER() OVER (ORDER BY production_year DESC) AS rank
+    FROM 
+        Movie_Stats
+)
+
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.total_actors,
+    ms.total_keywords,
+    ms.lead_actor,
+    ir.rank,
+    ra.actor_order,
+    ra.character_name
+FROM 
+    Movie_Stats ms
+LEFT JOIN 
+    Recursive_Actors ra ON ms.title = ra.actor_name
+LEFT JOIN 
+    Imdb_Rank ir ON ms.title = ir.title
+WHERE 
+    ms.total_actors > 3
+    AND (ms.movie_era = 'Modern' OR ms.total_keywords > 5)
+ORDER BY 
+    ir.rank, ms.production_year DESC, ra.actor_order
+LIMIT 100;

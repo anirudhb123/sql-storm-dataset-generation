@@ -1,0 +1,76 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LEAD(Reputation) OVER (ORDER BY CreationDate) AS NextReputation
+    FROM Users
+),
+RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.OwnerUserId) AS TotalUpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.OwnerUserId) AS TotalDownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= '2023-01-01'
+),
+TopRankedPosts AS (
+    SELECT 
+        r.*,
+        CASE 
+            WHEN r.Rank <= 3 THEN 'Top 3 Posts'
+            ELSE 'Other Posts'
+        END AS PostCategory
+    FROM RankedPosts r
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    u.DisplayName AS UserName,
+    p.Title,
+    COALESCE(r.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(r.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(ch.CloseCount, 0) AS CloseCount,
+    COALESCE(ch.ReopenCount, 0) AS ReopenCount,
+    CASE 
+        WHEN u.BadgeCount >= 5 THEN 'Active Contributor'
+        ELSE 'New User'
+    END AS UserStatus,
+    p.CreationDate,
+    ROUND((p.Score::float / NULLIF(p.ViewCount, 0)) * 100, 2) AS InteractionRate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN TopRankedPosts r ON p.Id = r.PostId
+LEFT JOIN ClosedPostHistory ch ON p.Id = ch.PostId
+LEFT JOIN LATERAL (
+    SELECT 
+        unnest(string_to_array(p.Tags, ',')) AS TagName
+) t ON TRUE
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE p.PostTypeId = 1 -- Only questions
+GROUP BY p.Id, u.DisplayName, ch.CloseCount, ch.ReopenCount, ub.BadgeCount
+ORDER BY InteractionRate DESC
+LIMIT 10;

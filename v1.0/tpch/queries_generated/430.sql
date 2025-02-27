@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        nt.n_name,
+        rs.s_name,
+        rs.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation nt ON rs.s_nationkey = nt.n_nationkey
+    JOIN 
+        region r ON nt.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        r.r_name, nt.n_name, rs.s_name, rs.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name,
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_name, c.c_acctbal
+)
+SELECT 
+    ts.r_name AS region,
+    ts.n_name AS nation,
+    ts.s_name AS supplier,
+    ts.s_acctbal AS supplier_account_balance,
+    COALESCE(co.total_spent, 0) AS total_spent_by_customer,
+    CASE
+        WHEN co.order_count > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS has_orders
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrders co ON ts.s_name = co.c_name
+WHERE 
+    ts.total_parts_supplied > (
+        SELECT AVG(total_parts_supplied) FROM TopSuppliers
+    )
+ORDER BY 
+    ts.r_name, ts.n_name, ts.s_name;

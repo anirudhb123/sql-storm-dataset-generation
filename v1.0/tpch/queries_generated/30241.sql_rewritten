@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' 
+    GROUP BY o.o_orderkey
+),
+NationSales AS (
+    SELECT n.n_nationkey, SUM(od.total_revenue) AS total_sales
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY n.n_nationkey
+),
+RankedRevenue AS (
+    SELECT ns.n_nationkey, ns.total_sales,
+           RANK() OVER (ORDER BY ns.total_sales DESC) AS sales_rank
+    FROM NationSales ns
+)
+SELECT rh.supp_key, rh.s_name, rh.level, rr.total_sales, rr.sales_rank
+FROM SupplierHierarchy rh
+LEFT JOIN RankedRevenue rr ON rh.s_nationkey = rr.n_nationkey
+WHERE rr.sales_rank IS NOT NULL OR rh.level < 3 
+ORDER BY rh.level, rr.total_sales DESC
+LIMIT 100;

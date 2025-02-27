@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS gender_rank
+    FROM
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT
+    ca.ca_address_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    rs.total_sales,
+    rs.sales_rank,
+    CASE 
+        WHEN rs.total_sales IS NULL THEN 'No Sales' 
+        WHEN rs.total_sales > 10000 THEN 'High Roller'
+        ELSE 'Casual Buyer'
+    END AS customer_category,
+    COALESCE((SELECT COUNT(*)
+              FROM store_sales ss
+              WHERE ss.ss_item_sk = rs.ws_item_sk AND ss.ss_ticket_number IS NOT NULL
+              GROUP BY ss.ss_ticket_number), 0) AS sales_transactions
+FROM
+    RankedSales rs
+    LEFT JOIN CustomerInfo ci ON ci.gender_rank = 1
+    LEFT JOIN customer_address ca ON ca.ca_address_sk = ci.c_customer_sk
+WHERE
+    (ci.cd_gender IS NOT NULL OR ci.cd_gender IS NULL)
+    AND (rs.total_sales > 5000 OR rs.total_sales IS NULL)
+ORDER BY
+    customer_category DESC,
+    total_sales DESC
+LIMIT 100;

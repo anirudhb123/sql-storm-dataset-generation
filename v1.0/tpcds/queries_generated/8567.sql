@@ -1,0 +1,39 @@
+
+WITH sales_summary AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        d_year,
+        d_month_seq,
+        ca_state
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        d_year, d_month_seq, ca_state
+),
+top_states AS (
+    SELECT 
+        ca_state,
+        total_sales,
+        total_profit,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    d_year,
+    ca_state,
+    total_sales,
+    total_profit
+FROM 
+    top_states
+WHERE 
+    sales_rank <= 5
+ORDER BY 
+    d_year, total_sales DESC;

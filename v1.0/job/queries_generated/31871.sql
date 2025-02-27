@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mt.production_year >= 2000
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(cc.id) AS total_cast,
+    AVG(CASE WHEN cc.note IS NULL THEN 0 ELSE 1 END) AS average_note_presence,
+    STRING_AGG(DISTINCT ci.kind, ', ') AS company_kinds,
+    ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(cc.id) DESC) AS yearly_rank
+FROM 
+    cast_info cc
+JOIN 
+    aka_name a ON cc.person_id = a.person_id
+JOIN 
+    MovieHierarchy mh ON cc.movie_id = mh.movie_id
+JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+JOIN 
+    aka_title t ON cc.movie_id = t.id
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(cc.id) > 3
+    AND AVG(CASE WHEN cc.note IS NULL THEN 0 ELSE 1 END) > 0.5
+ORDER BY 
+    t.production_year DESC, total_cast DESC;
+This SQL query builds a recursive Common Table Expression (CTE) to traverse movie linkages, calculates various metrics related to cast information, and applies multiple joining and grouping techniques to generate a comprehensive performance benchmark output.

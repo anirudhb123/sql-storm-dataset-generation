@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title AS t
+    JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithCompany AS (
+    SELECT 
+        m.title_id,
+        m.title,
+        m.production_year,
+        cc.kind AS company_kind,
+        c.name AS company_name,
+        COALESCE(m.note, 'No Note Available') AS movie_note
+    FROM 
+        RankedMovies AS m
+    LEFT JOIN 
+        movie_companies AS mc ON m.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name AS c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type AS cc ON mc.company_type_id = cc.id
+    WHERE 
+        m.rank_by_cast_size <= 5
+),
+FullMovieInfo AS (
+    SELECT 
+        mwc.title,
+        mwc.production_year,
+        mwc.company_name,
+        mwc.company_kind,
+        mk.keyword,
+        mk.keyword AS first_keyword, 
+        COALESCE(mw.note, 'No additional info') AS additional_info
+    FROM 
+        MoviesWithCompany AS mwc
+    LEFT JOIN 
+        movie_keyword AS mk ON mwc.title_id = mk.movie_id
+    LEFT JOIN 
+        movie_info AS mw ON mwc.title_id = mw.movie_id
+    WHERE 
+        mw.info ILIKE '%oscar%' OR mw.info IS NULL
+),
+SelectedMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY company_kind ORDER BY production_year) AS company_rank
+    FROM 
+        FullMovieInfo
+)
+SELECT 
+    title,
+    production_year,
+    company_name,
+    company_kind,
+    first_keyword,
+    additional_info
+FROM 
+    SelectedMovies
+WHERE 
+    company_rank = 1
+ORDER BY 
+    production_year DESC, 
+    company_name;

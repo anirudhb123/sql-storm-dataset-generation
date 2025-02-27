@@ -1,0 +1,53 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_year
+    FROM title t
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+ActorStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT ci.role_id) FILTER (WHERE rt.role = 'Actor') AS actor_roles
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tt.id AS title_id,
+        tt.title,
+        tt.production_year,
+        COALESCE(cs.company_count, 0) AS company_count,
+        COALESCE(as.actor_count, 0) AS actor_count,
+        COALESCE(as.actor_roles, 0) AS actor_roles
+    FROM RankedTitles tt
+    LEFT JOIN CompanyStats cs ON tt.id = cs.movie_id
+    LEFT JOIN ActorStats as ON tt.id = as.movie_id
+    WHERE tt.production_year >= 2000
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.actor_count,
+    md.actor_roles,
+    CASE 
+        WHEN md.actor_roles > 5 THEN 'High Actor Role'
+        WHEN md.actor_roles BETWEEN 3 AND 5 THEN 'Medium Actor Role'
+        ELSE 'Low Actor Role'
+    END AS role_category
+FROM MovieDetails md
+WHERE md.company_count > 0
+ORDER BY md.production_year DESC, md.title;

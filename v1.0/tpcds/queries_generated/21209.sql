@@ -1,0 +1,95 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS PriceRank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS TotalReturnAmount,
+        COUNT(DISTINCT cr_order_number) AS TotalReturns,
+        SUM(cr_return_quantity) AS TotalReturnQuantity
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+StoreStats AS (
+    SELECT 
+        s_store_id,
+        AVG(ss_net_profit) AS AvgNetProfit,
+        MAX(ss_ext_sales_price) AS MaxSalesPrice
+    FROM 
+        store_sales
+    JOIN 
+        store ON store.s_store_sk = store_sales.ss_store_sk
+    GROUP BY 
+        s_store_id
+),
+Combined AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(r.TotalReturnAmount, 0) AS TotalReturnsAmount,
+        COALESCE(r.TotalReturns, 0) AS TotalReturnsCount,
+        COALESCE(s.AvgNetProfit, 0) AS AvgStoreProfit
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns r ON c.c_customer_sk = r.cr_returning_customer_sk
+    LEFT JOIN 
+        StoreStats s ON s.s_store_id = (
+            SELECT 
+                s_store_id 
+            FROM 
+                store 
+            WHERE 
+                s_store_sk = (
+                    SELECT 
+                        ss_store_sk 
+                    FROM 
+                        store_sales 
+                    WHERE 
+                        ss_customer_sk = c.c_customer_sk 
+                    ORDER BY 
+                        ss_sales_price DESC 
+                    LIMIT 1
+                )
+        )
+)
+SELECT 
+    c.c_customer_id,
+    CASE 
+        WHEN TotalReturnsCount = 0 THEN 'No Returns'
+        WHEN TotalReturnsAmount > 1000 THEN 'High Returner'
+        ELSE 'Regular'
+    END AS ReturnCategory,
+    CASE 
+        WHEN AvgStoreProfit > 5000 THEN 'High Profit Store'
+        WHEN AvgStoreProfit IS NULL THEN 'No Purchase'
+        ELSE 'Regular Store'
+    END AS StoreCategory,
+    COUNT(DISTINCT ws_item_sk) AS DistinctPurchasedItems,
+    AVG(ws_sales_price) AS AvgSalesPrice
+FROM 
+    Combined c
+JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_id
+LEFT JOIN 
+    RankedSales rs ON rs.ws_item_sk = ws.ws_item_sk
+WHERE 
+    ws_sales_price IS NOT NULL
+GROUP BY 
+    c.c_customer_id, TotalReturnsCount, TotalReturnsAmount, AvgStoreProfit
+HAVING 
+    COUNT(DISTINCT ws_item_sk) > 5 AND 
+    AVG(ws_sales_price) < 200 AND 
+    TotalReturnsAmount < 5000
+ORDER BY 
+    StoreCategory DESC, ReturnCategory ASC;

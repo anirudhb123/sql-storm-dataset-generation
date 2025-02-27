@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        ri.ws_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        ri.total_quantity,
+        ri.total_profit
+    FROM RankedSales ri
+    JOIN item i ON ri.ws_item_sk = i.i_item_sk
+    WHERE ri.sales_rank < 6
+),
+CustomerReturns AS (
+    SELECT 
+        cr.refunded_customer_sk,
+        SUM(COALESCE(cr.cr_return_quantity, 0)) AS total_return_qty,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS total_return_amount
+    FROM catalog_returns cr
+    WHERE cr.cr_return_quantity IS NOT NULL
+    GROUP BY cr.refunded_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        ti.ws_item_sk,
+        ti.i_item_desc,
+        ti.total_quantity,
+        ti.total_profit,
+        cr.total_return_qty,
+        cr.total_return_amount
+    FROM TopItems ti
+    LEFT JOIN CustomerReturns cr ON ti.ws_item_sk = cr.refunded_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    COALESCE(SUM(cd.cd_dep_count), 0) AS total_dependencies,
+    AVG(CASE 
+        WHEN cd.cd_credit_rating IS NULL THEN 0 
+        ELSE LENGTH(cd.cd_credit_rating) 
+    END) AS avg_credit_rating_length,
+    MAX(COALESCE(c.total_profit, 0)) AS max_profit_item,
+    CASE 
+        WHEN MAX(COALESCE(c.total_profit, 0)) > 1000 THEN 'High Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM customer cd
+LEFT JOIN CombinedData c ON cd.c_customer_sk = c.ws_item_sk 
+GROUP BY cd.c_customer_id
+ORDER BY total_dependencies DESC
+LIMIT 10;

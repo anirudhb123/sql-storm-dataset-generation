@@ -1,0 +1,62 @@
+WITH MovieStats AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast co ON t.id = co.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id AND pi.info_type_id = it.id
+    LEFT JOIN 
+        (SELECT person_id, movie_id, note FROM cast_info WHERE note IS NOT NULL) ci ON ci.movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        ms.*,
+        RANK() OVER (ORDER BY actor_count DESC, production_year ASC) AS rank
+    FROM 
+        MovieStats ms
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    rm.has_note_ratio,
+    rm.keywords,
+    CASE 
+        WHEN rm.rank <= 10 THEN 'Top 10'
+        ELSE 'Other'
+    END AS movie_rank_category
+FROM 
+    RankedMovies rm
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM movie_companies mc
+        WHERE mc.movie_id = rm.movie_id 
+        AND mc.company_type_id IN (
+            SELECT id 
+            FROM company_type 
+            WHERE kind ILIKE '%studio%'
+        )
+    )
+ORDER BY 
+    rm.rank;

@@ -1,0 +1,55 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451990
+    GROUP BY
+        ws.web_site_id
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+),
+TopWebSites AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_profit
+    FROM 
+        SalesData
+    WHERE 
+        profit_rank <= 5
+)
+SELECT 
+    tw.web_site_id,
+    COALESCE(SUM(cd.cd_purchase_estimate), 0) AS total_purchase_estimate,
+    COUNT(DISTINCT cd.c_customer_id) AS unique_customers,
+    AVG(CASE WHEN cd.cd_credit_rating = 'High' THEN cd.cd_purchase_estimate END) AS avg_high_credit_purchase
+FROM 
+    TopWebSites tw
+LEFT JOIN 
+    CustomerData cd ON tw.web_site_id = CAST(SUBSTRING(cd.c_customer_id FROM 1 FOR 5) AS VARCHAR)
+GROUP BY 
+    tw.web_site_id
+ORDER BY 
+    total_purchase_estimate DESC
+FETCH FIRST 10 ROWS ONLY;

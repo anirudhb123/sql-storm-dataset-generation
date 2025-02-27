@@ -1,0 +1,69 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_ext_sales_price) AS avg_order_value,
+        SUM(ws_coupon_amt) AS total_coupons_used,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_purchased
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        s.ws_bill_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.cd_purchase_estimate,
+        ss.total_sales,
+        ss.total_orders,
+        ss.avg_order_value,
+        ss.total_coupons_used,
+        ss.unique_items_purchased
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer_info ci ON ss.ws_bill_customer_sk = ci.c_customer_sk
+)
+SELECT 
+    sds.c_first_name,
+    sds.c_last_name,
+    sds.cd_gender,
+    sds.cd_marital_status,
+    sds.cd_education_status,
+    sds.cd_purchase_estimate,
+    sds.total_sales,
+    sds.total_orders,
+    sds.avg_order_value,
+    sds.total_coupons_used,
+    sds.unique_items_purchased
+FROM 
+    sales_data sds
+WHERE 
+    sds.total_sales > 1000
+ORDER BY 
+    sds.total_sales DESC
+LIMIT 100;

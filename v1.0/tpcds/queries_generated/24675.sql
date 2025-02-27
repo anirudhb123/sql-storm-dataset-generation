@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk, 
+        ws.ws_quantity, 
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as rank_order
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_shipping_price > 0
+        AND ws.ws_quantity > (SELECT AVG(ws2.ws_quantity) 
+                               FROM web_sales ws2 
+                               WHERE ws2.ws_item_sk = ws.ws_item_sk)
+),
+PopularItems AS (
+    SELECT 
+        ws_item_sk, COUNT(*) AS item_count
+    FROM 
+        RankedSales
+    WHERE 
+        rank_order <= 5
+    GROUP BY 
+        ws_item_sk
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(COUNT(s.sales), 0) as total_sales
+    FROM 
+        customer_address ca
+    LEFT JOIN (
+        SELECT 
+            DISTINCT ss.ss_addr_sk, ss.ss_item_sk
+        FROM 
+            store_sales ss 
+        JOIN 
+            store s ON ss.ss_store_sk = s.s_store_sk
+        WHERE 
+            s.s_state = 'CA'
+    ) s ON ca.ca_address_sk = s.ss_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    ad.ca_city,
+    ad.ca_state,
+    SUM(ad.total_sales) AS total_sales,
+    COUNT(pi.ws_item_sk) AS popular_item_count,
+    MAX(pi.item_count) AS max_count
+FROM 
+    AddressDetails ad
+JOIN 
+    PopularItems pi ON pi.ws_item_sk IN (
+        SELECT 
+            ir.ws_item_sk
+        FROM 
+            web_sales ir 
+        WHERE 
+            ir.ws_order_number IN (
+                SELECT 
+                    ws_order_number FROM RankedSales
+            )
+    )
+GROUP BY 
+    ad.ca_city, ad.ca_state
+HAVING 
+    SUM(ad.total_sales) > (SELECT AVG(total_sales) FROM AddressDetails)
+ORDER BY 
+    total_sales DESC, popular_item_count ASC;

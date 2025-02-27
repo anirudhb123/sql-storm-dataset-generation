@@ -1,0 +1,46 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(cc.id) AS total_cast,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM aka_title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year >= 2000 
+    GROUP BY t.id
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (ORDER BY md.total_cast DESC) AS rank_by_cast
+    FROM MovieDetails md
+),
+HighCastMovies AS (
+    SELECT * 
+    FROM RankedMovies 
+    WHERE total_cast > (SELECT AVG(total_cast) FROM RankedMovies) 
+)
+SELECT 
+    hcm.title,
+    hcm.production_year,
+    hcm.total_cast,
+    hcm.company_names,
+    hcm.keywords,
+    CASE
+        WHEN hcm.rank_by_cast <= 10 THEN 'Top Cast Movies'
+        ELSE 'High Cast Movies'
+    END AS movie_category
+FROM HighCastMovies hcm
+LEFT JOIN aka_name an ON an.person_id IN (
+    SELECT DISTINCT cc.person_id 
+    FROM cast_info cc 
+    WHERE cc.movie_id = hcm.movie_id
+)
+WHERE an.name IS NOT NULL
+ORDER BY hcm.rank_by_cast, hcm.production_year DESC;

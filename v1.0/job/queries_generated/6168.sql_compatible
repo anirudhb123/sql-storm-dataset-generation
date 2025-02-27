@@ -1,0 +1,30 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    ct.kind AS company_type,
+    COUNT(mk.keyword) AS keyword_count,
+    STRING_AGG(k.keyword, ', ') AS keywords,
+    MIN(mi.info) AS movie_info,
+    MAX(mi.note) AS movie_note
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+GROUP BY 
+    a.name, t.title, c.nr_order, ct.kind
+HAVING 
+    COUNT(mk.keyword) > 0 
+ORDER BY 
+    keyword_count DESC, actor_name ASC;

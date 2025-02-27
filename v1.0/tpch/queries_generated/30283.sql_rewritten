@@ -1,0 +1,52 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_name = 'ASIA'
+    
+    UNION ALL
+    
+    SELECT r.regionkey, rh.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 100
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+TotalLineItems AS (
+    SELECT l.l_orderkey, COUNT(l.l_linenumber) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, t.item_count
+    FROM orders o
+    JOIN TotalLineItems t ON o.o_orderkey = t.l_orderkey
+    WHERE o.o_orderdate > '1996-01-01' AND t.item_count > 5
+)
+SELECT 
+    rh.r_name AS region_name,
+    c.c_name AS customer_name,
+    COALESCE(SUM(co.total_spent), 0) AS total_spent_by_customer,
+    ts.total_value AS supplier_value,
+    COUNT(DISTINCT fo.o_orderkey) AS total_orders
+FROM RegionHierarchy rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN TopSuppliers ts ON c.c_nationkey = ts.s_suppkey
+LEFT JOIN FilteredOrders fo ON c.c_custkey = fo.o_orderkey
+WHERE ts.total_value IS NOT NULL OR total_spent_by_customer > 0
+GROUP BY rh.r_name, c.c_name, ts.total_value
+ORDER BY rh.r_name, total_spent_by_customer DESC;

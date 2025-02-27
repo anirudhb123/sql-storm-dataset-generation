@@ -1,0 +1,46 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(ci.nr_order), 0) AS total_cast,
+        COALESCE(MAX(m.production_year), NULL) AS latest_production_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    GROUP BY m.id, m.title
+),
+ranked_movies AS (
+    SELECT *,
+           RANK() OVER (PARTITION BY latest_production_year ORDER BY total_cast DESC) AS rank_by_cast_count
+    FROM 
+        movie_hierarchy
+)
+SELECT 
+    mv.title,
+    mv.total_cast,
+    mv.latest_production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = mv.movie_id AND cc.status_id IS NOT NULL) AS completed_cast_count,
+    pc.name AS company_name,
+    ARRAY_AGG(DISTINCT co.kind) AS company_types
+FROM 
+    ranked_movies mv
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mv.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mv.movie_id
+LEFT JOIN 
+    company_name pc ON pc.id = mc.company_id
+LEFT JOIN 
+    company_type co ON co.id = mc.company_type_id
+WHERE 
+    mv.rank_by_cast_count <= 10 AND 
+    (mv.latest_production_year IS NULL OR mv.latest_production_year > 2000)
+GROUP BY 
+    mv.movie_id, mv.title, mv.total_cast, mv.latest_production_year, pc.name
+ORDER BY 
+    mv.latest_production_year DESC, mv.total_cast DESC;

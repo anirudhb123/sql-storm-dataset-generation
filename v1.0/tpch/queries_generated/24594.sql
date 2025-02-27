@@ -1,0 +1,52 @@
+WITH RecursiveCTE AS (
+    SELECT l_orderkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_shipdate DESC) AS rn
+    FROM lineitem
+    WHERE l_returnflag = 'N'
+    GROUP BY l_orderkey
+),
+SupplierRanking AS (
+    SELECT s.s_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+HighRevenueOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           CASE 
+               WHEN total_revenue IS NULL THEN 0
+               ELSE total_revenue 
+           END AS effective_revenue
+    FROM orders o
+    LEFT JOIN RecursiveCTE r ON o.o_orderkey = r.l_orderkey
+    WHERE o.o_orderdate >= '2021-01-01' AND o.o_orderstatus = 'F'
+),
+FinalOutput AS (
+    SELECT hr.o_orderkey,
+           hr.o_totalprice,
+           COALESCE(sr.rank, 100) AS supplier_rank,
+           hr.effective_revenue,
+           CASE 
+               WHEN hr.effective_revenue > 10000 THEN 'High'
+               WHEN hr.effective_revenue BETWEEN 5000 AND 10000 THEN 'Medium'
+               ELSE 'Low' 
+           END AS revenue_category
+    FROM HighRevenueOrders hr
+    LEFT JOIN SupplierRanking sr ON hr.o_orderkey = sr.s_suppkey
+)
+SELECT fo.o_orderkey,
+       fo.o_totalprice,
+       fo.supplier_rank,
+       fo.effective_revenue,
+       fo.revenue_category,
+       STRING_AGG(CONCAT(fo.o_orderkey, '-', fo.supplier_rank), ', ') 
+           WITHIN GROUP (ORDER BY fo.o_totalprice DESC) AS aggregated_order_supplier
+FROM FinalOutput fo
+GROUP BY fo.o_orderkey, fo.o_totalprice, fo.supplier_rank, fo.effective_revenue, fo.revenue_category
+HAVING SUM(fo.effective_revenue) < (SELECT AVG(sr.total_cost) 
+                                      FROM SupplierRanking sr WHERE sr.rank < 10)
+ORDER BY fo.effective_revenue DESC NULLS LAST;

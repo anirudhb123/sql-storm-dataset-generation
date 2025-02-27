@@ -1,0 +1,71 @@
+
+WITH RECURSIVE Sales_Hierarchy AS (
+    SELECT
+        s_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM
+        store_sales
+    GROUP BY
+        s_store_sk
+
+    UNION ALL
+
+    SELECT
+        sh.s_store_sk,
+        sh.total_net_profit + COALESCE(SUM(ss_net_profit), 0) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY sh.s_store_sk ORDER BY sh.total_net_profit + COALESCE(SUM(ss_net_profit), 0) DESC) AS rank
+    FROM
+        store_sales ss
+    JOIN
+        Sales_Hierarchy sh ON sh.s_store_sk = ss.s_store_sk
+    GROUP BY
+        sh.s_store_sk, sh.total_net_profit
+),
+Customer_Addresses AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM
+        customer_address
+    GROUP BY
+        ca_state
+),
+Average_Sales AS (
+    SELECT
+        ca.ca_state,
+        AVG(ws.ws_net_profit) AS average_net_profit
+    FROM
+        web_sales ws
+    LEFT JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY
+        ca.ca_state
+)
+SELECT
+    hd.hd_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    (SELECT COUNT(*) FROM web_returns wr WHERE wr_return_quantity > 0) AS total_returns,
+    COALESCE(sh.total_net_profit, 0) AS total_net_profit,
+    ca.address_count,
+    avg_sales.average_net_profit
+FROM
+    household_demographics hd
+LEFT JOIN
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN
+    Sales_Hierarchy sh ON 1=1
+LEFT JOIN
+    Customer_Addresses ca ON 1=1
+LEFT JOIN
+    Average_Sales avg_sales ON avg_sales.ca_state = ca.ca_state
+WHERE
+    hd.hd_buy_potential IS NOT NULL AND
+    (hd_dep_count > 1 OR hd_vehicle_count IS NULL)
+GROUP BY
+    hd.hd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound, sh.total_net_profit, ca.address_count, avg_sales.average_net_profit
+ORDER BY
+    hd.hd_income_band_sk;

@@ -1,0 +1,52 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, 1 AS level 
+    FROM orders o 
+    WHERE o.o_orderstatus IN ('O', 'F')
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, oh.level + 1
+    FROM orders o 
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey 
+    WHERE o.o_orderdate > oh.o_orderdate AND oh.level < 5
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           COALESCE(NULLIF(s.s_comment, ''), 'No comment provided') AS adjusted_comment
+    FROM supplier s
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey
+)
+SELECT DISTINCT 
+    r.r_name, 
+    SUM(CASE WHEN li.l_discount > 0 THEN li.l_extendedprice * (1 - li.l_discount) ELSE li.l_extendedprice END) AS net_sales, 
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    pgw.avg_part_price
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartSupplierDetails psd ON ps.ps_partkey = psd.ps_partkey
+LEFT JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+LEFT JOIN CustomerOrderSummary cos ON cos.c_custkey = s.s_nationkey  
+CROSS JOIN (
+    SELECT AVG(p.p_retailprice) AS avg_part_price 
+    FROM part p 
+    WHERE p.p_size IS NOT NULL AND p.p_container IS NOT NULL
+) pgw
+WHERE li.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+AND li.l_returnflag = 'N'
+GROUP BY r.r_name, pgw.avg_part_price
+HAVING SUM(li.l_extendedprice) > 1000000
+ORDER BY net_sales DESC, unique_customers ASC
+LIMIT 10 OFFSET 5;

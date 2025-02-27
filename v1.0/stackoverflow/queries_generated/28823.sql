@@ -1,0 +1,77 @@
+WITH RankedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Focus on closing and reopening actions
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(DISTINCT ph.UserId) AS Closures,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        ARRAY_AGG(DISTINCT ph.UserDisplayName) AS ClosureUsers
+    FROM 
+        Posts p
+    INNER JOIN 
+        RankedPostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Count of closures only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+ReopenedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT ph.UserId) AS Reopens,
+        MAX(ph.CreationDate) AS LastReopenedDate,
+        ARRAY_AGG(DISTINCT ph.UserDisplayName) AS ReopenUsers
+    FROM 
+        Posts p
+    INNER JOIN 
+        RankedPostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 11 -- Count of reopens only
+    GROUP BY 
+        p.Id
+),
+FinalResults AS (
+    SELECT 
+        cp.PostId,
+        cp.Title,
+        cp.CreationDate,
+        cp.Closures,
+        cp.LastClosedDate,
+        rp.Reopens,
+        rp.LastReopenedDate,
+        cp.ClosureUsers,
+        rp.ReopenUsers
+    FROM 
+        ClosedPosts cp
+    LEFT JOIN 
+        ReopenedPosts rp ON cp.PostId = rp.PostId
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Closures,
+    fr.LastClosedDate,
+    fr.Reopens,
+    fr.LastReopenedDate,
+    ARRAY_TO_STRING(fr.ClosureUsers, ', ') AS ClosureUsers,
+    ARRAY_TO_STRING(fr.ReopenUsers, ', ') AS ReopenUsers
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Closures DESC, fr.LastClosedDate DESC
+LIMIT 50;
+

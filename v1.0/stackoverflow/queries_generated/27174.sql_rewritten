@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+DistinctTags AS (
+    SELECT DISTINCT
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        RankedPosts
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        DistinctTags 
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Tags,
+    rp.OwnerName,
+    ut.UserId,
+    ut.DisplayName AS EngagedUser,
+    ut.TotalBounty,
+    ut.CommentCount,
+    ut.BadgeCount,
+    tt.Tag AS MostUsedTag,
+    tt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TopTags tt ON rp.Tags LIKE '%' || tt.Tag || '%'
+JOIN 
+    UserEngagement ut ON ut.UserId = rp.OwnerUserId
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    tt.TagCount DESC, 
+    rp.ViewCount DESC;

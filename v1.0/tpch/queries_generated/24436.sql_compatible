@@ -1,0 +1,59 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100.00)
+),
+TotalSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ts.total_cost, 0) AS supplier_total_cost,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY COALESCE(ts.total_cost, 0) DESC) AS supplier_rank,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        ELSE CAST(co.total_spent AS VARCHAR)
+    END AS customer_spending_summary
+FROM 
+    RankedParts p
+LEFT JOIN 
+    TotalSupplierCost ts ON p.p_partkey = ts.ps_partkey
+FULL OUTER JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%Acme%' LIMIT 1)
+WHERE 
+    p.rnk <= 5 OR ts.total_cost IS NOT NULL
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    ts.total_cost, 
+    co.total_spent, 
+    p.p_type
+ORDER BY 
+    p.p_partkey, supplier_rank;

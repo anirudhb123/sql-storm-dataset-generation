@@ -1,0 +1,61 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 100 AND 
+        U.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id
+),
+PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(CAST(B.Name AS VARCHAR), 'No Badge') AS UserBadge,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        P.Id, B.Name
+    HAVING 
+        COUNT(CASE WHEN B.Id IS NOT NULL THEN 1 END) > 0
+)
+SELECT 
+    U.DisplayName AS Author,
+    UVC.UserPostRank,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.UserBadge,
+    UVC.Upvotes,
+    UVC.Downvotes,
+    PS.CommentCount
+FROM 
+    UserVoteSummary UVC
+JOIN 
+    PostDetail PS ON UVC.UserId = PS.OwnerUserId
+WHERE 
+    UVC.Upvotes > UVC.Downvotes
+ORDER BY 
+    UVC.Upvotes DESC, PS.Score DESC
+LIMIT 10;

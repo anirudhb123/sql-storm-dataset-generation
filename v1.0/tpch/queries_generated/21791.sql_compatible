@@ -1,0 +1,45 @@
+
+WITH Recursive_CTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        LEAD(ps.ps_supplycost) OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS next_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_availqty DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+), 
+Filtered_CTE AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN next_supplycost IS NULL THEN 0 
+            ELSE (next_supplycost - ps_supplycost) / ps_supplycost 
+        END AS cost_increase
+    FROM Recursive_CTE
+    WHERE rn = 1
+), 
+Aggregated AS (
+    SELECT 
+        n.n_name,
+        SUM(p.p_retailprice * f.cost_increase) AS total_cost_increase
+    FROM Filtered_CTE f
+    JOIN supplier s ON f.p_partkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(a.total_cost_increase, 0) AS total_cost_increase,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customers
+FROM nation n
+LEFT JOIN Aggregated a ON n.n_name = a.n_name
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+WHERE n.r_regionkey IN (SELECT DISTINCT r.r_regionkey FROM region r WHERE r.r_name LIKE '%North%')
+GROUP BY n.n_name
+HAVING COALESCE(a.total_cost_increase, 0) > (SELECT AVG(total_cost_increase) FROM Aggregated)
+ORDER BY total_cost_increase DESC
+LIMIT 10 OFFSET 0;

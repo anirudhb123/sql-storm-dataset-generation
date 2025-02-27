@@ -1,0 +1,81 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        CAST(0 AS INT) AS Level,
+        CAST(p.Id AS CHAR(255)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        rp.Level + 1,
+        CONCAT(rp.Path, '>', CAST(p.Id AS CHAR(255)))
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        ps.OwnerUserId,
+        COUNT(ps.Id) AS RecentPostCount,
+        MAX(ps.CreationDate) AS LastPostDate
+    FROM 
+        Posts ps
+    WHERE 
+        ps.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        ps.OwnerUserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.QuestionCount,
+    us.AnswerCount,
+    us.TotalScore,
+    us.TotalBadgeClass,
+    COALESCE(ra.RecentPostCount, 0) AS RecentPostCount,
+    COALESCE(ra.LastPostDate, 'No Recent Activity') AS LastPostDate,
+    rp.Level AS PostLevel
+FROM 
+    UserStats us
+LEFT JOIN 
+    RecentActivity ra ON us.UserId = ra.OwnerUserId
+LEFT JOIN 
+    RecursivePostCTE rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    us.TotalScore > 100
+    AND us.QuestionCount > 10
+ORDER BY 
+    us.TotalScore DESC, us.DisplayName ASC
+FETCH FIRST 100 ROWS ONLY;

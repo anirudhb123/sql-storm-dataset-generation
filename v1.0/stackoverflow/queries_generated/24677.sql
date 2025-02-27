@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+AggPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReOpenedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        up.UserId,
+        up.DisplayName AS UserDisplayName,
+        up.Reputation,
+        p.ViewCount,
+        p.Score,
+        up.UpVotesReceived,
+        up.DownVotesReceived,
+        COALESCE(ph.LastClosedDate, 'N/A') AS CloseStatus,
+        COALESCE(ph.LastReOpenedDate, 'N/A') AS ReopenStatus,
+        CASE 
+            WHEN ph.LastClosedDate IS NOT NULL AND ph.LastReOpenedDate IS NULL THEN 'Closed Only' 
+            WHEN ph.LastClosedDate IS NULL AND ph.LastReOpenedDate IS NOT NULL THEN 'Reopened Only'
+            ELSE 'Closed and Reopened'
+        END AS PostStatus
+    FROM 
+        RankedPosts p
+    JOIN 
+        UserReputation up ON p.PostRank = 1 AND p.OwnerUserId = up.UserId
+    LEFT JOIN 
+        AggPostHistory ph ON p.PostId = ph.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation > 1000 THEN 'Expert'
+        WHEN Reputation > 500 THEN 'Pro'
+        ELSE 'Novice'
+    END AS UserLevel,
+    CONCAT('Post Title: ', Title, ' | Author: ', UserDisplayName) AS PostDetail
+FROM 
+    CombinedData
+WHERE 
+    PostStatus = 'Closed and Reopened'
+ORDER BY 
+    Score DESC NULLS LAST, 
+    ViewCount DESC;
+

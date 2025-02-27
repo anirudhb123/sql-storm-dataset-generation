@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.ParentId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.ParentId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(p.CreationDate) AS LastActivePostDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation IS NOT NULL
+    GROUP BY u.Id, u.Reputation
+),
+HighScorePosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        u.Username,
+        COALESCE(rp.CommentCount, 0) AS CommentCount,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'High'
+            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory,
+        u.Id AS UserId
+    FROM RankedPosts rp
+    JOIN Users u ON rp.ParentId = u.Id 
+    WHERE rp.Score > 10
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        COUNT(*) AS CloseEventCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId, ph.CreationDate
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.Score,
+    hp.CommentCount,
+    CASE WHEN cph.CloseEventCount IS NOT NULL THEN 'Closed' ELSE 'Open' END AS PostStatus,
+    ur.ReputationCategory,
+    COALESCE(cph.CloseDate, 'No Closure') AS ClosureDate
+FROM HighScorePosts hp
+LEFT JOIN UserReputation ur ON hp.UserId = ur.UserId
+LEFT JOIN ClosedPostHistory cph ON hp.PostId = cph.PostId
+WHERE hp.CommentCount = (SELECT MAX(CommentCount) FROM HighScorePosts)
+ORDER BY hp.Score DESC, ur.Reputation DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        Views,
+        UpVotes,
+        DownVotes
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount, U.DisplayName
+),
+BadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(Id) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+)
+
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.Views,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate AS PostCreationDate,
+    PS.ViewCount AS PostViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    COALESCE(BC.BadgeCount, 0) AS TotalBadges,
+    PS.VoteCount
+FROM UserStats US
+JOIN PostStatistics PS ON US.UserId = PS.OwnerDisplayName
+LEFT JOIN BadgeCounts BC ON US.UserId = BC.UserId
+ORDER BY US.Reputation DESC, PS.ViewCount DESC;

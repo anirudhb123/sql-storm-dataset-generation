@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(vt.Name, 'No Votes') AS VoteType,
+        p.AcceptedAnswerId,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate < DATE_SUB('2024-10-01 12:34:56', INTERVAL 1 YEAR)
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.RankByScore,
+    rp.CommentCount,
+    rp.VoteType,
+    p.AcceptedAnswerId,
+    p2.Title AS AcceptedAnswerTitle,
+    u.DisplayName AS PostOwner,
+    u.Reputation AS OwnerReputation,
+    CASE 
+        WHEN rp.OwnerDisplayName IS NULL THEN 'Anonymous'
+        ELSE rp.OwnerDisplayName
+    END AS PostOwnerDisplayName
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Posts p ON rp.AcceptedAnswerId = p.Id
+LEFT JOIN 
+    Users u ON rp.OwnerDisplayName = u.DisplayName
+LEFT JOIN 
+    Posts p2 ON rp.AcceptedAnswerId = p2.Id
+WHERE 
+    rp.RankByScore <= 5
+ORDER BY 
+    rp.Score DESC;

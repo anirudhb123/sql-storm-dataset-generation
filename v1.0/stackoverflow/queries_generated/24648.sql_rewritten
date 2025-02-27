@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COALESCE(upvotes.UpVotes, 0) AS UpVotes,
+        COALESCE(downvotes.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts AS p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS UpVotes 
+        FROM Votes 
+        WHERE VoteTypeId = 2 
+        GROUP BY PostId
+    ) AS upvotes ON p.Id = upvotes.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS DownVotes 
+        FROM Votes 
+        WHERE VoteTypeId = 3 
+        GROUP BY PostId
+    ) AS downvotes ON p.Id = downvotes.PostId
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags AS t
+    JOIN Posts AS p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(pt.PostId) > 10
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory AS ph
+    WHERE
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND ph.PostHistoryTypeId IN (10, 11, 12)
+)
+SELECT 
+    p.Title,
+    p.PostId,
+    p.ViewCount,
+    p.UpVotes,
+    p.DownVotes,
+    pt.TagName,
+    ph.Comment AS MostRecentComment,
+    ph.HistoryCount
+FROM 
+    RankedPosts AS p
+JOIN 
+    PopularTags AS pt ON p.PostRank = 1
+LEFT JOIN 
+    PostHistories AS ph ON p.PostId = ph.PostId AND ph.HistoryCount = 
+        (SELECT MAX(HistoryCount) 
+         FROM PostHistories 
+         WHERE PostId = p.PostId)
+WHERE 
+    p.ViewRank <= 10
+ORDER BY 
+    p.ViewCount DESC, p.PostId ASC;

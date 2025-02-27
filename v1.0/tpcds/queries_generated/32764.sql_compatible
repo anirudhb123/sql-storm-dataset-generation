@@ -1,0 +1,77 @@
+
+WITH RECURSIVE historical_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        1 AS depth
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_net_profit) + hs.total_net_profit AS total_net_profit,
+        COUNT(ws.ws_order_number) + hs.total_orders AS total_orders,
+        depth + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        historical_sales hs ON ws.ws_item_sk = hs.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk < (
+            SELECT MAX(ws_sold_date_sk) 
+            FROM web_sales 
+            WHERE ws_sold_date_sk < (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+        )
+    GROUP BY 
+        ws.ws_item_sk, hs.total_net_profit, hs.total_orders, depth
+), customer_metrics AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_spent,
+        AVG(ws.ws_net_paid) AS avg_spending
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk
+), aggregated_data AS (
+    SELECT
+        cm.c_customer_sk,
+        COALESCE(SUM(hs.total_net_profit), 0) AS historical_net_profit,
+        cm.total_orders,
+        cm.total_spent,
+        cm.avg_spending
+    FROM 
+        customer_metrics cm
+    LEFT JOIN 
+        historical_sales hs ON cm.c_customer_sk = hs.ws_item_sk
+    GROUP BY 
+        cm.c_customer_sk, cm.total_orders, cm.total_spent, cm.avg_spending
+)
+SELECT 
+    ad.c_customer_sk,
+    ad.historical_net_profit,
+    ad.total_orders,
+    ad.total_spent,
+    ad.avg_spending,
+    CASE 
+        WHEN ad.total_orders > 10 THEN 'High Engagement' 
+        WHEN ad.total_orders BETWEEN 5 AND 10 THEN 'Moderate Engagement' 
+        ELSE 'Low Engagement' 
+    END AS engagement_level
+FROM 
+    aggregated_data ad
+WHERE 
+    ad.historical_net_profit IS NOT NULL
+ORDER BY 
+    ad.historical_net_profit DESC
+LIMIT 100;

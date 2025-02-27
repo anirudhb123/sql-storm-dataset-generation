@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_title,
+        1 AS depth
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    LEFT JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title AS main_title,
+    mh.linked_title,
+    mh.depth,
+    COUNT(DISTINCT ci.id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS alias_names,
+    SUM(
+        CASE 
+            WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) 
+            ELSE 0 
+        END
+    ) AS info_length,
+    CASE 
+        WHEN COUNT(DISTINCT ci.id) > 10 THEN 'Famous Cast'
+        ELSE 'Lesser Known'
+    END AS cast_fame_category
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.linked_title, mh.depth
+HAVING 
+    COUNT(DISTINCT ci.id) > 0
+ORDER BY 
+    mh.depth DESC, total_cast DESC, mh.title;

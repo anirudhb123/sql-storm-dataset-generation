@@ -1,0 +1,83 @@
+WITH UserScoreCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(u.UpVotes, 0) - COALESCE(u.DownVotes, 0) AS NetVotes,
+        DENSE_RANK() OVER (ORDER BY COALESCE(u.UpVotes, 0) - COALESCE(u.DownVotes, 0) DESC) AS Ranking
+    FROM Users u
+),
+PostInfoCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.CommentCount,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, '>'))::int)
+    GROUP BY p.Id
+),
+VotesInfo AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount
+    FROM Votes v
+    WHERE v.CreationDate > NOW() - INTERVAL '1 month'
+    GROUP BY v.PostId, v.VoteTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserDisplayName END) AS ClosedBy,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.UserDisplayName END) AS ReopenedBy
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY ph.PostId, ph.CreationDate
+),
+RankedPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.Tags,
+        COALESCE(SUM(vi.VoteCount) FILTER (WHERE vi.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(vi.VoteCount) FILTER (WHERE vi.VoteTypeId = 3), 0) AS TotalDownvotes,
+        CASE 
+            WHEN cp.ClosedBy IS NOT NULL THEN 'Closed' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM PostInfoCTE p
+    LEFT JOIN VotesInfo vi ON vi.PostId = p.PostId
+    LEFT JOIN ClosedPosts cp ON cp.PostId = p.PostId
+    GROUP BY p.PostId, p.Title, p.Tags, cp.ClosedBy
+),
+FinalRanking AS (
+    SELECT
+        r.PostId,
+        r.Title,
+        r.Tags,
+        r.TotalUpvotes,
+        r.TotalDownvotes,
+        r.PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY r.PostStatus ORDER BY r.TotalUpvotes DESC) AS PostRank
+    FROM RankedPosts r
+)
+SELECT 
+    u.DisplayName AS UserName,
+    fs.PostId,
+    fs.Title AS PostTitle,
+    fs.Tags,
+    fs.TotalUpvotes,
+    fs.TotalDownvotes,
+    fs.PostStatus,
+    fs.PostRank,
+    us.Ranking AS UserRanking
+FROM FinalRanking fs
+INNER JOIN Users u ON u.Id = fs.PostId
+LEFT JOIN UserScoreCTE us ON u.Id = us.UserId
+WHERE fs.PostRank <= 10
+ORDER BY fs.PostStatus, fs.PostRank, us.Ranking DESC;

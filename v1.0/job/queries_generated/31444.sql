@@ -1,0 +1,96 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        0 AS level,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        mh.level + 1,
+        path || mt.linked_movie_id
+    FROM 
+        movie_link mt
+    JOIN 
+        aka_title a ON a.id = mt.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mt.movie_id
+    WHERE 
+        mt.link_type_id = 1 -- Assuming 1 is for a specific relationship type
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+MovieDetails AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.kind_id,
+        r.level,
+        r.rank,
+        COALESCE(ci.count, 0) AS cast_count,
+        COALESCE(STRING_AGG(DISTINCT a.name, ', '), 'No Cast') AS cast_names
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(*) AS count 
+        FROM 
+            cast_info 
+        GROUP BY 
+            movie_id) ci ON r.movie_id = ci.movie_id
+    LEFT JOIN 
+        cast_info ci2 ON ci2.movie_id = r.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci2.person_id
+    GROUP BY 
+        r.movie_id, r.title, r.production_year, r.kind_id, r.level, r.rank
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.kind_id,
+    md.level,
+    md.rank,
+    md.cast_count,
+    md.cast_names,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    (SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords 
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id) mk ON md.movie_id = mk.movie_id
+WHERE 
+    (md.production_year >= 2000 OR md.cast_count > 5)  -- Example filter criteria
+ORDER BY 
+    md.production_year DESC,
+    md.rank;

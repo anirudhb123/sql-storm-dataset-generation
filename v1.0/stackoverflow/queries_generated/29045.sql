@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY t.Id ORDER BY p.CreationDate DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        Rank,
+        TagList
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1 AND PostTypeId = 1 -- Only Questions
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 10
+)
+SELECT 
+    pq.Title,
+    pq.ViewCount,
+    pq.Score,
+    pq.TagList,
+    tc.DisplayName AS TopContributor,
+    tc.QuestionCount,
+    tc.TotalScore,
+    tc.TotalViews
+FROM 
+    PopularQuestions pq
+JOIN 
+    TopContributors tc ON pq.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = tc.UserId)
+ORDER BY 
+    pq.ViewCount DESC, pq.Score DESC;

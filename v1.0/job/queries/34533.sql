@@ -1,0 +1,52 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        1 AS generation
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        c.nr_order = 1  
+
+    UNION ALL
+
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        ah.generation + 1
+    FROM
+        cast_info c
+    JOIN
+        ActorHierarchy ah ON c.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id LIMIT 1)
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+)
+SELECT
+    t.title,
+    t.production_year,
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = t.id) AS keyword_count,
+    (SELECT COUNT(DISTINCT cc.person_id) FROM cast_info cc WHERE cc.movie_id = t.id) AS total_cast,
+    ah.actor_name,
+    ah.generation,
+    AVG(LENGTH(a.name)) AS average_name_length
+FROM
+    title t
+LEFT JOIN
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN
+    ActorHierarchy ah ON ci.person_id = ah.person_id
+LEFT JOIN
+    aka_name a ON ci.person_id = a.person_id
+WHERE
+    t.production_year BETWEEN 1990 AND 2023
+    AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Feature%')
+GROUP BY
+    t.id, t.title, t.production_year, ah.actor_name, ah.generation
+ORDER BY
+    t.production_year DESC,
+    keyword_count DESC,
+    total_cast DESC,
+    average_name_length ASC;

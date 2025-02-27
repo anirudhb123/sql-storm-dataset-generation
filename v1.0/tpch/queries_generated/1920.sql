@@ -1,0 +1,71 @@
+WITH SupplierCostSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopPartSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        s.s_name AS supplier_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_container, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        total_spent
+    FROM 
+        CustomerOrderSummary c
+    WHERE 
+        total_spent > 50000
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(s.supplier_name, 'No Supplier') AS supplier_name,
+    ROUND(avg(scs.total_supply_cost), 2) AS avg_supply_cost,
+    hvc.c_name AS high_value_customer
+FROM 
+    part p
+LEFT JOIN 
+    SupplierCostSummary scs ON p.p_partkey = scs.ps_partkey
+LEFT JOIN 
+    TopPartSuppliers s ON p.p_partkey = s.p_partkey AND s.rn = 1
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_orders > 5
+WHERE 
+    p.p_size >= 10 AND 
+    (p.p_mfgr LIKE 'Manufacturer%' OR p.p_brand IS NOT NULL)
+GROUP BY 
+    p.p_name, p.p_brand, s.supplier_name, hvc.c_name
+ORDER BY 
+    avg_supply_cost DESC, p.p_name;

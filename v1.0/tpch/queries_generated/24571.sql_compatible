@@ -1,0 +1,80 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice NOT IN (SELECT MAX(p2.p_retailprice) FROM part p2 WHERE p2.p_brand = p.p_brand)
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(SUM(l.l_extendedprice * (1 - l.l_discount)), 0), 0) AS total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+FilteredNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND (c.c_acctbal > 0 OR c.c_mktsegment = 'Retail')
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+
+SELECT 
+    rn.p_name,
+    s.s_name,
+    fn.n_name,
+    cs.order_count,
+    cs.total_spent,
+    s.total_sales,
+    (CASE 
+        WHEN s.total_sales > 0 THEN ROUND((s.total_sales / NULLIF(cs.total_spent, 0)) * 100, 2)
+        ELSE 0 
+    END) AS sales_percentage
+FROM 
+    RankedParts rn
+JOIN 
+    partsupp ps ON rn.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    FilteredNation fn ON s.s_nationkey = fn.n_nationkey
+JOIN 
+    CustomerOrderStats cs ON cs.order_count > 5
+WHERE 
+    rn.price_rank <= 5 
+    AND (s.s_acctbal IS NOT NULL OR s.s_name LIKE 'Supplier%')
+ORDER BY 
+    sales_percentage DESC, cs.total_spent ASC;

@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY COALESCE(P.Score, 0) DESC, P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+    WHERE P.CreationDate >= '2020-01-01' -- Only consider posts created after 2020
+    GROUP BY P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+CommentedPostStats AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(PostId) AS TotalPosts,
+        SUM(CommentCount) AS TotalComments,
+        SUM(AnswerCount) AS TotalAnswers,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes
+    FROM RankedPosts
+    GROUP BY OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    C.TotalPosts,
+    C.TotalComments,
+    C.TotalAnswers,
+    C.TotalUpVotes,
+    C.TotalDownVotes
+FROM Users U
+JOIN CommentedPostStats C ON U.Id = C.OwnerUserId
+WHERE U.Reputation > 1000 -- Filter for users with a reputation higher than 1000
+ORDER BY C.TotalPosts DESC, C.TotalUpVotes DESC;

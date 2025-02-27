@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorRoles AS (
+    SELECT
+        ca.person_id,
+        ca.movie_id,
+        COALESCE(cr.role, 'Unknown') AS role_name,
+        COUNT(ca.id) OVER (PARTITION BY ca.person_id) AS num_movies
+    FROM
+        cast_info ca
+    LEFT JOIN role_type cr ON ca.role_id = cr.id
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        COALESCE(ar.role_name, 'No Cast') AS lead_actor_role,
+        ar.person_id,
+        ar.num_movies,
+        (SELECT COUNT(DISTINCT mp.company_id)
+         FROM movie_companies mp
+         WHERE mp.movie_id = rm.movie_id) AS company_count
+    FROM
+        RankedMovies rm
+    LEFT JOIN ActorRoles ar ON rm.movie_id = ar.movie_id AND ar.num_movies > 5
+    LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+)
+SELECT
+    dmi.title,
+    dmi.production_year,
+    dmi.keywords,
+    dmi.lead_actor_role,
+    (CASE
+        WHEN dmi.company_count IS NULL THEN 'No Companies'
+        WHEN dmi.company_count = 0 THEN 'Independent'
+        ELSE 'Produced by ' || dmi.company_count || ' companies'
+     END) AS company_info,
+    (SELECT COUNT(*)
+     FROM complete_cast cc
+     WHERE cc.movie_id = dmi.movie_id) AS complete_cast_count
+FROM
+    DetailedMovieInfo dmi
+WHERE
+    (dmi.production_year BETWEEN 2000 AND 2020)
+    AND (dmi.lead_actor_role = 'Director' OR dmi.lead_actor_role = 'Unknown')
+ORDER BY
+    dmi.production_year DESC,
+    dmi.title
+LIMIT 50 OFFSET (SELECT COUNT(*) FROM DetailedMovieInfo) / 2;

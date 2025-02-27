@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE
+            WHEN p.p_size IS NULL OR p.p_size = 0 THEN 'Unknown Size'
+            ELSE CAST(p.p_size AS varchar)
+        END AS size_desc
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container != 'BOX')
+), OrderStats AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS total_returned
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+), CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(os.total_orders, 0) AS orders_count,
+        COALESCE(os.total_revenue, 0) AS revenue,
+        CASE 
+            WHEN COALESCE(os.total_revenue, 0) = 0 THEN 'No Revenue'
+            ELSE 'Has Revenue'
+        END AS revenue_status
+    FROM customer c
+    LEFT JOIN OrderStats os ON c.c_custkey = os.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    fp.size_desc,
+    COALESCE(COUNT(DISTINCT sp.ps_suppkey), 0) AS supplier_count,
+    r.s_name AS top_supplier,
+    cr.revenue,
+    cr.orders_count,
+    cr.revenue_status
+FROM FilteredParts fp
+LEFT JOIN SupplierParts sp ON fp.p_partkey = sp.ps_partkey
+LEFT JOIN RankedSuppliers r ON sp.ps_suppkey = r.s_suppkey AND r.rn = 1
+LEFT JOIN CustomerRevenue cr ON cr.revenue > 0
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    fp.size_desc, 
+    r.s_name, 
+    cr.revenue, 
+    cr.orders_count
+HAVING 
+    COUNT(sp.ps_suppkey) > 0 AND 
+    cr.orders_count > 2 AND 
+    cr.revenue_status = 'Has Revenue'
+ORDER BY 
+    fp.p_retailprice DESC, 
+    cr.revenue DESC;

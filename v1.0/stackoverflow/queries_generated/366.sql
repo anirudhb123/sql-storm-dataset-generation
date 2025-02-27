@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetScore,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE p.Score > 0 
+    GROUP BY p.Id, u.DisplayName
+    HAVING COUNT(DISTINCT c.Id) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.CreationDate,
+        p.AcceptedAnswerId,
+        PHT.Name AS HistoryType,
+        ph.Comment,
+        ROW_NUMBER() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.NetScore,
+    COUNT(DISTINCT rph.HistoryType) AS UniqueHistoryTypes,
+    MAX(rph.CreationDate) AS LastChangeDate,
+    CASE WHEN tp.AnswerCount > 0 THEN 'Has Answers' ELSE 'No Answers' END AS AnswerStatus,
+    CASE WHEN ur.ReputationRank <= 10 THEN 'Top User' ELSE 'Regular User' END AS UserType
+FROM TopPosts tp
+LEFT JOIN RecentPostHistory rph ON tp.PostId = rph.PostId AND rph.HistoryRank = 1
+JOIN UserReputation ur ON tp.OwnerDisplayName = ur.DisplayName
+GROUP BY tp.PostId, tp.Title, tp.OwnerDisplayName, tp.Score, tp.AnswerCount, tp.CommentCount, tp.NetScore
+HAVING MAX(rph.CreationDate) IS NOT NULL
+ORDER BY tp.NetScore DESC, tp.CreationDate DESC
+LIMIT 50;

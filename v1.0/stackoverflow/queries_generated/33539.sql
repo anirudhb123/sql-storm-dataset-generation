@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Last year
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CloseReasons AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen
+    GROUP BY 
+        ph.UserId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.Upvotes,
+        ur.Downvotes,
+        ur.PostCount,
+        ISNULL(cr.CloseCount, 0) AS CloseCount,
+        ISNULL(cr.CloseReasons, 'None') AS CloseReasons
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        CloseReasons cr ON ur.UserId = cr.UserId
+    WHERE 
+        ur.Reputation > 1000 -- Filtering users with reputation above 1000
+)
+
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.Upvotes,
+    tu.Downvotes,
+    AVG(rp.UserPostRank) AS AveragePostRank,
+    tu.CloseCount,
+    tu.CloseReasons
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+GROUP BY 
+    tu.DisplayName, tu.Reputation, tu.PostCount,
+    tu.Upvotes, tu.Downvotes, tu.CloseCount, tu.CloseReasons
+HAVING 
+    AVG(rp.UserPostRank) < 3 -- Average post rank less than 3
+ORDER BY 
+    tu.Reputation DESC, tu.Upvotes DESC;

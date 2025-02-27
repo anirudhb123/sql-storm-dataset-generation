@@ -1,0 +1,102 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000 AND 
+        p.p_size BETWEEN 10 AND 50
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_linenumber,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_quantity,
+        COALESCE(NULLIF(l.l_returnflag, 'N'), 'Y') AS adjusted_returnflag
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_shipdate <= CURRENT_DATE
+),
+FinalReport AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(HighValueCustomers.total_spent) AS avg_customer_spending,
+        COUNT(DISTINCT RankedSuppliers.s_suppkey) AS unique_suppliers
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        LineItemDetails l ON l.l_partkey = p.p_partkey
+    LEFT JOIN 
+        HighValueCustomers ON HighValueCustomers.c_custkey IN (
+            SELECT DISTINCT o.o_custkey 
+            FROM orders o 
+            WHERE o.o_orderkey = l.l_orderkey
+        )
+    GROUP BY 
+        n.n_name
+    HAVING 
+        total_revenue > (SELECT AVG(total_revenue) FROM (
+            SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+            FROM lineitem
+            WHERE l_shipdate <= CURRENT_DATE
+            GROUP BY l.l_orderkey
+        ) AS avg_totals)
+)
+SELECT 
+    f.n_name,
+    f.total_revenue,
+    f.total_orders,
+    f.avg_customer_spending,
+    f.unique_suppliers
+FROM 
+    FinalReport f
+WHERE 
+    f.total_revenue >= (
+        SELECT COALESCE(MAX(total_revenue), 0) 
+        FROM FinalReport
+        WHERE unique_suppliers IS NOT NULL
+    )
+    OR NOT EXISTS (
+        SELECT 1 FROM RankedSuppliers rs WHERE rs.rank = 1 AND rs.s_suppkey = ANY (
+            SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = ANY (
+                SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+            )
+        )
+    )
+ORDER BY 
+    f.total_revenue DESC, f.avg_customer_spending ASC;

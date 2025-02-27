@@ -1,0 +1,99 @@
+
+WITH RecursivePostVotes AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), 
+
+RankedPosts AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        pp.UpVotes,
+        pp.DownVotes,
+        (pp.UpVotes - pp.DownVotes) AS NetScore,
+        DENSE_RANK() OVER (ORDER BY (pp.UpVotes - pp.DownVotes) DESC) AS VoteRank
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostVotes pp ON p.Id = pp.PostId
+    WHERE 
+        p.PostTypeId = 1 
+), 
+
+UserBadges AS (
+    
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+    HAVING 
+        COUNT(b.Id) > 1
+),
+
+RecentActivity AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN p.CloseReasonId IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        c.CreationDate > '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days' OR p.CreationDate > '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+    GROUP BY 
+        u.Id
+),
+
+FinalBenchmark AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        r.Title AS TopPost,
+        r.NetScore,
+        ra.CommentCount,
+        ra.ClosedPosts,
+        ub.BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts r ON u.Id = r.UserId
+    LEFT JOIN 
+        RecentActivity ra ON u.Id = ra.UserId
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TopPost,
+    NetScore,
+    COALESCE(CommentCount, 0) AS CommentCount,
+    COALESCE(ClosedPosts, 0) AS ClosedPosts,
+    COALESCE(BadgeCount, 0) AS BadgeCount
+FROM 
+    FinalBenchmark
+WHERE 
+    NetScore > 10 
+ORDER BY 
+    Reputation DESC, 
+    NetScore DESC;

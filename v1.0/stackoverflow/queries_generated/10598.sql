@@ -1,0 +1,23 @@
+-- Performance benchmarking query to analyze post statistics and user engagement
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS PostCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+    SUM(p.ViewCount) AS TotalViews,
+    AVG(COALESCE(p.Score, 0)) AS AvgScore,
+    AVG(COALESCE(CAST(p.CreationDate AS DATE), GETDATE())) AS AvgPostAge,
+    COALESCE(SUM(c.CommentCount), 0) AS TotalComments,
+    COALESCE(SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS UserCommentCount
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) c ON p.Id = c.PostId
+GROUP BY 
+    pt.Name
+ORDER BY 
+    PostCount DESC;

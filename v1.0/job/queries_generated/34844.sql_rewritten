@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM title mt
+    WHERE mt.season_nr IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level,
+        mh.path || m.title
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path,
+    COUNT(DISTINCT ci.id) AS num_cast_members,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS num_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    COALESCE(mt.info, 'No Info') AS movie_info,
+    CASE 
+        WHEN mh.production_year < 1980 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 1980 AND 1999 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN info_type it ON it.id = mi.info_type_id
+LEFT JOIN (
+    SELECT movie_id, STRING_AGG(info, '; ') AS info
+    FROM movie_info
+    GROUP BY movie_id
+) mt ON mt.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year, 
+    mh.level, 
+    mh.path, 
+    mt.info
+ORDER BY 
+    mh.production_year DESC, 
+    num_cast_members DESC;

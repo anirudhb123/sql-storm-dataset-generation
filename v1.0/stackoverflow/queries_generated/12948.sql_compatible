@@ -1,0 +1,50 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(P.UpVotes) AS TotalUpVotes,
+        SUM(P.DownVotes) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.AnswerCount, P.CommentCount, P.FavoriteCount
+)
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.TotalPosts,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount AS PostAnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.FavoriteCount,
+    PS.TotalComments
+FROM UserStats US
+JOIN PostStats PS ON US.UserId = PS.OwnerUserId
+ORDER BY US.Reputation DESC, PS.ViewCount DESC
+LIMIT 100;

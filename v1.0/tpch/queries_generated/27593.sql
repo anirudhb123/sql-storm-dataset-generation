@@ -1,0 +1,30 @@
+SELECT 
+    p.p_name AS part_name, 
+    s.s_name AS supplier_name, 
+    c.c_name AS customer_name, 
+    o.o_orderkey AS order_number, 
+    l.l_quantity AS quantity, 
+    l.l_extendedprice AS extended_price, 
+    CONCAT('Supplier: ', s.s_name, ', for Customer: ', c.c_name) AS supplier_customer_info,
+    REPLACE(p.p_comment, 'boxes', 'containers') AS modified_comment,
+    SUBSTRING_INDEX(p.p_mfgr, ' ', 1) AS manufacturer_first_word,
+    CHAR_LENGTH(s.s_comment) AS supplier_comment_length
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%Wrench%' 
+    AND o.o_orderdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    AND l.l_discount > 0.1 
+ORDER BY 
+    l.l_extendedprice DESC
+LIMIT 10;

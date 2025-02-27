@@ -1,0 +1,71 @@
+
+WITH RECURSIVE item_sales_cte AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+top_items AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        iv.inv_quantity_on_hand,
+        COALESCE((
+            SELECT SUM(ws_quantity)
+            FROM web_sales
+            WHERE ws_item_sk = i.i_item_sk
+        ), 0) AS total_web_sales,
+        COALESCE((
+            SELECT SUM(cs_quantity)
+            FROM catalog_sales
+            WHERE cs_item_sk = i.i_item_sk
+        ), 0) AS total_catalog_sales,
+        COALESCE((
+            SELECT SUM(ss_quantity)
+            FROM store_sales
+            WHERE ss_item_sk = i.i_item_sk
+        ), 0) AS total_store_sales
+    FROM
+        item i
+    LEFT JOIN inventory iv ON i.i_item_sk = iv.inv_item_sk
+    WHERE
+        iv.inv_quantity_on_hand > 0
+),
+combined_sales AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        (i.total_web_sales + i.total_catalog_sales + i.total_store_sales) AS overall_sales
+    FROM
+        top_items i
+)
+SELECT
+    ib.ib_income_band_sk,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    AVG(CASE
+        WHEN c.c_birth_year < 1980 THEN 1
+        ELSE 0
+    END) AS gen_x_percentage,
+    SUM(cs_ext_sales_price) AS total_revenue,
+    ROW_NUMBER() OVER (ORDER BY SUM(cs_ext_sales_price) DESC) AS sales_rank
+FROM
+    combined_sales cs
+JOIN customer c ON c.c_current_addr_sk =
+    (SELECT ca_address_sk FROM customer_address WHERE ca_address_id = 'dummy_address_id')
+JOIN household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk
+JOIN income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+JOIN catalog_sales cs ON cs.cs_item_sk = (
+    SELECT ws_item_sk FROM item_sales_cte WHERE sales_rank = 1
+)
+WHERE
+    cs.cs_sold_date_sk >= (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_date = CURRENT_DATE - INTERVAL '1 year'
+    )
+GROUP BY
+    ib.ib_income_band_sk;

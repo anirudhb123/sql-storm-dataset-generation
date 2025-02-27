@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title AS PostTitle, 
+        p.OwnerUserId, 
+        p.PostTypeId, 
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        a.Id, 
+        a.Title, 
+        a.OwnerUserId, 
+        a.PostTypeId,
+        a.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy ph ON a.ParentId = ph.PostId
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostCommentCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+)
+SELECT 
+    ph.PostId,
+    ph.PostTitle,
+    u.DisplayName AS AuthorName,
+    CASE 
+        WHEN ph.PostTypeId = 1 THEN 'Question' 
+        WHEN ph.PostTypeId = 2 THEN 'Answer' 
+        ELSE 'Other' 
+    END AS PostType,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    u.Reputation,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'Expert'
+        WHEN u.Reputation >= 100 THEN 'Contributor'
+        ELSE 'Novice'
+    END AS UserLevel,
+    CASE 
+        WHEN ph.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    ph.Level
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    AggregatedVotes v ON ph.PostId = v.PostId
+LEFT JOIN 
+    PostCommentCounts pc ON ph.PostId = pc.PostId
+JOIN 
+    Users u ON ph.OwnerUserId = u.Id
+WHERE 
+    ph.Level = 0  -- Only include top-level questions
+ORDER BY 
+    u.Reputation DESC, 
+    ph.PostId
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;  -- Pagination for performance testing
+

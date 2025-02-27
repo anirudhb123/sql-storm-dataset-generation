@@ -1,0 +1,48 @@
+
+WITH RankedCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(pi.info_type_id) AS avg_info_type_id
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON mi.movie_id = pi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    rc.actor_name,
+    md.keyword_count,
+    md.company_count,
+    md.avg_info_type_id
+FROM 
+    MovieDetails md
+JOIN 
+    RankedCast rc ON md.movie_id = rc.movie_id
+WHERE 
+    rc.actor_rank <= 3
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

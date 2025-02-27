@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        supplier s
+),
+AggregatedParts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost,
+        COUNT(DISTINCT ps.ps_suppkey) AS UniqueSuppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        DATE_PART('year', o.o_orderdate) AS OrderYear,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'HighValue'
+            ELSE 'RegularValue'
+        END AS OrderValueCategory
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+        AND o.o_orderdate >= '2022-01-01'
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT fo.o_orderkey) AS TotalOrders,
+        SUM(fo.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        FilteredOrders fo ON c.c_custkey = fo.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(CASE WHEN fo.o_orderstatus = 'F' THEN 1 ELSE 0 END) > 5
+)
+SELECT 
+    ps.p_partkey,
+    COALESCE(rs.s_name, 'Unknown Supplier') AS SupplierName,
+    ap.TotalSupplyCost,
+    cs.TotalOrders,
+    cs.TotalSpent,
+    (ap.TotalSupplyCost / NULLIF(cs.TotalSpent, 0)) AS CostToSpendRatio,
+    ROW_NUMBER() OVER (PARTITION BY CASE WHEN cs.TotalOrders IS NULL THEN 'No Orders' ELSE 'With Orders' END ORDER BY ap.TotalSupplyCost DESC) AS OrderCostRank
+FROM 
+    AggregatedParts ap
+LEFT JOIN 
+    RankedSuppliers rs ON rs.SupplierRank <= 3
+LEFT JOIN 
+    CustomerOrderStats cs ON cs.TotalSpent IS NOT NULL
+WHERE 
+    ap.TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM AggregatedParts)
+    OR (ap.TotalSupplyCost IS NOT NULL AND COALESCE(cs.TotalOrders, 0) = 0)
+ORDER BY 
+    CostToSpendRatio DESC, 
+    SupplierName;

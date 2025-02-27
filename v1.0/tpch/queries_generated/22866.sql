@@ -1,0 +1,67 @@
+WITH RegionalSales AS (
+    SELECT
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    JOIN orders o ON o.o_orderkey = l.l_orderkey
+    WHERE
+        l.l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+        AND (l.l_discount BETWEEN 0.05 AND 0.07 OR l.l_discount IN (SELECT DISTINCT NULLIF(CAST('05' AS DECIMAL), 0)))
+    GROUP BY
+        r.r_name
+),
+RankedSales AS (
+    SELECT
+        region,
+        total_sales,
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY region ORDER BY order_count DESC) AS order_rank
+    FROM
+        RegionalSales
+),
+FinalOutput AS (
+    SELECT
+        rs.region,
+        rs.total_sales,
+        rs.order_count,
+        CASE
+            WHEN rs.sales_rank = 1 THEN 'Top Region'
+            WHEN rs.total_sales IS NULL THEN 'No Sales'
+            ELSE 'Regular Region'
+        END AS sales_category,
+        COALESCE(NULLIF(rs.order_count, 0), (SELECT COUNT(*) FROM orders) + 1) AS adjusted_order_count
+    FROM
+        RankedSales rs
+)
+SELECT
+    f.region,
+    f.total_sales,
+    f.order_count,
+    f.sales_category,
+    f.adjusted_order_count
+FROM
+    FinalOutput f
+FULL OUTER JOIN supplier s ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps ORDER BY RANDOM() LIMIT 1)
+ORDER BY
+    f.total_sales DESC NULLS LAST,
+    f.region ASC
+LIMIT 10
+UNION ALL
+SELECT
+    'Total' AS region,
+    SUM(total_sales) AS total_sales,
+    SUM(order_count) AS order_count,
+    'Aggregate' AS sales_category,
+    COUNT(DISTINCT NULLIF(region, '')) AS adjusted_order_count
+FROM
+    FinalOutput
+WHERE
+    region IS NOT NULL;

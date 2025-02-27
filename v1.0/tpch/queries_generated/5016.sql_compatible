@@ -1,0 +1,29 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopOrders AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice
+    FROM RankedOrders ro
+    WHERE ro.rn <= 10
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN TopOrders to ON l.l_orderkey = to.o_orderkey
+    GROUP BY l.l_orderkey
+)
+SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, od.total_revenue, ss.s_name, ss.total_supply_cost
+FROM TopOrders o
+JOIN OrderDetails od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN SupplierStats ss ON od.total_revenue > ss.total_supply_cost
+ORDER BY o.o_orderdate DESC, od.total_revenue DESC;

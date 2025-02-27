@@ -1,0 +1,66 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT co.name ORDER BY co.name) AS companies
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+StringBenchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.companies,
+        LENGTH(md.cast_names) AS cast_names_length,
+        LENGTH(md.keywords) AS keywords_length,
+        LENGTH(md.companies) AS companies_length
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    sb.movie_title,
+    sb.production_year,
+    sb.cast_names,
+    sb.keywords,
+    sb.companies,
+    sb.cast_names_length,
+    sb.keywords_length,
+    sb.companies_length,
+    CASE 
+        WHEN sb.cast_names_length > 100 THEN 'Long Cast List'
+        ELSE 'Short Cast List'
+    END AS cast_length_category,
+    CASE 
+        WHEN sb.keywords_length > 50 THEN 'Many Keywords'
+        ELSE 'Few Keywords'
+    END AS keyword_length_category,
+    CASE 
+        WHEN sb.companies_length > 150 THEN 'Many Companies'
+        ELSE 'Few Companies'
+    END AS company_length_category
+FROM 
+    StringBenchmark sb
+ORDER BY 
+    sb.production_year DESC, 
+    sb.movie_title;

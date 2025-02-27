@@ -1,0 +1,65 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_kind,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.year_rank,
+    ci.company_name,
+    ci.company_kind,
+    cd.actor_name,
+    cd.role,
+    cd.actor_rank,
+    rm.total_cast,
+    CASE 
+        WHEN rm.total_cast > 3 THEN 'Ensemble'
+        ELSE 'Limited Cast'
+    END AS cast_size_description
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyInfo ci ON rm.title_id = ci.movie_id AND ci.company_rank = 1
+LEFT JOIN 
+    CastDetails cd ON rm.title_id = cd.movie_id AND cd.actor_rank <= 3
+WHERE 
+    CAST(rm.production_year AS VARCHAR) LIKE '20%'
+ORDER BY 
+    rm.production_year DESC, rm.title;

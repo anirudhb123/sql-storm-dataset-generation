@@ -1,0 +1,102 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+
+    UNION ALL 
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            WHEN v.VoteTypeId = 3 THEN -1 
+            ELSE 0 
+        END) AS ScoreVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId, 
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Considering only title, body, and tag edits
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    p.Id AS PostId, 
+    p.Title, 
+    p.CreationDate AS QuestionDate, 
+    u.DisplayName AS Author,
+    ub.BadgeCount,
+    PCP.ScoreVoteCount,
+    COALESCE(SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+    COALESCE(MAX(rph.LastEdited), 'Never') AS LastEdited,
+    CASE 
+        WHEN COUNT(DISTINCT r.Id) > 0 THEN 'Has Accepted Answer' 
+        ELSE 'No Accepted Answer' 
+    END AS AnswerStatus
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostVotes PCP ON p.Id = PCP.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Posts r ON p.AcceptedAnswerId = r.Id
+LEFT JOIN 
+    RecentPostHistory rph ON p.Id = rph.PostId
+LEFT JOIN 
+    RecursivePostCTE rc ON p.Id = rc.PostId -- Analyze hierarchy if needed
+WHERE 
+    p.PostTypeId = 1 -- Only Questions
+GROUP BY 
+    p.Id, u.DisplayName, ub.BadgeCount, PCP.ScoreVoteCount
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC
+LIMIT 100;

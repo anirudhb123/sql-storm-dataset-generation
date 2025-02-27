@@ -1,0 +1,66 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate < DATE '1998-10-01' AND 
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    c.c_name AS customer_name,
+    rq.order_rank,
+    rq.o_totalprice AS order_total,
+    ci.s_name AS supplier_name,
+    ci.supplier_cost,
+    COALESCE(co.order_count, 0) AS order_count,
+    COALESCE(co.total_spent, 0) AS total_spent
+FROM 
+    RankedOrders rq
+JOIN 
+    SupplierInfo ci ON rq.o_orderkey = ci.s_suppkey
+FULL OUTER JOIN 
+    CustomerOrders co ON co.total_spent < rq.total_sales
+WHERE 
+    rq.order_rank = 1 
+    AND (ci.supplier_cost IS NULL OR ci.supplier_cost > 1000)
+    AND (COALESCE(rq.o_totalprice, 0) - COALESCE((SELECT MAX(o_totalprice) FROM orders WHERE o_orderstatus = 'F'), 0) 
+    > 0 OR rq.o_orderdate BETWEEN DATEADD(month, -6, DATE '1998-10-01') AND DATE '1998-10-01')
+ORDER BY 
+    co.order_count DESC NULLS LAST, 
+    rq.o_totalprice DESC;

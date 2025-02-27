@@ -1,0 +1,85 @@
+WITH ranked_actors AS (
+    SELECT 
+        ak.person_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE
+        ak.name IS NOT NULL
+),
+
+movie_details AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE
+        mt.production_year >= 2000 
+        AND (mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Feature%') OR mt.kind_id IS NULL)
+    GROUP BY 
+        mt.id
+),
+
+actor_movie_info AS (
+    SELECT 
+        r.actor_name,
+        md.title,
+        md.production_year,
+        r.actor_rank
+    FROM 
+        ranked_actors r
+    JOIN 
+        cast_info ci ON r.person_id = ci.person_id
+    JOIN 
+        aka_title md ON ci.movie_id = md.id
+    WHERE 
+        r.actor_rank = 1
+),
+
+filtered_movies AS (
+    SELECT 
+        adm.actor_name,
+        adm.title,
+        adm.production_year,
+        md.total_companies,
+        md.company_names,
+        COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS keyword_count
+    FROM 
+        actor_movie_info adm
+    JOIN 
+        movie_keyword mk ON adm.title = mk.movie_id
+    JOIN 
+        movie_details md ON adm.title = md.title
+    GROUP BY 
+        adm.actor_name, adm.title, adm.production_year, md.total_companies, md.company_names
+)
+
+SELECT 
+    f.actor_name,
+    f.title,
+    f.production_year,
+    f.total_companies,
+    f.company_names,
+    COALESCE(f.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN f.total_companies > 0 AND f.keyword_count > 10 THEN 'Highly Collaborative'
+        WHEN f.total_companies > 0 AND f.keyword_count <= 10 THEN 'Moderately Collaborative'
+        ELSE 'Less Collaborative'
+    END AS collaboration_level
+FROM 
+    filtered_movies f
+WHERE 
+    f.production_year IS NOT NULL
+ORDER BY 
+    f.production_year DESC, 
+    f.actor_name;

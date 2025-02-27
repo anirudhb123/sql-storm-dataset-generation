@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT t.id AS movie_id, t.title AS movie_title, t.production_year, 
+           1 AS level, CAST(t.title AS VARCHAR(255)) AS path
+    FROM aka_title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT t.id AS movie_id, t.title AS movie_title, t.production_year, 
+           mh.level + 1 AS level, 
+           CAST(mh.path || ' -> ' || t.title AS VARCHAR(255)) AS path
+    FROM aka_title t
+    JOIN movie_hierarchy mh ON t.episode_of_id = mh.movie_id
+    WHERE mh.level < 5
+),
+
+cast_details AS (
+    SELECT c.id AS cast_id, a.name AS actor_name, k.keyword AS genre, 
+           ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS rn
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE a.name IS NOT NULL
+),
+
+actor_rankings AS (
+    SELECT actor_name, COUNT(cast_id) AS movie_count,
+           DENSE_RANK() OVER (ORDER BY COUNT(cast_id) DESC) AS rank
+    FROM cast_details
+    GROUP BY actor_name
+),
+
+movie_performance AS (
+    SELECT mh.movie_title, mh.production_year, a.actor_name, 
+           COALESCE(r.movie_count, 0) AS actor_movie_count,
+           CASE
+               WHEN a.actor_movie_count > 10 THEN 'Star'
+               WHEN a.actor_movie_count BETWEEN 5 AND 10 THEN 'Supporting'
+               ELSE 'Cameo'
+           END AS role_description
+    FROM movie_hierarchy mh
+    LEFT JOIN actor_rankings a ON mh.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = (SELECT id FROM aka_name WHERE name = a.actor_name))
+),
+
+final_selection AS (
+    SELECT movie_title, production_year, role_description,
+           STRING_AGG(actor_name, ', ') AS actors
+    FROM movie_performance
+    GROUP BY movie_title, production_year, role_description
+    HAVING COUNT(actor_name) > 1
+)
+
+SELECT fs.movie_title, fs.production_year, fs.role_description,
+       CASE
+           WHEN fs.role_description = 'Star' THEN 'High Demand'
+           WHEN fs.role_description = 'Supporting' THEN 'Moderate Demand'
+           ELSE 'Low Demand'
+       END AS demand_level
+FROM final_selection fs
+ORDER BY fs.production_year DESC, fs.role_description;

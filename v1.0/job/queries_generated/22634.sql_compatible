@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY m.id DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorRoles AS (
+    SELECT 
+        k.name,
+        ci.note AS role_note,
+        COUNT(*) AS role_count,
+        MAX(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE ci.nr_order END) AS max_order,
+        SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name k ON ci.person_id = k.person_id
+    GROUP BY 
+        k.name, ci.note
+),
+MovieCompanies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(*) AS company_count,
+        STRING_AGG(c.name, '; ') AS company_names
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    GROUP BY 
+        m.movie_id
+),
+MoviesWithRoles AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ar.name AS actor_name,
+        ar.role_note,
+        ar.role_count,
+        mc.company_count,
+        mc.company_names,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY ar.role_count DESC) AS actor_rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON ar.role_note IS NOT NULL
+    LEFT JOIN 
+        MovieCompanies mc ON mc.movie_id = rm.movie_id
+    WHERE 
+        rm.year_rank <= 5 AND ar.role_count > 1
+)
+SELECT 
+    mw.title, 
+    mw.production_year, 
+    mw.actor_name, 
+    mw.role_note, 
+    mw.role_count,
+    mw.company_count,
+    mw.company_names
+FROM 
+    MoviesWithRoles mw
+WHERE 
+    mw.company_count > 0 
+    AND (mw.role_note IS NULL OR mw.role_note NOT LIKE '%extra%')
+ORDER BY 
+    mw.production_year DESC, 
+    mw.role_count DESC 
+LIMIT 50;

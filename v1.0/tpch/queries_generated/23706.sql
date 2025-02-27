@@ -1,0 +1,48 @@
+WITH RecursiveCustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, r.level + 1
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN RecursiveCustomerOrders r ON c.c_custkey = r.c_custkey
+    WHERE o.o_orderkey <> r.o_orderkey
+),
+SupplierPartDetails AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_partkey
+),
+SalesSummary AS (
+    SELECT s.partkey, 
+           (CASE WHEN SUM(s.total_sales) IS NULL THEN 0 ELSE SUM(s.total_sales) END) AS total_sales
+    FROM AggregatedSales s
+    GROUP BY s.partkey
+)
+
+SELECT c.c_name, COALESCE(so.all_orders, 0) AS total_orders, 
+       COALESCE(ss.total_sales, 0) AS total_sales,
+       (SELECT COUNT(*) FROM SupplierPartDetails sp WHERE sp.rank <= 3) AS top_suppliers
+FROM RecursiveCustomerOrders co
+JOIN SalesSummary ss ON EXISTS (
+    SELECT 1 FROM lineitem l 
+    WHERE l.l_orderkey = co.o_orderkey AND l.l_partkey = ss.partkey
+)
+LEFT JOIN (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS all_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+) so ON co.c_custkey = so.c_custkey
+GROUP BY c.c_name;

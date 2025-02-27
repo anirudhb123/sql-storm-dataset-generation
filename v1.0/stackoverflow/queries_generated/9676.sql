@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC, p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+), 
+PostStats AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.Rank,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        CASE 
+            WHEN rp.Rank <= 10 THEN 'Top Posts'
+            ELSE 'Other Posts'
+        END AS FilteredCategory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        (SELECT p.Id, COUNT(c.Id) AS CommentCount 
+         FROM Posts p 
+         LEFT JOIN Comments c ON p.Id = c.PostId 
+         WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+         GROUP BY p.Id) ps ON rp.PostId = ps.Id
+)
+SELECT
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    u.DisplayName AS OwnerUser
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+WHERE 
+    ps.FilteredCategory = 'Top Posts'
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

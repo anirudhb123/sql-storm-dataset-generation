@@ -1,0 +1,77 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS actor_rank,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        ranked_movies
+    WHERE 
+        actor_rank < 6  -- Top 5 movies per year by actor count
+),
+selected_companies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(sc.company_names, 'No Companies') AS companies,
+    COALESCE(NULLIF(k.keyword, ''), 'No Keywords') AS keyword,
+    COALESCE((
+        SELECT 
+            STRING_AGG(DISTINCT ki.info, ', ') 
+        FROM 
+            movie_info mi
+        JOIN 
+            info_type it ON mi.info_type_id = it.id
+        WHERE 
+            mi.movie_id = tm.id
+            AND it.info ILIKE '%award%'
+    ), 'No Awards') AS awards,
+    COUNT(DISTINCT ci.person_id) AS total_actors
+FROM 
+    top_movies tm
+LEFT JOIN 
+    selected_companies sc ON tm.id = sc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tm.id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = tm.id
+WHERE 
+    tm.production_year >= 2000 
+    AND (tm.production_year <= 2023 OR tm.title ILIKE '%remake%')
+GROUP BY 
+    tm.title, tm.production_year, sc.company_names, k.keyword
+ORDER BY 
+    tm.production_year DESC, total_actors DESC;
+
+This query performs several operations:
+1. It utilizes common table expressions (CTEs) to compute ranked movies by year based on the number of unique actors, selects the top five per year, and aggregates companies associated with those movies.
+2. It includes outer joins to retrieve company names and keywords, handling NULL values with COALESCE and NULLIF functions.
+3. It features a correlated subquery to extract award information from the movie info table, ensuring that any necessary logic for empty string handling and absence of awards is in place.
+4. The final selection displays movies from the 21st century with additional filtering conditions, aggregating various data points for comprehensive output.

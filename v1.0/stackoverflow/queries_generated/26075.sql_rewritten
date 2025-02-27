@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL string_to_array(substr(p.Tags, 2, length(p.Tags) - 2), '><') AS tag_name ON TRUE
+    JOIN 
+        Tags t ON tag_name = t.TagName
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.Rank,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+),
+
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.Tags,
+        COALESCE(NULLIF(ph.UserDisplayName, ''), 'System') AS LastEditorDisplayName,
+        ph.CreationDate AS LastEditDate,
+        ph.CreateDate AS PostDate,
+        ARRAY_AGG(DISTINCT c.Text) AS Comments,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.OwnerDisplayName, ph.UserDisplayName, ph.CreationDate
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.OwnerDisplayName,
+    pd.LastEditorDisplayName,
+    pd.LastEditDate,
+    pd.Tags,
+    pd.Comments,
+    pd.VoteCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 10;

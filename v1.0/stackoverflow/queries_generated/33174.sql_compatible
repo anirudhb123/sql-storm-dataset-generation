@@ -1,0 +1,72 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    q.PostId AS QuestionId,
+    q.Title AS QuestionTitle,
+    q.CreationDate AS QuestionCreated,
+    a.Id AS AnswerId,
+    a.CreationDate AS AnswerCreated,
+    u.Id AS UserId,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(c.Id) AS CommentCount,
+    AVG(v.Score) AS AverageVoteScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy q
+LEFT JOIN 
+    Posts a ON q.AcceptedAnswerId = a.Id
+LEFT JOIN 
+    Users u ON q.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = q.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = q.PostId
+LEFT JOIN 
+    LATERAL (SELECT 
+                  unnest(string_to_array(p.Tags, '><')) AS TagName 
+              FROM 
+                  Posts p 
+              WHERE 
+                  p.Id = q.PostId) t ON TRUE
+WHERE 
+    q.Level = 1    
+GROUP BY 
+    q.PostId, 
+    q.Title, 
+    q.CreationDate, 
+    a.Id, 
+    a.CreationDate,
+    u.Id, 
+    u.DisplayName,
+    u.Reputation
+ORDER BY 
+    u.Reputation DESC, 
+    q.CreationDate DESC;

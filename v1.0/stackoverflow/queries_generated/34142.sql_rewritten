@@ -1,0 +1,88 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName AS User,
+    us.QuestionCount,
+    us.AnswerCount,
+    us.TotalScore,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    string_agg(DISTINCT ph.Title, '; ') AS RelatedQuestions,
+    tt.TagName AS TopTag,
+    tt.PostCount
+FROM 
+    UserStatistics us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    RecentVotes rv ON u.Id = rv.UserId
+LEFT JOIN 
+    PostHierarchy ph ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1)
+LEFT JOIN 
+    TopTags tt ON tt.TagName IN (SELECT unnest(string_to_array(pt.Tags, '><')))
+GROUP BY 
+    u.Id, us.QuestionCount, us.AnswerCount, us.TotalScore, rv.UpVotes, rv.DownVotes, tt.TagName, tt.PostCount
+ORDER BY 
+    us.TotalScore DESC, u.DisplayName
+LIMIT 50;

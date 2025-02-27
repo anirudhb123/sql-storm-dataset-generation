@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        1 AS level
+    FROM
+        supplier s
+    WHERE
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+
+    UNION ALL
+
+    SELECT
+        p.s_suppkey,
+        p.s_name,
+        p.s_address,
+        p.s_nationkey,
+        sh.level + 1
+    FROM
+        SupplierHierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier p ON ps.ps_partkey = p.s_suppkey
+    WHERE
+        sh.level < 5
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(r.r_comment, 'No Comment') AS region_comment,
+    STRING_AGG(DISTINCT CONCAT(COALESCE(s.s_name, 'Unspecified'), ' (', s.s_suppkey, ')') 
+                 ORDER BY s.s_name DESC) AS suppliers
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+WHERE 
+    l.l_shipdate BETWEEN DATEADD(DAY, -30, '1998-10-01') AND '1998-10-01'
+    AND l.l_discount BETWEEN 0.05 AND 0.15
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = l.l_partkey AND ps.ps_availqty < 25
+    )
+GROUP BY 
+    n.n_name, r.r_comment
+HAVING 
+    AVG(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l.l_extendedprice * (1 - l.l_discount)) FROM lineitem)
+ORDER BY 
+    nation_name, avg_price DESC
+LIMIT 100;

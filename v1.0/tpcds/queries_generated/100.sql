@@ -1,0 +1,63 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        COALESCE(cs.total_web_sales, 0) AS web_sales,
+        COALESCE(cs.total_catalog_sales, 0) AS catalog_sales,
+        COALESCE(cs.total_store_sales, 0) AS store_sales,
+        CASE 
+            WHEN COALESCE(cs.total_web_sales, 0) > 1000 THEN 'High Value Customer'
+            WHEN COALESCE(cs.total_web_sales, 0) BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+            ELSE 'Low Value Customer'
+        END AS customer_value
+    FROM 
+        CustomerSales cs
+)
+SELECT 
+    dem.cd_gender,
+    dem.cd_marital_status,
+    SUM(SUM(ss.web_sales + ss.catalog_sales + ss.store_sales)) AS total_sales,
+    COUNT(ss.c_customer_id) AS customer_count,
+    AVG(CASE 
+            WHEN ss.customer_value = 'High Value Customer' THEN 1 
+            ELSE 0 
+        END) AS high_value_percentage
+FROM 
+    SalesSummary ss
+JOIN 
+    CustomerDemographics dem ON ss.c_customer_id = dem.cd_demo_sk
+WHERE 
+    dem.ib_lower_bound <= 50000 AND (dem.ib_upper_bound > 50000 OR dem.ib_upper_bound IS NULL)
+GROUP BY 
+    dem.cd_gender, dem.cd_marital_status
+HAVING 
+    COUNT(ss.c_customer_id) > 10
+ORDER BY 
+    total_sales DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

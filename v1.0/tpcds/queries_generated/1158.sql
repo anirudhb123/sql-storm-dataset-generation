@@ -1,0 +1,44 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk AS customer_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM web_sales AS ws
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+    GROUP BY ws.bill_customer_sk
+), customer_activity AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        SUM(ss.ss_sales_price) AS total_store_sales,
+        SUM(IFNULL(cr.cr_return_amount, 0)) AS total_returns,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN catalog_returns AS cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY c.c_customer_sk, gender
+), ranked_customers AS (
+    SELECT 
+        ca.c_customer_sk,
+        ca.gender,
+        ca.total_store_sales,
+        ca.total_returns,
+        ca.sales_count,
+        ROW_NUMBER() OVER (PARTITION BY ca.gender ORDER BY ca.total_store_sales DESC) AS sales_rank
+    FROM customer_activity AS ca
+)
+SELECT 
+    r.customer_id,
+    r.gender,
+    r.total_store_sales,
+    r.total_returns,
+    r.sales_count,
+    s.total_sales AS web_total_sales,
+    r.sales_count + COALESCE(s.total_orders, 0) AS total_interaction
+FROM ranked_customers AS r
+LEFT JOIN sales_summary AS s ON r.c_customer_sk = s.customer_id
+WHERE r.sales_rank <= 10
+ORDER BY r.gender, r.total_store_sales DESC;

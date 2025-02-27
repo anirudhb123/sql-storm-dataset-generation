@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        c.role_id,
+        COUNT(*) AS total_roles
+    FROM 
+        cast_info c
+    WHERE 
+        c.note IS NULL
+    GROUP BY 
+        c.movie_id, c.role_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        COALESCE(cb.company_count, 0) AS company_count,
+        COALESCE(cb.companies, 'No Companies') AS companies,
+        ar.total_roles
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CompanyInfo cb ON rt.title_id = cb.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON rt.title_id = ar.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.companies,
+    md.total_roles,
+    CASE 
+        WHEN md.total_roles IS NULL THEN 'No Roles Assigned'
+        WHEN md.total_roles > 5 THEN 'Multiple Roles'
+        ELSE 'Single Role'
+    END AS role_description
+FROM 
+    MovieDetails md
+WHERE 
+    md.rank = 1
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

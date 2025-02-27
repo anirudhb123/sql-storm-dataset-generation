@@ -1,0 +1,90 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.Score, 0)) AS TotalPostScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+UserActivity AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.TotalPostScore,
+        u.TotalPosts,
+        COALESCE(tb.BadgeCount, 0) AS GoldBadgeCount,
+        COALESCE(tb.BadgeNames, 'None') AS AwardedBadges
+    FROM 
+        UserPostStats u
+    LEFT JOIN 
+        TopBadges tb ON u.UserId = tb.UserId
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPostScore,
+    ua.TotalPosts,
+    ua.GoldBadgeCount,
+    ua.AwardedBadges,
+    ps.Title AS TopPostTitle,
+    ps.Score AS TopPostScore,
+    ps.CommentCount,
+    cpp.CreationDate AS PostClosureDate,
+    cpp.CloseReasons AS ClosingReasons
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostScores ps ON ua.UserId = ps.OwnerUserId AND ps.UserPostRank = 1
+LEFT JOIN 
+    ClosedPostDetails cpp ON ps.Id = cpp.PostId
+WHERE 
+    ua.TotalPosts > 10
+ORDER BY 
+    ua.TotalPostScore DESC, ua.GoldBadgeCount DESC
+LIMIT 20;

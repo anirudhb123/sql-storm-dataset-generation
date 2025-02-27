@@ -1,0 +1,49 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY c.c_last_name) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        (cd.cd_marital_status = 'M' OR cd.cd_education_status LIKE '%Bachelor%')
+),
+CityAggregates AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(*) AS customer_count,
+        STRING_AGG(full_name, ', ' ORDER BY full_name) AS customer_names
+    FROM 
+        RankedCustomers
+    JOIN 
+        customer_address ca ON RankedCustomers.c_customer_sk = ca.ca_address_sk
+    WHERE 
+        rank <= 10
+    GROUP BY 
+        ca.ca_city
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    ca.ca_city,
+    customer_count,
+    MIN(LENGTH(customer_names)) AS min_name_length,
+    MAX(LENGTH(customer_names)) AS max_name_length,
+    AVG(LENGTH(customer_names)) AS avg_name_length
+FROM 
+    CityAggregates ca
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    customer_count DESC;

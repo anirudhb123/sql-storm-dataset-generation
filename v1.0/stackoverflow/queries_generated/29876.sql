@@ -1,0 +1,72 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        ARRAY_AGG(t.TagName) AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(c.Id), 0) AS CommentTotal,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        (CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END) AS AnswerStatus
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_name ON TRUE
+    LEFT JOIN 
+        Tags t ON tag_name = t.TagName
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Body,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.Tags,
+    ps.OwnerDisplayName,
+    ps.CommentTotal,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.AnswerStatus,
+    cp.ClosedDate,
+    cp.CloseReason
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId
+ORDER BY 
+    ps.Score DESC, ps.AnswerCount DESC, ps.CreationDate DESC
+LIMIT 100;

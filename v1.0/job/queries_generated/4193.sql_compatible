@@ -1,0 +1,54 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        mt.movie_id,
+        ct.kind AS company_type,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        aka_title mt ON mt.id = mc.movie_id
+    WHERE 
+        cn.country_code = 'USA'
+    GROUP BY 
+        mt.movie_id, ct.kind
+),
+HighRankedTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.title_rank = 1
+)
+SELECT 
+    ht.title,
+    ht.production_year,
+    COALESCE(tm.movie_count, 0) AS total_movies,
+    CASE 
+        WHEN tm.movie_count IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS has_company
+FROM 
+    HighRankedTitles ht
+LEFT JOIN 
+    TopMovies tm ON ht.production_year = tm.movie_id
+ORDER BY 
+    ht.production_year DESC, 
+    ht.title;

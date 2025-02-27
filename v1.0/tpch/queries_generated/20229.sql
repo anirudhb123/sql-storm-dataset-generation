@@ -1,0 +1,46 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_custkey = c.c_custkey AND ch.level < 5
+),
+part_summary AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           AVG(p.p_retailprice) AS avg_price,
+           COUNT(ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > 10000
+)
+SELECT ch.c_name, p.p_name, p.avg_price, p.total_cost, 
+       COALESCE(ho.o_orderkey, -1) AS high_order, 
+       CASE WHEN ho.o_orderkey IS NOT NULL 
+            THEN 'Successful' 
+            ELSE 'No High Value Orders' END AS order_status
+FROM customer_hierarchy ch
+LEFT JOIN part p ON ch.c_custkey % 10 = p.p_partkey % 10
+LEFT JOIN high_value_orders ho ON ho.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o
+    WHERE o.o_orderdate > (CURRENT_DATE - INTERVAL '1 year')
+    INTERSECT
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_discount BETWEEN 0.05 AND 0.15 
+    EXCEPT 
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'F'
+)
+JOIN region r ON r.r_regionkey = ch.c_custkey % (SELECT COUNT(*) FROM region) + 1
+WHERE r.r_comment IS NOT NULL
+ORDER BY p.total_cost DESC NULLS LAST, ch.level, p.p_name;

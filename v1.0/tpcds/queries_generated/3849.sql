@@ -1,0 +1,56 @@
+
+WITH RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+), 
+ItemStatistics AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        COALESCE(rs.total_revenue, 0) AS total_revenue,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(rs.total_revenue, 0) DESC) AS revenue_rank,
+        COUNT(DISTINCT ws_bill_customer_sk) AS unique_customers
+    FROM 
+        item i
+    LEFT JOIN 
+        RecentSales rs ON i.i_item_sk = rs.ws_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc, rs.total_quantity, rs.total_revenue
+), 
+DemographicAnalysis AS (
+    SELECT 
+        cd_gender,
+        AVG(total_revenue) AS avg_revenue,
+        SUM(unique_customers) AS customer_count
+    FROM 
+        ItemStatistics is
+    JOIN 
+        customer c ON is.i_item_sk = c.c_current_cdemo_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    da.cd_gender,
+    da.avg_revenue,
+    da.customer_count,
+    CASE 
+        WHEN da.avg_revenue > (SELECT AVG(avg_revenue) FROM DemographicAnalysis) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS revenue_comparison
+FROM 
+    DemographicAnalysis da
+ORDER BY 
+    da.cd_gender;

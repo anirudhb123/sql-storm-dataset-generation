@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        NULL::integer AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.parent_id,
+        mh.level,
+        ROW_NUMBER() OVER(PARTITION BY mh.parent_id ORDER BY mh.level, mh.title) AS rank
+    FROM 
+        movie_hierarchy mh
+),
+movie_statistics AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.id
+),
+final_output AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.parent_id,
+        rm.level,
+        ms.total_cast,
+        ms.avg_order
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_statistics ms ON rm.movie_id = ms.movie_id
+    WHERE 
+        rm.level <= 2
+)
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.parent_id,
+    fo.level,
+    COALESCE(fo.total_cast, 0) AS total_cast,
+    COALESCE(fo.avg_order, 'N/A') AS avg_order,
+    CASE 
+        WHEN fo.level = 0 THEN 'Original Movie'
+        WHEN fo.level = 1 THEN 'Related Movie'
+        ELSE 'Sub-Related Movie'
+    END AS movie_type
+FROM 
+    final_output fo
+ORDER BY 
+    fo.level, fo.title;

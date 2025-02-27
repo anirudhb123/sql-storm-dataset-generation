@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS row_num
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_month_seq = 4
+        )
+    UNION ALL
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        cs.cs_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_order_number) AS row_num
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_month_seq = 4
+        )
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(COALESCE(sd.ws_quantity, 0)) AS total_web_quantity,
+        SUM(COALESCE(sd.cs_quantity, 0)) AS total_catalog_quantity,
+        COUNT(DISTINCT sd.ws_order_number) AS total_web_orders,
+        COUNT(DISTINCT sd.cs_order_number) AS total_catalog_orders,
+        SUM(COALESCE(sd.ws_net_profit, 0)) AS total_web_profit,
+        SUM(COALESCE(sd.cs_net_profit, 0)) AS total_catalog_profit
+    FROM 
+        sales_data sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk OR sd.cs_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+),
+final_summary AS (
+    SELECT 
+        is.i_item_sk,
+        is.i_item_desc,
+        COALESCE(is.total_web_quantity, 0) AS total_web_quantity,
+        COALESCE(is.total_catalog_quantity, 0) AS total_catalog_quantity,
+        COALESCE(is.total_web_orders, 0) AS total_web_orders,
+        COALESCE(is.total_catalog_orders, 0) AS total_catalog_orders,
+        COALESCE(is.total_web_profit, 0) AS total_web_profit,
+        COALESCE(is.total_catalog_profit, 0) AS total_catalog_profit,
+        (COALESCE(is.total_web_profit, 0) + COALESCE(is.total_catalog_profit, 0)) AS total_profit
+    FROM 
+        item_summary is
+    LEFT JOIN 
+        item i ON i.i_item_sk = is.i_item_sk
+)
+SELECT 
+    f.i_item_sk,
+    f.i_item_desc,
+    f.total_web_quantity,
+    f.total_catalog_quantity,
+    f.total_web_orders,
+    f.total_catalog_orders,
+    f.total_web_profit,
+    f.total_catalog_profit,
+    f.total_profit
+FROM 
+    final_summary f
+WHERE 
+    f.total_profit > (SELECT AVG(total_profit) FROM final_summary)
+ORDER BY 
+    f.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,67 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey,
+        CAST(s.s_name AS VARCHAR(100)) AS full_path,
+        1 AS level
+    FROM 
+        supplier AS s
+    WHERE 
+        s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'S%')
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_nationkey,
+        CONCAT(SH.full_path, ' -> ', s.s_name),
+        SH.level + 1
+    FROM 
+        SupplierHierarchy AS SH
+    JOIN 
+        partsupp AS ps ON SH.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier AS s ON ps.ps_suppkey = s.s_suppkey
+)
+, NationalSales AS (
+    SELECT 
+        n.n_name AS nation,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    NVL(max(SH.level), 0) AS supplier_levels,
+    NTILE(3) OVER (ORDER BY coalesce(total_sales, 0) DESC) AS sales_tier,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    NationalSales ns ON ns.nation = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey LIMIT 1))
+LEFT JOIN 
+    SupplierHierarchy SH ON SH.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+WHERE 
+    (p.p_retailprice - NVL((
+        SELECT AVG(ps_supplycost)
+        FROM partsupp
+        WHERE ps_partkey = p.p_partkey
+    ), 0) > 10.00 OR p.p_size < 15)
+    AND (l.l_discount IS NULL OR l.l_discount < 0.05)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice
+HAVING 
+    SUM(o.o_totalprice) IS NOT NULL
+ORDER BY 
+    sales_tier, supplier_levels DESC;

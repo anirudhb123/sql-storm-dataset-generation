@@ -1,0 +1,55 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM Tags
+    LEFT JOIN Posts ON POSITION(Tags.TagName IN Posts.Tags) > 0
+    GROUP BY Tags.TagName
+),
+
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionsAsked,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        SUM(COALESCE(Votes.VoteTypeId = 2, 0)) AS TotalUpvotes,
+        SUM(COALESCE(Votes.VoteTypeId = 3, 0)) AS TotalDownvotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Comments ON Users.Id = Comments.UserId
+    LEFT JOIN Votes ON Users.Id = Votes.UserId
+    WHERE Users.Reputation > 100
+    GROUP BY Users.DisplayName
+),
+
+ClosedPosts AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        COUNT(PostHistory.Id) AS CloseCount,
+        MAX(PostHistory.CreationDate) AS LastClosedDate
+    FROM Posts
+    JOIN PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE PostHistory.PostHistoryTypeId = 10
+    GROUP BY Posts.Id, Posts.Title
+)
+
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.TotalScore,
+    U.DisplayName AS ActiveUser,
+    U.QuestionsAsked,
+    U.CommentsMade,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    C.Title AS ClosedPostTitle,
+    C.CloseCount,
+    C.LastClosedDate
+FROM TagStatistics AS T
+JOIN UserActivity AS U ON T.PostCount > 5
+LEFT JOIN ClosedPosts AS C ON C.CloseCount > 0
+ORDER BY T.TotalViews DESC, U.TotalUpvotes DESC;

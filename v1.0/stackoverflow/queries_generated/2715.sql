@@ -1,0 +1,45 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, CreationDate, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) as Rank
+    FROM Users
+), 
+PostStats AS (
+    SELECT p.OwnerUserId, 
+           COUNT(p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+           AVG(p.ViewCount) AS AvgViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, ps.TotalPosts, 
+           ps.TotalQuestions, ps.TotalAnswers, ps.AvgViews
+    FROM UserReputation u
+    JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE u.Reputation > 1000
+)
+
+SELECT t.Id AS UserId, 
+       t.DisplayName, 
+       t.Reputation, 
+       t.TotalPosts,
+       t.TotalQuestions,
+       t.TotalAnswers,
+       t.AvgViews,
+       COALESCE(b.BadgeCount, 0) AS BadgeCount,
+       COALESCE(ph.ActivityCount, 0) AS PostHistoryCount
+FROM TopUsers t
+LEFT JOIN (
+    SELECT UserId, COUNT(*) AS BadgeCount 
+    FROM Badges 
+    GROUP BY UserId
+) b ON t.Id = b.UserId
+LEFT JOIN (
+    SELECT UserId, COUNT(*) AS ActivityCount 
+    FROM PostHistory 
+    WHERE CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY UserId
+) ph ON t.Id = ph.UserId
+ORDER BY t.Reputation DESC, t.TotalPosts DESC
+LIMIT 20;

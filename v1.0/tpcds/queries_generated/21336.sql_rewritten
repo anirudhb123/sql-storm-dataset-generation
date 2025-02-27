@@ -1,0 +1,61 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.orders,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS dense_rank_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_month IN (1, 2, 3) 
+        AND (c.c_preferred_cust_flag = 'Y' OR c.c_last_name LIKE 'Smith%')
+    GROUP BY 
+        ws.web_site_sk, ws.orders
+),
+high_value_domain AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_credit_rating IN ('Excellent', 'Good') THEN 'High'
+            WHEN cd.cd_credit_rating = 'Fair' AND cd.cd_purchase_estimate > 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS customer_value_segment
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_marital_status = 'M'
+        AND (cd.cd_dep_count IS NOT NULL OR cd.cd_dep_employed_count > 0)
+)
+SELECT 
+    c.c_customer_id,
+    SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(ss.ss_net_profit, 0)) AS total_net_profit,
+    COUNT(DISTINCT CASE WHEN ws.ws_sales_price > 100 THEN ws.ws_order_number END) AS high_value_orders,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    AVG(CASE 
+        WHEN ws.ws_ship_date_sk IS NULL THEN 0 
+        ELSE DATEDIFF(d, DATEADD(DAY, 1, d.d_date), cast('2002-10-01' as date)()) 
+    END) AS avg_days_to_ship,
+    STRING_AGG(DISTINCT CONCAT('Website:', ws.web_site_sk, ' - Orders:', total_orders, ' - Profit:', total_net_profit), '; ') AS site_transactions_info
+FROM 
+    web_sales ws
+FULL OUTER JOIN 
+    store_sales ss ON ws.ws_item_sk = ss.ss_item_sk AND ws.ws_sold_date_sk = ss.ss_sold_date_sk
+JOIN 
+    ranked_sales rs ON rs.web_site_sk = ws.ws_web_site_sk
+JOIN 
+    high_value_domain hvd ON c.c_current_cdemo_sk = hvd.cd_demo_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    (ws.ws_ext_discount_amt != 0 OR ss.ss_ext_discount_amt != 0)
+    AND d.d_year = (SELECT MAX(d_year) FROM date_dim WHERE d_current_year = 'Y')
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    SUM(ws.ws_net_profit) IS NOT NULL
+    OR SUM(ss.ss_net_profit) IS NOT NULL
+ORDER BY 
+    total_net_profit DESC
+LIMIT 100;

@@ -1,0 +1,35 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PartSupplierCounts AS (
+    SELECT ps.ps_partkey, COUNT(*) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+RankedOrders AS (
+    SELECT os.o_orderkey, os.o_totalprice, os.o_orderdate, os.lineitem_count,
+           RANK() OVER (ORDER BY os.o_totalprice DESC) AS price_rank
+    FROM OrderSummary os
+)
+SELECT DISTINCT s.s_name, s.nation_name, p.p_name, p.p_retailprice, ps.supplier_count, ro.lineitem_count
+FROM SupplierDetails s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = (
+    SELECT TOP 1 o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    ORDER BY o.o_totalprice DESC
+)
+WHERE p.p_retailprice BETWEEN 100 AND 500
+  AND s.s_acctbal IS NOT NULL
+  AND (ro.lineitem_count IS NULL OR ro.lineitem_count > 0);

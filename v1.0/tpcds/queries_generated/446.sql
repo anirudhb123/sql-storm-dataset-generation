@@ -1,0 +1,62 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20201 AND 20212
+),
+customer_info AS (
+    SELECT 
+        c.customer_id,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        cd.purchase_estimate,
+        cd.credit_rating,
+        ca.city,
+        ca.state,
+        ROW_NUMBER() OVER (PARTITION BY c.customer_id ORDER BY cd.purchase_estimate DESC) AS rank_info
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ri.ws_item_sk,
+        SUM(ri.ws_sales_price) AS total_sales,
+        COUNT(ri.ws_item_sk) AS sales_count
+    FROM ranked_sales ri
+    WHERE ri.sales_rank = 1
+    GROUP BY ri.ws_item_sk
+)
+SELECT 
+    cinfo.customer_id, 
+    cinfo.gender, 
+    cinfo.marital_status,
+    cinfo.education_status,
+    cinfo.purchase_estimate,
+    cinfo.city,
+    cinfo.state,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.sales_count, 0) AS sales_count
+FROM customer_info cinfo
+LEFT JOIN sales_summary ss ON cinfo.rank_info = 1
+WHERE cinfo.rank_info <= 5
+ORDER BY cinfo.purchase_estimate DESC, total_sales DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    'Total Sales' AS customer_id,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    SUM(ss.total_sales) AS total_sales,
+    COUNT(ss.ws_item_sk) AS sales_count
+FROM sales_summary ss
+WHERE ss.total_sales > 1000;

@@ -1,0 +1,45 @@
+
+WITH FilteredPosts AS (
+    SELECT 
+        Id,
+        Title,
+        Tags,
+        CreationDate,
+        Score,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = Posts.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = Posts.Id AND VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = Posts.Id AND VoteTypeId = 3) AS DownVoteCount,
+        LEFT(Body, 200) AS PreviewBody  
+    FROM 
+        Posts
+    WHERE
+        CreationDate > DATEADD(year, -1, '2024-10-01')  
+        AND PostTypeId = 1  
+),
+
+RankedPosts AS (
+    SELECT 
+        *,
+        (UpVoteCount - DownVoteCount) AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY Score DESC, (UpVoteCount - DownVoteCount) DESC, CreationDate ASC) AS Rank
+    FROM 
+        FilteredPosts
+)
+
+SELECT 
+    r.Rank,
+    r.Title,
+    r.PreviewBody,
+    r.CommentCount,
+    r.Score,
+    r.Tags,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+WHERE 
+    r.Rank <= 10  
+ORDER BY 
+    r.Rank;

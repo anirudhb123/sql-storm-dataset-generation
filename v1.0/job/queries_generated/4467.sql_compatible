@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role,
+        COUNT(c.person_role_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, c.person_id, r.role
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keywords,
+        CASE 
+            WHEN mi.info IS NULL THEN 'No Info'
+            ELSE mi.info
+        END AS additional_info,
+        rm.year_rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+
+SELECT 
+    mw.title,
+    mw.production_year,
+    r.role,
+    r.role_count,
+    CASE 
+        WHEN mw.additional_info LIKE '%great%' THEN 'Highly Rated'
+        ELSE 'Rated Average'
+    END AS rating_category
+FROM 
+    MoviesWithInfo mw
+LEFT JOIN 
+    MovieRoles r ON mw.movie_id = r.movie_id
+WHERE 
+    mw.year_rank <= 5
+ORDER BY 
+    mw.production_year DESC, 
+    r.role_count DESC
+LIMIT 20;

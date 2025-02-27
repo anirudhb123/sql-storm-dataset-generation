@@ -1,0 +1,68 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        sc.level + 1
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_suppkey != sc.s_suppkey)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS price_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    sc.s_name AS Supplier_Name,
+    sc.level AS Supply_Level,
+    co.c_name AS Customer_Name,
+    co.total_spent AS Total_Spent,
+    pd.p_name AS Part_Name,
+    pd.ps_availqty AS Available_Quantity,
+    pd.ps_supplycost AS Supply_Cost
+FROM 
+    SupplyChain sc
+FULL OUTER JOIN 
+    CustomerOrders co ON sc.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p LIMIT 1) LIMIT 1)
+LEFT JOIN 
+    PartDetails pd ON pd.price_rank = 1
+WHERE 
+    co.spending_rank <= 5 OR sc.level IS NULL
+ORDER BY 
+    sc.level DESC, co.total_spent DESC, pd.p_name;

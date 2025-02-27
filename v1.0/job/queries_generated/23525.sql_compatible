@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        COALESCE(gc.total_gross, 0) AS total_gross,
+        ROW_NUMBER() OVER (PARTITION BY mt.kind_id ORDER BY COALESCE(gc.total_gross, 0) DESC) AS rank,
+        CASE 
+            WHEN mt.production_year IS NULL THEN 'Unknown Year'
+            WHEN mt.production_year < 2000 THEN 'Before 2000'
+            ELSE 'After 2000'
+        END AS production_period
+    FROM 
+        aka_title mt
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            SUM(CAST(info AS numeric)) AS total_gross
+        FROM 
+            movie_info
+        WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Gross')
+            AND info IS NOT NULL
+        GROUP BY 
+            movie_id
+    ) gc ON mt.movie_id = gc.movie_id
+),
+QualifiedMovies AS (
+    SELECT 
+        mc.title,
+        mc.production_year,
+        mc.total_gross,
+        mc.production_period,
+        COUNT(*) OVER (PARTITION BY mc.production_period) AS count_by_period,
+        DENSE_RANK() OVER (ORDER BY mc.total_gross DESC) AS gross_rank
+    FROM 
+        MovieCTE mc
+    WHERE 
+        mc.production_year IS NOT NULL 
+        AND mc.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+),
+PopularCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        MAX(COALESCE(cn.name, 'Unknown')) AS primary_cast_name
+    FROM 
+        cast_info ci
+    LEFT JOIN aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    qm.title AS movie_title,
+    qm.production_year,
+    qm.total_gross,
+    qm.production_period,
+    qm.count_by_period,
+    pc.primary_cast_name,
+    GRANT_SYSNAME(qm.total_gross, NULL) AS gross_rating
+FROM 
+    QualifiedMovies qm
+LEFT JOIN PopularCast pc ON qm.movie_id = pc.movie_id
+WHERE 
+    (qm.total_gross IS NOT NULL OR pc.cast_count > 0)
+    AND (qm.production_year BETWEEN 1990 AND 2023 OR qm.total_gross > 1000000)
+ORDER BY 
+    qm.rank, 
+    pc.cast_count DESC 
+LIMIT 50;

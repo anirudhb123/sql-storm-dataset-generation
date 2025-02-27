@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk
+            FROM date_dim
+            WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 6
+        )
+),
+TotalSales AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.ws_net_paid) AS total_net_paid
+    FROM 
+        RankedSales r
+    WHERE 
+        r.price_rank <= 10
+    GROUP BY 
+        r.web_site_sk
+)
+SELECT 
+    s.s_store_name,
+    COUNT(DISTINCT r.ws_item_sk) AS unique_items_sold,
+    COALESCE(t.total_net_paid, 0) AS total_sales,
+    ra.ca_city AS warehouse_city
+FROM 
+    store s
+LEFT JOIN 
+    RankedSales r ON s.s_store_sk = r.ws_item_sk
+LEFT JOIN 
+    TotalSales t ON r.web_site_sk = t.web_site_sk
+LEFT JOIN 
+    warehouse ra ON ra.w_warehouse_sk = s.s_store_sk
+WHERE 
+    s.s_close_date_sk IS NULL 
+    AND s.s_number_employees > 10
+GROUP BY 
+    s.s_store_name, t.total_net_paid, ra.ca_city
+HAVING 
+    COUNT(DISTINCT r.ws_item_sk) > 5
+ORDER BY 
+    total_sales DESC, unique_items_sold DESC;

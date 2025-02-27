@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount,
+        COALESCE(a.UserId, -1) AS AcceptedAnswerUserId,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+        LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN (
+            SELECT PostId, COUNT(*) AS CommentCount
+            FROM Comments
+            GROUP BY PostId
+        ) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+),
+AggregatedScores AS (
+    SELECT 
+        OwnerDisplayName,
+        SUM(Score) AS TotalScore,
+        SUM(ViewCount) AS TotalViews,
+        SUM(TagCount) AS TotalTags,
+        SUM(CommentCount) AS TotalComments
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerDisplayName
+),
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM 
+        AggregatedScores
+)
+SELECT 
+    tu.OwnerDisplayName,
+    tu.TotalScore,
+    tu.TotalViews,
+    tu.TotalTags,
+    tu.TotalComments,
+    pu.PostId,
+    pu.Title,
+    pu.CreationDate,
+    pu.Score,
+    pu.TagCount,
+    pu.UserPostRank
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts pu ON pu.OwnerDisplayName = tu.OwnerDisplayName
+WHERE 
+    tu.UserRank <= 5  
+ORDER BY 
+    tu.TotalScore DESC, pu.CreationDate DESC;

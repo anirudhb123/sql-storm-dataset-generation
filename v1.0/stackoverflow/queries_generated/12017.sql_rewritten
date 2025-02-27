@@ -1,0 +1,37 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(U.Reputation, 0) AS OwnerReputation,
+        COALESCE(B.Count, 0) AS BadgeCount,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, U.Reputation
+)
+SELECT 
+    P.PostTypeId,
+    COUNT(P.PostId) AS TotalPosts,
+    AVG(P.ViewCount) AS AvgViewCount,
+    AVG(P.Score) AS AvgScore,
+    AVG(P.AnswerCount) AS AvgAnswerCount,
+    SUM(P.CommentCount) AS TotalComments,
+    AVG(P.OwnerReputation) AS AvgOwnerReputation,
+    AVG(P.BadgeCount) AS AvgBadgeCount
+FROM 
+    PostStats P
+GROUP BY 
+    P.PostTypeId
+ORDER BY 
+    P.PostTypeId;

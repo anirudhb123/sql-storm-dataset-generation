@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankPerType
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS UserRank
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons,
+        COUNT(DISTINCT ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM
+        PostHistory ph
+    JOIN CloseReasonTypes cr ON CAST(ph.Comment AS INTEGER) = cr.Id
+    WHERE
+        ph.PostHistoryTypeId = 10 
+    GROUP BY
+        ph.PostId
+),
+EnhancedPostDetails AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.RankPerType,
+        cp.CloseReasons,
+        cp.CloseCount,
+        cp.LastCloseDate,
+        tu.TotalBounty,
+        tu.TotalPosts
+    FROM
+        RankedPosts rp
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN TopUsers tu ON rp.ViewCount > 1000 AND tu.TotalPosts > 5 
+)
+SELECT
+    epd.Title,
+    epd.ViewCount,
+    epd.RankPerType,
+    COALESCE(epd.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    COALESCE(epd.CloseCount, 0) AS CloseCount,
+    COALESCE(epd.LastCloseDate, 'Never Closed') AS LastCloseDate,
+    epd.TotalBounty,
+    epd.TotalPosts
+FROM
+    EnhancedPostDetails epd
+WHERE
+    epd.RankPerType <= 3
+ORDER BY
+    epd.RankPerType, epd.ViewCount DESC
+LIMIT 10
+UNION ALL
+SELECT
+    'Aggregate Metrics' AS Title,
+    COUNT(*) AS ViewCount,
+    COUNT(DISTINCT PostId) AS RankPerType,
+    NULL AS CloseReasons,
+    NULL AS CloseCount,
+    NULL AS LastCloseDate,
+    SUM(TotalBounty) AS TotalBounty,
+    SUM(TotalPosts) AS TotalPosts
+FROM
+    EnhancedPostDetails;

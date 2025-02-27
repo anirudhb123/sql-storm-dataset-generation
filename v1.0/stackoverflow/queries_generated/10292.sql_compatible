@@ -1,0 +1,39 @@
+
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT Id) AS PostsCount,
+        COUNT(DISTINCT CASE WHEN Reputation > 0 THEN Id END) AS PositiveReputationPosts
+    FROM Users
+    GROUP BY Id
+), PostStats AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore,
+        COUNT(DISTINCT CASE WHEN IsModeratorOnly = 1 THEN Id END) AS TotalModeratorTags
+    FROM Posts
+    JOIN Tags ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(us.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(us.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(ps.TotalScore, 0) AS TotalScore,
+    COALESCE(ps.TotalModeratorTags, 0) AS TotalModeratorTags
+FROM Users u
+LEFT JOIN UserStats us ON u.Id = us.UserId
+LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+ORDER BY COALESCE(ps.TotalPosts, 0) DESC
+FETCH FIRST 100 ROWS ONLY;

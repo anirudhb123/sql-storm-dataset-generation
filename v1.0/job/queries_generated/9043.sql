@@ -1,0 +1,39 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    COUNT(mk.keyword) AS keyword_count,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    tp.production_year AS production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type it ON mi.info_type_id = it.id
+JOIN 
+    kind_type tp ON t.kind_id = tp.id
+WHERE 
+    ti.info LIKE '%Oscar%'
+    AND tp.kind = 'feature'
+    AND a.name_pcode_cf IS NOT NULL
+GROUP BY 
+    a.name, t.title, c.kind, tp.production_year
+HAVING 
+    COUNT(mk.keyword) > 3
+ORDER BY 
+    keyword_count DESC, production_year DESC;

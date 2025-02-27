@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CreationDate,
+        OwnerName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    p.OwnerName,
+    p.CommentCount,
+    COALESCE(b.Name, 'No Badge') AS UserBadge,
+    COUNT(ph.Id) AS PostHistoryCount
+FROM 
+    PopularPosts p 
+LEFT JOIN 
+    Badges b ON p.OwnerName = (
+        SELECT DisplayName 
+        FROM Users 
+        WHERE Id = (SELECT UserId FROM Badges WHERE UserId = (SELECT Id FROM Users WHERE DisplayName = p.OwnerName) LIMIT 1)
+    )
+LEFT JOIN 
+    PostHistory ph ON p.PostId = ph.PostId
+GROUP BY 
+    p.PostId, p.Title, p.Score, p.ViewCount, p.CreationDate, p.OwnerName, UserBadge
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

@@ -1,0 +1,43 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, 
+           ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, 
+           ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supply_chain sc ON sc.p_partkey = p.p_partkey
+    WHERE sc.rank < 5
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) as customer_rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) as total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2022-01-01' 
+      AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT cs.c_name, cs.c_acctbal, os.total_revenue, sc.s_name as supplier_name, sc.p_name as part_name
+FROM customer_summary cs
+LEFT JOIN order_summary os ON os.o_orderkey IN (SELECT o.o_orderkey 
+                                                FROM orders o 
+                                                WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN supply_chain sc ON sc.rank = 1
+WHERE cs.customer_rank <= 10
+ORDER BY cs.c_acctbal DESC, os.total_revenue DESC;

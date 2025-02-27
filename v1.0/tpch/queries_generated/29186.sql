@@ -1,0 +1,52 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        s.s_name AS supplier_name,
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        p.p_retailprice > 50.00 AND 
+        (p.p_name LIKE '%widget%' OR p.p_comment LIKE '%special%')
+),
+AggregatedResults AS (
+    SELECT 
+        p.mfgr,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts,
+        SUM(o.o_totalprice) AS total_revenue,
+        AVG(l.l_discount) AS average_discount,
+        AVG(l.l_tax) AS average_tax
+    FROM PartDetails p
+    GROUP BY p.mfgr
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    ar.mfgr,
+    ar.unique_parts,
+    ar.total_revenue,
+    ar.average_discount,
+    ar.average_tax
+FROM AggregatedResults ar
+JOIN supplier s ON s.s_suppkey = ar.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+ORDER BY total_revenue DESC, unique_parts DESC;

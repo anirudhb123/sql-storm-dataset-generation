@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1950 AND 2000
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returned_date_sk,
+        COUNT(*) AS total_returns,
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        wr.wr_returned_date_sk, wr_returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        r.web_site_sk,
+        r.total_sales,
+        COALESCE(rt.total_returns, 0) AS total_returns,
+        COALESCE(rt.total_return_amount, 0) AS total_return_amount
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        CustomerReturns rt ON r.web_site_sk = rt.wr_returning_customer_sk
+)
+SELECT 
+    s.warehouse_name,
+    SUM(sw.total_sales) AS total_warehouse_sales,
+    AVG(sw.total_return_amount) AS average_return_amount,
+    MIN(sw.total_sales - sw.total_returns) AS minimum_sales_after_returns
+FROM 
+    SalesWithReturns sw
+JOIN 
+    warehouse s ON s.w_warehouse_sk = sw.web_site_sk
+WHERE 
+    s.w_country = 'USA' 
+    AND (sw.total_sales - sw.total_returns) > 0
+GROUP BY 
+    s.warehouse_name
+HAVING 
+    SUM(sw.total_sales) IS NOT NULL 
+ORDER BY 
+    total_warehouse_sales DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'TOTAL' AS warehouse_name,
+    SUM(total_sales),
+    AVG(total_return_amount),
+    MIN(total_sales - total_returns)
+FROM 
+    SalesWithReturns 
+WHERE 
+    (total_sales - total_returns) IS NOT NULL;

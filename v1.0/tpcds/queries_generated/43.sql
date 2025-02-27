@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        i.i_brand,
+        i.i_category,
+        SUM(ws.ws_net_paid) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sales,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_per_category
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+ReturnData AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_amt) AS total_returned
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+OverallSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.i_brand,
+        sd.i_category,
+        sd.cumulative_sales,
+        COALESCE(rd.total_returned, 0) AS total_returned,
+        (sd.cumulative_sales - COALESCE(rd.total_returned, 0)) AS net_sales
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnData rd ON sd.ws_item_sk = rd.wr_item_sk
+)
+SELECT 
+    o.i_brand,
+    o.i_category,
+    MAX(o.net_sales) AS max_net_sales,
+    COUNT(*) AS item_count,
+    AVG(o.net_sales) AS avg_net_sales
+FROM 
+    OverallSales o
+WHERE 
+    o.rank_per_category <= 5
+GROUP BY 
+    o.i_brand, o.i_category
+ORDER BY 
+    o.i_brand, o.i_category;

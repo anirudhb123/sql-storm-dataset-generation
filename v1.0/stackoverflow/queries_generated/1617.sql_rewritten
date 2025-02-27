@@ -1,0 +1,67 @@
+WITH RankedUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM
+        Users u
+    WHERE
+        u.Reputation > 1000
+),
+TopTags AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM
+        Tags t
+    JOIN
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY
+        t.TagName
+    HAVING
+        COUNT(p.Id) > 10
+),
+PostVoteDetails AS (
+    SELECT
+        p.Id AS PostID,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        p.Id
+)
+SELECT
+    u.DisplayName AS ActiveUser,
+    u.Reputation AS UserReputation,
+    tt.TagName AS ActiveTag,
+    pvd.PostID,
+    pvd.VoteCount,
+    pvd.UpVotes - pvd.DownVotes AS NetVotes
+FROM
+    RankedUsers u
+CROSS JOIN
+    TopTags tt
+JOIN
+    PostVoteDetails pvd ON pvd.PostID IN (
+        SELECT p.Id
+        FROM Posts p
+        WHERE p.Tags LIKE '%' || tt.TagName || '%'
+    )
+WHERE
+    u.Id IN (
+        SELECT DISTINCT OwnerUserId
+        FROM Posts
+        WHERE CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    )
+ORDER BY
+    u.Reputation DESC,
+    NetVotes DESC
+LIMIT 10;

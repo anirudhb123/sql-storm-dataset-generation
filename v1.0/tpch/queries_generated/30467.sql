@@ -1,0 +1,42 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 1 AS hierarchy_level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, ch.c_name, c.c_acctbal, hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE ch.hierarchy_level < 5
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, ROW_NUMBER() OVER (ORDER BY total_supply_cost DESC) AS rank
+    FROM PartSupplier p
+)
+SELECT 
+    r.r_name AS region_name, 
+    n.n_name AS nation_name, 
+    SUM(o.o_totalprice) AS total_sales,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    AVG(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice - l.l_discount * l.l_extendedprice ELSE NULL END) AS avg_discounted_price
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN CustomerHierarchy ch ON o.o_custkey = ch.c_custkey
+WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+AND (ch.c_acctbal IS NOT NULL OR l.l_shipmode IS NOT NULL)
+GROUP BY r.r_name, n.n_name
+HAVING SUM(o.o_totalprice) > 10000
+ORDER BY total_sales DESC;

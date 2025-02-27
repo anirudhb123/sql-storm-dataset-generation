@@ -1,0 +1,72 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        cr.refunded_customer_sk,
+        cr.return_quantity,
+        cr.return_amt,
+        cr.return_tax,
+        cr.return_amt_inc_tax,
+        cr.returning_customer_sk,
+        1 AS level
+    FROM
+        catalog_returns cr
+    WHERE
+        cr.return_quantity > 0
+    UNION ALL
+    SELECT
+        cr.refunded_customer_sk,
+        cr.return_quantity,
+        cr.return_amt,
+        cr.return_tax,
+        cr.return_amt_inc_tax,
+        cr.returning_customer_sk,
+        level + 1
+    FROM
+        catalog_returns cr
+    JOIN CustomerReturns crPrev ON cr.returning_customer_sk = crPrev.refunded_customer_sk
+    WHERE
+        cr.return_quantity > 0 AND level < 3
+),
+TotalReturns AS (
+    SELECT
+        cr.refunded_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amt_inc_tax) AS total_refund,
+        COUNT(DISTINCT cr.returning_customer_sk) AS return_count
+    FROM
+        CustomerReturns cr
+    GROUP BY
+        cr.refunded_customer_sk
+),
+SalesData AS (
+    SELECT
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS order_rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.bill_customer_sk
+)
+SELECT
+    c.c_customer_id,
+    cd.cd_gender,
+    COALESCE(tr.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(tr.total_refund, 0) AS total_refund,
+    sd.total_net_profit,
+    sd.total_orders
+FROM
+    customer c
+LEFT JOIN
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN
+    TotalReturns tr ON c.c_customer_sk = tr.refunded_customer_sk
+JOIN
+    SalesData sd ON c.c_customer_sk = sd.bill_customer_sk AND sd.order_rank = 1
+WHERE
+    ((cd.cd_gender = 'M' AND sd.total_net_profit > 5000) OR (cd.cd_gender = 'F' AND sd.total_net_profit > 3000))
+    AND (tr.return_count > 0 OR tr.total_refund > 100)
+ORDER BY
+    sd.total_net_profit DESC,
+    c.c_customer_id;

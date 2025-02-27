@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ph.Comment, 'No History') AS PostHistoryComment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+        AND ph.CreationDate = (
+            SELECT MAX(CreationDate) 
+            FROM PostHistory 
+            WHERE PostId = p.Id
+        )
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    rp.PostId,
+    rp.Title AS PostTitle,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    rp.CreationDate AS PostCreationDate,
+    ra.PostHistoryComment,
+    ua.CommentCount AS UserCommentCount,
+    ua.VoteCount AS UserVoteCount,
+    ua.BadgeCount AS UserBadgeCount
+FROM 
+    UserActivity ua
+JOIN 
+    RankedPosts rp ON ua.UserId = (
+        SELECT OwnerUserId 
+        FROM Posts 
+        WHERE Id = rp.PostId
+    )
+LEFT JOIN 
+    RecentPosts ra ON rp.PostId = ra.Id
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    ua.BadgeCount DESC, 
+    rp.Score DESC;

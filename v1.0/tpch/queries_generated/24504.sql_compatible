@@ -1,0 +1,51 @@
+
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name AS supp_name, s.s_acctbal, p.p_partkey, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rn,
+           CASE 
+               WHEN p.p_size IS NULL THEN 'UNKNOWN' 
+               ELSE CASE 
+                   WHEN p.p_size < 10 THEN 'SMALL' 
+                   WHEN p.p_size BETWEEN 10 AND 20 THEN 'MEDIUM' 
+                   ELSE 'LARGE' 
+               END 
+           END AS size_category
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+), MaxRetailPrice AS (
+    SELECT MAX(p_retailprice) AS max_price FROM part
+), QualifiedCustomers AS (
+    SELECT c.c_custkey, 
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_spent,
+           STRING_AGG(DISTINCT n.n_name, ', ') AS nations_spent_in
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal > 0 
+    GROUP BY c.c_custkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+), FrequentSuppliers AS (
+    SELECT s.s_suppkey
+    FROM RecursiveSupplier
+    WHERE rn = 1 AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    cs.c_custkey, 
+    cs.total_spent, 
+    r.supp_name,
+    r.size_category,
+    r.p_retailprice,
+    CASE 
+        WHEN cs.total_spent >= (SELECT AVG(total_spent) FROM QualifiedCustomers) THEN 'HIGH SPENDER'
+        ELSE 'LOW SPENDER' 
+    END AS spender_type
+FROM QualifiedCustomers cs
+LEFT JOIN RecursiveSupplier r ON cs.total_spent > 0 AND cs.total_spent > r.p_retailprice
+JOIN FrequentSuppliers fs ON r.s_suppkey = fs.s_suppkey
+WHERE r.p_retailprice = (SELECT max_price FROM MaxRetailPrice) 
+  AND r.size_category IS NOT NULL
+  AND (r.p_retailprice IS NOT NULL OR r.p_partkey IS NOT NULL)
+ORDER BY cs.total_spent DESC, r.supp_name;

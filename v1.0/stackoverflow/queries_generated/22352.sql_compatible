@@ -1,0 +1,74 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (10, 12) THEN 1 ELSE 0 END), 0) AS DeletedPosts,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id AND V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+HighEngagementUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        TotalPosts,
+        TotalComments,
+        ReputationRank
+    FROM UserActivity
+    WHERE UpVotes > DownVotes
+      AND TotalPosts > 5
+      AND ReputationRank <= 100
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PH.UserId AS EditorId,
+        PH.PostHistoryTypeId,
+        CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END AS IsClosedOrReopened,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11, 12, 19, 20)
+),
+FinalPostDetails AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.CreationDate,
+        PS.EditorId,
+        PS.IsClosedOrReopened,
+        PH.DisplayName AS LatestEditorName
+    FROM PostStats PS
+    LEFT JOIN Users PH ON PS.EditorId = PH.Id
+    WHERE PS.HistoryRank = 1
+)
+SELECT 
+    H.UserId,
+    H.DisplayName,
+    FP.Title,
+    FP.CreationDate,
+    FP.IsClosedOrReopened,
+    COUNT(C.Id) AS CommentCount,
+    ARRAY_AGG(DISTINCT T.TagName) AS AssociatedTags
+FROM HighEngagementUsers H
+JOIN FinalPostDetails FP ON H.UserId = FP.EditorId
+LEFT JOIN Comments C ON FP.PostId = C.PostId
+LEFT JOIN Posts P ON FP.PostId = P.Id
+LEFT JOIN LATERAL (
+    SELECT 
+        unnest(split_part(P.Tags, ',')) AS TagName
+) T ON TRUE
+GROUP BY H.UserId, H.DisplayName, FP.Title, FP.CreationDate, FP.IsClosedOrReopened
+ORDER BY H.DisplayName;

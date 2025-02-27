@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(COALESCE(p.Score, 0)) AS TotalScore, 
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate > CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        TotalScore, 
+        UpVotes, 
+        DownVotes,
+        RANK() OVER (ORDER BY PostCount DESC) as PostRank
+    FROM 
+        UserStats
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.LastActivityDate, 
+        p.Score, 
+        u.DisplayName AS OwnerName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName, 
+    tu.Reputation, 
+    tu.PostCount, 
+    tu.TotalScore, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.LastActivityDate, 
+    rp.Score
+FROM 
+    TopUsers tu
+JOIN 
+    RecentPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    tu.PostRank <= 10
+ORDER BY 
+    tu.PostRank, rp.LastActivityDate DESC;

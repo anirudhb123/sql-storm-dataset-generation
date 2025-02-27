@@ -1,0 +1,57 @@
+WITH TagAnalysis AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags t
+        LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+        LEFT JOIN Comments c ON c.PostId = p.Id
+        LEFT JOIN Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        COUNT(*) AS TotalRevisions
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+),
+FinalAnalysis AS (
+    SELECT 
+        ta.TagName,
+        ta.PostCount,
+        ta.CommentCount,
+        ta.AvgUserReputation,
+        ta.ActiveUsers,
+        p.TotalRevisions,
+        p.EditorCount,
+        p.CloseReopenCount
+    FROM 
+        TagAnalysis ta
+        LEFT JOIN PostHistorySummary p ON ta.PostCount > 0
+)
+SELECT 
+    fa.TagName,
+    fa.PostCount,
+    fa.CommentCount,
+    fa.AvgUserReputation,
+    fa.ActiveUsers,
+    fa.TotalRevisions,
+    fa.EditorCount,
+    fa.CloseReopenCount
+FROM 
+    FinalAnalysis fa
+ORDER BY 
+    fa.PostCount DESC, fa.CommentCount DESC;

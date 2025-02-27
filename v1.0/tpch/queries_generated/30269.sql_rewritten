@@ -1,0 +1,62 @@
+WITH RECURSIVE MonthlyRevenue AS (
+    SELECT 
+        DATE_TRUNC('month', o_orderdate) AS month,
+        SUM(o_totalprice) AS total_revenue
+    FROM orders
+    WHERE o_orderdate >= '1996-01-01'
+    GROUP BY month
+    UNION ALL
+    SELECT 
+        m.month + INTERVAL '1 month',
+        COALESCE(SUM(o_totalprice), 0) AS total_revenue
+    FROM MonthlyRevenue m
+    LEFT JOIN orders o ON DATE_TRUNC('month', o_orderdate) = m.month + INTERVAL '1 month'
+    WHERE m.month < '1996-12-31'
+),
+SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+),
+PartSupplierDetail AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(cm.total_orders) AS total_orders_by_customers,
+    SUM(sm.num_parts) AS total_unique_parts_supplied,
+    COALESCE(SUM(mr.total_revenue), 0) AS total_monthly_revenue,
+    MAX(p.p_size) AS largest_part_size,
+    STRING_AGG(DISTINCT pd.suppliers, '; ') AS suppliers_details
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerOrderCounts cm ON cm.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN SupplierMetrics sm ON sm.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+LEFT JOIN MonthlyRevenue mr ON TRUE
+LEFT JOIN PartSupplierDetail pd ON TRUE
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 0
+ORDER BY total_orders_by_customers DESC, largest_part_size DESC;

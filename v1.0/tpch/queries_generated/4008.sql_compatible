@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+        AND o.o_totalprice IS NOT NULL
+), 
+SupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank_supplier
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 0
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice) AS avg_price
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.o_orderkey,
+    pi.p_partkey,
+    pi.p_name,
+    pi.total_quantity,
+    pi.avg_price,
+    s.s_name,
+    s.s_acctbal,
+    CASE 
+        WHEN r.rank_price <= 10 THEN 'Top Orders'
+        ELSE 'Other Orders'
+    END AS order_category,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN pi.avg_price > (SELECT AVG(avg_price) FROM ProductDetails) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS price_comparison
+FROM 
+    RankedOrders r
+JOIN 
+    ProductDetails pi ON r.o_orderkey = pi.p_partkey
+LEFT JOIN 
+    SupplierInfo s ON pi.p_partkey = s.ps_partkey AND s.rank_supplier = 1
+WHERE 
+    r.o_orderstatus IN ('O', 'F')
+ORDER BY 
+    r.o_orderdate DESC, 
+    pi.total_quantity DESC;

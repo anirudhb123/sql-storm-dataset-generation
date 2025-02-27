@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName
+    FROM RankedPosts
+    WHERE Rank <= 10
+),
+PostsWithComments AS (
+    SELECT
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.ViewCount,
+        tp.Score,
+        tp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM TopPosts tp
+    LEFT JOIN Comments c ON tp.PostId = c.PostId
+    GROUP BY tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.OwnerDisplayName
+),
+PostsWithBadges AS (
+    SELECT
+        pwc.PostId,
+        pwc.Title,
+        pwc.CreationDate,
+        pwc.ViewCount,
+        pwc.Score,
+        pwc.OwnerDisplayName,
+        bw.Name AS BadgeName
+    FROM PostsWithComments pwc
+    LEFT JOIN Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = pwc.PostId)
+    LEFT JOIN Users u ON u.Id = b.UserId
+    WHERE b.TagBased = 0
+    ORDER BY pwc.Score DESC
+)
+SELECT
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    p.OwnerDisplayName,
+    COALESCE(pb.BadgeName, 'No Badge') AS BadgeName
+FROM PostsWithBadges p
+LEFT JOIN (
+    SELECT
+        PostId,
+        STRING_AGG(BadgeName, ', ') AS BadgeNames
+    FROM PostsWithBadges
+    GROUP BY PostId
+) pb ON p.PostId = pb.PostId
+ORDER BY p.Score DESC, p.ViewCount DESC;

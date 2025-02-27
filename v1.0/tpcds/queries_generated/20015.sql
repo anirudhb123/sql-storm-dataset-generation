@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+                         AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+FilteredReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS TotalReturns,
+        COUNT(wr_order_number) AS ReturnCount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+    HAVING 
+        SUM(wr_return_quantity) > 5
+),
+CustomerExpenditure AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS TotalSpent,
+        AVG(ws.ws_net_paid) AS AvgSpentPerOrder
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    cd.cd_gender,
+    CE.TotalSpent,
+    CE.AvgSpentPerOrder,
+    COALESCE(FR.TotalReturns, 0) AS TotalReturns,
+    CASE 
+        WHEN CE.TotalSpent IS NULL THEN 'Inactive'
+        WHEN CE.TotalSpent > 1000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS CustomerValue,
+    RANK() OVER (PARTITION BY cd.cd_gender ORDER BY CE.TotalSpent DESC) AS GenderRank
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    CustomerExpenditure CE ON c.c_customer_sk = CE.c_customer_sk
+LEFT JOIN 
+    FilteredReturns FR ON c.c_customer_sk = FR.wr_returning_customer_sk
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM store_returns sr
+        WHERE sr.s_return_quantity > 0 AND sr.sr_customer_sk = c.c_customer_sk
+    )
+AND 
+    (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+ORDER BY 
+    ca.ca_city, CustomerValue DESC;

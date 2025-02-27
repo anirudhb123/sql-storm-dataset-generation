@@ -1,0 +1,70 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation, 
+        r.r_name AS region,
+        s.s_comment,
+        LENGTH(s.s_name) AS name_length,
+        UPPER(s.s_name) AS upper_name,
+        TRIM(s.s_comment) AS trimmed_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        SUBSTRING_INDEX(p.p_name, ' ', -1) AS last_word,
+        CONCAT(p.p_brand, '-', p.p_type) AS brand_type,
+        CHAR_LENGTH(p.p_comment) AS comment_length
+    FROM 
+        part p
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS orders_count, 
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name 
+)
+SELECT 
+    sd.s_suppkey, 
+    sd.s_name, 
+    sd.nation, 
+    sd.region, 
+    pd.p_partkey, 
+    pd.p_name, 
+    cd.c_custkey,
+    cd.orders_count, 
+    cd.total_spent,
+    pd.last_word,
+    pd.brand_type,
+    sd.trimmed_comment,
+    pd.comment_length
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    CustomerOrders cd ON cd.orders_count > 10 
+WHERE 
+    sd.name_length > 10 
+ORDER BY 
+    sd.region, 
+    cd.total_spent DESC, 
+    pd.p_name;

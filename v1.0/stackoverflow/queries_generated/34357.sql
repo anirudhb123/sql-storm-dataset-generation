@@ -1,0 +1,90 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+VoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN VoteTypeId = 1 THEN 1 END) AS AcceptedVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(vc.Upvotes, 0) AS Upvotes,
+        COALESCE(vc.Downvotes, 0) AS Downvotes,
+        COALESCE(vc.AcceptedVotes, 0) AS AcceptedVotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        VoteCounts vc ON p.Id = vc.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.AcceptedVotes,
+    th.Level AS HierarchyLevel,
+    td.TagName,
+    td.PostCount
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    PostHierarchy th ON rp.Id = th.Id
+LEFT JOIN 
+    TagDetails td ON td.TagId IN (SELECT UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')::int[]))
+    WHERE td.PostCount > 0)
+WHERE 
+    rp.Upvotes > rp.Downvotes
+ORDER BY 
+    rp.Upvotes DESC, rp.Score DESC
+LIMIT 100;

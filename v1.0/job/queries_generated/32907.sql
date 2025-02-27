@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title AS Related_Movie,
+    mh.production_year,
+    ak.name AS Actor_Name,
+    COUNT(DISTINCT cc.movie_id) AS Number_of_Movies,
+    AVG(mi.info LIKE '%Award%') AS Award_Recognition,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS Cast_Notes_Exist,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS Ranking
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+WHERE 
+    mh.depth <= 2
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, ak.name
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 1
+ORDER BY 
+    mh.production_year DESC, Number_of_Movies DESC;
+
+This SQL query utilizes a recursive common table expression (CTE) to build a hierarchy of movies linked to each other. It selects related movie details, counts the number of films featuring a particular actor, assesses their participation in award-winning movies, checks for notes in the cast info, and ranks movies based on the depth of relationships. Additionally, it employs various constructs such as outer joins, aggregate functions, and window functions to compile meaningful insights for performance benchmarking.

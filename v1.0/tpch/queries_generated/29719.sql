@@ -1,0 +1,34 @@
+SELECT 
+    P.p_name, 
+    S.s_name, 
+    C.c_name, 
+    SUM(L.l_quantity) AS total_quantity,
+    COUNT(DISTINCT O.o_orderkey) AS order_count,
+    TRIM(CONCAT('Part: ', P.p_name, ', Supplier: ', S.s_name, ', Customer: ', C.c_name)) AS description,
+    SUBSTRING_INDEX(S.r_comment, ' ', 3) AS short_comment
+FROM 
+    part P
+JOIN 
+    partsupp PS ON P.p_partkey = PS.ps_partkey
+JOIN 
+    supplier S ON PS.ps_suppkey = S.s_suppkey
+JOIN 
+    lineitem L ON P.p_partkey = L.l_partkey
+JOIN 
+    orders O ON L.l_orderkey = O.o_orderkey
+JOIN 
+    customer C ON O.o_custkey = C.c_custkey
+JOIN 
+    nation N ON S.s_nationkey = N.n_nationkey
+JOIN 
+    region R ON N.n_regionkey = R.r_regionkey
+WHERE 
+    P.p_size BETWEEN 1 AND 10
+    AND O.o_orderstatus = 'O'
+    AND R.r_name LIKE 'Asia%'
+GROUP BY 
+    P.p_name, S.s_name, C.c_name
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_quantity DESC;

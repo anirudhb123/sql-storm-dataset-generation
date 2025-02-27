@@ -1,0 +1,70 @@
+
+WITH RECURSIVE CTE_Address AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 1 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, level + 1
+    FROM customer_address a
+    JOIN CTE_Address b ON a.ca_address_sk = b.ca_address_sk
+    WHERE a.ca_state = 'CA' AND level < 5
+),
+Sales_Summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_paid_inc_tax) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk > (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_month_seq = 8
+        LIMIT 1
+    )
+    GROUP BY ws_bill_customer_sk
+),
+Sales_Returns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(sr_ticket_number) AS total_returns
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_customer_sk
+),
+Demographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        SUM(CASE WHEN ws.net_profit IS NOT NULL THEN ws.net_profit ELSE 0 END) AS lifetime_value,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, cd.cd_credit_rating, hd.hd_income_band_sk
+)
+SELECT 
+    d.c_customer_sk,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    d.income_band,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    COALESCE(ss.total_profit, 0) AS total_profit,
+    COALESCE(ss.avg_order_value, 0) AS avg_order_value,
+    COALESCE(sr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(sr.total_returns, 0) AS total_returns
+FROM Demographics d
+LEFT JOIN Sales_Summary ss ON d.c_customer_sk = ss.ws_bill_customer_sk
+LEFT JOIN Sales_Returns sr ON d.c_customer_sk = sr.sr_customer_sk
+WHERE d.lifetime_value IS NOT NULL
+ORDER BY d.total_sales DESC, d.cd_gender, d.cd_marital_status;

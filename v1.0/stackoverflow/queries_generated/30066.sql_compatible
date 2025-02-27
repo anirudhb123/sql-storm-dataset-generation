@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        ROW_NUMBER() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS b_rn
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(rb.BadgeName, 'No Recent Badge') AS RecentBadge,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS QuestionsAsked,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecentBadges rb ON u.Id = rb.UserId AND rb.b_rn = 1
+    GROUP BY 
+        u.Id, u.DisplayName, rb.BadgeName
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.RecentBadge,
+    us.QuestionsAsked,
+    us.UpvotesReceived,
+    us.DownvotesReceived,
+    CASE 
+        WHEN us.QuestionsAsked > 0 THEN ROUND((us.UpvotesReceived::NUMERIC / us.QuestionsAsked), 2) 
+        ELSE 0 
+    END AS UpvoteRatio,
+    CASE 
+        WHEN us.DownvotesReceived > 0 THEN ROUND((us.DownvotesReceived::NUMERIC / NULLIF(us.QuestionsAsked, 0)), 2) 
+        ELSE 0 
+    END AS DownvoteRatio
+FROM 
+    UserStats us
+WHERE 
+    us.QuestionsAsked > 0 
+ORDER BY 
+    us.UpvoteRatio DESC, us.DownvoteRatio ASC
+LIMIT 10;

@@ -1,0 +1,46 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE ps.ps_availqty > 10
+),
+order_values AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+supply_costs AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(ov.total_value) AS total_order_value,
+    COUNT(DISTINCT sh.s_suppkey) AS distinct_suppliers,
+    CASE
+        WHEN SUM(ov.total_value) IS NULL THEN 0
+        ELSE SUM(ov.total_value) / COUNT(DISTINCT c.c_custkey)
+    END AS avg_order_value_per_customer,
+    STRING_AGG(DISTINCT p.p_name, '; ') AS part_names
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN customer c ON s.s_suppkey = c.c_custkey
+LEFT JOIN order_values ov ON c.c_custkey = ov.o_orderkey
+LEFT JOIN supply_costs sc ON sc.ps_partkey = s.s_suppkey
+LEFT JOIN part p ON sc.ps_partkey = p.p_partkey
+LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_order_value DESC;

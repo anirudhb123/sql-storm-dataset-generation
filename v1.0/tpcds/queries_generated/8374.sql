@@ -1,0 +1,56 @@
+
+WITH RecentSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DATEADD(DAY, -30, MAX(dd.d_date)) AS sales_cutoff_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_date >= DATEADD(DAY, -30, GETDATE())
+    GROUP BY 
+        ws.ws_item_sk
+), 
+HighVolumeItems AS (
+    SELECT 
+        ir.i_item_id,
+        cs.total_quantity,
+        cs.total_sales
+    FROM 
+        item ir
+    JOIN 
+        RecentSales cs ON ir.i_item_sk = cs.ws_item_sk
+    WHERE 
+        cs.total_quantity > 100
+),
+OrderDetails AS (
+    SELECT 
+        o.ws_order_number,
+        o.ws_item_sk,
+        o.ws_quantity,
+        o.ws_net_paid,
+        o.ws_ship_mode_sk,
+        sm.sm_type AS shipping_method
+    FROM 
+        web_sales o
+    JOIN 
+        ship_mode sm ON o.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE 
+        o.ws_item_sk IN (SELECT ws_item_sk FROM HighVolumeItems)
+)
+SELECT 
+    od.ws_order_number,
+    COUNT(DISTINCT od.ws_item_sk) AS unique_items,
+    SUM(od.ws_quantity) AS total_order_quantity,
+    SUM(od.ws_net_paid) AS total_order_value,
+    od.shipping_method
+FROM 
+    OrderDetails od
+GROUP BY 
+    od.ws_order_number, od.shipping_method
+ORDER BY 
+    total_order_value DESC
+LIMIT 10;

@@ -1,0 +1,51 @@
+
+WITH ranked_sales AS (
+    SELECT
+        cs_item_sk,
+        cs_sales_price,
+        RANK() OVER (PARTITION BY cs_item_sk ORDER BY cs_sold_date_sk DESC) AS recent_rank,
+        SUM(cs_net_profit) OVER (PARTITION BY cs_item_sk) AS total_profit
+    FROM catalog_sales
+    WHERE cs_quantity > 0
+),
+customer_data AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL AND hd.hd_income_band_sk IS NOT NULL
+),
+sales_summary AS (
+    SELECT
+        cs.cs_item_sk,
+        cs.cs_net_profit,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_web_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS total_store_sales
+    FROM catalog_sales cs
+    LEFT JOIN web_sales ws ON cs.cs_item_sk = ws.ws_item_sk
+    LEFT JOIN store_sales ss ON cs.cs_item_sk = ss.ss_item_sk
+    GROUP BY cs.cs_item_sk, cs.cs_net_profit
+)
+SELECT
+    rd.c_customer_id,
+    cs.cs_item_sk,
+    rs.cs_sales_price,
+    ss.total_web_sales,
+    ss.total_store_sales,
+    ss.cs_net_profit,
+    CASE 
+        WHEN rs.recent_rank = 1 THEN 'Latest Sale'
+        ELSE 'Prior Sale'
+    END AS sale_status,
+    COALESCE(dib.ib_upper_bound, 0) AS income_upper_bound
+FROM ranked_sales rs
+JOIN sales_summary ss ON rs.cs_item_sk = ss.cs_item_sk
+JOIN customer_data rd ON rd.cd_income_band_sk = ss.cs_item_sk
+LEFT JOIN income_band dib ON dib.ib_income_band_sk = rd.cd_income_band_sk
+WHERE ss.cs_net_profit > 0
+ORDER BY rd.c_customer_id, ss.cs_item_sk;

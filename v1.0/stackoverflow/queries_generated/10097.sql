@@ -1,0 +1,56 @@
+-- Performance benchmarking query for the Stack Overflow schema
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostTypeCounts AS (
+    SELECT 
+        PT.Id AS PostTypeId,
+        PT.Name AS PostTypeName,
+        COUNT(P.Id) AS CountOfPosts
+    FROM PostTypes PT
+    LEFT JOIN Posts P ON PT.Id = P.PostTypeId
+    GROUP BY PT.Id, PT.Name
+),
+AverageViewCount AS (
+    SELECT 
+        AVG(ViewCount) AS AvgViewCount
+    FROM Posts
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TagUsage
+    FROM Tags T
+    LEFT JOIN Posts P ON T.Id = P.Id
+    GROUP BY T.TagName
+    ORDER BY TagUsage DESC
+    LIMIT 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalBounty,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    PTC.PostTypeId,
+    PTC.PostTypeName,
+    PTC.CountOfPosts,
+    AVC.AvgViewCount,
+    TT.TagName,
+    TT.TagUsage
+FROM UserStats U
+CROSS JOIN PostTypeCounts PTC
+CROSS JOIN AverageViewCount AVC
+LEFT JOIN TopTags TT ON TRUE
+ORDER BY U.PostCount DESC, U.TotalBounty DESC;

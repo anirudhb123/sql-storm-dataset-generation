@@ -1,0 +1,72 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_year,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS title_count_by_year,
+        COALESCE(kw.keyword, 'No Keyword') AS keyword
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+)
+, person_with_roles AS (
+    SELECT 
+        p.id AS person_id,
+        ak.name AS aka_name,
+        c.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY c.nr_order) AS role_ranking
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+)
+, complex_subquery AS (
+    SELECT 
+        pw.person_id,
+        pw.aka_name,
+        COUNT(DISTINCT pw.movie_id) AS movie_count,
+        SUM(CASE WHEN pw.role_ranking = 1 THEN 1 ELSE 0 END) AS lead_role_count,
+        MAX(CASE WHEN pw.role_ranking = 1 THEN t.production_year ELSE NULL END) AS last_lead_year,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles_played
+    FROM 
+        person_with_roles pw
+    LEFT JOIN 
+        ranked_titles t ON pw.movie_id = t.title_id
+    GROUP BY 
+        pw.person_id, pw.aka_name
+)
+SELECT 
+    c.id AS company_id,
+    cn.name AS company_name,
+    c.movie_id,
+    COUNT(DISTINCT CASE WHEN s.role_ranking = 1 THEN s.person_id END) AS lead_actors_count,
+    MAX(ca.last_lead_year) AS latest_lead_year,
+    STRING_AGG(DISTINCT s.titles_played, '; ') AS all_titles_played,
+    COUNT(1) FILTER (WHERE ct.kind = 'Distributor') AS distributor_count,
+    MAX(CASE WHEN c.note IS NULL THEN 'Note is NULL' ELSE c.note END) AS note_status
+FROM 
+    movie_companies c
+JOIN 
+    company_name cn ON c.company_id = cn.id
+LEFT JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id
+LEFT JOIN 
+    complex_subquery ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    comp_cast_type ct ON cc.status_id = ct.id
+LEFT JOIN 
+    person_with_roles s ON cc.movie_id = s.movie_id
+GROUP BY 
+    c.id, cn.name
+HAVING 
+    COUNT(DISTINCT s.person_id) > 3
+    AND MAX(s.last_lead_year) > (SELECT AVG(production_year) FROM title) -- Having condition based on correlated subquery
+ORDER BY 
+    company_name, latest_lead_year DESC;

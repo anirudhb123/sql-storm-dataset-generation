@@ -1,0 +1,56 @@
+
+WITH AddressAggregates AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        STRING_AGG(ca_city, ', ') AS cities,
+        STRING_AGG(DISTINCT ca_county ORDER BY ca_county) AS counties
+    FROM
+        customer_address
+    GROUP BY
+        ca_state
+),
+DemographicStats AS (
+    SELECT
+        cd_gender,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_dep_count) AS avg_dependents,
+        COUNT(cd_demo_sk) AS demographic_count
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender
+),
+SalesData AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws_ship_customer_sk) AS unique_customers
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY
+        ws.web_site_id
+)
+SELECT
+    aa.ca_state,
+    aa.unique_addresses,
+    aa.cities,
+    aa.counties,
+    ds.cd_gender,
+    ds.total_purchase_estimate,
+    ds.avg_dependents,
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.unique_customers
+FROM
+    AddressAggregates aa
+JOIN
+    DemographicStats ds ON aa.ca_state = 'CA' -- Example state filter
+JOIN
+    SalesData sd ON sd.total_sales > 10000 -- Example sales threshold
+ORDER BY
+    aa.unique_addresses DESC, ds.total_purchase_estimate DESC, sd.total_sales DESC;

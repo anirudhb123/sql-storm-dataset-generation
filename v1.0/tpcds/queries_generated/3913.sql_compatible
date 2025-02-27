@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 
+        AND d.d_moy IN (1, 2, 3) 
+    GROUP BY 
+        ws.web_site_id
+),
+TopWebsites AS (
+    SELECT 
+        web_site_id,
+        total_orders,
+        total_profit
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    COALESCE(t.total_orders, 0) AS total_orders,
+    COALESCE(t.total_profit, 0) AS total_profit,
+    CASE 
+        WHEN COALESCE(t.total_orders, 0) > 0 THEN 
+            ROUND(COALESCE(t.total_profit, 0) / COALESCE(t.total_orders, 1), 2)
+        ELSE 
+            0
+    END AS avg_profit_per_order
+FROM 
+    web_site AS w
+LEFT JOIN 
+    TopWebsites AS t ON w.web_site_id = t.web_site_id
+ORDER BY 
+    total_profit DESC;

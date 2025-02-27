@@ -1,0 +1,56 @@
+WITH part_supplier_summary AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        s.s_name AS supplier_name, 
+        COUNT(ps.ps_availqty) AS available_quantity_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        GROUP_CONCAT(DISTINCT s.s_comment SEPARATOR '; ') AS supplier_comments
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_name
+),
+
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date,
+        SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT o.o_comment ORDER BY o.o_orderdate SEPARATOR '; '), '; ', 5) AS recent_comments
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    ps.supplier_name, 
+    pss.available_quantity_count, 
+    pss.total_supply_cost,
+    cus.c_custkey, 
+    cus.c_name, 
+    cus.total_orders, 
+    cus.total_spent, 
+    cus.last_order_date, 
+    cus.recent_comments
+FROM 
+    part_supplier_summary pss
+JOIN 
+    customer_order_summary cus ON (pss.available_quantity_count > 0)
+JOIN 
+    part p ON p.p_partkey = pss.p_partkey
+JOIN 
+    supplier ps ON ps.s_name = pss.supplier_name
+ORDER BY 
+    p.p_name, cus.total_spent DESC;

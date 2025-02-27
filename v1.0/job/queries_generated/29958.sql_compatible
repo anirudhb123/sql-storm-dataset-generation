@@ -1,0 +1,61 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS rank_by_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+KeywordDetails AS (
+    SELECT 
+        k.id AS keyword_id,
+        k.keyword,
+        kt.kind AS keyword_type
+    FROM 
+        keyword k
+    JOIN 
+        kind_type kt ON k.phonetic_code = kt.kind
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        c.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year, c.kind
+)
+SELECT 
+    r.title_id,
+    r.title,
+    r.production_year,
+    r.keyword_count,
+    md.movie_id,
+    md.title AS movie_title,
+    md.production_year AS movie_year,
+    md.company_type,
+    md.cast_count
+FROM 
+    RankedTitles r
+JOIN 
+    MovieDetails md ON r.title_id = md.movie_id
+WHERE 
+    r.rank_by_keywords <= 5
+ORDER BY 
+    r.production_year DESC, r.keyword_count DESC;

@@ -1,0 +1,60 @@
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast,
+        SUM(CASE WHEN m.production_year < 2000 THEN 1 ELSE 0 END) OVER (PARTITION BY m.id) AS pre_2000_count
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    WHERE 
+        m.production_year >= 1980
+), 
+ActorRoleData AS (
+    SELECT 
+        a.name AS actor_name,
+        r.role AS role_description,
+        COUNT(DISTINCT c.movie_id) AS movies_count
+    FROM 
+        aka_name AS a 
+    JOIN 
+        cast_info AS c ON a.person_id = c.person_id 
+    JOIN 
+        role_type AS r ON c.role_id = r.id 
+    GROUP BY 
+        a.name, r.role
+),
+MovieKeywordData AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title AS m 
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id 
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id 
+    GROUP BY 
+        m.id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COALESCE(a.movies_count, 0) AS actor_movie_count,
+    m.total_cast,
+    m.pre_2000_count
+FROM 
+    RecursiveMovieInfo AS m
+LEFT JOIN 
+    ActorRoleData AS a ON a.movies_count = m.total_cast
+LEFT JOIN 
+    MovieKeywordData AS mk ON mk.movie_id = m.movie_id
+WHERE 
+    (m.total_cast > 1 OR m.pre_2000_count > 0)
+ORDER BY 
+    m.production_year DESC, 
+    a.movies_count DESC NULLS LAST;

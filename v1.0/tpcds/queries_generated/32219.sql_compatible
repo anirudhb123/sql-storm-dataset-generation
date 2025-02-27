@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        ss_sold_date_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales 
+    JOIN 
+        store ON store_sales.ss_store_sk = store.s_store_sk
+    GROUP BY 
+        s_store_sk, s_store_name, ss_sold_date_sk
+),
+daily_sales AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        SUM(ss.net_paid) AS total_store_sales,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions
+    FROM 
+        store_sales AS ss
+    JOIN 
+        date_dim AS d ON ss.ss_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_date_sk, d.d_date
+),
+high_sales_days AS (
+    SELECT 
+        d.d_date,
+        ds.total_store_sales,
+        ds.total_transactions,
+        RANK() OVER (ORDER BY ds.total_store_sales DESC) AS sales_rank
+    FROM 
+        daily_sales AS ds
+    JOIN 
+        date_dim AS d ON ds.d_date_sk = d.d_date_sk
+    WHERE 
+        d.d_weekend = '1'
+)
+SELECT 
+    hsd.d_date,
+    hsd.total_store_sales,
+    hsd.total_transactions,
+    COUNT(DISTINCT ss.item_sk) AS distinct_items_sold,
+    COALESCE(MAX(sr.reason), 'N/A') AS top_return_reason
+FROM 
+    high_sales_days AS hsd
+LEFT JOIN 
+    store_returns AS sr ON hsd.d_date = sr.returned_date_sk
+LEFT JOIN 
+    store_sales AS ss ON hsd.total_store_sales = ss.net_paid
+WHERE 
+    hsd.sales_rank <= 5
+GROUP BY 
+    hsd.d_date, hsd.total_store_sales, hsd.total_transactions
+ORDER BY 
+    hsd.total_store_sales DESC;

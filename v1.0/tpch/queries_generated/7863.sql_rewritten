@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty) as total_avail_qty,
+        SUM(ps.ps_supplycost) as total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) as total_orders,
+        SUM(o.o_totalprice) as total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    SUM(c.total_spent) AS total_customer_spent,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders_received,
+    COUNT(DISTINCT sp.s_suppkey) AS total_suppliers,
+    AVG(sp.total_supply_cost) AS avg_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey)
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_container = 'BOX')
+LEFT JOIN 
+    RankedOrders co ON co.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+WHERE 
+    c.total_orders > 0
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(c.total_spent) > 10000
+ORDER BY 
+    total_customer_spent DESC;

@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPartDetails AS (
+    SELECT
+        ps.ps_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(h.order_value), 0) AS total_order_value,
+    COALESCE(SUM(sp.total_available_qty), 0) AS total_available_qty,
+    COALESCE(SUM(sp.total_supply_cost), 0) AS total_supply_cost
+FROM 
+    RankedSuppliers s
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    HighValueOrders h ON s.s_suppkey = h.o_orderkey 
+LEFT JOIN 
+    SupplierPartDetails sp ON s.s_suppkey = sp.ps_partkey 
+WHERE 
+    s.rank <= 3
+GROUP BY 
+    n.n_name, s.s_name
+HAVING 
+    total_orders > 0 OR total_order_value > 10000
+ORDER BY 
+    total_order_value DESC, nation_name, supplier_name;

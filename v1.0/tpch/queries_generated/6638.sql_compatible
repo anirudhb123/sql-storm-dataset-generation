@@ -1,0 +1,46 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+), TotalPricePerNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name, 
+    ts.total_sales, 
+    rs.s_name, 
+    rs.total_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    TotalPricePerNation ts ON n.n_nationkey = ts.n_nationkey
+JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey AND rs.rn = 1
+ORDER BY 
+    ts.total_sales DESC, rs.total_cost DESC;

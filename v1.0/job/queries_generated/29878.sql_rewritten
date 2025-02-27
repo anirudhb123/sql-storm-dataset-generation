@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+        JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+PopularKeywords AS (
+    SELECT 
+        mk.keyword,
+        COUNT(DISTINCT mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Tagline')
+    GROUP BY 
+        mk.keyword
+    ORDER BY 
+        keyword_count DESC
+    LIMIT 10
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    ta.name AS top_actor_name,
+    pk.keyword AS popular_keyword
+FROM 
+    RankedMovies rm
+JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+JOIN 
+    TopActors ta ON ci.person_id = ta.person_id
+JOIN 
+    movie_keyword mk ON rm.movie_id = mk.movie_id
+JOIN 
+    PopularKeywords pk ON mk.keyword = pk.keyword
+WHERE 
+    rm.year_rank <= 5 
+ORDER BY 
+    rm.production_year DESC, ta.movie_count DESC, pk.keyword_count DESC;

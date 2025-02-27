@@ -1,0 +1,90 @@
+WITH RecursivePosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+
+    UNION ALL
+
+    SELECT
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        a.ParentId,
+        rp.Level + 1
+    FROM
+        Posts a
+    JOIN
+        RecursivePosts rp ON a.ParentId = rp.Id
+    WHERE
+        a.PostTypeId = 2 -- Only answers
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(coalesce(vt.UpVotes, 0)) AS TotalUpVotes,
+        SUM(coalesce(vt.DownVotes, 0)) AS TotalDownVotes,
+        SUM(coalesce(b.Class = 1, 0)) AS GoldBadges,
+        SUM(coalesce(b.Class = 2, 0)) AS SilverBadges,
+        SUM(coalesce(b.Class = 3, 0)) AS BronzeBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY ua.PostCount DESC, ua.TotalUpVotes DESC) AS Rank
+    FROM
+        UserActivity ua
+    WHERE
+        ua.PostCount > 0
+)
+SELECT
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges,
+    COALESCE(rp.Title, 'No Questions') AS RecentQuestionTitle,
+    COALESCE(rp.CreationDate, 'N/A') AS RecentQuestionDate,
+    CASE 
+        WHEN rp.Level IS NOT NULL THEN 
+            CONCAT('Has ', rp.Level, ' levels of answers.')
+        ELSE 
+            'No Answers.'
+    END AS AnswerStatus
+FROM
+    TopUsers tu
+LEFT JOIN 
+    RecursivePosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    tu.Rank <= 10 -- Only top 10 users
+ORDER BY 
+    tu.Rank;

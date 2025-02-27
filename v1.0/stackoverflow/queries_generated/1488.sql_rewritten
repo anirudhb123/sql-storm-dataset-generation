@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.ViewCount, p.CreationDate, p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title AS ClosedTitle,
+        ph.CreationDate AS CloseDate,
+        STRING_AGG(DISTINCT c.Text, ', ') AS CloseComments
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId 
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, ph.CreationDate
+)
+SELECT 
+    up.UserId,
+    up.BadgeCount,
+    up.HighestBadgeClass,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.CommentCount,
+    cp.ClosedPostId,
+    cp.ClosedTitle,
+    cp.CloseDate,
+    cp.CloseComments
+FROM UserBadges up
+JOIN RankedPosts rp ON up.UserId = rp.CommentCount
+FULL OUTER JOIN ClosedPosts cp ON rp.PostId = cp.ClosedPostId
+WHERE up.BadgeCount > 0
+AND rp.ViewRank <= 5
+ORDER BY up.BadgeCount DESC, rp.ViewCount DESC;

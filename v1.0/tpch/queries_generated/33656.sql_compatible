@@ -1,0 +1,35 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate, 1 AS depth
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+), 
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT ps.p_partkey, p.p_name, ps.ps_supplycost, 
+       COALESCE(SUM(i.l_quantity), 0) AS total_ordered, 
+       CASE 
+           WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'High'
+           WHEN COUNT(DISTINCT o.o_orderkey) BETWEEN 6 AND 10 THEN 'Medium'
+           ELSE 'Low' 
+       END AS order_frequency,
+       AVG(i.l_extendedprice * (1 - i.l_discount)) OVER (PARTITION BY ps.ps_partkey) AS avg_net_price
+FROM partsupp ps
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem i ON ps.ps_partkey = i.l_partkey
+LEFT JOIN orders o ON i.l_orderkey = o.o_orderkey
+JOIN CustomerSummary cs ON o.o_custkey = cs.c_custkey
+WHERE cs.rank <= 10
+GROUP BY ps.p_partkey, p.p_name, ps.ps_supplycost
+ORDER BY total_ordered DESC, p.p_name;

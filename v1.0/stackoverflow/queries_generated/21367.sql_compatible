@@ -1,0 +1,85 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(v.BountyAmount * CASE WHEN v.VoteTypeId = 9 THEN 1 ELSE 0 END), 0) AS TotalBountyClose,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS RowNum
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        p.AcceptedAnswerId,
+        p.Score,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, 
+                SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM Votes
+         GROUP BY PostId) v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasonNames,
+        COUNT(*) AS CloseActionCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON CAST(ph.Comment AS INTEGER) = ctr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBadges,
+    CASE 
+        WHEN ua.TotalPosts = 0 THEN 'No Posts'
+        ELSE (SELECT COUNT(*) FROM RecentPosts rp WHERE rp.PostRank = 1 AND rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = ua.UserId))
+    END AS RecentPostCount,
+    COALESCE(cp.CloseReasonNames, 'No Closed Posts') AS ClosedPostReasons,
+    COALESCE(cp.CloseActionCount, 0) AS TotalClosedPosts
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = ANY(SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+WHERE 
+    ua.Reputation > 1000
+ORDER BY 
+    ua.Reputation DESC NULLS LAST, 
+    ua.DisplayName ASC;

@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+CostDetails AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           CASE WHEN o.o_totalprice > 1000 THEN 'High'
+                WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+                ELSE 'Low'
+           END AS price_category
+    FROM orders o
+    WHERE EXTRACT(YEAR FROM o.o_orderdate) = 1997
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS average_spent
+    FROM customer c
+    LEFT JOIN FilteredOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT r.r_name,
+       COALESCE(cs.order_count, 0) AS total_orders,
+       COALESCE(cs.total_spent, 0) AS total_spent,
+       ps.total_cost,
+       ss.rank AS supplier_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer cs ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN CostDetails ps ON ps.ps_partkey IN (SELECT p.p_partkey 
+                                               FROM part p 
+                                               WHERE p.p_brand = 'Brand#Toyota' AND p.p_size BETWEEN 10 AND 20)
+LEFT JOIN RankedSuppliers ss ON ss.s_suppkey = (SELECT MIN(s.s_suppkey)
+                                                  FROM RankedSuppliers rs
+                                                  WHERE rs.rank < 5 AND rs.s_suppkey IS NOT NULL)
+WHERE (r.r_name LIKE 'A%' OR r.r_name LIKE 'B%')
+  AND (cs.total_spent > 500 OR cs.order_count > 5)
+ORDER BY total_orders DESC, total_spent ASC 
+LIMIT 50;

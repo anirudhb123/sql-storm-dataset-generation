@@ -1,0 +1,82 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Date AS BadgeDate,
+        b.Class,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), ',') AS tag_split ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_split
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        p.Title AS PostTitle,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditReason,
+        p.Body,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+)
+
+SELECT 
+    ub.UserId,
+    ub.DisplayName,
+    COUNT(DISTINCT rb.BadgeName) AS TotalBadges,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    SUM(rp.UpVotes) AS TotalUpVotes,
+    SUM(rp.DownVotes) AS TotalDownVotes,
+    STRING_AGG(DISTINCT rp.Tags, ', ') AS AllTags,
+    ARRAY_AGG(DISTINCT pd.EditReason) FILTER (WHERE pd.EditRank = 1) AS LatestEditReasons
+FROM 
+    UserBadges ub
+LEFT JOIN 
+    RecentPosts rp ON ub.UserId = rp.OwnerDisplayName
+LEFT JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+WHERE 
+    ub.BadgeRank = 1  
+GROUP BY 
+    ub.UserId, ub.DisplayName
+ORDER BY 
+    TotalPosts DESC, TotalBadges DESC;

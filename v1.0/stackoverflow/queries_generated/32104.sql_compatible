@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        Score,
+        CreationDate,
+        CAST(Title AS VARCHAR(300)) AS FullTitle,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        CAST(CONCAT(r.FullTitle, ' -> ', p.Title) AS VARCHAR(300)) AS FullTitle,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COALESCE(SUM(COALESCE(P.ViewCount, 0)), 0) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        PH.PostId,
+        PH.Title,
+        PH.Score,
+        PH.CreationDate,
+        PH.Level,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL AND V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL AND V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount,
+        DENSE_RANK() OVER (PARTITION BY PH.Level ORDER BY PH.Score DESC) AS RankWithinLevel
+    FROM 
+        RecursivePostHierarchy PH
+    LEFT JOIN 
+        Comments C ON PH.PostId = C.PostId
+    LEFT JOIN 
+        Votes V ON PH.PostId = V.PostId
+    GROUP BY 
+        PH.PostId, PH.Title, PH.Score, PH.CreationDate, PH.Level
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Upvotes,
+    U.Downvotes,
+    U.PostsCount,
+    U.TotalViews,
+    PM.PostId,
+    PM.Title,
+    PM.Score,
+    PM.CreationDate,
+    PM.CommentCount,
+    PM.UpvoteCount,
+    PM.DownvoteCount,
+    PM.RankWithinLevel
+FROM 
+    UserActivity U
+JOIN 
+    PostMetrics PM ON U.UserId = PM.PostId
+WHERE 
+    U.TotalViews > 1000
+    AND PM.RankWithinLevel <= 10
+ORDER BY 
+    U.Reputation DESC, PM.Score DESC;

@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > '2020-12-31' AND 
+        o.o_orderstatus IN ('O', 'F', 'P')
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(DISTINCT ps.ps_partkey) AS PartCount, 
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    c.c_name,
+    r.r_name AS Region,
+    COALESCE(cs.TotalSpent, 0) AS TotalSpent,
+    COALESCE(ss.PartCount, 0) AS SupplierParts,
+    RANK() OVER (ORDER BY COALESCE(cs.TotalSpent, 0) DESC, COALESCE(ss.PartCount, 0) ASC) AS CustomerRank
+FROM 
+    customer c
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_retailprice > (
+                SELECT AVG(p2.p_retailprice) 
+                FROM part p2
+            )
+        )
+    )
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM RankedOrders ro 
+        WHERE ro.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o WHERE o.o_custkey = c.c_custkey)
+    )
+ORDER BY 
+    CustomerRank;

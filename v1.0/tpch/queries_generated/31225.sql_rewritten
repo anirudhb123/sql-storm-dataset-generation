@@ -1,0 +1,37 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+),
+best_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(lo.total_revenue) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem_summary lo ON o.o_orderkey = lo.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(lo.total_revenue) > 10000
+)
+SELECT ns.n_name AS nation_name,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       SUM(bc.total_spent) AS total_spending
+FROM nation ns
+LEFT JOIN supplier_hierarchy sh ON ns.n_nationkey = sh.s_nationkey
+LEFT JOIN best_customers bc ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = bc.c_nationkey)
+GROUP BY ns.n_name
+ORDER BY total_spending DESC, supplier_count DESC
+LIMIT 10;

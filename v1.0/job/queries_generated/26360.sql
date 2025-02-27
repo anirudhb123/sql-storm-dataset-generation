@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        COUNT(c.person_id) as cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id
+), 
+TopTitles AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        kind_id,
+        cast_count,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC) as rnk
+    FROM 
+        RankedTitles
+), 
+TitleDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        m.name AS company_name,
+        p.gender, 
+        r.role
+    FROM 
+        TopTitles t
+    LEFT JOIN 
+        movie_keyword mk ON t.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    LEFT JOIN 
+        complete_cast cc ON t.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        t.rnk <= 10
+)
+SELECT 
+    td.title,
+    td.production_year,
+    STRING_AGG(DISTINCT td.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT td.company_name, ', ') AS production_companies,
+    STRING_AGG(DISTINCT td.gender, ', ') AS genders,
+    STRING_AGG(DISTINCT td.role, ', ') AS roles
+FROM 
+    TitleDetails td
+GROUP BY 
+    td.title, td.production_year
+ORDER BY 
+    td.production_year DESC, 
+    COUNT(td.role) DESC;

@@ -1,0 +1,61 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) FILTER (WHERE P.Score > 0) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        AvgScore
+    FROM 
+        UserPostStats
+    WHERE 
+        UserRank <= 10
+),
+PopularTags AS (
+    SELECT 
+        TAG.TagName,
+        COUNT(P.Id) AS TagUsage
+    FROM 
+        Tags TAG
+    JOIN 
+        Posts P ON TAG.Id IN (SELECT UNNEST(SPLIT(P.Tags, '><')))
+    GROUP BY 
+        TAG.TagName
+    ORDER BY 
+        TagUsage DESC
+    LIMIT 5
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    COALESCE(UT.TagName, 'No Tags') AS MostUsedTag,
+    U.AvgScore
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PopularTags UT ON U.UserId IN (
+        SELECT P.OwnerUserId 
+        FROM Posts P 
+        WHERE P.Tags LIKE CONCAT('%', UT.TagName, '%')
+    )
+ORDER BY 
+    U.TotalPosts DESC;

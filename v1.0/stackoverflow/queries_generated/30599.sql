@@ -1,0 +1,58 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, U.CreationDate, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000 -- start from users with high reputation
+    UNION ALL
+    SELECT U.Id, U.DisplayName, U.Reputation, U.CreationDate, Level + 1
+    FROM Users U
+    JOIN UserReputationCTE CTE ON U.Id = CTE.Id
+    WHERE U.Reputation > (CTE.Reputation / 2) -- a user is considered in the next level if their reputation is at least half of the previous
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        CASE 
+            WHEN P.ParentId IS NOT NULL THEN (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.ParentId)
+            ELSE 0 
+        END AS CommentCount
+    FROM Posts P
+    WHERE P.CreationDate >= '2023-01-01' -- filter for posts from the current year
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UR.Reputation, 0) AS ReputationLevel,
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    PVS.TotalVotes,
+    CASE 
+        WHEN PVS.UpVotes > PVS.DownVotes THEN 'Positive'
+        WHEN PVS.DownVotes > PVS.UpVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM Users U
+LEFT JOIN UserReputationCTE UR ON U.Id = UR.Id
+LEFT JOIN PostStats PS ON U.Id = PS.PostId
+LEFT JOIN PostVoteStats PVS ON PS.PostId = PVS.PostId
+WHERE U.Reputation IS NOT NULL
+ORDER BY UR.Level DESC, PS.ViewCount DESC
+LIMIT 50;

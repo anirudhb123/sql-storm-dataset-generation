@@ -1,0 +1,63 @@
+
+WITH RECURSIVE Movie_CTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        c.level + 1
+    FROM 
+        Movie_CTE c
+    JOIN 
+        movie_link ml ON ml.movie_id = c.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    WHERE 
+        c.level < 5
+)
+SELECT 
+    a.name AS actor_name,
+    k.keyword AS movie_keyword,
+    m.title AS linked_movie_title,
+    m.production_year AS linked_movie_year,
+    COUNT(DISTINCT c.id) AS total_castings,
+    SUM(CASE 
+            WHEN pi.info IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS info_count,
+    AVG(w.rating) OVER (PARTITION BY m.production_year) AS avg_year_rating
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    Movie_CTE m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON pi.person_id = c.person_id AND pi.info_type_id = 1  
+LEFT JOIN 
+    (SELECT movie_id, AVG(rating) AS rating FROM movie_info GROUP BY movie_id) w ON m.movie_id = w.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+GROUP BY 
+    a.name, k.keyword, m.title, m.production_year
+ORDER BY 
+    total_castings DESC, avg_year_rating DESC
+LIMIT 10;

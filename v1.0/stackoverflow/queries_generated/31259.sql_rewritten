@@ -1,0 +1,81 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        0 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        Level + 1
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        RecursiveUserStats rus ON rus.UserId = p.OwnerUserId
+    WHERE 
+        rus.Level < 2
+),
+PostDetailsWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        p.LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+)
+SELECT 
+    rus.UserId,
+    rus.DisplayName,
+    rus.Reputation,
+    rus.Views,
+    rus.UpVotes,
+    rus.DownVotes,
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.UpVotes AS PostUpVotes,
+    pd.DownVotes AS PostDownVotes,
+    pd.TotalVotes,
+    pd.LastActivityDate
+FROM 
+    RecursiveUserStats rus
+LEFT JOIN 
+    PostDetailsWithVotes pd ON rus.UserId = pd.OwnerUserId
+WHERE 
+    pd.TotalVotes > 10 OR rus.Reputation > 5000
+ORDER BY 
+    rus.Reputation DESC, pd.LastActivityDate DESC
+OPTION (MAXRECURSION 10);

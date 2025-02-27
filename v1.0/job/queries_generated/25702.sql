@@ -1,0 +1,50 @@
+WITH movie_rating AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(r.rating) AS average_rating
+    FROM movie_info m
+    JOIN movie_info_idx idx ON m.id = idx.movie_id
+    JOIN info_type it ON idx.info_type_id = it.id
+    JOIN ratings r ON m.id = r.movie_id
+    WHERE it.info = 'rating'
+    GROUP BY m.id
+),
+filtered_titles AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        title.production_year
+    FROM title
+    WHERE title.production_year >= 2000
+      AND title.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv'))
+),
+actor_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+),
+movies_with_details AS (
+    SELECT 
+        ft.title_id,
+        ft.title,
+        ft.production_year,
+        ar.actor_name,
+        ar.role_name,
+        mr.average_rating
+    FROM filtered_titles ft
+    LEFT JOIN actor_roles ar ON ft.title_id = ar.movie_id
+    LEFT JOIN movie_rating mr ON ft.title_id = mr.movie_id
+)
+SELECT 
+    mwd.title AS movie_title,
+    mwd.production_year,
+    STRING_AGG(DISTINCT mwd.actor_name || ' (' || mwd.role_name || ')', ', ') AS actors,
+    COALESCE(mwd.average_rating, 0) AS average_rating
+FROM movies_with_details mwd
+GROUP BY mwd.title_id, mwd.title, mwd.production_year
+ORDER BY average_rating DESC
+LIMIT 10;

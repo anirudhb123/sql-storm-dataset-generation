@@ -1,0 +1,95 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        s.s_acctbal > 10000
+),
+EligibleCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        COUNT(o.o_orderkey) > 2 AND 
+        (c.c_acctbal - COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0)) > 500
+),
+PartSuppDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_supplycost, 
+        p.p_name,
+        COALESCE(l.line_count, 0) AS line_count
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN (
+        SELECT 
+            l.l_partkey,
+            COUNT(l.l_orderkey) AS line_count
+        FROM 
+            lineitem l
+        GROUP BY 
+            l.l_partkey
+    ) l ON ps.ps_partkey = l.l_partkey
+),
+RegionDetails AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    ecs.c_custkey,
+    ecs.c_name,
+    psd.p_name,
+    psd.ps_supplycost,
+    rs.s_name AS top_supplier,
+    rs.s_acctbal AS supplier_acctbal,
+    rg.r_name AS region_name,
+    rg.nation_count
+FROM 
+    EligibleCustomers ecs
+JOIN 
+    PartSuppDetails psd ON psd.ps_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND ps.ps_availqty > 10
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1 AND rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = psd.ps_partkey
+    )
+LEFT JOIN 
+    nation n ON ecs.c_custkey = n.n_nationkey
+LEFT JOIN 
+    RegionDetails rg ON n.n_regionkey = rg.n_regionkey
+WHERE 
+    ecs.c_acctbal BETWEEN 100 AND 5000
+ORDER BY 
+    ecs.c_custkey, psd.ps_supplycost DESC;

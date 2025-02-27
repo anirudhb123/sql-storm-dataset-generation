@@ -1,0 +1,68 @@
+WITH Supplier_Costs AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+Top_Suppliers AS (
+    SELECT 
+        sc.s_suppkey,
+        sc.total_supply_cost
+    FROM 
+        Supplier_Costs sc
+    ORDER BY 
+        sc.total_supply_cost DESC
+    LIMIT 10
+), 
+Customer_Summary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+Suppliers_By_Customers AS (
+    SELECT 
+        ts.s_suppkey,
+        cs.c_custkey,
+        cs.total_spent
+    FROM 
+        Top_Suppliers ts
+    JOIN 
+        partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    JOIN 
+        customer cs ON o.o_custkey = cs.c_custkey
+), 
+Final_Report AS (
+    SELECT 
+        s.suppkey,
+        COUNT(DISTINCT c.c_custkey) AS num_customers,
+        AVG(total_spent) AS avg_spent_per_customer
+    FROM 
+        Suppliers_By_Customers s
+    JOIN 
+        Customer_Summary c ON s.c_custkey = c.c_custkey
+    GROUP BY 
+        s.suppkey
+)
+SELECT 
+    s.suppkey, 
+    s.num_customers, 
+    s.avg_spent_per_customer
+FROM 
+    Final_Report s
+ORDER BY 
+    s.avg_spent_per_customer DESC;

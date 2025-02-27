@@ -1,0 +1,65 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE
+        ws.ws_sold_date_sk = (
+            SELECT MAX(d.d_date_sk)
+            FROM date_dim d
+            WHERE d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 12
+        )
+    GROUP BY
+        ws.ws_item_sk
+),
+returns_summary AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+),
+final_summary AS (
+    SELECT
+        ss.item_sk,
+        ss.total_quantity,
+        ss.total_profit,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        CASE
+            WHEN ss.total_profit > 0 THEN ss.total_profit / NULLIF(ss.total_quantity, 0)
+            ELSE 0
+        END AS avg_profit_per_item
+    FROM
+        sales_summary ss
+    LEFT JOIN
+        returns_summary rs ON ss.item_sk = rs.sr_item_sk
+    WHERE
+        ss.profit_rank <= 10
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    fs.total_quantity,
+    fs.total_profit,
+    fs.total_returns,
+    fs.avg_profit_per_item,
+    CASE
+        WHEN fs.total_profit IS NULL THEN 'Undefined'
+        WHEN fs.total_profit = 0 THEN 'No Profit'
+        ELSE 'Profit Achieved'
+    END AS profit_status
+FROM
+    final_summary fs
+JOIN
+    item i ON fs.item_sk = i.i_item_sk
+ORDER BY
+    fs.total_profit DESC,
+    fs.avg_profit_per_item ASC;

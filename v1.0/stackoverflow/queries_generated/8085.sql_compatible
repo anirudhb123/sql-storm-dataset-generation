@@ -1,0 +1,48 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        MAX(b.Date) AS LastBadgeDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    ORDER BY p.Score DESC, p.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.PostsCount,
+    us.CommentsCount,
+    us.TotalVotes,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.Tags
+FROM UserStats us
+JOIN PopularPosts pp ON us.UserId = pp.OwnerUserId
+ORDER BY us.Reputation DESC, pp.Score DESC;

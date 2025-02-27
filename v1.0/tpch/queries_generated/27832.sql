@@ -1,0 +1,38 @@
+SELECT
+    p.p_name AS part_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(p.p_retailprice) AS average_retail_price,
+    MAX(SUBSTRING(s.s_name, 1, 5)) AS max_supplier_prefix,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions_supplied,
+    LENGTH(p.p_comment) AS comment_length,
+    CASE
+        WHEN COUNT(DISTINCT c.c_custkey) > 10 THEN 'High Customer Activity'
+        ELSE 'Low Customer Activity'
+    END AS customer_activity_level
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+WHERE
+    p.p_size > 10
+    AND p.p_type LIKE 'TYPE%'
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY
+    p.p_name
+HAVING
+    SUM(ps.ps_availqty) > 100
+ORDER BY
+    average_retail_price DESC;

@@ -1,0 +1,75 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT UserId,
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM Votes
+    GROUP BY UserId
+), UserBadges AS (
+    SELECT UserId,
+           COUNT(*) AS TotalBadges,
+           SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+), PopularPosts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.ViewCount,
+           ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) as ViewRank
+    FROM Posts p
+    WHERE p.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+), PostHistoryDetails AS (
+    SELECT ph.PostId,
+           ph.CreationDate,
+           ph.UserDisplayName,
+           p.Title,
+           P.HistoryTypeId,
+           COUNT(*) OVER (PARTITION BY ph.PostId) AS EditCount,
+           MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) as LastEditDate
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (4, 6, 24) -- Edit Title, Edit Tags, Suggested Edit Applied
+),
+UsersWithVoteCounts AS (
+    SELECT u.Id,
+           u.DisplayName,
+           u.Reputation,
+           u.CreationDate,
+           COALESCE(v.UpVotesCount, 0) AS UpVotesCount,
+           COALESCE(v.DownVotesCount, 0) AS DownVotesCount,
+           COALESCE(b.TotalBadges, 0) AS TotalBadges,
+           COALESCE(b.GoldBadges, 0) AS GoldBadges,
+           COALESCE(b.SilverBadges, 0) AS SilverBadges,
+           COALESCE(b.BronzeBadges, 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN UserVoteCounts v ON u.Id = v.UserId
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    u.UpVotesCount,
+    u.DownVotesCount,
+    u.TotalBadges,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViewCount,
+    phd.EditCount,
+    phd.LastEditDate,
+    COUNT(pl.RelatedPostId) AS RelatedPostsCount
+FROM UsersWithVoteCounts u
+LEFT JOIN PopularPosts pp ON u.Id = pp.UserId
+LEFT JOIN PostHistoryDetails phd ON u.Id = phd.UserId
+LEFT JOIN PostLinks pl ON phd.PostId = pl.PostId
+WHERE u.Reputation > 100
+GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+         u.UpVotesCount, u.DownVotesCount, u.TotalBadges,
+         u.GoldBadges, u.SilverBadges, u.BronzeBadges,
+         pp.Title, pp.ViewCount, phd.EditCount, phd.LastEditDate
+ORDER BY u.Reputation DESC, pp.ViewCount DESC
+LIMIT 100;

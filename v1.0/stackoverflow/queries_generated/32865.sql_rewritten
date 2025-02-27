@@ -1,0 +1,70 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN vt.Name = 'Close' THEN 1 END) AS CloseVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COALESCE(upv.UpVotes, 0) AS UpVotes,
+    COALESCE(upv.DownVotes, 0) AS DownVotes,
+    COALESCE(upv.CloseVotes, 0) AS CloseVotes,
+    p.Title,
+    p.CreationDate,
+    COALESCE(pv.EditCount, 0) AS TotalEdits,
+    pv.LastEditDate,
+    CASE 
+        WHEN nv.PostId IS NOT NULL THEN 'New Activity' 
+        ELSE 'No Recent Activity' 
+    END AS PostActivityStatus
+FROM 
+    Users u 
+LEFT JOIN 
+    RecursiveCTE rct ON u.Id = rct.OwnerUserId 
+LEFT JOIN 
+    UserVotes upv ON rct.PostId = upv.PostId 
+LEFT JOIN 
+    PostHistoryStats pv ON rct.PostId = pv.PostId 
+LEFT JOIN 
+    (SELECT 
+         PostId 
+     FROM 
+         Posts 
+     WHERE 
+         LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') nv ON rct.PostId = nv.PostId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    u.DisplayName, rct.CreationDate DESC;

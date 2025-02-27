@@ -1,0 +1,66 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, oh.depth + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_custkey = (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_custkey = oh.o_orderkey
+        LIMIT 1
+    )
+    WHERE o.o_orderstatus = 'O' AND oh.depth < 5
+),
+AggregatedSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2023-12-31'
+    GROUP BY l.l_orderkey
+),
+SupplierSales AS (
+    SELECT ps.ps_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_total_cost,
+           COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+),
+CustomerSales AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT DISTINCT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_suppkey AS supplier_id,
+    COALESCE(ss.supplier_total_cost, 0) AS total_cost,
+    COALESCE(ag.total_sales, 0) AS total_order_sales,
+    cs.order_count,
+    cs.total_spent,
+    oh.depth
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierSales ss ON s.s_suppkey = ss.ps_suppkey
+LEFT JOIN AggregatedSales ag ON ag.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+)
+LEFT JOIN CustomerSales cs ON cs.c_custkey = s.s_suppkey
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey = ag.l_orderkey
+WHERE (ss.supplier_total_cost IS NOT NULL OR ag.total_sales IS NOT NULL)
+  AND oh.depth IS NOT NULL
+ORDER BY r.r_name, n.n_name, s.s_suppkey;

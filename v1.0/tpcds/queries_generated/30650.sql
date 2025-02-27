@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) as rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+high_profit_items AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_profit
+    FROM 
+        sales_cte sales
+    JOIN 
+        item item ON sales.ws_item_sk = item.i_item_sk
+    WHERE 
+        sales.total_profit > (SELECT AVG(total_profit) FROM sales_cte)
+)
+SELECT 
+    COALESCE(hi.i_item_desc, 'Unknown Item') AS item_description,
+    COUNT(ws.ws_order_number) AS total_sales,
+    SUM(ws.ws_net_profit) AS total_revenue,
+    AVG(ws.ws_net_profit) AS average_revenue_per_sale
+FROM 
+    high_profit_items hi
+LEFT JOIN 
+    web_sales ws ON hi.ws_item_sk = ws.ws_item_sk
+WHERE 
+    ws.ws_net_profit IS NOT NULL
+GROUP BY 
+    hi.i_item_desc
+HAVING 
+    COUNT(ws.ws_order_number) > 10
+ORDER BY 
+    total_revenue DESC
+UNION ALL
+SELECT 
+    'Total' AS item_description,
+    COUNT(DISTINCT ws.ws_order_number) AS total_sales,
+    SUM(ws.ws_net_profit) AS total_revenue,
+    AVG(ws.ws_net_profit) AS average_revenue_per_sale
+FROM 
+    web_sales ws
+WHERE 
+    ws.ws_net_profit IS NOT NULL 
+AND 
+    NOT EXISTS (SELECT 1 FROM high_profit_items hi WHERE hi.ws_item_sk = ws.ws_item_sk);

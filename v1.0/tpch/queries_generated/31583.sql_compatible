@@ -1,0 +1,91 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT 
+        sc.s_suppkey,
+        sc.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+
+SELECT 
+    f.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    sc.p_name AS part_name,
+    c.total_revenue,
+    sc.ps_availqty,
+    sc.ps_supplycost,
+    CASE 
+        WHEN c.total_revenue >= 10000 THEN 'High Value'
+        WHEN c.total_revenue BETWEEN 5000 AND 9999 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    FilteredSuppliers f
+JOIN 
+    SupplyChain sc ON f.s_suppkey = sc.s_suppkey
+JOIN 
+    CustomerOrders c ON sc.p_partkey = c.p_partkey
+WHERE 
+    sc.ps_availqty IS NOT NULL AND sc.ps_availqty > 0
+ORDER BY 
+    c.total_revenue DESC, f.s_name;

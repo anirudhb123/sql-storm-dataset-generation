@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+TopTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY 
+        Tags.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(v.UserId, 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.Id PostHistoryId,
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::jsonb->>'reason_id'::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    ph.UserDisplayName AS ClosedBy,
+    ph.CreationDate AS ClosedDate,
+    ut.UserId,
+    ut.DisplayName AS VotingUser,
+    ut.Reputation,
+    tt.TagName,
+    tt.PostCount,
+    COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+    COALESCE(ps.TotalBounties, 0) AS TotalBounties,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS CloseHistoryRank
+FROM 
+    Posts p
+LEFT JOIN 
+    ClosedPosts ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserStats ut ON p.OwnerUserId = ut.UserId
+LEFT JOIN 
+    TopTags tt ON p.Tags LIKE '%' || tt.TagName || '%'
+LEFT JOIN 
+    UserStats ps ON p.OwnerUserId = ps.UserId
+WHERE 
+    p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+ORDER BY 
+    p.CreationDate DESC,
+    CloseHistoryRank
+LIMIT 100;

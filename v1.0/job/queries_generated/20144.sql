@@ -1,0 +1,73 @@
+WITH movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(*) AS info_count,
+        STRING_AGG(mi.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+role_summary AS (
+    SELECT 
+        cc.movie_id,
+        STRING_AGG(DISTINCT rt.role, ', ') AS unique_roles,
+        COUNT(DISTINCT cc.person_id) AS role_count
+    FROM 
+        cast_info cc
+    JOIN 
+        role_type rt ON cc.role_id = rt.id
+    GROUP BY 
+        cc.movie_id
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_data AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.title AS alternate_title,
+        cc.unique_roles,
+        cc.role_count,
+        ks.keywords,
+        ms.info_count,
+        ms.info_details
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title a ON t.id = a.movie_id
+    LEFT JOIN 
+        role_summary cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_info_summary ms ON t.id = ms.movie_id
+    LEFT JOIN 
+        keyword_summary ks ON t.id = ks.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.unique_roles, 'No Roles') AS role_info,
+    COALESCE(md.keywords, 'No Keywords') AS keyword_info,
+    CASE 
+        WHEN md.info_count > 0 THEN 'Has Info'
+        ELSE 'No Info'
+    END AS info_status,
+    ARRAY_LENGTH(ARRAY_REMOVE(STRING_TO_ARRAY(md.info_details, '; '), NULL), 1) AS num_info_entries
+FROM 
+    movie_data md
+WHERE 
+    md.production_year BETWEEN 1980 AND 2023
+    AND (md.unique_roles IS NOT NULL OR md.keywords IS NOT NULL)
+ORDER BY 
+    md.production_year DESC,
+    md.title ASC
+LIMIT 100;

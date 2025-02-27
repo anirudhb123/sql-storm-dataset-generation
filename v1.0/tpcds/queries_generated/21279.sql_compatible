@@ -1,0 +1,51 @@
+
+WITH item_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_web_sales,
+        SUM(cs.cs_quantity) AS total_catalog_sales,
+        SUM(ss.ss_quantity) AS total_store_sales,
+        COALESCE(SUM(ws.ws_quantity), 0) AS web_sales_null_check
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_id
+), 
+sales_summary AS (
+    SELECT 
+        i_item_id,
+        COALESCE(total_web_sales, 0) + COALESCE(total_catalog_sales, 0) + COALESCE(total_store_sales, 0) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(total_web_sales, 0) + COALESCE(total_catalog_sales, 0) + COALESCE(total_store_sales, 0) DESC) AS sales_rank
+    FROM 
+        item_sales
+)
+SELECT 
+    ss.i_item_id,
+    ss.total_sales,
+    CASE 
+        WHEN ss.sales_rank <= 10 THEN 'Top 10 Seller'
+        ELSE 'Regular Seller'
+    END AS seller_category,
+    (SELECT COUNT(*) 
+     FROM sales_summary ss2 
+     WHERE ss2.total_sales > ss.total_sales) AS competitors,
+    (SELECT SUM(total_sales) 
+     FROM sales_summary 
+     WHERE sales_rank > ss.sales_rank 
+     AND sales_rank <= ss.sales_rank + 2) AS next_two_sales
+FROM 
+    sales_summary ss
+WHERE 
+    ss.total_sales > (
+        SELECT AVG(total_sales)
+        FROM sales_summary
+    )
+ORDER BY 
+    seller_category DESC, total_sales DESC
+FETCH FIRST 15 ROWS ONLY;

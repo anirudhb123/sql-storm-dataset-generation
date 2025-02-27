@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+SupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand
+),
+HighValueOrders AS (
+    SELECT co.o_orderkey, co.total_amount, c.c_name
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE co.total_amount > 10000
+),
+SupplierNation AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(*) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    sh.level, 
+    sn.n_name AS supplier_nation,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    COALESCE(SUM(co.total_amount), 0) AS total_revenue,
+    AVG(sd.total_available_qty) AS avg_available_quantity
+FROM SupplierHierarchy sh
+LEFT JOIN SupplierNation sn ON sh.s_nationkey = sn.n_nationkey
+LEFT JOIN HighValueOrders co ON sh.s_suppkey = co.o_orderkey
+LEFT JOIN SupplierDetails sd ON sh.s_suppkey = sd.ps_suppkey
+WHERE sh.level <= 3 
+GROUP BY sh.level, sn.n_name
+ORDER BY sh.level, total_revenue DESC;

@@ -1,0 +1,107 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) -
+                 SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS VoteBalance
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        pp.UserId AS OwnerId,
+        COALESCE(b.Class, 0) AS BadgeLevel,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(hist.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users pp ON p.OwnerUserId = pp.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = pp.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory hist ON hist.PostId = p.Id AND hist.PostHistoryTypeId IN (2, 4, 5)  
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, pp.UserId, b.Class
+),
+RankedPosts AS (
+    SELECT 
+        pd.*,
+        ROW_NUMBER() OVER (PARTITION BY pd.OwnerId ORDER BY pd.Score DESC, pd.CreationDate DESC) AS PostRank,
+        DENSE_RANK() OVER (ORDER BY pd.Score DESC) AS ScoreRank
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.BadgeLevel > 1  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.LastEditDate,
+        uv.UserId,
+        uv.DisplayName,
+        uv.UpVoteCount,
+        uv.DownVoteCount,
+        uv.VoteBalance
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserVoteCounts uv ON rp.OwnerId = uv.UserId
+    WHERE 
+        rp.PostRank = 1  
+        AND rp.CommentCount > 5  
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.LastEditDate,
+    fp.DisplayName,
+    fp.UpVoteCount,
+    fp.DownVoteCount,
+    CASE 
+        WHEN fp.VoteBalance IS NULL THEN 'No Votes' 
+        WHEN fp.VoteBalance > 0 THEN 'Net Positive Votes' 
+        ELSE 'Net Negative Votes' 
+    END AS VoteStatus,
+    CASE 
+        WHEN COUNT(pl.RelatedPostId) > 0 THEN 'Related Posts Exist' 
+        ELSE 'No Related Posts' 
+    END AS RelationStatus
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostLinks pl ON fp.PostId = pl.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.AnswerCount, 
+    fp.CommentCount, fp.LastEditDate, fp.DisplayName, fp.UpVoteCount, 
+    fp.DownVoteCount, fp.VoteBalance
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,78 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_item_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS rank
+    FROM
+        store_sales ss
+    WHERE
+        ss.ss_sold_date_sk >= (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = cast('2002-10-01' as date) - INTERVAL '6 days')
+        AND ss.ss_sold_date_sk <= (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = cast('2002-10-01' as date))
+    GROUP BY
+        ss.ss_sold_date_sk, ss.ss_item_sk
+), RankedSales AS (
+    SELECT
+        r.*,
+        ROW_NUMBER() OVER (ORDER BY r.total_sales DESC) AS sales_rank
+    FROM
+        SalesCTE r
+    WHERE
+        r.total_quantity > 0
+), LatestSales AS (
+    SELECT
+        rt.ss_item_sk,
+        rt.ss_quantity,
+        rt.ss_net_paid,
+        CASE
+            WHEN rt.ss_net_paid IS NULL THEN 'NO SALES'
+            ELSE 'SALES RECORDED'
+        END AS sales_status
+    FROM
+        store_sales rt
+    INNER JOIN RankedSales rank ON rt.ss_item_sk = rank.ss_item_sk
+    WHERE
+        rank.sales_rank <= 10
+), AddressInfo AS (
+    SELECT
+        c.c_customer_sk,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country
+    FROM
+        customer c
+    LEFT JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+)
+SELECT
+    l.ss_item_sk,
+    l.ss_quantity,
+    l.ss_net_paid,
+    l.sales_status,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_country,
+    NULLIF(l.ss_net_paid - (SELECT AVG(ss2.ss_net_paid) FROM store_sales ss2 WHERE ss2.ss_item_sk = l.ss_item_sk), 0) AS profit_margin,
+    CASE
+        WHEN ai.ca_country IS NULL THEN 'UNKNOWN'
+        ELSE ai.ca_country
+    END AS customer_country,
+    COALESCE(SUM(returns.returned_quantity), 0) AS total_returns
+FROM
+    LatestSales l
+LEFT JOIN AddressInfo ai ON l.ss_item_sk = ai.c_customer_sk
+LEFT JOIN (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS returned_quantity
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+) returns ON l.ss_item_sk = returns.sr_item_sk
+GROUP BY
+    l.ss_item_sk, l.ss_quantity, l.ss_net_paid, l.sales_status, ai.ca_city, ai.ca_state, ai.ca_country
+HAVING
+    total_returns < 20
+ORDER BY
+    total_sales DESC;

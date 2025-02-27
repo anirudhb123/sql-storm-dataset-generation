@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           NULL::int AS parent_movie_id,
+           0 AS level
+    FROM aka_title AS mt
+    WHERE mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           mh.movie_id AS parent_movie_id,
+           mh.level + 1
+    FROM aka_title AS mt
+    JOIN movie_link AS ml ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy AS mh ON mh.movie_id = ml.movie_id
+    WHERE mh.level < 5 
+),
+cast_summary AS (
+    SELECT ci.movie_id,
+           COUNT(ci.id) AS total_cast,
+           AVG(CASE WHEN role.name IS NOT NULL THEN 1 ELSE 0 END) AS avg_aka_role
+    FROM cast_info ci
+    LEFT JOIN role_type role ON role.id = ci.role_id
+    GROUP BY ci.movie_id
+),
+movie_details AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           COALESCE(s.avg_aka_role, 0) AS avg_cast_roles,
+           s.total_cast
+    FROM aka_title mt
+    LEFT JOIN cast_summary s ON s.movie_id = mt.id
+)
+SELECT md.movie_id, 
+       md.title, 
+       md.production_year,
+       mh.parent_movie_id,
+       mh.level,
+       CASE 
+           WHEN md.total_cast IS NULL THEN 'No Cast Available'
+           ELSE CAST(md.total_cast AS TEXT)
+       END AS cast_count,
+       CASE 
+           WHEN mh.level = 0 THEN 'Root Movie'
+           WHEN mh.level = 1 THEN 'Child Movie'
+           ELSE 'Descendant Movie'
+       END AS movie_hierarchy_level,
+       STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+       (SELECT COUNT(*) 
+        FROM movie_info mi 
+        WHERE mi.movie_id = md.movie_id AND mi.info_type_id IS NOT NULL) AS info_types_count
+FROM movie_details md
+LEFT JOIN movie_keyword mk ON mk.movie_id = md.movie_id
+LEFT JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN movie_hierarchy mh ON mh.movie_id = md.movie_id
+GROUP BY md.movie_id, md.title, md.production_year, mh.parent_movie_id, mh.level, md.total_cast
+ORDER BY md.production_year DESC, cast_count DESC NULLS LAST;

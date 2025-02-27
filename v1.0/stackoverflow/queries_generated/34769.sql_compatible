@@ -1,0 +1,77 @@
+
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        rpc.Depth + 1 AS Depth
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostChain rpc ON q.Id = rpc.PostId
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Depth,
+        COALESCE(COUNT(v.Id), 0) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        RecursivePostChain rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Depth
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Depth,
+    ps.VoteCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    CASE 
+        WHEN ub.BadgeCount > 0 THEN ub.BadgeNames
+        ELSE 'No Badges'
+    END AS UserBadges,
+    EXTRACT(YEAR FROM CURRENT_DATE) - EXTRACT(YEAR FROM ps.CreationDate) AS AgeInYears
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ps.Depth <= 2
+ORDER BY 
+    ps.VoteCount DESC, 
+    ps.CreationDate DESC;

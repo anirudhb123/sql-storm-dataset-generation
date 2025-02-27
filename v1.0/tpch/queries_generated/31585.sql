@@ -1,0 +1,47 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderTotals AS (
+    SELECT c.c_custkey,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT p.p_name,
+       p.p_mfgr,
+       COALESCE(sf.total_available, 0) AS total_available,
+       cs.total_spent,
+       RANK() OVER (PARTITION BY cs.order_count ORDER BY cs.total_spent DESC) AS rank,
+       CASE 
+           WHEN cs.total_spent IS NULL THEN 'No Orders'
+           ELSE 'Active Customer'
+       END AS customer_status,
+       COUNT(DISTINCT oh.o_orderkey) AS order_hierarchy_count
+FROM part p
+LEFT JOIN SupplierStats sf ON sf.ps_partkey = p.p_partkey
+LEFT JOIN CustomerOrderTotals cs ON cs.c_custkey IN (
+    SELECT DISTINCT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+)
+LEFT JOIN OrderHierarchy oh ON oh.o_custkey = cs.c_custkey
+WHERE (p.p_retailprice * 0.9) > sf.avg_supplier_balance
+OR (sf.avg_supplier_balance IS NULL AND cs.total_spent IS null)
+GROUP BY p.p_name, p.p_mfgr, sf.total_available, cs.total_spent;

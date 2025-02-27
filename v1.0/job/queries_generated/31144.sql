@@ -1,0 +1,61 @@
+WITH RECURSIVE ActorHierarchy AS (
+    -- This CTE constructs an actor hierarchy based on their roles in different movies
+    SELECT 
+        ca.person_id AS actor_id,
+        ca.movie_id AS movie_id,
+        ca.role_id,
+        1 AS level
+    FROM 
+        cast_info ca
+    UNION ALL
+    SELECT 
+        ca.person_id,
+        mc.linked_movie_id,
+        ca.role_id,
+        ah.level + 1
+    FROM 
+        cast_info ca
+    JOIN 
+        movie_link ml ON ca.movie_id = ml.movie_id
+    JOIN 
+        ActorHierarchy ah ON ml.linked_movie_id = ah.movie_id
+)
+, ActorStats AS (
+    -- CTE to calculate total roles and distinct movies for each actor
+    SELECT 
+        person_id,
+        COUNT(DISTINCT movie_id) AS total_movies,
+        COUNT(role_id) AS total_roles
+    FROM 
+        ActorHierarchy
+    GROUP BY 
+        person_id
+)
+-- Main query to get actor names and movie details filtered by certain conditions
+SELECT 
+    ak.name AS actor_name,
+    ak.name_pcode_nf AS actor_code,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(COUNT(DISTINCT m.movie_id), 0) AS co_star_count,
+    AVG(COALESCE(ms.info::float, 0)) AS average_movie_score
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Score') 
+LEFT JOIN 
+    ActorStats as ON as.person_id = ak.person_id
+WHERE 
+    ak.person_id IS NOT NULL 
+    AND (t.production_year > 2000 OR t.production_year IS NULL)
+GROUP BY 
+    ak.name, ak.name_pcode_nf, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY 
+    average_movie_score DESC
+LIMIT 10;

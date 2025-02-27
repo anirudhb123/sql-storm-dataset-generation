@@ -1,0 +1,72 @@
+WITH RECURSIVE TotalOrderValue AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    UNION ALL
+    SELECT 
+        o.o_orderkey, 
+        tv.total_value + SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        TotalOrderValue tv
+    JOIN 
+        orders o ON tv.o_orderkey = o.o_orderkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, tv.total_value
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(cos.total_spent) AS avg_spent,
+    SUM(CASE WHEN s.rank <= 5 THEN s.total_cost ELSE 0 END) AS top_supplier_cost,
+    MAX(cos.total_orders) AS max_orders
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrderStats cos ON n.n_nationkey = cos.c_custkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey
+WHERE 
+    (cos.total_spent IS NOT NULL OR cos.total_orders > 0)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY 
+    avg_spent DESC;

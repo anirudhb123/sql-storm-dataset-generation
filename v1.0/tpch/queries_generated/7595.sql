@@ -1,0 +1,50 @@
+WITH Revenue AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= DATE '2022-01-01' AND l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        l_orderkey
+), 
+CustomerData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(r.total_revenue) OVER (PARTITION BY c.c_custkey) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        Revenue r ON r.o_custkey = c.c_custkey
+), 
+RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.nation_name,
+        c.region_name,
+        c.total_revenue,
+        ROW_NUMBER() OVER (ORDER BY c.total_revenue DESC) AS revenue_rank
+    FROM 
+        CustomerData c
+) 
+SELECT 
+    rc.c_custkey,
+    rc.c_name,
+    rc.nation_name,
+    rc.region_name,
+    rc.total_revenue
+FROM 
+    RankedCustomers rc
+WHERE 
+    rc.revenue_rank <= 10
+ORDER BY 
+    rc.total_revenue DESC;

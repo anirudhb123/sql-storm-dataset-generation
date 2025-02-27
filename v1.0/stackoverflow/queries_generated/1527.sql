@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+TopPostsHistory AS (
+    SELECT 
+        T.PostId,
+        PH.CreationDate AS HistoryDate,
+        PHT.Name AS HistoryType,
+        PH.UserDisplayName,
+        PH.Comment
+    FROM 
+        TopPosts T
+    JOIN 
+        PostHistory PH ON T.PostId = PH.PostId
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= T.CreationDate
+),
+RecentVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= '2023-01-01'
+    GROUP BY 
+        PostId
+)
+SELECT 
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.Score,
+    T.ViewCount,
+    T.OwnerDisplayName,
+    COALESCE(V.VoteCount, 0) AS TotalVoteCount,
+    COALESCE(V.UpVoteCount, 0) AS TotalUpVotes,
+    COALESCE(V.DownVoteCount, 0) AS TotalDownVotes,
+    STRING_AGG(TH.HistoryType || ': ' || TH.Comment, '; ' ORDER BY TH.HistoryDate) AS HistoryInfo
+FROM 
+    TopPosts T
+LEFT JOIN 
+    RecentVotes V ON T.PostId = V.PostId
+LEFT JOIN 
+    TopPostsHistory TH ON T.PostId = TH.PostId
+GROUP BY 
+    T.PostId, T.Title, T.CreationDate, T.Score, T.ViewCount, T.OwnerDisplayName
+ORDER BY 
+    T.Score DESC, T.CreationDate DESC;

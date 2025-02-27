@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        PHT.Name AS PostHistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    ua.PostCount,
+    ua.TotalViews,
+    ua.CommentCount,
+    ua.VoteCount,
+    rph.Depth AS PostDepth,
+    array_agg(DISTINCT ph.UserDisplayName) AS Editors,
+    ph.Comment AS LastComment,
+    ph.CreationDate AS LastEdited,
+    ph.PostHistoryType
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId AND ph.rn = 1
+WHERE 
+    p.ViewCount > 0
+GROUP BY 
+    p.Id, u.DisplayName, ua.PostCount, ua.TotalViews, ua.CommentCount, ua.VoteCount, rph.Depth, ph.Comment, ph.CreationDate, ph.PostHistoryType
+ORDER BY 
+    ua.TotalViews DESC, p.CreationDate DESC
+LIMIT 100;

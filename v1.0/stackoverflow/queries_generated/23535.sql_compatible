@@ -1,0 +1,88 @@
+
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.AcceptedAnswerId, P.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.PostTypeId,
+        PS.Upvotes,
+        PS.Downvotes,
+        PS.CommentCount,
+        PS.AcceptedAnswerId,
+        PS.CreationDate
+    FROM 
+        PostStatistics PS
+    WHERE 
+        PS.PostRank <= 5
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation > 1000 THEN 'High'
+            WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users U
+),
+RecentActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.CreationDate) AS RecentComments,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        C.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    T.Title,
+    T.PostId,
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    U.ReputationLevel,
+    RA.RecentComments,
+    RA.LastCommentDate,
+    CASE 
+        WHEN T.Upvotes > T.Downvotes THEN 'Positive'
+        WHEN T.Upvotes < T.Downvotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus,
+    JSON_AGG(DISTINCT PH.PostHistoryTypeId) AS PostHistoryTypes 
+FROM 
+    TopPosts T
+INNER JOIN 
+    Users U ON T.AcceptedAnswerId = U.Id
+LEFT JOIN 
+    RecentActivity RA ON T.PostId = RA.PostId
+LEFT JOIN 
+    PostHistory PH ON PH.PostId = T.PostId 
+GROUP BY 
+    T.PostId, T.Title, U.DisplayName, U.Reputation, U.ReputationLevel, RA.RecentComments, RA.LastCommentDate
+ORDER BY 
+    T.CreationDate DESC;

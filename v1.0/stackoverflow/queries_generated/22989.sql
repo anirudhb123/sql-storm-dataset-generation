@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5) THEN ph.CreationDate END) AS LastEditDate,
+        MAX(ph.UserDisplayName) FILTER (WHERE ph.PostHistoryTypeId IN (4, 5)) AS LastEditor
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(crt.Name, ', ') AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(phd.EditCount, 0) AS EditCount,
+    COALESCE(phd.LastEditDate, 'Never') AS LastEditDate,
+    COALESCE(phd.LastEditor, 'N/A') AS LastEditor,
+    COALESCE(cr.CloseReason, 'Not Closed') AS CloseReason,
+    rp.RankByViews,
+    rp.CommentCount,
+    rp.TotalBounty
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.RankByViews <= 3 -- Top 3 posts by user
+    AND rp.CommentCount > 5
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

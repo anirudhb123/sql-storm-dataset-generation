@@ -1,0 +1,85 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATEADD(YEAR, -1, '1998-10-01')
+),
+SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(NULLIF(ps.ps_supplycost, 0)) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerPurchases AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+CombinedStats AS (
+    SELECT
+        cs.c_name,
+        cs.total_spent,
+        ss.total_avail_qty,
+        ss.avg_supply_cost,
+        CASE 
+            WHEN ss.total_avail_qty IS NOT NULL AND cs.total_spent IS NOT NULL THEN 
+                cs.total_spent / NULLIF(ss.total_avail_qty, 0)
+            ELSE 
+                NULL
+        END AS spending_per_availability
+    FROM
+        CustomerPurchases cs
+    LEFT JOIN
+        SupplierStats ss ON cs.order_count > 10 
+)
+SELECT
+    r.o_orderkey,
+    CASE 
+        WHEN r.order_rank <= 5 THEN 'Top Recent Order'
+        WHEN r.order_rank <= 10 THEN 'Recent Order'
+        ELSE 'Older Order'
+    END AS order_recency,
+    cs.c_name,
+    cs.total_spent,
+    cs.spending_per_availability,
+    COALESCE(cs.avg_supply_cost, 0) AS avg_supply_cost,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Spending'
+        ELSE 'Spent'
+    END AS spending_status
+FROM
+    RankedOrders r
+LEFT JOIN
+    CombinedStats cs ON r.o_orderkey = cs.total_spent
+WHERE
+    (r.o_orderstatus != 'C' OR r.o_orderdate < DATEADD(DAY, -30, '1998-10-01'))
+ORDER BY
+    r.o_orderdate DESC, cs.total_spent DESC 
+FETCH FIRST 100 ROWS ONLY;

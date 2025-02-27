@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY h.CreationDate DESC) AS LatestHistory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+TopEngagedPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.LatestHistory = 1
+    ORDER BY 
+        rp.Score DESC, 
+        rp.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    u.DisplayName AS Owner,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    TopEngagedPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId 
+GROUP BY 
+    tp.Id, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, u.DisplayName
+ORDER BY 
+    tp.Score DESC;

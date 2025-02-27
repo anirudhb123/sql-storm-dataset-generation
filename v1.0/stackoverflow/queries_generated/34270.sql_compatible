@@ -1,0 +1,75 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(V.Score, 0)) AS TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS RecentActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalVotes,
+        RANK() OVER (ORDER BY PostCount DESC, TotalVotes DESC) AS ActivityRank
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation IS NOT NULL
+),
+RecentPostUpdates AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.Body,
+        P.LastActivityDate,
+        P.Score,
+        PH.PostHistoryTypeId,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS UpdateRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.Reputation,
+    RU.PostCount,
+    RU.TotalVotes,
+    RU.ActivityRank,
+    P.PostId,
+    P.Title,
+    P.Body AS PostBody,
+    P.LastActivityDate,
+    P.Score,
+    COUNT(RP.UserId) AS RecentUpdateCount,
+    STRING_AGG(DISTINCT CASE WHEN RP.PostHistoryTypeId = 10 THEN 'Closed' ELSE 'Other' END, ', ') AS RecentActionTypes
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    RecentPostUpdates RP ON RU.UserId = RP.UserId
+LEFT JOIN 
+    Posts P ON RP.PostId = P.Id
+WHERE 
+    RU.ActivityRank <= 100
+GROUP BY 
+    RU.UserId, RU.DisplayName, RU.Reputation, RU.PostCount, RU.TotalVotes, RU.ActivityRank, P.PostId, P.Title, P.Body, P.LastActivityDate, P.Score
+ORDER BY 
+    RU.ActivityRank, RU.Reputation DESC, RU.PostCount DESC;

@@ -1,0 +1,34 @@
+SELECT 
+    name.name AS actor_name,
+    title.title AS movie_title,
+    aka_title.production_year,
+    role_type.role AS role,
+    COUNT(DISTINCT movie_keyword.keyword_id) AS keyword_count,
+    COUNT(DISTINCT movie_companies.company_id) AS company_count
+FROM 
+    cast_info 
+JOIN 
+    aka_name ON cast_info.person_id = aka_name.person_id 
+JOIN 
+    title ON cast_info.movie_id = title.id 
+JOIN 
+    role_type ON cast_info.role_id = role_type.id 
+JOIN 
+    movie_keyword ON title.id = movie_keyword.movie_id 
+JOIN 
+    movie_companies ON title.id = movie_companies.movie_id 
+JOIN 
+    company_name ON movie_companies.company_id = company_name.id 
+JOIN 
+    info_type ON person_info.info_type_id = info_type.id 
+JOIN 
+    person_info ON cast_info.person_id = person_info.person_id 
+JOIN 
+    aka_title ON title.id = aka_title.movie_id 
+WHERE 
+    aka_title.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND title.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    actor_name, movie_title, aka_title.production_year, role
+ORDER BY 
+    keyword_count DESC, company_count DESC;

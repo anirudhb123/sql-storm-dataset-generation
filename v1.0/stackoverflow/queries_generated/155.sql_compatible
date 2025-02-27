@@ -1,0 +1,59 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes c ON CAST(ph.Comment AS INTEGER) = c.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    up.TotalVotes AS UserTotalVotes,
+    up.UpVotes AS UserUpVotes,
+    up.DownVotes AS UserDownVotes,
+    COALESCE(ch.LastClosedDate, 'No Closure') AS LastClosed,
+    COALESCE(ch.CloseReasons, 'N/A') AS CloseReasons,
+    CASE 
+        WHEN ps.UserPostRank <= 5 THEN 'Top Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM PostStats ps
+LEFT JOIN UserVoteCounts up ON ps.PostId = (SELECT AcceptedAnswerId FROM Posts WHERE Id = ps.PostId)
+LEFT JOIN ClosedPostHistory ch ON ps.PostId = ch.PostId
+WHERE ps.ViewCount > 100 
+ORDER BY ps.ViewCount DESC, ps.CreationDate DESC;

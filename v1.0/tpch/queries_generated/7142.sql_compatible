@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.c_name AS customer_name,
+    cs.o_orderkey,
+    cs.o_orderdate,
+    rs.total_cost AS supplier_total_cost,
+    rs.s_name AS top_supplier_name
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    CustomerOrders co ON cs.c_custkey = co.c_custkey AND co.order_rank = 1
+LEFT JOIN 
+    RankedSuppliers rs ON cs.c_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        JOIN orders o ON c.c_custkey = o.o_custkey 
+        WHERE o.o_orderkey = co.o_orderkey 
+        ORDER BY o.o_totalprice DESC 
+        FETCH FIRST 1 ROWS ONLY
+    )
+WHERE 
+    co.o_orderdate >= DATE '1996-01-01'
+ORDER BY 
+    r.r_name, n.n_name, cs.c_name;

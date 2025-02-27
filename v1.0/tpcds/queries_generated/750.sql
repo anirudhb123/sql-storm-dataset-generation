@@ -1,0 +1,75 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate,
+        d.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+TopReturningCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.total_returns,
+        cr.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cr.total_return_amount DESC) AS rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        CustomerDemographics cd ON cr.sr_customer_sk = cd.c_customer_sk
+),
+ActiveItems AS (
+    SELECT 
+        i_item_sk,
+        i_product_name,
+        SUM(ws_quantity) AS total_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        i_item_sk, i_product_name
+)
+
+SELECT 
+    t.rcustomer,
+    t.total_returns,
+    t.total_return_amount,
+    t.cd_gender,
+    t.cd_marital_status,
+    ai.i_product_name,
+    ai.total_sold,
+    CASE 
+        WHEN t.total_returns IS NULL THEN 'No Returns'
+        ELSE 'Returns Exist'
+    END AS return_status,
+    COALESCE(NULLIF(t.avg_return_quantity, 0), 'No Quantity') AS average_return_quantity
+FROM 
+    TopReturningCustomers t
+LEFT JOIN 
+    ActiveItems ai ON t.sr_customer_sk = ai.i_item_sk
+WHERE 
+    t.rank <= 5
+ORDER BY 
+    t.total_return_amount DESC;

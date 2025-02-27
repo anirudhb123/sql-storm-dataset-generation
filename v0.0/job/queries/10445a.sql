@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1980) (USA) (theatrical) (presents)', '(1982) (Netherlands) (TV) (13 episodes)', '(1992) (India) (theatrical) (ceded)', '(1994) (worldwide) (all media) (as Atari Jaguar)', '(2004-2009) (UK) (DVD) (as ADV Films UK)', '(2010) (Switzerland) (DVD)', '(????) (USA) (VHS) (XXX double feature #81) (edited version)') AND ci.role_id IN (1, 10, 11, 2, 3, 4, 5, 6, 7, 8) AND t.phonetic_code IS NOT NULL AND n.id < 3878254;

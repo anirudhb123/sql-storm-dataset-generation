@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_sales_price, 
+        1 AS level
+    FROM 
+        store_sales
+    JOIN 
+        item ON store_sales.ss_item_sk = item.i_item_sk
+    WHERE 
+        s_store_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk, 
+        sh.s_store_name, 
+        sh.s_sales_price * 1.1 AS s_sales_price, 
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store ON sh.s_store_sk = store.s_store_sk
+    WHERE 
+        sh.level < 5
+),
+
+sales_summary AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        AVG(ss_ext_sales_price) AS average_sales
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+),
+
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        c.c_state
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_state
+)
+
+SELECT 
+    sa.s_store_name, 
+    ss.total_sales, 
+    ss.transaction_count, 
+    cs.total_net_profit,
+    cs.total_orders,
+    CASE 
+        WHEN cs.total_orders > 0 THEN cs.total_net_profit / cs.total_orders 
+        ELSE 0 
+    END AS average_net_profit_per_order
+FROM 
+    sales_summary ss
+JOIN 
+    store sa ON ss.ss_store_sk = sa.s_store_sk
+LEFT JOIN 
+    customer_sales cs ON sa.s_store_sk = cs.c_customer_sk
+WHERE 
+    sa.s_state = 'CA' OR sa.s_state IS NULL
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

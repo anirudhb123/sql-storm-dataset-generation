@@ -1,0 +1,97 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        sh.level < 10
+), PartSupplierCount AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), OrderRevenue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+), HighValueOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(re.revenue) AS total_revenue
+    FROM 
+        OrderRevenue re
+    JOIN 
+        orders o ON re.o_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_custkey
+    HAVING 
+        SUM(re.revenue) > 10000
+), NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        RANK() OVER (ORDER BY AVG(s.s_acctbal) DESC) AS rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(psc.supplier_count, 0) AS supplier_count,
+    COALESCE(hvo.total_revenue, 0) AS customer_revenue,
+    nd.n_name,
+    sh.level
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierCount psc ON p.p_partkey = psc.ps_partkey
+LEFT JOIN 
+    HighValueOrders hvo ON p.p_partkey = hvo.o_custkey
+LEFT JOIN 
+    nation nd ON nd.n_nationkey = (
+        SELECT n.n_nationkey
+        FROM supplier s
+        JOIN HighValueOrders hvo ON s.s_suppkey = hvo.o_custkey
+        WHERE s.s_nationkey = nd.n_nationkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierHierarchy sh ON sh.s_nationkey = nd.n_nationkey
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice >= 100)
+ORDER BY 
+    p.p_retailprice DESC, 
+    nd.n_name, 
+    sh.level;

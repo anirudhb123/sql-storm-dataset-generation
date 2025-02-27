@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, 
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.s_nationkey
+    HAVING COUNT(DISTINCT p.p_partkey) > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey,
+           sc.part_count + COUNT(DISTINCT p.p_partkey),
+           sc.total_cost + SUM(ps.ps_availqty * ps.ps_supplycost)
+    FROM SupplierChain sc
+    JOIN supplier s ON sc.s_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sc.s_suppkey <> s.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, sc.part_count, sc.total_cost
+),
+RankedSuppliers AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY total_cost DESC) AS rank
+    FROM SupplierChain
+)
+SELECT rs.s_name, rs.total_cost, rs.part_count,
+       CASE 
+           WHEN rs.total_cost IS NULL THEN 'No Cost'
+           WHEN rs.total_cost > 100000 THEN 'High Spend'
+           ELSE 'Low Spend'
+       END AS spending_category,
+       COALESCE(n.n_name, 'Undefined') AS nation_name,
+       st.GetSupplierComment AS clever_comment
+FROM RankedSuppliers rs
+LEFT OUTER JOIN nation n ON rs.s_nationkey = n.n_nationkey
+CROSS JOIN (SELECT DISTINCT 'Supplier ' || s_name || ' is always ready to serve!' AS GetSupplierComment
+            FROM supplier) st
+WHERE rs.rank = 1
+  AND rs.s_nationkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%East%')
+  AND EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = rs.s_nationkey)
+ORDER BY rs.total_cost DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

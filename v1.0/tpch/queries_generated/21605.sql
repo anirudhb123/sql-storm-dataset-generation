@@ -1,0 +1,58 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           ps.ps_supplycost,
+           ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty) AS cost_efficiency
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp) 
+    AND ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerDetails AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           c.c_nationkey,
+           n.n_name AS nation_name,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+OrderLineSummary AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           o.o_orderdate,
+           COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT cd.c_name,
+       cd.nation_name,
+       CASE WHEN MAX(r.s_suppkey) IS NULL THEN 'No Suppliers' ELSE 'Has Suppliers' END AS supplier_status,
+       SUM(ohl.total_revenue) AS order_revenue,
+       COUNT(DISTINCT hpp.p_partkey) AS high_value_parts_count
+FROM CustomerDetails cd
+LEFT JOIN RankedSuppliers r ON r.s_suppkey = cd.c_custkey
+LEFT JOIN OrderLineSummary ohl ON ohl.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = cd.c_custkey
+)
+LEFT JOIN HighValueParts hpp ON hpp.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_supplycost >= (SELECT MIN(ps_supplycost) FROM partsupp)
+)
+GROUP BY cd.c_name, cd.nation_name
+HAVING COUNT(DISTINCT hpp.p_partkey) > 0 
+   OR SUM(ohl.total_revenue) IS NULL
+ORDER BY order_revenue DESC NULLS LAST;

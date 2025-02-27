@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT
+        cs.cs_bill_customer_sk,
+        cs.total_profit,
+        cs.total_orders,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        COALESCE(ca.ca_zip, 'Unknown') AS ca_zip_code
+    FROM sales_summary cs
+    JOIN customer_demographics cd ON cs.ws_bill_customer_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON cs.ws_bill_customer_sk = ca.ca_address_sk
+    WHERE cs.rank <= 10
+),
+item_revenue AS (
+    SELECT
+        i.i_item_id,
+        SUM(ws.ws_net_profit) AS item_revenue
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+)
+SELECT 
+    tc.ws_bill_customer_sk,
+    tc.total_profit,
+    tc.total_orders,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.ca_city,
+    tc.ca_zip_code,
+    ir.item_revenue,
+    CASE 
+        WHEN tc.total_profit > (SELECT AVG(total_profit) FROM sales_summary) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS profit_classification
+FROM top_customers tc
+FULL OUTER JOIN item_revenue ir ON ir.item_revenue = (SELECT MAX(item_revenue) FROM item_revenue)
+ORDER BY tc.total_profit DESC;

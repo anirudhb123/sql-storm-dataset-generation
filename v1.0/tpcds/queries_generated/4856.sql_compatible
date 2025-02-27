@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr.return_quantity, 0)) AS total_returned_items,
+        SUM(COALESCE(sr.return_amt_inc_tax, 0)) AS total_returned_amount,
+        COUNT(DISTINCT sr.ticket_number) AS return_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+IncomeLevel AS (
+    SELECT 
+        cd.demo_sk, 
+        CASE 
+            WHEN ib.lower_bound IS NULL THEN 'Unknown'
+            WHEN cd.purchase_estimate < ib.lower_bound THEN 'Below Minimum'
+            WHEN cd.purchase_estimate >= ib.lower_bound AND cd.purchase_estimate <= ib.upper_bound THEN 'Within Range'
+            ELSE 'Above Maximum'
+        END AS income_band
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.demo_sk = hd.demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.income_band_sk = ib.income_band_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    c.c_customer_id,
+    cl.income_band,
+    COALESCE(cr.total_returned_items, 0) AS total_returned_items,
+    COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+    ss.total_orders,
+    ss.total_sales,
+    ss.average_profit
+FROM 
+    CustomerReturns cr
+JOIN 
+    IncomeLevel cl ON cr.c_customer_id = (SELECT c_customer_id FROM customer WHERE current_cdemo_sk = cl.demo_sk LIMIT 1)
+LEFT JOIN 
+    SalesSummary ss ON ss.web_site_sk IN (SELECT ws.web_site_sk FROM web_site ws WHERE ws.web_name LIKE '%Shop%')
+ORDER BY 
+    total_returned_amount DESC, 
+    total_returned_items DESC;

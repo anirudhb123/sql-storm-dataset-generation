@@ -1,0 +1,54 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+), 
+customer_summary AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_sales_price) AS total_purchase
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c_customer_sk
+), 
+demographic_summary AS (
+    SELECT 
+        cd_demo_sk, 
+        SUM(total_purchase) AS total_spent,
+        COUNT(DISTINCT total_orders) AS order_count
+    FROM 
+        customer_summary
+    JOIN 
+        customer_demographics cd ON customer_summary.c_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_demo_sk
+)
+SELECT 
+    d.d_year,
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers,
+    SUM(cs.total_spent) AS total_spent,
+    AVG(cs.order_count) AS avg_orders_per_customer,
+    MAX(cs.total_spent) AS max_spent_customer
+FROM 
+    demographic_summary cs
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+GROUP BY 
+    d.d_year
+ORDER BY 
+    d.d_year DESC
+LIMIT 10;

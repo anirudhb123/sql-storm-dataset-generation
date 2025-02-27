@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_in_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+
+CoActors AS (
+    SELECT 
+        ci.movie_id,
+        k.keyword,
+        COUNT(DISTINCT ci.person_id) AS co_actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        ci.movie_id, k.keyword
+),
+
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id, c.name
+),
+
+InfoSummary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(CONCAT(it.info, ': ', mi.info) ORDER BY it.id) AS movie_info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(cs.company_count, 0) AS total_companies,
+    COALESCE(ca.co_actor_count, 0) AS total_co_actors,
+    COALESCE(is.movie_info_summary, 'No Info Available') AS info_summary
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyStats cs ON rm.movie_id = cs.movie_id
+LEFT JOIN 
+    CoActors ca ON rm.movie_id = ca.movie_id
+LEFT JOIN 
+    InfoSummary is ON rm.movie_id = is.movie_id
+WHERE 
+    (rm.rank_in_year = 1 OR cs.company_count >= 2) -- Edge case: Include only top-ranked movies or those with multiple companies
+ORDER BY 
+    rm.production_year DESC, rm.title;
+
+-- This query retrieves top movies based on production year, highlights their 
+-- company associations, co-actor information using keywords, and combines 
+-- various summaries of movie info while addressing NULLs and edge conditions.

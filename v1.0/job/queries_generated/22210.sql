@@ -1,0 +1,90 @@
+WITH RecursiveTitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.name) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        t.title_id,
+        t.title,
+        t.production_year,
+        'Repeating Actor' AS actor_name,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY 'Repeating Actor')
+    FROM 
+        RecursiveTitleInfo t 
+    WHERE 
+        rn < 3
+),
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        mt.company_id,
+        c.name AS company_name,
+        kt.keyword
+    FROM 
+        movie_companies mt
+    JOIN 
+        company_name c ON mt.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        c.country_code IN ('USA', 'CAN')
+    AND 
+        kt.keyword IS NOT NULL
+),
+FilteringCTE AS (
+    SELECT 
+        titleInfo.title,
+        titleInfo.production_year,
+        titleInfo.actor_name,
+        titleInfo.kind_id,
+        COALESCE(md.company_name, 'No Company') AS company_name
+    FROM 
+        RecursiveTitleInfo titleInfo
+    LEFT JOIN 
+        MovieDetails md ON titleInfo.title_id = md.movie_id
+    WHERE 
+        (titleInfo.production_year > 2000 AND titleInfo.production_year < 2023)
+        OR (titleInfo.actor_name IS NOT NULL AND titleInfo.actor_name != 'Unknown')
+        OR (md.company_name IS NULL)
+),
+FinalOutput AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actor_name) % 2 = 0 
+            THEN 'Even Row' 
+            ELSE 'Odd Row' 
+        END AS row_parity,
+        LENGTH(actor_name) AS actor_name_length
+    FROM 
+        FilteringCTE
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_name,
+    f.company_name,
+    f.row_parity,
+    f.actor_name_length
+FROM 
+    FinalOutput f
+WHERE
+    (f.row_parity = 'Odd Row' AND f.company_name LIKE 'A%')
+    OR (f.actor_name_length > 10 AND f.company_name = 'No Company')
+ORDER BY 
+    f.production_year DESC, f.actor_name;

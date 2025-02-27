@@ -1,0 +1,67 @@
+
+WITH RECURSIVE Sales_Rank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Sales_Analysis AS (
+    SELECT 
+        sr.c_customer_sk,
+        sr.c_first_name,
+        sr.c_last_name,
+        sr.total_profit,
+        CASE 
+            WHEN total_profit IS NULL THEN 'No Sales'
+            WHEN total_profit < 1000 THEN 'Low Profit'
+            WHEN total_profit < 5000 THEN 'Medium Profit'
+            ELSE 'High Profit'
+        END AS profit_category
+    FROM 
+        Sales_Rank sr
+),
+Customer_Thanks AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        coalesce(MAX(s.last_thank_you_date), '1900-01-01') AS last_thank_you_date
+    FROM 
+        customer c
+    LEFT JOIN (
+        SELECT 
+            wr_returning_customer_sk,
+            MAX(wr_returned_date_sk) AS last_thank_you_date
+        FROM 
+            web_returns
+        GROUP BY 
+            wr_returning_customer_sk
+    ) s ON c.c_customer_sk = s.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+)
+SELECT 
+    sa.c_customer_sk,
+    sa.c_first_name,
+    sa.c_last_name,
+    sa.total_profit,
+    sa.profit_category,
+    CONCAT('Thank you for your business! Last thanked on: ', 
+           TO_CHAR(CTE_DATE(d.d_date, 'Day, Month DD, YYYY'))) AS thank_you_message
+FROM 
+    Sales_Analysis sa
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(last_thank_you_date) FROM Customer_Thanks WHERE c_customer_sk = sa.c_customer_sk)
+WHERE 
+    sa.profit_category != 'No Sales'
+ORDER BY 
+    total_profit DESC
+LIMIT 100;

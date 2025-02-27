@@ -1,0 +1,82 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice 
+        END AS effective_price,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+)
+
+SELECT
+    c.c_custkey, 
+    c.c_name, 
+    COALESCE(RS.s_name, 'No Supplier') AS supplier_name,
+    FP.p_name,
+    FP.effective_price,
+    FP.total_available_qty,
+    COALESCE(CO.order_count, 0) AS order_count,
+    COALESCE(CO.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN CO.last_order_date IS NOT NULL AND CO.last_order_date < cast('1998-10-01' as date) - INTERVAL '365 days' 
+            THEN 'Inactive'
+        ELSE 'Active'
+    END AS customer_status
+FROM 
+    FilteredParts FP
+LEFT JOIN 
+    RankedSuppliers RS ON FP.p_partkey = RS.s_suppkey AND RS.rank = 1
+LEFT JOIN 
+    CustomerOrders CO ON CO.c_custkey = (SELECT c.c_custkey 
+                                          FROM customer c 
+                                          WHERE c.c_nationkey = (SELECT n.n_nationkey 
+                                                                  FROM nation n 
+                                                                  WHERE n.n_name = 'UNITED STATES')
+                                          ORDER BY random() 
+                                          LIMIT 1)
+WHERE 
+    FP.effective_price > (
+        SELECT AVG(effective_price) 
+        FROM FilteredParts
+    ) AND RS.rank IS NULL
+ORDER BY 
+    FP.total_available_qty DESC, 
+    total_spent DESC;

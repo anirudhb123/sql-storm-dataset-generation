@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank 
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finalized Order'
+            WHEN o.o_orderstatus = 'P' THEN 'Pending Order'
+            ELSE 'Other'
+        END AS status_description
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    AND 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate >= DATEADD(month, -12, CURRENT_DATE)
+        )
+), OrderLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), ResultSet AS (
+    SELECT 
+        fo.o_orderkey, 
+        fo.o_orderdate, 
+        fo.o_totalprice, 
+        ol.total_sales, 
+        ol.part_count, 
+        rs.s_name AS top_supplier
+    FROM 
+        FilteredOrders fo
+    LEFT JOIN 
+        OrderLineItems ol ON fo.o_orderkey = ol.l_orderkey
+    LEFT JOIN 
+        RankedSuppliers rs ON ol.total_sales IS NOT NULL AND rs.rank = 1
+    WHERE 
+        fo.o_orderdate = (
+            SELECT MAX(o_orderdate) FROM FilteredOrders
+        )
+)
+SELECT 
+    r.*,
+    COALESCE(r.total_sales, 0) AS adjusted_sales,
+    CASE 
+        WHEN r.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM 
+    ResultSet r
+WHERE 
+    (r.o_totalprice - COALESCE(r.total_sales, 0)) / NULLIF(r.o_totalprice, 0) > 0.1
+ORDER BY 
+    r.o_orderdate DESC, r.o_orderkey;

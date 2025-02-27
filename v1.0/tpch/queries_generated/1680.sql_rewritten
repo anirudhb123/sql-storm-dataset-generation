@@ -1,0 +1,65 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price,
+        COUNT(DISTINCT l.l_partkey) AS total_items
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY
+        l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation,
+    s.s_name AS supplier_name,
+    ss.total_cost AS supplier_total_cost,
+    os.total_spent AS customer_total_spent,
+    SUM(lis.total_line_price) AS total_order_value,
+    AVG(ss.part_count) OVER (PARTITION BY n.n_regionkey) AS avg_parts_per_supplier
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN 
+    OrderStats os ON os.c_custkey = s.s_suppkey
+LEFT JOIN 
+    LineItemSummary lis ON lis.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = s.s_suppkey)
+WHERE 
+    ss.total_cost IS NOT NULL OR os.total_spent IS NOT NULL
+GROUP BY 
+    n.n_name, s.s_name, ss.total_cost, os.total_spent, n.n_regionkey
+HAVING 
+    SUM(lis.total_line_price) > 10000
+ORDER BY 
+    n.n_name, total_order_value DESC;

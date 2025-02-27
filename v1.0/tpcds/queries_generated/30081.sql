@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_floor_space,
+           ROW_NUMBER() OVER (ORDER BY s_number_employees DESC) as emp_rank
+    FROM store
+    WHERE s_number_employees IS NOT NULL
+),
+item_stats AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, AVG(ws_net_profit) AS avg_net_profit,
+           SUM(ws_quantity) AS total_quantity
+    FROM web_sales
+    GROUP BY i_item_sk, i_item_id, i_item_desc
+),
+top_items AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, avg_net_profit, total_quantity,
+           RANK() OVER (ORDER BY avg_net_profit DESC) as item_rank
+    FROM item_stats
+    WHERE total_quantity > 100 
+),
+customer_activity AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           COUNT(DISTINCT ws_order_number) AS order_count,
+           SUM(ws_net_profit) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING SUM(ws_net_profit) IS NOT NULL
+),
+special_receipts AS (
+    SELECT sr_returning_customer_sk, SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM store_returns 
+    GROUP BY sr_returning_customer_sk 
+    HAVING SUM(sr_return_amt_inc_tax) > 500
+),
+final_report AS (
+    SELECT c.c_customer_sk, CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+           ch.order_count, ch.total_spent, 
+           si.i_item_id, si.i_item_desc, 
+           si.avg_net_profit, 
+           s.s_store_name, 
+           COALESCE(sr.total_returned, 0) AS total_returned
+    FROM customer_activity ch
+    JOIN customer c ON ch.c_customer_sk = c.c_customer_sk
+    JOIN top_items si ON ch.order_count > 0
+    JOIN sales_hierarchy s ON si.total_quantity > 200
+    LEFT JOIN special_receipts sr ON c.c_customer_sk = sr.sr_returning_customer_sk
+    ORDER BY ch.total_spent DESC, si.avg_net_profit DESC
+)
+SELECT FR.customer_name, FR.total_spent, FR.total_returned, 
+       COUNT(DISTINCT FR.s_store_name) AS active_stores
+FROM final_report FR
+GROUP BY FR.customer_name, FR.total_spent, FR.total_returned
+HAVING SUM(FR.total_returned) < 1000 AND COUNT(DISTINCT FR.i_item_id) > 3
+ORDER BY FR.total_spent DESC;

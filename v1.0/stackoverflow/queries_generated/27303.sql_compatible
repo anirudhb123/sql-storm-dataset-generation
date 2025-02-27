@@ -1,0 +1,66 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId IS NOT NULL, false) AS HasAcceptedAnswer,
+        COALESCE(aa.Id, 0) AS AcceptedAnswerId,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '') AS CleanedTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts aa ON p.AcceptedAnswerId = aa.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStats AS (
+    SELECT 
+        tg.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(pt.CommentCount) AS TotalComments,
+        AVG(pt.CommentCount) AS AvgCommentsPerPost
+    FROM 
+        PostDetails pt
+    CROSS JOIN 
+        Tags tg ON tg.TagName = ANY(string_to_array(pt.CleanedTags, '>')) 
+    GROUP BY 
+        tg.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c 
+        ON p.Id = c.PostId
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalComments,
+    ts.AvgCommentsPerPost,
+    ue.DisplayName AS UserName,
+    ue.TotalPosts,
+    ue.TotalViews,
+    ue.TotalComments
+FROM 
+    TagStats ts
+JOIN 
+    UserEngagement ue ON ts.PostCount > 10 
+ORDER BY 
+    ts.TotalComments DESC, ue.TotalViews DESC
+LIMIT 50;

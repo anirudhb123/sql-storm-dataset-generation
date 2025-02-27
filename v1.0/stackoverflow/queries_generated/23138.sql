@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+        AND p.OwnerUserId > 0
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(u.LastAccessDate) AS LastActiveDate,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'High'
+            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            WHEN u.Reputation < 500 THEN 'Low'
+            ELSE 'Unspecified'
+        END AS ReputationLevel
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId 
+    GROUP BY
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.ReputationLevel,
+        COALESCE(SUM(v.VoteTypeId IN (2)) OVER (PARTITION BY rp.PostId), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId IN (3)) OVER (PARTITION BY rp.PostId), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM
+        RankedPosts rp
+    JOIN
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN
+        Comments c ON rp.PostId = c.PostId
+    WHERE
+        rp.PostRank = 1
+    GROUP BY
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, ur.UserId, ur.Reputation, ur.BadgeCount, ur.ReputationLevel
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.ReputationLevel,
+    ps.BadgeCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.ViewCount IS NULL THEN 'No Views Yet'
+        WHEN ps.ViewCount > 1000 THEN 'Trending'
+        ELSE 'Regular Activity'
+    END AS ActivityStatus
+FROM 
+    PostStats ps
+WHERE 
+    ps.ReputationLevel = 'High'
+    AND ps.Score > 10
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 10;
+
+-- The above query fetches the top blog posts written by highly reputable users (with different badge counts), 
+-- includes metrics such as upvotes, downvotes, and comments, 
+-- and adds some intricate logic to indicate the status of activity based on view counts.

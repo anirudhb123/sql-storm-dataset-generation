@@ -1,0 +1,83 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        1 AS Level
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        Level + 1
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    JOIN 
+        Posts A ON P.Id = A.ParentId
+    WHERE 
+        A.PostTypeId = 2 -- Answers only
+),
+AggregatedUserStats AS (
+    SELECT 
+        UP.UserId,
+        UP.DisplayName,
+        COUNT(DISTINCT UP.PostId) AS TotalQuestions,
+        SUM(UP.Score) AS TotalScore,
+        SUM(UP.ViewCount) AS TotalViews,
+        STRING_AGG(DISTINCT TAG.TagName, ', ') AS TagList
+    FROM 
+        RecursiveUserPosts UP
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(UP.Tags, '<>')) AS Tag ON TRUE
+    GROUP BY 
+        UP.UserId, UP.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalQuestions,
+        TotalScore,
+        TotalViews,
+        TagList,
+        DENSE_RANK() OVER (ORDER BY TotalScore DESC) AS RankScore,
+        DENSE_RANK() OVER (ORDER BY TotalViews DESC) AS RankViews
+    FROM 
+        AggregatedUserStats
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(TU.TotalQuestions, 0) AS Questions,
+    COALESCE(TU.TotalScore, 0) AS Score,
+    COALESCE(TU.TotalViews, 0) AS Views,
+    TU.RankScore,
+    TU.RankViews
+FROM 
+    Users U
+LEFT JOIN 
+    TopUsers TU ON U.Id = TU.UserId
+WHERE 
+    U.Reputation > 1000 -- Consider only users with reputation greater than 1000
+ORDER BY 
+    TU.RankScore, TU.RankViews DESC;

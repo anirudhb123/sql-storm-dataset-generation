@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5
+),
+Contributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        u.Id
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseVotes,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEdits,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS Deletions
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.OwnerDisplayName,
+    pt.TagName,
+    c.Upvotes,
+    c.Downvotes,
+    ph.CloseVotes,
+    ph.SuggestedEdits,
+    ph.Deletions
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || pt.TagName || '%')
+JOIN 
+    Contributors c ON rp.OwnerUserId = c.UserId
+JOIN 
+    PostHistoryData ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

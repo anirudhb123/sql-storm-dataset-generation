@@ -1,0 +1,58 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(DISTINCT P.Id) DESC) AS post_rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+), 
+RecentPostHistory AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS HistoryDate,
+        PH.Comment AS VersionComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS RecentHistoryRank
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.CreationDate > NOW() - INTERVAL '1 year'
+)
+SELECT 
+    RUA.UserId,
+    RUA.DisplayName,
+    RUA.Reputation,
+    RUA.TotalPosts,
+    RUA.TotalVotes,
+    COALESCE(RPH.Title, 'No Recent Activity') AS RecentPostTitle,
+    COALESCE(RPH.HistoryDate::DATE, 'No Recent Activity') AS RecentHistoryDate,
+    COALESCE(RPH.VersionComment, 'N/A') AS RecentVersionComment
+FROM 
+    RecursiveUserActivity RUA
+LEFT JOIN 
+    RecentPostHistory RPH ON RUA.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = RPH.PostId LIMIT 1)
+WHERE 
+    RUA.TotalPosts > 5
+ORDER BY 
+    RUA.TotalVotes DESC, RUA.Reputation DESC
+LIMIT 100;
+

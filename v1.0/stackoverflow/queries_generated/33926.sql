@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        CASE 
+            WHEN P.PostTypeId = 1 THEN 'Question' 
+            WHEN P.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- starting with questions
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        'Answer' AS PostType,
+        P2.CreationDate,
+        Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+    SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+    AVG(COALESCE(V.BountyAmount, 0)) AS AverageBounty,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Votes V2 
+     WHERE 
+         V2.UserId = U.Id AND V2.CreationDate >= now() - INTERVAL '30 days') AS RecentVotesCount,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Badges B 
+     WHERE 
+         B.UserId = U.Id AND B.Class = 1) AS GoldBadges,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Badges B 
+     WHERE 
+         B.UserId = U.Id AND B.Class = 2) AS SilverBadges,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Badges B 
+     WHERE 
+         B.UserId = U.Id AND B.Class = 3) AS BronzeBadges
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    PostTags PT ON P.Id = PT.PostId
+LEFT JOIN 
+    Tags T ON PT.TagId = T.Id
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+WHERE 
+    U.Reputation > 1000 -- filter for active users
+GROUP BY 
+    U.DisplayName
+HAVING 
+    COUNT(DISTINCT P.Id) > 5 -- only users with more than 5 posts
+ORDER BY 
+    TotalPosts DESC, UserName;
+
+-- To benchmark performance, you may adjust the WHERE clause filters, add an INDEX on frequently queried columns,
+-- or analyze execution plans to determine efficiencies of the query operations.

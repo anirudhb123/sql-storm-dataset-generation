@@ -1,0 +1,93 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code = 'USA'
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 5 -- limit to depth of 5 for this hierarchy
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_companies mc ON mc.movie_id = mh.movie_id
+    WHERE 
+        mh.level = 1
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+cast_ranked AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS cast_count,
+        RANK() OVER (ORDER BY COUNT(c.person_id) DESC) AS cast_rank
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+final_selection AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        cr.cast_count,
+        tm.rank
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        cast_ranked cr ON tm.movie_id = cr.movie_id
+    WHERE 
+        tm.rank <= 10 -- get top 10 movies per production year
+),
+string_aggregations AS (
+    SELECT 
+        fs.production_year,
+        STRING_AGG(fs.title, '; ') AS titles,
+        COUNT(DISTINCT fs.movie_id) AS unique_movies,
+        SUM(COALESCE(fs.cast_count, 0)) AS total_cast_count
+    FROM 
+        final_selection fs
+    GROUP BY 
+        fs.production_year
+)
+SELECT 
+    sa.production_year,
+    sa.titles,
+    sa.unique_movies,
+    sa.total_cast_count,
+    CASE 
+        WHEN sa.total_cast_count IS NULL THEN 'No data available'
+        ELSE 'Data retrieved successfully'
+    END AS status_message,
+    NULLIF(sa.unique_movies, 0) AS safe_movies_count,
+    (SELECT AVG(cast_rank) FROM cast_ranked WHERE movie_id IN (SELECT movie_id FROM final_selection WHERE production_year = sa.production_year)) AS avg_cast_rank
+FROM 
+    string_aggregations sa
+ORDER BY 
+    sa.production_year DESC;

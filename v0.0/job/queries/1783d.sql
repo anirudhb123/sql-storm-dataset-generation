@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND t.md5sum IN ('04ecf6408c7aa8ff26dabd33173f925d', '05967285b0a96be85043a069ffb8a674', '39fa3a3e22b0d0cdf7dd148a0a1c702f', '3d70934f82a7c1eedd081252fed16dc6', '4020130c95d0ed39b7efd6bc06c560ae', '4deef4819bd5bf64164f9e2a54c6d63b', '686404889bb61fa274de549ceb741c55', '7ec289e9b3c9b32b18afb7da4b6877cc', 'd01d37a0cfea53d167c885cfcfba239b');

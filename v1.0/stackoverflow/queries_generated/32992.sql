@@ -1,0 +1,61 @@
+WITH Recursive PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(p.Title, 'No Title') AS Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        COALESCE(p2.Title, 'No Title') AS Title,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.PostId
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    U.DisplayName AS OwnerName,
+    U.Reputation AS OwnerReputation,
+    COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+    COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Users U ON ph.OwnerUserId = U.Id
+LEFT JOIN 
+    Votes v ON ph.PostId = v.PostId
+LEFT JOIN 
+    Badges b ON U.Id = b.UserId
+LEFT JOIN 
+    Tags t ON t.Id IN (
+        SELECT 
+            UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+        FROM 
+            Posts p
+        WHERE 
+            p.Id = ph.PostId
+    )
+GROUP BY 
+    ph.PostId, ph.Title, ph.Level, OwnerName, OwnerReputation
+HAVING 
+    COUNT(v.Id) > 0  -- Only include posts with votes
+ORDER BY 
+    ph.Level DESC, Upvotes DESC;

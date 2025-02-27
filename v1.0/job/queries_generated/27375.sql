@@ -1,0 +1,49 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        k.keyword AS movie_keyword,
+        array_agg(DISTINCT ak.name) AS aka_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.subject_id = ak.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+),
+average_movie_data AS (
+    SELECT 
+        AVG(production_year) AS avg_production_year,
+        COUNT(movie_id) AS total_movies,
+        COUNT(DISTINCT company_name) AS total_companies
+    FROM 
+        movie_data
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.company_name,
+    md.movie_keyword,
+    md.aka_names,
+    avg.md.total_movies,
+    avg.md.avg_production_year,
+    avg.md.total_companies
+FROM 
+    movie_data md
+JOIN 
+    average_movie_data avg ON md.production_year > avg.md.avg_production_year
+ORDER BY 
+    md.production_year DESC;

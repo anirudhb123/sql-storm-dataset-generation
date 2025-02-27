@@ -1,0 +1,34 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY COALESCE(SUM(ps.ps_availqty), 0) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.s_phone, n.n_name
+),
+HighRankedSuppliers AS (
+    SELECT 
+        r.n_name AS nation_name,
+        r.s_name,
+        r.s_address,
+        r.s_phone,
+        r.total_available_qty,
+        r.total_supply_cost
+    FROM RankedSuppliers r
+    WHERE r.supplier_rank <= 3
+)
+SELECT 
+    h.nation_name,
+    STRING_AGG(CONCAT(h.s_name, ' (', h.s_address, ')'), '; ') AS suppliers_info,
+    SUM(h.total_available_qty) AS total_qty,
+    AVG(h.total_supply_cost) AS avg_supply_cost
+FROM HighRankedSuppliers h
+GROUP BY h.nation_name
+ORDER BY h.nation_name;

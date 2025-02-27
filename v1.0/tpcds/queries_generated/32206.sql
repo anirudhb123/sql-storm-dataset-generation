@@ -1,0 +1,55 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) as total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) as rank
+    FROM 
+        customer c
+    JOIN  
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), customer_income AS (
+    SELECT 
+        hc.hd_income_band_sk,
+        hc.hd_demo_sk,
+        cb.ib_lower_bound,
+        cb.ib_upper_bound
+    FROM 
+        household_demographics hc
+    JOIN 
+        income_band cb ON hc.hd_income_band_sk = cb.ib_income_band_sk
+), filtered_customers AS (
+    SELECT 
+        tc.c_customer_id,
+        tc.total_spent,
+        ci.ib_lower_bound,
+        ci.ib_upper_bound
+    FROM 
+        top_customers tc
+    JOIN 
+        customer_income ci ON tc.c_customer_sk = ci.hd_demo_sk
+    WHERE 
+        tc.total_spent BETWEEN ci.ib_lower_bound AND ci.ib_upper_bound
+)
+SELECT 
+    fc.c_customer_id,
+    fc.total_spent,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS number_of_orders,
+    MAX(ws.ws_ship_date_sk) AS last_order_date
+FROM 
+    filtered_customers fc
+LEFT JOIN 
+    web_sales ws ON fc.c_customer_id = ws.ws_bill_customer_sk
+GROUP BY 
+    fc.c_customer_id, fc.total_spent
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 0
+ORDER BY 
+    fc.total_spent DESC
+LIMIT 10;

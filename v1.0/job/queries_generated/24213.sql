@@ -1,0 +1,54 @@
+WITH Recursive_Title AS (
+    SELECT title.id AS movie_id, title.title AS movie_title, title.production_year, 1 AS level
+    FROM title
+    WHERE title.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title AS movie_title, mt.production_year, rt.level + 1
+    FROM title mt
+    JOIN Recursive_Title rt ON mt.id = rt.movie_id
+    WHERE mt.production_year < rt.production_year
+),
+Cast_Details AS (
+    SELECT ci.movie_id, 
+           ak.name AS actor_name, 
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+           SUM(COALESCE(mi.info LIKE '%Award%', 0)) OVER (PARTITION BY ci.movie_id) AS award_count
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_info mi ON ci.movie_id = mi.movie_id 
+    WHERE ak.name IS NOT NULL
+),
+Movies_With_Keywords AS (
+    SELECT mt.movie_id, 
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN title mt ON mk.movie_id = mt.id
+    GROUP BY mt.movie_id
+)
+SELECT rt.level,
+       rt.movie_title,
+       rt.production_year,
+       cd.actor_name,
+       cd.actor_rank,
+       COALESCE(mwk.keywords, 'No Keywords') AS keywords,
+       CASE 
+           WHEN cd.award_count > 0 THEN 'Award-Winning'
+           ELSE 'Not Award-Winning' 
+       END AS award_status,
+       CASE 
+           WHEN cd.actor_rank <= 3 THEN 'Top Actor'
+           ELSE 'Supporting Actor' 
+       END AS role_category
+FROM Recursive_Title rt
+LEFT JOIN Cast_Details cd ON rt.movie_id = cd.movie_id
+LEFT JOIN Movies_With_Keywords mwk ON rt.movie_id = mwk.movie_id
+WHERE rt.production_year >= ALL (
+    SELECT COALESCE(production_year, 0)
+    FROM title
+    WHERE production_year IS NOT NULL
+)
+ORDER BY rt.level, rt.production_year DESC, cd.actor_rank
+LIMIT 100;

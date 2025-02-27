@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS CostRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s_nationkey,
+        s_suppkey,
+        s_name,
+        TotalSupplyCost
+    FROM 
+        RankedSuppliers
+    WHERE 
+        CostRank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineItemPrice,
+        COUNT(l.l_linenumber) AS ItemCount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FinalReport AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.o_orderkey,
+        co.o_orderdate,
+        co.o_totalprice,
+        ls.TotalLineItemPrice,
+        ls.ItemCount,
+        ts.s_name AS SupplierName,
+        ts.TotalSupplyCost
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        LineItemSummary ls ON co.o_orderkey = ls.l_orderkey
+    LEFT JOIN 
+        TopSuppliers ts ON ts.s_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = co.c_custkey)
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    fr.o_orderkey,
+    fr.o_orderdate,
+    COALESCE(fr.o_totalprice, 0) AS OrderTotalPrice,
+    COALESCE(fr.TotalLineItemPrice, 0) AS LineItemTotalPrice,
+    fr.ItemCount,
+    COALESCE(fr.SupplierName, 'No Supplier') AS SupplierName,
+    CASE 
+        WHEN fr.TotalSupplyCost IS NULL THEN 'Supplier Not Available'
+        ELSE 'Supplier Available'
+    END AS SupplierStatus
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.o_orderdate DESC, 
+    fr.o_totalprice DESC;

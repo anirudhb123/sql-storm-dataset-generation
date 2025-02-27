@@ -1,0 +1,60 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier) AND sh.level < 5
+),
+PartStats AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM lineitem l
+    WHERE l.l_shipdate > '2023-01-01'
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    ps.p_name,
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUM(CASE WHEN l.l_discount = 0 THEN 1 ELSE 0 END) AS no_discount_orders
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN PartStats ps ON ps.p_partkey IN (SELECT DISTINCT l.l_partkey FROM RankedLineItems l)
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+GROUP BY r.r_name, ps.p_name, cs.c_name, cs.order_count, cs.total_spent
+HAVING total_revenue > 10000 OR cs.order_count > 5
+ORDER BY total_revenue DESC, cs.total_spent ASC;

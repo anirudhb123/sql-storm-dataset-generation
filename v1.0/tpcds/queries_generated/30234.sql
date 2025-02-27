@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS store_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+
+    UNION ALL
+
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.total_profit + COALESCE(SUM(ws.ws_net_profit), 0),
+        sh.store_profit + COALESCE(SUM(ss.ss_net_profit), 0)
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = sh.c_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name, sh.total_profit, sh.store_profit
+),
+customer_ranked AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.total_profit,
+        sh.store_profit,
+        ROW_NUMBER() OVER (PARTITION BY sh.store_profit ORDER BY sh.total_profit DESC) AS profit_rank
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON c.c_customer_sk = sh.c_customer_sk
+)
+SELECT 
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.total_profit,
+    cr.store_profit,
+    cr.profit_rank
+FROM 
+    customer_ranked cr
+WHERE 
+    (cr.total_profit IS NOT NULL AND cr.total_profit > 5000) 
+    OR (cr.store_profit IS NOT NULL AND cr.store_profit > 1000)
+ORDER BY 
+    cr.profit_rank ASC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

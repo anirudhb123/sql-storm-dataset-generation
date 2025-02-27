@@ -1,0 +1,83 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        B.Date,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS rn
+    FROM 
+        Users U
+    INNER JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        RANK() OVER (ORDER BY SUM(COALESCE(P.Score, 0)) DESC) AS ScoreRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.CreationDate < NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+    HAVING 
+        SUM(COALESCE(P.Score, 0)) > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.CreatedAt,
+        P.Title,
+        ARRAY(SELECT STRING_AGG(T.TagName, ', ') 
+              FROM Tags T 
+              WHERE T.Id = ANY(STRING_TO_ARRAY(P.Tags, ',')::int[])) AS TagsArray
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostEngagement AS (
+    SELECT 
+        RP.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        RecentPosts RP
+    LEFT JOIN 
+        Comments C ON RP.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON RP.Id = V.PostId
+    GROUP BY 
+        RP.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UB.BadgeName, 'No Badge') AS RecentBadge,
+    PU.TotalScore,
+    PE.CommentCount,
+    PE.VoteCount,
+    PE.TotalBounties
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId AND UB.rn = 1
+LEFT JOIN 
+    TopUsers PU ON U.Id = PU.Id
+LEFT JOIN 
+    PostEngagement PE ON U.Id = PE.OwnerUserId
+WHERE 
+    PU.ScoreRank <= 10
+ORDER BY 
+    U.Reputation DESC, PU.TotalScore DESC;

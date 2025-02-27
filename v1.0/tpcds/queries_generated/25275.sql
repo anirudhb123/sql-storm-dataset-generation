@@ -1,0 +1,45 @@
+
+WITH CTE_Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        COALESCE(cd.cd_education_status, 'Unknown') AS education_status,
+        TRIM(UPPER(CONCAT(c.c_first_name, ' ', c.c_last_name))) AS trimmed_full_name,
+        LENGTH(TRIM(CONCAT(c.c_first_name, ' ', c.c_last_name))) AS name_length
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ca.ca_state IN ('CA', 'NY')
+),
+CTE_Aggregated AS (
+    SELECT 
+        city,
+        state,
+        COUNT(*) AS customer_count,
+        AVG(name_length) AS average_name_length,
+        ARRAY_AGG(trimmed_full_name) AS customer_names
+    FROM 
+        CTE_Customers
+    GROUP BY 
+        ca_city, ca_state
+)
+SELECT 
+    state,
+    city,
+    customer_count,
+    average_name_length,
+    STRING_AGG(full_name, ', ') AS all_customer_names
+FROM 
+    CTE_Aggregated
+GROUP BY 
+    state, city, customer_count, average_name_length
+ORDER BY 
+    state, city;

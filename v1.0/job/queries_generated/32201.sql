@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        title AS lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3  -- Limit recursion to three levels
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT co.name, ', ') FILTER (WHERE co.country_code IS NOT NULL) AS company_names,
+    CASE 
+        WHEN COUNT(DISTINCT co.id) > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_production_company
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    complete_cast AS cc ON ci.movie_id = cc.movie_id
+JOIN 
+    movie_hierarchy AS m ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword AS mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS kc ON mk.keyword_id = kc.id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 0
+ORDER BY 
+    m.production_year DESC, keyword_count DESC;

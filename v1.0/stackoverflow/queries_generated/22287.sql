@@ -1,0 +1,89 @@
+WITH UserSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS AnswerCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 2 -- Answers
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    WHERE 
+        U.Reputation > 100 -- only consider trusted users
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS QuestionCount
+    FROM 
+        Tags T
+    INNER JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%') AND P.PostTypeId = 1 -- Questions
+    GROUP BY 
+        T.Id, T.TagName
+    HAVING 
+        COUNT(P.Id) > 5 -- only tags with more than 5 questions
+),
+TaggedUsers AS (
+    SELECT 
+        US.UserId,
+        PT.TagId,
+        ROW_NUMBER() OVER (PARTITION BY US.UserId ORDER BY COUNT(PT.TagId) DESC) AS TagRank
+    FROM 
+        UserSummary US
+    JOIN 
+        Posts P ON P.OwnerUserId = US.UserId AND P.PostTypeId = 1 -- Questions
+    JOIN 
+        Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%') 
+    JOIN 
+        PopularTags PT ON T.Id = PT.TagId
+    GROUP BY 
+        US.UserId, PT.TagId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    UPV.UpVotes,
+    UPV.DownVotes,
+    PT.TagName,
+    COALESCE(A.AcceptedAnswers, 0) AS AcceptedAnswers,
+    US.CommentCount,
+    CASE WHEN US.Reputation IS NULL THEN 'User not found' ELSE 'User found' END AS UserStatus,
+    CASE 
+        WHEN US.Reputation >= 5000 THEN 'Gold Member'
+        WHEN US.Reputation >= 1000 THEN 'Silver Member'
+        ELSE 'Bronze Member'
+    END AS MemberStatus
+FROM 
+    UserSummary US
+LEFT JOIN 
+    (SELECT UserId, COUNT(DISTINCT Id) AS AcceptedAnswers 
+     FROM Posts 
+     WHERE AcceptedAnswerId IS NOT NULL 
+     GROUP BY UserId) A ON US.UserId = A.UserId
+LEFT JOIN 
+    (SELECT UserId, SUM(VoteTypeId = 2) AS UpVotes, SUM(VoteTypeId = 3) AS DownVotes 
+     FROM Votes 
+     GROUP BY UserId) UPV ON US.UserId = UPV.UserId
+LEFT JOIN 
+    (SELECT UserId, TagId 
+     FROM TaggedUsers 
+     WHERE TagRank = 1) TU ON US.UserId = TU.UserId
+LEFT JOIN 
+    PopularTags PT ON TU.TagId = PT.TagId
+WHERE 
+    US.Reputation > 100
+ORDER BY 
+    US.Reputation DESC,
+    US.UserId;

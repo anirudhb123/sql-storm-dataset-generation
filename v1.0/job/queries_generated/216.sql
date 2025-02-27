@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY a.id) AS actor_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.keyword,
+        rm.actor_count,
+        mi.info AS movie_note
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.production_year = mi.movie_id
+    WHERE 
+        rm.year_rank <= 10
+)
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COALESCE(m.movie_note, 'No note available') AS note,
+    m.keyword,
+    m.actor_count,
+    CASE 
+        WHEN m.actor_count > 5 THEN 'High Profile'
+        ELSE 'Indie'
+    END AS movie_profile
+FROM 
+    MovieInfo m
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM cast_info ci
+        WHERE ci.movie_id = m.production_year AND ci.person_role_id = (
+            SELECT id FROM role_type WHERE role = 'Actor'
+            LIMIT 1
+        )
+    )
+ORDER BY 
+    m.production_year DESC, 
+    m.actor_count DESC
+FETCH FIRST 20 ROWS ONLY;

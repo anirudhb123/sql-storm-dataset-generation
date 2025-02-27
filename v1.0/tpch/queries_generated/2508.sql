@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    INNER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        l.l_returnflag
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01' 
+    GROUP BY l.l_orderkey, l.l_returnflag
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    pd.p_name,
+    pd.supplier_count,
+    pd.avg_supply_cost,
+    ol.net_sales,
+    ol.l_returnflag
+FROM 
+    CustomerSummary cs
+LEFT JOIN ProductDetails pd ON cs.total_spent > 10000
+LEFT JOIN RankedOrders ro ON cs.c_custkey = ro.o_orderkey
+LEFT JOIN OrderLineDetails ol ON ro.o_orderkey = ol.l_orderkey
+WHERE 
+    cs.order_count > 5
+    AND pd.avg_supply_cost IS NOT NULL
+    AND ol.l_returnflag IS NULL
+ORDER BY 
+    cs.total_spent DESC, 
+    pd.p_name;

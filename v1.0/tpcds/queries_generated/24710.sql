@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) as rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_moy IN (1, 2, 3)
+        )
+    GROUP BY 
+        ws_item_sk
+),
+TopSales AS (
+    SELECT
+        item.i_item_id,
+        item.i_item_desc,
+        ranked.total_quantity,
+        ranked.total_sales
+    FROM 
+        RankedSales ranked
+    JOIN 
+        item ON ranked.ws_item_sk = item.i_item_sk
+    WHERE 
+        ranked.rank <= 10
+)
+SELECT 
+    t1.i_item_id,
+    t1.i_item_desc,
+    COALESCE(t1.total_quantity, 0) AS total_quantity,
+    COALESCE(t1.total_sales, 0.00) AS total_sales,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            catalog_sales cs 
+        WHERE 
+            cs.cs_item_sk = t1.i_item_sk
+    ) AS catalog_sales_count,
+    (
+        SELECT 
+            SUM(cs_ext_sales_price) 
+        FROM 
+            catalog_sales cs 
+        WHERE 
+            cs.cs_item_sk = t1.i_item_sk AND cs.cs_sold_date_sk IN (
+                SELECT d_date_sk 
+                FROM date_dim 
+                WHERE d_year = 2023
+            )
+    ) AS catalog_sales_yearly_total,
+    (
+        SELECT 
+            COALESCE(AVG(ws_net_paid), 0) 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk = t1.i_item_sk AND ws_sold_date_sk BETWEEN 20230101 AND 20230331
+    ) AS average_web_sales
+FROM 
+    TopSales t1
+LEFT JOIN 
+    store_returns sr ON t1.total_quantity = sr.sr_return_quantity AND sr.sr_item_sk = t1.i_item_sk
+FULL OUTER JOIN 
+    customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk AND cd.cd_marital_status IS NOT NULL
+WHERE 
+    (t1.total_sales > 1000 OR t1.total_quantity IS NULL)
+    AND (EXISTS (
+        SELECT 1 
+        FROM inventory inv 
+        WHERE inv.inv_item_sk = t1.i_item_sk AND inv.inv_quantity_on_hand < 5
+    ) OR t1.total_sales < 5000)
+ORDER BY 
+    total_sales DESC, total_quantity DESC;

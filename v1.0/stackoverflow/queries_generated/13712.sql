@@ -1,0 +1,62 @@
+-- Performance Benchmarking Query for Stack Overflow Schema
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(vs.Score) AS TotalVoteScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes vs ON p.Id = vs.PostId
+    GROUP BY u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(ROUND(AVG(v.Score), 2), 0) AS AverageVoteScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) AS EditCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.CreationDate
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.BadgeCount,
+    u.TotalVoteScore,
+    p.PostId,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.AverageVoteScore,
+    ra.Title,
+    ra.CreationDate,
+    ra.CommentCount AS RecentCommentCount,
+    ra.EditCount AS RecentEditCount
+FROM UserStats u
+JOIN PostStats p ON u.PostCount > 0
+JOIN RecentActivity ra ON ra.PostId = p.PostId
+ORDER BY u.Reputation DESC, p.Score DESC
+LIMIT 100;

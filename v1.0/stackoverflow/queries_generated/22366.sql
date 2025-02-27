@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes,
+        COUNT(*) AS RevisionCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.TotalBounty,
+    COALESCE(rp.PostId, -1) AS LatestPostId,
+    COALESCE(rp.Title, 'No Posts') AS LatestPostTitle,
+    COALESCE(rp.CreationDate, 'No Posts') AS LatestPostDate,
+    COALESCE(rp.Score, 0) AS LatestPostScore,
+    COALESCE(rp.ViewCount, 0) AS LatestPostViews,
+    pha.PostHistoryTypes,
+    pha.RevisionCount,
+    (ua.UpVotes - ua.DownVotes) AS VoteNet
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    PostHistoryAggregates pha ON rp.PostId = pha.PostId
+WHERE 
+    ua.PostCount > 5
+    AND ua.TotalBounty > 0
+ORDER BY 
+    VoteNet DESC, ua.PostCount DESC
+LIMIT 10;

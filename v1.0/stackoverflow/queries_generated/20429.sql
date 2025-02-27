@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        PARENTS.ParentId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Posts AS PARENTS ON p.ParentId = PARENTS.Id
+    GROUP BY p.Id, p.Title, p.OwnerUserId, PARENTS.ParentId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id, u.Reputation
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.OwnerUserId,
+        rp.TotalComments,
+        rp.TotalBounty,
+        ur.Reputation,
+        ur.BadgeCount,
+        CASE 
+            WHEN ur.Reputation IS NULL THEN 'No Reputation'
+            WHEN ur.Reputation >= 1000 THEN 'High Reputation'
+            ELSE 'Regular Reputation'
+        END AS ReputationCategory
+    FROM RankedPosts rp
+    LEFT JOIN UserReputation ur ON rp.OwnerUserId = ur.UserId
+),
+FilteredPosts AS (
+    SELECT *
+    FROM PostAnalytics
+    WHERE TotalComments > 5 AND TotalBounty > 0
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS TotalHistoryEntries,
+        STRING_AGG(DISTINCT pht.Name, ', ') FILTER (WHERE pht.Name IS NOT NULL) AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    fp.Title AS PostTitle, 
+    fp.Reputation AS UserReputation,
+    fp.ReputationCategory,
+    fp.TotalComments,
+    fp.TotalBounty,
+    COALESCE(ph.TotalHistoryEntries, 0) AS HistoryEntryCount,
+    COALESCE(ph.HistoryTypes, 'None') AS PostHistoryTypes
+FROM FilteredPosts fp
+LEFT JOIN PostHistoryAggregates ph ON fp.PostId = ph.PostId
+ORDER BY fp.TotalBounty DESC, fp.TotalComments DESC
+LIMIT 100;
+

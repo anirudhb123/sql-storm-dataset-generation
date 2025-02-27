@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS store_rank
+    FROM store_sales
+    GROUP BY s_store_sk
+),
+high_sales_stores AS (
+    SELECT 
+        s_store_sk,
+        total_sales,
+        transaction_count,
+        LEAD(total_sales) OVER (ORDER BY total_sales DESC) AS next_high_sales
+    FROM sales_summary
+    WHERE store_rank <= 10
+),
+customer_returns AS (
+    SELECT 
+        sr_returned_date_sk,
+        SUM(sr_return_qty) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS returns_amount
+    FROM store_returns
+    GROUP BY sr_returned_date_sk
+),
+sales_and_returns AS (
+    SELECT 
+        ds.d_date,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.returns_amount, 0) AS returns_amount,
+        CASE 
+            WHEN COALESCE(ss.total_sales, 0) - COALESCE(cr.returns_amount, 0) < 0 
+                THEN 'Negative Sales After Returns' 
+            ELSE 'Positive Sales After Returns' 
+        END AS sales_status
+    FROM date_dim ds
+    LEFT JOIN high_sales_stores ss ON ds.d_date_sk = CAST(ss.s_store_sk AS INTEGER)
+    LEFT JOIN customer_returns cr ON ds.d_date_sk = cr.sr_returned_date_sk
+),
+final_summary AS (
+    SELECT 
+        d.d_date,
+        SUM(sar.total_sales) AS total_sales,
+        SUM(sar.total_returns) AS total_returns,
+        COUNT(*) FILTER (WHERE sar.sales_status = 'Negative Sales After Returns') AS negative_sales_count,
+        COUNT(*) FILTER (WHERE sar.sales_status = 'Positive Sales After Returns') AS positive_sales_count
+    FROM sales_and_returns sar
+    JOIN date_dim d ON d.d_date = sar.d_date
+    GROUP BY d.d_date
+)
+SELECT 
+    f.d_date,
+    f.total_sales,
+    f.total_returns,
+    f.negative_sales_count,
+    f.positive_sales_count,
+    CONCAT('Sales Status: ', 
+           CASE 
+               WHEN f.total_sales > 0 THEN 'Profitable Day' 
+               WHEN f.total_sales = 0 THEN 'Break-even Day' 
+               ELSE 'Loss Day' 
+           END
+    ) AS sales_status
+FROM final_summary f
+ORDER BY f.d_date DESC
+LIMIT 100;

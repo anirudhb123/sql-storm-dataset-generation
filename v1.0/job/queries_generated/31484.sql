@@ -1,0 +1,68 @@
+WITH RECURSIVE Actor_Titles AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+Movie_Keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+Actor_Info AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT a.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS all_titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    GROUP BY 
+        c.person_id
+),
+Highest_Contributions AS (
+    SELECT 
+        ai.person_id,
+        ai.total_movies,
+        ai.all_titles,
+        kt.keywords
+    FROM 
+        Actor_Info ai
+    LEFT JOIN 
+        Movie_Keywords kt ON ai.movie_id = kt.movie_id
+    WHERE 
+        ai.total_movies > 5
+)
+SELECT 
+    ak.actor_name,
+    hc.total_movies,
+    hc.all_titles,
+    hc.keywords,
+    COALESCE(p.info, 'No additional info') AS additional_info
+FROM 
+    Actor_Titles ak
+JOIN 
+    Highest_Contributions hc ON ak.person_id = hc.person_id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id
+WHERE 
+    ak.year_rank = 1
+ORDER BY 
+    hc.total_movies DESC, ak.actor_name;

@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+PostHistoryAggregation AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstHistoryDate,
+        MAX(ph.CreationDate) AS LastHistoryDate,
+        COUNT(ph.Id) AS TotalHistoryEntries,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS ActivePosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        u.Reputation > 500 -- Only consider active users with reputation greater than 500
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.AnswerCount,
+    RP.CommentCount,
+    RP.OwnerDisplayName,
+    PH.FirstHistoryDate,
+    PH.LastHistoryDate,
+    PH.TotalHistoryEntries,
+    PH.HistoryTypes,
+    AU.DisplayName AS ActiveUserName,
+    AU.Reputation,
+    AU.ActivePosts,
+    AU.TotalBounty
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostHistoryAggregation PH ON RP.PostId = PH.PostId
+LEFT JOIN 
+    ActiveUsers AU ON AU.UserId = RP.OwnerUserId
+WHERE 
+    RP.Rank = 1 -- Only the highest-scoring question per user
+ORDER BY 
+    RP.Score DESC,
+    RP.CreationDate ASC;

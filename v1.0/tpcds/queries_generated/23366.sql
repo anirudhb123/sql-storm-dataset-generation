@@ -1,0 +1,54 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS site_rank,
+        COUNT(*) OVER (PARTITION BY ws.web_site_sk) AS site_order_count,
+        SUM(ws.ext_ship_cost) OVER (PARTITION BY ws.web_site_sk) AS total_ship_cost
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_month_seq = (SELECT d_month_seq 
+                                                  FROM date_dim 
+                                                  WHERE d_date = CURRENT_DATE) 
+                              AND d_year = EXTRACT(YEAR FROM CURRENT_DATE))
+)
+
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    ca.ca_city,
+    ws.web_site_id,
+    rs.order_number,
+    rs.net_profit,
+    rs.total_ship_cost,
+    CASE 
+        WHEN rs.net_profit IS NULL THEN 'NO PROFIT'
+        ELSE 
+            CASE 
+                WHEN rs.net_profit > 1000 THEN 'HIGH'
+                WHEN rs.net_profit BETWEEN 500 AND 1000 THEN 'MEDIUM'
+                ELSE 'LOW'
+            END
+    END AS profit_category,
+    COUNT(DISTINCT cr.returning_customer_sk) AS returns_count,
+    SUM(COALESCE(cr.return_amount, 0)) AS total_returns
+FROM 
+    ranked_sales rs
+LEFT JOIN 
+    customer c ON rs.order_number = c.c_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    catalog_returns cr ON rs.order_number = cr.cr_order_number
+GROUP BY 
+    c.c_customer_sk, ca.ca_city, rs.web_site_id, rs.order_number, rs.net_profit, rs.total_ship_cost
+HAVING 
+    (SUM(COALESCE(cr.return_amount, 0)) = 0 OR SUM(cr.return_quantity) IS NULL)
+    AND (rs.site_order_count > 5 OR rs.site_rank = 1)
+ORDER BY 
+    profit_category DESC, rs.net_profit DESC
+LIMIT 50;

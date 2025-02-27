@@ -1,0 +1,71 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TitleOrBodyEdits,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseEdits,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenEdits
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    T.TagName,
+    TS.PostCount AS TotalPosts,
+    TS.QuestionCount,
+    TS.AnswerCount,
+    TS.AverageScore,
+    U.UserId,
+    U.DisplayName,
+    U.CommentCount AS TotalComments,
+    U.UpVotes,
+    U.DownVotes,
+    U.OffensiveVotes,
+    PH.EditCount AS TotalEdits,
+    PH.TitleOrBodyEdits,
+    PH.CloseEdits,
+    PH.ReopenEdits
+FROM 
+    TagStatistics TS
+JOIN 
+    UserEngagement U ON U.UpVotes > 10 
+LEFT JOIN 
+    PostHistoryDetails PH ON PH.PostId IN (SELECT P.Id FROM Posts P WHERE P.Tags LIKE CONCAT('%', TS.TagName, '%'))
+WHERE 
+    TS.PostCount > 5 
+ORDER BY 
+    TS.AverageScore DESC, 
+    U.CommentCount DESC;

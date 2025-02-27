@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, ws_sales_price, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rnk
+    FROM web_sales
+    WHERE ws_sales_price > 0
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name || ' ' || c.c_last_name AS full_name,
+           cd.cd_gender, cd.cd_marital_status, 
+           COALESCE(NULLIF(cd.cd_credit_rating, 'Poor'), 'Average') AS credit_rating,
+           hd.hd_income_band_sk,
+           CASE
+               WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown'
+               ELSE ib.ib_income_band_sk
+           END AS income_band
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics AS hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN income_band AS ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+sales_summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_bill_customer_sk) AS customer_count
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.avg_sales_price,
+    ci.full_name,
+    ci.credit_rating,
+    ci.income_band
+FROM item AS i
+JOIN sales_summary AS ss ON i.i_item_sk = ss.ws_item_sk
+JOIN customer_info AS ci ON ci.hd_income_band_sk = (SELECT DISTINCT ib_income_band_sk FROM household_demographics WHERE ib_lower_bound <= ss.total_sales AND ib_upper_bound >= ss.total_sales)
+LEFT JOIN ship_mode AS sm ON sm.sm_ship_mode_sk = (SELECT sm_ship_mode_sk FROM web_sales WHERE ws_item_sk = i.i_item_sk LIMIT 1)
+WHERE ss.total_quantity > (
+    SELECT AVG(total_quantity)
+    FROM sales_summary
+) AND sm.sm_type IS NOT NULL
+ORDER BY ss.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal * (1 + 0.05 * sh.level)
+),
+
+NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name, ns.supplier_count,
+           DENSE_RANK() OVER (ORDER BY ns.supplier_count DESC) AS rk
+    FROM nation n
+    JOIN NationSupplier ns ON n.n_nationkey = ns.n_nationkey
+)
+
+SELECT pn.p_partkey, pn.p_name, 
+       COALESCE(CAST(SUM(l.l_extendedprice * (1 - l.l_discount)) AS DECIMAL(12, 2)), 0) AS total_revenue,
+       CASE 
+           WHEN tn.rk IS NULL THEN 'No Orders' 
+           ELSE 'Top ' || tn.rk || ' in Nation: ' || tn.n_name 
+       END AS status,
+       (SELECT COUNT(DISTINCT o.o_orderkey)
+        FROM orders o
+        WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+        AND o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')))
+       ) AS recent_orders,
+       CASE
+           WHEN EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = pn.p_partkey AND ps.ps_availqty < 100) THEN 'Low Stock'
+           ELSE 'In Stock'
+       END AS availability
+FROM part pn
+LEFT JOIN lineitem l ON pn.p_partkey = l.l_partkey
+LEFT JOIN TopNations tn ON tn.n_nationkey = (SELECT n.n_nationkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = l.l_suppkey)
+GROUP BY pn.p_partkey, pn.p_name, tn.rk, tn.n_name
+HAVING total_revenue > 0 OR tn.rk IS NOT NULL
+ORDER BY total_revenue DESC, pn.p_name ASC
+LIMIT 50;

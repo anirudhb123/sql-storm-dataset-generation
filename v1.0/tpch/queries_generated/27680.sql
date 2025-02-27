@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        S.s_suppkey,
+        S.s_name,
+        S.s_nationkey,
+        COUNT(P.ps_partkey) AS TotalParts,
+        SUM(P.ps_supplycost) AS TotalCost,
+        ROW_NUMBER() OVER (PARTITION BY N.n_regionkey ORDER BY COUNT(P.ps_partkey) DESC, SUM(P.ps_supplycost) DESC) AS SupplierRank
+    FROM 
+        supplier S
+    JOIN 
+        partsupp P ON S.s_suppkey = P.ps_suppkey
+    JOIN 
+        nation N ON S.s_nationkey = N.n_nationkey
+    GROUP BY 
+        S.s_suppkey, S.s_name, S.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        R.r_name AS RegionName,
+        R.r_regionkey,
+        RS.s_suppkey,
+        RS.s_name,
+        RS.TotalParts,
+        RS.TotalCost
+    FROM 
+        RankedSuppliers RS
+    JOIN 
+        nation N ON RS.s_nationkey = N.n_nationkey
+    JOIN 
+        region R ON N.n_regionkey = R.r_regionkey
+    WHERE 
+        RS.SupplierRank <= 5
+)
+SELECT 
+    TS.RegionName,
+    TS.s_name AS SupplierName,
+    TS.TotalParts,
+    TS.TotalCost,
+    P.p_name,
+    P.p_size,
+    P.p_retailprice,
+    LEFT(P.p_comment, CHARINDEX(' ', P.p_comment + ' ', 10) - 1) AS ShortComment
+FROM 
+    TopSuppliers TS
+JOIN 
+    partsupp PS ON TS.s_suppkey = PS.ps_suppkey
+JOIN 
+    part P ON PS.ps_partkey = P.p_partkey
+ORDER BY 
+    TS.RegionName, TS.TotalCost DESC, TS.TotalParts DESC;

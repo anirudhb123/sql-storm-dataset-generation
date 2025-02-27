@@ -1,0 +1,80 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        mt.movie_id AS original_movie_id,
+        mt.linked_movie_id,
+        1 AS level
+    FROM 
+        movie_link mt
+    WHERE 
+        mt.movie_id = (SELECT id FROM title WHERE title = 'The Godfather')
+
+    UNION ALL
+
+    SELECT 
+        mc.original_movie_id,
+        ml.linked_movie_id,
+        mc.level + 1
+    FROM 
+        movie_chain mc
+    JOIN 
+        movie_link ml ON mc.linked_movie_id = ml.movie_id
+),
+
+keyword_movies AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+
+cast_and_info AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+
+movies_info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ci.actor_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_and_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        keyword_movies km ON t.id = km.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, ci.actor_count
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_count,
+    COALESCE(m.keywords, 'No Keywords') AS keywords,
+    COALESCE(mc.level, 0) AS chain_level
+FROM 
+    movies_info m
+LEFT JOIN 
+    movie_chain mc ON m.movie_id = mc.original_movie_id
+WHERE 
+    m.actor_count > 2
+ORDER BY 
+    m.production_year DESC, m.actor_count DESC;

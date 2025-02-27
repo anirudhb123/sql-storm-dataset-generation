@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderpriority, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) as rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.o_orderpriority,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+Summary AS (
+    SELECT 
+        COUNT(DISTINCT to.o_orderkey) AS total_orders,
+        SUM(to.o_totalprice) AS total_amount,
+        AVG(to.o_totalprice) AS average_order_value,
+        COUNT(DISTINCT sd.s_suppkey) AS total_suppliers,
+        SUM(sd.ps_supplycost) AS total_supplycost
+    FROM 
+        TopOrders to
+    JOIN 
+        SupplierDetails sd ON to.o_orderkey = sd.ps_partkey
+)
+SELECT 
+    s.total_orders,
+    s.total_amount,
+    s.average_order_value,
+    s.total_suppliers,
+    s.total_supplycost,
+    r.r_name
+FROM 
+    Summary s
+CROSS JOIN 
+    region r
+WHERE 
+    r.r_regionkey IN (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey IN (SELECT DISTINCT c.c_nationkey FROM customer c))
+ORDER BY 
+    s.total_amount DESC;

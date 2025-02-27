@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+        AND cn.country_code = 'US' 
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+)
+
+SELECT 
+    h.title,
+    h.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    CASE 
+        WHEN h.production_year IS NULL THEN 'Unknown Year'
+        ELSE h.production_year::text
+    END AS production_year_display,
+    SUM(CASE 
+        WHEN mi.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS has_notes
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON h.movie_id = mi.movie_id
+WHERE 
+    h.level <= 2
+GROUP BY 
+    h.id, h.title, h.production_year
+ORDER BY 
+    actor_count DESC, h.production_year DESC
+LIMIT 50;

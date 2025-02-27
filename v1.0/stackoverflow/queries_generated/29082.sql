@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only consider questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' -- Last year
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT b.Name, ', ') AS UserBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId AND v.VoteTypeId = 8 -- BountyStart votes
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Tags, rp.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Tags, ',')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Tags,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.TotalBountyAmount,
+    ps.BadgeCount,
+    ps.UserBadges,
+    pt.Tag AS PopularTag,
+    COUNT(pt.Tag) OVER (PARTITION BY pt.Tag) AS TagFrequency
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PopularTags pt ON pt.Tag = ANY(STRING_TO_ARRAY(ps.Tags, ','))
+WHERE 
+    ps.Rank <= 5 -- Top 5 questions per tag
+ORDER BY 
+    ps.CreationDate DESC;

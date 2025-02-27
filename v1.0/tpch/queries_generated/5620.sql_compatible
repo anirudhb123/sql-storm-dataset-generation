@@ -1,0 +1,30 @@
+
+WITH RankedNation AS (
+    SELECT n.n_name, r.r_name AS region, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name, r.r_name
+), OrderSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+), FinalReport AS (
+    SELECT rn.n_name, rn.region, 
+           rn.total_supply_cost, 
+           COALESCE(os.total_spent, 0) AS total_customer_spending
+    FROM RankedNation rn
+    LEFT JOIN OrderSummary os ON rn.n_name = os.c_custkey
+    WHERE rn.rank = 1
+)
+SELECT region, 
+       SUM(total_supply_cost) AS aggregate_supply_cost,
+       AVG(total_customer_spending) AS average_spending
+FROM FinalReport
+GROUP BY region
+ORDER BY aggregate_supply_cost DESC;

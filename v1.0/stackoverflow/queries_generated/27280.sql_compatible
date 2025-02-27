@@ -1,0 +1,68 @@
+
+WITH PostTagCounts AS (
+  SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COUNT(DISTINCT t.TagName) AS TagCount,
+    EXTRACT(YEAR FROM p.CreationDate) AS PostYear
+  FROM 
+    Posts p
+  JOIN 
+    UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS t(TagName) 
+  GROUP BY 
+    p.Id, p.Title, PostYear
+),
+
+UserActivity AS (
+  SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    SUM(p.ViewCount) AS TotalViews
+  FROM 
+    Users u
+  LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+  GROUP BY 
+    u.Id, u.DisplayName
+),
+
+PostHistoryMetrics AS (
+  SELECT 
+    ph.PostId,
+    MAX(ph.CreationDate) AS LastEditDate,
+    COUNT(*) AS EditCount,
+    STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+  FROM 
+    PostHistory ph
+  JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+  GROUP BY 
+    ph.PostId
+)
+
+SELECT 
+  u.DisplayName,
+  u.TotalPosts,
+  u.TotalQuestions,
+  u.TotalAnswers,
+  u.TotalViews,
+  ptc.PostYear,
+  ptc.TagCount,
+  phm.EditCount,
+  phm.LastEditDate,
+  phm.HistoryTypes
+FROM 
+  UserActivity u
+JOIN 
+  PostTagCounts ptc ON u.UserId = ptc.PostId
+JOIN 
+  PostHistoryMetrics phm ON ptc.PostId = phm.PostId
+WHERE 
+  u.TotalPosts > 10
+AND 
+  ptc.TagCount > 3
+ORDER BY 
+  u.TotalViews DESC, ptc.PostYear DESC;

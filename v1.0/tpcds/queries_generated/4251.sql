@@ -1,0 +1,84 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) as rnk
+    FROM 
+        store_returns
+), 
+CustomerCounts AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        COUNT(DISTINCT wr.order_number) AS online_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+TopReturns AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cc.total_returns,
+        cc.online_returns,
+        COALESCE(SUM(rr.sr_return_amt), 0) AS total_return_amt,
+        COALESCE(SUM(rr.sr_return_tax), 0) AS total_return_tax
+    FROM 
+        customer c
+    JOIN 
+        CustomerCounts cc ON c.c_customer_sk = cc.c_customer_sk
+    LEFT JOIN 
+        RankedReturns rr ON c.c_customer_sk = rr.sr_customer_sk
+    WHERE 
+        cc.total_returns > 0 OR cc.online_returns > 0
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cc.total_returns, cc.online_returns
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        hv_hd_income_band_sk.hd_income_band_sk,
+        hd_buy_potential
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hv ON cd.cd_demo_sk = hv_hd_demo_sk
+)
+
+SELECT 
+    tr.c_customer_id,
+    tr.c_first_name,
+    tr.c_last_name,
+    tr.total_returns,
+    tr.online_returns,
+    tr.total_return_amt,
+    tr.total_return_tax,
+    SUM(CASE 
+        WHEN cd.cd_gender = 'M' THEN 1 
+        ELSE 0 
+    END) AS male_customers,
+    SUM(CASE 
+        WHEN cd.cd_marital_status = 'M' THEN 1 
+        ELSE 0 
+    END) AS married_customers,
+    AVG(tr.total_return_amt) OVER (PARTITION BY cd.cd_gender) AS avg_return_amt_by_gender
+FROM 
+    TopReturns tr
+JOIN 
+    CustomerDemographics cd ON tr.c_customer_id = cd.cd_demo_sk
+GROUP BY 
+    tr.c_customer_id, tr.c_first_name, tr.c_last_name, tr.total_returns, tr.online_returns, tr.total_return_amt, tr.total_return_tax
+ORDER BY 
+    total_returns DESC, online_returns DESC;

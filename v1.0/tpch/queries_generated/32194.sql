@@ -1,0 +1,65 @@
+WITH RECURSIVE OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+),
+SuppliersFiltered AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_supply_cost > 10000
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    LIMIT 5
+)
+SELECT 
+    os.o_orderkey, 
+    os.customer_name, 
+    os.total_revenue, 
+    sf.s_name AS top_supplier,
+    sf.total_supply_cost,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS revenue_status
+FROM 
+    OrderSummary os
+LEFT JOIN 
+    TopSuppliers ts ON os.total_revenue > (SELECT AVG(total_revenue) FROM OrderSummary)
+LEFT JOIN 
+    SuppliersFiltered sf ON ts.s_suppkey = sf.s_suppkey
+WHERE 
+    (os.revenue_rank <= 5 OR sf.total_supply_cost IS NOT NULL)
+ORDER BY 
+    os.total_revenue DESC, sf.total_supply_cost ASC;

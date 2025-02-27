@@ -1,0 +1,99 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01') AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        ps.*,
+        COALESCE(ps.UpVotes - ps.DownVotes, 0) AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY ps.NetVotes DESC, ps.CommentCount DESC) AS PostRank
+    FROM 
+        PostStatistics ps
+    WHERE 
+        ps.CommentCount > 10 AND
+        ps.CloseReopenCount < 2 
+),
+TopPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.CommentCount,
+        fp.NetVotes
+    FROM 
+        FilteredPosts fp
+    WHERE 
+        fp.PostRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ',' ORDER BY b.Date DESC) AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        u.DisplayName AS PostOwner,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        tp.NetVotes,
+        tp.CommentCount
+    FROM 
+        TopPosts tp
+    JOIN 
+        Posts p ON tp.PostId = p.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.PostOwner,
+    pd.NetVotes,
+    pd.CommentCount,
+    pd.BadgeCount,
+    COALESCE(pd.BadgeNames, 'No Badges') AS BadgeNames,
+    CASE 
+        WHEN pd.BadgeCount = 0 THEN 'Regular User'
+        WHEN pd.BadgeCount BETWEEN 1 AND 5 THEN 'Novice Contributor'
+        WHEN pd.BadgeCount BETWEEN 6 AND 10 THEN 'Experienced Contributor'
+        ELSE 'Top Contributor'
+    END AS UserClassification,
+    EXISTS (
+        SELECT 1 
+        FROM Votes v 
+        WHERE v.PostId = pd.PostId AND v.UserId IN (SELECT Id FROM Users WHERE Reputation > 1000)
+    ) AS HasReputationVotes
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.NetVotes DESC, pd.CommentCount DESC;

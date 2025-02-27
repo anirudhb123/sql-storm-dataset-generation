@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), 
+CompanyCastMovie AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id
+), 
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        cc.company_names,
+        cc.cast_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY cc.cast_count DESC) AS rank_within_year
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CompanyCastMovie cc ON mh.movie_id = cc.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(rm.company_names, 'Unknown Company') AS company_names,
+    rm.cast_count,
+    rm.rank_within_year
+FROM 
+    RankedMovies rm 
+WHERE 
+    rm.production_year IS NOT NULL 
+    AND rm.rank_within_year <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank_within_year;

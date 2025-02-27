@@ -1,0 +1,66 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_net_paid) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_item_sk
+),
+return_data AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        SUM(wr_net_loss) AS total_return_loss
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        wr_item_sk
+),
+combined_data AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        COALESCE(rd.total_return_loss, 0) AS total_return_loss,
+        (sd.total_sales - COALESCE(rd.total_return_loss, 0)) AS net_profit,
+        sd.sales_rank
+    FROM 
+        sales_data sd
+    LEFT JOIN 
+        return_data rd ON sd.ws_item_sk = rd.wr_item_sk
+)
+SELECT 
+    cd.i_item_id,
+    cd.i_item_desc,
+    cd.i_brand,
+    cd.i_category,
+    cd.i_class,
+    cd.total_quantity,
+    cd.total_sales,
+    cd.total_returns,
+    cd.total_return_loss,
+    cd.net_profit,
+    CASE 
+        WHEN cd.net_profit < 0 THEN 'Loss'
+        WHEN cd.net_profit >= 0 AND cd.net_profit < 1000 THEN 'Small Profit'
+        ELSE 'Large Profit'
+    END AS profitability_category
+FROM 
+    item cd
+JOIN 
+    combined_data com ON cd.i_item_sk = com.ws_item_sk
+WHERE 
+    com.sales_rank = 1
+ORDER BY 
+    cd.net_profit DESC
+LIMIT 10;

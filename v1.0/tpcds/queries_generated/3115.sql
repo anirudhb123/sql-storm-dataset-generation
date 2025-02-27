@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt,
+        DENSE_RANK() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rnk
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_first_name) AS cust_rnk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+),
+ReturnDetails AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        rr.total_returned,
+        rr.total_returned_amt
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        RankedReturns rr ON ci.c_customer_id = rr.sr_returning_customer_sk
+    WHERE 
+        rr.rnk = 1
+)
+SELECT 
+    rd.c_customer_id,
+    rd.c_first_name,
+    rd.c_last_name,
+    rd.cd_gender,
+    rd.cd_marital_status,
+    COALESCE(rd.total_returned, 0) AS total_returned,
+    COALESCE(rd.total_returned_amt, 0.00) AS total_returned_amt,
+    CASE 
+        WHEN rd.total_returned > 0 THEN 'High Return Customer'
+        ELSE 'Normal Customer'
+    END AS customer_status
+FROM 
+    ReturnDetails rd
+WHERE 
+    (rd.total_returned_amt - rd.total_returned * (SELECT AVG(total_return_amt) FROM RankedReturns)) > 0
+ORDER BY 
+    rd.total_returned_amt DESC
+LIMIT 100
+OFFSET 0;

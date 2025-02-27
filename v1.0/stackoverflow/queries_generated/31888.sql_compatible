@@ -1,0 +1,101 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > DATEADD(day, -30, CAST('2024-10-01' AS DATE))
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalUpvotedPosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS TotalDownvotedPosts,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        UNNEST(SPLIT(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ct ON CAST(ph.Comment AS INT) = ct.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ct.Name
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalUpvotedPosts,
+    up.TotalDownvotedPosts,
+    up.AverageScore,
+    up.TotalViewCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS RecentPostDate,
+    rp.OwnerDisplayName AS RecentPostOwner,
+    pcr.CloseReason,
+    pcr.LastCloseDate,
+    tb.TagName
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    RecentPosts rp ON up.UserId = rp.OwnerUserId AND rp.rn = 1 
+LEFT JOIN 
+    PostCloseReasons pcr ON rp.PostId = pcr.PostId
+LEFT JOIN 
+    TopTags tb ON tb.TagName = ANY (SPLIT(SUBSTRING(rp.Tags FROM 2 FOR LENGTH(rp.Tags) - 2), '><'))
+WHERE 
+    up.TotalPosts > 5
+ORDER BY 
+    up.TotalPosts DESC, rp.CreationDate DESC;

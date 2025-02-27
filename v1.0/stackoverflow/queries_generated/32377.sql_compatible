@@ -1,0 +1,98 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        cte.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+),
+RecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CloseReason, 'Not Closed') AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPosts c ON p.Id = c.PostId
+)
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.PostsCount,
+    r.TotalBounties,
+    r.AvgScore,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.Score AS PostScore,
+    ps.ViewCount AS TotalViews,
+    ps.CloseReason,
+    cte.Level AS QuestionLevel,
+    CASE 
+        WHEN ps.CloseReason IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RecentActivity r
+JOIN 
+    PostSummary ps ON r.UserId = ps.OwnerUserId
+LEFT JOIN 
+    RecursivePostCTE cte ON ps.PostId = cte.PostId
+WHERE 
+    r.PostsCount > 5
+    AND r.AvgScore > 10
+    AND ps.UserRank <= 5
+ORDER BY 
+    r.TotalBounties DESC, r.AvgScore DESC, ps.Score DESC;

@@ -1,0 +1,46 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state, 
+        COUNT(DISTINCT ca_address_sk) AS unique_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        SUM(CASE WHEN ca_zip LIKE '______' THEN 1 ELSE 0 END) AS valid_zip_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+DemographicStats AS (
+    SELECT 
+        cd_education_status,
+        COUNT(DISTINCT cd_demo_sk) AS demo_count,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender = 'F'
+    GROUP BY 
+        cd_education_status
+),
+CombinedStats AS (
+    SELECT 
+        A.ca_state,
+        A.unique_addresses,
+        A.avg_street_name_length,
+        A.valid_zip_count,
+        D.cd_education_status,
+        D.demo_count,
+        D.total_dependents,
+        D.avg_purchase_estimate
+    FROM 
+        AddressStats A
+    JOIN 
+        DemographicStats D ON A.ca_state IN (SELECT ca_state FROM customer_address)
+    ORDER BY 
+        A.unique_addresses DESC
+)
+SELECT * FROM CombinedStats
+WHERE avg_purchase_estimate > (SELECT AVG(avg_purchase_estimate) FROM DemographicStats)
+AND unique_addresses > 100
+```

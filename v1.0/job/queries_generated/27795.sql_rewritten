@@ -1,0 +1,54 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT CONCAT(a.name, ' as ', r.role), ', ') AS cast
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        role_type AS r ON ci.person_role_id = r.id
+    LEFT JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+benchmarking AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.companies,
+        md.keywords,
+        md.cast,
+        LENGTH(md.title) AS title_length, 
+        LENGTH(md.companies) AS companies_length, 
+        LENGTH(md.keywords) AS keywords_length, 
+        LENGTH(md.cast) AS cast_length 
+    FROM 
+        movie_details AS md
+)
+SELECT 
+    AVG(title_length) AS avg_title_length,
+    AVG(companies_length) AS avg_companies_length,
+    AVG(keywords_length) AS avg_keywords_length,
+    AVG(cast_length) AS avg_cast_length,
+    COUNT(movie_id) AS total_movies
+FROM 
+    benchmarking;

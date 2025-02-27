@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+),
+SupplierStatistics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name,
+    SUM(s.total_supplycost) AS total_supplier_value,
+    AVG(c.total_spent) AS avg_spent,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier_statistics s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    customer_purchases c ON c.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderdate BETWEEN DATEADD(month, -6, CURRENT_DATE) AND CURRENT_DATE
+    )
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IN (
+        SELECT o_orderkey FROM orders WHERE o_orderstatus IN ('O', 'P')
+    )
+WHERE 
+    s.total_supplycost IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_supplier_value DESC, avg_spent DESC;

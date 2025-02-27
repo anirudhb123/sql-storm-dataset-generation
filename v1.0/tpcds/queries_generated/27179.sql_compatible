@@ -1,0 +1,39 @@
+
+WITH ProcessedAddresses AS (
+    SELECT
+        ca_address_sk,
+        UPPER(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        SUBSTRING_INDEX(SUBSTRING_INDEX(ca_city, ' ', 1), ' ', 1) AS city_first_word,
+        ca_state,
+        LENGTH(ca_zip) AS zip_length
+    FROM customer_address
+),
+Demographics AS (
+    SELECT
+        cd_demo_sk,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd_demo_sk
+),
+AggregatedData AS (
+    SELECT
+        p.full_address,
+        p.city_first_word,
+        p.ca_state,
+        d.customer_count,
+        d.avg_purchase_estimate
+    FROM ProcessedAddresses p
+    JOIN Demographics d ON p.ca_state = 'CA' AND UPPER(p.city_first_word) LIKE 'S%'
+)
+SELECT
+    full_address,
+    city_first_word,
+    ca_state,
+    customer_count,
+    avg_purchase_estimate
+FROM AggregatedData
+WHERE customer_count > 10
+ORDER BY avg_purchase_estimate DESC
+FETCH FIRST 100 ROWS ONLY;

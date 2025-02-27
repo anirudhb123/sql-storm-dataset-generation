@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_item_sk, SUM(ss_net_paid) AS total_sales, COUNT(ss_ticket_number) AS sales_count
+    FROM store_sales
+    GROUP BY ss_item_sk
+    HAVING SUM(ss_net_paid) > 1000
+    UNION ALL
+    SELECT ss_item_sk, total_sales / 2, sales_count
+    FROM SalesCTE
+    WHERE total_sales > 100
+),
+DemographicCTE AS (
+    SELECT cd.gender, cd.marital_status, COUNT(c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.gender, cd.marital_status
+),
+ShippingCTE AS (
+    SELECT sm.sm_ship_mode_id, COUNT(ws_order_number) AS order_count, SUM(ws_net_paid) AS total_revenue
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY sm.sm_ship_mode_id
+),
+ReturnsSummary AS (
+    SELECT sr_item_sk, SUM(sr_return_amt_inc_tax) AS total_return, COUNT(sr_order_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(S.total_sales, 0) AS total_sales,
+    COALESCE(D.customer_count, 0) AS customer_count,
+    COALESCE(SH.total_revenue, 0) AS total_revenue,
+    COALESCE(R.total_return, 0) AS total_return,
+    CASE 
+        WHEN COALESCE(S.total_sales, 0) > 0 THEN COALESCE(R.total_return, 0) * 100.0 / COALESCE(S.total_sales, 1)
+        ELSE 0
+    END AS return_rate
+FROM item i
+LEFT JOIN SalesCTE S ON i.i_item_sk = S.ss_item_sk
+LEFT JOIN DemographicCTE D ON D.gender = 'F' AND D.marital_status = 'M'
+LEFT JOIN ShippingCTE SH ON SH.order_count > 10
+LEFT JOIN ReturnsSummary R ON R.sr_item_sk = i.i_item_sk
+WHERE i.i_current_price > 20.00
+ORDER BY return_rate DESC
+LIMIT 50;

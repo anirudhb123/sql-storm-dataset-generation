@@ -1,0 +1,89 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        RANK() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_quantity) DESC) AS return_rank
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+HighestReturners AS (
+    SELECT 
+        rr.wr_returning_customer_sk,
+        rr.total_returned_quantity
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.return_rank = 1
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales_price,
+        SUM(ws_quantity) AS total_quantity_sold,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+    GROUP BY 
+        ws_item_sk
+),
+IncomeBandReturn AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(DISTINCT wr_returning_customer_sk) AS return_customer_count,
+        SUM(wr_return_quantity) AS total_returned_quantity
+    FROM 
+        household_demographics h
+    JOIN 
+        web_returns wr ON h.hd_demo_sk = wr.wr_returning_cdemo_sk
+    GROUP BY 
+        h.hd_income_band_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ha.total_returned_quantity AS highest_returned_quantity,
+    ia.total_sales_price,
+    ia.total_orders,
+    CASE 
+        WHEN hd.return_customer_count IS NULL THEN 'No Returns'
+        WHEN hd.return_customer_count > 0 AND hd.return_customer_count <= 5 THEN 'Low Returns'
+        WHEN hd.return_customer_count BETWEEN 6 AND 15 THEN 'Moderate Returns'
+        ELSE 'High Returns'
+    END AS return_category,
+    COALESCE(ib.ib_lower_bound, 0) AS income_lower_bound,
+    COALESCE(ib.ib_upper_bound, 100000) AS income_upper_bound
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    HighestReturners ha ON cd.c_customer_sk = ha.wr_returning_customer_sk
+LEFT JOIN 
+    SalesAnalysis ia ON ia.ws_item_sk = cd.c_current_hdemo_sk
+LEFT JOIN 
+    IncomeBandReturn hd ON cd.c_current_hdemo_sk = hd.hd_income_band_sk
+LEFT JOIN 
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    cd.cd_purchase_estimate > 1000
+ORDER BY 
+    highest_returned_quantity DESC, 
+    total_sales_price DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,101 @@
+WITH Recursive_Tag_Counts AS (
+    SELECT 
+        TagName,
+        Count,
+        1 AS level
+    FROM Tags
+    WHERE Count > 0
+
+    UNION ALL
+
+    SELECT 
+        T.TagName,
+        T.Count,
+        RTC.level + 1
+    FROM Tags T
+    INNER JOIN Recursive_Tag_Counts RTC ON T.Count > RTC.Count
+    WHERE RTC.level < 10
+),
+Post_Details AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.ViewCount,
+        COUNT(C.CreationDate) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        L.Name AS LinkTypeName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank,
+        T.TagName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    LEFT JOIN 
+        LinkTypes L ON PL.LinkTypeId = L.Id
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')  -- Assuming Tags are extracted correctly
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId, P.AnswerCount, P.ViewCount, L.Name, T.TagName
+),
+User_Reputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+
+Top_Posts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.ViewCount,
+        PD.CommentCount,
+        PD.UpVotes,
+        PD.DownVotes,
+        UR.Reputation,
+        UR.ReputationRank,
+        ROW_NUMBER() OVER (ORDER BY PD.ViewCount DESC) AS PostRank
+    FROM 
+        Post_Details PD
+    LEFT JOIN 
+        User_Reputation UR ON PD.OwnerUserId = UR.UserId
+    WHERE 
+        PD.AnswerCount > 0  -- Filters out all posts without answers
+)
+
+SELECT 
+    TP.Title,
+    TP.CreationDate,
+    TP.ViewCount,
+    TP.CommentCount,
+    TP.UpVotes,
+    TP.DownVotes,
+    TP.Reputation,
+    CASE 
+        WHEN TC.TagName IS NOT NULL THEN TC.TagName
+        ELSE 'No Tags'
+    END AS PrimaryTag,
+    CASE 
+        WHEN TP.PostRank <= 100 THEN 'Top 100 Posts'
+        ELSE 'Beyond Top 100'
+    END AS PostCategory
+FROM 
+    Top_Posts TP
+LEFT JOIN 
+    (SELECT DISTINCT TagName FROM Tags WHERE Count > 1) TC ON TP.Title LIKE CONCAT('%', TC.TagName, '%')
+WHERE 
+    TP.Reputation > 1000
+ORDER BY 
+    TP.ViewCount DESC, TP.CreationDate DESC;
+

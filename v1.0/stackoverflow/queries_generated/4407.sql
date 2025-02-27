@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        UpVotes,
+        DownVotes,
+        CommentCount,
+        RANK() OVER (ORDER BY PostCount DESC, UpVotes DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[]) 
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    u.UpVotes,
+    u.DownVotes,
+    u.CommentCount,
+    t.TagName,
+    t.PostCount AS TagPostCount
+FROM 
+    RankedUsers u
+LEFT JOIN 
+    PopularTags t ON u.PostCount > 10 AND u.UserId IN (
+        SELECT UserId 
+        FROM Posts 
+        WHERE Tags LIKE '%' || t.TagName || '%'
+    )
+WHERE 
+    u.UserRank <= 50
+ORDER BY 
+    u.UserRank, t.PostCount DESC NULLS LAST;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as rn,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        p.Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= now() - INTERVAL '1 year'
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        CASE 
+            WHEN COUNT(b.Id) FILTER (WHERE b.Class = 1) > 0 THEN 'Gold' 
+            WHEN COUNT(b.Id) FILTER (WHERE b.Class = 2) > 0 THEN 'Silver' 
+            WHEN COUNT(b.Id) FILTER (WHERE b.Class = 3) > 0 THEN 'Bronze' 
+            ELSE 'None' 
+        END AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN rp.rn = 1 THEN 1 ELSE 0 END) AS LatestPosts,
+    SUM(rp.UpVotes) AS TotalUpVotes,
+    SUM(rp.DownVotes) AS TotalDownVotes,
+    uwb.BadgeClass,
+    CASE 
+        WHEN SUM(rp.UpVotes) > SUM(rp.DownVotes) THEN 'Positive'
+        WHEN SUM(rp.UpVotes) < SUM(rp.DownVotes) THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostSentiment
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    UserWithBadges uwb ON up.Id = uwb.UserId
+GROUP BY 
+    up.UserId, uwb.BadgeClass
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    TotalPosts DESC, BadgeCount DESC;

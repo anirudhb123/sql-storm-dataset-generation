@@ -1,0 +1,64 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND 
+        o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        SupplierSales s
+)
+SELECT 
+    n.n_name AS nation,
+    r.r_name AS region,
+    COALESCE(ts.s_name, 'Unknown') AS top_supplier,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(ts.order_count, 0) AS order_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    (SELECT 
+         s.s_suppkey, 
+         s.s_name, 
+         ss.total_sales, 
+         ss.order_count 
+     FROM 
+         SupplierSales ss
+     JOIN 
+         TopSuppliers ts ON ss.s_suppkey = ts.s_suppkey
+    WHERE 
+         ts.rank = 1
+    ) ts ON n.n_nationkey = (
+        SELECT 
+            s.s_nationkey 
+        FROM 
+            supplier s 
+        WHERE 
+            s.s_suppkey = ts.s_suppkey
+        LIMIT 1
+    )
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    total_sales DESC, 
+    nation;

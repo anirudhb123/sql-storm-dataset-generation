@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000   
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT qc.person_id) AS coactors_count,
+    AVG(mi.rating) AS avg_rating,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT qc.person_id) > 5 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_type
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        AVG(info::numeric) AS rating 
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        movie_id
+) mi ON m.movie_id = mi.movie_id
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        ci.person_id
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NULL   
+) qc ON qc.movie_id = m.movie_id
+GROUP BY 
+    a.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT qc.person_id) >= 2 
+ORDER BY 
+    m.production_year DESC, coactors_count DESC;

@@ -1,0 +1,62 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.Score,
+        pc.CommentCount,
+        pc.LastCommentDate
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    WHERE 
+        rp.RecentRank = 1
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    pp.Score,
+    COALESCE(pp.CommentCount, 0) AS TotalComments,
+    CASE 
+        WHEN pp.LastCommentDate IS NOT NULL THEN 
+            DATEDIFF(NOW(), pp.LastCommentDate)
+        ELSE 
+            NULL 
+    END AS DaysSinceLastComment,
+    ROW_NUMBER() OVER (ORDER BY pp.Score DESC) AS PopularityRank
+FROM 
+    PopularPosts pp
+JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+WHERE 
+    pp.Score > 0 
+    AND (pp.CommentCount IS NULL OR pp.CommentCount >= 5)
+ORDER BY 
+    pp.Score DESC, pp.CreationDate ASC;

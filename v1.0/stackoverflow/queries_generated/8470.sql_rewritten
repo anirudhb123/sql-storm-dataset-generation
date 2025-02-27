@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        P.Score,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Posts A ON P.Id = A.ParentId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, U.DisplayName, P.Score
+),
+TopRankedPosts AS (
+    SELECT PostId, Title, CreationDate, ViewCount, OwnerDisplayName, AnswerCount, Score
+    FROM RankedPosts
+    WHERE PostRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS MaxBadgeClass  
+    FROM Users U 
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT 
+        TRP.PostId,
+        TRP.Title,
+        TRP.CreationDate,
+        TRP.ViewCount,
+        TRP.OwnerDisplayName,
+        TRP.AnswerCount,
+        TRP.Score,
+        UB.BadgeCount,
+        UB.MaxBadgeClass
+    FROM TopRankedPosts TRP
+    JOIN UserBadges UB ON TRP.OwnerDisplayName = UB.UserId
+)
+SELECT 
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.Score,
+    PS.BadgeCount,
+    CASE 
+        WHEN PS.MaxBadgeClass = 1 THEN 'Gold'
+        WHEN PS.MaxBadgeClass = 2 THEN 'Silver'
+        WHEN PS.MaxBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS HighestBadge
+FROM PostStats PS
+ORDER BY PS.Score DESC, PS.ViewCount DESC;

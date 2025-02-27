@@ -1,0 +1,31 @@
+
+SELECT 
+    c.c_customer_id AS customer_id, 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+    a.ca_city AS city, 
+    a.ca_state AS state, 
+    SUBSTRING_INDEX(a.ca_street_name, ' ', 1) AS street_first_word, 
+    d.d_year AS year, 
+    d.d_month_seq AS month, 
+    COUNT(ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT ws.ws_web_page_sk) AS unique_pages_visited
+FROM 
+    customer c
+JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+    AND a.ca_state = 'CA'
+    AND d.d_year = 2023
+GROUP BY 
+    customer_id, full_name, city, state, street_first_word, year, month
+HAVING 
+    total_orders > 2 
+ORDER BY 
+    total_profit DESC, total_orders DESC
+LIMIT 100;

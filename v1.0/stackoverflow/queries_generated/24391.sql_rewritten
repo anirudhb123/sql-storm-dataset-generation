@@ -1,0 +1,68 @@
+WITH PostsWithDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS OwnerDisplayName,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= '2022-01-01' 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName, p.AcceptedAnswerId
+), 
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        pht.Name AS PostHistoryType,
+        COUNT(ph.Id) AS ChangeCount,
+        json_agg(DISTINCT ph.UserDisplayName) AS Editors,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE pht.Id IN (4, 5, 6, 10, 11) 
+    GROUP BY ph.PostId, pht.Name
+),
+PostRankings AS (
+    SELECT 
+        wd.PostId,
+        wd.Rank,
+        pd.ChangeCount,
+        pd.LastChangeDate,
+        pd.Editors
+    FROM PostsWithDetails wd
+    LEFT JOIN PostHistoryData pd ON wd.PostId = pd.PostId
+)
+SELECT 
+    pr.PostId,
+    pr.Rank,
+    pr.ChangeCount,
+    COALESCE(pr.Editors::text, 'No Edits') AS Editors,
+    COALESCE(pd.OwnerDisplayName, 'Unknown Owner') AS OwnerDisplayName,
+    COALESCE(pd.CommentCount, 0) AS CommentCount,
+    COALESCE(pd.UpVotes - NULLIF(pd.DownVotes, 0), 0) AS NetVoteScore,
+    CASE 
+        WHEN pd.Score > 50 THEN 'Hot'
+        WHEN pd.Score BETWEEN 20 AND 50 THEN 'Warm'
+        ELSE 'Cold'
+    END AS Temperature,
+    pb.BadgeCount
+FROM PostRankings pr
+JOIN (
+    SELECT 
+        b.UserId, 
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+) pb ON pb.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = pr.PostId)
+LEFT JOIN PostsWithDetails pd ON pr.PostId = pd.PostId
+WHERE pr.Rank <= 10
+ORDER BY pr.Rank ASC
+LIMIT 10;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionSupplier AS (
+    SELECT r.r_name, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_name, s.s_name
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, cs.total_spent, cs.total_orders,
+           ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM CustomerSummary cs
+    JOIN customer c ON cs.c_custkey = c.c_custkey
+)
+SELECT 
+    rh.o_orderkey,
+    rh.o_orderdate,
+    rh.o_totalprice,
+    rs.r_name,
+    rs.s_name,
+    rc.c_name,
+    rc.total_orders,
+    COALESCE(rc.total_spent, 0) AS total_spent,
+    DENSE_RANK() OVER (PARTITION BY rs.r_name ORDER BY rc.total_spent DESC) AS rank_within_region
+FROM OrderHierarchy rh
+LEFT JOIN RegionSupplier rs ON rh.o_orderkey = rs.s_name 
+LEFT JOIN RankedCustomers rc ON rh.o_custkey = rc.c_custkey
+WHERE rh.o_orderdate >= DATEADD(MONTH, -6, '1998-10-01') 
+  AND (rh.o_totalprice - COALESCE(rc.total_spent, 0)) > 1000.00
+ORDER BY rank_within_region, rc.total_spent DESC;

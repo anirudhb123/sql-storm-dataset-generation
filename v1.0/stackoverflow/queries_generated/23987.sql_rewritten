@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        TAGS.Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS TotalUpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, STRING_AGG(TagName, ',') AS Tags
+         FROM Posts
+         JOIN Tags ON Posts.Id = Tags.ExcerptPostId
+         GROUP BY PostId) AS TAGS ON p.Id = TAGS.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - interval '30 days'
+),
+
+PostsWithBadges AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.CreationDate,
+        r.RankScore,
+        b.Name AS BadgeName,
+        b.Class,
+        r.TotalUpVotes,
+        r.TotalDownVotes
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Badges b ON r.PostId = b.UserId
+    WHERE 
+        b.Class IN (1, 2) AND b.Date > r.CreationDate
+),
+
+TopRankedPosts AS (
+    SELECT 
+        p.*,
+        COALESCE(SUM(case when v.VoteTypeId = 4 THEN 1 ELSE 0 END) OVER (PARTITION BY p.PostId), 0) AS OffensiveVotes,
+        CASE 
+            WHEN p.RankScore IS NULL THEN 'Not Ranked'
+            WHEN p.RankScore <= 5 THEN 'Top Rank'
+            ELSE 'Lower Rank'
+        END AS RankCategory
+    FROM 
+        PostsWithBadges p
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId
+    ORDER BY 
+        p.Score DESC
+)
+
+SELECT 
+    t.*,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('BadgeName', t.BadgeName, 'Class', CASE WHEN t.Class = 1 THEN 'Gold' WHEN t.Class = 2 THEN 'Silver' ELSE 'Bronze' END)) AS Badges,
+    COALESCE(k.CloseReason, 'N/A') AS LatestCloseReason
+FROM 
+    TopRankedPosts t
+LEFT JOIN 
+    (SELECT ph.PostId, CT.Name AS CloseReason
+     FROM PostHistory ph
+     JOIN CloseReasonTypes CT ON ph.Comment = CT.Id::varchar
+     WHERE ph.PostHistoryTypeId = 10) k ON t.PostId = k.PostId
+GROUP BY 
+    t.PostId, t.Title, t.Score, t.CreationDate, t.RankScore, t.BadgeName, t.Class
+HAVING 
+    AVG(t.TotalUpVotes - t.TotalDownVotes) > 0 OR COUNT(t.BadgeName) > 2
+ORDER BY 
+    t.RankCategory DESC, t.CreationDate DESC
+LIMIT 100;

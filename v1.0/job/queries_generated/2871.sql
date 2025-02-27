@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY t.kind_id DESC) AS rank_per_year,
+        COUNT(c.id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.id = t.id
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        rank_per_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year <= 5
+),
+GenreInfo AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT k.keyword SEPARATOR ', ') AS genres
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.rank_per_year,
+    f.cast_count,
+    COALESCE(g.genres, 'No genres found') AS genres
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    GenreInfo g ON f.movie_title = g.movie_id
+ORDER BY 
+    f.production_year DESC, f.rank_per_year;

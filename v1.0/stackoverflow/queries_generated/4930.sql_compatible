@@ -1,0 +1,57 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation >= 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL
+),
+MostVotedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId IN (1, 2)
+    GROUP BY p.Id
+    HAVING COUNT(v.Id) > 10
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+)
+SELECT 
+    u.DisplayName AS UserName,
+    ur.ReputationLevel,
+    tp.Title,
+    tp.ViewCount,
+    COALESCE(vp.VoteCount, 0) AS VoteCount,
+    COALESCE(rp.UserDisplayName, 'No recent changes') AS RecentEditor,
+    COALESCE(rp.CreationDate::TEXT, 'N/A') AS LastEditDate
+FROM UserReputation ur
+JOIN Users u ON u.Id = ur.Id
+LEFT JOIN TopPosts tp ON u.Id = tp.OwnerUserId AND tp.rn = 1
+LEFT JOIN MostVotedPosts vp ON tp.PostId = vp.PostId
+LEFT JOIN RecentPostHistory rp ON tp.PostId = rp.PostId AND rp.rn = 1
+WHERE ur.ReputationLevel = 'High'
+ORDER BY ur.Reputation DESC, tp.ViewCount DESC;

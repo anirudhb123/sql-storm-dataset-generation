@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(CASE WHEN ci.nr_order IS NOT NULL THEN 1 END) AS role_count
+    FROM 
+        cast_info ci 
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, a.name, rt.role
+), 
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cr.company_count, 0) AS company_count,
+        COALESCE(ar.role_count, 0) AS actor_role_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyMovieInfo cr ON rm.title_id = cr.movie_id
+    LEFT JOIN 
+        ActorRoles ar ON rm.title_id = ar.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.company_count,
+    m.actor_role_count,
+    CASE 
+        WHEN m.actor_role_count > 5 THEN 'Popular'
+        WHEN m.actor_role_count BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Niche' 
+    END AS popularity_category,
+    JSON_BUILD_OBJECT('title', m.title, 'year', m.production_year) AS movie_json,
+    CASE 
+        WHEN m.company_count IS NULL THEN 'No Companies'
+        ELSE 'Has Companies' 
+    END AS company_status
+FROM 
+    MoviesWithInfo m
+WHERE 
+    m.actor_role_count > 0
+    AND m.production_year >= (SELECT MAX(production_year) - 5 FROM aka_title)
+ORDER BY 
+    m.production_year DESC;

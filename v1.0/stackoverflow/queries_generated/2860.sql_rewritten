@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 5
+),
+PostDetails AS (
+    SELECT 
+        TP.PostId,
+        TP.Title,
+        TP.CreationDate,
+        TP.Score,
+        TP.OwnerDisplayName,
+        ISNULL(PH.Comment, 'No comments') AS EditComment,
+        ISNULL(PH.CreationDate, TP.CreationDate) AS LastEditDate
+    FROM 
+        TopPosts TP
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            MAX(CreationDate) AS CreationDate, 
+            STRING_AGG(Comment, '; ') AS Comment
+         FROM 
+            PostHistory PH
+         WHERE 
+            PH.PostHistoryTypeId IN (4, 5) 
+         GROUP BY 
+            PostId) PH ON TP.PostId = PH.PostId
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.OwnerDisplayName,
+    PD.CommentCount,
+    PD.LastEditDate,
+    CASE 
+        WHEN PD.Score > 100 THEN 'High Score'
+        WHEN PD.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    'Post Title: ' + PD.Title + ', Owner: ' + PD.OwnerDisplayName AS TitleDescription
+FROM 
+    PostDetails PD
+ORDER BY 
+    PD.Score DESC;

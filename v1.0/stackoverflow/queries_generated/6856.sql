@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+PostStats AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(CAST(ptAnswers.AnswerCount AS INT), 0) AS AnswerCount
+    FROM 
+        RankedPosts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) pc ON p.PostId = pc.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount 
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) ptAnswers ON p.PostId = ptAnswers.ParentId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.AnswerCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    PostStats ps
+WHERE 
+    ps.PostRank <= 5
+ORDER BY 
+    ps.Score DESC, ps.CreationDate ASC;

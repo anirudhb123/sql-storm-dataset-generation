@@ -1,0 +1,53 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name AS customer_name,
+        o.o_totalprice,
+        1 AS level
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderdate,
+        c.c_name AS customer_name,
+        oh.o_totalprice,
+        oh.level + 1
+    FROM 
+        order_hierarchy oh
+    JOIN 
+        lineitem l ON oh.o_orderkey = l.l_orderkey
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+
+SELECT 
+    rh.customer_name,
+    COUNT(DISTINCT rh.o_orderkey) AS total_orders,
+    SUM(rh.o_totalprice) AS total_spent,
+    AVG(rh.o_totalprice) AS avg_order_value,
+    ROW_NUMBER() OVER (PARTITION BY rh.customer_name ORDER BY SUM(rh.o_totalprice) DESC) AS order_rank
+FROM 
+    order_hierarchy rh
+GROUP BY 
+    rh.customer_name
+HAVING 
+    SUM(rh.o_totalprice) > 1000
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON tag_array = t.TagName
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.PostTypeId
+),
+AcceptedAnswers AS (
+    SELECT 
+        p.Id AS PostId,
+        pa.Id AS AcceptedAnswerId,
+        pa.Title AS AcceptTitle
+    FROM
+        Posts p
+    LEFT JOIN 
+        Posts pa ON p.AcceptedAnswerId = pa.Id
+    WHERE 
+        p.PostTypeId = 1
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title AS PostTitle,
+        p.Score,
+        p.ViewCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- closed, reopened, deleted
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    aa.AcceptedAnswerId,
+    aa.AcceptTitle,
+    CASE 
+        WHEN ph.UserId IS NOT NULL THEN 'Edited by: ' || ph.UserId
+        ELSE 'No Edits'
+    END AS EditInfo,
+    COUNT(DISTINCT ph.PostId) AS EditCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AcceptedAnswers aa ON rp.PostId = aa.PostId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.Rank <= 3  -- Top 3 posts per type
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.UpVotes, rp.DownVotes, rp.CommentCount, 
+    aa.AcceptedAnswerId, aa.AcceptTitle, ph.UserId
+ORDER BY 
+    rp.Rank;
+
+-- The query with CTEs fetches the top-ranked posts per type and aggregates vote counts, 
+-- retrieves accepted answers, and joins with post history to include edit information. 
+-- It highlights NULL logic for determining edits and uses string aggregation for tags.

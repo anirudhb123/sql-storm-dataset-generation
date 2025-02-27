@@ -1,0 +1,101 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= DATE_TRUNC('year', CAST('2024-10-01 12:34:56' AS TIMESTAMP))
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        COALESCE(cm.CommentCount, 0) AS TotalComments,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,  
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) cm ON p.Id = cm.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(rb.BadgeCount, 0) AS BadgeCount,
+        COALESCE(rb.BadgeNames, 'No Badges') AS BadgeNames,
+        pp.PostId,
+        rp.Rank,
+        pp.TotalComments,
+        pp.TotalUpVotes,
+        pp.TotalDownVotes,
+        pp.ClosedCount
+    FROM 
+        Users u
+    LEFT JOIN UserBadges rb ON u.Id = rb.UserId
+    LEFT JOIN PostStatistics pp ON u.Id = pp.PostId
+    LEFT JOIN RankedPosts rp ON u.Id = rp.Id
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    UserId,
+    DisplayName,
+    BadgeCount,
+    BadgeNames,
+    COUNT(PostId) AS TotalPosts,
+    SUM(TotalComments) AS TotalComments,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    MAX(ClosedCount) AS TotalClosedPosts
+FROM 
+    UserPostData
+GROUP BY 
+    UserId, 
+    DisplayName, 
+    BadgeCount, 
+    BadgeNames
+HAVING 
+    COUNT(PostId) > 0
+ORDER BY 
+    TotalUpVotes DESC, TotalComments DESC
+LIMIT 10;

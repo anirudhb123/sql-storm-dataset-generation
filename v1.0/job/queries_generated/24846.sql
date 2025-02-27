@@ -1,0 +1,74 @@
+WITH ActorTitles AS (
+    SELECT 
+        a.person_id, 
+        a.name AS actor_name, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS recent_role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        at.actor_name,
+        at.title,
+        at.production_year,
+        mwk.keyword_count,
+        mwk.keywords,
+        COALESCE(mi.info, 'No additional info') AS additional_info,
+        CASE 
+            WHEN mwk.keyword_count > 5 THEN 'High'
+            WHEN mwk.keyword_count BETWEEN 1 AND 5 THEN 'Medium'
+            ELSE 'Low'
+        END AS keyword_category
+    FROM 
+        ActorTitles at
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON at.title = mwk.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.title = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Description') 
+    WHERE 
+        at.recent_role = 1
+)
+SELECT 
+    dmi.actor_name,
+    dmi.title,
+    dmi.production_year,
+    dmi.keyword_count,
+    dmi.keywords,
+    dmi.additional_info,
+    dmi.keyword_category,
+    CASE 
+        WHEN dmi.production_year < 2000 THEN 'Classic'
+        WHEN dmi.production_year BETWEEN 2000 AND 2010 THEN 'Recent'
+        ELSE 'Modern'
+    END AS era,
+    COALESCE(NULLIF(STRING_AGG(DISTINCT ct.kind, ', '), ''), 'Unknown') AS company_types
+FROM 
+    DetailedMovieInfo dmi
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = dmi.title
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+GROUP BY 
+    dmi.actor_name, dmi.title, dmi.production_year, dmi.keyword_count, dmi.keywords, dmi.additional_info, dmi.keyword_category
+ORDER BY 
+    dmi.production_year DESC, dmi.actor_name;

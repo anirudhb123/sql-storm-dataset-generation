@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankWithinType,
+        SUM(p.Score) OVER (PARTITION BY p.OwnerUserId) AS TotalOwnerScore,
+        ARRAY_AGG(t.TagName) AS PostTags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(b.Id) AS BadgeCount, 
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) AS LatestCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.RankWithinType,
+    us.DisplayName AS OwnerDisplayName,
+    us.BadgeCount,
+    us.TotalBounty,
+    us.MaxReputation,
+    cp.LatestCloseDate,
+    rp.PostTags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserStatistics us ON u.Id = us.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.RankWithinType <= 3
+ORDER BY 
+    rp.Score DESC, 
+    us.BadgeCount DESC 
+LIMIT 25;

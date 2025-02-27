@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    ak.id AS aka_id,
+    ak.name AS person_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    mh.level,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COUNT(DISTINCT mc.id) OVER(PARTITION BY ak.id) AS total_movies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') FILTER (WHERE kw.keyword IS NOT NULL) AS keywords
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN movie_companies mc ON ci.movie_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+JOIN aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+JOIN movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name != ''
+    AND mt.production_year > 2000
+    AND (mh.level = 0 OR (mh.level > 0 AND mt.production_year % 2 = 0))
+GROUP BY 
+    ak.id, ak.name, mt.title, mt.production_year, mh.level, cn.name
+ORDER BY 
+    total_movies DESC,
+    ak.name ASC,
+    mt.production_year DESC
+LIMIT 50;
+
+This SQL query retrieves a list of actors along with their movie titles, production years, associated companies, and keywords for movies released after 2000. It utilizes recursive common table expressions (CTEs) to navigate movie hierarchies, counts distinct movies per actor using a window function, and applies various filters and joins, including outer joins for optional data. The inclusion of `STRING_AGG` ensures aggregation of keywords, while handling NULL values appropriately with `COALESCE`. The final output is sorted and limited to show a concise benchmark of performance.

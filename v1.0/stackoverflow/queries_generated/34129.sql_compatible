@@ -1,0 +1,103 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+), 
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        rph.Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.Id
+    WHERE 
+        p.CreationDate >= DATE '2022-01-01'  
+    GROUP BY 
+        p.Id, p.Title, rph.Level
+),
+AggregatedScores AS (
+    SELECT 
+        Level,
+        COUNT(*) AS PostCount,
+        AVG(UpVotes - DownVotes) AS AvgScore,
+        SUM(CommentCount) AS TotalComments,
+        SUM(BadgeCount) AS TotalBadges
+    FROM 
+        PostScores
+    GROUP BY 
+        Level
+)
+
+SELECT 
+    aph.Level,
+    aph.PostCount,
+    aph.AvgScore,
+    aph.TotalComments,
+    aph.TotalBadges,
+    COALESCE(MAX(upv.DailyUpVotes), 0) AS DailyUpVotes,
+    COALESCE(MAX(dv.DailyDownVotes), 0) AS DailyDownVotes
+FROM 
+    AggregatedScores aph
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS DailyUpVotes
+    FROM 
+        Votes
+    WHERE 
+        VoteTypeId = 2 AND 
+        CreationDate >= DATE '2024-10-01' - INTERVAL '7 days'  
+    GROUP BY 
+        PostId
+) upv ON upv.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId IS NOT NULL)
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS DailyDownVotes
+    FROM 
+        Votes
+    WHERE 
+        VoteTypeId = 3 AND 
+        CreationDate >= DATE '2024-10-01' - INTERVAL '7 days'
+    GROUP BY 
+        PostId
+) dv ON dv.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId IS NOT NULL)
+GROUP BY 
+    aph.Level, aph.PostCount, aph.AvgScore, aph.TotalComments, aph.TotalBadges
+ORDER BY 
+    aph.Level;

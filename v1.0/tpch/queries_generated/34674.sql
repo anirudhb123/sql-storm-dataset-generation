@@ -1,0 +1,45 @@
+WITH RECURSIVE RegionSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+    UNION ALL
+    SELECT 
+        'All Regions' AS region_name,
+        SUM(total_sales) AS total_sales
+    FROM 
+        RegionSales
+)
+SELECT 
+    r.region_name,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(r.total_sales, 0) DESC) AS sales_rank,
+    CASE 
+        WHEN r.total_sales IS NULL THEN 'No sales'
+        WHEN r.total_sales > 1000000 THEN 'High seller'
+        ELSE 'Regular seller'
+    END AS seller_category
+FROM 
+    (SELECT region_name, SUM(total_sales) AS total_sales 
+     FROM RegionSales 
+     GROUP BY region_name) r
+FULL OUTER JOIN 
+    (SELECT DISTINCT r_name FROM region) reg ON r.region_name = reg.r_name
+WHERE 
+    (r.total_sales IS NULL OR r.total_sales > 500000)
+ORDER BY 
+    sales_rank
+LIMIT 10;

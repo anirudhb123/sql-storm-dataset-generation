@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+nation_avg_purchase AS (
+    SELECT n.n_nationkey, AVG(o.o_totalprice) AS avg_total_price
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey
+),
+sales_ranked AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_sales,
+           RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT n.n_name, s.s_name, s.s_acctbal, l.l_shipdate,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY l.l_extendedprice DESC) AS item_rank,
+       COALESCE(sales.total_sales, 0) AS total_sales,
+       (SELECT COUNT(*) FROM supplier s2 WHERE s2.s_acctbal > s.s_acctbal) AS less_acctbal_count
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.n_nationkey
+LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN sales_ranked sales ON n.n_nationkey = sales.n_nationkey
+LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE (s.s_acctbal IS NOT NULL AND s.s_acctbal > 20000) OR 
+      (s.s_acctbal IS NULL AND n.n_name LIKE 'A%')
+ORDER BY n.n_name, total_sales DESC;

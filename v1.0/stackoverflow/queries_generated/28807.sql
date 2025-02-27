@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- counting only upvotes and downvotes
+    WHERE 
+        p.PostTypeId = 1 -- only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.ViewCount, u.DisplayName
+), PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(p.Tags from 2 for length(p.Tags) - 2), '><'))) AS TagName, 
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+), TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.TagName,
+    ut.DisplayName AS TopUser,
+    ut.GoldBadges,
+    ut.SilverBadges,
+    ut.BronzeBadges,
+    SUM(CASE WHEN ut.TotalPosts > 10 THEN 1 ELSE 0 END) OVER (PARTITION BY pt.TagName) AS PostsAboveThreshold
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+JOIN 
+    TopUsers ut ON rp.OwnerDisplayName = ut.DisplayName
+WHERE 
+    rp.Rank <= 5 -- select top 5 ranked posts per user
+ORDER BY 
+    rp.ViewCount DESC, 
+    pt.TagCount DESC;

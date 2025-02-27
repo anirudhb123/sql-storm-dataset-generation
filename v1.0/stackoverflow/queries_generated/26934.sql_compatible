@@ -1,0 +1,98 @@
+
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(DISTINCT Id) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT p2.Id) AS AnswersGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Posts p2 ON u.Id = p2.OwnerUserId AND p2.PostTypeId = 2  
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionsAsked,
+        AnswersGiven
+    FROM 
+        UserReputation
+    WHERE 
+        Reputation > 1000 AND QuestionsAsked > 5  
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        TagCounts tc ON tc.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        Tags,
+        RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM 
+        PostScore
+)
+SELECT 
+    t.TagName,
+    COUNT(DISTINCT p.PostId) AS PostsParticipated,
+    SUM(COALESCE(u.Reputation, 0)) AS TotalReputation,
+    COUNT(DISTINCT u.UserId) AS ActiveUserCount,
+    MAX(u.Reputation) AS MaxUserReputation,
+    MIN(u.Reputation) AS MinUserReputation
+FROM 
+    TopTags t
+JOIN 
+    Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    ActiveUsers u ON p.OwnerUserId = u.UserId
+WHERE 
+    t.Rank <= 10  
+GROUP BY 
+    t.TagName
+ORDER BY 
+    PostsParticipated DESC, TotalReputation DESC;

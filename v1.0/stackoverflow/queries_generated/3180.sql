@@ -1,0 +1,57 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostInsights AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PI.PostId,
+        PI.Title,
+        PI.CreationDate,
+        PI.Score,
+        PI.ViewCount,
+        PI.AnswerCount,
+        PI.CommentCount,
+        US.DisplayName
+    FROM PostInsights PI
+    JOIN UserStats US ON PI.OwnerUserId = US.UserId
+    WHERE PI.RecentPostRank <= 5
+)
+SELECT 
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    TP.ViewCount,
+    TP.AnswerCount,
+    TP.CommentCount,
+    TP.DisplayName,
+    COALESCE(B.Name, 'No Badge') AS BadgeName,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = TP.PostId AND V.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = TP.PostId AND V.VoteTypeId = 3) AS DownVoteCount
+FROM TopPosts TP
+LEFT JOIN Badges B ON TP.UserId = B.UserId AND B.Class = 1
+WHERE TP.Score > 10
+ORDER BY TP.ViewCount DESC, TP.CreationDate DESC
+LIMIT 50;

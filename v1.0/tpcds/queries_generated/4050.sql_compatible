@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        MAX(ws.ws_sales_price) AS max_purchase
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year > 1975
+    GROUP BY 
+        c.c_customer_sk
+),
+PromotionSummary AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(ws.ws_order_number) AS usage_count,
+        SUM(ws.ws_net_paid) AS total_revenue
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk < (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        p.p_promo_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.order_count,
+    cs.total_spent,
+    cs.max_purchase,
+    ps.promo_name,
+    ps.usage_count,
+    ps.total_revenue
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    (SELECT 
+         p.p_promo_sk, 
+         p.promo_name,
+         ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS promo_rank
+     FROM 
+         PromotionSummary ps
+     JOIN 
+         promotion p ON ps.p_promo_sk = p.p_promo_sk
+     GROUP BY 
+         p.p_promo_sk, p.promo_name) AS ps ON cs.c_customer_sk = ps.promo_rank
+WHERE 
+    cs.order_count > 5
+ORDER BY 
+    cs.total_spent DESC, cs.max_purchase DESC;

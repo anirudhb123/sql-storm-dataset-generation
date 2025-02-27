@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        jl.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link jl
+    JOIN aka_title m ON jl.movie_id = m.id
+    JOIN MovieHierarchy mh ON jl.movie_id = mh.movie_id
+),
+
+ActorPerformance AS (
+    SELECT 
+        a.id AS actor_id,
+        an.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN a.gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN a.gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN name a ON an.name = a.name
+    GROUP BY 
+        a.id
+),
+
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    ap.name AS actor_name,
+    ap.total_movies,
+    ap.male_count,
+    ap.female_count
+FROM 
+    TopMovies tm
+JOIN ActorPerformance ap ON tm.movie_id = ap.actor_id
+WHERE 
+    tm.movie_rank <= 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;
+
+In this SQL query:
+
+- We start by defining a recursive CTE called `MovieHierarchy` to establish a hierarchy of movies and their linked titles.
+- Next, we create an `ActorPerformance` CTE that calculates the total number of movies each actor appears in, along with a breakdown of male and female actors.
+- Then, we define a third CTE, `TopMovies`, to find the top movies based on the count of distinct cast members for each year, ranking them within that year.
+- Finally, the main query selects pertinent details from `TopMovies` and `ActorPerformance`, limiting to the top 5 movies per production year and ordering the results by production year and movie title.

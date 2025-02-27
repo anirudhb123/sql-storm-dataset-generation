@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.title AS movie_title,
+        mc.company_id,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.title AS movie_title,
+        mc.company_id,
+        m.production_year,
+        depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_chain mc_chain ON mc_chain.company_id = mc.company_id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    WHERE 
+        mc_chain.depth < 5 AND 
+        m.production_year >= 2000
+),
+
+company_info AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(*) AS movie_count,
+        STRING_AGG(DISTINCT m.movie_title, ', ') AS movies
+    FROM 
+        movie_chain mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        aka_title m ON mc.movie_title = m.title
+    GROUP BY 
+        c.name
+),
+
+cast_ranked AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+
+final_results AS (
+    SELECT 
+        ci.company_name,
+        ci.movie_count,
+        ci.movies,
+        cr.actor_name,
+        cr.actor_rank
+    FROM 
+        company_info ci
+    LEFT JOIN 
+        cast_ranked cr ON ci.movie_count > 0
+)
+
+SELECT 
+    fr.company_name,
+    fr.movie_count,
+    fr.movies,
+    CASE 
+        WHEN fr.actor_rank IS NULL THEN 'No actors'
+        ELSE fr.actor_name
+    END AS actor_details
+FROM 
+    final_results fr
+WHERE 
+    fr.movie_count > 5
+ORDER BY 
+    fr.movie_count DESC, fr.company_name;
+

@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    INNER JOIN 
+        MovieHierarchy h ON h.movie_id = ml.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mk.keywords,
+        RANK() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieKeywords mk ON mh.movie_id = mk.movie_id
+)
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    COALESCE(tm.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN tm.rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS rank_category
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.production_year DESC,
+    tm.movie_title;

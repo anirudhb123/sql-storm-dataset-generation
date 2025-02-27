@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        ROW_NUMBER() OVER (ORDER BY sd.total_profit DESC) AS rank
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_quantity IS NOT NULL
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(b.ib_lower_bound, 'Unknown') AS income_band
+    FROM 
+        item i
+    LEFT JOIN 
+        (SELECT 
+             ib_income_band_sk,
+             ib_lower_bound
+         FROM 
+             income_band 
+         WHERE 
+             ib_lower_bound IS NOT NULL) b ON i.i_item_sk = b.ib_income_band_sk
+)
+SELECT 
+    it.i_item_id,
+    it.i_item_desc,
+    COALESCE(ts.total_quantity, 0) AS total_quantity,
+    COALESCE(ts.total_profit, 0.00) AS total_profit,
+    ts.rank,
+    CASE 
+        WHEN ts.rank <= 10 THEN 'Top Seller'
+        ELSE 'Regular'
+    END AS seller_category
+FROM 
+    ItemDetails it
+LEFT JOIN 
+    (SELECT 
+         ws_item_sk, total_quantity, total_profit, rank
+     FROM 
+         TopSales
+     WHERE 
+         rank <= 10) ts ON it.i_item_sk = ts.ws_item_sk
+WHERE 
+    it.income_band <> 'Unknown'
+ORDER BY 
+    ts.rank NULLS LAST, it.i_item_id;

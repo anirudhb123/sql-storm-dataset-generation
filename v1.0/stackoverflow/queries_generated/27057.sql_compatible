@@ -1,0 +1,61 @@
+
+WITH TagStats AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        MAX(p.ViewCount) AS MaxViews,
+        MIN(u.Reputation) AS MinimumUserReputation
+    FROM 
+        Tags AS tag
+    LEFT JOIN 
+        Posts AS p ON p.Tags LIKE CONCAT('%', tag.TagName, '%')
+    LEFT JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        tag.TagName
+),
+BadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        (SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id) AS VoteCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS CommentCount
+    FROM 
+        Users AS u
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AverageScore,
+    ts.MaxViews,
+    MIN(bc.BadgeCount) AS MinBadgeCount,
+    AVG(ue.VoteCount) AS AvgVoteCount,
+    AVG(ue.CommentCount) AS AvgCommentCount,
+    COUNT(DISTINCT u.Id) AS UniqueUsersEngaged
+FROM 
+    TagStats AS ts
+LEFT JOIN 
+    BadgeCounts AS bc ON bc.UserId IN (SELECT OwnerUserId FROM Posts p WHERE p.Tags LIKE CONCAT('%', ts.TagName, '%'))
+LEFT JOIN 
+    UserEngagement AS ue ON ue.UserId IN (SELECT OwnerUserId FROM Posts p WHERE p.Tags LIKE CONCAT('%', ts.TagName, '%'))
+LEFT JOIN 
+    Users AS u ON u.Id IN (SELECT OwnerUserId FROM Posts p WHERE p.Tags LIKE CONCAT('%', ts.TagName, '%'))
+GROUP BY 
+    ts.TagName, ts.PostCount, ts.QuestionCount, ts.AnswerCount, ts.AverageScore, ts.MaxViews
+ORDER BY 
+    ts.PostCount DESC;

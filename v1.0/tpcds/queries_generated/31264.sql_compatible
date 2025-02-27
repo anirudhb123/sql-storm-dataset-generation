@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+LowIncomeCustomers AS (
+    SELECT 
+        cd.cd_demo_sk,
+        hd.hd_buy_potential,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        household_demographics hd
+    JOIN 
+        customer_demographics cd ON hd.hd_demo_sk = cd.cd_demo_sk
+    WHERE 
+        hd.hd_income_band_sk IS NOT NULL
+    GROUP BY 
+        cd.cd_demo_sk, hd.hd_buy_potential
+)
+SELECT 
+    w.w_warehouse_id,
+    SUM(ss.ss_net_profit) AS total_net_profit,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    COALESCE(STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', '), 'No customers') AS customer_names,
+    MAX(r.r_reason_desc) AS last_reason_desc
+FROM 
+    store_sales ss
+JOIN 
+    store s ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN 
+    customer c ON ss.ss_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    (SELECT cr_item_sk, COUNT(*) AS return_count, MAX(r.r_reason_desc) AS r_reason_desc
+     FROM catalog_returns cr
+     JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+     GROUP BY cr_item_sk) r ON ss.ss_item_sk = r.cr_item_sk
+JOIN 
+    warehouse w ON s.s_company_id = w.w_warehouse_sk
+WHERE 
+    ss.ss_sales_price > 0 
+    AND EXISTS (SELECT 1 
+                FROM CustomerRank cr 
+                WHERE cr.c_customer_sk = c.c_customer_sk AND cr.gender_rank <= 5)
+GROUP BY 
+    w.w_warehouse_id
+HAVING 
+    SUM(ss.ss_net_profit) > (SELECT AVG(ss_net_profit) FROM store_sales)
+ORDER BY 
+    total_net_profit DESC;

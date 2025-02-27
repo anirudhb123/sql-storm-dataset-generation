@@ -1,0 +1,86 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS TotalRevenue,
+        i.i_item_id,
+        i.i_item_desc,
+        MAX(i.i_current_price) AS MaxPrice,
+        MIN(i.i_current_price) AS MinPrice
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+),
+SalesSummary AS (
+    SELECT 
+        t.i_item_id,
+        t.i_item_desc,
+        t.TotalRevenue,
+        t.MaxPrice,
+        t.MinPrice,
+        COUNT(CASE WHEN r.SalesRank = 1 THEN 1 END) AS TopSalesCount,
+        COUNT(CASE WHEN r.SalesRank = 2 THEN 1 END) AS SecondTopSalesCount
+    FROM 
+        TotalSales t
+    LEFT JOIN 
+        RankedSales r ON t.i_item_id = r.ws_item_sk
+    GROUP BY 
+        t.i_item_id, t.i_item_desc, t.TotalRevenue, t.MaxPrice, t.MinPrice
+),
+HighPerformanceItems AS (
+    SELECT 
+        s.i_item_id,
+        s.i_item_desc,
+        s.TotalRevenue
+    FROM 
+        SalesSummary s
+    WHERE 
+        s.TotalRevenue > (SELECT AVG(TotalRevenue) FROM SalesSummary) 
+        AND s.MaxPrice IS NOT NULL
+)
+SELECT 
+    s.i_item_id,
+    s.i_item_desc,
+    s.TotalRevenue,
+    COALESCE(NULLIF(s.MaxPrice, s.MinPrice), -1) AS PriceDifference, 
+    CASE 
+        WHEN s.TopSalesCount > 0 THEN 'TOPSELLER'
+        WHEN s.SecondTopSalesCount > 0 THEN 'SECOND TOPSELLER'
+        ELSE 'OTHER'
+    END AS SalesCategory
+FROM 
+    HighPerformanceItems s
+JOIN 
+    customer dem ON dem.c_current_cdemo_sk = (
+        SELECT cd_demo_sk 
+        FROM customer_demographics 
+        WHERE cd_purchase_estimate > 1000 
+        AND cd_gender = 'F' 
+        ORDER BY cd_demo_sk LIMIT 1
+    )
+WHERE 
+    dem.c_birth_month IS NOT NULL
+    OR EXISTS (
+        SELECT 1 
+        FROM store s 
+        WHERE s.s_closed_date_sk IS NULL 
+        HAVING COUNT(*) > 5
+    )
+ORDER BY 
+    s.TotalRevenue DESC
+LIMIT 100
+OFFSET 50;

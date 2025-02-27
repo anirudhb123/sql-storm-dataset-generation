@@ -1,0 +1,86 @@
+
+WITH MovieTitle AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id
+),
+
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        mt.title_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(md.company_name, 'No Companies') AS company_name,
+        COALESCE(md.company_count, 0) AS company_count,
+        COALESCE(mt.keyword, 'No Keywords') AS keyword
+    FROM 
+        MovieTitle mt
+    LEFT JOIN 
+        CompanyDetails md ON mt.title_id = md.movie_id
+)
+
+SELECT 
+    mwk.title,
+    mwk.production_year,
+    mwk.company_count,
+    mwk.company_name,
+    ak.name AS actor_name,
+    ar.movie_count,
+    ar.roles,
+    CASE 
+        WHEN mwk.keyword = 'No Keywords' THEN NULL 
+        ELSE mwk.keyword 
+    END AS active_keyword
+FROM 
+    MoviesWithKeywords mwk
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT person_id FROM ActorRoles WHERE movie_count > 1)
+JOIN 
+    ActorRoles ar ON ak.person_id = ar.person_id
+WHERE 
+    mwk.production_year >= 2000
+    AND mwk.company_count > 0
+ORDER BY 
+    mwk.production_year DESC, 
+    ar.movie_count DESC,
+    mwk.title;

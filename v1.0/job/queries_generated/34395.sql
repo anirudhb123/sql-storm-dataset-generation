@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')  -- Adjust to specific types if needed
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        h.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')  -- Include specific links if needed
+)
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    STRING_AGG(k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.movie_id) AS num_movies,
+    COALESCE(p.info, 'N/A') AS personal_info,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank,
+    HOUR(AVG(DATE_PART('epoch', (SELECT MAX(mvi.info)::timestamp - MIN(mvi.info)::timestamp)
+                                    FROM movie_info mvi
+                                    WHERE mvi.movie_id = t.id))) AS avg_time_between_movies
+FROM
+    aka_name a
+JOIN
+    cast_info c ON a.person_id = c.person_id
+JOIN
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    person_info p ON a.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'biography')
+LEFT JOIN
+    MovieHierarchy mh ON mh.movie_id = t.id
+WHERE
+    c.nr_order IS NOT NULL
+GROUP BY
+    a.id, t.id, p.info
+HAVING
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY
+    num_movies DESC, actor_name ASC;

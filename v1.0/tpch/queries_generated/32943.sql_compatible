@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name AS supp_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+NationSupplierCount AS (
+    SELECT 
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+FinalReport AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_discount) DESC) AS rank_discount
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY ps.ps_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    nsc.n_name,
+    sr.supp_name,
+    fr.p_name,
+    fr.order_count,
+    fr.total_supply_cost,
+    sr.level
+FROM FinalReport fr
+JOIN NationSupplierCount nsc ON true
+JOIN SupplierHierarchy sr ON nsc.supplier_count > 5
+WHERE fr.rank_discount <= 10
+ORDER BY nsc.n_name, fr.total_supply_cost DESC;

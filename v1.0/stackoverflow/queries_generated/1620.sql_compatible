@@ -1,0 +1,48 @@
+
+WITH UserVoteAggregation AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+    FROM Votes v
+    GROUP BY v.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(SUM(COALESCE(ph1.CreationDate, '2000-01-01'::date)) / NULLIF(COUNT(ph1.Id), 0), 0) AS AverageEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph1 ON p.Id = ph1.PostId AND ph1.PostHistoryTypeId IN (4, 5)
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ua.UpVotes,
+        ua.DownVotes,
+        ua.TotalVotes,
+        RANK() OVER (ORDER BY ua.TotalVotes DESC) AS UserRank
+    FROM Users u
+    JOIN UserVoteAggregation ua ON u.Id = ua.UserId
+)
+SELECT 
+    pu.PostId,
+    pu.Title,
+    pu.CommentCount,
+    tu.DisplayName,
+    tu.UpVotes,
+    tu.DownVotes,
+    pu.AverageEditDate,
+    pu.UserPostRank,
+    tu.UserRank
+FROM PostStatistics pu
+FULL OUTER JOIN TopUsers tu ON pu.UserPostRank = tu.UserRank
+WHERE 
+    tu.UpVotes > 10 OR tu.DownVotes < 5
+ORDER BY pu.CommentCount DESC NULLS LAST, tu.UserRank;

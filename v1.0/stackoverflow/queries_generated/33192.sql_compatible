@@ -1,0 +1,82 @@
+
+WITH RecursiveUserPostCounts AS (
+    SELECT 
+        OwnerUserId, 
+        COUNT(*) AS PostCount
+    FROM 
+        Posts 
+    WHERE 
+        CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        OwnerUserId
+    UNION ALL
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(*) + r.PostCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveUserPostCounts r ON p.OwnerUserId = r.OwnerUserId
+    WHERE 
+        p.CreationDate < '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS Upvotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '6 months'
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.CreationDate, P.Score
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(R.PostCount, 0) AS TotalPostCount,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COUNT(PA.PostId) AS RecentPostActivity,
+    SUM(PA.Upvotes) AS TotalUpvotes,
+    SUM(PA.Downvotes) AS TotalDownvotes
+FROM 
+    Users U
+LEFT JOIN 
+    RecursiveUserPostCounts R ON U.Id = R.OwnerUserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    PostActivity PA ON U.Id = PA.OwnerUserId
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation, R.PostCount, UB.GoldBadges, UB.SilverBadges, UB.BronzeBadges
+HAVING 
+    COALESCE(R.PostCount, 0) > 10 
+    AND U.Reputation > 100
+ORDER BY 
+    U.Reputation DESC, TotalPostCount DESC;

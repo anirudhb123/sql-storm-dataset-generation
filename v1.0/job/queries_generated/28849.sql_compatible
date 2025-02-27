@@ -1,0 +1,69 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(c.name, 'Unknown') AS company_name
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ARRAY_AGG(DISTINCT t.id) AS movie_ids
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    WHERE 
+        ci.note IS NULL
+    GROUP BY 
+        a.id, a.name
+),
+Benchmark AS (
+    SELECT 
+        md.title_id,
+        md.movie_title,
+        md.production_year,
+        AD.actor_id,
+        AD.actor_name,
+        md.keywords,
+        md.company_name
+    FROM 
+        MovieDetails md
+    JOIN 
+        cast_info ci ON md.title_id = ci.movie_id
+    JOIN 
+        ActorDetails AD ON ci.person_id = AD.actor_id
+    ORDER BY 
+        md.production_year DESC, md.movie_title ASC
+)
+SELECT 
+    b.movie_title,
+    b.production_year,
+    b.actor_name,
+    STRING_AGG(DISTINCT b.keywords, ', ') AS keywords_list,
+    b.company_name
+FROM 
+    Benchmark b
+GROUP BY 
+    b.movie_title, b.production_year, b.actor_name, b.company_name
+ORDER BY 
+    b.production_year DESC, b.movie_title;

@@ -1,0 +1,53 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        coc.c_custkey,
+        coc.order_count,
+        RANK() OVER (ORDER BY coc.order_count DESC) AS rank
+    FROM 
+        CustomerOrderCounts coc
+)
+SELECT 
+    r.r_name,
+    ts.rank,
+    ts.order_count,
+    rs.s_name,
+    rs.total_supply_cost
+FROM 
+    TopCustomers ts
+JOIN 
+    customer c ON ts.c_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+WHERE 
+    rs.rank <= 5 AND ts.rank <= 10
+ORDER BY 
+    r.r_name, ts.order_count DESC, rs.total_supply_cost DESC;

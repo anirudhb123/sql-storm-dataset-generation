@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        rp.PostRank = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Author, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount
+    HAVING 
+        COUNT(c.Id) > 5
+),
+TopBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        b.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(b.Id) > 2
+)
+SELECT 
+    pp.Title,
+    pp.Author,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.CommentCount,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    TopBadges ub ON pp.Author = ub.UserId
+ORDER BY 
+    pp.Score DESC,
+    pp.ViewCount DESC
+LIMIT 10;

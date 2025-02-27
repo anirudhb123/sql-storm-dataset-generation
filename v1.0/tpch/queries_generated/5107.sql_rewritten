@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY
+        c.c_custkey, c.c_name
+    HAVING
+        SUM(o.o_totalprice) >= 10000
+),
+SupplierPartCost AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM
+        partsupp ps
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY
+        ps.ps_partkey
+),
+TopRegions AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY
+        r.r_regionkey, r.r_name
+    HAVING
+        COUNT(DISTINCT n.n_nationkey) > 2
+)
+SELECT
+    o.rn,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    o.o_orderstatus,
+    c.c_name AS customer_name,
+    HPC.total_spent AS customer_spending,
+    SPC.total_supply_cost AS part_supply_cost,
+    TR.r_name AS region_name
+FROM
+    RankedOrders o
+JOIN
+    HighValueCustomers HPC ON o.o_orderkey IN (SELECT o1.o_orderkey FROM orders o1 WHERE o1.o_custkey = HPC.c_custkey)
+JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN
+    SupplierPartCost SPC ON l.l_partkey = SPC.ps_partkey
+JOIN
+    TopRegions TR ON TR.r_regionkey = (SELECT n.n_regionkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = l.l_suppkey LIMIT 1)
+WHERE
+    o.rn <= 10
+ORDER BY
+    o.o_totalprice DESC;

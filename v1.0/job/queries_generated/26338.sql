@@ -1,0 +1,72 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT co.name) AS companies
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name co ON co.id = mc.company_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+RoleStatistics AS (
+    SELECT 
+        ci.role_id,
+        r.role,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON r.id = ci.role_id
+    GROUP BY 
+        ci.role_id, r.role
+),
+
+CompanyStats AS (
+    SELECT 
+        co.country_code,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON co.id = mc.company_id
+    GROUP BY 
+        co.country_code
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_names,
+    md.keywords,
+    cs.country_code,
+    cs.total_companies,
+    rs.role,
+    rs.role_count
+FROM 
+    MovieDetails md
+JOIN 
+    RoleStatistics rs ON rs.role_id IN (SELECT DISTINCT ci.role_id FROM cast_info ci WHERE ci.movie_id = md.movie_id)
+JOIN 
+    CompanyStats cs ON cs.total_companies > 5
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

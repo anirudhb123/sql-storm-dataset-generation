@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rnk,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id, 
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.Score > 0 THEN 'Positive' 
+            WHEN rp.Score < 0 THEN 'Negative' 
+            ELSE 'Neutral' 
+        END AS ScoreCategory
+    FROM RankedPosts rp
+    WHERE rp.CommentCount > 5 AND rp.rnk = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.DisplayName,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ScoreCategory,
+    COALESCE(ub.BadgeNames, 'No Badges') AS UserBadges
+FROM FilteredPosts fp
+JOIN Users u ON u.Id = fp.OwnerUserId
+LEFT JOIN UserBadges ub ON ub.UserId = u.Id
+ORDER BY fp.Score DESC, fp.CreationDate ASC;

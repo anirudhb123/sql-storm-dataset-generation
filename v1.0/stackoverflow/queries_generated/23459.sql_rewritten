@@ -1,0 +1,56 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.OwnerUserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(vs.VoteCount, 0) AS VoteCount,
+        COALESCE(ub.BadgeCount, 0) AS UserBadgeCount
+    FROM Posts p
+    LEFT JOIN PostVoteStats vs ON p.OwnerUserId = vs.OwnerUserId
+    LEFT JOIN UserBadges ub ON p.OwnerUserId = ub.UserId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+),
+RankedPosts AS (
+    SELECT 
+        rp.*,
+        RANK() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS PostRank,
+        ROW_NUMBER() OVER (PARTITION BY rp.UserBadgeCount ORDER BY rp.CreationDate DESC) AS UserRank
+    FROM RecentPosts rp
+)
+SELECT 
+    up.UserId,
+    COUNT(rp.Id) AS RecentPostCount,
+    AVG(rp.VoteCount) AS AvgVoteCount,
+    MAX(rp.UserBadgeCount) AS MaxUserBadges,
+    STRING_AGG(rp.Title, '; ') AS RecentPostTitles
+FROM RankedPosts rp
+JOIN Users up ON rp.OwnerUserId = up.Id
+WHERE rp.PostRank <= 10 AND rp.UserBadgeCount > 0
+GROUP BY up.UserId
+HAVING AVG(rp.VoteCount) > 5 AND MAX(rp.UserBadgeCount) >= 1
+ORDER BY RecentPostCount DESC
+LIMIT 5;

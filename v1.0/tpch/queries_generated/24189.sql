@@ -1,0 +1,58 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), LineItemAggregate AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    SUM(COALESCE(l.total_price, 0)) AS total_line_item_price,
+    (SELECT COUNT(*) FROM SupplierDetails sd WHERE sd.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierDetails)) AS above_average_suppliers,
+    MAX(CASE 
+        WHEN l.l_returnflag = 'R' THEN 'Returned'
+        ELSE 'Not Returned' 
+    END) AS return_status,
+    DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice) DESC) AS price_rank
+FROM 
+    part p
+LEFT OUTER JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    OrderHierarchy oh ON oh.o_orderkey = l.l_orderkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    SUM(l.l_discount) IS NOT NULL AND 
+    COUNT(l.l_orderkey) > 1
+ORDER BY 
+    total_line_item_price DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE CTE_CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+CTE_PartSupp AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CTE_SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_discount,
+           CASE 
+               WHEN l.l_returnflag = 'Y' THEN 'Returned'
+               ELSE 'Not Returned'
+           END AS return_status
+    FROM lineitem l
+    WHERE l.l_shipdate < DATE '1998-10-01' - INTERVAL '1 year'
+)
+
+SELECT c.c_custkey, c.c_name, p.p_name, 
+       SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+       COUNT(DISTINCT li.l_orderkey) AS order_count,
+       MAX(o.o_orderdate) AS last_order_date,
+       ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+FROM customer c
+LEFT JOIN CTE_CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN orders o ON co.o_orderkey = o.o_orderkey
+JOIN FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+JOIN CTE_PartSupp ps ON li.l_partkey = ps.ps_partkey
+JOIN CTE_SupplierRank sr ON ps.ps_suppkey = sr.s_suppkey
+WHERE (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+  AND sr.rank_acctbal <= 10
+  AND (c.c_acctbal BETWEEN 1000 AND 5000 OR c.c_acctbal IS NULL)
+GROUP BY c.c_custkey, c.c_name, p.p_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+   OR SUM(li.l_quantity) > 100
+ORDER BY total_revenue DESC, c.c_custkey ASC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

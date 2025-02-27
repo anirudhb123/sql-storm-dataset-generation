@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS Rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+TopNationOrders AS (
+    SELECT 
+        rn.o_orderkey,
+        rn.o_totalprice,
+        n.n_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY rn.o_totalprice DESC) AS RegionRank
+    FROM 
+        RankedOrders rn
+    JOIN 
+        customer c ON rn.c_name = c.c_name
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    SUM(rn.o_totalprice) AS TotalSales,
+    COUNT(DISTINCT rn.o_orderkey) AS OrderCount,
+    AVG(rn.o_totalprice) AS AvgOrderValue,
+    MAX(rn.o_totalprice) AS MaxOrderValue,
+    MIN(rn.o_totalprice) AS MinOrderValue
+FROM 
+    TopNationOrders rn
+JOIN 
+    region r ON rn.n_name = r.r_name
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(rn.o_totalprice) > 100000
+ORDER BY 
+    TotalSales DESC
+UNION ALL
+SELECT 
+    'GLOBAL_TOTAL' AS n_name,
+    SUM(o.o_totalprice),
+    COUNT(DISTINCT o.o_orderkey),
+    AVG(o.o_totalprice),
+    MAX(o.o_totalprice),
+    MIN(o.o_totalprice)
+FROM 
+    orders o
+WHERE
+    EXISTS (SELECT 1 FROM customer c WHERE o.o_custkey = c.c_custkey AND c.c_acctbal IS NOT NULL)
+

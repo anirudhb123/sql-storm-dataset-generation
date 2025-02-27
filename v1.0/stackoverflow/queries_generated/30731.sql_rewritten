@@ -1,0 +1,67 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        P.ParentId,
+        0 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.CreationDate,
+        P2.Score,
+        P2.ViewCount,
+        P2.OwnerUserId,
+        P2.ParentId,
+        RP.Depth + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostCTE RP ON P2.ParentId = RP.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS TotalQuestions,
+    SUM(P.ViewCount) AS TotalViews,
+    AVG(P.Score) AS AverageScore,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    MAX(CreationDate) AS LastActivityDate,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    (SELECT COUNT(*) FROM Votes V 
+     WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes V 
+     WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+LEFT JOIN 
+    Comments C ON C.PostId = P.Id
+LEFT JOIN 
+    LATERAL string_to_array(P.Tags, ',') AS tagArray ON TRUE
+LEFT JOIN 
+    Tags T ON T.TagName = tagArray
+WHERE 
+    U.Reputation > 1000
+    AND EXISTS (
+        SELECT 1 
+        FROM Posts P2 
+        WHERE P2.OwnerUserId = U.Id 
+        AND P2.PostTypeId = 2  
+    )
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+ORDER BY 
+    TotalQuestions DESC, AverageScore DESC
+LIMIT 10;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws_sales_price,
+        ws_quantity,
+        1 AS level
+    FROM web_sales ws
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        ws_sales_price * 0.9 AS ws_sales_price,  -- assuming a discount for recursive levels
+        ws_quantity + 10 AS ws_quantity,           -- adding 10 for every level
+        sh.level + 1
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws.web_site_sk = sh.web_site_sk
+    WHERE sh.level < 5
+),
+filtered_sales AS (
+    SELECT 
+        wh.w_warehouse_id,
+        SUM(CASE WHEN ws_quantity > 0 THEN ws_quantity ELSE 0 END) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales ws
+    JOIN warehouse wh ON ws.ws_warehouse_sk = wh.w_warehouse_sk
+    WHERE ws.web_site_sk IN (SELECT DISTINCT web_site_sk FROM sales_hierarchy)
+    GROUP BY wh.w_warehouse_id
+),
+top_warehouses AS (
+    SELECT 
+        w.w_warehouse_id,
+        fs.total_sales,
+        fs.order_count,
+        RANK() OVER (ORDER BY fs.total_sales DESC) AS sales_rank
+    FROM filtered_sales fs
+    JOIN warehouse w ON fs.w_warehouse_id = w.w_warehouse_id
+)
+SELECT 
+    tw.w_warehouse_id,
+    tw.total_sales,
+    tw.order_count,
+    tw.sales_rank,
+    CASE 
+        WHEN tw.sales_rank <= 10 THEN 'Top'
+        ELSE 'Other'
+    END AS sales_category,
+    (SELECT COUNT(*) FROM store s WHERE s.s_state = 'CA') AS store_count_in_CA
+FROM top_warehouses tw
+WHERE tw.sales_rank <= 20
+ORDER BY tw.sales_rank;

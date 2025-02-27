@@ -1,0 +1,32 @@
+
+WITH UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, 
+           DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+    WHERE CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '3 years'
+),
+PostStatsCTE AS (
+    SELECT OwnerUserId, COUNT(*) AS TotalPosts, 
+           SUM(COALESCE(ViewCount, 0)) AS TotalViews,
+           SUM(COALESCE(CommentCount, 0)) AS TotalComments,
+           AVG(COALESCE(Score, 0)) AS AverageScore
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+TopPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM Posts p
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE u.Reputation >= 1000
+    AND p.PostTypeId = 1
+)
+SELECT u.DisplayName, u.Reputation, u.CreationDate, 
+       ps.TotalPosts, ps.TotalViews, ps.TotalComments, ps.AverageScore,
+       pp.Title AS TopPostTitle, pp.Score AS TopPostScore
+FROM UserReputationCTE u
+LEFT JOIN PostStatsCTE ps ON u.Id = ps.OwnerUserId
+LEFT JOIN TopPosts pp ON u.Id = pp.OwnerUserId AND pp.PostRank = 1
+WHERE u.ReputationRank <= 10
+ORDER BY u.Reputation DESC, ps.TotalPosts DESC
+FETCH FIRST 10 ROWS ONLY;

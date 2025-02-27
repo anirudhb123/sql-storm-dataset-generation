@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_supplierkey, s_name, s_acctbal, null AS parent_supplier
+    FROM supplier
+    WHERE s_acctbal > 3000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_supplierkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_supplierkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OverpricedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_retailprice > 100.00
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT c.c_name, c.c_acctbal, o.o_orderkey, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT l.l_orderkey) AS order_count,
+       CASE WHEN COUNT(DISTINCT l.l_orderkey) > 0 THEN 'Active' ELSE 'Inactive' END AS customer_status,
+       MAX(p.p_retailprice) AS highest_price_part
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN OverpricedParts p ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierParts sp ON sp.ps_partkey = l.l_partkey
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = c.c_nationkey
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_supplierkey = o.o_custkey
+WHERE o.o_orderstatus = 'O'
+AND (c.c_acctbal IS NOT NULL OR r.r_comment IS NULL)
+GROUP BY c.c_name, c.c_acctbal, o.o_orderkey
+HAVING total_revenue > 1000 
+   OR (order_count > 5 AND highest_price_part IS NOT NULL)
+ORDER BY total_revenue DESC;

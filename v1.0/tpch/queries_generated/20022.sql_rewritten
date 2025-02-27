@@ -1,0 +1,61 @@
+WITH RECURSIVE supplier_revenue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), national_summary AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') OR o.o_orderstatus IS NULL
+    GROUP BY 
+        n.n_name
+), ranking AS (
+    SELECT 
+        r.n_name, 
+        sr.revenue,
+        ROW_NUMBER() OVER (PARTITION BY r.n_name ORDER BY sr.revenue DESC) AS rn
+    FROM 
+        national_summary r
+    JOIN 
+        supplier_revenue sr ON r.n_name = sr.s_name
+)
+SELECT 
+    r.n_name AS nation_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    r.revenue AS supplier_revenue,
+    ns.customer_count,
+    ns.total_order_value,
+    CASE 
+        WHEN ns.total_order_value IS NULL THEN 'No Orders'
+        WHEN ns.total_order_value > 100000 THEN 'High Value'
+        ELSE 'Normal Value' 
+    END AS order_value_category
+FROM 
+    ranking r
+FULL OUTER JOIN 
+    supplier_revenue s ON r.s_supplier_key = s.s_suppkey
+JOIN 
+    national_summary ns ON ns.n_name = r.n_name
+WHERE 
+    r.rn = 1 OR ns.customer_count > 100
+ORDER BY 
+    r.n_name, supplier_revenue DESC;

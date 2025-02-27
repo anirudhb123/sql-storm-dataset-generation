@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        U.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        (
+            SELECT COUNT(*) 
+            FROM Votes V 
+            WHERE V.PostId = P.Id AND V.VoteTypeId = 2 -- UpMod
+        ) AS Upvotes,
+        (
+            SELECT COUNT(*) 
+            FROM Votes V 
+            WHERE V.PostId = P.Id AND V.VoteTypeId = 3 -- DownMod
+        ) AS Downvotes
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2022-01-01' -- Filter for posts created this year
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id 
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+),
+PostTags AS (
+    SELECT 
+        P.Id,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    CROSS JOIN LATERAL 
+        STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><') AS Tag
+    JOIN 
+        Tags T ON T.Id = CAST(Tag AS int)
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    RP.Author,
+    RP.Rank,
+    RP.Upvotes,
+    RP.Downvotes,
+    COALESCE(CT.CloseReason, 'Open') AS CloseReason,
+    PT.Tags
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPosts CT ON RP.PostId = CT.PostId
+LEFT JOIN 
+    PostTags PT ON RP.PostId = PT.Id
+WHERE 
+    RP.Rank <= 5 -- Only top 5 posts of each type
+ORDER BY 
+    RP.Rank, RP.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY
+UNION ALL
+SELECT 
+    NULL AS PostId, 
+    'Total Upvotes' AS Title,
+    SUM(RP.Upvotes) AS ViewCount, 
+    'N/A' AS Author, 
+    NULL AS Rank,
+    SUM(RP.Upvotes) AS Upvotes,
+    NULL AS Downvotes,
+    NULL AS CloseReason,
+    NULL AS Tags
+FROM 
+    RankedPosts RP
+
+ORDER BY 
+    CASE WHEN PostId IS NULL THEN 1 ELSE 0 END, -- Null check for totals
+    ViewCount DESC;

@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(c.kind, 'UNKNOWN') AS company_kind,
+        ARRAY[COALESCE(k.keyword, 'NO_KEYWORD')] AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY COALESCE(m.production_year, 0) DESC) AS rn
+    FROM
+        aka_title m
+        LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+        LEFT JOIN keyword k ON k.id = mk.keyword_id
+        LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+        LEFT JOIN company_type c ON c.id = mc.company_type_id
+    WHERE
+        m.production_year IS NOT NULL
+        AND m.production_year > 2000
+    
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.company_kind,
+        mh.keywords || ARRAY[COALESCE(k2.keyword, 'NO_KEYWORD')] AS keywords,
+        mh.rn
+    FROM
+        MovieHierarchy mh
+        LEFT JOIN movie_link ml ON ml.movie_id = mh.movie_id
+        LEFT JOIN aka_title m2 ON m2.id = ml.linked_movie_id
+        LEFT JOIN movie_keyword mk2 ON mk2.movie_id = m2.id
+        LEFT JOIN keyword k2 ON k2.id = mk2.keyword_id
+    WHERE
+        mh.rn < 3
+),
+FilteredMovies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.company_kind,
+        UNNEST(m.keywords) AS keyword
+    FROM
+        MovieHierarchy m
+)
+SELECT
+    f.movie_id,
+    f.title,
+    COUNT(DISTINCT f.keyword) AS unique_keyword_count,
+    STRING_AGG(DISTINCT f.keyword, ', ') AS all_keywords,
+    CASE 
+        WHEN COUNT(DISTINCT f.keyword) > 3 THEN 'Popular'
+        WHEN COUNT(DISTINCT f.keyword) IS NULL OR COUNT(DISTINCT f.keyword) = 0 THEN 'No Keywords'
+        ELSE 'General'
+    END AS keyword_category
+FROM
+    FilteredMovies f
+GROUP BY
+    f.movie_id, f.title
+HAVING
+    COUNT(DISTINCT f.keyword) > 1 OR f.title IS NOT NULL
+ORDER BY
+    unique_keyword_count DESC, f.title;

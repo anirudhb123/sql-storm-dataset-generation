@@ -1,0 +1,62 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        SUM(COALESCE(ws.ws_quantity, cs.cs_quantity, ss.ss_quantity, 0)) AS total_quantity,
+        SUM(COALESCE(ws.ws_net_paid, cs.cs_net_paid, ss.ss_net_paid, 0)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        cd.cd_dep_count, cd.cd_purchase_estimate, hd.hd_income_band_sk
+)
+
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_dep_count,
+    cs.cd_purchase_estimate,
+    cs.hd_income_band_sk,
+    cs.total_quantity,
+    cs.total_spent,
+    d.d_year,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_store_transactions,
+    ROUND(AVG(ws.ws_net_profit), 2) AS avg_web_profit,
+    ROUND(AVG(ss.ss_net_profit), 2) AS avg_store_profit
+FROM 
+    customer_summary cs
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws.ws_ship_date_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = cs.c_customer_sk)
+LEFT JOIN 
+    web_sales ws ON cs.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON cs.c_customer_sk = ss.ss_customer_sk
+WHERE 
+    cs.total_quantity > 0
+GROUP BY 
+    cs.c_customer_sk, cs.c_first_name, cs.c_last_name, cs.cd_gender, cs.cd_marital_status,
+    cs.cd_dep_count, cs.cd_purchase_estimate, cs.hd_income_band_sk, d.d_year
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

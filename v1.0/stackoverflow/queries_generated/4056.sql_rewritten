@@ -1,0 +1,61 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC, TotalPosts DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+),
+RecentPostStats AS (
+    SELECT 
+        p.OwnerUserId AS UserId,
+        MAX(p.CreationDate) AS LastPostDate,
+        COUNT(p.Id) AS RecentPostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(r.TotalPosts, 0) AS TotalPosts,
+    COALESCE(r.Questions, 0) AS Questions,
+    COALESCE(r.Answers, 0) AS Answers,
+    COALESCE(r.TotalScore, 0) AS TotalScore,
+    COALESCE(r.ScoreRank, 0) AS ScoreRank,
+    COALESCE(rp.LastPostDate, 'No Recent Posts') AS LastPostDate,
+    COALESCE(rp.RecentPostCount, 0) AS RecentPostCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedUsers r ON u.Id = r.UserId
+LEFT JOIN 
+    RecentPostStats rp ON u.Id = rp.UserId
+WHERE 
+    (r.TotalPosts IS NULL OR r.TotalPosts > 0)
+    AND (rp.RecentPostCount IS NULL OR rp.RecentPostCount > 0)
+ORDER BY 
+    r.TotalScore DESC NULLS LAST, 
+    r.TotalPosts DESC NULLS LAST;

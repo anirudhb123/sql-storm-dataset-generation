@@ -1,0 +1,86 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.LastActivityDate,
+        p.AcceptedAnswerId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.Score,
+        p2.ViewCount,
+        p2.LastActivityDate,
+        p2.AcceptedAnswerId,
+        rp.Depth + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePosts rp ON p2.ParentId = rp.PostId
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(v.VoteTypeId = 2) AS AverageUpVotes
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.PostId -- Assuming PostId could relate to Users
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.LastActivityDate
+),
+FinalMetrics AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.Score,
+        pm.ViewCount,
+        pm.CommentCount,
+        pm.BadgeCount,
+        pm.AverageUpVotes,
+        CASE 
+            WHEN pm.Score IS NULL THEN 'No Score'
+            WHEN pm.Score >= 100 THEN 'High Score'
+            ELSE 'Moderate Score' 
+        END AS ScoreCategory
+    FROM 
+        PostMetrics pm
+)
+SELECT 
+    fm.PostId,
+    fm.Title,
+    fm.Score,
+    fm.ViewCount,
+    fm.CommentCount,
+    fm.BadgeCount,
+    fm.AverageUpVotes,
+    fm.ScoreCategory,
+    CASE 
+        WHEN fm.ViewCount >= 1000 THEN 'Very Popular'
+        WHEN fm.ViewCount BETWEEN 500 AND 999 THEN 'Popular'
+        ELSE 'Less Popular' 
+    END AS PopularityCategory
+FROM 
+    FinalMetrics fm
+WHERE 
+    fm.ScoreCategory = 'High Score'
+    OR fm.PopularityCategory = 'Very Popular'
+ORDER BY 
+    fm.Score DESC, fm.ViewCount DESC;

@@ -1,0 +1,51 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 3
+),
+total_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+avg_order AS (
+    SELECT c.c_custkey, AVG(to.total_price) AS avg_price
+    FROM customer c
+    JOIN total_orders to ON c.c_custkey = to.o_custkey
+    GROUP BY c.c_custkey
+),
+max_supply_cost AS (
+    SELECT ps.ps_partkey, MAX(ps.ps_supplycost) AS max_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_brand, p.p_retailprice
+    FROM part p
+    JOIN max_supply_cost msc ON p.p_partkey = msc.ps_partkey
+    WHERE p.p_retailprice > 100 AND msc.max_cost < 50.00
+)
+SELECT r.r_name, MAX(a.avg_price) AS max_avg_price,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       COUNT(DISTINCT fp.p_partkey) AS part_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN avg_order a ON sh.s_suppkey = a.c_custkey
+LEFT JOIN filtered_parts fp ON sh.s_suppkey = fp.p_partkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT fp.p_partkey) > 10
+ORDER BY max_avg_price DESC, supplier_count DESC;

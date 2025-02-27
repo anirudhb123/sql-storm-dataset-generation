@@ -1,0 +1,51 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScorePosts
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+HighReputationUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation
+    FROM UserReputation
+    WHERE Reputation > 1000
+),
+LatestPost AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.Score > 0
+),
+VoteCounts AS (
+    SELECT
+        PostId,
+        COUNT(*) FILTER (WHERE VoteTypeId = 2) AS UpVotes,
+        COUNT(*) FILTER (WHERE VoteTypeId = 3) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    lp.Title,
+    lp.CreationDate,
+    lp.Score,
+    COALESCE(vc.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(vc.DownVotes, 0) AS TotalDownVotes
+FROM HighReputationUsers u
+JOIN LatestPost lp ON u.UserId = lp.OwnerUserId AND lp.rn = 1
+LEFT JOIN VoteCounts vc ON lp.PostId = vc.PostId
+ORDER BY u.Reputation DESC, lp.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

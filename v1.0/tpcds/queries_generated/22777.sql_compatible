@@ -1,0 +1,94 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_net_paid) AS total_sales,
+        COUNT(cs_order_number) AS total_orders,
+        MAX(cs_sold_date_sk) AS last_sale_date
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_net_paid > 0 
+    GROUP BY 
+        cs_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        cs.total_sales,
+        cs.total_orders,
+        cs.last_sale_date,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        RecursiveSales cs ON i.i_item_sk = cs.cs_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+),
+HighSales AS (
+    SELECT 
+        i.i_item_desc, 
+        cs.total_sales,
+        cs.total_orders,
+        cs.last_sale_date,
+        CASE 
+            WHEN cs.total_sales IS NULL THEN 'No Sales'
+            WHEN cs.total_sales > 1000 THEN 'High Sales'
+            ELSE 'Regular Sales'
+        END AS sales_category
+    FROM 
+        ItemDetails cs 
+    WHERE 
+        cs.sales_rank = 1
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS num_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+ShippingDetails AS (
+    SELECT 
+        ws.ws_item_sk,
+        sm.sm_type,
+        COUNT(ws.ws_order_number) AS total_shipments
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        ws.ws_item_sk, sm.sm_type
+)
+SELECT 
+    hs.item_desc,
+    hs.total_sales,
+    hs.sales_category,
+    cs.total_spent,
+    cs.num_orders,
+    sd.total_shipments,
+    CASE
+        WHEN cs.total_spent IS NULL THEN 'New Customer'
+        WHEN cs.total_spent <= 100 THEN 'Low Spender'
+        ELSE 'Regular Spender'
+    END AS customer_status
+FROM 
+    HighSales hs
+LEFT JOIN 
+    CustomerSales cs ON hs.item_desc = cs.c_customer_id  
+LEFT JOIN 
+    ShippingDetails sd ON hs.total_orders = sd.total_shipments 
+WHERE 
+    (hs.total_sales IS NOT NULL OR cs.total_spent IS NOT NULL) 
+ORDER BY 
+    hs.total_sales DESC, 
+    cs.total_spent ASC;

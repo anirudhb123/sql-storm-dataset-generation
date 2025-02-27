@@ -1,0 +1,66 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COUNT(DISTINCT V.PostId) AS VotePostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '30 days'
+        AND P.Score IS NOT NULL
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    U.VotePostsCount,
+    RP.PostId,
+    RP.Title,
+    RP.ViewCount,
+    CASE 
+        WHEN RP.Score > 10 THEN 'Highly Active'
+        WHEN RP.Score BETWEEN 1 AND 10 THEN 'Moderately Active'
+        ELSE 'Low Activity'
+    END AS ActivityLevel,
+    (SELECT COUNT(*) 
+     FROM Comments C 
+     WHERE C.PostId = RP.PostId) AS CommentCount,
+    CASE 
+        WHEN RP.CreationDate IS NULL THEN 'No Posts'
+        ELSE TO_CHAR(RP.CreationDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS FormattedCreationDate,
+    (SELECT 
+        STRING_AGG(DISTINCT Tag.TagName, ', ') 
+     FROM 
+        Tags Tag 
+     WHERE 
+        POSITION(Tag.TagName IN RP.Tags) > 0) AS RelatedTags
+FROM 
+    UserVoteCounts U
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.PostId
+WHERE 
+    U.UpVotesCount > U.DownVotesCount
+ORDER BY 
+    RP.ViewCount DESC
+LIMIT 10;

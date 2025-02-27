@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostsTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30' DAY
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, U.DisplayName, p.PostTypeId
+),
+
+MostPopularTags AS (
+    SELECT 
+        t.Id,
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        PostsTags pt ON t.Id = pt.TagId
+    GROUP BY 
+        t.Id, t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(U.Reputation) AS TotalReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges b ON U.Id = b.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    rp.Title,
+    rp.Body,
+    rp.ViewCount,
+    rp.Score,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    mpt.TagName AS PopularTag,
+    ur.DisplayName AS UserWithTopReputation,
+    ur.TotalReputation,
+    ur.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    MostPopularTags mpt ON rp.Tags LIKE '%' || mpt.TagName || '%'
+JOIN 
+    UserReputation ur ON ur.TotalReputation = (
+        SELECT MAX(TotalReputation) FROM UserReputation
+    )
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC;

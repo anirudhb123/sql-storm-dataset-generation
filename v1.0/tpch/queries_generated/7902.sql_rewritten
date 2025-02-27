@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        n.n_name AS nation_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.rank = 1 AND rs.n_nationkey = n.n_nationkey
+)
+SELECT 
+    ts.nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_order_value,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    MAX(ts.total_supply_cost) AS max_supplier_cost
+FROM 
+    TopSuppliers ts
+JOIN 
+    customer c ON ts.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    ts.nation_name
+HAVING 
+    SUM(o.o_totalprice) > 1000000
+ORDER BY 
+    total_order_value DESC;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451545 AND 2451545 + 365 -- Example date range
+    GROUP BY ws_item_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_customer_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year < 1980
+    GROUP BY c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_customer_profit,
+        RANK() OVER (ORDER BY cs.total_customer_profit DESC) AS customer_rank
+    FROM customer_sales cs
+    JOIN customer c ON cs.c_customer_id = c.c_customer_id
+),
+avg_profit_per_item AS (
+    SELECT 
+        ws_item_sk,
+        AVG(ws_net_profit) AS avg_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+over_avg_items AS (
+    SELECT 
+        i.i_item_id,
+        a.avg_profit
+    FROM item i
+    JOIN avg_profit_per_item a ON i.i_item_sk = a.ws_item_sk
+    WHERE a.avg_profit > 100.00
+)
+SELECT 
+    wc.warehouse_id,
+    wc.warehouse_name,
+    wc.total_quantity,
+    tc.total_customer_profit,
+    tc.order_count,
+    c.address_id AS customer_address,
+    'High Profit Item' AS item_status
+FROM warehouse wc
+LEFT JOIN (
+    SELECT 
+        ws.ws_warehouse_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_warehouse_sk
+) AS warehouse_summary ON wc.warehouse_sk = warehouse_summary.ws_warehouse_sk
+JOIN top_customers tc ON tc.customer_rank <= 10
+JOIN customer_address c ON c.ca_address_sk = tc.customer_id
+JOIN over_avg_items oai ON wc.warehouse_sk = oai.i_item_sk
+WHERE wc.warehouse_sq_ft > 1000
+ORDER BY wc.warehouse_id, tc.total_customer_profit DESC;

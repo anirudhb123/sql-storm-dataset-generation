@@ -1,0 +1,104 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        child.Id AS PostId,
+        child.Title,
+        child.OwnerUserId,
+        child.Score,
+        child.CreationDate,
+        child.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts child
+    INNER JOIN 
+        PostHierarchy ph ON child.ParentId = ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT v.Id) AS UpVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.Level,
+        COUNT(c.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    INNER JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, ph.Level
+),
+FinalStats AS (
+    SELECT 
+        p.PostId,
+        p.Level,
+        ps.TotalComments,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        us.UserId,
+        us.DisplayName,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges
+    FROM 
+        PostStats ps
+    JOIN 
+        Posts p ON p.Id = ps.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+)
+SELECT 
+    fs.PostId,
+    fs.Level,
+    fs.TotalComments,
+    fs.TotalUpVotes,
+    fs.TotalDownVotes,
+    fs.DisplayName,
+    (fs.GoldBadges * 3 + fs.SilverBadges * 2 + fs.BronzeBadges) AS TotalBadgePoints,
+    COALESCE(NULLIF(fs.TotalUpVotes - fs.TotalDownVotes, 0), 'No Votes') AS AdjustedVoteCount
+FROM 
+    FinalStats fs
+WHERE 
+    fs.TotalComments > 5
+ORDER BY 
+    fs.TotalUpVotes DESC, fs.PostId;

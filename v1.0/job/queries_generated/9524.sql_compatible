@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(ci.nr_order) AS avg_role_order
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+    HAVING 
+        COUNT(mk.keyword_id) > 1
+),
+MoviesWithCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    rm.avg_role_order,
+    pw.keyword,
+    pw.keyword_count,
+    mc.company_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    PopularKeywords pw ON rm.movie_id = pw.movie_id
+LEFT JOIN 
+    MoviesWithCompanies mc ON rm.movie_id = mc.movie_id
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    rm.production_year DESC, rm.total_cast DESC;

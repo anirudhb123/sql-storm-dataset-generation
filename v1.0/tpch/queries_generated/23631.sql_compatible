@@ -1,0 +1,68 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn,
+        (SELECT COUNT(*) FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+FilteredCTE AS (
+    SELECT 
+        r.r_name, 
+        n.n_name, 
+        s.s_name, 
+        RecursiveCTE.*, 
+        (CASE WHEN RecursiveCTE.supplier_count > 5 THEN 1 ELSE 0 END) AS high_supply_count
+    FROM 
+        RecursiveCTE
+    JOIN 
+        supplier s ON RecursiveCTE.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        (RecursiveCTE.rn = 1 OR RecursiveCTE.p_retailprice BETWEEN 100.00 AND 500.00)
+        AND (s.s_acctbal IS NOT NULL AND s.s_acctbal > 0) 
+),
+FinalResult AS (
+    SELECT 
+        f.r_name, 
+        f.n_name, 
+        f.s_name, 
+        f.p_partkey, 
+        f.p_name, 
+        f.p_brand, 
+        f.p_retailprice, 
+        f.ps_supplycost,
+        f.high_supply_count,
+        SUM(l.l_extendedprice) OVER (PARTITION BY f.p_partkey ORDER BY f.ps_supplycost DESC) AS total_extended_price
+    FROM 
+        FilteredCTE f
+    LEFT JOIN 
+        lineitem l ON l.l_partkey = f.p_partkey 
+    WHERE 
+        (f.high_supply_count = 1 AND l.l_discount <= 0.1) 
+        OR (f.p_retailprice IS NULL AND f.ps_supplycost > 50.00)
+)
+SELECT 
+    fr.r_name, 
+    fr.n_name, 
+    fr.s_name, 
+    COUNT(DISTINCT fr.p_partkey) AS part_count, 
+    AVG(fr.total_extended_price) AS avg_extended_price
+FROM 
+    FinalResult fr
+GROUP BY 
+    fr.r_name, fr.n_name, fr.s_name
+HAVING 
+    COUNT(DISTINCT fr.p_partkey) > 3
+ORDER BY 
+    avg_extended_price DESC;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank,
+        COALESCE(P.ClosedDate, 'No Closure') AS ClosureStatus,
+        STRING_AGG(T.TagName, ', ') AS TagsList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.WikiPostId = P.Id OR T.ExcerptPostId = P.Id
+    WHERE 
+        P.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.OwnerUserId, P.ClosedDate
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        T.TagsList,
+        UB.GoldBadges,
+        UB.SilverBadges,
+        UB.BronzeBadges,
+        RP.ClosureStatus
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        UserBadges UB ON RP.OwnerUserId = UB.UserId
+)
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.TagsList,
+    PD.ClosureStatus,
+    COALESCE(TS.AvgScore, 0) AS AvgScoreForTag,
+    COALESCE(TS.PostCount, 0) AS PostsWithTagCount,
+    PD.GoldBadges,
+    PD.SilverBadges,
+    PD.BronzeBadges
+FROM 
+    PostDetails PD
+LEFT JOIN 
+    TagStatistics TS ON PD.TagsList LIKE '%' || TS.TagName || '%'
+WHERE 
+    PD.ScoreRank = 1
+ORDER BY 
+    PD.Score DESC, PD.ViewCount DESC NULLS LAST
+LIMIT 100
+OFFSET 0;

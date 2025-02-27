@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS PostRank,
+        SUM(COALESCE(v.BountyAmount, 0)) OVER (PARTITION BY p.Id) AS TotalBounty,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    GROUP BY
+        p.Id, pt.Name
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName
+    FROM
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE
+        pht.Name = 'Post Closed'
+        AND ph.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+ActiveUserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBountyEarned
+    FROM
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    COALESCE(cp.CreationDate, 'No closure') AS PostClosedDate,
+    rp.TotalBounty,
+    rp.CommentCount,
+    uas.UserId AS OwnerId,
+    uas.DisplayName AS OwnerDisplayName,
+    uas.PostCount AS UserPostCount,
+    uas.TotalBountyEarned AS UserTotalBounty,
+    CASE 
+        WHEN rp.CommentCount > 10 THEN 'Highly Discussed'
+        WHEN rp.ViewCount > 1000 THEN 'Popular'
+        ELSE 'Regular'
+    END AS PostCategory,
+    CASE
+        WHEN rp.ViewCount IS NULL THEN 'No Views Recorded'
+        ELSE 'Views Available'
+    END AS ViewStatus,
+    CONCAT('Tags: ', COALESCE(rp.Tags, 'No Tags')) AS TagsInfo
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    Users uas ON rp.PostId = uas.Id
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.ViewCount DESC NULLS LAST;

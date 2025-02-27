@@ -1,0 +1,33 @@
+
+SELECT
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    CONCAT(c.c_name, ' (', c.c_acctbal, ')') AS cust_details,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS short_comment,
+    CONCAT('Region: ', r.r_name, ', Nation: ', n.n_name) AS location,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    LENGTH(p.p_name) > 20 AND
+    c.c_mktsegment = 'BUILDING'
+GROUP BY
+    p.p_partkey, p.p_name, s.s_name, c.c_name, c.c_acctbal, r.r_name, n.n_name
+ORDER BY
+    total_revenue DESC, p.p_partkey ASC;

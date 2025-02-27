@@ -1,0 +1,55 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        SUM(cr.return_amount) AS total_return_amount,
+        COUNT(cr.return_quantity) AS total_return_count
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.returning_customer_sk
+),
+ItemSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+ItemInfo AS (
+    SELECT
+        i.item_sk,
+        i.item_desc,
+        i.current_price,
+        COALESCE(NULLIF(i.brand, ''), 'Unknown') AS brand_name
+    FROM
+        item i
+)
+SELECT
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    ti.item_desc,
+    ti.brand_name,
+    ir.total_return_amount,
+    ir.total_return_count,
+    is.total_sales,
+    is.order_count,
+    CASE 
+        WHEN is.total_sales > 0 THEN ROUND((ir.total_return_amount / is.total_sales) * 100, 2)
+        ELSE 0 
+    END AS return_rate_percentage
+FROM
+    CustomerReturns ir
+JOIN
+    Customer c ON c.c_customer_sk = ir.returning_customer_sk
+JOIN
+    ItemSales is ON is.ws_item_sk IN (SELECT item_sk FROM catalog_sales WHERE cs_ship_customer_sk = c.c_customer_sk)
+JOIN
+    ItemInfo ti ON ti.item_sk = is.ws_item_sk
+WHERE
+    ir.total_return_count > 5
+ORDER BY
+    return_rate_percentage DESC
+LIMIT 10;

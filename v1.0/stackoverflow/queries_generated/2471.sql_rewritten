@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id
+),
+PostSummary AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.GoldBadges,
+        up.SilverBadges,
+        up.BronzeBadges,
+        up.PostsCount,
+        up.TotalBounty,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats up ON rp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = up.UserId)
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    ps.UserId,
+    ps.DisplayName,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges,
+    ps.PostsCount,
+    ps.TotalBounty,
+    STRING_AGG(ps.Title, '; ') AS TopPosts,
+    COALESCE(ROUND(AVG(ps.Score), 2), 0) AS AverageScore,
+    COUNT(ps.Title) AS PostCount
+FROM 
+    PostSummary ps
+GROUP BY 
+    ps.UserId, ps.DisplayName, ps.GoldBadges, ps.SilverBadges, ps.BronzeBadges, ps.PostsCount, ps.TotalBounty
+ORDER BY 
+    ps.TotalBounty DESC, ps.PostsCount DESC
+LIMIT 10;

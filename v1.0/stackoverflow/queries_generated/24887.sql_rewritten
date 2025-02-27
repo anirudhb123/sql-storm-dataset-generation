@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank,
+        COALESCE(po.Title, 'Unanswered') AS ParentTitle
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts po ON p.ParentId = po.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVotes,
+        AVG(COALESCE(u.Reputation, 0)) AS AverageReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+),
+AnswerStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.CreationDate) AS AvgCreationDate 
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+    GROUP BY 
+        p.OwnerUserId
+),
+FinalRanking AS (
+    SELECT 
+        up.UserId,
+        up.AverageReputation,
+        us.BadgeCount,
+        COALESCE(asn.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(asn.TotalScore, 0) AS TotalScore,
+        COUNT(DISTINCT rp.Id) AS TotalQuestionsRanked,
+        SUM(CASE WHEN rp.Rank <= 3 THEN 1 ELSE 0 END) AS TopRankedQuestions
+    FROM 
+        UserStatistics us
+    JOIN 
+        UserStatistics up ON us.UserId = up.UserId
+    LEFT JOIN 
+        AnswerStats asn ON up.UserId = asn.OwnerUserId
+    LEFT JOIN 
+        RankedPosts rp ON up.UserId = rp.OwnerUserId
+    GROUP BY 
+        up.UserId, up.AverageReputation, us.BadgeCount
+)
+SELECT 
+    fr.UserId,
+    fr.AverageReputation,
+    fr.BadgeCount,
+    fr.TotalAnswers,
+    fr.TotalScore,
+    fr.TotalQuestionsRanked,
+    fr.TopRankedQuestions,
+    CASE 
+        WHEN fr.AverageReputation > 5000 THEN 'High Reputation'
+        WHEN fr.AverageReputation BETWEEN 1000 AND 5000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    CASE 
+        WHEN fr.TopRankedQuestions > 5 THEN 'Question Guru'
+        ELSE 'Novice'
+    END AS QuestionExpertise
+FROM 
+    FinalRanking fr
+WHERE 
+    fr.TotalAnswers > 0 OR fr.BadgeCount > 0
+ORDER BY 
+    fr.TotalScore DESC, fr.AverageReputation DESC
+LIMIT 10;

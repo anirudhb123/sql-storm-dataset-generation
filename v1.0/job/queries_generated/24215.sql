@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+ActorsWithMultipleRoles AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.role_id) > 1
+),
+RecentMovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        mk.movie_id IN (SELECT movie_id FROM RankedMovies WHERE production_year = (SELECT MAX(production_year) FROM aka_title))
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(ak.name, 'Unknown') AS actor_name,
+    ak.role_count,
+    COALESCE(rmk.keywords, 'No keywords') AS movie_keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorsWithMultipleRoles ak ON rm.cast_count = ak.role_count
+LEFT JOIN 
+    RecentMovieKeywords rmk ON rm.movie_title = rmk.movie_id
+WHERE 
+    (rm.cast_count > 5 OR ak.role_count IS NOT NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;
+This query incorporates several constructs, including Common Table Expressions (CTEs), outer joins, correlated subqueries, aggregation functions, and string manipulation. In addition, it handles NULL values gracefully, utilizing COALESCE to provide fallback values. The intent is to gather insights into movies with a substantial cast, focusing also on actors who play multiple roles, with an emphasis on the most recent productions and relevant keywords.

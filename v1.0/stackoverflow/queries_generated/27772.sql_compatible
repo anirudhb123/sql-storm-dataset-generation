@@ -1,0 +1,79 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+        AND p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+TagAnalysis AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS UsageCount
+    FROM 
+        StringProcessing
+    GROUP BY 
+        Tag
+),
+RecentComments AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    WHERE 
+        CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 MONTH)
+    GROUP BY 
+        PostId
+),
+Engagement AS (
+    SELECT 
+        sp.PostId,
+        sp.Title,
+        sp.Body,
+        sp.Tags,
+        COALESCE(rc.CommentCount, 0) AS CommentCount,
+        ta.UsageCount AS TagUsageCount
+    FROM 
+        StringProcessing sp
+    LEFT JOIN 
+        RecentComments rc ON sp.PostId = rc.PostId
+    LEFT JOIN 
+        TagAnalysis ta ON ta.Tag = ANY(string_to_array(sp.Tags, '><'))
+),
+Ranking AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        CommentCount,
+        TagUsageCount,
+        (CommentCount * 0.6 + TagUsageCount * 0.4) AS EngagementScore
+    FROM 
+        Engagement
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    Tags,
+    CommentCount,
+    TagUsageCount,
+    EngagementScore
+FROM 
+    Ranking
+ORDER BY 
+    EngagementScore DESC
+LIMIT 10;

@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.PostTypeId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        SUM(b.Class) AS BadgeScore, 
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate, 
+        CREATETIMEZONE(ph.CreationDate) AS LocalCreationDate
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+CombinedResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate, 
+        r.ViewCount,
+        r.CommentCount,
+        r.UpVotes,
+        r.DownVotes,
+        COALESCE(c.LocalCreationDate, 'N/A') AS ClosedDate, 
+        u.DisplayName AS TopUser 
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        ClosedPosts c ON r.PostId = c.PostId
+    LEFT JOIN 
+        TopUsers u ON u.PostCount = (SELECT MAX(PostCount) FROM TopUsers)
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate, 
+    ViewCount,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    CASE 
+        WHEN ClosedDate <> 'N/A' THEN 'Closed'
+        ELSE 'Open' 
+    END AS Status,
+    TopUser
+FROM 
+    CombinedResults
+WHERE 
+    UpVotes - DownVotes > 5
+ORDER BY 
+    CreationDate DESC
+LIMIT 100;

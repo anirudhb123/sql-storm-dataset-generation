@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.Rank <= 10
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.TotalSales,
+        RANK() OVER (ORDER BY cs.TotalSales DESC) AS Rank
+    FROM 
+        CustomerSales cs
+)
+
+SELECT 
+    tc.c_name AS TopCustomer,
+    hs.s_name AS HighValueSupplier,
+    hs.TotalSupplyCost,
+    hs.s_acctbal AS SupplierAccountBalance
+FROM 
+    TopCustomers tc
+JOIN 
+    lineitem li ON tc.c_custkey = li.l_orderkey
+JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN 
+    HighValueSuppliers hs ON ps.ps_suppkey = hs.s_suppkey
+WHERE 
+    tc.Rank <= 5 AND hs.s_acctbal > 100.00
+ORDER BY 
+    tc.TotalSales DESC, hs.TotalSupplyCost DESC;

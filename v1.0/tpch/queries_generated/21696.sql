@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_name AS nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(SUM(l.l_discount * l.l_extendedprice), 0) AS total_discounted_sales
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS returned_quantity,
+    COALESCE(SUM(CASE WHEN l.l_returnflag != 'R' THEN l.l_quantity ELSE NULL END), 0) AS sold_quantity,
+    hs.nation AS supplier_nation,
+    COUNT(DISTINCT hoe.o_orderkey) AS order_count,
+    MAX(l.l_extendedprice) OVER (PARTITION BY p.p_partkey) AS max_price,
+    COUNT(*) FILTER (WHERE l.l_tax > 0.15) AS high_tax_count
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    HighValueOrders hoe ON l.l_orderkey = hoe.o_orderkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation hs ON s.s_nationkey = hs.n_nationkey
+WHERE 
+    (p.p_retailprice IS NOT NULL AND p.p_retailprice > 100.00) OR
+    (p.p_size BETWEEN 10 AND 20) AND 
+    (l.l_shipdate IS NOT NULL OR l.l_receiptdate IS NOT NULL)
+GROUP BY 
+    ps.ps_partkey, p.p_name, hs.nation
+HAVING 
+    returned_quantity >= 5 * sold_quantity
+ORDER BY 
+    order_count DESC, max_price DESC, p.p_name DESC;

@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS sale_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+FilteredReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        AVG(cr_fee) AS avg_return_fee
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+SalesReturns AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_sales_price,
+        COALESCE(t.total_returned, 0) AS total_returned,
+        COALESCE(t.avg_return_fee, 0) AS avg_return_fee
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        FilteredReturns t ON r.ws_item_sk = t.cr_item_sk
+    WHERE 
+        r.sale_rank = 1
+)
+SELECT 
+    s.ws_item_sk,
+    s.ws_sales_price,
+    s.total_returned,
+    s.avg_return_fee,
+    CASE 
+        WHEN s.avg_return_fee > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    SalesReturns s
+JOIN 
+    item i ON s.ws_item_sk = i.i_item_sk
+WHERE 
+    i.i_current_price - s.ws_sales_price BETWEEN 0 AND (SELECT AVG(i_current_price) FROM item WHERE i_current_price IS NOT NULL)
+UNION ALL
+SELECT 
+    NULL AS ws_item_sk,
+    NULL AS ws_sales_price,
+    0 AS total_returned,
+    0 AS avg_return_fee,
+    'Total' AS return_status
+FROM 
+    (SELECT 1) AS dual
+ORDER BY 
+    s.ws_item_sk;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE RevenueCTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim) - 30
+    GROUP BY ws_item_sk
+    
+    UNION ALL
+
+    SELECT
+        cs_item_sk,
+        SUM(cs_net_profit) + r.total_profit,
+        level + 1
+    FROM catalog_sales AS cs
+    JOIN RevenueCTE AS r ON cs.cs_item_sk = r.ws_item_sk
+    WHERE level < 3
+    GROUP BY cs_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY c.c_customer_sk) AS city_rank
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_web_sales,
+        SUM(ss.ss_net_profit) AS total_store_sales
+    FROM customer AS c
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk
+),
+FinalOutput AS (
+    SELECT 
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.ca_city,
+        COALESCE(ss.total_web_sales, 0) AS total_web_sales,
+        COALESCE(ss.total_store_sales, 0) AS total_store_sales,
+        r.total_profit AS revenue_from_catalog
+    FROM CustomerInfo AS ci
+    LEFT JOIN SalesSummary AS ss ON ci.c_customer_sk = ss.c_customer_sk
+    LEFT JOIN RevenueCTE AS r ON r.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = ci.c_customer_sk)
+)
+SELECT 
+    fo.c_first_name,
+    fo.c_last_name,
+    fo.ca_city,
+    fo.total_web_sales,
+    fo.total_store_sales,
+    fo.revenue_from_catalog,
+    CASE 
+        WHEN fo.total_web_sales > 10000 THEN 'High Value'
+        WHEN fo.total_store_sales < 5000 THEN 'Low Value'
+        ELSE 'Medium Value'
+    END AS customer_value
+FROM FinalOutput AS fo
+WHERE fo.city_rank <= 5
+ORDER BY fo.ca_city, fo.total_web_sales DESC;

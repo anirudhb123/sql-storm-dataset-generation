@@ -1,0 +1,68 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+AggregatedParts AS (
+    SELECT
+        p.p_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') OR o.o_orderdate > '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(a.total_cost), 0) AS total_part_cost,
+    COALESCE(SUM(f.total_revenue), 0) AS total_order_revenue,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT rct.s_suppkey) AS top_suppliers_count,
+    STRING_AGG(DISTINCT rct.s_name, ', ') AS top_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RecursiveCTE rct ON s.s_suppkey = rct.s_suppkey AND rct.rn <= 5
+LEFT JOIN 
+    AggregatedParts a ON a.p_partkey IN (SELECT ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    FilteredOrders f ON f.o_orderdate BETWEEN '1996-01-01' AND cast('1998-10-01' as date)
+WHERE 
+    r.r_name IS NOT NULL OR r.r_comment IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 OR SUM(f.total_revenue) > 5000
+ORDER BY 
+    total_order_revenue DESC NULLS LAST;

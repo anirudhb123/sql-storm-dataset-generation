@@ -1,0 +1,81 @@
+
+WITH RECURSIVE OrderCTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        oc.order_level + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderCTE oc ON o.o_custkey = oc.o_orderkey
+    WHERE 
+        oc.order_level < 10
+),
+AggregatedSales AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        ps.ps_partkey
+),
+SupplierRanks AS (
+    SELECT 
+        ps.ps_partkey,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        AggregatedSales a
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    sr.sales_rank,
+    CASE 
+        WHEN sr.sales_rank IS NULL THEN 'No Rank' 
+        ELSE CAST(sr.sales_rank AS VARCHAR)
+    END AS sales_rank_display,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(o.o_totalprice) AS total_order_value,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierRanks sr ON p.p_partkey = sr.ps_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, sr.sales_rank
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_order_value DESC
+LIMIT 100;

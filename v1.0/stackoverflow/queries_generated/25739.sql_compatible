@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+         FROM 
+            Votes
+         GROUP BY 
+            PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName, v.UpVotes, v.DownVotes
+),
+
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        OwnerDisplayName,
+        UpVotes,
+        DownVotes,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 3  
+),
+
+TagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.tag) AS TagCount,
+        STRING_AGG(DISTINCT t.tag, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        (SELECT unnest(string_to_array(p.Tags, ',')) AS tag FROM Posts p) AS t ON TRUE
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    f.Title,
+    f.OwnerDisplayName,
+    f.CreationDate,
+    f.ViewCount,
+    f.UpVotes,
+    f.DownVotes,
+    f.CommentCount,
+    COALESCE(ts.TagCount, 0) AS TagCount,
+    COALESCE(ts.Tags, 'No Tags') AS Tags
+FROM 
+    FilteredPosts f
+LEFT JOIN 
+    TagStats ts ON f.PostId = ts.PostId
+ORDER BY
+    f.CreationDate DESC;

@@ -1,0 +1,54 @@
+WITH SupplierTotals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        st.s_suppkey,
+        st.s_name
+    FROM 
+        SupplierTotals st
+    WHERE 
+        st.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierTotals)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5 AND SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    cu.c_name, 
+    cu.total_spent, 
+    hs.s_name
+FROM 
+    CustomerOrders cu
+JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cu.c_custkey)
+JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+JOIN 
+    HighValueSuppliers hs ON hs.s_suppkey = ps.ps_suppkey
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2023-12-31'
+ORDER BY 
+    cu.total_spent DESC, 
+    hs.s_name ASC
+LIMIT 10;

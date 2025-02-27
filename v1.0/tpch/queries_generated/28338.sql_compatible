@@ -1,0 +1,23 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ' | Address: ', s.s_address, ' | Nation: ', n.n_name) AS supplier_info,
+    COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    STRING_AGG(DISTINCT p.p_name ORDER BY p.p_name) AS supplied_parts
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+GROUP BY 
+    s.s_suppkey, s.s_name, s.s_address, n.n_name
+HAVING 
+    SUM(ps.ps_availqty) > 100
+ORDER BY 
+    total_supply_cost DESC;

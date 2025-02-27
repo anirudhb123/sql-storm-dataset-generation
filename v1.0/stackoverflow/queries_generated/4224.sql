@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation IS NOT NULL
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '30 DAYS'
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS TagCount
+    FROM Tags t
+    JOIN Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+    ORDER BY TagCount DESC
+    LIMIT 10
+),
+UserPostSummary AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        COALESCE(ua.PostCount, 0) AS TotalPosts,
+        COALESCE(ua.QuestionCount, 0) AS TotalQuestions,
+        COALESCE(ua.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(rp.PostId, 0) AS RecentPostId,
+        rp.Title AS RecentPostTitle,
+        rp.ViewCount AS RecentPostViews,
+        ROW_NUMBER() OVER (ORDER BY ua.Reputation DESC) AS UserRank
+    FROM UserActivity ua
+    LEFT JOIN RecentPosts rp ON ua.UserId = rp.OwnerUserId AND rp.PostRank = 1
+),
+CombinedResults AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalQuestions,
+        ups.TotalAnswers,
+        ups.RecentPostId,
+        ups.RecentPostTitle,
+        ups.RecentPostViews,
+        tt.TagName
+    FROM UserPostSummary ups
+    LEFT JOIN TopTags tt ON tt.TagCount > ups.TotalQuestions
+)
+SELECT 
+    cr.UserId,
+    cr.DisplayName,
+    cr.TotalPosts,
+    cr.TotalQuestions,
+    cr.TotalAnswers,
+    cr.RecentPostTitle,
+    cr.RecentPostViews,
+    cr.TagName
+FROM CombinedResults cr
+WHERE cr.UserRank <= 50
+ORDER BY cr.RecentPostViews DESC, cr.TotalPosts DESC
+LIMIT 100;

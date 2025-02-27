@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_custkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.region_name,
+    cr.nation_name,
+    TS.total_value,
+    COUNT(DISTINCT RS.s_suppkey) AS supplier_count
+FROM 
+    TotalOrderValue TS
+JOIN 
+    CustomerRegion cr ON TS.o_custkey = cr.c_custkey
+LEFT JOIN 
+    RankedSuppliers RS ON RS.rank = 1
+GROUP BY 
+    cr.region_name, cr.nation_name, TS.total_value
+HAVING 
+    TS.total_value > (SELECT AVG(total_value) FROM TotalOrderValue)
+ORDER BY 
+    cr.region_name, supplier_count DESC;

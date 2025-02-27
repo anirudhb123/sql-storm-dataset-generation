@@ -1,0 +1,57 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+  
+    UNION ALL
+  
+    SELECT 
+        A.Id,
+        A.Title,
+        A.CreationDate,
+        A.Score,
+        A.OwnerUserId,
+        R.Level + 1
+    FROM Posts A
+    JOIN RecursiveCTE R ON A.ParentId = R.PostId
+    WHERE A.PostTypeId = 2 
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    JOIN STRING_TO_ARRAY(P.Tags, ',') AS TagNames ON TRUE
+    JOIN Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagNames)  
+    GROUP BY P.Id
+)
+SELECT 
+    RCTE.PostId,
+    RCTE.Title,
+    RCTE.CreationDate,
+    COALESCE(PVC.UpVotes, 0) AS UpVotes,
+    COALESCE(PVC.DownVotes, 0) AS DownVotes,
+    RCTE.Score,
+    PT.Tags,
+    RCTE.Level
+FROM RecursiveCTE RCTE
+LEFT JOIN PostVoteCounts PVC ON RCTE.PostId = PVC.PostId
+LEFT JOIN PostTags PT ON RCTE.PostId = PT.PostId
+WHERE RCTE.Score >= 10  
+  AND RCTE.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'  
+ORDER BY RCTE.Score DESC,
+         RCTE.CreationDate DESC;

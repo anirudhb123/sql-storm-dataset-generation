@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        CAST(NULL AS text) AS parent_title,
+        0 AS depth
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        mh.title AS parent_title,
+        mh.depth + 1
+    FROM aka_title et
+    JOIN MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(mo.production_year) AS latest_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.surname_pcode ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS row_num
+    FROM aka_title at
+    JOIN cast_info ci ON ci.movie_id = at.id
+    JOIN aka_name ak ON ak.person_id = ci.person_id
+    JOIN movie_info mo ON mo.movie_id = at.id AND mo.info_type_id = 1  
+    WHERE ak.name IS NOT NULL AND ak.name <> ''
+    GROUP BY at.id, at.title, ak.name, ak.surname_pcode
+),
+TopGenres AS (
+    SELECT 
+        at.id AS movie_id,
+        kt.keyword AS genre,
+        COUNT(DISTINCT at.id) AS genre_count
+    FROM aka_title at
+    JOIN movie_keyword mk ON mk.movie_id = at.id
+    JOIN keyword kt ON kt.id = mk.keyword_id
+    GROUP BY at.id, kt.keyword
+),
+FilteredMovies AS (
+    SELECT 
+        th.movie_id,
+        th.title,
+        th.actor_name,
+        th.actor_count,
+        tg.genre,
+        tg.genre_count,
+        mh.parent_title
+    FROM TopMovies th
+    LEFT JOIN TopGenres tg ON th.movie_id = tg.movie_id
+    LEFT JOIN MovieHierarchy mh ON th.movie_id = mh.movie_id
+    WHERE 
+        th.actor_count > 3 
+        AND (tg.genre IS NULL OR tg.genre_count > 2)
+)
+SELECT 
+    fm.title AS "Movie Title",
+    fm.actor_name AS "Top Actor",
+    COALESCE(fm.parent_title, 'Standalone') AS "Parent Title",
+    fm.actor_count AS "Number of Actors",
+    COUNT(DISTINCT fm.genre) AS "Genre Count",
+    STRING_AGG(DISTINCT fm.genre, ', ') AS "Genres",
+    CASE 
+        WHEN fm.actor_count BETWEEN 3 AND 5 THEN 'Featured'
+        WHEN fm.actor_count > 5 THEN 'Star-studded'
+        ELSE 'Standard'
+    END AS "Movie Classification"
+FROM FilteredMovies fm
+GROUP BY fm.title, fm.actor_name, fm.parent_title, fm.actor_count
+ORDER BY fm.actor_count DESC, fm.title ASC
+LIMIT 100;

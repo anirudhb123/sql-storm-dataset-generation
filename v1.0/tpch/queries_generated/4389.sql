@@ -1,0 +1,101 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_linenumber) AS number_of_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY AVG(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+Result AS (
+    SELECT 
+        cus.c_name AS customer_name,
+        ord.o_orderkey,
+        ord.total_order_value,
+        supp.s_name AS supplier_name,
+        COALESCE(supp_stats.total_avail_qty, 0) AS supplier_total_avail_qty,
+        COALESCE(supp_stats.avg_supply_cost, 0) AS supplier_avg_supply_cost,
+        CASE 
+            WHEN ord.total_order_value > 5000 THEN 'High Value'
+            WHEN ord.total_order_value BETWEEN 2000 AND 5000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM 
+        OrderDetails ord
+    JOIN 
+        customer cus ON cus.c_custkey = (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_addr LIKE '%Street%' 
+            LIMIT 1
+        )
+    LEFT JOIN 
+        SupplierStats supp_stats ON ord.o_orderkey = (
+            SELECT l.l_orderkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = ord.o_orderkey
+            LIMIT 1
+        )
+    LEFT JOIN 
+        TopSuppliers supp ON supp.s_suppkey = (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            WHERE ps.ps_partkey IN (
+                SELECT l.l_partkey 
+                FROM lineitem l 
+                WHERE l.l_orderkey = ord.o_orderkey
+            )
+            ORDER BY ps.ps_supplycost 
+            LIMIT 1
+        )
+    WHERE 
+        supp.supplier_rank <= 5
+)
+SELECT 
+    r.customer_name,
+    r.o_orderkey,
+    r.total_order_value,
+    r.supplier_name,
+    r.supplier_total_avail_qty,
+    r.supplier_avg_supply_cost,
+    r.order_value_category
+FROM 
+    Result r
+WHERE 
+    r.supplier_avg_supply_cost IS NOT NULL
+ORDER BY 
+    r.total_order_value DESC, 
+    r.supplier_name ASC
+LIMIT 100;

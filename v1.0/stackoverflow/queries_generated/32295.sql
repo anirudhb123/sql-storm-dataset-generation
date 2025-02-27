@@ -1,0 +1,102 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.OwnerUserId,
+        a.ParentId,
+        rp.Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId  -- Join to get Answers
+    WHERE 
+        a.PostTypeId = 2  -- We are only interested in Answers
+),
+
+AggregatedScores AS (
+    SELECT 
+        rp.OwnerUserId,
+        SUM(rp.Score) AS TotalScore,
+        COUNT(rp.PostId) AS AnswerCount
+    FROM 
+        RecursivePostCTE rp
+    GROUP BY 
+        rp.OwnerUserId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+        a.TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        AggregatedScores a ON u.Id = a.OwnerUserId
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score AS PostScore,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.PostScore,
+    ps.CommentCount,
+    ps.VoteCount,
+    CASE 
+        WHEN u.TotalAnswers IS NULL THEN 'No answers contributed'
+        ELSE CONCAT(u.TotalAnswers, ' answers contributed')
+    END AS AnswerContribution,
+    CASE 
+        WHEN u.TotalScore IS NULL THEN 'No score from answers'
+        ELSE CONCAT('Total score from answers: ', u.TotalScore)
+    END AS AnswerScore
+FROM 
+    UserReputation u
+JOIN 
+    PostStats ps ON u.TotalAnswers > 0  -- Join only users who have contributed answers
+ORDER BY 
+    u.Reputation DESC, ps.CreationDate DESC
+LIMIT 10;
+

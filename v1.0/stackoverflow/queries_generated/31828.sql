@@ -1,0 +1,109 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (8, 9) THEN v.BountyAmount END), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+UserBadgeInfo AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    p.Title,
+    p.PostId,
+    ph.RevisionCount,
+    ph.LastEditDate,
+    pv.UpVoteCount,
+    pv.DownVoteCount,
+    pv.TotalBounty,
+    pv.CommentCount,
+    ub.BadgeCount,
+    ub.LastBadgeDate,
+    CASE 
+        WHEN pv.UpVoteCount > pv.DownVoteCount THEN 'Positive'
+        WHEN pv.UpVoteCount < pv.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    CASE 
+        WHEN p.Title ILIKE '%help%' THEN 'Urgent'
+        ELSE 'Normal'
+    END AS PostPriority,
+    ARRAY(
+        SELECT 
+            t.TagName 
+        FROM 
+            Tags t
+        WHERE 
+            t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ','))::int)
+    ) AS RelatedTags,
+    ph.Level AS HierarchyLevel
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    PostWithVotes pv ON ph.PostId = pv.PostId
+JOIN 
+    UserBadgeInfo ub ON pv.UserId = ub.UserId
+ORDER BY 
+    pv.UpVoteCount DESC, ph.Level ASC
+LIMIT 100;

@@ -1,0 +1,76 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT(m.title, ' *'),
+        m.production_year,
+        depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    JOIN 
+        RecursiveMovieCTE r ON ml.linked_movie_id = r.movie_id
+    WHERE 
+        depth < 3 
+),
+AggregatedInfo AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        complete_cast c
+    LEFT JOIN 
+        cast_info ci ON c.subject_id = ci.person_id AND ci.movie_id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = c.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = c.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        c.movie_id
+),
+FinalResults AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        COALESCE(a.total_cast, 0) AS total_cast,
+        COALESCE(a.total_keywords, 0) AS total_keywords,
+        a.company_names,
+        r.production_year,
+        RANK() OVER (PARTITION BY r.production_year ORDER BY a.total_cast DESC) AS cast_rank
+    FROM 
+        RecursiveMovieCTE r
+    LEFT JOIN 
+        AggregatedInfo a ON r.movie_id = a.movie_id
+    WHERE 
+        r.production_year >= 2000
+)
+SELECT 
+    movie_id,
+    title,
+    total_cast,
+    total_keywords,
+    company_names,
+    production_year,
+    cast_rank
+FROM 
+    FinalResults
+WHERE 
+    cast_rank <= 5 
+ORDER BY 
+    production_year, cast_rank;

@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate < CURRENT_DATE - INTERVAL '1 month'
+        )
+),
+OrderedLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate BETWEEN CURRENT_DATE - INTERVAL '1 year' AND CURRENT_DATE
+    GROUP BY 
+        li.l_orderkey, li.l_partkey
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+SELECT 
+    n.r_name,
+    p.p_name,
+    SUM(oli.total_revenue) AS total_revenue_to_nation,
+    ps.supplier_count,
+    (SELECT COUNT(*) FROM CustomerNation cn WHERE cn.nation_name = n.n_name AND cn.cust_rank <= 10) AS top_customers_count,
+    CASE 
+        WHEN ps.avg_supply_cost IS NULL THEN 'No Data' 
+        ELSE TO_CHAR(ps.avg_supply_cost, 'FM999999999.00')
+    END AS formatted_avg_cost
+FROM 
+    nation n
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    RankedOrders ro ON c.c_custkey = ro.o_custkey
+JOIN 
+    OrderedLineItems oli ON ro.o_orderkey = oli.l_orderkey
+JOIN 
+    partsupp ps ON oli.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON p.p_partkey = oli.l_partkey
+WHERE 
+    n.n_name LIKE 'A%' 
+    AND (EXISTS(SELECT 1 FROM supplier s WHERE s.s_nationkey = n.n_nationkey AND s.s_acctbal > 1000))
+GROUP BY 
+    n.r_name, p.p_name, ps.supplier_count, ps.avg_supply_cost
+HAVING 
+    SUM(oli.total_revenue) > (
+        SELECT AVG(total_revenue) 
+        FROM OrderedLineItems
+    )
+ORDER BY 
+    total_revenue_to_nation DESC;

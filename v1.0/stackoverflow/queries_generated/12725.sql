@@ -1,0 +1,33 @@
+-- Performance benchmarking query for posts, users, and votes: 
+-- This query retrieves the top 10 users by reputation who have the most posts and their corresponding vote counts.
+
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN v.Id IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        VoteCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserPostCounts u
+    JOIN Users us ON u.UserId = us.Id
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    VoteCount,
+    ReputationRank
+FROM RankedUsers
+WHERE ReputationRank <= 10
+ORDER BY ReputationRank;

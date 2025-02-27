@@ -1,0 +1,54 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.customer_sk,
+        sr.returned_date_sk,
+        sr.return_quantity,
+        RANK() OVER (PARTITION BY sr.customer_sk ORDER BY sr.return_quantity DESC) AS ReturnRank,
+        (SELECT COUNT(DISTINCT sr2.return_quantity) 
+         FROM store_returns sr2 
+         WHERE sr2.customer_sk = sr.customer_sk AND sr2.return_quantity IS NOT NULL) AS DistinctReturnQtyCount
+    FROM store_returns sr
+),
+InventoryStatus AS (
+    SELECT 
+        inv.inventory_date_sk,
+        inv.warehouse_sk,
+        SUM(CASE WHEN inv.quantity_on_hand IS NULL THEN 0 ELSE inv.quantity_on_hand END) AS TotalQuantityOnHand,
+        COUNT(DISTINCT inv.item_sk) AS DistinctItems
+    FROM inventory inv
+    WHERE inv.warehouse_sk IS NOT NULL
+    GROUP BY inv.inventory_date_sk, inv.warehouse_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        cd.marital_status,
+        cd.gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.marital_status ORDER BY c.customer_sk) AS MaritalRow
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    WHERE c.first_name IS NOT NULL AND c.last_name IS NOT NULL
+)
+SELECT 
+    ci.customer_sk,
+    ci.first_name,
+    ci.last_name,
+    ci.marital_status,
+    ir.return_quantity,
+    ir.ReturnRank,
+    COALESCE(is.TotalQuantityOnHand, 0) AS TotalInventory,
+    ci.Gender,
+    ci.MaritalRow,
+    CASE 
+        WHEN ir.DistinctReturnQtyCount > 5 THEN 'High Returner' 
+        ELSE 'Regular Customer' 
+    END AS CustomerReturnStatus
+FROM CustomerInfo ci
+FULL OUTER JOIN RankedReturns ir ON ci.customer_sk = ir.customer_sk
+LEFT JOIN InventoryStatus is ON ir.returned_date_sk = is.inventory_date_sk
+WHERE (ci.gender = 'F' OR ci.gender IS NULL)
+    AND (CASE WHEN ci.marital_status = 'M' THEN ci.last_name IS NOT NULL ELSE ci.last_name IS NULL END)
+ORDER BY ir.ReturnRank DESC NULLS LAST, ci.first_name ASC;

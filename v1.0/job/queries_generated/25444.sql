@@ -1,0 +1,66 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ka.name) AS aliases,
+        GROUP_CONCAT(DISTINCT co.name) AS companies,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        aka_name ka ON t.id = ka.person_id
+    WHERE 
+        t.production_year > 2000
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        GROUP_CONCAT(DISTINCT p.name ORDER BY c.nr_order) AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        name p ON c.person_id = p.imdb_id
+    GROUP BY 
+        c.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aliases,
+        md.companies,
+        md.keywords,
+        COALESCE(cd.actor_count, 0) AS actor_count,
+        COALESCE(cd.cast_names, 'No cast information') AS cast_names
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        CastDetails cd ON md.movie_id = cd.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    aliases,
+    companies,
+    keywords,
+    actor_count,
+    cast_names
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, title;

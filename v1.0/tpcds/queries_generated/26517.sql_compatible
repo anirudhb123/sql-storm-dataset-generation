@@ -1,0 +1,62 @@
+
+WITH address_data AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+customer_data AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(ws_order_number) AS orders_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+final_report AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        s.total_spent,
+        s.orders_count,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        a.ca_country
+    FROM customer_data cd
+    LEFT JOIN sales_data s ON cd.c_customer_sk = s.ws_bill_customer_sk
+    LEFT JOIN address_data a ON cd.c_current_addr_sk = a.ca_address_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_spent IS NULL THEN 'No Purchases'
+        WHEN total_spent > 1000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_value_segment
+FROM final_report
+WHERE ca_state = 'CA'
+ORDER BY total_spent DESC, c_last_name ASC
+LIMIT 100;

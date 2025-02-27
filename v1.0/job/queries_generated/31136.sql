@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mh.production_year DESC) AS movie_rank,
+    COALESCE(pi.info, 'No additional info') AS person_info
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ak.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'biography')
+WHERE 
+    mh.level < 3
+GROUP BY 
+    ak.name, at.title, mh.production_year, pi.info
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 0
+ORDER BY 
+    actor_name, production_year DESC;
+
+### Explanation of Query Components:
+1. **CTE (Common Table Expression)**: Creates a recursive hierarchy of movies linked through the `movie_link` table, providing a way to analyze relationships between movies (e.g., sequels or series).
+
+2. **Joins**: Combines multiple tables to gather relevant information, including:
+   - `aka_name` for actor names,
+   - `cast_info` to connect actors to movies,
+   - `movie_keyword` and `keyword` for movie keywords,
+   - `person_info` for optional additional information about the actor.
+
+3. **Aggregations and Window Functions**: 
+   - Counts the number of distinct keywords per movie and concatenates them into a string with `STRING_AGG`.
+   - Uses `ROW_NUMBER()` to rank movies for each actor based on the production year.
+
+4. **Complex Predicates**: 
+   - Filters movies in the hierarchy to a specific depth (less than 3 levels).
+   - Excludes actors with no keywords using the `HAVING` clause.
+
+5. **Null Logic**: Uses `COALESCE` to handle potential `NULL` values in `person_info`, providing a default message if no biography is available.
+
+This detailed SQL query provides robust data insights for performance benchmarking, focusing on actor involvement across movie hierarchies and their attributes.

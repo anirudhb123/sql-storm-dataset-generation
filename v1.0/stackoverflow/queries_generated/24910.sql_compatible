@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+RecentClosure AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosure
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+CombinedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.PostRank,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        COALESCE(rc.LastClosure, 'No Closure') AS LastClosureDate,
+        CASE 
+            WHEN rc.LastClosure IS NOT NULL AND rp.PostRank <= 5 THEN 'Recently Closed High Rank'
+            WHEN rc.LastClosure IS NULL AND rp.CommentCount > 5 THEN 'No Closure High Activity'
+            ELSE 'Normal Activity'
+        END AS ActivityLevel
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentClosure rc ON rp.PostId = rc.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    PostRank,
+    CommentCount,
+    UpvoteCount,
+    DownvoteCount,
+    LastClosureDate,
+    ActivityLevel
+FROM 
+    CombinedPosts
+WHERE 
+    (LastClosureDate = 'No Closure' OR LastClosureDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months') 
+    AND UpvoteCount > DownvoteCount
+ORDER BY 
+    CreationDate DESC
+LIMIT 50 OFFSET (SELECT COUNT(*) FROM CombinedPosts) / 2;

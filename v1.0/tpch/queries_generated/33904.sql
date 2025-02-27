@@ -1,0 +1,47 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+           COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate
+),
+FilteredOrders AS (
+    SELECT os.o_orderkey, os.o_orderstatus, os.o_totalprice
+    FROM OrdersSummary os
+    WHERE os.lineitem_count > 2 AND os.order_rank <= 5
+),
+CustomerOrderDetails AS (
+    SELECT ch.c_custkey, ch.c_name, fo.o_orderkey, fo.o_orderstatus, fo.o_totalprice
+    FROM CustomerHierarchy ch
+    JOIN FilteredOrders fo ON ch.c_custkey = fo.o_orderkey
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT cod.c_custkey) AS customer_count,
+    SUM(cod.o_totalprice) AS total_spent,
+    AVG(cod.o_totalprice) AS average_order_value
+FROM CustomerOrderDetails cod
+JOIN nation n ON cod.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE cod.o_totalprice IS NOT NULL 
+AND r.r_name LIKE 'N%'
+GROUP BY r.r_name
+ORDER BY total_spent DESC;

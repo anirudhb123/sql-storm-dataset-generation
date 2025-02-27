@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+),
+best_sellers AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_web_site_sk IN (SELECT rs.web_site_id FROM ranked_sales rs WHERE rs.sales_rank <= 10)
+    GROUP BY 
+        i.i_item_id, i.i_product_name
+    ORDER BY 
+        total_quantity_sold DESC
+    LIMIT 10
+)
+SELECT 
+    rs.web_site_id,
+    rs.total_sales,
+    rs.total_orders,
+    bs.i_item_id,
+    bs.i_product_name,
+    bs.total_quantity_sold
+FROM 
+    ranked_sales rs
+JOIN 
+    best_sellers bs ON rs.web_site_id = (
+        SELECT 
+            ws.ws_web_site_sk 
+        FROM 
+            web_sales ws 
+        WHERE 
+            ws.ws_web_site_sk = rs.web_site_id 
+        GROUP BY 
+            ws.ws_web_site_sk 
+        ORDER BY 
+            SUM(ws.ws_quantity) DESC 
+        LIMIT 1
+    )
+ORDER BY 
+    rs.sales_rank, bs.total_quantity_sold DESC;

@@ -1,0 +1,64 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        AVG(P.Score) AS AverageScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TagPostCounts AS (
+    SELECT
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM
+        Tags T
+    LEFT JOIN
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY
+        T.TagName
+),
+VoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.Questions,
+    U.Answers,
+    U.PositiveScorePosts,
+    U.AverageScore,
+    U.TotalViews,
+    T.TagName,
+    T.PostCount,
+    V.TotalVotes,
+    V.UpVotes,
+    V.DownVotes
+FROM 
+    UserPostStats U
+LEFT JOIN 
+    TagPostCounts T ON true 
+LEFT JOIN 
+    VoteStats V ON U.UserId = V.PostId 
+ORDER BY 
+    U.TotalPosts DESC, U.AverageScore DESC;

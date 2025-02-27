@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 3 WHEN b.Class = 2 THEN 2 WHEN b.Class = 3 THEN 1 END), 0) AS TotalBadges
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+PostAnswers AS (
+    SELECT
+        p.OwnerUserId, 
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(rp.Title, 'No Recent Questions') AS LatestQuestion,
+    COALESCE(rp.CreationDate, 'N/A') AS LatestQuestionDate,
+    COALESCE(rp.Score, 0) AS LatestQuestionScore,
+    COALESCE(rp.ViewCount, 0) AS LatestQuestionViews,
+    ur.TotalBadges,
+    pa.AnswerCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostAnswers pa ON u.Id = pa.OwnerUserId
+WHERE 
+    u.Reputation IS NOT NULL 
+    AND (ur.TotalBadges > 0 OR pa.AnswerCount IS NULL)
+ORDER BY 
+    ur.TotalBadges DESC, 
+    pa.AnswerCount DESC;

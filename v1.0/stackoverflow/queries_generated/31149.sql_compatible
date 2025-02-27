@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LastPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+FilteredVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalReputation DESC
+    LIMIT 10
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(fv.Upvotes, 0) AS Upvotes,
+    COALESCE(fv.Downvotes, 0) AS Downvotes,
+    COALESCE(rp.OwnerUserId, 'Unknown') AS OwnerUserId,
+    p.DisplayName AS OwnerDisplayName,
+    COALESCE(rph.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(rph.LastReopenedDate, 'Never Reopened') AS LastReopenedDate,
+    tu.DisplayName AS TopUserDisplayName,
+    tu.TotalReputation
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    FilteredVotes fv ON rp.PostId = fv.PostId
+LEFT JOIN 
+    RecentPostHistory rph ON rp.PostId = rph.PostId
+JOIN 
+    Users p ON rp.OwnerUserId = p.Id
+JOIN 
+    TopUsers tu ON p.Id = tu.UserId
+WHERE 
+    rp.LastPostRank = 1
+    AND (fv.Upvotes IS NOT NULL OR fv.Downvotes IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, fv.Upvotes DESC, rp.CreationDate DESC;

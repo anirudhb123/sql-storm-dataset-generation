@@ -1,0 +1,67 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_type, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        c.c_name, 
+        o.o_totalprice, 
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_totalprice > 1000
+),
+FinalBenchmark AS (
+    SELECT 
+        r.r_name AS region, 
+        COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count, 
+        AVG(rp.total_supply_cost) AS avg_part_supply_cost,
+        SUM(rp.total_supply_cost) AS total_part_supply_cost
+    FROM 
+        RankedParts rp
+    JOIN 
+        RankedSuppliers rs ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        HighValueOrders hvo ON hvo.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = rp.p_partkey)
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    region, 
+    high_value_order_count, 
+    avg_part_supply_cost, 
+    total_part_supply_cost
+FROM 
+    FinalBenchmark
+ORDER BY 
+    total_part_supply_cost DESC;

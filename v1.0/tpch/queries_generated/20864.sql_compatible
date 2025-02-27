@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SuppCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+PartSummary AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           DENSE_RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name,
+           DENSE_RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+CombinedProducts AS (
+    SELECT p.*, COALESCE(ls.total_price, 0) AS total_order_value
+    FROM PartSummary p
+    LEFT JOIN LineItemStats ls ON p.p_partkey = ls.l_orderkey
+),
+FilteredOrders AS (
+    SELECT od.o_orderkey, COUNT(DISTINCT p.p_partkey) AS part_count,
+           SUM(p.p_retailprice * COALESCE(os.total_order_value, 0)) AS total_value
+    FROM OrderDetails od
+    LEFT JOIN CombinedProducts p ON od.o_orderkey = p.p_partkey
+    LEFT JOIN orderdetails os ON od.o_orderkey = os.order_id
+    GROUP BY od.o_orderkey
+)
+
+SELECT c.c_name, c.c_acctbal, sr.supplier_rank,
+       fc.part_count, fc.total_value
+FROM CustomerRank c
+LEFT JOIN FilteredOrders fc ON c.c_custkey = fc.o_orderkey
+JOIN SupplierRank sr ON sr.supplier_rank <= 10
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+ORDER BY c.c_acctbal DESC, sr.supplier_rank, fc.total_value DESC
+LIMIT 50;

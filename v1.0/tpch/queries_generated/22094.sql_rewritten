@@ -1,0 +1,65 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01'
+),
+part_supplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           ps.ps_supplycost, 
+           ps.ps_availqty, 
+           s.s_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > (
+        SELECT AVG(ps_availqty) 
+        FROM partsupp 
+        WHERE ps_supplycost < 100
+    )
+),
+order_summary AS (
+    SELECT co.c_custkey, 
+           SUM(co.o_totalprice) AS total_spent,
+           COUNT(co.o_orderkey) AS order_count
+    FROM cust_orders co
+    WHERE co.order_rank <= 5
+    GROUP BY co.c_custkey
+),
+high_value_orders AS (
+    SELECT o.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS high_value_count,
+           MAX(o.o_totalprice) AS max_order_value
+    FROM orders o
+    JOIN order_summary os ON o.o_custkey = os.c_custkey
+    WHERE o.o_totalprice > os.total_spent / GREATEST(NULLIF(os.order_count, 0), 1)
+    GROUP BY o.c_custkey
+)
+SELECT r.r_name, 
+       p.p_mfgr, 
+       p.p_name, 
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       SUM(hv.high_value_count) OVER (PARTITION BY r.r_regionkey) AS total_high_value_customers,
+       CASE 
+           WHEN COUNT(DISTINCT s.s_suppkey) IS NULL THEN 'No Suppliers' 
+           ELSE 'Has Suppliers' 
+       END AS supplier_status
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN part_supplier ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN high_value_orders hv ON n.n_nationkey = hv.o_custkey
+JOIN part p ON ps.p_partkey = p.p_partkey
+WHERE p.p_size IN (SELECT DISTINCT DISTINCT COALESCE(NULLIF(p_size, 0), 0) FROM part) 
+                   OR p.p_retailprice IS NOT NULL
+                   AND p.p_comment LIKE '%special%'
+GROUP BY r.r_name, p.p_mfgr, p.p_name
+ORDER BY avg_supply_cost DESC
+LIMIT 10 OFFSET 5;

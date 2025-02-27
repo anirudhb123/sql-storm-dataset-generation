@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        cd_demo_sk, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(*) AS order_count
+    FROM 
+        web_sales 
+    JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        cd_gender = 'F' 
+        AND ws_sold_date_sk BETWEEN 1 AND 365 
+    GROUP BY 
+        cd_demo_sk
+    UNION ALL
+    SELECT 
+        cd_demo_sk,
+        sh.total_sales * 1.10,
+        sh.order_count + 1
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = sh.cd_demo_sk 
+    WHERE 
+        cd.cd_dep_count IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        sh.cd_demo_sk,
+        sh.total_sales,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(cd.cd_marital_status, 'Unknown') ORDER BY sh.total_sales DESC) AS rank
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        customer_demographics cd ON sh.cd_demo_sk = cd.cd_demo_sk
+),
+MonthlySales AS (
+    SELECT 
+        dd.d_year,
+        SUM(ts.total_sales) AS monthly_total_sales
+    FROM 
+        TotalSales ts
+    JOIN 
+        date_dim dd ON dd.d_date_sk = CURRENT_DATE
+    WHERE 
+        ts.rank <= 5
+    GROUP BY 
+        dd.d_year
+)
+SELECT 
+    w.w_warehouse_name AS Warehouse,
+    ts.marital_status,
+    SUM(ts.total_sales) AS Total_Sales,
+    AVG(ts.total_sales) AS Average_Sales,
+    MAX(ts.total_sales) AS Max_Sales,
+    MIN(ts.total_sales) AS Min_Sales,
+    STRING_AGG(CAST(ts.cd_demo_sk AS VARCHAR), ', ') AS Customer_IDs
+FROM 
+    TotalSales ts
+JOIN 
+    warehouse w ON ts.cd_demo_sk = w.w_warehouse_sk
+JOIN 
+    MonthlySales ms ON ts.total_sales > ms.monthly_total_sales
+WHERE 
+    w.w_state = 'CA' 
+    AND ts.total_sales IS NOT NULL
+GROUP BY 
+    w.warehouse_name, 
+    ts.marital_status
+HAVING 
+    SUM(ts.total_sales) > 1000 
+ORDER BY 
+    Total_Sales DESC;

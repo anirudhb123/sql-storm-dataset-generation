@@ -1,0 +1,71 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(C.Id) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days')
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalComments,
+    UA.TotalBounty,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    COALESCE(CP.CloseCount, 0) AS CloseCount
+FROM 
+    UserActivity UA
+JOIN 
+    RecentPosts RP ON UA.UserId = RP.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+WHERE 
+    UA.ActivityRank <= 10 
+    AND RP.PostRank = 1
+ORDER BY 
+    UA.TotalComments DESC, 
+    UA.TotalBounty DESC;

@@ -1,0 +1,51 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.ws_order_number, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk 
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+), sales_info AS (
+    SELECT 
+        rs.web_site_sk, 
+        rs.ws_order_number, 
+        rs.total_sales,
+        sm.sm_type,
+        sm.sm_carrier,
+        CASE 
+            WHEN rs.total_sales > 1000 THEN 'High'
+            WHEN rs.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM 
+        ranked_sales rs
+    LEFT JOIN 
+        ship_mode sm ON rs.ws_order_number = (SELECT MIN(ws2.ws_order_number) FROM web_sales ws2 WHERE ws2.ws_web_site_sk = rs.web_site_sk AND ws2.ws_order_number IS NOT NULL)
+    WHERE 
+        rs.sales_rank <= 5
+)
+SELECT 
+    si.web_site_sk,
+    si.ws_order_number,
+    si.total_sales,
+    COALESCE(si.sm_type, 'N/A') AS shipping_type,
+    COALESCE(si.sm_carrier, 'No Carrier') AS carrier_name,
+    si.sales_category
+FROM 
+    sales_info si
+FULL OUTER JOIN 
+    customer c ON c.c_customer_sk = (
+        SELECT c_customer_sk FROM customer WHERE c_customer_id = 'IDENTIFIER' LIMIT 1
+    )
+WHERE 
+    (si.total_sales IS NOT NULL OR c.c_customer_sk IS NULL)
+ORDER BY 
+    si.total_sales DESC NULLS LAST;

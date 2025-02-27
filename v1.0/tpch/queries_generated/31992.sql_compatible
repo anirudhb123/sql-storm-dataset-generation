@@ -1,0 +1,71 @@
+
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT 
+        ps_partkey,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+        1 AS level
+    FROM 
+        partsupp 
+    GROUP BY 
+        ps_partkey
+    UNION ALL
+    SELECT 
+        ph.ps_partkey,
+        ph.total_supply_cost * 1.1 AS total_supply_cost,
+        ph.level + 1
+    FROM 
+        PriceHierarchy ph
+    JOIN 
+        partsupp ps ON ph.ps_partkey = ps.ps_partkey
+    WHERE 
+        ph.level < 5
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        c.c_name, o.o_orderkey, c.c_nationkey
+),
+MaxOrderTotal AS (
+    SELECT 
+        c_nationkey,
+        MAX(order_total) AS max_order_total
+    FROM 
+        CustomerOrderDetails
+    GROUP BY 
+        c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    MAX(p.total_supply_cost) AS max_supply_cost,
+    COUNT(DISTINCT cod.o_orderkey) AS total_orders,
+    COALESCE(mot.max_order_total, 0) AS max_order_total
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    PriceHierarchy p ON true
+JOIN 
+    CustomerOrderDetails cod ON n.n_nationkey = cod.o_orderkey 
+LEFT JOIN 
+    MaxOrderTotal mot ON n.n_nationkey = mot.c_nationkey 
+WHERE 
+    p.total_supply_cost IS NOT NULL
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    max_supply_cost DESC, total_orders DESC
+FETCH FIRST 10 ROWS ONLY;

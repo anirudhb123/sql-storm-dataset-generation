@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ss_store_sk, ss_sold_date_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(cr_item_sk) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+TopStores AS (
+    SELECT 
+        rs.ss_store_sk,
+        rs.total_sales
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.sales_rank <= 3
+)
+SELECT 
+    ts.ss_store_sk,
+    ts.total_sales,
+    COALESCE(cs.total_returns, 0) AS total_returns,
+    COALESCE(cs.total_return_amount, 0) AS total_return_amount,
+    (CASE 
+        WHEN cs.total_returns IS NULL OR cs.total_returns = 0 THEN 'No Returns'
+        ELSE 'Has Returns'
+    END) AS return_status,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c 
+     WHERE c.c_current_addr_sk IS NOT NULL 
+     AND EXISTS (SELECT 1 FROM store_sales s WHERE s.ss_store_sk = ts.ss_store_sk AND s.ss_customer_sk = c.c_customer_sk)) AS unique_customers
+FROM 
+    TopStores ts
+LEFT JOIN 
+    CustomerStats cs ON cs.c_customer_sk IN (SELECT DISTINCT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk IN (SELECT DISTINCT s.s_store_sk FROM store s WHERE s.s_store_sk = ts.ss_store_sk))
+ORDER BY 
+    ts.total_sales DESC, 
+    return_status;

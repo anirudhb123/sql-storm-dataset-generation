@@ -1,0 +1,72 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Select only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT c.Id) DESC) AS OwnerCommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+FilteredPostStats AS (
+    SELECT 
+        ps.*,
+        CASE 
+            WHEN ps.UpVoteCount - ps.DownVoteCount > 10 THEN 'Highly Popular'
+            WHEN ps.UpVoteCount - ps.DownVoteCount BETWEEN 1 AND 10 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS Popularity
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Level,
+    fps.UpVoteCount,
+    fps.DownVoteCount,
+    fps.CommentCount,
+    fps.Popularity,
+    u.DisplayName AS Owner
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    FilteredPostStats fps ON r.PostId = fps.Id
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+WHERE 
+    fps.Popularity = 'Highly Popular'
+ORDER BY 
+    r.Level, fps.UpVoteCount DESC;

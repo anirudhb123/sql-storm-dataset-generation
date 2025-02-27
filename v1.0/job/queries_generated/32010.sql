@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year BETWEEN 2000 AND 2023
+
+    UNION ALL
+
+    SELECT
+        mm.id AS movie_id,
+        mm.title,
+        mm.production_year,
+        mm.kind_id,
+        mm.episode_of_id
+    FROM
+        aka_title mm
+    INNER JOIN MovieHierarchy mh ON mm.episode_of_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT
+        m.id,
+        m.title,
+        COUNT(c.person_id) AS cast_count,
+        AVG(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS avg_has_role
+    FROM
+        MovieHierarchy m
+    LEFT JOIN cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    GROUP BY
+        m.id
+    HAVING
+        COUNT(c.person_id) > 5 -- Only consider movies with more than 5 cast members
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+FinalResult AS (
+    SELECT
+        tm.id,
+        tm.title,
+        tm.cast_count,
+        tm.avg_has_role,
+        COALESCE(mk.keywords, ARRAY[]::text[]) AS keywords,
+        CASE WHEN tm.production_year = max(m.production_year) OVER () THEN 'Current Year Release' ELSE 'Past Release' END AS release_status
+    FROM
+        TopMovies tm
+    LEFT JOIN MovieKeywords mk ON tm.id = mk.movie_id
+)
+SELECT
+    fr.id,
+    fr.title,
+    fr.cast_count,
+    fr.avg_has_role,
+    unnest(fr.keywords) AS keyword,
+    fr.release_status
+FROM
+    FinalResult fr
+ORDER BY
+    fr.cast_count DESC,
+    fr.release_status,
+    fr.title;
+In this query:
+
+1. We start by creating a recursive CTE `MovieHierarchy` to capture the hierarchy of movies and their episodes released between 2000 and 2023.
+2. We then create another CTE `TopMovies` to filter for movies with more than 5 cast members, calculating the average presence of roles.
+3. The `MovieKeywords` CTE collects keywords associated with each movie to yield an array of keywords per movie.
+4. Finally, `FinalResult` compiles all this information, determining the release status of each movie and aggregating results across relevant joins.
+5. In the final selection, we flatten the keyword arrays and sort the result based on the number of cast members and release status.

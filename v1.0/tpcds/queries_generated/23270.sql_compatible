@@ -1,0 +1,49 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.item_sk,
+        ws.order_number,
+        ws.net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.item_sk ORDER BY ws.net_paid DESC) AS rank,
+        ws.sold_date_sk,
+        ws.ship_date_sk,
+        COALESCE(ws.net_paid, 0) AS adjusted_net_paid
+    FROM web_sales ws
+    WHERE ws.sold_date_sk BETWEEN 1000 AND 1005
+),
+filtered_returns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.returning_cdemo_sk,
+        SUM(cr.return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT cr.order_number) AS return_count,
+        AVG(cr.return_amt) AS avg_return_amt
+    FROM catalog_returns cr
+    WHERE cr.returned_date_sk IS NOT NULL
+    GROUP BY cr.returning_customer_sk, cr.returning_cdemo_sk
+),
+max_sales AS (
+    SELECT 
+        ws.item_sk, 
+        MAX(ws.net_paid) AS max_net_paid
+    FROM web_sales ws
+    GROUP BY ws.item_sk
+)
+SELECT 
+    ca.city,
+    ca.state,
+    SUM(CASE 
+            WHEN rs.adjusted_net_paid > 0 THEN rs.adjusted_net_paid 
+            ELSE NULL 
+        END) AS total_positive_sales,
+    COUNT(DISTINCT fr.returning_customer_sk) AS unique_returning_customers,
+    MAX(COALESCE(ms.max_net_paid, 0)) AS highest_sales_per_item
+FROM customer_address ca
+LEFT JOIN ranked_sales rs ON ca.ca_address_sk = rs.track_number_sk
+LEFT JOIN filtered_returns fr ON fr.returning_customer_sk = ca.c_address_sk
+LEFT JOIN max_sales ms ON ms.item_sk = rs.item_sk
+WHERE ca.state IS NOT NULL
+AND ca.city NOT LIKE '%North%'
+GROUP BY ca.city, ca.state
+ORDER BY total_positive_sales DESC
+LIMIT 10 OFFSET 5;

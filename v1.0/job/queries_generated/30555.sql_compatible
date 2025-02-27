@@ -1,0 +1,45 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year = 2022
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.level < 3 
+)
+
+SELECT
+    n.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movies_count,
+    AVG(CASE WHEN m.production_year < 2000 THEN 1 ELSE 0 END) * 100 AS percentage_before_2000,
+    ARRAY_AGG(DISTINCT a.title ORDER BY a.title) AS movie_titles,
+    FIRST_VALUE(a.title) OVER (PARTITION BY n.id ORDER BY a.production_year DESC) AS latest_movie_title,
+    EXTRACT(YEAR FROM CAST('2024-10-01 12:34:56' AS TIMESTAMP)) - MAX(m.production_year) AS years_since_last_release
+FROM
+    aka_name n
+LEFT JOIN
+    cast_info c ON n.person_id = c.person_id
+LEFT JOIN
+    aka_title a ON c.movie_id = a.id
+LEFT JOIN
+    movie_info mi ON a.id = mi.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON a.id = mh.movie_id
+LEFT JOIN
+    aka_title m ON c.movie_id = m.id
+WHERE
+    n.name IS NOT NULL
+    AND (mi.info IS NULL OR mi.info NOT LIKE '%unreleased%')
+GROUP BY
+    n.name, n.id
+HAVING
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY
+    movies_count DESC,
+    years_since_last_release
+LIMIT 10;

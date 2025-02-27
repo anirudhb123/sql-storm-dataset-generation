@@ -1,0 +1,52 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScores,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 -- Questions
+    LEFT JOIN Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2 -- Answers
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.Reputation,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.TotalCommentScores,
+        ua.TotalBadges,
+        ua.TotalBounty,
+        RANK() OVER (ORDER BY ua.Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY ua.TotalCommentScores DESC) AS CommentScoreRank,
+        RANK() OVER (ORDER BY ua.QuestionCount DESC) AS QuestionCountRank
+    FROM UserActivity ua
+)
+SELECT 
+    ru.UserId,
+    ru.Reputation,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.TotalCommentScores,
+    ru.TotalBadges,
+    ru.TotalBounty,
+    ru.ReputationRank,
+    ru.CommentScoreRank,
+    ru.QuestionCountRank,
+    (CASE 
+        WHEN ru.ReputationRank <= 10 THEN 'Top Reputation'
+        WHEN ru.QuestionCountRank <= 10 THEN 'Top Questions'
+        ELSE 'Normal User'
+    END) AS UserCategory
+FROM RankedUsers ru
+WHERE ru.TotalBounty > 0
+ORDER BY ru.TotalBounty DESC, ru.Reputation DESC;
+
+This SQL query benchmarks string processing by analyzing user activities in terms of reputation, question counts, answer counts, total comment scores, and badges, ensuring those users have received bounties. The result ranks and categorizes users based on their reputation and engagement with the platform.

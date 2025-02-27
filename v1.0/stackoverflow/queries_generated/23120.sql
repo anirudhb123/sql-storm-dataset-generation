@@ -1,0 +1,94 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+), 
+PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.DisplayName AS OwnerName,
+        PH.Comment AS LastEditComment,
+        PH.CreationDate AS LastEditDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (
+            SELECT MAX(CreationDate)
+            FROM PostHistory
+            WHERE PostId = P.Id
+              AND PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+        )
+), 
+RankedPosts AS (
+    SELECT 
+        PD.*,
+        RANK() OVER (PARTITION BY PD.OwnerName ORDER BY PD.Score DESC) AS PostRank
+    FROM 
+        PostDetail PD
+)
+SELECT 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.Views,
+    UA.PostCount,
+    UA.AnswerCount,
+    UA.QuestionCount,
+    UA.TotalBounty,
+    UA.CommentCount,
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.ViewCount,
+    RP.LastEditComment,
+    RP.LastEditDate,
+    CASE 
+        WHEN RP.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    UserActivity UA
+JOIN 
+    RankedPosts RP ON UA.UserId = RP.OwnerName
+WHERE 
+    UA.PostCount > 5 
+    AND UA.TotalBounty IS NOT NULL
+    AND RP.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    UA.Reputation DESC,
+    RP.Score DESC
+LIMIT 50;
+
+-- The above query includes the following:
+-- 1. Common Table Expressions (CTEs) to organize user activity metrics and post details.
+-- 2. A correlated subquery for the latest post edit.
+-- 3. Window function to rank posts by score per user.
+-- 4. Filtering based on various user and post conditions.
+-- 5. String expressions to categorize posts dynamically.

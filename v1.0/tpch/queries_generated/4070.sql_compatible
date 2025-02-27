@@ -1,0 +1,85 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.s_suppkey
+),
+CustomerTotal AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+FinalReport AS (
+    SELECT 
+        n.n_name,
+        s.s_supname,
+        cs.total_spent,
+        SUM(f.revenue) AS total_revenue,
+        s.avg_supplycost
+    FROM 
+        SupplierStats s
+    JOIN 
+        nation n ON s.s_suppkey = n.n_nationkey
+    JOIN 
+        CustomerTotal cs ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey LIMIT 1)
+    LEFT JOIN 
+        FilteredLineItems f ON cs.c_custkey = f.l_orderkey
+    WHERE 
+        s.total_available > 0
+    GROUP BY 
+        n.n_name,
+        s.s_supname,
+        cs.total_spent,
+        s.avg_supplycost
+    HAVING 
+        SUM(f.revenue) IS NOT NULL AND AVG(s.avg_supplycost) < 100
+)
+SELECT 
+    DISTINCT r.r_name, 
+    fr.n_name AS nation_name, 
+    fr.total_spent,
+    fr.total_revenue
+FROM 
+    region r
+LEFT JOIN 
+    FinalReport fr ON r.r_regionkey = fr.n_nationkey
+WHERE 
+    fr.total_revenue > 1000 OR fr.total_spent IS NULL
+ORDER BY 
+    r.r_name, fr.total_revenue DESC;

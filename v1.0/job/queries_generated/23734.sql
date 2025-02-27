@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) AS rank_per_year
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_per_year <= 3
+),
+
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        GROUP_CONCAT(DISTINCT an.name ORDER BY an.name ASC) AS actor_names,
+        (SELECT COUNT(DISTINCT mk.keyword)
+         FROM movie_keyword mk
+         JOIN keyword k ON mk.keyword_id = k.id
+         WHERE mk.movie_id = at.id) AS keyword_count
+    FROM 
+        TopMovies tm
+    JOIN 
+        aka_title at ON tm.title = at.title AND tm.production_year = at.production_year
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        tm.title, tm.production_year
+),
+
+FinalBenchmarkedResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_names,
+        COALESCE(md.keyword_count, 0) AS keyword_count,
+        CASE 
+            WHEN md.keyword_count IS NULL THEN 'No keywords'
+            ELSE 'Keywords available'
+        END AS keyword_status
+    FROM 
+        MovieDetails md
+    ORDER BY 
+        md.production_year DESC, md.title
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN actor_names IS NOT NULL AND keyword_count > 5 THEN 'Highly Rated'
+        WHEN actor_names IS NOT NULL AND keyword_count BETWEEN 1 AND 5 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS movie_rating
+FROM 
+    FinalBenchmarkedResults 
+WHERE 
+    production_year BETWEEN 1990 AND 2020
+    OR (actor_names IS NULL AND keyword_count <= 1)
+    OR (actor_names LIKE '%Smith%' OR actor_names LIKE '%Johnson%')
+ORDER BY 
+    movie_rating DESC, production_year;

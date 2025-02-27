@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastWithRole AS (
+    SELECT ci.movie_id, a.name AS actor_name, 
+           r.role AS role_name,
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type r ON ci.role_id = r.id
+),
+MoviesInfo AS (
+    SELECT mh.movie_id, mh.title, mh.production_year,
+           COUNT(DISTINCT c.actor_name) AS total_actors,
+           STRING_AGG(DISTINCT c.actor_name, ', ') AS actors_list
+    FROM MovieHierarchy mh
+    LEFT JOIN CastWithRole c ON mh.movie_id = c.movie_id
+    GROUP BY mh.movie_id
+),
+MovieCompanies AS (
+    SELECT mc.movie_id, 
+           STRING_AGG(DISTINCT cmp.name, ', ') AS companies,
+           COUNT(DISTINCT cmp.id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name cmp ON mc.company_id = cmp.id
+    GROUP BY mc.movie_id
+)
+SELECT mi.title,
+       mi.production_year,
+       mi.total_actors,
+       COALESCE(mc.companies, 'No companies') AS companies,
+       mc.total_companies,
+       CASE 
+           WHEN mi.production_year < 2000 THEN 'Classic'
+           WHEN mi.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+           ELSE 'Recent'
+       END AS era,
+       CASE 
+           WHEN mi.total_actors > 10 THEN 'Ensemble Cast'
+           WHEN mi.total_actors <= 10 AND mi.total_actors > 0 THEN 'Limited Cast'
+           ELSE 'No Cast'
+       END AS cast_type
+FROM MoviesInfo mi
+LEFT JOIN MovieCompanies mc ON mi.movie_id = mc.movie_id
+ORDER BY mi.production_year DESC, mi.total_actors DESC;

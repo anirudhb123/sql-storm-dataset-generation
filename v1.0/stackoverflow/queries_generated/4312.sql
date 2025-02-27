@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadgeClass,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(COALESCE(vs.UserScore, 0)) AS AvgVoteScore
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            v.UserId,
+            SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END) AS UserScore
+        FROM Votes v
+        GROUP BY v.UserId
+    ) vs ON u.Id = vs.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        COALESCE(pd.PostId, 'No Links') AS LinkedPostId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN PostLinks pd ON p.Id = pd.PostId
+    WHERE p.CreationDate > NOW() - INTERVAL '1 month'
+      AND p.Score > 10
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.TotalBadgeClass,
+    ur.PostCount,
+    ur.AvgVoteScore,
+    ps.Title,
+    ps.Score,
+    ps.CreationDate,
+    ps.AnswerCount,
+    ps.LinkedPostId
+FROM UserReputation ur
+JOIN PostStats ps ON ur.UserId = ps.OwnerUserId
+WHERE ur.TotalBadgeClass > 5
+ORDER BY ur.Reputation DESC, ps.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT 
+    0 AS UserId,
+    'No Users' AS DisplayName,
+    COUNT(*) AS TotalBadgeClass,
+    NULL AS PostCount,
+    NULL AS AvgVoteScore,
+    NULL AS Title,
+    NULL AS Score,
+    NULL AS CreationDate,
+    NULL AS AnswerCount,
+    NULL AS LinkedPostId
+FROM Badges
+WHERE UserId IS NULL
+ORDER BY 1;

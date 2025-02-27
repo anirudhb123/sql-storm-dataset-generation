@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_within_region
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        r.r_regionkey,
+        SUM(total_supply_cost) AS total_cost_by_region
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.n_nationkey)
+    WHERE 
+        rs.rank_within_region <= 10
+    GROUP BY 
+        r.r_name, r.r_regionkey
+)
+SELECT 
+    h.region_name,
+    h.total_cost_by_region,
+    COALESCE((
+        SELECT 
+            COUNT(DISTINCT c.c_custkey) 
+        FROM 
+            customer c 
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey 
+        WHERE 
+            o.o_orderstatus = 'O' AND 
+            o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    ), 0) AS active_customers_last_year
+FROM 
+    HighValueSuppliers h
+ORDER BY 
+    h.total_cost_by_region DESC;

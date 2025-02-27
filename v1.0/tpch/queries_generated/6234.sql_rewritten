@@ -1,0 +1,67 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_type
+)
+
+SELECT 
+    co.c_name AS customer_name,
+    ns.n_name AS nation_name,
+    pd.p_name AS part_name,
+    pd.total_quantity_sold,
+    co.total_spent,
+    ns.total_supply_cost
+FROM 
+    CustomerOrders co
+JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    NationSupplier ns ON n.n_nationkey = ns.n_nationkey
+JOIN 
+    PartsDetails pd ON pd.total_quantity_sold > 10
+WHERE 
+    co.total_spent > 1000
+ORDER BY 
+    ns.total_supply_cost DESC, co.order_count DESC, co.total_spent DESC
+LIMIT 50;

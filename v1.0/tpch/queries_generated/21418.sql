@@ -1,0 +1,70 @@
+WITH RankedSupp AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.n_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        region r
+    JOIN 
+        RankedSupp rs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_suppkey) 
+    WHERE 
+        rs.SupplierRank <= 3
+),
+AccountInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE WHEN c.c_acctbal IS NULL THEN 'Unknown' ELSE 'Known' END AS BalanceState
+    FROM 
+        customer c
+),
+OrderDetail AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalPrice,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    a.c_name,
+    CASE 
+        WHEN t.s_name IS NOT NULL THEN t.s_name 
+        ELSE 'No Supplier' 
+    END AS SupplierName,
+    COUNT(DISTINCT o.o_orderkey) AS NumberOfOrders,
+    SUM(COALESCE(a.c_acctbal, 0)) AS TotalAccountBalance,
+    STRING_AGG(DISTINCT a.BalanceState || ' - ' || a.c_acctbal::TEXT, '; ') AS AccountStates
+FROM 
+    AccountInfo a
+LEFT JOIN 
+    OrderDetail o ON a.c_custkey = o.o_custkey
+LEFT JOIN 
+    TopSuppliers t ON a.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = t.s_suppkey))
+GROUP BY 
+    a.c_name, t.s_name
+HAVING 
+    SUM(COALESCE(a.c_acctbal, 0)) > (SELECT AVG(s.s_acctbal) FROM supplier s)
+ORDER BY 
+    TotalAccountBalance DESC NULLS LAST
+LIMIT 100 OFFSET 10;

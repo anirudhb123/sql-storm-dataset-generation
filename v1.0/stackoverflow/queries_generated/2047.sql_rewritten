@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank,
+        COALESCE(U.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+), PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate AS HistoryDate,
+        PHT.Name AS ChangeType,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS ChangeRank
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PH.CreationDate AS ClosedDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    RP.ScoreRank,
+    COALESCE(PHD.UserDisplayName, 'No Changes') AS LastEditor,
+    COALESCE(PHD.HistoryDate, P.CreationDate) AS LastChangeDate,
+    CASE 
+        WHEN CP.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    RV.VoteCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.PostId = PHD.PostId AND PHD.ChangeRank = 1
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS VoteCount
+     FROM Votes
+     GROUP BY PostId) RV ON RP.PostId = RV.PostId
+WHERE 
+    RP.ScoreRank <= 5
+ORDER BY 
+    RP.CreationDate DESC;

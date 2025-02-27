@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(o.o_comment, '; ') AS comments
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+PartShipping AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_shipmode,
+        CASE 
+            WHEN l.l_shipdate < l.l_commitdate THEN 'Early'
+            WHEN l.l_shipdate = l.l_commitdate THEN 'On Time'
+            ELSE 'Late'
+        END AS shipping_status
+    FROM 
+        lineitem l
+),
+FinalReport AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        p.p_brand,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        SUM(CASE WHEN ps.ps_availqty > 0 THEN ps.ps_supplycost ELSE NULL END) AS total_available_cost,
+        MAX(CASE WHEN rnk = 1 THEN s.s_name END) AS top_supplier
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSuppliers s ON ps.ps_partkey = s.ps_partkey
+    LEFT JOIN 
+        CustomerStats c ON c.total_orders > 5
+    GROUP BY 
+        ps.ps_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.p_brand,
+    f.unique_customers,
+    f.total_available_cost,
+    f.top_supplier,
+    r.r_name,
+    NVL(CASE WHEN f.total_available_cost > 1000 THEN 'Profitable' ELSE 'Check Supply' END, 'Unknown') AS profitability_status
+FROM 
+    FinalReport f
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT MIN(c.c_nationkey) FROM customer c WHERE c.c_custkey = f.unique_customers))
+WHERE 
+    f.unique_customers > 0 
+    AND r.r_name IS NOT NULL
+ORDER BY 
+    f.total_available_cost DESC, f.unique_customers;

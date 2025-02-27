@@ -1,0 +1,47 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ak.name) AS actor_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS actor_count
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        a.production_year >= 2000
+        AND cn.country_code = 'USA'
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_name,
+        rm.actor_rank,
+        rm.actor_count
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.actor_count > 3
+)
+SELECT 
+    movie_title,
+    production_year,
+    STRING_AGG(actor_name, ', ') AS cast_list,
+    COUNT(actor_name) AS total_actors
+FROM 
+    filtered_movies
+GROUP BY 
+    movie_title, 
+    production_year
+ORDER BY 
+    production_year DESC, 
+    total_actors DESC;

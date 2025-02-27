@@ -1,0 +1,61 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        AVG(CAST(mi.info AS FLOAT)) AS avg_movie_info_length,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_in_year,
+        a.production_year
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON a.id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE 'summary%')
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.total_actors,
+        rm.avg_movie_info_length,
+        rm.rank_in_year
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank_in_year <= 5
+),
+most_common_keywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.total_actors,
+    fm.avg_movie_info_length,
+    STRING_AGG(DISTINCT mk.keyword || ' (' || mc.keyword_count || ')', ', ') AS keywords
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    most_common_keywords mc ON fm.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+JOIN 
+    movie_keyword mk ON fm.movie_title = (SELECT title FROM aka_title WHERE id = mk.movie_id)
+GROUP BY 
+    fm.movie_title, fm.production_year, fm.total_actors, fm.avg_movie_info_length
+ORDER BY 
+    fm.production_year DESC, fm.total_actors DESC;

@@ -1,0 +1,60 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS item_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        SUM(sd.total_net_profit) AS customer_total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        (SELECT ws_bill_customer_sk, ws_item_sk, ws_net_profit FROM web_sales) sd 
+    ON 
+        c.c_customer_sk = sd.ws_bill_customer_sk
+    GROUP BY 
+        c_customer_sk, cd_gender, cd_marital_status
+),
+TopCustomers AS (
+    SELECT 
+        cdm.cd_gender,
+        cdm.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cdm.cd_gender ORDER BY SUM(cdm.customer_total_net_profit) DESC) AS customer_rank,
+        SUM(cdm.customer_total_net_profit) AS total_profit
+    FROM 
+        CustomerData cdm
+    GROUP BY 
+        cdm.cd_gender, cdm.cd_marital_status
+    HAVING 
+        SUM(cdm.customer_total_net_profit) > 0
+)
+SELECT 
+    tcu.cd_gender,
+    tcu.cd_marital_status,
+    tcu.total_profit,
+    COALESCE(i.item_desc, 'Unknown Item') AS item_desc,
+    COALESCE(sd.total_quantity, 0) AS total_quantity_sold
+FROM 
+    TopCustomers tcu
+LEFT JOIN 
+    SalesData sd ON sd.item_rank = 1
+LEFT JOIN 
+    item i ON sd.ws_item_sk = i.i_item_sk
+WHERE 
+    tcu.customer_rank <= 10
+ORDER BY 
+    tcu.cd_gender, tcu.total_profit DESC
+LIMIT 100;

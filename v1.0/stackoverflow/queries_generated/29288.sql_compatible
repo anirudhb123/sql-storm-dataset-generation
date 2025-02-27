@@ -1,0 +1,79 @@
+
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        ARRAY_AGG(DISTINCT SUBSTR(p.Tags, POSITION('<' IN p.Tags)+1, POSITION('>' IN p.Tags)-POSITION('<' IN p.Tags)-1)) ) AS ExtractedTags,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        t.TagName, p.Id, p.CreationDate, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagPopularities AS (
+    SELECT 
+        ts.TagName,
+        COUNT(DISTINCT p.Id) AS NumberOfQuestions,
+        SUM(ts.ViewCount) AS TotalViews,
+        AVG(ts.AnswerCount) AS AverageAnswers,
+        AVG(ts.CommentCount) AS AverageComments,
+        SUM(ts.FavoriteCount) AS TotalFavorites
+    FROM 
+        TagStats ts
+    JOIN 
+        Posts p ON ts.Title = p.Title 
+    GROUP BY 
+        ts.TagName
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    t.TagName,
+    tp.NumberOfQuestions,
+    tp.TotalViews,
+    tp.AverageAnswers,
+    tp.AverageComments,
+    tp.TotalFavorites,
+    COUNT(DISTINCT c.Id) AS TotalComments
+FROM 
+    MostActiveUsers u
+JOIN 
+    TagPopularities tp ON u.PostCount > 10 
+JOIN 
+    Comments c ON c.PostId IN (SELECT p.Id FROM Posts p WHERE p.Title IN (
+        SELECT ts.Title FROM TagStats ts WHERE ts.ExtractedTags @> ARRAY[tp.TagName]
+    ))
+JOIN 
+    Tags t ON t.TagName = tp.TagName
+GROUP BY 
+    u.DisplayName, t.TagName, tp.NumberOfQuestions, tp.TotalViews, tp.AverageAnswers, tp.AverageComments, tp.TotalFavorites
+ORDER BY 
+    tp.TotalViews DESC
+LIMIT 20;

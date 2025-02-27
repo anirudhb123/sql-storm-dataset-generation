@@ -1,0 +1,63 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBountyAmount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+ActiveQuestions AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.AnswerCount,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, P.AnswerCount, P.ViewCount
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalBadges,
+    US.TotalBountyAmount,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    AQ.QuestionId,
+    AQ.Title AS QuestionTitle,
+    AQ.CreationDate AS QuestionCreationDate,
+    AQ.OwnerDisplayName AS QuestionOwner,
+    AQ.AnswerCount AS QuestionAnswerCount,
+    AQ.ViewCount AS QuestionViewCount,
+    AQ.CommentCount AS QuestionCommentCount
+FROM 
+    UserStats US
+LEFT JOIN 
+    ActiveQuestions AQ ON US.UserId = AQ.OwnerDisplayName
+ORDER BY 
+    US.TotalPosts DESC, US.TotalUpVotes DESC;

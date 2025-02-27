@@ -1,0 +1,129 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        UNNEST(string_to_array(Tags, '><'))
+),
+TagStats AS (
+    SELECT 
+        TagName,
+        SUM(TagCount) AS TotalTagCount
+    FROM 
+        PopularTags
+    GROUP BY 
+        TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        pp.PrevPostTitle,
+        pp.PrevPostViewCount,
+        pp.PrevPostScore
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            pp.Id,
+            pp.Title AS PrevPostTitle,
+            pp.ViewCount AS PrevPostViewCount,
+            pp.Score AS PrevPostScore
+        FROM 
+            Posts pp
+        WHERE 
+            pp.PostTypeId = 1 
+            AND pp.CreationDate < '2023-01-01'
+    ) pp ON pp.Id = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    ORDER BY 
+        p.CreationDate DESC
+),
+BenchmarkData AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ub.TotalBadges,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts r
+    JOIN 
+        Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = r.PostId)
+    LEFT JOIN 
+        UserBadges ub ON ub.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = r.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = r.PostId
+    WHERE 
+        r.rn = 1 
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, u.DisplayName, ub.TotalBadges, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+)
+SELECT
+    bd.PostId,
+    bd.Title,
+    bd.CreationDate,
+    bd.OwnerDisplayName,
+    bd.TotalBadges,
+    bd.GoldBadges,
+    bd.SilverBadges,
+    bd.BronzeBadges,
+    MAX(tp.TotalTagCount) AS MaxTagCount,
+    SUM(bd.UpVotes) AS TotalUps,
+    SUM(bd.DownVotes) AS TotalDowns,
+    COUNT(DISTINCT c.Id) AS UniqueCommentCount
+FROM 
+    BenchmarkData bd
+LEFT JOIN 
+    TagStats tp ON tp.TagName IN (
+        SELECT UNNEST(string_to_array(bd.Title, ' '))
+    )
+LEFT JOIN 
+    Comments c ON c.PostId = bd.PostId
+GROUP BY 
+    bd.PostId, bd.Title, bd.CreationDate, bd.OwnerDisplayName, bd.TotalBadges, bd.GoldBadges, bd.SilverBadges, bd.BronzeBadges
+ORDER BY 
+    bd.CreationDate DESC;

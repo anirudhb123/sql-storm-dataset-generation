@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Filter to only include posts from the last year
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        ISNULL(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        ISNULL(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        ISNULL(SUM(v.BountyAmount), 0) AS TotalBountyGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY 
+        u.Id
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditCount -- Not counting closed edits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+ComplexQuery AS (
+    SELECT 
+        rs.PostId,
+        rs.Title,
+        us.DisplayName,
+        us.Reputation,
+        COALESCE(pha.ClosedDate, 'Never') AS ClosedDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = rs.PostId) AS RelatedPostsCount,
+        MAX(ph.Text) AS LastPostHistoryAction
+    FROM 
+        RankedPosts rs
+    JOIN 
+        UserStats us ON rs.OwnerUserId = us.UserId
+    LEFT JOIN 
+        Comments c ON rs.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rs.PostId = v.PostId
+    LEFT JOIN 
+        PostHistoryAggregated pha ON rs.PostId = pha.PostId
+    LEFT JOIN 
+        PostHistory ph ON rs.PostId = ph.PostId
+    WHERE 
+        rs.UserPostRank = 1 -- Only the latest post per user
+    GROUP BY 
+        rs.PostId, rs.Title, us.DisplayName, us.Reputation, pha.ClosedDate
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes > 10 THEN 'Highly Upvoted'
+        WHEN UpVotes BETWEEN 5 AND 10 THEN 'Moderately Upvoted'
+        ELSE 'Low Upvotes'
+    END AS VoteCategory,
+    CASE 
+        WHEN ClosedDate = 'Never' AND Score > 5 THEN 'Active'
+        ELSE 'Inactive'
+    END AS PostStatus
+FROM 
+    ComplexQuery
+WHERE 
+    Reputation > 1000 -- Only include users with high reputation
+ORDER BY 
+    rs.Score DESC, us.Reputation DESC
+OPTION (MAXDOP 1); -- To benchmark performance on resource consumption

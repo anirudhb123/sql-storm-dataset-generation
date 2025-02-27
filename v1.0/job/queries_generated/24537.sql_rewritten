@@ -1,0 +1,50 @@
+WITH RecursiveActorMovies AS (
+    
+    SELECT 
+        ca.person_id,
+        at.movie_id,
+        a.name AS actor_name,
+        at.title AS movie_title,
+        f.production_year
+    FROM 
+        cast_info ca
+    JOIN aka_name a ON ca.person_id = a.person_id
+    JOIN aka_title at ON ca.movie_id = at.movie_id
+    JOIN title f ON at.movie_id = f.id
+    WHERE 
+        f.production_year >= 2000 
+        AND a.name IS NOT NULL
+
+    UNION ALL
+    
+    SELECT 
+        ra.person_id,
+        at.movie_id,
+        a.name AS actor_name,
+        at.title AS movie_title,
+        f.production_year
+    FROM 
+        cast_info ra
+    JOIN RecursiveActorMovies ram ON ra.movie_id = ram.movie_id
+    JOIN aka_name a ON ra.person_id = a.person_id
+    JOIN aka_title at ON ra.movie_id = at.movie_id
+    JOIN title f ON at.movie_id = f.id
+    WHERE 
+        f.production_year < ram.production_year
+)
+
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    ROW_NUMBER() OVER (PARTITION BY actor_name ORDER BY production_year DESC) AS movie_rank,
+    COUNT(*) OVER (PARTITION BY actor_name) AS total_movies,
+    COALESCE(NULLIF(SUBSTR(movie_title, 1, 3), ''), 'No Title') AS adjusted_title
+FROM 
+    RecursiveActorMovies
+WHERE 
+    actor_name IS NOT NULL 
+    AND movie_rank <= 5
+ORDER BY 
+    total_movies DESC, 
+    actor_name;

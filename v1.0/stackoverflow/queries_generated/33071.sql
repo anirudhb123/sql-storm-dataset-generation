@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+FinalOutput AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        u.DisplayName AS PostOwner,
+        rp.Score,
+        rp.CommentCount,
+        ur.Reputation AS OwnerReputation,
+        COALESCE(cp.UserDisplayName, 'Not Closed') AS ClosestPostUser,
+        COALESCE(cp.ClosedDate, 'N/A') AS ClosedPostDate,
+        COALESCE(cp.Comment, 'No Comments') AS CloseComment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        ClosedPosts cp ON rp.Id = cp.ClosedPostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN OwnerReputation < 100 THEN 'Newbie'
+        WHEN OwnerReputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+        ELSE 'Expert'
+    END AS UserLevel,
+    CONCAT('Post Title: ', Title, ' | Score: ', Score) AS PostDetails
+FROM 
+    FinalOutput
+WHERE 
+    CommentCount > 5 OR ClosestPostUser <> 'Not Closed'
+ORDER BY 
+    Score DESC, CreationDate DESC;

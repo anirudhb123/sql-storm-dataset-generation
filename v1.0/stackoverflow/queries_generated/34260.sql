@@ -1,0 +1,74 @@
+WITH RECURSIVE UserBadgeCount AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, B.Class
+),
+BadgeDistribution AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        SUM(CASE WHEN Class = 1 THEN BadgeCount ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN BadgeCount ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN BadgeCount ELSE 0 END) AS BronzeBadges
+    FROM UserBadgeCount
+    GROUP BY UserId, DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS QuestionRank
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Only questions
+),
+UserQuestionStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(TQ.QuestionCount, 0) AS TotalQuestions,
+        COALESCE(SUM(TQ.Score), 0) AS TotalScore,
+        COALESCE(SUM(TQ.ViewCount), 0) AS TotalViews,
+        COALESCE(BD.GoldBadges, 0) AS GoldBadges,
+        COALESCE(BD.SilverBadges, 0) AS SilverBadges,
+        COALESCE(BD.BronzeBadges, 0) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(Id) AS QuestionCount,
+            SUM(Score) AS Score,
+            SUM(ViewCount) AS ViewCount
+        FROM Posts
+        WHERE PostTypeId = 1 -- Only questions
+        GROUP BY OwnerUserId
+    ) TQ ON U.Id = TQ.OwnerUserId
+    LEFT JOIN BadgeDistribution BD ON U.Id = BD.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+FinalRanking AS (
+    SELECT 
+        UQS.*,
+        RANK() OVER (ORDER BY TotalScore DESC, TotalViews DESC) AS RankByScoreAndViews
+    FROM UserQuestionStatistics UQS
+)
+SELECT 
+    FR.UserId,
+    FR.DisplayName,
+    FR.TotalQuestions,
+    FR.TotalScore,
+    FR.TotalViews,
+    FR.GoldBadges,
+    FR.SilverBadges,
+    FR.BronzeBadges,
+    FR.RankByScoreAndViews
+FROM FinalRanking FR
+WHERE FR.RankByScoreAndViews <= 10 -- Top 10 users
+ORDER BY FR.RankByScoreAndViews;

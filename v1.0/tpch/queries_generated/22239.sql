@@ -1,0 +1,88 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        AVG(ps.ps_supplycost) > (
+            SELECT 
+                AVG(ps2.ps_supplycost) 
+            FROM 
+                partsupp ps2
+        )
+),
+OrdersWithMultiLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_linenumber) > 1
+),
+FilteredRegions AS (
+    SELECT  
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    WHERE 
+        r.r_name LIKE '%East%'
+    GROUP BY 
+        r.r_regionkey
+    HAVING 
+        COUNT(DISTINCT n.n_nationkey) > 0
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ss.s_name,
+    o.o_orderkey,
+    o.line_count,
+    r.r_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_quantity * l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    HighValueParts p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    RankedSuppliers ss ON ps.ps_suppkey = ss.s_suppkey
+JOIN 
+    OrdersWithMultiLineItems o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    FilteredRegions r ON r.r_regionkey = ss.s_nationkey
+WHERE 
+    (ss.s_acctbal > 1000 OR ss.s_name IS NULL) 
+AND 
+    l.l_discount > (SELECT AVG(l2.l_discount) FROM lineitem l2 WHERE l2.l_shipdate IS NOT NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, ss.s_name, o.o_orderkey, o.line_count, r.r_name
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

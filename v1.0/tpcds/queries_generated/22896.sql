@@ -1,0 +1,54 @@
+
+WITH RecursiveSales AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity, 
+           SUM(ws_ext_sales_price) AS total_sales 
+    FROM web_sales 
+    WHERE ws_sold_date_sk BETWEEN 1 AND 1000 
+    GROUP BY ws_item_sk
+),
+FilteredSales AS (
+    SELECT rv.ws_item_sk, 
+           rv.total_quantity, 
+           rv.total_sales, 
+           cd.cd_gender,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY rv.total_sales DESC) AS rank_gender 
+    FROM RecursiveSales rv
+    JOIN customer c ON rv.ws_item_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT c.c_customer_id, 
+           COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status, 
+           COUNT(rv.ws_item_sk) AS item_count 
+    FROM customer c 
+    LEFT JOIN web_sales rv ON c.c_customer_sk = rv.ws_bill_customer_sk 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    WHERE cd.cd_purchase_estimate > 3000 
+      AND (cd.cd_dep_count IS NULL OR cd.cd_dep_count > 2) 
+    GROUP BY c.c_customer_id, marital_status 
+    HAVING COUNT(rv.ws_item_sk) > 5 
+),
+AggregatedReturns AS (
+    SELECT sr_customer_sk, 
+           COUNT(DISTINCT sr_ticket_number) AS total_returns, 
+           SUM(sr_return_amt) AS total_return_amount 
+    FROM store_returns 
+    GROUP BY sr_customer_sk
+),
+FinalResults AS (
+    SELECT fs.c_customer_id, 
+           fs.marital_status, 
+           COALESCE(ar.total_returns, 0) AS total_returns,
+           ar.total_return_amount, 
+           fs.item_count,
+           COALESCE(ar.total_return_amount / NULLIF(fs.item_count, 0), 0) AS return_per_item 
+    FROM HighValueCustomers fs 
+    LEFT JOIN AggregatedReturns ar ON fs.c_customer_id = ar.sr_customer_sk
+)
+SELECT customer_id, marital_status, total_returns, 
+       total_return_amount, item_count, return_per_item 
+FROM FinalResults 
+WHERE return_per_item > (SELECT AVG(return_per_item) FROM FinalResults)
+ORDER BY return_per_item DESC 
+LIMIT 10;

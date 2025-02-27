@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        CAST(NULL AS INTEGER) AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL   
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id 
+)
+
+SELECT 
+    mv.title AS movie_title,
+    mv.production_year,
+    COALESCE(p.name, 'Unknown') AS person_name,
+    c.role,
+    c.nr_order,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY mv.title) AS row_num,
+    CASE 
+        WHEN c.nr_order IS NULL THEN 'No Order'
+        ELSE 'Order: ' || c.nr_order::text 
+    END AS order_description,
+    CASE
+        WHEN mv.kind_id IN (1, 2, 3) THEN 'Feature Film'
+        ELSE 'Other'
+    END AS movie_type
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON c.id = cc.subject_id
+LEFT JOIN 
+    aka_name p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+WHERE 
+    mv.production_year >= 1990
+    AND (p.name IS NOT NULL OR p.name IS NOT NULL)
+GROUP BY 
+    mv.title, mv.production_year, person_name, c.role, c.nr_order
+ORDER BY 
+    mv.production_year DESC, mv.title ASC;

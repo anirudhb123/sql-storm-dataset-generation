@@ -1,0 +1,89 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 3
+),
+MovieAnalytics AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        movie_keyword k ON m.movie_id = k.movie_id
+    GROUP BY 
+        m.movie_id
+),
+CommonMovieDetails AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        ma.total_cast,
+        ma.total_keywords
+    FROM 
+        aka_title m
+    JOIN 
+        MovieAnalytics ma ON m.id = ma.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_cast > 5 THEN 'Large Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        CommonMovieDetails 
+    WHERE 
+        production_year > 2000 
+        AND total_cast IS NOT NULL 
+        AND (total_keywords = 0 OR total_keywords IS NULL OR total_keywords > 2)
+)
+SELECT 
+    f.actor_name,
+    f.movie_title,
+    f.production_year,
+    f.cast_size,
+    COALESCE(cn.name, 'Unknown Company') AS company_name,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword
+FROM 
+    TopMovies f
+LEFT JOIN 
+    movie_companies mc ON f.movie_title = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON f.movie_title = mk.movie_id
+WHERE 
+    EXISTS (SELECT 1 
+            FROM movie_info mi 
+            WHERE mi.movie_id = f.movie_title 
+              AND mi.info ILIKE '%award%'
+              AND (mi.note IS NULL OR mi.note NOT LIKE '%pending%'))
+ORDER BY 
+    f.production_year DESC, 
+    f.actor_name ASC;

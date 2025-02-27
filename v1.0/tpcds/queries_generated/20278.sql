@@ -1,0 +1,57 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+), low_sales AS (
+    SELECT
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price
+    FROM catalog_sales
+    WHERE cs_sales_price < (SELECT AVG(ws_sales_price) FROM ranked_sales)
+), store_sales_summary AS (
+    SELECT
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_store_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_tickets
+    FROM store_sales
+    GROUP BY ss_store_sk
+), daily_returns AS (
+    SELECT
+        wr_returned_date_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity
+    FROM web_returns
+    GROUP BY wr_returned_date_sk
+), return_band AS (
+    SELECT
+        wb.hd_income_band_sk,
+        SUM(wb.hd_dep_count) AS total_deps,
+        COUNT(DISTINCT wb.hd_demo_sk) AS demographic_count
+    FROM household_demographics AS wb
+    JOIN income_band AS ib ON wb.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE wb.hd_buy_potential = 'High'
+    GROUP BY wb.hd_income_band_sk
+)
+SELECT
+    ca.ca_city,
+    COALESCE(s.total_store_profit, 0) AS total_profit_by_city,
+    COALESCE(d.total_returned_quantity, 0) AS total_returns_by_date,
+    rb.hd_income_band_sk,
+    SUM(rb.total_deps) AS total_dependencies,
+    SUM(rb.demographic_count) AS total_demographics,
+    CASE
+        WHEN SUM(rb.total_deps) > 0 THEN 'High Dependency'
+        ELSE 'Low Dependency'
+    END AS dependency_status
+FROM customer_address AS ca
+LEFT JOIN store_sales_summary AS s ON ca.ca_city = s.ss_store_sk
+LEFT JOIN daily_returns AS d ON d.wr_returned_date_sk = CAST(CURRENT_DATE AS INTEGER)
+LEFT JOIN return_band AS rb ON rb.hd_income_band_sk IS NOT NULL
+WHERE ca.ca_state IN ('CA', 'NY') OR ca.ca_country IS NULL
+GROUP BY ca.ca_city, s.total_store_profit, d.total_returned_quantity, rb.hd_income_band_sk
+ORDER BY total_profit_by_city DESC, total_returns_by_date ASC;

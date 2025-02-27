@@ -1,0 +1,60 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS depth
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN '2021-01-01' AND CURRENT_DATE
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.depth + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_custkey = oh.o_orderkey 
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE NULL END) AS avg_returned_price,
+    STRING_AGG(DISTINCT DISTINCT p.p_name, ', ') FILTER (WHERE p.p_size >= 10) AS large_parts,
+    SUM(CASE 
+            WHEN (l.l_shipdate IS NULL OR l.l_shipinstruct LIKE '%DIRECT%') 
+                 AND l.l_linestatus = 'F' THEN l.l_quantity 
+            ELSE 0 END) AS conditional_quantity,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p.p_retailprice) OVER (PARTITION BY r.r_name) AS median_part_price
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON l.l_orderkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderHierarchy oh ON oh.o_orderkey = l.l_orderkey
+WHERE 
+    n.n_name LIKE 'A%' OR n.n_comment IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(l.l_tax) > 1000 AND COUNT(DISTINCT o_orderkey) > 5 
+ORDER BY 
+    total_revenue DESC 
+LIMIT 10;

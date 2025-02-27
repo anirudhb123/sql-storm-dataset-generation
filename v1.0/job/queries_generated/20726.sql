@@ -1,0 +1,93 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        t.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.id = t.id
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+
+-- CTE to capture the highest rated movies based on a hypothetical rating system
+high_rated_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        AVG(coalesce(r.rating, 0)) AS avg_rating
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_info r ON m.movie_id = r.movie_id AND r.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+    HAVING 
+        AVG(coalesce(r.rating, 0)) > 8
+),
+
+-- CTE to find the actors who appear in the top rated movies
+top_actor_info AS (
+    SELECT 
+        n.name,
+        c.person_id,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        name n
+    JOIN 
+        cast_info c ON n.imdb_id = c.person_id
+    JOIN 
+        high_rated_movies m ON c.movie_id = m.movie_id
+    GROUP BY 
+        n.name, c.person_id
+    HAVING 
+        COUNT(c.movie_id) > 3
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    ra.name,
+    ra.movie_count,
+    t.year_rank,
+    CASE 
+        WHEN t.year_rank IS NOT NULL THEN 'In Top Movies'
+        ELSE 'Not in Top Movies' 
+    END AS movie_rank_status
+FROM 
+    high_rated_movies t
+JOIN 
+    top_actor_info ra ON ra.movie_count > 3
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    t.production_year DESC, 
+    ra.movie_count DESC;
+
+-- Including null checks in predicates
+SELECT 
+    DISTINCT title.title AS movie_title,
+    coalesce(cast_count, 0) AS total_cast,
+    CASE 
+        WHEN title.production_year IS NULL THEN 'Year Unknown'
+        ELSE title.production_year::text 
+    END AS production_year
+FROM 
+    title
+LEFT JOIN 
+    (SELECT movie_id, COUNT(person_id) AS cast_count
+     FROM cast_info
+     WHERE person_role_id IS NOT NULL
+     GROUP BY movie_id) cast_summary
+ON title.id = cast_summary.movie_id
+WHERE 
+    title.production_year IS NOT NULL 
+    AND (title.kind_id IS NULL OR title.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Drama%'))
+ORDER BY 
+    total_cast DESC NULLS LAST;

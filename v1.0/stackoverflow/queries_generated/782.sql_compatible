@@ -1,0 +1,77 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(ph.EditCount, 0) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6) 
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.UpVoteCount,
+        pd.DownVoteCount,
+        pd.EditCount,
+        ur.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY pd.Score ORDER BY ur.Reputation DESC) AS ReputationRanking
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserReputation ur ON pd.Score > 0
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.EditCount,
+    tp.Reputation,
+    ur.ReputationRank
+FROM 
+    TopPosts tp
+JOIN
+    UserReputation ur ON tp.Reputation = ur.Reputation
+WHERE 
+    tp.Reputation > 1000
+    AND tp.ReputationRanking <= 5
+ORDER BY 
+    tp.Score DESC, tp.CreationDate ASC;

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE income_calculation AS (
+    SELECT
+        h.hd_demo_sk,
+        h.hd_income_band_sk,
+        (COALESCE(hd.hd_dep_count, 0) + COALESCE(hd.hd_vehicle_count, 0)) AS total_relationships,
+        ROW_NUMBER() OVER (PARTITION BY h.hd_income_band_sk ORDER BY (COALESCE(hd.hd_dep_count, 0) + COALESCE(hd.hd_vehicle_count, 0)) DESC) AS rank
+    FROM
+        household_demographics h
+    LEFT JOIN
+        (SELECT
+            demo_sk,
+            SUM(dep_count) AS hd_dep_count,
+            SUM(vehicle_count) AS hd_vehicle_count
+         FROM
+            household_demographics
+         GROUP BY
+            demo_sk) hd ON h.hd_demo_sk = hd.demo_sk
+    
+    UNION ALL
+    
+    SELECT
+        h.hd_demo_sk,
+        h.hd_income_band_sk,
+        (c.cd_dep_count + CASE WHEN c.cd_dep_employed_count IS NULL THEN 0 ELSE c.cd_dep_employed_count END) AS total_relationships,
+        ROW_NUMBER() OVER (PARTITION BY h.hd_income_band_sk ORDER BY (c.cd_dep_count + COALESCE(c.cd_dep_employed_count, 0)) DESC) AS rank
+    FROM
+        household_demographics h
+    JOIN
+        customer_demographics c ON h.hd_demo_sk = c.cd_demo_sk
+    WHERE
+        h.hd_income_band_sk IS NOT NULL
+),
+ranked_income AS (
+    SELECT *,
+        CASE
+            WHEN total_relationships > 10 THEN 'High'
+            WHEN total_relationships BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS income_category
+    FROM
+        income_calculation
+)
+SELECT
+    r.hd_income_band_sk,
+    COUNT(DISTINCT r.hd_demo_sk) AS total_households,
+    MAX(coalesce(r.total_relationships, 0)) AS max_relationships,
+    MIN(coalesce(r.total_relationships, 0)) AS min_relationships,
+    AVG(r.total_relationships) AS avg_relationships,
+    STRING_AGG(DISTINCT r.income_category ORDER BY r.income_category) AS categories
+FROM
+    ranked_income r
+LEFT JOIN
+    web_sales ws ON ws.ws_ship_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_birth_country IS NULL)
+LEFT JOIN
+    date_dim d ON d.d_date_sk = ws.ws_ship_date_sk
+WHERE
+    d.d_year = 2023
+GROUP BY
+    r.hd_income_band_sk
+HAVING
+    COUNT(DISTINCT r.hd_demo_sk) > 1
+ORDER BY
+    r.hd_income_band_sk;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.level + 1
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON co.c_custkey = c.c_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+AggregatedOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartPricing AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name, 
+           ps.ps_supplycost, ps.ps_availqty,
+           COALESCE(NULLIF(s.s_acctbal, 0), 1) AS adjusted_acctbal
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerSupplierOrders AS (
+    SELECT co.c_custkey, co.c_name, sp.p_name, sp.ps_supplycost,
+           COALESCE(sp.ps_availqty, 0) AS available_qty
+    FROM CustomerOrders co
+    JOIN SupplierPartPricing sp ON co.o_orderkey = sp.p_partkey
+    WHERE sp.ps_supplycost > (SELECT AVG(ps_supplycost)
+                               FROM SupplierPartPricing)
+)
+SELECT c.c_name, COUNT(DISTINCT cs.o_orderkey) AS order_count,
+       SUM(cs.ps_supplycost) AS total_cost,
+       AVG(cs.available_qty) AS avg_avail_qty,
+       MAX(cs.available_qty) AS max_avail_qty,
+       STRING_AGG(DISTINCT cs.p_name, ', ') AS part_names
+FROM customer c
+LEFT JOIN CustomerSupplierOrders cs ON c.c_custkey = cs.c_custkey
+GROUP BY c.c_name
+HAVING SUM(cs.ps_supplycost) > 1000
+ORDER BY total_cost DESC
+LIMIT 10;

@@ -1,0 +1,80 @@
+
+WITH CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+SupplierInformation AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    pi.nation_name,
+    COALESCE(cc.order_count, 0) AS customer_order_count,
+    psd.total_avail_qty,
+    psd.avg_supply_cost,
+    (SELECT COUNT(DISTINCT o.o_orderkey) 
+     FROM orders o 
+     WHERE o.o_orderstatus = 'F' 
+       AND o.o_totalprice > 1000) AS total_high_value_orders
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierDetails psd ON p.p_partkey = psd.ps_partkey
+LEFT JOIN 
+    SupplierInformation si ON si.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost ASC 
+        FETCH FIRST 1 ROW ONLY
+    )
+LEFT JOIN 
+    CustomerOrderCounts cc ON cc.c_custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey = p.p_partkey 
+        FETCH FIRST 1 ROW ONLY
+    )
+LEFT JOIN 
+    nation n ON si.nation_name = n.n_name 
+WHERE 
+    p.p_size BETWEEN 10 AND 50
+  AND 
+    (n.r_regionkey IS NULL OR n.r_regionkey = 1)
+GROUP BY 
+    p.p_name, 
+    p.p_mfgr, 
+    pi.nation_name, 
+    cc.order_count, 
+    psd.total_avail_qty, 
+    psd.avg_supply_cost
+ORDER BY 
+    customer_order_count DESC, 
+    avg_supply_cost DESC;

@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_number,
+    COUNT(DISTINCT l.l_linenumber) AS line_item_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(s.s_comment, ' ', 5), ' ', -5) AS supplier_comment_excerpt,
+    CONCAT('Part: ', p.p_name, ' | Customer: ', c.c_name, ' | Order: ', o.o_orderkey) AS order_summary
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    LENGTH(s.s_comment) > 15 AND
+    o.o_orderdate >= DATE '1997-01-01' AND 
+    o.o_orderdate < DATE '1997-12-31'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey
+HAVING 
+    total_revenue > 5000
+ORDER BY 
+    total_revenue DESC, part_name ASC;

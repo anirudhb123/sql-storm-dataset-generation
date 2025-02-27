@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.series_years IN ('1951-1961', '1970-1971', '1970-1976', '1978-1997', '1982-1986', '1985-1985', '1988-2009', '1990-2006', '1995-????') AND it1.info > 'LD length' AND mi.info < 'Iran:November 1999' AND ci.person_role_id > 2387096 AND n.gender LIKE '%f%' AND n.md5sum > '21ef75ca7875d0d03ca8f7a9efbebe7f';

@@ -1,0 +1,39 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.CreationDate)) / 60) AS AvgPostAge
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        QuestionCount, 
+        AnswerCount, 
+        UpVotes, 
+        DownVotes, 
+        AvgPostAge,
+        RANK() OVER (ORDER BY QuestionCount DESC, AnswerCount DESC) AS Rank
+    FROM UserActivity
+)
+SELECT 
+    tu.DisplayName,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.UpVotes,
+    tu.DownVotes,
+    tu.AvgPostAge,
+    RANK() OVER (ORDER BY AVG(NULLIF(tu.UpVotes::FLOAT / NULLIF(tu.QuestionCount + tu.AnswerCount, 0), 0)) DESC) AS EngagementRank
+FROM TopUsers tu
+WHERE tu.Rank <= 10
+ORDER BY tu.UpVotes DESC, tu.AnswerCount DESC;

@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           NULL::integer AS parent_id, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           mh.movie_id AS parent_id, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON m.id = ml.linked_movie_id
+),
+ranked_cast AS (
+    SELECT ci.movie_id, ak.name AS actor_name, 
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+),
+cast_summary AS (
+    SELECT mc.movie_id, 
+           COUNT(*) AS total_actors,
+           STRING_AGG(DISTINCT rc.actor_name, ', ') AS actors
+    FROM movie_companies mc
+    JOIN ranked_cast rc ON mc.movie_id = rc.movie_id
+    GROUP BY mc.movie_id
+),
+production_year_summary AS (
+    SELECT production_year, 
+           COUNT(DISTINCT movie_id) AS movie_count,
+           AVG(total_actors) AS average_actors_per_movie
+    FROM cast_summary cs
+    JOIN aka_title a ON cs.movie_id = a.id
+    GROUP BY production_year
+)
+
+SELECT py.production_year,
+       py.movie_count,
+       py.average_actors_per_movie,
+       (SELECT COUNT(DISTINCT mc.company_id)
+        FROM movie_companies mc
+        WHERE mc.movie_id IN (SELECT movie_id FROM cast_summary cs WHERE cs.total_actors > 5)
+       ) AS total_companies_with_more_than_5_actors,
+       mh.title AS parent_movie
+FROM production_year_summary py
+LEFT JOIN movie_hierarchy mh ON py.production_year = mh.production_year
+WHERE py.movie_count > 3
+ORDER BY py.production_year DESC, py.movie_count DESC;
+
+This SQL query contains various interesting constructs:
+- A recursive CTE `movie_hierarchy` is used for retrieving movies released since 2000 and their hierarchy regarding linked movies.
+- The `ranked_cast` CTE ranks actors in each movie based on their order in the cast.
+- The `cast_summary` CTE aggregates the total number of actors and a list of their names for each movie.
+- The `production_year_summary` CTE summarizes data based on production year, including the number of movies and average actors per movie.
+- The final select statement combines results from multiple CTEs, using a correlated subquery to count the number of companies linked to movies with more than five actors, and applies a NULL logic with an outer join to retrieve parent movie titles when available. 
+- Additionally, it uses string aggregation and incorporates filtering criteria with complex predicates.
+

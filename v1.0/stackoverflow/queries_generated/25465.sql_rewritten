@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedQuestions,
+        STRING_AGG(DISTINCT t.Tag, ', ') AS PopularTags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        TagStatistics t ON t.Tag = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostInfo AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        t.Tag
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><') AS t ON true
+    WHERE 
+        rp.RecentPostRank = 1
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.QuestionCount,
+    ups.UpvotedQuestions,
+    GROUP_CONCAT(DISTINCT rpi.Title || ' (' || rpi.CreationDate || ') - Managed by: ' || rpi.OwnerDisplayName) AS RecentPosts,
+    ups.PopularTags
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentPostInfo rpi ON ups.UserId = rpi.OwnerUserId
+GROUP BY 
+    ups.UserId, ups.DisplayName, ups.QuestionCount, ups.UpvotedQuestions, ups.PopularTags
+ORDER BY 
+    ups.QuestionCount DESC, 
+    ups.UpvotedQuestions DESC;

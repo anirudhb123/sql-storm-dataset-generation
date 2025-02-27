@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = 1  -- Assume 1 represents 'movie'
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        m.kind_id = 1
+),
+cast_details AS (
+    SELECT
+        ci.movie_id,
+        STRING_AGG(DISTINCT concat(an.name, ' as ', rt.role), ', ') AS cast_list,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        MAX(CASE WHEN ci.nr_order = 1 THEN an.name END) AS lead_actor
+    FROM
+        cast_info ci
+    JOIN
+        aka_name an ON ci.person_id = an.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id
+),
+movie_info_and_keywords AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mi.info_type_id) AS info_count
+    FROM
+        movie_info mi
+    LEFT JOIN
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    GROUP BY
+        mi.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    cd.cast_list,
+    cd.total_cast,
+    cd.lead_actor,
+    mk.keywords,
+    mk.info_count
+FROM
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_info_and_keywords mk ON mh.movie_id = mk.movie_id
+WHERE
+    mh.production_year >= 2000  -- Filter for movies produced after 2000
+ORDER BY
+    mh.production_year DESC,
+    cd.total_cast DESC,
+    mh.movie_title ASC;

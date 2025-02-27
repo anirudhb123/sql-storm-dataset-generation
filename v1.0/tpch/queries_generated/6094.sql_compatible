@@ -1,0 +1,31 @@
+
+WITH top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 10
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) 
+    AND o.o_orderdate >= DATE '1996-01-01'
+),
+detailed_report AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, s.s_name, li.l_quantity, li.l_extendedprice, li.l_discount, li.l_tax
+    FROM high_value_orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN supplier s ON li.l_suppkey = s.s_suppkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+)
+SELECT r.r_name, COUNT(DISTINCT dr.o_orderkey) AS num_orders, 
+       SUM(dr.l_extendedprice * (1 - dr.l_discount)) AS revenue
+FROM detailed_report dr
+JOIN nation n ON dr.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN top_suppliers ts ON dr.s_name = ts.s_name
+GROUP BY r.r_name
+ORDER BY revenue DESC;

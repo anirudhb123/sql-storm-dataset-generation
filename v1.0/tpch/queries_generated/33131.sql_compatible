@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+supplier_part AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    ss.c_name AS customer_name,
+    sp.s_name AS supplier_name,
+    sp.p_name AS part_name,
+    ss.total_sales,
+    sp.ps_availqty,
+    CASE 
+        WHEN sp.ps_availqty IS NULL THEN 'No supply available'
+        ELSE 'Supply available'
+    END AS supply_status,
+    COUNT(o.o_orderkey) OVER (PARTITION BY ss.c_custkey) AS order_count
+FROM 
+    sales_summary ss
+FULL OUTER JOIN 
+    supplier_part sp ON ss.c_custkey = sp.s_suppkey
+LEFT JOIN 
+    orders o ON ss.c_custkey = o.o_custkey
+WHERE 
+    ss.total_sales > 1000 OR sp.ps_supplycost < 20
+ORDER BY 
+    ss.total_sales DESC, sp.ps_supplycost ASC;

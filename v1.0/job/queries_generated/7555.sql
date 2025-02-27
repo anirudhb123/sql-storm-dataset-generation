@@ -1,0 +1,41 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS role_type,
+    ci.note AS cast_note,
+    m.info AS movie_description,
+    kv.keyword AS movie_keyword,
+    cn.name AS production_company,
+    k.kind AS movie_kind,
+    ti.info AS additional_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kv ON mk.keyword_id = kv.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    kind_type k ON t.kind_id = k.id
+JOIN 
+    movie_info_idx ti ON t.id = ti.movie_id
+WHERE 
+    t.production_year > 2000
+ORDER BY 
+    t.production_year DESC, a.name ASC
+LIMIT 100;

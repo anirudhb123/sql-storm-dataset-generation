@@ -1,0 +1,14 @@
+
+SELECT 
+    CONCAT_WS(' ', 
+        LEFT(p.p_name, 15), 
+        SUBSTRING(p.p_comment, 1, 10), 
+        REPLACE(s.s_name, 'Supplier', 'Sup'))
+FROM 
+    products p
+JOIN 
+    suppliers s ON p.supplier_id = s.supplier_id
+GROUP BY 
+    p.p_name, 
+    p.p_comment, 
+    s.s_name;

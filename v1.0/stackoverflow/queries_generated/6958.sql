@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.Tags, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        tp.CreationDate,
+        tp.Tags,
+        tp.OwnerDisplayName,
+        tp.CommentCount,
+        COALESCE(pht.Comment, '') AS LastEditComment,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostHistory ph ON tp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) -- Edit Title or Edit Body
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.CreationDate, tp.Tags, tp.OwnerDisplayName, tp.CommentCount, pht.Comment
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.CreationDate,
+    pd.Tags,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.LastEditComment,
+    pd.LastEditDate
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

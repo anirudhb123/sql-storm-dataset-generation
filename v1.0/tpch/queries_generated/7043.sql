@@ -1,0 +1,56 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+TotalSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        c.c_name AS customer_name,
+        oo.o_totalprice,
+        ts.total_sales
+    FROM 
+        RankedOrders oo
+    INNER JOIN 
+        customer c ON oo.rank_order = 1 AND c.c_custkey = oo.o_orderkey
+    INNER JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    INNER JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    INNER JOIN 
+        TotalSales ts ON ts.l_orderkey = oo.o_orderkey
+    WHERE 
+        ts.total_sales > 50000
+)
+SELECT 
+    tc.region_name,
+    tc.nation_name,
+    tc.customer_name,
+    SUM(tc.o_totalprice) AS total_revenue,
+    COUNT(tc.o_orderkey) AS order_count
+FROM 
+    TopCustomers tc
+GROUP BY 
+    tc.region_name, tc.nation_name, tc.customer_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

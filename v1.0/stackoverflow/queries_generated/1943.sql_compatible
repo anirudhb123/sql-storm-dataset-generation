@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Users u
+        LEFT JOIN (
+            SELECT 
+                UserId, 
+                MAX(Class) AS Class
+            FROM 
+                Badges
+            GROUP BY 
+                UserId
+        ) b ON u.Id = b.UserId
+),
+ClosedPostCounts AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS ClosedPosts
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    ud.DisplayName,
+    ud.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(cpc.ClosedPosts, 0) AS ClosedPostsCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserDetails ud ON rp.PostRank = 1 AND ud.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPostCounts cpc ON ud.UserId = cpc.UserId
+WHERE 
+    rp.Score > 0
+ORDER BY 
+    ud.Reputation DESC, rp.Score DESC
+LIMIT 100;

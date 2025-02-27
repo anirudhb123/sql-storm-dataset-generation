@@ -1,0 +1,72 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        0 AS Level
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        Level + 1
+    FROM Users u
+    JOIN UserReputationCTE ur ON u.UpVotes > 0 AND u.Reputation < ur.Reputation
+    WHERE Level < 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13)
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rp.PostId, 0) AS RecentPostId,
+    COALESCE(rp.Title, 'No Recent Post') AS RecentPostTitle,
+    COALESCE(rp.ViewCount, 0) AS RecentPostViewCount,
+    COALESCE(rp.Score, 0) AS RecentPostScore,
+    (SELECT STRING_AGG(tt.TagName, ', ') FROM TopTags tt) AS TopTags,
+    (SELECT COUNT(DISTINCT phd.PostId) FROM PostHistoryDetails phd WHERE phd.UserDisplayName = u.DisplayName AND phd.rn = 1) AS RecentHistoryCount
+FROM Users u
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId
+JOIN UserReputationCTE ur ON u.Id = ur.UserId
+WHERE u.Reputation > 100
+ORDER BY u.Reputation DESC, ur.Level ASC;

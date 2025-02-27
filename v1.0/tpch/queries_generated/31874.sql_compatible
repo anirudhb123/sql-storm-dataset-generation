@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 100000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AggregatedSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, a.total_sales
+    FROM customer c
+    JOIN AggregatedSales a ON c.c_custkey = a.o_custkey
+    ORDER BY a.total_sales DESC
+    LIMIT 10
+)
+SELECT th.c_name, 
+       th.total_sales, 
+       COUNT(DISTINCT p.p_partkey) AS unique_parts,
+       AVG(s.s_acctbal) AS avg_sup_account
+FROM TopCustomers th
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+WHERE l.l_shipdate IS NOT NULL 
+  AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+GROUP BY th.c_name, th.total_sales
+HAVING COUNT(DISTINCT p.p_partkey) > 5
+ORDER BY th.total_sales DESC;

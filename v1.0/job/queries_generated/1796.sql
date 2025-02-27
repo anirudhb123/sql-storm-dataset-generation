@@ -1,0 +1,53 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movie_details AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title = (SELECT title FROM title WHERE id = mk.movie_id LIMIT 1)
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (SELECT id FROM title WHERE title = rm.title LIMIT 1)
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        rm.rank <= 10
+),
+final_output AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.company_name,
+        EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = (SELECT id FROM title WHERE title = md.title LIMIT 1) AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')) AS has_box_office_info
+    FROM 
+        movie_details md
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    fo.company_name,
+    CASE 
+        WHEN fo.has_box_office_info THEN 'Available' 
+        ELSE 'Not Available' 
+    END AS box_office_status
+FROM 
+    final_output fo
+ORDER BY 
+    fo.production_year DESC, fo.keyword;

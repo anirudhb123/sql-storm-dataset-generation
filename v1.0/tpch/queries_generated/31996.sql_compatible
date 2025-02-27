@@ -1,0 +1,36 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty > 0)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_linenumber) AS line_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey AS orderkey, os.total_revenue, os.line_count
+    FROM OrderSummary os
+    JOIN orders o ON os.o_orderkey = o.o_orderkey
+    WHERE os.line_count > 2 AND os.total_revenue > 1000
+)
+SELECT r.r_name AS region, 
+       COUNT(DISTINCT fo.orderkey) AS total_filtered_orders, 
+       AVG(fo.total_revenue) AS avg_revenue,
+       MAX(s.s_acctbal) AS max_supplier_balance
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.n_nationkey
+LEFT JOIN FilteredOrders fo ON s.s_suppkey = fo.orderkey
+GROUP BY r.r_name
+HAVING MAX(s.s_acctbal) IS NOT NULL OR AVG(fo.total_revenue) > 5000
+ORDER BY region;

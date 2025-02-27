@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalCustomerOrders AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+PartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    pa.total_available,
+    COALESCE(tc.order_count, 0) AS customer_order_count,
+    COALESCE(tc.total_spent, 0) AS total_spent_by_customer,
+    CASE 
+        WHEN rs.rank <= 5 THEN rs.s_name 
+        ELSE 'Other Suppliers' 
+    END AS key_supplier
+FROM 
+    part p
+LEFT JOIN 
+    PartAvailability pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN 
+    TotalCustomerOrders tc ON tc.o_custkey IN (
+        SELECT DISTINCT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice > 100.00
+    AND pa.total_available IS NOT NULL
+GROUP BY 
+    p.p_name, 
+    p.p_retailprice, 
+    pa.total_available, 
+    rs.s_name, 
+    rs.rank
+ORDER BY 
+    p.p_name ASC, 
+    total_spent DESC;

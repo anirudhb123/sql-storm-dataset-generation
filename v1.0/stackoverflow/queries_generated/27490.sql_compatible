@@ -1,0 +1,65 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags 
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><'))
+    GROUP BY 
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM 
+        Users 
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    WHERE 
+        Users.Reputation > 0
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+PopularTags AS (
+    SELECT 
+        TagCounts.TagName,
+        TagCounts.PostCount,
+        SUM(UserReputation.PostCount) AS TotalPostsByUsers,
+        SUM(UserReputation.TotalViews) AS TotalViewsByUsers,
+        SUM(UserReputation.TotalScore) AS TotalScoresByUsers
+    FROM 
+        TagCounts
+    JOIN 
+        Posts ON TagCounts.TagName = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><'))
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    JOIN 
+        UserReputation ON Users.Id = UserReputation.UserId
+    GROUP BY 
+        TagCounts.TagName, TagCounts.PostCount
+    ORDER BY 
+        TagCounts.PostCount DESC
+)
+SELECT 
+    PopularTags.TagName,
+    PopularTags.PostCount,
+    COALESCE(PopularTags.TotalPostsByUsers, 0) AS TotalPostsByUsers,
+    COALESCE(PopularTags.TotalViewsByUsers, 0) AS TotalViewsByUsers,
+    COALESCE(PopularTags.TotalScoresByUsers, 0) AS TotalScoresByUsers,
+    CASE 
+        WHEN PopularTags.PostCount > 100 THEN 'Very Popular'
+        WHEN PopularTags.PostCount BETWEEN 50 AND 100 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityLevel
+FROM 
+    PopularTags
+WHERE 
+    PopularTags.PostCount > 10
+ORDER BY 
+    PopularityLevel DESC, PopularTags.PostCount DESC;

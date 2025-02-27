@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT
+        Id,
+        Reputation,
+        LastAccessDate,
+        CASE 
+            WHEN LastAccessDate < NOW() - INTERVAL '1 year' THEN 'Inactive'
+            ELSE 'Active'
+        END AS ActivityStatus
+    FROM Users
+),
+PostEngagement AS (
+    SELECT
+        p.Id AS PostId,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Score, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        pt.Name AS PostType,
+        pt2.Name AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    JOIN CloseReasonTypes pt2 ON pt2.Id = CAST(ph.Comment AS INT)
+    JOIN PostTypes pt ON pt.Id = p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.ActivityStatus,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    AVG(pe.Score) AS AvgScore,
+    COUNT(DISTINCT pe.PostId) AS TotalPosts,
+    ARRAY_AGG(DISTINCT cp.Title) AS ClosedPostsTitles,
+    COUNT(DISTINCT cp.Id) AS TotalClosedPosts
+FROM UserReputation u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN PostEngagement pe ON u.Id = pe.OwnerUserId
+LEFT JOIN ClosedPosts cp ON cp.Id IN (SELECT PostId FROM Posts WHERE OwnerUserId = u.Id AND ClosedDate IS NOT NULL)
+WHERE u.Reputation > 1000
+    AND u.ActivityStatus = 'Active'
+GROUP BY u.Id, u.DisplayName, u.Reputation, u.ActivityStatus, ub.BadgeCount
+ORDER BY avg(pe.Score) DESC, u.Reputation DESC
+LIMIT 50;

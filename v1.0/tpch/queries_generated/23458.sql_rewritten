@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+HighValueItems AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        total_sales > 100000
+),
+RegionSupplierCount AS (
+    SELECT 
+        n.n_regionkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_regionkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(e.total_sales, 0) AS total_sales,
+    COALESCE(s.supplier_count, 0) AS supplier_count,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN s.supplier_rank IS NOT NULL THEN 1 ELSE 0 END) AS ranked_supplier_count,
+    (SELECT COUNT(DISTINCT o.o_custkey) FROM RecentOrders o WHERE o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderdate < cast('1998-10-01' as date) - INTERVAL '30 days')) AS inactive_customers
+FROM 
+    region r
+LEFT JOIN 
+    RegionSupplierCount s ON r.r_regionkey = s.n_regionkey
+LEFT JOIN 
+    HighValueItems e ON e.total_sales > 0
+LEFT JOIN 
+    customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+WHERE 
+    r.r_name LIKE 'A%' OR r.r_name IS NULL
+GROUP BY 
+    r.r_name, e.total_sales, s.supplier_count
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    r.r_name;

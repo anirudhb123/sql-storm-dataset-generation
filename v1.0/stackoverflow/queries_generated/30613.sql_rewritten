@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+PopularUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountyReceived
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        pu.DisplayName,
+        COALESCE(phs.CloseCount, 0) AS CloseCount,
+        COALESCE(phs.ReopenCount, 0) AS ReopenCount,
+        COALESCE(phs.DeleteCount, 0) AS DeleteCount
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        Users pu ON p.OwnerUserId = pu.Id
+    LEFT JOIN 
+        PostHistorySummary phs ON p.PostId = phs.PostId
+    WHERE 
+        p.Rank <= 5 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.DisplayName,
+    tp.CloseCount,
+    tp.ReopenCount,
+    tp.DeleteCount,
+    pu.TotalBountyReceived
+FROM 
+    TopPosts tp
+JOIN 
+    PopularUsers pu ON tp.OwnerUserId = pu.UserId
+ORDER BY 
+    tp.Score DESC;

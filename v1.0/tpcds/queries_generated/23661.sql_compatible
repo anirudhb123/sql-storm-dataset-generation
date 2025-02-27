@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS total_returns,
+        SUM(COALESCE(sr_return_amt, 0) + COALESCE(cr_return_amount, 0) + COALESCE(wr_return_amt, 0)) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) FILTER (WHERE sr_return_quantity IS NOT NULL) AS store_return_count,
+        COUNT(DISTINCT cr_order_number) FILTER (WHERE cr_return_quantity IS NOT NULL) AS catalog_return_count,
+        COUNT(DISTINCT wr_order_number) FILTER (WHERE wr_return_quantity IS NOT NULL) AS web_return_count
+    FROM 
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    GROUP BY c.c_customer_id
+),
+DynamicIncomeBands AS (
+    SELECT 
+        db.ib_income_band_sk,
+        CASE 
+            WHEN db.ib_lower_bound IS NOT NULL AND db.ib_upper_bound IS NOT NULL THEN 
+                CONCAT('$', CAST(db.ib_lower_bound AS CHAR), ' - $', CAST(db.ib_upper_bound AS CHAR))
+            ELSE 'Unknown Income Range' 
+        END AS income_band_range
+    FROM 
+        income_band db
+),
+FinalMetrics AS (
+    SELECT
+        cr.c_customer_id,
+        cr.total_returns,
+        cr.total_return_amt,
+        db.income_band_range,
+        CASE
+            WHEN cr.total_returns >= 10 THEN 'High Returner'
+            WHEN cr.total_returns BETWEEN 5 AND 9 THEN 'Medium Returner'
+            ELSE 'Low Returner'
+        END AS return_category
+    FROM 
+        CustomerReturns cr
+    LEFT JOIN customer_demographics cd ON cr.c_customer_id = cd.cd_demo_sk
+    LEFT JOIN DynamicIncomeBands db ON cd.cd_purchase_estimate BETWEEN db.ib_lower_bound AND db.ib_upper_bound
+)
+SELECT 
+    c.c_customer_id,
+    f.total_returns,
+    f.total_return_amt,
+    f.income_band_range,
+    f.return_category,
+    ROW_NUMBER() OVER (PARTITION BY f.return_category ORDER BY f.total_return_amt DESC) AS rank_within_category
+FROM 
+    FinalMetrics f
+JOIN customer c ON f.c_customer_id = c.c_customer_id
+WHERE 
+    (f.total_return_amt IS NOT NULL OR f.total_returns IS NOT NULL)
+    AND f.return_category != 'Low Returner'
+ORDER BY 
+    f.return_category, f.total_return_amt DESC
+FETCH FIRST 100 ROWS ONLY;

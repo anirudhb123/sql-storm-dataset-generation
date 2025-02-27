@@ -1,0 +1,55 @@
+
+WITH TagAnalysis AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.Score) AS TotalScore,
+        AVG(Posts.ViewCount) AS AverageViews,
+        ARRAY_AGG(DISTINCT Users.DisplayName) AS ActiveUsers
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::text[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalScore,
+        AverageViews,
+        ActiveUsers,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagPopularityRank,
+        RANK() OVER (ORDER BY TotalScore DESC) AS TagScoreRank
+    FROM 
+        TagAnalysis
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalScore,
+    AverageViews,
+    ActiveUsers,
+    CASE 
+        WHEN TagPopularityRank = 1 THEN 'Top Tag by Posts'
+        WHEN TagScoreRank = 1 THEN 'Top Tag by Score'
+        ELSE NULL
+    END AS Highlight,
+    (SELECT COUNT(*) 
+     FROM Posts 
+     WHERE CreationDate >= DATE '2024-10-01' - INTERVAL '1 month') AS RecentPostCount,
+    (SELECT AVG(Reputation) 
+     FROM Users 
+     WHERE Id IN (SELECT UNNEST(ActiveUsers)) 
+     AND Reputation > 0) AS AvgUserReputation
+FROM 
+    TopTags
+WHERE 
+    PostCount > 5
+ORDER BY 
+    PostCount DESC, TotalScore DESC;

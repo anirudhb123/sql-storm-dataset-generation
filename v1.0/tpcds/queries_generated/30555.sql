@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_ext_sales_price) as total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) as sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+CustomerReturn AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) as total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(s.total_sales, 0) as total_sales,
+        COALESCE(r.total_returns, 0) as total_returns,
+        (COALESCE(s.total_sales, 0) - COALESCE(r.total_returns, 0)) as net_sales
+    FROM 
+        SalesCTE s
+    LEFT JOIN 
+        CustomerReturn r ON s.ws_item_sk = r.sr_item_sk
+),
+IncomeDistribution AS (
+    SELECT 
+        hd_income_band_sk, 
+        COUNT(*) as customer_count
+    FROM 
+        household_demographics
+    WHERE 
+        hd_buy_potential IN ('Low', 'Medium', 'High')
+    GROUP BY 
+        hd_income_band_sk
+)
+SELECT 
+    c.c_customer_id, 
+    s.ws_item_sk, 
+    cs.total_sales, 
+    cs.total_returns, 
+    cs.net_sales,
+    ib.ib_income_band_sk,
+    id.customer_count
+FROM 
+    CombinedSales cs
+JOIN 
+    item i ON cs.ws_item_sk = i.i_item_sk
+JOIN 
+    customer c ON i.i_item_sk = c.c_current_addr_sk
+JOIN 
+    IncomeDistribution id ON c.c_current_cdemo_sk = id.hd_demo_sk
+JOIN 
+    income_band ib ON id.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    cs.net_sales > 0
+ORDER BY 
+    cs.net_sales DESC
+LIMIT 100;

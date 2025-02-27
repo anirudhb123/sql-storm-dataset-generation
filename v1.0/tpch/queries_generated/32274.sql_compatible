@@ -1,0 +1,36 @@
+
+WITH RECURSIVE RegionSales AS (
+    SELECT r.r_name AS region_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 1 AS level
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY r.r_name
+    UNION ALL
+    SELECT r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) + r.total_sales, level + 1
+    FROM RegionSales r
+    JOIN nation n ON r.region_name = n.n_name
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE level < 10
+)
+SELECT r.r_name AS Region,
+       COALESCE(SUM(ls.total_sales), 0) AS Total_Sales,
+       COUNT(DISTINCT o.o_orderkey) AS Order_Count,
+       ROUND(AVG(o.o_totalprice), 2) AS Avg_Order_Value,
+       COUNT(DISTINCT CASE WHEN o.o_orderstatus = 'F' THEN o.o_orderkey END) AS Completed_Orders
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN RegionSales ls ON r.r_name = ls.region_name
+GROUP BY r.r_name
+ORDER BY Total_Sales DESC
+LIMIT 10;

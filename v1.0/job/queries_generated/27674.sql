@@ -1,0 +1,74 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        tk.keyword AS movie_keyword,
+        k.kind AS kind_of_movie
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+),
+actor_details AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        a.gender,
+        a.imdb_index,
+        COUNT(*) OVER(PARTITION BY c.movie_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        name a ON c.person_id = a.id
+    WHERE 
+        a.gender = 'M'
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        ct.kind = 'Production'
+),
+complete_info AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        ad.actor_name,
+        ad.gender,
+        ad.actor_count,
+        ci.company_name,
+        ci.company_type
+    FROM 
+        movie_details md
+    JOIN 
+        actor_details ad ON md.movie_id = ad.movie_id
+    JOIN 
+        company_info ci ON md.movie_id = ci.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+    COUNT(DISTINCT actor_name) AS unique_actor_count,
+    STRING_AGG(DISTINCT company_name, ', ') AS production_companies,
+    MIN(production_year) OVER() AS earliest_production_year
+FROM 
+    complete_info
+GROUP BY 
+    title, production_year
+ORDER BY 
+    production_year DESC, unique_actor_count DESC;

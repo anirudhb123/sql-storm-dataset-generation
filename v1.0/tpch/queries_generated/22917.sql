@@ -1,0 +1,58 @@
+WITH RECURSIVE price_history AS (
+    SELECT ps_partkey, ps_availqty, ps_supplycost, ps_comment,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+    WHERE ps_supplycost BETWEEN (SELECT AVG(ps_supplycost) FROM partsupp) * 0.9 
+                     AND (SELECT AVG(ps_supplycost) FROM partsupp) * 1.1
+),
+filtered_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, n.n_name,
+           RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_per_region
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+      AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL) 
+      AND n.n_name IS NOT NULL
+),
+nation_region AS (
+    SELECT r.r_regionkey, r.r_name, n.n_name
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    WHERE n.n_comment LIKE '%important%'
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS total_lines,
+           MAX(l.l_tax) AS max_tax
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+      AND l.l_returnflag IS NULL
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+cumulative_stats AS (
+    SELECT *, SUM(total_revenue) OVER (ORDER BY o_orderdate) AS cumulative_revenue
+    FROM order_summary
+)
+SELECT pr.p_name, pr.p_retailprice, fs.s_name, nr.r_name,
+       cs.cumulative_revenue, cs.total_lines, 
+       CASE WHEN cs.max_tax IS NULL THEN 'N/A' ELSE cs.max_tax END AS max_tax,
+       CASE WHEN pr.p_comment LIKE '%special%' THEN 'Special Item' ELSE 'Regular Item' END AS item_type
+FROM part pr
+LEFT JOIN price_history ph ON pr.p_partkey = ph.ps_partkey
+JOIN filtered_suppliers fs ON fs.s_suppkey IN (
+    SELECT ps_suppkey
+    FROM partsupp
+    WHERE ps_partkey = pr.p_partkey
+)
+JOIN nation_region nr ON fs.n_name = nr.n_name
+JOIN cumulative_stats cs ON cs.o_orderkey IN (
+    SELECT o_orderkey
+    FROM orders
+    WHERE o_orderdate >= '2023-01-01'
+    AND o_orderdate <= CURRENT_DATE
+)
+WHERE pr.p_retailprice BETWEEN 50 AND 500
+  AND ph.rn = 1
+  AND fs.rank_per_region <= 5
+ORDER BY cs.cumulative_revenue DESC, pr.p_retailprice ASC;

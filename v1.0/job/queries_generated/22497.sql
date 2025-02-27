@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+),
+ActorCount AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+FilteredMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(ac.actor_count, 0) AS num_actors,
+        CASE 
+            WHEN m.production_year < 2000 THEN 'Classic'
+            WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Contemporary'
+        END AS era
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        ActorCount ac ON m.id = ac.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.num_actors,
+        fm.era,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        fm.movie_id, fm.title, fm.num_actors, fm.era
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.num_actors,
+    f.era,
+    CASE 
+        WHEN f.num_actors = 0 THEN 'No Actors'
+        WHEN f.num_actors > 10 THEN 'Star-Studded'
+        ELSE 'Moderate Cast'
+    END AS cast_evaluation,
+    CASE 
+        WHEN f.era = 'Classic' AND f.num_actors < 2 THEN NULL
+        WHEN f.era = 'Modern' AND f.num_actors BETWEEN 2 AND 5 THEN 'Recommended'
+        ELSE 'Not Recommended'
+    END AS evaluation,
+    kw.keywords
+FROM 
+    MoviesWithKeywords f
+LEFT JOIN 
+    RankedTitles rt ON f.movie_id = rt.title_id AND rt.title_rank <= 5
+WHERE 
+    f.num_actors IS NOT NULL 
+    AND f.era != 'Contemporary'
+ORDER BY 
+    f.production_year DESC, 
+    f.num_actors DESC NULLS LAST;

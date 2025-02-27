@@ -1,0 +1,55 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.AnswerCount), 0) AS TotalAnswers,
+        COALESCE(SUM(p.CommentCount), 0) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.TotalScore,
+    u.TotalViews,
+    u.TotalAnswers,
+    u.TotalComments,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount
+FROM 
+    UserStats u
+JOIN 
+    PostStats p ON u.UserId = p.OwnerUserId
+ORDER BY 
+    u.Reputation DESC, p.Score DESC
+LIMIT 100;

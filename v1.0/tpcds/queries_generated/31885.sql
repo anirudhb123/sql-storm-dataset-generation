@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ss.s_sold_date_sk,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_customer_sk) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY ss.s_item_sk ORDER BY SUM(ss.ss_sales_price) DESC) AS rank
+    FROM
+        store_sales ss
+    GROUP BY
+        ss.s_sold_date_sk
+),
+Customer_Aggregate AS (
+    SELECT 
+        ca.ca_address_id,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        MAX(hd.hd_dep_count) AS max_deps
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ca.ca_state IS NOT NULL AND
+        cd.cd_gender = 'F'
+    GROUP BY 
+        ca.ca_address_id, cd.cd_gender
+    HAVING 
+        COUNT(DISTINCT c.c_customer_sk) > 10
+),
+Sales_Summary AS (
+    SELECT 
+        s.s_sold_date_sk,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_tickets,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        SUM(ss.ss_ext_discount_amt) AS total_discount
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        s.s_sold_date_sk
+)
+SELECT 
+    sa.ca_address_id,
+    ca.cd_gender,
+    SUM(sa.total_sales) AS overall_sales,
+    SUM(ca.total_net_profit) AS total_profit,
+    AVG(ss.avg_sales_price) AS average_sale_price
+FROM 
+    Customer_Aggregate ca
+JOIN 
+    (SELECT 
+        s.s_sold_date_sk, 
+        total_sales FROM 
+        Sales_CTE s) sa ON ca.ca_address_id = sa.s_sold_date_sk
+LEFT JOIN 
+    Sales_Summary ss ON sa.s_sold_date_sk = ss.s_sold_date_sk
+WHERE 
+    ss.total_discount IS NOT NULL
+GROUP BY 
+    sa.ca_address_id, ca.cd_gender
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

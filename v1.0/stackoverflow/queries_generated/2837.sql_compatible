@@ -1,0 +1,40 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostWithComments AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, 
+           COALESCE(c.CommentCount, 0) AS CommentCount, 
+           COUNT(c.Id) OVER (PARTITION BY p.Id) AS TotalComments
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1
+),
+HighlyVotedPosts AS (
+    SELECT pwc.PostId, pwc.Title, pwc.CreationDate, 
+           pwc.CommentCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+           COUNT(v.Id) AS VotesCount
+    FROM PostWithComments pwc
+    LEFT JOIN Votes v ON pwc.PostId = v.PostId
+    GROUP BY pwc.PostId, pwc.Title, pwc.CreationDate, pwc.CommentCount 
+),
+TopUserPosts AS (
+    SELECT u.DisplayName, pp.Title, pp.Upvotes, pp.Downvotes, pp.VotesCount,
+           RANK() OVER (PARTITION BY u.DisplayName ORDER BY pp.Upvotes DESC) AS PostRank
+    FROM UserReputation u
+    JOIN HighlyVotedPosts pp ON u.Id = pp.PostId 
+    WHERE u.Reputation > 1000
+)
+SELECT tup.DisplayName, tup.Title, tup.Upvotes, tup.Downvotes, 
+       CONCAT('Post Rank: ', tup.PostRank) AS PostRankingInfo
+FROM TopUserPosts tup
+WHERE tup.PostRank <= 5
+ORDER BY tup.DisplayName, tup.Upvotes DESC;

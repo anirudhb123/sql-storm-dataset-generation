@@ -1,0 +1,34 @@
+WITH RECURSIVE OrderSums AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o_orderkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerSegment AS (
+    SELECT c.c_nationkey, c.c_mktsegment, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM customer c
+    GROUP BY c.c_nationkey, c.c_mktsegment
+)
+SELECT
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    cs.c_mktsegment,
+    COALESCE(cs.customer_count, 0) AS customer_count,
+    COALESCE(SUM(os.total_sales), 0) AS total_order_sales,
+    ts.total_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN CustomerSegment cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN OrderSums os ON cs.customer_count > 0
+LEFT JOIN TopSuppliers ts ON ts.total_supply_cost > 10000
+WHERE (n.n_name LIKE 'A%' OR n.n_name IS NULL)
+GROUP BY r.r_name, n.n_name, cs.c_mktsegment, ts.total_supply_cost
+ORDER BY region_name, nation_name, cs.c_mktsegment;

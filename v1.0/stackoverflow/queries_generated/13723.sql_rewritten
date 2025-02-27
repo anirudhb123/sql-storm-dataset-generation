@@ -1,0 +1,23 @@
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    COUNT(DISTINCT a.Id) AS TotalAnswers,
+    SUM(v.UpVotes) AS TotalUpVotes,
+    SUM(v.DownVotes) AS TotalDownVotes,
+    AVG(u.Reputation) AS AverageUserReputation,
+    MIN(p.CreationDate) AS EarliestPostDate,
+    MAX(p.CreationDate) AS LatestPostDate
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId  
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId     
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id 
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

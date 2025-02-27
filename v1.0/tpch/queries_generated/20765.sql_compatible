@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey AND sh.level < 5
+),
+PartCount AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+QualifiedCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND (c.c_acctbal > 5000 OR c.c_name LIKE '%Corp%')
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS number_of_lineitems, MAX(l.l_extendedprice) AS max_line_price
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+CombinedData AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COUNT(DISTINCT l.l_orderkey) AS order_count,
+           (SELECT COUNT(*) FROM HighValueOrders hvo WHERE hvo.o_orderkey = od.o_orderkey) AS hv_order_count,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN OrderDetails od ON od.o_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice, od.o_orderkey
+)
+SELECT ch.c_custkey AS cust_key, ch.c_name AS cust_name, SUM(cd.order_count) AS total_orders,
+       MAX(cd.max_line_price) AS max_price_per_part,
+       AVG(cd.rn) AS average_rank
+FROM CombinedData cd
+JOIN QualifiedCustomers ch ON cd.order_count > 0
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = ch.c_custkey
+GROUP BY ch.c_custkey, ch.c_name
+HAVING SUM(cd.order_count) > 0 AND AVG(MAX(cd.max_line_price)) IS NOT NULL
+ORDER BY average_rank DESC, total_orders DESC;

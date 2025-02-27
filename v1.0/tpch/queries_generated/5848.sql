@@ -1,0 +1,69 @@
+WITH SupplierPartCost AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, c.c_name
+),
+RegionNationalStats AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    rns.r_name AS region_name,
+    rns.n_name AS nation_name,
+    spc.s_name AS supplier_name,
+    spc.p_name AS part_name,
+    spc.ps_supplycost AS supply_cost,
+    cod.total_extended_price AS order_total,
+    cod.lineitem_count,
+    rns.supplier_count,
+    rns.total_available_quantity
+FROM 
+    RegionNationalStats rns
+JOIN 
+    SupplierPartCost spc ON spc.ps_partkey IN (SELECT ps_partkey FROM partsupp)
+JOIN 
+    CustomerOrderDetails cod ON cod.o_orderkey IN (SELECT o_orderkey FROM orders);

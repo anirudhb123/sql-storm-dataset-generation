@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only starting from Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2 -- Only including Answers
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 3 WHEN b.Class = 2 THEN 2 WHEN b.Class = 3 THEN 1 ELSE 0 END) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS Upvotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsWithScore AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(ps.Upvotes, 0) AS Upvotes,
+        COALESCE(ps.Downvotes, 0) AS Downvotes,
+        CAST(p.CreationDate AS DATE) AS PostDate,
+        DENSE_RANK() OVER (PARTITION BY CAST(p.CreationDate AS DATE) ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+         FROM 
+            Votes 
+         GROUP BY 
+            PostId) ps ON p.Id = ps.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, ps.Upvotes, ps.Downvotes
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ph.ViewCount,
+    ph.Score,
+    ROUND((ph.Upvotes::numeric / NULLIF((ph.Upvotes + ph.Downvotes), 0)) * 100, 2) AS UpvotePercentage,
+    ur.DisplayName AS UserName,
+    ur.TotalBadges,
+    ur.TotalPosts,
+    ur.Upvotes AS UserUpvotes,
+    ur.Downvotes AS UserDownvotes,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    ph.RankScore
+FROM 
+    PostsWithScore ph
+INNER JOIN 
+    Users ur ON ph.OwnerUserId = ur.Id
+LEFT JOIN 
+    Comments c ON ph.Id = c.PostId
+WHERE 
+    ph.RankScore <= 5 -- Get top 5 by score for each day
+GROUP BY 
+    ph.Id, ph.Title, ph.ViewCount, ph.Score, ur.DisplayName, ur.TotalBadges, ur.TotalPosts, ur.Upvotes, ur.Downvotes, ph.RankScore
+ORDER BY 
+    ph.PostDate DESC, ph.RankScore;

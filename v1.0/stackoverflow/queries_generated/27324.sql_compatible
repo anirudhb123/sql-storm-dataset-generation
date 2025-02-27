@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS ViewRank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]) 
+    WHERE 
+        p.CreationDate > CAST('2024-10-01' AS DATE) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        ViewCount, 
+        AnswerCount, 
+        CreationDate, 
+        OwnerDisplayName, 
+        AssociatedTags,
+        ViewRank
+    FROM 
+        RankedPosts
+    WHERE 
+        ViewRank <= 5
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.ViewCount,
+    trp.AnswerCount,
+    trp.CreationDate,
+    trp.OwnerDisplayName,
+    trp.AssociatedTags,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN vh.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN vh.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    Comments c ON trp.PostId = c.PostId
+LEFT JOIN 
+    Votes vh ON trp.PostId = vh.PostId
+GROUP BY 
+    trp.PostId, trp.Title, trp.ViewCount, trp.AnswerCount, trp.CreationDate, trp.OwnerDisplayName, trp.AssociatedTags
+ORDER BY 
+    trp.ViewCount DESC, trp.AnswerCount DESC;

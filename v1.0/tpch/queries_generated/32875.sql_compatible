@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS VARCHAR) AS full_name,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(CONCAT(sh.full_name, ' > ', s.s_name) AS VARCHAR),
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal BETWEEN 500 AND 1000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+AveragePrices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(avg_price.average_supply_cost, 0) AS average_supply_cost,
+    COUNT(DISTINCT co.c_custkey) AS number_of_customers,
+    COUNT(DISTINCT sh.s_suppkey) AS total_suppliers,
+    STRING_AGG(sh.full_name, '; ') AS suppliers_path
+FROM part p
+LEFT JOIN AveragePrices avg_price ON p.p_partkey = avg_price.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CustomerOrders co ON co.total_spending > p.p_retailprice
+LEFT JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > 50)
+  AND p.p_type NOT LIKE '%unknown%'
+  AND (p.p_comment IS NULL OR p.p_comment NOT LIKE '%defective%')
+GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, avg_price.average_supply_cost;

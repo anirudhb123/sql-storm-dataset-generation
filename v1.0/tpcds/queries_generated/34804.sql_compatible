@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_sales_price,
+        ss_sold_date_sk,
+        1 AS level
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    
+    UNION ALL
+
+    SELECT 
+        sd.ss_store_sk,
+        sd.ss_item_sk,
+        sd.ss_quantity * 1.05 AS ss_quantity,
+        sd.ss_sales_price * 0.9 AS ss_sales_price,
+        sd.ss_sold_date_sk,
+        sd.level + 1
+    FROM 
+        sales_data sd
+    JOIN 
+        store_sales s ON sd.ss_item_sk = s.ss_item_sk AND sd.ss_store_sk = s.ss_store_sk
+    WHERE 
+        sd.level < 3
+),
+
+return_data AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+
+final_sales AS (
+    SELECT 
+        s.ss_store_sk,
+        s.ss_item_sk,
+        SUM(s.ss_quantity) AS total_quantity,
+        SUM(s.ss_sales_price) AS total_sales,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        COALESCE(r.total_return_amt, 0) AS total_return_amt,
+        (SUM(s.ss_sales_price) - COALESCE(r.total_return_amt, 0)) AS net_sales
+    FROM 
+        sales_data s
+    LEFT JOIN 
+        return_data r ON s.ss_item_sk = r.sr_item_sk
+    GROUP BY 
+        s.ss_store_sk, s.ss_item_sk
+)
+
+SELECT 
+    f.ss_store_sk,
+    f.ss_item_sk,
+    f.total_quantity,
+    f.total_sales,
+    f.total_returned,
+    f.total_return_amt,
+    f.net_sales,
+    DENSE_RANK() OVER (PARTITION BY f.ss_store_sk ORDER BY f.net_sales DESC) AS sales_rank
+FROM 
+    final_sales f
+WHERE 
+    f.total_sales > 0
+ORDER BY 
+    f.ss_store_sk, sales_rank
+FETCH FIRST 100 ROWS ONLY;

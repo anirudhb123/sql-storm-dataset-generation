@@ -1,0 +1,89 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS hierarchy_level,
+        c.c_name,
+        c.c_acctbal,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' 
+        AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_acctbal
+
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey,
+        oh.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.hierarchy_level + 1,
+        c.c_name,
+        c.c_acctbal,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        OrderHierarchy oh ON oh.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' 
+        AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, oh.o_custkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_acctbal, oh.hierarchy_level
+), 
+SupplierSummary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey
+),
+SalesData AS (
+    SELECT 
+        oh.c_name,
+        SUM(oh.total_price_after_discount) AS total_spent,
+        COUNT(oh.o_orderkey) AS total_orders,
+        RANK() OVER (ORDER BY SUM(oh.total_price_after_discount) DESC) AS rank
+    FROM 
+        OrderHierarchy oh
+    GROUP BY 
+        oh.c_name
+)
+SELECT 
+    sd.c_name,
+    sd.total_spent,
+    sd.total_orders,
+    CASE 
+        WHEN sd.rank <= 10 THEN 'Top 10 Customers'
+        ELSE 'Others'
+    END AS customer_category,
+    COALESCE(ss.total_available, 0) AS total_available_parts,
+    COALESCE(ss.avg_supply_cost, 0) AS average_supply_cost
+FROM 
+    SalesData sd
+LEFT JOIN 
+    SupplierSummary ss ON sd.c_name = ss.p_partkey
+WHERE 
+    sd.total_spent > 1000
+ORDER BY 
+    sd.total_spent DESC;

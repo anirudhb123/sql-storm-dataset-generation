@@ -1,0 +1,49 @@
+WITH AddressInfo AS (
+    SELECT 
+        ca.city AS City,
+        ca.state AS State,
+        ca.country AS Country,
+        COUNT(DISTINCT c.c_customer_sk) AS CustomerCount,
+        AVG(cd.cd_purchase_estimate) AS AvgPurchaseEstimate,
+        STRING_AGG(DISTINCT CONCAT(cd.cd_gender, ' ', cd.cd_marital_status), ', ') AS GenderMaritalDistribution
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca.city, ca.state, ca.country
+),
+OrderSummary AS (
+    SELECT 
+        d.d_year AS Year,
+        d.d_month AS Month,
+        SUM(ws.ws_quantity) AS TotalQuantity,
+        SUM(ws.ws_net_paid) AS TotalSales,
+        AVG(ws.ws_net_profit) AS AvgNetProfit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month
+)
+SELECT 
+    ai.City,
+    ai.State,
+    ai.Country,
+    ai.CustomerCount,
+    ai.AvgPurchaseEstimate,
+    ai.GenderMaritalDistribution,
+    os.Year,
+    os.Month,
+    os.TotalQuantity,
+    os.TotalSales,
+    os.AvgNetProfit
+FROM 
+    AddressInfo ai
+JOIN 
+    OrderSummary os ON ai.CustomerCount > 50 
+ORDER BY 
+    ai.CustomerCount DESC, os.Year DESC, os.Month DESC;

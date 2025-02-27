@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.net_paid) AS total_web_sales,
+        SUM(cs.net_paid) AS total_catalog_sales,
+        SUM(ss.net_paid) AS total_store_sales
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+SalesAnalysis AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_web_sales,
+        cs.total_catalog_sales,
+        cs.total_store_sales,
+        COALESCE((cs.total_web_sales + cs.total_catalog_sales + cs.total_store_sales), 0) AS total_sales,
+        CASE 
+            WHEN COALESCE(total_web_sales, 0) > COALESCE(total_catalog_sales, 0) AND COALESCE(total_web_sales, 0) > COALESCE(total_store_sales, 0) THEN 'Web'
+            WHEN COALESCE(total_catalog_sales, 0) > COALESCE(total_web_sales, 0) AND COALESCE(total_catalog_sales, 0) > COALESCE(total_store_sales, 0) THEN 'Catalog'
+            ELSE 'Store'
+        END AS preferred_channel
+    FROM CustomerSales cs
+),
+DemographicData AS (
+    SELECT
+        d.cd_demo_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_credit_rating,
+        da.total_sales,
+        da.preferred_channel
+    FROM customer_demographics d
+    JOIN SalesAnalysis da ON d.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_id = da.c_customer_id)
+)
+SELECT 
+    dd.cd_gender,
+    dd.cd_marital_status,
+    dd.cd_credit_rating,
+    COUNT(DISTINCT dd.cd_demo_sk) AS demographic_count,
+    AVG(dd.total_sales) AS avg_sales,
+    SUM(dd.total_sales) AS total_sales_by_gender,
+    MAX(dd.total_sales) AS max_sales,
+    MIN(dd.total_sales) AS min_sales
+FROM DemographicData dd
+GROUP BY dd.cd_gender, dd.cd_marital_status, dd.cd_credit_rating
+HAVING AVG(dd.total_sales) > 200
+ORDER BY total_sales_by_gender DESC;

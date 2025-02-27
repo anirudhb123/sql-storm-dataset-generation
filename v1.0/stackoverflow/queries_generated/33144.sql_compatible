@@ -1,0 +1,74 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        p.Id, p.Title
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(*) AS RevisionCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CommentCount,
+    p.UpvoteCount,
+    p.DownvoteCount,
+    COALESCE(phs.ClosedDate, NULL) AS ClosedStatus,
+    COALESCE(phs.ReopenedDate, NULL) AS ReopenStatus,
+    rho.Level,
+    rho.Title AS ParentPostTitle,
+    ps.AvgUserReputation
+FROM 
+    PostStats p
+LEFT JOIN 
+    PostHistorySummary phs ON p.PostId = phs.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rho ON p.PostId = rho.Id
+ORDER BY 
+    p.CommentCount DESC, 
+    p.UpvoteCount DESC,
+    p.Title;

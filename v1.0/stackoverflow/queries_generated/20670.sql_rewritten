@@ -1,0 +1,88 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(P.Tags, '>') AS T ON TRUE
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation,
+        Tags,
+        QuestionCount,
+        UpVotes - DownVotes AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, QuestionCount DESC) AS Rank
+    FROM 
+        UserReputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.OwnerUserId, 
+        P.Score,
+        P.ViewCount,
+        COALESCE(P.AcceptedAnswerId, 0) AS HasAcceptedAnswer
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.HasAcceptedAnswer,
+        U.DisplayName AS OwnerName,
+        COALESCE(PH.Comment, 'No comments') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY RP.OwnerUserId ORDER BY RP.CreationDate DESC) AS EditRank
+    FROM 
+        RecentPosts RP
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON RP.PostId = PH.PostId AND PH.PostHistoryTypeId IN (4, 5)
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation AS TopUserReputation,
+    PP.Title AS RecentPostTitle,
+    PP.CreationDate AS RecentPostDate,
+    PP.Score AS PostScore,
+    PP.ViewCount AS PostViewCount,
+    PP.OwnerName AS OwnerOfPost,
+    PP.LastEditComment AS LastComment,
+    CASE 
+        WHEN PP.HasAcceptedAnswer > 0 THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AcceptedAnswerStatus
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PP ON TU.UserId = PP.OwnerUserId
+WHERE 
+    TU.Rank <= 10
+AND 
+    PP.EditRank = 1
+ORDER BY 
+    TU.Reputation DESC, 
+    PP.CreationDate DESC;

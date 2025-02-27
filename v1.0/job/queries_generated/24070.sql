@@ -1,0 +1,85 @@
+WITH RankedMovies AS (
+    SELECT
+        a.id AS aka_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+TopRankedMovies AS (
+    SELECT
+        aka_id,
+        title,
+        production_year,
+        cast_count
+    FROM
+        RankedMovies
+    WHERE
+        year_rank <= 5
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+ActorRoles AS (
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        rt.role,
+        COUNT(*) AS role_count
+    FROM
+        cast_info ci
+    LEFT JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.person_id, ci.movie_id, rt.role
+    HAVING
+        COUNT(*) > 1
+),
+MovieDetails AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(ar.role, 'Unknown Role') AS role,
+        ar.role_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        MovieKeywords mk ON t.id = mk.movie_id
+    LEFT JOIN
+        ActorRoles ar ON t.id = ar.movie_id
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.role,
+    md.role_count
+FROM
+    MovieDetails md
+WHERE
+    md.production_year BETWEEN 1990 AND 2020
+    AND md.role <> 'Unknown Role'
+    AND EXISTS (
+        SELECT 1
+        FROM complete_cast cc
+        WHERE cc.movie_id = md.movie_id AND cc.status_id IS NULL
+    )
+ORDER BY
+    md.production_year DESC, md.title ASC;

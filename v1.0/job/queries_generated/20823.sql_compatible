@@ -1,0 +1,84 @@
+
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY RANDOM()) AS random_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS total_cast
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN
+        cast_info ci ON mc.movie_id = ci.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+filtered_cast AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name an ON ci.person_id = an.person_id
+    WHERE
+        an.name ILIKE '%Smith%'
+    GROUP BY
+        ci.person_id
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 3
+),
+keyword_ranking AS (
+    SELECT
+        mk.movie_id,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY mk.movie_id ORDER BY k.keyword) AS keyword_rank
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+),
+cast_and_keywords AS (
+    SELECT
+        cm.movie_id,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ci.person_id
+    FROM
+        movie_companies cm
+    LEFT JOIN
+        movie_keyword mk ON cm.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        cast_info ci ON cm.movie_id = ci.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rf.person_id,
+    rf.movie_count AS cast_movie_count,
+    COALESCE(kr.keyword, 'No Keyword') AS movie_keyword,
+    CASE 
+        WHEN rm.total_cast IS NULL THEN 'No Cast Info' 
+        ELSE CAST(rm.total_cast AS text)
+    END AS total_cast_count
+FROM
+    ranked_movies rm
+LEFT JOIN
+    filtered_cast rf ON rm.movie_id = rf.person_id
+LEFT JOIN 
+    keyword_ranking kr ON rm.movie_id = kr.movie_id AND kr.keyword_rank = 1
+WHERE
+    rm.random_rank <= 10
+GROUP BY
+    rm.title, 
+    rm.production_year, 
+    rf.person_id, 
+    rf.movie_count, 
+    kr.keyword, 
+    rm.total_cast
+ORDER BY
+    rm.production_year DESC, 
+    rm.title;

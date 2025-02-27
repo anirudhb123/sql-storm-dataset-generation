@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title AS movie_title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY COUNT(cast_info.person_id) DESC) AS rank_per_year,
+        COUNT(cast_info.person_id) AS cast_count
+    FROM 
+        title
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.id, title.title, title.production_year
+),
+ActorsWithNulls AS (
+    SELECT 
+        aka_name.person_id,
+        COUNT(DISTINCT aka_name.name) AS name_count,
+        AVG(COALESCE(char_name.name_pcode_nf, 'ZZZZZ')) AS avg_pcode_nf
+    FROM 
+        aka_name
+    LEFT JOIN 
+        char_name ON aka_name.imdb_index = char_name.imdb_index
+    GROUP BY 
+        aka_name.person_id
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count,
+        CAST(COALESCE(CAST(SUM(a.name_count) AS INTEGER), 0) AS INTEGER) AS total_name_count 
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorsWithNulls a ON a.person_id IN (
+            SELECT 
+                cast_info.person_id
+            FROM 
+                cast_info
+            WHERE 
+                cast_info.movie_id = rm.movie_id
+        )
+    WHERE 
+        rm.rank_per_year <= 5 
+    GROUP BY 
+        rm.movie_title, rm.production_year, rm.cast_count
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.cast_count,
+    tm.total_name_count,
+    CASE 
+        WHEN tm.cast_count = 0 THEN 'No Cast'
+        WHEN tm.cast_count > 4 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_type
+FROM 
+    TopMovies tm
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM movie_keyword mk
+        WHERE mk.movie_id = (SELECT id FROM title WHERE title = tm.movie_title LIMIT 1)
+        AND mk.keyword_id IN (
+            SELECT id FROM keyword WHERE keyword LIKE 'Drama%'
+        )
+    )
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_name_count DESC
+LIMIT 10;

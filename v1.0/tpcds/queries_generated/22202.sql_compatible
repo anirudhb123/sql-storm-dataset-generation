@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn,
+        ws_net_profit,
+        ws_net_paid,
+        ws_net_paid_inc_tax,
+        ws_ext_discount_amt,
+        ws_ext_sales_price,
+        (ws_net_paid - ws_ext_discount_amt) AS net_after_discount
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_profit IS NOT NULL
+        AND ws_quantity > 0
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_credit_rating = 'Fair' AND cd.cd_purchase_estimate > 1000 THEN 'High Potential'
+            WHEN cd.cd_credit_rating = 'Good' THEN 'Medium Potential'
+            ELSE 'Low Potential'
+        END AS customer_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+high_value_customers AS (
+    SELECT 
+        d.d_year,
+        cd.customer_potential,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        ranked_sales ws
+    JOIN 
+        customer_data cd ON ws.ws_order_number = cd.c_customer_id
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        cd.customer_potential = 'High Potential'
+    GROUP BY 
+        d.d_year, cd.customer_potential
+),
+yearly_profit AS (
+    SELECT 
+        hvc.d_year,
+        SUM(hvc.total_profit) AS yearly_total_profit
+    FROM 
+        high_value_customers hvc
+    GROUP BY 
+        hvc.d_year
+)
+SELECT 
+    dd.d_year,
+    COALESCE(y.yearly_total_profit, 0) AS yearly_total_profit,
+    COALESCE(y.yearly_total_profit, 0) AS adjusted_profit,
+    CASE 
+        WHEN y.yearly_total_profit > 50000 THEN 'Excellent'
+        WHEN y.yearly_total_profit BETWEEN 10000 AND 50000 THEN 'Good'
+        ELSE 'Needs Improvement'
+    END AS performance_rating
+FROM 
+    (SELECT DISTINCT d_year FROM date_dim WHERE d_year BETWEEN 2015 AND 2025) dd
+LEFT JOIN 
+    yearly_profit y ON y.d_year = dd.d_year
+ORDER BY 
+    adjusted_profit DESC, dd.d_year ASC;

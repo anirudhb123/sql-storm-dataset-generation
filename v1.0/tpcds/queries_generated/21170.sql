@@ -1,0 +1,52 @@
+
+WITH RECURSIVE income_summary AS (
+    SELECT
+        h.hd_income_band_sk,
+        CASE
+            WHEN h.hd_buy_potential IS NULL THEN 'UNKNOWN'
+            ELSE h.hd_buy_potential
+        END AS buy_potential,
+        SUM(CASE WHEN h.hd_dep_count IS NULL THEN 0 ELSE h.hd_dep_count END) AS total_dependents,
+        COUNT(c.c_customer_sk) AS customer_count,
+        MAX(i.ib_upper_bound) AS upper_income_bound,
+        MIN(i.ib_lower_bound) AS lower_income_bound
+    FROM household_demographics h
+    LEFT JOIN customer c ON h.hd_income_band_sk = c.c_current_hdemo_sk
+    LEFT JOIN income_band i ON h.hd_income_band_sk = i.ib_income_band_sk
+    GROUP BY h.hd_income_band_sk, h.hd_buy_potential
+),
+item_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rn
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+high_profit_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_current_price,
+        is.total_quantity_sold,
+        is.total_net_profit
+    FROM item i
+    JOIN item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE is.rn = 1 AND is.total_net_profit > (SELECT AVG(total_net_profit) FROM item_sales)
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cu.ca_city,
+    ReCASE((CASE WHEN cd.cd_gender = 'F' THEN 'Female' ELSE 'Male' END), NULL) AS customer_gender,
+    COALESCE(SUM(hs.total_net_profit), 0) AS total_net_profit,
+    COUNT(DISTINCT hs.hd_income_band_sk) AS distinct_income_bands,
+    STRING_AGG(DISTINCT hpi.i_item_id, ', ') AS high_profit_items_ids
+FROM customer c
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN customer_address cu ON c.c_current_addr_sk = cu.ca_address_sk
+LEFT JOIN income_summary hs ON c.c_current_hdemo_sk = hs.hd_income_band_sk
+LEFT JOIN high_profit_items hpi ON hs.hd_income_band_sk = (SELECT hd_income_band_sk FROM household_demographics WHERE hd_demo_sk = c.c_current_hdemo_sk)
+GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, cu.ca_city, cd.cd_gender
+HAVING COALESCE(SUM(hs.total_net_profit), 0) > 10000
+ORDER BY total_net_profit DESC;

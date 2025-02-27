@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_ship_date_sk, 
+        ws_item_sk, 
+        ws_order_number, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_ship_date_sk, ws_item_sk, ws_order_number
+    UNION ALL
+    SELECT 
+        ws_ship_date_sk, 
+        ws_item_sk, 
+        ws_order_number, 
+        total_quantity + ws_quantity,
+        total_sales + ws_sales_price
+    FROM SalesCTE 
+    JOIN web_sales ON SalesCTE.ws_item_sk = web_sales.ws_item_sk 
+    WHERE SalesCTE.ws_order_number = web_sales.ws_order_number AND SalesCTE.ws_ship_date_sk < web_sales.ws_ship_date_sk
+)
+SELECT 
+    c.c_customer_id, 
+    ca.ca_city,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_store_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_web_sales,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS store_profit,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS web_profit,
+    AVG(cd.cd_dep_count) AS avg_dependent_count
+FROM customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+) AS WebProfit ON ws.ws_item_sk = WebProfit.ws_item_sk
+WHERE 
+    ca.ca_city IS NOT NULL 
+    AND (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+    AND ws.ws_ship_date_sk BETWEEN 1 AND 30
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+ORDER BY 
+    total_store_sales DESC, total_web_sales DESC
+LIMIT 100;

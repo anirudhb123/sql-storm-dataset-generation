@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.TotalScore,
+        RANK() OVER (ORDER BY us.TotalScore DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.PostCount > 5
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pht.Name IN ('Edit Title', 'Edit Body') 
+        AND ph.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    tu.UserRank,
+    COUNT(DISTINCT p.PostId) AS PostCount,
+    SUM(p.Score) AS TotalScore,
+    MAX(CASE WHEN rp.rn = 1 THEN rp.Title END) AS TopPostTitle,
+    COUNT(DISTINCT re.PostId) AS RecentEditCount,
+    STRING_AGG(DISTINCT re.Comment, '; ') AS RecentEditComments
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    RecentEdits re ON p.Id = re.PostId
+GROUP BY 
+    u.DisplayName, tu.UserRank
+ORDER BY 
+    tu.UserRank
+LIMIT 10;

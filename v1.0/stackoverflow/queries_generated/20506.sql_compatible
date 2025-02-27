@@ -1,0 +1,83 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        AVG(EXTRACT(EPOCH FROM (P.LastActivityDate - P.CreationDate)) / 3600.0) AS AvgResponseTimeHours
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+ParticipationRatio AS (
+    SELECT
+        U.UserId,
+        (COALESCE(P.QuestionCount, 0) + COALESCE(P.AnswerCount, 0)) / NULLIF(U.TotalPosts, 0) AS Ratio
+    FROM 
+        UserStatistics U
+    LEFT JOIN 
+        PostActivity P ON U.UserId = P.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.UpVotes,
+        U.DownVotes,
+        U.GoldBadges,
+        U.SilverBadges,
+        U.BronzeBadges,
+        U.TotalPosts,
+        P.AvgResponseTimeHours,
+        R.Ratio,
+        RANK() OVER (ORDER BY R.Ratio DESC NULLS LAST) AS ParticipationRank
+    FROM 
+        UserStatistics U
+    LEFT JOIN 
+        PostActivity P ON U.UserId = P.OwnerUserId
+    LEFT JOIN 
+        ParticipationRatio R ON U.UserId = R.UserId
+)
+SELECT 
+    R.DisplayName,
+    R.ParticipationRank,
+    R.UpVotes,
+    R.DownVotes,
+    R.GoldBadges,
+    R.SilverBadges,
+    R.BronzeBadges,
+    R.TotalPosts,
+    R.AvgResponseTimeHours
+FROM 
+    RankedUsers R
+WHERE 
+    (R.Ratio IS NOT NULL AND R.Ratio >= 1) OR
+    (R.AvgResponseTimeHours < 1 AND R.TotalPosts > 5)
+ORDER BY 
+    R.ParticipationRank ASC, 
+    R.TotalPosts DESC;

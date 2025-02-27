@@ -1,0 +1,77 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(V.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT BP.Id) AS BestPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts BP ON BP.OwnerUserId = U.Id AND BP.PostTypeId = 1 AND BP.Score > 0
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostEditHistory AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate 
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, PH.PostHistoryTypeId
+),
+HighScoringPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.AnswerCount,
+        U.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.Score > 10  -- Focus on higher scoring posts
+)
+SELECT 
+    T.TagName,
+    COALESCE(RT.PostCount, 0) AS TagPostCount,
+    U.DisplayName AS UserName,
+    U.TotalBounties,
+    COALESCE(EH.EditCount, 0) AS TotalEdits,
+    HP.Title AS HighScoringPostTitle,
+    HP.Score AS HighScore,
+    HP.Rank
+FROM 
+    RecursiveTagCounts RT
+LEFT JOIN 
+    UserReputation U ON U.TotalBounties > 0
+LEFT JOIN 
+    PostEditHistory EH ON EH.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || RT.TagName || '%')
+LEFT JOIN 
+    HighScoringPosts HP ON HP.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || RT.TagName || '%')
+WHERE 
+    RT.PostCount > 5  -- include only tags with more than 5 associated posts
+ORDER BY 
+    TagPostCount DESC, 
+    TotalBounties DESC, 
+    HighScore DESC;

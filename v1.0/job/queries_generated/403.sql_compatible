@@ -1,0 +1,65 @@
+
+WITH MovieRatings AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        AVG(CAST(person_info.info AS numeric)) AS average_rating,
+        COUNT(DISTINCT complete_cast.subject_id) AS cast_count
+    FROM 
+        title
+    LEFT JOIN 
+        movie_info ON title.id = movie_info.movie_id
+    LEFT JOIN 
+        person_info ON movie_info.id = person_info.info_type_id
+    LEFT JOIN 
+        complete_cast ON title.id = complete_cast.movie_id
+    WHERE 
+        movie_info.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        title.id, title.title
+),
+KeywordCount AS (
+    SELECT 
+        movie_id,
+        COUNT(keyword.id) AS keyword_count
+    FROM 
+        movie_keyword
+    INNER JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+    GROUP BY 
+        movie_id
+),
+CastRoleTypes AS (
+    SELECT 
+        cast_info.movie_id,
+        role_type.role AS role_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info
+    INNER JOIN 
+        role_type ON cast_info.role_id = role_type.id
+    GROUP BY 
+        cast_info.movie_id, role_type.role
+)
+SELECT 
+    mt.movie_id,
+    mt.title,
+    COALESCE(mr.average_rating, 0) AS average_rating,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    COALESCE(crt.role_count, 0) AS lead_role_count
+FROM 
+    MovieRatings mr
+FULL OUTER JOIN 
+    KeywordCount kc ON mr.movie_id = kc.movie_id
+FULL OUTER JOIN 
+    CastRoleTypes crt ON mr.movie_id = crt.movie_id
+JOIN 
+    aka_title at ON mr.movie_id = at.movie_id
+WHERE 
+    COALESCE(mr.average_rating, 0) > 3.0 
+    OR COALESCE(kc.keyword_count, 0) > 5
+    OR COALESCE(crt.role_name, '') = 'Lead'
+ORDER BY 
+    mr.average_rating DESC, 
+    kc.keyword_count DESC, 
+    crt.role_count DESC;

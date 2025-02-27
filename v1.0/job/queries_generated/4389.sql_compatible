@@ -1,0 +1,41 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ct.kind AS role_type,
+        COALESCE(mi.info, 'No Info Available') AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_rank
+    FROM aka_title mt
+    LEFT JOIN cast_info c ON mt.id = c.movie_id
+    LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN role_type ct ON c.role_id = ct.id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1
+    )
+    WHERE mt.production_year BETWEEN 2000 AND 2023
+),
+filtered_movies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.actor_name,
+        md.role_type,
+        md.movie_info,
+        md.actor_rank
+    FROM movie_details md
+    WHERE md.actor_rank <= 3
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    STRING_AGG(f.actor_name || ' (' || f.role_type || ')' ORDER BY f.actor_name) AS actors,
+    MIN(f.movie_info) AS movie_info
+FROM filtered_movies f
+GROUP BY 
+    f.movie_title, 
+    f.production_year
+ORDER BY 
+    f.production_year DESC, 
+    f.movie_title;

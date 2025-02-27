@@ -1,0 +1,50 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    COUNT(DISTINCT h.o_orderkey) AS high_value_order_count,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS popular_parts
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rank <= 3
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    HighValueOrders h ON p.p_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = h.o_orderkey LIMIT 1)
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, n.n_name, s.s_acctbal
+HAVING 
+    COUNT(DISTINCT h.o_orderkey) > 0
+ORDER BY 
+    high_value_order_count DESC, n.n_name;

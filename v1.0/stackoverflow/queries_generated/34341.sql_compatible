@@ -1,0 +1,82 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24) THEN 1 END) AS SuggestedEditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    up.DisplayName AS OwnerDisplayName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.AverageViewCount,
+    COALESCE(phs.CloseCount, 0) AS CloseCount,
+    COALESCE(phs.DeleteCount, 0) AS DeleteCount,
+    COALESCE(phs.SuggestedEditCount, 0) AS SuggestedEditCount,
+    ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+    JSON_AGG(DISTINCT r.Title) AS RelatedPosts
+FROM 
+    Posts p
+JOIN 
+    Users up ON p.OwnerUserId = up.Id
+LEFT JOIN 
+    UserPostStats ups ON up.Id = ups.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON p.Id = phs.PostId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Posts r ON pl.RelatedPostId = r.Id
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, up.DisplayName, ups.PostCount, ups.TotalScore, ups.AverageViewCount, phs.CloseCount, phs.DeleteCount, phs.SuggestedEditCount
+HAVING 
+    ups.TotalScore > 0
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50;

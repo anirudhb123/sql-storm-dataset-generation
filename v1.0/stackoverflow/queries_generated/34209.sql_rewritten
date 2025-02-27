@@ -1,0 +1,64 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        0 AS Level,
+        p.OwnerUserId,
+        p.AcceptedAnswerId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+
+    UNION ALL
+
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        Level + 1,
+        p.OwnerUserId,
+        p.AcceptedAnswerId
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+)
+
+
+SELECT 
+    u.DisplayName AS Author,
+    r.Title AS Question,
+    r.CreationDate AS QuestionDate,
+    r.Score AS QuestionScore,
+    COUNT(a.PostId) AS AnswerCount,
+    SUM(CASE WHEN a.Id = r.AcceptedAnswerId THEN 1 ELSE 0 END) AS AcceptedCount,
+    AVG(sub.Score) AS AvgAnswerScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(cv.Content) AS ClosedReason,
+    MAX(COALESCE(b.Name, 'No Badge')) AS TopBadgeName
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    Posts a ON r.PostId = a.ParentId
+LEFT JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(r.Tags, 2, length(r.Tags)-2), '><')::int[])
+LEFT JOIN 
+    PostHistory ph ON r.PostId = ph.PostId AND ph.PostHistoryTypeId = 10
+LEFT JOIN 
+    CloseReasonTypes cv ON CAST(ph.Comment AS int) = cv.Id
+LEFT JOIN 
+    Badges b ON b.UserId = r.OwnerUserId AND b.Class = 1  
+GROUP BY 
+    u.DisplayName, r.Title, r.CreationDate, r.Score
+HAVING 
+    COUNT(a.PostId) > 0 AND AVG(sub.Score) > 10
+ORDER BY 
+    QuestionScore DESC, Author ASC;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' AND 
+        p.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS AvgViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- count Bounty-related votes
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalBounty,
+    u.PostCount,
+    u.AvgViews,
+    pp.PostId,
+    pp.Title,
+    pp.ViewCount,
+    pp.CreationDate,
+    pp.Score,
+    cp.CloseReasons
+FROM 
+    UserActivity u
+JOIN 
+    RankedPosts pp ON u.UserId = pp.OwnerUserId AND pp.Rank <= 5
+LEFT JOIN 
+    ClosedPosts cp ON pp.PostId = cp.PostId
+WHERE 
+    u.TotalBounty > 0 OR u.PostCount > 5
+ORDER BY 
+    u.TotalBounty DESC, 
+    pp.ViewCount DESC;

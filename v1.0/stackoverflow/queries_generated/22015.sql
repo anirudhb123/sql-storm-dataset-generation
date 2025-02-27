@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) AND 
+        p.Score IS NOT NULL
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(pvs.Upvotes, 0) AS Upvotes,
+    COALESCE(pvs.Downvotes, 0) AS Downvotes,
+    COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(phd.ChangeCount, 0) AS EditCount,
+    CASE 
+        WHEN COUNT(DISTINCT CASE WHEN rp.PostTypeId = 1 THEN V.Id END) > 0 
+            THEN 'Question' 
+        WHEN COUNT(DISTINCT CASE WHEN rp.PostTypeId = 2 THEN V.Id END) > 0 
+            THEN 'Answer' 
+        ELSE 'Other' 
+    END AS PostType,
+    CASE 
+        WHEN MAX(phd.Editors) IS NULL THEN 'No Recent Edits'
+        ELSE MAX(phd.Editors)
+    END AS RecentEditors
+FROM 
+    RankedPosts AS rp
+LEFT JOIN 
+    PostVoteSummary AS pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    PostHistoryDetails AS phd ON rp.PostId = phd.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score
+HAVING 
+    COALESCE(pvs.Upvotes, 0) > 10 OR 
+    COALESCE(pvs.Downvotes, 0) < 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;
+
+This query benchmarks the performance by combining various SQL constructs and handling complex data relationships, optimally selecting relevant posts from a defined time frame while also aggregating votes and post history details. The query uses CTEs for organization and clarity, includes outer joins for comprehensive data retrieval, applies window functions for ranking, and integrates conditional statements to manage diverse post types and edit comprehensiveness. It also implements practical NULL logic while yielding a robust dataset for performance testing.

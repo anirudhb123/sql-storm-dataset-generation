@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+SupplierCost AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    rc.total_supply_cost,
+    cs.total_spent,
+    cs.order_count,
+    ro.o_orderdate,
+    ro.o_orderpriority
+FROM 
+    part p
+LEFT JOIN 
+    SupplierCost rc ON p.p_partkey = rc.ps_partkey
+LEFT JOIN 
+    CustomerStats cs ON cs.total_spent IS NOT NULL
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = (
+        SELECT o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'F' 
+        AND o.o_totalprice >= 1000 
+        ORDER BY o.o_orderdate DESC 
+        LIMIT 1
+    )
+WHERE 
+    p.p_size > 15 
+    AND (rc.total_supply_cost IS NULL OR rc.total_supply_cost > 10000)
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

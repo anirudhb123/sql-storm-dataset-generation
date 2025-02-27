@@ -1,0 +1,55 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_hdemo_sk, 0 AS level
+    FROM customer
+    WHERE c_current_hdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_hdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_hdemo_sk = ch.c_current_hdemo_sk
+),
+SalesStats AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+),
+TopStores AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY s.s_store_id
+    HAVING total_store_sales > 1000000
+),
+ShippingModes AS (
+    SELECT 
+        sm.sm_type,
+        COUNT(ws.ws_item_sk) AS items_sold,
+        SUM(ws.ws_ext_ship_cost) AS total_ship_cost
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY sm.sm_type
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    coalesce(ss.total_sales, 0) AS total_sales,
+    coalesce(ss.total_orders, 0) AS total_orders,
+    coalesce(ss.avg_net_profit, 0) AS avg_net_profit,
+    ts.s_store_id,
+    ts.total_store_sales,
+    sm.sm_type,
+    sm.items_sold,
+    sm.total_ship_cost
+FROM CustomerHierarchy ch
+LEFT JOIN SalesStats ss ON ch.c_current_hdemo_sk = ss.d_year
+LEFT JOIN TopStores ts ON ts.s_store_id = (SELECT MAX(s_store_id) FROM store) -- Example for store selection
+LEFT JOIN ShippingModes sm ON sm.items_sold > 100
+WHERE ch.level <= 3
+ORDER BY ch.c_first_name, ch.c_last_name, total_sales DESC;

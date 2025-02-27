@@ -1,0 +1,79 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY u.Id), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY u.Id), 0) AS Downvotes,
+        COALESCE(COUNT(c.Id) OVER (PARTITION BY u.Id), 0) AS Comments,
+        COALESCE(SUM(b.Class = 1) OVER (PARTITION BY u.Id), 0) AS GoldBadges
+    FROM
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Upvotes,
+        Downvotes,
+        Comments,
+        GoldBadges,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserEngagement
+), PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        CASE
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes'
+            ELSE 'No'
+        END AS IsAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+), EnhancedPostDetails AS (
+    SELECT 
+        pd.*,
+        CASE 
+            WHEN pd.Upvotes - pd.Downvotes > 1 THEN 'Positive'
+            WHEN pd.Upvotes - pd.Downvotes < -1 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        ROW_NUMBER() OVER (ORDER BY pd.ViewCount DESC) AS PopularityRank
+    FROM 
+        PostDetails pd
+)
+
+SELECT
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    epd.Title,
+    epd.CreationDate,
+    epd.ViewCount,
+    epd.TotalComments,
+    epd.IsAcceptedAnswer,
+    epd.Upvotes - epd.Downvotes AS NetVotes,
+    epd.Sentiment,
+    NULLIF(epd.PopularityRank, 1) AS NotFirstPlacePopularity 
+FROM 
+    TopUsers tu
+INNER JOIN 
+    EnhancedPostDetails epd ON tu.UserId = epd.PostId 
+WHERE 
+    tu.UserRank <= 10 
+    AND epd.Sentiment <> 'Neutral' 
+ORDER BY 
+    tu.Reputation DESC, 
+    epd.ViewCount DESC;

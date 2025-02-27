@@ -1,0 +1,36 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+), CustomerPurchases AS (
+    SELECT c.c_custkey, SUM(os.total_revenue) AS total_spent
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    GROUP BY c.c_custkey
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, cp.total_spent
+    FROM customer c
+    JOIN CustomerPurchases cp ON c.c_custkey = cp.c_custkey
+    WHERE cp.total_spent IS NOT NULL
+    HAVING cp.total_spent > 5000
+)
+SELECT r.r_name, COUNT(n.n_nationkey) AS nation_count, 
+       SUM(COALESCE(sh.level, 0)) AS total_supplier_level,
+       AVG(ch.total_spent) AS avg_spent_per_customer
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN HighValueCustomers ch ON n.n_nationkey = ch.c_name
+GROUP BY r.r_name
+ORDER BY nation_count DESC, avg_spent_per_customer DESC;

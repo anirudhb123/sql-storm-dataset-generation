@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    COALESCE(pv.Upvotes, 0) AS Upvotes,
+    COALESCE(pv.Downvotes, 0) AS Downvotes,
+    COALESCE(pv.TotalVotes, 0) AS TotalVotes,
+    COALESCE(cpr.CloseReasons, 'Not Closed') AS CloseReasons,
+    r.Level
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    PostVoteSummary pv ON r.PostId = pv.PostId
+LEFT JOIN 
+    ClosedPostReasons cpr ON r.PostId = cpr.PostId
+WHERE 
+    r.Level <= 3 
+ORDER BY 
+    r.Level, r.Title;

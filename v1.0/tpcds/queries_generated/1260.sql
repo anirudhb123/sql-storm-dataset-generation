@@ -1,0 +1,71 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+), 
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_sales > (
+            SELECT AVG(total_sales) FROM CustomerSales
+        )
+), 
+CustomerDetails AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count
+    FROM 
+        HighValueCustomers cs
+    LEFT JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+), 
+SalesAnalysis AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_made,
+        SUM(ws.ws_net_paid_inc_tax) AS total_paid
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        web_sales ws ON cd.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    sa.c_customer_id,
+    sa.cd_gender,
+    sa.cd_marital_status,
+    sa.total_net_profit,
+    sa.orders_made,
+    CASE 
+        WHEN sa.total_paid >= 5000 THEN 'High Value'
+        WHEN sa.total_paid BETWEEN 1000 AND 4999 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    SalesAnalysis sa
+ORDER BY 
+    sa.total_net_profit DESC
+LIMIT 100;

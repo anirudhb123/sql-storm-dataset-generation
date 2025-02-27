@@ -1,0 +1,46 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.full_name, 
+        rc.cd_gender, 
+        rc.cd_marital_status, 
+        rc.cd_education_status
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.gender_rank <= 10
+)
+SELECT 
+    fc.full_name,
+    fc.cd_gender,
+    fc.cd_marital_status,
+    fc.cd_education_status,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_paid) AS total_spent,
+    AVG(DATEDIFF(CURRENT_DATE, ca.ca_address_id)) AS average_days_since_registered
+FROM 
+    FilteredCustomers fc 
+JOIN 
+    web_sales ws ON fc.c_customer_id = ws.ws_bill_customer_sk
+JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_id = fc.c_customer_id)
+JOIN 
+    date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+GROUP BY 
+    fc.full_name, fc.cd_gender, fc.cd_marital_status, fc.cd_education_status, fc.c_customer_id
+ORDER BY 
+    total_spent DESC;

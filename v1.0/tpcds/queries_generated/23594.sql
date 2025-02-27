@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS last_sale_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk
+),
+date_range AS (
+    SELECT 
+        d.d_date,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS customer_count
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year = 2023 AND d.d_dow NOT IN (6, 7) 
+    GROUP BY 
+        d.d_date
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        COALESCE(MAX(inv.inv_quantity_on_hand), 0) AS inventory_quantity,
+        CASE 
+            WHEN COALESCE(MAX(inv.inv_quantity_on_hand), 0) < 10 THEN 'Low Stock'
+            ELSE 'Sufficient Stock'
+        END AS stock_status
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    sd.ws_item_sk,
+    sd.total_quantity,
+    sd.total_sales,
+    ir.inventory_quantity,
+    ir.stock_status,
+    dr.order_count,
+    dr.customer_count,
+    CASE 
+        WHEN sd.sales_rank = 1 AND ir.stock_status = 'Sufficient Stock' THEN 'Top Seller and In Stock'
+        ELSE 'Check Stock'
+    END AS sales_inventory_status
+FROM 
+    sales_data sd
+LEFT JOIN 
+    inventory_status ir ON sd.ws_item_sk = ir.inv_item_sk
+LEFT JOIN 
+    date_range dr ON dr.order_count > 0
+WHERE 
+    sd.total_quantity > 0 
+    AND sd.last_sale_rank = 1 
+    AND sd.total_sales IS NOT NULL
+ORDER BY 
+    sd.total_sales DESC NULLS LAST;

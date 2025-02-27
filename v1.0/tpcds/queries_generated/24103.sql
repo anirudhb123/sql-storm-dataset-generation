@@ -1,0 +1,50 @@
+
+WITH RECURSIVE IncomeBands AS (
+    SELECT ib_income_band_sk, 
+           ib_lower_bound, 
+           ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, 
+           ib.ib_lower_bound, 
+           ib.ib_upper_bound
+    FROM income_band ib
+    INNER JOIN IncomeBands ib_rec ON ib.ib_income_band_sk = ib_rec.ib_income_band_sk + 1
+),
+CustomerReturnStats AS (
+    SELECT c.c_customer_sk,
+           COUNT(DISTINCT sr_ticket_number) AS total_returns,
+           SUM(sr_return_amt_inc_tax) AS total_return_amount,
+           SUM(sr_return_qty) AS total_return_quantity
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    WHERE sr_return_qty IS NOT NULL
+    GROUP BY c.c_customer_sk
+),
+SalesDetails AS (
+    SELECT ws_bill_customer_sk AS customer_sk,
+           SUM(ws_net_paid) AS total_spent,
+           COUNT(DISTINCT ws_order_number) AS order_count,
+           MAX(ws_sold_date_sk) AS last_purchase_date
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT cd.cd_gender,
+       cd.cd_marital_status,
+       ib.ib_lower_bound,
+       ib.ib_upper_bound,
+       COALESCE(cr.total_returns, 0) AS return_count,
+       COALESCE(cr.total_return_amount, 0.00) AS return_amount,
+       COALESCE(sd.total_spent, 0.00) AS total_spent,
+       sd.order_count,
+       ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY total_spent DESC) AS rank_by_spending
+FROM customer_demographics cd
+JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+JOIN IncomeBands ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN CustomerReturnStats cr ON cd.cd_demo_sk = cr.c_customer_sk
+LEFT JOIN SalesDetails sd ON cd.cd_demo_sk = sd.customer_sk
+WHERE (total_spent > 1000 OR return_count > 5)
+  AND (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NOT NULL)
+  AND (return_amount > 50.00 OR ib.ib_lower_bound < 5000)
+ORDER BY rank_by_spending ASC, cd.cd_gender DESC;

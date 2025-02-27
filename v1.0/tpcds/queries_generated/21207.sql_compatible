@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+demographic_stats AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_credit_rating) AS max_credit_rating
+    FROM customer_demographics
+    WHERE cd_dep_count IS NOT NULL
+    GROUP BY cd_gender
+),
+item_details AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_current_price,
+        COALESCE(NULLIF(i_size, ''), 'Unknown Size') AS item_size,
+        ROW_NUMBER() OVER (ORDER BY i_current_price DESC) AS price_rank
+    FROM item
+    WHERE i_current_price > 10.00
+),
+outer_joined_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        sd.total_profit,
+        id.i_item_desc,
+        id.item_size,
+        ds.cd_gender,
+        ds.customer_count
+    FROM sales_cte ws
+    LEFT JOIN item_details id ON ws.ws_item_sk = id.i_item_sk
+    LEFT JOIN demographic_stats ds ON (ds.customer_count > 10)
+    WHERE ws.rn = 1
+)
+SELECT 
+    oj.ws_item_sk,
+    oj.i_item_desc,
+    oj.item_size,
+    COALESCE(oj.total_profit, 0) AS total_profit,
+    COALESCE(oj.customer_count, 0) AS customer_count,
+    CASE 
+        WHEN COALESCE(oj.customer_count, 0) > 100 THEN 'High Engagement'
+        WHEN COALESCE(oj.customer_count, 0) BETWEEN 50 AND 100 THEN 'Medium Engagement'
+        ELSE 'Low Engagement'
+    END AS engagement_level
+FROM 
+    outer_joined_data oj
+WHERE 
+    oj.total_profit IS NOT NULL
+ORDER BY 
+    oj.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

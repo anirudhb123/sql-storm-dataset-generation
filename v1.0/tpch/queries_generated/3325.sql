@@ -1,0 +1,65 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        COUNT(DISTINCT p.p_partkey) AS TotalParts,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS RankByCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ss.TotalCost,
+        ROW_NUMBER() OVER (ORDER BY ss.TotalCost DESC) AS OverallRank
+    FROM 
+        supplier s
+    JOIN 
+        SupplierSummary ss ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.TotalCost > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+)
+SELECT 
+    h.s_name AS SupplierName,
+    h.TotalCost AS SupplierTotalCost,
+    c.c_name AS CustomerName,
+    o.o_totalprice AS OrderTotalPrice,
+    c.o_orderdate AS OrderDate,
+    ROW_NUMBER() OVER (PARTITION BY h.s_nationkey ORDER BY o.o_orderdate DESC) AS OrderPosition
+FROM 
+    HighCostSuppliers h
+LEFT JOIN 
+    CustomerOrders c ON h.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.o_orderkey = o.o_orderkey
+WHERE 
+    h.RankByCost <= 5
+    AND c.OrderRank <= 3
+ORDER BY 
+    h.TotalCost DESC, 
+    c.o_orderdate DESC;

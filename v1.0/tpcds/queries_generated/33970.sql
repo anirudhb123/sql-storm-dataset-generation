@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        1 AS level,
+        ws_order_number
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+    UNION ALL
+    SELECT 
+        ws.item_sk,
+        ws.ws_sales_price * 0.9 AS ws_sales_price,
+        level + 1,
+        ws_order_number
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesHierarchy sh ON ws.ws_item_sk = sh.ws_item_sk AND sh.level < 10
+)
+SELECT 
+    ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(s.ws_sales_price) AS total_sales,
+    AVG(s.ws_sales_price) AS avg_sales_price,
+    MAX(s.ws_sales_price) AS max_sales_price,
+    MIN(s.ws_sales_price) AS min_sales_price,
+    CASE 
+        WHEN SUM(s.ws_sales_price) IS NULL THEN 'No Sales'
+        WHEN SUM(s.ws_sales_price) > 10000 THEN 'High Sales'
+        ELSE 'Regular Sales'
+    END AS sales_category
+FROM 
+    customer c 
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    SalesHierarchy s ON c.c_customer_sk = s.ws_order_number
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = c.c_current_cdemo_sk 
+        AND cd.cd_credit_rating IS NOT NULL
+    )
+GROUP BY 
+    ca_city
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 1
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

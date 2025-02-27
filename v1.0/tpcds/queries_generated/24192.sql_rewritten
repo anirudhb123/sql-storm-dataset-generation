@@ -1,0 +1,70 @@
+WITH RecursiveSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), ItemDetails AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc,
+        COALESCE(NULLIF(i.i_current_price, 0), 0.01) AS price, 
+        i.i_brand,
+        CASE 
+            WHEN IFNULL(i.i_rec_end_date, cast('2002-10-01' as date)) < cast('2002-10-01' as date) THEN 'DISCONTINUED'
+            ELSE 'ACTIVE'
+        END AS status
+    FROM 
+        item i 
+), StorePerformance AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss_ticket_number) AS transactions,
+        AVG(ss_sales_price) AS avg_sales_price
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+)
+SELECT 
+    d.d_year, 
+    d.d_month_seq, 
+    aa.ca_city,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+    SUM(CASE WHEN s.total_sales > 1000 THEN s.total_sales ELSE 0 END) AS high_value_sales,
+    COUNT(DISTINCT rs.ws_item_sk) AS total_web_items_sold,
+    COALESCE(SUM(sp.total_net_profit), 0) AS total_profit,
+    COUNT(DISTINCT CASE WHEN cd.cd_marital_status = 'M' THEN c.c_customer_id END) AS married_customers,
+    STRING_AGG(DISTINCT CONCAT(i.i_item_desc, ' - ', i.i_brand), '; ') FILTER (WHERE i.status = 'ACTIVE') AS active_items
+FROM 
+    date_dim d
+LEFT JOIN 
+    RecursiveSales rs ON d.d_date_sk = rs.ws_item_sk
+LEFT JOIN 
+    catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    StorePerformance sp ON sp.ss_store_sk = rs.ws_item_sk
+INNER JOIN 
+    customer_address aa ON aa.ca_address_sk = (
+        SELECT ca_address_sk 
+        FROM customer c 
+        WHERE c.c_first_name = 'John' AND c.c_last_name = 'Doe'
+        LIMIT 1
+    )
+LEFT JOIN 
+    ItemDetails i ON i.i_item_sk = rs.ws_item_sk
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE 
+    d.d_year IN (2000, 2001)
+AND 
+    d.d_week_seq % 2 = 0 
+GROUP BY 
+    d.d_year, d.d_month_seq, aa.ca_city
+ORDER BY 
+    d.d_year DESC, d.d_month_seq DESC;

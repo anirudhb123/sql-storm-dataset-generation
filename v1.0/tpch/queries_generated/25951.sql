@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        p.p_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        lineitem l ON rs.s_suppkey = l.l_suppkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        rs.rank <= 3
+    GROUP BY 
+        rs.s_suppkey, rs.s_name, rs.s_acctbal, p.p_name
+)
+SELECT 
+    ts.s_name,
+    MAX(ts.s_acctbal) AS max_acctbal,
+    SUM(ts.order_count) AS total_orders,
+    COUNT(DISTINCT p.p_partkey) AS unique_parts
+FROM 
+    TopSuppliers ts
+JOIN 
+    partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    ts.s_name
+ORDER BY 
+    max_acctbal DESC
+LIMIT 10;

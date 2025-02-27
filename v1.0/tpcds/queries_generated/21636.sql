@@ -1,0 +1,70 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_value,
+        DENSE_RANK() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+FilteredDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status, 
+        cd_purchase_estimate
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 100
+),
+CustomerAddress AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state
+    FROM customer_address
+    WHERE ca_state IS NOT NULL OR ca_city IS NOT NULL
+)
+SELECT 
+    c.c_customer_id,
+    ca.full_address,
+    fd.cd_gender,
+    fd.cd_marital_status,
+    fd.cd_purchase_estimate,
+    rr.return_count,
+    rr.total_return_quantity,
+    rr.total_return_value,
+    COALESCE(rr.return_count, 0) AS return_present,
+    CASE 
+        WHEN rr.total_return_value IS NULL THEN 'No Returns' 
+        ELSE CONCAT('Total Returns: $', ROUND(rr.total_return_value, 2)) 
+    END AS return_summary
+FROM customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN FilteredDemographics fd ON c.c_current_cdemo_sk = fd.cd_demo_sk
+LEFT JOIN RankedReturns rr ON rr.sr_customer_sk = c.c_customer_sk
+WHERE 
+    (fd.cd_gender IS NOT NULL OR fd.cd_marital_status IS NOT NULL)
+    AND (ca.ca_city = 'Seattle' OR (ca.ca_state = 'WA' AND ca.ca_city IS NOT NULL))
+    AND COALESCE(rr.return_count, 0) < 5
+UNION ALL
+SELECT 
+    c.c_customer_id,
+    'No Address' AS full_address,
+    fd.cd_gender,
+    fd.cd_marital_status,
+    fd.cd_purchase_estimate,
+    rr.return_count,
+    rr.total_return_quantity,
+    rr.total_return_value,
+    COALESCE(rr.return_count, 0) AS return_present,
+    'No Returns' AS return_summary
+FROM customer c
+LEFT JOIN FilteredDemographics fd ON c.c_current_cdemo_sk = fd.cd_demo_sk
+LEFT JOIN RankedReturns rr ON rr.sr_customer_sk = c.c_customer_sk
+WHERE 
+    c.c_current_addr_sk IS NULL
+    AND (fd.cd_gender IS NOT NULL OR fd.cd_marital_status IS NOT NULL);

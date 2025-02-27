@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+), HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM RankedSuppliers s
+    WHERE s.rank <= 3
+), BestSellingParts AS (
+    SELECT ps.ps_partkey, SUM(l.l_quantity) AS total_quantity
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+    HAVING SUM(l.l_quantity) > (SELECT AVG(total_quantity) FROM (
+                                          SELECT SUM(l.l_quantity) AS total_quantity
+                                          FROM partsupp ps
+                                          JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+                                          GROUP BY ps.ps_partkey
+                                     ) AS subquery)
+), SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN HighValueSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 1
+), CombinedData AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, sp.supplier_count, bsp.total_quantity,
+           ROW_NUMBER() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    LEFT JOIN SupplierPartCounts sp ON p.p_partkey = sp.ps_partkey
+    LEFT JOIN BestSellingParts bsp ON p.p_partkey = bsp.ps_partkey
+)
+SELECT c.c_name, SUM(cd.p_retailprice * COALESCE(cd.total_quantity, 0)) AS potential_revenue
+FROM CombinedData cd
+JOIN customer c ON c.c_custkey IN (SELECT o.o_custkey
+                                     FROM orders o
+                                     WHERE o.o_orderstatus = 'O'
+                                     AND o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date)))
+WHERE cd.price_rank <= 10 OR cd.supplier_count IS NULL
+GROUP BY c.c_name
+HAVING SUM(cd.p_retailprice * COALESCE(cd.total_quantity, 0)) > 1000
+ORDER BY potential_revenue DESC
+LIMIT 5;

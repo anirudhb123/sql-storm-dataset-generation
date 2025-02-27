@@ -1,0 +1,78 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice) 
+            FROM part p2 
+            WHERE p2.p_size IS NOT NULL
+        ) 
+        AND p.p_size BETWEEN 10 AND 50
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        s.s_comment,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS nation_rank
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+        AND s.s_acctbal > (
+            SELECT COALESCE(AVG(s2.s_acctbal), 0) 
+            FROM supplier s2 
+            WHERE s2.s_comment LIKE '%excellent%' 
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+EligibleSuppliers AS (
+    SELECT 
+        sd.s_suppkey, 
+        sd.s_name 
+    FROM 
+        SupplierDetails sd 
+    WHERE 
+        sd.nation_rank = 1
+)
+SELECT 
+    c.c_custkey, 
+    c.c_name, 
+    COALESCE(cp.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT rp.p_partkey) AS num_top_parts,
+    STRING_AGG(DISTINCT es.s_name, ', ') AS top_suppliers
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders cp ON c.c_custkey = cp.c_custkey
+LEFT JOIN 
+    RankedParts rp ON cp.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders) 
+LEFT JOIN 
+    EligibleSuppliers es ON es.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM RankedParts rp WHERE rp.price_rank = 1))
+GROUP BY 
+    c.c_custkey, c.c_name
+HAVING 
+    total_spent IS NOT NULL 
+    AND num_top_parts > 0
+ORDER BY 
+    total_spent DESC, c.c_name ASC;

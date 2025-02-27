@@ -1,0 +1,47 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS Level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o2.o_orderkey, o2.o_orderdate, o2.o_totalprice, oh.Level + 1
+    FROM orders o2
+    JOIN OrderHierarchy oh ON o2.o_orderkey = oh.o_orderkey
+    WHERE oh.Level < 5
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, s.s_nationkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+           COUNT(DISTINCT s.s_suppkey) AS SupplierCount
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_nationkey
+),
+PopularParts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS OrderCount
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 10
+),
+AggregatedData AS (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice,
+           ps.TotalCost, pp.OrderCount, 
+           ROW_NUMBER() OVER (PARTITION BY ps.s_nationkey ORDER BY oh.o_totalprice DESC) AS Rank
+    FROM OrderHierarchy oh
+    JOIN SupplierStats ps ON oh.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.ps_partkey)
+    JOIN PopularParts pp ON ps.ps_partkey = pp.p_partkey
+    WHERE oh.o_totalprice IS NOT NULL
+)
+SELECT r.r_name, AD.o_orderkey, AD.o_orderdate, AD.o_totalprice, 
+       AD.TotalCost, AD.OrderCount,
+       CASE 
+           WHEN AD.Rank <= 3 THEN 'Top'
+           ELSE 'Others'
+       END AS OrderRank
+FROM AggregatedData AD
+JOIN nation n ON AD.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE r.r_name IS NOT NULL
+ORDER BY r.r_name, AD.o_orderdate DESC;

@@ -1,0 +1,69 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+),
+item_summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(CASE WHEN ws.ws_sales_price IS NULL THEN 0 ELSE ws.ws_sales_price END), 0) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS sales_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_ship_date_sk) AS unique_ship_dates
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+customer_analysis AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_dow,
+        COUNT(DISTINCT sr.sr_ticket_number) AS returns_count,
+        SUM(COALESCE(sr.sr_return_amount, 0)) AS total_returns
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE d.d_dow IN (0, 6) -- only include returns on weekends
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, d.d_dow
+),
+final_analysis AS (
+    SELECT 
+        i.id AS item_id,
+        i.description AS item_description,
+        COALESCE(cs.total_sales, 0) AS total_sales,
+        COALESCE(cs.sales_count, 0) AS sales_count,
+        COALESCE(cs.avg_sales_price, 0) AS avg_sales_price,
+        COALESCE(ca.returns_count, 0) AS returns_count,
+        COALESCE(ca.total_returns, 0) AS total_returns,
+        CASE WHEN cs.avg_sales_price = 0 THEN 'No Sales' ELSE 'Sold' END AS sales_status,
+        CASE WHEN ca.returns_count > 0 THEN 'Has Returns' ELSE 'No Returns' END AS return_status
+    FROM item_summary cs
+    LEFT JOIN customer_analysis ca ON ca.c_customer_id = 'some_customer_id'  -- assuming we focus on a specific customer for this analysis
+    LEFT JOIN (
+        SELECT 
+            i.i_item_sk AS id,
+            i.i_item_desc AS description
+        FROM item i
+    ) i ON i.id = cs.i_item_id
+)
+SELECT 
+    fa.item_id,
+    fa.item_description,
+    fa.total_sales,
+    fa.sales_count,
+    fa.avg_sales_price,
+    fa.returns_count,
+    fa.total_returns,
+    fa.sales_status,
+    fa.return_status
+FROM final_analysis fa
+WHERE fa.total_sales > 1000
+ORDER BY fa.avg_sales_price DESC
+LIMIT 50;

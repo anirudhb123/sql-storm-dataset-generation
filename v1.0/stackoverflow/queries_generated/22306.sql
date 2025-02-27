@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 4 THEN 1 END) AS OffensiveCount
+    FROM Votes v
+    GROUP BY v.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        uv.UpVotesCount,
+        uv.DownVotesCount,
+        uv.OffensiveCount,
+        CASE 
+            WHEN rp.ViewCount IS NULL THEN 'Unseen'
+            WHEN rp.ViewCount > 1000 THEN 'Popular'
+            ELSE 'Moderate'
+        END AS Popularity
+    FROM RankedPosts rp
+    LEFT JOIN UserVotes uv ON rp.PostId = uv.PostId
+    WHERE rp.Rank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    COALESCE(tp.UpVotesCount, 0) AS UpVotes,
+    COALESCE(tp.DownVotesCount, 0) AS DownVotes,
+    CASE 
+        WHEN tp.OffensiveCount > 0 THEN 'Contains Offensive Votes'
+        ELSE 'No Offensive Votes'
+    END AS VoteStatus,
+    tp.Popularity,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM TopPosts tp
+LEFT JOIN Posts p ON tp.PostId = p.Id
+LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+GROUP BY 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.UpVotesCount,
+    tp.DownVotesCount,
+    tp.OffensiveCount,
+    tp.Popularity
+ORDER BY tp.Score DESC, tp.ViewCount DESC;

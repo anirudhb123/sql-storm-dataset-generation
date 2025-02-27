@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_net_profit) AS total_profit, 
+           1 AS level
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+    UNION ALL
+    SELECT sh.ws_bill_customer_sk, 
+           SUM(ws_ws.net_profit) AS total_profit, 
+           sh.level + 1
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws.ws_bill_customer_sk = sh.ws_bill_customer_sk
+    WHERE sh.level < 3
+    GROUP BY sh.ws_bill_customer_sk
+),
+promoted_sales AS (
+    SELECT ws_web_site_sk, 
+           COUNT(DISTINCT ws_order_number) AS total_orders, 
+           SUM(ws_net_profit) AS total_revenue
+    FROM web_sales
+    WHERE ws_ship_date_sk IS NOT NULL
+    GROUP BY ws_web_site_sk
+),
+top_customers AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name || ' ' || c.c_last_name AS customer_name,
+           SUM(ss.ss_net_profit) AS total_spent
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY c.c_customer_sk
+    HAVING SUM(ss.ss_net_profit) > 5000
+    ORDER BY total_spent DESC
+    LIMIT 10
+)
+SELECT ca.ca_city,
+       ca.ca_state,
+       SUM(ws.ws_net_profit) AS net_profit,
+       AVG(ws.ws_ext_discount_amt) AS avg_discount,
+       (SELECT COUNT(*) FROM customer WHERE c_birth_month = ca.ca_birth_month) AS potential_customers,
+       CASE 
+           WHEN SUM(ws.ws_net_profit) > 500 THEN 'High Profit'
+           ELSE 'Low Profit'
+       END AS profit_category
+FROM web_sales ws
+JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+INNER JOIN promoted_sales ps ON ws.ws_web_site_sk = ps.ws_web_site_sk
+WHERE ca.ca_state IS NOT NULL
+GROUP BY ca.ca_city, ca.ca_state
+HAVING COUNT(DISTINCT ws.ws_order_number) > 100
+ORDER BY net_profit DESC
+LIMIT 20;

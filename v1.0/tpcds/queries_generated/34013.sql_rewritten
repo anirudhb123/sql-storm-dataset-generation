@@ -1,0 +1,55 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk,
+           0 AS level
+    FROM customer
+    WHERE c_parent_customer_sk IS NULL 
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_parent_customer_sk = ch.c_customer_sk
+),
+item_sales AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY ws.ws_item_sk
+),
+customer_info AS (
+    SELECT cd.cd_gender, cd.cd_marital_status, ch.level, COUNT(c.c_customer_sk) AS customer_count
+    FROM customer_hierarchy ch
+    JOIN customer c ON c.c_customer_sk = ch.c_customer_sk
+    JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status, ch.level
+),
+lookup AS (
+    SELECT c.c_customer_id,
+           ca.ca_city,
+           MAX(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_customers,
+           SUM(i.total_sales) AS total_sales
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN item_sales i ON i.ws_item_sk = c.c_current_hdemo_sk
+    JOIN customer_info cd ON cd.level = (SELECT MAX(level) FROM customer_info) 
+    GROUP BY c.c_customer_id, ca.ca_city
+),
+final_summary AS (
+    SELECT ca.ca_city, 
+           COUNT(DISTINCT c.c_customer_id) AS total_customers,
+           SUM(l.married_customers) AS total_married,
+           AVG(IFNULL(l.total_sales, 0)) AS avg_total_sales
+    FROM lookup l
+    JOIN customer_address ca ON l.ca_city = ca.ca_city
+    GROUP BY ca.ca_city
+)
+SELECT fs.ca_city, 
+       fs.total_customers, 
+       fs.total_married, 
+       fs.avg_total_sales,
+       ROW_NUMBER() OVER (ORDER BY fs.avg_total_sales DESC) AS sales_rank
+FROM final_summary fs
+WHERE fs.total_married > 10
+ORDER BY sales_rank;

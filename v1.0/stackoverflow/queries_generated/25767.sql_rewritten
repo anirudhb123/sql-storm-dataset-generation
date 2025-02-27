@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(v.Id) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+
+SELECT 
+    rp.OwnerDisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.VoteCount,
+    ph.Comment AS PostCloseReason,
+    h.UserDisplayName AS LastEditor,
+    COUNT(c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistory ph ON rp.PostId = ph.PostId AND ph.PostHistoryTypeId = 10 
+LEFT JOIN 
+    Posts h ON rp.PostId = h.Id 
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId 
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><') AS t ON t.TagName IS NOT NULL
+WHERE 
+    rp.VoteRank <= 5 
+GROUP BY 
+    rp.OwnerDisplayName, rp.Title, rp.CreationDate, rp.VoteCount, ph.Comment, h.UserDisplayName
+ORDER BY 
+    rp.VoteCount DESC;

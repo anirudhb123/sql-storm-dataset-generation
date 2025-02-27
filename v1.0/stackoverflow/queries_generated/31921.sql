@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vc.BountyAmount), 0) AS TotalBounties,
+        COALESCE(COUNT(DISTINCT v.PostId), 0) AS TotalVotes,
+        COALESCE(SUM(v.CreationDate), 0) AS VoteScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Votes vc ON u.Id = vc.UserId AND vc.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (1, 2) THEN ph.CreationDate END) AS InitialPostDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    u.DisplayName AS Owner,
+    ua.TotalBounties,
+    ua.TotalVotes,
+    ua.VoteScore,
+    phd.LastEditDate,
+    phd.InitialPostDate,
+    phd.CloseCount,
+    CASE 
+        WHEN phd.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.PostId = phd.PostId
+WHERE 
+    p.RankByScore <= 3 -- Top 3 posts per user
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

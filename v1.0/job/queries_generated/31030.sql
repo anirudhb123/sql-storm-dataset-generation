@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 -- assuming kind_id=1 represents some specific category
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    p.name AS actor_name,
+    m.title AS movie_title,
+    mh.level AS movie_level,
+    COALESCE(c.role_id, 'Unknown Role') AS role_id,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    AVG(ACTIVITY) OVER (PARTITION BY p.id ORDER BY COUNT(DISTINCT k.keyword) DESC) AS avg_activity,
+    SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_count,
+    STRING_AGG(DISTINCT ci.note, ', ') AS cast_notes
+FROM 
+    cast_info c
+JOIN 
+    aka_name p ON c.person_id = p.person_id
+JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+WHERE 
+    p.name IS NOT NULL 
+    AND (mh.production_year BETWEEN 2000 AND 2020)
+GROUP BY 
+    p.id, mh.movie_id, mh.title, mh.level, c.role_id
+HAVING 
+    COUNT(DISTINCT k.keyword) > 0
+ORDER BY 
+    avg_activity DESC, keyword_count DESC;
+This SQL query creates a recursive Common Table Expression (CTE) to build a hierarchy of movies linked by certain criteria (using `movie_link`). It gathers performance data on actors, including their names, the titles of the movies they are associated with, various role information, keyword counts, and more. The use of window functions, CTEs, outer joins, string aggregation, and conditional aggregation tackles different aspects of the relationships in the dataset, providing a detailed performance report of actor engagements in movies. The results are sorted based on average activity and keyword counts for better insight into the most active actors during the specified production years.

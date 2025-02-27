@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CategoryCTE AS (
+    SELECT 
+        i_item_sk,
+        i_category_id,
+        i_item_desc,
+        1 AS depth
+    FROM 
+        item
+    WHERE 
+        i_category_id IS NOT NULL
+    UNION ALL
+    SELECT 
+        i.item_sk,
+        i.i_category_id,
+        CONCAT(cc.i_item_desc, ' -> ', i.i_item_desc) AS i_item_desc,
+        depth + 1
+    FROM 
+        item i
+    JOIN 
+        CategoryCTE cc ON i.i_category_id = cc.i_category_id
+    WHERE 
+        depth < 5
+),
+CustomerCategory AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cc.i_item_desc,
+        SUM(ss.ss_quantity) AS total_quantity
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        CategoryCTE cc ON ss.ss_item_sk = cc.i_item_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cc.i_item_desc
+),
+RankedSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.i_item_desc,
+        c.total_quantity,
+        RANK() OVER (PARTITION BY c.i_item_desc ORDER BY c.total_quantity DESC) AS rank
+    FROM 
+        CustomerCategory c
+)
+SELECT 
+    r.c_customer_sk,
+    r.c_first_name,
+    r.c_last_name,
+    r.cd_gender,
+    r.cd_marital_status,
+    r.i_item_desc,
+    r.total_quantity,
+    CASE 
+        WHEN r.rank = 1 THEN 'Top Seller'
+        ELSE 'Other'
+    END AS sale_rank
+FROM 
+    RankedSales r
+WHERE 
+    r.total_quantity > 0
+    AND r.cd_gender IS NOT NULL
+    AND r.cd_marital_status IN ('M', 'S')
+ORDER BY 
+    r.i_item_desc, r.total_quantity DESC;

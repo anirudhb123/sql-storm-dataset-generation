@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore,
+        CASE 
+            WHEN P.PostTypeId = 1 THEN 
+                (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) 
+            ELSE 0 
+        END AS TotalUpVotes
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryCounts AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+CombinedResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.AnswerCount,
+        RP.CommentCount,
+        RUA.UserId,
+        RUA.DisplayName,
+        RUA.CommentCount AS UserCommentCount,
+        RUA.UpVotes AS UserUpVotes,
+        RUA.DownVotes AS UserDownVotes,
+        PHC.HistoryCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecentUserActivity RUA ON RUA.UserId = RP.OwnerUserId
+    LEFT JOIN 
+        PostHistoryCounts PHC ON PHC.PostId = RP.PostId
+    WHERE 
+        (RP.RankByScore <= 5 OR RP.CommentCount > 0) 
+        AND (RUA.UpVotes > 10 OR RUA.CommentCount > 5)
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    UserId,
+    DisplayName,
+    UserCommentCount,
+    UserUpVotes,
+    UserDownVotes,
+    COALESCE(HistoryCount, 0) AS HistoryCount,
+    (SELECT STRING_AGG(PH.Comment, '; ') 
+     FROM PostHistory PH 
+     WHERE PH.PostId = CR.PostId 
+     AND PH.PostHistoryTypeId IN (10, 11)) AS CloseReasons
+FROM 
+    CombinedResults CR
+WHERE 
+    Score > 0
+ORDER BY 
+    CreationDate DESC;

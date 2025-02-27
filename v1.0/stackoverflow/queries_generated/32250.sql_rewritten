@@ -1,0 +1,69 @@
+WITH RECURSIVE UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsVotedOn
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON v.PostId = p.Id
+    GROUP BY u.Id
+), 
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '60 days'
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.CommentCount,
+        pd.PostRank,
+        COALESCE(phs.HistoryCount, 0) AS HistoryCount
+    FROM PostDetails pd
+    LEFT JOIN PostHistorySummary phs ON pd.PostId = phs.PostId
+    WHERE pd.PostRank <= 10
+),
+RankedUsers AS (
+    SELECT 
+        uvs.UserId,
+        uvs.DisplayName,
+        (uvs.UpVotes - uvs.DownVotes) AS NetVotes,
+        RANK() OVER (ORDER BY (uvs.UpVotes - uvs.DownVotes) DESC) AS UserRank
+    FROM UserVoteSummary uvs
+)
+
+SELECT 
+    tp.Title AS PostTitle,
+    tp.UpVotes AS TotalUpVotes,
+    tp.DownVotes AS TotalDownVotes,
+    tp.CommentCount AS TotalComments,
+    tp.HistoryCount AS TotalHistoryEntries,
+    ru.DisplayName AS TopUser,
+    ru.NetVotes AS UserNetVotes
+FROM TopPosts tp
+JOIN RankedUsers ru ON tp.UpVotes = ru.UpVotes AND tp.DownVotes = ru.DownVotes
+ORDER BY tp.UpVotes DESC, tp.DownVotes ASC;

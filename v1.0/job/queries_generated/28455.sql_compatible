@@ -1,0 +1,70 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_list,
+        ARRAY_AGG(DISTINCT cn.name) AS company_list
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+cast_details AS (
+    SELECT 
+        c.id AS cast_id,
+        a.name AS actor_name,
+        a.imdb_index
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+),
+info_summary AS (
+    SELECT 
+        m.movie_id,
+        ARRAY_AGG(DISTINCT pi.info) AS info_list
+    FROM 
+        movie_info m
+    JOIN 
+        movie_info_idx mi ON m.movie_id = mi.movie_id
+    JOIN 
+        person_info pi ON mi.info_type_id = pi.info_type_id
+    WHERE 
+        pi.info IS NOT NULL
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.cast_list,
+    md.company_list,
+    is.info_list
+FROM 
+    movie_details md
+LEFT JOIN 
+    info_summary is ON md.movie_id = is.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

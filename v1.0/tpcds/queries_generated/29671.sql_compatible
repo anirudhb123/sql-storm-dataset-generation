@@ -1,0 +1,68 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        LOWER(CONCAT(ca_city, ', ', ca_state, ' ', ca_zip)) AS normalized_location
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        ca_address_sk,
+        (SELECT COUNT(*) FROM customer_demographics WHERE cd_demo_sk = c_current_cdemo_sk) AS demo_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+Result AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ai.full_address,
+        COALESCE(si.total_profit, 0) AS total_profit,
+        COALESCE(si.order_count, 0) AS order_count,
+        ci.demo_count
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        AddressInfo ai ON ci.ca_address_sk = ai.ca_address_sk
+    LEFT JOIN 
+        SalesInfo si ON ci.c_customer_sk = si.ws_bill_customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN order_count > 10 THEN 'High Value Customer' 
+        WHEN order_count BETWEEN 5 AND 10 THEN 'Medium Value Customer' 
+        ELSE 'Low Value Customer' 
+    END AS customer_value_segment
+FROM 
+    Result
+WHERE 
+    normalized_location LIKE '%new york%'
+ORDER BY 
+    total_profit DESC;

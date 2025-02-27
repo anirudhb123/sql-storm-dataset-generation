@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(NULLIF(STRING_AGG(DISTINCT t.TagName, ', '), ''), 'No Tags') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(b.Class = 1, 0)) AS GoldBadges,
+        SUM(COALESCE(b.Class = 2, 0)) AS SilverBadges,
+        SUM(COALESCE(b.Class = 3, 0)) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+HighlightedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        us.DisplayName AS Creator,
+        us.PostsCreated,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UserStats us ON us.UserId = (
+            SELECT 
+                OwnerUserId 
+            FROM 
+                Posts 
+            WHERE 
+                Id = rp.PostId 
+            LIMIT 1
+        )
+    WHERE 
+        rp.Rank <= 10  -- Top 10 posts per type
+)
+
+SELECT 
+    h.PostId,
+    h.Title,
+    h.ViewCount,
+    h.Creator,
+    h.PostsCreated,
+    h.GoldBadges,
+    h.SilverBadges,
+    h.BronzeBadges
+FROM 
+    HighlightedPosts h
+ORDER BY 
+    h.ViewCount DESC;

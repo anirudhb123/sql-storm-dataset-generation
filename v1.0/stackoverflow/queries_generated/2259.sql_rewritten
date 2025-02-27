@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    LEFT OUTER JOIN Comments c ON p.Id = c.PostId
+    WHERE
+        p.PostTypeId = 1 /* Questions only */
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+RecentActivity AS (
+    SELECT
+        p.OwnerUserId,
+        MAX(p.LastActivityDate) AS LastActive
+    FROM
+        Posts p
+    GROUP BY
+        p.OwnerUserId
+)
+SELECT
+    u.DisplayName,
+    p.PostId,
+    p.Title,
+    p.CommentCount,
+    ub.BadgeCount,
+    CASE
+        WHEN Rat.LastActive IS NULL THEN 'Never Active'
+        WHEN Rat.LastActive > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 'Active Last Year'
+        ELSE 'Inactive'
+    END AS ActivityStatus,
+    p.Rank,
+    COALESCE(ub.BadgeNames, 'No Badges') AS Badges
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecentActivity Rat ON u.Id = Rat.OwnerUserId
+WHERE 
+    p.Rank <= 5 /* Top 5 recent posts per user */
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC;

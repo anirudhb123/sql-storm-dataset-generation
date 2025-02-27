@@ -1,0 +1,62 @@
+
+WITH RECURSIVE income_data AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        0 AS level
+    FROM 
+        income_band
+    WHERE 
+        ib_lower_bound > 0
+
+    UNION ALL
+
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        id.level + 1
+    FROM 
+        income_band ib
+    JOIN 
+        income_data id ON ib.ib_income_band_sk = id.ib_income_band_sk
+    WHERE 
+        id.level < 3
+),
+ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY ca.ca_state) AS total_customers,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) OVER (PARTITION BY ca.ca_state) AS married_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state IS NOT NULL
+)
+SELECT 
+    ic.ib_income_band_sk,
+    COUNT(DISTINCT rc.c_customer_id) AS customer_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(CASE WHEN rc.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    MAX(rc.married_count) AS max_married_count,
+    STRING_AGG(rc.c_customer_id::TEXT, ', ') AS customer_ids
+FROM 
+    income_data ic
+LEFT JOIN 
+    ranked_customers rc ON (rc.rn <= 5 AND (ic.ib_lower_bound < rc.total_customers OR ic.ib_upper_bound >= rc.total_customers))
+GROUP BY 
+    ic.ib_income_band_sk
+HAVING 
+    COUNT(DISTINCT rc.c_customer_id) > 0
+ORDER BY 
+    ic.ib_income_band_sk ASC
+WITH ROLLUP
+;

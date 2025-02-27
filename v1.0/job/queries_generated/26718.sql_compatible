@@ -1,0 +1,79 @@
+
+WITH ActorNames AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        p.id AS person_id,
+        p.gender AS actor_gender
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        name p ON p.id = a.person_id
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT an.actor_name, ', ') AS cast_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        ActorNames an ON ci.person_id = an.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, ct.kind
+),
+FinalBenchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        ct.kind AS company_type,
+        md.cast_names,
+        COUNT(DISTINCT an.actor_id) AS total_actors,
+        COUNT(DISTINCT mk.keyword) AS total_keywords,
+        ARRAY_AGG(DISTINCT ct.kind ORDER BY ct.kind) AS distinct_company_types
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_companies mc ON md.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON md.movie_id = mk.movie_id
+    LEFT JOIN 
+        ActorNames an ON md.movie_id = an.movie_id
+    GROUP BY 
+        md.movie_title, md.production_year, md.movie_keyword, md.cast_names
+)
+SELECT 
+    fb.movie_title,
+    fb.production_year,
+    fb.movie_keyword,
+    fb.company_type,
+    fb.cast_names,
+    fb.total_actors,
+    fb.total_keywords,
+    fb.distinct_company_types
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.total_actors > 1 AND 
+    fb.production_year >= 2000
+ORDER BY 
+    fb.production_year DESC, 
+    fb.total_actors DESC;

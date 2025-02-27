@@ -1,0 +1,64 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(sr_ticket_number) AS returns_count
+    FROM
+        store_returns
+    GROUP BY
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        CASE
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS purchase_category
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+WarehouseInventory AS (
+    SELECT
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM
+        inventory inv
+    JOIN
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY
+        i.i_item_sk
+)
+SELECT
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cr.total_returned_amount,
+    cr.returns_count,
+    w.w_warehouse_name,
+    wi.total_inventory,
+    CASE
+        WHEN wi.total_inventory IS NULL THEN 'Out of Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM
+    CustomerDemographics cd
+LEFT JOIN
+    CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN
+    store s ON s.s_store_sk = (SELECT MIN(sr_store_sk) FROM store_returns WHERE sr_customer_sk = cd.c_customer_sk)
+LEFT JOIN
+    warehouse w ON w.w_warehouse_sk = s.s_store_sk
+LEFT JOIN
+    WarehouseInventory wi ON wi.i_item_sk = (SELECT sr_item_sk FROM store_returns WHERE sr_customer_sk = cd.c_customer_sk LIMIT 1)
+WHERE
+    cd.cd_gender = 'F' AND (cr.returns_count > 2 OR cr.total_returned_amount IS NULL)
+ORDER BY
+    cd.c_customer_sk, cr.total_returned_amount DESC;

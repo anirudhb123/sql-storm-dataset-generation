@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Feature%')
+),
+ActorNames AS (
+    SELECT 
+        a.person_id,
+        LISTAGG(DISTINCT a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS actor_names
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        RankedMovies rm ON c.movie_id = rm.movie_id
+    GROUP BY 
+        a.person_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(an.actor_names, 'No Actors') AS actors
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorNames an ON rm.movie_id = (
+            SELECT movie_id 
+            FROM cast_info ci 
+            WHERE ci.person_id IN (SELECT person_id FROM aka_name WHERE name_pcode_nf IS NOT NULL)
+            LIMIT 1  
+        )
+)
+
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.actors,
+    CASE 
+        WHEN mw.production_year IS NULL THEN 'Year Unknown' 
+        WHEN mw.production_year < 2000 THEN 'Classic' 
+        ELSE 'Modern' 
+    END AS movie_category,
+    (SELECT COUNT(*) 
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = mw.movie_id 
+     UNION ALL 
+     SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mw.movie_id) AS total_metadata
+FROM 
+    MoviesWithActors mw
+WHERE 
+    mw.title NOT ILIKE '%unreleased%'  
+    AND mw.production_year BETWEEN 1980 AND 2023
+ORDER BY 
+    CASE 
+        WHEN mw.production_year IS NULL THEN 1 
+        ELSE 0 
+    END, 
+    mw.production_year DESC, 
+    mw.title;

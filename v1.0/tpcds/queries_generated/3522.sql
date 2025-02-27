@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_paid) AS total_sales_amt
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_customer_sk
+),
+CustomerASummary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        COALESCE(cs.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(cs.total_sales_amt, 0) AS total_sales_amt,
+        CASE 
+            WHEN COALESCE(cs.total_sales_amt, 0) > 0 THEN 
+                (COALESCE(cr.total_return_amt, 0) / COALESCE(cs.total_sales_amt, 0)) * 100 
+            ELSE 0 
+        END AS return_percentage
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_returning_customer_sk
+    LEFT JOIN 
+        CustomerSales cs ON c.c_customer_sk = cs.ws_ship_customer_sk
+)
+SELECT 
+    cas.c_customer_sk,
+    cas.c_first_name,
+    cas.c_last_name,
+    cas.total_return_quantity,
+    cas.total_return_amt,
+    cas.total_sales_quantity,
+    cas.total_sales_amt,
+    cas.return_percentage,
+    DENSE_RANK() OVER (ORDER BY cas.return_percentage DESC) AS rank_by_return_percentage
+FROM 
+    CustomerASummary cas
+WHERE 
+    (cas.total_return_quantity > 0 OR cas.total_sales_quantity > 0)
+ORDER BY 
+    cas.return_percentage DESC, cas.c_last_name, cas.c_first_name;

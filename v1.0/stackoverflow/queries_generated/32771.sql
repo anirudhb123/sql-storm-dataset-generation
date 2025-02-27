@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+        AND p.PostTypeId = 1 -- Only questions
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        um.UserId,
+        um.BadgeCount,
+        um.AvgReputation,
+        um.TotalUpvotes,
+        um.TotalDownvotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserMetrics um ON rp.OwnerUserId = um.UserId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    COALESCE(b.Name, 'No Badge') AS BadgeType,
+    p.TotalUpvotes,
+    p.TotalDownvotes,
+    (p.TotalUpvotes - p.TotalDownvotes) AS NetVotes,
+    CASE 
+        WHEN p.NetVotes > 0 THEN 'Positive'
+        WHEN p.NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    PostsWithBadges p
+LEFT JOIN 
+    Badges b ON p.UserId = b.UserId
+WHERE 
+    p.BadgeCount > 0
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

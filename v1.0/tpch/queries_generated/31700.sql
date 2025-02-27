@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           1 AS order_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           oh.order_level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_custkey = oh.o_custkey
+                  AND o.o_orderdate > (SELECT MAX(o_orderdate) FROM orders WHERE o_orderkey = oh.o_orderkey)
+    WHERE oh.order_level < 5
+),
+CustomerSales AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_sales,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplier AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           p.p_retailprice * SUM(ps.ps_availqty) AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_retailprice
+)
+SELECT DISTINCT r.r_name, SUM(cs.total_sales) AS nation_sales, 
+                MAX(ps.total_value) AS max_part_value,
+                COUNT(DISTINCT o.o_orderkey) AS order_count,
+                COALESCE(SUM(CASE WHEN cs.sales_rank <= 10 THEN total_sales END), 0) AS top_customer_sales
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerSales cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN PartSupplier ps ON ps.p_partkey = (SELECT p.p_partkey 
+                                               FROM part p 
+                                               WHERE p.p_size = (SELECT MAX(p2.p_size) 
+                                                                  FROM part p2 
+                                                                  WHERE p2.p_mfgr = 'Manufacturer#1'))
+GROUP BY r.r_name
+HAVING nation_sales > (
+    SELECT AVG(region_sales) FROM (
+        SELECT SUM(o.o_totalprice) AS region_sales
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+        GROUP BY n.n_nationkey
+    ) AS avg_sales
+)
+ORDER BY nation_sales DESC;

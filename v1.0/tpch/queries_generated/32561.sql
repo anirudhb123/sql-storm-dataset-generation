@@ -1,0 +1,37 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_stats AS (
+    SELECT s.nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.nationkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    COALESCE(SUM(ss.total_cost), 0) AS total_supplier_cost,
+    COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(ss.total_cost) DESC) AS rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_stats ss ON n.n_nationkey = ss.nationkey
+LEFT JOIN high_value_orders ho ON n.n_nationkey = ho.o_orderkey
+GROUP BY r.r_name
+ORDER BY total_supplier_cost DESC, nation_count ASC;

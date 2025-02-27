@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 10
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpVoteCount,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = fp.OwnerUserId AND b.Class = 1) AS GoldBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = fp.OwnerUserId AND b.Class = 2) AS SilverBadges,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = fp.OwnerUserId AND b.Class = 3) AS BronzeBadges
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC
+LIMIT 10;

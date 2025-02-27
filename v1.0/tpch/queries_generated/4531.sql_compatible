@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_value
+    FROM 
+        supplier s
+), 
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS total_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' 
+        AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        l.l_orderkey
+), 
+CustomerOrderCount AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.order_count,
+        SUM(l.total_revenue) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrderCount co ON c.c_custkey = co.c_custkey
+    JOIN 
+        LineItemSummary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    WHERE 
+        co.order_count > 5
+    GROUP BY 
+        c.c_custkey, c.c_name, co.order_count
+    HAVING 
+        SUM(l.total_revenue) > 10000
+)
+SELECT 
+    tc.c_name,
+    tc.order_count,
+    tc.total_spent,
+    s.s_name AS top_supplier,
+    s.s_acctbal AS supplier_balance
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RankedSuppliers s ON s.rank_value = 1
+WHERE 
+    s.s_acctbal IS NOT NULL
+ORDER BY 
+    tc.total_spent DESC;

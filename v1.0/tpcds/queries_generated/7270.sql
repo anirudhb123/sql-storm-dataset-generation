@@ -1,0 +1,39 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        rs.total_sales,
+        rs.order_count
+    FROM RankedSales rs
+    JOIN customer c ON rs.ws_bill_customer_sk = c.c_customer_sk
+    WHERE rs.sales_rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.order_count,
+    COALESCE(cd.cd_gender, 'N/A') AS gender,
+    COALESCE(cd.cd_marital_status, 'N/A') AS marital_status,
+    CASE 
+        WHEN hd.hd_income_band_sk IS NOT NULL THEN ib.ib_upper_bound
+        ELSE 'Unknown'
+    END AS income_band_upper
+FROM TopCustomers tc
+LEFT JOIN customer_demographics cd ON tc.ws_bill_customer_sk = cd.cd_demo_sk
+LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+ORDER BY tc.total_sales DESC, tc.order_count DESC;

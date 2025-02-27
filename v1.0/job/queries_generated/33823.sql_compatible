@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t 
+    WHERE 
+        t.season_nr IS NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        aka_title t
+    INNER JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    a.id AS actor_id,
+    a.name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(mh.level) AS avg_hierarchy_level,
+    STRING_AGG(DISTINCT kv.keyword, ', ') AS keywords,
+    COALESCE(MAX(mo.info), 'No Info Available') AS latest_movie_info,
+    nt.kind AS title_kind
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = c.movie_id
+LEFT JOIN 
+    keyword kv ON mk.keyword_id = kv.id
+LEFT JOIN 
+    movie_info mo ON mo.movie_id = c.movie_id
+LEFT JOIN 
+    title nt ON nt.id = c.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND (c.nr_order IS NOT NULL OR c.note IS NOT NULL)
+    AND (nt.production_year IS NOT NULL AND nt.production_year > 2000)
+GROUP BY 
+    a.id, a.name, nt.kind
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    movie_count DESC, avg_hierarchy_level ASC;

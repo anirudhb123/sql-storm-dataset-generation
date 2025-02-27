@@ -1,0 +1,84 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(t.season_nr, 0) AS season_number,
+        COALESCE(t.episode_nr, 0) AS episode_number,
+        t.production_year AS year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM
+        aka_title t
+    JOIN
+        title m ON m.id = t.movie_id
+    WHERE
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        s.id AS movie_id,
+        s.title AS movie_title,
+        COALESCE(s.season_nr, 0) AS season_number,
+        COALESCE(s.episode_nr, 0) AS episode_number,
+        NULL AS year,
+        ROW_NUMBER() OVER (PARTITION BY s.id ORDER BY s.production_year DESC) AS rn
+    FROM
+        title s
+    WHERE
+        s.episode_of_id IS NOT NULL
+),
+FilteredCast AS (
+    SELECT
+        c.id AS cast_id,
+        p.name AS person_name,
+        p.gender AS person_gender,
+        m.movie_id,
+        RANK() OVER (PARTITION BY m.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM
+        cast_info c
+    JOIN
+        aka_name p ON p.person_id = c.person_id
+    JOIN 
+        RecursiveMovieCTE m ON m.movie_id = c.movie_id
+    WHERE
+        p.name IS NOT NULL
+),
+MovieSummary AS (
+    SELECT
+        r.movie_id,
+        COUNT(DISTINCT r.cast_id) AS total_cast,
+        MAX(r.role_rank) AS highest_role_rank,
+        STRING_AGG(DISTINCT r.person_name, ', ') AS cast_names
+    FROM
+        FilteredCast r
+    GROUP BY
+        r.movie_id
+),
+FinalOutput AS (
+    SELECT
+        m.movie_title,
+        m.year,
+        COALESCE(ms.total_cast, 0) AS total_cast,
+        COALESCE(ms.highest_role_rank, 0) AS highest_role_rank,
+        ms.cast_names,
+        CASE 
+            WHEN m.season_number > 0 THEN 'Series'
+            ELSE 'Film'
+        END AS movie_type
+    FROM
+        RecursiveMovieCTE m
+    LEFT JOIN
+        MovieSummary ms ON m.movie_id = ms.movie_id
+)
+SELECT
+    f.movie_title,
+    f.year,
+    f.total_cast,
+    f.highest_role_rank,
+    f.cast_names,
+    f.movie_type
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.year DESC,
+    f.movie_title ASC
+LIMIT 50;

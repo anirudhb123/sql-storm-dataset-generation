@@ -1,0 +1,79 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        MIN(d_date) AS first_order_date
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_date >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        ws_bill_customer_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        fa.store_ct AS preferred_store_count
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            c_customer_sk,
+            COUNT(DISTINCT s_store_sk) AS store_ct
+        FROM 
+            store_sales
+        GROUP BY 
+            c_customer_sk
+    ) fa ON c.c_customer_sk = fa.c_customer_sk
+), detailed_sales AS (
+    SELECT 
+        sd.ws_bill_customer_sk,
+        SUM(sd.ws_net_paid) as total_spent,
+        COUNT(DISTINCT sd.ws_order_number) as order_count,
+        d.d_date,
+        ROW_NUMBER() OVER (PARTITION BY sd.ws_bill_customer_sk ORDER BY d.d_date DESC) AS recent_order
+    FROM 
+        web_sales sd
+    JOIN 
+        date_dim d ON d.d_date_sk = sd.ws_sold_date_sk
+    GROUP BY 
+        sd.ws_bill_customer_sk, d.d_date
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    COALESCE(sd.total_sales, 0) AS total_web_sales,
+    COALESCE(ds.total_spent, 0) AS total_detailed_sales,
+    CASE 
+        WHEN ci.cd_purchase_estimate > 1000 THEN 'High Value Customer'
+        WHEN ci.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value,
+    STRFTIME('%Y-%m-%d', MAX(ds.d_date)) AS last_order_date,
+    NULLIF(COUNT(DISTINCT ci.preferred_store_count), 0) AS store_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_data sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+LEFT JOIN 
+    detailed_sales ds ON ci.c_customer_sk = ds.ws_bill_customer_sk AND ds.recent_order = 1
+GROUP BY 
+    ci.c_customer_sk
+HAVING 
+    total_web_sales > 0 AND customer_value = 'High Value Customer'
+ORDER BY 
+    last_order_date DESC
+LIMIT 10;

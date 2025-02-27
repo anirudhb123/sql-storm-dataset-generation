@@ -1,0 +1,45 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    GROUP BY n.n_nationkey, n.n_name
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, s.cust_sales.total_sales
+    FROM nation_sales s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    WHERE s.total_sales > 100000
+),
+sales_ranks AS (
+    SELECT n_nationkey, n_name, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM nation_sales
+),
+top_nations AS (
+    SELECT n_nationkey, n_name, total_sales
+    FROM sales_ranks
+    WHERE sales_rank <= 5
+),
+extended_info AS (
+    SELECT tn.n_name,
+           COUNT(DISTINCT c.c_custkey) AS customer_count,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM top_nations tn
+    LEFT JOIN customer c ON tn.n_nationkey = c.c_nationkey
+    LEFT JOIN supplier s ON tn.n_nationkey = s.s_nationkey
+    GROUP BY tn.n_name
+)
+
+SELECT ei.n_name,
+       ei.customer_count,
+       ei.avg_acctbal,
+       COALESCE(NULLIF(ei.avg_acctbal, 0), 'No customers') AS adjusted_avg_acctbal,
+       CASE WHEN ei.customer_count > 0 THEN 'Has Customers' ELSE 'No Customers' END AS customer_status
+FROM extended_info ei
+ORDER BY ei.avg_acctbal DESC;

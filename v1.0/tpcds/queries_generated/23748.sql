@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank,
+        ws.ws_net_profit,
+        DATE_PART('year', d.d_date) AS sale_year,
+        CASE 
+            WHEN d.d_dow IN (1, 7) THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS sale_type
+    FROM web_sales AS ws
+    JOIN date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+), 
+HighProfitItems AS (
+    SELECT 
+        web_site_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        sale_year,
+        sale_type
+    FROM RankedSales
+    WHERE rank = 1
+), 
+CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        wr_item_sk,
+        sum(wr_return_quantity) AS total_returned_quantity,
+        sum(wr_return_amt) AS total_returned_amount
+    FROM web_returns AS wr
+    GROUP BY wr.refunded_customer_sk, wr_item_sk
+), 
+CombinedResults AS (
+    SELECT 
+        hpi.web_site_sk,
+        hpi.ws_item_sk,
+        hpi.ws_order_number,
+        hpi.ws_net_profit,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+        (CASE 
+            WHEN COALESCE(cr.total_returned_quantity, 0) > 0 THEN 'Returned'
+            ELSE 'Not Returned'
+        END) AS return_status
+    FROM HighProfitItems AS hpi
+    LEFT JOIN CustomerReturns AS cr ON hpi.ws_item_sk = cr.wr_item_sk 
+                                    AND hpi.web_site_sk = cr.refunded_customer_sk
+    WHERE hpi.ws_net_profit > (
+        SELECT AVG(ws_net_profit) 
+        FROM HighProfitItems
+    )
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(cr.total_returned_quantity) AS sum_returned_quantity,
+    SUM(cr.total_returned_amount) AS sum_returned_amount,
+    COUNT(DISTINCT cr.ws_order_number) AS total_orders
+FROM CombinedResults AS cr
+JOIN customer AS c ON cr.web_site_sk = c.c_customer_sk
+JOIN customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY c.c_customer_id, ca.ca_city, ca.ca_state
+HAVING SUM(cr.total_returned_quantity) > 0
+ORDER BY sum_returned_quantity DESC, c.c_customer_id
+LIMIT 10;

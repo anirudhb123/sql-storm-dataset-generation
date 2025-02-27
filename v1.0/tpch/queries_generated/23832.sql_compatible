@@ -1,0 +1,39 @@
+
+WITH RankedSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'NULL Account'
+               WHEN s.s_acctbal < 1000 THEN 'Low Account'
+               ELSE 'High Account'
+           END AS account_category
+    FROM supplier s
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           COUNT(l.l_orderkey) AS line_count, 
+           CASE 
+               WHEN COUNT(l.l_orderkey) > 5 THEN 'Bulk Order'
+               ELSE 'Regular Order'
+           END AS order_type
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING COUNT(DISTINCT o.o_orderkey) > 0 OR c.c_acctbal IS NULL
+)
+
+SELECT r.r_name, fs.c_custkey, fs.c_name, fs.account_category, 
+       os.total_price, os.order_type, rs.rank
+FROM RankedSupplier rs
+JOIN FilteredCustomers fs ON rs.s_nationkey = fs.c_custkey
+LEFT JOIN OrderSummary os ON fs.c_custkey = os.o_custkey
+JOIN region r ON fs.c_custkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+WHERE rs.rank <= 3
+  AND (os.total_price IS NOT NULL AND os.total_price > 1000 OR os.total_price IS NULL)
+ORDER BY r.r_name ASC, fs.c_name DESC, os.total_price DESC;

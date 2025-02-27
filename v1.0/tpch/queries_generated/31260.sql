@@ -1,0 +1,47 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+), customer_revenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS revenue
+    FROM customer c
+    LEFT JOIN order_summary os ON c.c_custkey = os.o_orderkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+), nation_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, SUM(cr.revenue) AS total_customer_revenue
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN customer_revenue cr ON c.c_custkey = cr.c_custkey
+    GROUP BY n.n_name
+)
+SELECT 
+    p.p_name AS part_name,
+    p.p_retailprice AS retail_price,
+    COALESCE(ns.total_customer_revenue, 0) AS total_revenue_by_nation,
+    SNT.total_revenue_by_nation AS national_total_revenue,
+    CASE 
+        WHEN SNT.total_revenue_by_nation IS NULL THEN 'No sales'
+        ELSE 'Sales present'
+    END AS sales_status
+FROM part p
+LEFT JOIN (
+    SELECT n.n_name, SUM(ns.total_customer_revenue) AS total_revenue_by_nation
+    FROM nation_summary ns
+    JOIN nation n ON ns.n_name = n.n_name
+    GROUP BY n.n_name
+) SNT ON TRUE
+LEFT JOIN supplier_hierarchy sh ON p.p_partkey = sh.s_suppkey
+WHERE p.p_size > 20
+ORDER BY p.p_retailprice DESC, sales_status ASC;

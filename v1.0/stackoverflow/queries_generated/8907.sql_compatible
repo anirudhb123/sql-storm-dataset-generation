@@ -1,0 +1,52 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(P.Score), 0) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalScore DESC) AS Rank
+    FROM UserStats
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Tags T
+    LEFT JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ','))
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.TotalViews,
+    TU.TotalScore,
+    PT.TagName,
+    PT.PostCount,
+    PT.TotalViews
+FROM TopUsers TU
+CROSS JOIN PopularTags PT
+WHERE TU.QuestionCount > 0
+  AND TU.TotalScore > 100
+ORDER BY TU.Rank, PT.PostCount DESC;

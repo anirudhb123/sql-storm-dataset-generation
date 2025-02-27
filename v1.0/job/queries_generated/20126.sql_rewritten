@@ -1,0 +1,82 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS lead_actors,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL AND
+        a.name IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieKeywordsCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(mk.keyword_id::text, ', ') AS keywords,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT mk.keyword_id) DESC) AS keyword_rank
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.*,
+        k.keywords,
+        k.keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.rank_by_cast ASC) AS yearly_rank
+    FROM 
+        RecursiveMovieCTE m
+    JOIN 
+        MovieKeywordsCTE k ON m.movie_id = k.movie_id
+    WHERE 
+        (m.total_cast > 0 AND m.production_year >= 1990) OR 
+        (m.total_cast = 0 AND m.production_year < 1990)
+),
+FinalOutput AS (
+    SELECT 
+        DISTINCT f.title,
+        f.production_year,
+        f.total_cast,
+        f.keywords,
+        CASE 
+            WHEN f.keyword_count IS NULL THEN 'No Keywords'
+            ELSE f.keywords
+        END AS processed_keywords
+    FROM 
+        FilteredMovies f
+    WHERE 
+        f.yearly_rank <= 10
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.total_cast,
+    fo.processed_keywords,
+    CASE 
+        WHEN fo.production_year % 2 = 0 THEN 'Even Year'
+        ELSE 'Odd Year'
+    END AS year_type,
+    COALESCE((SELECT AVG(c2.nr_order) 
+              FROM cast_info c2 
+              WHERE c2.movie_id = fo.movie_id 
+              AND c2.nr_order IS NOT NULL), 0) AS average_order_of_cast
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    movie_info mi ON fo.movie_id = mi.movie_id AND mi.info_type_id = 1  
+WHERE 
+    (fo.total_cast > 5 OR fo.keywords IS NOT NULL) 
+ORDER BY 
+    fo.production_year DESC, 
+    fo.total_cast DESC;

@@ -1,0 +1,69 @@
+
+WITH item_sales AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(ws_order_number) AS total_sales,
+        SUM(ws_ext_sales_price) AS total_revenue,
+        AVG(ws_net_profit) AS avg_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+catalog_returns_summary AS (
+    SELECT 
+        cr_item_sk,
+        COUNT(cr_order_number) AS total_catalog_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+store_sales_summary AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_store_sales,
+        SUM(ss_ext_tax) AS total_store_tax
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(is.total_sales, 0) AS total_web_sales,
+    COALESCE(cs.total_catalog_returns, 0) AS total_catalog_returns,
+    COALESCE(ss.total_store_sales, 0) AS total_store_sales,
+    COALESCE(is.total_revenue, 0) AS total_web_revenue,
+    COALESCE(ss.total_store_tax, 0) AS total_store_tax,
+    COALESCE(is.avg_profit, 0) AS average_web_profit,
+    COALESCE(inv.total_quantity_on_hand, 0) AS quantity_on_hand,
+    CASE 
+        WHEN inv.total_quantity_on_hand IS NULL OR inv.total_quantity_on_hand = 0 THEN 'Out of Stock'
+        ELSE 'In Stock' 
+    END AS stock_status
+FROM 
+    item i
+LEFT JOIN 
+    item_sales is ON i.i_item_sk = is.ws_item_sk
+LEFT JOIN 
+    catalog_returns_summary cs ON i.i_item_sk = cs.cr_item_sk
+LEFT JOIN 
+    store_sales_summary ss ON i.i_item_sk = ss.ss_item_sk
+LEFT JOIN 
+    inventory_summary inv ON i.i_item_sk = inv.inv_item_sk
+WHERE 
+    i.i_current_price IS NOT NULL
+ORDER BY 
+    total_web_sales DESC, total_store_sales DESC
+LIMIT 100;

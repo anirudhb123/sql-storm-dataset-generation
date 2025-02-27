@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (NOW() - interval '1 year')
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- close and reopen actions
+    GROUP BY 
+        ph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class), 0) AS TotalBadgePoints,
+        COALESCE(MAX(UpVotes), 0) AS TotalUpVotes,
+        COALESCE(MAX(DownVotes), 0) AS TotalDownVotes,
+        COALESCE(cp.CloseCount, 0) AS TotalCloseCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalBadgePoints,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalCloseCount,
+    (us.TotalUpVotes - us.TotalDownVotes) AS VoteNet,
+    CASE 
+        WHEN us.TotalCloseCount > 5 THEN 'Highly Engaged'
+        WHEN us.TotalUpVotes > 100 THEN 'Top Contributor'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    UserStatistics us
+WHERE 
+    us.TotalBadgePoints > 5
+ORDER BY 
+    VoteNet DESC,
+    us.DisplayName ASC
+LIMIT 20;

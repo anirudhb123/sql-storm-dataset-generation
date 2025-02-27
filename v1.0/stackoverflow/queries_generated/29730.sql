@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS VoteBalance,  -- Upvotes - Downvotes
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tagArray ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tagArray)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+PostSummaries AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.ViewCount,
+        rp.VoteBalance,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.UserPostRank,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostID) AS TotalComments
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostID)
+    WHERE 
+        rp.UserPostRank <= 5  -- Top 5 posts per user
+)
+SELECT 
+    ps.OwnerDisplayName,
+    ps.Title,
+    ps.ViewCount,
+    ps.VoteBalance,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.TotalComments,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostID)) AS BadgeCount
+FROM 
+    PostSummaries ps
+ORDER BY 
+    ps.VoteBalance DESC, ps.ViewCount DESC;

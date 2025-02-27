@@ -1,0 +1,70 @@
+-- Performance benchmarking query to analyze post statistics and user involvement on the Stack Overflow platform
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(AVG(v.BountyAmount), 0) AS AverageBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Considering only bounty votes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.AnswerCount) AS TotalAnswers,
+        SUM(p.CommentCount) AS TotalComments,
+        SUM(p.FavoriteCount) AS TotalFavorites
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount AS PostCommentCount,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    us.PostsCreated,
+    us.TotalViews,
+    us.TotalScore,
+    us.TotalAnswers,
+    us.TotalComments,
+    us.TotalFavorites,
+    ps.AverageBounty
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.OwnerDisplayName = us.DisplayName
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100; -- Limiting to top 100 posts based on score and view count

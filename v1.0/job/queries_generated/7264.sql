@@ -1,0 +1,36 @@
+SELECT 
+    t.title AS movie_title,
+    STRING_AGG(DISTINCT ak.name, ', ') AS akas,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    cni.name AS company_name,
+    ckt.kind AS company_type,
+    ARRAY_AGG(DISTINCT p.info) AS person_infos,
+    ti.info AS movie_info
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cni ON mc.company_id = cni.id
+JOIN 
+    company_type ckt ON mc.company_type_id = ckt.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+GROUP BY 
+    t.title, cni.name, ckt.kind, ti.info
+ORDER BY 
+    t.production_year DESC, cni.name;

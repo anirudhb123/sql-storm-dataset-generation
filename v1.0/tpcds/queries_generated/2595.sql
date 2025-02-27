@@ -1,0 +1,76 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) as income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+), 
+sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+store_sales_data AS (
+    SELECT 
+        ss.ss_customer_sk,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS order_count
+    FROM 
+        store_sales ss
+    LEFT JOIN 
+        customer_info ci ON ss.ss_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        ss.ss_customer_sk
+),
+combined_sales AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        COALESCE(sd.total_profit, 0) AS web_total_profit,
+        COALESCE(sd.order_count, 0) AS web_order_count,
+        COALESCE(ssd.total_profit, 0) AS store_total_profit,
+        COALESCE(ssd.order_count, 0) AS store_order_count
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        sales_data sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales_data ssd ON ci.c_customer_sk = ssd.ss_customer_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.income_band,
+    COALESCE(c.web_total_profit, 0) + COALESCE(c.store_total_profit, 0) AS total_combined_profit,
+    CASE 
+        WHEN (c.web_order_count + c.store_order_count) = 0 THEN NULL 
+        ELSE (COALESCE(c.web_total_profit, 0) + COALESCE(c.store_total_profit, 0)) / (c.web_order_count + c.store_order_count) 
+    END AS average_profit_per_order
+FROM 
+    combined_sales c
+WHERE 
+    c.total_combined_profit > 0
+ORDER BY 
+    total_combined_profit DESC
+LIMIT 100;

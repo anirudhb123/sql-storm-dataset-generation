@@ -1,0 +1,78 @@
+WITH RECURSIVE PriceAnalysis AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_supplycost IS NOT NULL
+    UNION ALL
+    SELECT 
+        pa.p_partkey,
+        pa.p_name,
+        pa.ps_supplycost,
+        pa.ps_availqty,
+        pa.total_cost + (1.1 * pa.total_cost) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY pa.p_partkey ORDER BY (1.1 * pa.total_cost) DESC) AS rank
+    FROM 
+        PriceAnalysis pa
+    WHERE 
+        pa.rank < 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 500
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+)
+SELECT 
+    pa.p_partkey,
+    pa.p_name,
+    SUM(pa.total_cost) AS total_cost_sum,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    COUNT(DISTINCT hs.s_suppkey) AS supplier_count
+FROM 
+    PriceAnalysis pa
+LEFT JOIN 
+    lineitem l ON pa.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerOrders co ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = l.l_orderkey)
+LEFT JOIN 
+    HighValueSuppliers hs ON l.l_suppkey = hs.s_suppkey
+WHERE 
+    pa.total_cost > (SELECT AVG(total_cost) FROM PriceAnalysis)
+    AND pa.rank = 1
+GROUP BY 
+    pa.p_partkey, pa.p_name
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 10
+ORDER BY 
+    total_cost_sum DESC, unique_customers ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

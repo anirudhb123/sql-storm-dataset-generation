@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.AcceptedAnswerId
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserParticipation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        STRING_AGG(ph.Comment, ' | ') FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReasons,
+        COUNT(*) AS HistoryEntryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    up.BadgeCount,
+    up.BadgeNames,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(ph.CloseReasons, 'No Close Reasons') AS PostCloseReasons,
+    ph.HistoryEntryCount
+FROM 
+    UserParticipation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryInfo ph ON rp.PostId = ph.PostId
+WHERE 
+    (up.TotalUpVotes - up.TotalDownVotes) > (up.TotalPosts / NULLIF(up.BadgeCount, 0)) 
+    AND rp.PostRank = 1
+    AND EXISTS (
+        SELECT 1
+        FROM Posts p2
+        WHERE p2.AcceptedAnswerId = rp.PostId
+        AND EXISTS (
+            SELECT 1 
+            FROM VoteTypes vt 
+            WHERE vt.Id = 2 
+            HAVING COUNT(vt.Id) > 0
+        )
+    )
+ORDER BY 
+    up.TotalUpVotes DESC NULLS LAST,  
+    rp.ViewCount DESC;

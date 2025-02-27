@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        RANK() OVER (ORDER BY SUM(p.Score) DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 0
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Views, u.UpVotes, u.DownVotes
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) AS ChangeCount
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= NOW() - INTERVAL '1 year' -- Only recent history
+    GROUP BY ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.TotalBounty,
+    phs.ChangeCount,
+    COALESCE(rp.UserPostRank, 0) AS UserPostRank,
+    CASE 
+        WHEN up.ReputationRank <= 10 THEN 'Top Contributor'
+        WHEN up.ReputationRank <= 50 THEN 'Regular Contributor'
+        ELSE 'New Contributor' 
+    END AS ContributorLevel
+FROM UserStats up
+JOIN RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN PostHistoryStats phs ON rp.PostId = phs.PostId
+WHERE rp.Score > 0
+ORDER BY up.Reputation DESC, rp.Score DESC
+LIMIT 100;

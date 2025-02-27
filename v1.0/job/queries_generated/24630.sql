@@ -1,0 +1,85 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+      
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.path || m.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COALESCE(ki.keyword, 'unknown') AS keyword,
+        COALESCE(pi.info, 'NA') AS person_info,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ki.keyword) AS keyword_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.subject_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'bio')
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ti.keyword,
+    ti.person_info,
+    mh.level,
+    STRING_AGG(DISTINCT mh.path[1:ARRAY_LENGTH(mh.path, 1) - mh.level], ' -> ') AS path
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    title_info ti ON mh.movie_id = ti.title_id
+WHERE 
+    mh.level < 3
+    AND (ti.keyword IS NOT NULL OR ti.person_info IS NOT NULL)
+GROUP BY 
+    mh.movie_id, ti.keyword, ti.person_info, mh.level
+ORDER BY 
+    mh.production_year DESC, mh.title ASC
+LIMIT 100
+OFFSET 10;
+
+-- Including an example of handling NULLs and using unusual semantic constructs
+UNION ALL
+SELECT 
+    c.movie_id,
+    NULL AS title,
+    NULL AS production_year,
+    NULL AS keyword,
+    NULL AS person_info,
+    NULL AS level,
+    'No Path Available' AS path
+FROM 
+    complete_cast c
+WHERE 
+    NOT EXISTS (
+        SELECT 1 FROM movie_hierarchy mh WHERE mh.movie_id = c.movie_id
+    );

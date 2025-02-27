@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year AS year,
+        c.name AS company_name,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT p.gender) AS genders,
+        COUNT(DISTINCT ca.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ca ON cc.subject_id = ca.person_id
+    LEFT JOIN 
+        name p ON ca.person_id = p.imdb_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, c.name
+),
+CompanyStatistics AS (
+    SELECT
+        company_name,
+        COUNT(movie_title) AS total_movies,
+        AVG(year) AS average_production_year
+    FROM 
+        MovieDetails
+    GROUP BY 
+        company_name
+)
+SELECT 
+    company_name,
+    total_movies,
+    average_production_year,
+    (SELECT COUNT(*) FROM MovieDetails) AS total_movies_overall,
+    (SELECT COUNT(DISTINCT genders) FROM MovieDetails) AS distinct_genders,
+    STRING_AGG(DISTINCT aka_names, ', ') AS all_aka_names
+FROM 
+    CompanyStatistics
+ORDER BY 
+    total_movies DESC
+LIMIT 10;
+
+This SQL query effectively benchmarks string processing by aggregating movie and company information, analyzing cast demographics, and consolidating aka names, while also providing insights on companies that produce movies over a specific time range. It uses common table expressions (CTEs) to streamline the data extraction process and employs aggregate functions to summarize the data meaningfully.

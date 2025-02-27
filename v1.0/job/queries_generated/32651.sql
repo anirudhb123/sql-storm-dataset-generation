@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        1 AS depth
+    FROM 
+        aka_title
+    WHERE 
+        episode_of_id IS NULL  -- Start with base movies
+    
+    UNION ALL
+    
+    SELECT 
+        c.movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        complete_cast c
+    JOIN 
+        aka_title a ON c.movie_id = a.movie_id
+    JOIN 
+        MovieHierarchy mh ON a.episode_of_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT km.keyword) AS keyword_count,
+    MAX(mh.depth) AS episode_depth,
+    STRING_AGG(DISTINCT km.keyword, ', ') AS keywords_list,
+    AVG(pi.info) AS average_person_info -- assuming info is numeric
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword km ON mk.keyword_id = km.id
+LEFT JOIN 
+    MovieHierarchy mh ON m.id = mh.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    m.production_year >= 2000
+    AND (a.name IS NOT NULL OR a.surname_pcode IS NULL) -- NULL logic example
+GROUP BY 
+    a.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5                -- More than 5 movies to be considered
+ORDER BY 
+    average_person_info DESC
+LIMIT 10;

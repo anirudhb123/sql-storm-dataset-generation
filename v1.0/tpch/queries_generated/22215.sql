@@ -1,0 +1,77 @@
+WITH RECURSIVE regional_suppliers AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_within_nation
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+        AND s.s_acctbal > 1000
+), 
+
+top_region_suppliers AS (
+    SELECT 
+        r.r_name,
+        ARRAY_AGG(s.s_name) AS supplier_names,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        regional_suppliers s
+    JOIN 
+        nation n ON s.n_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.rank_within_nation <= 5
+    GROUP BY 
+        r.r_name
+), 
+
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    reg.r_name AS region_name,
+    reg.supplier_names,
+    cus.c_custkey,
+    cus.order_count,
+    cus.total_spent,
+    CASE 
+        WHEN cus.last_order_date IS NULL THEN 'No Orders' 
+        ELSE TO_CHAR(cus.last_order_date, 'YYYY-MM-DD')
+    END AS last_order_date_formatted
+FROM 
+    top_region_suppliers reg
+LEFT JOIN 
+    customer_order_summary cus ON reg.r_name = (
+        SELECT 
+            r.r_name 
+        FROM 
+            region r
+        JOIN 
+            nation n ON n.n_regionkey = r.r_regionkey
+        WHERE 
+            n.n_nationkey IN (SELECT DISTINCT n_nationkey FROM supplier)
+        LIMIT 1
+    )
+ORDER BY 
+    reg.total_acctbal DESC NULLS LAST,
+    cus.total_spent DESC NULLS FIRST;

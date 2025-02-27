@@ -1,0 +1,61 @@
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CONCAT(p.p_mfgr, ' ', p.p_brand, ' ', p.p_type) AS part_description,
+        p.p_retailprice,
+        LENGTH(p.p_comment) AS comment_length
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 50
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_phone,
+        s.s_acctbal,
+        UPPER(s.s_comment) AS supplier_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+        MONTH(o.o_orderdate) AS order_month,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Completed'
+            ELSE 'Pending'
+        END AS order_status
+    FROM 
+        orders o
+)
+SELECT 
+    pd.p_partkey,
+    pd.part_description,
+    sd.s_name,
+    sd.s_phone,
+    od.o_totalprice,
+    od.order_year,
+    od.order_month,
+    od.order_status
+FROM 
+    part_details pd
+JOIN 
+    partsupp ps ON pd.p_partkey = ps.ps_partkey
+JOIN 
+    supplier_details sd ON ps.ps_suppkey = sd.s_suppkey
+JOIN 
+    lineitem li ON ps.ps_partkey = li.l_partkey
+JOIN 
+    order_details od ON li.l_orderkey = od.o_orderkey
+WHERE 
+    pd.comment_length > 10
+ORDER BY 
+    od.order_year DESC, od.order_month DESC, pd.p_partkey;

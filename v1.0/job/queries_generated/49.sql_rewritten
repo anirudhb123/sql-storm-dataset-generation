@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER(PARTITION BY m.production_year ORDER BY m.id) AS movie_rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+RecentMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.movie_rank <= 10
+),
+ActorDetails AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        c.movie_id,
+        c.role_id,
+        rk.title AS movie_title,
+        rk.production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        RecentMovies rk ON c.movie_id = rk.movie_id
+)
+SELECT 
+    A.person_id,
+    A.name AS actor_name,
+    COALESCE(STRING_AGG(DISTINCT md.name, ', '), 'No movies') AS movie_names,
+    COUNT(DISTINCT A.movie_id) AS total_movies,
+    MAX(A.production_year) AS latest_movie_year,
+    CASE 
+        WHEN COUNT(DISTINCT A.movie_id) = 0 THEN 'No roles found'
+        WHEN COUNT(DISTINCT A.movie_id) > 5 THEN 'Frequent Actor'
+        ELSE 'Occasional Actor'
+    END AS actor_frequency
+FROM 
+    ActorDetails A
+LEFT JOIN 
+    movie_info M ON A.movie_id = M.movie_id 
+    AND M.info_type_id = (SELECT MIN(id) FROM info_type) 
+LEFT JOIN 
+    movie_keyword K ON A.movie_id = K.movie_id
+LEFT JOIN 
+    keyword kw ON K.keyword_id = kw.id
+LEFT JOIN 
+    title T ON T.id = A.movie_id
+GROUP BY 
+    A.person_id, A.name 
+HAVING 
+    MAX(A.production_year) > 2000
+ORDER BY 
+    total_movies DESC, latest_movie_year DESC;

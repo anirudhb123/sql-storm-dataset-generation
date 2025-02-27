@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, s2.s_acctbal, s2.s_nationkey, sh.level + 1
+    FROM SupplierHierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s2 ON ps.ps_partkey = s2.s_suppkey
+    WHERE sh.level < 5
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE 
+        WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount)
+        ELSE l.l_extendedprice
+    END) AS total_sales,
+    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY l.l_extendedprice) OVER (PARTITION BY n.n_nationkey) AS sales_75th_percentile
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE 
+    l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND (s.s_acctbal IS NOT NULL OR s.s_acctbal > 1000)
+GROUP BY 
+    n.n_name, n.n_nationkey
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

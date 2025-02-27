@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS TEXT) AS path
+    FROM title m
+    WHERE m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || e.title AS TEXT)
+    FROM title e
+    JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        at.title,
+        COUNT(cc.movie_id) AS cast_count,
+        AVG(CAST(m.production_year AS NUMERIC)) AS avg_year
+    FROM aka_title at
+    JOIN cast_info cc ON at.movie_id = cc.movie_id
+    LEFT JOIN movie_info mi ON at.movie_id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE at.production_year >= 2000
+      AND (mi.info_type_id IS NULL OR mi.info_type_id <> (SELECT id FROM info_type WHERE info = 'Documentary'))
+      AND k.keyword IS NOT NULL
+    GROUP BY at.title
+    HAVING AVG(CAST(m.production_year AS NUMERIC)) > 2010
+),
+
+person_roles AS (
+    SELECT 
+        ak.name,
+        rc.role,
+        COUNT(DISTINCT ci.movie_id) AS total_movies
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN role_type rc ON ci.role_id = rc.id
+    GROUP BY ak.name, rc.role
+    HAVING COUNT(DISTINCT ci.movie_id) > 5
+)
+
+SELECT 
+    mv.title,
+    mv.avg_year,
+    pr.name AS actor_name,
+    pr.role,
+    pr.total_movies,
+    COALESCE(mh.path, 'No Episodes') AS episode_path
+FROM top_movies mv
+JOIN person_roles pr ON mv.cast_count > 10
+LEFT JOIN movie_hierarchy mh ON mv.movie_id = mh.movie_id
+ORDER BY mv.avg_year DESC, total_movies DESC
+LIMIT 50;
+
+This query aims to benchmark the performance of complex joins, subqueries, and CTEs using the provided movie schema. It retrieves eligible movies together with information about actors who played significant roles in them, while also evaluating movies in a hierarchical context.

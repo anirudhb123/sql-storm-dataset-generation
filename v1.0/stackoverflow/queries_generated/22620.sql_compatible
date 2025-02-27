@@ -1,0 +1,74 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) > 0 THEN 1 ELSE 0 END) AS UpvotedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        UpvotedPosts,
+        RANK() OVER (ORDER BY PostCount DESC, TotalViews DESC) AS PostRank
+    FROM 
+        UserPostStats
+),
+PostWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass,
+        b.Date AS BadgeDate,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        b.Date > (SELECT MIN(CreationDate) FROM Badges WHERE UserId = p.OwnerUserId)
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    COALESCE(pw.BadgeName, 'None') AS BadgeName,
+    AVG(pw.ViewCount) AS AverageViewCount,
+    COUNT(pw.PostId) AS AssociatedBadges,
+    CASE 
+        WHEN AVG(pw.ViewCount) IS NULL THEN 'No Views Recorded'
+        ELSE CAST(AVG(pw.ViewCount) AS VARCHAR)
+    END AS AvgViewStr,
+    SUM(CASE WHEN pw.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewPosts,
+    COUNT(DISTINCT CASE WHEN ph.PostId IS NOT NULL THEN ph.PostId END) AS ClosedPostCount,
+    SUM(NULLIF(pw.ViewCount, 0)) AS SumNonZeroViews
+FROM 
+    TopUsers u
+LEFT JOIN 
+    PostWithBadges pw ON u.UserId = pw.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON pw.PostId = ph.PostId AND (ph.PostHistoryTypeId = 10 OR ph.PostHistoryTypeId = 11)
+WHERE 
+    u.PostCount > 5 
+GROUP BY 
+    u.DisplayName, u.PostCount
+HAVING 
+    SUM(CASE WHEN pw.ViewCount IS NOT NULL AND pw.ViewCount > 50 THEN 1 ELSE 0 END) > 3
+ORDER BY 
+    u.PostCount DESC, u.DisplayName ASC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

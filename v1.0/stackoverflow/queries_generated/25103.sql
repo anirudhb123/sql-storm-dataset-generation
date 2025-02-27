@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only Questions
+),
+AggregatedTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM 
+        AggregatedTags
+    WHERE 
+        TagCount > 1
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.OwnerDisplayName,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    PT.TagName,
+    PT.TagCount,
+    UB.BadgeCount
+FROM 
+    RankedPosts RP
+JOIN 
+    PopularTags PT ON RP.Tags LIKE '%' || PT.TagName || '%'
+JOIN 
+    UserBadges UB ON RP.OwnerUserId = UB.UserId
+WHERE 
+    RP.RankByUser <= 5 -- Limit to top 5 posts per user
+ORDER BY 
+    RP.Score DESC, RP.CreationDate DESC;

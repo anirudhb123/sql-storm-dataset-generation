@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+ClosedPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), p.CreationDate) AS ClosedDate,
+        COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END), p.CreationDate) AS ReopenedDate,
+        p.ViewCount,
+        p.Score,
+        ph.HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistories ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+)
+SELECT 
+    u.DisplayName,
+    up.QuestionCount,
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    p.ClosedDate,
+    p.ReopenedDate,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 
+            CURRENT_DATE - p.ClosedDate 
+        ELSE 
+            NULL 
+    END AS DaysSinceClosed,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM (SELECT unnest(string_to_array((SELECT Tags FROM Posts WHERE Id = p.PostId), ',')) AS TagName) AS t) AS Tags
+FROM 
+    UserActivity up
+JOIN 
+    ClosedPostDetails p ON up.UserId = p.PostId 
+WHERE 
+    up.VoteCount > 5
+    AND p.Score > 10
+ORDER BY 
+    DaysSinceClosed DESC,
+    up.CommentCount DESC
+LIMIT 100 OFFSET 0;

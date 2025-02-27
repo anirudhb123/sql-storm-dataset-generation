@@ -1,0 +1,53 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS TagUsageCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE p.PostTypeId IN (1, 2)
+    GROUP BY t.TagName
+    ORDER BY TagUsageCount DESC
+    LIMIT 10
+),
+TagStats AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT p.Id) AS PostsWithTags,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+    FROM Posts p
+    JOIN LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS tag_name ON TRUE
+    JOIN Tags t ON tag_name = t.TagName
+    GROUP BY UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AcceptedAnswers,
+    ups.AvgScore,
+    pts.TagUsageCount,
+    ts.PostsWithTags,
+    ts.AssociatedTags
+FROM UserPostStats ups
+LEFT JOIN PopularTags pts ON true
+LEFT JOIN TagStats ts ON ups.UserId = ts.UserId
+WHERE ups.UserRank <= 10
+ORDER BY ups.TotalPosts DESC, ups.AvgScore DESC;

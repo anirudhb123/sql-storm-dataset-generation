@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId, 
+                UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><'))::VARCHAR[]) AS TagName
+            FROM 
+                Posts
+        ) t ON t.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastModifiedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerName,
+    rp.CommentCount,
+    rp.VoteCount,
+    rp.Tags,
+    phi.HistoryTypes,
+    phi.LastModifiedDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryInfo phi ON rp.PostId = phi.PostId
+ORDER BY 
+    rp.VoteCount DESC, 
+    rp.CommentCount DESC, 
+    rp.CreationDate DESC
+LIMIT 100;

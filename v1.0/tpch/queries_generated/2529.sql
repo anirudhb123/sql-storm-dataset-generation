@@ -1,0 +1,81 @@
+WITH SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSalesSummary AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        l.l_partkey
+),
+AggregatedData AS (
+    SELECT 
+        sp.s_name,
+        cps.c_name,
+        ps.total_sales,
+        sp.total_supply_cost,
+        cps.total_spent,
+        cps.order_count AS customer_order_count,
+        ps.order_count AS part_order_count
+    FROM 
+        SupplierPartInfo sp
+    FULL OUTER JOIN 
+        CustomerOrderSummary cps ON sp.part_count > 0 AND cps.total_spent IS NOT NULL
+    FULL OUTER JOIN 
+        PartSalesSummary ps ON ps.total_sales > 0
+    WHERE 
+        sp.total_supply_cost IS NOT NULL OR cps.total_spent IS NOT NULL OR ps.total_sales IS NOT NULL
+),
+RankedResults AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY s_name ORDER BY total_spent DESC NULLS LAST) AS rank_by_spent
+    FROM 
+        AggregatedData
+)
+
+SELECT 
+    s_name,
+    c_name,
+    total_sales,
+    total_supply_cost,
+    total_spent,
+    customer_order_count,
+    part_order_count,
+    rank_by_spent
+FROM 
+    RankedResults
+WHERE 
+    rank_by_spent <= 5
+ORDER BY 
+    total_spent DESC, s_name;

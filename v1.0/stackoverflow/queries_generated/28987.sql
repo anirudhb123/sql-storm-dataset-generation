@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+        AND p.ViewCount > 100 -- Filter by view count
+),
+PopularTags AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PopularityCount
+    FROM 
+        Posts p
+    CROSS JOIN LATERAL 
+        string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        tag.TagName
+    ORDER BY 
+        PopularityCount DESC
+    LIMIT 5
+),
+ActivityScore AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        (COALESCE(SUM(v.BountyAmount), 0) + 
+         COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+         COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0)) AS Score
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Score,
+        RANK() OVER (ORDER BY Score DESC) AS Rank
+    FROM 
+        ActivityScore
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.RankByViews,
+    rp.TagCount,
+    tt.TagName AS PopularTag,
+    tu.DisplayName AS TopUser,
+    tu.Score AS UserScore
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags tt ON rp.TagCount > 0
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.RankByViews <= 5 -- Top 5 most viewed posts per user
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate DESC;

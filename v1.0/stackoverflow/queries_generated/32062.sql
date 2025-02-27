@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(v.BountyAmount) AS AverageBounty,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+    COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    COALESCE(ps.AverageBounty, 0) AS AverageBounty,
+    COALESCE(ps.LastPostDate, '2000-01-01') AS LastPostDate,
+    COALESCE(phs.LastEditDate, '2000-01-01') AS LastEditDate
+FROM 
+    Users u
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON u.Id = phs.UserId
+WHERE 
+    (COALESCE(ps.TotalPosts, 0) > 5 OR COALESCE(ub.BadgeCount, 0) > 2)
+ORDER BY 
+    TotalPosts DESC, BadgeCount DESC;

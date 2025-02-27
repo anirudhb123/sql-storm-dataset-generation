@@ -1,0 +1,64 @@
+WITH EnhancedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        LENGTH(p.p_name) AS name_length,
+        LOWER(p.p_comment) AS transformed_comment,
+        SUBSTRING_INDEX(p.p_type, ' ', 1) AS primary_type
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_phone,
+        r.r_name AS region_name,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ep.p_partkey,
+    ep.p_name,
+    ep.transformed_comment,
+    si.region_name,
+    co.c_custkey,
+    co.c_name,
+    co.order_count,
+    co.total_spent
+FROM 
+    EnhancedParts ep
+JOIN 
+    SupplierInfo si ON ep.p_brand = si.s_name
+JOIN 
+    CustomerOrders co ON ep.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (
+        SELECT MIN(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = ep.p_partkey 
+    ) LIMIT 1)
+WHERE 
+    ep.name_length > 10 AND 
+    si.comment_length < 50 AND 
+    co.order_count > 0
+ORDER BY 
+    total_spent DESC, 
+    ep.p_name;

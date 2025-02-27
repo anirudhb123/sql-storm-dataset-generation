@@ -1,0 +1,51 @@
+WITH RecursiveMovieCast AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name IS NOT NULL
+), MovieDetails AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT rc.actor_name) AS num_actors,
+        MAX(CASE WHEN mt.production_year <= 1990 THEN 'Classic' ELSE 'Modern' END) AS era
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        RecursiveMovieCast rc ON mt.id = rc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+), MovieGenres AS (
+    SELECT 
+        mt.id AS movie_id,
+        string_agg(k.keyword, ', ') AS genres
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.num_actors,
+    COALESCE(mg.genres, 'No Genre') AS genres,
+    md.era
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    MovieGenres mg ON md.title = mg.movie_id
+WHERE 
+    md.num_actors > 0
+ORDER BY 
+    md.production_year DESC, md.num_actors DESC
+LIMIT 50;

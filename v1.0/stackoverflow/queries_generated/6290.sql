@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpvoteCount,
+        SUM(v.VoteTypeId = 3) AS DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        CommentCount, 
+        UpvoteCount, 
+        DownvoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    up.DisplayName,
+    up.TotalBadges,
+    up.TotalScore,
+    tp.Title,
+    tp.Score AS PostScore,
+    tp.CommentCount,
+    tp.UpvoteCount,
+    tp.DownvoteCount
+FROM 
+    UserReputation up
+JOIN 
+    TopPosts tp ON up.UserId = tp.PostId
+ORDER BY 
+    up.TotalScore DESC, 
+    tp.Score DESC
+LIMIT 50;

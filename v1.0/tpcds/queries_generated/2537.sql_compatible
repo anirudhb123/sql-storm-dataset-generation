@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_ship_date_sk BETWEEN 2450000 AND 2450008
+),
+CustomerReturns AS (
+    SELECT
+        wr.wr_item_sk,
+        SUM(wr.wr_return_qty) AS total_return_qty,
+        SUM(wr.wr_return_amt) AS total_return_amt
+    FROM
+        web_returns wr
+    WHERE
+        wr.wr_returned_date_sk BETWEEN 2450000 AND 2450008
+    GROUP BY
+        wr.wr_item_sk
+),
+AggregateSales AS (
+    SELECT
+        cs.cs_item_sk,
+        COUNT(cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs.cs_bill_customer_sk) AS unique_customers
+    FROM
+        catalog_sales cs
+    WHERE
+        cs.cs_sold_date_sk BETWEEN 2450000 AND 2450008
+    GROUP BY
+        cs.cs_item_sk
+)
+SELECT
+    i.i_item_id,
+    COALESCE(r.total_return_qty, 0) AS total_return_qty,
+    COALESCE(r.total_return_amt, 0) AS total_return_amt,
+    COALESCE(s.total_orders, 0) AS total_orders,
+    COALESCE(s.total_profit, 0) AS total_profit,
+    RANK() OVER (ORDER BY COALESCE(s.total_profit, 0) DESC) AS profit_rank
+FROM
+    item i
+LEFT JOIN CustomerReturns r ON i.i_item_sk = r.wr_item_sk
+LEFT JOIN AggregateSales s ON i.i_item_sk = s.cs_item_sk
+WHERE
+    (SELECT COUNT(*) FROM RankedSales rs WHERE rs.ws_item_sk = i.i_item_sk AND rs.sales_rank = 1) > 0
+    OR i.i_current_price > 100
+GROUP BY
+    i.i_item_id, r.total_return_qty, r.total_return_amt, s.total_orders, s.total_profit
+ORDER BY
+    total_profit DESC NULLS LAST;

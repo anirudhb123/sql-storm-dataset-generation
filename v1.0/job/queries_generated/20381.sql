@@ -1,0 +1,62 @@
+WITH RECURSIVE Movie_Hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        -- Assigning a depth level for hierarchical representation
+        1 AS depth_level,
+        CAST(mt.title AS VARCHAR(255)) AS full_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.depth_level + 1,
+        CAST(mh.full_path || ' -> ' || lt.title AS VARCHAR(255))
+    FROM 
+        Movie_Hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+)
+SELECT 
+    ak.name AS alias_name,
+    at.title,
+    at.production_year,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ci.kind) AS company_kinds,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS has_summary,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.id) AS row_num
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cc ON ak.person_id = cc.person_id
+JOIN 
+    aka_title at ON cc.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND at.production_year > 2000
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(cc.person_id) > 1
+    AND MAX(at.production_year) IS NOT NULL
+ORDER BY 
+    total_cast DESC,
+    at.production_year DESC,
+    row_num
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

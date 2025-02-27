@@ -1,0 +1,53 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT c.id AS cast_id, c.movie_id, a.person_id, 
+           a.name AS actor_name, a.surname_pcode,
+           1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.id AS cast_id, c.movie_id, a.person_id,
+           a.name AS actor_name, a.surname_pcode,
+           ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE ah.level < 3
+),
+
+MovieDetails AS (
+    SELECT CONCAT(m.title, '(', m.production_year, ')') AS movie_title,
+           m.id AS movie_id, COUNT(DISTINCT ac.person_id) AS actor_count
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_name ac ON c.person_id = ac.person_id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id, m.title, m.production_year
+),
+
+FamousMovies AS (
+    SELECT md.movie_title, md.actor_count
+    FROM MovieDetails md
+    WHERE md.actor_count >= 5
+),
+
+MovieKeywords AS (
+    SELECT m.title AS movie_title, GROUP_CONCAT(k.keyword) AS keywords
+    FROM aka_title m
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id, m.title
+)
+
+SELECT fm.movie_title, 
+       COALESCE(k.keywords, 'No keywords') AS keywords,
+       ah.actor_name,
+       COUNT(DISTINCT ah.cast_id) AS total_appearances,
+       SUM(CASE WHEN ah.surname_pcode IS NOT NULL THEN 1 ELSE 0 END) AS valid_surnames
+FROM FamousMovies fm
+LEFT JOIN MovieKeywords k ON fm.movie_title = k.movie_title
+LEFT JOIN ActorHierarchy ah ON ah.movie_id = fm.movie_id
+GROUP BY fm.movie_title, k.keywords, ah.actor_name
+ORDER BY total_appearances DESC, fm.movie_title;

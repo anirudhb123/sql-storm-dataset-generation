@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN c.note IS NULL THEN 0 ELSE 1 END) AS avg_note_presence
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.title, t.production_year
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.avg_note_presence,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COALESCE(mi.info_details, 'No information') AS info_details
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieKeywords mk ON rm.title = mk.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rm.title = mi.movie_id
+WHERE 
+    rm.cast_count > 0 
+    AND (rm.production_year >= 2000 OR rm.avg_note_presence > 0.5)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC
+LIMIT 50;

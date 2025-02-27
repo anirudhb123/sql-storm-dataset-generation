@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Base case: movies from the year 2000 onwards
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id  -- Recursive case
+),
+AggregateInfo AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        COUNT(mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword_id) AS unique_keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.title, mh.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        company_count,
+        unique_keywords,
+        RANK() OVER (ORDER BY unique_keywords DESC, company_count DESC) AS movie_rank
+    FROM 
+        AggregateInfo
+    WHERE 
+        company_count > 5  -- Consider movies with more than 5 associated companies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_count,
+    tm.unique_keywords,
+    COALESCE(a.name, 'Unknown') AS first_associated_actor,
+    CASE 
+        WHEN tm.unique_keywords IS NULL THEN 'No keywords available'
+        ELSE 'Keywords Found'
+    END AS keyword_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    cast_info ci ON tm.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    tm.movie_rank <= 10  -- Getting only top 10 ranked movies
+ORDER BY 
+    tm.movie_rank;

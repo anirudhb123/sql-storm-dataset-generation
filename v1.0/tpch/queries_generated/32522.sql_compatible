@@ -1,0 +1,47 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level, 
+           CAST(s.s_name AS CHAR(255)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1,
+           CAST(CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS CHAR(255))
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE sh.level < 5 AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+           DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, os.total_amount
+    FROM customer c
+    JOIN order_summary os ON c.c_custkey = os.o_custkey
+    WHERE os.rank <= 10
+),
+nation_avg AS (
+    SELECT n.n_name, AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    ph.hierarchy_path,
+    tc.c_name AS top_customer,
+    tc.total_amount,
+    na.n_name AS nation_name,
+    na.avg_acctbal,
+    COALESCE(tc.c_acctbal - na.avg_acctbal, 0) AS balance_difference
+FROM supplier_hierarchy ph
+LEFT JOIN top_customers tc ON ph.s_nationkey = tc.c_custkey
+LEFT JOIN nation_avg na ON ph.s_nationkey = na.n_name
+WHERE ph.s_name LIKE 'Supplier%'
+ORDER BY balance_difference DESC, tc.total_amount DESC;

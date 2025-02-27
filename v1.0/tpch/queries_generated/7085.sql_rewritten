@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND 
+        o.o_orderdate < DATE '1996-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(ps.ps_partkey) > 5
+),
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ss.total_parts,
+    ss.total_supplycost,
+    cr.total_revenue
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    SupplierStats ss ON ss.total_parts > 10  
+LEFT JOIN 
+    CustomerRevenue cr ON cr.total_revenue > 10000  
+WHERE 
+    ro.order_rank <= 10
+ORDER BY 
+    ro.o_orderdate DESC, 
+    ro.o_totalprice DESC;

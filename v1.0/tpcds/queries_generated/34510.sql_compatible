@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+item_details AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_current_price,
+        COALESCE(i_current_price - AVG(i_current_price) OVER (PARTITION BY i_category_id), 0) AS price_difference,
+        i_brand,
+        i_category
+    FROM 
+        item
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ii.i_item_id,
+    ws_summary.total_quantity,
+    ws_summary.total_sales,
+    ii.price_difference,
+    ci.cd_gender,
+    ci.cd_marital_status
+FROM 
+    customer_info ci
+JOIN 
+    (SELECT 
+        ss.ws_sold_date_sk, 
+        ss.ws_item_sk, 
+        SUM(ss.ws_quantity) AS total_quantity, 
+        SUM(ss.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss.ws_item_sk ORDER BY ss.ws_sold_date_sk) AS item_rank
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.ws_sold_date_sk, ss.ws_item_sk
+    ) AS ws_summary ON ci.c_customer_sk = ws_summary.ws_bill_customer_sk
+JOIN 
+    item_details ii ON ws_summary.ws_item_sk = ii.i_item_sk
+WHERE 
+    (ci.gender_rank <= 10 OR ii.price_difference > 0)
+    AND EXISTS (
+        SELECT 1 
+        FROM store s 
+        WHERE s.s_closed_date_sk IS NULL
+        AND s.s_number_employees > 50
+        HAVING COUNT(s.s_item_sk) > 3
+    )
+ORDER BY 
+    ci.cd_gender, ws_summary.total_sales DESC;

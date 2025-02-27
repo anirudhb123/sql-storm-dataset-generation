@@ -1,0 +1,54 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS total_addresses,
+        COUNT(DISTINCT ca_city) AS unique_cities,
+        SUM(LENGTH(ca_street_name) - LENGTH(REPLACE(ca_street_name, ' ', '')) + 1) AS avg_street_name_words,
+        AVG(COALESCE(NULLIF(LENGTH(ca_street_name), 0), NULL)) AS avg_length_street_name
+    FROM customer_address
+    GROUP BY ca_state
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS total_customers,
+        AVG(cd_dep_count) AS avg_dependent_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    JOIN customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY cd_gender
+),
+SalesData AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_bill_addr_sk
+),
+RankedSales AS (
+    SELECT 
+        a.ca_state,
+        c.cd_gender,
+        a.total_addresses,
+        a.unique_cities,
+        a.avg_street_name_words,
+        a.avg_length_street_name,
+        s.total_sales,
+        RANK() OVER (PARTITION BY a.ca_state ORDER BY s.total_sales DESC) AS sales_rank
+    FROM AddressStats a
+    JOIN CustomerStats c ON 1=1
+    JOIN SalesData s ON a.ca_address_sk = s.ws_bill_addr_sk
+)
+SELECT 
+    ca_state,
+    cd_gender,
+    total_addresses,
+    unique_cities,
+    avg_street_name_words,
+    avg_length_street_name,
+    total_sales,
+    sales_rank
+FROM RankedSales
+WHERE sales_rank <= 10
+ORDER BY ca_state, sales_rank;

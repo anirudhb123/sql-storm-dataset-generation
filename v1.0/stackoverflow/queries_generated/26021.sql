@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+),
+TagStatistics AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        Tag
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS ClosureDate,
+        crt.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Post Closed / Post Reopened
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.ViewCount,
+    rp.Score,
+    ts.PostCount,
+    ur.DisplayName AS PostOwner,
+    ur.TotalBadges,
+    cp.ClosureDate,
+    cp.CloseReason
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON rp.Tags LIKE '%' || ts.Tag || '%'
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank = 1 -- Top post per user
+ORDER BY 
+    rp.Score DESC, ts.PostCount DESC;

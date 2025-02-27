@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsWithHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ph.CreationDate, p.CreationDate) AS CreatedDate,
+        CASE 
+            WHEN ph.PostId IS NOT NULL THEN 1
+            ELSE 0 
+        END AS HasHistory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+),
+TopPostTitles AS (
+    SELECT 
+        Title, 
+        ROW_NUMBER() OVER (PARTITION BY Level ORDER BY CreatedDate DESC) AS Rank
+    FROM 
+        PostsWithHistory pwh
+    JOIN 
+        RecursivePostHierarchy rph ON pwh.PostId = rph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    ua.Upvotes,
+    ua.Downvotes,
+    ua.CommentCount,
+    ua.PostsCount,
+    MAX(tp.Title) AS MostRecentTopPost,
+    COUNT(DISTINCT p.Id) AS TotalPostsWithHistory,
+    COUNT(DISTINCT tp.Title) AS UniquePostTitles,
+    SUM(CASE WHEN pwh.HasHistory = 1 THEN 1 ELSE 0 END) AS TotalCloseReopenCount
+FROM 
+    Users u
+INNER JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostsWithHistory pwh ON u.Id = pwh.OwnerUserId
+LEFT JOIN 
+    TopPostTitles tp ON tp.Title = pwh.Title
+GROUP BY 
+    u.Id, u.DisplayName, ua.Upvotes, ua.Downvotes, ua.CommentCount, ua.PostsCount
+ORDER BY 
+    ua.Upvotes DESC, ua.CommentCount DESC
+LIMIT 50;

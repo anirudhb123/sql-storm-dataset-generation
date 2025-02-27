@@ -1,0 +1,76 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+TopVotedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Score
+    HAVING COUNT(v.Id) > 0
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.Comment
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+),
+EnhancedPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.VoteCount,
+        tp.UpVotes,
+        tp.DownVotes,
+        cp.ClosedBy,
+        cp.ClosedDate,
+        COALESCE(cp.Comment, 'No close reason provided') AS CloseReason
+    FROM TopVotedPosts tp
+    LEFT JOIN ClosedPosts cp ON tp.PostId = cp.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        COUNT(DISTINCT p.Id) AS PostedCount,
+        SUM(COALESCE(UPD.UserId, 0)) AS UpdateCount 
+    FROM UserReputation ur
+    LEFT JOIN Posts p ON ur.UserId = p.OwnerUserId
+    LEFT JOIN PostHistory UPD ON p.Id = UPD.PostId AND UPD.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ur.UserId, ur.Reputation
+    HAVING COUNT(DISTINCT p.Id) > 0
+)
+SELECT 
+    ep.Title,
+    ep.Score,
+    ep.VoteCount,
+    ep.UpVotes,
+    ep.DownVotes,
+    ep.ClosedBy,
+    ep.ClosedDate,
+    ep.CloseReason,
+    au.Reputation AS UserReputation,
+    au.PostedCount,
+    au.UpdateCount
+FROM EnhancedPosts ep
+JOIN ActiveUsers au ON ep.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = au.UserId)
+WHERE ep.Score > 10
+ORDER BY ep.Score DESC, au.Reputation DESC
+LIMIT 100;

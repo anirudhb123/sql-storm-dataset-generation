@@ -1,0 +1,74 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        1 AS Level
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  -- only questions
+
+    UNION ALL
+
+    SELECT
+        a.Id,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        a.OwnerUserId,
+        a.ParentId,
+        COALESCE(v.UpVoteCount, 0),
+        COALESCE(v.DownVoteCount, 0),
+        Level + 1
+    FROM
+        Posts a
+    INNER JOIN RecursivePostCTE r ON a.ParentId = r.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON a.Id = v.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+    AVG(UpVoteCount - DownVoteCount) OVER (PARTITION BY p.OwnerUserId) AS UserVoteBalance,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostCTE p
+LEFT JOIN Comments c ON c.PostId = p.Id
+LEFT JOIN Posts p2 ON p2.ParentId = p.Id
+LEFT JOIN Tags t ON t.Id IN (
+    SELECT DISTINCT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int[])
+)
+GROUP BY 
+    p.Id,
+    p.Title
+HAVING 
+    COUNT(DISTINCT c.Id) > 5
+ORDER BY 
+    UserVoteBalance DESC, 
+    CommentCount DESC
+LIMIT 100;
+
+-- Clean up with error handling for the execution depending on the actual database engine used
+

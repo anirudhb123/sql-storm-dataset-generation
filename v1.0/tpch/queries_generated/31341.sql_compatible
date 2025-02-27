@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000 AND sh.level < 3
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+NationSummary AS (
+    SELECT n.n_regionkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acct_bal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_regionkey, n.n_name
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT ns.n_name, ns.supplier_count, ns.total_acct_bal,
+       ps.p_name, ps.total_cost,
+       cos.total_orders, cos.total_spent
+FROM NationSummary ns
+FULL OUTER JOIN PartSupplier ps ON ns.supplier_count > 0
+LEFT JOIN CustomerOrderSummary cos ON cos.total_orders > 5
+WHERE ns.total_acct_bal IS NOT NULL OR ps.total_cost IS NOT NULL
+ORDER BY ns.n_name, ps.p_name;

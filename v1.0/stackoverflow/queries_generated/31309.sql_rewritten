@@ -1,0 +1,55 @@
+WITH RECURSIVE UserTree AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        Location,
+        CAST(1 AS INT) AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000 
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Location,
+        ut.Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserTree ut ON u.Id <> ut.Id AND u.Reputation < ut.Reputation 
+)
+
+SELECT 
+    u.Id,
+    u.DisplayName,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes, 
+    COUNT(DISTINCT bh.Id) AS BadgeCount, 
+    COUNT(DISTINCT p.Id) AS PostCount, 
+    AVG(ut.Reputation) AS AvgReputation 
+FROM 
+    Users u
+LEFT JOIN 
+    Votes v ON u.Id = v.UserId 
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId 
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId 
+LEFT JOIN 
+    UserTree ut ON u.Id = ut.Id 
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    BadgeCount > 0 OR PostCount > 5 
+ORDER BY 
+    AvgReputation DESC, 
+    UpVotes DESC;

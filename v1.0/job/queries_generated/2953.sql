@@ -1,0 +1,58 @@
+WITH MovieRatings AS (
+    SELECT 
+        a.title AS movie_title,
+        COUNT(c.id) AS cast_count,
+        AVG(CASE WHEN r.rating IS NOT NULL THEN r.rating ELSE 0 END) AS avg_rating
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_info m ON a.id = m.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            MAX(info) AS rating
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+         GROUP BY 
+            movie_id
+        ) r ON a.id = r.movie_id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        a.title
+),
+ActorStatistics AS (
+    SELECT 
+        n.id AS actor_id,
+        n.name AS actor_name,
+        COUNT(DISTINCT cc.movie_id) AS movies_played,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT cc.movie_id) DESC) AS rank
+    FROM 
+        aka_name n
+    JOIN 
+        cast_info c ON n.person_id = c.person_id
+    JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    GROUP BY 
+        n.id, n.name
+)
+SELECT 
+    m.movie_title,
+    COALESCE(m.cast_count, 0) AS total_cast,
+    COALESCE(m.avg_rating, 'N/A') AS average_rating,
+    a.actor_name,
+    a.movies_played,
+    CASE WHEN a.rank <= 10 THEN 'Top Actor' ELSE 'Supporting Actor' END AS actor_role
+FROM 
+    MovieRatings m
+FULL OUTER JOIN 
+    ActorStatistics a ON a.movies_played >= 1
+WHERE 
+    m.avg_rating IS NOT NULL OR a.movies_played >= 5
+ORDER BY 
+    m.avg_rating DESC NULLS LAST, 
+    a.movies_played DESC;

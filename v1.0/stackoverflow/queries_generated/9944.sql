@@ -1,0 +1,55 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPosts,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        DATEDIFF(CURRENT_TIMESTAMP, u.CreationDate) AS AccountAge,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AverageBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        PopularPosts,
+        TotalUpVotes,
+        TotalDownVotes,
+        AccountAge,
+        AverageBounty,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserStats
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    QuestionCount,
+    AnswerCount,
+    PopularPosts,
+    TotalUpVotes,
+    TotalDownVotes,
+    AccountAge,
+    AverageBounty,
+    UserRank
+FROM 
+    RankedUsers
+WHERE 
+    UserRank <= 10
+ORDER BY 
+    UserRank;

@@ -1,0 +1,51 @@
+WITH MovieStatistics AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        MAX(m.production_year) AS release_year,
+        COUNT(DISTINCT mk.keyword) AS total_keywords
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id
+    GROUP BY 
+        t.id, t.title
+),
+
+CompanyStatistics AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, '; ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    ms.movie_id,
+    ms.movie_title,
+    ms.total_cast,
+    ms.aka_names,
+    ms.release_year,
+    ms.total_keywords,
+    cs.total_companies,
+    cs.company_names
+FROM 
+    MovieStatistics ms
+LEFT JOIN 
+    CompanyStatistics cs ON ms.movie_id = cs.movie_id
+ORDER BY 
+    ms.release_year DESC, 
+    ms.total_cast DESC;

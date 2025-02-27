@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    us.Reputation,
+    us.DisplayName,
+    us.BadgeCount,
+    us.HighViewCountPosts,
+    COALESCE(cp.LastClosedDate, 'Not Closed') AS LastClosedDate
+FROM 
+    RankedPosts p
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.rn = 1
+ORDER BY 
+    us.Reputation DESC, 
+    p.Score DESC;

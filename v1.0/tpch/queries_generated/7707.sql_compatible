@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_ordered_qty,
+        AVG(l.l_extendedprice) AS avg_price,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+FinalMetrics AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(ps.total_available_qty) AS total_available_qty,
+        AVG(ps.avg_supply_cost) AS avg_supply_cost,
+        SUM(pd.total_ordered_qty) AS total_ordered_parts,
+        AVG(pd.avg_price) AS avg_order_price
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        SupplierStats ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        PartDetails pd ON ps.ps_partkey = pd.p_partkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    fm.r_name,
+    fm.total_available_qty,
+    fm.avg_supply_cost,
+    fm.total_ordered_parts,
+    fm.avg_order_price,
+    COUNT(ro.o_orderkey) AS total_orders,
+    SUM(ro.o_totalprice) AS total_revenue
+FROM 
+    FinalMetrics fm
+LEFT JOIN 
+    RankedOrders ro ON fm.r_name = (SELECT r.r_name FROM region r WHERE r.r_regionkey = ro.r_regionkey)
+GROUP BY 
+    fm.r_name, fm.total_available_qty, fm.avg_supply_cost, fm.total_ordered_parts, fm.avg_order_price
+ORDER BY 
+    fm.total_available_qty DESC, total_revenue DESC;

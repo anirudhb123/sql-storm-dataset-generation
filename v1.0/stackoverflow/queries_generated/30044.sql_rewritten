@@ -1,0 +1,49 @@
+WITH RecursivePosts AS (
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RN
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC)
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.Id
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, COUNT(b.Id) AS BadgeCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVoteCounts AS (
+    SELECT p.Id, 
+           COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    rp.Id AS QuestionId,
+    rp.Title AS QuestionTitle,
+    u.DisplayName AS QuestionOwner,
+    ub.BadgeCount AS OwnerBadgeCount,
+    SUM(COALESCE(pvc.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(pvc.DownVotes, 0)) AS TotalDownVotes,
+    COUNT(DISTINCT cm.Id) AS TotalComments,
+    MAX(CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS IsClosed,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostLinks,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM RecursivePosts rp
+JOIN Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN PostVoteCounts pvc ON rp.Id = pvc.Id
+LEFT JOIN Comments cm ON rp.Id = cm.PostId
+LEFT JOIN PostLinks pl ON rp.Id = pl.PostId
+LEFT JOIN UNNEST(string_to_array(rp.Tags, ', ')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY rp.Id, rp.Title, u.DisplayName, ub.BadgeCount
+ORDER BY TotalUpVotes DESC, rp.CreationDate DESC
+LIMIT 100;

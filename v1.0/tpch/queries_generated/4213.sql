@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT p.ps_partkey) AS parts_supplied,
+        SUM(p.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerStats) 
+)
+SELECT 
+    hvc.c_name AS high_value_customer,
+    so.s_name AS supplier_name,
+    so.parts_supplied,
+    lo.l_orderkey,
+    lo.o_totalprice AS order_value,
+    ROW_NUMBER() OVER (PARTITION BY so.s_suppkey ORDER BY lo.o_totalprice DESC) as order_rank
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    orders lo ON hvc.c_custkey = lo.o_custkey
+JOIN 
+    lineitem li ON lo.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier so ON ps.ps_suppkey = so.s_suppkey
+WHERE 
+    li.l_discount > 0.1
+    AND lo.o_orderstatus IN ('F', 'P')
+    AND so.s_name IS NOT NULL
+ORDER BY 
+    hvc.c_name ASC, lo.o_totalprice DESC;

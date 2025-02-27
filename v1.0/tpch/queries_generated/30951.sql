@@ -1,0 +1,49 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN sales_hierarchy sh ON s.s_acctbal BETWEEN sh.s_acctbal * 0.5 AND sh.s_acctbal * 1.5
+),
+aggregated_sales AS (
+    SELECT 
+        c.c_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY c.c_nationkey, n.n_name
+),
+combined_data AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        ps.ps_availqty, 
+        COALESCE(sh.s_name, 'No Supplier') AS supplier_name,
+        COALESCE(sh.s_acctbal, 0) AS supplier_acctbal,
+        ag.total_orders,
+        ag.total_revenue
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN sales_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    LEFT JOIN aggregated_sales ag ON ag.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    WHERE p.p_retailprice >= ANY (SELECT DISTINCT p_retailprice FROM part WHERE p_size < 20)
+)
+SELECT 
+    p_name,
+    SUM(total_revenue) AS total_revenue,
+    AVG(supplier_acctbal) AS avg_supplier_acctbal,
+    ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+FROM combined_data
+WHERE total_orders IS NOT NULL
+GROUP BY p_name
+HAVING SUM(total_revenue) > 10000
+ORDER BY revenue_rank
+LIMIT 10;

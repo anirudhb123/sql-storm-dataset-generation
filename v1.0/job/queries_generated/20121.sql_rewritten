@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id
+    FROM aka_title mt 
+    WHERE mt.kind_id IN (1, 12) 
+
+    UNION ALL
+
+    SELECT
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id
+    FROM aka_title mt
+    JOIN MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+ActorPerformance AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE WHEN year(cast(COALESCE(mi.info, '0 years'), '0 years')) < 2000 THEN 1 ELSE 0 END) AS avg_old_movies
+    FROM cast_info ci
+    LEFT JOIN movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info='Release Year')
+    GROUP BY ci.person_id
+),
+
+TopActors AS (
+    SELECT
+        a.id AS actor_id,
+        na.name AS actor_name,
+        ap.movie_count,
+        ap.avg_old_movies
+    FROM ActorPerformance ap
+    JOIN aka_name na ON ap.person_id = na.person_id
+    WHERE na.name IS NOT NULL AND ap.movie_count > 5
+    ORDER BY ap.movie_count DESC
+    LIMIT 10
+),
+
+MovieKeywords AS (
+    SELECT
+        mt.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mt.id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(tap.actor_name, 'Unknown Actor') AS lead_actor,
+    mk.keywords,
+    (SELECT COUNT(*)
+     FROM complete_cast cc
+     WHERE cc.movie_id = mh.movie_id
+     AND cc.status_id IS NOT NULL) AS total_cast,
+    CASE
+        WHEN (SELECT COUNT(*)
+              FROM complete_cast cc
+              WHERE cc.movie_id = mh.movie_id
+              AND cc.status_id IS NULL) > 5 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM MovieHierarchy mh
+LEFT JOIN TopActors tap ON mh.movie_id = tap.movie_id
+LEFT JOIN MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE mh.production_year IS NOT NULL
+AND mh.production_year BETWEEN 1980 AND 2023
+ORDER BY mh.production_year DESC, mh.title;

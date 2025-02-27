@@ -1,0 +1,52 @@
+WITH UserTagCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT t.Id) AS TagCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+             UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><')) AS TagName, 
+             p.Id AS PostId
+         FROM 
+             Posts p WHERE p.PostTypeId = 1) AS t ON p.Id = t.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TagCount, 
+        GoldBadges, 
+        SilverBadges, 
+        BronzeBadges,
+        RANK() OVER (ORDER BY TagCount DESC) AS TagCountRank
+    FROM 
+        UserTagCounts
+)
+SELECT 
+    ru.DisplayName,
+    ru.TagCount,
+    ru.GoldBadges,
+    ru.SilverBadges,
+    ru.BronzeBadges,
+    ru.TagCountRank,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoredPosts
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    Posts p ON ru.UserId = p.OwnerUserId
+GROUP BY 
+    ru.UserId, ru.DisplayName, ru.TagCount, ru.GoldBadges, ru.SilverBadges, ru.BronzeBadges, ru.TagCountRank
+ORDER BY 
+    ru.TagCountRank, ru.DisplayName;

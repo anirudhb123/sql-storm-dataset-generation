@@ -1,0 +1,66 @@
+
+WITH RankedSupplyCost AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS supply_rank
+    FROM 
+        partsupp
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ps.ps_partkey, 
+        ps.ps_supplycost
+    FROM 
+        supplier s 
+    JOIN 
+        RankedSupplyCost ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.supply_rank = 1
+),
+TotalRevenue AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+HighVolumeCustomers AS (
+    SELECT 
+        c_custkey
+    FROM 
+        TotalRevenue 
+    WHERE 
+        revenue > 10000
+)
+SELECT 
+    ts.s_suppkey, 
+    ts.s_name, 
+    ts.ps_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    p.p_retailprice,
+    tv.revenue
+FROM 
+    TopSuppliers ts 
+JOIN 
+    part p ON ts.ps_partkey = p.p_partkey
+JOIN 
+    HighVolumeCustomers hvc ON ts.s_suppkey = hvc.c_custkey
+JOIN 
+    TotalRevenue tv ON hvc.c_custkey = tv.c_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p.p_retailprice) FROM part) 
+ORDER BY 
+    tv.revenue DESC, ts.s_name;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+TopPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(U.DisplayName, 'Community User') AS OwnerDisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users U ON rp.PostId = U.Id OR rp.OwnerUserId = U.Id 
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = U.Id
+    WHERE 
+        rp.Rank <= 5 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Score, U.DisplayName
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        PHT.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE())
+)
+SELECT 
+    tpd.PostId,
+    tpd.Title,
+    tpd.ViewCount,
+    tpd.Score,
+    tpd.OwnerDisplayName,
+    tpd.Upvotes,
+    tpd.Downvotes,
+    tpd.CommentCount,
+    tpd.BadgeCount,
+    phd.PostHistoryTypeId,
+    phd.HistoryTypeName,
+    phd.CreationDate AS HistoryDate
+FROM 
+    TopPostData tpd
+LEFT JOIN 
+    PostHistoryData phd ON tpd.PostId = phd.PostId 
+WHERE 
+    tpd.Upvotes - tpd.Downvotes > 0 
+ORDER BY 
+    tpd.Score DESC, tpd.ViewCount DESC;

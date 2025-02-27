@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 3
+),
+
+PartSupplierStats AS (
+    SELECT ps.ps_partkey,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+
+OrderRevenue AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+
+FilteredResults AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_retailprice,
+           p.p_size,
+           ps.supplier_count,
+           ps.avg_supply_cost,
+           ps.total_available_qty,
+           ordr.total_revenue,
+           nr.r_name AS nation_region
+    FROM part p
+    LEFT JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN OrderRevenue ordr ON ordr.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = l.l_orderkey)
+    LEFT JOIN NationRegion nr ON p.p_partkey % (SELECT COUNT(DISTINCT n.n_nationkey) FROM nation n) = nr.n_nationkey
+    WHERE (p.p_size BETWEEN 1 AND 5 OR p.p_type LIKE '%red%')
+      AND (ps.total_available_qty IS NULL OR ps.total_available_qty > 100)
+      AND (ordr.total_revenue IS NULL OR ordr.total_revenue > 5000)
+)
+
+SELECT f.p_partkey,
+       f.p_name,
+       f.p_retailprice,
+       f.supplier_count,
+       f.avg_supply_cost,
+       f.total_available_qty,
+       f.total_revenue,
+       f.nation_region,
+       ROW_NUMBER() OVER (PARTITION BY f.nation_region ORDER BY f.total_revenue DESC) AS row_num
+FROM FilteredResults f
+WHERE f.total_revenue IS NOT NULL
+ORDER BY f.nation_region, f.total_revenue DESC;

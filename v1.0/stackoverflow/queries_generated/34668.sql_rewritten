@@ -1,0 +1,57 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Level,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,  
+    COALESCE(count(c.Id), 0) AS CommentCount,  
+    COALESCE(MAX(b.Date), 'No Badges') AS LastBadgeDate  
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Users u ON ph.PostId = u.Id
+LEFT JOIN 
+    Votes v ON ph.PostId = v.PostId
+LEFT JOIN 
+    Comments c ON ph.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    ph.Level <= 3  
+GROUP BY 
+    ph.PostId,
+    u.DisplayName,
+    ph.Title,
+    ph.CreationDate,
+    ph.Level
+ORDER BY 
+    ph.Level,
+    ph.CreationDate DESC;

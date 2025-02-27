@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(*) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        rp.Title,
+        rp.ViewCount,
+        pv.UpVotes,
+        pv.DownVotes,
+        rp.Score,
+        u.DisplayName AS OwnerName,
+        tp.UserId AS TopUserId,
+        tp.TotalPosts,
+        tp.GoldBadges,
+        tp.SilverBadges,
+        tp.BronzeBadges
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        PostVoteSummary pv ON rp.Id = pv.PostId
+    LEFT JOIN 
+        TopUsers tp ON rp.OwnerUserId = tp.UserId
+)
+SELECT 
+    pd.Title,
+    pd.ViewCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Score,
+    pd.OwnerName,
+    COALESCE(pd.GoldBadges, 0) AS GoldBadges,
+    COALESCE(pd.SilverBadges, 0) AS SilverBadges,
+    COALESCE(pd.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    PostDetails pd
+WHERE 
+    pd.TotalPosts > 5 OR pd.UpVotes > 10
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 50;

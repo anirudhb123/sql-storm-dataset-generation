@@ -1,0 +1,49 @@
+
+WITH RankedCustomer AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) as rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+),
+TopCustomers AS (
+    SELECT r.r_name, rc.c_custkey, rc.c_name, rc.c_acctbal
+    FROM RankedCustomer rc
+    JOIN nation n ON rc.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rc.rank <= 5
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+),
+FinalReport AS (
+    SELECT tc.r_name, 
+           COUNT(DISTINCT tc.c_custkey) AS num_customers,
+           SUM(os.total_price_after_discount) AS total_revenue,
+           AVG(si.total_cost) AS avg_supplier_cost
+    FROM TopCustomers tc
+    LEFT JOIN OrdersSummary os ON tc.c_custkey = os.o_custkey
+    LEFT JOIN SupplierInfo si ON si.part_count > 0
+    GROUP BY tc.r_name
+)
+SELECT fr.r_name, fr.num_customers, fr.total_revenue, 
+       CASE WHEN fr.avg_supplier_cost IS NULL THEN 'No Data' 
+            ELSE CAST(fr.avg_supplier_cost AS VARCHAR) END AS avg_supplier_cost
+FROM FinalReport fr
+WHERE fr.total_revenue > (SELECT AVG(total_revenue) FROM FinalReport)
+ORDER BY fr.r_name DESC;

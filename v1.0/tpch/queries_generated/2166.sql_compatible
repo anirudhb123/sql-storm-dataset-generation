@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value,
+        STRING_AGG(o.o_comment, '; ') AS order_comments
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    r.r_name AS region_name,
+    rs.s_name AS top_supplier,
+    rs.total_supplycost,
+    co.total_orders,
+    co.avg_order_value,
+    COALESCE(co.order_comments, 'No comments') AS order_comments
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rank = 1
+LEFT JOIN 
+    customer c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o_orderkey) FROM orders) LIMIT 1)
+LEFT JOIN 
+    CustomerOrders co ON c.c_custkey = co.c_custkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size = p.p_size)
+    OR p.p_type LIKE '%wood%'
+ORDER BY 
+    total_supplycost DESC, 
+    p.p_name ASC;

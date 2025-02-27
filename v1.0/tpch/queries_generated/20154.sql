@@ -1,0 +1,71 @@
+WITH RecursivePart AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_brand,
+        COUNT(ps_suppkey) AS supplier_count
+    FROM 
+        part 
+        LEFT JOIN partsupp ON part.p_partkey = partsupp.ps_partkey
+    GROUP BY 
+        p_partkey, p_name, p_brand
+),
+AggregatedSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal < 500 THEN 'Low Balance'
+            ELSE 'Sufficient Balance'
+        END AS balance_category
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment IN (SELECT DISTINCT 'BUILDING' AS segment UNION SELECT 'FURNITURE' UNION SELECT 'AUTOMOBILE')
+),
+TopNations AS (
+    SELECT 
+        n.n_name, 
+        COUNT(s.s_suppkey) AS total_suppliers
+    FROM 
+        nation n
+        LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+    ORDER BY 
+        total_suppliers DESC
+    LIMIT 5
+)
+SELECT 
+    rp.p_name,
+    rp.p_brand,
+    fp.c_name,
+    fs.total_sales,
+    tn.n_name AS top_nation,
+    CASE 
+        WHEN fs.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM 
+    RecursivePart rp
+    JOIN FilteredCustomers fp ON fp.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+    LEFT JOIN AggregatedSales fs ON fs.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = fp.c_custkey)
+    LEFT JOIN TopNations tn ON tn.total_suppliers > 1
+WHERE 
+    rp.supplier_count > (SELECT AVG(supplier_count) FROM RecursivePart)
+ORDER BY 
+    rp.p_brand, fp.balance_category DESC, fs.rank
+OFFSET 10 LIMIT 20;

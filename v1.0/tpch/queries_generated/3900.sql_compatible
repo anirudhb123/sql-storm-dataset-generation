@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.n_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS NationRank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 1000
+),
+BestSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.s_acctbal,
+        n.n_name
+    FROM SupplierDetails sd
+    JOIN nation n ON sd.n_nationkey = n.n_nationkey
+    WHERE sd.NationRank <= 3
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_size,
+    p.p_retailprice,
+    COALESCE(b.s_name, 'No Supplier') AS BestSupplier,
+    COALESCE(b.s_acctbal, 0.00) AS SupplierBalance,
+    r.TotalAvailable,
+    r.TotalSupplyCost,
+    o.o_orderkey,
+    o.o_orderstatus
+FROM part p
+LEFT JOIN PartSupplierStats r ON p.p_partkey = r.ps_partkey
+LEFT JOIN BestSuppliers b ON r.ps_partkey = b.s_suppkey
+JOIN RankedOrders o ON o.o_orderkey = (
+    SELECT MAX(o2.o_orderkey) 
+    FROM orders o2 
+    WHERE o2.o_orderstatus = 'O' AND o2.o_orderkey IS NOT NULL
+)
+WHERE p.p_retailprice > 50.00
+  AND (b.s_acctbal IS NULL OR b.s_acctbal > 5000.00)
+ORDER BY o.o_orderdate DESC, p.p_name;

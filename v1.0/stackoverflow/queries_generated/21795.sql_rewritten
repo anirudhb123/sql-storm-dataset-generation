@@ -1,0 +1,92 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        COALESCE(MAX(b.Class), 0) AS MaxBadgeClass,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentPostLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        pl.LinkTypeId,
+        ROW_NUMBER() OVER (PARTITION BY pl.PostId ORDER BY pl.CreationDate DESC) AS Rn
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.LinkTypeId = 3 
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryOrder
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        COALESCE(t.TagName, 'No Tag') AS TagName,
+        ps.UserId AS LastEditorId,
+        ps.LastEditDate,
+        ph.UserId AS LastHistoryUserId,
+        ph.Comment AS LastHistoryComment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%' 
+    LEFT JOIN 
+        Posts ps ON p.Id = ps.Id
+    LEFT JOIN 
+        PostHistories ph ON p.Id = ph.PostId AND ph.HistoryOrder = 1
+    WHERE 
+        p.Score > 5
+        AND (p.ViewCount BETWEEN 10 AND 1000 OR p.AcceptedAnswerId IS NOT NULL)
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.TotalPosts,
+    us.QuestionsAsked,
+    us.AnswersGiven,
+    us.AcceptedAnswers,
+    us.MaxBadgeClass,
+    us.TotalBadges,
+    fp.Title,
+    fp.Body,
+    fp.TagName,
+    fp.LastEditorId,
+    fp.LastEditDate,
+    fp.LastHistoryUserId,
+    fp.LastHistoryComment
+FROM 
+    UserStats us
+JOIN 
+    FilteredPosts fp ON us.UserId = fp.LastEditorId
+WHERE 
+    us.TotalPosts > 5 
+    AND (fp.LastHistoryComment IS NOT NULL OR fp.TagName = 'No Tag')
+ORDER BY 
+    us.Reputation DESC,
+    us.TotalPosts DESC
+OFFSET 10 ROWS FETCH NEXT 25 ROWS ONLY;

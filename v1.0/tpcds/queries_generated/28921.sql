@@ -1,0 +1,63 @@
+
+WITH CustomerAddressCombined AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        ca_gmt_offset
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DateInformation AS (
+    SELECT 
+        d.d_date_sk,
+        DATE_FORMAT(d.d_date, '%Y-%m-%d') AS formatted_date,
+        d.d_month_seq,
+        d.d_year,
+        d.d_day_name
+    FROM 
+        date_dim d
+)
+SELECT 
+    cdc.full_name,
+    cdc.c_email_address,
+    cac.full_address,
+    cac.ca_city,
+    cac.ca_state,
+    cac.ca_zip,
+    cac.ca_country,
+    di.formatted_date,
+    di.d_year,
+    di.d_day_name,
+    cac.ca_gmt_offset,
+    REPLACE(CONCAT(cdc.full_name, ' lives at ', cac.full_address), ' ', '_') AS address_label,
+    LENGTH(REPLACE(CONCAT(cdc.full_name, ' lives at ', cac.full_address), ' ', '_')) AS address_label_length
+FROM 
+    CustomerDetails cdc
+JOIN 
+    CustomerAddressCombined cac ON cdc.c_customer_sk = cac.ca_address_sk
+JOIN 
+    DateInformation di ON di.d_date_sk = cdc.c_customer_sk % 100  -- Example for filtering with Date Dimension
+WHERE 
+    cac.ca_state = 'NY' 
+AND 
+    di.d_year BETWEEN 2020 AND 2023
+ORDER BY 
+    di.d_year DESC, 
+    cac.ca_city ASC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    ur.DisplayName AS AuthorDisplayName,
+    ur.Reputation AS AuthorReputation,
+    COALESCE(phs.CloseReopenCount, 0) AS CloseReopenCount,
+    AGE(cast('2024-10-01 12:34:56' as timestamp), phs.FirstEditDate) AS DurationSinceFirstEdit,
+    CASE 
+        WHEN phs.LastEditDate IS NULL THEN 'No Edits'
+        ELSE 'Edited ' || EXTRACT(DAY FROM AGE(cast('2024-10-01 12:34:56' as timestamp), phs.LastEditDate)) || ' days ago'
+    END AS EditStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ur.UserId)
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 100
+OFFSET 0;

@@ -1,0 +1,29 @@
+SELECT 
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    r.r_name AS region_name,
+    CONCAT('Total price: $', FORMAT(SUM(l.l_extendedprice * (1 - l.l_discount)), 2)) AS total_price,
+    MAX(l.l_shipdate) AS last_ship_date
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_type LIKE '%brass%'
+    AND l.l_shipmode IN ('AIR', 'SHIP')
+    AND l.l_shipdate >= DATE_SUB(cast('1998-10-01' as date)(), INTERVAL 1 YEAR)
+GROUP BY 
+    short_name, region_name
+HAVING 
+    AVG(ps.ps_supplycost) > 100
+ORDER BY 
+    total_price DESC, short_name ASC;

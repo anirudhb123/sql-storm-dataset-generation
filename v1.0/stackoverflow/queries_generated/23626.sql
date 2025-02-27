@@ -1,0 +1,96 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(UPV.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(DNV.DownVoteCount, 0) AS DownVoteCount,
+        P.AcceptedAnswerId,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.Score DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS UpVoteCount
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2 
+        GROUP BY 
+            PostId
+    ) AS UPV ON P.Id = UPV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS DownVoteCount
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 3 
+        GROUP BY 
+            PostId
+    ) AS DNV ON P.Id = DNV.PostId
+)
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation,
+    PS.Title AS PostTitle,
+    PS.ViewCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.Score,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Comments C 
+     WHERE 
+         C.PostId = PS.PostId) AS CommentCount,
+    (SELECT 
+         STRING_AGG(PH.Comment, '; ') 
+     FROM 
+         PostHistory PH 
+     WHERE 
+         PH.PostId = PS.PostId 
+         AND PH.PostHistoryTypeId IN (10, 11) 
+         AND PH.Comment IS NOT NULL) AS CloseOrReopenComments,
+    (SELECT 
+         STRING_AGG(PT.Name, ', ') 
+     FROM 
+         PostHistory PH 
+     LEFT JOIN 
+         PostHistoryTypes PT ON PH.PostHistoryTypeId = PT.Id 
+     WHERE 
+         PH.PostId = PS.PostId 
+         AND PH.PostHistoryTypeId IN (10, 11)) AS RecentStatusChanges
+FROM 
+    UserVoteStats U
+JOIN 
+    PostStatistics PS ON PS.UpVoteCount > 0
+WHERE 
+    U.Reputation IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM Votes V 
+        WHERE V.UserId = U.UserId 
+        AND V.VoteTypeId IN (2, 3)
+    )
+    AND PS.TagRank <= 3
+ORDER BY 
+    U.Reputation DESC, PS.Score DESC, PS.ViewCount DESC
+LIMIT 50;

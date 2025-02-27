@@ -1,0 +1,71 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+ProductSales AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ns.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(ps.total_available_qty) AS supplier_availability,
+    SUM(ps.avg_supply_cost) AS total_avg_supply_cost,
+    SUM(prod.total_revenue) AS total_product_revenue,
+    AVG(co.total_spent) AS avg_spent_by_customer
+FROM 
+    nation ns
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierStats ps ON ps.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_supplycost > 100.00)
+LEFT JOIN 
+    ProductSales prod ON prod.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_availqty > 50)
+GROUP BY 
+    ns.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 
+ORDER BY 
+    customer_count DESC;

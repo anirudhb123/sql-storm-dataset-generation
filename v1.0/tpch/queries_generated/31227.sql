@@ -1,0 +1,50 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 0 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate AND oh.level < 5
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, s.s_name, p.p_name
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > (
+        SELECT AVG(ps2.ps_availqty) FROM partsupp ps2 WHERE ps2.ps_partkey = ps.ps_partkey
+    )
+),
+CustomerSpending AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS supplier_rank
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_supplycost < (
+        SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = ps.ps_partkey
+    )
+)
+SELECT ch.o_orderkey, ch.o_orderdate, ch.total_spent, 
+       psp.p_name, psp.ps_availqty, 
+       rs.s_name AS top_supplier_name,
+       CASE
+           WHEN ch.total_spent IS NULL THEN 'No Orders'
+           ELSE 'Orders Present'
+       END AS order_status,
+       ROW_NUMBER() OVER (PARTITION BY ch.o_orderkey ORDER BY ch.o_orderdate DESC) AS order_seq
+FROM OrderHierarchy ch
+FULL OUTER JOIN CustomerSpending cs ON ch.o_custkey = cs.c_custkey
+LEFT JOIN PartSupplierDetails psp ON cs.c_custkey = psp.ps_suppkey
+LEFT JOIN RankedSuppliers rs ON psp.ps_partkey = rs.ps_partkey AND rs.supplier_rank = 1
+WHERE ch.level = (
+    SELECT MAX(level) FROM OrderHierarchy
+)
+ORDER BY ch.o_orderdate DESC, psp.p_name ASC;

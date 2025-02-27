@@ -1,0 +1,69 @@
+
+WITH RECURSIVE company_hierarchy AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        1 AS level
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code = 'USA'
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ch.level + 1
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        company_hierarchy ch ON mc.movie_id = ch.movie_id
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    ak.name AS actor_name,
+    ct.kind AS company_type,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS info_count,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_order,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = t.id) AS total_cast
+FROM 
+    title t
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year >= 2000
+    AND ct.kind IS NOT NULL
+GROUP BY 
+    t.title, t.production_year, ak.name, ct.kind
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 2 
+ORDER BY 
+    t.production_year DESC, actor_order;

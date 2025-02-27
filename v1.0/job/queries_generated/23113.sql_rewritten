@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 1990 AND 2023
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5  
+)
+, RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        DENSE_RANK() OVER (PARTITION BY mh.level ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_level
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.level
+)
+, MovieInfo AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        COALESCE(m.info || ' | ' || mk.keyword, 'No Additional Info') AS additional_info
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        movie_info m ON r.movie_id = m.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON r.movie_id = mk.movie_id 
+        AND mk.keyword_id IN (SELECT id FROM keyword WHERE LOWER(keyword) LIKE 'action%')
+) 
+SELECT 
+    mi.movie_id,
+    mi.title,
+    mi.additional_info,
+    CASE
+        WHEN r.num_cast_members > 10 THEN 'Ensemble Cast'
+        WHEN r.num_cast_members BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Few Cast Members'
+    END AS cast_size_category,
+    CASE 
+        WHEN MAX(r.rank_within_level) OVER (PARTITION BY r.movie_id) = 1 THEN 'Top Movie'
+        ELSE 'Regular Movie'
+    END AS movie_ranking
+FROM 
+    MovieInfo mi
+JOIN 
+    RankedMovies r ON mi.movie_id = r.movie_id
+WHERE 
+    mi.additional_info IS NOT NULL
+    AND r.rank_within_level <= 3
+ORDER BY 
+    r.num_cast_members DESC, 
+    mi.movie_id;

@@ -1,0 +1,4 @@
+SELECT min(at.title) AS aka_title, min(t.title) AS internet_movie_title
+FROM aka_title AS at, company_name AS cn, company_type AS ct, info_type AS it1, keyword AS k, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = at.movie_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mc.movie_id AND mk.movie_id = at.movie_id AND mi.movie_id = mc.movie_id AND mi.movie_id = at.movie_id AND mc.movie_id = at.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND cn.md5sum IN ('5a36e152d8f789b22a7446a64b55b37b', '8590e34bfbe53ba4245277c30fc8ef72', 'c54c1415e9808aa1eaee1bb509dd466e', 'd988878380dad494e84f9d0be104d194', 'ed10ed8ab402368ec5d006494837190a', 'edd93cdde8682e1d9a2bdfe5c05ec456', 'f6e474df5c35ce08117560d33a4e7e7f');

@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs.bill_customer_sk, 
+        cs.sales_price AS revenue,
+        1 AS level,
+        CAST(c.c_first_name AS VARCHAR(50)) AS customer_name
+    FROM 
+        catalog_sales cs
+    JOIN 
+        customer c ON cs.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.cs_sold_date_sk = (
+            SELECT 
+                MAX(cs1.cs_sold_date_sk)
+            FROM 
+                catalog_sales cs1
+            WHERE 
+                cs1.cs_ship_date_sk = cs.cs_ship_date_sk
+                AND cs1.bill_customer_sk = cs.bill_customer_sk
+        )
+    UNION ALL
+    SELECT 
+        cs.bill_customer_sk, 
+        cs.sales_price AS revenue,
+        sh.level + 1 AS level,
+        CAST(c.c_first_name AS VARCHAR(50)) AS customer_name
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.bill_customer_sk = sh.bill_customer_sk
+    JOIN 
+        customer c ON cs.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        sh.level < 5
+), 
+address_summary AS (
+    SELECT 
+        ca.ca_city,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+    FROM 
+        store_sales ss
+    JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_city
+)
+
+SELECT 
+    ah.ca_city,
+    ah.total_net_profit,
+    ah.unique_customers,
+    SH.level,
+    SH.revenue
+FROM 
+    address_summary ah
+LEFT JOIN 
+    sales_hierarchy SH ON ah.unique_customers = SH.bill_customer_sk
+WHERE 
+    (ah.total_net_profit > 1000 OR SH.revenue > 500)
+ORDER BY 
+    ah.total_net_profit DESC, 
+    SH.level ASC
+FETCH FIRST 100 ROWS ONLY;

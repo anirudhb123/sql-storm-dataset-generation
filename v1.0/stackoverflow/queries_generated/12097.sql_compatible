@@ -1,0 +1,43 @@
+
+WITH UserStats AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.Reputation, 
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        SUM(Posts.UpVotes) AS TotalUpVotes,
+        SUM(Posts.DownVotes) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN Badges ON Users.Id = Badges.UserId
+    LEFT JOIN Posts ON Users.Id = Posts.UserId
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+PostStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.PostTypeId,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        COUNT(DISTINCT Votes.Id) AS VoteCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM 
+        Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id, Posts.PostTypeId
+),
+AggregatedResults AS (
+    SELECT 
+        'UserStatistics' AS Source, 
+        COUNT(*) AS RecordCount FROM UserStats
+    UNION ALL
+    SELECT 
+        'PostStatistics', 
+        COUNT(*) FROM PostStats
+)
+SELECT 
+    Source, 
+    RecordCount 
+FROM 
+    AggregatedResults;

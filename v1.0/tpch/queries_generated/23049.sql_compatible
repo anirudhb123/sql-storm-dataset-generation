@@ -1,0 +1,97 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+), 
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps 
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+), 
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+), 
+SupplierPartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        s.s_name,
+        ss.total_supply_cost,
+        ss.supplier_count,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ss.total_supply_cost DESC) AS supply_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierStats ss ON p.p_partkey = ss.ps_partkey
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_size BETWEEN 10 AND 50
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    r.o_orderdate,
+    pi.p_partkey,
+    pi.p_name,
+    pi.p_retailprice,
+    pi.s_name,
+    pi.total_supply_cost,
+    pi.supplier_count
+FROM 
+    RankedOrders r
+JOIN 
+    HighValueLineItems h ON r.o_orderkey = h.l_orderkey
+JOIN 
+    SupplierPartInfo pi ON pi.supply_rank = 1
+WHERE 
+    pi.total_supply_cost IS NOT NULL 
+    OR pi.supplier_count > 0
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate ASC
+LIMIT 100
+
+UNION ALL
+
+SELECT 
+    NULL AS o_orderkey,
+    NULL AS o_totalprice,
+    NULL AS o_orderdate,
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    'No Supplier' AS s_name,
+    NULL AS total_supply_cost,
+    0 AS supplier_count
+FROM 
+    part p
+WHERE 
+    p.p_partkey NOT IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps);

@@ -1,0 +1,48 @@
+
+WITH AddressStats AS (
+    SELECT
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_city, ', ') AS cities,
+        MIN(ca_zip) AS min_zip,
+        MAX(ca_zip) AS max_zip
+    FROM customer_address
+    GROUP BY ca_state
+),
+CustomerStats AS (
+    SELECT
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        SUM(cd_dep_count) AS total_dependents
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_gender
+),
+SalesData AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.quantity) AS total_quantity,
+        STRING_AGG(DISTINCT i.product_name, ', ') AS sold_items
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.web_site_id
+)
+SELECT
+    a.ca_state,
+    a.address_count,
+    a.cities,
+    a.min_zip,
+    a.max_zip,
+    c.cd_gender,
+    c.customer_count,
+    c.total_dependents,
+    s.web_site_id,
+    s.total_sales,
+    s.total_quantity,
+    s.sold_items
+FROM AddressStats a
+JOIN CustomerStats c ON c.customer_count > 100
+JOIN SalesData s ON s.total_sales > 10000
+ORDER BY a.address_count DESC, c.customer_count DESC, s.total_sales DESC
+LIMIT 10;

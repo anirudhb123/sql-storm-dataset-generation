@@ -1,0 +1,70 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(u.LastAccessDate) AS LastAccess
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        UpVotes,
+        DownVotes,
+        LastAccess
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > 1000
+    ORDER BY 
+        Reputation DESC
+    LIMIT 10
+)
+
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    t.Reputation,
+    t.PostCount,
+    t.CommentCount,
+    t.BadgeCount,
+    t.UpVotes,
+    t.DownVotes,
+    t.LastAccess,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    STRING_AGG(DISTINCT pht.Name, ', ') AS RecentPostHistoryTypes
+FROM 
+    TopUsers t
+LEFT JOIN 
+    Posts ps ON t.UserId = ps.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON ps.Id = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    t.UserId, t.DisplayName, t.Reputation, t.PostCount, t.CommentCount, t.BadgeCount, t.UpVotes, t.DownVotes, t.LastAccess
+ORDER BY 
+    t.Reputation DESC;

@@ -1,0 +1,67 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        NULL::text AS parent_title,
+        1 AS depth
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.title AS parent_title,
+        th.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        title_hierarchy th ON ml.movie_id = th.title_id
+    WHERE 
+        th.depth < 3 -- Limit the hierarchy depth
+)
+
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(c.person_id) AS total_actors,
+    CASE WHEN AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) > 0.5 
+        THEN 'Major Role' 
+        ELSE 'Minor Role' 
+    END AS actor_role,
+    STRING_AGG(DISTINCT CONCAT('Company:', cn.name, ' (', ct.kind, ')'), '; ') AS companies_involved
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+INNER JOIN 
+    title_hierarchy th ON th.title_id = t.id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name != ''
+    AND t.production_year > 2000
+    AND ci.nr_order IS NOT NULL
+GROUP BY 
+    ak.name, t.title, t.production_year
+HAVING 
+    COUNT(ci.person_id) >= 2
+ORDER BY 
+    total_actors DESC, t.production_year ASC NULLS LAST;

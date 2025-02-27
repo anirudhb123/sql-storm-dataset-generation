@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    r.r_name AS region,
+    cs.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT ss.s_suppkey) AS unique_suppliers,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+FROM 
+    lineitem li
+JOIN 
+    orders o ON li.l_orderkey = o.o_orderkey
+JOIN 
+    customer cs ON o.o_custkey = cs.c_custkey
+JOIN 
+    supplier ss ON li.l_suppkey = ss.s_suppkey
+JOIN 
+    partsupp ps ON ps.ps_suppkey = ss.s_suppkey AND ps.ps_partkey = li.l_partkey
+JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+JOIN 
+    nation n ON ss.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+GROUP BY 
+    p.p_name, r.r_name, cs.c_name, ss.s_name
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY 
+    revenue DESC;

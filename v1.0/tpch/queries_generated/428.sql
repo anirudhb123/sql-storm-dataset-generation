@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(DAY, -30, GETDATE())
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name, 
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+    SUM(ps.ps_supplycost) AS total_supply_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank <= 5
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN CustomerSummary cs ON s.s_nationkey = cs.c_nationkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name, cs.total_orders, cs.total_spent
+ORDER BY r.r_name ASC, total_orders DESC;

@@ -1,0 +1,84 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, WikiPostId, 0 AS Level
+    FROM Tags 
+    WHERE Count > 0 
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.WikiPostId, r.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy r ON t.Id = r.WikiPostId 
+    WHERE r.Level < 5 
+), 
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+), 
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes 
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId 
+    GROUP BY p.Id, p.PostTypeId, p.Title, p.Score, p.AnswerCount, p.ViewCount
+), 
+
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+)
+
+SELECT 
+    u.DisplayName AS User,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    p.AnswerCount AS TotalAnswers,
+    ph.PostHistoryTypeId AS LastHistoryAction,
+    CASE 
+        WHEN ph.PostHistoryTypeId IS NOT NULL THEN 
+            'Edited on ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD HH24:MI')
+        ELSE 
+            'No recent edits'
+    END AS LastActionDate,
+    rt.TagName,
+    rt.Count AS TagCount,
+    ur.Reputation AS UserReputation,
+    ur.Rank AS UserRank,
+    pStats.UpVotes,
+    pStats.DownVotes,
+    p.ViewCount,
+    CASE WHEN p.ViewCount > 100 THEN 'Popular' ELSE 'Less Popular' END AS Popularity
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN RecentPostHistory ph ON p.Id = ph.PostId AND ph.rn = 1
+LEFT JOIN PostStats pStats ON p.Id = pStats.PostId
+LEFT JOIN RecursiveTagHierarchy rt ON p.Tags LIKE '%' || rt.TagName || '%'
+JOIN UserReputation ur ON u.Id = ur.UserId
+WHERE p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+AND (p.PostTypeId IN (1, 2) OR p.AcceptedAnswerId IS NOT NULL)
+AND (p.Status = 0 OR p.Status IS NULL)
+GROUP BY u.DisplayName, p.Title, p.Score, p.AnswerCount, 
+         ph.PostHistoryTypeId, ph.CreationDate, 
+         rt.TagName, rt.Count, ur.Reputation, ur.Rank, 
+         pStats.UpVotes, pStats.DownVotes, p.ViewCount
+ORDER BY ur.Reputation DESC, p.Score DESC, rt.Count DESC
+FETCH FIRST 100 ROWS ONLY;

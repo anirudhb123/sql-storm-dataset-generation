@@ -1,0 +1,75 @@
+
+WITH RECURSIVE CategoryHierarchy AS (
+    SELECT i_category_id AS category_id, i_category AS category_name, 
+           0 AS level
+    FROM item
+    WHERE i_category IS NOT NULL
+    UNION ALL
+    SELECT i.i_category_id, CONCAT('Subcategory of ', ch.category_name), 
+           ch.level + 1
+    FROM item i 
+    JOIN CategoryHierarchy ch ON i.i_category_id = ch.category_id
+),
+SalesData AS (
+    SELECT
+        ds.d_date AS sale_date,
+        ws.ws_item_sk,
+        COALESCE(ws.ws_quantity, 0) AS quantity_sold,
+        COALESCE(ws.ws_net_paid, 0) AS sales_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ds.d_date ORDER BY ws.ws_net_paid DESC) AS sales_rank
+    FROM 
+        date_dim ds
+    LEFT JOIN web_sales ws ON ds.d_date_sk = ws.ws_sold_date_sk
+    WHERE ds.d_year = 2023
+),
+ReturnStats AS (
+    SELECT 
+        dr.d_date AS return_date,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim dr ON sr.sr_returned_date_sk = dr.d_date_sk
+    GROUP BY 
+        dr.d_date
+),
+AggregatedSales AS (
+    SELECT
+        s.sale_date,
+        SUM(s.quantity_sold) AS total_quantity,
+        SUM(s.sales_revenue) AS total_revenue
+    FROM 
+        SalesData s
+    GROUP BY 
+        s.sale_date
+),
+FinalReport AS (
+    SELECT
+        cs.category_name,
+        COALESCE(a.total_quantity, 0) AS total_quantity_sold,
+        COALESCE(a.total_revenue, 0) AS total_revenue_generated,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        COALESCE(r.total_return_amt, 0) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(a.total_revenue, 0) = 0 THEN NULL
+            ELSE (COALESCE(r.total_return_amt, 0) / COALESCE(a.total_revenue, 0)) * 100
+        END AS return_rate_percentage
+    FROM 
+        CategoryHierarchy cs
+    LEFT JOIN AggregatedSales a ON cs.category_id = a.sale_date
+    LEFT JOIN ReturnStats r ON a.sale_date = r.return_date
+)
+SELECT 
+    category_name,
+    total_quantity_sold,
+    total_revenue_generated,
+    total_returned,
+    total_return_amount,
+    return_rate_percentage
+FROM 
+    FinalReport
+WHERE 
+    total_revenue_generated > 1000 
+ORDER BY 
+    return_rate_percentage DESC NULLS LAST;

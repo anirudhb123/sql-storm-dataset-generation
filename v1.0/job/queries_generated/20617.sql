@@ -1,0 +1,86 @@
+WITH Recursive_Performance AS (
+    SELECT 
+        a.id AS aka_id,
+        a.person_id,
+        a.name AS aka_name,
+        a.imdb_index AS aka_imdb_index,
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(ci.role_id, -1) AS role_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY a.person_id) AS total_movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'series'))
+        AND (t.production_year IS NOT NULL OR t.title ILIKE '%special%')
+),
+Movie_Stats AS (
+    SELECT 
+        person_id,
+        COUNT(DISTINCT aka_id) AS aka_count,
+        AVG(production_year) AS avg_year,
+        MAX(total_movies) AS max_movies
+    FROM 
+        Recursive_Performance
+    GROUP BY 
+        person_id
+),
+Complicated_Filtering AS (
+    SELECT 
+        ps.person_id,
+        ps.aka_count,
+        ps.avg_year,
+        ps.max_movies,
+        (SELECT COUNT(*) 
+         FROM movie_companies mc 
+         WHERE mc.movie_id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id = ps.person_id)) AS companies_count,
+        (SELECT STRING_AGG(DISTINCT c.name, ', ') 
+         FROM company_name c 
+         JOIN movie_companies mc ON mc.company_id = c.id 
+         WHERE mc.movie_id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id = ps.person_id)) AS production_companies,
+        CASE 
+            WHEN ps.avg_year < 2000 THEN 'Before 2000'
+            WHEN ps.avg_year BETWEEN 2000 AND 2010 THEN '2000-2010'
+            ELSE 'After 2010'
+        END AS movie_decade
+    FROM 
+        Movie_Stats ps
+)
+SELECT 
+    cf.person_id,
+    cf.aka_count,
+    cf.avg_year,
+    cf.max_movies,
+    cf.companies_count,
+    cf.production_companies,
+    cf.movie_decade,
+    COALESCE(cast_info.note, 'No Role Info') AS cast_note
+FROM 
+    Complicated_Filtering cf
+LEFT JOIN 
+    cast_info ON cf.person_id = cast_info.person_id AND cast_info.nr_order = 1
+WHERE 
+    cf.aka_count > 3 
+    AND cf.companies_count > 0
+ORDER BY 
+    cf.avg_year DESC, 
+    cf.max_movies DESC;
+
+This SQL query uses several constructs for performance benchmarking, including:
+
+1. **CTEs**: Multiple Common Table Expressions (CTEs) are used to create intermediate results for clarity and separation of logic.
+2. **Window Functions**: `ROW_NUMBER()` and `COUNT()` window functions calculate rankings and total movie counts.
+3. **Correlated Subqueries**: These are employed to derive counts and aggregated information about companies associated with the movies.
+4. **Complicated Filtering**: Filters on the average production year lead to categorization based on decades.
+5. **Aggregations**: Statistical calculations like average, count, and maximum help create performance metrics.
+6. **String Aggregation**: `STRING_AGG` is used to concatenate names of production companies.
+7. **NULL Logic and COALESCE**: NULL handling is demonstrated with `COALESCE` to provide default values.
+8. **Outer Joins**: LEFT JOINs are utilized to enrich the dataset with relevant role information from `cast_info`.
+
+Overall, this query encapsulates a comprehensive analysis of actors, their performances, and relationships with production companies while adding complexity and utilizing various SQL functionalities.

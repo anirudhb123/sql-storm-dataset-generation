@@ -1,0 +1,78 @@
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(DATEDIFF('minute', p.CreationDate, COALESCE(p.LastActivityDate, cast('2024-10-01 12:34:56' as timestamp)))) AS AvgPostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LatestEdit,
+        MIN(ph.CreationDate) AS FirstEdit,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+),
+TagsStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.votes) AS TotalVotes
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.ExcerptPostId = p.Id OR t.WikiPostId = p.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS votes 
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    up.DisplayName,
+    up.TotalPosts,
+    up.Questions,
+    up.Answers,
+    up.AvgPostAge,
+    ph.EditCount,
+    ph.LatestEdit,
+    ph.FirstEdit,
+    ph.EditComments,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalVotes
+FROM 
+    UserPosts up
+LEFT JOIN 
+    PostHistories ph ON up.UserId = ph.PostId
+LEFT JOIN 
+    TagsStats ts ON up.TotalPosts > 0 AND ts.PostCount > 0
+WHERE 
+    (up.TotalPosts > 5 OR up.Reputation > 100)
+    AND (up.LastAccessDate IS NOT NULL AND up.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+ORDER BY 
+    up.AvgPostAge DESC,
+    up.TotalPosts DESC,
+    ts.TotalVotes DESC
+LIMIT 50;

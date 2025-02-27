@@ -1,0 +1,55 @@
+
+WITH RECURSIVE DateRange AS (
+    SELECT MIN(d_date_sk) AS start_date_sk, MAX(d_date_sk) AS end_date_sk
+    FROM date_dim
+    UNION ALL
+    SELECT start_date_sk + 1, end_date_sk
+    FROM DateRange
+    WHERE start_date_sk + 1 <= end_date_sk
+),
+SalesSummary AS (
+    SELECT 
+        d.d_year,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_ext_sales_price) AS avg_sales_price
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year IN (SELECT DISTINCT d_year FROM date_dim WHERE d_year >= 2020)
+    GROUP BY d.d_year
+),
+TopStores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ss_ext_sales_price) AS store_sales
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk, s.s_store_name
+    HAVING SUM(ss_ext_sales_price) > 10000
+),
+TopDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 1990 
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    d.d_year,
+    ss.total_sales,
+    ss.order_count,
+    ss.avg_sales_price,
+    ts.s_store_name,
+    ts.store_sales,
+    td.cd_gender,
+    td.avg_purchase_estimate
+FROM SalesSummary ss
+JOIN TopStores ts ON ss.total_sales > ts.store_sales
+CROSS JOIN TopDemographics td
+JOIN DateRange dr ON ss.d_year BETWEEN 2020 AND 2023
+WHERE dr.start_date_sk IS NOT NULL
+ORDER BY ss.d_year, ts.store_sales DESC, td.avg_purchase_estimate DESC
+OPTION (MAXRECURSION 100);

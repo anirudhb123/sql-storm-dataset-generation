@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT 
+    rh.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(os.total_revenue) AS avg_order_value,
+    MAX(os.total_revenue) AS max_order_value,
+    SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN l.l_quantity 
+        ELSE 0 
+    END) AS total_returned_quantity,
+    SUM(l.l_discount) AS total_discount
+FROM nation rh
+LEFT JOIN supplier s ON rh.n_nationkey = s.s_nationkey
+LEFT JOIN TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+LEFT JOIN orders o ON ts.s_suppkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN OrdersSummary os ON o.o_orderkey = os.o_orderkey
+WHERE rh.n_nationkey IN (SELECT c_nationkey FROM FilteredCustomers)
+GROUP BY rh.n_name
+ORDER BY total_orders DESC;

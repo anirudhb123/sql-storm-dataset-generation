@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.OwnerUserId
+),
+PostWithComments AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.UpvoteCount,
+        RP.DownvoteCount,
+        COALESCE(COUNT(C.ID), 0) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    GROUP BY 
+        RP.PostId, RP.Title, RP.CreationDate, RP.Score, RP.ViewCount, RP.UpvoteCount, RP.DownvoteCount
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(PT.Tags, '>,<')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts PT
+    WHERE 
+        PT.Tags IS NOT NULL
+    GROUP BY 
+        UNNEST(string_to_array(PT.Tags, '>,<'))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    PWC.PostId,
+    PWC.Title,
+    PWC.CreationDate,
+    PWC.Score,
+    PWC.ViewCount,
+    PWC.UpvoteCount,
+    PWC.DownvoteCount,
+    PWC.CommentCount,
+    CASE 
+        WHEN PWC.UpvoteCount > PWC.DownvoteCount THEN 'Positive'
+        WHEN PWC.UpvoteCount < PWC.DownvoteCount THEN 'Negative'
+        ELSE NULL 
+    END AS Sentiment,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM PopularTags T 
+     WHERE T.TagName IN (SELECT UNNEST(string_to_array(PT.Tags, '>,<')))) AS PopularTagsUsed
+FROM 
+    PostWithComments PWC
+WHERE 
+    PWC.Score > 0 
+    AND PWC.CommentCount > 0
+ORDER BY 
+    PWC.Score DESC 
+    NULLS LAST;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserID,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.CreationDate,
+        ur.UserID,
+        ur.Reputation,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserID
+    WHERE 
+        rp.OwnerPostRank <= 5
+)
+SELECT 
+    tp.PostID,
+    tp.Title,
+    tp.CreationDate,
+    tp.Reputation,
+    tp.CommentCount,
+    tp.VoteCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.VoteCount DESC, tp.CommentCount DESC
+LIMIT 10;
+
+-- Note: This query provides a top 10 list of posts created in the last 30 days, with their identifiers, titles, creation dates, 
+-- owner's reputation, and a count of comments and votes. The subqueries and CTEs are used for structured analysis 
+-- of user and post interactions, filtering, and ranking.

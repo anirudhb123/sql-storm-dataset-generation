@@ -1,0 +1,57 @@
+
+WITH RECURSIVE relevant_items AS (
+    SELECT i_item_sk, i_item_desc, i_current_price
+    FROM item
+    WHERE i_rec_start_date <= DATE '2002-10-01' AND (i_rec_end_date IS NULL OR i_rec_end_date >= DATE '2002-10-01')
+    
+    UNION ALL
+    
+    SELECT i.i_item_sk, i.i_item_desc, i.i_current_price
+    FROM item i
+    JOIN relevant_items ri ON i.i_item_sk = ri.i_item_sk + 1
+),
+sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws.web_site_sk
+),
+customer_return_metrics AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+combined_metrics AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(sgi.total_sales, 0) AS total_sales,
+        COALESCE(srm.total_returns, 0) AS total_returns,
+        COALESCE(srm.total_return_amount, 0) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(sgi.total_sales, 0) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN sales_summary sgi ON c.c_customer_sk = sgi.web_site_sk
+    LEFT JOIN customer_return_metrics srm ON c.c_customer_sk = srm.sr_customer_sk
+)
+
+SELECT 
+    cm.c_customer_id,
+    cm.c_first_name,
+    cm.c_last_name,
+    cm.total_sales,
+    cm.total_returns,
+    cm.total_return_amount,
+    r.i_item_desc,
+    r.i_current_price
+FROM combined_metrics cm
+JOIN relevant_items r ON cm.total_sales > 1000
+WHERE cm.total_returns > 0
+ORDER BY cm.total_sales DESC, cm.total_returns ASC
+LIMIT 10;

@@ -1,0 +1,53 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(CAST(MAX(o.o_orderdate) AS VARCHAR), 'N/A') AS last_order_date,
+    COALESCE(SUM(top.customer_revenue), 0) AS total_revenue,
+    CASE 
+        WHEN SUM(top.customer_revenue) > 10000 THEN 'VIP' 
+        WHEN SUM(top.customer_revenue) BETWEEN 5000 AND 10000 THEN 'Regular' 
+        ELSE 'Low Volume' 
+    END AS customer_segment
+FROM 
+    customer c
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    TopCustomers top ON top.c_custkey = c.c_custkey
+GROUP BY 
+    c.c_custkey, c.c_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

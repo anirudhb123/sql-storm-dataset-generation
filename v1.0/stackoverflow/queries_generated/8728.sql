@@ -1,0 +1,59 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PostTypeCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        PT.Name AS PostType,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY 
+        P.OwnerUserId, PT.Name
+),
+FinalReport AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        US.TotalPosts,
+        US.TotalComments,
+        US.TotalUpVotes,
+        US.TotalDownVotes,
+        US.TotalBadges,
+        STRING_AGG(PTC.PostType || ': ' || PTC.PostCount, ', ') AS PostTypesSummary
+    FROM 
+        UserStatistics US
+    LEFT JOIN 
+        PostTypeCounts PTC ON US.UserId = PTC.OwnerUserId
+    GROUP BY 
+        US.UserId, US.DisplayName, US.Reputation, US.TotalPosts, US.TotalComments, US.TotalUpVotes, US.TotalDownVotes, US.TotalBadges
+)
+SELECT * 
+FROM 
+    FinalReport
+ORDER BY 
+    Reputation DESC, TotalPosts DESC;

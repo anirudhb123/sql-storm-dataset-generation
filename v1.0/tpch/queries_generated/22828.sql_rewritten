@@ -1,0 +1,38 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS depth, CAST(c.c_name AS varchar(255)) AS path
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT ch.c_custkey, c.c_name, c.c_acctbal, ch.depth + 1, CAST(ch.path || ' -> ' || c.c_name AS varchar(255))
+    FROM CustomerHierarchy ch
+    JOIN customer c ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY') 
+                     AND ch.depth < 5
+)
+, PartSupplierStats AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_availqty,
+           MAX(ps.ps_supplycost) AS max_supplycost,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT DISTINCT r.r_name, 
+                SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS returned_extended_price,
+                COUNT(DISTINCT o.o_orderkey) AS total_orders,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ps.total_availqty) OVER () AS median_availqty,
+                CONCAT(n.n_name, ' - ', COALESCE(c.c_name, 'Unknown Customer')) AS nation_customer
+FROM region r
+LEFT OUTER JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey 
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+JOIN PartSupplierStats ps ON ps.ps_partkey = l.l_partkey
+WHERE r.r_name IS NOT NULL AND (c.c_acctbal > 0 OR c.c_acctbal IS NULL)
+GROUP BY r.r_name, n.n_name, c.c_name
+HAVING SUM(l.l_quantity) > (SELECT AVG(l2.l_quantity)
+                             FROM lineitem l2 
+                             WHERE l2.l_shipdate >= DATE '1997-01-01' 
+                             AND l2.l_shipdate <= cast('1998-10-01' as date) 
+                             GROUP BY l2.l_orderkey) 
+   AND MAX(ls.total_availqty) IS NOT NULL
+ORDER BY returned_extended_price DESC, total_orders ASC;

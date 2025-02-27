@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostClosureReasons AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        ARRAY_AGG(DISTINCT crt.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Only considering closure events
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(uc.GoldCount, 0) AS GoldBadges,
+    COALESCE(uc.SilverCount, 0) AS SilverBadges,
+    COALESCE(uc.BronzeCount, 0) AS BronzeBadges,
+    pc.CloseCount,
+    pc.CloseReasons,
+    rp.OwnerPostRank
+FROM 
+    RankedPosts rp
+FULL OUTER JOIN 
+    UserBadges uc ON rp.OwnerUserId = uc.UserId
+LEFT JOIN 
+    PostClosureReasons pc ON rp.PostId = pc.PostId
+WHERE 
+    rp.OwnerPostRank <= 5 OR pc.CloseCount > 0
+ORDER BY 
+    rp.Score DESC NULLS LAST, 
+    pc.CloseCount DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate,
+           CAST(DisplayName AS varchar(255)) AS FullPath
+    FROM Users
+    WHERE Reputation > 1000  -- Start with users having a reputation greater than 1000
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           CAST(CONCAT(uh.FullPath, ' -> ', u.DisplayName) AS varchar(255))
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Id = uh.Id + 1  -- Hypothetical relationship
+
+    WHERE u.Reputation > 0
+),
+
+PopularPosts AS (
+    SELECT p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.ViewCount IS NOT NULL AND p.Score > 0
+),
+
+ClosedPosts AS (
+    SELECT ph.PostId, ph.CreationDate, 
+           COUNT(*) AS CloseCount, 
+           STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Closed and reopened posts
+    GROUP BY ph.PostId, ph.CreationDate
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    up.Id AS PopularPostId,
+    up.Title AS PopularPostTitle,
+    up.ViewCount AS PopularPostViewCount,
+    cp.CloseCount AS NumberOfClosures,
+    cp.CloseReasons,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+FROM Users u
+LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN PopularPosts up ON up.Id = p.Id AND up.rn <= 3  -- Top 3 popular posts per type
+LEFT JOIN Votes v ON v.PostId = p.Id
+LEFT JOIN ClosedPosts cp ON cp.PostId = p.Id
+WHERE u.CreationDate >= '2020-01-01' -- Only users created after 2020
+GROUP BY u.Id, up.Id, cp.CloseCount, cp.CloseReasons
+ORDER BY u.Reputation DESC, PopularPostViewCount DESC
+LIMIT 100;

@@ -1,0 +1,83 @@
+WITH TagCounts AS (
+    SELECT
+        tag.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS QuestionCount
+    FROM
+        Tags t
+        JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+        JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY
+        tag.TagName
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Comments c ON u.Id = c.UserId
+        LEFT JOIN Votes v ON u.Id = v.UserId
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostHistoryDetail AS (
+    SELECT
+        p.Title AS PostTitle,
+        p.CreationDate AS PostCreationDate,
+        p.Score,
+        ph.UserDisplayName AS EditorName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditComment,
+        ph.Text AS NewBody
+    FROM
+        Posts p
+        JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5)  -- Edit Title or Edit Body
+),
+RankedTags AS (
+    SELECT 
+        tc.TagName,
+        tc.PostCount,
+        tc.AnswerCount,
+        tc.QuestionCount,
+        RANK() OVER (ORDER BY tc.PostCount DESC) AS TagRank
+    FROM
+        TagCounts tc
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.PostCount,
+    u.CommentCount,
+    u.UpVotes,
+    u.DownVotes,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    rt.TagName,
+    rt.PostCount AS TaggedPostCount,
+    rt.AnswerCount,
+    rt.QuestionCount,
+    p.PostTitle,
+    ph.EditDate,
+    ph.EditorName,
+    ph.EditComment
+FROM 
+    UserActivity u
+    JOIN RankedTags rt ON rt.TagRank <= 5 -- Top 5 Tags
+    LEFT JOIN PostHistoryDetail ph ON ph.PostTitle ILIKE '%' || rt.TagName || '%'
+    LEFT JOIN Posts p ON p.Id = ph.PostId
+ORDER BY 
+    u.PostCount DESC, 
+    rt.PostCount DESC;

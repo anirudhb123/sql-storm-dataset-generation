@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        COALESCE(SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) AS total_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2021)
+),
+CustomerReturns AS (
+    SELECT 
+        sr.returning_customer_sk, 
+        COUNT(*) AS num_returns,
+        SUM(sr.returned_date_sk IS NULL) AS null_return_dates
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returning_customer_sk
+    HAVING 
+        COUNT(*) > 5
+        AND SUM(sr.returned_date_sk IS NULL) > 0
+),
+Summary AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(rr.num_returns) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns rr ON rr.returning_customer_sk = c.c_customer_sk
+    WHERE 
+        ca.ca_country = 'USA' 
+        AND (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+    GROUP BY 
+        ca.ca_city, ca.ca_state
+)
+SELECT 
+    s.ca_city, 
+    s.ca_state,
+    s.customer_count,
+    s.avg_purchase_estimate,
+    COALESCE(s.total_returns, 0) AS total_returns,
+    COUNT(DISTINCT r.ws_order_number) AS unique_orders,
+    COUNT(DISTINCT ws.ws_item_sk) FILTER (WHERE ws.ws_sales_price > 100) AS expensive_items,
+    MAX(ws.ws_sales_price) AS max_sales_price,
+    ROUND(AVG(NULLIF(rv.price_rank, 0)), 2) AS average_price_rank
+FROM 
+    Summary s
+LEFT JOIN 
+    RankedSales rv ON s.customer_count > 50
+LEFT JOIN 
+    web_sales ws ON s.customer_count = COUNT(DISTINCT ws.ws_order_number)
+GROUP BY 
+    s.ca_city, s.ca_state
+ORDER BY 
+    s.avg_purchase_estimate DESC, total_returns ASC;

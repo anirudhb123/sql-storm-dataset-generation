@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year >= 2000
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.level <= 3
+),
+ActorStatistics AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON an.person_id = c.person_id
+    WHERE 
+        c.movie_id IN (SELECT movie_id FROM FilteredMovies)
+    GROUP BY 
+        a.person_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, '; ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.level,
+    COALESCE(as.movie_count, 0) AS actor_count,
+    COALESCE(as.avg_order, 0) AS average_order,
+    COALESCE(cm.companies, 'None') AS production_companies
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorStatistics as ON fm.movie_id = as.movie_id
+LEFT JOIN 
+    CompanyMovies cm ON fm.movie_id = cm.movie_id
+WHERE 
+    fm.production_year IS NOT NULL
+ORDER BY 
+    fm.production_year DESC, 
+    fm.level, 
+    actor_count DESC;

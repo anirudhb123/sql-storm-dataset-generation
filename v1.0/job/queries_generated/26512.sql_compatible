@@ -1,0 +1,58 @@
+
+WITH movie_data AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        c.kind AS company_type,
+        a.name AS actor_name,
+        p.info AS person_info
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+        AND LENGTH(m.movie_title) > 10
+        AND k.keyword LIKE '%Action%'
+),
+
+aggregated_data AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        COUNT(DISTINCT actor_name) AS total_actors,
+        COUNT(DISTINCT movie_keyword) AS total_keywords,
+        STRING_AGG(DISTINCT company_type, ', ') AS production_companies
+    FROM 
+        movie_data
+    GROUP BY 
+        movie_id, movie_title, production_year
+)
+
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    total_actors,
+    total_keywords,
+    production_companies
+FROM 
+    aggregated_data
+ORDER BY 
+    production_year DESC, 
+    total_actors DESC;

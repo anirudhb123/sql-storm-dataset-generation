@@ -1,0 +1,98 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM 
+        orders
+),
+HighValueSuppliers AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        s_acctbal,
+        CASE 
+            WHEN s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) THEN 'Above Average' 
+            ELSE 'Below Average' 
+        END AS balance_status
+    FROM 
+        supplier
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        SUM(ps_availqty) AS total_avail_qty,
+        MAX(ps_supplycost) AS max_supplycost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey, ps_suppkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        l_tax,
+        l_returnflag,
+        l_linestatus,
+        CASE 
+            WHEN l_returnflag = 'A' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+SupplierPartRanking AS (
+    SELECT 
+        h.s_suppkey,
+        p.p_partkey,
+        RANK() OVER (PARTITION BY h.balance_status ORDER BY ps.total_avail_qty DESC) AS supplier_rank,
+        h.balance_status,
+        p.p_retailprice,
+        p.p_size
+    FROM 
+        HighValueSuppliers h
+    JOIN 
+        PartSupplierDetails ps ON h.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    r.n_name AS nation,
+    rt.o_orderkey,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_sales,
+    COALESCE(MAX(sp.p_retailprice), 0) AS max_part_price,
+    COALESCE(AVG(sp.p_size), NULL) AS avg_part_size,
+    COUNT(DISTINCT rt.o_orderkey) AS number_of_orders,
+    AVG(ps.total_avail_qty) AS avg_available_quantity
+FROM 
+    RankedOrders rt
+LEFT JOIN 
+    customer c ON rt.o_custkey = c.c_custkey
+LEFT JOIN 
+    nation r ON c.c_nationkey = r.n_nationkey
+LEFT JOIN 
+    FilteredLineItems li ON rt.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierPartRanking sp ON sp.s_suppkey = (
+        SELECT s.s_suppkey 
+        FROM supplier s 
+        WHERE s.s_acctbal IN (SELECT DISTINCT s_acctbal FROM supplier) 
+        ORDER BY s.s_acctbal DESC 
+        LIMIT 1
+    )
+GROUP BY 
+    r.n_name, rt.o_orderkey
+HAVING 
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) > 10000
+ORDER BY 
+    total_sales DESC, r.n_name;

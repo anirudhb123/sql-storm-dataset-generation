@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.Tags) AS TagPostCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Only Questions
+    AND p.Score IS NOT NULL
+),
+TopScoredPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.TagPostCount
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.PostID,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM TopScoredPosts tp
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2 -- Only Answers
+        GROUP BY PostId
+    ) p ON tp.PostID = p.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON tp.PostID = c.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 12) THEN 1 END) AS CloseVoteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS TotalClosed
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        pd.Title,
+        pd.OwnerDisplayName,
+        pd.CreationDate,
+        pd.Score,
+        pd.AnswerCount,
+        pd.CommentCount,
+        COALESCE(phs.ClosedDate, 'Never Closed') AS ClosedDate,
+        COALESCE(phs.ReopenedDate, 'Not Reopened') AS ReopenedDate,
+        phs.CloseVoteCount,
+        phs.TotalClosed,
+        CASE 
+            WHEN phs.TotalClosed > 1 THEN 'Closed Multiple Times'
+            WHEN phs.TotalClosed = 1 THEN 'Closed Once'
+            ELSE 'Never Closed'
+        END AS ClosureStatus
+    FROM PostDetails pd
+    LEFT JOIN PostHistorySummary phs ON pd.PostID = phs.PostId
+)
+SELECT 
+    Title, 
+    OwnerDisplayName, 
+    CreationDate, 
+    Score, 
+    AnswerCount, 
+    CommentCount, 
+    ClosedDate,
+    ReopenedDate, 
+    CloseVoteCount, 
+    TotalClosed, 
+    ClosureStatus
+FROM FinalResults
+ORDER BY Score DESC, CreationDate DESC
+LIMIT 50;

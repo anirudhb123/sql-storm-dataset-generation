@@ -1,0 +1,93 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_title_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(ml.linked_movie_id, mt.id) AS linked_movie
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_title_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(ml.linked_movie_id, mt.id) AS linked_movie
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        MovieHierarchy mh ON mh.linked_movie = mt.id
+)
+
+, MovieStats AS (
+    SELECT 
+        mh.movie_title_id,
+        mh.movie_title,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY mh.movie_title_id ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS action_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_title_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_title_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON mh.movie_title_id = ci.movie_id
+    GROUP BY 
+        mh.movie_title_id, mh.movie_title
+)
+
+SELECT 
+    ms.movie_title,
+    ms.production_year,
+    ms.company_count,
+    ms.keyword_count,
+    ms.cast_count,
+    CASE 
+        WHEN ms.cast_count IS NULL THEN 'No cast data' 
+        WHEN ms.cast_count >= 10 THEN 'Large Cast'
+        WHEN ms.cast_count < 10 AND ms.cast_count > 0 THEN 'Small Cast'
+        ELSE 'Unknown'
+    END AS cast_size_category,
+    COALESCE((SELECT MIN(info) FROM movie_info mi WHERE mi.movie_id = ms.movie_title_id AND mi.info_type_id IS NOT NULL), 'No Info') AS first_info
+FROM 
+    MovieStats ms
+WHERE 
+    ms.action_rank <= 5
+ORDER BY 
+    ms.cast_count DESC,
+    ms.movie_title;
+
+### Explanation of SQL Query Constructs:
+- **Common Table Expressions (CTEs)**: 
+    - `MovieHierarchy` is a recursive CTE used to build a hierarchy of movies that have links to other movies produced since 2000. 
+    - `MovieStats` aggregates statistics about each movie.
+
+- **Outer Joins and NULL Logic**: 
+    - The use of `LEFT JOIN` ensures that if a movie has no associated companies, keywords, or cast, it still appears in the results.
+  
+- **Aggregate Functions**: 
+    - `COUNT(DISTINCT ...)` to count unique companies, keywords, and cast members.
+
+- **Window Functions**: 
+    - `RANK()` assigns a rank to movies based on the cast count to find the top entries.
+
+- **Case Statements**:
+    - Categorizes movies based on the number of cast members using `CASE`.
+
+- **Correlated Subquery**:
+    - The subquery in the `SELECT` statement fetches the first info for each movie based on its ID and handles NULL conditions, providing a default message if no info exists.
+
+- **Complex Predicates**: 
+    - The `ORDER BY` clause sorts primarily by the number of cast members and secondarily by movie title to arrange results logically.
+
+This query presents a comprehensive view of movie statistics and utilizes a variety of SQL elements effectively to handle complexity and performance benchmarking scenarios within the given schemas.

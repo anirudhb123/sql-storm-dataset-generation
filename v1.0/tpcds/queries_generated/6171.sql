@@ -1,0 +1,56 @@
+
+WITH sales_summary AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        w.warehouse_name
+),
+returns_summary AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    JOIN 
+        warehouse w ON sr.sr_store_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        w.warehouse_name
+)
+SELECT 
+    ss.warehouse_name,
+    ss.total_sales,
+    ss.total_orders,
+    ss.unique_customers,
+    ss.average_profit,
+    rs.total_returned,
+    rs.total_returns,
+    (ss.total_sales - COALESCE(rs.total_returned, 0)) AS net_sales,
+    ((ss.total_sales - COALESCE(rs.total_returned, 0)) / NULLIF(ss.total_sales, 0)) * 100 AS sales_return_rate
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    returns_summary rs ON ss.warehouse_name = rs.warehouse_name
+ORDER BY 
+    net_sales DESC;

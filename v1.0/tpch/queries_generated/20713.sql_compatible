@@ -1,0 +1,64 @@
+
+WITH RECURSIVE RegionalSupply AS (
+    SELECT 
+        r.r_name AS region_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 0.00 
+            ELSE s.s_acctbal 
+        END AS adjusted_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        AVG(l.l_quantity) AS avg_quantity_per_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    rs.region_name,
+    rs.s_name,
+    rs.adjusted_acctbal,
+    os.total_revenue,
+    os.unique_customers,
+    os.avg_quantity_per_order,
+    CASE 
+        WHEN os.total_revenue > 10000 THEN 'High Revenue'
+        WHEN os.total_revenue IS NULL THEN 'No Revenue Data' 
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM 
+    RegionalSupply rs
+FULL OUTER JOIN 
+    OrderStats os ON rs.s_suppkey = (SELECT ps.ps_suppkey 
+                                       FROM partsupp ps 
+                                       WHERE ps.ps_partkey = (SELECT p.p_partkey 
+                                                               FROM part p 
+                                                               WHERE p.p_retailprice > 50.00 
+                                                               ORDER BY p.p_retailprice DESC 
+                                                               LIMIT 1)
+                                       LIMIT 1)
+WHERE 
+    rs.rank <= 5 OR os.avg_quantity_per_order > 10
+ORDER BY 
+    rs.region_name, rs.adjusted_acctbal DESC NULLS LAST;

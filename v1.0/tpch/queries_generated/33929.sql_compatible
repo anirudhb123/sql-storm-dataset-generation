@@ -1,0 +1,48 @@
+
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT ps_partkey, 
+           ps_suppkey, 
+           ps_availqty,
+           ps_supplycost,
+           1 AS Level
+    FROM partsupp
+    WHERE ps_availqty > 0
+    UNION ALL
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey,
+           ps.ps_availqty - 10, 
+           ps.ps_supplycost * 0.9,
+           ph.Level + 1
+    FROM partsupp ps
+    JOIN PriceHierarchy ph ON ps.ps_partkey = ph.ps_partkey
+    WHERE ph.Level < 10 AND ps.ps_availqty > 10
+),
+AggregatedOrders AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           COUNT(DISTINCT l.l_partkey) AS UniqueParts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_supplycost) AS TotalSupplyCost,
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS SupplierRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT p.p_partkey,
+       p.p_name,
+       COALESCE(a.TotalRevenue, 0) AS RevenueGenerated,
+       COALESCE(sic.TotalSupplyCost, 0) AS TotalSupplyCost,
+       ph.Level AS AvailabilityLevel
+FROM part p
+LEFT JOIN AggregatedOrders a ON p.p_partkey = a.o_orderkey
+LEFT JOIN SupplierInfo sic ON sic.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey ORDER BY ps.ps_supplycost DESC LIMIT 1)
+LEFT JOIN PriceHierarchy ph ON ph.ps_partkey = p.p_partkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+  AND (sic.TotalSupplyCost IS NULL OR sic.TotalSupplyCost > 1000)
+ORDER BY p.p_partkey, AvailabilityLevel DESC;

@@ -1,0 +1,61 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s_nationkey,
+        s_suppkey,
+        s_name,
+        total_sales,
+        order_count,
+        sales_rank
+    FROM 
+        SupplierSales
+    WHERE 
+        sales_rank <= 5
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(SUM(ts.total_sales), 0) AS total_nation_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    ns.total_nation_sales,
+    STRING_AGG(CONCAT('Supplier: ', ts.s_name, ' (Sales: ', ts.total_sales, ')'), ', ') AS top_suppliers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    NationSales ns ON n.n_nationkey = ns.n_nationkey
+LEFT JOIN 
+    TopSuppliers ts ON ns.n_nationkey = ts.s_nationkey
+GROUP BY 
+    r.r_name, ns.n_name, ns.total_nation_sales
+ORDER BY 
+    r.r_name, ns.n_name;

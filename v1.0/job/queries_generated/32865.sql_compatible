@@ -1,0 +1,55 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COALESCE(c.name, 'Unknown') AS company_name,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    STRING_AGG(DISTINCT p.info, ', ') AS person_info,
+    AVG(CASE WHEN p.info IS NOT NULL THEN 1 ELSE 0 END) AS info_presence,
+    COUNT(DISTINCT ci.role_id) AS unique_roles
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id AND p.info_type_id = 1  
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, c.name, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, total_cast DESC, mh.title;

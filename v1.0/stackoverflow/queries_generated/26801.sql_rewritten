@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY(SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) ORDER BY p.Score DESC) ORDER BY p.Score DESC) AS RankInTag,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.ViewCount, p.Score, p.CreationDate, p.OwnerUserId
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%') 
+    GROUP BY 
+        t.TagName
+),
+PopularPosts AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.CreationDate
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.RankInTag <= 5 
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.Score,
+    r.CreationDate,
+    t.TagName,
+    ts.TotalPosts,
+    ts.AverageScore,
+    ts.TotalViews
+FROM 
+    PopularPosts r
+JOIN 
+    Tags t ON r.Tags LIKE CONCAT('%<', t.TagName, '>%')
+JOIN 
+    TagStatistics ts ON t.TagName = ts.TagName
+ORDER BY 
+    t.TagName, r.Score DESC;

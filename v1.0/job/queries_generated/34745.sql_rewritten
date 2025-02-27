@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mh.level + 1,
+        path || mt.title
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        mc.cast_count,
+        mc.cast_names
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_cast mc ON mh.movie_id = mc.movie_id
+    WHERE 
+        mc.cast_count > 5  
+)
+SELECT 
+    fm.title,
+    fm.level,
+    fm.cast_count,
+    fm.cast_names,
+    COALESCE(mi.info, 'No info available') AS movie_info
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1)
+WHERE 
+    fm.level = 1  
+ORDER BY 
+    fm.title;

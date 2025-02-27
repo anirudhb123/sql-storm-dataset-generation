@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P 
+    WHERE 
+        P.PostTypeId = 1  -- Starting with questions (PostTypeId = 1)
+  
+    UNION ALL 
+  
+    SELECT 
+        P.Id,
+        P.Title,
+        P.PostTypeId,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P 
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    R.PhPostId,
+    R.Title AS QuestionTitle,
+    U.DisplayName AS QuestionOwner,
+    U.Reputation AS OwnerReputation,
+    U.BadgeCount,
+    UP.Upvotes,
+    UP.Downvotes,
+    UP.TotalVotes,
+    COUNT(C.Id) AS CommentCount,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagList
+FROM 
+    RecursivePostHierarchy R
+LEFT JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVoteSummary UP ON R.PostId = UP.PostId
+LEFT JOIN 
+    Comments C ON R.PostId = C.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            T.Id, T.TagName 
+        FROM 
+            Tags T 
+        WHERE 
+            T.Id IN (
+                SELECT 
+                    unnest(string_to_array(R.Tags, ','))::int
+            )
+    ) AS T ON TRUE 
+WHERE 
+    R.Level = 0  -- Only top-level questions
+GROUP BY 
+    R.PostId, R.Title, U.DisplayName, U.Reputation, U.BadgeCount, UP.Upvotes, UP.Downvotes, UP.TotalVotes
+ORDER BY 
+    UP.Upvotes DESC, U.Reputation DESC
+LIMIT 100;

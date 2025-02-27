@@ -1,0 +1,60 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_city) AS upper_city,
+        REPLACE(ca_zip, '-', '') AS zip_without_hyphen
+    FROM 
+        customer_address 
+    WHERE 
+        ca_state IN ('CA', 'NY', 'TX')
+), 
+DemographicsData AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM 
+        customer_demographics 
+    WHERE 
+        cd_purchase_estimate > 1000
+), 
+JoinedData AS (
+    SELECT 
+        a.ca_address_sk,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.zip_without_hyphen,
+        d.cd_demo_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate
+    FROM 
+        AddressData a
+    JOIN 
+        DemographicsData d ON a.ca_address_sk = d.cd_demo_sk
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    COUNT(cd_demo_sk) AS demographic_count,
+    STRING_AGG(DISTINCT cd_gender) AS unique_genders,
+    MAX(cd_purchase_estimate) AS max_purchase_estimate
+FROM 
+    JoinedData
+GROUP BY 
+    full_address, ca_city, ca_state
+ORDER BY 
+    demographic_count DESC, ca_state, ca_city;

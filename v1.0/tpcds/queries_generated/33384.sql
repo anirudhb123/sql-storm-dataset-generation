@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        1 AS level
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        SUM(ws_net_profit) > 0
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        SUM(s.ws_net_profit) + SUM(ws_new_total_profit) AS total_profit,
+        COUNT(s.ws_order_number) + COUNT(ws_new_order_number) AS total_orders,
+        level + 1 
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_ship_date_sk > 0
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    SUM(ss.ss_net_profit) AS store_net_profit,
+    AVG(cd.cd_purchase_estimate) AS avg_estimated_purchase,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    SUM(COALESCE(store_returns.sr_return_amt, 0)) AS total_return_amount,
+    COUNT(DISTINCT sr_ticket_number) AS total_returns,
+    COUNT(DISTINCT r.r_reason_id) AS return_reason_count
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    store_returns ON c.c_customer_sk = sr_returning_customer_sk
+FULL OUTER JOIN 
+    reason r ON sr_reason_sk = r.r_reason_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND cd.cd_gender IS NOT NULL
+    AND ss.ss_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 8)
+GROUP BY 
+    ca.ca_city, ca.ca_state, cd.cd_gender
+HAVING 
+    SUM(ss.ss_net_profit) > 1000 OR COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,70 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01' 
+      AND o.o_orderdate < '1996-01-01'
+), HighValueOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice
+    FROM RankedOrders ro
+    WHERE ro.rn <= 10
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), PartPricing AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE p.p_retailprice * 1.1 
+        END AS adjusted_price
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_availqty > 0)
+), AggregatedCustomerData AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), CustomerRank AS (
+    SELECT 
+        acd.c_custkey,
+        acd.num_orders,
+        acd.total_spent,
+        RANK() OVER (ORDER BY acd.total_spent DESC) AS customer_rank
+    FROM AggregatedCustomerData acd
+)
+SELECT 
+    pp.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    pp.adjusted_price,
+    o.o_orderkey,
+    cr.customer_rank,
+    CASE 
+        WHEN o.o_orderstatus = 'F' AND cr.total_spent > 5000 THEN 'Premium Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM PartPricing pp
+JOIN lineitem li ON pp.p_partkey = li.l_partkey
+LEFT JOIN SupplierInfo s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN HighValueOrders o ON li.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerRank cr ON o.o_orderkey = cr.c_custkey
+WHERE pp.adjusted_price < (SELECT AVG(pp2.adjusted_price) FROM PartPricing pp2) 
+   AND s.total_cost IS NOT NULL
+ORDER BY pp.p_name ASC, cr.customer_rank DESC
+LIMIT 100;

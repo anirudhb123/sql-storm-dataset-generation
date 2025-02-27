@@ -1,0 +1,56 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, ca_country 
+    FROM customer_address 
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_zip, ca.ca_country 
+    FROM customer_address AS ca 
+    JOIN AddressCTE AS addr ON ca.ca_city = addr.ca_city AND ca.ca_state = addr.ca_state
+    WHERE ca.ca_address_sk < addr.ca_address_sk
+),
+IncomeCTE AS (
+    SELECT hd.hd_demo_sk, 
+           SUM(CASE WHEN i.ib_lower_bound IS NOT NULL THEN 1 ELSE 0 END) AS income_bins 
+    FROM household_demographics hd 
+    LEFT JOIN income_band i ON hd.hd_income_band_sk = i.ib_income_band_sk 
+    GROUP BY hd.hd_demo_sk
+),
+SalesCTE AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales,
+           AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk 
+        FROM date_dim d 
+        WHERE d.d_year = 2023 AND d.d_month_seq IN (SELECT DISTINCT d_month_seq FROM date_dim WHERE d_year = 2023 AND d_dow IN (1, 2, 3))
+    )
+    GROUP BY ws.ws_item_sk
+)
+SELECT a.ca_city, 
+       a.ca_state, 
+       a.ca_zip, 
+       a.ca_country, 
+       i.income_bins, 
+       s.total_sales,
+       s.avg_net_profit,
+       RANK() OVER (PARTITION BY a.ca_city ORDER BY s.total_sales DESC) AS sales_ranking
+FROM AddressCTE a
+LEFT JOIN IncomeCTE i ON a.ca_address_sk = i.hd_demo_sk
+LEFT JOIN SalesCTE s ON s.ws_item_sk = (
+    SELECT ws_item_sk 
+    FROM web_sales 
+    WHERE ws_bill_addr_sk = a.ca_address_sk 
+    ORDER BY ws_net_paid DESC 
+    LIMIT 1
+)
+WHERE a.ca_country = 'USA' 
+  AND (i.income_bins IS NULL OR i.income_bins > 0)
+  AND EXISTS (
+      SELECT 1 
+      FROM store_sales ss 
+      WHERE ss.ss_customer_sk IS NULL 
+        OR (ss.ss_net_profit BETWEEN 100 AND (CASE WHEN i.income_bins = 5 THEN 500 ELSE 100 END))
+  )
+ORDER BY a.ca_city, s.total_sales DESC;

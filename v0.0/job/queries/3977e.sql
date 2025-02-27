@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.id > 1338301 AND cn.country_code IS NOT NULL AND t.production_year > 2008 AND cn.name IN ('740 Sound Design', 'Artsworld', 'Colorado Film and Video Association', 'Contact TV inc.', 'Edward Saxon Productions (ESP)', 'Hipchick Productions', 'Kasaan Haida Heritage Foundation', 'Left Field Ventures', 'PHI', 'TV2 Viihdetoimitus');

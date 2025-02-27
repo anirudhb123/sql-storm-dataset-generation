@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS associated_keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_per_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY a.id) AS total_cast 
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id 
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        (a.production_year IS NOT NULL OR a.production_year < 1000) 
+        AND k.keyword IS NOT NULL
+),
+RecentMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.associated_keyword,
+        rm.total_cast,
+        CASE 
+            WHEN rm.total_cast > 10 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS popularity_category,
+        cast('2024-10-01' as date) - INTERVAL '1 year' AS one_year_ago
+    FROM 
+        RankedMovies rm 
+    WHERE 
+        rm.production_year >= EXTRACT(YEAR FROM cast('2024-10-01' as date)) - 1
+)
+SELECT 
+    r.movie_title,
+    r.production_year,
+    r.associated_keyword,
+    r.total_cast,
+    r.popularity_category,
+    CASE 
+        WHEN r.production_year IS NULL THEN 'Year Unknown'
+        WHEN r.production_year < one_year_ago THEN 'Old Movie'
+        ELSE 'Recent Release'
+    END AS release_timing
+FROM 
+    RecentMovies r
+LEFT JOIN 
+    aka_name an ON r.movie_title LIKE '%' || an.name || '%' 
+WHERE 
+    (an.name IS NULL OR an.name NOT LIKE '%(uncredited)%') 
+ORDER BY 
+    r.production_year DESC, r.total_cast DESC
+LIMIT 30;

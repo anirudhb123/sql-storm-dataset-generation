@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.Score > 0 -- Only questions with a positive score
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveQuestions,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000 -- Only users with more than 1000 reputation
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        p.Title, 
+        p.CreationDate, 
+        u.DisplayName,
+        COALESCE(MAX(c.CreationDate), '1970-01-01') AS LastCommentDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+JoinPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        p.Title,
+        p.Body,
+        ph.Comment,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '7 days'
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalQuestions,
+    u.PositiveQuestions,
+    u.TotalComments,
+    u.TotalBadges,
+    rp.PostId,
+    rp.Title AS RecentQuestionTitle,
+    rp.CreationDate AS QuestionDate,
+    ra.LastCommentDate,
+    ph.HistoryDate AS PostHistoryDate,
+    ph.PostHistoryType AS HistoryType,
+    ph.Comment AS EditComment
+FROM 
+    UserActivity u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    RecentActivity ra ON rp.Title = ra.Title
+LEFT JOIN 
+    JoinPostHistory ph ON ph.PostId = rp.PostId
+WHERE 
+    u.TotalQuestions > 5 -- Only consider users with more than 5 questions
+ORDER BY 
+    u.TotalBadges DESC, 
+    u.DisplayName ASC;

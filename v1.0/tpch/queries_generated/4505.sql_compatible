@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+Combined AS (
+    SELECT 
+        r.n_name AS nation,
+        H.c_name AS customer_name,
+        R.s_name AS supplier_name,
+        COALESCE(H.order_count, 0) AS order_count,
+        COALESCE(R.total_cost, 0) AS supplier_cost,
+        CASE 
+            WHEN H.total_spent > 10000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_segment
+    FROM 
+        HighValueCustomers H
+    FULL OUTER JOIN 
+        RankedSuppliers R ON H.order_count > 0 AND R.rank <= 10
+    LEFT JOIN 
+        nation r ON H.c_nationkey = r.n_nationkey
+    WHERE 
+        H.rank IS NULL OR R.rank IS NULL
+)
+SELECT 
+    *,
+    CONCAT('Customer:', customer_name, '; Supplier:', supplier_name) AS customer_supplier_info,
+    CASE 
+        WHEN order_count > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buying_pattern
+FROM 
+    Combined
+ORDER BY 
+    nation, customer_segment, order_count DESC;

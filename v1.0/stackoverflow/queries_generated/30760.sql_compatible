@@ -1,0 +1,96 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursiveCTE r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2
+),
+PostWithDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        tags.TagName,
+        ph.CreationDate AS PostHistoryDate,
+        ph.Comment AS PostCloseReason
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags tags ON tags.WikiPostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId = 10  
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        TagName,
+        PostHistoryDate,
+        PostCloseReason,
+        ROW_NUMBER() OVER (PARTITION BY OwnerDisplayName ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM 
+        PostWithDetails
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        Score,
+        ViewCount,
+        TagName,
+        PostHistoryDate,
+        PostCloseReason
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+
+SELECT 
+    t.OwnerDisplayName,
+    COUNT(t.PostId) AS TotalPosts,
+    AVG(t.Score) AS AverageScore,
+    SUM(CASE WHEN t.PostCloseReason IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    TopRankedPosts t
+GROUP BY 
+    t.OwnerDisplayName
+ORDER BY 
+    TotalPosts DESC
+LIMIT 10;

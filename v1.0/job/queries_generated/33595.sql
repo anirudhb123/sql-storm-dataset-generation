@@ -1,0 +1,79 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE ci.role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE ci.role_id IS NOT NULL AND ah.level < 5
+),
+TopMovies AS (
+    SELECT 
+        ak.title,
+        ak.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN ak.production_year = EXTRACT(YEAR FROM CURRENT_DATE) THEN 1 ELSE 0 END) AS released_this_year
+    FROM aka_title ak
+    LEFT JOIN cast_info ci ON ak.movie_id = ci.movie_id
+    WHERE ak.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY ak.title, ak.production_year
+    HAVING COUNT(DISTINCT ci.person_id) > 5
+    ORDER BY actor_count DESC
+    LIMIT 10
+),
+ActorAverageAge AS (
+    SELECT 
+        ai.person_id,
+        AVG(EXTRACT(YEAR FROM CURRENT_DATE) - pi.year_of_birth) AS average_age
+    FROM person_info pi
+    JOIN aka_name an ON pi.person_id = an.person_id
+    GROUP BY ai.person_id
+),
+RecentMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT an.name) AS actors,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rn
+    FROM aka_title m
+    JOIN cast_info ci ON m.id = ci.movie_id
+    JOIN aka_name an ON an.person_id = ci.person_id
+    WHERE m.production_year > (CURRENT_DATE - INTERVAL '5 years')
+    GROUP BY m.id, m.title, m.production_year
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.released_this_year,
+    ah.actor_name,
+    aave.average_age,
+    rm.actors
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorHierarchy ah ON tm.movie_id = ah.movie_id
+LEFT JOIN 
+    ActorAverageAge aave ON ah.person_id = aave.person_id
+LEFT JOIN 
+    RecentMovies rm ON tm.title = rm.title
+WHERE 
+    aave.average_age IS NOT NULL AND
+    ah.level < 3
+ORDER BY 
+    tm.actor_count DESC, 
+    tm.production_year DESC;

@@ -1,0 +1,44 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, SUM(ps.ps_availqty) AS total_availability
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_supplycost
+)
+SELECT ns.n_name AS nation_name, 
+       ns.r_name AS region_name,
+       COALESCE(SUM(ch.total_orders), 0) AS total_orders,
+       COUNT(DISTINCT p.p_partkey) AS number_of_parts,
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       MAX(ps.total_availability) AS max_availability,
+       COUNT(DISTINCT sh.s_suppkey) FILTER (WHERE sh.level = 1) AS top_suppliers,
+       STRING_AGG(DISTINCT sh.s_name, ', ') AS supplier_names
+FROM nation_region ns
+LEFT JOIN customer_orders ch ON ns.n_nationkey = ch.c_custkey
+LEFT JOIN part_supplier_info ps ON ps.p_partkey IS NOT NULL
+LEFT JOIN supplier_hierarchy sh ON ns.n_nationkey = sh.s_nationkey
+GROUP BY ns.n_name, ns.r_name
+HAVING COUNT(DISTINCT p.p_partkey) > 10
+ORDER BY total_orders DESC
+LIMIT 100;

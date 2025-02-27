@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_sales_price,
+        ws_quantity,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        RANK() OVER (ORDER BY SUM(rs.ws_sales_price * rs.ws_quantity) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        customer_rank <= 10
+),
+CustomerAddresses AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY ca.ca_state) AS address_rank
+    FROM 
+        customer_address ca
+),
+FinalReport AS (
+    SELECT 
+        tc.c_customer_id,
+        tc.c_first_name,
+        tc.c_last_name,
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = tc.c_customer_id
+    LEFT JOIN 
+        CustomerAddresses ca ON ca.ca_address_id = (SELECT ca1.ca_address_id 
+                                                    FROM customer_address ca1 
+                                                    WHERE ca1.ca_address_sk = c.c_current_addr_sk)
+    GROUP BY 
+        tc.c_customer_id, tc.c_first_name, tc.c_last_name, ca.ca_address_id, ca.ca_city, ca.ca_state, ca.ca_country
+    HAVING 
+        SUM(ws.ws_net_profit) IS NOT NULL
+    ORDER BY 
+        total_net_profit DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_net_profit IS NULL THEN 'No Profit'
+        ELSE FORMAT(total_net_profit, '$#,##0.00')
+    END AS formatted_net_profit
+FROM 
+    FinalReport
+WHERE 
+    EXISTS (SELECT 1 FROM customer_demographics cd WHERE cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_id = FinalReport.c_customer_id))
+ORDER BY 
+    total_net_profit DESC;

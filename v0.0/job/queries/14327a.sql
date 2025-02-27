@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND t.phonetic_code IS NOT NULL AND t.md5sum IN ('374553d314656a4efe48c99c39ad5904', '54ff6da26a8cc53c62506dfb1e692870', '6ad9bb851d812ec647687155aa9fba67', '93b8b5bea8be0e2c8068b792ab3791e5', 'ae11bce35596cb68f5f1fb49f3fef242', 'b01736e0701b9ba05883429c4809d6bb', 'bf46d62d5844702959f4b50eeaf0c66c', 'f1447e49d74fb264a60f17d2b5ee9848');

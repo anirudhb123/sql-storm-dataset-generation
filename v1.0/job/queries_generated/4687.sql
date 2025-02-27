@@ -1,0 +1,41 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.total_cast,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.total_cast DESC) AS rn
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    COALESCE(NULLIF(tm.cast_names, ''), 'No cast available') AS cast_names,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = tm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')) AS award_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rn <= 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

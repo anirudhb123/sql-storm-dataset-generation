@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        p.p_size,
+        p.p_container,
+        p.p_comment,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_returned,
+        COALESCE(SUM(CASE WHEN l.l_returnflag <> 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_sold
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_size, p.p_container, p.p_comment
+),
+SupplierPerformance AS (
+    SELECT 
+        r.r_name AS region,
+        n.n_name AS nation,
+        ps.ps_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        r.r_name, n.n_name, ps.ps_partkey
+)
+SELECT 
+    pd.p_name,
+    pd.p_brand,
+    pd.p_retailprice,
+    COALESCE(sp.total_revenue, 0) AS total_revenue,
+    COALESCE(rs.rank, 'Not Available') AS supplier_rank,
+    pd.total_returned,
+    pd.total_sold
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    SupplierPerformance sp ON pd.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON pd.p_partkey = rs.ps_partkey AND rs.rank = 1
+WHERE 
+    pd.p_retailprice > 100
+ORDER BY 
+    pd.p_name ASC, total_revenue DESC;

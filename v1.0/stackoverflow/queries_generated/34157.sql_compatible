@@ -1,0 +1,93 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        LastAccessDate,
+        WebsiteUrl,
+        Location,
+        AboutMe,
+        Views,
+        UpVotes,
+        DownVotes,
+        ProfileImageUrl,
+        EmailHash,
+        AccountId,
+        0 AS level
+    FROM Users
+    WHERE Reputation >= 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        u.LastAccessDate,
+        u.WebsiteUrl,
+        u.Location,
+        u.AboutMe,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        u.ProfileImageUrl,
+        u.EmailHash,
+        u.AccountId,
+        ur.level + 1
+    FROM Users u
+    JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE ur.level < 3
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rn
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 AND p.ViewCount > 100
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    WHERE v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY v.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    p.Title,
+    p.ViewCount,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+    COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+    COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges,
+    COALESCE(NULLIF(AVG(DATE '2024-10-01' - p.CreationDate), 0), 1) AS AveragePostAge
+FROM UserReputation u
+JOIN TopPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostComments pc ON p.Id = pc.PostId
+LEFT JOIN RecentVotes rv ON p.Id = rv.PostId
+LEFT JOIN Badges b ON u.Id = b.UserId
+WHERE p.rn = 1
+GROUP BY u.DisplayName, p.Title, p.ViewCount, rv.UpVotes, rv.DownVotes
+ORDER BY p.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

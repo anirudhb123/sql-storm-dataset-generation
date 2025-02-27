@@ -1,0 +1,106 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.OwnerUserId,
+        a.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        (COALESCE(SUM(v.VoteTypeId = 2), 0) - COALESCE(SUM(v.VoteTypeId = 3), 0)) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+VoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    ps.UserId AS OwnerId,
+    u.DisplayName AS OwnerDisplayName,
+    ph.HistoryCount,
+    ph.LastChangeDate,
+    vs.UpVoteCount,
+    vs.DownVoteCount,
+    us.Upvotes,
+    us.Downvotes,
+    us.NetVotes,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank
+FROM 
+    RecursivePostCTE p
+JOIN 
+    UserStats us ON us.UserId = p.OwnerUserId
+JOIN 
+    PostHistoryStats ph ON ph.PostId = p.PostId
+JOIN 
+    VoteSummary vs ON vs.PostId = p.PostId
+LEFT JOIN 
+    Comments c ON c.PostId = p.PostId
+LEFT JOIN 
+    Users ps ON ps.Id = p.OwnerUserId
+WHERE 
+    p.Score > 0
+GROUP BY 
+    p.PostId, ps.UserId, u.DisplayName, ph.HistoryCount, ph.LastChangeDate, vs.UpVoteCount, vs.DownVoteCount, us.Upvotes, us.Downvotes, us.NetVotes
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

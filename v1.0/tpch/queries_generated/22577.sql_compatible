@@ -1,0 +1,96 @@
+
+WITH RECURSIVE nation_supplier_cte AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    
+    UNION ALL
+    
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 0 
+            ELSE s.s_acctbal * 0.9 
+        END AS s_acctbal,
+        CONCAT('Supplier ', s.s_name, ' from ', n.n_name) AS s_comment
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal < 500
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT 
+                AVG(o2.o_totalprice) 
+            FROM 
+                orders o2 
+            WHERE 
+                o2.o_orderstatus = 'O'
+        )
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey AND l.l_returnflag = 'N'
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    (p.p_retailprice - (p.p_retailprice * 0.15)) > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2 
+        WHERE 
+            p2.p_size IS NOT NULL
+    )
+    OR 
+    p.p_comment IS NOT NULL
+GROUP BY 
+    ps.ps_partkey, p.p_name, p.p_retailprice, n.n_name
+HAVING 
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > (
+        SELECT 
+            AVG(total_spent) 
+        FROM 
+            customer_order_summary
+    ) 
+    AND 
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) <= 10
+ORDER BY 
+    total_revenue DESC;

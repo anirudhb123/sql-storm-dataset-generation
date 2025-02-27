@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) AS VoteCount
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId, p.PostTypeId
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RowNum
+    FROM
+        PostHistory ph
+)
+SELECT
+    up.UserId,
+    up.Reputation,
+    up.TotalPosts,
+    up.QuestionCount,
+    up.AnswerCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.PostRank,
+    COALESCE(rph.Comment, 'No recent history') AS RecentComment
+FROM
+    UserStatistics up
+JOIN
+    RankedPosts rp ON up.TotalPosts > 0 
+LEFT JOIN
+    RecentPostHistory rph ON rp.PostId = rph.PostId AND rph.RowNum = 1 
+WHERE
+    up.Reputation > 1000 
+ORDER BY
+    up.Reputation DESC, rp.Score DESC;

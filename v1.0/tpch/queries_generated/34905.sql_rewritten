@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS lvl
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.lvl < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+PartSupplier AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY p.p_partkey
+),
+CustomerRank AS (
+    SELECT c.c_custkey, RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_mktsegment
+)
+SELECT 
+    r.r_name AS region_name,
+    nh.supplier_count,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(os.total_revenue) AS total_revenue,
+    COUNT(DISTINCT cr.c_custkey) AS top_customers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy nh ON n.n_nationkey = nh.s_nationkey
+LEFT JOIN OrderSummary os ON os.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+LEFT JOIN CustomerRank cr ON cr.custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+GROUP BY r.r_name, nh.supplier_count
+HAVING SUM(os.total_revenue) > 1000000
+ORDER BY total_revenue DESC NULLS LAST;

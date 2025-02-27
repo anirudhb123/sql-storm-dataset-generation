@@ -1,0 +1,63 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        COUNT(cr.order_number) AS total_returns,
+        SUM(cr.return_amt) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+WebSalesSummary AS (
+    SELECT 
+        ws.ship_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        WINDOW_SUM(SUM(ws.net_paid_inc_tax)) OVER (PARTITION BY ws.ship_customer_sk) AS cumulative_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.ship_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        c.c_customer_id
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+)
+SELECT 
+    c.customer_id,
+    d.gender,
+    d.marital_status,
+    d.purchase_estimate,
+    COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+    ws.total_net_profit,
+    ws.cumulative_sales,
+    CASE 
+        WHEN ws.total_net_profit IS NULL THEN 'No Sales'
+        ELSE 'Has Sales'
+    END AS sales_status
+FROM 
+    CustomerDemographics d
+LEFT JOIN 
+    CustomerReturns r ON d.c_customer_id = r.returning_customer_sk
+FULL OUTER JOIN 
+    WebSalesSummary ws ON d.c_customer_id = ws.ship_customer_sk
+WHERE 
+    d.purchase_estimate > 1000 
+    AND (d.gender = 'M' OR d.marital_status = 'S')
+ORDER BY 
+    total_returned_quantity DESC, 
+    total_net_profit DESC
+LIMIT 100;

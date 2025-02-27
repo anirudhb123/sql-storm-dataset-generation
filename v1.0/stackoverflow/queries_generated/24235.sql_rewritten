@@ -1,0 +1,87 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 50
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostAnalytics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY SUM(COALESCE(P.Score, 0)) DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - interval '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        PB.PostCount,
+        BA.BadgeCount,
+        PB.TotalScore,
+        PB.AvgViewCount
+    FROM 
+        UserBadges BA
+    JOIN 
+        PostAnalytics PB ON BA.UserId = PB.OwnerUserId
+    JOIN 
+        Users U ON U.Id = PB.OwnerUserId
+    WHERE 
+        BA.BadgeCount > 0 AND
+        PB.PostCount > 5
+    ORDER BY 
+        U.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    T.DisplayName,
+    T.Reputation,
+    T.PostCount,
+    T.BadgeCount,
+    T.TotalScore,
+    T.AvgViewCount,
+    (SELECT 
+        CASE 
+            WHEN AVG(P.Score) IS NULL THEN 'No Posts'
+            WHEN AVG(P.Score) >= 5 THEN 'Elite'
+            WHEN AVG(P.Score) >= 1 THEN 'Active'
+            ELSE 'Newbie'
+        END 
+     FROM 
+        Posts P
+     WHERE 
+        P.OwnerUserId = T.OwnerUserId) AS UserActivityLevel,
+    (SELECT 
+        string_agg(DISTINCT P.Title, ', ') 
+     FROM 
+        Posts P 
+     WHERE 
+        P.OwnerUserId = T.OwnerUserId 
+     AND P.Tags LIKE '%SQL%'
+    ) AS RelatedSQLPosts
+FROM 
+    TopUsers T
+LEFT JOIN 
+    PostHistory PH ON PH.UserId = T.OwnerUserId
+WHERE 
+    PH.PostHistoryTypeId NOT IN (12, 13) 
+ORDER BY 
+    T.TotalScore DESC, 
+    T.BadgeCount DESC;

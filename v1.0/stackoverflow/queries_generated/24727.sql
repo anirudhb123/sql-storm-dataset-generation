@@ -1,0 +1,91 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 MONTH'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.Id, t.TagName
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        ARRAY_AGG(b.Name) AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+    HAVING 
+        COUNT(*) > 3
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ts.TagName,
+    ts.PostCount AS RelatedPostCount,
+    b.BadgeNames,
+    b.BadgeCount,
+    phs.CloseReopenCount,
+    phs.LastHistoryDate
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.PostCount > 0
+LEFT JOIN 
+    TopBadges b ON b.UserId = rp.OwnerDisplayName 
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId = rp.PostId
+WHERE 
+    rp.Score > 0 
+    AND rp.ViewCount > 100 
+    AND rp.CommentCount IS NOT NULL
+    AND (rp.CreationDate > '2022-01-01' OR b.BadgeCount IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;
+
+
+This complex SQL query features multiple constructs, including Common Table Expressions (CTEs), outer joins, correlated subqueries, and various aggregate functions. It analyzes recent posts, takes into account badge statistics for users, retrieves tag-based information, and aggregates post history data, all while applying multifaceted filtering criteria for dynamic analysis.

@@ -1,0 +1,30 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty > 50)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS average_order_price,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN o.o_orderkey END) AS total_returns,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS revenue_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp))
+AND (l.l_shipdate >= '2023-01-01' OR l.l_shipdate IS NULL)
+GROUP BY p.p_partkey, p.p_name, s.s_name
+HAVING revenue > 1000.00
+ORDER BY revenue_rank, revenue DESC;

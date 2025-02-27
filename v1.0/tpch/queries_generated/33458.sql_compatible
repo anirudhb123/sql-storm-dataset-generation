@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+RegionNationTotal AS (
+    SELECT r.r_name, n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_type LIKE '%plastic%')
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    sh.s_name,
+    COALESCE(s.total_spent, 0) AS total_spent_by_customer,
+    COALESCE(ls.total_revenue, 0) AS total_revenue_from_orders,
+    rt.r_name AS region_name,
+    rt.n_name AS nation_name,
+    rt.total_cost
+FROM SupplierHierarchy sh
+LEFT JOIN CustomerOrderSummary s ON sh.s_nationkey = s.c_custkey
+LEFT JOIN LineItemSummary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = sh.s_suppkey)
+JOIN RegionNationTotal rt ON rt.n_name = sh.s_name
+WHERE sh.level < 5
+ORDER BY rt.total_cost DESC;

@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        ak.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        t.title, t.production_year
+),
+KeywordMovies AS (
+    SELECT 
+        m.title,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    DISTINCT tm.movie_title,
+    COALESCE(md.actors, 'No actors available') AS actors_list,
+    GROUP_CONCAT(DISTINCT km.keyword ORDER BY km.keyword) AS keywords,
+    IIF(tm.production_year > 2000, 'Modern', 'Classic') AS era
+FROM 
+    TopActors tm
+LEFT JOIN 
+    MovieDetails md ON tm.movie_title = md.title AND tm.production_year = md.production_year
+LEFT JOIN 
+    KeywordMovies km ON tm.movie_title = km.title
+GROUP BY 
+    tm.movie_title, md.actors, tm.production_year
+HAVING 
+    COUNT(km.keyword) > 2
+ORDER BY 
+    tm.production_year DESC;

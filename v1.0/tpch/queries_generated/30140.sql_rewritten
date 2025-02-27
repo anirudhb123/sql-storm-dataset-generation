@@ -1,0 +1,61 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = (
+        SELECT n.n_nationkey
+        FROM nation n
+        WHERE n.n_name LIKE 'United%'
+    )
+    WHERE c.c_acctbal > 5000 AND ch.level < 10
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_container ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+        WHERE p2.p_size > 10
+    )
+),
+OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           SUM(l.l_quantity) OVER (PARTITION BY o.o_orderkey) AS total_quantity,
+           COUNT(DISTINCT l.l_suppkey) OVER (PARTITION BY o.o_orderkey) AS unique_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_name
+)
+SELECT DISTINCT ch.c_name, ch.c_acctbal, fp.p_name, fp.p_retailprice, os.o_orderdate, 
+       nr.total_revenue,
+       CASE 
+           WHEN nr.total_revenue IS NULL THEN 'No Revenue'
+           ELSE CAST(nr.total_revenue AS VARCHAR) 
+       END AS revenue_status
+FROM CustomerHierarchy ch
+JOIN FilteredParts fp ON fp.price_rank <= 5
+JOIN OrdersSummary os ON os.o_orderkey IN (
+    SELECT o_orderkey 
+    FROM orders 
+    WHERE o_orderstatus = 'O' AND o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+LEFT JOIN NationRevenue nr ON nr.n_name = (
+    SELECT n.n_name 
+    FROM nation n 
+    JOIN customer c ON n.n_nationkey = c.c_nationkey 
+    WHERE c.c_custkey = ch.c_custkey
+)
+WHERE ch.level < 2
+ORDER BY ch.c_acctbal DESC, fp.p_retailprice DESC;

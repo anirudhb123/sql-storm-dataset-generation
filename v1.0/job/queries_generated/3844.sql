@@ -1,0 +1,47 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS cast_names,
+        COUNT(DISTINCT g.id) AS genre_count,
+        (SELECT COUNT(*) 
+         FROM movie_info mi 
+         WHERE mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')) AS box_office_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+    GROUP BY 
+        t.id
+),
+RankedMovies AS (
+    SELECT 
+        md.*, 
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.genre_count DESC) AS genre_rank
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.*, 
+    CASE 
+        WHEN box_office_count > 0 THEN 'Film with Box Office Info'
+        ELSE 'Film without Box Office Info'
+    END AS box_office_status
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.genre_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.genre_count DESC;

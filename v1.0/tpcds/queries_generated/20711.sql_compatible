@@ -1,0 +1,52 @@
+
+WITH RankedReturns AS (
+    SELECT cr.returning_customer_sk,
+           cr.returning_cdemo_sk,
+           cr.return_quantity,
+           cr.return_amount,
+           ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.return_quantity DESC) AS rnk
+    FROM catalog_returns cr
+    WHERE cr.return_quantity IS NOT NULL
+      AND cr.returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+CustomerData AS (
+    SELECT c.c_customer_id,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           ci.income_band
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN income_band ci ON ci.ib_income_band_sk = hd.hd_income_band_sk
+),
+AggregatedData AS (
+    SELECT r.returning_customer_sk,
+           SUM(r.return_quantity) AS total_returned,
+           SUM(r.return_amount) AS total_return_amount
+    FROM RankedReturns r
+    WHERE r.rnk <= 5
+    GROUP BY r.returning_customer_sk
+)
+SELECT cd.c_customer_id,
+       cd.c_first_name,
+       cd.c_last_name,
+       cd.cd_gender,
+       cd.cd_marital_status,
+       cd.cd_purchase_estimate,
+       COALESCE(ad.total_returned, 0) AS total_returned,
+       COALESCE(ad.total_return_amount, 0) AS total_return_amount,
+       CASE
+           WHEN cd.cd_purchase_estimate BETWEEN 0 AND 100 THEN 'Low Spender'
+           WHEN cd.cd_purchase_estimate BETWEEN 101 AND 500 THEN 'Medium Spender'
+           ELSE 'High Spender'
+       END AS spender_category
+FROM CustomerData cd
+LEFT JOIN AggregatedData ad ON cd.c_customer_id = ad.returning_customer_sk
+WHERE cd.cd_gender = 'F' 
+  AND cd.cd_marital_status IN ('M', 'S')
+  AND (cd.cd_purchase_estimate < (SELECT MAX(cd_purchase_estimate) FROM customer_demographics) * 0.5
+       OR cd.cd_purchase_estimate IS NULL)
+ORDER BY COALESCE(ad.total_returned, 0) DESC, cd.c_last_name ASC NULLS LAST;

@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(ts.total_sales) AS region_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        TotalSales ts ON o.o_orderkey = ts.o_orderkey
+    GROUP BY 
+        n.n_regionkey
+    HAVING 
+        COUNT(DISTINCT c.c_custkey) > 10
+),
+SupplierPerformance AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost,
+        tr.region_sales,
+        tr.unique_customers
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        TopRegions tr ON rs.s_nationkey = tr.n_nationkey
+    WHERE 
+        rs.rank <= 10 AND (tr.region_sales IS NULL OR tr.region_sales > 100000)
+)
+SELECT 
+    sp.s_suppkey,
+    sp.s_name,
+    COALESCE(sp.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(sp.region_sales, 0) AS region_sales,
+    sp.unique_customers
+FROM 
+    SupplierPerformance sp
+ORDER BY 
+    sp.total_supply_cost DESC, sp.s_name ASC
+FETCH FIRST 20 ROWS ONLY;

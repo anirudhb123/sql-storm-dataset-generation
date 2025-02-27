@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS Rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450010 AND 2450686  -- Assuming date range to filter sales
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(*) AS return_count
+    FROM 
+        web_returns
+    WHERE 
+        wr_reason_sk IN (SELECT r_reason_sk FROM reason WHERE r_reason_desc LIKE '%defective%')
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        (SUM(ws.ws_net_profit) - COALESCE(cr.total_return_amt, 0)) AS net_profit_after_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    s.c_customer_id,
+    s.total_orders,
+    s.total_net_profit,
+    s.total_return_amt,
+    s.net_profit_after_returns,
+    (SELECT COUNT(DISTINCT sr_store_sk) 
+     FROM store_returns sr 
+     WHERE sr.sr_customer_sk = s.c_customer_id) AS total_store_returns
+FROM 
+    SalesWithReturns s
+WHERE 
+    s.total_orders > 5 AND 
+    s.net_profit_after_returns > 1000
+ORDER BY 
+    s.net_profit_after_returns DESC
+LIMIT 10;

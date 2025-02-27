@@ -1,0 +1,67 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(co.total_orders, 0) AS total_orders,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        RANK() OVER (ORDER BY COALESCE(co.total_spent, 0) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+),
+LatestOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM 
+        orders o
+)
+SELECT 
+    tc.c_name,
+    tc.total_orders,
+    tc.total_spent,
+    ps.total_available,
+    ps.avg_supply_cost
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    LatestOrders lo ON tc.c_custkey = lo.o_custkey AND lo.recent_order_rank = 1
+LEFT JOIN 
+    lineitem li ON li.l_orderkey = lo.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = li.l_partkey
+WHERE 
+    ps.avg_supply_cost IS NOT NULL AND
+    tc.total_spent > (
+        SELECT AVG(total_spent) FROM TopCustomers
+    )
+ORDER BY 
+    tc.spending_rank
+LIMIT 10;

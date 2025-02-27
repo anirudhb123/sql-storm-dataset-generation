@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        p.LastActivityDate,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR(1000)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        p2.CreationDate,
+        p2.LastActivityDate,
+        rph.Level + 1,
+        CAST(rph.Path || ' -> ' || p2.Title AS VARCHAR(1000))
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+, PopularPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+)
+
+SELECT 
+    rph.PostId,
+    rph.Title AS QuestionTitle,
+    rph.Path AS AnswerPath,
+    rph.OwnerUserId,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(uRep.BadgeCount, 0) AS BadgeCount,
+    COALESCE(rph.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+    pp.ViewCount,
+    pp.Rank
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation uRep ON u.Id = uRep.UserId
+LEFT JOIN 
+    PopularPosts pp ON rph.PostId = pp.Id
+WHERE 
+    rph.LastActivityDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+ORDER BY 
+    pp.Rank
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH TagCount AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.AnswerCount ELSE 0 END) AS TotalAcceptedAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.DisplayName
+),
+BadgeSummary AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalViews,
+    ua.TotalAnswers,
+    ua.TotalAcceptedAnswers,
+    bs.TotalBadges,
+    bs.GoldBadges,
+    bs.SilverBadges,
+    bs.BronzeBadges,
+    tc.Tag,
+    tc.PostCount
+FROM 
+    UserActivity ua
+JOIN 
+    BadgeSummary bs ON ua.DisplayName = bs.DisplayName
+JOIN 
+    (SELECT 
+         Tag,
+         PostCount
+     FROM 
+         TagCount 
+     ORDER BY 
+         PostCount DESC
+     LIMIT 5) tc ON true -- Cartesian join to include top 5 tags
+WHERE 
+    ua.TotalPosts > 5 -- Consider users with more than 5 posts
+ORDER BY 
+    ua.TotalViews DESC;

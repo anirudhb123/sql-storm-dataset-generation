@@ -1,0 +1,100 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+    WHERE 
+        ml.link_type_id = 1
+),
+cast_overview AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count,
+        COALESCE(a.average_rating, 0) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN (
+        SELECT 
+            mi.movie_id,
+            AVG(CAST(SUBSTRING(mi.info FROM 'Rating: (\d+\.\d+)') AS FLOAT)) AS average_rating
+        FROM 
+            movie_info mi
+        WHERE 
+            mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+        GROUP BY 
+            mi.movie_id
+    ) a ON a.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+movie_summary AS (
+    SELECT 
+        mv.movie_id,
+        mv.linked_movie_id,
+        COALESCE(co.total_cast, 0) AS total_cast,
+        COALESCE(co.cast_names, 'No cast') AS cast_names,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.keyword_count,
+        md.average_rating,
+        mh.depth
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_data md ON md.movie_id = mh.movie_id
+    LEFT JOIN 
+        cast_overview co ON co.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    m.total_cast,
+    m.cast_names,
+    m.keyword,
+    m.keyword_count,
+    m.average_rating,
+    m.depth
+FROM 
+    movie_summary m
+WHERE 
+    m.depth <= 2 
+ORDER BY 
+    m.keyword_count DESC,
+    m.average_rating DESC
+LIMIT 10;

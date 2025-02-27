@@ -1,0 +1,62 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        1 AS level
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    WHERE 
+        a.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        ah.level + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info ca ON ah.movie_id = ca.movie_id
+    JOIN 
+        aka_name a ON a.person_id = ca.person_id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    dh.actor_name,
+    d.title AS movie_title,
+    d.production_year,
+    COUNT(DISTINCT d.id) OVER (PARTITION BY d.id) AS total_appearances,
+    CASE 
+        WHEN COUNT(DISTINCT d.id) OVER (PARTITION BY d.id) > 5 THEN 'Frequent'
+        ELSE 'Occasional'
+    END AS appearance_frequency,
+    COALESCE(ct.kind, 'Unknown') AS company_type
+FROM 
+    title d
+LEFT JOIN 
+    complete_cast cc ON d.id = cc.movie_id
+LEFT JOIN 
+    movie_companies mc ON d.id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    actor_hierarchy dh ON dh.movie_id = d.id
+WHERE 
+    d.production_year BETWEEN 2000 AND 2023
+      AND dh.actor_name LIKE '%Smith%' 
+      AND dh.level > 1 
+GROUP BY 
+    dh.actor_name, 
+    d.title, 
+    d.production_year, 
+    ct.kind
+ORDER BY 
+    d.production_year DESC, 
+    appearance_frequency DESC;

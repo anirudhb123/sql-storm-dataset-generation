@@ -1,0 +1,41 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 3
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+),
+RankedSuppliers AS (
+    SELECT s.*, RANK() OVER (ORDER BY s.total_supply_cost DESC) AS rank
+    FROM SupplierStats s
+    WHERE s.total_supply_cost IS NOT NULL
+)
+SELECT oh.o_orderkey, oh.o_orderdate, l.total_price, rs.s_name, rs.rank,
+       CASE 
+           WHEN l.returned_quantity > 0 THEN 'Has Returns' 
+           ELSE 'No Returns' 
+       END AS return_status,
+       CASE 
+           WHEN oh.o_totalprice - l.total_price < 0 THEN 'Overbudget' 
+           ELSE 'Within Budget' 
+       END AS budget_status
+FROM OrderHierarchy oh
+LEFT JOIN LineItemDetails l ON oh.o_orderkey = l.l_orderkey
+LEFT JOIN RankedSuppliers rs ON l.total_price < rs.total_supply_cost
+ORDER BY oh.o_orderdate DESC, rs.rank;

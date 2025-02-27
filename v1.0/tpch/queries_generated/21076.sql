@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, SUM(ps.ps_supplycost) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING AVG(ps.ps_availqty) > 100 AND COUNT(ps.ps_suppkey) > 1
+), LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_tax) IS NOT NULL
+), CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+), OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice) AS total_order_value
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+
+SELECT DISTINCT c.c_name, 
+                SUM(COALESCE(hp.total_cost, 0)) AS total_high_value_part_cost,
+                MAX(lis.total_revenue) AS max_order_revenue,
+                COUNT(DISTINCT co.o_orderkey) AS total_orders,
+                CASE 
+                    WHEN SUM(DISTINCT lis.total_revenue) IS NULL THEN 'No Revenue'
+                    ELSE 'Revenue Generated'
+                END AS revenue_status
+FROM customer c
+LEFT JOIN HighValueParts hp ON c.c_custkey IN (SELECT DISTINCT ps.ps_suppkey 
+                                                 FROM partsupp ps 
+                                                 WHERE ps.ps_availqty > 0)
+LEFT JOIN LineItemSummary lis ON c.c_custkey = (SELECT DISTINCT o.o_custkey 
+                                                  FROM orders o 
+                                                  WHERE o.o_orderkey IN (SELECT o_orderkey 
+                                                                          FROM OrderDetails 
+                                                                          WHERE total_order_value > 10000))
+LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.o_totalprice > 500)
+GROUP BY c.c_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 3 OR SUM(lis.total_revenue) > 10000
+ORDER BY total_high_value_part_cost DESC, max_order_revenue DESC;

@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorStats AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        COUNT(ci.person_id) AS role_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id, a.name
+),
+SelectedMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COUNT(DISTINCT as.actor_name) AS total_actors,
+        MAX(as.role_count) AS max_roles_per_actor,
+        STRING_AGG(DISTINCT as.roles, '; ') AS all_roles
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        ActorStats as ON rm.movie_id = as.movie_id
+    WHERE
+        rm.year_rank <= 5  
+    GROUP BY
+        rm.movie_id, rm.title, rm.production_year
+    ORDER BY
+        rm.production_year DESC, total_actors DESC
+)
+SELECT
+    sm.title,
+    sm.production_year,
+    sm.total_actors,
+    sm.max_roles_per_actor,
+    sm.all_roles
+FROM
+    SelectedMovies sm
+WHERE
+    sm.total_actors > 1  
+ORDER BY
+    sm.production_year DESC, sm.total_actors DESC;

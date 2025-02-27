@@ -1,0 +1,56 @@
+
+WITH MovieDetails AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        MAX(mci.note) AS company_notes
+    FROM
+        aka_title a
+    LEFT JOIN
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN
+        movie_companies mci ON a.id = mci.movie_id
+    LEFT JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY
+        a.title,
+        a.production_year
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+FinalOutput AS (
+    SELECT
+        md.title,
+        md.production_year,
+        md.actor_count,
+        md.actors,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        md.company_notes
+    FROM
+        MovieDetails md
+    LEFT JOIN
+        MovieKeywords mk ON md.id = mk.movie_id
+)
+SELECT
+    *,
+    ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS rank
+FROM
+    FinalOutput
+WHERE
+    actor_count > 1
+ORDER BY
+    production_year, actor_count DESC
+LIMIT 50;

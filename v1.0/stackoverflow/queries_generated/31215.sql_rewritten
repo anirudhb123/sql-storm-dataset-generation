@@ -1,0 +1,68 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(av.UpVotes, 0) AS UpVotes,
+        COALESCE(av.DownVotes, 0) AS DownVotes,
+        COALESCE(ph.Level, 0) AS HierarchyLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        AggregatedVotes av ON p.Id = av.PostId
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.*,
+        RANK() OVER (PARTITION BY pd.HierarchyLevel ORDER BY pd.ViewCount DESC) as Rank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.ViewCount,
+    tp.HierarchyLevel
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Rank <= 5
+ORDER BY 
+    tp.HierarchyLevel, tp.ViewCount DESC;

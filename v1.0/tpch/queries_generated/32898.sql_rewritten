@@ -1,0 +1,62 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+RecentOrders AS (
+    SELECT 
+        c.custkey,
+        c.name,
+        COUNT(DISTINCT o.orderkey) as order_count,
+        SUM(o.totalprice) as total_spent,
+        RANK() OVER (ORDER BY SUM(o.totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        c.custkey, c.name
+),
+TopProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_quantity) > 100
+)
+SELECT 
+    c.c_name AS customer_name,
+    coalesce(o.order_count, 0) AS total_orders,
+    coalesce(o.total_spent, 0.00) AS total_spent,
+    p.p_name AS product_name,
+    tp.total_quantity_sold
+FROM 
+    RecentOrders o
+FULL OUTER JOIN 
+    CustomerOrders co ON o.custkey = co.c_custkey AND co.order_rank = 1
+LEFT JOIN 
+    TopProducts tp ON tp.total_quantity_sold > 200
+JOIN 
+    part p ON tp.p_partkey = p.p_partkey
+WHERE 
+    o.order_count IS NOT NULL OR co.o_orderkey IS NOT NULL
+ORDER BY 
+    o.total_spent DESC NULLS LAST,
+    tp.total_quantity_sold DESC;

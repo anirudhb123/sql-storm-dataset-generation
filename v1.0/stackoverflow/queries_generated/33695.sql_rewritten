@@ -1,0 +1,94 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL 
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        p.Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS CloseActionCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Owner,
+    COALESCE(c.CloseActionCount, 0) AS CloseCount,
+    COALESCE(c.LastCloseDate, 'Never Closed') AS LastClose,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalVotes,
+    ps.Score,
+    rph.Level AS HierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    UserPostStats u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    ClosedPostHistory c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.Id
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

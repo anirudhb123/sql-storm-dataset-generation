@@ -1,0 +1,82 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.id AS cast_id,
+        ci.movie_id,
+        ak.name AS actor_name,
+        ci.note,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+CompanyTitles AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FilteredMovies AS (
+    SELECT 
+        ct.movie_id,
+        COUNT(DISTINCT ck.keyword) AS keyword_count
+    FROM 
+        movie_keyword ck
+    INNER JOIN 
+        aka_title ct ON ck.movie_id = ct.id
+    GROUP BY 
+        ct.movie_id
+    HAVING 
+        COUNT(DISTINCT ck.keyword) > 3
+),
+FinalOutput AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        cd.actor_name,
+        cd.note AS actor_note,
+        ct.company_name,
+        ct.company_type,
+        fm.keyword_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastDetails cd ON rt.title_id = cd.movie_id AND cd.actor_rank <= 3
+    LEFT JOIN 
+        CompanyTitles ct ON rt.title_id = ct.movie_id
+    LEFT JOIN 
+        FilteredMovies fm ON rt.title_id = fm.movie_id
+    WHERE 
+        (ct.company_type IS NOT NULL OR cd.note LIKE '%star%')
+        AND (cd.note IS NOT NULL OR cd.actor_name LIKE '%John%')
+)
+SELECT 
+    title, 
+    production_year, 
+    actor_name, 
+    actor_note,
+    company_name,
+    company_type,
+    COALESCE(keyword_count, 0) AS keyword_count
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, title;

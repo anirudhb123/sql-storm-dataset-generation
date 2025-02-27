@@ -1,0 +1,80 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate >= DATE '1997-01-01')
+), CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+), HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal >= 100000 THEN 'High'
+            WHEN s.s_acctbal BETWEEN 50000 AND 99999 THEN 'Medium'
+            ELSE 'Low'
+        END AS value_category
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), QuantityPrice AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    c.c_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    d.total_quantity,
+    d.total_price,
+    COALESCE(SUM(d.total_price) OVER (PARTITION BY c.c_custkey), 0) AS customer_total_spent,
+    CASE 
+        WHEN d.total_price IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_state
+FROM 
+    RankedOrders r
+JOIN 
+    CustomerDetails c ON r.o_custkey = c.c_custkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p WHERE p.p_retailprice > 50
+    )
+LEFT JOIN 
+    HighValueSuppliers s ON s.s_suppkey = ps.ps_suppkey
+INNER JOIN 
+    QuantityPrice d ON d.l_orderkey = r.o_orderkey
+WHERE 
+    r.order_rank = 1
+GROUP BY 
+    r.o_orderkey, c.c_name, s.s_name, d.total_quantity, d.total_price
+HAVING 
+    SUM(d.total_quantity) > (SELECT AVG(total_quantity) FROM QuantityPrice)
+ORDER BY 
+    customer_total_spent DESC, r.o_orderkey;

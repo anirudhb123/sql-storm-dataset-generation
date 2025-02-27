@@ -1,0 +1,62 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY at.title) AS rank_within_year
+    FROM 
+        aka_title at
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        c.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        COUNT(DISTINCT ci.role_id) OVER (PARTITION BY ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalSummary AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        cd.actor_name,
+        cd.role_count,
+        COALESCE(cn.companies, 'Unknown Company') AS production_companies
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastDetails cd ON rt.title_id = cd.movie_id
+    LEFT JOIN 
+        CompanyDetails cn ON rt.title_id = cn.movie_id
+    WHERE 
+        rt.rank_within_year <= 5 AND 
+        (cd.role_count IS NULL OR cd.role_count >= 2) 
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    role_count,
+    production_companies
+FROM 
+    FinalSummary
+WHERE 
+    production_year IS NOT NULL 
+ORDER BY 
+    production_year DESC, title ASC;

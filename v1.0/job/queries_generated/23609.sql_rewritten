@@ -1,0 +1,88 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mb.note, 'No production company') AS production_company,
+        0 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mb ON mt.id = mb.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        linked_mt.title,
+        linked_mt.production_year,
+        COALESCE(mb.note, 'No production company') AS production_company,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title linked_mt ON ml.linked_movie_id = linked_mt.id
+    LEFT JOIN 
+        movie_companies mb ON linked_mt.id = mb.movie_id
+    JOIN 
+        RecursiveMovieHierarchy r ON ml.movie_id = r.movie_id
+    WHERE 
+        linked_mt.production_year IS NOT NULL
+), 
+
+AverageCompanyCount AS (
+    SELECT 
+        movie_id, 
+        COUNT(DISTINCT company_id) AS num_companies
+    FROM 
+        movie_companies
+    GROUP BY 
+        movie_id
+), 
+
+FilteredResults AS (
+    SELECT 
+        r.movie_id,
+        r.movie_title,
+        r.production_year,
+        r.production_company,
+        a.num_companies,
+        ROW_NUMBER() OVER (PARTITION BY r.production_year ORDER BY a.num_companies DESC) AS ranking
+    FROM 
+        RecursiveMovieHierarchy r
+    LEFT JOIN 
+        AverageCompanyCount a ON r.movie_id = a.movie_id
+), 
+
+FinalSelection AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN num_companies > 3 THEN 'High'
+            WHEN num_companies BETWEEN 1 AND 3 THEN 'Medium'
+            ELSE 'Low'
+        END AS company_rating
+    FROM 
+        FilteredResults
+    WHERE 
+        r.movie_title IS NOT NULL
+        AND r.production_year IS NOT NULL
+)
+
+SELECT 
+    fs.movie_id,
+    fs.movie_title,
+    fs.production_year,
+    fs.production_company,
+    fs.num_companies,
+    fs.company_rating
+FROM 
+    FinalSelection fs
+WHERE 
+    fs.ranking <= 5
+    AND fs.production_year BETWEEN 2000 AND 2022
+ORDER BY 
+    fs.production_year DESC, 
+    fs.num_companies DESC;

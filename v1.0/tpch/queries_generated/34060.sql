@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS lvl
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal > sh.s_acctbal
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplies AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_price,
+    COALESCE(c.order_count, 0) AS customer_order_count,
+    CASE 
+        WHEN sh.lvl IS NOT NULL THEN 'High-value Supplier' 
+        ELSE 'Standard Supplier' 
+    END AS supplier_type,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS brand_rank
+FROM part p
+LEFT JOIN PartSupplies ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN CustomerOrders c ON c.order_count > 10
+LEFT JOIN SupplierHierarchy sh ON sh.s_acctbal > p.p_retailprice 
+WHERE p.p_size > 10
+ORDER BY p.p_name, supplier_type DESC
+FETCH FIRST 100 ROWS ONLY;

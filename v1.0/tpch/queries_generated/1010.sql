@@ -1,0 +1,66 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MIN(o.o_orderdate) AS first_order_date,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_available_quantity > 1000 THEN 'High Availability'
+            WHEN total_available_quantity BETWEEN 500 AND 1000 THEN 'Medium Availability'
+            ELSE 'Low Availability'
+        END AS availability_category
+    FROM 
+        SupplierSummary
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.order_count,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.total_available_quantity,
+    s.availability_category,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No Orders'
+        ELSE FORMAT(c.total_spent / NULLIF(c.order_count, 0), 2)
+    END AS average_spent_per_order,
+    DENSE_RANK() OVER (PARTITION BY s.availability_category ORDER BY c.total_spent DESC) AS category_rank
+FROM 
+    CustomerOrderSummary c
+FULL OUTER JOIN 
+    RankedSuppliers s ON c.order_count > 0 AND s.total_available_quantity IS NOT NULL
+WHERE 
+    (c.first_order_date IS NULL OR s.total_available_quantity > 100) 
+    AND (s.avg_supply_cost < 500 OR s.s_name LIKE 'A%')
+ORDER BY 
+    c.total_spent DESC NULLS LAST, 
+    s.availability_category;

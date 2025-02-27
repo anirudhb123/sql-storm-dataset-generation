@@ -1,0 +1,76 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        LastAccessDate,
+        CASE 
+            WHEN Reputation IS NULL THEN 'Unknown Reputation'
+            WHEN Reputation > 1000 THEN 'Highly Respected'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Moderately Respected'
+            ELSE 'Newbie'
+        END AS ReputationCategory
+    FROM Users
+), 
+
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        COUNT(c.Id) FILTER (WHERE c.Text IS NOT NULL) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        CASE 
+            WHEN p.Score IS NULL THEN 0
+            ELSE p.Score - COALESCE(NULLIF(AVG(v.BountyAmount), 0), 0) 
+        END AS AdjustedScore
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId
+), 
+
+UserWithPostStats AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        COUNT(ps.PostId) FILTER (WHERE ps.Score > 0) AS PositivePosts,
+        SUM(ps.AdjustedScore) AS TotalAdjustedScore
+    FROM UserReputation ur
+    LEFT JOIN PostScore ps ON ur.UserId = ps.OwnerUserId
+    GROUP BY ur.UserId, ur.DisplayName
+), 
+
+RankedUserStats AS (
+    SELECT 
+        uwps.UserId,
+        uwps.DisplayName,
+        uwps.PositivePosts,
+        uwps.TotalAdjustedScore,
+        RANK() OVER (ORDER BY uwps.TotalAdjustedScore DESC) AS ScoreRank
+    FROM UserWithPostStats uwps
+)
+
+SELECT 
+    rus.UserId,
+    rus.DisplayName,
+    rus.PositivePosts,
+    rus.TotalAdjustedScore,
+    rus.ScoreRank,
+    CASE 
+        WHEN rus.TotalAdjustedScore IS NULL OR rus.TotalAdjustedScore = 0 THEN 'No Performance'
+        WHEN rus.ScoreRank <= 10 THEN 'Top Performer'
+        ELSE 'Average Performer'
+    END AS PerformanceCategory,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes
+FROM RankedUserStats rus
+LEFT JOIN Posts p ON rus.UserId = p.OwnerUserId
+LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+WHERE rus.PositivePosts > 0
+GROUP BY rus.UserId, rus.DisplayName, rus.PositivePosts, rus.TotalAdjustedScore, rus.ScoreRank
+ORDER BY rus.ScoreRank;
+

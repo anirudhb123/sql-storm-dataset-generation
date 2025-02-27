@@ -1,0 +1,71 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT 
+        m.title,
+        AVG(mi.info) AS average_info_score
+    FROM 
+        title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.title
+)
+SELECT 
+    rt.title, 
+    rt.production_year, 
+    rt.keyword,
+    cd.actor_name, 
+    cd.role_name, 
+    co.company_name, 
+    co.company_type, 
+    mi.average_info_score
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title = cd.movie_id
+LEFT JOIN 
+    CompanyDetails co ON rt.title = co.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title = mi.title
+WHERE 
+    rt.rank <= 5
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

@@ -1,0 +1,57 @@
+
+WITH customer_incomes AS (
+    SELECT 
+        cd_gender, 
+        ib_lower_bound, 
+        ib_upper_bound, 
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics 
+    JOIN 
+        household_demographics ON cd_demo_sk = hd_demo_sk
+    JOIN 
+        income_band ON hd_income_band_sk = ib_income_band_sk
+    GROUP BY 
+        cd_gender, ib_lower_bound, ib_upper_bound
+), monthly_sales AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+), sales_per_gender AS (
+    SELECT 
+        ci.cd_gender, 
+        ms.d_year, 
+        ms.d_month_seq, 
+        SUM(ms.total_sales) AS gender_sales
+    FROM 
+        customer_incomes ci
+    JOIN 
+        web_sales ws ON ws.ws_bill_cdemo_sk IN (
+            SELECT c_current_cdemo_sk FROM customer WHERE c_customer_sk IN 
+            (SELECT c_customer_sk FROM customer_demographics WHERE cd_gender = ci.cd_gender)
+        )
+    JOIN 
+        monthly_sales ms ON ms.ws_bill_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.cd_gender, ms.d_year, ms.d_month_seq
+)
+SELECT 
+    g.cd_gender, 
+    g.ib_lower_bound, 
+    g.ib_upper_bound,
+    COALESCE(SUM(s.gender_sales), 0) AS total_sales
+FROM 
+    customer_incomes g
+LEFT JOIN 
+    sales_per_gender s ON g.cd_gender = s.cd_gender 
+GROUP BY 
+    g.cd_gender, g.ib_lower_bound, g.ib_upper_bound
+ORDER BY 
+    g.cd_gender, g.ib_lower_bound;

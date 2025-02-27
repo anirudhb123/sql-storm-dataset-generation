@@ -1,0 +1,83 @@
+WITH PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostRanking AS (
+    SELECT 
+        pe.PostId,
+        pe.Title,
+        pe.CreationDate,
+        pe.Score,
+        pe.ViewCount,
+        pe.UpVotes,
+        pe.DownVotes,
+        pe.CommentCount,
+        RANK() OVER (ORDER BY pe.Score DESC, pe.ViewCount DESC) AS PostRank
+    FROM 
+        PostEngagement pe
+),
+FilteredPosts AS (
+    SELECT 
+        pr.*,
+        CASE 
+            WHEN pr.CommentCount = 0 THEN 'No Comments'
+            WHEN pr.UpVotes > pr.DownVotes THEN 'Positive Feedback'
+            ELSE 'Needs Engagement'
+        END AS EngagementStatus
+    FROM 
+        PostRanking pr
+    WHERE 
+        pr.UpVotes IS NOT NULL AND pr.DownVotes IS NOT NULL
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.CommentCount,
+    fp.EngagementStatus,
+    CASE 
+        WHEN fp.PostRank <= 10 THEN 'High Rank'
+        WHEN fp.PostRank BETWEEN 11 AND 50 THEN 'Moderate Rank'
+        ELSE 'Low Rank'
+    END AS RankGroup,
+    (SELECT COUNT(b.Id) 
+     FROM Badges b 
+     WHERE b.UserId IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE Id = fp.PostId)) AS OwnerBadges,
+    CASE 
+        WHEN EXISTS (SELECT 1 
+                     FROM Votes v 
+                     WHERE v.PostId = fp.PostId AND v.VoteTypeId = 4) 
+        THEN 'Nominated as Favorite' 
+        ELSE 'Not Nominated'
+    END AS FavoriteNomination
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.EngagementStatus <> 'No Comments'
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC
+LIMIT 100;
+

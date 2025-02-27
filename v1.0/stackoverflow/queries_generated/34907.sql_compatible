@@ -1,0 +1,88 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 2  
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, rpc.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE rpc ON p.Id = rpc.ParentId
+),
+UserStats AS (
+    
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(DISTINCT b.Id) AS TotalBadges,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+           SUM(p.ViewCount) AS TotalViews,
+           SUM(p.Score) AS TotalScore
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostActivity AS (
+    
+    SELECT q.Id AS QuestionId,
+           COALESCE(a.AnswerCount, 0) AS AnswerCount,
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           q.Title
+    FROM Posts q
+    LEFT JOIN (
+        SELECT ParentId, COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2  
+        GROUP BY ParentId
+    ) a ON q.Id = a.ParentId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON q.Id = c.PostId
+    WHERE q.PostTypeId = 1  
+),
+FinalResults AS (
+    
+    SELECT u.UserId,
+           u.DisplayName,
+           ps.QuestionId,
+           ps.Title,
+           ps.AnswerCount,
+           ps.CommentCount,
+           us.TotalBadges,
+           us.GoldBadges,
+           us.SilverBadges,
+           us.BronzeBadges,
+           us.TotalViews,
+           us.TotalScore,
+           rpc.Level AS AnswerLevel
+    FROM UserStats us
+    LEFT JOIN PostActivity ps ON us.UserId = ps.QuestionId  
+    LEFT JOIN RecursivePostCTE rpc ON ps.QuestionId = rpc.ParentId
+)
+
+SELECT UserId,
+       DisplayName,
+       QuestionId,
+       Title,
+       AnswerCount,
+       CommentCount,
+       TotalBadges,
+       GoldBadges,
+       SilverBadges,
+       BronzeBadges,
+       TotalViews,
+       TotalScore,
+       CASE 
+           WHEN AnswerCount > 0 THEN 'Active Contributor'
+           WHEN TotalScore > 1000 THEN 'Veteran'
+           ELSE 'New User'
+       END AS UserClassification
+FROM FinalResults
+WHERE TotalBadges > 0 OR AnswerCount > 0  
+ORDER BY UserId, AnswerCount DESC, CommentCount DESC;

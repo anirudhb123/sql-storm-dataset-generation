@@ -1,0 +1,48 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        c.first_name,
+        c.last_name,
+        sr.return_quantity,
+        sr.return_amt,
+        sr.return_tax,
+        sr.store_sk,
+        s.store_name,
+        r.reason_desc
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.customer_sk = c.customer_sk
+    JOIN 
+        store s ON sr.store_sk = s.store_sk
+    JOIN 
+        reason r ON sr.reason_sk = r.reason_sk
+    WHERE 
+        sr.returned_date_sk BETWEEN 20230101 AND 20231231
+),
+MonthlyReturns AS (
+    SELECT 
+        DATE_TRUNC('month', d.d_date) AS return_month,
+        COUNT(*) AS total_returns,
+        SUM(cr.return_quantity) AS total_returned_items,
+        SUM(cr.return_amt) AS total_returned_amount
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        date_dim d ON cr.returned_date_sk = d.d_date_sk
+    GROUP BY 
+        DATE_TRUNC('month', d.d_date)
+)
+SELECT 
+    return_month,
+    total_returns,
+    total_returned_items,
+    total_returned_amount,
+    RANK() OVER (ORDER BY total_returned_amount DESC) AS return_rank
+FROM 
+    MonthlyReturns
+ORDER BY 
+    return_month;

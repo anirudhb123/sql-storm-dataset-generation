@@ -1,0 +1,65 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(d.d_date) AS last_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_order_count
+    FROM 
+        customer c
+    JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+top_customers AS (
+    SELECT 
+        s.c_customer_sk,
+        s.c_first_name,
+        s.c_last_name,
+        s.total_sales,
+        cd.total_catalog_sales,
+        ROW_NUMBER() OVER (PARTITION BY s.c_customer_sk ORDER BY s.total_sales DESC) AS rank
+    FROM 
+        sales_summary s
+    LEFT JOIN 
+        customer_demographics cd ON s.c_customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    COALESCE(tc.c_first_name, 'Unknown') AS first_name,
+    COALESCE(tc.c_last_name, 'Customer') AS last_name,
+    tc.total_sales,
+    COALESCE(tc.catalog_order_count, 0) AS catalog_order_count,
+    EXTRACT(MONTH FROM tc.last_purchase_date) AS last_purchase_month,
+    CASE 
+        WHEN tc.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM 
+    top_customers tc
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

@@ -1,0 +1,61 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, PostTypeId, ParentId, OwnerUserId, CreationDate, 
+           0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.PostTypeId, p.ParentId, p.OwnerUserId, p.CreationDate, 
+           r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserBadges AS (
+    SELECT UserId, 
+           COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges, 
+           COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges, 
+           COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PostWithMetrics AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+           COALESCE(b.GoldBadges, 0) AS GoldBadges,
+           COALESCE(b.SilverBadges, 0) AS SilverBadges,
+           COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, u.DisplayName, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+),
+QualifiedPosts AS (
+    SELECT pwm.Id, 
+           pwm.Title, 
+           pwm.OwnerDisplayName, 
+           pwm.CommentCount, 
+           pwm.UpVotes, 
+           pwm.DownVotes, 
+           r.Level
+    FROM PostWithMetrics pwm
+    INNER JOIN RecursivePostHierarchy r ON pwm.Id = r.Id
+    WHERE pwm.UpVotes - pwm.DownVotes >= 10 
+)
+SELECT qp.Title, qp.OwnerDisplayName, qp.CommentCount, qp.UpVotes, qp.DownVotes, 
+       CASE 
+           WHEN qp.CommentCount > 5 THEN 'Highly Engaged'
+           ELSE NULL 
+       END AS EngagementLevel,
+       RANK() OVER (PARTITION BY qp.Level ORDER BY qp.UpVotes DESC) AS VoteRank
+FROM QualifiedPosts qp
+LEFT JOIN Tags t ON t.ExcerptPostId = qp.Id 
+WHERE t.TagName IS NOT NULL
+ORDER BY qp.Level ASC, qp.UpVotes DESC;

@@ -1,0 +1,59 @@
+
+WITH ProcessedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        UPPER(ca_city) AS city_upper,
+        INITCAP(ca_street_name) AS street_name_capitalized,
+        CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type) AS full_address,
+        TRIM(ca_suite_number) AS suite_number_trimmed,
+        LENGTH(ca_zip) AS zip_length
+    FROM 
+        customer_address
+),
+AggregatedDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(cd_dep_count) AS total_deps,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_credit_rating::numeric) AS avg_credit_rating
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_demo_sk
+),
+DateFormatted AS (
+    SELECT 
+        d_date_sk,
+        TO_CHAR(d_date, 'YYYY-MM-DD') AS formatted_date,
+        EXTRACT(MONTH FROM d_date) AS month,
+        EXTRACT(YEAR FROM d_date) AS year
+    FROM 
+        date_dim
+    WHERE 
+        d_date >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    pa.ca_address_sk,
+    pa.city_upper,
+    pa.street_name_capitalized,
+    pa.full_address,
+    pa.suite_number_trimmed,
+    pa.zip_length,
+    ad.total_deps,
+    ad.total_purchase_estimate,
+    ad.avg_credit_rating,
+    df.formatted_date,
+    df.month,
+    df.year
+FROM 
+    ProcessedAddresses pa
+JOIN 
+    customer c ON pa.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    AggregatedDemographics ad ON c.c_current_cdemo_sk = ad.cd_demo_sk
+JOIN 
+    DateFormatted df ON c.c_first_sales_date_sk = df.d_date_sk
+WHERE 
+    ad.total_purchase_estimate > 10000
+ORDER BY 
+    pa.city_upper, ad.total_purchase_estimate DESC;

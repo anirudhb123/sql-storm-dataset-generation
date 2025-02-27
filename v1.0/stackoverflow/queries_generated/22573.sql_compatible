@@ -1,0 +1,101 @@
+
+WITH RecentPosts AS (
+    SELECT
+        p.Id AS post_id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        COUNT(cm.Id) AS comment_count,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS user_post_rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments cm ON cm.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.AcceptedAnswerId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS user_id,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS badge_count
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM RecentPosts rp 
+            WHERE rp.OwnerUserId = u.Id AND rp.upvotes > 0
+        )
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostsWithTags AS (
+    SELECT
+        p.Id,
+        p.Title,
+        STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM unnest(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><'))), ', ') AS Tags
+    FROM 
+        Posts p 
+    WHERE 
+        p.Tags IS NOT NULL 
+    GROUP BY 
+        p.Id, p.Title
+),
+AggregateData AS (
+    SELECT 
+        r.post_id,
+        r.Title,
+        r.CreationDate,
+        r.comment_count,
+        r.upvotes,
+        r.downvotes,
+        u.DisplayName,
+        u.Reputation,
+        u.badge_count,
+        t.Tags
+    FROM 
+        RecentPosts r
+    JOIN 
+        UserReputation u ON r.OwnerUserId = u.user_id
+    LEFT JOIN 
+        PostsWithTags t ON r.post_id = t.Id
+)
+SELECT 
+    ad.post_id,
+    ad.Title,
+    ad.CreationDate,
+    ad.comment_count,
+    ad.upvotes - ad.downvotes AS net_votes,
+    COALESCE(ad.badge_count, 0) AS badge_count,
+    ad.Tags,
+    CASE
+        WHEN ad.upvotes >= 10 THEN 'Popular'
+        WHEN ad.upvotes BETWEEN 5 AND 9 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS popularity_rating,
+    CASE 
+        WHEN ad.upvotes > 5 
+            THEN 'Highly Engaged'
+        WHEN ad.comment_count > 10 
+            THEN 'Discussion Active'
+        ELSE 'Low Engagement'
+    END AS engagement_level
+FROM 
+    AggregateData ad
+WHERE 
+    ad.upvotes - ad.downvotes > 0
+ORDER BY 
+    net_votes DESC, 
+    ad.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,74 @@
+WITH TagFrequency AS (
+    SELECT
+        unnest(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1 
+    GROUP BY
+        TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM
+        TagFrequency
+    WHERE
+        PostCount >= 10 
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM
+        Posts P
+    JOIN
+        TagFrequency TF ON position(',' || TF.TagName || ',' IN ',' || P.Tags || ',') > 0
+    WHERE
+        P.PostTypeId = 1 
+    GROUP BY
+        P.Id
+    HAVING
+        COUNT(DISTINCT TF.TagName) > 2 
+),
+UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1 
+    LEFT JOIN
+        Votes V ON V.PostId = P.Id AND V.VoteTypeId IN (2, 3) 
+    GROUP BY
+        U.Id
+    HAVING
+        COUNT(DISTINCT P.Id) >= 5 
+)
+SELECT
+    U.DisplayName,
+    UA.QuestionCount,
+    UA.UpvotesReceived,
+    TP.TagName AS TopTag,
+    PP.Title AS PopularPost,
+    PP.CreationDate,
+    PP.Score
+FROM
+    UserActivity UA
+JOIN
+    Users U ON U.Id = UA.UserId
+JOIN
+    TopTags TP ON TP.Rank = 1
+JOIN
+    PopularPosts PP ON PP.Tags @> ARRAY[TP.TagName] 
+ORDER BY
+    UpvotesReceived DESC, QuestionCount DESC;

@@ -1,0 +1,71 @@
+WITH SupplierAggregation AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sa.part_count,
+        sa.total_supply_cost,
+        DENSE_RANK() OVER (ORDER BY sa.total_supply_cost DESC) AS rank
+    FROM 
+        SupplierAggregation sa
+    JOIN 
+        supplier s ON sa.s_suppkey = s.s_suppkey
+),
+OrdersStatus AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') AND 
+        (l.l_returnflag IS NULL OR l.l_returnflag != 'R')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    ts.s_suppkey,
+    ts.s_name,
+    ts.part_count,
+    ts.total_supply_cost,
+    o.o_orderstatus,
+    COALESCE(o.line_count, 0) AS order_line_count,
+    CASE 
+        WHEN ts.total_supply_cost > 10000 THEN 'High Supplier'
+        WHEN ts.total_supply_cost BETWEEN 5000 AND 10000 THEN 'Medium Supplier'
+        ELSE 'Low Supplier'
+    END AS supplier_category
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    OrdersStatus o ON ts.s_suppkey = (SELECT ps.ps_suppkey 
+                                        FROM partsupp ps 
+                                        WHERE ps.ps_partkey = (SELECT p.p_partkey 
+                                                                FROM part p 
+                                                                WHERE p.p_size = (
+                                                                    SELECT MAX(p_size) 
+                                                                    FROM part
+                                                                    WHERE p.retailprice IS NOT NULL)
+                                                                LIMIT 1)
+                                        LIMIT 1)
+WHERE 
+    ts.rank <= 5 OR o.o_orderstatus IS NOT NULL
+ORDER BY 
+    ts.total_supply_cost DESC, ts.s_name;

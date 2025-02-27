@@ -1,0 +1,61 @@
+WITH UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(VoteTypeId = 3), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.PostTypeId
+),
+ClosedPosts AS (
+    SELECT
+        P.Id AS ClosedPostId,
+        PH.CreationDate AS ClosedDate,
+        P.Title,
+        PT.Name AS PostType
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE PHT.Name = 'Post Closed'
+),
+PostComparisons AS (
+    SELECT
+        PS.PostId,
+        PS.Title,
+        PS.UpVotes - PS.DownVotes AS Score,
+        CASE 
+            WHEN PS.CommentCount > 0 THEN 'Has Comments'
+            ELSE 'No Comments'
+        END AS CommentStatus,
+        COALESCE(CP.ClosedDate, 'Not Closed') AS ClosureDate
+    FROM PostStats PS
+    LEFT JOIN ClosedPosts CP ON PS.PostId = CP.ClosedPostId
+)
+SELECT
+    U.DisplayName,
+    U.BadgeCount,
+    U.BadgeNames,
+    PC.Title,
+    PC.Score,
+    PC.CommentStatus,
+    PC.ClosureDate
+FROM UserBadges U
+JOIN PostComparisons PC ON PC.Score > 0
+WHERE U.BadgeCount > 0
+ORDER BY PC.Score DESC, U.BadgeCount DESC
+LIMIT 10;

@@ -1,0 +1,59 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year = 2023
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        at.kind_id,
+        rmh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        RecursiveMovieHierarchy rmh ON ml.movie_id = rmh.movie_id
+)
+SELECT
+    rhs.movie_title,
+    rhs.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    COUNT(DISTINCT kw.keyword) AS unique_keywords,
+    MAX(ci.nr_order) AS max_cast_order,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+FROM
+    RecursiveMovieHierarchy rhs
+LEFT JOIN
+    complete_cast cc ON rhs.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info ci ON cc.subject_id = ci.movie_id AND ci.note IS NULL
+LEFT JOIN
+    movie_keyword mw ON rhs.movie_id = mw.movie_id
+LEFT JOIN
+    keyword kw ON mw.keyword_id = kw.id
+LEFT JOIN
+    aka_name c ON ci.person_id = c.person_id
+WHERE
+    rhs.production_year BETWEEN 2000 AND 2023
+    AND rhs.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+GROUP BY
+    rhs.movie_id, rhs.movie_title, rhs.production_year
+HAVING
+    COUNT(DISTINCT kw.keyword) > 5
+    OR MAX(ci.nr_order) IS NULL
+ORDER BY
+    total_cast DESC,
+    rhs.production_year DESC
+LIMIT 10;

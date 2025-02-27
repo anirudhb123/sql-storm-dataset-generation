@@ -1,0 +1,73 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+actor_appearances AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        SUM(CASE WHEN c.nr_order IS NULL THEN 1 ELSE 0 END) AS null_orders_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        aka_title t ON t.id = c.movie_id
+    GROUP BY 
+        a.person_id
+), 
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+unique_movie_info AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(mi.info, 'Info Not Available') AS movie_info,
+        COALESCE(mk.keywords, 'No Keywords') AS movie_keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id
+    LEFT JOIN 
+        movie_keywords mk ON mk.movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    a.person_id,
+    ra.title AS title,
+    ra.production_year,
+    actor.movie_count,
+    actor.null_orders_count,
+    u.movie_info,
+    u.movie_keywords
+FROM 
+    actor_appearances actor
+JOIN 
+    aka_name a ON a.person_id = actor.person_id
+LEFT JOIN 
+    ranked_titles ra ON ra.rn <= 5  
+LEFT JOIN 
+    unique_movie_info u ON u.movie_id = ra.title_id
+WHERE 
+    actor.movie_count > 0
+ORDER BY 
+    actor.movie_count DESC,
+    ra.production_year ASC NULLS LAST, 
+    a.name,
+    u.movie_keywords;

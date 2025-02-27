@@ -1,0 +1,38 @@
+
+WITH String_Stats AS (
+    SELECT 
+        ca.city AS city_name,
+        LENGTH(ca.city) AS city_length,
+        TRIM(UPPER(ca.city)) AS city_uppercase,
+        SUBSTRING(ca.city, 1, 3) AS city_substring,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.city, LENGTH(ca.city), TRIM(UPPER(ca.city)), SUBSTRING(ca.city, 1, 3)
+),
+Aggregated_Stats AS (
+    SELECT 
+        AVG(city_length) AS avg_city_length,
+        MAX(city_length) AS max_city_length,
+        MIN(city_length) AS min_city_length,
+        COUNT(DISTINCT city_uppercase) AS unique_uppercase_cities,
+        COUNT(DISTINCT city_substring) AS unique_city_substrings
+    FROM 
+        String_Stats
+)
+SELECT 
+    a.avg_city_length,
+    a.max_city_length,
+    a.min_city_length,
+    a.unique_uppercase_cities,
+    a.unique_city_substrings,
+    s.city_name
+FROM 
+    Aggregated_Stats a
+JOIN 
+    String_Stats s ON s.city_length = a.avg_city_length
+ORDER BY 
+    a.avg_city_length DESC;

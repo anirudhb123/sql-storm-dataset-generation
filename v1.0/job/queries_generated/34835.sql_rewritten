@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.season_nr IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    p.name AS actor_name,
+    ARRAY_AGG(DISTINCT kh.keyword) AS keywords,
+    mh.level,
+    mh.path,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    COALESCE(NULLIF(MIN(m.production_year), 0), 'Unknown') AS earliest_movie
+FROM 
+    aka_name p
+INNER JOIN 
+    cast_info ci ON ci.person_id = p.person_id
+INNER JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kh ON mk.keyword_id = kh.id
+WHERE 
+    p.name ILIKE '%Doe%'  
+    AND mh.level < 3  
+GROUP BY 
+    p.name, mh.level, mh.path
+ORDER BY 
+    total_movies DESC, p.name;

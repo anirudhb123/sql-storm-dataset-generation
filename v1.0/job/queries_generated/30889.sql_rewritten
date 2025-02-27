@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           mt.kind_id,
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT et.id,
+           et.title,
+           et.production_year,
+           et.kind_id,
+           mh.level + 1
+    FROM aka_title et
+    INNER JOIN movie_hierarchy mh ON et.episode_of_id = mh.movie_id
+),
+movie_stats AS (
+    SELECT m.id AS movie_id,
+           COUNT(DISTINCT ci.person_id) AS total_cast,
+           AVG(CASE 
+                   WHEN ci.nr_order IS NOT NULL THEN ci.nr_order 
+                   ELSE 0 
+               END) AS avg_order,
+           STRING_AGG(DISTINCT ci.note, ', ') AS notes
+    FROM movie_companies mc
+    JOIN complete_cast cc ON mc.movie_id = cc.movie_id
+    JOIN cast_info ci ON cc.subject_id = ci.id
+    GROUP BY m.id
+),
+ranked_movies AS (
+    SELECT mh.movie_id,
+           mh.title,
+           mh.production_year,
+           ms.total_cast,
+           ms.avg_order,
+           RANK() OVER (ORDER BY ms.total_cast DESC, ms.avg_order ASC) AS rank
+    FROM movie_hierarchy mh
+    LEFT JOIN movie_stats ms ON mh.movie_id = ms.movie_id
+)
+SELECT rm.rank,
+       rm.title,
+       rm.production_year,
+       rm.total_cast,
+       rm.avg_order,
+       CASE 
+           WHEN rm.total_cast IS NULL THEN 'No Cast Available'
+           ELSE 'Cast Available'
+       END AS cast_availability,
+       COALESCE(k.keyword, 'No Keywords') AS keywords
+FROM ranked_movies rm
+LEFT JOIN (
+    SELECT mk.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keyword
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+) k ON rm.movie_id = k.movie_id
+WHERE rm.rank <= 10  
+ORDER BY rm.rank;

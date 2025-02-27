@@ -1,0 +1,29 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT r.r_name AS region, 
+       COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers, 
+       SUM(sp.ps_availqty) AS total_available_quantity, 
+       AVG(co.order_total) AS avg_order_total, 
+       COUNT(co.o_orderkey) AS total_orders
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplierparts sp ON sp.s_nationkey = n.n_nationkey
+JOIN customerorders co ON co.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c
+    WHERE c.c_nationkey = n.n_nationkey
+)
+GROUP BY r.r_name
+ORDER BY region;

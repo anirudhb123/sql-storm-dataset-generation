@@ -1,0 +1,43 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS depth
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND oh.depth < 5
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT ch.o_orderkey, ch.o_custkey, co.c_name AS customer_name, co.total_spent, 
+       rc.s_name AS supplier_name, su.total_supply_cost,
+       CASE 
+           WHEN co.total_spent > 5000 THEN 'High Value'
+           WHEN co.total_spent BETWEEN 1000 AND 5000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_segment
+FROM OrderHierarchy ch
+JOIN CustomerOrders co ON ch.o_custkey = co.c_custkey
+LEFT JOIN lineitem li ON li.l_orderkey = ch.o_orderkey
+LEFT JOIN SupplierCost su ON li.l_partkey = su.ps_partkey
+LEFT JOIN RankedSuppliers rc ON su.ps_suppkey = rc.s_suppkey
+WHERE ch.depth <= 3
+AND (co.order_count IS NULL OR co.order_count > 5)
+ORDER BY co.total_spent DESC, rc.rank ASC
+LIMIT 100;

@@ -1,0 +1,71 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_mfgr,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey AND o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey 
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > '2023-01-01' AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT co.c_custkey) AS total_customers,
+    SUM(COALESCE(rp.p_retailprice, 0)) AS total_retail_price,
+    AVG(sa.total_supply_cost) AS avg_supplier_cost,
+    COUNT(DISTINCT fi.l_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT p.p_name ORDER BY price_rank) AS notable_parts
+FROM 
+    nation n
+LEFT JOIN 
+    customer co ON n.n_nationkey = co.c_nationkey
+LEFT JOIN 
+    RankedParts rp ON rp.price_rank <= 5
+LEFT JOIN 
+    SupplierAggregates sa ON sa.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 100)
+LEFT JOIN 
+    FilteredLineItems fi ON fi.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 5 AND SUM(COALESCE(rp.p_retailprice, 0)) IS NOT NULL
+ORDER BY 
+    total_customers DESC, total_orders ASC;

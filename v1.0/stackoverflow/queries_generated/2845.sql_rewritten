@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        COALESCE(CAST(ph.Comment AS VARCHAR), 'No comments') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteCounts pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 24 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.UpVotes,
+    up.DownVotes,
+    up.LastEditComment,
+    CASE 
+        WHEN up.LastEditComment IS NOT NULL THEN 'Edited'
+        ELSE 'Not Edited'
+    END AS EditStatus
+FROM 
+    UserReputation ur
+JOIN 
+    RecentPosts up ON ur.UserId = up.OwnerUserId
+WHERE 
+    ur.Reputation > (SELECT AVG(Reputation) FROM UserReputation)
+ORDER BY 
+    ur.Reputation DESC, up.CreationDate DESC;

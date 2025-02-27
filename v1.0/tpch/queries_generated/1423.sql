@@ -1,0 +1,59 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+UnderperformingProducts AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.price_rank,
+        sv.total_available_qty,
+        sv.total_supply_value
+    FROM RankedParts rp
+    JOIN SupplierAvailability sv ON rp.p_partkey = sv.ps_partkey
+    WHERE rp.price_rank > 5 AND sv.total_available_qty < 100
+)
+SELECT 
+    co.c_custkey,
+    co.order_count,
+    co.total_spent,
+    co.avg_order_value,
+    u.p_partkey,
+    u.p_name,
+    u.price_rank,
+    u.total_available_qty,
+    u.total_supply_value,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        ELSE CONCAT('Spent: $', CAST(co.total_spent AS CHAR), ' in ', CAST(co.order_count AS CHAR), ' Orders')
+    END AS customer_order_summary
+FROM CustomerOrderStats co
+FULL OUTER JOIN UnderperformingProducts u ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') LIMIT 1)
+WHERE (u.total_available_qty IS NOT NULL OR co.order_count IS NOT NULL)
+ORDER BY co.total_spent DESC NULLS LAST, u.price_rank ASC;

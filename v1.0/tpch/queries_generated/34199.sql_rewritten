@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+RankedOrders AS (
+    SELECT os.*, RANK() OVER (PARTITION BY os.o_orderstatus ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM OrderStats os
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    R.o_orderkey,
+    R.o_orderstatus,
+    R.total_revenue,
+    COALESCE(S.s_name, 'No Supplier') AS supplier_name,
+    PH.total_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY R.o_orderstatus ORDER BY R.total_revenue DESC) AS row_num
+FROM RankedOrders R
+LEFT JOIN SupplierHierarchy S ON S.s_suppkey = R.o_orderkey 
+LEFT JOIN PartSuppliers PH ON PH.ps_partkey = R.o_orderkey 
+WHERE R.total_revenue IS NOT NULL
+AND (R.o_orderstatus = 'O' OR R.o_orderstatus = 'F')
+ORDER BY R.total_revenue DESC, S.s_name
+LIMIT 50;

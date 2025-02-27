@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TopParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 200
+)
+SELECT 
+    s.s_name, 
+    s.s_acctbal, 
+    r.r_name AS region_name, 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    c.c_name AS customer_name, 
+    CASE 
+        WHEN ts.total_available IS NOT NULL THEN 'Available'
+        ELSE 'Out of Stock'
+    END AS stock_status,
+    hv.total_revenue
+FROM 
+    RankedSuppliers s
+JOIN 
+    region r ON s.nation_name = r.r_name
+JOIN 
+    HighValueOrders hv ON hv.o_orderkey = (
+        SELECT o2.o_orderkey 
+        FROM orders o2 
+        WHERE o2.o_orderdate <= CURRENT_DATE AND o2.o_orderkey = hv.o_orderkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    TopParts ts ON ts.ps_partkey = s.s_suppkey
+WHERE 
+    s.rank_nation <= 5 
+ORDER BY 
+    hv.total_revenue DESC, 
+    s.s_name;

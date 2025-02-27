@@ -1,0 +1,38 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           0 AS level,
+           m.kind_id
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, 
+           CONCAT(p.title, ' -> ', m.title) AS title, 
+           m.production_year, 
+           mh.level + 1,
+           m.kind_id
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = m.id
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT 
+    h.title AS complete_title,
+    h.production_year,
+    (SELECT COUNT(DISTINCT ca.person_id) 
+     FROM cast_info ca 
+     JOIN aka_name an ON ca.person_id = an.person_id 
+     WHERE ca.movie_id = h.movie_id) AS actor_count,
+    (SELECT STRING_AGG(DISTINCT kw.keyword, ', ') 
+     FROM movie_keyword mk
+     JOIN keyword kw ON mk.keyword_id = kw.id
+     WHERE mk.movie_id = h.movie_id) AS keywords,
+    ROW_NUMBER() OVER(PARTITION BY h.production_year ORDER BY h.production_year DESC) AS row_num
+FROM MovieHierarchy h
+WHERE h.level = 0
+  AND h.production_year IS NOT NULL
+  AND h.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'video'))
+ORDER BY h.production_year DESC, actor_count DESC
+LIMIT 10;

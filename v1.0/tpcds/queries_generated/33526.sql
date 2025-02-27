@@ -1,0 +1,47 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 1 AS level 
+    FROM customer 
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_current_cdemo_sk = c.c_current_cdemo_sk 
+    WHERE ch.level < 5
+), customer_stats AS (
+    SELECT 
+        cac.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM customer cac
+    LEFT JOIN customer_demographics cd ON cac.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON cac.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY cac.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+), top_customers AS (
+    SELECT 
+        c.*, 
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY total_profit DESC) AS rank
+    FROM customer_stats c
+    JOIN customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+    WHERE total_profit > (SELECT AVG(total_profit) FROM customer_stats)
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cd.cd_gender,
+    c.order_count,
+    cs.level,
+    COALESCE(c.total_profit, 0) AS net_profit,
+    CASE 
+        WHEN cd.cd_marital_status = 'M' THEN 'Married'
+        WHEN cd.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Other'
+    END AS marital_status
+FROM top_customers c
+JOIN customer_hierarchy cs ON c.c_customer_sk = cs.c_customer_sk
+JOIN customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+WHERE c.rank <= 10
+ORDER BY cd.cd_gender, c.total_profit DESC;

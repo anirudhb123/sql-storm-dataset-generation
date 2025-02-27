@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM
+        title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        lm.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mh.depth + 1
+    FROM
+        movie_link lm
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = lm.movie_id
+    JOIN
+        title mt ON mt.id = lm.linked_movie_id
+    WHERE
+        mh.depth < 3 
+)
+
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    MAX(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS has_role,
+    SUM(COALESCE(mvi.info_type_id, 0)) AS info_count,
+    AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN LENGTH(mi.info) ELSE NULL END) AS avg_info_length,
+    MAX(CASE WHEN m.keyword IS NOT NULL THEN 1 ELSE 0 END) AS has_keywords
+FROM
+    MovieHierarchy mh
+JOIN
+    aka_title at ON at.movie_id = mh.movie_id
+LEFT JOIN
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN
+    keyword m ON mk.keyword_id = m.id
+WHERE
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY
+    mh.movie_title, mh.production_year
+ORDER BY
+    total_cast DESC,
+    mh.production_year DESC
+LIMIT 10;

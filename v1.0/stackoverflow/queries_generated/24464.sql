@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.Score,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankByScore,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNumByAuthor
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id AND C.CreationDate >= NOW() - INTERVAL '1 year'
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id
+),
+FilteredPosts AS (
+    SELECT 
+        RP.PostId, 
+        RP.Title,
+        RP.Score,
+        RP.OwnerUserId,
+        RPT.Name AS PostType,
+        COALESCE(U.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        COALESCE(SUM(PH.Comment), 'No History') AS PostHistoryComment
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = RP.PostId AND PH.CreationDate >= NOW() - INTERVAL '6 months'
+    LEFT JOIN 
+        Users U ON U.Id = RP.OwnerUserId
+    LEFT JOIN 
+        PostTypes RPT ON RPT.Id = RP.PostId
+    WHERE 
+        RP.RankByScore <= 5
+    GROUP BY 
+        RP.PostId, RP.Title, RP.Score, RP.OwnerUserId, U.DisplayName, RPT.Name
+),
+FinalReport AS (
+    SELECT 
+        F.PostId,
+        F.Title,
+        F.Score,
+        F.OwnerDisplayName,
+        F.PostType,
+        R.TotalComments,
+        R.TotalBadges,
+        R.TotalBounty
+    FROM 
+        FilteredPosts F
+    LEFT JOIN 
+        RecentUserActivity R ON R.UserId = F.OwnerUserId
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.Score,
+    FR.OwnerDisplayName,
+    FR.PostType,
+    COALESCE(FR.TotalComments, 0) AS TotalComments,
+    COALESCE(FR.TotalBadges, 0) AS TotalBadges,
+    COALESCE(FR.TotalBounty, 0) AS TotalBounty,
+    CASE 
+        WHEN FR.Score IS NULL THEN 'No Score'
+        WHEN FR.Score = 0 THEN 'Average Post'
+        WHEN FR.Score > 0 AND FR.Score <= 10 THEN 'Good Post'
+        ELSE 'Excellent Post'
+    END AS PostQuality
+FROM 
+    FinalReport FR
+ORDER BY 
+    FR.Score DESC, FR.TotalComments DESC;
+

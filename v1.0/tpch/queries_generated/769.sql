@@ -1,0 +1,40 @@
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, 
+           SUM(ps.ps_availqty) AS total_available_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_orders AS (
+    SELECT co.c_custkey, co.c_name, co.order_count, co.total_spent,
+           RANK() OVER (ORDER BY co.total_spent DESC) AS rank_order
+    FROM customer_orders co
+)
+SELECT s.s_name, s.nation_name, ss.total_available_qty, ss.avg_supply_cost,
+       ro.c_name, ro.order_count, ro.total_spent
+FROM supplier_summary ss
+FULL OUTER JOIN ranked_orders ro ON ss.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey IN (
+            SELECT o.o_orderkey 
+            FROM orders o 
+            WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+        )
+    )
+    LIMIT 1
+)
+WHERE ss.total_available_qty IS NOT NULL OR ro.order_count IS NULL
+ORDER BY ss.avg_supply_cost DESC NULLS LAST, ro.total_spent DESC;

@@ -1,0 +1,63 @@
+
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+High_Value_Customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_net_paid,
+        cs.order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs.sales_rank ORDER BY cs.total_net_paid DESC) AS value_rank
+    FROM 
+        Customer_Sales cs
+    JOIN customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_net_paid > (SELECT AVG(total_net_paid) FROM Customer_Sales)
+),
+Returned_Items AS (
+    SELECT 
+        wr.wr_returned_date_sk,
+        wr.wr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(wr.wr_return_amt) AS total_returned_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returned_date_sk, wr.wr_item_sk
+),
+Final_Summary AS (
+    SELECT 
+        hv.c_customer_id,
+        hv.total_net_paid,
+        hv.order_count,
+        COALESCE(ri.return_count, 0) AS return_count,
+        COALESCE(ri.total_returned_amount, 0.00) AS total_returned_amount
+    FROM 
+        High_Value_Customers hv
+    LEFT JOIN Returned_Items ri ON hv.c_customer_id = ri.wr_returned_date_sk
+    WHERE 
+        hv.value_rank <= 10
+)
+SELECT 
+    f.c_customer_id,
+    f.total_net_paid,
+    f.order_count,
+    f.return_count,
+    f.total_returned_amount,
+    CASE 
+        WHEN f.return_count > 0 THEN 'Returned'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    Final_Summary f
+ORDER BY 
+    f.total_net_paid DESC;

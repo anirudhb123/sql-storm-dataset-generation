@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS production_year_rank
+    FROM
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.production_year_rank <= 5
+),
+MovieDetails AS (
+    SELECT
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        COALESCE(mc.company_name, 'N/A') AS production_company,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_companies mc ON fm.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    GROUP BY
+        fm.movie_id, fm.title, fm.production_year, mc.company_name
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.production_company,
+    md.keyword_count,
+    CASE 
+        WHEN md.keyword_count > 5 THEN 'Rich in Keywords'
+        WHEN md.keyword_count BETWEEN 3 AND 5 THEN 'Moderately Popular'
+        WHEN md.keyword_count = 0 THEN 'No Keywords Available'
+        ELSE 'Under the Radar'
+    END AS popularity_category
+FROM
+    MovieDetails md
+WHERE
+    md.production_year = (
+        SELECT 
+            MAX(production_year) 
+        FROM 
+            FilteredMovies
+    )
+ORDER BY
+    md.keyword_count DESC NULLS LAST;
+
+This SQL query incorporates various advanced constructs such as Common Table Expressions (CTEs), outer joins, correlated subqueries, window functions, and CASE statements with NULL logic. It retrieves and analyzes movie data based on production year, cast count, and keywords while handling cases of variability and ambiguity in results.

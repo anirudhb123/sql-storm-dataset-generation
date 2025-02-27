@@ -1,0 +1,59 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+returns_summary AS (
+    SELECT 
+        sr_customer_sk AS customer_sk,
+        SUM(sr_return_amt) AS total_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_customer_sk
+)
+SELECT 
+    rc.c_first_name || ' ' || rc.c_last_name AS customer_name,
+    rc.cd_gender,
+    ss.total_spent,
+    ss.total_orders,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    (ss.total_spent - COALESCE(rs.total_returns, 0)) AS net_spent,
+    CASE 
+        WHEN ss.total_orders > 10 THEN 'Frequent Buyer'
+        WHEN ss.total_orders > 0 THEN 'Occasional Buyer'
+        ELSE 'No Purchase'
+    END AS buyer_category
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    sales_summary ss ON rc.c_customer_sk = ss.customer_sk
+LEFT JOIN 
+    returns_summary rs ON rc.c_customer_sk = rs.customer_sk
+WHERE 
+    rc.rn = 1
+ORDER BY 
+    net_spent DESC
+LIMIT 10;

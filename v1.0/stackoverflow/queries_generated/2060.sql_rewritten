@@ -1,0 +1,48 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(u.Views, 0) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        um.UserId,
+        um.DisplayName,
+        um.Reputation,
+        um.UpVotes - um.DownVotes AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY um.Reputation DESC, NetVotes DESC) AS Rank
+    FROM 
+        UserMetrics um
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.TotalPosts,
+    COALESCE(b.Name, 'No Badge') AS BadgeName,
+    (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.UserId) AS TotalComments,
+    COALESCE(
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         JOIN Posts p ON t.ExcerptPostId = p.Id 
+         WHERE p.OwnerUserId = u.UserId),
+        'No Tags') AS UserTags
+FROM 
+    TopUsers u
+LEFT JOIN 
+    Badges b ON u.UserId = b.UserId AND b.Class = 1  
+WHERE 
+    u.Rank <= 10
+ORDER BY 
+    u.Rank;

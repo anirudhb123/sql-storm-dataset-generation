@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+), FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CreationDate,
+        OwnerDisplayName,
+        CommentCount,
+        Upvotes,
+        Downvotes,
+        Rank
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 3 -- Top 3 posts per user
+), PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    INNER JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS t(TagName)
+    GROUP BY 
+        p.Id
+), FinalResults AS (
+    SELECT 
+        f.PostId,
+        f.Title,
+        f.Score,
+        f.ViewCount,
+        f.CreationDate,
+        f.OwnerDisplayName,
+        f.CommentCount,
+        f.Upvotes,
+        f.Downvotes,
+        COALESCE(t.Tags, 'No Tags') AS Tags
+    FROM 
+        FilteredPosts f
+    LEFT JOIN 
+        PostTags t ON f.PostId = t.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Upvotes > Downvotes THEN 'Positive engagement'
+        WHEN Downvotes > Upvotes THEN 'Negative engagement'
+        ELSE 'Neutral engagement'
+    END AS EngagementType
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, ViewCount DESC;

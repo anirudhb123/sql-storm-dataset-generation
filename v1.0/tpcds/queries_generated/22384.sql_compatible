@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk >= 20210101 AND 
+        (i.i_current_price IS NOT NULL OR i.i_wholesale_cost IS NOT NULL)
+    GROUP BY 
+        ws.ws_item_sk
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        r.total_net_profit,
+        COALESCE(t.total_return_quantity, 0) AS total_return_quantity,
+        t.return_count
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        TotalReturns t ON r.ws_item_sk = t.sr_item_sk
+)
+SELECT 
+    sa.*, 
+    CASE 
+        WHEN total_return_quantity > total_quantity THEN 'High Return Rate' 
+        ELSE 'Normal Return Rate' 
+    END AS return_rate_status,
+    CONCAT('Item SK: ', CAST(ws_item_sk AS VARCHAR), 
+           ' | Sold: ', CAST(total_quantity AS VARCHAR), 
+           ' | Profit: $', FORMAT(total_net_profit, 2)) AS sales_summary
+FROM 
+    SalesAndReturns sa
+WHERE 
+    rank = 1 AND 
+    total_net_profit > 1000 AND 
+    EXISTS (
+        SELECT 1 
+        FROM promotion p 
+        WHERE p.p_item_sk = sa.ws_item_sk AND 
+              p.p_discount_active = 'Y'
+    )
+ORDER BY 
+    total_net_profit DESC, 
+    total_return_quantity ASC
+LIMIT 10;

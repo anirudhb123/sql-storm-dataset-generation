@@ -1,0 +1,92 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND 
+        o.o_orderdate < DATE '2024-01-01'
+), SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey
+    FROM 
+        CustomerOrders coc
+    WHERE 
+        coc.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+), OuterJoinSample AS (
+    SELECT 
+        p.p_partkey,
+        COALESCE(s.s_name, 'Unknown') AS supplier_name,
+        s.s_acctbal
+    FROM 
+        part p
+    LEFT JOIN 
+        supplier s ON p.p_partkey = (
+            SELECT ps.ps_partkey 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey
+            ORDER BY ps.ps_availqty DESC 
+            LIMIT 1
+        )
+), OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        lo.l_partkey,
+        lo.l_quantity,
+        lo.l_discount,
+        lo.l_returnflag,
+        RANK() OVER (PARTITION BY lo.l_orderkey ORDER BY lo.l_discount DESC) AS discount_rank
+    FROM 
+        lineitem lo
+)
+SELECT 
+    o.order_date, 
+    oc.custkey AS customer_key,
+    COALESCE(sir.supplier_name, 'No Supplier') AS supplier_name,
+    AVG(real_price) AS avg_price,
+    COUNT(DISTINCT od.l_orderkey) AS total_orders
+FROM 
+    RankedOrders o
+JOIN 
+    HighValueCustomers hv ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = hv.c_custkey)
+JOIN 
+    OuterJoinSample sir ON sir.p_partkey = (
+        SELECT l.l_partkey
+        FROM lineitem l
+        WHERE l.l_orderkey = o.o_orderkey
+        LIMIT 1
+    )
+JOIN 
+    OrderDetails od ON od.l_orderkey = o.o_orderkey
+WHERE 
+    o.rank_order <= 10 AND 
+    o.o_totalprice IS NOT NULL
+GROUP BY 
+    o.o_orderdate, oc.custkey, sir.supplier_name
+HAVING 
+    AVG(real_price) > 50
+ORDER BY 
+    o.o_orderdate DESC NULLS LAST;

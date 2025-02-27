@@ -1,0 +1,37 @@
+-- Performance Benchmarking Query
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Posts p2 ON p.Id = p2.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount, u.DisplayName
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY Score DESC) AS ScoreRank,
+    RANK() OVER (ORDER BY ViewCount DESC) AS ViewRank
+FROM 
+    PostMetrics
+ORDER BY 
+    ViewCount DESC, Score DESC;

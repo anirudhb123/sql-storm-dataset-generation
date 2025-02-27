@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score, p.ViewCount
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    RANK() OVER (ORDER BY up.Score DESC) AS GlobalRank,
+    NULLIF(up.ViewCount, 0) * NULLIF(up.Score, 0) AS EngagementScore
+FROM 
+    RankedPosts up
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    up.rn = 1 
+    AND (up.Score > 10 OR up.ViewCount > 50) 
+    AND (u.Reputation > 1000) 
+ORDER BY 
+    GlobalRank,
+    up.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

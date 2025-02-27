@@ -1,0 +1,82 @@
+WITH RECURSIVE order_totals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders AS o
+    JOIN 
+        lineitem AS l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+    GROUP BY 
+        o.o_orderkey
+), ranked_orders AS (
+    SELECT 
+        ot.o_orderkey,
+        ot.total_price,
+        ROW_NUMBER() OVER (ORDER BY ot.total_price DESC) AS rank
+    FROM 
+        order_totals AS ot
+), high_value_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.total_price,
+        C.c_name,
+        R.r_name AS region_name
+    FROM 
+        ranked_orders AS ro
+    JOIN 
+        customer AS C ON C.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+    JOIN 
+        nation AS N ON C.c_nationkey = N.n_nationkey
+    JOIN 
+        region AS R ON N.n_regionkey = R.r_regionkey
+    WHERE 
+        ro.rank <= 10
+), supplier_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp AS ps
+    GROUP BY 
+        ps.ps_partkey
+), part_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(ss.total_available, 0) AS total_available,
+        COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        STRING_AGG(DISTINCT CONCAT(CAST(c.c_custkey AS VARCHAR), ' - ', c.c_name), '; ') AS customer_list
+    FROM 
+        part AS p
+    LEFT JOIN 
+        lineitem AS l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        high_value_orders AS hvo ON l.l_orderkey = hvo.o_orderkey
+    LEFT JOIN 
+        supplier_stats AS ss ON p.p_partkey = ss.ps_partkey
+    LEFT JOIN 
+        orders AS o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        customer AS c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.p_retailprice,
+    ps.total_available,
+    ps.avg_supply_cost,
+    ps.order_count,
+    ps.customer_list
+FROM 
+    part_summary AS ps
+WHERE 
+    (ps.total_available > 0 OR ps.avg_supply_cost IS NULL)
+ORDER BY 
+    ps.order_count DESC, ps.p_retailprice DESC;

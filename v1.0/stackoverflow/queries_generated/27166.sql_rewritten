@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Author,
+        ViewCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        PostRank
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5
+),
+AverageVotes AS (
+    SELECT 
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(UpVotes) AS AvgUpVotes,
+        AVG(DownVotes) AS AvgDownVotes
+    FROM 
+        TopPosts p
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Author,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    av.AvgUpVotes,
+    av.AvgDownVotes
+FROM 
+    TopPosts tp
+CROSS JOIN 
+    AverageVotes av
+ORDER BY 
+    tp.ViewCount DESC;

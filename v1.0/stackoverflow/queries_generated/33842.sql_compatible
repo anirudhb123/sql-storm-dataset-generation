@@ -1,0 +1,55 @@
+
+WITH RECURSIVE RecursiveUserHierarchy AS (
+    SELECT U.Id, U.Reputation, U.DisplayName, U.Location, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000 
+
+    UNION ALL
+
+    SELECT U.Id, U.Reputation, U.DisplayName, U.Location, Level + 1
+    FROM Users U
+    JOIN Votes V ON U.Id = V.UserId
+    JOIN RecursiveUserHierarchy R ON V.PostId IN (
+        SELECT P.Id
+        FROM Posts P
+        WHERE P.OwnerUserId = R.Id
+    )
+    WHERE Level < 5  
+),
+FilteredPosts AS (
+    SELECT P.Id, P.Title, P.ViewCount, P.Score, U.DisplayName AS OwnerDisplayName
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= DATEADD(month, -1, '2024-10-01') 
+      AND P.AnswerCount > 0 
+),
+RankedPosts AS (
+    SELECT FP.*, 
+           ROW_NUMBER() OVER (PARTITION BY FP.OwnerDisplayName ORDER BY FP.ViewCount DESC) AS RankByViews,
+           SUM(FP.Score) OVER (PARTITION BY FP.OwnerDisplayName) AS TotalScore
+    FROM FilteredPosts FP
+),
+MaxRankedScores AS (
+    SELECT OwnerDisplayName, MAX(TotalScore) AS MaxScore
+    FROM RankedPosts
+    WHERE RankByViews <= 3 
+    GROUP BY OwnerDisplayName
+),
+CloseReasons AS (
+    SELECT DISTINCT PH.PostId, C.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON CAST(PH.Comment AS INT) = C.Id
+    WHERE PH.PostHistoryTypeId = 10 
+)
+SELECT R.OwnerDisplayName,
+       COUNT(DISTINCT R.Id) AS PostCount,
+       NCO.CloseReason,
+       U.Reputation,
+       COALESCE(MR.MaxScore, 0) AS MaxScore
+FROM RankedPosts R
+LEFT JOIN CloseReasons NCO ON R.Id = NCO.PostId
+LEFT JOIN RecursiveUserHierarchy U ON R.OwnerDisplayName = U.DisplayName
+LEFT JOIN MaxRankedScores MR ON R.OwnerDisplayName = MR.OwnerDisplayName
+WHERE R.RankByViews <= 3 
+GROUP BY R.OwnerDisplayName, NCO.CloseReason, U.Reputation, MR.MaxScore
+ORDER BY PostCount DESC, MaxScore DESC;

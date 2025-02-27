@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 MONTH'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 10000
+),
+LineItemAggregation AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FinalReport AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        to.o_totalprice,
+        to.c_name,
+        la.revenue,
+        COUNT(sd.ps_partkey) AS supplier_count
+    FROM 
+        TopOrders to
+    LEFT JOIN 
+        LineItemAggregation la ON to.o_orderkey = la.l_orderkey
+    LEFT JOIN 
+        SupplierDetails sd ON sd.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > 10000))
+    GROUP BY 
+        to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name, la.revenue
+)
+SELECT 
+    fr.o_orderkey,
+    fr.o_orderdate,
+    fr.o_totalprice,
+    fr.c_name,
+    fr.revenue,
+    fr.supplier_count
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.o_orderdate DESC, fr.o_totalprice DESC;

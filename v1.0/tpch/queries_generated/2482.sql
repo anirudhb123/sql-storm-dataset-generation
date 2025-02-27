@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'Discounted'
+            ELSE 'Standard'
+        END AS price_category
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+),
+TopSuppliers AS (
+    SELECT 
+        rs.ps_partkey,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank = 1
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand, 
+    COALESCE(c.order_count, 0) AS total_orders,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    SUM(d.l_extendedprice * (1 - d.l_discount)) AS net_revenue,
+    COUNT(DISTINCT ts.s_suppkey) AS distinct_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    DetailedLineItems d ON p.p_partkey = d.l_partkey
+LEFT JOIN 
+    TopSuppliers ts ON p.p_partkey = ts.ps_partkey
+LEFT JOIN 
+    CustomerOrders c ON p.p_partkey = d.l_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    SUM(d.l_extendedprice * (1 - d.l_discount)) > 10000
+ORDER BY 
+    net_revenue DESC;

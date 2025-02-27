@@ -1,0 +1,50 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_profit
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id
+),
+high_value_customers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        cs.avg_profit,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        customer_sales AS cs
+    JOIN 
+        customer AS c ON cs.c_customer_id = c.c_customer_id
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cs.total_sales > 1000
+)
+SELECT 
+    hvc.customer_id,
+    hvc.total_sales,
+    hvc.total_orders,
+    hvc.avg_profit,
+    cd.cd_gender,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    high_value_customers AS hvc
+JOIN 
+    income_band AS ib ON hvc.hd_income_band_sk = ib.ib_income_band_sk
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 100;

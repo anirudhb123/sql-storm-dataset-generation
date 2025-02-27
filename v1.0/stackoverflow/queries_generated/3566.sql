@@ -1,0 +1,72 @@
+WITH QuestionStats AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title AS QuestionTitle,
+        P.CreationDate AS QuestionCreationDate,
+        U.DisplayName AS UserDisplayName,
+        U.Reputation AS UserReputation,
+        COUNT(A.Id) AS AnswerCount,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes,
+        MAX(P.LastActivityDate) AS LastActivityDate,
+        DENSE_RANK() OVER (PARTITION BY P.Id ORDER BY P.CreationDate) AS CreationRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id AND V.VoteTypeId IN (2, 3)
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, U.Reputation
+),
+ClosedQuestions AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        JSON_AGG(PH.Comment) AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+AnswerStats AS (
+    SELECT 
+        P.Id AS AnswerId,
+        P.ParentId AS QuestionId,
+        P.CreationDate AS AnswerCreationDate,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS IsAccepted
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 2
+)
+SELECT 
+    QS.QuestionId,
+    QS.QuestionTitle,
+    QS.QuestionCreationDate,
+    QS.UserDisplayName,
+    QS.UserReputation,
+    QS.AnswerCount,
+    COALESCE(CQ.LastClosedDate, 'Not Closed') AS LastClosedDate,
+    COALESCE(CQ.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    AS.AnswerId,
+    AS.AnswerCreationDate,
+    AS.IsAccepted
+FROM 
+    QuestionStats QS
+LEFT JOIN 
+    ClosedQuestions CQ ON QS.QuestionId = CQ.PostId
+LEFT JOIN 
+    AnswerStats AS ON QS.QuestionId = AS.QuestionId
+ORDER BY 
+    QS.QuestionCreationDate DESC, 
+    QS.TotalUpVotes - QS.TotalDownVotes DESC;

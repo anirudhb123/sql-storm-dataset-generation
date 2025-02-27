@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) as rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 3
+        )
+),
+FilteredSales AS (
+    SELECT 
+        rs.web_site_sk,
+        SUM(rs.ws_net_profit) AS total_net_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 10
+    GROUP BY 
+        rs.web_site_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd.cd_dep_count) AS max_dependents
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        f.web_site_sk,
+        f.total_net_profit,
+        c.unique_customers,
+        c.avg_purchase_estimate,
+        c.max_dependents,
+        COALESCE(f.total_net_profit / NULLIF(c.unique_customers, 0), 0) AS profit_per_customer
+    FROM 
+        FilteredSales f
+    LEFT JOIN 
+        CustomerStats c ON f.web_site_sk = c.c_customer_sk
+)
+SELECT
+    fr.web_site_sk,
+    fr.total_net_profit,
+    fr.unique_customers,
+    fr.avg_purchase_estimate,
+    fr.max_dependents,
+    fr.profit_per_customer,
+    CASE 
+        WHEN fr.profit_per_customer > 100 THEN 'High Value'
+        WHEN fr.profit_per_customer IS NULL THEN 'No Customers'
+        ELSE 'Moderate Value'
+    END AS customer_value_category
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_net_profit > (SELECT AVG(total_net_profit) FROM FilteredSales)
+ORDER BY 
+    fr.total_net_profit DESC
+FETCH FIRST 5 ROWS ONLY;

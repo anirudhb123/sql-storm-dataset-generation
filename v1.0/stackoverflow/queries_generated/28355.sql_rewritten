@@ -1,0 +1,72 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        STRING_AGG(T.TagName, ', ') AS TagList
+    FROM 
+        Posts P
+    JOIN 
+        LATERAL unnest(string_to_array(P.Tags, '>')) AS TagName ON true
+    JOIN 
+        Tags T ON T.TagName = TagName
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+    ORDER BY 
+        P.Score DESC
+    LIMIT 50
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS RevisionCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureEdits,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEdits
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RU.DisplayName AS User,
+    RU.Reputation,
+    RU.BadgeCount,
+    RU.TotalBounties,
+    TP.Title AS TopPostTitle,
+    TP.CreationDate AS PostCreationDate,
+    TP.Score AS PostScore,
+    TP.TagList,
+    PHS.RevisionCount,
+    PHS.ClosureEdits,
+    PHS.SuggestedEdits
+FROM 
+    RankedUsers RU
+JOIN 
+    TopPosts TP ON RU.UserId = TP.PostId 
+JOIN 
+    PostHistoryStats PHS ON TP.PostId = PHS.PostId
+ORDER BY 
+    RU.Reputation DESC, TP.Score DESC;

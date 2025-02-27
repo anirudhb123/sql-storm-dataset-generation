@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        RK.Rank,
+        COALESCE(mci.company_count, 0) AS company_count,
+        RK.movie_id
+    FROM (
+        SELECT
+            t.title,
+            t.production_year,
+            ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT cast.movie_id) DESC) AS Rank,
+            t.id AS movie_id
+        FROM
+            aka_title t
+        LEFT JOIN cast_info cast ON t.id = cast.movie_id
+        GROUP BY 
+            t.title, t.production_year, t.id
+    ) AS RK
+
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT company_id) AS company_count
+        FROM 
+            movie_companies
+        GROUP BY 
+            movie_id
+    ) AS mci ON RK.movie_id = mci.movie_id
+    WHERE 
+        RK.Rank <= 5  
+),
+
+ActorDetails AS (
+    SELECT
+        a.name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_order
+    FROM
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    WHERE
+        NULLIF(a.name, '') IS NOT NULL  
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+
+FinalResult AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ad.name AS actor_name,
+        ad.role_order,
+        mk.keywords,
+        CASE 
+            WHEN rm.company_count > 0 THEN 'Produced'
+            ELSE 'Not Produced'
+        END AS company_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN ActorDetails ad ON rm.movie_id = ad.movie_id
+    LEFT JOIN MovieKeywords mk ON rm.movie_id = mk.movie_id
+)
+
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    role_order,
+    keywords,
+    company_status
+FROM 
+    FinalResult
+WHERE 
+    actor_name IS NOT NULL
+ORDER BY 
+    production_year DESC, role_order ASC;

@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY pt.Name) AS total_posts
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+PostStatistics AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        rn,
+        total_posts,
+        COALESCE((SELECT AVG(v.BountyAmount) 
+                   FROM Votes v 
+                   WHERE v.PostId = rp.PostId 
+                     AND v.VoteTypeId IN (8, 9)), 0) AS AverageBounty
+    FROM 
+        RankedPosts rp
+),
+UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS PostsVotedOnCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.rn,
+    ps.total_posts,
+    ps.AverageBounty,
+    uvs.DisplayName AS VoterDisplayName,
+    uvs.TotalUpVotes,
+    uvs.TotalDownVotes,
+    uvs.PostsVotedOnCount,
+    COALESCE(NULLIF(REGEXP_REPLACE(ps.Title, '[^a-zA-Z0-9 ]', ''), ''), 'Title Not Transformable') AS CleanTitle,
+    (CASE 
+         WHEN ps.Score > 100 THEN 'Hot'
+         WHEN ps.Score BETWEEN 50 AND 100 THEN 'Trending'
+         ELSE 'Cold'
+    END) AS Status,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tag ON t.TagName = tag
+     WHERE p.Id = ps.PostId) AS Tags
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    UserVoteStatistics uvs ON ps.PostId = uvs.PostsVotedOnCount
+WHERE 
+    ps.AverageBounty > 0 
+    OR ps.Score >= (SELECT AVG(Score) FROM Posts WHERE Score IS NOT NULL)
+ORDER BY 
+    COALESCE(ps.AverageBounty, 0) DESC, 
+    ps.ViewCount DESC;

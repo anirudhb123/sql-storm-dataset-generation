@@ -1,0 +1,84 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id,
+        mt.season_nr,
+        mt.episode_nr
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        m.episode_of_id,
+        m.season_nr,
+        m.episode_nr
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        r.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    a.person_id,
+    a.role AS actor_role,
+    c.companies,
+    COUNT(DISTINCT mki.keyword) AS keyword_count,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COALESCE(NULLIF(STRING_AGG(DISTINCT a.role, ', '), ''), 'No roles assigned') AS roles_summary
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles a ON mh.movie_id = a.movie_id
+LEFT JOIN 
+    CompanyDetails c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword mki ON mk.keyword_id = mki.id
+WHERE 
+    mh.level < 3
+GROUP BY 
+    mh.title, mh.production_year, a.person_id, a.role, c.companies, era
+HAVING 
+    COUNT(DISTINCT mki.keyword) > 0 AND
+    era = 'Modern'
+ORDER BY 
+    mh.production_year DESC, mh.title,
+    COALESCE(a.role_order, 0)
+LIMIT 100 OFFSET 0;

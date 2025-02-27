@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(NULLIF(ca.role_id, 0), -1) AS cast_role_id,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    WHERE 
+        m.production_year >= 2000  
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(ca.role_id, 0), -1),
+        level + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        aka_title m ON mh.cast_role_id = m.id  
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank_within_year
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ca ON mh.movie_id = ca.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+)
+SELECT 
+    fm.movie_id,
+    fm.movie_title,
+    fm.production_year,
+    fm.cast_count,
+    CASE 
+        WHEN fm.rank_within_year = 1 THEN 'Highest Cast'
+        ELSE 'Not Top Rank'
+    END AS cast_rank_status,
+    kt.keyword AS associated_keyword
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+WHERE 
+    fm.cast_count > 5  
+ORDER BY 
+    fm.production_year DESC,
+    fm.cast_count DESC
+LIMIT 10;

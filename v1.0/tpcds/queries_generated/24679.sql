@@ -1,0 +1,37 @@
+
+WITH CustomerInfo AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           cd.cd_dep_count, cd.cd_dep_college_count,
+           COALESCE(hd.hd_income_band_sk, -1) AS income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_quantity, ws.ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS recent_sales
+    FROM web_sales ws
+    WHERE ws.ws_quantity > 0
+),
+HighValueSales AS (
+    SELECT ci.c_customer_sk, SUM(sd.ws_net_profit) AS total_profit,
+           COUNT(DISTINCT sd.ws_item_sk) AS unique_items
+    FROM CustomerInfo ci
+    JOIN SalesData sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+    WHERE ci.cd_marital_status = 'M' AND ci.cd_purchase_estimate > 1000
+    GROUP BY ci.c_customer_sk
+)
+SELECT ci.c_first_name, ci.c_last_name, ci.cd_gender, 
+       COALESCE(income_band.ib_lower_bound, 0) AS income_lower_bound,
+       SUM(hv.total_profit) AS total_high_value_profit,
+       COUNT(hv.unique_items) AS total_unique_items_purchased
+FROM CustomerInfo ci
+LEFT JOIN HighValueSales hv ON ci.c_customer_sk = hv.c_customer_sk
+LEFT JOIN income_band ib ON ci.income_band_sk = ib.ib_income_band_sk
+WHERE ci.c_birth_year IS NOT NULL
+GROUP BY ci.c_first_name, ci.c_last_name, ci.cd_gender, 
+         income_band.ib_lower_bound
+HAVING SUM(hv.total_profit) > 5000 OR COUNT(hv.unique_items) > 10
+ORDER BY total_high_value_profit DESC, ci.c_last_name ASC
+FETCH FIRST 20 ROWS ONLY;

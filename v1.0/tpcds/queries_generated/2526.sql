@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        r.ws_order_number,
+        SUM(r.ws_quantity * r.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT r.ws_item_sk) AS item_count
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rnk <= 3
+    GROUP BY 
+        r.ws_order_number
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ts.total_sales
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        TotalSales ts ON ci.c_customer_sk = ts.ws_order_number
+    WHERE 
+        ts.total_sales > (SELECT AVG(total_sales) FROM TotalSales)
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    CASE 
+        WHEN ci.cd_gender = 'M' THEN 'Male'
+        WHEN ci.cd_gender = 'F' THEN 'Female'
+        ELSE 'Other'
+    END AS gender_desc,
+    COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status
+FROM 
+    TopCustomers tc
+JOIN 
+    CustomerInfo ci ON tc.c_customer_sk = ci.c_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON ci.c_current_cdemo_sk = cd.cd_demo_sk
+ORDER BY 
+    tc.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

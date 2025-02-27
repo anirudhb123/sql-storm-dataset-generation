@@ -1,0 +1,61 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(vote.VoteTypeId = 2) AS UpVotes,
+        SUM(vote.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes vote ON u.Id = vote.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(vote.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(vote.VoteTypeId = 3), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes vote ON p.Id = vote.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+CombinedMetrics AS (
+    SELECT 
+        um.UserId,
+        um.Reputation,
+        um.TotalPosts,
+        um.TotalBadges,
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.Score,
+        pm.ViewCount,
+        pm.CommentCount,
+        pm.UpVotes AS PostUpVotes,
+        pm.DownVotes AS PostDownVotes
+    FROM UserMetrics um
+    LEFT JOIN PostMetrics pm ON um.UserId = pm.OwnerUserId
+)
+SELECT 
+    cb.UserId,
+    cb.Reputation,
+    cb.TotalPosts,
+    cb.TotalBadges,
+    cb.PostId,
+    cb.Title,
+    cb.CreationDate,
+    cb.Score,
+    cb.ViewCount,
+    cb.CommentCount,
+    cb.PostUpVotes,
+    cb.PostDownVotes
+FROM CombinedMetrics cb
+ORDER BY cb.Reputation DESC, cb.TotalPosts DESC;

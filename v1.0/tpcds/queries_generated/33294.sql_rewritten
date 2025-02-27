@@ -1,0 +1,60 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_quantity) + s.total_quantity AS total_quantity,
+        SUM(ss_ext_sales_price) + s.total_sales AS total_sales
+    FROM store_sales AS ss
+    JOIN sales_summary AS s ON ss_ss_sold_date_sk = s.ws_sold_date_sk AND ss.ss_item_sk = s.ws_item_sk
+    GROUP BY ss_sold_date_sk, ss_item_sk
+),
+
+customer_metrics AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(CASE WHEN cd.eduation_status LIKE 'PhD%' THEN 1 ELSE 0 END) AS phd_count,
+        COUNT(*) AS total_customers,
+        AVG(cd.purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk
+),
+
+inventory_status AS (
+    SELECT
+        i.i_item_sk,
+        i.i_current_price,
+        COALESCE(SUM(inv.inv_quantity_on_hand), 0) AS total_on_hand
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk, i.i_current_price
+)
+
+SELECT
+    cm.phd_count,
+    cm.total_customers,
+    cm.avg_purchase_estimate,
+    is.i_item_sk,
+    is.i_current_price,
+    is.total_on_hand,
+    COALESCE(ss.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(ss.total_sales, 0) AS total_sales_returned
+FROM customer_metrics cm
+LEFT JOIN inventory_status is ON TRUE  
+LEFT JOIN sales_summary ss ON is.i_item_sk = ss.ws_item_sk
+WHERE 
+    is.total_on_hand > 0
+    AND cm.avg_purchase_estimate > 1000
+    AND (ss.total_quantity > 50 OR ss.total_sales > 500)
+ORDER BY cm.total_customers DESC, total_sales_returned DESC
+LIMIT 50;

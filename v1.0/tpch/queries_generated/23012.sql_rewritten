@@ -1,0 +1,87 @@
+WITH RECURSIVE CTE_Order_Summary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+),
+CTE_Supplier_Avg_Cost AS (
+    SELECT 
+        ps.ps_partkey, 
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CTE_Comparative_Nation_Sales AS (
+    SELECT 
+        n.n_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_name, n.n_nationkey
+),
+Outer_Join_Supplier_Customer AS (
+    SELECT 
+        s.s_suppkey,
+        c.c_custkey,
+        COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    LEFT JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+),
+Filtered_Orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS price_comparison
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' OR o.o_orderdate >= '1997-01-01'
+)
+SELECT 
+    r.r_name as region_name, 
+    cte.n_name AS nation_name,
+    SUM(cte.total_sales) AS nation_total_sales,
+    COUNT(DISTINCT fj.cleaned_orderkey) AS distinct_order_count,
+    AVG(cte_avg.avg_supplycost) AS average_cost,
+    MAX(oj.s_acctbal) AS max_supplier_balance
+FROM 
+    CTE_Comparative_Nation_Sales cte
+JOIN 
+    region r ON cte.n_name LIKE '%' || r.r_name || '%'
+JOIN 
+    CTE_Supplier_Avg_Cost cte_avg ON cte.ps_partkey = cte_avg.ps_partkey
+JOIN 
+    Outer_Join_Supplier_Customer oj ON oj.s_suppkey = 
+        (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal IS NOT NULL ORDER BY s.s_acctbal DESC LIMIT 1) 
+LEFT JOIN 
+    Filtered_Orders fj ON fj.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+WHERE 
+    cte.rank <= 5
+GROUP BY 
+    r.r_name, cte.n_name
+HAVING 
+    SUM(cte.total_sales) IS NOT NULL AND 
+    COUNT(DISTINCT fj.cleaned_orderkey) > 10 
+ORDER BY 
+    nation_total_sales DESC, region_name;

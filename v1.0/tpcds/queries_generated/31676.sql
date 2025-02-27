@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sd.total_sales,
+        sd.order_count,
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS rank
+    FROM sales_data sd
+    JOIN item ON sd.ws_item_sk = item.i_item_sk
+    WHERE sd.sales_rank <= 5 -- top 5 items per day
+),
+daily_summary AS (
+    SELECT 
+        d.d_date,
+        SUM(ts.total_sales) AS daily_total_sales,
+        COUNT(ts.order_count) AS daily_orders
+    FROM date_dim d
+    LEFT JOIN top_sales ts ON d.d_date_sk = ts.ws_sold_date_sk
+    GROUP BY d.d_date
+)
+SELECT 
+    d.d_date,
+    COALESCE(ds.daily_total_sales, 0) AS total_daily_sales,
+    COALESCE(ds.daily_orders, 0) AS total_daily_orders,
+    (SELECT COUNT(DISTINCT c.c_customer_sk)
+     FROM customer c
+     JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+     WHERE ws.ws_sold_date_sk = d.d_date_sk) AS total_unique_customers
+FROM date_dim d
+LEFT JOIN daily_summary ds ON d.d_date = ds.d_date
+WHERE d.d_year = 2023
+ORDER BY d.d_date;

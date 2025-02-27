@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_nationkey,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey,
+           sh.s_name,
+           sh.s_nationkey,
+           sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+    WHERE sh.level < 5
+),
+
+order_summary AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+
+nation_summary AS (
+    SELECT n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           AVG(s.s_acctbal) AS avg_acct_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+
+SELECT r.r_name AS region,
+       ns.n_name AS nation,
+       ns.supplier_count AS total_suppliers,
+       ns.avg_acct_balance,
+       os.total_revenue,
+       os.unique_customers,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY os.total_revenue DESC) AS revenue_rank
+FROM region r
+JOIN nation_summary ns ON r.r_regionkey = ns.nation_count
+LEFT JOIN order_summary os ON ns.supplier_count > 0
+WHERE ns.avg_acct_balance IS NOT NULL
+  AND (os.total_revenue IS NOT NULL OR os.unique_customers IS NOT NULL)
+ORDER BY r.r_name, revenue_rank;

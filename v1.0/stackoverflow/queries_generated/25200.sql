@@ -1,0 +1,52 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ph.UserDisplayName AS LastEditedBy,
+        ph.CreationDate AS LastEditDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) -- Title and Body Edits
+    LEFT JOIN TAGS t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' -- Posts created in the last year
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, ph.UserDisplayName, ph.CreationDate
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalBadges,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.Score,
+    pa.Tags,
+    pa.LastEditedBy,
+    pa.LastEditDate
+FROM UserStats us
+JOIN PostAnalysis pa ON us.UserId = pa.LastEditedBy -- Link users to the last edited posts
+ORDER BY us.Reputation DESC, pa.ViewCount DESC; -- Order by reputation and view count
+

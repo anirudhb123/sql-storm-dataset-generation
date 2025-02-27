@@ -1,0 +1,61 @@
+WITH PartSupplierCTE AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineCTE AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_orderkey) AS line_count,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerRevenueCTE AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        AVG(o.o_totalprice) AS average_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_cost,
+    COALESCE(cr.total_order_value, 0) AS total_customer_revenue,
+    COUNT(DISTINCT ol.l_orderkey) AS order_count,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_served
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierCTE ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    OrderLineCTE ol ON ol.l_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerRevenueCTE cr ON cr.c_custkey IN (SELECT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+JOIN 
+    partsupp psup ON p.p_partkey = psup.ps_partkey
+JOIN 
+    supplier s ON psup.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    p.p_partkey, p.p_name, ps.total_cost, cr.total_order_value
+HAVING 
+    COALESCE(cr.total_order_value, 0) > 10000 OR COUNT(DISTINCT ol.l_orderkey) > 5
+ORDER BY 
+    total_customer_revenue DESC, order_count DESC;

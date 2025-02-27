@@ -1,0 +1,81 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Looking at Questions only
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+    WHERE 
+        p.PostTypeId = 2 -- Fetching Answers
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostLineage AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        rp.Level,
+        us.BadgeCount,
+        us.TotalBounties,
+        us.TotalUpVotes,
+        us.TotalDownVotes
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserStats us ON u.Id = us.UserId
+)
+SELECT 
+    pl.PostId,
+    pl.Title,
+    pl.CreationDate,
+    pl.OwnerDisplayName,
+    pl.Level,
+    pl.BadgeCount,
+    pl.TotalBounties,
+    pl.TotalUpVotes,
+    pl.TotalDownVotes,
+    COALESCE(pl.TotalUpVotes - pl.TotalDownVotes, 0) AS VoteBalance,
+    RANK() OVER (ORDER BY pl.Level DESC, pl.CreationDate ASC) AS PostRank
+FROM 
+    PostLineage pl
+WHERE 
+    pl.BadgeCount > 0 -- Focusing on users with badges
+ORDER BY 
+    VoteBalance DESC, pl.CreationDate DESC
+LIMIT 100;

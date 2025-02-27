@@ -1,0 +1,57 @@
+
+WITH RECURSIVE relevant_parts AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, p_comment
+    FROM part
+    WHERE p_retailprice > 50
+
+    UNION ALL
+
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, CONCAT(r.r_name, ' - ', p.p_comment) AS extended_comment
+    FROM part p
+    JOIN region r ON p.p_partkey % (SELECT COUNT(*) FROM region) = r.r_regionkey
+    WHERE p_retailprice BETWEEN 30 AND 50
+),
+
+customer_stats AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name
+),
+
+lineitem_analytics AS (
+    SELECT l.l_orderkey, l.l_partkey, SUM(l.l_quantity * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_quantity * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+    WHERE l.l_shipdate <= DATE '1998-10-01' 
+    GROUP BY l.l_orderkey, l.l_partkey
+),
+
+qualified_part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           CASE 
+               WHEN ps.ps_availqty < 5 THEN 'LOW STOCK'
+               WHEN ps.ps_availqty BETWEEN 5 AND 20 THEN 'MEDIUM STOCK'
+               ELSE 'HIGH STOCK'
+           END AS stock_status,
+           COALESCE(NULLIF(s.s_name, ''), 'UNKNOWN SUPPLIER') AS supplier_name
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+
+SELECT 
+    rp.p_partkey, rp.p_name, 
+    cs.c_name, cs.total_spent, 
+    la.total_revenue,
+    qps.stock_status, qps.supplier_name
+FROM relevant_parts rp
+LEFT JOIN customer_stats cs ON rp.p_size = (SELECT MAX(p_size) FROM part WHERE p_mfgr = 'ManufacturerX')
+LEFT JOIN lineitem_analytics la ON la.l_partkey = rp.p_partkey
+FULL OUTER JOIN qualified_part_supplier qps ON rp.p_partkey = qps.ps_partkey
+WHERE (cs.order_count > 0 OR la.revenue_rank = 1)
+  AND (rp.p_retailprice IS NOT NULL OR qps.ps_partkey IS NULL);

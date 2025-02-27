@@ -1,0 +1,51 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS depth
+    FROM nation n
+    WHERE n.n_regionkey = (SELECT MIN(r.r_regionkey) FROM region r)
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+supply_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+calc_order_stats AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_totalprice BETWEEN 1000 AND 5000
+),
+final_summary AS (
+    SELECT 
+        r.r_name, 
+        COALESCE(p.total_available, 0) AS total_available_parts,
+        COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+        COUNT(DISTINCT c.c_custkey) AS total_customers,
+        COUNT(DISTINCT CASE WHEN c.c_acctbal IS NULL THEN 1 END) AS null_balance_count,
+        SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) END) AS total_discounted_sales
+    FROM region r
+    LEFT JOIN nation_hierarchy nh ON r.r_regionkey = nh.n_regionkey
+    LEFT JOIN part_supplier p ON p.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l)
+    LEFT JOIN supply_summary s ON s.s_suppkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l)
+    LEFT JOIN customer c ON c.c_nationkey = nh.n_nationkey
+    LEFT JOIN calc_order_stats o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l)
+    LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name
+)
+SELECT r.r_name, fs.total_available_parts, fs.total_supply_cost, fs.total_customers, 
+       fs.null_balance_count, fs.total_discounted_sales
+FROM final_summary fs
+JOIN region r ON r.r_name = fs.r_name
+WHERE r.r_name NOT LIKE '%region%' AND r.r_name IS NOT NULL
+ORDER BY fs.total_available_parts DESC, fs.total_supply_cost DESC;

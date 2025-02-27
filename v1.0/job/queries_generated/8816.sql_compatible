@@ -1,0 +1,30 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(*) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(*) DESC) AS rn
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY t.id, t.title, t.production_year
+),
+top_roles AS (
+    SELECT 
+        c.person_id, 
+        COUNT(c.role_id) AS role_count
+    FROM cast_info c
+    JOIN ranked_titles rt ON c.movie_id = rt.id
+    WHERE rt.rn <= 10
+    GROUP BY c.person_id
+)
+SELECT 
+    n.name AS actor_name, 
+    tr.role_count AS roles_in_top_movies 
+FROM top_roles tr
+JOIN name n ON tr.person_id = n.id
+ORDER BY tr.roles_in_top_movies DESC
+LIMIT 50;

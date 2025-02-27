@@ -1,0 +1,50 @@
+WITH UserBadgeCounts AS (
+    SELECT UserId, 
+           COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldCount,
+           COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverCount,
+           COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeCount
+    FROM Badges
+    GROUP BY UserId
+),
+TopUsers AS (
+    SELECT u.Id, 
+           u.DisplayName, 
+           u.Reputation, 
+           COALESCE(ub.GoldCount, 0) AS GoldCount, 
+           COALESCE(ub.SilverCount, 0) AS SilverCount,
+           COALESCE(ub.BronzeCount, 0) AS BronzeCount,
+           RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    WHERE u.Reputation > (
+        SELECT AVG(Reputation)
+        FROM Users
+    )
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           p.AnswerCount, 
+           p.ViewCount, 
+           u.DisplayName AS OwnerDisplayName,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT t.DisplayName AS UserName, 
+       t.Reputation, 
+       t.GoldCount, 
+       t.SilverCount, 
+       t.BronzeCount, 
+       r.PostId, 
+       r.Title AS PostTitle, 
+       r.CreationDate AS PostCreationDate, 
+       r.AnswerCount, 
+       r.ViewCount
+FROM TopUsers t
+LEFT JOIN RecentPosts r ON t.Id = r.OwnerUserId
+WHERE t.Rank <= 10
+ORDER BY t.Reputation DESC, r.ViewCount DESC NULLS LAST
+LIMIT 100;

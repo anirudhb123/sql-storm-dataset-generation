@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_credit_rating = 'Excellent' THEN 'High Value'
+            WHEN cd.cd_credit_rating = 'Good' THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    cu.c_customer_id,
+    ca.ca_city,
+    wc.web_name,
+    r.customer_value,
+    COALESCE(rs.total_orders, 0) AS total_orders,
+    COALESCE(rs.total_sales, 0) AS total_sales
+FROM 
+    customer cu
+LEFT JOIN 
+    customer_address ca ON cu.current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_site wc ON cu.c_customer_sk = wc.web_site_sk
+LEFT JOIN 
+    RankedSales rs ON cu.c_customer_sk = rs.bill_customer_sk
+LEFT JOIN 
+    HighValueCustomers r ON cu.c_current_cdemo_sk = r.cd_demo_sk
+WHERE 
+    (rs.sales_rank <= 10 OR r.customer_value = 'High Value')
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

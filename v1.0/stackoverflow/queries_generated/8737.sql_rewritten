@@ -1,0 +1,81 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        (SELECT COUNT(*) FROM Posts WHERE ParentId = p.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+Ranking AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.TotalBountyAmount,
+        ue.UserId,
+        ue.DisplayName,
+        ue.PostCount,
+        ue.GoldBadges,
+        ue.SilverBadges,
+        ue.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC) AS PostRank
+    FROM 
+        PostStats ps
+    JOIN 
+        UserEngagement ue ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ue.UserId)
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.Score,
+    r.CommentCount,
+    r.VoteCount,
+    r.TotalBountyAmount,
+    r.UserId,
+    r.DisplayName,
+    r.PostCount,
+    r.GoldBadges,
+    r.SilverBadges,
+    r.BronzeBadges,
+    r.PostRank
+FROM 
+    Ranking r
+WHERE 
+    r.PostRank <= 100
+ORDER BY 
+    r.PostRank;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        COALESCE(SUM(v.VoteTypeId = 10) OVER (PARTITION BY p.Id), 0) AS DeletionVotes,
+        COALESCE(NULLIF(AVG(CASE WHEN c.Text IS NOT NULL THEN LENGTH(c.Text) END) OVER (PARTITION BY p.Id), 0), 0) AS AvgCommentLength,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, cast('2024-10-01 12:34:56' as timestamp))
+),
+RecentPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        PostTypeId,
+        Upvotes,
+        Downvotes,
+        DeletionVotes, 
+        AvgCommentLength
+    FROM 
+        RankedPosts
+    WHERE 
+        RN <= 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostTypeId,
+    CASE 
+        WHEN rp.Upvotes > 0 THEN 'Popular'
+        WHEN rp.Downvotes > 0 THEN 'Controversial'
+        ELSE 'Neutral' 
+    END AS PostClassification,
+    COUNT(DISTINCT bh.Id) AS NumBadges,
+    STRING_AGG(DISTINCT CONCAT(ut.Name, ':', ut.Id), ', ') AS UserTags,
+    (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            PostHistory ph 
+        WHERE 
+            ph.PostId = rp.PostId 
+            AND ph.CreationDate >= DATEADD(MONTH, -6, cast('2024-10-01 12:34:56' as timestamp))
+    ) AS RecentHistoryChanges,
+    EXISTS (
+        SELECT 1 
+        FROM Comments c 
+        WHERE c.PostId = rp.PostId 
+        AND c.CreationDate > DATEADD(MONTH, -1, cast('2024-10-01 12:34:56' as timestamp))
+    ) AS HasRecentComments
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Badges bh ON bh.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    Users ut ON ut.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+GROUP BY 
+    rp.PostId, rp.Title, rp.PostTypeId, rp.Upvotes, rp.Downvotes
+ORDER BY 
+    rp.Upvotes DESC, rp.Downvotes ASC;

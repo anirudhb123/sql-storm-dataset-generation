@@ -1,0 +1,52 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.UserId != U.Id
+    WHERE U.Reputation > 1000  
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        QuestionsAsked,
+        AnswersGiven,
+        UpVotesReceived,
+        DownVotesReceived,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+    WHERE TotalPosts > 5  
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalComments,
+    TU.TotalBadges,
+    TU.QuestionsAsked,
+    TU.AnswersGiven,
+    TU.UpVotesReceived,
+    TU.DownVotesReceived
+FROM TopUsers TU
+WHERE TU.ReputationRank <= 10  
+ORDER BY TU.Reputation DESC;

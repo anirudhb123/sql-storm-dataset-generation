@@ -1,0 +1,68 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        kt.kind AS kind_type,
+        ROW_NUMBER() OVER (PARTITION BY kt.kind ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_title at
+    JOIN 
+        kind_type kt ON at.kind_id = kt.id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+
+DirectorMovies AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS number_of_actors,
+        SUM(CASE 
+                WHEN ci.note IS NULL THEN 1 
+                ELSE 0 
+            END) AS missing_notes,
+        MAX(CAST(SUBSTRING(at.title FROM 1 FOR POSITION(' ' IN at.title) - 1) AS INTEGER)) AS max_word_length
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(COALESCE(mi.info, 'Unknown Info'), '; ') AS movie_infos
+    FROM 
+        movie_info mi
+    JOIN 
+        (SELECT DISTINCT movie_id FROM complete_cast) cc ON mi.movie_id = cc.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.kind_type,
+    dm.number_of_actors,
+    dm.missing_notes,
+    mi.movie_infos,
+    COALESCE(NULLIF(dm.max_word_length, 0), 'N/A') AS max_title_length
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    DirectorMovies dm ON rm.title_id = dm.movie_id
+FULL OUTER JOIN 
+    MovieInfo mi ON rm.title_id = mi.movie_id
+WHERE 
+    (rm.rn = 1 OR rm.production_year < 2000) 
+    AND (dm.number_of_actors > 3 OR dm.missing_notes > 0)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC;

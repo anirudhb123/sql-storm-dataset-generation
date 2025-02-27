@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0 
+        AND p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vb.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes vb ON vb.UserId = u.Id AND vb.VoteTypeId = 8 -- BountyStart
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        DENSE_RANK() OVER(ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Post Closed and Post Reopened
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER(ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.LastAccessDate > CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName AS ActiveUser,
+    p.Title AS PopularPostTitle,
+    p.Score AS PostScore,
+    us.TotalBounty AS UserTotalBounty,
+    us.BadgeCount AS UserBadgeCount,
+    cp.Comment AS ClosureComment,
+    cp.CreationDate AS ClosureDate,
+    CASE 
+        WHEN cp.CreationDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus,
+    CASE 
+        WHEN up.UserRank <= 10 THEN 'Top 10' 
+        ELSE 'Below Top 10' 
+    END AS UserRankCategory
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+JOIN 
+    UserScores us ON us.UserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = p.PostId
+JOIN 
+    TopActiveUsers up ON up.UserId = u.Id
+WHERE 
+    us.BadgeCount > 5 -- Only users with more than 5 badges
+    AND (up.UserRank < 50 OR us.TotalBounty > 100) -- Top active users or high bounty
+ORDER BY 
+    PostScore DESC, 
+    ActiveUser ASC
+LIMIT 100;

@@ -1,0 +1,62 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL 
+    GROUP BY 
+        t.title, t.production_year
+),
+actor_roles AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        r.role,
+        COUNT(c.movie_id) AS movies_acted_in
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        a.person_id, a.name, r.role
+)
+SELECT 
+    rm.title AS Movie_Title,
+    rm.production_year AS Production_Year,
+    rm.total_cast AS Total_Cast,
+    ar.name AS Actor_Name,
+    ar.role AS Actor_Role,
+    ar.movies_acted_in AS Total_Movies_Acted_In
+FROM 
+    ranked_movies rm
+JOIN 
+    actor_roles ar ON ar.movies_acted_in >= 5
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.total_cast DESC
+UNION ALL
+SELECT 
+    t.title AS Movie_Title,
+    t.production_year AS Production_Year,
+    NULL AS Total_Cast,
+    NULL AS Actor_Name,
+    NULL AS Actor_Role,
+    NULL AS Total_Movies_Acted_In
+FROM 
+    aka_title t
+WHERE 
+    NOT EXISTS (SELECT 1 FROM cast_info c WHERE c.movie_id = t.id)
+ORDER BY 
+    Production_Year DESC;

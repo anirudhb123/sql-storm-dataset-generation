@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_quantity DESC) AS rn
+    FROM catalog_sales
+),
+ReturnStatistics AS (
+    SELECT
+        cs_item_sk,
+        COUNT(DISTINCT cs_order_number) AS total_sales,
+        SUM(cs_quantity) AS total_quantity_sold,
+        SUM(cs_sales_price) AS total_sales_amount
+    FROM RankedSales
+    WHERE rn = 1
+    GROUP BY cs_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        MAX(cd.cd_credit_rating) AS credit_rating,
+        COUNT(cd.cd_dep_count) AS total_dependents
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year >= 1980
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+SalesReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(CASE WHEN sr_return_quantity IS NULL THEN 0 ELSE sr_return_quantity END) AS total_returns,
+        COUNT(sr_ticket_number) AS number_of_returns
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+FinalReport AS (
+    SELECT
+        r.cs_item_sk,
+        r.total_sales,
+        r.total_quantity_sold,
+        r.total_sales_amount,
+        COALESCE(s.number_of_returns, 0) AS returns_count,
+        COALESCE(s.total_returns, 0) AS returns_quantity,
+        ci.cd_gender,
+        ci.credit_rating,
+        CASE 
+            WHEN ci.cd_marital_status = 'M' AND ci.total_dependents > 0 THEN 'Married with Dependents'
+            WHEN ci.cd_marital_status = 'M' THEN 'Married without Dependents'
+            ELSE 'Single/Other'
+        END AS marital_status_category
+    FROM ReturnStatistics r
+    LEFT JOIN SalesReturns s ON r.cs_item_sk = s.sr_item_sk
+    LEFT JOIN CustomerInfo ci ON r.cs_item_sk = ci.c_customer_id
+)
+SELECT 
+    f.cs_item_sk,
+    SUM(f.total_sales_amount - f.returns_quantity) AS net_sales,
+    AVG(f.returns_quantity) OVER (PARTITION BY f.cd_gender) AS avg_returns_by_gender,
+    COUNT(DISTINCT f.c_customer_id) FILTER (WHERE f.marital_status_category = 'Married with Dependents') AS married_with_dependents_count
+FROM FinalReport f
+GROUP BY f.cs_item_sk, f.cd_gender
+HAVING net_sales > (SELECT AVG(f2.net_sales) FROM FinalReport f2)
+ORDER BY net_sales DESC
+LIMIT 10;

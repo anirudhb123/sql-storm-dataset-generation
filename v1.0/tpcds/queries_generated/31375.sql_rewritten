@@ -1,0 +1,75 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT cs_item_sk, cs_order_number, 1 AS level
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2451545 AND 2451545 + 30 
+    UNION ALL
+    SELECT cs.cs_item_sk, cs.cs_order_number, sh.level + 1
+    FROM catalog_sales cs
+    JOIN sales_hierarchy sh ON cs.cs_order_number = sh.cs_order_number
+    WHERE sh.level < 5
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        SUM(ss_net_profit) AS total_net_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_product_name
+),
+best_customers AS (
+    SELECT 
+        cs.c_customer_sk, 
+        cs.c_first_name, 
+        cs.c_last_name, 
+        cs.total_transactions,
+        cs.total_net_profit,
+        RANK() OVER (ORDER BY cs.total_net_profit DESC) AS profit_rank
+    FROM customer_summary cs
+    WHERE cs.total_transactions > 10
+),
+item_performance AS (
+    SELECT 
+        is.i_item_sk, 
+        is.i_product_name, 
+        is.total_quantity_sold,
+        is.total_profit,
+        RANK() OVER (ORDER BY is.total_profit DESC, is.total_quantity_sold DESC) AS item_rank
+    FROM item_summary is
+    WHERE is.order_count > 5
+)
+SELECT 
+    bc.c_customer_sk,
+    bc.c_first_name,
+    bc.c_last_name,
+    ip.i_item_sk,
+    ip.i_product_name,
+    ip.total_quantity_sold,
+    ip.total_profit,
+    CASE 
+        WHEN ip.total_profit > 1000 THEN 'High Profit'
+        WHEN ip.total_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM best_customers bc
+JOIN item_performance ip ON bc.c_customer_sk IN (
+    SELECT cs_cdemo_sk FROM store_sales ss 
+    JOIN sales_hierarchy sh ON ss.ss_order_number = sh.cs_order_number
+)
+WHERE bc.profit_rank <= 10 AND ip.item_rank <= 10
+ORDER BY bc.total_net_profit DESC, ip.total_profit DESC;

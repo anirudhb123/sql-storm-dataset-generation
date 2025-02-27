@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        SUM(l.l_tax) AS total_tax,
+        COUNT(*) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationStats AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+
+SELECT 
+    ns.n_name AS nation_name,
+    COALESCE(rc.total_supply_cost, 0) AS total_supplier_cost,
+    COALESCE(hvc.cust_rank, 0) AS high_value_customer_rank,
+    od.total_value AS order_value,
+    od.total_tax,
+    od.line_item_count
+FROM 
+    NationStats ns
+LEFT JOIN 
+    RankedSuppliers rc ON ns.n_nationkey = rc.s_nationkey AND rc.rank = 1  
+LEFT JOIN 
+    HighValueCustomers hvc ON ns.customer_count > 0  
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate = (SELECT MAX(o2.o_orderdate) FROM orders o2 WHERE o2.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)))
+WHERE
+    ns.total_sales IS NOT NULL OR rc.total_supply_cost > 1000.00
+ORDER BY 
+    ns.supplier_count DESC, 
+    od.total_value DESC;

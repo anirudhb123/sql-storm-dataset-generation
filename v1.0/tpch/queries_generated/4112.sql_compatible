@@ -1,0 +1,89 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        * 
+    FROM 
+        CustomerOrderSummary
+    WHERE 
+        total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+RegionWiseSupplier AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    hc.c_name,
+    hc.total_orders,
+    hc.total_spent,
+    p.p_name,
+    p.total_available,
+    p.avg_supply_cost,
+    rs.region_name,
+    rs.total_suppliers
+FROM 
+    HighValueCustomers hc
+LEFT JOIN 
+    PartSupplierDetails p ON p.ps_suppkey IN (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        JOIN 
+            supplier s ON ps.ps_suppkey = s.s_suppkey
+        WHERE 
+            s.s_acctbal > (
+                SELECT 
+                    AVG(s_acctbal) FROM supplier
+            )
+    )
+LEFT JOIN 
+    RegionWiseSupplier rs ON rs.nation_name IN (
+        SELECT n.n_name FROM nation n WHERE n.n_nationkey IN (
+            SELECT c.c_nationkey FROM customer c WHERE c.c_name = hc.c_name
+        )
+    )
+WHERE 
+    hc.total_orders > 5
+ORDER BY 
+    hc.total_spent DESC, p.total_available DESC
+LIMIT 50;

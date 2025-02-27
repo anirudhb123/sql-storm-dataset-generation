@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorWithRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        r.role AS role_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        a.id, ak.name, r.role
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ar.actor_name, 'Unknown Actor') AS top_actor,
+    mh.level,
+    mi.keywords,
+    COUNT(DISTINCT ar.actor_id) AS total_actors,
+    AVG(CASE WHEN ar.role_name IS NOT NULL THEN 1 ELSE 0 END) AS percentage_with_roles
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorWithRoles ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, ar.actor_name, mh.level, mi.keywords
+ORDER BY 
+    mh.production_year DESC, mh.title;

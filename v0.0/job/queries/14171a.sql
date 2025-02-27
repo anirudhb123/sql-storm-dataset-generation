@@ -1,0 +1,4 @@
+SELECT min(mi_idx.info) AS rating, min(t.title) AS northern_dark_movie
+FROM info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND k.id < 50043 AND t.series_years IN ('1890-1918', '1957-1970', '1973-1983', '1976-1978', '1982-2005', '1989-2000', '1990-2001', '1990-2011');

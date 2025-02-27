@@ -1,0 +1,102 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        AVG(u.Reputation) OVER () AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1
+            WHEN ph.PostHistoryTypeId = 24 AND ph.Comment LIKE '%great%' THEN 2
+            ELSE 0 
+        END AS ActivityType
+    FROM 
+        PostHistory ph
+),
+FilteredVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.Rank AS PostRank,
+    ur.Reputation,
+    ur.TotalBadges,
+    ur.TotalVotes,
+    COALESCE(cp.CloseDate, 'No Closure') AS LastCloseDate,
+    AVG(pa.ActivityType) AS AverageActivity
+FROM 
+    RankedPosts up
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON up.PostId = cp.ClosedPostId
+LEFT JOIN 
+    PostActivity pa ON up.PostId = pa.PostId
+WHERE 
+    ur.Reputation >= (SELECT AVG(Reputation) FROM Users) 
+    AND up.Rank <= 5
+GROUP BY 
+    up.UserId, 
+    u.DisplayName, 
+    up.PostId, 
+    up.Title, 
+    up.Rank, 
+    ur.Reputation, 
+    ur.TotalBadges, 
+    ur.TotalVotes, 
+    cp.CloseDate
+ORDER BY 
+    up.Rank, ur.Reputation DESC;

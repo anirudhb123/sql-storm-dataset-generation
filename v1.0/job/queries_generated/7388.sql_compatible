@@ -1,0 +1,39 @@
+
+SELECT 
+    t.title AS movie_title,
+    c.name AS cast_member,
+    ak.name AS aka_name,
+    co.name AS company_name,
+    k.keyword AS movie_keyword,
+    pi.info AS person_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    company_name co ON t.id = co.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    t.production_year >= 2000 
+    AND ci.nr_order < 5
+    AND pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography')
+GROUP BY 
+    t.title, 
+    c.name, 
+    ak.name, 
+    co.name, 
+    k.keyword, 
+    pi.info
+ORDER BY 
+    t.production_year DESC, 
+    t.title, 
+    ak.name;

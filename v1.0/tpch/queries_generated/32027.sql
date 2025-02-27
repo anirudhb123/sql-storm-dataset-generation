@@ -1,0 +1,73 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_totalprice,
+        o.o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+region_totals AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, r.r_name
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    COALESCE(RO.region_name, 'Unknown') AS region_name,
+    COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+    p.p_name AS part_name,
+    CASE 
+        WHEN SUM(l.l_discount) > 0.1 THEN 'High Discount'
+        ELSE 'Normal Discount'
+    END AS discount_category,
+    COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS total_returns,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    (SELECT n.n_nationkey, r.r_name AS region_name FROM region_totals rt JOIN nation n ON n.n_nationkey = rt.n_nationkey) RO 
+    ON c.c_nationkey = RO.n_nationkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY 
+    c.c_name, RO.region_name, p.p_name
+HAVING 
+    total_spent > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY 
+    total_spent DESC, c.c_name
+LIMIT 100;

@@ -1,0 +1,48 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+        AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        s.s_suppkey
+),
+RegionSales AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(ss.total_sales) AS region_sales
+    FROM 
+        SupplierSales ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_regionkey
+),
+TopRegions AS (
+    SELECT 
+        r.r_name,
+        rs.region_sales
+    FROM 
+        region r
+    JOIN 
+        RegionSales rs ON r.r_regionkey = rs.n_regionkey
+    ORDER BY 
+        rs.region_sales DESC
+    LIMIT 5
+)
+SELECT 
+    r.r_name AS region_name,
+    r.region_sales AS total_sales
+FROM 
+    TopRegions r
+ORDER BY 
+    r.total_sales DESC;

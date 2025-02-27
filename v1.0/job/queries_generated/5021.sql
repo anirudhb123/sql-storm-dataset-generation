@@ -1,0 +1,38 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    co.name AS company_name,
+    k.keyword AS movie_keyword,
+    p.info AS person_info,
+    CASE 
+        WHEN ti.info IS NOT NULL THEN ti.info 
+        ELSE 'No additional info' 
+    END AS title_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    (SELECT movie_id, info FROM movie_info_idx WHERE note LIKE '%Award%') ti ON t.id = ti.movie_id
+WHERE 
+    t.production_year > 2000
+    AND co.country_code = 'USA'
+ORDER BY 
+    a.name, t.production_year DESC;

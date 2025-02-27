@@ -1,0 +1,71 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(p.Title, 'Untitled') AS Title,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+  
+    UNION ALL
+  
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(p.Title, 'Untitled') AS Title,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+, UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViews,
+        MAX(p.CreationDate) AS LastActivity
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id
+)
+, ActivityScore AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalBounties,
+        TotalScore,
+        AvgViews,
+        LastActivity,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, AvgViews DESC) AS ActivityRank
+    FROM UserActivity
+)
+SELECT 
+    u.DisplayName,
+    p.Title,
+    ph.Level,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    a.TotalPosts,
+    a.TotalBounties,
+    a.TotalScore,
+    a.AvgViews,
+    a.LastActivity,
+    CASE 
+        WHEN ph.Level > 0 THEN 'Sub-post'
+        ELSE 'Top-level Post' 
+    END AS PostType,
+    CASE 
+        WHEN a.LastActivity < NOW() - INTERVAL '30 days' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserStatus
+FROM RecursivePostHierarchy ph
+JOIN Posts p ON ph.PostId = p.Id
+LEFT JOIN Comments c ON c.PostId = p.Id
+JOIN ActivityScore a ON p.OwnerUserId = a.UserId
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+WHERE p.CreationDate > NOW() - INTERVAL '1 year'
+ORDER BY a.TotalScore DESC, ph.Level ASC;

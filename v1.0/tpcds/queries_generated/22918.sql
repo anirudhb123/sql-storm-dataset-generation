@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws_ext_sales_price,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2459582 AND 2459588
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+    HAVING SUM(ws.ws_net_paid) > 1000
+),
+FrequentReasons AS (
+    SELECT 
+        sr_reason_sk,
+        COUNT(*) AS total_returns
+    FROM store_returns
+    GROUP BY sr_reason_sk
+    HAVING COUNT(*) > 5
+)
+SELECT 
+    a.ca_address_id,
+    a.ca_city,
+    d.d_date,
+    COALESCE(r.total_returns, 0) AS return_count,
+    COALESCE(hvc.total_spent, 0) AS high_value_total_spent,
+    COUNT(DISTINCT r.hr_reason_sk) AS unique_repeat_reasons,
+    MAX(rs.ws_sales_price) AS max_web_sales_price_of_item
+FROM customer_address a
+LEFT JOIN date_dim d ON d.d_date_sk = (
+    SELECT MAX(d2.d_date_sk) 
+    FROM date_dim d2 
+    WHERE d2.d_date <= CURRENT_DATE
+)
+LEFT JOIN RankedSales rs ON rs.ws_item_sk = (
+    SELECT i.i_item_sk 
+    FROM item i 
+    WHERE i.i_current_price > 50 AND i.i_item_sk = rs.ws_item_sk
+)
+LEFT JOIN FrequentReasons r ON r.sr_reason_sk = (
+    SELECT MIN(sr.sr_reason_sk)
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity > 0
+)
+LEFT JOIN HighValueCustomers hvc ON hvc.c_customer_sk = (
+    SELECT c.c_customer_sk 
+    FROM customer c 
+    WHERE c.c_current_addr_sk = a.ca_address_sk
+)
+WHERE 
+    a.ca_city IS NOT NULL 
+    AND d.d_year = 2023
+GROUP BY 
+    a.ca_address_id, a.ca_city, d.d_date, hvc.total_spent
+HAVING 
+    MAX(rs.ws_sales_price) IS NOT NULL
+ORDER BY 
+    return_count DESC, unique_repeat_reasons DESC
+LIMIT 50;

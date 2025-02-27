@@ -1,0 +1,70 @@
+WITH MovieRatings AS (
+    SELECT
+        m.id AS movie_id,
+        AVG(r.rating) AS average_rating
+    FROM
+        title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN
+        (SELECT
+             movie_id,
+             info AS rating
+         FROM
+             movie_info
+         WHERE
+             info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) r ON m.id = r.movie_id
+    GROUP BY
+        m.id
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY a.name) AS actor_order
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    WHERE
+        ci.nr_order IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        r.average_rating,
+        (
+            SELECT
+                STRING_AGG(keyword.keyword, ', ')
+            FROM
+                movie_keyword mk
+            JOIN
+                keyword keyword ON mk.keyword_id = keyword.id
+            WHERE
+                mk.movie_id = m.id
+        ) AS keywords
+    FROM
+        title m
+    LEFT JOIN
+        MovieRatings r ON m.id = r.movie_id
+    WHERE
+        m.production_year IS NOT NULL
+        AND r.average_rating IS NOT NULL
+)
+SELECT
+    fm.title,
+    fm.production_year,
+    fm.average_rating,
+    cd.actor_name,
+    cd.actor_order
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    CastDetails cd ON fm.id = cd.movie_id
+WHERE
+    cd.actor_order <= 3 OR cd.actor_order IS NULL
+ORDER BY
+    fm.production_year DESC,
+    fm.title ASC;

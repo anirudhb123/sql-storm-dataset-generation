@@ -1,0 +1,54 @@
+WITH UserVoteStats AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(P.ArchivedAnswerId) AS AnswerCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId
+),
+UserPostStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(VS.UpVotes, 0) AS UpVotes,
+        COALESCE(VS.DownVotes, 0) AS DownVotes,
+        COUNT(DISTINCT PS.PostId) AS TotalPosts,
+        SUM(PS.CommentCount) AS TotalComments,
+        SUM(PS.AnswerCount) AS TotalAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserVoteStats VS ON U.Id = VS.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, VS.UpVotes, VS.DownVotes
+)
+SELECT 
+    UserId,
+    DisplayName,
+    UpVotes,
+    DownVotes,
+    TotalPosts,
+    TotalComments,
+    TotalAnswers
+FROM 
+    UserPostStats
+ORDER BY 
+    TotalPosts DESC, UpVotes DESC;

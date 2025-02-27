@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+AggregateOrders AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+MaxRevenue AS (
+    SELECT MAX(total_revenue) AS max_total_revenue
+    FROM AggregateOrders
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       SUM(a.total_revenue) AS total_revenues,
+       COALESCE(MAX(a.total_revenue), 0) AS max_order_revenue
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN AggregateOrders a ON s.s_suppkey IN (SELECT ps.ps_suppkey 
+                                               FROM partsupp ps 
+                                               WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                       FROM part p 
+                                                                       WHERE p.p_size = (SELECT MAX(p2.p_size) 
+                                                                                         FROM part p2)))
+WHERE n.n_nationkey IN (SELECT CASE WHEN r.r_regionkey IS NULL THEN 'Unknown' ELSE r.r_name END
+                         FROM region r
+                         WHERE r.r_comment LIKE '%industry%')
+GROUP BY n.n_name
+HAVING SUM(a.total_revenue) > (SELECT AVG(total_revenue) 
+                                 FROM AggregateOrders 
+                                 WHERE rn = 1)
+ORDER BY total_revenues DESC;

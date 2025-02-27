@@ -1,0 +1,88 @@
+
+WITH RECURSIVE Inventory_CTE AS (
+    SELECT 
+        inv.warehouse_sk AS warehouse_id,
+        inv.item_sk AS item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.warehouse_sk, inv.item_sk
+), 
+Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_ext_sales_price) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+Return_Summary AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns,
+        SUM(cr_return_amount) AS total_returned_amt
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+), 
+Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+Sales_Analysis AS (
+    SELECT 
+        si.ws_item_sk AS item_id,
+        COALESCE(si.total_sales, 0) AS total_sales,
+        COALESCE(si.total_revenue, 0) AS total_revenue,
+        COALESCE(ir.total_quantity, 0) AS total_inventory,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        (COALESCE(si.total_revenue, 0) - COALESCE(rs.total_returned_amt, 0)) AS net_revenue
+    FROM 
+        Sales_CTE si
+    LEFT JOIN 
+        Inventory_CTE ir ON si.ws_item_sk = ir.item_id
+    LEFT JOIN 
+        Return_Summary rs ON si.ws_item_sk = rs.cr_item_sk
+)
+SELECT 
+    sa.item_id,
+    sa.total_sales,
+    sa.total_revenue,
+    sa.total_inventory,
+    sa.total_returns,
+    sa.net_revenue,
+    COUNT(DISTINCT ci.c_customer_sk) AS unique_customers,
+    MAX(ci.cd_purchase_estimate) AS max_purchase_estimate
+FROM 
+    Sales_Analysis sa
+LEFT JOIN 
+    Customer_Info ci ON ci.c_customer_sk IN (
+        SELECT 
+            ws_ship_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk = sa.item_id
+    )
+GROUP BY 
+    sa.item_id, sa.total_sales, sa.total_revenue, sa.total_inventory, sa.total_returns, sa.net_revenue
+HAVING 
+    sa.net_revenue > 1000
+ORDER BY 
+    sa.net_revenue DESC
+LIMIT 50;

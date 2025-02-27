@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(m.production_year, 'Unknown') AS production_year,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    WHERE 
+        m.rank_per_year = 1 
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    pa.name AS top_actor,
+    pa.movie_count,
+    pa.has_note_count,
+    md.keyword_count,
+    md.keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    PopularActors pa ON pa.movie_count = (SELECT MAX(movie_count) FROM PopularActors)
+WHERE 
+    md.production_year IS NOT NULL OR md.production_year = 'Unknown'
+ORDER BY 
+    md.production_year DESC, 
+    md.title
+LIMIT 10;

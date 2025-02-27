@@ -1,0 +1,119 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+ExceptionalItems AS (
+    SELECT 
+        ir.ws_item_sk,
+        ir.total_sales,
+        ir.total_profit,
+        CASE 
+            WHEN ir.order_count > 10 AND rr.sr_return_quantity IS NOT NULL THEN 'High Sales with Returns'
+            WHEN ir.total_profit < 0 AND ir.order_count = 0 THEN 'No Sales with Loss'
+            ELSE 'Normal'
+        END AS sales_case
+    FROM 
+        ItemSales ir
+    LEFT JOIN 
+        (SELECT DISTINCT sr_item_sk, MAX(return_rank) AS max_rank
+         FROM RankedReturns
+         GROUP BY sr_item_sk) rr ON ir.ws_item_sk = rr.sr_item_sk
+),
+WarehouseAddresses AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        CONCAT(w.w_street_number, ' ', w.w_street_name, ' ', w.w_street_type) AS full_address
+    FROM 
+        warehouse w
+    WHERE 
+        w.w_gmt_offset IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(cd.cd_marital_status, 'U') AS marital_status,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        CASE 
+            WHEN hw.hd_income_band_sk IS NOT NULL 
+            THEN 'Income Band Exists' 
+            ELSE 'Income Band Missing' 
+        END AS income_status
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hw ON c.c_current_hdemo_sk = hw.hd_demo_sk
+),
+FinalResults AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city, 
+        ca.ca_state,
+        SUM(ws.ws_sales_price) AS total_sales_value, 
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT cr.cr_order_number) AS total_catalog_returns,
+        COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+        wd.full_address,
+        cd.full_name,
+        cd.gender,
+        cd.marital_status,
+        ei.sales_case
+    FROM 
+        customer_address ca
+    JOIN 
+        CustomerDetails cd ON cd.c_customer_sk = ca.ca_address_sk
+    JOIN 
+        web_sales ws ON ws.ws_ship_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        catalog_returns cr ON cr.cr_returning_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_returns wr ON wr.wr_returning_addr_sk = ca.ca_address_sk
+    JOIN 
+        WarehouseAddresses wd ON wd.w_warehouse_sk = ws.ws_warehouse_sk
+    LEFT JOIN 
+        ExceptionalItems ei ON ei.ws_item_sk = ws.ws_item_sk
+    GROUP BY 
+        ca.ca_address_id, ca.ca_city, ca.ca_state, wd.full_address, cd.full_name, cd.gender, cd.marital_status, ei.sales_case
+    
+) 
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales_value IS NULL THEN 'No Sales Recorded'
+        WHEN total_orders = 0 THEN 'Zero Orders'
+        ELSE 'Active Customer'
+    END AS customer_activity_status
+FROM 
+    FinalResults
+WHERE 
+    total_catalog_returns > 0 OR customer_activity_status = 'Active Customer'
+ORDER BY 
+    total_sales_value DESC, total_orders DESC
+LIMIT 100;

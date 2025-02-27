@@ -1,0 +1,62 @@
+WITH RecursiveMovieData AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ka.name AS actor_name,
+        ka.md5sum AS actor_md5,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ka.name) AS actor_order
+    FROM title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN aka_name ka ON ci.person_id = ka.person_id
+    WHERE t.production_year IS NOT NULL
+),
+MovieCompanyData AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY c.name) AS company_order
+    FROM movie_companies m
+    JOIN company_name c ON m.company_id = c.id
+    JOIN company_type ct ON m.company_type_id = ct.id
+),
+MovieKeywordData AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+MovieInfoData AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS movie_infos 
+    FROM movie_info mi
+    GROUP BY mi.movie_id
+)
+SELECT 
+    r.title_id,
+    r.title,
+    r.production_year,
+    r.actor_name,
+    r.actor_md5,
+    COALESCE(mcd.company_name, 'Unknown Company') AS company_name,
+    mcd.company_type,
+    mkd.keywords,
+    mkd.keyword_count,
+    mid.movie_infos
+FROM RecursiveMovieData r
+LEFT JOIN MovieCompanyData mcd ON r.title_id = mcd.movie_id
+LEFT JOIN MovieKeywordData mkd ON r.title_id = mkd.movie_id
+LEFT JOIN MovieInfoData mid ON r.title_id = mid.movie_id
+WHERE (r.actor_order % 2 = 1 OR r.actor_order IS NULL)   
+  AND (mcd.company_type IS NULL OR mcd.company_type LIKE 'Film%%')  
+  AND EXISTS (
+      SELECT 1
+      FROM MovieKeywordData mk
+      WHERE mk.movie_id = r.title_id AND mk.keyword_count > 2
+  )
+ORDER BY r.production_year DESC, r.title;

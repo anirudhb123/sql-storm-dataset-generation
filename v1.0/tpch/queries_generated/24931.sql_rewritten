@@ -1,0 +1,53 @@
+WITH recursive orders_summary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+supplier_totals AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    INNER JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    GROUP BY ps.ps_partkey
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        r.r_name AS region_name,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            ELSE CAST(p.p_size AS VARCHAR)
+        END AS part_size,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM part p
+    LEFT JOIN nation n ON p.p_brand = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    ps.ps_partkey,
+    pd.p_name,
+    ps.total_available,
+    pd.total_quantity,
+    pd.net_revenue,
+    pd.region_name,
+    pd.part_size,
+    O.o_orderkey,
+    COALESCE(O.total_lines, 0) AS total_lines,
+    COALESCE(O.last_ship_date, cast('1998-10-01' as date)) AS last_ship_date
+FROM supplier_totals ps
+FULL OUTER JOIN part_details pd ON ps.ps_partkey = pd.p_partkey
+LEFT JOIN orders_summary O ON pd.p_partkey = O.o_orderkey
+WHERE (pd.region_name IS NOT NULL OR pd.part_size = 'Unknown Size')
+  AND (ps.total_available > 1000 OR ps.avg_supply_cost < 50.00)
+ORDER BY ps.total_available DESC, O.net_revenue DESC
+LIMIT 100;

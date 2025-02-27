@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year >= 2000
+),
+ActorsInTopMovies AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT m.movie_id) AS num_movies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        cast_info c
+    JOIN 
+        RankedMovies rm ON c.movie_id = rm.id AND rm.rank <= 5
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = c.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        c.person_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count,
+        MAX(m.production_year) AS latest_movie_year,
+        MIN(m.production_year) AS earliest_movie_year
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        mc.company_id
+)
+SELECT 
+    p.name,
+    a.num_movies,
+    cs.movie_count,
+    cs.latest_movie_year,
+    CASE 
+        WHEN cs.earliest_movie_year IS NULL THEN 'No movies'
+        ELSE cs.earliest_movie_year::text || ' (First Movie)'
+    END AS earliest_movie
+FROM 
+    ActorsInTopMovies a
+JOIN 
+    aka_name p ON a.person_id = p.person_id
+LEFT JOIN 
+    CompanyStats cs ON cs.company_id IN (
+        SELECT 
+            mc.company_id 
+        FROM 
+            movie_companies mc 
+        JOIN 
+            cast_info ci ON mc.movie_id = ci.movie_id 
+        WHERE 
+            ci.person_id = p.person_id
+    )
+WHERE 
+    a.num_movies > 0
+ORDER BY 
+    a.num_movies DESC, p.name;

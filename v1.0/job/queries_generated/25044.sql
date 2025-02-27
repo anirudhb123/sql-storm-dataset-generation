@@ -1,0 +1,70 @@
+WITH MovieInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords,
+        COALESCE(cast.info_count, 0) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(*) AS info_count 
+        FROM 
+            movie_info 
+        GROUP BY 
+            movie_id
+    ) AS cast ON t.id = cast.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_participated,
+        GROUP_CONCAT(DISTINCT t.title ORDER BY t.title SEPARATOR ', ') AS movies_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.id, a.name
+),
+
+FinalBenchmark AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        m.keywords,
+        m.cast_count,
+        a.actor_id,
+        a.actor_name,
+        a.movies_participated,
+        a.movies_titles
+    FROM 
+        MovieInfo m
+    JOIN 
+        ActorInfo a ON m.cast_count > 0
+    ORDER BY 
+        m.cast_count DESC, m.production_year DESC
+)
+
+SELECT 
+    *
+FROM 
+    FinalBenchmark
+LIMIT 100;

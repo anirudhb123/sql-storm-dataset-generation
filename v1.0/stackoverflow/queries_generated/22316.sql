@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '2 years' 
+        AND p.Score > 0
+),
+
+PostWithTags AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        t.TagName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(rp.Tags, '><')) AS TagName) AS t ON TRUE
+    WHERE 
+        rp.Rank <= 10
+),
+
+VoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+PostInfo AS (
+    SELECT 
+        pwt.PostId,
+        pwt.Title,
+        pwt.CreationDate,
+        pwt.ViewCount,
+        pwt.CommentCount,
+        vs.UpVotes,
+        vs.DownVotes,
+        vs.TotalVotes,
+        CASE 
+            WHEN vs.TotalVotes = 0 THEN NULL 
+            ELSE ROUND((vs.UpVotes::decimal / vs.TotalVotes) * 100, 2) 
+        END AS UpVotePercentage
+    FROM 
+        PostWithTags pwt
+    LEFT JOIN 
+        VoteSummary vs ON pwt.PostId = vs.PostId
+)
+
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.CreationDate,
+    pi.ViewCount,
+    pi.CommentCount,
+    COALESCE(pi.UpVotePercentage, 'No Votes') AS UpVotePercentage,
+    CASE 
+        WHEN pi.CommentCount > 100 THEN 'High Engagement'
+        WHEN pi.CommentCount BETWEEN 50 AND 100 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementCategory,
+    STRING_AGG(pt.TagName, ', ') AS Tags
+FROM 
+    PostInfo pi
+LEFT JOIN 
+    Tags pt ON pi.PostId = pt.ExcerptPostId -- Assuming tags relate to post excerpts
+GROUP BY 
+    pi.PostId, pi.Title, pi.CreationDate, pi.ViewCount, pi.CommentCount, pi.UpVotePercentage
+ORDER BY 
+    pi.CreationDate DESC
+LIMIT 20;
+
+-- Note: 
+-- 1. The `Tags` relationship may not accurately represent the way tags are structured but gives an idea of how to incorporate tags in complex SQL. 
+-- 2. The query uses multiple window functions, correlated subqueries, aggregates, and string manipulation, showcasing complex SQL capabilities. 
+-- 3. Adjust table relationships as needed based on the specific database schema or implementation details.

@@ -1,0 +1,26 @@
+WITH StringManipulation AS (
+    SELECT 
+        DISTINCT
+        CONCAT('Supplier: ', s_name, ' | Address: ', s_address, ' | Nation: ', n_name) AS SupplierDetails,
+        LENGTH(s_comment) AS CommentLength,
+        REPLACE(LOWER(s_comment), 'supply', 'supplied') AS ModifiedComment
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE LENGTH(s_comment) > 50 
+),
+AggregatedDetails AS (
+    SELECT 
+        SUBSTRING(ModifiedComment FROM 1 FOR 50) AS ShortComment,
+        COUNT(*) AS SupplierCount,
+        AVG(CommentLength) AS AvgCommentLength
+    FROM StringManipulation
+    GROUP BY ShortComment
+)
+SELECT 
+    SupplierDetails,
+    ShortComment,
+    SupplierCount,
+    AvgCommentLength
+FROM AggregatedDetails
+ORDER BY SupplierCount DESC
+LIMIT 10;

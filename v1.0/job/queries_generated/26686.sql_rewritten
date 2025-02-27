@@ -1,0 +1,70 @@
+WITH FilteredTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_title t 
+    JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000
+        AND t.kind_id = (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        )
+),
+FilteredPersons AS (
+    SELECT 
+        a.id AS person_id,
+        a.name AS actor_name,
+        c.role_id,
+        r.role
+    FROM 
+        aka_name a 
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role LIKE '%actor%'
+),
+ActorTitleRank AS (
+    SELECT 
+        f.title_id,
+        f.title,
+        f.production_year,
+        f.movie_keyword,
+        p.person_id,
+        p.actor_name,
+        ROW_NUMBER() OVER (PARTITION BY f.title_id ORDER BY p.actor_name) AS actor_rank
+    FROM 
+        FilteredTitles f
+    JOIN 
+        FilteredPersons p ON f.title_id IN (
+        SELECT movie_id FROM cast_info WHERE person_id = p.person_id
+        )
+),
+FinalResults AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        STRING_AGG(DISTINCT a.actor_name, ', ') AS actors
+    FROM 
+        ActorTitleRank a
+    WHERE 
+        a.actor_rank <= 5 
+    GROUP BY 
+        a.title_id, a.title, a.production_year
+)
+SELECT 
+    title,
+    production_year,
+    actors
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, title;

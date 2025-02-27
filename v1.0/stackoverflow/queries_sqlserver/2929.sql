@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01 12:34:56')
+        AND p.Score > 0
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownvoteCount,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        PostId
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(pvs.UpvoteCount, 0) AS UpvoteCount,
+    COALESCE(pvs.DownvoteCount, 0) AS DownvoteCount,
+    COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(cpr.CloseReasons, 'No close reasons') AS CloseReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteStats pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

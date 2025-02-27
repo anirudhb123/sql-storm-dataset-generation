@@ -1,0 +1,80 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(vt.Id = 2) - SUM(vt.Id = 3), 0) AS Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.UserId) AS BadgeCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserId END) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+HighlightPosts AS (
+    SELECT 
+        p.Title,
+        ps.Score,
+        ps.CommentCount,
+        ps.BadgeCount,
+        ps.CloseCount,
+        ROW_NUMBER() OVER (ORDER BY ps.Score DESC, ps.CommentCount DESC) as Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostScores ps ON p.Id = ps.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+        AND p.AcceptedAnswerId IS NULL
+),
+UserHighlights AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(uvc.UpVotesCount, 0) AS UpVotesCount,
+        COALESCE(uvc.DownVotesCount, 0) AS DownVotesCount,
+        COUNT(DISTINCT hp.PostId) AS HighlightedPostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserVoteCounts uvc ON u.Id = uvc.UserId
+    LEFT JOIN 
+        HighlightPosts hp ON u.Id = hp.CloseCount
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    uh.DisplayName,
+    uh.UpVotesCount,
+    uh.DownVotesCount,
+    uh.HighlightedPostsCount,
+    CASE 
+        WHEN uh.HighlightedPostsCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS UserStatus
+FROM 
+    UserHighlights uh
+WHERE 
+    uh.UpVotesCount > uh.DownVotesCount
+    OR uh.HighlightedPostsCount > (SELECT COUNT(*) / 10 FROM Users)
+ORDER BY 
+    uh.HighlightedPostsCount DESC, uh.UpVotesCount DESC;

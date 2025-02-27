@@ -1,0 +1,65 @@
+WITH recursive movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level,
+        m.production_year,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        e.episode_of_id AS movie_id,
+        e.title AS movie_title,
+        mh.level + 1,
+        e.production_year,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title AS e
+    JOIN 
+        movie_hierarchy AS mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    h.movie_title,
+    h.production_year,
+    COALESCE(NULLIF(c.name, ''), 'Unknown') AS company_name,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE 
+            WHEN rw.role IS NOT NULL AND rw.role != 'Cameo' THEN ci.nr_order 
+            ELSE NULL 
+        END) AS avg_cast_order,
+    SUM(mk.id IS NOT NULL) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER(PARTITION BY h.production_year ORDER BY h.movie_title) AS rank_within_year
+FROM 
+    movie_hierarchy AS h
+LEFT JOIN 
+    complete_cast AS cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON ci.movie_id = h.movie_id
+LEFT JOIN 
+    movie_companies AS mc ON mc.movie_id = h.movie_id
+LEFT JOIN 
+    company_name AS c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = h.movie_id
+LEFT JOIN 
+    role_type AS rw ON ci.role_id = rw.id
+WHERE 
+    h.production_year IS NOT NULL
+    AND h.production_year >= 1980
+    AND (c.country_code IS NOT NULL OR ci.note IS NULL)
+GROUP BY 
+    h.movie_title, h.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1
+ORDER BY 
+    h.production_year DESC, total_cast DESC, h.movie_title;
+
+-- Note: The usage of COALESCE, NULLIF, SUM with a comparison yielding a boolean, and recursive CTE 
+-- showcases various complex SQL logic, along with string aggregation and window functions.

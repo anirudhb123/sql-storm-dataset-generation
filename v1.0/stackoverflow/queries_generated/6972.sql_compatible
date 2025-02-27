@@ -1,0 +1,51 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount,
+        COALESCE((SELECT SUM(Score) FROM Votes v WHERE v.PostId = p.Id), 0) AS TotalScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        PostCreationDate,
+        OwnerDisplayName,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        PostDetails
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.TotalScore,
+    tp.PostCreationDate,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts p ON t.ExcerptPostId = p.Id 
+     WHERE p.Id = tp.PostId) AS Tags
+FROM 
+    TopPosts tp
+WHERE 
+    tp.Rank <= 10
+ORDER BY 
+    tp.TotalScore DESC;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT tg.TagName) FILTER (WHERE tg.TagName IS NOT NULL) AS TagNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '>')) AS tg(TagName) ON TRUE
+    WHERE 
+        p.CreationDate > current_timestamp - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+), 
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 
+                 WHEN v.VoteTypeId = 3 THEN -1 
+                 ELSE 0 END) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only for Questions and Answers
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.RankByViews,
+    pv.NetVotes,
+    CASE 
+        WHEN pv.NetVotes IS NULL THEN 'No Votes' 
+        ELSE CASE 
+            WHEN pv.NetVotes > 0 THEN 'Popular' 
+            WHEN pv.NetVotes < 0 THEN 'Controversial' 
+            ELSE 'Neutral' 
+        END 
+    END AS VoteStatus,
+    CASE 
+        WHEN rp.CommentCount = 0 THEN 'No Comments' 
+        WHEN rp.CommentCount > 10 THEN 'Highly Engaged' 
+        ELSE 'Moderately Engaged' 
+    END AS EngagementLevel,
+    COALESCE(array_to_string(rp.TagNames, ', '), 'No Tags') AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    (rp.RankByViews <= 5 OR pv.NetVotes IS NOT NULL)
+ORDER BY 
+    rp.RankByViews, 
+    pv.NetVotes DESC NULLS LAST;
+

@@ -1,0 +1,63 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+supplier_parts AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+price_details AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_custkey, 
+    co.c_name, 
+    co.o_orderkey, 
+    co.o_totalprice, 
+    sp.p_partkey, 
+    sp.p_name, 
+    pd.total_price,
+    AVG(sp.ps_supplycost) OVER (PARTITION BY sp.p_partkey) AS avg_supply_cost
+FROM 
+    cust_orders co
+LEFT JOIN 
+    price_details pd ON co.o_orderkey = pd.l_orderkey
+JOIN 
+    supplier_parts sp ON sp.ps_partkey IN (SELECT p_partkey FROM part WHERE p_size > 10)
+WHERE 
+    co.order_rank = 1
+    AND (pd.total_price IS NOT NULL OR pd.total_price > 1000)
+ORDER BY 
+    co.c_name, 
+    co.o_orderkey DESC;

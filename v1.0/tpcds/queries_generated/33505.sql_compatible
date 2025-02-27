@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        1 AS level,
+        ss_item_sk,
+        ss_quantity,
+        ss_ext_sales_price
+    FROM
+        store_sales ss
+    JOIN store s ON ss_store_sk = s_store_sk
+    WHERE
+        ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    UNION ALL
+    SELECT
+        s_store_sk,
+        s_store_name,
+        level + 1,
+        ss_item_sk,
+        ss_quantity,
+        ss_ext_sales_price
+    FROM
+        store_sales ss
+    JOIN store s ON ss_store_sk = s_store_sk
+    JOIN SalesHierarchy sh ON ss_item_sk = sh.ss_item_sk
+    WHERE
+        ss_quantity > 0
+        AND sh.level < 5
+)
+SELECT
+    s.s_store_name,
+    SUM(sh.ss_quantity) AS total_quantity,
+    AVG(sh.ss_ext_sales_price) AS avg_sales_price,
+    MIN(sh.ss_ext_sales_price) AS min_sales_price,
+    MAX(sh.ss_ext_sales_price) AS max_sales_price,
+    COUNT(DISTINCT sh.s_store_sk) AS store_count
+FROM
+    SalesHierarchy sh
+JOIN store s ON sh.s_store_sk = s.s_store_sk
+WHERE
+    sh.ss_quantity IS NOT NULL
+GROUP BY
+    s.s_store_name,
+    sh.ss_item_sk,
+    sh.ss_quantity,
+    sh.ss_ext_sales_price
+HAVING
+    SUM(sh.ss_quantity) > 0
+ORDER BY
+    total_quantity DESC
+LIMIT 10;

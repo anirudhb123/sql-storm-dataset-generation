@@ -1,0 +1,42 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopNationOrders AS (
+    SELECT 
+        n.n_name,
+        SUM(ro.o_totalprice) AS total_sales,
+        COUNT(ro.o_orderkey) AS order_count
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.order_rank <= 5
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    rn.r_name AS region,
+    TNO.n_name AS nation,
+    TNO.total_sales,
+    TNO.order_count,
+    RANK() OVER (ORDER BY TNO.total_sales DESC) AS sales_rank
+FROM 
+    region rn
+JOIN 
+    nation n ON rn.r_regionkey = n.n_regionkey
+JOIN 
+    TopNationOrders TNO ON n.n_nationkey = TNO.n_nationkey
+ORDER BY 
+    rn.r_name, sales_rank;

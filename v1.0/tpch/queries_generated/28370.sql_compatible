@@ -1,0 +1,28 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    c.c_name, 
+    o.o_orderkey, 
+    STRING_AGG(CONCAT('Supplier:', s.s_name, ', Part:', p.p_name, ', Quantity:', l.l_quantity), '; ') AS OrderDetails,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY p.p_partkey) AS OrderCount
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%metal%'
+    AND o.o_orderdate BETWEEN '1994-01-01' AND '1994-12-31'
+    AND s.s_acctbal > 5000
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey, p.p_partkey, s.s_suppkey, c.c_custkey
+ORDER BY 
+    p.p_name, o.o_orderkey;

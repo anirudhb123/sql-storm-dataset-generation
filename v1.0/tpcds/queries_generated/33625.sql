@@ -1,0 +1,40 @@
+
+WITH RECURSIVE top_income_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_income_band_sk, hd.hd_buy_potential,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE cd.cd_purchase_estimate > 1000 AND cd.cd_gender = 'F'
+),
+monthly_sales AS (
+    SELECT d.d_year, d.d_month_seq,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+sales_by_income_band AS (
+    SELECT ib.ib_income_band_sk, 
+           SUM(ws.ws_ext_sales_price) AS sales_in_band,
+           COUNT(DISTINCT ws.ws_order_number) AS orders_in_band
+    FROM web_sales ws
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN income_band ib ON cd.cd_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+    GROUP BY ib.ib_income_band_sk
+),
+ranked_sales AS (
+    SELECT a.ib_income_band_sk, a.sales_in_band, a.orders_in_band,
+           RANK() OVER (ORDER BY sales_in_band DESC) AS sales_rank
+    FROM sales_by_income_band a
+)
+SELECT ti.c_first_name, ti.c_last_name, ti.cd_income_band_sk,
+       ms.d_year, ms.d_month_seq, ms.total_sales,
+       r.sales_rank, r.sales_in_band
+FROM top_income_customers ti
+LEFT JOIN monthly_sales ms ON ms.d_year = 2023
+JOIN ranked_sales r ON ti.cd_income_band_sk = r.ib_income_band_sk
+WHERE r.sales_rank <= 5
+ORDER BY ms.d_year, ms.d_month_seq, r.sales_rank;

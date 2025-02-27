@@ -1,0 +1,83 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RevisionRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 2, 4, 5) 
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+PostWithLastHistory AS (
+    SELECT 
+        p.*,
+        ph.RevisionRank,
+        ph.CreationDate AS LastHistoryDate,
+        ph.UserId AS LastEditorId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId AND ph.RevisionRank = 1
+)
+SELECT 
+    p.Id AS PostID,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    u.DisplayName AS LastEditor,
+    u.Reputation,
+    p.LastActivityDate,
+    COALESCE(B.Count, 0) AS BadgeCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS HasAcceptedAnswer,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostWithLastHistory p
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    Users u ON p.LastEditorId = u.Id
+LEFT JOIN 
+    Badges B ON B.UserId = u.Id
+LEFT JOIN 
+    Tags t ON t.WikiPostId = p.Id
+WHERE 
+    p.LastActivityDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days' 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, ps.VoteCount, ps.UpVotes, ps.DownVotes, u.DisplayName, u.Reputation, p.LastActivityDate, B.Count
+ORDER BY 
+    p.Score DESC, ps.VoteCount DESC 
+LIMIT 10; 

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND mc.note < '(2007-2008) (Norway) (theatrical) (limited release)' AND ci.person_id < 202849 AND n.name_pcode_cf IN ('B514', 'C413', 'D5434', 'E5626', 'H61', 'L2525', 'L6213', 'M4243', 'O3415') AND cn.md5sum < 'c048e0e3e4d0e6e168ce8f96eab18206';

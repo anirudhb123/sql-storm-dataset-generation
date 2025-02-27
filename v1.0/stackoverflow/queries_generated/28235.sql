@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  -- Answers
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+), RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Body and Tags
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    re.UserDisplayName AS LastEditor,
+    re.EditDate AS LastEditDate,
+    re.EditComment AS LastEditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentEdits re ON rp.Id = re.PostId AND re.EditRank = 1
+WHERE 
+    rp.ViewCount > 100
+ORDER BY 
+    rp.ViewCount DESC,
+    rp.CreationDate DESC
+LIMIT 10;

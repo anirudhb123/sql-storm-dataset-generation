@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY p.Id
+),
+PostHistoryWithUser AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        U.DisplayName AS EditorDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS history_rank
+    FROM PostHistory ph
+    JOIN Users U ON ph.UserId = U.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12) -- Only focus on Close, Reopen, Delete
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges,
+        COALESCE(SUM(b.Date >= NOW() - INTERVAL '1 year'), 0) AS RecentlyAwarded
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    ph.UserId AS LastEditorId,
+    ph.EditorDisplayName AS LastEditorDisplayName,
+    ph.HistoryDate,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ub.RecentlyAwarded,
+    CASE 
+        WHEN ub.GoldBadges > 0 THEN 'Gold Achiever'
+        WHEN ub.SilverBadges > 0 THEN 'Silver Achiever'
+        ELSE 'No Achievements'
+    END AS BadgeStatus
+FROM RankedPosts rp
+LEFT JOIN PostHistoryWithUser ph ON rp.PostId = ph.PostId AND ph.history_rank = 1 -- Most recent history
+LEFT JOIN UserBadges ub ON rp.PostId = ub.UserId
+WHERE rp.CommentCount > 10 -- Only consider posts with more than 10 comments
+AND (rp.UpVotes > rp.DownVotes OR rp.ViewCount > 100) -- Keep posts with more upvotes than downvotes or with high views
+ORDER BY rp.CreationDate DESC, rp.ViewCount DESC;

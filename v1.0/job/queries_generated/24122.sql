@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+TitlesWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+),
+PersonInfoCounts AS (
+    SELECT 
+        pi.person_id,
+        COUNT(DISTINCT pi.info_type_id) AS info_count
+    FROM 
+        person_info pi
+    GROUP BY 
+        pi.person_id
+),
+MaxKeywordMovies AS (
+    SELECT 
+        movie_id
+    FROM 
+        movie_keyword
+    GROUP BY 
+        movie_id
+    HAVING 
+        COUNT(keyword_id) > (SELECT AVG(keyword_count) FROM (SELECT COUNT(keyword_id) AS keyword_count FROM movie_keyword GROUP BY movie_id) AS subquery)
+),
+FinalResults AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        tk.keywords,
+        pic.info_count,
+        CASE 
+            WHEN rm.actor_count > 5 THEN 'Highly Casted'
+            WHEN rm.actor_count > 0 THEN 'Moderately Casted'
+            ELSE 'No Cast'
+        END AS casting_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        TitlesWithKeywords tk ON rm.id = tk.movie_id
+    LEFT JOIN 
+        PersonInfoCounts pic ON pic.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.id)
+    WHERE 
+        rm.rank <= 10
+        AND rm.production_year IS NOT NULL
+        AND tk.keywords IS NOT NULL
+        AND rm.id IS NOT NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN info_count IS NULL THEN 'No Info'
+        ELSE 'Info Available'
+    END AS info_availability
+FROM 
+    FinalResults
+ORDER BY 
+    actor_count DESC, production_year DESC
+LIMIT 20;
+

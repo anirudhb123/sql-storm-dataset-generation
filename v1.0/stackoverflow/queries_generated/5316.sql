@@ -1,0 +1,86 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        MAX(p.LastActivityDate) AS LastActive,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        AVG(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE NULL END) AS CommentRatio
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.CommentCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ua.LastActive,
+    ua.BadgeCount,
+    pe.Title AS PopularPostTitle,
+    pe.ViewCount AS PopularPostViews,
+    pe.Score AS PopularPostScore,
+    pe.UpVoteCount AS PopularPostUpVotes,
+    pe.DownVoteCount AS PopularPostDownVotes,
+    pt.TagName AS PopularTagName,
+    pt.PostCount AS PopularTagUseCount
+FROM 
+    UserActivity ua
+JOIN 
+    PostEngagement pe ON ua.AnswerCount > 5 -- Only consider users with more than 5 answers
+JOIN 
+    PopularTags pt ON pt.PostCount > 5 -- Only consider tags used in more than 5 posts
+ORDER BY 
+    ua.LastActive DESC, ua.UpVotes DESC
+LIMIT 100;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1 
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_regionkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATEADD(DAY, -30, DATE '1998-10-01')
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name, 
+       n.n_name AS nation_name, 
+       ss.s_name AS supplier_name, 
+       COALESCE(ls.total_extended_price, 0) AS total_sales, 
+       ss.total_supply_cost,
+       rs.order_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_summary ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN lineitem_summary ls ON ss.s_suppkey = ls.l_orderkey
+LEFT JOIN ranked_orders rs ON ss.s_suppkey = rs.o_custkey
+WHERE r.r_name LIKE 'N%' 
+AND (ss.total_supply_cost IS NULL OR ss.total_supply_cost > 1000)
+ORDER BY total_sales DESC, ss.total_supply_cost ASC;

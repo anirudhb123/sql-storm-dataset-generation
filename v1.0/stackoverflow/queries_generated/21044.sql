@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.CreationDate DESC) AS PostRank,
+        COALESCE(CAST(P.Body AS varchar(255)), 'No content provided') AS ShortBody,
+        (SELECT COUNT(*) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2023-01-01' AND 
+        P.ViewCount > 100
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS CloseDate,
+        COUNT(*) AS CloseHistoryCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.OwnerDisplayName,
+    RP.ShortBody,
+    RP.Score,
+    RP.CreationDate,
+    RP.PostRank,
+    COALESCE(CP.CloseDate, 'Not Closed') AS CloseStatus,
+    COALESCE(CP.CloseHistoryCount, 0) AS ClosureCount,
+    CASE 
+        WHEN RP.UpVoteCount > RP.DownVoteCount THEN 'Positive'
+        WHEN RP.UpVoteCount < RP.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    CASE 
+        WHEN RP.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRankStatus
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+WHERE 
+    (RP.PostRank <= 3 OR RP.PostRank IS NULL)
+    AND (RP.Score > 5 OR RP.CreationDate > NOW() - INTERVAL '30 days')
+    AND NOT EXISTS (
+         SELECT 1 
+         FROM Comments C 
+         WHERE C.PostId = RP.PostId AND C.CreationDate >= NOW() - INTERVAL '1 day'
+    )
+ORDER BY 
+    RP.Score DESC, RP.CreationDate DESC;
+

@@ -1,0 +1,42 @@
+WITH RECURSIVE OrderHistory AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_quantity, l.l_extendedprice, l.l_discount, c.c_name, ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate <= DATE '2023-12-31'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.l_quantity, oh.l_extendedprice, oh.l_discount, oh.c_name, ROW_NUMBER() OVER (PARTITION BY oh.o_orderkey ORDER BY oh.rn) + 1
+    FROM OrderHistory oh
+    JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    WHERE oh.rn < 5
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+RegionSupplier AS (
+    SELECT r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+),
+DiscountedOrders AS (
+    SELECT oh.o_orderkey, SUM(oh.l_extendedprice * (1 - oh.l_discount)) AS discounted_total
+    FROM OrderHistory oh
+    WHERE oh.l_discount > 0.05
+    GROUP BY oh.o_orderkey
+)
+
+SELECT r.r_name,
+       COALESCE(rs.supplier_count, 0) AS total_suppliers,
+       COUNT(DISTINCT doi.o_orderkey) AS total_discounted_orders,
+       SUM(doi.discounted_total) AS sum_discounted_total,
+       MAX(supply.total_supply_value) AS max_supply_value
+FROM RegionSupplier rs
+LEFT JOIN DiscountedOrders doi ON rs.supplier_count > 0
+LEFT JOIN SupplierInfo supply ON supply.total_supply_value > 10000
+GROUP BY r.r_name
+ORDER BY total_suppliers DESC, sum_discounted_total DESC;

@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.CreationDate,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        P.Title,
+        P.Score,
+        PH.Comment,
+        PH.CreationDate 
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Location,
+    COALESCE(SUM(PVS.UpVotes) - SUM(PVS.DownVotes), 0) AS NetVotes,
+    COALESCE(SUM(CASE WHEN CP.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostCount,
+    UBB.GoldBadges,
+    UBB.SilverBadges,
+    UBB.BronzeBadges,
+    SUM(COALESCE(RPH.Level, 0)) AS TotalPostHierarchyLevel
+FROM 
+    Users U
+LEFT JOIN 
+    PostVoteSummary PVS ON U.Id = PVS.UserId
+LEFT JOIN 
+    ClosedPosts CP ON U.Id = CP.UserId
+LEFT JOIN 
+    UserBadges UBB ON U.Id = UBB.UserId
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON U.Id = RPH.OwnerUserId
+WHERE 
+    U.Reputation > 100
+GROUP BY 
+    U.DisplayName, U.Reputation, U.Location, UBB.GoldBadges, UBB.SilverBadges, UBB.BronzeBadges
+ORDER BY 
+    NetVotes DESC, U.Reputation ASC;

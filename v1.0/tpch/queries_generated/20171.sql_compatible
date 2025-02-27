@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS Rnk
+    FROM 
+        supplier s
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice * 0.8 AS discounted_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 30 
+        AND p.p_retailprice IS NOT NULL
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+        AND l.l_shipdate > '1995-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), RegionNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        r.r_regionkey,
+        r.r_name
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT 
+    COALESCE(rn.n_name, 'Unknown') AS nation_name,
+    rp.p_name AS part_name,
+    rs.s_name AS supplier_name,
+    MAX(od.total_price) AS max_order_value,
+    AVG(CASE WHEN od.total_price > 1000 THEN od.total_price ELSE NULL END) AS avg_high_value_order,
+    MIN(CASE WHEN rs.Rnk = 1 THEN rs.s_acctbal ELSE NULL END) AS highest_supplier_acctbal
+FROM 
+    FilteredParts rp
+JOIN 
+    partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN 
+    OrderDetails od ON od.o_orderkey = ps.ps_partkey 
+JOIN 
+    RegionNation rn ON rs.s_nationkey = rn.n_nationkey
+WHERE 
+    rp.discounted_price < 500 
+    OR rs.s_acctbal IS NULL
+GROUP BY 
+    rn.n_name, rp.p_name, rs.s_name
+HAVING 
+    COUNT(DISTINCT od.o_orderkey) > 5 
+ORDER BY 
+    max_order_value DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,52 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT c.name) AS company_names,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        aka_name ak ON ak.id = at.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.id
+),
+TrendingMovies AS (
+    SELECT 
+        title,
+        production_year,
+        aka_names,
+        company_names,
+        keywords,
+        cast_count,
+        RANK() OVER (ORDER BY production_year DESC, cast_count DESC) AS rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    title,
+    production_year,
+    aka_names,
+    company_names,
+    keywords,
+    cast_count
+FROM 
+    TrendingMovies
+WHERE 
+    rank <= 10
+ORDER BY 
+    production_year DESC, cast_count DESC;

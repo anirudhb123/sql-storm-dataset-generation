@@ -1,0 +1,81 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTagStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(P.Tags, '><')) AS TagName
+        ) AS T ON TRUE
+    GROUP BY 
+        P.Id
+)
+SELECT
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalAnswers,
+    U.TotalScore,
+    U.AvgViewCount,
+    PT.TagCount,
+    COALESCE(RH.Level, 0) AS AnswerLevel,
+    P.Title AS QuestionTitle,
+    CASE 
+        WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted' 
+        ELSE 'Not Accepted' 
+    END AS AnswerStatus
+FROM 
+    UserPostStats U
+LEFT JOIN 
+    Posts P ON P.OwnerUserId = U.UserId AND P.PostTypeId = 1  
+LEFT JOIN 
+    PostTagStats PT ON PT.PostId = P.Id
+LEFT JOIN 
+    RecursivePostHierarchy RH ON RH.PostId = P.AcceptedAnswerId
+WHERE 
+    U.TotalScore > 100  
+GROUP BY 
+    U.UserId, U.DisplayName, U.TotalPosts, U.TotalAnswers, U.TotalScore, U.AvgViewCount, PT.TagCount, RH.Level, P.Title
+ORDER BY 
+    U.TotalPosts DESC, 
+    U.AvgViewCount DESC
+LIMIT 50;

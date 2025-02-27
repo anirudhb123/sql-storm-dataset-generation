@@ -1,0 +1,105 @@
+WITH RecursivePostTree AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        1 as Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Questions
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostTree R ON P.ParentId = R.Id
+    WHERE 
+        P.PostTypeId = 2  -- Answers
+),
+
+RankedPosts AS (
+    SELECT 
+        RPT.Id,
+        RPT.Title,
+        RPT.CreationDate,
+        RPT.Score,
+        RPT.Level,
+        RANK() OVER (PARTITION BY RPT.OwnerUserId ORDER BY RPT.Score DESC) as ScoreRank
+    FROM 
+        RecursivePostTree RPT
+),
+
+UserBadges AS (
+    SELECT 
+        U.Id as UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) as GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) as SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) as BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id as PostId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) as CommentCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) as VoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) as UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) as DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    PP.PostId,
+    PP.CommentCount,
+    PP.VoteCount,
+    PP.UpVotes,
+    PP.DownVotes,
+    RP.Title,
+    RP.Score as PostScore,
+    RP.Level,
+    RP.ScoreRank
+FROM 
+    Users U
+JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    PostStatistics PP ON U.Id = PP.PostId
+LEFT JOIN 
+    RankedPosts RP ON U.Id = RP.OwnerUserId
+WHERE 
+    U.Reputation > 1000
+    AND (RP.ScoreRank = 1 OR RP.ScoreRank IS NULL)
+ORDER BY 
+    U.Reputation DESC, 
+    RP.Score DESC;

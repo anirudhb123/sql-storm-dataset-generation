@@ -1,0 +1,76 @@
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_profit IS NOT NULL AND ws_quantity > 0
+),
+AggregatedReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+FrequentCustomers AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    JOIN 
+        customer ON sr_customer_sk = c_customer_sk
+    WHERE 
+        sr_return_quantity > 1
+    GROUP BY 
+        c_customer_sk
+    HAVING 
+        COUNT(DISTINCT sr_ticket_number) > 5
+),
+MaxProfits AS (
+    SELECT 
+        ws_item_sk,
+        MAX(ws_net_profit) AS max_profit
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    ca.city AS customer_city,
+    COUNT(DISTINCT c.c_customer_id) AS active_customers,
+    COALESCE(SUM(a.total_return_quantity), 0) AS total_returns,
+    SUM(s.ws_net_profit) AS total_net_profit,
+    STRING_AGG(DISTINCT wp_type, ', ') FILTER (WHERE wp_web_page_sk IS NOT NULL) AS web_page_types
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    RankedSales s ON c.c_customer_sk = s.ws_item_sk
+LEFT JOIN 
+    AggregatedReturns a ON s.ws_item_sk = a.sr_item_sk
+LEFT JOIN 
+    web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    MaxProfits mp ON s.ws_item_sk = mp.ws_item_sk
+JOIN 
+    date_dim d ON d.d_date_sk = s.ws_sold_date_sk AND d.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+WHERE 
+    s.rank = 1
+    AND ca.ca_state IS NOT NULL
+    AND (mp.max_profit IS NULL OR mp.max_profit > 0)
+GROUP BY 
+    ca.city
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY 
+    total_returns DESC, customer_city ASC;

@@ -1,0 +1,47 @@
+
+WITH processed_addresses AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LOWER(REPLACE(ca_city, ' ', '_')) AS processed_city,
+        SUBSTRING(ca_state FROM 1 FOR 2) AS state_abbreviation,
+        REGEXP_REPLACE(ca_zip, '([0-9]{5})(-[0-9]{4})?', '\\1') AS standardized_zip
+    FROM customer_address
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        cd.cd_gender,
+        CA.full_address,
+        CA.processed_city,
+        CA.state_abbreviation,
+        CA.standardized_zip
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN processed_addresses CA ON c.c_current_addr_sk = CA.ca_address_sk
+),
+sales_data AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        c.processed_city,
+        c.state_abbreviation
+    FROM web_sales ws
+    JOIN customer_info c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY ws.ws_item_sk, c.processed_city, c.state_abbreviation
+)
+SELECT
+    s.item_name,
+    sd.processed_city,
+    sd.state_abbreviation,
+    sd.total_quantity_sold,
+    sd.total_sales,
+    RANK() OVER (PARTITION BY sd.processed_city ORDER BY sd.total_sales DESC) AS sales_rank
+FROM sales_data sd
+JOIN item s ON sd.ws_item_sk = s.i_item_sk
+WHERE sd.total_quantity_sold > 100
+ORDER BY sd.processed_city, sales_rank;

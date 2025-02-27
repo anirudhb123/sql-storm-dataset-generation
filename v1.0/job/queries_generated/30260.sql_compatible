@@ -1,0 +1,87 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    WHERE 
+        mh.level < 5  
+),
+CastWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+MoviesWithKeywordCount AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id, mt.title
+),
+SelectedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(cwk.actor_name, 'No Cast') AS actor_name,
+        COALESCE(cwk.role, 'Unknown Role') AS role,
+        mwkc.keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastWithRoles cwk ON mh.movie_id = cwk.movie_id AND cwk.actor_rank = 1  
+    LEFT JOIN 
+        MoviesWithKeywordCount mwkc ON mh.movie_id = mwkc.movie_id
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.actor_name,
+    sm.role,
+    sm.keyword_count,
+    CASE 
+        WHEN sm.keyword_count IS NULL THEN 'No Keywords'
+        WHEN sm.keyword_count = 0 THEN 'No Keywords Listed'
+        ELSE 'Has Keywords'
+    END AS keyword_status
+FROM 
+    SelectedMovies sm
+WHERE 
+    (sm.production_year BETWEEN 1990 AND 2023) 
+    AND (sm.actor_name IS NOT NULL OR sm.role IS NOT NULL)
+ORDER BY 
+    sm.production_year DESC, 
+    sm.title ASC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE UserScoreCTE AS (
+    SELECT U.Id AS UserId, U.Reputation, U.CreationDate, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT U.Id, U.Reputation, U.CreationDate, Level + 1
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    JOIN UserScoreCTE CTE ON CTE.UserId = P.OwnerUserId
+    WHERE U.Reputation > 1000 AND CTE.Level < 5
+),
+TopActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS ViewRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount, P.CreationDate
+    HAVING P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 DAYS'
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    T.ViewRank,
+    T.Title,
+    T.ViewCount,
+    T.UpVotesCount,
+    T.DownVotesCount
+FROM Users U
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+JOIN TopActivePosts T ON T.ViewRank <= 5
+WHERE U.Id IN (SELECT UserId FROM UserScoreCTE)
+ORDER BY U.Reputation DESC, T.ViewCount DESC;

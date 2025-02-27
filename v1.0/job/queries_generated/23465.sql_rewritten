@@ -1,0 +1,80 @@
+WITH RECURSIVE title_path AS (
+    SELECT
+        mt.id AS movie_id,
+        0 AS level,
+        ARRAY[mt.title] AS title_chain
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        tp.level + 1,
+        tp.title_chain || ml.title
+    FROM
+        title_path tp
+    JOIN
+        movie_link ml ON tp.movie_id = ml.movie_id
+    WHERE
+        tp.level < 5 
+),
+partial_cast AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order,
+        COALESCE(aka.name, na.name) AS actor_name
+    FROM
+        cast_info ci
+    LEFT JOIN
+        aka_name aka ON ci.person_id = aka.person_id
+    LEFT JOIN
+        name na ON ci.person_id = na.imdb_id
+),
+info_summary AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_details,
+        COALESCE(SUM(CASE WHEN mi.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS note_count
+    FROM
+        movie_companies mc
+    LEFT JOIN
+        movie_info mi ON mc.movie_id = mi.movie_id
+    LEFT JOIN
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY
+        mc.movie_id
+),
+final_performance AS (
+    SELECT
+        tt.movie_id,
+        tt.title_chain[array_length(tt.title_chain, 1)] AS final_title,
+        pc.actor_name,
+        pc.actor_order,
+        is.info_details,
+        is.note_count
+    FROM
+        title_path tt
+    JOIN
+        partial_cast pc ON tt.movie_id = pc.movie_id
+    JOIN
+        info_summary is ON tt.movie_id = is.movie_id
+    ORDER BY
+        tt.movie_id, pc.actor_order
+)
+SELECT
+    fp.final_title,
+    COUNT(*) FILTER (WHERE fp.note_count > 0) AS chapter_count,
+    ROW_NUMBER() OVER (ORDER BY fp.final_title) AS title_rank,
+    SUM(CASE WHEN fp.note_count IS NULL THEN 1 ELSE 0 END) AS null_notes
+FROM
+    final_performance fp
+GROUP BY
+    fp.final_title
+HAVING
+    COUNT(fp.actor_name) > 1 AND COUNT(fp.note_count) > 0
+ORDER BY
+    title_rank DESC NULLS FIRST;

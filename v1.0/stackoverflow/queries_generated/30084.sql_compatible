@@ -1,0 +1,91 @@
+
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+), 
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        U.DisplayName AS Author,
+        p.ViewCount,
+        p.Score
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ht.Name AS HistoryType,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    WHERE 
+        ht.Name IN ('Edit Title', 'Edit Body')
+    GROUP BY 
+        ph.PostId, ht.Name
+), 
+TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS UsedCount
+    FROM 
+        Posts 
+    CROSS JOIN 
+        LATERAL UNNEST(string_to_array(Tags, ',')) AS TagName
+    GROUP BY 
+        TagName
+    ORDER BY 
+        UsedCount DESC
+    LIMIT 10
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(UPC.TotalPosts, 0) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserPostCounts UPC ON U.Id = UPC.OwnerUserId
+    ORDER BY 
+        U.Reputation DESC
+    LIMIT 5
+)
+SELECT 
+    R.Title,
+    R.Author,
+    R.CreationDate,
+    R.ViewCount,
+    COALESCE(PH.EditCount, 0) AS EditCount,
+    PP.LastEditDate,
+    (SELECT STRING_AGG(TagName, ', ') FROM TopTags) AS PopularTags,
+    U.DisplayName AS TopUser,
+    U.Reputation AS TopUserReputation,
+    U.PostCount AS TopUserPostCount
+FROM 
+    RecentPosts R
+LEFT JOIN 
+    PostHistorySummary PH ON R.Id = PH.PostId
+LEFT JOIN 
+    (SELECT * FROM TopUsers) U ON TRUE
+LEFT JOIN 
+    PostHistory PP ON R.Id = PP.PostId
+WHERE 
+    R.Score > 5
+ORDER BY 
+    R.ViewCount DESC;

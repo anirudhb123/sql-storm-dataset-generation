@@ -1,0 +1,56 @@
+
+WITH Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        COUNT(DISTINCT CASE WHEN cd_purchase_estimate > 5000 THEN c_customer_id END) AS high_value_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_gender, cd_marital_status
+),
+Address AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        COUNT(DISTINCT CASE WHEN cd_marital_status = 'M' THEN c_customer_id END) AS married_customers
+    FROM customer
+    JOIN customer_address ON c_current_addr_sk = ca_address_sk
+    GROUP BY ca_state
+),
+Sales AS (
+    SELECT 
+        sm_type,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales
+    JOIN ship_mode ON ws_ship_mode_sk = sm_ship_mode_sk
+    GROUP BY sm_type
+),
+FinalReport AS (
+    SELECT 
+        A.ca_state,
+        A.customer_count AS state_customer_count,
+        A.married_customers,
+        D.customer_count AS demographics_customer_count,
+        D.high_value_customers,
+        D.avg_purchase_estimate,
+        S.sm_type,
+        S.total_profit,
+        S.avg_sales_price
+    FROM Address A
+    JOIN Demographics D ON 1=1
+    JOIN Sales S ON 1=1
+)
+SELECT 
+    ca_state,
+    SUM(state_customer_count) AS total_customers,
+    SUM(married_customers) AS total_married_customers,
+    SUM(demographics_customer_count) AS total_demographics_customers,
+    SUM(high_value_customers) AS total_high_value_customers,
+    AVG(avg_purchase_estimate) AS avg_estimate,
+    STRING_AGG(sm_type || ': ' || total_profit || ' (Avg: ' || avg_sales_price || ')', ', ') AS profit_summary
+FROM FinalReport
+GROUP BY ca_state
+ORDER BY total_customers DESC;

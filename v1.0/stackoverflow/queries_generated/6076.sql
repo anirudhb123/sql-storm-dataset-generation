@@ -1,0 +1,54 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        AVG(V.VoteTypeId = 2) AS AverageUpvotes,
+        AVG(V.VoteTypeId = 3) AS AverageDownvotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        PH.PostHistoryTypeId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, PH.PostHistoryTypeId
+),
+TopActiveUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        SUM(PA.ViewCount) AS TotalViews
+    FROM UserStatistics U
+    JOIN PostAnalytics PA ON U.UserId = PA.PostId
+    GROUP BY U.UserId, U.DisplayName
+    ORDER BY TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalScore,
+    U.AverageUpvotes,
+    U.AverageDownvotes,
+    T.TotalViews
+FROM UserStatistics U
+JOIN TopActiveUsers T ON U.Id = T.UserId
+ORDER BY U.TotalScore DESC, T.TotalViews DESC;

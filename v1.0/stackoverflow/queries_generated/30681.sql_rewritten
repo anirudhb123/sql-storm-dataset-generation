@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    ph.Title AS QuestionTitle,
+    ph.PostId AS QuestionId,
+    r.AnswerCount,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    COALESCE(v.TotalVotes, 0) AS TotalVotes,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    Users u
+JOIN 
+    Posts ph ON u.Id = ph.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        p.OwnerUserId
+) b ON u.Id = b.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        v.PostId, 
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+) v ON ph.Id = v.PostId
+LEFT JOIN (
+    SELECT 
+        STRING_AGG(DISTINCT t.TagName) AS TagName,
+        p.Id AS PostId
+    FROM 
+        Posts p
+    CROSS JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag
+    JOIN 
+        Tags t ON t.TagName = TRIM(tag)
+    GROUP BY 
+        p.Id
+) t ON t.PostId = ph.Id
+LEFT JOIN (
+    SELECT 
+        r.AnswerCount, 
+        r.PostId 
+    FROM 
+        RecursivePostHierarchy r
+) r ON ph.Id = r.PostId
+WHERE 
+    ph.PostTypeId = 1 
+GROUP BY 
+    u.DisplayName, 
+    ph.Title, 
+    ph.Id, 
+    r.AnswerCount, 
+    b.BadgeCount, 
+    v.TotalVotes
+ORDER BY 
+    BadgeCount DESC, 
+    TotalVotes DESC
+LIMIT 10;

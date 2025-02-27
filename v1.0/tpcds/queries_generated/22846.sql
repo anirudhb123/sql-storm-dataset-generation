@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(sr_return_quantity, 0) + COALESCE(cr_return_quantity, 0) + COALESCE(wr_return_quantity, 0)) AS total_returned,
+        COUNT(DISTINCT CASE WHEN sr_return_quantity IS NOT NULL THEN sr_ticket_number END) AS store_return_count,
+        COUNT(DISTINCT CASE WHEN cr_return_quantity IS NOT NULL THEN cr_order_number END) AS catalog_return_count,
+        COUNT(DISTINCT CASE WHEN wr_return_quantity IS NOT NULL THEN wr_order_number END) AS web_return_count
+    FROM 
+        customer c
+        LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+        LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+        LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+ReturnStatistics AS (
+    SELECT 
+        total_returned,
+        DENSE_RANK() OVER (ORDER BY total_returned DESC) AS return_rank
+    FROM 
+        CustomerReturns
+),
+IncomeBandStats AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+        INNER JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+        INNER JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+),
+ReturnByIncome AS (
+    SELECT 
+        r.return_rank,
+        i.ib_income_band_sk,
+        COALESCE(SUM(rs.customer_count), 0) AS number_of_returns
+    FROM 
+        ReturnStatistics r
+        FULL OUTER JOIN IncomeBandStats rs ON r.return_rank = CASE 
+            WHEN rs.customer_count > 100 THEN 1
+            WHEN rs.customer_count BETWEEN 50 AND 100 THEN 2
+            ELSE 3
+        END
+        CROSS JOIN income_band i 
+    GROUP BY 
+        r.return_rank,
+        i.ib_income_band_sk
+)
+SELECT 
+    r.return_rank,
+    i.ib_income_band_sk,
+    r.number_of_returns,
+    CASE 
+        WHEN r.number_of_returns IS NULL THEN 'No Data'
+        ELSE 'Data Available'
+    END AS data_availability,
+    ROW_NUMBER() OVER (PARTITION BY i.ib_income_band_sk ORDER BY r.number_of_returns DESC) AS income_group_rank
+FROM 
+    ReturnByIncome r
+    JOIN income_band i ON r.ib_income_band_sk = i.ib_income_band_sk
+WHERE 
+    r.return_rank IS NOT NULL
+ORDER BY 
+    r.return_rank, 
+    i.ib_income_band_sk;

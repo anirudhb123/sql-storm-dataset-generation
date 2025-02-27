@@ -1,0 +1,67 @@
+
+WITH MovieStats AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS avg_rating,
+        SUM(CASE WHEN kw.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.person_id = pi.person_id
+    GROUP BY 
+        at.title, at.production_year
+),
+MovieCompanies AS (
+    SELECT 
+        at.title,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FinalResult AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.cast_count,
+        ms.avg_rating,
+        ms.keyword_count,
+        mc.company_name,
+        mc.company_type,
+        DENSE_RANK() OVER(PARTITION BY ms.production_year ORDER BY ms.avg_rating DESC) AS rating_rank
+    FROM 
+        MovieStats ms
+    LEFT JOIN 
+        MovieCompanies mc ON ms.title = mc.title
+)
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    avg_rating,
+    keyword_count,
+    STRING_AGG(company_name, ', ') AS companies,
+    STRING_AGG(company_type, ', ') AS types,
+    rating_rank
+FROM 
+    FinalResult
+GROUP BY 
+    title, production_year, cast_count, avg_rating, keyword_count, rating_rank
+ORDER BY 
+    avg_rating DESC, production_year ASC;

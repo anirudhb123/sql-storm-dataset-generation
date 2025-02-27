@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1998-01-01'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        parts p ON ps.ps_partkey = p.p_partkey 
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_supply_value) FROM (
+            SELECT 
+                SUM(ps_supplycost * ps_availqty) AS total_supply_value
+            FROM 
+                partsupp ps
+            GROUP BY 
+                ps.ps_suppkey
+        ) t)
+),
+FinalResult AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS total_open_orders,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_filled_orders
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    fr.region_name,
+    fr.unique_customers,
+    fr.total_open_orders,
+    fr.total_filled_orders,
+    COALESCE(MAX(to_1.total_supply_value), 0) AS max_supplier_value
+FROM 
+    FinalResult fr
+LEFT JOIN 
+    TopSuppliers to_1 ON 1 = (SELECT COUNT(*) FROM TopSuppliers)
+GROUP BY 
+    fr.region_name, fr.unique_customers, fr.total_open_orders, fr.total_filled_orders
+HAVING 
+    SUM(fr.total_open_orders) > 0 OR COUNT(fr.unique_customers) IS NULL
+ORDER BY 
+    fr.unique_customers DESC, fr.region_name;

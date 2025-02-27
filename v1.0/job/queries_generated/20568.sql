@@ -1,0 +1,92 @@
+WITH recursive top_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(c.id) AS cast_count,
+        AVG(mv.production_year) OVER (PARTITION BY t.id ORDER BY t.id) AS avg_production_year,
+        ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN 
+        title mv ON t.movie_id = mv.id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'short%')
+        AND mv.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title
+),
+relevant_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS all_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+top_movies_with_keywords AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.cast_count,
+        tm.avg_production_year,
+        rk.all_keywords
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        relevant_keywords rk ON tm.movie_id = rk.movie_id
+    WHERE 
+        tm.rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.cast_count,
+    COALESCE(tm.avg_production_year, 0) AS avg_prod_year,
+    COALESCE(tm.all_keywords, 'No Keywords') AS keywords
+FROM 
+    top_movies_with_keywords tm
+LEFT JOIN 
+    aka_name a ON a.person_id = (
+        SELECT person_id 
+        FROM cast_info c 
+        WHERE c.movie_id = tm.movie_id 
+        ORDER BY c.nr_order 
+        LIMIT 1
+    )
+WHERE 
+    EXISTS (
+        SELECT 1 FROM movie_companies mc 
+        WHERE mc.movie_id = tm.movie_id 
+        AND mc.note IS NOT NULL
+    ) 
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.avg_prod_year;
+
+
+### Explanation:
+1. **CTEs (Common Table Expressions)**: 
+   - `top_movies`: This CTE selects short films (`kind LIKE 'short%'`) from the titles, counts their casts, and averages their production years. It also ranks them based on the cast count within the same year.
+   - `relevant_keywords`: Aggregates the keywords associated with each movie.
+   - `top_movies_with_keywords`: Joins the previous CTEs to combine movie details and keywords.
+
+2. **Correlated Subqueries**: 
+   - Used within the `SELECT` statement to retrieve the `person_id` for the first cast member.
+
+3. **NULL Handling**: 
+   - The use of `COALESCE` manages potential NULL values for average production year and keywords, providing default values.
+
+4. **Outer Joins**: 
+   - The query uses `LEFT JOIN` to ensure that we still fetch movies even if they do not have associated cast or keywords.
+
+5. **String Aggregation**: 
+   - The `STRING_AGG()` function is used to concatenate keywords into a single string.
+
+6. **Complicated Filtering Logic**:
+   - The existence of notes in `movie_companies` determines whether to include the film in the results.
+
+This query combines various complex SQL features aiming to retrieve a meaningful dataset from the given schema while showcasing SQL capabilities.

@@ -1,0 +1,77 @@
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        ws_sold_date_sk >= (cast('2002-10-01' as date) - INTERVAL '1 year')
+        AND (cd.cd_credit_rating IS NULL OR cd.cd_credit_rating <> 'Low')
+    GROUP BY
+        ws.web_site_sk, ws_sold_date_sk
+),
+SalesTrends AS (
+    SELECT
+        dd.d_year,
+        SUM(r.total_net_profit) AS yearly_net_profit
+    FROM
+        date_dim dd
+    JOIN
+        RankedSales r ON r.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY
+        dd.d_year
+),
+CustomerStats AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd.cd_dep_count) AS max_dependents
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_gender IN ('M', 'F')
+    GROUP BY
+        cd.cd_gender
+),
+ShippingDetails AS (
+    SELECT
+        sm.sm_ship_mode_id,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM
+        web_sales ws
+    JOIN
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY
+        sm.sm_ship_mode_id
+)
+SELECT
+    ct.cd_gender,
+    ct.customer_count,
+    ct.avg_purchase_estimate,
+    st.yearly_net_profit,
+    sd.orders_count,
+    sd.avg_net_paid,
+    CASE
+        WHEN ct.customer_count IS NULL THEN 'No Customers'
+        ELSE 'Active'
+    END AS customer_status
+FROM
+    CustomerStats ct
+FULL OUTER JOIN
+    SalesTrends st ON 1 = 1
+LEFT JOIN
+    ShippingDetails sd ON sd.orders_count > 50
+WHERE
+    st.yearly_net_profit IS NOT NULL
+ORDER BY
+    ct.cd_gender, st.yearly_net_profit DESC NULLS LAST;

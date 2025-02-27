@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting from questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(pc.AnswerCount), 0) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (
+            SELECT 
+                ParentId,
+                COUNT(*) AS AnswerCount
+            FROM 
+                Posts
+            WHERE 
+                PostTypeId = 2  -- Answers
+            GROUP BY 
+                ParentId
+        ) pc ON p.Id = pc.ParentId
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentClose,
+        PH.UserDisplayName AS ClosedBy
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Closed Posts
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.TotalScore,
+    u.TotalAnswers,
+    COALESCE(pc.UpVotes, 0) AS UpVotes,
+    COALESCE(pc.DownVotes, 0) AS DownVotes,
+    ph.Title AS ClosedPostTitle,
+    ph.CreationDate AS ClosedPostDate,
+    ph.ClosedBy
+FROM 
+    UserEngagement u
+LEFT JOIN 
+    PostVoteCounts pc ON u.UserId = pc.PostId
+LEFT JOIN 
+    ClosedPostDetails ph ON u.PostCount > 0  -- Only include users with posts
+WHERE 
+    u.PublishDate >= NOW() - INTERVAL '1 year'  -- Users active in the last year
+    AND (u.TotalScore > 10 OR u.TotalAnswers > 5)  -- Filtering criteria
+ORDER BY 
+    u.TotalScore DESC,
+    u.PostCount DESC;

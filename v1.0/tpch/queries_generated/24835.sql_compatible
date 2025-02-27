@@ -1,0 +1,48 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+NationwiseRevenue AS (
+    SELECT n.n_nationkey, SUM(os.total_revenue) AS nation_total_revenue
+    FROM nation n
+    LEFT JOIN OrderStats os ON n.n_nationkey = (
+        SELECT s.s_nationkey
+        FROM supplier s
+        WHERE s.s_suppkey IN (
+            SELECT ps.ps_suppkey
+            FROM partsupp ps
+            WHERE ps.ps_partkey IN (
+                SELECT p.p_partkey
+                FROM part p
+                WHERE p.p_size > (SELECT AVG(p2.p_size)
+                                  FROM part p2 
+                                  WHERE p2.p_comment LIKE '%fragile%')
+            )
+        )
+        LIMIT 1
+    )
+    GROUP BY n.n_nationkey
+),
+HighRevenueSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, n.n_name, nr.nation_total_revenue
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN NationwiseRevenue nr ON n.n_nationkey = nr.n_nationkey
+    WHERE rs.rn <= 3 AND nr.nation_total_revenue > (SELECT AVG(nation_total_revenue) FROM NationwiseRevenue)
+)
+SELECT DISTINCT h.s_name AS supplier_name, h.n_name AS nation_name,
+                CONCAT('Revenue from ', h.n_name, ' is ', CAST(h.nation_total_revenue AS VARCHAR)) AS revenue_note
+FROM HighRevenueSuppliers h
+ORDER BY h.nation_total_revenue DESC
+LIMIT 5;

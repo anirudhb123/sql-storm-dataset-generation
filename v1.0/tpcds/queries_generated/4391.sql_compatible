@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000 
+    GROUP BY 
+        ws.web_site_id
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status IN ('M', 'S') 
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_income_band_sk, cd.cd_marital_status
+),
+demographics_summary AS (
+    SELECT
+        hd.hd_income_band_sk,
+        COUNT(*) AS customer_count,
+        SUM(cust.orders_count) AS total_orders,
+        SUM(cust.total_sales) AS total_sales_value
+    FROM 
+        household_demographics hd
+    JOIN 
+        customer_info cust ON hd.hd_income_band_sk = cust.cd_income_band_sk
+    GROUP BY 
+        hd.hd_income_band_sk
+)
+SELECT 
+    d.hd_income_band_sk,
+    d.customer_count,
+    d.total_orders,
+    d.total_sales_value,
+    COALESCE(d.total_orders / NULLIF(d.customer_count, 0), 0) AS avg_orders_per_customer,
+    COALESCE(d.total_sales_value / NULLIF(d.customer_count, 0), 0) AS avg_sales_per_customer,
+    CASE 
+        WHEN d.total_sales_value > 100000 THEN 'High Value'
+        WHEN d.total_sales_value BETWEEN 50000 AND 100000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    demographics_summary d
+ORDER BY 
+    d.hd_income_band_sk;

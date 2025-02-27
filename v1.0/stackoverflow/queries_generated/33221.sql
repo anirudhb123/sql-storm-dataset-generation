@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        c.UserId,
+        MAX(c.CreationDate) AS LastCommentDate,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+),
+FinalMetrics AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalBounty,
+        us.TotalPosts,
+        us.PositivePosts,
+        us.NegativePosts,
+        COALESCE(ra.LastCommentDate, '1970-01-01') AS LastCommentDate,
+        ra.TotalComments,
+        r.PostId,
+        rp.Title AS RecentPostTitle,
+        rp.Score AS RecentPostScore,
+        p.EditCount,
+        p.LastEditDate
+    FROM 
+        UserStatistics us
+    LEFT JOIN 
+        RecentActivity ra ON us.UserId = ra.UserId
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+    LEFT JOIN 
+        PostHistorySummary p ON rp.PostId = p.PostId
+    WHERE 
+        us.TotalPosts > 0
+)
+
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.TotalBounty,
+    f.TotalPosts,
+    f.PositivePosts,
+    f.NegativePosts,
+    f.LastCommentDate,
+    f.TotalComments,
+    f.RecentPostTitle,
+    f.RecentPostScore,
+    f.EditCount,
+    f.LastEditDate
+FROM 
+    FinalMetrics f
+ORDER BY 
+    f.TotalBounty DESC, f.TotalPosts DESC;

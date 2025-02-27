@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ubc.BadgeCount,
+        ubc.GoldBadges,
+        ubc.SilverBadges,
+        ubc.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ubc ON u.Id = ubc.UserId
+    WHERE 
+        u.Reputation > 1000 
+)
+SELECT 
+    php.PostId,
+    php.Title,
+    php.CreationDate,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    tu.DisplayName AS TopUser,
+    tu.Reputation AS TopUserReputation,
+    tu.BadgeCount AS TopUserBadgeCount,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges
+FROM 
+    RecursivePostHierarchy php
+LEFT JOIN 
+    PostVoteSummary pvs ON php.PostId = pvs.PostId
+LEFT JOIN 
+    TopUsers tu ON tu.Rank <= 10 
+ORDER BY 
+    php.CreationDate DESC;

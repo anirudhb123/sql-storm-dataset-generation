@@ -1,0 +1,52 @@
+
+WITH RecentOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_TIMESTAMP)
+    GROUP BY
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_nationkey
+),
+NationRevenue AS (
+    SELECT
+        n.n_nationkey,
+        r.r_name,
+        SUM(ro.total_revenue) AS region_revenue
+    FROM
+        RecentOrders ro
+    JOIN
+        nation n ON ro.c_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY
+        n.n_nationkey,
+        r.r_name
+),
+TopRegions AS (
+    SELECT
+        r.r_name,
+        r.region_revenue,
+        RANK() OVER (ORDER BY r.region_revenue DESC) AS revenue_rank
+    FROM
+        NationRevenue r
+)
+SELECT
+    r.r_name,
+    r.region_revenue
+FROM
+    TopRegions r
+WHERE
+    r.revenue_rank <= 5
+ORDER BY
+    r.region_revenue DESC;

@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN c.ct_id = 1 THEN 1 ELSE 0 END) AS lead_cast_count
+    FROM 
+        title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c_info ON cc.subject_id = c_info.id
+    LEFT JOIN 
+        role_type AS r ON c_info.role_id = r.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieRank AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        company_count,
+        lead_cast_count,
+        RANK() OVER (ORDER BY production_year DESC, lead_cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    mr.movie_id,
+    mr.title,
+    mr.production_year,
+    mr.company_count,
+    mr.lead_cast_count
+FROM 
+    MovieRank AS mr
+WHERE 
+    mr.rank <= 10
+ORDER BY 
+    mr.production_year DESC, mr.lead_cast_count DESC;

@@ -1,0 +1,70 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned,
+        COUNT(DISTINCT cr.order_number) AS distinct_orders
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+    HAVING 
+        SUM(cr.return_quantity) > 0
+), ItemStats AS (
+    SELECT 
+        i.i_item_sk,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        SUM(ws.ws_quantity) AS total_sold
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+), StoreAndReturns AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        COUNT(DISTINCT sr.ticket_number) AS total_store_returns,
+        SUM(sr.net_loss) AS total_loss
+    FROM 
+        store s
+    LEFT JOIN 
+        store_returns sr ON s.s_store_sk = sr.s_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+), RankedCustomers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_returned,
+        cr.distinct_orders,
+        ROW_NUMBER() OVER (ORDER BY cr.total_returned DESC) AS rank
+    FROM 
+        CustomerReturns cr
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    sr.store_name,
+    ir.avg_sales_price,
+    ir.total_sold,
+    r.rank
+FROM 
+    customer c
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    RankedCustomers r ON c.c_customer_sk = r.returning_customer_sk
+LEFT JOIN 
+    StoreAndReturns sr ON sr.total_store_returns > 0
+LEFT JOIN 
+    ItemStats ir ON ir.total_sold > 0
+WHERE 
+    (cd.cd_credit_rating IS NULL OR cd.cd_credit_rating != 'Low')
+    AND (c.c_birth_year < 1980 OR c.c_birth_month < 6)
+ORDER BY 
+    total_returned DESC, 
+    sr.total_loss ASC
+LIMIT 100;

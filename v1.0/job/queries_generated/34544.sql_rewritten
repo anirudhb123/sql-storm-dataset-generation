@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_link AS ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000  
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        aka_title AS mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    COUNT(DISTINCT c.person_id) AS Cast_Count,
+    AVG(mi.info_length) AS Average_Info_Length,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords,
+    CASE 
+        WHEN AVG(mi.info_length) IS NULL THEN 'No Information'
+        ELSE 'Information Available'
+    END AS Info_Status
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    complete_cast AS cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    movie_info AS mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 2  
+ORDER BY 
+    m.production_year DESC, Cast_Count DESC;

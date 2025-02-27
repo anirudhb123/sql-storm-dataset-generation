@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, 
+        ws.ws_item_sk, 
+        ws.ws_order_number
+), CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_returned
+    FROM 
+        store_returns
+    WHERE
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_item_sk
+), FilteredWebSales AS (
+    SELECT
+        ws.*,
+        c.c_first_name,
+        c.c_last_name,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_net_profit DESC) AS customer_sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales) -- Higher than average sales price
+        AND c.c_current_cdemo_sk IS NOT NULL
+)
+SELECT 
+    fs.city,
+    COALESCE(SUM(ws.total_sales), 0) AS total_sales,
+    COALESCE(SUM(cr.return_count), 0) AS returns_count,
+    COALESCE(SUM(cr.total_returned), 0) AS returns_value,
+    AVG(ws.ws_net_profit) AS average_profit,
+    COUNT(DISTINCT CASE WHEN fs.total_sales > 100 THEN fs.ws_order_number END) AS high_value_orders
+FROM 
+    (SELECT
+        sa.s_city AS city,
+        sa.s_store_sk,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        store sa
+    LEFT JOIN 
+        web_sales ws ON sa.s_store_sk = ws.ws_store_sk
+    GROUP BY 
+        sa.s_city, sa.s_store_sk
+    HAVING 
+        SUM(ws.ws_sales_price) IS NOT NULL
+    ) AS fs
+LEFT JOIN 
+    (SELECT ws_item_sk, total_sales FROM RankedSales WHERE sales_rank <= 10) AS rs ON fs.ws_item_sk = rs.ws_item_sk
+LEFT JOIN 
+    CustomerReturns cr ON rs.ws_item_sk = cr.sr_item_sk
+WHERE 
+    fs.city IS NOT NULL
+GROUP BY 
+    fs.city
+ORDER BY 
+    average_profit DESC;

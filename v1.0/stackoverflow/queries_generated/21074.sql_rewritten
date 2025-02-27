@@ -1,0 +1,68 @@
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS TotalUpvotes,  
+        SUM(COALESCE(V.VoteTypeId = 3, 0)) AS TotalDownvotes,  
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), U.CreationDate) AS DaysActive
+    FROM Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount, 
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount, 
+        RANK() OVER (ORDER BY P.Score DESC) AS PostRank
+    FROM Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+FinalMetrics AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.TotalPosts,
+        U.TotalUpvotes,
+        U.TotalDownvotes,
+        U.DaysActive,
+        P.Title,
+        P.CommentCount,
+        P.UpVoteCount,
+        P.DownVoteCount,
+        P.PostRank
+    FROM UserMetrics U
+    JOIN PostStatistics P ON U.UserId = P.OwnerUserId
+    WHERE U.Reputation > 1000
+),
+UserRanking AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM FinalMetrics
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalUpvotes,
+    TotalDownvotes,
+    DaysActive,
+    Title,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    PostRank,
+    ReputationRank
+FROM UserRanking
+WHERE ReputationRank <= 10
+ORDER BY Reputation DESC, TotalPosts DESC;

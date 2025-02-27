@@ -1,0 +1,58 @@
+
+WITH CustomerReturnData AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        COUNT(DISTINCT CASE WHEN wr.returned_date_sk IS NOT NULL THEN wr_order_number END) AS unique_web_return_orders,
+        COUNT(DISTINCT CASE WHEN sr.returned_date_sk IS NOT NULL THEN sr_ticket_number END) AS unique_store_return_orders
+    FROM 
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_id
+),
+HighestReturnCustomers AS (
+    SELECT 
+        ccd.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CRD.total_store_returns, 
+        CRD.total_web_returns,
+        RANK() OVER (ORDER BY (CRD.total_store_returns + CRD.total_web_returns) DESC) AS return_rank
+    FROM 
+        CustomerReturnData CRD
+    JOIN customer_demographics cd ON cd.cd_demo_sk = (
+        SELECT DISTINCT c.c_current_cdemo_sk 
+        FROM customer c 
+        WHERE c.c_customer_id = CRD.c_customer_id
+    )
+    JOIN customer ccd ON CRD.c_customer_id = ccd.c_customer_id
+)
+SELECT 
+    hrc.c_customer_id,
+    hrc.total_store_returns,
+    hrc.total_web_returns,
+    hrc.return_rank,
+    (CASE 
+        WHEN hrc.return_rank <= 10 THEN 'Top Returns'
+        ELSE 'Regular Returns' 
+    END) AS return_category,
+    COUNT(DISTINCT cp.cp_catalog_page_id) AS related_catalog_pages
+FROM 
+    HighestReturnCustomers hrc
+LEFT JOIN catalog_page cp ON 
+    (hrc.return_rank <= 10 AND EXISTS (
+        SELECT 1 
+        FROM web_sales ws 
+        WHERE ws.ws_bill_customer_sk = hrc.c_customer_id AND ws.ws_item_sk IN (
+            SELECT DISTINCT i.i_item_sk FROM item i 
+            WHERE i.i_item_desc LIKE '%' || hrc.c_customer_id || '%'
+        )
+    ))
+GROUP BY 
+    hrc.c_customer_id, hrc.total_store_returns, hrc.total_web_returns, hrc.return_rank
+HAVING 
+    (COUNT(DISTINCT cp.cp_catalog_page_id) > 5 OR hrc.return_rank <= 20)
+ORDER BY 
+    hrc.return_rank, hrc.total_store_returns DESC;

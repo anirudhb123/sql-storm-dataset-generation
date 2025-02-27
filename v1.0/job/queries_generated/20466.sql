@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        COALESCE(mk.keyword, 'No Keyword') AS genre,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_actors
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        STRING_AGG(DISTINCT cn.name, '; ') AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+),
+RelevantMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.genre,
+        rm.production_year,
+        ac.num_actors,
+        mc.num_companies,
+        mc.company_names
+    FROM RankedMovies rm 
+    JOIN ActorCounts ac ON rm.title_id = ac.movie_id
+    LEFT JOIN MovieCompanies mc ON rm.title_id = mc.movie_id
+    WHERE rm.year_rank <= 5 AND ac.num_actors > 1
+)
+SELECT 
+    rv.title,
+    rv.genre,
+    rv.production_year,
+    rv.num_actors,
+    COALESCE(rv.company_names, 'No Companies') AS company_names,
+    CASE 
+        WHEN rv.num_companies > 0 THEN 'Produced'
+        ELSE 'Independent'
+    END AS production_type,
+    NULLIF(rv.num_companies, 0) AS company_count_value,
+    ROW_NUMBER() OVER (ORDER BY rv.production_year DESC) AS movie_ranking
+FROM RelevantMovies rv
+WHERE rv.genre NOT LIKE '%Horror%'
+ORDER BY rv.production_year DESC, rv.num_actors DESC
+LIMIT 20;
+
+-- Additional bizarre semantics checks:
+SELECT 
+    title,
+    (SELECT AVG(num_actors) FROM ActorCounts WHERE movie_id IN (SELECT title_id FROM RelevantMovies)) AS average_actors,
+    CASE 
+        WHEN (SELECT AVG(num_actors) FROM ActorCounts) IS NULL THEN 'No Data'
+        ELSE 'Data Available'
+    END AS data_availability
+FROM RelevantMovies
+WHERE NOT EXISTS (SELECT 1 FROM movie_keyword WHERE movie_id = title_id AND keyword = 'Action')
+ORDER BY title;

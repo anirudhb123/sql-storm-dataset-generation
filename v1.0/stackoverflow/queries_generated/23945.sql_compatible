@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        u.Reputation AS UserReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.ViewCount IS NOT NULL AND
+        (p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' OR p.Score > 10)
+), 
+HighReputationUsers AS (
+    SELECT 
+        Id, 
+        DisplayName, 
+        Reputation,
+        CASE 
+            WHEN Reputation > 1000 THEN 'Experienced'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Moderately Experienced'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        Users 
+    WHERE 
+        Reputation IS NOT NULL 
+        AND Location IS NOT NULL
+), 
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 52 THEN 1 END) AS HotCount,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS Comments
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    COALESCE(rp.Body, 'No body content') AS BodyContent,
+    rp.ViewCount,
+    u.UserLevel,
+    ph.CloseCount,
+    ph.HotCount,
+    ph.Comments,
+    CASE 
+        WHEN rp.UserReputation > 1000 THEN 'Highly valued'
+        WHEN rp.UserReputation BETWEEN 500 AND 1000 THEN 'Moderately valued'
+        ELSE 'Low value'
+    END AS ReputationLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    HighReputationUsers u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistoryData ph ON rp.PostId = ph.PostId
+WHERE 
+    (ph.CloseCount > 0 OR ph.HotCount > 0)
+    AND rp.PostRank <= 10
+ORDER BY 
+    rp.ViewCount DESC,
+    u.Reputation DESC NULLS LAST
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

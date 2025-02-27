@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+), 
+TopSellingItems AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        RankedSales
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amount) AS total_returned_amount
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_ship_mode_sk IS NOT NULL
+    GROUP BY 
+        cr_returning_customer_sk
+), 
+SalesAndReturns AS (
+    SELECT 
+        cs.cs_item_sk,
+        COALESCE(SUM(ws.total_quantity), 0) AS total_web_sales_quantity,
+        COALESCE(SUM(cr.total_returned_quantity), 0) AS total_catalog_returns_quantity
+    FROM 
+        TopSellingItems cs
+    LEFT JOIN 
+        RankedSales ws ON cs.ws_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON cr.cr_returning_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cs.cs_item_sk
+)
+SELECT 
+    items.i_item_id,
+    items.i_item_desc,
+    sales.total_web_sales_quantity,
+    sales.total_catalog_returns_quantity,
+    (sales.total_web_sales_quantity - sales.total_catalog_returns_quantity) AS net_sales,
+    CASE 
+        WHEN sales.total_web_sales_quantity = 0 THEN 'No Sales'
+        WHEN sales.total_catalog_returns_quantity < sales.total_web_sales_quantity * 0.25 THEN 'Good Sales Performance'
+        WHEN sales.total_catalog_returns_quantity >= sales.total_web_sales_quantity * 0.25 THEN 'High Returns'
+        ELSE 'Unknown'
+    END AS sales_performance
+FROM 
+    item items
+JOIN 
+    SalesAndReturns sales ON items.i_item_sk = sales.cs_item_sk
+WHERE 
+    items.i_current_price IS NOT NULL AND 
+    items.i_item_desc IS NOT NULL
+ORDER BY 
+    net_sales DESC;

@@ -1,0 +1,53 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpvoteCount,
+        ps.DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY ps.UpvoteCount DESC, ps.CommentCount DESC) AS Rank
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CommentCount,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    rp.Rank,
+    CASE 
+        WHEN rp.UpvoteCount > 0 THEN 
+            (100.0 * rp.UpvoteCount / NULLIF(rp.CommentCount + rp.UpvoteCount + rp.DownvoteCount, 0)) 
+        ELSE 0 
+    END AS UpvotePercentage,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN PostsTag pt ON t.Id = pt.TagId 
+     WHERE pt.PostId = rp.PostId) AS Tags
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Rank;

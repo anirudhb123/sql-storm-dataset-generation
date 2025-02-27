@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        COALESCE(SUM(ss_net_profit), 0) AS total_net_profit
+    FROM
+        store s
+    LEFT JOIN
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY
+        s_store_sk, s_store_name
+    UNION ALL
+    SELECT
+        sh.s_store_sk,
+        sh.s_store_name,
+        sh.total_net_profit + COALESCE(SUM(ss.net_profit), 0) AS total_net_profit
+    FROM
+        SalesHierarchy sh
+    JOIN
+        store_sales ss ON sh.s_store_sk = ss.ss_store_sk
+    GROUP BY
+        sh.s_store_sk, sh.s_store_name, sh.total_net_profit
+),
+CustomerStats AS (
+    SELECT
+        cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd_gender
+),
+TimeAnalysis AS (
+    SELECT
+        d_year,
+        STRING_AGG(DISTINCT d_holiday) AS holidays,
+        COUNT(DISTINCT d_date) AS total_days
+    FROM
+        date_dim
+    WHERE
+        d_year >= 2021 AND d_year <= 2023
+    GROUP BY
+        d_year
+)
+SELECT
+    sh.s_store_name,
+    sh.total_net_profit,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    ta.total_days,
+    ta.holidays
+FROM
+    SalesHierarchy sh
+FULL OUTER JOIN
+    CustomerStats cs ON sh.total_net_profit > 1000
+LEFT JOIN
+    TimeAnalysis ta ON ta.d_year = 2023
+WHERE
+    sh.total_net_profit IS NOT NULL OR cs.customer_count IS NOT NULL
+ORDER BY
+    sh.total_net_profit DESC, cs.customer_count DESC;

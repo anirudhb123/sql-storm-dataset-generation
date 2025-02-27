@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostTypeStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(rp.PostId) AS TotalPosts,
+        AVG(rp.ViewCount) AS AvgViewCount,
+        AVG(rp.Score) AS AvgScore,
+        SUM(rp.Upvotes) - SUM(rp.Downvotes) AS NetVotes
+    FROM 
+        PostTypes pt
+    LEFT JOIN 
+        RankedPosts rp ON pt.Id = rp.PostTypeId
+    GROUP BY 
+        pt.Name
+),
+RecentEdits AS (
+    SELECT 
+        postId, 
+        COUNT(*) AS EditCount,
+        MAX(creationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5) -- Title and Body edits
+    GROUP BY 
+        postId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        rp.CommentCount,
+        COALESCE(re.EditCount, 0) AS EditCount,
+        COALESCE(re.LastEditDate, '1970-01-01') AS LastEditDate,
+        JSON_AGG(b.Name) AS Badges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RankedPosts rp ON p.Id = rp.PostId
+    LEFT JOIN 
+        RecentEdits re ON p.Id = re.postId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, rp.CommentCount, re.EditCount, re.LastEditDate
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    CONCAT('Views: ', p.ViewCount, ', Comments: ', p.CommentCount, 
+           ', Edits: ', p.EditCount) AS PostSummary,
+    COALESCE(pt.PostType, 'Unknown') AS PostType,
+    COALESCE(pt.TotalPosts, 0) AS TotalPosts,
+    COALESCE(pt.AvgViewCount, 0) AS AvgViewCount,
+    COALESCE(pt.AvgScore, 0) AS AvgScore,
+    COALESCE(pt.NetVotes, 0) AS NetVotes,
+    p.LastEditDate,
+    p.Badges
+FROM 
+    PostDetails p
+LEFT JOIN 
+    PostTypeStats pt ON p.PostId = pt.TotalPosts
+WHERE 
+    p.EditCount > 0 OR p.CommentCount > 0
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 10;

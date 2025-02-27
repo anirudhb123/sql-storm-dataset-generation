@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_ext_sales_price, 
+        ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk, 
+        rs.ws_order_number, 
+        rs.ws_ext_sales_price,
+        i.i_item_desc,
+        i.i_brand,
+        COALESCE(i.i_current_price, 0) AS item_current_price,
+        (CASE WHEN rs.ws_ext_sales_price > (0.8 * COALESCE(i.i_current_price, 0)) THEN 'High' ELSE 'Low' END) AS price_category
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.sales_rank = 1
+) 
+SELECT 
+    ta.c_customer_id, 
+    SUM(ta.ws_ext_sales_price) AS total_spent,
+    ROUND(AVG(CASE WHEN ta.price_category = 'High' THEN ta.ws_ext_sales_price ELSE NULL END), 2) AS avg_high_price,
+    COUNT(DISTINCT ta.ws_order_number) AS order_count,
+    (SELECT COUNT(DISTINCT wp_customer_sk) 
+     FROM web_page 
+     WHERE wp_creation_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y') 
+       AND wp_access_date_sk IS NOT NULL) AS unique_web_visitors
+FROM 
+    TopSales ta
+JOIN 
+    customer c ON ta.ws_order_number = c.c_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+    AND (ta.total_spent IS NOT NULL OR ta.total_spent > 100)
+GROUP BY 
+    ta.c_customer_id
+ORDER BY 
+    total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

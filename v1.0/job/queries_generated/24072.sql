@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5 -- Top 5 movies per production year
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') FILTER (WHERE c.name IS NOT NULL) AS companies
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+),
+NullLogicCheck AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        CASE 
+            WHEN md.keyword IS NULL THEN 'Keyword Info Missing' 
+            WHEN md.company_count = 0 THEN 'No Companies' 
+            ELSE 'All Good' 
+        END AS status
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    n.name AS actor_name,
+    ns.surname AS actor_surname,
+    ml.linked_movie_id,
+    ml.link_type_id,
+    n.gender,
+    nl.link AS link_type,
+    nc.name AS company_name,
+    null_check.status AS movie_status
+FROM 
+    cast_info ci
+JOIN 
+    aka_name n ON ci.person_id = n.person_id
+JOIN 
+    NullLogicCheck null_check ON ci.movie_id = null_check.movie_id
+LEFT JOIN 
+    movie_link ml ON ci.movie_id = ml.movie_id
+LEFT JOIN 
+    company_name nc ON ci.movie_id = nc.id
+LEFT JOIN 
+    name ns ON n.person_id = ns.id
+WHERE 
+    ml.linked_movie_id IS NOT NULL
+    AND (n.name IS NOT NULL OR n.name <> '')
+ORDER BY 
+    null_check.production_year DESC,
+    actor_surname,
+    actor_name;

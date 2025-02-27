@@ -1,0 +1,76 @@
+WITH RecursiveTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS TagCount,
+        MIN(p.CreationDate) AS FirstUsed,
+        MAX(p.CreationDate) AS LastUsed,
+        MAX(POSTS.ViewCount) AS MaxViews,
+        AVG(POSTS.ViewCount) AS AvgViews
+    FROM 
+        RecursiveTags rt
+    JOIN 
+        Posts p ON rt.PostId = p.Id
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(p.AnswerCount) AS TotalAnswers,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        TagCount
+    FROM 
+        TagStatistics
+    WHERE 
+        TagCount > 50
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.BadgeCount,
+    ua.TotalAnswers,
+    ua.TotalComments,
+    pt.Tag,
+    pt.TagCount,
+    ts.FirstUsed,
+    ts.LastUsed,
+    ts.MaxViews,
+    ts.AvgViews
+FROM 
+    UserActivity ua
+JOIN 
+    PopularTags pt ON pt.Tag IN (SELECT Tag FROM RecursiveTags WHERE PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ua.UserId))
+JOIN 
+    TagStatistics ts ON pt.Tag = ts.Tag
+ORDER BY 
+    ua.BadgeCount DESC, 
+    ts.TagCount DESC;

@@ -1,0 +1,54 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        m.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER(PARTITION BY m.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info ci ON a.movie_id = ci.movie_id
+    JOIN 
+        title m ON a.movie_id = m.id
+    GROUP BY 
+        a.title, m.production_year
+), 
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year <= 5  
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+)
+
+SELECT 
+    tm.production_year, 
+    tm.title, 
+    tm.cast_count,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN tm.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Cast Exists'
+    END AS cast_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.movie_id 
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

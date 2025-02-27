@@ -1,0 +1,52 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           COALESCE(SUM(sr_return_quantity), 0) AS total_returned,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY COALESCE(SUM(sr_return_quantity), 0) DESC) AS rank
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_income_band_sk,
+           RANK() OVER (ORDER BY total_returned DESC) AS return_rank
+    FROM CustomerReturns cr
+    JOIN customer_demographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+    WHERE cr.rank <= 5
+),
+DateRange AS (
+    SELECT d.d_date, d.d_month_seq
+    FROM date_dim d
+    WHERE d.d_date BETWEEN '2022-01-01' AND '2023-01-01'
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN DateRange dr ON ws.ws_sold_date_sk = dr.d_date
+    GROUP BY ws.ws_sold_date_sk
+)
+SELECT tc.c_customer_id,
+       tc.cd_gender,
+       tc.cd_marital_status,
+       tc.cd_income_band_sk,
+       d.d_date,
+       COALESCE(SUM(sd.total_sales), 0) AS total_sales,
+       COALESCE(COUNT(sd.total_orders), 0) AS total_orders,
+       CASE 
+           WHEN COALESCE(SUM(sd.total_sales), 0) > 1000 THEN 'High'
+           WHEN COALESCE(SUM(sd.total_sales), 0) BETWEEN 500 AND 1000 THEN 'Medium'
+           ELSE 'Low' 
+       END AS sales_category
+FROM TopCustomers tc
+LEFT JOIN SalesData sd ON tc.c_customer_id = CAST(sd.ws_sold_date_sk AS CHAR)
+LEFT JOIN date_dim d ON 1=1
+GROUP BY tc.c_customer_id, tc.cd_gender, tc.cd_marital_status, tc.cd_income_band_sk, d.d_date
+HAVING d.d_date IS NOT NULL
+ORDER BY total_sales DESC;

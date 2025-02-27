@@ -1,0 +1,95 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.CreationDate END) AS FirstEditDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  
+    GROUP BY 
+        ph.PostId
+),
+PostStatistics AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        COALESCE(pe.FirstEditDate, 'No edits') AS FirstEditDate,
+        COALESCE(pe.EditCount, 0) AS EditCount,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetVotes
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        PostEditHistory pe ON ph.Id = pe.PostId
+    LEFT JOIN 
+        Comments c ON ph.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.Id = v.PostId
+    GROUP BY 
+        ph.Id, ph.Title, pe.FirstEditDate, pe.EditCount
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.Upvotes,
+    ua.Downvotes,
+    ua.BadgeCount,
+    ps.Title,
+    ps.FirstEditDate,
+    ps.EditCount,
+    ps.TotalComments,
+    ps.NetVotes,
+    ROW_NUMBER() OVER (PARTITION BY ua.UserId ORDER BY ps.NetVotes DESC) AS Rank
+FROM 
+    UserActivity ua
+JOIN 
+    PostStatistics ps ON ps.Id IN (SELECT Id FROM Posts WHERE OwnerUserId = ua.UserId)
+WHERE 
+    ua.PostCount > 0
+ORDER BY 
+    ua.BadgeCount DESC, ua.PostCount DESC, ps.NetVotes DESC;

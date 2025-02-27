@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND t.production_year IN (1880, 1889, 1910, 1944, 1952, 1959, 1981, 1996, 2009) AND mc.company_type_id = 1 AND cn.name < 'Ashdown Film Productions' AND ci.person_id < 3269268 AND n.md5sum < '35078a733798f9441bff932227d9e697';

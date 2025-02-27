@@ -1,0 +1,62 @@
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(T.TagName) AS TagCount,
+        STRING_AGG(T.TagName, ', ') AS TagsList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '>') AS TagNames ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagNames)
+    GROUP BY 
+        P.Id
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.TagCount, 0) AS NumberOfTags,
+        COALESCE(PF.FavoriteCount, 0) AS FavoriteCount,
+        COALESCE(C.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) C ON C.PostId = P.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS FavoriteCount FROM Votes WHERE VoteTypeId = 5 GROUP BY PostId) PF ON PF.PostId = P.Id
+    LEFT JOIN 
+        PostTagCounts PH ON PH.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+),
+BenchmarkResults AS (
+    SELECT 
+        PM.*,
+        CASE 
+            WHEN PM.Score > 10 THEN 'High Score'
+            WHEN PM.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        PostMetrics PM
+    WHERE
+        PM.NumberOfTags >= 3 AND PM.ViewCount >= 100
+)
+SELECT 
+    BR.PostId,
+    BR.Title,
+    BR.CreationDate,
+    BR.Score,
+    BR.ViewCount,
+    BR.NumberOfTags,
+    BR.FavoriteCount,
+    BR.CommentCount,
+    BR.ScoreCategory
+FROM 
+    BenchmarkResults BR
+ORDER BY 
+    BR.ViewCount DESC, BR.Score DESC;

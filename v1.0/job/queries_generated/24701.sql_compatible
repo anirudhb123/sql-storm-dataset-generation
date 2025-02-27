@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(m.title, ' (Sequel)') AS movie_title,
+        m.production_year + 1,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+    WHERE 
+        mh.depth < 5 
+),
+actor_movie AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        n.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY m.production_year) AS movie_order
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name n ON a.person_id = n.person_id
+    JOIN 
+        aka_title m ON m.id = a.movie_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+),
+unique_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT a.person_id) AS actor_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movie a ON mh.movie_id = a.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+)
+SELECT 
+    u.movie_id,
+    u.movie_title,
+    COALESCE(u.actor_count, 0) AS total_actors,
+    STRING_AGG(DISTINCT CASE 
+        WHEN a.nickname IS NOT NULL THEN a.nickname 
+        ELSE n.name 
+    END, ', ') AS actor_names,
+    CASE 
+        WHEN u.actor_count IS NULL THEN 'No Actors'
+        WHEN u.actor_count < 3 THEN 'Fewer Actors'
+        ELSE 'Many Actors'
+    END AS actor_status
+FROM 
+    unique_movies u
+LEFT JOIN 
+    actor_movie a ON u.movie_id = a.movie_id
+LEFT JOIN 
+    aka_name n ON a.person_id = n.person_id
+WHERE 
+    u.production_year IS NOT NULL
+GROUP BY 
+    u.movie_id, u.movie_title, u.actor_count
+ORDER BY 
+    u.production_year DESC, total_actors DESC;

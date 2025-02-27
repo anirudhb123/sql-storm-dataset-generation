@@ -1,0 +1,53 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM aka_title a
+    LEFT JOIN cast_info c ON a.id = c.movie_id
+    WHERE a.production_year IS NOT NULL
+    GROUP BY a.title, a.production_year
+),
+top_movies AS (
+    SELECT * 
+    FROM ranked_movies 
+    WHERE year_rank <= 5
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    GROUP BY m.movie_id
+),
+movie_info_extended AS (
+    SELECT 
+        m.movie_id,
+        MAX(mi.info) AS synopsis, 
+        MAX(CASE WHEN it.info LIKE '%rating%' THEN mi.info END) AS rating,
+        MAX(CASE WHEN it.info LIKE '%budget%' THEN mi.info END) AS budget
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    JOIN aka_title m ON mi.movie_id = m.id
+    GROUP BY m.movie_id
+)
+SELECT 
+    tm.title, 
+    tm.production_year,
+    tm.cast_count,
+    mk.keywords,
+    mie.synopsis,
+    mie.rating,
+    mie.budget
+FROM top_movies tm
+LEFT JOIN movie_keywords mk ON tm.id = mk.movie_id
+LEFT JOIN movie_info_extended mie ON tm.id = mie.movie_id
+WHERE 
+    tm.production_year >= 2000 AND 
+    (mie.rating IS NOT NULL OR mie.budget IS NULL) 
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

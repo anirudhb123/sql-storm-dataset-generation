@@ -1,0 +1,79 @@
+
+WITH CTE_UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteBalance, 
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN p.Score END), 0) AS TotalQuestionScore,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN p.Score END), 0) AS TotalAnswerScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+CTE_ScoreStatistics AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        BadgeCount,
+        VoteBalance,
+        TotalQuestionScore,
+        TotalAnswerScore,
+        ROW_NUMBER() OVER (ORDER BY BadgeCount DESC, VoteBalance DESC) AS UserRank
+    FROM 
+        CTE_UserStatistics
+),
+CTE_RankThreshold AS (
+    SELECT 
+        UserRank,
+        COUNT(*) OVER () AS TotalUsers
+    FROM 
+        CTE_ScoreStatistics
+    WHERE 
+        VoteBalance > 0
+),
+CTE_VoteDistribution AS (
+    SELECT 
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.CreationDate > CURRENT_DATE - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.VoteTypeId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.BadgeCount,
+    us.VoteBalance,
+    us.TotalQuestionScore,
+    us.TotalAnswerScore,
+    COALESCE(th.UserRank, 'N/A') AS UserRank,
+    COALESCE(th.TotalUsers, 0) AS TotalActiveUsers,
+    vd.VoteTypeId,
+    vd.VoteCount,
+    vd.RecentVotes
+FROM 
+    Users u
+LEFT JOIN 
+    CTE_UserStatistics us ON u.Id = us.UserId
+LEFT JOIN 
+    CTE_RankThreshold th ON us.VoteBalance > 0 AND us.UserRank <= th.UserRank
+LEFT JOIN 
+    CTE_VoteDistribution vd ON TRUE 
+WHERE 
+    u.Reputation > 100
+    AND (us.BadgeCount >= 2 OR us.TotalAnswerScore > 50)
+ORDER BY 
+    u.Reputation DESC,
+    us.BadgeCount DESC,
+    us.VoteBalance DESC
+LIMIT 100 OFFSET 0;

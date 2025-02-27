@@ -1,0 +1,36 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    c.c_name,
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_line_quantity,
+    MAX(l.l_shipdate) AS last_ship_date,
+    STRING_AGG(DISTINCT l.l_comment, '; ') AS comments_summary
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_type LIKE '%soft%'
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, n.n_name, r.r_name
+HAVING 
+    total_revenue > 100000
+ORDER BY 
+    total_orders DESC, total_revenue DESC;

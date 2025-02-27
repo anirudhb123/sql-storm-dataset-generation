@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        (p.p_retailprice * 0.9) AS discounted_price,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_count,
+        COUNT(l.l_orderkey) AS total_orders
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    cu.c_name AS customer_name,
+    pd.p_name AS part_name,
+    pd.discounted_price,
+    rs.s_name AS supplier_name,
+    rs.s_acctbal AS supplier_account_balance,
+    cu.order_count,
+    cu.total_spent,
+    pd.returned_count,
+    pd.total_orders
+FROM 
+    CustomerOrderSummary cu
+JOIN 
+    PartDetails pd ON cu.total_spent > 1000  
+LEFT JOIN 
+    RankedSuppliers rs ON pd.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (SELECT MAX(psb.ps_supplycost) FROM partsupp psb WHERE psb.ps_partkey = pd.p_partkey))
+WHERE 
+    rs.rank = 1 OR rs.rank IS NULL  
+ORDER BY 
+    cu.total_spent DESC, pd.discounted_price ASC;

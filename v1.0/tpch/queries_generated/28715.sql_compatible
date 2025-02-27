@@ -1,0 +1,61 @@
+
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        SUBSTRING(s.s_comment, 1, 30) AS supplier_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_comment,
+        LENGTH(o.o_comment) AS comment_length
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND o.o_totalprice > 100.00
+),
+RankedSupplierParts AS (
+    SELECT 
+        p_name,
+        s_name,
+        ps_supplycost,
+        ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p_name ORDER BY ps_supplycost DESC) AS rn
+    FROM 
+        PartSupplierDetails
+)
+SELECT 
+    cp.c_name AS customer_name,
+    cp.o_orderkey,
+    cp.o_totalprice,
+    cp.o_orderdate,
+    cp.o_orderstatus,
+    sp.p_name AS part_name,
+    sp.s_name AS supplier_name,
+    sp.ps_supplycost,
+    sp.ps_availqty,
+    cp.comment_length,
+    sp.supplier_comment
+FROM 
+    CustomerOrderDetails cp
+JOIN 
+    RankedSupplierParts sp ON cp.o_orderkey = sp.ps_supplycost
+WHERE 
+    sp.rn = 1
+ORDER BY 
+    cp.o_orderdate DESC, cp.o_totalprice DESC;

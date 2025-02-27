@@ -1,0 +1,89 @@
+
+WITH RecursivePostTree AS (
+    
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        1 AS Level,
+        CAST(Title AS VARCHAR(3000)) AS Path
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        pt.Level + 1,
+        CAST(CONCAT(pt.Path, ' > ', p.Title) AS VARCHAR(3000)) AS Path
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostTree pt ON p.ParentId = pt.Id
+    WHERE 
+        p.PostTypeId = 2 
+),
+PostStats AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount
+),
+UserBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    pt.Title AS QuestionTitle,
+    pt.ViewCount,
+    pt.AnswerCount,
+    pt.CommentCount,
+    u.DisplayName AS AnswererDisplayName,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    RANK() OVER (PARTITION BY pt.Id ORDER BY pt.CreationDate DESC) AS AnswerRank,
+    COUNT(DISTINCT pt2.Id) AS RelatedPostCount
+FROM 
+    PostStats pt
+LEFT JOIN 
+    Posts p2 ON pt.Id = p2.ParentId
+LEFT JOIN 
+    Users u ON p2.OwnerUserId = u.Id 
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostLinks pl ON pt.Id = pl.PostId 
+LEFT JOIN 
+    Posts pt2 ON pl.RelatedPostId = pt2.Id 
+GROUP BY 
+    pt.Id, pt.Title, pt.ViewCount, pt.AnswerCount, pt.CommentCount, 
+    u.DisplayName, ub.BadgeCount, ub.HighestBadgeClass
+ORDER BY 
+    pt.ViewCount DESC, pt.AnswerCount DESC, pt.CommentCount DESC;

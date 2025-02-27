@@ -1,0 +1,81 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS UpVotesCount,
+        SUM(v.VoteTypeId = 3) AS DownVotesCount,
+        SUM(v.VoteTypeId = 5) AS FavoriteCount
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        UpVotesCount,
+        DownVotesCount,
+        FavoriteCount,
+        RANK() OVER (ORDER BY Reputation DESC) as ReputationRank
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsageCount
+    FROM 
+        Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 50
+    ORDER BY TagUsageCount DESC
+    LIMIT 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    t.TagName AS PopularTag,
+    COUNT(r.PostId) AS RecentPostCount,
+    AVG(COALESCE(ph.HistoryRank, 0)) AS AvgRecentHistoryRank
+FROM 
+    TopUsers u
+JOIN 
+    PopularTags t ON t.TagName IN (
+        SELECT UNNEST(string_to_array(substring(u.Tags, 2, length(u.Tags) - 2), '><')))
+    )
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId AND p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId
+GROUP BY 
+    u.DisplayName, u.Reputation, t.TagName
+HAVING 
+    COUNT(r.PostId) > 10
+ORDER BY 
+    u.Reputation DESC, COUNT(r.PostId) DESC;

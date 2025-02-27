@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS RN,
+        COALESCE((SELECT STRING_AGG(t.TagName, ', ') 
+                  FROM Tags t 
+                  WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '<>'))::integer)), 'No Tags') AS ConcatenatedTags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        h.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRN
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes h ON ph.PostHistoryTypeId = h.Id
+    WHERE 
+        ph.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months'
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.Score,
+    r.ConcatenatedTags,
+    u.UserId,
+    u.DisplayName,
+    u.VoteCount,
+    u.UpVotes,
+    u.DownVotes,
+    COALESCE(SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE 1 END), 0) AS TotalNonNullScores,
+    STRING_AGG(DISTINCT CASE WHEN ph.HistoryRN = 1 THEN ph.Comment END, ', ') AS RecentChanges,
+    COUNT(DISTINCT CASE WHEN ph.HistoryRN = 1 AND ph.Comment IS NOT NULL THEN ph.PostId END) AS RecentCommentedPosts
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    UserActivity u ON u.UserId = r.PostId
+LEFT JOIN 
+    PostHistoryDetails ph ON ph.PostId = r.PostId
+WHERE 
+    r.RN <= 5 
+GROUP BY 
+    r.PostId, r.Title, r.ViewCount, r.Score, r.ConcatenatedTags, u.UserId, u.DisplayName
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC
+WITH ROLLUP;

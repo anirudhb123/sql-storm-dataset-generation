@@ -1,0 +1,71 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS actor_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.kind ORDER BY c.kind) AS company_types
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        aka_name a ON cc.subject_id = a.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    WHERE 
+        t.production_year >= 2000 
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_stats AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movies_acted_in,
+        SUM(CASE WHEN mc.company_type_id IS NOT NULL THEN 1 ELSE 0 END) AS companies_involved
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id
+    GROUP BY 
+        a.id, a.name
+),
+top_actors AS (
+    SELECT 
+        actor_id,
+        name,
+        movies_acted_in,
+        companies_involved,
+        RANK() OVER (ORDER BY movies_acted_in DESC) AS rank
+    FROM 
+        actor_stats
+    WHERE 
+        movies_acted_in > 5
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    ta.name AS top_actor,
+    ta.movies_acted_in,
+    ta.companies_involved,
+    md.keywords,
+    md.company_types
+FROM 
+    movie_details md
+JOIN 
+    top_actors ta ON md.actor_names LIKE '%' || ta.name || '%'
+ORDER BY 
+    md.production_year DESC, 
+    ta.movies_acted_in DESC;

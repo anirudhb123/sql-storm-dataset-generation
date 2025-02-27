@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+PartPricing AS (
+    SELECT 
+        p.p_partkey,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'High'
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        part p
+), 
+CustomerTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    coalesce(ct.total_spent, 0) AS customer_spending,
+    ps.part_count,
+    p.price_category,
+    CASE 
+        WHEN ct.total_spent IS NULL THEN 'Inactive' 
+        ELSE 'Active' 
+    END AS customer_status
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerTotals ct ON c.c_custkey = ct.c_custkey
+LEFT JOIN 
+    SupplierStats ps ON c.c_nationkey = ps.s_suppkey 
+JOIN 
+    PartPricing p ON ps.part_count > 5
+WHERE 
+    p.price_category = 'High' OR c.c_acctbal > 1000
+ORDER BY 
+    customer_status DESC, c.c_name ASC;

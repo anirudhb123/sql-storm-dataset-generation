@@ -1,0 +1,72 @@
+WITH RecursivePostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        1 AS Level,
+        CAST(p.Title AS VARCHAR(300)) AS PostTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Score,
+        r.Level + 1,
+        CAST(CONCAT(r.PostTitle, ' > ', a.Title) AS VARCHAR(300)) AS PostTitle
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostScore r ON a.ParentId = r.PostId  
+)
+
+, UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    ps.PostId,
+    ps.PostTitle,
+    ps.Score,
+    uv.UserId,
+    uv.Reputation,
+    uv.TotalVotes,
+    uv.UpVotes,
+    uv.DownVotes,
+    COALESCE(ph.Comment, 'No comments') AS LastEditComment
+FROM 
+    RecursivePostScore ps
+LEFT JOIN 
+    Posts p ON ps.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteCounts uv ON u.Id = uv.UserId
+LEFT JOIN 
+    (SELECT 
+        ph.PostId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+     FROM 
+        PostHistory ph
+     WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10)  
+    ) ph ON p.Id = ph.PostId AND ph.rn = 1
+WHERE 
+    ps.Level = 1  
+ORDER BY 
+    ps.Score DESC, 
+    uv.TotalVotes DESC;

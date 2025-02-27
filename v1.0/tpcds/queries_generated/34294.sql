@@ -1,0 +1,85 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_current_price,
+        i_brand,
+        1 AS level
+    FROM 
+        item
+    WHERE 
+        i_current_price IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        i.item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand,
+        ih.level + 1
+    FROM 
+        item_hierarchy ih
+    JOIN 
+        item i ON i.brand_id = ih.i_item_sk AND i.i_current_price > ih.i_current_price
+),
+
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+
+filtered_sales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        cs.order_count,
+        CASE 
+            WHEN cs.total_sales < 100 THEN 'Low'
+            WHEN cs.total_sales BETWEEN 100 AND 500 THEN 'Medium'
+            ELSE 'High'
+        END AS sales_category
+    FROM 
+        customer_sales cs
+    WHERE 
+        cs.order_count > 0
+),
+
+top_customers AS (
+    SELECT 
+        f.c_customer_sk,
+        f.total_sales,
+        f.sales_category,
+        ROW_NUMBER() OVER (PARTITION BY f.sales_category ORDER BY f.total_sales DESC) AS rank
+    FROM 
+        filtered_sales f
+)
+
+SELECT 
+    ih.i_item_desc,
+    ih.i_current_price,
+    tc.c_customer_sk,
+    tc.total_sales,
+    tc.sales_category
+FROM 
+    item_hierarchy ih
+JOIN 
+    top_customers tc ON tc.sales_category = CASE 
+                                                WHEN ih.i_current_price < 100 THEN 'Low'
+                                                WHEN ih.i_current_price BETWEEN 100 AND 500 THEN 'Medium'
+                                                ELSE 'High'
+                                            END
+WHERE 
+    tc.rank <= 10
+
+ORDER BY 
+    ih.i_current_price ASC, tc.total_sales DESC;

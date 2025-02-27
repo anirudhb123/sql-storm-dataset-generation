@@ -1,0 +1,72 @@
+WITH CustomerAddressData AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        LENGTH(ca.ca_street_name) AS street_name_length
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city IS NOT NULL
+),
+DemographicData AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+),
+CombinedData AS (
+    SELECT 
+        cad.ca_address_id,
+        cad.ca_city,
+        cad.ca_state,
+        cad.full_address,
+        cad.street_name_length,
+        dd.cd_gender,
+        dd.cd_marital_status,
+        dd.cd_education_status,
+        dd.customer_count,
+        sd.total_quantity,
+        sd.total_sales,
+        sd.unique_customers
+    FROM 
+        CustomerAddressData cad
+    LEFT JOIN 
+        DemographicData dd ON cad.ca_city = dd.cd_gender  
+    LEFT JOIN 
+        SalesData sd ON sd.ws_order_number = cad.ca_address_id  
+)
+SELECT 
+    city,
+    state,
+    AVG(street_name_length) AS avg_street_name_length,
+    COUNT(DISTINCT address_id) AS unique_addresses,
+    SUM(customer_count) AS total_customers,
+    SUM(total_quantity) AS overall_quantity_sold,
+    SUM(total_sales) AS overall_sales
+FROM 
+    CombinedData
+GROUP BY 
+    city, state
+ORDER BY 
+    overall_sales DESC
+LIMIT 10;

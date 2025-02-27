@@ -1,0 +1,71 @@
+WITH UserVoteCounts AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM
+        Users U
+    LEFT JOIN
+        Votes V ON U.Id = V.UserId
+    GROUP BY
+        U.Id
+),
+PostDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        PT.Name AS PostType,
+        COALESCE(UP.UserId, -1) AS AcceptedAnswerId,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM
+        Posts P
+    JOIN
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN
+        Posts A ON P.AcceptedAnswerId = A.Id
+    LEFT JOIN
+        Users UP ON A.OwnerUserId = UP.Id
+)
+SELECT
+    UVC.UserId,
+    UVC.DisplayName,
+    UVC.Upvotes,
+    UVC.Downvotes,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    P.ViewCount,
+    P.CommentCount,
+    CASE
+        WHEN P.Score > 10 THEN 'High Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    ROW_NUMBER() OVER (PARTITION BY UVC.UserId ORDER BY P.Score DESC) AS UserPostRank
+FROM
+    UserVoteCounts UVC
+JOIN
+    PostDetails P ON UVC.UserId = P.AcceptedAnswerId
+WHERE
+    P.Score IS NOT NULL
+    AND P.ViewCount > 50
+UNION ALL
+SELECT
+    UVC.UserId,
+    UVC.DisplayName,
+    UVC.Upvotes,
+    UVC.Downvotes,
+    'N/A' AS PostTitle,
+    0 AS PostScore,
+    0 AS ViewCount,
+    0 AS CommentCount,
+    'No Posts' AS ScoreCategory,
+    0 AS UserPostRank
+FROM
+    UserVoteCounts UVC
+WHERE
+    UVC.UserId NOT IN (SELECT DISTINCT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+ORDER BY
+    UserId;

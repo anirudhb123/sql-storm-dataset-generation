@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        DENSE_RANK() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk, 
+        cd_gender, 
+        cd_marital_status,
+        COALESCE(cd_buy_potential, 'N/A') AS buy_potential,
+        cd_dep_count 
+    FROM customer_demographics
+),
+ReturningCustomers AS (
+    SELECT 
+        rrr.sr_customer_sk, 
+        rrr.total_returns, 
+        rrr.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.buy_potential,
+        cd.cd_dep_count,
+        ROW_NUMBER() OVER (ORDER BY rrr.total_return_amount DESC) AS rank
+    FROM RankedReturns rrr
+    LEFT JOIN CustomerDemographics cd ON rrr.sr_customer_sk = cd.cd_demo_sk
+    WHERE rrr.return_rank = 1
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity_sold,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        rc.sr_customer_sk,
+        rc.total_returns,
+        rc.total_return_amount,
+        sd.total_net_profit,
+        sd.total_orders,
+        COALESCE((rc.total_return_amount - sd.total_net_profit), 0) AS profit_loss_difference,
+        CASE 
+            WHEN rc.total_return_amount > sd.total_net_profit THEN 'Return Heavy'
+            ELSE 'Profitable'
+        END AS customer_status
+    FROM ReturningCustomers rc
+    LEFT JOIN SalesData sd ON rc.sr_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    fbh.sr_customer_sk,
+    fbh.total_returns,
+    fbh.total_return_amount,
+    fbh.total_net_profit,
+    fbh.total_orders,
+    fbh.profit_loss_difference,
+    fbh.customer_status
+FROM FinalBenchmark fbh
+WHERE fbh.total_orders > 5
+AND fbh.total_net_profit IS NOT NULL
+ORDER BY fbh.profit_loss_difference DESC
+FETCH FIRST 100 ROWS ONLY;

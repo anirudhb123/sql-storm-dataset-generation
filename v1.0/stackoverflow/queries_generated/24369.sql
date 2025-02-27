@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(NULLIF(p.Score, 0), 1) AS Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COALESCE(NULLIF(p.Score, 0), 1) DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PostScoreChanges AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) as LastChangeDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11, 24)) AS ChangesInvalidatingScore,
+        SUM(CASE WHEN ph.UserId IS NULL THEN 1 ELSE 0 END) AS NullUserRecords
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+ComparativeRanks AS (
+    SELECT 
+        r.Title, 
+        r.Score, 
+        r.Rank, 
+        COALESCE(psc.ChangesInvalidatingScore, 0) AS AdjustedScoreChange,
+        CASE WHEN r.Rank = 1 THEN 'Top Post' ELSE 'Other Post' END AS PostTypeRank
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        PostScoreChanges psc ON r.PostId = psc.PostId
+)
+
+SELECT 
+    c.PostId AS CommentPostId,
+    c.Text AS CommentText,
+    cp.Title AS ParentPostTitle,
+    cp.PostTypeRank,
+    c.CreationDate AS CommentCreationDate,
+    cr.NullUserRecords,
+    CASE 
+        WHEN c.UserId IS NULL THEN 'Anonymous' 
+        ELSE u.DisplayName 
+    END AS CommenterName,
+    CASE 
+        WHEN cr.ChangesInvalidatingScore > 0 THEN 'This post has had score invalidating changes' 
+        ELSE 'No score changes detected' 
+    END AS ScoreChangeMessage
+FROM 
+    Comments c
+JOIN 
+    Posts cp ON c.PostId = cp.Id
+LEFT JOIN 
+    ComparativeRanks cr ON cp.Id = cr.PostId
+LEFT JOIN 
+    Users u ON c.UserId = u.Id
+WHERE 
+    cp.ViewCount > 50 
+    AND cp.CreationDate < NOW() - INTERVAL '6 months'
+ORDER BY 
+    c.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY; 
+
+This SQL query encompasses various SQL constructs, including Common Table Expressions (CTEs), window functions, outer joins, conditional logic, filtering through a complex WHERE clause, and a set of derived fields to showcase multiple aspects of post interactions, including votes and comments. It also checks for corner cases such as null user records, providing a more detailed output related to post changes and comment origins.

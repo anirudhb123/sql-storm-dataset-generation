@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        t.TagName
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        LATERAL (
+            SELECT
+                unnest(string_to_array(p.Tags, '><')) AS TagName
+        ) t ON TRUE
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, t.TagName
+),
+TopPosts AS (
+    SELECT
+        rp.*,
+        RANK() OVER (ORDER BY rp.Score DESC, rp.ViewCount DESC) AS ScoreRank
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.PostRank = 1
+)
+SELECT
+    u.DisplayName,
+    COUNT(DISTINCT tp.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN tp.ScoreRank <= 10 THEN tp.Id END) AS TopRankedPosts,
+    SUM(tp.UpVotes) AS TotalUpVotes,
+    SUM(tp.DownVotes) AS TotalDownVotes,
+    ARRAY_AGG(DISTINCT tp.TagName) AS AssociatedTags
+FROM
+    TopPosts tp
+JOIN
+    Users u ON tp.OwnerUserId = u.Id
+GROUP BY
+    u.DisplayName
+HAVING
+    COUNT(DISTINCT tp.Id) > 5
+ORDER BY
+    TotalPosts DESC;

@@ -1,0 +1,65 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TitleKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieWithCompany AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        co.name AS company_name,
+        COALESCE(ct.kind, 'Other') AS company_type
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    rt.rank,
+    COALESCE(tk.keywords, 'No Keywords') AS keywords,
+    COUNT(DISTINCT cc.person_id) AS cast_count,
+    STRING_AGG(DISTINCT CONCAT(p.name, ' as ', rt.title), '; ') AS cast_list
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    TitleKeywords tk ON rt.title_id = tk.movie_id
+LEFT JOIN 
+    MovieWithCompany mwc ON rt.title_id = mwc.movie_id
+LEFT JOIN 
+    complete_cast cc ON rt.title_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id
+WHERE 
+    rt.production_year >= 2000 
+    AND mwc.company_name IS NOT NULL
+GROUP BY 
+    rt.title_id, rt.title, rt.production_year, rt.rank
+ORDER BY 
+    rt.production_year DESC, rt.rank;

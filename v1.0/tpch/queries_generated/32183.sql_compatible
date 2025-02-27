@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    oh.total_orders,
+    oh.total_spent,
+    p.p_name,
+    psi.total_avail_qty,
+    psi.avg_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_nationkey ORDER BY oh.total_spent DESC) AS national_rank
+FROM nation ns
+LEFT JOIN OrderSummary oh ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name = oh.c_name LIMIT 1)
+JOIN PartSupplierInfo psi ON oh.total_orders > 5 AND psi.total_avail_qty > 100
+WHERE ns.n_comment IS NOT NULL
+ORDER BY ns.n_name, oh.total_spent DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_within_site,
+        ws.ws_bill_customer_sk,
+        ws.ws_warehouse_sk,
+        ws.ws_item_sk
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        (SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales_price
+         FROM web_sales
+         GROUP BY ws_item_sk) AS total_sales
+    ON ws.ws_item_sk = total_sales.ws_item_sk
+    WHERE 
+        total_sales.total_sales_price IS NOT NULL
+)
+
+SELECT 
+    COALESCE(c.c_first_name, '[Unknown]') AS first_name,
+    COALESCE(c.c_last_name, '[Unknown]') AS last_name,
+    ca.ca_city,
+    COALESCE(wb.avg_sold_price, 0) AS avg_sales,
+    AVG(rs.ws_net_paid) AS average_net_paid,
+    (SELECT COUNT(*) 
+     FROM store_returns sr 
+     WHERE sr.sr_return_quantity > 0 
+         AND sr.sr_store_sk = ss.s_store_sk 
+         AND sr.sr_returned_date_sk BETWEEN 20220101 AND 20221231) AS total_returns_this_year,
+    (CASE 
+        WHEN AVG(rs.ws_net_paid) IS NULL THEN 'No Sales'
+        WHEN AVG(rs.ws_net_paid) > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END) AS value_category
+FROM 
+    RankedSales rs
+JOIN 
+    customer c ON c.c_customer_sk = rs.ws_bill_customer_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    (SELECT ws.web_site_sk, AVG(ws.ws_sales_price) AS avg_sold_price 
+     FROM web_sales ws 
+     GROUP BY ws.web_site_sk) AS wb ON wb.web_site_sk = rs.web_site_sk
+JOIN 
+    store ss ON ss.s_store_sk = rs.ws_warehouse_sk
+WHERE 
+    rs.rank_within_site = 1
+GROUP BY 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    wb.avg_sold_price
+HAVING 
+    SUM(rs.ws_net_paid) > 5000
+ORDER BY 
+    c.c_last_name DESC, 
+    c.c_first_name ASC
+FETCH FIRST 10 ROWS ONLY;

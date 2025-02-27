@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank_acctbal
+    FROM 
+        supplier s
+),
+ProductAvailability AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_available 
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal 
+    FROM 
+        customer c 
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales 
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.n_name AS nation_name, 
+    pa.p_name AS part_name,
+    COALESCE(SUM(os.total_sales), 0) AS total_sales,
+    COALESCE(SUM(pa.total_available), 0) AS total_available,
+    COUNT(DISTINCT hvc.c_custkey) AS high_value_customers,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM 
+    nation r
+LEFT JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank_acctbal <= 5
+LEFT JOIN 
+    ProductAvailability pa ON pa.total_available > 0
+LEFT JOIN 
+    OrderSummary os ON os.total_sales > 10000
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = pa.p_partkey))
+WHERE 
+    r.r_regionkey IS NOT NULL
+GROUP BY 
+    r.n_name, pa.p_name
+HAVING 
+    COUNT(DISTINCT hvc.c_custkey) > 0
+ORDER BY 
+    total_sales DESC, nation_name, part_name;

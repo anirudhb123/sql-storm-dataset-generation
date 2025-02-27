@@ -1,0 +1,54 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.PostTypeId,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE r ON p2.ParentId = r.PostId 
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionsCount,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswersCount,
+    COUNT(DISTINCT b.Name) AS BadgesCount,
+    COUNT(DISTINCT t.TagName) AS UniqueTagsCount,
+    AVG(COALESCE(p.Score, 0)) AS AverageScore,
+    MAX(p.CreationDate) AS LastActivityDate,
+    NULLIF(MAX(p.LastEditDate), '1900-01-01') AS LastEditDate 
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    (SELECT DISTINCT UNNEST(string_to_array(Tags, ',')) AS TagName FROM Posts) t ON t.TagName IS NOT NULL
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 6 
+WHERE 
+    u.Reputation > 1000 
+    AND (p.LastActivityDate >= cast('2024-10-01' as date) - INTERVAL '30 days' OR p.LastEditDate >= cast('2024-10-01' as date) - INTERVAL '30 days') 
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    AverageScore DESC
+LIMIT 10;

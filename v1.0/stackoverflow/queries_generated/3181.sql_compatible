@@ -1,0 +1,75 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        Users
+),
+PostStatistics AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UB.BadgeCount,
+    P.TotalPosts,
+    P.Questions,
+    P.Answers,
+    P.TotalViews,
+    CASE 
+        WHEN P.TotalPosts > 0 THEN ROUND((P.TotalViews * 1.0 / P.TotalPosts), 2) 
+        ELSE 0 
+    END AS AverageViewsPerPost,
+    COALESCE(FirstPost.Title, 'No Posts') AS FirstPostTitle,
+    COALESCE(FirstPost.CreationDate, NULL) AS FirstPostDate
+FROM 
+    TopUsers U
+LEFT JOIN 
+    UserBadges UB ON U.UserId = UB.UserId
+LEFT JOIN 
+    PostStatistics P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    (
+        SELECT 
+            P.OwnerUserId,
+            P.Title,
+            P.CreationDate
+        FROM 
+            Posts P
+        WHERE 
+            P.CreationDate IS NOT NULL
+        ORDER BY 
+            P.CreationDate
+    ) FirstPost ON U.UserId = FirstPost.OwnerUserId
+WHERE 
+    U.Rank <= 10
+ORDER BY 
+    U.Rank;

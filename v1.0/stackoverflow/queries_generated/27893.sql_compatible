@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= DATEADD(day, -30, DATE '2024-10-01') 
+        AND p.Body IS NOT NULL
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.Body, p.Tags, p.CreationDate, p.OwnerUserId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.BadgeCount,
+        rp.OwnerUserId
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 
+        AND rp.CommentCount > 5 
+        AND rp.BadgeCount >= 1
+)
+
+SELECT 
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    FORMAT(fp.CreationDate, 'yyyy-MM-dd HH:mm:ss') AS FormattedCreationDate,
+    fp.CommentCount,
+    fp.BadgeCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+ORDER BY 
+    fp.CommentCount DESC, 
+    fp.CreationDate DESC
+LIMIT 10;

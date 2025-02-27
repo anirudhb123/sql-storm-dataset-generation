@@ -1,0 +1,33 @@
+
+WITH RankedSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           SUBSTRING(p.p_comment, 1, 15) AS short_comment
+    FROM part p
+    WHERE CHAR_LENGTH(p.p_name) > 10 AND p.p_retailprice < 50.00
+),
+FinalResult AS (
+    SELECT r.r_name AS region,
+           n.n_name AS nation,
+           ss.s_name AS supplier_name,
+           fp.p_name AS part_name,
+           fp.short_comment,
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(l.l_quantity) AS total_quantity_sold
+    FROM RankedSupplier ss
+    JOIN nation n ON ss.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN partsupp ps ON ss.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part fp ON ps.ps_partkey = fp.p_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE ss.rank <= 3
+    GROUP BY r.r_name, n.n_name, ss.s_name, fp.p_name, fp.short_comment
+    ORDER BY r.r_name, n.n_name, ss.s_name, total_orders DESC
+)
+SELECT * FROM FinalResult;

@@ -1,0 +1,40 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score, p.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ModeratedPosts AS (
+    SELECT ph.PostId, ph.UserId, ph.CreationDate, ph.Comment 
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+      AND ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '60 days'
+),
+TopUsers AS (
+    SELECT u.Id AS UserId, u.DisplayName, 
+           COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+           COUNT(DISTINCT p.Id) AS RecentPostCount
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN RecentPosts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+    HAVING COUNT(DISTINCT p.Id) > 0
+),
+ClosedPostStats AS (
+    SELECT p.Id AS PostId, p.Title, COUNT(DISTINCT pm.UserId) AS ModeratorCount
+    FROM Posts p 
+    LEFT JOIN ModeratedPosts pm ON p.Id = pm.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id
+)
+
+SELECT tu.UserId, tu.DisplayName, tu.BadgeCount, tu.RecentPostCount, 
+       cps.PostId, cps.Title, cps.ModeratorCount
+FROM TopUsers tu
+LEFT JOIN ClosedPostStats cps ON tu.RecentPostCount > 2 
+ORDER BY tu.BadgeCount DESC, tu.RecentPostCount DESC;

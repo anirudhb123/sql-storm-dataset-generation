@@ -1,0 +1,54 @@
+
+WITH RECURSIVE CTE_SupplierRating AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS rating_level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, cr.rating_level + 1
+    FROM supplier s
+    JOIN CTE_SupplierRating cr ON s.s_acctbal < cr.s_acctbal AND cr.rating_level < 5
+),
+AggregatedOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, n.n_name
+    FROM customer c
+    JOIN Nations n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal > 50000
+),
+SupplierOrders AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_supply_value
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           RANK() OVER (PARTITION BY sr.rating_level ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM CTE_SupplierRating sr
+    JOIN partsupp ps ON sr.s_suppkey = ps.ps_suppkey
+    GROUP BY sr.s_suppkey, sr.s_name, sr.rating_level
+)
+SELECT 
+    hv.c_name, 
+    COALESCE(ao.total_spent, 0) AS total_spent, 
+    COALESCE(SUM(ss.total_supply_value), 0) AS total_supply_value,
+    rs.s_name AS top_supplier
+FROM HighValueCustomers hv
+LEFT JOIN AggregatedOrders ao ON hv.c_custkey = ao.o_custkey
+LEFT JOIN SupplierOrders ss ON hv.c_custkey = ss.p_partkey
+LEFT JOIN RankedSuppliers rs ON rs.rank = 1
+WHERE hv.n_name IS NOT NULL
+GROUP BY hv.c_name, ao.total_spent, rs.s_name
+ORDER BY ao.total_spent DESC;

@@ -1,0 +1,36 @@
+WITH MovieYears AS (
+    SELECT 
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        AVG(COALESCE(mi.info)::float) AS avg_info_length
+    FROM aka_title mt
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id
+    WHERE mt.production_year IS NOT NULL
+    GROUP BY mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM aka_title mt
+    JOIN cast_info ci ON mt.id = ci.movie_id
+    GROUP BY mt.id, mt.title
+    HAVING COUNT(DISTINCT ci.person_id) > 5
+)
+SELECT 
+    my.production_year,
+    tm.title,
+    tm.total_cast,
+    my.total_companies,
+    my.avg_info_length,
+    RANK() OVER (PARTITION BY my.production_year ORDER BY my.avg_info_length DESC) AS rank_by_info_length,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM MovieYears my
+JOIN TopMovies tm ON my.production_year = (SELECT MAX(m.production_year) FROM aka_title m WHERE m.id = tm.movie_id)
+LEFT JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.imdb_id
+WHERE my.total_companies > 1
+GROUP BY my.production_year, tm.title, tm.total_cast, my.total_companies, my.avg_info_length
+ORDER BY my.production_year, rank_by_info_length;

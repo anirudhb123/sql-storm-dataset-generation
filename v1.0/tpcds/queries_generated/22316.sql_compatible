@@ -1,0 +1,69 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_prod,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.web_site_sk) AS total_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date = DATE '2002-10-01' - INTERVAL '30 DAYS')
+        AND ws.ws_net_profit IS NOT NULL
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, ca.ca_city
+),
+aggregate_returns AS (
+    SELECT 
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        sr_store_sk,
+        sr_reason_sk
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(d2.d_date_sk) FROM date_dim d2 WHERE d2.d_date = DATE '2002-10-01')
+    GROUP BY 
+        sr_store_sk, sr_reason_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    ci.order_count,
+    rs.ws_sales_price,
+    rs.rank_prod,
+    ar.total_returns,
+    CASE 
+        WHEN ci.order_count = 0 THEN 'No Orders' 
+        WHEN ar.total_returns > 10 THEN 'High Returns' 
+        ELSE 'Normal' 
+    END AS order_status
+FROM 
+    customer_info ci
+LEFT JOIN 
+    ranked_sales rs ON ci.order_count > 0
+LEFT JOIN 
+    aggregate_returns ar ON ar.sr_store_sk = (SELECT MIN(s.s_store_sk) FROM store s)
+WHERE 
+    (ci.cd_gender = 'M' OR ci.cd_marital_status = 'S')
+    AND (rs.ws_sales_price >= 20 OR (rs.rank_prod IS NULL AND ci.order_count = 1))
+ORDER BY 
+    ci.ca_city, rs.rank_prod DESC;

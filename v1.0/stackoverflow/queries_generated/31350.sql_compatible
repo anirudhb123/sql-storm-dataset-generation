@@ -1,0 +1,85 @@
+
+WITH RecursivePostCTE AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        0 AS Level
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        R.Level + 1
+    FROM
+        Posts P
+    INNER JOIN RecursivePostCTE R ON P.ParentId = R.PostId
+),
+UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY
+        U.Id
+),
+PostScores AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(VoteScore, 0) AS VoteScore,
+        COALESCE(CommentCount, 0) AS CommentCount
+    FROM
+        Posts P
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS VoteScore
+        FROM
+            Votes
+        GROUP BY
+            PostId
+    ) V ON P.Id = V.PostId
+)
+SELECT
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.PostId) AS TotalQuestions,
+    SUM(COALESCE(PS.VoteScore, 0)) AS TotalVoteScore,
+    SUM(PS.CommentCount) AS TotalComments,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    COUNT(DISTINCT R.PostId) AS TotalAnswers,
+    STRING_AGG(R.Title, '; ') AS AnswerTitles
+FROM
+    Users U
+LEFT JOIN RecursivePostCTE R ON U.Id = R.OwnerUserId
+LEFT JOIN PostScores PS ON U.Id = PS.OwnerUserId
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE
+    U.Reputation > 100 AND (UB.BadgeCount IS NULL OR UB.BadgeCount > 0)  
+GROUP BY
+    U.DisplayName,
+    U.Reputation,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges
+ORDER BY
+    TotalVoteScore DESC, TotalComments DESC;

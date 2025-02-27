@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+MinMaxOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           MIN(o.o_totalprice) OVER (PARTITION BY o.o_orderstatus) AS min_price,
+           MAX(o.o_totalprice) OVER (PARTITION BY o.o_orderstatus) AS max_price
+    FROM orders o
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice) AS total_price,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM lineitem l
+    WHERE l.l_discount > 0.05 AND l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+SupplierOrders AS (
+    SELECT sh.s_suppkey, sh.s_name, COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM SupplierHierarchy sh
+    LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY sh.s_suppkey, sh.s_name
+)
+SELECT s.s_name, so.total_orders, f.total_price, 
+       COALESCE(m.min_price, 0) AS min_order_price, 
+       COALESCE(m.max_price, 0) AS max_order_price,
+       CASE WHEN so.total_orders > 10 THEN 'High Order Supplier' ELSE 'Low Order Supplier' END AS order_status
+FROM FilteredLineItems f
+JOIN MinMaxOrders m ON f.l_orderkey = m.o_orderkey
+JOIN SupplierOrders so ON so.total_orders > 0
+JOIN supplier s ON so.s_suppkey = s.s_suppkey
+WHERE f.part_count > 5
+ORDER BY f.total_price DESC, s.s_name ASC;

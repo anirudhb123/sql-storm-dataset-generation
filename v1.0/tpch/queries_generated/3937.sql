@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_custkey,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+),
+CustomerPurchases AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    JOIN
+        lineitem l ON l.l_orderkey = ro.o_orderkey
+    WHERE
+        ro.order_rank <= 5
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT
+        cp.c_custkey,
+        cp.c_name,
+        cp.total_spent,
+        DENSE_RANK() OVER (ORDER BY cp.total_spent DESC) AS spend_rank
+    FROM
+        CustomerPurchases cp
+)
+SELECT
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_spent,
+    COALESCE(s.s_name, 'Unknown Supplier') AS last_supplier_name,
+    AVG(p.p_retailprice) AS avg_part_price,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+FROM
+    TopCustomers tc
+LEFT JOIN
+    orders o ON tc.c_custkey = o.o_custkey 
+LEFT JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey 
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN
+    part p ON l.l_partkey = p.p_partkey
+WHERE
+    tc.spend_rank <= 10
+GROUP BY
+    tc.c_custkey, tc.c_name
+HAVING
+    AVG(p.p_retailprice) IS NOT NULL
+ORDER BY
+    tc.total_spent DESC;

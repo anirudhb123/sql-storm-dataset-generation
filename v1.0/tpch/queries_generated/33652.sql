@@ -1,0 +1,63 @@
+WITH RECURSIVE part_suppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), top_suppliers AS (
+    SELECT 
+        ps.p_partkey,
+        ps.p_name,
+        ARRAY_AGG(DISTINCT ps.s_name) AS supplier_names
+    FROM 
+        part_suppliers ps
+    WHERE 
+        ps.rn <= 3
+    GROUP BY 
+        ps.p_partkey, ps.p_name
+), order_aggregation AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ta.p_partkey,
+    ta.p_name,
+    COALESCE(t.total_revenue, 0) AS total_revenue,
+    t.unique_customers,
+    t.distinct_parts,
+    STRING_AGG(DISTINCT ta.supplier_names, ', ') AS suppliers
+FROM 
+    top_suppliers ta
+LEFT JOIN 
+    order_aggregation t ON ta.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    )
+GROUP BY 
+    ta.p_partkey, ta.p_name, t.total_revenue, t.unique_customers, t.distinct_parts
+ORDER BY 
+    total_revenue DESC;

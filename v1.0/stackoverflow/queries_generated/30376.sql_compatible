@@ -1,0 +1,41 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        1 AS Level
+    FROM Posts p 
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId, 
+        p2.Title, 
+        p2.OwnerUserId, 
+        p2.CreationDate, 
+        rp.Level + 1
+    FROM Posts p2
+    JOIN RecursivePostCTE rp ON p2.ParentId = rp.PostId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(b.BadgesCount, 0) AS BadgeCount,
+    COUNT(pp.PostId) AS TotalPosts,
+    SUM(CASE WHEN pp.Level = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN pp.Level > 1 THEN 1 ELSE 0 END) AS TotalAnswers,
+    MAX(pp.CreationDate) AS LastPostDate
+FROM Users u
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(*) AS BadgesCount
+    FROM Badges
+    GROUP BY UserId
+) b ON u.Id = b.UserId
+LEFT JOIN RecursivePostCTE pp ON u.Id = pp.OwnerUserId
+GROUP BY u.DisplayName, b.BadgesCount
+HAVING COUNT(pp.PostId) > 10 
+ORDER BY BadgeCount DESC, TotalPosts DESC;

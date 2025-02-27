@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        date_dim.d_year,
+        date_dim.d_month_seq,
+        customer.c_customer_id,
+        customer.c_birth_year,
+        customer.c_gender,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer ON ws.ws_bill_customer_sk = customer.c_customer_sk
+    JOIN 
+        date_dim ON ws.ws_sold_date_sk = date_dim.d_date_sk
+    WHERE 
+        date_dim.d_year >= 2020
+    GROUP BY 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk, 
+        date_dim.d_year, 
+        date_dim.d_month_seq, 
+        customer.c_customer_id, 
+        customer.c_birth_year, 
+        customer.c_gender
+),
+AggregateSales AS (
+    SELECT 
+        d_year,
+        SUM(total_quantity) AS yearly_quantity,
+        SUM(total_net_profit) AS yearly_net_profit,
+        COUNT(DISTINCT c_customer_id) AS unique_customers,
+        AVG(c_birth_year) AS avg_birth_year,
+        COUNT(CASE WHEN c_gender = 'M' THEN 1 END) AS male_count,
+        COUNT(CASE WHEN c_gender = 'F' THEN 1 END) AS female_count
+    FROM 
+        SalesData
+    GROUP BY 
+        d_year
+)
+SELECT 
+    a.d_year,
+    a.yearly_quantity,
+    a.yearly_net_profit,
+    a.unique_customers,
+    a.avg_birth_year,
+    a.male_count,
+    a.female_count
+FROM 
+    AggregateSales AS a
+ORDER BY 
+    a.d_year DESC;

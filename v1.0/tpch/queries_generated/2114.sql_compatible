@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name,
+        n.n_nationkey,
+        r.r_regionkey,
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_sales
+    FROM 
+        RankedSales cs
+    JOIN 
+        nation n ON cs.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        cs.sales_rank <= 5
+),
+AverageSales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales
+    FROM 
+        TopCustomers
+)
+SELECT 
+    tc.r_name,
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_sales,
+    CASE 
+        WHEN tc.total_sales > (SELECT avg_sales FROM AverageSales) THEN 'Above Average'
+        WHEN tc.total_sales < (SELECT avg_sales FROM AverageSales) THEN 'Below Average'
+        ELSE 'Average'
+    END AS sales_comparison,
+    COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    partsupp ps ON tc.c_custkey = ps.ps_partkey
+GROUP BY 
+    tc.r_name, tc.c_custkey, tc.c_name, tc.total_sales
+ORDER BY 
+    tc.r_name, tc.total_sales DESC;

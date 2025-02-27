@@ -1,0 +1,45 @@
+
+WITH RECURSIVE CostlySuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_supplycost, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_supplycost > 100
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_supplycost, ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN CostlySuppliers cs ON cs.ps_supplycost > ps.ps_supplycost
+    WHERE cs.s_acctbal < s.s_acctbal
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+MaxRevenue AS (
+    SELECT MAX(total_revenue) AS highest_revenue FROM FilteredOrders
+),
+EligibleSuppliers AS (
+    SELECT DISTINCT cs.s_suppkey, cs.s_name, cs.ps_availqty
+    FROM CostlySuppliers cs
+    JOIN supplier s ON cs.s_suppkey = s.s_suppkey
+    WHERE cs.s_acctbal IS NOT NULL
+),
+RevenueAnalytics AS (
+    SELECT fo.o_orderkey, fo.o_orderdate, fo.total_revenue
+    FROM FilteredOrders fo
+    JOIN MaxRevenue mr ON fo.total_revenue = mr.highest_revenue
+)
+SELECT es.s_name, es.ps_availqty, ra.o_orderkey, ra.o_orderdate, ra.total_revenue
+FROM EligibleSuppliers es
+LEFT JOIN RevenueAnalytics ra ON es.s_suppkey = (SELECT ps.ps_suppkey
+                                                  FROM partsupp ps
+                                                  WHERE ps.ps_availqty = es.ps_availqty
+                                                  ORDER BY ps.ps_supplycost DESC
+                                                  FETCH FIRST 1 ROW ONLY)
+WHERE es.ps_availqty IS NOT NULL
+ORDER BY ra.total_revenue DESC, es.s_name ASC NULLS FIRST
+FETCH FIRST 10 ROWS ONLY;

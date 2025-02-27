@@ -1,0 +1,73 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        c.person_id,
+        n.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name n ON c.person_id = n.person_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+),
+CompanyContributions AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(co.name, ', ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title AS movie_title,
+    rt.production_year,
+    cd.actor_name,
+    cd.actor_order,
+    mwk.keywords,
+    cc.companies,
+    cc.num_companies,
+    count(cast_info.movie_id) OVER () AS total_movies,
+    COALESCE(NULLIF(rt.title_rank, 1), 'Not First') AS rank_status
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title_id = cd.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rt.title_id = mwk.movie_id
+LEFT JOIN 
+    CompanyContributions cc ON rt.title_id = cc.movie_id
+WHERE 
+    (cd.actor_name IS NOT NULL AND cd.actor_name LIKE 'A%')
+    OR (cc.num_companies > 5 AND cc.companies IS NOT NULL)
+ORDER BY 
+    rt.production_year DESC, rt.title ASC, cd.actor_order
+FETCH FIRST 50 ROWS ONLY;

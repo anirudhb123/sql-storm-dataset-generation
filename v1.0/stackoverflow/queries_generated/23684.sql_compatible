@@ -1,0 +1,78 @@
+
+WITH ranked_posts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank,
+        COALESCE(pa.UserId, -1) AS AcceptedAnswerUserId,
+        p.Tags
+    FROM 
+        Posts p
+        LEFT JOIN Posts pa ON p.AcceptedAnswerId = pa.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+tagged_posts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.ScoreRank <= 10 THEN 'Top Post'
+            WHEN rp.ScoreRank BETWEEN 11 AND 50 THEN 'Mid Post'
+            ELSE 'Low Post'
+        END AS ScoreCategory,
+        t.TagName
+    FROM 
+        ranked_posts rp
+        LEFT JOIN LATERAL (
+            SELECT 
+                unnest(string_to_array(rp.Tags, '><')) AS TagName
+        ) t ON TRUE
+    WHERE 
+        t.TagName IS NOT NULL
+),
+post_history_info AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.CreationDate END) AS DeletedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Id,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.ScoreCategory,
+    STRING_AGG(DISTINCT tp.TagName, ', ') AS Tags,
+    COALESCE(ph.ClosedDate, ph.DeletedDate) AS MostRecentChangeDate,
+    CASE 
+        WHEN ph.ClosedDate IS NOT NULL THEN 'Closed'
+        WHEN ph.DeletedDate IS NOT NULL THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    COALESCE(u.DisplayName, 'Community User') AS AcceptedAnswerUser
+FROM 
+    tagged_posts tp
+    LEFT JOIN post_history_info ph ON tp.Id = ph.PostId
+    LEFT JOIN Users u ON tp.AcceptedAnswerUserId = u.Id
+WHERE 
+    tp.CommentCount > 0
+GROUP BY 
+    tp.Id, tp.Title, tp.CreationDate, tp.Score, tp.CommentCount, tp.ScoreCategory, ph.ClosedDate, ph.DeletedDate, u.DisplayName
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC
+LIMIT 100;

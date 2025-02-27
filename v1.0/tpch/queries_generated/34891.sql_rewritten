@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s1.s_suppkey, s1.s_name, s1.s_acctbal, s2.s_suppkey AS parent_suppkey
+    FROM supplier s1
+    LEFT JOIN partsupp ps ON s1.s_suppkey = ps.ps_suppkey
+    LEFT JOIN supplier s2 ON ps.ps_supplycost < s2.s_acctbal
+    WHERE s1.s_acctbal > 1000
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_acctbal, sh.s_suppkey
+    FROM SupplierHierarchy sh
+    JOIN supplier s2 ON sh.parent_suppkey = s2.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+    HAVING COUNT(o.o_orderkey) > 5
+),
+PartPricing AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    rs.r_name AS region_name,
+    ns.n_name AS nation_name,
+    c.cs_name,
+    cs.total_orders,
+    cs.total_spent,
+    pp.p_partkey,
+    pp.avg_supply_cost,
+    pp.supplier_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+FROM region rs
+JOIN nation ns ON rs.r_regionkey = ns.n_regionkey
+JOIN customer c ON ns.n_nationkey = c.c_nationkey
+JOIN CustomerOrderSummary cs ON c.c_name = cs.c_name
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN PartPricing pp ON l.l_partkey = pp.p_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = l.l_suppkey
+WHERE sh.parent_suppkey IS NULL
+GROUP BY rs.r_name, ns.n_name, cs.c_name, cs.total_orders, cs.total_spent, pp.p_partkey, pp.avg_supply_cost, pp.supplier_count
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC
+LIMIT 10;

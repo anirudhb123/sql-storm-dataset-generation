@@ -1,0 +1,60 @@
+
+WITH RankedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS address_rank
+    FROM 
+        customer_address
+),
+CityAddressCounts AS (
+    SELECT 
+        ca_city,
+        COUNT(DISTINCT full_address) AS unique_address_count
+    FROM 
+        RankedAddresses
+    GROUP BY 
+        ca_city
+),
+DemographicStatistics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_dep_count) AS max_dep_count,
+        cd_demo_sk
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status, cd_demo_sk
+),
+Combined AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        u.unique_address_count,
+        ds.avg_purchase_estimate,
+        ds.max_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        CityAddressCounts u ON ca.ca_city = u.ca_city
+    JOIN 
+        DemographicStatistics ds ON c.c_current_cdemo_sk = ds.cd_demo_sk
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c_customer_id) AS customer_count,
+    AVG(avg_purchase_estimate) AS city_avg_purchase_estimate,
+    MAX(max_dep_count) AS city_max_dep_count,
+    SUM(unique_address_count) AS city_total_unique_addresses
+FROM 
+    Combined ca
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    customer_count DESC;

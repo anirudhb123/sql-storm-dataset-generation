@@ -1,0 +1,94 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName, 
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL 
+    GROUP BY 
+        UNNEST(string_to_array(Tags, '><'))
+),
+TopUsers AS (
+    SELECT 
+        ua.*,
+        ROW_NUMBER() OVER (ORDER BY ua.Reputation DESC) AS UserRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(pt.TagCount, 0) AS TotalTagUsage,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    AVG(v.BountyAmount) AS AvgBountyByPost,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT UNNEST(string_to_array(p.Tags, '><')))
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+WHERE 
+    p.PostTypeId = 1  
+    AND p.CreationDate >= (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year')  
+GROUP BY 
+    p.Id, u.DisplayName, u.Reputation, pt.TagCount
+ORDER BY 
+    CommentCount DESC, Upvotes DESC
+LIMIT 10;

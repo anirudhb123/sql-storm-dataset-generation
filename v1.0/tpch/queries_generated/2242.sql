@@ -1,0 +1,63 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value,
+        r.r_name AS region_name
+    FROM 
+        customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        JOIN supplier s ON s.s_nationkey = c.c_nationkey
+        JOIN nation n ON n.n_nationkey = s.s_nationkey
+        JOIN region r ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        c.c_custkey, c.c_name, r.r_name
+), PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        MIN(ps.ps_supplycost) AS min_cost,
+        MAX(ps.ps_supplycost) AS max_cost
+    FROM 
+        part p
+        JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(DISTINCT l.l_partkey) AS part_count,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS value_rank
+    FROM 
+        orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    co.avg_order_value,
+    ps.total_available,
+    ps.min_cost,
+    ps.max_cost,
+    od.order_value,
+    od.part_count,
+    od.value_rank
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    PartSupplier ps ON co.c_custkey = ps.p_partkey -- Hypothetical join for benchmarking
+LEFT JOIN 
+    OrderDetails od ON co.order_count = od.part_count
+WHERE 
+    co.total_spent > 1000
+ORDER BY 
+    co.avg_order_value DESC, 
+    co.order_count DESC
+LIMIT 50;

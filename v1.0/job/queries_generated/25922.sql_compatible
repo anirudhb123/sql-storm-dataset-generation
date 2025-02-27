@@ -1,0 +1,61 @@
+
+WITH movie_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.id, a.name
+),
+actor_details AS (
+    SELECT 
+        ma.actor_id,
+        ma.actor_name,
+        ma.total_movies,
+        ma.movie_titles,
+        pi.info AS additional_info
+    FROM 
+        movie_actors ma
+    LEFT JOIN 
+        person_info pi ON ma.actor_id = pi.person_id
+    WHERE 
+        pi.info_type_id IS NOT NULL
+),
+movie_info AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.title, mt.production_year
+)
+SELECT 
+    ad.actor_id,
+    ad.actor_name,
+    ad.total_movies,
+    ad.movie_titles,
+    ad.additional_info,
+    mi.movie_title,
+    mi.production_year,
+    mi.keywords
+FROM 
+    actor_details ad
+JOIN 
+    movie_info mi ON ad.movie_titles LIKE '%' || mi.movie_title || '%'
+ORDER BY 
+    ad.total_movies DESC, mi.production_year DESC;

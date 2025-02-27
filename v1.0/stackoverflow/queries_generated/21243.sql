@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostClosureHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    ur.TotalBadges,
+    ur.TotalPosts,
+    ur.MaxReputation,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    COALESCE(pch.CloseReasonCount, 0) AS CloseReasonCount,
+    COALESCE(pch.CloseReasons, 'None') AS CloseReasons,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists' 
+        ELSE 'No Accepted Answer' 
+    END AS AnswerStatus,
+    CASE 
+        WHEN p.Score > 100 THEN 'Popular'
+        WHEN p.Score BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus
+FROM 
+    RankedPosts p
+JOIN 
+    Users up ON p.OwnerUserId = up.Id
+JOIN 
+    UserReputation ur ON up.Id = ur.UserId
+LEFT JOIN 
+    PostClosureHistory pch ON p.Id = pch.PostId
+WHERE 
+    p.PostRank <= 5 
+ORDER BY 
+    ur.MaxReputation DESC, 
+    p.Score DESC;
+
+This query employs Common Table Expressions (CTEs) to create rankings for posts based on multiple criteria while aggregating badge information and handling closure histories with string expressions and conditional case statements.

@@ -1,0 +1,81 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT Id, Title, AcceptedAnswerId, CreationDate, OwnerUserId, Score, 0 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1
+
+    UNION ALL
+
+    
+    SELECT p.Id, p.Title, p.AcceptedAnswerId, p.CreationDate, p.OwnerUserId, p.Score, rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE rp ON p.ParentId = rp.Id
+    WHERE p.PostTypeId = 2 
+),
+
+PostVoteSummary AS (
+    
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Votes
+    GROUP BY PostId
+),
+
+RecentPostHistory AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserId,
+        ph.Comment,
+        u.DisplayName,
+        b.Name AS BadgeName
+    FROM PostHistory ph
+    JOIN Users u ON ph.UserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId AND b.Date = (
+        SELECT MAX(Date)
+        FROM Badges
+        WHERE UserId = u.Id
+    )
+    WHERE ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+),
+
+CombinedSummary AS (
+    
+    SELECT
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rv.Upvotes,
+        rv.Downvotes,
+        rp.Level,
+        rph.EditDate,
+        rph.DisplayName,
+        rph.BadgeName
+    FROM RecursivePostCTE rp
+    LEFT JOIN PostVoteSummary rv ON rp.Id = rv.PostId
+    LEFT JOIN RecentPostHistory rph ON rp.Id = rph.PostId
+)
+
+
+SELECT
+    c.PostId,
+    c.Title,
+    c.CreationDate,
+    COALESCE(c.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(c.Downvotes, 0) AS TotalDownvotes,
+    CASE 
+        WHEN c.Level = 0 THEN 'Question'
+        ELSE 'Answer'
+    END AS PostType,
+    c.EditDate,
+    COALESCE(c.DisplayName, 'No Editor') AS LastEditedBy,
+    COALESCE(c.BadgeName, 'No Badge') AS EditorBadge
+FROM CombinedSummary c
+WHERE COALESCE(c.Upvotes, 0) - COALESCE(c.Downvotes, 0) > 0 
+AND c.EditDate IS NOT NULL 
+ORDER BY c.TotalUpvotes DESC, c.CreationDate DESC
+LIMIT 100;

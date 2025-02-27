@@ -1,0 +1,59 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Posts.Tags LIKE CONCAT('%', Tags.TagName, '%')
+    GROUP BY 
+        Tags.TagName
+), 
+MostActiveUsers AS (
+    SELECT 
+        Users.DisplayName,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.DisplayName
+), 
+UserReputation AS (
+    SELECT 
+        Users.DisplayName,
+        Users.Reputation,
+        COALESCE(SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.DisplayName, Users.Reputation
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    ma.QuestionsAsked,
+    ma.AnswersGiven,
+    ma.TotalViews,
+    tc.TagName,
+    tc.PostCount
+FROM 
+    UserReputation u
+JOIN 
+    MostActiveUsers ma ON u.DisplayName = ma.DisplayName
+LEFT JOIN 
+    TagCounts tc ON tc.PostCount > 0
+ORDER BY 
+    u.Reputation DESC, 
+    ma.TotalViews DESC;

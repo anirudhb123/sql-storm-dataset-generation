@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 10
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.Reputation
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        p.Title AS PostTitle,
+        p.OwnerDisplayName,
+        (SELECT STRING_AGG(CAST(ph2.Comment AS VARCHAR), ', ') 
+         FROM PostHistory ph2 
+         WHERE ph2.PostId = ph.PostId) AS Comments
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.OwnerDisplayName,
+    tuh.Reputation,
+    pu.PostCount,
+    phd.HistoryDate,
+    phd.PostTitle,
+    phd.Comments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers tuh ON rp.OwnerDisplayName = tuh.Id
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

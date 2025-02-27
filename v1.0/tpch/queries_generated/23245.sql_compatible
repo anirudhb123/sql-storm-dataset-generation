@@ -1,0 +1,58 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p 
+    WHERE p.p_size BETWEEN 1 AND 100
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps 
+    GROUP BY ps.ps_partkey
+),
+HighValueParts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_retailprice 
+    FROM RankedParts rp 
+    WHERE rp.rank <= 5
+),
+EligibleQueens AS (
+    SELECT 
+        n.n_name AS nation_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 3
+),
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_adjusted
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' 
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_name, 
+    p.p_retailprice, 
+    COALESCE(sc.total_supply_cost, 0) * CASE WHEN p.p_retailprice IS NOT NULL THEN 1 ELSE 0 END AS adjusted_supply_cost, 
+    e.nation_name, 
+    o.total_price_adjusted 
+FROM HighValueParts p 
+LEFT JOIN SupplierCost sc ON p.p_partkey = sc.ps_partkey 
+JOIN EligibleQueens e ON e.nation_name IS NOT NULL 
+FULL OUTER JOIN OrderStatistics o ON o.o_orderkey IN (
+    SELECT o_orderkey 
+    FROM orders 
+    WHERE o_orderstatus <> 'F'
+) 
+ORDER BY p.p_retailprice DESC NULLS LAST, adjusted_supply_cost ASC;

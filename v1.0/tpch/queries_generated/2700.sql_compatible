@@ -1,0 +1,64 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+DetailedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS item_rank
+    FROM 
+        lineitem l
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(cos.total_spent, 0) AS total_spent,
+    cos.total_orders,
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(psd.total_avail_qty, 0) AS total_avail_qty,
+    COALESCE(psd.avg_supply_cost, 0) AS avg_supply_cost,
+    SUM(dli.l_extendedprice * (1 - dli.l_discount)) AS total_value
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderSummary cos ON c.c_custkey = cos.c_custkey
+LEFT JOIN 
+    DetailedLineItems dli ON c.c_custkey = dli.l_orderkey
+LEFT JOIN 
+    part p ON dli.l_partkey = p.p_partkey
+LEFT JOIN 
+    PartSupplierDetails psd ON p.p_partkey = psd.ps_partkey
+WHERE 
+    c.c_acctbal > 1000
+GROUP BY 
+    c.c_custkey, c.c_name, cos.total_spent, cos.total_orders, p.p_partkey, p.p_name, p.p_retailprice
+HAVING 
+    SUM(dli.l_extendedprice * (1 - dli.l_discount)) > 5000
+ORDER BY 
+    total_value DESC;

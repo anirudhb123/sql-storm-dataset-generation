@@ -1,0 +1,86 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId, 
+        COUNT(B.Id) AS BadgeCount,
+        AVG(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeRatio,
+        SUM(CASE WHEN B.TagBased = 1 THEN 1 ELSE 0 END) AS TagBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+RecentPostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS RecentPostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= timestamp '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        P.OwnerUserId
+),
+EligibleUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UC.BadgeCount,
+        RPA.RecentPostCount,
+        RPA.PositiveScorePosts,
+        RPA.TotalViews,
+        COALESCE(UC.GoldBadgeRatio, 0) AS GoldBadgeRatio,
+        UC.TagBadges
+    FROM 
+        Users U
+    INNER JOIN 
+        UserBadgeCounts UC ON U.Id = UC.UserId
+    LEFT JOIN 
+        RecentPostActivity RPA ON U.Id = RPA.OwnerUserId
+    WHERE 
+        U.Reputation > 100
+),
+TopUsers AS (
+    SELECT 
+        EU.UserId, 
+        EU.DisplayName, 
+        EU.BadgeCount,
+        EU.RecentPostCount,
+        EU.PositiveScorePosts,
+        EU.TotalViews,
+        ROW_NUMBER() OVER (ORDER BY EU.BadgeCount DESC, EU.RecentPostCount DESC, EU.TotalViews DESC) AS Rank
+    FROM 
+        EligibleUsers EU
+)
+SELECT 
+    U.DisplayName,
+    U.BadgeCount,
+    U.RecentPostCount,
+    U.PositiveScorePosts,
+    U.TotalViews,
+    CASE 
+        WHEN U.GoldBadgeRatio > 0.5 THEN 'Gold Enthusiast'
+        WHEN U.TagBadges > 5 THEN 'Tag Influencer'
+        ELSE 'Novice Contributor'
+    END AS UserClassification,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     INNER JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+     WHERE P.OwnerUserId = U.UserId 
+     GROUP BY T.Id
+     HAVING COUNT(P.Id) > 1) AS FrequentTags,
+    (
+        SELECT COUNT(DISTINCT C.Id) 
+        FROM Comments C 
+        WHERE C.UserId = U.UserId
+     ) AS TotalComments
+FROM 
+    TopUsers U
+WHERE 
+    U.Rank <= 10
+ORDER BY 
+    U.Rank;

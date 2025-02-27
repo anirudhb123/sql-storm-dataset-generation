@@ -1,0 +1,38 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+orders_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, COUNT(l.l_orderkey) AS total_lines,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+nations_with_customers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(c.c_custkey) AS customer_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+filtered_orders AS (
+    SELECT os.o_orderkey, os.o_orderdate, ns.n_name AS nation_name, os.total_price
+    FROM orders_summary os
+    JOIN nations_with_customers ns ON os.price_rank <= 5
+    WHERE os.total_lines > 1
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment,
+       COALESCE(ts.total_value, 0) AS supplier_total_value,
+       f.total_price AS order_total_price
+FROM part p
+LEFT JOIN top_suppliers ts ON p.p_partkey IN (
+      SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey
+)
+LEFT JOIN filtered_orders f ON p.p_partkey IN (
+      SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = f.o_orderkey
+)
+ORDER BY supplier_total_value DESC, order_total_price DESC;

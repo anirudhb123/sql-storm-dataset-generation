@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 
+           (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS total_parts
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 
+           (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS total_parts
+    FROM supplier s
+    INNER JOIN SupplierCTE cte ON s.n_nationkey = cte.n_nationkey
+    WHERE s.s_acctbal > 1000 AND s.s_suppkey <> cte.s_suppkey
+),
+OrderTotals AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_custkey
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, 
+       COALESCE(SUM(DISTINCT ot.total_spent), 0) AS total_spend_by_nation,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       COUNT(DISTINCT ss.s_name) AS supplier_count,
+       SUM(CASE WHEN l.total_line_value IS NOT NULL THEN l.total_line_value ELSE 0 END) AS total_line_item_value,
+       RANK() OVER (ORDER BY COALESCE(SUM(DISTINCT ot.total_spent), 0) DESC) AS region_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN OrderTotals ot ON c.c_custkey = ot.o_custkey
+LEFT JOIN SupplierCTE ss ON ss.n_nationkey = n.n_nationkey
+LEFT JOIN LineItemSummary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 AND SUM(COALESCE(ot.total_spent, 0)) > 5000
+ORDER BY region_rank
+FETCH FIRST 10 ROWS ONLY;

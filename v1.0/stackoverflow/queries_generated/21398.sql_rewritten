@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoricalDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        u.DisplayName AS EditorDisplayName,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Undeleted'
+            WHEN ph.PostHistoryTypeId IN (24, 25) THEN 'Edited/Updated'
+            ELSE 'Other Action'
+        END AS ActionType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserStats AS (
+    SELECT 
+        CreatedByUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' THEN 1 ELSE 0 END) AS RecentPosts,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        CreatedByUserId
+),
+PostLinksSummary AS (
+    SELECT 
+        pl.PostId,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+FinalSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ups.TotalPosts,
+        ups.RecentPosts,
+        ups.GoldBadges,
+        rp.PostId,
+        rp.Title,
+        COALESCE(pls.RelatedPostCount, 0) AS TotalRelatedLinks,
+        ARRAY_AGG(ra.ActionType) AS RecentActivityTypes
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserStats ups ON u.Id = ups.CreatedByUserId
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1
+    LEFT JOIN 
+        PostLinksSummary pls ON rp.PostId = pls.PostId
+    LEFT JOIN 
+        RecentActivity ra ON rp.PostId = ra.PostId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, ups.TotalPosts, ups.RecentPosts, ups.GoldBadges, rp.PostId, rp.Title
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.TotalPosts,
+    fs.RecentPosts,
+    fs.GoldBadges,
+    fs.Title AS MostRecentPostTitle,
+    fs.TotalRelatedLinks,
+    CASE 
+        WHEN fs.RecentActivityTypes IS NOT NULL THEN 'Recent Activities: ' || STRING_AGG(DISTINCT fs.RecentActivityTypes)
+        ELSE 'No Recent Activities'
+    END AS ActivityDetails
+FROM 
+    FinalSummary fs
+ORDER BY 
+    fs.GoldBadges DESC, fs.TotalPosts DESC, fs.RecentPosts DESC;

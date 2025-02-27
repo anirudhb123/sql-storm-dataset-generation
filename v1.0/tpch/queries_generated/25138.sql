@@ -1,0 +1,20 @@
+WITH FilteredItems AS (
+    SELECT p.p_name, p.p_brand, p.p_mfgr, p.p_retailprice, s.s_name, s.s_acctbal, 
+           CONCAT(s.s_name, ' ', p.p_name) AS SupplierProductName,
+           LEFT(p.p_comment, 10) AS ShortComment,
+           SUBSTRING_INDEX(s.s_comment, ' ', 5) AS SupplierCommentSnippet
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_size > 10 AND s.s_acctbal > 1000
+),
+RankedItems AS (
+    SELECT f.*, 
+           ROW_NUMBER() OVER (PARTITION BY f.p_brand ORDER BY f.p_retailprice DESC) AS BrandRank
+    FROM FilteredItems f
+)
+SELECT p_name, p_brand, p_mfgr, p_retailprice, s_name, s_acctbal, 
+       SupplierProductName, ShortComment, SupplierCommentSnippet
+FROM RankedItems
+WHERE BrandRank <= 5
+ORDER BY p_retailprice DESC, p_brand, p_name;

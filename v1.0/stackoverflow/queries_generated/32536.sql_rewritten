@@ -1,0 +1,113 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COALESCE(P.AvgScore, 0) AS AvgScore,
+        COALESCE(CL.TotalCloseVotes, 0) AS TotalCloseVotes,
+        COALESCE(BA.BadgeCount, 0) AS BadgeCount,
+        1 AS Level
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            AVG(Score) AS AvgScore 
+        FROM 
+            Posts 
+        GROUP BY 
+            OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS TotalCloseVotes
+        FROM 
+            PostHistory 
+        WHERE 
+            PostHistoryTypeId = 10  
+        GROUP BY 
+            UserId
+    ) CL ON U.Id = CL.UserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) BA ON U.Id = BA.UserId
+    WHERE 
+        U.Reputation > 100
+    UNION ALL
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COALESCE(P.AvgScore, 0) AS AvgScore,
+        COALESCE(CL.TotalCloseVotes, 0) AS TotalCloseVotes,
+        COALESCE(BA.BadgeCount, 0) AS BadgeCount,
+        Level + 1
+    FROM 
+        Users U
+    JOIN UserActivity UA ON U.Id =  UA.UserId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            AVG(Score) AS AvgScore 
+        FROM 
+            Posts 
+        GROUP BY 
+            OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS TotalCloseVotes
+        FROM 
+            PostHistory 
+        WHERE 
+            PostHistoryTypeId = 10  
+        GROUP BY 
+            UserId
+    ) CL ON U.Id = CL.UserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) BA ON U.Id = BA.UserId
+    WHERE 
+        U.Reputation > 100
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.AvgScore,
+        U.TotalCloseVotes,
+        U.BadgeCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        UserActivity U
+    WHERE 
+        U.Level = 1
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.Reputation,
+    T.AvgScore,
+    T.TotalCloseVotes,
+    T.BadgeCount
+FROM 
+    TopUsers T
+WHERE 
+    T.Rank <= 10
+ORDER BY 
+    T.Reputation DESC;

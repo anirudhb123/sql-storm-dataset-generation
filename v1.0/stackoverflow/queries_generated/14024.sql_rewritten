@@ -1,0 +1,71 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(V.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(V.DownVotes, 0)) AS TotalDownVotes,
+        AVG(U.Reputation) AS AvgReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+Ranking AS (
+    SELECT 
+        U.DisplayName,
+        U.AvgReputation,
+        S.PostCount,
+        S.Questions,
+        S.Answers,
+        S.TotalUpVotes,
+        S.TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.AvgReputation DESC) AS Rank
+    FROM 
+        UserStats S
+    JOIN 
+        (SELECT DisplayName, AVG(Reputation) AS AvgReputation FROM Users GROUP BY DisplayName) U ON U.DisplayName = S.DisplayName
+)
+SELECT 
+    R.Rank,
+    R.DisplayName,
+    R.PostCount,
+    R.Questions,
+    R.Answers,
+    R.TotalUpVotes,
+    R.TotalDownVotes,
+    P.Title,
+    P.ViewCount,
+    P.CommentCount,
+    P.UpVotes AS PostUpVotes,
+    P.DownVotes AS PostDownVotes
+FROM 
+    Ranking R
+LEFT JOIN 
+    PostStats P ON R.UserId = P.OwnerUserId 
+ORDER BY 
+    R.Rank;

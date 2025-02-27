@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, u.DisplayName, u.Reputation
+),
+FilteredPosts AS (
+    SELECT
+        rp.*,
+        CASE 
+            WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+            WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+            ELSE 'Neutral' 
+        END AS VoteSentiment
+    FROM RankedPosts rp
+    WHERE rn <= 5 OR VoteSentiment = 'Positive'
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseInteractions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24) THEN 1 END) AS EditsApplied,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalSummary AS (
+    SELECT
+        fp.PostId,
+        fp.Title,
+        fp.OwnerDisplayName,
+        fp.OwnerReputation,
+        fp.CreationDate,
+        fp.Score,
+        fp.ViewCount,
+        fp.AnswerCount,
+        fps.CloseInteractions,
+        fps.EditsApplied,
+        fps.LastActivityDate,
+        fp.VoteSentiment
+    FROM FilteredPosts fp
+    LEFT JOIN PostHistorySummary fps ON fp.PostId = fps.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    OwnerReputation,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    COALESCE(CloseInteractions, 0) AS CloseInteractions,
+    COALESCE(EditsApplied, 0) AS EditsApplied,
+    COALESCE(LastActivityDate, 'No Activity') AS LastActivityDate,
+    VoteSentiment
+FROM FinalSummary
+ORDER BY Score DESC, ViewCount DESC;

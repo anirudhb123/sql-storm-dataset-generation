@@ -1,0 +1,23 @@
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+    AVG(p.Score) AS AverageScore,
+    SUM(p.ViewCount) AS TotalViews,
+    SUM(c.Score) AS TotalCommentScore,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    MAX(p.CreationDate) AS MostRecentPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.UserId = u.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+GROUP BY 
+    u.Id
+ORDER BY 
+    PostCount DESC
+LIMIT 100;

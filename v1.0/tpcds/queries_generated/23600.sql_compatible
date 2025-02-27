@@ -1,0 +1,62 @@
+
+WITH RecursiveCustomer AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_current_addr_sk ORDER BY c.c_customer_sk) AS rnk
+    FROM customer c
+    WHERE c.c_birth_year IS NOT NULL
+),
+CustomerStateCount AS (
+    SELECT ca.ca_state, COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_state
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_net_profit) AS max_net_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk 
+                                  FROM date_dim d 
+                                  WHERE d.d_year = 2023 
+                                  AND d.d_month_seq BETWEEN 1 AND 6)
+    GROUP BY ws.ws_item_sk
+),
+ReturnData AS (
+    SELECT 
+        CASE WHEN sr_item_sk IS NULL THEN 'Not Returned' ELSE 'Returned' END AS return_status,
+        COUNT(*) AS return_count
+    FROM store_returns sr
+    GROUP BY sr_item_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        cs.ca_state,
+        cc.customer_count,
+        COALESCE(sd.total_quantity, 0) AS total_sales_quantity,
+        COALESCE(sd.avg_sales_price, 0) AS average_sales_price,
+        rd.return_status,
+        rd.return_count
+    FROM CustomerStateCount cc
+    LEFT JOIN customer_address ca ON cc.ca_state = ca.ca_state
+    LEFT JOIN SalesData sd ON sd.ws_item_sk = ca.ca_address_sk
+    LEFT JOIN ReturnData rd ON rd.return_status = 'Returned'
+)
+SELECT 
+    fa.ca_state,
+    fa.customer_count,
+    fa.total_sales_quantity,
+    fa.average_sales_price,
+    fa.return_status,
+    fa.return_count,
+    LEAD(fa.total_sales_quantity) OVER (ORDER BY fa.customer_count DESC) AS next_total_sales_quantity,
+    CASE 
+        WHEN fa.average_sales_price IS NULL THEN 'N/A' 
+        ELSE CONCAT('Average Price: $', ROUND(fa.average_sales_price, 2))
+    END AS formatted_avg_price
+FROM FinalAnalysis fa
+WHERE fa.customer_count > 50
+ORDER BY fa.customer_count DESC
+LIMIT 50;

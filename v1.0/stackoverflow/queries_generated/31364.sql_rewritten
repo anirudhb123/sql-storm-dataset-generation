@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, OwnerUserId, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.OwnerUserId, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        DisplayName, 
+        Reputation,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High Reputation'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory
+    FROM Users
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostsWithVotes AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ph.Level
+    FROM Posts p
+    LEFT JOIN PostVoteCounts v ON p.Id = v.PostId
+    LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        SUM(pw.UpVotes) AS TotalUpVotes,
+        SUM(pw.DownVotes) AS TotalDownVotes,
+        RANK() OVER (ORDER BY SUM(pw.UpVotes) DESC) AS Rank
+    FROM PostsWithVotes pw
+    JOIN UserReputation ur ON pw.OwnerUserId = ur.UserId
+    GROUP BY ur.UserId, ur.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        COUNT(*) AS ClosedPostCount,
+        CAST(CAST(ClosedDate AS DATE) AS VARCHAR) AS ClosedDate
+    FROM Posts
+    WHERE ClosedDate IS NOT NULL
+    GROUP BY CAST(ClosedDate AS DATE)
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    TOP.Users.TotalUpVotes,
+    TOP.Users.TotalDownVotes,
+    pp.ClosedPostCount,
+    pp.ClosedDate
+FROM UserReputation u
+JOIN TopUsers TOP ON u.Id = TOP.UserId
+JOIN ClosedPosts pp ON pp.ClosedDate = CAST(cast('2024-10-01 12:34:56' as timestamp) AS DATE)
+WHERE u.ReputationCategory = 'High Reputation'
+ORDER BY TOP.Rank, u.Reputation DESC;

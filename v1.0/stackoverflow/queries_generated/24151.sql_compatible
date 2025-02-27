@@ -1,0 +1,96 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes,
+        SUM(CASE WHEN V.VoteTypeId = 7 THEN 1 ELSE 0 END) AS OpenVotes
+    FROM 
+        Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+), PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        P.CreationDate,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+                      COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS VoteRank
+    FROM 
+        Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.OwnerUserId, P.CreationDate
+), CloseReasonDetails AS (
+    SELECT 
+        PH.Id AS PostHistoryId,
+        PH.PostId,
+        CR.Name AS CloseReasonName,
+        PH.UserDisplayName AS ClosedBy,
+        PH.CreationDate AS CloseDate
+    FROM 
+        PostHistory PH
+    JOIN CloseReasonTypes CR ON PH.Comment = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+), CTE_VotedPosts AS (
+    SELECT 
+        DISTINCT P.Id AS PostId
+    FROM 
+        Posts P
+    JOIN Votes V ON P.Id = V.PostId
+    WHERE 
+        V.VoteTypeId IN (2, 3)
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    UP.DisplayName AS TopVotedUser,
+    UC.TotalVotes AS TotalVotesByUser,
+    CR.CloseReasonName,
+    (CASE 
+        WHEN PS.CommentCount = 0 THEN 'No comments yet'
+        ELSE 'Has comments'
+    END) AS CommentStatus,
+    (CASE 
+        WHEN PS.UpVoteCount - PS.DownVoteCount > 10 THEN 'Highly favorited'
+        WHEN PS.UpVoteCount - PS.DownVoteCount < 5 AND PS.CommentCount = 0 THEN 'Needs attention'
+        ELSE 'Moderately rated'
+    END) AS PostRating,
+    (SELECT COUNT(*)
+     FROM CTE_VotedPosts VP
+     WHERE VP.PostId = PS.PostId) AS TotalVotedCount
+FROM 
+    PostStats PS
+LEFT JOIN UserVoteCounts UC ON PS.OwnerUserId = UC.UserId
+LEFT JOIN CloseReasonDetails CR ON PS.PostId = CR.PostId
+LEFT JOIN LATERAL (
+    SELECT 
+        U.DisplayName
+    FROM 
+        Votes V
+    JOIN Users U ON V.UserId = U.Id
+    WHERE 
+        V.PostId = PS.PostId
+        AND V.VoteTypeId = 2
+    ORDER BY V.CreationDate DESC
+    LIMIT 1
+) UP ON true
+WHERE 
+    PS.VoteRank <= 10 
+ORDER BY 
+    PS.VoteRank, 
+    PS.Title ASC;

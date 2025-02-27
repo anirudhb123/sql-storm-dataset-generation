@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+),
+AnswerStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(AVG(a.Score), 0) AS AverageAnswerScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+VoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    COALESCE(vd.UpVotes, 0) AS UpVotes,
+    COALESCE(vd.DownVotes, 0) AS DownVotes,
+    COALESCE(as.AnswerCount, 0) AS AnswerCount,
+    as.AverageAnswerScore,
+    rp.OwnerName,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsAnswered,
+    CASE
+        WHEN rp.ViewCount >= 100 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS Popularity
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AnswerStats as ON rp.PostId = as.QuestionId
+LEFT JOIN 
+    VoteDetails vd ON rp.PostId = vd.PostId
+WHERE 
+    rp.rn = 1  
+ORDER BY 
+    rp.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

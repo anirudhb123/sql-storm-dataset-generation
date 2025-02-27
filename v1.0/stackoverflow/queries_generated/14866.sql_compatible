@@ -1,0 +1,67 @@
+
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+
+PostActivityStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.HistoryCount, 0) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS HistoryCount
+        FROM 
+            PostHistory
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+)
+
+SELECT
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    ups.TotalScore,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.CommentCount,
+    pa.EditCount
+FROM 
+    UserPostStatistics ups
+JOIN 
+    Users u ON u.Id = ups.UserId
+LEFT JOIN 
+    PostActivityStatistics pa ON pa.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+ORDER BY 
+    ups.TotalScore DESC, ups.TotalPosts DESC
+LIMIT 100;

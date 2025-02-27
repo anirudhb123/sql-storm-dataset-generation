@@ -1,0 +1,39 @@
+-- Performance benchmarking query to analyze user activity on posts, their votes, and the number of comments and badges earned
+
+WITH UserPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        SUM(V.VoteTypeId IN (6,7)) AS CloseVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    CommentCount,
+    BadgeCount,
+    UpVotes,
+    DownVotes,
+    CloseVotes
+FROM 
+    UserPostActivity
+ORDER BY 
+    PostCount DESC, UpVotes DESC;

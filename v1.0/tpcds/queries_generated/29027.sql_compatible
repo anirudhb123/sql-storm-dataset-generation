@@ -1,0 +1,63 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.city AS customer_city,
+        ca.state AS customer_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+item_info AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        i.i_current_price, 
+        i.i_brand, 
+        CASE 
+            WHEN i.i_current_price < 20 THEN 'Cheap' 
+            WHEN i.i_current_price BETWEEN 20 AND 100 THEN 'Affordable' 
+            ELSE 'Expensive' 
+        END AS price_category
+    FROM 
+        item i
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_item_sk, 
+        ws.ws_quantity, 
+        ws.ws_net_profit,
+        ci.full_name,
+        ii.i_item_desc,
+        ii.price_category
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_id
+    JOIN 
+        item_info ii ON ws.ws_item_sk = ii.i_item_id
+)
+SELECT 
+    price_category,
+    COUNT(DISTINCT ws_order_number) AS total_orders,
+    SUM(ws_quantity) AS total_quantity,
+    AVG(ws_net_profit) AS average_profit
+FROM 
+    sales_data
+GROUP BY 
+    price_category
+ORDER BY 
+    CASE price_category
+        WHEN 'Cheap' THEN 1
+        WHEN 'Affordable' THEN 2
+        WHEN 'Expensive' THEN 3
+    END;

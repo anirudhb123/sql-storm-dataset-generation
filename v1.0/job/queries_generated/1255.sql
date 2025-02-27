@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        COALESCE(MAX(r.role), 'Unknown') AS main_role
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        MAX(cn.name) AS company_name
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name cn ON m.company_id = cn.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    ar.role_count,
+    ar.main_role,
+    mc.company_count,
+    mc.company_name
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.title_id = ar.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON rm.title_id = mc.movie_id
+WHERE 
+    rm.year_rank <= 10
+    AND (ar.role_count IS NULL OR ar.role_count > 2)
+ORDER BY 
+    rm.production_year DESC, 
+    ar.role_count DESC NULLS LAST
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

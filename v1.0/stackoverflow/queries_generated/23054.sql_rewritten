@@ -1,0 +1,81 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS HistoryCreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+), RankedPosts AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        ph.CreationDate,
+        ph.HistoryCreationDate,
+        ph.PostHistoryTypeId,
+        u.DisplayName AS Editor,
+        ph.rn,
+        ROW_NUMBER() OVER (PARTITION BY ph.Id ORDER BY ph.HistoryCreationDate) AS EditorRank
+    FROM 
+        RecursivePostHistory ph
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 6, 10)  
+), PostsWithVoteCounts AS (
+    SELECT 
+        p.Id,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 8 THEN v.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+), AggregatedPostData AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        r.CreationDate,
+        COALESCE(pvc.UpVotes, 0) AS UpVotes,
+        COALESCE(pvc.DownVotes, 0) AS DownVotes,
+        COALESCE(pvc.TotalBounty, 0) AS TotalBounty,
+        MAX(CASE WHEN r.EditorRank = 1 THEN r.Editor END) AS LastEditor,
+        COUNT(r.Id) FILTER (WHERE r.PostHistoryTypeId = 10) AS CloseCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        PostsWithVoteCounts pvc ON r.Id = pvc.Id
+    GROUP BY 
+        r.Id, r.Title, r.CreationDate
+)
+SELECT 
+    a.Id,
+    a.Title,
+    a.CreationDate,
+    a.UpVotes,
+    a.DownVotes,
+    a.TotalBounty,
+    a.LastEditor,
+    a.CloseCount,
+    a.CreationDate AT TIME ZONE 'UTC' AS UTC_CreationDate,
+    CASE 
+        WHEN a.CloseCount > 0 THEN 'Closed'
+        WHEN a.UpVotes > a.DownVotes THEN 'Popular'
+        ELSE 'Needs Attention'
+    END AS Status,
+    CONCAT(COALESCE(a.LastEditor, 'No Edits'), ' - Last Editor') AS EditorInfo
+FROM 
+    AggregatedPostData a
+WHERE 
+    a.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    a.UpVotes DESC, a.CloseCount DESC, a.CreationDate DESC
+LIMIT 100;

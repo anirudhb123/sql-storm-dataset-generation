@@ -1,0 +1,80 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        p2.ParentId,
+        p2.Score,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN RecursivePostCTE r ON p2.ParentId = r.PostId
+),
+ScoreSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+),
+BadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ps.TotalPosts,
+    ps.TotalScore,
+    ps.AverageScore,
+    bs.BadgeCount,
+    COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedPosts,
+    COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END), 0) AS ReopenedPosts,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    Users u
+LEFT JOIN 
+    ScoreSummary ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    BadgeSummary bs ON u.Id = bs.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(UNNEST(string_to_array(p.Tags, '><'))) AS TagName
+    ) t ON TRUE
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, ps.TotalPosts, ps.TotalScore, ps.AverageScore, bs.BadgeCount
+ORDER BY 
+    ps.TotalScore DESC, u.DisplayName;

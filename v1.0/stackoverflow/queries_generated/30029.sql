@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) as VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(c.Score), 0) AS CommentScore,
+        COALESCE(MAX(v.CreationDate), '1970-01-01'::timestamp) AS LastVoteDate 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.Level,
+        pe.UpVotes,
+        pe.DownVotes,
+        pe.CommentScore,
+        pe.LastVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    JOIN 
+        PostEngagement pe ON p.Id = pe.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Level,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.CommentScore,
+    pd.LastVoteDate
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Rank <= 5 
+ORDER BY 
+    pd.Level, pd.CreationDate DESC;

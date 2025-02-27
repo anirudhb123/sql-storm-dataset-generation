@@ -1,0 +1,66 @@
+
+WITH RecursiveTaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        1 AS TagLevel
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score + COALESCE(po.Score, 0) AS Score,
+        p.ViewCount + COALESCE(po.ViewCount, 0) AS ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        rp.TagLevel + 1
+    FROM Posts p
+    INNER JOIN PostLinks pl ON pl.RelatedPostId = p.Id
+    INNER JOIN RecursiveTaggedPosts rp ON rp.PostId = pl.PostId
+    LEFT JOIN Posts po ON po.Id = rp.PostId
+    WHERE rp.TagLevel < 3  
+),
+PostScores AS (
+    SELECT 
+        rp.PostId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(COALESCE(u.Reputation, 0)) AS AverageReputation,
+        SUM(CASE WHEN p.CreationDate < (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') THEN 1 ELSE 0 END) AS PostOlderThanYear
+    FROM RecursiveTaggedPosts rp
+    LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN Badges b ON b.UserId = rp.OwnerUserId
+    GROUP BY rp.PostId
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.BadgeCount,
+        ps.AverageReputation,
+        ps.PostOlderThanYear,
+        ROW_NUMBER() OVER (ORDER BY ps.AverageReputation DESC, ps.BadgeCount DESC) AS Rank
+    FROM PostScores ps
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    ps.BadgeCount,
+    ps.AverageReputation,
+    ps.PostOlderThanYear,
+    rk.Rank
+FROM RecursiveTaggedPosts rp
+JOIN RankedPosts rk ON rp.PostId = rk.PostId
+JOIN PostScores ps ON rp.PostId = ps.PostId
+WHERE rk.Rank <= 10  
+ORDER BY rk.Rank;

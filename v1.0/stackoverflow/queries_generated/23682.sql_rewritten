@@ -1,0 +1,79 @@
+WITH UserVoteStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) DESC) AS UserRank
+    FROM
+        Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON V.PostId = P.Id
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM
+        Posts P
+    LEFT JOIN Tags T ON POSITION(T.TagName IN P.Tags) > 0
+    WHERE
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+),
+ClosedPosts AS (
+    SELECT
+        PH.PostId,
+        COUNT(*) AS ClosureCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM
+        PostHistory PH
+    WHERE
+        PH.PostHistoryTypeId = 10
+    GROUP BY
+        PH.PostId
+),
+UserInteractions AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosureInteractions
+    FROM
+        Users U
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN PostHistory PH ON PH.UserId = U.Id
+    GROUP BY
+        U.Id
+)
+SELECT
+    U.UserId,
+    U.DisplayName,
+    U.UpVoteCount,
+    U.DownVoteCount,
+    U.TotalBounty,
+    Coalesce(PD.PostCount, 0) AS PostCount,
+    Coalesce(PD.Title, 'No Title') AS Title,
+    Coalesce(PD.CreationDate, '1900-01-01') AS CreationDate,
+    Coalesce(PD.ViewCount, 0) AS ViewCount,
+    Coalesce(PD.Score, 0) AS Score,
+    COALESCE(CP.ClosureCount, 0) AS ClosureCount,
+    COALESCE(UI.CommentCount, 0) AS CommentCount,
+    COALESCE(UI.ClosureInteractions, 0) AS ClosureInteractions
+FROM
+    UserVoteStats U
+LEFT JOIN PostDetails PD ON U.UserId = PD.PostId
+LEFT JOIN ClosedPosts CP ON PD.PostId = CP.PostId
+LEFT JOIN UserInteractions UI ON U.UserId = UI.UserId
+WHERE
+    U.UserRank <= 10
+ORDER BY
+    U.UpVoteCount DESC, U.DisplayName;

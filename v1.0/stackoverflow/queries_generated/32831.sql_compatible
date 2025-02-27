@@ -1,0 +1,58 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(300)) AS FullTitle,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(CONCAT(ph.FullTitle, ' > ', p.Title) AS VARCHAR(300)) AS FullTitle,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ph.FullTitle,
+    p.CreationDate,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(ph.Level) AS MaxLevel
+FROM 
+    PostHierarchy ph
+JOIN 
+    Posts p ON ph.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tagName ON TRUE
+LEFT JOIN 
+    Tags t ON TRIM(tagName) = t.TagName
+GROUP BY 
+    u.DisplayName, u.Reputation, ph.FullTitle, p.CreationDate
+HAVING 
+    COUNT(c.Id) > 0 
+ORDER BY 
+    u.Reputation DESC,
+    MaxLevel DESC;

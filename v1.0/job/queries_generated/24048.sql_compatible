@@ -1,0 +1,55 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank 
+    FROM title t 
+    WHERE t.production_year IS NOT NULL
+),
+actor_movies AS (
+    SELECT 
+        c.person_id, 
+        ti.movie_id, 
+        ti.title, 
+        COUNT(DISTINCT ci.person_id) AS co_actor_count,
+        AVG(ti.production_year) AS avg_co_actor_year 
+    FROM cast_info c 
+    JOIN aka_name an ON c.person_id = an.person_id 
+    JOIN aka_title ti ON c.movie_id = ti.movie_id 
+    LEFT JOIN cast_info ci ON ti.movie_id = ci.movie_id AND ci.person_id <> c.person_id
+    GROUP BY c.person_id, ti.movie_id, ti.title
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords_list 
+    FROM movie_keyword mk 
+    JOIN keyword k ON mk.keyword_id = k.id 
+    GROUP BY mk.movie_id
+)
+SELECT 
+    a.person_id, 
+    an.name AS actor_name,
+    ARRAY_AGG(DISTINCT r.title ORDER BY r.production_year) AS titles,
+    mk.keywords_list,
+    COALESCE(SUM(co.co_actor_count), 0) AS total_co_actors,
+    COUNT(DISTINCT r.title_id) AS total_titles,
+    CASE 
+        WHEN COUNT(DISTINCT r.title_id) = 0 THEN NULL 
+        ELSE AVG(a.avg_co_actor_year) 
+    END AS avg_co_actor_prod_year 
+FROM actor_movies a 
+JOIN aka_name an ON a.person_id = an.person_id 
+LEFT JOIN ranked_titles r ON a.movie_id = r.title_id 
+LEFT JOIN movie_keywords mk ON a.movie_id = mk.movie_id 
+LEFT JOIN (
+    SELECT person_id, COUNT(DISTINCT movie_id) AS co_actor_count 
+    FROM actor_movies 
+    GROUP BY person_id
+) co ON a.person_id = co.person_id
+WHERE a.avg_co_actor_year IS NOT NULL 
+GROUP BY a.person_id, an.name 
+HAVING COUNT(DISTINCT r.title_id) > 5
+ORDER BY total_titles DESC, actor_name;

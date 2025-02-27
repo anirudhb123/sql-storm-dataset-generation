@@ -1,0 +1,65 @@
+WITH RankedItems AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        s.s_name AS supplier_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        p.p_retailprice > 50.00
+),
+AggregatedData AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM
+        lineitem li
+    JOIN
+        orders o ON li.l_orderkey = o.o_orderkey
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        supplier s ON li.l_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE
+        li.l_shipdate >= DATE '1995-01-01' AND li.l_shipdate < DATE '1996-01-01'
+    GROUP BY
+        n.n_name
+),
+FinalReport AS (
+    SELECT
+        ai.nation_name,
+        ai.total_sales,
+        ai.order_count,
+        ai.customer_count,
+        COUNT(ri.p_partkey) AS unique_parts_supplied
+    FROM
+        AggregatedData ai
+    LEFT JOIN
+        RankedItems ri ON ai.nation_name = (SELECT n_name FROM nation n WHERE n.n_nationkey = (SELECT s_nationkey FROM supplier s JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey WHERE ps.ps_partkey IN (SELECT DISTINCT p_partkey FROM part WHERE p_retailprice > 50)))
+    GROUP BY
+        ai.nation_name, ai.total_sales, ai.order_count, ai.customer_count
+)
+SELECT
+    nation_name,
+    total_sales,
+    order_count,
+    customer_count,
+    unique_parts_supplied
+FROM
+    FinalReport
+ORDER BY
+    total_sales DESC,
+    order_count DESC;

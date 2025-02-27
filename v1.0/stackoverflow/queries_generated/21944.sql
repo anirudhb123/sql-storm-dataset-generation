@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RN,
+        (SELECT COUNT(*) 
+         FROM Comments C 
+         WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT SUM(V.BountyAmount) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 8) AS TotalBounty
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate BETWEEN '2020-01-01' AND NOW() 
+        AND P.Score IS NOT NULL
+),
+PostHistoryData AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId
+),
+PostsWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        T.TagName,
+        P.Title
+    FROM 
+        Posts P
+    LEFT JOIN 
+        unnest(string_to_array(P.Tags, '>')) AS Tag(T) ON TRUE
+    WHERE 
+        P.ViewCount > 100 
+),
+FinalResults AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        PH.EditCount,
+        PH.LastEditDate,
+        PH.EditTypes,
+        COALESCE(PT.TagName, 'No Tags') AS TagName,
+        CASE 
+            WHEN RP.Score IS NULL THEN 'No Score' 
+            WHEN RP.Score > 100 THEN 'Highly Scored' 
+            ELSE 'Low Score' 
+        END AS ScoreCategory
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostHistoryData PH ON RP.PostId = PH.PostId
+    LEFT JOIN 
+        PostsWithTags PT ON RP.PostId = PT.PostId
+)
+SELECT 
+    F.*,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(F.FinalBounty, 0) AS FinalBounty
+FROM 
+    FinalResults F
+LEFT JOIN 
+    Users U ON F.OwnerUserId = U.Id
+ORDER BY 
+    F.CreationDate DESC, 
+    F.Score DESC
+LIMIT 100;

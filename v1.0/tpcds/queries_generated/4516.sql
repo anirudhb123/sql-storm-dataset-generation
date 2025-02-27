@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT
+        ss.sold_date_sk,
+        ss.ticket_number,
+        ss.item_sk,
+        ss.quantity,
+        ss.net_paid,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_addr_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ss.item_sk ORDER BY ss.net_paid DESC) AS rn
+    FROM
+        store_sales ss
+    JOIN
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    LEFT JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        ss.sold_date_sk IN (
+            SELECT d_date_sk
+            FROM date_dim
+            WHERE d_year = 2022 AND d_moy BETWEEN 6 AND 8
+        )
+        AND ss.net_paid > 100
+),
+TopSales AS (
+    SELECT
+        item_sk,
+        SUM(net_paid) AS total_net_paid
+    FROM
+        SalesData
+    WHERE
+        rn <= 10
+    GROUP BY
+        item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    ts.total_net_paid,
+    COALESCE(NULLIF(ts.total_net_paid, 0), NULL) AS safe_total_net_paid,
+    COUNT(sd.ticket_number) AS sales_count,
+    MAX(sd.quantity) AS max_quantity_sold
+FROM
+    item i
+JOIN
+    TopSales ts ON i.i_item_sk = ts.item_sk
+LEFT JOIN
+    SalesData sd ON ts.item_sk = sd.item_sk
+WHERE
+    i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2)
+GROUP BY
+    i.i_item_id, i.i_item_desc, ts.total_net_paid
+HAVING
+    COUNT(sd.ticket_number) > 5
+ORDER BY
+    ts.total_net_paid DESC
+LIMIT 50;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+nation_summary AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           COUNT(s.s_suppkey) AS supplier_count, 
+           AVG(s.s_acctbal) AS average_balance
+    FROM nation n
+    LEFT JOIN supplier_hierarchy s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+part_summary AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available,
+           MAX(l.l_extendedprice) AS max_price,
+           MIN(l.l_discount) AS min_discount
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ns.n_name AS nation_name,
+       ps.p_name AS part_name,
+       ps.total_available,
+       ps.max_price,
+       ns.average_balance,
+       CASE 
+           WHEN ns.supplier_count IS NULL THEN 'No suppliers'
+           WHEN ns.supplier_count > 10 THEN 'High supply'
+           ELSE 'Normal supply'
+       END AS supply_category
+FROM nation_summary ns
+FULL OUTER JOIN part_summary ps ON ns.n_nationkey = ps.p_partkey
+WHERE ns.average_balance IS NOT NULL
+  AND ps.total_available > (SELECT AVG(total_available) FROM part_summary WHERE total_available IS NOT NULL)
+  AND (ns.n_name LIKE '%land%' OR ns.n_name IS NULL)
+ORDER BY ns.n_name ASC, ps.p_name DESC
+FETCH FIRST 100 ROWS ONLY
+OFFSET (SELECT COUNT(*) FROM nation_summary) / 2;

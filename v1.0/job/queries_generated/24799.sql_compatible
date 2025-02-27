@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieCostCTE AS (
+    SELECT
+        mg.movie_id,
+        SUM(CAST(mi.info AS numeric)) AS total_cost
+    FROM
+        movie_info mi
+    JOIN
+        movie_companies mc ON mc.movie_id = mi.movie_id
+    JOIN
+        company_name cn ON cn.id = mc.company_id
+    WHERE
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'cost') 
+        AND cn.country_code IS NOT NULL
+    GROUP BY
+        mg.movie_id
+),
+TopMovies AS (
+    SELECT
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (ORDER BY mc.total_cost DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        MovieCostCTE mc ON mc.movie_id = mt.movie_id
+    WHERE
+        mt.production_year >= 2000
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Feature%')
+),
+CastInfoWithRoles AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        COALESCE(rt.role, 'Unknown') AS role_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON rt.id = ci.role_id
+)
+SELECT DISTINCT
+    tm.title,
+    tm.production_year,
+    STRING_AGG(DISTINCT CASE WHEN ci.role_rank <= 3 THEN ci.role_name ELSE NULL END, ', ') AS top_roles,
+    COALESCE(mc.total_cost, 0) AS movie_cost
+FROM
+    TopMovies tm
+LEFT JOIN 
+    MovieCostCTE mc ON mc.movie_id = tm.movie_id
+LEFT JOIN 
+    CastInfoWithRoles ci ON ci.movie_id = tm.movie_id
+GROUP BY
+    tm.title, tm.production_year, mc.total_cost
+HAVING
+    COUNT(ci.person_id) > 5
+    AND (COUNT(DISTINCT ci.role_id) > 3 OR MAX(ci.role_rank) < 4)
+ORDER BY
+    tm.production_year DESC, movie_cost DESC;

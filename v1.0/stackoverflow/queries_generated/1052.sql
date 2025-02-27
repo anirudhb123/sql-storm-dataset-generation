@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.ViewCount > 50
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(t.TagName, 'No Tag') AS TagName,
+        p.Title
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')) AS TagName
+        ) t ON true
+    WHERE 
+        p.PostTypeId = 1
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    p.Title AS RecentPostTitle,
+    p.ViewCount AS RecentPostViews,
+    p.Score AS RecentPostScore,
+    t.TagName,
+    MAX(p.CreationDate) AS MostRecentPostDate
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts p ON us.UserId = p.OwnerUserId AND p.rn = 1
+LEFT JOIN 
+    PostsWithTags t ON p.PostId = t.PostId
+WHERE 
+    us.Reputation > 1000
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, p.Title, p.ViewCount, p.Score, t.TagName
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    us.Reputation DESC, MostRecentPostDate DESC;

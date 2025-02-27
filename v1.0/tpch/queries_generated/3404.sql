@@ -1,0 +1,49 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           RANK() OVER (ORDER BY ss.total_supply_value DESC) AS supplier_rank
+    FROM supplier s
+    JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE ss.total_supply_value IS NOT NULL
+),
+TopCustomers AS (
+    SELECT co.c_custkey,
+           co.c_name,
+           co.total_spent,
+           RANK() OVER (ORDER BY co.total_spent DESC) AS customer_rank
+    FROM CustomerOrders co
+    WHERE co.total_spent IS NOT NULL
+)
+
+SELECT ts.s_name AS supplier_name,
+       tc.c_name AS customer_name,
+       ts.total_supply_value,
+       tc.total_spent,
+       CASE 
+           WHEN ts.total_supply_value > COALESCE(tc.total_spent, 0) THEN 'Supplier leads'
+           WHEN ts.total_supply_value < COALESCE(tc.total_spent, 0) THEN 'Customer leads'
+           ELSE 'Equal'
+       END AS comparison
+FROM TopSuppliers ts
+FULL OUTER JOIN TopCustomers tc ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10 ORDER BY p.p_retailprice DESC LIMIT 5) LIMIT 1)
+WHERE ts.supplier_rank <= 5 OR tc.customer_rank <= 5
+ORDER BY ts.total_supply_value DESC NULLS LAST, tc.total_spent DESC NULLS LAST;

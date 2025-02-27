@@ -1,0 +1,70 @@
+WITH RECURSIVE region_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+    UNION ALL
+    SELECT 
+        rc.c_custkey,
+        rc.c_name,
+        rc.nation_name,
+        rc.total_orders + 1,
+        rc.total_spent
+    FROM 
+        region_customers rc
+    WHERE 
+        rc.total_orders < 10
+),
+high_value_customers AS (
+    SELECT 
+        r.r_name,
+        r.r_regionkey,
+        rc.c_name,
+        rc.total_spent,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY rc.total_spent DESC) AS rank_value
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        region_customers rc ON n.n_nationkey = rc.nation_name
+    WHERE 
+        rc.total_spent > (
+            SELECT AVG(total_spent) FROM region_customers
+        )
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT h.c_name) AS high_value_customer_count,
+    SUM(h.total_spent) AS total_revenue
+FROM 
+    region r
+LEFT JOIN 
+    high_value_customers h ON r.r_name = h.r_name
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT h.c_name) = (
+        SELECT 
+            MAX(total_count) 
+        FROM (
+            SELECT COUNT(DISTINCT h1.c_name) AS total_count
+            FROM high_value_customers h1
+            GROUP BY h1.r_name
+        ) AS counts
+    )
+ORDER BY 
+    total_revenue DESC
+LIMIT 1;

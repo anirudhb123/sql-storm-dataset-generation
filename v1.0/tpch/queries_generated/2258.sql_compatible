@@ -1,0 +1,42 @@
+
+WITH SupplierRanked AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_within_nation
+    FROM supplier s
+),
+PopularParts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 5
+),
+NationSales AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT n.n_name AS nation_name, 
+       COALESCE(SUM(ps.ps_supplycost * l.l_quantity), 0) AS total_cost,
+       COUNT(DISTINCT p.p_partkey) AS unique_parts,
+       AVG(o.o_totalprice) AS avg_order_value
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN PopularParts pp ON pp.p_partkey = l.l_partkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT pp.p_partkey) > 0
+ORDER BY total_cost DESC
+LIMIT 10;

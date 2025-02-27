@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+, actor_movie AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS recent_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    WHERE 
+        ci.person_role_id = (SELECT id FROM role_type WHERE role = 'actor')
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    am.actor_name,
+    COUNT(DISTINCT co.name) AS company_count,
+    SUM(CASE WHEN mki.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    AVG(am.recent_rank) AS average_recent_rank
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_keyword mki ON mh.movie_id = mki.movie_id
+JOIN 
+    actor_movie am ON mh.title = am.movie_title AND mh.production_year = am.production_year
+WHERE 
+    mh.level = 1 -- Only top level movies
+    AND mh.production_year > 2000
+GROUP BY 
+    mh.title, mh.production_year, am.actor_name
+HAVING 
+    COUNT(DISTINCT co.id) > 1 -- More than one company involved
+ORDER BY 
+    mh.production_year DESC, company_count DESC;

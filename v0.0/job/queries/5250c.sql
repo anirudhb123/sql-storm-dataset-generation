@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info < 'Rick Jones defends his alliance with the Hulk to Pepper by admitting it is because of his "mistake" that they are on the run. The mistake in question is the accident that turned Bruce Banner into the Hulk. Banner was exposed to the gamma radiation of his own device while saving Rick, who had snuck into the testing grounds on a dare. These events, recounted time and again, first took place in "The Incredible Hulk #1" in 1962.' AND t.md5sum LIKE '%2%' AND mi.movie_id < 2229796 AND mk.keyword_id > 59522;

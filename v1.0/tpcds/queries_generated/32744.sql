@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_ranking AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) as rnk
+    FROM
+        web_sales
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT ws_order_number) AS web_order_count
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    INNER JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name, 
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk,
+        i.i_item_desc
+),
+top_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        pis.total_sales,
+        pis.avg_sales_price,
+        RANK() OVER (ORDER BY pis.total_sales DESC) AS sales_rank
+    FROM 
+        item_sales pis
+    WHERE 
+        pis.total_sales > 0
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.i_item_desc,
+    ti.total_sales,
+    ti.avg_sales_price,
+    sr.rnk
+FROM 
+    customer_info ci
+LEFT JOIN 
+    top_items ti ON ci.web_order_count > 0
+LEFT JOIN 
+    sales_ranking sr ON ti.i_item_sk = sr.ws_item_sk AND ti.sales_rank <= 10
+WHERE 
+    ci.income_band IN (1, 2, 3, 4) OR ci.cd_gender IS NULL
+ORDER BY 
+    ci.c_last_name, ci.c_first_name, ti.total_sales DESC;

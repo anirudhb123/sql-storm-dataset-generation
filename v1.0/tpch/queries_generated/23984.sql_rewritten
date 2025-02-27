@@ -1,0 +1,84 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey 
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey 
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        r.r_name
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_spent
+    FROM 
+        customer c
+    JOIN 
+        CustomerSales cs ON c.c_custkey = cs.c_custkey
+    WHERE 
+        cs.total_spent = (SELECT MAX(total_spent) FROM CustomerSales)
+),
+DiscountedSales AS (
+    SELECT 
+        part.p_name,
+        SUM(l.l_extendedprice * l.l_discount) AS discounted_total
+    FROM 
+        lineitem l
+    JOIN 
+        part ON l.l_partkey = part.p_partkey
+    WHERE 
+        l.l_discount BETWEEN 0.1 AND 0.3
+    GROUP BY 
+        part.p_name
+),
+FinalResults AS (
+    SELECT 
+        rs.region_name,
+        COALESCE(dc.discounted_total, 0) AS discounted_sales,
+        tc.total_spent
+    FROM 
+        RegionalSales rs
+    LEFT JOIN 
+        DiscountedSales dc ON rs.region_name = (SELECT r_name FROM region WHERE r_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = (SELECT DISTINCT s_nationkey FROM supplier WHERE s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = (SELECT p_partkey FROM part WHERE p_name LIKE '%%'))))) LIMIT 1)
+    LEFT JOIN 
+        TopCustomers tc ON 1=1
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY discounted_sales DESC) AS sales_rank
+FROM 
+    FinalResults
+WHERE 
+    discounted_sales > 0 OR total_spent IS NULL
+ORDER BY 
+    region_name;

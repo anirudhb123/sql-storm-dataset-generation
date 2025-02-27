@@ -1,0 +1,76 @@
+
+WITH cte_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+cte_sales_return AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_net_loss) AS total_net_loss
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+cte_sales_catalog AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_catalog_quantity,
+        SUM(cs_net_profit) AS total_catalog_net_profit
+    FROM catalog_sales
+    GROUP BY cs_item_sk
+),
+cte_final AS (
+    SELECT 
+        COALESCE(ws.ws_item_sk, sr.wr_item_sk, cs.cs_item_sk) AS item_sk,
+        COALESCE(ws.total_quantity, 0) AS quantity_sold,
+        COALESCE(sr.total_returned, 0) AS quantity_returned,
+        COALESCE(cs.total_catalog_quantity, 0) AS catalog_quantity,
+        COALESCE(ws.total_net_profit, 0) AS profit,
+        COALESCE(sr.total_net_loss, 0) AS return_loss,
+        COALESCE(cs.total_catalog_net_profit, 0) AS catalog_profit,
+        CASE 
+            WHEN COALESCE(ws.total_net_profit, 0) > COALESCE(sr.total_net_loss, 0) 
+            THEN 'Profitable'
+            ELSE 'Unprofitable'
+        END AS profitability_status
+    FROM cte_sales ws
+    FULL OUTER JOIN cte_sales_return sr ON ws.ws_item_sk = sr.wr_item_sk
+    FULL OUTER JOIN cte_sales_catalog cs ON COALESCE(ws.ws_item_sk, sr.wr_item_sk) = cs.cs_item_sk
+)
+SELECT 
+    item_sk,
+    quantity_sold,
+    quantity_returned,
+    catalog_quantity,
+    profit,
+    return_loss,
+    catalog_profit,
+    profitability_status
+FROM cte_final
+WHERE (quantity_sold - quantity_returned) > 0
+AND (profit > 0 OR return_loss IS NOT NULL)
+ORDER BY profitability_status, profit DESC, return_loss ASC
+LIMIT 100
+UNION ALL
+SELECT 
+    ca.ca_address_sk AS item_sk,
+    NULL AS quantity_sold,
+    NULL AS quantity_returned,
+    NULL AS catalog_quantity,
+    NULL AS profit,
+    NULL AS return_loss,
+    NULL AS catalog_profit,
+    'Address Info' AS profitability_status
+FROM customer_address ca
+WHERE ca.ca_country IS NOT NULL
+AND EXISTS (
+    SELECT 1 
+    FROM customer c 
+    WHERE c.c_current_addr_sk = ca.ca_address_sk 
+    AND c.c_birth_year IS NULL
+);

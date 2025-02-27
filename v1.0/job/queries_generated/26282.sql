@@ -1,0 +1,65 @@
+WITH processed_names AS (
+    SELECT 
+        a.person_id,
+        a.name AS aka_name,
+        c.name AS char_name,
+        n.gender,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY LENGTH(a.name) DESC) AS name_rank
+    FROM 
+        aka_name a
+    JOIN 
+        char_name c ON a.name_pcode_nf = c.name_pcode_nf
+    JOIN 
+        name n ON a.person_id = n.imdb_id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year >= 2000
+),
+complete_cast_info AS (
+    SELECT 
+        cal.movie_id,
+        a.ak_name,
+        c.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY cal.movie_id ORDER BY a.name) AS cast_rank
+    FROM 
+        complete_cast cal
+    JOIN 
+        processed_names a ON cal.subject_id = a.person_id
+    JOIN 
+        movie_info mi ON cal.movie_id = mi.movie_id
+    JOIN 
+        aka_title t ON cal.movie_id = t.id
+    JOIN 
+        role_type r ON r.id = t.kind_id
+)
+SELECT
+    m.title,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    COUNT(DISTINCT kw.keyword) AS total_keywords,
+    AVG(LENGTH(a.aka_name)) AS avg_name_length,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords_list
+FROM 
+    movies_with_keywords kw
+JOIN 
+    complete_cast_info c ON kw.movie_id = c.movie_id
+JOIN 
+    aka_title m ON kw.movie_id = m.id
+WHERE 
+    c.cast_rank <= 5 -- Top 5 cast members
+GROUP BY 
+    m.title
+ORDER BY 
+    total_cast DESC, 
+    avg_name_length DESC;

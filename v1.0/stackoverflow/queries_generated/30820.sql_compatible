@@ -1,0 +1,76 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT p.Id AS PostId, p.ParentId, p.Title, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, ph.Level + 1
+    FROM Posts p
+    JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS QuestionCount,
+           COUNT(DISTINCT c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+           SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           COALESCE(ph.Level, 0) AS HierarchyLevel,
+           COALESCE(vt.Name, 'No Votes') AS VoteType,
+           COUNT(DISTINCT c.Id) AS CommentCount,
+           COUNT(DISTINCT ph2.PostId) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN Posts ph2 ON p.Id = ph2.ParentId  
+    LEFT JOIN Comments c ON p.Id = c.PostId 
+    GROUP BY p.Id, ph.Level, vt.Name
+),
+FinalRankings AS (
+    SELECT ua.UserId, 
+           ua.DisplayName,
+           ua.QuestionCount,
+           ua.CommentCount,
+           ua.UpVoteCount,
+           ua.DownVoteCount,
+           ps.PostId,
+           ps.Title,
+           ps.VoteType,
+           ps.CommentCount AS PostCommentCount,
+           ps.AnswerCount,
+           ROW_NUMBER() OVER (PARTITION BY ua.UserId ORDER BY ua.UpVoteCount DESC, ua.QuestionCount DESC) AS Ranking
+    FROM UserActivity ua
+    JOIN PostStats ps ON ua.UserId = ps.OwnerUserId  -- Fixed join condition
+)
+
+SELECT f.UserId, 
+       f.DisplayName,
+       f.QuestionCount,
+       f.CommentCount,
+       f.UpVoteCount,
+       f.DownVoteCount,
+       f.PostId,
+       f.Title,
+       f.VoteType,
+       f.PostCommentCount,
+       f.AnswerCount,
+       CASE 
+           WHEN f.Ranking = 1 THEN 'Top Contributor'
+           ELSE 'Contributor'
+       END AS UserStatus
+FROM FinalRankings f
+WHERE f.AnswerCount > 0  
+ORDER BY f.UpVoteCount DESC, f.QuestionCount DESC;

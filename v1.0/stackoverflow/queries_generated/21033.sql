@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.AcceptedAnswerId, P.CreationDate, P.ViewCount, P.OwnerUserId
+),
+
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+
+ClosedQuestionStats AS (
+    SELECT 
+        P.Id AS ClosedPostId,
+        P.Title,
+        PH.UserDisplayName AS ClosedBy,
+        PH.CreationDate AS ClosedDate,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- posts voted to be closed
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(RP.PostId, 0) AS LastPostedQuestionId,
+    COALESCE(RP.Title, 'No Questions Found') AS LastPostedQuestionTitle,
+    RP.ViewCount,
+    RP.UpVotes,
+    RP.DownVotes,
+    COALESCE(CQS.ClosedPostId, 0) AS ClosedQuestionId,
+    COALESCE(CQS.Title, 'No Closed Questions Found') AS ClosedQuestionTitle,
+    CQS.ClosedBy,
+    CQS.ClosedDate,
+    CQS.CommentCount,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     WHERE T.Id = ANY(STRING_TO_ARRAY(RP.Tags, ', ')::int[])) AS Tags
+FROM 
+    TopUsers U
+LEFT JOIN 
+    RankedPosts RP ON U.UserId = RP.OwnerUserId AND RP.PostRank = 1
+LEFT JOIN 
+    ClosedQuestionStats CQS ON RP.PostId = CQS.ClosedPostId
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC, RP.ViewCount DESC NULLS LAST
+LIMIT 10;
+
+-- The query retrieves the top users ranked by reputation who have posted questions. 
+-- For each user, it retrieves their latest question and related statistics, 
+-- including any questions they have closed, along with relevant tags.
+-- It showcases advanced constructs such as CTEs, window functions, correlated subqueries,
+-- and aggregation along with NULL handling.

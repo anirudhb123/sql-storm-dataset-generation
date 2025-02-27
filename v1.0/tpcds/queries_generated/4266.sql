@@ -1,0 +1,54 @@
+
+WITH Customer_Returns AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returned_quantity,
+        COALESCE(SUM(sr_return_amt), 0) AS total_returned_amount,
+        COUNT(DISTINCT sr_ticket_number) AS total_return_transactions
+    FROM
+        customer c
+        LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Customer_Demographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk
+    FROM
+        customer_demographics cd
+        LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE
+        cd.cd_purchase_estimate > 100 AND cd.cd_credit_rating IS NOT NULL
+),
+High_Income_Customer AS (
+    SELECT
+        c.c_customer_sk,
+        cr.total_returned_quantity,
+        cr.total_returned_amount
+    FROM
+        Customer_Returns cr
+        INNER JOIN Customer_Demographics cd ON cr.c_customer_sk = cd.cd_demo_sk
+    WHERE
+        cd.hd_income_band_sk IS NOT NULL
+        AND cd.hd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_upper_bound > 50000)
+)
+SELECT
+    COALESCE(w.web_company_name, 'Unknown') AS warehouse_name,
+    hs.c_customer_sk,
+    hv.total_returned_quantity,
+    hv.total_returned_amount,
+    ROW_NUMBER() OVER (PARTITION BY hs.c_customer_sk ORDER BY hv.total_returned_amount DESC) AS return_rank
+FROM
+    High_Income_Customer hv
+    LEFT JOIN web_site w ON hv.c_customer_sk = w.web_site_sk
+WHERE
+    hv.total_returned_amount > 0
+ORDER BY
+    warehouse_name, return_rank;

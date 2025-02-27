@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        o.o_orderkey
+),
+HighValueOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.total_price,
+        RANK() OVER (ORDER BY od.total_price DESC) AS order_rank
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.total_price > 10000
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count,
+    AVG(hvo.total_price) AS average_order_value,
+    MAX(rs.total_supply_cost) AS highest_supplier_cost
+FROM 
+    nation ns
+JOIN 
+    customer c ON ns.n_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    HighValueOrders hvo ON o.o_orderkey = hvo.o_orderkey
+JOIN 
+    RankedSuppliers rs ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = o.o_orderkey
+    )
+GROUP BY 
+    ns.n_name
+ORDER BY 
+    high_value_order_count DESC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, sh.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+    GROUP BY o.o_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_name, SUM(os.total_revenue) AS total_revenue
+    FROM nation n
+    LEFT JOIN (
+        SELECT DISTINCT c.c_nationkey, o_totalprice
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+    ) cust_orders ON n.n_nationkey = cust_orders.c_nationkey
+    JOIN OrderStats os ON cust_orders.o_totalprice = os.total_revenue
+    GROUP BY n.n_name
+),
+DistinctParts AS (
+    SELECT DISTINCT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+SELECT 
+    sr.s_name AS supplier_name, 
+    nr.n_name AS nation_name,
+    COALESCE(np.total_revenue, 0) AS total_part_revenue,
+    DENSE_RANK() OVER (PARTITION BY sr.s_name ORDER BY COALESCE(np.total_revenue, 0) DESC) AS revenue_rank
+FROM SupplierHierarchy sr
+LEFT JOIN NationRevenue nr ON sr.s_suppkey = nr.n_name
+LEFT JOIN (
+    SELECT SUM(ps.ps_supplycost * dp.ps_availqty) AS total_revenue, dp.p_partkey
+    FROM DistinctParts dp
+    JOIN partsupp ps ON dp.p_partkey = ps.ps_partkey
+    GROUP BY dp.p_partkey
+) np ON np.p_partkey = sr.s_suppkey
+ORDER BY supplier_name, revenue_rank;

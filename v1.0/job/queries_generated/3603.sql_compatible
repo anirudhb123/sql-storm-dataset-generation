@@ -1,0 +1,61 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(CASE WHEN r.role = 'actor' THEN 1 END) AS actor_count,
+        COUNT(CASE WHEN r.role = 'director' THEN 1 END) AS director_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS featured_actors
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_metadata AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(m.title, 'Unknown Title') AS title,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        ci.actor_count,
+        ci.director_count,
+        ci.featured_actors,
+        m.production_year
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_details ci ON m.movie_id = ci.movie_id
+)
+SELECT 
+    mm.title,
+    mm.production_year,
+    mm.keyword,
+    mm.actor_count,
+    mm.director_count,
+    mm.featured_actors
+FROM 
+    movie_metadata mm
+WHERE 
+    (mm.actor_count > 5 OR mm.director_count > 2)
+    AND mm.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    mm.production_year DESC,
+    mm.title_rank
+LIMIT 100;

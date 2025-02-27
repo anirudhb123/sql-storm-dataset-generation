@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mt.id AS movie_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- filter to only recent movies
+    
+    UNION ALL
+
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id AS movie_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+)
+
+, CastInfoWithRole AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        nt.name,
+        rt.role,
+        ROW_NUMBER() OVER(PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        name nt ON ci.person_id = nt.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+)
+
+, MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    ci_with_role.actor_rank,
+    ci_with_role.name AS actor_name,
+    mk.keywords,
+    CASE 
+        WHEN ci_with_role.role IS NULL THEN 'Unclassified Role'
+        ELSE ci_with_role.role
+    END AS actor_role
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastInfoWithRole ci_with_role ON mh.movie_id = ci_with_role.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level = 0  -- Top-level movies only
+    AND (ci_with_role.actor_rank <= 3 OR ci_with_role.actor_rank IS NULL) -- Include top 3 actors or movies with no cast
+ORDER BY 
+    mh.production_year DESC, 
+    ci_with_role.actor_rank;

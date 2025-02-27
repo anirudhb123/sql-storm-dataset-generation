@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS ActivePosts
+    FROM
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.Id) AS UsageCount
+    FROM
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name = 'Question'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+TopUsers AS (
+    SELECT
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.ActivePosts,
+        ROW_NUMBER() OVER (ORDER BY us.TotalPosts DESC) AS Rank
+    FROM 
+        UserStats us
+)
+SELECT 
+    tu.Rank,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    pt.TagName,
+    pt.UsageCount
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON pt.UsageCount > 5
+WHERE 
+    tu.Rank <= 20
+ORDER BY 
+    tu.Rank, pt.UsageCount DESC;

@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+
+SupplierSummary AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS supplier_count,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+
+CustomerRevenue AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size > 10 THEN 'Large'
+            WHEN p.p_size BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Small'
+        END AS size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_brand IN (SELECT DISTINCT p_brand FROM part WHERE CHAR_LENGTH(p_name) > 10)
+)
+
+SELECT 
+    r.r_name,
+    COALESCE(SUM(cs.total_revenue), 0) AS region_revenue,
+    COALESCE(SUM(ss.total_supplycost), 0) AS region_supply_cost,
+    COUNT(DISTINCT pd.p_partkey) AS unique_parts,
+    COUNT(oo.o_orderkey) AS total_orders
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerRevenue cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    SupplierSummary ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    RankedOrders oo ON oo.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+LEFT JOIN 
+    PartDetails pd ON pd.p_partkey IN (SELECT l_partkey FROM lineitem l WHERE l.l_orderkey = oo.o_orderkey)
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name ASC;

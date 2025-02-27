@@ -1,0 +1,65 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT a.name) AS cast_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year > 2000 
+        AND k.keyword IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+AverageCast AS (
+    SELECT 
+        AVG(total_cast) AS avg_cast_size 
+    FROM 
+        MovieDetails
+),
+HighCastMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.total_cast,
+        md.cast_names,
+        CASE
+            WHEN md.total_cast > (SELECT avg_cast_size FROM AverageCast) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS cast_size_category
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.total_cast,
+    h.cast_names,
+    h.cast_size_category,
+    COALESCE(ci.kind, 'Unknown') AS company_type
+FROM 
+    HighCastMovies h
+LEFT JOIN 
+    movie_companies mc ON h.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+WHERE 
+    h.cast_size_category = 'Above Average'
+ORDER BY 
+    h.total_cast DESC;

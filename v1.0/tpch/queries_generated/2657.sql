@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_supply_value
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.supplier_rank <= 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(co.total_order_value) AS total_spent
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_order_value > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    fc.c_custkey,
+    fc.c_name,
+    COALESCE(ts.total_supply_value, 0) AS total_supply_value,
+    COALESCE(fc.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN COALESCE(fc.total_spent, 0) > COALESCE(ts.total_supply_value, 0) THEN 'High Spender'
+        ELSE 'Regular Spender'
+    END AS spender_type
+FROM 
+    FilteredCustomers fc
+FULL OUTER JOIN 
+    TopSuppliers ts ON fc.c_custkey = ts.s_suppkey
+WHERE 
+    fc.total_spent IS NOT NULL OR ts.total_supply_value IS NOT NULL
+ORDER BY 
+    spender_type, total_spent DESC;

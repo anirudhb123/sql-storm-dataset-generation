@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    cc.kind AS cast_type,
+    cn.name AS company_name,
+    mi.info AS movie_info,
+    k.keyword AS movie_keyword,
+    p.info AS person_info
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    keyword k ON t.id = k.movie_id
+JOIN 
+    person_info p ON ak.person_id = p.person_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+    AND k.keyword IN ('Action', 'Adventure')
+ORDER BY 
+    t.production_year DESC, ak.name ASC, t.title ASC
+LIMIT 100;

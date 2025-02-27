@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.PostTypeId,
+           p.CreationDate,
+           p.OwnerUserId,
+           COALESCE(vote_counts.UpVotes, 0) AS UpVotes,
+           COALESCE(vote_counts.DownVotes, 0) AS DownVotes,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COALESCE(vote_counts.UpVotes, 0) - COALESCE(vote_counts.DownVotes, 0) DESC) AS Rank,
+           ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId,
+               SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+               SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) vote_counts ON p.Id = vote_counts.PostId
+),
+FilteredPosts AS (
+    SELECT rp.PostId,
+           rp.Title,
+           rp.UpVotes,
+           rp.DownVotes,
+           rp.Rank,
+           rp.RecentRank,
+           U.Reputation,
+           U.DisplayName,
+           (SELECT STRING_AGG(p.TagName, ', ') 
+            FROM Tags t
+            JOIN Posts p ON t.ExcerptPostId = p.Id
+            WHERE p.Id = rp.PostId) AS Tags
+    FROM RankedPosts rp
+    JOIN Users U ON rp.OwnerUserId = U.Id
+    WHERE rp.Rank <= 5 OR rp.RecentRank <= 10
+),
+TagSummary AS (
+    SELECT Tags,
+           COUNT(*) AS PostCount,
+           SUM(UpVotes) AS TotalUpVotes,
+           SUM(DownVotes) AS TotalDownVotes,
+           SUM(CASE WHEN UpVotes > DownVotes THEN 1 ELSE 0 END) AS PositivePosts
+    FROM FilteredPosts
+    GROUP BY Tags
+)
+SELECT ts.Tags,
+       ts.PostCount,
+       ts.TotalUpVotes,
+       ts.TotalDownVotes,
+       CASE 
+           WHEN ts.PostCount = 0 THEN NULL 
+           ELSE ROUND(CAST(ts.TotalUpVotes AS FLOAT) / NULLIF(ts.PostCount, 0), 2) 
+       END AS AverageUpVotes,
+       (SELECT STRING_AGG(DISTINCT CONCAT(UPPER(SUBSTRING(u.DisplayName, 1, 1)), LOWER(SUBSTRING(u.DisplayName, 2))) || ' (Reputation: ' || u.Reputation || ')'), ', ')
+        FROM Users u
+        JOIN FilteredPosts fp ON u.Id = fp.OwnerUserId
+        WHERE fp.Tags = ts.Tags) AS Contributors
+FROM TagSummary ts
+WHERE ts.TotalUpVotes IS NOT NULL
+ORDER BY ts.PostCount DESC, ts.TotalUpVotes DESC
+LIMIT 20;
+
+In this elaborate query:
+- We first create a common table expression (CTE) named `RankedPosts` that ranks posts based on their upvotes and downvotes, as well as their recency.
+- We filter these posts in the second CTE `FilteredPosts` to focus on either top-ranked posts or the most recent ones.
+- We then summarize the data in the `TagSummary` CTE, which aggregates posts based on their tags and counts various post metrics.
+- The final SELECT statement ultimately calculates an average upvote count and retrieves a list of contributors for each tag while taking care of NULL logic and using string aggregation for displaying contributors. 
+- The query also considers corner cases, e.g., dividing by zero, using `NULLIF` to ensure safety.

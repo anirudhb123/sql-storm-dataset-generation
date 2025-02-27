@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByDate
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, Score, ViewCount, AnswerCount, FavoriteCount, OwnerDisplayName, CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 10
+),
+RecentPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, Score, ViewCount, AnswerCount, FavoriteCount, OwnerDisplayName, CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByDate <= 10
+)
+SELECT 
+    'High Score' AS PostType,
+    h.PostId,
+    h.Title,
+    h.CreationDate,
+    h.Score,
+    h.ViewCount,
+    h.AnswerCount,
+    h.FavoriteCount,
+    h.OwnerDisplayName,
+    h.CommentCount
+FROM 
+    HighScoringPosts h
+UNION ALL
+SELECT 
+    'Recent' AS PostType,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.AnswerCount,
+    r.FavoriteCount,
+    r.OwnerDisplayName,
+    r.CommentCount
+FROM 
+    RecentPosts r
+ORDER BY 
+    CASE PostType
+        WHEN 'High Score' THEN 1
+        WHEN 'Recent' THEN 2
+    END,
+    Score DESC;

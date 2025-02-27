@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        MAX(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS has_roles
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        has_roles
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year >= 2000 AND cast_count > 0
+),
+MovieInfo AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        STRING_AGG(DISTINCT mi.info, ', ') AS infos
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        movie_info mi ON fm.movie_id = mi.movie_id
+    GROUP BY 
+        fm.movie_id, fm.title, fm.production_year
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.infos,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN m.has_roles = 1 THEN 'Has Roles' 
+        ELSE 'No Roles' 
+    END AS role_status
+FROM 
+    MovieInfo m
+LEFT JOIN 
+    KeywordStats ks ON m.movie_id = ks.movie_id
+WHERE 
+    (m.production_year BETWEEN 2010 AND 2020 OR (m.production_year < 2010 AND m.keyword_count > 2))
+ORDER BY 
+    m.production_year DESC,
+    m.title ASC
+LIMIT 50;
+
+-- This query evaluates movies from the 2000s and later, 
+-- ranks them by their cast size, and joins movie information and keywords to yield a rich dataset.
+-- It employs CTEs, window functions for counts, and deals with NULL scenarios 
+-- to construct a thorough output including movie role statuses and conditional logic for fetched data.

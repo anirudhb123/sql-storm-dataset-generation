@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 100
+),
+HighestOrderValues AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SupplierAndOrderDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ho.total_value
+    FROM 
+        RankedSuppliers s
+    LEFT JOIN 
+        HighestOrderValues ho ON s.s_suppkey = ho.o_orderkey
+    WHERE 
+        s.rn = 1
+),
+FinalResult AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        COALESCE(SUM(ho.total_value), 0) AS total_order_value,
+        COUNT(DISTINCT ho.o_orderkey) AS order_count
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierAndOrderDetails s ON p.p_partkey = s.s_suppkey
+    LEFT JOIN 
+        HighestOrderValues ho ON s.s_suppkey = ho.o_orderkey
+    GROUP BY 
+        p.p_name, s.s_name
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    COALESCE(total_order_value, 0) AS total_order_value,
+    order_count,
+    CASE 
+        WHEN total_order_value IS NULL THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM 
+    FinalResult fr
+FULL OUTER JOIN 
+    part p ON fr.p_name = p.p_name
+WHERE 
+    p.p_retailprice BETWEEN 10.00 AND 100.00
+ORDER BY 
+    total_order_value DESC NULLS LAST;

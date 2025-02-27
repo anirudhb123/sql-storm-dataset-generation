@@ -1,0 +1,48 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_brand, p_retailprice, NULL::text AS parent_brand
+    FROM part
+    WHERE p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+    
+    UNION ALL
+    
+    SELECT ps.ps_partkey, p.p_name, p.p_brand, p.p_retailprice, ph.p_brand
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN PartHierarchy ph ON ph.p_partkey = ps.ps_partkey
+    WHERE p.p_brand IS DISTINCT FROM ph.parent_brand
+),
+RankedOrders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice,
+           RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS price_rank
+    FROM orders
+    WHERE o_orderstatus IN ('O', 'F')
+),
+NationsWithComments AS (
+    SELECT n.n_name, n.n_comment, COUNT(*) AS nation_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, n.n_comment
+    HAVING COUNT(*) < (SELECT COUNT(*) FROM supplier)
+),
+SupplierSummary AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+    HAVING SUM(ps.ps_supplycost) IS NOT NULL AND unique_parts > 5
+)
+SELECT p.p_name, ph.parent_brand, ns.n_name, SUM(ls.l_quantity) AS total_quantity,
+       RANK() OVER (PARTITION BY p.p_name ORDER BY SUM(ls.l_quantity) DESC) AS quantity_rank
+FROM lineitem ls
+JOIN part p ON ls.l_partkey = p.p_partkey
+LEFT JOIN PartHierarchy ph ON ph.p_partkey = p.p_partkey
+JOIN NationsWithComments ns ON ph.parent_brand = ns.n_comment
+JOIN SupplierSummary ss ON ss.total_supply_cost > (
+         SELECT AVG(total_supply_cost) FROM SupplierSummary
+     )
+WHERE ls.l_returnflag = 'R'
+GROUP BY p.p_name, ph.parent_brand, ns.n_name
+HAVING SUM(ls.l_quantity) > (SELECT AVG(l_quantity) FROM lineitem WHERE l_returnflag = 'R')
+ORDER BY total_quantity DESC
+LIMIT 10;

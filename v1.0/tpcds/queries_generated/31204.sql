@@ -1,0 +1,49 @@
+
+WITH RECURSIVE top_categories AS (
+    SELECT i_category_id, i_category, SUM(ws_ext_sales_price) AS total_sales
+    FROM item 
+    JOIN web_sales ON item.i_item_sk = web_sales.ws_item_sk
+    GROUP BY i_category_id, i_category
+    UNION ALL
+    SELECT i_category_id, i_category, SUM(cs_ext_sales_price) AS total_sales
+    FROM item 
+    JOIN catalog_sales ON item.i_item_sk = catalog_sales.cs_item_sk
+    GROUP BY i_category_id, i_category
+), 
+sales_data AS (
+    SELECT dd.d_date, SUM(ws.ws_ext_sales_price) AS web_sales_total, 
+           SUM(cs.cs_ext_sales_price) AS catalog_sales_total,
+           SUM(ss.ss_ext_sales_price) AS store_sales_total,
+           COUNT(DISTINCT ws.ws_order_number) AS web_orders_count,
+           COUNT(DISTINCT cs.cs_order_number) AS catalog_orders_count,
+           COUNT(DISTINCT ss.ss_ticket_number) AS store_orders_count
+    FROM date_dim dd
+    LEFT JOIN web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON dd.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON dd.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY dd.d_date
+),
+aggregated_sales AS (
+    SELECT d_date, web_sales_total, catalog_sales_total, store_sales_total,
+           (web_sales_total + catalog_sales_total + store_sales_total) AS total_sales,
+           ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank_total
+    FROM sales_data
+)
+SELECT 
+    a.d_date,
+    a.web_sales_total,
+    a.catalog_sales_total,
+    a.store_sales_total,
+    coalesce(a.total_sales, 0) AS total_sales,
+    a.rank_total,
+    t.i_category,
+    CASE 
+        WHEN t.i_category IS NOT NULL THEN 'Category Available' 
+        ELSE 'No Sales Category' 
+    END AS sales_category
+FROM aggregated_sales a
+LEFT JOIN top_categories t ON a.web_sales_total > 10000 
+                             OR a.catalog_sales_total > 10000 
+                             OR a.store_sales_total > 10000
+ORDER BY a.d_date DESC
+LIMIT 50;

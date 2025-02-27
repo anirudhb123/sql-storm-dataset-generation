@@ -1,0 +1,73 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ship_mode_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_ship_mode_sk ORDER BY SUM(ws_net_paid) DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ship_mode_sk
+), top_sales AS (
+    SELECT 
+        s.ship_mode_sk,
+        s.total_quantity,
+        s.total_net_paid
+    FROM 
+        sales_summary s
+    WHERE 
+        s.rn <= 5
+), customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, hd.hd_income_band_sk
+), customer_sales AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.hd_income_band_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer_data cd
+    JOIN 
+        web_sales ws ON cd.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        cd.c_customer_sk, cd.cd_gender, cd.hd_income_band_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.hd_income_band_sk,
+    cs.total_spent,
+    COALESCE(ts.total_quantity, 0) AS total_quantity_by_ship_mode,
+    COALESCE(ts.total_net_paid, 0) AS total_net_paid_by_ship_mode
+FROM 
+    customer_sales cs
+LEFT JOIN 
+    top_sales ts ON cs.c_customer_sk IN (
+        SELECT 
+            ws_ship_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_ship_mode_sk = ts.ship_mode_sk
+    )
+ORDER BY 
+    cs.total_spent DESC, cs.c_customer_sk;

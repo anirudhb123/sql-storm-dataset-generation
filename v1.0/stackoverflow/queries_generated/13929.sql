@@ -1,0 +1,43 @@
+-- Performance Benchmarking Query
+
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(ps.PostId) AS TotalPosts,
+    AVG(ps.ViewCount) AS AverageViewCount,
+    AVG(ps.Score) AS AverageScore,
+    AVG(ps.UpVotes) AS AverageUpVotes,
+    AVG(ps.DownVotes) AS AverageDownVotes,
+    AVG(ps.AnswerCount) AS AverageAnswerCount,
+    AVG(ps.CommentCount) AS AverageCommentCount,
+    AVG(ps.FavoriteCount) AS AverageFavoriteCount
+FROM 
+    PostStatistics ps
+JOIN 
+    PostTypes pt ON ps.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

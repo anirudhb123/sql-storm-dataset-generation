@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent 
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey 
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    r.n_name,
+    COALESCE(SUM(RankedOrders.o_totalprice), 0) AS total_revenue,
+    COUNT(DISTINCT HighValueCustomers.c_custkey) AS high_value_customer_count,
+    AVG(SupplierDetails.total_available_qty) AS avg_avail_qty,
+    MAX(SupplierDetails.max_acctbal) AS richest_supplier_acctbal
+FROM 
+    nation r
+LEFT JOIN 
+    HighValueCustomers ON r.n_nationkey = HighValueCustomers.c_custkey  -- linkage based on bizarre key
+LEFT JOIN 
+    RankedOrders ON RankedOrders.o_orderkey = HighValueCustomers.c_custkey   -- quirky join on order key and customer key
+LEFT JOIN 
+    SupplierDetails ON SupplierDetails.s_suppkey = (SELECT MIN(s.s_suppkey) FROM supplier s WHERE s.s_name LIKE '%Inc%')  -- subquery to fetch first supplier with 'Inc'
+WHERE 
+    r.r_regionkey IS NOT NULL
+GROUP BY 
+    r.n_name
+ORDER BY 
+    total_revenue DESC, 
+    high_value_customer_count ASC
+FETCH FIRST 10 ROWS ONLY;

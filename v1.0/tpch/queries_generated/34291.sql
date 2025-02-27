@@ -1,0 +1,35 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'UNITED STATES')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal + sh.s_acctbal AS total_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+, part_sales AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+)
+, ranked_sales AS (
+    SELECT ps.p_partkey, ps.total_sales,
+           ROW_NUMBER() OVER (ORDER BY ps.total_sales DESC) AS sales_rank
+    FROM part_sales ps
+)
+SELECT r.r_name,
+       SUM(COALESCE(ps.total_sales, 0)) AS region_total_sales,
+       COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+       MAX(s.s_acctbal) AS max_supplier_acctbal
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN ranked_sales ps ON s.s_suppkey = ps.p_partkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING SUM(COALESCE(ps.total_sales, 0)) > 10000
+ORDER BY region_total_sales DESC
+LIMIT 5;

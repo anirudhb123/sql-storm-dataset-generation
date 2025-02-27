@@ -1,0 +1,75 @@
+WITH ranked_posts AS (
+    SELECT 
+        p.Id AS post_id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+user_badges AS (
+    SELECT 
+        u.Id AS user_id,
+        COUNT(b.Id) AS badge_count,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS gold_badges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS silver_badges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS bronze_badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+post_comments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS comment_count
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+post_votes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.post_id,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    COALESCE(pc.comment_count, 0) AS total_comments,
+    COALESCE(pv.upvotes, 0) AS total_upvotes,
+    COALESCE(pv.downvotes, 0) AS total_downvotes,
+    ub.badge_count AS user_badge_count,
+    ub.gold_badges,
+    ub.silver_badges,
+    ub.bronze_badges
+FROM 
+    ranked_posts rp
+LEFT JOIN 
+    post_comments pc ON rp.post_id = pc.PostId
+LEFT JOIN 
+    post_votes pv ON rp.post_id = pv.PostId
+LEFT JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    user_badges ub ON ub.user_id = u.Id
+WHERE 
+    rp.rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

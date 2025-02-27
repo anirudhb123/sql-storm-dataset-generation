@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(c.id) AS total_cast_members,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors_list
+    FROM 
+        aka_title a
+    JOIN 
+        movie_info mi ON a.id = mi.movie_id
+    JOIN 
+        title m ON m.id = a.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    WHERE 
+        mi.info LIKE '%Great%' 
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopRatedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast_members,
+        rm.actors_list
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.total_cast_members > 5 
+    ORDER BY 
+        rm.total_cast_members DESC
+    LIMIT 10
+)
+SELECT 
+    t.movie_title,
+    t.production_year,
+    t.total_cast_members,
+    t.actors_list,
+    COUNT(DISTINCT kw.keyword) AS keyword_count
+FROM 
+    TopRatedMovies t
+LEFT JOIN 
+    movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    t.movie_title, t.production_year, t.total_cast_members, t.actors_list
+ORDER BY 
+    t.total_cast_members DESC;

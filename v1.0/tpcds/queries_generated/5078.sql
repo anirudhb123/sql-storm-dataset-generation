@@ -1,0 +1,38 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_orders_count,
+        COUNT(DISTINCT sr.ticket_number) AS store_returns_count,
+        AVG(sr.return_amt) AS avg_store_return_amt
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_id
+),
+
+DemographicSales AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(total_web_sales) AS avg_sales_by_gender,
+        SUM(web_orders_count) AS total_orders_by_gender,
+        SUM(store_returns_count) AS total_returns_by_gender,
+        AVG(avg_store_return_amt) AS avg_return_amt_by_gender
+    FROM CustomerSales
+    JOIN customer_demographics cd ON CustomerSales.c_customer_id = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+
+SELECT 
+    ds.cd_gender,
+    ds.avg_sales_by_gender,
+    ds.total_orders_by_gender,
+    ds.total_returns_by_gender,
+    ds.avg_return_amt_by_gender,
+    CONCAT(ROUND(ds.avg_sales_by_gender, 2), ' USD') AS formatted_avg_sales,
+    CONCAT(ds.total_orders_by_gender, ' orders') AS formatted_total_orders,
+    CONCAT(ds.total_returns_by_gender, ' returns') AS formatted_total_returns,
+    CONCAT(ROUND(ds.avg_return_amt_by_gender, 2), ' USD') AS formatted_avg_return_amt
+FROM DemographicSales ds
+ORDER BY ds.avg_sales_by_gender DESC;

@@ -1,0 +1,28 @@
+WITH RECURSIVE cte_supplier_orders AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+cte_top_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+)
+SELECT n.n_name, 
+       SUM(COALESCE(cte.total_revenue, 0)) AS total_revenue, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       MAX(o.o_totalprice) AS max_order_value,
+       STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN cte_supplier_orders cte ON s.s_suppkey = cte.s_suppkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN cte_top_orders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+WHERE n.n_regionkey IS NOT NULL
+GROUP BY n.n_name
+ORDER BY total_revenue DESC;

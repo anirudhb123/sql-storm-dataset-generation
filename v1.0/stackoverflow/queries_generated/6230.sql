@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) >= 10
+)
+SELECT 
+    rp.OwnerDisplayName,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    pt.TagName,
+    pt.PostCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON rp.PostRank <= 5
+ORDER BY 
+    rp.Score DESC, pt.PostCount DESC
+LIMIT 50;

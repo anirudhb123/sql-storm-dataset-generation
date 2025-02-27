@@ -1,0 +1,58 @@
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        (UpVotes - DownVotes) AS VoteBalance,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(Votes.BountyAmount) FILTER (WHERE Votes.BountyAmount IS NOT NULL) AS AvgBounty
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY Users.Id, Users.DisplayName, Users.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        VoteBalance,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgBounty,
+        RANK() OVER (ORDER BY VoteBalance DESC) AS VoteRank,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserStats
+),
+FilteredUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        VoteBalance,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgBounty,
+        VoteRank,
+        ReputationRank
+    FROM TopUsers
+    WHERE PostCount > 5 AND Reputation > 100
+)
+SELECT 
+    FU.DisplayName,
+    FU.VoteBalance,
+    FU.QuestionCount,
+    FU.AnswerCount,
+    COALESCE(FU.AvgBounty, 0) AS AvgBounty,
+    PH.RevisionGUID,
+    PH.CreationDate AS HistoryDate,
+    P.Title,
+    P.CreationDate AS PostDate
+FROM FilteredUsers AS FU
+LEFT JOIN PostHistory AS PH ON FU.UserId = PH.UserId
+LEFT JOIN Posts AS P ON PH.PostId = P.Id
+WHERE PH.PostHistoryTypeId IN (10, 11, 12, 13)  
+ORDER BY VoteBalance DESC, Reputation DESC, PH.CreationDate DESC
+LIMIT 100;

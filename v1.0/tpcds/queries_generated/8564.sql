@@ -1,0 +1,62 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'M' 
+        AND cd.cd_marital_status = 'S' 
+        AND cd.cd_purchase_estimate >= 500
+    GROUP BY 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        cd.cd_purchase_estimate
+), WarehouseSales AS (
+    SELECT 
+        ws.ws_warehouse_sk,
+        SUM(ws.ws_quantity) AS warehouse_total_quantity,
+        SUM(ws.ws_net_paid) AS warehouse_total_net_paid
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_warehouse_sk
+), DemographicSummary AS (
+    SELECT 
+        cb.cd_marital_status,
+        COUNT(DISTINCT cb.c_customer_id) AS num_customers,
+        SUM(ws.ws_net_paid) AS total_net_paid_in_category
+    FROM 
+        CustomerData cb
+    JOIN 
+        web_sales ws ON cb.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        cb.cd_marital_status
+)
+SELECT 
+    d.cd_marital_status,
+    ds.num_customers,
+    ds.total_net_paid_in_category,
+    ws.warehouse_total_quantity,
+    ws.warehouse_total_net_paid
+FROM 
+    DemographicSummary ds
+JOIN 
+    WarehouseSales ws ON ds.num_customers > 100
+WHERE 
+    ds.total_net_paid_in_category > 10000
+ORDER BY 
+    ds.total_net_paid_in_category DESC;

@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate,
+           o_orderpriority, o_clerk, o_shippriority, o_comment, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           o.o_orderpriority, o.o_clerk, o.o_shippriority, o.o_comment, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+TotalLineItemCost AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, r.r_name AS region_name,
+           COUNT(p.ps_supplycost) AS part_supply_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, r.r_name
+    HAVING COUNT(p.ps_supplycost) > 0
+),
+CustomerStats AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_orders, MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT cs.c_custkey, cs.total_orders, cs.last_order_date, 
+       si.s_name, si.region_name, SUM(tlc.total_cost) AS total_cost
+FROM CustomerStats cs
+JOIN TotalLineItemCost tlc ON cs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = tlc.l_orderkey LIMIT 1)
+LEFT JOIN SupplierInfo si ON si.part_supply_count = (SELECT COUNT(*) FROM partsupp ps WHERE ps.ps_partkey IN 
+    (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN 
+        (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)))
+GROUP BY cs.c_custkey, cs.total_orders, cs.last_order_date, si.s_name, si.region_name
+ORDER BY cs.total_orders DESC
+LIMIT 10;

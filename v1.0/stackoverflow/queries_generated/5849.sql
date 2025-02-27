@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(b.Class) AS TotalBadges,
+        COUNT(DISTINCT ph.Id) AS TotalPostHistoryEntries
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalBadges,
+        TotalPostHistoryEntries,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalComments DESC) AS ActivityRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.TotalBadges,
+    u.TotalPostHistoryEntries,
+    t.ActivityRank,
+    ROUND(AVG(COALESCE(v.CreationDate, CURRENT_TIMESTAMP) - p.CreationDate), 2) AS AvgPostAge,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS PopularTags
+FROM 
+    TopActiveUsers t
+JOIN 
+    Posts p ON t.UserId = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            t2.TagName 
+        FROM 
+            STRING_TO_ARRAY(p.Tags, ',') AS tag
+        JOIN 
+            Tags t2 ON t2.TagName = TRIM(tag)
+        GROUP BY 
+            t2.TagName
+        ORDER BY 
+            COUNT(*) DESC
+        LIMIT 5
+    ) t ON true
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.UserId = t.UserId
+WHERE 
+    t.ActivityRank <= 10
+GROUP BY 
+    u.UserId, u.DisplayName, t.ActivityRank
+ORDER BY 
+    t.ActivityRank;

@@ -1,0 +1,83 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id as UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS Deletions,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 11 THEN 1 ELSE 0 END), 0) AS Undeletions,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id as PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        CASE 
+            WHEN COUNT(DISTINCT PH.Id) > 0 THEN 'Edited'
+            ELSE 'Not Edited'
+        END AS EditStatus
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount
+),
+VoteDetails AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.UpVotes, 
+    UA.DownVotes, 
+    UA.Deletions, 
+    UA.Undeletions,
+    UA.TotalPosts,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.LastEditDate,
+    PS.EditStatus,
+    COALESCE(VD.TotalUpVotes, 0) AS PostUpVotes,
+    COALESCE(VD.TotalDownVotes, 0) AS PostDownVotes,
+    CASE 
+        WHEN PS.ViewCount > 1000 THEN 'Popular'
+        WHEN PS.ViewCount >= 500 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus
+FROM 
+    UserActivity UA
+JOIN 
+    PostStats PS ON UA.UserId = PS.OwnerUserId
+LEFT JOIN 
+    VoteDetails VD ON PS.PostId = VD.PostId
+WHERE 
+    UA.Reputation > 500 
+    AND UA.TotalPosts > 0 
+ORDER BY 
+    UA.UpVotes DESC, PS.CommentCount DESC, PS.LastEditDate DESC
+LIMIT 50;

@@ -1,0 +1,78 @@
+WITH regional_sales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        n.n_name, n.n_regionkey
+),
+high_volume_orders AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_returnflag IS NULL
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_orderkey) > 10
+),
+supplier_average_cost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    r.r_name AS region,
+    rss.nation_name,
+    rss.total_sales,
+    sac.avg_supply_cost,
+    hv_orders.lineitem_count
+FROM 
+    region r
+LEFT JOIN 
+    regional_sales rss ON r.r_name = rss.nation_name
+LEFT JOIN 
+    supplier_average_cost sac ON sac.ps_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN part p ON ps.ps_partkey = p.p_partkey 
+        WHERE p.p_type LIKE '%brass%'
+    )
+FULL OUTER JOIN 
+    high_volume_orders hv_orders ON hv_orders.o_orderkey = (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            orders o 
+        ORDER BY 
+            o.o_orderdate DESC 
+        LIMIT 1
+    )
+WHERE 
+    rss.sales_rank <= 5 
+    OR (sac.avg_supply_cost IS NOT NULL AND sac.avg_supply_cost > (
+        SELECT AVG(ps2.ps_supplycost) 
+        FROM partsupp ps2
+    ) * 0.75)
+ORDER BY 
+    region, nation_name, total_sales DESC NULLS LAST;

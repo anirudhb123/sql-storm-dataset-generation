@@ -1,0 +1,73 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_info AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+),
+inventory_status AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory i
+    GROUP BY 
+        i.i_item_sk
+),
+return_info AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    si.total_quantity_sold,
+    si.total_net_profit,
+    COALESCE(is.total_quantity_on_hand, 0) AS total_quantity_on_hand,
+    COALESCE(ri.total_returned, 0) AS total_returned,
+    CASE 
+        WHEN si.total_net_profit > 0 THEN 'Profitable'
+        WHEN si.total_net_profit < 0 THEN 'Unprofitable'
+        ELSE 'Neutral'
+    END AS profitability_status
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_info si ON ci.c_customer_sk = si.ws_bill_customer_sk
+LEFT JOIN 
+    inventory_status is ON si.ws_item_sk = is.i_item_sk
+LEFT JOIN 
+    return_info ri ON si.ws_item_sk = ri.cr_item_sk
+WHERE 
+    ci.gender_rank <= 5
+ORDER BY 
+    ci.cd_purchase_estimate DESC, 
+    profitability_status;

@@ -1,0 +1,30 @@
+SELECT 
+    CONCAT(c.c_name, ' (', c.c_acctbal, ') - ', s.s_name) AS supplier_customer_info,
+    SUBSTRING_INDEX(p.p_name, ' ', 1) AS part_name_first_word,
+    p.p_size,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice) AS average_price,
+    GROUP_CONCAT(DISTINCT r.r_name ORDER BY r.r_name ASC SEPARATOR ', ') AS regions_supplied
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 100.00 AND 
+    l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_partkey, c.c_custkey, s.s_suppkey
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC, average_price DESC;

@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        rh.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy rh ON a.ParentId = rh.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+PostStats AS (
+    
+    SELECT 
+        q.PostId,
+        q.Title,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.PostId) AS AnswerCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        CASE 
+            WHEN COUNT(a.PostId) > 0 THEN AVG(a.Score)
+            ELSE 0
+        END AS AverageAnswerScore,
+        MAX(q.CreationDate) AS LatestActivity
+    FROM 
+        RecursivePostHierarchy q
+    LEFT JOIN 
+        Posts a ON a.ParentId = q.PostId
+    LEFT JOIN 
+        Users u ON q.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = q.PostId
+    WHERE 
+        q.Level = 1  
+    GROUP BY 
+        q.PostId, q.Title, u.DisplayName
+),
+PostCloseReasons AS (
+    
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS int) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.AnswerCount,
+    ps.TotalVotes,
+    ps.AverageAnswerScore,
+    ps.LatestActivity,
+    COALESCE(pcr.CloseReason, 'Not Closed') AS CloseReasonText
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostCloseReasons pcr ON ps.PostId = pcr.PostId
+ORDER BY 
+    ps.TotalVotes DESC, 
+    ps.LatestActivity DESC;

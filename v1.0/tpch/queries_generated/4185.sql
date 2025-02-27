@@ -1,0 +1,60 @@
+WITH total_sales AS (
+    SELECT
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS sales
+    FROM
+        lineitem
+    WHERE
+        l_shipdate <= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY
+        l_partkey
+),
+ranked_parts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ts.sales,
+        RANK() OVER (ORDER BY ts.sales DESC) AS sales_rank
+    FROM
+        part p
+    LEFT JOIN total_sales ts ON p.p_partkey = ts.l_partkey
+),
+top_suppliers AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM
+        partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY
+        ps.ps_partkey, s.s_name
+    HAVING
+        SUM(ps.ps_availqty) > 0
+)
+SELECT
+    r.rank,
+    rp.p_name,
+    rp.p_brand,
+    rp.p_retailprice,
+    COALESCE(ts.sales, 0) AS total_sales,
+    COALESCE(ts.sales, 0) / NULLIF(rp.p_retailprice, 0) AS sales_to_price_ratio,
+    ts.sales_rank
+FROM
+    ranked_parts rp
+LEFT JOIN total_sales ts ON rp.p_partkey = ts.l_partkey
+JOIN (
+    SELECT 
+        ROW_NUMBER() OVER (ORDER BY sales DESC) AS rank,
+        p_partkey
+    FROM 
+        total_sales
+) r ON rp.p_partkey = r.p_partkey
+LEFT JOIN top_suppliers tsup ON rp.p_partkey = tsup.ps_partkey
+WHERE
+    rp.sales_rank <= 10 OR tsup.total_avail_qty IS NOT NULL
+ORDER BY
+    rp.sales_rank, rp.p_name;

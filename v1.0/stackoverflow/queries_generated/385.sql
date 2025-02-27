@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vb.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(v.UpVotes - v.DownVotes), 0) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Votes vb ON u.Id = vb.UserId AND vb.VoteTypeId = 8
+    GROUP BY 
+        u.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate 
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)
+        AND ph.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+), 
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    u.DisplayName,
+    u.TotalBounty,
+    u.NetVotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COUNT(DISTINCT re.UserDisplayName) AS RecentEditors
+FROM 
+    RankedPosts p
+JOIN 
+    UserScores u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    UserBadgeCounts ub ON u.UserId = ub.UserId
+LEFT JOIN 
+    RecentEdits re ON p.Id = re.PostId
+WHERE 
+    p.rn = 1
+GROUP BY 
+    p.Title, p.CreationDate, p.Score, u.DisplayName, u.TotalBounty, u.NetVotes, ub.BadgeCount
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,75 @@
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        ca_country,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS Full_Address,
+        Upper(ca_city) AS Upper_City,
+        Lower(ca_state) AS Lower_State
+    FROM 
+        customer_address
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(c_first_name, ' ', c_last_name) AS Full_Name
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DateData AS (
+    SELECT 
+        d_date_sk,
+        d_date,
+        d_month_seq,
+        d_year,
+        CONCAT(d_day_name, ', ', d_month_seq, '/', d_date) AS Formatted_Date
+    FROM 
+        date_dim
+),
+SalesData AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_sales_price) AS Total_Sales,
+        SUM(ss_quantity) AS Total_Quantity,
+        COUNT(DISTINCT ss_ticket_number) AS Total_Transactions
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        a.ca_country,
+        a.Full_Address,
+        c.Full_Name,
+        c.cd_gender,
+        c.cd_marital_status,
+        d.Formatted_Date,
+        s.Total_Sales,
+        s.Total_Quantity,
+        s.Total_Transactions
+    FROM 
+        AddressData a
+    JOIN 
+        CustomerData c ON a.ca_address_sk = c.c_customer_sk
+    JOIN 
+        DateData d ON d.d_date_sk = c.c_first_sales_date_sk
+    JOIN 
+        SalesData s ON s.ss_store_sk = a.ca_address_sk % 100 
+    WHERE 
+        a.ca_country = 'USA' 
+        AND c.cd_marital_status = 'M' 
+        AND d.d_year >= 1999
+)
+SELECT 
+    COUNT(*) AS Benchmark_Count,
+    AVG(Total_Sales) AS Average_Sales,
+    SUM(Total_Quantity) AS Total_Quantity_Sold
+FROM 
+    FinalBenchmark;

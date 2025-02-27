@@ -1,0 +1,97 @@
+WITH UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+PostDetailsCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus,
+        (SELECT COUNT(*) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.Id IN (SELECT UNNEST(STRING_TO_ARRAY(P.Tags, ', '))) 
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.OwnerUserId, 
+        P.AcceptedAnswerId, P.CreationDate, P.ViewCount, P.Score, 
+        P.AnswerCount, P.CommentCount
+),
+UserScoreCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(P.Score) AS TotalPostScore,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgPostScore,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UR.ReputationRank,
+    PD.PostId,
+    PD.Title,
+    PD.AnswerStatus,
+    PD.UpVotes,
+    PD.DownVotes,
+    US.TotalPostScore,
+    US.AvgPostScore,
+    CASE 
+        WHEN PD.Score >= 0 THEN 'Non-Negative' 
+        ELSE 'Negative' 
+    END AS ScoreClassification,
+    COALESCE(PD.Tags, 'No Tags') AS PostTags
+FROM 
+    UserReputationCTE UR
+JOIN 
+    Users U ON U.Id = UR.UserId
+LEFT JOIN 
+    PostDetailsCTE PD ON PD.OwnerUserId = U.Id
+LEFT JOIN 
+    UserScoreCTE US ON US.UserId = U.Id
+WHERE 
+    UR.ReputationRank <= 10
+ORDER BY 
+    UR.ReputationRank, PD.ViewCount DESC NULLS LAST
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;
+
+This complex SQL query performs the following tasks:
+1. **CTEs** to aggregate user and post data for better organization.
+2. Ranks users by reputation while filtering out NULL values.
+3. Joins post details while calculating upvotes and downvotes using correlated subqueries.
+4. Analyzes total and average post scores per user.
+5. Classifies post scores into 'Non-Negative' and 'Negative'.
+6. Uses string aggregation and handles NULL logic in post tags.
+7. The final selection restricts the users ranked in the top 10 and paginates the results for ranked users.

@@ -1,0 +1,46 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders AS o
+    WHERE o.o_orderstatus IN ('O', 'P')
+), part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           CASE 
+               WHEN ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+               THEN 'Expensive' 
+               ELSE 'Affordable' 
+           END AS price_category
+    FROM partsupp AS ps
+), complex_part AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, 
+           COALESCE(MAX(CASE WHEN l.l_returnflag = 'R' THEN 1 END), 0) AS return_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part AS p
+    LEFT JOIN lineitem AS l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand
+), total_revenue AS (
+    SELECT SUM(total_sales) AS revenue
+    FROM complex_part
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    c.c_mktsegment,
+    COALESCE(CONCAT('Total Orders: ', COUNT(co.order_rank), ', Last Order Date: ', MAX(o.o_orderdate)), 'No Orders') AS order_summary,
+    ps.price_category,
+    tr.revenue,
+    CASE 
+        WHEN tr.revenue IS NULL THEN 'No Revenue'
+        ELSE CASE 
+            WHEN tr.revenue > 1000000 THEN 'High Revenue Customer' 
+            ELSE 'Regular Customer' 
+            END 
+        END AS customer_classification
+FROM customer AS c
+LEFT JOIN cust_orders AS co ON c.c_custkey = co.o_custkey
+LEFT JOIN part_supplier AS ps ON ps.ps_partkey = (SELECT MAX(ps_partkey) FROM part_supplier)
+CROSS JOIN total_revenue AS tr
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+GROUP BY c.c_custkey, c.c_name, c.c_mktsegment, ps.price_category, tr.revenue
+HAVING COUNT(co.order_rank) > 0 OR tr.revenue IS NOT NULL
+ORDER BY c.c_custkey DESC, order_summary NULLS LAST;

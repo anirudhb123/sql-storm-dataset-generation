@@ -1,0 +1,51 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId IN (1, 2) THEN P.Score ELSE 0 END), 0) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionCount,
+        AnswerCount,
+        TotalScore,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalScore DESC) AS Rank
+    FROM 
+        UserStats
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.TotalScore,
+    TU.CommentCount,
+    COUNT(DISTINCT B.Id) AS BadgeCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    Badges B ON TU.UserId = B.UserId
+WHERE 
+    TU.Rank <= 10
+GROUP BY 
+    TU.UserId, TU.DisplayName, TU.Reputation, TU.QuestionCount, TU.AnswerCount, TU.TotalScore, TU.CommentCount
+ORDER BY 
+    TU.Rank;

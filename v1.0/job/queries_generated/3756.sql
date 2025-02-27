@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.title, m.production_year
+),
+PopularRoles AS (
+    SELECT 
+        r.role AS role_name,
+        COUNT(DISTINCT ci.person_id) AS role_count
+    FROM 
+        role_type r
+    INNER JOIN 
+        cast_info ci ON r.id = ci.role_id
+    GROUP BY 
+        r.role
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(SUM(mk.keyword), 'No Keywords') AS keywords,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_count,
+    COALESCE(pr.role_name, 'No Popular Role') AS popular_role,
+    mv.keywords,
+    mv.actors
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    PopularRoles pr ON pr.role_count = rm.actor_count
+JOIN 
+    MovieDetails mv ON mv.production_year = rm.production_year
+WHERE 
+    rm.rank <= 5 AND mv.actors IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC;

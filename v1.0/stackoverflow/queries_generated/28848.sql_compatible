@@ -1,0 +1,67 @@
+
+WITH UserTagActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (24) THEN 1 ELSE 0 END) AS SuggestedEditCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsEngaged
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        LATERAL UNNEST(string_to_array(p.Tags, '>')) AS t(TagName) ON TRUE
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 3 THEN p.Id END) AS InitialTagCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags ILIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        t.TagName
+),
+ActiveUserTags AS (
+    SELECT 
+        ut.DisplayName,
+        ut.UserId,
+        ARRAY_AGG(DISTINCT t.TagName) AS EngagedTags
+    FROM 
+        UserTagActivity ut
+    JOIN 
+        Tags t ON ut.TagsEngaged @> ARRAY[t.TagName]
+    GROUP BY 
+        ut.DisplayName, ut.UserId
+)
+SELECT 
+    u.DisplayName,
+    ut.QuestionCount,
+    ut.CloseCount,
+    ut.SuggestedEditCount,
+    tags.EngagedTags,
+    ts.PostCount,
+    ts.AvgUserReputation,
+    ts.InitialTagCount
+FROM 
+    UserTagActivity ut
+JOIN 
+    ActiveUserTags tags ON ut.UserId = tags.UserId
+JOIN 
+    TagStats ts ON ts.TagName = ANY(tags.EngagedTags)
+ORDER BY 
+    ut.QuestionCount DESC, ut.CloseCount ASC, ts.PostCount DESC
+LIMIT 10;

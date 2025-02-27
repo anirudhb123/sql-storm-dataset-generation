@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        CAST(Title AS VARCHAR(300)) AS FullTitle,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        CAST(CONCAT(rph.FullTitle, ' -> ', p.Title) AS VARCHAR(300)) AS FullTitle,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(v.BountyAmount) AS AvgBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostVisibility AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(t.TagName, 'Uncategorized') AS TagName,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.AvgBountyAmount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, STRING_AGG(TagName, ', ') AS TagName
+         FROM 
+            Tags t
+         JOIN 
+            LATERAL string_to_array(p.Tags, ',') AS tag ON t.TagName = trim(tag)
+         GROUP BY 
+            PostId) AS t ON p.Id = t.PostId
+    LEFT JOIN 
+        PostStats ps ON p.Id = ps.PostId
+)
+SELECT 
+    rph.FullTitle,
+    pv.TagName,
+    pv.CommentCount,
+    pv.UpVoteCount,
+    pv.DownVoteCount,
+    pv.AvgBountyAmount,
+    pv.PostStatus
+FROM 
+    PostVisibility pv
+JOIN 
+    RecursivePostHierarchy rph ON pv.Id = rph.Id
+WHERE 
+    pv.CommentCount > 5
+    AND pv.UpVoteCount > pv.DownVoteCount
+    AND pv.PostStatus = 'Open'
+ORDER BY 
+    pv.CommentCount DESC,
+    pv.UpVoteCount - pv.DownVoteCount DESC
+LIMIT 10;

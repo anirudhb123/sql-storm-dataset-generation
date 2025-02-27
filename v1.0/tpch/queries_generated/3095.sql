@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        p.p_retailprice,
+        (CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown'
+            ELSE CAST(p.p_size AS VARCHAR)
+        END) AS size_info
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrdersWithDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS total_items
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT 
+        owd.o_orderkey,
+        owd.o_orderdate,
+        owd.total_revenue,
+        owd.total_items,
+        CASE 
+            WHEN owd.total_revenue > 10000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS order_type
+    FROM 
+        OrdersWithDetails owd
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    sp.p_name AS part_name,
+    GROUP_CONCAT(DISTINCT ss.s_name) AS supplier_names,
+    HVO.total_revenue,
+    HVO.order_type,
+    HVO.o_orderdate
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers ss ON n.n_nationkey = ss.s_nationkey AND ss.rnk <= 3
+LEFT JOIN 
+    SupplierParts sp ON ss.s_suppkey = sp.ps_suppkey
+JOIN 
+    HighValueOrders HVO ON HVO.o_orderkey IN (
+        SELECT 
+            l.l_orderkey 
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_partkey = sp.ps_partkey
+    )
+GROUP BY 
+    r.r_name, n.n_name, sp.p_name, HVO.total_revenue, HVO.order_type, HVO.o_orderdate
+ORDER BY 
+    HVO.total_revenue DESC, r.r_name, n.n_name, sp.p_name;

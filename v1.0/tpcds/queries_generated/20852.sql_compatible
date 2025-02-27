@@ -1,0 +1,90 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sales_price IS NOT NULL
+),
+total_sales AS (
+    SELECT
+        sr_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue,
+        COUNT(ws_quantity) AS num_sales
+    FROM
+        web_sales
+    GROUP BY
+        sr_item_sk
+),
+return_summary AS (
+    SELECT
+        cr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount,
+        SUM(cr_return_tax) AS total_return_tax
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_item_sk
+),
+customer_gender AS (
+    SELECT 
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        MAX(cd.cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    item.i_item_id,
+    item.i_item_desc,
+    COALESCE(ranked_sales.price_rank, 0) AS highest_price_rank,
+    COALESCE(total_sales.total_revenue, 0) AS total_revenue,
+    COALESCE(return_summary.total_returns, 0) AS total_returns,
+    COALESCE(return_summary.total_return_amount, 0) AS total_return_amount,
+    COALESCE(return_summary.total_return_tax, 0) AS total_return_tax,
+    cg.cd_gender,
+    COALESCE(total_sales.num_sales, 0) AS num_sales,
+    COALESCE(cg.max_purchase_estimate, 0) AS max_purchase_estimate
+FROM
+    item
+LEFT JOIN
+    ranked_sales ON item.i_item_sk = ranked_sales.ws_item_sk
+LEFT JOIN
+    total_sales ON item.i_item_sk = total_sales.sr_item_sk
+LEFT JOIN
+    return_summary ON item.i_item_sk = return_summary.cr_item_sk
+LEFT JOIN
+    customer_gender cg ON cg.c_current_cdemo_sk = COALESCE(
+        (SELECT c_current_cdemo_sk 
+         FROM customer 
+         WHERE c_current_hdemo_sk IS NULL 
+         LIMIT 1), 
+         -1
+    )
+WHERE
+    (item.i_current_price IS NOT NULL AND item.i_current_price > 0)
+    AND (ranked_sales.price_rank BETWEEN 1 AND 10 OR ranked_sales.price_rank IS NULL)
+    AND (total_sales.total_revenue > 1000 OR total_sales.total_revenue IS NULL)
+GROUP BY
+    item.i_item_id,
+    item.i_item_desc,
+    ranked_sales.price_rank,
+    total_sales.total_revenue,
+    return_summary.total_returns,
+    return_summary.total_return_amount,
+    return_summary.total_return_tax,
+    cg.cd_gender,
+    total_sales.num_sales,
+    cg.max_purchase_estimate
+ORDER BY
+    item.i_item_id ASC;

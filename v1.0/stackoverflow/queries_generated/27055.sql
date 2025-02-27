@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+        JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        p.Id
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    pt.Tags,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    rp.PostType
+FROM 
+    RankedPosts rp
+    JOIN PostTags pt ON rp.PostId = pt.PostId
+    JOIN PostVoteStatistics pvs ON rp.PostId = pvs.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostType, 
+    rp.ViewCount DESC;

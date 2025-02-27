@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_order_number, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_net_paid DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_order_number, ws_item_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(SUM(ws.total_net_paid), 0) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+top_items AS (
+    SELECT 
+        i_item_id,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        item_sales
+    WHERE 
+        total_sales > 0
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ca.ca_address_sk) AS address_count,
+    SUM(CASE WHEN ss.ss_net_paid > 100 THEN ss.ss_net_paid ELSE 0 END) AS high_value_sales,
+    AVG(ss.ss_net_profit) AS avg_net_profit,
+    ARRAY_AGG(DISTINCT ti.i_item_id) AS top_item_ids
+FROM 
+    customer_address ca
+LEFT JOIN 
+    store s ON ca.ca_address_sk = s.s_store_sk
+LEFT JOIN 
+    store_sales ss ON s.s_store_sk = ss.ss_store_sk
+LEFT JOIN 
+    top_items ti ON ti.i_item_id = ss.ss_item_sk
+WHERE 
+    ca.ca_state IS NOT NULL 
+    AND ca.ca_city IS NOT NULL
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT ca.ca_address_sk) > 5
+ORDER BY 
+    avg_net_profit DESC;

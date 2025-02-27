@@ -1,0 +1,60 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 10 THEN 1 END) AS Deletions,
+        COUNT(CASE WHEN V.VoteTypeId = 11 THEN 1 END) AS Undeletions
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(C) AS CommentCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(P.AnswerCount), 0) AS TotalAnswers,
+        COALESCE(SUM(P.CommentCount), 0) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalAnswers,
+    U.TotalComments,
+    V.UpVotes,
+    V.DownVotes,
+    V.Deletions,
+    V.Undeletions
+FROM 
+    UserPostStats U
+JOIN 
+    UserVoteStats V ON U.UserId = V.UserId
+ORDER BY 
+    U.TotalPosts DESC, V.UpVotes DESC;

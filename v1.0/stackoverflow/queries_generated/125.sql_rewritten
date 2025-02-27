@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS TotalPosts,
+        COALESCE(SUM(rp.Score), 0) AS TotalScore,
+        COALESCE(AVG(rp.Score), 0) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+TopPostScores AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalScore,
+        ups.AverageScore,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ups.TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        PostComments pc ON pc.PostId IN (SELECT PostId FROM RankedPosts WHERE OwnerUserId = ups.UserId)
+)
+SELECT 
+    fps.*,
+    CASE 
+        WHEN fps.ScoreRank <= 10 THEN 'Top Scorer'
+        WHEN fps.AverageScore > 10 THEN 'High Average Score'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    TopPostScores fps
+WHERE 
+    fps.TotalPosts > 5
+UNION
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    0 AS TotalPosts,
+    0 AS TotalScore,
+    0 AS AverageScore,
+    0 AS CommentCount,
+    999 AS ScoreRank 
+FROM 
+    Users u
+WHERE 
+    u.Reputation < 100
+EXCEPT 
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalScore,
+    AverageScore,
+    CommentCount,
+    ScoreRank
+FROM 
+    TopPostScores
+WHERE 
+    ScoreRank <= 10
+ORDER BY 
+    TotalScore DESC, UserId;

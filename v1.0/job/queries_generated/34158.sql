@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        ak.title,
+        ak.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+        JOIN aka_title ak ON ak.id = ml.linked_movie_id
+        JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.depth < 3  -- Limit recursion depth to avoid infinite loops
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_summary
+    FROM 
+        aka_title AT
+        JOIN movie_info mi ON AT.id = mi.movie_id
+    GROUP BY 
+        m.id
+),
+CastSummary AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(cr.nr_order) AS avg_order
+    FROM 
+        cast_info c
+        LEFT JOIN role_type cr ON c.role_id = cr.id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    CASE 
+        WHEN ms.info_summary IS NOT NULL THEN ms.info_summary
+        ELSE 'No additional info available' 
+    END AS info_summary,
+    cs.total_cast,
+    cs.avg_order,
+    ROW_NUMBER() OVER (ORDER BY mh.production_year DESC) AS movie_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieInfo ms ON mh.movie_id = ms.movie_id
+LEFT JOIN 
+    CastSummary cs ON mh.movie_id = cs.movie_id
+WHERE 
+    mh.depth > 1  -- Filter deeper movies only
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

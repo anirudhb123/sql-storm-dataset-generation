@@ -1,0 +1,55 @@
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM o_orderdate) AS order_year,
+        EXTRACT(MONTH FROM o_orderdate) AS order_month,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        order_year, order_month
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost) > 10000
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.c_name,
+    cr.r_name,
+    ms.order_year,
+    ms.order_month,
+    COALESCE(ms.total_sales, 0) AS sales,
+    ts.total_cost
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    MonthlySales ms ON cr.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31')
+LEFT JOIN 
+    TopSuppliers ts ON cr.c_custkey IN (SELECT DISTINCT l.l_suppkey FROM lineitem l WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31')
+WHERE 
+    cr.r_name IS NOT NULL
+ORDER BY 
+    cr.r_name, ms.order_year, ms.order_month DESC;

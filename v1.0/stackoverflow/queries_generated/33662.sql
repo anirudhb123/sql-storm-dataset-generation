@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RowNum
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24)  -- Edit Title, Edit Body, Edit Tags, Suggested Edit Applied
+),
+PostVotes AS (
+    SELECT 
+        v.PostId, 
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1
+                 WHEN vt.Name = 'DownMod' THEN -1 
+                 ELSE 0 END) AS VoteScore
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(*) as BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        b.Class = 2  -- Only Silver badges
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(u.DisplayName, 'Community') AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        COALESCE(RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC), 0) AS Rank,
+        COALESCE(pvh.VoteScore, 0) AS TotalVotes,
+        CASE 
+            WHEN r.Depth > 0 THEN 'Child'
+            ELSE 'Root'
+        END AS PostType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+    LEFT JOIN 
+        PostVotes pvh ON p.Id = pvh.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.Rank,
+    pd.TotalVotes,
+    ph.UserDisplayName AS LastEditor,
+    ph.Comment AS LastEditComment,
+    ph.CreationDate AS LastEditDate,
+    ub.BadgeCount AS UserBadgeCount
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    RecentEdits ph ON pd.PostId = ph.PostId AND ph.RowNum = 1
+LEFT JOIN 
+    UserBadges ub ON pd.OwnerUserId = ub.UserId
+WHERE 
+    pd.Score > 10 
+    AND (pd.CreationDate > NOW() - INTERVAL '1 year')
+    AND (pd.PostType = 'Root' OR pd.PostType = 'Child') 
+ORDER BY 
+    pd.Rank DESC, 
+    pd.CreationDate DESC;

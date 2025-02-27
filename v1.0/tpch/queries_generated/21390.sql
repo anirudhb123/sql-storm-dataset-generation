@@ -1,0 +1,58 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_partkey) AS distinct_items_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATEADD(month, -3, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NullCheck AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS total_customers,
+        MAX(s.total_supply_cost) AS max_supply_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        SupplierDetails s ON s.s_suppkey IS NULL OR s.total_supply_cost IS NOT NULL
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    nd.n_name,
+    COALESCE(nd.total_customers, 0) AS total_customers,
+    COALESCE(nd.max_supply_cost, 0) AS max_supply_cost,
+    COUNT(CASE WHEN od.total_order_value IS NULL THEN 1 END) AS null_order_count,
+    SUM(od.total_order_value) OVER (PARTITION BY nd.n_name) AS regional_order_total
+FROM 
+    NullCheck nd
+FULL OUTER JOIN 
+    OrderDetails od ON nd.total_customers = 0 AND nd.null_order_count IS NOT NULL
+WHERE 
+    UPPER(nd.n_name) LIKE '%A%'
+ORDER BY 
+    nd.n_name DESC
+LIMIT 100 OFFSET 0;

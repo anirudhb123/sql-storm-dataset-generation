@@ -1,0 +1,68 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN p.UpVotes IS NOT NULL THEN u.UpVotes ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN u.Location IS NOT NULL THEN 1 ELSE 0 END) AS UsersWithLocation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionsCount,
+        AnswersCount,
+        TotalUpVotes,
+        UsersWithLocation,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalUpVotes DESC) AS RankByUpVotes
+    FROM 
+        UserActivity
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId IN (8, 9)) AS TotalBounty
+    FROM 
+        Posts p 
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.QuestionsCount,
+    tu.AnswersCount,
+    tu.TotalUpVotes,
+    tu.UsersWithLocation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.TotalBounty,
+    RANK() OVER (PARTITION BY tu.UserId ORDER BY rp.CreationDate DESC) AS RankByRecentPosts
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPosts rp ON tu.UserId = rp.OwnerDisplayName
+WHERE 
+    tu.RankByPosts <= 10 OR tu.RankByUpVotes <= 10
+ORDER BY 
+    tu.RankByPosts, tu.RankByUpVotes, rp.CreationDate DESC;

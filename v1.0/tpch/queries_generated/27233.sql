@@ -1,0 +1,31 @@
+SELECT 
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty * p.p_retailprice) AS total_value,
+    r.r_name,
+    GROUP_CONCAT(DISTINCT c.c_name ORDER BY c.c_name SEPARATOR ', ') AS customer_names
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_retailprice > 100.00 AND 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' 
+GROUP BY 
+    p.p_partkey, r.r_name
+HAVING 
+    SUM(ps.ps_availqty) > 10
+ORDER BY 
+    total_value DESC;

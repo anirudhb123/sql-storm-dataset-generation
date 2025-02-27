@@ -1,0 +1,52 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  
+    UNION ALL
+    SELECT 
+        lm.linked_movie_id AS movie_id,
+        lt.title,
+        lt.production_year,
+        rm.movie_id AS parent_movie_id,
+        rm.level + 1
+    FROM 
+        movie_link lm
+    JOIN 
+        title lt ON lm.linked_movie_id = lt.id
+    JOIN 
+        RecursiveMovieHierarchy rm ON lm.movie_id = rm.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    rt.role AS role_name,
+    COUNT(DISTINCT movie.id) AS movie_count,
+    AVG(mk.keyword_length) AS avg_keyword_length,
+    MAX(m.production_year) AS latest_movie_year
+FROM 
+    RecursiveMovieHierarchy movie
+JOIN 
+    cast_info ci ON movie.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    movie_keyword mk ON movie.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL
+    AND rt.role IS NOT NULL
+GROUP BY 
+    ak.name, rt.role
+HAVING 
+    COUNT(DISTINCT movie.movie_id) > 1
+ORDER BY 
+    movie_count DESC, latest_movie_year DESC;

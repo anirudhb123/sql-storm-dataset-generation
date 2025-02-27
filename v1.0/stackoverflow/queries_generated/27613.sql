@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only questions (1) and answers (2)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.Body
+),
+
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 10 -- Top 10 posts per category
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.Tags,
+    tp.CommentCount,
+    tp.VoteCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    CASE 
+        WHEN tp.CommentCount > 5 THEN 'High Discussion'
+        WHEN tp.CommentCount BETWEEN 3 AND 5 THEN 'Moderate Discussion'
+        ELSE 'Low Discussion'
+    END AS DiscussionLevel,
+    CASE 
+        WHEN tp.Score > 20 THEN 'Highly Rated'
+        WHEN tp.Score BETWEEN 10 AND 20 THEN 'Moderately Rated'
+        ELSE 'Low Rating'
+    END AS RatingLevel
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

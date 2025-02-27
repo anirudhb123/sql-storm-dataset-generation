@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')))
+    GROUP BY 
+        p.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+Heartbeat AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS VoteBalance
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteCounts v ON p.Id = v.PostId
+),
+PostActivity AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        h.VoteBalance,
+        COALESCE(c.LastClosedDate, '1970-01-01') AS LastClosedDate,
+        COALESCE(c.CloseReasons, 'Not Applicable') AS CloseReasons,
+        RANK() OVER (ORDER BY r.Score DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY r.ViewCount DESC) AS ViewRank
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Heartbeat h ON r.PostId = h.PostId
+    LEFT JOIN 
+        ClosedPosts c ON r.PostId = c.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.VoteBalance,
+    p.LastClosedDate,
+    p.CloseReasons,
+    p.ScoreRank,
+    p.ViewRank,
+    CASE 
+        WHEN p.Score > 100 THEN 'High Score'
+        WHEN p.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN p.LastClosedDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Recently Closed'
+        ELSE 'Active'
+    END AS ActivityStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AggregatedTags
+FROM 
+    PostActivity p
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.TagsArray, 2, LENGTH(p.TagsArray)-2), '><')))
+GROUP BY 
+    p.PostId
+HAVING 
+    p.Score > 0 OR p.VoteBalance IS NOT NULL
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

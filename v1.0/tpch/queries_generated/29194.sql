@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, s.s_phone
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.total_parts,
+        s.total_supply_cost
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.rank <= 5
+),
+PartDetail AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        h.s_name AS supplier_name,
+        h.total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        HighValueSuppliers h ON ps.ps_suppkey = h.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    CONCAT('Retail Price: $', FORMAT(p.p_retailprice, 2)) AS formatted_price,
+    CONCAT('Supplied by: ', p.supplier_name, ' (Cost: $', FORMAT(p.total_supply_cost, 2), ')') AS supplier_details
+FROM 
+    PartDetail p
+WHERE 
+    p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) FROM part p2
+    )
+ORDER BY 
+    p.p_retailprice DESC;

@@ -1,0 +1,55 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        s.s_address AS supplier_address,
+        n.n_name AS nation_name,
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comment') AS supplier_comment,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, 
+        s.s_address, 
+        n.n_name, 
+        s.s_comment
+),
+PartDetails AS (
+    SELECT 
+        p.p_name AS part_name,
+        p.p_size AS part_size,
+        p.p_container AS part_container,
+        p.p_retailprice AS retail_price,
+        COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS part_comment
+    FROM part p
+    WHERE p.p_retailprice > 100.00
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipmode IN ('AIR', 'MAIL')
+    GROUP BY l.l_partkey
+)
+SELECT 
+    sd.supplier_name,
+    sd.supplier_address,
+    sd.nation_name,
+    pd.part_name,
+    pd.part_size,
+    pd.part_container,
+    pd.retail_price,
+    ls.total_revenue,
+    ls.total_orders,
+    sd.supplier_comment,
+    pd.part_comment
+FROM SupplierDetails sd
+JOIN PartDetails pd ON pd.part_size BETWEEN 10 AND 20
+JOIN LineItemSummary ls ON ls.l_partkey = pd.p_partkey
+ORDER BY 
+    ls.total_revenue DESC,
+    sd.supplier_name;

@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+), 
+PartSupplierCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+PartRegions AS (
+    SELECT 
+        p.p_partkey,
+        r.r_regionkey
+    FROM 
+        part p
+    LEFT JOIN 
+        nation n ON p.p_partkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+    WHERE 
+        p.p_size IS NOT NULL
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    rng.o_orderkey,
+    rng.o_orderdate,
+    pr.r_regionkey,
+    COALESCE(psc.supplier_count, 0) AS total_suppliers,
+    os.total_revenue,
+    CASE 
+        WHEN os.line_count > 10 THEN 'High Volume'
+        WHEN os.line_count BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume' 
+    END AS volume_category
+FROM 
+    RankedOrders rng 
+OUTER JOIN 
+    PartRegions pr ON rng.o_orderkey = pr.p_partkey 
+LEFT JOIN 
+    PartSupplierCounts psc ON pr.p_partkey = psc.ps_partkey 
+JOIN 
+    OrderSummary os ON rng.o_orderkey = os.o_orderkey 
+WHERE 
+    rng.order_rank = 1 
+    AND (rng.o_orderdate BETWEEN DATEADD(MONTH, -6, CURRENT_DATE) AND CURRENT_DATE)
+    AND (pr.r_regionkey IS NOT NULL OR psc.supplier_count IS NULL)
+ORDER BY 
+    os.total_revenue DESC NULLS LAST;

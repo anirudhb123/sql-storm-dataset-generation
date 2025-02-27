@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2023-01-01'
+        AND P.Score > 0
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+),
+PostWithVotes AS (
+    SELECT 
+        RP.*,
+        PVC.UpVotes,
+        PVC.DownVotes,
+        COALESCE(PVC.UpVotes - PVC.DownVotes, 0) AS NetVotes
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostVoteCounts PVC ON RP.PostId = PVC.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        *,
+        (CASE 
+            WHEN ViewCount IS NULL THEN 0 
+            ELSE ViewCount 
+         END) AS SafeViewCount 
+    FROM 
+        PostWithVotes
+)
+SELECT 
+    F.PostId,
+    F.Title,
+    F.CreationDate,
+    F.OwnerDisplayName,
+    F.Score,
+    F.UpVotes,
+    F.DownVotes,
+    F.NetVotes,
+    F.SafeViewCount
+FROM 
+    FilteredPosts F
+WHERE 
+    F.Rank <= 5
+    OR F.Score > 100
+ORDER BY 
+    F.NetVotes DESC,
+    F.Score DESC;

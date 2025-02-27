@@ -1,0 +1,58 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+recent_orders AS (
+    SELECT 
+        o.o_custkey, 
+        COUNT(*) AS recent_order_count
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    cs.c_custkey, 
+    cs.c_name, 
+    COALESCE(ro.recent_order_count, 0) AS recent_orders,
+    ss.total_cost,
+    ss.avg_supply_cost,
+    (CASE 
+        WHEN cs.total_spent > 1000 THEN 'High spender'
+        ELSE 'Regular spender'
+    END) AS spender_category
+FROM 
+    customer_orders cs
+LEFT JOIN 
+    recent_orders ro ON cs.c_custkey = ro.o_custkey
+LEFT JOIN 
+    supplier_summary ss ON ss.total_cost > (SELECT AVG(total_cost) FROM supplier_summary)
+WHERE 
+    ss.avg_supply_cost IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, 
+    recent_orders DESC;

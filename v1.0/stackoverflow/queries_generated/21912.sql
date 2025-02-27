@@ -1,0 +1,68 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostsWithScores AS (
+    SELECT 
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN p.LastEditDate < p.CreationDate THEN 1 ELSE 0 END) AS EditsBeforeCreation
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= DATE_TRUNC('year', NOW()) -- posts created in the current year
+    GROUP BY p.OwnerUserId, p.PostTypeId
+),
+RankedPosts AS (
+    SELECT 
+        OW.UserId,
+        OW.PostTypeId,
+        OW.DisallowedVotes,
+        RANK() OVER (PARTITION BY OW.UserId ORDER BY OW.TotalScore DESC, OW.CommentCount DESC) AS PostRank
+    FROM (
+        SELECT 
+            p.OwnerUserId AS UserId,
+            p.PostTypeId,
+            SUM(v.BountyAmount) AS DisallowedVotes,
+            ps.TotalScore,
+            ps.CommentCount
+        FROM Posts p
+        INNER JOIN Votes v ON p.Id = v.PostId
+        INNER JOIN PostsWithScores ps ON ps.OwnerUserId = p.OwnerUserId AND ps.PostTypeId = p.PostTypeId
+        WHERE v.VoteTypeId IN (1, 2, 6) -- focus on accepted answer, upvote, or close
+        GROUP BY p.OwnerUserId, p.PostTypeId, ps.TotalScore, ps.CommentCount
+    ) OW
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        COALESCE(pp.PostRank, 0) AS PostRank
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN RankedPosts pp ON u.Id = pp.UserId
+)
+SELECT 
+    f.DisplayName,
+    f.Reputation,
+    f.BadgeCount,
+    CASE 
+        WHEN f.PostRank > 0 THEN 'Active Contributor' 
+        ELSE 'Inactive' 
+    END AS ContributorStatus,
+    COALESCE(NULLIF(f.BadgeCount, 0), 'No Badges') AS BadgeStatus
+FROM FinalResults f
+WHERE f.Reputation > 1000
+ORDER BY f.PostRank DESC, f.Reputation DESC
+LIMIT 50;

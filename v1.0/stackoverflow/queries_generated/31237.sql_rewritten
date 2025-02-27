@@ -1,0 +1,61 @@
+WITH RECURSIVE UserReputation AS (
+    
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        Views,
+        UpVotes,
+        DownVotes,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+), RecentPosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        string_agg(t.TagName, ', ') AS Tags,
+        COALESCE( COUNT(c.Id), 0) AS CommentCount,
+        COALESCE( COUNT(v.Id), 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY p.Id
+), PopularTags AS (
+    
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    ur.Id AS UserId,
+    ur.Reputation,
+    ur.Views,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    rp.CommentCount,
+    rp.VoteCount,
+    pt.TagName AS PopularTag
+FROM UserReputation ur
+LEFT JOIN RecentPosts rp ON ur.Id = rp.OwnerUserId
+LEFT JOIN PopularTags pt ON pt.TagName = ANY (string_to_array(rp.Tags, ', '))
+WHERE ur.Reputation > 1000 
+  AND (rp.CommentCount > 5 OR rp.VoteCount > 10) 
+  AND rp.PostRank <= 3 
+ORDER BY ur.Reputation DESC, rp.Score DESC;

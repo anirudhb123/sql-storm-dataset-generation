@@ -1,0 +1,31 @@
+SELECT 
+    a.id AS aka_id,
+    a.name AS aka_name,
+    t.title AS movie_title,
+    t.production_year,
+    GROUP_CONCAT(DISTINCT c.person_id) AS cast_ids,
+    GROUP_CONCAT(DISTINCT c.nr_order) AS cast_order,
+    cct.kind AS cast_type,
+    cn.name AS company_name,
+    mi.info AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    comp_cast_type cct ON c.person_role_id = cct.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND c.nr_order IS NOT NULL
+GROUP BY 
+    a.id, a.name, t.id, t.title, t.production_year, cct.kind, cn.name, mi.info
+ORDER BY 
+    t.production_year DESC, t.title ASC;

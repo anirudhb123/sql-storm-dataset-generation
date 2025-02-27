@@ -1,0 +1,43 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+), SupplierInfo AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), TotalLineItems AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice) AS avg_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY l.l_partkey
+)
+SELECT
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    COALESCE(SI.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(OL.total_quantity, 0) AS total_quantity,
+    COALESCE(OL.avg_price, 0) AS avg_price,
+    CASE WHEN R.rn IS NOT NULL THEN 'Top Order' ELSE 'Other' END AS order_category
+FROM part p
+LEFT JOIN SupplierInfo SI ON p.p_partkey = SI.s_suppkey
+LEFT JOIN TotalLineItems OL ON p.p_partkey = OL.l_partkey
+LEFT JOIN RankedOrders R ON R.o_orderkey IN (
+    SELECT o_orderkey FROM orders WHERE o_orderdate >= '1996-01-01' AND o_orderdate < '1997-01-01'
+    AND o_orderstatus = 'O' AND o_totalprice > 1000
+)
+WHERE p.p_size > 10
+ORDER BY total_supply_cost DESC, avg_price DESC;

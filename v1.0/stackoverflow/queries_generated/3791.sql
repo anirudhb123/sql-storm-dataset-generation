@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount, -- Assuming VoteTypeId 2 is UpVote
+        SUM(v.VoteTypeId = 3) AS DownVoteCount -- Assuming VoteTypeId 3 is DownVote
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.CreationDate, rp.ViewCount, rp.OwnerDisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    COALESCE(pd.CommentCount, 0) AS TotalComments,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.OwnerDisplayName,
+    CASE 
+        WHEN pd.ViewCount > 1000 THEN 'High Views'
+        WHEN pd.ViewCount BETWEEN 500 AND 1000 THEN 'Medium Views'
+        ELSE 'Low Views'
+    END AS ViewCategory,
+    CASE 
+        WHEN pd.ScoreRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistory ph ON pd.PostId = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory 
+        WHERE PostId = pd.PostId
+    )
+WHERE 
+    (ph.PostHistoryTypeId IN (10, 11) OR ph.PostHistoryTypeId IS NULL)
+ORDER BY 
+    pd.Score DESC, pd.PostId;

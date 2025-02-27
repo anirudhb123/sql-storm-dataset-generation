@@ -1,0 +1,56 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.n_nationkey,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT 
+        s2.s_suppkey,
+        s2.s_name,
+        s2.s_acctbal,
+        s2.n_nationkey,
+        sh.level + 1
+    FROM supplier s2
+    JOIN supplier_hierarchy sh ON s2.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+total_orders AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem li ON p.p_partkey = li.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_name,
+    pd.total_revenue,
+    sh.s_name AS supplier_name,
+    sh.level,
+    CASE 
+        WHEN sh.s_name IS NULL THEN 'No Supplier'
+        ELSE sh.s_name
+    END AS hierarchy_supplier,
+    COALESCE(to.order_count, 0) AS customer_order_count,
+    ROUND(pd.total_revenue / NULLIF(to.total_spent, 0), 2) AS revenue_ratio
+FROM part_details pd
+LEFT JOIN supplier_hierarchy sh ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sh.s_suppkey)
+LEFT JOIN total_orders to ON to.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sh.n_nationkey LIMIT 1)
+WHERE pd.total_revenue > 10000
+ORDER BY pd.total_revenue DESC, sh.level;

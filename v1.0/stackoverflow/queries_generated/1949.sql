@@ -1,0 +1,67 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        MIN(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate,
+        MIN(CASE WHEN PH.PostHistoryTypeId = 10 THEN CR.Name END) AS CloseReason
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    GROUP BY 
+        PH.PostId
+),
+RankedPosts AS (
+    SELECT 
+        P.*,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS ActivityRank,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+)
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.TotalPosts,
+    UPS.Questions,
+    UPS.Answers,
+    UPS.TotalScore,
+    UPS.AvgViewCount,
+    UPS.TotalBadges,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score AS PostScore,
+    RP.ActivityRank,
+    CR.ClosedDate,
+    CR.CloseReason
+FROM 
+    UserPostStats UPS
+JOIN 
+    RankedPosts RP ON UPS.UserId = RP.OwnerUserId AND RP.ActivityRank <= 5
+LEFT JOIN 
+    CloseReasons CR ON RP.Id = CR.PostId
+WHERE 
+    UPS.TotalPosts > 5 
+    AND UPS.TotalScore > 10
+    AND (UPS.DisplayName IS NOT NULL OR UPS.Reputation > 100)
+ORDER BY 
+    UPS.TotalScore DESC, RP.LastActivityDate DESC
+LIMIT 100;

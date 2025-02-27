@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+        AND p.ViewCount > 100 -- Only consider popular questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+),
+FilteredHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ChangeDate,
+        pht.Name AS ChangeType,
+        ph.UserDisplayName AS ChangedBy
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Close, Reopen, Delete, Undelete actions
+),
+RecentChanges AS (
+    SELECT 
+        fh.PostId,
+        STRING_AGG(CONCAT(fh.ChangeType, ' by ', fh.ChangedBy, ' on ', TO_CHAR(fh.ChangeDate, 'YYYY-MM-DD HH24:MI:SS')), '; ') AS ChangeDetails
+    FROM 
+        FilteredHistory fh
+    GROUP BY 
+        fh.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rc.ChangeDetails
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentChanges rc ON rp.PostId = rc.PostId
+WHERE 
+    rp.ViewRank <= 10 -- Top 10 most viewed questions
+ORDER BY 
+    rp.ViewCount DESC;

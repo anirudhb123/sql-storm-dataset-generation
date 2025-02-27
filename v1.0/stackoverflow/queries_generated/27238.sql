@@ -1,0 +1,50 @@
+WITH ProcessedTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG( DISTINCT TRIM(T.TagName), ', ' ORDER BY T.TagName) AS ProcessedTags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS Tag 
+        ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = Tag
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(CAST(NULLIF(P.AcceptedAnswerId, -1) AS INT), 0) AS HasAcceptedAnswer,
+        COALESCE(PT.Name, 'No Type') AS PostType,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        COALESCE(BADGES, 0) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BADGES FROM Badges GROUP BY UserId) B ON P.OwnerUserId = B.UserId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.HasAcceptedAnswer,
+    PS.PostType,
+    PS.CommentCount,
+    PT.ProcessedTags,
+    PS.BadgeCount
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    ProcessedTags PT ON PS.PostId = PT.PostId
+WHERE 
+    PS.ViewCount > 1000 -- Filtering for popular posts
+ORDER BY 
+    PS.ViewCount DESC, -- Sort by view count
+    PS.CommentCount DESC; -- Further sort by comments

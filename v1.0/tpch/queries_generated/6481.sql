@@ -1,0 +1,57 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation, 
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+FinalStats AS (
+    SELECT 
+        ss.nation,
+        COUNT(DISTINCT ss.s_suppkey) AS supplier_count,
+        SUM(os.total_revenue) AS total_revenue,
+        SUM(ss.total_available) AS total_inventory,
+        AVG(ss.total_cost) AS avg_cost_per_supplier
+    FROM 
+        SupplierStats ss
+    LEFT JOIN 
+        OrderStats os ON ss.nation = os.nation
+    GROUP BY 
+        ss.nation
+)
+SELECT 
+    nation,
+    supplier_count,
+    total_revenue,
+    total_inventory,
+    avg_cost_per_supplier
+FROM 
+    FinalStats
+ORDER BY 
+    total_revenue DESC, 
+    supplier_count DESC;

@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName, P.OwnerUserId
+),
+
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        OwnerDisplayName,
+        Score,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT CT.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CT ON PH.Comment::int = CT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    TRP.Title,
+    TRP.OwnerDisplayName,
+    TRP.CreationDate,
+    TRP.Score,
+    TRP.UpVotes,
+    TRP.DownVotes,
+    COALESCE(CP.LastClosedDate, 'Never') AS LastClosedDate,
+    COALESCE(CP.CloseReasons, 'No close reasons') AS CloseReasons
+FROM 
+    TopRankedPosts TRP
+LEFT JOIN 
+    ClosedPosts CP ON TRP.PostId = CP.PostId
+ORDER BY 
+    TRP.Score DESC, TRP.CreationDate DESC;

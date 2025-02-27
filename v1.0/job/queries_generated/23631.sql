@@ -1,0 +1,79 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS year_count
+    FROM 
+        aka_title t
+)
+
+, cast_roles AS (
+    SELECT 
+        c.movie_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+)
+
+, movie_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    COALESCE(c.role_count, 0) AS number_of_roles,
+    r.year_rank,
+    r.year_count,
+    COALESCE(mk.keywords_list, 'No keywords') AS keywords,
+    CASE 
+        WHEN r.year_count = 0 THEN 'Unknown release year'
+        WHEN r.year_rank IS NULL THEN 'No ranking available'
+        ELSE CAST(r.year_rank AS VARCHAR) || ' of ' || CAST(r.year_count AS VARCHAR)
+    END AS rank_info
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    cast_roles c ON r.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keywords mk ON r.movie_id = mk.movie_id
+WHERE 
+    r.production_year IS NOT NULL AND 
+    (r.title LIKE '%A%' OR r.title LIKE '%B%' OR r.title IS NULL)
+ORDER BY 
+    r.production_year DESC, r.title
+FETCH FIRST 100 ROWS ONLY
+UNION ALL 
+SELECT 
+    NULL AS movie_id,
+    NULL AS title,
+    NULL AS production_year,
+    SUM(COALESCE(c.role_count, 0)) AS number_of_roles,
+    NULL,
+    NULL,
+    'Total roles' AS keywords,
+    NULL AS rank_info
+FROM 
+    cast_roles c
+WHERE 
+    c.movie_id IS NOT NULL
+HAVING 
+    COUNT(*) > 2;
+
+This SQL query demonstrates a complex interaction between multiple tables, employing common table expressions (CTEs) for organized data retrieval, while integrating outer joins, conditional logic, and set operations. It carries out a series of interesting calculations, such as counting roles and aggregating keywords for movies, while also accommodating NULL values with robust logic. It includes a UNION ALL operation to provide both detailed movie data and summary statistics for total roles, showcasing unusual SQL semantics by outputting NULL values in the context of aggregated results.

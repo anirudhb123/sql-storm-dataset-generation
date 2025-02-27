@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000
+),
+OrderStats AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           SUM(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS return_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+AverageRevenue AS (
+    SELECT AVG(total_revenue) AS avg_revenue
+    FROM OrderStats
+),
+SupplierStats AS (
+    SELECT sh.s_suppkey, sh.s_name, AVG(o.total_revenue) AS avg_order_revenue
+    FROM SupplierHierarchy sh
+    LEFT JOIN OrderStats o ON sh.s_suppkey = o.o_orderkey
+    GROUP BY sh.s_suppkey, sh.s_name
+)
+SELECT s.s_name, s.avg_order_revenue, r.r_name, n.n_name,
+       CASE 
+           WHEN s.avg_order_revenue IS NULL THEN 'No Data' 
+           ELSE ROUND(s.avg_order_revenue - (SELECT avg_revenue FROM AverageRevenue), 2) 
+       END AS revenue_difference,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(CASE WHEN s.s_nationkey IS NULL THEN 1 ELSE 0 END) AS null_nation_count
+FROM SupplierStats s
+LEFT JOIN supplier sup ON s.s_suppkey = sup.s_suppkey
+LEFT JOIN nation n ON sup.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN orders o ON sup.s_suppkey = o.o_orderkey
+GROUP BY s.s_name, s.avg_order_revenue, r.r_name, n.n_name
+ORDER BY revenue_difference DESC;

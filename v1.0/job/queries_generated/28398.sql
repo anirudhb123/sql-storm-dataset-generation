@@ -1,0 +1,57 @@
+WITH movie_actor_info AS (
+    SELECT 
+        a.name AS actor_name,
+        a.id AS actor_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL 
+        AND t.production_year >= 2000
+    GROUP BY 
+        a.id, t.title, t.production_year
+), 
+actor_movie_count AS (
+    SELECT 
+        actor_id, 
+        COUNT(DISTINCT movie_title) AS movie_count 
+    FROM 
+        movie_actor_info
+    GROUP BY 
+        actor_id
+), 
+top_actors AS (
+    SELECT 
+        actor_name,
+        movie_count
+    FROM 
+        movie_actor_info
+    JOIN 
+        actor_movie_count ON movie_actor_info.actor_id = actor_movie_count.actor_id
+    ORDER BY 
+        movie_count DESC 
+    LIMIT 10
+)
+
+SELECT 
+    t.movie_title,
+    t.production_year,
+    a.actor_name,
+    a.movie_count,
+    a.roles
+FROM 
+    movie_actor_info t
+JOIN 
+    top_actors a ON t.actor_id = a.actor_id
+ORDER BY 
+    t.production_year DESC, 
+    a.actor_name;

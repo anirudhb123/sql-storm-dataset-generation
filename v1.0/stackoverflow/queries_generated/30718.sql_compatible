@@ -1,0 +1,67 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, Location, CreationDate, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM Users
+    WHERE Reputation > 0
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate AS PostCreationDate,
+           p.Score, 
+           p.ViewCount, 
+           COALESCE(a.Id, 0) AS AcceptedAnswerId,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(v.Id) AS VoteCount,
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN STRING_SPLIT(p.Tags, ',') AS t ON t.value = t.TagName
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, a.Id
+),
+PostHistorySummary AS (
+    SELECT ph.PostId, 
+           MAX(ph.CreationDate) AS LastEditDate, 
+           MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+           COUNT(ph.Id) AS EditCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT u.DisplayName, 
+       u.Reputation, 
+       u.Location,
+       ur.UserRank,
+       pd.PostId, 
+       pd.Title,
+       pd.PostCreationDate,
+       pd.Score,
+       pd.ViewCount,
+       pd.CommentCount,
+       pd.VoteCount,
+       phs.LastEditDate,
+       phs.ClosedDate,
+       CASE 
+           WHEN phs.ClosedDate IS NOT NULL THEN 'Closed' 
+           ELSE 'Open' 
+       END AS PostStatus,
+       CASE 
+           WHEN pd.AcceptedAnswerId > 0 THEN 'Yes' 
+           ELSE 'No' 
+       END AS HasAcceptedAnswer,
+       CASE 
+           WHEN pd.Tags IS NULL THEN 'No Tags' 
+           ELSE pd.Tags 
+       END AS Tags
+FROM UserReputation ur
+JOIN Users u ON ur.Id = u.Id
+JOIN PostDetails pd ON pd.PostId IN (
+    SELECT DISTINCT ph.PostId
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+)
+LEFT JOIN PostHistorySummary phs ON pd.PostId = phs.PostId
+ORDER BY ur.UserRank, pd.ViewCount DESC;

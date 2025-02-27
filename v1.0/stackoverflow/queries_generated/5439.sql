@@ -1,0 +1,81 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.FavoriteCount) AS TotalFavorites
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+),
+CombinedStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.TotalComments,
+        us.UpVotes,
+        us.DownVotes,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        ps.PostType,
+        ps.PostCount,
+        ps.AvgScore,
+        ps.TotalViews,
+        ps.TotalFavorites
+    FROM 
+        UserStats us
+    CROSS JOIN 
+        PostStats ps
+)
+SELECT
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalComments,
+    UpVotes,
+    DownVotes,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    PostType,
+    PostCount,
+    AvgScore,
+    TotalViews,
+    TotalFavorites
+FROM 
+    CombinedStats
+ORDER BY 
+    Reputation DESC, TotalPosts DESC, UpVotes DESC;

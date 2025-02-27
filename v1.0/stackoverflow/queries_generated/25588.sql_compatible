@@ -1,0 +1,62 @@
+
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+TagStats AS (
+    SELECT 
+        t.Tag AS TagName,
+        COUNT(pt.PostId) AS TagPostCount,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueUserCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        PostTags pt
+    JOIN 
+        Tags t ON pt.Tag = t.TagName
+    LEFT JOIN 
+        Posts p ON pt.PostId = p.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.Tag
+    ORDER BY 
+        TagPostCount DESC
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        TagPostCount, 
+        UniqueUserCount, 
+        AvgReputation, 
+        ROW_NUMBER() OVER (ORDER BY TagPostCount DESC) AS Rank
+    FROM 
+        TagStats
+    WHERE 
+        TagPostCount > 0
+)
+SELECT 
+    tt.TagName,
+    tt.TagPostCount,
+    tt.UniqueUserCount,
+    tt.AvgReputation,
+    COUNT(DISTINCT ph.Id) AS HistoryCount,
+    ARRAY_AGG(DISTINCT CONCAT(u.DisplayName, ' (', u.Reputation, ')')) AS Editors
+FROM 
+    TopTags tt
+LEFT JOIN 
+    Posts p ON p.Id IN (SELECT pt.PostId FROM PostTags pt WHERE pt.Tag = tt.TagName)
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    Users u ON ph.UserId = u.Id
+WHERE 
+    tt.Rank <= 10  
+GROUP BY 
+    tt.TagName, tt.TagPostCount, tt.UniqueUserCount, tt.AvgReputation
+ORDER BY 
+    tt.TagPostCount DESC;

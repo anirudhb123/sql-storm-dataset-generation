@@ -1,0 +1,94 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ext_sales_price > (
+            SELECT 
+                AVG(ws2.ext_sales_price) 
+            FROM 
+                web_sales ws2 
+            WHERE 
+                ws2.ws_web_site_sk = ws.ws_web_site_sk
+        )
+),
+InventoryStatus AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inventory_date_sk,
+        CASE 
+            WHEN SUM(inv.inv_quantity_on_hand) > 100 THEN 'In Stock'
+            WHEN SUM(inv.inv_quantity_on_hand) BETWEEN 1 AND 100 THEN 'Low Stock'
+            ELSE 'Out of Stock'
+        END AS stock_status
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk, 
+        inv.inventory_date_sk
+),
+RecentReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns 
+    WHERE 
+        sr_returned_date_sk = (
+            SELECT MAX(sr_returned_date_sk) FROM store_returns
+        )
+    GROUP BY 
+        sr_customer_sk
+),
+CombinedSales AS (
+    SELECT 
+        cad.c_city,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(invs.stock_status, 'Unknown') AS stock_status
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer cad ON ws.ws_bill_customer_sk = cad.c_customer_sk
+    LEFT JOIN 
+        RecentReturns rs ON ws.ws_bill_customer_sk = rs.sr_customer_sk
+    LEFT JOIN 
+        InventoryStatus invs ON ws.ws_item_sk = invs.inv_item_sk
+    WHERE 
+        cad.c_country = 'USA' 
+        AND ws.ws_sold_date_sk BETWEEN 2451545 AND 2451547
+),
+FinalResults AS (
+    SELECT 
+        cs.c_city, 
+        SUM(cs.ws_ext_sales_price) AS total_sales,
+        AVG(cs.total_returns) AS avg_returns,
+        COUNT(DISTINCT cs.ws_order_number) AS order_count,
+        MAX(cs.stock_status) AS most_common_stock_status
+    FROM 
+        CombinedSales cs
+    GROUP BY 
+        cs.c_city
+)
+SELECT 
+    f.c_city,
+    f.total_sales,
+    f.avg_returns,
+    f.order_count,
+    f.most_common_stock_status
+FROM 
+    FinalResults f
+WHERE 
+    f.avg_returns IS NOT NULL
+    AND f.order_count > 10
+    ORDER BY 
+    f.total_sales DESC
+LIMIT 10;

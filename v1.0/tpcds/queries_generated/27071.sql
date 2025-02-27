@@ -1,0 +1,64 @@
+
+WITH Customer_Info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Item_Sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number, ws.ws_item_sk
+),
+Sales_Info AS (
+    SELECT 
+        ci.customer_name,
+        ci.full_address,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_zip,
+        is.item_sk,
+        is.total_quantity,
+        is.total_sales
+    FROM 
+        Customer_Info ci
+    JOIN 
+        Item_Sales is ON ci.c_customer_id = is.ws_order_number  -- Assuming ws_order_number relates to customer_id for this example
+)
+SELECT 
+    customer_name,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    item_sk,
+    total_quantity,
+    total_sales,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value Customer'
+        WHEN total_sales BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer' 
+    END AS customer_value_segment
+FROM 
+    Sales_Info
+ORDER BY 
+    total_sales DESC;

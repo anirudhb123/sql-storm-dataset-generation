@@ -1,0 +1,28 @@
+-- Performance benchmarking query to analyze user activity and post engagement over the last year
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(p.Id) AS PostCount,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    SUM(b.Class = 1) AS GoldBadges,
+    SUM(b.Class = 2) AS SilverBadges,
+    SUM(b.Class = 3) AS BronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.CreationDate >= NOW() - INTERVAL '1 year'
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    u.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    PostCount DESC, UpVotes DESC;

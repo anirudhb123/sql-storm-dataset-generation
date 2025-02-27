@@ -1,0 +1,82 @@
+
+WITH RECURSIVE SalesTrends AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sold_date_sk, 
+        ws_sales_price, 
+        1 AS trend_level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        cs_sold_date_sk, 
+        cs_sales_price, 
+        trend_level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        trend_level < 3
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        COALESCE(cs.total_web_sales, 0) AS web_sales,
+        COALESCE(cs.total_catalog_sales, 0) AS catalog_sales,
+        COALESCE(cs.total_web_sales, 0) + COALESCE(cs.total_catalog_sales, 0) AS total_sales,
+        DENSE_RANK() OVER (ORDER BY COALESCE(cs.total_web_sales, 0) + COALESCE(cs.total_catalog_sales, 0) DESC) AS rank
+    FROM 
+        CustomerSales cs
+),
+TopCustomers AS (
+    SELECT *
+    FROM SalesSummary
+    WHERE rank <= 10
+),
+SalesTrendsFinal AS (
+    SELECT 
+        s.ws_item_sk,
+        COUNT(*) AS trend_count,
+        AVG(s.ws_sales_price) AS avg_price
+    FROM 
+        SalesTrends s
+    GROUP BY 
+        s.ws_item_sk
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.web_sales,
+    tc.catalog_sales,
+    tc.total_sales,
+    st.avg_price,
+    CASE 
+        WHEN tc.total_sales IS NULL THEN 'No sales'
+        ELSE 'Active sales'
+    END AS sales_status
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesTrendsFinal st ON tc.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = st.ws_item_sk LIMIT 1)
+ORDER BY 
+    tc.total_sales DESC

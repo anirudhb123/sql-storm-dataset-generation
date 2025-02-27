@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '<>')) AS tag ON true 
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        SUM(b.Class = 1::smallint) AS GoldBadges,
+        SUM(b.Class = 2::smallint) AS SilverBadges,
+        SUM(b.Class = 3::smallint) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalScore,
+    us.AvgViewCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Score AS PostScore,
+    rp.ViewCount AS PostViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.Tags
+FROM 
+    UserStatistics us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    rp.PostRank <= 3 -- Get top 3 posts for each user
+ORDER BY 
+    us.TotalScore DESC, us.DisplayName, rp.PostScore DESC;

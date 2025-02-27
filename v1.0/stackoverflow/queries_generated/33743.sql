@@ -1,0 +1,86 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.OwnerUserId,
+        p2.Title,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE rp ON p2.ParentId = rp.PostId
+),
+UserVoteTotal AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(ph.CloseReasonInHistory, 0) AS CloseCount,
+        COALESCE(p_answer.AcceptedAnswerId, NULL) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT ph.PostId, COUNT(*) AS CloseReasonInHistory
+        FROM PostHistory ph 
+        WHERE ph.PostHistoryTypeId = 10 -- Count of posts closed
+        GROUP BY ph.PostId) ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UserVoteTotal v ON p.OwnerUserId = v.UserId
+    LEFT JOIN 
+        Posts p_answer ON p_answer.Id = p.AcceptedAnswerId
+    GROUP BY 
+        p.Id, p.Title, p.Score, ph.CloseReasonInHistory, p_answer.AcceptedAnswerId
+)
+SELECT 
+    us.DisplayName,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.CommentCount,
+    ps.TotalCommentScore,
+    ps.AcceptedAnswerId,
+    ps.CloseCount,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    rp.Level AS PostLevel
+FROM 
+    PostSummary ps
+LEFT JOIN 
+    Users us ON ps.PostId = us.Id
+LEFT JOIN 
+    RecursivePostCTE rp ON ps.PostId = rp.PostId
+WHERE 
+    ps.Score > 5 -- Filter only those with a score greater than 5
+    AND (ps.TotalUpVotes > ps.TotalDownVotes OR ps.CloseCount = 0)
+ORDER BY 
+    ps.CloseCount DESC, ps.Score DESC;

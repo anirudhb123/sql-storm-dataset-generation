@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mt.id) AS cast_count
+    FROM 
+        aka_title mt
+        LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+        LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_year <= 10
+        AND rm.production_year BETWEEN 1990 AND 2000
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    fm.cast_count,
+    CASE 
+        WHEN fm.cast_count > 5 THEN 'Ensemble Cast'
+        WHEN fm.cast_count BETWEEN 3 AND 5 THEN 'Moderate Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_description
+FROM 
+    FilteredMovies fm
+LEFT JOIN MovieKeywords mk ON fm.movie_id = mk.movie_id
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

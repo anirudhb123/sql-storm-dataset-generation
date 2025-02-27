@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.episode_of_id > 105897 AND ci.role_id < 6 AND t.season_nr IN (2009, 21, 23, 50, 68) AND n.md5sum < 'feafabc553f6c65d7f782fa24778d64c' AND t.production_year IS NOT NULL AND t.phonetic_code < 'Y4154' AND n.imdb_index IS NOT NULL;

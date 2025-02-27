@@ -1,0 +1,66 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+TopReturningCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        cr.total_returns,
+        cr.total_return_amt,
+        RANK() OVER (ORDER BY cr.total_return_amt DESC) AS rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer_demographics cd ON cr.sr_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cr.total_returns > 0
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_sales) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        t.rc_customer_sk,
+        COALESCE(s.total_sales, 0) AS total_sales
+    FROM 
+        TopReturningCustomers t
+    LEFT JOIN 
+        SalesData s ON t.sr_customer_sk = s.ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cs.total_sales,
+    CASE 
+        WHEN cs.total_sales > 1000 THEN 'High Value Customer'
+        WHEN cs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_segment
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerSales cs ON c.c_customer_sk = cs.rc_customer_sk
+WHERE 
+    c.c_birth_year < 1980 AND 
+    (c.c_preferred_cust_flag = 'Y' OR cs.total_sales > 0)
+ORDER BY 
+    customer_value_segment DESC, 
+    cs.total_sales DESC;

@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+),
+TotalSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < CURRENT_DATE
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(ts.total_sales) AS avg_sales,
+    MAX(sd.total_supply_cost) AS max_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    TotalSales ts ON ts.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders o WHERE o.rn <= 10) 
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders)
+    )
+WHERE 
+    c.c_acctbal IS NOT NULL 
+    AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_customers DESC, avg_sales DESC NULLS LAST;

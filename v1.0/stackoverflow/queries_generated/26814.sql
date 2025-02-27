@@ -1,0 +1,76 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag(tagname) ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag.tagname
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1  -- Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+    GROUP BY 
+        p.Id
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        ue.CommentCount,
+        ue.UpVotes,
+        ue.DownVotes,
+        rp.Tags,
+        GREATEST(ue.UpVotes - ue.DownVotes, 0) AS NetVoteScore
+    FROM 
+        RecentPosts rp
+    JOIN 
+        UserEngagement ue ON rp.PostId = ue.PostId
+)
+SELECT 
+    pa.*,
+    CASE 
+        WHEN pa.AnswerCount = 0 THEN 'No Answers Yet'
+        WHEN pa.NetVoteScore > 10 THEN 'High Engagement'
+        WHEN pa.NetVoteScore BETWEEN 1 AND 10 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementStatus
+FROM 
+    PostAnalytics pa
+ORDER BY 
+    pa.LastActivityDate DESC;

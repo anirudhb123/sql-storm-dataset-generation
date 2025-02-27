@@ -1,0 +1,60 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+top_sales AS (
+    SELECT 
+        ss.c_custkey,
+        ss.c_name,
+        ss.total_sales
+    FROM 
+        sales_summary ss
+    WHERE 
+        ss.sales_rank <= 5
+),
+nation_data AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    nd.supplier_count,
+    CASE 
+        WHEN COALESCE(ts.total_sales, 0) > 10000 THEN 'High Sales'
+        WHEN COALESCE(ts.total_sales, 0) BETWEEN 5000 AND 10000 THEN 'Moderate Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    nation_data nd
+LEFT JOIN 
+    top_sales ts ON nd.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = ts.c_custkey LIMIT 1)
+ORDER BY 
+    nd.n_name
+UNION
+SELECT 
+    'Total' AS nation_name,
+    SUM(COALESCE(ts.total_sales, 0)) AS total_sales,
+    SUM(nd.supplier_count) AS supplier_count,
+    NULL AS sales_category
+FROM 
+    nation_data nd
+LEFT JOIN 
+    top_sales ts ON nd.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = ts.c_custkey LIMIT 1);

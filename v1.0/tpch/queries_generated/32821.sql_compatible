@@ -1,0 +1,71 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_custkey = (SELECT MIN(c_custkey) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.n_nationkey = ch.c_nationkey
+    WHERE ch.level < 3
+),
+TotalOrderValue AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+    FROM part p
+    WHERE p.p_size > 10 AND p.p_retailprice < (
+        SELECT AVG(p2.p_retailprice) FROM part p2
+    )
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+NationDetails AS (
+    SELECT n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    ch.c_name AS customer_name,
+    ch.c_acctbal AS account_balance,
+    ov.total_value AS order_value,
+    ps.p_name AS part_name,
+    ns.n_name AS nation_name,
+    ns.supplier_count,
+    RANK() OVER (ORDER BY ov.total_value DESC) AS global_order_rank
+FROM CustomerHierarchy ch
+LEFT JOIN TotalOrderValue ov ON ch.c_custkey = ov.o_custkey
+LEFT JOIN FilteredParts ps ON ps.p_partkey = (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty = (
+        SELECT MAX(ps2.ps_availqty) 
+        FROM partsupp ps2
+    )
+    LIMIT 1
+)
+JOIN NationDetails ns ON ch.c_nationkey = ns.n_nationkey
+WHERE ch.c_acctbal IS NOT NULL 
+AND ch.c_acctbal >= (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal IS NOT NULL)
+GROUP BY 
+    ch.c_name, 
+    ch.c_acctbal, 
+    ov.total_value, 
+    ps.p_name, 
+    ns.n_name, 
+    ns.supplier_count
+ORDER BY global_order_rank, ch.c_name;

@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.id) AS rank_per_year
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT CONCAT(p.name, ' (', rt.role, ')'), '; ') AS cast_list
+    FROM 
+        cast_info c
+    JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+    GROUP BY 
+        c.movie_id
+),
+MovieInformation AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No additional info') AS additional_info,
+        m.production_year,
+        m.kind_id
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    mt.title AS movie_title,
+    mt.production_year,
+    mt.additional_info,
+    cd.total_cast,
+    cd.cast_list
+FROM 
+    MovieInformation mt
+LEFT JOIN 
+    CastDetails cd ON mt.movie_id = cd.movie_id
+JOIN 
+    RankedTitles rt ON mt.title_id = rt.title_id
+WHERE 
+    rt.rank_per_year <= 5  
+ORDER BY 
+    mt.production_year DESC, 
+    cd.total_cast DESC;

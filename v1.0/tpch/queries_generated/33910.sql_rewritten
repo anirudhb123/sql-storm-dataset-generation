@@ -1,0 +1,35 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, 1 AS order_level
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.orderkey, o.custkey, o.totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderkey > oh.o_orderkey
+    WHERE oh.order_level < 5
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+LineItemSummary AS (
+    SELECT li.l_orderkey, 
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+           COUNT(li.l_linenumber) AS total_items,
+           RANK() OVER (PARTITION BY li.l_orderkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+    FROM lineitem li
+    GROUP BY li.l_orderkey
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count, 
+       COALESCE(SUM(lis.total_revenue), 0) AS total_revenue,
+       AVG(s.s_acctbal) AS avg_supplier_balance,
+       MAX(s.s_acctbal) AS max_supplier_balance
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON s.s_suppkey = c.c_nationkey
+LEFT JOIN LineItemSummary lis ON lis.l_orderkey IN (SELECT o_orderkey FROM OrderHierarchy)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0 AND MAX(s.s_acctbal) IS NOT NULL
+ORDER BY total_revenue DESC;

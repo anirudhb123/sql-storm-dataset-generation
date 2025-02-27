@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_manager, 
+        1 AS level
+    FROM 
+        store
+    WHERE 
+        s_manager IS NOT NULL
+    UNION ALL
+    SELECT 
+        s.store_sk,
+        s.s_store_name,
+        s.manager,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.s_manager = s.s_manager
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_sold
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+return_summary AS (
+    SELECT 
+        cr_returning_customer_sk AS customer_sk,
+        SUM(cr_return_amount) AS total_returns,
+        COUNT(cr_order_number) AS total_return_orders
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+final_report AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.total_orders, 0) AS total_orders,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_orders, 0) AS total_return_orders,
+        (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_returns, 0)) AS net_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        sales_summary ss ON c.c_customer_sk = ss.ws_bill_customer_sk
+    LEFT JOIN 
+        return_summary rs ON c.c_customer_sk = rs.customer_sk
+)
+SELECT 
+    f.c_customer_id,
+    f.total_sales,
+    f.total_orders,
+    f.total_returns,
+    f.total_return_orders,
+    f.net_sales,
+    sh.s_store_name,
+    sh.level
+FROM 
+    final_report f
+LEFT JOIN 
+    sales_hierarchy sh ON f.c_customer_id = sh.s_manager
+WHERE 
+    f.net_sales > 1000
+ORDER BY 
+    f.net_sales DESC, 
+    sh.level DESC
+LIMIT 50;

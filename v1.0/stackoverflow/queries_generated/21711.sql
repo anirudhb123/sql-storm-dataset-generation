@@ -1,0 +1,109 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS Answers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+VoteCount AS (
+    SELECT 
+        V.UserId, 
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.UserId
+),
+RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS ClosedDate, 
+        P.Title AS PostTitle,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+CombinedStats AS (
+    SELECT 
+        UB.UserId,
+        UB.DisplayName,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.Questions, 0) AS TotalQuestions,
+        COALESCE(PS.Answers, 0) AS TotalAnswers,
+        COALESCE(V.TotalVotes, 0) AS TotalVotes,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        UserBadges UB
+    LEFT JOIN 
+        PostStats PS ON UB.UserId = PS.OwnerUserId
+    LEFT JOIN 
+        VoteCount V ON UB.UserId = V.UserId
+)
+SELECT 
+    CB.DisplayName,
+    CB.TotalPosts,
+    CB.TotalQuestions,
+    CB.TotalAnswers,
+    CB.TotalVotes,
+    CB.BadgeCount,
+    CB.GoldBadges,
+    CB.SilverBadges,
+    CB.BronzeBadges,
+    RANK() OVER (ORDER BY CB.BadgeCount DESC) AS BadgeRank,
+    COALESCE(
+        (SELECT COUNT(*) 
+         FROM ClosedPosts CP 
+         WHERE CP.ClosedDate > CURRENT_DATE - INTERVAL '30 DAYS' 
+         AND CP.PostId IN (SELECT Id FROM Posts P WHERE P.OwnerUserId = CB.UserId)), 
+        0) AS RecentClosedPosts
+FROM 
+    CombinedStats CB
+WHERE 
+    CB.BadgeCount > 5
+    AND (CB.TotalPosts > 10 OR CB.TotalVotes > 20)
+ORDER BY 
+    CB.BadgeRank, CB.DisplayName;

@@ -1,0 +1,64 @@
+
+WITH classified_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COALESCE(keyword_counts.keyword_count, 0) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(*) AS keyword_count
+        FROM 
+            movie_keyword mk
+        GROUP BY 
+            mk.movie_id
+    ) AS keyword_counts ON t.id = keyword_counts.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT n.name, ', ' ORDER BY n.name) AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    ct.title_id,
+    ct.title,
+    ct.production_year,
+    ct.keyword,
+    ct.keyword_count,
+    COALESCE(cd.total_cast, 0) AS total_cast,
+    cd.cast_names,
+    LEAST(ct.keyword_count, COALESCE(cd.total_cast, 0)) AS min_count,
+    CASE 
+        WHEN ct.production_year < (DATE '2024-10-01' - INTERVAL '10 years') THEN 'Classic'
+        WHEN ct.production_year >= (DATE '2024-10-01' - INTERVAL '10 years') AND ct.production_year < DATE '2024-10-01' THEN 'Recent'
+        ELSE 'Upcoming'
+    END AS time_frame
+FROM 
+    classified_titles ct
+LEFT JOIN 
+    cast_details cd ON ct.title_id = cd.movie_id
+WHERE 
+    (ct.keyword_count > 3 OR cd.total_cast IS NULL)
+    AND (cd.total_cast IS NULL OR cd.total_cast >= 5)
+ORDER BY 
+    ct.production_year ASC, ct.keyword_count DESC
+FETCH FIRST 50 ROWS ONLY;

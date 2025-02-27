@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+CombinedStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        rp.CommentCount,
+        us.BadgeCount,
+        us.UpVotes,
+        us.DownVotes,
+        us.TotalBounty,
+        pv.VoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+    JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+)
+SELECT 
+    cs.PostId,
+    cs.Title,
+    cs.ViewCount,
+    cs.Score,
+    cs.AnswerCount,
+    cs.CommentCount,
+    cs.BadgeCount,
+    cs.UpVotes,
+    cs.DownVotes,
+    cs.TotalBounty,
+    cs.VoteCount
+FROM 
+    CombinedStats cs
+WHERE 
+    cs.Rank <= 5
+ORDER BY 
+    cs.Score DESC, cs.ViewCount DESC;

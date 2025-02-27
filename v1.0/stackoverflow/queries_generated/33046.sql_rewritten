@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days'
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostRank,
+    rp.TotalComments,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    cp.LastClosed,
+    au.UserId,
+    au.TotalBounty,
+    au.AvgReputation,
+    CASE 
+        WHEN cp.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    ActiveUsers au ON rp.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = au.UserId
+    )
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.PostRank, rp.ViewCount DESC;

@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_size,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COUNT(DISTINCT a.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.title IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_names,
+        rm.total_cast,
+        CASE 
+            WHEN rm.rank_by_cast_size < 5 THEN 'Small Cast'
+            WHEN rm.rank_by_cast_size BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Large Cast'
+        END AS cast_size_category
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.total_cast > 0
+),
+DistinctKeywords AS (
+    SELECT 
+        DISTINCT mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_names,
+    fm.cast_size_category,
+    COUNT(DISTINCT k.keyword) AS distinct_keyword_count,
+    CASE 
+        WHEN COUNT(DISTINCT k.keyword) > 10 THEN 'High'
+        WHEN COUNT(DISTINCT k.keyword) BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_diversity,
+    COALESCE(CAST(NULLIF(fm.cast_names, '') AS text), 'No Cast Information') AS cast_info
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    DistinctKeywords k ON fm.movie_id = k.movie_id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.cast_names, fm.cast_size_category
+HAVING 
+    fm.production_year >= 2000 AND 
+    (CAST(SUBSTRING(fm.title FROM '[0-9]+') AS integer) IS NOT NULL OR fm.cast_size_category = 'Large Cast')
+ORDER BY 
+    fm.production_year DESC, 
+    keyword_diversity DESC, 
+    fm.total_cast DESC;
+

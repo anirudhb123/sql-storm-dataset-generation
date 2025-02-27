@@ -1,0 +1,125 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        jsonb_agg(DISTINCT tag.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName) AS tag ON true
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph 
+    INNER JOIN 
+        CloseReasonTypes cr ON cr.Id = ph.Comment::int 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    COALESCE(cb.CloseDate, 'No Closure'::timestamp) AS ClosureDate,
+    COALESCE(cb.CloseReason, 'N/A'::varchar) AS CloseReason,
+    ub.TotalBadges,
+    ub.HighestBadgeClass,
+    STRING_AGG(DISTINCT p.Tags::text, ', ') AS AssociatedTags
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    ClosedPostDetails cb ON p.PostId = cb.PostId
+LEFT JOIN 
+    UserBadges ub ON p.PostId IN (SELECT 
+                                        ParentId 
+                                    FROM 
+                                        Posts 
+                                    WHERE 
+                                        OwnerUserId = ub.UserId AND 
+                                        PostTypeId = 2) 
+WHERE 
+    p.Rank = 1
+GROUP BY 
+    p.PostId, cb.CloseDate, cb.CloseReason, ub.TotalBadges, ub.HighestBadgeClass
+ORDER BY 
+    p.Score DESC NULLS LAST,
+    p.ViewCount DESC NULLS FIRST
+LIMIT 50 OFFSET 0;
+
+SELECT 
+    COUNT(*) AS TotalPosts
+FROM 
+    Posts
+WHERE 
+    Score = 0 AND 
+    OwnerUserId IS NOT NULL;
+
+WITH RecursiveTags AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        WikiPostId,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly IS NULL OR IsModeratorOnly = 0
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.WikiPostId,
+        rt.Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        RecursiveTags rt ON t.WikiPostId = rt.Id
+)
+SELECT 
+    MAX(Level) AS MaxTagLevel
+FROM 
+    RecursiveTags;
+
+WITH UniqueComments AS (
+    SELECT 
+        DISTINCT ON (Text) 
+        Id, PostId, Text
+    FROM 
+        Comments 
+    ORDER BY 
+        PostId, CreationDate DESC
+)
+SELECT 
+    COUNT(*) AS UniqueCommentCount
+FROM 
+    UniqueComments;

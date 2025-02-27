@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate > '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+RankedOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.total_lineitem_value,
+        od.lineitem_count,
+        RANK() OVER (ORDER BY od.total_lineitem_value DESC) AS order_rank
+    FROM 
+        OrderDetails od
+)
+SELECT 
+    ns.n_name,
+    ss.s_name,
+    COALESCE(os.total_lineitem_value, 0) AS total_value,
+    COALESCE(ss.total_supply_value, 0) AS supplier_value
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier ss ON ns.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    RankedOrders os ON os.o_orderkey = ss.s_suppkey
+WHERE 
+    ns.n_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE 'A%')
+    AND ss.total_parts > 5
+ORDER BY 
+    total_value DESC, 
+    supplier_value ASC;

@@ -1,0 +1,75 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        AVG(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE NULL END) AS AvgViewPerPost,
+        EXTRACT(YEAR FROM AGE(u.CreationDate)) AS AccountAgeYears
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        ARRAY_AGG(b.Name) AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+            ELSE 'No' 
+        END AS IsAccepted,
+        p.Score,
+        p.ViewCount,
+        COALESCE((SELECT COUNT(DISTINCT c.Id) 
+                  FROM Comments c 
+                  WHERE c.PostId = p.Id), 0) AS CommentCount
+    FROM 
+        Posts p
+)
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.Reputation,
+    um.PostCount,
+    um.TotalScore,
+    um.TotalViews,
+    COALESCE(ub.BadgeNames, '{}') AS BadgeNames,
+    ub.BadgeCount,
+    SUM(pd.ViewCount) AS OverallPostViews,
+    SUM(pd.CommentCount) AS TotalComments,
+    COUNT(*) FILTER (WHERE pd.IsAccepted = 'Yes') AS AcceptedPostCount,
+    CASE 
+        WHEN SUM(pd.ViewCount) > 0 THEN SUM(pd.Score) * 1.0 / SUM(pd.ViewCount) 
+        ELSE 0 
+    END AS ScorePerView,
+    COUNT(*) OVER () AS TotalUsers,
+    RANK() OVER (ORDER BY um.Reputation DESC) AS ReputationRank
+FROM 
+    UserMetrics um
+LEFT JOIN 
+    UserBadges ub ON um.UserId = ub.UserId
+LEFT JOIN 
+    PostDetails pd ON um.UserId = pd.OwnerUserId
+GROUP BY 
+    um.UserId, um.DisplayName, um.Reputation, ub.BadgeNames, ub.BadgeCount
+HAVING 
+    COUNT(pd.PostId) > 0 
+ORDER BY 
+    ScorePerView DESC,
+    um.Reputation DESC
+LIMIT 100;

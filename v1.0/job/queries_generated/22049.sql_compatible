@@ -1,0 +1,83 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mt.kind_id,
+        mt.production_year, 
+        COALESCE(mti.info, 'No info available') AS movie_info,
+        0 AS level
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_info AS mti ON mti.movie_id = mt.id AND mti.info_type_id IN (SELECT id FROM info_type WHERE info = 'Plot')
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL 
+
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.kind_id,
+        mh.production_year,
+        COALESCE(mti.info, 'No info available') AS movie_info,
+        mh.level + 1
+    FROM 
+        movie_hierarchy AS mh
+    JOIN 
+        movie_link AS ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS mt ON mt.id = ml.linked_movie_id
+    LEFT JOIN 
+        movie_info AS mti ON mti.movie_id = mt.id AND mti.info_type_id IN (SELECT id FROM info_type WHERE info = 'Plot')
+    WHERE 
+        mh.level < 3
+), top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.id) DESC) AS actor_rank
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        complete_cast AS cc ON cc.movie_id = mh.movie_id
+    LEFT JOIN 
+        cast_info AS c ON c.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name AS a ON a.person_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+    HAVING 
+        COUNT(DISTINCT c.id) > 0
+)
+SELECT 
+    t.movie_id,
+    t.movie_title,
+    t.actors,
+    t.actor_rank,
+    t.production_year,
+    CASE 
+        WHEN t.actor_rank = 1 THEN 'Top Actor Movie'
+        ELSE 'Other'
+    END AS classification,
+    MAX(CASE 
+        WHEN mt.kind_id IS NOT NULL THEN 'Series' 
+        ELSE 'Film' 
+    END) AS movie_type
+FROM 
+    top_movies AS t
+LEFT JOIN 
+    aka_title AS mt ON mt.id = t.movie_id
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM movie_keyword AS mk
+        WHERE mk.movie_id = t.movie_id
+        AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword = 'action')
+    )
+GROUP BY 
+    t.movie_id, t.movie_title, t.actors, t.actor_rank, t.production_year
+ORDER BY 
+    t.actor_rank, t.production_year DESC;

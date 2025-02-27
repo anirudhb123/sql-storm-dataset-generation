@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER(PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_moy IN (1, 2, 3)
+    )
+    GROUP BY ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_id,
+        cd_gender,
+        cd_marital_status,
+        total_sales
+    FROM RankedSales
+    JOIN customer ON customer.c_customer_sk = RankedSales.ws_bill_customer_sk
+    JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    WHERE sales_rank <= 10
+),
+AddressCounts AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS address_count
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    GROUP BY ca_state
+)
+SELECT 
+    tc.c_customer_id,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.total_sales,
+    ac.ca_state,
+    ac.address_count,
+    COALESCE(CONCAT('USD ', FORMAT(tc.total_sales, 2)), 'No Sales') AS formatted_sales
+FROM TopCustomers tc
+LEFT JOIN AddressCounts ac ON 1=1
+WHERE 
+    (tc.cd_gender = 'F' AND tc.total_sales > 1000)
+    OR (tc.cd_gender = 'M' AND tc.total_sales BETWEEN 500 AND 1000)
+ORDER BY tc.total_sales DESC, ac.address_count ASC
+FETCH FIRST 20 ROWS ONLY;

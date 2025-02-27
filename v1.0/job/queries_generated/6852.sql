@@ -1,0 +1,28 @@
+SELECT 
+    p.name AS actor_name,
+    t.title AS movie_title,
+    tc.kind AS company_type,
+    COUNT(*) AS total_movies,
+    AVG(m.production_year) AS avg_production_year
+FROM 
+    aka_name p
+JOIN 
+    cast_info ci ON p.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type it ON mi.info_type_id = it.id
+WHERE 
+    it.info = 'Box Office'
+GROUP BY 
+    p.name, t.title, ct.kind
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    total_movies DESC, avg_production_year DESC;

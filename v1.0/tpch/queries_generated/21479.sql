@@ -1,0 +1,85 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > DATEADD(year, -2, GETDATE())
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            WHEN s.s_acctbal > 1000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS SupplierValue
+    FROM 
+        supplier s
+    WHERE 
+        s.s_comment NOT LIKE '%defective%'
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice * 0.9
+        END AS DiscountedPrice
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+JoinResults AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS SupplierCount,
+        SUM(ps.ps_availqty) AS TotalAvailableQuantity
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    o.o_orderkey,
+    od.r_name,
+    od.n_name,
+    SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS TotalRevenue,
+    COUNT(DISTINCT l.l_partkey) AS DistinctPartCount,
+    MAX(l.l_shipdate) AS LatestShipDate,
+    ROW_NUMBER() OVER (PARTITION BY od.r_name ORDER BY TotalRevenue DESC) AS RegionRank
+FROM 
+    RankedOrders o 
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    (SELECT 
+         DISTINCT r_name, n_name 
+     FROM 
+         JoinResults) od ON od.SupplierCount > 5
+LEFT JOIN 
+    PartDetails pd ON l.l_partkey = pd.p_partkey
+WHERE 
+    o.o_totalprice > (SELECT AVG(o1.o_totalprice) FROM orders o1 WHERE o1.o_orderstatus = 'F')
+    AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+GROUP BY 
+    o.o_orderkey, od.r_name, od.n_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    o.o_orderkey, TotalRevenue DESC;

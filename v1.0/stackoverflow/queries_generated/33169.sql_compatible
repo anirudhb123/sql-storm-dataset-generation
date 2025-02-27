@@ -1,0 +1,81 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Level,
+    u.DisplayName AS UserDisplayName,
+    u.TotalReputation,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    (COALESCE(pvs.UpVotes, 0) - COALESCE(pvs.DownVotes, 0)) AS NetVotes,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    Users u ON r.PostId = u.Id 
+LEFT JOIN 
+    PostVoteStats pvs ON r.PostId = pvs.PostId 
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            UNNEST(SPLIT_PART(p.Tags, ',')) AS TagName
+        FROM 
+            Posts p
+        WHERE 
+            p.Id = r.PostId
+    ) t ON true
+GROUP BY 
+    r.PostId, r.Title, r.CreationDate, r.Level, u.DisplayName, u.TotalReputation
+ORDER BY 
+    r.Level, r.CreationDate DESC;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Body, 
+        P.CreationDate, 
+        P.ViewCount, 
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.ViewCount DESC) AS TagRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+        AND P.CreationDate > NOW() - INTERVAL '1 year'
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS TagName, 
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(CASE WHEN AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptanceRate
+    FROM 
+        RankedPosts
+    GROUP BY 
+        TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AcceptanceRate,
+        RANK() OVER (ORDER BY TotalViews DESC) AS PopularityRank
+    FROM 
+        TagStatistics
+    WHERE 
+        PostCount > 5 -- Only consider tags with more than 5 posts
+)
+SELECT 
+    PT.TagName,
+    PT.PostCount,
+    PT.TotalViews,
+    PT.AcceptanceRate,
+    PH.Title AS TopQuestionTitle,
+    PH.OwnerDisplayName AS TopQuestionOwner,
+    PH.ViewCount AS TopQuestionViewCount
+FROM 
+    PopularTags PT
+JOIN 
+    RankedPosts PH ON PT.TagName = ANY(string_to_array(PH.Tags, '>'))
+WHERE 
+    PT.PopularityRank <= 10 -- Top 10 popular tags
+ORDER BY 
+    PT.PopularityRank;

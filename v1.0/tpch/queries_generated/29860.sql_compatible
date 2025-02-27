@@ -1,0 +1,25 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name) AS supplier_part_info,
+    LENGTH(s.s_comment) AS supplier_comment_length,
+    SUBSTRING_INDEX(s.s_address, ' ', 1) AS first_word_of_address,
+    REPLACE(p.p_comment, 'good', 'excellent') AS modified_part_comment,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c2 WHERE c2.c_nationkey = s.s_nationkey LIMIT 1)
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+WHERE 
+    LENGTH(p.p_name) > 10
+GROUP BY 
+    s.s_name, p.p_name, s.s_comment, s.s_address
+HAVING 
+    unique_customers > 5
+ORDER BY 
+    supplier_part_info ASC, supplier_comment_length DESC;

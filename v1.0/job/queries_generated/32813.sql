@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT
+        cm.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link cm
+    JOIN 
+        MovieHierarchy mh ON cm.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON cm.linked_movie_id = mt.id
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND mh.level < 5  -- Limiting depth to avoid excessive recursion
+)
+
+SELECT
+    ah.id AS actor_id,
+    ah.name AS actor_name,
+    mv.title AS movie_title,
+    mh.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ah.id, mh.production_year ORDER BY mh.level DESC) AS year_rank,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    COALESCE(pi.info, 'N/A') AS personal_info,
+    COUNT(mv.id) OVER (PARTITION BY ah.id) AS movie_count
+FROM
+    aka_name ah
+JOIN
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title mv ON mh.movie_id = mv.id
+LEFT JOIN
+    movie_keyword mk ON mv.id = mk.movie_id
+LEFT JOIN
+    person_info pi ON ah.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_date')
+WHERE
+    mv.production_year BETWEEN 2000 AND 2023
+    AND ah.name IS NOT NULL
+GROUP BY
+    ah.id, ah.name, mv.title, mh.production_year, pi.info
+ORDER BY
+    actor_id, year_rank;

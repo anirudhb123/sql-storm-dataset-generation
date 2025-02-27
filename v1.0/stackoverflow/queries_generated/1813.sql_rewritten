@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(up.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(dn.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        (SELECT OwnerUserId, SUM(UpVotes) AS UpVotes FROM Posts GROUP BY OwnerUserId) up ON u.Id = up.OwnerUserId
+    LEFT JOIN 
+        (SELECT OwnerUserId, SUM(DownVotes) AS DownVotes FROM Posts GROUP BY OwnerUserId) dn ON u.Id = dn.OwnerUserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostEngagements AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        mau.UserId AS ActiveUserId,
+        mau.TotalUpVotes AS UserUpVotes,
+        mau.TotalDownVotes AS UserDownVotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        MostActiveUsers mau ON rp.PostId IN (
+            SELECT PostId FROM Votes v WHERE v.UserId = mau.UserId
+        )
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.CreationDate,
+    pe.Score,
+    pe.ViewCount,
+    pe.CommentCount,
+    pe.ActiveUserId,
+    pe.UserUpVotes,
+    pe.UserDownVotes,
+    CASE 
+        WHEN pe.Score > 100 THEN 'High Engagement'
+        WHEN pe.Score BETWEEN 50 AND 100 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement' 
+    END AS EngagementLevel
+FROM 
+    PostEngagements pe
+ORDER BY 
+    pe.Score DESC, 
+    pe.CommentCount DESC
+LIMIT 10;

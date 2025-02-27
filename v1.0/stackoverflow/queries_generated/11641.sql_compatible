@@ -1,0 +1,42 @@
+
+WITH UserCount AS (
+    SELECT COUNT(*) AS TotalUsers FROM Users
+),
+PostCount AS (
+    SELECT COUNT(*) AS TotalPosts FROM Posts
+),
+VoteCount AS (
+    SELECT COUNT(*) AS TotalVotes FROM Votes
+)
+
+SELECT 
+    (SELECT TotalUsers FROM UserCount) AS TotalUsers,
+    (SELECT TotalPosts FROM PostCount) AS TotalPosts,
+    (SELECT TotalVotes FROM VoteCount) AS TotalVotes
+UNION ALL
+
+SELECT AVG(Score) AS AveragePostScore FROM Posts
+UNION ALL
+
+SELECT AVG(Reputation) AS AverageUserReputation FROM Users
+UNION ALL
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    p.Id, p.Title, u.DisplayName
+ORDER BY 
+    p.Id
+LIMIT 10;

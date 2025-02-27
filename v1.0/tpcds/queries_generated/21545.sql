@@ -1,0 +1,50 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_customer_id, c.c_preferred_cust_flag,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           pd.income_band_sk, pd.hd_buy_potential
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics pd ON pd.hd_demo_sk = c.c_current_hdemo_sk
+    WHERE cd.cd_gender IS NOT NULL AND cd.cd_purchase_estimate > 1000
+
+    UNION ALL
+
+    SELECT ch.c_customer_sk, ch.c_customer_id, ch.c_preferred_cust_flag,
+           ch.cd_gender, ch.cd_marital_status, ch.cd_purchase_estimate,
+           pd.income_band_sk, pd.hd_buy_potential
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_hdemo_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics pd ON pd.hd_demo_sk = c.c_current_hdemo_sk
+    WHERE ch.cd_gender IS NOT NULL AND ch.cd_purchase_estimate > 1500
+),
+recent_sales AS (
+    SELECT ws_bill_customer_sk, SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws_bill_customer_sk
+),
+item_sales AS (
+    SELECT ws_item_sk, COUNT(*) AS sales_count,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+combined_sales AS (
+    SELECT ch.c_customer_id, ch.cd_gender, ch.cd_marital_status,
+           COALESCE(rs.total_sales, 0) AS recent_sales,
+           COALESCE(is.sales_count, 0) AS item_sales_count
+    FROM customer_hierarchy ch
+    LEFT JOIN recent_sales rs ON ch.c_customer_sk = rs.ws_bill_customer_sk
+    LEFT JOIN item_sales is ON ch.c_customer_sk = is.ws_item_sk
+)
+SELECT c.customer_id, c.gender, c.marital_status,
+       MAX(CASE WHEN c.recent_sales > 0 THEN 'Active' ELSE 'Inactive' END) AS customer_status,
+       (CASE WHEN SUM(i.sales_count) > 0 THEN 'Sales Active' ELSE 'Sales Inactive' END) AS sales_activity,
+       STRING_AGG(DISTINCT c.marital_status) WITHIN GROUP (ORDER BY c.marital_status) AS distinct_marital_statuses
+FROM combined_sales c
+JOIN customer_hierarchy h ON c.customer_id = h.c_customer_id
+GROUP BY c.customer_id, c.gender
+HAVING SUM(c.recent_sales) > 5000 OR COUNT(DISTINCT c.item_sales_count) > 2
+ORDER BY customer_status DESC, sales_activity ASC;

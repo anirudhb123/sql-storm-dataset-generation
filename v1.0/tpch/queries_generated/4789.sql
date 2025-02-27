@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus IN ('O', 'F'))
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey, s.s_name
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(sp.total_available_qty) AS max_avail_qty,
+    AVG(ss.total_supply_cost) AS avg_supply_cost,
+    CASE 
+        WHEN MAX(o.o_totalprice) IS NULL THEN 'No Orders'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM 
+    CustomerSummary c
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierPartDetails sp ON l.l_partkey = sp.ps_partkey
+LEFT JOIN 
+    LATERAL (SELECT DISTINCT ps.ps_partkey, ps.ps_supplycost FROM partsupp ps WHERE ps.ps_partkey = l.l_partkey ORDER BY ps.ps_supplycost DESC LIMIT 1) ss ON true
+WHERE 
+    c.total_spent > 1000
+GROUP BY 
+    c.c_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 0
+ORDER BY 
+    total_revenue DESC;

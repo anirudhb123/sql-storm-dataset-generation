@@ -1,0 +1,70 @@
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+customer_details AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS row_num
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+),
+recent_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+final_sales AS (
+    SELECT 
+        rs.nation_name,
+        rs.total_sales,
+        CASE 
+            WHEN rs.sales_rank <= 5 THEN 'Top 5 Nation'
+            ELSE 'Other'
+        END AS sales_category
+    FROM 
+        regional_sales rs
+)
+SELECT 
+    f.nation_name,
+    f.total_sales,
+    cd.c_name,
+    cd.c_acctbal,
+    ro.item_count
+FROM 
+    final_sales f
+JOIN 
+    customer_details cd ON cd.row_num <= 10
+LEFT JOIN 
+    recent_orders ro ON cd.c_custkey = ro.o_custkey
+WHERE 
+    f.total_sales > (SELECT AVG(total_sales) FROM final_sales)
+ORDER BY 
+    f.total_sales DESC, cd.c_acctbal DESC;

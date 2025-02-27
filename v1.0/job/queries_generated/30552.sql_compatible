@@ -1,0 +1,83 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(a.name, ', ') AS actor_names,
+        AVG(CASE WHEN a.gender = 'M' THEN 1.0 ELSE 0.0 END) AS male_ratio
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+final_summary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(cs.total_cast, 0) AS total_cast,
+        COALESCE(cs.actor_names, 'No Cast') AS actor_names,
+        COALESCE(cs.male_ratio, 0) AS male_ratio,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        mh.depth
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_summary cs ON mh.movie_id = cs.movie_id
+    LEFT JOIN 
+        movies_with_keywords mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.depth, cs.total_cast, cs.actor_names, cs.male_ratio
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.total_cast,
+    f.actor_names,
+    f.male_ratio,
+    f.keywords,
+    f.depth
+FROM 
+    final_summary f
+WHERE 
+    (f.depth = 1 AND f.total_cast > 5) OR 
+    (f.depth > 1 AND f.male_ratio > 0.5)
+ORDER BY 
+    f.production_year DESC, f.title;

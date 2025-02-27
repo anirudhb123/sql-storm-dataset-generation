@@ -1,0 +1,36 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_id,
+        cs.cs_sales_price,
+        cs.cs_quantity,
+        d.d_year,
+        d.d_month_seq,
+        RANK() OVER (PARTITION BY s.s_store_id, d.d_year, d.d_month_seq ORDER BY SUM(cs.cs_sales_price * cs.cs_quantity) DESC) AS sales_rank
+    FROM store s
+    JOIN store_sales cs ON s.s_store_sk = cs.ss_store_sk
+    JOIN date_dim d ON cs.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2021 AND 2023
+    GROUP BY s.s_store_id, d.d_year, d.d_month_seq, cs.cs_sales_price, cs.cs_quantity
+),
+AggregatedSales AS (
+    SELECT 
+        store_id,
+        d_year,
+        d_month_seq,
+        SUM(cs_sales_price * cs_quantity) AS total_sales,
+        COUNT(*) AS total_transactions
+    FROM RankedSales
+    WHERE sales_rank <= 10
+    GROUP BY store_id, d_year, d_month_seq
+)
+SELECT 
+    s.store_id,
+    a.d_year,
+    a.d_month_seq,
+    a.total_sales,
+    a.total_transactions,
+    ROW_NUMBER() OVER (PARTITION BY a.d_year, a.d_month_seq ORDER BY a.total_sales DESC) AS rank_by_sales
+FROM AggregatedSales a
+JOIN store s ON s.s_store_id = a.store_id
+ORDER BY a.d_year, a.d_month_seq, total_sales DESC;

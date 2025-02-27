@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        c.c_custkey
+    UNION ALL
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) + s.total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        SalesCTE s ON c.c_custkey = s.c_custkey
+    WHERE 
+        o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, s.total_sales
+),
+RankedSales AS (
+    SELECT 
+        r.n_name,
+        SUM(s.total_sales) AS total
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_custkey = c.c_custkey
+    JOIN 
+        supplier su ON su.s_nationkey = c.c_nationkey
+    JOIN 
+        nation r ON r.n_nationkey = c.c_nationkey
+    GROUP BY 
+        r.n_name
+),
+FinalSales AS (
+    SELECT 
+        n_name,
+        total,
+        RANK() OVER (ORDER BY total DESC) AS sales_rank
+    FROM 
+        RankedSales
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    f.n_name AS nation,
+    CASE 
+        WHEN f.sales_rank IS NULL THEN 'No Sales'
+        ELSE CAST(f.sales_rank AS VARCHAR)
+    END AS sales_rank,
+    COALESCE(f.total, 0) AS total_sales
+FROM 
+    part p
+LEFT JOIN 
+    FinalSales f ON f.n_name = p.p_mfgr
+WHERE 
+    p.p_retailprice > 100.00
+    AND p.p_size BETWEEN 20 AND 30
+ORDER BY 
+    total_sales DESC, 
+    p.p_name ASC;

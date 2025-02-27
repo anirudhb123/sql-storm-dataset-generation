@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+UserInteraction AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastRevisionDate,
+        STRING_AGG(DISTINCT CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN CONCAT('Closed:', cr.Name) 
+            ELSE 'Other' 
+        END, ', ') AS RevType
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS VARCHAR) -- updated to standard SQL
+    GROUP BY 
+        ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(ph.RevisionCount, 0) AS RevisionCount,
+        ph.LastRevisionDate,
+        ph.RevType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryDetails ph ON p.Id = ph.PostId
+    WHERE 
+        p.Id IN (SELECT PostId FROM PostHistory ph WHERE ph.PostHistoryTypeId = 10)
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    SUM(CASE WHEN cp.RevType = 'Closed:1' THEN 1 ELSE 0 END) AS ExactDuplicateClosedCount,
+    SUM(CASE WHEN cp.RevType = 'Closed:2' THEN 1 ELSE 0 END) AS OffTopicClosedCount,
+    SUM(cp.RevisionCount) AS TotalRevisions,
+    MAX(cp.LastRevisionDate) AS LatestClosedPostDate
+FROM 
+    UserInteraction up
+JOIN 
+    ClosedPosts cp ON up.UserId = cp.OwnerUserId
+GROUP BY 
+    up.UserId, up.DisplayName
+ORDER BY 
+    ClosedPostCount DESC
+LIMIT 10
+OFFSET (SELECT COUNT(DISTINCT u.Id) FROM Users u WHERE u.Reputation > 1000) / 2;

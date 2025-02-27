@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.PostTypeId,
+        a.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    WHERE 
+        q.PostTypeId = 1  
+), 
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostScoreRanked AS (
+    SELECT
+        Ph.PostId,
+        Ph.Title,
+        Ph.OwnerUserId,
+        Ph.Level,
+        Row_Number() OVER (PARTITION BY Ph.OwnerUserId ORDER BY Ph.PostId DESC) AS PostRank,
+        SUM(a.Score) OVER (PARTITION BY Ph.PostId) AS TotalAnswersScore
+    FROM 
+        RecursivePostHierarchy Ph
+    LEFT JOIN 
+        Posts a ON Ph.PostId = a.ParentId
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalScore,
+    u.BadgeCount,
+    ps.Title AS PostTitle,
+    ps.TotalAnswersScore,
+    CASE 
+        WHEN ps.PostRank = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostRankStatus
+FROM 
+    UserActivity u
+JOIN 
+    PostScoreRanked ps ON u.UserId = ps.OwnerUserId
+WHERE 
+    u.TotalPosts > 5
+ORDER BY 
+    u.TotalScore DESC,
+    u.BadgeCount DESC;

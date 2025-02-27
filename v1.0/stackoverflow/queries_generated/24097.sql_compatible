@@ -1,0 +1,93 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass,
+        STRING_AGG(B.Name, ', ') FILTER (WHERE B.TagBased = 0) AS NamedBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(COALESCE(V.VoteCount, 0)) AS AvgVotes,
+        MAX(P.CreationDate) AS LatestPostDate
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PS.PostCount, 0) AS PostCount,
+        COALESCE(PS.TotalViews, 0) AS TotalViews,
+        COALESCE(PS.AvgVotes, 0) AS AvgVotes,
+        COALESCE(PS.LatestPostDate, DATE '2000-01-01') AS LatestPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        RANK() OVER (ORDER BY UA.BadgeCount DESC, UA.TotalViews DESC) AS UserRank
+    FROM 
+        UserActivity UA
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.BadgeCount,
+    RU.PostCount,
+    RU.TotalViews,
+    CASE 
+        WHEN RU.LatestPostDate > DATE '2024-10-01 12:34:56' - INTERVAL '30 days' 
+        THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS ActivityStatus,
+    RU.UserRank,
+    UU.UserRelatedNote
+FROM 
+    RankedUsers RU
+LEFT JOIN (
+    SELECT 
+        U.Id AS UserId,
+        CASE 
+            WHEN COUNT(P.Id) = 0 THEN 'No Posts Yet' 
+            ELSE 'Has Posts' 
+        END AS UserRelatedNote
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+) UU ON RU.UserId = UU.UserId
+WHERE 
+    RU.UserRank <= 10 
+    AND (RU.BadgeCount > 0 OR RU.PostCount > 0)
+ORDER BY 
+    RU.UserRank, RU.DisplayName;

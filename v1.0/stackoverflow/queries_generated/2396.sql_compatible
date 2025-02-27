@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        CreationDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.OwnerUserId, 
+        p.Title, 
+        p.CreationDate AS PostCreationDate, 
+        p.Score,
+        COALESCE(pc.AnswerCount, 0) AS AnswerCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(pc.FavoriteCount, 0) AS FavoriteCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount, 
+            SUM(CommentCount) AS CommentCount, 
+            SUM(FavoriteCount) AS FavoriteCount
+        FROM Posts 
+        GROUP BY ParentId
+    ) pc ON p.Id = pc.ParentId
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId AS EditorId, 
+        ph.CreationDate AS EditDate, 
+        ph.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+AggregatedUserData AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        COUNT(pd.PostId) AS TotalPosts,
+        SUM(pd.Score) AS TotalScore,
+        COUNT(DISTINCT pd.PostId) AS PostsWithEdits
+    FROM UserReputation ur
+    LEFT JOIN PostDetails pd ON ur.UserId = pd.OwnerUserId
+    LEFT JOIN RecentPostEdits rpe ON pd.PostId = rpe.PostId AND rpe.EditRank = 1
+    GROUP BY ur.UserId, ur.Reputation
+)
+SELECT 
+    au.UserId,
+    au.Reputation,
+    au.TotalPosts,
+    au.TotalScore,
+    COALESCE(au.PostsWithEdits, 0) AS PostsWithRecentEdits,
+    CASE 
+        WHEN au.Reputation > 1000 THEN 'High Reputation User'
+        WHEN au.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation User'
+        ELSE 'Low Reputation User' 
+    END AS ReputationCategory,
+    CASE 
+        WHEN au.TotalPosts = 0 THEN 'No Posts Yet'
+        ELSE CONCAT(CAST(au.TotalPosts AS VARCHAR), ' Posts') 
+    END AS PostSummary
+FROM AggregatedUserData au
+WHERE au.ReputationRank <= 50
+ORDER BY au.TotalScore DESC, au.Reputation DESC;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_address_id,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        0 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_address_id,
+        ca.ca_street_name,
+        ca.ca_city,
+        ca.ca_state,
+        ah.level + 1
+    FROM customer_address ca
+    JOIN AddressHierarchy ah ON ca.ca_address_id = CONCAT(ah.ca_address_id, '-child') -- Fictive child relationship
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    INNER JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE w.web_country = 'USA' AND ws.ws_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY ws.ws_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(COUNT(ws.ws_order_number), 0) AS orders_count,
+        DENSE_RANK() OVER (ORDER BY COALESCE(COUNT(ws.ws_order_number), 0) DESC) AS orders_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    ah.ca_city,
+    ah.ca_state,
+    SUM(sd.total_sales) AS total_sales_by_location,
+    COUNT(DISTINCT cs.c_customer_sk) AS unique_customers,
+    MAX(cs.orders_count) AS max_orders,
+    MIN(CASE WHEN sd.sales_rank = 1 THEN sd.total_sales ELSE NULL END) AS top_sale
+FROM AddressHierarchy ah
+LEFT JOIN SalesData sd ON sd.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_ws_ship_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 ORDER BY d_date_sk LIMIT 1))
+FULL OUTER JOIN CustomerSales cs ON cs.orders_rank <= 10 -- Combine notable orders count
+WHERE ah.level < 3  -- Limiting to a certain address hierarchy level
+GROUP BY 
+    ah.ca_city, 
+    ah.ca_state
+HAVING 
+    total_sales_by_location > 10000
+ORDER BY 
+    total_sales_by_location DESC
+LIMIT 20;

@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_supplierkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TopSuppliers AS (
+    SELECT s_name, SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s_name
+    HAVING SUM(ps_supplycost * ps_availqty) > 50000
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    AND l.l_shipdate >= '2023-01-01' 
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+NationRegion AS (
+    SELECT n.n_name AS nation_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+RankedOrders AS (
+    SELECT od.orderkey, od.orderdate, od.total_price, 
+           ROW_NUMBER() OVER (PARTITION BY nr.region_name ORDER BY od.total_price DESC) AS order_rank
+    FROM OrderDetails od
+    JOIN Customer c ON od.o_custkey = c.c_custkey
+    JOIN NationRegion nr ON c.c_nationkey = nr.n_nationkey
+)
+SELECT 
+    t.total_supply_cost,
+    r.orderdate,
+    r.total_price,
+    r.order_rank,
+    sh.hierarchy_level
+FROM RankedOrders r
+JOIN TopSuppliers t ON r.total_price < t.total_supply_cost
+LEFT JOIN SupplierHierarchy sh ON t.s_name = sh.s_name
+WHERE r.order_rank = 1 
+AND sh.hierarchy_level IS NOT NULL
+ORDER BY r.orderdate DESC, t.total_supply_cost DESC;

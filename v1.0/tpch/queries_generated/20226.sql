@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderStats AS (
+    SELECT o_orderkey, 
+           o_custkey, 
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+           COUNT(l_linenumber) AS line_item_count,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2021-01-01' 
+    GROUP BY o_orderkey, o_custkey
+), TopCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COALESCE(SUM(os.total_revenue), 0) AS customer_revenue,
+           COUNT(os.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN OrderStats os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), SupplierInfo AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost) AS total_supplycost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+), PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           AVG(ps.ps_supplycost) AS average_cost,
+           MAX(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS max_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT tc.c_custkey, 
+       tc.c_name, 
+       tc.customer_revenue, 
+       si.total_supplycost, 
+       pd.average_cost,
+       pd.max_avail_qty,
+       CASE 
+           WHEN tc.customer_revenue > 50000 THEN 'High Value Customer'
+           WHEN tc.customer_revenue BETWEEN 20000 AND 50000 THEN 'Medium Value Customer'
+           ELSE 'Low Value Customer' 
+       END AS customer_category
+FROM TopCustomers tc
+FULL OUTER JOIN SupplierInfo si ON tc.order_count = 0 OR (si.part_count > 5 AND tc.customer_revenue IS NOT NULL)
+FULL OUTER JOIN PartDetails pd ON pd.average_cost IS NOT NULL
+WHERE tc.customer_revenue > (SELECT AVG(customer_revenue) FROM TopCustomers) + 
+      (SELECT COUNT(*) FROM SupplierInfo WHERE total_supplycost IS NOT NULL) 
+ORDER BY tc.customer_revenue DESC, si.total_supplycost ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,74 @@
+WITH RECURSIVE SubqueryRegionSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(o.o_totalprice) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        r.r_name
+),
+AggregatedSales AS (
+    SELECT 
+        region_name, 
+        total_sales, 
+        sales_rank
+    FROM 
+        SubqueryRegionSales 
+    WHERE 
+        total_sales IS NOT NULL
+),
+TopRegions AS (
+    SELECT 
+        region_name, 
+        total_sales
+    FROM 
+        AggregatedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    r.region_name,
+    COALESCE(as.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_quantity) AS total_quantity,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    TopRegions as ON r.r_name = as.region_name
+WHERE 
+    (l.l_discount > 0.1 OR l.l_discount IS NULL)
+    AND l.l_shipdate > '2023-01-01'
+GROUP BY 
+    r.region_name, as.total_sales
+ORDER BY 
+    total_sales DESC;

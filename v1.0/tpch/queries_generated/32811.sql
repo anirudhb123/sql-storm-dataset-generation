@@ -1,0 +1,69 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_nationkey,
+        1 AS level
+    FROM
+        customer c
+    WHERE
+        c.c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_nationkey,
+        ch.level + 1
+    FROM
+        customer c
+    JOIN
+        CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE
+        c.c_acctbal > ch.c_acctbal
+)
+
+SELECT
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    rh.region_name,
+    ROW_NUMBER() OVER (PARTITION BY rh.region_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM
+    part p
+JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN
+    customer c ON o.o_custkey = c.c_custkey
+JOIN
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN (
+    SELECT 
+        n.n_regionkey, 
+        COUNT(*) AS customer_count,
+        STRING_AGG(c.c_name, ', ') AS customers
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        n.n_regionkey
+) AS rh ON rh.n_regionkey = r.r_regionkey
+WHERE
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY
+    p.p_partkey, p.p_name, rh.region_name
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY
+    rh.region_name, total_revenue DESC;

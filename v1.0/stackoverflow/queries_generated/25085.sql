@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) -- Edits only
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.LastActivityDate, u.DisplayName
+),
+
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><'))) ) AS TagName,
+        COUNT(*) AS TotalPosts,
+        AVG(EXTRACT(EPOCH FROM (LastActivityDate - CreationDate))) AS AvgActiveTimeSeconds
+    FROM 
+        RankedPosts
+    GROUP BY 
+        TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalPosts,
+        AvgActiveTimeSeconds,
+        DENSE_RANK() OVER (ORDER BY TotalPosts DESC) AS TagRank
+    FROM 
+        TagStatistics
+)
+
+SELECT 
+    tt.TagName,
+    tt.TotalPosts,
+    tt.AvgActiveTimeSeconds,
+    COUNT(DISTINCT rp.PostId) AS PostsInTopRank,
+    ARRAY_AGG(DISTINCT rp.OwnerDisplayName) AS ActiveContributors
+FROM 
+    TopTags tt
+JOIN 
+    RankedPosts rp ON rp.Tags LIKE '%' || tt.TagName || '%'
+WHERE 
+    tt.TagRank <= 5 -- Top 5 tags
+GROUP BY 
+    tt.TagName, tt.TotalPosts, tt.AvgActiveTimeSeconds
+ORDER BY 
+    tt.TotalPosts DESC;

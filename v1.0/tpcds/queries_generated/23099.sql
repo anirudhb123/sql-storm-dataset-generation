@@ -1,0 +1,56 @@
+
+WITH RECURSIVE customer_profile AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, 
+           COALESCE(hd.hd_buy_potential, 'unknown') as buy_potential,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY ca_address_sk) AS row_num
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_birth_month IS NOT NULL OR ca.ca_city IS NOT NULL
+), sales_data AS (
+    SELECT ws_bill_customer_sk, SUM(ws_net_profit) as total_profit,
+           COUNT(DISTINCT ws_order_number) as order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 365 FROM date_dim) 
+    GROUP BY ws_bill_customer_sk
+), return_data AS (
+    SELECT sr_customer_sk, SUM(sr_return_amt) as total_return, 
+           COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), final_summary AS (
+    SELECT cp.c_customer_sk, 
+           cp.c_first_name, 
+           cp.c_last_name,
+           sd.total_profit, 
+           sd.order_count,
+           rd.total_return,
+           rd.return_count,
+           CASE 
+               WHEN sd.total_profit IS NULL THEN 'No Sales'
+               WHEN rd.total_return > 0 THEN 'Returned'
+               ELSE 'Active'
+           END AS customer_status
+    FROM customer_profile cp
+    LEFT JOIN sales_data sd ON cp.c_customer_sk = sd.ws_bill_customer_sk
+    LEFT JOIN return_data rd ON cp.c_customer_sk = rd.sr_customer_sk
+    WHERE (cp.buy_potential IN ('high', 'medium') OR cp.cd_marital_status = 'M')
+      AND cp.row_num = 1
+)
+SELECT f.c_customer_sk, 
+       f.c_first_name, 
+       f.c_last_name, 
+       COALESCE(f.total_profit, 0) AS total_profit, 
+       f.order_count, 
+       COALESCE(f.total_return, 0) AS total_return, 
+       f.return_count,
+       CASE 
+           WHEN (f.order_count > 10 AND f.total_return < 10) THEN 'VIP Customer'
+           WHEN (f.order_count = 0 AND f.total_return = 0) THEN 'Inactive'
+           ELSE 'Regular Customer'
+       END AS ultimate_customer_rank
+FROM final_summary f
+ORDER BY f.total_profit DESC, f.order_count DESC 
+LIMIT 50;

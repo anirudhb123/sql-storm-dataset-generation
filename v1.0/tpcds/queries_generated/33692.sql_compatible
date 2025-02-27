@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM
+        store_sales
+    GROUP BY
+        s_store_sk, ss_sold_date_sk
+),
+date_info AS (
+    SELECT
+        d_date,
+        d_month_seq,
+        d_year,
+        d_dow,
+        d_month_seq % 12 AS month_group
+    FROM
+        date_dim
+    WHERE
+        d_year BETWEEN 2020 AND 2023
+),
+store_info AS (
+    SELECT
+        s_store_sk,
+        s_city,
+        s_state,
+        s_zip,
+        COUNT(cc_call_center_sk) AS call_centers,
+        SUM(s_number_employees) AS total_employees
+    FROM
+        store
+    LEFT JOIN
+        call_center ON s_store_sk = cc_call_center_sk
+    GROUP BY
+        s_store_sk, s_city, s_state, s_zip
+)
+SELECT
+    di.d_year,
+    di.d_month_seq,
+    si.s_city,
+    si.s_state,
+    si.s_zip,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(ss.total_transactions) AS total_transactions,
+    AVG(si.total_employees) AS avg_employees,
+    COUNT(si.call_centers) AS call_center_count
+FROM
+    date_info di
+JOIN
+    sales_summary ss ON di.d_sold_date_sk = ss.ss_sold_date_sk
+JOIN
+    store_info si ON ss.s_store_sk = si.s_store_sk
+WHERE
+    ss.sales_rank <= 10
+GROUP BY
+    di.d_year, di.d_month_seq, si.s_city, si.s_state, si.s_zip
+HAVING
+    SUM(ss.total_sales) > 10000 AND COUNT(si.call_centers) > 2
+UNION ALL
+SELECT
+    di.d_year,
+    di.d_month_seq,
+    'OVERALL' AS s_city,
+    'ALL' AS s_state,
+    NULL AS s_zip,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(ss.total_transactions) AS total_transactions,
+    AVG(si.total_employees) AS avg_employees,
+    COUNT(si.call_centers) AS call_center_count
+FROM
+    date_info di
+JOIN
+    sales_summary ss ON di.d_sold_date_sk = ss.ss_sold_date_sk
+JOIN
+    store_info si ON ss.s_store_sk = si.s_store_sk
+GROUP BY
+    di.d_year, di.d_month_seq
+HAVING
+    SUM(ss.total_sales) > 10000
+ORDER BY
+    total_sales DESC;

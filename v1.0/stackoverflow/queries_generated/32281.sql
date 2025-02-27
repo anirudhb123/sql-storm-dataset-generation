@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        ParentId,
+        Title,
+        OwnerUserId,
+        CreationDate,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBountyPerAnswer,
+        MAX(p.Score) AS MaxScore
+    FROM
+        Posts p
+    LEFT JOIN Posts a ON a.ParentId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8  -- BountyStart vote type
+    GROUP BY
+        p.Id, p.Title, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM
+        Users u
+)
+SELECT
+    rph.Title AS PostTitle,
+    us.DisplayName AS OwnerDisplayName,
+    us.Reputation AS OwnerReputation,
+    ps.AnswerCount,
+    ps.TotalBounty,
+    ps.AvgBountyPerAnswer,
+    ps.MaxScore,
+    CASE
+        WHEN ps.MaxScore > 0 THEN 'Popular'
+        WHEN ps.TotalBounty > 0 THEN 'Bounty'
+        ELSE 'Regular'
+    END AS PostType,
+    COALESCE(ph.UserId, 0) AS HasBadge
+FROM
+    RecursivePostHierarchy rph
+LEFT JOIN PostStats ps ON rph.Id = ps.Id
+LEFT JOIN UserReputation us ON ps.OwnerUserId = us.UserId
+LEFT JOIN LATERAL (
+    SELECT
+        b.UserId
+    FROM
+        Badges b
+    WHERE
+        b.UserId = ps.OwnerUserId AND b.Class = 1  -- Gold badges
+    LIMIT 1
+) ph ON TRUE
+WHERE
+    ps.AnswerCount > 0
+ORDER BY
+    rph.CreationDate DESC, ps.MaxScore DESC;

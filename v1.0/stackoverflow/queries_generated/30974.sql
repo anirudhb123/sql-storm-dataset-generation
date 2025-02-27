@@ -1,0 +1,98 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        Ph.Id,
+        Ph.PostHistoryTypeId,
+        Ph.PostId,
+        Ph.CreationDate,
+        Ph.UserId,
+        Ph.UserDisplayName,
+        Ph.Comment,
+        1 AS Depth
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = 1)  -- select only questions for recursion
+    
+    UNION ALL
+
+    SELECT 
+        Ph.Id,
+        Ph.PostHistoryTypeId,
+        Ph.PostId,
+        Ph.CreationDate,
+        Ph.UserId,
+        Ph.UserDisplayName,
+        Ph.Comment,
+        Depth + 1
+    FROM 
+        PostHistory Ph
+    INNER JOIN 
+        RecursivePostHistory RPh ON Ph.PostId = RPh.PostId
+    WHERE 
+        RPh.Depth < 5  -- limit recursion depth
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+PostTagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'  -- join on Tags
+    GROUP BY 
+        T.Id
+),
+RecentUserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAcquired,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  -- only BountyStart
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName AS ActiveUser,
+    U.PostsCreated,
+    U.TotalBountyAcquired,
+    TL.TotalVotes,
+    TL.UpVotes,
+    TL.DownVotes,
+    PT.TagName,
+    PT.TotalViews
+FROM 
+    RecentUserActivity U
+JOIN 
+    PostVoteSummary TL ON U.UserId = TL.PostId  -- joining with vote summary
+LEFT JOIN 
+    PostTagStats PT ON PT.PostCount > 100  -- only popular tags
+WHERE 
+    U.ActivityRank <= 10  -- getting top 10 users
+ORDER BY 
+    U.TotalBountyAcquired DESC, 
+    U.PostsCreated DESC;
+

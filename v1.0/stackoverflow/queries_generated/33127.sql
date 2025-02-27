@@ -1,0 +1,70 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, 
+           CAST(DisplayName AS varchar(1000)) AS Path
+    FROM Users
+    WHERE Reputation > (SELECT AVG(Reputation) FROM Users)
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           CAST(CONCAT(uh.Path, ' -> ', u.DisplayName) AS varchar(1000))
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Reputation > uh.Reputation
+), 
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId
+), 
+
+UserPostStats AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ps.PostID,
+        ps.Title,
+        ps.CreationDate,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount  
+    FROM Users u
+    INNER JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE ps.LatestPostRank <= 5
+), 
+
+CriticalPosts AS (
+    SELECT 
+        ps.PostID,
+        ps.Title,
+        ps.UpVotes - ps.DownVotes AS Score,
+        ROW_NUMBER() OVER (ORDER BY (ps.UpVotes - ps.DownVotes) DESC) AS ScoreRank
+    FROM PostStats ps
+    WHERE ps.CommentCount > 5
+)
+
+SELECT 
+    uhs.Path,
+    ups.DisplayName,
+    ups.Reputation,
+    ups.Title,
+    ups.UpVotes,
+    ups.DownVotes,
+    cp.Score,
+    cp.ScoreRank
+FROM UserPostStats ups
+LEFT JOIN CriticalPosts cp ON ups.PostID = cp.PostID
+INNER JOIN UserHierarchy uhs ON ups.DisplayName = uhs.DisplayName
+WHERE cp.ScoreRank IS NOT NULL
+ORDER BY ups.Reputation DESC, cp.Score DESC;

@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS varchar(255)) AS path,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- suppliers with above-average balance
+
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_acctbal,
+           CONCAT(sh.path, ' -> ', s2.s_name), -- build path representation
+           sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 -- limit recursion to levels
+), OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31' -- filter for 2023 orders
+    GROUP BY o.o_orderkey
+), CustomerRankings AS (
+    SELECT c.c_custkey, RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(os.total_revenue) DESC) AS rank
+    FROM customer c
+    JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    GROUP BY c.c_custkey
+)
+SELECT ps.ps_partkey, p.p_name, COUNT(distinct cs.c_custkey) AS num_customers,
+       AVG(su.s_acctbal) AS avg_supplier_balance,
+       MAX(case when cs.rank <= 10 then cs.rank else NULL end) AS top_customer_rank -- conditional aggregation
+FROM partsupp ps
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN supplier su ON ps.ps_suppkey = su.s_suppkey
+LEFT JOIN customer cs ON cs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM orders o2 WHERE o2.o_orderkey = o.o_orderkey))
+GROUP BY ps.ps_partkey, p.p_name
+ORDER BY avg_supplier_balance DESC, num_customers DESC
+LIMIT 50;

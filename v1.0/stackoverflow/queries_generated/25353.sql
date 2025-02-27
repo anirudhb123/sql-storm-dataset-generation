@@ -1,0 +1,51 @@
+WITH TagRankings AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(Posts.CommentCount, 0)) AS TotalComments,
+        AVG(Users.Reputation) AS AvgUserReputation,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT Posts.Id) DESC) AS TagRank
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalAnswers,
+        TotalComments,
+        AvgUserReputation
+    FROM 
+        TagRankings
+    WHERE 
+        TagRank <= 10
+)
+
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.TotalAnswers,
+    t.TotalComments,
+    t.AvgUserReputation,
+    p.AvgScore AS AvgPostScore,
+    STRING_AGG(DISTINCT u.DisplayName, ', ') AS ActiveUsers
+FROM 
+    TopTags t
+JOIN 
+    Posts p ON t.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+GROUP BY 
+    t.TagName, t.PostCount, t.TotalViews, t.TotalAnswers, t.TotalComments, t.AvgUserReputation
+ORDER BY 
+    t.PostCount DESC;

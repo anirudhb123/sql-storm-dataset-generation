@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS TotalPosts
+    FROM 
+        Posts p 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.RankByScore,
+        rp.TotalPosts,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8), 0) AS TotalBounty,
+        -- Count unique comment authors
+        COUNT(DISTINCT c.UserId) AS UniqueCommenters,
+        COUNT(DISTINCT COALESCE(NULLIF(b.UserId, -1), b.UserId)) AS UniqueBadgeOwners
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.PostId -- Assuming a badge is associated with a post 
+    WHERE 
+        rp.RankByScore <= 5 -- Top 5 posts per type
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.RankByScore, rp.TotalPosts
+),
+PostHistoryOverview AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) AS HistoryEvents,
+        MIN(ph.CreationDate) AS FirstRecordedEvent,
+        MAX(ph.CreationDate) AS LastRecordedEvent
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.TotalBounty,
+    tp.UniqueCommenters,
+    pho.HistoryEvents,
+    pho.FirstRecordedEvent,
+    pho.LastRecordedEvent
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryOverview pho ON tp.PostId = pho.PostId
+WHERE 
+    tp.TotalPosts > 10 
+    AND tp.UniqueCommenters > 2
+    AND (pho.HistoryEvents IS NULL OR pho.HistoryEvents < 5)
+ORDER BY 
+    tp.Score DESC, 
+    tp.TotalBounty DESC;

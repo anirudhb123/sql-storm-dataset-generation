@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || e.title AS VARCHAR(255))
+    FROM
+        aka_title e
+    JOIN
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    COALESCE(NULLIF(cast.info, ''), 'No Cast Info') AS cast_info,
+    COUNT(reviews.movie_id) AS review_count,
+    AVG(reviews.rating) AS average_rating,
+    STRING_AGG(DISTINCT keywords.keyword, ', ') AS keyword_list
+FROM
+    movie_hierarchy mw
+LEFT JOIN
+    cast_info cast ON cast.movie_id = mw.movie_id
+LEFT JOIN
+    movie_info reviews ON reviews.movie_id = mw.movie_id AND reviews.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mw.movie_id
+LEFT JOIN
+    keyword keywords ON keywords.id = mk.keyword_id
+GROUP BY
+    mw.movie_id, mw.title, mw.production_year, cast.info
+HAVING
+    mw.production_year >= 2000
+ORDER BY
+    mw.production_year DESC, mw.level, mw.title;
+
+

@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        p.CreationDate,
+        p.Title,
+        p.Tags,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(vote.Value) AS AverageVoteValue
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT 
+            v.UserId,
+            CASE 
+                WHEN v.VoteTypeId = 2 THEN 1
+                WHEN v.VoteTypeId = 3 THEN -1
+                ELSE 0 
+            END AS Value
+        FROM 
+            Votes v
+    ) vote ON u.Id = vote.UserId
+    GROUP BY 
+        u.Id
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS Comments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+OverallActivity AS (
+    SELECT 
+        p.PostId,
+        SUM(COALESCE(rc.CommentCount, 0)) AS TotalComments,
+        COUNT(DISTINCT CASE WHEN b.UserId IS NOT NULL THEN b.UserId END) AS DistinctUsersWithBadges,
+        COUNT(DISTINCT v.Id) AS TotalVotes
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        RecentComments rc ON p.PostId = rc.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId
+    WHERE 
+        p.Rank <= 10
+    GROUP BY 
+        p.PostId
+)
+SELECT 
+    oa.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    u.UserId,
+    u.BadgeCount,
+    u.TotalBounty,
+    oa.TotalComments,
+    oa.DistinctUsersWithBadges,
+    oa.TotalVotes,
+    CASE 
+        WHEN u.AverageVoteValue IS NULL THEN 'No Votes Yet'
+        ELSE CONCAT('Average Vote Value: ', ROUND(u.AverageVoteValue, 2))
+    END AS AverageVoteComment
+FROM 
+    OverallActivity oa
+JOIN 
+    Posts p ON oa.PostId = p.Id
+JOIN 
+    UserStatistics u ON p.OwnerUserId = u.UserId
+WHERE 
+    p.ViewCount > 50 OR 
+    (p.ViewCount > 10 AND u.BadgeCount > 1)
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

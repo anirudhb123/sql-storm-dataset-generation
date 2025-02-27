@@ -1,0 +1,49 @@
+WITH RegionSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+    GROUP BY 
+        r.r_name
+),
+TopRegions AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionSales
+)
+SELECT 
+    TR.region_name,
+    TR.total_sales,
+    p.p_name AS top_part_name,
+    MAX(ps.ps_supplycost) AS highest_supplycost
+FROM 
+    TopRegions TR
+JOIN 
+    partsupp ps ON TR.region_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        JOIN region r ON n.n_regionkey = r.r_regionkey 
+        WHERE r.r_name = TR.region_name
+    )
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    TR.sales_rank <= 5
+GROUP BY 
+    TR.region_name, TR.total_sales, p.p_name
+ORDER BY 
+    TR.total_sales DESC, highest_supplycost DESC;

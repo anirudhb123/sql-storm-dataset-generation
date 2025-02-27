@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss.store_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        COUNT(ss.ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk, ss.store_sk
+    UNION ALL
+    SELECT 
+        sd.sold_date_sk,
+        sd.item_sk,
+        sd.store_sk,
+        sd.total_sales * 1.05 AS total_sales, -- simulate a 5% increase
+        sd.total_transactions + 1
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_sales < 1000 
+        AND sd.item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price > 50)
+),
+ItemPromotion AS (
+    SELECT 
+        sp.item_sk,
+        sp.promo_sk,
+        p.p_promo_name,
+        ROW_NUMBER() OVER (PARTITION BY sp.item_sk ORDER BY p.p_start_date_sk DESC) AS promo_rank
+    FROM 
+        promotion p
+    JOIN 
+        store_sales sp ON p.p_item_sk = sp.item_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+        AND p.p_start_date_sk <= CURRENT_DATE 
+        AND p.p_end_date_sk >= CURRENT_DATE 
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        COUNT(cd_demo_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender IS NOT NULL
+    GROUP BY 
+        cd_demo_sk, cd_gender
+)
+SELECT 
+    sa.store_sk,
+    COALESCE(AVG(sd.total_sales), 0) AS average_store_sales,
+    SUM(CASE WHEN ip.promo_rank = 1 THEN 1 ELSE 0 END) AS active_promotions,
+    cd.gender,
+    cd.customer_count,
+    cd.avg_purchase_estimate
+FROM 
+    SalesData sd
+LEFT JOIN 
+    ItemPromotion ip ON sd.item_sk = ip.item_sk
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = sd.store_sk)
+GROUP BY 
+    sa.store_sk, cd.gender
+HAVING 
+    AVG(sd.total_sales) > (SELECT AVG(total_sales) FROM SalesData WHERE store_sk = sd.store_sk) 
+    OR COUNT(ip.promo_rank) > 0
+ORDER BY 
+    average_store_sales DESC
+LIMIT 10;

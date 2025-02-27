@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT
+        mk.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM
+        movie_link mk
+    JOIN
+        aka_title at ON mk.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON mk.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mci.company_id) AS company_count,
+    STRING_AGG(DISTINCT cmp.name, ', ') AS companies,
+    AVG(CASE WHEN mvi.info_type_id = 1 THEN mvi.info END) AS average_rating
+FROM
+    cast_info ci
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN
+    movie_companies mci ON ci.movie_id = mci.movie_id
+JOIN
+    movie_info mvi ON ci.movie_id = mvi.movie_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title at ON mh.movie_id = at.id
+LEFT JOIN
+    company_name cmp ON mci.company_id = cmp.id
+WHERE
+    ak.name IS NOT NULL
+    AND mh.depth <= 2
+GROUP BY
+    ak.name, at.title, mh.production_year
+ORDER BY
+    average_rating DESC NULLS LAST, company_count DESC;

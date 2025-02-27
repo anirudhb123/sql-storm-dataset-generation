@@ -1,0 +1,56 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        1 AS Level
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal IS NOT NULL)
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        ch.Level + 1
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS Total_Customers,
+    SUM(o.o_totalprice) AS Total_Sales,
+    AVG(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS Avg_Sale_After_Discount,
+    SUM(COALESCE(ps.ps_supplycost, 0) * COALESCE(ps.ps_availqty, 0)) AS Total_Cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    CustomerHierarchy c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 AND SUM(o.o_totalprice) > 100000
+ORDER BY 
+    Total_Sales DESC;

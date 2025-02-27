@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Sales_History AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk, ws_order_number
+),
+Returning_Customers AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(wr_order_number) AS total_returns
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+Customer_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS purchase_count,
+        COALESCE(rc.total_returns, 0) AS total_returns
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN Returning_Customers rc ON c.c_customer_sk = rc.wr_returning_customer_sk
+    GROUP BY c.c_customer_sk
+),
+Top_Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        cs.purchase_count,
+        cs.total_returns,
+        (cs.purchase_count - cs.total_returns) AS net_purchases
+    FROM customer c
+    JOIN Customer_Summary cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE cs.purchase_count > cs.total_returns
+),
+Sales_Analysis AS (
+    SELECT 
+        sh.ws_item_sk,
+        sh.total_sales,
+        thc.c_customer_sk,
+        tc.total_returns,
+        RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM Sales_History sh
+    JOIN Top_Customers tc ON sh.ws_item_sk = tc.c_customer_sk
+)
+
+SELECT 
+    sa.ws_item_sk,
+    sa.total_sales,
+    tc.c_customer_sk,
+    tc.net_purchases,
+    sa.sales_rank
+FROM Sales_Analysis sa
+JOIN Top_Customers tc ON sa.c_customer_sk = tc.c_customer_sk
+WHERE sa.total_sales > (SELECT AVG(total_sales) FROM Sales_History)
+ORDER BY sa.sales_rank;

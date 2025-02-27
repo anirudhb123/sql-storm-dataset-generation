@@ -1,0 +1,55 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_county, ca_state, ca_country, 1 as level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    
+    UNION ALL
+
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_county, ca.ca_state, ca.ca_country, level + 1
+    FROM customer_address ca
+    JOIN AddressCTE cte ON ca.ca_county = cte.ca_county AND ca.ca_state = cte.ca_state
+    WHERE level < 5
+),
+Demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_age_band, COUNT(*) as cnt
+    FROM (
+        SELECT cd_demo_sk, cd_gender, 
+            CASE 
+                WHEN cd_purchase_estimate < 1000 THEN 'Low'
+                WHEN cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+                ELSE 'High' 
+            END as cd_age_band
+        FROM customer_demographics
+    ) AS Sub
+    GROUP BY cd_demo_sk, cd_gender, cd_age_band
+),
+SalesAggregates AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales, COUNT(ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CombinedSales AS (
+    SELECT ss.ws_item_sk, 
+           COALESCE(ws.total_sales, 0) + COALESCE(cs.total_sales, 0) AS combined_sales,
+           ws.order_count + cs.order_count AS total_orders
+    FROM SalesAggregates ws
+    FULL OUTER JOIN (
+        SELECT cs_item_sk, SUM(cs_sales_price) AS total_sales, COUNT(cs_order_number) AS order_count
+        FROM catalog_sales
+        GROUP BY cs_item_sk
+    ) cs ON ws.ws_item_sk = cs.cs_item_sk
+)
+SELECT a.ca_city, a.ca_county, a.ca_country,
+       d.cd_gender, d.cd_age_band, d.cnt AS demographic_count,
+       s.combined_sales, s.total_orders
+FROM AddressCTE a
+LEFT JOIN Demographics d ON a.ca_city = d.cd_demo_sk
+LEFT JOIN CombinedSales s ON s.ws_item_sk = (
+    SELECT i_item_sk FROM item
+    WHERE i_item_desc LIKE '%widget%'
+    LIMIT 1
+)
+WHERE a.ca_country IS NOT NULL
+ORDER BY a.ca_city, d.cd_gender, s.combined_sales DESC
+LIMIT 100;

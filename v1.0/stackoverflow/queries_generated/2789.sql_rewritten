@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+    JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.rn = 1 AND 
+        rp.Score > 0
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.BadgeCount,
+    CASE 
+        WHEN fp.BadgeCount > 5 THEN 'Expert' 
+        ELSE 'Novice' 
+    END AS UserLevel,
+    CASE 
+        WHEN fp.BadgeCount IS NULL THEN 'No badges awarded'
+        ELSE fp.BadgeNames
+    END AS UserBadges
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC
+FETCH FIRST 10 ROWS ONLY;

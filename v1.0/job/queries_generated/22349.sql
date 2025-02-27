@@ -1,0 +1,81 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+),
+FilteredPersons AS (
+    SELECT
+        p.id AS person_id,
+        a.name AS aka_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        p.id, a.name
+    HAVING
+        COUNT(DISTINCT c.movie_id) > 5
+),
+MovieCompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+),
+FinalOutput AS (
+    SELECT
+        rt.title,
+        rt.production_year,
+        fp.aka_name,
+        mci.company_names,
+        mci.company_types,
+        (SELECT AVG(r.movie_count) FROM FilteredPersons r) AS average_movie_count,
+        CASE 
+            WHEN rt.keyword_count IS NULL THEN 'No Keywords'
+            WHEN rt.keyword_count < 2 THEN 'Few Keywords'
+            ELSE 'Many Keywords' 
+        END AS keyword_descriptor
+    FROM
+        RankedTitles rt
+    LEFT JOIN
+        FilteredPersons fp ON rt.title_id = fp.person_id
+    LEFT JOIN
+        MovieCompanyInfo mci ON rt.title_id = mci.movie_id
+    WHERE
+        rt.production_year IS NOT NULL
+        AND (
+            (EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = rt.title_id AND mi.info_type_id = 1))
+            OR (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = rt.title_id) > 3
+        )
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.aka_name,
+    fo.company_names,
+    fo.company_types,
+    fo.average_movie_count,
+    fo.keyword_descriptor
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.production_year DESC, 
+    fo.title;

@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= DATEADD(MONTH, -12, GETDATE())
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_mktsegment,
+        COALESCE(cu.order_count, 0) AS recent_order_count,
+        COALESCE(cu.total_spent, 0) AS recent_total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders cu ON c.c_custkey = cu.c_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT 
+    p.p_name,
+    COUNT(*) AS order_count,
+    SUM(l.l_quantity * (1 - l.l_discount)) AS total_sold_quantity,
+    ROUND(AVG(l.l_extendedprice * (1 - l.l_discount)), 2) AS avg_discounted_price,
+    MAX(s.s_name) AS supplier_name,
+    COALESCE(RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC), 'Unknown') AS rank,
+    CASE 
+        WHEN SUM(l.l_quantity) > 0 THEN 'Available' 
+        ELSE 'Out of Stock' 
+    END AS stock_status
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+JOIN 
+    HighValueCustomers hvc ON o.o_custkey = hvc.c_custkey
+WHERE 
+    hvc.recent_order_count > 0
+GROUP BY 
+    p.p_name
+HAVING 
+    COUNT(*) > (SELECT AVG(order_count) FROM CustomerOrders)
+ORDER BY 
+    total_sold_quantity DESC, 
+    p.p_name ASC;

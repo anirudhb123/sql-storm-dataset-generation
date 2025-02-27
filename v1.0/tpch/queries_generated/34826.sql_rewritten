@@ -1,0 +1,47 @@
+WITH RECURSIVE TotalSupplierCosts AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+RankedSuppliers AS (
+    SELECT s.s_name, s.s_nationkey, tsc.total_cost,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY tsc.total_cost DESC) AS rank
+    FROM supplier s
+    JOIN TotalSupplierCosts tsc ON s.s_suppkey = tsc.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredCustomers AS (
+    SELECT co.c_custkey, co.c_name, co.total_order_value,
+           COALESCE(r.n_name, 'Unknown') AS nation
+    FROM CustomerOrders co
+    LEFT JOIN nation r ON co.c_custkey IN (SELECT c_nationkey FROM customer WHERE c_custkey = co.c_custkey)
+),
+HighValueCustomers AS (
+    SELECT fc.c_custkey, fc.c_name, fc.total_order_value, fc.nation
+    FROM FilteredCustomers fc
+    WHERE fc.total_order_value > (
+        SELECT AVG(total_order_value)
+        FROM FilteredCustomers
+    )
+),
+SupplyDetails AS (
+    SELECT p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_name
+)
+SELECT hvc.c_name, hvc.total_order_value, sd.p_name, sd.supplier_count,
+       CASE 
+           WHEN sd.supplier_count > 5 THEN 'High Supply'
+           ELSE 'Low Supply'
+       END AS supply_status,
+       RANK() OVER (ORDER BY hvc.total_order_value DESC) AS customer_rank
+FROM HighValueCustomers hvc
+JOIN SupplyDetails sd ON hvc.total_order_value > (SELECT AVG(total_order_value) FROM HighValueCustomers)
+ORDER BY hvc.total_order_value DESC, supply_status;

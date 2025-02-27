@@ -1,0 +1,92 @@
+WITH UserReputation AS (
+    SELECT
+        Id,
+        DisplayName,
+        Reputation,
+        CASE
+            WHEN Reputation > 1000 THEN 'High Reputation'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory
+    FROM
+        Users
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        pt.Name AS PostType,
+        COALESCE(au.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        (
+            SELECT COUNT(*)
+            FROM Comments c
+            WHERE c.PostId = p.Id
+        ) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByCreationDate
+    FROM
+        Posts p
+    LEFT JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Users au ON p.OwnerUserId = au.Id
+    LEFT JOIN
+        Posts a ON a.ParentId = p.Id
+    WHERE
+        p.CreationDate > DATEADD(year, -2, GETDATE()) OR p.Score > 10
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, pt.Name, au.DisplayName
+),
+RecentUserBadges AS (
+    SELECT
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Badges b
+    WHERE
+        b.Date > DATEADD(month, -6, GETDATE())
+    GROUP BY
+        b.UserId
+),
+AggregatedData AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ur.ReputationCategory, 'Unknown') AS ReputationCategory,
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.AnswerCount,
+        pd.CommentCount,
+        rb.BadgeNames
+    FROM
+        UserReputation ur
+    FULL OUTER JOIN
+        PostDetails pd ON pd.OwnerDisplayName = ur.DisplayName
+    FULL OUTER JOIN
+        RecentUserBadges rb ON ur.Id = rb.UserId
+    JOIN Users u ON ur.Id = u.Id OR pd.OwnerDisplayName = u.DisplayName
+)
+SELECT
+    UserId,
+    DisplayName,
+    ReputationCategory,
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    AnswerCount,
+    CommentCount,
+    BadgeNames
+FROM
+    AggregatedData
+WHERE
+    (ReputationCategory IS NOT NULL OR BadgeNames IS NOT NULL)
+    AND Score > 5
+ORDER BY
+    ReputationCategory DESC, Score DESC, CreationDate DESC
+OPTION (MAXRECURSION 0);

@@ -1,0 +1,82 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CAST('1998-10-01' AS DATE)) AND o.o_orderstatus IN ('F', 'O')
+),
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS high_value_total
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+),
+SupplierPartPairs AS (
+    SELECT DISTINCT
+        ps.ps_partkey,
+        s.s_suppkey,
+        COALESCE(NULLIF(ps.ps_availqty, 0), -1) AS available_qty
+    FROM 
+        partsupp ps
+    LEFT OUTER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(su.s_acctbal) AS average_acct_balance,
+    SUM(COALESCE(hv.high_value_total, 0)) AS total_high_value,
+    MAX(CASE WHEN su.rank = 1 THEN su.s_name END) AS top_supplier,
+    STRING_AGG(DISTINCT CAST(o.o_orderkey AS TEXT), ', ') FILTER (WHERE o.o_orderkey IS NOT NULL) AS order_keys
+FROM 
+    part p
+LEFT JOIN 
+    SupplierPartPairs ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers su ON ps.s_suppkey = su.s_suppkey
+LEFT JOIN 
+    HighValueLineItems hv ON hv.l_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey LIMIT 1)
+LEFT JOIN 
+    RecentOrders o ON o.o_orderkey = hv.l_orderkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) >= 2 AND 
+    AVG(su.s_acctbal) IS NOT NULL AND
+    SUM(COALESCE(hv.high_value_total, 0)) > 10000
+ORDER BY 
+    supplier_count DESC, 
+    total_high_value DESC
+LIMIT 50;

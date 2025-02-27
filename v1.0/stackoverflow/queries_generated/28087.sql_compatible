@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        ARRAY_LENGTH(string_to_array(p.Tags, '>'), 1) AS TagCount,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.AcceptedAnswerId, p.OwnerUserId, p.Score
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 100 
+)
+SELECT 
+    ru.DisplayName AS Author,
+    p.Title,
+    p.TagCount AS NumberOfTags,
+    cnt.CommentCount,
+    COALESCE(a.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    p.UpVotes - p.DownVotes AS NetVotes
+FROM 
+    RankedPosts p
+JOIN 
+    Comments cnt ON p.PostId = cnt.PostId
+LEFT JOIN 
+    Posts a ON p.AcceptedAnswerId = a.Id
+JOIN 
+    Users ru ON p.OwnerUserId = ru.Id
+JOIN 
+    TopUsers tu ON ru.Id = tu.UserId
+WHERE 
+    tu.UserRank <= 10 
+ORDER BY 
+    NetVotes DESC, 
+    p.CreationDate DESC
+LIMIT 100;

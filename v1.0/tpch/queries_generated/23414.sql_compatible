@@ -1,0 +1,85 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supply_cost,
+        CASE 
+            WHEN ss.avg_acct_balance IS NULL THEN 'NEVER'
+            WHEN ss.avg_acct_balance < 1000 THEN 'LOW'
+            WHEN ss.avg_acct_balance BETWEEN 1000 AND 5000 THEN 'MEDIUM'
+            ELSE 'HIGH'
+        END AS balance_category
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+), 
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COUNT(DISTINCT po.p_partkey) AS unique_part_count,
+    SUM(COALESCE(co.total_revenue, 0)) AS total_order_revenue,
+    ts.balance_category
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders co ON c.c_custkey = co.o_custkey
+LEFT JOIN 
+    RankedParts po ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = po.p_partkey 
+        AND ps.ps_suppkey IN (SELECT s.s_suppkey FROM TopSuppliers ts)
+    )
+LEFT JOIN 
+    TopSuppliers ts ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = ts.s_suppkey
+    )
+GROUP BY 
+    c.c_custkey, c.c_name, ts.balance_category
+HAVING 
+    SUM(COALESCE(co.total_revenue, 0)) > 1000 AND
+    COUNT(DISTINCT po.p_partkey) > 5
+ORDER BY 
+    total_order_revenue DESC, 
+    unique_part_count ASC;

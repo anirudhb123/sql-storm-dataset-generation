@@ -1,0 +1,53 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        us.UserId,
+        u.Reputation,
+        us.TotalBadges,
+        ps.TotalPosts,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.TotalScore,
+        ps.TotalViews,
+        RANK() OVER (ORDER BY us.TotalBadges DESC, u.Reputation DESC) AS BadgeRank
+    FROM UserBadgeStats us
+    JOIN Users u ON us.UserId = u.Id
+    LEFT JOIN PostStats ps ON us.UserId = ps.OwnerUserId
+)
+SELECT 
+    ua.DisplayName,
+    ua.Reputation,
+    ua.TotalBadges,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalScore,
+    ua.TotalViews,
+    ua.BadgeRank
+FROM UserActivity ua
+WHERE ua.TotalPosts IS NOT NULL
+ORDER BY ua.BadgeRank, ua.Reputation DESC
+LIMIT 50;

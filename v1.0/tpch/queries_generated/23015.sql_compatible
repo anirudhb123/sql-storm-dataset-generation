@@ -1,0 +1,48 @@
+
+WITH RECURSIVE supplier_ranks AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+part_supplier_join AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, s.s_suppkey, s.s_name, s.s_nationkey
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    AVG(ps.ps_supplycost) AS avg_supplycost,
+    SUM(CASE 
+        WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount)
+        ELSE l.l_extendedprice END) AS net_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    COALESCE(hr.total_spent, 0) AS high_value_total_spent
+FROM part_supplier_join p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN high_value_customers hr ON hr.c_custkey IN (SELECT c.c_custkey 
+                                                       FROM customer c
+                                                       WHERE c.c_nationkey = p.s_nationkey)
+LEFT JOIN supplier_ranks sr ON sr.s_suppkey = p.s_suppkey
+WHERE p.p_size > 10
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    s.s_name,
+    hr.total_spent
+HAVING 
+    AVG(ps.ps_supplycost) IS NOT NULL
+ORDER BY 
+    avg_supplycost DESC,
+    unique_customers DESC
+LIMIT 100;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tags_sub ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tags_sub
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.*,
+        ROW_NUMBER() OVER (ORDER BY rp.ViewCount DESC, rp.Score DESC) AS Rank
+    FROM 
+        RankedPosts rp
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReasonComment,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened
+    GROUP BY 
+        ph.PostId, ph.Comment
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Body,
+    pp.CreationDate,
+    pp.ViewCount,
+    pp.Score,
+    pp.AnswerCount,
+    pp.OwnerDisplayName,
+    pp.Tags,
+    c.CloseReasonComment,
+    c.CloseCount
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    ClosedPostReasons c ON pp.PostId = c.PostId
+WHERE 
+    pp.Rank <= 10 -- Top 10 popular questions
+ORDER BY 
+    pp.ViewCount DESC, 
+    pp.Score DESC;

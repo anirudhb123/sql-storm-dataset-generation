@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-10-01'
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    p.p_name AS part_name,
+    sp.total_avail_qty,
+    sp.avg_supply_cost,
+    o.o_orderkey,
+    o.o_orderdate,
+    c.c_name AS customer_name,
+    c.order_count,
+    c.total_spent
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedOrders o ON p.p_partkey = o.o_orderkey
+LEFT JOIN 
+    CustomerOrderSummary c ON o.o_orderkey = c.order_count
+WHERE 
+    sp.avg_supply_cost > (
+        SELECT AVG(ps_supplycost) * 1.1 
+        FROM partsupp 
+        WHERE ps_partkey = p.p_partkey
+    )
+ORDER BY 
+    nation_name, part_name, o.o_orderdate DESC;

@@ -1,0 +1,110 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.Id = r.ParentId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE 
+            WHEN p.ViewCount IS NULL THEN 0 
+            ELSE p.ViewCount 
+        END) AS TotalViews,
+        AVG(CASE 
+            WHEN p.Score IS NULL THEN 0 
+            ELSE p.Score 
+        END) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS UpVotes,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1 
+            ELSE 0 
+        END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        us.PostCount,
+        us.TotalViews,
+        us.AvgScore,
+        ROW_NUMBER() OVER (ORDER BY us.TotalViews DESC) AS Rank
+    FROM 
+        UserPostStats us
+    JOIN 
+        Users u ON us.UserId = u.Id
+    WHERE 
+        us.PostCount > 10 
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(p_view.UpVotes, 0) AS UpVotes,
+        COALESCE(p_view.DownVotes, 0) AS DownVotes,
+        u.DisplayName AS OwnerDisplayName,
+        CASE 
+            WHEN ph.PostId IS NULL THEN 'No Parent'
+            ELSE ph.Title 
+        END AS ParentTitle
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary p_view ON p.Id = p_view.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.AcceptedAnswerId = ph.PostId
+)
+SELECT 
+    tu.Rank,
+    tu.DisplayName,
+    fp.Title,
+    fp.UpVotes - fp.DownVotes AS NetVotes,
+    fp.ParentTitle,
+    fp.OwnerDisplayName
+FROM 
+    TopUsers tu
+JOIN 
+    FilteredPosts fp ON tu.UserId = fp.OwnerDisplayName
+ORDER BY 
+    tu.Rank, NetVotes DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

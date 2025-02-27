@@ -1,0 +1,48 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CASE WHEN LENGTH(s.s_comment) = 0 THEN NULL ELSE s.s_comment END AS supplier_comment,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CASE WHEN LENGTH(s.s_comment) = 0 THEN NULL ELSE s.s_comment END AS supplier_comment,
+           sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size IN (10, 20, 30)
+),
+excessive_selling AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+top_revenue_orders AS (
+    SELECT order_key, total_revenue,
+           RANK() OVER (ORDER BY total_revenue DESC) AS order_rank
+    FROM excessive_selling
+),
+final_selection AS (
+    SELECT s_h.s_name, p_s.p_name, p_s.ps_availqty, p_s.ps_supplycost, o.tro.total_revenue
+    FROM supplier_hierarchy s_h
+    LEFT JOIN (
+        SELECT ps.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+        FROM part_supplier ps
+        WHERE ps.rank = 1
+    ) p_s ON s_h.s_suppkey = p_s.ps_partkey
+    LEFT JOIN top_revenue_orders o_tro ON o_tro.order_key = s_h.s_suppkey
+    WHERE (s_h.s_acctbal IS NOT NULL OR o_tro.total_revenue IS NOT NULL)
+)
+SELECT * 
+FROM final_selection
+WHERE s_name IS NOT NULL AND total_revenue IS NOT NULL
+ORDER BY total_revenue DESC, p_name;

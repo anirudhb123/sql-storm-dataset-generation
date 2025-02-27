@@ -1,0 +1,81 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.wg_sales_date_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+TopWebSales AS (
+    SELECT 
+        r.sales_date_sk,
+        r.item_sk,
+        r.order_number,
+        r.net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rn <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+),
+SalesWithDemographics AS (
+    SELECT 
+        tws.sales_date_sk,
+        tws.item_sk,
+        tws.order_number,
+        tws.net_profit,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        TopWebSales tws
+    LEFT JOIN 
+        CustomerDemographics cd ON tws.net_profit > cd.cd_purchase_estimate
+),
+FinalResults AS (
+    SELECT 
+        s.ws_item_sk,
+        COUNT(*) AS total_sales,
+        AVG(s.ws_net_profit) AS avg_net_profit,
+        MAX(s.ws_net_profit) AS max_net_profit,
+        MIN(s.ws_net_profit) AS min_net_profit,
+        STRING_AGG(DISTINCT CONCAT(cd.cd_gender, ': ', COUNT(*)) ORDER BY cd.cd_gender) AS gender_distribution
+    FROM 
+        web_sales s
+    INNER JOIN 
+        SalesWithDemographics sd ON s.ws_item_sk = sd.item_sk
+    WHERE 
+        sd.cd_marital_status IS NOT NULL
+    GROUP BY 
+        s.ws_item_sk
+)
+SELECT 
+    f.ws_item_sk, 
+    f.total_sales, 
+    f.avg_net_profit, 
+    f.max_net_profit,
+    f.min_net_profit,
+    CASE 
+        WHEN f.avg_net_profit IS NULL THEN 'No Data' 
+        ELSE f.gender_distribution 
+    END AS gender_distribution
+FROM 
+    FinalResults f
+ORDER BY 
+    f.avg_net_profit DESC
+LIMIT 50;

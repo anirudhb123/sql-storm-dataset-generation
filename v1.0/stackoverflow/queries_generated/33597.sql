@@ -1,0 +1,94 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title AS PostTitle, 
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        A.Id AS PostId, 
+        A.Title AS PostTitle, 
+        A.OwnerUserId,
+        PH.Level + 1 AS Level
+    FROM 
+        Posts A
+    INNER JOIN 
+        PostHierarchy PH ON A.ParentId = PH.PostId
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PopularPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.PostTitle,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(AV.UpVotes, 0) AS UpVotes,
+        COALESCE(AV.DownVotes, 0) AS DownVotes,
+        PH.Level
+    FROM 
+        PostHierarchy PH
+    LEFT JOIN 
+        Users U ON PH.OwnerUserId = U.Id
+    LEFT JOIN 
+        AggregatedVotes AV ON PH.PostId = AV.PostId
+    WHERE 
+        PH.Level = 1
+    ORDER BY 
+        UpVotes DESC
+    LIMIT 20
+),
+RecentEdits AS (
+    SELECT 
+        P.Title,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (2, 4, 6) -- Edit Body, Edit Title, Edit Tags
+        AND PH.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    PP.PostTitle,
+    PP.OwnerDisplayName,
+    PP.UpVotes,
+    PP.DownVotes,
+    RE. RecentEditsCount,
+    RE.Comment AS RecentComment,
+    ROW_NUMBER() OVER (PARTITION BY PP.PostId ORDER BY RE.CreationDate DESC) AS RecentEditRank
+FROM 
+    PopularPosts PP
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS RecentEditsCount,
+        MAX(CreationDate) AS MostRecentEdit
+    FROM 
+        RecentEdits
+    GROUP BY 
+        PostId
+) RE ON PP.PostId = RE.PostId
+WHERE 
+    RecentEditRank = 1 OR RecentEditRank IS NULL  -- Only showing the most recent edit or posts without edits
+ORDER BY 
+    PP.UpVotes DESC, 
+    PP.Level ASC;
+

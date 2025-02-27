@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_paid) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(wp.wp_url, 'No Website') AS web_page_url,
+        SUM(COALESCE(s.total_quantity, 0)) AS total_quantity,
+        SUM(COALESCE(s.total_sales, 0)) AS total_sales,
+        COUNT(DISTINCT w.web_site_sk) AS site_count
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesCTE s ON i.i_item_sk = s.ws_item_sk
+    LEFT JOIN 
+        web_page wp ON i.i_item_id = wp.wp_web_page_id
+    LEFT JOIN 
+        web_site w ON w.web_site_sk = wp.wp_web_page_sk
+    GROUP BY 
+        i.i_item_id, wp.wp_url
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    item_sales.i_item_id,
+    item_sales.total_quantity,
+    item_sales.total_sales,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN item_sales.total_sales > 10000 THEN 'High Performer'
+        WHEN item_sales.total_sales BETWEEN 5000 AND 10000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    ItemSales item_sales
+LEFT JOIN 
+    CustomerReturns cr ON item_sales.i_item_id = cr.sr_item_sk
+WHERE 
+    item_sales.site_count > 0
+ORDER BY 
+    item_sales.total_sales DESC
+LIMIT 50;

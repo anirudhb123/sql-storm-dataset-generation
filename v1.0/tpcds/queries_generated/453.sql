@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(*) AS total_sales,
+        SUM(cs.cs_net_paid) AS total_revenue,
+        AVG(cs.cs_net_paid) AS avg_sale_value,
+        MAX(cs.cs_net_paid) AS max_sale_value
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    WHERE
+        c.c_birth_year BETWEEN 1980 AND 1995
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.total_revenue,
+        cs.avg_sale_value,
+        cs.max_sale_value
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_revenue > 5000
+),
+Returns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+)
+SELECT 
+    hv.c_customer_id,
+    hv.total_sales,
+    hv.total_revenue,
+    hv.avg_sale_value,
+    hv.max_sale_value,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    (hv.total_revenue - COALESCE(r.total_returns, 0)) AS net_revenue,
+    CASE 
+        WHEN hv.total_sales > 20 THEN 'Frequent Buyer'
+        WHEN hv.total_sales BETWEEN 10 AND 20 THEN 'Occasional Buyer'
+        ELSE 'Rare Buyer'
+    END AS customer_segment
+FROM 
+    HighValueCustomers hv
+LEFT JOIN 
+    Returns r ON hv.c_customer_id = r.sr_returning_customer_sk
+WHERE 
+    hv.total_sales > 5
+ORDER BY 
+    net_revenue DESC
+LIMIT 10;

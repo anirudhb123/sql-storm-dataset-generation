@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        LEAD(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS NextPostDate,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id AND PostTypeId = 1) AS QuestionCount
+    FROM 
+        Users u
+),
+PostAndVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.NextPostDate,
+    rp.ScoreRank,
+    ur.Reputation,
+    ur.QuestionCount,
+    pv.VoteCount,
+    pv.Upvotes,
+    pv.Downvotes,
+    CASE 
+        WHEN pv.Upvotes > pv.Downvotes THEN 'Positive'
+        WHEN pv.Upvotes < pv.Downvotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ur.UserId)
+LEFT JOIN 
+    PostAndVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    rp.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)
+ORDER BY 
+    rp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,83 @@
+WITH RecursiveVotes AS (
+    SELECT
+        V.PostId,
+        V.UserId,
+        V.CreationDate,
+        V.VoteTypeId,
+        RANK() OVER (PARTITION BY V.PostId ORDER BY V.CreationDate DESC) AS VoteRank
+    FROM Votes V
+),
+UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE 
+            WHEN V.VoteTypeId = 2 THEN 1
+            WHEN V.VoteTypeId = 3 THEN -1
+            ELSE 0 END), 0) AS Score,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE 
+            WHEN V.VoteTypeId = 2 THEN 1
+            WHEN V.VoteTypeId = 3 THEN -1
+            ELSE 0 END), 0) DESC) AS ScoreRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.CreationDate > DATEADD(MONTH, -1, cast('2024-10-01 12:34:56' as timestamp)) 
+    WHERE P.Score >= 0 AND P.ViewCount IS NOT NULL
+    GROUP BY P.Id, P.Title, P.ViewCount
+),
+ClosedPosts AS (
+    SELECT
+        Ph.PostId,
+        MAX(Ph.CreationDate) AS ClosedDate
+    FROM PostHistory Ph
+    WHERE Ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY Ph.PostId
+),
+FilteredPosts AS (
+    SELECT
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.CommentCount,
+        PS.Score,
+        PS.ScoreRank,
+        CB.ClosedDate
+    FROM PostStatistics PS
+    LEFT JOIN ClosedPosts CB ON PS.PostId = CB.PostId
+    WHERE (CB.ClosedDate IS NULL OR CB.ClosedDate < DATEADD(DAY, -30, cast('2024-10-01 12:34:56' as timestamp))) 
+    AND PS.ScoreRank <= 10 
+)
+
+SELECT
+    FP.PostId,
+    FP.Title,
+    FP.ViewCount,
+    FP.CommentCount,
+    FP.Score,
+    U.BadgeCount,
+    U.BadgeNames,
+    CASE 
+        WHEN FP.Score IS NULL THEN 'NEW POST'
+        WHEN FP.Score >= 10 THEN 'HOT'
+        ELSE 'COLD'
+    END AS PostTemperature,
+    (SELECT 
+        COALESCE(STRING_AGG(DISTINCT T.TagName, ', '), 'No Tags')
+     FROM Tags T
+     LEFT JOIN LATERAL STRING_TO_ARRAY(P.Tags, ',') AS TagArray ON T.TagName = TagArray 
+     WHERE P.Id = FP.PostId) AS AssociatedTags
+FROM FilteredPosts FP
+LEFT JOIN UserBadges U ON FP.PostId = U.UserId
+ORDER BY FP.Score DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

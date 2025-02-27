@@ -1,0 +1,62 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesPerformance AS (
+    SELECT 
+        CASE 
+            WHEN ws_bill_customer_sk IS NOT NULL THEN 'Web'
+            WHEN ss_customer_sk IS NOT NULL THEN 'Store'
+            ELSE 'Unknown'
+        END AS sales_channel,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM (
+        SELECT ws_bill_customer_sk, ws_net_profit FROM web_sales
+        UNION ALL
+        SELECT ss_customer_sk, ss_net_profit FROM store_sales
+    ) AS sales_data
+    GROUP BY sales_channel
+),
+CustomerSales AS (
+    SELECT 
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        sp.sales_channel,
+        sp.total_sales,
+        sp.total_net_profit
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        SalesPerformance sp ON cd.c_customer_id = CASE WHEN sp.sales_channel = 'Web' THEN ws_bill_customer_sk ELSE ss_customer_sk END
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    sales_channel,
+    total_sales,
+    total_net_profit,
+    ROUND(total_net_profit / NULLIF(total_sales, 0), 2) AS avg_profit_per_sale
+FROM 
+    CustomerSales
+WHERE 
+    cd_gender IN ('M', 'F')
+ORDER BY 
+    avg_profit_per_sale DESC
+LIMIT 10;

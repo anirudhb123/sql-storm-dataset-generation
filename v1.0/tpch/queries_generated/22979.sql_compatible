@@ -1,0 +1,63 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierRevenue AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+RankedOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_revenue,
+        RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM 
+        OrderSummary os
+),
+TopSuppliers AS (
+    SELECT 
+        sr.ps_suppkey,
+        RANK() OVER (ORDER BY sr.supplier_revenue DESC) AS supplier_rank
+    FROM 
+        SupplierRevenue sr
+)
+SELECT 
+    r.r_name,
+    COALESCE(su.supplier_rank, 0) AS supplier_rank,
+    COALESCE(o.revenue_rank, 0) AS revenue_rank,
+    COUNT(DISTINCT c.c_custkey) AS customer_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    TopSuppliers su ON s.s_suppkey = su.ps_suppkey
+LEFT JOIN 
+    orders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN
+    customer c ON o.o_custkey = c.c_custkey
+GROUP BY 
+    r.r_name, su.supplier_rank, o.revenue_rank 
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 AND (COALESCE(o.revenue_rank, 0) BETWEEN 1 AND 5 OR su.supplier_rank IS NOT NULL)
+ORDER BY 
+    r.r_name ASC, su.supplier_rank DESC, o.revenue_rank ASC;

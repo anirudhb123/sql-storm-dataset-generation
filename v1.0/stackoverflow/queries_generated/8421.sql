@@ -1,0 +1,56 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes
+),
+PopularTags AS (
+    SELECT 
+        TR.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags TR
+    JOIN Posts P ON TR.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY TR.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 month'
+    ORDER BY P.CreationDate DESC
+    LIMIT 10
+)
+SELECT 
+    US.DisplayName AS UserName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalComments,
+    US.TotalBadges,
+    PT.TagName AS PopularTag,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.Author AS RecentPostAuthor
+FROM UserStats US
+CROSS JOIN PopularTags PT
+CROSS JOIN RecentPosts RP
+ORDER BY US.Reputation DESC, PT.PostCount DESC, RP.CreationDate DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451000 AND 2451200
+    GROUP BY 
+        ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        ranked.total_quantity,
+        ranked.total_sales
+    FROM 
+        RankedSales ranked
+    JOIN 
+        item ON ranked.ws_item_sk = item.i_item_sk
+    WHERE 
+        ranked.sales_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        customer.c_customer_id,
+        customer.c_first_name,
+        customer.c_last_name,
+        demo.cd_gender,
+        demo.cd_education_status
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics demo ON customer.c_current_cdemo_sk = demo.cd_demo_sk
+    WHERE 
+        demo.cd_marital_status = 'M'
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_education_status,
+    ts.i_item_id,
+    ts.i_item_desc,
+    ts.total_quantity,
+    ts.total_sales
+FROM 
+    TopSales ts
+JOIN 
+    CustomerInfo ci ON ci.c_customer_id IN (
+        SELECT DISTINCT ws_bill_customer_sk FROM web_sales
+        WHERE ws_item_sk = ts.i_item_sk
+    )
+ORDER BY 
+    ts.total_sales DESC, 
+    ci.c_last_name, 
+    ci.c_first_name;

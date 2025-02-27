@@ -1,0 +1,52 @@
+WITH SupplierCosts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerExpenses AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_expense
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_mfgr, SUM(ps.ps_availqty) AS available_quantity
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_mfgr
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, rc.total_cost
+    FROM SupplierCosts rc
+    ORDER BY rc.total_cost DESC
+    LIMIT 10
+),
+TopCustomers AS (
+    SELECT ce.c_custkey, ce.c_name, ce.total_expense
+    FROM CustomerExpenses ce
+    ORDER BY ce.total_expense DESC
+    LIMIT 10
+)
+
+SELECT 
+    pc.p_partkey,
+    pc.p_name,
+    pc.p_brand,
+    pc.p_mfgr,
+    ts.s_suppkey,
+    ts.s_name AS supplier_name,
+    tc.c_custkey,
+    tc.c_name AS customer_name,
+    pc.available_quantity
+FROM 
+    PartDetails pc
+JOIN 
+    TopSuppliers ts ON pc.p_partkey = ts.s_suppkey
+JOIN 
+    TopCustomers tc ON ts.s_suppkey = tc.c_custkey
+WHERE 
+    pc.available_quantity > 100
+ORDER BY 
+    pc.p_partkey, tc.total_expense DESC;

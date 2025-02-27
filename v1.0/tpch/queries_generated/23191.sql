@@ -1,0 +1,50 @@
+WITH RECURSIVE price_variation AS (
+    SELECT p_partkey, p_name, p_retailprice, 0 AS level
+    FROM part
+    WHERE p_retailprice IS NOT NULL
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_retailprice * (1 + ((RAND() * 2) - 1) * 0.1) AS price_variation
+    FROM part p
+    JOIN price_variation pv ON p.p_partkey = pv.p_partkey
+    WHERE level < 3
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING total_orders > (
+        SELECT AVG(total_orders)
+        FROM (
+            SELECT COUNT(*) AS total_orders
+            FROM orders
+            GROUP BY o_custkey
+        ) AS avg_orders
+    )
+),
+nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, SUM(s.s_acctbal) AS total_balance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+final_selection AS (
+    SELECT pv.p_partkey, pv.p_name, pv.p_retailprice, co.total_orders, ns.total_balance
+    FROM price_variation pv
+    JOIN customer_orders co ON 1 = 1  -- Cartesian product for full analysis
+    FULL OUTER JOIN nation_supplier ns ON ns.total_balance IS NOT NULL
+    WHERE pv.p_retailprice > (SELECT AVG(price) FROM price_variation)
+      AND (ns.total_balance IS NULL OR ns.total_balance >= 10000)
+)
+SELECT DISTINCT f.p_partkey, f.p_name, 
+       CASE 
+           WHEN f.total_orders > 10 THEN 'High Order Customer'
+           ELSE 'General Customer'
+       END AS customer_type,
+       f.p_retailprice * (1 + f.total_balance / 100000) AS adjusted_price
+FROM final_selection f 
+WHERE f.p_name LIKE '%part%' 
+  AND f.total_orders IS NOT NULL 
+  AND f.total_balance IS NOT NULL
+ORDER BY adjusted_price DESC
+LIMIT 50;

@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+  
+    SELECT su.s_suppkey, su.s_name, su.s_nationkey, sh.level + 1
+    FROM supplier su
+    JOIN SupplierHierarchy sh ON su.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+)
+, OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS gross_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+, HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, CASE 
+        WHEN o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'High'
+        ELSE 'Normal' END AS order_value
+    FROM orders o
+)
+SELECT r.r_name,
+       COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+       COALESCE(SUM(os.gross_revenue), 0) AS total_gross_revenue,
+       STRING_AGG(DISTINCT sh.s_name, ', ') FILTER (WHERE sh.level = 2) AS middle_level_suppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN OrderStats os ON ps.ps_partkey = (SELECT p.p_partkey 
+                                              FROM part p 
+                                              WHERE p.p_size = 10 
+                                              ORDER BY p.p_retailprice DESC LIMIT 1)
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE r.r_comment IS NOT NULL
+GROUP BY r.r_regionkey, r.r_name
+HAVING SUM(ps.ps_availqty) > 0
+ORDER BY total_supply_cost DESC, nation_count DESC;

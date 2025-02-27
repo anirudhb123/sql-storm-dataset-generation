@@ -1,0 +1,86 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword), 'No Keywords') AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%')
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+DirectorDetails AS (
+    SELECT 
+        ci.movie_id,
+        COALESCE(ak.name, 'Unknown Director') AS director_name
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+),
+AggregatedData AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.cast_count,
+        md.production_companies,
+        dd.director_name,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rn
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        DirectorDetails dd ON md.movie_id = dd.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    keywords,
+    cast_count,
+    production_companies,
+    director_name
+FROM 
+    AggregatedData
+WHERE 
+    (cast_count > 5 OR production_companies > 1)
+    AND rn BETWEEN 1 AND 10
+ORDER BY 
+    production_year DESC, cast_count DESC;
+
+-- With an optional string concatenation of directors and movie titles for further customization
+SELECT 
+    STRING_AGG(CONCAT(title, ' (Directed by: ', COALESCE(director_name, 'Unknown'), ')'), ', ') AS movies
+FROM 
+    AggregatedData
+WHERE 
+    production_year = (SELECT MAX(production_year) FROM AggregatedData);
+
+-- Finally, we can check for the NULL logic
+SELECT 
+    (CASE 
+        WHEN COUNT(*) = 0 THEN 'No Movies Found'
+        ELSE 'Movies Exist'
+    END) AS Movie_Status
+FROM 
+    AggregatedData
+WHERE 
+    production_companies IS NULL;

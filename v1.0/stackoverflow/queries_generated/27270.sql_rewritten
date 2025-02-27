@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(t.TagName) AS TagsArray,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Text AS EditText,
+        p.Title AS PostTitle,
+        p.ViewCount,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName, ph.CreationDate, p.Title, p.ViewCount
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.TagsArray,
+    rp.CommentCount,
+    pts.EditText,
+    pts.UserDisplayName AS LastEditor,
+    pts.CreationDate AS LastEditDate,
+    ubc.BadgeCount,
+    rp.RankByViews
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary pts ON pts.PostId = rp.PostId
+LEFT JOIN 
+    UserBadgeCounts ubc ON ubc.UserId = rp.OwnerUserId
+ORDER BY 
+    rp.ViewCount DESC, rp.RankByViews;

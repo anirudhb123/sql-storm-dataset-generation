@@ -1,0 +1,91 @@
+WITH movie_with_cast AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.person_id,
+        a.name AS actor_name,
+        rank() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        t.production_year IS NOT NULL
+        AND c.nr_order IS NOT NULL
+),
+actor_movie_info AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.actor_name,
+        CASE 
+            WHEN m.production_year < 2000 THEN 'Classic'
+            WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era,
+        COUNT(m.actor_name) OVER (PARTITION BY m.movie_id) AS num_actors
+    FROM
+        movie_with_cast m
+),
+company_movie_info AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(c.name, ', ') AS companies,
+        STRING_AGG(ct.kind, ', ') AS company_types
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+),
+final_movie_info AS (
+    SELECT
+        a.*,
+        cm.companies,
+        cm.company_types
+    FROM
+        actor_movie_info a
+    LEFT JOIN
+        company_movie_info cm ON a.movie_id = cm.movie_id
+),
+strange_movies AS (
+    SELECT
+        f.*,
+        CASE 
+            WHEN f.title LIKE '%(Q)%' THEN 'Q anomalous' 
+            WHEN f.num_actors > 20 THEN 'Ensemble'
+            ELSE 'Regular'
+        END AS classification
+    FROM
+        final_movie_info f
+    WHERE
+        f.era = 'Modern' AND (f.num_actors IS NULL OR f.num_actors > 5)
+)
+SELECT
+    sm.movie_id,
+    sm.title,
+    sm.production_year,
+    sm.actor_name,
+    sm.companies,
+    sm.company_types,
+    sm.classification
+FROM
+    strange_movies sm
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM cast_info ci
+        WHERE ci.movie_id = sm.movie_id
+        AND ci.role_id IS NULL
+    )
+ORDER BY
+    sm.production_year DESC,
+    sm.actor_rank
+LIMIT 50;

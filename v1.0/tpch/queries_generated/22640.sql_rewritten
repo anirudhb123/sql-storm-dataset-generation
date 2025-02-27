@@ -1,0 +1,88 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_comment IS NOT NULL AND n.n_comment <> ''
+), 
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.rank <= 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+OrderStatusSummary AS (
+    SELECT 
+        o.o_orderstatus,
+        COUNT(*) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY 
+        o.o_orderstatus
+), 
+FinalSelection AS (
+    SELECT 
+        c.c_name,
+        co.total_spent,
+        os.order_count AS status_order_count,
+        COALESCE(ts.total_cost, 0) AS supplier_total_cost
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        OrderStatusSummary os ON co.order_count = os.order_count
+    LEFT JOIN 
+        TopSuppliers ts ON ts.s_suppkey = (
+            SELECT ps.s_suppkey FROM partsupp ps 
+            WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10) 
+            ORDER BY ps.ps_availqty DESC LIMIT 1
+        )
+    JOIN 
+        nation n ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ts.s_suppkey)
+    WHERE 
+        co.total_spent IS NOT NULL AND 
+        (co.total_spent - supplier_total_cost) > 1000
+)
+SELECT 
+    f.c_name,
+    f.total_spent,
+    f.status_order_count,
+    f.supplier_total_cost
+FROM 
+    FinalSelection f
+WHERE 
+    f.supplier_total_cost IS NOT NULL OR f.supplier_total_cost > 1000
+ORDER BY 
+    f.total_spent DESC, f.supplier_total_cost ASC
+FETCH FIRST 10 ROWS ONLY;

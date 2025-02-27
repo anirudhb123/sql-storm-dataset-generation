@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+PriceInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice) AS total_line_price
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    s.s_name,
+    COALESCE(ri.avg_price_after_discount, 0) AS avg_price_after_discount,
+    COALESCE(si.total_cost, 0) AS total_supply_cost,
+    od.line_count AS number_of_lines,
+    od.total_line_price,
+    CASE 
+        WHEN od.total_line_price > 10000 THEN 'High Value'
+        WHEN od.total_line_price BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM 
+    part p
+JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey AND n.n_name LIKE 'A%')
+LEFT JOIN 
+    RankedSuppliers s ON p.p_partkey = s.s_suppkey
+LEFT JOIN 
+    PriceInfo ri ON p.p_partkey = ri.ps_partkey
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = s.s_suppkey)
+WHERE 
+    p.p_retailprice IS NOT NULL AND r.r_name IS NOT NULL
+    AND (COALESCE(s.s_acctbal, 0) > 100 OR p.p_size / NULLIF(s.s_acctbal, 0) < 2)
+ORDER BY 
+    p.p_partkey, r.r_name DESC;

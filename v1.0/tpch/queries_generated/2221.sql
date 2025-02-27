@@ -1,0 +1,51 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RegionSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(ss.total_sales) AS region_total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN SupplierSales ss ON n.n_nationkey = (
+        SELECT s.n_nationkey 
+        FROM supplier s 
+        WHERE s.s_suppkey = ss.s_suppkey
+    )
+    GROUP BY n.n_name, r.r_name
+),
+FilteredSales AS (
+    SELECT 
+        nation_name,
+        region_name,
+        CASE 
+            WHEN region_total_sales IS NULL THEN 0 
+            ELSE region_total_sales 
+        END AS adjusted_sales
+    FROM RegionSales
+    WHERE region_total_sales > 100000
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COALESCE(SUM(AdjustedSales.adjusted_sales), 0) AS total_adjusted_sales
+FROM region r
+LEFT JOIN (
+    SELECT nation_name, region_name, SUM(adjusted_sales) AS adjusted_sales
+    FROM FilteredSales
+    GROUP BY nation_name, region_name
+) AS AdjustedSales ON adjusted_sales.region_name = r.r_name
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+GROUP BY r.r_name, n.n_name
+ORDER BY total_adjusted_sales DESC, r.r_name ASC;

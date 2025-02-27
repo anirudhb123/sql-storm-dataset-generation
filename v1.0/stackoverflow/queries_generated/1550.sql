@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           p.ViewCount, 
+           p.Tags,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+           COUNT(DISTINCT c.Id) OVER (PARTITION BY p.OwnerUserId) AS CommentCount,
+           AVG(v.BountyAmount) OVER (PARTITION BY p.OwnerUserId) AS AvgBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty votes
+    WHERE p.CreationDate >= '2020-01-01'
+),
+PostHistoryCounts AS (
+    SELECT ph.PostId, 
+           COUNT(*) AS HistoryCount,
+           MAX(ph.CreationDate) AS LastHistoryDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+UserInfo AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           u.Reputation,
+           COALESCE(b.Count, 0) AS BadgeCount
+    FROM Users u
+    LEFT JOIN (SELECT UserId, COUNT(*) AS Count
+               FROM Badges
+               GROUP BY UserId) b ON u.Id = b.UserId
+)
+SELECT rp.Title, 
+       rp.CreationDate, 
+       rp.Score, 
+       rp.ViewCount,
+       rp.Tags,
+       ui.DisplayName AS UserName,
+       ui.Reputation,
+       COALESCE(hc.HistoryCount, 0) AS HistoryCount,
+       COALESCE(ui.BadgeCount, 0) AS BadgeCount,
+       CASE WHEN rp.ViewCount > 1000 THEN 'Popular' ELSE 'Less Popular' END AS Popularity,
+       CASE WHEN rp.Score IS NULL THEN 'No Score' ELSE 'Has Score' END AS ScoreStatus
+FROM RankedPosts rp
+JOIN UserInfo ui ON rp.OwnerUserId = ui.UserId
+LEFT JOIN PostHistoryCounts hc ON rp.Id = hc.PostId
+WHERE rp.rn = 1
+ORDER BY rp.CreationDate DESC;
+

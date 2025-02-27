@@ -1,0 +1,68 @@
+
+WITH RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        p.ViewCount,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - interval '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate
+),
+
+TagAnalytics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(ps.CommentCount) AS TotalComments,
+        SUM(ps.UpVoteCount) AS TotalUpVotes,
+        SUM(ps.DownVoteCount) AS TotalDownVotes,
+        SUM(ps.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY (STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::TEXT[])
+    JOIN 
+        RecentPostStats ps ON p.Id = ps.PostId
+    GROUP BY 
+        t.TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalViews,
+        ROW_NUMBER() OVER (ORDER BY TotalUpVotes DESC) AS Rank
+    FROM 
+        TagAnalytics
+    WHERE 
+        TotalPosts > 0
+)
+
+SELECT 
+    TagName,
+    TotalPosts,
+    TotalComments,
+    TotalUpVotes,
+    TotalDownVotes,
+    TotalViews
+FROM 
+    TopTags
+WHERE 
+    Rank <= 10
+ORDER BY 
+    TotalUpVotes DESC;

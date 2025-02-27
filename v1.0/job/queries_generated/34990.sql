@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year = 2023
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 5
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS total_actors,
+        SUM(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE 1 END) AS non_ordered_actors
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        COUNT(mk.id) AS keyword_count
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY
+        m.id, mi.info
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cd.actor_name,
+    cd.total_actors,
+    cd.non_ordered_actors,
+    mi.movie_info,
+    mi.keyword_count
+FROM
+    MovieHierarchy mh
+JOIN
+    CastDetails cd ON mh.movie_id = cd.movie_id
+JOIN
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE
+    mh.production_year IS NOT NULL
+    AND (mh.production_year >= 2000 OR cd.total_actors > 5)
+ORDER BY
+    mh.production_year DESC,
+    mi.keyword_count DESC,
+    cd.total_actors ASC;

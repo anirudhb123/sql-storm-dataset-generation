@@ -1,0 +1,99 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), RankedUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM 
+        UserReputation
+), PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[]) 
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+), RecentActivity AS (
+    SELECT 
+        u.DisplayName,
+        p.Title,
+        p.CreationDate,
+        ph.Comment,
+        ph.CreationDate AS HistoryDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    AND 
+        ph.PostHistoryTypeId IN (1, 4, 6) 
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    ru.PostCount,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    pt.TagName,
+    COUNT(DISTINCT ra.Title) AS RecentPostCount,
+    ub.BadgeCount,
+    COALESCE(SUM(up.VoteCount), 0) AS TotalVotes
+FROM 
+    RankedUsers ru
+JOIN 
+    PopularTags pt ON pt.TagName = ANY(string_to_array((SELECT STRING_AGG(Tags, ',') FROM Posts WHERE OwnerUserId = ru.UserId)::text, ','))
+LEFT JOIN 
+    RecentActivity ra ON ru.DisplayName = ra.DisplayName
+LEFT JOIN 
+    UserBadges ub ON ru.UserId = ub.UserId
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount 
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+) up ON up.PostId = ANY((SELECT ARRAY_AGG(p.Id) FROM Posts p WHERE p.OwnerUserId = ru.UserId))
+GROUP BY 
+    ru.UserId, ru.DisplayName, ru.Reputation, ru.PostCount, ru.QuestionCount, ru.AnswerCount, pt.TagName, ub.BadgeCount
+HAVING 
+    ru.Reputation > 1000
+ORDER BY 
+    ru.Reputation DESC;

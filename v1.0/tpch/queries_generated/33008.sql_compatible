@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE') 
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND o.o_orderstatus = 'F'
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT c.c_name, 
+       COALESCE(st.total_available_qty, 0) AS total_available_qty,
+       COALESCE(st.avg_supply_cost, 0) AS avg_supply_cost,
+       COUNT(DISTINCT co.o_orderkey) AS order_count,
+       SUM(co.o_totalprice) AS total_spent,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS parts_ordered
+FROM CustomerOrders co
+FULL OUTER JOIN customer c ON co.c_custkey = c.c_custkey
+LEFT JOIN PartSupplierInfo st ON st.total_available_qty > 0
+WHERE co.recent_order_rank = 1
+AND (st.avg_supply_cost < (SELECT AVG(st2.avg_supply_cost) FROM PartSupplierInfo st2)
+     OR st.total_available_qty IS NULL)
+GROUP BY c.c_name
+HAVING SUM(co.o_totalprice) > (SELECT AVG(o.o_totalprice) FROM orders o)
+ORDER BY total_spent DESC;

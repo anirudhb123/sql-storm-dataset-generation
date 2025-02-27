@@ -1,0 +1,66 @@
+WITH UserBadges AS (
+    SELECT u.Id AS UserId,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT p.OwnerUserId,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionsCount,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswersCount,
+           SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+           SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT u.Id, 
+           u.DisplayName,
+           COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+           COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+           COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+           ps.QuestionsCount,
+           ps.AnswersCount,
+           ps.TotalViews,
+           ps.TotalScore
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+    WHERE u.Reputation > 1000 
+      AND u.LastAccessDate > NOW() - INTERVAL '1 year'
+),
+TopTags AS (
+    SELECT UNNEST(STRING_TO_ARRAY(STRING_AGG(DISTINCT p.Tags, ','), ',')) AS TagName,
+           COUNT(*) AS TagUsage
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+    GROUP BY TagName
+    HAVING COUNT(*) > 5
+),
+TopUsers AS (
+    SELECT au.DisplayName,
+           au.QuestionsCount,
+           au.AnswersCount,
+           au.TotalViews,
+           au.TotalScore,
+           ROW_NUMBER() OVER (ORDER BY au.TotalScore DESC) AS Rank
+    FROM ActiveUsers au
+    WHERE au.QuestionsCount > 10 
+      AND au.TotalViews > 500
+)
+SELECT tu.DisplayName,
+       tu.QuestionsCount,
+       tu.AnswersCount,
+       tu.TotalViews,
+       tu.TotalScore,
+       tt.TagName,
+       tt.TagUsage
+FROM TopUsers tu
+LEFT JOIN TopTags tt ON rating_rank <= 3 /* Example to join with tag users who are top in questions */
+WHERE tu.Rank <= 10
+ORDER BY tu.TotalScore DESC, tt.TagUsage DESC
+OPTION (MAXRECURSION 0);
+

@@ -1,0 +1,93 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 1 THEN 1 
+            ELSE 0 
+        END) AS QuestionCount,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS AnswerCount
+    FROM 
+        Tags
+    JOIN 
+        Posts 
+        ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><'))::int[]
+    GROUP BY 
+        Tags.TagName
+),
+BadgeSummary AS (
+    SELECT 
+        Users.Id AS UserId,
+        SUM(CASE 
+            WHEN Badges.Class = 1 THEN 1 
+            ELSE 0 
+        END) AS GoldBadgeCount,
+        SUM(CASE 
+            WHEN Badges.Class = 2 THEN 1 
+            ELSE 0 
+        END) AS SilverBadgeCount,
+        SUM(CASE 
+            WHEN Badges.Class = 3 THEN 1 
+            ELSE 0 
+        END) AS BronzeBadgeCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges 
+        ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+),
+PostWithComments AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        COUNT(Comments.Id) AS CommentCount,
+        MAX(Comments.CreationDate) AS LastCommentDate
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments 
+        ON Posts.Id = Comments.PostId
+    GROUP BY 
+        Posts.Id, Posts.Title
+)
+SELECT 
+    tg.TagName,
+    tg.PostCount,
+    tg.QuestionCount,
+    tg.AnswerCount,
+    bs.UserId AS TopUserId,
+    bs.GoldBadgeCount,
+    bs.SilverBadgeCount,
+    bs.BronzeBadgeCount,
+    pwc.PostId AS MostCommentedPostId,
+    pwc.Title AS MostCommentedPostTitle,
+    pwc.CommentCount AS TotalCommentCount,
+    pwc.LastCommentDate
+FROM 
+    TagCounts tg
+JOIN 
+    BadgeSummary bs ON bs.UserId = (
+        SELECT 
+            UserId
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2 -- Upmod
+        ORDER BY 
+            COUNT(VoteTypeId) DESC
+        LIMIT 1
+    )
+JOIN 
+    PostWithComments pwc ON pwc.CommentCount = (
+        SELECT 
+            MAX(CommentCount) 
+            FROM PostWithComments
+    )
+ORDER BY 
+    tg.PostCount DESC 
+LIMIT 10;

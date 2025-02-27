@@ -1,0 +1,72 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc,
+        sales.total_quantity,
+        sales.total_net_profit
+    FROM 
+        SalesCTE sales
+    JOIN 
+        item ON item.i_item_sk = sales.ws_item_sk
+    WHERE 
+        sales.rn = 1
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+TotalSales AS (
+    SELECT 
+        ci.c_customer_id,
+        SUM(ts.total_net_profit) AS customer_total_net_profit,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        TopSales ts ON ci.rn = 1
+    LEFT JOIN 
+        household_demographics hd ON ci.cd_income_band_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ci.c_customer_id, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT 
+    t.c_customer_id,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COUNT(*) AS num_customers,
+    MAX(t.customer_total_net_profit) AS max_net_profit,
+    AVG(t.customer_total_net_profit) AS avg_net_profit
+FROM 
+    TotalSales t
+JOIN 
+    income_band ib ON t.ib_lower_bound <= t.customer_total_net_profit AND t.customer_total_net_profit < t.ib_upper_bound
+GROUP BY 
+    t.ib_lower_bound, t.ib_upper_bound
+HAVING 
+    COUNT(*) > 10
+ORDER BY 
+    avg_net_profit DESC;

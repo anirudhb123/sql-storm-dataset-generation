@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SizeCTE AS (
+    SELECT p_partkey, p_size, 1 AS level
+    FROM part
+    WHERE p_size IS NOT NULL
+    UNION ALL
+    SELECT p.p_partkey, p.p_size * 2, cte.level + 1
+    FROM part p
+    JOIN SizeCTE cte ON p.p_size < cte.p_size
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey, COUNT(ps.ps_partkey) AS total_parts, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+DenseRankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_TIMESTAMP)
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN l.l_discount > 0.2 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS total_revenue,
+    AVG(COALESCE(s.s_acctbal, 0)) AS avg_supplier_balance,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS parts,
+    (SELECT MAX(l_commitdate) 
+     FROM lineitem 
+     WHERE l_returnflag = 'R' AND l_shippingdate > l_receiptdate) AS last_return_date
+FROM nation n
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SizeCTE rz ON l.l_partkey = rz.p_partkey
+LEFT JOIN SupplierSummary ss ON ss.s_suppkey = o.o_orderkey
+WHERE o.o_orderstatus IN ('O', 'F') 
+  AND (l.l_shipmode IS NULL OR l.l_shipmode NOT LIKE 'Air%')
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5 
+   AND SUM(l.l_quantity) > 1000
+ORDER BY total_revenue DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

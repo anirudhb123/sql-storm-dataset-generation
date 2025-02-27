@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON at.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mv.title AS Movie_Title,
+    mv.production_year AS Production_Year,
+    String_Agg(DISTINCT akt.name, ', ') AS Actor_Names,
+    COUNT(DISTINCT kc.keyword) AS Keyword_Count,
+    SUM(CASE 
+            WHEN mv.production_year IS NULL THEN 0 
+            ELSE 2023 - mv.production_year 
+        END) AS Years_since_Release,
+    ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY COUNT(DISTINCT akt.name) DESC) AS Actor_Rank
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mv.movie_id
+LEFT JOIN 
+    aka_name akt ON akt.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mv.movie_id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year
+HAVING 
+    COUNT(DISTINCT akt.name) > 0 AND mv.level < 3
+ORDER BY 
+    Years_since_Release DESC, 
+    Keyword_Count DESC;

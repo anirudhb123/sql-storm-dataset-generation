@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        STRING_AGG(ci.company_name, ', ') AS companies
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        CompanyInfo ci ON rm.movie_id = ci.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, ac.actor_count
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    COALESCE(md.companies, 'No Companies') AS companies,
+    CASE 
+        WHEN md.actor_count >= 5 THEN 'Popular'
+        WHEN md.actor_count IS NULL THEN 'No Cast Info'
+        ELSE 'Less Popular'
+    END AS popularity_status
+FROM 
+    MovieDetails md
+WHERE 
+    md.rank_by_year <= 10
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note < '(1987) (USA) (all media) (bootleg version)' AND ci.role_id < 11 AND t.md5sum > '7c982bdf974f177fdb93c570ba06e4b4' AND an.md5sum IN ('5622daf808503f3e2e5ecd4ee57b7d45', '8e63639b916fa5c807fa230dcc395211', '95ba775387b95fcfa6899c8ea62f0990', 'a1ff997931e6f86ba683a6d31724bf3f', 'cea2937ee0eceaf6ebb0132874d0ccad', 'e2ec49446ae2c932772644dd9e3264b0', 'f07c3d2a97e03db9e4858d69541151d2');

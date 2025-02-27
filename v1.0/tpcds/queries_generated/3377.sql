@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+),
+TopSales AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_net_paid,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_credit_rating
+    FROM 
+        RankedSales r
+    JOIN 
+        customer c ON c.c_customer_sk = (SELECT MAX(c_customer_sk) FROM web_sales WHERE ws_order_number = r.ws_order_number)
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        r.rank = 1 AND 
+        ca.ca_state IS NOT NULL
+)
+SELECT 
+    t.ws_order_number,
+    SUM(t.ws_net_paid) AS total_net_paid,
+    COUNT(t.ws_item_sk) AS item_count,
+    STRING_AGG(DISTINCT t.ca_city, ', ') AS cities,
+    AVG(CASE 
+            WHEN t.cd_credit_rating IS NULL THEN 0 
+            ELSE CASE t.cd_credit_rating WHEN 'Good' THEN 1 ELSE 0 END
+        END) AS good_credit_percentage
+FROM 
+    TopSales t
+GROUP BY 
+    t.ws_order_number
+HAVING 
+    COUNT(t.ws_item_sk) > 5
+ORDER BY 
+    total_net_paid DESC
+LIMIT 10;

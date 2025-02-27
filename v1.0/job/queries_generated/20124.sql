@@ -1,0 +1,83 @@
+WITH RecursiveActorMovies AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL 
+
+    UNION ALL 
+
+    SELECT 
+        a.id, 
+        a.name, 
+        t.title, 
+        t.production_year,
+        level + 1
+    FROM 
+        RecursiveActorMovies ram
+    JOIN 
+        cast_info ci ON ram.actor_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        ram.actor_id <> ci.person_id
+),
+ActorMovieCounts AS (
+    SELECT 
+        ram.actor_id, 
+        ram.actor_name,
+        COUNT(DISTINCT ram.movie_title) AS movie_count,
+        AVG(ram.production_year) AS average_production_year
+    FROM 
+        RecursiveActorMovies ram
+    GROUP BY 
+        ram.actor_id, ram.actor_name
+),
+TopActors AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC, average_production_year DESC) AS rank
+    FROM 
+        ActorMovieCounts
+)
+SELECT 
+    ta.actor_id, 
+    ta.actor_name, 
+    ta.movie_count, 
+    ta.average_production_year,
+    CASE 
+        WHEN ta.movie_count = 0 THEN 'No Movies'
+        WHEN ta.average_production_year < 2000 THEN 'Oldest Era Actor'
+        ELSE 'Modern Era Actor'
+    END AS actor_label,
+    EXISTS (
+        SELECT 1 
+        FROM movie_keyword mk 
+        JOIN keyword k ON mk.keyword_id = k.id 
+        WHERE mk.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ta.actor_id) 
+        AND k.keyword LIKE '%Action%' 
+    ) AS has_action_movies
+FROM 
+    TopActors ta
+WHERE 
+    ta.rank <= 10 
+    AND EXISTS (
+        SELECT 1 
+        FROM movie_info mi
+        WHERE mi.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ta.actor_id)
+        AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+        AND mi.info IS NOT NULL 
+        AND mi.info::numeric > 7.0
+    )
+ORDER BY 
+    ta.movie_count DESC, 
+    ta.average_production_year;

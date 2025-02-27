@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.Reputation, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        (SELECT Name FROM PostHistoryTypes pht WHERE pht.Id = ph.PostHistoryTypeId) AS ChangeType,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+),
+CommentsByUser AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS CommentsCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(cb.CommentsCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        CommentsByUser cb ON u.Id = cb.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    tp.UserId,
+    tp.DisplayName,
+    tp.PostsCreated,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges,
+    tc.TotalComments,
+    COALESCE(DENSE_RANK() OVER (ORDER BY tp.PostsCreated DESC), 0) AS RankByPosts
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    TopContributors tc ON tp.UserId = tc.UserId
+WHERE 
+    tp.PostsCreated > 0
+ORDER BY 
+    tp.PostsCreated DESC, tc.TotalComments DESC;

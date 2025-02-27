@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.Score > 5 THEN 1 ELSE 0 END) AS HighScoringQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN phh.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.DisplayName,
+    ur.Reputation,
+    up.Views,
+    pr.PostId,
+    pr.Title,
+    pr.CreationDate,
+    pr.Score,
+    pr.ViewCount,
+    ph.LastClosedDate,
+    ph.LastReopenedDate,
+    ph.ClosureCount,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'High'
+        WHEN ur.Reputation BETWEEN 100 AND 1000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS ReputationTier
+FROM 
+    UserReputation ur
+JOIN 
+    Users up ON ur.UserId = up.Id
+JOIN 
+    RankedPosts pr ON up.Id = pr.OwnerUserId
+LEFT JOIN 
+    PostHistoryData ph ON pr.PostId = ph.PostId
+WHERE 
+    pr.Rank = 1 -- Select the latest question for each user
+    AND ur.QuestionCount > 0
+    AND ph.ClosureCount > 1 -- Selected only users with questions that were closed multiple times
+ORDER BY 
+    ur.Reputation DESC,
+    pr.CreationDate ASC
+FETCH FIRST 50 ROWS ONLY;

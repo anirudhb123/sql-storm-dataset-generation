@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(a.OwnerUserId, -1) AS AcceptedAnswerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate,
+        rp.AcceptedAnswerUserId,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 AND rp.PostTypeId = 1
+),
+TopAnswers AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate,
+        rp.AcceptedAnswerUserId,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10 AND rp.PostTypeId = 2
+),
+FinalReport AS (
+    SELECT 
+        'Top Questions' AS ReportType,
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        CreationDate,
+        AcceptedAnswerUserId,
+        OwnerDisplayName
+    FROM 
+        TopQuestions
+    UNION ALL
+    SELECT 
+        'Top Answers' AS ReportType,
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        CreationDate,
+        AcceptedAnswerUserId,
+        OwnerDisplayName
+    FROM 
+        TopAnswers
+)
+SELECT 
+    fr.ReportType,
+    fr.PostId,
+    fr.Title,
+    fr.ViewCount,
+    fr.Score,
+    fr.CreationDate,
+    u.Reputation AS OwnerReputation,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    FinalReport fr
+LEFT JOIN 
+    Users u ON fr.AcceptedAnswerUserId = u.Id
+LEFT JOIN 
+    Posts p ON fr.PostId = p.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') AS t(TagName) ON TRUE
+GROUP BY 
+    fr.ReportType, fr.PostId, fr.Title, fr.ViewCount, fr.Score, fr.CreationDate, u.Reputation
+ORDER BY 
+    ReportType, Score DESC;

@@ -1,0 +1,48 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o1.o_orderkey, o1.o_orderdate, o1.o_totalprice, 1 AS order_level
+    FROM orders o1
+    WHERE o1.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o2.o_orderkey, o2.o_orderdate, o2.o_totalprice, oh.order_level + 1
+    FROM orders o2
+    JOIN OrderHierarchy oh ON o2.o_orderkey = oh.o_orderkey
+    WHERE o2.o_orderstatus = 'O' AND oh.order_level < 5
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, c.c_name, n.n_name AS nation_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    cr.nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    COALESCE(SUM(ts.total_sales), 0) AS total_revenue,
+    SUM(sd.total_supply_cost) AS total_supply_cost
+FROM CustomerRegion cr
+LEFT JOIN OrderHierarchy oh ON cr.c_custkey = oh.o_orderkey
+LEFT JOIN TotalSales ts ON oh.o_orderkey = ts.o_orderkey
+LEFT JOIN SupplierDetails sd ON sd.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_type LIKE '%metal%'
+    )
+)
+GROUP BY cr.nation_name
+ORDER BY total_revenue DESC, total_customers DESC;

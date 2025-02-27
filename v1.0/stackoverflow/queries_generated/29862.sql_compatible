@@ -1,0 +1,78 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count AS TotalPosts,
+        CAST(EXTRACT(EPOCH FROM CreationDate) AS INTEGER) AS AgeInSeconds
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+    UNION ALL
+    SELECT
+        t.Id,
+        t.TagName,
+        t.Count,
+        CAST(EXTRACT(EPOCH FROM t.CreationDate) AS INTEGER)
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy rth ON t.Id = rth.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.AuthorizedAnswerId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVoteCount,
+        (SELECT STRING_AGG(t.TagName, ', ') 
+            FROM Tags t 
+            WHERE t.Id = ANY(CAST(STRING_TO_ARRAY(p.Tags, ',') AS INTEGER[]))) AS RelatedTags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+Benchmark AS (
+    SELECT 
+        p.Title AS QuestionTitle,
+        p.ViewCount,
+        p.Score,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsInQuestion,
+        (EXTRACT(EPOCH FROM CAST('2024-10-01 12:34:56' AS TIMESTAMP)) - EXTRACT(EPOCH FROM p.CreationDate)) AS AgeInSeconds,
+        COALESCE((SELECT COUNT(*) FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 1), 0) AS GoldBadgeCount,
+        COALESCE((SELECT COUNT(*) FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 2), 0) AS SilverBadgeCount,
+        COALESCE((SELECT COUNT(*) FROM Badges b WHERE b.UserId = p.OwnerUserId AND b.Class = 3), 0) AS BronzeBadgeCount
+    FROM 
+        PostStatistics ps
+    JOIN 
+        Posts p ON ps.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(CAST(STRING_TO_ARRAY(p.Tags, ',') AS INTEGER[]))
+    GROUP BY 
+        p.Title, p.ViewCount, p.Score, ps.CommentCount, ps.UpVoteCount, ps.DownVoteCount, p.CreationDate, p.OwnerUserId
+)
+SELECT 
+    Benchmark.*,
+    ROUND((CAST(Benchmark.ViewCount AS FLOAT) / NULLIF(Benchmark.AgeInSeconds, 0)), 2) AS ViewsPerSecond,
+    ROUND((CAST(Benchmark.Score AS FLOAT) / NULLIF(Benchmark.AgeInSeconds, 0)), 2) AS ScorePerSecond,
+    COALESCE(RH.TotalPosts, 0) AS TotalTagsCreated
+FROM 
+    Benchmark
+LEFT JOIN 
+    RecursiveTagHierarchy RH ON RH.TagName = ANY(CAST(STRING_TO_ARRAY(Benchmark.TagsInQuestion, ',') AS TEXT[]))
+WHERE 
+    Benchmark.CommentCount > 0
+ORDER BY 
+    ViewsPerSecond DESC
+LIMIT 100;

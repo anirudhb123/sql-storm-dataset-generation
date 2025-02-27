@@ -1,0 +1,69 @@
+
+WITH RankedBadges AS (
+    SELECT UserId, 
+           Name,
+           Class,
+           Date,
+           ROW_NUMBER() OVER(PARTITION BY UserId ORDER BY Date DESC) AS BadgeRanking
+    FROM Badges
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId,
+           p.OwnerUserId,
+           p.CreationDate,
+           p.Title,
+           p.Score,
+           p.ViewCount,
+           COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+           (SELECT COUNT(*) 
+            FROM Comments c 
+            WHERE c.PostId = p.Id) AS CommentCount,
+           STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT TagName
+        FROM UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName
+    ) t ON TRUE
+    WHERE p.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+    GROUP BY p.Id, p.OwnerUserId, p.CreationDate, p.Title, p.Score, p.ViewCount
+),
+VoteAggregates AS (
+    SELECT PostId,
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostHistoryAggregated AS (
+    SELECT ph.PostId,
+           MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserId END) AS ClosedByUserId,
+           MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.UserId END) AS ReopenedByUserId,
+           MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosedOrReopenedDate,
+           COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.UserId END) AS DeletionCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT rp.PostId,
+       rp.Title,
+       rp.Score,
+       rp.ViewCount,
+       COALESCE(ba.BadgeRanking, 0) AS UserBadge,
+       COALESCE(va.UpVotes, 0) AS TotalUpVotes,
+       COALESCE(va.DownVotes, 0) AS TotalDownVotes,
+       ph.LastClosedOrReopenedDate,
+       CASE
+           WHEN va.TotalVotes > 0 THEN
+               (va.TotalVotes - va.DownVotes) * 100.0 / va.TotalVotes
+           ELSE 0
+       END AS PercentUpVotes,
+       COALESCE((SELECT COUNT(*) FROM Users u 
+                 WHERE u.Reputation > 1000 AND u.Id = rp.OwnerUserId), 0) AS HighRepUserCount,
+       STRING_AGG(DISTINCT COALESCE(rt.Name, 'None'), ', ') AS RecentBadges
+FROM RecentPosts rp
+LEFT JOIN VoteAggregates va ON rp.PostId = va.PostId
+LEFT JOIN RankedBadges rt ON rt.UserId = rp.OwnerUserId AND rt.BadgeRanking <= 5
+LEFT JOIN PostHistoryAggregated ph ON rp.PostId = ph.PostId
+GROUP BY rp.PostId, rp.Title, rp.Score, rp.ViewCount, ph.LastClosedOrReopenedDate, ba.BadgeRanking
+ORDER BY rp.Score DESC, rp.ViewCount DESC
+LIMIT 10;

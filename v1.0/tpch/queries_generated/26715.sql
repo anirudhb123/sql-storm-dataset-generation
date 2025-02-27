@@ -1,0 +1,22 @@
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', from nation: ', n.n_name, 
+           ' provides part: ', p.p_name, ' of type: ', p.p_type) AS supplier_part_info,
+    LENGTH(CONCAT(s.s_name, n.n_name, p.p_name, p.p_type)) AS total_characters,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS brief_comment,
+    UPPER(n.n_comment) AS upper_nation_comment,
+    CHAR_LENGTH(p.p_comment) AS comment_length
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    LENGTH(s.s_name) > 10
+AND 
+    p.p_retailprice > 100
+ORDER BY 
+    comment_length DESC, total_characters ASC
+LIMIT 50;

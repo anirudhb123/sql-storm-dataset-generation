@@ -1,0 +1,52 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.Score,
+        ps.AnswerCount,
+        ps.CommentCount,
+        ps.FavoriteCount,
+        ps.OwnerDisplayName,
+        ps.Tags,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC) AS Rank
+    FROM PostStats ps
+)
+SELECT 
+    tp.Rank,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.FavoriteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+FROM TopPosts tp
+LEFT JOIN Tags t ON tp.Tags LIKE '%' || t.TagName || '%'
+WHERE tp.Rank <= 10
+GROUP BY tp.Rank, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.ViewCount, tp.Score, tp.AnswerCount, tp.CommentCount, tp.FavoriteCount
+ORDER BY tp.Rank;

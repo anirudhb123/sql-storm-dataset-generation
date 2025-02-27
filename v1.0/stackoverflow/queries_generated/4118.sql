@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rb.GoldBadges,
+        rb.SilverBadges,
+        rb.BronzeBadges,
+        COALESCE(pw.UpVotes, 0) AS UpVotes,
+        COALESCE(pw.DownVotes, 0) AS DownVotes,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        CASE 
+            WHEN rp.Score > 100 THEN 'Highly Scored'
+            WHEN rp.Score BETWEEN 50 AND 100 THEN 'Moderately Scored'
+            ELSE 'Low Scored'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges rb ON u.Id = rb.UserId
+    LEFT JOIN 
+        (SELECT 
+            Vote.PostId, 
+            SUM(CASE WHEN Vote.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN Vote.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes 
+        FROM 
+            Votes Vote
+        GROUP BY 
+            Vote.PostId) pw ON rp.PostId = pw.PostId
+),
+FinalStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.GoldBadges,
+        ps.SilverBadges,
+        ps.BronzeBadges,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        ps.ScoreCategory,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.UpVotes DESC) AS OverallRank
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.ScoreCategory,
+    ps.OverallRank,
+    CASE 
+        WHEN ps.GoldBadges = 0 THEN 'No Gold Badges'
+        WHEN ps.SilverBadges = 0 THEN 'No Silver Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus
+FROM 
+    FinalStats ps
+WHERE 
+    ps.OverallRank <= 100
+ORDER BY 
+    ps.OverallRank;

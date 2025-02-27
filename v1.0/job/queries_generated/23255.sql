@@ -1,0 +1,55 @@
+WITH recursive_name AS (
+    SELECT id, person_id, name, 
+           ROW_NUMBER() OVER(PARTITION BY person_id ORDER BY name) AS rnk
+    FROM aka_name
+),
+mini_cast AS (
+    SELECT 
+        c.id AS cast_id, 
+        c.movie_id, 
+        c.person_id, 
+        COALESCE(r.role, 'Unknown') AS role_name,
+        COUNT(*) OVER(PARTITION BY c.movie_id) AS total_cast 
+    FROM cast_info c
+    LEFT JOIN role_type r ON c.role_id = r.id
+),
+movie_with_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        m.production_year,
+        COALESCE(COUNT(mk.id), 0) AS keyword_count,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') THEN mi.info END) AS rating,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info END) AS budget
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN movie_info mi ON mi.movie_id = m.id
+    GROUP BY m.id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id, 
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+        COUNT(ct.id) AS company_types_count
+    FROM movie_companies mc
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    mn.id AS movie_name_id,
+    wt.title, 
+    wt.production_year,
+    COALESCE(mn.keyword_count, 0) AS total_keywords,
+    COALESCE(mp.role_name, 'No Roles Assigned') AS main_role,
+    COALESCE(cnt.company_names, 'No Companies') AS production_companies,
+    CASE WHEN mn.rating IS NULL THEN 'Not Rated' ELSE mn.rating END AS movie_rating,
+    CASE WHEN mn.budget IS NULL THEN 'Not Disclosed' ELSE mn.budget END AS movie_budget,
+    CASE WHEN cnt.company_types_count < 1 THEN 'Solo Production' ELSE 'Collaborative Production' END AS collaboration_type
+FROM movie_with_info mn
+JOIN movie_with_info wt ON mn.movie_id = wt.movie_id
+LEFT JOIN mini_cast mp ON mp.movie_id = wt.movie_id AND mp.rnk = 1
+LEFT JOIN company_details cnt ON cnt.movie_id = wt.movie_id
+WHERE wt.production_year > 2000
+  AND (mn.rating IS NOT NULL OR mn.budget IS NOT NULL)
+ORDER BY wt.production_year DESC, wt.title ASC;

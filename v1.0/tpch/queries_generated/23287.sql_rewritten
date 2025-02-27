@@ -1,0 +1,72 @@
+WITH RECURSIVE monthly_orders AS (
+    SELECT 
+        DATE_TRUNC('month', o_orderdate) AS order_month, 
+        SUM(o_totalprice) AS total_revenue,
+        COUNT(DISTINCT o_orderkey) AS order_count
+    FROM orders
+    WHERE o_orderdate >= DATE '1996-01-01'
+    GROUP BY order_month
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+top_part_suppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) IS NOT NULL
+),
+avglineitem_discount AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_discount) AS avg_discount
+    FROM lineitem l
+    WHERE l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+    HAVING AVG(l.l_discount) > 0.1
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        AVG(l.l_discount) AS avg_discount,
+        COUNT(l.l_linenumber) AS line_item_count
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_name
+    HAVING COUNT(l.l_linenumber) > 5
+)
+SELECT 
+    m.order_month,
+    m.total_revenue,
+    COALESCE(t.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(o.revenue, 0) AS revenue_from_orders,
+    os.total_supply_cost,
+    os.distinct_parts_supplied,
+    AVG(ald.avg_discount) OVER (PARTITION BY m.order_month) AS average_discount,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY m.order_month) AS total_orders,
+    CASE 
+        WHEN m.total_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Active Revenue'
+    END AS revenue_status
+FROM monthly_orders m
+LEFT JOIN top_part_suppliers t ON TRUE AND t.rn = 1
+LEFT JOIN order_details o ON m.order_month = DATE_TRUNC('month', o.o_orderdate)
+LEFT JOIN supplier_stats os ON t.ps_partkey = os.s_suppkey
+FULL OUTER JOIN avglineitem_discount ald ON o.o_orderkey = ald.l_orderkey
+WHERE m.total_revenue IS NOT NULL OR o.revenue > 0
+ORDER BY m.order_month, supplier_name;

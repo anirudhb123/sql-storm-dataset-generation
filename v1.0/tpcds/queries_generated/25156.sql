@@ -1,0 +1,47 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), CustomerStats AS (
+    SELECT 
+        ai.full_name,
+        ai.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        COUNT(DISTINCT cd.cd_demo_sk) AS demographic_records,
+        SUM(COALESCE(CASE WHEN cd.cd_gender = 'M' THEN 1 END, 0)) AS male_count,
+        SUM(COALESCE(CASE WHEN cd.cd_gender = 'F' THEN 1 END, 0)) AS female_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        AddressInfo ai
+    LEFT JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        ai.full_name, ai.ca_city
+), Result AS (
+    SELECT 
+        cs.ca_city,
+        SUM(cs.total_customers) AS city_customer_count,
+        AVG(cs.avg_purchase_estimate) AS city_avg_purchase
+    FROM 
+        CustomerStats cs
+    GROUP BY 
+        cs.ca_city
+)
+SELECT 
+    r.ca_city,
+    r.city_customer_count,
+    r.city_avg_purchase,
+    MAX(r.city_customer_count) OVER () AS max_customers,
+    MIN(r.city_avg_purchase) OVER () AS min_average_purchase
+FROM 
+    Result r
+ORDER BY 
+    r.city_avg_purchase DESC
+LIMIT 10;

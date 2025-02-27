@@ -1,0 +1,41 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(ca_street_number) AS street_number,
+        TRIM(ca_street_name) AS street_name,
+        TRIM(ca_street_type) AS street_type,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type)) AS full_address
+    FROM 
+        customer_address
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        d.d_date AS customer_since,
+        a.full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_shipto_date_sk = d.d_date_sk
+    JOIN 
+        AddressParts a ON c.c_current_addr_sk = a.ca_address_sk
+)
+SELECT 
+    ci.full_name,
+    COUNT(DISTINCT ci.customer_since) AS total_years_customer,
+    COUNT(DISTINCT a.ca_city) AS unique_cities,
+    STRING_AGG(DISTINCT a.full_address, '; ') AS aggregated_addresses
+FROM 
+    CustomerInfo ci
+JOIN 
+    customer_address a ON ci.c_customer_sk = a.ca_address_sk
+GROUP BY 
+    ci.full_name
+HAVING 
+    COUNT(DISTINCT a.ca_city) > 5
+ORDER BY 
+    total_years_customer DESC;

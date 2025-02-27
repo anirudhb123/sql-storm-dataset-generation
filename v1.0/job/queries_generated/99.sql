@@ -1,0 +1,67 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+actor_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        c.movie_id,
+        COUNT(c.movie_id) OVER (PARTITION BY a.id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+), 
+movies_with_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mi.info, 'No Info') AS movie_info
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        m.production_year >= 2000
+), 
+cast_roles AS (
+    SELECT 
+        c.movie_id,
+        rc.role,
+        COUNT(c.role_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type rc ON c.role_id = rc.id
+    GROUP BY 
+        c.movie_id, rc.role
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    STRING_AGG(DISTINCT am.actor_name, ', ') AS actors,
+    COUNT(DISTINCT cr.role) AS total_roles,
+    mt.movie_info
+FROM 
+    movies_with_info mt
+LEFT JOIN 
+    actor_movies am ON mt.movie_id = am.movie_id
+LEFT JOIN 
+    cast_roles cr ON mt.movie_id = cr.movie_id
+GROUP BY 
+    mt.title_id, mt.title, mt.production_year, mt.movie_info
+HAVING 
+    COUNT(DISTINCT am.actor_id) > 2 AND
+    MAX(cr.role_count) >= 2
+ORDER BY 
+    mt.production_year DESC, 
+    mt.title;

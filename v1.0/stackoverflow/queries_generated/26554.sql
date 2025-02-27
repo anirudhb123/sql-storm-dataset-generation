@@ -1,0 +1,72 @@
+WITH QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopQuestions AS (
+    SELECT 
+        qs.QuestionId,
+        qs.Title,
+        qs.CreationDate,
+        qs.AnswerCount,
+        qs.UpVotes,
+        qs.DownVotes,
+        qs.LastVoteDate,
+        RANK() OVER (ORDER BY qs.UpVotes - qs.DownVotes DESC) AS VoteRank
+    FROM 
+        QuestionStats qs
+    WHERE 
+        qs.AnswerCount > 0  -- Only questions with answers
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS RelatedQuestionCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10  -- Tags used in more than 10 questions
+)
+SELECT 
+    tq.QuestionId,
+    tq.Title,
+    tq.CreationDate,
+    tq.AnswerCount,
+    tq.UpVotes,
+    tq.DownVotes,
+    tq.LastVoteDate,
+    pt.TagName,
+    pt.RelatedQuestionCount
+FROM 
+    TopQuestions tq
+JOIN 
+    PostLinks pl ON tq.QuestionId = pl.PostId
+JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+JOIN 
+    Tags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+WHERE 
+    tq.VoteRank <= 10  -- Top 10 questions by net votes
+ORDER BY 
+    tq.UpVotes - tq.DownVotes DESC, tq.LastVoteDate DESC;

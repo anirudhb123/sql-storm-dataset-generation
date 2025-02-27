@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.ws_order_number, 
+        ws.ws_ext_sales_price, 
+        ws.ws_net_paid, 
+        ws.ws_sold_date_sk, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+), 
+MonthlySales AS (
+    SELECT 
+        DENSE_RANK() OVER (ORDER BY d_month_seq) AS month_number, 
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d_month_seq
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COUNT(s.ws_order_number) AS total_orders,
+        COALESCE(SUM(s.ws_ext_sales_price), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales s ON c.c_customer_sk = s.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ib.ib_lower_bound, 
+    ib.ib_upper_bound,
+    ci.total_orders,
+    ci.total_spent,
+    SUM(CASE WHEN ms.total_sales > 10000 THEN 1 ELSE 0 END) OVER (PARTITION BY ci.c_customer_sk) AS num_high_spend_months,
+    MAX(CASE WHEN ws.rank = 1 THEN ws.ws_net_paid END) AS max_single_purchase
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    income_band ib ON ci.cd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN 
+    SalesCTE ws ON ci.c_customer_sk = ws.ws_order_number
+LEFT JOIN 
+    MonthlySales ms ON EXTRACT(MONTH FROM ms.total_sales) = EXTRACT(MONTH FROM ws.ws_ext_sales_price)
+WHERE 
+    ib.ib_lower_bound IS NOT NULL
+GROUP BY 
+    ci.c_customer_sk, ci.cd_gender, ib.ib_lower_bound, ib.ib_upper_bound
+HAVING 
+    SUM(ci.total_orders) > 5
+ORDER BY 
+    ci.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

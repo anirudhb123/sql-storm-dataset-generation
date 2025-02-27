@@ -1,0 +1,90 @@
+WITH recursive MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.name AS company_name,
+        c.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name m ON mc.company_id = m.id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonsWithRole AS (
+    SELECT 
+        a.id AS person_id,
+        a.name,
+        ci.role_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    WHERE 
+        ci.note IS NOT NULL AND
+        a.surname_pcode IS NOT NULL
+    GROUP BY 
+        a.id, a.name, ci.role_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+KeywordMovies AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.phonetic_code IS NOT NULL
+    GROUP BY 
+        mk.movie_id, k.keyword
+    HAVING 
+        COUNT(mk.movie_id) > 2
+),
+FinalResults AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        p.person_id,
+        p.name AS actor_name,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY p.movie_count DESC) AS actor_rank
+    FROM 
+        MovieCTE m
+    JOIN 
+        PersonsWithRole p ON m.movie_id = p.movie_id
+    JOIN 
+        KeywordMovies k ON m.movie_id = k.movie_id
+    WHERE 
+        m.year_rank <= 5 AND
+        (m.company_name IS NOT NULL OR m.company_type = 'Distributor') AND
+        (p.role_id IS NOT NULL AND p.movie_count > 3)
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.actor_name,
+    COALESCE(f.keyword, 'No Keywords') AS keyword_association,
+    CASE 
+        WHEN actor_rank = 1 THEN 'Lead Actor'
+        ELSE 'Supporting Actor'
+    END AS actor_role
+FROM 
+    FinalResults f
+WHERE 
+    f.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    f.production_year DESC, f.actor_rank
+LIMIT 100;

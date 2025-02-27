@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())  -- Filter for posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        pt.Name AS PostType
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostId = rp.PostTypeId
+    WHERE 
+        rp.Rank <= 5  -- Fetch top 5 ranked posts per type
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(po.ViewCount) AS PostViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts po ON u.Id = po.LastEditorUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.BadgeCount,
+    up.TotalViews,
+    tp.PostId,
+    tp.Title,
+    tp.PostType,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes
+FROM 
+    UserEngagement up
+JOIN 
+    TopPosts tp ON up.UserId IN (
+        SELECT OwnerUserId 
+        FROM Posts 
+        WHERE Id = tp.PostId
+    )
+ORDER BY 
+    up.BadgeCount DESC, up.TotalViews DESC;  -- Order by user engagement metrics

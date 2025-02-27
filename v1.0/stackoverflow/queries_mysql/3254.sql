@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        @rank := IF(@prev_user = p.OwnerUserId, @rank + 1, 1) AS Rank,
+        @prev_user := p.OwnerUserId,
+        COALESCE(u.Reputation, 0) AS OwnerReputation,
+        COALESCE(c.CommentCount, 0) AS CommentsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId,
+        (SELECT @rank := 0, @prev_user := NULL) r
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL 1 YEAR
+    ORDER BY 
+        p.OwnerUserId, p.Score DESC
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        OwnerReputation,
+        CommentsCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerReputation,
+    tp.CommentsCount,
+    GROUP_CONCAT(t.TagName) AS Tags,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+GROUP BY 
+    tp.PostId, tp.Title, tp.Score, tp.ViewCount, tp.OwnerReputation, tp.CommentsCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

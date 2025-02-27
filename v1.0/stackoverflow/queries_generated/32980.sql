@@ -1,0 +1,68 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts P
+        LEFT JOIN Users U ON P.OwnerUserId = U.Id
+        LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, P.Score, P.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS HistoryDate,
+        PH.Comment,
+        PHT.Name AS PostHistoryType
+    FROM 
+        PostHistory PH
+        JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+UserBadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadgeCount,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadgeCount,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    RP.Score,
+    RP.CommentCount,
+    COALESCE(UBC.GoldBadgeCount, 0) AS GoldBadges,
+    COALESCE(UBC.SilverBadgeCount, 0) AS SilverBadges,
+    COALESCE(UBC.BronzeBadgeCount, 0) AS BronzeBadges,
+    PH.HistoryDate,
+    PH.PostHistoryType
+FROM 
+    RecentPosts RP
+    LEFT JOIN UserBadgeCounts UBC ON RP.OwnerUserId = UBC.UserId
+    LEFT JOIN PostHistoryDetails PH ON RP.PostId = PH.PostId
+WHERE 
+    (PH.Comment IS NULL OR PH.Comment LIKE '%important%') 
+    AND RP.Score > 0
+ORDER BY 
+    RP.Score DESC,
+    RP.ViewCount DESC;
+
+This query generates a summary of recent posts, including details about the post authors, their badge counts, and any relevant post history that may indicate significant changes or actions related to the post. It uses common table expressions (CTEs) for better organization, applies window functions for ranking, and implements multiple outer joins to gather all necessary information while filtering for active and significant contributions.

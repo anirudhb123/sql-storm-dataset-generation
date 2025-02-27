@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS actor_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopRankedMovies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        m.company_id,
+        co.name AS company_name,
+        GROUP_CONCAT(k.keyword) AS keywords
+    FROM 
+        TopRankedMovies t
+    JOIN 
+        movie_companies m ON t.title = (SELECT title FROM aka_title WHERE id = m.movie_id)
+    JOIN 
+        company_name co ON m.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, m.company_id, co.name
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_name,
+    COALESCE(md.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN md.keywords IS NOT NULL THEN 'Has Keywords' 
+        ELSE 'No Keywords' 
+    END AS keyword_status
+FROM 
+    TopRankedMovies tr
+FULL OUTER JOIN 
+    MovieDetails md ON tr.title = md.title
+WHERE 
+    tr.production_year IS NOT NULL OR md.production_year IS NOT NULL
+ORDER BY 
+    tr.production_year DESC NULLS LAST, md.company_name;

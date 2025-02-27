@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        c.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        kind_type c ON a.kind_id = c.id
+    WHERE 
+        a.production_year BETWEEN 1990 AND 2023
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        mk.keywords,
+        rm.rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.id = mk.movie_id
+    WHERE 
+        rm.rank <= 5
+),
+CompanyMovieStats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(cast_info.nr_order) AS avg_cast_order
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        cast_info ON mc.movie_id = cast_info.movie_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    COALESCE(cms.company_count, 0) AS company_count,
+    COALESCE(cms.avg_cast_order, 0) AS avg_cast_order,
+    COALESCE(tm.keywords, 'No keywords') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyMovieStats cms ON tm.movie_id = cms.movie_id
+ORDER BY 
+    tm.production_year DESC, tm.title;

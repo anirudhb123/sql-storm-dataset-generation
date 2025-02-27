@@ -1,0 +1,86 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        a.ViewCount,
+        a.OwnerUserId,
+        a.PostTypeId,
+        r.Level + 1
+    FROM Posts a
+    INNER JOIN Posts q ON a.ParentId = q.Id
+    INNER JOIN RecursivePostStats r ON r.PostId = q.Id
+), UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.QuestionCount,
+        ue.AnswerCount,
+        ue.TotalScore,
+        ue.AverageViews,
+        DENSE_RANK() OVER (ORDER BY ue.TotalScore DESC) AS Rank
+    FROM UserEngagement ue
+    WHERE ue.QuestionCount > 5
+)
+SELECT 
+    p.Title,
+    p.Score AS PostScore,
+    u.DisplayName AS Owner,
+    COALESCE(ph.Comments, 0) AS CommentCount,
+    COALESCE(ph.Views, 0) AS ViewCount,
+    tp.Rank AS UserRank,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM Posts p
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(*) AS Comments,
+        SUM(ViewCount) AS Views
+    FROM Comments c
+    JOIN Posts ps ON c.PostId = ps.Id
+    GROUP BY PostId
+) ph ON p.Id = ph.PostId
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+JOIN TopUsers tp ON u.Id = tp.UserId
+LEFT JOIN LATERAL (
+    SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagName
+    FROM Tags t
+    WHERE t.Id IN (
+        SELECT UNNEST(string_to_array(p.Tags, '<>'))::int)
+    )
+) t ON TRUE
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    AND (p.ViewCount > 100 OR p.Score > 10)
+GROUP BY 
+    p.Title, p.Score, u.DisplayName, ph.Comments, ph.Views, tp.Rank
+ORDER BY 
+    tp.Rank, p.Score DESC;

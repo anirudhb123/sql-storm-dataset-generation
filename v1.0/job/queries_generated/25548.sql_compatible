@@ -1,0 +1,58 @@
+
+WITH movie_actor_info AS (
+    SELECT 
+        a.name AS actor_name,
+        a.person_id,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS actor_role,
+        k.keyword AS movie_keyword,
+        COALESCE(c.name, 'N/A') AS company_name
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND a.name IS NOT NULL
+        AND k.keyword IS NOT NULL
+    ORDER BY 
+        t.production_year DESC, a.name
+),
+grouped_results AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_title) AS movie_count,
+        ARRAY_AGG(DISTINCT movie_title ORDER BY production_year DESC) AS movies,
+        ARRAY_AGG(DISTINCT movie_keyword) AS keywords,
+        STRING_AGG(DISTINCT company_name, ', ') AS companies
+    FROM 
+        movie_actor_info
+    GROUP BY 
+        actor_name
+)
+
+SELECT 
+    actor_name,
+    movie_count,
+    movies,
+    keywords,
+    companies
+FROM 
+    grouped_results
+WHERE 
+    movie_count > 5
+ORDER BY 
+    movie_count DESC, actor_name;

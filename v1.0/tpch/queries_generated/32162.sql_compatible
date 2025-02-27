@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal BETWEEN 1000 AND 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 10000
+),
+CustomerOrders AS (
+    SELECT c.c_name, c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name, c.c_custkey
+),
+PartSupplierSummary AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+TopCustomers AS (
+    SELECT c.c_name, COALESCE(co.order_count, 0) AS order_count, COALESCE(co.total_spending, 0) AS total_spending
+    FROM customer c
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    ORDER BY total_spending DESC
+    LIMIT 10
+)
+SELECT t.c_name AS Top_Customer, t.total_spending, p.p_name AS Top_Part, ps.total_supply_cost, sh.level AS Supplier_Level
+FROM TopCustomers t
+CROSS JOIN part p
+LEFT JOIN PartSupplierSummary ps ON p.p_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_availqty = (SELECT MAX(ps_availqty) FROM partsupp WHERE ps_partkey = p.p_partkey))
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = (SELECT DISTINCT c.c_nationkey FROM customer c WHERE c.c_custkey = t.c_custkey))
+WHERE p.p_size >= 20 AND p.p_size <= 100 AND t.total_spending > 0
+ORDER BY t.total_spending DESC, ps.total_supply_cost ASC;

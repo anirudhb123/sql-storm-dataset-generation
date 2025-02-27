@@ -1,0 +1,53 @@
+
+WITH RecursiveAddress AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 0 AS address_level
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, address_level + 1
+    FROM customer_address AS ca
+    JOIN RecursiveAddress AS ra ON ca.ca_city = ra.ca_city AND ca.ca_state = ra.ca_state
+    WHERE ra.address_level < 5
+),
+CustomerDetails AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_credit_rating, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT SUM(ws.ws_sales_price) AS total_sales,
+           AVG(ws.ws_net_profit) AS avg_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           MAX(ws.ws_sold_date_sk) AS last_sale_date,
+           CASE 
+               WHEN SUM(ws.ws_sales_price) > 10000 THEN 'High Value'
+               ELSE 'Low Value'
+           END AS sales_category
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY ws.ws_ship_mode_sk
+),
+ReturnedData AS (
+    SELECT sr_item_sk, SUM(sr_return_quantity) AS total_returns, 
+           CASE 
+               WHEN SUM(sr_return_quantity) > 0 THEN 'Returned'
+               ELSE 'Not Returned'
+           END AS return_status
+    FROM store_returns
+    GROUP BY sr_item_sk
+    HAVING COUNT(sr_ticket_number) > 1
+)
+SELECT ca.ca_city, ca.ca_state, ca.ca_country, 
+       cd.c_first_name, cd.c_last_name, cd.cd_gender, 
+       sd.total_sales, sd.avg_profit,
+       rd.total_returns, rd.return_status
+FROM RecursiveAddress ca
+LEFT JOIN CustomerDetails cd ON cd.rn = (SELECT MAX(rn) FROM CustomerDetails)
+LEFT JOIN SalesData sd ON 1=1
+LEFT JOIN ReturnedData rd ON rd.sr_item_sk = cd.c_customer_sk
+WHERE ca.ca_state IS NOT NULL
+AND (sd.avg_profit > 500 OR rd.return_status = 'Returned')
+ORDER BY ca.ca_city, ca.ca_country DESC
+FETCH FIRST 100 ROWS ONLY;

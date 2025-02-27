@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        cs_ext_sales_price,
+        cs_sold_date_sk
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (
+            SELECT 
+                MIN(d_date_sk) 
+            FROM 
+                date_dim 
+            WHERE 
+                d_year = 2022
+        )
+    
+    UNION ALL
+    
+    SELECT 
+        cs.bill_customer_sk,
+        cs.order_number,
+        cs.quantity,
+        cs.sales_price,
+        cs.ext_sales_price,
+        cs.sold_date_sk
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.bill_customer_sk = sh.customer_sk
+    WHERE 
+        cs.order_number > sh.order_number
+)
+SELECT 
+    d.d_year,
+    SUM(sh.cs_quantity) AS total_quantity,
+    COUNT(DISTINCT sh.cs_order_number) AS order_count,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    AVG(sh.cs_sales_price) AS avg_sales_price,
+    SUM(COALESCE(sh.cs_ext_sales_price, 0)) AS total_sales
+FROM 
+    sales_hierarchy sh
+JOIN 
+    date_dim d ON d.d_date_sk = sh.cs_sold_date_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk = sh.customer_sk
+WHERE 
+    d.d_year BETWEEN 2022 AND 2023
+GROUP BY 
+    d.d_year
+ORDER BY 
+    d.d_year DESC;

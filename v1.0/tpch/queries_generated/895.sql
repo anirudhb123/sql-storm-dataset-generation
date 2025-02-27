@@ -1,0 +1,66 @@
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        n.n_name
+),
+TopNations AS (
+    SELECT 
+        nation_name,
+        total_sales,
+        order_count
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 3
+)
+SELECT 
+    t.nation_name,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    COALESCE(t.order_count, 0) AS order_count,
+    CASE 
+        WHEN t.total_sales > 1000000 THEN 'High Sales'
+        WHEN t.total_sales BETWEEN 500000 AND 1000000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    CONCAT('Total sales for ', t.nation_name, ': $', CAST(t.total_sales AS VARCHAR)) AS sales_message
+FROM 
+    TopNations t
+LEFT JOIN 
+    region r ON t.nation_name = r.r_name
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    t.total_sales DESC
+UNION ALL
+SELECT 
+    'Overall Total' AS nation_name,
+    SUM(total_sales) AS total_sales,
+    SUM(order_count) AS order_count,
+    CASE 
+        WHEN SUM(total_sales) > 3000000 THEN 'High Sales'
+        WHEN SUM(total_sales) BETWEEN 1500000 AND 3000000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    NULL AS sales_message
+FROM 
+    TopNations
+HAVING 
+    COUNT(*) > 0;

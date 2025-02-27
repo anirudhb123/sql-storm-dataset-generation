@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+HighlyRatedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) 
+                                     FROM partsupp)
+),
+RecentOrders AS (
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_orderdate, oh.o_totalprice
+    FROM OrderHierarchy oh
+    WHERE oh.order_rank <= 5
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM customer c
+),
+SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 2
+)
+SELECT cd.c_name, cd.c_nationkey, 
+       SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+       COALESCE(spc.supplier_count, 0) AS supplier_count,
+       CASE 
+           WHEN oh.o_orderkey IS NOT NULL THEN 'Recent Order'
+           ELSE 'No Recent Order'
+       END AS order_status
+FROM CustomerDetails cd
+LEFT JOIN RecentOrders oh ON cd.c_custkey = oh.o_custkey
+LEFT JOIN lineitem lo ON oh.o_orderkey = lo.l_orderkey
+LEFT JOIN SupplierPartCounts spc ON lo.l_partkey = spc.ps_partkey
+WHERE cd.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+GROUP BY cd.c_name, cd.c_nationkey, oh.o_orderkey
+ORDER BY total_revenue DESC, cd.c_name ASC
+LIMIT 10;

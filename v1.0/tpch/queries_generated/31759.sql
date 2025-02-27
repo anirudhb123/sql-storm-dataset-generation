@@ -1,0 +1,83 @@
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o_orderdate) AS month,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o_orderdate >= '2023-01-01'
+    GROUP BY 
+        month
+    UNION ALL
+    SELECT 
+        month + INTERVAL '1 month',
+        0
+    FROM 
+        MonthlySales
+    WHERE 
+        month < CURRENT_DATE - INTERVAL '1 month'
+),
+CustomerSupplier AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        customer c
+    LEFT JOIN 
+        supplier s ON c.c_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        c.c_custkey, c.c_name, s.s_suppkey, s.s_name
+),
+RegionSales AS (
+    SELECT 
+        r.r_name,
+        SUM(COALESCE(ms.total_sales, 0)) AS total_sales
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        MonthlySales ms ON DATE_TRUNC('month', o.o_orderdate) = ms.month
+    GROUP BY 
+        r.r_name
+),
+TotalCost AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        SUM(cs.total_supply_cost) AS total_cost
+    FROM 
+        CustomerSupplier cs
+    WHERE 
+        cs.total_supply_cost IS NOT NULL
+    GROUP BY 
+        cs.c_custkey, cs.c_name
+)
+
+SELECT 
+    r.r_name,
+    rs.total_sales,
+    tc.total_cost,
+    COALESCE(tc.total_cost, 0) - COALESCE(rs.total_sales, 0) AS profit_or_loss
+FROM 
+    RegionSales rs
+FULL OUTER JOIN 
+    TotalCost tc ON rs.r_name = tc.c_name
+WHERE 
+    rs.total_sales > 50000 OR tc.total_cost > 100000
+ORDER BY 
+    profit_or_loss DESC
+LIMIT 10;

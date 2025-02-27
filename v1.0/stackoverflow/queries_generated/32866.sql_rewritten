@@ -1,0 +1,67 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,  
+        SUM(v.VoteTypeId = 3) AS DownVoteCount  
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+    GROUP BY p.Id, p.Title, p.LastActivityDate
+),
+PostRankings AS (
+    SELECT 
+        PostId,
+        Title,
+        LastActivityDate,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        DENSE_RANK() OVER (ORDER BY UpVoteCount DESC, CommentCount DESC) AS PostRank
+    FROM RecentPostActivity
+),
+UserPostSummary AS (
+    SELECT 
+        u.DisplayName,
+        ubc.BadgeCount,
+        p.Rank,
+        p.Title,
+        p.LastActivityDate
+    FROM Users u
+    INNER JOIN UserBadgeCounts ubc ON u.Id = ubc.UserId
+    LEFT JOIN PostRankings p ON u.Id = p.PostId
+    WHERE p.PostRank IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        ups.DisplayName,
+        ups.BadgeCount,
+        COALESCE(p.Title, 'No Posts Yet') AS Title,
+        COALESCE(p.LastActivityDate, 'N/A') AS LastActivityDate,
+        CASE 
+            WHEN p.PostRank IS NOT NULL THEN 'Active Contributor'
+            ELSE 'New User'
+        END AS UserStatus
+    FROM UserPostSummary ups
+    RIGHT JOIN Users u ON ups.DisplayName = u.DisplayName
+)
+SELECT 
+    DisplayName,
+    BadgeCount,
+    Title,
+    LastActivityDate,
+    UserStatus
+FROM FinalResults
+ORDER BY BadgeCount DESC, LastActivityDate DESC NULLS LAST
+LIMIT 100;

@@ -1,0 +1,42 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 0 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 1 -- Start with moderator-only tags
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.Id = r.ExcerptPostId
+),
+UserActivity AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.CreationDate < NOW() - INTERVAL '1 year' THEN 1 ELSE 0 END) AS PostsOlderThanOneYear,
+           SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositivePostScores
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY u.Id, u.DisplayName
+),
+TopContributors AS (
+    SELECT UserId, DisplayName,
+           ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+           Rank() OVER (ORDER BY TotalBounty DESC) AS BountyRank
+    FROM UserActivity
+)
+SELECT t.TagName,
+       COALESCE(MAX(a.DisplayName), 'No Contributors') AS TopContributor,
+       COUNT(DISTINCT p.Id) AS PostsAssociated,
+       SUM(p.ViewCount) AS TotalViews,
+       AVG(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS AveragePostScore,
+       SUM(CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostCount,
+       (SELECT COUNT(*) FROM Votes WHERE UserId IN (SELECT UserId FROM TopContributors WHERE PostRank <= 10)) AS TotalVotesByTopContributors
+FROM Tags t
+LEFT JOIN Posts p ON t.Id = p.Tags -- Assuming Tags is a concatenated string in Posts
+LEFT JOIN TopContributors a ON p.OwnerUserId = a.UserId
+WHERE t.Count > 100 AND (t.IsRequired = 1 OR t.IsModeratorOnly IS NULL) -- Consider tags with significant usage
+GROUP BY t.TagName
+HAVING COUNT(DISTINCT p.Id) > 5
+ORDER BY TotalViews DESC
+LIMIT 10;

@@ -1,0 +1,37 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent
+    FROM customer c
+    JOIN CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE co.total_spent > 10000
+),
+PartSuppDetails AS (
+    SELECT p.p_partkey, p.p_name, MAX(ps.ps_supplycost) AS max_supplycost, 
+           MIN(ps.ps_availqty) AS min_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT R.s_name, CO.total_spent, H.c_name AS high_value_customer, 
+       PD.p_name, PD.max_supplycost, PD.min_availqty
+FROM RankedSuppliers R
+JOIN HighValueCustomers H ON R.rank = 1
+JOIN PartSuppDetails PD ON R.s_suppkey = PD.p_partkey
+LEFT JOIN lineitem L ON L.l_partkey = PD.p_partkey
+JOIN CustomerOrders CO ON CO.c_custkey = H.c_custkey
+WHERE L.l_returnflag = 'N' AND R.s_acctbal IS NOT NULL
+ORDER BY CO.total_spent DESC, R.s_name DESC;

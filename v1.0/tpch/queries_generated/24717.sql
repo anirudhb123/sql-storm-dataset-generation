@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        SUM(o.o_totalprice) OVER (PARTITION BY c.c_custkey) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+RecentSales AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetSales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > '2023-01-01'
+    GROUP BY 
+        l.l_orderkey, l.l_partkey, l.l_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(rn.SupplierRank, 0) AS SupplierRank,
+    hvc.c_name AS HighValueCustomer,
+    r1.r_name AS RegionName,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R') AS Returns,
+    CASE 
+        WHEN hvc.TotalSpent > 10000 THEN 'Gold'
+        WHEN hvc.TotalSpent BETWEEN 5000 AND 10000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS CustomerCategory
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rn ON p.p_partkey = rn.s_suppkey AND rn.SupplierRank = 1
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey = (SELECT TOP 1 c.c_custkey FROM customer c ORDER BY c.c_acctbal DESC)
+LEFT JOIN 
+    nation n ON hvc.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r1 ON n.n_regionkey = r1.r_regionkey
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM RecentSales rs
+        WHERE rs.l_partkey = p.p_partkey
+          AND rs.NetSales > (SELECT AVG(NetSales) FROM RecentSales)
+    )
+ORDER BY 
+    p.p_partkey;

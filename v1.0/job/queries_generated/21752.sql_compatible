@@ -1,0 +1,48 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        c.name AS company_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY a.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        DENSE_RANK() OVER (ORDER BY a.production_year) AS year_dense_rank
+    FROM aka_title a
+    LEFT JOIN movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.movie_id
+    WHERE a.production_year IS NOT NULL
+    AND a.title NOT LIKE '%Untitled%'
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN cast_count > 10 THEN 'High'
+            WHEN cast_count BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS cast_size_category
+    FROM RankedMovies
+    WHERE year_dense_rank < 11  
+),
+CoalescedInfo AS (
+    SELECT 
+        fm.movie_title,
+        fm.production_year,
+        fm.company_name,
+        COALESCE(fm.cast_count, 0) AS total_cast,
+        COALESCE(mk.keyword, 'No keyword') AS movie_keyword
+    FROM FilteredMovies fm
+    LEFT JOIN movie_keyword mk ON fm.production_year = mk.movie_id
+)
+SELECT 
+    COALESCE(ci.name, 'Unknown') AS Performer_Name,
+    ci.note AS Performer_Note,
+    c.movie_title,
+    COALESCE(c.total_cast, 0) AS Total_Cast, 
+    c.movie_keyword
+FROM CoalescedInfo c
+LEFT JOIN cast_info ci ON ci.movie_id = (SELECT movie_id FROM cast_info WHERE person_id IS NOT NULL LIMIT 1)
+WHERE c.cast_size_category = 'High'
+ORDER BY c.production_year DESC, c.total_cast DESC;

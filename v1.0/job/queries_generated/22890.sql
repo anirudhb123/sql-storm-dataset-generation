@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+ActorsWithTitles AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        RANK() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS title_rank,
+        COUNT(*) OVER (PARTITION BY ak.name) AS title_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+HighestRatedActors AS (
+    SELECT 
+        awt.actor_name,
+        awt.movie_title,
+        awt.production_year,
+        awt.title_rank, 
+        COALESCE(CAST(SUBSTRING(awt.movie_title, LENGTH(awt.movie_title) - 1 FOR 1) AS varchar), 'N/A') AS last_char
+    FROM 
+        ActorsWithTitles awt
+    WHERE 
+        awt.title_rank = 1
+    AND 
+        (awt.actor_name NOT LIKE '%[^a-zA-Z]%' OR awt.actor_name IS NULL)
+)
+SELECT 
+    h.actor_name,
+    h.movie_title,
+    h.production_year,
+    h.last_char,
+    r.total_cast,
+    CASE 
+        WHEN r.total_cast > 5 THEN 'Popular'
+        WHEN r.total_cast BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Niche'
+    END AS movie_cast_size_category
+FROM 
+    HighestRatedActors h
+LEFT JOIN 
+    RankedMovies r ON h.movie_title = r.title AND h.production_year = r.production_year
+WHERE 
+    h.last_char IS NOT NULL
+ORDER BY 
+    r.production_year DESC, r.total_cast DESC;

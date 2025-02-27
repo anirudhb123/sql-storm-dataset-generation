@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(COALESCE(sr.sr_return_quantity, 0) + COALESCE(cr.cr_return_quantity, 0)) AS total_returns,
+        SUM(COALESCE(sr.sr_return_amt_inc_tax, 0) + COALESCE(cr.cr_return_amt_inc_tax, 0)) AS total_return_amount
+    FROM
+        customer AS c
+    LEFT JOIN
+        store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN
+        catalog_returns AS cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM
+        customer_demographics AS cd
+    JOIN
+        customer AS c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+ReturnsStatistics AS (
+    SELECT
+        d.d_year,
+        AVG(cr.total_returns) AS avg_returns,
+        AVG(cr.total_return_amount) AS avg_return_amount,
+        COUNT(cr.c_customer_sk) AS returning_customers
+    FROM
+        CustomerReturns AS cr
+    JOIN
+        date_dim AS d ON d.d_date_sk IN (SELECT DISTINCT sr_returned_date_sk FROM store_returns WHERE sr_customer_sk = cr.c_customer_sk)
+    GROUP BY
+        d.d_year
+),
+HighValueReturns AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.total_returns,
+        cs.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM
+        CustomerReturns AS cs
+    JOIN
+        CustomerDemographics AS cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE
+        cs.total_return_amount > 1000
+)
+SELECT
+    r.d_year,
+    h.cd_gender,
+    h.cd_marital_status,
+    COUNT(DISTINCT h.c_customer_sk) AS high_value_customers,
+    AVG(h.total_return_amount) AS avg_high_value_return
+FROM
+    ReturnsStatistics AS r
+JOIN
+    HighValueReturns AS h ON r.returning_customers > 50
+GROUP BY
+    r.d_year, h.cd_gender, h.cd_marital_status
+ORDER BY
+    r.d_year ASC, high_value_customers DESC;

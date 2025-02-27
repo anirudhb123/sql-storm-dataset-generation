@@ -1,0 +1,84 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(NULLIF(o.o_orderstatus, 'F'), 'Pending') AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name AS region_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_regionkey, r.r_name
+),
+TopCustomerOrders AS (
+    SELECT 
+        c.cr_regionkey,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS ongoing_orders_total,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        CustomerRegion c
+    LEFT JOIN 
+        OrderSummary o ON c.c_custkey = o.o_orderkey
+    GROUP BY 
+        c.cr_regionkey
+)
+
+SELECT 
+    r.r_name,
+    SUM(COALESCE(s.total_supply_cost, 0)) AS total_supply_cost,
+    AVG(cs.total_spent) AS average_spent,
+    MAX(l.l_tax) AS maximum_tax
+FROM 
+    region r
+LEFT JOIN 
+    SupplierStats s ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey IS NOT NULL LIMIT 1))
+LEFT JOIN 
+    CustomerRegion cs ON r.r_regionkey = cs.n_regionkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus IN ('O', 'F') AND o.o_orderdate <= CURRENT_DATE)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT CASE WHEN s.part_count > 5 THEN s.s_suppkey END) > 3
+ORDER BY 
+    total_supply_cost DESC, average_spent ASC;
+

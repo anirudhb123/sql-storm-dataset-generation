@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CTE_CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(d.d_date) AS last_purchase_date
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk
+),
+CTE_IncomeBand AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_income_band_sk
+    FROM household_demographics hd
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+CTE_TopCustomers AS (
+    SELECT 
+        cp.c_customer_sk, 
+        cp.total_net_profit,
+        cp.total_orders,
+        ib.ib_income_band_sk,
+        RANK() OVER (PARTITION BY ib.ib_income_band_sk ORDER BY cp.total_net_profit DESC) AS rank_income_band
+    FROM CTE_CustomerPurchases cp
+    JOIN CTE_IncomeBand ib ON cp.c_customer_sk = ib.hd_demo_sk
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cp.total_net_profit,
+    cp.total_orders,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    CASE 
+        WHEN cp.last_purchase_date IS NULL THEN 'No Purchases'
+        ELSE TO_CHAR(cp.last_purchase_date, 'YYYY-MM-DD')
+    END AS last_purchase_date,
+    c.c_birth_month
+FROM CTE_TopCustomers cp
+JOIN customer c ON cp.c_customer_sk = c.c_customer_sk
+JOIN CTE_IncomeBand ib ON cp.ib_income_band_sk = ib.ib_income_band_sk
+WHERE cp.rank_income_band <= 10
+ORDER BY ib.ib_income_band_sk, cp.total_net_profit DESC
+
+UNION ALL 
+
+SELECT 
+    'Total' AS c_first_name,
+    NULL AS c_last_name,
+    SUM(cp.total_net_profit) AS total_net_profit,
+    SUM(cp.total_orders) AS total_orders,
+    NULL AS ib_lower_bound,
+    NULL AS ib_upper_bound,
+    NULL AS last_purchase_date,
+    NULL AS c_birth_month
+FROM CTE_TopCustomers cp
+GROUP BY 'Total'
+ORDER BY c_first_name;

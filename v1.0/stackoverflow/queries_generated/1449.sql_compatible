@@ -1,0 +1,63 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes,
+        RANK() OVER (ORDER BY COUNT(v.Id) DESC) AS VoteRank
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY p.Id, p.Title, p.ViewCount, p.Score, p.AcceptedAnswerId
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.Score,
+        pd.CommentCount,
+        pd.LastEdited,
+        ROW_NUMBER() OVER (ORDER BY pd.Score DESC, pd.ViewCount DESC) AS PostRank
+    FROM PostDetails pd
+)
+SELECT 
+    uvs.UserId,
+    uvs.DisplayName,
+    t.Title,
+    t.Score,
+    t.ViewCount,
+    t.CommentCount,
+    CASE 
+        WHEN t.AcceptedAnswerId != -1 THEN 'Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    CASE 
+        WHEN uvs.TotalVotes >= 10 THEN 'Active Voter'
+        ELSE 'Regular Voter'
+    END AS VoterType
+FROM UserVoteStats uvs
+JOIN TopPosts t ON uvs.UserId IN (
+    SELECT DISTINCT p.OwnerUserId 
+    FROM Posts p 
+    WHERE p.Id = t.PostId
+)
+WHERE uvs.VoteRank <= 5
+ORDER BY uvs.TotalVotes DESC, t.Score DESC;

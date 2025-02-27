@@ -1,0 +1,72 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(V.Id = 2, 0)) AS UpVotes,
+        SUM(COALESCE(V.Id = 3, 0)) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS ActivityRank
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId in (4, 5, 10)
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS ClosedPostId,
+        P.Title,
+        P.ClosedDate,
+        U.DisplayName AS ClosedBy,
+        ROW_NUMBER() OVER (ORDER BY P.ClosedDate DESC) AS ClosedRank
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    INNER JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    COALESCE(ClosedPosts.ClosedPostId, 0) AS ClosedPostId,
+    COALESCE(ClosedPosts.Title, 'No Closed Posts') AS ClosedPostTitle,
+    COALESCE(ClosedPosts.ClosedDate, 'N/A') AS ClosedDate,
+    COALESCE(ClosedPosts.ClosedBy, 'N/A') AS ClosedBy,
+    PostActivity.PostId AS RecentActivityPostId,
+    PostActivity.Title AS RecentActivityTitle,
+    PostActivity.CreationDate AS RecentActivityDate,
+    PostActivity.Comment AS RecentActivityComment
+FROM 
+    UserScore U
+LEFT JOIN 
+    ClosedPosts ON U.TotalQuestions > 0 AND ClosedPosts.ClosedRank <= 5
+LEFT JOIN 
+    PostActivity ON U.UserId = PostActivity.PostId
+WHERE 
+    U.UpVotes - U.DownVotes > 10
+ORDER BY 
+    U.UpVotes DESC, U.TotalPosts DESC;

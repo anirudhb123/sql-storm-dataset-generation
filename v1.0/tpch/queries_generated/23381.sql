@@ -1,0 +1,81 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+HighValueLines AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) OVER (PARTITION BY ps.ps_partkey) AS total_availqty,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        partsupp ps
+),
+JoinedData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        rp.order_rank,
+        hl.total_line_value
+    FROM 
+        part p
+    LEFT JOIN supplier s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM SupplierParts ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.max_supplycost DESC 
+        LIMIT 1
+    )
+    LEFT JOIN RankedOrders rp ON rp.o_orderkey = (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey 
+        ORDER BY l.l_quantity DESC 
+        LIMIT 1
+    )
+    LEFT JOIN HighValueLines hl ON hl.l_orderkey = rp.o_orderkey
+    WHERE 
+        p.p_retailprice IS NOT NULL AND 
+        (s.s_acctbal IS NULL OR s.s_acctbal >= 500.00) AND 
+        p.p_comment LIKE '%special%'
+)
+SELECT 
+    JD.p_partkey,
+    JD.p_name,
+    COALESCE(JD.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(JD.s_acctbal, 0.00) AS supplier_account_balance,
+    JD.order_rank,
+    JD.total_line_value,
+    CASE 
+        WHEN JD.order_rank IS NOT NULL THEN 
+            CASE 
+                WHEN JD.total_line_value IS NULL THEN 'No Value'
+                ELSE 'Value Present'
+            END
+        ELSE 'No Order'
+    END AS order_status
+FROM 
+    JoinedData JD
+ORDER BY 
+    JD.p_partkey, JD.order_rank DESC, JD.total_line_value ASC
+LIMIT 100 OFFSET 10;

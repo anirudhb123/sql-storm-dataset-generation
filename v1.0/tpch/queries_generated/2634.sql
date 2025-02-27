@@ -1,0 +1,51 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS OrderCount, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT si.s_suppkey, si.s_name
+    FROM SupplierInfo si
+    WHERE si.TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM SupplierInfo)
+),
+LineitemStats AS (
+    SELECT l.l_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+           COUNT(*) AS LineCount,
+           AVG(l.l_quantity) AS AvgQuantity
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    pp.OrderCount,
+    pp.TotalSpent,
+    ls.TotalRevenue,
+    ls.LineCount,
+    ls.AvgQuantity,
+    (CASE 
+        WHEN pp.TotalSpent IS NULL THEN 'No Orders' 
+        WHEN pp.TotalSpent > 100000 THEN 'High Spending Customer' 
+        ELSE 'Regular Customer'
+    END) AS CustomerCategory,
+    (SELECT COUNT(*) FROM HighValueSuppliers hvs
+     WHERE EXISTS (SELECT 1 FROM partsupp psup WHERE psup.ps_suppkey = hvs.s_suppkey AND psup.ps_partkey = ps.ps_partkey)) AS SupplierCount
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN CustomerOrders pp ON pp.c_custkey = (SELECT c.c_custkey FROM customer c 
+                                                  WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o 
+                                                                       WHERE o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM orders o2)))
+                                                  LIMIT 1)
+LEFT JOIN LineitemStats ls ON ls.l_partkey = ps.ps_partkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY TotalRevenue DESC
+LIMIT 100;

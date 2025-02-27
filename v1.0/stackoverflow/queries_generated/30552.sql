@@ -1,0 +1,114 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        CreationDate,
+        PostTypeId,
+        Score,
+        ParentId
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Start with questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        p.ParentId
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.Id
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title AS PostTitle,
+        ph.PostHistoryTypeId,
+        pt.Name AS PostHistoryTypeName,
+        U.DisplayName AS EditorDisplayName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    JOIN 
+        Users U ON ph.UserId = U.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+BadgesCTE AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+UserScoreSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(b.TotalBadges, 0) AS BadgeCount,
+        SUM(p.Score) AS TotalPostScore,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts p ON U.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        BadgesCTE b ON U.Id = b.UserId
+    GROUP BY 
+        U.Id
+),
+FinalResults AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.BadgeCount,
+        u.TotalPostScore,
+        u.TotalCommentScore,
+        u.TotalPosts,
+        u.TotalComments,
+        ROW_NUMBER() OVER (ORDER BY u.TotalPostScore DESC) AS PostScoreRank,
+        ROW_NUMBER() OVER (ORDER BY u.TotalComments DESC) AS CommentRank,
+        ROW_NUMBER() OVER (ORDER BY u.BadgeCount DESC) AS BadgeRank
+    FROM 
+        UserScoreSummary u
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.BadgeCount,
+    fr.TotalPostScore,
+    fr.TotalCommentScore,
+    fr.TotalPosts,
+    fr.TotalComments,
+    CASE 
+        WHEN fr.PostScoreRank < 11 THEN 'Top Poster'
+        ELSE 'Regular Poster'
+    END AS PosterCategory,
+    CASE 
+        WHEN fr.CommentRank < 11 THEN 'Top Commenter'
+        ELSE 'Regular Commenter'
+    END AS CommenterCategory
+FROM 
+    FinalResults fr
+WHERE 
+    fr.BadgeCount > 0 
+ORDER BY 
+    fr.TotalPostScore DESC, fr.TotalComments DESC;
+
+This query includes recursive CTEs and combines several constructs like outer joins, window functions, and filtering based on recent activity. The results categorize users based on their activity on the site, providing a detailed output for performance benchmarking.

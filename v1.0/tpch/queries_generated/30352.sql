@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = sh.s_nationkey)
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_supplycost, ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    n.n_name, 
+    SUM(pl.l_extendedprice * (1 - pl.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(sh.level) AS max_level,
+    COUNT(DISTINCT cr.c_custkey) AS active_customers
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartSupplier p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem pl ON p.p_partkey = pl.l_partkey
+LEFT JOIN orders o ON pl.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerRank cr ON o.o_custkey = cr.c_custkey AND cr.rank <= 10
+WHERE o.o_orderstatus = 'F' AND pl.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+GROUP BY n.n_name
+HAVING SUM(pl.l_extendedprice * (1 - pl.l_discount)) > (SELECT AVG(total) FROM (
+    SELECT SUM(pl2.l_extendedprice * (1 - pl2.l_discount)) AS total
+    FROM lineitem pl2
+    JOIN orders o2 ON pl2.l_orderkey = o2.o_orderkey
+    WHERE o2.o_orderstatus = 'F'
+    GROUP BY o2.o_orderkey
+) AS revenue_totals)
+ORDER BY total_revenue DESC, n.n_name
+LIMIT 10;

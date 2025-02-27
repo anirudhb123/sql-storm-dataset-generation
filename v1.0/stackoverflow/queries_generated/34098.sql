@@ -1,0 +1,44 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, Reputation, DisplayName, AccountId, 1 AS Level
+    FROM Users
+    WHERE Id = (SELECT MIN(Id) FROM Users)  -- Start with the user with the minimum Id
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.DisplayName, u.AccountId, uh.Level + 1 AS Level
+    FROM Users u
+    JOIN UserHierarchy uh ON u.AccountId = uh.Id  -- Assuming AccountId refers to a user Id they are linked to
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'  -- Fetch posts created in the last 30 days
+),
+PostStatistics AS (
+    SELECT PostId, COUNT(c.Id) AS CommentCount, SUM(v.BountyAmount) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- Only consider BountyStart and BountyClose votes
+    GROUP BY PostId
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, u.DisplayName, COUNT(p.Id) AS PostCount, SUM(ps.CommentCount) AS TotalComments,
+           SUM(ps.TotalBounty) AS TotalBounty, MAX(p.CreationDate) AS LastActive
+    FROM Users u
+    LEFT JOIN RecentPosts p ON u.Id = p.OwnerUserId
+    LEFT JOIN PostStatistics ps ON p.PostId = ps.PostId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT uh.Id AS HierarchicalUserId, uh.DisplayName, ua.PostCount, ua.TotalComments, ua.TotalBounty,
+       COALESCE(ua.LastActive, 'No Activity') AS LastActiveDate,
+       CASE
+           WHEN ua.TotalBounty IS NULL THEN 'No Bounty'
+           WHEN ua.TotalBounty > 100 THEN 'High Bounty'
+           WHEN ua.TotalBounty BETWEEN 50 AND 100 THEN 'Medium Bounty'
+           ELSE 'Low Bounty'
+       END AS BountyLevel,
+       (SELECT COUNT(*) FROM Votes v WHERE v.UserId = uh.Id AND v.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 YEAR') AS AnnualVoteCount
+FROM UserHierarchy uh
+LEFT JOIN UserActivity ua ON uh.Id = ua.UserId
+ORDER BY uh.Level, ua.PostCount DESC;

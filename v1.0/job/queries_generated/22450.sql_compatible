@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_cast,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+        MIN(a.id) AS first_movie_id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title, 
+        production_year,
+        cast_count,
+        female_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_cast <= 5
+      AND 
+        (cast_count - female_count) > 0  
+),
+MovieKeywords AS (
+    SELECT 
+        a.title,
+        STRING_AGG(k.keyword, ', ') AS aggregated_keywords
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        a.title
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.cast_count,
+    fm.female_count,
+    mk.aggregated_keywords
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieKeywords mk ON fm.movie_title = mk.title
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE 
+            mi.movie_id = fm.first_movie_id 
+            AND mi.info LIKE '%award%' 
+            AND mi.note IS NOT NULL
+    )
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC
+OFFSET 10 ROWS;

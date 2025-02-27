@@ -1,0 +1,91 @@
+WITH RankedSupplier AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_balance
+    FROM 
+        supplier s
+), ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Expensive' 
+            ELSE 'Affordable' 
+        END AS price_category
+    FROM 
+        part p
+), SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ep.price_category
+    FROM 
+        partsupp ps
+    JOIN 
+        ExpensiveParts ep ON ps.ps_partkey = ep.p_partkey
+), CustomerOrderInfo AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderstatus IN ('O', 'P')
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+), CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+), OrderSupplierInfo AS (
+    SELECT 
+        ooi.o_orderkey,
+        sp.ps_partkey,
+        COUNT(sp.ps_suppkey) AS supplier_count
+    FROM 
+        CustomerOrderInfo ooi
+    JOIN 
+        SupplierPartInfo sp ON ooi.o_orderkey = sp.ps_partkey
+    GROUP BY 
+        ooi.o_orderkey, sp.ps_partkey
+)
+SELECT 
+    cn.n_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.total_revenue) AS total_revenue,
+    AVG(r.s_acctbal) AS avg_supplier_balance,
+    MAX(sp.ps_supplycost) AS max_supply_cost,
+    CASE 
+        WHEN COUNT(DISTINCT co.o_orderkey) = 0 THEN NULL 
+        ELSE AVG(sp.ps_availqty) END AS avg_available_qty
+FROM 
+    CustomerNation cn
+LEFT JOIN 
+    CustomerOrderInfo co ON cn.c_custkey = co.o_custkey
+LEFT JOIN 
+    RankedSupplier r ON cn.n_nationkey = r.s_suppkey
+LEFT JOIN 
+    OrderSupplierInfo sp ON co.o_orderkey = sp.o_orderkey
+WHERE 
+    r.rank_balance <= 5
+GROUP BY 
+    cn.n_name
+HAVING 
+    SUM(co.total_revenue) > 10000
+ORDER BY 
+    total_orders DESC NULLS LAST;

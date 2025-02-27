@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Posts that were closed
+)
+SELECT 
+    ua.DisplayName,
+    SUM(rp.ViewCount) AS TotalViews,
+    COUNT(DISTINCT rp.PostId) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN rp.rn = 1 THEN rp.PostId END) AS TopScoredQuestions,
+    SUM(cp.CreationDate IS NOT NULL) AS TotalClosedPosts,
+    STRING_AGG(DISTINCT cp.CloseReason, '; ') AS ReasonsForClosing
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+GROUP BY 
+    ua.UserId, ua.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0 
+ORDER BY 
+    TotalViews DESC;

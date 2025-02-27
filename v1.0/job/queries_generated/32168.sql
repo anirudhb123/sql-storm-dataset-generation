@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        h.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_hierarchy h ON t.episode_of_id = h.movie_id
+),
+title_cast AS (
+    SELECT 
+        ct.movie_id,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY ct.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ct
+    JOIN 
+        aka_name ak ON ct.person_id = ak.person_id
+),
+company_movie_info AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS num_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    GROUP_CONCAT(DISTINCT tc.actor_name ORDER BY tc.actor_rank) AS actor_list,
+    COALESCE(SUM(cmi.num_movies), 0) AS total_company_movies,
+    COUNT(DISTINCT tc.actor_id) AS actor_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    title_cast tc ON mh.movie_id = tc.movie_id
+LEFT JOIN 
+    company_movie_info cmi ON mh.movie_id = cmi.movie_id
+WHERE 
+    mh.production_year >= 2000 
+    AND (mh.title ILIKE '%action%' OR mh.title ILIKE '%drama%')
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT tc.actor_id) > 1  -- At least two actors in the movie
+ORDER BY 
+    mh.production_year DESC, mh.title;

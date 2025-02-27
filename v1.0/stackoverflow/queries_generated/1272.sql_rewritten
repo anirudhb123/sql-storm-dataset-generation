@@ -1,0 +1,73 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        U.CreationDate,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+), 
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        PT.Name AS PostType,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        (SELECT COUNT(1) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.Id, U.DisplayName, PT.Name
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PHT.Name AS HistoryType,
+        COUNT(PH.Id) AS HistoryCount
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.PostId, PH.PostHistoryTypeId, PHT.Name
+), 
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore 
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.ReputationRank,
+    PA.PostId,
+    PA.Title AS PostTitle,
+    PA.PostType,
+    PA.Score AS PostScore,
+    PA.ViewCount,
+    PA.AnswerCount,
+    PA.CommentCount,
+    COALESCE(PHA.HistoryCount, 0) AS HistoryChanges,
+    US.TotalPosts,
+    US.TotalScore,
+    US.AverageScore
+FROM UserReputation UA
+JOIN PostAnalytics PA ON UA.UserId = PA.OwnerDisplayName
+LEFT JOIN PostHistoryAnalysis PHA ON PA.PostId = PHA.PostId
+JOIN UserStats US ON UA.UserId = US.UserId
+WHERE UA.Reputation > 1000
+ORDER BY UA.Reputation DESC, PA.ViewCount DESC
+LIMIT 100;

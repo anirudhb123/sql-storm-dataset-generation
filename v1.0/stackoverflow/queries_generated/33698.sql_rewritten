@@ -1,0 +1,82 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '90 days'
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount
+    HAVING 
+        COUNT(C.Id) > 5
+),
+DetailedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS EditDate,
+        U.DisplayName AS EditedBy,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    JOIN 
+        Users U ON PH.UserId = U.Id
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName AS UserName,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    UVC.UpvoteCount,
+    UVC.DownvoteCount,
+    COALESCE(DPH.EditDate, 'No edits') AS LastEditDate,
+    COALESCE(DPH.EditedBy, '-') AS LastEditedBy,
+    COALESCE(DPH.HistoryType, 'None') AS LastEditType,
+    PP.CommentCount AS Comments
+FROM 
+    Users U
+JOIN 
+    UserVoteCounts UVC ON U.Id = UVC.UserId
+JOIN 
+    PopularPosts P ON P.Rank <= 5
+LEFT JOIN 
+    DetailedPostHistory DPH ON P.PostId = DPH.PostId AND DPH.EditRank = 1
+JOIN 
+    (SELECT 
+         PostId,
+         COUNT(Id) AS CommentCount
+     FROM 
+         Comments
+     GROUP BY 
+         PostId) PP ON PP.PostId = P.PostId
+WHERE 
+    U.Reputation > 100
+ORDER BY 
+    U.DisplayName, P.Score DESC;

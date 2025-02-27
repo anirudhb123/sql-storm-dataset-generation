@@ -1,0 +1,80 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE 
+                WHEN p.PostTypeId = 1 THEN 1 
+                ELSE 0 
+            END) AS QuestionCount,
+        SUM(CASE 
+                WHEN p.PostTypeId = 2 THEN 1 
+                ELSE 0 
+            END) AS AnswerCount,
+        SUM(CASE 
+                WHEN p.PostTypeId = 10 THEN 1 
+                ELSE 0 
+            END) AS ClosedCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        t.TagName,
+        u.DisplayName AS OwnerName,
+        ARRAY_AGG(c.Text) AS Comments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, t.TagName, u.DisplayName
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseHistoryCount,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.ClosedCount,
+    ts.AvgReputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerName,
+    COALESCE(cph.CloseHistoryCount, 0) AS CloseHistoryCount,
+    cph.FirstClosedDate
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentPosts rp ON ts.TagName = rp.TagName
+LEFT JOIN 
+    ClosedPostHistory cph ON rp.PostId = cph.PostId
+ORDER BY 
+    ts.PostCount DESC, ts.AvgReputation DESC;

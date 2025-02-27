@@ -1,0 +1,26 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.total_cost
+    FROM RankedSuppliers s
+    WHERE s.total_cost > (SELECT AVG(total_cost) FROM RankedSuppliers)
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, CAST('1998-10-01' AS DATE))
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT r.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, SUM(ho.total_revenue) AS total_revenue
+FROM HighValueSuppliers h
+JOIN supplier s ON h.s_suppkey = s.s_suppkey
+JOIN nation r ON s.s_nationkey = r.n_nationkey
+JOIN RecentOrders ho ON ho.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = r.n_nationkey)
+GROUP BY r.n_name
+ORDER BY total_revenue DESC, customer_count DESC;

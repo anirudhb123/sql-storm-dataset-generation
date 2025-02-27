@@ -1,0 +1,35 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        DENSE_RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+)
+
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    SUM(rs.total_supply_value) AS total_value,
+    AVG(rs.total_supply_value) AS avg_value_per_supplier
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.nation_name
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 5
+ORDER BY 
+    total_value DESC;

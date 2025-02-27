@@ -1,0 +1,91 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+), BadgeStats AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeList
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+), PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.Score > 0
+), CommentAndHistory AS (
+    SELECT 
+        C.Id AS CommentId,
+        C.PostId,
+        C.Text,
+        PH.PostHistoryTypeId,
+        PH.Comment AS EditComment,
+        PH.CreationDate AS HistoryDate
+    FROM 
+        Comments C
+    FULL OUTER JOIN 
+        PostHistory PH ON C.PostId = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IS NOT NULL
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalComments,
+    COALESCE(BS.BadgeList, 'No Badges') AS BadgeList,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    JSON_AGG(PD) AS RecentPosts,
+    JSON_AGG(CH) AS CommentsAndHistory
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    BadgeStats BS ON UA.UserId = BS.UserId
+LEFT JOIN 
+    (
+        SELECT 
+            U.Id AS UserId,
+            PD.Title,
+            PD.Rank,
+            PD.CreationDate
+        FROM 
+            UserActivity UA1
+        JOIN 
+            PostDetails PD ON UA1.UserId = PD.PostId
+        ORDER BY 
+            PD.CreationDate DESC
+        LIMIT 5
+    ) PD ON UA.UserId = PD.UserId
+LEFT JOIN 
+    CommentAndHistory CH ON UA.UserId = CH.PostId
+GROUP BY 
+    UA.UserId
+ORDER BY 
+    UA.Reputation DESC NULLS LAST;

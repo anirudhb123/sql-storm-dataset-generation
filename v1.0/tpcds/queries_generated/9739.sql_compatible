@@ -1,0 +1,73 @@
+
+WITH top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+    ORDER BY 
+        total_profit DESC
+    LIMIT 10
+),
+recent_returns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date >= DATE '2002-10-01' - INTERVAL '1 year')
+    GROUP BY 
+        cr_returning_customer_sk
+),
+customer_address_info AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+),
+profit_summary AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        AVG(ws.ws_net_profit) AS average_order_profit
+    FROM 
+        top_customers tc
+    JOIN 
+        web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+    JOIN 
+        customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    ps.total_orders,
+    ps.total_spent,
+    ps.average_order_profit,
+    rr.total_return_amount
+FROM 
+    profit_summary ps
+JOIN 
+    customer_address_info ci ON ps.c_customer_id = ci.ca_address_id
+LEFT JOIN 
+    recent_returns rr ON ps.c_customer_id = rr.cr_returning_customer_sk
+ORDER BY 
+    ps.total_spent DESC;

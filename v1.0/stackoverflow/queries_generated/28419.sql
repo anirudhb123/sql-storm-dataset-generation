@@ -1,0 +1,75 @@
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Tags,
+        ARRAY(SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))) AS tag) AS TagArray
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RankedPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.OwnerUserId,
+        tp.Tags,
+        tp.TagArray,
+        ROW_NUMBER() OVER (PARTITION BY tag ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        TaggedPosts tp
+    JOIN 
+        Posts p ON tp.PostId = p.Id,
+        unnest(tp.TagArray) AS tag
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        u.EmailHash,
+        rp.TagArray,
+        rp.TagRank,
+        b.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UsersWithBadges b ON u.Id = b.UserId
+    WHERE 
+        rp.TagRank <= 5 -- Top 5 ranked posts per tag
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.Reputation,
+    pd.EmailHash,
+    pd.TagArray,
+    pd.BadgeCount,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = pd.PostId), 0) AS CommentCount,
+    COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = pd.PostId AND v.VoteTypeId = 2), 0) AS UpvoteCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 100; -- Limit to the latest 100 entries

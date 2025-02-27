@@ -1,0 +1,59 @@
+WITH UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.ViewCount DESC) AS RankByViews
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY P.Id, P.OwnerUserId
+),
+PostHistorySummary AS (
+    SELECT
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS EditCount -- Count of edits per post
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) -- Edits to title, body, or tags
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+),
+PostVoteSummary AS (
+    SELECT
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT
+    U.DisplayName,
+    UReputation.Reputation,
+    PP.PostId,
+    PP.Title,
+    PP.Score,
+    PP.ViewCount,
+    PP.CommentCount,
+    COALESCE(PHS.EditCount, 0) AS TotalEdits,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    UReputation.ReputationRank
+FROM UserReputation UReputation
+INNER JOIN PopularPosts PP ON UReputation.UserId = PP.OwnerUserId
+LEFT JOIN PostHistorySummary PHS ON PP.PostId = PHS.PostId
+LEFT JOIN PostVoteSummary PVS ON PP.PostId = PVS.PostId
+WHERE UReputation.Reputation > 1000 -- Filter users with reputation greater than 1000
+  AND PP.RankByViews <= 5 -- Get top 5 popular posts by user
+ORDER BY PP.ViewCount DESC, TotalEdits DESC;
+

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_paid) AS total_sales,
+        1 AS level,
+        CASE 
+            WHEN cd_demo_sk IS NOT NULL THEN 'Customer'
+            ELSE 'Unknown' 
+        END AS customer_type
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        ws.bill_customer_sk,
+        cd_demo_sk
+    UNION ALL
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_paid) AS total_sales,
+        sh.level + 1,
+        'Customer'
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesHierarchy sh ON ws.bill_customer_sk = sh.bill_customer_sk
+    WHERE 
+        sh.level < 3
+    GROUP BY 
+        ws.bill_customer_sk, 
+        sh.level
+),
+RankedSales AS (
+    SELECT 
+        sh.bill_customer_sk,
+        sh.total_sales,
+        DENSE_RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM 
+        SalesHierarchy sh
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(SUM(rs.total_sales), 0) AS city_sales,
+    COUNT(DISTINCT rs.bill_customer_sk) AS distinct_customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RankedSales rs ON c.c_customer_sk = rs.bill_customer_sk
+WHERE 
+    ca.ca_country = 'USA' 
+    AND ca.ca_state IN ('CA', 'NY', 'TX')
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    COALESCE(SUM(rs.total_sales), 0) > 10000
+ORDER BY 
+    city_sales DESC;

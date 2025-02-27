@@ -1,0 +1,26 @@
+-- Performance Benchmarking Query
+-- This query retrieves the post statistics including the count of answers, comments, and votes for each user along with their reputation.
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId -- Get the posts authored by the user
+LEFT JOIN 
+    Posts a ON a.OwnerUserId = u.Id AND a.PostTypeId = 2 -- Get the answers authored by the user
+LEFT JOIN 
+    Comments c ON c.UserId = u.Id -- Get comments made by the user
+LEFT JOIN 
+    Votes v ON v.UserId = u.Id -- Get votes made by the user
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    u.Reputation DESC; -- Order by user reputation

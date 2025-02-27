@@ -1,0 +1,70 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.Score DESC) AS UserRank
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+    WHERE 
+        rp.CreationDate >= DATEADD(year, -1, GETDATE())  -- Posts created in the last year
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(fp.PostId) AS TotalPosts,
+    SUM(fp.Score) AS TotalScore,
+    SUM(fp.UpVotes) AS TotalUpVotes,
+    SUM(fp.DownVotes) AS TotalDownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    FilteredPosts fp ON u.Id = fp.OwnerUserId
+WHERE 
+    u.Reputation > 1000  -- Users with reputation greater than 1000
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(fp.PostId) > 5  -- Users with more than 5 posts
+ORDER BY 
+    TotalScore DESC, TotalUpVotes DESC;

@@ -1,0 +1,85 @@
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        supplier_name,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM 
+        PartSupplierDetails
+    GROUP BY 
+        supplier_name
+    ORDER BY 
+        total_supply_cost DESC
+    LIMIT 5
+),
+CustomerOrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        c.c_address,
+        SUM(l.l_extendedprice * l.l_quantity) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, c.c_name, c.c_address
+),
+CombinedDetails AS (
+    SELECT 
+        psd.p_partkey,
+        psd.p_name,
+        psd.supplier_name,
+        psd.s_address,
+        c.od_order_value,
+        ts.total_supply_cost
+    FROM 
+        PartSupplierDetails psd
+    JOIN 
+        TopSuppliers ts ON psd.supplier_name = ts.supplier_name
+    JOIN 
+        CustomerOrderDetails c ON psd.p_partkey = c.o_orderkey
+)
+SELECT 
+    p.p_name,
+    p.supplier_name,
+    p.s_address,
+    co.total_order_value AS customer_order_value,
+    tp.total_supply_cost AS supplier_supply_cost
+FROM 
+    CombinedDetails p
+JOIN 
+    region r ON r.r_regionkey = (
+        SELECT 
+            n.n_regionkey 
+        FROM 
+            nation n 
+        JOIN 
+            supplier s ON n.n_nationkey = s.s_nationkey 
+        WHERE 
+            s.s_name = p.supplier_name
+        LIMIT 1
+    )
+WHERE 
+    p.total_order_value > 10000 
+ORDER BY 
+    p.total_order_value DESC, 
+    tp.total_supply_cost ASC;

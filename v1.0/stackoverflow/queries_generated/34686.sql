@@ -1,0 +1,90 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RN
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13, 14) -- Considering close, reopen, delete, undelete, lock types
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(UPV.TotalUpVotes, 0) AS TotalUpVotes,
+        COALESCE(DOWNV.TotalDownVotes, 0) AS TotalDownVotes,
+        COALESCE(COM.CountComments, 0) AS CommentCount,
+        COALESCE(PH.RN, 0) AS RecentHistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            v.PostId,
+            COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+            COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+        FROM 
+            Votes v
+        GROUP BY 
+            v.PostId
+    ) AS UPV ON p.Id = UPV.PostId
+    LEFT JOIN (
+        SELECT 
+            c.PostId,
+            COUNT(*) AS CountComments
+        FROM 
+            Comments c
+        GROUP BY 
+            c.PostId
+    ) AS COM ON p.Id = COM.PostId
+    LEFT JOIN RecursivePostHistory PH ON p.Id = PH.PostId
+),
+FinalOutput AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        u.DisplayName AS OwnerName,
+        ur.Reputation AS OwnerReputation,
+        ur.BadgeCount AS OwnerBadgeCount,
+        pa.TotalUpVotes,
+        pa.TotalDownVotes,
+        pa.CommentCount,
+        pa.RecentHistoryCount,
+        CASE 
+            WHEN pa.RecentHistoryCount > 0 THEN 'Has Recent Changes'
+            ELSE 'No Recent Changes'
+        END AS PostStatus,
+        ROW_NUMBER() OVER (ORDER BY pa.RecentHistoryCount DESC, pa.TotalUpVotes DESC) AS Rn
+    FROM 
+        PostAnalytics pa
+    JOIN 
+        Users u ON pa.OwnerUserId = u.Id
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        pa.TotalUpVotes > 10  -- Filtering for posts with more than 10 upvotes
+)
+SELECT * FROM FinalOutput
+WHERE Rn <= 20  -- Get the top 20 posts by recent activity and upvote count
+ORDER BY 
+    OwnerReputation DESC, 
+    TotalUpVotes DESC;

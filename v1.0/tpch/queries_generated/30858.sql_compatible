@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS seg_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+part_supplier_prices AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+final_result AS (
+    SELECT p.p_name, 
+           MAX(ps.total_supplycost) AS max_supply_cost,
+           AVG(os.o_totalprice) AS avg_order_price,
+           COUNT(os.o_orderkey) AS order_count
+    FROM part p
+    LEFT JOIN part_supplier_prices ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN order_summary os ON os.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+    WHERE p.p_retailprice > 100 AND p.p_size BETWEEN 10 AND 20
+    GROUP BY p.p_name
+)
+SELECT fh.s_name, fr.p_name, fr.max_supply_cost, fr.avg_order_price, fr.order_count
+FROM final_result fr
+JOIN supplier_hierarchy fh ON fh.s_suppkey = fr.max_supply_cost 
+WHERE fr.order_count > 10
+ORDER BY fr.avg_order_price DESC, fh.level ASC;

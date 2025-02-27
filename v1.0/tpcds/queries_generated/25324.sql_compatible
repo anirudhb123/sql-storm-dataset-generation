@@ -1,0 +1,54 @@
+
+WITH Address_Analysis AS (
+    SELECT 
+        ca_city, 
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_street_name || ' ' || ca_street_number || ' ' || ca_street_type, '; ') AS full_address,
+        SUM(CASE WHEN ca_country = 'USA' THEN 1 ELSE 0 END) AS usa_address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, 
+        ca_state
+), 
+Gender_Analysis AS (
+    SELECT 
+        cd_gender, 
+        COUNT(*) AS gender_count,
+        AVG(cd_dep_count) AS average_dependencies
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+), 
+Income_Summary AS (
+    SELECT 
+        ib_income_band_sk, 
+        CONCAT(ib_lower_bound, ' - ', ib_upper_bound) AS income_range,
+        COUNT(*) AS count_per_band
+    FROM 
+        household_demographics
+    LEFT JOIN 
+        income_band ON household_demographics.hd_income_band_sk = income_band.ib_income_band_sk
+    GROUP BY 
+        ib_income_band_sk, ib_lower_bound, ib_upper_bound
+)
+SELECT 
+    AA.ca_city,
+    AA.ca_state,
+    AA.address_count,
+    AA.full_address,
+    GA.cd_gender,
+    GA.gender_count,
+    GA.average_dependencies,
+    IS.income_range,
+    IS.count_per_band
+FROM 
+    Address_Analysis AA
+JOIN 
+    Gender_Analysis GA ON GA.gender_count > 50
+JOIN 
+    Income_Summary IS ON IS.count_per_band > 10
+ORDER BY 
+    AA.ca_city, AA.ca_state;

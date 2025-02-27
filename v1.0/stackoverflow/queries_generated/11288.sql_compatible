@@ -1,0 +1,49 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS TotalComments,
+        SUM(C.Score) AS TotalCommentScore,
+        SUM(CASE WHEN C.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalCommentUsers,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalBadges,
+    U.TotalBounty,
+    P.PostId,
+    P.TotalComments,
+    P.TotalCommentScore,
+    P.TotalCommentUsers
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, U.TotalPosts DESC, P.TotalComments DESC;

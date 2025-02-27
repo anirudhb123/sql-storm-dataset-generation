@@ -1,0 +1,50 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(COALESCE(Posts.Score, 0)) AS AverageScore,
+        SUM(CASE WHEN Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    WHERE 
+        Posts.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(Votes.VoteTypeId = 2) AS UpVotesGiven,
+        SUM(Votes.VoteTypeId = 3) AS DownVotesGiven,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Votes.UserId = Users.Id AND Votes.PostId = Posts.Id
+    GROUP BY 
+        Users.Id, Users.DisplayName
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ts.AcceptedAnswers,
+    ur.DisplayName,
+    ur.UpVotesGiven,
+    ur.DownVotesGiven,
+    ur.PostsCreated
+FROM 
+    TagStatistics ts
+JOIN 
+    UserReputation ur ON ts.AcceptedAnswers > 0
+ORDER BY 
+    ts.PostCount DESC,
+    ts.TotalViews DESC
+LIMIT 10;

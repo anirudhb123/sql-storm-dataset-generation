@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND CURRENT_DATE
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_name,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS parts_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name,
+    cs.total_spent,
+    cs.order_count,
+    cs.last_order_date,
+    sp.total_supply_cost,
+    sp.parts_supplied,
+    ra.o_orderstatus,
+    ra.o_totalprice AS highest_order_total
+FROM 
+    CustomerSummary cs
+JOIN 
+    SupplierPerformance sp ON sp.parts_supplied = (SELECT COUNT(*) FROM part p WHERE p.p_partkey % 2 = 0)
+LEFT JOIN 
+    RankedOrders ra ON ra.o_orderkey = (SELECT MAX(o_orderkey) FROM RankedOrders WHERE order_rank = 1)
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSummary) 
+    AND sp.total_supply_cost IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST
+UNION ALL
+SELECT 
+    'Average Customer' AS c_name,
+    AVG(cs.total_spent) AS total_spent,
+    AVG(cs.order_count) AS order_count,
+    NULL AS last_order_date,
+    NULL AS total_supply_cost,
+    NULL AS parts_supplied,
+    NULL AS o_orderstatus,
+    NULL AS highest_order_total
+FROM 
+    CustomerSummary cs;

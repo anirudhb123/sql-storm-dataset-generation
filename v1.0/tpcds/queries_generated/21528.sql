@@ -1,0 +1,76 @@
+
+WITH RECURSIVE demographics AS (
+    SELECT cd_demo_sk, 
+           cd_gender, 
+           cd_marital_status, 
+           cd_education_status, 
+           cd_purchase_estimate, 
+           cd_credit_rating, 
+           cd_dep_count, 
+           cd_dep_employed_count, 
+           cd_dep_college_count 
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+    UNION ALL
+    SELECT d.cd_demo_sk,
+           d.cd_gender,
+           d.cd_marital_status,
+           d.cd_education_status,
+           d.cd_purchase_estimate + 100 AS cd_purchase_estimate,
+           d.cd_credit_rating, 
+           d.cd_dep_count, 
+           d.cd_dep_employed_count, 
+           d.cd_dep_college_count
+    FROM demographics d
+    WHERE d.cd_purchase_estimate < 1000
+),
+store_info AS (
+    SELECT s.s_store_sk, 
+           s.s_store_name, 
+           s.s_state, 
+           SUM(ss_ext_sales_price) AS total_sales 
+    FROM store s
+    LEFT JOIN store_sales ss 
+           ON s.s_store_sk = ss.ss_store_sk 
+    WHERE s.s_state IS NOT NULL
+    GROUP BY s.s_store_sk, s.s_store_name, s.s_state
+),
+date_info AS (
+    SELECT d.d_date, 
+           d.d_month_seq, 
+           d.d_year, 
+           COUNT(ws.ws_order_number) AS total_orders 
+    FROM date_dim d 
+    LEFT JOIN web_sales ws 
+           ON d.d_date_sk = ws.ws_sold_date_sk 
+    GROUP BY d.d_date, d.d_month_seq, d.d_year
+),
+test AS (
+    SELECT ca.ca_address_sk, 
+           ca.ca_city, 
+           ca.ca_state,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count 
+    FROM customer_address ca 
+    LEFT JOIN customer c 
+           ON ca.ca_address_sk = c.c_current_addr_sk 
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT s.s_store_name, 
+       s.total_sales, 
+       d.total_orders, 
+       d.d_year, 
+       COALESCE(DENSE_RANK() OVER (PARTITION BY s.s_store_sk ORDER BY s.total_sales DESC), 0) AS sales_rank,
+       (SELECT MAX(cd_purchase_estimate) 
+        FROM demographics 
+        WHERE cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IN (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_city = s.s_state))
+       ) AS max_purchase_estimate,
+       (SELECT COUNT(*) 
+        FROM store_info si 
+        WHERE si.total_sales > s.total_sales) AS higher_sales_count
+FROM store_info s 
+JOIN date_info d 
+ON d.d_month_seq = EXTRACT(MONTH FROM CURRENT_DATE)
+WHERE s.total_sales > (SELECT AVG(total_sales) FROM store_info)
+  AND d.d_year = (SELECT MAX(d_year) FROM date_info)
+ORDER BY sales_rank, total_sales DESC 
+LIMIT 10;

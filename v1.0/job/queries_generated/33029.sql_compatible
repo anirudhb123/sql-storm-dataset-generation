@@ -1,0 +1,59 @@
+
+WITH RECURSIVE RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT n.name, ', ') AS cast_names,
+        MAX(co.kind) AS top_cast_role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name n ON c.person_id = n.person_id
+    JOIN 
+        comp_cast_type co ON c.person_role_id = co.id
+    GROUP BY 
+        c.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    r.movie_title,
+    r.production_year,
+    cd.total_cast,
+    cd.cast_names,
+    cd.top_cast_role,
+    mk.keywords,
+    CASE 
+        WHEN cd.total_cast IS NULL THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_presence
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    CastDetails cd ON r.movie_title = cd.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON r.movie_title = mk.movie_id
+WHERE 
+    r.year_rank <= 5
+ORDER BY 
+    r.production_year DESC, 
+    cd.total_cast DESC NULLS LAST;

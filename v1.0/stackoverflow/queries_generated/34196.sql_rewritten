@@ -1,0 +1,84 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(U.DisplayName, 'Community User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS RecentActivityOrder
+    FROM 
+        Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    
+    UNION ALL
+    
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(U.DisplayName, 'Community User') AS OwnerDisplayName,
+        PH.CreationDate AS RecentActivityDate
+    FROM 
+        Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    AND 
+        RecentActivityOrder > 0
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM Votes
+    GROUP BY PostId
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(PT.PostId) AS PostsTagged
+    FROM 
+        Tags T
+    LEFT JOIN Posts PT ON PT.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+)
+SELECT
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.OwnerDisplayName,
+    COALESCE(PV.UpVoteCount, 0) AS TotalUpVotes,
+    COALESCE(PV.DownVoteCount, 0) AS TotalDownVotes,
+    (SELECT STRING_AGG(TagName, ', ') 
+     FROM TagStatistics 
+     WHERE PostsTagged > 0
+     AND PostId = PS.PostId) AS AssociatedTags,
+    (SELECT COUNT(*) 
+     FROM Comments C 
+     WHERE C.PostId = PS.PostId
+    ) AS CommentCount,
+    (SELECT COUNT(*) 
+     FROM PostHistory PH 
+     WHERE PH.PostId = PS.PostId 
+     AND PH.PostHistoryTypeId = 12) AS DeletionCount
+FROM 
+    RecursivePostStats PS
+LEFT JOIN PostVoteCounts PV ON PS.PostId = PV.PostId
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC
+LIMIT 100;

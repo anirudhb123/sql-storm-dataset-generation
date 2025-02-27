@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+TotalOrderValue AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+)
+SELECT 
+    r.r_name,
+    pd.p_name,
+    pd.p_brand,
+    pd.p_retailprice,
+    ts.total_value,
+    COALESCE(rs.s_name, 'No Supplier') AS best_supplier,
+    pd.supplier_count
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey AND rs.rn = 1
+JOIN ProductDetails pd ON rs.s_suppkey = pd.supplier_count 
+LEFT JOIN TotalOrderValue ts ON ts.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o WHERE o.o_orderstatus = 'O')
+WHERE pd.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2 
+    WHERE p2.p_brand = pd.p_brand
+) 
+AND (pd.supplier_count > 2 OR rs.s_suppkey IS NULL)
+ORDER BY r.r_name, pd.p_retailprice DESC;

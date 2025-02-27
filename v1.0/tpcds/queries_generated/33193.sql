@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_sold_date_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk
+),
+warehouse_info AS (
+    SELECT 
+        w.w_warehouse_name,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_profit
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_name
+),
+customer_statistics AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+),
+top_reasons AS (
+    SELECT 
+        r.r_reason_desc,
+        COUNT(sr.ticket_number) AS return_count
+    FROM reason r
+    JOIN store_returns sr ON r.r_reason_sk = sr.sr_reason_sk
+    GROUP BY r.r_reason_desc
+    ORDER BY return_count DESC
+    LIMIT 5
+)
+SELECT
+    w.w_warehouse_name,
+    ws.ws_sold_date_sk,
+    sd.total_quantity,
+    sd.total_sales,
+    ci.customer_count,
+    ci.avg_estimate,
+    tr.r_reason_desc,
+    tr.return_count
+FROM sales_data sd
+JOIN warehouse_info w ON sd.ws_sold_date_sk = w.total_orders
+JOIN customer_statistics ci ON ci.customer_count IS NOT NULL
+LEFT JOIN top_reasons tr ON tr.return_count < 1000
+WHERE sd.sales_rank <= 5
+  AND w.avg_profit IS NOT NULL
+  AND COALESCE(ci.avg_estimate, 0) > 100
+    OR (tr.return_count > 0 AND tr.r_reason_desc IS NOT NULL)
+ORDER BY sd.total_sales DESC, w.w_warehouse_name;

@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS UserReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Bounty Start or Close
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        UserReputation,
+        PostRank,
+        CommentCount,
+        TotalBounty,
+        CASE 
+            WHEN Score >= 10 THEN 'High Score'
+            WHEN Score BETWEEN 5 AND 9 THEN 'Medium Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1
+)
+SELECT 
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.UserReputation,
+    t.CommentCount,
+    t.TotalBounty,
+    t.ScoreCategory,
+    CASE 
+        WHEN t.TotalBounty > 0 THEN 'Has Bounty'
+        ELSE 'No Bounty'
+    END AS BountyStatus
+FROM 
+    TopPosts t
+LEFT JOIN 
+    Badges b ON t.UserReputation >= b.UserId
+WHERE 
+    b.Id IS NULL OR (b.Class = 1 AND t.UserReputation > 1000)
+ORDER BY 
+    t.ViewCount DESC, t.CreationDate ASC
+LIMIT 50;

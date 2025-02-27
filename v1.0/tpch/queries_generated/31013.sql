@@ -1,0 +1,41 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey IN (SELECT DISTINCT c_nationkey FROM customer)
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+AggregatedData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    WHERE l.l_shipdate >= DATE '2023-01-01' 
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+TopProducts AS (
+    SELECT p_partkey, p_name, p_brand, total_revenue
+    FROM AggregatedData
+    WHERE rank <= 10
+)
+SELECT r.r_name, 
+       SUM(COALESCE(tp.total_revenue, 0)) AS total_revenue_by_region,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       STRING_AGG(DISTINCT CONCAT(c.c_name, ' (', c.c_custkey, ')')) AS customer_names
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN TopProducts tp ON c.c_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name IN (SELECT n_name FROM nation WHERE n_nationkey = tp.p_partkey))
+GROUP BY r.r_name
+ORDER BY total_revenue_by_region DESC;

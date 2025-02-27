@@ -1,0 +1,87 @@
+WITH PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Tags,
+        PT.Name AS PostType,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        P.ViewCount,
+        substring(P.Tags, 2, length(P.Tags) - 2) AS CleanedTags
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.Tags IS NOT NULL AND
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+), TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(CleanedTags, '>')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        PostTags
+    GROUP BY 
+        Tag
+), PopularTags AS (
+    SELECT 
+        Tag, 
+        TagCount
+    FROM
+        TagCounts
+    WHERE 
+        TagCount > 5
+    ORDER BY 
+        TagCount DESC
+), RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        PT.Name AS PostType,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, PT.Name, U.DisplayName
+), Combined AS (
+    SELECT 
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.OwnerDisplayName,
+        PT.Tag AS PopularTag,
+        PT.TagCount
+    FROM 
+        RecentPosts RP
+    JOIN 
+        PopularTags PT ON RP.Title ILIKE '%' || PT.Tag || '%'
+    ORDER BY 
+        RP.Score DESC, PT.TagCount DESC
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY Score DESC) AS Rank,
+    Title,
+    CreationDate,
+    Score,
+    OwnerDisplayName,
+    PopularTag,
+    TagCount
+FROM 
+    Combined
+WHERE 
+    Rank <= 10;

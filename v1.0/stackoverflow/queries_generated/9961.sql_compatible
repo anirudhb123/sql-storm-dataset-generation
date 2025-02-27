@@ -1,0 +1,37 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, LastAccessDate
+    FROM Users
+    WHERE Reputation > 1000
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score,
+           p.ViewCount, p.OwnerUserId
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+      AND p.PostTypeId = 1
+),
+ActiveUsers AS (
+    SELECT u.Id, u.DisplayName, u.EmailHash
+    FROM UserReputation ur
+    JOIN Users u ON ur.Id = u.Id
+    WHERE ur.LastAccessDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '14 days'
+),
+UserPostStats AS (
+    SELECT au.Id AS UserId, COUNT(rp.PostId) AS PostsCount, SUM(rp.Score) AS TotalScore
+    FROM ActiveUsers au
+    LEFT JOIN RecentPosts rp ON au.Id = rp.OwnerUserId
+    GROUP BY au.Id
+),
+TopUsers AS (
+    SELECT ups.UserId, ups.PostsCount, ups.TotalScore, u.DisplayName
+    FROM UserPostStats ups
+    JOIN Users u ON ups.UserId = u.Id
+    WHERE ups.PostsCount > 5
+    ORDER BY ups.TotalScore DESC
+    LIMIT 10
+)
+SELECT tu.DisplayName, tu.PostsCount, tu.TotalScore
+FROM TopUsers tu
+JOIN UserReputation ur ON tu.UserId = ur.Id
+ORDER BY ur.Reputation DESC;

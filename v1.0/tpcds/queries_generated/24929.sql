@@ -1,0 +1,42 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT sr_customer_sk, SUM(sr_return_quantity) AS total_returned_items
+    FROM store_returns 
+    GROUP BY sr_customer_sk
+),
+EnhancedCustomer AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           COALESCE(cr.total_returned_items, 0) AS total_returned_items,
+           CASE 
+               WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+               WHEN cd.cd_purchase_estimate < 100 THEN 'Low'
+               WHEN cd.cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Medium'
+               WHEN cd.cd_purchase_estimate > 500 THEN 'High'
+           END AS purchase_category
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+),
+StoreSales AS (
+    SELECT ss.ss_customer_sk, SUM(ss.ss_net_paid) AS total_sales
+    FROM store_sales ss
+    JOIN EnhancedCustomer ec ON ss.ss_customer_sk = ec.c_customer_sk
+    WHERE ss.ss_sold_date_sk >= 20200101
+    GROUP BY ss.ss_customer_sk
+),
+RankedSales AS (
+    SELECT ess.c_customer_sk, ess.total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ess.purchase_category ORDER BY ess.total_sales DESC) AS sales_rank
+    FROM StoreSales ess
+)
+SELECT ec.c_first_name, ec.c_last_name,
+       ec.cd_gender, ec.purchase_category, 
+       COALESCE(rs.total_sales, 0) AS total_sales,
+       rs.sales_rank
+FROM EnhancedCustomer ec
+LEFT JOIN RankedSales rs ON ec.c_customer_sk = rs.c_customer_sk
+WHERE (ec.cd_marital_status = 'M' AND rs.total_sales > 1000)
+   OR (ec.cd_marital_status = 'S' AND rs.sales_rank <= 5)
+   OR (ec.total_returned_items > 10 AND ec.cd_purchase_estimate IS NOT NULL)
+ORDER BY ec.c_last_name, ec.c_first_name;

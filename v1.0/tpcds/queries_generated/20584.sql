@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_order
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 0
+        AND ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+top_sales AS (
+    SELECT 
+        sd.web_site_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        AVG(sd.ws_net_profit) AS avg_profit
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.rank_order <= 10
+    GROUP BY 
+        sd.web_site_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) IS NOT NULL AND COUNT(ws.ws_order_number) > 2
+),
+profit_analysis AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.order_count,
+        cs.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS customer_rank,
+        CASE 
+            WHEN cs.total_spent IS NULL THEN 'No Purchases'
+            WHEN cs.total_spent < (SELECT AVG(total_spent) FROM customer_stats) THEN 'Low Value Customer'
+            ELSE 'High Value Customer' 
+        END AS customer_value
+    FROM 
+        customer_stats cs
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    COALESCE(ts.total_quantity, 0) AS total_quantity,
+    COALESCE(pa.total_spent, 0) AS total_spent,
+    pa.customer_value,
+    (SELECT COUNT(DISTINCT c.c_customer_id) FROM customer c WHERE c.c_birth_year IS NOT NULL) AS distinct_birthday_customers,
+    DENSE_RANK() OVER (ORDER BY (SELECT AVG(total_spent) FROM customer_stats) DESC) AS avg_customer_rank
+FROM 
+    warehouse w
+LEFT JOIN 
+    top_sales ts ON w.w_warehouse_sk = ts.web_site_sk
+LEFT JOIN 
+    profit_analysis pa ON pa.c_customer_sk = ts.web_site_sk
+WHERE 
+    w.w_state = 'CA' 
+    AND NOT EXISTS (SELECT 1 FROM inventory i WHERE i.inv_warehouse_sk = w.w_warehouse_sk AND i.inv_quantity_on_hand < 1)
+ORDER BY 
+    total_quantity DESC, total_spent ASC
+LIMIT 100;

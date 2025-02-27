@@ -1,0 +1,58 @@
+
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost,
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 1000
+),
+highest_priced_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice AS max_totalprice,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F'
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    l.l_quantity,
+    CASE 
+        WHEN l.l_discount IS NULL THEN 'No Discount'
+        ELSE CONCAT('Discount: ', CAST(l.l_discount * 100 AS VARCHAR(255)), '%')
+    END AS discount_info,
+    COALESCE(rp.rank_cost, NULL) AS supplier_rank,
+    hp.max_totalprice,
+    CASE 
+        WHEN hp.order_rank = 1 THEN 'Highest Order'
+        ELSE 'Other Order'
+    END AS order_status
+FROM 
+    lineitem l
+JOIN 
+    ranked_suppliers rp ON l.l_suppkey = rp.s_suppkey
+FULL OUTER JOIN 
+    highest_priced_orders hp ON l.l_orderkey = hp.o_orderkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    (rp.total_available_qty IS NOT NULL AND rp.rank_cost <= 3) OR 
+    (hp.max_totalprice IS NULL AND l.l_returnflag = 'R' AND l.l_shipdate < DATE '1998-10-01' - INTERVAL '30 days')
+ORDER BY 
+    p.p_name ASC, supplier_rank DESC;

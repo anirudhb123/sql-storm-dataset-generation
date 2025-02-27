@@ -1,0 +1,33 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+    t.TagName
+FROM 
+    Posts p
+LEFT JOIN 
+    (SELECT PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+     FROM Votes
+     GROUP BY PostId) v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount
+     FROM Comments
+     GROUP BY PostId) c ON p.Id = c.PostId
+LEFT JOIN 
+    (SELECT Id, AcceptedAnswerId FROM Posts) a ON p.Id = a.Id
+LEFT JOIN 
+    (SELECT PostId, STRING_AGG(TagName, ', ') AS TagName
+     FROM PostTags pt
+     JOIN Tags t ON pt.TagId = t.Id
+     GROUP BY PostId) t ON p.Id = t.PostId
+WHERE 
+    p.CreationDate >= '2022-01-01'
+ORDER BY 
+    p.CreationDate DESC;

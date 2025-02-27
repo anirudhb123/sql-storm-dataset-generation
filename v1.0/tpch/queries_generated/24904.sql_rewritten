@@ -1,0 +1,68 @@
+WITH RECURSIVE Order_CTE AS (
+    SELECT 
+        o_orderkey,
+        o_totalprice,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o_orderkey ORDER BY o_orderdate DESC) as row_num
+    FROM 
+        orders
+    WHERE 
+        o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as row_num
+    FROM 
+        orders o
+    JOIN 
+        Order_CTE o_cte ON o.o_orderkey = o_cte.o_orderkey
+    WHERE 
+        o.o_orderdate > o_cte.o_orderdate
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE 
+            WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) 
+            ELSE 0 
+        END) AS total_returns,
+    MAX(l.l_tax) AS max_tax,
+    MIN(l.l_discount) AS min_discount,
+    AVG(CASE 
+            WHEN l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30 days' THEN l.l_extendedprice 
+            ELSE NULL 
+        END) AS avg_old_shipments,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS unique_part_names
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    customer c ON c.c_custkey = (
+        SELECT 
+            c2.c_custkey
+        FROM 
+            customer c2
+        WHERE 
+            c2.c_nationkey = s.s_nationkey
+        ORDER BY 
+            c2.c_acctbal DESC
+        LIMIT 1
+    )
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_size BETWEEN 1 AND 50
+    AND (s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000 OR p.p_retailprice IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    total_returns > 1000 OR COUNT(DISTINCT c.c_custkey) = 0
+ORDER BY 
+    n.n_name DESC;

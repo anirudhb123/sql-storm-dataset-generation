@@ -1,0 +1,62 @@
+
+WITH 
+  CustomerInfo AS (
+    SELECT 
+      c.c_customer_sk,
+      CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+      cd.cd_gender,
+      cd.cd_marital_status,
+      cd.cd_education_status,
+      cd.cd_purchase_estimate,
+      cd.cd_credit_rating,
+      ca.ca_city,
+      ca.ca_state
+    FROM 
+      customer c
+      JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+      JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+  ),
+  ItemInfo AS (
+    SELECT 
+      i.i_item_sk,
+      i.i_item_desc,
+      i.i_product_name,
+      i.i_brand,
+      i.i_category,
+      i.i_current_price
+    FROM 
+      item i
+  ),
+  SalesInfo AS (
+    SELECT 
+      ws.ws_item_sk,
+      SUM(ws.ws_quantity) AS total_quantity,
+      SUM(ws.ws_net_profit) AS total_profit,
+      COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+      web_sales ws
+    GROUP BY 
+      ws.ws_item_sk
+  )
+SELECT 
+  ci.full_name,
+  ci.cd_gender,
+  ci.cd_marital_status,
+  ii.i_item_desc,
+  ii.i_product_name,
+  ii.i_brand,
+  ii.i_category,
+  si.total_quantity,
+  si.total_profit,
+  COALESCE(si.total_orders, 0) AS total_orders
+FROM 
+  CustomerInfo ci
+  LEFT JOIN SalesInfo si ON ci.c_customer_sk = si.ws_ship_customer_sk
+  LEFT JOIN ItemInfo ii ON si.ws_item_sk = ii.i_item_sk
+WHERE 
+  ci.cd_gender = 'F' 
+  AND ci.cd_marital_status = 'M' 
+  AND si.total_profit > 1000 
+ORDER BY 
+  ci.cd_purchase_estimate DESC, 
+  si.total_profit DESC;

@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 as level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey 
+    WHERE oh.level < 5
+),
+RankedParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available_qty,
+           DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rnk
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS sale_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY sale_month
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, r.r_regionkey
+    FROM customer c 
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey 
+    WHERE c.c_acctbal > 5000
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(m.total_revenue) AS total_monthly_revenue,
+    SUM(s.total_spent) AS total_supplier_spending,
+    (SELECT AVG(o.o_totalprice) FROM OrderHierarchy o WHERE o.level <= 2) AS avg_order_price
+FROM region r
+LEFT JOIN CustomerRegion cr ON r.r_regionkey = cr.r_regionkey
+LEFT JOIN MonthlySales m ON DATE_TRUNC('month', cast('1998-10-01' as date)) = m.sale_month
+LEFT JOIN SupplierSales s ON s.total_spent IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_monthly_revenue DESC
+LIMIT 10;

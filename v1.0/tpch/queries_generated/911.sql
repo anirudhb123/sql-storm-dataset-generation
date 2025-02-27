@@ -1,0 +1,81 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 5000
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.rn <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_totalprice > (
+            SELECT AVG(o1.o_totalprice)
+            FROM orders o1
+            WHERE o1.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+        )
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(SUM(oli.total_revenue), 0) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    ps.ps_supplycost AS avg_supply_cost,
+    RANK() OVER (ORDER BY COALESCE(SUM(oli.total_revenue), 0) DESC) AS revenue_rank
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    OrderLineItems oli ON c.o_orderkey = oli.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_brand = 'Brand#1'
+    )
+JOIN 
+    TopSuppliers ts ON ts.s_suppkey = ps.ps_suppkey
+GROUP BY 
+    c.c_custkey, 
+    c.c_name, 
+    ps.ps_supplycost
+HAVING 
+    COALESCE(SUM(oli.total_revenue), 0) > 10000
+ORDER BY 
+    revenue_rank;

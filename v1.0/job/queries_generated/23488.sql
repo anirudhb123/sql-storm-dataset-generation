@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ComplicatedTitles AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(k.keyword, ''), 'No Keyword') AS keyword,
+        CASE 
+            WHEN m.production_year < 2000 THEN 'Classic'
+            WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern Era'
+            ELSE 'Recent'
+        END AS era,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+UnusualActors AS (
+    SELECT 
+        a.name,
+        a.id AS actor_id,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_notes,
+        COUNT(DISTINCT c.movie_id) AS unique_movies_count
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) > 5
+)
+SELECT 
+    ct.title,
+    ct.production_year,
+    ct.keyword,
+    ct.era,
+    ua.name AS actor_name,
+    ua.unique_movies_count,
+    rm.total_cast AS cast_count,
+    COALESCE(NULLIF(ua.movies_with_notes, 0), -1) AS note_count_adjusted
+FROM 
+    ComplicatedTitles ct
+LEFT JOIN 
+    RankedMovies rm ON ct.movie_id = rm.movie_id
+JOIN 
+    UnusualActors ua ON rm.total_cast >= 3
+WHERE 
+    ct.title_rank <= 5 
+    AND ua.unique_movies_count > 1
+ORDER BY 
+    ct.production_year DESC, ct.era, ct.title;

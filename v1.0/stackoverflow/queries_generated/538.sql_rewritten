@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotesCount, 
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotesCount,
+        COUNT(c.Id) AS CommentsCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        ue.DisplayName AS OwnerDisplayName,
+        ue.UserId AS OwnerUserId,
+        ue.UpVotesCount,
+        ue.DownVotesCount,
+        ue.CommentsCount,
+        ue.GoldBadges,
+        CASE 
+            WHEN rp.AnswerCount > 5 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS Popularity
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserEngagement ue ON rp.OwnerUserId = ue.UserId
+    WHERE 
+        rp.PostRank = 1 
+)
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.OwnerDisplayName,
+    ps.UpVotesCount,
+    ps.DownVotesCount,
+    ps.CommentsCount,
+    ps.GoldBadges,
+    ps.Popularity,
+    COALESCE(ph.ClosedDate, 'Not Closed') AS ClosureStatus
+FROM 
+    PostSummary ps
+LEFT OUTER JOIN 
+    Posts p ON ps.PostId = p.Id
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+WHERE 
+    ps.GoldBadges > 0
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

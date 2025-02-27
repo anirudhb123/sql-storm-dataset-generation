@@ -1,0 +1,77 @@
+
+WITH RecursiveCustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 0
+),
+AggregatedSales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rcd.c_customer_sk, 
+        rcd.c_first_name, 
+        rcd.c_last_name, 
+        asales.total_sales,
+        asales.order_count
+    FROM 
+        RecursiveCustomerData rcd
+    JOIN 
+        AggregatedSales asales ON rcd.c_customer_sk = asales.ws_bill_customer_sk
+    WHERE 
+        purchase_rank <= 10 AND 
+        total_sales > (SELECT AVG(total_sales) FROM AggregatedSales) 
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_id, ca.ca_city, ca.ca_state, ca.ca_zip 
+)
+SELECT 
+    hvc.c_first_name, 
+    hvc.c_last_name, 
+    hvc.total_sales,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_zip,
+    ai.customer_count,
+    CASE 
+        WHEN hvc.total_sales IS NULL THEN 'No Sales'
+        ELSE CONCAT('Sales: $', FORMAT(hvc.total_sales, 2))
+    END AS final_sales_info
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    AddressInfo ai ON hvc.c_customer_sk = ai.customer_count
+ORDER BY 
+    hvc.total_sales DESC, 
+    hvc.c_last_name ASC 
+LIMIT 50;

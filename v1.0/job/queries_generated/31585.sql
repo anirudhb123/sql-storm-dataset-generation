@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || e.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title AS e
+    JOIN 
+        MovieHierarchy AS mh ON e.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        mh.path,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rn
+    FROM 
+        MovieHierarchy AS mh
+),
+PopularMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(ci.person_id) AS cast_count
+    FROM 
+        aka_title AS m
+    JOIN 
+        cast_info AS ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.title, m.production_year
+    HAVING 
+        COUNT(ci.person_id) > 1
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    rm.path AS movie_path,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY pm.production_year) AS total_cast_in_year,
+    COALESCE(SUBSTRING(pm.title FROM '(\w+)$'), 'Unknown') AS last_word_title,
+    CASE 
+        WHEN pm.production_year IS NULL THEN 'Year not specified'
+        ELSE 'Year: ' || pm.production_year
+    END AS year_display,
+    RANK() OVER (ORDER BY pm.cast_count DESC) AS popularity_rank
+FROM 
+    PopularMovies AS pm
+LEFT JOIN 
+    RankedMovies AS rm ON pm.title = rm.title AND pm.production_year = rm.production_year
+LEFT JOIN 
+    cast_info AS ci ON pm.title = (SELECT title FROM aka_title WHERE id = ci.movie_id LIMIT 1)
+WHERE 
+    pm.cast_count IS NOT NULL
+ORDER BY 
+    pm.cast_count DESC, 
+    pm.production_year DESC;

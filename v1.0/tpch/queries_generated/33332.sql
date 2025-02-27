@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE sh.level < 5
+),
+OrderLineSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ols.total_revenue) AS nation_revenue
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN OrderLineSummary ols ON o.o_orderkey = ols.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+RankedNations AS (
+    SELECT nr.n_nationkey, nr.n_name, nr.nation_revenue,
+           RANK() OVER (ORDER BY nr.nation_revenue DESC) AS revenue_rank
+    FROM NationRevenue nr
+    WHERE nr.nation_revenue IS NOT NULL
+)
+SELECT sh.s_name AS supplier_name,
+       nr.n_name AS nation_name,
+       nr.nation_revenue,
+       rh.level,
+       CASE WHEN nr.nation_revenue > 100000 THEN 'High Revenue'
+            WHEN nr.nation_revenue BETWEEN 50000 AND 100000 THEN 'Medium Revenue'
+            ELSE 'Low Revenue' END AS revenue_category
+FROM SupplierHierarchy sh
+FULL OUTER JOIN RankedNations nr ON sh.s_nationkey = nr.n_nationkey
+WHERE sh.level IS NOT NULL OR nr.nation_revenue IS NOT NULL
+ORDER BY nr.nation_revenue DESC NULLS LAST;

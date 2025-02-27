@@ -1,0 +1,76 @@
+WITH RankedParts AS (
+    SELECT 
+        p_partkey, 
+        p_name, 
+        p_brand, 
+        p_retailprice, 
+        RANK() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) AS price_rank
+    FROM part
+),
+SupplierAvailability AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        SUM(ps_availqty) AS total_avail_qty
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        o_custkey, 
+        SUM(o_totalprice) AS total_order_value
+    FROM orders
+    WHERE o_orderstatus IN ('O', 'F')
+    GROUP BY o_custkey
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(co.total_order_value, 0) AS total_order_value
+    FROM customer c
+    LEFT JOIN CustomerOrders co ON c.c_custkey = co.o_custkey
+    WHERE COALESCE(c.c_acctbal, 0) > (SELECT AVG(c_acctbal) FROM customer) 
+      AND c.c_mktsegment NOT LIKE 'S%'
+),
+JoinedData AS (
+    SELECT 
+        fp.p_partkey, 
+        fp.p_name, 
+        ss.s_name, 
+        fa.total_avail_qty, 
+        fc.c_name, 
+        fc.total_order_value
+    FROM RankedParts fp
+    LEFT OUTER JOIN SupplierAvailability ss ON fp.p_partkey = ss.ps_partkey
+    LEFT OUTER JOIN FrequentCustomers fc ON fc.total_order_value > 1000
+    WHERE fp.price_rank = 1 AND (ss.total_avail_qty IS NOT NULL OR fc.c_name IS NOT NULL)
+),
+FinalSelection AS (
+    SELECT 
+        jd.p_partkey, 
+        jd.p_name, 
+        jd.s_name, 
+        jd.total_avail_qty,
+        CASE 
+            WHEN jd.total_avail_qty IS NULL THEN 'No Supply'
+            ELSE 'Available'
+        END AS supply_status
+    FROM JoinedData jd
+    WHERE jd.s_name IS NOT NULL
+)
+SELECT 
+    f.p_partkey, 
+    f.p_name, 
+    f.s_name, 
+    f.total_avail_qty, 
+    f.supply_status
+FROM FinalSelection f
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM lineitem l
+    WHERE l.l_partkey = f.p_partkey 
+      AND l.l_discount > 0.2 
+      AND l.l_returnflag = 'R'
+)
+ORDER BY f.p_name, f.total_avail_qty DESC;

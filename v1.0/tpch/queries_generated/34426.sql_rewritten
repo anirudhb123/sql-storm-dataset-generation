@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 3
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > 10000
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING SUM(o.o_totalprice) > 50000
+),
+UnionedPrices AS (
+    SELECT ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice < 50
+    
+    UNION ALL
+    
+    SELECT ps.ps_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT sh.s_name, 
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       AVG(o.o_totalprice) AS avg_order_price,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+       STRING_AGG(DISTINCT c.c_name, '; ') AS customer_names
+FROM SupplierHierarchy sh
+LEFT JOIN lineitem l ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN HighValueOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerOrderSummary c ON c.c_custkey = o.o_orderkey
+WHERE sh.hierarchy_level > 1 AND o.o_orderdate >= '1996-01-01'
+GROUP BY sh.s_name
+ORDER BY avg_order_price DESC;

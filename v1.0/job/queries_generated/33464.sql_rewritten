@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id,
+        l.title,
+        mh.level + 1
+    FROM 
+        movie_link mt
+    JOIN 
+        aka_title l ON mt.linked_movie_id = l.id
+    JOIN 
+        movie_hierarchy mh ON mt.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN mi.info::numeric ELSE 0 END) AS avg_info_value,
+    CASE 
+        WHEN COUNT(DISTINCT mi.info) > 0 THEN 'Has Info'
+        ELSE 'No Info'
+    END AS info_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.level
+HAVING 
+    AVG(CASE WHEN mi.info IS NOT NULL THEN mi.info::numeric ELSE 0 END) > 0
+ORDER BY 
+    mh.level DESC, actor_count DESC;

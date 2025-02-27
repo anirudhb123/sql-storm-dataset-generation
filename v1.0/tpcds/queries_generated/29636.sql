@@ -1,0 +1,55 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+GenderSummary AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS gender_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+DemographicAnalysis AS (
+    SELECT 
+        cd.gender AS gender,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(c.click_count) AS average_clicks
+    FROM 
+        GenderSummary gs
+    JOIN 
+        customer_demographics cd ON gs.cd_gender = cd.cd_gender
+    JOIN (
+        SELECT 
+            wp_customer_sk,
+            COUNT(*) AS click_count
+        FROM 
+            web_page
+        GROUP BY 
+            wp_customer_sk
+    ) c ON cd.cd_demo_sk = c.wp_customer_sk
+    GROUP BY 
+        cd.gender
+)
+SELECT 
+    ap.full_address,
+    da.gender,
+    da.total_dependents,
+    da.average_clicks
+FROM 
+    AddressParts ap
+JOIN 
+    customer c ON ap.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    DemographicAnalysis da ON c.c_current_cdemo_sk = da.gender
+ORDER BY 
+    ap.full_address, da.gender;

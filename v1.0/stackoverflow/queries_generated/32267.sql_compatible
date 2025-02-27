@@ -1,0 +1,92 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        u.DisplayName AS Creator,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+),
+TopPostHistory AS (
+    SELECT 
+        r.PostId,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY r.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        RecursivePostHistory ph
+    JOIN 
+        RecentPosts r ON ph.PostId = r.Id
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    r.Title,
+    r.CreationDate AS PostCreationDate,
+    pt.Name AS PostType,
+    th.UserDisplayName AS LastEditor,
+    th.CreationDate AS LastEditDate,
+    CASE 
+        WHEN th.PostHistoryTypeId = 10 THEN 'Closed'
+        WHEN th.PostHistoryTypeId = 11 THEN 'Reopened'
+        ELSE 'Edited'
+    END AS ChangeType
+FROM 
+    UserActivity ua
+JOIN 
+    RecentPosts r ON ua.TotalPosts > 0
+LEFT JOIN 
+    TopPostHistory th ON r.Id = th.PostId AND th.HistoryRank = 1
+LEFT JOIN 
+    PostTypes pt ON r.PostType = pt.Id
+WHERE 
+    ua.TotalPosts > 10
+ORDER BY 
+    ua.UpVotes DESC, 
+    r.CreationDate DESC;

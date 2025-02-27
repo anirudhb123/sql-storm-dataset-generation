@@ -1,0 +1,86 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT po.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT v.Id) AS VotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts po ON u.Id = po.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON po.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        p.Title,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+)
+SELECT 
+    uph.PostId,
+    uph.Title,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    pah.PostHistoryTypeId,
+    pah.CreationDate AS LastActionDate,
+    ua.PostsCreated,
+    ua.CommentsMade,
+    ua.VotesReceived,
+    COUNT(c.Id) AS CommentsCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    COUNT(DISTINCT p.Id) AS RelatedPostsCount
+FROM 
+    RecursivePostHierarchy uph
+LEFT JOIN 
+    Users u ON uph.PostId = u.Id
+LEFT JOIN 
+    RecentPostHistory pah ON uph.PostId = pah.PostId AND pah.rn = 1
+LEFT JOIN 
+    Comments c ON uph.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON uph.PostId = v.PostId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+GROUP BY 
+    uph.PostId, uph.Title, u.DisplayName, pah.PostHistoryTypeId, pah.CreationDate, ua.PostsCreated, ua.CommentsMade, ua.VotesReceived
+ORDER BY 
+    uph.PostId;

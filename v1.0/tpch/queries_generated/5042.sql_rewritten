@@ -1,0 +1,37 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           c.c_name,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey 
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT r.o_orderkey, 
+           r.o_orderdate, 
+           r.o_totalprice, 
+           r.c_name
+    FROM RankedOrders r
+    WHERE r.order_rank <= 5
+),
+OrderDetails AS (
+    SELECT lo.l_orderkey, 
+           SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS order_value,
+           COUNT(DISTINCT lo.l_partkey) AS unique_parts
+    FROM lineitem lo
+    JOIN TopOrders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY lo.l_orderkey
+)
+SELECT to.o_orderkey, 
+       to.o_orderdate, 
+       to.o_totalprice, 
+       od.order_value, 
+       od.unique_parts, 
+       n.n_name AS customer_nation
+FROM TopOrders to
+JOIN OrderDetails od ON to.o_orderkey = od.l_orderkey
+JOIN customer c ON to.c_name = c.c_name
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+ORDER BY to.o_orderdate DESC, order_value DESC;

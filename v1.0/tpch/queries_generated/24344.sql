@@ -1,0 +1,57 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+avg_order_prices AS (
+    SELECT c.c_custkey, AVG(o.o_totalprice) AS avg_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, a.avg_price
+    FROM customer c
+    JOIN avg_order_prices a ON c.c_custkey = a.c_custkey
+    WHERE a.avg_price > 1000
+),
+supply_stats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+high_supply_supp AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_supply_cost
+    FROM supplier s
+    JOIN supply_stats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE ss.total_supply_cost > ALL (SELECT AVG(total_supply_cost) FROM supply_stats)
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    hp.total_supply_cost,
+    CASE 
+        WHEN co.o_totalprice IS NULL THEN 'No Orders'
+        WHEN co.order_rank = 1 THEN 'Latest Order'
+        ELSE 'Previous Order' 
+    END AS order_type,
+    CASE 
+        WHEN hp.s_name IS NULL THEN 'No Supplier for High Value'
+        ELSE hp.s_name 
+    END AS high_value_supplier
+FROM cust_orders co
+LEFT JOIN high_value_customers hvc ON co.c_custkey = hvc.c_custkey
+LEFT JOIN high_supply_supp hp ON hp.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps
+    JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_orderkey = co.o_orderkey
+    GROUP BY ps.ps_suppkey
+)
+WHERE co.o_totalprice IS NOT NULL 
+AND hvc.avg_price IS NOT NULL
+ORDER BY co.o_orderdate DESC NULLS LAST;

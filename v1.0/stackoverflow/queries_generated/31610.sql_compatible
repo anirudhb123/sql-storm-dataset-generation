@@ -1,0 +1,50 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT u.Id AS UserId, u.Reputation, 1 AS Level
+    FROM Users u
+    WHERE u.Reputation >= 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, ur.Level + 1
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation
+    WHERE ur.Level < 5
+), 
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, 
+           p.CreationDate, p.OwnerUserId,
+           u.DisplayName AS OwnerDisplayName,
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COALESCE(ph.CloseReason, 'Open') AS CloseReason
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN (
+        SELECT ph.PostId, STRING_AGG(cr.Name, ', ') AS CloseReason
+        FROM PostHistory ph
+        JOIN CloseReasonTypes cr ON cr.Id = CAST(ph.Comment AS INT)
+        WHERE ph.PostHistoryTypeId = 10
+        GROUP BY ph.PostId
+    ) AS ph ON ph.PostId = p.Id
+    JOIN Users u ON u.Id = p.OwnerUserId
+    WHERE p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    GROUP BY p.Id, u.DisplayName, p.Title, p.CreationDate, p.OwnerUserId
+), 
+RankedPosts AS (
+    SELECT pd.PostId, pd.Title, pd.OwnerDisplayName, pd.CommentCount,
+           pd.UpVotes, pd.DownVotes, pd.CloseReason,
+           RANK() OVER (ORDER BY pd.UpVotes - pd.DownVotes DESC) AS PostRank
+    FROM PostDetails pd
+)
+SELECT up.UserId, up.Reputation, rp.Title, rp.OwnerDisplayName, 
+       rp.CommentCount, rp.UpVotes, rp.DownVotes, rp.CloseReason,
+       CASE 
+           WHEN rp.CloseReason = 'Open' THEN 'Not Closed'
+           ELSE 'Closed'
+       END AS PostStatus
+FROM UserReputationCTE up
+JOIN RankedPosts rp ON up.UserId = rp.OwnerUserId
+WHERE up.Level < 5
+AND rp.PostRank <= 10
+ORDER BY up.Reputation DESC, rp.UpVotes DESC;

@@ -1,0 +1,71 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        d.d_year
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2021 AND 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        ss.c_customer_id,
+        ss.total_quantity,
+        ss.total_sales,
+        ss.total_orders,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_lower_bound,
+        cd.ib_upper_bound
+    FROM 
+        SalesSummary ss
+    JOIN 
+        CustomerDemographics cd ON ss.c_customer_id = (
+            SELECT c.c_customer_id 
+            FROM customer c 
+            WHERE c.c_customer_sk = ss.c_customer_sk
+            LIMIT 1
+        )
+)
+SELECT 
+    fa.c_customer_id,
+    fa.total_quantity,
+    fa.total_sales,
+    fa.total_orders,
+    fa.cd_gender,
+    fa.cd_marital_status,
+    CASE
+        WHEN fa.total_sales > 10000 THEN 'High Value'
+        WHEN fa.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    FinalAnalysis fa
+ORDER BY 
+    fa.total_sales DESC
+LIMIT 1000;

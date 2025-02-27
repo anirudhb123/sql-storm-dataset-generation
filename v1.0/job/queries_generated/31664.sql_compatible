@@ -1,0 +1,55 @@
+
+WITH RECURSIVE hierarchy AS (
+    SELECT 
+        c.id AS company_id, 
+        c.name AS company_name, 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS level
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        aka_title t ON mc.movie_id = t.movie_id
+    WHERE 
+        c.country_code = 'USA'
+
+    UNION ALL
+
+    SELECT 
+        ch.id AS company_id,
+        ch.name AS company_name,
+        m.id AS movie_id,
+        t.title AS movie_title,
+        h.level + 1
+    FROM 
+        company_name ch
+    JOIN 
+        movie_companies mc ON ch.id = mc.company_id
+    JOIN 
+        aka_title t ON mc.movie_id = t.movie_id
+    JOIN 
+        hierarchy h ON ch.id = h.company_id
+    WHERE 
+        h.level < 5  
+)
+
+SELECT 
+    h.company_name,
+    COUNT(DISTINCT h.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT h.movie_title, '; ') AS movie_titles,
+    AVG(t.production_year) AS avg_production_year,
+    SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_notes
+FROM 
+    hierarchy h
+JOIN 
+    aka_title t ON h.movie_id = t.id
+JOIN 
+    movie_companies mc ON h.movie_id = mc.movie_id
+GROUP BY 
+    h.company_name
+HAVING 
+    COUNT(DISTINCT h.movie_id) > 1
+ORDER BY 
+    total_movies DESC;

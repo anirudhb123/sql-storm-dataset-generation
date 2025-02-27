@@ -1,0 +1,55 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        AVG(cr_return_amt) AS avg_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY cr_returning_customer_sk ORDER BY SUM(cr_return_quantity) DESC) AS return_rank
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rcr.returning_customer_sk,
+        rcr.total_returned,
+        CASE 
+            WHEN rcr.total_returned > 10 THEN 'High' 
+            ELSE 'Low' 
+        END AS customer_value,
+        COALESCE(cd.demo_sk, -1) AS demo_sk
+    FROM 
+        RankedReturns rcr
+    LEFT JOIN 
+        customer c ON c.c_customer_sk = rcr.returning_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        rcr.return_rank = 1
+)
+SELECT 
+    wc.web_site_id,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    MAX(wr.wr_return_amt_inc_tax) AS max_return_with_tax,
+    COUNT(DISTINCT hvc.returning_customer_sk) AS high_value_returning_customers,
+    AVG(hvc.total_returned) FILTER (WHERE hvc.customer_value = 'High') AS avg_high_value_returns,
+    COUNT(*) FILTER (WHERE wc.web_name IS NOT NULL AND hvc.customer_value = 'High') AS active_high_value_web_customers
+FROM 
+    web_sales ws
+JOIN 
+    web_site wc ON ws.ws_web_site_sk = wc.web_site_sk
+LEFT JOIN 
+    HighValueCustomers hvc ON ws.ws_ship_customer_sk = hvc.returning_customer_sk
+LEFT JOIN 
+    web_returns wr ON ws.ws_order_number = wr.wr_order_number
+WHERE 
+    ws.ws_sold_date_sk BETWEEN 20000101 AND 20230101
+    AND (wr.wr_return_quantity IS NULL OR wr.wr_return_quantity > 0 OR hvc.customer_value = 'High')
+GROUP BY 
+    wc.web_site_id
+HAVING 
+    SUM(ws.ws_ext_sales_price) > (SELECT AVG(ws_ext_sales_price) FROM web_sales) * 1.5
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

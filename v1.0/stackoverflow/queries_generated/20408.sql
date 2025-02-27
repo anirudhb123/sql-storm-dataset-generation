@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (NOW() - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.PostTypeId, p.Title
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.PostTypeId = 1 THEN 'Question'
+            WHEN rp.PostTypeId = 2 THEN 'Answer'
+            WHEN rp.PostTypeId IN (4, 5) THEN 'Tag Wiki'
+            ELSE 'Other'
+        END AS PostType,
+        CASE 
+            WHEN rp.CommentCount = 0 THEN 'No Comments'
+            WHEN rp.CommentCount <= 5 THEN 'Few Comments'
+            ELSE 'Many Comments'
+        END AS CommentCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.VoteRank <= 5
+),
+PostAnalytics AS (
+    SELECT 
+        fp.*,
+        fp.UpVotes - fp.DownVotes AS NetVotes,
+        (fp.UpVotes + fp.DownVotes) AS TotalVotes
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CommentCategory,
+    pa.NetVotes,
+    pa.TotalVotes,
+    CONCAT('Post Type: ', pa.PostType) AS PostTypeDescription,
+    CASE 
+        WHEN pa.TotalVotes IS NULL THEN 'Unvoted'
+        WHEN pa.TotalVotes > 0 AND pa.NetVotes IS NULL THEN 'Neutral'
+        ELSE 'Voted'
+    END AS VoteStatus,
+    STRING_AGG(CONCAT('Comment ID: ', c.Id, ' | ', c.Text), ', ') AS CommentsSummary
+FROM 
+    PostAnalytics pa
+LEFT JOIN 
+    Comments c ON pa.PostId = c.PostId
+GROUP BY 
+    pa.PostId, pa.Title, pa.CommentCategory, pa.NetVotes, pa.TotalVotes, pa.PostType
+ORDER BY 
+    pa.NetVotes DESC NULLS LAST,
+    pa.CommentCount DESC NULLS LAST;

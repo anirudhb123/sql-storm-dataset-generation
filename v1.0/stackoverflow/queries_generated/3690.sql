@@ -1,0 +1,51 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(C.Score), 0) AS TotalCommentScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 50 AND (U.Location IS NOT NULL OR U.WebsiteUrl IS NOT NULL)
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalBounty,
+    UA.TotalCommentScore,
+    UA.TotalPosts,
+    UA.TotalBadges,
+    PP.Title AS PopularPostTitle,
+    PP.Score AS PopularPostScore
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PopularPosts PP ON UA.TotalPosts > 0 AND PP.PostRank <= 5
+ORDER BY 
+    UA.TotalBounty DESC, UA.TotalCommentScore DESC, UA.TotalPosts DESC
+LIMIT 10;

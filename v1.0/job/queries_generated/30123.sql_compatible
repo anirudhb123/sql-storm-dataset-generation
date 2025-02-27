@@ -1,0 +1,70 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.kind_id = 1  
+),
+TopRatedMovies AS (
+    SELECT 
+        a.title,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        AVG(mv.rating) AS avg_rating
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mv ON a.id = mv.movie_id
+    WHERE 
+        mv.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+    GROUP BY 
+        a.title
+    HAVING 
+        COUNT(DISTINCT cc.person_id) > 5 AND AVG(mv.rating) > 7.5
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    tr.total_cast,
+    tr.avg_rating,
+    STRING_AGG(aka.name, ', ') AS cast_names,
+    COUNT(DISTINCT kc.keyword) AS keyword_count
+FROM 
+    MovieHierarchy mh
+JOIN 
+    TopRatedMovies tr ON mh.title = tr.title
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, tr.total_cast, tr.avg_rating
+ORDER BY 
+    tr.avg_rating DESC, mh.production_year DESC
+LIMIT 10;

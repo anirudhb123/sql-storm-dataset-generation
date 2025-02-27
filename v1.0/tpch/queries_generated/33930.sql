@@ -1,0 +1,47 @@
+WITH RecursivePartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty + r.ps_availqty AS ps_availqty, r.ps_supplycost
+    FROM partsupp ps
+    JOIN RecursivePartSuppliers r ON ps.ps_partkey = r.ps_partkey AND ps.ps_suppkey <> r.ps_suppkey
+    WHERE ps.ps_availqty > r.ps_availqty
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierRegion AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, r.r_name AS region_name,
+           MAX(s.s_acctbal) OVER (PARTITION BY n.n_name) AS max_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem li ON p.p_partkey = li.l_partkey
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    WHERE li.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.p_partkey, p.p_name
+),
+FinalReport AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, 
+           cs.c_custkey, cs.c_name, ps2.total_sales, sr.region_name
+    FROM RecursivePartSuppliers ps
+    JOIN CustomerOrders cs ON cs.recent_order = 1
+    LEFT JOIN PartSales ps2 ON ps.ps_partkey = ps2.p_partkey
+    JOIN SupplierRegion sr ON ps.ps_suppkey = sr.s_suppkey
+    WHERE ps.ps_availqty < 100 AND (ps.ps_supplycost > 50 OR ps2.order_count IS NULL)
+)
+SELECT fr.*, 
+       COALESCE(fr.max_balance, 0) AS safe_balance, 
+       CONCAT('Supplier: ', fr.s_suppkey, '; Name: ', fr.s_name) AS supplier_info
+FROM FinalReport fr
+ORDER BY fr.total_sales DESC, fr.region_name;

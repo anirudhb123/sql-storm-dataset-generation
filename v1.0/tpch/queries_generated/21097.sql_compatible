@@ -1,0 +1,42 @@
+
+WITH RECURSIVE TopCustomers AS (
+    SELECT c_custkey, c_name, c_acctbal, 
+           ROW_NUMBER() OVER (ORDER BY c_acctbal DESC) AS rank 
+    FROM customer 
+    WHERE c_acctbal IS NOT NULL
+),
+RegionSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%North%')
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, 
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+TopOrderValues AS (
+    SELECT od.o_orderkey, od.o_orderdate, 
+           DENSE_RANK() OVER (ORDER BY od.total_order_value DESC) AS order_rank
+    FROM OrderDetails od
+)
+SELECT 
+    tc.c_name, 
+    COALESCE(SUM(TOV.total_order_value), 0) AS total_value,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    STRING_AGG(rs.nation_name, ', ') AS supplier_nations,
+    CASE 
+        WHEN SUM(TOV.total_order_value) > 5000 THEN 'High Value'
+        WHEN SUM(TOV.total_order_value) = 0 THEN 'No Value'
+        ELSE 'Medium Value'
+    END AS value_category
+FROM TopCustomers tc
+LEFT JOIN TopOrderValues TOV ON tc.c_custkey = TOV.o_orderkey
+LEFT JOIN RegionSuppliers rs ON rs.s_acctbal < tc.c_acctbal
+WHERE tc.rank <= 10
+GROUP BY tc.c_name
+HAVING COALESCE(SUM(TOV.total_order_value), 0) > 1000
+ORDER BY total_value DESC;

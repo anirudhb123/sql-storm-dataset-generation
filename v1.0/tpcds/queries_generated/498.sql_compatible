@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk = (
+        SELECT MAX(ws_sold_date_sk)
+        FROM web_sales
+    )
+),
+CustomerPromotions AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT wep.wp_web_page_sk) AS page_views,
+        CASE
+            WHEN SUM(ws.ws_ext_sales_price) > 1000 THEN 'High Value'
+            WHEN SUM(ws.ws_ext_sales_price) BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_page wep ON ws.ws_web_page_sk = wep.wp_web_page_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000
+    AND cd.cd_gender = 'M'
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+PopularItems AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold
+    FROM web_sales
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_quantity) > 100
+),
+SalesWithPromotion AS (
+    SELECT 
+        wws.ws_order_number,
+        wws.ws_item_sk,
+        wws.ws_sales_price,
+        pp.p_promo_name,
+        wm.sm_type AS ship_mode
+    FROM web_sales wws
+    LEFT JOIN promotion pp ON wws.ws_promo_sk = pp.p_promo_sk
+    LEFT JOIN ship_mode wm ON wws.ws_ship_mode_sk = wm.sm_ship_mode_sk
+    WHERE wws.ws_net_profit > 0
+)
+SELECT 
+    cp.c_customer_id,
+    cp.c_first_name,
+    cp.c_last_name,
+    cp.total_sales,
+    pi.total_quantity_sold,
+    rws.ws_sales_price,
+    rws.p_promo_name,
+    rws.ship_mode,
+    CASE 
+        WHEN cp.customer_value = 'High Value' THEN 'VIP Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM CustomerPromotions cp
+JOIN PopularItems pi ON cp.c_customer_id = pi.ws_item_sk
+JOIN SalesWithPromotion rws ON cp.c_customer_id = rws.ws_order_number
+WHERE cp.page_views IS NOT NULL
+AND cp.total_sales > (
+    SELECT AVG(total_sales) FROM CustomerPromotions
+)
+ORDER BY cp.total_sales DESC, pi.total_quantity_sold ASC;

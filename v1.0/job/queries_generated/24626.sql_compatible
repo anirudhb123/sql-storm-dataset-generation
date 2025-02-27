@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast_count,
+        COUNT(c.person_id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopCastMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        rank_by_cast_count,
+        total_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast_count = 1
+),
+ActorsWithAwards AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT ma.id) AS award_count
+    FROM 
+        aka_name a
+    JOIN 
+        movie_info mi ON a.person_id = mi.movie_id
+    JOIN 
+        movie_info_idx mii ON mi.movie_id = mii.movie_id
+    JOIN 
+        info_type it ON mii.info_type_id = it.id
+    WHERE 
+        it.info = 'Awards' 
+    GROUP BY 
+        a.person_id, a.name
+),
+MovieCompanies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ' ORDER BY co.name) AS companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    tcm.title,
+    tcm.production_year,
+    tcm.total_cast,
+    ac.name AS actor_name,
+    awa.award_count,
+    mc.companies
+FROM 
+    TopCastMovies tcm
+LEFT JOIN 
+    cast_info ci ON tcm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ac ON ci.person_id = ac.person_id
+LEFT JOIN 
+    ActorsWithAwards awa ON ac.person_id = awa.person_id
+LEFT JOIN 
+    MovieCompanies mc ON tcm.movie_id = mc.movie_id
+WHERE 
+    (awa.award_count IS NULL OR awa.award_count > 0)
+    AND tcm.production_year > 1990
+ORDER BY 
+    tcm.production_year DESC, tcm.total_cast DESC
+LIMIT 100;

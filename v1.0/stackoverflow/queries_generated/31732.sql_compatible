@@ -1,0 +1,95 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        0 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    UNION ALL
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        rph.Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE 
+        ph.CreationDate < rph.CreationDate  
+),
+BadgeCount AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeTotal
+    FROM 
+        Badges
+    WHERE 
+        Class = 1  
+    GROUP BY 
+        UserId
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(vote.VoteCount, 0) AS VoteCount,
+        COALESCE(bc.BadgeTotal, 0) AS UserBadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        BadgeCount bc ON p.OwnerUserId = bc.UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.VoteCount,
+    ps.UserBadgeCount,
+    COALESCE(rph.Comment, 'No status change') AS StatusChangeComment,
+    CASE 
+        WHEN ps.Score > 100 THEN 'High Score'
+        WHEN ps.Score > 50 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    PostSummary ps
+LEFT JOIN 
+    RecursivePostHistory rph ON ps.PostId = rph.PostId
+WHERE 
+    ps.UserBadgeCount > 0  
+GROUP BY 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.VoteCount,
+    ps.UserBadgeCount,
+    rph.Comment
+ORDER BY 
+    ps.CreationDate DESC, 
+    ps.Score DESC
+LIMIT 50 OFFSET 0;

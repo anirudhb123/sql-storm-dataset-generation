@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        @row_number := IF(@current_owner_user_id = p.OwnerUserId, @row_number + 1, 1) AS Rank,
+        @current_owner_user_id := p.OwnerUserId,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id,
+        (SELECT @row_number := 0, @current_owner_user_id := NULL) AS vars
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= NOW() - INTERVAL 1 YEAR
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.Title,
+        tp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,  
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes   
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.Id = v.PostId
+    GROUP BY 
+        tp.Title, tp.OwnerDisplayName
+),
+FinalResult AS (
+    SELECT 
+        pd.Title,
+        pd.OwnerDisplayName,
+        pd.CommentCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        CASE 
+            WHEN pd.UpVotes + pd.DownVotes > 0 THEN 
+                ROUND((pd.UpVotes * 1.0 / (pd.UpVotes + pd.DownVotes)) * 100, 2) 
+            ELSE 0 
+        END AS UpvotePercentage
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    f.Title,
+    f.OwnerDisplayName,
+    f.CommentCount,
+    f.UpVotes,
+    f.DownVotes,
+    f.UpvotePercentage
+FROM 
+    FinalResult f
+WHERE 
+    f.UpvotePercentage > 50 
+ORDER BY 
+    f.UpVotes DESC, f.CommentCount DESC;

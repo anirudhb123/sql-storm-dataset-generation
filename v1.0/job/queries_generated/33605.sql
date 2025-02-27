@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title AS movie_title,
+           1 AS depth,
+           ARRAY[m.id] AS path
+    FROM aka_title m
+    WHERE m.episode_of_id IS NULL
+    UNION ALL
+    SELECT m2.id,
+           m2.title,
+           mh.depth + 1,
+           path || m2.id
+    FROM movie_hierarchy mh
+    JOIN aka_title m2 ON mh.movie_id = m2.episode_of_id
+    WHERE NOT m2.id = ANY(mh.path)
+),
+cast_details AS (
+    SELECT c.movie_id, 
+           c.person_id,
+           a.name AS actor_name,
+           r.role AS actor_role,
+           COALESCE(CAST(SUM(mk.keyword) AS TEXT), 'No Keywords') AS keywords
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    LEFT JOIN movie_keyword mk ON c.movie_id = mk.movie_id
+    WHERE a.name IS NOT NULL
+    GROUP BY c.movie_id, c.person_id, a.name, r.role
+),
+movie_info_details AS (
+    SELECT m.id AS movie_id,
+           m.title AS movie_title,
+           COALESCE(mi.info, 'No Info') AS additional_info
+    FROM aka_title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    WHERE m.production_year > 2000
+),
+ranked_movies AS (
+    SELECT mh.movie_id,
+           mh.movie_title,
+           md.additional_info,
+           ROW_NUMBER() OVER (PARTITION BY mh.depth ORDER BY mh.movie_title) AS rank,
+           COUNT(*) OVER () AS total_movies
+    FROM movie_hierarchy mh
+    JOIN movie_info_details md ON mh.movie_id = md.movie_id
+)
+SELECT rm.movie_id,
+       rm.movie_title,
+       rm.additional_info,
+       cd.actor_name,
+       cd.actor_role,
+       rm.rank,
+       rm.total_movies,
+       CASE 
+           WHEN rm.rank <= 10 THEN 'Top 10'
+           ELSE 'Lower Rank'
+       END AS rank_category
+FROM ranked_movies rm
+LEFT JOIN cast_details cd ON rm.movie_id = cd.movie_id
+WHERE cd.actor_role IS NOT NULL
+ORDER BY rm.rank, rm.movie_title;

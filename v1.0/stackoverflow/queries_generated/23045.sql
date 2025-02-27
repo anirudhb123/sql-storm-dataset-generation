@@ -1,0 +1,78 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.RevisionGUID, 
+        ph.CreationDate, 
+        ph.UserId, 
+        ph.PostHistoryTypeId, 
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+),
+UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(NULLIF(Count(c.id), 0), 'No Comments') AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+)
+SELECT  
+    rp.PostId,
+    rp.Title,
+    up.UserId,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.RevisionGUID,
+    ph.CreationDate AS HistoryDate,
+    ph.Comment AS CloseReason,
+    CASE
+        WHEN ph.PostId IS NOT NULL THEN 'Post Closed'
+        ELSE 'Post Active'
+    END AS PostStatus,
+    CASE 
+        WHEN (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) >= 10 
+        THEN 'Highly Upvoted'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserBadgeSummary ub ON up.Id = ub.UserId
+LEFT JOIN 
+    RecursivePostHistory ph ON rp.PostId = ph.PostId AND ph.rn = 1
+WHERE 
+    rp.rn <= 10
+ORDER BY 
+    rp.CreationDate DESC, 
+    ub.BadgeCount DESC;

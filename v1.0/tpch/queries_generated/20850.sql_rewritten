@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+), LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_discount) AS avg_discount
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+), PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+), CombinedResults AS (
+    SELECT 
+        n.n_name AS nation, 
+        COUNT(DISTINCT c.c_custkey) AS high_value_customer_count,
+        AVG(s.s_acctbal) AS avg_supplier_acctbal,
+        SUM(lis.total_revenue) AS total_lineitem_revenue,
+        SUM(ps.avg_supplycost) AS total_avg_supplycost
+    FROM nation n
+    LEFT OUTER JOIN HighValueCustomers c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN SupplierHierarchy s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN LineItemSummary lis ON EXISTS (
+        SELECT 1 FROM orders o WHERE o.o_orderkey = lis.l_orderkey AND o.o_custkey = c.c_custkey
+    )
+    LEFT JOIN PartSupplierInfo ps ON ls_item_count = (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = lis.l_orderkey)
+    GROUP BY n.n_name
+)
+SELECT * 
+FROM CombinedResults
+WHERE COALESCE(high_value_customer_count, 0) > 0
+OR total_lineitem_revenue > (SELECT MAX(total_revenue) FROM LineItemSummary)
+ORDER BY nation, high_value_customer_count DESC, total_lineitem_revenue DESC;

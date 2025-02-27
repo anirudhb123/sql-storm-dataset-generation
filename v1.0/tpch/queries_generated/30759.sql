@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty + sc.ps_availqty AS ps_availqty, ps.ps_supplycost + sc.ps_supplycost AS ps_supplycost
+    FROM SupplierChain sc
+    JOIN supplier s ON sc.ps_partkey = s.s_suppkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0 AND sc.ps_partkey <> ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionSummary AS (
+    SELECT n.n_regionkey, r.r_name, COUNT(DISTINCT c.c_custkey) AS cust_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    SUM(d.total_spent) AS total_customer_spend,
+    COUNT(DISTINCT d.c_custkey) AS unique_customers,
+    COALESCE(SUM(sc.ps_availqty), 0) AS total_avail_qty,
+    AVG(sc.ps_supplycost) AS avg_supply_cost,
+    MAX(r.cust_count) AS max_customers_in_region
+FROM RegionSummary r
+LEFT JOIN CustomerOrders d ON r.cust_count = d.total_spent
+LEFT JOIN SupplyChain sc ON sc.ps_partkey = (SELECT ps_partkey FROM partsupp ORDER BY ps_supplycost DESC LIMIT 1)
+WHERE r.cust_count > 5
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT d.c_custkey) > 10
+ORDER BY total_customer_spend DESC NULLS LAST;

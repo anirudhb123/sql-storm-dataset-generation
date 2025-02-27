@@ -1,0 +1,50 @@
+
+WITH Address_City AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS city_count,
+        AVG(ca_gmt_offset) AS avg_gmt_offset
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+Product_Description AS (
+    SELECT 
+        i_item_sk,
+        SUBSTRING(i_item_desc FROM 1 FOR 30) AS short_desc,
+        LENGTH(i_item_desc) AS desc_length
+    FROM 
+        item
+),
+Customer_Demo AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS total_customers,
+        AVG(cd_dep_count) AS avg_dependency_count
+    FROM 
+        customer_demo_sk
+    JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    a.ca_city,
+    a.city_count,
+    a.avg_gmt_offset,
+    p.short_desc,
+    p.desc_length,
+    c.cd_gender,
+    c.total_customers,
+    c.avg_dependency_count
+FROM 
+    Address_City a
+JOIN 
+    Product_Description p ON p.i_item_sk IN (SELECT i_item_sk FROM store_sales)
+JOIN 
+    Customer_Demo c ON c.cd_gender IN ('M', 'F')
+ORDER BY 
+    a.city_count DESC, 
+    c.total_customers DESC
+FETCH FIRST 100 ROWS ONLY;

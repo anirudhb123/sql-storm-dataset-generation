@@ -1,0 +1,30 @@
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId IN (1, 2) -- Consider only questions and answers
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+PostStats AS (
+    SELECT r.OwnerUserId, 
+           AVG(r.Score) AS AvgScore, 
+           SUM(r.ViewCount) AS TotalViews,
+           SUM(CASE WHEN r.PostRank = 1 THEN 1 ELSE 0 END) AS BestPosts
+    FROM RankedPosts r
+    GROUP BY r.OwnerUserId
+)
+SELECT u.Id AS UserId, 
+       u.DisplayName, 
+       u.Reputation, 
+       ps.AvgScore, 
+       ps.TotalViews, 
+       ps.BestPosts, 
+       u.CreationDate
+FROM Users u
+JOIN PostStats ps ON u.Id = ps.OwnerUserId
+WHERE ps.TotalViews > 1000
+ORDER BY ps.AvgScore DESC, ps.TotalViews DESC;

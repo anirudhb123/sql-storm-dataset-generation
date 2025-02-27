@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) as rank_within_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        mk.keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keywords mk ON rm.title = mk.movie_id
+    WHERE 
+        rm.rank_within_year <= 5
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(tm.keywords, 'No keywords available') AS keywords,
+    CASE 
+        WHEN tm.cast_count > 10 THEN 'Popular'
+        WHEN tm.cast_count BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Less known'
+    END AS popularity_status,
+    CONCAT('Movie: ', tm.title, ' (', tm.production_year, ')') AS movie_description
+FROM 
+    top_movies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;

@@ -1,0 +1,82 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        DisplayName,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalPosts,
+        TotalComments,
+        Rank
+    FROM 
+        UserStats
+    WHERE 
+        Rank <= 10
+),
+AverageVotes AS (
+    SELECT 
+        AVG(TotalUpVotes) AS AvgUpVotes, 
+        AVG(TotalDownVotes) AS AvgDownVotes
+    FROM 
+        UserStats
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(B.TotalBadges, 0) AS TotalBadges,
+        COALESCE(UP.TotalUpVotes, 0) AS UpVotes,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS Status
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS TotalBadges FROM Badges GROUP BY UserId) B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes FROM Votes GROUP BY PostId) UP ON P.Id = UP.PostId
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalUpVotes,
+    TU.TotalDownVotes,
+    TU.TotalPosts,
+    TU.TotalComments,
+    PA.PostId,
+    PA.Title,
+    PA.Score,
+    PA.TotalBadges,
+    PA.UpVotes,
+    PA.Status,
+    AVG_V.AvgUpVotes,
+    AVG_V.AvgDownVotes
+FROM 
+    TopUsers TU
+JOIN 
+    PostAnalytics PA ON TU.UserId = PA.OwnerUserId
+CROSS JOIN 
+    AverageVotes AVG_V
+ORDER BY 
+    TU.Rank, PA.Score DESC;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE actor_movies AS (
+    SELECT 
+        ca.id AS cast_id,
+        ca.person_id,
+        ca.movie_id,
+        COALESCE(at.production_year, NULL) AS production_year,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY at.production_year DESC) AS rn
+    FROM 
+        cast_info ca
+    LEFT JOIN 
+        aka_title at ON ca.movie_id = at.id
+    WHERE 
+        ca.nr_order IS NOT NULL
+),
+yearly_average AS (
+    SELECT 
+        production_year,
+        COUNT(DISTINCT person_id) AS actor_count,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - TO_TIMESTAMP(production_year::TEXT, 'YYYY')))) AS avg_age
+    FROM 
+        actor_movies
+    GROUP BY 
+        production_year
+)
+SELECT 
+    am.person_id,
+    COALESCE(ak.name, 'Unknown') AS actor_name,
+    at.title,
+    at.production_year,
+    CASE 
+        WHEN am.rn = 1 AND (SELECT avg_avg.avg_age FROM yearly_average avg_avg WHERE avg_avg.production_year = at.production_year) < 31536000 THEN 'Recent Release' 
+        ELSE 'Older Release' 
+    END AS release_status,
+    COUNT(DISTINCT ct.kind) AS company_count,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    MAX(info.info) FILTER (WHERE info.info_type_id = 1) AS biography
+FROM 
+    actor_movies am
+JOIN 
+    aka_name ak ON ak.person_id = am.person_id
+JOIN 
+    aka_title at ON am.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = am.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    person_info info ON info.person_id = am.person_id
+WHERE 
+    am.rn <= 5
+GROUP BY 
+    am.person_id, ak.name, at.title, at.production_year, am.rn
+ORDER BY 
+    am.person_id, at.production_year DESC
+LIMIT 100;

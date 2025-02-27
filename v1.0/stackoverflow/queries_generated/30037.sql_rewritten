@@ -1,0 +1,51 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate, 1 AS Level
+    FROM Users
+    WHERE Reputation >= 1000  
+    UNION ALL
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate, uh.Level + 1
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Reputation < uh.Reputation  
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetScore,  
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId, p.PostTypeId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY u.Id, u.DisplayName
+    HAVING COUNT(DISTINCT p.Id) > 5  
+)
+SELECT 
+    uh.DisplayName AS UserName,
+    uh.Reputation,
+    ps.Title,
+    ps.NetScore,
+    ps.CommentCount,
+    ps.EditCount,
+    au.TotalPosts,
+    au.LastPostDate
+FROM UserHierarchy uh
+JOIN PostStatistics ps ON uh.Id = ps.OwnerUserId
+JOIN ActiveUsers au ON uh.Id = au.UserId
+WHERE ps.NetScore > 10  
+ORDER BY uh.Reputation DESC, au.LastPostDate DESC
+LIMIT 50;

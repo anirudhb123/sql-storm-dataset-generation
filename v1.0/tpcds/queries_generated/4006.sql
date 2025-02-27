@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT
+        s_store_sk,
+        ss_item_sk,
+        ss_ticket_number,
+        ss_sold_date_sk,
+        ss_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY ss_net_paid DESC) AS rank
+    FROM
+        store_sales
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+), 
+sales_summary AS (
+    SELECT 
+        r.s_store_sk,
+        r.ss_item_sk,
+        SUM(r.ss_net_paid) AS total_sales,
+        COUNT(r.ss_ticket_number) AS transaction_count
+    FROM 
+        ranked_sales r
+    WHERE 
+        r.rank <= 10
+    GROUP BY 
+        r.s_store_sk, r.ss_item_sk
+)
+SELECT 
+    s.s_store_sk,
+    c.c_customer_sk,
+    c.cd_gender,
+    c.hd_buy_potential,
+    COALESCE(ss.total_sales, 0) AS sales_amount,
+    COALESCE(ss.transaction_count, 0) AS sales_count
+FROM 
+    customer_info c
+JOIN 
+    store s ON c.c_current_addr_sk = s.s_store_sk
+LEFT JOIN 
+    sales_summary ss ON s.s_store_sk = ss.s_store_sk AND ss.ss_item_sk IN (
+        SELECT i_item_sk FROM item WHERE i_current_price > 50
+    )
+WHERE 
+    c.hd_buy_potential IS NOT NULL
+    AND c.cd_gender = 'M'
+    AND s.s_closed_date_sk IS NULL
+ORDER BY 
+    s.s_store_sk, sales_amount DESC;

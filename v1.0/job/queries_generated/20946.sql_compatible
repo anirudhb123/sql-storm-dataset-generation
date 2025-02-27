@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.title IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS movie_count,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS note_counts
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(c.movie_id) > 5
+),
+CompanyStatistics AS (
+    SELECT 
+        at.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title at ON mc.movie_id = at.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        at.production_year <= 2000
+    GROUP BY 
+        at.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        COALESCE(cs.company_count, 0) AS company_count,
+        cs.company_names,
+        ra.rank_by_year
+    FROM 
+        RankedMovies tm
+    LEFT JOIN 
+        CompanyStatistics cs ON tm.movie_id = cs.movie_id
+    JOIN 
+        TopActors ta ON ta.movie_count > 5
+    LEFT JOIN 
+        aka_name an ON an.person_id = ta.actor_name
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.company_names,
+    RANK() OVER (ORDER BY md.company_count DESC, md.production_year DESC) AS movie_rank
+FROM 
+    MovieDetails md
+WHERE 
+    md.company_count IS NOT NULL
+    AND md.rank_by_year IS NOT NULL
+ORDER BY 
+    md.company_count DESC,
+    md.title ASC;

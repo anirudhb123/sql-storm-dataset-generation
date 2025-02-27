@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    p.name AS person_name,
+    ct.kind AS company_type,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    MAX(md.info) AS latest_note,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY length(p.name) DESC) AS name_length_rn
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+LEFT JOIN 
+    movie_info_idx md ON md.movie_id = m.movie_id AND md.info_type_id = 1
+WHERE 
+    m.depth <= 3
+    AND (p.name IS NOT NULL OR p.surname_pcode IS NULL)
+GROUP BY 
+    m.id, p.name, ct.kind
+HAVING 
+    COUNT(DISTINCT ci.id) > 2
+ORDER BY 
+    m.production_year DESC, name_length_rn;

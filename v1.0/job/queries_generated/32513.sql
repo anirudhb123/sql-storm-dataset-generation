@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title AS mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link AS ml
+    JOIN
+        aka_title AS at ON at.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy AS mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    akn.name AS actor_name,
+    ak.production_year,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies,
+    AVG(CASE WHEN ki.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_avg,
+    STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY akn.id ORDER BY ak.production_year DESC) AS row_num
+FROM
+    aka_name AS akn
+JOIN 
+    cast_info AS ci ON akn.person_id = ci.person_id
+JOIN 
+    movie_hierarchy AS mh ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_title AS ak ON ak.id = mh.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = ak.id
+LEFT JOIN 
+    keyword AS ki ON ki.id = mk.keyword_id
+WHERE
+    akn.name IS NOT NULL 
+    AND akn.name != ''
+    AND (ak.production_year BETWEEN 2000 AND 2023)
+GROUP BY
+    akn.name, ak.production_year, akn.id
+HAVING 
+    COUNT(DISTINCT ml.linked_movie_id) > 5
+ORDER BY
+    actor_name, ak.production_year DESC;
+
+This SQL query leverages several advanced SQL features, including:
+
+- A recursive CTE for hierarchical data retrieval from `aka_title` related through `movie_link`
+- Various JOINs to connect `aka_name`, `cast_info`, `movie_hierarchy`, and other related tables
+- LEFT JOINs for optional keyword relationships
+- Filtering out NULL and empty actor names with predicates
+- Aggregation functions for counting linked movies and average keywords
+- STRING_AGG for combining keywords into a single output string
+- ROW_NUMBER for creating a sequential ordering of the results by the production year
+- A HAVING clause to filter based on movie associations, ensuring the involvement of actors in multiple linked movies 
+
+The output yields detailed insights into actors' careers, specifically focusing on their work in a rich contextual landscape informed by movie relationships and keywords.

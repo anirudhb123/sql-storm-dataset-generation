@@ -1,0 +1,46 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('F', 'K')
+),
+NationSupplier AS (
+    SELECT n.n_name, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_comment IS NOT NULL
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand,
+           SUM(ps.ps_availqty) AS total_availqty,
+           CASE WHEN AVG(ps.ps_supplycost) > 50 THEN 'High Cost' ELSE 'Low Cost' END AS cost_category
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT DISTINCT
+    ns.n_name AS nation_name,
+    ps.s_name AS supplier_name,
+    pd.p_name AS part_name,
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    pd.total_availqty,
+    pd.cost_category
+FROM OrderHierarchy oh
+FULL OUTER JOIN NationSupplier ns ON ns.acct_rank <= 5
+LEFT JOIN supplier ps ON ps.s_name IS NOT NULL
+JOIN PartDetails pd ON pd.p_partkey = (
+    SELECT ps_partkey
+    FROM partsupp
+    WHERE ps_availqty > 0
+    ORDER BY ps_supplycost DESC
+    LIMIT 1
+)
+LEFT JOIN region r ON r.r_name IS NOT NULL
+WHERE pd.total_availqty IS NOT NULL 
+AND (r.r_name IS NULL OR r.r_name LIKE 'E%')
+ORDER BY ns.n_name, ps.s_name, oh.o_orderdate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

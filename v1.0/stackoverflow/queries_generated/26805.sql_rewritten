@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        p.Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(REGEXP_REPLACE(t.TagName, '<[^>]*>', '', 'g')) AS CleanTag,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>') OR p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        CleanTag
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5 
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalBadges,
+    us.TotalScore,
+    us.TotalViews,
+    CASE 
+        WHEN up.RankByScore = 1 THEN 'Top Post of User'
+        ELSE NULL 
+    END AS AwardForTopPost,
+    CASE 
+        WHEN up.RankByViews = 1 THEN 'Most Viewed Post of User'
+        ELSE NULL 
+    END AS AwardForMostViewed,
+    pt.CleanTag,
+    pt.PostCount
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    RankedPosts up ON us.UserId = up.OwnerUserId AND up.RankByScore <= 3 
+JOIN 
+    PopularTags pt ON pt.PostCount > 10 
+ORDER BY 
+    us.TotalScore DESC, us.TotalPosts DESC;

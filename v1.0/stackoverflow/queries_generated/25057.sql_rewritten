@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(NULLIF(ps.Score, 0), 0) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, SUM(Score) AS Score FROM Votes GROUP BY PostId) ps ON p.Id = ps.PostId
+    WHERE 
+        p.PostTypeId = 1 
+      AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+AggregatedTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        RankedPosts
+    WHERE 
+        Tag IS NOT NULL
+),
+TagMetrics AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM 
+        RankedPosts r
+    JOIN 
+        AggregatedTags a ON r.Tags LIKE '%' || a.Tag || '%'
+    GROUP BY 
+        Tag
+)
+SELECT 
+    tm.Tag,
+    tm.PostCount,
+    tm.TotalViews,
+    tm.AverageScore,
+    CASE 
+        WHEN tm.AverageScore >= 10 THEN 'High'
+        WHEN tm.AverageScore BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS QualityCategory
+FROM 
+    TagMetrics tm
+ORDER BY 
+    tm.TotalViews DESC, 
+    tm.PostCount DESC;

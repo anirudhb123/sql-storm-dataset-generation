@@ -1,0 +1,36 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+), LineItemDetails AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+)
+SELECT 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS total_revenue,
+    si.nation_name,
+    (SELECT COUNT(*)
+     FROM customer c
+     WHERE c.c_nationkey = n.n_nationkey
+     AND c.c_acctbal >= 1000) AS active_customers
+FROM orders o
+JOIN LineItemDetails ld ON o.o_orderkey = ld.l_orderkey
+LEFT JOIN SupplierInfo si ON si.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey = ld.l_partkey
+)
+LEFT JOIN nation n ON si.nation_name = n.n_name
+WHERE o.o_orderstatus = 'O'
+  AND si.s_acctbal IS NOT NULL
+GROUP BY si.nation_name
+ORDER BY total_revenue DESC
+LIMIT 10;

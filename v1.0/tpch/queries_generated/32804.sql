@@ -1,0 +1,38 @@
+WITH RECURSIVE CTE_Supplier_Rank AS (
+    SELECT s_suppkey, s_name, s_acctbal, ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+),
+Recent_Orders AS (
+    SELECT o_orderkey, o_totalprice, o_orderdate, o_custkey,
+           DENSE_RANK() OVER (ORDER BY o_orderdate DESC) AS order_rank
+    FROM orders
+    WHERE o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+Total_Sales AS (
+    SELECT l_partkey, SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM lineitem
+    GROUP BY l_partkey
+),
+Supplier_Stats AS (
+    SELECT ps_partkey, ps_suppkey, ps_supplycost, ps_availqty,
+           (CASE WHEN ps_availqty <= 0 THEN 'Out of Stock' ELSE 'Available' END) AS stock_status
+    FROM partsupp
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+       COALESCE(ss.total_sales, 0) AS total_sales,
+       COALESCE(sr.rank, 0) AS supplier_rank, 
+       rs.o_totalprice AS latest_order_total,
+       rs.o_orderdate AS latest_order_date,
+       CASE WHEN sr.rank = 1 THEN 'Top Supplier' ELSE 'Other Supplier' END AS supplier_category,
+       (SELECT COUNT(DISTINCT c.c_custkey) 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey 
+          AND c.c_acctbal > 5000) AS high_value_customers
+FROM part p
+LEFT JOIN Total_Sales ss ON p.p_partkey = ss.l_partkey
+LEFT JOIN CTE_Supplier_Rank sr ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = sr.s_suppkey)
+LEFT JOIN Recent_Orders ro ON ro.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') LIMIT 1)
+LEFT JOIN orders rs ON ro.o_orderkey = rs.o_orderkey
+JOIN nation n ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = sr.s_suppkey LIMIT 1)
+WHERE p.p_retailprice > 50.00
+ORDER BY total_sales DESC NULLS LAST, latest_order_date DESC;

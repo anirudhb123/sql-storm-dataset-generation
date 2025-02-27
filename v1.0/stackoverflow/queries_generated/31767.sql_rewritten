@@ -1,0 +1,80 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerDisplayName,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerDisplayName,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+), 
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Id AS QuestionPostId,
+    rp.Title AS QuestionTitle,
+    rp.OwnerDisplayName AS QuestionOwner,
+    pm.TotalCommentScore,
+    pm.TotalBadges,
+    ph.LastClosedDate,
+    ph.LastReopenedDate,
+    CASE 
+        WHEN ph.LastClosedDate IS NOT NULL AND ph.LastReopenedDate IS NULL THEN 'Closed'
+        WHEN ph.LastReopenedDate IS NOT NULL THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    COUNT(DISTINCT p2.Id) AS AnswerCount,
+    AVG(p2.Score) AS AvgAnswerScore
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    PostMetrics pm ON rp.Id = pm.PostId
+LEFT JOIN 
+    PostHistoryData ph ON ph.PostId = rp.Id
+LEFT JOIN 
+    Posts p2 ON p2.ParentId = rp.Id 
+WHERE 
+    pm.TotalBadges > 0 
+GROUP BY 
+    rp.Id, rp.Title, rp.OwnerDisplayName, pm.TotalCommentScore, pm.TotalBadges, ph.LastClosedDate, ph.LastReopenedDate
+ORDER BY 
+    PostStatus, QuestionPostId;

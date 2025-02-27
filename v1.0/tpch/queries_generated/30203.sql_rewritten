@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal >= (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal >= sh.s_acctbal * 0.9
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -1, cast('1998-10-01' as date))
+),
+OrderLineItemSummary AS (
+    SELECT li.l_orderkey, COUNT(li.l_linenumber) AS line_count, SUM(li.l_extendedprice) AS total_extended_price, 
+           AVG(li.l_discount) AS avg_discount
+    FROM lineitem li
+    GROUP BY li.l_orderkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) < 100000
+)
+SELECT 
+    sr.s_name AS supplier_name,
+    sr.nation_name,
+    osl.line_count,
+    osl.total_extended_price,
+    osl.avg_discount,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    ro.order_rank
+FROM RankedOrders ro
+LEFT JOIN OrderLineItemSummary osl ON ro.o_orderkey = osl.l_orderkey
+JOIN FilteredSuppliers sr ON sr.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    WHERE li.l_orderkey = ro.o_orderkey
+)
+ORDER BY sr.nation_name, ro.o_totalprice DESC, osl.line_count;

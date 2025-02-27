@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.Tags AS PostTags,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Tags, p.OwnerUserId, p.CreationDate, p.Score
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.PostTitle,
+        rp.PostTags,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.Rank,
+        rp.CommentCount,
+        rp.VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Tags t ON POSITION(t.TagName IN rp.PostTags) > 0
+    WHERE 
+        rp.Rank <= 5 -- Top 5 posts per user
+    GROUP BY 
+        rp.PostId, rp.PostTitle, rp.PostTags, rp.OwnerUserId, rp.OwnerDisplayName, rp.CreationDate, rp.Score, rp.Rank
+)
+SELECT 
+    ad.OwnerUserId,
+    ad.OwnerDisplayName,
+    COUNT(ad.PostId) AS TotalPosts,
+    SUM(ad.Score) AS TotalScore,
+    SUM(ad.CommentCount) AS TotalComments,
+    SUM(ad.VoteCount) AS TotalVotes,
+    STRING_AGG(ad.PostTitle, ' | ') AS TopPostTitles,
+    STRING_AGG(ad.AllTags, '; ') AS CollectedTags
+FROM 
+    AggregatedData ad
+GROUP BY 
+    ad.OwnerUserId, 
+    ad.OwnerDisplayName
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC;

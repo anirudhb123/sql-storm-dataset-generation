@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1 AND P.PostTypeId = 1
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6, 24) 
+),
+LatestEdits AS (
+    SELECT 
+        PostId,
+        UserDisplayName,
+        CreationDate,
+        Comment 
+    FROM 
+        RecentEdits
+    WHERE 
+        EditRank = 1
+),
+PostStatistics AS (
+    SELECT 
+        Q.PostId,
+        Q.Title,
+        Q.Score,
+        Q.ViewCount,
+        LE.UserDisplayName AS LastEditor,
+        LE.CreationDate AS LastEditDate,
+        COALESCE(CAST(PH.Comment AS VARCHAR(200)), 'No comments') AS LastEditComment,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        TopQuestions Q
+    LEFT JOIN 
+        LatestEdits LE ON Q.PostId = LE.PostId
+    LEFT JOIN 
+        Votes V ON Q.PostId = V.PostId
+    GROUP BY 
+        Q.PostId, Q.Title, Q.Score, Q.ViewCount, LE.UserDisplayName, LE.CreationDate, PH.Comment
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.LastEditor,
+    PS.LastEditDate,
+    PS.LastEditComment,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    COALESCE(CONVERT(VARCHAR(10), C.Score), 'No Comments') AS CommentScore
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    Comments C ON PS.PostId = C.PostId AND C.CreationDate >= DATEADD(MONTH, -1, GETDATE())
+ORDER BY 
+    PS.ViewCount DESC, PS.Score DESC;

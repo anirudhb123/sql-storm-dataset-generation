@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonRoles AS (
+    SELECT 
+        ci.movie_id,
+        p.name AS person_name,
+        rt.role AS role_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, p.name, rt.role
+),
+MoviesWithRoles AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        pr.person_name,
+        pr.role_name,
+        pr.role_count,
+        COALESCE(NULLIF(mn.info, ''), 'No information available') AS movie_info
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        PersonRoles pr ON m.movie_id = pr.movie_id
+    LEFT JOIN 
+        movie_info mn ON m.movie_id = mn.movie_id
+    WHERE 
+        m.rank_per_year <= 5
+)
+SELECT 
+    mw.title,
+    mw.person_name,
+    mw.role_name,
+    mw.production_year,
+    mw.movie_info,
+    COALESCE(GROUP_CONCAT(DISTINCT mk.keyword ORDER BY mk.keyword SEPARATOR ', '), 'No keywords') AS keywords
+FROM 
+    MoviesWithRoles mw
+LEFT JOIN 
+    movie_keyword mk ON mw.movie_id = mk.movie_id
+GROUP BY 
+    mw.title, mw.person_name, mw.role_name, mw.production_year, mw.movie_info
+ORDER BY 
+    mw.production_year DESC, mw.title;

@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate >= '2023-01-01' 
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        total_value > 1000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COALESCE(SUM(CASE 
+        WHEN hs.s_name IS NOT NULL THEN hs.s_acctbal 
+        ELSE 0 
+    END), 0) AS total_supplier_accounts,
+    AVG(hvo.total_value) AS avg_order_value
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.supplier_rank = 1
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = rs.s_suppkey
+WHERE 
+    r.r_comment IS NOT NULL 
+    AND (c.c_acctbal IS NULL OR c.c_acctbal > 500)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_supplier_accounts DESC, 
+    customer_count DESC;

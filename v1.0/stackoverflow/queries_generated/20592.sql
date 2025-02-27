@@ -1,0 +1,88 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.PostTypeId, P.CreationDate, P.AcceptedAnswerId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS HistoryCount,
+        STRING_AGG(PHT.Name, ', ') AS HistoryTypes,
+        MAX(PH.CreationDate) AS LastEditedDate,
+        MIN(PH.CreationDate) AS FirstHistoryDate
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PHT.Id = PH.PostHistoryTypeId
+    GROUP BY PH.PostId
+),
+DetailedPostStats AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CreationDate,
+        PA.CommentCount,
+        PA.VoteCount,
+        PA.UpVotes,
+        PA.DownVotes,
+        PH.LastEditedDate,
+        PSA.HistoryCount,
+        PSA.HistoryTypes,
+        U.DisplayName AS TopCommenter,
+        U.Reputation AS TopCommenterReputation
+    FROM PostActivity PA
+    LEFT JOIN PostHistoryAnalysis PSA ON PA.PostId = PSA.PostId
+    LEFT JOIN (
+        SELECT 
+            C.PostId,
+            U.DisplayName,
+            U.Reputation,
+            ROW_NUMBER() OVER (PARTITION BY C.PostId ORDER BY C.CreationDate DESC) AS RowNum
+        FROM Comments C
+        JOIN Users U ON C.UserId = U.Id
+    ) AS TopComments ON PA.PostId = TopComments.PostId AND TopComments.RowNum = 1
+)
+SELECT 
+    DPS.PostId,
+    DPS.Title,
+    DPS.CreationDate,
+    DPS.CommentCount,
+    DPS.VoteCount,
+    DPS.UpVotes,
+    DPS.DownVotes,
+    DPS.LastEditedDate,
+    DPS.HistoryCount,
+    DPS.HistoryTypes,
+    DPS.TopCommenter,
+    COALESCE(DPS.TopCommenterReputation, 0) AS TopCommenterReputation,
+    U.Rank AS UserRank,
+    U.BadgeCount AS UserBadgeCount
+FROM DetailedPostStats DPS
+JOIN UserStats U ON U.UserId = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = DPS.PostId) 
+WHERE DPS.CommentCount > 0
+ORDER BY DPS.UpVotes DESC, DPS.CommentCount DESC, DPS.CreationDate DESC
+LIMIT 10
+

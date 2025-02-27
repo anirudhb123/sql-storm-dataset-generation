@@ -1,0 +1,50 @@
+WITH aggregated_cast AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        m.production_year,
+        t.title,
+        r.role,
+        COUNT(c.id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        movie_info m ON t.id = m.movie_id
+    WHERE 
+        m.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre') AND
+        m.info LIKE '%Drama%' 
+    GROUP BY 
+        a.id, a.name, m.production_year, t.title, r.role
+),
+ranked_cast AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        production_year,
+        title,
+        role,
+        movie_count,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY movie_count DESC) AS rank
+    FROM 
+        aggregated_cast
+)
+SELECT 
+    actor_name,
+    production_year,
+    COUNT(title) AS titles_count,
+    MAX(movie_count) AS max_movies,
+    STRING_AGG(title, ', ') AS titles_list
+FROM 
+    ranked_cast
+WHERE 
+    rank <= 5 
+GROUP BY 
+    actor_name, production_year
+ORDER BY 
+    production_year DESC, titles_count DESC;

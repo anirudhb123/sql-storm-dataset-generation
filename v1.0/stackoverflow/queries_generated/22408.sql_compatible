@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS OwnerRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+), 
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.OwnerRank,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerRank = 1 OR rp.CommentCount > 5
+), 
+UnionedVotes AS (
+    SELECT 
+        p.PostId,
+        'UserVotes' AS Source,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS VoteCount
+    FROM 
+        FilteredPosts p
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId
+    GROUP BY 
+        p.PostId
+    UNION ALL
+    SELECT 
+        p.PostId,
+        'CommentCounts' AS Source,
+        COUNT(c.Id) AS VoteCount
+    FROM 
+        FilteredPosts p
+    LEFT JOIN 
+        Comments c ON p.PostId = c.PostId
+    GROUP BY 
+        p.PostId
+)
+SELECT 
+    CASE WHEN u.Id IS NULL THEN 'Anonymous' ELSE u.DisplayName END AS AuthorName,
+    f.Title,
+    f.Score,
+    COALESCE(v.VoteCount, 0) AS TotalVotes,
+    f.CommentCount,
+    COALESCE(f.UpVotes, 0) - COALESCE(f.DownVotes, 0) AS NetVotes,
+    f.CreationDate,
+    CASE
+        WHEN f.Score < 0 THEN 'Low Score'
+        ELSE 'Good Score'
+    END AS PostQuality
+FROM 
+    FilteredPosts f
+LEFT JOIN 
+    Users u ON f.OwnerUserId = u.Id
+LEFT JOIN 
+    UnionedVotes v ON f.PostId = v.PostId
+WHERE 
+    (f.CommentCount IS NOT NULL OR v.VoteCount IS NOT NULL) 
+    AND (f.Score > 0 OR v.VoteCount IS NOT NULL)
+ORDER BY 
+    f.Score DESC, f.CommentCount DESC;

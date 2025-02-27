@@ -1,0 +1,68 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS movie_keywords,
+        STRING_AGG(DISTINCT comp.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT pt.role, ', ') AS roles
+    FROM 
+        aka_title m
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    JOIN 
+        person_info p ON c.person_id = p.person_id
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name comp ON mc.company_id = comp.id 
+    JOIN 
+        role_type pt ON c.role_id = pt.id 
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+KeywordFrequency AS (
+    SELECT 
+        k.keyword,
+        COUNT(*) AS frequency
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        k.keyword
+),
+TopKeywords AS (
+    SELECT 
+        keyword,
+        frequency,
+        ROW_NUMBER() OVER (ORDER BY frequency DESC) AS rank
+    FROM 
+        KeywordFrequency
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.cast_names,
+    md.movie_keywords,
+    md.company_names,
+    md.roles,
+    tk.keyword AS top_keyword,
+    tk.frequency AS top_keyword_frequency
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TopKeywords tk ON md.movie_keywords LIKE '%' || tk.keyword || '%'
+WHERE 
+    md.production_year > 2000
+ORDER BY 
+    md.production_year DESC, tk.frequency DESC;

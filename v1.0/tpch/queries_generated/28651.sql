@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS average_order_value,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied,
+    MAX(o.o_orderdate) AS last_order_date,
+    MIN(o.o_orderdate) AS first_order_date
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_name LIKE '%steel%' 
+    AND o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    AND s.s_acctbal > 1000.00
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_available_quantity DESC, average_order_value ASC;

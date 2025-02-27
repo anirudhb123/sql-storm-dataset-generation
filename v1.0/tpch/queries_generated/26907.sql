@@ -1,0 +1,43 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, n.n_name, 
+           CASE 
+               WHEN s.s_acctbal > 50000 THEN 'High Balance'
+               WHEN s.s_acctbal BETWEEN 20000 AND 50000 THEN 'Medium Balance'
+               ELSE 'Low Balance' 
+           END AS Account_Balance_Category
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), 
+PartFilters AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, p.p_retailprice,
+           CASE 
+               WHEN p.p_retailprice > 1000 THEN 'Premium'
+               WHEN p.p_retailprice BETWEEN 500 AND 1000 THEN 'Mid Range'
+               ELSE 'Budget' 
+           END AS Price_Category
+    FROM part p
+    WHERE p.p_size IN (1, 2, 3, 4) AND p.p_type LIKE 'Wood%'
+), 
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, c.c_name, 
+           COUNT(l.l_orderkey) AS total_items_ordered, 
+           SUM(l.l_extendedprice) AS total_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, c.c_name
+)
+SELECT sd.s_name, sd.n_name AS Supplier_Nation, pf.p_name AS Part_Name, 
+       pf.Price_Category, od.c_name AS Customer_Name, od.total_order_value
+FROM SupplierDetails sd
+JOIN PartFilters pf ON pf.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost < 200.00
+)
+JOIN OrderDetails od ON od.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_discount > 0.05 AND l.l_shipmode = 'AIR'
+)
+ORDER BY sd.Account_Balance_Category DESC, od.total_order_value DESC;

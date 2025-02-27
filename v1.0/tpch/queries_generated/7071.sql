@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > 10000
+),
+ProductsOrdered AS (
+    SELECT 
+        li.l_partkey,
+        SUM(li.l_quantity) AS total_quantity
+    FROM 
+        lineitem li
+    JOIN 
+        RankedOrders ro ON li.l_orderkey = ro.o_orderkey
+    WHERE 
+        ro.rank <= 100  -- Consider top 100 orders by price
+    GROUP BY 
+        li.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(po.total_quantity, 0) AS total_quantity_sold,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    ProductsOrdered po ON p.p_partkey = po.l_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+ORDER BY 
+    total_quantity_sold DESC, avg_supply_cost ASC
+LIMIT 50;

@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_net_paid > 0
+      AND ws.ws_net_profit IS NOT NULL
+),
+HighProfitSales AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_order_number,
+        rs.ws_net_profit
+    FROM RankedSales rs
+    WHERE rs.profit_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amount) AS total_returned
+    FROM web_returns wr
+    WHERE wr.returned_date_sk > (
+        SELECT MAX(d.d_date_sk) - 30 
+        FROM date_dim d 
+        WHERE d.d_year = 2022
+    )
+    GROUP BY wr.returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        h.ws_order_number,
+        h.ws_net_profit,
+        COALESCE(cr.total_returned, 0) AS total_returned
+    FROM HighProfitSales h
+    LEFT JOIN CustomerReturns cr ON h.ws_order_number = cr.returning_customer_sk
+),
+FinalOutput AS (
+    SELECT 
+        s.ws_order_number,
+        s.ws_net_profit,
+        s.total_returned,
+        CASE 
+            WHEN s.total_returned > s.ws_net_profit THEN 'Highly Returned'
+            WHEN s.total_returned = 0 THEN 'No Returns'
+            ELSE 'Regular'
+        END AS return_status
+    FROM SalesWithReturns s
+)
+SELECT 
+    f.ws_order_number,
+    f.ws_net_profit,
+    f.total_returned,
+    f.return_status,
+    CASE 
+        WHEN f.return_status = 'Highly Returned' THEN 'Investigate Further'
+        ELSE 'No Action Required'
+    END AS action_needed
+FROM FinalOutput f
+WHERE f.total_returned BETWEEN 50 AND (SELECT MAX(ws_net_profit) FROM web_sales)
+ORDER BY f.ws_net_profit DESC NULLS LAST
+FETCH FIRST 20 ROWS ONLY;

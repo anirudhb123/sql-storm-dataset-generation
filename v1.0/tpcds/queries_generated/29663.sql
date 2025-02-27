@@ -1,0 +1,69 @@
+
+WITH customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+combined_data AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.ca_city,
+        cd.ca_state,
+        cd.ca_country,
+        COALESCE(ss.total_quantity, 0) AS total_quantity,
+        COALESCE(ss.total_sales, 0.00) AS total_sales
+    FROM 
+        customer_details cd
+    LEFT JOIN 
+        sales_summary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    cd_purchase_estimate,
+    cd_credit_rating,
+    ca_city,
+    ca_state,
+    ca_country,
+    total_quantity,
+    total_sales,
+    ROUND(total_sales / NULLIF(total_quantity, 0), 2) AS average_order_value
+FROM 
+    combined_data
+WHERE 
+    total_sales > 0
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

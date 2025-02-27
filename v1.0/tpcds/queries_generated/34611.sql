@@ -1,0 +1,54 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_rec_start_date, i_item_desc, 0 AS Level
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE
+    UNION ALL
+    SELECT i_item_sk, i_item_id, i_rec_start_date, i_item_desc, ih.Level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.item_sk = ih.i_item_sk
+    WHERE i.rec_start_date > ih.i_rec_start_date
+),
+SalesData AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           d.d_year
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.ws_item_sk, d.d_year
+),
+CustomerReturns AS (
+    SELECT cr.cr_item_sk,
+           SUM(cr.cr_return_quantity) AS total_returns,
+           SUM(cr.cr_return_amount) AS total_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+AggregateMetrics AS (
+    SELECT sd.ws_item_sk,
+           COALESCE(sd.total_quantity, 0) AS total_quantity,
+           COALESCE(sd.total_sales, 0) AS total_sales,
+           COALESCE(cr.total_returns, 0) AS total_returns,
+           COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+           (COALESCE(sd.total_sales, 0) - COALESCE(cr.total_return_amount, 0)) AS net_sales
+    FROM SalesData sd
+    LEFT JOIN CustomerReturns cr ON sd.ws_item_sk = cr.cr_item_sk
+),
+TopItems AS (
+    SELECT im.i_item_id, 
+           ag.net_sales,
+           ROW_NUMBER() OVER (ORDER BY ag.net_sales DESC) AS rank
+    FROM AggregateMetrics ag
+    JOIN item im ON ag.ws_item_sk = im.i_item_sk
+)
+SELECT ti.i_item_id, 
+       ti.net_sales, 
+       CASE 
+           WHEN ti.rank <= 10 THEN 'Top Seller'
+           ELSE 'Other'
+       END AS sales_category
+FROM TopItems ti
+WHERE ti.net_sales > 5000
+ORDER BY ti.rank;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+),
+AuthorStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        pt.Name AS PostHistoryTypeName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 days') 
+        AND ph.Comment IS NOT NULL
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    ra.UserId,
+    a.DisplayName,
+    ra.Rank,
+    ps.TotalBadges,
+    ps.GoldBadges,
+    ps.TotalBounties,
+    ph.PostHistoryTypeName,
+    ph.CreationDate AS HistoryCreationDate,
+    ph.UserDisplayName AS HistoryUser,
+    ph.HistoryRank
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ra ON rp.PostId = ra.Id  
+JOIN 
+    AuthorStats ps ON ra.UserId = ps.UserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, ps.TotalBadges DESC;

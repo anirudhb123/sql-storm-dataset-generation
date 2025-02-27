@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UsersWithReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.TagBased, 0) AS HasBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        (SELECT UserId, MAX(Class) AS TagBased FROM Badges GROUP BY UserId) b ON u.Id = b.UserId
+)
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    up.ViewCount,
+    ur.UserId,
+    ur.Reputation,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'High'
+        WHEN ur.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReputationLevel,
+    COALESCE(uc.CommentCount, 0) AS UserCommentCount,
+    COUNT(v.Id) AS VoteCount,
+    CASE 
+        WHEN up.Rank = 1 THEN 'Most Recent'
+        ELSE 'Older'
+    END AS RecentStatus
+FROM 
+    RankedPosts up
+JOIN 
+    UsersWithReputation ur ON up.OwnerUserId = ur.UserId
+LEFT JOIN 
+    Comments uc ON up.PostId = uc.PostId
+LEFT JOIN 
+    Votes v ON up.PostId = v.PostId AND v.VoteTypeId = 2
+WHERE 
+    ur.Reputation IS NOT NULL AND
+    (ur.HasBadge IS NULL OR ur.HasBadge = 0) -- Users without any badge
+GROUP BY 
+    up.PostId, up.Title, up.CreationDate, up.Score, up.ViewCount, 
+    ur.UserId, ur.Reputation, up.Rank
+HAVING 
+    SUM(CASE WHEN uc.UserId IS NOT NULL THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    up.Score DESC, up.ViewCount DESC
+LIMIT 100;
+
+-- Getting related posts for each post returned
+SELECT 
+    p.Title AS OriginalPostTitle,
+    ARRAY_AGG(rp.Title) AS RelatedPostTitles
+FROM
+    (SELECT DISTINCT PostId FROM Posts) p
+LEFT JOIN
+    PostLinks pl ON p.PostId = pl.PostId
+LEFT JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+GROUP BY 
+    p.Title;
+

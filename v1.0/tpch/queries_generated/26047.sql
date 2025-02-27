@@ -1,0 +1,54 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ps.ps_suppkey) DESC) AS part_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr
+),
+OrderedCustomerParts AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_partkey) AS ordered_part_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_mfgr,
+    rp.supplier_count,
+    rp.total_avail_qty,
+    rp.avg_supply_cost,
+    rp.supplier_names,
+    ocp.c_custkey,
+    ocp.c_name,
+    ocp.o_orderkey,
+    ocp.ordered_part_count
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    OrderedCustomerParts ocp ON rp.part_rank <= 5 AND ocp.ordered_part_count > 0
+ORDER BY 
+    rp.supplier_count DESC, ocp.ordered_part_count DESC;

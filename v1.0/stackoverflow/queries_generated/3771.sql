@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    GROUP BY 
+        u.Id
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        c.PostId
+),
+FinalStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.TotalBounty,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(rc.CommentCount, 0) AS RecentCommentCount
+    FROM 
+        UserStats us
+    JOIN 
+        RankedPosts rp ON us.UserId = rp.PostRank
+    LEFT JOIN 
+        RecentComments rc ON rp.PostId = rc.PostId
+    WHERE 
+        us.Reputation > 1000 AND 
+        rp.PostRank <= 5
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.Reputation,
+    f.TotalPosts,
+    f.TotalBounty,
+    f.Title,
+    f.CreationDate,
+    f.ViewCount,
+    f.Score,
+    f.RecentCommentCount
+FROM 
+    FinalStats f
+ORDER BY 
+    f.Reputation DESC, 
+    f.ViewCount DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    0 AS TotalPosts,
+    0 AS TotalBounty,
+    NULL AS Title,
+    NULL AS CreationDate,
+    0 AS ViewCount,
+    0 AS Score,
+    0 AS RecentCommentCount
+FROM 
+    Users u
+WHERE 
+    u.Reputation < 500
+ORDER BY 
+    UserId;

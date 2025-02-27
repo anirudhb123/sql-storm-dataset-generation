@@ -1,0 +1,53 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_street_name, ', ' ORDER BY ca_street_name) AS all_street_names
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS customer_count,
+        AVG(cd_dep_count) AS avg_dependent_count
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+SalesStats AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.all_street_names,
+    c.cd_gender,
+    c.customer_count,
+    c.avg_dependent_count,
+    s.web_site_id,
+    s.total_sales,
+    s.order_count
+FROM 
+    AddressStats a
+JOIN 
+    CustomerStats c ON a.address_count > 100  -- arbitrary filter condition for demo
+JOIN 
+    SalesStats s ON s.order_count > 50  -- arbitrary filter condition for demo
+ORDER BY 
+    a.ca_state, c.cd_gender, s.total_sales DESC;

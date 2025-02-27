@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast 
+    FROM 
+        aka_title t 
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.title_id,
+        m.title,
+        m.production_year,
+        k.keyword,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Year Unknown'
+            WHEN m.production_year < 2000 THEN 'Pre-Millennial'
+            ELSE 'Post-Millennial' 
+        END AS era 
+    FROM 
+        RankedMovies m 
+    LEFT JOIN 
+        movie_keyword mk ON m.title_id = mk.movie_id 
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id 
+    WHERE 
+        m.rank_by_cast <= 5
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(c.name, 'Independent') AS final_company_name
+    FROM 
+        movie_companies mc 
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id 
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id 
+),
+FinalResult AS (
+    SELECT 
+        mw.title,
+        mw.production_year,
+        mw.keyword,
+        mw.era,
+        COALESCE(comp.final_company_name, 'No Known Company') AS company_name 
+    FROM 
+        MoviesWithKeywords mw 
+    LEFT JOIN 
+        MovieCompanies comp ON mw.title_id = comp.movie_id 
+)
+SELECT 
+    *,
+    CASE 
+        WHEN keyword IS NOT NULL THEN 'Contained Keyword: ' || keyword 
+        ELSE 'No Keywords Found' 
+    END AS keyword_status,
+    COUNT(DISTINCT company_name) OVER (PARTITION BY production_year) AS distinct_company_count
+FROM 
+    FinalResult 
+WHERE 
+    company_name IS NOT NULL 
+    AND keyword IS NOT NULL
+ORDER BY 
+    production_year DESC, 
+    title;

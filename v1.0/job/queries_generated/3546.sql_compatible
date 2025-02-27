@@ -1,0 +1,53 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title) AS rank
+    FROM title
+    WHERE title.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(CAST(mk.keyword AS CHAR), 'No Keywords') AS keyword,
+        COALESCE(cn.name, 'No Company') AS company_name
+    FROM RankedMovies rm
+    LEFT JOIN movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    WHERE rm.rank <= 5
+),
+ActorMovies AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        md.movie_id,
+        md.title,
+        md.production_year
+    FROM cast_info a
+    JOIN aka_name ak ON a.person_id = ak.person_id
+    JOIN MovieDetails md ON a.movie_id = md.movie_id
+),
+ActorStats AS (
+    SELECT 
+        am.actor_name,
+        COUNT(*) AS movie_count,
+        STRING_AGG(DISTINCT am.title, ', ') AS movies
+    FROM ActorMovies am
+    GROUP BY am.actor_name
+)
+SELECT 
+    ass.actor_name,
+    ass.movie_count,
+    ass.movies,
+    CASE 
+        WHEN ass.movie_count > 5 THEN 'Veteran Actor'
+        WHEN ass.movie_count BETWEEN 3 AND 5 THEN 'Intermediate Actor'
+        ELSE 'New Actor'
+    END AS actor_experience 
+FROM ActorStats ass
+ORDER BY ass.movie_count DESC, ass.actor_name;

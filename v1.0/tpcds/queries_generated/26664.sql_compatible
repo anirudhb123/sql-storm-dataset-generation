@@ -1,0 +1,31 @@
+
+WITH string_benchmark AS (
+    SELECT 
+        ca.city,
+        ca.state,
+        ca.zip,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS full_address,
+        cd.gender,
+        cd.education_status,
+        CONCAT(c.first_name, ' ', c.last_name) AS full_name,
+        LENGTH(CONCAT(c.first_name, ' ', c.last_name)) AS name_length,
+        LENGTH(CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type)) AS address_length,
+        d.d_month_seq,
+        d.d_year
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+)
+SELECT 
+    city,
+    state,
+    zip,
+    COUNT(*) AS total_customers,
+    AVG(name_length) AS avg_name_length,
+    AVG(address_length) AS avg_address_length
+FROM string_benchmark
+WHERE city IS NOT NULL AND state IS NOT NULL AND zip IS NOT NULL
+GROUP BY city, state, zip
+ORDER BY total_customers DESC
+FETCH FIRST 10 ROWS ONLY;

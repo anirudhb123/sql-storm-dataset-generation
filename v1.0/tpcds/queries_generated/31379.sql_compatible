@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20220101 AND 20220131
+    GROUP BY ws_sold_date_sk, ws_item_sk
+), 
+TopSales AS (
+    SELECT 
+        cte.total_sales,
+        i.i_item_desc,
+        RANK() OVER (ORDER BY cte.total_sales DESC) AS sales_rank
+    FROM SalesCTE cte
+    JOIN item i ON cte.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN t.sales_rank <= 10 THEN 'Top 10'
+        ELSE 'Not Top 10'
+    END AS rank_category,
+    COALESCE(inventory.inv_quantity_on_hand, 0) AS quantity_on_hand
+FROM 
+    item i
+LEFT JOIN 
+    TopSales t ON i.i_item_sk = t.ws_item_sk
+LEFT JOIN 
+    (SELECT inv_item_sk, SUM(inv_quantity_on_hand) AS inv_quantity_on_hand 
+     FROM inventory 
+     GROUP BY inv_item_sk) inventory ON i.i_item_sk = inventory.inv_item_sk
+WHERE 
+    i.i_current_price > 50.00 
+    AND i.i_class_id IN (SELECT DISTINCT i_class_id FROM item WHERE i_size <> 'S')
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,66 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    JOIN Tags t ON t.Id = ANY(string_to_array(substr(p.Tags, 2, length(p.Tags) - 2), '><')::text[])::int[]
+    WHERE p.PostTypeId = 1  
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+RecentActivities AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ph.PostId, ph.UserId, ph.CreationDate
+),
+PostMetrics AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.ViewCount,
+        tp.AnswerCount,
+        ue.DisplayName AS UserDisplayName,
+        ue.VoteCount,
+        ue.TotalBounty,
+        ra.EditCount,
+        ra.Comments
+    FROM TaggedPosts tp
+    JOIN UserEngagement ue ON ue.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+    LEFT JOIN RecentActivities ra ON ra.PostId = tp.PostId
+    WHERE tp.ViewRank = 1
+)
+SELECT 
+    pm.Title,
+    pm.ViewCount,
+    pm.AnswerCount,
+    pm.UserDisplayName,
+    pm.VoteCount,
+    pm.TotalBounty,
+    pm.EditCount,
+    COALESCE(pm.Comments, 'No comments available') AS EditComments
+FROM PostMetrics pm
+ORDER BY pm.ViewCount DESC, pm.AnswerCount DESC
+LIMIT 10;

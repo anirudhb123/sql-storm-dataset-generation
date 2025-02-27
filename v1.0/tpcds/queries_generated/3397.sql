@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_order_number,
+        ws_item_sk,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_net_profit DESC) AS rank
+    FROM
+        web_sales
+    WHERE
+        ws_net_profit IS NOT NULL
+),
+TopSales AS (
+    SELECT
+        ws_order_number,
+        ws_item_sk,
+        ws_net_profit
+    FROM
+        RankedSales
+    WHERE
+        rank = 1
+),
+TotalSales AS (
+    SELECT
+        a.s_item_sk,
+        SUM(a.ss_net_profit) AS total_store_profit,
+        SUM(b.ws_net_profit) AS total_web_profit
+    FROM
+        store_sales a
+    FULL OUTER JOIN web_sales b ON a.ss_item_sk = b.ws_item_sk
+    GROUP BY
+        a.ss_item_sk
+),
+CustomerReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(ts.total_store_profit, 0) AS total_store_profit,
+    COALESCE(ws.total_web_profit, 0) AS total_web_profit,
+    COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN COALESCE(ts.total_store_profit, 0) > COALESCE(ws.total_web_profit, 0) THEN 'Store'
+        WHEN COALESCE(ts.total_store_profit, 0) < COALESCE(ws.total_web_profit, 0) THEN 'Web'
+        ELSE 'Equal'
+    END AS more_profitable_channel
+FROM 
+    item i
+LEFT JOIN 
+    TotalSales ts ON i.i_item_sk = ts.s_item_sk
+LEFT JOIN 
+    CustomerReturns cr ON i.i_item_sk = cr.sr_item_sk
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM TopSales ts
+        WHERE ts.ws_item_sk = i.i_item_sk
+    )
+ORDER BY 
+    i.i_item_id;

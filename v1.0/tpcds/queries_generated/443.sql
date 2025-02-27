@@ -1,0 +1,64 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_last_name, 
+        c.c_first_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_items_sold
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_last_name, c.c_first_name, cd.cd_gender, cd.cd_marital_status
+),
+popular_items AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS quantity_sold
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+    HAVING 
+        SUM(ws.ws_quantity) > 1000
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        i.i_current_price
+    FROM 
+        item i
+    JOIN 
+        popular_items pi ON i.i_item_sk = pi.ws_item_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_last_name,
+    cs.c_first_name,
+    cs.cd_gender,
+    cs.total_orders,
+    cs.total_profit,
+    cs.total_items_sold,
+    it.i_item_desc,
+    it.i_current_price,
+    CASE 
+        WHEN cs.total_profit IS NULL THEN 'No Profit'
+        ELSE 'Profit Exists'
+    END AS profit_status,
+    DENSE_RANK() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_profit DESC) AS gender_profit_rank
+FROM 
+    customer_stats cs
+LEFT JOIN 
+    item_details it ON cs.total_items_sold > 0
+ORDER BY 
+    cs.total_profit DESC, 
+    cs.total_orders DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ws.bill_customer_sk, ws.net_profit, 1 AS level
+    FROM web_sales ws
+    WHERE ws.sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    UNION ALL
+    SELECT ws.bill_customer_sk, sh.net_profit + ws.net_profit, level + 1
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws.bill_customer_sk = sh.bill_customer_sk
+    WHERE sh.level < 5
+), 
+customer_summary AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           COALESCE(SUM(ws.net_profit), 0) AS total_profit,
+           COALESCE(COUNT(ws.ws_order_number), 0) AS total_sales,
+           cd.cd_marital_status, cd.cd_gender,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY COALESCE(SUM(ws.net_profit), 0) DESC) AS gender_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_gender
+), 
+promo_summary AS (
+    SELECT p.p_promo_id, COUNT(ws.ws_order_number) AS promo_sales_count
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+), 
+high_rollers AS (
+    SELECT customer_summary.c_customer_sk, customer_summary.total_profit,
+           RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM customer_summary
+    WHERE total_profit > 10000
+), 
+return_statistics AS (
+    SELECT sr_customer_sk,
+           COUNT(*) AS total_returns,
+           SUM(sr_return_amt) AS total_return_amt,
+           SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_customer_sk
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ISNULL(ch.total_profit, 0) AS total_profit,
+    ISNULL(hr.profit_rank, 0) AS profit_rank,
+    COALESCE(ps.promo_sales_count, 0) AS promo_sales_count,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amt, 0) AS total_return_amt,
+    COALESCE(rs.total_return_tax, 0) AS total_return_tax
+FROM high_rollers hr
+JOIN customer_summary ch ON hr.c_customer_sk = ch.c_customer_sk
+LEFT JOIN promo_summary ps ON ch.total_sales > 0 
+LEFT JOIN return_statistics rs ON ch.c_customer_sk = rs.sr_customer_sk
+ORDER BY ch.total_profit DESC, hr.profit_rank;

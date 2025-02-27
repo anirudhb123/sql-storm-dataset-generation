@@ -1,0 +1,65 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE u.Reputation > 100 
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        UpvotesReceived - DownvotesReceived AS NetVotes,
+        TotalComments,
+        ROW_NUMBER() OVER (ORDER BY UpvotesReceived - DownvotesReceived DESC, UpvotesReceived DESC) AS Rank
+    FROM UserActivity
+),
+RecentActivity AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS RecentPostCount,
+        MIN(CreationDate) AS FirstRecentPost,
+        MAX(CreationDate) AS LastRecentPost
+    FROM Posts
+    WHERE CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY UserId
+),
+UserMetrics AS (
+    SELECT 
+        t.UserId,
+        t.DisplayName,
+        t.QuestionsAsked,
+        t.AnswersGiven,
+        t.NetVotes,
+        t.TotalComments,
+        COALESCE(r.RecentPostCount, 0) AS RecentPostCount,
+        r.FirstRecentPost,
+        r.LastRecentPost
+    FROM TopUsers t
+    LEFT JOIN RecentActivity r ON t.UserId = r.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    QuestionsAsked,
+    AnswersGiven,
+    NetVotes,
+    TotalComments,
+    RecentPostCount,
+    FirstRecentPost,
+    LastRecentPost
+FROM UserMetrics
+WHERE Rank <= 10 
+ORDER BY NetVotes DESC;

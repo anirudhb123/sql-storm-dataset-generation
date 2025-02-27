@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal BETWEEN 3000 AND 5000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(ro.total_revenue) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN RecentOrders ro ON o.o_orderkey = ro.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cs.order_count, cs.total_spent,
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM customer c
+    JOIN CustomerStats cs ON c.c_custkey = cs.c_custkey
+    WHERE cs.total_spent IS NOT NULL
+)
+SELECT p.p_name, SUM(ps.ps_availqty) AS total_available, 
+       MAX(s.s_acctbal) AS max_supplier_balance,
+       (SELECT COUNT(*) FROM SupplierHierarchy) AS supplier_count,
+       tc.c_name AS top_customer_name, tc.total_spent AS top_customer_spent
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN TopCustomers tc ON tc.rank = 1
+GROUP BY p.p_name, tc.c_name
+HAVING SUM(ps.ps_availqty) > 10 AND MAX(s.s_acctbal) > 3000
+ORDER BY total_available DESC;

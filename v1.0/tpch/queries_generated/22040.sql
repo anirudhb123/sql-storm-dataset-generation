@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), HighlyRatedSuppliers AS (
+    SELECT 
+        r.r_name, 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.total_cost
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank_within_nation <= 3
+), OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    hrs.r_name,
+    hrs.s_name,
+    o.total_revenue,
+    o.line_item_count,
+    CASE 
+        WHEN o.line_item_count > 5 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS volume_category,
+    COALESCE(o.total_revenue, 0) - COALESCE(hrs.total_cost, 0) AS profit_margin
+FROM 
+    HighlyRatedSuppliers hrs
+FULL OUTER JOIN 
+    OrdersWithLineItems o ON hrs.s_suppkey = o.o_orderkey
+WHERE 
+    hrs.total_cost IS NOT NULL OR o.total_revenue IS NOT NULL
+ORDER BY 
+    profit_margin DESC, hrs.r_name, hrs.s_name;

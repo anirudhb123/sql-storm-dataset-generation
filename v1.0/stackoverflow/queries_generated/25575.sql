@@ -1,0 +1,76 @@
+WITH TagAnalysis AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosedCount,
+        SUM(CASE WHEN p.PostId IS NOT NULL THEN 1 ELSE 0 END) AS LinkedPostsCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsPosted,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersPosted
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+),
+FilteredPostHistory AS (
+    SELECT 
+        rph.PostId,
+        rph.PostHistoryTypeId,
+        rph.CreationDate
+    FROM 
+        RecentPostHistory rph
+    WHERE 
+        rph.rn = 1 AND rph.PostHistoryTypeId IN (10, 11, 12, 13)  -- Only relevant history for closure/reopening/deletion
+)
+SELECT 
+    ta.TagName,
+    ta.PostCount,
+    ta.QuestionCount,
+    ta.AnswerCount,
+    ta.ClosedCount,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.QuestionsPosted,
+    ua.AnswersPosted,
+    COUNT(DISTINCT fph.PostId) AS RelatedPostHistoryCount
+FROM 
+    TagAnalysis ta
+JOIN 
+    UserActivity ua ON ua.QuestionsPosted > 0  -- Get active users with posted questions
+LEFT JOIN 
+    FilteredPostHistory fph ON fph.PostId IN (
+        SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' || ta.TagName || '%'
+    )
+GROUP BY 
+    ta.TagName, ua.DisplayName
+ORDER BY 
+    ta.PostCount DESC, ua.TotalPosts DESC;

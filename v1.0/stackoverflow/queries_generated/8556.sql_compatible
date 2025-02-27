@@ -1,0 +1,48 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN p.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikiPostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT v.Id) AS VotesCast,
+        COUNT(DISTINCT b.Id) AS BadgesEarned
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserSummary AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        QuestionsAsked, 
+        AnswersGiven, 
+        WikiPostsCreated, 
+        CommentsMade, 
+        VotesCast, 
+        BadgesEarned,
+        RANK() OVER (ORDER BY QuestionsAsked DESC) AS QuestionsRank,
+        RANK() OVER (ORDER BY AnswersGiven DESC) AS AnswersRank,
+        RANK() OVER (ORDER BY WikiPostsCreated DESC) AS WikiPostsRank,
+        RANK() OVER (ORDER BY CommentsMade DESC) AS CommentsRank,
+        RANK() OVER (ORDER BY VotesCast DESC) AS VotesRank,
+        RANK() OVER (ORDER BY BadgesEarned DESC) AS BadgesRank
+    FROM UserActivity
+)
+SELECT 
+    DisplayName, 
+    QuestionsAsked, 
+    AnswersGiven, 
+    WikiPostsCreated, 
+    CommentsMade, 
+    VotesCast, 
+    BadgesEarned,
+    LEAST(QuestionsRank, AnswersRank, WikiPostsRank, CommentsRank, VotesRank, BadgesRank) AS OverallRank
+FROM UserSummary
+WHERE LEAST(QuestionsRank, AnswersRank, WikiPostsRank, CommentsRank, VotesRank, BadgesRank) <= 10
+ORDER BY OverallRank;

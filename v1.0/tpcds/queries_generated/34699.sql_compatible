@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d.d_year, 
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year
+    UNION ALL
+    SELECT 
+        st.d_year - 1, 
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        SalesTrend st
+    JOIN 
+        web_sales ws ON st.d_year = YEAR(ws.ws_sold_date_sk)
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        st.d_year - 1
+)
+SELECT 
+    ca.ca_state, 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT i.i_product_name, ', ') AS product_names,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_net_profit) DESC) AS state_rank
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+GROUP BY 
+    ca.ca_state, cd.cd_purchase_estimate
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10 AND 
+    SUM(ws.ws_net_profit) IS NOT NULL 
+ORDER BY 
+    total_net_profit DESC;

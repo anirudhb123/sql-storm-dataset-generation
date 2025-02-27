@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        u.Reputation,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY
+        u.Id
+),
+PostLinksCTE AS (
+    SELECT
+        pl.PostId,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM
+        PostLinks pl
+    GROUP BY
+        pl.PostId
+),
+MostActiveUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM
+        Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id
+    HAVING
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT
+    rs.PostId,
+    rs.Title,
+    rs.CreationDate,
+    rs.ViewCount,
+    us.DisplayName AS UserDisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.TotalBounty,
+    pl.RelatedPostCount,
+    mu.PostCount AS ActiveUserPostCount
+FROM
+    RankedPosts rs
+LEFT JOIN UserStats us ON rs.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId AND p.Id = rs.PostId)
+LEFT JOIN PostLinksCTE pl ON rs.PostId = pl.PostId
+LEFT JOIN MostActiveUsers mu ON mu.Id = us.UserId
+WHERE
+    rs.PostRank = 1
+ORDER BY
+    rs.Score DESC, rs.ViewCount DESC;

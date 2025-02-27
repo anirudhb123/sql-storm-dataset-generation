@@ -1,0 +1,70 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        UpVotes,
+        DownVotes,
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        u.UpVotes,
+        u.DownVotes,
+        us.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        RecursiveUserStats us ON u.Reputation > us.Reputation
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(badgeCount.Count, 0) AS BadgeCount,
+    COALESCE(postStats.PostCount, 0) AS TotalPosts,
+    COALESCE(AVG(v.Score), 0) AS AvgScore,
+    CASE 
+        WHEN COALESCE(AVG(v.Score), 0) > 0 THEN 'Active Contributor'
+        ELSE 'Less Active'
+    END AS ActivityLevel,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(badgeCount.Count, 0) DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    (SELECT 
+         UserId,
+         COUNT(*) AS Count
+     FROM 
+         Badges
+     GROUP BY 
+         UserId) badgeCount ON u.Id = badgeCount.UserId
+LEFT JOIN 
+    (SELECT 
+         OwnerUserId,
+         COUNT(*) AS PostCount
+     FROM 
+         Posts
+     WHERE 
+         CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+     GROUP BY 
+         OwnerUserId) postStats ON u.Id = postStats.OwnerUserId
+LEFT JOIN 
+    Votes v ON u.Id = v.UserId
+WHERE 
+    u.Reputation >= 1000 
+    AND (v.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 month' OR v.UserId IS NULL)
+GROUP BY 
+    u.Id, u.DisplayName, badgeCount.Count, postStats.PostCount
+HAVING 
+    COUNT(DISTINCT v.PostId) > 5 
+ORDER BY 
+    Rank;

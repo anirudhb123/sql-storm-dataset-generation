@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id,
+        et.title,
+        et.production_year,
+        mh.depth + 1,
+        mh.movie_id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        COALESCE(NULLIF(SUM(mk.keyword LIKE '%action%'), 0), 0) AS action_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.depth
+),
+
+ActorStatistics AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(COALESCE(wk.keyword_id, 0)) AS avg_keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword wk ON ci.movie_id = wk.movie_id
+    GROUP BY 
+        a.name
+)
+
+SELECT 
+    fm.title AS movie_title,
+    fm.production_year,
+    fm.depth,
+    as.name AS actor_name,
+    as.movie_count,
+    as.avg_keywords,
+    CASE
+        WHEN fm.action_count > 3 THEN 'High Action'
+        WHEN fm.action_count BETWEEN 1 AND 3 THEN 'Moderate Action'
+        ELSE 'Low Action'
+    END AS action_rating
+FROM 
+    FilteredMovies fm
+JOIN 
+    ActorStatistics as ON fm.movie_id IN (
+        SELECT movie_id 
+        FROM cast_info 
+        WHERE person_id IN (SELECT person_id FROM aka_name WHERE name = as.name)
+    )
+ORDER BY 
+    fm.production_year DESC, fm.depth, as.movie_count DESC;

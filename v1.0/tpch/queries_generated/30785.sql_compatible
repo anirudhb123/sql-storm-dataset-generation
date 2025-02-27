@@ -1,0 +1,66 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey IS NOT NULL
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_order_value,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date,
+           CASE 
+               WHEN SUM(o.o_totalprice) > 10000 THEN 'High Value'
+               WHEN SUM(o.o_totalprice) BETWEEN 5000 AND 10000 THEN 'Medium Value'
+               ELSE 'Low Value' 
+           END AS customer_segment
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT s.s_name,
+           rs.n_name AS supplier_nation,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+           SUM(stat.total_avail_qty) AS total_available_quantity,
+           SUM(stat.avg_supply_cost * stat.total_avail_qty) AS total_cost_sum,
+           cnt.order_count, 
+           cnt.total_order_value, 
+           cnt.customer_segment
+    FROM SupplierStats stat
+    JOIN supplier s ON s.s_suppkey = stat.s_suppkey
+    LEFT JOIN nation rs ON rs.n_nationkey = s.s_nationkey
+    LEFT JOIN CustomerOrderStats cnt ON cnt.customer_segment = 
+        CASE 
+            WHEN cnt.total_order_value > 10000 THEN 'High Value'
+            WHEN cnt.total_order_value BETWEEN 5000 AND 10000 THEN 'Medium Value'
+            ELSE 'Low Value' 
+        END
+    GROUP BY s.s_name, rs.n_name, cnt.order_count, cnt.total_order_value, cnt.customer_segment
+)
+SELECT r.r_name, 
+       COALESCE(fr.supplier_nation, 'Unknown') AS supplier_nation,
+       AVG(fr.total_available_quantity) AS avg_available_qty,
+       SUM(fr.total_cost_sum) AS total_cost_sum,
+       MAX(fr.last_order_date) AS last_order_date
+FROM RegionHierarchy r
+LEFT JOIN FinalReport fr ON r.r_regionkey = fr.supplier_nation
+GROUP BY r.r_name
+ORDER BY r.r_name;

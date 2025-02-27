@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sales_price, 
+        ws_quantity, 
+        ws_discount_amt, 
+        ws_net_paid, 
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        cs_discount_amt,
+        cs_net_paid,
+        level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sales_price IS NOT NULL AND level < 5
+), sales_summary AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        COUNT(sd.ws_item_sk) AS sales_count,
+        AVG(sd.ws_net_paid) AS average_net_paid
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        d.d_year AS customer_year,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+)
+SELECT 
+    ci.customer_year,
+    ci.cd_gender,
+    ci.hd_income_band_sk,
+    SUM(ss.total_sales) AS total_sales_per_customer,
+    COUNT(ss.sales_count) AS total_transactions
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ss.ws_item_sk = ci.c_customer_sk
+GROUP BY 
+    ci.customer_year, 
+    ci.cd_gender, 
+    ci.hd_income_band_sk
+HAVING 
+    SUM(ss.total_sales) IS NOT NULL 
+    AND COUNT(ss.sales_count) > 0
+ORDER BY 
+    total_sales_per_customer DESC
+LIMIT 100;

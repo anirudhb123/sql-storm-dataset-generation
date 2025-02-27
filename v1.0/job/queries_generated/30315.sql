@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::text AS parent_title,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.title AS parent_title,
+        mh.depth + 1 AS depth
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+AggregateCast AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_members
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON a.person_id = ci.person_id
+    GROUP BY
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ac.total_cast,
+        ac.cast_members,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY ac.total_cast DESC) as rank_by_cast
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        AggregateCast ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN
+        movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+)
+SELECT
+    md.title AS Movie_Title,
+    md.production_year AS Production_Year,
+    md.total_cast AS Total_Cast,
+    md.cast_members AS Cast_Members,
+    md.movie_info AS Synopsis,
+    CASE
+        WHEN md.rank_by_cast IS NULL THEN 'Unranked'
+        ELSE md.rank_by_cast::text
+    END AS Cast_Rank_Year,
+    mh.parent_title AS Parent_Movie_Title
+FROM
+    MovieDetails md
+LEFT JOIN
+    MovieHierarchy mh ON md.movie_id = mh.movie_id
+WHERE
+    md.production_year BETWEEN 2000 AND 2023
+    AND md.total_cast > 5
+ORDER BY
+    md.production_year DESC, md.total_cast DESC;

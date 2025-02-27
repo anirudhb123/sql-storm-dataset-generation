@@ -1,0 +1,66 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        CASE 
+            WHEN cd_purchase_estimate > 10000 THEN 'High'
+            WHEN cd_purchase_estimate BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS purchase_band
+    FROM 
+        customer_demographics 
+),
+FilteredSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        cd.purchase_band
+    FROM 
+        SalesData sd
+    INNER JOIN 
+        CustomerDemographics cd ON sd.ws_item_sk = cd.cd_demo_sk -- Assuming item_sk corresponds to demo_sk in this context
+    WHERE 
+        sd.sales_rank = 1 AND 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status = 'M'
+)
+SELECT 
+    f.ws_item_sk,
+    f.total_quantity,
+    f.total_sales,
+    f.purchase_band,
+    COALESCE(NULLIF(f.total_sales, 0), 'No Sales') AS sales_status,
+    CONCAT('Item ', f.ws_item_sk, ' has ', f.total_quantity, ' sold for a total of ', COALESCE(CAST(f.total_sales AS VARCHAR), '0'), ' in sales.') AS sales_summary
+FROM 
+    FilteredSales f
+ORDER BY 
+    f.total_sales DESC
+LIMIT 100
+UNION
+SELECT 
+    NULL AS ws_item_sk,
+    NULL AS total_quantity,
+    AVG(total_sales) AS avg_sales,
+    NULL AS purchase_band,
+    'Aggregate' AS sales_status,
+    'Average sales total for high-demand items' AS sales_summary
+FROM 
+    FilteredSales
+WHERE 
+    purchase_band = 'High';

@@ -1,0 +1,61 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        pt.Id AS ParentPostTypeId,
+        1 AS Level
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%', '%')
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE t.Count > 50
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        pt.Id,
+        rh.Level + 1
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%', '%')
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN RecursiveTagHierarchy rh ON t.Count < rh.Count
+)
+
+SELECT 
+    u.DisplayName AS User,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+    AVG(p.Score) AS AvgPostScore,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    ARRAY_AGG(DISTINCT t.TagName ORDER BY t.Count DESC) AS PopularTags
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN RecursiveTagHierarchy rth ON rth.TagId IN (SELECT UNNEST(string_to_array(p.Tags, '>'))) 
+WHERE u.Reputation > 100
+GROUP BY u.Id, u.DisplayName
+HAVING COUNT(DISTINCT p.Id) > 5
+ORDER BY AvgPostScore DESC
+LIMIT 10;
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+)
+
+SELECT 
+    ur.ReputationRank,
+    p.PostTypeId,
+    COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeletedPosts,
+    MAX(p.LastActivityDate) AS LastPostActivity
+FROM UserReputation ur
+JOIN Posts p ON ur.Id = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+WHERE ur.ReputationRank <= 100
+GROUP BY ur.ReputationRank, p.PostTypeId
+ORDER BY ur.ReputationRank, LastPostActivity DESC;

@@ -1,0 +1,55 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.web_site_id
+),
+Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_age_group,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_quantity,
+    sd.total_sales,
+    sd.total_orders,
+    d.cd_gender,
+    d.cd_age_group,
+    d.ib_lower_bound,
+    d.ib_upper_bound
+FROM 
+    SalesData sd
+JOIN 
+    Demographics d ON d.cd_demo_sk IN (
+        SELECT 
+            DISTINCT c.c_current_cdemo_sk
+        FROM 
+            customer c
+        WHERE 
+            c.c_first_shipto_date_sk IS NOT NULL
+    )
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

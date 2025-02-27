@@ -1,0 +1,22 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS role_type,
+    m.prod_year AS production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    info_type it ON m.info_type_id = it.id
+WHERE 
+    it.info = 'SomeInfo'  -- Example filter, replace with actual info
+ORDER BY 
+    t.production_year DESC, 
+    a.name;

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey AS c_custkey, s.s_name AS c_name, s.s_acctbal, level + 1
+    FROM supplier s
+    JOIN sales_hierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'Germany')
+    WHERE s.s_acctbal < sh.c_acctbal
+), ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+), part_supply AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_supply
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), customer_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_mktsegment = 'B2B'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT ch.c_custkey, ch.c_name, ch.c_acctbal, o.o_orderkey, o.o_orderstatus, 
+       cs.total_spent, ps.total_supply, RANK() OVER (ORDER BY ch.c_acctbal DESC) AS customer_rank
+FROM sales_hierarchy ch
+LEFT JOIN ranked_orders o ON ch.c_custkey = o.o_custkey
+LEFT JOIN customer_summary cs ON ch.c_custkey = cs.c_custkey
+JOIN part_supply ps ON ps.p_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_availqty > 0 ORDER BY ps_supplycost DESC LIMIT 1)
+WHERE ch.level > 0 OR o.o_orderstatus IS NOT NULL
+ORDER BY customer_rank, o.o_orderstatus;

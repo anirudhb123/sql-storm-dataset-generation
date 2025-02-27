@@ -1,0 +1,87 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.Score, 0) AS Score,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.Score, 0) AS Score,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN COALESCE(v.VoteTypeId, 0) = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN COALESCE(v.VoteTypeId, 0) = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        MAX(ph.CreationDate) AS LastEditedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    COALESCE(ph.CloseReopenCount, 0) AS CloseReopenCount,
+    COALESCE(ph.EditorCount, 0) AS EditorCount,
+    COALESCE(ph.LastEditedDate, NULL) AS LastEditedDate,
+    COALESCE(ue.TotalPosts, 0) AS UserTotalPosts,
+    COALESCE(ue.Upvotes, 0) AS Upvotes,
+    COALESCE(ue.Downvotes, 0) AS Downvotes,
+    COALESCE(ue.AverageScore, 0) AS AverageScore,
+    CASE 
+        WHEN r.Level > 0 THEN 'Child'
+        ELSE 'Parent'
+    END AS PostType,
+    RANK() OVER (PARTITION BY CASE WHEN r.Level > 0 THEN 'Child' ELSE 'Parent' END ORDER BY p.ViewCount DESC) AS RankByViews
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    PostHistoryStats ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserEngagement ue ON p.OwnerUserId = ue.UserId
+WHERE 
+    p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+    AND p.ViewCount IS NOT NULL
+    AND (COALESCE(ue.TotalPosts, 0) > 0 OR p.OwnerUserId IS NULL) 
+ORDER BY 
+    PostType DESC, 
+    p.ViewCount DESC;

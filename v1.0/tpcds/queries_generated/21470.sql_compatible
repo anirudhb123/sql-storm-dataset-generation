@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.store_sk, 
+        ss.ss_sales_price, 
+        ss.ss_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ss.store_sk ORDER BY ss.net_profit DESC) AS price_rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001 AND d_dow = 1)
+)
+SELECT 
+    s.store_id,
+    s.store_name,
+    COALESCE(r.sales_price_sum, 0) AS total_sales_price,
+    COALESCE(r.total_quantity, 0) AS total_quantity,
+    COALESCE(p.promo_count, 0) AS promotional_sales_count
+FROM 
+    store s
+LEFT JOIN (
+    SELECT 
+        store_sk,
+        SUM(ss_sales_price) AS sales_price_sum,
+        SUM(ss_quantity) AS total_quantity
+    FROM 
+        RankedSales
+    GROUP BY 
+        store_sk
+) r ON s.store_sk = r.store_sk
+LEFT JOIN (
+    SELECT 
+        ss.store_sk,
+        COUNT(DISTINCT ss.promo_sk) AS promo_count
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_current_month = 'Y' AND d_holiday = 'Y')
+    GROUP BY 
+        ss.store_sk
+) p ON s.store_sk = p.store_sk
+WHERE 
+    s.state IN (SELECT ca_state FROM customer_address WHERE ca_city = 'SomeCity')
+ORDER BY 
+    total_sales_price DESC, 
+    total_quantity ASC
+FETCH FIRST 10 ROWS ONLY;

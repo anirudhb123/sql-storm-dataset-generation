@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        u.DisplayName AS OwnerDisplayName, 
+        u.Reputation AS OwnerReputation
+    FROM RankedPosts rp
+    JOIN Users u ON rp.OwnerUserId = u.Id
+    WHERE rp.Rank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(tp.Tags, ', '))::int)) AS Tags
+FROM TopPosts tp
+ORDER BY tp.Score DESC, tp.CreationDate DESC;

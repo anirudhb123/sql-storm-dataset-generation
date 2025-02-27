@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostTypeName,
+        DENSE_RANK() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+HighScoringPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        AnswerCount,
+        CommentCount,
+        FavoriteCount,
+        OwnerDisplayName,
+        PostTypeName
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.OwnerDisplayName,
+        p.PostTypeName,
+        c.Text AS CommentText,
+        c.CreationDate AS CommentDate,
+        bh.Comment AS BadgeComment,
+        bh.Date AS BadgeDate,
+        b.Name AS BadgeName
+    FROM 
+        HighScoringPosts p
+    LEFT JOIN 
+        Comments c ON p.PostId = c.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = p.PostId)
+    LEFT JOIN 
+        PostHistory bh ON p.PostId = bh.PostId AND bh.UserId IS NOT NULL
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    AnswerCount,
+    CommentCount,
+    FavoriteCount,
+    OwnerDisplayName,
+    PostTypeName,
+    ARRAY_AGG(DISTINCT CommentText) AS Comments,
+    COUNT(DISTINCT BadgeName) AS BadgeCount,
+    ARRAY_AGG(DISTINCT BadgeComment) AS BadgeComments,
+    ARRAY_AGG(DISTINCT BadgeDate) AS BadgeDates
+FROM 
+    PostDetails
+GROUP BY 
+    PostId, Title, CreationDate, Score, ViewCount, AnswerCount, CommentCount, FavoriteCount, OwnerDisplayName, PostTypeName
+ORDER BY 
+    Score DESC, ViewCount DESC;

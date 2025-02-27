@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10
+),
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        V.PostId
+),
+PostWithDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.AnswerCount,
+        RP.OwnerDisplayName,
+        RV.VoteCount,
+        RV.UpVotes,
+        RV.DownVotes,
+        COALESCE(B.Name, 'No Badge') AS MostRecentBadge
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecentVotes RV ON RP.PostId = RV.PostId
+    LEFT JOIN 
+        (SELECT 
+             UserId, 
+             Name 
+         FROM 
+             Badges 
+         WHERE 
+             Date = (SELECT MAX(Date) FROM Badges AS B2 WHERE B2.UserId = Badges.UserId)
+        ) B ON RP.OwnerUserId = B.UserId
+    WHERE 
+        RP.OwnerRank = 1
+)
+SELECT 
+    PWD.*,
+    CASE 
+        WHEN PWD.VoteCount IS NULL THEN 'No Votes Yet'
+        WHEN PWD.UpVotes > PWD.DownVotes THEN 'Positive Feedback'
+        ELSE 'Negative Feedback'
+    END AS FeedbackType
+FROM 
+    PostWithDetails PWD
+ORDER BY 
+    PWD.Score DESC, PWD.CreationDate DESC
+LIMIT 100;

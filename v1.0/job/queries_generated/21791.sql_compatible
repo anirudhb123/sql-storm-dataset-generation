@@ -1,0 +1,99 @@
+
+WITH RecentMovies AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        K.keyword,
+        ROW_NUMBER() OVER (PARTITION BY T.id ORDER BY K.keyword) AS keyword_rank
+    FROM 
+        aka_title T
+    LEFT JOIN 
+        movie_keyword MK ON T.id = MK.movie_id
+    LEFT JOIN 
+        keyword K ON MK.keyword_id = K.id
+    WHERE 
+        T.production_year >= 2020
+),
+CastDetails AS (
+    SELECT 
+        CI.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(P.name, ', ') AS cast_names
+    FROM 
+        cast_info CI
+    JOIN 
+        aka_name P ON CI.person_id = P.person_id
+    GROUP BY 
+        CI.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        MI.movie_id,
+        ARRAY_AGG(DISTINCT I.info) AS info_details,
+        COALESCE(MAX(MI.note), 'No notes available') AS general_note
+    FROM 
+        movie_info MI
+    JOIN 
+        info_type I ON MI.info_type_id = I.id
+    GROUP BY 
+        MI.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        MC.movie_id,
+        COUNT(DISTINCT C.id) AS unique_companies,
+        STRING_AGG(DISTINCT CN.name, '; ') AS company_names
+    FROM 
+        movie_companies MC
+    JOIN 
+        company_name CN ON MC.company_id = CN.id
+    WHERE 
+        CN.country_code IS NOT NULL
+    GROUP BY 
+        MC.movie_id
+),
+FinalResults AS (
+    SELECT 
+        RM.movie_id,
+        RM.title,
+        RM.production_year,
+        RM.keyword,
+        CD.total_cast,
+        CD.cast_names,
+        MI.info_details,
+        MI.general_note,
+        COALESCE(MC.unique_companies, 0) AS unique_companies,
+        MC.company_names
+    FROM 
+        RecentMovies RM
+    LEFT JOIN 
+        CastDetails CD ON RM.movie_id = CD.movie_id
+    LEFT JOIN 
+        MovieInfo MI ON RM.movie_id = MI.movie_id
+    LEFT JOIN 
+        MovieCompanies MC ON RM.movie_id = MC.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    keyword,
+    total_cast,
+    cast_names,
+    info_details,
+    general_note,
+    unique_companies,
+    company_names
+FROM 
+    FinalResults
+WHERE 
+    total_cast > 0 
+    AND production_year = (
+        SELECT MAX(production_year) 
+        FROM RecentMovies
+    )
+ORDER BY 
+    production_year DESC, 
+    total_cast DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) FROM web_sales ws_inner WHERE ws_inner.ws_item_sk = ws.ws_item_sk)
+),
+
+ItemSales AS (
+    SELECT 
+        item.i_item_id,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_paid_inc_tax) AS total_sales
+    FROM SalesData sd
+    JOIN item ON item.i_item_sk = sd.ws_item_sk
+    WHERE sd.rn = 1
+    GROUP BY item.i_item_id
+),
+
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        SUM(is.total_sales) AS total_sales_by_gender
+    FROM ItemSales is
+    JOIN customer c ON c.c_customer_sk = is.i_item_id
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_name, 
+        SUM(ss.ss_net_paid_inc_tax) AS total_sales_warehouse
+    FROM store_sales ss
+    JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE w.w_state = 'TX'
+    GROUP BY w.w_warehouse_name
+)
+
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(ws.total_sales_warehouse, 0) AS total_sales_from_warehouse,
+    cd.total_sales_by_gender
+FROM CustomerDemographics cd
+LEFT JOIN WarehouseSales ws ON cd.total_sales_by_gender > 0
+ORDER BY cd.cd_gender, cd.cd_marital_status;

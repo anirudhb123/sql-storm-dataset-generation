@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS actor_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        r.title, 
+        r.production_year, 
+        r.movie_id,
+        r.actor_count
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    fm.actor_count,
+    CASE 
+        WHEN CHAR_LENGTH(mk.keywords) > 50 THEN 'Keyword Overload'
+        ELSE 'Manageable Keywords'
+    END AS keyword_status,
+    (SELECT COUNT(DISTINCT person_id) FROM person_info pi WHERE pi.info_type_id = 1 AND pi.info LIKE '%award%') AS total_award_winners
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieKeywords mk ON fm.movie_id = mk.movie_id
+WHERE 
+    fm.actor_count > 3 
+    AND fm.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fm.production_year DESC, 
+    fm.actor_count DESC;

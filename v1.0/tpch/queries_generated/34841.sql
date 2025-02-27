@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > (sh.s_acctbal * 1.1) 
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY total_revenue DESC
+    LIMIT 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_orders, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    p.p_name AS part_name,
+    so.s_name AS supplier_name,
+    tp.total_revenue,
+    co.total_orders,
+    co.order_count
+FROM region r
+INNER JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier so ON n.n_nationkey = so.s_nationkey
+LEFT JOIN TopParts tp ON so.s_suppkey = tp.p_partkey
+FULL OUTER JOIN CustomerOrders co ON co.c_custkey = so.s_nationkey
+WHERE tp.total_revenue IS NOT NULL OR co.total_orders IS NOT NULL
+ORDER BY region_name, nation_name, total_revenue DESC, total_orders DESC;

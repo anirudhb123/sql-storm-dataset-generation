@@ -1,0 +1,55 @@
+WITH MovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_actors,
+        total_keywords,
+        ROW_NUMBER() OVER (ORDER BY total_actors DESC, total_keywords DESC) AS rn
+    FROM 
+        MovieStats
+    WHERE 
+        production_year >= 2000 AND total_actors > 1
+)
+SELECT 
+    t.movie_id,
+    t.title,
+    t.production_year,
+    t.total_actors,
+    t.total_keywords,
+    ci.name AS actor_name,
+    pi.info AS actor_info,
+    CASE 
+        WHEN pi.info IS NULL THEN 'No additional info'
+        WHEN pi.info LIKE '%award%' THEN 'Award winner' 
+        ELSE 'Regular actor' 
+    END AS actor_status
+FROM 
+    TopMovies t
+LEFT JOIN 
+    cast_info ci ON t.movie_id = ci.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id AND pi.info_type_id = 
+    (SELECT id FROM info_type WHERE info = 'memo' LIMIT 1)
+WHERE 
+    t.rn <= 10
+ORDER BY 
+    t.total_actors DESC, t.total_keywords DESC, ci.name ASC;

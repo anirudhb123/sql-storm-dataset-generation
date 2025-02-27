@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY SUM(co.total_spent) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(co.total_spent) > 1000
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    pc.c_name AS customer_name,
+    ps.p_name AS part_name,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    ps.avg_supply_cost,
+    ps.max_avail_qty,
+    tc.customer_rank
+FROM 
+    PartSummary ps
+LEFT JOIN 
+    RankedSuppliers rs ON ps.p_partkey = rs.s_suppkey AND rs.rank = 1
+JOIN 
+    TopCustomers tc ON tc.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE 'A%')
+WHERE 
+    ps.avg_supply_cost < (SELECT AVG(ps_avg.avg_supply_cost) FROM PartSummary ps_avg)
+ORDER BY 
+    tc.customer_rank, ps.p_name;

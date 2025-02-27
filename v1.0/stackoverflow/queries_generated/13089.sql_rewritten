@@ -1,0 +1,36 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+)
+SELECT 
+    UserId,
+    Reputation,
+    Views,
+    UpVotes,
+    DownVotes,
+    TotalPosts,
+    TotalComments,
+    TotalBadges,
+    (TotalPosts + TotalComments + TotalBadges) AS EngagementScore
+FROM 
+    UserStats
+ORDER BY 
+    EngagementScore DESC
+LIMIT 100;

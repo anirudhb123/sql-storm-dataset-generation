@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        RANK() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+TopMovies AS (
+    SELECT 
+        title_id, title, production_year, kind_id
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+MovieWithKeywords AS (
+    SELECT 
+        tm.title_id,
+        tm.title,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = tm.title_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        tm.title_id, tm.title
+),
+MovieInfoWithCompanies AS (
+    SELECT 
+        mwk.title_id,
+        mwk.title,
+        mwk.keywords,
+        COALESCE(
+            STRING_AGG(DISTINCT cn.name, ', ' ORDER BY cn.name),
+            'No Companies'
+        ) AS companies
+    FROM 
+        MovieWithKeywords mwk
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = mwk.title_id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id 
+    GROUP BY 
+        mwk.title_id, mwk.title, mwk.keywords
+)
+SELECT 
+    miw.title,
+    miw.keywords,
+    miw.companies,
+    t.kind,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS average_notes,
+    SUM(CASE WHEN LENGTH(miw.keywords::text) > 0 THEN 1 ELSE 0 END) AS movies_with_keywords
+FROM 
+    MovieInfoWithCompanies miw
+JOIN 
+    aka_title t ON t.id = miw.title_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = t.id
+JOIN 
+    kind_type k ON k.id = t.kind_id
+GROUP BY 
+    miw.title, miw.keywords, miw.companies, t.kind
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    total_cast DESC, miw.title;
+
+This SQL query performs a series of complex operations, including the use of Common Table Expressions (CTEs) to rank movies by the number of distinct cast members, aggregate keywords related to the top movies, and join information about companies associated with those movies. The query incorporates window functions (RANK()), aggregates with ARRAY_AGG and STRING_AGG, NULL handling with COALESCE, and GROUP BY with HAVING conditions to ensure the results meet specific criteria. Additionally, it includes a variety of conditions and joins to cover different relationships within the schema, presenting a thorough performance benchmarking scenario.

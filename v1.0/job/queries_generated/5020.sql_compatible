@@ -1,0 +1,22 @@
+
+WITH movie_actors AS (
+    SELECT c.movie_id, a.name AS actor_name, r.role AS role
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+), movie_details AS (
+    SELECT t.title, t.production_year, m.company_id, m.note AS company_note, m.company_type_id
+    FROM aka_title t
+    JOIN movie_companies m ON t.id = m.movie_id
+), movie_keywords AS (
+    SELECT mk.movie_id, k.keyword
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+)
+SELECT ma.actor_name, md.title, md.production_year, mk.keyword, md.company_note
+FROM movie_actors ma
+JOIN movie_details md ON ma.movie_id = md.movie_id
+JOIN movie_keywords mk ON ma.movie_id = mk.movie_id
+WHERE md.production_year BETWEEN 2000 AND 2023
+GROUP BY ma.actor_name, md.title, md.production_year, mk.keyword, md.company_note
+ORDER BY md.production_year DESC, ma.actor_name;

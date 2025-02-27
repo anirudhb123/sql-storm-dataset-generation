@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 20230101 AND 20230930
+    GROUP BY 
+        ws_bill_customer_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN 20230101 AND 20230930
+    GROUP BY 
+        sr_customer_sk
+), 
+CombinedSales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesCTE s ON c.c_customer_sk = s.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerReturns r ON c.c_customer_sk = r.sr_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.total_sales,
+    c.total_returns,
+    (c.total_sales - c.total_returns) AS net_gains,
+    CASE 
+        WHEN c.total_sales > c.total_returns THEN 'Profitable'
+        ELSE 'Unprofitable'
+    END AS profitability_status
+FROM 
+    (SELECT 
+        customer_id, 
+        MAX(total_sales) AS total_sales, 
+        MAX(total_returns) AS total_returns
+     FROM 
+        CombinedSales
+     GROUP BY 
+        customer_id) AS c
+WHERE 
+    c.total_sales > 0 OR c.total_returns > 0
+ORDER BY 
+    net_gains DESC;

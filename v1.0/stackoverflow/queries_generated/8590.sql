@@ -1,0 +1,47 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS Upvotes,
+        SUM(V.VoteTypeId = 3) AS Downvotes,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U 
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN Comments C ON U.Id = C.UserId 
+    LEFT JOIN Votes V ON P.Id = V.PostId 
+    LEFT JOIN Badges B ON U.Id = B.UserId 
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount END) AS QuestionsAnswered,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswersCount,
+        AVG(P.Score) AS AveragePostScore
+    FROM Posts P 
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.Upvotes,
+    US.Downvotes,
+    US.GoldBadges,
+    US.SilverBadges,
+    US.BronzeBadges,
+    PS.QuestionsAnswered,
+    PS.AnswersCount,
+    PS.AveragePostScore
+FROM UserStatistics US
+LEFT JOIN PostStatistics PS ON US.UserId = PS.OwnerUserId
+ORDER BY US.Reputation DESC, PS.AveragePostScore DESC
+LIMIT 50;

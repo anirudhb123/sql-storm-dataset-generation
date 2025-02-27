@@ -1,0 +1,15 @@
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(p.Id) AS NumberOfPosts
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    NumberOfPosts DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

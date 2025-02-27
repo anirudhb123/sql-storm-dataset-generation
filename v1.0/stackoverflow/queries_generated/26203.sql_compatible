@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+),
+
+MostDiscusssedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score
+    HAVING 
+        COUNT(c.Id) > 5  
+)
+
+SELECT 
+    mdp.PostId,
+    mdp.Title,
+    mdp.Score,
+    mdp.CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    u.Reputation AS OwnerReputation,
+    u.Location,
+    u.WebsiteUrl,
+    MAX(v.CreationDate) AS LastVoteDate
+FROM 
+    MostDiscusssedPosts mdp
+JOIN 
+    Posts p ON p.Id = mdp.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id AND v.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTR(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_array ON true
+LEFT JOIN 
+    Tags t ON t.TagName = UNNEST(tag_array)
+GROUP BY 
+    mdp.PostId, mdp.Title, mdp.Score, u.Reputation, u.Location, u.WebsiteUrl
+ORDER BY 
+    mdp.Score DESC,
+    mdp.CommentCount DESC
+LIMIT 10;

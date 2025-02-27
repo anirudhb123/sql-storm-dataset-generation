@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserBadges AS (
+    SELECT
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostVoteAggregates AS (
+    SELECT
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPostCounts AS (
+    SELECT
+        PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId = 10
+    GROUP BY 
+        PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(u.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(upvotes.UpVotes, 0) AS UpVotes,
+        COALESCE(downvotes.DownVotes, 0) AS DownVotes,
+        COALESCE(c.CloseCount, 0) AS CloseCount,
+        ph.Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserBadges u ON p.OwnerUserId = u.UserId
+    LEFT JOIN 
+        PostVoteAggregates upvotes ON p.Id = upvotes.PostId
+    LEFT JOIN 
+        PostVoteAggregates downvotes ON p.Id = downvotes.PostId
+    LEFT JOIN 
+        ClosedPostCounts c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.UserBadgeCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CloseCount,
+    ps.Level,
+    CASE 
+        WHEN ps.CloseCount > 0 THEN 'Closed'
+        WHEN ps.UpVotes > ps.DownVotes THEN 'Positive'
+        WHEN ps.UpVotes < ps.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostStatus
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.UserBadgeCount >= 2
+ORDER BY 
+    ps.CloseCount DESC, 
+    ps.UpVotes - ps.DownVotes DESC
+LIMIT 50;

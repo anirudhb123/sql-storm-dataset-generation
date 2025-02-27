@@ -1,0 +1,88 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+address_details AS (
+    SELECT 
+        ca.ca_address_sk, 
+        ca.ca_city,
+        ca.ca_state,
+        CASE 
+            WHEN ca.ca_city IS NULL THEN 'Unknown City' 
+            ELSE ca.ca_city 
+        END AS resolved_city
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_city NOT IN ('', ' ')
+),
+customer_incomes AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        ib.ib_income_band_sk,
+        COALESCE(ib.ib_lower_bound + 1000, 0) AS inferred_income,
+        CASE 
+            WHEN ib.ib_income_band_sk IS NULL THEN 'Unknown Income Band'
+            ELSE CAST(ib.ib_income_band_sk AS VARCHAR)
+        END AS band_info
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month AS month_num,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_revenue
+    FROM 
+        date_dim d 
+    INNER JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year >= 1998
+    GROUP BY 
+        d.d_year, d.d_month
+)
+SELECT 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    ai.resolved_city, 
+    ci.band_info, 
+    ms.month_num, 
+    ms.total_orders, 
+    ms.total_revenue,
+    CASE 
+        WHEN ms.total_revenue > 10000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    top_customers tc
+LEFT JOIN 
+    address_details ai ON tc.c_customer_sk = ai.ca_address_sk
+LEFT JOIN 
+    customer_incomes ci ON tc.c_customer_sk = ci.cd_demo_sk
+JOIN 
+    monthly_sales ms ON EXTRACT(MONTH FROM DATE '2002-10-01') = ms.month_num
+WHERE 
+    (ai.resolved_city IS NOT NULL OR ci.band_info != 'Unknown Income Band')
+    AND (tc.total_profit > 5000 OR ms.total_orders > 10)
+ORDER BY 
+    tc.rank
+LIMIT 100 OFFSET 10;

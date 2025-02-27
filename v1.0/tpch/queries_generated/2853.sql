@@ -1,0 +1,47 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available_qty,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts_supply
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    ss.s_name AS supplier_name,
+    COALESCE(rs.total_sales, 0) AS sales,
+    ss.total_available_qty,
+    ss.total_parts_supply
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    RankedSales rs ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = rs.p_partkey LIMIT 1)
+WHERE 
+    ss.total_available_qty > 100
+ORDER BY 
+    region, nation, sales DESC
+LIMIT 50
+OFFSET 20;

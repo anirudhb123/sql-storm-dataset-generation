@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+), 
+
+PostWithTags AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        r.AcceptedAnswerId,
+        string_agg(t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = r.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.ViewCount, r.Score, r.AcceptedAnswerId
+), 
+
+PostWithResponses AS (
+    SELECT 
+        p.*,
+        COALESCE(a.Score, 0) AS AcceptedAnswerScore,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        PostWithTags p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.PostId
+    GROUP BY 
+        p.PostId, a.Score
+), 
+
+FinalResults AS (
+    SELECT 
+        p.*,
+        CASE 
+            WHEN (p.Score >= 10 AND p.AcceptedAnswerScore > 5) THEN 'High Engagement'
+            WHEN p.Score < 0 THEN 'Negative Scoring'
+            ELSE 'Moderate Engagement'
+        END AS EngagementLevel,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostId AND v.VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.PostId AND v.VoteTypeId = 3) AS Downvotes
+    FROM 
+        PostWithResponses p
+    WHERE 
+        p.Rank <= 5
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN Tags IS NULL THEN 'No Tags'
+        ELSE Tags
+    END AS DisplayTags,
+    COALESCE(ROUND(ViewCount / NULLIF(CommentCount, 0), 2), 0) AS ViewToCommentRatio
+FROM 
+    FinalResults
+WHERE 
+    EngagementLevel LIKE 'High Engagement'
+ORDER BY 
+    Score DESC, CreationDate ASC;

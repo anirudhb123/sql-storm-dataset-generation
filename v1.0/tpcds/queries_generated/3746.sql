@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_net_paid) AS total_spent,
+        COUNT(ss.ss_ticket_number) AS purchase_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        DECODE(cd.cd_marital_status, 'M', 'Married', 'S', 'Single', 'Unknown') AS marital_status,
+        cd.cd_credit_rating
+    FROM 
+        customer_demographics cd
+),
+SalesAnalysis AS (
+    SELECT 
+        cs.c_customer_id,
+        cd.cd_gender,
+        cd.marital_status,
+        cs.total_spent,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = c.c_customer_id
+)
+SELECT 
+    sa.c_customer_id,
+    sa.cd_gender,
+    sa.marital_status,
+    COALESCE(sa.total_spent, 0) AS spent,
+    CASE 
+        WHEN sa.rank <= 10 THEN 'Top 10'
+        ELSE 'Others'
+    END AS spending_category
+FROM 
+    SalesAnalysis sa
+LEFT JOIN 
+    warehouse w ON w.w_warehouse_sk = (SELECT MAX(w_warehouse_sk) FROM warehouse)
+WHERE 
+    sa.cd_gender IS NOT NULL
+ORDER BY 
+    sa.cd_gender, sa.total_spent DESC;

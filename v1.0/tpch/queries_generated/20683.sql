@@ -1,0 +1,67 @@
+WITH region_sales AS (
+    SELECT 
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_name
+),
+supplier_stats AS (
+    SELECT 
+        s.s_name,
+        COUNT(ps.ps_supplycost) AS supply_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        MAX(ps.ps_availqty) AS max_avail_qty,
+        MIN(ps.ps_supplycost) AS min_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    r.r_name AS region,
+    cs.c_name AS customer_name,
+    cs.num_orders,
+    cs.total_spent,
+    s.s_name AS supplier_name,
+    ss.supply_count,
+    ss.avg_supply_cost,
+    COALESCE(ss.max_avail_qty, 0) AS max_avail_qty,
+    CASE 
+        WHEN ss.min_supply_cost IS NULL THEN 'No Data'
+        ELSE CAST(ss.min_supply_cost AS VARCHAR)
+    END AS min_supply_cost
+FROM 
+    region_sales r
+FULL OUTER JOIN customer_orders cs ON r.r_name IS NOT NULL OR cs.c_name IS NOT NULL
+FULL OUTER JOIN supplier_stats ss ON ss.s_name IS NOT NULL
+WHERE 
+    (cs.total_spent > 1000 OR ss.avg_supply_cost < 500)
+    AND (r.total_sales IS NULL OR r.total_sales > 10000)
+ORDER BY 
+    r.r_name, cs.total_spent DESC, ss.avg_supply_cost ASC;

@@ -1,0 +1,25 @@
+
+SELECT 
+    t.title,
+    ak.name AS aka_name,
+    c.note AS cast_note,
+    co.name AS company_name,
+    m.info AS movie_info
+FROM 
+    title t
+JOIN 
+    aka_title ak ON t.id = ak.movie_id
+JOIN 
+    cast_info c ON t.id = c.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, ak.name, c.note, co.name, m.info
+ORDER BY 
+    t.production_year DESC;

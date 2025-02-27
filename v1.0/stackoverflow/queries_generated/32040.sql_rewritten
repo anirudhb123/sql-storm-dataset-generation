@@ -1,0 +1,83 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+        JOIN RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON b.UserId = u.Id
+        LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostScores AS (
+    SELECT 
+        rp.PostId,
+        rp.Score,
+        ROW_NUMBER() OVER (PARTITION BY rp.Level ORDER BY rp.Score DESC) AS Rank,
+        rp.Title,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RecursivePostCTE rp
+        LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.Rank,
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.Views,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.TotalComments
+FROM 
+    PostScores ps
+JOIN 
+    UserStats us ON us.UserId = ps.OwnerDisplayName 
+WHERE 
+    ps.Rank <= 5  
+ORDER BY 
+    ps.Score DESC, us.Reputation DESC
+OPTION (MAXRECURSION 100)  
+;

@@ -1,0 +1,57 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+TopSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(s.s_acctbal, 0) AS supplier_balance,
+        rs.total_sales
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        partsupp ps ON rs.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        rs.sales_rank <= 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    COALESCE(ts.p_name, 'Unknown Part') AS part_name,
+    ts.total_sales,
+    ts.supplier_balance,
+    COALESCE(co.order_count, 0) AS customer_order_count,
+    COALESCE(co.total_spent, 0) AS total_amount_spent
+FROM 
+    TopSales ts
+FULL OUTER JOIN 
+    CustomerOrders co ON ts.supplier_balance > 500
+WHERE 
+    ts.total_sales > 1000 OR co.total_amount_spent > 5000
+ORDER BY 
+    ts.total_sales DESC, co.total_amount_spent DESC;

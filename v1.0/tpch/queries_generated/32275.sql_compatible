@@ -1,0 +1,37 @@
+
+WITH RECURSIVE AvgSupplierCost AS (
+    SELECT ps_suppkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, a.avg_cost,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY a.avg_cost DESC) AS supplier_rank
+    FROM supplier s
+    JOIN AvgSupplierCost a ON s.s_suppkey = a.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT r.r_name, ns.n_nationkey, n.n_name, rs.s_name AS supplier_name, rs.s_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey
+    WHERE rs.supplier_rank <= 3
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+FinalSummary AS (
+    SELECT ts.r_name, ts.n_name, COUNT(od.o_orderkey) AS order_count, 
+           SUM(od.total_line_price) AS total_sales,
+           MAX(od.o_totalprice) AS max_order_price
+    FROM TopSuppliers ts
+    LEFT JOIN OrderDetails od ON ts.supplier_name = od.o_orderkey
+    GROUP BY ts.r_name, ts.n_name
+)
+SELECT r_name, n_name, order_count, total_sales, max_order_price
+FROM FinalSummary
+WHERE total_sales IS NOT NULL AND order_count > 0
+ORDER BY total_sales DESC, max_order_price ASC;

@@ -1,0 +1,63 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    WHERE U.Reputation > 0
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.Id
+),
+AuthorStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+)
+SELECT 
+    UR.UserId,
+    UR.Reputation,
+    UR.ReputationRank,
+    PI.PostId,
+    PI.Title,
+    PI.CreationDate,
+    PI.Score,
+    PI.ViewCount,
+    AS.PostCount,
+    AS.AvgScore,
+    AS.TotalViews,
+    PT.TagName,
+    PT.UsageCount,
+    PI.TotalBounty
+FROM UserReputation UR
+JOIN PostInfo PI ON UR.UserId = PI.OwnerUserId
+JOIN AuthorStats AS ON UR.UserId = AS.OwnerUserId
+LEFT JOIN PopularTags PT ON PT.UsageCount > 5
+WHERE UR.Reputation > 1000 
+AND PI.Score > (SELECT AVG(Score) FROM Posts WHERE CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+ORDER BY UR.Reputation DESC, PI.TotalBounty DESC
+LIMIT 50;

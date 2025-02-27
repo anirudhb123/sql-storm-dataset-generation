@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCOPE(B.Id IS NOT NULL, 1, 0)) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        Views,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC, Reputation DESC) AS UserRank
+    FROM 
+        UserStats
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS TopContributors
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    R.UserRank,
+    R.DisplayName AS UserDisplayName,
+    R.TotalPosts,
+    R.TotalQuestions,
+    R.TotalAnswers,
+    R.TotalScore,
+    R.TotalBadges,
+    T.TagName,
+    T.PostCount AS RelatedPostCount,
+    T.TotalViews AS RelatedViewCount,
+    T.TotalScore AS RelatedScore,
+    T.TopContributors
+FROM 
+    RankedUsers R
+CROSS JOIN 
+    TagStats T
+WHERE 
+    R.TotalScore > 100
+ORDER BY 
+    R.UserRank, T.TotalViews DESC;

@@ -1,0 +1,52 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.Comment,
+        ph.UserDisplayName,
+        1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- Posts that were closed or reopened
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.Comment,
+        ph.UserDisplayName,
+        Level + 1
+    FROM PostHistory ph
+    JOIN RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE ph.CreationDate < rph.HistoryDate
+)
+
+SELECT
+    p.Title,
+    COUNT(DISTINCT ph.Id) AS CloseReopenCount,
+    MAX(ph.HistoryDate) AS LastCloseReopenDate,
+    ARRAY_AGG(DISTINCT u.DisplayName) AS UsernamesInvolved,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS TotalUpvotes,
+    COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS TotalDownvotes,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    CASE 
+        WHEN SUM(b.Class) IS NULL THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus
+FROM Posts p
+LEFT JOIN RecursivePostHistory ph ON p.Id = ph.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+LEFT JOIN Users u ON ph.UserId = u.Id
+WHERE p.PostTypeId = 1 -- Filter for questions only
+GROUP BY p.Id
+ORDER BY LastCloseReopenDate DESC
+LIMIT 50;

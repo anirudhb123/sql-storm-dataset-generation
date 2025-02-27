@@ -1,0 +1,68 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes, -- UpMod
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes -- DownMod
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    ups.TotalUpVotes,
+    ups.TotalDownVotes,
+    th.TagName,
+    phs.EditCount,
+    phs.LastEditDate
+FROM 
+    UserPostStats ups
+JOIN 
+    Users u ON u.Id = ups.UserId
+JOIN 
+    TopTags th ON th.PostCount > 5 -- Only include users with posts in top tags
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalViews DESC
+LIMIT 50;

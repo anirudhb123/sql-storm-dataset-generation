@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+NamePattern AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr
+    FROM part p
+    WHERE p.p_name LIKE 'S%' OR p.p_comment IS NULL
+),
+FilteredOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        NULLIF(o.o_orderstatus, 'F') AS adjusted_status,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o 
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate < CURRENT_DATE - INTERVAL '1 year'
+    )
+),
+CriticalItems AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+    GROUP BY l.l_orderkey
+),
+SupplierInfo AS (
+    SELECT
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acct_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+),
+HighValueOrders AS (
+    SELECT
+        fo.o_orderkey,
+        SUM(ci.total_price) AS order_total
+    FROM FilteredOrders fo
+    LEFT JOIN CriticalItems ci ON fo.o_orderkey = ci.l_orderkey
+    WHERE fo.adjusted_status IS NOT NULL
+    GROUP BY fo.o_orderkey
+)
+SELECT 
+    r.r_name,
+    si.supplier_count,
+    si.total_acct_balance,
+    COALESCE(hvo.order_total, 0) AS total_order_value,
+    (SELECT COUNT(*)
+     FROM RankedSuppliers rs
+     WHERE rs.rn <= 5) AS top_supplier_count,
+    CASE 
+        WHEN hvo.order_total IS NULL THEN 'No high-value orders'
+        ELSE 'High-value orders exist'
+    END AS order_status
+FROM SupplierInfo si
+LEFT JOIN region r ON si.r_name = r.r_name
+LEFT JOIN HighValueOrders hvo ON hvo.o_orderkey = ALL (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey IN (SELECT DISTINCT o_orderkey FROM lineitem WHERE l_quantity > (SELECT AVG(l_quantity) FROM lineitem)))
+ORDER BY total_order_value DESC, supplier_count DESC;

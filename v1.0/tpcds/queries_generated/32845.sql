@@ -1,0 +1,68 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk,
+           1 AS hierarchy_level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.first_name AS parent_name, 
+           ch.c_current_cdemo_sk, 
+           ch.hierarchy_level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.hierarchy_level < 3  -- limit the hierarchy depth
+),
+DailySales AS (
+    SELECT d.d_date, SUM(ws.ws_ext_sales_price) AS total_sales, 
+           COUNT(ws.ws_order_number) AS total_orders
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+SalesByCustomer AS (
+    SELECT ch.c_customer_sk, 
+           ch.c_first_name,
+           ch.c_last_name,
+           ds.total_sales,
+           ds.total_orders,
+           RANK() OVER (PARTITION BY ch.c_customer_sk ORDER BY ds.total_sales DESC) AS sales_rank
+    FROM CustomerHierarchy ch
+    LEFT JOIN DailySales ds ON ds.total_sales IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT c.c_customer_id, 
+           c.c_first_name,
+           c.c_last_name, 
+           cd.cd_gender, 
+           cd.cd_purchase_estimate,
+           CASE 
+               WHEN cd.cd_purchase_estimate IS NULL THEN 'UNKNOWN'
+               WHEN cd.cd_purchase_estimate > 500000 THEN 'HIGH'
+               WHEN cd.cd_purchase_estimate BETWEEN 250000 AND 500000 THEN 'MEDIUM'
+               ELSE 'LOW'
+           END AS customer_value
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M' OR cd.cd_gender = 'F'
+)
+SELECT hvc.c_customer_id,
+       hvc.c_first_name,
+       hvc.c_last_name,
+       hvc.customer_value,
+       SUM(COALESCE(s.total_sales, 0)) AS total_sales,
+       COUNT(DISTINCT s.total_orders) AS total_orders,
+       STRING_AGG(DISTINCT w.w_warehouse_name, ', ') AS warehouses_used
+FROM HighValueCustomers hvc
+LEFT JOIN SalesByCustomer s ON hvc.c_customer_id = s.c_customer_sk
+LEFT JOIN warehouse w ON w.w_warehouse_sk IN (
+    SELECT ws.ws_warehouse_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_bill_customer_sk = hvc.c_customer_id
+)
+WHERE hvc.customer_value IN ('HIGH', 'MEDIUM')
+GROUP BY hvc.c_customer_id, hvc.c_first_name, hvc.c_last_name, hvc.customer_value
+HAVING SUM(COALESCE(s.total_sales, 0)) > 10000
+ORDER BY total_sales DESC
+LIMIT 10;

@@ -1,0 +1,62 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title AS title_name,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM
+        aka_title t
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.kind_id IN (1, 2)  -- Filtering for specific kinds, e.g., Movie and TV Show
+),
+top_cast_members AS (
+    SELECT
+        a.name AS actor_name,
+        c.movie_id,
+        COUNT(*) AS total_roles
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        a.name, c.movie_id
+    HAVING
+        COUNT(*) > 1  -- Actors with more than one role
+),
+title_cast_info AS (
+    SELECT
+        rt.title_name,
+        rt.production_year,
+        tcm.actor_name,
+        tcm.total_roles
+    FROM
+        ranked_titles rt
+    JOIN
+        top_cast_members tcm ON rt.title_id IN (
+            SELECT movie_id FROM cast_info WHERE person_id IN (
+                SELECT person_id FROM aka_name WHERE name = tcm.actor_name
+            )
+        )
+)
+SELECT
+    tci.title_name,
+    tci.production_year,
+    tci.actor_name,
+    tci.total_roles,
+    COUNT(DISTINCT mk.keyword) AS unique_keywords
+FROM
+    title_cast_info tci
+LEFT JOIN
+    movie_keyword mk ON tci.title_name = (
+        SELECT title FROM aka_title WHERE id = tci.title_id
+    )
+GROUP BY
+    tci.title_name, tci.production_year, tci.actor_name, tci.total_roles
+ORDER BY
+    tci.production_year DESC, tci.total_roles DESC, tci.title_name
+LIMIT 100;

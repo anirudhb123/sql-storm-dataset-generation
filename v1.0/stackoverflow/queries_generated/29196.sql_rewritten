@@ -1,0 +1,78 @@
+WITH TagWords AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, LENGTH(Tags) - 2), '><'))) AS Tag
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1 
+),
+UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+        LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+TagCount AS (
+    SELECT
+        T.Tag AS TagName,
+        COUNT(*) AS TagFrequency
+    FROM
+        TagWords T
+    GROUP BY
+        T.Tag
+),
+TopTags AS (
+    SELECT
+        TagName,
+        TagFrequency,
+        ROW_NUMBER() OVER (ORDER BY TagFrequency DESC) AS Rank
+    FROM
+        TagCount
+    WHERE
+        TagFrequency > 2 
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS ActivePostCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE 
+        U.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT
+    U.UserId,
+    U.DisplayName,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalPosts,
+    U.TotalBadges,
+    A.ActivePostCount,
+    A.TotalComments,
+    T.TagName,
+    T.TagFrequency
+FROM 
+    UserStats U
+JOIN 
+    ActiveUsers A ON U.UserId = A.UserId
+JOIN 
+    TopTags T ON T.TagName IN (SELECT UNNEST(string_to_array(P.Tags, '><')) FROM Posts P WHERE P.PostTypeId = 1)
+ORDER BY
+    U.TotalPosts DESC,
+    T.TagFrequency DESC;

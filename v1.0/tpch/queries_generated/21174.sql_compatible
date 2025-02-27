@@ -1,0 +1,81 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier AS s
+    JOIN 
+        partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        orders AS o
+    WHERE 
+        o.o_totalprice > (
+            SELECT 
+                AVG(o2.o_totalprice)
+            FROM 
+                orders AS o2
+            WHERE 
+                o2.o_orderdate < '1995-01-01'
+        ) 
+        AND o.o_orderstatus IN ('O', 'F')
+),
+NationsWithComments AS (
+    SELECT 
+        n.n_name,
+        n.n_comment,
+        COALESCE(NULLIF(LENGTH(n.n_comment), 0), -1) AS comment_length
+    FROM 
+        nation AS n
+    WHERE 
+        n.n_regionkey = (
+            SELECT 
+                r.r_regionkey 
+            FROM 
+                region AS r 
+            WHERE 
+                r.r_name LIKE 'ASIA%'
+            LIMIT 1
+        )
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank,
+    o.o_orderkey,
+    o.o_totalprice,
+    ns.n_name,
+    ns.comment_length,
+    ss.s_name,
+    ss.total_cost
+FROM 
+    FilteredOrders AS o
+LEFT JOIN 
+    NationsWithComments AS ns ON ns.n_name = (
+        SELECT 
+            n.n_name
+        FROM 
+            nation AS n
+        JOIN 
+            customer AS c ON c.c_nationkey = n.n_nationkey
+        WHERE 
+            c.c_custkey = o.o_custkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    RankedSuppliers AS ss ON ss.rnk = 1
+WHERE 
+    (o.o_orderdate BETWEEN DATEADD(MONTH, -3, '1998-10-01') AND '1998-10-01') 
+    AND ss.total_cost IS NOT NULL
+ORDER BY 
+    o.o_totalprice DESC;

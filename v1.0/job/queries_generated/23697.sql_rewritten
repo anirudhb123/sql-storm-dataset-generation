@@ -1,0 +1,78 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS movie_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')  
+),
+filtered_movies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN cast_count > 0 THEN 'Has Cast'
+            ELSE 'No Cast'
+        END AS cast_status
+    FROM 
+        ranked_movies
+    WHERE 
+        movie_rank <= 5  
+),
+detailed_movies AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_status,
+        ci.person_id,
+        p.name AS actor_name,
+        CASE 
+            WHEN p.gender = 'M' THEN 'Male'
+            WHEN p.gender = 'F' THEN 'Female'
+            ELSE 'Unknown'
+        END AS actor_gender,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        filtered_movies fm
+    LEFT JOIN 
+        cast_info ci ON fm.id = ci.movie_id
+    LEFT JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON fm.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        fm.cast_status = 'Has Cast'
+    GROUP BY 
+        fm.title, fm.production_year, fm.cast_status, ci.person_id, p.name, p.gender
+),
+final_output AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN COUNT(*) OVER (PARTITION BY production_year) >= 5 THEN 'Top Year'
+            ELSE 'Other Year'
+        END AS year_status
+    FROM 
+        detailed_movies
+)
+SELECT 
+    title,
+    production_year,
+    cast_status,
+    actor_name,
+    actor_gender,
+    keywords,
+    year_status
+FROM 
+    final_output
+WHERE 
+    title IS NOT NULL  
+ORDER BY 
+    production_year DESC, 
+    cast_count DESC NULLS LAST;

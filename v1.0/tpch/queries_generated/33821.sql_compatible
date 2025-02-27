@@ -1,0 +1,45 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_regionkey = 1  
+
+    UNION ALL
+
+    SELECT r.regionkey, r.r_name, r.r_comment
+    FROM region r
+    INNER JOIN RegionHierarchy rh ON r.regionkey = rh.r_regionkey + 1
+),
+SupplierSummary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrdersWithLineItems AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'  
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           DENSE_RANK() OVER (ORDER BY COUNT(o.o_orderkey) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 0  
+)
+SELECT rh.r_name AS Region,
+       c.c_name AS Customer,
+       cs.total_cost AS Supplier_Cost,
+       ol.total_price AS Order_Value,
+       cr.rank AS Customer_Rank
+FROM RegionHierarchy rh
+LEFT JOIN SupplierSummary cs ON rh.r_regionkey = cs.s_suppkey
+JOIN OrdersWithLineItems ol ON cs.s_suppkey = ol.o_custkey  
+JOIN CustomerRanked cr ON ol.o_custkey = cr.c_custkey
+WHERE cs.total_cost IS NOT NULL
+  AND ol.total_price > 500  
+ORDER BY cr.rank ASC, ol.total_price DESC;

@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY t.id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+), ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+), MoviesWithActorRoles AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ar.actor_name,
+        ar.role_name,
+        ar.nr_order
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+    WHERE 
+        rm.rank <= 5 AND ar.role_rank IS NOT NULL
+)
+SELECT 
+    mw.title AS Movie_Title,
+    mw.production_year AS Production_Year,
+    STRING_AGG(mw.actor_name || ' (' || COALESCE(mw.role_name, 'Unknown') || ')', '; ') AS Actors_Roles,
+    CASE 
+        WHEN mw.production_year < 2000 THEN 'Classic'
+        WHEN mw.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS Era,
+    COALESCE(NULLIF(STRING_AGG(mw.actor_name, '; '), ''), 'No actors listed') AS Actor_Info
+FROM 
+    MoviesWithActorRoles mw
+GROUP BY 
+    mw.movie_id, mw.title, mw.production_year
+ORDER BY 
+    mw.production_year DESC, Movie_Title;

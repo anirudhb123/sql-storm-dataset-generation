@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) AS VoteCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int)
+                        WHERE p.PostTypeId = 1)
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COUNT(c.Id) AS CommentCount,
+        MAX(p.LastEditDate) AS LastEditDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    WHERE 
+        rp.Rank <= 5
+    GROUP BY 
+        rp.PostId, rp.Title
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.CommentCount,
+    hp.LastEditDate,
+    CASE 
+        WHEN hp.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    rp.AvgUserReputation AS OwnerAvgReputation
+FROM 
+    HighScoringPosts hp
+JOIN 
+    RankedPosts rp ON hp.PostId = rp.PostId
+ORDER BY 
+    rp.Score DESC, hp.CommentCount DESC
+LIMIT 10;

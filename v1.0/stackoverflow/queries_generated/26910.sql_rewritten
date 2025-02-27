@@ -1,0 +1,66 @@
+WITH TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        ARRAY_AGG(DISTINCT p.OwnerDisplayName) AS UniqueAuthors,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate))) AS AvgActivityTimeInSeconds
+    FROM
+        Tags t
+    JOIN
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY
+        t.TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        STRING_AGG(DISTINCT c.Text, '; ') AS Comments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+OverallStats AS (
+    SELECT 
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScores
+    FROM 
+        Posts p
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.UniqueAuthors,
+    ts.AvgActivityTimeInSeconds,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Author,
+    rp.Comments,
+    os.TotalPosts,
+    os.TotalQuestions,
+    os.TotalAnswers,
+    os.TotalScores
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentPosts rp ON ts.TagName = ANY(string_to_array(rp.Title, ' '))
+CROSS JOIN 
+    OverallStats os
+ORDER BY 
+    ts.PostCount DESC, 
+    rp.ViewCount DESC
+LIMIT 10;

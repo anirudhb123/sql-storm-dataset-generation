@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount,
+        ARRAY_AGG(p.Title) AS ExamplePostTitles
+    FROM 
+        (SELECT DISTINCT UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS TagName FROM Posts WHERE PostTypeId = 1) AS tag
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+),
+FinalBenchmark AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        ts.PostCount AS RelatedTagCount,
+        ts.ExamplePostTitles
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagStats ts ON rp.Tags LIKE '%' || ts.TagName || '%'
+    WHERE 
+        rp.rn = 1 -- Selecting only the first occurrence for benchmarking
+)
+
+SELECT 
+    *,
+    CONCAT('Post titled "', Title, '" by "', OwnerDisplayName, '" has ', CommentCount, ' comments, ', UpVotes, ' upvotes, and ', DownVotes, ' downvotes.') AS BenchmarkSummary
+FROM 
+    FinalBenchmark
+ORDER BY 
+    UpVotes DESC, CommentCount DESC
+LIMIT 10;

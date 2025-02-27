@@ -1,0 +1,102 @@
+WITH RecursivePostPaths AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        R.Depth + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostPaths R ON P.ParentId = R.PostId
+),
+
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+
+PostVoteAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+
+BestPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PS.UserId,
+        PS.PostCount,
+        PS.TotalScore,
+        PS.AvgViews,
+        PVA.TotalVotes,
+        PVA.Upvotes,
+        PVA.Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY PS.UserId ORDER BY PVA.TotalVotes DESC, PS.TotalScore DESC) AS Rank
+    FROM 
+        Posts P
+    INNER JOIN 
+        UserPostStats PS ON P.OwnerUserId = PS.UserId
+    INNER JOIN 
+        PostVoteAnalysis PVA ON P.Id = PVA.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '90 days'  
+)
+
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.OwnerUserId,
+    U.DisplayName,
+    COALESCE(R.Depth, 0) AS ParentDepth,
+    PS.TotalScore,
+    PS.AvgViews,
+    PVA.Upvotes,
+    PVA.Downvotes,
+    CASE 
+        WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer
+FROM 
+    BestPosts BP
+JOIN 
+    Posts P ON BP.Id = P.Id
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    RecursivePostPaths R ON P.Id = R.PostId
+WHERE 
+    BP.Rank <= 5  
+ORDER BY 
+    PS.TotalScore DESC, 
+    BP.Upvotes DESC;

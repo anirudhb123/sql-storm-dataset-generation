@@ -1,0 +1,86 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+PersonRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        r.role AS person_role,
+        r.id AS role_id
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+),
+TitleRatings AS (
+    SELECT 
+        t.id AS title_id,
+        AVG(rating) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        t.id
+),
+TitleKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    tk.keywords,
+    COALESCE(cmc.company_count, 0) AS company_count,
+    COALESCE(tr.average_rating, 0) AS average_rating,
+    CASE
+        WHEN cmc.company_count > 0 THEN 'Produced'
+        ELSE 'Independent' 
+    END AS production_type,
+    COUNT(DISTINCT pr.person_id) FILTER (WHERE pr.person_role IS NOT NULL) AS distinct_cast_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    TitleKeywords tk ON rt.title_id = tk.movie_id
+LEFT JOIN 
+    CompanyMovieCounts cmc ON rt.title_id = cmc.movie_id
+LEFT JOIN 
+    TitleRatings tr ON rt.title_id = tr.title_id
+LEFT JOIN 
+    PersonRoles pr ON rt.title_id = pr.movie_id
+WHERE 
+    rt.year_rank <= 5
+GROUP BY 
+    rt.title_id, rt.title, rt.production_year, tk.keywords, cmc.company_count, tr.average_rating
+ORDER BY 
+    rt.production_year DESC, rt.title;
+
+This SQL query combines several advanced techniques, including Common Table Expressions (CTEs), window functions, aggregates, COALESCE for NULL handling, and a case statement for semantic categorization. It calculates metrics such as the number of unique companies associated with movies, average ratings from a related info table, and distinct cast counts, while also filtering for the top 5 titles per production year. The use of LEFT JOINs ensures that even titles without associated data can be included, courtesy of NULL-safe processing. This provides a rich data set for performance benchmarking, focusing on production year, title associations, and enhancing insights through keyword aggregation.

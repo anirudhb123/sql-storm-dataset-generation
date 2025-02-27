@@ -1,0 +1,53 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ReturnDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.cd_gender,
+        c.cd_marital_status,
+        cr.total_returned_quantity,
+        cr.total_returned_amount,
+        ROW_NUMBER() OVER (PARTITION BY c.cd_gender ORDER BY cr.total_returned_amount DESC) AS return_rank
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        CustomerDemographics c ON cr.sr_customer_sk = c.c_customer_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(rd.total_returned_quantity) AS total_quantity_returned,
+    AVG(rd.total_returned_amount) AS average_returned_value,
+    COUNT(rd.c_customer_sk) AS customer_count
+FROM 
+    ReturnDetails rd
+JOIN 
+    CustomerDemographics cd ON rd.c_customer_sk = cd.c_customer_sk
+WHERE 
+    rd.return_rank <= 5
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    total_quantity_returned DESC, 
+    average_returned_value DESC;

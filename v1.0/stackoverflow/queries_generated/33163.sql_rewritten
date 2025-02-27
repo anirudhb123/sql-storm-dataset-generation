@@ -1,0 +1,80 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+), 
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(COALESCE(pt.Score, 0)) AS TotalScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.Id, t.TagName
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    ts.TagId,
+    ts.TagName,
+    ts.PostCount AS TagPostCount,
+    ts.TotalScore AS TagTotalScore,
+    ub.UserId,
+    ub.DisplayName AS UserName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    cp.Comment AS CloseComment,
+    cp.CreationDate AS CloseDate
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TagStatistics ts ON rp.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE CONCAT('%', ts.TagName, '%'))
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId AND cp.rn = 1 
+WHERE 
+    rp.rn <= 5 
+ORDER BY 
+    rp.CreationDate DESC;

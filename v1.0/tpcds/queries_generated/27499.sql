@@ -1,0 +1,20 @@
+
+SELECT
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT i.i_category, ', ') AS unique_categories,
+    CONCAT(ca.ca_city, ', ', ca.ca_state) AS location
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN item i ON ws.ws_item_sk = i.i_item_sk
+WHERE ca.ca_city IS NOT NULL
+AND cd.cd_purchase_estimate > 1000
+GROUP BY ca.ca_city, ca.ca_state
+HAVING COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY total_customers DESC;

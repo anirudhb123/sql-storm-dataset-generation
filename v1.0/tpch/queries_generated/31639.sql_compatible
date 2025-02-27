@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal, sp.s_comment, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal > sh.s_acctbal
+),
+CustomerSummary AS (
+    SELECT c_nationkey, 
+           COUNT(c_custkey) AS total_customers,
+           SUM(c_acctbal) AS total_acctbal
+    FROM customer
+    GROUP BY c_nationkey
+),
+OrderLineDetails AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+           COUNT(l.l_linenumber) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, 
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returned_items,
+           AVG(COALESCE(l.l_tax, 0)) AS avg_tax
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT nh.n_name, 
+       cs.total_customers,
+       cs.total_acctbal,
+       COUNT(DISTINCT sh.s_suppkey) AS active_suppliers,
+       SUM(COALESCE(psd.avg_supply_cost, 0)) AS total_avg_supply_cost,
+       SUM(ol.order_total) AS total_order_value,
+       SUM(ns.returned_items) AS total_returned_items,
+       AVG(ns.avg_tax) AS average_tax
+FROM NationSummary AS nh
+JOIN CustomerSummary cs ON cs.c_nationkey = nh.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = nh.n_nationkey
+LEFT JOIN PartSupplierDetails psd ON psd.p_partkey = sh.s_suppkey
+LEFT JOIN OrderLineDetails ol ON ol.o_orderkey = sh.s_suppkey
+LEFT JOIN NationSummary ns ON ns.n_nationkey = nh.n_nationkey
+GROUP BY nh.n_name, cs.total_customers, cs.total_acctbal;

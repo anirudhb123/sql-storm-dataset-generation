@@ -1,0 +1,55 @@
+
+WITH RECURSIVE part_price_history AS (
+    SELECT p_partkey, p_name, p_retailprice, CAST(NULL AS DECIMAL(12, 2)) AS historical_price, 0 AS price_change
+    FROM part
+    UNION ALL
+    SELECT pp.p_partkey,
+           pp.p_name,
+           pp.p_retailprice,
+           pph.p_retailprice AS historical_price,
+           CASE 
+               WHEN pp.p_retailprice <> pph.p_retailprice THEN 1 
+               ELSE 0 
+           END AS price_change
+    FROM part pp
+    JOIN part_price_history pph ON pp.p_partkey = pph.p_partkey
+    WHERE pp.p_retailprice IS NOT NULL
+),
+customer_segment AS (
+    SELECT c_custkey, c_name, c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c_mktsegment ORDER BY c_acctbal DESC) AS cust_rank
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+),
+supplier_agg AS (
+    SELECT s_nationkey,
+           COUNT(*) AS supplier_count,
+           SUM(s_acctbal) AS total_account_balance
+    FROM supplier
+    GROUP BY s_nationkey
+),
+lineitem_discount AS (
+    SELECT l_orderkey, 
+           SUM(l_extendedprice * (1 - l_discount)) AS line_total,
+           COUNT(*) AS line_count
+    FROM lineitem
+    WHERE l_returnflag = 'N'
+    GROUP BY l_orderkey
+)
+SELECT 
+    ns.n_name AS nation,
+    MAX(pph.p_retailprice) AS max_price,
+    COALESCE(MAX(c.cust_rank), 0) AS highest_segment_rank,
+    COALESCE(s.supplier_count, 0) AS supplier_count,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    SUM(li.line_total) AS total_revenue,
+    AVG(CASE WHEN COALESCE(pph.price_change, 0) = 1 THEN pph.historical_price ELSE NULL END) AS avg_price_change
+FROM nation ns
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN part_price_history pph ON s.s_suppkey = pph.p_partkey
+LEFT JOIN customer_segment c ON c.cust_rank <= 5
+LEFT JOIN lineitem_discount li ON li.l_orderkey = pph.p_partkey
+GROUP BY ns.n_name
+HAVING MAX(pph.p_retailprice) IS NOT NULL
+ORDER BY total_revenue DESC
+LIMIT 10 OFFSET 5;

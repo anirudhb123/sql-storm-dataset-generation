@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+      AND o.o_orderdate < '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+TopParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS part_rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(ps.ps_suppkey) >= 2
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+)
+SELECT
+    rh.r_name,
+    COUNT(DISTINCT c.c_custkey) AS high_value_customer_count,
+    SUM(DISTINCT th.total_revenue) AS total_revenue,
+    ph.p_name,
+    AVG(sh.level) AS avg_supplier_level
+FROM region rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN HighValueCustomers hvc ON c.c_custkey = hvc.c_custkey
+LEFT JOIN OrderSummary os ON hvc.c_custkey = os.o_orderkey 
+LEFT JOIN SupplierHierarchy sh ON hvc.c_nationkey = sh.s_nationkey 
+LEFT JOIN TopParts ph ON ph.part_rank <= 5
+WHERE rh.r_comment IS NOT NULL
+GROUP BY rh.r_name, ph.p_name
+ORDER BY high_value_customer_count DESC, total_revenue DESC;

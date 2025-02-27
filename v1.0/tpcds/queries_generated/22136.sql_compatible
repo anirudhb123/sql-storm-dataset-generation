@@ -1,0 +1,72 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn,
+        SUM(ws.ws_ext_sales_price) OVER (PARTITION BY ws.ws_item_sk) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-10-31')
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON cs.cs_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+high_value_customers AS (
+    SELECT 
+        cu.c_customer_id,
+        cu.order_count,
+        cu.total_profit,
+        CASE 
+            WHEN cu.total_profit > 1000 THEN 'High Value'
+            WHEN cu.total_profit > 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer_summary cu
+    WHERE 
+        cu.order_count > 5
+),
+location_info AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT cu.c_customer_id) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN high_value_customers hvc ON c.c_customer_id = hvc.c_customer_id
+    GROUP BY 
+        ca.ca_city, ca.ca_state
+)
+SELECT 
+    li.ca_city,
+    li.ca_state,
+    li.customer_count,
+    rws.ws_item_sk,
+    rws.ws_sales_price,
+    COALESCE(hvc.order_count, 0) AS order_count,
+    COALESCE(hvc.total_profit, 0) AS total_profit
+FROM 
+    location_info li
+LEFT JOIN ranked_sales rws ON rws.rn = 1
+LEFT JOIN high_value_customers hvc ON hvc.c_customer_id = rws.ws_item_sk
+WHERE 
+    li.customer_count > 0
+    AND rws.ws_sales_price > (SELECT AVG(rws2.ws_sales_price) FROM ranked_sales rws2)
+ORDER BY 
+    li.customer_count DESC, 
+    total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,89 @@
+WITH RecursivePostLink AS (
+    SELECT 
+        pl.PostId, 
+        pl.RelatedPostId, 
+        1 AS LinkLevel
+    FROM 
+        PostLinks pl
+    UNION ALL
+    SELECT 
+        pl.PostId, 
+        pl.RelatedPostId, 
+        rpl.LinkLevel + 1
+    FROM 
+        PostLinks pl
+    INNER JOIN 
+        RecursivePostLink rpl ON pl.PostId = rpl.RelatedPostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(pht.Name, 'No History') AS LastHistoryAction,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '>'))::int)
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, pht.Name
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(coalesce(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.CreationDate,
+    pd.OwnerDisplayName,
+    pd.LastHistoryAction,
+    pm.TotalUpVotes,
+    pm.TotalPosts,
+    pm.TotalBadges,
+    CASE 
+        WHEN pd.UserPostRank = 1 THEN 'Most Recent Post'
+        ELSE NULL
+    END AS RankInfo,
+    COUNT(DISTINCT rpl.RelatedPostId) AS RelatedPostCount,
+    CASE 
+        WHEN pd.Score > 10 THEN 'Highly Scored'
+        ELSE 'Moderately Scored'
+    END AS ScoreCategory
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    UserMetrics pm ON pm.UserId = pd.OwnerUserId
+LEFT JOIN 
+    RecursivePostLink rpl ON rpl.PostId = pd.PostId
+GROUP BY 
+    pd.PostId, pm.TotalUpVotes, pm.TotalPosts, pm.TotalBadges, pd.UserPostRank, pd.Title, pd.ViewCount, pd.CreationDate, pd.OwnerDisplayName, pd.LastHistoryAction, pd.Score
+ORDER BY 
+    pd.ViewCount DESC
+LIMIT 100;

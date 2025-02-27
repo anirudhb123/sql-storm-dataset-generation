@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+RecentLineItems AS (
+    SELECT 
+        l.*,
+        COALESCE(l.l_discount * l.l_extendedprice, 0) AS discount_amount,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_shipdate DESC) AS lineitem_row
+    FROM 
+        lineitem l
+    WHERE 
+        l_shipdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(l.discount_amount) AS avg_discount,
+    COUNT(r.s_suppkey) FILTER (WHERE r.s_suppkey IS NOT NULL) AS active_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RecentLineItems r ON l.l_orderkey = r.l_orderkey AND r.lineitem_row = 1
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    HighValueCustomers c ON o.o_custkey = c.c_custkey
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    (SUM(l.l_quantity) > 100 OR EXISTS (SELECT 1 FROM HighValueCustomers WHERE c.c_custkey IS NOT NULL))
+    AND AVG(l.discount_amount) IS NOT NULL
+ORDER BY 
+    total_quantity DESC, avg_discount DESC
+LIMIT 10;

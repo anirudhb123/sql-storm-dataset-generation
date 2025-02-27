@@ -1,0 +1,62 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+EngagementRanked AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalPosts DESC, Questions DESC, UpVotes - DownVotes DESC) AS EngagementRank
+    FROM UserEngagement
+),
+RecentActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM Posts p
+    INNER JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY p.OwnerUserId
+),
+FinalEngagement AS (
+    SELECT 
+        u.DisplayName,
+        ue.TotalPosts,
+        ue.Questions,
+        ue.Answers,
+        ue.AcceptedAnswers,
+        ue.CommentCount,
+        ue.UpVotes,
+        ue.DownVotes,
+        ra.LastActivityDate
+    FROM EngagementRanked ue
+    LEFT JOIN RecentActivity ra ON ue.UserId = ra.OwnerUserId
+)
+
+SELECT 
+    fe.DisplayName,
+    fe.TotalPosts,
+    fe.Questions,
+    fe.Answers,
+    fe.AcceptedAnswers,
+    fe.CommentCount,
+    fe.UpVotes,
+    fe.DownVotes,
+    COALESCE(ra.LastActivityDate, 'No Activity') AS LastActivity
+FROM FinalEngagement fe
+WHERE fe.EngagementRank <= 50  -- Top 50 engaged users
+AND fe.Answers > fe.Questions  -- Must have more answers than questions
+ORDER BY fe.TotalPosts DESC, fe.UpVotes DESC;
+

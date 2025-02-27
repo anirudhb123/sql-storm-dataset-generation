@@ -1,0 +1,54 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_type, p_size, p_retailprice, p_comment
+    FROM part
+    WHERE p_size >= 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_type, p.p_size, p.p_retailprice * 0.9 AS p_retailprice, p.p_comment
+    FROM part p
+    JOIN part_hierarchy ph ON p.p_size < ph.p_size AND p.p_retailprice > ph.p_retailprice * 1.05
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(s.s_comment, 'No Comment') AS s_comment,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1995-01-01' OR o.o_orderdate IS NULL
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    sd.s_name,
+    cu.c_name,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    CASE 
+        WHEN SUM(li.l_quantity) IS NULL THEN 'Unknown Quantity'
+        WHEN SUM(li.l_quantity) < 100 THEN 'Low Volume'
+        ELSE 'High Volume'
+    END AS volume_category
+FROM part_hierarchy ph
+LEFT JOIN lineitem li ON li.l_partkey = ph.p_partkey
+JOIN supplier_details sd ON sd.s_suppkey = li.l_suppkey
+JOIN customer_orders cu ON cu.order_count > 0 AND cu.total_spent IS NOT NULL
+WHERE li.l_returnflag = 'N' 
+AND li.l_shipdate BETWEEN '1995-01-01' AND '1995-12-31'
+AND (ph.p_retailprice IS NOT NULL OR ph.p_retailprice < 500.00)
+GROUP BY ph.p_partkey, ph.p_name, sd.s_name, cu.c_name
+HAVING COUNT(li.l_orderkey) > 5 
+   OR (SUM(li.l_extendedprice) - SUM(li.l_discount) < 1000.00 
+   AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = cu.c_custkey AND c.c_acctbal IS NOT NULL))
+ORDER BY revenue DESC NULLS LAST;

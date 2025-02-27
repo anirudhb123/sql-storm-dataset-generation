@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth,
+        CAST(mt.title AS CHAR) AS path
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1,
+        mh.path || ' > ' || m.title
+    FROM aka_title m
+    JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+    WHERE mh.depth < 5  
+),
+AggregatedInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COUNT(DISTINCT ci.person_id) AS total_cast_members,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_count 
+    FROM MovieHierarchy mh
+    LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+    GROUP BY mh.movie_id, mh.title
+),
+RankedMovies AS (
+    SELECT
+        ai.*,
+        ROW_NUMBER() OVER (ORDER BY ai.total_cast_members DESC, ai.info_count DESC) AS rank,
+        RANK() OVER (PARTITION BY ai.total_cast_members ORDER BY ai.info_count DESC) AS total_cast_rank
+    FROM AggregatedInfo ai
+    WHERE ai.total_cast_members > 0  
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.total_cast_members,
+    rm.aka_names,
+    rm.info_count,
+    rm.rank,
+    rm.total_cast_rank,
+    COALESCE(NULLIF(rm.title, ''), 'Untitled Movie') AS safe_title,  
+    CASE 
+        WHEN rm.production_year IS NOT NULL THEN 'Year Available' 
+        ELSE 'Year Unknown' 
+    END AS year_status
+FROM RankedMovies rm
+WHERE rm.rank <= 10  
+ORDER BY rm.rank;

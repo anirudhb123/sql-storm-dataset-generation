@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+RecentVotes AS (
+    SELECT 
+        PostId,
+        V.UserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes V
+    WHERE V.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY PostId, V.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        COUNT(*) AS TotalHistoryChanges
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(v.UpVotes, 0) AS RecentUpVotes,
+    COALESCE(v.DownVotes, 0) AS RecentDownVotes,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalScore,
+    ts.TotalViews,
+    COALESCE(phs.CloseReopenCount, 0) AS CloseReopenCount,
+    COALESCE(phs.DeleteUndeleteCount, 0) AS DeleteUndeleteCount,
+    COALESCE(phs.TotalHistoryChanges, 0) AS TotalHistoryChanges
+FROM RankedPosts rp
+LEFT JOIN RecentVotes v ON rp.PostId = v.PostId 
+LEFT JOIN TagStatistics ts ON ts.PostCount > 0 AND rp.PostId IN (SELECT PostId FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%')
+LEFT JOIN PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE rp.ScoreRank <= 5
+ORDER BY rp.CreationDate DESC, rp.Score DESC;

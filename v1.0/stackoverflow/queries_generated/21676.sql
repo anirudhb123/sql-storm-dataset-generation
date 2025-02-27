@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC NULLS LAST) AS OwnerRank,
+        COUNT(c.Id) FILTER (WHERE c.Id IS NOT NULL) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpVotes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        rank() OVER (ORDER BY TotalUpVotes - TotalDownVotes DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    WHERE
+        CreationDate >= NOW() - INTERVAL '1 month' -- Only posts created in the last month 
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        PHT.Name AS HistoryType,
+        ph.UserId
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.TotalUpVotes,
+    fp.TotalDownVotes,
+    fp.OwnerRank,
+    fp.CommentCount,
+    fp.BadgeCount,
+    fp.TagsList,
+    fp.OverallRank,
+    pHd.UserDisplayName AS ModeratorUser,
+    pHd.HistoryDate,
+    STRING_AGG(DISTINCT pHd.Comment, '; ') AS HistoryComments
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryDetails pHd ON fp.PostId = pHd.PostId
+JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+WHERE 
+    (fp.OwnerRank <= 3 OR fp.CommentCount > 5) -- Select top-ranked owners or those with more than 5 comments
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.TotalUpVotes, fp.TotalDownVotes, fp.OwnerRank,
+    fp.CommentCount, fp.BadgeCount, fp.TagsList, fp.OverallRank, pHd.UserDisplayName, pHd.HistoryDate
+ORDER BY 
+    fp.OverallRank;

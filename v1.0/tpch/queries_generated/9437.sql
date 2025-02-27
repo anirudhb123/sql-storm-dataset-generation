@@ -1,0 +1,39 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        nc.n_name AS nation_name,
+        rc.c_name AS customer_name,
+        rc.total_spent
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        nation nc ON rc.c_nationkey = nc.n_nationkey
+    JOIN 
+        region r ON nc.n_regionkey = r.r_regionkey
+    WHERE 
+        rc.rank <= 10
+)
+SELECT 
+    region_name,
+    nation_name,
+    customer_name,
+    total_spent
+FROM 
+    TopCustomers
+ORDER BY 
+    region_name, nation_name, total_spent DESC;

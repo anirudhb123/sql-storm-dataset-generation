@@ -1,0 +1,63 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        RANK() OVER (ORDER BY c.c_customer_sk) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), sales_summary AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        r.total_profit,
+        ci.c_first_name,
+        ci.c_last_name,
+        COUNT(*) FILTER (WHERE r.total_profit > 0) AS profitable_transactions,
+        COUNT(*) AS total_transactions
+    FROM 
+        ranked_sales r
+    JOIN 
+        customer_info ci ON r.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        r.ws_bill_customer_sk, r.total_profit, ci.c_first_name, ci.c_last_name
+)
+SELECT 
+    ss.ws_bill_customer_sk,
+    ss.c_first_name,
+    ss.c_last_name,
+    ss.total_profit,
+    ss.profitable_transactions,
+    ss.total_transactions,
+    CASE 
+        WHEN ss.total_transactions = 0 THEN 'No Transactions' 
+        ELSE 'Some Transactions' 
+    END AS transaction_status,
+    COALESCE(ss.profitable_transactions * 100.0 / NULLIF(ss.total_transactions, 0), 0) AS profitable_percentage
+FROM 
+    sales_summary ss
+WHERE 
+    ss.total_profit > 0
+ORDER BY 
+    ss.profitable_percentage DESC
+LIMIT 10
+OFFSET (SELECT COUNT(DISTINCT ws_bill_customer_sk) / 2 FROM web_sales);

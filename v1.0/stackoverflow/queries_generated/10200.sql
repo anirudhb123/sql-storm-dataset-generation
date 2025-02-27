@@ -1,0 +1,42 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBountyAmount,
+        SUM(V.VoteTypeId = 2) AS UpVoteCount,
+        SUM(V.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.BadgeCount,
+    US.TotalBountyAmount,
+    US.UpVoteCount,
+    US.DownVoteCount
+FROM 
+    UserStats US
+ORDER BY 
+    US.Reputation DESC, 
+    US.PostCount DESC;

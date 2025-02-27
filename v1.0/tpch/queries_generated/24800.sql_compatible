@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), 
+PartWithMaxPrice AS (
+    SELECT p.p_partkey, MAX(p.p_retailprice) AS max_price
+    FROM part p
+    GROUP BY p.p_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(CASE 
+        WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount)
+        ELSE NULL 
+    END) AS avg_returned_price,
+    MAX(l.l_quantity) AS max_quantity_sold,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ': ', p.p_comment), ', ') AS part_details,
+    COUNT(DISTINCT CASE WHEN l.l_discount > 0.1 AND l.l_quantity < 10 THEN l.l_orderkey END) AS qualifying_orders 
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN PartWithMaxPrice p ON l.l_partkey = p.p_partkey
+LEFT OUTER JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+  AND (o.o_orderstatus IN ('F', 'O') OR (o.o_orderpriority = 'LOW' AND EXISTS (SELECT 1 FROM lineitem ll WHERE ll.l_orderkey = o.o_orderkey AND ll.l_returnflag = 'N')))
+GROUP BY r.r_name, n.n_name, s.s_name, p.p_name, p.p_comment
+HAVING SUM(COALESCE(l.l_tax, 0)) > 1000
+   AND COUNT(DISTINCT CASE WHEN l.l_tax > 0 THEN l.l_orderkey END) >= 5
+ORDER BY total_revenue DESC, customer_count DESC;

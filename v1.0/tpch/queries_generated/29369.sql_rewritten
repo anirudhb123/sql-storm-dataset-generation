@@ -1,0 +1,67 @@
+WITH SupplierPart AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        CONCAT(s.s_address, ', NationKey: ', s.s_nationkey) AS supplier_info,
+        ps.ps_availqty AS available_quantity,
+        ps.ps_supplycost AS supply_cost,
+        ps.ps_comment AS part_supplier_comment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrder AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        o.o_totalprice AS total_price,
+        o.o_orderdate AS order_date,
+        o.o_orderpriority AS order_priority,
+        CONCAT(c.c_address, ', NationKey: ', c.c_nationkey) AS customer_info
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+JoinResult AS (
+    SELECT 
+        sp.supplier_name,
+        sp.part_name,
+        sp.supplier_info,
+        co.customer_name,
+        co.order_key,
+        co.total_price,
+        co.order_date,
+        co.order_priority,
+        sp.available_quantity,
+        sp.supply_cost,
+        sp.part_supplier_comment
+    FROM 
+        SupplierPart sp
+    LEFT JOIN 
+        lineitem l ON sp.part_name LIKE '%' || l.l_orderkey || '%'
+    LEFT JOIN 
+        CustomerOrder co ON l.l_orderkey = co.order_key
+)
+SELECT 
+    supplier_name,
+    part_name,
+    supplier_info,
+    customer_name,
+    order_key,
+    total_price,
+    order_date,
+    order_priority,
+    available_quantity,
+    supply_cost,
+    CONCAT(part_supplier_comment, ' | Processed on: ', cast('1998-10-01' as date)) AS processed_comment
+FROM 
+    JoinResult
+WHERE 
+    available_quantity > 0
+ORDER BY 
+    total_price DESC, order_date DESC
+LIMIT 100;

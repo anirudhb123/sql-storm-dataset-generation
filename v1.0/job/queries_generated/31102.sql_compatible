@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title t ON m.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.kind_id,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY mh.movie_id) AS cast_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+        AND rm.production_year IS NOT NULL
+)
+SELECT 
+    f.movie_id,
+    f.movie_title,
+    COALESCE(f.production_year, 'Unknown') AS production_year,
+    f.cast_count
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_info mi ON f.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    f.cast_count > 0
+ORDER BY 
+    f.cast_count DESC, 
+    f.movie_title ASC;

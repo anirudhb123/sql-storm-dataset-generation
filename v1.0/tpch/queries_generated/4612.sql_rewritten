@@ -1,0 +1,57 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate <= DATE '1997-10-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    COALESCE(SUM(ss.total_cost), 0) AS total_supplier_cost,
+    MAX(od.net_revenue) AS max_order_revenue
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey FROM partsupp ps
+        WHERE ps.ps_availqty > 50
+    )
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey IN (
+        SELECT l.l_orderkey FROM lineitem l
+        WHERE l.l_returnflag = 'N' 
+        AND l.l_shipinstruct = 'DELIVER IN PERSON'
+    )
+GROUP BY 
+    r.r_name
+HAVING 
+    nation_count > 1
+ORDER BY 
+    region_name
+LIMIT 10;

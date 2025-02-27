@@ -1,0 +1,87 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS row_num,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+FilteredNames AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name,
+        n.gender,
+        a.person_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.id) AS name_rank
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        name n ON a.person_id = n.imdb_id
+    WHERE 
+        n.gender IS NOT NULL
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(m.id) AS total_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+AverageMovieData AS (
+    SELECT 
+        title_id,
+        AVG(ROW_NUMBER() OVER (PARTITION BY production_year)) AS avg_rank
+    FROM 
+        RecursiveTitleCTE
+    GROUP BY 
+        title_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(f.name, 'Unknown') AS actor_name,
+    CASE 
+        WHEN f.gender = 'M' THEN 'Male Actor' 
+        WHEN f.gender = 'F' THEN 'Female Actor' 
+        ELSE 'Non-binary Actor' 
+    END AS actor_description,
+    mc.company_name,
+    mc.company_type,
+    a.avg_rank,
+    CASE
+        WHEN mc.total_movies IS NULL THEN 'No Movies by Company'
+        ELSE mc.total_movies::text || ' Movies by Company'
+    END AS company_movies_info,
+    t.keywords
+FROM 
+    RecursiveTitleCTE t
+FULL OUTER JOIN 
+    FilteredNames f ON f.name_rank = 1 
+LEFT JOIN 
+    MovieCompanyInfo mc ON t.title_id = mc.movie_id
+LEFT JOIN 
+    AverageMovieData a ON t.title_id = a.title_id
+WHERE 
+    t.production_year > 2000
+ORDER BY 
+    t.production_year DESC, 
+    t.title ASC
+LIMIT 50;

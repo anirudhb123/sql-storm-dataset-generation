@@ -1,0 +1,37 @@
+
+WITH RankedSupplies AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name AS supp_name, 
+        s.s_address AS supp_address, 
+        n.n_name AS nation_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY COUNT(DISTINCT ps.ps_partkey) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name
+),
+FilteredSupplies AS (
+    SELECT 
+        r.*, 
+        'Total parts: ' || r.parts_count || ', Cost: ' || FORMAT(total_supply_cost, 'C') AS supply_details
+    FROM 
+        RankedSupplies r
+    WHERE 
+        r.rank <= 3
+)
+SELECT 
+    s.supp_name,
+    s.supp_address,
+    s.nation_name,
+    s.supply_details
+FROM 
+    FilteredSupplies s
+ORDER BY 
+    s.nation_name, s.parts_count DESC;

@@ -1,0 +1,53 @@
+
+WITH UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        t.TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    CROSS JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName)
+    GROUP BY 
+        u.Id, u.DisplayName, t.TagName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        SUM(TagUsageCount) AS TotalTags
+    FROM 
+        UserTags
+    GROUP BY 
+        UserId, DisplayName
+    ORDER BY 
+        TotalTags DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges ub
+    JOIN 
+        Users u ON ub.UserId = u.Id
+    GROUP BY 
+        ub.UserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalTags,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.BadgeNames, 'No Badges') AS BadgeNames
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    UserBadges ub ON tu.UserId = ub.UserId
+ORDER BY 
+    tu.TotalTags DESC;
+```  

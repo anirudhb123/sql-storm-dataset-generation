@@ -1,0 +1,61 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential 
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        c.c_birth_year >= 1980
+),
+sales_data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count 
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY 
+        ws_bill_customer_sk
+),
+final_data AS (
+    SELECT
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.c_birth_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.order_count, 0) AS order_count
+    FROM 
+        customer_data AS cd
+    LEFT JOIN 
+        sales_data AS sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+)
+SELECT 
+    c.c_birth_year,
+    COUNT(*) AS customer_count,
+    SUM(cd.total_sales) AS total_sales_sum,
+    AVG(cd.order_count) AS average_order_count,
+    COUNT(DISTINCT cd.hd_income_band_sk) AS unique_income_bands
+FROM 
+    final_data AS cd
+GROUP BY 
+    c.c_birth_year
+ORDER BY 
+    c.c_birth_year;

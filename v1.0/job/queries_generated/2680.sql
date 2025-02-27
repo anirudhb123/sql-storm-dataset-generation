@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COALESCE(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY a.id), 0) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id,
+        ct.kind
+),
+MoviesWithAverageRating AS (
+    SELECT 
+        a.id,
+        a.title,
+        a.production_year,
+        COALESCE(AVG(mvi.info::numeric), 0) AS average_rating
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_info mvi ON a.id = mvi.movie_id AND mvi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        a.id,
+        a.title,
+        a.production_year
+)
+
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_count,
+    ci.company_names,
+    ci.company_type,
+    ra.average_rating
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    CompanyInfo ci ON r.title = ci.movie_id
+LEFT JOIN 
+    MoviesWithAverageRating ra ON r.title = ra.title
+WHERE 
+    r.year_rank <= 10
+ORDER BY 
+    r.production_year DESC, r.cast_count DESC, ra.average_rating DESC
+LIMIT 50;

@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), TopActors AS (
+    SELECT 
+        ak.name,
+        COUNT(cc.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info cc ON ak.person_id = cc.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(cc.movie_id) > 5
+), MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keywords,
+        COALESCE(mn.name, 'Unknown') AS main_actor
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        aka_name mn ON cc.person_id = mn.person_id 
+        AND cc.nr_order = 1
+), ActorMovies AS (
+    SELECT 
+        a.name,
+        STRING_AGG(m.title, ', ') AS movies
+    FROM 
+        TopActors a
+    JOIN 
+        cast_info ci ON a.name = ci.person_id
+    JOIN 
+        title m ON ci.movie_id = m.id
+    GROUP BY 
+        a.name
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    am.movies,
+    md.keywords,
+    COALESCE(NULLIF(am.movies, ''), 'No Movies') AS safe_movies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieDetails md ON rm.title = md.title AND rm.production_year = md.production_year
+LEFT JOIN 
+    ActorMovies am ON md.main_actor = am.name
+WHERE 
+    rm.rank = 1
+AND 
+    (md.keywords IS NOT NULL OR md.main_actor LIKE '%Smith%')
+ORDER BY 
+    rm.production_year DESC, rm.title;

@@ -1,0 +1,89 @@
+
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        MAX(P.LastActivityDate) AS LastActiveDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UPC.TotalPosts, 0) AS TotalPosts,
+        COALESCE(UPC.QuestionCount, 0) AS QuestionCount,
+        COALESCE(UPC.AnswerCount, 0) AS AnswerCount,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(RA.LastActiveDate, NULL) AS LastActiveDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserPostCounts UPC ON U.Id = UPC.UserId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        RecentActivity RA ON U.Id = RA.UserId
+),
+RankedUserStats AS (
+    SELECT 
+        U.*,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC, QuestionCount DESC, AnswerCount DESC) AS Rank
+    FROM 
+        UserStats U
+)
+SELECT 
+    R.UserId,
+    R.DisplayName,
+    R.TotalPosts,
+    R.QuestionCount,
+    R.AnswerCount,
+    R.GoldBadges,
+    R.SilverBadges,
+    R.BronzeBadges,
+    TO_CHAR(COALESCE(R.LastActiveDate, DATE '2024-10-01'), 'YYYY-MM-DD HH24:MI:SS') AS FormattedLastActiveDate,
+    CASE
+        WHEN R.LastActiveDate IS NULL THEN 'Inactive'
+        WHEN R.LastActiveDate > DATE '2024-10-01' - INTERVAL '30 days' THEN 'Active'
+        ELSE 'Inactive for a while'
+    END AS UserStatus,
+    CASE 
+        WHEN R.QuestionCount = 0 THEN 'No Questions'
+        WHEN R.AnswerCount = 0 THEN 'No Answers'
+        ELSE 'Engaged User'
+    END AS EngagementLevel
+FROM 
+    RankedUserStats R
+WHERE 
+    R.Rank <= 10
+ORDER BY 
+    R.Rank

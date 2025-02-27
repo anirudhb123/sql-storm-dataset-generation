@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '6 months'
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, '>'))) AS Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (24, 10) 
+    GROUP BY 
+        Tag
+    ORDER BY 
+        Frequency DESC
+    LIMIT 10
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    us.DisplayName AS Owner,
+    us.Reputation,
+    ps.TotalBounties,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    pt.Tag AS PopularTag
+FROM 
+    RankedPosts p
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    PopularTags pt ON p.Tags LIKE CONCAT('%', pt.Tag, '%')
+WHERE 
+    p.Rank = 1
+ORDER BY 
+    p.Score DESC,
+    us.Reputation DESC
+FETCH FIRST 50 ROWS ONLY;

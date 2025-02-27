@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+), ThoughtfulSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > (SELECT AVG(ps_availqty) FROM partsupp)
+), HighRollbackCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'R' OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(CASE WHEN o.o_orderstatus IS NULL THEN 0 ELSE o.o_totalprice END) > 10000
+), AbsentPartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(l.l_quantity), 0) AS total_sold
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT l.l_orderkey) < 1
+)
+SELECT 
+    c.c_name,
+    s.s_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(p.total_sold, 0) AS total_sold_parts,
+    SUM(ds.total_supply_cost) OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS cumulative_supply_cost
+FROM HighRollbackCustomers c
+JOIN RankedOrders o ON c.order_count > 0 AND o.order_rank <= 5
+FULL OUTER JOIN ThoughtfulSuppliers s ON s.total_supply_cost > 5000
+LEFT JOIN AbsentPartDetails p ON p.p_partkey = (
+    SELECT p.p_partkey FROM part p
+    ORDER BY RANDOM()
+    LIMIT 1
+)
+WHERE (o.o_orderdate >= '2023-01-01' OR o.o_orderdate IS NULL)
+AND (s.s_name IS NOT NULL OR p.p_name IS NULL)
+ORDER BY o.o_orderdate, c.c_name;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+), CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), ReturnAnalysis AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_qty
+    FROM store_returns 
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_customer_sk
+), WebMarketingAnalysis AS (
+    SELECT 
+        w.web_site_sk,
+        w.web_name,
+        SUM(ws_net_paid) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discounts,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_site w
+    JOIN web_sales ws ON w.web_site_sk = ws.ws_web_site_sk
+    GROUP BY w.web_site_sk, w.web_name
+)
+SELECT 
+    s.ws_item_sk,
+    COALESCE(a.total_quantity, 0) AS total_quantity,
+    COALESCE(a.total_profit, 0) AS total_profit,
+    c.c_last_name,
+    r.total_returns,
+    r.total_return_amount,
+    m.total_sales,
+    m.total_discounts
+FROM SalesCTE a
+LEFT JOIN CustomerRank c ON a.ws_item_sk = c.c_customer_sk
+LEFT JOIN ReturnAnalysis r ON r.sr_customer_sk = c.c_customer_sk
+LEFT JOIN WebMarketingAnalysis m ON m.web_site_sk = (
+    SELECT ws_web_site_sk 
+    FROM web_sales 
+    WHERE ws_item_sk = a.ws_item_sk 
+    ORDER BY ws_sold_date_sk DESC 
+    FETCH FIRST 1 ROWS ONLY
+) 
+WHERE a.rn = 1
+ORDER BY total_profit DESC, total_quantity DESC;

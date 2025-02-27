@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id, 
+        ak.name AS actor_name, 
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS num_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cm.company_name,
+    cm.company_type,
+    cd.actor_name,
+    cd.num_actors
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CompanyMovies cm ON rt.title_rank <= 10 AND rt.production_year = 2020
+LEFT JOIN 
+    CastDetails cd ON rt.id = cd.movie_id
+WHERE 
+    (cd.num_actors IS NULL OR cd.num_actors > 5)
+    OR (cd.actor_name LIKE '%Smith%')
+ORDER BY 
+    rt.production_year DESC,
+    rt.title;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(YEAR, -1, GETDATE())
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountyAmount,
+        COUNT(v.Id) AS TotalVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    coalesce(cp.CloseCount, 0) AS NumberOfClosures,
+    cp.CloseReasons,
+    us.UserId,
+    us.DisplayName,
+    us.TotalBountyAmount,
+    us.TotalVotes,
+    us.BadgeCount
+FROM 
+    RankedPosts rp
+LEFT OUTER JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    UserStatistics us ON us.UserId = rp.OwnerUserId
+WHERE 
+    rp.ViewRank <= 5 
+    AND rp.PostTypeId = 1  
+    AND COALESCE(cp.CloseCount, 0) < 2  
+ORDER BY 
+    rp.ViewCount DESC, 
+    us.TotalVotes DESC;

@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ARRAY[mt.title] AS title_hierarchy,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.title_hierarchy || at.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mh.title, ', ') AS linked_movies,
+    AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order
+FROM 
+    keyword mk
+LEFT JOIN 
+    movie_keyword mwk ON mk.id = mwk.keyword_id
+LEFT JOIN 
+    aka_title at ON mwk.movie_id = at.id
+LEFT JOIN 
+    cast_info c ON at.id = c.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+WHERE 
+    mk.keyword IS NOT NULL AND
+    (c.nr_order IS NULL OR c.nr_order > 0) AND
+    at.production_year > 2000
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT c.person_id) > 10
+ORDER BY 
+    actor_count DESC, 
+    movie_count DESC
+LIMIT 50;
+
+This query performs the following operations:
+
+1. It defines a recursive common table expression (CTE) called `movie_hierarchy` to retrieve a hierarchy of movies and their linked titles.
+2. In the main query, it retrieves keywords, the count of actors and movies, linked movie titles, and the average order of appearance from several tables.
+3. It includes several JOINs, applying LEFT JOINs with appropriate filtering in the WHERE clause, and uses aggregation functions such as COUNT and AVG.
+4. The results are grouped by keyword, having conditions to filter out keywords with fewer than ten distinct actors.
+5. It sorts the output based on actor and movie counts in descending order and limits the results to 50.

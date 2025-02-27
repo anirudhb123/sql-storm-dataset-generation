@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT
+        m.id AS movie_id,
+        t.title AS title,
+        1 AS depth
+    FROM
+        aka_title t
+    JOIN
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN
+        company_name c ON mc.company_id = c.id
+    WHERE
+        c.country_code = 'USA'
+        
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        t.title AS title,
+        mc.depth + 1
+    FROM
+        MovieChain mc
+    JOIN
+        movie_link ml ON mc.movie_id = ml.movie_id
+    JOIN
+        aka_title t ON ml.linked_movie_id = t.movie_id
+)
+
+SELECT
+    ak.name,
+    t.title,
+    COALESCE(ki.keyword, 'No Keyword') AS keyword,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mc.depth DESC) AS rank,
+    COUNT(ci.id) OVER (PARTITION BY ak.id) AS role_count,
+    CASE
+        WHEN t.production_year IS NULL THEN 'Unknown Year'
+        WHEN t.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    CASE
+        WHEN ak.name IS NULL THEN 'No Name Provided'
+        ELSE ak.name
+    END AS safe_name,
+    MAX(t.production_year) OVER (PARTITION BY ak.id) AS latest_movie_year
+FROM
+    aka_name ak
+INNER JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN
+    movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN
+    MovieChain mc ON t.id = mc.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND (t.production_year IS NOT NULL OR t.production_year >= 2000)
+    AND (mc.depth IS NULL OR mc.depth < 5)
+ORDER BY
+    ak.name,
+    t.production_year DESC;

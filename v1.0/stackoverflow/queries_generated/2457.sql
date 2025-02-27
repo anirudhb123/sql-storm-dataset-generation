@@ -1,0 +1,76 @@
+WITH RankVotes AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(v.Id) DESC) AS VoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId
+), UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), PostSummary AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(rl.VoteCount, 0) AS TotalVotes, 
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RankVotes rl ON p.Id = rl.PostId
+    LEFT JOIN 
+        UserBadges ub ON p.OwnerUserId = ub.UserId
+)
+SELECT 
+    ps.PostId, 
+    ps.Title,
+    ps.CreationDate,
+    ps.TotalVotes,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges,
+    CASE 
+        WHEN ps.TotalVotes = 0 THEN 'No votes yet'
+        WHEN ps.TotalVotes BETWEEN 1 AND 5 THEN 'Low engagement'
+        ELSE 'High engagement'
+    END AS EngagementLevel
+FROM 
+    PostSummary ps
+WHERE 
+    ps.TotalVotes > 0
+    AND ps.GoldBadges > 0
+ORDER BY 
+    ps.TotalVotes DESC
+UNION ALL
+SELECT 
+    ps.PostId, 
+    ps.Title,
+    ps.CreationDate,
+    ps.TotalVotes,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges,
+    'Community-focused post' AS EngagementLevel
+FROM 
+    PostSummary ps
+WHERE 
+    ps.TotalVotes = 0
+ORDER BY 
+    CreationDate DESC
+LIMIT 50;

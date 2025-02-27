@@ -1,0 +1,65 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT t.Id, t.TagName, t.Count,
+           1 AS Level
+    FROM Tags t
+    WHERE t.Count > 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count,
+           r.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy r ON r.Level < 5
+    WHERE t.Count > r.Count   
+),
+UserEngagement AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(c.Score) AS TotalCommentScore,
+           SUM(v.BountyAmount) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+ActivePostStats AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.ViewCount,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+           DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.ViewCount
+),
+CombinedStats AS (
+    SELECT ue.UserId,
+           ue.DisplayName,
+           ue.PostCount,
+           ue.TotalCommentScore,
+           ue.TotalBounty,
+           aps.Title,
+           aps.ViewCount,
+           aps.UpVoteCount,
+           aps.DownVoteCount,
+           tg.TagName
+    FROM UserEngagement ue
+    LEFT JOIN ActivePostStats aps ON ue.PostCount > 0
+    LEFT JOIN Tags tg ON aps.PostId = tg.ExcerptPostId
+)
+
+SELECT u.*, 
+       COALESCE(tg.TagName, 'No Tag') AS TagName,
+       tg.Level AS TagLevel,
+       CASE 
+           WHEN u.TotalCommentScore IS NULL THEN 'No Comments'
+           ELSE CONCAT('Comment Score: ', u.TotalCommentScore) 
+       END AS CommentStatus
+FROM CombinedStats u
+LEFT JOIN RecursiveTagHierarchy tg ON u.TagName = tg.TagName
+WHERE u.PostCount > 10
+ORDER BY u.TotalBounty DESC, u.UserId;

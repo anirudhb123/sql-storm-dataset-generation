@@ -1,0 +1,62 @@
+
+WITH sales_summary AS (
+    SELECT 
+        COALESCE(SUM(ws_ext_sales_price), 0.00) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_ext_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_bill_cdemo_sk) AS unique_customers
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_year = 2023 
+                            AND d_dow IN (1, 2, 3, 4, 5))
+    UNION ALL
+    SELECT 
+        COALESCE(SUM(cs_ext_sales_price), 0.00) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        AVG(cs_ext_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT cs_bill_cdemo_sk) AS unique_customers
+    FROM 
+        catalog_sales 
+    WHERE 
+        cs_sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_year = 2023 
+                            AND d_dow IN (1, 2, 3, 4, 5))
+),
+top_customers AS (
+    SELECT 
+        cd_gender,
+        SUM(COALESCE(ws_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0)) AS total_spent
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws_bill_customer_sk = cs_bill_customer_sk
+    FULL OUTER JOIN customer_demographics cd ON ws_bill_cdemo_sk = cd.cd_demo_sk OR cs_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        (ws_sold_date_sk IS NOT NULL OR cs_sold_date_sk IS NOT NULL)
+        AND (cd_gender IS NOT NULL OR cd_gender IS NULL)
+    GROUP BY 
+        cd_gender
+    HAVING 
+        SUM(COALESCE(ws_ext_sales_price, 0) + COALESCE(cs_ext_sales_price, 0)) > 10000
+)
+SELECT 
+    t1.total_sales, 
+    t1.order_count, 
+    t1.avg_sales_price, 
+    t1.unique_customers,
+    COALESCE(t2.total_spent, 0) AS total_spent_by_gender
+FROM 
+    sales_summary t1
+LEFT JOIN 
+    (SELECT gender, SUM(total_spent) AS total_spent 
+     FROM top_customers 
+     GROUP BY cd_gender) t2 
+ON 
+    t1.total_sales BETWEEN 5000 AND 10000
+ORDER BY 
+    t1.total_sales DESC, 
+    t2.total_spent DESC
+LIMIT 10;

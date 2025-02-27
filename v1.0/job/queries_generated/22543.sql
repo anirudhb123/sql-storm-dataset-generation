@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorStatistics AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_title) AS movie_count,
+        AVG(production_year) AS avg_production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        title_rank <= 5
+    GROUP BY 
+        actor_name
+),
+
+DetailedInfo AS (
+    SELECT 
+        t.title AS movie_title,
+        c.name AS company_name,
+        co.kind AS company_type,
+        k.keyword AS keywords,
+        COALESCE(mi.info, 'No additional info') AS movie_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type co ON mc.company_type_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.movie_id = mi.movie_id
+    WHERE 
+        co.kind IS NOT NULL OR c.name IS NOT NULL -- company details should not be null
+)
+
+SELECT 
+    ds.actor_name,
+    ds.movie_count,
+    ds.avg_production_year,
+    di.movie_title,
+    di.company_name,
+    di.company_type,
+    STRING_AGG(di.keywords, ', ') AS all_keywords,
+    MAX(di.movie_info) AS additional_information
+FROM 
+    ActorStatistics ds
+LEFT JOIN 
+    DetailedInfo di ON ds.actor_name IN (SELECT DISTINCT name FROM aka_name WHERE person_id IN 
+                                          (SELECT person_id FROM cast_info WHERE movie_id IN 
+                                           (SELECT movie_id FROM aka_title WHERE title = di.movie_title)))
+GROUP BY 
+    ds.actor_name, ds.movie_count, ds.avg_production_year, di.movie_title, di.company_name, di.company_type
+HAVING 
+    COUNT(di.movie_title) > 0 AND ds.movie_count > 2 -- Only those actors with more than 2 movies
+ORDER BY 
+    ds.avg_production_year DESC, ds.movie_count DESC;

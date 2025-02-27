@@ -1,0 +1,50 @@
+
+WITH RECURSIVE category_hierarchy AS (
+    SELECT c_category_id, c_category, NULL AS parent_category_id
+    FROM category
+    WHERE c_category_id = 1  -- Start from the root category
+    UNION ALL
+    SELECT c.c_category_id, c.c_category, ch.c_category_id
+    FROM category c
+    JOIN category_hierarchy ch ON c.parent_category_id = ch.c_category_id
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_name,
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_paid) AS total_sales_value,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_name, i.i_item_id, i.i_item_desc
+),
+top_sales AS (
+    SELECT w.w_warehouse_name, i.i_item_desc, total_sales_quantity, total_sales_value
+    FROM sales_summary
+    WHERE sales_rank <= 5
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        ca.ca_city, 
+        cd.cd_gender, 
+        COUNT(CASE WHEN ws.ws_item_sk IS NOT NULL THEN 1 END) AS total_orders
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, ca.ca_city, cd.cd_gender
+)
+SELECT 
+    ci.c_customer_id,
+    ci.ca_city,
+    ci.cd_gender,
+    ts.*,
+    COALESCE(ts.total_sales_value / NULLIF(ci.total_orders, 0), 0) AS avg_spend_per_order
+FROM top_sales ts
+JOIN customer_info ci ON ts.w_warehouse_name = (SELECT w.w_warehouse_name FROM warehouse w WHERE w.w_warehouse_sk = (SELECT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk = ts.i_item_sk LIMIT 1))
+WHERE ci.total_orders > 0
+ORDER BY ci.ca_city, ts.total_sales_value DESC;

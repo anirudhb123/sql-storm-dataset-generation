@@ -1,0 +1,66 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS TotalPosts, 
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS TagPostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ','::text)::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TagPostCount DESC
+    LIMIT 10
+),
+PostHistoryStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        P.Score, 
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        COUNT(DISTINCT PH.Id) AS TotalHistoryEntries
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.OwnerUserId, P.Score
+)
+
+SELECT 
+    U.DisplayName, 
+    U.TotalPosts, 
+    U.TotalComments, 
+    U.TotalUpvotes, 
+    U.TotalDownvotes, 
+    PH.CloseReopenCount,
+    T.TagName
+FROM 
+    UserStats U
+JOIN 
+    PostHistoryStats PH ON U.UserId = PH.OwnerUserId
+JOIN 
+    TopTags T ON U.TotalPosts > 20 /* Example condition to limit */
+ORDER BY 
+    U.Reputation DESC, U.TotalPosts DESC;

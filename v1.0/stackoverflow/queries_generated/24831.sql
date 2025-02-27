@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 9 -- BountyClose
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND p.Score >= 0
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        PostRank,
+        CommentCount,
+        TotalBounty
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1 AND TotalBounty > 0
+),
+PostsWithTags AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.CommentCount,
+        STUFF((SELECT ',' + t.TagName 
+               FROM Tags t 
+               JOIN Posts p2 ON CHARINDEX(t.TagName, p2.Tags) > 0
+               WHERE p2.Id = fp.PostId 
+               FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'),1,1,'') AS Tags
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    pwt.PostId,
+    pwt.Title,
+    pwt.CreationDate,
+    pwt.ViewCount,
+    pwt.CommentCount,
+    ISNULL(pht.Name, 'No History') AS PostHistoryType,
+    pwt.Tags,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM PostHistory ph WHERE ph.PostId = pwt.PostId AND ph.PostHistoryTypeId = 10) 
+        THEN 'Closed' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM 
+    PostsWithTags pwt
+LEFT JOIN 
+    PostHistoryTypes pht ON pht.Id = (SELECT TOP 1 ph.PostHistoryTypeId 
+                                        FROM PostHistory ph 
+                                        WHERE ph.PostId = pwt.PostId 
+                                        ORDER BY ph.CreationDate DESC)
+ORDER BY 
+    pwt.ViewCount DESC, pwt.CreationDate ASC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

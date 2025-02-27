@@ -1,0 +1,88 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.custkey,
+        o.totalprice,
+        o.orderdate,
+        o.orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.orderstatus ORDER BY o.totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.orderdate >= DATE '2023-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.suppkey,
+        p.partkey,
+        ps.availqty,
+        ps.supplycost,
+        p.retailprice,
+        (ps.availqty * ps.supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.suppkey = ps.suppkey
+    JOIN 
+        part p ON ps.partkey = p.partkey
+    WHERE 
+        s.acctbal > 500
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.custkey,
+        c.name,
+        SUM(o.totalprice) AS total_spent,
+        COUNT(o.orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.custkey = o.custkey
+    GROUP BY
+        c.custkey, c.name
+),
+NationStats AS (
+    SELECT 
+        n.nationkey,
+        COUNT(DISTINCT s.suppkey) AS supplier_count,
+        AVG(s.acctbal) AS avg_acct_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.nationkey = s.nationkey
+    GROUP BY 
+        n.nationkey
+)
+SELECT 
+    o.orderkey,
+    o.totalprice AS order_value,
+    c.name AS customer_name,
+    ns.supplier_count,
+    ns.avg_acct_balance
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    CustomerOrderSummary c ON o.custkey = c.custkey
+LEFT JOIN 
+    SupplierPartDetails sp ON sp.supplycost < o.totalprice
+LEFT JOIN 
+    NationStats ns ON c.custkey IN (SELECT custkey FROM customer WHERE c_nationkey = ns.nationkey)
+WHERE 
+    o.order_rank <= 10
+ORDER BY 
+    o.totalprice DESC
+UNION ALL
+SELECT 
+    NULL AS orderkey,
+    SUM(ps.total_supply_cost) AS total_value,
+    'Aggregate' AS customer_name,
+    NULL AS supplier_count,
+    NULL AS avg_acct_balance
+FROM 
+    SupplierPartDetails ps
+GROUP BY 
+    ps.partkey
+HAVING 
+    SUM(ps.availqty) >= 100
+ORDER BY 
+    order_value DESC NULLS LAST;

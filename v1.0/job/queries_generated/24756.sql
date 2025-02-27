@@ -1,0 +1,87 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorMovieDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        a.person_id,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_order,
+        ci.kind AS actor_role,
+        COALESCE(NULLIF(c.note, ''), 'No notes') AS notes
+    FROM 
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    LEFT JOIN role_type ci ON c.role_id = ci.id 
+),
+
+DistinctKeywords AS (
+    SELECT DISTINCT 
+        m.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    WHERE 
+        LENGTH(k.keyword) BETWEEN 4 AND 10
+),
+
+ExcludedMovies AS (
+    SELECT 
+        movie_id
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id IN (SELECT id FROM info_type WHERE info = 'excluded')
+),
+
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        amd.actor_id,
+        amd.name AS actor_name,
+        amd.actor_role,
+        amd.role_order,
+        dk.keyword AS movie_keyword,
+        CASE 
+            WHEN rm.total_titles > 3 THEN 'Popular Year'
+            ELSE 'Cult Year'
+        END AS movie_category
+    FROM 
+        RankedMovies rm
+    LEFT JOIN ActorMovieDetails amd ON rm.movie_id = amd.movie_id
+    LEFT JOIN DistinctKeywords dk ON rm.movie_id = dk.movie_id
+    WHERE 
+        rm.movie_id NOT IN (SELECT movie_id FROM ExcludedMovies)
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    actor_name,
+    actor_role,
+    role_order,
+    movie_keyword,
+    movie_category
+FROM 
+    FinalResults
+WHERE 
+    movie_keyword IS NOT NULL
+ORDER BY 
+    production_year DESC,
+    title_rank ASC,
+    role_order ASC
+LIMIT 100 OFFSET 0;

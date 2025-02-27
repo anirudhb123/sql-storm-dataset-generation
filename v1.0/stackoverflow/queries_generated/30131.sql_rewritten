@@ -1,0 +1,113 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        th.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy th ON t.ExcerptPostId = th.Id
+),
+UserWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' 
+          AND p.PostTypeId IN (1, 2) 
+          AND p.Score > 0
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.AnswerCount,
+        ps.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY ps.Score DESC) AS Ranking
+    FROM 
+        Users u
+    JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+),
+CloseReasonStats AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    uws.UserId,
+    uws.DisplayName,
+    uws.BadgeCount AS TotalBadges,
+    uws.GoldBadges,
+    uws.SilverBadges,
+    uws.BronzeBadges,
+    ups.PostId,
+    ups.Title,
+    ups.ViewCount,
+    ups.Score,
+    ups.AnswerCount,
+    ups.CommentCount,
+    crs.CloseReason
+FROM 
+    UserWithBadges uws
+JOIN 
+    UserPostStats ups ON uws.UserId = ups.UserId
+LEFT JOIN 
+    CloseReasonStats crs ON crs.PostId = ups.PostId
+WHERE 
+    uws.Reputation > 1000 
+    AND ups.Ranking <= 5
+ORDER BY 
+    uws.TotalBadges DESC, 
+    ups.Score DESC;

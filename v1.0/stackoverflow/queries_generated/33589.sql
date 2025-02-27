@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) FILTER (WHERE Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE Class = 3) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(v.UpVotes, 0) AS UpVoteCount,
+    COALESCE(v.DownVotes, 0) AS DownVoteCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    bh.GoldBadges,
+    bh.SilverBadges,
+    bh.BronzeBadges,
+    h.Level AS PostLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteSummary v ON p.Id = v.PostId
+LEFT JOIN 
+    UserBadges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    RecursivePostHierarchy h ON p.Id = h.Id
+WHERE 
+    u.Reputation > 1000 
+    AND p.CreationDate > '2022-01-01'
+    AND (p.Tags LIKE '%SQL%' OR p.Tags LIKE '%Database%')
+ORDER BY 
+    v.UpVotes DESC, 
+    p.CreationDate DESC
+OFFSET 0 ROWS 
+FETCH NEXT 100 ROWS ONLY;

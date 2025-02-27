@@ -1,0 +1,61 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Tags,
+        U.DisplayName AS Author,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1  
+        AND P.Tags IS NOT NULL
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, P.Tags, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        TaggedPosts
+),
+TagPopularity AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS PopularityScore
+    FROM 
+        PopularTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        PopularityScore DESC
+    LIMIT 10
+)
+SELECT 
+    T.Tag,
+    TP.PostId,
+    TP.Title,
+    TP.CommentCount,
+    TP.BadgeCount,
+    TP.VoteCount,
+    COALESCE(TP.CreationDate, 'N/A') AS CreationDate,
+    COALESCE(TP.Author, 'Anonymous') AS Author
+FROM 
+    TagPopularity T
+JOIN 
+    TaggedPosts TP ON TP.Tags LIKE '%' || T.Tag || '%'
+ORDER BY 
+    T.PopularityScore DESC, TP.VoteCount DESC;

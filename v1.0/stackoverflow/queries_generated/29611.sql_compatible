@@ -1,0 +1,81 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeList
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        COUNT(*) AS CloseActionCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        ups.PostCount,
+        ups.TotalViews,
+        ups.AvgScore,
+        p.TagCount,
+        p.TagList,
+        COALESCE(cp.CloseActionCount, 0) AS CloseActionCount,
+        ups.BadgeCount,
+        ups.BadgeList
+    FROM 
+        UserPostStats ups
+    JOIN 
+        PostTagCounts p ON p.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+    LEFT JOIN 
+        ClosedPosts cp ON cp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+    WHERE 
+        ups.PostCount > 0  
+)
+SELECT 
+    DisplayName,
+    PostCount,
+    TotalViews,
+    AvgScore,
+    TagCount,
+    TagList,
+    CloseActionCount,
+    BadgeCount,
+    BadgeList
+FROM 
+    FinalResults
+ORDER BY 
+    PostCount DESC, TotalViews DESC
+LIMIT 10;

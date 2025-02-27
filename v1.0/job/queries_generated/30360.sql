@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    c.name AS cast_member,
+    MAX(CASE WHEN p.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography') THEN p.info END) AS biography,
+    COUNT(DISTINCT mw.id) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS cast_order,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COALESCE(NULLIF(sum(mc.note::integer), 0), 'N/A') AS company_note
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mw ON m.movie_id = mw.movie_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    keyword kw ON mw.keyword_id = kw.id
+LEFT JOIN 
+    aka_name an ON c.person_id = an.person_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year, c.name
+HAVING 
+    SUM(CASE WHEN p.info_type_id IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    m.production_year DESC, cast_order;

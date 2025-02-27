@@ -1,0 +1,28 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        AVG(DATEDIFF(SECOND, p.CreationDate, GETDATE())) AS AvgPostAgeInSeconds
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    *,
+    (PostCount + AnswerCount * 0.5) AS EngagementScore
+FROM 
+    UserMetrics
+ORDER BY 
+    EngagementScore DESC
+LIMIT 100;

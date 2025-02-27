@@ -1,0 +1,95 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        ARRAY[t.title] AS path
+    FROM
+        aka_title t
+    WHERE
+        t.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1,
+        path || t.title
+    FROM
+        movie_link m
+    JOIN
+        aka_title t ON m.linked_movie_id = t.id
+    JOIN
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3
+),
+ActorRoles AS (
+    SELECT
+        ci.person_id,
+        na.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name na ON ci.person_id = na.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.person_id, na.name, rt.role
+),
+TopActors AS (
+    SELECT
+        actor_name,
+        role_name,
+        movie_count,
+        ROW_NUMBER() OVER (PARTITION BY role_name ORDER BY movie_count DESC) AS rank
+    FROM
+        ActorRoles
+),
+MovieStatistics AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        AVG(CASE WHEN p.info_type_id = 1 THEN LENGTH(p.info) END) AS avg_length_info,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_info p ON t.id = p.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY
+        t.id, t.title
+)
+SELECT
+    mh.movie_id,
+    mh.title AS linked_movie_title,
+    mh.production_year,
+    ta.actor_name,
+    ta.role_name,
+    ta.movie_count,
+    ms.avg_length_info,
+    ms.keyword_count,
+    mh.path
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    TopActors ta ON mh.movie_id IN (
+        SELECT ci.movie_id
+        FROM cast_info ci
+        WHERE ci.person_id IN (
+            SELECT person_id
+            FROM ActorRoles
+            WHERE movie_count > 1
+        )
+    )
+LEFT JOIN
+    MovieStatistics ms ON mh.movie_id = ms.movie_id
+WHERE
+    ta.rank = 1
+ORDER BY
+    mh.production_year DESC, mh.title;

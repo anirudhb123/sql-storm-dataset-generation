@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        cn.country_code = 'USA' 
+        AND t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.cast_count,
+    GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    GROUP_CONCAT(DISTINCT info.info) AS info
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    aka_title ak ON ak.movie_id = tm.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tm.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = tm.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+GROUP BY 
+    tm.movie_title, tm.production_year, tm.cast_count
+ORDER BY 
+    tm.production_year DESC, tm.cast_count DESC;

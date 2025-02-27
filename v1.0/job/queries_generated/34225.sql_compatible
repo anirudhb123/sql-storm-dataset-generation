@@ -1,0 +1,63 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mv.linked_movie_id,
+        mt.title,
+        mv.production_year,
+        level + 1
+    FROM 
+        movie_link mv
+    JOIN 
+        aka_title mt ON mv.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mv.movie_id = mh.movie_id
+    WHERE 
+        mv.link_type_id = 1
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    AVG(CASE 
+            WHEN mi.info IS NOT NULL AND mi.note IS NULL THEN LENGTH(mi.info)
+            ELSE NULL 
+        END) AS avg_info_length,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS company_rank,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_info mi ON ci.movie_id = mi.movie_id
+JOIN 
+    movie_keyword mk ON ci.movie_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mi.info_type_id IS NULL OR mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE 'director%'))
+GROUP BY 
+    ak.name, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1 
+ORDER BY 
+    mh.production_year DESC, company_rank;

@@ -1,0 +1,59 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+movie_info_summary AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.companies,
+        COUNT(mi.id) AS info_count,
+        JSON_AGG(DISTINCT mi.info) AS additional_info
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        movie_info mi ON md.movie_id = mi.movie_id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year, md.cast_names, md.keywords, md.companies
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    cast_names,
+    keywords,
+    companies,
+    info_count,
+    additional_info
+FROM 
+    movie_info_summary
+ORDER BY 
+    production_year DESC, title;

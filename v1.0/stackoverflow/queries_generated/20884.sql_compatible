@@ -1,0 +1,90 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUBSTRING(p.Tags, 3, LENGTH(p.Tags) - 4), 'No tags') AS ParsedTags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01') 
+        AND p.Score IS NOT NULL
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+CommentStatistics AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        COALESCE(pvc.Upvotes, 0) AS Upvotes,
+        COALESCE(pvc.Downvotes, 0) AS Downvotes,
+        COALESCE(cs.CommentCount, 0) AS CommentCount,
+        COALESCE(cs.LastCommentDate, 'No comments') AS LastCommentDate,
+        rp.Rank,
+        CASE 
+            WHEN rp.Rank = 1 THEN 'Top Post'
+            WHEN rp.Rank <= 5 THEN 'Hot Post'
+            ELSE 'Regular Post'
+        END AS Popularity
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteCounts pvc ON rp.PostId = pvc.PostId
+    LEFT JOIN 
+        CommentStatistics cs ON rp.PostId = cs.PostId
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Upvotes,
+    fp.Downvotes,
+    fp.CommentCount,
+    fp.LastCommentDate,
+    fp.Popularity,
+    COUNT(DISTINCT bh.UserId) AS UniqueEditors,
+    STRING_AGG(DISTINCT CONCAT(bh.UserDisplayName, ' (Edits: ', bh.Id, ')'), ', ') AS EditorDetails
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistory bh ON fp.PostId = bh.PostId AND bh.PostHistoryTypeId IN (4, 5, 6) 
+GROUP BY 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Upvotes,
+    fp.Downvotes,
+    fp.CommentCount,
+    fp.LastCommentDate,
+    fp.Popularity
+ORDER BY 
+    fp.ViewCount DESC, 
+    fp.Upvotes DESC;

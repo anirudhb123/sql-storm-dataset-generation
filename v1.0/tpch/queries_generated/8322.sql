@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+TotalSales AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierSales AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        SUM(ts.total_sales) AS supplier_sales
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        TotalSales ts ON rs.s_suppkey IN (
+            SELECT DISTINCT l.l_suppkey
+            FROM lineitem l 
+            JOIN orders o ON l.l_orderkey = o.o_orderkey
+            WHERE 
+                o.o_orderkey IN (
+                    SELECT DISTINCT o.o_orderkey
+                    FROM orders o
+                    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+                    WHERE 
+                        l.l_shipdate >= DATE '2022-01-01' 
+                        AND l.l_shipdate < DATE '2023-01-01'
+                )
+        )
+    GROUP BY 
+        rs.s_suppkey, rs.s_name
+)
+SELECT 
+    s.s_suppkey, 
+    s.s_name, 
+    s.s_acctbal, 
+    ss.supplier_sales, 
+    ROW_NUMBER() OVER (ORDER BY ss.supplier_sales DESC) AS rank
+FROM 
+    supplier s
+JOIN 
+    SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+WHERE 
+    ss.supplier_sales > 10000
+ORDER BY 
+    ss.supplier_sales DESC;

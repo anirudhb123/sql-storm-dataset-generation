@@ -1,0 +1,42 @@
+WITH AddressInfo AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+    WHERE 
+        ca_country = 'USA'
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+)
+SELECT 
+    ai.full_address,
+    ai.ca_city,
+    ai.ca_state,
+    di.cd_gender,
+    di.cd_marital_status,
+    di.cd_education_status,
+    di.cd_purchase_estimate,
+    SUBSTRING(ai.ca_zip, 1, 5) AS zip_prefix,
+    COUNT(DISTINCT di.cd_credit_rating) AS unique_credit_ratings
+FROM 
+    AddressInfo ai
+JOIN 
+    Demographics di ON ai.ca_city = di.cd_gender 
+GROUP BY 
+    ai.full_address, ai.ca_city, ai.ca_state, di.cd_gender, di.cd_marital_status, di.cd_education_status, di.cd_purchase_estimate
+HAVING 
+    COUNT(DISTINCT di.cd_credit_rating) > 1
+ORDER BY 
+    ai.ca_state, ai.ca_city;

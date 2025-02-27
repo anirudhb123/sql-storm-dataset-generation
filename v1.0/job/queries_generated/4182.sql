@@ -1,0 +1,66 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a 
+    WHERE 
+        a.production_year IS NOT NULL
+),
+actor_movies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        c.person_role_id IS NOT NULL
+    GROUP BY 
+        c.person_id, t.title, t.production_year
+),
+latest_movies AS (
+    SELECT 
+        person_id,
+        title,
+        production_year
+    FROM 
+        actor_movies
+    WHERE 
+        movie_count > 2
+),
+keyword_count AS (
+    SELECT 
+        m.movie_id,
+        COUNT(k.id) AS keyword_total
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    n.name AS actor_name,
+    lt.title AS latest_title,
+    lt.production_year,
+    COALESCE(kc.keyword_total, 0) AS total_keywords,
+    CASE 
+        WHEN lt.production_year IS NULL THEN 'No Movies Found'
+        ELSE 'Found Movies'
+    END AS movie_status
+FROM 
+    aka_name n
+LEFT JOIN 
+    latest_movies lt ON n.person_id = lt.person_id
+LEFT JOIN 
+    keyword_count kc ON lt.title = (SELECT title FROM ranked_titles WHERE year_rank = 1 AND production_year = lt.production_year LIMIT 1)
+WHERE 
+    n.md5sum IS NOT NULL
+ORDER BY 
+    lt.production_year DESC NULLS LAST,
+    n.name;

@@ -1,0 +1,65 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        LastAccessDate,
+        Views,
+        UpVotes,
+        DownVotes
+    FROM Users
+    WHERE LastAccessDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+HighlyActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS Upvotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month' 
+      AND P.PostTypeId = 1
+    GROUP BY P.Id, P.Title, P.OwnerUserId, P.Score, P.ViewCount, P.CreationDate
+    HAVING COUNT(C.Id) > 0 OR COUNT(V.Id) > 0
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    U.UpVotes,
+    U.DownVotes,
+    UBC.BadgeCount,
+    UBC.GoldBadges,
+    UBC.SilverBadges,
+    UBC.BronzeBadges,
+    HP.PostId,
+    HP.Title AS PostTitle,
+    HP.Score AS PostScore,
+    HP.ViewCount AS PostViewCount,
+    HP.CommentCount AS PostCommentCount,
+    HP.Upvotes AS PostUpvotes
+FROM ActiveUsers U
+JOIN UserBadgeCounts UBC ON U.Id = UBC.UserId
+LEFT JOIN HighlyActivePosts HP ON U.Id = HP.OwnerUserId
+ORDER BY U.Reputation DESC, HP.Score DESC
+LIMIT 50;

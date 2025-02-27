@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(b.Class) AS BadgeCount,
+        COUNT(DISTINCT b.Id) AS DistinctBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.TotalScore,
+        RANK() OVER (ORDER BY us.TotalScore DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.PostCount > 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalScore,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore,
+    COALESCE(rp.RankByScore, 0) AS PostScoreRank,
+    CASE 
+        WHEN rp.ViewCount IS NULL THEN 'No Views'
+        ELSE CAST(rp.ViewCount AS VARCHAR)
+    END AS ViewCountStatus
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId AND rp.RankByScore = 1
+ORDER BY 
+    tu.UserRank, rp.Score DESC NULLS LAST;

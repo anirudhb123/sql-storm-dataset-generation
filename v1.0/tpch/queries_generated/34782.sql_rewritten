@@ -1,0 +1,93 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        CAST(o.o_orderkey AS VARCHAR) AS order_path
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        CONCAT(oh.order_path, ' -> ', CAST(o.o_orderkey AS VARCHAR))
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE 
+        o.o_orderdate > oh.o_orderdate
+        AND o.o_orderdate < oh.o_orderdate + INTERVAL '30 days'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ch.o_orderkey,
+    c.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    od.net_sales,
+    od.avg_quantity,
+    ts.total_supplycost,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No orders'
+        WHEN cs.total_spent >= 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    OrderHierarchy ch
+JOIN 
+    customer c ON ch.o_custkey = c.c_custkey
+LEFT JOIN 
+    CustomerStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    OrderDetails od ON ch.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON od.l_orderkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey)
+WHERE 
+    c.c_acctbal IS NOT NULL 
+ORDER BY 
+    ch.o_orderkey, cs.total_orders DESC;

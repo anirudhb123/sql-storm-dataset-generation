@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id, 
+        a.title, 
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS ranking
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(mc.note IS NOT NULL)::int, 0) AS company_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        d.*, 
+        RANK() OVER (PARTITION BY d.production_year ORDER BY d.company_count DESC) AS company_rank
+    FROM 
+        MovieDetails d
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.company_count,
+    t.keyword_count,
+    COALESCE(pi.info, 'No additional info') AS info
+FROM 
+    TopMovies t
+LEFT JOIN 
+    movie_info pi ON t.movie_id = pi.movie_id
+WHERE 
+    t.company_rank <= 5
+ORDER BY 
+    t.production_year DESC, t.company_count DESC;
+
+--- Union with an aggregated summary of the roles in the top movies
+UNION ALL
+
+SELECT 
+    'Total Roles' AS title,
+    NULL AS production_year,
+    COUNT(DISTINCT cc.role_id) AS total_roles,
+    NULL AS keyword_count,
+    NULL AS info
+FROM 
+    cast_info cc
+WHERE 
+    cc.movie_id IN (SELECT movie_id FROM TopMovies WHERE company_rank <= 5);

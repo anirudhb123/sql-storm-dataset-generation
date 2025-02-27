@@ -1,0 +1,54 @@
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2452082 AND 2452089 
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerIncome AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN h.hd_income_band_sk IS NOT NULL THEN h.hd_income_band_sk
+            ELSE -1
+        END AS income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        r.c_customer_id,
+        ci.income_band_sk,
+        AVG(r.total_sales) AS avg_sales
+    FROM 
+        RankedSales r
+    JOIN 
+        CustomerIncome ci ON r.c_customer_id = ci.cd_demo_sk
+    GROUP BY 
+        r.c_customer_id, ci.income_band_sk
+)
+
+SELECT 
+    a.ca_city,
+    s.store_name,
+    COALESCE(sd.avg_sales, 0) AS average_sales
+FROM 
+    customer_address a
+JOIN 
+    store s ON a.ca_address_sk = s.s_store_sk
+LEFT JOIN 
+    SalesDetails sd ON a.ca_address_sk = sd.c_customer_id
+WHERE 
+    a.ca_state = 'CA'
+ORDER BY 
+    average_sales DESC
+LIMIT 10;

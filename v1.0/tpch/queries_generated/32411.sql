@@ -1,0 +1,84 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ISNULL(SUM(ps.ps_availqty), 0) AS total_available
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN SUM(o.o_totalprice) IS NULL THEN 0 
+            ELSE SUM(o.o_totalprice) 
+        END AS total_spent,
+        SUM(CASE 
+            WHEN o.o_orderstatus = 'F' THEN o.o_totalprice 
+            ELSE 0 
+        END) AS confirmed_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cd.c_custkey,
+    cd.c_name,
+    ps.p_partkey,
+    ps.p_name,
+    ps.p_retailprice,
+    ps.total_available,
+    cs.total_spent,
+    cs.confirmed_orders,
+    ss.s_name,
+    ss.s_acctbal
+FROM 
+    PartDetails ps
+JOIN 
+    CustomerSpending cs ON cs.total_spent > 1000
+LEFT JOIN 
+    RankedSuppliers ss ON ss.rank <= 10
+LEFT JOIN 
+    lineitem l ON ps.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer cd ON o.o_custkey = cd.c_custkey
+WHERE 
+    ss.s_acctbal IS NOT NULL 
+    AND (o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31')
+ORDER BY 
+    cs.total_spent DESC, ps.p_retailprice ASC;

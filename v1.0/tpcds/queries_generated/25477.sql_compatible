@@ -1,0 +1,64 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), 
+item_summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id, 
+        i.i_item_desc
+), 
+customer_sales AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer_info ci
+    JOIN 
+        web_sales ws ON ci.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        ci.full_name, ci.cd_gender
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.ca_city,
+    ci.ca_state,
+    isb.total_net_profit,
+    cs.total_orders,
+    cs.total_spent
+FROM 
+    customer_info ci
+LEFT JOIN 
+    item_summary isb ON ci.ca_city LIKE '%' || LEFT(isb.i_item_desc, 2) || '%'
+LEFT JOIN 
+    customer_sales cs ON ci.full_name = cs.full_name
+WHERE 
+    cs.total_orders > 0
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

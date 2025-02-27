@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Customer_Income_Analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        h.hd_income_band_sk,
+        COALESCE(h.hd_dep_count, 0) AS dep_count,
+        CASE 
+            WHEN h.hd_income_band_sk IS NULL THEN 'Undefined'
+            WHEN h.hd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound IS NULL) THEN 'No Income'
+            ELSE 'Income Band ' || h.hd_income_band_sk
+        END AS income_band_category
+    FROM customer c
+    LEFT JOIN household_demographics h ON c.c_customer_sk = h.hd_demo_sk
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        h.hd_income_band_sk,
+        COALESCE(h.hd_dep_count, 0) + 1,
+        'Increased ' || COALESCE(NULLIF(hd_income_band_sk, h.hd_income_band_sk), 'Unexpected')
+    FROM customer c
+    JOIN household_demographics h ON c.c_customer_sk = h.hd_demo_sk
+    WHERE h.hd_dep_count IS NOT NULL AND h.hd_dep_count < 5
+),
+Base_Web_Sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+Agg_Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        a.total_spent,
+        RANK() OVER (PARTITION BY a.total_spent ORDER BY c.c_last_name) AS rank,
+        COUNT(DISTINCT s.s_store_sk) OVER (PARTITION BY s.s_store_sk) AS distinct_stores,
+        DENSE_RANK() OVER (ORDER BY COALESCE(total_spent, 0) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN Base_Web_Sales a ON c.c_customer_sk = a.ws_bill_customer_sk
+    LEFT JOIN store s ON s.s_store_sk = c.c_current_addr_sk
+),
+Final_Summary AS (
+    SELECT 
+        ca.c_first_name,
+        ca.c_last_name,
+        ga.total_spent,
+        ga.rank,
+        ga.distinct_stores,
+        ga.spending_rank,
+        CASE 
+            WHEN ca.dep_count < 2 THEN 'Few dependents'
+            WHEN ca.dep_count BETWEEN 2 AND 4 THEN 'Average dependents'
+            ELSE 'Many dependents'
+        END AS dependent_status
+    FROM Customer_Income_Analysis ca
+    JOIN Agg_Customer_Stats ga ON ca.c_customer_sk = ga.c_customer_sk
+)
+SELECT 
+    COALESCE(f.c_first_name, 'Unknown') AS First_Name,
+    COALESCE(f.c_last_name, 'Unknown') AS Last_Name,
+    f.total_spent,
+    COALESCE(f.dependent_status, 'N/A') AS Dependent_Status,
+    CASE 
+        WHEN f.spending_rank IS NULL THEN 'No Spending'
+        ELSE f.spending_rank::text
+    END AS Spending_Rank
+FROM Final_Summary f
+LEFT JOIN customer_demographics cd ON f.c_customer_sk = cd.cd_demo_sk
+WHERE f.spending_rank <= 10
+  AND (f.dependent_status IS NOT NULL OR f.total_spent >= 100)
+ORDER BY f.total_spent DESC, f.First_Name, f.Last_Name;

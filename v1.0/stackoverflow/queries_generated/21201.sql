@@ -1,0 +1,74 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    GROUP BY U.Id, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 
+                (SELECT COUNT(*) FROM Votes WHERE PostId = P.AcceptedAnswerId AND VoteTypeId IN (2, 3))
+            ELSE 0 
+        END AS AcceptedAnswerVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= DATEADD(DAY, -30, GETDATE())
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+CombinedStats AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.UpVotesCount,
+        UR.DownVotesCount,
+        PD.PostId,
+        PD.Title,
+        PD.ViewCount,
+        PD.CreationDate,
+        PD.Score,
+        VS.TotalUpVotes,
+        VS.TotalDownVotes,
+        PD.RecentPostRank
+    FROM UserReputation UR
+    INNER JOIN PostDetails PD ON UR.UserId = PD.OwnerUserId
+    LEFT JOIN VoteStatistics VS ON PD.PostId = VS.PostId
+)
+SELECT 
+    CS.UserId,
+    CS.Reputation,
+    CS.UpVotesCount,
+    CS.DownVotesCount,
+    CASE 
+        WHEN CS.RecentPostRank = 1 THEN 'Most Recent Post'
+        ELSE NULL 
+    END AS Status,
+    COUNT(DISTINCT CS.PostId) AS PostCount,
+    COUNT(DISTINCT CASE WHEN CS.TotalUpVotes > CS.TotalDownVotes THEN CS.PostId END) AS PositiveInfluencePosts,
+    COUNT(DISTINCT CASE WHEN CS.TotalUpVotes < CS.TotalDownVotes THEN CS.PostId END) AS NegativeInfluencePosts
+FROM CombinedStats CS
+WHERE CS.Reputation > 0
+GROUP BY CS.UserId, CS.Reputation, CS.UpVotesCount, CS.DownVotesCount, CS.RecentPostRank
+HAVING COUNT(DISTINCT CS.PostId) > 2
+ORDER BY CS.Reputation DESC, PositiveInfluencePosts DESC;
+This query uses several advanced SQL techniques and functions such as Common Table Expressions (CTEs), window functions for ranking posts, conditional aggregates, and NULL logic for handling various scenarios. The resulting query provides a detailed overview of users, their reputation, and influence based on their posts and votes, filtered by specific conditions and ordered accordingly, making it useful for performance benchmarking in a complex SQL environment.

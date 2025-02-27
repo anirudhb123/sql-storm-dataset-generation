@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    WHERE 
+        t.kind_id IN (1, 2) 
+),
+CastDetails AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        rk.title AS movie_title,
+        COALESCE(a.name, ch.name || ' (voice)') AS actor_name,
+        c.nr_order,
+        COUNT(DISTINCT c.role_id) OVER (PARTITION BY c.movie_id) AS role_count,
+        MAX(CASE WHEN ci.kind = 'Lead' THEN 'Lead Actor' ELSE 'Supporting Actor' END) AS actor_role,
+        rk.production_year
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        RankedMovies rk ON rk.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        char_name ch ON ch.imdb_index = a.imdb_index
+    JOIN 
+        comp_cast_type ci ON ci.id = c.person_role_id
+    WHERE 
+        c.nr_order IS NOT NULL
+),
+LatestMoviePerActor AS (
+    SELECT 
+        cd.actor_name,
+        cd.movie_title,
+        cd.production_year,
+        DENSE_RANK() OVER (PARTITION BY cd.actor_name ORDER BY cd.production_year DESC) AS recent_rank
+    FROM 
+        CastDetails cd
+)
+SELECT 
+    l.actor_name,
+    l.movie_title,
+    l.production_year,
+    COALESCE(NULLIF(l.movie_title, 'Untitled'), 'TBA') AS sanitized_title,
+    CASE WHEN l.recent_rank = 1 THEN 'Latest Movie' ELSE 'Previous Work' END AS movie_status
+FROM 
+    LatestMoviePerActor l
+WHERE 
+    l.recent_rank <= 3 
+ORDER BY 
+    l.actor_name, l.production_year DESC
+LIMIT 50;

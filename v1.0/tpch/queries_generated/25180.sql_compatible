@@ -1,0 +1,44 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+SuppliersWithParts AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        p.p_retailprice,
+        r.r_name AS region_name,
+        nv.n_name AS nation_name,
+        r.r_comment AS region_comment
+    FROM RankedSuppliers s
+    JOIN supplier sp ON s.s_suppkey = sp.s_suppkey
+    JOIN partsupp ps ON sp.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation nv ON sp.s_nationkey = nv.n_nationkey
+    JOIN region r ON nv.n_regionkey = r.r_regionkey
+    WHERE s.rn <= 5 
+      AND ps.ps_partkey IN (SELECT p.ps_partkey FROM HighValueParts p)
+)
+SELECT 
+    s.s_name,
+    p.p_name,
+    s.s_acctbal,
+    p.p_retailprice,
+    s.region_name,
+    s.nation_name,
+    s.region_comment
+FROM SuppliersWithParts s
+ORDER BY s.s_name, s.p_name;

@@ -1,0 +1,43 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COALESCE(k.keyword, 'No Keywords') AS keyword_used,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_order,
+        COUNT(DISTINCT ci.role_id) OVER (PARTITION BY t.id) AS unique_roles
+    FROM 
+        aka_title t
+    INNER JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000 
+        AND ak.name IS NOT NULL
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    STRING_AGG(DISTINCT md.actor_name, ', ') AS full_cast,
+    MAX(md.unique_roles) AS total_unique_roles,
+    SUM(CASE WHEN md.keyword_used != 'No Keywords' THEN 1 ELSE 0 END) AS keyword_count,
+    CASE 
+        WHEN COUNT(md.actor_id) > 5 THEN 'Ensemble Cast' 
+        WHEN COUNT(md.actor_id) BETWEEN 3 AND 5 THEN 'Moderate Cast' 
+        ELSE 'Minimal Cast' 
+    END AS cast_size
+FROM 
+    movie_details md
+GROUP BY 
+    md.movie_title, md.production_year
+HAVING 
+    MAX(md.unique_roles) > 2
+ORDER BY 
+    md.production_year DESC, md.movie_title;

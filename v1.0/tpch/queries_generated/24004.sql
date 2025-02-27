@@ -1,0 +1,42 @@
+WITH RECURSIVE region_chain AS (
+    SELECT r_regionkey, r_name, 0 AS depth
+    FROM region
+    WHERE r_regionkey = (SELECT MAX(r_regionkey) FROM region)
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rc.depth + 1
+    FROM region_chain rc
+    JOIN nation n ON n.n_regionkey = rc.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    WHERE rc.depth < 5
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_fully_paid,
+           COUNT(o.o_orderkey) AS total_orders,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+price_summary AS (
+    SELECT p.p_partkey, p.p_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           MIN(l.l_shipdate) AS first_ship_date,
+           MAX(l.l_shipdate) AS last_ship_date
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT r.r_name, cs.c_name, cs.total_fully_paid, cs.total_orders,
+       ps.total_price,
+       COUNT(CASE WHEN ps.total_price IS NOT NULL THEN 1 END) OVER (PARTITION BY r.r_name) AS part_count,
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY cs.total_fully_paid DESC) AS cust_rank
+FROM region_chain r
+LEFT JOIN customer_summary cs ON cs.total_fully_paid > (SELECT AVG(total_fully_paid) FROM customer_summary)
+LEFT JOIN price_summary ps ON ps.total_price > ALL (SELECT AVG(total_price) FROM price_summary)
+WHERE (r.r_name IS NOT NULL OR cs.c_name IS NULL OR ps.total_price IS NULL)
+  AND (CURRENT_DATE - INTERVAL '30 days' <= cs.last_order_date OR cs.last_order_date IS NULL)
+ORDER BY r.r_name, cust_rank;

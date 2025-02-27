@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        RPAD(rp.Body, 600, '...') AS ShortBody, 
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerUserId
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankPerUser <= 3 
+),
+UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(fp.PostId) AS PostCount,
+        COALESCE(SUM(fp.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(fp.Score), 0) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        FilteredPosts fp ON u.Id = fp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(BOTH ' ' FROM unnest(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.PostCount,
+    up.TotalViews,
+    up.TotalScore,
+    pt.TagName,
+    pt.TagCount
+FROM 
+    UserPosts up
+CROSS JOIN 
+    PopularTags pt
+ORDER BY 
+    up.TotalScore DESC, 
+    pt.TagCount DESC;

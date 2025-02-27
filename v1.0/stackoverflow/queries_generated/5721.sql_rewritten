@@ -1,0 +1,42 @@
+WITH UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS TotalPosts, 
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+           AVG(COALESCE(p.Score, 0)) AS AvgPostScore,
+           SUM(b.Class) AS TotalBadges,
+           DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), u.CreationDate) AS AccountAgeDays
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+), PostStatistics AS (
+    SELECT pt.Name AS PostTypeName, 
+           COUNT(p.Id) AS PostCount,
+           AVG(p.ViewCount) AS AvgViews
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY pt.Name
+)
+SELECT ua.UserId, 
+       ua.DisplayName, 
+       ua.TotalPosts, 
+       ua.TotalQuestions, 
+       ua.TotalAnswers, 
+       ua.TotalUpvotes, 
+       ua.TotalDownvotes, 
+       ua.AvgPostScore, 
+       ua.TotalBadges, 
+       ua.AccountAgeDays, 
+       CAST(ps.PostCount AS VARCHAR) || ' posts of type ' || ps.PostTypeName AS PostTypeSummary,
+       ps.AvgViews
+FROM UserActivity ua
+JOIN PostStatistics ps ON ua.TotalPosts = ps.PostCount
+WHERE ua.TotalPosts > 10
+ORDER BY ua.TotalUpvotes DESC, ua.AvgPostScore DESC
+LIMIT 50;

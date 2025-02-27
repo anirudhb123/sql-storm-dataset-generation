@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COUNT(mk.keyword) AS keyword_count,
+    COALESCE(gc.name, 'No Genre') AS genre,
+    STRING_AGG(DISTINCT aka.name, ', ') AS actors
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.title = (SELECT title FROM aka_title WHERE id = mk.movie_id)
+LEFT JOIN 
+    movie_companies mc ON tm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+LEFT JOIN 
+    company_name gc ON mc.company_id = gc.id AND gc.country_code IS NOT NULL
+LEFT JOIN 
+    cast_info ci ON tm.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+WHERE 
+    tm.production_year BETWEEN 1990 AND 2020
+GROUP BY 
+    tm.title, tm.production_year, gc.name
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+ORDER BY 
+    tm.production_year DESC, keyword_count DESC;

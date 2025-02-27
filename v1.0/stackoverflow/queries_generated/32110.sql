@@ -1,0 +1,117 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only interested in Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+), 
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+), 
+PostScoreStats AS (
+    SELECT 
+        p.OwnerUserId,
+        AVG(p.Score) AS AvgScore,
+        MAX(p.Score) AS MaxScore,
+        MIN(p.Score) AS MinScore,
+        COUNT(*) AS TotalPosts
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason,
+        p.Title,
+        p.OwnerUserId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+),
+TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation,
+        ub.BadgeCount, 
+        ub.BadgeNames,
+        ps.AvgScore,
+        ps.MaxScore,
+        ps.MinScore,
+        ps.TotalPosts,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostScoreStats ps ON u.Id = ps.OwnerUserId
+    WHERE 
+        u.Reputation > 1000  -- Only consider users with reputation above 1000
+),
+UserClosedPostStats AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(cp.PostId) AS ClosedPostCount,
+        STRING_AGG(cp.CloseReason, '; ') AS CloseReasons,
+        SUM(COALESCE(ps.TotalPosts, 0)) AS TotalPosts,
+        SUM(COALESCE(ps.AvgScore, 0)) AS TotalScore
+    FROM 
+        TopUsers u 
+    LEFT JOIN 
+        ClosedPostDetails cp ON u.Id = cp.OwnerUserId
+    LEFT JOIN 
+        PostScoreStats ps ON u.Id = ps.OwnerUserId
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    u.ClosedPostCount,
+    u.CloseReasons,
+    u.TotalPosts,
+    u.TotalScore,
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    rph.Level AS PostLevel
+FROM 
+    UserClosedPostStats u
+LEFT JOIN 
+    RecursivePostHierarchy rph ON u.TotalPosts > 5 -- Join with post hierarchy for users with more than 5 posts
+LEFT JOIN 
+    Posts p ON rph.Id = p.Id 
+ORDER BY 
+    u.ClosedPostCount DESC, 
+    u.TotalScore DESC, 
+    u.DisplayName;

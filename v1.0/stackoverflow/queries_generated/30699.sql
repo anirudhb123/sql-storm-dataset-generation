@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CommentStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS TotalComments,
+        AVG(c.Score) AS AvgCommentScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+TopBadgedUsers AS (
+    SELECT 
+        UserId,
+        BadgeCount,
+        BadgeNames
+    FROM 
+        UserBadges 
+    WHERE 
+        BadgeCount > 5
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+    COALESCE(cs.TotalComments, 0) AS TotalComments,
+    COALESCE(cs.AvgCommentScore, 0) AS AvgCommentScore,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    Posts p ON ph.PostId = p.Id
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    TopBadgedUsers bs ON u.Id = bs.UserId
+LEFT JOIN 
+    CommentStatistics cs ON p.Id = cs.PostId
+LEFT JOIN 
+    PostVoteStatistics vs ON p.Id = vs.PostId
+ORDER BY 
+    ph.Level, ph.PostId;

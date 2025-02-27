@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorPerformance AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE WHEN t.production_year IS NOT NULL THEN t.production_year - MIN(t.production_year) OVER (PARTITION BY a.id) ELSE NULL END) AS avg_year_difference
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    GROUP BY a.id, a.name
+),
+CompanyMovies AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(DISTINCT m.movie_id) AS total_movies
+    FROM company_name c
+    JOIN movie_companies mc ON c.id = mc.company_id
+    JOIN complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY c.id, c.name
+),
+FilteredActors AS (
+    SELECT 
+        ap.actor_name,
+        ap.movie_count,
+        ap.avg_year_difference
+    FROM ActorPerformance ap
+    WHERE ap.movie_count > 5 AND ap.avg_year_difference IS NOT NULL
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fa.actor_name,
+    fa.movie_count,
+    fa.avg_year_difference,
+    cm.company_name,
+    cm.total_movies
+FROM RankedMovies fm
+LEFT JOIN FilteredActors fa ON fm.rn = fa.movie_count 
+LEFT JOIN CompanyMovies cm ON cm.total_movies > 10
+WHERE fa.actor_name IS NOT NULL
+ORDER BY fm.production_year DESC, fa.movie_count DESC
+LIMIT 50;

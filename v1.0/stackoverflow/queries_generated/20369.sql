@@ -1,0 +1,97 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(1) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1' YEAR
+        AND p.ViewCount > 10
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        rp.RankByScore,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        CASE 
+            WHEN rp.Score = 0 THEN 'Neutral'
+            WHEN rp.Score > 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 10
+),
+ScoreSummary AS (
+    SELECT 
+        ScoreCategory,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore,
+        AVG(Score) AS AverageScore
+    FROM 
+        FilteredPosts
+    GROUP BY 
+        ScoreCategory
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class) AS TotalBadges,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CombinedResults AS (
+    SELECT 
+        f.PostId,
+        f.Title,
+        f.CommentCount,
+        u.DisplayName,
+        u.PostCount,
+        u.TotalBadges,
+        s.ScoreCategory,
+        f.UpVoteCount,
+        f.DownVoteCount
+    FROM 
+        FilteredPosts f
+    JOIN 
+        UserActivity u ON f.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId ORDER BY p.CreationDate DESC LIMIT 1)
+    JOIN 
+        ScoreSummary s ON f.ScoreCategory = s.ScoreCategory
+)
+SELECT 
+    Cr.*,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+FROM 
+    CombinedResults Cr
+LEFT JOIN 
+    Votes v ON Cr.PostId = v.PostId
+GROUP BY 
+    Cr.PostId, Cr.Title, Cr.CommentCount, Cr.DisplayName, Cr.PostCount, Cr.TotalBadges, Cr.ScoreCategory
+HAVING 
+    COUNT(v.Id) > 0
+ORDER BY 
+    Cr.CommentCount DESC, Cr.UpVoteCount - Cr.DownVoteCount DESC, Cr.LastPostDate DESC
+LIMIT 100;

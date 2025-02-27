@@ -1,0 +1,56 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.person_id,
+        a.movie_id,
+        1 AS level
+    FROM 
+        cast_info a
+    WHERE 
+        a.person_role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        a.id AS actor_id,
+        a.person_id,
+        m.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info a
+    JOIN 
+        complete_cast m ON a.movie_id = m.movie_id
+    JOIN 
+        ActorHierarchy ah ON ah.actor_id = a.id
+)
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_available,
+    MAX(CASE WHEN mi.info_type_id IS NOT NULL THEN mi.info ELSE NULL END) AS last_known_info,
+    SUM(CASE WHEN c.id IS NULL THEN 1 ELSE 0 END) AS uncredited_roles
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+LEFT JOIN 
+    ActorHierarchy ah ON ak.person_id = ah.person_id
+LEFT JOIN 
+    (SELECT DISTINCT movie_id FROM movie_companies WHERE company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')) mc 
+    ON t.id = mc.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND (c.note IS NULL OR c.note != 'Cameo') 
+    AND t.production_year >= 2000 
+GROUP BY 
+    ak.name
+HAVING 
+    movie_count > 5
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

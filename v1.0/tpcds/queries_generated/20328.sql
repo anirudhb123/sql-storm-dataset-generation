@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS Rank_Sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (
+            SELECT 
+                AVG(ws_inner.ws_sales_price) 
+            FROM 
+                web_sales ws_inner 
+            WHERE 
+                ws_inner.ws_ship_date_sk = ws.ws_ship_date_sk
+        )
+), 
+InventoryStatus AS (
+    SELECT 
+        inv.inv_item_sk,
+        CASE 
+            WHEN inv.inv_quantity_on_hand IS NULL THEN 'Out of Stock' 
+            WHEN inv.inv_quantity_on_hand > 100 THEN 'In Stock' 
+            ELSE 'Low Stock' 
+        END AS Stock_Status
+    FROM 
+        inventory inv
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+PotentialReturns AS (
+    SELECT 
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_reason_sk,
+        r.r_reason_desc
+    FROM 
+        catalog_returns cr
+    LEFT JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE 
+        cr.cr_return_quantity > 0
+)
+SELECT 
+    cd.c_customer_id,
+    COUNT(DISTINCT rs.ws_order_number) AS Total_Orders,
+    SUM(rs.ws_sales_price) AS Total_Sales_Amount,
+    MAX(CASE WHEN is.Stock_Status = 'Out of Stock' THEN 1 ELSE 0 END) AS Out_of_Stock_Flag,
+    SUM(pr.cr_return_amount) AS Total_Returns,
+    ROW_NUMBER() OVER (PARTITION BY is.Stock_Status ORDER BY SUM(rs.ws_sales_price) DESC) AS Stock_Rank
+FROM 
+    RankedSales rs
+JOIN 
+    InventoryStatus is ON rs.ws_item_sk = is.inv_item_sk
+JOIN 
+    CustomerDetails cd ON rs.ws_order_number = cd.c_customer_id 
+LEFT JOIN 
+    PotentialReturns pr ON rs.ws_item_sk = pr.cr_item_sk
+GROUP BY 
+    cd.c_customer_id, is.Stock_Status
+HAVING 
+    SUM(rs.ws_sales_price) > 1000 
+    OR MAX(pr.cr_return_quantity) IS NOT NULL
+ORDER BY 
+    Total_Sales_Amount DESC
+LIMIT 20;

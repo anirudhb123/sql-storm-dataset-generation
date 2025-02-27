@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+), 
+UserReputation AS (
+    SELECT 
+        u.Id as UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation > 1000 THEN 'Experienced'
+            WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+            ELSE 'Novice'
+        END as UserLevel
+    FROM 
+        Users u
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) as GoldCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) as SilverCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) as BronzeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ur.Reputation,
+    ur.UserLevel,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId), 0) as CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL (
+         SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) as Tag
+     ) as parsed_tags ON t.TagName = parsed_tags.Tag
+     WHERE p.Id = rp.PostId) as TagList
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    rp.Score DESC, CommentCount DESC 
+LIMIT 50;

@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.ViewCount DESC) AS RankByViews,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.OwnerUserId
+), PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(P.Tags, '><')) AS TagName) AS TagList ON true
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagList.TagName)
+    GROUP BY 
+        P.Id
+), RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(MAX(B.Date), '1970-01-01') AS LastBadgeDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName
+), FinalResults AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.ViewCount,
+        R.RankByViews,
+        R.UpVoteCount - R.DownVoteCount AS NetVotes,
+        T.Tags,
+        U.UserId,
+        U.DisplayName,
+        U.LastBadgeDate,
+        U.TotalPosts,
+        U.TotalComments
+    FROM 
+        RankedPosts R
+    JOIN 
+        PostTags T ON R.PostId = T.PostId
+    JOIN 
+        RecentUserActivity U ON R.OwnerUserId = U.UserId
+    WHERE 
+        R.RankByViews = 1
+)
+SELECT 
+    F.PostId,
+    F.Title,
+    F.ViewCount,
+    F.NetVotes,
+    F.Tags,
+    F.DisplayName AS OwnerDisplayName,
+    CASE 
+        WHEN F.TotalPosts > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS UserActivityStatus,
+    CASE 
+        WHEN F.LastBadgeDate = '1970-01-01' THEN 'No badges yet' 
+        ELSE 'Last badge on ' || TO_CHAR(F.LastBadgeDate, 'YYYY-MM-DD') 
+    END AS BadgeStatus
+FROM 
+    FinalResults F
+ORDER BY 
+    F.ViewCount DESC,
+    F.NetVotes DESC
+LIMIT 10;

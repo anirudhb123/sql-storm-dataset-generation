@@ -1,0 +1,67 @@
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(Posts.ViewCount) AS AverageViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM
+        Tags
+    JOIN
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[])
+    GROUP BY
+        Tags.TagName
+),
+UserEngagement AS (
+    SELECT
+        Users.DisplayName,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT Posts.Id) AS PostsCount,
+        COUNT(DISTINCT Comments.Id) AS CommentsCount
+    FROM
+        Users
+    LEFT JOIN
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY
+        Users.DisplayName
+),
+ClosedPosts AS (
+    SELECT
+        Posts.Title,
+        PostHistory.CreationDate AS ClosedDate,
+        PostHistory.UserDisplayName AS ClosedBy
+    FROM
+        Posts
+    JOIN
+        PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE
+        PostHistory.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT
+    t.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AverageViews,
+    ts.TotalScore,
+    ue.DisplayName AS ActiveUser,
+    ue.TotalViews AS UserTotalViews,
+    ue.TotalScore AS UserTotalScore,
+    ue.PostsCount AS UserPostsCount,
+    ue.CommentsCount AS UserCommentsCount,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    cp.ClosedBy
+FROM
+    TagStatistics ts
+JOIN
+    UserEngagement ue ON ue.PostsCount > 0 -- Active users that have posts
+LEFT JOIN
+    ClosedPosts cp ON cp.ClosedDate = (SELECT MAX(ClosedDate) FROM ClosedPosts)
+ORDER BY
+    ts.TotalScore DESC, ue.TotalViews DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE inventory_summary AS (
+    SELECT i.inv_item_sk, 
+           SUM(i.inv_quantity_on_hand) AS total_quantity,
+           ROW_NUMBER() OVER (PARTITION BY i.inv_item_sk ORDER BY i.inv_quantity_on_hand DESC) AS rn
+    FROM inventory i
+    GROUP BY i.inv_item_sk
+),
+customer_purchases AS (
+    SELECT c.c_customer_sk,
+           SUM(ws.ws_net_paid) AS total_spent,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+high_value_customers AS (
+    SELECT cp.c_customer_sk, cp.total_spent, cp.order_count
+    FROM customer_purchases cp
+    WHERE cp.total_spent > (SELECT AVG(total_spent) FROM customer_purchases)
+),
+returns_info AS (
+    SELECT sr.sr_customer_sk, 
+           SUM(sr.sr_return_quantity) AS total_returns,
+           COUNT(sr.sr_item_sk) AS return_count
+    FROM store_returns sr
+    GROUP BY sr.sr_customer_sk
+),
+final_results AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           COALESCE(hv.total_spent, 0) AS total_spent,
+           COALESCE(ri.total_returns, 0) AS total_returns,
+           ri.return_count,
+           i.total_quantity
+    FROM customer c
+    LEFT JOIN high_value_customers hv ON c.c_customer_sk = hv.c_customer_sk
+    LEFT JOIN returns_info ri ON c.c_customer_sk = ri.sr_customer_sk
+    LEFT JOIN inventory_summary i ON i.inv_item_sk IN (
+        SELECT ws.ws_item_sk
+        FROM web_sales ws
+        WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+    )
+)
+SELECT f.c_customer_sk,
+       f.c_first_name,
+       f.c_last_name,
+       f.total_spent,
+       f.total_returns,
+       f.return_count,
+       f.total_quantity,
+       CASE 
+           WHEN f.total_spent > 1000 THEN 'High Value'
+           WHEN f.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+           ELSE 'Low Value' 
+       END AS customer_value_category
+FROM final_results f
+WHERE f.total_quantity IS NOT NULL
+ORDER BY f.total_spent DESC, f.total_returns ASC;

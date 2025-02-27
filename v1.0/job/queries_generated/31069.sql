@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title t ON ml.linked_movie_id = t.id
+    WHERE mh.level < 5 -- Limit recursion to avoid deep hierarchy
+),
+ActorCount AS (
+    SELECT 
+        ac.movie_id,
+        COUNT(ac.person_id) AS actor_count
+    FROM cast_info ac
+    GROUP BY ac.movie_id
+),
+MovieKeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+CompleteCast AS (
+    SELECT 
+        cc.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS complete_cast
+    FROM complete_cast cc
+    JOIN aka_name ak ON cc.subject_id = ak.person_id
+    GROUP BY cc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ak.actor_count, 0) AS number_of_actors,
+    COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+    COALESCE(cc.complete_cast, 'No cast available') AS complete_cast_list
+FROM MovieHierarchy mh
+LEFT JOIN ActorCount ak ON mh.movie_id = ak.movie_id
+LEFT JOIN MovieKeywordInfo mk ON mh.movie_id = mk.movie_id
+LEFT JOIN CompleteCast cc ON mh.movie_id = cc.movie_id
+WHERE mh.production_year IS NOT NULL
+ORDER BY mh.production_year DESC, mh.title;

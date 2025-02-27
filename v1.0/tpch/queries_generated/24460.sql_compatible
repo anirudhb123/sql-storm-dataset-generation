@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_mktsegment = 'BUILDING'
+    GROUP BY 
+        c.c_custkey
+),
+PartsSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FinalReport AS (
+    SELECT 
+        c.c_custkey,
+        cs.total_orders,
+        cs.total_spent,
+        ps.partkey,
+        MAX(ps.total_avail_qty) OVER (PARTITION BY ps.partkey) AS max_avail_qty,
+        COUNT(rs.s_suppkey) FILTER (WHERE rs.rn <= 3) AS top_suppliers_count
+    FROM 
+        CustomerOrderStats cs
+    INNER JOIN
+        (SELECT DISTINCT p.p_partkey AS partkey
+         FROM part p
+         JOIN lineitem l ON p.p_partkey = l.l_partkey
+         WHERE l.l_returnflag = 'N' AND l.l_discount > 0) ps ON cs.c_custkey = ps.partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON rs.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+)
+SELECT 
+    f.c_custkey, 
+    f.total_orders, 
+    f.total_spent, 
+    COALESCE(f.max_avail_qty, 0) AS max_avail_qty,
+    CASE 
+        WHEN f.top_suppliers_count > 0 THEN 'Available'
+        WHEN f.top_suppliers_count IS NULL THEN 'None'
+        ELSE 'Unknown' 
+    END AS supplier_status
+FROM 
+    FinalReport f
+WHERE 
+    f.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats WHERE total_orders > 5)
+ORDER BY 
+    f.total_spent DESC 
+LIMIT 10 OFFSET 5;

@@ -1,0 +1,89 @@
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        r.r_name
+
+    UNION ALL
+
+    SELECT 
+        r2.r_name,
+        SUM(l2.l_extendedprice * (1 - l2.l_discount)) + r.total_sales,
+        COUNT(DISTINCT o2.o_orderkey) + r.order_count
+    FROM 
+        RegionalSales r
+    JOIN 
+        region r2 ON r2.r_regionkey != (SELECT r_regionkey FROM region WHERE r_name = r.region)
+    JOIN 
+        nation n2 ON r2.r_regionkey = n2.n_regionkey
+    JOIN 
+        supplier s2 ON n2.n_nationkey = s2.s_nationkey
+    JOIN 
+        partsupp ps2 ON s2.s_suppkey = ps2.ps_suppkey
+    JOIN 
+        part p2 ON ps2.ps_partkey = p2.p_partkey
+    JOIN 
+        lineitem l2 ON p2.p_partkey = l2.l_partkey
+    JOIN 
+        orders o2 ON l2.l_orderkey = o2.o_orderkey
+    WHERE 
+        o2.o_orderstatus = 'O'
+    GROUP BY 
+        r2.r_name, r.total_sales, r.order_count
+)
+
+SELECT 
+    rs.region,
+    rs.total_sales,
+    CASE 
+        WHEN rs.order_count > 100 THEN 'High Volume'
+        WHEN rs.order_count BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM 
+    RegionalSales rs
+WHERE
+    rs.total_sales IS NOT NULL
+ORDER BY 
+    rs.total_sales DESC
+LIMIT 10;
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    p.p_retailprice, 
+    SUM(l.l_quantity) AS total_quantity
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+INNER JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+WHERE 
+    l.l_shipdate > (SELECT MAX(o.o_orderdate) FROM orders o WHERE o.o_orderstatus = 'F')
+GROUP BY 
+    p.p_name, s.s_name, p.p_retailprice
+HAVING 
+    SUM(l.l_quantity) > 0
+ORDER BY 
+    total_quantity DESC;

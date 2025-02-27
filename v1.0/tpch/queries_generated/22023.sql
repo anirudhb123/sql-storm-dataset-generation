@@ -1,0 +1,52 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, rs.level + 1
+    FROM supplier s
+    INNER JOIN RecursiveSupplier rs ON s.n_nationkey = rs.n_nationkey
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+      AND rs.level < 5
+),
+EligibleCustomers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) >= 1
+),
+SuppliersInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_mfgr = p.p_mfgr)
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    si.p_name AS part_name,
+    ED.total_price,
+    rs.level AS supplier_level,
+    CASE 
+        WHEN si.total_availqty IS NULL THEN 'Unavailable'
+        ELSE 'Available'
+    END AS avail_status
+FROM EligibleCustomers c
+JOIN OrderDetails ED ON c.c_custkey = ED.o_orderkey
+LEFT JOIN SuppliersInfo si ON ED.o_orderkey = si.ps_partkey
+JOIN RecursiveSupplier rs ON rs.s_suppkey = si.ps_suppkey
+WHERE (rs.level BETWEEN 1 AND 3 OR rs.level IS NULL)
+  AND c.c_custkey NOT IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'F')
+ORDER BY c.c_name, ED.total_price DESC;

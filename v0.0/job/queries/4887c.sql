@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info = 'The aggressive actress Susan, star of many erotic thrillers, feels stalked by her fans and has a fight with her producer. During a one week long pause in the shooting of a movie, she retires into an hotel, unknowing that her producer is lying dead in her trailer. While the police searches her, she meets the married sales representative Paul on a congress and pulls him into an affair. However the stalkings begin again, more frightening than ever.' AND k.id < 101775;

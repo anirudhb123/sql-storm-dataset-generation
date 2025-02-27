@@ -1,0 +1,46 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_items,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM store_returns
+    WHERE sr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY sr_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned_items,
+        cr.total_returned_amount,
+        ROW_NUMBER() OVER (ORDER BY cr.total_returned_amount DESC) AS rn
+    FROM customer c
+    JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    WHERE cr.total_returned_items > 0
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(sm.sm_carrier, 'Unknown') AS shipping_carrier,
+    COALESCE(SUM(ws.ws_quantity), 0) AS total_items_sold,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+    CASE 
+        WHEN tc.total_returned_amount > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM TopCustomers tc
+LEFT JOIN web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+GROUP BY 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    shipping_carrier
+HAVING 
+    SUM(ws.ws_net_profit) > 1000 OR COUNT(ws.ws_order_number) > 5
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

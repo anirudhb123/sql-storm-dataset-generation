@@ -1,0 +1,15 @@
+SELECT 
+    p.Title, 
+    u.DisplayName, 
+    p.CreationDate, 
+    p.Score, 
+    p.ViewCount 
+FROM 
+    Posts p 
+JOIN 
+    Users u ON p.OwnerUserId = u.Id 
+WHERE 
+    p.PostTypeId = 1  -- Filtering for questions only
+ORDER BY 
+    p.CreationDate DESC 
+LIMIT 10;

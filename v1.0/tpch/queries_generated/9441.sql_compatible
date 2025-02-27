@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+    GROUP BY
+        o.o_orderkey, o.o_totalprice
+),
+SupplierDetails AS (
+    SELECT
+        hs.s_suppkey,
+        hs.s_name,
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(CASE WHEN ho.o_totalprice IS NOT NULL THEN ho.o_totalprice ELSE 0 END) AS total_order_value
+    FROM
+        RankedSuppliers hs
+    LEFT JOIN
+        HighValueOrders ho ON hs.s_suppkey IN (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps 
+            WHERE ps.ps_partkey IN (
+                SELECT l.l_partkey 
+                FROM lineitem l 
+                WHERE l.l_orderkey IN (
+                    SELECT o.o_orderkey 
+                    FROM orders o 
+                    WHERE o.o_orderstatus = 'O'
+                )
+            )
+        )
+    JOIN
+        supplier s ON hs.s_suppkey = s.s_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY
+        hs.s_suppkey, hs.s_name, r.r_name, n.n_name
+)
+SELECT
+    s.s_name,
+    s.region_name,
+    s.nation_name,
+    s.total_order_value,
+    r.total_supply_cost
+FROM
+    SupplierDetails s
+JOIN
+    RankedSuppliers r ON s.s_suppkey = r.s_suppkey
+WHERE
+    s.total_order_value > 10000
+ORDER BY
+    r.total_supply_cost DESC, s.total_order_value DESC
+LIMIT 10;

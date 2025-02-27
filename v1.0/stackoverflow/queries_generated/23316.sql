@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.Score,
+           p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankIndex,
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+           ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+    ) AS t ON true
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '365 days'
+    GROUP BY p.Id
+),
+UserActivity AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(b.Class = 1) AS GoldBadges,
+           SUM(b.Class = 2) AS SilverBadges,
+           SUM(b.Class = 3) AS BronzeBadges,
+           COUNT(DISTINCT ph.PostId) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosedPosts,
+           COUNT(DISTINCT ph.PostId) FILTER (WHERE ph.PostHistoryTypeId IN (12, 13)) AS DeletedPosts,
+           COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN PostHistory ph ON u.Id = ph.UserId
+    GROUP BY u.Id
+)
+SELECT up.UserId, 
+       up.DisplayName,
+       up.GoldBadges,
+       up.SilverBadges,
+       up.BronzeBadges,
+       up.ClosedPosts,
+       up.DeletedPosts,
+       up.PostsCreated,
+       rp.PostId,
+       rp.Title,
+       rp.Score,
+       rp.ViewCount,
+       rp.TagsArray
+FROM UserActivity up
+JOIN RankedPosts rp ON up.UserId = (
+    SELECT p.OwnerUserId
+    FROM Posts p
+    WHERE p.Id = rp.PostId
+)
+WHERE up.GoldBadges > 0 OR up.SilverBadges > 2
+ORDER BY rp.Score DESC, up.DeletedPosts ASC, up.PostsCreated DESC
+LIMIT 50;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE nation_tree AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT MAX(r_regionkey) FROM region)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nt.level + 1
+    FROM nation n
+    JOIN nation_tree nt ON n.n_regionkey = nt.n_nationkey
+),
+colored_parts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           CASE 
+               WHEN p.p_size < 10 THEN 'Small' 
+               WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+               ELSE 'Large' 
+           END AS size_category,
+           SUM(ps.ps_availqty) AS total_supply
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_size
+),
+supplier_info AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT nt.n_name,
+       cp.size_category, 
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       COALESCE(os.total_revenue, 0) AS order_revenue,
+       COUNT(DISTINCT cp.p_partkey) AS parts_count,
+       AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM nation_tree nt
+LEFT JOIN colored_parts cp ON nt.n_nationkey IN (SELECT s_nationkey FROM supplier)
+LEFT JOIN supplier_info s ON s.s_nationkey = nt.n_nationkey AND s.acctbal_rank = 1
+FULL OUTER JOIN order_summary os ON os.total_revenue > 100000
+WHERE nt.level = (SELECT MAX(level) FROM nation_tree)
+GROUP BY nt.n_name, cp.size_category, s.s_name
+HAVING COUNT(DISTINCT cp.p_partkey) > 5 OR AVG(s.s_acctbal) IS NULL 
+ORDER BY nt.n_name DESC, order_revenue DESC;

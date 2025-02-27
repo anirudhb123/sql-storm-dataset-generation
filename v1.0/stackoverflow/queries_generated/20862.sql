@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes,
+        AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS AvgDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        ph.PostId, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN p.CreationDate END) AS ClosedDate, 
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        SUM(CASE WHEN ph.UserId IS NOT NULL THEN 1 ELSE 0 END) AS UserEditedCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalBounty,
+    ua.AvgUpVotes,
+    ua.AvgDownVotes,
+    COALESCE(SUM(ps.CommentCount),0) AS TotalComments,
+    COALESCE(AVG(rp.Score), 0) AS AvgPostScore,
+    COALESCE(MAX(ps.ClosedDate), 'No Closure') AS LastClosedPostDate,
+    CASE 
+        WHEN ua.TotalPosts >= 10 AND ua.TotalBounty > 100 THEN 'Active Contributor'
+        ELSE 'Regular User' 
+    END AS UserType
+FROM 
+    Users u
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostStats ps ON ps.PostId IN (SELECT PostId FROM RankedPosts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 50
+GROUP BY 
+    u.Id, ua.TotalPosts, ua.TotalBounty, ua.AvgUpVotes, ua.AvgDownVotes
+HAVING 
+    COUNT(DISTINCT ps.PostId) > 0
+ORDER BY 
+    ua.TotalPosts DESC, ua.TotalBounty DESC;

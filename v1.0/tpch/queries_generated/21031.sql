@@ -1,0 +1,45 @@
+WITH RECURSIVE cte_supplier_spending AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * l.l_quantity) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_supplycost * l.l_quantity) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+cte_customer_summary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           MAX(o.o_orderdate) AS latest_order
+    FROM customer c
+    LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name
+),
+cte_nation_regional AS (
+    SELECT n.n_name,
+           r.r_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(CASE WHEN s.s_acctbal IS NULL THEN 0 ELSE s.s_acctbal END) AS total_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT cs.c_name,
+       SUM(COALESCE(css.total_spent, 0)) AS total_customer_spending,
+       ns.r_name AS region_name,
+       COUNT(ns.n_name) AS distinct_nations_served,
+       COUNT(DISTINCT ss.s_name) AS distinct_suppliers,
+       AVG(CASE WHEN cs.order_count > 0 THEN cs.order_count ELSE NULL END) AS average_orders_per_customer,
+       COUNT(DISTINCT cs.latest_order) AS distinct_order_dates
+FROM cte_customer_summary cs
+LEFT JOIN cte_nation_regional ns ON TRUE
+LEFT JOIN cte_supplier_spending ss ON ss.rn = 1
+WHERE cs.total_spent > (SELECT AVG(total_spent) FROM cte_customer_summary)
+GROUP BY cs.c_name, ns.r_name
+HAVING COUNT(DISTINCT ns.n_name) > 1
+ORDER BY total_customer_spending DESC NULLS LAST;

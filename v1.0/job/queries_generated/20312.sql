@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC, m.title) AS rn,
+        k.keyword,
+        COALESCE(i.info, 'No Info') AS movie_info
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info i ON m.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+    WHERE m.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        MAX(c.nr_order) AS highest_role_order
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    LEFT JOIN RankedMovies r ON c.movie_id = r.movie_id
+    WHERE ak.name IS NOT NULL
+    GROUP BY a.id, ak.name
+    HAVING COUNT(DISTINCT c.movie_id) > 5  -- Only actors with more than 5 movies
+),
+BizarreSubquery AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        MIN(mc.note) AS first_note,
+        MAX(CASE WHEN ct.kind = 'Distributor' THEN mc.note END) AS distributor_note
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+    HAVING COUNT(DISTINCT mc.company_id) > 2
+),
+FinalResults AS (
+    SELECT
+        r.movie_id,
+        r.title,
+        r.production_year,
+        f.actor_name,
+        f.movie_count,
+        f.highest_role_order,
+        b.company_count,
+        b.first_note,
+        b.distributor_note
+    FROM RankedMovies r
+    JOIN FilteredActors f ON r.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = f.actor_id)
+    JOIN BizarreSubquery b ON r.movie_id = b.movie_id
+)
+SELECT
+    fr.title,
+    fr.production_year,
+    fr.actor_name,
+    fr.movie_count,
+    fr.highest_role_order,
+    COALESCE(fr.company_count, 0) AS total_companies,
+    COALESCE(fr.first_note, 'No Note') AS company_first_note,
+    COALESCE(fr.distributor_note, 'No Distributor Info') AS distributor_info
+FROM FinalResults fr
+ORDER BY fr.production_year DESC, fr.movie_count DESC, fr.title
+LIMIT 50;
+
+

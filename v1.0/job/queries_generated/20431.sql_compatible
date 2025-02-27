@@ -1,0 +1,81 @@
+
+WITH RecursiveActors AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name,
+        c.movie_id,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS role_order,
+        COUNT(*) OVER (PARTITION BY a.id) AS total_movies,
+        NULLIF(COUNT(DISTINCT t.production_year) FILTER (WHERE t.production_year IS NOT NULL), 0) AS unique_years
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year > 2000
+),
+FilteredActors AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        COUNT(movie_id) AS movies_participated,
+        SUM(unique_years) AS total_unique_years,
+        MAX(role_order) AS highest_role_order
+    FROM 
+        RecursiveActors
+    WHERE
+        unique_years IS NOT NULL
+    GROUP BY 
+        actor_id, actor_name
+),
+JoinResults AS (
+    SELECT 
+        fa.actor_id,
+        fa.actor_name,
+        fa.movies_participated,
+        fa.total_unique_years,
+        fa.highest_role_order,
+        ko.keyword,
+        COALESCE(ki.info, 'N/A') AS info_value
+    FROM 
+        FilteredActors fa
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id IN (
+            SELECT movie_id 
+            FROM cast_info 
+            WHERE person_id = fa.actor_id
+        )
+    LEFT JOIN 
+        keyword ko ON mk.keyword_id = ko.id
+    LEFT JOIN 
+        movie_info ki ON ki.movie_id IN (
+            SELECT movie_id 
+            FROM cast_info 
+            WHERE person_id = fa.actor_id
+        )
+    WHERE 
+        fa.movies_participated > 5
+)
+SELECT 
+    actor_id,
+    actor_name,
+    movies_participated,
+    total_unique_years,
+    highest_role_order,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+    ARRAY_AGG(DISTINCT info_value) AS info_values,
+    CASE 
+        WHEN total_unique_years > 10 THEN 'Veteran'
+        WHEN total_unique_years BETWEEN 5 AND 10 THEN 'Experienced'
+        ELSE 'Newcomer' 
+    END AS experience_level
+FROM 
+    JoinResults
+GROUP BY 
+    actor_id, actor_name, movies_participated, total_unique_years, highest_role_order
+ORDER BY 
+    movies_participated DESC, 
+    highest_role_order DESC;

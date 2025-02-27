@@ -1,0 +1,80 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+HighAcctBalance AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+ActiveCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        n.n_nationkey
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_acctbal IS NOT NULL)
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal, n.n_nationkey
+),
+RelevantLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1996-01-01' AND l.l_shipdate < '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    hl.r_name,
+    ac.c_name,
+    hl.total_acctbal,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY hl.total_acctbal DESC) AS supplier_rank,
+    COALESCE(SUM(rl.net_revenue), 0) AS total_revenue,
+    COALESCE(SUM(rl.item_count), 0) AS total_items
+FROM 
+    nation n
+JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rn = 1
+JOIN 
+    HighAcctBalance hl ON n.n_regionkey = hl.r_regionkey
+JOIN 
+    ActiveCustomers ac ON n.n_nationkey = ac.n_nationkey
+LEFT JOIN 
+    RelevantLineItems rl ON ac.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey))
+WHERE 
+    s.s_acctbal IS NOT NULL
+GROUP BY 
+    n.n_name, hl.r_name, ac.c_name, hl.total_acctbal
+HAVING 
+    SUM(rl.net_revenue) > 10000
+ORDER BY 
+    n.n_name, hl.total_acctbal DESC;

@@ -1,0 +1,58 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name, 
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        MAX(ps.ps_supplycost) AS max_supplycost,
+        (SELECT COUNT(*)
+         FROM orders o
+         LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+         WHERE l.l_partkey = ps.ps_partkey) AS order_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_partkey
+)
+
+SELECT 
+    np.n_name AS nation_name,
+    np.region_name,
+    COUNT(DISTINCT np.supplier_count) AS total_suppliers,
+    COUNT(DISTINCT rp.p_partkey) AS high_value_parts,
+    SUM(ts.total_revenue) AS total_revenue_from_parts,
+    COALESCE(ROUND(AVG(ts.total_revenue), 2), 0) AS avg_revenue_per_part,
+    STRING_AGG(DISTINCT rp.p_name, ', ') AS part_names
+FROM NationDetails np
+JOIN SupplierParts sp ON np.supplier_count > sp.total_availqty
+LEFT JOIN RankedParts rp ON sp.ps_partkey = rp.p_partkey AND rp.rn <= 3
+LEFT JOIN TotalSales ts ON rp.p_partkey = ts.l_partkey
+GROUP BY np.n_name, np.region_name
+HAVING SUM(ts.total_revenue) IS NOT NULL AND COUNT(DISTINCT rp.p_partkey) > 0
+ORDER BY avg_revenue_per_part DESC;

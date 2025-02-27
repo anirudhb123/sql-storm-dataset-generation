@@ -1,0 +1,71 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year > 2000
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        pt.title_id,
+        cr.role AS role_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        RankedTitles rt ON ci.movie_id = rt.title_id
+    JOIN 
+        role_type cr ON ci.role_id = cr.id
+    WHERE 
+        an.name IS NOT NULL
+    GROUP BY 
+        ci.person_id, rt.title_id, cr.role
+),
+CompaniesWithMaxMovies AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.company_id
+    HAVING 
+        COUNT(DISTINCT mc.movie_id) = (SELECT MAX(movie_count) FROM (SELECT COUNT(DISTINCT mc_inner.movie_id) AS movie_count FROM movie_companies mc_inner GROUP BY mc_inner.company_id) AS subquery)
+)
+SELECT 
+    an.name AS actor_name,
+    rt.title AS movie_title,
+    rt.production_year,
+    ar.role_name,
+    COALESCE(cm.movie_count, 0) AS company_movie_count,
+    SUM(ar.movie_count) OVER (PARTITION BY an.name ORDER BY rt.production_year DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_movies
+FROM 
+    ActorRoles ar
+JOIN 
+    aka_name an ON ar.person_id = an.person_id
+JOIN 
+    RankedTitles rt ON ar.title_id = rt.title_id
+LEFT JOIN 
+    CompaniesWithMaxMovies cm ON cm.company_id IN (
+        SELECT 
+            mc.company_id
+        FROM 
+            movie_companies mc
+        WHERE 
+            mc.movie_id = ar.title_id
+    )
+ORDER BY 
+    rt.production_year DESC,
+    actor_name ASC
+LIMIT 50 OFFSET 10;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate, p.ViewCount, p.Score
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        GROUP_CONCAT(DISTINCT crt.Name ORDER BY crt.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::jsonb->>'CloseReasonId'::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened posts
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserDisplayName
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        COALESCE(cpr.CloseDate, 'No Closure') AS CloseDate,
+        COALESCE(cpr.ClosedBy, 'N/A') AS ClosedBy,
+        COALESCE(cpr.CloseReasons, 'N/A') AS CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CloseDate,
+    ps.ClosedBy,
+    ps.CloseReasons
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.AnswerCount > 0
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC
+LIMIT 50;

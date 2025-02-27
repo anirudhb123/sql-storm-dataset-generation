@@ -1,0 +1,62 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_ext_sales_price) AS avg_order_value,
+        SUM(ws_ext_tax) AS total_tax,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        DATEADD(day, d_dow - 1, d_date) AS sales_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, 
+        DATEADD(day, d_dow - 1, d_date)
+),
+customer_data AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS customer_orders,
+        SUM(cs.cs_sales_price) AS customer_spending,
+        COUNT(DISTINCT cs.cs_item_sk) AS items_bought
+    FROM 
+        customer_demographics cd
+    JOIN 
+        catalog_sales cs ON cd.cd_demo_sk = cs.cs_bill_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+),
+warehouse_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT inv.inv_item_sk) AS inventory_items,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_order_value,
+    cd.customer_orders,
+    cd.customer_spending,
+    wh.inventory_items,
+    wh.total_inventory
+FROM 
+    sales_data sd
+JOIN 
+    customer_data cd ON sd.total_orders > 0
+JOIN 
+    warehouse_summary wh ON wh.inventory_items > 0
+ORDER BY 
+    sd.total_sales DESC;

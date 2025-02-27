@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_in_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_custkey
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_sales
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(rs.s_name, 'No Suppliers') AS supplier_name,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    COALESCE(ss.supplier_sales, 0) AS supplier_contribution,
+    CASE 
+        WHEN COALESCE(ts.total_sales, 0) = 0 THEN NULL 
+        ELSE ROUND(COALESCE(ss.supplier_sales, 0) / ts.total_sales * 100, 2) 
+    END AS supplier_percentage_of_sales
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey AND rs.rank_in_nation = 1
+LEFT JOIN 
+    TotalOrders ts ON ts.o_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey 
+        LIMIT 1
+    )
+LEFT JOIN 
+    SupplierSales ss ON ss.s_suppkey = rs.s_suppkey
+ORDER BY 
+    n.n_name;

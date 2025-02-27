@@ -1,0 +1,80 @@
+WITH RECURSIVE actor_movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ti.title AS movie_title,
+        ti.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ti.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title ti ON ci.movie_id = ti.movie_id
+    WHERE 
+        a.name IS NOT NULL
+    UNION ALL
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        ti.title,
+        ti.production_year,
+        ROW_NUMBER() OVER (PARTITION BY am.actor_id ORDER BY ti.production_year DESC) AS rn
+    FROM 
+        actor_movies am
+    JOIN 
+        cast_info ci ON am.actor_id = ci.person_id
+    JOIN 
+        aka_title ti ON ci.movie_id = ti.movie_id
+    WHERE 
+        ti.production_year >= 2000
+),
+movie_info_summary AS (
+    SELECT
+        m.id AS movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS info_count,
+        STRING_AGG(mi.info, '; ') AS infos,
+        MAX(mi.note) AS latest_note
+    FROM 
+        movie_info mi
+    JOIN 
+        aka_title m ON mi.movie_id = m.movie_id
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        m.id
+),
+top_movies AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        mis.info_count,
+        mis.infos,
+        mis.latest_note,
+        ROW_NUMBER() OVER (PARTITION BY am.actor_id ORDER BY am.production_year) AS top_movie_rank
+    FROM 
+        actor_movies am
+    LEFT JOIN 
+        movie_info_summary mis ON am.movie_title = mis.movie_id
+    WHERE 
+        am.rn <= 5 AND (mis.info_count IS NULL OR mis.info_count > 1)
+)
+SELECT 
+    tm.actor_id,
+    tm.actor_name,
+    tm.movie_title,
+    tm.production_year,
+    COALESCE(tm.infos, 'No information available') AS movie_info,
+    CASE 
+        WHEN tm.latest_note IS NULL THEN 'No Notes'
+        ELSE tm.latest_note
+    END AS note_status
+FROM 
+    top_movies tm
+WHERE 
+    tm.top_movie_rank = 1
+ORDER BY 
+    tm.actor_name, tm.production_year DESC
+LIMIT 100 OFFSET 0;

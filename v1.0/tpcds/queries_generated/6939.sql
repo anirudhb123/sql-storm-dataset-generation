@@ -1,0 +1,44 @@
+
+WITH sales_summary AS (
+    SELECT
+        d.d_year AS sales_year,
+        d.d_month_seq AS sales_month,
+        SUM(ss.net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        SUM(ss.ss_ext_discount_amt) AS total_discount
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE d.d_year BETWEEN 2020 AND 2023
+        AND cd.cd_marital_status = 'M'
+        AND s.s_market_desc LIKE '%Urban%'
+    GROUP BY d.d_year, d.d_month_seq
+),
+return_summary AS (
+    SELECT
+        d.d_year AS return_year,
+        d.d_month_seq AS return_month,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns_count
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2020 AND 2023
+    GROUP BY d.d_year, d.d_month_seq
+)
+SELECT
+    ss.sales_year,
+    ss.sales_month,
+    ss.total_sales,
+    ss.total_transactions,
+    ss.avg_sales_price,
+    ss.total_discount,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_returns_count, 0) AS total_returns_count,
+    (ss.total_sales - COALESCE(rs.total_returns, 0)) AS net_sales,
+    (ss.avg_sales_price - (COALESCE(rs.total_returns, 0) / NULLIF(ss.total_transactions, 0))) AS avg_net_price
+FROM sales_summary ss
+LEFT JOIN return_summary rs ON ss.sales_year = rs.return_year AND ss.sales_month = rs.return_month
+ORDER BY ss.sales_year, ss.sales_month;

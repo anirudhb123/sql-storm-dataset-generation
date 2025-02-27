@@ -1,0 +1,58 @@
+title: SQLStorm v1.0 StackOverflow Benchmark (24h)
+repetitions: 1
+warmup: 0
+timeout: 10
+fetch_result: false
+global_timeout: 86400
+query_seed: 42
+output: results/v1.0/stackoverflow
+systems:
+  - title: Umbra
+    dbms: umbra
+    disabled: false
+    settings:
+      usedirectio: true
+  - title: CedarDB
+    dbms: cedardb
+    disabled: false
+    settings: { }
+  - title: Hyper
+    dbms: hyper
+    disabled: false
+    settings: { }
+  - title: DuckDB
+    dbms: duckdb
+    disabled: false
+    settings: { }
+  - title: Clickhouse
+    dbms: clickhouse
+    disabled: false
+    settings: { }
+  - title: Postgres
+    dbms: postgres
+    disabled: false
+    settings: { }
+  - title: SQLServer
+    dbms: sqlserver
+    disabled: false
+    settings: { }
+  - title: Apollo
+    dbms: apollo
+    disabled: false
+    settings: { }
+  - title: SingleStore
+    dbms: singlestore
+    disabled: false
+    settings: { }
+benchmarks:
+  - name: stackoverflow
+    zero: true
+    query_dir: sqlstorm_v1.0
+  - name: stackoverflow
+    dba: true
+    query_dir: sqlstorm_v1.0
+  - name: stackoverflow
+    math: true
+    query_dir: sqlstorm_v1.0
+  - name: stackoverflow
+    query_dir: sqlstorm_v1.0

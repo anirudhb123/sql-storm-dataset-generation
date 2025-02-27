@@ -1,0 +1,54 @@
+WITH RankedOrderLines AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey, l.l_suppkey
+),
+TopOrderLines AS (
+    SELECT 
+        r.l_orderkey,
+        r.l_partkey,
+        r.l_suppkey,
+        r.total_sales
+    FROM 
+        RankedOrderLines r
+    WHERE 
+        r.sales_rank <= 5
+),
+SupplierPartDetails AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        sp.ps_supplycost,
+        sp.ps_availqty 
+    FROM 
+        partsupp sp
+    JOIN 
+        supplier s ON sp.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON sp.ps_partkey = p.p_partkey
+)
+SELECT 
+    o.o_orderkey,
+    COUNT(DISTINCT t.l_partkey) AS number_of_parts,
+    SUM(supply.ps_supplycost) AS total_supply_cost,
+    MAX(t.total_sales) AS highest_sale,
+    COUNT(DISTINCT s.s_name) AS unique_suppliers
+FROM 
+    orders o
+JOIN 
+    TopOrderLines t ON o.o_orderkey = t.l_orderkey
+JOIN 
+    SupplierPartDetails supply ON t.l_partkey = supply.p.p_partkey
+GROUP BY 
+    o.o_orderkey
+HAVING 
+    SUM(supply.ps_supplycost) > 10000
+ORDER BY 
+    o.o_orderkey;

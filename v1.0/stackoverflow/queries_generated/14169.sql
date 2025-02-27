@@ -1,0 +1,46 @@
+-- Performance Benchmarking Query
+WITH PostCounts AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        AVG(ViewCount) AS AvgViewCount
+    FROM Posts
+    GROUP BY PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT Id) AS TotalPosts,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY UserId
+),
+TopTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY (string_to_array(p.Tags, ',')::int[])
+    GROUP BY Tags.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    pt.Name AS PostType,
+    pc.TotalPosts,
+    pc.PositiveScoreCount,
+    pc.AvgViewCount,
+    ua.UserId,
+    ua.TotalPosts AS UserTotalPosts,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    tt.TagName,
+    tt.PostCount
+FROM PostCounts pc
+JOIN PostTypes pt ON pc.PostTypeId = pt.Id
+LEFT JOIN UserActivity ua ON ua.TotalPosts > 0
+LEFT JOIN TopTags tt ON tt.PostCount > 0
+ORDER BY pc.TotalPosts DESC, ua.TotalPosts DESC;

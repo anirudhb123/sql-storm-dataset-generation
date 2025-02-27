@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    MIN(mt.depth) AS minimum_depth,
+    ROUND(AVG(p.age), 2) AS avg_age
+FROM 
+    movie_hierarchy mt
+JOIN 
+    complete_cast cc ON mt.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mt.movie_id = mc.movie_id
+LEFT JOIN 
+    (SELECT 
+         person_id,
+         EXTRACT(YEAR FROM AGE(cast('2024-10-01' as date), pi.info)) AS age
+     FROM 
+         person_info pi 
+     WHERE 
+         pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Date of Birth')) p ON ak.person_id = p.person_id
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    company_count > 1
+ORDER BY 
+    production_year DESC, actor_name;

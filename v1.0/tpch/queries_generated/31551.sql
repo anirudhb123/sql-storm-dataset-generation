@@ -1,0 +1,36 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sh.s_suppkey = sp.s_nationkey
+)
+, customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND c.c_acctbal > 1000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    sh.level AS supplier_level
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN customer_orders co ON l.l_orderkey = co.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.p_partkey, p.p_name, r.r_name, n.n_name, sh.level
+HAVING total_revenue > 10000
+ORDER BY total_revenue DESC, p.p_partkey
+LIMIT 100;

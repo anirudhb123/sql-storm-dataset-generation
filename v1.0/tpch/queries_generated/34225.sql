@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500 AND sh.level < 3
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_shippriority,
+           RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'F' AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available,
+           SUM(ps.ps_supplycost) AS total_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sp.total_available, 0) AS total_available,
+    COALESCE(sp.unique_suppliers, 0) AS unique_suppliers,
+    r.n_name AS nation_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    RANK() OVER (PARTITION BY r.n_name ORDER BY SUM(lo.l_extendedprice * (1 - lo.l_discount)) DESC) AS revenue_rank
+FROM part p
+LEFT JOIN lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN (
+    SELECT DISTINCT s_nationkey
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+) AS s ON s.s_nationkey = p.p_partkey
+JOIN nation r ON r.n_nationkey = s.s_nationkey
+LEFT JOIN PartSupplierInfo sp ON sp.ps_partkey = p.p_partkey
+JOIN RankedOrders ro ON ro.o_orderkey = lo.l_orderkey
+WHERE lo.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, r.n_name, sp.total_available, sp.unique_suppliers
+HAVING SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 1000
+ORDER BY revenue_rank, p.p_partkey;

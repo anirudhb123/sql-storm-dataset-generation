@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_ship_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_date_sk, ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        i.i_item_desc,
+        rs.total_quantity,
+        rs.total_sales,
+        sm.sm_ship_mode_id,
+        ca_city,
+        ca_state
+    FROM 
+        RankedSales rs
+    JOIN item i ON rs.ws_item_sk = i.i_item_sk
+    LEFT JOIN ship_mode sm ON sm.sm_ship_mode_sk = (SELECT TOP 1 sm_ship_mode_sk 
+                                                    FROM web_sales 
+                                                    WHERE ws_item_sk = rs.ws_item_sk 
+                                                    ORDER BY ws_sales_price DESC)
+    LEFT JOIN customer_address ca ON (SELECT c.c_current_addr_sk 
+                                       FROM customer c 
+                                       WHERE c.c_customer_sk = (SELECT ws_bill_customer_sk 
+                                                             FROM web_sales 
+                                                             WHERE ws_item_sk = rs.ws_item_sk 
+                                                             LIMIT 1))
+    WHERE 
+        rs.rank <= 5
+),
+SalesSummary AS (
+    SELECT 
+        t.ws_item_sk,
+        SUM(t.total_sales) AS cumulative_sales,
+        AVG(t.total_quantity) AS avg_quantity
+    FROM 
+        TopSales t
+    GROUP BY 
+        t.ws_item_sk
+)
+SELECT 
+    s.ws_item_sk,
+    s.i_item_desc,
+    s.total_quantity,
+    s.total_sales,
+    ss.cumulative_sales,
+    ss.avg_quantity,
+    CASE 
+        WHEN ss.avg_quantity IS NULL THEN 'No Sales'
+        WHEN ss.avg_quantity > 50 THEN 'High Demand'
+        ELSE 'Regular Demand'
+    END AS demand_category
+FROM 
+    TopSales s
+JOIN 
+    SalesSummary ss ON s.ws_item_sk = ss.ws_item_sk
+ORDER BY 
+    s.total_sales DESC, 
+    s.total_quantity DESC
+LIMIT 100;

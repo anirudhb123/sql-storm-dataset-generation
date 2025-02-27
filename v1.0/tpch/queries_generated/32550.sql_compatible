@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sc.part_count + 1
+    FROM SupplyChain sc
+    JOIN partsupp p ON sc.s_suppkey = p.ps_suppkey
+    WHERE sc.part_count < 5
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, '1998-10-01')
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierStatistics AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value, AVG(ps.ps_supplycost) AS avg_cost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT cs.c_name,
+       ss.s_name,
+       ps.total_value,
+       ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY ps.total_value DESC) AS value_rank,
+       CASE 
+           WHEN ps.total_value > 100000 THEN 'High Value Supplier'
+           WHEN ps.total_value BETWEEN 50000 AND 100000 THEN 'Medium Value Supplier'
+           ELSE 'Low Value Supplier'
+       END AS supplier_category
+FROM CustomerOrderSummary cs
+JOIN SupplyChain ss ON cs.order_count > 10
+JOIN PartSupplierStatistics ps ON ss.part_count = ps.rank
+WHERE ps.avg_cost IS NOT NULL AND ss.s_acctbal > 5000
+ORDER BY value_rank, cs.c_name;

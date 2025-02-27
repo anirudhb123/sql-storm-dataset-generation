@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS region_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+RegionSuppliers AS (
+    SELECT 
+        r.r_name AS region,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.part_count,
+        rs.total_avail_qty
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.region_rank <= 3
+)
+SELECT 
+    r.region,
+    rs.s_name,
+    rs.part_count,
+    rs.total_avail_qty,
+    CONCAT('Supplier: ', rs.s_name, ', Total Available Quantity: ', rs.total_avail_qty) AS supplier_info
+FROM 
+    RegionSuppliers rs
+ORDER BY 
+    r.region, rs.total_avail_qty DESC;

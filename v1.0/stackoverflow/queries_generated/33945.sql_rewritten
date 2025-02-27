@@ -1,0 +1,107 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+AverageScores AS (
+    SELECT 
+        p.OwnerUserId,
+        AVG(p.Score) AS AvgScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.OwnerUserId
+),
+TopContributors AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.BadgeCount,
+        asc.AvgScore,
+        asg.PostCount
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        AverageScores asc ON ur.UserId = asc.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            UserId,
+            COUNT(PostId) AS PostCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1
+        GROUP BY 
+            UserId) asg ON ur.UserId = asg.UserId
+    WHERE 
+        ur.Reputation > 1000  
+),
+PostLinkCounts AS (
+    SELECT 
+        PostId,
+        COUNT(RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks
+    GROUP BY 
+        PostId
+)
+SELECT 
+    p.Title,
+    u.DisplayName AS Contributor,
+    uc.Reputation,
+    uc.BadgeCount,
+    COALESCE(pl.LinkCount, 0) AS LinkCount,
+    COALESCE(rh.Level, 0) AS HierarchyLevel,
+    COALESCE(avg.AvgScore, 0) AS AverageScore,
+    COALESCE(avg.PostCount, 0) AS PostCount
+FROM 
+    Posts p 
+INNER JOIN 
+    TopContributors uc ON p.OwnerUserId = uc.UserId
+LEFT JOIN 
+    PostLinkCounts pl ON p.Id = pl.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rh ON p.Id = rh.PostId
+LEFT JOIN 
+    AverageScores avg ON uc.UserId = avg.OwnerUserId
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'  
+ORDER BY 
+    uc.Reputation DESC, uc.BadgeCount DESC, LinkCount DESC;

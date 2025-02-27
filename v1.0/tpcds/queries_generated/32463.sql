@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT d.d_date AS sale_date,
+           SUM(ss.ss_net_paid) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ss.ss_store_sk ORDER BY d.d_date) AS sales_rank
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year >= 2020
+    GROUP BY d.d_date, ss.ss_store_sk
+    UNION ALL
+    SELECT d.d_date,
+           st.total_sales * 1.05 AS total_sales, 
+           st.sales_rank + 1
+    FROM sales_trends st
+    JOIN date_dim d ON st.sale_date = d.d_date
+    WHERE st.sales_rank < 5
+),
+customer_return_stats AS (
+    SELECT c.c_customer_sk,
+           COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+           SUM(sr.sr_return_amt) AS total_return_amount
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+popular_items AS (
+    SELECT i.i_item_id,
+           i.i_item_desc,
+           SUM(ws.ws_quantity) AS total_sales,
+           RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS item_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+)
+SELECT ca.ca_city,
+       COUNT(DISTINCT c.c_customer_id) AS active_customers,
+       AVG(cr.total_return_amount) AS avg_return_amount,
+       pi.i_item_desc,
+       pi.total_sales AS item_sales,
+       st.sale_date,
+       st.total_sales AS daily_sales
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_return_stats cr ON c.c_customer_sk = cr.c_customer_sk
+JOIN popular_items pi ON pi.item_rank <= 10
+JOIN sales_trends st ON st.sale_date BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY ca.ca_city, pi.i_item_desc, st.sale_date
+HAVING COUNT(DISTINCT c.c_customer_id) > 100
+ORDER BY ca.ca_city, st.sale_date;

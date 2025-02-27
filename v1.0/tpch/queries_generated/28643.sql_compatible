@@ -1,0 +1,24 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Retail Price: $', FORMAT(p.p_retailprice, 2)) AS description,
+    LENGTH(CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Retail Price: $', FORMAT(p.p_retailprice, 2))) AS total_length,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS truncated_comment,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name IN ('USA', 'Germany'))
+GROUP BY 
+    s.s_suppkey, s.s_name, p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+HAVING 
+    total_length > 50
+ORDER BY 
+    total_length DESC;

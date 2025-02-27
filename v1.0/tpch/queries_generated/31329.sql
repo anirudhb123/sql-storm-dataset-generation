@@ -1,0 +1,35 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_orderstatus, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND oh.level < 10
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, COUNT(ps.ps_suppkey) AS supplier_count, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, COALESCE(SI.s_name, 'Unknown Supplier') AS supplier_name,
+       PSI.supplier_count, PSI.total_supplycost,
+       SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+       SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_quantity ELSE 0 END) AS return_qty,
+       AVG(CASE WHEN li.l_shipdate < '1996-01-01' THEN li.l_tax ELSE NULL END) AS avg_tax_pre_1996
+FROM part p
+LEFT JOIN PartSupplierInfo PSI ON p.p_partkey = PSI.ps_partkey
+LEFT JOIN SupplierInfo SI ON SI.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey AND SI.rn = 1)
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+WHERE p.p_size > 10 AND (p.p_container = 'Box' OR p.p_container IS NULL)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, SI.s_name, PSI.supplier_count, PSI.total_supplycost
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY revenue DESC, p.p_name;

@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_quantity > 0
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        COUNT(DISTINCT web_page.wp_web_page_sk) AS web_page_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_marital_status, cd.cd_gender
+),
+ReturnsSummary AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_returned_date_sk) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_refunds
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    r.rank,
+    ci.c_customer_id,
+    ci.cd_marital_status,
+    ci.cd_gender,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_refunds, 0) AS total_refunds,
+    SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales_value,
+    AVG(CASE WHEN rs.ws_sales_price IS NOT NULL THEN rs.ws_sales_price ELSE NULL END) AS avg_sales_price
+FROM 
+    RankedSales rs
+JOIN 
+    CustomerInfo ci ON ci.web_page_count > 0
+LEFT JOIN 
+    ReturnsSummary r ON r.sr_item_sk = rs.ws_item_sk
+WHERE 
+    (ci.cd_marital_status = 'M' AND ci.cd_gender = 'F') 
+    OR (ci.cd_marital_status IS NULL AND ci.cd_gender IS NOT NULL)
+GROUP BY 
+    r.rank, ci.c_customer_id, ci.cd_marital_status, ci.cd_gender
+HAVING 
+    total_sales_value > (SELECT AVG(total_sales_value) FROM RankedSales)    
+ORDER BY 
+    total_sales_value DESC NULLS LAST;

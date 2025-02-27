@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_within_site
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1950 AND 2000
+    GROUP BY ws.web_site_sk, ws.web_site_id
+),
+DateAnalysis AS (
+    SELECT 
+        d.d_year,
+        SUM(CASE WHEN d.d_weekend = '1' THEN 1 ELSE 0 END) AS weekend_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year
+),
+SalesComparison AS (
+    SELECT 
+        da.d_year,
+        da.weekend_sales,
+        da.total_orders,
+        COALESCE(da.weekend_sales * 1.0 / NULLIF(da.total_orders, 0), 0) AS weekend_order_ratio
+    FROM DateAnalysis da
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity > 0
+    GROUP BY sr_customer_sk
+),
+FinalMetrics AS (
+    SELECT 
+        cs.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COALESCE(cr.return_count, 0) AS return_count,
+        SUM(ws.ws_net_paid) AS total_sales,
+        rr.weekend_order_ratio
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN SalesComparison rr ON YEAR(CURRENT_DATE) = rr.d_year
+    WHERE c.c_preferred_cust_flag = 'Y' AND ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY cs.c_customer_sk, rr.weekend_order_ratio
+)
+SELECT 
+    fm.c_customer_sk,
+    fm.order_count,
+    fm.return_count,
+    fm.total_sales,
+    fm.weekend_order_ratio,
+    CASE 
+        WHEN fm.return_count > fm.order_count THEN 'High Return'
+        ELSE 'Normal Return'
+    END AS return_behavior
+FROM FinalMetrics fm
+WHERE fm.total_sales > (SELECT AVG(total_sales) FROM FinalMetrics)
+ORDER BY fm.total_sales DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM customer) / 2;

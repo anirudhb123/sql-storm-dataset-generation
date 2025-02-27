@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.UserPostRank,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Upvotes,
+        rp.Downvotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 5
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.UserPostRank,
+    fp.Score,
+    fp.ViewCount,
+    fp.AnswerCount,
+    (fp.Upvotes - fp.Downvotes) AS NetVotes,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'No Score'
+        WHEN fp.Score > 10 THEN 'High Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Posts p ON fp.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    fp.PostId, fp.Title, fp.UserPostRank, fp.Score, fp.ViewCount, fp.AnswerCount
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC
+LIMIT 10

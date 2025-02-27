@@ -1,0 +1,50 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.upvotes, 0)) AS TotalUpvotes,
+        SUM(COALESCE(v.downvotes, 0)) AS TotalDownvotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(u.UpVotes) DESC) AS ActivityRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS upvotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS downvotes
+        FROM Votes
+        GROUP BY PostId
+    ) AS v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalUpvotes,
+        TotalDownvotes
+    FROM UserActivity
+    WHERE ActivityRank <= 10
+)
+
+SELECT 
+    t.DisplayName,
+    t.PostCount,
+    t.TotalUpvotes,
+    t.TotalDownvotes,
+    COALESCE(ROUND((t.TotalUpvotes * 1.0 / NULLIF(t.PostCount, 0)), 2), 0) AS UpvoteRatio,
+    CASE 
+        WHEN t.TotalDownvotes = 0 THEN 'No downvotes'
+        ELSE ROUND((t.TotalDownvotes * 1.0 / NULLIF(t.PostCount, 0)), 2) 
+    END AS DownvoteRatio,
+    CASE 
+        WHEN ph.PostHistoryTypeId IS NOT NULL THEN 'Has History Change'
+        ELSE 'No History Change'
+    END AS HistoryStatus
+FROM TopUsers t
+LEFT JOIN PostHistory ph ON t.UserId = ph.UserId 
+GROUP BY t.UserId, t.DisplayName, t.PostCount, t.TotalUpvotes, t.TotalDownvotes, ph.PostHistoryTypeId
+ORDER BY UpvoteRatio DESC, PostCount DESC;

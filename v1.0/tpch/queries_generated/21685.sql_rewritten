@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE()) 
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_cost) * 2 FROM (SELECT ps.ps_supplycost FROM partsupp ps) AS avg_price)
+),
+OrderDetails AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_suppkey,
+        li.l_quantity,
+        li.l_discount,
+        li.l_extendedprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY li.l_orderkey ORDER BY li.l_discount DESC) AS rn
+    FROM 
+        lineitem li
+    JOIN 
+        RankedOrders o ON li.l_orderkey = o.o_orderkey
+    WHERE 
+        li.l_shipdate IS NOT NULL AND li.l_discount > 0.1
+)
+SELECT 
+    p.p_name,
+    pr.r_name,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS net_sales,
+    MIN(od.o_orderpriority) AS lowest_priority,
+    CASE 
+        WHEN COUNT(DISTINCT od.l_orderkey) IS NULL THEN 'No Orders'
+        ELSE CAST(COUNT(DISTINCT od.l_orderkey) AS varchar(25))
+    END AS order_count
+FROM 
+    OrderDetails od
+JOIN 
+    part p ON od.l_partkey = p.p_partkey
+JOIN 
+    supplier s ON od.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region pr ON n.n_regionkey = pr.r_regionkey
+LEFT JOIN 
+    HighValueSuppliers hvs ON s.s_suppkey = hvs.s_suppkey
+WHERE 
+    (hvs.s_name IS NOT NULL OR n.n_name IN ('USA', 'CANADA')) 
+    AND (p.p_size BETWEEN 10 AND 20 OR p.p_size IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, pr.r_name
+HAVING 
+    SUM(od.l_extendedprice) > 5000
+ORDER BY 
+    net_sales DESC, lowest_priority ASC;

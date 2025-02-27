@@ -1,0 +1,45 @@
+-- Performance benchmarking query on Stack Overflow schema
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROUND(AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 2) AS AvgUpVotes,
+        ROUND(AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 2) AS AvgDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+)
+
+SELECT 
+    pts.PostId,
+    pts.PostTypeId,
+    pts.CreationDate,
+    pts.Score,
+    pts.ViewCount,
+    pts.AnswerCount,
+    pts.CommentCount,
+    pts.OwnerDisplayName,
+    pts.VoteCount,
+    pts.AvgUpVotes,
+    pts.AvgDownVotes
+FROM 
+    PostStats pts
+ORDER BY 
+    pts.Score DESC, pts.ViewCount DESC
+LIMIT 100;

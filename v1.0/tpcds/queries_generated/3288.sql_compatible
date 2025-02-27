@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        C.c_customer_id,
+        D.d_year,
+        ROW_NUMBER() OVER (PARTITION BY C.c_customer_sk ORDER BY ws.ws_sold_date_sk DESC) AS row_num
+    FROM 
+        web_sales AS ws
+    JOIN 
+        customer AS C ON ws.ws_bill_customer_sk = C.c_customer_sk
+    JOIN 
+        date_dim AS D ON ws.ws_sold_date_sk = D.d_date_sk
+),
+AggregatedSales AS (
+    SELECT 
+        c_customer_id,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(*) AS total_transactions
+    FROM 
+        SalesData
+    WHERE 
+        row_num <= 5
+    GROUP BY 
+        c_customer_id
+),
+RankedSales AS (
+    SELECT 
+        c_customer_id,
+        total_sales,
+        total_profit,
+        total_transactions,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        AggregatedSales
+)
+SELECT 
+    RS.c_customer_id,
+    RS.total_sales,
+    RS.total_profit,
+    RS.total_transactions,
+    CASE 
+        WHEN RS.sales_rank <= 10 THEN 'Top 10'
+        WHEN RS.sales_rank <= 50 THEN 'Top 50'
+        ELSE 'Others'
+    END AS Sales_Bracket
+FROM 
+    RankedSales AS RS
+LEFT JOIN 
+    customer_demographics AS CD ON RS.c_customer_id = CD.cd_demo_sk
+WHERE 
+    (CD.cd_gender = 'M' AND RS.total_sales > 1000) OR 
+    (CD.cd_gender = 'F' AND RS.total_sales < 500)
+ORDER BY 
+    RS.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

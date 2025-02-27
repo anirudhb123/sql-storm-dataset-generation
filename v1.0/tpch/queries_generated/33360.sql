@@ -1,0 +1,39 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) + sc.total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN supply_chain sc ON s.s_suppkey = sc.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_orders AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent,
+           RANK() OVER (ORDER BY co.total_spent DESC) AS spent_rank
+    FROM customer_orders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+),
+part_sales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT rs.c_custkey, rs.c_name, rs.total_spent, ps.p_partkey, ps.p_name, ps.total_revenue,
+       CASE WHEN rs.total_spent > 1000 THEN 'High Value' ELSE 'Low Value' END AS customer_segment,
+       COALESCE(sc.total_supply_cost, 0) AS supplier_cost
+FROM ranked_orders rs
+LEFT JOIN part_sales ps ON ps.total_revenue > 500
+LEFT JOIN supply_chain sc ON ps.p_partkey = (SELECT ps_partkey FROM partsupp ps2 WHERE ps2.ps_suppkey = sc.s_suppkey LIMIT 1)
+WHERE ps.p_name LIKE '%widget%' AND rs.spent_rank <= 10
+ORDER BY rs.total_spent DESC, ps.total_revenue DESC;

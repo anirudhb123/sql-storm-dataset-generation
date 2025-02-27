@@ -1,0 +1,87 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.order_number, 
+        ws.item_sk, 
+        ws.net_paid, 
+        RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws.net_paid DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq BETWEEN 5 AND 7
+        )
+),
+HighValueReturns AS (
+    SELECT 
+        cr.returning_customer_sk, 
+        SUM(cr.return_qty) AS total_return_qty,
+        SUM(cr.return_amount) AS total_return_amt
+    FROM 
+        catalog_returns cr 
+    WHERE 
+        cr.returned_date_sk = (SELECT MAX(returned_date_sk) FROM catalog_returns)
+    GROUP BY 
+        cr.returning_customer_sk
+    HAVING 
+        SUM(cr.return_qty) > 10
+),
+CustomerWithHighReturns AS (
+    SELECT 
+        c.customer_id, 
+        COALESCE(hvr.total_return_qty, 0) AS total_return_qty,
+        COALESCE(hvr.total_return_amt, 0) AS total_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        HighValueReturns hvr ON c.customer_sk = hvr.returning_customer_sk
+),
+FinalSales AS (
+    SELECT 
+        cs.order_number,
+        cs.item_sk,
+        cs.net_paid,
+        COALESCE(ch.return_qty, 0) AS return_qty,
+        CASE 
+            WHEN SUM(ch.return_qty) IS NULL THEN 'No Returns'
+            WHEN SUM(ch.return_qty) < 5 THEN 'Low Returns'
+            ELSE 'High Returns'
+        END AS return_status
+    FROM 
+        store_sales cs
+    LEFT JOIN 
+        (SELECT 
+            cr.order_number, 
+            cr.returning_customer_sk, 
+            SUM(cr.return_quantity) AS return_qty
+         FROM 
+            catalog_returns cr 
+         GROUP BY 
+            cr.order_number, cr.returning_customer_sk) ch ON cs.order_number = ch.order_number
+    WHERE 
+        cs.sold_date_sk BETWEEN 20230101 AND 20230930
+    GROUP BY 
+        cs.order_number, cs.item_sk, cs.net_paid
+)
+SELECT 
+    f.order_number, 
+    f.item_sk,
+    f.net_paid,
+    f.return_qty,
+    f.return_status,
+    CASE 
+        WHEN f.return_status = 'High Returns' THEN (f.net_paid - (f.return_qty * 10)) 
+        ELSE f.net_paid 
+    END AS adjusted_net_paid,
+    DENSE_RANK() OVER (ORDER BY adjusted_net_paid DESC) AS sales_density
+FROM 
+    FinalSales f
+JOIN 
+    RankedSales r ON f.order_number = r.order_number AND f.item_sk = r.item_sk
+WHERE 
+    r.sales_rank = 1
+ORDER BY 
+    adjusted_net_paid DESC
+FETCH FIRST 50 ROWS ONLY;

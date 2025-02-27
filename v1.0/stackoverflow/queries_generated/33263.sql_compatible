@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadgeCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadgeCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryLatest AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS LatestRevision
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.OwnerDisplayName,
+    ub.GoldBadgeCount,
+    ub.SilverBadgeCount,
+    ub.BronzeBadgeCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ph.UserDisplayName AS LastEditor,
+    ph.Comment AS EditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryLatest ph ON rp.PostId = ph.PostId AND ph.LatestRevision = 1
+WHERE 
+    rp.ViewCount > 50
+    AND (rp.AnswerCount > 0 OR rp.UpVotes > 5)
+    AND rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC 
+FETCH FIRST 100 ROWS ONLY;

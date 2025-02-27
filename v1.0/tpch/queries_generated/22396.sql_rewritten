@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' 
+    AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SalesStatistics AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey 
+    WHERE l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30' DAY
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    sc.total_supply_cost,
+    ro.order_rank
+FROM part p
+LEFT JOIN SalesStatistics ss ON p.p_partkey = ss.l_partkey
+LEFT JOIN SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_managed = 'Y' AND o.o_orderstatus = 'O'
+) OR ro.o_orderkey IS NULL
+WHERE (sc.total_supply_cost IS NULL OR sc.total_supply_cost > 100) 
+AND (p.p_retailprice > 50 OR p.p_comment IS NULL)
+ORDER BY total_sales DESC, p.p_partkey
+FETCH FIRST 100 ROWS ONLY;

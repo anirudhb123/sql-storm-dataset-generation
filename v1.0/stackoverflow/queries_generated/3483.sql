@@ -1,0 +1,51 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(COALESCE(v.CreationDate, NOW())) AS AvgVoteDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.Reputation
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(ph.Id) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+), RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(cp.CloseCount, 0) AS ClosingEvents
+    FROM Posts p
+    LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.AnswerCount,
+    us.QuestionCount,
+    us.TotalBounties,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.Rank,
+    rp.ClosingEvents
+FROM UserStats us
+JOIN RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE us.Reputation > 1000
+  AND rp.Rank <= 5
+  AND (rp.ClosingEvents IS NULL OR rp.ClosingEvents < 3)
+ORDER BY us.Reputation DESC, rp.Score DESC;

@@ -1,0 +1,70 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagPostCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalPosts,
+        UA.TotalComments,
+        UA.TotalBounty,
+        UA.TotalViews,
+        UA.AvgPostScore,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY UA.TotalViews DESC) AS ViewRank
+    FROM 
+        UserActivity UA
+)
+SELECT
+    TU.DisplayName,
+    COALESCE(TPC.TagName, 'No Tags') AS TagName,
+    COALESCE(TPC.PostCount, 0) AS NumberOfPostsWithTag,
+    TU.TotalPosts,
+    TU.TotalViews,
+    TU.AvgPostScore,
+    CASE 
+        WHEN TU.TotalPosts > 100 THEN 'Veteran' 
+        WHEN TU.TotalPosts > 50 THEN 'Experienced' 
+        ELSE 'Novice' 
+    END AS UserLevel
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    TagPostCounts TPC ON TU.UserId IN (SELECT DISTINCT U.Id FROM Users U WHERE U.Tags LIKE '%' || TPC.TagName || '%')
+WHERE 
+    TU.TotalViews > 1000 OR TU.TotalComments > 50
+ORDER BY 
+    TU.TotalPosts DESC, TU.TotalViews DESC
+LIMIT 10;

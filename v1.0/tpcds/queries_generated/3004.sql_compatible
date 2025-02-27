@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2459732 AND 2459738
+    GROUP BY ws_bill_customer_sk, ws_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+AddressSales AS (
+    SELECT 
+        ca.city,
+        ca.county,
+        ca.state,
+        SUM(rs.total_quantity) AS total_sales_quantity,
+        SUM(rs.total_net_profit) AS total_sales_net_profit
+    FROM RankedSales rs
+    JOIN customer c ON rs.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca.city, ca.county, ca.state
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ab.city,
+    ab.county,
+    ab.state,
+    ab.total_sales_quantity,
+    ab.total_sales_net_profit,
+    CASE 
+        WHEN ab.total_sales_net_profit > 5000 THEN 'High Value'
+        WHEN ab.total_sales_net_profit BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders
+FROM CustomerInfo ci
+JOIN AddressSales ab ON ci.c_customer_sk = ab.customer_sk
+LEFT JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+WHERE ci.cd_purchase_estimate > 100
+GROUP BY ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status, 
+         ab.city, ab.county, ab.state, ab.total_sales_quantity, 
+         ab.total_sales_net_profit
+ORDER BY ab.total_sales_net_profit DESC
+LIMIT 100;

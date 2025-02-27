@@ -1,0 +1,61 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+total_returns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr.cr_order_number) AS return_count
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+final_sales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(rs.ws_ext_sales_price), 0) AS total_sales_value,
+        COALESCE(ts.total_returned, 0) AS total_returns,
+        COALESCE(ts.return_count, 0) AS return_count,
+        RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS overall_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        ranked_sales rs ON ws.ws_item_sk = rs.ws_item_sk AND ws.ws_order_number = rs.ws_order_number
+    LEFT JOIN 
+        total_returns ts ON i.i_item_id = ts.cr_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    f.i_item_id,
+    f.total_quantity_sold,
+    f.total_sales_value,
+    f.total_returns,
+    CASE 
+        WHEN f.return_count > 0 THEN 'High Risk'
+        WHEN f.total_sales_value > 1000 THEN 'Profit Maker'
+        ELSE 'Consistent Seller'
+    END AS sales_category,
+    COALESCE(MAX(f.total_sales_value) OVER (PARTITION BY f.total_returns ORDER BY f.total_sales_value DESC), 0) AS max_sales_value_per_return
+FROM 
+    final_sales f
+WHERE 
+    f.total_quantity_sold > (SELECT AVG(total_quantity_sold) FROM final_sales) 
+    AND f.total_returns IS NOT NULL
+ORDER BY 
+    f.overall_rank, f.total_sales_value DESC
+FETCH FIRST 100 ROWS ONLY;

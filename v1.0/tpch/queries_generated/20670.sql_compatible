@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_type
+), 
+CustomerOrderTotals AS (
+    SELECT 
+        o.o_custkey, 
+        SUM(o.o_totalprice) AS total_price,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+), 
+LateShipments AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_shipdate,
+        l.l_commitdate,
+        DATEDIFF(l.l_shipdate, l.l_commitdate) AS late_days,
+        CASE 
+            WHEN l.l_shipdate < l.l_commitdate THEN 'Late'
+            WHEN l.l_shipdate IS NULL THEN 'Unknown'
+            ELSE 'On Time'
+        END AS shipment_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate IS NOT NULL
+)
+SELECT 
+    c.c_name,
+    COALESCE(cot.total_price, 0) AS customer_total,
+    COUNT(l.l_orderkey) AS total_lines,
+    MAX(CASE WHEN ls.late_days > 0 THEN l.l_orderkey END) AS late_order,
+    s.s_name AS supplier_name,
+    rs.total_supply_cost
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderTotals cot ON c.c_custkey = cot.o_custkey
+LEFT JOIN 
+    lineitem l ON c.c_custkey = l.l_orderkey
+LEFT JOIN 
+    LateShipments ls ON l.l_orderkey = ls.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1
+LEFT JOIN 
+    supplier s ON rs.s_suppkey = s.s_suppkey 
+WHERE 
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    c.c_name, cot.total_price, s.s_name, rs.total_supply_cost
+HAVING 
+    COUNT(l.l_orderkey) > 10 OR MAX(ls.late_days) IS NOT NULL
+ORDER BY 
+    customer_total DESC, 
+    total_lines DESC;

@@ -1,0 +1,95 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank_price
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND 
+        ws.ws_sold_date_sk >= (
+            SELECT MAX(d.d_date_sk) - 30 
+            FROM date_dim d 
+            WHERE d.d_year = 2023
+        )
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_qty,
+        SUM(sr_return_amt) AS total_returned_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        r.ws_item_sk,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(SUM(cr.total_returned_qty), 0) AS total_returned_qty,
+        COALESCE(SUM(cr.total_returned_amt), 0) AS total_returned_amt,
+        SUM(CASE WHEN cr.total_returns IS NULL THEN ws.ws_quantity ELSE 0 END) AS no_return_qty,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_value
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        CustomerReturns cr ON r.ws_item_sk = cr.sr_item_sk
+    JOIN 
+        web_sales ws ON r.ws_order_number = ws.ws_order_number
+    GROUP BY 
+        r.ws_item_sk
+),
+FinalAnalytics AS (
+    SELECT
+        swr.ws_item_sk,
+        swr.total_returns,
+        swr.total_returned_qty,
+        swr.total_returned_amt,
+        swr.no_return_qty,
+        swr.total_sales_value,
+        CASE 
+            WHEN swr.total_returns > 0 THEN 'Returned'
+            WHEN swr.total_sales_value IS NULL OR swr.total_sales_value = 0 THEN 'No Sales'
+            ELSE 'Successful'
+        END AS sales_status
+    FROM 
+        SalesWithReturns swr
+)
+SELECT 
+    i.i_item_id,
+    f.total_returns,
+    f.total_returned_qty,
+    f.total_returned_amt,
+    f.no_return_qty,
+    f.total_sales_value,
+    f.sales_status,
+    i.i_item_desc,
+    CASE 
+        WHEN f.total_returned_qty > 0 THEN 'High Return Rate'
+        WHEN f.total_sales_value < (
+            SELECT AVG(total_sales_value) 
+            FROM SalesWithReturns
+        ) THEN 'Low Sales'
+        ELSE 'Normal'
+    END AS performance_rating
+FROM 
+    FinalAnalytics f
+JOIN 
+    item i ON f.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    warehouse w ON (f.ws_item_sk % 10) = (w.w_warehouse_sk % 10)
+WHERE 
+    i.i_current_price < (
+        SELECT AVG(i_current_price) 
+        FROM item
+    )
+ORDER BY 
+    f.total_sales_value DESC, 
+    f.total_returns DESC NULLS LAST;

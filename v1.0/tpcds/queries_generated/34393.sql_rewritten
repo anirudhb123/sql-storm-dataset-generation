@@ -1,0 +1,37 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        0 AS level,
+        '' AS path
+    FROM 
+        customer AS c
+    WHERE 
+        c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT 
+        s.ss_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.level + 1,
+        CONCAT(sh.path, ' -> ', c.c_first_name, ' ', c.c_last_name)
+    FROM 
+        sales_hierarchy AS sh
+    JOIN 
+        store_sales AS s ON sh.c_customer_sk = s.ss_customer_sk
+    JOIN 
+        customer AS c ON s.ss_customer_sk = c.c_customer_sk
+)
+SELECT 
+    sh.level,
+    COUNT(DISTINCT sh.c_customer_sk) AS unique_customers,
+    STRING_AGG(DISTINCT sh.path) AS customer_paths
+FROM 
+    sales_hierarchy AS sh
+GROUP BY 
+    sh.level
+HAVING 
+    COUNT(DISTINCT sh.c_customer_sk) > 1
+ORDER BY 
+    sh.level DESC;

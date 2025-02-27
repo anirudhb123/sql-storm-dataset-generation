@@ -1,0 +1,59 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+),
+SupplierAvgCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+Surcharges AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + 
+        COALESCE(SUM(l.l_tax), 0) AS total_cost
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CombinedData AS (
+    SELECT 
+        r.n_nationkey,
+        r.n_name,
+        s.s_name,
+        COALESCE(SUM(sac.avg_supplycost), 0) AS total_avg_cost,
+        oc.o_totalprice,
+        sc.total_cost
+    FROM nation r
+    LEFT JOIN RankedSuppliers s ON r.n_nationkey = s.s_nationkey AND s.rank_acctbal = 1
+    LEFT JOIN SupplierAvgCost sac ON s.s_suppkey = sac.ps_suppkey
+    LEFT JOIN RecentOrders oc ON oc.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = r.n_nationkey AND c.c_acctbal > 100)
+    LEFT JOIN Surcharges sc ON oc.o_orderkey = sc.l_orderkey
+    GROUP BY r.n_nationkey, r.n_name, s.s_name, oc.o_totalprice, sc.total_cost
+)
+SELECT 
+    c.n_name,
+    COALESCE(MAX(c.total_avg_cost), 0) AS max_avg_cost,
+    SUM(COALESCE(c.total_cost, 0)) AS total_order_cost,
+    COUNT(DISTINCT c.o_totalprice) AS distinct_order_count
+FROM CombinedData c
+WHERE c.total_avg_cost > 0 AND c.n_name IS NOT NULL
+GROUP BY c.n_name
+HAVING COUNT(c.s_name) > 0
+ORDER BY max_avg_cost DESC NULLS LAST;

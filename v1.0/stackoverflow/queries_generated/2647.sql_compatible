@@ -1,0 +1,58 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS PostsCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.Upvotes,
+    US.Downvotes,
+    US.PostsCount,
+    US.Rank,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.ViewCount AS RecentPostViewCount,
+    RP.OwnerDisplayName AS RecentPostOwner
+FROM 
+    UserStatistics US
+LEFT JOIN 
+    RecentPosts RP ON US.UserId = RP.OwnerDisplayName
+WHERE 
+    US.Reputation > 100
+    AND (SELECT COUNT(*) FROM Badges B WHERE B.UserId = US.UserId AND B.Class = 1) > 0
+    OR (RP.RN = 1 AND RP.ViewCount > 100)
+ORDER BY 
+    US.Reputation DESC, 
+    RP.CreationDate DESC
+LIMIT 50;

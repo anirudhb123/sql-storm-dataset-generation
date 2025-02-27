@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT C.c_customer_sk, C.c_first_name, C.c_last_name, C.c_current_addr_sk, CH.level + 1
+    FROM customer C
+    JOIN CustomerHierarchy CH ON C.c_current_addr_sk = CH.c_current_addr_sk AND CH.level < 5
+),
+SalesData AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales,
+           SUM(ws.ws_net_paid) AS total_net_paid,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+ReturnData AS (
+    SELECT cr.cr_item_sk,
+           SUM(cr.cr_return_quantity) AS total_returns,
+           SUM(cr.cr_return_amt) AS total_return_amt
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+PerformanceMetrics AS (
+    SELECT I.i_item_sk,
+           I.i_item_desc,
+           COALESCE(SD.total_sales, 0) AS total_sales,
+           COALESCE(SD.total_net_paid, 0) AS total_net_paid,
+           COALESCE(RD.total_returns, 0) AS total_returns,
+           COALESCE(RD.total_return_amt, 0) AS total_return_amt,
+           (COALESCE(SD.total_net_paid, 0) - COALESCE(RD.total_return_amt, 0)) AS net_profit_per_item,
+           P.p_discount_active,
+           CASE 
+               WHEN COALESCE(SD.total_sales, 0) = 0 THEN NULL
+               ELSE (COALESCE(RD.total_returns, 0) * 1.0 / NULLIF(COALESCE(SD.total_sales, 0), 0)) * 100
+           END AS return_percentage
+    FROM item I
+    LEFT JOIN SalesData SD ON I.i_item_sk = SD.ws_item_sk
+    LEFT JOIN ReturnData RD ON I.i_item_sk = RD.cr_item_sk
+    LEFT JOIN promotion P ON P.p_item_sk = I.i_item_sk
+),
+TopSellingItems AS (
+    SELECT i_item_sk, 
+           i_item_desc, 
+           net_profit_per_item, 
+           return_percentage,
+           ROW_NUMBER() OVER (ORDER BY net_profit_per_item DESC) AS ranking
+    FROM PerformanceMetrics
+    WHERE net_profit_per_item > 0 
+    AND return_percentage < 10
+)
+SELECT ch.c_first_name,
+       ch.c_last_name,
+       ch.level,
+       tsi.i_item_desc,
+       tsi.net_profit_per_item,
+       tsi.return_percentage
+FROM CustomerHierarchy ch
+JOIN TopSellingItems tsi ON ch.c_current_addr_sk IS NOT NULL
+WHERE ch.level IN (SELECT DISTINCT level + 2 FROM CustomerHierarchy)
+ORDER BY tsi.net_profit_per_item DESC, tsi.return_percentage ASC
+LIMIT 10;

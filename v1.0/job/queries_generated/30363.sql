@@ -1,0 +1,52 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        ARRAY[c.person_id] AS actor_path,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.movie_id IN (SELECT id FROM aka_title WHERE production_year >= 2000)
+
+    UNION ALL 
+
+    SELECT 
+        cc.person_id,
+        cc.movie_id,
+        ah.actor_path || cc.person_id,
+        ah.level + 1
+    FROM 
+        cast_info cc
+    JOIN 
+        ActorHierarchy ah ON cc.movie_id = ah.movie_id
+    WHERE 
+        NOT cc.person_id = ANY(ah.actor_path)
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT ah.movie_id) AS movies_count,
+    STRING_AGG(DISTINCT at.title, ', ') AS titles,
+    MAX(CASE WHEN c.kind = 'director' THEN 'Yes' ELSE 'No' END) AS directed,
+    SUM(COALESCE(mi.info_type_id, 0)) AS total_info_entries
+FROM 
+    ActorHierarchy ah
+JOIN 
+    aka_name a ON a.person_id = ah.person_id
+LEFT JOIN 
+    aka_title at ON at.id = ah.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = ah.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = ah.movie_id
+LEFT JOIN 
+    comp_cast_type c ON c.id = ci.person_role_id
+WHERE 
+    ah.level < 5
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT ah.movie_id) > 5
+ORDER BY 
+    movies_count DESC;

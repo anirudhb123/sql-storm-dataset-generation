@@ -1,0 +1,53 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+PopularActors AS (
+    SELECT 
+        an.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name an
+    JOIN 
+        cast_info ci ON an.person_id = ci.person_id
+    GROUP BY 
+        an.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+RecentMovies AS (
+    SELECT 
+        r.title,
+        r.actor_count,
+        COALESCE(pa.movie_count, 0) AS popular_actor_count
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        PopularActors pa ON pa.movie_count >= r.actor_count
+    WHERE 
+        r.rn <= 10
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    rm.popular_actor_count,
+    CASE 
+        WHEN rm.actor_count IS NULL THEN 'No Actors'
+        WHEN rm.popular_actor_count > 0 THEN 'Features Popular Actors'
+        ELSE 'Less Known Cast'
+    END AS cast_category
+FROM 
+    RecentMovies rm
+ORDER BY 
+    rm.actor_count DESC, rm.title;

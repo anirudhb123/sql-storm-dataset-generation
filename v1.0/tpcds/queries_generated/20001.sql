@@ -1,0 +1,69 @@
+
+WITH RecursiveCustomer AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           COALESCE(d.cd_gender, 'U') AS gender, 
+           d.cd_marital_status, 
+           d.cd_purchase_estimate, 
+           COALESCE(d.cd_dep_count, 0) AS dependents, 
+           c.c_birth_year, 
+           2023 - c.c_birth_year AS age
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    WHERE d.cd_purchase_estimate IS NOT NULL 
+          AND (d.cd_gender IS NULL OR d.cd_gender IN ('M', 'F'))
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           COALESCE(d.cd_gender, 'U') AS gender, 
+           d.cd_marital_status, 
+           d.cd_purchase_estimate, 
+           COALESCE(d.cd_dep_count, 0) AS dependents, 
+           c.c_birth_year,
+           2023 - c.c_birth_year AS age
+    FROM RecursiveCustomer rc
+    JOIN customer c ON rc.c_customer_sk = c.c_current_cdemo_sk
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+YearlySales AS (
+    SELECT EXTRACT(YEAR FROM date_dim.d_date) AS year,
+           SUM(ws.net_profit) AS total_profit,
+           COUNT(ws.ws_order_number) AS total_sales
+    FROM web_sales ws
+    JOIN date_dim ON ws.ws_sold_date_sk = date_dim.d_date_sk
+    WHERE date_dim.d_year >= 2019
+    GROUP BY year
+),
+AggregateReturns AS (
+    SELECT sr_returned_date_sk, SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_returned_date_sk
+),
+JoinedData AS (
+    SELECT rc.gender, rc.marital_status, rc.age, 
+           COUNT(DISTINCT ws.ws_order_number) AS order_count, 
+           COALESCE(SUM(ws.ws_net_profit), 0) AS total_spent, 
+           COALESCE(SUM(sr.total_returns), 0) AS total_returned
+    FROM RecursiveCustomer rc
+    LEFT JOIN web_sales ws ON rc.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN AggregateReturns sr ON ws.ws_sold_date_sk = sr.sr_returned_date_sk
+    GROUP BY rc.gender, rc.marital_status, rc.age
+), 
+FinalOutput AS (
+    SELECT gd.gender, gd.marital_status, gd.age,
+           gd.order_count, gd.total_spent, gd.total_returned,
+           gd.total_spent / NULLIF(gd.order_count, 0) AS avg_spent_per_order,
+           CASE 
+               WHEN gd.total_spent < 1000 THEN 'Low'
+               WHEN gd.total_spent BETWEEN 1000 AND 5000 THEN 'Medium'
+               ELSE 'High'
+           END AS spending_category
+    FROM JoinedData gd
+)
+SELECT * 
+FROM FinalOutput 
+WHERE (gender = 'F' AND order_count > 5) 
+   OR (gender = 'U' AND total_returned > 0) 
+   OR (total_spent IS NULL OR total_returned IS NULL)
+ORDER BY total_spent DESC, age ASC
+LIMIT 50;

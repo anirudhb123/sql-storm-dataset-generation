@@ -1,0 +1,81 @@
+
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 5
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        SUBSTRING(s.s_comment, 1, 50) AS short_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT 
+        rp.p_name,
+        rp.p_brand,
+        rp.p_type,
+        sd.s_name AS supplier_name,
+        sd.short_comment,
+        cp.c_name AS customer_name,
+        cp.total_orders,
+        cp.total_spent
+    FROM 
+        RankedProducts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier sd ON ps.ps_suppkey = sd.s_suppkey
+    JOIN 
+        lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    JOIN 
+        CustomerPurchases cp ON o.o_custkey = cp.c_custkey
+    WHERE 
+        rp.price_rank <= 3
+)
+SELECT 
+    p_name,
+    p_brand,
+    p_type,
+    supplier_name,
+    short_comment,
+    customer_name,
+    total_orders,
+    total_spent
+FROM 
+    FinalReport
+ORDER BY 
+    total_spent DESC, 
+    p_brand, 
+    p_name;

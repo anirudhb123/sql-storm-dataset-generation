@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_customer_sk, ws_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        hd.hd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.ca_city,
+        ci.ca_state,
+        rs.total_quantity,
+        rs.total_sales,
+        CASE 
+            WHEN rs.sales_rank = 1 THEN 'Top Seller'
+            ELSE 'Regular Seller'
+        END AS customer_status
+    FROM RankedSales rs
+    JOIN CustomerInfo ci ON rs.ws_customer_sk = ci.c_customer_id
+    WHERE rs.total_sales > 10000
+)
+SELECT 
+    tc.customer_status,
+    COUNT(tc.c_customer_id) AS customer_count,
+    AVG(tc.total_sales) AS avg_sales,
+    SUM(tc.total_quantity) AS total_quantity_sold,
+    MIN(ib.ib_lower_bound) AS min_income_band,
+    MAX(ib.ib_upper_bound) AS max_income_band
+FROM TopCustomers tc
+JOIN income_band ib ON tc.hd_income_band_sk = ib.ib_income_band_sk
+GROUP BY tc.customer_status
+ORDER BY customer_count DESC;

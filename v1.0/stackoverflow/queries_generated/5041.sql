@@ -1,0 +1,38 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount, 
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName, 
+    rp.PostId, 
+    rp.Title, 
+    rp.CommentCount, 
+    rp.AnswerCount, 
+    rp.UpVoteCount, 
+    rp.DownVoteCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    u.DisplayName, rp.CommentCount DESC;

@@ -1,0 +1,56 @@
+WITH MovieTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+        AND k.keyword IN ('Drama', 'Comedy', 'Action')
+),
+MovieDetails AS (
+    SELECT 
+        mt.title_id, 
+        mt.title, 
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        MovieTitles mt
+    JOIN 
+        complete_cast cc ON mt.title_id = cc.movie_id
+    GROUP BY 
+        mt.title_id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.title_id, 
+        md.title, 
+        md.production_year,
+        md.cast_count,
+        DENSE_RANK() OVER (ORDER BY md.cast_count DESC) AS rank
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    t.id, 
+    t.title, 
+    t.production_year, 
+    ak.name AS actor_name, 
+    ak.id AS actor_id
+FROM 
+    TopMovies tm
+JOIN 
+    complete_cast cc ON tm.title_id = cc.movie_id
+JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.rank, 
+    ak.name;

@@ -1,0 +1,52 @@
+
+WITH MovieStatistics AS (
+    SELECT
+        a.title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(m.production_year) AS avg_production_year
+    FROM
+        aka_title a
+    JOIN
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN
+        cast_info c ON cc.subject_id = c.id
+    JOIN
+        movie_info mi ON a.id = mi.movie_id
+    WHERE
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration') 
+        AND mi.info IS NOT NULL
+    GROUP BY
+        a.title
+),
+TopMovies AS (
+    SELECT
+        title,
+        total_cast,
+        avg_production_year,
+        DENSE_RANK() OVER (ORDER BY total_cast DESC) AS rank
+    FROM
+        MovieStatistics
+    WHERE
+        avg_production_year > 2000
+)
+SELECT
+    tm.title,
+    tm.total_cast,
+    CASE
+        WHEN tm.total_cast > 10 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    STRING_AGG(DISTINCT co.name, ', ') AS company_names
+FROM
+    TopMovies tm
+LEFT JOIN
+    movie_companies mc ON tm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+LEFT JOIN
+    company_name co ON mc.company_id = co.id
+GROUP BY
+    tm.title, tm.total_cast
+HAVING
+    COUNT(DISTINCT co.id) > 2
+ORDER BY
+    tm.total_cast DESC
+LIMIT 10;

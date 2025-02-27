@@ -1,0 +1,66 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        0 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id = (SELECT id FROM title WHERE title = 'Inception') -- Start with a specific movie
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name, 
+        level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        actor_hierarchy ah ON c.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+)
+
+SELECT 
+    ah.actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT t.title, ', ') AS movies_cast_in,
+    AVG(m.production_year) AS average_year,
+    MAX(m.production_year) AS latest_movie_year
+FROM 
+    actor_hierarchy ah
+JOIN 
+    cast_info c ON ah.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_info m ON m.movie_id = c.movie_id
+WHERE 
+    m.info_type_id = (SELECT id FROM info_type WHERE info = 'Released')
+GROUP BY 
+    ah.actor_name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 1 -- Only include actors who have worked in multiple movies
+ORDER BY 
+    movie_count DESC
+LIMIT 10;
+
+-- Set operation example to find actors who also worked as directors
+SELECT 
+    a.actor_name 
+FROM 
+    (SELECT DISTINCT a.name AS actor_name FROM aka_name a 
+     JOIN cast_info c ON a.person_id = c.person_id 
+     WHERE c.movie_id IN (SELECT id FROM title WHERE kind_id = (SELECT id FROM kind_type WHERE kind = 'Movie')) 
+    ) AS a
+INTERSECT
+SELECT 
+    d.director_name 
+FROM 
+    (SELECT DISTINCT d.name AS director_name FROM aka_name d 
+     JOIN movie_companies mc ON d.person_id = mc.company_id 
+     WHERE mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    ) AS d;

@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+VoteStatistics AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastOpenedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 25) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName,
+    COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+    COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+    COALESCE(bs.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(vs.Upvotes, 0) AS Upvotes,
+    COALESCE(vs.Downvotes, 0) AS Downvotes,
+    COALESCE(hs.LastClosedDate, 'Never Closed') AS LastClosed,
+    COALESCE(hs.LastOpenedDate, 'Never Opened') AS LastOpened,
+    COALESCE(hs.EditCount, 0) AS EditCount
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    VoteStatistics vs ON r.PostId = vs.PostId
+LEFT JOIN 
+    PostHistorySummary hs ON r.PostId = hs.PostId
+LEFT JOIN 
+    UserBadges bs ON r.OwnerUserId = bs.UserId
+WHERE 
+    r.Level = 0 
+ORDER BY 
+    hs.EditCount DESC, 
+    vs.Upvotes DESC;

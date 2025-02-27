@@ -1,0 +1,86 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_counts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+highest_earning_actors AS (
+    SELECT
+        a.person_id,
+        SUM(CASE 
+                WHEN ci.nr_order IS NOT NULL THEN ci.nr_order 
+                ELSE 0 
+            END) AS earnings
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id
+    HAVING 
+        SUM(CASE 
+                WHEN ci.nr_order IS NOT NULL THEN ci.nr_order 
+                ELSE 0 
+            END) > 100
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    t.title,
+    rt.production_year,
+    co.name AS company_name,
+    COALESCE(ak.movie_count, 0) AS actor_count,
+    COALESCE(h_actor.earnings, 0) AS actor_earnings,
+    COALESCE(mk.keywords, 'No Keywords') AS movie_keywords
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    movie_companies mc ON rt.title_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    actor_counts ak ON rt.title_id = ak.person_id
+LEFT JOIN 
+    highest_earning_actors h_actor ON ak.person_id = h_actor.person_id
+LEFT JOIN 
+    movie_keywords mk ON rt.title_id = mk.movie_id
+WHERE 
+    rt.title_rank <= 5
+    AND (co.country_code IS NULL OR co.country_code <> 'XXX')
+ORDER BY 
+    rt.production_year ASC,
+    t.title DESC
+LIMIT 100;
+
+In this query:
+- CTEs are used to derive various ranking, counting, and summarization of data related to titles, actor counts, and movie keywords.
+- STRING_AGG is invoked to gather keywords into a comma-separated string.
+- COALESCE is employed to handle potential NULL values.
+- Outer JOINs are used to ensure all titles are included irrespective of their associated companies or actors.
+- The query prioritizes returning only the top 5 ranked titles per production year while filtering out any companies with an obscure country code.
+- Bizarre semantics are invoked through the use of an unconventional check (`co.country_code IS NULL OR co.country_code <> 'XXX'`), adding complexity to the logic.

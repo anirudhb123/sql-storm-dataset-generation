@@ -1,0 +1,78 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_estimate_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+IncomeCounts AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT ci.c_customer_sk) AS num_customers_in_band
+    FROM CustomerInfo ci
+    JOIN household_demographics hd ON ci.cd_income_band_sk = hd.hd_income_band_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+),
+ReturnStats AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.purchase_estimate_band,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        COALESCE(cr.total_return_tax, 0) AS total_return_tax
+    FROM CustomerInfo ci
+    LEFT JOIN CustomerReturns cr ON ci.c_customer_sk = cr.sr_customer_sk
+),
+SalesSummary AS (
+    SELECT
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_coupon_amt) AS total_coupons,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    rs.c_first_name,
+    rs.c_last_name,
+    rs.cd_gender,
+    rs.purchase_estimate_band,
+    rs.total_returns,
+    rs.total_return_amt,
+    rs.total_return_tax,
+    ss.total_sales,
+    ss.total_coupons,
+    ss.total_orders,
+    ROUND((rs.total_return_amt / NULLIF(ss.total_sales, 0)) * 100, 2) AS return_percentage,
+    CASE 
+        WHEN rs.total_returns > 5 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_behavior
+FROM ReturnStats rs
+LEFT JOIN SalesSummary ss ON rs.c_customer_sk = ss.customer_sk
+WHERE (rs.total_returns > 0 OR ss.total_sales IS NOT NULL)
+ORDER BY return_percentage DESC, ss.total_sales DESC;

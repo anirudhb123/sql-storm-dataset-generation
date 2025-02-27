@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighCostParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        AVG(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    co.order_count,
+    co.total_spent,
+    r.s_name AS top_supplier,
+    r.total_cost AS top_supplier_cost,
+    hp.p_name AS high_cost_part,
+    hp.avg_supply_cost
+FROM 
+    CustomerOrders co
+JOIN 
+    RankedSuppliers r ON r.rank = 1
+LEFT JOIN 
+    HighCostParts hp ON hp.p_partkey = (
+        SELECT 
+            p.p_partkey 
+        FROM 
+            part p 
+        JOIN 
+            partsupp ps ON p.p_partkey = ps.ps_partkey
+        WHERE 
+            ps.ps_supplycost = (
+                SELECT 
+                    MAX(ps_supplycost) 
+                FROM 
+                    partsupp
+            )
+        LIMIT 1
+    )
+WHERE 
+    co.total_spent IS NOT NULL
+ORDER BY 
+    co.total_spent DESC;

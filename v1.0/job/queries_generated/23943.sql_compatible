@@ -1,0 +1,81 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        c.person_id,
+        a.name,
+        1 AS level
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        c.person_id,
+        a.name,
+        h.level + 1
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        ActorHierarchy h ON c.person_role_id = h.person_id
+    WHERE
+        h.level < 5 AND a.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT COALESCE(k.keyword, 'Unknown'), ', ') AS keywords
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id, m.title, m.production_year
+),
+RankedMovies AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.actor_count,
+        md.keywords,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.actor_count DESC) AS rank
+    FROM
+        MovieDetails md
+    WHERE
+        md.actor_count > 0
+)
+SELECT
+    r.title,
+    r.actor_count,
+    r.rank,
+    a.name AS main_actor
+FROM
+    RankedMovies r
+LEFT JOIN
+    cast_info ci ON r.movie_id = ci.movie_id
+LEFT JOIN
+    aka_name a ON ci.person_id = a.person_id AND ci.nr_order = 1
+WHERE
+    r.rank <= 10
+    AND (r.keywords LIKE '%action%' OR r.keywords LIKE '%comedy%')
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = r.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rotten Tomatoes')
+        HAVING AVG(CAST(mi.info AS FLOAT)) < 50
+    )
+ORDER BY
+    r.production_year DESC,
+    r.actor_count DESC;

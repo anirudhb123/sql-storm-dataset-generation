@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY RANDOM()) AS random_rank,
+        k.keyword AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS num_cast_members
+    FROM aka_title a
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info c ON a.id = c.movie_id
+    GROUP BY a.id, a.title, a.production_year, k.keyword
+), FilteredMovies AS (
+    SELECT 
+        *, 
+        CASE 
+            WHEN num_cast_members > 0 THEN 'Has Cast' 
+            ELSE 'No Cast'
+        END AS cast_existence,
+        COALESCE(movie_keyword, 'No Keywords') AS keyword_existence
+    FROM RankedMovies
+    WHERE production_year BETWEEN 1990 AND 2023
+    AND (EXTRACT(YEAR FROM CURRENT_DATE) - production_year) <= 30
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.cast_existence,
+    f.keyword_existence,
+    f.random_rank,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = (SELECT id FROM aka_title WHERE title = f.movie_title LIMIT 1)) AS num_movie_infos,
+    (SELECT STRING_AGG(DISTINCT cn.name, ', ') 
+     FROM company_name cn 
+     JOIN movie_companies mc ON cn.id = mc.company_id 
+     WHERE mc.movie_id = (SELECT id FROM aka_title WHERE title = f.movie_title LIMIT 1) 
+     AND cn.country_code IS NOT NULL) AS companies
+FROM FilteredMovies f
+WHERE 
+    f.cast_existence = 'Has Cast'
+ORDER BY 
+    f.production_year DESC, 
+    f.random_rank
+OFFSET 10 LIMIT 5
+UNION ALL
+SELECT 
+    DISTINCT 'Total Movies' AS movie_title,
+    NULL AS production_year,
+    COUNT(*) AS total_movies,
+    NULL AS keyword_existence,
+    NULL AS random_rank,
+    NULL AS num_movie_infos,
+    NULL AS companies
+FROM FilteredMovies
+WHERE 
+    random_rank <= 5
+HAVING COUNT(*) > 10;

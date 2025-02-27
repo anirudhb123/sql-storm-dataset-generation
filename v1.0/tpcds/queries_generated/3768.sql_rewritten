@@ -1,0 +1,79 @@
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001 AND dd.d_month_seq IN (3, 4) 
+    GROUP BY 
+        ws.web_site_id
+),
+AvgSales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales,
+        AVG(total_orders) AS avg_orders,
+        AVG(unique_customers) AS avg_customers
+    FROM 
+        SalesData
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        sd.web_site_id 
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        web_site AS sd ON ws.ws_web_site_sk = sd.web_site_sk
+),
+ReturnData AS (
+    SELECT 
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        COALESCE(SUM(sr_return_amt_inc_tax), 0) AS total_return_amt
+    FROM 
+        store_returns AS sr
+    WHERE 
+        sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001)
+)
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    ca.ca_city,
+    ca.ca_state,
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.unique_customers,
+    rs.total_returns,
+    rs.total_return_amt,
+    (sd.total_sales - rs.total_return_amt) AS net_sales,
+    (SELECT avg_sales FROM AvgSales) AS avg_sales,
+    (SELECT avg_orders FROM AvgSales) AS avg_orders,
+    (SELECT avg_customers FROM AvgSales) AS avg_customers
+FROM 
+    CustomerDetails AS cd
+LEFT JOIN 
+    SalesData AS sd ON cd.web_site_id = sd.web_site_id
+LEFT JOIN 
+    ReturnData AS rs ON true 
+WHERE 
+    cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+ORDER BY 
+    net_sales DESC;

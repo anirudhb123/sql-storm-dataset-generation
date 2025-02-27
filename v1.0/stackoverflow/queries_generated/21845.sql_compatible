@@ -1,0 +1,65 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+
+PostsWithVoteCount AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COUNT(v.Id) AS VoteCount,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AverageUpVotes,
+        AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS AverageDownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.ViewCount
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        EXTRACT(EPOCH FROM COALESCE(p.ClosedDate, TIMESTAMP '2024-10-01 12:34:56') - ph.CreationDate) / 60 AS MinutesOpen,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+)
+
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.BadgeCount,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    pwc.PostId,
+    pwc.Title,
+    pwc.ViewCount,
+    pwc.VoteCount,
+    CASE WHEN pwc.VoteCount > 0 THEN (pwc.AverageUpVotes - pwc.AverageDownVotes) / NULLIF(pwc.VoteCount, 0) ELSE 0 END AS VoteTrend,
+    cp.CloseDate,
+    cp.MinutesOpen,
+    cp.UserDisplayName AS CloserUser,
+    cp.Comment AS ClosureReason
+FROM UserReputation ur
+JOIN PostsWithVoteCount pwc ON ur.UserId = pwc.OwnerUserId
+LEFT JOIN ClosedPosts cp ON pwc.PostId = cp.PostId
+WHERE ur.Reputation >= 100  
+AND (cp.MinutesOpen IS NULL OR cp.MinutesOpen > 10)  
+ORDER BY ur.Reputation DESC, pwc.VoteCount DESC
+LIMIT 10;

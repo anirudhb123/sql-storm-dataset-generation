@@ -1,0 +1,86 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        Title,
+        Score,
+        ViewCount,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        PostTypeId = 1
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON rp.Id = p.ParentId
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryWithReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        pht.Name AS PostHistoryType,
+        JSON_AGG(prt.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment::integer = crt.Id AND ph.PostHistoryTypeId = 10
+    WHERE 
+        ph.CreationDate BETWEEN cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' AND cast('2024-10-01 12:34:56' as timestamp)
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserId, ph.Comment, pht.Name
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    av.UpVotes,
+    av.DownVotes,
+    av.TotalVotes,
+    phwr.CloseReasons,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN (SELECT Title FROM Posts WHERE Id = rp.AcceptedAnswerId)
+        ELSE NULL 
+    END AS AcceptedAnswerTitle,
+    COALESCE(NULLIF(rp.CommentCount, 0), NULL) AS CommentCount
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    AggregatedVotes av ON av.PostId = rp.Id
+LEFT JOIN 
+    PostHistoryWithReasons phwr ON phwr.PostId = rp.Id
+WHERE 
+    rp.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

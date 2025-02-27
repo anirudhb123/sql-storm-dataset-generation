@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+Returns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COALESCE(SUM(sr_return_amt), 0) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(rs.total_sales, 0) AS total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN COALESCE(rs.total_sales, 0) = 0 THEN NULL 
+            ELSE (COALESCE(r.total_returns, 0) * 100.0) / COALESCE(rs.total_sales, 0) 
+        END AS return_percentage
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk AND rs.sales_rank = 1
+    LEFT JOIN 
+        Returns r ON i.i_item_sk = r.sr_item_sk
+)
+SELECT 
+    a.i_item_id,
+    a.total_sales,
+    a.total_returns,
+    a.return_percentage,
+    CASE 
+        WHEN a.return_percentage IS NULL THEN 'No Sales'
+        WHEN a.return_percentage > 20 THEN 'High Returns'
+        WHEN a.return_percentage BETWEEN 10 AND 20 THEN 'Moderate Returns'
+        ELSE 'Low Returns'
+    END AS return_category
+FROM 
+    AggregateSales a
+WHERE 
+    a.total_sales > 1000
+    OR EXISTS (
+        SELECT 1
+        FROM store s
+        WHERE s.s_store_sk IN (
+            SELECT ss_store_sk FROM store_sales ss WHERE ss.ss_item_sk = a.i_item_id AND ss.ss_quantity > 0
+        )
+    )
+ORDER BY 
+    a.total_sales DESC, a.total_returns ASC;

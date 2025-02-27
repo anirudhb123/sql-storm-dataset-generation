@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01' -- Only consider posts created from 2022 onwards
+),
+CommentStatistics AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments,
+        AVG(LEN(c.Text)) AS AvgCommentLength
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+TagStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        STRING_SPLIT(p.Tags, ',') AS tag_names ON t.TagName = LTRIM(RTRIM(tag_names.value))
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_names.value
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.CreationDate,
+    r.Score,
+    c.TotalComments,
+    c.AvgCommentLength,
+    t.TagsList,
+    t.TagCount,
+    CASE 
+        WHEN r.RankByScore = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostRank
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    CommentStatistics c ON r.PostId = c.PostId
+LEFT JOIN 
+    TagStatistics t ON r.PostId = t.PostId
+WHERE 
+    r.RankByScore <= 10   -- Limit to top 10 posts per user
+ORDER BY 
+    r.OwnerUserId, r.Score DESC;

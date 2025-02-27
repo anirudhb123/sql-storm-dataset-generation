@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(distinct v.UserId) OVER (PARTITION BY p.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END)
+            OVER (PARTITION BY p.Id) AS ScoreAdjustment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        DENSE_RANK() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Badges b
+    WHERE 
+        b.Date > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month')
+),
+ErrorPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(ph.Comment, 'No close reason provided') AS CloseReason,
+        ph.CreationDate AS ClosureDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    WHERE 
+        ph.Comment IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score + rp.ScoreAdjustment AS FinalScore,
+        rb.BadgeName,
+        ep.CloseReason,
+        ep.ClosureDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentBadges rb ON rp.OwnerUserId = rb.UserId AND rb.BadgeRank = 1
+    LEFT JOIN 
+        ErrorPosts ep ON rp.PostId = ep.Id
+    WHERE 
+        rp.Rank <= 5 
+)
+SELECT 
+    fr.*,
+    COALESCE(NULLIF(fr.BadgeName, ''), 'No badge awarded') AS BadgeStatus,
+    CASE 
+        WHEN fr.ClosureDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.FinalScore DESC, fr.ClosureDate ASC NULLS LAST;

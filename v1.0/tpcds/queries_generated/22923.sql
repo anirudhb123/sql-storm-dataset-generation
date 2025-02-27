@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_quantity) DESC) AS rnk
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk, ws_item_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band_sk,
+        CASE 
+            WHEN cd.cd_runner < 0 THEN 'Underage'
+            WHEN cd.cd_runner IS NULL THEN 'Unknown'
+            ELSE 'Adult'
+        END AS age_status
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+SalesRankings AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(cs_quantity) AS total_quantity,
+        RANK() OVER (ORDER BY SUM(cs_quantity) DESC) AS rank
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+),
+ReturnAnalysis AS (
+    SELECT 
+        sr_returned_date_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_returned_date_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    COALESCE(ranked_sales.total_quantity, 0) AS web_sales_quantity,
+    COALESCE(catalog_sales.total_quantity, 0) AS catalog_sales_quantity,
+    COALESCE(return_analysis.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN catalog_sales.total_quantity > 0 AND ranked_sales.total_quantity IS NULL THEN 'Catalog only'
+        WHEN ranked_sales.total_quantity > 0 AND catalog_sales.total_quantity IS NULL THEN 'Web only'
+        ELSE 'Both'
+    END AS sales_type
+FROM CustomerDetails cd
+LEFT JOIN RankedSales ranked_sales ON cd.c_customer_sk = ranked_sales.ws_bill_customer_sk
+LEFT JOIN SalesRankings catalog_sales ON cd.c_customer_sk = catalog_sales.cs_bill_customer_sk
+LEFT JOIN ReturnAnalysis return_analysis ON return_analysis.sr_returned_date_sk = cd.c_customer_sk
+WHERE (cd.cd_gender = 'M' OR cd.cd_marital_status = 'S') 
+AND (cd.income_band_sk IS NULL OR cd.income_band_sk > 0)
+ORDER BY cd.c_last_name, cd.c_first_name;

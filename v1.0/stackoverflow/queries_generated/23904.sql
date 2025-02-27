@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS PostCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments,
+        MAX(CreationDate) AS LastCommentDate
+    FROM 
+        Comments
+    WHERE 
+        CreationDate > NOW() - INTERVAL '6 months'
+    GROUP BY 
+        PostId
+),
+FilteredTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.PostTypeId,
+    rp.Score,
+    rp.PostCount,
+    rc.TotalComments,
+    rc.LastCommentDate,
+    CASE 
+        WHEN rc.TotalComments IS NOT NULL THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    CASE 
+        WHEN rp.PostTypeId = 1 AND rp.rn = 1 THEN 'Latest Question'
+        ELSE 'Other'
+    END AS PostStatus,
+    COALESCE(ft.PostCount, 0) AS TagPostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentComments rc ON rp.PostId = rc.PostId
+LEFT JOIN 
+    FilteredTags ft ON ft.TagName IN (SELECT UNNEST(string_to_array(rp.Tags, ',')))
+WHERE 
+    rp.Score > (SELECT AVG(Score) FROM Posts) -- Only select posts above average score
+    AND (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) > 10 -- More than 10 upvotes
+    AND rp.PostTypeId = 1 -- Focus on questions only
+ORDER BY 
+    rp.Score DESC NULLS LAST, 
+    rc.LastCommentDate DESC NULLS LAST;

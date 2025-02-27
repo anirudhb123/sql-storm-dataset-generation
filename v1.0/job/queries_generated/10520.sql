@@ -1,0 +1,29 @@
+-- Performance Benchmarking Query for Join Order Benchmark Schema
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.note AS role_note,
+    r.role AS role_type,
+    m.production_year,
+    GROUP_CONCAT(k.keyword) AS movie_keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+WHERE 
+    m.info_type_id IN (SELECT id FROM info_type WHERE info = 'description')
+GROUP BY 
+    a.name, t.title, c.note, r.role, m.production_year
+ORDER BY 
+    a.name, m.production_year;

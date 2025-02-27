@@ -1,0 +1,85 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal < 5000 THEN 'Low Balance' 
+            WHEN s.s_acctbal BETWEEN 5000 AND 20000 THEN 'Medium Balance' 
+            ELSE 'High Balance' 
+        END AS balance_category
+    FROM supplier s
+),
+
+NationInfo AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_regionkey,
+        r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+
+PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_retailprice,
+        LENGTH(p.p_comment) AS comment_length
+    FROM part p
+    WHERE p.p_retailprice > 50.00
+),
+
+OrderInfo AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice < 1000 THEN 'Small'
+            WHEN o.o_totalprice BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'Large'
+        END AS order_size,
+        o.o_comment
+    FROM orders o
+)
+
+SELECT 
+    s.s_name AS supplier_name,
+    s.s_address AS supplier_address,
+    n.n_name AS nation_name,
+    n.n_regionkey,
+    r.region_name,
+    p.p_name AS part_name,
+    p.p_type AS part_type,
+    o.o_orderkey AS order_key,
+    o.order_size,
+    p.comment_length,
+    s.balance_category
+FROM SupplierInfo s
+JOIN NationInfo n ON s.s_nationkey = n.n_nationkey
+JOIN PartInfo p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+JOIN OrderInfo o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+WHERE LENGTH(n.n_name) = (SELECT MAX(LENGTH(n2.n_name)) FROM nation n2)
+GROUP BY 
+    s.s_name,
+    s.s_address,
+    n.n_name,
+    n.n_regionkey,
+    r.region_name,
+    p.p_name,
+    p.p_type,
+    o.o_orderkey,
+    o.order_size,
+    p.comment_length,
+    s.balance_category
+ORDER BY o.o_orderdate DESC, s.s_name;

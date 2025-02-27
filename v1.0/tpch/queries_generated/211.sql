@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_custkey
+),
+NationStats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    CASE 
+        WHEN ss.total_avail_qty IS NULL THEN 0 
+        ELSE ss.total_avail_qty 
+    END AS available_quantity,
+    COALESCE(n.n_name, 'Unknown Region') AS nation,
+    ods.total_revenue,
+    SUM(ods.total_revenue) OVER (PARTITION BY n.n_nationkey) AS total_revenue_by_nation,
+    (SELECT COUNT(*) FROM orders o WHERE o.o_orderstatus = 'O' AND o.o_orderdate > CURRENT_DATE - INTERVAL '1 YEAR') AS recent_orders_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierStats ss ON p.p_partkey = ss.s_suppkey
+LEFT JOIN 
+    OrderDetails ods ON ods.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')))
+LEFT JOIN 
+    NationStats n ON ss.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 2)
+ORDER BY 
+    available_quantity DESC, total_revenue DESC;

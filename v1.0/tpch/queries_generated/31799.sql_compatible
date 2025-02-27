@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON co.o_orderkey < o.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+),
+ProductSummary AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierWithComment AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Unknown Balance'
+               ELSE 'Balance: ' || TRIM(CAST(s.s_acctbal AS VARCHAR(20))) -- changed TO_CHAR to CAST for compatibility
+           END AS formatted_balance
+    FROM supplier s
+)
+SELECT COALESCE(co.c_name, 'Unknown Customer') AS customer_name,
+       ps.p_partkey, 
+       ps.total_sales, 
+       swc.s_name, 
+       swc.formatted_balance
+FROM CustomerOrders co
+FULL OUTER JOIN ProductSummary ps ON ps.total_sales > 50000
+LEFT JOIN SupplierWithComment swc ON EXISTS (
+    SELECT 1 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = ps.p_partkey AND ps.ps_availqty < 50
+    AND ps.ps_supplycost < swc.s_acctbal
+)
+WHERE co.o_orderdate >= '1997-01-01'
+GROUP BY co.c_name, ps.p_partkey, ps.total_sales, swc.s_name, swc.formatted_balance
+ORDER BY ps.total_sales DESC, co.c_name;

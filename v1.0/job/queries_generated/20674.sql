@@ -1,0 +1,84 @@
+WITH Recursive_Cast AS (
+    SELECT 
+        ci.id,
+        ci.person_id,
+        ci.movie_id,
+        ci.person_role_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.person_role_id IS NOT NULL
+),
+Movie_Keyword_Count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+Extended_Title_Info AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        mi.info,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        CASE 
+            WHEN t.production_year IS NULL THEN 'Unknown Year'
+            WHEN t.production_year < 1980 THEN 'Classic'
+            WHEN t.production_year BETWEEN 1980 AND 2000 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era_category
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre' LIMIT 1)
+    LEFT JOIN 
+        Movie_Keyword_Count kc ON t.id = kc.movie_id
+),
+Company_Movie_Count AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.company_id
+)
+SELECT 
+    e.title,
+    e.production_year,
+    e.info,
+    e.keyword_count,
+    e.era_category,
+    coalesce(cmc.movie_count, 0) AS company_movie_count,
+    CASE 
+        WHEN e.keyword_count > 5 THEN 'Rich in Keywords'
+        WHEN e.keyword_count BETWEEN 1 AND 5 THEN 'Moderate Keywords'
+        ELSE 'No Keywords'
+    END AS keyword_richness,
+    (
+        SELECT 
+            COUNT(DISTINCT ak.id)
+        FROM 
+            aka_title ak
+        JOIN 
+            aka_name an ON ak.id = an.movie_id
+        WHERE 
+            ak.production_year = e.production_year
+    ) AS aka_count,
+    (SELECT MAX(role_order) FROM Recursive_Cast rc WHERE rc.movie_id = e.title_id) AS max_role_order
+FROM 
+    Extended_Title_Info e
+LEFT JOIN 
+    Company_Movie_Count cmc ON cmc.company_id IN (SELECT DISTINCT mc.company_id FROM movie_companies mc WHERE mc.movie_id = e.title_id)
+WHERE 
+    e.era_category = 'Modern' 
+    AND e.keyword_count > 0
+ORDER BY 
+    e.production_year DESC, 
+    e.keyword_count DESC;

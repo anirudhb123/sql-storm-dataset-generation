@@ -1,0 +1,77 @@
+WITH PotentialDuplicatePosts AS (
+    SELECT 
+        p1.Id AS PostId, 
+        p1.Title,
+        p1.Body,
+        COUNT(DISTINCT p2.Id) AS DuplicateCount,
+        STRING_AGG(DISTINCT p2.Title, ', ') AS DuplicateTitles
+    FROM 
+        Posts p1
+    LEFT JOIN 
+        Posts p2 ON p1.Body ILIKE p2.Body AND p1.Id <> p2.Id
+    WHERE 
+        p1.PostTypeId = 1  
+    GROUP BY 
+        p1.Id, p1.Title, p1.Body
+    HAVING 
+        COUNT(DISTINCT p2.Id) > 0  
+),
+DetailedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT Comments.Text, ' | ') AS Comments,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Comments ON ph.PostId = Comments.PostId
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0  
+)
+SELECT 
+    dup.PostId,
+    dup.Title,
+    dup.DuplicateCount,
+    dup.DuplicateTitles,
+    hist.HistoryCount,
+    hist.LastChangeDate,
+    usr.DisplayName AS UserDisplayName,
+    usr.QuestionsAsked,
+    usr.TotalViews,
+    usr.TotalComments
+FROM 
+    PotentialDuplicatePosts dup
+JOIN 
+    DetailedPostHistory hist ON dup.PostId = hist.PostId
+JOIN 
+    Users usr ON usr.Id = (
+        SELECT 
+            OwnerUserId 
+        FROM 
+            Posts 
+        WHERE 
+            Id = dup.PostId
+    )
+ORDER BY 
+    dup.DuplicateCount DESC, 
+    hist.LastChangeDate DESC;

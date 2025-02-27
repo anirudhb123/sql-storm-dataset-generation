@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        ROW_NUMBER() OVER (PARTITION BY o.orderkey ORDER BY o.orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.orderkey, o.totalprice, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        MIN(s.s_acctbal) AS min_supplier_balance,
+        MAX(s.s_acctbal) AS max_supplier_balance
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+OrderCounts AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        ro.orderkey, 
+        ro.totalprice, 
+        ro.c_name
+    FROM RankedOrders ro
+    WHERE ro.totalprice > (SELECT AVG(totalprice) FROM orders)
+)
+
+SELECT 
+    r.r_name,
+    COALESCE(o.order_count, 0) AS order_count,
+    COALESCE(sp.total_available, 0) AS total_available,
+    COALESCE(sp.min_supplier_balance, 0.00) AS min_supplier_balance,
+    COALESCE(sp.max_supplier_balance, 0.00) AS max_supplier_balance,
+    COALESCE(hvo.orderkey, 0) AS high_value_order_key,
+    hvo.totalprice AS high_value_order_price,
+    hvo.c_name AS high_value_order_customer
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN OrderCounts o ON n.n_nationkey = o.c_nationkey
+LEFT JOIN SupplierParts sp ON n.n_nationkey = sp.ps_partkey
+LEFT JOIN HighValueOrders hvo ON o.order_count > 0 AND hvo.orderkey IN (SELECT o.orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+WHERE r.r_name IS NOT NULL AND r.r_comment IS NOT NULL
+ORDER BY r.r_name, high_value_order_price DESC;

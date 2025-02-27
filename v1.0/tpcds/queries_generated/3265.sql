@@ -1,0 +1,67 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        total_orders
+    FROM 
+        SalesData
+    WHERE 
+        sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returned_amount,
+        COUNT(DISTINCT wr_order_number) AS return_orders_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+        COALESCE(cr.return_orders_count, 0) AS return_orders_count,
+        SUM(sd.total_sales) AS total_sales_generated
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        SalesData sd ON ws.ws_web_site_sk = sd.web_site_id
+    GROUP BY 
+        c.c_customer_id, cr.total_returned_amount, cr.return_orders_count
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_returned_amount,
+    cs.return_orders_count,
+    cs.total_sales_generated,
+    CASE 
+        WHEN cs.total_returned_amount > (0.1 * cs.total_sales_generated) THEN 'High Return'
+        WHEN cs.total_returned_amount BETWEEN (0.05 * cs.total_sales_generated) AND (0.1 * cs.total_sales_generated) THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM 
+    CustomerStats cs
+WHERE 
+    cs.total_sales_generated > 0
+ORDER BY 
+    cs.total_returned_amount DESC;

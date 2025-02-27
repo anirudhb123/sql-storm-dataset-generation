@@ -1,0 +1,68 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey, 
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+NationOrderCount AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    ps.p_name AS part_name,
+    ps.total_available,
+    ps.avg_supplycost,
+    os.total_revenue,
+    os.customer_count,
+    CASE 
+        WHEN ns.order_count IS NULL THEN 0 
+        ELSE ns.order_count 
+    END AS order_count_by_nation
+FROM PartSupplier ps
+JOIN OrderSummary os ON ps.p_partkey = os.o_orderkey
+LEFT JOIN NationOrderCount ns ON ns.n_nationkey = ps.p_partkey
+JOIN SupplierHierarchy sh ON sh.s_suppkey = ps.p_partkey
+WHERE ps.total_available > 1000
+ORDER BY total_revenue DESC, order_count_by_nation ASC
+LIMIT 10;

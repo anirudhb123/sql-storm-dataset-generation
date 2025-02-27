@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_sales_price) AS customer_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+), 
+HighValueCustomers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.customer_sales,
+        CASE 
+            WHEN ci.customer_sales > 10000 THEN 'High Value' 
+            WHEN ci.customer_sales BETWEEN 5000 AND 10000 THEN 'Medium Value' 
+            ELSE 'Low Value' 
+        END AS customer_segment
+    FROM 
+        CustomerInfo ci
+    WHERE 
+        ci.customer_sales > 5000
+)
+SELECT 
+    r.web_site_id,
+    r.total_sales,
+    hvc.c_customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.customer_sales,
+    hvc.customer_segment
+FROM 
+    RankedSales r
+LEFT JOIN 
+    HighValueCustomers hvc ON r.total_sales > 10000 
+WHERE 
+    r.sales_rank = 1
+ORDER BY 
+    r.total_sales DESC, hvc.customer_sales DESC
+LIMIT 10;

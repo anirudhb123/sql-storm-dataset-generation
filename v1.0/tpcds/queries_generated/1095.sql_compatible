@@ -1,0 +1,73 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        sr.return_tax,
+        ROW_NUMBER() OVER (PARTITION BY sr.item_sk ORDER BY sr.returned_date_sk DESC) AS rn
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+    AND 
+        sr.return_amt > 0
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_sk) AS num_customers
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        w.web_site_id,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.web_site_sk = w.web_site_sk
+    WHERE 
+        ws.sold_date_sk BETWEEN 10000 AND 20000
+    GROUP BY 
+        w.web_site_id
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(cd.cd_gender, 'Unknown') AS gender,
+    SUM(CASE WHEN rr.rn = 1 THEN rr.return_amt ELSE 0 END) AS last_return_amount,
+    AVG(sd.total_sales) AS avg_sales,
+    COUNT(DISTINCT sd.total_orders) AS distinct_orders
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedReturns rr ON rr.customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = ca.ca_address_sk
+INNER JOIN 
+    SalesData sd ON sd.web_site_id = ca.ca_address_id
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+GROUP BY 
+    ca.ca_city, ca.ca_state, cd.cd_gender
+HAVING 
+    SUM(rr.return_quantity) > 0 OR AVG(sd.total_sales) > 1000
+ORDER BY 
+    avg_sales DESC, ca.ca_state, ca.ca_city;

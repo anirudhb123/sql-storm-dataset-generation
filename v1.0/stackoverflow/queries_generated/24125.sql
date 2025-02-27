@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+        AND p.Score > 0
+),
+AggregatedVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(av.Upvotes, 0) AS Upvotes,
+    COALESCE(av.Downvotes, 0) AS Downvotes,
+    mu.UserId,
+    mu.DisplayName,
+    mu.PostCount,
+    mu.CommentCount,
+    CASE 
+        WHEN rp.Score > 10 THEN 'High Impact'
+        WHEN rp.Score BETWEEN 1 AND 10 THEN 'Moderate Impact'
+        ELSE 'Low Impact' 
+    END AS ImpactCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedVotes av ON rp.PostId = av.PostId
+LEFT JOIN 
+    MostActiveUsers mu ON rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = mu.UserId)
+WHERE 
+    rp.RN = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

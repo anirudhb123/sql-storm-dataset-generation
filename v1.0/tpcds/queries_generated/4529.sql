@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY ws.web_site_sk, ws_order_number
+),
+TopSites AS (
+    SELECT 
+        w.web_site_id,
+        w.web_name,
+        w.web_country,
+        rs.total_sales
+    FROM web_site w
+    JOIN RankedSales rs ON w.web_site_sk = rs.web_site_sk
+    WHERE rs.rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr_return_qty) AS total_return_qty,
+        COUNT(DISTINCT cr_return_number) AS return_count
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ts.web_site_id,
+    ts.web_name,
+    ts.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(cr.total_return_qty) AS total_return_qty,
+    SUM(cr.return_count) AS total_return_count,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM TopSites ts
+LEFT JOIN CustomerReturns cr ON ts.web_site_sk = cr.returning_customer_sk
+JOIN CustomerDemographics cd ON cd.cd_demo_sk = cr.returning_customer_sk
+JOIN customer c ON c.c_customer_sk = cr.returning_customer_sk
+GROUP BY 
+    ts.web_site_id, 
+    ts.web_name, 
+    ts.total_sales, 
+    cd.cd_gender, 
+    cd.cd_marital_status
+HAVING 
+    SUM(cr.total_return_qty) > 0
+ORDER BY 
+    ts.total_sales DESC, 
+    unique_customers DESC;

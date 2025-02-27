@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_return_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_return_amount,
+        1 AS level
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sr_returning_customer_sk,
+        cr.returning_quantity + r.total_return_quantity,
+        cr.returning_amount + r.total_return_amount,
+        r.level + 1
+    FROM
+        catalog_returns cr
+    JOIN 
+        CustomerReturns r ON cr.cr_returning_customer_sk = r.wr_returning_customer_sk
+    WHERE 
+        r.level < 5
+),
+ItemPerformance AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc 
+),
+HighReturnCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_return_quantity,
+        cr.total_return_amount
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    WHERE 
+        cr.total_return_quantity > 5
+)
+SELECT 
+    hrc.c_customer_id,
+    hrc.c_first_name,
+    hrc.c_last_name,
+    hrc.total_return_quantity,
+    hrc.total_return_amount,
+    i.i_item_id,
+    i.i_item_desc,
+    ip.total_sales_quantity,
+    ip.total_net_profit,
+    ip.avg_net_paid
+FROM 
+    HighReturnCustomers hrc
+LEFT JOIN 
+    ItemPerformance ip ON ip.sales_rank <= 10
+JOIN 
+    item i ON i.i_item_id = ip.i_item_id
+WHERE 
+    ip.total_sales_quantity IS NOT NULL 
+ORDER BY 
+    hrc.total_return_amount DESC, ip.total_net_profit DESC
+LIMIT 50;

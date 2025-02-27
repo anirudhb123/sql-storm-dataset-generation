@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (
+            SELECT 
+                kt.id 
+            FROM 
+                kind_type kt 
+            WHERE 
+                kt.kind = 'feature'
+        )
+),
+ActorMovies AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+HighKeywordMovies AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM 
+        RankedMovies mv
+    LEFT JOIN 
+        MovieKeywords mk ON mv.movie_id = mk.movie_id
+    WHERE 
+        mv.year_rank <= 5
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    a.actor_name,
+    h.keywords,
+    CASE 
+        WHEN h.production_year IS NULL OR h.production_year < 2000 THEN 'Classic' 
+        WHEN h.production_year >= 2000 AND h.production_year < 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_era,
+    COUNT(DISTINCT ak.person_id) AS distinct_actors,
+    AVG(CASE 
+            WHEN ak.id IS NOT NULL THEN 1 
+            ELSE 0 
+        END) OVER (PARTITION BY h.movie_id) AS avg_actor_rank
+FROM 
+    HighKeywordMovies h
+LEFT JOIN 
+    ActorMovies a ON h.movie_id = a.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = a.actor_name
+WHERE 
+    h.keywords IS NOT NULL
+GROUP BY 
+    h.movie_id, h.title, h.production_year, a.actor_name, h.keywords
+ORDER BY 
+    h.production_year DESC, distinct_actors DESC, avg_actor_rank ASC
+LIMIT 10;
+
+-- This query selects the top 10 most recent movies based on production year 
+-- that contain distinct actor names and their associated keywords.
+-- It uses CTEs to rank movies, gather actor details and keywords, and apply filtering based on complicated verbal logic, demonstrating NULL handling, and various constraints and functions.

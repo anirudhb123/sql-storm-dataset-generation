@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year IS NOT NULL
+), 
+TopActors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(CAST.id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(CAST.id) DESC) AS actor_rank
+    FROM 
+        aka_name AS a
+    JOIN 
+        cast_info AS CAST ON a.person_id = CAST.person_id
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(CAST.id) > 2
+), 
+MovieKeywords AS (
+    SELECT 
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.title
+), 
+ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        m.title,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM 
+        aka_name AS a
+    JOIN 
+        cast_info AS c ON a.person_id = c.person_id
+    JOIN 
+        aka_title AS m ON c.movie_id = m.id
+    LEFT JOIN 
+        MovieKeywords AS mk ON m.title = mk.title
+)
+SELECT 
+    ra.title,
+    ra.production_year,
+    ta.actor_name,
+    am.title,
+    am.keywords
+FROM 
+    RankedMovies AS ra
+INNER JOIN 
+    TopActors AS ta ON ta.movie_count > 2
+LEFT JOIN 
+    ActorMovies AS am ON ta.actor_name = am.actor_name
+WHERE 
+    ra.rn <= 3
+ORDER BY 
+    ra.production_year DESC, 
+    ta.actor_rank, 
+    am.title ASC;

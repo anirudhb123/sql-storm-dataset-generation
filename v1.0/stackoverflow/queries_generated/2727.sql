@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId AND v.VoteTypeId IN (8, 9)
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score
+    HAVING 
+        AVG(v.BountyAmount) IS NOT NULL
+        AND COUNT(c.Id) > 5
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        COUNT(*) AS CloseRecordCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.Score,
+    hsp.CommentCount,
+    hsp.AvgBounty,
+    COALESCE(cph.LastClosedDate, 'No Closure Records') AS LastClosedDate,
+    CollectedTags.TagsCount
+FROM 
+    HighScoringPosts hsp
+LEFT JOIN 
+    ClosedPostHistory cph ON hsp.PostId = cph.PostId
+LEFT JOIN 
+    (SELECT 
+        p.Id, COUNT(t.Id) AS TagsCount 
+     FROM 
+        Posts p
+     JOIN 
+        UNNEST(string_to_array(p.Tags, ',')) AS tag ON tag IS NOT NULL
+     JOIN 
+        Tags t ON t.TagName = TRIM(tag)
+     GROUP BY 
+        p.Id) AS CollectedTags ON hsp.PostId = CollectedTags.Id
+WHERE 
+    hsp.Score > 100
+ORDER BY 
+    hsp.Score DESC
+LIMIT 50;

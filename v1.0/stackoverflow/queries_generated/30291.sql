@@ -1,0 +1,73 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        ph.CreationDate AS LastActionDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Only closed posts
+        AND ph.rn = 1
+),
+MostRecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.UserId,
+        v.CreationDate AS VoteDate,
+        vt.Name AS VoteType
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vt.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(vt.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    cp.PostId,
+    cp.Title,
+    cp.PostCreationDate,
+    cp.LastActionDate,
+    us.DisplayName AS LastVoter,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    COUNT(DISTINCT v.UserId) AS UniqueVoters
+FROM 
+    ClosedPosts cp
+LEFT JOIN 
+    MostRecentVotes v ON cp.PostId = v.PostId
+LEFT JOIN 
+    UserStats us ON v.UserId = us.UserId
+GROUP BY 
+    cp.PostId, cp.Title, cp.PostCreationDate, cp.LastActionDate, us.DisplayName
+HAVING 
+    COUNT(DISTINCT v.UserId) > 0 -- Only include closed posts with votes
+ORDER BY 
+    cp.LastActionDate DESC;

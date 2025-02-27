@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        1 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.episode_of_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    mt.movie_id,
+    mt.title AS movie_title,
+    mt.production_year,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    COUNT(DISTINCT ci.id) FILTER (WHERE ci.note IS NOT NULL) AS cast_with_notes,
+    SUM(CASE 
+            WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN mi.info::numeric
+            ELSE 0 
+        END) AS total_budget
+FROM 
+    cast_info ci 
+JOIN 
+    aka_name a ON ci.person_id = a.person_id 
+JOIN 
+    movie_hierarchy mt ON ci.movie_id = mt.movie_id 
+LEFT JOIN 
+    movie_keyword mk ON mt.movie_id = mk.movie_id 
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id 
+LEFT JOIN 
+    movie_companies mc ON mt.movie_id = mc.movie_id 
+LEFT JOIN 
+    movie_info mi ON mt.movie_id = mi.movie_id 
+GROUP BY 
+    a.name, mt.movie_id, mt.title, mt.production_year 
+HAVING 
+    COUNT(DISTINCT ci.id) > 2 AND SUM(mi.info::numeric) IS NOT NULL 
+ORDER BY 
+    mt.production_year ASC, 
+    a.name DESC
+LIMIT 100 OFFSET 50;

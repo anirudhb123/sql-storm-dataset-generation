@@ -1,0 +1,51 @@
+WITH MovieStats AS (
+    SELECT 
+        a.title AS MovieTitle,
+        t.production_year AS ProductionYear,
+        COUNT(DISTINCT c.person_id) AS ActorCount,
+        AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS FemaleRatio,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        name p ON c.person_id = p.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        MovieTitle, 
+        ProductionYear, 
+        ActorCount,
+        FemaleRatio,
+        ROW_NUMBER() OVER (PARTITION BY ProductionYear ORDER BY ActorCount DESC) AS Rank
+    FROM 
+        MovieStats
+)
+SELECT 
+    MovieTitle,
+    ProductionYear,
+    ActorCount,
+    FemaleRatio,
+    CASE 
+        WHEN ActorCount > 10 THEN 'High' 
+        WHEN ActorCount BETWEEN 5 AND 10 THEN 'Medium' 
+        ELSE 'Low' 
+    END AS ActorCountCategory,
+    COALESCE(Keywords, 'No Keywords') AS MovieKeywords
+FROM 
+    TopMovies
+WHERE 
+    Rank <= 5
+ORDER BY 
+    ProductionYear DESC, ActorCount DESC;

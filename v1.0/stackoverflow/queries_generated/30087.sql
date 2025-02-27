@@ -1,0 +1,83 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Id = (SELECT MIN(Id) FROM Users)  -- Starting point, e.g. the user with the smallest ID
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        uh.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserHierarchy uh ON u.Id > uh.Id  -- Creating a pseudo hierarchy based on ID
+), RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(rp.PostId) AS TotalPosts,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(rp.Score), 0) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+), RecentComments AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        c.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    u.CreationDate,
+    COALESCE(ups.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ups.TotalViews, 0) AS TotalViews,
+    COALESCE(ups.TotalScore, 0) AS TotalScore,
+    COALESCE(rc.CommentCount, 0) AS TotalComments,
+    rc.LastCommentDate
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    RecentComments rc ON u.Id = rc.UserId
+WHERE 
+    u.Reputation >= 1000  -- Only users with reputation of at least 1000
+    AND (u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL) -- Users with location or website
+ORDER BY 
+    u.Reputation DESC
+LIMIT 50;  -- Limit the results to top 50 users

@@ -1,0 +1,106 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        PostTypeId, 
+        ParentId,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title, 
+        p.PostTypeId, 
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+), RankedPosts AS (
+    SELECT 
+        p.*,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    r.Id AS PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    ub.BadgeCount,
+    COALESCE(rv.VoteCount, 0) AS RecentVoteCount,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN r.CloseDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    json_agg(DISTINCT t.TagName) AS Tags
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecentVotes rv ON r.Id = rv.PostId
+LEFT JOIN 
+    ClosedPosts cp ON r.Id = cp.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            unnest(string_to_array(r.Tags, '><')) AS TagName
+    ) AS t ON true
+WHERE 
+    r.UserRank <= 10 
+    AND r.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    r.Id, 
+    u.DisplayName, 
+    ub.BadgeCount, 
+    rv.VoteCount, 
+    cp.CloseCount
+ORDER BY 
+    r.Score DESC
+LIMIT 100;

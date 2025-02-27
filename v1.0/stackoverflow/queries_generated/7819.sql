@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(h.LastEditorDisplayName, 'N/A') AS LastEditor,
+        COUNT(DISTINCT h.Id) AS RevisionCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, LastEditorDisplayName FROM Posts WHERE LastEditorUserId IS NOT NULL) h ON p.Id = h.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, h.LastEditorDisplayName
+),
+UserPostActivity AS (
+    SELECT 
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        ua.TotalBadges,
+        COUNT(ps.PostId) AS ActivePosts,
+        AVG(ps.ViewCount) AS AverageViews,
+        AVG(ps.CommentCount) AS AverageComments,
+        AVG(ps.RevisionCount) AS AverageRevisions
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        PostStatistics ps ON ua.UserId = ps.PostId
+    GROUP BY 
+        ua.DisplayName, ua.TotalPosts, ua.QuestionCount, ua.AnswerCount, ua.UpVotes, ua.DownVotes, ua.TotalBadges
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    QuestionCount,
+    AnswerCount,
+    UpVotes,
+    DownVotes,
+    TotalBadges,
+    ActivePosts,
+    AverageViews,
+    AverageComments,
+    AverageRevisions
+FROM 
+    UserPostActivity
+ORDER BY 
+    TotalPosts DESC, UpVotes DESC;

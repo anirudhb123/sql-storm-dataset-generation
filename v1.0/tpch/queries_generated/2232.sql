@@ -1,0 +1,70 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        SUM(l.l_quantity) AS total_quantity_sold,
+        COUNT(DISTINCT l.l_orderkey) AS total_orders
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS line_items_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    ps.s_name AS supplier_name,
+    pd.p_name AS part_name,
+    pd.p_brand AS part_brand,
+    pd.total_quantity_sold,
+    pd.total_orders,
+    os.total_value AS order_value,
+    ss.total_parts AS supplier_total_parts,
+    ss.total_supply_cost AS supplier_total_supply_cost,
+    (CASE 
+        WHEN ss.avg_acctbal IS NULL THEN 'No Account'
+        WHEN ss.avg_acctbal < 5000 THEN 'Low Balance'
+        WHEN ss.avg_acctbal BETWEEN 5000 AND 20000 THEN 'Medium Balance'
+        ELSE 'High Balance'
+    END) AS account_status
+FROM 
+    SupplierStats ss
+FULL OUTER JOIN 
+    PartDetails pd ON ss.total_parts > 0
+JOIN 
+    OrderSummary os ON os.line_items_count > 5 
+    AND os.total_value > 1000
+ORDER BY 
+    ss.total_supply_cost DESC,
+    pd.total_quantity_sold DESC;

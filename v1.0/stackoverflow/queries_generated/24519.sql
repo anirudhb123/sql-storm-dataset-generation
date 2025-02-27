@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        UP.Reputation AS OwnerReputation,
+        NTILE(10) OVER (ORDER BY P.ViewCount DESC) AS ViewRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        COALESCE(DATEDIFF(day, P.CreationDate, GETDATE()), 0) AS AgeInDays,
+        ARRAY_LENGTH(string_to_array(P.Tags, ','), 1) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users UP ON P.OwnerUserId = UP.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, UP.Reputation, P.Title, P.CreationDate, P.ViewCount
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosureDate,
+        CR.Name AS CloseReason,
+        PH.UserDisplayName AS ClosedBy
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.ViewCount,
+        RP.OwnerReputation,
+        RP.ViewRank,
+        RP.UpVoteCount,
+        RP.DownVoteCount,
+        RP.AgeInDays,
+        RP.TagCount,
+        COALESCE(CP.ClosureDate, 'No Closure'::text) AS ClosureDate,
+        COALESCE(CP.CloseReason, 'N/A') AS CloseReason,
+        COALESCE(CP.ClosedBy, 'System') AS ClosedBy
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    PD.Title,
+    PD.ViewCount,
+    PD.OwnerReputation,
+    PD.ViewRank,
+    PD.UpVoteCount,
+    PD.DownVoteCount,
+    PD.AgeInDays,
+    PD.TagCount,
+    PD.ClosureDate,
+    PD.CloseReason,
+    PD.ClosedBy,
+    CASE 
+        WHEN PD.TagCount > 5 THEN 'Highly Tagged'
+        ELSE 'Moderately Tagged'
+    END AS TagCategory,
+    CASE 
+        WHEN PD.ViewCount > 1000 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus,
+    (PD.UpVoteCount - PD.DownVoteCount) AS NetVotes,
+    CASE 
+        WHEN PD.AgeInDays > 30 THEN 
+            CASE 
+                WHEN PD.NetVotes < 0 THEN 'Needs Improvement'
+                WHEN PD.NetVotes > 0 THEN 'Well Received'
+                ELSE 'Neutral'
+            END
+        ELSE 'New Post'
+    END AS ReceptionStatus
+FROM 
+    PostDetails PD
+WHERE 
+    PD.OwnerReputation IS NOT NULL
+ORDER BY 
+    PD.ViewRank, PD.ViewCount DESC
+LIMIT 100;

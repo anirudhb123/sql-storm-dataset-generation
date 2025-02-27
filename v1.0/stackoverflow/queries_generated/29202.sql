@@ -1,0 +1,73 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        t.TagName
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id) AS TotalPosts,
+        (SELECT COUNT(*) FROM Comments WHERE UserId = u.Id) AS TotalComments,
+        (SELECT COUNT(*) FROM Badges WHERE UserId = u.Id) AS TotalBadges
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+), 
+PopularTags AS (
+    SELECT
+        ts.TagName,
+        ts.PostCount,
+        ts.AnswerCount,
+        ts.QuestionCount,
+        ts.TotalUpvotes,
+        ts.TotalDownvotes,
+        ts.PositiveScorePosts,
+        ur.UserId,
+        ur.Reputation
+    FROM 
+        TagStatistics ts
+    JOIN 
+        UserReputation ur ON ts.PostCount > 5 AND ur.TotalPosts > 10
+    WHERE 
+        ts.TotalUpvotes > ts.TotalDownvotes
+)
+SELECT 
+    pt.TagName,
+    pt.PostCount,
+    pt.AnswerCount,
+    pt.QuestionCount,
+    pt.TotalUpvotes,
+    pt.TotalDownvotes,
+    CASE 
+        WHEN pt.AnswerCount > 0 THEN ROUND(CAST(pt.TotalUpvotes AS FLOAT) / pt.AnswerCount, 2)
+        ELSE 0 
+    END AS UpvoteToAnswerRatio,
+    ur.UserId,
+    ur.Reputation,
+    ur.TotalPosts,
+    ur.TotalComments,
+    ur.TotalBadges
+FROM 
+    PopularTags pt
+JOIN 
+    UserReputation ur ON pt.UserId = ur.UserId
+ORDER BY 
+    pt.PostCount DESC, 
+    pt.TotalUpvotes DESC;

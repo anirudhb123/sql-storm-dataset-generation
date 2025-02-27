@@ -1,0 +1,60 @@
+WITH RECURSIVE CTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        ps.ps_availqty,
+        rank + 1
+    FROM 
+        CTE cte
+    JOIN 
+        partsupp ps ON cte.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty < (SELECT MIN(ps_availqty) FROM partsupp WHERE ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp))
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_extended_price,
+    AVG(CASE 
+            WHEN o.o_orderstatus = 'O' THEN o.o_totalprice
+            ELSE NULL 
+        END) AS avg_order_price,
+    STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE r.r_name IS NOT NULL) AS products_list
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CTE ON CTE.p_partkey = l.l_partkey
+WHERE 
+    (l.l_returnflag = 'R' OR l.l_returnflag IS NULL)
+    AND (o.o_orderdate BETWEEN DATE '1996-01-01' AND cast('1998-10-01' as date))
+    AND r.r_name LIKE ANY (ARRAY['%North%', '%South%'])
+GROUP BY 
+    c.c_name, r.r_name
+HAVING 
+    total_extended_price > (SELECT (SUM(ps_supplycost) / COUNT(*)) FROM partsupp)
+ORDER BY 
+    total_extended_price DESC NULLS LAST;

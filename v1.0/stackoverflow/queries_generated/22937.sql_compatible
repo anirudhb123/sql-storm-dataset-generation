@@ -1,0 +1,86 @@
+
+WITH RecursiveTags AS (
+    SELECT 
+        Id, 
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        IsModeratorOnly,
+        IsRequired,
+        1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id, 
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rt.Level + 1
+    FROM Tags t
+    JOIN RecursiveTags rt ON t.Count < rt.Count 
+    WHERE t.ExcerptPostId IS NOT NULL
+),
+UserContributions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN 1 ELSE 0 END), 0) AS PostCount,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+CuratedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        RANK() OVER (ORDER BY PostCount DESC, CommentCount DESC) AS Rank
+    FROM UserContributions
+    WHERE PostCount > 0
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.UserId,
+        MIN(ph.CreationDate) AS FirstActionDate,
+        MAX(ph.CreationDate) AS LastActionDate,
+        COUNT(*) AS ActionCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS ChangedPosts
+    FROM PostHistory ph
+    JOIN Posts p ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6, 10, 11, 14, 15)
+    GROUP BY ph.UserId
+)
+SELECT 
+    cu.DisplayName,
+    cu.PostCount,
+    cu.CommentCount,
+    cu.BadgeCount,
+    ph.FirstActionDate,
+    ph.LastActionDate,
+    ph.ActionCount,
+    pt.Name AS PostTypeName,
+    rt.TagName AS RequiredTag,
+    CASE 
+        WHEN cu.BadgeCount > 5 THEN 'Gold Member'
+        WHEN cu.BadgeCount > 1 THEN 'Silver Member'
+        ELSE 'New Member'
+    END AS MembershipStatus
+FROM CuratedUsers cu
+LEFT JOIN PostHistoryAggregated ph ON cu.UserId = ph.UserId
+LEFT JOIN PostTypes pt ON pt.Id IN (SELECT DISTINCT PostTypeId FROM Posts p WHERE p.OwnerUserId = cu.UserId)
+LEFT JOIN RecursiveTags rt ON rt.Id IN (SELECT UNNEST(SPLIT_PART(p.Tags, ',', 1)::integer) FROM Posts p WHERE p.OwnerUserId = cu.UserId)
+WHERE cu.Rank <= 10
+ORDER BY cu.PostCount DESC, cu.CommentCount DESC, MembershipStatus;

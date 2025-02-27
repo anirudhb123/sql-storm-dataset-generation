@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- First level: selecting movies along with their companies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mc.company_id,
+        mc.note AS company_note,
+        1 AS level
+    FROM aka_title mt
+    JOIN movie_companies mc ON mt.id = mc.movie_id
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+    
+    -- Recursive part: fetching movies linked to previously fetched movies
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        mc.company_id,
+        mc.note AS company_note,
+        mh.level + 1 AS level
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_companies mc ON at.id = mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.company_id,
+    COUNT(DISTINCT mh.company_note) AS unique_company_notes,
+    RANK() OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS hierarchy_level_rank,
+    (SELECT COUNT(DISTINCT ci.person_id) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = mh.movie_id) AS cast_count,
+    (SELECT STRING_AGG(DISTINCT ak.name, ', ') 
+     FROM aka_name ak 
+     WHERE ak.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = mh.movie_id)) AS cast_names,
+    (CASE 
+        WHEN COUNT(mk.id) > 5 THEN 'Has many keywords'
+        ELSE 'Few keywords'
+    END) AS keyword_status
+FROM movie_hierarchy mh
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY mh.movie_id, mh.title, mh.company_id
+ORDER BY unique_company_notes DESC, hierarchy_level_rank ASC;

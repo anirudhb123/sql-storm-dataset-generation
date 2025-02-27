@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        ws_employee_id,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_employee_id ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_employee_id, ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(total_sales) AS overall_sales
+    FROM 
+        sales_analysis
+    WHERE 
+        rank <= 10
+    GROUP BY 
+        ws_item_sk
+),
+sales_comparison AS (
+    SELECT 
+        i_item_id,
+        COALESCE(SUM(ts.overall_sales), 0) AS overall_sales,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS recent_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        top_sales ts ON i.i_item_sk = ts.ws_item_sk
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk 
+                     AND ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+                     AND ws.ws_sold_date_sk < (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        i_item_id
+)
+SELECT 
+    wp.wp_web_page_id,
+    wp.wp_creation_date_sk,
+    sa.i_item_id,
+    sa.overall_sales,
+    sa.recent_profit,
+    wp.wp_url,
+    CASE 
+        WHEN sa.recent_profit > sa.overall_sales THEN 'Higher Profit'
+        WHEN sa.recent_profit < sa.overall_sales THEN 'Lower Profit'
+        ELSE 'Equal Profit'
+    END AS profit_comparison
+FROM 
+    sales_comparison sa
+JOIN 
+    web_page wp ON wp.wp_customer_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer))
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer))
+WHERE 
+    cd.cd_marital_status = 'M'
+ORDER BY 
+    overall_sales DESC, recent_profit ASC;

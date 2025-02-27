@@ -1,0 +1,85 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice >= (SELECT AVG(ps.ps_supplycost) FROM partsupp ps WHERE ps.ps_availqty > 0)
+), 
+SuppliersWithHighCount AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    GROUP BY 
+        s.s_nationkey
+    HAVING 
+        COUNT(s.s_suppkey) > 5
+    UNION
+    SELECT 
+        n.n_regionkey,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_comment IS NOT NULL
+    GROUP BY 
+        n.n_regionkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P') -- Only Open and Processing
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+), 
+AggregateLineItems AS (
+    SELECT 
+        l.l_returnflag,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        l.l_returnflag
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    c.total_spent,
+    COALESCE(SUPPLIER.supplier_count, 0) AS supplier_count,
+    ali.revenue,
+    ali.line_count
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey = (SELECT MIN(cust.c_custkey) FROM customer cust WHERE cust.c_acctbal > 5000)
+LEFT JOIN 
+    SuppliersWithHighCount SUPPLIER ON SUPPLIER.s_nationkey = (SELECT MAX(n.n_nationkey) FROM nation n WHERE n.n_name LIKE '%land%')
+LEFT JOIN 
+    AggregateLineItems ali ON ali.l_returnflag = 'N'
+WHERE 
+    rp.price_rank <= 10
+    OR rp.p_mfgr NOT IN (SELECT DISTINCT s.s_mfgr FROM supplier s)
+ORDER BY 
+    rp.p_retailprice DESC NULLS LAST;

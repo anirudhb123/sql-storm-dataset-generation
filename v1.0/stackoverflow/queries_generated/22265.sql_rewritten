@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT U.Id,
+           U.DisplayName,
+           U.Reputation,
+           U.Views,
+           U.UpVotes,
+           U.DownVotes,
+           ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+           (SELECT COUNT(*)
+            FROM Badges B
+            WHERE B.UserId = U.Id) AS BadgeCount
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+PostDetails AS (
+    SELECT P.Id AS PostId,
+           P.Title,
+           P.CreationDate,
+           P.LastActivityDate,
+           P.Score,
+           P.ViewCount,
+           P.OwnerUserId,
+           COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+           SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    AND P.PostTypeId = 1 
+    GROUP BY P.Id, P.Title, P.CreationDate, P.LastActivityDate, P.Score, P.ViewCount, P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT P.Id,
+           PH.UserDisplayName,
+           PH.CreationDate AS CloseDate,
+           PH.Comment AS CloseReason,
+           PH.PostId
+    FROM PostHistory PH
+    JOIN Posts P ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 
+),
+FinalStats AS (
+    SELECT U.Id AS UserId,
+           U.DisplayName,
+           U.Reputation,
+           U.BadgeCount,
+           P.PostId,
+           P.Title,
+           P.Score,
+           P.CommentCount,
+           P.UpVotes,
+           P.DownVotes,
+           COALESCE(CP.CloseDate, 'No Close') AS CloseDate,
+           COALESCE(CP.CloseReason, 'Not Applicable') AS CloseReason
+    FROM UserStats U
+    JOIN PostDetails P ON U.Id = P.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON P.PostId = CP.PostId
+)
+
+SELECT *,
+       CASE 
+           WHEN CloseDate != 'No Close' THEN 'Closed'
+           ELSE 'Active'
+       END AS PostStatus,
+       (SELECT COUNT(*)
+        FROM PostHistory PH
+        WHERE PH.PostId = F.PostId
+          AND PH.PostHistoryTypeId IN (11, 13) 
+       ) AS ReopenedCount
+FROM FinalStats F
+ORDER BY U.Reputation DESC, CloseDate NULLS LAST
+LIMIT 100;

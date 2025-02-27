@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_id 
+        ON t.Id = tag_id
+    LEFT JOIN 
+        Tags t ON t.Id::varchar IN (SELECT UNNEST(string_to_array(p.Tags, '><')))
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.CommentCount
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        bh.TagBased,
+        bh.Class
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges bh ON bh.UserId = u.Id 
+    WHERE 
+        u.Reputation > 1000  
+),
+UserPostStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS TotalPosts,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.AnswerCount) AS TotalAnswers,
+        SUM(rp.CommentCount) AS TotalComments
+    FROM 
+        ActiveUsers u
+    JOIN 
+        RankedPosts rp ON u.UserId = rp.OwnerUserId
+    GROUP BY 
+        u.UserId, u.DisplayName
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalViews,
+    ups.TotalAnswers,
+    ups.TotalComments,
+    COALESCE(b.Name, 'No Badge') AS BadgeName,
+    CASE 
+        WHEN ups.TotalViews > 10000 THEN 'Highly Viewed'
+        WHEN ups.TotalViews > 1000 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed'
+    END AS ViewCategory
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    Badges b ON ups.UserId = b.UserId
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalViews DESC;

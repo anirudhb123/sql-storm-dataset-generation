@@ -1,0 +1,74 @@
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.PostTypeId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(A.Id) AS AnswerCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  -- BountyStart
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS ClosureCount,
+        MAX(CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  -- Post Closed, Post Reopened
+    GROUP BY 
+        PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    RP.CommentCount,
+    RP.AnswerCount,
+    COALESCE(CP.ClosureCount, 0) AS ClosureCount,
+    CP.LastClosedDate,
+    IU.DisplayName AS InfluentialUserName,
+    IU.Reputation AS InfluentialUserReputation,
+    RANK() OVER (PARTITION BY RP.PostTypeId ORDER BY RP.Score DESC) AS PostRank
+FROM 
+    RecentPosts RP
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+LEFT JOIN 
+    TopUsers IU ON RP.OwnerDisplayName = IU.DisplayName
+WHERE 
+    RP.Score > 0
+ORDER BY 
+    RP.CreationDate DESC, 
+    RP.Score DESC
+OPTION (RECOMPILE);

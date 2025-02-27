@@ -1,0 +1,90 @@
+
+WITH RecursiveTagCount AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        Count > 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        rt.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagCount rt ON rt.ExcerptPostId = t.Id 
+    WHERE 
+        t.Count > 0 AND rt.Level < 5
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    COALESCE(SUM(ps.CommentCount), 0) AS TotalComments,
+    COALESCE(SUM(ps.Upvotes), 0) AS TotalUpvotes,
+    COALESCE(SUM(ps.Downvotes), 0) AS TotalDownvotes,
+    tt.TagName,
+    COUNT(DISTINCT ps.PostId) AS PostsWithTagCount
+FROM 
+    UserActivity u
+LEFT JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostStats ps ON p.Id = ps.PostId
+LEFT JOIN 
+    Tags tt ON tt.WikiPostId = p.Id
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, tt.TagName
+HAVING 
+    COALESCE(SUM(ps.Upvotes), 0) - COALESCE(SUM(ps.Downvotes), 0) > 10
+ORDER BY 
+    TotalComments DESC, u.Reputation DESC
+LIMIT 10;

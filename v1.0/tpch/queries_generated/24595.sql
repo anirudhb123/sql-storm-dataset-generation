@@ -1,0 +1,76 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+    GROUP BY o.o_orderkey
+),
+supplier_parts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+customer_data AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_name, 
+    n.n_name AS nation_name,
+    cs.order_count,
+    cs.total_spent,
+    sp.total_availability,
+    sp.avg_supply_cost,
+    os.total_revenue,
+    COALESCE(NULLIF(sp.total_availability - cs.order_count, 0), 9999) AS availability_adjusted,
+    CASE WHEN cs.spending_rank < 5 THEN 'High Value' ELSE 'Regular' END AS customer_value_category
+FROM part p
+JOIN supplier s ON s.s_nationkey = (
+    SELECT n.n_nationkey
+    FROM nation n
+    JOIN nation_hierarchy nh ON nh.n_nationkey = n.n_nationkey
+    WHERE nh.level = (SELECT MAX(level) FROM nation_hierarchy)
+    LIMIT 1
+)
+LEFT JOIN supplier_parts sp ON sp.s_suppkey = s.s_suppkey
+LEFT JOIN order_summary os ON os.o_orderkey = (
+    SELECT MIN(o.o_orderkey)
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+)
+LEFT JOIN customer_data cs ON cs.c_custkey = (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = s.s_nationkey
+    ORDER BY c.c_acctbal DESC
+    LIMIT 1
+)
+WHERE p.p_retailprice < (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_size IS NOT NULL
+) 
+AND (p.p_comment LIKE '%fragile%' OR p.p_container = 'BOX')
+ORDER BY customer_value_category DESC, p.p_name;

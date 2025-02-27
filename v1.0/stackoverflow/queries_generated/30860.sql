@@ -1,0 +1,93 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        CAST(0 AS INT) AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.OwnerUserId,
+        a.Title,
+        a.CreationDate,
+        a.AnswerCount,
+        a.Score,
+        Level + 1
+    FROM 
+        Posts a
+    JOIN 
+        RecursiveCTE r ON a.ParentId = r.PostId
+),
+AggregateData AS (
+    SELECT 
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AvgScore,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        ph.PostId,
+        STRING_AGG(ph.Comment, '; ') AS CloseReasons,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        ad.DisplayName,
+        ad.TotalAnswers,
+        ad.AvgScore,
+        ad.TotalBadges,
+        ad.TotalViews,
+        cp.CloseReasons,
+        cp.LastClosedDate
+    FROM 
+        AggregateData ad
+    LEFT JOIN 
+        ClosedPosts cp ON cp.PostId = (
+            SELECT Id 
+            FROM Posts 
+            WHERE OwnerUserId = ad.OwnerUserId 
+            ORDER BY LastActivityDate DESC 
+            LIMIT 1
+        )
+    WHERE 
+        ad.TotalAnswers > 5
+)
+
+SELECT 
+    fr.DisplayName,
+    fr.TotalAnswers,
+    fr.AvgScore,
+    fr.TotalBadges,
+    fr.TotalViews,
+    COALESCE(fr.CloseReasons, 'No close reasons') AS CloseReasons,
+    COALESCE(fr.LastClosedDate, 'N/A') AS LastClosedDate
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.TotalAnswers DESC, fr.AvgScore DESC;

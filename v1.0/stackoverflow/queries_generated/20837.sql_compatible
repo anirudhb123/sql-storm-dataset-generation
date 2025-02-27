@@ -1,0 +1,65 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(UP.UsageCount, 0) AS UsageCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS UsageCount
+        FROM PostLinks
+        GROUP BY PostId
+    ) AS UP ON p.Id = UP.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ub.Reputation,
+        ub.BadgeCount,
+        CASE 
+            WHEN rp.UsageCount > 5 THEN 'Highly Used'
+            WHEN rp.UsageCount BETWEEN 2 AND 5 THEN 'Moderately Used'
+            ELSE 'Rarely Used'
+        END AS UsageType
+    FROM RecentPosts rp
+    JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE rp.rn <= 5
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Reputation,
+    ps.BadgeCount,
+    ps.UsageType,
+    COUNT(c.Id) AS CommentCount,
+    AVG(v.BountyAmount) AS AverageBountyAmount,
+    MAX(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS HasBadgesFlag,
+    (SELECT COUNT(*) FROM Votes v2 WHERE v2.PostId = ps.PostId AND v2.VoteTypeId = 2) AS UpvoteCount,
+    MAX(b.UserDisplayName) AS LastBadgeGiver
+FROM PostStats ps
+LEFT JOIN Comments c ON ps.PostId = c.PostId
+LEFT JOIN Votes v ON ps.PostId = v.PostId
+LEFT JOIN Badges b ON ps.Reputation = b.UserId
+GROUP BY 
+    ps.PostId, ps.Title, ps.Reputation, ps.BadgeCount, ps.UsageType
+HAVING 
+    ps.BadgeCount IS NOT NULL 
+    AND ps.UsageType IN ('Highly Used', 'Moderately Used')
+ORDER BY 
+    ps.Reputation DESC, CommentCount DESC
+LIMIT 100;

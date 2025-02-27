@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.Score
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.QuestionCount,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount
+FROM 
+    UserReputation ur
+JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId
+WHERE 
+    rp.PostRank <= 3 -- Only return top 3 posts per user
+ORDER BY 
+    ur.Reputation DESC, rp.Score DESC;

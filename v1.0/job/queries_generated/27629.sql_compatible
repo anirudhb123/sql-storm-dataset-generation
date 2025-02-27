@@ -1,0 +1,54 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ak.name AS aka_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+RoleCounts AS (
+    SELECT 
+        ci.movie_id,
+        rt.role AS role_type,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS movie_info_details
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.aka_name,
+    rc.role_type,
+    rc.role_count,
+    mi.movie_info_details
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    RoleCounts rc ON rt.title_id = rc.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title_id = mi.movie_id
+WHERE 
+    rt.title_rank <= 5
+ORDER BY 
+    rt.production_year DESC, rt.title_rank;

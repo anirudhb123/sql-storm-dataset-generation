@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.ViewCount IS NOT NULL
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenActions,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.AverageReputation,
+        COUNT(*) AS ActivityCount
+    FROM 
+        UserActivity ua
+    JOIN RankedPosts rp ON ua.UserId = rp.OwnerUserId
+    GROUP BY 
+        ua.UserId, ua.AverageReputation
+    HAVING 
+        COUNT(*) > 5
+),
+PostVoteInfo AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(*) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ua.UserId,
+    ua.AverageReputation,
+    uv.ActivityCount,
+    pvi.UpVotes,
+    pvi.DownVotes,
+    pvi.TotalVotes,
+    CASE 
+        WHEN pvi.TotalVotes > 0 THEN CAST(pvi.UpVotes AS DECIMAL) / pvi.TotalVotes 
+        ELSE NULL 
+    END AS UpvotePercentage,
+    CASE 
+        WHEN pvi.TotalVotes = 0 AND rp.Score < 0 THEN 'Negative Post'
+        WHEN pvi.TotalVotes = 0 THEN 'No Votes Yet'
+        ELSE 'Vote Counted'
+    END AS VoteStatus,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM Comments c 
+            WHERE c.PostId = rp.PostId 
+            AND c.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+        ) THEN 'Recent Comments Exist'
+        ELSE 'No Recent Comments'
+    END AS RecentCommentsStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    TopUsers uv ON u.Id = uv.UserId
+LEFT JOIN 
+    PostVoteInfo pvi ON rp.PostId = pvi.PostId
+ORDER BY 
+    rp.Score DESC,
+    UpvotePercentage DESC NULLS LAST;

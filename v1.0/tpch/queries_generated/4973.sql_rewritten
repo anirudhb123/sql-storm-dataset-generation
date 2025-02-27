@@ -1,0 +1,56 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 0 
+            ELSE ps.ps_availqty 
+        END AS available_quantity
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers_used
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    LEFT JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    cs.c_custkey,
+    cs.total_spent,
+    cs.order_count,
+    cs.avg_order_value,
+    COALESCE(sp.p_name, 'No Part') AS part_name,
+    COALESCE(sp.available_quantity, 0) AS available_quantity,
+    COALESCE(so.order_rank, 0) AS high_value_order,
+    CASE 
+        WHEN cs.total_spent IS NULL OR cs.total_spent < 1000 THEN 'Low Value'
+        WHEN cs.total_spent BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'High Value'
+    END AS customer_value_segment
+FROM CustomerStats cs
+FULL OUTER JOIN SupplierParts sp ON cs.suppliers_used LIKE '%' || sp.s_name || '%'
+LEFT JOIN RankedOrders so ON cs.order_count > 10 AND so.o_orderkey = cs.c_custkey
+WHERE cs.total_spent IS NOT NULL
+ORDER BY cs.total_spent DESC, part_name ASC;

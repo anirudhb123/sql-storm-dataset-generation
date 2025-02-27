@@ -1,0 +1,32 @@
+
+SELECT 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state, 
+    SUM(ss.ss_sales_price) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    COUNT(DISTINCT wr.wr_order_number) AS total_web_returns,
+    MAX(ss.ss_sold_date_sk) AS last_purchase_date
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+    AND ca.ca_state = 'CA'
+    AND ss.ss_sold_date_sk >= (SELECT MAX(d_date_sk) - 365 FROM date_dim)
+GROUP BY 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

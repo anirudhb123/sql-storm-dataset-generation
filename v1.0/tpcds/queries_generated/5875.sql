@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws.web_site_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(ws.order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.sold_date_sk, ws.web_site_sk
+),
+TopWebSites AS (
+    SELECT 
+        web_site_sk,
+        SUM(total_sales) AS annual_sales,
+        SUM(total_orders) AS total_orders
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 5
+    GROUP BY 
+        web_site_sk
+)
+SELECT 
+    ws.web_name,
+    tws.annual_sales,
+    tws.total_orders,
+    AVG(ws_tax_percentage) AS avg_tax_percentage,
+    SUM(ss.ext_sales_price) AS total_store_sales,
+    COUNT(ss.ticket_number) AS total_store_orders
+FROM 
+    web_site ws
+JOIN 
+    TopWebSites tws ON ws.web_site_sk = tws.web_site_sk
+LEFT JOIN 
+    store_sales ss ON ss.ss_sold_date_sk = tws.sold_date_sk
+GROUP BY 
+    ws.web_name, tws.annual_sales, tws.total_orders
+ORDER BY 
+    tws.annual_sales DESC;

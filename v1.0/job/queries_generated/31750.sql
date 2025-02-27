@@ -1,0 +1,36 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorRoles AS (
+    SELECT a.name, COUNT(DISTINCT ci.movie_id) AS movie_count, 
+           STRING_AGG(DISTINCT r.role, ', ') AS roles,
+           AVG(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE ci.nr_order END) AS avg_order
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN role_type r ON ci.role_id = r.id
+    GROUP BY a.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 1
+)
+
+SELECT mh.title AS movie_title,
+       mh.production_year,
+       COUNT(DISTINCT ci.person_id) AS total_actors,
+       SUM(COALESCE(ai.movie_count, 0)) AS total_actor_roles,
+       STRING_AGG(DISTINCT ai.roles, '; ') AS all_roles,
+       DISTINCT CASE WHEN mh.level = 2 THEN 'Sequel' ELSE 'Original' END AS movie_type
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN ActorRoles ai ON ci.person_id = ai.person_id
+WHERE mh.production_year IS NOT NULL
+GROUP BY mh.id, mh.title, mh.production_year, mh.level
+ORDER BY mh.production_year DESC, total_actors DESC;

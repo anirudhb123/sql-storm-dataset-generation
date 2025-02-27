@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserId AS EditorId,
+        u.DisplayName AS EditorName,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Edited'
+        END AS Action
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Users u ON u.Id = ph.UserId
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    ua.DisplayName AS OwnerName,
+    ua.VoteCount,
+    ua.AverageReputation,
+    COALESCE(ph.Action, 'No Action') AS RecentAction,
+    COALESCE(ph.HistoryDate, 'Never') AS LastActionDate,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserActivity ua ON ua.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetail ph ON ph.PostId = rp.PostId
+WHERE 
+    (rp.Score > 10 OR rp.ViewCount > 1000)
+    AND (ARRAY_LENGTH(rp.Tags, 1) >= 3 OR rp.Rank = 1)
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;
+
+This elaborate SQL query retrieves data about posts while considering various aspects including user activity, post history, and tag information. The query employs Common Table Expressions (CTEs) to organize data related to posts, users, and post history before combining them to produce a final selection of interesting posts that meet specific criteria. It incorporates complex predicates, filters, and aggregations, making it ideal for performance benchmarking.

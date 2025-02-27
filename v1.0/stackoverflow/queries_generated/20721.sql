@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS rn,
+        COALESCE(c.UserDisplayName, 'Anonymous') AS LastCommentUser,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, c.UserDisplayName
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        PHT.Name AS HistoryTypeName,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalPostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.rn,
+        hp.HistoryCount,
+        ub.BadgeNames,
+        ub.BadgeCount,
+        rp.LastCommentUser,
+        rp.LastCommentDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryData hp ON rp.PostId = hp.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.PostId = ub.UserId
+    WHERE 
+        rp.rn <= 5
+)
+SELECT 
+    fpm.PostId,
+    fpm.Title,
+    fpm.ViewCount,
+    fpm.Score,
+    CASE 
+        WHEN fpm.HistoryCount > 0 THEN 'Activity'
+        ELSE 'No Activity'
+    END AS ActivityStatus,
+    fpm.BadgeNames,
+    COALESCE(fpm.LastCommentUser, 'No comments yet') AS LatestCommenter,
+    fpm.LastCommentDate,
+    CASE 
+        WHEN fpm.LastCommentDate IS NULL THEN 'N/A'
+        ELSE EXTRACT(EPOCH FROM (NOW() - fpm.LastCommentDate))::int
+    END AS SecondsSinceLastComment
+FROM 
+    FinalPostMetrics fpm
+WHERE 
+    fpm.Score > (SELECT AVG(Score) FROM Posts) -- Filter for above-average posts
+ORDER BY 
+    fpm.ViewCount DESC, 
+    fpm.Score DESC;

@@ -1,0 +1,75 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RegionalOrderStats AS (
+    SELECT 
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    coalesce(ss.total_avail_qty, 0) AS supplier_avail_qty,
+    coalesce(ts.s_name, 'No Supplier') AS top_supplier_name,
+    col.total_orders,
+    col.total_spent,
+    ros.total_orders AS orders_in_region,
+    ros.total_revenue
+FROM 
+    CustomerOrderStats col
+JOIN 
+    SupplierStats ss ON col.total_orders > 5
+LEFT JOIN 
+    TopSuppliers ts ON ss.total_supply_cost > 10000
+LEFT JOIN 
+    RegionalOrderStats ros ON ss.total_supply_cost IS NOT NULL
+WHERE 
+    ros.total_revenue BETWEEN 10000 AND 50000
+ORDER BY 
+    col.total_spent DESC, col.c_name;

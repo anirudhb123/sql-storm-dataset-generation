@@ -1,0 +1,71 @@
+WITH RecursiveTagCTE AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, c.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagCTE c ON t.ExcerptPostId = c.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '90 days'
+    GROUP BY p.Id
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstActivityDate,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(DISTINCT ph.UserId) AS UniqueEditors
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.GoldCount,
+    u.SilverCount,
+    u.BronzeCount,
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    ra.FirstActivityDate,
+    ra.LastActivityDate,
+    ra.EditCount,
+    ra.UniqueEditors,
+    tt.TagName AS TopTagName,
+    COALESCE(tt.Count, 0) AS TopTagCount,
+    ps.TotalBounty AS TotalBountyAmount,
+    ps.CommentCount
+FROM UserBadges u
+JOIN RecentPostStats ps ON ps.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+LEFT JOIN PostActivity ra ON ra.PostId = ps.PostId
+LEFT JOIN RecursiveTagCTE tt ON tt.Id = ps.PostId -- Assuming tag relation
+ORDER BY u.BadgeCount DESC, ps.ViewCount DESC, ps.Score DESC
+LIMIT 100;

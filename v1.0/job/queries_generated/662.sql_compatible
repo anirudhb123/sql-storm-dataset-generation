@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS rank
+    FROM 
+        aka_title a
+    INNER JOIN 
+        title t ON a.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON c.person_id = an.person_id
+    WHERE 
+        an.name LIKE '%Smith%'
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 1
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    act.person_id,
+    act.movie_count,
+    comp.companies
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    FilteredActors act ON act.movie_count > 1
+LEFT JOIN 
+    CompanyMovies comp ON r.title = comp.movie_id
+WHERE 
+    (r.rank <= 5 OR act.person_id IS NULL)
+ORDER BY 
+    r.production_year DESC, 
+    r.title;

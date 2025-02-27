@@ -1,0 +1,44 @@
+WITH SupplierTotalCost AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+CustomerOrderCounts AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+ProductSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY l.l_partkey
+),
+NationSupplierSales AS (
+    SELECT n.n_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS nation_total_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey
+)
+SELECT r.r_name,
+       COALESCE(stc.total_supply_cost, 0) AS total_supply_cost,
+       COALESCE(osc.total_orders, 0) AS total_orders,
+       COALESCE(ps.total_sales, 0) AS total_sales
+FROM region r
+LEFT JOIN SupplierTotalCost stc ON r.r_regionkey = (
+    SELECT n.r_regionkey
+    FROM nation n
+    WHERE n.n_nationkey IN (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = stc.s_suppkey)
+)
+LEFT JOIN CustomerOrderCounts osc ON r.r_regionkey = (
+    SELECT c.c_nationkey
+    FROM customer c
+    WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = osc.o_custkey)
+)
+LEFT JOIN ProductSales ps ON ps.l_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_container = 'BOX'
+)
+ORDER BY r.r_name ASC;

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+UserTopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        ub.BadgeCount
+    FROM RankedPosts rp
+    JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE rp.rn <= 5  
+),
+PostEngagement AS (
+    SELECT
+        p.Id AS PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,  
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes  
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostMetrics AS (
+    SELECT 
+        utp.Title,
+        utp.Score,
+        utp.ViewCount,
+        utp.BadgeCount,
+        pe.Upvotes,
+        pe.Downvotes
+    FROM UserTopPosts utp
+    JOIN PostEngagement pe ON utp.PostId = pe.PostId
+)
+SELECT 
+    Title,
+    Score,
+    ViewCount,
+    BadgeCount,
+    Upvotes,
+    Downvotes,
+    COALESCE(Upvotes - Downvotes, 0) AS NetEngagement,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pm.PostId) AS CommentCount
+FROM PostMetrics pm
+ORDER BY NetEngagement DESC, Score DESC, ViewCount DESC
+LIMIT 10;

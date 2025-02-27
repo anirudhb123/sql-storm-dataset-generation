@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PopularTags AS (
+    SELECT
+        UNNEST(string_to_array(p.Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        TagName
+    HAVING
+        COUNT(*) > 5
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CAST(ph.Comment AS text), ', ') AS EditComments
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= NOW() - INTERVAL '1 month'
+        AND ph.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.CommentCount,
+    t.TagName,
+    CASE 
+        WHEN rp.rn = 1 THEN 'Top'
+        WHEN rp.rn <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS Classification,
+    p.EditComments
+FROM
+    RankedPosts r
+JOIN
+    PopularTags t ON r.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || t.TagName || '%')
+LEFT JOIN
+    RecentPostHistory p ON r.PostId = p.PostId
+WHERE
+    r.Score > (SELECT AVG(Score) FROM Posts WHERE CreationDate >= NOW() - INTERVAL '1 year')
+ORDER BY
+    r.Score DESC, t.TagCount DESC
+LIMIT 50;

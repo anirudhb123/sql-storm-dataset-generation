@@ -1,0 +1,53 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        sales_data ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, customer_name, cd.cd_gender
+),
+top_customers AS (
+    SELECT
+        customer_name,
+        cd_gender,
+        total_spent,
+        DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY total_spent DESC) AS rank
+    FROM 
+        customer_summary
+)
+SELECT 
+    tc.customer_name,
+    tc.cd_gender,
+    tc.total_spent,
+    COALESCE(NULLIF(tc.rank, 1), 'Not Top 1') AS customer_rank
+FROM 
+    top_customers tc
+WHERE 
+    tc.rank <= 5
+ORDER BY 
+    tc.cd_gender, tc.total_spent DESC;

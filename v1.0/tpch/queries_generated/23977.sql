@@ -1,0 +1,68 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, NULL AS parent_key
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_acctbal < sh.s_acctbal
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+filtered_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey
+    FROM supplier s
+    WHERE EXISTS (
+        SELECT 1
+        FROM partsupp ps
+        WHERE ps.ps_suppkey = s.s_suppkey
+        AND ps.ps_availqty > (
+            SELECT AVG(ps2.ps_availqty)
+            FROM partsupp ps2
+            WHERE ps2.ps_partkey IN (SELECT p_partkey FROM part WHERE p_size > 10)
+        )
+    )
+),
+final_selection AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT l.l_orderkey) AS order_count,
+           COALESCE(SUM(l.l_extendedprice), 0) AS total_extended_price,
+           STRING_AGG(DISTINCT CONCAT_WS(' ', s.s_name, s.s_phone), '; ') AS supplier_details
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN filtered_suppliers fs ON fs.s_nationkey = (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY'
+    )
+    LEFT JOIN supplier s ON s.s_suppkey = l.l_suppkey
+    WHERE p.p_retailprice IS NOT NULL 
+    AND EXISTS (
+        SELECT 1 FROM supplier_hierarchy sh WHERE sh.s_suppkey = fs.s_suppkey
+    )
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT f.p_partkey, f.p_name, f.order_count, f.total_extended_price,
+       CASE WHEN f.order_count > 0 THEN 'Active' ELSE 'Inactive' END AS activity_status,
+       CASE 
+           WHEN f.order_count IS NULL THEN 'No Orders' 
+           ELSE 'Orders Present' 
+       END AS order_presence,
+       RANK() OVER (ORDER BY f.total_extended_price DESC) AS price_rank
+FROM final_selection f
+ORDER BY f.total_extended_price DESC NULLS LAST
+LIMIT 100
+UNION ALL
+SELECT -1 AS p_partkey, 'TOTAL' AS p_name, COUNT(*) AS order_count,
+       SUM(total_value) AS total_extended_price, NULL, NULL, NULL
+FROM ranked_orders
+WHERE order_rank <= 10
+GROUP BY 1
+ORDER BY total_extended_price DESC;

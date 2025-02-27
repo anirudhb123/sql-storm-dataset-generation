@@ -1,0 +1,79 @@
+WITH RecursivePostLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        1 AS LinkDepth
+    FROM 
+        PostLinks pl
+    WHERE 
+        pl.LinkTypeId = 3  -- Starting with duplicates
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        pl.RelatedPostId,
+        LinkDepth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        pl.LinkTypeId = 3 AND
+        p.Id <> pl.RelatedPostId
+),
+PostVoteAggregation AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, pt.Name
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(pa.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pa.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(pa.TotalVotes, 0) AS GrandTotalVotes,
+    COUNT(DISTINCT pl.RelatedPostId) AS DuplicateCount,
+    u.DisplayName AS OwnerDisplayName,
+    ub.BadgeCount,
+    ub.HighestBadgeClass,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY pa.TotalVotes DESC) AS VoteRank
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteAggregation pa ON p.Id = pa.PostId
+LEFT JOIN 
+    RecursivePostLinks pl ON p.Id = pl.PostId
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'  -- Only posts from the last year
+GROUP BY 
+    p.Id, pa.UpVotes, pa.DownVotes, u.DisplayName, ub.BadgeCount, ub.HighestBadgeClass
+ORDER BY 
+    GrandTotalVotes DESC, VoteRank;

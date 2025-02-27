@@ -1,0 +1,65 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year >= 2000
+),
+ActorDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COALESCE(ac.nr_order, 0) AS order_in_cast,
+        c.role_id,
+        CNT.total_movies
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ac ON ak.person_id = ac.person_id
+    LEFT JOIN 
+        (SELECT person_id, COUNT(DISTINCT movie_id) AS total_movies
+         FROM cast_info
+         GROUP BY person_id) CNT ON ak.person_id = CNT.person_id
+),
+MovieInfo AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    GROUP BY 
+        mt.movie_id, mt.title, mt.production_year
+)
+SELECT 
+    ad.actor_name,
+    mt.title,
+    mt.production_year,
+    mt.keywords,
+    ad.order_in_cast,
+    COUNT(DISTINCT cc.movie_id) OVER (PARTITION BY ad.actor_id) AS movies_with_roles,
+    MAX(RT.rank) OVER (PARTITION BY mt.production_year) AS max_rank_in_year,
+    CASE 
+        WHEN ad.role_id IS NOT NULL THEN 'Has Role'
+        ELSE 'No Role'
+    END AS role_status
+FROM 
+    ActorDetails ad
+LEFT JOIN 
+    complete_cast cc ON ad.actor_id = cc.subject_id
+JOIN 
+    MovieInfo mt ON cc.movie_id = mt.movie_id
+JOIN 
+    RankedTitles RT ON mt.title = RT.title 
+WHERE 
+    mt.production_year <= 2023 
+    AND ad.order_in_cast IS NOT NULL
+ORDER BY 
+    mt.production_year DESC, 
+    ad.actor_name;

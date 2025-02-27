@@ -1,0 +1,71 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        MAX(U.CreationDate) AS AccountCreated,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.ViewCount) AS AvgViewCount,
+        AVG(P.Score) AS AvgScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalPosts,
+        UA.TotalComments,
+        UA.TotalBadges,
+        UA.PositivePosts,
+        UA.NegativePosts,
+        P.PostCount,
+        P.AvgViewCount,
+        P.AvgScore,
+        P.LastPostDate
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostStats P ON UA.UserId = P.OwnerUserId
+    ORDER BY 
+        UA.TotalPosts DESC, UA.TotalComments DESC
+    LIMIT 10
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.TotalComments,
+    T.TotalBadges,
+    T.PositivePosts,
+    T.NegativePosts,
+    T.PostCount,
+    T.AvgViewCount,
+    T.AvgScore,
+    T.LastPostDate,
+    DATEDIFF(NOW(), T.AccountCreated) AS DaysSinceCreation
+FROM 
+    TopUsers T
+ORDER BY 
+    T.TotalPosts DESC;

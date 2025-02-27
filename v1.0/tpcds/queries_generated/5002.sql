@@ -1,0 +1,64 @@
+
+WITH ProductSales AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        SUM(ws.ws_quantity) AS total_quantity_sold, 
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459580 AND 2459645  -- Date range for sales
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+), 
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+), 
+SalesSummary AS (
+    SELECT 
+        pd.i_item_id,
+        pd.i_item_desc,
+        SUM(pd.total_quantity_sold) AS total_sales_quantity,
+        SUM(pd.total_sales_amount) AS sales_amount,
+        COUNT(DISTINCT cd.c_customer_id) AS unique_customers
+    FROM 
+        ProductSales pd
+    JOIN 
+        CustomerDemographics cd ON pd.i_item_id IN (
+            SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cd.c_customer_id
+        )
+    GROUP BY 
+        pd.i_item_id, pd.i_item_desc
+) 
+SELECT 
+    ss.i_item_id, 
+    ss.i_item_desc, 
+    ss.total_sales_quantity, 
+    ss.sales_amount, 
+    ss.unique_customers,
+    CASE
+        WHEN ss.sales_amount > 10000 THEN 'High'
+        WHEN ss.sales_amount BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_performance
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.sales_amount DESC
+LIMIT 50;

@@ -1,0 +1,33 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation
+    FROM Users
+    WHERE Reputation > 1000
+),
+PopularPosts AS (
+    SELECT P.Id, P.Title, P.ViewCount, P.Score, U.DisplayName AS OwnerDisplayName, 
+           COUNT(C.Id) AS CommentCount, COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.ViewCount, P.Score, U.DisplayName
+    HAVING COUNT(C.Id) > 5 OR COUNT(V.Id) > 10
+),
+PostHistoryAnalysis AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate, 
+           COUNT(PH.Id) AS HistoryCount, MAX(PH.CreationDate) AS LastEdited
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate
+),
+FinalReport AS (
+    SELECT UP.DisplayName, PP.Title, PP.ViewCount, PP.Score, 
+           PH.HistoryCount, PH.LastEdited
+    FROM UserReputation UP
+    JOIN PopularPosts PP ON UP.Id = PP.OwnerDisplayName
+    JOIN PostHistoryAnalysis PH ON PP.Id = PH.PostId
+)
+SELECT *
+FROM FinalReport
+ORDER BY Reputation DESC, ViewCount DESC;

@@ -1,0 +1,66 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count 
+    FROM customer AS c
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE ws.ws_net_paid IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING SUM(ws.ws_net_paid) > (SELECT AVG(ws2.ws_net_paid) FROM web_sales AS ws2)
+),
+MonthlySales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales AS ws
+    JOIN date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+),
+FailedReturns AS (
+    SELECT 
+        wr.wr_refunded_customer_sk,
+        SUM(wr.wr_return_amt_inc_tax) AS total_failed_returns
+    FROM web_returns AS wr
+    WHERE wr.wr_return_amt_inc_tax < 0
+    GROUP BY wr.wr_refunded_customer_sk
+)
+
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(hvc.total_spent, 0) AS customer_spending,
+    CASE 
+        WHEN rc.gender_rank IS NOT NULL THEN rc.gender_rank 
+        ELSE 'Not Ranked'
+    END AS gender_rank,
+    ms.total_sales AS monthly_sales,
+    fr.total_failed_returns
+FROM customer AS c
+LEFT JOIN HighValueCustomers AS hvc ON c.c_customer_sk = hvc.c_customer_sk
+LEFT JOIN RankedCustomers AS rc ON c.c_customer_sk = rc.c_customer_sk
+LEFT JOIN MonthlySales AS ms ON ms.d_year = EXTRACT(YEAR FROM CURRENT_DATE) AND
+                                   ms.d_month_seq = EXTRACT(MONTH FROM CURRENT_DATE)
+LEFT JOIN FailedReturns AS fr ON c.c_customer_sk = fr.wr_refunded_customer_sk
+ORDER BY customer_spending DESC, gender_rank ASC NULLS LAST;

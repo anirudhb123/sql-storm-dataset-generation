@@ -1,0 +1,83 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(P.ViewCount) AS AverageViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpVotes,
+        SUM(COALESCE(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+ClosingStatistics AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        COUNT(PH.Id) AS CloseVotes,
+        MAX(PH.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+    GROUP BY 
+        PH.UserId, PH.PostId
+)
+
+SELECT 
+    T.TagName,
+    TS.PostCount,
+    TS.QuestionCount,
+    TS.AnswerCount,
+    TS.AverageViews,
+    TS.AverageScore,
+    U.DisplayName AS TopUser,
+    U.PostsCreated,
+    U.Questions,
+    U.Answers,
+    U.UpVotes,
+    U.DownVotes,
+    CS.CloseVotes,
+    CS.LastCloseDate
+FROM 
+    TagStatistics TS
+JOIN 
+    UserStatistics U ON U.PostsCreated = (
+        SELECT MAX(PostsCreated)
+        FROM UserStatistics
+    )
+LEFT JOIN 
+    ClosingStatistics CS ON CS.PostId = (
+        SELECT P.Id
+        FROM Posts P
+        WHERE P.Tags LIKE CONCAT('%', T.TagName, '%')
+        ORDER BY P.CreationDate DESC
+        LIMIT 1
+    )
+ORDER BY 
+    TS.PostCount DESC
+LIMIT 10;

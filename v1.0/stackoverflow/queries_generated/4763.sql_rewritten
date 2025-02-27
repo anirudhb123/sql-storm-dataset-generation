@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0 AND p.PostTypeId = 1
+),
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostFeedback AS (
+    SELECT 
+        p.Id,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    u.DisplayName AS PopularUser,
+    pu.PostCount,
+    pf.CommentCount,
+    pf.UpVoteCount,
+    pf.DownVoteCount,
+    CASE 
+        WHEN pf.UpVoteCount > pf.DownVoteCount THEN 'Positive'
+        WHEN pf.UpVoteCount < pf.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS FeedbackSentiment
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.OwnerUserId = u.Id
+JOIN 
+    PopularUsers pu ON u.Id = pu.UserId
+JOIN 
+    PostFeedback pf ON r.Id = pf.Id
+WHERE 
+    r.PostRank = 1
+ORDER BY 
+    r.Score DESC, 
+    r.CreationDate DESC;

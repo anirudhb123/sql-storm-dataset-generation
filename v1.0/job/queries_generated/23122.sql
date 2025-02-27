@@ -1,0 +1,45 @@
+WITH MovieYearStats AS (
+    SELECT 
+        t.title AS movie_title,
+        COUNT(c.id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_cast_note_present
+    FROM title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN aka_title at ON t.id = at.movie_id
+    WHERE t.production_year >= 2000 AND (t.kind_id IN (1, 2) OR t.title LIKE '%action%')
+    GROUP BY t.title
+), CompanyStats AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM movie_companies mc
+    INNER JOIN company_name cn ON mc.company_id = cn.id
+    INNER JOIN title t ON mc.movie_id = t.id
+    GROUP BY m.movie_id
+), MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM movie_keyword mk
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    ms.cast_count,
+    ms.avg_cast_note_present,
+    cs.company_count,
+    cs.company_names,
+    mk.keywords
+FROM title m
+JOIN MovieYearStats ms ON m.title = ms.movie_title
+LEFT JOIN CompanyStats cs ON m.id = cs.movie_id
+LEFT JOIN MovieKeywords mk ON m.id = mk.movie_id
+WHERE m.production_year IS NOT NULL
+AND (m.title ILIKE '%hero%' OR m.title ILIKE '%villain%' OR ms.cast_count > 10)
+ORDER BY m.production_year DESC, ms.cast_count DESC
+LIMIT 10;

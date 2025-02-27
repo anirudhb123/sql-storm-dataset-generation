@@ -1,0 +1,73 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(COUNT(C.Comment), 0) AS CommentCount,
+        COALESCE(MAX(C.CreationDate), '1970-01-01') AS LastCommentDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+),
+RankedPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.CreationDate,
+        PA.Score,
+        PA.CommentCount,
+        PA.LastCommentDate,
+        RANK() OVER (PARTITION BY PA.Score ORDER BY PA.CreationDate DESC) AS ScoreRank
+    FROM 
+        PostActivity PA
+    WHERE 
+        PA.Score > 0
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.AnswerCount,
+    US.QuestionCount,
+    US.TotalScore,
+    PP.PostId,
+    PP.Title,
+    PP.Score,
+    PP.CommentCount,
+    PP.LastCommentDate
+FROM 
+    UserStats US
+LEFT JOIN 
+    RankedPosts PP ON US.UserId = (
+        SELECT OwnerUserId
+        FROM Posts
+        WHERE Id = PP.PostId
+        FETCH FIRST 1 ROW ONLY
+    )
+WHERE 
+    US.Reputation > 1000
+ORDER BY 
+    US.TotalScore DESC, PP.LastCommentDate DESC
+FETCH FIRST 10 ROWS ONLY;

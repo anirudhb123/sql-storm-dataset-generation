@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_number_employees,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS manager_name,
+        1 AS level
+    FROM store s
+    JOIN customer c ON s.s_manager = c.c_customer_id
+    WHERE s.s_number_employees IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        sh.s_store_sk,
+        sh.s_store_name,
+        sh.s_number_employees,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS manager_name,
+        level + 1
+    FROM store sh
+    JOIN customer c ON sh.s_manager = c.c_customer_id
+    JOIN sales_hierarchy shier ON shier.s_store_sk = sh.s_store_sk
+    WHERE sh.s_number_employees IS NOT NULL
+),
+customer_metrics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_quantity) AS avg_quantity_per_order
+    FROM customer_demographics cd
+    LEFT JOIN web_sales ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+),
+top_customers AS (
+    SELECT
+        cm.cd_demo_sk,
+        cm.cd_gender,
+        cm.total_spent,
+        RANK() OVER (PARTITION BY cm.cd_gender ORDER BY cm.total_spent DESC) AS rnk
+    FROM customer_metrics cm
+),
+popular_items AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+    HAVING total_quantity_sold > 100
+),
+returns_summary AS (
+    SELECT
+        cr.refunded_customer_sk,
+        SUM(cr.cr_return_amount) AS total_returned,
+        COUNT(cr.cr_order_number) AS return_count
+    FROM catalog_returns cr
+    GROUP BY cr.refunded_customer_sk
+)
+SELECT
+    sh.s_store_name,
+    sh.manager_name,
+    tc.cd_gender,
+    tc.total_spent,
+    ti.i_item_desc,
+    ti.total_quantity_sold,
+    rs.total_returned,
+    rs.return_count
+FROM sales_hierarchy sh
+JOIN top_customers tc ON sh.s_store_sk = tc.cd_demo_sk
+LEFT JOIN popular_items ti ON tc.cd_demo_sk = ti.i_item_sk
+LEFT JOIN returns_summary rs ON tc.cd_demo_sk = rs.refunded_customer_sk
+WHERE sh.s_number_employees > 50
+ORDER BY sh.s_store_name, tc.total_spent DESC;

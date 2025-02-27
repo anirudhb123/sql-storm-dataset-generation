@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        CommentCount 
+    FROM 
+        RankedPosts 
+    WHERE 
+        RankScore <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    CASE 
+        WHEN tp.CommentCount IS NULL THEN 'No comments'
+        ELSE 'Comments available'
+    END AS CommentStatus,
+    COALESCE((
+        SELECT 
+            STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM 
+            Tags t 
+        INNER JOIN 
+            LATERAL (
+                SELECT 
+                    UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS tag
+            ) AS tags_sub ON t.TagName = tags_sub.tag
+        WHERE 
+            p.Id = tp.PostId
+    ), 'No tags') AS Tags,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = tp.PostId 
+            AND v.VoteTypeId = 2
+        ) THEN 'Has Upvotes'
+        ELSE 'No Upvotes'
+    END AS UpvoteStatus
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId 
+WHERE 
+    ph.CreationDate >= NOW() - INTERVAL '6 months' 
+    OR ph.UserId IS NULL
+ORDER BY 
+    tp.CreationDate DESC;

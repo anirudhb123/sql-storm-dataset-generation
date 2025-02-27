@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_sales_price) DESC) AS rank
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(ws.total_sales, 0) AS web_sales,
+        COALESCE(cs.total_sales, 0) AS catalog_sales,
+        (COALESCE(ws.total_sales, 0) + COALESCE(cs.total_sales, 0)) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        (SELECT 
+             ws_bill_customer_sk,
+             SUM(ws_sales_price) AS total_sales
+         FROM 
+             web_sales
+         GROUP BY 
+             ws_bill_customer_sk) ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        (SELECT 
+             cs_bill_customer_sk,
+             SUM(cs_sales_price) AS total_sales
+         FROM 
+             catalog_sales
+         GROUP BY 
+             cs_bill_customer_sk) cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+)
+SELECT 
+    cd_cdemo_sk,
+    cd_gender,
+    cd_marital_status,
+    SUM(total_sales) AS total_customer_sales,
+    COUNT(DISTINCT c_customer_sk) AS customer_count,
+    AVG(total_sales) AS avg_sales_per_customer
+FROM 
+    customer_sales
+JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE 
+    cd_gender = 'F'
+    AND cd_marital_status = 'M'
+    AND total_sales > 1000
+GROUP BY 
+    cd_cdemo_sk, cd_gender, cd_marital_status
+HAVING 
+    AVG(total_sales) > 500
+ORDER BY 
+    total_customer_sales DESC
+LIMIT 50;

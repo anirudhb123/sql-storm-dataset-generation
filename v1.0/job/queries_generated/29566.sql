@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+high_cast_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.actor_names,
+        rm.keywords,
+        RANK() OVER (ORDER BY rm.cast_count DESC) AS rank
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.cast_count > 5
+),
+most_frequent_actor AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(c.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(c.movie_id) DESC) AS actor_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id, a.name
+    ORDER BY 
+        movie_count DESC
+    LIMIT 1
+)
+SELECT 
+    hcm.movie_id,
+    hcm.title,
+    hcm.production_year,
+    hcm.cast_count,
+    hcm.actor_names,
+    hcm.keywords,
+    fa.name AS most_frequent_actor_name,
+    fa.movie_count AS movies_with_actor
+FROM 
+    high_cast_movies hcm
+CROSS JOIN 
+    most_frequent_actor fa
+ORDER BY 
+    hcm.cast_count DESC;

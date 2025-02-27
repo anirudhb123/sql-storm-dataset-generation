@@ -1,0 +1,80 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Location,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%)') -- Assuming XML-like structure of Tags
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COALESCE(c.CommentsCount, 0) AS CommentsCount,
+        COALESCE(v.VotesCount, 0) AS VotesCount,
+        COALESCE(b.BadgesCount, 0) AS BadgesCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentsCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VotesCount FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgesCount FROM Badges GROUP BY UserId) b ON u.Id = b.UserId
+    CROSS JOIN 
+        TopTags t
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.CreationDate DESC
+    LIMIT 15
+)
+
+SELECT 
+    ur.DisplayName,
+    ur.Reputation,
+    ur.TotalPosts,
+    ur.PositivePosts,
+    ps.Title AS PostTitle,
+    ps.Score AS PostScore,
+    ps.ViewCount,
+    ps.CommentsCount,
+    ps.VotesCount,
+    ps.BadgesCount,
+    ps.Tags,
+    DATE_PART('day', CURRENT_TIMESTAMP - ps.CreationDate) AS DaysSincePost
+FROM 
+    UserReputation ur
+JOIN 
+    PostStats ps ON ur.UserId = ps.Author
+WHERE 
+    ur.Reputation > 1000
+ORDER BY 
+    ur.Reputation DESC, ps.ViewCount DESC;

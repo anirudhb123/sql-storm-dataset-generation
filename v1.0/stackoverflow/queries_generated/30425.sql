@@ -1,0 +1,52 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, 
+           '' AS Path
+    FROM Users
+    WHERE Reputation > 0
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate,
+           CONCAT(uh.Path, ' -> ', u.DisplayName)
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Id = uh.Id -- A self-join to reflect user relations (assumed users can relate to themselves; adjust as necessary)
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.LastActivityDate, 
+           COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+           COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount,
+           COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVoteCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+AggregatedPostStats AS (
+    SELECT OwnerUserId,
+           SUM(CommentCount) AS TotalComments,
+           SUM(UpVoteCount) AS TotalUpVotes,
+           SUM(DownVoteCount) AS TotalDownVotes
+    FROM RecentPosts
+    GROUP BY OwnerUserId
+),
+TopContributors AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, 
+           a.TotalComments, a.TotalUpVotes, a.TotalDownVotes
+    FROM Users u
+    LEFT JOIN AggregatedPostStats a ON u.Id = a.OwnerUserId
+    WHERE u.Reputation > 1000 -- Filtering for users with significant reputation
+    ORDER BY a.TotalUpVotes DESC NULLS LAST, u.Reputation DESC
+    LIMIT 10
+)
+
+SELECT u.DisplayName, u.Reputation, 
+       COALESCE(a.TotalComments, 0) AS TotalComments,
+       COALESCE(a.TotalUpVotes, 0) AS TotalUpVotes,
+       COALESCE(a.TotalDownVotes, 0) AS TotalDownVotes,
+       STRING_AGG(DISTINCT p.Title, '; ') AS PostTitles,
+       u.Path AS UserPath
+FROM TopContributors c
+JOIN Users u ON c.Id = u.Id
+LEFT JOIN RecentPosts p ON p.OwnerUserId = u.Id
+LEFT JOIN UserHierarchy uh ON u.Id = uh.Id
+GROUP BY u.Id, u.DisplayName, u.Reputation, u.Path
+ORDER BY u.Reputation DESC;

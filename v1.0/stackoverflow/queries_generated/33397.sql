@@ -1,0 +1,54 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.ParentId,
+        p2.CreationDate,
+        rp.Depth + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePosts rp ON p2.ParentId = rp.Id
+)
+SELECT 
+    rp.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    RANK() OVER (ORDER BY COUNT(DISTINCT a.Id) DESC) AS RankByAnswers
+FROM 
+    RecursivePosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON rp.Id = c.PostId
+LEFT JOIN 
+    Posts a ON rp.Id = a.ParentId AND a.PostTypeId = 2
+LEFT JOIN 
+    Votes v ON rp.Id = v.PostId
+WHERE 
+    rp.CreationDate > NOW() - INTERVAL '1 year' -- Only consider questions created in the last year
+GROUP BY 
+    rp.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT a.Id) > 0 -- Only include questions that have answers
+ORDER BY 
+    RankByAnswers;

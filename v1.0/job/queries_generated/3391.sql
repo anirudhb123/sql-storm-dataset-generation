@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = rm.id
+    WHERE 
+        rm.cast_count > 5
+),
+MovieDetails AS (
+    SELECT 
+        hcm.title,
+        hcm.production_year,
+        hcm.cast_count,
+        COUNT(DISTINCT mi.info) AS info_count
+    FROM 
+        HighCastMovies hcm
+    LEFT JOIN 
+        movie_info mi ON hcm.title = mi.info
+    GROUP BY 
+        hcm.title, hcm.production_year, hcm.cast_count
+)
+SELECT 
+    d.title,
+    d.production_year,
+    d.cast_count,
+    d.info_count,
+    CASE 
+        WHEN d.info_count > 0 THEN 'Has Info'
+        ELSE 'No Info'
+    END AS info_status
+FROM 
+    MovieDetails d
+WHERE 
+    d.production_year = (SELECT MAX(production_year) FROM MovieDetails)
+ORDER BY 
+    d.cast_count DESC, 
+    d.title;

@@ -1,0 +1,58 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+top_keywords AS (
+    SELECT 
+        keyword,
+        COUNT(*) AS occurrences
+    FROM 
+        ranked_titles
+    GROUP BY 
+        keyword
+    ORDER BY 
+        occurrences DESC
+    LIMIT 10
+),
+actor_movie_counts AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak 
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        ranked_titles rt ON ci.movie_id = rt.title_id
+    WHERE 
+        rt.keyword IN (SELECT keyword FROM top_keywords)
+    GROUP BY 
+        a.id, ak.name
+)
+SELECT 
+    am.actor_name,
+    am.movie_count,
+    ARRAY_AGG(DISTINCT rt.title ORDER BY rt.production_year) AS movies,
+    COUNT(DISTINCT rt.production_year) AS unique_years
+FROM 
+    actor_movie_counts am 
+JOIN 
+    ranked_titles rt ON am.actor_name = rt.keyword
+GROUP BY 
+    am.actor_name, am.movie_count
+ORDER BY 
+    am.movie_count DESC, unique_years DESC
+LIMIT 5;

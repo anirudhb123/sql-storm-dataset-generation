@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 'Unknown Year') AS production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(MAX)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        m.title,
+        COALESCE(m.production_year, 'Unknown Year') AS production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(MAX))
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.episode_of_id
+    WHERE 
+        mh.level < 10 -- limit depth to avoid excessive recursion
+),
+CompanyStats AS (
+    SELECT 
+        c.id AS company_id,
+        c.name,
+        COUNT(DISTINCT mc.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.kind, ', ') AS company_types,
+        COUNT(DISTINCT kc.keyword) AS keyword_count
+    FROM 
+        company_name c
+    LEFT JOIN 
+        movie_companies mc ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = mc.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        c.id, c.name
+),
+TitleStats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        AVG(COALESCE(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE NULL END, 0)) * 100 AS filled_cast_percentage
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.id, t.title
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    c.name AS company_name,
+    cs.movie_count AS total_movies_produced,
+    ts.cast_count AS total_cast_members,
+    ts.filled_cast_percentage,
+    ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY ts.cast_count DESC) AS company_rank,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Feature'
+        WHEN mh.level > 1 AND mh.level < 5 THEN 'Series'
+        ELSE 'Spin-off'
+    END AS movie_category
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    CompanyStats cs ON c.id = cs.company_id
+LEFT JOIN 
+    TitleStats ts ON mh.movie_id = ts.title_id
+WHERE 
+    c.country_code IS NOT NULL
+ORDER BY 
+    mh.production_year DESC NULLS LAST, 
+    cs.movie_count DESC, 
+    movie_title ASC;

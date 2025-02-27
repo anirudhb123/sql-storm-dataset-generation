@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        p.Id
+),
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostLinkCounts AS (
+    SELECT 
+        pl.PostId, 
+        COUNT(pl.RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.UpVotes, 
+    rp.DownVotes, 
+    pu.DisplayName AS PopularUser, 
+    plc.LinkCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostLinkCounts plc ON rp.PostId = plc.PostId
+JOIN 
+    PopularUsers pu ON rp.PostId IN (
+        SELECT PostId FROM Posts WHERE OwnerUserId = pu.UserId
+    )
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Rank;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+        AND CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 5
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    up.DisplayName,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    cb.CommentCount,
+    ub.BadgeNames,
+    tu.PostCount,
+    tu.TotalScore
+FROM 
+    RankedPosts p
+JOIN 
+    Users up ON p.OwnerUserId = up.Id
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+JOIN 
+    TopUsers tu ON up.Id = tu.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+        PostId, COUNT(Id) AS CommentCount
+     FROM 
+        Comments 
+     GROUP BY 
+        PostId) cb ON p.Id = cb.PostId
+WHERE 
+    p.UserPostRank <= 3
+ORDER BY 
+    tu.TotalScore DESC, p.Score DESC;

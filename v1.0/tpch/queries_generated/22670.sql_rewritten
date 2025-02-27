@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps_availqty > 1000
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finished'
+            WHEN o.o_orderstatus = 'P' THEN 'Pending'
+            ELSE 'Other' 
+        END AS order_status_desc
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate >= '1997-01-01')
+),
+SupplierDetails AS (
+    SELECT 
+        r.r_name AS region_name, 
+        n.n_name AS nation_name, 
+        s.s_name AS supplier_name, 
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost) DESC) AS cost_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name, n.n_name, s.s_name
+)
+SELECT 
+    fo.o_orderkey, 
+    COUNT(DISTINCT li.l_linenumber) AS line_item_count, 
+    SUM(li.l_extendedprice) * (1 - SUM(li.l_discount) / NULLIF(SUM(li.l_extendedprice), 0)) AS net_revenue,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(sd.region_name, 'Unknown Region') AS region_name
+FROM FilteredOrders fo
+LEFT JOIN lineitem li ON fo.o_orderkey = li.l_orderkey
+LEFT JOIN RankedSuppliers rs ON rs.rank = 1 AND li.l_suppkey = rs.s_suppkey
+LEFT JOIN SupplierDetails sd ON rs.s_suppkey = sd.s_suppkey
+WHERE fo.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal > 1000)
+AND li.l_shipdate BETWEEN '1997-01-01' AND cast('1998-10-01' as date)
+GROUP BY fo.o_orderkey, supplier_name, region_name
+HAVING COUNT(DISTINCT li.l_linenumber) > 5
+ORDER BY net_revenue DESC, fo.o_orderkey;

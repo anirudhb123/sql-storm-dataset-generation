@@ -1,0 +1,65 @@
+
+WITH AddressComponents AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' 
+                    THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressComponents a ON c.c_current_addr_sk = a.ca_address_sk
+),
+DateDetails AS (
+    SELECT
+        d.d_date_sk,
+        d.d_date,
+        d.d_day_name,
+        d.d_month_seq,
+        d.d_year
+    FROM date_dim d
+    WHERE d.d_year = 2023
+),
+SalesStatistics AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        COUNT(DISTINCT ws_item_sk) AS unique_items_sold
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT
+    c.full_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.cd_purchase_estimate,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    d.d_date,
+    s.total_sales,
+    s.order_count,
+    s.unique_items_sold
+FROM CustomerDetails c
+JOIN DateDetails d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+LEFT JOIN SalesStatistics s ON c.c_customer_sk = s.ws_bill_customer_sk
+WHERE (s.total_sales > 1000 OR s.order_count > 5)
+ORDER BY c.cd_purchase_estimate DESC, s.total_sales DESC;

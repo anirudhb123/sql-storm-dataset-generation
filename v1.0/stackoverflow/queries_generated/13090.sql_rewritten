@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes IS NOT NULL THEN p.UpVotes ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN p.DownVotes IS NOT NULL THEN p.DownVotes ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.VoteCount,
+        ROW_NUMBER() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC) AS Rank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    us.UserId,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.VoteCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    TopPosts tp ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.TotalPosts DESC
+LIMIT 10;

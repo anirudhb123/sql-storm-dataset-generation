@@ -1,0 +1,73 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank 
+    FROM 
+        part p 
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(ps.ps_partkey) AS total_parts,
+        AVG(ps.ps_supplycost) AS avg_supply_cost 
+    FROM 
+        supplier s 
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey 
+), ExprValues AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price
+    FROM 
+        orders o 
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey 
+    GROUP BY 
+        o.o_orderkey 
+), RegionCounts AS (
+    SELECT 
+        r.r_regionkey, 
+        COUNT(DISTINCT n.n_nationkey) AS nation_count 
+    FROM 
+        region r 
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey 
+    GROUP BY 
+        r.r_regionkey 
+)
+SELECT 
+    rp.p_partkey, 
+    rp.p_name, 
+    rp.p_retailprice, 
+    ss.total_parts,
+    CASE 
+        WHEN ss.total_parts IS NULL THEN 'No Suppliers'
+        ELSE CONCAT('Suppliers: ', ss.total_parts)
+    END AS supplier_info,
+    ev.total_price AS order_total,
+    rc.nation_count,
+    CASE 
+        WHEN rc.nation_count IS NULL THEN 'Unknown Region'
+        ELSE r.r_name
+    END AS region_name
+FROM 
+    RankedParts rp 
+LEFT JOIN 
+    SupplierStats ss ON rp.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp WHERE ps_partkey = rp.p_partkey))
+LEFT JOIN 
+    ExprValues ev ON ev.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o)
+LEFT JOIN 
+    RegionCounts rc ON rc.r_regionkey = (SELECT MIN(n.n_regionkey) FROM nation n)
+LEFT JOIN 
+    region r ON rc.r_regionkey = r.r_regionkey
+WHERE 
+    rp.rank <= 5
+ORDER BY 
+    rp.p_retailprice DESC, 
+    ss.avg_supply_cost ASC;

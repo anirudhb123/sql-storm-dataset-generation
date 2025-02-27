@@ -1,0 +1,97 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        1 AS order_level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    
+    UNION ALL
+
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        co.order_level + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+        AND co.o_orderkey <> o.o_orderkey
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+TotalLineItemSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+),
+EffectiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(ts.total_sales, 0) AS sales_amount,
+        COALESCE(sc.total_supply_cost, 0) AS supply_cost,
+        (COALESCE(ts.total_sales, 0) - COALESCE(sc.total_supply_cost, 0)) AS profit
+    FROM 
+        part p
+    LEFT JOIN 
+        TotalLineItemSales ts ON p.p_partkey = ts.l_partkey
+    LEFT JOIN 
+        SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+),
+RankedParts AS (
+    SELECT 
+        ep.p_partkey,
+        ep.p_name,
+        ep.sales_amount,
+        ep.supply_cost,
+        ep.profit,
+        ROW_NUMBER() OVER (ORDER BY ep.profit DESC) AS rank
+    FROM 
+        EffectiveParts ep
+)
+SELECT 
+    co.c_name,
+    co.o_orderdate,
+    co.o_orderkey,
+    rp.p_name,
+    rp.profit,
+    rp.rank
+FROM 
+    CustomerOrders co
+JOIN 
+    lineitem li ON co.o_orderkey = li.l_orderkey
+JOIN 
+    RankedParts rp ON li.l_partkey = rp.p_partkey
+WHERE 
+    rp.rank <= 10
+ORDER BY 
+    co.c_name, co.o_orderdate;

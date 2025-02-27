@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS HierarchyLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.HierarchyLevel + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'UpMod') AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'DownMod') AS DownvoteCount,
+        COUNT(DISTINCT c.UserId) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 4 THEN 1 END) AS TitleEditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 5 THEN 1 END) AS BodyEditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    pvs.UpvoteCount,
+    pvs.DownvoteCount,
+    ph.LastEditDate,
+    ph.TitleEditCount,
+    ph.BodyEditCount,
+    ph.CloseCount,
+    ph.ReopenCount,
+    r.HierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary pvs ON p.Id = pvs.PostId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON p.Id = ph.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+WHERE 
+    (p.CreationDate >= NOW() - INTERVAL '1 year' OR ph.LastEditDate >= NOW() - INTERVAL '1 year') 
+    AND (p.Title ILIKE '%performance%' OR p.Body ILIKE '%performance%')
+ORDER BY 
+    UpvoteCount DESC, LastEditDate DESC
+LIMIT 50;

@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpvoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.Score > 0 -- Taking only questions with a score > 0
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        (UpvoteCount - DownvoteCount) AS NetVotes,
+        CASE 
+            WHEN TagCount > 0 THEN 'With Tags'
+            ELSE 'Without Tags'
+        END AS TagStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewRank <= 100 -- Focusing on top 100 viewed questions
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.TagCount,
+    fp.NetVotes,
+    fp.TagStatus,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Comments c ON c.PostId = fp.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = fp.OwnerUserId
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount,
+    fp.TagCount, fp.NetVotes, fp.TagStatus
+ORDER BY 
+    fp.NetVotes DESC, 
+    fp.ViewCount DESC
+LIMIT 50;

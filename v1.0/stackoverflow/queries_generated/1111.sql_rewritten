@@ -1,0 +1,70 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COUNT(C.Id) AS TotalComments,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalCloseVotes,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS TotalReopenVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+),
+UserPostRanking AS (
+    SELECT 
+        UA.UserId, 
+        UA.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY UA.UpVoteCount DESC) AS UpVoteRank,
+        ROW_NUMBER() OVER (ORDER BY UA.DownVoteCount DESC) AS DownVoteRank
+    FROM 
+        UserActivity UA
+)
+SELECT 
+    UPS.DisplayName, 
+    UPS.UpVoteRank,
+    UPS.DownVoteRank,
+    PS.Title AS PostTitle,
+    PS.TotalComments,
+    PS.TotalCloseVotes,
+    PS.TotalReopenVotes,
+    CASE 
+        WHEN PS.TotalCloseVotes > 0 THEN 'Closed'
+        WHEN PS.TotalReopenVotes > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    UserPostRanking UPS
+LEFT JOIN 
+    PostStatistics PS ON UPS.UserId = PS.UserId
+WHERE 
+    UPS.UpVoteCount > UPS.DownVoteCount
+ORDER BY 
+    UPS.UpVoteRank, PS.Score DESC
+LIMIT 100;

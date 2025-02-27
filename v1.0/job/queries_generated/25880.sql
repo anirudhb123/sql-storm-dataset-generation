@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorRoles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        c.movie_id,
+        r.role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON r.id = c.person_role_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        com.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name com ON com.id = mc.company_id
+    JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        ar.actor_name,
+        cm.company_name,
+        cm.company_type,
+        rt.keyword_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        ActorRoles ar ON ar.movie_id = rt.title_id
+    LEFT JOIN 
+        CompanyMovies cm ON cm.movie_id = rt.title_id
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    actor_name,
+    company_name,
+    company_type,
+    keyword_count
+FROM 
+    FilteredTitles
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    keyword_count DESC, 
+    production_year ASC
+LIMIT 50;

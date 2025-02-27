@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Start with the root movies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    -- Recursively find episodes for each movie
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title et
+    INNER JOIN 
+        movie_hierarchy mh ON et.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level AS episode_level,
+    COUNT(DISTINCT cr.company_id) AS total_companies,
+    AVG(p.info_count) AS avg_info_per_person,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    cast_info ci
+INNER JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+INNER JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies cr ON ci.movie_id = cr.movie_id
+LEFT JOIN (
+    SELECT 
+        pi.person_id,
+        COUNT(DISTINCT mi.id) AS info_count
+    FROM 
+        person_info pi
+    JOIN 
+        movie_info mi ON pi.info_type_id = mi.info_type_id
+    GROUP BY 
+        pi.person_id
+) p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    ak.name, mt.title, mh.level
+HAVING 
+    COUNT(DISTINCT cr.company_id) > 2
+ORDER BY 
+    episode_level DESC, total_companies DESC;
+
+This query performs a benchmarking analysis of movies, including their hierarchical structure (episodes), counts of associated companies, average additional info per actor, and aggregates related keywords. The use of a recursive CTE allows it to handle movies that have episodes, and it showcases a variety of SQL constructs such as joins, aggregates, and string functions.

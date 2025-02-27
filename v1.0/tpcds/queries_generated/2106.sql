@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        cs.total_sales,
+        cs.order_count
+    FROM CustomerSales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+),
+StoreReturns AS (
+    SELECT 
+        sr.sr_store_sk,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        COUNT(sr.sr_ticket_number) AS total_returns
+    FROM store_returns sr
+    GROUP BY sr.sr_store_sk
+),
+TopStores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        sr.total_return_amount,
+        sr.total_returns,
+        RANK() OVER (ORDER BY sr.total_return_amount DESC) AS return_rank
+    FROM store s
+    LEFT JOIN StoreReturns sr ON s.s_store_sk = sr.sr_store_sk
+    WHERE s.s_state = 'CA'
+)
+SELECT 
+    hvc.customer_name,
+    hvc.total_sales,
+    hvc.order_count,
+    ts.s_store_name,
+    ts.total_return_amount,
+    ts.total_returns,
+    COALESCE(ts.return_rank, 'No Returns') AS return_rank
+FROM HighValueCustomers hvc
+JOIN TopStores ts ON hvc.total_sales > (SELECT AVG(total_sales) FROM HighValueCustomers)
+WHERE hvc.order_count > 5
+ORDER BY hvc.total_sales DESC, ts.total_return_amount DESC;

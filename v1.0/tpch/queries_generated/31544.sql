@@ -1,0 +1,56 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size >= 10
+),
+NationStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+FinalAnalysis AS (
+    SELECT 
+        ns.n_name,
+        ns.supplier_count,
+        ns.total_acctbal,
+        hp.p_name,
+        hp.p_retailprice,
+        hvo.order_value
+    FROM NationStats ns
+    LEFT JOIN RankedParts hp ON ns.supplier_count > 5
+    LEFT JOIN HighValueOrders hvo ON hp.p_partkey = (SELECT ps.ps_partkey 
+                                                       FROM partsupp ps 
+                                                       WHERE ps.ps_supplycost = (SELECT MAX(ps2.ps_supplycost) 
+                                                                                 FROM partsupp ps2 
+                                                                                 WHERE ps2.ps_partkey = hp.p_partkey))
+    )
+)
+SELECT 
+    fa.n_name AS nation,
+    fa.supplier_count,
+    fa.total_acctbal,
+    fa.p_name,
+    fa.p_retailprice,
+    COALESCE(fa.order_value, 0) AS high_value_order
+FROM FinalAnalysis fa
+WHERE fa.total_acctbal IS NOT NULL
+ORDER BY fa.n_name, fa.p_retailprice DESC;

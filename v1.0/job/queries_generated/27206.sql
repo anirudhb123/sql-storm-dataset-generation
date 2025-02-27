@@ -1,0 +1,60 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT a.name) AS cast_names,
+        k.keyword AS movie_keyword,
+        STRING_AGG(DISTINCT co.name, ', ') AS production_companies
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+info_summary AS (
+    SELECT 
+        m.movie_id,
+        COUNT(pi.id) AS info_count,
+        STRING_AGG(DISTINCT CASE WHEN it.info = 'rating' THEN mi.info ELSE NULL END, ', ') AS ratings,
+        STRING_AGG(DISTINCT CASE WHEN it.info = 'summary' THEN mi.info ELSE NULL END, ' ') AS summaries
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    JOIN 
+        movie_companies mc ON mi.movie_id = mc.movie_id
+    JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    JOIN 
+        movie_details m ON m.movie_id = cc.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_names,
+    md.movie_keyword,
+    isum.info_count,
+    isum.ratings,
+    isum.summaries,
+    md.production_companies
+FROM 
+    movie_details md
+LEFT JOIN 
+    info_summary isum ON md.movie_id = isum.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY RAND()) AS random_rank,
+        COALESCE(k.keyword, 'No Keyword') AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT m.name) FILTER (WHERE m.gender = 'M') AS male_actors,
+        COUNT(DISTINCT m.name) FILTER (WHERE m.gender = 'F') AS female_actors
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        name m ON c.person_id = m.id
+    WHERE 
+        a.production_year IS NOT NULL AND
+        (a.production_year > 1990 OR (a.production_year IS NULL AND m.name IS NOT NULL))
+    GROUP BY 
+        a.id, a.title, a.production_year, mk.keyword_id, k.keyword
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name SEPARATOR ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast,
+        rm.male_actors,
+        rm.female_actors,
+        cs.company_names,
+        cs.num_companies,
+        CASE 
+            WHEN rm.total_cast > 0 THEN 
+                ROUND((rm.male_actors * 100.0) / rm.total_cast, 2)
+            ELSE 
+                NULL
+        END AS male_percentage
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyStats cs ON rm.movie_id = cs.movie_id
+)
+SELECT 
+    dmi.movie_title,
+    dmi.production_year,
+    dmi.total_cast,
+    dmi.male_actors,
+    dmi.female_actors,
+    dmi.company_names,
+    dmi.num_companies,
+    dmi.male_percentage,
+    CASE 
+        WHEN dmi.male_percentage IS NULL OR dmi.male_percentage < 50 THEN 'More Women'
+        WHEN dmi.male_percentage >= 50 AND dmi.male_percentage < 80 THEN 'Balanced'
+        ELSE 'More Men'
+    END AS gender_balance
+FROM 
+    DetailedMovieInfo dmi
+WHERE 
+    dmi.production_year BETWEEN 2000 AND 2023
+    AND dmi.total_cast > 0
+ORDER BY 
+    dmi.production_year DESC,
+    dmi.male_percentage DESC;

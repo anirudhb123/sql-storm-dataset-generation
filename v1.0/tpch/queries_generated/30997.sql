@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_suppkey = (SELECT MIN(s_suppkey) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size IS NOT NULL
+),
+TotalSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, 
+       SUM(COALESCE(s.s_acctbal, 0)) AS total_supplier_acctbal,
+       AVG(rp.p_retailprice) AS avg_part_price,
+       MAX(ts.total_sales) AS highest_order_sales
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedParts rp ON rp.price_rank <= 5
+LEFT JOIN TotalSales ts ON ts.l_orderkey IN (SELECT o.o_orderkey 
+                                              FROM orders o 
+                                              WHERE o.o_custkey = c.c_custkey)
+GROUP BY n.n_name
+HAVING customer_count > 10
+ORDER BY total_supplier_acctbal DESC NULLS LAST;

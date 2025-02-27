@@ -1,0 +1,82 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2 -- Answer posts
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, ',') AS t ON t.value = p.Tags
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadgeCount,
+        AVG(u.Reputation) AS AvgReputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+BenchmarkData AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        us.DisplayName AS OwnerDisplayName,
+        us.AvgReputation,
+        ps.CommentCount,
+        ps.AnswerCount,
+        ps.Tags,
+        ps.LastEditDate,
+        us.TotalBadgeCount,
+        us.TotalPosts,
+        us.TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY ps.ViewCount DESC) AS RankByViews
+    FROM 
+        PostStats ps
+    JOIN 
+        Users u ON ps.PostId = u.Id
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN AvgReputation > 1000 THEN 'Expert'
+        WHEN AvgReputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+        ELSE 'Beginner'
+    END AS UserLevel
+FROM 
+    BenchmarkData
+WHERE 
+    AnswerCount > 0
+ORDER BY 
+    RankByViews, LastEditDate DESC;

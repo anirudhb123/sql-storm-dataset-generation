@@ -1,0 +1,83 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY 
+        ws_item_sk
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+),
+WarehouseAddress AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        CONCAT(COALESCE(w.w_street_number, 'N/A'), ' ', COALESCE(w.w_street_name, 'Unknown'), ' ', COALESCE(w.w_city, 'Unknown')) AS full_address   
+    FROM 
+        warehouse w
+    WHERE 
+        w.w_country = 'USA'
+),
+ReturnInfo AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS unique_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    sales.ws_item_sk,
+    sales.total_quantity,
+    sales.total_sales,
+    cust.c_first_name,
+    cust.c_last_name,
+    IFNULL(returns.total_returns, 0) AS total_returns,
+    addr.full_address,
+    COUNT(DISTINCT cust.c_customer_sk) AS unique_customers,
+    CASE 
+        WHEN sales.total_sales > 1000 THEN 'High Sales'
+        WHEN sales.total_sales BETWEEN 500 AND 1000 THEN 'Medium Sales'
+        ELSE 'Low Sales' 
+    END AS sales_category
+FROM 
+    RankedSales sales
+LEFT JOIN 
+    CustomerInfo cust ON cust.gender_rank <= 5
+LEFT JOIN 
+    ReturnInfo returns ON returns.sr_item_sk = sales.ws_item_sk
+JOIN 
+    WarehouseAddress addr ON addr.w_warehouse_sk = (SELECT inv.inv_warehouse_sk FROM inventory inv WHERE inv.inv_item_sk = sales.ws_item_sk LIMIT 1)
+WHERE 
+    sales.rank = 1
+    AND sales.total_quantity IS NOT NULL
+GROUP BY 
+    sales.ws_item_sk, sales.total_quantity, sales.total_sales, cust.c_first_name, cust.c_last_name, addr.full_address
+HAVING 
+    total_sales > 100
+ORDER BY 
+    sales.total_sales DESC
+LIMIT 10;

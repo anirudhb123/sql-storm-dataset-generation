@@ -1,0 +1,70 @@
+
+WITH UserAggregation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(p.Id) AS PostsCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionsCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswersCount
+    FROM Users u 
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(t.TagName) AS TagsArray,
+        COUNT(c.Id) AS CommentsCount,
+        COALESCE(NULLIF(MAX(ph.CreationDate), '1970-01-01'), 'No history') AS LastEdited
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(p.Tags, ',')) AS TagName
+    ) AS t ON TRUE
+    GROUP BY p.Id, u.DisplayName
+),
+UserScores AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation + 5 * ua.UpVotesCount - 3 * ua.DownVotesCount AS Score
+    FROM UserAggregation ua
+),
+RankedUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Score,
+        RANK() OVER (ORDER BY us.Score DESC) AS UserRank
+    FROM UserScores us
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Score,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score AS PostScore,
+    pd.CommentsCount,
+    pd.LastEdited,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM RankedUsers ru
+INNER JOIN Posts p ON ru.UserId = p.OwnerUserId
+INNER JOIN PostDetails pd ON p.Id = pd.PostId
+LEFT JOIN LATERAL (
+    SELECT unnest(pd.TagsArray) AS TagName
+) AS t ON TRUE
+WHERE ru.Score > 10
+GROUP BY ru.UserId, ru.DisplayName, ru.Score, pd.Title, pd.CreationDate, pd.Score, pd.CommentsCount, pd.LastEdited
+ORDER BY ru.UserRank, pd.CreationDate DESC
+LIMIT 100;

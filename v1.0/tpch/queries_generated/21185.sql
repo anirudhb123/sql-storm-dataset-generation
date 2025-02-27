@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+AvgParts AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > 1000 THEN 'Expensive' 
+            ELSE 'Affordable' 
+        END AS pricing_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+        AND p.p_size > (SELECT AVG(p_size) FROM part)
+),
+SupplierSummary AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice END), 0) AS total_returns,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        lineitem l ON rs.s_suppkey = l.l_suppkey
+    GROUP BY 
+        rs.s_suppkey, rs.s_name
+)
+SELECT 
+    ep.p_partkey, 
+    ep.p_name, 
+    ep.pricing_category,
+    AVG(a.avg_supplycost) AS avg_cost,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(ss.total_returns) AS total_returns
+FROM 
+    ExpensiveParts ep
+JOIN 
+    AvgParts a ON ep.p_partkey = a.ps_partkey
+JOIN 
+    SupplierSummary ss ON a.supplier_count > 1
+WHERE 
+    ep.p_retailprice * 1.1 > (SELECT AVG(p_retailprice) FROM part WHERE p_comment IS NOT NULL)
+    AND (ep.p_retailprice IS NOT NULL OR ep.p_size < 100)
+GROUP BY 
+    ep.p_partkey, ep.p_name, ep.pricing_category
+HAVING 
+    COUNT(ep.p_partkey) > 0
+ORDER BY 
+    total_sales DESC, total_returns ASC;

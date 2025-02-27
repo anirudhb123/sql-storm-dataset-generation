@@ -1,0 +1,50 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers,
+        COUNT(DISTINCT o.o_custkey) AS distinct_customers,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_income
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+NationSuppliers AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    ps.p_partkey,
+    p.p_name,
+    p.p_brand,
+    ps.ps_availqty,
+    COALESCE(ns.total_account_balance, 0) AS supplier_balance,
+    os.total_revenue,
+    CASE 
+        WHEN os.rank_income <= 5 THEN 'Top Revenue'
+        ELSE 'Others'
+    END AS revenue_category
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = ps.ps_suppkey
+LEFT JOIN 
+    NationSuppliers ns ON ps.ps_suppkey = ns.n_nationkey
+WHERE 
+    p.p_container IN ('BOX', 'PACK')
+    AND ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+ORDER BY 
+    p.p_brand, revenue_category DESC, supplier_balance DESC;

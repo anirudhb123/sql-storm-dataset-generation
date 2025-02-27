@@ -1,0 +1,68 @@
+
+WITH UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '>'))::int)
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName, t.TagName
+),
+
+TagStatistics AS (
+    SELECT 
+        TagName, 
+        COUNT(DISTINCT UserId) AS UniqueUsers,
+        SUM(QuestionsAsked) AS TotalQuestions,
+        SUM(UpVotes) AS TotalUpvotes,
+        SUM(DownVotes) AS TotalDownvotes,
+        COUNT(*) AS UserCount
+    FROM 
+        UserTags
+    GROUP BY 
+        TagName
+),
+
+RankedTags AS (
+    SELECT 
+        TagName,
+        UniqueUsers,
+        TotalQuestions,
+        TotalUpvotes,
+        TotalDownvotes,
+        UserCount,
+        RANK() OVER (ORDER BY UniqueUsers DESC) AS UserRank,
+        RANK() OVER (ORDER BY TotalQuestions DESC) AS QuestionRank,
+        RANK() OVER (ORDER BY TotalUpvotes DESC) AS UpvoteRank,
+        RANK() OVER (ORDER BY TotalDownvotes DESC) AS DownvoteRank
+    FROM 
+        TagStatistics
+)
+
+SELECT 
+    TagName,
+    UniqueUsers,
+    TotalQuestions,
+    TotalUpvotes,
+    TotalDownvotes,
+    UserCount,
+    UserRank,
+    QuestionRank,
+    UpvoteRank,
+    DownvoteRank
+FROM 
+    RankedTags
+WHERE 
+    UserCount > 5  
+ORDER BY 
+    UniqueUsers DESC, TotalQuestions DESC;

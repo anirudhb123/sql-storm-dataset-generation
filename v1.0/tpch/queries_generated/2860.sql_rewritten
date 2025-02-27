@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= DATE '1997-01-01' 
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighVolumeCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COALESCE(AVG(l.l_discount), 0) AS avg_discount,
+    rp.rnk,
+    sp.s_name,
+    hcc.order_count
+FROM 
+    lineitem l
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    RankedOrders rp ON l.l_orderkey = rp.o_orderkey
+LEFT JOIN 
+    SupplierParts sp ON l.l_suppkey = sp.s_suppkey
+JOIN 
+    HighVolumeCustomers hcc ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hcc.c_custkey)
+WHERE 
+    l.l_shipdate BETWEEN DATE '1997-08-01' AND DATE '1997-08-31'
+GROUP BY 
+    p.p_name, rp.rnk, sp.s_name, hcc.order_count
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, p.p_name;

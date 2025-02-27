@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year >= 2000
+),
+ActorNames AS (
+    SELECT 
+        a.person_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        an.actor_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorNames an ON rm.movie_id = (SELECT cc.movie_id FROM complete_cast cc WHERE cc.subject_id = rm.movie_id LIMIT 1)
+    WHERE 
+        rm.total_cast > 0
+)
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.total_cast,
+    COALESCE(mw.actor_names, 'No Cast Available') AS cast_names,
+    CASE 
+        WHEN mw.production_year IS NULL THEN 'Year Not Available'
+        ELSE CAST(2023 - mw.production_year AS VARCHAR)
+    END AS years_since_release
+FROM 
+    MoviesWithActors mw
+ORDER BY 
+    mw.production_year DESC, mw.title;

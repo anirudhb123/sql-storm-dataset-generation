@@ -1,0 +1,67 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS TotalSales
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(l.l_orderkey) AS OrderCount,
+        AVG(l.l_extendedprice) AS AvgPrice,
+        SUM(l.l_discount) AS TotalDiscount
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS Nation,
+    s.s_name AS Supplier,
+    ps.p_name AS PartName,
+    ps.OrderCount,
+    ps.AvgPrice,
+    ps.TotalDiscount,
+    ns.TotalSales,
+    sd.TotalSupplyCost
+FROM 
+    SupplierDetails sd
+JOIN 
+    nation n ON sd.s_nationkey = n.n_nationkey
+JOIN 
+    PartStats ps ON sd.s_suppkey = (
+        SELECT ps_suppkey 
+        FROM partsupp 
+        WHERE ps_partkey IN (SELECT p_partkey FROM part WHERE p_name = ps.p_name)
+        LIMIT 1
+    )
+JOIN 
+    NationSales ns ON n.n_nationkey = ns.n_nationkey
+WHERE 
+    sd.TotalSupplyCost > 500000
+ORDER BY 
+    ns.TotalSales DESC, ps.AvgPrice ASC;

@@ -1,0 +1,66 @@
+
+WITH PostStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Users.DisplayName AS Owner,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT CASE WHEN Votes.VoteTypeId = 2 THEN Votes.Id END) AS Upvotes,
+        COUNT(DISTINCT CASE WHEN Votes.VoteTypeId = 3 THEN Votes.Id END) AS Downvotes,
+        MAX(Comments.CreationDate) AS LastCommentDate
+    FROM 
+        Posts
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.CreationDate >= NOW() - INTERVAL 1 YEAR
+    GROUP BY 
+        Posts.Id, Posts.Title, Users.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PHT.Name AS ChangeType,
+        COUNT(*) AS ChangeCount,
+        GROUP_CONCAT(DISTINCT PH.UserDisplayName) AS UsersInvolved
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL 6 MONTH
+    GROUP BY 
+        PH.PostId, PHT.Name
+),
+CombinedResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Owner,
+        PS.TotalComments,
+        PS.Upvotes,
+        PS.Downvotes,
+        PS.LastCommentDate,
+        COALESCE(PHD.ChangeCount, 0) AS TotalChanges,
+        COALESCE(PHD.UsersInvolved, '') AS UsersInvolved
+    FROM 
+        PostStats PS
+    LEFT JOIN 
+        PostHistoryDetails PHD ON PS.PostId = PHD.PostId
+)
+SELECT 
+    CR.*,
+    (CR.Upvotes - CR.Downvotes) AS NetVotes,
+    CASE 
+        WHEN CR.TotalComments > 10 THEN 'Hot Topic'
+        WHEN CR.TotalComments BETWEEN 5 AND 10 THEN 'Moderate Interest'
+        ELSE 'Low Interest'
+    END AS InterestLevel
+FROM 
+    CombinedResults CR
+ORDER BY 
+    NetVotes DESC, LastCommentDate DESC;

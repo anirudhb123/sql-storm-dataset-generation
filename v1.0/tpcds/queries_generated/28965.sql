@@ -1,0 +1,62 @@
+
+WITH CustomerDetail AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PopularCities AS (
+    SELECT 
+        cd.ca_city,
+        COUNT(*) AS customer_count
+    FROM 
+        customer_detail cd
+    GROUP BY 
+        cd.ca_city
+    HAVING 
+        COUNT(*) > 10
+),
+RecentTransactions AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerDetail cd ON ws.ws_bill_customer_sk = cd.c_customer_id
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_date >= CURRENT_DATE - INTERVAL '30 days'
+        )
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.full_name,
+    cd.ca_city,
+    cd.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    r.total_profit
+FROM 
+    CustomerDetail cd
+JOIN 
+    RecentTransactions r ON cd.c_customer_id = r.ws_bill_customer_sk
+JOIN 
+    PopularCities pc ON cd.ca_city = pc.ca_city
+ORDER BY 
+    r.total_profit DESC;

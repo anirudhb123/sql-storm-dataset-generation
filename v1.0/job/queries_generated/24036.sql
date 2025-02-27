@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        RANK() OVER (ORDER BY t.production_year DESC, COUNT(ci.person_id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN cast_info ci ON t.movie_id = ci.movie_id
+    WHERE
+        t.production_year IS NOT NULL AND t.production_year > 2000
+),
+FilteredCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        co.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM
+        movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type co ON mc.company_type_id = co.id
+    WHERE 
+        c.country_code IS NOT NULL AND c.country_code != ''
+),
+KeywordCounts AS (
+    SELECT
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(fc.company_name, 'No Company') AS company_name,
+        MAX(kc.keyword_count) AS total_keywords,
+        CASE 
+            WHEN rm.rank <= 10 THEN 'Top 10 Recent Movies'
+            ELSE 'Other Movies'
+        END AS movie_category
+    FROM 
+        RankedMovies rm 
+    LEFT JOIN FilteredCompanies fc ON rm.movie_id = fc.movie_id AND fc.company_rank = 1
+    LEFT JOIN KeywordCounts kc ON rm.movie_id = kc.movie_id
+    GROUP BY rm.movie_id, rm.title, rm.production_year, rm.cast_count, fc.company_name, rm.rank
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.company_name,
+    fr.total_keywords,
+    fr.movie_category,
+    CASE 
+        WHEN fr.total_keywords IS NULL THEN 'No keywords associated'
+        WHEN fr.total_keywords > 5 THEN 'Rich in Keywords'
+        ELSE 'Few Keywords'
+    END AS keyword_classification
+FROM 
+    FinalResults fr
+WHERE 
+    fr.cast_count > 1
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC;

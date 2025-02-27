@@ -1,0 +1,35 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    ci.nr_order AS role_order, 
+    ct.kind AS cast_type,
+    c.name AS company_name,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    m.production_year AS production_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    kind_type kt ON t.kind_id = kt.id
+JOIN 
+    comp_cast_type ct ON ci.person_role_id = ct.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')
+    AND t.production_year > 2000
+GROUP BY 
+    a.name, t.title, ci.nr_order, ct.kind, c.name, m.production_year
+ORDER BY 
+    movie_title, role_order;

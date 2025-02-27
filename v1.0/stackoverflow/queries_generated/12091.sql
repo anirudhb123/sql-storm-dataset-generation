@@ -1,0 +1,28 @@
+-- Performance benchmarking query for Stack Overflow schema
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    U.DisplayName AS OwnerDisplayName,
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+    COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) AS VoteCount,
+    T.TagName
+FROM 
+    Posts P
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    STRING_SPLIT(P.Tags, ',') AS Tag ON P.Id = Tags.PostId
+LEFT JOIN 
+    Tags T ON T.TagName = Tag.value
+WHERE 
+    P.CreationDate >= NOW() - INTERVAL '30 days' -- Last 30 days
+GROUP BY 
+    P.Id, U.DisplayName, T.TagName
+ORDER BY 
+    P.CreationDate DESC;

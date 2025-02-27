@@ -1,0 +1,40 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders,
+        SUM(COALESCE(sr.sr_return_quantity, 0)) AS total_returns
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk AND ws.ws_bill_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON ws.ws_item_sk = ss.ss_item_sk AND ws.ss_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        store_returns sr ON ws.ws_item_sk = sr.sr_item_sk AND ws.ws_bill_customer_sk = sr.sr_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    ws.web_site_id,
+    ws.web_name,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.total_orders,
+    ss.catalog_orders,
+    ss.store_orders,
+    ss.total_returns,
+    (ss.total_sales - ss.total_returns) AS net_sales
+FROM 
+    web_site ws
+JOIN 
+    SalesSummary ss ON ws.web_site_id = ss.web_site_id
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

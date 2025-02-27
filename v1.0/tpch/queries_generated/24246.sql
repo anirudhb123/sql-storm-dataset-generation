@@ -1,0 +1,63 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+SupplierStats AS (
+    SELECT 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_adjusted,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_orderdate
+),
+FilteredOrders AS (
+    SELECT 
+        od.o_orderkey, 
+        od.total_price_adjusted,
+        od.o_orderstatus,
+        od.o_orderdate,
+        CASE 
+            WHEN od.o_orderstatus = 'F' THEN 'Finalized'
+            ELSE 'Pending' 
+        END AS status_description
+    FROM OrderDetails od
+)
+SELECT 
+    nc.n_name AS nation_name,
+    rc.c_name AS top_customer,
+    rc.c_acctbal,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    SUM(ss.total_supply_cost) AS supplier_cost_total,
+    AVG(ss.distinct_parts_supplied) AS avg_parts_per_supplier,
+    MAX(fo.total_price_adjusted) AS max_order_value,
+    MIN(fo.total_price_adjusted) AS min_order_value,
+    STRING_AGG(fo.status_description, ', ') AS order_status_summary
+FROM nation nc
+LEFT JOIN RankedCustomers rc ON nc.n_nationkey = rc.c_nationkey AND rc.rank = 1
+LEFT JOIN FilteredOrders fo ON rc.c_custkey = (
+    SELECT o.o_custkey 
+    FROM FilteredOrders fo2
+    JOIN orders o ON fo2.o_orderkey = o.o_orderkey
+    WHERE o.o_orderdate = (SELECT MAX(o_orderdate) FROM orders)
+    LIMIT 1
+)
+LEFT JOIN SupplierStats ss ON nc.n_nationkey = ss.s_nationkey
+GROUP BY nc.n_name, rc.c_name, rc.c_acctbal
+HAVING SUM(ss.total_supply_cost) IS NOT NULL AND COUNT(DISTINCT fo.o_orderkey) > 0
+ORDER BY nation_name, rc.c_acctbal DESC;

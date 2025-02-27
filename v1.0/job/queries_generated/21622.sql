@@ -1,0 +1,84 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        ak.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        ak.name AS actor_name,
+        ah.level + 1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        actor_hierarchy ah ON c.movie_id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id = ah.person_id)
+    WHERE 
+        ak.name IS NOT NULL AND ah.level < 3
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT ak.name) AS actors,
+        COALESCE(m.production_year, 'Unknown') AS year,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+complex_movie_info AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.year,
+        md.actors,
+        CASE 
+            WHEN md.keyword_count > 0 THEN 'Contains Keywords'
+            ELSE 'No Keywords'
+        END AS keyword_status,
+        ROW_NUMBER() OVER (PARTITION BY md.year ORDER BY md.keyword_count DESC, md.title) AS rank_by_keywords
+    FROM 
+        movie_details md
+)
+SELECT 
+    cm.movie_id,
+    cm.title,
+    cm.year,
+    cm.actors,
+    cm.keyword_status,
+    ah.actor_name,
+    ah.level,
+    CASE 
+        WHEN ah.level IS NULL THEN 'N/A'
+        ELSE CONCAT('Level ', ah.level)
+    END AS hierarchy_level
+FROM 
+    complex_movie_info cm
+LEFT JOIN 
+    actor_hierarchy ah ON cm.movie_id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id = ah.person_id)
+WHERE 
+    cm.keyword_status = 'Contains Keywords'
+ORDER BY 
+    cm.year DESC,
+    cm.keyword_count DESC,
+    cm.title ASC
+LIMIT 100;

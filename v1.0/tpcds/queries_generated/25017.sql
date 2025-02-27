@@ -1,0 +1,58 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemInfo AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category,
+        i.i_current_price
+    FROM 
+        item i
+),
+SalesInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ci.full_name,
+        ii.i_item_desc,
+        ii.i_brand
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerInfo ci ON ws.ws_bill_customer_sk = ci.c_customer_id
+    JOIN 
+        ItemInfo ii ON ws.ws_item_sk = ii.i_item_id
+)
+SELECT 
+    full_name,
+    i_brand,
+    SUM(ws_quantity) AS total_quantity_sold,
+    SUM(ws_sales_price) AS total_sales,
+    SUM(ws_net_profit) AS total_profit
+FROM 
+    SalesInfo
+GROUP BY 
+    full_name, i_brand
+HAVING 
+    total_sales > 1000
+ORDER BY 
+    total_profit DESC;

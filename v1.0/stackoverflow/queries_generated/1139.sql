@@ -1,0 +1,75 @@
+WITH PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+        AND p.Score > 0
+), RecentPostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate
+), UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.VoteCount, 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), ClosedQuestions AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        COALESCE(crt.Name, 'Unknown') AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment::jsonb @> jsonb_build_object('reason', crt.Id::text)
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+)
+SELECT 
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.CreationDate AS PostCreationDate,
+    COALESCE(rph.EditCount, 0) AS EditCount,
+    up.UserId,
+    up.DisplayName,
+    up.PostCount,
+    up.TotalVotes,
+    cq.CloseDate,
+    cq.CloseReason
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    RecentPostHistories rph ON pp.Id = rph.PostId
+LEFT JOIN 
+    UserPosts up ON pp.OwnerUserId = up.UserId
+LEFT JOIN 
+    ClosedQuestions cq ON pp.Id = cq.PostId
+WHERE 
+    pp.rn <= 10 -- Get top 10 popular questions
+ORDER BY 
+    pp.Score DESC, pp.ViewCount DESC;

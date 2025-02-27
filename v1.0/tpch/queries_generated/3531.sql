@@ -1,0 +1,46 @@
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+line_items AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_parts, ss.total_value
+    FROM supplier_summary ss
+    JOIN supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE ss.total_value > (SELECT AVG(total_value) FROM supplier_summary)
+    ORDER BY ss.total_value DESC
+    LIMIT 5
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT 
+    c.c_name, 
+    SUM(coalesce(li.total_line_value, 0)) AS total_order_value,
+    ts.total_parts AS parts_supplied,
+    ts.total_value AS supplier_value
+FROM customer_orders co
+JOIN customer c ON co.c_custkey = c.c_custkey
+LEFT JOIN line_items li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN order_details od ON od.o_orderkey = li.l_orderkey
+JOIN top_suppliers ts ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON p.p_partkey = li.l_partkey WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+GROUP BY c.c_name, ts.total_parts, ts.total_value
+HAVING SUM(coalesce(li.total_line_value, 0)) > 100
+ORDER BY total_order_value DESC;

@@ -1,0 +1,58 @@
+
+WITH UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 1 
+            WHEN ph.PostHistoryTypeId = 11 THEN -1 
+            ELSE 0 
+        END) AS CloseOpenCount
+    FROM Votes v
+    LEFT JOIN Posts p ON v.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    GROUP BY v.UserId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+),
+TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName
+    FROM TagCounts
+    WHERE TotalPosts > 100
+    ORDER BY TotalPosts DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    uv.UpVotes,
+    uv.DownVotes,
+    uv.CloseOpenCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    tt.TagName
+FROM Users u
+LEFT JOIN UserVotes uv ON u.Id = uv.UserId
+JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+JOIN TopTags tt ON rp.Tags LIKE CONCAT('%', tt.TagName, '%')
+WHERE uv.UpVotes > uv.DownVotes
+   OR (uv.CloseOpenCount > 0 AND rp.CreationDate < (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'))
+ORDER BY u.Reputation DESC, rp.CreationDate ASC;

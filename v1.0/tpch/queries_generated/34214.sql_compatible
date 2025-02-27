@@ -1,0 +1,95 @@
+
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost,
+        1 AS level
+    FROM
+        partsupp ps
+    WHERE
+        ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost + (ph.ps_supplycost * 0.05) AS ps_supplycost,
+        ph.level + 1
+    FROM
+        partsupp ps
+    JOIN
+        PriceHierarchy ph ON ps.ps_partkey = ph.ps_partkey
+    WHERE
+        ph.level < 5
+),
+
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+
+LineItemSummary AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY
+        l.l_orderkey, l.l_partkey
+),
+
+FrequentCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS buyer_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(ps.ps_supplycost, 0) AS supply_cost,
+    COALESCE(cos.total_spent, 0) AS customer_spending,
+    CASE 
+        WHEN cos.order_count > 10 THEN 'High'
+        WHEN cos.order_count BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS order_priority,
+    SUM(l.total_price) OVER (PARTITION BY p.p_partkey ORDER BY l.l_orderkey DESC) AS cumulative_sales
+FROM
+    part p
+LEFT JOIN
+    PriceHierarchy ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN
+    CustomerOrders cos ON cos.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%Acme%')
+LEFT JOIN
+    LineItemSummary l ON l.l_partkey = p.p_partkey
+WHERE
+    p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL
+    )
+ORDER BY
+    p.p_partkey;

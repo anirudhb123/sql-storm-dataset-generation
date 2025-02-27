@@ -1,0 +1,49 @@
+WITH RECURSIVE CustOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, level + 1
+    FROM CustOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+),
+PartStats AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_avail_qty, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+FinalResults AS (
+    SELECT co.c_name, 
+           p.p_name,
+           ps.total_avail_qty,
+           ps.total_revenue,
+           COUNT(DISTINCT co.o_orderkey) AS order_count
+    FROM CustOrders co
+    JOIN PartStats ps ON EXISTS (
+        SELECT 1 FROM lineitem l 
+        WHERE l.l_orderkey = co.o_orderkey AND l.l_partkey IN (SELECT p.p_partkey FROM part p)
+    )
+    JOIN RankedSuppliers rs ON rs.rank <= 5
+    JOIN partsupp psu ON psu.ps_partkey = ANY(ARRAY(SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey))
+    JOIN part p ON p.p_partkey = psu.ps_partkey
+    WHERE co.o_totalprice > (
+        SELECT AVG(o.o_totalprice) FROM orders o
+        WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    )
+    GROUP BY co.c_name, p.p_name, ps.total_avail_qty, ps.total_revenue
+)
+SELECT * FROM FinalResults
+WHERE total_revenue IS NOT NULL AND total_avail_qty > 0
+ORDER BY total_revenue DESC, order_count DESC;

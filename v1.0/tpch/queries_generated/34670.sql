@@ -1,0 +1,47 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+),
+avg_supplier_cost AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+customers_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    p.p_name AS part_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    MAX(cost_data.avg_supplycost) AS max_supply_cost
+FROM lineitem li
+JOIN orders o ON li.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN avg_supplier_cost cost_data ON ps.ps_partkey = cost_data.ps_partkey
+WHERE 
+    li.l_shipdate BETWEEN DATEADD(MONTH, -6, GETDATE()) AND GETDATE()
+    AND n.n_name IN ('Australia', 'Canada')
+GROUP BY 
+    n.n_name, 
+    r.r_name, 
+    p.p_name 
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY 
+    total_sales DESC,
+    order_count DESC;

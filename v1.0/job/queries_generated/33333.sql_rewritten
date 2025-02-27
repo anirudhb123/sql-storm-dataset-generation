@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS level
+    FROM aka_title t
+    JOIN movie_link ml ON t.id = ml.movie_id
+    WHERE ml.link_type_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        CONCAT(mh.title, ' -> ', t.title) AS title,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.linked_movie_id
+    JOIN aka_title t ON ml.movie_id = t.id
+    WHERE mh.level < 5  
+),
+cast_statistics AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        MAX(CASE 
+            WHEN r.role = 'Director' THEN c.nr_order 
+            ELSE NULL 
+        END) AS director_order
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id
+),
+title_year AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS production_order
+    FROM aka_title t
+    WHERE t.production_year IS NOT NULL
+),
+company_details AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies m
+    JOIN company_name c ON m.company_id = c.id
+    JOIN company_type ct ON m.company_type_id = ct.id
+)
+SELECT 
+    t.title AS Movie_Title,
+    mh.title AS Related_Movies,
+    ts.production_year AS Production_Year,
+    cs.total_cast AS Total_Cast,
+    cs.director_order AS Director_Order,
+    cd.company_name AS Production_Company,
+    cd.company_type AS Company_Type
+FROM aka_title t
+LEFT OUTER JOIN movie_hierarchy mh ON t.id = mh.movie_id
+JOIN cast_statistics cs ON t.id = cs.movie_id
+JOIN title_year ts ON t.id = ts.title_id
+LEFT JOIN company_details cd ON t.id = cd.movie_id
+WHERE 
+    ts.production_year BETWEEN 2000 AND 2023
+    AND (cd.company_type IS NOT NULL OR cd.company_name IS NULL)  
+ORDER BY 
+    ts.production_year DESC,
+    t.title;

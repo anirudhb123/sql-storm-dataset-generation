@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(*) OVER (PARTITION BY ph.PostId) as HistoryCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) OVER (PARTITION BY ph.PostId) AS IsClosed
+    FROM PostHistory ph
+    WHERE ph.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING COUNT(DISTINCT p.Id) >= 5
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    COALESCE(u.UpVotesCount, 0) - COALESCE(u.DownVotesCount, 0) AS NetVotes,
+    ph.HistoryCount,
+    CASE 
+        WHEN ph.IsClosed = 1 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    uu.DisplayName AS TopUserDisplayName
+FROM 
+    RankedPosts p
+LEFT JOIN UserReputation u ON p.PostId = u.UserId
+LEFT JOIN PostHistories ph ON p.PostId = ph.PostId
+LEFT JOIN TopUsers uu ON uu.UserId = p.OwnerUserId
+WHERE 
+    (p.ViewCount > 100 OR ph.HistoryCount > 2)
+    AND (uu.Reputation IS NULL OR uu.Reputation > 1000)
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC;
+

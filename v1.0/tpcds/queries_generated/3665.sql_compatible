@@ -1,0 +1,50 @@
+
+WITH customer_return_summary AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(COALESCE(sr.sr_return_quantity, 0)) AS total_returned, 
+        SUM(COALESCE(sr.sr_return_amt, 0)) AS total_return_amt,
+        SUM(COALESCE(sr.sr_return_tax, 0)) AS total_tax
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_id
+),
+item_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        COUNT(ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_sales_price) AS total_sales_amount,
+        AVG(ws.ws_sales_price) AS average_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY COUNT(ws.ws_order_number) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_sk, 
+        i.i_product_name,
+        is.total_sales,
+        is.total_sales_amount,
+        is.average_sales_price
+    FROM item i
+    JOIN item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE is.sales_rank <= 10
+)
+SELECT 
+    crs.c_customer_id,
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.total_sales,
+    ti.total_sales_amount,
+    crs.total_returned,
+    crs.total_return_amt,
+    CASE 
+        WHEN crs.total_returned > 0 THEN 
+            (crs.total_return_amt / NULLIF(ti.total_sales_amount, 0)) * 100
+        ELSE 0 
+    END AS return_rate_percentage
+FROM customer_return_summary crs
+CROSS JOIN top_items ti
+WHERE crs.total_returned > 0 OR ti.total_sales > 0
+ORDER BY return_rate_percentage DESC, ti.i_item_id;

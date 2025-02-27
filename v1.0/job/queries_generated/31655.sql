@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.depth AS linkage_depth,
+    COUNT(mc.id) OVER (PARTITION BY ak.id) AS movie_count,
+    AVG(year_diff) OVER (PARTITION BY ak.id) AS avg_year_diff,
+    STRING_AGG(DISTINCT NULLIF(kw.keyword, '')) FILTER (WHERE kw.keyword IS NOT NULL) AS keywords
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_companies mvco ON ci.movie_id = mvco.movie_id
+JOIN 
+    aka_title at ON mvco.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id 
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id
+CROSS JOIN 
+    (SELECT EXTRACT(YEAR FROM CURRENT_DATE) - production_year AS year_diff 
+     FROM aka_title ORDER BY production_year DESC LIMIT 1) AS year_diff
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND at.production_year IS NOT NULL
+GROUP BY 
+    ak.name, at.title, mh.depth
+HAVING 
+    COUNT(DISTINCT at.id) > 1 AND
+    AVG(year_diff) < 10
+ORDER BY 
+    actor_name ASC, movie_title ASC;

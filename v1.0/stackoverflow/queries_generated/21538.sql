@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS rn,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount, -- upvotes
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount -- downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId = 12) AS LastDeletedDate,
+        MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId = 13) AS LastUndeletedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ua.DisplayName,
+    ua.PostsCreated,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    COALESCE(phd.CloseReopenCount, 0) AS CloseReopenCount,
+    CASE 
+        WHEN phd.LastDeletedDate IS NOT NULL THEN 'Deleted' 
+        ELSE 'Active' 
+    END AS PostStatus,
+    (rp.UpVoteCount - rp.DownVoteCount) AS NetVotes,
+    CASE 
+        WHEN rp.ViewCount > 1000 AND (rp.UpVoteCount - rp.DownVoteCount) > 100 THEN 'Popular'
+        ELSE 'Regular'
+    END AS PopularityCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    UserActivity ua ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.rn <= 10 -- limit to top 10 posts per type
+ORDER BY 
+    rp.ViewCount DESC, 
+    PostStatus, 
+    NetVotes DESC;

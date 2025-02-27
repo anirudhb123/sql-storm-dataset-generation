@@ -1,0 +1,49 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+annual_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        EXTRACT(YEAR FROM d_date) AS sales_year
+    FROM web_sales
+    JOIN date_dim dd ON ws_sold_date_sk = dd.d_date_sk
+    GROUP BY ws_bill_customer_sk, sales_year
+),
+demographic_sales AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.cd_purchase_estimate,
+        as.total_sales,
+        as.order_count,
+        as.sales_year
+    FROM customer_info ci
+    JOIN annual_sales as ON ci.c_customer_sk = as.ws_bill_customer_sk
+)
+SELECT 
+    ds.sales_year,
+    ds.ca_state,
+    COUNT(DISTINCT ds.full_name) AS customer_count,
+    AVG(ds.total_sales) AS average_sales,
+    SUM(ds.order_count) AS total_orders
+FROM demographic_sales ds
+GROUP BY ds.sales_year, ds.ca_state
+ORDER BY ds.sales_year, ds.ca_state;

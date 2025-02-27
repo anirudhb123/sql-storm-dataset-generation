@@ -1,0 +1,26 @@
+
+WITH RECURSIVE supply_chain AS (
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps.supplycost, 
+           1 AS depth, 
+           CONCAT('Supplier: ', s.s_name, ', Available Qty: ', ps.availqty) AS path
+    FROM partsupp ps
+    JOIN supplier s ON ps.suppkey = s.s_suppkey
+    UNION ALL
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps.supplycost, 
+           depth + 1,
+           CONCAT(sc.path, ' -> Supplier: ', s.s_name, ', Available Qty: ', ps.availqty)
+    FROM partsupp ps
+    JOIN supplier s ON ps.suppkey = s.s_suppkey
+    JOIN supply_chain sc ON ps.partkey = sc.partkey
+    WHERE depth < 3
+)
+SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, 
+       SUM(sc.availqty) AS total_available_qty,
+       AVG(sc.supplycost) AS avg_supply_cost, 
+       STRING_AGG(sc.path, ' | ') AS supply_paths
+FROM part p
+LEFT JOIN supply_chain sc ON p.p_partkey = sc.partkey
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand
+HAVING SUM(sc.availqty) > 0
+ORDER BY total_available_qty DESC
+LIMIT 10;

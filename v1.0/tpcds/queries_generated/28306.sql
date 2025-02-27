@@ -1,0 +1,51 @@
+
+WITH ExtendedCustomerInfo AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        DATE_FORMAT(NOW(), '%Y-%m-%d') AS current_date,
+        DATEDIFF(NOW(), STR_TO_DATE(CONCAT(c.c_birth_year, '-', c.c_birth_month, '-', c.c_birth_day), '%Y-%m-%d')) AS age
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+PurchasingPatterns AS (
+    SELECT 
+        cinfo.full_name,
+        SUM(ss.ss_quantity) AS total_items_purchased,
+        SUM(ss.ss_sales_price * ss.ss_quantity) AS total_spent
+    FROM 
+        ExtendedCustomerInfo AS cinfo
+    JOIN 
+        store_sales AS ss ON cinfo.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        cinfo.full_name
+)
+SELECT 
+    eci.full_name,
+    eci.ca_city,
+    eci.ca_state,
+    eci.ca_country,
+    eci.age,
+    COALESCE(pp.total_items_purchased, 0) AS total_items_purchased,
+    COALESCE(pp.total_spent, 0) AS total_spent
+FROM 
+    ExtendedCustomerInfo AS eci
+LEFT JOIN 
+    PurchasingPatterns AS pp ON eci.full_name = pp.full_name
+WHERE 
+    eci.cd_gender = 'F'
+AND 
+    eci.age BETWEEN 30 AND 45
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

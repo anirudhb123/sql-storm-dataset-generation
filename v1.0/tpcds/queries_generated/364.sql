@@ -1,0 +1,80 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        rr.sr_customer_sk,
+        rr.total_returns,
+        rr.total_return_amount,
+        cd_cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_buy_potential,
+        hd_income_band_sk
+    FROM 
+        RankedReturns rr
+    JOIN customer c ON rr.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        rr.total_returns > 2
+),
+CustomerAddress AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+    HAVING 
+        COUNT(DISTINCT c.c_customer_sk) > 5
+),
+ReturnSummary AS (
+    SELECT 
+        hrc.sr_customer_sk,
+        COUNT(hrc.total_returns) AS return_count,
+        SUM(hrc.total_return_amount) AS return_total,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        HighReturnCustomers hrc
+    JOIN CustomerAddress ca ON hrc.sr_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk)
+    GROUP BY 
+        hrc.sr_customer_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    r.sr_customer_sk,
+    r.return_count,
+    r.return_total,
+    r.ca_city,
+    r.ca_state,
+    CASE 
+        WHEN cd_gender = 'F' THEN 'Female'
+        WHEN cd_gender = 'M' THEN 'Male'
+        ELSE 'Unknown'
+    END AS gender_label,
+    COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+    RANK() OVER (ORDER BY r.return_total DESC) AS income_rank
+FROM 
+    ReturnSummary r
+LEFT JOIN 
+    customer_demographics cd ON r.sr_customer_sk = cd.cd_demo_sk
+LEFT JOIN 
+    household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+WHERE 
+    r.return_total > 100
+ORDER BY 
+    r.return_total DESC;

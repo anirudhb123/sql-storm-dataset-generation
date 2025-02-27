@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+TopSales AS (
+    SELECT 
+        web_site_sk,
+        web_name,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank = 1
+)
+SELECT 
+    w.web_name,
+    COALESCE(sr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_catalog_returns, 0) AS total_catalog_returns,
+    COALESCE(sr.total_returns, 0) - COALESCE(cr.total_catalog_returns, 0) AS net_sales
+FROM 
+    TopSales ts
+LEFT JOIN (
+    SELECT 
+        ws_ship_site_sk,
+        COUNT(*) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.s_store_sk
+) sr ON ts.web_site_sk = sr.ws_ship_site_sk
+LEFT JOIN (
+    SELECT 
+        cr_ship_mode_sk,
+        COUNT(*) AS total_catalog_returns
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.catalog_page_sk
+) cr ON ts.web_site_sk = cr.cr_ship_mode_sk
+WHERE 
+    ts.total_sales > 5000
+ORDER BY 
+    net_sales DESC;

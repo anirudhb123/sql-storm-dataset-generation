@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_by_balance
+    FROM 
+        supplier s
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_supply_cost) FROM (SELECT SUM(ps_supplycost * ps_availqty) AS total_supply_cost FROM partsupp GROUP BY ps_partkey) AS avg_supply_cost)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND (o.o_orderstatus IS NULL OR o.o_orderstatus = 'O')
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name,
+    ns.supplier_count,
+    ns.total_acctbal,
+    p.p_name,
+    hp.total_supply_cost,
+    co.total_orders,
+    co.avg_order_value
+FROM 
+    NationSummary ns
+LEFT JOIN 
+    RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rank_by_balance <= 5
+FULL OUTER JOIN 
+    HighValueParts hp ON rs.s_suppkey IS NULL OR hp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+JOIN 
+    CustomerOrders co ON ns.n_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = co.c_custkey)
+WHERE 
+    (hp.total_supply_cost IS NOT NULL OR co.total_orders > 10) AND 
+    (ns.supplier_count > 2 OR hp.total_supply_cost > 1000) 
+ORDER BY 
+    ns.total_acctbal DESC, co.avg_order_value ASC 
+LIMIT 50;

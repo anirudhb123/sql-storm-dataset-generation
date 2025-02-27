@@ -1,0 +1,64 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ship_date_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ship_date_sk ORDER BY ws.ws_net_paid DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid > 0
+),
+TopSales AS (
+    SELECT 
+        sd.ship_date_sk,
+        sd.ws_item_sk,
+        sd.ws_sales_price,
+        sd.ws_quantity,
+        sd.ws_net_paid
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rank <= 5
+),
+SalesSummary AS (
+    SELECT 
+        d.d_date,
+        COUNT(ts.ws_item_sk) AS total_items_sold,
+        SUM(ts.ws_net_paid) AS total_revenue
+    FROM 
+        TopSales ts
+    JOIN 
+        date_dim d ON d.d_date_sk = ts.ship_date_sk
+    GROUP BY 
+        d.d_date
+),
+StoreSummary AS (
+    SELECT 
+        s.s_store_name,
+        SUM(ss.ss_net_paid) AS store_revenue,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_tickets
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_name
+)
+SELECT 
+    ss.*,
+    COALESCE(su.store_revenue, 0) AS store_revenue,
+    COALESCE(su.total_tickets, 0) AS total_tickets,
+    CASE 
+        WHEN ss.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    StoreSummary su ON su.store_revenue > 5000
+ORDER BY 
+    ss.total_revenue DESC;

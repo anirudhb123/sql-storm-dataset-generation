@@ -1,0 +1,98 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY[m.id] AS path,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        path || m.id,
+        depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id 
+    WHERE 
+        NOT m.id = ANY(mh.path)
+),
+aggregate_info AS (
+    SELECT
+        k.keyword,
+        COUNT(DISTINCT m.id) AS movie_count,
+        ARRAY_AGG(DISTINCT m.production_year) AS unique_years,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        k.keyword
+),
+ranked_movies AS (
+    SELECT
+        m.id,
+        m.title,
+        COALESCE(ARRAY_AGG(DISTINCT ak.name) FILTER (WHERE ak.name IS NOT NULL), ARRAY[NULL]::text[]) AS actor_names,
+        ROW_NUMBER() OVER (PARTITION BY k.keyword ORDER BY m.production_year DESC) AS rank
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        m.id, m.title
+),
+final_output AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.depth,
+        ai.movie_count,
+        ai.unique_years,
+        r.actor_names,
+        r.rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        aggregate_info ai ON mh.title LIKE '%' || ai.keyword || '%'
+    LEFT JOIN 
+        ranked_movies r ON mh.movie_id = r.id
+    WHERE 
+        mh.depth < 4
+)
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.depth,
+    COALESCE(fo.movie_count, 0) AS total_movies,
+    COALESCE(fo.unique_years[1], 'Unknown Year') AS any_year,
+    CASE 
+        WHEN fo.rank IS NULL THEN 'No actors found'
+        ELSE STRING_AGG(DISTINCT fo.actor_names::text, ', ')
+    END AS actors_in_movies
+FROM 
+    final_output fo
+GROUP BY 
+    fo.movie_id, fo.title, fo.depth, fo.movie_count
+ORDER BY 
+    fo.total_movies DESC NULLS LAST, 
+    fo.any_year DESC;

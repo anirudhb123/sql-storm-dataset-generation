@@ -1,0 +1,105 @@
+WITH RECURSIVE TopTags AS (
+    SELECT 
+        TagName,
+        Count,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        Count > 0
+    UNION ALL
+    SELECT 
+        t.TagName,
+        t.Count,
+        tt.Level + 1
+    FROM 
+        Tags t
+    JOIN 
+        TopTags tt ON t.Count > tt.Count
+    WHERE 
+        tt.Level < 5 
+),
+UserVotingActions AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM 
+        Posts p 
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 1000
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(t.UsersWithTopTags, 0) AS UsersWithTopTags
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            COUNT(DISTINCT ut.UserId) AS UsersWithTopTags
+        FROM 
+            UserVotingActions ut
+        JOIN 
+            TopTags tt ON ut.TotalVotes > 10 
+    ) t ON u.Id = t.UsersWithTopTags
+),
+FinalResult AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS ClosedPostCount,
+        COALESCE(SUM(CASE WHEN pp.PopularityRank <= 10 THEN 1 ELSE 0 END), 0) AS PopularPostCount
+    FROM 
+        UserReputation u
+    LEFT JOIN 
+        ClosedPosts p ON u.Id = p.ClosedBy
+    LEFT JOIN 
+        PopularPosts pp ON pp.Id IN (SELECT PostId FROM Comments c WHERE c.UserId = u.Id)
+    GROUP BY 
+        u.DisplayName, u.Reputation
+)
+
+SELECT 
+    fr.DisplayName,
+    fr.Reputation,
+    fr.ClosedPostCount,
+    fr.PopularPostCount,
+    tt.TagName,
+    tt.Count AS TagCount
+FROM 
+    FinalResult fr
+JOIN 
+    TopTags tt ON fr.Reputation > 1000 
+ORDER BY 
+    fr.Reputation DESC, 
+    tt.Count DESC;

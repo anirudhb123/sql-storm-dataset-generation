@@ -1,0 +1,104 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL -- Top-level movies
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id 
+), 
+
+actor_stats AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(ki.keyword_count) AS average_keywords_per_movie
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(mk.keyword_id) AS keyword_count
+        FROM 
+            movie_keyword mk
+        GROUP BY 
+            mk.movie_id
+    ) ki ON ci.movie_id = ki.movie_id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+
+movie_info_with_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(SUM(mi.keywords_count), 0) AS total_keywords,
+        ARRAY_AGG(DISTINCT mi.info) AS additional_info
+    FROM 
+        aka_title mt
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            COUNT(mk.keyword_id) AS keywords_count
+        FROM 
+            movie_keyword mk
+        GROUP BY 
+            mk.movie_id
+    ) mi ON mt.id = mi.movie_id
+    GROUP BY 
+        mt.id, mt.title
+),
+
+final_report AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(a.movie_count, 0) AS actor_count,
+        m.total_keywords,
+        CASE 
+            WHEN m.total_keywords > 10 THEN 'High'
+            WHEN m.total_keywords BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS keyword_density,
+        m.additional_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_stats a ON mh.movie_id = a.movie_id
+    LEFT JOIN 
+        movie_info_with_keywords m ON mh.movie_id = m.movie_id
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.total_keywords,
+    fr.keyword_density,
+    fr.additional_info
+FROM 
+    final_report fr
+WHERE 
+    fr.production_year >= 2000
+ORDER BY 
+    fr.production_year DESC, 
+    fr.keyword_density ASC;

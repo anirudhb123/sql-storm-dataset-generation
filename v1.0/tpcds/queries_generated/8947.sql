@@ -1,0 +1,52 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.cd_marital_status = 'M'
+        AND cd.cd_gender = 'F'
+        AND p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.web_site_sk
+),
+WarehouseSummary AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) as total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+)
+SELECT 
+    ss.web_site_sk,
+    ws.w_warehouse_sk,
+    ss.total_quantity_sold,
+    ss.total_net_profit,
+    ss.total_orders,
+    ss.total_discount,
+    ws.total_inventory
+FROM 
+    SalesSummary ss
+JOIN 
+    WarehouseSummary ws ON ss.web_site_sk = ws.w_warehouse_sk
+ORDER BY 
+    ss.total_net_profit DESC
+LIMIT 10;

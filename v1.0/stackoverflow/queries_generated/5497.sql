@@ -1,0 +1,87 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+TopPosters AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsPosted
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        QuestionsPosted DESC
+    LIMIT 10
+),
+PostHistoryWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName AS EditorDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '<>'))::int)
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Track Title, Body and Tag edits
+    GROUP BY 
+        p.Id, ph.CreationDate, ph.UserDisplayName, ph.PostHistoryTypeId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerReputation,
+    ps.OwnerDisplayName,
+    ps.TotalComments,
+    ps.UpVotes,
+    ps.DownVotes,
+    COUNT(DISTINCT pht.EditorDisplayName) AS UniqueEditors,
+    STRING_AGG(DISTINCT pht.Tags, ', ') AS AllTags
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryWithTags pht ON ps.PostId = pht.PostId
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.AnswerCount, ps.CommentCount, ps.OwnerReputation, ps.OwnerDisplayName, ps.TotalComments, ps.UpVotes, ps.DownVotes
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 50;

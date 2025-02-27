@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS distinct_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS distinct_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.distinct_returns, 0) AS distinct_returns,
+        RANK() OVER (ORDER BY COALESCE(cr.total_returns, 0) DESC) AS return_rank
+    FROM 
+        customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_profit, 0) AS total_profit,
+    rc.total_returns,
+    rc.return_rank
+FROM 
+    RankedCustomers rc
+LEFT JOIN SalesSummary ss ON rc.c_customer_sk = ss.ws_bill_customer_sk
+WHERE 
+    (rc.total_returns > 0 OR (ss.total_sales > 1000 AND rc.return_rank <= 100))
+ORDER BY 
+    rc.return_rank, rc.c_last_name, rc.c_first_name;

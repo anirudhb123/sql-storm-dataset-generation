@@ -1,0 +1,47 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM 
+        customer c
+    INNER JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 4000 AND 5000
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+)
+SELECT 
+    t.c_first_name,
+    t.c_last_name,
+    t.total_sales,
+    cd.cd_gender,
+    cd.cd_education_status,
+    da.ca_city,
+    da.ca_state
+FROM 
+    TopCustomers t
+JOIN 
+    customer_demographics cd ON t.c_customer_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+WHERE 
+    t.sales_rank <= 10 
+    AND cd.cd_marital_status = 'M'
+ORDER BY 
+    t.total_sales DESC

@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostCommentCounts AS (
+    SELECT
+        postId,
+        COUNT(*) AS CommentCount
+    FROM Comments
+    GROUP BY postId
+),
+PostHistoryDetail AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY ph.PostId
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.BadgeNames, 'No Badges') AS BadgeNames,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    COALESCE(pcc.CommentCount, 0) AS TotalComments,
+    COALESCE(ph.LastEditDate, 'Never Edited') AS LastEditedDate,
+    ph.HistoryTypes
+FROM Users up
+LEFT JOIN UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN PostCommentCounts pcc ON rp.PostId = pcc.postId
+LEFT JOIN PostHistoryDetail ph ON rp.PostId = ph.PostId
+WHERE up.Reputation > 1000
+ORDER BY up.Reputation DESC, rp.Score DESC
+LIMIT 50
+OFFSET 0;

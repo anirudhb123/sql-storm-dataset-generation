@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        r.r_name,
+        ns.n_name,
+        s.s_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation ns ON rs.s_nationkey = ns.n_nationkey
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank = 1
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    h.r_name AS region,
+    h.n_name AS nation,
+    h.s_name AS supplier,
+    c.c_name AS customer,
+    c.order_count,
+    c.total_spent,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No orders'
+        ELSE 
+            CASE 
+                WHEN c.total_spent > 10000 THEN 'High spender'
+                WHEN c.total_spent BETWEEN 5000 AND 10000 THEN 'Medium spender'
+                ELSE 'Low spender'
+            END 
+    END AS spender_category
+FROM 
+    HighCostSuppliers h
+FULL OUTER JOIN 
+    CustomerOrders c ON h.s_name = c.c_name
+WHERE 
+    h.total_supply_cost IS NOT NULL OR c.total_spent IS NOT NULL
+ORDER BY 
+    h.r_name, h.n_name, h.s_name, c.total_spent DESC;

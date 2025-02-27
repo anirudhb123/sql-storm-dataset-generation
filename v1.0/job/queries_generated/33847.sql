@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    INNER JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.linked_movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT c.person_id) AS num_actors,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_count,
+    AVG(m.production_year) OVER (PARTITION BY mt.kind_id) AS avg_year_of_kind,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT mt.id) > 5 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS popularity
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+JOIN 
+    aka_title mt ON mt.id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = mt.id
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+ORDER BY 
+    num_actors DESC, mt.production_year DESC;
+
+-- Ensure to benchmark the performance for the execution plan and runtime statistics on this query.

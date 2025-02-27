@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    COUNT(DISTINCT cc.kind) AS company_count,
+    AVG(pi.info) AS average_person_info_length,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS year_rank,
+    CASE 
+        WHEN pi.info IS NULL THEN 'No Info'
+        ELSE pi.info
+    END AS person_info_evaluation
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+LEFT JOIN 
+    comp_cast_type cc ON ci.person_role_id = cc.id
+GROUP BY 
+    a.id, t.id, pi.info
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 0
+ORDER BY 
+    average_person_info_length DESC, year_rank ASC
+LIMIT 10;

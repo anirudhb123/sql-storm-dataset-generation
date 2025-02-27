@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(pc.CloseReasonId, 0) AS CloseReasonId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             ph.PostId, 
+             ph.Comment AS CloseReasonId
+         FROM 
+             PostHistory ph
+         WHERE 
+             ph.PostHistoryTypeId = 10) pc ON p.Id = pc.PostId
+    WHERE 
+        p.PostTypeId = 1  
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CloseReasonId,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        COUNT(ans.Id) AS AnswerCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts ans ON ans.ParentId = rp.PostId AND ans.PostTypeId = 2
+    WHERE 
+        rp.Rank = 1  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.CloseReasonId, u.DisplayName, u.Reputation
+),
+QuestionStatistics AS (
+    SELECT 
+        tq.*,
+        CASE 
+            WHEN tq.CloseReasonId > 0 THEN 'Closed'
+            ELSE 'Open'
+        END AS Status,
+        CASE 
+            WHEN tq.Reputation < 100 THEN 'Novice'
+            WHEN tq.Reputation >= 100 AND tq.Reputation <= 500 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserLevel
+    FROM 
+        TopQuestions tq
+)
+SELECT 
+    qs.Title,
+    qs.Score,
+    qs.ViewCount,
+    qs.Status,
+    qs.AnswerCount,
+    qs.OwnerDisplayName,
+    qs.UserLevel,
+    STRING_AGG(DISTINCT TRIM(SUBSTRING(t.TagName FROM 1 FOR 20)), ', ') AS TopTags
+FROM 
+    QuestionStatistics qs
+LEFT JOIN 
+    (SELECT 
+         p.Id AS PostId, 
+         TRIM(UNNEST(STRING_TO_ARRAY(p.Tags, ','))) AS TagName
+     FROM 
+         Posts p
+     WHERE 
+         p.Tags IS NOT NULL) t ON qs.PostId = t.PostId
+GROUP BY 
+    qs.PostId, qs.Title, qs.Score, qs.ViewCount, qs.Status, qs.AnswerCount, qs.OwnerDisplayName, qs.UserLevel
+ORDER BY 
+    qs.Score DESC, 
+    qs.ViewCount DESC
+LIMIT 10;

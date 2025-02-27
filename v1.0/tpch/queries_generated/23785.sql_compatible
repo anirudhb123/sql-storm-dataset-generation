@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_orderkey) AS line_item_count
+    FROM 
+        orders o 
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CAST('1998-10-01' AS DATE))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT MAX(o2.o_totalprice) * 0.1 FROM orders o2 WHERE o2.o_orderdate >= DATEADD(YEAR, -1, CAST('1998-10-01' AS DATE)))
+),
+SupplierOrderInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    r.r_name AS region_name,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    tc.c_name AS top_customer_name,
+    s.total_revenue,
+    rs.rnk,
+    tc.cust_rank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierOrderInfo s ON p.p_partkey = s.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopCustomers tc ON s.orders_count > 0
+WHERE 
+    p.p_retailprice IS NOT NULL
+    AND (p.p_size = 10 OR p.p_type LIKE '%special%')
+ORDER BY 
+    s.total_revenue DESC, p.p_name;

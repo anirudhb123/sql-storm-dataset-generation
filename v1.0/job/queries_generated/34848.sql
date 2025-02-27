@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS full_title
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        CONCAT(mh.full_title, ' -> ', mt.title)
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title mt ON m.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS original_title,
+    mh.production_year,
+    COUNT(DISTINCT cc.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS known_aliases,
+    MAX(mi.info) AS info,
+    CASE 
+        WHEN mi.note IS NOT NULL THEN 'Contains notes' 
+        ELSE 'No special notes' 
+    END AS note_status,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.cast_count DESC) AS year_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Summary')
+WHERE 
+    mh.level = 0
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.person_id) >= 5
+ORDER BY 
+    mh.production_year DESC, 
+    cast_count DESC;

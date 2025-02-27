@@ -1,0 +1,70 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(order_count, 0) AS order_count,
+        COALESCE(avg_order_value, 0) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        COALESCE(order_count, 0) > 5 AND 
+        COALESCE(avg_order_value, 0) > 1000
+)
+SELECT 
+    h.c_name,
+    h.order_count,
+    h.avg_order_value,
+    s.s_name,
+    s.total_sales
+FROM 
+    HighValueCustomers h
+JOIN 
+    TopSuppliers s ON h.c_custkey = (SELECT 
+                                            ps.cust_key 
+                                        FROM 
+                                            partsupp ps 
+                                        WHERE 
+                                            ps.ps_suppkey = s.s_suppkey 
+                                        LIMIT 1) 
+WHERE 
+    s.sales_rank <= 10
+ORDER BY 
+    h.avg_order_value DESC, 
+    s.total_sales DESC;

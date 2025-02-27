@@ -1,0 +1,41 @@
+-- Performance Benchmarking Query
+WITH PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(UPDATER.UserDisplayName, 'No Editor') AS LastEditor,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users UPDATER ON p.LastEditorUserId = UPDATER.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY 
+        p.Id, UPDATER.UserDisplayName
+),
+Summary AS (
+    SELECT 
+        COUNT(PostId) AS TotalPosts,
+        AVG(Score) AS AvgScore,
+        SUM(ViewCount) AS TotalViews,
+        SUM(CommentCount) AS TotalComments,
+        SUM(VoteCount) AS TotalVotes,
+        AVG(BadgeCount) AS AvgBadges
+    FROM 
+        PostAnalytics
+)
+
+SELECT 
+    *
+FROM 
+    Summary;

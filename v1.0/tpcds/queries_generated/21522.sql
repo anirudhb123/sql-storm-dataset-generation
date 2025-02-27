@@ -1,0 +1,81 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS sale_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales_value
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+item_analysis AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(ts.total_sales_value, 0) AS combined_sales,
+        ts.total_sales_value - (SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_item_sk = i.i_item_sk) AS profit_margin,
+        (SELECT COUNT(DISTINCT ws_order_number) FROM web_sales WHERE ws_item_sk = i.i_item_sk) AS order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        total_sales ts ON i.i_item_sk = ts.ws_item_sk
+    WHERE 
+        i.i_rec_start_date <= (SELECT MAX(d_date) FROM date_dim WHERE d_current_year = 'Y')
+),
+customer_purchases AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        COUNT(DISTINCT ws_order_number) AS purchase_count,
+        SUM(ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, ca.ca_city
+),
+frequent_returns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    ia.i_item_id,
+    ia.i_item_desc,
+    ia.combined_sales,
+    ia.profit_margin,
+    cp.purchase_count,
+    cp.total_spent,
+    COALESCE(fr.return_count, 0) AS return_frequency,
+    fr.total_returned
+FROM 
+    item_analysis ia
+LEFT JOIN 
+    customer_purchases cp ON cp.purchase_count > 0
+LEFT JOIN 
+    frequent_returns fr ON fr.sr_returning_customer_sk = cp.c_customer_id
+ORDER BY 
+    ia.combined_sales DESC,
+    ia.profit_margin ASC
+LIMIT 100;

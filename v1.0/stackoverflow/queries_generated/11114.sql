@@ -1,0 +1,52 @@
+-- Performance Benchmarking Query
+-- This query retrieves posts, their authors, and associated tags, while aggregating comment and vote counts.
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '><')) AS tag_name
+    JOIN 
+        Tags t ON t.TagName = tag_name
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Author,
+    ps.CommentCount,
+    ps.VoteCount,
+    pt.Tags
+FROM 
+    PostStats ps
+JOIN 
+    PostTags pt ON ps.PostId = pt.PostId
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 100;

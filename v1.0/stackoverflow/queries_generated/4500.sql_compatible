@@ -1,0 +1,72 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        pp.UserDisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users pp ON p.OwnerUserId = pp.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '6 MONTH'
+),
+RecentClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate AS CloseDate,
+        T.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes T ON ph.Comment = T.Id::TEXT 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate >= CURRENT_DATE - INTERVAL '6 MONTH'
+),
+FinalStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.AnswerCount,
+        ps.OwnerDisplayName,
+        ps.CreationDate,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        rc.CloseDate,
+        rc.CloseReason
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        RecentClosedPosts rc ON ps.PostId = rc.PostId
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.ViewCount,
+    fs.AnswerCount,
+    fs.OwnerDisplayName,
+    fs.CreationDate,
+    fs.CloseDate,
+    fs.CloseReason,
+    (fs.TotalUpVotes - fs.TotalDownVotes) AS NetVotes,
+    CASE 
+        WHEN fs.CloseDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    FinalStats fs
+WHERE 
+    fs.CloseDate IS NOT NULL OR (fs.TotalUpVotes - fs.TotalDownVotes) > 10
+ORDER BY 
+    fs.CreationDate DESC
+LIMIT 50 OFFSET 0;

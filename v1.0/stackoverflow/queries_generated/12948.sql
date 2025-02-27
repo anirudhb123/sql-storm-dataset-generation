@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query
+
+-- This query retrieves various statistics across a range of tables 
+-- to evaluate performance metrics from the Stack Overflow schema.
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT Id) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Id, Reputation
+),
+PostStats AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        AnswerCount,
+        CommentCount,
+        FavoriteCount,
+        COUNT(DISTINCT Comment.Id) AS TotalComments
+    FROM Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    GROUP BY Posts.Id, Title, CreationDate, ViewCount, Score, AnswerCount, CommentCount, FavoriteCount
+)
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.TotalPosts,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount AS PostAnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.FavoriteCount,
+    PS.TotalComments
+FROM UserStats US
+JOIN PostStats PS ON US.UserId = PS.OwnerUserId
+ORDER BY US.Reputation DESC, PS.ViewCount DESC
+LIMIT 100; -- Limiting to the top 100 users by reputation

@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Body,
+        u.DisplayName AS Author,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY COUNT(a.Id) DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2  -- Answers
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Tags, p.Body
+),
+RecentVotes AS (
+    SELECT 
+        PostId, 
+        ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS VoteRank, 
+        COUNT(VoteTypeId) AS VoteCount
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.Body,
+    rp.Author,
+    rp.AnswerCount,
+    r.VoteCount,
+    rp.LastVoteDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes r ON rp.PostId = r.PostId
+WHERE 
+    rp.TagRank <= 5  -- Top 5 tags based on answer count
+ORDER BY 
+    rp.AnswerCount DESC, 
+    r.VoteCount DESC;

@@ -1,0 +1,72 @@
+-- Performance benchmarking query for StackOverflow schema
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes, -- UpMod
+        SUM(v.VoteTypeId = 3) AS DownVotes -- DownMod
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' -- Filter by creation date
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        SUM(v.VoteTypeId = 2) AS UserUpVotes,
+        SUM(v.VoteTypeId = 3) AS UserDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.Tags,
+    us.UserId,
+    us.DisplayName AS OwnerDisplayName,
+    us.PostsCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.UserUpVotes,
+    us.UserDownVotes
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.OwnerUserId = us.UserId
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY; -- Limit results for performance benchmarking

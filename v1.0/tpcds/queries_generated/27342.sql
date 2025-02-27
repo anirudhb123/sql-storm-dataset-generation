@@ -1,0 +1,69 @@
+
+WITH processed_addresses AS (
+    SELECT 
+        ca.c_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca.ca_suite_number) ELSE '' END) AS full_address,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer_address ca
+), 
+item_description_length AS (
+    SELECT 
+        i.i_item_sk,
+        LENGTH(i.i_item_desc) AS desc_length
+    FROM 
+        item i
+),
+demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High' 
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+),
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    pa.full_address,
+    pa.ca_city,
+    pa.ca_state,
+    d.cd_gender,
+    d.purchase_category,
+    i.desc_length,
+    COALESCE(sd.total_quantity, 0) AS total_quantity,
+    COALESCE(sd.total_sales, 0) AS total_sales
+FROM 
+    processed_addresses pa
+JOIN 
+    demographics d ON d.cd_demo_sk = pa.c_address_sk
+JOIN 
+    item_description_length i ON i.i_item_sk = (
+        SELECT i_item_sk 
+        FROM web_sales 
+        WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023) 
+        ORDER BY ws_quantity DESC LIMIT 1
+    )
+LEFT JOIN 
+    sales_data sd ON sd.ws_item_sk = i.i_item_sk
+WHERE 
+    pa.ca_state IN ('CA', 'NY')
+ORDER BY 
+    total_sales DESC
+LIMIT 50;

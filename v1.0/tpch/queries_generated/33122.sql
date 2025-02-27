@@ -1,0 +1,44 @@
+WITH RECURSIVE ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, 1 AS rank
+    FROM part p
+    WHERE p.p_size > 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, rp.rank + 1
+    FROM part p
+    JOIN ranked_parts rp ON p.p_size > rp.p_size AND rp.rank < 5
+),
+supplier_data AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+),
+total_orders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+part_supplier_statistics AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       AVG(ts.total_spent) AS avg_spent,
+       COUNT(DISTINCT ps.ps_partkey) AS part_count,
+       p.p_name, 
+       p.rank,
+       CASE WHEN ps.avg_supplycost IS NULL THEN 'No Data' 
+            ELSE CAST(ps.avg_supplycost AS char(20)) END AS avg_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN total_orders ts ON c.c_custkey = ts.o_custkey
+LEFT JOIN part_supplier_statistics ps ON ps.ps_partkey IN (SELECT p_partkey FROM ranked_parts)
+INNER JOIN ranked_parts p ON ps.ps_partkey = p.p_partkey
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 500
+GROUP BY r.r_name, p.p_name, p.rank, ps.avg_supplycost
+ORDER BY r.r_name, avg_spent DESC
+LIMIT 10;

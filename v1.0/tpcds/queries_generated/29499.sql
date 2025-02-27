@@ -1,0 +1,49 @@
+
+WITH AddressAnalysis AS (
+    SELECT 
+        ca_state,
+        LENGTH(COALESCE(ca_street_name, '')) AS street_name_length,
+        UPPER(COALESCE(ca_city, '')) AS upper_city,
+        LOWER(COALESCE(ca_street_type, '')) AS lower_street_type
+    FROM 
+        customer_address
+),
+CustomerAnalysis AS (
+    SELECT 
+        cd_gender,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(*) AS customer_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+ReturnsAnalysis AS (
+    SELECT 
+        sr.reason_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        sr.reason_sk
+)
+SELECT 
+    aa.ca_state,
+    aa.street_name_length,
+    aa.upper_city,
+    aa.lower_street_type,
+    ca.avg_purchase_estimate,
+    ca.customer_count,
+    ra.total_returns,
+    ra.total_return_amount
+FROM 
+    AddressAnalysis aa
+JOIN 
+    CustomerAnalysis ca ON aa.ca_state IN (SELECT DISTINCT ca_state FROM customer_address)
+JOIN 
+    ReturnsAnalysis ra ON ra.total_returns > 100
+ORDER BY 
+    aa.ca_state, ca.avg_purchase_estimate DESC, ra.total_return_amount DESC;

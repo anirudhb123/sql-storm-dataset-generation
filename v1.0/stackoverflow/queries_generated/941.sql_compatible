@@ -1,0 +1,68 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(p.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(p.CommentCount, 0) AS TotalComments,
+        MAX(v.CreationDate) AS LastVoteDate,
+        COUNT(DISTINCT v.UserId) AS TotalVotes,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.AnswerCount, p.CommentCount
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON (ph.Comment::text::integer = ctr.Id)
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.ReputationRank,
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.TotalAnswers,
+    up.TotalComments,
+    COALESCE(cpd.CloseReasons, 'Not Closed') AS CloseReasons,
+    COALESCE(cpd.FirstClosedDate, 'N/A') AS FirstClosedDate,
+    up.TotalVotes,
+    up.LastVoteDate,
+    up.AvgUpVotes,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'High Reputation' 
+        ELSE 'Low Reputation' 
+    END AS ReputationStatus
+FROM 
+    UserReputation u
+LEFT JOIN 
+    PostStats up ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL LIMIT 1)
+LEFT JOIN 
+    ClosedPostDetails cpd ON up.PostId = cpd.PostId
+WHERE 
+    u.ReputationRank <= 10
+ORDER BY 
+    u.Reputation DESC, 
+    up.TotalVotes DESC;

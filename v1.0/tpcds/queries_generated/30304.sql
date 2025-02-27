@@ -1,0 +1,79 @@
+
+WITH RECURSIVE CategoryHierarchy AS (
+    SELECT 
+        i_category_id,
+        i_category,
+        0 AS level
+    FROM 
+        item
+    WHERE 
+        i_item_sk IN (SELECT DISTINCT cs_item_sk FROM catalog_sales)
+    UNION ALL
+    SELECT 
+        ch.i_category_id, 
+        ch.i_category,
+        level + 1
+    FROM 
+        CategoryHierarchy ch
+    JOIN 
+        item i ON i.i_category_id = ch.i_category_id
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE
+        AND i.i_rec_end_date > CURRENT_DATE
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+        AND 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_sales,
+        sd.avg_sales_price
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rn <= 10
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    SUM(ts.total_sales) AS total_sales,
+    SUM(ts.total_sales * ts.avg_sales_price) AS total_revenue,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    CASE 
+        WHEN SUM(ts.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    TopSales ts ON ts.ws_item_sk IN (SELECT DISTINCT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = c.c_customer_sk)
+WHERE 
+    ca.ca_state = 'CA' 
+    AND (c.c_birth_year >= 1980 OR c.c_birth_month >= 6)
+GROUP BY 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city
+HAVING 
+    total_revenue > 1000
+ORDER BY 
+    total_revenue DESC
+LIMIT 50;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE supplier_child AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sc.level + 1
+    FROM supplier_child sc
+    JOIN supplier s ON sc.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal < sc.s_acctbal AND sc.level < 5
+), 
+    
+part_data AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_container IS NOT NULL
+), 
+
+avg_discount AS (
+    SELECT AVG(l.l_discount) AS avg_discount
+    FROM lineitem l
+    WHERE l.l_shipdate > DATEADD(year, -1, '1998-10-01')
+      AND l.l_returnflag = 'R'
+),
+
+nation_count AS (
+    SELECT n.n_regionkey, COUNT(DISTINCT n.n_nationkey) AS nation_total
+    FROM nation n
+    GROUP BY n.n_regionkey
+)
+
+SELECT DISTINCT c.c_custkey, c.c_name,
+       COALESCE(para.p_retailprice, 0) * (1 - COALESCE(ad.avg_discount, 0)) AS effective_price,
+       s.s_name AS supplier_name,
+       CASE 
+           WHEN n.nation_total > 5 THEN 'Diverse'
+           ELSE 'Homogeneous'
+       END AS nation_distribution
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN part_data para ON l.l_partkey = para.p_partkey AND para.price_rank <= 10
+LEFT JOIN supplier_child s ON l.l_suppkey = s.s_suppkey
+INNER JOIN nation_count n ON c.c_nationkey = n.n_regionkey
+LEFT JOIN avg_discount ad ON TRUE
+WHERE (c.c_acctbal BETWEEN 500 AND 1500 OR s.s_acctbal > 0)
+  AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL) 
+  AND (s.s_comment LIKE '%urgent%' OR s.s_comment IS NULL)
+ORDER BY effective_price DESC, c.c_name;

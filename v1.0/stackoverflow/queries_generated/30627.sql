@@ -1,0 +1,76 @@
+WITH RecursivePostHistory AS (
+    -- Recursive Common Table Expression to traverse the edits of posts
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Text,
+        ph.PostHistoryTypeId,
+        1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) -- Only focusing on title, body, and tags edits
+
+    UNION ALL
+    
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Text,
+        ph.PostHistoryTypeId,
+        Level + 1
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE ph.CreationDate > rph.CreationDate
+)
+
+, UserActivity AS (
+    -- Get user activity stats
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+, EditsSummary AS (
+    -- Summarizing the edits by PostId along with the latest edit info
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        MIN(CreationDate) AS FirstEditDate,
+        MAX(CreationDate) AS LatestEditDate,
+        MAX(CASE WHEN PostHistoryTypeId = 4 THEN CreationDate END) AS LastTitleEdit,
+        MAX(CASE WHEN PostHistoryTypeId = 5 THEN CreationDate END) AS LastBodyEdit,
+        MAX(CASE WHEN PostHistoryTypeId = 6 THEN CreationDate END) AS LastTagsEdit
+    FROM RecursivePostHistory
+    GROUP BY PostId
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.CommentCount,
+    u.UpVotes,
+    u.DownVotes,
+    u.BadgeCount,
+    e.EditCount,
+    e.FirstEditDate,
+    e.LatestEditDate,
+    e.LastTitleEdit,
+    e.LastBodyEdit,
+    e.LastTagsEdit
+FROM UserActivity u
+LEFT JOIN EditsSummary e ON u.UserId = e.PostId -- join on UserId with PostId to see user's edits
+WHERE e.EditCount IS NOT NULL
+ORDER BY u.UpVotes DESC, u.PostCount DESC;

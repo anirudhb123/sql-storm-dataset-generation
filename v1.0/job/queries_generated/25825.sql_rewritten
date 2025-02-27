@@ -1,0 +1,55 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        r.role AS role_name,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_within_year
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        k.keyword ILIKE '%action%'  
+),
+ActorCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT title_id) AS total_movies
+    FROM 
+        RankedTitles
+    WHERE 
+        rank_within_year <= 5  
+    GROUP BY 
+        actor_name
+),
+TopActors AS (
+    SELECT 
+        actor_name
+    FROM 
+        ActorCounts
+    WHERE 
+        total_movies >= 3  
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.actor_name,
+    rt.role_name,
+    a.total_movies,
+    'Top Actor' AS category
+FROM 
+    RankedTitles rt
+JOIN 
+    TopActors a ON rt.actor_name = a.actor_name
+ORDER BY 
+    rt.production_year DESC, rt.title;

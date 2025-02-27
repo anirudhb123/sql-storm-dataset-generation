@@ -1,0 +1,48 @@
+WITH RECURSIVE FamilyTree AS (
+    SELECT p.id AS person_id, a.name AS full_name, 0 AS level
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT p.id AS person_id, 
+           a.name AS full_name, 
+           ft.level + 1
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN FamilyTree ft ON ci.movie_id = (
+        SELECT DISTINCT movie_id 
+        FROM cast_info ci2 
+        WHERE ci2.person_id = ft.person_id
+    )
+)
+
+SELECT 
+    ft.person_id,
+    ft.full_name,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    SUM(CASE WHEN t.production_year >= 2010 THEN 1 ELSE 0 END) AS movies_since_2010,
+    STRING_AGG(DISTINCT t.title, ', ') AS movie_titles,
+    MAX(t.production_year) AS last_movie_year
+FROM 
+    FamilyTree ft
+JOIN 
+    cast_info ci ON ft.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+WHERE 
+    mc.company_id IS NULL OR mc.company_type_id IN (
+        SELECT ct.id 
+        FROM company_type ct 
+        WHERE ct.kind = 'Production'
+    )
+GROUP BY 
+    ft.person_id, ft.full_name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 3
+ORDER BY 
+    last_movie_year DESC;

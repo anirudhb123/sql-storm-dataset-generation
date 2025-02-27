@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.o_orderkey,
+    ps.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Available'
+    END AS revenue_status,
+    r.r_name AS region_name
+FROM 
+    CustomerOrders c
+JOIN 
+    lineitem l ON c.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    c.order_rank = 1
+    AND l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+GROUP BY 
+    c.c_name, c.o_orderkey, ps.s_name, r.r_name
+HAVING 
+    total_revenue > (SELECT AVG(SUM(l2.l_extendedprice * (1 - l2.l_discount))) 
+                     FROM lineitem l2 
+                     GROUP BY l2.l_orderkey)
+ORDER BY 
+    total_revenue DESC;

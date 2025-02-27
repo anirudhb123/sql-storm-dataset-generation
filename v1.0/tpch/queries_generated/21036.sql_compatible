@@ -1,0 +1,81 @@
+
+WITH RECURSIVE order_dates AS (
+    SELECT o_orderdate AS order_date
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT DATE_ADD(order_date, INTERVAL 1 DAY)
+    FROM order_dates
+    WHERE order_date < (SELECT MAX(o_orderdate) FROM orders)
+),
+part_supplier_info AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+nation_summary AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+avg_order_value AS (
+    SELECT 
+        o_custkey,
+        AVG(o_totalprice) AS avg_order_value
+    FROM orders
+    GROUP BY o_custkey
+)
+SELECT 
+    p.p_name,
+    ps.supplier_count,
+    ps.total_supply_cost,
+    COALESCE(co.order_count, 0) AS order_count,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    ns.total_suppliers,
+    ns.total_acctbal,
+    aov.avg_order_value
+FROM part p
+LEFT JOIN part_supplier_info ps ON p.p_partkey = ps.p_partkey
+LEFT JOIN customer_orders co ON co.c_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    ORDER BY c.c_acctbal DESC 
+    FETCH FIRST 1 ROWS ONLY
+)
+LEFT JOIN nation_summary ns ON ns.n_name = (
+    SELECT n.n_name 
+    FROM nation n 
+    ORDER BY ns.total_suppliers DESC 
+    FETCH FIRST 1 ROWS ONLY
+)
+LEFT JOIN avg_order_value aov ON aov.o_custkey = co.c_custkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2 
+    WHERE p2.p_size IS NOT NULL
+)
+ORDER BY p.p_partkey,
+         CASE 
+            WHEN (p.p_retailprice IS NULL OR ps.total_supply_cost IS NULL) THEN 1 
+            ELSE 0 
+         END,
+         p.p_brand DESC
+HAVING ps.supplier_count > 5 OR (ps.supplier_count = 0 AND ps.total_supply_cost = 0);

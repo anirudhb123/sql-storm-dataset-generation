@@ -1,0 +1,83 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance'
+            WHEN s.s_acctbal > 10000 THEN 'High Balance' 
+            ELSE 'Low Balance'
+        END AS balance_category
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        p.p_mfgr,
+        CASE 
+            WHEN p.p_retailprice > 500 THEN 'Expensive'
+            ELSE 'Affordable'
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 50
+),
+AggregatedSales AS (
+    SELECT 
+        l.l_partkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        l.l_returnflag = 'N' AND
+        l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+FinalOutput AS (
+    SELECT 
+        fp.p_name, 
+        fp.price_category, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        COALESCE(SUM(as.total_sales), 0) AS total_sales,
+        SUM(CASE WHEN rs.rank <= 5 THEN 1 ELSE 0 END) AS top_supplier_flag
+    FROM 
+        FilteredParts fp
+    LEFT JOIN 
+        partsupp ps ON fp.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    LEFT JOIN 
+        AggregatedSales as ON fp.p_partkey = as.l_partkey
+    GROUP BY 
+        fp.p_name, fp.price_category
+)
+SELECT 
+    f.p_name, 
+    f.price_category, 
+    f.supplier_count, 
+    f.total_sales,
+    CASE 
+        WHEN f.total_sales = 0 THEN 'No Sales'
+        WHEN f.top_supplier_flag > 0 THEN 'Has Top Suppliers'
+        ELSE 'Regular'
+    END AS sales_status
+FROM 
+    FinalOutput f
+WHERE 
+    f.supplier_count > 0
+ORDER BY 
+    f.total_sales DESC, 
+    f.p_name ASC
+LIMIT 10 OFFSET (SELECT COUNT(*) FROM FinalOutput) / 2;

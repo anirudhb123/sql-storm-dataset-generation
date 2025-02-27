@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, s.s_name, s.s_acctbal,
+        RANK() OVER(PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, o.o_custkey, o.o_orderdate,
+        DENSE_RANK() OVER(ORDER BY o.o_orderdate DESC) AS rnk_recent
+    FROM orders o
+    WHERE o.o_orderdate >= DATE('1998-10-01') - INTERVAL '1 year'
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COALESCE(MAX(ps.ps_availqty), 0) AS max_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING (MAX(ps.ps_availqty) IS NULL AND p.p_retailprice IS NOT NULL)
+       OR (SUM(ps.ps_supplycost * ps.ps_availqty) > 1000 AND p.p_size BETWEEN 10 AND 20)
+),
+CountLineItems AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(*) AS line_item_count
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_partkey
+    HAVING COUNT(*) > (
+        SELECT COUNT(*) 
+        FROM lineitem 
+        WHERE l_returnflag = 'Y'
+        GROUP BY l_partkey
+        HAVING COUNT(*) < 10) 
+)
+SELECT 
+    r.r_country, 
+    COUNT(DISTINCT po.p_partkey) AS total_parts,
+    SUM(po.max_avail_qty) AS total_available_quantity,
+    MAX(po.p_retailprice) AS highest_price,
+    AVG(COALESCE(li.line_item_count, 0)) AS avg_line_item_count
+FROM (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name AS r_country,
+        fp.p_partkey, 
+        fp.max_avail_qty, 
+        SUM(fp.p_retailprice) AS p_retailprice
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN FilteredParts fp ON n.n_nationkey = fp.p_nationkey
+    LEFT JOIN CountLineItems li ON fp.p_partkey = li.l_partkey
+    GROUP BY n.n_nationkey, n.n_name, fp.p_partkey, fp.max_avail_qty
+) AS po
+JOIN RankedSuppliers s ON po.n_nationkey = s.s_nationkey AND s.rnk = 1
+JOIN RecentOrders o ON s.s_suppkey = o.o_custkey AND o.rnk_recent <= 5
+GROUP BY r.r_country
+HAVING (COUNT(DISTINCT po.p_partkey) > 5 AND AVG(po.total_available_quantity) IS NOT NULL)
+   OR (MAX(po.highest_price) IS NULL AND o.o_orderdate < DATE('1998-10-01') - INTERVAL '30 days');

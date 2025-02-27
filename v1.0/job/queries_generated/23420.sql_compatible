@@ -1,0 +1,100 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+actor_associations AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS recent_movie_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        ak.name IS NOT NULL AND mt.production_year IS NOT NULL
+        AND mt.production_year < 2023
+),
+
+movies_with_info AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ci.note,
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+        NULLIF(SUM(mi.info_type_id), 0) AS info_sum,
+        MAX(mh.level) AS hierarchy_level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, ci.note
+)
+
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    COALESCE(mw.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN mw.info_sum IS NULL THEN 'No info available'
+        ELSE CAST(mw.info_sum AS VARCHAR)
+    END AS info_count,
+    CASE 
+        WHEN mh.hierarchy_level IS NULL THEN 0
+        ELSE mh.hierarchy_level
+    END AS movie_hierarchy_level
+FROM 
+    movies_with_info mw
+LEFT JOIN 
+    movie_hierarchy mh ON mw.movie_id = mh.movie_id
+WHERE 
+    mw.production_year = (
+        SELECT MAX(production_year) 
+        FROM movies_with_info 
+        WHERE title LIKE '%Action%'
+    )
+    OR EXISTS (
+        SELECT 1 
+        FROM actor_associations aa 
+        WHERE aa.movie_title = mw.title 
+        AND aa.recent_movie_rank <= 5
+    )
+ORDER BY 
+    mw.production_year DESC, 
+    mw.title ASC;

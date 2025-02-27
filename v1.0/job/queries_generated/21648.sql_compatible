@@ -1,0 +1,89 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(cast.nr_order) AS avg_order,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = t.id
+    WHERE
+        t.production_year IS NOT NULL
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        actor_count,
+        avg_order
+    FROM
+        RankedMovies
+    WHERE
+        rank <= 5  
+),
+MoviesWithKeywords AS (
+    SELECT
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        tm.actor_count,
+        tm.avg_order,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        TopMovies tm
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = tm.title_id
+    LEFT JOIN
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY
+        tm.title_id, tm.title, tm.production_year, tm.actor_count, tm.avg_order
+),
+FinalOutput AS (
+    SELECT
+        mwk.title_id,
+        mwk.title,
+        mwk.production_year,
+        mwk.actor_count,
+        mwk.avg_order,
+        COALESCE(mwi.info, 'No Info Available') AS additional_info,
+        CASE
+            WHEN mwk.actor_count > 10 THEN 'Star-studded'
+            WHEN mwk.actor_count BETWEEN 5 AND 10 THEN 'Moderate cast'
+            ELSE 'Small cast'
+        END AS cast_evaluation
+    FROM
+        MoviesWithKeywords mwk
+    LEFT JOIN
+        movie_info mwi ON mwi.movie_id = mwk.title_id AND mwi.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+)
+SELECT
+    fo.title,
+    fo.production_year,
+    fo.actor_count,
+    fo.avg_order,
+    fo.additional_info,
+    fo.cast_evaluation,
+    CASE 
+        WHEN fo.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    (SELECT COUNT(*) FROM movie_info_idx WHERE movie_id = fo.title_id) AS info_count,
+    (SELECT MAX(rating) FROM (
+        SELECT DISTINCT movie_id, rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+        ) AS rated_movies WHERE movie_id = fo.title_id) AS max_rating
+FROM
+    FinalOutput fo
+WHERE
+    fo.production_year >= 1980
+ORDER BY
+    fo.production_year DESC, fo.actor_count DESC;

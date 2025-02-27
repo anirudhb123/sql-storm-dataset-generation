@@ -1,0 +1,65 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) as rank,
+        COALESCE(ws.ws_net_paid_inc_ship_tax, 0) - COALESCE(ws.ws_coupon_amt, 0) AS effective_paid
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2)
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+high_value_customers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (ORDER BY cd.total_profit DESC) as total_rank
+    FROM customer_data cd
+    WHERE cd.order_count > 5
+),
+last_month_sales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS last_month_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date = DATEADD(MONTH, -1, GETDATE())
+    GROUP BY ws.ws_bill_customer_sk
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    COALESCE(lms.last_month_profit, 0) AS last_month_profit,
+    SUM(rws.ws_net_profit) AS total_net_profit,
+    COUNT(rws.ws_order_number) AS order_count,
+    CASE 
+        WHEN COALESCE(lms.last_month_profit, 0) >= 1000 THEN 'Gold'
+        WHEN SUM(rws.ws_net_profit) >= 10000 THEN 'Platinum'
+        ELSE 'Regular'
+    END AS customer_status
+FROM high_value_customers hvc
+LEFT JOIN ranked_sales rws ON hvc.c_customer_sk = rws.web_site_sk
+LEFT JOIN last_month_sales lms ON hvc.c_customer_sk = lms.ws_bill_customer_sk
+WHERE hvc.total_rank <= 100
+GROUP BY hvc.c_customer_sk, hvc.c_first_name, hvc.c_last_name, hvc.cd_gender, hvc.cd_marital_status, lms.last_month_profit
+ORDER BY total_net_profit DESC, last_month_profit DESC;

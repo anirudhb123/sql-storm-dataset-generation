@@ -1,0 +1,80 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+AggregatePartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        CASE 
+            WHEN n.n_comment IS NULL THEN 'No comment' 
+            ELSE n.n_comment 
+        END AS adjusted_comment
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_availqty,
+    ps.avg_supplycost,
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS net_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    nd.n_name AS nation_name
+FROM 
+    part p
+LEFT JOIN 
+    AggregatePartSupplies ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    FilteredOrders o ON o.o_orderkey = l.l_orderkey
+JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = l.l_suppkey AND rs.supplier_rank = 1
+JOIN 
+    NationDetails nd ON nd.n_nationkey = rs.s_nationkey
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice IS NOT NULL)
+    AND (p.p_comment LIKE '%good%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    ps.total_availqty, 
+    ps.avg_supplycost, 
+    nd.n_name
+HAVING 
+    COUNT(o.o_orderkey) > 5 
+    AND SUM(COALESCE(l.l_tax, 0)) BETWEEN 100 AND 1000
+ORDER BY 
+    net_sales DESC, 
+    p.p_name;

@@ -1,0 +1,36 @@
+-- Performance benchmarking query for analyzing post engagement metrics
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.FavoriteCount,
+    u.Reputation AS OwnerReputation,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS TotalComments,
+    SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+    SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+    pt.Name AS PostTypeName,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') AS tag_arr ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = tag_arr
+GROUP BY 
+    p.Id, u.Reputation, u.DisplayName, pt.Name
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

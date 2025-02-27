@@ -1,0 +1,56 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COUNT(DISTINCT ki.keyword) AS keyword_count,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_flag,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY at.production_year DESC) AS recent_movie_rank,
+    STRING_AGG(DISTINCT ci.note, ', ') AS notes
+FROM 
+    aka_name ak
+INNER JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+WHERE 
+    at.production_year >= 2000
+    AND ak.name IS NOT NULL
+    AND ak.md5sum IS NOT NULL
+GROUP BY 
+    ak.id, ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 3
+ORDER BY 
+    keyword_count DESC, recent_movie_rank;

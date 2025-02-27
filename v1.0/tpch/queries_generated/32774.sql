@@ -1,0 +1,33 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 1 AS level
+    FROM region
+    WHERE r_name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+           COUNT(p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey
+),
+OrderOverview AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT rh.r_name, ss.total_value, oo.revenue, oo.revenue_rank
+FROM RegionHierarchy rh
+LEFT JOIN SupplierStats ss ON ss.total_value > 0
+FULL OUTER JOIN OrderOverview oo ON oo.revenue_rank <= 10
+WHERE ss.total_value IS NOT NULL OR oo.revenue IS NOT NULL
+ORDER BY rh.r_name, ss.total_value DESC, oo.revenue DESC;

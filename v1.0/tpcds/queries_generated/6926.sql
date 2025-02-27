@@ -1,0 +1,58 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_web_site_sk, 
+        ws.ws_sales_price, 
+        ws.ws_ship_date_sk, 
+        dd.d_date
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+),
+income_ranges AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM income_band ib
+),
+filtered_sales AS (
+    SELECT 
+        cs.customer_id, 
+        cs.first_name, 
+        cs.last_name, 
+        SUM(sd.ws_sales_price) AS total_sales,
+        ir.ib_lower_bound,
+        ir.ib_upper_bound,
+        COUNT(DISTINCT sd.ws_order_number) AS order_count
+    FROM customer_info cs
+    JOIN sales_data sd ON cs.c_customer_id = sd.ws_order_number
+    JOIN income_ranges ir ON cs.hd_income_band_sk = ir.ib_income_band_sk
+    WHERE sd.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY cs.customer_id, cs.first_name, cs.last_name, ir.ib_lower_bound, ir.ib_upper_bound
+)
+SELECT 
+    customer_id, 
+    first_name, 
+    last_name, 
+    total_sales, 
+    order_count,
+    CASE 
+        WHEN total_sales < ib_lower_bound THEN 'Below Income Band'
+        WHEN total_sales BETWEEN ib_lower_bound AND ib_upper_bound THEN 'Within Income Band'
+        ELSE 'Above Income Band'
+    END AS income_band_status
+FROM filtered_sales
+ORDER BY total_sales DESC;

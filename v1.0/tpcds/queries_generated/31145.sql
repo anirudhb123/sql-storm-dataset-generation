@@ -1,0 +1,67 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(ss_ticket_number) AS total_sales
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        s.s_store_sk, 
+        SUM(s.ss_net_profit) AS total_profit,
+        COUNT(s.ss_ticket_number) AS total_sales
+    FROM 
+        store_sales s
+    JOIN 
+        Sales_CTE sc ON s.ss_store_sk = sc.ss_store_sk
+    WHERE 
+        s.ss_sold_date_sk > (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2021)
+    GROUP BY 
+        s.s_store_sk
+),
+Ranked_Sales AS (
+    SELECT 
+        sc.ss_store_sk, 
+        sc.total_profit, 
+        sc.total_sales,
+        RANK() OVER (ORDER BY sc.total_profit DESC) AS sales_rank
+    FROM 
+        Sales_CTE sc
+)
+SELECT 
+    r.ss_store_sk, 
+    r.total_profit, 
+    r.total_sales,
+    CA.ca_city,
+    CA.ca_state,
+    CD.cd_gender,
+    (
+        SELECT COUNT(*) 
+        FROM store_returns sr 
+        WHERE sr.sr_store_sk = r.ss_store_sk AND sr_return_qty > 0
+    ) AS total_returns,
+    (
+        SELECT AVG(ws_net_paid) 
+        FROM web_sales ws 
+        WHERE ws.ws_ship_date_sk = r.ss_store_sk
+    ) AS avg_web_sales
+FROM 
+    Ranked_Sales r
+LEFT JOIN 
+    store s ON r.ss_store_sk = s.s_store_sk
+LEFT JOIN 
+    customer_address CA ON s.s_store_sk = CA.ca_address_sk
+LEFT JOIN 
+    customer_demographics CD ON s.s_store_sk = CD.cd_demo_sk
+WHERE 
+    r.sales_rank <= 10 
+    AND (CA.ca_state IS NOT NULL OR CA.ca_city IS NOT NULL)
+ORDER BY 
+    r.total_profit DESC;

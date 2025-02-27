@@ -1,0 +1,75 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AverageViews,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        COALESCE(bs.BadgeCount, 0) AS TotalBadges,
+        COALESCE(rp.PostCount, 0) AS RecentPostCount,
+        COALESCE(rp.TotalScore, 0) AS RecentTotalScore,
+        COALESCE(rp.AverageViews, 0) AS RecentAverageViews,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC, COALESCE(rp.TotalScore, 0) DESC, u.LastAccessDate DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeStats bs ON u.Id = bs.UserId
+    LEFT JOIN 
+        RecentPosts rp ON u.Id = rp.OwnerUserId
+)
+SELECT 
+    u.Id,
+    u.DisplayName,
+    u.Reputation,
+    u.LastAccessDate,
+    u.TotalBadges,
+    u.RecentPostCount,
+    u.RecentTotalScore,
+    u.RecentAverageViews,
+    CASE 
+        WHEN u.Rank <= 10 THEN 'Top User'
+        ELSE 'Regular User' 
+    END AS UserType,
+    (SELECT 
+        STRING_AGG(pt.Name, ', ') 
+     FROM 
+        PostTypes pt 
+     JOIN 
+        Posts p ON p.PostTypeId = pt.Id 
+     WHERE 
+        p.OwnerUserId = u.Id 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year') AS PostTypesLastYear
+FROM 
+    TopUsers u
+WHERE 
+    u.Reputation IS NOT NULL 
+ORDER BY 
+    u.Rank, u.Reputation DESC
+LIMIT 50;

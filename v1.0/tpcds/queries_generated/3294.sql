@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(wr_order_number) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesByCustomer AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(rs.ws_item_sk, 'N/A') AS best_selling_item,
+    COALESCE(rs.ws_order_number, 0) AS best_selling_order,
+    sbc.total_profit,
+    cr.total_return_amt,
+    cr.total_returns
+FROM 
+    customer c
+LEFT JOIN RankedSales rs ON c.c_customer_sk = rs.ws_item_sk
+LEFT JOIN SalesByCustomer sbc ON c.c_customer_sk = sbc.ws_bill_customer_sk
+LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+WHERE 
+    c.c_birth_year IS NOT NULL
+    AND c.c_current_addr_sk IS NOT NULL
+ORDER BY 
+    total_profit DESC,
+    total_return_amt ASC
+LIMIT 100;

@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+), OrderLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(*) AS num_items,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    JOIN 
+        RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    GROUP BY 
+        l.l_orderkey
+), SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(oss.total_supply_cost, 0) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierSummary oss ON p.p_partkey = oss.ps_partkey
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.p_retailprice,
+    ps.total_supply_cost,
+    ps.num_suppliers,
+    CASE 
+        WHEN ps.total_supply_cost > 1000 THEN 'High' 
+        WHEN ps.total_supply_cost IS NULL THEN 'Unknown'
+        ELSE 'Low' 
+    END AS supply_cost_category,
+    r.total_sales,
+    r.num_items,
+    r.avg_quantity
+FROM 
+    PartStats ps
+LEFT JOIN 
+    OrderLineItems r ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = r.l_orderkey)
+WHERE 
+    ps.num_suppliers > 0
+ORDER BY 
+    ps.num_suppliers DESC, ps.total_supply_cost DESC
+LIMIT 100;

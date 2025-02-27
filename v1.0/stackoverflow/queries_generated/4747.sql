@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        pViewCount IS NOT NULL
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(b.Class, 0) AS BadgeClass, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, b.Class
+), ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        h.UserDisplayName,
+        c.CreationDate
+    FROM 
+        Posts p
+    JOIN PostHistory h ON p.Id = h.PostId
+    JOIN CloseReasonTypes c ON h.Comment::int = c.Id
+    WHERE 
+        h.PostHistoryTypeId = 10
+)
+SELECT 
+    up.DisplayName AS UserDisplayName,
+    up.Reputation AS UserReputation,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore,
+    rp.ViewCount AS TopPostViewCount,
+    cp.ClosedPostId,
+    cp.UserDisplayName AS CloserUser,
+    cp.CreationDate AS CloseDate,
+    CASE 
+        WHEN up.BadgeClass = 1 THEN 'Gold'
+        WHEN up.BadgeClass = 2 THEN 'Silver'
+        WHEN up.BadgeClass = 3 THEN 'Bronze'
+        ELSE 'None'
+    END AS BadgeType
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.PostId = up.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.ClosedPostId
+WHERE 
+    up.Reputation > 1000 AND 
+    rp.Rank = 1
+ORDER BY 
+    up.Reputation DESC, 
+    rp.ViewCount DESC;

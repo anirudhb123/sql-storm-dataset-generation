@@ -1,0 +1,64 @@
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    GROUP BY c.c_custkey, c.c_name
+),
+FrequentSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 1000
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2
+    )
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_cost,
+        COUNT(l.l_linenumber) AS line_item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    cos.total_spent,
+    os.total_line_cost,
+    COALESCE(ss.total_available_quantity, 0) AS available_qty,
+    hs.s_name AS high_value_supplier
+FROM CustomerOrderSummary cos
+JOIN OrderDetails os ON cos.c_custkey = (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderkey = os.l_orderkey
+)
+LEFT JOIN FrequentSuppliers ss ON ss.ps_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_orderkey = os.l_orderkey
+)
+LEFT JOIN HighValueSuppliers hs ON hs.s_suppkey IN (
+    SELECT l.l_suppkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = os.l_orderkey
+)
+WHERE cos.total_spent > 5000
+ORDER BY cos.total_spent DESC, os.line_item_count DESC;

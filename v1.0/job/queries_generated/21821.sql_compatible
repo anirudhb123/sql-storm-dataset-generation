@@ -1,0 +1,83 @@
+
+WITH RECURSIVE CastHierarchy AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        1 AS generation
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order = 1
+        
+    UNION ALL
+    
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        ch.generation + 1
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        CastHierarchy ch ON ci.movie_id = ch.movie_id AND ci.nr_order = ch.nr_order + 1
+),
+AggregateCast AS (
+    SELECT 
+        ch.movie_id,
+        COUNT(DISTINCT ch.person_id) AS total_cast,
+        MAX(ch.generation) AS max_generation
+    FROM 
+        CastHierarchy ch
+    GROUP BY 
+        ch.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(mk.keyword, 'N/A') AS keyword,
+        ac.total_cast,
+        ac.max_generation,
+        CASE 
+            WHEN ac.total_cast > 10 THEN 'Large Cast'
+            WHEN ac.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        aka_title at 
+    LEFT JOIN 
+        AggregateCast ac ON at.id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.cast_size,
+        ROW_NUMBER() OVER (PARTITION BY md.cast_size ORDER BY md.production_year DESC) AS rn
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year IS NOT NULL 
+        AND md.production_year > 2000
+)
+SELECT 
+    rm.title,
+    COALESCE(rm.keyword, 'No Keywords') AS keyword,
+    rm.production_year,
+    rm.cast_size,
+    CASE 
+        WHEN rm.rn IS NULL THEN 'No Rank'
+        ELSE 'Rank ' || CAST(rm.rn AS VARCHAR)
+    END AS ranking
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.cast_size, rm.production_year DESC, rm.title;

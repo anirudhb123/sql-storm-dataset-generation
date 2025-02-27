@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        MAX(i.info) AS director
+    FROM 
+        movie_keyword k
+    JOIN 
+        movie_info m ON m.movie_id = k.movie_id
+    JOIN 
+        movie_info i ON i.movie_id = m.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+    GROUP BY 
+        m.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        mi.keywords,
+        mi.director
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieInfo mi ON rm.movie_id = mi.movie_id
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    fm.title,
+    COALESCE(fm.keywords, 'No keywords') AS keywords,
+    COALESCE(fm.director, 'Unknown Director') AS director,
+    CASE 
+        WHEN fm.production_year >= 2000 THEN 'Modern Era'
+        ELSE 'Classic Era'
+    END AS era_category
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, fm.title ASC;

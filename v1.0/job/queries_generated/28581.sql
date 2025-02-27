@@ -1,0 +1,74 @@
+WITH ranked_movies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY CASE WHEN k.keyword IS NOT NULL THEN 0 ELSE 1 END) AS keyword_rank
+    FROM
+        title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        m.production_year BETWEEN 2000 AND 2023
+),
+cast_summary AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id
+),
+cast_roles AS (
+    SELECT
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.id) AS role_count
+    FROM
+        cast_info ci
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id, rt.role
+    HAVING
+        COUNT(ci.id) > 1
+),
+movie_details AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cs.total_cast,
+        cs.cast_names,
+        r.role,
+        r.role_count
+    FROM
+        ranked_movies rm
+    LEFT JOIN
+        cast_summary cs ON rm.movie_id = cs.movie_id
+    LEFT JOIN
+        cast_roles r ON rm.movie_id = r.movie_id
+    WHERE
+        rm.keyword_rank = 1
+)
+SELECT
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.total_cast,
+    md.cast_names,
+    md.role,
+    md.role_count
+FROM
+    movie_details md
+ORDER BY
+    md.production_year DESC, md.total_cast DESC;
+
+This SQL query first creates several Common Table Expressions (CTEs) to gather information about movies produced between 2000 and 2023. It ranks the movies based on associated keywords, summarizes the cast for each movie, and counts the occurrences of distinct roles within the cast. Finally, it selects relevant movie details and orders them by production year and the total cast size.

@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 1 AS level
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name = 'FRANCE'
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, c.level + 1
+    FROM supplier s
+    JOIN SupplierCTE c ON s.s_suppkey = c.s_suppkey
+    WHERE c.level < 5
+),
+OrderSummary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(COALESCE(ss.total_spent, 0)) AS total_spent,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT ps.p_partkey) AS unique_parts_supplied
+FROM nation n
+LEFT JOIN SupplierCTE s ON n.n_nationkey = s.n_nationkey
+LEFT JOIN OrderSummary ss ON ss.c_custkey IN (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1' YEAR
+)
+LEFT JOIN PartSupplier ps ON ps.p_partkey = (
+    SELECT ps1.ps_partkey 
+    FROM partsupp ps1 
+    WHERE ps1.ps_availqty > (
+        SELECT AVG(ps2.ps_availqty) 
+        FROM partsupp ps2
+        WHERE ps2.ps_supplycost < 100
+    )
+    LIMIT 1
+)
+GROUP BY n.n_name
+ORDER BY total_spent DESC, avg_supply_cost ASC;

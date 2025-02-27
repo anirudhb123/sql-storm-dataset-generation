@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        u.DisplayName AS Owner,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    INNER JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName, t.TagName
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, Owner, CreationDate, LastActivityDate, CommentCount, AnswerCount, UpVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.Owner,
+    tp.CreationDate,
+    tp.LastActivityDate,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.UpVotes,
+    string_agg(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+GROUP BY 
+    tp.PostId, tp.Title, tp.Owner, tp.CreationDate, tp.LastActivityDate, tp.CommentCount, tp.AnswerCount, tp.UpVotes
+ORDER BY 
+    tp.UpVotes DESC, tp.LastActivityDate DESC;

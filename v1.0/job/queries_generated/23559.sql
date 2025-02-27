@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+      
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ah.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT ck.keyword) AS keyword_count,
+    COUNT(DISTINCT co.name) AS company_count,
+    AVG(
+        CASE 
+            WHEN pi.info IS NULL THEN NULL 
+            ELSE LENGTH(pi.info) 
+        END
+    ) AS avg_info_length,
+    STRING_AGG(DISTINCT pi.info || ': ' || pi.note, '; ' ORDER BY pi.note) AS information_notes,
+    RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(*) DESC) AS rank_within_year
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ah ON ci.person_id = ah.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN 
+    keyword ck ON mk.keyword_id = ck.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mt.id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ah.person_id AND pi.info IS NOT NULL
+WHERE 
+    mt.production_year IS NOT NULL
+    AND (ah.name IS NOT NULL OR ah.md5sum IS NOT NULL)
+    AND (ci.nr_order IS NULL OR ci.nr_order >= 1)
+GROUP BY 
+    ah.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM complete_cast cc 
+        WHERE cc.movie_id = mt.id AND cc.status_id IS NULL
+    )
+ORDER BY 
+    rank_within_year, movie_title;
+
+This SQL query incorporates a recursive CTE (`MovieHierarchy`) to manage hierarchical relationships between movies through links, aggregates keyword counts, counts companies associated with each movie, calculates average information length with a handling for `NULL` values, and dynamically creates a concatenated string of information notes. The query also uses the `HAVING` clause to filter in a complicated condition involving both keyword existence and the exclusion of certain `complete_cast` records, while ensuring that various predicates, including NULL logic, are well-formed within the framework of the provided schema. The ranking is done using window functions based on production year to give a thorough benchmarking capability within the dataset.

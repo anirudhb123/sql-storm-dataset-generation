@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mcm.company_id,
+        cn.name AS company_name
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mcm ON mt.id = mcm.movie_id
+    LEFT JOIN 
+        company_name cn ON mcm.company_id = cn.id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mcm.company_id,
+        cn.name AS company_name
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_companies mcm ON mt.id = mcm.movie_id
+    LEFT JOIN 
+        company_name cn ON mcm.company_id = cn.id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+cast_roles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.company_name,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.company_name
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.company_name,
+    COALESCE(CAST(cr.role AS TEXT), 'Unknown') AS role,
+    COALESCE(cr.role_count, 0) AS role_count,
+    mh.movie_id
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_roles cr ON rm.movie_id = cr.movie_id
+LEFT JOIN 
+    movie_info mi ON rm.movie_id = mi.movie_id
+WHERE 
+    (mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') AND mi.info IS NOT NULL) 
+    OR (mi.info_type_id IS NULL AND rm.production_year = 2020)
+ORDER BY 
+    rm.production_year DESC, rm.rank;

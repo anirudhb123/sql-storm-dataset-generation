@@ -1,0 +1,32 @@
+WITH PopularPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate,
+           COUNT(c.Id) AS CommentCount,
+           COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+           COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY p.Id
+),
+PostBadges AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+CommunityEngagement AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           pp.CommentCount, 
+           pp.UpvoteCount, 
+           pp.DownvoteCount,
+           COALESCE(pb.BadgeCount, 0) AS BadgeCount
+    FROM Users u
+    LEFT JOIN PopularPosts pp ON u.Id = pp.OwnerUserId
+    LEFT JOIN PostBadges pb ON u.Id = pb.UserId
+)
+SELECT ce.UserId, ce.DisplayName, ce.CommentCount, ce.UpvoteCount, ce.BadgeCount
+FROM CommunityEngagement ce
+WHERE ce.BadgeCount > 1
+ORDER BY ce.UpvoteCount DESC, ce.CommentCount DESC
+LIMIT 10;

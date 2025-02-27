@@ -1,0 +1,56 @@
+-- Performance benchmarking SQL query
+
+WITH PostCounts AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Posts
+    GROUP BY 
+        PostTypeId
+),
+UserStats AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalPosts,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        AVG(Reputation) AS AvgReputation
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        UserId
+),
+TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(*) AS TagUsageCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::integer[])
+    GROUP BY 
+        Tags.TagName
+)
+
+SELECT 
+    p.PostTypeId,
+    p.TotalPosts,
+    p.AcceptedAnswers,
+    u.TotalPosts AS TotalUserPosts,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.AvgReputation,
+    t.TagName,
+    t.TagUsageCount
+FROM 
+    PostCounts p
+LEFT JOIN 
+    UserStats u ON u.TotalPosts > 0
+LEFT JOIN 
+    TagStats t ON t.TagUsageCount > 0
+ORDER BY 
+    p.TotalPosts DESC, u.AvgReputation DESC, t.TagUsageCount DESC;

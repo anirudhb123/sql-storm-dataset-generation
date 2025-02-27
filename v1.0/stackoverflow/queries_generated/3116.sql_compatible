@@ -1,0 +1,50 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) DESC) AS VoteRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        CommentCount
+    FROM UserVoteStats
+    WHERE VoteRank <= 10
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.Comment AS CloseReason
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 
+)
+SELECT 
+    U.DisplayName,
+    U.UpVotes,
+    U.DownVotes,
+    U.PostCount,
+    U.CommentCount,
+    COALESCE(CP.ClosedDate, 'No Closure') AS LastClosedDate,
+    COALESCE(CP.CloseReason, 'N/A') AS ClosureReason
+FROM TopUsers U
+LEFT JOIN ClosedPosts CP ON U.UserId = CP.PostId 
+ORDER BY U.UpVotes - U.DownVotes DESC,
+         U.PostCount DESC
+FETCH FIRST 15 ROWS ONLY;

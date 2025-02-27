@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        COALESCE(mt.season_nr, 1) AS season,
+        COALESCE(mt.episode_nr, 1) AS episode,
+        mt.note,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        COALESCE(m.season_nr, 1) AS season,
+        COALESCE(m.episode_nr, 1) AS episode,
+        m.note,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        mh.season,
+        mh.episode,
+        mh.note,
+        DENSE_RANK() OVER (PARTITION BY mh.season, mh.episode ORDER BY mh.production_year DESC) AS production_rank,
+        COUNT(*) OVER (PARTITION BY mh.season, mh.episode) AS episode_count
+    FROM 
+        movie_hierarchy mh
+),
+selected_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.note,
+        rm.season,
+        rm.episode,
+        CASE 
+            WHEN rm.production_rank = 1 THEN 'Latest'
+            WHEN rm.production_rank = episode_count THEN 'Oldest'
+            ELSE 'Intermediate'
+        END AS production_status
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.production_year >= (SELECT AVG(production_year) FROM ranked_movies)
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.production_status,
+    ak.name AS actor_name,
+    co.name AS company_name,
+    COALESCE(mi.info, 'No additional info') AS movie_info,
+    CASE 
+        WHEN mi.info IS NULL THEN 'No Info'
+        WHEN LENGTH(mi.info) < 30 THEN 'Brief Info'
+        ELSE 'Detailed Info'
+    END AS info_description
+FROM 
+    selected_movies sm
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = sm.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = cc.subject_id 
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = sm.movie_id
+LEFT JOIN 
+    company_name co ON co.id = mc.company_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = sm.movie_id AND mi.info_type_id = (SELECT MIN(id) FROM info_type) -- Selecting first info type as an example
+WHERE 
+    sm.production_status IN ('Latest', 'Intermediate')
+ORDER BY 
+    sm.production_year DESC, ak.name;

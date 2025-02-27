@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+),
+MaxSales AS (
+    SELECT 
+        ws_item_sk AS item_sk,
+        MAX(ws_sales_price) AS max_price
+    FROM RankedSales
+    WHERE price_rank = 1
+    GROUP BY ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category
+    FROM item i
+)
+SELECT 
+    id.i_item_desc,
+    id.i_brand,
+    id.i_category,
+    COALESCE(ms.max_price, 0) AS highest_price,
+    CASE 
+        WHEN COALESCE(ms.max_price, 0) > 100 THEN 'Expensive'
+        WHEN COALESCE(ms.max_price, 0) <= 100 AND COALESCE(ms.max_price, 0) > 50 THEN 'Moderate'
+        ELSE 'Cheap' 
+    END AS price_category,
+    COUNT(DISTINCT rs.ws_order_number) AS order_count,
+    SUM(rs.ws_quantity) AS total_quantity_sold
+FROM ItemDetails id
+LEFT JOIN MaxSales ms ON id.i_item_sk = ms.item_sk
+LEFT JOIN RankedSales rs ON id.i_item_sk = rs.ws_item_sk
+GROUP BY 
+    id.i_item_desc,
+    id.i_brand,
+    id.i_category,
+    ms.max_price
+HAVING 
+    SUM(rs.ws_quantity) IS NOT NULL
+    AND MAX(rs.ws_sales_price) <= (
+        SELECT AVG(ws_sales_price)
+        FROM web_sales
+        WHERE ws_sales_price > 0
+    )
+ORDER BY 
+    price_category DESC,
+    highest_price DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'No Sales Item' AS i_item_desc,
+    'Unknown' AS i_brand,
+    'Unknown' AS i_category,
+    0 AS highest_price,
+    'Unsold' AS price_category,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    SUM(rs.ws_quantity) AS total_quantity_sold
+FROM web_sales ws
+RIGHT JOIN item i ON ws.ws_item_sk = i.i_item_sk
+WHERE ws.ws_item_sk IS NULL
+GROUP BY i.i_item_sk, i.i_item_desc, i.i_brand, i.i_category
+HAVING COUNT(i.i_item_sk) > 0
+ORDER BY order_count DESC
+LIMIT 5;

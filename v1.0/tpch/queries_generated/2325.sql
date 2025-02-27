@@ -1,0 +1,34 @@
+WITH customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_parts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+popular_products AS (
+    SELECT p.p_partkey, p.p_name, COUNT(*) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY order_count DESC
+    LIMIT 10
+)
+SELECT 
+    co.c_name,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        ELSE TO_CHAR(co.total_spent, 'FM$9,999,999.00')
+    END AS total_spent,
+    sp.s_name AS supplier_name,
+    pp.p_name AS popular_product,
+    pp.order_count
+FROM customer_orders co
+FULL OUTER JOIN supplier_parts sp ON sp.total_supplycost > 10000
+FULL OUTER JOIN popular_products pp ON pp.order_count > 5
+WHERE pp.p_partkey IS NOT NULL OR co.c_custkey IS NOT NULL
+ORDER BY co.total_spent DESC NULLS LAST, sp.total_supplycost DESC;

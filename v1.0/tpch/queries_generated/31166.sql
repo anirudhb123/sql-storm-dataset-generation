@@ -1,0 +1,45 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    JOIN top_suppliers ts ON s.s_acctbal > ts.s_acctbal AND s.s_suppkey <> ts.s_suppkey
+),
+aggregated_orders AS (
+    SELECT o_o_custkey, SUM(o_totalprice) AS total_revenue
+    FROM orders
+    WHERE o_orderstatus IN ('O', 'F')
+    GROUP BY o_o_custkey
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(a.total_revenue, 0) AS total_revenue, 
+           COUNT(o.o_orderkey) AS order_count, 
+           RANK() OVER (ORDER BY COALESCE(a.total_revenue, 0) DESC) AS revenue_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN aggregated_orders a ON c.c_custkey = a.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+high_value_parts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS part_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+)
+SELECT c.c_name, c.total_revenue, COALESCE(hv.part_value, 0) AS part_value,
+       CASE 
+           WHEN c.total_revenue > 200000 THEN 'High Value'
+           WHEN c.total_revenue BETWEEN 100000 AND 200000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_segment
+FROM customer_order_summary c
+LEFT JOIN high_value_parts hv ON hv.p_partkey IN 
+    (SELECT ps.ps_partkey 
+     FROM partsupp ps 
+     JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+     WHERE s.s_acctbal > 10000)
+WHERE c.revenue_rank <= 10
+ORDER BY c.total_revenue DESC, part_value DESC;

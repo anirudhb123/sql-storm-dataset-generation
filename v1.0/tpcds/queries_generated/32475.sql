@@ -1,0 +1,35 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ss_item_sk, SUM(ss_quantity) AS total_quantity, 
+           SUM(ss_net_paid_inc_tax) AS total_sales 
+    FROM store_sales 
+    WHERE ss_sold_date_sk BETWEEN 2458931 AND 2458991 
+    GROUP BY ss_item_sk
+    UNION ALL
+    SELECT ss_item_sk, SUM(ss_quantity) + cte.total_quantity,
+           SUM(ss_net_paid_inc_tax) + cte.total_sales 
+    FROM store_sales AS ss
+    JOIN sales_cte AS cte ON ss.ss_item_sk = cte.ss_item_sk
+    WHERE ss_sold_date_sk > 2458991
+)
+SELECT c.c_customer_id, 
+       da.d_date AS order_date, 
+       SUM(ss.s_sales_price) AS total_sales,
+       COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+       RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ss.s_sales_price) DESC) AS sales_rank,
+       COALESCE(SUM(sr.sr_return_amt), 0) AS total_returns,
+       SUM(ss.s_sales_price) - COALESCE(SUM(sr.sr_return_amt), 0) AS net_sales,
+       CASE 
+           WHEN SUM(ss.s_sales_price) - COALESCE(SUM(sr.sr_return_amt), 0) < 0 
+           THEN 'Negative Sales'
+           ELSE 'Positive Sales'
+       END AS sales_status
+FROM customer c
+JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN store_returns sr ON ss.ss_ticket_number = sr.sr_ticket_number
+JOIN date_dim da ON ss.ss_sold_date_sk = da.d_date_sk
+GROUP BY c.c_customer_id, da.d_date
+HAVING SUM(ss.s_sales_price) > 1000 
+   AND COUNT(ss.ss_ticket_number) > 5
+ORDER BY total_sales DESC
+LIMIT 10;

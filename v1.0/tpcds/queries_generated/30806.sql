@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING total_sales > 10000
+
+    UNION ALL
+
+    SELECT sh.c_customer_sk,
+           sh.c_first_name,
+           sh.c_last_name,
+           sh.total_sales * 1.1
+    FROM sales_hierarchy sh
+    JOIN customer_demographics cd ON sh.c_customer_sk = cd.cd_demo_sk
+    WHERE cd.cd_dep_count IS NOT NULL AND cd.cd_dep_count > 1
+),
+
+ranked_sales AS (
+    SELECT sh.c_customer_sk,
+           sh.c_first_name,
+           sh.c_last_name,
+           sh.total_sales,
+           RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM sales_hierarchy sh
+),
+
+top_customers AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           COALESCE(rs.total_sales, 0) AS total_sales
+    FROM customer c
+    LEFT JOIN ranked_sales rs ON c.c_customer_sk = rs.c_customer_sk
+    WHERE COALESCE(rs.total_sales, 0) > 0
+)
+
+SELECT tc.c_customer_sk,
+       tc.c_first_name,
+       tc.c_last_name,
+       tc.total_sales,
+       COALESCE(SUM(ds.d_ext_discount_amt), 0) AS total_discounts,
+       COUNT(ws.ws_order_number) AS total_orders
+FROM top_customers tc
+LEFT JOIN web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN (
+    SELECT ws.ws_order_number,
+           SUM(ws.ws_ext_discount_amt) AS d_ext_discount_amt
+    FROM web_sales ws
+    GROUP BY ws.ws_order_number
+) ds ON ws.ws_order_number = ds.ws_order_number
+GROUP BY tc.c_customer_sk, tc.c_first_name, tc.c_last_name
+HAVING total_sales > 20000 OR total_discounts > 500
+ORDER BY total_sales DESC, total_orders DESC
+LIMIT 10;

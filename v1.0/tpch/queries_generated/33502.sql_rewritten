@@ -1,0 +1,50 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+    WHERE o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+),
+CustomerTotalSpend AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+LineItemStats AS (
+    SELECT l_orderkey, AVG(l_extendedprice) AS avg_price, 
+           COUNT(*) AS total_items, 
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+CustomerOrderInfo AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(ros.total_spend, 0) AS total_spend_last_year,
+           COALESCE(lis.total_items, 0) AS total_order_items,
+           COALESCE(lis.total_revenue, 0) AS total_revenue
+    FROM customer c
+    LEFT JOIN CustomerTotalSpend ros ON c.c_custkey = ros.c_custkey
+    LEFT JOIN LineItemStats lis ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = lis.l_orderkey LIMIT 1)
+)
+SELECT ci.c_custkey, ci.c_name, 
+       ci.total_spend_last_year, 
+       ci.total_order_items,
+       ci.total_revenue,
+       ps.ps_supplycost, 
+       ps.ps_availqty,
+       ps.ps_comment,
+       COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_supplied
+FROM CustomerOrderInfo ci
+JOIN partsupp ps ON ps.ps_suppkey IN (SELECT DISTINCT s.s_suppkey 
+                                       FROM HighValueSuppliers s)
+LEFT OUTER JOIN RecentOrders ro ON ci.c_custkey = ro.o_custkey
+WHERE ci.total_spend_last_year > 10000
+GROUP BY ci.c_custkey, ci.c_name, ci.total_spend_last_year, ci.total_order_items, ci.total_revenue, ps.ps_supplycost, ps.ps_availqty, ps.ps_comment
+HAVING total_revenue / NULLIF(total_order_items, 0) > 100
+ORDER BY total_revenue DESC
+LIMIT 50;

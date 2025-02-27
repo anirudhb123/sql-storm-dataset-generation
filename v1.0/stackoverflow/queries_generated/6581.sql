@@ -1,0 +1,79 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS TotalPosts, 
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score <= 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(V.VoteCount, 0) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        ViewCount, 
+        VoteCount,
+        DENSE_RANK() OVER (ORDER BY ViewCount DESC) AS Rank
+    FROM 
+        PostEngagement
+)
+SELECT 
+    U.UserId, 
+    U.DisplayName, 
+    U.TotalPosts, 
+    U.PositivePosts, 
+    U.NegativePosts, 
+    U.TotalComments, 
+    U.GoldBadges, 
+    U.SilverBadges, 
+    U.BronzeBadges,
+    TP.Title,
+    TP.Score,
+    TP.ViewCount,
+    TP.VoteCount
+FROM 
+    UserStats U
+JOIN 
+    TopPosts TP ON U.TotalPosts > 0
+WHERE 
+    TP.Rank <= 10
+ORDER BY 
+    U.TotalPosts DESC, 
+    TP.VoteCount DESC;

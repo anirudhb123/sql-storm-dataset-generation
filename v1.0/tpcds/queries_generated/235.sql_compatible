@@ -1,0 +1,56 @@
+
+WITH cumulative_sales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year BETWEEN 2020 AND 2023
+    GROUP BY ws.web_site_sk
+),
+customer_statistics AS (
+    SELECT
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN c.c_customer_id END) AS female_customers,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN c.c_customer_id END) AS male_customers,
+        AVG(cd.cd_purchase_estimate) AS avg_spending
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca.ca_state
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.ws_item_sk
+)
+SELECT
+    cs.ca_state,
+    cs.customer_count,
+    cs.female_customers,
+    cs.male_customers,
+    cs.avg_spending,
+    ss.total_quantity,
+    ss.average_profit,
+    COALESCE(cs.customer_count, 0) AS customer_count_fallback
+FROM customer_statistics cs
+LEFT JOIN sales_summary ss ON ss.total_quantity > 100
+UNION ALL
+SELECT
+    '-' AS ca_state,
+    SUM(customer_count) AS customer_count,
+    SUM(female_customers) AS female_customers,
+    SUM(male_customers) AS male_customers,
+    AVG(avg_spending) AS avg_spending,
+    NULL AS total_quantity,
+    NULL AS average_profit
+FROM customer_statistics
+WHERE SUM(customer_count) > 1000
+GROUP BY 1
+ORDER BY ca_state;

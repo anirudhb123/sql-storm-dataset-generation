@@ -1,0 +1,58 @@
+-- Benchmarking query to measure performance on Posts and associated data
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Focusing on posts created in the last year
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(DISTINCT ph.UserId) AS UniqueEditors
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    phs.EditCount,
+    phs.UniqueEditors
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryStats phs ON ps.PostId = phs.PostId
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC
+LIMIT 100;  -- Limit results for performance benchmarking

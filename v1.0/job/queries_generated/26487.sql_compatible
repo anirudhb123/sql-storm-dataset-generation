@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT c.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS alternate_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title mt ON ak.movie_id = mt.id
+    LEFT JOIN 
+        cast_info c ON mt.id = c.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+), 
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        alternate_names,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.production_year,
+    pm.cast_count,
+    pm.alternate_names,
+    grp.original_title,
+    grp.rating,
+    grp.release_date
+FROM 
+    PopularMovies pm
+JOIN 
+    (SELECT 
+        m.id AS movie_id,
+        m.title AS original_title,
+        m.production_year,
+        info.info AS rating,
+        info.note AS release_date
+     FROM 
+        movie_info info
+     JOIN 
+        title m ON info.movie_id = m.id
+     WHERE 
+        info.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+   ) grp ON pm.movie_id = grp.movie_id
+WHERE 
+    pm.rank <= 10
+ORDER BY 
+    pm.rank;

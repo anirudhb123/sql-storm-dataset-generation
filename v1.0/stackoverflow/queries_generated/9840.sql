@@ -1,0 +1,57 @@
+WITH ranked_posts AS (
+    SELECT 
+        p.Id AS post_id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS comment_count,
+        COUNT(DISTINCT v.UserId) AS vote_count,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  -- Upvote and Downvote
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+user_statistics AS (
+    SELECT 
+        u.Id AS user_id,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS total_posts,
+        SUM(p.ViewCount) AS total_views,
+        SUM(p.Score) AS total_score,
+        u.Reputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.total_posts,
+    up.total_views,
+    up.total_score,
+    rp.post_id,
+    rp.Title AS post_title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.comment_count,
+    rp.vote_count
+FROM 
+    user_statistics up
+JOIN 
+    ranked_posts rp ON up.user_id = rp.OwnerUserId
+WHERE 
+    rp.rn <= 5  -- Top 5 posts per user
+ORDER BY 
+    up.Reputation DESC, 
+    rp.Score DESC;

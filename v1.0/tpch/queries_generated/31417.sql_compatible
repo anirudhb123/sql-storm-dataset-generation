@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, NULL AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 3000 AND s.s_suppkey <> sh.s_suppkey
+),
+
+TotalOrders AS (
+    SELECT o.custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.custkey
+),
+
+PartsInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice BETWEEN 50.00 AND 500.00
+)
+
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', ps.ps_availqty, ' available)')) AS part_details,
+    sh.s_name AS supplier_name
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN PartsInfo p ON l.l_partkey = p.p_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier sh ON sh.s_suppkey IN (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_partkey = l.l_partkey)
+WHERE o.o_orderstatus = 'O'
+GROUP BY c.c_custkey, c.c_name, sh.s_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000.00
+ORDER BY total_spent DESC;

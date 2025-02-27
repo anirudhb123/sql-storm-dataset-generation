@@ -1,0 +1,61 @@
+
+WITH CustomerReturnData AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        SUM(COALESCE(wr_return_quantity, 0) + COALESCE(cr_return_quantity, 0)) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS web_return_orders,
+        COUNT(DISTINCT cr_order_number) AS catalog_return_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_id, ca.ca_city
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws_order_number) AS web_sales_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+ReturnVsSales AS (
+    SELECT 
+        crd.c_customer_id,
+        crd.ca_city,
+        crd.total_returns,
+        sd.total_web_sales,
+        sd.web_sales_orders,
+        (CASE 
+            WHEN sd.total_web_sales IS NULL THEN 0 
+            ELSE ROUND(crd.total_returns * 100.0 / sd.total_web_sales, 2) 
+         END) AS return_rate_percentage
+    FROM 
+        CustomerReturnData crd
+    LEFT JOIN 
+        SalesData sd ON crd.c_customer_id = sd.customer_sk
+)
+
+SELECT 
+    rvs.ca_city,
+    COUNT(rvs.c_customer_id) AS total_customers,
+    AVG(rvs.return_rate_percentage) AS avg_return_rate,
+    MAX(rvs.total_returns) AS max_customer_returns,
+    MIN(rvs.total_web_sales) AS min_web_sales
+FROM 
+    ReturnVsSales rvs
+WHERE 
+    rvs.return_rate_percentage > 5
+GROUP BY 
+    rvs.ca_city
+ORDER BY 
+    avg_return_rate DESC
+LIMIT 10;

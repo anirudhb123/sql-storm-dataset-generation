@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_crew_members
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        t.production_year >= 2000 
+        AND (k.keyword IS NOT NULL OR t.title ILIKE '%Action%')
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+),
+
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        MAX(mc.note) AS last_note
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    COALESCE(cd.company_name, 'No Company') AS production_company,
+    md.total_cast,
+    md.avg_crew_members,
+    STRING_AGG(DISTINCT md.keyword, ', ') AS keywords
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyDetails cd ON md.movie_title = cd.movie_id
+GROUP BY 
+    md.movie_title, md.production_year, cd.company_name
+ORDER BY 
+    md.production_year DESC, md.total_cast DESC;

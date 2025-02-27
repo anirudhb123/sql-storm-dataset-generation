@@ -1,0 +1,86 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+), PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    CROSS JOIN LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS TagName
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+), PostHistoryStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        MAX(CreationDate) AS LastModified
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+), CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Author,
+        pv.UpVotes,
+        pv.DownVotes,
+        pH.CloseCount,
+        pH.ReopenCount,
+        pH.LastModified,
+        tt.TagName
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+    LEFT JOIN 
+        PostHistoryStats pH ON rp.PostId = pH.PostId
+    JOIN 
+        TopTags tt ON tt.TagName = ANY(STRING_TO_ARRAY(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><'))
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    c.*,
+    CASE 
+        WHEN c.CloseCount > 0 THEN 'Closed'
+        WHEN c.ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS Status,
+    COALESCE(ROUND((c.UpVotes::DECIMAL / NULLIF(c.UpVotes + c.DownVotes, 0)) * 100, 2), 0.00) AS UpvotePercentage
+FROM 
+    CombinedData c
+ORDER BY 
+    c.Score DESC, 
+    c.CreationDate DESC
+LIMIT 50;

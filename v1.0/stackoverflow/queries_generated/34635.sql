@@ -1,0 +1,99 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        1 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        LOWER(TRIM(SUBSTRING(tag.TagName FROM 2 FOR CHAR_LENGTH(tag.TagName) - 2))) AS TagName,
+        COUNT(p.Id) AS TagCount
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON tag.Id = p.Tags::INTEGER[] -- Assuming an array conversion for tags
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostScoreRanking AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalAnswers,
+    ua.TotalQuestions,
+    ua.TotalCommentScore,
+    ph.Title AS PostTitle,
+    ph.Depth,
+    pt.TagName AS PopularTag,
+    ps.Score,
+    ps.ScoreRank
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostHierarchy ph ON ua.UserId = ph.Id -- Assuming we want to join user's posts as a hierarchy
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT unnest(string_to_array(ph.Tags, ','))) -- Assuming tags are comma-separated
+LEFT JOIN 
+    PostScoreRanking ps ON ps.Id = ph.Id
+WHERE 
+    ua.TotalPosts > 5
+    AND ua.TotalAnswers < 10
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Badges b
+        WHERE b.UserId = ua.UserId 
+        AND b.Class = 1
+    )
+ORDER BY 
+    ua.TotalPosts DESC,
+    ua.TotalCommentScore DESC;

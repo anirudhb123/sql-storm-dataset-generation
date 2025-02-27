@@ -1,0 +1,82 @@
+
+WITH RECURSIVE MovieRelations AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(CAST(ki.keyword AS VARCHAR), 'No Keywords') AS keyword,
+        COALESCE(cmp.name, 'Unknown Company') AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ki.keyword) AS keyword_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cmp ON mc.company_id = cmp.id
+    WHERE 
+        mt.production_year > 2000
+),
+DirectorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS director_count
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IN (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY 
+        ci.movie_id
+),
+AdvancedMovieData AS (
+    SELECT 
+        mr.movie_id,
+        mr.title,
+        mr.production_year,
+        mr.keyword,
+        mr.company_name,
+        dc.director_count,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mr.movie_id) AS total_cast_members,
+        CASE 
+            WHEN dc.director_count IS NULL THEN 'No Directors'
+            ELSE CONCAT(dc.director_count, ' Directors')
+        END AS director_info,
+        mr.keyword_rank
+    FROM 
+        MovieRelations mr
+    LEFT JOIN 
+        DirectorCount dc ON mr.movie_id = dc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mr.movie_id = ci.movie_id
+)
+SELECT 
+    amd.title,
+    amd.production_year,
+    amd.keyword,
+    amd.company_name,
+    amd.director_info,
+    amd.total_cast_members,
+    CASE 
+        WHEN amd.total_cast_members > 10 THEN 'Large Cast'
+        WHEN amd.total_cast_members BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_description
+FROM 
+    AdvancedMovieData amd
+WHERE 
+    amd.keyword_rank = 1  
+    AND amd.company_name IS NOT NULL
+GROUP BY 
+    amd.title,
+    amd.production_year,
+    amd.keyword,
+    amd.company_name,
+    amd.director_info,
+    amd.total_cast_members,
+    amd.keyword_rank
+ORDER BY 
+    amd.production_year DESC,
+    amd.title;

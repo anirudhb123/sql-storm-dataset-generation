@@ -1,0 +1,45 @@
+WITH RECURSIVE ExpensiveParts AS (
+    SELECT p_partkey, p_name, p_retailprice
+    FROM part
+    WHERE p_retailprice > 100.00
+    UNION ALL
+    SELECT p.partkey, p.p_name, p.p_retailprice
+    FROM part p
+    JOIN ExpensiveParts ep ON ep.p_partkey = p.p_partkey
+    WHERE p.p_retailprice < ep.p_retailprice
+),
+SupplierData AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_comment IS NOT NULL
+),
+TotalLineItems AS (
+    SELECT o.o_orderkey, COUNT(li.l_orderkey) AS total_items
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, tl.total_items
+    FROM orders o
+    JOIN TotalLineItems tl ON o.o_orderkey = tl.o_orderkey
+    WHERE tl.total_items > 5
+),
+FinalOutput AS (
+    SELECT f.o_orderkey, f.o_totalprice, sp.s_name, ep.p_name, 
+           CASE 
+               WHEN f.o_totalprice > 500 THEN 'High'
+               WHEN f.o_totalprice BETWEEN 200 AND 500 THEN 'Medium'
+               ELSE 'Low'
+           END AS price_category,
+           RANK() OVER (PARTITION BY f.o_totalprice ORDER BY f.o_orderkey) AS order_rank
+    FROM FilteredOrders f
+    LEFT JOIN SupplierData sp ON sp.rn = 1
+    CROSS JOIN ExpensiveParts ep
+)
+SELECT fo.o_orderkey, fo.o_totalprice, fo.s_name, fo.p_name, fo.price_category, fo.order_rank
+FROM FinalOutput fo
+WHERE fo.order_rank < 10
+ORDER BY fo.price_category DESC, fo.o_totalprice DESC;

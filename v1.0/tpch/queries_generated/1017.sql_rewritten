@@ -1,0 +1,64 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS supply_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.o_orderstatus,
+    s.s_name,
+    s.total_supply_cost,
+    s.supply_parts,
+    c.c_name AS high_value_customer_name,
+    c.total_spent
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    supplier_info s ON s.total_supply_cost > (SELECT AVG(total_supply_cost) FROM supplier_info)
+LEFT JOIN 
+    high_value_customers c ON r.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

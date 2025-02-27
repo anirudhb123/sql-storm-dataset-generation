@@ -1,0 +1,76 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        (ps.Upvotes - ps.Downvotes) AS NetVotes,
+        ub.BadgeCount
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        UserBadges ub ON ps.OwnerUserId = ub.UserId
+    WHERE 
+        ps.RowNum = 1
+    ORDER BY 
+        NetVotes DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.CommentCount,
+    COALESCE(tp.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN tp.BadgeCount IS NULL THEN 'No badges awarded'
+        WHEN tp.BadgeCount >= 5 THEN 'Top contributor'
+        ELSE 'Regular user'
+    END AS UserStatus
+FROM 
+    TopPosts tp
+WHERE 
+    tp.BadgeCount IS NULL OR tp.BadgeCount > 3
+UNION ALL 
+SELECT 
+    'Overall Stats',
+    SUM(CommentCount),
+    SUM(BadgeCount),
+    'Overall Status'
+FROM 
+    (
+        SELECT COUNT(c.Id) AS CommentCount, COUNT(b.Id) AS BadgeCount
+        FROM Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN UserBadges b ON p.OwnerUserId = b.UserId
+    ) AS Stats;

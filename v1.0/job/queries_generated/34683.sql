@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Start with the movies that have no parent (root movies)
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    -- Recursive part: find child episodes for each movie
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mh.depth + 1
+    FROM
+        aka_title mt
+    INNER JOIN
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+movie_cast_info AS (
+    -- Aggregate cast information for each movie
+    SELECT 
+        c.movie_id,
+        STRING_AGG(a.name, ', ') AS cast_list,
+        COUNT(*) AS cast_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+years_production AS (
+    -- Get production year with count of movies produced
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count
+    FROM 
+        aka_title
+    GROUP BY 
+        production_year
+),
+cast_and_movies AS (
+    -- Combine movie information with cast information
+    SELECT 
+        mt.title AS movie_title,
+        mh.depth,
+        mci.cast_list,
+        mci.cast_count,
+        yr.movie_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_cast_info mci ON mh.movie_id = mci.movie_id
+    LEFT JOIN 
+        years_production yr ON mh.movie_id IN (SELECT id FROM aka_title WHERE production_year = yr.production_year)
+)
+
+-- Final output combining all the above information
+SELECT 
+    cm.movie_title,
+    cm.depth,
+    COALESCE(cm.cast_list, 'No Cast') AS cast_list,
+    COALESCE(cm.cast_count, 0) AS cast_count,
+    COALESCE(yr.movie_count, 0) AS movie_count_by_year
+FROM 
+    cast_and_movies cm
+LEFT JOIN 
+    years_production yr ON cm.production_year = yr.production_year
+ORDER BY 
+    cm.depth DESC, 
+    cm.cast_count DESC;
+
+This query uses multiple CTEs to organize and streamline the data extraction process. It begins with a recursive CTE to build a hierarchy of movies, retrieving both main titles and their episodes. Another CTE aggregates the cast information, while a third gathers the production years and counts. Finally, the main selection combines data from these CTEs to provide a comprehensive overview of movies, their cast, and their production years. The output is ordered by depth and cast count, showcasing the most complex structures.

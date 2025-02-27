@@ -1,0 +1,56 @@
+WITH actor_movies AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ai.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT at.title, ', ') AS movies
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name an ON ai.person_id = an.person_id
+    JOIN 
+        aka_title at ON ai.movie_id = at.movie_id
+    WHERE 
+        an.name IS NOT NULL
+    GROUP BY 
+        ai.person_id
+), movie_details AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(SUM(mi.info), 'No Info') AS movie_info
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id
+    GROUP BY 
+        at.id
+), actor_performance AS (
+    SELECT 
+        am.person_id,
+        am.movie_count,
+        md.title,
+        md.production_year,
+        md.movie_info,
+        ROW_NUMBER() OVER (PARTITION BY am.person_id ORDER BY md.production_year DESC) AS rn
+    FROM 
+        actor_movies am
+    JOIN 
+        movie_details md ON md.movie_id = am.movie_count
+    WHERE 
+        am.movie_count > 5
+)
+SELECT 
+    a.name,
+    ap.movie_count,
+    ap.title,
+    ap.production_year,
+    ap.movie_info
+FROM 
+    actor_performance ap
+JOIN 
+    aka_name a ON a.person_id = ap.person_id
+WHERE 
+    ap.rn <= 3
+ORDER BY 
+    ap.person_id, ap.production_year DESC;

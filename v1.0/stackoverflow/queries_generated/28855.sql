@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TagPopularity AS (
+    SELECT 
+        tag,
+        COUNT(*) AS TagCount
+    FROM 
+        PopularTags
+    GROUP BY 
+        tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        (TotalUpVotes - TotalDownVotes) AS NetVotes
+    FROM 
+        UserActivity ua
+    ORDER BY 
+        NetVotes DESC
+    LIMIT 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    rp.ViewCount,
+    tp.tag AS PopularTag,
+    tu.DisplayName AS TopUser,
+    tu.NetVotes
+FROM 
+    RankedPosts rp
+JOIN 
+    TagPopularity tp ON tp.tag = ANY(string_to_array(SUBSTRING(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><'))
+JOIN 
+    TopUsers tu ON tu.UserId = rp.OwnerUserId
+WHERE 
+    rp.TagRank <= 3 -- Top posts by views in their tag
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate DESC;

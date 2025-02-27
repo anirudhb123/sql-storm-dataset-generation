@@ -1,0 +1,67 @@
+
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_name = 'ASIA'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, level + 1
+    FROM region_hierarchy rh
+    JOIN nation n ON n.n_regionkey = rh.r_regionkey
+    JOIN region r ON r.r_regionkey = n.n_regionkey
+    WHERE level < 5
+), 
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+), 
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn,
+        o.o_custkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING COUNT(DISTINCT l.l_partkey) > 1
+)
+
+SELECT 
+    s.s_name,
+    ss.total_availqty,
+    ss.avg_acctbal,
+    co.order_count,
+    co.total_spent,
+    od.o_orderkey,
+    od.total_lineitem_value,
+    CASE 
+        WHEN co.order_count > 10 THEN 'Frequent'
+        ELSE 'Occasional'
+    END AS customer_type,
+    COUNT(DISTINCT rh.r_regionkey) AS regions_involved
+FROM supplier_summary ss
+JOIN customer_orders co ON ss.s_suppkey = co.c_custkey
+FULL OUTER JOIN order_details od ON co.c_custkey = od.o_custkey
+LEFT JOIN region_hierarchy rh ON rh.r_name = (SELECT DISTINCT r_name FROM region WHERE r_regionkey = (SELECT MAX(n.n_regionkey) FROM nation n))
+WHERE ss.avg_acctbal IS NOT NULL 
+AND od.rn = 1
+GROUP BY s.s_name, ss.total_availqty, ss.avg_acctbal, co.order_count, co.total_spent, od.o_orderkey, od.total_lineitem_value
+HAVING SUM(CASE WHEN od.total_lineitem_value IS NULL THEN 1 ELSE 0 END) > 0
+ORDER BY co.total_spent DESC NULLS LAST;

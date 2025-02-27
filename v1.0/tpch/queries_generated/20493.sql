@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        AVG(ps.ps_availqty) AS avg_availqty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_name, p.p_name
+),
+FinalAggregation AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(cs.total_spent) AS total_revenue,
+        AVG(cs.order_count) AS avg_orders_per_customer,
+        COUNT(DISTINCT spd.s_name) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        CustomerSummary cs ON n.n_nationkey = cs.c_custkey
+    LEFT JOIN 
+        SupplierPartDetails spd ON n.n_nationkey = spd.p_partkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name,
+    f.nation_count,
+    f.total_revenue,
+    f.avg_orders_per_customer,
+    f.supplier_count,
+    COALESCE(f.total_revenue / NULLIF(f.nation_count, 0), 0) AS avg_revenue_per_nation,
+    CASE 
+        WHEN f.total_revenue > 100000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    FinalAggregation f
+JOIN 
+    region r ON f.r_name = r.r_name
+ORDER BY 
+    f.total_revenue DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;
+
+SELECT 
+    DISTINCT '---' AS separator
+UNION ALL 
+SELECT 
+    'Performance Benchmarking Complete' AS message
+ORDER BY 
+    separator;

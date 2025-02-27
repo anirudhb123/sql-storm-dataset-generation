@@ -1,0 +1,28 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS company_kind,
+    COUNT(mk.keyword) AS keyword_count,
+    COUNT(DISTINCT pc.info) AS unique_person_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    person_info pc ON a.person_id = pc.person_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND c.country_code = 'USA'
+GROUP BY 
+    a.name, t.title, c.kind
+ORDER BY 
+    keyword_count DESC, unique_person_info ASC;

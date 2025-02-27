@@ -1,0 +1,54 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s_stats.total_availability,
+        s_stats.avg_supply_cost,
+        RANK() OVER (ORDER BY s_stats.total_availability DESC) AS availability_rank
+    FROM 
+        SupplierStats s_stats
+    JOIN 
+        supplier s ON s_stats.s_suppkey = s.s_suppkey
+)
+SELECT 
+    t.s_name AS supplier_name,
+    t.total_availability,
+    t.avg_supply_cost,
+    CASE 
+        WHEN t.availability_rank <= 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_category,
+    (SELECT COUNT(DISTINCT o.o_orderkey) 
+     FROM orders o 
+     WHERE o.o_custkey IN (
+         SELECT c.c_custkey 
+         FROM customer c 
+         WHERE c.c_nationkey = (
+             SELECT n.n_nationkey 
+             FROM nation n 
+             WHERE n.n_name = 'USA'
+         )
+     )) AS orders_in_usa
+FROM 
+    TopSuppliers t
+WHERE 
+    t.total_parts > 10
+ORDER BY 
+    t.total_availability DESC
+LIMIT 10;

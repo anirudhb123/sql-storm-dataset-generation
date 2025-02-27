@@ -1,0 +1,75 @@
+WITH RecursiveTagUsage AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM
+        Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    GROUP BY
+        Tags.TagName
+),
+UserReputation AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        Users.Reputation,
+        COALESCE(SUM(Votes.VoteTypeId = 2)::int, 0) AS UpVotes,
+        COALESCE(SUM(Votes.VoteTypeId = 3)::int, 0) AS DownVotes
+    FROM
+        Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY
+        Users.Id, Users.DisplayName, Users.Reputation
+),
+PostActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        GREATEST(COALESCE(vote_total.total_votes, 0), 0) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(*) AS total_votes
+        FROM Votes
+        GROUP BY PostId
+    ) vote_total ON p.Id = vote_total.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        p.CreationDate >= current_date - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+    HAVING
+        COUNT(DISTINCT ph.Id) > 0
+)
+SELECT
+    u.DisplayName,
+    u.Reputation,
+    t.TagName,
+    tu.PostCount AS TagPostCount,
+    pa.Title AS PostTitle,
+    pa.CreationDate AS PostCreationDate,
+    pa.ViewCount AS PostViewCount,
+    pa.TotalVotes,
+    pa.CommentCount,
+    pa.ActivityRank
+FROM
+    UserReputation u
+JOIN Posts p ON u.UserId = p.OwnerUserId
+JOIN RecursiveTagUsage tu ON tu.TagPostCount > 0
+JOIN PostActivity pa ON p.Id = pa.PostId
+JOIN Tags t ON t.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+WHERE
+    (u.Reputation > 500 AND pa.TotalVotes > 5) OR tu.TagPostCount > 10
+ORDER BY
+    u.Reputation DESC,
+    pa.TotalVotes DESC
+LIMIT 50;

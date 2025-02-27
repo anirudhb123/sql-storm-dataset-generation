@@ -1,0 +1,55 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level
+    FROM nation
+    WHERE n_regionkey = 0  -- Assuming a region key for starting point
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+price_summary AS (
+    SELECT 
+        p.p_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+latest_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    cs.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    ps.total_supply_cost,
+    ps.avg_supply_cost,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN cs.total_spent > 1000 THEN 'High Spender'
+        ELSE 'Regular Spender'
+    END AS spending_category
+FROM nation_hierarchy n
+LEFT JOIN customer_order_summary cs ON cs.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN price_summary ps ON ps.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey))
+WHERE n.level <= 2
+ORDER BY nation_name, customer_name;

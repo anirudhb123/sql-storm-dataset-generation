@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_acctbal < sh.s_acctbal
+),
+PartSupplierStats AS (
+    SELECT ps.partkey, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.partkey
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_orders,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+NationAggregates AS (
+    SELECT n.n_nationkey,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acct_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+RankedParts AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+)
+
+SELECT r.r_name,
+       na.supplier_count,
+       na.total_acct_balance,
+       ps.avg_supply_cost,
+       ps.total_available_qty,
+       cd.total_orders,
+       cd.order_count,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_tier_count
+FROM region r
+JOIN nationaggregate na ON r.r_regionkey = na.n_nationkey
+JOIN PartSupplierStats ps ON na.n_nationkey = ps.partkey
+LEFT JOIN CustomerOrderDetails cd ON na.n_nationkey = cd.c_custkey
+LEFT JOIN SupplierHierarchy sh ON na.n_nationkey = sh.s_nationkey
+WHERE na.total_acct_balance > 10000
+  AND EXISTS (SELECT 1 FROM RankedParts rp WHERE rp.price_rank = 1 AND rp.p_partkey = ps.partkey)
+GROUP BY r.r_name, na.supplier_count, na.total_acct_balance, ps.avg_supply_cost, ps.total_available_qty, cd.total_orders, cd.order_count
+ORDER BY r.r_name;

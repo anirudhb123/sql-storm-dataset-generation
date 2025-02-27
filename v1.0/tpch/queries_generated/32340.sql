@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalPartSupply AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderStatistics AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY o.o_custkey
+),
+MaxPartPrice AS (
+    SELECT MAX(p.p_retailprice) AS max_price
+    FROM part p
+    WHERE p.p_size > 0
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(os.total_spent) AS avg_spent,
+    SUM(CASE WHEN p.p_brand IS NOT NULL THEN p.p_retailprice ELSE 0 END) AS total_brand_price,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_discount > 0.2) AS high_discount_count,
+    (SELECT sh.s_name FROM SupplierHierarchy sh WHERE sh.level = 2 AND sh.s_nationkey = n.n_nationkey LIMIT 1) AS supplier_name,
+    pp.max_price
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN OrderStatistics os ON c.c_custkey = os.o_custkey
+LEFT JOIN part p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+CROSS JOIN MaxPartPrice pp
+WHERE n.n_comment LIKE '%important%'
+GROUP BY n.n_name, pp.max_price
+HAVING SUM(os.total_spent) > (SELECT AVG(total_spent) FROM OrderStatistics)
+ORDER BY total_customers DESC;

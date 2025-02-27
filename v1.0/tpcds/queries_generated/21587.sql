@@ -1,0 +1,60 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, ca_country
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_street_number, ca.ca_street_name, ca.ca_city, ca.ca_state, ca.ca_country
+    FROM customer_address ca
+    JOIN AddressHierarchy ah ON ca.ca_city = ah.ca_city AND ca.ca_state <> ah.ca_state
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COALESCE(hd.hd_dep_count, 0) AS dep_count,
+        COALESCE(hd.hd_vehicle_count, -1) AS vehicle_count,
+        COUNT(DISTINCT sr.return_ticket_number) AS total_returns
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk, hd.hd_dep_count, hd.hd_vehicle_count
+),
+JoinedDetails AS (
+    SELECT
+        ci.c_customer_id,
+        ah.ca_street_name,
+        ah.ca_city,
+        ah.ca_state,
+        ci.cd_gender,
+        ci.dep_count,
+        ci.vehicle_count,
+        CASE 
+            WHEN ci.dep_count > 0 THEN 'With Dependents'
+            ELSE 'No Dependents'
+        END AS dependent_status,
+        RANK() OVER (PARTITION BY ah.ca_city ORDER BY ci.total_returns DESC) AS return_rank
+    FROM CustomerInfo ci
+    JOIN AddressHierarchy ah ON ci.c_customer_id = ah.ca_address_sk::text
+)
+SELECT 
+    jd.c_customer_id,
+    jd.ca_street_name,
+    jd.ca_city,
+    jd.ca_state,
+    jd.cd_gender,
+    jd.dep_count,
+    jd.vehicle_count,
+    jd.dependent_status,
+    jd.return_rank
+FROM JoinedDetails jd
+WHERE 
+    (jd.cd_gender = 'F' AND jd.dep_count > 0)
+    OR (jd.cd_gender = 'M' AND jd.vehicle_count IS NULL)
+    OR (jd.return_rank <= 5)
+ORDER BY jd.ca_city, jd.cd_gender, jd.return_rank DESC;

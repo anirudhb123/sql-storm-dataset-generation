@@ -1,0 +1,42 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_return_time_sk, 
+        sr_item_sk, 
+        sr_return_quantity, 
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) as return_rank
+    FROM store_returns
+),
+DistinctCustomers AS (
+    SELECT DISTINCT 
+        c_customer_sk, 
+        c_first_name, 
+        c_last_name 
+    FROM customer
+    WHERE c_first_name IS NOT NULL AND c_last_name IS NOT NULL
+),
+TotalSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales 
+    GROUP BY ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(TR.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT dr.c_customer_sk) AS distinct_returning_customers,
+    AVG(CASE WHEN s.ss_net_profit > 0 THEN s.ss_net_profit ELSE NULL END) AS average_profit,
+    (SELECT COUNT(*) FROM store_returns) AS total_returns
+FROM item i
+LEFT JOIN TotalSales TR ON i.i_item_sk = TR.ws_item_sk
+LEFT JOIN RankedReturns rr ON i.i_item_sk = rr.sr_item_sk AND rr.return_rank <= 5
+LEFT JOIN store_sales s ON i.i_item_sk = s.ss_item_sk
+LEFT JOIN DistinctCustomers dr ON s.ss_customer_sk = dr.c_customer_sk 
+WHERE i.i_current_price > 20 AND i.i_brand = 'Brand X' 
+GROUP BY i.i_item_id, i.i_item_desc
+HAVING COUNT(DISTINCT rr.sr_item_sk) > 0
+ORDER BY total_sales DESC, distinct_returning_customers DESC
+LIMIT 100;

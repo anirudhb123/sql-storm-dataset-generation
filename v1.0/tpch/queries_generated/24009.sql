@@ -1,0 +1,53 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost > (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2))
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_orderdate >= DATEADD(month, -6, GETDATE())
+),
+NationsWithComment AS (
+    SELECT 
+        n.n_regionkey, 
+        n.n_name,
+        CASE 
+            WHEN n.n_comment IS NULL THEN 'No Comment' 
+            ELSE n.n_comment 
+        END AS n_comment
+    FROM nation n
+    WHERE n.n_name LIKE '%land%'
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(rp.p_retailprice) AS avg_part_price,
+    MAX(CASE WHEN sd.part_count IS NOT NULL THEN sd.avg_acctbal ELSE 0 END) AS supplier_avg_acctbal
+FROM customer c
+JOIN FilteredOrders fo ON c.c_custkey = fo.o_custkey
+JOIN lineitem l ON fo.o_orderkey = l.l_orderkey
+JOIN RankedParts rp ON l.l_partkey = rp.p_partkey AND rp.rn <= 5
+LEFT JOIN SupplierDetails sd ON sd.part_count > 10
+JOIN NationsWithComment n ON c.c_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 OR SUM(l.l_extendedprice) IS NULL
+ORDER BY total_revenue DESC, n.n_name;

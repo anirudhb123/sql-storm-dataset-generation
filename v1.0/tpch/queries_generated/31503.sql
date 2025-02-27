@@ -1,0 +1,45 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 1 AS level
+    FROM nation n
+    WHERE n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, nh.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_avg_cost AS (
+    SELECT ps.s_suppkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+customer_order_stats AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+order_line_item AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_cost
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+extended_data AS (
+    SELECT c.c_name, n.n_name AS nation_name, o.o_orderstatus, o.o_orderdate,
+           COALESCE(os.total_lineitem_cost, 0) AS lineitem_cost,
+           CASE
+               WHEN os.order_count > 10 THEN 'High Volume'
+               WHEN os.order_count BETWEEN 5 AND 10 THEN 'Medium Volume'
+               ELSE 'Low Volume'
+           END AS volume_category
+    FROM customer_order_stats os
+    JOIN customer c ON os.c_custkey = c.c_custkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN order_line_item li ON o.o_orderkey = li.l_orderkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT ed.c_name, ed.nation_name, ed.o_orderstatus, ed.o_orderdate,
+       SUM(ed.lineitem_cost) OVER (PARTITION BY ed.nation_name ORDER BY ed.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_cost,
+       ROW_NUMBER() OVER (PARTITION BY ed.nation_name ORDER BY ed.o_orderdate) AS order_number
+FROM extended_data ed
+WHERE ed.lineitem_cost IS NOT NULL
+ORDER BY ed.nation_name, ed.o_orderdate DESC;

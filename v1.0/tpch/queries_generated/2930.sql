@@ -1,0 +1,88 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        p.p_brand,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+MinMaxPrice AS (
+    SELECT 
+        MIN(o.o_totalprice) AS min_price,
+        MAX(o.o_totalprice) AS max_price
+    FROM 
+        orders o
+)
+SELECT 
+    r.c_custkey,
+    r.c_name,
+    r.total_orders,
+    r.total_spent,
+    r.last_order_date,
+    s.p_name,
+    s.p_brand,
+    s.s_name,
+    s.ps_supplycost,
+    CASE 
+        WHEN s.ps_supplycost < m.min_price THEN 'Below Min Price' 
+        WHEN s.ps_supplycost > m.max_price THEN 'Above Max Price' 
+        ELSE 'Within Range' 
+    END AS price_range,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    CustomerOrderSummary r
+LEFT JOIN 
+    RankedOrders o ON r.total_orders >= 1
+LEFT JOIN 
+    SupplierPartDetails s ON s.rank = 1
+JOIN 
+    MinMaxPrice m ON 1=1
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    r.last_order_date IS NOT NULL
+    AND r.total_spent > 1000
+GROUP BY 
+    r.c_custkey, r.c_name, r.total_orders, r.total_spent, r.last_order_date, s.p_name, s.p_brand, s.s_name, s.ps_supplycost, m.min_price, m.max_price
+ORDER BY 
+    total_revenue DESC;

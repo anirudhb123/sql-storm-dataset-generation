@@ -1,0 +1,60 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%') AND 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        RecursiveMovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    DISTINCT 
+    a.name AS actor_name,
+    ARRAY_AGG(DISTINCT title.title) AS movie_titles,
+    COUNT(DISTINCT CASE WHEN mt.production_year > 2015 THEN mt.title END) AS recent_movies_count,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS associated_keywords,
+    SUM(CASE WHEN pc.person_id IS NULL THEN 0 ELSE 1 END) AS non_null_persons_count
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    title title ON ci.movie_id = title.id
+LEFT JOIN 
+    movie_keyword mk ON title.id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    (SELECT DISTINCT person_id FROM person_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'unknown')) pc 
+ON 
+    ci.person_id = pc.person_id
+LEFT JOIN 
+    RecursiveMovieHierarchy r ON r.movie_id = title.id
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT title.id) > 5
+ORDER BY 
+    recent_movies_count DESC, 
+    a.name ASC
+LIMIT 10 OFFSET 5;

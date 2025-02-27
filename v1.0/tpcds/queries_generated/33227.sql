@@ -1,0 +1,60 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_customer_id, 
+           cd.cd_gender, hd.hd_income_band_sk, 
+           hd.hd_buy_potential, hd.hd_dep_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    WHERE c.c_birth_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_customer_id, 
+           cd.cd_gender, hd.hd_income_band_sk, 
+           hd.hd_buy_potential, hd.hd_dep_count
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_hdemo_sk = ch.hd_demo_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT ws.ws_item_sk, ws.ws_sales_price, 
+           ws.ws_quantity, ws.ws_net_paid,
+           rank() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) 
+                                FROM web_sales ws2
+                                WHERE ws2.ws_item_sk = ws.ws_item_sk)
+),
+aggregated_sales AS (
+    SELECT i.i_item_sk, 
+           SUM(s.net_paid) AS total_net_paid, 
+           COUNT(s.ws_item_sk) AS total_sales_records
+    FROM sales_data s
+    JOIN item i ON s.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_sk
+),
+final_selection AS (
+    SELECT ch.c_customer_id, ch.cd_gender, 
+           COALESCE(ib.ib_income_band_sk, 0) AS income_band,
+           ads.total_net_paid, ads.total_sales_records
+    FROM customer_hierarchy ch
+    LEFT JOIN aggregated_sales ads ON ch.c_customer_sk = ads.i_item_sk
+    LEFT JOIN income_band ib ON ch.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE ads.total_net_paid IS NOT NULL
+)
+SELECT f.c_customer_id,
+       f.cd_gender,
+       f.income_band,
+       CASE 
+           WHEN f.total_net_paid IS NULL THEN 'No Sales'
+           ELSE f.total_net_paid::VARCHAR
+       END AS total_net_sales,
+       CASE 
+           WHEN f.total_sales_records > 0 THEN 'Sales Found'
+           ELSE 'No Sales Records'
+       END AS sales_status
+FROM final_selection f
+ORDER BY f.total_net_paid DESC, f.cd_gender ASC
+LIMIT 100;

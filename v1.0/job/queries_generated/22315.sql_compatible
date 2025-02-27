@@ -1,0 +1,68 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 3
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        ARRAY_AGG(DISTINCT ka.name) AS aka_names,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        CASE 
+            WHEN tm.production_year < 2000 THEN 'Classic'
+            WHEN tm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        aka_name ka ON ka.person_id IN (SELECT ci.person_id FROM cast_info ci JOIN aka_title at ON ci.movie_id = at.id WHERE at.title = tm.movie_title)
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = tm.movie_title LIMIT 1)
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        tm.movie_title, tm.production_year
+)
+SELECT 
+    m.movie_title,
+    m.production_year,
+    m.aka_names,
+    m.company_names,
+    m.era,
+    COALESCE(mi.info, 'No additional info available') AS additional_info,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Year unknown'
+        WHEN m.production_year % 2 = 0 THEN 'Even year'
+        ELSE 'Odd year'
+    END AS year_category
+FROM 
+    MovieDetails m
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = (SELECT id FROM aka_title WHERE title = m.movie_title LIMIT 1)
+WHERE 
+    m.company_names IS NOT NULL
+    OR m.aka_names IS NOT NULL
+ORDER BY 
+    m.production_year DESC, m.movie_title;

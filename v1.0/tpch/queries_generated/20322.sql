@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS lvl
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.lvl < 3
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_availqty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING total_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal * 0.9
+    FROM customer c
+    WHERE c.c_acctbal <= 10000
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT 
+    n.n_name AS Nation,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS Total_Revenue,
+    COUNT(DISTINCT h.c_custkey) AS High_Value_Customers,
+    COUNT(DISTINCT sh.s_suppkey) AS Supplier_Count,
+    COUNT(DISTINCT p.p_partkey) FILTER (WHERE p.p_retailprice > 100) AS High_Priced_Parts,
+    COUNT(DISTINCT r.o_orderkey) FILTER (WHERE r.order_rank <= 5) AS Top_5_Orders
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN FilteredParts p ON l.l_partkey = p.p_partkey
+LEFT JOIN HighValueCustomers h ON s.s_nationkey = h.c_nationkey
+LEFT JOIN RankedOrders r ON l.l_orderkey = r.o_orderkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY n.n_name
+ORDER BY Total_Revenue DESC NULLS LAST;

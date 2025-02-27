@@ -1,0 +1,47 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws(ws.bill_customer_sk) AS customer_id,
+        ws.sold_date_sk,
+        ws.item_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 
+    GROUP BY 
+        ws.bill_customer_sk, ws.sold_date_sk, ws.item_sk
+), aggregated_returns AS (
+    SELECT 
+        wr.returning_customer_sk AS customer_id,
+        COUNT(wr.returning_customer_sk) AS return_count,
+        SUM(wr.return_amt) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    ca.ca_address_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    COALESCE(rs.total_quantity, 0) AS total_quantity,
+    COALESCE(rs.total_net_profit, 0) AS total_net_profit,
+    COALESCE(ar.return_count, 0) AS return_count,
+    COALESCE(ar.total_return_amount, 0) AS total_return_amount
+FROM 
+    customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN ranked_sales rs ON c.c_customer_sk = rs.customer_id AND rs.rank = 1
+LEFT JOIN aggregated_returns ar ON c.c_customer_sk = ar.customer_id
+WHERE 
+    cd.cd_gender = 'F' 
+    AND cd.cd_marital_status = 'M'
+    AND (cd.cd_purchase_estimate > 1000 OR ar.total_return_amount IS NOT NULL)
+ORDER BY 
+    total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

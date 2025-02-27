@@ -1,0 +1,122 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 5) THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        c.PostId
+),
+PostWithCommentStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.PostTypeId,
+        rp.Score,
+        rp.ScoreRank,
+        rcs.CommentCount,
+        rcs.LastCommentDate,
+        COALESCE(usr.UserId, 0) AS MostActiveUserId,
+        COALESCE(usr.Reputation, 0) AS UserReputation
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentComments rcs ON rp.PostId = rcs.PostId
+    LEFT JOIN 
+        (SELECT Users.Id AS UserId, COUNT(Comments.Id) AS CommentCount
+         FROM Users 
+         JOIN Comments ON Users.Id = Comments.UserId
+         GROUP BY Users.Id ORDER BY CommentCount DESC LIMIT 1) usr ON TRUE
+    WHERE 
+        rp.ScoreRank <= 5
+)
+SELECT 
+    pwcs.PostId,
+    pwcs.Title,
+    pwcs.CreationDate,
+    pwcs.Score,
+    pwcs.CommentCount,
+    pwcs.LastCommentDate,
+    CASE 
+      WHEN pwcs.UserReputation > 0 THEN 'Active'
+      WHEN pwcs.UserReputation IS NULL THEN 'Inactive'
+      ELSE 'Unknown'
+    END AS UserStatus,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')::INT[]))) AS AssociatedTags
+FROM 
+    PostWithCommentStats pwcs
+WHERE 
+    pwcs.CommentCount > 0 
+ORDER BY 
+    pwcs.Score DESC, pwcs.CreationDate DESC
+LIMIT 10;
+
+WITH InfluenceReport AS (
+    SELECT 
+        ph.PostId,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVotes,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 5 THEN 1 ELSE 0 END) AS Revisions,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenVotes
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id,
+    p.Title,
+    COALESCE(ir.CloseVotes, 0) AS CloseVotes,
+    COALESCE(ir.Revisions, 0) AS Revisions,
+    COALESCE(ir.ReopenVotes, 0) AS ReopenVotes,
+    COALESCE(pc.CommentCount, 0) AS RecentCommentCount
+FROM 
+    Posts p 
+LEFT JOIN 
+    InfluenceReport ir ON p.Id = ir.PostId
+LEFT JOIN 
+    RecentComments pc ON p.Id = pc.PostId
+WHERE 
+    p.PostTypeId = 1 
+    AND COALESCE(ir.CloseVotes, 0) = 0 
+ORDER BY 
+    p.CreationDate DESC;

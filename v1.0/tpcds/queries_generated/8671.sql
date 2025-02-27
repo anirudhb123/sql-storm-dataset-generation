@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid_inc_tax) AS average_order_value,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        d.d_moy IN (11, 12) -- Filter for November and December
+    GROUP BY 
+        ws.web_site_id
+),
+customer_demo AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ss.total_sales,
+        ss.order_count,
+        ss.average_order_value,
+        ss.unique_customers
+    FROM 
+        customer_demographics cd
+    JOIN 
+        sales_summary ss ON cd.cd_demo_sk = c.c_current_cdemo_sk
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(ws.ws_order_number) AS promo_used
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    cd.gender,
+    cd.marital_status,
+    SUM(cd.total_sales) AS total_sales_by_demo,
+    AVG(cd.average_order_value) AS avg_order_value_by_demo,
+    ps.total_discount AS total_discount_given,
+    ps.promo_used AS promo_redemptions
+FROM 
+    customer_demo cd
+LEFT JOIN 
+    promotion_summary ps ON cd.order_count > 50 -- focusing on higher order volumes
+GROUP BY 
+    cd.gender, 
+    cd.marital_status, 
+    ps.total_discount, 
+    ps.promo_used
+ORDER BY 
+    total_sales_by_demo DESC;

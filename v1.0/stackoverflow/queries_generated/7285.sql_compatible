@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName, p.Tags, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.CommentCount,
+        rp.TagRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = tp.PostId
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(string_to_array(tp.Tags, ',')) AS TagName) t ON TRUE
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.OwnerDisplayName, 
+    tp.UpVoteCount, tp.DownVoteCount, tp.CommentCount
+ORDER BY 
+    tp.UpVoteCount DESC, tp.ViewCount DESC
+LIMIT 100 OFFSET 0;

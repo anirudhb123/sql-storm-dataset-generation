@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        COUNT(DISTINCT co.Id) AS CommentCount,
+        AVG(vt.VoteTypeId = 2) AS UpvoteRatio,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT v.Id) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpvoteRatio
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 5 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Tags,
+    fp.CreationDate,
+    fp.CommentCount,
+    fp.UpvoteRatio,
+    STRING_AGG(DISTINCT u.DisplayName, ', ') AS ActiveCommenters
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Comments c ON fp.PostId = c.PostId
+LEFT JOIN 
+    Users u ON c.UserId = u.Id
+GROUP BY 
+    fp.PostId, fp.Title, fp.Tags, fp.CreationDate, fp.CommentCount, fp.UpvoteRatio
+ORDER BY 
+    fp.UpvoteRatio DESC, 
+    fp.CommentCount DESC;

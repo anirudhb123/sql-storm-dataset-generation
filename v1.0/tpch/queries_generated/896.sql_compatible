@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 MONTH'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 1000
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sp.total_available, 0) AS available_quantity,
+    COALESCE(sp.total_cost, 0) AS total_supply_cost,
+    co.c_name AS customer_name,
+    co.order_count,
+    co.total_spending,
+    (CASE 
+        WHEN co.total_spending > 10000 THEN 'High Value'
+        ELSE 'Regular Value'
+    END) AS customer_value_category,
+    RANK() OVER (ORDER BY COALESCE(co.total_spending, 0) DESC) AS spending_rank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerOrderDetails co ON co.order_count > 5
+WHERE 
+    p.p_retailprice > 50.00
+ORDER BY 
+    spending_rank, available_quantity DESC;

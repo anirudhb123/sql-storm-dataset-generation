@@ -1,0 +1,112 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        Title,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        ParentId,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.ParentId,
+        ph.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ''))
+    GROUP BY
+        t.TagName
+    HAVING
+        COUNT(pt.Id) > 10
+),
+PopularUsers AS (
+    SELECT
+        OwnerUserId AS UserId,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    GROUP BY
+        OwnerUserId
+    HAVING
+        COUNT(*) > 5
+),
+RecentActiveUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS RecentPosts
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days'
+    GROUP BY
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    u.DisplayName,
+    u.TotalScore,
+    u.QuestionCount,
+    u.AnswerCount,
+    (SELECT COUNT(DISTINCT ph.ParentId) FROM RecursivePostHierarchy ph WHERE ph.OwnerUserId = u.UserId) AS DirectlyAnsweredQuestions,
+    tt.TagName AS PopularTag,
+    STRING_AGG(DISTINCT p.Title, ', ') AS PopularPostTitles,
+    CASE 
+        WHEN u.TotalBounty > 100 THEN 'High Bounty Contributor'
+        WHEN u.TotalBounty BETWEEN 50 AND 100 THEN 'Medium Bounty Contributor'
+        ELSE 'Low Bounty Contributor'
+    END AS BountyContributorType
+FROM
+    UserStats u
+LEFT JOIN
+    PostLinks pl ON pl.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserId)
+LEFT JOIN 
+    TopTags tt ON tt.PostCount > 5
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId
+WHERE 
+    u.QuestionCount > 2 OR u.AnswerCount > 5
+GROUP BY
+    u.UserId, u.DisplayName, u.TotalScore, u.QuestionCount, u.AnswerCount, tt.TagName
+ORDER BY 
+    u.TotalScore DESC
+LIMIT 50;

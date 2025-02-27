@@ -1,0 +1,46 @@
+
+WITH RecursiveCustomerData AS (
+    SELECT c.c_customer_sk, c.c_customer_id, cd.cd_gender, cd.cd_marital_status,
+           cd.cd_purchase_estimate, cd.cd_credit_rating, cd.cd_dep_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_customer_id, cd.cd_gender, cd.cd_marital_status,
+           cd.cd_purchase_estimate, cd.cd_credit_rating, cd.cd_dep_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_gender ORDER BY cd.cd_purchase_estimate ASC) AS rn
+    FROM customer AS c
+    JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+    AND cd.cd_dep_count IS NOT NULL
+),
+MaxPurchase AS (
+    SELECT cd_gender, MAX(cd_purchase_estimate) AS max_purchase
+    FROM RecursiveCustomerData
+    GROUP BY cd_gender
+),
+CustomerMetrics AS (
+    SELECT r.c_customer_id, r.cd_gender, r.cd_marital_status, r.cd_purchase_estimate,
+           r.cd_credit_rating, COALESCE(i.ib_lower_bound, 0) AS lower_bound,
+           COALESCE(i.ib_upper_bound, 0) AS upper_bound,
+           m.max_purchase
+    FROM RecursiveCustomerData AS r
+    LEFT JOIN income_band AS i ON r.cd_purchase_estimate BETWEEN i.ib_lower_bound AND i.ib_upper_bound
+    JOIN MaxPurchase AS m ON r.cd_gender = m.cd_gender
+    WHERE r.rn <= 5
+)
+SELECT cm.cd_gender, COUNT(*) AS customer_count,
+       SUM(CASE WHEN cm.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count,
+       STRING_AGG(cm.c_customer_id, ', ') AS customer_ids,
+       AVG(cm.cd_purchase_estimate) AS avg_purchase_estimate,
+       MAX(cm.max_purchase) AS max_gender_purchase,
+       CASE 
+           WHEN MAX(cm.max_purchase) > 500 THEN 'High'
+           WHEN MAX(cm.max_purchase) BETWEEN 100 AND 500 THEN 'Medium'
+           ELSE 'Low'
+       END AS purchase_band
+FROM CustomerMetrics AS cm
+GROUP BY cm.cd_gender
+HAVING COUNT(*) > 10
+ORDER BY customer_count DESC;

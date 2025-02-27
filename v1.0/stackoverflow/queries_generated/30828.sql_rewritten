@@ -1,0 +1,82 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId  
+)
+, UserPostActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+, PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypeNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+, ScoreRankings AS (
+    SELECT 
+        PostId,
+        ROW_NUMBER() OVER (ORDER BY Score DESC) AS Rank
+    FROM 
+        RecursivePosts
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.QuestionCount,
+    up.AnswerCount,
+    up.AvgScore,
+    ph.EditCount,
+    ph.LastEditDate,
+    ph.HistoryTypeNames,
+    sr.Rank
+FROM 
+    UserPostActivity up
+LEFT JOIN 
+    PostHistoryAggregates ph ON up.UserId = ph.UserId
+LEFT JOIN 
+    ScoreRankings sr ON ph.PostId = sr.PostId
+ORDER BY 
+    up.TotalPosts DESC, up.AvgScore DESC;

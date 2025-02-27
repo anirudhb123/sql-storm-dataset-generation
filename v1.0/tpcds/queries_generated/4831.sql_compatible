@@ -1,0 +1,70 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_by_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_quantity,
+        sales.total_net_paid
+    FROM 
+        SalesData sales
+    JOIN 
+        item item ON sales.ws_item_sk = item.i_item_sk
+    WHERE 
+        sales.rank_by_sales <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr.s_store_sk AS returned_item_sk,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returned_quantity
+    FROM 
+        store_returns sr
+    LEFT JOIN 
+        store store ON sr.s_store_sk = store.s_store_sk
+    GROUP BY 
+        sr.s_store_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        ti.i_item_id,
+        ti.i_item_desc,
+        ti.total_quantity,
+        ti.total_net_paid,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        (ti.total_net_paid - COALESCE(cr.total_returned_quantity * ti.total_net_paid / NULLIF(ti.total_quantity, 0), 0)) AS net_profit
+    FROM 
+        TopItems ti
+    LEFT JOIN 
+        CustomerReturns cr ON ti.ws_item_sk = cr.returned_item_sk
+)
+SELECT 
+    item_id,
+    item_desc,
+    total_quantity,
+    total_net_paid,
+    total_returned_quantity,
+    net_profit,
+    CASE 
+        WHEN net_profit < 0 THEN 'Loss'
+        WHEN net_profit = 0 THEN 'Break Even'
+        ELSE 'Profit'
+    END AS profitability_status
+FROM 
+    SalesAndReturns
+ORDER BY 
+    net_profit DESC
+LIMIT 20;

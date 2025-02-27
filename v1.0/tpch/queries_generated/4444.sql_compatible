@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1994-01-01' AND DATE '1995-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierRanking AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        COALESCE(r.total_cost, 0) AS total_cost,
+        r.rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        RankedSuppliers r ON s.s_suppkey = r.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+CombinedResults AS (
+    SELECT 
+        sr.s_name,
+        sr.n_name,
+        sr.total_cost,
+        od.total_revenue,
+        od.order_count,
+        CASE 
+            WHEN od.total_revenue IS NULL THEN 'No Orders'
+            ELSE 'Has Orders'
+        END AS order_status
+    FROM 
+        SupplierRanking sr
+    LEFT JOIN 
+        OrderDetails od ON sr.s_suppkey = od.o_orderkey
+)
+SELECT 
+    *,
+    (total_cost - COALESCE(total_revenue, 0)) AS profit_loss,
+    CONCAT('Supplier ', s_name, ' has a rank of ', rank) AS supplier_info
+FROM 
+    CombinedResults
+WHERE 
+    total_cost > 10000 AND (order_status = 'Has Orders' OR total_cost IS NULL)
+ORDER BY 
+    profit_loss DESC
+LIMIT 100;

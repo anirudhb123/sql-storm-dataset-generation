@@ -1,0 +1,49 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY c.c_custkey, c.c_name
+), 
+RegionPerformance AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS fulfilled_orders,
+        SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT 
+    ss.s_name,
+    ss.total_parts_supplied,
+    cs.order_count,
+    cs.total_spent,
+    rp.r_name,
+    rp.fulfilled_orders,
+    rp.open_orders,
+    rp.total_orders
+FROM SupplierSummary ss
+JOIN CustomerOrders cs ON ss.s_nationkey = (SELECT n.n_nationkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = ss.s_suppkey)
+JOIN RegionPerformance rp ON cs.c_custkey IN (SELECT c.c_custkey FROM customer c JOIN nation n ON c.c_nationkey = n.n_nationkey WHERE n.n_regionkey = rp.n_regionkey)
+ORDER BY ss.total_supply_cost DESC, cs.total_spent DESC;

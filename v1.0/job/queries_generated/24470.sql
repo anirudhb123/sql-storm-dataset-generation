@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT
+        a.id AS actor_id,
+        a.name,
+        COALESCE(ac.movie_count, 0) AS movie_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        ActorMovieCounts ac ON a.person_id = ac.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        mi.info AS movie_info,
+        CASE
+            WHEN mi.info IS NULL THEN 'No Info'
+            ELSE mi.note
+        END AS note
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.title_id = mi.movie_id 
+                     AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+),
+ActorMovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ka.name) AS actors,
+        COALESCE(NULLIF(ti.kind, ''), 'Unknown Genre') AS genre
+    FROM 
+        MoviesWithInfo t
+    LEFT JOIN 
+        cast_info c ON t.title_id = c.movie_id
+    LEFT JOIN 
+        aka_name ka ON c.person_id = ka.person_id
+    LEFT JOIN 
+        title t2 ON t.title_id = t2.id
+    LEFT JOIN 
+        kind_type ti ON t2.kind_id = ti.id
+    GROUP BY 
+        t.title_id, t.title, t.production_year, ti.kind
+)
+SELECT 
+    amd.title,
+    amd.production_year,
+    amd.actors,
+    amd.genre,
+    CASE 
+        WHEN amd.actors IS NULL THEN 'No Actors Found'
+        ELSE 'Actors Listed'
+    END AS actor_status,
+    (SELECT COUNT(*) FROM Actors) AS total_actors,
+    (SELECT SUM(movie_count) FROM TopActors) AS total_movies_by_top_actors,
+    COUNT(rm.title) FILTER (WHERE rm.production_year >= 2000) AS movies_since_2000
+FROM 
+    ActorMovieDetails amd
+JOIN 
+    RankedMovies rm ON amd.title_id = rm.title_id
+GROUP BY 
+    amd.title, amd.production_year, amd.actors, amd.genre
+ORDER BY 
+    amd.production_year DESC, amd.title ASC;

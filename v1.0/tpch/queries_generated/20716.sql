@@ -1,0 +1,56 @@
+WITH region_summary AS (
+    SELECT r_name, COUNT(n_nationkey) AS nation_count
+    FROM region
+    JOIN nation ON r_regionkey = n_regionkey
+    GROUP BY r_name
+),
+supplier_summary AS (
+    SELECT s_nationkey, SUM(s_acctbal) AS total_acctbal, COUNT(s_suppkey) AS supplier_count
+    FROM supplier
+    GROUP BY s_nationkey
+),
+lineitem_analysis AS (
+    SELECT l_orderkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS total_order_value,
+           DENSE_RANK() OVER (PARTITION BY l_orderkey ORDER BY l_receiptdate DESC) AS receipt_rank
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+order_details AS (
+    SELECT o_orderkey, o_totalprice, o_orderdate, o_orderstatus,
+           CASE 
+               WHEN o_totalprice > 50000 THEN 'HIGH'
+               WHEN o_totalprice BETWEEN 20000 AND 50000 THEN 'MEDIUM'
+               ELSE 'LOW'
+           END AS price_category
+    FROM orders
+),
+customer_orders AS (
+    SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, o.price_category
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL OR c.c_acctbal BETWEEN 0 AND 1000
+)
+SELECT 
+    cs.c_name,
+    SUM(co.o_totalprice) AS total_spent,
+    AVG(co.o_totalprice) AS avg_order_value,
+    rs.nation_count,
+    ss.total_acctbal,
+    ss.supplier_count,
+    COUNT(DISTINCT la.l_orderkey) AS completed_orders,
+    CASE 
+        WHEN SUM(co.o_totalprice) IS NULL THEN 'No Orders'
+        WHEN SUM(co.o_totalprice) > 100000 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM customer_orders co
+LEFT JOIN region_summary rs ON rs.nation_count > 2
+LEFT JOIN supplier_summary ss ON ss.supplier_count <= 10
+JOIN lineitem_analysis la ON la.l_orderkey = co.o_orderkey
+WHERE co.price_category = 'HIGH' 
+      AND (co.o_orderdate BETWEEN '2021-01-01' AND CURRENT_DATE OR co.o_orderdate IS NULL)
+GROUP BY cs.c_name, rs.nation_count, ss.total_acctbal, ss.supplier_count
+HAVING SUM(co.o_totalprice) >= 50000
+ORDER BY total_spent DESC
+LIMIT 100;

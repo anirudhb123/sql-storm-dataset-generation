@@ -1,0 +1,61 @@
+
+WITH UserVotes AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT v.PostId) AS TotalPostsVoted
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.UserId
+),
+PostAggregates AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS TotalClosedPosts,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Id END) AS TotalReopenedPosts
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.OwnerUserId
+),
+UserLevels AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 50 THEN 'Newbie'
+            WHEN u.Reputation < 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserLevel
+    FROM Users u
+)
+SELECT 
+    u.DisplayName,
+    ul.UserLevel,
+    COALESCE(uv.UpVotes, 0) AS UpVotes,
+    COALESCE(uv.DownVotes, 0) AS DownVotes,
+    pa.TotalPosts,
+    pa.TotalScore,
+    pa.TotalViews,
+    pa.TotalClosedPosts,
+    pa.TotalReopenedPosts,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    CASE
+        WHEN pa.TotalPosts > 10 THEN 'High Contributor'
+        WHEN pa.TotalPosts BETWEEN 5 AND 10 THEN 'Medium Contributor'
+        ELSE 'Low Contributor'
+    END AS ContributionCategory
+FROM Users u
+LEFT JOIN UserVotes uv ON u.Id = uv.UserId
+LEFT JOIN PostAggregates pa ON u.Id = pa.OwnerUserId
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN LATERAL STRING_SPLIT(p.Tags, ',') AS tag ON tag.value IS NOT NULL
+LEFT JOIN Tags t ON t.TagName = TRIM(tag.value)
+JOIN UserLevels ul ON u.Id = ul.Id
+GROUP BY u.Id, u.DisplayName, ul.UserLevel, uv.UpVotes, uv.DownVotes, 
+         pa.TotalPosts, pa.TotalScore, pa.TotalViews, 
+         pa.TotalClosedPosts, pa.TotalReopenedPosts
+ORDER BY pa.TotalPosts DESC, uv.UpVotes DESC, ul.UserLevel DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title m ON mc.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+)
+
+SELECT 
+    title.title,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(t.production_year) AS avg_production_year,
+    ARRAY_AGG(DISTINCT company_name.name) FILTER (WHERE company_name.name IS NOT NULL) AS production_companies,
+    SUM(CASE 
+        WHEN ci.note IS NULL THEN 1
+        ELSE 0 
+    END) AS null_notes_count,
+    MAX(ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY RANDOM())) AS random_rank
+FROM 
+    movie_hierarchy mh
+JOIN 
+    aka_title t ON mh.movie_id = t.id
+LEFT JOIN 
+    cast_info ci ON t.id = ci.movie_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name ON mc.company_id = company_name.id
+WHERE 
+    t.production_year BETWEEN 1990 AND 2023
+GROUP BY 
+    title.title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5 
+ORDER BY 
+    NULLIF(AVG(t.production_year), 0) DESC,
+    RANDOM()
+LIMIT 50;
+

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS supply_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 2
+),
+TopSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY l.l_partkey
+    ORDER BY total_sales DESC
+    LIMIT 10
+),
+SupplierPerformance AS (
+    SELECT f.s_suppkey, f.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_total_sales
+    FROM FilteredSuppliers f
+    JOIN lineitem l ON f.s_suppkey = l.l_suppkey
+    WHERE l.l_returnflag = 'N' AND l.l_linestatus = 'O'
+    GROUP BY f.s_suppkey, f.s_name
+)
+SELECT oh.o_orderkey, 
+       c.c_name AS customer_name, 
+       p.p_name AS part_name, 
+       s.s_name AS supplier_name,
+       oh.level AS order_level,
+       COALESCE(sp.supplier_total_sales, 0) AS supplier_total_sales,
+       ts.total_sales AS top_sales
+FROM OrderHierarchy oh
+JOIN customer c ON oh.o_custkey = c.c_custkey
+LEFT JOIN lineitem li ON oh.o_orderkey = li.l_orderkey
+LEFT JOIN part p ON li.l_partkey = p.p_partkey
+LEFT JOIN FilteredSuppliers f ON li.l_suppkey = f.s_suppkey
+LEFT JOIN SupplierPerformance sp ON f.s_suppkey = sp.s_suppkey
+LEFT JOIN TopSales ts ON p.p_partkey = ts.l_partkey
+WHERE (p.p_size >= 10 OR p.p_container IS NOT NULL)
+AND (oh.o_orderstatus = 'O' OR oh.o_orderstatus IS NULL)
+ORDER BY oh.o_orderdate DESC, supplier_total_sales DESC;

@@ -1,0 +1,88 @@
+WITH RankedLineItems AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        l_linenumber,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        l_tax,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rn
+    FROM 
+        lineitem
+    WHERE 
+        l_discount > 0.05
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS credit_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey, c.c_name
+),
+HighValueNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 10
+)
+SELECT 
+    p.p_name,
+    SUM(rl.l_extendedprice * (1 - rl.l_discount)) AS total_revenue,
+    sd.s_name AS supplier_name,
+    cn.n_name AS customer_nation,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    CASE 
+        WHEN COUNT(DISTINCT co.o_orderkey) > 5 THEN 'High Activity'
+        ELSE 'Low Activity' 
+    END AS customer_activity_level
+FROM 
+    RankedLineItems rl
+JOIN 
+    partsupp ps ON rl.l_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails sd ON rl.l_suppkey = sd.s_suppkey
+JOIN 
+    CustomerOrders co ON rl.l_orderkey = co.o_orderkey
+JOIN 
+    highvaluenations cn ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = cn.n_nationkey)
+WHERE 
+    rl.rn = 1
+AND 
+    ps.ps_availqty IS NULL OR ps.ps_availqty > 50
+GROUP BY 
+    p.p_name, sd.s_name, cn.n_name
+HAVING 
+    total_revenue > 100000
+ORDER BY 
+    total_revenue DESC;

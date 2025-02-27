@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(p.CreationDate) ORDER BY p.Score DESC) AS YearRank,
+        COUNT(*) OVER (PARTITION BY YEAR(p.CreationDate)) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+PostVoteStats AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalClosed,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS TotalDeleted
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.Reputation > 1000 -- Filtering out users with low reputation
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.QuestionsAsked,
+        us.TotalClosed,
+        us.TotalDeleted,
+        RANK() OVER (ORDER BY us.QuestionsAsked DESC) AS UserRank
+    FROM 
+        UserPostStats us
+)
+SELECT 
+    pp.Id AS PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.YearRank,
+    pp.TotalPosts,
+    vs.UpVotes,
+    vs.DownVotes,
+    tu.DisplayName AS TopUser,
+    tu.QuestionsAsked,
+    tu.TotalClosed,
+    tu.TotalDeleted
+FROM 
+    RankedPosts pp
+LEFT JOIN 
+    PostVoteStats vs ON pp.Id = vs.PostId
+LEFT JOIN 
+    TopUsers tu ON pp.OwnerUserId = tu.UserId
+WHERE 
+    pp.YearRank <= 5 -- Top 5 posts for each year
+ORDER BY 
+    pp.CreationDate DESC;

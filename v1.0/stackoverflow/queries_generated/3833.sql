@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2022-01-01'
+    GROUP BY 
+        p.Id
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.RankByScore,
+    bu.DisplayName AS OwnerDisplayName,
+    bu.BadgeCount,
+    CASE 
+        WHEN r.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    COALESCE(NULLIF(r.UpVoteCount, 0), 'No Upvotes') AS UpVotes,
+    COALESCE(NULLIF(r.DownVoteCount, 0), 'No Downvotes') AS DownVotes
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.Id = u.Id
+LEFT JOIN 
+    BadgedUsers bu ON u.Id = bu.UserId
+WHERE 
+    r.RankByScore <= 5
+ORDER BY 
+    r.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

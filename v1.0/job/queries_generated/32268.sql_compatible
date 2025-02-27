@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieTree AS (
+    SELECT 
+        mt.id AS movie_id,
+        t.title AS movie_title,
+        0 AS depth,
+        ARRAY[t.title] AS path
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel') 
+        AND t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.movie_id,
+        t.title AS movie_title,
+        mt.depth + 1,
+        mt.path || t.title
+    FROM 
+        MovieTree mt
+    JOIN 
+        movie_link ml ON mt.movie_id = ml.linked_movie_id
+    JOIN 
+        aka_title t ON ml.movie_id = t.id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    a.name AS actor_name,
+    mt.depth,
+    mt.path,
+    COALESCE(ci.nr_order, 0) AS cast_order,
+    COUNT(DISTINCT mk.keyword) OVER (PARTITION BY m.id) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mt.depth DESC) AS tree_level_rank
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.id
+LEFT JOIN 
+    MovieTree mt ON m.id = mt.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND m.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    m.id, m.title, a.name, mt.depth, mt.path, ci.nr_order
+ORDER BY 
+    m.production_year DESC, keyword_count DESC, actor_name;

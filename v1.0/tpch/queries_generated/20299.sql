@@ -1,0 +1,49 @@
+WITH RECURSIVE CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedCustomers AS (
+    SELECT 
+        c.custkey,
+        c.name,
+        cs.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.custkey ORDER BY cs.total_sales DESC) AS sale_rank
+    FROM 
+        (SELECT DISTINCT c_custkey as custkey, c_name as name FROM customer) c
+    LEFT JOIN 
+        CustomerSales cs ON c.custkey = cs.c_custkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT r.n_nationkey) AS region_nations,
+    MAX(rc.total_sales) AS max_sales,
+    MIN(rc.total_sales) AS min_sales,
+    SUM(CASE WHEN rc.sale_rank = 1 THEN rc.total_sales ELSE NULL END) AS top_customer_sales,
+    CONCAT('{', STRING_AGG(CASE WHEN rc.total_sales IS NULL THEN 'NULL' ELSE rc.name END, ','), '}') AS customer_list
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedCustomers rc ON n.n_nationkey = rc.custkey
+WHERE 
+    (n.n_comment LIKE '%important%' OR n.n_comment IS NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY 
+    r.r_name
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,68 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        AcceptedAnswerId,
+        ViewCount,
+        Tags,
+        OwnerUserId,
+        0 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ViewCount,
+        p.Tags,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+)
+SELECT 
+    qp.Id AS QuestionId,
+    qp.Title AS QuestionTitle,
+    qp.CreationDate AS QuestionCreationDate,
+    qp.ViewCount AS QuestionViewCount,
+    COALESCE(v.UpVotes, 0) AS QuestionUpVotes,
+    COALESCE(v.DownVotes, 0) AS QuestionDownVotes,
+    COALESCE(b.BadgeCount, 0) AS AnsweringUserBadgeCount,
+    COALESCE(b.BadgeNames, 'None') AS AnsweringUserBadges,
+    COUNT(a.Id) AS AnswersCount,
+    COUNT(c.Id) AS CommentsCount,
+    STRING_AGG(DISTINCT qpt.Name, ', ') AS PostTypeNames,
+    MAX(CASE WHEN b.Date BETWEEN qp.CreationDate AND TIMESTAMP '2024-10-01 12:34:56' THEN b.Date END) AS LastBadgeDate
+FROM RecursivePostCTE qp 
+LEFT JOIN Posts a ON qp.Id = a.ParentId AND a.PostTypeId = 2 
+LEFT JOIN Comments c ON c.PostId = qp.Id
+LEFT JOIN PostVoteCounts v ON v.PostId = qp.Id
+LEFT JOIN Users u ON u.Id = qp.OwnerUserId
+LEFT JOIN UserBadges b ON b.UserId = qp.OwnerUserId
+LEFT JOIN PostTypes qpt ON qpt.Id = qp.PostTypeId
+WHERE qp.ViewCount > 1000
+GROUP BY qp.Id, qp.Title, qp.CreationDate, qp.ViewCount, v.UpVotes, v.DownVotes, b.BadgeCount, b.BadgeNames
+HAVING COUNT(a.Id) > 5
+ORDER BY qp.ViewCount DESC;

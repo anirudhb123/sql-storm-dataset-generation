@@ -1,0 +1,58 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        1 AS level 
+    FROM cast_info ci
+    WHERE ci.role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci2.person_id, 
+        ci2.movie_id, 
+        ah.level + 1 
+    FROM cast_info ci2
+    JOIN actor_hierarchy ah ON ci2.movie_id = ah.movie_id
+    WHERE ci2.person_id <> ah.person_id
+),
+movie_summary AS (
+    SELECT 
+        mt.title, 
+        mt.production_year, 
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM aka_title mt
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    WHERE mt.production_year IS NOT NULL
+    GROUP BY mt.title, mt.production_year
+),
+top_movies AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.total_cast,
+        ROW_NUMBER() OVER (ORDER BY ms.total_cast DESC) AS rn
+    FROM movie_summary ms
+    WHERE ms.production_year BETWEEN 1990 AND 2023
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    ah.level AS actor_hierarchy_level,
+    CASE 
+        WHEN tm.total_cast > 10 THEN 'Large Cast'
+        WHEN tm.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS cast_names
+FROM top_movies tm
+LEFT JOIN actor_hierarchy ah ON tm.title IN (SELECT mt.title FROM aka_title mt WHERE mt.production_year = tm.production_year)
+LEFT JOIN cast_info ci ON ci.movie_id = (SELECT id FROM aka_title WHERE title = tm.title LIMIT 1)
+LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+WHERE tm.rn <= 10 
+GROUP BY tm.title, tm.production_year, tm.total_cast, ah.level
+ORDER BY tm.total_cast DESC;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    up.UpVoteCount,
+    up.DownVoteCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(phs.CloseCount, 0) AS CloseCount,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.UserRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    Users u
+LEFT JOIN 
+    UserVotes up ON u.Id = up.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    u.Reputation > 1000 
+    AND (up.UpVoteCount IS NOT NULL OR up.DownVoteCount IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, 
+    u.DisplayName;

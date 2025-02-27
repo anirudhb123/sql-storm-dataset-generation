@@ -1,0 +1,110 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(p.ClosedDate, 'No Closure') AS ClosedDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 10
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+),
+UserTopPosts AS (
+    SELECT 
+        p.OwnerUserId,
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    WHERE p.OwnerUserId IS NOT NULL
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.Title AS PostTitle,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    phs.EditCount,
+    phs.EditTypes,
+    COUNT(DISTINCT pt.TagName) AS UniqueTagCount,
+    ub.BadgeCount,
+    CASE 
+        WHEN ub.BadgeCount > 5 THEN 'High Achiever'
+        WHEN ub.BadgeCount BETWEEN 1 AND 5 THEN 'Moderate'
+        ELSE 'Novice' 
+    END AS UserType,
+    COALESCE(PostCount, 0) AS TotalPosts
+FROM RankedUsers u
+JOIN PostDetails p ON p.AnswerCount > 5
+JOIN PostHistorySummary phs ON p.PostId = phs.PostId
+LEFT JOIN UserBadgeCounts ub ON ub.UserId = u.UserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount
+    FROM Posts
+    GROUP BY OwnerUserId
+) AS pp ON pp.OwnerUserId = u.UserId
+LEFT JOIN PopularTags pt ON pt.PostCount >= 20
+WHERE u.ReputationRank <= 10
+GROUP BY 
+    u.UserId, 
+    u.DisplayName, 
+    u.Reputation, 
+    p.Title,
+    p.Score, 
+    p.ViewCount,
+    p.CommentCount,
+    phs.EditCount,
+    phs.EditTypes,
+    ub.BadgeCount,
+    pp.PostCount
+ORDER BY 
+    u.Reputation DESC, 
+    p.Score DESC;

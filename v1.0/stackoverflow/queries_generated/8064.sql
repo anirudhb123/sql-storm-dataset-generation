@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1 AND rp.CommentCount > 10
+)
+SELECT 
+    p.Title,
+    COUNT(pl.RelatedPostId) AS RelatedPostCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t
+     WHERE t.WikiPostId = p.Id) AS Tags,
+    bp.Name AS BadgeName,
+    bp.Class AS BadgeClass
+FROM 
+    MostCommentedPosts mcp
+JOIN 
+    Posts p ON mcp.PostId = p.Id
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Badges bp ON bp.UserId = p.OwnerUserId
+WHERE 
+    bp.Date >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    p.Title, bp.Name, bp.Class
+ORDER BY 
+    RelatedPostCount DESC, p.Title
+LIMIT 10;

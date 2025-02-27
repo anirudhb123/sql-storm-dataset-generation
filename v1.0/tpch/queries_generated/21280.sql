@@ -1,0 +1,60 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        CAST(NULL AS VARCHAR(40)) AS parent_supplier,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        sh.s_name AS parent_supplier,
+        sh.level + 1
+    FROM partsupp ps
+    INNER JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    INNER JOIN supplier_hierarchy sh ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand LIKE '%Brand A%' LIMIT 1)
+    WHERE sh.level < 5  -- restrict to level 5 for performance testing
+), 
+
+nations_with_comments AS (
+    SELECT 
+        n.n_name,
+        n.n_comment,
+        COALESCE(NULLIF(n.n_comment, ''), 'No comment') AS effective_comment
+    FROM nation n
+), 
+
+lineitem_summary AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count,
+        AVG(l.l_quantity) as avg_quantity,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+    GROUP BY l.l_orderkey
+)
+
+SELECT
+    sh.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    SUM(ls.total_revenue) AS overall_revenue,
+    COUNT(DISTINCT ls.l_orderkey) AS distinct_orders,
+    SUM(CASE WHEN sh.level IS NULL THEN 0 ELSE 1 END) AS hierarchy_count,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ls.total_revenue) DESC) AS revenue_rank
+FROM supplier_hierarchy sh
+LEFT JOIN nations_with_comments n ON sh.s_suppkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = sh.s_suppkey)
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+GROUP BY sh.s_name, n.n_name
+HAVING SUM(ls.total_revenue) > 1000 AND MAX(ls.last_ship_date) <= CURRENT_DATE - INTERVAL '30 DAY'
+ORDER BY overall_revenue DESC, supplier_name
+OFFSET (SELECT COUNT(*) FROM supplier) / 2 ROWS FETCH NEXT 10 ROWS ONLY;

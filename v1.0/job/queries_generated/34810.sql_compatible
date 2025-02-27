@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+aggregated_cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        MAX(CASE WHEN r.role = 'Lead' THEN c.nr_order END) AS lead_order
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level,
+    ac.total_cast,
+    ac.lead_order,
+    kc.keyword_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    aggregated_cast ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    keyword_count kc ON mh.movie_id = kc.movie_id
+WHERE 
+    (mh.level = 0 OR ac.total_cast > 5)
+    AND (ac.lead_order IS NOT NULL OR kc.keyword_count > 2)
+ORDER BY 
+    mh.title,
+    mh.movie_id
+LIMIT 100;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        1 AS level
+    FROM 
+        customer_address
+    WHERE 
+        ca_state IS NOT NULL
+    UNION ALL
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country,
+        level + 1
+    FROM 
+        customer_address ca
+    JOIN AddressHierarchy ah ON ca.ca_address_sk = ah.ca_address_sk
+    WHERE 
+        ca_country = 'USA' AND ah.level < 5
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_year,
+        SUM(COALESCE(ws.ws_net_profit, 0) - COALESCE(ss.ss_net_profit, 0) * 0.1) AS adjusted_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY d.d_year DESC) AS yearly_rank
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+    JOIN date_dim d ON (ws.ws_sold_date_sk = d.d_date_sk OR ss.ss_sold_date_sk = d.d_date_sk)
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year
+    HAVING 
+        adjusted_profit > (SELECT AVG(adjusted_profit) FROM CustomerDetails) -- Correlated subquery
+    ORDER BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        d.d_year,
+        SUM(adjusted_profit) AS total_profit
+    FROM 
+        CustomerDetails c
+    JOIN date_dim d ON c.d_year = d.d_year
+    GROUP BY 
+        c.c_customer_id, d.d_year
+    HAVING 
+        total_profit > 1000
+)
+SELECT 
+    ah.ca_city,
+    ah.ca_state,
+    COUNT(tc.c_customer_id) AS customer_count,
+    ROUND(AVG(tc.total_profit), 2) AS avg_profit
+FROM 
+    AddressHierarchy ah
+LEFT JOIN TopCustomers tc ON 
+    EXISTS (SELECT 1 FROM customer c WHERE c.c_current_addr_sk = ah.ca_address_sk)
+GROUP BY 
+    ah.ca_city, ah.ca_state
+ORDER BY 
+    customer_count DESC, avg_profit DESC
+LIMIT 10 OFFSET 5;

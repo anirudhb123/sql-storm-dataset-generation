@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(V.BountyAmount) AS TotalBountyAmount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBountyAmount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalBountyAmount,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    SUM(CASE WHEN PH.PostHistoryTypeId = 1 THEN 1 ELSE 0 END) AS TotalInitialTitleEdits,
+    SUM(CASE WHEN PH.PostHistoryTypeId = 2 THEN 1 ELSE 0 END) AS TotalInitialBodyEdits,
+    MAX(U.CreationDate) AS AccountCreationDate
+FROM 
+    TopUsers U
+LEFT JOIN 
+    Comments C ON U.UserId = C.UserId
+LEFT JOIN 
+    PostHistory PH ON U.UserId = PH.UserId
+WHERE 
+    U.ReputationRank <= 10
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.TotalPosts, U.TotalQuestions, U.TotalAnswers, U.TotalBountyAmount
+ORDER BY 
+    U.Reputation DESC;

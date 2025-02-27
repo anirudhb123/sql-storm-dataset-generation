@@ -1,0 +1,39 @@
+WITH RECURSIVE nation_orders AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_orders
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) + NO.total_orders
+    FROM nation_orders NO
+    JOIN nation n ON NO.n_nationkey = n.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE NO.total_orders IS NOT NULL
+)
+SELECT r.r_name,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       AVG(o.o_totalprice) AS avg_order_value,
+       SUM(COALESCE(l.l_discount,0)) AS total_discount,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+WHERE r.r_name IS NOT NULL
+AND (o.o_orderstatus = 'F' OR o.o_orderstatus IS NULL)
+GROUP BY r.r_name
+HAVING AVG(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+AND customer_count > 10
+ORDER BY total_discount DESC;

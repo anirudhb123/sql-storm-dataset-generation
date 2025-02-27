@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 END), 0) AS NetVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id
+),
+MostActiveUsers AS (
+    SELECT
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        COUNT(DISTINCT p.Id) AS UniquePostCount
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        OwnerUserId
+    HAVING
+        COUNT(*) > 10
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.NetVotes,
+    r.CommentCount,
+    r.BadgeCount,
+    a.PostCount,
+    a.UniquePostCount
+FROM 
+    Users u
+JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+JOIN 
+    MostActiveUsers a ON u.Id = a.OwnerUserId
+WHERE 
+    r.rn = 1
+ORDER BY 
+    r.NetVotes DESC, 
+    r.Score DESC
+LIMIT 100;

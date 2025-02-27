@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(rp.Tags, ',') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(both ' ' from tag_array)
+    WHERE 
+        rp.Rank = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.OwnerReputation
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.OwnerReputation,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.Tags,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    cp.LastClosedDate,
+    CASE 
+        WHEN cp.CloseCount > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS IsClosed
+FROM 
+    PostStats ps
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.CommentCount DESC
+LIMIT 100;

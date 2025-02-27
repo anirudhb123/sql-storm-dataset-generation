@@ -1,0 +1,23 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Retail Price: ', FORMAT(p.p_retailprice, 2), ', Size: ', p.p_size) AS detailed_info,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS average_price_after_discount,
+    SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN 1 
+        ELSE 0 
+    END) AS return_count
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey 
+GROUP BY 
+    p.p_partkey, s.s_suppkey
+ORDER BY 
+    total_quantity DESC
+LIMIT 10;

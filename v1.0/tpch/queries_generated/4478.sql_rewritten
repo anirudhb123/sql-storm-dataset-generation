@@ -1,0 +1,80 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+), supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), top_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    WHERE 
+        li.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr
+    HAVING 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) > 100000
+), orders_with_parts AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        r.order_revenue,
+        c.c_nationkey
+    FROM 
+        ranked_orders ro
+    JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+    LEFT JOIN (
+        SELECT 
+            li.l_orderkey,
+            SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_revenue
+        FROM 
+            lineitem li
+        GROUP BY 
+            li.l_orderkey
+    ) r ON o.o_orderkey = r.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+)
+SELECT 
+    np.n_name,
+    p.p_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(s.total_supplycost) AS total_cost,
+    AVG(s.total_availqty) AS avg_avail_qty
+FROM 
+    nation np
+LEFT JOIN 
+    supplier s ON np.n_nationkey = s.s_nationkey
+JOIN 
+    supplier_parts sp ON s.s_suppkey = sp.ps_suppkey
+JOIN 
+    top_parts p ON sp.ps_partkey = p.p_partkey
+JOIN 
+    orders_with_parts o ON o.o_orderkey = p.p_partkey
+GROUP BY 
+    np.n_name, p.p_name
+ORDER BY 
+    np.n_name DESC, order_count DESC;

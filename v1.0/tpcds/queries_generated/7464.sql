@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        SUM(ws.ws_ext_tax) AS total_tax,
+        SUM(ws.ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2458849 AND 2459182  -- Example date range
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PromotionData AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        p.p_discount_active
+    FROM 
+        promotion p
+    WHERE 
+        p.p_discount_active = 'Y'
+)
+SELECT 
+    s.s_store_sk,
+    sd.ws_item_sk,
+    SUM(sd.total_quantity) AS total_quantity_sold,
+    SUM(sd.total_sales) AS total_sales_amount,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT p.p_promo_sk) AS promotions_used
+FROM 
+    SalesData sd
+JOIN 
+    store s ON sd.ws_item_sk = s.s_store_sk
+JOIN 
+    CustomerData c ON c.c_customer_sk = sd.ws_bill_customer_sk
+JOIN 
+    PromotionData p ON p.p_promo_sk = sd.ws_promo_sk
+GROUP BY 
+    s.s_store_sk, sd.ws_item_sk
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 50;

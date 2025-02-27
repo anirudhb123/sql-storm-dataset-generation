@@ -1,0 +1,70 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rnk
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk 
+    WHERE 
+        dd.d_year = 2001
+        AND dd.d_month_seq BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_sk
+),
+sales_summary AS (
+    SELECT 
+        w.warehouse_id, 
+        COALESCE(rs.total_quantity, 0) AS total_items_sold,
+        (SELECT AVG(ss.ws_sales_price) 
+         FROM web_sales ss 
+         WHERE ss.ws_ship_date_sk BETWEEN 20230101 AND 20230630) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        warehouse w 
+    LEFT JOIN
+        web_sales ws ON w.warehouse_sk = ws.ws_warehouse_sk 
+    LEFT JOIN 
+        ranked_sales rs ON rs.web_site_sk = w.warehouse_sk
+    GROUP BY 
+        w.warehouse_id
+),
+top_sales AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc, 
+        SUM(s.store_quantity) AS total_sold, 
+        RANK() OVER (ORDER BY SUM(s.store_quantity) DESC) AS item_rank
+    FROM 
+        (SELECT 
+             cs.cs_item_sk, COUNT(*) AS store_quantity 
+         FROM 
+             store_sales cs 
+         WHERE 
+             cs.ss_sold_date_sk >= 20230101 
+         GROUP BY 
+             cs.cs_item_sk) s
+    JOIN 
+        item ON item.i_item_sk = s.cs_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+)
+SELECT 
+    ss.warehouse_id, 
+    ss.total_items_sold,
+    ss.avg_sales_price,
+    ss.total_orders,
+    ts.i_item_id,
+    ts.i_item_desc,
+    ts.total_sold
+FROM 
+    sales_summary ss 
+JOIN 
+    top_sales ts ON ss.total_items_sold > 1000 
+WHERE 
+    ts.item_rank <= 10
+ORDER BY 
+    ss.total_items_sold DESC, 
+    ts.total_sold DESC
+OPTION (MAXDOP 1);

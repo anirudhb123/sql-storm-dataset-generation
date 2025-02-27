@@ -1,0 +1,101 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        CASE 
+            WHEN bp.BadgeCount IS NOT NULL THEN 'Has Badge'
+            ELSE 'No Badge'
+        END AS BadgeStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS BadgeCount
+        FROM Badges
+        GROUP BY UserId
+    ) b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON rp.PostId = c.PostId
+    LEFT JOIN (
+        SELECT 
+            p.Id AS PostId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Posts p
+        INNER JOIN Badges b ON p.OwnerUserId = b.UserId
+        WHERE 
+            p.AcceptedAnswerId IS NOT NULL
+        GROUP BY 
+            p.Id
+    ) bp ON rp.PostId = bp.PostId
+    WHERE 
+        rp.UserPostRank = 1
+),
+HighScorePosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.BadgeStatus,
+        RANK() OVER (ORDER BY ps.Score DESC) AS ScoreRank
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.ViewCount > 100 
+)
+SELECT 
+    hsp.PostId, 
+    hsp.Title,
+    hsp.ViewCount,
+    hsp.Score,
+    hsp.BadgeStatus,
+    CASE 
+        WHEN hsp.ScoreRank <= 10 THEN 'Top 10'
+        ELSE 'Other'
+    END AS ScoreCategory,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    HighScorePosts hsp
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            SUBSTRING(t.Tags FROM 2 FOR LENGTH(t.Tags) - 2) AS TagName
+        FROM 
+            Posts p
+        JOIN 
+            Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+        WHERE 
+            p.Id = hsp.PostId
+    ) t ON true
+GROUP BY 
+    hsp.PostId, hsp.Title, hsp.ViewCount, hsp.Score, hsp.BadgeStatus, hsp.ScoreRank
+HAVING 
+    COUNT(t.TagName) > 0 
+ORDER BY 
+    hsp.Score DESC, 
+    hsp.ViewCount DESC;

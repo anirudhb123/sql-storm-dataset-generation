@@ -1,0 +1,24 @@
+
+WITH SupplierAgg AS (
+    SELECT s.n_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_nationkey, COUNT(o.o_orderkey) AS TotalOrders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY c.c_nationkey
+),
+NationAggregates AS (
+    SELECT n.n_nationkey, n.n_name, COALESCE(sa.TotalSupplyCost, 0) AS TotalSupplyCost, COALESCE(co.TotalOrders, 0) AS TotalOrders
+    FROM nation n
+    LEFT JOIN SupplierAgg sa ON n.n_nationkey = sa.n_nationkey
+    LEFT JOIN CustomerOrders co ON n.n_nationkey = co.c_nationkey
+)
+SELECT na.n_name, na.TotalSupplyCost, na.TotalOrders
+FROM NationAggregates na
+ORDER BY na.TotalSupplyCost DESC, na.TotalOrders DESC
+FETCH FIRST 10 ROWS ONLY;

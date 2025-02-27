@@ -1,0 +1,43 @@
+
+WITH RankedPosts AS (
+    SELECT P.Id, P.Title, P.OwnerUserId, P.AnswerCount, P.Score, P.CreationDate, 
+           RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.PostTypeId = 1
+),
+UserStats AS (
+    SELECT U.Id AS UserId, 
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+           COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+           COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadgeCount,
+           COALESCE(SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadgeCount,
+           COALESCE(SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadgeCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostCloseReasons AS (
+    SELECT PH.PostId, 
+           STRING_AGG(CRT.Name, ', ') AS CloseReasons
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CRT ON CAST(PH.Comment AS INT) = CRT.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+)
+SELECT UP.UserId, 
+       U.DisplayName,
+       RP.Title AS MostRecentQuestionTitle, 
+       RP.Score AS QuestionScore,
+       PS.CloseReasons,
+       US.UpVoteCount, 
+       US.DownVoteCount,
+       US.GoldBadgeCount, 
+       US.SilverBadgeCount, 
+       US.BronzeBadgeCount
+FROM UserStats US
+JOIN RankedPosts RP ON US.UserId = RP.OwnerUserId AND RP.PostRank = 1
+JOIN Users U ON US.UserId = U.Id
+LEFT JOIN PostCloseReasons PS ON RP.Id = PS.PostId
+ORDER BY US.UpVoteCount DESC, US.DownVoteCount ASC, RP.CreationDate DESC
+LIMIT 10;

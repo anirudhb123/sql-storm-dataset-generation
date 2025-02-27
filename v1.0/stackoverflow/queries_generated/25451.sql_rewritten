@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_names ON TRUE
+    JOIN
+        Tags t ON t.TagName = tag_names
+    GROUP BY
+        p.Id, p.Title, p.OwnerUserId, p.ViewCount, p.CreationDate
+),
+PopularUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM
+        Users u
+    JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    JOIN
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id AND v.VoteTypeId = 9  
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+    HAVING
+        COUNT(DISTINCT p.Id) > 5 
+),
+PostHistorySummary AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON ph.PostId = p.Id
+    JOIN
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE
+        p.OwnerUserId IS NOT NULL
+    GROUP BY
+        p.Id
+)
+SELECT
+    pu.DisplayName AS UserName,
+    pu.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.CommentCount,
+    phs.EditCount,
+    phs.LastEditDate,
+    phs.PostHistoryTypes,
+    pu.TotalBounty
+FROM
+    PopularUsers pu
+JOIN
+    RankedPosts rp ON pu.UserId = rp.OwnerUserId
+JOIN
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE
+    rp.PostRank <= 3 
+ORDER BY
+    pu.Reputation DESC, rp.CommentCount DESC;

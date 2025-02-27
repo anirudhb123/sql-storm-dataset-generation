@@ -1,0 +1,71 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserReputation
+    WHERE 
+        PostCount > 5
+),
+RecentPostActivities AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+)
+SELECT 
+    tu.UserId,
+    u.DisplayName,
+    u.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    rp.CommentCount,
+    tu.Rank
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+JOIN 
+    RecentPostActivities rp ON u.Id = rp.OwnerUserId
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.Rank, rp.ViewCount DESC;

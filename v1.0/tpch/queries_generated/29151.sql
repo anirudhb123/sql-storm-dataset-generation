@@ -1,0 +1,58 @@
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        GROUP_CONCAT(DISTINCT s.s_name ORDER BY s.s_name SEPARATOR ', ') AS supplier_names
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+StringBenchmark AS (
+    SELECT 
+        ps.p_partkey,
+        CONCAT('Part: ', ps.p_name, ', Supplier Count: ', ps.supplier_count, 
+               ', Total Qty: ', ps.total_available_quantity, 
+               ', Average Cost: ', FORMAT(ps.average_supply_cost, 2), 
+               ', Suppliers: ', ps.supplier_names) AS part_details,
+        CONCAT('Customer: ', co.c_name, ', Total Spent: ', FORMAT(co.total_spent, 2),
+               ', Total Orders: ', co.total_orders) AS customer_details
+    FROM 
+        PartStats ps
+    CROSS JOIN 
+        CustomerOrders co
+    WHERE 
+        ps.supplier_count > 5 AND co.total_spent > 1000
+)
+SELECT 
+    part_details,
+    customer_details
+FROM 
+    StringBenchmark
+WHERE 
+    LENGTH(part_details) > 100 OR LENGTH(customer_details) > 100
+ORDER BY 
+    part_details DESC, customer_details ASC;

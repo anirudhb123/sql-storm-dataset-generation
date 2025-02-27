@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+      AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title AS ClosedPostTitle,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ph.Text AS HistoryDetails
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Post Closed and Post Reopened actions
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    rp.Title AS MostPopularPost,
+    rp.ViewCount AS Popularity,
+    ub.GoldBadgeCount,
+    ub.SilverBadgeCount,
+    ub.BronzeBadgeCount,
+    cp.ClosedPostTitle,
+    cp.CreationDate AS ClosedDate,
+    cp.Comment AS ClosureReason,
+    ROW_NUMBER() OVER (PARTITION BY up.Id ORDER BY rp.ViewCount DESC) AS RankInPopularity
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON rp.UserPostRank = 1 AND rp.ViewCount = (SELECT MAX(ViewCount) FROM RankedPosts r WHERE r.OwnerUserId = up.Id)
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    ClosedPostDetails cp ON cp.PostId = rp.Id
+WHERE 
+    up.Reputation > 1000
+    AND (ub.GoldBadgeCount > 0 OR ub.SilverBadgeCount > 0 OR ub.BronzeBadgeCount > 0)
+ORDER BY 
+    RankInPopularity, up.DisplayName;

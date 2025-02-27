@@ -1,0 +1,46 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(COALESCE(p.Views, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsWithTagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.QuestionsCount,
+    us.AnswersCount,
+    us.TotalViews,
+    us.TotalScore,
+    ts.TagId,
+    ts.TagName,
+    ts.PostsWithTagCount
+FROM 
+    UserStatistics us
+JOIN 
+    TagStatistics ts ON ts.PostsWithTagCount > 0
+ORDER BY 
+    us.Reputation DESC, us.PostCount DESC;

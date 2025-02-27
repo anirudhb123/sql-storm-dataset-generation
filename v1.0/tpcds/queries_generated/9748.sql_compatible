@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+SalesByDemographics AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+        SUM(cs.total_sales) AS total_sales
+    FROM 
+        CustomerSales AS cs
+    JOIN 
+        customer_demographics AS cd ON cs.c_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+), 
+SalesOverTime AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS yearly_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    sbd.cd_gender,
+    sbd.cd_marital_status,
+    sbd.customer_count,
+    sbd.total_sales,
+    sot.yearly_sales,
+    sot.total_orders
+FROM 
+    SalesByDemographics AS sbd
+CROSS JOIN 
+    SalesOverTime AS sot
+ORDER BY 
+    sbd.total_sales DESC;

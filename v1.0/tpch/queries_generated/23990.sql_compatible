@@ -1,0 +1,52 @@
+
+WITH SupplyCostCTE AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(*) AS supplier_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.partkey
+), 
+
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        COUNT(DISTINCT o.o_clerk) AS unique_clerks,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sc.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(os.total_amount, 0) AS total_amount,
+    COALESCE(os.unique_clerks, 0) AS unique_clerks,
+    CASE 
+        WHEN os.rank_order = 1 THEN 'Highest Sales Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    COALESCE(NULLIF(p.p_brand, 'UNKNOWN'), 'BRAND NOT SPECIFIED') AS processed_brand,
+    COUNT(DISTINCT n.n_nationkey) FILTER (WHERE n.n_regionkey IS NULL) AS related_nations
+FROM part p
+LEFT JOIN SupplyCostCTE sc ON p.p_partkey = sc.partkey
+FULL OUTER JOIN OrderSummary os ON os.total_amount > 1000
+LEFT JOIN nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sc.partkey LIMIT 1)
+WHERE p.p_retailprice BETWEEN 10.00 AND 500.00 
+  AND p.p_size IS NOT NULL
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    sc.total_supply_cost,
+    os.total_amount,
+    os.unique_clerks,
+    os.rank_order
+HAVING 
+    COALESCE(sc.total_supply_cost, 0) IS NOT NULL 
+    OR COUNT(n.n_nationkey) > 0
+ORDER BY order_type, total_amount DESC, processed_brand;

@@ -1,0 +1,91 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+    GROUP BY 
+        sr_returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status IS NOT NULL
+),
+IncomeStats AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        COUNT(hd.hd_demo_sk) AS household_count
+    FROM 
+        household_demographics hd
+    GROUP BY 
+        hd.hd_income_band_sk
+    HAVING 
+        COUNT(hd.hd_demo_sk) > (SELECT AVG(cnt) FROM (SELECT COUNT(hd_demo_sk) AS cnt FROM household_demographics GROUP BY hd_income_band_sk) AS subquery)
+),
+TopCustomers AS (
+    SELECT 
+        r.returning_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    JOIN 
+        RankedReturns r ON sr.sr_returning_customer_sk = r.s_returning_customer_sk
+    GROUP BY 
+        r.returning_customer_sk
+    HAVING 
+        return_count > 10
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    ci.hd_income_band_sk,
+    ci.household_count,
+    COALESCE(tc.total_return_amt, 0) AS total_return_amt,
+    CASE 
+        WHEN tc.return_count IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END AS return_status
+FROM 
+    CustomerDetails cd
+JOIN 
+    income_band ci ON ci.ib_income_band_sk = (
+        SELECT 
+            hd.hd_income_band_sk
+        FROM 
+            household_demographics hd
+        WHERE 
+            hd.hd_demo_sk IN (
+                SELECT c.c_current_hdemo_sk FROM customer c WHERE c.c_customer_id = cd.c_customer_id
+            )
+        LIMIT 1
+    )
+LEFT JOIN 
+    TopCustomers tc ON cd.c_customer_id = tc.returning_customer_sk
+WHERE 
+    cd.gender_rank = 1
+AND 
+    EXISTS (
+        SELECT 1 
+        FROM web_sales ws 
+        WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+        AND ws.ws_net_paid_inc_tax > 50
+    )
+ORDER BY 
+    cd.cd_purchase_estimate DESC,
+    total_return_amt DESC;

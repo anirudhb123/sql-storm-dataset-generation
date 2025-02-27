@@ -1,0 +1,85 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), FrequentTags AS (
+    SELECT 
+        T.TagName,
+        T.Count,
+        ROW_NUMBER() OVER (PARTITION BY T.TagName ORDER BY T.Count DESC) AS TagRank
+    FROM 
+        Tags T
+    WHERE 
+        T.IsModeratorOnly = 0
+), ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(PR.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    JOIN 
+        CloseReasonTypes CR ON CAST(PH.Comment AS INTEGER) = CR.Id
+    WHERE 
+        PHT.Name = 'Post Closed'
+    GROUP BY 
+        PH.PostId
+), UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE((SELECT COUNT(DISTINCT C.Id) 
+                   FROM Comments C 
+                   WHERE C.UserId = U.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(DISTINCT B.Id) 
+                   FROM Badges B 
+                   WHERE B.UserId = U.Id AND B.Class = 1), 0) AS GoldBadges
+    FROM 
+        Users U
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.Reputation,
+    RU.ReputationRank,
+    RU.PostCount,
+    RU.TotalBounty,
+    FT.TagName,
+    FT.Count AS TagCount,
+    CP.CloseReasonCount,
+    CP.CloseReasons,
+    UA.CommentCount,
+    UA.GoldBadges
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    FrequentTags FT ON RU.UserId = (SELECT OwnerUserId 
+                                      FROM Posts 
+                                      WHERE Tags LIKE CONCAT('%', FT.TagName, '%')
+                                      LIMIT 1)
+LEFT JOIN 
+    ClosedPosts CP ON CP.PostId IN (SELECT Id 
+                                       FROM Posts 
+                                       WHERE OwnerUserId = RU.UserId)
+LEFT JOIN 
+    UserActivity UA ON UA.UserId = RU.UserId
+WHERE 
+    RU.Reputation >= 1000
+    AND (FT.TagCount IS NOT NULL OR CP.CloseReasonCount IS NOT NULL)
+ORDER BY 
+    RU.ReputationRank, RU.DisplayName;

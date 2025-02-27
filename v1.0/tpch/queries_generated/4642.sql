@@ -1,0 +1,63 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_nationkey,
+        c.custkey,
+        c.c_name,
+        c.total_spent,
+        c.order_count
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.rank_within_nation <= 5
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    rc.r_name AS region_name,
+    tc.c_name AS customer_name,
+    tc.total_spent,
+    CASE 
+        WHEN tc.order_count > 10 THEN 'High'
+        WHEN tc.order_count BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low' 
+    END AS order_freq,
+    sp.supplier_value AS total_supplier_value,
+    CASE 
+        WHEN sp.supplier_value IS NULL THEN 'Not Available'
+        ELSE CONCAT('Value: ', CAST(sp.supplier_value AS VARCHAR))
+    END AS formatted_supplier_value
+FROM 
+    nation n
+JOIN 
+    region rc ON n.n_regionkey = rc.r_regionkey
+JOIN 
+    TopCustomers tc ON n.n_nationkey = tc.custkey
+LEFT JOIN 
+    SupplierParts sp ON tc.custkey = sp.s_suppkey
+WHERE 
+    tc.total_spent > 1000
+ORDER BY 
+    rc.r_name, tc.total_spent DESC;

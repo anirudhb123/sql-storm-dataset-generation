@@ -1,0 +1,66 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) > 1000
+), 
+HighValueCustomers AS (
+    SELECT 
+        csc.c_customer_sk,
+        csc.c_first_name,
+        csc.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        CustomerSales csc
+    JOIN 
+        customer_demographics cd ON csc.c_customer_sk = cd.cd_demo_sk
+),
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        SUM(ws.ws_quantity) AS total_sold,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_education_status,
+    ws.w_warehouse_name,
+    ws.total_sold,
+    ws.total_orders
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    WarehouseStats ws ON ws.total_sold > 100
+ORDER BY 
+    hvc.total_spent DESC, ws.total_sold DESC;

@@ -1,0 +1,83 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+RankedUserStats AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalPosts,
+        AvgViewCount,
+        TotalQuestions,
+        TotalAnswers,
+        ROW_NUMBER() OVER (ORDER BY TotalUpVotes DESC, TotalPosts DESC) AS UserRank
+    FROM UserVoteStats
+),
+HighActivityUsers AS (
+    SELECT *
+    FROM RankedUserStats
+    WHERE TotalPosts >= 10 AND (TotalUpVotes - TotalDownVotes) > 5
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month')
+    GROUP BY p.Id, p.Title
+),
+FinalAnalytics AS (
+    SELECT 
+        hua.UserId,
+        hua.DisplayName,
+        pa.PostId,
+        pa.Title,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes,
+        CASE 
+            WHEN pa.UpVotes > pa.DownVotes THEN 'Positive'
+            WHEN pa.UpVotes < pa.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment
+    FROM HighActivityUsers hua
+    JOIN PostAnalytics pa ON hua.UserId = pa.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(f.PostId, -1) AS PostId,
+    COALESCE(f.Title, 'No Posts') AS Title,
+    f.CommentCount,
+    f.UpVotes,
+    f.DownVotes,
+    f.Sentiment,
+    CASE 
+        WHEN f.UpVotes IS NULL AND f.DownVotes IS NULL THEN 'Votes not available'
+        WHEN f.UpVotes IS NOT NULL AND f.UpVotes > 100 THEN 'Star user'
+        ELSE 'Regular user' 
+    END AS UserCategory
+FROM Users u
+LEFT JOIN FinalAnalytics f ON u.Id = f.UserId
+ORDER BY u.Reputation DESC, f.UpVotes DESC;

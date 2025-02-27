@@ -1,0 +1,76 @@
+WITH TagFrequency AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        Tags
+),
+
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AvgScore,
+        MAX(P.CreationDate) AS LastPosted
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1 -- Only considering Questions
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+ClosedQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.UserDisplayName AS ClosedBy
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+),
+
+PopularTags AS (
+    SELECT
+        T.TagName,
+        TF.TagCount
+    FROM 
+        TagFrequency TF
+    JOIN 
+        Tags T ON TF.Tags = CONCAT('<', T.TagName, '>') -- Ensure correct tag format
+    WHERE 
+        TF.TagCount >= 10 -- Filtering tags with more than 10 occurrences
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.QuestionCount,
+    UA.AcceptedAnswers,
+    UA.TotalViews,
+    UA.AvgScore,
+    PQ.TagName AS PopularTag,
+    CQ.Title AS ClosedQuestionTitle,
+    CQ.ClosedDate,
+    CQ.ClosedBy
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    ClosedQuestions CQ ON CQ.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UA.UserId)
+LEFT JOIN 
+    PopularTags PQ ON PQ.TagCount = (SELECT MAX(TagCount) FROM PopularTags) -- Joining with the most popular tag
+ORDER BY 
+    UA.TotalViews DESC, UA.QuestionCount DESC;

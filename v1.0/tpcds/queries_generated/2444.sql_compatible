@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN web_site wsct ON ws.ws_web_site_sk = wsct.web_site_sk
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                                  AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY ws.web_site_sk, ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.total_sales
+    FROM RankedSales rs
+    WHERE rs.sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt_inc_tax) AS total_returned
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+FinalResults AS (
+    SELECT 
+        wsct.web_site_id,
+        ts.total_sales,
+        COALESCE(cr.total_returned, 0) AS total_returns,
+        (ts.total_sales - COALESCE(cr.total_returned, 0)) AS net_sales
+    FROM TopSales ts
+    JOIN web_site wsct ON ts.web_site_sk = wsct.web_site_sk
+    LEFT JOIN CustomerReturns cr ON cr.wr_returning_customer_sk = (
+        SELECT c_customer_sk 
+        FROM customer 
+        WHERE c_customer_id = (
+            SELECT wr_returned_customer_sk 
+            FROM web_returns 
+            WHERE wr_item_sk IN (
+                SELECT cs_item_sk 
+                FROM catalog_sales
+            )
+            ORDER BY wr_return_amt_inc_tax DESC
+            LIMIT 1
+        )
+    )
+)
+SELECT 
+    f.web_site_id,
+    f.total_sales,
+    f.total_returns,
+    f.net_sales,
+    CASE 
+        WHEN f.net_sales < 0 THEN 'Loss'
+        WHEN f.net_sales = 0 THEN 'Break-even'
+        ELSE 'Profit'
+    END AS sales_status
+FROM FinalResults f
+ORDER BY f.net_sales DESC;

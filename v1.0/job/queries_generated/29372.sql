@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        t.production_year >= 2000
+        AND k.keyword ILIKE '%action%'
+),
+company_details AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        mi.info AS movie_info
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%trivia%' OR info ILIKE '%box office%')
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.movie_keyword,
+    rm.actor_name,
+    cd.company_name,
+    cd.company_type,
+    mid.movie_info
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    company_details cd ON rm.movie_title = cd.movie_name
+LEFT JOIN 
+    movie_info_details mid ON rm.production_year = mid.movie_id
+WHERE 
+    rm.actor_rank <= 3
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_title;
+
+This alias-rich SQL query benchmarks string processing by filtering movie titles based on specific criteria (like production year and keywords), while also pulling in associated companies and trivia or box office information. It incorporates various joins and filtering conditions that can be used to measure the performance of string operations, ensuring a complex interplay of text data across multiple tables.

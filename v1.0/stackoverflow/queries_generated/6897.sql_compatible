@@ -1,0 +1,61 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), CAST(0 AS DECIMAL)) AS TotalBounty
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.CreationDate, U.DisplayName
+    ORDER BY 
+        P.Score DESC
+    LIMIT 5
+)
+SELECT 
+    UBDC.UserId,
+    UBDC.DisplayName,
+    UBDC.BadgeCount,
+    UBDC.GoldBadgeCount,
+    UBDC.SilverBadgeCount,
+    UBDC.BronzeBadgeCount,
+    TP.PostId,
+    TP.Title AS PostTitle,
+    TP.Score AS PostScore,
+    TP.CreationDate AS PostCreationDate,
+    TP.OwnerDisplayName,
+    TP.CommentCount,
+    TP.TotalBounty
+FROM 
+    UserBadgeCounts UBDC
+JOIN 
+    TopPosts TP ON UBDC.UserId = TP.OwnerDisplayName
+ORDER BY 
+    UBDC.BadgeCount DESC, TP.Score DESC;

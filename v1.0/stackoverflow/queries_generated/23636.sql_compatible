@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(BadgeCount.Count, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS Count 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) AS BadgeCount ON BadgeCount.UserId = p.OwnerUserId
+    WHERE
+        p.Score IS NOT NULL 
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.ViewCount > 10
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    JOIN Users u ON v.UserId = u.Id
+    GROUP BY 
+        v.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        up.UserId,
+        COALESCE(up.UpVotes, 0) AS UpVotes,
+        COALESCE(up.DownVotes, 0) AS DownVotes,
+        CASE WHEN cp.CloseReasonCount > 0 THEN 'Closed' ELSE 'Open' END AS Status
+    FROM 
+        RankedPosts rp
+    LEFT JOIN UserVoteSummary up ON up.UserId = rp.OwnerUserId
+    LEFT JOIN ClosedPosts cp ON cp.PostId = rp.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Status,
+    CASE 
+        WHEN pd.Score > 100 
+             THEN 'Highly Rated'
+        WHEN pd.Score BETWEEN 50 AND 100 
+             THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory
+FROM 
+    PostDetails pd
+WHERE 
+    pd.RN = 1
+ORDER BY 
+    pd.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,47 @@
+
+WITH PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        s.s_suppkey,
+        s.s_name,
+        s.s_comment,
+        CONCAT(s.s_name, ' - ', p.p_name) AS supplier_part_name,
+        LENGTH(CONCAT(s.s_name, ': ', p.p_name)) AS name_length,
+        SUBSTRING(p.p_comment, 1, LOCATE(' ', p.p_comment, LOCATE(' ', p.p_comment, LOCATE(' ', p.p_comment) + 1) + 1) - 1) AS short_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+AggregatedData AS (
+    SELECT 
+        p_partkey,
+        COUNT(DISTINCT s_suppkey) AS supplier_count,
+        MAX(name_length) AS max_name_length,
+        COUNT(CASE WHEN p_brand LIKE 'M%' THEN 1 END) AS brand_m_count,
+        STRING_AGG(DISTINCT short_comment, ' | ') AS comments_summary
+    FROM 
+        PartSupplier
+    GROUP BY 
+        p_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    a.supplier_count,
+    a.max_name_length,
+    a.brand_m_count,
+    a.comments_summary
+FROM 
+    part p
+JOIN 
+    AggregatedData a ON p.p_partkey = a.p_partkey
+WHERE 
+    a.supplier_count > 1
+ORDER BY 
+    a.max_name_length DESC, a.brand_m_count DESC;

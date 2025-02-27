@@ -1,0 +1,94 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        MAX(sr_return_amt) AS max_return_amt,
+        MIN(sr_return_amt) AS min_return_amt
+    FROM
+        store_returns
+    GROUP BY
+        sr_returning_customer_sk
+),
+SalesDetails AS (
+    SELECT
+        ws_ship_customer_sk,
+        SUM(ws_quantity) AS total_sold,
+        AVG(ws_net_profit) AS avg_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_ship_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim) -- last 30 days
+    GROUP BY
+        ws_ship_customer_sk
+),
+MatchedData AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(sd.total_sold, 0) AS total_sold,
+        CASE 
+            WHEN COALESCE(cr.total_returned, 0) > COALESCE(sd.total_sold, 0) THEN 'High Return'
+            WHEN COALESCE(cr.total_returned, 0) = 0 AND COALESCE(sd.total_sold, 0) = 0 THEN 'No Activity'
+            ELSE 'Normal'
+        END AS return_status
+    FROM
+        customer c
+    LEFT JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_returning_customer_sk
+    LEFT JOIN
+        SalesDetails sd ON c.c_customer_sk = sd.ws_ship_customer_sk
+),
+FinalResult AS (
+    SELECT
+        md.c_customer_sk,
+        md.c_first_name,
+        md.c_last_name,
+        md.total_returned,
+        md.total_sold,
+        md.return_status,
+        CASE 
+            WHEN md.return_status = 'High Return' AND md.total_returned > 10 THEN 'Investigation Needed'
+            ELSE 'Normal Monitoring'
+        END AS monitoring_status
+    FROM
+        MatchedData md
+    WHERE
+        md.return_status != 'No Activity'
+    ORDER BY
+        md.return_status, md.total_returned DESC
+)
+SELECT
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.total_returned,
+    fr.total_sold,
+    fr.return_status,
+    fr.monitoring_status,
+    CASE 
+        WHEN fr.total_returned IS NULL AND fr.total_sold IS NOT NULL THEN 'Returned Unknown'
+        WHEN fr.total_returned IS NOT NULL AND fr.total_sold IS NULL THEN 'Sold Unknown'
+        ELSE 'Activity Known'
+    END AS activity_status
+FROM 
+    FinalResult fr
+WHERE
+    fr.total_sold > 0
+UNION ALL
+SELECT
+    NULL,
+    'Unknown',
+    'Customer',
+    SUM(total_returned) AS total_returned_sum,
+    SUM(total_sold) AS total_sold_sum,
+    'Aggregate',
+    'Aggregate Monitoring'
+FROM
+    FinalResult
+GROUP BY
+    return_status;

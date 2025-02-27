@@ -1,0 +1,72 @@
+
+WITH ranked_posts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS post_rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(DATE '2024-10-01', INTERVAL '1 year')
+),
+recent_votes AS (
+    SELECT 
+        v.PostId, 
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    JOIN 
+        Posts p ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(DATE '2024-10-01', INTERVAL '1 year')
+    GROUP BY 
+        v.PostId
+),
+tag_summary AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rv.VoteCount,
+    rv.UpVoteCount,
+    rv.DownVoteCount,
+    ts.TagName,
+    ts.PostCount,
+    CASE 
+        WHEN rv.VoteCount IS NULL THEN 'No Votes'
+        WHEN rv.UpVoteCount > rv.DownVoteCount THEN 'More Up Votes'
+        ELSE 'More Down Votes'
+    END AS VoteStatus
+FROM 
+    ranked_posts rp
+LEFT JOIN 
+    recent_votes rv ON rp.Id = rv.PostId
+LEFT JOIN 
+    tag_summary ts ON rp.Id IN (SELECT PostId FROM Posts WHERE Tags LIKE CONCAT('%', ts.TagName, '%'))
+WHERE 
+    rp.post_rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

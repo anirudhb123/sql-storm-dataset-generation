@@ -1,0 +1,62 @@
+WITH RECURSIVE PostScoreCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(P.Score, 0) AS Score,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(P.Score, 0) + COALESCE(A.Score, 0) AS Score,
+        Level + 1
+    FROM 
+        Posts P
+        JOIN Posts A ON A.ParentId = P.Id
+    WHERE 
+        P.PostTypeId = 1
+)
+
+, UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+        LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(PostScores.TotalScore, 0) AS TotalPostScore,
+    COALESCE(BadgeCounts.BadgeCount, 0) AS TotalBadges,
+    BadgeCounts.GoldBadges,
+    BadgeCounts.SilverBadges,
+    BadgeCounts.BronzeBadges
+FROM 
+    Users U
+LEFT JOIN (
+    SELECT 
+        PS.PostId,
+        SUM(PS.Score) AS TotalScore
+    FROM 
+        PostScoreCTE PS
+    GROUP BY 
+        PS.PostId
+) PostScores ON PostScores.PostId = U.Id
+LEFT JOIN UserBadges BadgeCounts ON BadgeCounts.UserId = U.Id
+WHERE 
+    U.Reputation > 1000 -- Filter for active users
+ORDER BY 
+    TotalPostScore DESC, TotalBadges DESC
+FETCH FIRST 10 ROWS ONLY; -- Return top 10 users

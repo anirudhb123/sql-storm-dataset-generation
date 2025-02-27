@@ -1,0 +1,58 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+), actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        c.movie_id,
+        COUNT(DISTINCT ak.id) AS actor_count
+    FROM 
+        aka_name ak 
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    GROUP BY 
+        ak.name, c.movie_id
+), movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        GROUP_CONCAT(DISTINCT co.name) AS production_companies,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    dt.title,
+    dt.production_year,
+    ai.actor_name,
+    md.production_companies,
+    md.keyword_count,
+    rt.rank_per_year
+FROM 
+    ranked_titles rt
+JOIN 
+    movie_details md ON rt.title = md.title AND rt.production_year = md.production_year
+LEFT JOIN 
+    actor_info ai ON md.movie_id = ai.movie_id
+WHERE 
+    (rt.rank_per_year <= 5 AND md.keyword_count > 2)
+    OR (md.production_companies IS NULL)
+ORDER BY 
+    rt.production_year DESC, rt.rank_per_year;

@@ -1,0 +1,87 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.Score, 0) AS Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.VoteTypeId = 8 -- Bounty votes
+    GROUP BY 
+        u.Id
+),
+TopContributors AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounty,
+        ua.PostsCreated,
+        ua.AvgViewCount,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC) AS BountyRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalBounty > 0
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    uac.DisplayName AS Contributor,
+    uac.TotalBounty,
+    uac.PostsCreated,
+    uac.AvgViewCount
+FROM 
+    RecentPosts rp
+JOIN 
+    TopContributors uac ON rp.OwnerUserId = uac.UserId
+LEFT JOIN 
+    Comments c ON c.PostId = rp.Id 
+WHERE 
+    rp.rn = 1 -- Only get the most recent post per user
+    AND (rp.ViewCount > 100 OR uac.TotalBounty IS NOT NULL) -- Filter based on post popularity
+ORDER BY 
+    rp.CreationDate DESC;
+
+-- Additional Query to cross-check with PostHistory for closed posts by type
+WITH ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS CloseVotes
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Closed posts
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    rp.*,
+    cp.CloseVotes
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.rn = 1 AND cp.CloseVotes > 0
+ORDER BY 
+    rp.ViewCount DESC;

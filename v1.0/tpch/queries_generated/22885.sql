@@ -1,0 +1,42 @@
+WITH RECURSIVE RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 1000 AND s.s_acctbal BETWEEN 5000 AND 15000
+      AND s.s_name IS NOT NULL
+      AND ps.ps_supplycost <= (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+
+SELECT
+    n.n_name AS Nation_Name,
+    COUNT(DISTINCT c.c_custkey) AS Customer_Count,
+    SUM(o.o_totalprice) FILTER (WHERE o.o_orderstatus = 'O') AS Total_Sales,
+    COUNT(l.l_orderkey) OVER (PARTITION BY n.n_nationkey) AS Line_Count,
+    NULLIF(AVG(l.l_extendedprice), 0) AS Average_Extended_Price,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ') AS Part_Names
+FROM
+    nation n
+LEFT JOIN
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN
+    orders o ON o.o_custkey = c.c_custkey AND o.o_orderdate >= '2023-01-01'
+LEFT JOIN
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN
+    part p ON p.p_partkey = l.l_partkey
+WHERE
+    n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE n_comment IS NOT NULL
+                  AND n_regionkey NOT IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%East%'))
+GROUP BY
+    n.n_nationkey
+HAVING
+    SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderstatus = 'O')
+    OR EXISTS (SELECT 1 FROM RecursiveSupplier rs WHERE rs.s_suppkey = c.c_nationkey)
+ORDER BY
+    Customer_Count DESC, Total_Sales DESC;

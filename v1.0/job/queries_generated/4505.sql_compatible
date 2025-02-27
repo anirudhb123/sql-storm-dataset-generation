@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title AS a
+    LEFT JOIN 
+        cast_info AS c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rn <= 5
+),
+CastDetails AS (
+    SELECT 
+        p.name, 
+        c.nr_order, 
+        t.title, 
+        t.production_year
+    FROM 
+        cast_info AS c
+    JOIN 
+        person_info AS p ON c.person_id = p.person_id
+    JOIN 
+        aka_title AS t ON c.movie_id = t.id
+    WHERE 
+        t.production_year IN (SELECT production_year FROM TopMovies)
+    ORDER BY 
+        t.production_year, c.nr_order
+)
+SELECT 
+    md.name AS actor_name,
+    COALESCE(cast_summary.cast_count, 0) AS total_cast,
+    movie.production_year,
+    STRING_AGG(DISTINCT cd.title, ', ') AS movies_title
+FROM 
+    (SELECT DISTINCT name FROM char_name) AS md
+LEFT JOIN 
+    (SELECT 
+        p.name, 
+        COUNT(DISTINCT c.movie_id) AS cast_count 
+    FROM 
+        cast_info AS c
+    JOIN 
+        person_info AS p ON c.person_id = p.person_id
+    GROUP BY p.name) AS cast_summary ON md.name = cast_summary.name
+LEFT JOIN 
+    CastDetails AS cd ON md.name = cd.name
+LEFT JOIN 
+    (SELECT DISTINCT production_year FROM TopMovies) AS movie ON cd.production_year = movie.production_year
+GROUP BY 
+    md.name, movie.production_year, cast_summary.cast_count
+HAVING 
+    COUNT(cd.title) > 2 OR COUNT(cd.title) IS NULL
+ORDER BY 
+    movie.production_year DESC;

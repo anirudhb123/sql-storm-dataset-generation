@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Recursive CTE to get all movies linked to a specific movie_id
+    SELECT m.id AS movie_id, COALESCE(m.title, 'Unknown Title') AS title, 
+           COALESCE(CAST(m.production_year AS TEXT), 'Unknown Year') AS production_year,
+           0 AS level
+    FROM aka_title m
+    WHERE m.id = (SELECT id FROM aka_title WHERE title = 'Some Movie Title' LIMIT 1) -- Assuming we are starting with a specific movie
+
+    UNION ALL
+
+    SELECT m.id, COALESCE(m.title, 'Unknown Title'), 
+           COALESCE(CAST(m.production_year AS TEXT), 'Unknown Year'), 
+           level + 1
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+-- CTE for collecting detailed information about the cast
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ca.person_id) AS total_cast,
+        STRING_AGG(DISTINCT CASE WHEN a.gender = 'F' THEN a.name END, ', ') AS female_cast,
+        STRING_AGG(DISTINCT CASE WHEN a.gender = 'M' THEN a.name END, ', ') AS male_cast
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+-- CTE to gather movie companies with their types
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        cnt.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.note) AS notes_count
+    FROM movie_companies mc
+    JOIN company_name cnt ON mc.company_id = cnt.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, cnt.name, ct.kind
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cd.total_cast,
+    cd.female_cast,
+    cd.male_cast,
+    ci.company_name,
+    ci.company_type,
+    ci.notes_count,
+    CASE 
+        WHEN cd.total_cast = 0 THEN 'No cast available'
+        ELSE CONCAT('Total cast: ', cd.total_cast)
+    END AS cast_summary,
+    COALESCE(companies, 'No companies') AS companies_involved,
+    LEAD(mh.title) OVER (ORDER BY mh.production_year) AS next_movie_title
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    (SELECT movie_id, STRING_AGG(CONCAT(company_name, ' (', company_type, ')')) AS companies
+     FROM company_info
+     GROUP BY movie_id) ci ON mh.movie_id = ci.movie_id;

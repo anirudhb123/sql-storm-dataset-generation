@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0        
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title AS PostTitle,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ph_rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title AS QuestionTitle,
+        rp.CreationDate AS QuestionDate,
+        rp.Score AS QuestionScore,
+        rp.ViewCount AS QuestionViews,
+        rp.AnswerCount AS AnswerCount,
+        rph.UserDisplayName,
+        rph.Comment AS RecentActivity,
+        ub.BadgeCount,
+        ub.HighestBadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentPostHistory rph ON rp.PostId = rph.PostId AND rph.ph_rn = 1 
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+    WHERE 
+        rp.rn = 1 
+)
+SELECT 
+    cd.PostId,
+    cd.QuestionTitle,
+    cd.QuestionDate,
+    cd.QuestionScore,
+    cd.QuestionViews,
+    cd.AnswerCount,
+    COALESCE(cd.UserDisplayName, 'No Activity') AS LastActivityUser,
+    COALESCE(cd.RecentActivity, 'No Recent Activity') AS RecentActivity,
+    COALESCE(cd.BadgeCount, 0) AS TotalBadges,
+    CASE 
+        WHEN cd.HighestBadgeClass = 1 THEN 'Gold'
+        WHEN cd.HighestBadgeClass = 2 THEN 'Silver'
+        WHEN cd.HighestBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS HighestBadge
+FROM 
+    CombinedData cd
+ORDER BY 
+    cd.QuestionScore DESC, cd.QuestionViews DESC;

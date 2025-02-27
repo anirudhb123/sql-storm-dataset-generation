@@ -1,0 +1,42 @@
+
+WITH RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+), 
+SupplierPartCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+SalesData AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           l.l_discount, (l.l_extendedprice * (1 - l.l_discount)) AS net_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= DATE '1997-01-01'
+)
+SELECT p.p_mfgr, p.p_name, r.r_name, 
+       COALESCE(SUM(sd.net_price), 0) AS total_revenue,
+       COALESCE(SUM(sp.total_cost), 0) AS total_supplier_cost,
+       COUNT(DISTINCT c.c_custkey) AS unique_customers,
+       COUNT(s.s_suppkey) FILTER (WHERE sp.supplier_count > 3) AS active_suppliers,
+       RANK() OVER (ORDER BY COALESCE(SUM(sd.net_price), 0) DESC) AS revenue_rank
+FROM part p
+LEFT JOIN SalesData sd ON p.p_partkey = sd.l_partkey
+LEFT JOIN SupplierPartCosts sp ON p.p_partkey = sp.ps_partkey
+JOIN supplier s ON sp.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN RankedCustomers c ON c.c_custkey = (SELECT o.o_custkey
+                                           FROM orders o 
+                                           WHERE o.o_orderkey = sd.o_orderkey)
+GROUP BY p.p_partkey, p.p_mfgr, p.p_name, r.r_name, revenue_rank
+HAVING COALESCE(SUM(sd.net_price), 0) > (SELECT AVG(sd2.net_price)
+                                           FROM SalesData sd2
+                                           WHERE sd2.l_orderkey IS NOT NULL)
+ORDER BY revenue_rank, r.r_name DESC
+LIMIT 10;

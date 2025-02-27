@@ -1,0 +1,53 @@
+
+WITH MonthlySales AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ms.total_sales) AS total_sales,
+        COUNT(DISTINCT ms.unique_customers) AS customer_count
+    FROM 
+        CustomerDemographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        MonthlySales ms ON ms.d_month_seq IN (SELECT d_month_seq FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+TopDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.total_sales,
+        cd.customer_count,
+        RANK() OVER (ORDER BY cd.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerDemographics cd
+)
+SELECT 
+    td.cd_gender,
+    td.cd_marital_status,
+    td.total_sales,
+    td.customer_count
+FROM 
+    TopDemographics td
+WHERE 
+    td.sales_rank <= 10
+ORDER BY 
+    td.total_sales DESC;

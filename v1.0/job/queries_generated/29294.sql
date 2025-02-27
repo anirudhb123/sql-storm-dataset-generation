@@ -1,0 +1,66 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.nr_order) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT co.name ORDER BY co.name) AS companies
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+
+RoleDetails AS (
+    SELECT 
+        ci.role_id,
+        rt.role
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.note IS NOT NULL
+),
+
+FinalDetails AS (
+    SELECT 
+        md.*,
+        rd.role
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        RoleDetails rd ON md.cast_names LIKE '%' || rd.role || '%'
+)
+
+SELECT 
+    title,
+    production_year,
+    kind_id,
+    cast_names,
+    keywords,
+    companies,
+    COUNT(DISTINCT role) AS unique_roles
+FROM 
+    FinalDetails
+GROUP BY 
+    title, production_year, kind_id, cast_names, keywords, companies
+ORDER BY 
+    production_year DESC, title;

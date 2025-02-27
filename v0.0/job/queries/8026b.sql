@@ -1,0 +1,4 @@
+SELECT min(n.name) AS of_person, min(t.title) AS biography_movie
+FROM aka_name AS an, cast_info AS ci, info_type AS it, link_type AS lt, movie_link AS ml, name AS n, person_info AS pi, title AS t
+WHERE n.id = an.person_id AND n.id = pi.person_id AND ci.person_id = n.id AND t.id = ci.movie_id AND ml.linked_movie_id = t.id AND lt.id = ml.link_type_id AND it.id = pi.info_type_id AND pi.person_id = an.person_id AND pi.person_id = ci.person_id AND an.person_id = ci.person_id AND ci.movie_id = ml.linked_movie_id
+AND t.production_year IN (1890, 1911, 1921, 1926, 1942, 1951, 1983, 1994, 1997, 2007) AND ml.movie_id IN (121417, 122631, 136772, 138730, 139026, 142295, 148695, 55577, 93717) AND n.gender = 'f' AND t.series_years > '1976-1976';

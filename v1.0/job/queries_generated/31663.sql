@@ -1,0 +1,60 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS hierarchy_level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.hierarchy_level + 1
+    FROM 
+        cast_info ci
+        JOIN ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ah.person_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    MAX(ct.kind) AS company_type,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS total_budget,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT CONCAT('(', c.name, ', ', c.country_code, ')'), '; ') AS company_details
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    kind_type kt ON kt.id = (SELECT kind_id FROM aka_title at WHERE at.movie_id = ci.movie_id LIMIT 1)
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = ci.movie_id
+LEFT JOIN 
+    title t ON t.id = ci.movie_id
+JOIN 
+    ActorHierarchy ah ON ah.person_id = ci.person_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (ct.kind IN ('Distributor', 'Production Company') OR ct.kind IS NULL)
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT ch.movie_id) > 5
+ORDER BY 
+    total_movies DESC, actor_name
+LIMIT 20;

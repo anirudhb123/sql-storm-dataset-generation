@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(V.BountyAmount) AS AverageBounty,
+        MAX(U.LastAccessDate) AS LastAccessDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageBounty,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        PostCount > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Title, 
+        P.CreationDate, 
+        U.DisplayName AS OwnerName, 
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    COALESCE(RP.Title, 'No Posts Yet') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, NULL) AS RecentPostDate,
+    TU.AverageBounty,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = TU.UserId) AS BadgeCount,
+    CASE 
+        WHEN TU.Reputation > 1000 THEN 'High Reputation'
+        WHEN TU.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts RP ON TU.UserId = RP.OwnerUserId AND RP.PostRank = 1
+WHERE 
+    TU.ReputationRank <= 10
+ORDER BY 
+    TU.Reputation DESC, TU.DisplayName ASC;

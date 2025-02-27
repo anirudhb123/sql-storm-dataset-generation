@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           (SELECT COUNT(DISTINCT ps_partkey) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) AS part_count
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           (SELECT COUNT(DISTINCT ps_partkey) FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) + c.part_count
+    FROM supplier s
+    JOIN SupplierCTE c ON s.s_suppkey <> c.s_suppkey
+    WHERE c.part_count < 100
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           (CASE 
+                WHEN o.o_orderstatus = 'F' THEN 'Completed'
+                WHEN o.o_orderstatus IS NULL THEN 'Unknown'
+                ELSE 'Pending' 
+            END) AS order_status,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM lineitem li
+    JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey
+),
+FinalReport AS (
+    SELECT r.r_name, n.n_name, s.s_name, 
+           COALESCE(SUM(sr.total_revenue), 0) AS total_revenue,
+           COALESCE(MAX(fo.o_totalprice), 0) AS highest_order,
+           COUNT(DISTINCT fo.o_orderkey) AS total_orders
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplierRevenue sr ON n.n_nationkey = (SELECT s_nationkey FROM supplier s WHERE s.s_suppkey = sr.s_suppkey)
+    LEFT JOIN FilteredOrders fo ON n.n_nationkey = (SELECT c_nationkey FROM customer c WHERE c.c_custkey = fo.o_custkey)
+    GROUP BY r.r_name, n.n_name, s.s_name
+    HAVING COUNT(DISTINCT fo.o_orderkey) > 10 OR COALESCE(SUM(sr.total_revenue), 0) > 100000
+)
+SELECT DISTINCT r.r_name, n.n_name, s.s_name, f.total_revenue, f.highest_order
+FROM FinalReport f
+INNER JOIN region r ON f.r_name = r.r_name
+INNER JOIN nation n ON f.n_name = n.n_name
+WHERE f.total_orders > (SELECT AVG(total_orders) FROM FinalReport)
+ORDER BY f.total_revenue DESC NULLS LAST;

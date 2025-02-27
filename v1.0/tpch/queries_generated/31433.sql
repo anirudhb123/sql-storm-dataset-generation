@@ -1,0 +1,89 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        nation_sales ns ON n.n_nationkey = ns.n_nationkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > '2023-01-01'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+supplier_part_cost AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost) / COUNT(DISTINCT s.s_suppkey) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_retailprice > 100
+    GROUP BY 
+        p.p_partkey
+),
+customer_order_stats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+ranked_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cos.order_count,
+        cos.total_spent,
+        RANK() OVER (ORDER BY cos.total_spent DESC) AS rank
+    FROM 
+        customer_order_stats cos
+    JOIN 
+        customer c ON cos.c_custkey = c.c_custkey
+)
+SELECT 
+    ns.n_name,
+    COUNT(DISTINCT rc.c_custkey) AS active_customers,
+    AVG(spc.avg_supply_cost) AS avg_supply_cost_per_part,
+    SUM(news.total_sales) AS total_sales
+FROM 
+    nation_sales ns
+LEFT JOIN 
+    ranked_customers rc ON ns.n_nationkey = rc.c_custkey
+LEFT JOIN 
+    supplier_part_cost spc ON spc.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost IS NOT NULL)
+WHERE 
+    rc.rank <= 10
+GROUP BY 
+    ns.n_name
+ORDER BY 
+    total_sales DESC;

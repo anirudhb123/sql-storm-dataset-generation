@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostAnalysis AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerName,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.OwnerName, tp.CreationDate, tp.Score, tp.ViewCount
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.OwnerName,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.UpVotes,
+    pa.DownVotes,
+    (pa.UpVotes - pa.DownVotes) AS NetVotes
+FROM 
+    PostAnalysis pa
+ORDER BY 
+    pa.Score DESC, pa.CommentCount DESC;

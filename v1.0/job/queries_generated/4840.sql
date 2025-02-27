@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+), 
+CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        m.note
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+), 
+FilteredCompanies AS (
+    SELECT 
+        movie_id,
+        company_name,
+        company_type,
+        note,
+        ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY company_name) AS company_rank
+    FROM 
+        CompanyDetails
+    WHERE 
+        company_type LIKE '%Production%'
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(fc.company_name, 'No Company') AS company_name,
+    COALESCE(fc.company_type, 'Unknown') AS company_type,
+    rm.cast_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    FilteredCompanies fc ON rm.title = fc.movie_id AND fc.company_rank = 1
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

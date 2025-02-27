@@ -1,0 +1,88 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        1 AS level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL
+
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        s.level + 1
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        SalesCTE s ON s.c_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, s.level
+),
+SupplierRanking AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value,
+        RANK() OVER (ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TotalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+
+SELECT 
+    c.c_name,
+    SUM(s.total_sales) AS customer_total_sales,
+    MAX(sr.total_supply_value) AS max_supply_value,
+    COALESCE(SUM(to.net_value), 0) AS total_order_value,
+    CASE 
+        WHEN MAX(sr.supply_rank) <= 5 THEN 'Top Suppliers'
+        ELSE 'Other Suppliers'
+    END AS supplier_category
+FROM 
+    customer c
+LEFT JOIN 
+    SalesCTE s ON c.c_custkey = s.c_custkey
+LEFT JOIN 
+    SupplierRanking sr ON sr.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+        ORDER BY ps.ps_supplycost DESC
+        LIMIT 1
+    )
+LEFT JOIN 
+    TotalOrders to ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = to.o_orderkey)
+GROUP BY 
+    c.c_name
+ORDER BY 
+    customer_total_sales DESC, supplier_category;

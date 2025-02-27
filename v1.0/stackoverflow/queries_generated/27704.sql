@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        u.Reputation AS AuthorReputation,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only considering questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year' -- Questions created in the last year
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Score,
+        ViewCount,
+        Author,
+        AuthorReputation,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5 -- Top 5 questions per tag
+),
+PostStatistics AS (
+    SELECT 
+        fp.Tags,
+        COUNT(fp.PostId) AS TotalQuestions,
+        AVG(u.Reputation) AS AverageAuthorReputation,
+        SUM(fp.ViewCount) AS TotalViews,
+        SUM(fp.Score) AS TotalScore
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        Users u ON fp.Author = u.DisplayName
+    GROUP BY 
+        fp.Tags
+)
+SELECT 
+    ps.Tags,
+    ps.TotalQuestions,
+    ps.AverageAuthorReputation,
+    ps.TotalViews,
+    ps.TotalScore,
+    pt.Name AS PostTypeName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    Posts p ON p.Tags LIKE '%' || ps.Tags || '%' 
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Badges b ON b.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    ps.Tags, 
+    pt.Name
+ORDER BY 
+    ps.TotalQuestions DESC, 
+    ps.TotalScore DESC;

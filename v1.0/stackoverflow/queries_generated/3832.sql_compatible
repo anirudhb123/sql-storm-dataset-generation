@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostAnalytics AS (
+    SELECT 
+        r.Id,
+        r.Title,
+        COALESCE(u.DisplayName, 'Deleted User') AS UserName,
+        r.Score,
+        r.ViewCount,
+        COALESCE(b.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Users u ON r.AcceptedAnswerId = u.Id
+    LEFT JOIN 
+        UserBadges b ON u.Id = b.UserId
+    WHERE 
+        r.rn = 1
+)
+SELECT 
+    pa.Id,
+    pa.Title,
+    pa.UserName,
+    pa.Score,
+    pa.ViewCount,
+    pa.UserBadgeCount
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.UserBadgeCount > (
+        SELECT 
+            AVG(UserBadgeCount)
+        FROM 
+            UserBadges
+    )
+ORDER BY 
+    pa.ViewCount DESC
+LIMIT 10 OFFSET 0;

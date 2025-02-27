@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_year
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        total_cast, 
+        actors 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_within_year <= 5
+),
+DetailedMovieInfo AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.total_cast,
+        tm.actors,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year, tm.total_cast, tm.actors
+)
+SELECT 
+    title,
+    production_year,
+    total_cast,
+    actors,
+    keywords,
+    companies
+FROM 
+    DetailedMovieInfo
+ORDER BY 
+    production_year DESC, total_cast DESC;

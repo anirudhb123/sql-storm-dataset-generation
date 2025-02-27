@@ -1,0 +1,83 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        MAX(B.Date) AS LatestBadgeDate,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(UP.Score, 0) AS UpVoteCount,
+        COALESCE(DN.Score, 0) AS DownVoteCount,
+        COALESCE(CM.CommentCount, 0) AS CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS Rn
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Score
+        FROM Votes 
+        GROUP BY PostId
+    ) AS UP ON P.Id = UP.PostId
+    LEFT JOIN (
+        SELECT PostId, SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Score
+        FROM Votes 
+        GROUP BY PostId
+    ) AS DN ON P.Id = DN.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments 
+        GROUP BY PostId
+    ) AS CM ON P.Id = CM.PostId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= DATEADD(year, -1, '2024-10-01 12:34:56')
+),
+TopPosts AS (
+    SELECT 
+        PS.Title, 
+        PS.OwnerDisplayName, 
+        PS.CreationDate,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        PS.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY PS.UpVoteCount DESC, PS.CreationDate ASC) AS Rank
+    FROM PostSummary PS
+    WHERE PS.Rn = 1
+),
+UserActivity AS (
+    SELECT 
+        UB.UserId,
+        UB.DisplayName,
+        T.Title,
+        T.CreationDate,
+        UB.BadgeNames AS User_Badge_Names,
+        RANK() OVER (PARTITION BY UB.UserId ORDER BY T.CreationDate DESC) AS ActivityRank
+    FROM UserBadges UB
+    JOIN TopPosts T ON UB.BadgeCount > 0
+    WHERE UB.UserId IS NOT NULL
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Title,
+    UA.CreationDate,
+    UA.User_Badge_Names,
+    CASE 
+        WHEN UA.ActivityRank IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM UserActivity UA
+LEFT JOIN Users U ON UA.UserId = U.Id
+WHERE U.Reputation > (
+    SELECT AVG(Reputation) FROM Users
+) 
+AND UA.Title IS NOT NULL
+ORDER BY UA.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

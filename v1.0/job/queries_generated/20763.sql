@@ -1,0 +1,63 @@
+WITH movie_cast AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_actors
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        a.name IS NOT NULL
+),
+movie_details AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(mkc.keyword, 'No Keyword') AS keyword,
+        COUNT(mc.movie_id) AS total_movies
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        movie_cast mc ON t.id = mc.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year, mk.keyword 
+),
+ranked_movies AS (
+    SELECT
+        *, 
+        RANK() OVER (PARTITION BY keyword ORDER BY production_year DESC) AS year_rank
+    FROM
+        movie_details
+),
+final_output AS (
+    SELECT
+        r.title,
+        r.production_year,
+        r.keyword,
+        r.total_movies,
+        r.year_rank,
+        (SELECT COUNT(*) FROM movie_info_idx mii WHERE mii.movie_id = r.title_id AND mii.info_type_id IS NULL) AS null_info_count,
+        CONCAT('Movie: ', r.title, ' (', r.production_year, ') - Keyword: ', r.keyword) AS movie_description
+    FROM
+        ranked_movies r
+    WHERE
+        r.total_movies > 1
+        AND r.year_rank = 1
+)
+SELECT
+    fo.movie_description,
+    fo.null_info_count,
+    CASE 
+        WHEN fo.null_info_count > 0 THEN 'Contains Null Info'
+        ELSE 'All Info Present'
+    END AS info_presence
+FROM
+    final_output fo
+ORDER BY
+    fo.production_year DESC, fo.movie_description;
+This SQL query creates several Common Table Expressions (CTEs) to build a comprehensive overview of movies and their associated actors, keywords, and additional metadata. The final output includes a description of each movie, a count of associated `NULL` information records, and a case statement assessing the presence of information. The use of various SQL constructs such as window functions, correlated subqueries, and outer joins ensures robust performance benchmarking across the dataset.

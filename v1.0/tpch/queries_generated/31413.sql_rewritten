@@ -1,0 +1,31 @@
+WITH RECURSIVE RegionSales (r_name, total_sales) AS (
+    SELECT r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY r.r_name
+    UNION ALL
+    SELECT r_name, SUM(total_sales) * 1.1
+    FROM RegionSales
+    WHERE total_sales > 100000
+),
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS acct_rank
+    FROM customer c
+)
+SELECT r.r_name, 
+       COALESCE(SUM(rs.total_sales), 0) AS region_sales,
+       cr.c_name, 
+       cr.acct_rank
+FROM region r
+LEFT JOIN RegionSales rs ON r.r_name = rs.r_name
+LEFT JOIN CustomerRanked cr ON cr.acct_rank <= 10
+WHERE r.r_comment IS NOT NULL
+GROUP BY r.r_name, cr.c_name, cr.acct_rank
+ORDER BY region_sales DESC, r.r_name;

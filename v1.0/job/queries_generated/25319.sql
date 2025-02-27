@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', '), 'No Keywords') AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS average_roles
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    GROUP BY 
+        m.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        keywords, 
+        cast_count, 
+        average_roles,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, production_year DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keywords,
+    tm.cast_count,
+    tm.average_roles,
+    an.name AS lead_actor
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = tm.movie_id
+LEFT JOIN 
+    aka_name an ON an.person_id = ci.person_id AND ci.nr_order = 1
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.production_year DESC;

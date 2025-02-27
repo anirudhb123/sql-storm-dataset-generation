@@ -1,0 +1,72 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        c.c_nationkey,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS level
+    FROM 
+        customer c
+    INNER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+
+    UNION ALL
+
+    SELECT 
+        sh.c_custkey,
+        sh.c_name,
+        sh.c_nationkey,
+        l.o_orderkey,
+        l.l_shipdate,
+        l.l_extendedprice,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    INNER JOIN 
+        lineitem l ON sh.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+),
+aggregated_sales AS (
+    SELECT 
+        sh.c_nationkey,
+        COUNT(DISTINCT sh.o_orderkey) AS total_orders,
+        SUM(sh.o_totalprice) AS total_sales,
+        AVG(sh.o_totalprice) AS avg_order_value,
+        ROW_NUMBER() OVER (PARTITION BY sh.c_nationkey ORDER BY SUM(sh.o_totalprice) DESC) AS rank
+    FROM 
+        sales_hierarchy sh
+    GROUP BY 
+        sh.c_nationkey
+),
+nation_summary AS (
+    SELECT 
+        n.n_name,
+        COALESCE(as.total_orders, 0) AS total_orders,
+        COALESCE(as.total_sales, 0.00) AS total_sales,
+        COALESCE(as.avg_order_value, 0.00) AS avg_order_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        aggregated_sales as ON n.n_nationkey = as.c_nationkey
+)
+SELECT 
+    ns.n_name,
+    ns.total_orders,
+    ns.total_sales,
+    ns.avg_order_value,
+    CASE 
+        WHEN ns.avg_order_value > 1000 THEN 'High Value'
+        WHEN ns.avg_order_value BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS order_value_category
+FROM 
+    nation_summary ns
+WHERE 
+    ns.total_orders > 0
+ORDER BY 
+    ns.total_sales DESC;

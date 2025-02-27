@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2023
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mh.level + 1 
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(mci.nr_order, 0) AS cast_order,
+    GROUP_CONCAT(DISTINCT ak.name) AS actor_names,
+    COUNT(DISTINCT mw.keyword) AS keyword_count,
+    AVG(CASE WHEN mw.keyword IS NULL THEN 0 ELSE LENGTH(mw.keyword) END) AS avg_keyword_length
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mw ON mh.movie_id = mw.movie_id
+LEFT JOIN 
+    (SELECT movie_id, MIN(nr_order) AS nr_order
+     FROM cast_info 
+     GROUP BY movie_id) mci ON mh.movie_id = mci.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mci.nr_order
+ORDER BY 
+    mh.production_year DESC, mh.movie_id ASC;
+
+This SQL query creates a recursive Common Table Expression (CTE) to retrieve movies and their linked movies produced in 2023, then aggregates actor names and counts of related keywords for each movie, incorporating outer joins and groupings to ensure comprehensive data retrieval.

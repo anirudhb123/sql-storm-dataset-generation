@@ -1,0 +1,27 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS role_order,
+    r.role AS role_name,
+    mc.company_type_id,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    t.production_year > 2000
+    AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+GROUP BY 
+    a.name, t.title, c.nr_order, r.role, mc.company_type_id
+ORDER BY 
+    actor_name, movie_title, role_order;

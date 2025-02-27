@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Only counting Upvotes
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id
+),
+
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(t.Tags, 2, length(t.Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    INNER JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    GROUP BY 
+        TagName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.TagCount,
+    rp.CommentCount,
+    rp.VoteCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    CASE 
+        WHEN rp.UserRank = 1 THEN 'Top Post'
+        WHEN rp.UserRank <= 5 THEN 'Top 5 Posts'
+        ELSE 'Other Posts' 
+    END AS PostRankCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+ORDER BY 
+    rp.ViewCount DESC, ts.PostCount DESC;

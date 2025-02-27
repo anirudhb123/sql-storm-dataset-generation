@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with questions
+    
+    UNION ALL 
+    
+    SELECT 
+        pa.Id,
+        pa.Title,
+        pa.PostTypeId,
+        pa.ParentId,
+        Level + 1
+    FROM 
+        Posts pa
+    INNER JOIN 
+        RecursivePostHierarchy ph ON pa.ParentId = ph.PostId
+),
+PostVoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserContribution AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        SUM(COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS Score,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        PostVoteStatistics v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopContributors AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Score,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        RANK() OVER (ORDER BY Score DESC) AS Rank
+    FROM 
+        UserContribution
+),
+QuestionStatistics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Level,
+        p.AnswerCount,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes,
+        COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+        COALESCE(rnk.Rank, 0) AS ContributorRank
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        PostVoteStatistics vs ON ph.PostId = vs.PostId
+    LEFT JOIN 
+        TopContributors rnk ON p.OwnerUserId = rnk.UserId
+)
+SELECT 
+    qs.Title AS QuestionTitle,
+    qs.AnswerCount,
+    qs.UpVotes,
+    qs.DownVotes,
+    qs.TotalVotes,
+    c.DisplayName AS Contributor,
+    c.Score AS ContributorScore,
+    c.PostCount AS ContributorPostCount,
+    c.CommentCount AS ContributorCommentCount,
+    c.BadgeCount AS ContributorBadgeCount
+FROM 
+    QuestionStatistics qs
+LEFT JOIN 
+    TopContributors c ON qs.ContributorRank = c.Rank
+WHERE 
+    qs.Level = 0  -- We only want top-level questions
+ORDER BY 
+    qs.TotalVotes DESC
+LIMIT 10;

@@ -1,0 +1,73 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        ROW_NUMBER() OVER (ORDER BY cr.total_return_amount DESC) AS rank
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_returns > (
+            SELECT 
+                AVG(total_returns) FROM CustomerReturns
+        )
+),
+Sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    s.total_sales,
+    cr.total_returns,
+    cr.total_return_amount,
+    CASE 
+        WHEN cr.total_returns IS NULL THEN 'No Returns'
+        WHEN cr.total_returns > 5 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_status
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    Sales s ON cd.c_customer_sk = s.ws_bill_customer_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND s.total_sales IS NOT NULL 
+    AND cd.c_customer_sk IN (SELECT sr_customer_sk FROM TopCustomers WHERE rank <= 10)
+ORDER BY 
+    s.total_sales DESC, cr.total_return_amount DESC;

@@ -1,0 +1,50 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts,
+        SUM(CASE WHEN Posts.AnswerCount > 0 THEN 1 ELSE 0 END) AS ActiveQuestionCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+), 
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName, Users.Reputation
+)
+
+SELECT 
+    TC.TagName,
+    TC.PostCount AS TotalPostsForTag,
+    TC.HighViewCountPosts,
+    TC.ActiveQuestionCount,
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UR.TotalPosts,
+    UR.Questions,
+    UR.Answers
+FROM 
+    TagCounts TC
+JOIN 
+    UserReputation UR ON UR.TotalPosts > 5
+WHERE 
+    TC.PostCount > 10
+ORDER BY 
+    TC.PostCount DESC, 
+    UR.Reputation DESC 
+LIMIT 50;

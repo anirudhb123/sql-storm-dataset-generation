@@ -1,0 +1,62 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount, -- corrected column name here
+        p.Score,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, pt.Name
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.BadgeCount,
+    us.UpVotes AS UserUpVotes,
+    us.DownVotes AS UserDownVotes,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.ViewCount,
+    ps.Score,
+    ps.PostType,
+    ps.CommentCount AS PostCommentCount,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId  -- corrected to match the join condition
+ORDER BY 
+    us.Reputation DESC, ps.Score DESC;

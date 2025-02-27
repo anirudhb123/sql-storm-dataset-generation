@@ -1,0 +1,59 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        h.hd_income_band_sk,
+        h.hd_dep_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, h.hd_income_band_sk, h.hd_dep_count
+),
+high_value_customers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_spent > 1000 THEN 'High Value'
+            WHEN total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer_summary
+),
+demographic_distribution AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(*) AS num_customers,
+        AVG(total_spent) AS avg_spent
+    FROM 
+        customer_summary cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    hv.customer_value,
+    dd.cd_gender,
+    dd.cd_marital_status,
+    dd.num_customers,
+    dd.avg_spent
+FROM 
+    high_value_customers hv
+JOIN 
+    demographic_distribution dd ON dd.cd_gender = hv.gender AND dd.cd_marital_status = hv.marital_status
+ORDER BY 
+    hv.customer_value, dd.cd_gender, dd.cd_marital_status;

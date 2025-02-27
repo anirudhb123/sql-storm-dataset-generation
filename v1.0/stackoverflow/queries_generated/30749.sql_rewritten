@@ -1,0 +1,81 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentsCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgesCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY UpVotes - DownVotes DESC, CommentsCount DESC, PostsCount DESC) AS EngagementRank
+    FROM 
+        UserEngagement
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t 
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10 
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT c.Id) DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.UpVotes,
+    tu.DownVotes,
+    t.TagName,
+    ps.Title AS PopularPost,
+    ps.CreationDate AS PostDate,
+    ps.CommentCount AS PopularPostComments,
+    ps.UpVotes AS PopularPostUpVotes,
+    ps.DownVotes AS PopularPostDownVotes
+FROM 
+    TopUsers tu
+CROSS JOIN 
+    PopularTags t
+LEFT JOIN 
+    PostStats ps ON ps.CommentRank <= 3 
+WHERE 
+    tu.EngagementRank <= 10 
+ORDER BY 
+    tu.UpVotes DESC, tu.CommentCount DESC;

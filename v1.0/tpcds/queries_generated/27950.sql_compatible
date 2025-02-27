@@ -1,0 +1,23 @@
+
+SELECT 
+    ca.city AS city, 
+    ca.state AS state, 
+    COUNT(DISTINCT c.c_customer_id) AS num_customers,
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+    SUM(cs.cs_ext_sales_price) AS total_sales,
+    MAX(cd.education_status) AS highest_education,
+    MAX(i.i_item_desc) AS most_expensive_item,
+    STRING_AGG(DISTINCT CONCAT('STD: ', s.s_store_name, ' - ', COALESCE(s.s_city, ''), ', ', COALESCE(s.s_state, '')) ORDER BY s.s_store_name) AS store_details
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN store s ON s.s_store_sk = c.c_current_addr_sk
+JOIN catalog_sales cs ON cs.cs_bill_customer_sk = c.c_customer_sk
+JOIN item i ON i.i_item_sk = cs.cs_item_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE ca.city IS NOT NULL 
+  AND ca.state IS NOT NULL 
+  AND cd.cd_gender = 'F'
+  AND i.i_item_desc IS NOT NULL 
+GROUP BY ca.city, ca.state, cd.education_status
+HAVING SUM(cs.cs_ext_sales_price) > 1000
+ORDER BY total_sales DESC;

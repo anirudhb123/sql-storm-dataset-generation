@@ -1,0 +1,73 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreatedDate,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        U.UpVotes - U.DownVotes AS NetVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) B ON U.Id = B.UserId
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        PS.TotalPosts,
+        PS.TotalScore,
+        PS.AvgViewCount,
+        RANK() OVER (ORDER BY PS.TotalScore DESC) AS ScoreRank
+    FROM 
+        UserStats US
+    JOIN 
+        PostStats PS ON US.UserId = PS.OwnerUserId
+)
+SELECT 
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalScore,
+    TU.AvgViewCount,
+    US.Reputation,
+    US.BadgeCount,
+    US.NetVotes,
+    CASE 
+        WHEN TU.ScoreRank <= 10 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    TopUsers TU
+JOIN 
+    UserStats US ON TU.UserId = US.UserId
+WHERE 
+    US.Reputation > 1000
+    AND EXISTS (
+        SELECT 1
+        FROM Posts P
+        WHERE P.OwnerUserId = US.UserId 
+        AND P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    )
+ORDER BY 
+    TU.TotalScore DESC, US.Reputation DESC;

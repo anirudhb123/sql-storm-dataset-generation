@@ -1,0 +1,68 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        0 as Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL -- Select root posts (questions)
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        cte.Depth + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Closed posts
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    COALESCE(up.UpVotes, 0) AS UpVotes,
+    COALESCE(dn.DownVotes, 0) AS DownVotes,
+    COALESCE(cp.LastClosedDate, 'No closes') AS LastClosedDate,
+    p.Depth
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    PostVoteCounts up ON p.PostId = up.PostId
+LEFT JOIN 
+    PostVoteCounts dn ON p.PostId = dn.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.Score > 0 -- Only return posts with a positive score
+ORDER BY 
+    p.Depth, p.Score DESC;

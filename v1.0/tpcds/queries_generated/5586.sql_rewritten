@@ -1,0 +1,60 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.customer_sk,
+        ws.ship_date_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.customer_sk ORDER BY SUM(ws.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+        AND cd.cd_purchase_estimate > 500
+    GROUP BY 
+        ws.customer_sk, ws.ship_date_sk
+),
+top_customers AS (
+    SELECT
+        r.customer_sk,
+        r.total_sales,
+        d.d_week_seq,
+        d.d_month_seq
+    FROM 
+        ranked_sales r
+    JOIN 
+        date_dim d ON r.ship_date_sk = d.d_date_sk
+    WHERE 
+        r.sales_rank = 1 
+        AND d.d_year = 2001
+),
+warehouse_performance AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ext_sales_price) AS warehouse_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.ext_ship_cost) AS avg_shipping_cost
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        top_customers tc ON ws.bill_customer_sk = tc.customer_sk
+    GROUP BY 
+        w.warehouse_id
+)
+SELECT 
+    w.warehouse_id,
+    w.warehouse_sales,
+    w.total_orders,
+    w.avg_shipping_cost,
+    tc.total_sales AS customer_sales
+FROM 
+    warehouse_performance w
+JOIN 
+    top_customers tc ON tc.d_month_seq = MONTH(cast('2002-10-01' as date)())
+ORDER BY 
+    w.warehouse_sales DESC;

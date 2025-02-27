@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+TopItemSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        item.i_category,
+        sales.total_sales
+    FROM 
+        item
+    JOIN SalesCTE sales ON item.i_item_sk = sales.ws_item_sk
+    WHERE
+        sales.sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        t.item_id,
+        t.product_name,
+        COALESCE(c.total_returns, 0) AS total_returns,
+        COALESCE(c.total_return_amount, 0) AS total_return_amount,
+        t.total_sales
+    FROM 
+        TopItemSales t
+    LEFT JOIN CustomerReturns c ON t.total_sales > c.total_returns
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    SUM(s.ws_quantity) AS total_quantity_sold,
+    AVG(s.ws_sales_price) AS average_sales_price,
+    SUM(CASE WHEN r.total_return_amount > 0 THEN r.total_return_amount ELSE NULL END) AS total_returned_amount,
+    COUNT(s.ws_order_number) AS total_orders
+FROM 
+    web_sales s
+JOIN 
+    warehouse w ON s.ws_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN 
+    SalesWithReturns r ON s.ws_item_sk = r.item_id
+GROUP BY 
+    w.w_warehouse_id, w.w_warehouse_name
+HAVING 
+    total_quantity_sold >= 1000
+ORDER BY 
+    total_orders DESC, average_sales_price DESC;

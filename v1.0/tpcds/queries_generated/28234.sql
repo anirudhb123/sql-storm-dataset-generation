@@ -1,0 +1,48 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS address_city, 
+        ca.state AS address_state, 
+        ca.zip AS address_zip,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        d.d_date AS purchase_date
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+        AND (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M')
+),
+AggregateResults AS (
+    SELECT 
+        address_city,
+        address_state,
+        address_zip,
+        COUNT(*) AS total_customers,
+        STRING_AGG(customer_full_name, ', ') AS customer_names
+    FROM 
+        AddressDetails
+    GROUP BY 
+        address_city, address_state, address_zip
+)
+SELECT 
+    address_city,
+    address_state,
+    address_zip,
+    total_customers,
+    customer_names
+FROM 
+    AggregateResults
+ORDER BY 
+    total_customers DESC
+LIMIT 10;

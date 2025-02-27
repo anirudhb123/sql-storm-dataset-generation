@@ -1,0 +1,63 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    INNER JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+), 
+HighValueCustomers AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.order_count,
+        COALESCE(co.total_spent, 0) AS total_spent_formatted
+    FROM CustomerOrders co
+    WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+), 
+DiscountedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_discount > 0.1
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+FinalOutput AS (
+    SELECT 
+        hvc.c_name,
+        hvc.order_count,
+        hvc.total_spent_formatted,
+        sp.p_name,
+        sp.total_available
+    FROM HighValueCustomers hvc
+    LEFT JOIN SupplierParts sp ON sp.total_available > 10
+    WHERE EXISTS (
+        SELECT 1 
+        FROM DiscountedOrders do 
+        WHERE do.o_custkey = hvc.c_custkey AND do.discounted_total > 500
+    )
+)
+SELECT DISTINCT 
+    f.c_name,
+    f.order_count,
+    f.total_spent_formatted,
+    COALESCE(f.p_name, 'No Parts') AS p_name
+FROM FinalOutput f
+ORDER BY f.order_count DESC, f.total_spent_formatted;

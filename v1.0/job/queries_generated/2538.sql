@@ -1,0 +1,50 @@
+WITH movie_stats AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_cast_order
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        a.title,
+        a.production_year
+),
+top_movies AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.total_cast,
+        ms.avg_cast_order,
+        ROW_NUMBER() OVER (PARTITION BY ms.production_year ORDER BY ms.total_cast DESC) AS rank
+    FROM 
+        movie_stats ms
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.avg_cast_order,
+    COALESCE(r.role, 'Unknown') AS cast_role
+FROM 
+    top_movies tm
+LEFT JOIN 
+    (SELECT 
+        ci.movie_id, 
+        rt.role, 
+        COUNT(*) AS role_count
+     FROM 
+        cast_info ci
+     JOIN 
+        role_type rt ON ci.role_id = rt.id
+     GROUP BY 
+        ci.movie_id, rt.role) r ON tm.title = r.movie_id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        1 AS level
+    FROM title mt
+    WHERE mt.season_nr IS NULL
+    UNION ALL
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mh.level + 1
+    FROM title mt
+    INNER JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+popular_movies AS (
+    SELECT 
+        t.id,
+        t.title,
+        COALESCE(COUNT(ki.movie_id), 0) AS keyword_count
+    FROM title t
+    LEFT JOIN movie_keyword ki ON t.id = ki.movie_id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id
+    ORDER BY keyword_count DESC
+    LIMIT 10
+),
+actor_roles AS (
+    SELECT 
+        ci.person_id, 
+        a.name AS actor_name, 
+        rt.role AS role,
+        COUNT(ci.movie_id) AS movie_count
+    FROM cast_info ci
+    INNER JOIN aka_name a ON ci.person_id = a.person_id
+    INNER JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.person_id, a.name, rt.role
+    HAVING COUNT(ci.movie_id) > 5
+),
+actor_movie_details AS (
+    SELECT 
+        ar.actor_name,
+        mh.movie_title,
+        mh.level,
+        COUNT(mt.id) OVER (PARTITION BY ar.actor_name ORDER BY mh.level) AS movie_level_count
+    FROM actor_roles ar
+    JOIN movie_hierarchy mh ON ar.movie_count > 0
+)
+
+SELECT 
+    ah.actor_name,
+    ARRAY_AGG(DISTINCT ah.movie_title) AS movie_titles,
+    MAX(ah.level) AS highest_level,
+    SUM(ah.movie_level_count) AS total_movies_at_levels
+FROM actor_movie_details ah
+GROUP BY ah.actor_name
+HAVING MAX(ah.level) >= 2
+ORDER BY total_movies_at_levels DESC;

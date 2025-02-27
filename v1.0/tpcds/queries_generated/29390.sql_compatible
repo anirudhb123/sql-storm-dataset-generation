@@ -1,0 +1,69 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ProcessedCustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(UPPER(SUBSTRING(c.c_first_name, 1, 1)), LOWER(SUBSTRING(c.c_first_name, 2))) AS formatted_first_name,
+        CONCAT(UPPER(SUBSTRING(c.c_last_name, 1, 1)), LOWER(SUBSTRING(c.c_last_name, 2))) AS formatted_last_name,
+        c.ca_city,
+        c.ca_state,
+        c.ca_zip,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male' 
+            WHEN cd.cd_gender = 'F' THEN 'Female' 
+            ELSE 'Other' 
+        END AS gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        LENGTH(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name_length
+    FROM 
+        CustomerInfo c
+),
+RankedCustomers AS (
+    SELECT 
+        pci.*,
+        ROW_NUMBER() OVER (PARTITION BY pci.ca_state ORDER BY pci.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        ProcessedCustomerInfo pci
+)
+SELECT 
+    rc.c_customer_id,
+    rc.formatted_first_name,
+    rc.formatted_last_name,
+    rc.ca_city,
+    rc.ca_state,
+    rc.ca_zip,
+    rc.gender,
+    rc.cd_marital_status,
+    rc.cd_education_status,
+    rc.cd_purchase_estimate,
+    rc.cd_credit_rating,
+    rc.full_name_length,
+    rc.purchase_rank
+FROM 
+    RankedCustomers rc
+WHERE 
+    rc.purchase_rank <= 10
+ORDER BY 
+    rc.ca_state, rc.purchase_rank;

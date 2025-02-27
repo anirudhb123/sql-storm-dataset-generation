@@ -1,0 +1,57 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.cc_call_center_sk, 1 AS level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.cc_call_center_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+store_sales_summary AS (
+    SELECT
+        ss.ss_customer_sk,
+        COUNT(ss.ss_ticket_number) AS total_store_orders,
+        SUM(ss.ss_net_profit) AS total_store_net_profit
+    FROM store_sales ss
+    GROUP BY ss.ss_customer_sk
+),
+combined_sales AS (
+    SELECT
+        s.bill_customer_sk AS customer_sk,
+        COALESCE(s.total_net_profit, 0) AS web_profit,
+        COALESCE(ss.total_store_net_profit, 0) AS store_profit,
+        s.total_orders,
+        ss.total_store_orders,
+        (COALESCE(s.total_net_profit, 0) + COALESCE(ss.total_store_net_profit, 0)) AS grand_total
+    FROM sales_summary s
+    FULL OUTER JOIN store_sales_summary ss ON s.bill_customer_sk = ss.ss_customer_sk
+),
+final_report AS (
+    SELECT 
+        ch.c_first_name,
+        ch.c_last_name,
+        cs.grand_total,
+        DENSE_RANK() OVER (ORDER BY cs.grand_total DESC) AS rank
+    FROM customer_hierarchy ch
+    JOIN combined_sales cs ON ch.c_customer_sk = cs.customer_sk
+)
+SELECT 
+    fr.rank,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.grand_total
+FROM final_report fr
+WHERE fr.grand_total > (
+    SELECT AVG(grand_total) FROM final_report
+) 
+ORDER BY fr.rank;

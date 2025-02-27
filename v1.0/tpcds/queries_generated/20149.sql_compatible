@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ws_bill_customer_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_dow = 6) - 30 AND 
+                                (SELECT MAX(d_date_sk) FROM date_dim WHERE d_dow = 6)
+    GROUP BY 
+        ws_item_sk, 
+        ws_bill_customer_sk
+), customer_ranked AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(sd.total_net_profit) AS customer_net_profit,
+        RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(sd.total_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        sales_data sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, 
+        cd.cd_gender
+    HAVING 
+        SUM(sd.total_net_profit) IS NOT NULL
+        AND SUM(sd.total_net_profit) > (SELECT AVG(total_net_profit) FROM sales_data)
+), state_customer AS (
+    SELECT 
+        ca.ca_state, 
+        SUM(cr_amount) AS state_return_amount
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN (
+        SELECT 
+            sr_customer_sk, 
+            SUM(sr_return_amt) AS cr_amount 
+        FROM 
+            store_returns 
+        GROUP BY 
+            sr_customer_sk
+    ) r ON r.sr_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ca.ca_state
+)
+SELECT 
+    cu.c_customer_id,
+    cu.cd_gender,
+    cu.customer_net_profit,
+    CASE 
+        WHEN cu.profit_rank <= 3 THEN 'Top Customers'
+        ELSE 'Regular Customers' 
+    END AS customer_category,
+    sc.state_return_amount,
+    COALESCE(sc.state_return_amount, 0) AS adjusted_return_amount
+FROM 
+    customer_ranked cu
+LEFT JOIN 
+    state_customer sc ON cu.c_customer_id = (
+        SELECT 
+            ca.ca_address_id 
+        FROM 
+            customer_address ca
+        JOIN 
+            customer c ON ca.ca_address_sk = c.c_current_addr_sk 
+        WHERE 
+            c.c_customer_id = cu.c_customer_id
+        LIMIT 1
+    )
+ORDER BY 
+    cu.customer_net_profit DESC 
+LIMIT 100;

@@ -1,0 +1,53 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY FUNC_TO_BE_IMPLEMENTED(p.Body) ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS TagName) AS t ON TRUE
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN Rank <= 10 THEN 'Top 10'
+            WHEN Rank <= 20 THEN 'Top 20'
+            ELSE 'Others'
+        END AS PostRankCategory
+    FROM 
+        RankedPosts
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerName,
+    CreationDate,
+    ViewCount,
+    Score,
+    CommentCount,
+    Tags,
+    PostRankCategory
+FROM 
+    FilteredPosts
+WHERE 
+    PostRankCategory IN ('Top 10', 'Top 20')
+ORDER BY 
+    PostRankCategory, Score DESC, ViewCount DESC;

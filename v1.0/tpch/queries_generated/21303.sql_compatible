@@ -1,0 +1,84 @@
+
+WITH RECURSIVE PartSupplierCTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+), 
+CustomerOrderCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        EXISTS (
+            SELECT 1 
+            FROM lineitem l 
+            WHERE l.l_orderkey = o.o_orderkey AND 
+                  (l.l_discount / l.l_extendedprice) > 0.1
+        )
+),
+AggregateData AS (
+    SELECT 
+        c.c_custkey,
+        AVG(o.total_spent) AS avg_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        CustomerOrderCTE c
+    LEFT JOIN 
+        FilteredOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    ns.n_name, 
+    COALESCE(SUM(p.ps_supplycost * p.ps_availqty), 0) AS total_supply_cost,
+    COUNT(DISTINCT c.c_custkey) AS distinct_customers,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_custkey) > 0 THEN 
+            SUM(COALESCE(ad.avg_spent, 0)) / COUNT(DISTINCT c.c_custkey)
+        ELSE 
+            NULL
+    END AS avg_customer_spent
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp p ON s.s_suppkey = p.ps_suppkey
+LEFT JOIN 
+    AggregateData ad ON s.s_suppkey = ad.c_custkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = ns.n_nationkey
+WHERE 
+    ns.n_name LIKE 'A%'
+GROUP BY 
+    ns.n_name
+HAVING 
+    COALESCE(total_supply_cost, 0) > (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY 
+    total_supply_cost DESC;

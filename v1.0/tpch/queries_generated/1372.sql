@@ -1,0 +1,38 @@
+WITH SupplierSales AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM supplier s
+    JOIN SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+)
+
+SELECT p.p_partkey,
+       p.p_name,
+       p.p_brand,
+       COALESCE(ss.total_sales, 0) AS total_sales,
+       COALESCE(ts.sales_rank, 0) AS sales_rank,
+       r.r_name AS region_name
+FROM part p
+LEFT JOIN SupplierSales ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = ss.s_suppkey
+JOIN nation n ON n.n_nationkey = 
+    CASE WHEN ss.s_suppkey IS NOT NULL THEN 
+        (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ss.s_suppkey)
+    ELSE
+        NULL END
+JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE p.p_size BETWEEN 10 AND 20
+  AND ts.sales_rank <= 5
+ORDER BY total_sales DESC NULLS LAST;

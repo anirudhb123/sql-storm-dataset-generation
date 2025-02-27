@@ -1,0 +1,75 @@
+WITH movie_ratings AS (
+    SELECT 
+        c.movie_id,
+        AVG(CASE 
+                WHEN mi.info_type_id = 1 THEN CAST(mi.info AS DECIMAL) 
+                ELSE NULL 
+            END) AS average_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        complete_cast cc ON mi.movie_id = cc.movie_id
+    WHERE 
+        mi.info_type_id IN (1, 2) -- considering only ratings and reviews
+    GROUP BY 
+        c.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        COALESCE(mr.average_rating, 0) AS avg_rating
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        movie_ratings mr ON t.id = mr.movie_id
+    GROUP BY 
+        t.id, mr.average_rating
+),
+high_rated_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.year,
+        md.aka_names,
+        md.avg_rating
+    FROM 
+        movie_details md
+    WHERE 
+        md.avg_rating > 8.0
+),
+overlapping_cast_movies AS (
+    SELECT 
+        c1.movie_id AS movie_1,
+        c2.movie_id AS movie_2,
+        COUNT(*) AS common_cast_count
+    FROM 
+        cast_info c1
+    JOIN 
+        cast_info c2 ON c1.person_id = c2.person_id AND c1.movie_id <> c2.movie_id
+    WHERE 
+        c2.movie_id IN (SELECT movie_id FROM high_rated_movies)
+    GROUP BY 
+        c1.movie_id, c2.movie_id
+)
+SELECT 
+    md.title AS movie_title,
+    md.production_year,
+    COALESCE(oc.common_cast_count, 0) AS common_cast,
+    md.avg_rating,
+    CASE 
+        WHEN md.avg_rating IS NULL THEN 'No Rating'
+        WHEN md.avg_rating > 8 THEN 'Critical Darling'
+        ELSE 'Average Flick'
+    END AS rating_description
+FROM 
+    high_rated_movies md
+LEFT JOIN 
+    overlapping_cast_movies oc ON md.movie_id = oc.movie_1
+ORDER BY 
+    md.avg_rating DESC,
+    md.title;

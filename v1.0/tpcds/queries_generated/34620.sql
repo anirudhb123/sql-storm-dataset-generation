@@ -1,0 +1,42 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS SalesRank
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+Customer_Summary AS (
+    SELECT c_customer_sk, 
+           COUNT(DISTINCT (CASE WHEN cd_gender = 'M' THEN c_customer_sk END)) AS Male_Customers,
+           COUNT(DISTINCT (CASE WHEN cd_gender = 'F' THEN c_customer_sk END)) AS Female_Customers,
+           AVG(cd_purchase_estimate) AS Avg_Purchase_Estimate
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY c_customer_sk
+),
+Sales_Analysis AS (
+    SELECT c.c_customer_id, ca.ca_country,
+           SUM(CASE WHEN cs_order_number IS NOT NULL THEN cs_sales_price ELSE 0 END) AS Total_Catalog_Sales,
+           SUM(CASE WHEN ws_order_number IS NOT NULL THEN ws_sales_price ELSE 0 END) AS Total_Web_Sales,
+           COUNT(DISTINCT CASE WHEN sr_ticket_number IS NOT NULL THEN sr_ticket_number END) AS Store_Returns
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY c.c_customer_id, ca.ca_country
+)
+SELECT sa.c_customer_id, sa.ca_country,
+       COALESCE(sa.Total_Catalog_Sales, 0) AS Catalog_Sales, 
+       COALESCE(sa.Total_Web_Sales, 0) AS Web_Sales, 
+       COALESCE(cs.Male_Customers, 0) AS Male_Customers,
+       COALESCE(cs.Female_Customers, 0) AS Female_Customers,
+       cs.Avg_Purchase_Estimate,
+       SUM(sc.ws_net_profit) AS Total_Profit
+FROM Sales_Analysis sa
+FULL OUTER JOIN Customer_Summary cs ON sa.c_customer_id = cs.c_customer_id
+LEFT JOIN Sales_CTE sc ON sa.c_customer_id = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = sc.ws_item_sk)
+WHERE (Catalog_Sales + Web_Sales) > 1000
+GROUP BY sa.c_customer_id, sa.ca_country, cs.Male_Customers, cs.Female_Customers, cs.Avg_Purchase_Estimate
+ORDER BY Total_Profit DESC
+LIMIT 100;

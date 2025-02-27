@@ -1,0 +1,93 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS HistoryCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS RecentActivityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+TagPostCounts AS (
+    SELECT
+        Tags.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags 
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY 
+        Tags.TagName
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate,
+        CASE 
+            WHEN U.ProfileImageUrl IS NULL THEN 'No Image'
+            ELSE U.ProfileImageUrl 
+        END AS ProfileImage
+    FROM 
+        Users U
+    WHERE 
+        U.LastAccessDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UVote.UpVotes,
+    UVote.DownVotes,
+    P.Id AS PostId,
+    P.Title,
+    P.CommentCount,
+    P.RecentActivityRank,
+    T.TagName,
+    TC.PostCount,
+    TC.TotalViews,
+    COALESCE(UPTIME.TotalVotes, 0) AS UserPostInteractivity
+FROM 
+    ActiveUsers U
+JOIN 
+    UserVoteSummary UVote ON U.Id = UVote.UserId
+LEFT JOIN 
+    PostActivity P ON P.RecentActivityRank = 1
+LEFT JOIN 
+    Tags T ON T.TagName IN (SELECT UNNEST(STRING_TO_ARRAY(P.Tags, '><')))
+LEFT JOIN 
+    TagPostCounts TC ON T.TagName = TC.TagName
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes 
+    GROUP BY 
+        PostId
+    ) UPTIME ON P.PostId = UPTIME.PostId
+WHERE 
+    COALESCE(UPVote.UpVotes - UVote.DownVotes, 0) > 0 
+ORDER BY 
+    U.Reputation DESC, 
+    P.CommentCount DESC NULLS LAST, 
+    TC.TotalViews DESC;
+

@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId IN (1, 2)  -- Only considering Questions and Answers
+    GROUP BY 
+        P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        COALESCE(PS.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.AverageViews, 0) AS AverageViews,
+        COALESCE(PS.ClosedPosts, 0) AS ClosedPosts,
+        US.TotalPosts,
+        US.TotalComments,
+        US.GoldBadges,
+        US.SilverBadges,
+        US.BronzeBadges
+    FROM 
+        UserStats US
+    LEFT JOIN 
+        PostStats PS ON US.UserId = PS.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalComments,
+    TotalAnswers,
+    TotalScore,
+    AverageViews,
+    ClosedPosts,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    CombinedStats
+ORDER BY 
+    Reputation DESC, TotalScore DESC
+LIMIT 10;

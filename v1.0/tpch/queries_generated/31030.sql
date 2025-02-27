@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+    GROUP BY o.o_orderkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerRanking AS (
+    SELECT c.c_custkey, RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING'
+),
+TotalStats AS (
+    SELECT COUNT(DISTINCT o.o_orderkey) AS total_orders, COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM orders o
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+)
+SELECT 
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    COALESCE(ad.total_price, 0) AS total_order_price,
+    ps.total_supply_cost,
+    COALESCE(c.rank, 0) AS customer_rank,
+    ts.total_orders,
+    ts.total_customers
+FROM part p
+LEFT JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN OrderDetails ad ON p.p_partkey = ad.o_orderkey
+LEFT JOIN CustomerRanking c ON ad.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c))
+CROSS JOIN TotalStats ts
+WHERE p.p_retailprice > 50
+ORDER BY p.p_name, p.p_brand;

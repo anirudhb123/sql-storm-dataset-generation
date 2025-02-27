@@ -1,0 +1,68 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        ca_street_number || ' ' || ca_street_name || ' ' || ca_street_type AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name || ' ' || c_last_name AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd.education_status,
+        cd.purchase_estimate,
+        cd.credit_rating,
+        cd.dep_count,
+        cd.dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesAggregates AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        cd.full_name,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        sa.total_sales,
+        sa.total_orders,
+        CASE 
+            WHEN sa.total_sales IS NULL THEN 0
+            ELSE ROUND(sa.total_sales / NULLIF(sa.total_orders, 0), 2)
+        END AS avg_order_value
+    FROM 
+        CustomerDetails cd
+    LEFT JOIN 
+        AddressDetails ad ON cd.c_customer_sk = ad.ca_address_sk
+    LEFT JOIN 
+        SalesAggregates sa ON cd.c_customer_sk = sa.ws_bill_customer_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN avg_order_value > 100 THEN 'High Value'
+        WHEN avg_order_value BETWEEN 50 AND 100 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    FinalBenchmark
+ORDER BY 
+    avg_order_value DESC;

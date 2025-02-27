@@ -1,0 +1,67 @@
+
+WITH customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_city ORDER BY cd.cd_purchase_estimate DESC) as city_rank
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+item_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.ws_item_sk
+),
+high_value_customers AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(COALESCE(ws.ws_net_paid, 0)) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        c.c_birth_year > (EXTRACT(YEAR FROM CURRENT_DATE) - 30)
+    GROUP BY
+        c.c_customer_sk
+    HAVING
+        total_spent > 10000
+)
+SELECT
+    ci.c_customer_id,
+    ci.ca_city,
+    ci.ca_state,
+    SUM(isc.total_quantity) AS total_items_sold,
+    MAX(isc.total_net_profit) AS max_net_profit,
+    COUNT(DISTINCT hvc.c_customer_sk) AS high_value_customers_count
+FROM
+    customer_info ci
+LEFT JOIN item_sales isc ON isc.ws_item_sk IN (
+    SELECT
+        ws_item_sk
+    FROM
+        store_sales
+    WHERE
+        ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = (EXTRACT(YEAR FROM CURRENT_DATE)))
+) OR isc.ws_item_sk IN (
+    SELECT cs_item_sk FROM catalog_sales
+    WHERE cs_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = (EXTRACT(YEAR FROM CURRENT_DATE)))
+)
+LEFT JOIN high_value_customers hvc ON ci.c_customer_sk = hvc.c_customer_sk
+WHERE
+    ci.city_rank <= 5
+GROUP BY
+    ci.c_customer_id, ci.ca_city, ci.ca_state
+ORDER BY
+    total_items_sold DESC, max_net_profit DESC;

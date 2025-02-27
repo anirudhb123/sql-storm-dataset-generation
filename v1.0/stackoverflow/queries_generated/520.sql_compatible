@@ -1,0 +1,73 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalUpVotes,
+        TotalDownVotes,
+        DENSE_RANK() OVER (ORDER BY TotalUpVotes - TotalDownVotes DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    CASE 
+        WHEN u.TotalQuestions > 0 THEN ROUND(CAST(u.TotalAnswers AS DECIMAL) / u.TotalQuestions, 2)
+        ELSE 0
+    END AS AnswerToQuestionRatio,
+    CASE 
+        WHEN u.TotalPosts > 0 THEN ROUND(CAST(u.TotalUpVotes AS DECIMAL) / u.TotalPosts, 2)
+        ELSE 0
+    END AS UpVoteToPostRatio
+FROM 
+    TopUsers u
+WHERE 
+    u.Rank <= 10
+ORDER BY 
+    u.Rank
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    SUM(TotalPosts) AS TotalPosts,
+    SUM(TotalQuestions) AS TotalQuestions,
+    SUM(TotalAnswers) AS TotalAnswers,
+    SUM(TotalUpVotes) AS TotalUpVotes,
+    SUM(TotalDownVotes) AS TotalDownVotes,
+    CASE 
+        WHEN SUM(TotalQuestions) > 0 THEN ROUND(CAST(SUM(TotalAnswers) AS DECIMAL) / SUM(TotalQuestions), 2)
+        ELSE 0
+    END AS AnswerToQuestionRatio,
+    CASE 
+        WHEN SUM(TotalPosts) > 0 THEN ROUND(CAST(SUM(TotalUpVotes) AS DECIMAL) / SUM(TotalPosts), 2)
+        ELSE 0
+    END AS UpVoteToPostRatio
+FROM 
+    TopUsers;

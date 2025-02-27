@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+        
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    INNER JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+
+cast_details AS (
+    SELECT 
+        a.name AS actor_name,
+        c.nr_order,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+),
+
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+movie_ratings AS (
+    SELECT 
+        mi.movie_id,
+        AVG(NULLIF(mi.info::numeric, 0)) AS average_rating
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cd.actor_name) AS total_actors,
+    SUM(CASE WHEN cd.actor_rank <= 3 THEN 1 ELSE 0 END) AS top_3_actors,
+    COALESCE(kc.keyword_count, 0) AS total_keywords,
+    COALESCE(mr.average_rating, 0) AS average_rating
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    keyword_counts kc ON mh.movie_id = kc.movie_id
+LEFT JOIN 
+    movie_ratings mr ON mh.movie_id = mr.movie_id
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    kc.keyword_count,
+    mr.average_rating
+ORDER BY 
+    mh.production_year DESC, 
+    total_actors DESC;

@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 5000
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPartCount AS (
+    SELECT 
+        ps.ps_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    r.s_name,
+    r.n_name AS supplier_nation,
+    p.p_type,
+    p.p_brand,
+    os.total_sales,
+    os.customer_count,
+    COALESCE(spc.part_count, 0) AS part_count,
+    CASE 
+        WHEN os.total_sales > 10000 THEN 'High Sales'
+        WHEN os.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (
+        SELECT 
+            o.o_orderkey
+        FROM 
+            orders o
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_suppkey = r.s_suppkey
+    )
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = r.s_suppkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierPartCount spc ON spc.ps_suppkey = r.s_suppkey
+WHERE 
+    r.rank = 1
+ORDER BY 
+    os.total_sales DESC NULLS LAST, 
+    r.s_name, 
+    p.p_brand;

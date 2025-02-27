@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+PostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AverageScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+PostWithClosures AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        COALESCE(cp.FirstClosedDate, 'Active') AS ClosureStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+)
+SELECT 
+    ps.UserId,
+    ps.DisplayName,
+    ps.QuestionsAsked,
+    ps.TotalScore,
+    ps.AverageScore,
+    ps.TotalBadgeClass,
+    CASE 
+        WHEN pwc.ClosureStatus = 'Active' THEN 'No Closure'
+        ELSE 'Closed on: ' || TO_CHAR(pwc.ClosureStatus, 'YYYY-MM-DD') 
+    END AS ClosureInfo,
+    COUNT(DISTINCT rp.PostId) AS LatestPostsCount,
+    MAX(rp.CreationDate) AS MostRecentPostDate
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PostWithClosures pwc ON ps.UserId = pwc.PostId
+LEFT JOIN 
+    RankedPosts rp ON ps.UserId = rp.OwnerUserId AND rp.PostRank <= 5 -- Get top 5 latest posts for users
+GROUP BY 
+    ps.UserId, ps.DisplayName, pwc.ClosureStatus
+ORDER BY 
+    ps.TotalScore DESC, ps.QuestionsAsked DESC;

@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    GROUP BY 
+        ci.person_id
+)
+SELECT 
+    a.name AS actor_name,
+    rt.title,
+    rt.production_year,
+    amc.movie_count,
+    COALESCE(k.keyword, 'No keyword') AS movie_keyword,
+    CASE 
+        WHEN amc.movie_count > 10 THEN 'Prolific Actor'
+        ELSE 'Novice Actor'
+    END AS actor_experience,
+    MAX(cm.note) AS company_notes
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rt.title_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+JOIN 
+    complete_cast cc ON cc.movie_id = rt.title_id
+JOIN 
+    cast_info ci ON ci.movie_id = rt.title_id AND ci.person_id = cc.subject_id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+JOIN 
+    ActorMovieCount amc ON amc.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = rt.title_id
+LEFT JOIN 
+    company_name cm ON cm.id = mc.company_id
+WHERE 
+    rt.year_rank <= 5
+    AND rt.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    a.name, rt.title, rt.production_year, amc.movie_count, k.keyword
+ORDER BY 
+    rt.production_year DESC, actor_name;

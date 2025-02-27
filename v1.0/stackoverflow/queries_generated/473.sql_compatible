@@ -1,0 +1,64 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) AS AvgScore,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(P.Tags, '>')) AS Tag,
+        COUNT(P.Id) AS TagCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    U.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.AvgScore,
+    UPS.TotalComments,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    PT.Tag,
+    PT.TagCount
+FROM 
+    UserPostStats UPS
+LEFT JOIN UserBadges UB ON UPS.UserId = UB.UserId
+CROSS JOIN PopularTags PT
+WHERE 
+    UPS.TotalPosts > 10 
+    AND (UPS.TotalQuestions > 5 OR UPS.TotalAnswers > 5)
+ORDER BY 
+    UPS.AvgScore DESC, 
+    UPS.TotalPosts DESC;

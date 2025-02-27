@@ -1,0 +1,65 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.cd_purchase_estimate
+    FROM 
+        CustomerStats cs
+    WHERE 
+        rank_by_purchase_estimate <= 5
+),
+SalesData AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        d.d_year,
+        d.d_moy
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+)
+SELECT 
+    TOP 10
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    SUM(sd.ws_sales_price * sd.ws_quantity) AS total_spent,
+    COUNT(sd.ws_item_sk) AS total_items_purchased,
+    CASE 
+        WHEN COUNT(sd.ws_item_sk) > 10 THEN 'High Activity'
+        ELSE 'Low Activity' 
+    END AS customer_activity_level
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesData sd ON tc.c_customer_sk = sd.ws_bill_customer_sk
+GROUP BY 
+    tc.c_customer_sk, tc.c_first_name, tc.c_last_name
+ORDER BY 
+    total_spent DESC, total_items_purchased DESC
+```

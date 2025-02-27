@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS LatestVoteRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, a.AcceptedAnswerId
+),
+FilteredPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        AcceptedAnswer,
+        CommentCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        LatestVoteRank = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000 
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.VoteCount,
+    ur.DisplayName AS PostOwner,
+    ur.Reputation AS OwnerReputation
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users up ON fp.AcceptedAnswer = up.Id
+JOIN 
+    UserReputation ur ON up.Id = ur.UserId
+WHERE 
+    fp.Score > 0 
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY; 

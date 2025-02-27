@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+PreliminarySales AS (
+    SELECT o.o_orderkey, c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_linenumber) AS item_count,
+           RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_custkey
+),
+FilteredSales AS (
+    SELECT ps.ps_partkey, ps.ps_supplycost, 
+           ps.ps_availqty * COALESCE(NULLIF(AVG(s.s_acctbal), 0), 1) AS adjusted_avail_qty
+    FROM partsupp ps
+    LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rn = 1
+    WHERE ps.ps_availqty IS NOT NULL
+)
+SELECT n.n_name, COUNT(DISTINCT f.total_sales) AS unique_sales_count,
+       MAX(f.total_sales) AS max_sales,
+       MIN(f.total_sales) AS min_sales,
+       SUM(CASE 
+               WHEN f.total_sales > 10000 THEN 1 
+               ELSE 0 
+           END) AS high_value_orders
+FROM nation n
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+JOIN PreliminarySales f ON c.c_custkey = f.c_custkey
+JOIN FilteredSales fs ON fs.ps_partkey IN (SELECT p.p_partkey
+                                            FROM part p
+                                            WHERE p.p_size > 5)
+GROUP BY n.n_name
+HAVING COUNT(*) FILTER (WHERE f.item_count > 1) > 5
+ORDER BY n.n_name DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,59 @@
+
+WITH AddressConcat AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressConcat ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.full_address,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_zip,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.order_count, 0) AS order_count
+    FROM CustomerInfo ci
+    LEFT JOIN SalesData sd ON ci.c_customer_sk = sd.bill_customer_sk
+)
+SELECT 
+    total_sales,
+    order_count,
+    COUNT(*) AS customer_count,
+    AVG(total_sales) AS avg_sales_per_customer,
+    SUM(order_count) AS total_orders
+FROM FinalBenchmark
+GROUP BY total_sales, order_count
+ORDER BY avg_sales_per_customer DESC
+LIMIT 10;

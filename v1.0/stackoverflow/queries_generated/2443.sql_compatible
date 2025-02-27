@@ -1,0 +1,36 @@
+
+WITH UserBadgeCounts AS (
+    SELECT UserId, COUNT(*) AS BadgeCount, 
+           SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName AS OwnerDisplayName,
+           COALESCE((
+               SELECT COUNT(*)
+               FROM Comments c
+               WHERE c.PostId = p.Id
+           ), 0) AS CommentCount,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= (DATE '2024-10-01' - INTERVAL '1 year')
+),
+QualifiedUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, 
+           ub.BadgeCount, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    WHERE u.Reputation > 1000
+)
+SELECT qu.DisplayName, qu.Reputation, qu.BadgeCount, qu.GoldBadges, 
+       qu.SilverBadges, qu.BronzeBadges, rp.Title AS RecentPostTitle, 
+       rp.CreationDate AS PostDate, rp.Score, rp.CommentCount
+FROM QualifiedUsers qu
+LEFT JOIN RecentPosts rp ON qu.Id = rp.OwnerUserId AND rp.RecentRank = 1
+WHERE qu.BadgeCount IS NOT NULL OR rp.Title IS NOT NULL
+ORDER BY qu.Reputation DESC, rp.Score DESC
+LIMIT 50;

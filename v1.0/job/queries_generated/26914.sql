@@ -1,0 +1,41 @@
+SELECT 
+    t.title AS movie_title,
+    GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name SEPARATOR ', ') AS aka_names,
+    GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS cast_members,
+    GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword SEPARATOR ', ') AS keywords,
+    ty.kind AS title_kind,
+    ti.info AS additional_info,
+    mc.name AS company_name,
+    mc.country_code AS company_country
+FROM 
+    title t
+JOIN 
+    aka_title at ON t.id = at.movie_id
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+LEFT JOIN 
+    kind_type ty ON t.kind_id = ty.id
+WHERE 
+    t.production_year >= 2000
+    AND ak.name IS NOT NULL
+    AND ci.nr_order IS NOT NULL
+GROUP BY 
+    t.title, ty.kind, ti.info, mc.name, mc.country_code
+ORDER BY 
+    t.title ASC;

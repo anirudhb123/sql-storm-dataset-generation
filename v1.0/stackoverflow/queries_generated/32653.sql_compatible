@@ -1,0 +1,52 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.CreationDate,
+        P2.Score,
+        P2.OwnerUserId,
+        R.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostCTE R ON R.PostId = P2.ParentId
+)
+
+SELECT 
+    U.DisplayName AS Owner,
+    R.Title,
+    R.CreationDate,
+    R.Score,
+    R.Level,
+    COALESCE(C.Count, 0) AS CommentCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = R.PostId AND V.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = R.PostId AND V.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    RecursivePostCTE R
+LEFT JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS Count FROM Comments GROUP BY PostId) C ON R.PostId = C.PostId
+WHERE 
+    R.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' 
+    AND (R.Score >= 10 OR R.Level > 1) 
+GROUP BY 
+    U.DisplayName, R.Title, R.CreationDate, R.Score, R.Level
+ORDER BY 
+    R.Score DESC, R.CreationDate DESC
+LIMIT 100;

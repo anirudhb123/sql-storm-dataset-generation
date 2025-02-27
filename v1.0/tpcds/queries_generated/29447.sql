@@ -1,0 +1,61 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca.c_city,
+        ca.ca_state,
+        ca.ca_zip,
+        STRING_AGG(DISTINCT CONCAT_WS(', ', ca.ca_street_number, ca.ca_street_name, ca.ca_street_type, ca.ca_suite_number), '; ') AS full_address,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.c_city, ca.ca_state, ca.ca_zip
+),
+DemographicsInfo AS (
+    SELECT 
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS demographics_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+CombinedData AS (
+    SELECT 
+        ai.c_city,
+        ai.ca_state,
+        ai.ca_zip,
+        ai.full_address,
+        di.cd_gender,
+        di.marital_status,
+        ai.customer_count,
+        di.demographics_count
+    FROM 
+        AddressInfo ai
+    JOIN 
+        DemographicsInfo di ON ai.customer_count > 0
+)
+SELECT 
+    c.city,
+    c.state,
+    c.zip,
+    c.full_address,
+    d.cd_gender,
+    d.marital_status,
+    COALESCE(c.customer_count, 0) AS customer_count,
+    COALESCE(d.demographics_count, 0) AS demographics_count
+FROM 
+    CombinedData c
+FULL OUTER JOIN 
+    CombinedData d ON c.customer_count = d.demographics_count
+ORDER BY 
+    c.city, d.marital_status;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY COUNT(a.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 AND  
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><'))) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+TagStats AS (
+    SELECT 
+        Tag,
+        COUNT(DISTINCT PostId) AS TagCount,
+        SUM(AnswerCount) AS TotalAnswers
+    FROM 
+        RankedPosts r
+    JOIN 
+        PopularTags pt ON pt.Tag = ANY (string_to_array(r.Tags, '><'))
+    GROUP BY 
+        Tag
+)
+SELECT 
+    t.Tag,
+    t.TagCount,
+    t.TotalAnswers,
+    (SELECT AVG(AnswerCount) FROM RankedPosts r2 WHERE r2.Tags IS NOT NULL) AS AvgAnswersPerPost,
+    (SELECT MAX(UpVotes - DownVotes) FROM RankedPosts r3 WHERE r3.Tags IS NOT NULL) AS MaxVoteDiff
+FROM 
+    TagStats t
+ORDER BY 
+    t.TotalAnswers DESC, 
+    t.TagCount DESC
+LIMIT 10;

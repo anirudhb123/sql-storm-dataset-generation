@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 365 DAY)
+        AND p.Score IS NOT NULL
+),
+HighestScores AS (
+    SELECT 
+        PostType,
+        MAX(Score) AS MaxScore
+    FROM 
+        RankedPosts
+    GROUP BY 
+        PostType
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        rp.CreationDate, 
+        rp.PostType
+    FROM 
+        RankedPosts rp
+    JOIN 
+        HighestScores hs ON rp.PostType = hs.PostType AND rp.Score = hs.MaxScore
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalResult AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.PostType,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        CASE 
+            WHEN tp.Score > 100 THEN 'High Scorer'
+            WHEN tp.Score BETWEEN 50 AND 100 THEN 'Medium Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory,
+        CASE 
+            WHEN p.OwnerUserId IS NULL THEN 'Community Owned'
+            ELSE 'User Owned'
+        END AS Ownership
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+    LEFT JOIN 
+        Posts p ON tp.PostId = p.Id
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.Score,
+    f.PostType,
+    f.TotalComments,
+    f.ScoreCategory,
+    f.Ownership
+FROM 
+    FinalResult f
+ORDER BY 
+    f.Score DESC, f.CreationDate DESC;

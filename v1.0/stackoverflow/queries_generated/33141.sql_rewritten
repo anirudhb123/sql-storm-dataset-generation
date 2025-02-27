@@ -1,0 +1,64 @@
+WITH RecursivePostCTE AS (
+    SELECT p.Id, p.ParentId, p.OwnerUserId, p.Title, p.CreationDate, p.LastActivityDate, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT p.Id, p.ParentId, p.OwnerUserId, p.Title, p.CreationDate, p.LastActivityDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE cte ON p.ParentId = cte.Id
+    WHERE p.PostTypeId = 2  
+),
+
+UserBadges AS (
+    SELECT u.Id AS UserId, 
+           COUNT(b.Id) AS BadgeCount,
+           STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+
+PostVoteStats AS (
+    SELECT p.Id AS PostId,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+
+AggregatedPosts AS (
+    SELECT rp.Id,
+           rp.Title,
+           rp.CreationDate,
+           rp.LastActivityDate,
+           COALESCE(u.BadgeCount, 0) AS UserBadgeCount,
+           COALESCE(u.BadgeNames, '') AS UserBadges,
+           COALESCE(vs.UpVotes, 0) AS PostUpVotes,
+           COALESCE(vs.DownVotes, 0) AS PostDownVotes,
+           COUNT(c.Id) AS CommentsCount
+    FROM RecursivePostCTE rp
+    LEFT JOIN UserBadges u ON rp.OwnerUserId = u.UserId
+    LEFT JOIN PostVoteStats vs ON rp.Id = vs.PostId
+    LEFT JOIN Comments c ON rp.Id = c.PostId
+    GROUP BY rp.Id, rp.Title, rp.CreationDate, rp.LastActivityDate, u.BadgeCount, u.BadgeNames, vs.UpVotes, vs.DownVotes
+)
+
+SELECT ap.Id,
+       ap.Title,
+       ap.CreationDate,
+       ap.LastActivityDate,
+       ap.UserBadgeCount,
+       ap.UserBadges,
+       (ap.PostUpVotes - ap.PostDownVotes) AS Score,
+       ap.CommentsCount,
+       CASE 
+           WHEN ap.CommentsCount > 10 THEN 'Highly Discussed'
+           WHEN ap.CommentsCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+           ELSE 'Less Discussion'
+       END AS DiscussionLevel
+FROM AggregatedPosts ap
+ORDER BY Score DESC, ap.LastActivityDate DESC
+LIMIT 50;

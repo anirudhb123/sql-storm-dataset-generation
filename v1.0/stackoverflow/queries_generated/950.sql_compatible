@@ -1,0 +1,87 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId AND V.VoteTypeId = 8
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        COALESCE(PC.CommentCount, 0) AS CommentCount,
+        COALESCE(CP.CloseCount, 0) AS CloseCount,
+        UR.Reputation,
+        UR.TotalBounty
+    FROM 
+        RecentPosts RP
+    JOIN 
+        UserReputation UR ON RP.OwnerUserId = UR.Id
+    LEFT JOIN 
+        PostComments PC ON RP.PostId = PC.PostId
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.CommentCount,
+    PD.CloseCount,
+    PD.Reputation,
+    PD.TotalBounty,
+    CASE 
+        WHEN PD.CloseCount > 0 THEN 'Closed'
+        WHEN PD.Score >= 10 THEN 'Popular'
+        ELSE 'Normal'
+    END AS PostStatus
+FROM 
+    PostDetails PD
+WHERE 
+    PD.Reputation BETWEEN 100 AND 1000
+    AND PD.RecentPostRank <= 5
+ORDER BY 
+    PD.Score DESC, 
+    PD.CreationDate DESC;

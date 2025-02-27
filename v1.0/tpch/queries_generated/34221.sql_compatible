@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+), 
+AggregatedSales AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' 
+    GROUP BY c.c_nationkey
+), 
+RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM partsupp ps
+)
+
+SELECT 
+    p.p_name AS part_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(agh.total_sales, 0) AS total_sales_by_nation,
+    sh.s_name AS supplier_name,
+    sh.level AS supplier_level
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN RankedSuppliers rs ON l.l_suppkey = rs.ps_suppkey AND rs.rank = 1
+LEFT JOIN SupplierHierarchy sh ON rs.ps_suppkey = sh.s_suppkey
+LEFT JOIN AggregatedSales agh ON sh.s_nationkey = agh.c_nationkey
+WHERE p.p_size > 10 
+  AND l.l_returnflag = 'N' 
+  AND l.l_shipdate <= CURRENT_DATE
+GROUP BY p.p_name, sh.s_name, sh.level, agh.total_sales
+ORDER BY revenue DESC
+LIMIT 50;

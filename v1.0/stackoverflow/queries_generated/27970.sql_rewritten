@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS RankByDate
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+TagsArray AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+
+TagStatistics AS (
+    SELECT 
+        t.Tag,
+        COUNT(DISTINCT t.PostId) AS PostsCount,
+        COUNT(DISTINCT p.Id) AS AnswersCount
+    FROM 
+        TagsArray t
+    JOIN 
+        Posts p ON t.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 2 
+    GROUP BY 
+        t.Tag
+),
+
+PopularTags AS (
+    SELECT 
+        Tag,
+        PostsCount,
+        AnswersCount,
+        DENSE_RANK() OVER (ORDER BY PostsCount DESC) AS PopularityRank
+    FROM 
+        TagStatistics
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.RankByViews,
+    rp.RankByDate,
+    pt.Name AS PostType,
+    pt.Id AS PostTypeId,
+    ARRAY_AGG(DISTINCT rt.Tag) AS Tags,
+    COALESCE(ptags.PostsCount, 0) AS PostsUsingTag,
+    COALESCE(ptags.AnswersCount, 0) AS AnswersCountForTag
+FROM 
+    RankedPosts rp
+JOIN 
+    PostTypes pt ON rp.PostTypeId = pt.Id
+LEFT JOIN 
+    TagsArray rt ON rp.PostId = rt.PostId
+LEFT JOIN 
+    PopularTags ptags ON rt.Tag = ptags.Tag
+WHERE 
+    rp.RankByViews <= 5 
+GROUP BY 
+    rp.PostId, rp.Title, rp.OwnerDisplayName, rp.RankByViews, rp.RankByDate, pt.Name, pt.Id, ptags.PostsCount, ptags.AnswersCount
+ORDER BY 
+    rp.RankByViews;

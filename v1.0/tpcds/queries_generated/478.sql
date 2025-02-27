@@ -1,0 +1,71 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_sold_date_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rolling_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk) AS sale_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+
+CombinedReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_web_returns,
+        SUM(wr.wr_return_amt) AS total_web_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+
+ItemSalesSummary AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_sold,
+        SUM(sd.ws_sales_price) AS total_sales,
+        COALESCE(cr.total_web_returns, 0) AS total_web_returns,
+        COALESCE(cr.total_web_return_amt, 0) AS total_web_return_amt
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        CombinedReturns cr ON sd.ws_item_sk = cr.wr_item_sk
+    GROUP BY 
+        sd.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    iss.total_sold,
+    iss.total_sales,
+    iss.total_web_returns,
+    iss.total_web_return_amt,
+    (iss.total_sales - iss.total_web_return_amt) AS net_sales,
+    CASE 
+        WHEN iss.total_sold = 0 THEN NULL 
+        ELSE (iss.total_web_returns * 100.0 / iss.total_sold) END AS return_percentage,
+    MAX(sd.rolling_sales) AS max_rolling_sales_last_7_days,
+    MIN(sd.sale_rank) AS min_sale_rank
+FROM 
+    ItemSalesSummary iss
+JOIN 
+    item i ON iss.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    SalesData sd ON i.i_item_sk = sd.ws_item_sk
+GROUP BY 
+    i.i_item_id, i.i_item_desc, iss.total_sold, iss.total_sales, iss.total_web_returns, iss.total_web_return_amt
+ORDER BY 
+    net_sales DESC
+FETCH FIRST 100 ROWS ONLY;

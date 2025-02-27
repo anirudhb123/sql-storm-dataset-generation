@@ -1,0 +1,68 @@
+WITH ranked_orders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        o_orderdate,
+        RANK() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM 
+        orders
+), 
+supplier_part_details AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_type,
+        COALESCE(NULLIF(p.p_brand, ''), 'Unknown') AS brand,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS supplier_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+customer_nations AS (
+    SELECT 
+        c.c_custkey,
+        n.n_nationkey,
+        n.n_name AS nation_name,
+        COALESCE(NULLIF(c.c_comment, ''), 'No comment') AS comment
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    r.o_orderdate,
+    cp.brand,
+    cp.p_name,
+    cp.p_type,
+    cn.nation_name,
+    cn.comment,
+    COALESCE(NULLIF(r.order_rank, 1), 0) AS previous_order_existence,
+    SUM(CASE 
+        WHEN lp.l_discount BETWEEN 0.05 AND 0.15 THEN lp.l_extendedprice * lp.l_discount 
+        ELSE 0 
+    END) AS total_discounted_price,
+    STRING_AGG(DISTINCT cp.p_name, ', ') AS aggregated_part_names
+FROM 
+    ranked_orders r
+JOIN 
+    lineitem lp ON r.o_orderkey = lp.l_orderkey
+JOIN 
+    supplier_part_details cp ON lp.l_partkey = cp.ps_partkey AND cp.supplier_rank = 1
+JOIN 
+    customer_nations cn ON r.o_custkey = cn.c_custkey
+WHERE 
+    r.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)  
+    AND r.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    r.o_orderkey, r.o_totalprice, r.o_orderdate, cp.brand, cp.p_name, cp.p_type, cn.nation_name, cn.comment
+HAVING 
+    COUNT(lp.l_linenumber) > 1
+ORDER BY 
+    r.o_orderdate DESC, r.o_orderkey;

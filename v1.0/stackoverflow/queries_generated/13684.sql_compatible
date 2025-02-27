@@ -1,0 +1,49 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,  
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes  
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount 
+         FROM Posts 
+         WHERE PostTypeId = 2 
+         GROUP BY PostId) a ON p.Id = a.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, a.AnswerCount, c.CommentCount
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    (ps.UpVotes - ps.DownVotes) AS NetVotes,
+    (ps.ViewCount / NULLIF(ps.AnswerCount, 0)) AS ViewsPerAnswer,  
+    (ps.ViewCount / NULLIF(ps.CommentCount, 0)) AS ViewsPerComment   
+FROM 
+    PostStats ps
+ORDER BY 
+    ps.ViewCount DESC  
+LIMIT 100;

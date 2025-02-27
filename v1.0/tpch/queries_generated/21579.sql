@@ -1,0 +1,104 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        1 AS level
+    FROM 
+        part p
+    WHERE 
+        p.p_size <= 20
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice * (1 + (level * 0.05)) AS p_retailprice,
+        p.p_comment,
+        level + 1
+    FROM 
+        part p
+    JOIN 
+        part_hierarchy ph ON ph.p_partkey = p.p_partkey
+    WHERE 
+        ph.level < 4
+),
+item_supplier AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey
+),
+high_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+    HAVING 
+        order_value > 10000
+),
+customer_order_summary AS (
+    SELECT 
+        cu.c_custkey,
+        cu.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS cum_total_price
+    FROM 
+        customer cu
+    LEFT JOIN 
+        orders o ON cu.c_custkey = o.o_custkey
+    GROUP BY 
+        cu.c_custkey, cu.c_name
+    HAVING 
+        cum_total_price > 50000
+)
+SELECT 
+    c.c_name,
+    ph.p_name,
+    SUM(i.total_availqty) AS total_avail_qty,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    DENSE_RANK() OVER (PARTITION BY ph.p_brand ORDER BY SUM(o.o_totalprice) DESC) AS price_rank
+FROM 
+    part_hierarchy ph
+JOIN 
+    item_supplier i ON ph.p_partkey = i.ps_partkey
+LEFT JOIN 
+    high_value_orders o ON o.o_orderkey = (SELECT MAX(o2.o_orderkey) FROM high_value_orders o2 WHERE o2.o_orderkey < o.o_orderkey)
+JOIN 
+    customer_order_summary cu ON o.o_orderkey = cou[custkey]
+WHERE 
+    ph.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container IS NOT NULL)
+    AND (ph.p_size IS NOT NULL OR ph.p_type IS NOT NULL)
+GROUP BY 
+    c.c_name, ph.p_name, ph.p_brand
+HAVING 
+    SUM(i.total_availqty) - COUNT(DISTINCT o.o_orderkey) > 0
+ORDER BY 
+    price_rank, total_avail_qty DESC;

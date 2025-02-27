@@ -1,0 +1,34 @@
+
+WITH RECURSIVE DateHierarchy AS (
+    SELECT d_date_sk, d_year, d_month_seq, d_day_name, 1 as level
+    FROM date_dim
+    WHERE d_year = 2023
+    UNION ALL
+    SELECT d_date_sk, d_year, d_month_seq, d_day_name, level + 1
+    FROM date_dim
+    JOIN DateHierarchy ON d_month_seq = (SELECT d_month_seq FROM date_dim WHERE d_date_sk = DateHierarchy.d_date_sk) + 1
+    WHERE level < 12
+)
+SELECT 
+    ca_city, 
+    ca_state,
+    COUNT(DISTINCT c_customer_sk) AS total_customers,
+    SUM(ws_ext_sales_price) AS total_sales,
+    AVG(ws_ext_sales_price) AS avg_sales_amt,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ws_ext_sales_price) AS median_sales_amt,
+    CASE 
+        WHEN SUM(ws_ext_sales_price) IS NULL THEN 'No Sales'
+        ELSE 'Sales Completed'
+    END AS sales_status,
+    COALESCE((SELECT COUNT(*) 
+              FROM customer_demographics 
+              WHERE cd_demo_sk IN (SELECT c_current_cdemo_sk FROM customer WHERE c_current_addr_sk IS NOT NULL)), 0) AS total_demographics
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+LEFT JOIN DateHierarchy dh ON ws.ws_sold_date_sk = dh.d_date_sk
+WHERE ca_state IN ('CA', 'NY')
+GROUP BY ca_city, ca_state
+HAVING SUM(ws_ext_sales_price) > 10000
+ORDER BY total_sales DESC
+LIMIT 10;

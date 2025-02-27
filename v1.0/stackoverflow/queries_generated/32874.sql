@@ -1,0 +1,99 @@
+WITH RECURSIVE TagCTE AS (
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        T.IsModeratorOnly = 0
+    UNION ALL
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.Score
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    JOIN 
+        TagCTE ON T.Count > TagCTE.Count
+), 
+UserRank AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+), 
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(C.CreatedCommentCount, 0) AS CommentCount,
+        COALESCE(NB.NewBadgeCount, 0) AS NewBadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CreatedCommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT 
+            B.UserId,
+            COUNT(*) AS NewBadgeCount
+        FROM 
+            Badges B
+        WHERE 
+            B.Date > NOW() - INTERVAL '30 days'
+        GROUP BY 
+            B.UserId
+    ) NB ON P.OwnerUserId = NB.UserId
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    U.DisplayName,
+    U.UserRank,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.CommentCount,
+    RP.NewBadgeCount,
+    T.TagName,
+    T.Count AS TagUsageCount
+FROM 
+    UserRank U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+JOIN 
+    RecentPosts RP ON P.Id = RP.Id
+JOIN 
+    TagCTE T ON P.Tags LIKE '%' || T.TagName || '%'
+WHERE 
+    RP.Score > 0
+    AND RP.CommentCount > 5
+ORDER BY 
+    U.UserRank, RP.Score DESC;

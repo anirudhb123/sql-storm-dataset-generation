@@ -1,0 +1,27 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation
+    FROM Users
+    WHERE Reputation > 1000
+), PostStats AS (
+    SELECT P.Id AS PostId, P.Title, P.Score, P.ViewCount, P.AnswerCount, U.Reputation AS OwnerReputation
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' AND P.PostTypeId = 1
+), TopPosts AS (
+    SELECT PostId, Title, Score, ViewCount, AnswerCount, OwnerReputation,
+           ROW_NUMBER() OVER (ORDER BY Score DESC, ViewCount DESC) AS Rank
+    FROM PostStats
+), ClosedPosts AS (
+    SELECT PH.PostId, PH.CreationDate AS ChangeDate, C.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON CAST(PH.Comment AS INT) = C.Id
+    WHERE PH.PostHistoryTypeId = 10
+)
+SELECT TP.PostId, TP.Title, TP.Score, TP.ViewCount, TP.AnswerCount, TP.OwnerReputation, 
+       COALESCE(CP.ChangeDate, 'No Closure') AS ClosureDate, COALESCE(CP.CloseReason, 'N/A') AS CloseReason
+FROM TopPosts TP
+LEFT JOIN ClosedPosts CP ON TP.PostId = CP.PostId
+WHERE TP.Rank <= 10
+GROUP BY TP.PostId, TP.Title, TP.Score, TP.ViewCount, TP.AnswerCount, TP.OwnerReputation, CP.ChangeDate, CP.CloseReason
+ORDER BY TP.Score DESC, TP.ViewCount DESC;

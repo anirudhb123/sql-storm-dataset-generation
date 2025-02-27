@@ -1,0 +1,39 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId IN (6, 7) THEN 1 ELSE 0 END) AS WikiCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Tags T
+    JOIN Posts P ON T.Id = P.Tags::int[]
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY T.TagName
+    ORDER BY TotalViews DESC
+    LIMIT 10
+)
+
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.CreationDate,
+    US.PostCount,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.WikiCount,
+    TT.TagName,
+    TT.TotalViews
+FROM UserStats US
+JOIN TopTags TT ON TT.TagName IN (SELECT unnest(string_to_array(Tags, ',')) FROM Posts WHERE OwnerUserId = US.UserId)
+ORDER BY US.Reputation DESC, US.PostCount DESC;

@@ -1,0 +1,28 @@
+SELECT
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    MAX(p.p_retailprice) AS max_price,
+    MIN(p.p_retailprice) AS min_price,
+    AVG(p.p_retailprice) AS avg_price,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_phone, ')'), '; ') AS supplier_info,
+    r.r_name AS region_name,
+    n.n_name AS nation_name
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    p.p_name LIKE '%steel%' AND
+    p.p_retailprice BETWEEN 10.00 AND 100.00
+GROUP BY
+    p.p_name, r.r_name, n.n_name
+HAVING
+    COUNT(DISTINCT ps.s_suppkey) > 5
+ORDER BY
+    avg_price DESC, supplier_count DESC;

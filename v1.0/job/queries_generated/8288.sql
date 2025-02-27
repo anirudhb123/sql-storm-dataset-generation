@@ -1,0 +1,55 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        rm.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        RecursiveMovieHierarchy rm ON ml.movie_id = rm.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT ka.keyword) AS keyword_count,
+    GROUP_CONCAT(DISTINCT c.kind SEPARATOR ', ') AS company_types,
+    MIN(p.info) AS actor_bio
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    RecursiveMovieHierarchy m ON ci.movie_id = m.movie_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+JOIN 
+    keyword ka ON mk.keyword_id = ka.id
+JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+JOIN 
+    person_info p ON p.person_id = ci.person_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name, m.movie_title, m.production_year
+HAVING 
+    MAX(m.level) < 3
+ORDER BY 
+    keyword_count DESC, m.production_year DESC;

@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0 
+),
+FilteredSupply AS (
+    SELECT s_suppkey, s_name, s_acctbal, ps_availqty, ps_supplycost
+    FROM SupplyChain
+    WHERE rn <= 3
+),
+ComplexOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus,
+           c.c_name, c.c_mktsegment, 
+           CASE 
+               WHEN o.o_orderstatus IN ('F', 'O') THEN 'Active'
+               ELSE 'Completed'
+           END AS order_status,
+           LAG(o.o_totalprice) OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate) AS previous_total
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+)
+SELECT n.n_name,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COALESCE(MAX(CASE WHEN o.order_status = 'Active' THEN o.o_totalprice END), 0) AS active_order_value,
+       COUNT(DISTINCT CASE WHEN COALESCE(l.l_returnflag, 'N') = 'Y' THEN l.l_orderkey END) AS return_count,
+       STRING_AGG(DISTINCT ps.supp_name, ', ') AS suppliers,
+       COUNT(DISTINCT c.c_custkey) FILTER (WHERE c.c_mktsegment = 'AUTOMOBILE') AS auto_customers
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN FilteredSupply ps ON l.l_suppkey = ps.s_suppkey
+WHERE l.l_shipdate > '1997-01-01' AND l.l_tax IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC, n.n_name
+LIMIT 10;

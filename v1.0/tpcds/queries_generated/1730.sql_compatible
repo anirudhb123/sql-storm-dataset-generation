@@ -1,0 +1,45 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_paid_inc_tax) AS average_transaction_value,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_by_profit
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+    GROUP BY ws.web_site_sk
+),
+top_sites AS (
+    SELECT 
+        web_site_sk,
+        total_orders,
+        total_profit,
+        average_transaction_value,
+        rank_by_profit
+    FROM sales_summary
+    WHERE rank_by_profit <= 5
+),
+income_brackets AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(cd.cd_demo_sk) AS demo_count
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    INNER JOIN customer_demographics cd ON hd.hd_demo_sk = cd.cd_demo_sk
+    WHERE (hd.hd_buy_potential IS NOT NULL AND hd.hd_dep_count > 0)
+    GROUP BY ib.ib_income_band_sk
+)
+SELECT 
+    ts.web_site_sk,
+    ts.total_orders,
+    ts.total_profit,
+    ts.average_transaction_value,
+    ib.ib_income_band_sk,
+    ib.demo_count
+FROM top_sites ts
+FULL OUTER JOIN income_brackets ib ON ts.web_site_sk IS NULL OR ib.demo_count IS NULL
+WHERE (ib.demo_count IS NOT NULL OR ts.total_orders IS NOT NULL)
+ORDER BY ts.total_profit DESC, ib.demo_count DESC;

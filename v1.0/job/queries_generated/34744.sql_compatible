@@ -1,0 +1,90 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL AS parent_movie,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.id NOT IN (SELECT episode_of_id FROM aka_title WHERE episode_of_id IS NOT NULL)
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        p.title AS parent_movie,
+        h.level + 1
+    FROM
+        aka_title e
+    JOIN
+        aka_title p ON e.episode_of_id = p.id
+    JOIN
+        movie_hierarchy h ON h.movie_id = p.id
+),
+movie_cast AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS character_name,
+        CTE.dense_rank AS rk
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+    JOIN (
+        SELECT
+            movie_id,
+            actor_name,
+            DENSE_RANK() OVER (PARTITION BY movie_id ORDER BY COUNT(*) DESC) AS dense_rank
+        FROM
+            cast_info ci
+        JOIN
+            aka_name an ON ci.person_id = an.person_id
+        GROUP BY
+            movie_id, actor_name
+    ) CTE ON c.movie_id = CTE.movie_id
+    WHERE
+        CTE.dense_rank <= 3
+),
+movie_info_details AS (
+    SELECT
+        m.id AS movie_id,
+        ARRAY_AGG(DISTINCT kv.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT mt.kind) AS movie_types
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN
+        keyword kv ON mk.keyword_id = kv.id
+    LEFT JOIN
+        kind_type mt ON m.kind_id = mt.id
+    GROUP BY
+        m.id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ci.actor_name, 'Unknown') AS actor_name,
+    COALESCE(ci.character_name, 'Unknown') AS character_name,
+    COALESCE(mkd.keywords, ARRAY[]::TEXT[]) AS keywords,
+    COALESCE(mkd.movie_types, ARRAY[]::TEXT[]) AS movie_types
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    movie_cast ci ON mh.movie_id = ci.movie_id
+LEFT JOIN
+    movie_info_details mkd ON mh.movie_id = mkd.movie_id
+ORDER BY
+    mh.production_year DESC,
+    mh.title,
+    mh.level,
+    ci.rk;

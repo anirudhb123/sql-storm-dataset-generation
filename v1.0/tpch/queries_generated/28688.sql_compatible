@@ -1,0 +1,43 @@
+
+WITH String_Aggregation AS (
+    SELECT 
+        p.p_partkey,
+        CONCAT(p.p_name, ' ', p.p_mfgr, ' ', p.p_brand, ' ', p.p_type) AS combined_string,
+        LENGTH(CONCAT(p.p_name, ' ', p.p_mfgr, ' ', p.p_brand, ' ', p.p_type)) AS string_length,
+        SUBSTRING_INDEX(SUBSTRING_INDEX(p.p_comment, ' ', 3), ' ', -3) AS last_three_words,
+        REGEXP_REPLACE(p.p_comment, '([A-Za-z]+)', UPPER('$1')) AS uppercased_comment
+    FROM 
+        part p 
+    WHERE 
+        p.p_size > 10
+), Relevant_Suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_phone,
+        p.combined_string,
+        p.string_length,
+        s.s_nationkey  -- Added s_nationkey for correct join in final query
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        String_Aggregation p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    AVG(rs.string_length) AS avg_combined_string_length,
+    STRING_AGG(DISTINCT rs.last_three_words ORDER BY rs.s_suppkey) AS all_last_three_words,  -- Changed GROUP_CONCAT to STRING_AGG for standard SQL
+    MIN(rs.uppercased_comment) AS sample_uppercased_comment
+FROM 
+    Relevant_Suppliers rs
+JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

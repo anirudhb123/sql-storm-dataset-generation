@@ -1,0 +1,69 @@
+
+WITH SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        s.s_phone,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS comment_length
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE
+        LENGTH(s.s_name) > 10
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        LENGTH(p.p_name) AS name_length,
+        LENGTH(p.p_comment) AS comment_length
+    FROM
+        part p
+    WHERE
+        p.p_retailprice > 10.00
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_custkey
+    HAVING
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000.00
+)
+SELECT
+    sd.s_name AS supplier_name,
+    pd.p_name AS part_name,
+    hv.o_orderkey AS order_number,
+    hv.order_value,
+    sd.nation_name,
+    pd.name_length AS part_name_length,
+    sd.comment_length AS supplier_comment_length
+FROM
+    SupplierDetails sd
+JOIN
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN
+    HighValueOrders hv ON hv.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE CONCAT('%', sd.s_name, '%') LIMIT 1)
+WHERE
+    pd.comment_length > 20
+ORDER BY
+    hv.order_value DESC, sd.s_name, pd.p_name;

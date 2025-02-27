@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY s.s_acctbal DESC) AS supplier_rank,
+        p.p_partkey
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+            SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL
+        )
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), CustomerSegment AS (
+    SELECT 
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+    GROUP BY 
+        c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(ns.total_orders, 0) AS total_orders,
+    COALESCE(ns.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    AVG(COALESCE(ns.total_spent, 0)) OVER (PARTITION BY r.r_name) AS avg_spent_per_region
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerSegment ns ON n.n_nationkey = ns.c_name
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.p_partkey
+WHERE 
+    r.r_name LIKE 'A%' OR r.r_name IS NULL
+GROUP BY 
+    r.r_name, ns.total_orders, ns.total_spent
+HAVING 
+    COUNT(ns.total_orders) > 1
+ORDER BY 
+    avg_spent_per_region DESC NULLS LAST;

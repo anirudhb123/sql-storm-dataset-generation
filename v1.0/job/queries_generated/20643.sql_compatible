@@ -1,0 +1,95 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id 
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+), 
+actor_movies AS (
+    SELECT 
+        ca.person_id,
+        ka.name,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ka ON ca.person_id = ka.person_id
+    JOIN 
+        aka_title m ON ca.movie_id = m.id
+    WHERE 
+        ka.name IS NOT NULL
+),
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+    HAVING 
+        COUNT(mk.keyword_id) > 2
+),
+compilation AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        am.person_id,
+        am.name AS actor_name,
+        kc.keyword_count,
+        mh.level,
+        CASE 
+            WHEN kc.keyword_count IS NULL THEN 'No Keywords'
+            ELSE 'Keyword Presence'
+        END AS keyword_status
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movies am ON mh.movie_id = am.movie_id AND am.rn = 1
+    LEFT JOIN 
+        keyword_counts kc ON mh.movie_id = kc.movie_id
+)
+SELECT 
+    c.movie_id,
+    c.title,
+    c.production_year,
+    COALESCE(c.actor_name, 'Unknown') AS actor_name,
+    c.keyword_count,
+    c.keyword_status,
+    CASE 
+        WHEN c.level = 1 THEN 'Original'
+        WHEN c.level IS NOT NULL THEN 'Linked'
+        ELSE 'Unknown Level'
+    END AS movie_level_status
+FROM 
+    compilation c
+WHERE 
+    c.production_year < 2000 
+    AND (c.keyword_count IS NULL OR c.keyword_count <= 5)
+ORDER BY 
+    c.production_year DESC, 
+    c.keyword_count DESC NULLS LAST;

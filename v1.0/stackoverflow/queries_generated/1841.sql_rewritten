@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        PostId
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON JSON_EXTRACT(ph.Comment, '$.CloseReasonId') = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(pv.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pv.DownVotes, 0) AS TotalDownVotes,
+    rp.Reputation,
+    rp.DisplayName,
+    cr.CloseReason,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Latest Post' 
+        ELSE 'Older Post' 
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.Reputation > 100 
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 10;

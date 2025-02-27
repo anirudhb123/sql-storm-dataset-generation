@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+), RankedSuppliers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM SupplierOrders
+), AggregateNation AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_name
+), CombinedResults AS (
+    SELECT 
+        r.n_name, 
+        r.customer_count, 
+        r.total_order_value,
+        rs.s_name AS supplier_name,
+        rs.total_revenue
+    FROM AggregateNation r
+    JOIN RankedSuppliers rs ON r.customer_count > 10
+    WHERE r.total_order_value IS NOT NULL AND rs.total_revenue IS NOT NULL
+)
+SELECT 
+    n.n_name,
+    COALESCE(s.supplier_name, 'No Supplier') AS supplier_name,
+    n.customer_count,
+    n.total_order_value,
+    CASE 
+        WHEN n.customer_count > 50 THEN 'High Volume'
+        WHEN n.customer_count BETWEEN 20 AND 50 THEN 'Medium Volume'
+        ELSE 'Low Volume' 
+    END AS volume_category,
+    'Total Revenue: ' || CAST(COALESCE(s.total_revenue, 0) AS VARCHAR) AS revenue_info
+FROM AggregateNation n
+LEFT JOIN RankedSuppliers s ON n.customer_count < 5
+ORDER BY n.n_name, s.total_revenue DESC NULLS LAST;

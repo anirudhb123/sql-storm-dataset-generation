@@ -1,0 +1,68 @@
+
+WITH TagCounts AS (
+    SELECT 
+        UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')) AS TagName, 
+        COUNT(*) AS PostCount
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY TagName
+),
+QuestionDetails AS (
+    SELECT 
+        p.Id AS QuestionId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        TagCounts tc ON t.TagName = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))
+    LEFT JOIN 
+        Tags t ON t.TagName = tc.TagName
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(v.Id) AS VoteCount, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes, 
+        SUM(CASE WHEN b.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    q.QuestionId, 
+    q.Title, 
+    q.CreationDate, 
+    q.Score, 
+    q.ViewCount, 
+    q.AnswerCount, 
+    q.Tags, 
+    ua.UserId, 
+    ua.DisplayName AS UserDisplayName, 
+    ua.VoteCount, 
+    ua.UpVotes, 
+    ua.DownVotes, 
+    ua.BadgeCount
+FROM 
+    QuestionDetails q
+JOIN 
+    UserActivity ua ON q.QuestionId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+ORDER BY 
+    q.CreationDate DESC, 
+    q.Score DESC, 
+    ua.VoteCount DESC;

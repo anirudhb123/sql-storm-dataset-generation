@@ -1,0 +1,31 @@
+
+WITH ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+country_totals AS (
+    SELECT n.n_regionkey, SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+),
+aggregate_data AS (
+    SELECT r.r_regionkey, r.r_name, COALESCE(SUM(r_sup.total_supplycost), 0) AS total_supplycost,
+           COALESCE(ct.total_revenue, 0) AS total_revenue
+    FROM region r
+    LEFT JOIN ranked_suppliers r_sup ON r_sup.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+    LEFT JOIN country_totals ct ON r.r_regionkey = ct.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+
+SELECT a.r_regionkey, a.r_name, a.total_supplycost, a.total_revenue,
+       (CASE WHEN a.total_revenue = 0 THEN 0 ELSE a.total_supplycost / a.total_revenue END) AS cost_to_revenue_ratio
+FROM aggregate_data a
+WHERE a.total_supplycost > 0
+ORDER BY cost_to_revenue_ratio DESC, a.total_supplycost DESC
+FETCH FIRST 10 ROWS ONLY;

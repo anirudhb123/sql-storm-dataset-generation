@@ -1,0 +1,64 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(COALESCE(v.CreationDate, u.CreationDate)) AS AvgPostCreationDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = p.Id -- Assuming Tags are linked to Posts
+    GROUP BY t.TagName
+    ORDER BY TotalScore DESC
+    LIMIT 10
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalBounty,
+    u.AvgPostCreationDate,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    p.TotalBounty,
+    t.TagName,
+    t.TotalScore,
+    t.PostCount
+FROM UserStats u
+JOIN PostStats p ON u.TotalPosts > 0
+JOIN TopTags t ON p.ViewCount > 100  -- Arbitrary condition for joining with tags
+ORDER BY u.Reputation DESC, p.Score DESC
+LIMIT 100;

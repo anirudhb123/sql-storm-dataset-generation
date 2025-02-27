@@ -1,0 +1,90 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        wb.web_name,
+        DATE(d.d_date) AS sales_date,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site wb ON ws.ws_web_site_sk = wb.web_site_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        ws.web_site_sk, wb.web_name, d.d_date
+),
+top_selling_items AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws.ws_ship_mode_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_ship_mode_sk
+),
+customer_return_history AS (
+    SELECT 
+        wr.wr_returning_customer_sk AS customer_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_net_loss) AS total_net_loss
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+final_summary AS (
+    SELECT 
+        ss.web_site_sk,
+        ss.web_name,
+        ss.sales_date,
+        ss.total_quantity,
+        ss.total_net_profit,
+        ss.total_orders,
+        COALESCE(ctr.total_returns, 0) AS total_returns,
+        COALESCE(ctr.total_net_loss, 0) AS total_net_loss,
+        COALESCE(ti.total_quantity, 0) AS total_top_item_quantity
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        customer_return_history ctr ON ctr.customer_sk = ss.web_site_sk
+    LEFT JOIN 
+        top_selling_items ti ON ti.ws_item_sk = (
+            SELECT 
+                ti2.ws_item_sk 
+            FROM 
+                top_selling_items ti2 
+            WHERE 
+                ti2.rank = 1 
+            AND 
+                ti2.ws_ship_mode_sk = ss.web_site_sk
+            LIMIT 1
+        )
+)
+SELECT 
+    fs.web_name,
+    fs.sales_date,
+    fs.total_quantity,
+    fs.total_net_profit,
+    fs.total_orders,
+    fs.total_returns,
+    fs.total_net_loss,
+    CASE 
+        WHEN fs.total_orders > 100 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM 
+    final_summary fs
+WHERE 
+    fs.total_net_profit > 5000
+    AND fs.total_returns < 50
+ORDER BY 
+    fs.sales_date DESC, 
+    fs.total_net_profit DESC;

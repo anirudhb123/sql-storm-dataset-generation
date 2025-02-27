@@ -1,0 +1,58 @@
+WITH movie_info_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords,
+        COALESCE(STRING_AGG(DISTINCT c.name, ', '), 'No Companies') AS companies,
+        COALESCE(STRING_AGG(DISTINCT a.name, ', '), 'No Actors') AS actors,
+        COUNT(DISTINCT m2.linked_movie_id) AS linked_movies
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        aka_name a ON cc.subject_id = a.person_id
+    LEFT JOIN 
+        movie_link m2 ON t.id = m2.movie_id
+    GROUP BY 
+        m.movie_id, t.title
+),
+final_summary AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.keywords,
+        m.companies,
+        m.actors,
+        m.linked_movies,
+        CASE 
+            WHEN m.linked_movies > 5 THEN 'Highly Linked'
+            WHEN m.linked_movies BETWEEN 1 AND 5 THEN 'Moderately Linked'
+            ELSE 'Not Linked'
+        END AS link_category
+    FROM 
+        movie_info_summary m
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.keywords,
+    f.companies,
+    f.actors,
+    f.linked_movies,
+    f.link_category
+FROM 
+    final_summary f
+ORDER BY 
+    f.linked_movies DESC, 
+    f.title;

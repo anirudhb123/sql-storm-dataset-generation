@@ -1,0 +1,103 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostWithVoteCount AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        R.Level
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy R ON P.Id = R.PostId
+    GROUP BY 
+        P.Id, R.Level
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.BadgeCount
+    FROM 
+        UserReputation UR
+    WHERE 
+        UR.Reputation >= 1000  
+    ORDER BY 
+        UR.Reputation DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(PV.UpVotes, 0) AS UpVotes,
+        COALESCE(PV.DownVotes, 0) AS DownVotes,
+        U.DisplayName AS OwnerDisplayName,
+        U.Location AS OwnerLocation,
+        R.Level
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostWithVoteCount PV ON P.Id = PV.PostId
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.Id = R.PostId
+    WHERE 
+        R.Level = 0  
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.OwnerDisplayName,
+    PS.OwnerLocation,
+    U.BadgeCount
+FROM 
+    PostStats PS
+INNER JOIN 
+    TopUsers U ON PS.OwnerUserId = U.UserId
+WHERE 
+    PS.UpVotes > PS.DownVotes  
+ORDER BY 
+    PS.UpVotes DESC
+LIMIT 20;

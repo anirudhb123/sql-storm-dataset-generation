@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT ch.c_custkey, c.c_name, c.c_nationkey, level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+),
+SupplierWithParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 5 AND ps.ps_supplycost < 100.00
+),
+OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING COUNT(l.l_orderkey) > 0
+),
+NationMaxi AS (
+    SELECT n.n_name, MAX(s.s_acctbal) AS max_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    ch.c_name,
+    r.r_name, 
+    ns.n_name,
+    SUM(oss.o_totalprice) AS total_order_value,
+    AVG(sp.ps_supplycost) AS avg_supply_cost,
+    COUNT(DISTINCT sp.p_partkey) AS part_count,
+    ROW_NUMBER() OVER (PARTITION BY ch.c_name ORDER BY SUM(oss.o_totalprice) DESC) AS rank
+FROM CustomerHierarchy ch
+JOIN OrdersSummary oss ON ch.c_custkey = oss.o_orderkey
+JOIN SupplierWithParts sp ON sp.s_suppkey = oss.o_orderkey
+JOIN nation ns ON ch.c_nationkey = ns.n_nationkey
+JOIN region r ON ns.n_regionkey = r.r_regionkey
+WHERE r.r_name IS NULL OR ch.c_name IS NOT NULL
+GROUP BY ch.c_name, r.r_name, ns.n_name
+HAVING COUNT(DISTINCT oss.o_orderkey) > 10 
+   AND (SUM(oss.o_totalprice) / NULLIF(COUNT(DISTINCT sp.p_partkey), 0)) > 500.00
+ORDER BY total_order_value DESC, rank ASC;

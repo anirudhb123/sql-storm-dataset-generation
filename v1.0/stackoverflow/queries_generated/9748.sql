@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        RANK() OVER (ORDER BY p.CreationDate DESC, p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    tp.*,
+    pt.Name AS PostTypeName,
+    bt.Name AS BadgeTypeName,
+    JSON_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTypes pt ON tp.PostId = tp.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT Id FROM Users WHERE DisplayName = tp.OwnerDisplayName) 
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = tp.PostId
+GROUP BY 
+    tp.PostId, pt.Name, bt.Name
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

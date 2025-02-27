@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY m.rating DESC) AS rank_in_year,
+        COUNT(c.id) AS cast_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN movie_info m ON t.movie_id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank_in_year,
+        rm.cast_count,
+        rm.keyword_count
+    FROM RankedMovies rm
+    WHERE rm.rank_in_year <= 5
+),
+ActorStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS distinct_actors,
+        SUM(CASE WHEN ci.note IS NOT NULL AND ci.note LIKE '%lead%' THEN 1 ELSE 0 END) AS lead_roles
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+FinalReport AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        COALESCE(as.distinct_actors, 0) AS total_actors,
+        COALESCE(as.lead_roles, 0) AS lead_roles,
+        CASE 
+            WHEN COALESCE(as.lead_roles, 0) > 0 THEN 'Contains lead roles'
+            ELSE 'No lead roles detected'
+        END AS role_status,
+        fm.keyword_count
+    FROM FilteredMovies fm
+    LEFT JOIN ActorStats as ON fm.movie_id = as.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    total_actors,
+    lead_roles,
+    role_status,
+    keyword_count,
+    CASE 
+        WHEN total_actors IS NULL THEN 'Unknown'
+        WHEN total_actors > 10 THEN 'Large Cast'
+        WHEN total_actors BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM FinalReport
+ORDER BY production_year DESC, title ASC;

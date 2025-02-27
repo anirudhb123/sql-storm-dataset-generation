@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        tags.TagName,
+        ROW_NUMBER() OVER (PARTITION BY tags.TagName ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    CROSS APPLY 
+        (SELECT value AS TagName FROM STRING_SPLIT(SUBSTRING(p.Tags, 2, LEN(p.Tags) - 2), '>') WHERE value <> '') AS tag
+    JOIN 
+        Tags tags ON tag.TagName = tags.TagName 
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        ViewCount,
+        OwnerDisplayName,
+        TagName
+    FROM 
+        RankedPosts
+    WHERE 
+        ViewRank <= 3
+),
+
+TopCommenters AS (
+    SELECT 
+        c.UserDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    JOIN 
+        Posts p ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        c.UserDisplayName
+    ORDER BY 
+        CommentCount DESC
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.TagName,
+    tc.UserDisplayName AS TopCommenter,
+    tc.CommentCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    (SELECT TOP 1 UserDisplayName, CommentCount FROM TopCommenters ORDER BY CommentCount DESC) tc ON 1=1
+ORDER BY 
+    tp.ViewCount DESC;

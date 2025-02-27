@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserAggregate AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(v.CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(SUM(v.CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COALESCE(h.UserId, -1) AS LastEditorId,
+        h.LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, MAX(CreationDate) AS LastEditDate, UserId FROM PostHistory GROUP BY PostId) h ON p.Id = h.PostId
+    GROUP BY 
+        p.Id, h.UserId, h.LastEditDate
+)
+SELECT 
+    p.Title,
+    pm.TotalComments,
+    pm.TotalUpvotes,
+    pm.TotalDownvotes,
+    ur.DisplayName AS LastEditorName,
+    COUNT(DISTINCT r.PostId) AS AnswerCount,
+    u.BadgeCount,
+    u.TotalBounty,
+    UPPER(SUBSTRING(p.Title, 1, 10)) AS ShortTitle,
+    CASE 
+        WHEN pm.LastEditorId IS NULL THEN 'No Edits'
+        ELSE CONVERT(VARCHAR, DATEDIFF(MINUTE, pm.LastEditDate, GETDATE())) + ' minutes ago'
+    END AS LastEditInfo
+FROM 
+    Posts p
+JOIN 
+    PostMetrics pm ON p.Id = pm.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.ParentId
+LEFT JOIN 
+    UserAggregate u ON pm.LastEditorId = u.Id
+WHERE 
+    pm.TotalUpvotes > 0 
+    AND (pm.TotalDownvotes IS NULL OR pm.TotalDownvotes < pm.TotalUpvotes) 
+GROUP BY 
+    p.Title, pm.TotalComments, pm.TotalUpvotes, pm.TotalDownvotes, ur.DisplayName, u.BadgeCount, u.TotalBounty, pm.LastEditorId, pm.LastEditDate
+ORDER BY 
+    pm.TotalUpvotes DESC, pm.TotalComments DESC;

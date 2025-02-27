@@ -1,0 +1,40 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        cs_bill_customer_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY cs_bill_customer_sk ORDER BY SUM(cs_net_paid) DESC) AS sales_rank
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2451990 AND 2451997 -- Sample date range
+    GROUP BY cs_bill_customer_sk, cs_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        ss_customer_sk,
+        SUM(ss_net_paid) AS total_revenue
+    FROM store_sales 
+    WHERE ss_sold_date_sk BETWEEN 2451990 AND 2451997 -- Sample date range
+    GROUP BY ss_customer_sk
+)
+
+SELECT 
+    ca.city AS address_city,
+    ca.state AS address_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(SUM(ss.total_revenue), 0) AS total_revenue_from_store,
+    COALESCE(SUM(ss.total_sales), 0) AS total_sales_from_catalog,
+    COUNT(DISTINCT ss.sales_rank) AS distinct_ranks,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ss.total_revenue) DESC) AS gender_rank
+FROM customer_address ca 
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN FilteredSales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN SalesSummary cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+WHERE ca.ca_city IS NOT NULL 
+AND cd.cd_marital_status = 'M' 
+GROUP BY ca.city, ca.state, cd.cd_gender, cd.cd_marital_status
+HAVING COUNT(DISTINCT cs.cs_item_sk) > 3 OR COALESCE(SUM(ds.total_revenue), 0) > 1000
+ORDER BY total_revenue_from_store DESC, total_sales_from_catalog ASC;

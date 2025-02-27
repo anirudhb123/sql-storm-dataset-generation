@@ -1,0 +1,85 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        0 AS Level,
+        ARRAY[P.Id] AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        Level + 1,
+        Path || P.Id
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+VotesStats AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostDetails AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        COALESCE(VS.Upvotes, 0) AS Upvotes,
+        COALESCE(VS.Downvotes, 0) AS Downvotes,
+        COALESCE(VS.TotalVotes, 0) AS TotalVotes,
+        COALESCE(URN.Reputation, 0) AS UserReputation,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Yes'
+            ELSE 'No'
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts P
+    LEFT JOIN 
+        VotesStats VS ON P.Id = VS.PostId
+    LEFT JOIN 
+        Users URN ON P.OwnerUserId = URN.Id
+)
+SELECT 
+    PH.PostId,
+    PH.Title,
+    PH.Level,
+    PD.CreationDate,
+    PD.Upvotes,
+    PD.Downvotes,
+    PD.TotalVotes,
+    PD.UserReputation,
+    PD.HasAcceptedAnswer,
+    CASE 
+        WHEN PH.Level = 0 THEN 'Top Level'
+        WHEN PH.Level IS NOT NULL THEN 'Nested Level ' || CAST(PH.Level AS TEXT)
+        ELSE 'Unknown Level'
+    END AS HierarchyLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS RelatedTags
+FROM 
+    RecursivePostHierarchy PH
+JOIN 
+    PostDetails PD ON PH.PostId = PD.Id
+LEFT JOIN 
+    Posts P ON PH.PostId = P.Id
+LEFT JOIN 
+    Tags T ON T.WikiPostId = P.Id
+GROUP BY 
+    PH.PostId, PH.Title, PH.Level, PD.CreationDate, PD.Upvotes, PD.Downvotes, PD.TotalVotes, PD.UserReputation, PD.HasAcceptedAnswer
+ORDER BY 
+    PH.Level, PD.CreationDate DESC;

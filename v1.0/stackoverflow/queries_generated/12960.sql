@@ -1,0 +1,56 @@
+-- Performance benchmarking query on the Stack Overflow schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        P.AnswerCount,
+        P.CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.Views,
+    U.UpVotes,
+    U.DownVotes,
+    U.PostCount,
+    U.CommentCount,
+    U.TotalBadges,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.CreationDate,
+    P.AnswerCount,
+    P.CommentCount,
+    P.VoteCount,
+    P.Upvotes,
+    P.Downvotes
+FROM UserStats U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY U.Reputation DESC, P.Score DESC;

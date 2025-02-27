@@ -1,0 +1,98 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        ParentId,
+        CreationDate,
+        LastActivityDate,
+        1 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        p.LastActivityDate,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        ps.UpVotes,
+        ps.DownVotes,
+        COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+        COALESCE(bu.BadgeCount, 0) AS UserBadgeCount,
+        bu.BadgeNames,
+        p.LastActivityDate,
+        p.LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        UserBadges bu ON p.OwnerUserId = bu.UserId
+)
+SELECT 
+    pd.Title,
+    u.DisplayName AS Author,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.TotalVotes,
+    pd.UserBadgeCount,
+    pd.BadgeNames,
+    r.Depth,
+    r.CreationDate AS PostCreationDate,
+    r.LastActivityDate AS PostLastActivityDate,
+    CASE 
+        WHEN r.Depth > 1 THEN 'Sub-Post'
+        ELSE 'Main Post'
+    END AS PostType
+FROM 
+    PostDetails pd
+JOIN 
+    Users u ON pd.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON pd.PostId = r.Id
+WHERE 
+    pd.UpVotes > 0 AND 
+    pd.DownVotes = 0 AND 
+    u.Reputation > 500
+ORDER BY 
+    pd.UserBadgeCount DESC, pd.UpVotes DESC;

@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+    UNION ALL
+    SELECT m.id, m.title, m.production_year, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year,
+        COUNT(c.person_id) AS cast_count
+    FROM aka_title t
+    JOIN cast_info c ON t.id = c.movie_id
+    GROUP BY title, production_year
+    HAVING COUNT(c.person_id) > 5
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+cast_roles AS (
+    SELECT
+        c.movie_id,
+        r.role,
+        COUNT(DISTINCT c.person_id) AS role_count
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id, r.role
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mk.keywords, 'None') AS keywords,
+    COALESCE(cr.role, 'Unknown') AS role,
+    cr.role_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.production_year DESC) AS movie_rank
+FROM movie_hierarchy mh
+LEFT JOIN movie_keywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN cast_roles cr ON mh.movie_id = cr.movie_id
+WHERE mh.level <= 3 
+ORDER BY mh.production_year DESC, movie_rank;

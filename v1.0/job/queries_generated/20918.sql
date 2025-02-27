@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           NULL AS parent_movie_id,
+           1 AS hierarchy_level
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+    UNION ALL
+    SELECT m.id, 
+           m.title, 
+           m.production_year, 
+           h.movie_id AS parent_movie_id,
+           h.hierarchy_level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy h ON ml.movie_id = h.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+),
+cast_details AS (
+    SELECT c.movie_id, 
+           a.name AS actor_name, 
+           a.surname_pcode,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank,
+           COUNT(*) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+company_info AS (
+    SELECT mc.movie_id,
+           co.name AS company_name,
+           ct.kind AS company_type,
+           COUNT(*) OVER (PARTITION BY mc.movie_id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name co ON mc.company_id = co.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+keyword_summary AS (
+    SELECT mk.movie_id, 
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT mh.movie_id, 
+       mh.title, 
+       mh.production_year,
+       STRING_AGG(DISTINCT cd.actor_name, ', ') AS actors,
+       MAX(cd.total_cast) AS total_cast,
+       STRING_AGG(DISTINCT ci.company_name || ' (' || ci.company_type || ')', '; ') AS companies,
+       ks.keywords,
+       mh.hierarchy_level
+FROM movie_hierarchy mh
+LEFT JOIN cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN company_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN keyword_summary ks ON mh.movie_id = ks.movie_id
+GROUP BY mh.movie_id, mh.title, mh.production_year, mh.hierarchy_level
+HAVING COUNT(DISTINCT cd.actor_name) > 2 AND MAX(ci.total_companies) > 1
+ORDER BY mh.production_year DESC, mh.hierarchy_level ASC;

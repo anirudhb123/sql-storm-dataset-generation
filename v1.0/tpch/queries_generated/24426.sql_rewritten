@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acct_rank
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HistoricalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+        LAG(o.o_totalprice) OVER (ORDER BY o.o_orderdate) AS previous_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+TopLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(tli.total_revenue, 0) AS total_revenue,
+    rs.s_name,
+    rs.s_acctbal,
+    COUNT(DISTINCT coalesce(o.o_orderkey, 0)) AS num_orders,
+    AVG(CASE WHEN ho.previous_totalprice IS NULL THEN 0 ELSE ho.previous_totalprice END) AS avg_previous_total
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.acct_rank <= 5
+LEFT JOIN 
+    orders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%EU%')))
+LEFT JOIN 
+    TopLineItems tli ON tli.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    HistoricalOrders ho ON ho.o_orderkey = o.o_orderkey
+WHERE 
+    p.p_retailprice BETWEEN 100.00 AND 500.00
+    AND (p.p_comment LIKE '%fragile%' OR p.p_container IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, rs.s_name, rs.s_acctbal
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC, p.p_name ASC;

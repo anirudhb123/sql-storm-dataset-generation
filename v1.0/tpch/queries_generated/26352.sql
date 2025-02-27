@@ -1,0 +1,36 @@
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Region: ', r.r_name, ', Nation: ', n.n_name) AS supplier_details,
+    SUM(CASE 
+            WHEN p.p_type LIKE '%steel%' THEN ps.ps_supplycost * ps.ps_availqty
+            ELSE 0 
+        END) AS total_steel_cost,
+    COUNT(DISTINCT CASE 
+            WHEN o.o_orderstatus = 'F' THEN o.o_orderkey 
+        END) AS completed_orders,
+    MAX(CHAR_LENGTH(p.p_name)) AS max_part_name_length,
+    AVG(CASE 
+            WHEN c.c_mktsegment = 'BUILDING' THEN c.c_acctbal 
+            ELSE NULL 
+        END) AS avg_building_customer_acctbal
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name IS NOT NULL
+GROUP BY 
+    s.s_name, r.r_name, n.n_name
+ORDER BY 
+    total_steel_cost DESC, max_part_name_length DESC;

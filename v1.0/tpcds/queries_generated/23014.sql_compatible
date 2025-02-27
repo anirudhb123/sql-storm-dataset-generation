@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        COALESCE(NULLIF(ws.ws_ext_discount_amt, 0), NULL) AS discount_amt
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+), 
+
+HighProfitItems AS (
+    SELECT 
+        r.ws_item_sk,
+        SUM(r.ws_net_profit) AS total_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rn = 1
+    GROUP BY 
+        r.ws_item_sk
+    HAVING 
+        SUM(r.ws_net_profit) > (SELECT AVG(ws_ext_sales_price) FROM web_sales)
+), 
+
+SalesInfo AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        hp.total_net_profit,
+        (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_item_sk = i.i_item_sk) AS store_sales_count,
+        (SELECT COUNT(*) FROM catalog_sales cs WHERE cs.cs_item_sk = i.i_item_sk) AS catalog_sales_count
+    FROM 
+        item i
+    JOIN 
+        HighProfitItems hp ON i.i_item_sk = hp.ws_item_sk
+)
+
+SELECT 
+    si.i_item_id,
+    si.i_item_desc,
+    si.total_net_profit,
+    CASE 
+        WHEN si.store_sales_count = 0 THEN 'No store sales'
+        ELSE CAST(si.store_sales_count AS VARCHAR) || ' store sales'
+    END AS sales_report,
+    (SELECT STRING_AGG(COALESCE(r.r_reason_desc, 'Unknown'), ', ') 
+     FROM reason r 
+     WHERE r.r_reason_sk IN (
+         SELECT sr_reason_sk 
+         FROM store_returns sr 
+         WHERE sr.sr_item_sk = i.i_item_sk
+     )) AS return_reasons
+FROM 
+    SalesInfo si
+WHERE 
+    si.total_net_profit IS NOT NULL
+ORDER BY 
+    si.total_net_profit DESC 
+LIMIT 10;

@@ -1,0 +1,4 @@
+SELECT min(kt.kind) AS movie_kind, min(t.title) AS complete_us_internet_movie
+FROM complete_cast AS cc, comp_cast_type AS cct1, company_name AS cn, company_type AS ct, info_type AS it1, keyword AS k, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mc.movie_id AND t.id = cc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mc.movie_id AND mk.movie_id = cc.movie_id AND mi.movie_id = mc.movie_id AND mi.movie_id = cc.movie_id AND mc.movie_id = cc.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id AND cct1.id = cc.status_id
+AND t.kind_id = 3 AND cn.name_pcode_sf > 'I3523' AND cn.name_pcode_nf IN ('A3565', 'B6263', 'F5465', 'H5341', 'I2162', 'T1', 'X652') AND it1.id > 59;

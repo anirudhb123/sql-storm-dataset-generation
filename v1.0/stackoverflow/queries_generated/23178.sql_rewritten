@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetScore,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId, b.Name
+),
+UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS Questions,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS Answers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    upc.UserId,
+    u.DisplayName,
+    upc.TotalPosts,
+    upc.Questions,
+    upc.Answers,
+    rb.BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.NetScore,
+    rp.CommentCount
+FROM 
+    UserPostCounts upc
+JOIN 
+    Users u ON upc.UserId = u.Id
+LEFT JOIN 
+    RecentBadges rb ON upc.UserId = rb.UserId
+LEFT JOIN 
+    RankedPosts rp ON upc.UserId IN (
+        SELECT OwnerUserId 
+        FROM Posts 
+        WHERE CreationDate BETWEEN cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' AND cast('2024-10-01 12:34:56' as timestamp)
+    )
+WHERE 
+    (upc.TotalPosts > 10 OR rb.BadgeCount > 0)
+    AND rp.NetScore > 5
+ORDER BY 
+    rb.BadgeCount DESC NULLS LAST,
+    upc.TotalPosts DESC,
+    rp.CreationDate DESC;

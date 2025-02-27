@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY sum(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_sold_date_sk
+),
+daily_return_summary AS (
+    SELECT 
+        sr_store_sk,
+        sr_returned_date_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk, sr_returned_date_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_birth_year,
+        cd.cd_gender,
+        COUNT(os.ws_order_number) AS total_orders,
+        SUM(os.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(os.ws_net_profit) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales os ON c.c_customer_sk = os.ws_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_birth_year, cd.cd_gender
+)
+SELECT 
+    s.ss_store_sk,
+    d.d_date AS sales_date,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(r.total_returned, 0) AS total_returned,
+    cs.total_orders,
+    cs.total_net_profit
+FROM 
+    (SELECT DISTINCT ss_store_sk, ss_sold_date_sk FROM store_sales) s
+LEFT JOIN 
+    date_dim d ON s.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    sales_summary s ON s.ss_store_sk = s.ss_store_sk AND s.ss_sold_date_sk = s.ss_sold_date_sk
+LEFT JOIN 
+    daily_return_summary r ON r.sr_store_sk = s.ss_store_sk AND r.sr_returned_date_sk = s.ss_sold_date_sk
+LEFT JOIN 
+    customer_summary cs ON cs.c_birth_year = d.d_year  -- Assuming returning customers can be linked by year of birth for demo purposes
+WHERE 
+    (d.d_year BETWEEN 2020 AND 2023)
+    AND (cs.total_orders > 10 OR cs.total_net_profit IS NOT NULL)
+ORDER BY 
+    s.ss_store_sk, sales_date;

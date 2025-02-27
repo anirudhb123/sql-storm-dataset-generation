@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS actor_count_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_count_rank < 6
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+ActorsWithAwards AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT ai.info) as award_count
+    FROM 
+        aka_name a
+    JOIN 
+        person_info ai ON a.person_id = ai.person_id 
+    WHERE 
+        ai.info_type_id IN (SELECT id FROM info_type WHERE info = 'Award')
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(DISTINCT ai.info) > 0
+),
+Combined AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(a.award_count, 0) AS award_count
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        MovieKeywords mk ON fm.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT DISTINCT movie_id 
+         FROM complete_cast WHERE status_id IS NULL) AS cc ON fm.movie_id = cc.movie_id
+    LEFT JOIN 
+        ActorsWithAwards a ON a.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = fm.movie_id)
+)
+SELECT 
+    * 
+FROM 
+    Combined
+WHERE 
+    (keywords <> 'No Keywords' OR award_count > 0)
+    AND production_year > (
+        SELECT MAX(production_year) 
+        FROM FilteredMovies
+    ) - 10
+ORDER BY 
+    production_year DESC,
+    award_count DESC;

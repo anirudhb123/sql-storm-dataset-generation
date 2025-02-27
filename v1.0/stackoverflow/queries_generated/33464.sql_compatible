@@ -1,0 +1,104 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        0 AS Level
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,  
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,  
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostWithTags AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        t.TagName,
+        COALESCE(pw.ViewCount, 0) AS ViewCount,
+        COALESCE(pw.AnswerCount, 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, ',')) AS tag_id) tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tag.tag_id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            ViewCount,
+            AnswerCount
+        FROM 
+            Posts
+    ) pw ON pw.Id = p.Id
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.CreationDate AS HistoryDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+)
+SELECT 
+    r.Id AS QuestionId,
+    r.Title AS QuestionTitle,
+    r.CreationDate AS QuestionCreationDate,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    (COALESCE(pvs.UpVotes, 0) - COALESCE(pvs.DownVotes, 0)) AS NetVotes,
+    COALESCE(pwt.TagName, 'No Tags') AS PostTag,
+    COUNT(ph.UserDisplayName) AS HistoryCount,
+    MAX(ph.HistoryDate) AS LastHistoryDate
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    PostVoteStatistics pvs ON r.Id = pvs.PostId
+LEFT JOIN 
+    PostWithTags pwt ON r.Id = pwt.Id
+LEFT JOIN 
+    PostHistoryCTE ph ON r.Id = ph.PostId
+WHERE 
+    r.Level = 0  
+GROUP BY 
+    r.Id, r.Title, r.CreationDate, pvs.UpVotes, pvs.DownVotes, pwt.TagName
+ORDER BY 
+    NetVotes DESC
+LIMIT 100;

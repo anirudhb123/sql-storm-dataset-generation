@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        m.id AS company_id,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.name) AS company_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        company_name c ON m.company_id = c.id
+),
+extended_cast AS (
+    SELECT 
+        ci.movie_id,
+        ka.name AS actor_name,
+        ka.id AS actor_id,
+        COUNT(DISTINCT cc.id) AS co_starring_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN 
+        cast_info cc ON ci.movie_id = cc.movie_id AND ci.person_id <> cc.person_id
+    GROUP BY 
+        ci.movie_id, ka.id
+),
+movie_metadata AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        COALESCE(AVG(mi.info), 0) AS average_info_length
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.company_name,
+    ec.actor_name,
+    ec.co_starring_count,
+    mm.keyword_count,
+    mm.average_info_length,
+    CASE 
+        WHEN mm.keyword_count > 5 THEN 'Highly Tagged'
+        WHEN mm.keyword_count BETWEEN 3 AND 5 THEN 'Moderately Tagged'
+        ELSE 'Sparsely Tagged'
+    END AS tag_intensity,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year'
+        WHEN mh.production_year > 2000 THEN 'Modern'
+        ELSE 'Classic'
+    END AS movie_era
+FROM 
+    movie_hierarchy mh
+JOIN 
+    extended_cast ec ON mh.movie_id = ec.movie_id
+JOIN 
+    movie_metadata mm ON mh.movie_id = mm.movie_id
+WHERE 
+    mh.company_name IS NOT NULL
+    AND ec.co_starring_count > 1
+    AND (
+        mh.company_rank = 1 
+        OR (mh.production_year < 2010 AND mm.average_info_length > 50)
+    )
+ORDER BY 
+    mh.production_year DESC, 
+    mm.keyword_count DESC, 
+    ec.co_starring_count DESC
+LIMIT 100 OFFSET 10;

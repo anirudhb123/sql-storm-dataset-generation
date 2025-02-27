@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.CreationDate AS PostCreationDate,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(MAX)) AS FullPostPath
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.ParentId,
+        CAST(rph.FullPostPath + ' 
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+    WHERE 
+        p2.PostTypeId = 2  
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryTypesFiltered AS (
+    SELECT 
+        PostId,
+        MAX(CASE WHEN PostHistoryTypeId IN (10, 11) THEN CreationDate END) AS LastCloseOrReopenDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        ph.LastCloseOrReopenDate,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ph.FullPostPath
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteCounts v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistoryTypesFiltered ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1 
+)
+SELECT 
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.LastCloseOrReopenDate,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.FullPostPath,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Comments c ON pd.Id = c.PostId
+GROUP BY 
+    pd.Title, pd.Body, pd.CreationDate, pd.LastCloseOrReopenDate, pd.UpVotes, pd.DownVotes, pd.FullPostPath
+HAVING 
+    COUNT(c.Id) > 0 
+ORDER BY 
+    pd.LastCloseOrReopenDate DESC NULLS LAST, 
+    pd.UpVotes DESC, 
+    pd.CreationDate DESC;

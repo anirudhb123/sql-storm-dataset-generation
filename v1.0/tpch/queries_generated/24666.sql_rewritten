@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS balance_rank,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(rs.s_suppkey) AS supplier_count,
+        SUM(CASE WHEN rs.balance_rank <= 3 THEN s_acctbal ELSE 0 END) AS top_balance_total
+    FROM 
+        region r
+    LEFT JOIN 
+        RankedSuppliers rs ON rs.nation_name IN (
+            SELECT n_name 
+            FROM nation WHERE n_regionkey = r.r_regionkey
+        )
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_tax) AS total_tax,
+        o.o_orderdate,
+        COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS return_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_regionkey,
+    r.r_name,
+    COALESCE(ts.supplier_count, 0) AS supplier_count,
+    COALESCE(ts.top_balance_total, 0) AS top_balance_total,
+    COUNT(os.o_orderkey) AS total_orders,
+    SUM(os.total_revenue) AS total_revenue,
+    AVG(os.total_tax) AS avg_tax,
+    (SELECT COUNT(*) FROM customer c WHERE c.c_acctbal > 1000 AND c.c_mktsegment = 'BUILDING') AS high_value_customers
+FROM 
+    region r
+LEFT JOIN 
+    TopSuppliers ts ON ts.r_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderStats os ON os.o_orderkey IS NOT NULL
+WHERE 
+    r.r_name LIKE '%North%'
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    r.r_regionkey DESC 
+FETCH FIRST 10 ROWS ONLY;

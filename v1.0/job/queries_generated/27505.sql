@@ -1,0 +1,48 @@
+WITH TopMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title AS t
+        JOIN movie_keyword AS mk ON t.id = mk.movie_id
+        JOIN keyword AS k ON mk.keyword_id = k.id
+        JOIN complete_cast AS cc ON t.id = cc.movie_id
+        JOIN aka_name AS ak ON cc.subject_id = ak.person_id
+        JOIN cast_info AS ci ON ci.movie_id = t.id AND ci.person_id = ak.person_id
+    WHERE 
+        k.keyword ILIKE '%action%'
+    GROUP BY 
+        t.id
+    ORDER BY 
+        actor_count DESC
+    LIMIT 10
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        STRING_AGG(DISTINCT p.info, '; ') AS person_infos,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        TopMovies AS m
+        LEFT JOIN complete_cast AS cc ON m.movie_id = cc.movie_id
+        LEFT JOIN person_info AS p ON cc.subject_id = p.person_id
+        LEFT JOIN movie_companies AS mc ON m.movie_id = mc.movie_id
+        LEFT JOIN company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, m.title
+)
+SELECT 
+    d.title,
+    d.person_infos,
+    d.company_types,
+    m.production_year,
+    m.aka_names
+FROM 
+    MovieDetails AS d
+JOIN TopMovies AS m ON d.movie_id = m.movie_id
+ORDER BY 
+    m.production_year DESC;

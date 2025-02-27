@@ -1,0 +1,62 @@
+
+WITH ProcessedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.Tags,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS TagList,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(A.AcceptedAnswerId, 0) AS HasAcceptedAnswer
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON A.Id = P.AcceptedAnswerId
+    LEFT JOIN 
+        Tags T ON T.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><'))::int)
+    WHERE 
+        P.PostTypeId = 1  
+        AND P.CreationDate >= CAST(DATEADD(YEAR, -1, '2024-10-01') AS DATE)  
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate, P.Tags, U.DisplayName, A.AcceptedAnswerId
+),
+PostHistoryInfo AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        PH.UserDisplayName,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RevisionNumber
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE 
+        PH.CreationDate >= CAST(DATEADD(YEAR, -1, '2024-10-01') AS DATE) 
+)
+SELECT 
+    PP.PostId,
+    PP.Title,
+    PP.Score,
+    PP.ViewCount,
+    PP.CreationDate,
+    PP.TagList,
+    PP.OwnerDisplayName,
+    PP.HasAcceptedAnswer,
+    PHI.CreationDate AS LastEditDate,
+    PHI.Comment AS LastEditComment,
+    PHI.UserDisplayName AS LastEditedBy,
+    PHI.HistoryType AS LastEditType,
+    PHI.RevisionNumber
+FROM 
+    ProcessedPosts PP
+LEFT JOIN 
+    PostHistoryInfo PHI ON PP.PostId = PHI.PostId AND PHI.RevisionNumber = 1  
+ORDER BY 
+    PP.Score DESC, 
+    PP.ViewCount DESC;

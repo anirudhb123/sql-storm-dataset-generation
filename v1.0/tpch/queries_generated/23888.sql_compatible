@@ -1,0 +1,47 @@
+
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice,
+           CASE 
+               WHEN p.p_size BETWEEN 1 AND 10 THEN 'Small'
+               WHEN p.p_size BETWEEN 11 AND 20 THEN 'Medium'
+               ELSE 'Large'
+           END AS size_category
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), SupplierPartInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost
+    FROM partsupp ps
+    JOIN RecursiveSupplier rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE rs.rn = 1
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+), NavalRegion AS (
+    SELECT n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_name LIKE 'N%'
+)
+SELECT p.p_partkey, p.p_name, p.size_category, 
+       sp.ps_suppkey, sp.ps_supplycost, 
+       COALESCE(sp.ps_availqty, 0) AS avail_qty,
+       od.total_sales,
+       nr.n_name
+FROM FilteredParts p
+LEFT JOIN SupplierPartInfo sp ON p.p_partkey = sp.ps_partkey AND sp.rank_cost <= 3
+LEFT JOIN OrderDetails od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate = od.o_orderdate LIMIT 1)
+FULL OUTER JOIN NavalRegion nr ON nr.n_name = (
+    SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT MIN(n2.n_nationkey) FROM nation n2)
+)
+WHERE (p.p_retailprice IS NOT NULL OR sp.ps_supplycost IS NOT NULL) 
+AND (od.total_sales > 1000 OR nr.r_name IS NULL)
+ORDER BY p.p_partkey DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM part) / 3;

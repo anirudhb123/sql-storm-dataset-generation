@@ -1,0 +1,70 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), sale_dates AS (
+    SELECT 
+        DISTINCT d.d_date, 
+        d.d_year, 
+        d.d_week_seq,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY d.d_week_seq) AS week_no
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN (CURRENT_DATE - INTERVAL '5' YEAR) AND CURRENT_DATE
+), sales_summary AS (
+    SELECT 
+        cs.c_customer_sk,
+        sd.d_year,
+        sd.week_no,
+        COUNT(cs.c_customer_sk) AS num_transactions,
+        AVG(cs.total_sales) AS average_sales,
+        SUM(cs.total_sales) AS total_sales
+    FROM 
+        customer_sales cs
+    JOIN 
+        sale_dates sd ON EXTRACT(YEAR FROM cs.c_customer_sk) = sd.d_year 
+    GROUP BY 
+        cs.c_customer_sk, sd.d_year, sd.week_no
+)
+SELECT 
+    c.c_customer_id,
+    ss.d_year,
+    ss.week_no,
+    ss.num_transactions,
+    ss.average_sales,
+    CASE 
+        WHEN ss.total_sales IS NULL THEN 'No Sales'
+        WHEN ss.total_sales > 10000 THEN 'High Roller'
+        ELSE 'Occasional Buyer' 
+    END AS buyer_type
+FROM 
+    sales_summary ss
+JOIN 
+    customer c ON ss.c_customer_sk = c.c_customer_sk
+WHERE 
+    ss.num_transactions > (
+        SELECT AVG(num_transactions) 
+        FROM sales_summary
+    )
+    AND EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = c.c_current_cdemo_sk 
+        AND cd.cd_marital_status = 'M'
+    )
+ORDER BY 
+    ss.d_year DESC, 
+    ss.week_no ASC
+LIMIT 50 OFFSET 10;

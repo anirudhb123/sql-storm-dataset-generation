@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT ml.movie_id,
+           mt.title,
+           mt.production_year,
+           mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.movie_id = mt.id
+    WHERE mh.level < 5
+),
+
+cast_details AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ci.person_id) AS total_actors,
+           STRING_AGG(DISTINCT CONCAT(an.name, ' (', ct.kind, ')'), ', ') AS actor_listing
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY ci.movie_id
+),
+
+movie_info_details AS (
+    SELECT mi.movie_id,
+           STRING_AGG(DISTINCT info.info, '; ') AS information
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    WHERE it.info ILIKE '%details%'
+    GROUP BY mi.movie_id
+)
+
+SELECT mh.level,
+       mh.title,
+       mh.production_year,
+       COALESCE(cd.total_actors, 0) AS total_actors,
+       COALESCE(cd.actor_listing, 'No cast information') AS actor_listing,
+       COALESCE(mid.information, 'No additional info') AS additional_info
+FROM movie_hierarchy mh
+LEFT JOIN cast_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN movie_info_details mid ON mh.movie_id = mid.movie_id
+WHERE (mh.production_year >= 2000 OR mh.production_year IS NULL)
+  AND (mh.title ILIKE '%Matrix%' OR mh.title IS NULL)
+ORDER BY mh.level, mh.production_year DESC, mh.title;

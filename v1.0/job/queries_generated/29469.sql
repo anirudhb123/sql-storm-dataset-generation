@@ -1,0 +1,55 @@
+WITH NameCounts AS (
+    SELECT 
+        ak.name AS aka_name,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT ti.id) AS title_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title ti ON ci.movie_id = ti.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+MovieCounts AS (
+    SELECT 
+        ti.title,
+        ti.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title ti
+    LEFT JOIN 
+        cast_info ci ON ti.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON ti.id = mk.movie_id
+    GROUP BY 
+        ti.title, ti.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        mc.title,
+        mc.production_year,
+        mc.cast_count,
+        mc.keyword_count
+    FROM 
+        MovieCounts mc
+    WHERE 
+        mc.production_year > 2000 AND mc.cast_count > 5
+)
+SELECT 
+    nc.aka_name,
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.keyword_count
+FROM 
+    NameCounts nc
+JOIN 
+    FilteredMovies fm ON nc.actor_count > 3
+ORDER BY 
+    fm.production_year DESC, 
+    nc.aka_name;

@@ -1,0 +1,20 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Available Quantity: ', ps.ps_availqty, 
+           ', Cost: $', FORMAT(ps.ps_supplycost, 2), 
+           ', Comments: ', ps.ps_comment) AS benchmark_string
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    LENGTH(ps.ps_comment) > 50
+    AND p.p_brand LIKE 'Brand%'
+    AND s.s_address LIKE '%Street%'
+GROUP BY 
+    s.s_name, p.p_name, ps.ps_availqty, ps.ps_supplycost, ps.ps_comment
+ORDER BY 
+    s.s_name, p.p_name DESC
+LIMIT 100;

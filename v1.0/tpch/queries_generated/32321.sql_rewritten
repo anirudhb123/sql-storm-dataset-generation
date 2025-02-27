@@ -1,0 +1,54 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 as level
+    FROM region
+    WHERE r_regionkey = 0 
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, rh.level + 1
+    FROM nation n
+    JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+AggregatedPrices AS (
+    SELECT ps.ps_partkey,
+           SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS total_price
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_totalprice) AS max_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FinalSelection AS (
+    SELECT c.c_name, 
+           CONCAT('Total Orders: ', COALESCE(po.order_count, 0)) AS order_summary,
+           rp.r_name AS region_name,
+           CASE 
+               WHEN rp.r_name IS NULL THEN 'No Region'
+               ELSE rp.r_name 
+           END AS adjusted_region
+    FROM CustomerOrders po
+    JOIN RegionHierarchy rh ON rh.level = 1
+    LEFT JOIN region rp ON rh.r_regionkey = rp.r_regionkey
+    WHERE po.order_count > 5
+)
+SELECT f.c_name,
+       f.order_summary,
+       f.adjusted_region,
+       ap.total_price
+FROM FinalSelection f
+LEFT JOIN AggregatedPrices ap ON f.c_name = CONCAT('Customer ', COALESCE(f.c_name, 'Unknown'))
+ORDER BY ap.total_price DESC, f.order_summary, f.adjusted_region;

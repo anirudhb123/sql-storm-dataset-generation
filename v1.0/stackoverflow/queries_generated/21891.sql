@@ -1,0 +1,102 @@
+WITH RecursiveTagUsage AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        WHERE 
+            CreationDate >= NOW() - INTERVAL '30 days'
+        GROUP BY 
+            PostId
+    ) v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInteraction AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.UserDisplayName,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments,
+        COUNT(DISTINCT p.Id) AS RelatedPosts
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        p.ClosedDate IS NULL
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.UserDisplayName
+),
+VoteSummary AS (
+    SELECT
+        PostId,
+        MAX(CASE WHEN VoteTypeId = 2 THEN COUNT(*) ELSE 0 END) AS UpVotes,
+        MAX(CASE WHEN VoteTypeId = 3 THEN COUNT(*) ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+CombinedResults AS (
+    SELECT 
+        t.TagName,
+        ru.UserId,
+        ru.DisplayName AS UserName,
+        ru.QuestionCount,
+        ru.TotalVotes,
+        pi.Comments,
+        pi.RelatedPosts,
+        COALESCE(vs.UpVotes, 0) AS UpVotes,
+        COALESCE(vs.DownVotes, 0) AS DownVotes
+    FROM 
+        RecursiveTagUsage t
+    LEFT JOIN 
+        RecentUserActivity ru ON ru.QuestionCount > 0
+    LEFT JOIN 
+        PostInteraction pi ON pi.UserId = ru.UserId
+    LEFT JOIN 
+        VoteSummary vs ON vs.PostId = pi.PostId
+    WHERE 
+        t.PostCount > 1 
+        AND (ru.TotalVotes IS NULL OR ru.TotalVotes > 10)
+)
+SELECT 
+    cr.TagName,
+    cr.UserName,
+    cr.QuestionCount,
+    cr.UpVotes,
+    cr.DownVotes,
+    CASE 
+        WHEN cr.RelatedPosts > 5 THEN 'Highly Interactive'
+        WHEN cr.RelatedPosts BETWEEN 1 AND 5 THEN 'Moderately Interactive'
+        ELSE 'Low Interaction'
+    END AS InteractionLevel
+FROM 
+    CombinedResults cr
+ORDER BY 
+    cr.QuestionCount DESC, cr.UserName ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

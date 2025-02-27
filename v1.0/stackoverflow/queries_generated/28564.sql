@@ -1,0 +1,74 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 100
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.Id AS HistoryId,
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        P.Title,
+        U.DisplayName AS EditorName,
+        PH.CreationDate,
+        PH.Comment,
+        PH.Text
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+)
+SELECT 
+    U.DisplayName AS UserName,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    PT.TagName,
+    PT.PostCount,
+    PT.TotalViews,
+    PT.AverageScore,
+    PHD.Title,
+    PHD.EditorName,
+    PHD.CreationDate AS EditDate,
+    PHD.Comment,
+    PHD.Text AS EditContent
+FROM 
+    UserBadges UB
+JOIN 
+    Users U ON U.Id = UB.UserId
+LEFT JOIN 
+    PopularTags PT ON PT.TagName IN (SELECT UNNEST(SPLIT_PARTS(U.Tags, ','))) -- Assuming U.Tags contains a comma-separated list of tags
+LEFT JOIN 
+    PostHistoryDetails PHD ON PHD.UserId = U.Id
+ORDER BY 
+    UB.BadgeCount DESC, PT.TotalViews DESC, PHD.EditDate DESC
+LIMIT 50;

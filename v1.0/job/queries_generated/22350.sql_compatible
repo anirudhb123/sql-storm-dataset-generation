@@ -1,0 +1,50 @@
+
+WITH RecursiveMovieTitles AS (
+    SELECT t.id, t.title, t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM aka_title t
+    WHERE t.production_year IS NOT NULL
+),
+MovieCastInfo AS (
+    SELECT c.movie_id, COUNT(DISTINCT c.person_id) AS cast_size
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+TopMoviesByCast AS (
+    SELECT r.title, r.production_year, mc.cast_size
+    FROM RecursiveMovieTitles r
+    LEFT JOIN MovieCastInfo mc ON r.id = mc.movie_id
+    WHERE mc.cast_size IS NOT NULL
+    ORDER BY mc.cast_size DESC
+    LIMIT 10
+),
+MovieKeywordRank AS (
+    SELECT m.id AS movie_id, k.keyword, 
+           RANK() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM aka_title m
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year >= 2000
+)
+SELECT DISTINCT t.title AS movie_title,
+                t.production_year,
+                COALESCE(mki.keyword, 'No Keywords') AS keyword,
+                CASE 
+                    WHEN mki.keyword_rank IS NULL THEN 'Non-Highlighted'
+                    WHEN mki.keyword_rank <= 5 THEN 'Highlighted'
+                    ELSE 'Other'
+                END AS category,
+                CASE 
+                    WHEN COALESCE(cm.cast_size, 0) > 5 THEN 'Large Cast'
+                    ELSE 'Small Cast'
+                END AS cast_category
+FROM TopMoviesByCast t
+LEFT JOIN MovieKeywordRank mki ON t.title = mki.movie_id
+LEFT JOIN MovieCastInfo cm ON t.production_year = cm.movie_id
+WHERE t.production_year BETWEEN 2000 AND 2023
+AND (
+    mki.keyword IS NOT NULL OR
+    mki.keyword IS NULL
+)
+GROUP BY t.title, t.production_year, mki.keyword, mki.keyword_rank, cm.cast_size
+ORDER BY t.production_year DESC, t.title;

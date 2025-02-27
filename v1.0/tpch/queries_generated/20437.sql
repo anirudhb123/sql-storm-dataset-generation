@@ -1,0 +1,57 @@
+WITH RECURSIVE price_history AS (
+    SELECT p.p_partkey, p.p_retailprice, CAST(NULL AS DECIMAL(12, 2)) AS previous_price, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL
+
+    UNION ALL
+
+    SELECT p.p_partkey, (p.p_retailprice * 0.9) AS p_retailprice, ph.p_retailprice AS previous_price, 
+           ph.rn + 1
+    FROM part p
+    JOIN price_history ph ON p.p_partkey = ph.p_partkey
+    WHERE ph.rn < 5
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+nation_part AS (
+    SELECT n.n_name, p.p_name, COUNT(*) AS part_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY n.n_name, p.p_name
+    HAVING COUNT(*) > 1
+),
+extended_orders AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue, 
+           COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey
+    HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+)
+SELECT
+    n.n_name AS Nation,
+    p.p_name AS Part,
+    SUM(CASE WHEN li.l_returnflag IS NULL THEN li.l_quantity ELSE 0 END) AS Total_Sold,
+    AVG(ph.p_retailprice) AS Avg_Price,
+    COUNT(DISTINCT oi.o_orderkey) AS Unique_Orders,
+    SUM(COALESCE(eo.total_revenue, 0)) AS Total_Revenue_From_Orders,
+    SUBSTRING(n.n_comment, 1, 20) AS Nation_Comment_Prefix
+FROM nation_part np
+JOIN part p ON np.p_name = p.p_name
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN extended_orders eo ON li.l_orderkey = eo.o_orderkey
+JOIN supplier_info s ON s.s_suppkey = li.l_suppkey
+JOIN region r ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+LEFT JOIN price_history ph ON p.p_partkey = ph.p_partkey AND ph.rn = 1
+WHERE r.r_name IS NOT NULL AND p.p_size BETWEEN 1 AND 5
+GROUP BY n.n_name, p.p_name
+ORDER BY Total_Sold DESC, Avg_Price DESC
+LIMIT 10 OFFSET 2;

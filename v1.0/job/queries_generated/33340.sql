@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_link ml ON m.id = ml.movie_id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        title t
+    INNER JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cc.id) AS cast_count,
+    ARRAY_AGG(DISTINCT c.name) AS cast_names,
+    MAX(mk.keyword) AS top_keyword,
+    STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+    SUM(
+        CASE 
+            WHEN mh.depth = 1 THEN 1 
+            ELSE 0 
+        END
+    ) AS direct_links,
+    SUM(
+        CASE 
+            WHEN mh.depth > 1 THEN 1 
+            ELSE 0 
+        END
+    ) AS indirect_links
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.id) >= 5
+ORDER BY 
+    mh.production_year DESC, cast_count DESC;

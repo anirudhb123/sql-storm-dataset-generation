@@ -1,0 +1,35 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 
+           ARRAY[mt.title] AS title_path, 
+           1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 
+           mh.title_path || mt.title, 
+           mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.level < 3
+)
+
+SELECT mk.keyword, COUNT(DISTINCT c.id) AS actor_count, 
+       MAX(mh.level) AS max_hierarchy_level,
+       STRING_AGG(DISTINCT nth_value(mh.title_path, 1) OVER (PARTITION BY mk.keyword ORDER BY mh.level), ', ') AS movie_titles,
+       CASE 
+           WHEN AVG(m.production_year) > 2015 THEN 'Recent Movies'
+           ELSE 'Older Movies'
+       END AS movie_age_category
+FROM movie_keyword mk
+JOIN movie_info mi ON mk.movie_id = mi.movie_id
+JOIN complete_cast cc ON mk.movie_id = cc.movie_id
+JOIN MovieHierarchy mh ON mk.movie_id = mh.movie_id
+JOIN cast_info c ON c.movie_id = mk.movie_id 
+LEFT JOIN aka_name an ON c.person_id = an.person_id
+GROUP BY mk.keyword, mh.level
+HAVING COUNT(DISTINCT c.id) > 5
+ORDER BY actor_count DESC;

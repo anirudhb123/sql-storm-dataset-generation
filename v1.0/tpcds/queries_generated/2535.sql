@@ -1,0 +1,46 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT wr.returning_customer_sk) AS total_web_returns,
+        COUNT(DISTINCT sr.store_sk) AS total_store_returns
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_refunded_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+RankedCustomers AS (
+    SELECT
+        cr.c_customer_sk,
+        cr.c_first_name,
+        cr.c_last_name,
+        cr.total_web_returns,
+        cr.total_store_returns,
+        RANK() OVER (ORDER BY (cr.total_web_returns + cr.total_store_returns) DESC) AS rank
+    FROM CustomerReturns cr
+),
+IncomeBandStats AS (
+    SELECT 
+        h.hd_income_band_sk,
+        AVG(c.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM household_demographics h
+    INNER JOIN customer_demographics c ON h.hd_demo_sk = c.cd_demo_sk
+    GROUP BY h.hd_income_band_sk
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.total_web_returns,
+    rc.total_store_returns,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ib_stats.avg_purchase_estimate,
+    ib_stats.customer_count
+FROM RankedCustomers rc
+LEFT JOIN IncomeBandStats ib_stats ON ib_stats.customer_count > 0
+JOIN income_band ib ON ib.ib_income_band_sk = ib_stats.hd_income_band_sk
+WHERE rc.rank <= 10
+ORDER BY rc.rank, rc.total_web_returns DESC;

@@ -1,0 +1,62 @@
+WITH TagUsage AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COALESCE(AVG(u.Reputation), 0) AS AvgUserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+    GROUP BY 
+        p.Id, p.Title, p.Tags
+),
+TagExploded AS (
+    SELECT 
+        PostId,
+        unnest(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        TagUsage
+),
+TagStatistics AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS PostCount,
+        SUM(Upvotes) AS TotalUpvotes,
+        SUM(Downvotes) AS TotalDownvotes,
+        AVG(AvgUserReputation) AS AvgReputation
+    FROM 
+        TagUsage
+    JOIN 
+        TagExploded ON TagUsage.PostId = TagExploded.PostId
+    GROUP BY 
+        Tag
+)
+SELECT 
+    Tag,
+    PostCount,
+    TotalUpvotes,
+    TotalDownvotes,
+    AvgReputation,
+    RANK() OVER (ORDER BY PostCount DESC) AS PopularityRank
+FROM 
+    TagStatistics
+WHERE 
+    PostCount > 5  -- Filter for tags used in more than 5 questions
+ORDER BY 
+    PopularityRank;

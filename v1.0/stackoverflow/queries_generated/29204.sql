@@ -1,0 +1,76 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPostBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        u.CreatedAt,
+        b.TotalBadges,
+        b.GoldBadges,
+        b.SilverBadges,
+        b.BronzeBadges,
+        p.TotalPosts,
+        p.TotalQuestions,
+        p.TotalAnswers,
+        p.LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeStats b ON u.Id = b.UserId
+    LEFT JOIN 
+        TopPosts p ON u.Id = p.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    LastAccessDate,
+    Views,
+    UpVotes,
+    DownVotes,
+    TotalBadges,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    LastPostDate,
+    RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+FROM 
+    UserPostBadgeStats
+WHERE 
+    LastAccessDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+ORDER BY 
+    Reputation DESC, TotalPosts DESC
+LIMIT 10;

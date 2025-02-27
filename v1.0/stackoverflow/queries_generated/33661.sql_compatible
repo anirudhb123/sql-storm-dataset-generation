@@ -1,0 +1,101 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.ParentId, 
+        p.CreationDate, 
+        p.Title, 
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.ParentId, 
+        p.CreationDate, 
+        p.Title, 
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+
+UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(pvd.Upvotes, 0)) AS TotalUpvotes,
+        SUM(COALESCE(pvd.Downvotes, 0)) AS TotalDownvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostVoteDetails pvd ON p.Id = pvd.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000  
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS IsReopened,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalUpvotes,
+    u.TotalDownvotes,
+    COUNT(DISTINCT rph.PostId) AS DirectAnswers,
+    SUM(COALESCE(pv.IsClosed, 0)) AS ClosedPostCount,
+    SUM(COALESCE(pv.IsReopened, 0)) AS ReopenedPostCount,
+    SUM(phs.EditCount) AS TotalEdits
+FROM 
+    UserPostStatistics u
+JOIN 
+    RecursivePostHierarchy rph ON u.UserId = rph.PostId
+LEFT JOIN 
+    PostHistorySummary pv ON rph.PostId = pv.PostId
+GROUP BY 
+    u.UserId, 
+    u.DisplayName, 
+    u.TotalPosts, 
+    u.TotalUpvotes, 
+    u.TotalDownvotes
+ORDER BY 
+    u.TotalPosts DESC, 
+    u.TotalUpvotes DESC;

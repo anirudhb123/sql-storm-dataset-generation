@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(0, 0) AS level,
+        m.imdb_index
+    FROM title m
+    WHERE m.production_year >= 1990 
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        h.level + 1,
+        m.imdb_index
+    FROM title m
+    INNER JOIN movie_hierarchy h ON m.episode_of_id = h.movie_id
+), ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        level,
+        imdb_index,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY imdb_index) AS rn
+    FROM movie_hierarchy
+), filtered_movies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN level = 1 THEN 'First Level'
+            WHEN level > 1 AND level <= 3 THEN 'Second/Third Level'
+            ELSE 'Other Level'
+        END AS hierarchy_level
+    FROM ranked_movies
+    WHERE rn <= 10
+), joined_infos AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.hierarchy_level,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        COALESCE(ci.note, 'No Cast Info') AS cast_note
+    FROM filtered_movies f
+    LEFT JOIN movie_keyword mk ON f.movie_id = mk.movie_id
+    LEFT JOIN cast_info ci ON f.movie_id = ci.movie_id AND ci.nr_order = 1
+), final_summary AS (
+    SELECT 
+        title,
+        production_year,
+        hierarchy_level,
+        movie_keyword,
+        COUNT(cast_note) AS cast_count
+    FROM joined_infos
+    GROUP BY title, production_year, hierarchy_level, movie_keyword
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(f.movie_keyword, 'N/A') AS movie_keyword,
+    f.hierarchy_level,
+    f.cast_count,
+    CASE 
+        WHEN f.cast_count = 0 THEN 'No Cast Available'
+        WHEN f.cast_count IS NULL THEN 'Count Unavailable'
+        ELSE 'Cast Available'
+    END AS cast_availability,
+    STRING_AGG(DISTINCT CASE WHEN f.movie_keyword != 'No Keyword' THEN f.movie_keyword END, ', ') AS unique_keywords
+FROM final_summary f
+WHERE f.production_year IS NOT NULL
+AND f.hierarchy_level != 'Other Level'
+GROUP BY f.title, f.production_year, f.hierarchy_level, f.cast_count
+ORDER BY f.production_year DESC, f.title;

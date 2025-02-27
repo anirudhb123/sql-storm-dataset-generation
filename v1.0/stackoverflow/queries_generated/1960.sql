@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END), 0) AS PositiveScore,
+        COALESCE(SUM(CASE WHEN P.Score < 0 THEN P.Score ELSE 0 END), 0) AS NegativeScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+), RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        RANK() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PositiveScore,
+    US.NegativeScore,
+    US.TotalPosts,
+    US.Rank,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    CASE 
+        WHEN RP.RecentRank = 1 THEN 'Latest'
+        ELSE 'Older'
+    END AS PostStatus,
+    C.CommentCount,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = RP.PostId) AS CommentCount
+FROM 
+    UserStats US
+LEFT JOIN 
+    RecentPosts RP ON US.UserId = RP.OwnerName
+LEFT JOIN 
+    (SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount 
+     FROM 
+        Comments 
+     GROUP BY 
+        PostId) C ON RP.PostId = C.PostId
+WHERE 
+    US.Reputation > 1000
+    AND (US.PositiveScore + ABS(US.NegativeScore)) > 0
+ORDER BY 
+    US.Rank, RP.CreationDate DESC;

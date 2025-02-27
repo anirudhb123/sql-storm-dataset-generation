@@ -1,0 +1,47 @@
+
+WITH RECURSIVE recursive_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, rs.level + 1
+    FROM supplier s
+    JOIN recursive_suppliers rs ON s.s_nationkey = rs.s_nationkey
+    WHERE rs.level < 5 AND s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey IS NOT NULL)
+),
+customer_details AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rn
+    FROM customer c
+    WHERE c.c_mktsegment IN ('BUILDING', 'AUTOMOBILE')
+),
+large_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT DISTINCT 
+    ps.ps_partkey,
+    (SELECT COUNT(*) FROM partsupp WHERE ps_partkey = ps.ps_partkey) AS supplier_count,
+    COALESCE((SELECT SUM(ps_supplycost) FROM partsupp ps WHERE ps.ps_partkey = ps.ps_partkey), 0) AS total_supply_cost,
+    COALESCE((SELECT MAX(s.s_acctbal) FROM supplier s WHERE s.s_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_nationkey IS NOT NULL)), 'None') AS max_supplier_acctbal,
+    r.r_name AS region_name,
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_orderstatus
+FROM part ps
+LEFT JOIN recursive_suppliers rs ON rs.s_suppkey = ps.ps_partkey
+LEFT JOIN nation n ON n.n_nationkey = rs.s_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer_details c ON c.c_custkey = rs.s_nationkey 
+LEFT JOIN large_orders o ON o.o_custkey = c.c_custkey
+WHERE COALESCE(c.c_acctbal, 0) > COALESCE(rs.s_acctbal, 0) + 5000
+AND (r.r_name LIKE 'E%' OR r.r_name IS NULL)
+ORDER BY ps.ps_partkey, o.o_orderdate DESC
+LIMIT 100;

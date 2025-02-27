@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        AVG(v.BountyAmount) AS AverageBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8  -- BountyStart votes
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT TRIM(REGEXP_REPLACE(t.TagName, '(<|>)', '', 'g')), ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_names 
+        ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_names::text
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.AverageBounty,
+    ud.UserId,
+    ud.DisplayName AS UserDisplayName,
+    ud.Reputation,
+    ud.Views,
+    ud.UpVotes,
+    ud.DownVotes,
+    ud.BadgeCount,
+    ud.BadgeNames,
+    pt.Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ud ON rp.UserId = ud.Id
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.UserPostRank <= 5  -- Top 5 recent posts by user
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;  -- Limiting to the top 100 results

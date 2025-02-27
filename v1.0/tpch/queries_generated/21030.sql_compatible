@@ -1,0 +1,73 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY ps.ps_supplycost DESC) AS rank_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+FilteredResults AS (
+    SELECT 
+        COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+        pp.p_name AS part_name,
+        n.n_name AS customer_name,
+        co.total_spent,
+        COALESCE(co.order_count, 0) AS order_count
+    FROM 
+        RankedSuppliers s
+    FULL OUTER JOIN 
+        HighValueParts pp ON s.s_suppkey = pp.p_partkey
+    FULL OUTER JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        CustomerOrders co ON co.c_custkey = COALESCE(n.n_nationkey, -1)
+    WHERE 
+        pp.rank_cost <= 5 OR co.total_spent IS NULL
+)
+SELECT 
+    f.supplier_name,
+    f.part_name,
+    f.customer_name,
+    f.total_spent,
+    CASE 
+        WHEN f.order_count > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status,
+    CASE 
+        WHEN f.total_spent IS NULL THEN 'No Spend'
+        ELSE 'Spent ' || CAST(f.total_spent AS VARCHAR(255))
+    END AS spending_info
+FROM 
+    FilteredResults f
+WHERE 
+    f.order_count <> ALL (SELECT order_count FROM CustomerOrders WHERE order_count IS NOT NULL)
+ORDER BY 
+    f.total_spent DESC NULLS LAST, 
+    f.customer_name ASC;

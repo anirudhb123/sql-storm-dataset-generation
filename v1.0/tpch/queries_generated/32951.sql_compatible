@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > 2000 AND sh.level < 3
+), 
+
+PriceAnalysis AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), 
+
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    sh.s_name AS supplier_name,
+    r.r_name AS region_name,
+    p.p_name AS part_name,
+    pa.total_cost AS part_total_cost,
+    co.total_spent AS customer_total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent < 10000 THEN 'Low Value Customer'
+        ELSE 'Valued Customer'
+    END AS customer_segment
+FROM SupplierHierarchy sh
+JOIN nation n ON sh.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN PriceAnalysis pa ON pa.p_partkey IN (
+    SELECT ps.p_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost < 500
+)
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (
+    SELECT DISTINCT o.o_custkey 
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+)
+WHERE r.r_name IN ('North America', 'Europe')
+ORDER BY sh.s_name, r.r_name, pa.total_cost DESC;

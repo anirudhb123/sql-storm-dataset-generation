@@ -1,0 +1,44 @@
+WITH UserBadges AS (
+    SELECT UserId, COUNT(*) AS BadgeCount, MAX(CreationDate) AS LastBadgeDate
+    FROM Badges
+    GROUP BY UserId
+),
+UserPosts AS (
+    SELECT OwnerUserId, COUNT(*) AS PostCount, SUM(ViewCount) AS TotalViews, AVG(Score) AS AverageScore
+    FROM Posts
+    WHERE CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY OwnerUserId
+),
+PostHistoricalActions AS (
+    SELECT UserId, COUNT(*) AS ActionCount, MAX(CreationDate) AS LastActionDate
+    FROM PostHistory
+    WHERE CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY UserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(up.PostCount, 0) AS PostCount,
+        COALESCE(up.TotalViews, 0) AS TotalViews,
+        COALESCE(up.AverageScore, 0) AS AverageScore,
+        COALESCE(pa.ActionCount, 0) AS ActionCount
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN UserPosts up ON u.Id = up.OwnerUserId
+    LEFT JOIN PostHistoricalActions pa ON u.Id = pa.UserId
+)
+SELECT 
+    u.DisplayName,
+    us.BadgeCount,
+    us.PostCount,
+    us.TotalViews,
+    us.AverageScore,
+    us.ActionCount,
+    u.Reputation,
+    u.CreationDate,
+    u.LastAccessDate
+FROM UserStatistics us
+JOIN Users u ON us.UserId = u.Id
+ORDER BY us.Reputation DESC, us.BadgeCount DESC, us.PostCount DESC
+LIMIT 50;

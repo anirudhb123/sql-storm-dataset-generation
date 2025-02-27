@@ -1,0 +1,37 @@
+
+WITH MovieStats AS (
+    SELECT 
+        a.title AS movie_title,
+        COALESCE(COUNT(c.person_id), 0) AS cast_count,
+        COALESCE(AVG(m.produced_year), 0) AS avg_production_year,
+        COUNT(DISTINCT kw.keyword) AS keyword_count
+    FROM aka_title a
+    LEFT JOIN cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN movie_info m ON a.movie_id = m.movie_id
+    WHERE a.production_year IS NOT NULL
+    GROUP BY a.title, a.id
+), RankedMovies AS (
+    SELECT 
+        movie_title,
+        cast_count,
+        avg_production_year,
+        keyword_count,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, avg_production_year DESC) AS rank
+    FROM MovieStats
+)
+SELECT 
+    r.movie_title,
+    r.cast_count,
+    r.avg_production_year,
+    r.keyword_count,
+    CASE 
+        WHEN r.cast_count > 50 THEN 'Hit'
+        WHEN r.cast_count BETWEEN 20 AND 50 THEN 'Moderate'
+        ELSE 'Flop'
+    END AS classification,
+    (SELECT COUNT(*) FROM title t WHERE t.production_year = r.avg_production_year) AS similar_years_count
+FROM RankedMovies r
+WHERE r.rank <= 10
+ORDER BY r.rank;

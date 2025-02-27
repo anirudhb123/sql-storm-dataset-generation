@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        c.c_nationkey,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderstatus, 
+        ro.o_totalprice, 
+        n.n_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.order_rank <= 10
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey, 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+    FROM 
+        lineitem lo
+    WHERE 
+        lo.l_returnflag = 'N'
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    TO.n_name AS nation, 
+    SUM(OD.total_revenue) AS revenue
+FROM 
+    TopOrders TO
+JOIN 
+    OrderDetails OD ON TO.o_orderkey = OD.l_orderkey
+GROUP BY 
+    TO.n_name
+ORDER BY 
+    revenue DESC;

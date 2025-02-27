@@ -1,0 +1,90 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        Score,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+)
+
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionCreationDate,
+    p.Score AS QuestionScore,
+    COALESCE(Answers.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(TopComment.Text, 'No Comments') AS TopComment,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+        ELSE 'Open'
+    END AS QuestionStatus,
+    COALESCE(Comments.CommentCount, 0) AS TotalComments,
+    COALESCE(Badges.BadgeCount, 0) AS UserBadges
+FROM 
+    RecursivePostHierarchy p
+LEFT JOIN 
+    (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount 
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) Answers ON p.Id = Answers.ParentId
+LEFT JOIN 
+    (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) Comments ON p.Id = Comments.PostId
+LEFT JOIN 
+    (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) Badges ON p.OwnerUserId = Badges.UserId
+LEFT JOIN 
+    (
+        SELECT
+            PostId,
+            Text,
+            ROW_NUMBER() OVER (PARTITION BY PostId ORDER BY CreationDate DESC) AS rn
+        FROM 
+            Comments
+    ) AS TopComment ON p.Id = TopComment.PostId AND TopComment.rn = 1
+WHERE 
+    p.Level <= 3 
+ORDER BY 
+    p.CreationDate DESC;

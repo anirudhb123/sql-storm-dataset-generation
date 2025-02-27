@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id  
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    mh.level AS movie_level,
+    ARRAY_AGG(DISTINCT c.nota) AS cast_notes,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    MAX(pi.info) FILTER (WHERE it.info = 'birth date') AS birth_date  
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+JOIN 
+    name a ON c.person_id = a.id
+JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON a.id = pi.person_id
+LEFT JOIN 
+    info_type it ON pi.info_type_id = it.id
+WHERE 
+    mh.level <= 2  
+GROUP BY 
+    a.id, m.title, mh.level
+ORDER BY 
+    mh.level ASC, COUNT(DISTINCT mc.company_id) DESC, a.name;

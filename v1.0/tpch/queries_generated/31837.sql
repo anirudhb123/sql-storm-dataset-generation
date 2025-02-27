@@ -1,0 +1,36 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, n.n_name AS nation_name,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.r_regionkey,
+           ROW_NUMBER() OVER (PARTITION BY n.r_regionkey ORDER BY s.s_acctbal DESC) AS regional_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal > 5000
+),
+customer_orders AS (
+    SELECT c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice,
+           SUM(l.l_discount * l.l_extendedprice) AS total_discount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice
+)
+SELECT r.r_name, COALESCE(SUM(co.total_discount), 0) AS total_discount,
+       COUNT(DISTINCT ts.s_suppkey) AS unique_suppliers, 
+       STRING_AGG(DISTINCT sh.nation_name, ', ') AS supplier_nations
+FROM region r
+LEFT JOIN top_suppliers ts ON ts.r_regionkey = r.r_regionkey
+LEFT JOIN supplier_hierarchy sh ON sh.s_suppkey = ts.s_suppkey
+LEFT JOIN customer_orders co ON co.o_totalprice > 1000
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ts.s_suppkey) > 0
+ORDER BY total_discount DESC
+LIMIT 10;

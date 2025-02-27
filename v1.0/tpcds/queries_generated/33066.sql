@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY ws.web_site_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS quantity_on_hand,
+        AVG(i.i_current_price) AS avg_price
+    FROM inventory inv
+    JOIN item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY inv.inv_item_sk
+),
+top_sales AS (
+    SELECT 
+        ss.web_site_sk,
+        ss.total_sales,
+        ss.total_profit,
+        ss.order_count
+    FROM sales_summary ss
+    WHERE ss.rank <= 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    coalesce(ts.total_sales, 0) as total_sales,
+    coalesce(ts.order_count, 0) as order_count,
+    isnull(inv.quantity_on_hand, 0) as quantity_on_hand,
+    (ts.total_profit * 1.05) AS adjusted_profit
+FROM customer_info ci
+LEFT JOIN top_sales ts ON ci.c_customer_sk = (SELECT c.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_billed_customer_sk = ci.c_customer_sk LIMIT 1)
+LEFT JOIN inventory_summary inv ON ts.web_site_sk = (SELECT ws.ws_web_site_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = ci.c_customer_sk LIMIT 1)
+ORDER BY total_sales DESC, order_count DESC;

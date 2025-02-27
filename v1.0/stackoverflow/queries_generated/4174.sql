@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as UserPostRank,
+        MAX(v.VoteTypeId) OVER (PARTITION BY p.Id) as MaxVoteType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        CASE 
+            WHEN rp.MaxVoteType IS NULL THEN 'No Votes' 
+            ELSE 'Has Votes' 
+        END AS VoteStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 10 AND rp.UserPostRank <= 5
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    fs.Title,
+    fs.Score,
+    fs.ViewCount,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    fs.VoteStatus
+FROM 
+    FilteredPosts fs
+JOIN 
+    UserStatistics us ON fs.KeyUserId = us.UserId
+ORDER BY 
+    fs.Score DESC, us.Reputation DESC
+LIMIT 100;

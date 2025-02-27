@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        pt.Name AS PostType,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, pt.Name
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class AS BadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+),
+
+ContentEngagement AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.PostType,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        r.AnswerCount,
+        r.CommentCount,
+        (r.AnswerCount + r.CommentCount) AS TotalEngagement
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        UserBadges b ON r.OwnerUserId = b.UserId
+    WHERE 
+        r.UserPostRank <= 5
+)
+
+SELECT 
+    ce.Title,
+    ce.PostType,
+    ce.BadgeCount,
+    ce.AnswerCount,
+    ce.CommentCount,
+    ce.TotalEngagement,
+    CASE 
+        WHEN ce.BadgeCount >= 3 THEN 'Active Contributor'
+        WHEN ce.TotalEngagement >= 10 THEN 'Engaged User'
+        ELSE 'New Contributor'
+    END AS ContributionStatus
+FROM 
+    ContentEngagement ce
+ORDER BY 
+    ce.TotalEngagement DESC, ce.BadgeCount DESC;

@@ -1,0 +1,64 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(ca_street_number) || ' ' || TRIM(ca_street_name) || ' ' || TRIM(ca_street_type) || 
+        CASE WHEN ca_suite_number IS NOT NULL THEN ' Suite ' || TRIM(ca_suite_number) ELSE '' END AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_sk) AS num_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+SalesInfo AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS num_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ai.full_address,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_zip,
+    ai.ca_country,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.num_customers,
+    cs.avg_purchase_estimate,
+    cs.total_dependents,
+    si.total_sales,
+    si.total_profit,
+    si.num_orders
+FROM
+    AddressInfo ai
+LEFT JOIN 
+    CustomerStats cs ON ai.ca_address_sk = cs.cd_demo_sk
+LEFT JOIN 
+    SalesInfo si ON cs.num_customers = si.ws_bill_customer_sk
+WHERE
+    ai.ca_state = 'NY' 
+ORDER BY 
+    si.total_sales DESC, 
+    cs.avg_purchase_estimate DESC
+LIMIT 100;

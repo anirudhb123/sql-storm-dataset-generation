@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (DATE '2024-10-01' - INTERVAL '30 days')
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        Score,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        RANK() OVER (ORDER BY Score DESC, ViewCount DESC) AS OverallRank
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1 
+        AND CommentCount > 0
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= (DATE '2024-10-01' - INTERVAL '90 days')
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, p.Title
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.ViewCount,
+    t.Score,
+    t.CommentCount,
+    t.UpVoteCount,
+    t.DownVoteCount,
+    u.UserDisplayName,
+    p.CreationDate AS LastEditDate,
+    p.HistoryTypes,
+    CASE 
+        WHEN COUNT(DISTINCT ph.PostId) > 5 THEN 'Frequent Edits'
+        ELSE 'Rarely Edited'
+    END AS EditFrequency,
+    CASE 
+        WHEN MAX(CASE WHEN ph.CreationDate < (DATE '2024-10-01' - INTERVAL '30 days') THEN 1 ELSE 0 END) = 1 
+            THEN 'Old Post Edit' 
+        ELSE 'Recent Post Edit' 
+    END AS EditAge
+FROM 
+    TopPosts t
+LEFT JOIN 
+    PostHistoryDetails p ON t.PostId = p.PostId
+LEFT JOIN 
+    Users u ON p.UserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON t.PostId = ph.PostId
+GROUP BY 
+    t.PostId, t.Title, t.ViewCount, t.Score, t.CommentCount, t.UpVoteCount, t.DownVoteCount, 
+    u.UserDisplayName, p.CreationDate, p.HistoryTypes, t.OverallRank
+ORDER BY 
+    t.OverallRank, t.Score DESC;

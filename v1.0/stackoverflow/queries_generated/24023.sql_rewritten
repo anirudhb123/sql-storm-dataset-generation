@@ -1,0 +1,84 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPostInteractions AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT ph.Comment) AS CloseReasons,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+RankedUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.PostCount,
+        ua.CommentCount,
+        u.PostRank,
+        COALESCE(cpi.CloseReasons, 'No close reasons') AS RecentCloseReasons,
+        COALESCE(cpi.CloseCount, 0) AS TotalCloseInteractions
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        RecentPosts rp ON ua.UserId = rp.OwnerUserId AND rp.PostRank = 1
+    LEFT JOIN 
+        ClosedPostInteractions cpi ON rp.PostId = cpi.PostId
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.PostCount,
+    ru.CommentCount,
+    ru.RecentCloseReasons,
+    ru.TotalCloseInteractions,
+    CASE 
+        WHEN ru.Reputation >= 1000 THEN 'Elite User'
+        WHEN ru.Reputation >= 500 THEN 'Experienced User'
+        ELSE 'Newcomer'
+    END AS UserStatus,
+    NULLIF(ru.TotalCloseInteractions, 0) AS NullCloseInteractionCheck,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = ru.UserId) AS VoteCount
+FROM 
+    RankedUsers ru
+WHERE 
+    ru.UserRank <= 10
+ORDER BY 
+    ru.Reputation DESC, 
+    ru.UserId;

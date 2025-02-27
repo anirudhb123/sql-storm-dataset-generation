@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_orderkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(lo.total_revenue), 0) AS total_spent,
+        COUNT(lo.l_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN LineItemSummary lo ON c.c_custkey = lo.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(co.total_spent) AS average_spent,
+    MAX(sc.total_supply_cost) AS max_supplier_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN CustomerOrderDetails co ON s.s_suppkey = co.c_custkey
+LEFT JOIN SupplierCosts sc ON s.s_suppkey = sc.ps_partkey
+WHERE r.r_name IS NOT NULL
+AND n.n_name IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING MAX(sc.total_supply_cost) > (SELECT AVG(total_supply_cost) FROM SupplierCosts)
+ORDER BY region_name, nation_name;

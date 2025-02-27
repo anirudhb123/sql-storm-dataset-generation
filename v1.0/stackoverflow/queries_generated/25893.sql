@@ -1,0 +1,61 @@
+WITH PostAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01') AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+    GROUP BY 
+        p.Id
+),
+
+Ranking AS (
+    SELECT 
+        pa.*,
+        ROW_NUMBER() OVER (ORDER BY pa.Score DESC, pa.ViewCount DESC) AS Rank
+    FROM 
+        PostAggregates pa
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.CommentCount,
+    r.AnswerCount,
+    r.Tags,
+    r.BadgeCount,
+    r.LastEditDate,
+    r.Rank,
+    CASE 
+        WHEN r.Score > 100 THEN 'Highly Scored'
+        WHEN r.Score BETWEEN 50 AND 100 THEN 'Moderately Scored'
+        ELSE 'Lowly Scored'
+    END AS ScoreCategory
+FROM 
+    Ranking r
+WHERE 
+    r.Rank <= 100  -- Get top 100 posts
+ORDER BY 
+    r.Rank;

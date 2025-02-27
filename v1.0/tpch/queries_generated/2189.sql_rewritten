@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    NSP.n_name AS supplier_name,
+    COALESCE(total_supply_cost, 0) AS total_supplier_cost,
+    COALESCE(total_orders, 0) AS customer_order_count,
+    COALESCE(total_spent, 0) AS total_customer_spent,
+    RANK() OVER (ORDER BY COALESCE(total_spent, 0) DESC) AS customer_rank
+FROM 
+    SupplierInfo SI
+FULL OUTER JOIN 
+    CustomerOrders CO ON SI.s_suppkey = CO.c_custkey
+JOIN 
+    nation NSP ON NSP.n_nationkey = CO.c_nationkey
+WHERE 
+    (SI.total_supply_cost IS NOT NULL OR CO.total_orders IS NOT NULL)
+ORDER BY 
+    supplier_name, customer_rank;

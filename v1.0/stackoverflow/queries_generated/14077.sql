@@ -1,0 +1,57 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(VB.VoteCount) AS TotalVotes,
+        SUM(B.Reputation) AS BadgeReputation
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN (
+        SELECT 
+            V.UserId,
+            COUNT(*) AS VoteCount
+        FROM Votes V
+        GROUP BY V.UserId
+    ) VB ON U.Id = VB.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS TotalComments,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS Downvotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.TotalVotes,
+    US.BadgeReputation,
+    PM.PostId,
+    PM.Title,
+    PM.CreationDate,
+    PM.ViewCount,
+    PM.Score,
+    PM.TotalComments,
+    PM.Upvotes,
+    PM.Downvotes
+FROM UserStats US
+JOIN PostMetrics PM ON US.UserId = PM.PostId
+ORDER BY US.Reputation DESC, PM.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,59 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        STRING_AGG(a.name, ', ') AS cast_members
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON mc.movie_id = m.id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword, c.name, ct.kind
+),
+KeywordStats AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT movie_keyword) AS keyword_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        movie_id
+),
+ProductionStats AS (
+    SELECT 
+        production_year,
+        COUNT(movie_id) AS total_movies,
+        SUM(keyword_count) AS total_keywords
+    FROM 
+        MovieDetails md
+    JOIN 
+        KeywordStats ks ON ks.movie_id = md.movie_id
+    GROUP BY 
+        production_year
+)
+SELECT 
+    ps.production_year,
+    ps.total_movies,
+    ps.total_keywords,
+    (CAST(ps.total_keywords AS numeric) / GREATEST(NULLIF(ps.total_movies, 0), 1)) AS avg_keywords_per_movie
+FROM 
+    ProductionStats ps
+ORDER BY 
+    ps.production_year DESC;

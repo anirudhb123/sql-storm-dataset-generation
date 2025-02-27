@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY[mt.id] AS path_ids,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.path_ids || ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'remake') 
+        AND at.production_year < 2021
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COUNT(cnr.id) AS role_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS co_actors,
+    AVG(mh.depth) FILTER (WHERE mh.depth IS NOT NULL) AS avg_depth,
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_role_notes,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS not_null_role_notes
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    cast_info cnr ON cnr.movie_id = mt.id AND cnr.person_id <> ak.person_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.production_year BETWEEN 2000 AND 2020
+    AND ci.note IS NOT NULL
+GROUP BY 
+    ak.name, mt.title
+HAVING 
+    COUNT(cnr.id) >= 2
+ORDER BY 
+    COUNT(cnr.id) DESC, ak.name ASC;
+
+This SQL query utilizes various advanced SQL features to accomplish a detailed analysis of movies, actors, and their roles while incorporating a recursive common table expression (CTE) for movie linkage, intricate filtering conditions, group by clauses, and aggregate functions.

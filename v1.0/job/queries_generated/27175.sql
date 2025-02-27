@@ -1,0 +1,56 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT ci.kind ORDER BY ci.kind) AS company_types
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    JOIN 
+        aka_name c ON ca.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type ci ON mc.company_type_id = ci.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+final_benchmark AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        LENGTH(md.cast_names) AS cast_length,
+        LENGTH(md.keywords) AS keyword_length,
+        md.company_types
+    FROM 
+        movie_details md
+    WHERE
+        md.cast_length > 0
+        AND md.keyword_length > 0
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    cast_names,
+    keywords,
+    company_types,
+    (cast_length + keyword_length) AS total_string_length
+FROM 
+    final_benchmark
+ORDER BY 
+    total_string_length DESC
+LIMIT 100;

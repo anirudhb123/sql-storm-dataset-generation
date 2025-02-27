@@ -1,0 +1,43 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY SUM(ws.ws_net_paid) DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+        AND ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        customer_id, 
+        total_net_paid,
+        total_orders,
+        gender_rank
+    FROM 
+        aggregated_sales
+    WHERE 
+        gender_rank <= 10
+)
+SELECT 
+    tc.customer_id,
+    tc.total_net_paid,
+    tc.total_orders,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    top_customers tc
+JOIN 
+    customer_demographics cd ON tc.customer_id = cd.cd_demo_sk
+ORDER BY 
+    total_net_paid DESC;

@@ -1,0 +1,83 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        AVG(COALESCE(i.i_current_price, 0)) AS avg_price
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        inv.inv_item_sk
+),
+sales_info AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+qualified_customers AS (
+    SELECT 
+        s.c_customer_id
+    FROM 
+        sales_info s
+    WHERE 
+        s.order_count >= 5 AND s.total_profit >= 1000
+),
+return_summary AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(rs.rnk, 0) AS rank,
+    COALESCE(inv.total_quantity, 0) AS available_stock,
+    COALESCE(inv.avg_price, 0) AS average_price,
+    COALESCE(ks.total_returns, 0) AS total_returns,
+    COALESCE(ks.total_returned_amt, 0) AS total_returned_amt,
+    CASE 
+        WHEN ks.total_returns > 0 THEN 'Returned' 
+        ELSE 'Normal' 
+    END AS return_status
+FROM 
+    item i
+LEFT JOIN 
+    ranked_sales rs ON i.i_item_sk = rs.ws_item_sk AND rs.rnk = 1
+LEFT JOIN 
+    inventory_summary inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    return_summary ks ON i.i_item_sk = ks.sr_item_sk
+WHERE
+    i.i_current_price IS NOT NULL
+    AND (inv.total_quantity IS NULL OR inv.total_quantity > 10)
+    AND i.i_item_sk IN (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_order_number IN 
+        (SELECT ws_order_number FROM web_sales WHERE ws_ship_customer_sk IN (SELECT c_customer_sk FROM qualified_customers)))
+ORDER BY 
+    return_status, average_price DESC, total_profit DESC;

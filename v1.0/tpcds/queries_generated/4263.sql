@@ -1,0 +1,64 @@
+
+WITH sales_data AS (
+    SELECT 
+        w.w_warehouse_id,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 10030
+    GROUP BY 
+        w.w_warehouse_id, ws.ws_order_number
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT CASE WHEN ws.ws_order_number IS NOT NULL THEN ws.ws_order_number END) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+ranked_customers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.income_band,
+        ci.order_count,
+        RANK() OVER (PARTITION BY ci.income_band ORDER BY ci.order_count DESC) AS rank
+    FROM 
+        customer_info ci
+)
+SELECT 
+    sd.w_warehouse_id,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    rc.income_band,
+    SUM(sd.total_quantity) AS total_sales_quantity,
+    SUM(sd.total_net_paid) AS total_sales_net_paid,
+    AVG(sd.total_net_paid) AS average_sales_per_order,
+    COALESCE(MAX(rc.order_count), 0) AS max_orders_per_customer
+FROM 
+    sales_data sd
+JOIN 
+    ranked_customers rc ON sd.ws_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_bill_customer_sk = rc.c_customer_id)
+GROUP BY 
+    sd.w_warehouse_id, rc.cd_gender, rc.cd_marital_status, rc.income_band
+ORDER BY 
+    total_sales_quantity DESC, total_sales_net_paid DESC;

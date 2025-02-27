@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_quantity DESC) AS quantity_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450000 AND 2450500
+),
+ReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+HighRevenueItems AS (
+    SELECT 
+        i.i_item_sk,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(r.total_returned_amount, 0) AS total_returned_amount,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        ReturnStats r ON i.i_item_sk = r.sr_item_sk
+    GROUP BY 
+        i.i_item_sk, r.total_returns, r.total_returned_quantity, r.total_returned_amount
+    HAVING 
+        SUM(ws.ws_sales_price * ws.ws_quantity) > 1000
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    hi.total_sales,
+    hi.total_returns,
+    hi.total_returned_quantity,
+    hi.total_returned_amount,
+    (hi.total_sales - hi.total_returned_amount) AS net_revenue
+FROM 
+    HighRevenueItems hi
+JOIN 
+    item i ON hi.i_item_sk = i.i_item_sk
+ORDER BY 
+    net_revenue DESC
+LIMIT 10;

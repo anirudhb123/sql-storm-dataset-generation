@@ -1,0 +1,53 @@
+WITH ActorInfo AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        c.movie_id,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT ci.id) AS role_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.name, c.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        mk.company_id,
+        GROUP_CONCAT(DISTINCT mt.kind) AS company_types
+    FROM 
+        title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_type mt ON mc.company_type_id = mt.id
+    GROUP BY 
+        m.id, m.title, m.production_year, mc.company_id
+)
+SELECT 
+    ai.actor_name,
+    mi.title,
+    mi.production_year,
+    ai.keywords,
+    ai.role_count,
+    mi.company_types
+FROM 
+    ActorInfo ai
+JOIN 
+    MovieInfo mi ON ai.movie_id = mi.movie_id
+WHERE 
+    ai.role_count > 1 
+AND 
+    mi.production_year >= 2000 
+ORDER BY 
+    ai.role_count DESC, mi.production_year ASC;

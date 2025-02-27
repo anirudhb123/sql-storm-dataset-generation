@@ -1,0 +1,90 @@
+
+WITH RankedNames AS (
+    SELECT 
+        a.name AS aka_name,
+        p.name AS person_name,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.name) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        name p ON a.person_id = p.imdb_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CompleteCast AS (
+    SELECT 
+        cc.movie_id,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY cc.movie_id ORDER BY a.name) AS cast_rank
+    FROM 
+        complete_cast cc
+    JOIN 
+        aka_name a ON cc.subject_id = a.id
+    JOIN 
+        role_type r ON cc.role_id = r.id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    n.aka_name AS actor_alias,
+    n.person_name AS full_actor_name,
+    kw.keyword AS movie_keyword,
+    c.company_name,
+    c.company_type,
+    cc.actor_role,
+    COALESCE(n.rank, 1) AS name_rank,
+    COALESCE(kw.rank, 1) AS keyword_rank,
+    COALESCE(c.company_rank, 1) AS company_rank,
+    COALESCE(cc.cast_rank, 1) AS cast_rank
+FROM 
+    MoviesWithKeywords kw
+JOIN 
+    aka_title m ON kw.title = m.title AND kw.production_year = m.production_year
+LEFT JOIN 
+    RankedNames n ON n.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = m.id)
+LEFT JOIN 
+    CompanyDetails c ON c.movie_id = m.id
+LEFT JOIN 
+    CompleteCast cc ON cc.movie_id = m.id
+GROUP BY 
+    m.title,
+    m.production_year,
+    n.aka_name,
+    n.person_name,
+    kw.keyword,
+    c.company_name,
+    c.company_type,
+    cc.actor_role,
+    n.rank,
+    kw.rank,
+    c.company_rank,
+    cc.cast_rank
+ORDER BY 
+    m.production_year DESC, 
+    m.title, 
+    kw.keyword;

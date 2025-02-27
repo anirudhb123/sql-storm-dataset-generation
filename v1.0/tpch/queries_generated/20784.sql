@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT
+        r.r_regionkey,
+        n.n_name,
+        COUNT(DISTINCT rs.s_suppkey) AS top_supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey AND rs.rank <= 5
+    GROUP BY 
+        r.r_regionkey, n.n_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ts.top_supplier_count, 0) AS top_suppliers,
+    COALESCE(co.total_orders, 0) AS total_order_value,
+    ol.total_revenue,
+    ol.line_count,
+    CASE 
+        WHEN ol.total_revenue IS NULL THEN 'No Revenue'
+        WHEN ol.line_count > 10 THEN 'High Volume'
+        ELSE 'Standard'
+    END AS order_type
+FROM 
+    region r
+LEFT JOIN 
+    TopSuppliers ts ON r.r_regionkey = ts.r_regionkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey))
+LEFT JOIN 
+    OrderLineStatistics ol ON ol.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey)))
+ORDER BY 
+    r.r_name, ts.top_supplier_count DESC, co.total_orders DESC NULLS LAST;

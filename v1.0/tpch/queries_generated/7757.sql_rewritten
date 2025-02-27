@@ -1,0 +1,54 @@
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate > cast('1998-10-01' as date) - INTERVAL '6 months'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    hc.c_name,
+    hc.c_acctbal,
+    so.s_name,
+    sc.total_supply_cost,
+    ro.total_order_value,
+    ro.o_orderdate
+FROM 
+    HighValueCustomers hc
+JOIN 
+    RecentOrders ro ON hc.c_custkey = ro.o_custkey
+JOIN 
+    SupplierCosts sc ON sc.total_supply_cost > ro.total_order_value 
+JOIN 
+    supplier so ON so.s_suppkey = sc.s_suppkey
+ORDER BY 
+    ro.total_order_value DESC, hc.c_acctbal DESC;

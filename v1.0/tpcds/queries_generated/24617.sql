@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.cr_return_amount) AS total_returned
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        (cs.total_sales - COALESCE(cr.total_returned, 0)) AS net_sales
+    FROM CustomerSales cs
+    LEFT JOIN CustomerReturns cr ON cs.c_customer_sk = cr.returning_customer_sk
+)
+SELECT 
+    swr.c_customer_sk,
+    swr.c_first_name,
+    swr.c_last_name,
+    swr.total_sales,
+    swr.order_count,
+    swr.total_returned,
+    swr.net_sales,
+    CASE 
+        WHEN swr.net_sales IS NULL THEN 'Data Missing'
+        WHEN swr.net_sales < 0 THEN 'Negative Sales'
+        WHEN swr.net_sales = 0 THEN 'No Sales'
+        ELSE 'Positive Sales'
+    END AS sales_status
+FROM SalesWithReturns swr
+WHERE swr.sales_rank <= 5
+ORDER BY swr.net_sales DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL,
+    'Aggregate',
+    NULL,
+    SUM(total_sales),
+    SUM(order_count),
+    SUM(total_returned),
+    SUM(net_sales),
+    'Total Sales'
+FROM SalesWithReturns;

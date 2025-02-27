@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+), 
+
+TopCustomers AS (
+    SELECT 
+        c_customer_id AS customer_id,
+        total_sales,
+        order_count
+    FROM RankedSales
+    WHERE sales_rank <= 10
+),
+
+ReturnsInfo AS (
+    SELECT 
+        r.wr_returning_customer_sk,
+        SUM(r.wr_return_amt) AS total_refunds,
+        COUNT(r.wr_order_number) AS return_count
+    FROM web_returns r
+    GROUP BY r.wr_returning_customer_sk
+),
+
+CustomerAnalytics AS (
+    SELECT 
+        tc.customer_id,
+        tc.total_sales,
+        tc.order_count,
+        COALESCE(ri.total_refunds, 0) AS total_refunds,
+        COALESCE(ri.return_count, 0) AS return_count,
+        (tc.total_sales - COALESCE(ri.total_refunds, 0)) AS net_sales
+    FROM TopCustomers tc
+    LEFT JOIN ReturnsInfo ri ON tc.customer_id = ri.wr_returning_customer_sk
+)
+
+SELECT 
+    ca.customer_id, 
+    ca.total_sales,
+    ca.order_count,
+    ca.total_refunds,
+    ca.net_sales,
+    CASE 
+        WHEN ca.net_sales > 10000 THEN 'High Value'
+        WHEN ca.net_sales > 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM CustomerAnalytics ca
+ORDER BY ca.net_sales DESC
+LIMIT 50;

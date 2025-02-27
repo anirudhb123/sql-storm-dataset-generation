@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT ca.movie_id) AS movie_count
+    FROM 
+        cast_info ca
+    GROUP BY 
+        ca.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        an.name,
+        amc.movie_count
+    FROM 
+        ActorMovieCounts amc
+    JOIN 
+        aka_name an ON amc.person_id = an.person_id
+    WHERE 
+        amc.movie_count > 5
+    ORDER BY 
+        amc.movie_count DESC
+    LIMIT 10
+)
+SELECT 
+    rt.production_year,
+    rt.title,
+    ta.name AS actor_name,
+    COALESCE(mt.info, 'No info available') AS additional_info,
+    CASE 
+        WHEN at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'Feature Film') THEN 'Feature'
+        ELSE 'Other'
+    END AS title_type
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    cast_info ci ON rt.title = (SELECT title FROM aka_title WHERE movie_id = ci.movie_id LIMIT 1)
+JOIN 
+    TopActors ta ON ci.person_id = ta.person_id
+LEFT JOIN 
+    movie_info mt ON rt.production_year = mt.movie_id
+WHERE 
+    rt.title_rank <= 5
+  AND 
+    (mt.info_type_id IS NULL OR mt.note IS NOT NULL)
+ORDER BY 
+    rt.production_year DESC, ta.movie_count DESC;

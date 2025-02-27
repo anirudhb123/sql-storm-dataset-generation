@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseComment,
+        c.Name AS CloseReasonName,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.OwnerDisplayName,
+        pr.CloseComment,
+        pr.CloseReasonName,
+        pr.CloseDate,
+        COALESCE(pc.CommentCount, 0) AS TotalComments
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CloseReasons pr ON rp.PostId = pr.PostId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.OwnerDisplayName,
+    fp.TotalComments,
+    CASE 
+        WHEN fp.CloseComment IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(fp.CloseReasonName, 'N/A') AS CloseReason,
+    CASE 
+        WHEN fp.CloseDate IS NOT NULL THEN TO_CHAR(fp.CloseDate, 'YYYY-MM-DD HH24:MI:SS')
+        ELSE 'N/A'
+    END AS CloseDateFormatted
+FROM 
+    FinalPosts fp
+WHERE 
+    fp.Rank <= 10
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

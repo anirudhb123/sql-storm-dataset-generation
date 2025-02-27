@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopRanked AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        OwnerDisplayName, 
+        CommentCount, 
+        UpVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tr.Title, 
+    tr.OwnerDisplayName, 
+    tr.Score, 
+    tr.ViewCount, 
+    tr.CommentCount, 
+    tr.UpVoteCount,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Tags t 
+     JOIN 
+         Posts tp ON t.ExcerptPostId = tp.Id 
+     WHERE 
+         tp.Id IN (SELECT PostId FROM TopRanked) 
+         AND t.IsModeratorOnly = 0) AS NonModeratorTagCount
+FROM 
+    TopRanked tr;

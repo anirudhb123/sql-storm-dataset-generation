@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS Owner,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P 
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TagStatistics AS (
+    SELECT 
+        UNNEST(string_to_array(TRIM(BOTH '<>' FROM Tags), '> <')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 5 
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.Score) AS TotalScore,
+        COUNT(P.Id) AS QuestionCount
+    FROM 
+        Users U 
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(P.Id) > 10 
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.Score,
+    RP.Owner,
+    TS.Tag,
+    TS.PostCount,
+    TU.DisplayName AS TopUser,
+    TU.TotalScore,
+    TU.QuestionCount
+FROM 
+    RankedPosts RP
+JOIN 
+    TagStatistics TS ON RP.Tags LIKE '%' || TS.Tag || '%'
+JOIN 
+    TopUsers TU ON RP.OwnerUserId = TU.UserId
+WHERE 
+    RP.RN = 1 
+ORDER BY 
+    RP.CreationDate DESC;

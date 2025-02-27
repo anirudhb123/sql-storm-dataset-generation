@@ -1,0 +1,78 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COUNT(DISTINCT ss.ticket_number) AS store_sales_count,
+        SUM(ss.net_paid) AS total_store_sales,
+        SUM(ss.ext_discount_amt) AS total_store_discounts,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        r.c_customer_id,
+        r.total_store_sales,
+        r.total_store_discounts,
+        r.sales_rank,
+        ROW_NUMBER() OVER (ORDER BY r.total_store_sales DESC) AS overall_rank
+    FROM 
+        ranked_sales r
+    WHERE 
+        r.sales_rank <= 3 -- Top 3 sales per customer
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_store_sales,
+    tc.total_store_discounts,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    CASE 
+        WHEN cd.cd_dep_count IS NULL THEN 'Dependents Unknown' 
+        ELSE 'Dependents: ' || cd.cd_dep_count::text 
+    END AS dependents_info,
+    CASE 
+        WHEN tc.total_store_sales IS NOT NULL THEN 
+            CASE 
+                WHEN tc.total_store_sales > 5000 THEN 'High Spender' 
+                ELSE 'Regular Customer' 
+            END 
+        ELSE 'No Purchases'
+    END AS customer_category,
+    COALESCE(NULLIF(cd.cd_credit_rating, 'Unknown'), 'No Credit Rating') AS credit_info,
+    CASE 
+        WHEN tc.total_store_discounts > 0 THEN 
+            CONCAT('Received discounts of $', tc.total_store_discounts::text)
+        ELSE 
+            'No Discounts'
+    END AS discount_info
+FROM 
+    top_customers tc
+JOIN 
+    customer c ON tc.c_customer_id = c.c_customer_id
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    (tc.q1_sales > 0 OR tc.total_store_sales IS NULL)
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+ORDER BY 
+    tc.total_store_sales DESC, 
+    tc.total_store_discounts ASC;

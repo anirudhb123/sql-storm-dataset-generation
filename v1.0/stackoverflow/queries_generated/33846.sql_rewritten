@@ -1,0 +1,108 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+),
+TopPostHistory AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        UserDisplayName,
+        PostHistoryTypeId
+    FROM 
+        RecursivePostHistory
+    WHERE 
+        rn = 1
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.Id IS NULL THEN 0 ELSE 1 END) AS NonDeletedPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserStatistics
+    WHERE 
+        PostCount > 0
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetUpvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+FinalSelection AS (
+    SELECT 
+        r.*, 
+        t.UserId AS TopUserId,
+        tu.DisplayName AS TopUserName,
+        ph.CreationDate AS LatestHistoryDate,
+        ph.UserDisplayName AS LastEditor,
+        ph.PostHistoryTypeId AS LastEditType
+    FROM 
+        RecentPosts r
+    LEFT JOIN 
+        TopUsers tu ON r.Score >= 10
+    LEFT JOIN 
+        TopPostHistory ph ON r.Id = ph.PostId
+    ORDER BY 
+        r.CreationDate DESC
+)
+SELECT 
+    f.Title,
+    f.CreationDate,
+    f.CommentCount,
+    f.NetUpvotes,
+    COALESCE(f.TopUserName, 'N/A') AS TopContributorName,
+    COALESCE(f.LastEditor, 'N/A') AS LastEditedBy,
+    CASE 
+        WHEN f.LastEditType IN (4, 5) THEN 'Edited'
+        WHEN f.LastEditType IN (10, 11, 12) THEN 'Closed'
+        ELSE 'No Recent Changes'
+    END AS EditStatus
+FROM 
+    FinalSelection f
+WHERE 
+    f.LatestHistoryDate IS NOT NULL
+ORDER BY 
+    f.NetUpvotes DESC
+LIMIT 50;

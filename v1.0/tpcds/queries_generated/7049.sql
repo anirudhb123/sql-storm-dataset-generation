@@ -1,0 +1,56 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id
+),
+DemographicSales AS (
+    SELECT 
+        cd.cd_education_status,
+        cd.cd_gender,
+        SUM(cs.total_profit) AS total_profit,
+        SUM(cs.total_orders) AS total_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id IN (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = cd.cd_demo_sk)
+    GROUP BY 
+        cd.cd_education_status, 
+        cd.cd_gender
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ss.ss_net_profit) AS warehouse_profit
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    JOIN 
+        warehouse w ON s.s_address_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_name
+)
+SELECT 
+    ds.cd_gender, 
+    ds.cd_education_status, 
+    ds.total_profit AS demographic_sales_profit, 
+    ws.warehouse_name, 
+    ws.warehouse_profit
+FROM 
+    DemographicSales ds
+JOIN 
+    WarehouseSales ws ON ds.total_profit > 10000
+ORDER BY 
+    ds.total_profit DESC, 
+    ws.warehouse_profit ASC
+LIMIT 10;

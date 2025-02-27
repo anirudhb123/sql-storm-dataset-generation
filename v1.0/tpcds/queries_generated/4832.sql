@@ -1,0 +1,43 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        COUNT(DISTINCT CASE WHEN ws.ws_order_number IS NOT NULL THEN ws.ws_order_number END) AS web_orders,
+        COUNT(DISTINCT CASE WHEN cs.cs_order_number IS NOT NULL THEN cs.cs_order_number END) AS catalog_orders,
+        COUNT(DISTINCT CASE WHEN ss.ss_ticket_number IS NOT NULL THEN ss.ss_ticket_number END) AS store_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        CASE
+            WHEN ib.ib_income_band_sk IS NOT NULL THEN 'Income Band Present'
+            ELSE 'No Income Band'
+        END AS income_band_status
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    sd.c_customer_id,
+    sd.total_web_sales,
+    sd.total_catalog_sales,
+    sd.total_store_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.income_band_status,
+    RANK() OVER (PARTITION BY cd.cd_gender ORDER BY total_web_sales DESC) AS web_sales_rank
+FROM sales_summary sd
+JOIN customer_demographics cd ON sd.c_customer_id = cd.cd_demo_sk
+WHERE sd.total_web_sales IS NOT NULL OR sd.total_catalog_sales IS NOT NULL OR sd.total_store_sales IS NOT NULL
+ORDER BY total_web_sales DESC, total_catalog_sales DESC, total_store_sales DESC;

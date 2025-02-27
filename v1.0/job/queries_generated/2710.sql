@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_within_year
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        cast_info AS c ON t.id = c.movie_id
+    GROUP BY
+        t.title, t.production_year, t.kind_id
+),
+GenreStatistics AS (
+    SELECT
+        kt.kind AS genre,
+        COUNT(mt.movie_id) AS movie_count,
+        AVG(mt.production_year) AS avg_year
+    FROM
+        kind_type AS kt
+    JOIN
+        aka_title AS mt ON mt.kind_id = kt.id
+    GROUP BY
+        kt.kind
+)
+
+SELECT
+    rm.title,
+    rm.production_year,
+    rg.genre,
+    rm.actor_count,
+    gs.avg_year,
+    CASE
+        WHEN rm.rank_within_year <= 5 THEN 'Top 5 of Year'
+        ELSE 'Others'
+    END AS movie_rank_group
+FROM
+    RankedMovies AS rm
+JOIN
+    movie_keyword AS mk ON mk.movie_id = rm.id
+JOIN
+    keyword AS k ON k.id = mk.keyword_id
+LEFT JOIN
+    GenreStatistics AS gs ON gs.genre = k.keyword
+WHERE
+    rm.actor_count IS NOT NULL
+    AND (rm.production_year >= 2000 OR rm.kind_id = 1)
+ORDER BY
+    rm.production_year DESC, rm.actor_count DESC;
+

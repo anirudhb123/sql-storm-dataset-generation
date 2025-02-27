@@ -1,0 +1,68 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_net_paid_inc_tax, 0) + COALESCE(cs.cs_net_paid_inc_tax, 0) + COALESCE(ss.ss_net_paid_inc_tax, 0)) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_order_count,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_order_count,
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(ws.ws_net_paid_inc_tax, 0) + COALESCE(cs.cs_net_paid_inc_tax, 0) + COALESCE(ss.ss_net_paid_inc_tax, 0)) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.web_order_count,
+        cs.catalog_order_count,
+        cs.store_order_count,
+        cs.sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.sales_rank <= 10
+),
+SalesDetails AS (
+    SELECT 
+        t.c_customer_id,
+        COALESCE(ws.ws_ship_mode_sk, cs.cs_ship_mode_sk, ss.ss_ticket_number) AS ship_mode,
+        COUNT(DISTINCT ws.ws_order_number) AS web_sales_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_sales_count,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_count
+    FROM 
+        TopCustomers t
+    LEFT JOIN 
+        web_sales ws ON t.c_customer_id = ws.ws_bill_customer_sk
+    FULL OUTER JOIN 
+        catalog_sales cs ON t.c_customer_id = cs.cs_bill_customer_sk
+    FULL OUTER JOIN 
+        store_sales ss ON t.c_customer_id = ss.ss_customer_sk
+    GROUP BY 
+        t.c_customer_id, ship_mode
+)
+SELECT 
+    td.c_customer_id,
+    SUM(td.web_sales_count + td.catalog_sales_count + td.store_sales_count) AS total_orders,
+    AVG(td.web_sales_count + td.catalog_sales_count + td.store_sales_count) AS average_orders,
+    MAX(td.web_sales_count + td.catalog_sales_count + td.store_sales_count) AS max_orders
+FROM 
+    SalesDetails td
+WHERE 
+    td.ship_mode IS NOT NULL
+GROUP BY 
+    td.c_customer_id
+HAVING 
+    MAX(td.web_sales_count + td.catalog_sales_count + td.store_sales_count) > 5;

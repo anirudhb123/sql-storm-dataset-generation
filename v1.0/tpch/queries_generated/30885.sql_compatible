@@ -1,0 +1,57 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier) AND sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_linenumber) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+filtered_customers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.total_revenue, os.lineitem_count,
+           RANK() OVER (PARTITION BY os.lineitem_count ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM order_summary os
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sh.s_name, 'Unknown') AS supplier_name,
+    fc.c_name AS customer_name,
+    ro.total_revenue,
+    ro.revenue_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+JOIN filtered_customers fc ON fc.c_custkey = (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderkey = ro.o_orderkey
+)
+JOIN ranked_orders ro ON ro.o_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = fc.c_custkey
+)
+WHERE (p.p_size BETWEEN 10 AND 20 OR p.p_type LIKE '%widget%')
+  AND p.p_retailprice > 50.00
+  AND sh.level IS NOT NULL
+ORDER BY ro.revenue_rank DESC, p.p_name;

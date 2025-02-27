@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        ss_sales_price,
+        ss_quantity,
+        CURRENT_DATE - INTERVAL '30 days' AS sales_period_start
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 days')
+    UNION ALL
+    SELECT 
+        sd.ss_store_sk,
+        sd.ss_item_sk,
+        sd.ss_sales_price * 0.95 AS ss_sales_price,
+        sd.ss_quantity + 1 AS ss_quantity,
+        sales_period_start
+    FROM sales_data sd
+    JOIN store_sales ss ON sd.ss_store_sk = ss.ss_store_sk AND sd.ss_item_sk = ss.ss_item_sk
+    WHERE sd.ss_quantity < 100
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year,
+        SUM(CASE WHEN cs_bill_customer_sk IS NOT NULL THEN 1 ELSE 0 END) AS catalog_sales_count,
+        SUM(CASE WHEN ws_bill_customer_sk IS NOT NULL THEN 1 ELSE 0 END) AS web_sales_count
+    FROM customer c
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON (cs.cs_sold_date_sk = d.d_date_sk OR ws.ws_sold_date_sk = d.d_date_sk)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+),
+address_data AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(hd.hd_vehicle_count) AS avg_vehicle_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE ca.ca_state = 'CA'
+    GROUP BY ca.ca_city
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.d_year,
+    SUM(COALESCE(sd.ss_sales_price * sd.ss_quantity, 0)) AS total_sales,
+    ad.customer_count,
+    ad.avg_vehicle_count
+FROM customer_data cd
+LEFT JOIN sales_data sd ON cd.c_customer_sk = sd.ss_store_sk
+LEFT JOIN address_data ad ON cd.c_first_name || ' ' || cd.c_last_name = ad.ca_city
+GROUP BY cd.c_first_name, cd.c_last_name, cd.d_year, ad.customer_count, ad.avg_vehicle_count
+ORDER BY total_sales DESC
+LIMIT 10;

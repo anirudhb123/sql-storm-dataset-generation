@@ -1,0 +1,53 @@
+
+WITH RECURSIVE TimeSeries AS (
+    SELECT d_date, d_month_seq, 1 AS level
+    FROM date_dim
+    WHERE d_date = '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT d.d_date, d.d_month_seq, level + 1
+    FROM TimeSeries ts
+    JOIN date_dim d ON d.d_month_seq = (ts.d_month_seq + 1)
+    WHERE level < 12
+),
+FilteredSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sales_price > 50.00
+    GROUP BY ws_bill_customer_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        COALESCE(hd_hd_demo_sk, 0) AS demographics_sk,
+        COALESCE(income_band.ib_income_band_sk, 0) AS income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    t.d_date,
+    c.cd_gender,
+    c.cd_marital_status,
+    SUM(fs.total_quantity) AS total_quantity,
+    AVG(fs.total_net_profit) AS avg_net_profit,
+    COUNT(DISTINCT fs.ws_bill_customer_sk) AS unique_customers
+FROM TimeSeries t
+LEFT JOIN FilteredSales fs ON fs.ws_bill_customer_sk IN (
+    SELECT DISTINCT c.c_customer_sk 
+    FROM CustomerData c
+    WHERE c.demographics_sk IS NOT NULL
+    AND (c.income_band_sk IS NULL OR c.income_band_sk > 3)
+)
+LEFT JOIN CustomerData c ON c.c_customer_sk = fs.ws_bill_customer_sk
+GROUP BY t.d_date, c.cd_gender, c.cd_marital_status
+ORDER BY t.d_date DESC, avg_net_profit DESC
+LIMIT 10;

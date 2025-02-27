@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        1 AS level
+    FROM title m 
+    WHERE m.episode_of_id IS NULL  -- Start with movies that are not episodes
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id, 
+        e.title, 
+        e.production_year, 
+        mh.level + 1
+    FROM title e
+    JOIN MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY ci.movie_id
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year, 
+        COALESCE(cd.total_cast, 0) AS total_cast,
+        cd.cast_names,
+        mh.level
+    FROM MovieHierarchy mh
+    LEFT JOIN CastDetails cd ON mh.movie_id = cd.movie_id
+),
+
+KeywordAnalysis AS (
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, '; ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN title m ON mk.movie_id = m.id
+    GROUP BY m.movie_id
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    fm.cast_names,
+    ka.keyword_count,
+    ka.keywords
+FROM FilteredMovies fm
+LEFT JOIN KeywordAnalysis ka ON fm.movie_id = ka.movie_id
+ORDER BY fm.production_year DESC, fm.title;
+
+This SQL query accomplishes several objectives:
+
+1. **Recursive Common Table Expression (CTE)**: `MovieHierarchy` creates a hierarchy of movies and episodes, allowing the identification of movies that are not part of any series.
+
+2. **Aggregation of Cast Information**: `CastDetails` fetches a count of unique cast members and their names for each movie.
+
+3. **Consolidation of Movie Information**: `FilteredMovies` joins the movies with their respective cast details.
+
+4. **Keyword Analysis**: `KeywordAnalysis` gathers keyword details per movie to present additional insights.
+
+5. **Final Selection**: The final query selects movie information along with cast and keyword analysis, ordered by the production year and title.
+
+The use of outer joins, CTEs, string aggregation, and correlating different information demonstrates a complex SQL query useful for performance benchmarking.

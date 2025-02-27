@@ -1,0 +1,84 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, 1 AS level 
+    FROM customer_address 
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ah.level + 1 
+    FROM customer_address ca 
+    JOIN address_hierarchy ah ON ca.ca_state = ah.ca_state AND ca.ca_city <> ah.ca_city
+    WHERE ah.level < 5
+),
+demographic_statistics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd.cd_credit_rating) AS highest_credit_label
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender
+),
+web_sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_net_paid_inc_tax) AS total_net_paid
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY ws.ws_item_sk
+),
+customer_return_data AS (
+    SELECT 
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        COALESCE(SUM(sr_return_amt_inc_tax), 0) AS total_return_amount,
+        cr_reason_sk
+    FROM store_returns sr
+    LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY cr_reason_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk
+),
+final_report AS (
+    SELECT 
+        ah.ca_city,
+        ah.ca_state,
+        ds.cd_gender,
+        ds.customer_count,
+        ds.total_dependents,
+        ds.avg_purchase_estimate,
+        wd.total_orders,
+        wd.total_net_profit,
+        wd.total_net_paid,
+        ISNULL(ird.total_returns, 0) AS returns_impact,
+        is.avg_sales_price
+    FROM address_hierarchy ah
+    JOIN demographic_statistics ds ON ds.customer_count > 100
+    JOIN web_sales_data wd ON wd.total_orders > 5
+    LEFT JOIN customer_return_data ird ON IRD.total_return_amount > 100
+    JOIN item_sales is ON is.total_quantity_sold > 50
+)
+SELECT 
+    fr.ca_city,
+    fr.ca_state,
+    fr.cd_gender,
+    fr.customer_count,
+    fr.total_dependents,
+    fr.avg_purchase_estimate,
+    fr.total_orders,
+    fr.total_net_profit,
+    fr.total_net_paid,
+    fr.returns_impact,
+    fr.avg_sales_price
+FROM final_report fr
+WHERE fr.total_net_profit > (SELECT AVG(total_net_profit) FROM web_sales_data)
+ORDER BY fr.ca_state, fr.customer_count DESC;

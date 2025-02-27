@@ -1,0 +1,56 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.UpVotes > p.DownVotes THEN 1 ELSE 0 END) AS PositiveFeedback,
+        AVG(v.VoteTypeId) AS AverageVoteType
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.Questions,
+        ua.Answers,
+        ua.PositiveFeedback,
+        ua.AverageVoteType
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalPosts > 10
+    ORDER BY 
+        ua.PositiveFeedback DESC,
+        ua.TotalPosts DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.Questions,
+    tu.Answers,
+    tu.PositiveFeedback,
+    CASE 
+        WHEN tu.AverageVoteType IS NULL THEN 'No Votes'
+        WHEN tu.AverageVoteType BETWEEN 1 AND 4 THEN 'Generally Positive'
+        ELSE 'Mixed to Negative'
+    END AS VoteQuality
+FROM 
+    TopUsers tu
+JOIN 
+    Badges b ON tu.UserId = b.UserId
+WHERE 
+    b.Class = 1
+ORDER BY 
+    tu.TotalPosts DESC;

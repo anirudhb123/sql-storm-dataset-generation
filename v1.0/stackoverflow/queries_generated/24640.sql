@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+FinalPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(rp.UpVotes - rp.DownVotes, 0) AS NetVotes,
+        CASE 
+            WHEN rp.Score BETWEEN 1 AND 5 THEN 'Low'
+            WHEN rp.Score BETWEEN 6 AND 10 THEN 'Medium'
+            ELSE 'High'
+        END AS ScoreCategory,
+        CASE 
+            WHEN rp.rn = 1 THEN 'Most Recent'
+            ELSE 'Older Post'
+        END AS Recency
+    FROM 
+        RankedPosts rp
+),
+UserAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    fa.PostId,
+    fa.Title,
+    fa.CreationDate,
+    fa.NetVotes,
+    fa.CommentCount,
+    fa.ScoreCategory,
+    fa.Recency,
+    ua.TotalPosts,
+    ua.DisplayName,
+    ua.TotalBadges,
+    ua.GoldBadges,
+    ua.SilverBadges,
+    ua.BronzeBadges,
+    CASE 
+        WHEN ua.TotalBadges = 0 THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus,
+    COALESCE(excerpt.ExcerptPostId, 0) AS ExcerptPostId,
+    CASE 
+        WHEN fa.ViewCount IS NULL THEN 0
+        ELSE fa.ViewCount
+    END AS AdjustedViewCount,
+    (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = fa.PostId AND ph.PostHistoryTypeId IN (10, 11, 12, 13)) AS ClosureHistory
+FROM 
+    FinalPosts fa
+JOIN 
+    UserAggregates ua ON fa.OwnerUserId = ua.UserId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = fa.PostId
+LEFT JOIN 
+    Posts excerpt ON t.ExcerptPostId = excerpt.Id
+WHERE 
+    fa.NetVotes > 0
+ORDER BY 
+    fa.CreationDate DESC, fa.NetVotes DESC
+LIMIT 50;

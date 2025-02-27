@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS level
+    FROM aka_title m
+    WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.level < 5
+),
+cast_stats AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+movie_company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+
+SELECT 
+    at.title AS movie_title,
+    mh.level AS movie_level,
+    cs.total_cast,
+    cs.avg_order,
+    mci.company_names,
+    mci.company_types
+FROM movie_hierarchy mh
+JOIN aka_title at ON mh.movie_id = at.id
+LEFT JOIN cast_stats cs ON at.id = cs.movie_id
+LEFT JOIN movie_company_info mci ON at.id = mci.movie_id
+WHERE (cs.total_cast IS NULL OR cs.total_cast > 5) 
+AND (mci.company_names IS NOT NULL OR EXISTS (
+    SELECT 1 
+    FROM movie_companies mc
+    WHERE mc.movie_id = at.id
+    AND mc.note IS NOT NULL
+))
+ORDER BY mh.level DESC, at.title;
+
+-- Additional Performance Benchmarking Metrics
+EXPLAIN ANALYZE SELECT 
+    avg_order,
+    COUNT(DISTINCT movie_id) OVER (PARTITION BY avg_order) AS movie_count
+FROM cast_stats
+WHERE avg_order > (SELECT AVG(avg_order) FROM cast_stats);

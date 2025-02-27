@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year') 
+        AND p.Score IS NOT NULL
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rb.UserId,
+        ub.BadgeCount,
+        ub.HighestBadge,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        Users rb ON rp.OwnerUserId = rb.Id
+    LEFT JOIN 
+        UserBadges ub ON rb.Id = ub.UserId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+)
+SELECT 
+    ad.PostId,
+    ad.Title,
+    ad.BadgeCount,
+    ad.HighestBadge,
+    ad.CommentCount,
+    ad.Score,
+    ad.ViewCount
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.BadgeCount > 0 
+    AND ad.Score > (
+        SELECT AVG(Score) 
+        FROM Posts 
+        WHERE PostTypeId = 1
+    )
+ORDER BY 
+    ad.Score DESC, 
+    ad.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

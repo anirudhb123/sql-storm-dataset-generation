@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount, 
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount, 
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViewCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalScore,
+    us.TotalViewCount,
+    us.PostCount,
+    us.BadgeCount,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpvoteCount,
+    rp.DownvoteCount
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    us.TotalScore > 0
+ORDER BY 
+    us.TotalScore DESC, rp.Score DESC
+LIMIT 10;

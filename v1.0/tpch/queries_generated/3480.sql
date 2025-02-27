@@ -1,0 +1,60 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ProductStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(l.l_extendedprice) AS avg_price,
+        SUM(l.l_quantity) AS total_sold
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.order_count,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    s.total_available_qty,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    p.p_name AS product_name,
+    p.avg_price,
+    p.total_sold
+FROM 
+    CustomerOrders c
+FULL OUTER JOIN 
+    SupplierAggregates s ON c.c_custkey = s.s_suppkey
+FULL OUTER JOIN 
+    ProductStats p ON p.total_sold > 0
+WHERE 
+    (c.order_count > 0 OR s.total_available_qty IS NOT NULL)
+ORDER BY 
+    c.total_spent DESC, s.total_available_qty DESC, p.total_sold DESC;

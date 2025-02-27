@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.NetVotes,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 AND 
+        rp.ViewCount > 100 AND
+        rp.NetVotes > 0
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.NetVotes,
+    ub.BadgeCount,
+    ub.LastBadgeDate
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users up ON fp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+WHERE 
+    ub.BadgeCount > 5
+ORDER BY 
+    fp.NetVotes DESC, fp.ViewCount DESC
+LIMIT 10;

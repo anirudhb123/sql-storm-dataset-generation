@@ -1,0 +1,61 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, rh.level + 1
+    FROM nation n
+    JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        AVG(ps.ps_availqty) AS avg_avail_qty,
+        COUNT(DISTINCT p.p_partkey) AS distinct_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    c.c_name,
+    co.order_count,
+    co.total_spent,
+    ss.total_supply_cost,
+    ss.avg_avail_qty,
+    CASE 
+        WHEN co.total_spent > 10000 THEN 'High Spending'
+        WHEN co.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Spending'
+        ELSE 'Low Spending'
+    END AS spending_category,
+    COALESCE(ss.distinct_parts, 0) AS distinct_parts
+FROM RegionHierarchy r
+LEFT JOIN CustomerOrders co ON r.r_regionkey = co.c_custkey
+LEFT JOIN SupplierStats ss ON ss.s_suppkey = (
+    SELECT MIN(s.s_suppkey) 
+    FROM supplier s 
+    WHERE s.s_nationkey = (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_regionkey = r.r_regionkey
+    ) 
+    GROUP BY s.s_nationkey
+)
+WHERE r.level = 0
+ORDER BY r.r_name, co.total_spent DESC;

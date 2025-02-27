@@ -1,0 +1,25 @@
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, u.DisplayName AS OwnerDisplayName,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT Id, Title, CreationDate, Score, ViewCount, AnswerCount, OwnerDisplayName
+    FROM RankedPosts
+    WHERE Rank <= 5
+),
+TopTags AS (
+    SELECT TagName, COUNT(*) AS PostCount
+    FROM Posts p
+    CROSS APPLY STRING_SPLIT(p.Tags, ',') AS t
+    WHERE p.PostTypeId = 1
+    GROUP BY TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.AnswerCount, tp.OwnerDisplayName, tt.TagName
+FROM TopPosts tp
+JOIN TopTags tt ON tt.TagName IN (SELECT value FROM STRING_SPLIT(tp.Tags, ','))
+ORDER BY tp.Score DESC, tp.ViewCount DESC;

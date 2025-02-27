@@ -1,0 +1,47 @@
+
+WITH RECURSIVE inventory_cte AS (
+    SELECT inv_item_sk, inv_quantity_on_hand, inv_warehouse_sk, 1 AS inventory_level
+    FROM inventory
+    WHERE inv_quantity_on_hand IS NOT NULL
+    UNION ALL
+    SELECT inv_item_sk, inv_quantity_on_hand - 10 AS inv_quantity_on_hand, inv_warehouse_sk, inventory_level + 1
+    FROM inventory_cte
+    WHERE inv_quantity_on_hand - 10 > 0
+),
+customer_sales AS (
+    SELECT c.c_customer_id, c.c_first_name, c.c_last_name, 
+           SUM(COALESCE(ss.ss_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ws.ws_net_paid, 0)) AS total_sales
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name
+),
+ranked_sales AS (
+    SELECT c.c_customer_id AS customer_id, c.c_first_name AS first_name, c.c_last_name AS last_name, c.total_sales,
+           RANK() OVER (PARTITION BY CASE WHEN c.total_sales > 1000 THEN 'High' ELSE 'Low' END ORDER BY c.total_sales DESC) AS sales_rank
+    FROM customer_sales c
+),
+suspicious_returns AS (
+    SELECT CASE
+               WHEN cr_reason_sk IS NULL OR wr_reason_sk IS NULL THEN 'Unknown'
+               ELSE 'Known'
+           END AS return_status,
+           COUNT(*) AS return_count
+    FROM store_returns sr
+    FULL OUTER JOIN web_returns wr ON sr.sr_item_sk = wr.wr_item_sk AND sr.sr_order_number = wr.wr_order_number
+    LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+       OR wr.wr_reason_sk = r.r_reason_sk
+    GROUP BY return_status
+)
+SELECT st.s_store_sk AS store_id, st.s_store_name AS store_name, 
+       COALESCE(CTE.inv_quantity_on_hand, 0) AS quantity_on_hand,
+       cs.customer_id, cs.first_name, cs.last_name, cs.total_sales, 
+       rs.sales_rank, sr.return_count
+FROM store st
+LEFT JOIN inventory_cte CTE ON st.s_store_sk = CTE.inv_warehouse_sk
+LEFT JOIN ranked_sales cs ON cs.customer_id = st.s_store_sk
+LEFT JOIN suspicious_returns sr ON sr.return_count > 5
+WHERE st.s_city LIKE 'New%' 
+  AND (cs.sales_rank = 1 OR cs.sales_rank IS NULL)
+ORDER BY st.s_store_name, cs.total_sales DESC

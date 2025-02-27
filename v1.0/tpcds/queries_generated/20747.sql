@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        ws_item_sk,
+        total_quantity,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_birth_year DESC) AS row_num
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesWithCustomer AS (
+    SELECT 
+        w.ws_item_sk,
+        w.ws_quantity,
+        w.ws_net_profit,
+        ci.c_customer_id,
+        ci.cd_gender
+    FROM 
+        web_sales w
+    JOIN 
+        CustomerInfo ci ON w.ws_ship_customer_sk = ci.c_customer_id
+    WHERE 
+        ci.row_num = 1
+)
+SELECT 
+    hpi.ws_item_sk,
+    hpi.total_quantity,
+    hpi.total_net_profit,
+    si.si_net_profit,
+    CASE 
+        WHEN si.si_net_profit IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status,
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    AVG(si.si_net_profit) OVER (PARTITION BY hpi.ws_item_sk) AS avg_profit_per_item
+FROM 
+    HighProfitItems hpi
+LEFT JOIN 
+    SalesWithCustomer si ON hpi.ws_item_sk = si.ws_item_sk
+LEFT JOIN 
+    customer c ON si.c_customer_id = c.c_customer_id
+GROUP BY 
+    hpi.ws_item_sk, hpi.total_quantity, hpi.total_net_profit, si.si_net_profit
+HAVING 
+    hpi.total_net_profit > (SELECT AVG(total_net_profit) FROM HighProfitItems)
+ORDER BY 
+    hpi.total_net_profit DESC
+LIMIT 50;

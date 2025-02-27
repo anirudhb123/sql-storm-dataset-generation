@@ -1,0 +1,38 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+), 
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           RANK() OVER (PARTITION BY p.p_name ORDER BY SUM(ps.ps_supplycost) DESC) AS rank_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, p.p_name
+), 
+HighValueOrders AS (
+    SELECT co.c_custkey, COALESCE(SUM(co.o_totalprice), 0) AS total_spent,
+           COUNT(co.o_orderkey) AS order_count
+    FROM CustomerOrders co
+    WHERE co.rn <= 5
+    GROUP BY co.c_custkey
+)
+SELECT n.n_name AS nation_name, 
+       COUNT(DISTINCT co.o_orderkey) AS order_count,
+       MAX(co.total_spent) AS max_spent,
+       CASE 
+           WHEN COUNT(DISTINCT co.o_orderkey) > 10 THEN 'High Activity'
+           WHEN COUNT(DISTINCT co.o_orderkey) BETWEEN 1 AND 10 THEN 'Moderate Activity'
+           ELSE 'No Activity' 
+       END AS activity_level,
+       STRING_AGG(DISTINCT p.p_name, ', ') WITHIN GROUP (ORDER BY p.p_name) AS popular_parts
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN HighValueOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN lineitem li ON co.o_orderkey = li.l_orderkey
+LEFT JOIN SupplierPartDetails spd ON li.l_partkey = spd.ps_partkey
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT co.o_orderkey) > 0
+ORDER BY activity_level DESC, max_spent DESC;

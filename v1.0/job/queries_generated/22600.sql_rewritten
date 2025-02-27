@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(CAST(i.info AS text), 'No Info') AS movie_info,
+        COALESCE(CAST(ka.name AS text), 'Unknown Actor') AS actor_name
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        movie_info AS i ON m.id = i.movie_id
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name AS ka ON c.person_id = ka.person_id
+    WHERE 
+        m.production_year > 2000
+        AND (m.title LIKE 'A%' OR m.title LIKE 'B%')
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.movie_info || '; Additional Info' AS movie_info,
+        CAST(COALESCE(ka.name, 'Unknown Actor') AS text) AS actor_name
+    FROM 
+        movie_hierarchy AS mh
+    JOIN 
+        cast_info AS c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name AS ka ON c.person_id = ka.person_id
+    WHERE 
+        c.nr_order < 5
+        AND NOT (mh.actor_name IS NULL)
+)
+SELECT 
+    mh.title,
+    mh.movie_info,
+    COUNT(DISTINCT c.nr_order) AS unique_roles,
+    STRING_AGG(DISTINCT ka.name, ', ') AS co_stars,
+    SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count,
+    MAX(mh.movie_id) OVER (PARTITION BY mh.title) AS max_movie_id
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    cast_info AS c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name AS ka ON c.person_id = ka.person_id
+GROUP BY 
+    mh.title, mh.movie_info
+HAVING 
+    COUNT(DISTINCT c.role_id) > 1
+    OR SUM(CASE WHEN ka.name IS NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    unique_roles DESC, 
+    mh.title;

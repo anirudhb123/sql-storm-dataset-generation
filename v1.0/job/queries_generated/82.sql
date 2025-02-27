@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mt.id) AS has_notes,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        mt.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_count,
+        CASE WHEN rm.has_notes > 0 THEN 'Yes' ELSE 'No' END AS notes_present
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_count > 5 AND rm.production_year >= 2000
+),
+KeywordCount AS (
+    SELECT
+        mt.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    fm.actor_count,
+    fm.notes_present,
+    COALESCE(kc.keyword_count, 0) AS keyword_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    KeywordCount kc ON fm.movie_title = (SELECT title FROM aka_title WHERE id = kc.movie_id)
+ORDER BY 
+    fm.production_year DESC, 
+    fm.actor_count DESC;

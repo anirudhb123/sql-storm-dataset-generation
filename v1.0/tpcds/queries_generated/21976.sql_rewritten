@@ -1,0 +1,44 @@
+WITH RECURSIVE address_cte AS (
+    SELECT ca_address_sk, ca_city, ca_state, 
+           ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS rnk
+    FROM customer_address
+    WHERE ca_state IN ('CA', 'NY')
+), 
+demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, 
+           cd_dep_college_count, 
+           (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk = cd_demo_sk) AS customer_count
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 1000
+    AND cd_gender IS NOT NULL
+), 
+sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(CASE 
+            WHEN ws_net_profit IS NULL THEN 0 
+            ELSE ws_net_profit 
+        END) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        (SELECT COUNT(*) FROM web_returns WHERE wr_returned_date_sk = ws_sold_date_sk) AS returns_count
+    FROM web_sales
+    WHERE ws_list_price BETWEEN 20 AND 100
+    GROUP BY ws_sold_date_sk
+)
+
+SELECT 
+    da.ca_city, 
+    da.ca_state,
+    COALESCE(d.cd_gender, 'Unknown') AS gender,
+    AVG(d.cd_dep_college_count) AS avg_college_deps,
+    s.total_profit,
+    s.order_count,
+    s.returns_count
+FROM address_cte da
+FULL OUTER JOIN demographics d ON d.cd_demo_sk = da.rnk
+LEFT JOIN sales_data s ON s.ws_sold_date_sk = cast('2002-10-01' as date)
+WHERE (da.ca_city IS NOT NULL OR da.ca_state IS NOT NULL)
+AND d.cd_marital_status IN ('M', 'S')
+GROUP BY da.ca_city, da.ca_state, d.cd_gender, s.total_profit, s.order_count, s.returns_count
+HAVING (AVG(d.cd_dep_college_count) > 0 OR s.total_profit IS NULL)
+ORDER BY da.ca_city, da.ca_state;

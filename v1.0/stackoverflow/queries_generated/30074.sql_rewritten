@@ -1,0 +1,53 @@
+WITH RECURSIVE UserVoteSummary AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+           COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY u.Id
+), 
+PostDetail AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           COALESCE(ARRAY_AGG(DISTINCT t.TagName), '{}') AS Tags,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN LATERAL unnest(string_to_array(p.Tags, '>')) AS tag ON TRUE
+    LEFT JOIN Tags t ON t.TagName = tag
+    GROUP BY p.Id
+),
+ClosedPostDetails AS (
+    SELECT h.PostId,
+           h.UserDisplayName,
+           h.Comment,
+           h.CreationDate AS ClosedDate,
+           p.Title AS ClosedPostTitle
+    FROM PostHistory h
+    JOIN Posts p ON p.Id = h.PostId
+    WHERE h.PostHistoryTypeId = 10 
+)
+SELECT u.UserId,
+       u.DisplayName,
+       u.TotalUpVotes,
+       u.TotalDownVotes,
+       u.TotalPosts,
+       pd.PostId,
+       pd.Title AS PostTitle,
+       pd.CreationDate,
+       pd.Score,
+       pd.ViewCount,
+       pd.Tags,
+       cpd.ClosedDate,
+       cpd.ClosedPostTitle
+FROM UserVoteSummary u
+JOIN PostDetail pd ON u.UserId = pd.OwnerUserId
+LEFT JOIN ClosedPostDetails cpd ON pd.PostId = cpd.PostId
+WHERE u.TotalUpVotes > u.TotalDownVotes
+AND pd.PostRank <= 5
+ORDER BY u.TotalUpVotes DESC, pd.CreationDate DESC;

@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.id AS VARCHAR) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || mt.id AS VARCHAR)
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mt.id = ml.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    mh.level,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actor_names,
+    SUM(mi.info IS NOT NULL AND mi.info_type_id = 1) AS has_info_type_count, -- info type 1
+    ROUND(AVG(CASE WHEN mi.info_type_id = 2 THEN LENGTH(mi.info) ELSE NULL END), 2) AS avg_info_type_length, -- info type 2
+    MAX(CASE WHEN mt.kind_id IS NOT NULL THEN 1 ELSE 0 END) AS has_kind
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.id = mi.movie_id
+LEFT JOIN 
+    aka_title mt ON mh.id = mt.id
+GROUP BY 
+    mh.movie_title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5 -- Filter for movies with more than 5 actors
+ORDER BY 
+    mh.level, mh.production_year DESC;
+
+-- Benchmark by checking execution time on such a complex query.

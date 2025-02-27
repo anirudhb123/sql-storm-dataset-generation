@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_tickets
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(cs_order_number) AS total_tickets
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+ranked_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(s.total_tickets, 0) AS total_tickets,
+        RANK() OVER (ORDER BY COALESCE(s.total_sales, 0) DESC) AS sales_rank
+    FROM 
+        item
+    LEFT JOIN 
+        (SELECT 
+             sd.ss_item_sk AS item_sk,
+             SUM(sd.total_sales) AS total_sales,
+             SUM(sd.total_tickets) AS total_tickets
+         FROM 
+             sales_data sd
+         GROUP BY 
+             sd.ss_item_sk) s ON item.i_item_sk = s.item_sk
+)
+SELECT 
+    c.c_customer_id,
+    COUNT(DISTINCT CASE WHEN r.sales_rank <= 5 THEN r.i_item_id END) AS top_selling_items_count,
+    SUM(r.total_sales) AS total_spent,
+    MAX(p.p_discount_active) AS is_promotion_active
+FROM 
+    ranked_sales r
+JOIN 
+    web_sales ws ON r.i_item_sk = ws.ws_item_sk
+LEFT JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    promotion p ON ws.ws_promo_sk = p.p_promo_sk
+WHERE 
+    c.c_birth_year IS NOT NULL 
+    AND c.c_birth_month IS NOT NULL
+    AND (c.c_birth_day IS NULL OR c.c_birth_day BETWEEN 1 AND 31)
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    total_spent > 1000
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

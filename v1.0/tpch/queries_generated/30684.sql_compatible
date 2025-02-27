@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)    
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM orders o
+    WHERE o.o_orderdate > DATE('1998-10-01') - INTERVAL '1 year'
+),
+LineItemStats AS (
+    SELECT l.l_partkey, COUNT(l.l_orderkey) AS order_count, SUM(l.l_extendedprice) AS total_revenue,
+           AVG(l.l_discount) AS avg_discount, ROW_NUMBER() OVER (PARTITION BY l.l_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+HighestRevenueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, ls.total_revenue
+    FROM part p
+    JOIN LineItemStats ls ON p.p_partkey = ls.l_partkey
+    WHERE ls.rn = 1
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available_quantity,
+    COUNT(DISTINCT COALESCE(c.c_custkey, 0)) AS customer_count,
+    AVG(sh.level) AS avg_level,
+    COUNT(DISTINCT ho.o_orderkey) AS recent_orders_count
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN RecentOrders ho ON ho.o_custkey = s.s_nationkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+WHERE r.r_name IS NOT NULL AND (ps.ps_availqty IS NOT NULL OR ho.o_orderkey IS NOT NULL)
+GROUP BY r.r_name
+ORDER BY r.r_name;

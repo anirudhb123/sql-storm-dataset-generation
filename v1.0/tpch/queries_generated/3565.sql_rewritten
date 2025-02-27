@@ -1,0 +1,43 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(sd.total_supply_cost) AS total_cost,
+        COUNT(*) AS supplier_count
+    FROM nation n
+    LEFT JOIN SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name,
+    ns.total_cost,
+    ns.supplier_count,
+    COALESCE(co.total_orders, 0) AS total_orders,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    RANK() OVER (ORDER BY ns.total_cost DESC) AS rank_by_cost
+FROM NationSummary ns
+FULL OUTER JOIN CustomerOrders co ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name = 'CustomerName' LIMIT 1)
+WHERE ns.total_cost IS NOT NULL OR co.total_orders IS NOT NULL
+ORDER BY ns.total_cost DESC NULLS LAST, co.total_spent DESC;

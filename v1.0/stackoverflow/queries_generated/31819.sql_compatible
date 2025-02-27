@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  
+),
+PostsWithRecentEdits AS (
+    SELECT 
+        rp.*,
+        re.UserDisplayName AS LastEditor,
+        re.EditDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS Status,
+    p.LastEditor,
+    p.EditDate,
+    p.UpVotes,
+    p.DownVotes,
+    p.CommentCount
+FROM 
+    PostsWithRecentEdits p
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.Rank <= 5  
+    AND p.ViewCount > 100  
+ORDER BY 
+    p.CreationDate DESC;

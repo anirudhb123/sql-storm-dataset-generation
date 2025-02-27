@@ -1,0 +1,51 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        DATEDIFF(DAY, dd.d_date, DATE '2002-10-01') AS days_since_sale
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = EXTRACT(YEAR FROM DATE '2002-10-01') - 1
+),
+customer_promotions AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(CASE 
+            WHEN p.p_discount_active = 'Y' THEN 1
+            ELSE 0 
+        END) AS active_promotions,
+        MAX(COALESCE(cd.cd_purchase_estimate, 0)) AS max_purchase_estimate
+    FROM customer c
+    LEFT JOIN promotion p ON c.c_customer_sk = p.p_item_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk
+),
+final_analysis AS (
+    SELECT 
+        cs.c_customer_sk,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+        SUM(CASE 
+            WHEN cs.active_promotions > 0 THEN rs.ws_sales_price
+            ELSE 0 
+        END) AS total_sales_with_promotions,
+        AVG(rs.ws_sales_price) AS avg_sales_price,
+        SUM(rs.ws_sales_price) / NULLIF(COUNT(DISTINCT rs.ws_order_number), 0) AS avg_sales_per_order
+    FROM ranked_sales rs
+    JOIN customer_promotions cs ON rs.ws_item_sk = cs.c_customer_sk
+    GROUP BY cs.c_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    fa.total_orders,
+    fa.total_sales_with_promotions,
+    fa.avg_sales_price,
+    fa.avg_sales_per_order
+FROM customer c
+LEFT JOIN final_analysis fa ON c.c_customer_sk = fa.c_customer_sk
+WHERE fa.total_orders IS NOT NULL
+AND (fa.total_sales_with_promotions > 1000 OR fa.total_orders < 5)
+ORDER BY fa.avg_sales_price DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        0 AS Level,
+        CONCAT(P.Title) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.AcceptedAnswerId IS NULL
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        RPH.Level + 1,
+        CONCAT(RPH.Path, ' -> ', P.Title)
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostStatistics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PH.UserId) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.CommentCount,
+    PS.EditCount,
+    UBD.BadgeCount,
+    RPH.Level AS PostLevel,
+    RPH.Path
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    Users U ON PS.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges UBD ON U.Id = UBD.UserId
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON PS.PostId = RPH.PostId
+WHERE 
+    (PS.Upvotes - PS.Downvotes) > 5 
+    AND PS.CommentCount > 0
+ORDER BY 
+    PS.Score DESC, PS.Title
+LIMIT 100 OFFSET 0;

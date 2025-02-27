@@ -1,0 +1,78 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecentOrders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(MAX(l.l_quantity), 0) AS max_quantity
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey 
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    pp.p_name,
+    pp.max_quantity,
+    SUM(CASE 
+        WHEN rs.rank_acctbal = 1 THEN s.s_acctbal 
+        ELSE 0 
+    END) AS top_supplier_balance,
+    CASE 
+        WHEN SUM(l.l_quantity)/NULLIF(MAX(pp.max_quantity), 0) > 1 THEN 'High Usage'
+        ELSE 'Normal'
+    END AS usage_status
+FROM 
+    CustomerOrderSummary cs
+LEFT JOIN 
+    lineitem l ON cs.c_custkey = l.l_orderkey
+FULL OUTER JOIN 
+    FilteredParts pp ON pp.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON pp.p_partkey = rs.p_partkey
+GROUP BY 
+    cs.c_name, cs.order_count, cs.total_spent, pp.p_name, pp.max_quantity
+HAVING 
+    COALESCE(SUM(l.l_quantity), 0) > 1000 OR cs.order_count > 5
+ORDER BY 
+    cs.total_spent DESC, usage_status, cs.c_name;

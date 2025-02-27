@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-10-01'
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT p.p_partkey) AS unique_parts,
+    SUM(s.total_revenue) AS total_supplier_revenue,
+    AVG(cs.avg_order_value) AS avg_order_value_per_customer,
+    MIN(o.o_orderdate) AS first_order_date,
+    MAX(o.o_orderdate) AS last_order_date
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierRevenue sr ON s.s_suppkey = sr.s_suppkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    CustomerStats cs ON cs.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 1000)
+LEFT JOIN 
+    orders o ON o.o_custkey IN (SELECT c.c_custkey FROM CustomerStats cs)
+WHERE 
+    p.p_retailprice IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_supplier_revenue DESC, unique_parts DESC;

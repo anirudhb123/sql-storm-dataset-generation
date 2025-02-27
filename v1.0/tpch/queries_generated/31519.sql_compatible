@@ -1,0 +1,55 @@
+
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, p.p_partkey, p.p_name, 0 AS level
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT sc.s_suppkey, sc.s_name, sc.s_acctbal, p.p_partkey, p.p_name, sc.level + 1
+    FROM supply_chain sc
+    JOIN partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sc.level < 5 AND s.s_acctbal IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COALESCE(SUM(o.o_totalprice), 0) > 10000
+),
+part_region AS (
+    SELECT p.p_partkey, r.r_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY p.p_partkey, r.r_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    pr.r_name,
+    SUM(ss.total_revenue) AS total_revenue,
+    COALESCE(tc.total_spent, 0) AS customer_spending,
+    COUNT(DISTINCT sc.s_suppkey) AS total_suppliers,
+    RANK() OVER (PARTITION BY pr.r_name ORDER BY SUM(ss.total_revenue) DESC) AS revenue_rank
+FROM part_region pr
+JOIN part p ON pr.p_partkey = p.p_partkey
+JOIN order_summary ss ON ss.o_orderdate >= '1997-01-01'
+LEFT JOIN top_customers tc ON tc.total_spent > 10000
+LEFT JOIN supply_chain sc ON p.p_partkey = sc.p_partkey
+GROUP BY p.p_partkey, p.p_name, pr.r_name, tc.total_spent
+ORDER BY pr.r_name, revenue_rank;

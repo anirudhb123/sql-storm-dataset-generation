@@ -1,0 +1,53 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_name LIKE 'A%'
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+    WHERE nh.level < 3
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    WHERE ps.ps_supplycost > (
+        SELECT AVG(ps_supplycost) FROM partsupp
+    )
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+order_summary AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+customer_supplier AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+           SUM(ps.ps_supplycost) AS supplier_cost
+    FROM customer c
+    LEFT JOIN partsupp ps ON c.c_custkey = ps.ps_suppkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT
+    nh.n_name AS nation_name,
+    c.c_name AS customer_name,
+    o.order_count,
+    o.total_spent,
+    CASE WHEN c.unique_suppliers IS NULL THEN 'No Suppliers' 
+         WHEN c.unique_suppliers > 5 THEN 'Many Suppliers' 
+         ELSE 'Few Suppliers' END AS supplier_status,
+    CONCAT('Region: ', r.r_name, ' - Comment: ', r.r_comment) AS region_details
+FROM nation_hierarchy nh
+JOIN region r ON nh.n_regionkey = r.r_regionkey
+JOIN customer c ON c.c_nationkey = nh.n_nationkey
+LEFT JOIN order_summary o ON c.c_custkey = o.o_custkey
+JOIN customer_supplier cs ON c.c_custkey = cs.c_custkey
+WHERE (o.order_count IS NULL OR o.order_count > 10)
+  AND COALESCE(cs.supplier_cost, 0) < (SELECT MAX(ps_supplycost) FROM partsupp)
+ORDER BY total_spent DESC NULLS LAST
+FETCH FIRST 50 ROWS ONLY;

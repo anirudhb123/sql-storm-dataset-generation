@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_actors
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        * 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_actors <= 5
+),
+DistinctKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+),
+CombinedInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        dk.keyword,
+        COALESCE(pi.info, 'N/A') AS person_info
+    FROM 
+        TopMovies t
+    LEFT JOIN 
+        DistinctKeywords dk ON t.id = dk.movie_id
+    LEFT JOIN 
+        person_info pi ON pi.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = t.id)
+),
+FinalOutput AS (
+    SELECT 
+        c.name,
+        c.person_id,
+        ci.title,
+        ci.production_year,
+        ci.keyword,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY ci.production_year DESC) AS recent_movie_rank
+    FROM 
+        aka_name c
+    JOIN 
+        cast_info ci ON c.person_id = ci.person_id
+    JOIN 
+        CombinedInfo ci ON ci.title = ci.title AND ci.production_year = ci.production_year
+)
+SELECT 
+    fo.name,
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    CASE 
+        WHEN fo.recent_movie_rank = 1 THEN 'Recent Star'
+        WHEN fo.recent_movie_rank <= 3 THEN 'Rising Star'
+        ELSE 'Veteran'
+    END AS star_status
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.keyword IS NOT NULL 
+    AND fo.production_year > 2000
+ORDER BY 
+    fo.production_year DESC, 
+    fo.name ASC
+LIMIT 100;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_ranges ir ON ib.ib_income_band_sk = ir.ib_income_band_sk + 1
+    WHERE ib.ib_upper_bound IS NOT NULL
+), 
+customer_sales AS (
+    SELECT c.c_customer_sk,
+           COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+           MAX(ws.ws_sold_date_sk) AS last_order_date,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+), 
+top_spenders AS (
+    SELECT c.customer_sk,
+           cd.cd_gender,
+           cd.cd_marital_status
+    FROM customer_sales c
+    JOIN customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+    WHERE total_spent > (SELECT AVG(total_spent) FROM customer_sales)
+), 
+pre_filtered AS (
+    SELECT c.c_customer_sk,
+           ca.ca_state,
+           SUM(CASE WHEN ws.ws_sales_price IS NOT NULL THEN ws.ws_sales_price ELSE 0 END) AS total_sales
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ca.ca_state IS NOT NULL
+    GROUP BY c.c_customer_sk, ca.ca_state
+)
+SELECT ts.customer_sk,
+       ts.cd_gender,
+       ts.cd_marital_status,
+       pf.ca_state,
+       pf.total_sales,
+       CASE 
+           WHEN pf.total_sales > 1000 THEN 'High Roller'
+           WHEN pf.total_sales BETWEEN 500 AND 1000 THEN 'Mid Tier'
+           ELSE 'Budget Buyer'
+       END AS buyer_category,
+       COALESCE(ir.ib_income_band_sk, -1) AS income_band
+FROM top_spenders ts
+LEFT JOIN pre_filtered pf ON ts.customer_sk = pf.c_customer_sk
+LEFT JOIN income_ranges ir ON pf.total_sales BETWEEN ir.ib_lower_bound AND ir.ib_upper_bound
+WHERE pf.total_sales IS NOT NULL
+ORDER BY pf.total_sales DESC, ts.cd_gender, ts.cd_marital_status;

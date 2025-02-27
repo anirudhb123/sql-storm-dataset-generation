@@ -1,0 +1,66 @@
+
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN UPVOTE_Vote.VoteTypeId = 2 THEN 1 WHEN UPVOTE_Vote.VoteTypeId = 3 THEN -1 ELSE 0 END) AS NetVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes UPVOTE_Vote ON P.Id = UPVOTE_Vote.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS EditDate,
+        P.Body,
+        P.Tags,
+        P.ViewCount,
+        PH.Comment,
+        P.AcceptedAnswerId IS NOT NULL AS HasAcceptedAnswer
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    U.DisplayName,
+    COUNT(DISTINCT PS.TagName) AS DistinctTagsEdited,
+    SUM(PH.ViewCount) AS TotalViewsEditedPosts,
+    AVG(EXTRACT(EPOCH FROM (PH.EditDate - P.CreationDate)) / 60) AS AvgMinutesToEdit,
+    PHD.HasAcceptedAnswer
+FROM 
+    UserActivity U
+JOIN 
+    PostHistoryDetails PHD ON U.UserId = PHD.UserId
+JOIN 
+    TagStats PS ON POSITION(PS.TagName IN PHD.Tags) > 0 
+WHERE 
+    U.TotalPosts > 5 
+GROUP BY 
+    U.DisplayName, PHD.HasAcceptedAnswer
+ORDER BY 
+    TotalViewsEditedPosts DESC, U.DisplayName;

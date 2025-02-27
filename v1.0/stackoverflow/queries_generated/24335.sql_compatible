@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01 12:34:56')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostsWithInfo AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        up.Id AS UserId,
+        us.Reputation,
+        pw.UpVotes,
+        pw.DownVotes
+    FROM RankedPosts rp
+    LEFT JOIN Posts p ON rp.PostId = p.Id
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN UserStats us ON us.UserId = p.OwnerUserId
+    LEFT JOIN PostWithVotes pw ON pw.PostId = p.Id
+    LEFT JOIN Users up ON up.Id = p.OwnerUserId
+    WHERE rp.Rank <= 10
+),
+FilteredPosts AS (
+    SELECT 
+        pwi.*, 
+        (CASE WHEN pwi.UpVotes > pwi.DownVotes THEN 'Positive' ELSE 'Negative' END) AS VoteSentiment,
+        (CASE WHEN pwi.Reputation > 1000 THEN 'Popular User' ELSE 'New User' END) AS UserType,
+        (SELECT STRING_AGG(Name, ', ') 
+         FROM PostHistory ph 
+         JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id 
+         WHERE ph.PostId = pwi.PostId) AS HistoryTypes
+    FROM PostsWithInfo pwi
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.VoteSentiment,
+    fp.UserType,
+    fp.HistoryTypes
+FROM FilteredPosts fp
+WHERE fp.PostTypeId = 1  
+AND (fp.UpVotes - fp.DownVotes) > 5  
+ORDER BY fp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY;

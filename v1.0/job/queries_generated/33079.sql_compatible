@@ -1,0 +1,64 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year,
+        NULL AS parent_id,
+        0 AS level
+    FROM title
+    WHERE season_nr IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        mk.movie_id, 
+        t.title, 
+        t.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1 AS level
+    FROM movie_link mk
+    JOIN title t ON mk.linked_movie_id = t.id
+    JOIN MovieHierarchy mh ON mk.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.parent_id,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM MovieHierarchy mh
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COALESCE(SUM(CASE WHEN co.name IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        AVG(COALESCE(CAST(mi.info AS INTEGER), 0)) AS avg_rating
+    FROM title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY t.id, t.title, t.production_year
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.level,
+    md.total_cast,
+    md.company_count,
+    md.keywords,
+    md.avg_rating
+FROM RankedMovies rm
+LEFT JOIN MovieDetails md ON rm.movie_id = md.movie_id
+WHERE rm.level < 3  
+ORDER BY rm.level, rm.rank;

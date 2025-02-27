@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+HighProfitItems AS (
+    SELECT 
+        r.ss_store_sk,
+        r.ss_item_sk,
+        r.total_quantity,
+        r.total_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.profit_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    hpi.ss_store_sk,
+    hpi.ss_item_sk,
+    hpi.total_quantity,
+    hpi.total_profit,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    (hpi.total_profit - COALESCE(cr.total_return_amt, 0)) AS net_profit_after_returns
+FROM 
+    HighProfitItems hpi
+LEFT JOIN 
+    CustomerReturns cr ON hpi.ss_item_sk = cr.sr_item_sk
+WHERE 
+    hpi.total_quantity > 50
+UNION ALL
+SELECT 
+    'Total' AS ss_store_sk,
+    NULL AS ss_item_sk,
+    SUM(total_quantity),
+    SUM(total_profit),
+    SUM(return_count),
+    SUM(total_return_amt),
+    SUM(net_profit_after_returns)
+FROM (
+    SELECT 
+        hpi.total_quantity,
+        hpi.total_profit,
+        COALESCE(cr.return_count, 0) AS return_count,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        (hpi.total_profit - COALESCE(cr.total_return_amt, 0)) AS net_profit_after_returns
+    FROM 
+        HighProfitItems hpi
+    LEFT JOIN 
+        CustomerReturns cr ON hpi.ss_item_sk = cr.sr_item_sk
+    WHERE 
+        hpi.total_quantity > 50
+) AS Summary;

@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status,
+        COALESCE(NULLIF(s.s_name, ''), 'Unknown Supplier') AS supplier_name
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey AND rs.rank = 1
+),
+CustomerSpending AS (
+    SELECT 
+        co.c_custkey,
+        co.total_orders,
+        COALESCE(sf.total_spent, 0) AS total_spent
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        (SELECT 
+            c.c_custkey,
+            SUM(o.o_totalprice) AS total_spent
+        FROM 
+            customer c
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey
+        WHERE 
+            o.o_orderdate >= DATE '1997-01-01'
+        GROUP BY 
+            c.c_custkey) sf ON co.c_custkey = sf.c_custkey
+)
+SELECT 
+    cs.c_custkey,
+    cs.total_orders,
+    cs.total_spent,
+    COUNT(DISTINCT fo.l_partkey) AS distinct_parts_ordered,
+    SUM(fo.l_extendedprice * (1 - fo.l_discount)) AS total_revenue,
+    SUM(fo.l_tax) AS total_tax_collected,
+    STRING_AGG(DISTINCT fo.supplier_name, ', ') AS suppliers_used
+FROM 
+    CustomerSpending cs
+LEFT JOIN 
+    FilteredOrders fo ON cs.c_custkey = fo.o_orderkey
+GROUP BY 
+    cs.c_custkey, cs.total_orders, cs.total_spent
+HAVING 
+    SUM(fo.l_extendedprice * (1 - fo.l_discount)) > 10000
+ORDER BY 
+    cs.total_spent DESC, cs.total_orders DESC
+LIMIT 100;

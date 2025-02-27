@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_birth_year,
+           0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_year,
+           sh.level + 1
+    FROM customer AS c
+    JOIN sales_hierarchy AS sh ON c.c_customer_sk = (SELECT sr_returning_customer_sk 
+                                                      FROM store_returns 
+                                                      WHERE sr_item_sk IN (SELECT sr_item_sk 
+                                                                           FROM store_sales 
+                                                                           WHERE ss_net_profit > 0) 
+                                                      LIMIT 1)
+    WHERE sh.level < 5
+),
+filtered_customers AS (
+    SELECT cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           sh.*
+    FROM sales_hierarchy sh
+    JOIN customer_demographics cd ON sh.c_customer_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M' AND cd.cd_purchase_estimate > 50000
+),
+item_sales AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) as total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+promotion_sales AS (
+    SELECT p.p_promo_sk, SUM(ws_ext_sales_price) as promo_sales_total
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY p.p_promo_sk
+),
+final_summary AS (
+    SELECT fc.c_first_name, fc.c_last_name, fc.cd_gender,
+           SUM(isales.total_sales) AS sales_total,
+           COALESCE(ps.promo_sales_total, 0) AS promo_sales_total
+    FROM filtered_customers fc
+    LEFT JOIN item_sales isales ON fc.c_customer_sk = (SELECT sr_customer_sk
+                                                       FROM store_returns
+                                                       WHERE sr_item_sk IN (SELECT i_item_sk FROM item))
+    LEFT JOIN promotion_sales ps ON ps.p_promo_sk IN (SELECT ws_promo_sk FROM web_sales WHERE ws_bill_customer_sk = fc.c_customer_sk)
+    GROUP BY fc.c_first_name, fc.c_last_name, fc.cd_gender
+)
+SELECT f.c_first_name, f.c_last_name, f.cd_gender, f.sales_total, f.promo_sales_total
+FROM final_summary f
+ORDER BY f.sales_total DESC
+LIMIT 10;

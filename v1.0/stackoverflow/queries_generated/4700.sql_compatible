@@ -1,0 +1,71 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId, P.CreationDate, P.Score
+),
+UsersWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostsWithTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(P.Tags, ',') AS tag_list ON TRUE
+    JOIN 
+        Tags T ON T.Id = tag_list::INTEGER
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.CommentCount,
+    RP.VoteCount,
+    UWB.DisplayName,
+    UWB.BadgeCount,
+    UWB.HighestBadgeClass,
+    PT.Tags
+FROM 
+    RecentPosts RP
+JOIN 
+    UsersWithBadges UWB ON RP.OwnerUserId = UWB.UserId
+LEFT JOIN 
+    PostsWithTags PT ON RP.PostId = PT.PostId
+WHERE 
+    (UWB.BadgeCount > 5 OR UWB.HighestBadgeClass = 1)
+    AND RP.PostRank <= 5
+ORDER BY 
+    RP.Score DESC, 
+    RP.CommentCount DESC;

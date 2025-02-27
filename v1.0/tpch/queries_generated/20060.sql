@@ -1,0 +1,45 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON ch.c_custkey = c.custkey
+    WHERE ch.level < 5
+)
+, top_nation_suppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(s.s_suppkey) > (SELECT AVG(supplier_count) FROM (SELECT COUNT(*) AS supplier_count FROM supplier GROUP BY s_nationkey) AS temp)
+)
+, part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank,
+           CASE 
+               WHEN p.p_size IS NULL THEN 'Unknown Size'
+               ELSE CONCAT('Size: ', CAST(p.p_size AS VARCHAR))
+           END AS size_description
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice BETWEEN 100.00 AND 500.00
+)
+SELECT DISTINCT 
+    c.c_name, 
+    coalesce(RANK() OVER (PARTITION BY t.n_name ORDER BY c.c_acctbal ASC), 0) AS customer_rank,
+    t.n_name AS nation_name,
+    pd.p_name,
+    pd.size_description
+FROM customer_hierarchy c
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN part_details pd ON l.l_partkey = pd.p_partkey
+JOIN top_nation_suppliers t ON (SELECT n.n_nationkey FROM nation n WHERE n.n_name = t.n_name) IS NOT NULL
+WHERE c.c_acctbal < (SELECT AVG(c_acctbal) FROM customer) 
+AND EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = pd.p_partkey AND ps.ps_availqty > 0)
+AND l.l_discount * 100 > 10
+AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY c.c_name, nation_name, pd.price_rank;

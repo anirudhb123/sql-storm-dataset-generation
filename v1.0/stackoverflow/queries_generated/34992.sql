@@ -1,0 +1,98 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id, 
+        ph.PostId, 
+        ph.CreationDate, 
+        ph.UserDisplayName, 
+        ph.PostHistoryTypeId, 
+        ph.Comment, 
+        1 AS Depth
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 2, 10)  -- Initial Title, Body, Close
+    
+    UNION ALL
+    
+    SELECT 
+        ph.Id, 
+        ph.PostId, 
+        ph.CreationDate, 
+        ph.UserDisplayName, 
+        ph.PostHistoryTypeId, 
+        ph.Comment, 
+        Depth + 1
+    FROM 
+        PostHistory ph 
+    INNER JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId AND ph.CreationDate > rph.CreationDate
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpvoteCount,
+    COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownvoteCount,
+    MAX(p.Score) AS MaxScore,
+    MAX(rph.CreationDate) AS LastHistoryEdit,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    users.DisplayName AS OwnerName,
+    COALESCE(AVG(u.Reputation), 0) AS AverageReputation
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    Users users ON p.OwnerUserId = users.Id
+LEFT JOIN 
+    (SELECT 
+         UserId, AVG(Reputation) AS Reputation
+     FROM 
+         Users
+     GROUP BY 
+         UserId
+    ) AS u ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHistory rph ON p.Id = rph.PostId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    p.Id, p.Title, users.DisplayName
+ORDER BY 
+    MaxScore DESC;
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY MAX(v.CreationDate) DESC) AS UserPostRank,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.UserPostRank,
+    r.UpvoteCount,
+    CASE 
+        WHEN r.UserPostRank = 1 THEN 'Most Recent'
+        WHEN r.UserPostRank > 1 AND r.UserPostRank < 5 THEN 'Top Posts'
+        ELSE 'Regular Posts'
+    END AS PostStatus
+FROM 
+    RankedPosts r
+WHERE 
+    r.UpvoteCount > 10
+ORDER BY 
+    r.UpvoteCount DESC;

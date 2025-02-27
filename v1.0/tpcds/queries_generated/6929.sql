@@ -1,0 +1,54 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        inv.inv_warehouse_sk,
+        DATE(d.d_date) AS sale_date,
+        d.d_month_seq,
+        d.d_year
+    FROM web_sales ws
+    JOIN inventory inv ON ws.ws_item_sk = inv.inv_item_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+),
+aggregated_sales AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_spent,
+        COUNT(sd.ws_order_number) AS total_orders,
+        AVG(sd.ws_sales_price) AS avg_order_value,
+        EXTRACT(YEAR FROM MIN(sd.sale_date)) AS first_order_year,
+        EXTRACT(YEAR FROM MAX(sd.sale_date)) AS last_order_year
+    FROM customer_info ci
+    JOIN sales_data sd ON ci.c_customer_id = sd.ws_order_number -- this is a placeholder join
+    GROUP BY ci.c_customer_id, ci.c_first_name, ci.c_last_name
+)
+SELECT 
+    customer_id,
+    first_name,
+    last_name,
+    total_spent,
+    total_orders,
+    avg_order_value,
+    last_order_year - first_order_year AS order_span
+FROM aggregated_sales
+WHERE total_orders > 10
+ORDER BY total_spent DESC
+LIMIT 100;

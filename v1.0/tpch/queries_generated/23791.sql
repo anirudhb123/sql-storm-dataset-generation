@@ -1,0 +1,73 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps_availqty FROM partsupp WHERE ps_supplycost < 500)
+), 
+MarketSegment AS (
+    SELECT 
+        c.c_mktsegment, 
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN CURRENT_DATE - INTERVAL '30' DAY AND CURRENT_DATE
+        AND o.o_orderstatus IN ('O', 'P') 
+    GROUP BY 
+        c.c_mktsegment
+), 
+TopSuppliers AS (
+    SELECT 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 10
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        COUNT(l.l_orderkey) AS item_count, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        MAX(CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END) AS return_status
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name, 
+    COALESCE(m.total_sales, 0) AS total_sales, 
+    COALESCE(ts.total_supply_value, 0) AS supplier_value,
+    rc.p_name, 
+    rc.p_retailprice
+FROM 
+    region r
+LEFT JOIN 
+    MarketSegment m ON r.r_regionkey IN (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey IS NOT NULL)
+FULL OUTER JOIN 
+    TopSuppliers ts ON ts.total_supply_value > 10000
+JOIN 
+    RecursiveCTE rc ON rc.rnk <= 5
+WHERE 
+    rc.p_retailprice IS NOT NULL
+ORDER BY 
+    r.r_name, m.total_sales DESC, ts.total_supply_value DESC
+FETCH FIRST 10 ROWS ONLY;

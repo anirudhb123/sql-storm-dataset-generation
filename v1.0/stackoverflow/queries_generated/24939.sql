@@ -1,0 +1,80 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount, 
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 0
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        COALESCE (
+            (SELECT COUNT(*) 
+             FROM Votes v 
+             WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0
+        ) AS UpVoteCount,
+        COALESCE (
+            (SELECT COUNT(*) 
+             FROM Votes v 
+             WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0
+        ) AS DownVoteCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- only questions
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        up.Reputation,
+        rp.CreationDate,
+        rp.Score,
+        rp.UpVoteCount,
+        rp.DownVoteCount
+    FROM RecentPosts rp
+    JOIN UserReputation up ON rp.OwnerUserId = up.UserId
+    WHERE rp.RecentRank <= 3 -- top 3 recent questions per user
+),
+AggregateVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+FinalResults AS (
+    SELECT 
+        fp.Title, 
+        fp.Reputation,
+        COALESCE(av.TotalUpVotes, 0) AS UpVotes,
+        COALESCE(av.TotalDownVotes, 0) AS DownVotes,
+        CASE WHEN (COALESCE(av.TotalUpVotes, 0) + COALESCE(av.TotalDownVotes, 0)) > 0 THEN 
+            ROUND((COALESCE(av.TotalUpVotes, 0) * 1.0 / (COALESCE(av.TotalUpVotes, 0) + COALESCE(av.TotalDownVotes, 0))) * 100, 2) 
+        ELSE 0 END AS UpvotePercentage
+    FROM FilteredPosts fp
+    LEFT JOIN AggregateVotes av ON fp.PostId = av.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Reputation >= 1000 THEN 'Veteran'
+        WHEN Reputation >= 100 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserLevel,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = fp.OwnerUserId AND p.PostTypeId = 2) AS AnswerCount
+FROM FinalResults fp
+WHERE UpvotePercentage > 50 -- only consider posts with majority upvotes
+ORDER BY UpVotes DESC, Reputation DESC
+LIMIT 100;

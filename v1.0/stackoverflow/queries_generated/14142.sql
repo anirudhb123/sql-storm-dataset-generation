@@ -1,0 +1,35 @@
+-- Performance Benchmarking Query
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    (
+        SELECT COUNT(*)
+        FROM Posts AS a
+        WHERE a.AcceptedAnswerId = p.Id
+    ) AS AcceptedAnswerCount,
+    (
+        SELECT STRING_AGG(t.TagName, ', ') 
+        FROM Tags AS t
+        WHERE t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, '>'))::int)
+    ) AS Tags
+FROM 
+    Posts AS p
+JOIN 
+    Users AS u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments AS c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes AS v ON p.Id = v.PostId
+WHERE 
+    p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

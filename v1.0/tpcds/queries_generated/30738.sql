@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_date
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+),
+top_sales AS (
+    SELECT 
+        s.d_date,
+        s.total_sales,
+        s.order_count
+    FROM 
+        sales_summary s
+    WHERE 
+        s.sales_rank <= 10
+)
+SELECT 
+    t.d_date,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    COALESCE(t.order_count, 0) AS order_count,
+    CASE 
+        WHEN t.total_sales > 5000 THEN 'High'
+        WHEN t.total_sales BETWEEN 2000 AND 5000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    top_sales t
+FULL OUTER JOIN 
+    customer c ON t.d_date = (
+        SELECT MAX(d.d_date)
+        FROM date_dim d
+        WHERE d.d_year = 2023 AND d.d_date <= CURRENT_DATE
+    )
+WHERE 
+    c.c_birth_year IS NULL OR c.c_birth_year < 2000
+ORDER BY 
+    t.total_sales DESC NULLS LAST;

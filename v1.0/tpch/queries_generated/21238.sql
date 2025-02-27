@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate >= '1997-01-01'
+        )
+)
+SELECT 
+    ps.ps_partkey,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(COALESCE(l.l_discount, 0)) AS total_discount,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (ID: ', s.s_suppkey, ')'), '; ') AS supplier_list
+FROM 
+    partsupp ps
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rn <= 3
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+INNER JOIN 
+    HighValueOrders hvo ON l.l_orderkey = hvo.o_orderkey
+WHERE 
+    ps.ps_availqty > 0
+    AND (l.l_returnflag IS NULL OR l.l_returnflag != 'Y')
+GROUP BY 
+    ps.ps_partkey
+HAVING 
+    SUM(COALESCE(l.l_quantity, 0)) > 100
+ORDER BY 
+    total_discount DESC
+LIMIT 10;

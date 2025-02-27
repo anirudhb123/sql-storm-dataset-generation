@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice)
+            FROM part p2
+            WHERE p2.p_container IS NOT NULL
+        )
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD('year', -1, cast('1998-10-01' as date)) AND 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT CASE WHEN rs.rn = 1 THEN rs.s_suppkey END) AS top_suppliers,
+    SUM(od.total_revenue) AS total_order_revenue,
+    CASE 
+        WHEN SUM(od.total_revenue) > 1000000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    nation n
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (SELECT n_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey)
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_nationkey = n.n_nationkey
+        )
+    )
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 3
+ORDER BY 
+    revenue_category DESC, 
+    n.n_name ASC;

@@ -1,0 +1,79 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.Value), 0) AS TotalVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        MAX(u.LastAccessDate) AS LastActive,
+        MIN(u.CreationDate) AS AccountCreated
+    FROM 
+        Users u 
+        LEFT JOIN Votes v ON u.Id = v.UserId 
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId 
+        LEFT JOIN Comments c ON u.Id = c.UserId 
+    GROUP BY u.Id, u.DisplayName
+),
+PollutionInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT ci.Id) AS TotalCloseReasons,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+        LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+        LEFT JOIN CloseReasonTypes ctr ON ph.Comment::int = ctr.Id
+        LEFT JOIN Comments ci ON ci.PostId = p.Id
+    WHERE 
+        p.CreationDate < NOW() - INTERVAL '2 years' 
+    GROUP BY p.Id
+),
+PerformanceMetrics AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalVotes,
+        ua.TotalComments,
+        COALESCE(pi.TotalCloseReasons, 0) AS TotalCloseReasons,
+        COALESCE(pi.CloseReasons, 'None') AS CloseReasonList,
+        RANK() OVER (ORDER BY ua.TotalVotes DESC) AS UserVoteRank
+    FROM 
+        UserActivity ua
+        LEFT JOIN PollutionInfo pi ON ua.UserId = pi.PostId
+    WHERE 
+        ua.TotalPosts > 0
+)
+
+SELECT 
+    pm.UserId,
+    pm.DisplayName,
+    pm.TotalPosts,
+    pm.TotalVotes,
+    pm.TotalComments,
+    pm.TotalCloseReasons,
+    pm.CloseReasonList,
+    pm.UserVoteRank
+FROM 
+    PerformanceMetrics pm
+WHERE 
+    pm.UserVoteRank <= 10
+ORDER BY 
+    pm.TotalVotes DESC
+OPTION (MAXRECURSION 0); 
+
+### Explanation:
+- **Common Table Expressions (CTEs)**:
+  - `UserActivity`: Calculates total votes, posts, comments, and activity timestamps for users.
+  - `PollutionInfo`: Summarizes posts that have been closed, counting distinct close reasons over the last two years.
+  - `PerformanceMetrics`: Combines previous CTEs, ranking users by total votes received, and filters only users with total posts greater than zero.
+
+- **Outer Joins**: Used extensively to ensure users and their activities are captured, even if they have no votes or posts.
+
+- **Aggregation**: Utilizes functions like `SUM`, `COUNT`, and `STRING_AGG` to gather statistics.
+
+- **Window Function**: Employs the `RANK()` function to rank users based on votes.
+
+- **Bizarre Logic Clause**: Filters the final output to include only the top 10 users based on votes, with the potential for recursion in complex scenarios (demonstrated by `OPTION (MAXRECURSION 0)` for SQL Server users).
+
+This query executes complex SQL constructs in an elaborate yet efficient manner, suitable for performance benchmarking.

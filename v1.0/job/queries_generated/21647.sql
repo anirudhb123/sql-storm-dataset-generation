@@ -1,0 +1,93 @@
+WITH RecursiveActorHierarchy AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        0 AS hierarchy_level,
+        a.name AS actor_name
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        rah.hierarchy_level + 1,
+        a.name AS actor_name
+    FROM 
+        cast_info ca
+    JOIN 
+        RecursiveActorHierarchy rah ON ca.movie_id = rah.movie_id
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    WHERE 
+        rah.hierarchy_level < 3
+        AND a.name IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year >= 1990
+        AND (m.title LIKE '%%Mystery%%' OR m.title LIKE '%%Drama%%')
+    GROUP BY 
+        m.id, mk.keyword
+),
+ExtendedInfo AS (
+    SELECT 
+        f.movie_id,
+        f.title,
+        f.production_year,
+        f.movie_keyword,
+        f.actor_count,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = f.movie_id AND mi.info_type_id = 1) AS info_count,
+        (SELECT MAX(np.name) FROM name np WHERE np.imdb_id = f.movie_id) AS highest_rated_actor
+    FROM 
+        FilteredMovies f
+),
+FinalOutput AS (
+    SELECT 
+        ei.movie_id,
+        ei.title,
+        ei.production_year,
+        ei.movie_keyword,
+        ei.actor_count,
+        ei.info_count,
+        ei.highest_rated_actor,
+        CASE 
+            WHEN ei.actor_count > 5 THEN 'Popular'
+            WHEN ei.actor_count BETWEEN 3 AND 5 THEN 'Moderate'
+            ELSE 'Niche'
+        END AS movie_category
+    FROM 
+        ExtendedInfo ei
+)
+SELECT 
+    fo.*,
+    ROW_NUMBER() OVER (ORDER BY fo.production_year DESC, fo.actor_count DESC) AS overall_rank,
+    STRING_AGG(rah.actor_name, ', ') AS co_actors
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    RecursiveActorHierarchy rah ON rah.movie_id = fo.movie_id
+WHERE 
+    fo.production_year IN (SELECT DISTINCT production_year FROM ExtendedInfo WHERE actor_count > 2)
+GROUP BY 
+    fo.movie_id, fo.title, fo.production_year, fo.movie_keyword, fo.actor_count, fo.info_count, fo.highest_rated_actor
+ORDER BY 
+    fo.production_year DESC, fo.actor_count DESC;

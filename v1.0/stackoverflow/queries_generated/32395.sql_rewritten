@@ -1,0 +1,97 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    up.PostCount,
+    COALESCE(s.DataCount, 0) AS TotalDataCount,
+    COALESCE(b.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ph.LastPostTitle, 'No Posts Yet') AS LastPostTitle,
+    COALESCE(ph.LastPostDate, 'N/A') AS LastPostDate,
+    COUNT(DISTINCT t.TagName) AS TagCount
+FROM 
+    Users u
+LEFT JOIN (
+    SELECT 
+        OwnerUserId, 
+        COUNT(DISTINCT Id) AS PostCount
+    FROM 
+        Posts 
+    GROUP BY 
+        OwnerUserId
+) up ON u.Id = up.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) b ON u.Id = b.UserId
+LEFT JOIN (
+    SELECT 
+        OwnerUserId,
+        MAX(CreationDate) AS LastPostDate,
+        MAX(Title) AS LastPostTitle
+    FROM 
+        Posts
+    WHERE 
+        CreationDate IS NOT NULL
+    GROUP BY 
+        OwnerUserId
+) ph ON u.Id = ph.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS DataCount
+    FROM 
+        (
+            SELECT UserId FROM Comments 
+            UNION ALL 
+            SELECT UserId FROM Votes 
+            UNION ALL 
+            SELECT UserId FROM PostLinks
+        ) AS CombinedData
+    GROUP BY 
+        UserId
+) s ON u.Id = s.UserId
+LEFT JOIN (
+    SELECT 
+        DISTINCT p.Tags,
+        t.TagName 
+    FROM 
+        Posts p
+    CROSS APPLY 
+        STRING_SPLIT(p.Tags, ',') AS t
+) t ON u.Id = t.TagName
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, up.PostCount, s.DataCount, b.BadgeCount, 
+    ph.LastPostTitle, ph.LastPostDate
+ORDER BY 
+    u.Reputation DESC, 
+    up.PostCount DESC;

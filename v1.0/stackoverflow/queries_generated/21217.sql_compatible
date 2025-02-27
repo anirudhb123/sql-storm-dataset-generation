@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 AND
+        p.Score >= 0
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+PostWithBadges AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rb.BadgeCount,
+        rb.HighestBadge,
+        rp.CreationDate,
+        CASE
+            WHEN rb.BadgeCount > 0 THEN 'Has Badges'
+            ELSE 'No Badges'
+        END AS BadgeStatus
+    FROM
+        RankedPosts rp
+    LEFT JOIN UserBadges rb ON rp.OwnerUserId = rb.UserId
+)
+SELECT
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.BadgeStatus,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    ARRAY_AGG(t.TagName) AS Tags,
+    ARRAY_AGG(DISTINCT vt.Name) AS VoteTypes
+FROM
+    PostWithBadges p
+LEFT JOIN (
+    SELECT
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM
+        Comments
+    GROUP BY
+        PostId
+) c ON p.PostId = c.PostId
+LEFT JOIN Posts ps ON ps.Id = p.PostId
+LEFT JOIN (
+    SELECT
+        DISTINCT STRING_TO_ARRAY(substring(ps.Tags, 2, LENGTH(ps.Tags) - 2), '><') AS TagName,
+        ps.Id AS PostId
+    FROM
+        Posts ps
+) t ON t.PostId = p.PostId
+LEFT JOIN Votes v ON v.PostId = p.PostId
+LEFT JOIN VoteTypes vt ON vt.Id = v.VoteTypeId
+WHERE
+    (p.BadgeStatus = 'Has Badges' AND p.HighestBadge = 1) OR
+    (p.Score > 10 AND p.BadgeStatus = 'No Badges')
+GROUP BY
+    p.Title, p.CreationDate, p.Score, p.BadgeStatus, c.CommentCount
+ORDER BY
+    p.Score DESC, p.CreationDate DESC
+LIMIT 100;

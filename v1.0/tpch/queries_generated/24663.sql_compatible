@@ -1,0 +1,50 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'S%')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_nationkey = (nh.n_nationkey + 1)
+    WHERE n.n_regionkey = nh.n_regionkey
+),
+price_analysis AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate < DATEADD(MONTH, -6, DATE '1998-10-01')
+      AND (l.l_returnflag = 'Y' OR l.l_returnflag = 'N')
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+supplier_null_check AS (
+    SELECT s.s_suppkey,
+           CASE WHEN s.s_acctbal IS NOT NULL THEN 'Valid' ELSE 'Invalid' END AS account_status,
+           COUNT(DISTINCT ps.ps_partkey) AS supply_count
+    FROM supplier s
+    FULL OUTER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_comment IS NULL OR LENGTH(s.s_comment) < 50
+    GROUP BY s.s_suppkey
+),
+final_result AS (
+    SELECT nh.n_name,
+           pa.p_name,
+           pa.total_revenue,
+           s.account_status,
+           CASE WHEN pa.order_count > 100 THEN 'High' ELSE 'Low' END AS popularity
+    FROM price_analysis pa
+    JOIN supplier_null_check s ON pa.p_partkey = s.s_suppkey
+    JOIN nation_hierarchy nh ON nh.n_nationkey = s.s_suppkey
+    WHERE pa.total_revenue IS NOT NULL
+      AND s.supply_count > 5
+      AND (pa.p_retailprice - pa.total_revenue) / pa.p_retailprice > 0.1
+)
+SELECT DISTINCT n.n_name, f.p_name, f.total_revenue, f.account_status, f.popularity
+FROM final_result f
+JOIN nation_hierarchy n ON n.n_nationkey = f.p_partkey
+WHERE f.total_revenue BETWEEN (SELECT AVG(total_revenue) FROM final_result) AND 
+      (SELECT MAX(total_revenue) FROM final_result)
+ORDER BY f.total_revenue DESC, f.popularity DESC;

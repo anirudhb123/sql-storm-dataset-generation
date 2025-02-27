@@ -1,0 +1,67 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Location,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.Location
+), UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+), RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(CASE 
+            WHEN H.PostHistoryTypeId IN (10, 11) THEN 'Closed/ Reopened' 
+            ELSE NULL 
+        END, 'Active') AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostOrder
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory H ON P.Id = H.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Location,
+    UA.PostCount,
+    UA.PositiveScoreCount,
+    BA.BadgeCount,
+    BA.BadgeNames,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.PostStatus
+FROM 
+    RecursiveUserActivity UA
+LEFT JOIN 
+    UserBadges BA ON UA.UserId = BA.UserId
+LEFT JOIN 
+    RecentPosts RP ON UA.UserId = RP.OwnerUserId AND RP.RecentPostOrder = 1
+WHERE 
+    UA.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    UA.UserRank
+FETCH FIRST 10 ROWS ONLY;

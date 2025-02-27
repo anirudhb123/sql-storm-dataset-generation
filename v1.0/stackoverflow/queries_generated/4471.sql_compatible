@@ -1,0 +1,62 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, B.Class
+),
+PostMetrics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COALESCE(SUM(PM.TotalPosts), 0) AS TotalPosts,
+        COALESCE(SUM(UB.BadgeCount), 0) AS TotalBadges,
+        RANK() OVER (ORDER BY COALESCE(SUM(PM.TotalPosts), 0) + COALESCE(SUM(UB.BadgeCount), 0) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostMetrics PM ON U.Id = PM.OwnerUserId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.Id,
+    U.DisplayName,
+    COALESCE(PM.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UB.TotalBadges, 0) AS TotalBadges,
+    RU.UserRank
+FROM 
+    Users U
+LEFT JOIN 
+    PostMetrics PM ON U.Id = PM.OwnerUserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    RankedUsers RU ON U.Id = RU.Id
+WHERE 
+    COALESCE(PM.TotalPosts, 0) > 5
+ORDER BY 
+    RU.UserRank ASC
+LIMIT 10;

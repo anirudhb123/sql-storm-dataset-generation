@@ -1,0 +1,50 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status = 'M' 
+    GROUP BY 
+        ws.web_site_id
+), 
+sales_analysis AS (
+    SELECT 
+        r.web_site_id,
+        r.total_sales,
+        r.total_orders,
+        COALESCE(SUM(sr.sr_return_amt), 0) AS total_returns,
+        (r.total_sales - COALESCE(SUM(sr.sr_return_amt), 0)) AS net_sales
+    FROM 
+        ranked_sales r
+    LEFT JOIN 
+        store_returns sr ON r.web_site_id = sr.sr_store_sk
+    GROUP BY 
+        r.web_site_id, r.total_sales, r.total_orders
+)
+SELECT 
+    sa.web_site_id,
+    sa.total_sales,
+    sa.total_orders,
+    sa.total_returns,
+    sa.net_sales,
+    ROW_NUMBER() OVER (ORDER BY sa.net_sales DESC) AS rank_net_sales
+FROM 
+    sales_analysis sa
+WHERE 
+    sa.net_sales > 0
+ORDER BY 
+    sa.net_sales DESC
+LIMIT 10;

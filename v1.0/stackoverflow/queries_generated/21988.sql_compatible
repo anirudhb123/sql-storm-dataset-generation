@@ -1,0 +1,64 @@
+
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (1, 8) THEN 1 ELSE 0 END), 0) AS AcceptedAnswers,
+        COALESCE(SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(MAX(P.ViewCount), 0) AS MaxViewCount
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+    FROM Posts P
+),
+TopUsers AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.Reputation,
+        RANK() OVER (ORDER BY US.Reputation DESC) AS ReputationRank
+    FROM UserScores US
+    WHERE US.Reputation > 1000
+),
+UserPostStats AS (
+    SELECT 
+        PU.UserId, 
+        U.DisplayName, 
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS TotalAcceptedAnswers
+    FROM PostDetails P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    JOIN TopUsers PU ON U.Id = PU.UserId
+    GROUP BY PU.UserId, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    PS.TotalPosts,
+    PS.TotalAcceptedAnswers,
+    COALESCE(US.MaxViewCount, 0) AS MaxViews,
+    US.Upvotes,
+    US.Downvotes
+FROM TopUsers U
+LEFT JOIN UserPostStats PS ON U.UserId = PS.UserId
+LEFT JOIN UserScores US ON U.UserId = US.UserId
+WHERE U.ReputationRank <= 10
+ORDER BY U.Reputation DESC
+LIMIT 5;

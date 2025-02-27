@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CASE 
+            WHEN Reputation >= 10000 THEN 'High'
+            WHEN Reputation >= 5000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationTier
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.ViewCount, P.Score
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        ROW_NUMBER() OVER (ORDER BY PS.Score DESC, PS.ViewCount DESC) AS Rank
+    FROM PostStats PS
+    WHERE PS.Score > 10
+),
+BadgedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    UR.ReputationTier,
+    B.BadgeCount,
+    B.GoldCount,
+    B.SilverCount,
+    B.BronzeCount,
+    TP.Title,
+    TP.ViewCount,
+    TP.Score
+FROM UserReputation UR
+JOIN BadgedUsers B ON UR.Id = B.UserId
+LEFT JOIN TopPosts TP ON B.BadgeCount > 0 AND B.UserId = (SELECT MAX(UserId) FROM BadgedUsers BB WHERE BB.BadgeCount = B.BadgeCount)
+WHERE B.BadgeCount > 0
+ORDER BY U.Reputation DESC, B.BadgeCount DESC, TP.Score DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

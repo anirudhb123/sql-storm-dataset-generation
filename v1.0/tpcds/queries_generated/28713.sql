@@ -1,0 +1,73 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        COUNT(*) AS total_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        AVG(LENGTH(ca_street_type)) AS avg_street_type_length
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS customer_count,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+WebSalesStats AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_addr_sk
+),
+FinalStats AS (
+    SELECT 
+        a.ca_city,
+        a.unique_addresses,
+        a.total_addresses,
+        a.avg_street_name_length,
+        a.avg_street_type_length,
+        c.cd_gender,
+        c.customer_count,
+        c.total_dependents,
+        c.avg_purchase_estimate,
+        w.total_sales,
+        w.total_orders
+    FROM 
+        AddressStats a
+    LEFT JOIN 
+        CustomerStats c ON a.ca_city = (SELECT ca_city FROM customer_address WHERE ca_address_sk = c_customer_sk)
+    LEFT JOIN 
+        WebSalesStats w ON a.ca_address_sk = w.ws_bill_addr_sk
+)
+SELECT 
+    ca_city, 
+    unique_addresses, 
+    total_addresses, 
+    avg_street_name_length, 
+    avg_street_type_length, 
+    cd_gender, 
+    customer_count, 
+    total_dependents, 
+    avg_purchase_estimate, 
+    total_sales,
+    total_orders
+FROM 
+    FinalStats
+ORDER BY 
+    unique_addresses DESC, 
+    total_sales DESC;

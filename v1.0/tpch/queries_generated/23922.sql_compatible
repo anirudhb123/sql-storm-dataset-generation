@@ -1,0 +1,50 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_acctbal,
+        n.n_name AS nation_name
+    FROM supplier s
+    INNER JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 1000
+),
+RegionalOrders AS (
+    SELECT 
+        n.n_regionkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+)
+SELECT 
+    r.r_name, 
+    r.r_comment,
+    COALESCE(SUM(CASE WHEN hs.rank_acctbal <= 5 THEN hs.s_acctbal END), 0) AS top_supplier_acctbal,
+    COALESCE(SUM(hp.total_value), 0) AS high_value_parts,
+    o.order_count,
+    o.total_spent
+FROM region r
+LEFT JOIN RankedSuppliers hs ON r.r_regionkey = hs.nation_name
+LEFT JOIN HighValueParts hp ON hp.p_partkey IN (
+    SELECT DISTINCT p.p_partkey
+    FROM part p 
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+)
+LEFT JOIN RegionalOrders o ON r.r_regionkey = o.n_regionkey
+GROUP BY r.r_regionkey, r.r_name, r.r_comment, o.order_count, o.total_spent
+HAVING o.total_spent IS NOT NULL OR COUNT(hs.s_suppkey) > 0
+ORDER BY r.r_name ASC, top_supplier_acctbal DESC;

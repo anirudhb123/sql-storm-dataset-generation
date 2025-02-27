@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_graph AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(cc.id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC, mt.title) AS year_order
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.person_id = ak.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id
+),
+yearly_benchmarks AS (
+    SELECT 
+        production_year,
+        AVG(total_cast) AS avg_cast_per_year,
+        COUNT(DISTINCT movie_id) AS total_movies,
+        SUM(CASE WHEN total_cast > 5 THEN 1 ELSE 0 END) AS blockbusters_count
+    FROM 
+        movie_graph
+    GROUP BY 
+        production_year
+),
+exotic_movies AS (
+    SELECT 
+        mg.movie_id,
+        mg.title,
+        mg.cast_names,
+        mg.production_year,
+        COALESCE(SUM(CASE WHEN ki.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS keyword_count,
+        ROW_NUMBER() OVER (ORDER BY mg.production_year DESC, mg.title) AS exotic_order
+    FROM 
+        movie_graph mg
+    LEFT JOIN 
+        movie_keyword mk ON mg.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        mg.movie_id, mg.title, mg.cast_names, mg.production_year
+    HAVING 
+        COUNT(DISTINCT mk.keyword_id) > 2 AND 
+        mg.production_year BETWEEN 2000 AND 2021
+),
+final_benchmark AS (
+    SELECT
+        yb.production_year,
+        yb.avg_cast_per_year,
+        yb.total_movies,
+        COALESCE(ROUND(EXTRACT(EPOCH FROM (CURRENT_DATE - FIRST_VALUE(mg.production_year) OVER (ORDER BY mg.production_year))) / 86400), 0) AS days_since_first_movie,
+        em.title AS exotic_movie,
+        em.cast_names AS exotic_cast,
+        em.keyword_count AS exotic_keywords
+    FROM 
+        yearly_benchmarks yb
+    LEFT JOIN 
+        exotic_movies em ON yb.production_year = em.production_year
+)
+SELECT 
+    pb.production_year,
+    pb.avg_cast_per_year,
+    pb.total_movies,
+    pb.exotic_movie,
+    pb.exotic_cast,
+    pb.exotic_keywords,
+    CASE 
+        WHEN pb.total_movies > 100 THEN 'Prolific Year'
+        WHEN pb.avg_cast_per_year < 5 THEN 'Sparse Year'
+        ELSE 'Average Year'
+    END AS year_rating
+FROM 
+    final_benchmark pb
+ORDER BY 
+    pb.production_year DESC, 
+    pb.total_movies DESC NULLS LAST
+LIMIT 25;
+

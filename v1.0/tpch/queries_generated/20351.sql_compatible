@@ -1,0 +1,56 @@
+
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_brand, p_size, 1 AS level
+    FROM part
+    WHERE p_size <= (SELECT AVG(p_size) FROM part)
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON p.p_size > (SELECT AVG(p_size) FROM part WHERE p_brand = ph.p_brand)
+    WHERE ph.level < 3
+),
+supplier_overview AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, 
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent, 
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+region_nation AS (
+    SELECT n.n_regionkey, r.r_name, COUNT(n.n_nationkey) AS nation_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    COALESCE(s.total_supply_cost, 0) AS supplier_cost,
+    COALESCE(c.total_spent, 0) AS customer_spending,
+    r.nation_count AS nations_in_region,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_size DESC) AS rank_per_brand,
+    COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY p.p_partkey) AS order_count,
+    CASE 
+        WHEN l.l_discount > 0.1 THEN 'Discounted'
+        ELSE 'Regular Price'
+    END AS pricing_category
+FROM part_hierarchy p
+LEFT JOIN supplier_overview s ON s.unique_parts > 1
+LEFT JOIN customer_order_summary c ON c.order_count > 10
+LEFT JOIN region_nation r ON r.nation_count >= 3
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+WHERE p.p_comment IS NOT NULL AND LENGTH(p.p_comment) > 5
+  AND (s.total_supply_cost IS NULL OR c.order_count > 5)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_size, 
+    s.total_supply_cost, c.total_spent, r.nation_count, 
+    l.l_discount
+ORDER BY p.p_partkey DESC, c.last_order_date ASC;

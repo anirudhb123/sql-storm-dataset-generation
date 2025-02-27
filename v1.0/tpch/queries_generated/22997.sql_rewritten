@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+SuppFiltered AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    HAVING 
+        SUM(l.l_discount) IS NOT NULL
+),
+CustomerCount AS (
+    SELECT 
+        nation.n_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS cust_count
+    FROM 
+        customer c
+    JOIN 
+        nation ON c.c_nationkey = nation.n_nationkey
+    GROUP BY 
+        nation.n_nationkey
+    HAVING 
+        COUNT(DISTINCT c.c_custkey) > 0
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(sf.ps_supplycost), 0) AS total_supplycost,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    MAX(ro.o_orderdate) AS last_order_date, 
+    GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', ') AS part_names,
+    CASE 
+        WHEN COUNT(DISTINCT c.c_custkey) >= 10 THEN 'High Value'
+        WHEN COUNT(DISTINCT c.c_custkey) BETWEEN 5 AND 9 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    MAX(sf.total_discount) AS max_discount
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SuppFiltered sf ON sf.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON ro.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey LIMIT 1)
+LEFT JOIN 
+    CustomerCount cc ON cc.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    part p ON p.p_partkey = sf.ps_partkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(sf.ps_supplycost) IS NOT NULL 
+    OR COUNT(DISTINCT c.c_custkey) > 1
+ORDER BY 
+    total_supplycost DESC, 
+    last_order_date ASC
+LIMIT 100;

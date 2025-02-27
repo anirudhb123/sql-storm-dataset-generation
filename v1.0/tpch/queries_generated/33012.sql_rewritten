@@ -1,0 +1,77 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+    UNION ALL
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.order_level + 1
+    FROM 
+        orders o
+    JOIN 
+        order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        o.o_orderdate < '1997-01-01'
+),
+supplier_avg_cost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+customer_segment AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_mktsegment
+)
+SELECT 
+    nh.n_name,
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(s.avg_cost) AS max_suppliers_cost,
+    MIN(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE NULL END) AS min_filled_order,
+    ROUND(AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END), 2) AS avg_returned_quantity,
+    STRING_AGG(DISTINCT c.c_mktsegment, ', ') AS distinct_market_segments
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    nation nh ON s.s_nationkey = nh.n_nationkey
+JOIN 
+    region r ON nh.n_regionkey = r.r_regionkey
+LEFT OUTER JOIN 
+    customer_segment cs ON c.c_mktsegment = cs.c_mktsegment
+WHERE 
+    l.l_shipdate BETWEEN '1996-06-01' AND '1996-12-31'
+GROUP BY 
+    nh.n_name, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,45 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS level
+    FROM nation n
+    WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SalesDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    nh.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(cs.total_spent) AS total_spent_avg,
+    s.s_name AS supplier_name,
+    ss.total_available_qty,
+    ss.avg_supply_cost,
+    CASE 
+        WHEN ss.avg_supply_cost IS NULL THEN 'No Supplies'
+        ELSE 'Available'
+    END AS supply_status,
+    RANK() OVER (PARTITION BY nh.n_name ORDER BY SUM(sd.total_sales) DESC) AS sales_rank
+FROM NationHierarchy nh
+LEFT JOIN CustomerOrders cs ON cs.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT nh.n_nationkey))
+LEFT JOIN SupplierStats ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_type LIKE '%MICROCHIP%'))
+LEFT JOIN SalesDetails sd ON sd.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+GROUP BY nh.n_name, s.s_name, ss.total_available_qty, ss.avg_supply_cost
+ORDER BY nh.n_name, sales_rank;

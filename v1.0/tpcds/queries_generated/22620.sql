@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws.warehouse_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_revenue,
+        RANK() OVER (PARTITION BY ws.warehouse_sk ORDER BY SUM(ws_sales_price) DESC) AS rank_sales
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY ws.warehouse_sk, ws_sold_date_sk
+), 
+filtered_sales AS (
+    SELECT 
+        warehouse_sk,
+        ws_sold_date_sk,
+        total_sales,
+        total_revenue
+    FROM sales_data
+    WHERE rank_sales <= 3
+),
+customer_returns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_store_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns 
+    GROUP BY sr_returned_date_sk, sr_store_sk
+)
+
+SELECT 
+    COALESCE(ws.warehouse_sk, cr.sr_store_sk) AS store_id,
+    COALESCE(f.ws_sold_date_sk, cr.sr_returned_date_sk) AS date_id,
+    f.total_sales,
+    f.total_revenue,
+    cr.total_returns,
+    cr.total_returned_amount,
+    (f.total_revenue - COALESCE(cr.total_returned_amount, 0)) AS net_revenue,
+    CASE 
+        WHEN (f.total_sales > 0 AND cr.total_returned_amount IS NULL) THEN 'No Returns'
+        WHEN (f.total_sales = 0 AND cr.total_returned_amount IS NOT NULL) THEN 'Returns Only'
+        ELSE 'Mixed'
+    END AS sales_return_status
+FROM filtered_sales f
+FULL OUTER JOIN customer_returns cr ON f.warehouse_sk = cr.sr_store_sk AND f.ws_sold_date_sk = cr.sr_returned_date_sk
+WHERE COALESCE(f.total_sales, 0) + COALESCE(cr.total_returns, 0) > 0
+ORDER BY store_id, date_id;

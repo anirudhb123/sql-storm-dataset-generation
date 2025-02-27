@@ -1,0 +1,29 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), 
+TopSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_supply_cost, ROW_NUMBER() OVER (PARTITION BY rs.s_nationkey ORDER BY rs.total_supply_cost DESC) AS rn
+    FROM RankedSuppliers rs
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+), 
+NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM nation n
+    JOIN CustomerOrders o ON n.n_nationkey = o.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+
+SELECT n.n_name, ts.s_name, ts.total_supply_cost, ns.total_orders
+FROM TopSuppliers ts
+JOIN NationSummary ns ON ts.s_nationkey = ns.n_nationkey 
+WHERE ts.rn <= 3
+ORDER BY ns.total_orders DESC, ts.total_supply_cost DESC;

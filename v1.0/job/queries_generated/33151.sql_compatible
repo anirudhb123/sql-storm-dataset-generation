@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        1 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        mh.level + 1
+    FROM title t
+    JOIN MovieHierarchy mh ON t.episode_of_id = mh.movie_id
+),
+AverageMovieInfo AS (
+    
+    SELECT 
+        kt.kind_id,
+        AVG(m.production_year) AS avg_production_year
+    FROM aka_title m
+    JOIN kind_type kt ON m.kind_id = kt.id
+    GROUP BY kt.kind_id
+),
+CastRoles AS (
+    
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.person_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    mh.level AS hierarchy_level,
+    ar.avg_production_year,
+    cr.movie_count,
+    cr.roles
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    AverageMovieInfo ar ON mt.kind_id = ar.kind_id
+JOIN 
+    CastRoles cr ON ak.person_id = cr.person_id
+WHERE 
+    (mt.production_year >= 2000 OR mt.production_year IS NULL) 
+    AND ak.name IS NOT NULL 
+ORDER BY 
+    mh.level DESC, mt.production_year DESC;

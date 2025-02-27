@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_order_number,
+        SUM(sr_return_quantity) AS total_returned,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rank_return
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk, sr_order_number
+), UnusualReturns AS (
+    SELECT 
+        rr.*, 
+        CASE 
+            WHEN total_returned > (SELECT AVG(total_returned) FROM RankedReturns) THEN 'Higher than average'
+            ELSE 'Lower or equal to average'
+        END AS return_classification
+    FROM 
+        RankedReturns rr
+), ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), CombinedInfo AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ir.total_returned,
+        ir.return_classification,
+        isales.total_profit,
+        isales.total_orders,
+        CASE 
+            WHEN ir.total_returned IS NULL THEN 'No Returns'
+            WHEN ir.total_returned > 10 THEN 'Frequent Returns'
+            ELSE 'Occasional Returns'
+        END AS return_frequency
+    FROM 
+        item i
+    LEFT JOIN 
+        UnusualReturns ir ON i.i_item_sk = ir.sr_item_sk
+    LEFT JOIN 
+        ItemSales isales ON i.i_item_sk = isales.ws_item_sk
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_item_desc,
+    COALESCE(ci.total_returned, 0) AS returned_quantity,
+    ci.return_classification,
+    COALESCE(ci.total_profit, 0) AS total_profit,
+    COALESCE(ci.total_orders, 0) AS total_orders,
+    ci.return_frequency,
+    CONCAT('Item ', ci.i_item_id, ' classified as ', ci.return_frequency) AS item_summary
+FROM 
+    CombinedInfo ci
+WHERE 
+    COALESCE(ci.total_orders, 0) > 5
+ORDER BY 
+    ci.total_profit DESC, 
+    returned_quantity ASC;

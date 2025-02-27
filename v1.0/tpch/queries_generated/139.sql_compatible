@@ -1,0 +1,49 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, '1998-10-01')
+),
+supplier_revenue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATEADD(month, -6, '1998-10-01')
+    GROUP BY s.s_suppkey, s.s_name
+),
+nations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT 
+    n.n_name,
+    n.region_name,
+    s.total_revenue AS supplier_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(RO.order_count, 0) AS high_value_order_count
+FROM nations n
+LEFT JOIN supplier_revenue s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM ranked_orders o
+    WHERE o.order_rank <= 5
+    GROUP BY o.o_custkey
+) RO ON RO.o_custkey = n.n_nationkey
+GROUP BY n.n_name, n.region_name, s.total_revenue
+ORDER BY supplier_revenue DESC, total_orders DESC;

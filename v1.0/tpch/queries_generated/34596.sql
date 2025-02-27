@@ -1,0 +1,60 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 3000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AggregateLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS item_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-10-01'
+    GROUP BY l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS orders_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'Consumer'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_name, 
+           c.total_spent,
+           DENSE_RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM CustomerOrders c
+    WHERE c.orders_count > 5
+)
+SELECT p.p_name,
+       p.p_mfgr,
+       r.r_name,
+       s.s_name,
+       COALESCE(SH.level, 0) AS supplier_level,
+       COALESCE(AG.total_revenue, 0) AS order_revenue,
+       TC.rank AS customer_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierHierarchy SH ON s.s_suppkey = SH.s_suppkey
+LEFT JOIN AggregateLineItems AG ON AG.l_orderkey = (SELECT o.o_orderkey
+                                                       FROM orders o
+                                                       WHERE o.o_custkey IN (SELECT c.c_custkey
+                                                         FROM TopCustomers TC
+                                                         WHERE TC.rank <= 10)
+                                                       ORDER BY o.o_orderdate DESC
+                                                       LIMIT 1)
+LEFT JOIN TopCustomers TC ON TC.c_name = s.s_name
+WHERE p.p_size BETWEEN 10 AND 20
+ORDER BY order_revenue DESC, p.p_name;

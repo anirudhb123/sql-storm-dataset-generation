@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level,
+    mt.production_year,
+    COALESCE(CAST(STRING_AGG(DISTINCT kw.keyword, ', ') AS TEXT), 'No Keywords') AS keywords,
+    COUNT(DISTINCT ci.id) AS num_roles,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS row_num
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mt.production_year >= 2000 OR mt.production_year IS NULL)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = mt.id 
+        AND mi.info_type_id = 2 
+        AND mi.info LIKE '%Banned%'
+    )
+GROUP BY 
+    ak.name, mt.title, mh.level, mt.production_year
+HAVING 
+    COUNT(DISTINCT ci.id) > 1
+ORDER BY 
+    mh.level, mt.production_year DESC;
+
+This query aims to retrieve detailed information about actors, their roles in movies, and any associated keywords while creating a hierarchy of episodes related to their respective titles. It demonstrates the use of a recursive CTE to manage hierarchical data, various joins, conditional aggregations, and window functions. The final result is filtered to only include actors who have worked on more than one film, displaying additional insights on their collaboration and contribution to different film projects.

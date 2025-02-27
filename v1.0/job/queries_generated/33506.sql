@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), 
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS ranking
+    FROM 
+        MovieHierarchy mh
+),
+TopRankedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.ranking <= 5
+),
+MovieCast AS (
+    SELECT 
+        mt.title,
+        ct.kind AS cast_type,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        COUNT(ci.id) AS total_appearances
+    FROM 
+        TopRankedMovies t
+    LEFT JOIN 
+        complete_cast mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mc.subject_id = ci.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON ci.role_id = ct.id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mt.title, ct.kind, ak.name
+)
+SELECT 
+    mc.title AS movie_title,
+    mc.cast_type,
+    mc.actor_name,
+    mc.total_appearances,
+    CASE 
+        WHEN mc.total_appearances IS NULL THEN 'No Appearances'
+        ELSE mc.total_appearances::text || ' Appearances'
+    END AS appearance_description
+FROM 
+    MovieCast mc
+ORDER BY 
+    mc.total_appearances DESC NULLS LAST;

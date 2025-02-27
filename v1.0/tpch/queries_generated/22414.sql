@@ -1,0 +1,45 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE(NULLIF(ps.ps_availqty, 0), NULL) AS available_quantity,
+           CASE WHEN p.p_retailprice > 100 THEN 'Premium' ELSE 'Standard' END AS price_category
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+OuterJoinResult AS (
+    SELECT pc.p_partkey, pc.p_name, pc.available_quantity, so.total_supplycost, 
+           rc.total_spent, 
+           CASE 
+               WHEN rc.total_spent IS NULL THEN 'No Orders' 
+               ELSE 'Has Orders' 
+           END AS order_status
+    FROM PartDetails pc
+    FULL OUTER JOIN SupplierInfo so ON pc.p_partkey = so.total_parts
+    LEFT JOIN FilteredCustomers rc ON so.s_suppkey = rc.c_custkey
+)
+SELECT DISTINCT order_status, COUNT(*) AS total_records,
+       STRING_AGG(CONCAT(p_name, ' - ', price_category), '; ') AS part_names
+FROM OuterJoinResult
+WHERE available_quantity IS NOT NULL AND total_supplycost IS NOT NULL
+GROUP BY order_status
+ORDER BY total_records DESC
+LIMIT 5;

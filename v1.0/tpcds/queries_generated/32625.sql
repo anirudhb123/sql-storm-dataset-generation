@@ -1,0 +1,80 @@
+
+WITH RECURSIVE recent_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sale_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY 
+        ws_item_sk
+),
+total_inventory AS (
+    SELECT 
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+promotions AS (
+    SELECT 
+        p.p_item_sk,
+        AVG(p.p_cost) AS avg_cost
+    FROM 
+        promotion p
+    GROUP BY 
+        p.p_item_sk
+),
+month_sales AS (
+    SELECT 
+        EXTRACT(MONTH FROM dd.d_date) AS sale_month, 
+        ws.ws_item_sk AS item_id,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        sale_month, ws.ws_item_sk
+),
+aggregated_data AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_sales,
+        COALESCE(i.total_inventory, 0) AS total_inventory,
+        COALESCE(p.avg_cost, 0) AS avg_cost,
+        COALESCE(m.total_quantity, 0) AS total_quantity
+    FROM 
+        recent_sales r
+    LEFT JOIN 
+        total_inventory i ON r.ws_item_sk = i.inv_item_sk
+    LEFT JOIN 
+        promotions p ON r.ws_item_sk = p.p_item_sk
+    LEFT JOIN 
+        month_sales m ON r.ws_item_sk = m.item_id
+    WHERE 
+        r.sale_rank = 1
+)
+SELECT 
+    a.ws_item_sk, 
+    a.total_sales, 
+    a.total_inventory, 
+    a.avg_cost, 
+    a.total_quantity, 
+    CASE 
+        WHEN a.total_sales IS NULL OR a.total_sales = 0 THEN NULL 
+        ELSE (a.total_sales / NULLIF(a.total_quantity, 0)) 
+    END AS sales_per_quantity,
+    CASE 
+        WHEN a.avg_cost = 0 THEN 'No cost' 
+        ELSE 'Cost calculated' 
+    END AS cost_status
+FROM 
+    aggregated_data a
+ORDER BY 
+    sales_per_quantity DESC
+LIMIT 10;

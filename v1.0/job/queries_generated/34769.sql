@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        1 AS depth 
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year = 2020
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        kt.title, 
+        mh.depth + 1 
+    FROM 
+        movie_link ml 
+    JOIN 
+        kind_type kt ON kt.id = ml.link_type_id 
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COUNT(DISTINCT c.id) AS total_cast,
+    AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    MAX(mh.depth) AS hierarchy_depth
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON c.person_id = ak.person_id
+JOIN 
+    aka_title mt ON mt.id = c.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = mt.id
+WHERE 
+    ak.name IS NOT NULL
+    AND mt.production_year > 2010
+GROUP BY 
+    ak.name, mt.title
+HAVING 
+    COUNT(DISTINCT c.id) > 2
+ORDER BY 
+    hierarchy_depth DESC, 
+    total_cast DESC;

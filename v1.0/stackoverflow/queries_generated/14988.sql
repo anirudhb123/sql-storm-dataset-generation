@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.CommentCount,
+        P.AnswerCount,
+        P.FavoriteCount,
+        AVG(V.BountyAmount) AS AverageBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId, P.CreationDate, P.ViewCount, P.Score, P.CommentCount, P.AnswerCount, P.FavoriteCount
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.CommentCount,
+    U.BadgeCount,
+    P.PostId,
+    P.ViewCount,
+    P.Score,
+    P.AnswerCount,
+    P.CommentCount,
+    P.FavoriteCount,
+    P.AverageBounty
+FROM 
+    UserStatistics U
+JOIN 
+    PostStatistics P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 100;

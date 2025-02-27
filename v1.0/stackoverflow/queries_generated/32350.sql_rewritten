@@ -1,0 +1,51 @@
+WITH RecursiveTopUsers AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 1000
+),
+UserPosts AS (
+    SELECT p.OwnerUserId, COUNT(p.Id) AS PostCount, 
+           SUM(p.Score) AS TotalScore, 
+           AVG(p.ViewCount) AS AvgViewCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserBadges AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount,
+           STRING_AGG(b.Name, ', ') AS Badges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, 
+           ph.UserId, u.DisplayName AS EditorName
+    FROM PostHistory ph
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentPostChanges AS (
+    SELECT pd.PostId, COUNT(pd.Id) AS ChangeCount,
+           MAX(pd.CreationDate) AS LastChangeDate
+    FROM PostHistoryDetails pd
+    WHERE pd.PostHistoryTypeId IN (4, 5, 10)
+    GROUP BY pd.PostId
+)
+SELECT u.Id, u.DisplayName, 
+       COALESCE(up.PostCount, 0) AS PostCount, 
+       COALESCE(up.TotalScore, 0) AS TotalScore,
+       COALESCE(up.AvgViewCount, 0) AS AvgViewCount,
+       COALESCE(ub.BadgeCount, 0) AS BadgeCount, 
+       COALESCE(ub.Badges, 'None') AS Badges,
+       COALESCE(rp.ChangeCount, 0) AS RecentChangeCount,
+       rp.LastChangeDate
+FROM RecursiveTopUsers u
+LEFT JOIN UserPosts up ON u.Id = up.OwnerUserId
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN RecentPostChanges rp ON rp.PostId IN (
+    SELECT p.Id 
+    FROM Posts p 
+    WHERE p.OwnerUserId = u.Id
+)
+WHERE u.Rank <= 50
+ORDER BY u.Rank;

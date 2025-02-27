@@ -1,0 +1,47 @@
+
+WITH AddressData AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+DemographicData AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM customer_demographics cd
+),
+AggregatedData AS (
+    SELECT
+        ad.full_name,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_country,
+        dd.cd_gender,
+        dd.cd_marital_status,
+        dd.cd_purchase_estimate,
+        COUNT(sr.returned_date_sk) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount
+    FROM AddressData ad
+    LEFT JOIN DemographicData dd ON ad.c_customer_sk = dd.cd_demo_sk
+    LEFT JOIN store_returns sr ON ad.c_customer_sk = sr.sr_customer_sk
+    GROUP BY ad.full_name, ad.ca_city, ad.ca_state, ad.ca_country, dd.cd_gender, dd.cd_marital_status, dd.cd_purchase_estimate
+)
+SELECT 
+    CONCAT(full_name, ', ', ca_city, ', ', ca_state, ', ', ca_country) AS customer_location,
+    cd_gender,
+    cd_marital_status,
+    cd_purchase_estimate,
+    total_returns,
+    total_return_amount
+FROM AggregatedData
+WHERE cd_purchase_estimate > 1000
+ORDER BY total_return_amount DESC
+LIMIT 50;

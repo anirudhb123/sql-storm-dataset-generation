@@ -1,0 +1,72 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        t.kind_id, 
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT m.id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        aka_name an ON at.id = an.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        name n ON ci.person_id = n.imdb_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+MostPopularTitles AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        rank = 1
+)
+SELECT 
+    m.title AS movie_title, 
+    m.production_year, 
+    c.name AS company_name, 
+    STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords, 
+    STRING_AGG(DISTINCT CONCAT(n.name, ' (', rt.role, ')') ORDER BY n.name) AS cast
+FROM 
+    MostPopularTitles m
+JOIN 
+    movie_companies mc ON m.title_id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_keyword mk ON m.title_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    complete_cast cc ON m.title_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    name n ON ci.person_id = n.imdb_id
+JOIN 
+    role_type rt ON ci.role_id = rt.id
+GROUP BY 
+    m.title_id, m.title, m.production_year, c.name
+ORDER BY 
+    m.production_year DESC, 
+    movie_title;

@@ -1,0 +1,31 @@
+-- Performance Benchmarking Query
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    COALESCE(p.AnswerCount, 0) AS AnswerCount,
+    COALESCE(p.CommentCount, 0) AS CommentCount,
+    COALESCE(p.FavoriteCount, 0) AS FavoriteCount,
+    u.Reputation AS OwnerReputation,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(ph.CreationDate) AS LastHistoryChange
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])  -- Extracting tags
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01'  -- Filter for posts created this year
+GROUP BY 
+    p.Id, u.Reputation, u.DisplayName
+ORDER BY 
+    p.ViewCount DESC;  -- Order by view count for benchmarking

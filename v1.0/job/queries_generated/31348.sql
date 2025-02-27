@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000 AND mt.kind_id = 1 -- Assuming '1' is for movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id AS parent_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = mh.movie_id
+     AND cc.status_id IS NOT NULL) AS cast_count,
+    (SELECT STRING_AGG(an.name, ', ') 
+     FROM aka_name an 
+     JOIN cast_info ci ON an.person_id = ci.person_id 
+     WHERE ci.movie_id = mh.movie_id) AS cast_names,
+    COALESCE((SELECT COUNT(DISTINCT mc.company_id) 
+              FROM movie_companies mc 
+              WHERE mc.movie_id = mh.movie_id), 0) AS company_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS row_num,
+    mh.depth
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+WHERE 
+    mk.keyword_id IN (SELECT id FROM keyword WHERE keyword IN ('Action', 'Drama'))
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth
+ORDER BY 
+    mh.production_year DESC, mh.title;

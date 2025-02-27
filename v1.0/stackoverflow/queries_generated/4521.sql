@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+CommentCounts AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            MAX(Class) AS Class 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- closed or reopened posts
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    uc.DisplayName,
+    uc.Reputation,
+    cc.TotalComments,
+    COALESCE(cp.CloseCount, 0) AS CloseStatus,
+    CASE 
+        WHEN uc.BadgeClass = 1 THEN 'Gold'
+        WHEN uc.BadgeClass = 2 THEN 'Silver'
+        WHEN uc.BadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS UserBadge
+FROM 
+    RankedPosts p
+JOIN 
+    UserReputation uc ON p.OwnerUserId = uc.UserId
+LEFT JOIN 
+    CommentCounts cc ON p.PostId = cc.PostId
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.rn = 1 
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 100;

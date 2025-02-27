@@ -1,0 +1,50 @@
+
+WITH RECURSIVE order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice, 1 AS lvl,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT os.o_orderkey, os.o_orderstatus, os.o_orderdate, os.o_totalprice, lvl + 1,
+           ROW_NUMBER() OVER (PARTITION BY os.o_orderkey ORDER BY os.o_orderdate DESC)
+    FROM order_summary os
+    JOIN orders o ON os.o_orderkey = o.o_orderkey AND os.lvl < 3
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, s.s_name, s.s_acctbal,
+           LEAD(s.s_acctbal) OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS next_acctbal,
+           CASE 
+               WHEN ps.ps_availqty IS NULL THEN 'No Availability'
+               ELSE 'Available'
+           END AS availability
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus
+),
+total_sales AS (
+    SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS grand_total
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+)
+SELECT c.c_name, coso.order_rank, ps.p_name, ps.availability,
+       CASE 
+           WHEN ps.next_acctbal IS NULL THEN 'No Next'
+           ELSE CAST(ps.next_acctbal AS CHAR(10))
+       END AS next_account_bal,
+       ts.grand_total
+FROM customer_order_summary coso
+JOIN part_supplier ps ON coso.o_orderkey = ps.ps_suppkey
+CROSS JOIN total_sales ts
+WHERE coso.total_amount > (SELECT AVG(total_amount) FROM customer_order_summary)
+  AND (coso.o_orderstatus = 'F' OR (o.o_orderdate IS NOT NULL AND o.o_orderdate < DATE '1998-10-01'))
+ORDER BY coso.order_rank DESC, ts.grand_total DESC
+LIMIT 10 OFFSET 2;

@@ -1,0 +1,108 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerUserId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(UPV.Score) AS AverageScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(v.BountyAmount) DESC) AS BountyRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    LEFT JOIN 
+        (SELECT 
+            PostId,
+            SUM(Score) AS Score
+         FROM 
+            Votes 
+         WHERE 
+            VoteTypeId IN (2, 3)  
+         GROUP BY 
+            PostId) UPV ON p.Id = UPV.PostId
+    WHERE 
+        u.Reputation > 100 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounties,
+        TotalPosts,
+        AverageScore,
+        BountyRank
+    FROM 
+        UserStatistics
+    WHERE 
+        BountyRank <= 10
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    ps.OwnerDisplayName,
+    ps.PostCount,
+    COALESCE(phs.EditCount, 0) AS TotalEdits,
+    phs.LastEditDate,
+    phs.EditTypes,
+    tp.TotalBounties
+FROM 
+    Posts p
+INNER JOIN 
+    (SELECT 
+        Posts.OwnerUserId, 
+        COUNT(*) AS PostCount 
+     FROM 
+        Posts 
+     WHERE 
+        PostTypeId = 1 
+     GROUP BY 
+        Posts.OwnerUserId) ps ON p.OwnerUserId = ps.OwnerUserId
+LEFT JOIN 
+    PostHistoryStats phs ON p.Id = phs.PostId
+LEFT JOIN 
+    TopUsers tp ON p.OwnerUserId = tp.UserId
+WHERE 
+    p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 DAYS'
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.level < 5
+),
+actor_details AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(ci.movie_id) AS num_movies,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movies,
+        AVG(COALESCE(mi.info::numeric, 0)) AS avg_rating
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY ak.person_id, ak.name
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.id) AS num_roles
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, c.name, ct.kind
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    ad.name AS actor_name,
+    ad.num_movies AS actor_movie_count,
+    ad.movies AS actor_movies,
+    cd.company_name,
+    cd.company_type,
+    cd.num_roles AS num_roles_in_movie,
+    (SELECT MAX(mi.info) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mh.movie_id AND mi.info_type_id IS NOT NULL) AS highest_rating
+FROM movie_hierarchy mh
+LEFT JOIN actor_details ad ON ad.num_movies > 0
+LEFT JOIN company_details cd ON cd.movie_id = mh.movie_id
+WHERE mh.production_year IS NOT NULL
+AND cd.company_name IS NOT NULL
+ORDER BY mh.production_year DESC, ad.num_movies DESC, mh.title;

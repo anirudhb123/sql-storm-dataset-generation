@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(cs.company_count, 0) AS company_count,
+    COALESCE(cs.companies, 'Unknown Companies') AS companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieKeywords mk ON rm.id = mk.movie_id
+LEFT JOIN 
+    CompanyStats cs ON rm.id = cs.movie_id
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC,
+    rm.title;

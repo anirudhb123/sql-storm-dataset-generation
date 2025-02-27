@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+), CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(CASE 
+                WHEN o.o_orderstatus = 'F' THEN o.o_totalprice 
+                ELSE 0 
+            END) AS total_fulfilled,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+), OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_fulfilled,
+    cs.total_orders,
+    cs.last_order_date,
+    COALESCE(s.part_details, 'No Parts') AS part_details,
+    ROW_NUMBER() OVER (ORDER BY cs.total_fulfilled DESC) AS customer_rank,
+    LOADING.GREATEST(COALESCE(ols.avg_price_after_discount, 0), 0) AS maximum_avg_price
+FROM 
+    CustomerSummary cs
+LEFT JOIN 
+    (SELECT 
+        psd.s_name || ' supplies ' || COUNT(psd.p_partkey) || ' parts.' AS part_details
+     FROM 
+        SupplierPartDetails psd
+     GROUP BY 
+        psd.s_name) AS s ON cs.c_custkey = 1 -- Assuming filter for a specific customer for demonstration
+LEFT JOIN 
+    OrderLineSummary ols ON ols.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cs.c_custkey)
+WHERE 
+    (cs.total_orders > 0 OR cs.total_fulfilled > 0)
+AND 
+    cs.last_order_date IS NOT NULL
+ORDER BY 
+    customer_rank;

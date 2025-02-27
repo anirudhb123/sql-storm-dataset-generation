@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankInType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2)  
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankInType <= 5  
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(c.Text, ' | ') AS AllComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.Score,
+    tp.ViewCount,
+    tp.CreationDate,
+    tp.CommentCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    pc.AllComments,
+    CASE 
+        WHEN pvs.UpVotes IS NULL THEN 'No votes yet'
+        ELSE 'Has votes'
+    END AS VoteStatus,
+    CASE 
+        WHEN tp.CommentCount > 0 THEN 'Popular'
+        ELSE 'Not popular'
+    END AS PopularityStatus
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostVoteStats pvs ON tp.PostId = pvs.PostId
+LEFT JOIN 
+    PostComments pc ON tp.PostId = pc.PostId
+WHERE 
+    tp.Score > 10  
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

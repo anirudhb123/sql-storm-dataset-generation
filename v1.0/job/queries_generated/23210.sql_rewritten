@@ -1,0 +1,82 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count
+    FROM 
+        RankedTitles
+    WHERE 
+        rank <= 5
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(*) >= 3
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    a.actor_name,
+    a.movie_count,
+    m.title AS movie_title,
+    m.production_year,
+    c.company_name,
+    c.company_type,
+    mw.keywords,
+    CASE 
+        WHEN mw.keywords IS NOT NULL THEN true 
+        ELSE false 
+    END AS has_keywords
+FROM 
+    TopActors a
+JOIN 
+    RankedTitles r ON a.actor_name = r.actor_name
+JOIN 
+    MoviesWithKeywords mw ON r.id = mw.movie_id
+LEFT JOIN 
+    CompanyMovies c ON r.movie_id = c.movie_id
+WHERE 
+    r.rank <= 5
+    AND r.production_year > (SELECT AVG(production_year) FROM aka_title) 
+ORDER BY 
+    a.movie_count DESC,
+    r.production_year DESC
+LIMIT 20;

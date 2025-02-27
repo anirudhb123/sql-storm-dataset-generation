@@ -1,0 +1,67 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk AS customer_id,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS return_transactions
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+FilteredReturns AS (
+    SELECT 
+        cr.customer_id,
+        cr.total_returned_quantity,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON cr.customer_id = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) 
+                                    FROM customer_demographics 
+                                    WHERE cd_gender = 'F')
+),
+TopReturns AS (
+    SELECT 
+        fr.customer_id,
+        fr.total_returned_quantity,
+        ROW_NUMBER() OVER (ORDER BY fr.total_returned_quantity DESC) AS rank
+    FROM 
+        FilteredReturns fr
+    WHERE 
+        fr.total_returned_quantity > (
+            SELECT COALESCE(NULLIF(SUM(total_returned_quantity), 0), 10) 
+            FROM FilteredReturns) / 10
+        )
+)
+
+SELECT 
+    fb.customer_id,
+    fb.total_returned_quantity,
+    SUM(COALESCE(ws.ws_net_paid, 0)) AS total_spent,
+    COUNT(DISTINCT ws.ws_order_number) AS num_orders,
+    CASE 
+        WHEN fb.total_returned_quantity > 100 THEN 'High Returner'
+        WHEN fb.total_returned_quantity BETWEEN 50 AND 100 THEN 'Medium Returner'
+        ELSE 'Low Returner'
+    END AS return_category,
+    STRING_AGG(DISTINCT sm.sm_carrier, ', ') AS shipment_methods
+FROM 
+    TopReturns fb
+LEFT JOIN 
+    web_sales ws ON fb.customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+GROUP BY 
+    fb.customer_id, fb.total_returned_quantity
+HAVING 
+    total_spent > (SELECT AVG(ws_net_paid) FROM web_sales)
+ORDER BY 
+    total_returned_quantity DESC, num_orders DESC;

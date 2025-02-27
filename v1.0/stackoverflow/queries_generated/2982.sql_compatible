@@ -1,0 +1,55 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+), 
+RecentPosts AS (
+    SELECT P.Id AS PostId, 
+           P.Title,
+           P.CreationDate,
+           U.DisplayName AS Author,
+           COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+           SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties,
+           SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.CreationDate, U.DisplayName
+), 
+PostStatistics AS (
+    SELECT RP.PostId, 
+           RP.Title,
+           RP.CreationDate,
+           RP.Author,
+           RP.CommentCount,
+           RP.TotalBounties,
+           RP.UpVotes,
+           RP.RelatedPostsCount,
+           (SELECT COUNT(*) 
+            FROM Votes V 
+            WHERE V.PostId = RP.PostId AND V.VoteTypeId = 3) AS DownVotes,
+           (SELECT COUNT(*) 
+            FROM PostHistory PH 
+            WHERE PH.PostId = RP.PostId AND PH.PostHistoryTypeId = 10) AS CloseCount
+    FROM RecentPosts RP
+), 
+FinalResults AS (
+    SELECT PS.*, 
+           U.ReputationRank,
+           CASE 
+               WHEN PS.UpVotes > (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PS.PostId AND V.VoteTypeId = 3) THEN 'Positive' 
+               WHEN PS.UpVotes < (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PS.PostId AND V.VoteTypeId = 3) THEN 'Negative' 
+               ELSE 'Neutral' 
+           END AS PostSentiment
+    FROM PostStatistics PS
+    LEFT JOIN UserReputation U ON PS.Author = U.DisplayName
+)
+SELECT *
+FROM FinalResults
+WHERE ReputationRank <= 10 AND CloseCount = 0
+ORDER BY TotalBounties DESC, UpVotes DESC;

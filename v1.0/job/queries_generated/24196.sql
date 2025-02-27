@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ki.kind, 'Unknown') AS kind,
+        COALESCE(AVG(CAST(p.info AS DECIMAL)), 0) AS average_rating,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC, m.title) AS release_order
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id 
+    LEFT JOIN info_type it ON mi.info_type_id = it.id AND it.info = 'rating'
+    LEFT JOIN kind_type ki ON m.kind_id = ki.id
+    GROUP BY m.id, m.title, m.production_year, ki.kind
+),
+MovieWithCast AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COUNT(c.person_id) AS cast_count
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id 
+    GROUP BY c.movie_id
+),
+MoviesWithLinks AS (
+    SELECT 
+        ml.movie_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count
+    FROM movie_link ml
+    GROUP BY ml.movie_id
+),
+FinalMovieStats AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.kind,
+        COALESCE(mc.cast_names, 'No Cast') AS cast_names,
+        COALESCE(mc.cast_count, 0) AS cast_count,
+        COALESCE(ml.linked_movies_count, 0) AS linked_movies_count,
+        m.average_rating,
+        CASE 
+            WHEN m.average_rating IS NULL THEN 'Rating Info Missing' 
+            WHEN m.average_rating < 5 THEN 'Poor Rating'
+            WHEN m.average_rating BETWEEN 5 AND 7 THEN 'Average Rating'
+            ELSE 'Good Rating'
+        END AS rating_description,
+        CASE 
+            WHEN m.production_year IS NULL THEN 'Year Not Available'
+            WHEN m.production_year < 2000 THEN 'Classic Movie'
+            WHEN m.production_year BETWEEN 2000 AND 2010 THEN 'Modern Movie'
+            ELSE 'Recent Movie'
+        END AS movie_age_category
+    FROM MovieCTE m
+    LEFT JOIN MovieWithCast mc ON m.movie_id = mc.movie_id
+    LEFT JOIN MoviesWithLinks ml ON m.movie_id = ml.movie_id
+)
+
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.kind,
+    f.cast_names,
+    f.cast_count,
+    f.linked_movies_count,
+    f.average_rating,
+    f.rating_description,
+    f.movie_age_category
+FROM FinalMovieStats f
+WHERE 
+    f.production_year IS NOT NULL 
+    AND (
+        f.average_rating > 0 
+        OR f.cast_count > 0 
+        OR f.linked_movies_count > 0
+    )
+ORDER BY f.production_year DESC, f.title;

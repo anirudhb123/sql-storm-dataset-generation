@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title, 
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_year
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.id) AS num_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        MAX(mi.info) AS max_info,
+        MIN(CASE WHEN it.info = 'Rating' THEN mi.info END) AS rating
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    cm.company_name,
+    cm.company_type,
+    mi.max_info,
+    mi.rating
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyMovies cm ON rm.title = (SELECT title FROM aka_title WHERE id = cm.movie_id)
+LEFT JOIN 
+    MovieInfo mi ON rm.production_year = mi.movie_id
+WHERE 
+    rm.rank_year <= 10 AND 
+    (mi.rating IS NULL OR mi.rating > 7.0)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.total_cast DESC;

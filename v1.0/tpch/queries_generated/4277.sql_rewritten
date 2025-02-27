@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 2
+),
+PartSupplierData AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+AggregatedData AS (
+    SELECT ps.p_partkey, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM PartSupplierData ps
+    GROUP BY ps.p_partkey
+)
+SELECT 
+    ch.c_name,
+    ch.o_orderdate,
+    COUNT(DISTINCT li.l_orderkey) AS lineitem_count,
+    COALESCE(SUM(ls.total_revenue), 0) AS total_revenue,
+    (SELECT COUNT(*) FROM SupplierHierarchy) AS active_suppliers,
+    AVG(ad.avg_supply_cost) AS avg_part_cost,
+    ad.total_available
+FROM CustomerOrders ch
+LEFT JOIN LineItemStats ls ON ch.o_orderkey = ls.l_orderkey
+LEFT JOIN AggregatedData ad ON ad.p_partkey IN (
+    SELECT ps.p_partkey
+    FROM PartSupplierData ps
+    WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM SupplierHierarchy)
+)
+LEFT JOIN lineitem li ON ch.o_orderkey = li.l_orderkey
+WHERE ch.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY ch.c_name, ch.o_orderdate, ad.total_available
+HAVING COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY total_revenue DESC, ch.c_name;

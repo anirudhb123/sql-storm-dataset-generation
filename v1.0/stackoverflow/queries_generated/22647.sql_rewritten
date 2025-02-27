@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.PostTypeId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Ranking
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+AnswerCountCTE AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+QuestionTitles AS (
+    SELECT 
+        p.Id,
+        COALESCE(NULLIF(p.Title, ''), 'Untitled Question') AS Title
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    qp.PostId,
+    qt.Title,
+    qp.Score,
+    ac.AnswerCount,
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgScore,
+    CASE 
+        WHEN qp.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerAcceptance,
+    CASE 
+        WHEN qp.Ranking < 6 THEN 'Top 5 Post for this type'
+        ELSE 'Below Top 5 Post for this type'
+    END AS PostRankingStatus
+FROM 
+    RankedPosts qp
+LEFT JOIN 
+    AnswerCountCTE ac ON qp.PostId = ac.PostId
+LEFT JOIN 
+    QuestionTitles qt ON qp.PostId = qt.Id
+LEFT JOIN 
+    TagStatistics ts ON ts.PostCount > 0
+WHERE 
+    ts.AvgScore IS NOT NULL
+    AND ts.PostCount > 2
+ORDER BY 
+    qp.Score DESC, qt.Title ASC;

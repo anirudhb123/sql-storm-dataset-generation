@@ -1,0 +1,65 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+), ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+), MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+), MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_details
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info IS NOT NULL
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    ar.actor_name,
+    ar.role,
+    COALESCE(mk.keyword, 'N/A') AS keyword,
+    COALESCE(mk_info.info_details, 'N/A') AS additional_info,
+    mc.companies
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorRoles ar ON rt.title_id = ar.movie_id
+LEFT JOIN 
+    keyword mk ON rt.title_id = mk.movie_id
+LEFT JOIN 
+    MovieInfo mk_info ON rt.title_id = mk_info.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON rt.title_id = mc.movie_id
+WHERE 
+    rt.title_rank <= 3
+ORDER BY 
+    rt.production_year, rt.title;

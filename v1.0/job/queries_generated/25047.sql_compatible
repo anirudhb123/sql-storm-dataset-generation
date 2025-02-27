@@ -1,0 +1,38 @@
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.role_id AS character_role,
+    k.keyword AS movie_keyword,
+    STRING_AGG(DISTINCT p.info ORDER BY p.info_type_id) AS additional_info,
+    COUNT(DISTINCT mc.company_id) AS production_companies_count,
+    AVG(CASE WHEN ti.info IS NOT NULL THEN 1 ELSE 0 END) * 100 AS completeness_percentage
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    kind_type kt ON t.kind_id = kt.id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    movie_info_idx ti ON t.id = ti.movie_id AND it.id = ti.info_type_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND k.keyword IS NOT NULL
+GROUP BY 
+    a.name, t.title, c.role_id, k.keyword
+ORDER BY 
+    completeness_percentage DESC, actor_name;

@@ -1,0 +1,80 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    INNER JOIN 
+        RecursivePosts rp ON a.Id = rp.PostId
+), RankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        u.DisplayName AS Owner,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS OwnerRank
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, u.DisplayName, rp.OwnerUserId
+), FilteredPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Owner,
+        fp.CommentCount,
+        fp.UpVotes,
+        fp.DownVotes,
+        CASE 
+            WHEN fp.CommentCount > 10 THEN 'Highly Discussed'
+            WHEN fp.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+            ELSE 'Less Discussed'
+        END AS DiscussionLevel
+    FROM 
+        RankedPosts fp
+    WHERE 
+        fp.OwnerRank <= 5  
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Owner,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.DiscussionLevel
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistory ph ON fp.PostId = ph.PostId
+WHERE 
+    ph.CreationDate > (SELECT MAX(CreationDate) - INTERVAL '1 year' FROM PostHistory)
+    AND ph.PostHistoryTypeId IN (10, 11)  
+ORDER BY 
+    fp.CommentCount DESC,
+    fp.UpVotes DESC;

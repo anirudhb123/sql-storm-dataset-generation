@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        ARRAY[mt.id] AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1,
+        mh.path || m.id
+    FROM
+        aka_title m
+    INNER JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.depth) AS rank_within_year
+    FROM
+        MovieHierarchy mh
+),
+CompanyStats AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        movie_info mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+    WHERE
+        mi.info IS NOT NULL
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.depth,
+    rm.rank_within_year,
+    cs.total_companies,
+    cs.company_names,
+    CASE
+        WHEN rm.depth = 1 THEN 'Main Movie'
+        WHEN rm.depth > 1 THEN 'Episode'
+        ELSE 'Unknown'
+    END AS movie_type
+FROM
+    RankedMovies rm
+LEFT JOIN
+    CompanyStats cs ON rm.movie_id = cs.movie_id
+WHERE
+    rm.production_year BETWEEN 2000 AND 2023
+    AND (cs.total_companies IS NOT NULL OR rm.rank_within_year < 5)
+ORDER BY
+    rm.production_year DESC, rm.rank_within_year ASC, rm.title;

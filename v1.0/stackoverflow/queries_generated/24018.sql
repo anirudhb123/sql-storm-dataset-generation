@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1
+        AND P.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.PostHistoryTypeId,
+        MIN(PH.CreationDate) AS FirstActivityDate,
+        MAX(PH.CreationDate) AS LastActivityDate,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenActions,
+        COUNT(*) AS TotalHistories
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, 
+        PH.UserId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges,
+        COALESCE(PA.LastActivityDate, '1900-01-01') AS LastActivityDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(RP.Score) AS TotalScore,
+        SUM(RP.UpVotes) AS TotalUpVotes,
+        SUM(RP.DownVotes) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges B ON U.Id = B.UserId
+    LEFT JOIN 
+        RankedPosts RP ON U.Id = RP.OwnerUserId
+    LEFT JOIN 
+        PostActivity PA ON PA.UserId = U.Id
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, B.GoldBadges, B.SilverBadges, B.BronzeBadges
+)
+SELECT 
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalScore,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    US.GoldBadges,
+    US.SilverBadges,
+    US.BronzeBadges,
+    COALESCE(RP.Title, 'No Posts') AS TopPostTitle,
+    RP.Score AS TopPostScore,
+    COALESCE(to_char(RP.CreationDate, 'MM/DD/YYYY'), 'N/A') AS TopPostCreationDate
+FROM 
+    UserStats US
+LEFT JOIN 
+    RankedPosts RP ON US.UserId = RP.OwnerUserId AND RP.ScoreRank = 1
+WHERE 
+    US.TotalPosts > 5 
+    AND (US.LastActivityDate < (CURRENT_DATE - INTERVAL '6 months') OR US.LastActivityDate IS NULL)
+ORDER BY 
+    US.Reputation DESC, 
+    US.TotalScore DESC;

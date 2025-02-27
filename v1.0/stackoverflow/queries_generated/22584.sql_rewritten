@@ -1,0 +1,95 @@
+WITH RankedUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        NTILE(4) OVER (ORDER BY Reputation) AS ReputationQuartile
+    FROM 
+        Users
+), 
+
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MAX(PH.CreationDate), P.CreationDate) AS LastActivity
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title
+), 
+
+ClosedPosts AS (
+    SELECT 
+        P.Id AS ClosedPostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.UserDisplayName,
+        PH.Comment
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+
+PostWithBadges AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        RB.UserId AS BadgeOwnerId,
+        B.Name AS BadgeName,
+        B.Class,
+        PS.TotalComments,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.LastActivity
+    FROM 
+        PostSummary PS
+    LEFT JOIN 
+        Badges B ON PS.PostId = B.UserId
+    LEFT JOIN 
+        RankedUsers RB ON B.UserId = RB.Id
+    WHERE 
+        B.Class = 1 OR B.Class = 2 
+)
+
+SELECT 
+    PWB.PostId,
+    PWB.Title,
+    PWB.TotalComments,
+    PWB.UpVotes,
+    PWB.DownVotes,
+    PWB.LastActivity,
+    CURDATE() - PWB.LastActivity AS DaysSinceLastActivity,
+    COALESCE(CP.ClosedPostId, 'Not Closed') AS CloseStatus,
+    COALESCE(CP.ClosedDate, 'Open Post') AS ClosedDate,
+    COALESCE(CP.UserDisplayName,'N/A') AS ClosedBy,
+    COALESCE(CP.Comment, 'N/A') AS CloseReason,
+    CASE 
+        WHEN PWB.TotalComments > 50 THEN 'High Engagement'
+        WHEN PWB.UpVotes > 100 THEN 'Popular'
+        ELSE 'Normal Activity'
+    END AS ActivityLevel
+FROM 
+    PostWithBadges PWB
+LEFT JOIN 
+    ClosedPosts CP ON PWB.PostId = CP.ClosedPostId
+WHERE 
+    PWB.TotalComments BETWEEN 10 AND 1000
+ORDER BY 
+    PWB.UpVotes DESC, 
+    PWB.LastActivity DESC
+OFFSET 5 ROWS 
+FETCH NEXT 10 ROWS ONLY;

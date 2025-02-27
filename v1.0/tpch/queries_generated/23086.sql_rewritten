@@ -1,0 +1,50 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+ComplexJoin AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        sa.total_cost,
+        r.r_name AS region_name
+    FROM part p
+    JOIN SupplierAggregates sa ON p.p_partkey = sa.ps_partkey
+    JOIN supplier s ON s.s_suppkey = sa.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_seq
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT 
+    COALESCE(cj.p_name, 'Unknown Part') AS part_name,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    AVG(sa.total_cost) AS average_supplier_cost,
+    MAX(fo.o_totalprice) AS max_order_value,
+    SUM(CASE WHEN fo.o_orderkey IS NULL THEN 1 ELSE 0 END) AS null_orders
+FROM ComplexJoin cj
+LEFT JOIN FilteredOrders fo ON cj.p_partkey = fo.o_orderkey 
+LEFT JOIN supplier s ON fo.o_orderkey = s.s_suppkey
+GROUP BY cj.p_name
+HAVING COUNT(DISTINCT fo.o_orderkey) > 5
+ORDER BY max_order_value DESC;

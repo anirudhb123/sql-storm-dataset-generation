@@ -1,0 +1,73 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS title_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+actor_appearance_counts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(t.production_year) AS last_movie_year
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    JOIN title t ON at.id = t.id
+    GROUP BY ci.person_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+highlighted_companies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE ct.kind = 'Distributor'
+)
+SELECT 
+    t.title,
+    t.production_year,
+    an.name AS actor_name,
+    ac.movie_count,
+    kw.keywords,
+    highlighted.company_name,
+    highlighted.company_type,
+    CASE 
+        WHEN ac.movie_count IS NULL THEN 'No Movies'
+        ELSE CONCAT(ac.movie_count, ' Movies') 
+    END AS movie_performance,
+    COALESCE(rt.title_rank, 0) AS title_rank,
+    COALESCE(highlighted.company_name, 'Independent') AS company_info
+FROM title t
+LEFT JOIN ranked_titles rt ON t.id = rt.title_id
+LEFT JOIN cast_info ci ON t.id = ci.movie_id
+LEFT JOIN aka_name an ON ci.person_id = an.person_id
+LEFT JOIN actor_appearance_counts ac ON ci.person_id = ac.person_id
+LEFT JOIN movie_keywords kw ON t.id = kw.movie_id
+LEFT JOIN highlighted_companies highlighted ON t.id = highlighted.movie_id
+WHERE 
+    (t.production_year < 2000 OR t.title ILIKE '%Classic%')
+    AND (an.name IS NOT NULL OR ac.last_movie_year IS NOT NULL)
+GROUP BY 
+    t.title, 
+    t.production_year, 
+    an.name, 
+    ac.movie_count, 
+    kw.keywords, 
+    highlighted.company_name, 
+    highlighted.company_type, 
+    rt.title_rank
+ORDER BY t.production_year DESC, t.title ASC;

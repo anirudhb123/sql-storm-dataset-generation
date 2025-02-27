@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        s_number_employees, 
+        s_floor_space,
+        s_sales_state,
+        ROW_NUMBER() OVER (PARTITION BY s_sales_state ORDER BY s_floor_space DESC) AS rank
+    FROM store
+    WHERE s_rec_start_date <= CURRENT_DATE()
+), 
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM customer AS c
+    INNER JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS customer_rank
+    FROM customer_sales AS cs
+    JOIN customer AS c ON cs.c_customer_sk = c.c_customer_sk
+), 
+combined AS (
+    SELECT 
+        th.s_store_name, 
+        th.s_number_employees, 
+        th.s_floor_space, 
+        tc.c_first_name, 
+        tc.c_last_name, 
+        tc.total_sales, 
+        tc.order_count
+    FROM sales_hierarchy AS th
+    LEFT JOIN top_customers AS tc ON th.rank <= 10
+)
+SELECT 
+    c.s_store_name, 
+    c.s_number_employees, 
+    c.s_floor_space, 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    COALESCE(tc.total_sales, 0) AS total_sales,
+    COALESCE(tc.order_count, 0) AS order_count,
+    CASE 
+        WHEN tc.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM sales_hierarchy AS c
+LEFT JOIN top_customers AS tc ON c.s_store_sk = tc.c_customer_sk
+ORDER BY c.s_store_name, total_sales DESC;

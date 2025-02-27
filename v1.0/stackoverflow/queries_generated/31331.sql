@@ -1,0 +1,104 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Start with top-level posts (having no parents)
+    
+    UNION ALL 
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.Id AS PostId,
+        ph.Title,
+        ph.CreationDate,
+        COUNT(DISTINCT ph.UserId) AS CloseVoteCount -- Count unique users who closed posts
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Only considering posts that were closed
+    GROUP BY 
+        ph.Id, ph.Title, ph.CreationDate
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+FinalStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.QuestionCount,
+        us.AnswerCount,
+        us.AvgScore,
+        COALESCE(cp.CloseVoteCount, 0) AS CloseVotes,
+        ra.LastCommentDate,
+        ROW_NUMBER() OVER (ORDER BY us.AvgScore DESC) AS ScoreRank
+    FROM 
+        UserStatistics us
+    LEFT JOIN 
+        ClosedPosts cp ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id IN (SELECT DISTINCT PostId FROM PostHistory WHERE PostHistoryTypeId = 10))
+    LEFT JOIN 
+        RecentActivity ra ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id IN (SELECT DISTINCT PostId FROM Comments))
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.PostCount,
+    fs.QuestionCount,
+    fs.AnswerCount,
+    fs.AvgScore,
+    fs.CloseVotes,
+    fs.LastCommentDate,
+    ph.Title AS TopPostTitle,
+    ph.Level AS PostLevel
+FROM 
+    FinalStats fs
+LEFT JOIN 
+    PostHierarchy ph ON fs.UserId = ph.OwnerUserId
+WHERE 
+    fs.ScoreRank <= 10 -- Top 10 users based on average score
+ORDER BY 
+    fs.AvgScore DESC, fs.PostCount DESC;

@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank,
+        SUM(l.l_discount) AS total_discount
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        NULLIF(c.c_acctbal, 0) AS adjusted_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_mktsegment='BUILDING'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT 
+    ci.c_name,
+    ci.nation_name,
+    COUNT(ro.o_orderkey) AS order_count,
+    SUM(ro.total_discount) AS total_discount,
+    MAX(sd.total_supplycost) AS max_supply_cost
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    RankedOrders ro ON ci.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+LEFT JOIN 
+    SupplierDetails sd ON EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey) AND ps.ps_suppkey = sd.s_suppkey)
+WHERE 
+    ci.adjusted_acctbal IS NOT NULL AND 
+    (ci.nation_name LIKE 'A%' OR ci.nation_name IS NULL)
+GROUP BY 
+    ci.c_name, ci.nation_name
+HAVING 
+    COUNT(ro.o_orderkey) > 5 AND 
+    MAX(sd.total_supplycost) < (SELECT SUM(total_supplycost) / COUNT(DISTINCT s_suppkey) FROM SupplierDetails)
+ORDER BY 
+    total_discount DESC, ci.nation_name ASC
+FETCH FIRST 10 ROWS ONLY;

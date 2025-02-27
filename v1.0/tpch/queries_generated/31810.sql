@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.level * 1000
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+FrequentParts AS (
+    SELECT ps.ps_partkey, COUNT(*) AS purchase_count
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2023-10-01'
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(*) > 50
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS brand_rank,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM part p
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN supplier s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN TopCustomers tc ON tc.c_custkey = s.s_nationkey
+WHERE p.p_retailprice > 100
+AND EXISTS (SELECT 1 FROM FrequentParts fp WHERE fp.ps_partkey = p.p_partkey)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, n.n_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 50000
+ORDER BY total_revenue DESC, brand_rank;

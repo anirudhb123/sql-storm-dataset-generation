@@ -1,0 +1,75 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_name LIKE 'A%'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_custkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS gross_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+part_avg_price AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10
+    GROUP BY p.p_partkey
+),
+nation_supplier AS (
+    SELECT n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+    HAVING COUNT(s.s_suppkey) > 0
+)
+SELECT 
+    n.n_name, 
+    ns.unique_suppliers, 
+    COALESCE(os.total_orders, 0) AS total_orders,
+    COALESCE(os.total_spent, 0) AS total_spent,
+    COALESCE(ps.avg_supply_cost, 0) AS avg_supply_cost,
+    SUM(CASE 
+        WHEN ls.gross_revenue > 1000 THEN 1 
+        ELSE 0 
+    END) OVER (PARTITION BY n.n_nationkey) AS high_revenue_orders
+FROM nation n
+LEFT JOIN nation_supplier ns ON n.n_nationkey = ns.n_nationkey
+LEFT JOIN order_summary os ON os.o_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = n.n_nationkey 
+    ORDER BY c.c_acctbal DESC 
+    LIMIT 1
+)
+LEFT JOIN part_avg_price ps ON ps.p_partkey = (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE EXISTS (
+        SELECT 1 
+        FROM supplier_hierarchy sh 
+        WHERE sh.s_nationkey = n.n_nationkey
+        AND sh.level <= 2
+    ) 
+    ORDER BY p.p_retailprice DESC 
+    LIMIT 1
+)
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = os.o_custkey
+)
+GROUP BY n.n_name, ns.unique_suppliers, os.total_orders, os.total_spent, ps.avg_supply_cost
+ORDER BY n.n_name;

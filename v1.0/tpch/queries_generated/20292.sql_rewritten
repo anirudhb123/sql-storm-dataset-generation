@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS VARCHAR(100)) AS hierarchy_path,
+           1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_acctbal,
+           CONCAT(sh.hierarchy_path, ' > ', s2.s_name),
+           sh.hierarchy_level + 1
+    FROM SupplierHierarchy sh
+    JOIN supplier s2 ON sh.s_suppkey = s2.s_suppkey
+    WHERE sh.hierarchy_level < 5
+), 
+
+TotalSales AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_suppkey
+),
+
+NationsWithSales AS (
+    SELECT n.n_name, s.s_nationkey, COALESCE(ts.total_revenue, 0) AS sales_total
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN TotalSales ts ON s.s_suppkey = ts.l_suppkey
+)
+
+SELECT n.n_name, 
+       n.n_nationkey, 
+       ns.sales_total, 
+       COUNT(DISTINCT p.p_partkey) AS unique_parts,
+       MAX(p.p_retailprice) AS highest_price,
+       SUM(NULLIF(ps.ps_availqty, 0)) FILTER (WHERE ps.ps_supplycost > 0) AS total_available_quantity,
+       string_agg(DISTINCT p.p_name, ',') AS part_names,
+       ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY ns.sales_total DESC) AS sales_rank
+FROM NationsWithSales ns
+JOIN partsupp ps ON ns.s_nationkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN SupplierHierarchy sh ON ns.s_nationkey = sh.s_nationkey
+WHERE (ns.sales_total > 10000 OR ns.sales_total IS NULL)
+  AND n.n_name NOT IN ('USA', 'CANADA')
+GROUP BY n.n_name, n.n_nationkey, ns.sales_total
+HAVING MAX(p.p_retailprice) > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY ns.sales_total DESC
+LIMIT 10 OFFSET 5;

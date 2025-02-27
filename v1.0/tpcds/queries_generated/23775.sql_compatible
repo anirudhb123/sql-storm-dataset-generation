@@ -1,0 +1,92 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_quantity) DESC) AS rn
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk, wr_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+InventoryStatus AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+PromotionalSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.web_site_id
+),
+CustomerSummary AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        COUNT(DISTINCT rr.wr_returning_customer_sk) AS total_returns,
+        COALESCE(ps.total_profit, 0) AS total_profit
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        RankedReturns rr ON ci.c_customer_id = rr.wr_returning_customer_sk
+    LEFT JOIN 
+        PromotionalSales ps ON ci.c_customer_id = ps.web_site_id
+    GROUP BY 
+        ci.c_customer_id, ci.c_first_name, ci.c_last_name, ci.cd_gender
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.total_returns,
+    cs.total_profit,
+    CASE 
+        WHEN cs.total_profit > 1000 THEN 'High Value'
+        WHEN cs.total_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    CustomerSummary cs
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM InventoryStatus i
+        WHERE i.inv_item_sk IN (
+            SELECT rr.wr_item_sk 
+            FROM RankedReturns rr 
+            WHERE rr.wr_returning_customer_sk = cs.c_customer_id
+        )
+        AND i.total_quantity < 10
+    )
+ORDER BY 
+    cs.total_profit DESC;

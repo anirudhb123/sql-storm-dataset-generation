@@ -1,0 +1,63 @@
+
+WITH RECURSIVE MovieChains AS (
+    SELECT 
+        mc.movie_id,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS rn,
+        c.name AS company_name
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE ct.kind ILIKE '%Production%'
+),
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ka.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ka.name) AS actor_rank,
+        COALESCE(SUM(CASE WHEN mi.info IS NOT NULL THEN 1 END), 0) AS info_count
+    FROM aka_title at
+    JOIN title t ON at.movie_id = t.id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id AND mi.info_type_id IS NOT NULL
+    GROUP BY t.id, ka.name
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_name,
+        mcc.company_name,
+        mcc.company_type
+    FROM RankedMovies rm
+    LEFT JOIN MovieChains mcc ON rm.title ILIKE '%' || mcc.company_name || '%'
+    WHERE rm.info_count > 1 AND rm.actor_rank <= 5
+),
+FinalOutput AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.actor_name,
+        fm.company_name,
+        fm.company_type,
+        COUNT(*) AS count
+    FROM FilteredMovies fm
+    LEFT JOIN movie_keyword mk ON mk.movie_id = (
+        SELECT id FROM title WHERE title = fm.title LIMIT 1
+    )
+    GROUP BY fm.title, fm.production_year, fm.actor_name, fm.company_name, fm.company_type
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.actor_name,
+    fo.company_name,
+    fo.company_type,
+    fo.count
+FROM FinalOutput fo
+WHERE
+    fo.actor_name IS NOT NULL
+    OR (fo.company_type IS NULL AND fo.company_name IS NOT NULL)
+ORDER BY fo.production_year DESC, fo.title ASC;

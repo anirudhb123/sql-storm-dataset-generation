@@ -1,0 +1,37 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        p.p_partkey,
+        UPPER(p.p_name) AS upper_name,
+        LOWER(p.p_comment) AS lower_comment,
+        LENGTH(p.p_comment) AS comment_length,
+        SUBSTRING_INDEX(p.p_type, ' ', 1) AS first_word_type,
+        REPLACE(p.p_brand, ' ', '') AS brand_no_spaces,
+        TRIM(p.p_name) AS trimmed_name,
+        CONCAT(p.p_name, ' - ', p.p_comment) AS concatenated_info
+    FROM 
+        part p
+)
+
+SELECT 
+    sp.p_partkey,
+    sp.upper_name,
+    sp.lower_comment,
+    sp.comment_length,
+    sp.first_word_type,
+    sp.brand_no_spaces,
+    sp.trimmed_name,
+    sp.concatenated_info,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal
+FROM 
+    StringProcessing sp
+LEFT JOIN 
+    partsupp ps ON sp.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    sp.p_partkey, sp.upper_name, sp.lower_comment, sp.comment_length, 
+    sp.first_word_type, sp.brand_no_spaces, sp.trimmed_name, sp.concatenated_info
+ORDER BY 
+    sp.comment_length DESC, sp.p_partkey;

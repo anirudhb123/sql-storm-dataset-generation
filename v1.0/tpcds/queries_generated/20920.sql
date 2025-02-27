@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.net_paid_inc_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_paid_inc_tax DESC) AS rank_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk, CASE WHEN ws.net_paid_inc_tax IS NULL THEN 0 ELSE 1 END ORDER BY ws.net_paid_inc_tax) AS dense_rank_sales
+    FROM web_sales ws
+    LEFT JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'S')
+        AND EXISTS (
+            SELECT 1 
+            FROM store s 
+            WHERE s.s_store_sk = ws.ws_ship_mode_sk 
+              AND s.s_city LIKE 'New%'
+            HAVING COUNT(s.s_store_sk) > 1
+        )
+),
+SalesSummary AS (
+    SELECT 
+        web_site_sk,
+        SUM(net_paid_inc_tax) AS total_sales,
+        AVG(CASE WHEN rank_sales = 1 THEN net_paid_inc_tax ELSE NULL END) AS top_sales_avg
+    FROM RankedSales
+    GROUP BY web_site_sk
+)
+SELECT 
+    ws.web_site_id,
+    ss.total_sales,
+    COALESCE(ss.top_sales_avg, 0.00) AS top_sales_avg,
+    CASE
+        WHEN ss.total_sales > 10000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM web_site ws
+LEFT JOIN SalesSummary ss ON ws.web_site_sk = ss.web_site_sk
+WHERE 
+    ss.total_sales IS NOT NULL AND (sales_category IS NOT NULL OR ss.top_sales_avg IS NULL)
+    OR ss.total_sales = 0
+ORDER BY sales_category DESC, ss.total_sales DESC;

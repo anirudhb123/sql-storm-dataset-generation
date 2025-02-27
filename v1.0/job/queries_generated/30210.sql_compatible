@@ -1,0 +1,101 @@
+
+WITH RECURSIVE company_hierarchy AS (
+    SELECT 
+        mc.movie_id,
+        c.id AS company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        1 AS level
+    FROM 
+        movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    
+    UNION ALL
+
+    SELECT 
+        h.movie_id,
+        mc.company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        h.level + 1
+    FROM 
+        company_hierarchy h
+    JOIN movie_companies mc ON mc.movie_id = h.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        h.level < 3  
+), 
+famous_actors AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id
+    HAVING 
+        COUNT(ci.movie_id) > 5  
+), 
+movie_kw AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title m
+    JOIN movie_keyword mk ON m.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+), 
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ch.company_name,
+        ch.company_type,
+        f.actor_name,
+        f.movie_count,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN company_hierarchy ch ON ch.movie_id = t.id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN famous_actors f ON ci.person_id = f.actor_id
+    LEFT JOIN movie_kw mk ON mk.title = t.title
+    GROUP BY 
+        t.title, t.production_year, f.actor_name, f.movie_count, ch.company_name, ch.company_type
+), 
+final_output AS (
+    SELECT 
+        title,
+        production_year,
+        STRING_AGG(DISTINCT company_name || ' (' || company_type || ')', ', ') AS companies,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+        MAX(movie_count) AS max_movies_by_actor,
+        SUM(keyword_count) AS total_keywords
+    FROM 
+        movie_details
+    GROUP BY 
+        title, production_year
+)
+
+SELECT 
+    title,
+    production_year,
+    companies,
+    actors,
+    max_movies_by_actor,
+    total_keywords,
+    CASE 
+        WHEN total_keywords > 10 THEN 'High'
+        WHEN total_keywords BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_density
+FROM 
+    final_output
+ORDER BY 
+    production_year DESC, keyword_density DESC;

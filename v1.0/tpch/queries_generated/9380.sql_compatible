@@ -1,0 +1,39 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders AS o
+    JOIN 
+        customer AS c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+),
+TopOrders AS (
+    SELECT 
+        ro.c_mktsegment AS mktsegment,
+        SUM(ro.o_totalprice) AS TotalSales,
+        COUNT(ro.o_orderkey) AS OrderCount
+    FROM 
+        RankedOrders AS ro
+    WHERE 
+        ro.rn <= 10
+    GROUP BY 
+        ro.c_mktsegment
+)
+SELECT 
+    r.r_name,
+    to.TotalSales,
+    to.OrderCount
+FROM 
+    TopOrders AS to
+JOIN 
+    region AS r ON to.mktsegment = r.r_name
+ORDER BY 
+    to.TotalSales DESC;

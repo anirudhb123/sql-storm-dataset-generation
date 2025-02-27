@@ -1,0 +1,42 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.total_revenue,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.revenue_rank <= 10
+)
+SELECT 
+    to.o_orderkey,
+    to.total_revenue,
+    to.c_name,
+    to.c_acctbal,
+    to.nation_name
+FROM 
+    TopOrders to
+ORDER BY 
+    to.total_revenue DESC;

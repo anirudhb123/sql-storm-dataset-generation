@@ -1,0 +1,90 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ph.Level AS PostLevel,
+        u.DisplayName AS UserOwner,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        MAX(CASE WHEN ph.Level = 0 THEN p.CreationDate END) AS TopLevelDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, ph.Level, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        PostLevel, 
+        UserOwner,
+        (Score + CommentCount) * POWER(1.1, PostLevel) AS EngagementScore
+    FROM 
+        PostMetrics
+    WHERE 
+        PostLevel < 3 
+)
+SELECT 
+    fp.Title,
+    fp.UserOwner,
+    (Score + CommentCount) * POWER(1.1, PostLevel) AS EngagementScore,
+    us.TotalBounty,
+    us.TotalUpVotes,
+    us.TotalDownVotes
+FROM 
+    FilteredPosts fp
+JOIN 
+    UserScores us ON fp.UserOwner = us.DisplayName
+WHERE 
+    (Score + CommentCount) * POWER(1.1, PostLevel) > 0
+ORDER BY 
+    EngagementScore DESC
+LIMIT 10;

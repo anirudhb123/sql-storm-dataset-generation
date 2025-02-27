@@ -1,0 +1,70 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        COUNT(DISTINCT mc.company_id) AS production_companies_count,
+        COUNT(DISTINCT mk.keyword) AS keywords_count
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        aka_name AS ak ON t.id = ak.id
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+person_role_details AS (
+    SELECT 
+        pi.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info AS ci
+    JOIN 
+        person_info AS pi ON ci.person_id = pi.person_id
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    GROUP BY 
+        pi.person_id
+),
+rich_movies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        pr.movies_count,
+        pr.roles,
+        md.production_companies_count,
+        md.keywords_count
+    FROM 
+        movie_details AS md
+    LEFT JOIN 
+        person_role_details AS pr ON md.movie_id IN (
+            SELECT movie_id FROM cast_info WHERE person_id IN (
+                SELECT person_id FROM person_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+            )
+        )
+    WHERE 
+        md.production_companies_count > 3 
+        AND md.keywords_count > 5
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    rm.movies_count AS director_movies_count,
+    rm.roles AS director_roles,
+    rm.production_companies_count,
+    rm.keywords_count
+FROM 
+    rich_movies AS rm
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_title;

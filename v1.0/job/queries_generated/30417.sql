@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM
+        MovieHierarchy mh
+),
+CastRoles AS (
+    SELECT
+        ci.movie_id,
+        ct.kind AS role_type,
+        COUNT(ci.person_id) AS actor_count
+    FROM
+        cast_info ci
+    JOIN
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY
+        ci.movie_id, ct.kind
+),
+MovieData AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cr.actor_count, 0) AS actor_count,
+        rm.level,
+        CASE
+            WHEN rm.production_year < 2000 THEN 'Old'
+            WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Recent'
+            ELSE 'New'
+        END AS age_group
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        CastRoles cr ON rm.movie_id = cr.movie_id
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.level,
+    md.age_group,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+FROM
+    MovieData md
+LEFT JOIN
+    aka_name ak ON md.movie_id = ak.movie_id
+WHERE
+    md.actor_count > 0
+GROUP BY
+    md.movie_id, md.title, md.production_year, md.actor_count, md.level, md.age_group
+HAVING
+    md.level = 1 OR md.actor_count > 5
+ORDER BY
+    md.production_year DESC, md.level, md.actor_count DESC;

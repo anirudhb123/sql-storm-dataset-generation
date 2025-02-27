@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.ViewCount IS NOT NULL
+    GROUP BY 
+        p.Id, u.Reputation, p.PostTypeId, p.Title, p.CreationDate, p.ViewCount
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+
+ClosingReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId IN (10, 11)
+    LEFT JOIN 
+        CloseReasonTypes crt ON crt.Id = CAST(ph.Comment AS INT)
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostTypeId,
+    rp.ViewCount,
+    rp.OwnerReputation,
+    rp.ViewRank,
+    COALESCE(phd.LatestEditDate, 'No Edits') AS LatestEditDate,
+    COALESCE(phd.HistoryTypes, 'No History') AS HistoryTypes,
+    COALESCE(cr.CloseReasons, 'Not Closed') AS CloseReasons,
+    rp.CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    ClosingReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    (rp.ViewCount > 1000 OR rp.CommentCount > 5)
+    AND (rp.OwnerReputation BETWEEN 50 AND 200)
+ORDER BY 
+    rp.ViewRank, rp.OwnerReputation DESC
+LIMIT 50;

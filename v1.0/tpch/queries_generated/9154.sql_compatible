@@ -1,0 +1,56 @@
+
+WITH supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS supplied_parts_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+final_report AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        COUNT(DISTINCT ss.s_suppkey) AS supplier_count,
+        SUM(ss.total_supply_value) AS total_value_from_suppliers,
+        COUNT(DISTINCT cos.c_custkey) AS customer_count,
+        SUM(cos.total_spent) AS total_revenue
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier_stats ss ON ss.s_suppkey IN (
+        SELECT s.s_suppkey 
+        FROM supplier s 
+        JOIN nation na ON s.s_nationkey = na.n_nationkey 
+        WHERE na.n_regionkey = r.r_regionkey
+    )
+    LEFT JOIN customer_order_summary cos ON cos.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        JOIN nation na ON c.c_nationkey = na.n_nationkey 
+        WHERE na.n_regionkey = r.r_regionkey
+    )
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    nation,
+    region,
+    supplier_count,
+    total_value_from_suppliers,
+    customer_count,
+    total_revenue
+FROM final_report
+ORDER BY total_revenue DESC, total_value_from_suppliers DESC;

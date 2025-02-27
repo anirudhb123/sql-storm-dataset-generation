@@ -1,0 +1,93 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        cte.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+), PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), UserBadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ubs.GoldBadges,
+    ubs.SilverBadges,
+    ubs.BronzeBadges,
+    COALESCE(u.DisplayName, 'Anonymous') AS UserDisplayName,
+    m.PostCount AS TotalPostsByActiveUser,
+    CASE 
+        WHEN m.PostCount IS NULL THEN 'No Activity'
+        ELSE 'Active'
+    END AS UserActivityStatus
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    PostVoteSummary ps ON p.PostId = ps.PostId
+LEFT JOIN 
+    UserBadgeSummary ubs ON p.OwnerUserId = ubs.UserId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    MostActiveUsers m ON p.OwnerUserId = m.UserId
+WHERE 
+    p.Score > 0
+ORDER BY 
+    p.CreationDate DESC, 
+    p.Score DESC;

@@ -1,0 +1,60 @@
+WITH RegionSupplier AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+TopTenCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(h.order_value) AS total_order_value
+    FROM customer c
+    JOIN HighValueOrders h ON c.c_custkey = h.o_custkey
+    WHERE h.rn = 1
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_order_value DESC
+    LIMIT 10
+),
+SupplierInfo AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(ps.ps_availqty, 0) AS available_quantity,
+        COALESCE(SUM(l.l_extendedprice), 0) AS total_sales
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    rs.r_name,
+    tc.c_name,
+    si.s_name,
+    si.available_quantity,
+    si.total_sales,
+    CASE
+        WHEN si.total_sales > 50000 THEN 'High Sales'
+        WHEN si.total_sales BETWEEN 10000 AND 50000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM RegionSupplier rs
+JOIN TopTenCustomers tc ON rs.r_regionkey = tc.c_custkey 
+JOIN SupplierInfo si ON rs.r_regionkey = si.available_quantity % 5 
+WHERE rs.total_acctbal IS NOT NULL
+AND (rs.total_acctbal > 10000 OR rs.total_acctbal IS NULL)
+ORDER BY rs.r_name, tc.total_order_value DESC, si.total_sales DESC;

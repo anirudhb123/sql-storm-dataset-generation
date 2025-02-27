@@ -1,0 +1,66 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amount) AS total_return_amount,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        MAX(cr_returned_date_sk) AS last_return_date_sk
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+CustomersWithHighReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned_quantity,
+        cr.total_return_amount,
+        cr.return_count
+    FROM customer c
+    JOIN CustomerReturns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    WHERE cr.total_returned_quantity > (
+        SELECT AVG(total_returned_quantity) 
+        FROM CustomerReturns
+    )
+),
+ReturnReasons AS (
+    SELECT 
+        wr.returning_customer_sk,
+        wr.wr_reason_sk,
+        r.r_reason_desc,
+        SUM(wr_return_quantity) AS total_web_returned_quantity
+    FROM web_returns wr
+    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    GROUP BY wr.returning_customer_sk, wr.wr_reason_sk, r.r_reason_desc
+),
+TotalReturnsWithReasons AS (
+    SELECT 
+        cr.cr_returning_customer_sk,
+        SUM(cr.total_returned_quantity) AS total_return_quantity,
+        SUM(tr.total_web_returned_quantity) AS total_web_return_quantity,
+        COALESCE(rr.total_web_returned_quantity, 0) AS web_return_quantity
+    FROM CustomerReturns cr
+    LEFT JOIN ReturnReasons rr ON cr.cr_returning_customer_sk = rr.returning_customer_sk
+    JOIN (SELECT wr.returning_customer_sk, SUM(wr_return_quantity) AS total_web_returned_quantity 
+          FROM web_returns wr 
+          GROUP BY wr.returning_customer_sk) tr 
+    ON cr.cr_returning_customer_sk = tr.returning_customer_sk
+    GROUP BY cr.cr_returning_customer_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COUNT(DISTINCT c.c_customer_sk) AS num_of_customers,
+    SUM(COALESCE(tr.total_return_quantity, 0)) AS overall_returned_quantity,
+    SUM(COALESCE(tr.web_return_quantity, 0)) AS overall_web_returned_quantity,
+    MAX(tr.total_return_quantity) AS max_return_quantity,
+    MIN(tr.total_return_quantity) AS min_return_quantity,
+    AVG(tr.total_return_quantity) AS avg_return_quantity,
+    DENSE_RANK() OVER (ORDER BY SUM(tr.total_return_quantity) DESC) AS rank
+FROM CustomersWithHighReturns c
+JOIN TotalReturnsWithReasons tr ON c.c_customer_sk = tr.cr_returning_customer_sk
+WHERE tr.total_return_quantity IS NOT NULL
+GROUP BY c.c_first_name, c.c_last_name
+HAVING SUM(COALESCE(tr.total_return_quantity, 0)) > 100
+ORDER BY overall_returned_quantity DESC, c.c_last_name ASC;

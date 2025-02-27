@@ -1,0 +1,63 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+
+CustomerRanking AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+
+NationRevenue AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_name
+),
+
+FinalResults AS (
+    SELECT r.r_name, 
+           COUNT(DISTINCT c.c_custkey) AS customer_count,
+           AVG(d.total_spent) AS avg_spent,
+           SUM(n.total_revenue) AS region_revenue
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN CustomerRanking c ON n.n_nationkey = c.c_custkey
+    LEFT JOIN PartDetails d ON d.total_available > 100
+    LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+    GROUP BY r.r_name
+)
+
+SELECT r.r_name, 
+       COALESCE(pr.p_name, 'No Parts') AS part_name, 
+       sh.s_name AS supplier_name,
+       fr.customer_count,
+       fr.avg_spent,
+       fr.region_revenue
+FROM FinalResults fr
+FULL OUTER JOIN PartDetails pr ON fr.avg_spent > 1000
+LEFT JOIN SupplierHierarchy sh ON fr.customer_count > 10
+ORDER BY fr.region_revenue DESC, fr.customer_count ASC;

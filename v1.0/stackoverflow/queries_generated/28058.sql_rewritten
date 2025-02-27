@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 52 THEN ph.CreationDate END) AS HotDate,
+        RANK() OVER (ORDER BY COUNT(a.Id) DESC) AS RankByAnswers,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS RankByViews,
+        RANK() OVER (ORDER BY p.Score DESC) AS RankByScore
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.CreationDate
+),
+StringSimilarity AS (
+    SELECT 
+        rp1.PostId,
+        rp1.Title,
+        rp2.PostId AS RelatedPostId,
+        rp2.Title AS RelatedTitle,
+        SIMILARITY(rp1.Title, rp2.Title) AS TitleSimilarity
+    FROM RankedPosts rp1
+    JOIN RankedPosts rp2 ON rp1.PostId <> rp2.PostId
+    WHERE SIMILARITY(rp1.Title, rp2.Title) > 0.3
+),
+HotPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(ph.CreationDate) AS LastBadgeDate
+    FROM Posts p
+    JOIN Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 52
+    GROUP BY p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.CloseDate,
+    rp.HotDate,
+    sp.RelatedPostId,
+    sp.RelatedTitle,
+    hp.BadgeCount,
+    hp.LastBadgeDate
+FROM RankedPosts rp
+LEFT JOIN StringSimilarity sp ON rp.PostId = sp.PostId
+LEFT JOIN HotPosts hp ON rp.PostId = hp.Id
+WHERE rp.RankByAnswers <= 10
+ORDER BY rp.RankByAnswers, rp.RankByViews DESC;

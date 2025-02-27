@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND n.name_pcode_nf IN ('F2345', 'H3632', 'K1614', 'K6131', 'L6236', 'R4325', 'S4326', 'U6236', 'V5416', 'W413') AND mc.company_type_id < 2 AND t.id < 504476 AND n.surname_pcode LIKE '%4%' AND ci.role_id < 9 AND k.phonetic_code IS NOT NULL;

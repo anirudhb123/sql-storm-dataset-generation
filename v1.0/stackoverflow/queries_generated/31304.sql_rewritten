@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p 
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonsCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '<>')) AS t(TagName) ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+)
+SELECT 
+    pwh.PostId,
+    pwh.Title,
+    pwh.ViewCount,
+    pwh.TagsList,
+    COALESCE(cps.CloseReasonsCount, 0) AS CloseReasonsCount,
+    cps.LastCloseDate,
+    ur.TotalReputation,
+    CASE 
+        WHEN cps.CloseReasonsCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COUNT(DISTINCT rp.PostId) AS ChildPostsCount,
+    AVG(COALESCE(v.Score, 0)) AS AvgPostScore
+FROM 
+    PostsWithTags pwh
+LEFT JOIN 
+    ClosedPostStats cps ON pwh.PostId = cps.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rp ON pwh.PostId = rp.ParentId
+LEFT JOIN 
+    Votes v ON pwh.PostId = v.PostId
+LEFT JOIN 
+    UserReputation ur ON pwh.PostId IN (SELECT OwnerUserId FROM Posts WHERE Id = pwh.PostId)
+GROUP BY 
+    pwh.PostId,
+    pwh.Title,
+    pwh.ViewCount,
+    cps.CloseReasonsCount,
+    cps.LastCloseDate,
+    ur.TotalReputation
+ORDER BY 
+    pwh.ViewCount DESC,
+    ur.TotalReputation DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

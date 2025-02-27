@@ -1,0 +1,87 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey AS custkey,
+        c.c_name,
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS rank
+    FROM 
+        CustomerOrderSummary c
+    WHERE 
+        c.order_count > 0
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+OrderLineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey, l.l_suppkey
+),
+FinalReport AS (
+    SELECT 
+        tc.c_name,
+        p.p_name,
+        SUM(oli.total_quantity) AS total_quantity_sold,
+        p.p_retailprice,
+        p.total_available,
+        CASE 
+            WHEN p.total_available > 0 THEN 'In Stock' 
+            ELSE 'Out of Stock' 
+        END AS stock_status
+    FROM 
+        TopCustomers tc
+    JOIN 
+        orders o ON tc.custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        PartDetails p ON l.l_partkey = p.p_partkey
+    JOIN 
+        OrderLineItemDetails oli ON l.l_orderkey = oli.l_orderkey AND l.l_partkey = oli.l_partkey
+    GROUP BY 
+        tc.c_name, p.p_name, p.p_retailprice, p.total_available
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_quantity_sold / NULLIF(total_available, 0) > 1 THEN 'Exceeded Available Stock'
+        ELSE 'Stock Within Limits' 
+    END AS stock_performance
+FROM 
+    FinalReport
+WHERE 
+    rank <= 10
+ORDER BY 
+    total_quantity_sold DESC;

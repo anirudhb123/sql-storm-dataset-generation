@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.kind_id < 2 AND mi.info = 'Copyright MCMXXVI by The Pickford Corporation (on print); The Mary Pickford Corp.,30 April 1926, LP22664 (in copyright registry)';

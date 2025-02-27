@@ -1,0 +1,81 @@
+
+WITH RECURSIVE movie_tree AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        mt.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_tree mt ON ml.movie_id = mt.movie_id
+),
+company_movie AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT c.id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+cast_info_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mi.info_type_id) AS num_info_types
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mt.movie_id,
+    mt.title,
+    COALESCE(cmd.num_companies, 0) AS num_companies,
+    COALESCE(csd.num_cast, 0) AS num_cast,
+    COALESCE(mkd.keywords, 'No keywords') AS keywords,
+    COALESCE(mkd.num_info_types, 0) AS num_info_types,
+    mt.level
+FROM 
+    movie_tree mt
+LEFT JOIN 
+    company_movie cmd ON mt.movie_id = cmd.movie_id
+LEFT JOIN 
+    cast_info_details csd ON mt.movie_id = csd.movie_id
+LEFT JOIN 
+    movie_info_details mkd ON mt.movie_id = mkd.movie_id
+WHERE 
+    mt.level <= 3
+ORDER BY 
+    mt.level, mt.title;

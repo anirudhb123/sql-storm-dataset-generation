@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS hierarchy_level,
+        CAST(mt.title AS VARCHAR(255)) AS full_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        mh.hierarchy_level + 1,
+        CAST(mh.full_path || ' -> ' || m.title AS VARCHAR(255))
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.hierarchy_level,
+        mh.full_path,
+        ROW_NUMBER() OVER (PARTITION BY mh.hierarchy_level ORDER BY mh.title) AS rank
+    FROM 
+        MovieHierarchy mh
+)
+SELECT 
+    movie.title AS movie_title,
+    CAST(STRING_AGG(DISTINCT name.name, ', ') AS VARCHAR) AS actor_names,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    COALESCE(MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END), 'No Rating') AS highest_rating,
+    CASE 
+        WHEN movie.production_year IS NULL THEN 'Unknown Year' 
+        ELSE movie.production_year::TEXT 
+    END AS production_year,
+    mh.full_path AS movie_hierarchy_path
+FROM 
+    aka_title movie
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = movie.id
+LEFT JOIN 
+    aka_name name ON name.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = movie.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = movie.id
+LEFT JOIN 
+    RankedMovies rm ON rm.movie_id = movie.id
+WHERE 
+    movie.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'series'))
+    AND (movie.production_year < 2023 OR movie.production_year IS NULL)
+GROUP BY 
+    movie.id, mh.full_path
+HAVING 
+    (COUNT(DISTINCT ci.id) > 1 OR COUNT(DISTINCT mc.id) > 0)
+    AND (rank IS NOT NULL OR movie.title LIKE '%Epic%')
+ORDER BY 
+    movie.title ASC;

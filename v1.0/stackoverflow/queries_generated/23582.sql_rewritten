@@ -1,0 +1,71 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Title,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.CreationDate, p.Title
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.UpVotes AS TotalUpVotes,
+    up.DownVotes AS TotalDownVotes,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    MAX(cp.FirstCloseDate) AS LastClosedPostDate,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    BOOL_AND(rph.PostHistoryTypeId = 10) AS ClosedPostHistoryExists
+FROM 
+    UserVoteStats up
+LEFT JOIN 
+    ClosedPosts cp ON up.UserId = cp.PostId
+LEFT JOIN 
+    RecentPostHistory rph ON cp.PostId = rph.PostId AND rph.rn = 1
+LEFT JOIN 
+    UserBadges ub ON up.UserId = ub.UserId
+GROUP BY 
+    up.UserId, up.DisplayName
+HAVING 
+    SUM(up.UpVotes) > 0 OR COUNT(DISTINCT cp.PostId) > 0 
+ORDER BY 
+    TotalUpVotes DESC, TotalBadges DESC
+LIMIT 100;

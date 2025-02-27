@@ -1,0 +1,41 @@
+
+WITH string_benchmark AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_comment,
+        CONCAT('Part: ', p.p_name, ', Manufacturer: ', p.p_mfgr) AS part_info,
+        REPLACE(p.p_comment, 'small', 'tiny') AS modified_comment,
+        LENGTH(p.p_name) AS name_length,
+        UPPER(p.p_brand) AS upper_brand,
+        SUBSTRING(p.p_comment, 1, 10) AS comment_excerpt
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_size > 10
+    ORDER BY 
+        p.p_retailprice DESC
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    AVG(CAST(SUBSTRING(part_info, POSITION(':' IN part_info) + 2, LENGTH(part_info)) AS VARCHAR)) AS total_part_info,
+    STRING_AGG(DISTINCT upper_brand, ', ') AS all_brands,
+    STRING_AGG(DISTINCT modified_comment, '; ') AS all_comments
+FROM 
+    string_benchmark sb
+JOIN 
+    supplier s ON sb.p_partkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT sb.p_partkey) > 5;

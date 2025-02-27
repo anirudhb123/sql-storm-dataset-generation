@@ -1,0 +1,83 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.order_level + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+),
+SupplierSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        ps.ps_supplycost,
+        COALESCE(ts.total_sales, 0) AS total_sales
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        TotalSales ts ON p.p_partkey = ts.l_partkey
+    WHERE 
+        p.p_retailprice > 100
+)
+SELECT 
+    n.n_name,
+    SUM(ss.total_sales) AS total_sales_per_nation,
+    AVG(ss.ps_supplycost) AS avg_supply_cost
+FROM 
+    SupplierSales ss
+JOIN 
+    supplier s ON ss.ps_supplycost = s.s_acctbal
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(ss.total_sales) > (SELECT AVG(total_sales_per_nation) FROM (
+        SELECT 
+            SUM(ts.total_sales) AS total_sales_per_nation
+        FROM 
+            SupplierSales ss2
+        JOIN 
+            supplier s2 ON ss2.ps_supplycost = s2.s_acctbal
+        JOIN 
+            nation n2 ON s2.s_nationkey = n2.n_nationkey
+        GROUP BY 
+            n2.n_name
+    ) avg_sales)
+ORDER BY 
+    total_sales_per_nation DESC
+LIMIT 10;

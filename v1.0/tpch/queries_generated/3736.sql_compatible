@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+        AND (p.p_retailprice - ps.ps_supplycost) > 0
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+SupplierPartAnalysis AS (
+    SELECT 
+        s.s_name,
+        COUNT(ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    r.r_name AS region_name,
+    r.r_comment,
+    ss.s_name AS top_supplier,
+    ss.rank AS supplier_rank,
+    p.p_name AS part_name,
+    p.profit_margin,
+    c.c_name AS customer_name,
+    cos.total_spent,
+    spa.supplied_parts,
+    spa.total_supply_cost
+FROM 
+    RankedSuppliers ss
+JOIN 
+    SupplierPartAnalysis spa ON ss.s_name = spa.s_name
+JOIN 
+    HighValueParts p ON p.ps_supplycost BETWEEN 50 AND 150
+LEFT JOIN 
+    CustomerOrderSummary cos ON cos.c_custkey = ss.s_suppkey
+JOIN 
+    nation n ON ss.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.profit_margin IS NOT NULL
+ORDER BY 
+    r.region_name, ss.rank, cos.total_spent DESC;

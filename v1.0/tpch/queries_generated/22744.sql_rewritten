@@ -1,0 +1,92 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+),
+DistinctParts AS (
+    SELECT 
+        DISTINCT p.p_partkey, 
+        p.p_name, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    co.c_name,
+    co.total_orders,
+    co.total_spent,
+    dp.p_name,
+    ss.total_available,
+    ss.avg_supply_cost,
+    ro.price_rank,
+    CASE 
+        WHEN ro.price_rank = 1 THEN 'Top Order' 
+        ELSE 'Not Top Order' 
+    END AS order_priority,
+    (SELECT COUNT(*)
+     FROM lineitem l
+     WHERE l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderdate = ro.o_orderdate)
+       AND l.l_discount > 0) AS counts_with_discount
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+LEFT JOIN 
+    DistinctParts dp ON EXISTS (
+        SELECT 1
+        FROM partsupp ps
+        WHERE ps.ps_partkey = dp.p_partkey
+          AND ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (SELECT ps_suppkey 
+                                         FROM partsupp 
+                                         WHERE ps_partkey = dp.p_partkey 
+                                         ORDER BY ps_supplycost 
+                                         LIMIT 1)
+WHERE 
+    co.total_orders > 5
+    AND (ss.avg_supply_cost IS NULL OR ss.avg_supply_cost < 50.00)
+ORDER BY 
+    co.total_spent DESC,
+    dp.supplier_count ASC
+LIMIT 100;

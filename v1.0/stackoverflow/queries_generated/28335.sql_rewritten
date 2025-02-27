@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    JOIN
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_array ON TRUE
+    JOIN
+        Tags t ON t.TagName = tag_array
+    WHERE
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.PostTypeId
+),
+HighEngagementPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Tags,
+        CASE
+            WHEN rp.ViewCount > 1000 THEN 'High'
+            WHEN rp.ViewCount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS EngagementLevel
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Rank <= 10
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN bh.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    LEFT JOIN
+        Badges bh ON bh.UserId = u.Id
+    GROUP BY
+        u.Id, u.DisplayName
+)
+SELECT
+    he.PostId,
+    he.Title,
+    he.CreationDate,
+    he.ViewCount,
+    he.AnswerCount,
+    he.Tags,
+    he.EngagementLevel,
+    ue.DisplayName AS UserCreator,
+    ue.PostsCreated,
+    ue.UpVotes AS UserUpVotes,
+    ue.DownVotes AS UserDownVotes,
+    ue.BadgesEarned
+FROM
+    HighEngagementPosts he
+JOIN
+    UserEngagement ue ON he.PostId = ue.UserId
+ORDER BY
+    he.ViewCount DESC, ue.UpVotes DESC;

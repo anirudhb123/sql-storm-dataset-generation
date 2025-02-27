@@ -1,0 +1,63 @@
+WITH RECURSIVE OrderValueCTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierRanked AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        SupplierRanked s
+    WHERE 
+        s.rank <= 10
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(COALESCE(l.l_quantity, 0)) AS total_quantity,
+    AVG(o.total_value) AS avg_order_value,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Size Unknown'
+        ELSE p.p_size::text
+    END AS is_size_known
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    p.p_retailprice > 20.00 
+    AND (l.l_shipdate >= '1997-01-01' OR l.l_shipdate IS NULL)
+GROUP BY 
+    p.p_name, p.p_brand, p.p_size
+HAVING 
+    SUM(COALESCE(l.l_quantity, 0)) > 0
+ORDER BY 
+    total_quantity DESC, avg_order_value DESC;

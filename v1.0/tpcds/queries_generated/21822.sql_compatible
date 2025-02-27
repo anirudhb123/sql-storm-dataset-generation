@@ -1,0 +1,95 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS item_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk, 
+        ws.ws_order_number
+),
+BestSellingItems AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        COALESCE(i.i_product_name, 'Unknown Product') AS product_name,
+        i.i_current_price,
+        i.i_category,
+        CASE 
+            WHEN r.total_quantity = 0 THEN 'No Sales'
+            WHEN r.total_quantity < 10 THEN 'Low Sales'
+            ELSE 'High Sales'
+        END AS sales_category
+    FROM 
+        RankedSales r
+    JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    WHERE 
+        r.item_rank = 1
+),
+IncomeDemographics AS (
+    SELECT 
+        hd.hd_demo_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        hd.hd_buy_potential
+    FROM 
+        household_demographics hd
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+SalesWithDemographics AS (
+    SELECT 
+        bsi.product_name,
+        bsi.total_quantity,
+        id.ib_lower_bound, 
+        id.ib_upper_bound,
+        id.hd_buy_potential,
+        CASE 
+            WHEN bsi.total_quantity IS NULL THEN 'No Sales Data'
+            ELSE 'Sales Data Available'
+        END AS sales_data_status
+    FROM 
+        BestSellingItems bsi
+    LEFT JOIN 
+        IncomeDemographics id ON bsi.ws_item_sk = id.hd_demo_sk
+)
+SELECT 
+    s.product_name, 
+    s.total_quantity, 
+    s.ib_lower_bound,
+    s.ib_upper_bound,
+    s.hd_buy_potential,
+    s.sales_data_status
+FROM 
+    SalesWithDemographics s
+WHERE 
+    s.total_quantity IS NOT NULL AND 
+    (s.ib_lower_bound IS NULL OR s.ib_upper_bound IS NULL OR s.ib_upper_bound > 100000)
+ORDER BY 
+    s.total_quantity DESC
+FETCH FIRST 50 ROWS ONLY
+
+UNION ALL
+
+SELECT 
+    'Summary' AS product_name, 
+    SUM(total_quantity) AS total_quantity, 
+    NULL AS ib_lower_bound,
+    NULL AS ib_upper_bound,
+    NULL AS hd_buy_potential,
+    'Aggregated Data' AS sales_data_status
+FROM 
+    SalesWithDemographics
+WHERE 
+    hd_buy_potential IS NOT NULL
+GROUP BY 
+    hd_buy_potential
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    total_quantity DESC 
+FETCH FIRST 10 ROWS ONLY;

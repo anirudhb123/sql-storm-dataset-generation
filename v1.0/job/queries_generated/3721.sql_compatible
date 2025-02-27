@@ -1,0 +1,34 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN c.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS cast_count
+    FROM title t
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    WHERE t.production_year IS NOT NULL AND t.production_year > 2000
+    GROUP BY t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_count,
+        md.cast_count,
+        RANK() OVER (ORDER BY md.cast_count DESC, md.company_count DESC) AS rank
+    FROM movie_details md
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_count,
+    tm.cast_count,
+    COALESCE(cn.name, 'Unknown') AS company_name
+FROM top_movies tm
+LEFT JOIN movie_companies mc ON tm.title_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+WHERE tm.rank <= 10
+ORDER BY tm.rank, tm.title;

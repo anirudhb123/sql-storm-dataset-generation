@@ -1,0 +1,43 @@
+WITH RECURSIVE subquery AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS order_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+customer_rank AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    n.n_name,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    COALESCE(SUM(ls.total_revenue), 0) AS total_revenue_for_nation,
+    COUNT(DISTINCT cr.c_custkey) AS active_customers,
+    COUNT(DISTINCT sub.s_suppkey) AS top_suppliers_count
+FROM nation n
+LEFT JOIN supplier sub ON n.n_nationkey = sub.s_nationkey
+LEFT JOIN partsupp ps ON sub.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer_rank cr WHERE cr.cust_rank <= 10))
+LEFT JOIN customer_rank cr ON cr.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING AVG(ps.ps_supplycost) > 1000
+ORDER BY total_revenue_for_nation DESC
+LIMIT 5;

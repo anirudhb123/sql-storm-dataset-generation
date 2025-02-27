@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title m ON mc.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3  
+)
+
+SELECT 
+    CONCAT(n.name, ' (', n.gender, ')') AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(c.id) AS roles_count,
+    AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_ratio,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY n.id ORDER BY t.production_year DESC) AS rank
+FROM 
+    aka_name n
+LEFT JOIN 
+    cast_info c ON n.person_id = c.person_id
+INNER JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+INNER JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+INNER JOIN 
+    keyword k ON mk.keyword_id = k.id
+INNER JOIN 
+    movie_hierarchy t ON c.movie_id = t.movie_id
+WHERE 
+    n.name IS NOT NULL
+    AND (n.id IS NOT NULL OR c.note IS NULL)
+GROUP BY 
+    n.id, n.name, n.gender, t.title, t.production_year
+HAVING 
+    COUNT(c.id) > 0
+ORDER BY 
+    t.production_year DESC, roles_count DESC;

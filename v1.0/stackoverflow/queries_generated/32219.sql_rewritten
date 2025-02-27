@@ -1,0 +1,63 @@
+WITH RecursivePosts AS (
+    SELECT p.Id,
+           p.Title,
+           p.ViewCount,
+           p.Score,
+           p.OwnerUserId,
+           1 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT p2.Id,
+           p2.Title,
+           p2.ViewCount,
+           p2.Score,
+           p2.OwnerUserId,
+           rp.Depth + 1
+    FROM Posts p2
+    JOIN RecursivePosts rp ON rp.Id = p2.ParentId 
+),
+PostStats AS (
+    SELECT rp.Id AS PostId,
+           rp.Title,
+           rp.Depth,
+           rp.ViewCount,
+           rp.Score,
+           u.DisplayName AS OwnerDisplayName,
+           COUNT(c.Id) AS CommentCount, 
+           AVG(v.BountyAmount) AS AvgBounty,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes
+    FROM RecursivePosts rp
+    LEFT JOIN Comments c ON c.PostId = rp.Id
+    LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN Votes v ON v.PostId = rp.Id
+    GROUP BY rp.Id, rp.Title, rp.Depth, rp.ViewCount, rp.Score, u.DisplayName
+),
+RankedPosts AS (
+    SELECT ps.*,
+           ROW_NUMBER() OVER (PARTITION BY ps.Depth ORDER BY ps.Score DESC) AS RankScore,
+           RANK() OVER (PARTITION BY ps.Depth ORDER BY ps.ViewCount DESC) AS RankViews
+    FROM PostStats ps
+),
+MostCommentedPosts AS (
+    SELECT PostId, Title, Depth, ViewCount, Score, OwnerDisplayName, CommentCount
+    FROM RankedPosts
+    WHERE RankScore <= 10 AND CommentCount > 0
+),
+SummaryStatistics AS (
+    SELECT Depth,
+           COUNT(PostId) AS TotalPosts,
+           AVG(ViewCount) AS AvgViewCount,
+           SUM(CommentCount) AS TotalComments
+    FROM RankedPosts
+    GROUP BY Depth
+)
+SELECT mcp.*, 
+       s.TotalPosts,
+       s.AvgViewCount,
+       s.TotalComments
+FROM MostCommentedPosts mcp
+JOIN SummaryStatistics s ON mcp.Depth = s.Depth
+WHERE COALESCE(mcp.ViewCount, 0) > 100 
+ORDER BY mcp.Depth, mcp.Score DESC, mcp.CommentCount DESC;

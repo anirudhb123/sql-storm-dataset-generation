@@ -1,0 +1,88 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(PH.CreationDate, P.CreationDate) AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS RevisionRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(year, -5, GETDATE())
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        ROW_NUMBER() OVER (ORDER BY PS.Score DESC, PS.ViewCount DESC) AS PopularityRank
+    FROM 
+        RecursivePostStats PS
+    WHERE 
+        PS.RevisionRank = 1 AND
+        PS.PostTypeId = 1 -- Only Questions
+),
+UserPostStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        SUM(P.ViewCount) AS TotalViewCount,
+        COUNT(P.Id) AS TotalPosts,
+        AVG(P.Score) AS AverageScore,
+        RANK() OVER (ORDER BY SUM(P.ViewCount) DESC) AS UserRank
+    FROM 
+        UserReputation U
+    JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    WHERE 
+        P.CreationDate >= DATEADD(month, -12, GETDATE())
+    GROUP BY 
+        U.UserId, U.DisplayName
+)
+SELECT 
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    U.DisplayName AS AuthorName,
+    U.BadgeCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    U.TotalPosts,
+    U.TotalViewCount,
+    U.AverageScore
+FROM 
+    PopularPosts PS
+JOIN 
+    UserReputation U ON PS.PostId IN (
+        SELECT DISTINCT PostId 
+        FROM Posts 
+        WHERE OwnerUserId = U.UserId
+    )
+WHERE 
+    (U.TotalPosts > 5 AND U.Reputation > 100) OR (U.BadgeCount > 0)
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC;

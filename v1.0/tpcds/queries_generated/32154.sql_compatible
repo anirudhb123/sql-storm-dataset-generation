@@ -1,0 +1,86 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+highest_sales AS (
+    SELECT 
+        hs.ws_item_sk, 
+        hs.total_profit,
+        i.i_item_desc,
+        i.i_current_price,
+        ROW_NUMBER() OVER (ORDER BY hs.total_profit DESC) AS item_rank
+    FROM 
+        sales_summary hs
+    JOIN 
+        item i ON hs.ws_item_sk = i.i_item_sk
+    WHERE 
+        hs.rank <= 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+),
+web_sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS ws_quantity,
+        SUM(ws.ws_net_profit) AS net_profit_web
+    FROM 
+        web_sales ws
+    JOIN 
+        highest_sales hs ON ws.ws_item_sk = hs.ws_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COUNT(DISTINCT wsd.ws_item_sk) AS num_items_purchased,
+    SUM(wsd.net_profit_web) AS total_net_profit_web,
+    MAX(hs.i_current_price) AS max_item_price,
+    MIN(hs.total_profit) AS min_profit_item,
+    CASE 
+        WHEN SUM(wsd.net_profit_web) IS NULL THEN 'No Purchases'
+        ELSE 'Purchases Made'
+    END AS purchase_status
+FROM 
+    customer_info ci
+LEFT JOIN 
+    web_sales_data wsd ON ci.c_customer_sk = wsd.ws_item_sk
+LEFT JOIN 
+    highest_sales hs ON wsd.ws_item_sk = hs.ws_item_sk
+GROUP BY 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status
+ORDER BY 
+    total_net_profit_web DESC
+FETCH FIRST 20 ROWS ONLY;

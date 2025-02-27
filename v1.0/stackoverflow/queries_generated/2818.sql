@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC) AS RankByComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByComments <= 10
+),
+PostStatistics AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Author,
+        fp.CreationDate,
+        fp.CommentCount,
+        fp.UpVotes,
+        CASE 
+            WHEN fp.UpVotes IS NULL THEN 'No UpVotes'
+            ELSE to_char(fp.UpVotes, 'FM9999')
+        END AS FormattedUpVotes
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Author,
+    ps.CreationDate,
+    ps.CommentCount,
+    ps.FormattedUpVotes,
+    CASE 
+        WHEN ps.CommentCount > 5 THEN 'Active Discussion'
+        WHEN ps.CommentCount = 0 THEN 'No Comments'
+        ELSE 'Moderate Activity'
+    END AS EngagementLevel
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PostHistory ph ON ps.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+WHERE 
+    ph.CreationDate IS NULL
+ORDER BY 
+    ps.UpVotes DESC NULLS LAST;

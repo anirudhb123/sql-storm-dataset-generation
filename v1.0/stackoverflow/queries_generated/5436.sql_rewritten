@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), TagPopularity AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+), RecentComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    WHERE 
+        C.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        C.PostId
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    COALESCE(RC.CommentCount, 0) AS RecentCommentCount,
+    TP.TagName,
+    TP.PostCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    RecentComments RC ON RP.PostId = RC.PostId
+JOIN 
+    PostTags PT ON PT.PostId = RP.PostId
+JOIN 
+    TagPopularity TP ON PT.TagId = TP.TagId
+WHERE 
+    RP.Rank <= 5
+ORDER BY 
+    RP.Score DESC, RP.ViewCount DESC;

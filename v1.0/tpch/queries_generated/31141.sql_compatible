@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           0 AS Level, CAST(s_name AS VARCHAR(255)) AS FullHierarchy
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal,
+           sh.Level + 1,
+           CAST(CONCAT(sh.FullHierarchy, ' -> ', sp.s_name) AS VARCHAR(255))
+    FROM SupplierHierarchy sh
+    JOIN supplier sp ON sp.s_nationkey = sh.s_nationkey 
+    WHERE sp.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    AND sh.Level < 10
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(od.total_revenue) AS revenue
+    FROM customer c
+    JOIN OrderDetails od ON od.o_orderkey IN (
+        SELECT o_orderkey 
+        FROM orders 
+        WHERE o_custkey = c.c_custkey
+    )
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(od.total_revenue) > 10000
+),
+RegionSupplier AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT rs.r_name AS Region, COUNT(DISTINCT ts.c_custkey) AS TopCustomerCount,
+       SUM(ts.revenue) AS TotalCustomerRevenue, SUM(sh.s_acctbal) AS TotalSupplierBalance
+FROM RegionSupplier rs
+LEFT JOIN TopCustomers ts ON ts.revenue > (
+    SELECT AVG(revenue) FROM TopCustomers
+)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey IN (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    WHERE n.n_regionkey = rs.r_regionkey
+)
+GROUP BY rs.r_name
+ORDER BY TotalCustomerRevenue DESC, TopCustomerCount DESC;

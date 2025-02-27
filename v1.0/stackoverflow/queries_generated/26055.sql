@@ -1,0 +1,75 @@
+WITH UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(P.Score) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        TotalScore,
+        TotalViews,
+        LastPostDate,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS ActivityRank
+    FROM UserPosts
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        Questions, 
+        Answers, 
+        TotalScore, 
+        TotalViews, 
+        LastPostDate,
+        ScoreRank,
+        ActivityRank
+    FROM ActiveUsers
+    WHERE ScoreRank <= 10 OR ActivityRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Class AS BadgeClass,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, B.Class
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.Questions,
+    U.Answers,
+    U.TotalScore,
+    U.TotalViews,
+    U.LastPostDate,
+    CASE 
+        WHEN UB.BadgeCount IS NOT NULL THEN UB.BadgeCount
+        ELSE 0 
+    END AS TotalBadges,
+    STRING_AGG(DISTINCT BR.Name, ', ') AS BadgeNames,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TopTags
+FROM TopUsers U
+LEFT JOIN UserBadges UB ON U.UserId = UB.UserId
+LEFT JOIN Posts P ON U.UserId = P.OwnerUserId
+LEFT JOIN STRING_TO_ARRAY(substring(P.Tags from 2 for length(P.Tags) - 2), '><') AS T (TagName) ON TRUE
+LEFT JOIN Badges R ON R.UserId = U.UserId
+LEFT JOIN PostHistory PH ON PH.UserId = U.UserId
+LEFT JOIN PostHistoryTypes BR ON PH.PostHistoryTypeId = BR.Id
+GROUP BY U.DisplayName, U.TotalPosts, U.Questions, U.Answers, U.TotalScore, U.TotalViews, U.LastPostDate, UB.BadgeCount
+ORDER BY U.TotalScore DESC, U.TotalPosts DESC;

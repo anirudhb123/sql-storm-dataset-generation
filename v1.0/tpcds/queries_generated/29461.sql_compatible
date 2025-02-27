@@ -1,0 +1,66 @@
+
+WITH CustomerAddress AS (
+    SELECT
+        ca_address_sk,
+        UPPER(ca_street_name) AS street_name_upper,
+        TRIM(ca_city) AS city_trimmed,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_state,
+        ca_country
+    FROM
+        customer_address
+),
+CustomerDemographics AS (
+    SELECT
+        cd_demo_sk,
+        LOWER(cd_marital_status) AS marital_status_lower,
+        CONCAT(cd_gender, ' | ', cd_credit_rating) AS gender_credit,
+        cd_dep_count,
+        cd_dep_employed_count
+    FROM
+        customer_demographics
+),
+DateDimension AS (
+    SELECT
+        d_date_sk,
+        d_date,
+        EXTRACT(MONTH FROM d_date) AS month_number,
+        TO_CHAR(d_date, 'Month') AS month_name,
+        TO_CHAR(d_date, 'YYYY-MM') AS year_month
+    FROM
+        date_dim
+),
+SalesData AS (
+    SELECT
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        ws_net_profit,
+        TO_CHAR(ws_ship_date_sk, 'YYYY-MM') AS sales_month
+    FROM
+        web_sales
+)
+SELECT
+    ca.city_trimmed AS City,
+    ca.full_address AS Full_Address,
+    cd.marital_status_lower AS Marital_Status,
+    dd.month_name AS Sales_Month,
+    SUM(sd.ws_quantity) AS Total_Quantity_Sold,
+    SUM(sd.ws_net_paid) AS Total_Net_Sales
+FROM
+    CustomerAddress ca
+JOIN
+    CustomerDemographics cd ON ca.ca_address_sk = cd.cd_demo_sk
+JOIN
+    SalesData sd ON cd.cd_demo_sk = sd.ws_item_sk
+JOIN
+    DateDimension dd ON sd.sales_month = dd.year_month
+WHERE
+    ca.ca_state = 'CA'
+    AND cd.cd_dep_count > 0
+GROUP BY
+    ca.city_trimmed, ca.full_address, cd.marital_status_lower, dd.month_name
+ORDER BY
+    Total_Net_Sales DESC
+FETCH FIRST 10 ROWS ONLY;

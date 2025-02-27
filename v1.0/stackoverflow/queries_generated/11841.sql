@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.AnswerCount,
+    r.CommentCount,
+    r.FavoriteCount,
+    r.Tags,
+    u.UserId,
+    u.DisplayName AS UserDisplayName,
+    u.UpVotes,
+    u.DownVotes,
+    u.BadgeCount
+FROM 
+    RankedPosts r
+INNER JOIN 
+    Posts p ON r.PostId = p.Id
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    r.Rank <= 10
+ORDER BY 
+    r.PostTypeId, r.Score DESC;

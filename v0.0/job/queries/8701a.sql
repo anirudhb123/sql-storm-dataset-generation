@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS movie_company, min(mi_idx.info) AS rating, min(t.title) AS western_violent_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mk.movie_id = mc.movie_id AND mi.movie_id = mi_idx.movie_id AND mi.movie_id = mc.movie_id AND mc.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id
+AND t.phonetic_code IS NOT NULL AND it2.id > 72 AND t.title > 'Dark Afternoon' AND t.md5sum < '8e3ddc52afe26c62e8385a78dae23cb1' AND k.id = 123680;

@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.Id IS NOT NULL THEN 1 ELSE 0 END) AS PostCount,
+        SUM(rp.UpVotes) AS TotalUpVotes,
+        SUM(rp.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        RANK() OVER (ORDER BY PostCount DESC, TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserStats
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    CASE 
+        WHEN tu.TotalUpVotes IS NULL THEN 'No UpVotes'
+        WHEN tu.TotalUpVotes > 100 THEN 'High Engagement'
+        ELSE 'Moderate Engagement'
+    END AS EngagementLevel
+FROM 
+    TopUsers tu
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.UserRank;

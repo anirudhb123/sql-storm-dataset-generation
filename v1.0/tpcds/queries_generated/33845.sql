@@ -1,0 +1,42 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_ext_sales_price) AS total_sales, 
+           COUNT(ws_order_number) AS order_count, 
+           ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_performance AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cs.total_sales, 
+           cs.order_count,
+           COALESCE(cd.cd_income_band_sk, 0) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN sales_summary cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    WHERE COALESCE(cs.total_sales, 0) > 1000 OR cd.cd_demo_sk IS NOT NULL
+),
+top_customers AS (
+    SELECT c.customer_id, 
+           c.total_sales, 
+           c.order_count, 
+           ROW_NUMBER() OVER (ORDER BY c.total_sales DESC) AS sales_rank
+    FROM customer_performance c
+    WHERE c.total_sales IS NOT NULL
+    AND c.order_count > 5
+)
+SELECT t.customer_id, 
+       t.total_sales, 
+       t.order_count, 
+       s.s_store_name, 
+       r.r_reason_desc
+FROM top_customers t
+JOIN store_sales ss ON t.customer_id = ss.ss_customer_sk
+LEFT JOIN reason r ON ss.ss_coupon_amt IS NOT NULL
+JOIN store s ON ss.ss_store_sk = s.s_store_sk
+WHERE t.sales_rank <= 10 
+AND s.s_city = 'San Francisco'
+ORDER BY t.total_sales DESC;

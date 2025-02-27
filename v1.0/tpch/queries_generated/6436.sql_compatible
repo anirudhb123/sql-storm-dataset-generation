@@ -1,0 +1,46 @@
+
+WITH SupplierPartCost AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(su.total_supply_cost) AS total_cost_per_supplier
+    FROM 
+        SupplierPartCost su
+    JOIN 
+        supplier s ON su.s_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(su.total_supply_cost) > (SELECT AVG(total_supply_cost) FROM SupplierPartCost)
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    h.s_name AS supplier_name,
+    h.total_cost_per_supplier
+FROM 
+    HighCostSuppliers h
+JOIN 
+    supplier s ON h.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+ORDER BY 
+    r.region_name, n.n_name, h.total_cost_per_supplier DESC;

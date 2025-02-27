@@ -1,0 +1,63 @@
+WITH ranked_ordered_items AS (
+    SELECT
+        o.o_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank,
+        (l.l_quantity * l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+)
+, highest_revenue_parts AS (
+    SELECT
+        part.p_partkey,
+        part.p_name,
+        SUM(roi.net_revenue) AS total_revenue
+    FROM
+        part part
+    JOIN
+        ranked_ordered_items roi ON part.p_partkey = roi.l_partkey
+    WHERE
+        roi.price_rank = 1
+    GROUP BY
+        part.p_partkey, part.p_name
+),
+nation_stats AS (
+    SELECT
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        AVG(s.s_acctbal) AS avg_supplier_balance,
+        CASE 
+            WHEN COUNT(DISTINCT c.c_custkey) = 0 THEN NULL 
+            ELSE SUM(roi.net_revenue) / COUNT(DISTINCT c.c_custkey) 
+        END AS avg_revenue_per_customer
+    FROM
+        nation n
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN
+        ranked_ordered_items roi ON roi.l_suppkey = s.s_suppkey
+    GROUP BY
+        n.n_name
+)
+SELECT
+    n.n_name,
+    hs.total_revenue,
+    ns.customer_count,
+    ns.avg_supplier_balance,
+    ns.avg_revenue_per_customer
+FROM
+    highest_revenue_parts hs
+FULL OUTER JOIN
+    nation_stats ns ON hs.p_name LIKE CONCAT('%', ns.n_nationkey, '%')
+WHERE
+    (ns.customer_count IS NOT NULL OR hs.total_revenue IS NOT NULL)
+ORDER BY
+    COALESCE(hs.total_revenue, 0) DESC,
+    COALESCE(ns.avg_revenue_per_customer, 0) DESC;

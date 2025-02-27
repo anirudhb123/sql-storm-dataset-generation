@@ -1,0 +1,58 @@
+
+WITH MovieAwards AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(DISTINCT ma.id) AS award_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_info mi ON mt.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_info ma ON mi.movie_id = ma.movie_id AND ma.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    GROUP BY 
+        mt.id, mt.title
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        award_count,
+        RANK() OVER (ORDER BY award_count DESC) AS rank
+    FROM 
+        MovieAwards
+),
+FilteredMovies AS (
+    SELECT 
+        m.title,
+        c.name AS company_name,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        TopMovies m
+    JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON m.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ca ON cc.subject_id = ca.id
+    LEFT JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    WHERE 
+        m.rank <= 10 AND 
+        (c.country_code IS NOT NULL AND c.country_code <> '')
+    GROUP BY 
+        m.movie_id, m.title, c.name
+)
+SELECT 
+    f.title,
+    f.company_name,
+    f.cast_count,
+    f.actor_names,
+    COALESCE(NULLIF(f.cast_count, 0), 'No cast available') AS cast_summary
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.cast_count DESC;

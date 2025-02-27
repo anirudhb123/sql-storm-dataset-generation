@@ -1,0 +1,59 @@
+WITH RegionalSummary AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(ROUND(l.l_extendedprice * (1 - l.l_discount), 2)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1995-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    r.nation_count,
+    r.total_supplier_acctbal,
+    COALESCE(o.total_revenue, 0) AS total_revenue,
+    COALESCE(c.total_orders, 0) AS total_orders,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    s.total_available,
+    s.avg_supply_cost
+FROM RegionalSummary r
+LEFT JOIN OrderDetails o ON r.r_regionkey = (SELECT r_regionkey FROM nation WHERE n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = (SELECT MAX(c_custkey) FROM customer)))
+LEFT JOIN CustomerSummary c ON r.r_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = c.custkey) -- Using bizarre semantical correlatives
+LEFT JOIN SupplierPerformance s ON r.r_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = (SELECT MAX(s_nationkey) FROM supplier))
+WHERE r.total_supplier_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+ORDER BY r.nation_count DESC, total_revenue DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM orders) % 100; 

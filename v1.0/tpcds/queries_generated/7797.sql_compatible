@@ -1,0 +1,49 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        dd.d_year = 2023
+        AND c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        ws.web_site_id
+),
+PromoData AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_net_profit) AS total_net_profit
+    FROM 
+        catalog_sales cs
+    JOIN 
+        promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN 
+        item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 20.00
+        AND p.p_start_date_sk <= 20230101
+        AND p.p_end_date_sk >= 20231231
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_quantity AS web_total_quantity,
+    sd.total_net_profit AS web_total_net_profit,
+    pd.total_quantity AS promo_total_quantity,
+    pd.total_net_profit AS promo_total_net_profit
+FROM 
+    SalesData sd
+LEFT JOIN 
+    PromoData pd ON sd.total_quantity > 1000
+ORDER BY 
+    sd.total_net_profit DESC, pd.total_net_profit DESC
+FETCH FIRST 50 ROWS ONLY;

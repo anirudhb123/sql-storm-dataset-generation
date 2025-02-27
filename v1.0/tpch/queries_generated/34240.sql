@@ -1,0 +1,92 @@
+WITH RECURSIVE OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_value,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+NationAvg AS (
+    SELECT 
+        n.n_name,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+),
+MaxOrderValue AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        os.order_value
+    FROM 
+        orders o
+    JOIN 
+        OrderSummary os ON o.o_orderkey = os.o_orderkey
+    WHERE 
+        os.order_value IS NOT NULL
+),
+QualifiedParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey,
+        p.p_name,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+    ORDER BY 
+        total_cost DESC
+),
+OrderDetails AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderdate,
+        COUNT(li.l_orderkey) AS line_count,
+        SUM(li.l_extendedprice) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY os.o_orderkey ORDER BY SUM(li.l_extendedprice) DESC) as line_rank
+    FROM 
+        lineitem li
+    JOIN 
+        MaxOrderValue os ON li.l_orderkey = os.o_orderkey
+    GROUP BY 
+        os.o_orderkey, os.o_orderdate
+)
+SELECT 
+    os.o_orderkey,
+    os.o_orderdate,
+    od.line_count,
+    od.total_price,
+    np.n_name,
+    na.avg_acctbal,
+    CASE 
+        WHEN od.total_price > na.avg_acctbal THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS price_comparison,
+    pp.p_name
+FROM 
+    OrderDetails od
+JOIN 
+    NationAvg na ON od.o_orderkey % (SELECT COUNT(*) FROM nation) = na.n_name::int
+JOIN 
+    QualifiedParts pp ON pp.ps_availqty < 10
+LEFT JOIN 
+    nation np ON np.n_nationkey = (SELECT s_nationkey FROM supplier s WHERE s.s_suppkey = od.o_orderkey % (SELECT COUNT(*) FROM supplier))
+WHERE 
+    od.line_rank = 1
+ORDER BY 
+    os.o_orderdate DESC, 
+    od.total_price DESC;

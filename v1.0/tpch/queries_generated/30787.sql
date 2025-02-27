@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sh.level < 3 AND ps.ps_availqty > 50
+),
+agg_supp AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_name, l.l_quantity, l.l_discount,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_discount DESC) AS rnk
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    AND o.o_orderstatus = 'O'
+),
+final_summary AS (
+    SELECT ad.o_orderkey, ad.o_totalprice, ad.c_name,
+           SUM(ad.l_quantity * (1 - ad.l_discount)) AS net_revenue
+    FROM order_details ad
+    WHERE ad.rnk <= 5
+    GROUP BY ad.o_orderkey, ad.o_totalprice, ad.c_name
+)
+SELECT r.r_name, COUNT(DISTINCT f.o_orderkey) AS order_count,
+       AVG(f.net_revenue) AS average_revenue,
+       (SELECT COUNT(*) FROM supplier_hierarchy) AS active_suppliers
+FROM final_summary f
+JOIN customer c ON f.c_name = c.c_name
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE f.net_revenue IS NOT NULL
+GROUP BY r.r_name
+ORDER BY order_count DESC
+LIMIT 10;

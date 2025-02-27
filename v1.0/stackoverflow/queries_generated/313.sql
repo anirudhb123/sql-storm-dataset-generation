@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > (SELECT AVG(Score) FROM Posts) -- Filter for above average score
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.Id) > 10 -- Only tags with more than 10 posts
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    coalesce(ub.BadgeCount, 0) AS TotalBadges,
+    coalesce(ub.GoldBadgeCount, 0) AS GoldBadges,
+    coalesce(ub.SilverBadgeCount, 0) AS SilverBadges,
+    coalesce(ub.BronzeBadgeCount, 0) AS BronzeBadges,
+    pt.TagName AS PopularTagName,
+    pt.PostCount AS PopularTagPostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    (SELECT TagName, COUNT(*) AS PostCount
+     FROM PopularTags
+     GROUP BY TagName) pt ON pt.PostCount = (SELECT MAX(PostCount) FROM PopularTags) 
+WHERE 
+    rp.PostRank = 1 -- Only top post for each user
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

@@ -1,0 +1,88 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        COALESCE(R.EditCount, 0) AS EditCount,
+        COALESCE(R.LastEditDate, P.CreationDate) AS LastEditDate,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecentEdits R ON P.Id = R.PostId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND (P.Tags IS NOT NULL AND P.Tags != '')
+),
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.EditCount,
+        PS.LastEditDate,
+        PS.OwnerDisplayName,
+        PS.OwnerReputation,
+        PS.UpVotes,
+        PS.DownVotes,
+        UPC.PostCount,
+        T.ReputationRank
+    FROM 
+        PostStatistics PS
+    JOIN 
+        UserPostCounts UPC ON PS.OwnerDisplayName = UPC.UserId
+    JOIN 
+        TopUsers T ON PS.OwnerDisplayName = T.DisplayName
+)
+SELECT 
+    *,
+    (UpVotes - DownVotes) AS NetVotes,
+    CASE 
+        WHEN OwnerReputation > 1000 THEN 'Expert Contributor'
+        WHEN OwnerReputation BETWEEN 500 AND 1000 THEN 'Intermediate Contributor'
+        ELSE 'Novice Contributor'
+    END AS ContributorLevel
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, EditCount DESC
+LIMIT 100;

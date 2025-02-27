@@ -1,0 +1,53 @@
+
+WITH Address_Analysis AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_street_name,
+        ca.ca_city,
+        ca.ca_state,
+        LENGTH(ca.ca_street_name) AS street_name_length,
+        LENGTH(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type)) AS full_address_length,
+        LOWER(ca.ca_city) AS lower_city_name
+    FROM 
+        customer_address ca
+),
+Demographic_Analysis AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        MAX(cd.cd_purchase_estimate) AS max_purchase_estimate,
+        SUM(cd.cd_dep_count) AS total_dependents
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    GROUP BY 
+        cd.cd_demo_sk
+),
+Aggregate_Analysis AS (
+    SELECT 
+        aa.ca_address_id,
+        da.customer_count,
+        da.max_purchase_estimate,
+        da.total_dependents,
+        SUM(da.customer_count) OVER (PARTITION BY aa.lower_city_name) AS city_customer_count,
+        AVG(da.max_purchase_estimate) OVER (PARTITION BY aa.lower_city_name) AS avg_city_purchase_estimate
+    FROM 
+        Address_Analysis aa
+    LEFT JOIN 
+        Demographic_Analysis da ON aa.ca_city = UPPER(da.lower_city_name)
+)
+SELECT 
+    full_address_length,
+    customer_count,
+    max_purchase_estimate,
+    total_dependents,
+    city_customer_count,
+    avg_city_purchase_estimate
+FROM 
+    Aggregate_Analysis
+WHERE 
+    full_address_length > 50
+ORDER BY 
+    city_customer_count DESC, 
+    total_dependents DESC;

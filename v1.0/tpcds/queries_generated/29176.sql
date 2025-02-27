@@ -1,0 +1,59 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        ca.ca_city,
+        REPLACE(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type), '  ', ' ') AS full_address,
+        CASE 
+            WHEN ca.ca_state = 'CA' THEN 'California'
+            WHEN ca.ca_state = 'NY' THEN 'New York'
+            ELSE 'Other'
+        END AS state_category
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+),
+DemoStats AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(cd.cd_dep_count) AS avg_dependent_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender
+),
+SalesOverview AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_paid) AS total_net_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    ad.customer_name,
+    ad.full_address,
+    ad.city,
+    ad.state_category,
+    ds.cd_gender,
+    ds.customer_count,
+    ds.avg_dependent_count,
+    ds.avg_purchase_estimate,
+    so.total_net_sales,
+    so.total_orders
+FROM 
+    AddressDetails ad
+JOIN 
+    DemoStats ds ON ad.customer_name = ds.customer_name
+LEFT JOIN 
+    SalesOverview so ON ad.ca_address_sk = so.ws_bill_customer_sk
+ORDER BY 
+    so.total_net_sales DESC, ad.customer_name;

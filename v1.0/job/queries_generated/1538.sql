@@ -1,0 +1,56 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MaxRankedTitles AS (
+    SELECT 
+        production_year, 
+        title 
+    FROM 
+        RankedTitles 
+    WHERE 
+        rank = 1
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.company_id, 
+        COUNT(DISTINCT mc.movie_id) AS movie_count 
+    FROM 
+        movie_companies mc
+    JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget')
+    GROUP BY 
+        mc.company_id
+)
+SELECT 
+    c.name AS company_name,
+    cm.movie_count,
+    mt.title,
+    COALESCE(t.name, 'Unknown') AS director_name
+FROM 
+    company_name c
+LEFT JOIN 
+    CompanyMovieCounts cm ON c.id = cm.company_id
+LEFT JOIN 
+    movie_companies mc ON c.id = mc.company_id
+LEFT JOIN 
+    MaxRankedTitles mt ON mc.movie_id = mt.movie_id
+LEFT JOIN 
+    cast_info ci ON mc.movie_id = ci.movie_id AND ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+LEFT JOIN 
+    aka_name t ON ci.person_id = t.person_id
+WHERE 
+    cm.movie_count IS NOT NULL
+ORDER BY 
+    cm.movie_count DESC, c.name;

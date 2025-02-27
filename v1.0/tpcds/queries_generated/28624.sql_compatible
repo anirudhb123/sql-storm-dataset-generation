@@ -1,0 +1,59 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        ca_city AS city,
+        ca_state AS state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        CASE 
+            WHEN ca_city LIKE '%ville%' THEN 'Has Ville'
+            ELSE 'No Ville'
+        END AS city_feature
+    FROM customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender AS gender,
+        cd_marital_status AS marital_status,
+        UPPER(cd_education_status) AS education_status,
+        CONCAT('Income Estimate: ', cd_purchase_estimate) AS income_estimate
+    FROM customer_demographics
+),
+AggregatedData AS (
+    SELECT 
+        a.ca_address_sk,
+        a.city,
+        a.state,
+        a.full_address,
+        d.gender,
+        d.marital_status,
+        d.education_status,
+        d.income_estimate,
+        COUNT(DISTINCT d.cd_demo_sk) AS demo_count,
+        SUM(d.cd_purchase_estimate) AS total_income_estimate
+    FROM AddressDetails a
+    JOIN Demographics d ON a.ca_address_sk = d.cd_demo_sk
+    GROUP BY 
+        a.ca_address_sk,
+        a.city,
+        a.state,
+        a.full_address,
+        d.gender,
+        d.marital_status,
+        d.education_status,
+        d.income_estimate
+)
+SELECT 
+    city,
+    state,
+    full_address,
+    gender,
+    marital_status,
+    education_status,
+    demo_count,
+    total_income_estimate,
+    ROW_NUMBER() OVER (PARTITION BY state ORDER BY total_income_estimate DESC) AS rank
+FROM AggregatedData
+WHERE city_feature = 'Has Ville'
+ORDER BY total_income_estimate DESC;

@@ -1,0 +1,19 @@
+
+SELECT 
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AveragePostScore,
+    COUNT(v.Id) AS TotalVotes,
+    ut.Name AS UserTypeName,
+    COUNT(DISTINCT u.Id) AS TotalUsers
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserTypes ut ON u.AccountId = ut.Id
+WHERE 
+    p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+GROUP BY 
+    ut.Name;

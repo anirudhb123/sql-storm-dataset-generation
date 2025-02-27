@@ -1,0 +1,44 @@
+
+WITH RECURSIVE ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           o.o_orderdate, o.o_shippriority,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_shippriority
+),
+customer_high_value AS (
+    SELECT c.c_custkey AS cust_key, c.c_name, c.c_acctbal,
+           CASE 
+               WHEN c.c_acctbal >= (SELECT AVG(c2.c_acctbal) FROM customer c2) THEN 'High Value'
+               ELSE 'Low Value'
+           END AS customer_type
+    FROM customer c
+),
+nation_part_records AS (
+    SELECT n.n_name, p.p_name, COUNT(ps.ps_partkey) AS part_count,
+           SUM(ps.ps_supplycost) AS total_cost
+    FROM nation n 
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY n.n_name, p.p_name
+)
+SELECT npr.n_name, npr.p_name, npr.part_count, npr.total_cost,
+       COALESCE(r.s_name, 'No Supplier') AS supplier_name,
+       COALESCE(os.total_revenue, 0) AS order_revenue,
+       chv.customer_type
+FROM nation_part_records npr
+LEFT JOIN ranked_suppliers r ON r.rank = 1 AND npr.part_count > 0
+LEFT JOIN order_summary os ON npr.total_cost = os.total_revenue
+CROSS JOIN customer_high_value chv
+WHERE (npr.total_cost > 1000 AND chv.cust_key >= 0)
+   OR (npr.part_count < 5 AND os.total_revenue IS NULL)
+ORDER BY npr.n_name, npr.total_cost DESC, npr.part_count ASC;

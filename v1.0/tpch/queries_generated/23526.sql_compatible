@@ -1,0 +1,74 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > 100.00)
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS nation_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+    HAVING COUNT(DISTINCT o.o_orderkey) > 5
+),
+supplier_nation AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        CASE WHEN SUM(ps.ps_availqty) > 100 THEN 'Large' ELSE 'Small' END AS size_category
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+order_line_stats AS (
+    SELECT 
+        o.o_orderkey,
+        AVG(l.l_quantity) AS avg_quantity,
+        MAX(l.l_discount) AS max_discount,
+        SUM(CASE WHEN l.l_shipdate < l.l_commitdate THEN 1 ELSE 0 END) AS late_shipments
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+final_summary AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        sp.n_name AS supplier_nation,
+        rp.p_name,
+        rp.p_retailprice,
+        ol.avg_quantity,
+        ol.max_discount,
+        ol.late_shipments
+    FROM customer_orders co
+    FULL OUTER JOIN ranked_parts rp ON co.total_orders > 5 AND rp.price_rank <= 10
+    LEFT JOIN supplier_nation sp ON co.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = sp.n_name)
+    LEFT JOIN order_line_stats ol ON co.total_orders = ol.o_orderkey
+    WHERE rp.p_retailprice IS NOT NULL OR sp.size_category = 'Large'
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    f.supplier_nation,
+    f.p_name,
+    COALESCE(f.p_retailprice, 0) AS adjusted_price,
+    COALESCE(f.avg_quantity, 0) AS avg_qty,
+    COALESCE(f.max_discount, 0) AS max_disc,
+    COALESCE(f.late_shipments, 0) AS late_ship_count
+FROM final_summary f
+WHERE COALESCE(f.p_retailprice, 0) > 100 AND COALESCE(f.late_shipments, 0) < 3
+ORDER BY f.c_custkey, f.late_ship_count DESC, f.adjusted_price DESC;

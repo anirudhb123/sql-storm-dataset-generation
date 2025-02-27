@@ -1,0 +1,54 @@
+
+WITH CustomerOrderStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS total_orders,
+        AVG(ss.ss_sales_price) AS average_order_value
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cos.c_customer_id,
+        cos.c_first_name,
+        cos.c_last_name,
+        cos.total_sales,
+        cos.total_orders,
+        cos.average_order_value,
+        ROW_NUMBER() OVER (ORDER BY cos.total_sales DESC) AS rank
+    FROM 
+        CustomerOrderStats cos
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.total_orders,
+    tc.average_order_value,
+    d.d_year,
+    d.d_month_seq,
+    COUNT(ws.ws_order_number) AS online_orders,
+    SUM(ws.ws_sales_price) AS online_sales
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    tc.rank <= 10
+GROUP BY 
+    tc.c_customer_id, tc.c_first_name, tc.c_last_name, tc.total_sales, tc.total_orders, tc.average_order_value,
+    d.d_year, d.d_month_seq
+ORDER BY 
+    tc.total_sales DESC;

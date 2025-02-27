@@ -1,0 +1,78 @@
+
+WITH RecursiveDemo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) as rn
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+SelectedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating 
+    FROM 
+        customer c
+    JOIN 
+        RecursiveDemo cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.rn <= 10 AND cd.cd_gender IS NOT NULL
+),
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) as item_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit > 0
+),
+TotalSales AS (
+    SELECT 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        cs.cs_item_sk
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesData ws ON cs.cs_item_sk = ws.ws_item_sk
+    GROUP BY 
+        cs.cs_item_sk
+),
+FinalResults AS (
+    SELECT 
+        sc.c_customer_id,
+        cd.cd_gender,
+        ts.total_net_profit,
+        CASE 
+            WHEN ts.total_net_profit IS NULL THEN 'No Profit'
+            ELSE CAST(ts.total_net_profit AS VARCHAR) 
+        END AS profit_message
+    FROM 
+        SelectedCustomers sc
+    LEFT JOIN 
+        TotalSales ts ON sc.c_customer_sk = ts.cs_item_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN profit_message IS NULL THEN 'No Data'
+        ELSE profit_message 
+    END AS final_profit_message
+FROM 
+    FinalResults
+WHERE 
+    final_profit_message IS NOT NULL
+ORDER BY 
+    c_customer_id, cd_gender;

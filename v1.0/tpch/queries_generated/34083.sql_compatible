@@ -1,0 +1,46 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier sp
+    JOIN supplier_hierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_suppkey <> sh.s_suppkey
+),
+
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+
+nation_avg_revenue AS (
+    SELECT n.n_nationkey, AVG(os.total_revenue) AS avg_revenue
+    FROM nation n
+    LEFT JOIN order_summary os ON os.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+    GROUP BY n.n_nationkey
+)
+
+SELECT p.p_name, p.p_mfgr, p.p_retailprice, 
+       COALESCE(nar.avg_revenue, 0) AS avg_revenue, 
+       sh.level AS supplier_level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN nation_avg_revenue nar ON sh.s_nationkey = nar.n_nationkey
+WHERE p.p_retailprice > 100 AND 
+      EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_discount BETWEEN 0.1 AND 0.2)
+GROUP BY p.p_name, p.p_mfgr, p.p_retailprice, nar.avg_revenue, sh.level
+ORDER BY avg_revenue DESC, p.p_name;

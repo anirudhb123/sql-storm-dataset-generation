@@ -1,0 +1,73 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 30
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+        AVG(cs.total_spent) AS avg_spent
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        TopCustomers cs ON c.c_customer_sk = cs.c_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.customer_count,
+    cd.avg_spent,
+    COALESCE(NULLIF(cd.avg_spent, 0), 'No sales') AS adjusted_avg_spent
+FROM 
+    CustomerDemographics cd
+ORDER BY 
+    cd.avg_spent DESC
+LIMIT 5;
+
+-- Include a CROSS JOIN to introduce complexity with NULL handling
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cd.customer_count, 0) AS customer_count
+FROM 
+    TopCustomers tc
+CROSS JOIN 
+    CustomerDemographics cd
+WHERE 
+    (cd.customer_count IS NULL OR cd.customer_count > 0)
+ORDER BY 
+    tc.total_spent DESC;

@@ -1,0 +1,70 @@
+WITH UserScoreData AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes, 
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+PostAnalysis AS (
+    SELECT 
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(p.CreationDate) AS LatestPostDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.OwnerUserId, p.PostTypeId
+), 
+FinalData AS (
+    SELECT 
+        usd.UserId, 
+        usd.DisplayName, 
+        usd.Reputation, 
+        usd.Upvotes, 
+        usd.Downvotes, 
+        usd.BadgeCount,
+        pa.PostCount,
+        COALESCE(pa.CommentCount, 0) AS TotalComments,
+        COALESCE(pa.EditCount, 0) AS TotalEdits,
+        pa.LatestPostDate
+    FROM 
+        UserScoreData usd
+    LEFT JOIN 
+        PostAnalysis pa ON usd.UserId = pa.OwnerUserId
+)
+SELECT 
+    fd.UserId,
+    fd.DisplayName,
+    fd.Reputation,
+    fd.Upvotes,
+    fd.Downvotes,
+    fd.BadgeCount,
+    fd.PostCount,
+    fd.TotalComments,
+    fd.TotalEdits,
+    fd.LatestPostDate
+FROM 
+    FinalData fd
+ORDER BY 
+    fd.Reputation DESC, fd.Upvotes DESC, fd.TotalComments DESC;

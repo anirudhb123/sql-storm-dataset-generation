@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+RecentLargeOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_totalprice,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY r.o_orderkey ORDER BY r.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) AS total_revenue
+    FROM 
+        RankedOrders r
+    LEFT JOIN 
+        lineitem l ON r.o_orderkey = l.l_orderkey
+    WHERE 
+        r.order_rank = 1 AND r.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+SupplierPartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name,
+    SUM(COALESCE(r.lo_total_revenue, 0)) AS total_revenue_from_large_orders,
+    SUM(s.supplier_count) AS total_unique_suppliers,
+    SUM(CASE WHEN s.avg_supply_cost IS NULL THEN 0 ELSE s.avg_supply_cost END) AS average_supply_cost
+FROM 
+    nation n
+LEFT JOIN 
+    RecentLargeOrders r ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = r.s_orderkey LIMIT 1)
+LEFT JOIN 
+    SupplierPartStats s ON s.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = n.n_nationkey))
+WHERE 
+    n.n_regionkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(r.o_orderkey) > 5 OR SUM(COALESCE(r.total_revenue, 0)) > 10000
+ORDER BY 
+    total_revenue_from_large_orders DESC, average_supply_cost ASC;

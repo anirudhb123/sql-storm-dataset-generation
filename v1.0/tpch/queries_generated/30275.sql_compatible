@@ -1,0 +1,56 @@
+
+WITH RECURSIVE OrderCTE AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        1 AS order_level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oc.order_level + 1
+    FROM orders o
+    JOIN OrderCTE oc ON o.o_custkey = oc.o_custkey
+    WHERE o.o_orderdate > oc.o_orderdate
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    AVG(s.s_acctbal) AS avg_supplier_acctbal,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY AVG(l.l_extendedprice) DESC) AS rank,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size'
+        ELSE CAST(p.p_size AS CHAR)
+    END AS part_size_description,
+    CASE 
+        WHEN r.r_name IS NOT NULL THEN r.r_name
+        ELSE 'N/A'
+    END AS region_name
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN customer c ON l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p_sub.p_retailprice) FROM part p_sub) 
+    AND (l.l_discount BETWEEN 0.05 AND 0.10 OR l.l_returnflag = 'R')
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name, p.p_size
+HAVING 
+    SUM(l.l_quantity) > 10
+ORDER BY 
+    rank ASC, total_quantity DESC;

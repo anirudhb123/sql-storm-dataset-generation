@@ -1,0 +1,77 @@
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Score
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score AS PostScore,
+        P.ViewCount,
+        P.AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Score,
+        RANK() OVER (ORDER BY U.Score DESC) AS Rank
+    FROM 
+        UserScores U
+    WHERE 
+        U.Score > 0
+)
+SELECT 
+    PU.DisplayName AS UserDisplayName,
+    PD.Title AS PostTitle,
+    PD.CreationDate,
+    PD.PostScore,
+    PD.ViewCount,
+    TG.TagName AS MostUsedTag,
+    COALESCE(COUNT(PL.RelatedPostId), 0) AS LinkedPostsCount,
+    COALESCE(TR.Rank, 0) AS UserRank
+FROM 
+    PostDetails PD
+JOIN 
+    Users PU ON PD.AcceptedAnswerId = PU.Id
+LEFT JOIN 
+    PostLinks PL ON PD.PostId = PL.PostId
+LEFT JOIN 
+    (SELECT 
+         P.Id,
+         STRING_AGG(T.TagName, ', ') AS TagName
+     FROM 
+         Posts P
+     JOIN 
+         Tags T ON T.Id = ANY(string_to_array(P.Tags, ','))
+     GROUP BY 
+         P.Id) TG ON PD.PostId = TG.Id
+LEFT JOIN 
+    TopUsers TR ON PU.Id = TR.UserId
+WHERE 
+    PD.UserPostRank <= 5
+GROUP BY 
+    PU.DisplayName, PD.Title, PD.CreationDate, PD.PostScore, PD.ViewCount, TG.TagName, TR.Rank
+ORDER BY 
+    PD.PostScore DESC, UserRank ASC;

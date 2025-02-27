@@ -1,0 +1,78 @@
+
+WITH SupplierCost AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        AVG(o.o_totalprice) > 1000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        p.p_retailprice * 0.85 AS discounted_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+LineItemRanking AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM 
+        lineitem l
+)
+SELECT 
+    p.p_name,
+    p.discounted_price,
+    s.s_name,
+    sc.total_supply_cost,
+    COALESCE(hc.avg_order_value, 0) AS customer_avg_order_value
+FROM 
+    PartDetails p
+JOIN 
+    SupplierCost sc ON sc.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 1
+    )
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    LineItemRanking lr ON l.l_orderkey = lr.l_orderkey AND lr.price_rank = 1
+LEFT JOIN 
+    HighValueCustomers hc ON l.l_orderkey = (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = hc.c_custkey 
+        LIMIT 1
+    )
+WHERE 
+    p.supplier_count > 5
+AND 
+    (sc.total_supply_cost IS NOT NULL OR hc.avg_order_value IS NULL)
+ORDER BY 
+    p.discounted_price DESC, 
+    sc.total_supply_cost ASC;

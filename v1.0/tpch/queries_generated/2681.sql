@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueOrders AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_line_value
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+    HAVING 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 10000
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(SUM(ps.ps_supplycost * ps.ps_availqty), 0), 1) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name,
+    cs.order_count,
+    cs.total_spent,
+    COUNT(DISTINCT ho.l_orderkey) AS high_value_order_count,
+    SUM(s.total_supply_cost) AS total_supplier_cost,
+    MAX(ro.o_totalprice) AS max_order_price
+FROM 
+    customer c
+JOIN 
+    CustomerStats cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    HighValueOrders ho ON c.c_custkey = ho.l_orderkey
+LEFT JOIN 
+    SupplierInfo s ON cs.order_count = (SELECT MAX(order_count) FROM CustomerStats)
+LEFT JOIN 
+    RankedOrders ro ON c.c_custkey = ro.o_orderkey
+WHERE 
+    cs.total_spent > 5000
+GROUP BY 
+    c.c_name, cs.order_count, cs.total_spent
+ORDER BY 
+    total_spent DESC;

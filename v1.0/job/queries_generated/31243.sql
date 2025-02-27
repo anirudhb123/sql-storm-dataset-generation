@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        RANK() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level
+), CastOverview AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+), MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        co.actor_names,
+        co.role_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastOverview co ON rm.movie_id = co.movie_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_count,
+    COALESCE(md.actor_names, 'No actors') AS actor_names,
+    COALESCE(md.role_count, 0) AS role_count,
+    CASE 
+        WHEN md.company_count > 0 THEN 'Has Companies'
+        ELSE 'No Companies'
+    END AS company_status
+FROM 
+    MovieDetails md
+WHERE 
+    md.rank <= 10
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_id ASC;
+
+This SQL query creates a recursive common table expression (CTE) to generate a movie hierarchy based on linked movies. It computes ranks for movies based on their production years, aggregates cast information, and retrieves detailed results about top movies while incorporating various SQL constructs for performance benchmarking.

@@ -1,0 +1,64 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal
+
+    ORDER BY ch.level DESC
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+), SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), HighValueNations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+    WHERE n.n_nationkey IN (
+        SELECT s.s_nationkey
+        FROM supplier s
+        WHERE s.s_acctbal IS NOT NULL
+        GROUP BY s.s_nationkey
+        HAVING SUM(s.s_acctbal) > 5000
+    )
+), OrderDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ch.c_name AS CustomerName,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+    AVG(od.revenue) AS AverageRevenue,
+    SUM(sp.total_avail_qty) AS TotalAvailableQuantity,
+    ROW_NUMBER() OVER (PARTITION BY ch.level ORDER BY SUM(od.revenue) DESC) AS RevenueRank
+FROM CustomerHierarchy ch
+LEFT JOIN RankedOrders o ON ch.c_custkey = o.o_custkey
+LEFT JOIN OrderDetails od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN SupplierParts sp ON sp.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE p.p_retailprice > 50
+) AND sp.ps_suppkey IN (
+    SELECT s.s_suppkey 
+    FROM supplier s 
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM HighValueNations)
+)
+WHERE ch.level > 1
+GROUP BY ch.c_name, ch.level
+HAVING SUM(od.revenue) IS NOT NULL
+ORDER BY RevenueRank ASC, TotalOrders DESC;

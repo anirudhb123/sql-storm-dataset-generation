@@ -1,0 +1,69 @@
+WITH TagStats AS (
+    SELECT 
+        SPLIT_PART(Tags, '><', 1) AS Tag,
+        COUNT(*) AS PostCount,
+        COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        SPLIT_PART(Tags, '><', 1
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.OwnerUserId = U.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN C.UserId = U.Id THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(CASE WHEN V.UserId = U.Id AND V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+    ORDER BY 
+        UpvotesReceived DESC
+    LIMIT 5
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId IN (1, 4, 6) THEN PH.CreationDate END) AS LatestEditDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    TS.Tag,
+    TS.PostCount,
+    TS.QuestionCount,
+    TS.AnswerCount,
+    US.DisplayName AS TopUser,
+    US.PostsCreated,
+    US.CommentsMade,
+    US.UpvotesReceived,
+    PHS.LatestEditDate,
+    PHS.CloseCount,
+    PHS.ReopenCount
+FROM 
+    TagStats TS
+JOIN 
+    UserStats US ON 1=1 -- Cartesian join to combine stats (not suggested for performance but for demonstration)
+JOIN 
+    PostHistoryStats PHS ON PHS.PostId = (SELECT MAX(PostId) FROM PostHistoryStats) -- Get stats of latest edited post
+ORDER BY 
+    TS.PostCount DESC, 
+    US.UpvotesReceived DESC;

@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COALESCE(cp.Views, 0) AS TotalViews,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, SUM(ViewCount) AS Views
+         FROM 
+            Posts 
+         GROUP BY 
+            PostId) cp ON cp.PostId = rp.PostId
+    WHERE 
+        rp.rn = 1
+    GROUP BY 
+        rp.PostId, rp.Title, cp.Views
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        ARRAY_AGG(DISTINCT b.Name) AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    pd.Title,
+    pd.TotalViews,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    ub.BadgeNames
+FROM 
+    Users u
+JOIN 
+    PostDetails pd ON u.Id = pd.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    pd.TotalViews DESC, pd.UpVotes DESC
+LIMIT 10;

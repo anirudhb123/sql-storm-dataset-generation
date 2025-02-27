@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COALESCE(info_city.info, 'N/A') AS production_info,
+    COUNT(DISTINCT CASE WHEN mck.keyword IS NOT NULL THEN mck.keyword END) AS unique_keywords,
+    AVG(CASE WHEN ci.role_id IS NOT NULL THEN ci.nr_order ELSE NULL END) AS avg_role_order,
+    MAX(mh.level) AS max_episode_level,
+    MIN(CASE WHEN p.gender = 'F' THEN ak.name END) AS first_female_actor
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mck ON mt.id = mck.movie_id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Production Company')
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'City')
+LEFT JOIN 
+    (SELECT DISTINCT ON (imdb_id) * FROM name ORDER BY imdb_id) p ON ak.person_id = p.imdb_id
+GROUP BY 
+    ak.name, mt.title, info_city.info
+HAVING 
+    COUNT(DISTINCT mt.production_year) > 1
+ORDER BY 
+    unique_keywords DESC, movie_title;

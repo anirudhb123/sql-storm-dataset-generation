@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk, 
+        ss_item_sk, 
+        SUM(ss_quantity) AS total_quantity, 
+        SUM(ss_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER(PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY s_store_sk, ss_item_sk
+), 
+TopItems AS (
+    SELECT 
+        r.s_store_sk,
+        r.ss_item_sk,
+        r.total_quantity,
+        r.total_net_paid
+    FROM RankedSales r
+    WHERE r.rank <= 3
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        fd.d_year,
+        cd.cd_marital_status
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim fd ON c.c_first_sales_date_sk = fd.d_date_sk
+    WHERE cd.cd_marital_status IS NOT NULL
+),
+SalesWithType AS (
+    SELECT 
+        t.s_store_sk,
+        ti.ss_item_sk,
+        ti.total_net_paid,
+        CASE 
+            WHEN ti.total_net_paid > 1000 THEN 'High'
+            WHEN ti.total_net_paid BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_type
+    FROM TopItems ti
+    JOIN store t ON ti.s_store_sk = t.s_store_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    s.s_store_name,
+    s.s_city,
+    s.s_state,
+    swt.sales_type,
+    SUM(swt.total_net_paid) AS total_paid,
+    COUNT(swt.ss_item_sk) AS items_bought,
+    AVG(swt.total_net_paid) AS avg_paid
+FROM CustomerInfo ci
+LEFT JOIN SalesWithType swt ON ci.c_customer_sk IN (SELECT DISTINCT ss_customer_sk FROM store_sales WHERE ss_item_sk IN (SELECT ss_item_sk FROM TopItems WHERE s_store_sk = swt.s_store_sk))
+JOIN store s ON s.s_store_sk = swt.s_store_sk
+GROUP BY 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ci.cd_gender, 
+    ci.cd_marital_status, 
+    s.s_store_name, 
+    s.s_city, 
+    s.s_state, 
+    swt.sales_type
+HAVING
+    COUNT(swt.ss_item_sk) > 0
+ORDER BY total_paid DESC, items_bought ASC;

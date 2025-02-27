@@ -1,0 +1,54 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ARRAY_AGG(DISTINCT c.role_id) AS roles,
+        ARRAY_AGG(DISTINCT g.keyword) AS keywords,
+        COUNT(DISTINCT m.company_id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword g ON g.id = mk.keyword_id
+    LEFT JOIN 
+        movie_companies m ON m.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+person_details AS (
+    SELECT 
+        a.person_id AS person_id,
+        a.name AS aka_name,
+        ARRAY_AGG(DISTINCT f.role) AS roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON c.person_id = a.person_id
+    JOIN 
+        role_type f ON f.id = c.role_id
+    GROUP BY 
+        a.person_id, a.name
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.kind_id,
+    pd.aka_name,
+    pd.roles AS person_roles,
+    md.roles AS movie_roles,
+    md.keywords,
+    md.company_count
+FROM 
+    movie_details md
+JOIN 
+    person_details pd ON pd.person_id IN (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = md.movie_id)
+ORDER BY 
+    md.production_year DESC, 
+    md.title ASC;

@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.id) AS rank_in_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') AND
+        t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COALESCE(NULLIF(a.name_pcode_nf, ''), a.surname_pcode) AS primary_code,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL AND
+        a.name_pcode_nf IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name, a.surname_pcode
+),
+CompCast AS (
+    SELECT 
+        cc.id AS comp_cast_id,
+        ct.kind AS cast_type,
+        mv.movie_id,
+        ROW_NUMBER() OVER(PARTITION BY mv.movie_id ORDER BY cc.id) AS role_rank
+    FROM 
+        complete_cast mv
+    JOIN 
+        comp_cast_type ct ON mv.status_id = ct.id
+    JOIN 
+        cast_info cc ON mv.movie_id = cc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        f.movie_id,
+        f.title,
+        f.production_year,
+        c.cast_type,
+        r.primary_code,
+        r.movie_count,
+        CASE 
+            WHEN r.movie_count > 10 THEN 'A-List'
+            WHEN r.movie_count BETWEEN 5 AND 10 THEN 'B-List'
+            ELSE 'C-List'
+        END AS celebrity_status
+    FROM 
+        RankedMovies f
+    LEFT JOIN 
+        CompCast c ON f.movie_id = c.movie_id
+    LEFT JOIN 
+        FilteredActors r ON c.comp_cast_id = r.person_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_type,
+    md.primary_code,
+    md.movie_count,
+    md.celebrity_status
+FROM 
+    MovieDetails md
+WHERE 
+    md.celebrity_status = 'A-List' OR
+    (md.celebrity_status = 'B-List' AND md.primary_code IS NOT NULL)
+ORDER BY 
+    md.production_year DESC,
+    md.title ASC;

@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -5, CURRENT_DATE)
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CloseCount,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top Recent Posts' 
+        ELSE 'Other Posts' 
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.CloseCount = 0
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Active Posts:' AS Title,
+    NULL AS CreationDate,
+    COUNT(*) AS Score,
+    NULL AS ViewCount,
+    NULL AS CommentCount,
+    NULL AS UpVotes,
+    NULL AS DownVotes,
+    NULL AS CloseCount,
+    NULL AS PostCategory
+FROM 
+    Posts p
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -5, CURRENT_DATE)
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    PostId;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        CASE 
+            WHEN p.AnswerCount IS NULL THEN 'No Answers'
+            WHEN p.AnswerCount = 0 THEN 'No Accepted Answer'
+            ELSE 'Has Answers'
+        END AS AnswerStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.ViewCount, p.Score, p.AnswerCount
+),
+PostWithHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 12) THEN 1 END) AS TotalCloseVotes
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    p.Title,
+    rp.ViewCount,
+    rp.Score,
+    r.CommentCount,
+    pwh.CloseDate,
+    pwh.ReopenDate,
+    rb.BadgeNames,
+    CASE 
+        WHEN pwh.TotalCloseVotes > 0 THEN 'Under Review'
+        ELSE 'Not Under Review'
+    END AS ReviewStatus,
+    CASE 
+        WHEN pwh.CloseDate IS NOT NULL AND pwh.ReopenDate IS NOT NULL THEN 'Closed and Reopened'
+        WHEN pwh.CloseDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    COALESCE(rp.AnswerStatus, 'No Info') AS PostAnswerStatus
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostWithHistory pwh ON rp.PostId = pwh.PostId
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+WHERE 
+    rp.Rank <= 5 AND 
+    (rp.Score > 10 OR rp.ViewCount > 100)
+ORDER BY 
+    rp.ViewCount DESC, u.Reputation DESC
+LIMIT 10;

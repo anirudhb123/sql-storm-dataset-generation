@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year IS NOT NULL
+),
+CategoricalCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_order
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+),
+FilteredCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL AND ak.name <> ''
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cc.company_name,
+    cc.company_type,
+    fc.actor_name,
+    COUNT(DISTINCT fc.nr_order) OVER (PARTITION BY rm.movie_id) AS total_cast,
+    CASE 
+        WHEN COUNT(cc.company_name) > 0 THEN 'Produced' 
+        ELSE COALESCE(NULLIF(cc.company_name, ''), 'No Companies') 
+    END AS production_status,
+    NULLIF(PAD_RIGHT(rm.title, 50, ' '), ' ') AS padded_title
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CategoricalCompanies cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    FilteredCast fc ON rm.movie_id = fc.movie_id
+WHERE 
+    rm.title_rank <= 5
+    AND (rc.movie_id IS NULL OR rc.movie_id IS NOT NULL) -- Bizarre corner case
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title ASC, 
+    cc.company_order,
+    fc.cast_order
+FETCH FIRST 100 ROWS ONLY;
+

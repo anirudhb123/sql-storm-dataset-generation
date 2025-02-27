@@ -1,0 +1,51 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderAggregate AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(COALESCE(sa.total_supply_value, 0)) AS total_supply_value,
+    AVG(oa.total_order_value) AS avg_order_value,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(COALESCE(sa.total_supply_value, 0)) DESC) AS supplier_rank
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierStats sa ON s.s_suppkey = sa.s_suppkey
+LEFT JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    OrderAggregate oa ON c.c_custkey = oa.o_custkey
+WHERE 
+    n.n_name IS NOT NULL
+    AND COALESCE(oa.total_order_value, 0) > 0
+GROUP BY 
+    n.n_name, n.n_nationkey
+HAVING 
+    SUM(COALESCE(sa.total_supply_value, 0)) > 5000
+ORDER BY 
+    supplier_rank;

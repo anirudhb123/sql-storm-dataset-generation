@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        kt.kind AS movie_kind,
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title ak 
+    JOIN 
+        title m ON ak.movie_id = m.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        kind_type kt ON m.kind_id = kt.id
+    GROUP BY 
+        m.id, m.title, m.production_year, kt.kind
+),
+
+MostPopularGenres AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(mt.movie_id) AS movie_count
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id
+    JOIN 
+        title mt ON mt.id = mk.movie_id
+    LEFT JOIN 
+        kind_type kt ON mt.kind_id = kt.id
+    GROUP BY 
+        kt.kind
+    ORDER BY movie_count DESC
+    LIMIT 5
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.movie_kind,
+    rm.total_cast,
+    rm.aka_names,
+    mpg.genre,
+    mpg.movie_count
+FROM 
+    RankedMovies rm
+JOIN 
+    MostPopularGenres mpg ON rm.movie_kind = mpg.genre
+WHERE 
+    rm.rank_by_cast_size <= 3
+ORDER BY 
+    rm.production_year DESC, 
+    rm.total_cast DESC;
+
+This SQL query generates a report that benchmarks string processing by pulling together multiple join operations and aggregations. It ranks movies by the size of their cast, aggregates alternate names, and identifies the most popular genres. It then limits the output to the top three ranked movies with the most cast members for each production year while correlating it with the most popular genres.

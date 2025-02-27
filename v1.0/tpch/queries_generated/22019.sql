@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+RegionalSales AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+    GROUP BY 
+        n.n_regionkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+TopSalesRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        rs.total_sales,
+        RANK() OVER (ORDER BY rs.total_sales DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        RegionalSales rs ON r.r_regionkey = rs.n_regionkey
+)
+SELECT 
+    tr.r_name,
+    tp.s_name,
+    ts.total_sales,
+    sp.total_available,
+    CASE 
+        WHEN sp.unique_parts IS NULL THEN 'No Parts Available'
+        ELSE 'Parts Available: ' || sp.unique_parts::text 
+    END AS availability_status,
+    CASE 
+        WHEN ts.sales_rank <= 3 THEN 'Top Region' 
+        ELSE 'Other Region' 
+    END AS region_type
+FROM 
+    TopSalesRegions ts
+LEFT JOIN 
+    RankedSuppliers tp ON ts.r_regionkey = tp.s_nationkey AND tp.rank = 1
+LEFT JOIN 
+    SupplierParts sp ON tp.s_suppkey = sp.ps_suppkey
+WHERE 
+    ts.total_sales IS NOT NULL
+ORDER BY 
+    ts.total_sales DESC, tp.s_name ASC;

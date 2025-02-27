@@ -1,0 +1,41 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_name IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation_hierarchy nh
+    JOIN nation n ON nh.n_regionkey = n.n_regionkey
+    WHERE nh.level < 10
+),
+supply_data AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_data AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+           COUNT(DISTINCT l.l_linenumber) AS line_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT nh.n_name AS nation_name,
+       SUM(od.order_value) AS total_order_value,
+       COALESCE(sd.total_supply_cost, 0) AS total_supply_cost,
+       AVG(od.line_count) AS average_line_count,
+       CASE 
+           WHEN SUM(od.order_value) IS NULL THEN 'No Orders'
+           WHEN SUM(od.order_value) > 10000 THEN 'High Value'
+           ELSE 'Low Value' 
+       END AS order_status
+FROM nation_hierarchy nh
+LEFT JOIN order_data od ON nh.n_nationkey = od.o_custkey
+LEFT JOIN supply_data sd ON nh.n_nationkey = sd.s_suppkey
+WHERE nh.level < 2
+GROUP BY nh.n_name
+HAVING SUM(od.order_value) IS NOT NULL OR COALESCE(sd.total_supply_cost, 0) > 0
+ORDER BY total_order_value DESC NULLS LAST;

@@ -1,0 +1,58 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(100)) AS full_name, 
+           0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT(sh.full_name, ' > ', s.s_name), 
+           sh.depth + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+)
+, top_nations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+    ORDER BY order_count DESC
+    LIMIT 5
+)
+, part_price_info AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           MAX(p.p_retailprice) - MIN(p.p_retailprice) AS price_var
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    n.n_name, 
+    ph.full_name AS supplier_hierarchy,
+    COUNT(DISTINCT li.l_orderkey) AS total_orders,
+    SUM(CASE 
+            WHEN li.l_returnflag = 'R' THEN li.l_extendedprice * (1 - li.l_discount) 
+            ELSE 0 
+        END) AS total_returned_value,
+    AVG(pp.avg_supply_cost) AS avg_supply_cost,
+    SUM(pp.price_var) AS total_price_variation
+FROM 
+    top_nations n
+JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+LEFT JOIN 
+    supplier_hierarchy ph ON li.l_suppkey = ph.s_suppkey
+LEFT JOIN 
+    part_price_info pp ON li.l_partkey = pp.p_partkey
+WHERE 
+    n.n_name IS NOT NULL 
+    AND (li.l_quantity BETWEEN 1 AND 100 OR li.l_discount > 0)
+GROUP BY 
+    n.n_name, ph.full_name
+HAVING 
+    SUM(CASE WHEN li.l_tax IS NULL THEN 0 ELSE 1 END) > 0
+ORDER BY 
+    total_orders DESC, total_returned_value ASC;

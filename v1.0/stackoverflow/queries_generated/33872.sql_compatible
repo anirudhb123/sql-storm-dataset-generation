@@ -1,0 +1,110 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN c.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInfluence AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(ph.VoteCount, 0) + COALESCE(SUM(c.Score), 0) AS PostInfluenceScore,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(ph.VoteCount, 0) + COALESCE(SUM(c.Score), 0) DESC) AS Ranking
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS VoteCount 
+         FROM 
+            Votes 
+         WHERE 
+            VoteTypeId = 2 
+         GROUP BY 
+            PostId) ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, ph.VoteCount
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        pe.PostId,
+        pe.Title,
+        pe.PostInfluenceScore,
+        COALESCE(r.Level, 0) AS PostLevel,
+        COALESCE(ue.TotalPosts, 0) AS UserPostCount,
+        COALESCE(ue.TotalUpVotes, 0) AS UserUpVotes,
+        COALESCE(ue.TotalDownVotes, 0) AS UserDownVotes,
+        COALESCE(ue.TotalComments, 0) AS UserComments,
+        COALESCE(ue.AverageBounty, 0) AS UserAverageBounty
+    FROM 
+        PostInfluence pe
+    JOIN 
+        Users u ON pe.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    LEFT JOIN 
+        RecursivePostHierarchy r ON pe.PostId = r.PostId
+    LEFT JOIN 
+        UserEngagement ue ON u.Id = ue.UserId
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    PostId,
+    Title,
+    PostInfluenceScore,
+    PostLevel,
+    UserPostCount,
+    UserUpVotes,
+    UserDownVotes,
+    UserComments,
+    UserAverageBounty
+FROM 
+    FinalResults
+WHERE 
+    (UserPostCount > 10 AND PostInfluenceScore > 20) OR 
+    UserAverageBounty > 100
+ORDER BY 
+    PostInfluenceScore DESC, 
+    UserPostCount DESC;

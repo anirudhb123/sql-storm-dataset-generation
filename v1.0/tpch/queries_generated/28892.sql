@@ -1,0 +1,18 @@
+SELECT 
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    COUNT(*) AS parts_count,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    STRING_AGG(CONCAT(c.c_name, ' (', c.c_nationkey, ')'), ', ') AS customer_names,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT r.r_name) AS regions_supplied
+FROM part p 
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN customer c ON c.c_nationkey = s.s_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE p.p_retailprice > 100 
+GROUP BY SUBSTRING(p.p_name, 1, 10)
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY parts_count DESC, max_supplier_balance DESC;

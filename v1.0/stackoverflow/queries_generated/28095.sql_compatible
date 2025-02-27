@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.Tags, p.ViewCount
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Body,
+        r.Tags,
+        r.ViewCount,
+        r.CommentCount,
+        r.VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        (SELECT DISTINCT 
+             unnest(string_to_array(substring(Tags FROM 2 FOR length(Tags) - 2), '><')) AS TagName, 
+             Id 
+         FROM 
+             Posts) t ON r.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        r.rn = 1
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.Body, r.Tags, r.ViewCount, r.CommentCount, r.VoteCount
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Body,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.VoteCount,
+    pd.TagList,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        PostHistory ph 
+     WHERE 
+        ph.PostId = pd.PostId 
+        AND ph.PostHistoryTypeId IN (10, 11, 12, 53) /* Close, Reopen, Delete, Removed Hot */
+    ) AS EditHistoryCount,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Badges b 
+     WHERE 
+        b.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = pd.PostId)
+    ) AS BadgeCount
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ViewCount > 1000
+ORDER BY 
+    pd.ViewCount DESC, pd.CreationDate DESC
+LIMIT 50;

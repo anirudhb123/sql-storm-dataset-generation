@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, ParentId, Title, CreationDate, Score, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.ParentId, p.Title, p.CreationDate, p.Score, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(p.Score) AS AverageScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        p.Title,
+        p.Body,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        pp.Title,
+        ph.CreationDate AS CloseDate,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM PostHistoryData ph
+    JOIN CloseReasonTypes cr ON ph.PostHistoryTypeId = 10
+    JOIN Posts pp ON ph.PostId = pp.Id
+    WHERE ph.rn = 1
+    GROUP BY ph.PostId, pp.Title, ph.CreationDate
+)
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.AverageScore,
+    r.Title AS RootPostTitle,
+    r.Level,
+    cp.CloseDate,
+    cp.CloseReasons
+FROM UserStatistics us
+LEFT JOIN RecursivePostHierarchy r ON us.UserId = r.Id
+LEFT JOIN ClosedPosts cp ON r.Id = cp.PostId
+WHERE us.TotalPosts > 10
+ORDER BY us.TotalPosts DESC, us.AverageScore DESC;

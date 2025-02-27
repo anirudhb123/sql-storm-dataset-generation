@@ -1,0 +1,61 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonRoles AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        COALESCE(rt.role, 'Unknown') AS role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        role_type rt ON rt.id = c.role_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT pc.person_id) AS producer_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'producer' LIMIT 1)
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    rt.production_year,
+    rt.title,
+    pr.actor_name,
+    pr.role,
+    md.producer_count,
+    md.keywords
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonRoles pr ON rt.title_id = pr.movie_id
+LEFT JOIN 
+    MovieDetails md ON rt.title_id = md.movie_id
+WHERE 
+    rt.title_rank <= 5
+    AND (md.producer_count > 1 OR md.keywords IS NOT NULL)
+ORDER BY 
+    rt.production_year DESC, rt.title;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    DISTINCT a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT mc.company_id) AS companies_count,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_types,
+    (SELECT AVG(CAST(pi.info AS FLOAT))
+     FROM person_info pi
+     WHERE pi.person_id = cs.person_id AND pi.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')) AS avg_rating,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info cs ON a.person_id = cs.person_id
+JOIN 
+    title t ON cs.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+WHERE 
+    t.production_year >= 2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, t.id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    avg_rating DESC NULLS LAST,
+    companies_count DESC,
+    actor_name;

@@ -1,0 +1,47 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        w.w_warehouse_name,
+        c.c_city,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        ws.ws_sold_date_sk, w.w_warehouse_name, c.c_city
+),
+AggregateSales AS (
+    SELECT 
+        d.d_date AS sales_date,
+        sd.warehouse_name,
+        sd.c_city,
+        sd.total_sales,
+        sd.total_orders,
+        sd.unique_customers,
+        RANK() OVER (PARTITION BY sd.warehouse_name ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        SalesData sd
+    JOIN 
+        date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+)
+SELECT 
+    sales_date,
+    warehouse_name,
+    c_city,
+    total_sales,
+    total_orders,
+    unique_customers
+FROM 
+    AggregateSales
+WHERE 
+    sales_rank <= 5
+ORDER BY 
+    warehouse_name, total_sales DESC;

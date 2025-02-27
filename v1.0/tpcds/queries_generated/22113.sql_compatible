@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS item_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = DATE('2002-10-01') - INTERVAL '30 DAY')
+),
+AggregateSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM RankedSales
+    WHERE item_rank = 1
+    GROUP BY ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        a.total_net_paid,
+        a.order_count
+    FROM AggregateSales a
+    JOIN item i ON a.ws_item_sk = i.i_item_sk
+    ORDER BY a.total_net_paid DESC
+    LIMIT 10
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    COALESCE(ti.total_net_paid, 0) AS total_net_paid,
+    COALESCE(ti.order_count, 0) AS order_count,
+    CASE 
+        WHEN ti.order_count IS NULL THEN 'No Sales'
+        WHEN ti.order_count > 5 THEN 'High Performer'
+        ELSE 'Under Performer' 
+    END AS performance_category
+FROM TopItems ti
+FULL OUTER JOIN customer_demographics cd ON cd.cd_demo_sk IN (
+    SELECT c.c_current_cdemo_sk 
+    FROM customer c 
+    WHERE c.c_first_name LIKE '%John%'
+)
+WHERE (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NULL)
+ORDER BY total_net_paid DESC, ti.i_item_id ASC;

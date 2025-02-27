@@ -1,0 +1,61 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.ParentId,
+        rp.Level + 1 AS Level
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy rp ON a.ParentId = rp.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS QuestionCount, 
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount, 
+    AVG(p.Score) AS AverageScore,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+    SUM(CASE WHEN ph.Id IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRanking
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Posts ph ON p.Id = ph.Id AND ph.ClosedDate IS NOT NULL
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    STRING_SPLIT(p.Tags, ',') AS t ON t.value IS NOT NULL
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    AverageScore DESC, UserId;

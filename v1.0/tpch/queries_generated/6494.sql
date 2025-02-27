@@ -1,0 +1,30 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_supply_value, 
+           RANK() OVER (PARTITION BY rs.s_nationkey ORDER BY rs.total_supply_value DESC) AS rank
+    FROM RankedSuppliers rs
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, ts.s_nationkey
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN TopSuppliers ts ON ts.rank = 1 AND c.c_nationkey = ts.s_nationkey
+),
+OrderLineDetails AS (
+    SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, 
+           li.l_partkey, li.l_quantity, li.l_extendedprice, li.l_discount
+    FROM CustomerOrders co
+    JOIN lineitem li ON co.o_orderkey = li.l_orderkey
+)
+SELECT ol.c_custkey, ol.c_name, COUNT(DISTINCT ol.o_orderkey) AS order_count, 
+       SUM(ol.l_extendedprice * (1 - ol.l_discount)) AS total_spent
+FROM OrderLineDetails ol
+GROUP BY ol.c_custkey, ol.c_name
+HAVING COUNT(DISTINCT ol.o_orderkey) > 5
+ORDER BY total_spent DESC
+LIMIT 10;

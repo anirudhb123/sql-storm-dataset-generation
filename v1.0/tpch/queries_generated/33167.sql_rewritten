@@ -1,0 +1,50 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_acctbal, sh.level + 1
+    FROM supplier s2
+    JOIN supplier_hierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE s2.s_acctbal > sh.s_acctbal
+),
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(o.o_totalprice), 0) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal BETWEEN 1000 AND 5000
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.total_spent,
+    COUNT(DISTINCT ro.o_orderkey) AS recent_order_count,
+    SUM(ro.total_price) AS total_recent_spent
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem li ON li.l_partkey = p.p_partkey
+LEFT JOIN recent_orders ro ON ro.o_orderkey = li.l_orderkey
+JOIN customer_summary cs ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2
+    WHERE p2.p_size > 10
+) AND s.s_acctbal IS NOT NULL
+GROUP BY p.p_partkey, p.p_name, ps.ps_availqty, s.s_name, cs.c_name, cs.total_spent
+HAVING COUNT(DISTINCT ro.o_orderkey) > 1
+ORDER BY total_recent_spent DESC
+LIMIT 100;

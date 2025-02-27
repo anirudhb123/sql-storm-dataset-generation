@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 365 FROM date_dim)
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerAddresses AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_city,
+        COUNT(DISTINCT ca.ca_address_sk) AS address_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_city
+    HAVING 
+        COUNT(DISTINCT ca.ca_address_sk) > 1
+),
+HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        item.i_current_price,
+        rs.total_profit
+    FROM 
+        item
+    JOIN 
+        RankedSales rs ON item.i_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.profit_rank = 1
+)
+SELECT 
+    hp.item_id,
+    hp.i_product_name,
+    hp.i_current_price,
+    ca.ca_city AS city_with_multiple_addresses,
+    ca.address_count
+FROM 
+    HighProfitItems hp
+JOIN 
+    CustomerAddresses ca ON ca.c_customer_sk = (SELECT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = hp.i_item_sk LIMIT 1)
+ORDER BY 
+    hp.total_profit DESC
+LIMIT 10
+OFFSET 5;

@@ -1,0 +1,45 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id, 
+        a.name as actor_name,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id IN (SELECT id FROM aka_title WHERE title LIKE '%Inception%') 
+
+    UNION ALL
+
+    SELECT 
+        c.person_id, 
+        a.name as actor_name,
+        ah.level + 1 
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id IN (SELECT linked_movie_id FROM movie_link WHERE movie_id = ah.movie_id)
+)
+
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ca.movie_id) AS number_of_movies,
+    AVG(TIMESTAMPDIFF(YEAR, (SELECT MIN(production_year) FROM aka_title WHERE movie_id = ca.movie_id), 
+               (SELECT MAX(production_year) FROM aka_title WHERE movie_id = ca.movie_id))) AS avg_movie_age,
+    STRING_AGG(DISTINCT ak.keyword, ', ') AS associated_keywords
+FROM 
+    ActorHierarchy a
+JOIN 
+    cast_info ca ON a.person_id = ca.person_id
+LEFT JOIN 
+    movie_keyword ak ON ca.movie_id = ak.movie_id
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT ca.movie_id) > 5 
+ORDER BY 
+    number_of_movies DESC
+LIMIT 10;

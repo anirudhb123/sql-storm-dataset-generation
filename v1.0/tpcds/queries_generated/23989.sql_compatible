@@ -1,0 +1,60 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 1 AS level
+    FROM customer c
+    WHERE c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk, c.c_first_name, c.c_last_name, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_cdemo_sk
+    WHERE ch.level < 5
+), sales_data AS (
+    SELECT 
+        ws.ws_order_number, 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_item_sk) AS item_count,
+        CASE 
+            WHEN SUM(ws.ws_ext_sales_price) > 1000 THEN 'High'
+            WHEN SUM(ws.ws_ext_sales_price) BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM web_sales ws 
+    GROUP BY ws.ws_order_number, ws.ws_sold_date_sk
+), detailed_sales AS (
+    SELECT 
+        sd.ws_order_number,
+        sd.ws_sold_date_sk,
+        sd.total_sales,
+        sd.item_count,
+        sd.sales_category,
+        ROW_NUMBER() OVER (PARTITION BY sd.sales_category ORDER BY sd.total_sales DESC) AS rank_within_category
+    FROM sales_data sd
+), return_data AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM store_returns 
+    GROUP BY sr_returning_customer_sk
+), final_report AS (
+    SELECT
+        ch.c_first_name,
+        ch.c_last_name,
+        sd.total_sales,
+        sd.sales_category,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN sd.sales_category = 'High' AND COALESCE(rd.total_returns, 0) > 0 THEN 'At Risk'
+            WHEN sd.sales_category = 'Low' AND COALESCE(rd.total_returns, 0) = 0 THEN 'Safe'
+            ELSE 'Moderate Risk'
+        END AS risk_level
+    FROM customer_hierarchy ch
+    JOIN detailed_sales sd ON ch.c_customer_sk = sd.ws_order_number
+    LEFT JOIN return_data rd ON ch.c_customer_sk = rd.sr_returning_customer_sk
+    WHERE sd.rank_within_category <= 10
+)
+SELECT * 
+FROM final_report
+WHERE sales_category <> 'Low'
+ORDER BY risk_level DESC, total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

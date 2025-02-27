@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS ClosedPosts,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 18 THEN 1 ELSE 0 END), 0) AS MergedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.ClosedPosts,
+    ups.MergedPosts,
+    rb.PostId,
+    rb.Title,
+    rb.Score,
+    rb.UpVotes,
+    rb.DownVotes
+FROM 
+    UserPostStatistics ups
+JOIN 
+    RankedPosts rb ON ups.UserId = rb.PostId 
+WHERE 
+    ups.BadgeCount > 3
+ORDER BY 
+    rb.Score DESC, ups.TotalPosts DESC
+LIMIT 10
+OFFSET 5

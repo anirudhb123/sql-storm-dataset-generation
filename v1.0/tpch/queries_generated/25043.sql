@@ -1,0 +1,31 @@
+SELECT 
+    CONCAT(c.c_name, ' from ', s.s_name) AS supplier_customer_info,
+    REGEXP_REPLACE(SUBSTRING_INDEX(p.p_name, ' ', 1), '[^A-Za-z]', '') AS sanitized_part_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    ROUND(AVG(p.p_retailprice), 2) AS avg_part_price,
+    GROUP_CONCAT(DISTINCT r.r_name ORDER BY r.r_name SEPARATOR ', ') AS regions_supplied
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    supplier_customer_info, sanitized_part_name
+HAVING 
+    total_orders > 10
+ORDER BY 
+    total_revenue DESC;

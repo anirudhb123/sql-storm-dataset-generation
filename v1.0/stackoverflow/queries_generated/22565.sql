@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        DisplayName,
+        EmailHash,
+        Rank() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        Users
+), 
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'UpMod') AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE vt.Name = 'DownMod') AS DownVoteCount,
+        SUM(p.ViewCount) AS TotalViewCount,
+        LEAD(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS NextPostDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.PostTypeId
+), 
+PostDetails AS (
+    SELECT 
+        ap.PostId,
+        ur.DisplayName AS OwnerDisplayName,
+        ap.CommentCount,
+        ap.UpVoteCount,
+        ap.DownVoteCount,
+        ap.TotalViewCount,
+        CASE 
+            WHEN ap.NextPostDate IS NOT NULL AND ap.NextPostDate < NOW() THEN 'Has Following Post'
+            ELSE 'No Following Post'
+        END AS PostFollowUpStatus
+    FROM 
+        ActivePosts ap
+    JOIN 
+        UserReputation ur ON ap.OwnerUserId = ur.UserId
+)
+SELECT 
+    pd.OwnerDisplayName,
+    SUM(pd.CommentCount) AS TotalComments,
+    SUM(pd.UpVoteCount) AS TotalUpVotes,
+    SUM(pd.DownVoteCount) AS TotalDownVotes,
+    SUM(pd.TotalViewCount) AS TotalViews,
+    pd.PostFollowUpStatus,
+    CASE 
+        WHEN SUM(pd.UpVoteCount) - SUM(pd.DownVoteCount) > 10 THEN 'Highly Rated'
+        WHEN SUM(pd.UpVoteCount) - SUM(pd.DownVoteCount) BETWEEN 1 AND 10 THEN 'Moderately Rated'
+        ELSE 
+            CASE 
+                WHEN SUM(pd.UpVoteCount) = 0 AND SUM(pd.DownVoteCount) = 0 THEN 'No Votes'
+                ELSE 'Negatively Rated' 
+            END 
+    END AS PostRating
+FROM 
+    PostDetails pd
+GROUP BY 
+    pd.OwnerDisplayName, pd.PostFollowUpStatus
+HAVING 
+    SUM(pd.CommentCount) > 0 
+    OR PostFollowUpStatus = 'Has Following Post'
+ORDER BY 
+    TotalViews DESC, TotalComments DESC
+LIMIT 10;

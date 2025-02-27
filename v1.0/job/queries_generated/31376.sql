@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 0 AS level
+    FROM aka_title m
+    WHERE m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, mh.level + 1
+    FROM aka_title m
+    JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RoleCount AS (
+    SELECT ci.movie_id, COUNT(ci.id) AS role_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+MoviesWithRoleDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COALESCE(rc.role_count, 0) AS role_count,
+        CASE 
+            WHEN rc.role_count > 5 THEN 'Large Cast'
+            WHEN rc.role_count BETWEEN 3 AND 5 THEN 'Medium Cast'
+            ELSE 'Small Cast' 
+        END AS cast_size
+    FROM MovieHierarchy mh
+    LEFT JOIN RoleCount rc ON mh.movie_id = rc.movie_id
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.role_count,
+        m.cast_size,
+        ROW_NUMBER() OVER (PARTITION BY m.cast_size ORDER BY m.role_count DESC) AS rn
+    FROM MoviesWithRoleDetails m
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.role_count,
+    tm.cast_size,
+    nk.keyword AS popular_keyword
+FROM TopMovies tm
+LEFT JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN keyword nk ON mk.keyword_id = nk.id
+WHERE tm.rn <= 5
+ORDER BY tm.cast_size, tm.role_count DESC;
+
+This query benchmarks the performance of retrieving movies produced after 2000, categorizing them based on their cast size, and limiting the output to the top 5 movies in each cast size category, while also joining with keywords associated with the movies. It uses CTEs for hierarchical movie relationships, counts roles for each movie, and employs window functions for ranking.

@@ -1,0 +1,65 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cr.total_returns,
+        cr.total_return_amt,
+        ROW_NUMBER() OVER (ORDER BY cr.total_return_amt DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    WHERE 
+        cr.total_returns > 5
+),
+HighSellingItems AS (
+    SELECT 
+        i.i_item_id,
+        it.total_sales_quantity,
+        it.total_sales_amount,
+        RANK() OVER (ORDER BY it.total_sales_amount DESC) AS rank
+    FROM 
+        item i
+    JOIN 
+        ItemSales it ON i.i_item_sk = it.ws_item_sk
+    WHERE 
+        it.total_sales_quantity > 50
+)
+SELECT 
+    hrc.c_customer_id,
+    hrc.total_returns,
+    hrc.total_return_amt,
+    hsi.i_item_id,
+    hsi.total_sales_quantity,
+    hsi.total_sales_amount
+FROM 
+    HighReturnCustomers hrc
+JOIN 
+    web_sales ws ON hrc.c_customer_id = ws.ws_bill_customer_sk
+JOIN 
+    HighSellingItems hsi ON ws.ws_item_sk = hsi.ws_item_sk
+WHERE 
+    ws.ws_sold_date_sk BETWEEN 2000000 AND 2000500
+ORDER BY 
+    hrc.total_return_amt DESC, hsi.total_sales_amount DESC
+LIMIT 10;

@@ -1,0 +1,67 @@
+WITH RankedActors AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_rank,
+        COUNT(DISTINCT mo.movie_id) OVER (PARTITION BY a.person_id) AS total_movies
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        company_name co ON mc.company_id = co.id
+    WHERE
+        t.production_year >= 2000
+        AND co.country_code IS NOT NULL
+),
+DistinctMovies AS (
+    SELECT DISTINCT
+        actor_name,
+        movie_title,
+        total_movies
+    FROM
+        RankedActors
+),
+FilteredActors AS (
+    SELECT 
+        actor_name,
+        movie_title,
+        total_movies,
+        CASE 
+            WHEN total_movies > 5 THEN 'Prolific Actor'
+            WHEN total_movies BETWEEN 3 AND 5 THEN 'Regular Actor'
+            ELSE 'Novice Actor'
+        END AS actor_category
+    FROM
+        DistinctMovies
+    WHERE
+        movie_title IS NOT NULL
+        AND actor_name IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count,
+        STRING_AGG(movie_title, ', ') AS movies
+    FROM 
+        FilteredActors
+    WHERE 
+        actor_category = 'Prolific Actor'
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(*) > 10
+)
+SELECT 
+    actor_name,
+    movie_count,
+    movies
+FROM 
+    TopActors
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

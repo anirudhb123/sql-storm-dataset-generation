@@ -1,0 +1,59 @@
+-- Performance benchmarking query for Stack Overflow schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.CreationDate, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COUNT(CM.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.FavoriteCount
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.CreationDate,
+    U.PostCount,
+    U.BadgeCount,
+    P.PostId,
+    P.PostTypeId,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.AnswerCount,
+    P.CommentCount AS PostCommentCount,
+    P.FavoriteCount AS PostFavoriteCount
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 100;

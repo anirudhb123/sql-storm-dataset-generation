@@ -1,0 +1,27 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name,
+           RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+BiggestOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name, c.c_mktsegment,
+           ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+      AND o.o_orderdate < DATE '1997-01-01'
+)
+SELECT p.p_name, p.p_brand, SUM(l.l_quantity) AS total_quantity,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       rs.nation_name, bo.c_name AS customer_name, bo.o_totalprice AS order_amount
+FROM lineitem l
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN BiggestOrders bo ON l.l_orderkey = bo.o_orderkey
+WHERE rs.supplier_rank <= 5
+GROUP BY p.p_name, p.p_brand, rs.nation_name, bo.customer_name, bo.o_totalprice
+HAVING SUM(l.l_quantity) > 100
+ORDER BY total_revenue DESC
+LIMIT 10;

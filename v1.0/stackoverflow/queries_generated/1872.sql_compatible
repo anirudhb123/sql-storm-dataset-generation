@@ -1,0 +1,53 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(EXTRACT(EPOCH FROM (COALESCE(p.LastActivityDate, p.CreationDate) - p.CreationDate)) / 3600.0) AS AvgHoursToFirstActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.UpVotes,
+        UA.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY UA.PostCount DESC, UA.UpVotes DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.PostCount > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.PostCount,
+    TU.UpVotes,
+    TU.DownVotes,
+    COALESCE(AVG(CASE WHEN p.AnswerCount > 0 THEN p.AnswerCount ELSE NULL END), 0) AS AvgAnswersPerQuestion,
+    COALESCE(MAX(p.CreationDate), '1970-01-01'::DATE) AS LastPostDate,
+    CASE 
+        WHEN TU.UpVotes - TU.DownVotes > 0 THEN 'Positive'
+        WHEN TU.UpVotes - TU.DownVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = TU.UserId AND p.PostTypeId = 1
+WHERE 
+    TU.UserRank <= 10
+GROUP BY 
+    TU.UserId, TU.DisplayName, TU.PostCount, TU.UpVotes, TU.DownVotes
+ORDER BY 
+    TU.UserRank;

@@ -1,0 +1,58 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS fully_fulfilled,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name
+),
+CustomerSales AS (
+    SELECT 
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS customer_order_count
+    FROM 
+        customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_name
+),
+SalesRanked AS (
+    SELECT 
+        region_name,
+        fully_fulfilled,
+        total_sales,
+        order_count,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM RegionalSales
+),
+CustomerRanked AS (
+    SELECT 
+        customer_name,
+        customer_total_sales,
+        customer_order_count,
+        DENSE_RANK() OVER (ORDER BY customer_total_sales DESC) AS customer_rank
+    FROM CustomerSales
+)
+
+SELECT 
+    r.region_name,
+    COALESCE(s.sales_rank, 0) AS region_rank,
+    COALESCE(c.customer_name, 'No Purchases') AS customer_name,
+    COALESCE(c.customer_total_sales, 0) AS total_sales_by_customer,
+    COALESCE(c.customer_order_count, 0) AS order_count_by_customer
+FROM 
+    SalesRanked s
+FULL OUTER JOIN CustomerRanked c ON s.region_name = 
+        (SELECT r.r_name FROM region r ORDER BY r.r_regionkey LIMIT 1 OFFSET (c.customer_rank - 1) % (SELECT COUNT(*) FROM region r))
+ORDER BY 
+    r.region_name, c.customer_name;

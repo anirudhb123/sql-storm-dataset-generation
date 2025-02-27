@@ -1,0 +1,50 @@
+WITH RecursiveSales AS (
+    SELECT ws.web_site_sk, 
+           ws_sales_price, 
+           ws_quantity, 
+           ROW_NUMBER() OVER (PARTITION BY ws.ship_mode_sk ORDER BY ws_sales_price DESC) AS rank_sales,
+           DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price) AS dense_rank_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE ws_sales_price > 0
+      AND c.c_birth_year < (EXTRACT(YEAR FROM cast('2002-10-01' as date)) - 21)
+), 
+CumulativeReturns AS (
+    SELECT wr.web_site_sk, 
+           SUM(wr_return_quantity) AS total_return_qty, 
+           SUM(wr_return_amt) AS total_return_amt,
+           CASE 
+               WHEN SUM(wr_return_amt) IS NULL THEN 'Unknown' 
+               WHEN SUM(wr_return_amt) > 1000 THEN 'High' 
+               ELSE 'Low'
+           END AS return_category
+    FROM web_returns wr
+    GROUP BY wr.web_site_sk
+)
+SELECT 
+    sa.web_site_sk, 
+    COALESCE(rs.rank_sales, 0) AS rank_sales,
+    COALESCE(cr.total_return_qty, 0) AS total_return_qty,
+    COALESCE(cr.return_category, 'No Returns') AS return_category,
+    (SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_gender = 'F' AND cd.cd_dep_college_count IS NOT NULL) AS female_college_count
+FROM RecursiveSales rs
+FULL OUTER JOIN CumulativeReturns cr ON rs.web_site_sk = cr.web_site_sk
+WHERE (COALESCE(rs.ws_sales_price, 0) + COALESCE(cr.total_return_amt, 0) < 10000 OR rs.rank_sales < 5)
+  AND (rs.dense_rank_sales IS NOT NULL OR cr.return_category IS NOT NULL)
+ORDER BY rs.web_site_sk, total_return_qty DESC
+FETCH FIRST 10 ROWS ONLY
+
+UNION ALL
+
+SELECT 
+    NULL AS web_site_sk, 
+    -1 AS rank_sales,
+    NULL AS total_return_qty,
+    'Global Total' AS return_category
+FROM dual
+WHERE EXISTS (
+    SELECT 1 
+    FROM web_sales ws
+    WHERE ws.ws_quantity >= (SELECT AVG(ws_quantity) FROM web_sales)
+)
+ORDER BY web_site_sk;

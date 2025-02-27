@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount
+    FROM RankedPosts rp
+    LEFT JOIN Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON c.PostId = rp.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        WHERE VoteTypeId IN (2, 3) 
+        GROUP BY PostId
+    ) v ON v.PostId = rp.PostId
+    WHERE rp.ScoreRank <= 5 
+),
+AggregatedData AS (
+    SELECT 
+        tp.*,
+        CASE 
+            WHEN tp.Score IS NULL THEN 'No Score' 
+            WHEN tp.Score > 10 THEN 'High Score'
+            ELSE 'Low Score' 
+        END AS ScoreCategory
+    FROM TopPosts tp
+),
+PostDetail AS (
+    SELECT 
+        ad.PostId,
+        ad.Title,
+        ad.OwnerDisplayName,
+        ad.CommentCount,
+        STRING_AGG(a.Body, ' | ') AS AnswersBody,
+        ad.ScoreCategory
+    FROM AggregatedData ad
+    LEFT JOIN Posts a ON a.ParentId = ad.PostId 
+    GROUP BY ad.PostId, ad.Title, ad.OwnerDisplayName, ad.CommentCount, ad.ScoreCategory
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.AnswersBody,
+    pd.ScoreCategory
+FROM PostDetail pd
+WHERE pd.OwnerDisplayName IS NOT NULL
+  AND pd.CommentCount > 0
+ORDER BY pd.CommentCount DESC, pd.Title
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+
+UNION ALL 
+
+SELECT 
+    NULL AS PostId,
+    'No Data Available' AS Title,
+    NULL AS OwnerDisplayName,
+    0 AS CommentCount,
+    'N/A' AS AnswersBody,
+    'No Score' AS ScoreCategory
+WHERE NOT EXISTS (SELECT 1 FROM PostDetail);

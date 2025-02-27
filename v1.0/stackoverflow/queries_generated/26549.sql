@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS TotalUpvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS TotalDownvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostHistoryCount AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags edits
+    GROUP BY 
+        ph.PostId
+),
+CombinedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.Tags,
+        COALESCE(vs.TotalUpvotes, 0) AS TotalUpvotes,
+        COALESCE(vs.TotalDownvotes, 0) AS TotalDownvotes,
+        COALESCE(phc.EditCount, 0) AS TotalEdits
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserVoteSummary vs ON vs.UserId = rp.OwnerDisplayName
+    LEFT JOIN 
+        PostHistoryCount phc ON phc.PostId = rp.PostId
+)
+SELECT 
+    *,
+    (TotalUpvotes - TotalDownvotes) AS NetVoteScore,
+    CASE 
+        WHEN TotalEdits > 10 THEN 'Highly Edited'
+        WHEN TotalEdits BETWEEN 5 AND 10 THEN 'Moderately Edited'
+        ELSE 'Slightly Edited'
+    END AS EditClassification
+FROM 
+    CombinedResults
+ORDER BY 
+    Score DESC, CreationDate DESC;

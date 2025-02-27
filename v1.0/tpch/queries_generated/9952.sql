@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), 
+TopSuppliers AS (
+    SELECT s.s_nationkey, s.s_name, s.total_supply_cost
+    FROM RankedSuppliers s
+    WHERE s.rank <= 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+) 
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    co.total_order_value,
+    ts.s_name AS top_supplier_name,
+    ts.total_supply_cost
+FROM 
+    CustomerOrders co
+JOIN 
+    nation n ON n.n_nationkey = (
+        SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey
+    )
+JOIN 
+    TopSuppliers ts ON ts.s_nationkey = n.n_nationkey
+WHERE 
+    co.total_order_value > 1000
+ORDER BY 
+    co.total_order_value DESC, ts.total_supply_cost DESC;

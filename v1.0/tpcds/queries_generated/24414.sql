@@ -1,0 +1,55 @@
+
+WITH RecursiveAddress AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 1 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_zip, ra.level + 1
+    FROM customer_address ca
+    JOIN RecursiveAddress ra ON ca.ca_city = ra.ca_city AND ra.level < 5
+),
+CustomerAggregate AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(ws.ws_net_paid, 0)) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT CASE WHEN ws.ws_ext_discount_amt > 0 THEN ws.ws_order_number END) AS discount_orders,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN RecursiveAddress ra ON c.c_current_addr_sk = ra.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, ra.ca_city, ra.ca_state
+),
+TopCustomers AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY total_spent DESC) AS rank
+    FROM CustomerAggregate
+),
+StoreStats AS (
+    SELECT 
+        s.s_store_sk,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        SUM(CASE WHEN ss.ss_quantity > 10 THEN ss.ss_quantity ELSE 0 END) AS large_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.total_spent,
+    c.order_count,
+    s.avg_sales_price,
+    s.large_sales
+FROM TopCustomers c
+JOIN StoreStats s ON c.order_count > s.sales_count
+WHERE c.rank <= 5 OR c.total_spent IS NULL
+ORDER BY c.ca_state, c.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

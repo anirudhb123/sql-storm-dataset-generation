@@ -1,0 +1,37 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost,
+           COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+RegionSales AS (
+    SELECT n.n_regionkey, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN customer c ON s.s_suppkey = c.c_custkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_regionkey
+),
+RankedSuppliers AS (
+    SELECT sd.s_suppkey, sd.s_name, sd.s_acctbal, sd.total_supply_cost, sd.total_parts,
+           RANK() OVER (ORDER BY sd.total_supply_cost DESC) AS supply_rank
+    FROM SupplierDetails sd
+)
+SELECT rs.s_suppkey, rs.s_name, rs.s_acctbal, rs.total_supply_cost, rs.total_parts,
+       COALESCE(NULLIF(rs.total_parts, 0), 0) AS avg_cost_per_part,
+       CASE 
+           WHEN rs.total_parts > 0 THEN 'Active Supplier' 
+           ELSE 'Inactive Supplier' 
+       END AS supplier_status,
+       COALESCE(rs.total_supply_cost, 0) - COALESCE(rs.total_parts, 0) AS adjusted_cost,
+       r.r_name AS region_name, 
+       r_sales.total_sales
+FROM RankedSuppliers rs
+LEFT JOIN RegionSales r_sales ON rs.s_nationkey = r_sales.n_regionkey
+LEFT JOIN region r ON r.n_regionkey = rs.s_nationkey
+WHERE (COALESCE(NULLIF(rs.total_parts, 0), 1) != 0 AND rs.total_supply_cost / NULLIF(rs.total_parts, 0) > 100) OR rs.s_acctbal < 500
+ORDER BY rs.s_acctbal DESC, rs.total_supply_cost ASC;

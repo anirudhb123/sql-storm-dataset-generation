@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_ext_discount_amt,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk
+        FROM date_dim d
+        WHERE d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 6
+    )
+    AND ws.ws_net_paid > 0
+),
+ReturnData AS (
+    SELECT
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        AVG(wr.wr_return_amt_inc_tax) AS avg_return_value
+    FROM web_returns wr
+    GROUP BY wr.wr_web_page_sk
+),
+SalesReturns AS (
+    SELECT 
+        sd.web_site_id,
+        sd.ws_order_number,
+        sd.ws_item_sk,
+        sd.ws_sales_price,
+        rd.total_returns,
+        rd.avg_return_value,
+        (sd.ws_sales_price - COALESCE(rd.avg_return_value, 0)) AS adjusted_price
+    FROM SalesData sd
+    LEFT JOIN ReturnData rd ON sd.ws_item_sk = rd.wr_web_page_sk
+    WHERE sd.rank <= 10
+)
+SELECT 
+    sr.web_site_id,
+    COUNT(sr.ws_order_number) AS total_orders,
+    SUM(sr.adjusted_price) AS total_adjusted_sales,
+    MAX(sr.adjusted_price) AS max_adjusted_price,
+    COUNT(DISTINCT CASE WHEN sr.total_returns IS NULL THEN sd.ws_item_sk END) AS no_return_items
+FROM SalesReturns sr
+LEFT JOIN SalesData sd ON sr.ws_order_number = sd.ws_order_number
+GROUP BY sr.web_site_id
+HAVING total_adjusted_sales IS NOT NULL AND total_orders > 5
+ORDER BY total_adjusted_sales DESC;

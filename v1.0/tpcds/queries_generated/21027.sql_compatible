@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        sr_return_quantity, 
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_date_sk DESC) AS rnk
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+), 
+TotalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_amt IS NOT NULL
+    GROUP BY 
+        sr_item_sk
+), 
+WebReturns AS (
+    SELECT 
+        wr_item_sk, 
+        SUM(wr_return_quantity) AS total_web_returned_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_web_return_amount
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_amt_inc_tax IS NOT NULL
+    GROUP BY 
+        wr_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    COALESCE(TR.total_returned_quantity, 0) AS store_returned_quantity,
+    COALESCE(TR.total_return_amount, 0) AS store_return_amount,
+    COALESCE(WR.total_web_returned_quantity, 0) AS web_returned_quantity,
+    COALESCE(WR.total_web_return_amount, 0) AS web_return_amount,
+    CASE 
+        WHEN COALESCE(TR.total_returned_quantity, 0) + COALESCE(WR.total_web_returned_quantity, 0) > 0 
+        THEN 100.0 * COALESCE(TR.total_returned_quantity, 0) / (COALESCE(TR.total_returned_quantity, 0) + COALESCE(WR.total_web_returned_quantity, 0)) 
+        ELSE NULL 
+    END AS store_return_percentage,
+    RANK() OVER (ORDER BY COALESCE(TR.total_returned_quantity, 0) + COALESCE(WR.total_web_returned_quantity, 0) DESC) AS return_rank
+FROM 
+    item i
+LEFT JOIN 
+    TotalReturns TR ON i.i_item_sk = TR.sr_item_sk
+LEFT JOIN 
+    WebReturns WR ON i.i_item_sk = WR.wr_item_sk
+WHERE 
+    (COALESCE(TR.total_returned_quantity, 0) > 0 OR COALESCE(WR.total_web_returned_quantity, 0) > 0)
+    AND EXISTS (
+        SELECT 1 
+        FROM catalog_sales cs 
+        WHERE cs.cs_item_sk = i.i_item_sk 
+        GROUP BY cs.cs_item_sk 
+        HAVING COUNT(DISTINCT cs.cs_order_number) > 3
+    )
+ORDER BY 
+    return_rank
+FETCH FIRST 50 ROWS ONLY;

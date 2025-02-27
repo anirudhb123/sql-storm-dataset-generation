@@ -1,0 +1,65 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        COALESCE(SUM(mk.id), 0) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+    GROUP BY 
+        t.id, t.title, t.production_year
+), movie_company_details AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+), movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mii.info, '; ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type i ON mi.info_type_id = i.id
+    WHERE 
+        i.info LIKE '%budget%'
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_count,
+    md.cast_names,
+    COALESCE(mcd.company_names, 'N/A') AS company_names,
+    COALESCE(mcd.company_types, 'N/A') AS company_types,
+    COALESCE(mid.info_details, 'No budget info') AS budget_info,
+    md.keyword_count
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_company_details mcd ON md.movie_id = mcd.movie_id
+LEFT JOIN 
+    movie_info_details mid ON md.movie_id = mid.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC;

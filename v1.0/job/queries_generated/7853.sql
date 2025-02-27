@@ -1,0 +1,53 @@
+WITH RecursiveMovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        cm.name AS company_name,
+        kt.keyword AS movie_keyword
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cm ON mc.company_id = cm.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    WHERE 
+        t.production_year >= 2000
+    ORDER BY 
+        t.production_year DESC
+),
+AggregatedMovieDetails AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+        STRING_AGG(DISTINCT company_name, ', ') AS companies,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords
+    FROM 
+        RecursiveMovieDetails
+    GROUP BY 
+        movie_id, title, production_year
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    actors,
+    companies,
+    keywords
+FROM 
+    AggregatedMovieDetails
+WHERE 
+    COUNT(actors) >= 3
+ORDER BY 
+    production_year ASC;

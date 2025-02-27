@@ -1,0 +1,61 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT r.role) AS distinct_roles,
+        STRING_AGG(DISTINCT cct.kind, ', ') AS company_types
+    FROM 
+        title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_type cct ON mc.company_type_id = cct.id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        m.production_year >= 2000  -- Focus on movies from the year 2000 onward
+    GROUP BY 
+        m.id
+),
+ranked_movies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.distinct_roles,
+        md.company_types,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.movie_title ASC) AS rank
+    FROM 
+        movie_details md
+)
+SELECT 
+    rm.rank,
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    rm.cast_names,
+    rm.keywords,
+    rm.distinct_roles,
+    rm.company_types
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.distinct_roles > 1  -- Filter to only show movies with multiple roles
+ORDER BY 
+    rm.rank
+LIMIT 20;  -- Limit to the top 20 results

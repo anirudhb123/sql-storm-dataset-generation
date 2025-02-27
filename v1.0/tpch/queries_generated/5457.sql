@@ -1,0 +1,62 @@
+WITH RegionalSales AS (
+    SELECT
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE
+        l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY
+        r.r_name
+),
+CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+OrderLineSummary AS (
+    SELECT
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS total_lines,
+        SUM(l.l_quantity) AS total_quantity
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+)
+SELECT
+    r.region,
+    AVG(cs.total_orders) AS avg_orders_per_customer,
+    AVG(cs.total_spent) AS avg_spent_per_customer,
+    SUM(rs.total_sales) AS total_sales_region,
+    SUM(ols.total_lines) AS total_lines_in_orders,
+    SUM(ols.total_quantity) AS total_quantity_in_orders
+FROM
+    RegionalSales rs
+JOIN
+    CustomerOrderStats cs ON rs.region = (SELECT r_name FROM region WHERE r_regionkey IN (SELECT n_regionkey FROM nation WHERE n_nationkey IN (SELECT s_nationkey FROM supplier WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT p_partkey FROM part)))))
+JOIN
+    OrderLineSummary ols ON ols.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey IN (SELECT p_partkey FROM part)))
+GROUP BY
+    r.region
+ORDER BY
+    total_sales_region DESC;

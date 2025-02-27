@@ -1,0 +1,58 @@
+WITH movie_data AS (
+    SELECT 
+        m.title AS movie_title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT r.role) AS roles,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(COUNT(DISTINCT mc.company_id), 0) AS production_companies
+    FROM 
+        title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        roles,
+        cast_names,
+        keywords,
+        production_companies,
+        RANK() OVER (ORDER BY production_year DESC, production_companies DESC) AS rank
+    FROM 
+        movie_data
+)
+SELECT 
+    rm.rank,
+    rm.movie_title,
+    rm.production_year,
+    rm.production_companies,
+    string_agg(DISTINCT cn.name, ', ') AS company_names,
+    string_agg(DISTINCT kw.keyword, ', ') AS all_keywords
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movie_companies mc ON rm.movie_title = (SELECT title FROM title WHERE id = mc.movie_id)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON rm.movie_title = (SELECT title FROM title WHERE id = mk.movie_id)
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    rm.rank, rm.movie_title, rm.production_year, rm.production_companies
+ORDER BY 
+    rm.rank;

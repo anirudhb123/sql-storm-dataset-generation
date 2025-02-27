@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 3 THEN ph.CreationDate END) AS LastTagChangeDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.UserId,
+    up.Reputation,
+    COALESCE(rp.CommentCount, 0) AS TotalComments,
+    COALESCE(rp.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(phs.CloseCount, 0) AS TotalCloseVotes,
+    COALESCE(phs.ReopenCount, 0) AS TotalReopenVotes,
+    AVG(rp.ViewCount) AS AverageViewCount,
+    COUNT(DISTINCT rp.PostId) AS QuestionCount,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS PostTitles,
+    CASE
+        WHEN up.Reputation > 1000 THEN 'High Reputation User'
+        WHEN up.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation User'
+        ELSE 'Low Reputation User'
+    END AS ReputationCategory
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+GROUP BY 
+    up.UserId, up.Reputation
+HAVING 
+    AVG(rp.ViewCount) IS NOT NULL
+ORDER BY 
+    up.Reputation DESC;

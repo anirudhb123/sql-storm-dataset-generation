@@ -1,0 +1,98 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpVotes,
+        DownVotes,
+        PostsCount,
+        BadgesCount,
+        ROW_NUMBER() OVER (PARTITION BY 
+            CASE WHEN Reputation < 1000 THEN 'Novice'
+                 WHEN Reputation >= 1000 AND Reputation < 10000 THEN 'Intermediate'
+                 ELSE 'Expert' END 
+            ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics
+),
+TopContributors AS (
+    SELECT 
+        DisplayName,
+        Reputation,
+        UpVotes,
+        DownVotes,
+        PostsCount,
+        BadgesCount,
+        UserId
+    FROM 
+        RankedUsers
+    WHERE 
+        UserRank <= 10
+),
+PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    CROSS JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tagName
+    LEFT JOIN 
+        Tags t ON t.TagName = tagName
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    tc.DisplayName,
+    tc.Reputation,
+    tc.UpVotes,
+    tc.DownVotes,
+    pt.PostId,
+    pt.Title,
+    pt.CreationDate,
+    pt.Tags,
+    CASE 
+        WHEN tc.BadgesCount = 0 THEN 'No Badges'
+        WHEN tc.BadgesCount BETWEEN 1 AND 5 THEN 'Some Badges'
+        ELSE 'Highly Decorated'
+    END AS BadgeStatus,
+    CASE 
+        WHEN tc.UpVotes - tc.DownVotes < 0 THEN 'Negative Feedback'
+        WHEN tc.UpVotes - tc.DownVotes > 0 THEN 'Positive Feedback'
+        ELSE 'Neutral Feedback'
+    END AS FeedbackStatus
+FROM 
+    TopContributors tc
+LEFT JOIN 
+    PostsWithTags pt ON tc.UserId = pt.PostId
+WHERE 
+    tc.Biography IS NULL OR LENGTH(tc.Biography) < 50
+    OR EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = tc.UserId AND b.Class = 1)
+ORDER BY 
+    tc.Reputation DESC, 
+    pt.CreationDate DESC
+OFFSET 0 ROWS
+FETCH NEXT 100 ROWS ONLY;

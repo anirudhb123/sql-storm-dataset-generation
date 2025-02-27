@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        c.name AS company_name,
+        k.keyword,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info LIKE '%Award%' 
+        OR it.info LIKE '%Nominated%'
+),
+RecentMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        company_name,
+        keyword,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank = 1
+)
+SELECT 
+    rm.title,
+    rm.company_name,
+    STRING_AGG(rm.keyword, ', ') AS keywords,
+    rm.production_year
+FROM 
+    RecentMovies rm
+GROUP BY 
+    rm.movie_id, rm.title, rm.company_name, rm.production_year
+ORDER BY 
+    rm.production_year DESC;

@@ -1,0 +1,39 @@
+WITH TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(total_cost)
+        FROM (
+            SELECT SUM(ps1.ps_supplycost * ps1.ps_availqty) AS total_cost
+            FROM supplier s1
+            JOIN partsupp ps1 ON s1.s_suppkey = ps1.ps_suppkey
+            GROUP BY s1.s_suppkey
+        ) AS avg_cost
+    )
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1997-10-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierOrders AS (
+    SELECT t.s_suppkey, o.o_orderkey, o.o_orderdate, os.net_sales
+    FROM TopSuppliers t
+    LEFT JOIN lineitem l ON t.s_suppkey = l.l_suppkey
+    JOIN OrderStats os ON l.l_orderkey = os.o_orderkey
+)
+SELECT 
+    so.s_suppkey,
+    s.s_name,
+    COUNT(DISTINCT so.o_orderkey) AS order_count,
+    SUM(so.net_sales) AS total_net_sales,
+    RANK() OVER (PARTITION BY so.s_suppkey ORDER BY SUM(so.net_sales) DESC) AS sales_rank
+FROM SupplierOrders so
+JOIN supplier s ON so.s_suppkey = s.s_suppkey
+GROUP BY so.s_suppkey, s.s_name
+HAVING SUM(so.net_sales) IS NOT NULL
+ORDER BY total_net_sales DESC;

@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+            THEN 'Above Average' 
+            ELSE 'Below Average' 
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10 AND p.p_comment NOT LIKE '%fragile%'
+),
+OverDueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        DATEDIFF(CURRENT_DATE, o.o_orderdate) AS days_late
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate < DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
+),
+SupplierPartInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS Supplier_Name,
+    COUNT(DISTINCT o.o_orderkey) AS Total_Orders,
+    SUM(e.p_retailprice) AS Total_Expensive_Part_Price,
+    SUM(sp.total_value) AS Total_Part_Value,
+    COUNT(DISTINCT CASE WHEN s.rnk = 1 THEN s.s_suppkey END) AS Top_Suppliers_Count,
+    AVG(CASE WHEN od.days_late IS NOT NULL THEN od.days_late ELSE NULL END) AS Average_Days_Late
+FROM 
+    RankedSuppliers s
+LEFT JOIN 
+    ExpensiveParts e ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = e.p_partkey LIMIT 1)
+LEFT JOIN 
+    OverDueOrders od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = s.s_nationkey LIMIT 1) LIMIT 1)
+LEFT JOIN 
+    SupplierPartInfo sp ON sp.ps_suppkey = s.s_suppkey
+GROUP BY 
+    s.s_suppkey, s.s_name, s.s_nationkey
+HAVING 
+    Total_Orders > 0 OR Total_Expensive_Part_Price IS NOT NULL
+ORDER BY 
+    Total_Orders DESC, Total_Expensive_Part_Price DESC, Supplier_Name
+LIMIT 10;

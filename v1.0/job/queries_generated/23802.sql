@@ -1,0 +1,79 @@
+WITH ranked_actors AS (
+    SELECT
+        k.keyword,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        RANK() OVER (PARTITION BY k.keyword ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_within_keyword
+    FROM
+        keyword k
+    JOIN
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN
+        aka_title t ON mk.movie_id = t.id
+    JOIN
+        cast_info c ON t.id = c.movie_id
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        t.production_year >= 2000
+        AND k.keyword IS NOT NULL
+    GROUP BY
+        k.keyword, a.name, t.title
+),
+
+actor_most_frequent_roles AS (
+    SELECT
+        a.actor_name,
+        r.role AS most_frequent_role,
+        COUNT(*) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        a.actor_name, r.role
+    HAVING
+        COUNT(*) > 5
+),
+
+actor_info AS (
+    SELECT
+        ai.person_id,
+        ai.info,
+        CASE 
+            WHEN ai.info_type_id = 1 THEN 'Biography'
+            WHEN ai.info_type_id = 2 THEN 'Awards'
+            ELSE 'Miscellaneous'
+        END AS info_category
+    FROM
+        person_info ai
+)
+
+SELECT 
+    COALESCE(r.keyword, 'Unspecified') AS keyword,
+    ra.actor_name,
+    ra.movie_title,
+    CASE 
+        WHEN r.rank_within_keyword <= 3 THEN 'Top Actor'
+        ELSE 'Supporting Actor'
+    END AS actor_type,
+    afr.most_frequent_role,
+    afr.role_count,
+    (SELECT COUNT(*) FROM actor_info WHERE person_id = a.person_id) AS info_records_count
+FROM 
+    ranked_actors ra
+LEFT JOIN 
+    actor_most_frequent_roles afr ON ra.actor_name = afr.actor_name
+LEFT JOIN 
+    (SELECT DISTINCT person_id, name FROM aka_name) a ON ra.actor_name = a.name
+WHERE 
+    ra.rank_within_keyword <= 5
+ORDER BY 
+    r.keyword, ra.actor_name;
+
+-- Note:
+-- This query fetches actors' ranked appearances in movies based on keywords,
+-- their most frequent roles, and their associated information, while addressing NULL values, 
+-- correlated subqueries, and multiple join types to provide comprehensive insights.

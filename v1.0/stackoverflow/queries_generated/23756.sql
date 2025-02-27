@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(p.Body, ''), 'No content provided') AS PostContent
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+
+SiblingPosts AS (
+    SELECT
+        p1.Id AS ParentPostId,
+        p1.Title AS ParentTitle,
+        p2.Id AS ChildPostId,
+        p2.Title AS ChildTitle,
+        p2.CreationDate AS ChildCreationDate
+    FROM 
+        Posts p1
+        JOIN Posts p2 ON p1.Id = p2.ParentId
+    WHERE 
+        p1.PostTypeId = 1 AND p2.PostTypeId = 2 -- Parent is a question, child is an answer
+),
+
+VoteDistribution AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+
+PostMetrics AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS NetVotes,
+        r.CreationDate
+    FROM 
+        RankedPosts r
+        LEFT JOIN VoteDistribution v ON r.PostId = v.PostId
+)
+
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.ViewCount,
+    pm.NetVotes,
+    pm.CreationDate,
+    COALESCE(sp.ChildTitle, 'No answers') AS LatestAnswerTitle,
+    COALESCE(sp.ChildCreationDate, 'N/A') AS LatestAnswerDate,
+    'Post type: ' || pt.Name AS PostType,
+    COALESCE(NULLIF(pm.PostContent, ''), 'Content stripped') AS DisplayContent
+FROM 
+    PostMetrics pm
+    LEFT JOIN SiblingPosts sp ON pm.PostId = sp.ParentPostId
+    JOIN PostTypes pt ON pm.PostId IN (
+        SELECT Id FROM Posts WHERE PostTypeId = pt.Id
+    )
+WHERE 
+    pm.NetVotes >= 0
+    AND pm.ViewCount > 50
+    AND pm.CreationDate BETWEEN CURRENT_DATE - INTERVAL '6 months' AND CURRENT_DATE
+ORDER BY 
+    pm.NetVotes DESC,
+    pm.CreationDate DESC
+LIMIT 10;

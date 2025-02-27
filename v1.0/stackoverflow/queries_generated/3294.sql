@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        U.Id
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId AS EditorUserId,
+        PH.CreationDate AS EditDate,
+        PH.Comment,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(PH.Id) AS ClosureCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalQuestions,
+    UA.TotalAnswers,
+    UA.TotalBounties,
+    COALESCE(CP.ClosureCount, 0) AS PostClosureCount,
+    COALESCE(CP.LastClosedDate, 'No closures') AS LastClosedPostDate,
+    RE.EditedPostId,
+    RE.EditDate AS RecentEditDate,
+    U2.DisplayName AS EditorDisplayName,
+    RE.Comment AS EditComment
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    ClosedPosts CP ON UA.UserId = CP.PostId
+LEFT JOIN 
+    (SELECT 
+        RE.PostId AS EditedPostId,
+        RE.EditDate,
+        RE.EditorUserId,
+        RE.Comment
+     FROM 
+        RecentEdits RE
+     WHERE 
+        RE.EditRank = 1) RE ON UA.TotalPosts = RE.EditedPostId
+LEFT JOIN 
+    Users U2 ON RE.EditorUserId = U2.Id
+WHERE 
+    UA.TotalPosts > 0
+ORDER BY 
+    UA.TotalPosts DESC, UA.DisplayName ASC;

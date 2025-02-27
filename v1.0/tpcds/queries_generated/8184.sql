@@ -1,0 +1,51 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        dd.d_year = 2023
+        AND dd.d_month_seq BETWEEN 1 AND 6
+    GROUP BY 
+        ws.web_site_id
+),
+customer_analysis AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS count_customers,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    s.web_site_id,
+    s.total_sales,
+    s.total_discount,
+    s.total_orders,
+    s.unique_customers,
+    c.cd_gender,
+    c.count_customers,
+    c.avg_purchase_estimate
+FROM 
+    sales_summary s
+LEFT JOIN 
+    customer_analysis c ON s.total_orders > 100
+ORDER BY 
+    s.total_sales DESC, 
+    c.count_customers DESC
+LIMIT 50;

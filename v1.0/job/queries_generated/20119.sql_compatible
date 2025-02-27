@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank
+    FROM 
+        title t
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        r.role,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        c.note IS NULL
+    GROUP BY 
+        c.person_id, c.movie_id, r.role
+),
+Combined AS (
+    SELECT 
+        a.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year,
+        ar.person_id,
+        ar.role,
+        ar.role_count
+    FROM 
+        aka_name a
+    FULL OUTER JOIN 
+        (
+            SELECT 
+                r.title_id,
+                r.title,
+                r.production_year,
+                ar.person_id,
+                ar.role,
+                ar.role_count
+            FROM 
+                RankedMovies r
+            LEFT JOIN 
+                ActorRoles ar ON r.title_id = ar.movie_id
+        ) m ON a.person_id = m.person_id
+    LEFT JOIN 
+        aka_title at ON at.id = m.title_id
+)
+SELECT 
+    c.actor_name,
+    c.movie_title,
+    COALESCE(c.role, 'Unknown Role') AS role,
+    COALESCE(c.role_count, 0) AS role_occurrences,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ARRAY_AGG(DISTINCT p.info) AS additional_info
+FROM 
+    Combined c
+LEFT JOIN 
+    movie_keyword mk ON c.movie_title = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    person_info p ON c.actor_name = p.person_id
+WHERE 
+    c.production_year > 2000
+GROUP BY 
+    c.actor_name, c.movie_title, c.role, c.role_count, c.production_year
+HAVING 
+    COUNT(mk.keyword_id) > 1
+ORDER BY 
+    c.production_year DESC, c.actor_name ASC;

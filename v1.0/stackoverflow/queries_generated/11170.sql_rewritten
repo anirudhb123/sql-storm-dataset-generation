@@ -1,0 +1,72 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(A.Id) AS AnswerCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostVoteStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.CommentCount,
+    PS.AnswerCount,
+    US.DisplayName AS OwnerDisplayName,
+    US.Reputation AS OwnerReputation,
+    US.BadgeCount AS OwnerBadgeCount,
+    US.TotalBounties AS OwnerTotalBounties,
+    PVS.UpVotes,
+    PVS.DownVotes
+FROM 
+    PostStatistics PS
+JOIN 
+    Users U ON PS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+JOIN 
+    UserStatistics US ON U.Id = US.UserId
+LEFT JOIN 
+    PostVoteStatistics PVS ON PS.PostId = PVS.PostId
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC
+LIMIT 100;

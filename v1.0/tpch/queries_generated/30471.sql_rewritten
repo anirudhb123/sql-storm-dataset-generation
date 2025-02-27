@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+AvgPriceCTE AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-10-31'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 50000
+),
+AggregatedLineItems AS (
+    SELECT l.l_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS item_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    p.p_container AS part_container,
+    p.p_size AS part_size,
+    COALESCE(sp.total_revenue, 0) AS total_revenue,
+    COALESCE(ac.avg_supply_cost, 0) AS avg_supply_cost,
+    c.c_name AS customer_name,
+    sh.level AS supplier_level
+FROM part p
+LEFT JOIN AggregatedLineItems sp ON p.p_partkey = sp.l_partkey AND sp.rn = 1
+LEFT JOIN AvgPriceCTE ac ON p.p_partkey = ac.ps_partkey
+LEFT JOIN TopCustomers c ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < ac.avg_supply_cost)
+LEFT JOIN SupplierHierarchy sh ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = sh.s_suppkey)
+WHERE p.p_retailprice > 50.00
+ORDER BY total_revenue DESC, avg_supply_cost ASC
+LIMIT 100;

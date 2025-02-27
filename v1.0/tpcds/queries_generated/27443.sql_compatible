@@ -1,0 +1,86 @@
+
+WITH AddressData AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        TRIM(CONCAT(ca_city, ', ', ca_state, ' ', ca_zip)) AS city_state_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicData AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count
+    FROM 
+        customer_demographics
+),
+DateData AS (
+    SELECT 
+        CAST(d_date AS CHAR) AS formatted_date,
+        d_month_seq,
+        d_week_seq,
+        d_year
+    FROM 
+        date_dim
+),
+CustomerData AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        c_preferred_cust_flag
+    FROM 
+        customer
+),
+SalesData AS (
+    SELECT 
+        ws_ship_mode_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_mode_sk
+)
+SELECT 
+    ad.full_address,
+    ad.city_state_zip,
+    ad.ca_country,
+    dd.formatted_date,
+    dd.d_year,
+    cd.full_name,
+    cd.c_email_address,
+    cd.c_preferred_cust_flag,
+    sd.total_quantity,
+    sd.total_profit
+FROM 
+    AddressData ad
+JOIN 
+    DemographicData dd ON ad.full_address IS NOT NULL
+JOIN 
+    CustomerData cd ON cd.c_email_address IS NOT NULL
+JOIN 
+    SalesData sd ON sd.ws_ship_mode_sk IS NOT NULL
+WHERE 
+    ad.ca_country = 'USA'
+    AND dd.cd_marital_status = 'M'
+    AND dd.cd_purchase_estimate > 1000
+GROUP BY 
+    ad.full_address,
+    ad.city_state_zip,
+    ad.ca_country,
+    dd.formatted_date,
+    dd.d_year,
+    cd.full_name,
+    cd.c_email_address,
+    cd.c_preferred_cust_flag,
+    sd.total_quantity,
+    sd.total_profit
+ORDER BY 
+    dd.d_year DESC, 
+    sd.total_profit DESC
+LIMIT 100;

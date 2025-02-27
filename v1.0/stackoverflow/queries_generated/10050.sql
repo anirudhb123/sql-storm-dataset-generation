@@ -1,0 +1,37 @@
+-- Performance benchmarking query to analyze Posts with their related details
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.LastActivityDate,
+    p.ViewCount,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(v.Id) AS VoteCount,
+    COUNT(c.Id) AS CommentCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    MAX(b.Date) AS LastBadgeDate,
+    MAX(b.Class) AS HighestBadgeClass
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, '<>')) AS tag_id ON true
+LEFT JOIN 
+    Tags t ON tag_id::int = t.Id
+WHERE 
+    p.CreationDate >= '2023-01-01'  -- Filter for posts created in 2023
+GROUP BY 
+    p.Id, u.DisplayName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;  -- Limit the result set for performance

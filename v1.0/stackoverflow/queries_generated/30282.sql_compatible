@@ -1,0 +1,104 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        Title,
+        ViewCount,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN pp.LastClosedDate IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedQuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1 
+    LEFT JOIN 
+        ClosedPosts pp ON pp.PostId = p.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    p.Title AS QuestionTitle,
+    p.ViewCount,
+    p.BadgeCount,
+    u.QuestionCount,
+    u.ClosedQuestionCount,
+    ru.UserRank,
+    (CASE 
+        WHEN u.QuestionCount > 0 THEN ROUND((CAST(u.ClosedQuestionCount AS DECIMAL) / u.QuestionCount) * 100, 2) 
+        ELSE 0 
+    END) AS ClosureRate,
+    DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank 
+FROM 
+    UserPostStats u
+JOIN 
+    PostsWithBadges p ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    RankedUsers ru ON u.UserId = ru.UserId
+WHERE 
+    u.QuestionCount > 0
+ORDER BY 
+    PopularityRank,
+    ClosureRate DESC;

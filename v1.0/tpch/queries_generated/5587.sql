@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+        o.o_orderdate,
+        o.o_orderpriority,
+        n.n_name AS NationName
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderpriority, n.n_name
+),
+FinalResults AS (
+    SELECT 
+        rd.NationName,
+        SUM(od.Revenue) AS TotalRevenue,
+        COUNT(DISTINCT od.o_orderkey) AS TotalOrders,
+        MAX(rd.TotalCost) AS MaxSupplierCost
+    FROM 
+        RankedSuppliers rd
+    JOIN 
+        OrderDetails od ON rd.NationName = od.NationName
+    GROUP BY 
+        rd.NationName
+)
+SELECT 
+    NationName,
+    TotalRevenue,
+    TotalOrders,
+    MaxSupplierCost
+FROM 
+    FinalResults
+ORDER BY 
+    TotalRevenue DESC
+LIMIT 10;

@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DATEDIFF(CURRENT_DATE, o.o_orderdate) AS days_since_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+TopNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        supplier_count > 5
+),
+OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(COALESCE(ols.total_revenue, 0)) AS total_revenue,
+    AVG(rn.rn) AS avg_supplier_rank,
+    MAX(ols.line_item_count) AS max_line_items
+FROM 
+    TopNations r
+LEFT JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rn ON s.s_suppkey = rn.s_suppkey
+LEFT JOIN 
+    RecentOrders o ON s.s_nationkey = o.o_custkey
+LEFT JOIN 
+    OrderLineSummary ols ON o.o_orderkey = ols.l_orderkey
+WHERE 
+    (rn.rn = 1 OR rn.rn IS NULL) AND 
+    (rn.s_acctbal IS NOT NULL OR o.o_orderkey IS NULL)
+GROUP BY 
+    r.n_name
+HAVING 
+    total_orders > 0 
+    OR MAX(2 * (total_revenue IS NULL)) >= MAX(total_revenue)
+ORDER BY 
+    total_revenue DESC;

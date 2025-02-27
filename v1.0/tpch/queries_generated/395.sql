@@ -1,0 +1,57 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS effective_price,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    cs.total_orders,
+    COALESCE(cs.total_spent, 0) AS customer_spent,
+    ss.s_name AS supplier_name,
+    ss.total_available,
+    ss.avg_supply_cost,
+    ldc.effective_price,
+    ldc.line_count
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStats ss ON cs.total_orders > 0 
+LEFT JOIN 
+    LineItemDetails ldc ON ldc.l_orderkey = cs.total_orders
+WHERE 
+    ss.avg_supply_cost = (SELECT MAX(avg_supply_cost) FROM SupplierStats)
+ORDER BY 
+    cs.total_orders DESC, customer_spent DESC;

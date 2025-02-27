@@ -1,0 +1,45 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal AND ch.level < 5
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_availqty) AS avg_avail_qty, MAX(p.p_retailprice) AS max_price
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 20
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    n.n_name AS nation,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    SUM(l.l_discount) AS total_discount,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice) DESC) AS rank,
+    coalesce(pd.max_price, 0) AS part_max_price,
+    CASE 
+        WHEN SUM(l.l_discount) BETWEEN 0 AND 0.1 THEN 'Low Discount'
+        WHEN SUM(l.l_discount) BETWEEN 0.1 AND 0.3 THEN 'Medium Discount'
+        ELSE 'High Discount'
+    END AS discount_category
+FROM orders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN PartDetails pd ON l.l_partkey = pd.p_partkey
+WHERE o.o_orderstatus = 'F'
+  AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+  AND n.n_name IN (SELECT DISTINCT n_name FROM nation WHERE r_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'EUROPE'))
+GROUP BY c.c_name, n.n_name, pd.max_price
+HAVING SUM(l.l_extendedprice) > 10000
+ORDER BY rank, c_name;

@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        mt.production_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title IS NOT NULL 
+
+    UNION ALL
+
+    SELECT 
+        linked_movie.linked_movie_id,
+        lt.title,
+        mh.level + 1,
+        lt.production_year
+    FROM 
+        movie_link linked_movie
+    JOIN 
+        aka_title lt ON linked_movie.linked_movie_id = lt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = linked_movie.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(mc.company_id) AS company_count,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    SUM(mi.info LIKE '%Awards%') AS awards_info,
+    AVG(mh.level) AS average_link_level
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = 
+        (SELECT id FROM info_type WHERE info = 'Awards' LIMIT 1)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(mc.company_id) > 1 AND AVG(mh.level) < 2
+ORDER BY 
+    mh.production_year DESC, movie_count DESC;

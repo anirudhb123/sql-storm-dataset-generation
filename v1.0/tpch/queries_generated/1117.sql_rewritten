@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+SalesSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS total_orders
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+        AND l.l_returnflag = 'N'
+        AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(ss.total_sales) AS region_sales
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        SalesSummary ss ON ss.o_orderkey IN (
+            SELECT l_orderkey
+            FROM lineitem l
+            JOIN orders o ON l.l_orderkey = o.o_orderkey
+            JOIN customer c ON o.o_custkey = c.c_custkey
+            WHERE c.c_nationkey = n.n_nationkey
+        )
+    GROUP BY 
+        n.n_regionkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ts.region_sales, 0) AS total_sales,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    STRING_AGG(DISTINCT s.s_name) AS suppliers
+FROM 
+    region r
+LEFT JOIN 
+    TopRegions ts ON r.r_regionkey = ts.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON ts.n_regionkey IN (
+        SELECT 
+            n.n_regionkey
+        FROM 
+            nation n
+        WHERE 
+            n.n_nationkey = s.s_nationkey
+    )
+WHERE 
+    (COALESCE(ts.region_sales, 0) > 1000 OR s.s_acctbal IS NOT NULL)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY 
+    total_sales DESC, r.r_name;

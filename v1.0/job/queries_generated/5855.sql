@@ -1,0 +1,21 @@
+SELECT c.id AS cast_id, 
+       a.name AS actor_name, 
+       t.title AS movie_title, 
+       k.keyword AS movie_keyword, 
+       comp.name AS company_name, 
+       ci.kind AS company_type, 
+       mi.info AS movie_info
+FROM cast_info c
+JOIN aka_name a ON c.person_id = a.person_id
+JOIN complete_cast cc ON c.movie_id = cc.movie_id
+JOIN title t ON cc.movie_id = t.id
+JOIN movie_companies mc ON mc.movie_id = t.id
+JOIN company_name comp ON mc.company_id = comp.id
+JOIN company_type ct ON mc.company_type_id = ct.id
+JOIN movie_keyword mk ON mk.movie_id = t.id
+JOIN keyword k ON mk.keyword_id = k.id
+JOIN movie_info mi ON mi.movie_id = t.id
+WHERE a.name ILIKE '%Smith%'
+  AND t.production_year BETWEEN 2000 AND 2020
+  AND k.keyword LIKE 'Action%'
+ORDER BY t.production_year DESC, a.name;

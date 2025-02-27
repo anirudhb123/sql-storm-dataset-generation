@@ -1,0 +1,104 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.EmailHash,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.EmailHash,
+        R.Level + 1 AS Level
+    FROM Users U
+    JOIN RecursiveUserStats R ON U.Reputation > R.Reputation
+    WHERE U.Id != R.UserId
+),
+
+TopUserPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        MAX(P.CreationDate) AS RecentPostDate
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY P.OwnerUserId
+),
+
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes V
+    GROUP BY V.PostId
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        DATEDIFF(MINUTE, PH.CreationDate, NOW()) AS MinutesSinceClosed
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+),
+
+FinalUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(TP.PostCount, 0) AS PostCount,
+        COALESCE(TP.TotalScore, 0) AS TotalScore,
+        COALESCE(TP.AvgViewCount, 0) AS AvgViewCount,
+        COALESCE(PVS.UpVotes, 0) AS UpVotesReceived,
+        COALESCE(PVS.DownVotes, 0) AS DownVotesReceived,
+        COALESCE(PVS.TotalVotes, 0) AS TotalVotesOnPosts,
+        COALESCE(CP.MinutesSinceClosed, 0) AS MinutesSinceLastClosed
+    FROM Users U
+    LEFT JOIN TopUserPosts TP ON U.Id = TP.OwnerUserId
+    LEFT JOIN PostVoteSummary PVS ON TP.OwnerUserId = PVS.PostId
+    LEFT JOIN ClosedPosts CP ON PVS.PostId = CP.PostId
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalScore,
+    U.AvgViewCount,
+    U.UpVotesReceived,
+    U.DownVotesReceived,
+    U.TotalVotesOnPosts,
+    U.MinutesSinceLastClosed,
+    CASE 
+        WHEN U.Reputation >= 2000 THEN 'Gold'
+        WHEN U.Reputation >= 1000 THEN 'Silver'
+        ELSE 'Bronze' 
+    END AS Tier,
+    R.Level AS RecursiveLevel
+FROM FinalUserStats U
+JOIN RecursiveUserStats R ON U.UserId = R.UserId
+WHERE U.Reputation >= 500
+ORDER BY U.Reputation DESC, U.PostCount DESC;

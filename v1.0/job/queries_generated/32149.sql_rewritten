@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(STRING_AGG(DISTINCT concat(aka.name, ' [', cct.kind, ']'), ', '), 'No Cast') AS cast_members,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(p.age) FILTER (WHERE p.age IS NOT NULL) AS average_age,
+    MAX(m.production_year) OVER () AS latest_movie_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    (SELECT person_id, 
+            EXTRACT(YEAR FROM AGE(cast('2024-10-01 12:34:56' as timestamp), date_of_birth)) AS age 
+     FROM person_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Date of Birth')
+    ) p ON ci.person_id = p.person_id
+LEFT JOIN 
+    comp_cast_type cct ON ci.role_id = cct.id
+WHERE 
+    mh.level = 1
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, keyword_count DESC
+LIMIT 10;

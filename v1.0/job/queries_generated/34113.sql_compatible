@@ -1,0 +1,78 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1 AS level
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+ranked_cast AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+),
+grouped_movie_info AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info, ', ') AS all_information
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    mh.level,
+    rc.person_id,
+    rc.role_id,
+    rc.role_rank,
+    gmi.all_information
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    ranked_cast rc ON mh.movie_id = rc.movie_id
+LEFT JOIN 
+    grouped_movie_info gmi ON mh.movie_id = gmi.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2022
+    AND (rc.role_rank IS NULL OR rc.role_rank <= 5)
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    mh.level,
+    rc.person_id,
+    rc.role_id,
+    rc.role_rank,
+    gmi.all_information
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC;

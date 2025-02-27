@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        DISTINCT STRING_AGG(t.TagName, ', ') OVER (PARTITION BY p.Id) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) 
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(p.Score) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ModerationHistory AS (
+    SELECT 
+        ph.UserDisplayName,
+        ph.CreationDate,
+        COUNT(*) OVER (PARTITION BY ph.UserId) AS TotalEdits,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) OVER (PARTITION BY ph.UserId) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '2 years'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.Reputation AS UserReputation,
+    r.Tags,
+    rp.RankByScore,
+    COALESCE(u.BadgeCount, 0) AS UserBadgeCount,
+    u.AvgPostScore,
+    mh.UserDisplayName AS ModeratorWhoEdited,
+    mh.TotalEdits,
+    mh.CloseReopenCount,
+    CASE 
+        WHEN mh.CloseReopenCount > 0 THEN 'Moderated' 
+        ELSE 'Not Moderated' 
+    END AS ModerationStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    ModerationHistory mh ON u.Id = mh.UserId
+WHERE 
+    rp.RankByScore <= 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

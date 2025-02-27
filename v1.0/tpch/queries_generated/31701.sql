@@ -1,0 +1,61 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS depth
+    FROM nation
+    WHERE n_regionkey = 1
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_nationkey, COUNT(DISTINCT s.s_suppkey) AS total_suppliers, 
+           SUM(s.s_acctbal) AS total_account_balance,
+           AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    GROUP BY s.s_nationkey
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_order_value
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, COUNT(*) AS item_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           SUM(l.l_tax) AS total_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, 
+       ns.total_suppliers, 
+       ns.total_account_balance, 
+       os.total_order_value, 
+       ls.item_count, 
+       ls.total_sales, 
+       ls.total_tax
+FROM nation_hierarchy n
+LEFT JOIN supplier_summary ns ON n.n_nationkey = ns.s_nationkey
+LEFT JOIN order_summary os ON os.o_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = n.n_nationkey
+)
+LEFT JOIN lineitem_summary ls ON ls.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey 
+              AND c.c_acctbal > (
+                  SELECT AVG(c2.c_acctbal)
+                  FROM customer c2
+                  WHERE c2.c_nationkey = n.n_nationkey
+              )
+    )
+)
+WHERE ns.total_suppliers IS NOT NULL 
+      OR os.total_order_value IS NOT NULL
+ORDER BY n.n_name;

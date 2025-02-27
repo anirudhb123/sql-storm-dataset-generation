@@ -1,0 +1,97 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(ps.UpVotes, 0) AS UpVotes,
+        COALESCE(ps.DownVotes, 0) AS DownVotes,
+        COALESCE(pa.HistoryTypes, 'No history') AS HistoryTypes,
+        COALESCE(pa.HistoryCount, 0) AS HistoryCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostVoteStats ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        PostHistoryAggregate pa ON p.Id = pa.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, u.DisplayName, ps.UpVotes, ps.DownVotes, pa.HistoryTypes, pa.HistoryCount
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.OwnerDisplayName,
+    f.UpVotes,
+    f.DownVotes,
+    f.HistoryTypes,
+    f.HistoryCount,
+    f.CommentCount,
+    f.RelatedPostsCount,
+    RANK() OVER (ORDER BY f.UpVotes - f.DownVotes DESC) AS VoteRank
+FROM 
+    FinalResults f
+ORDER BY 
+    f.VoteRank
+LIMIT 100;

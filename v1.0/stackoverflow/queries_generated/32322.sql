@@ -1,0 +1,78 @@
+WITH RecursivePostCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        COALESCE(SUM(PH.PostHistoryTypeId IN (10, 11)), 0) AS CloseReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '><')::int[])
+    GROUP BY 
+        T.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  -- Only count closed or reopened posts
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    COALESCE(UB.BadgeNames, 'None') AS Badges,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    SUM(COALESCE(PC.AnswerCount, 0)) AS TotalAnswers,
+    COALESCE(SUM(CP.CloseCount), 0) AS TotalClosed,
+    STRING_AGG(DISTINCT PT.TagName, ', ') AS AssociatedTags,
+    AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount,
+    (SELECT COUNT(*) FROM Posts WHERE PostTypeId = 1 AND ViewCount > 100) AS HighTrafficQuestions,
+    (SELECT COUNT(*) FROM ClosedPosts WHERE CloseCount > 0) AS ClosedPostCount
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    RecursivePostCounts PC ON P.Id = PC.PostId
+LEFT JOIN 
+    PopularTags PT ON PT.TotalViews > 1000 -- Popular tags with over 1000 views
+LEFT JOIN 
+    ClosedPosts CP ON P.Id = CP.Id
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+ORDER BY 
+    U.Reputation DESC, TotalAnswers DESC;

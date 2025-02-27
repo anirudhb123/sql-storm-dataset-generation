@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SupplierRankings AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_quantity) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate <= '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_name
+),
+FilteredSuppliers AS (
+    SELECT 
+        sr.* 
+    FROM 
+        SupplierRankings sr
+    WHERE 
+        sr.rank <= 10
+),
+CombinedData AS (
+    SELECT 
+        od.o_orderkey,
+        od.c_name,
+        od.total_price,
+        fs.s_name,
+        fs.total_supplycost
+    FROM 
+        OrderDetails od
+    LEFT JOIN 
+        FilteredSuppliers fs ON fs.s_suppkey IN (
+            SELECT 
+                ps.ps_suppkey 
+            FROM 
+                partsupp ps 
+            JOIN 
+                lineitem l ON ps.ps_partkey = l.l_partkey 
+            WHERE 
+                l.l_orderkey = od.o_orderkey
+        )
+)
+SELECT 
+    c_name,
+    COUNT(o_orderkey) AS order_count,
+    AVG(total_price) AS avg_order_price,
+    SUM(total_supplycost) AS total_supplier_cost
+FROM 
+    CombinedData
+GROUP BY 
+    c_name
+HAVING 
+    COUNT(o_orderkey) > 5
+ORDER BY 
+    total_supplier_cost DESC
+LIMIT 20;

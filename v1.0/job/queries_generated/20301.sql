@@ -1,0 +1,63 @@
+WITH recursive MovieRankings AS (
+    SELECT 
+        a.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        a.id, t.title, t.production_year
+),
+NotableMovies AS (
+    SELECT 
+        m.title_id,
+        m.movie_title,
+        m.production_year,
+        m.cast_count
+    FROM 
+        MovieRankings m
+    WHERE 
+        m.year_rank <= 5
+),
+KeywordData AS (
+    SELECT 
+        m.title_id,
+        string_agg(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON mk.movie_id = mc.movie_id
+    JOIN 
+        aka_title m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.title_id
+)
+SELECT 
+    nm.movie_title,
+    nm.production_year,
+    nm.cast_count,
+    kd.keywords,
+    COALESCE(info.info, 'No Info') AS additional_info,
+    CASE 
+        WHEN nm.cast_count IS NULL THEN 'Unknown'
+        WHEN nm.cast_count > 10 THEN 'Blockbuster'
+        WHEN nm.cast_count > 5 THEN 'Moderate Success'
+        ELSE 'Indie Film'
+    END AS status 
+FROM 
+    NotableMovies nm
+LEFT JOIN 
+    movie_info info ON nm.title_id = info.movie_id AND info.info_type_id = (SELECT id FROM info_type WHERE info = 'Trivia')
+LEFT JOIN 
+    KeywordData kd ON nm.title_id = kd.title_id
+ORDER BY 
+    nm.production_year DESC NULLS LAST,
+    nm.cast_count DESC;

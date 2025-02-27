@@ -1,0 +1,51 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank,
+        COUNT(ws_item_sk) OVER (PARTITION BY ws_item_sk) AS total_sales
+    FROM web_sales
+    WHERE
+        ws_net_profit IS NOT NULL
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_net_profit,
+        RANK() OVER (PARTITION BY cs_item_sk ORDER BY cs_net_profit DESC) AS profit_rank,
+        COUNT(cs_item_sk) OVER (PARTITION BY cs_item_sk) AS total_sales
+    FROM catalog_sales
+    WHERE 
+        cs_net_profit IS NOT NULL
+)
+SELECT 
+    item.i_item_id,
+    item.i_item_desc,
+    COALESCE(rs.ws_net_profit, cs.cs_net_profit, 0) AS net_profit,
+    COALESCE(rs.total_sales, 0) AS sales_count,
+    COALESCE(SUM(wr.wr_return_amt), 0) AS total_web_returns,
+    COALESCE(SUM(cr.cr_return_amount), 0) AS total_catalog_returns,
+    COALESCE(SUM(cr.cr_return_amount), 0) + COALESCE(SUM(wr.wr_return_amt), 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(SUM(wr.wr_return_amt), 0) > COALESCE(SUM(cr.cr_return_amount), 0) 
+        THEN 'Web returns exceed catalog'
+        ELSE 'Catalog returns exceed or equal web returns'
+    END AS return_comparison
+FROM item
+LEFT JOIN ranked_sales rs ON item.i_item_sk = rs.ws_item_sk
+LEFT JOIN catalog_sales cs ON item.i_item_sk = cs.cs_item_sk
+LEFT JOIN web_returns wr ON rs.ws_order_number = wr.wr_order_number AND rs.ws_item_sk = wr.wr_item_sk
+LEFT JOIN catalog_returns cr ON cs.cs_order_number = cr.cr_order_number AND cs.cs_item_sk = cr.cr_item_sk
+WHERE
+    item.i_current_price IS NOT NULL
+    AND item.i_rec_start_date < '2002-10-01'
+    AND (item.i_rec_end_date IS NULL OR item.i_rec_end_date > '2002-10-01')
+GROUP BY 
+    item.i_item_id, item.i_item_desc, rs.ws_net_profit, cs.cs_net_profit
+HAVING 
+    COUNT(CASE WHEN rs.profit_rank = 1 THEN 1 END) > 0 OR COUNT(CASE WHEN profit_rank = 1 THEN 1 END) > 0
+ORDER BY 
+    net_profit DESC
+LIMIT 100;

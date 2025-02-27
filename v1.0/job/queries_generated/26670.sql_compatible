@@ -1,0 +1,52 @@
+
+WITH top_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(ci.person_id) > 5
+    ORDER BY 
+        cast_count DESC
+    LIMIT 10
+),
+movie_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(mc.company_id) AS company_count,
+        ARRAY_AGG(DISTINCT cn.name) AS companies
+    FROM 
+        top_movies m
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_count,
+    md.companies,
+    tm.aka_names
+FROM 
+    movie_details md
+JOIN 
+    top_movies tm ON md.movie_id = tm.movie_id
+ORDER BY 
+    md.company_count DESC;

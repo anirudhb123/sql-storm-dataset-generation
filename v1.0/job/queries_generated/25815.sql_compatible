@@ -1,0 +1,49 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        a.title,
+        CASE 
+            WHEN LOWER(a.title) LIKE '%the%' THEN 'Contains The'
+            ELSE 'Does Not Contain The'
+        END AS title_filter,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    GROUP BY 
+        a.title
+),
+person_associations AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title,
+        mt.production_year,
+        rt.role,
+        info.info AS additional_info
+    FROM 
+        ranked_titles mt
+    JOIN 
+        cast_info ci ON mt.title = ci.movie_id 
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        person_info info ON ak.person_id = info.person_id
+    WHERE 
+        mt.cast_count > 5 
+        AND (info.info_type_id IS NULL OR info.info IS NOT NULL)
+)
+SELECT 
+    actor_name,
+    title,
+    production_year,
+    role,
+    STRING_AGG(DISTINCT additional_info, '; ') AS additional_info_aggregate
+FROM 
+    person_associations
+GROUP BY 
+    actor_name, title, production_year, role
+ORDER BY 
+    production_year DESC, actor_name;

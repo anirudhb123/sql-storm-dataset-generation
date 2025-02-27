@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        COALESCE(CAST(EXTRACT(EPOCH FROM (COALESCE(p.ClosedDate, p.LastActivityDate) - p.CreationDate)) AS INTEGER), 0) AS DurationInSeconds,
+        ARRAY(SELECT DISTINCT tag.TagName FROM Tags tag WHERE tag.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])) AS TagsList
+    FROM
+        Posts p
+    JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularQuestions AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.TagsList,
+        rp.DurationInSeconds,
+        CASE
+            WHEN rp.Rank <= 5 THEN 'Top 5'
+            WHEN rp.Rank BETWEEN 6 AND 10 THEN 'Top 10'
+            ELSE 'Below Top 10'
+        END AS RankCategory
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Rank <= 10
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate as CloseDate,
+        COUNT(*) AS CloseReasonCount
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId = 10
+    GROUP BY
+        ph.PostId, ph.CreationDate
+),
+PostStatistics AS (
+    SELECT
+        p.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COALESCE(cp.CloseReasonCount, 0) AS CloseReasonCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvote and Downvote
+    LEFT JOIN
+        ClosedPosts cp ON p.Id = cp.PostId
+    GROUP BY
+        p.PostId, cp.CloseReasonCount
+)
+SELECT
+    pq.PostId,
+    pq.Title,
+    pq.Score,
+    pq.TagsList,
+    ps.CommentCount,
+    ps.TotalBounty,
+    ps.CloseReasonCount,
+    CASE
+        WHEN pq.DurationInSeconds < 3600 THEN 'Less than an hour'
+        WHEN pq.DurationInSeconds BETWEEN 3600 AND 86400 THEN 'Within a day'
+        ELSE 'More than a day'
+    END AS DurationCategory,
+    COUNT(DISTINCT b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+    COALESCE((SELECT AVG(Reputation) FROM Users WHERE Id = ANY((SELECT DISTINCT UserId FROM Votes WHERE PostId = pq.PostId))), 0) AS AvgUserReputation
+FROM
+    PopularQuestions pq
+LEFT JOIN
+    Badges b ON b.UserId IN (SELECT UserId FROM Posts WHERE Id = pq.PostId)
+JOIN
+    PostStatistics ps ON pq.PostId = ps.PostId
+GROUP BY
+    pq.PostId, pq.Title, pq.Score, pq.TagsList, ps.CommentCount, ps.TotalBounty, ps.CloseReasonCount, pq.DurationInSeconds
+ORDER BY
+    pq.Score DESC, ps.CommentCount DESC
+LIMIT 50;

@@ -1,0 +1,57 @@
+
+WITH regional_sales AS (
+    SELECT
+        n.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(l.l_extendedprice) OVER (PARTITION BY n.n_nationkey) AS avg_price_per_nation
+    FROM
+        nation n
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY
+        n.r_name, n.n_nationkey
+),
+high_value_sales AS (
+    SELECT
+        region,
+        total_sales,
+        total_orders,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rn
+    FROM
+        regional_sales
+    WHERE
+        total_sales > (SELECT AVG(total_sales) FROM regional_sales)
+)
+SELECT
+    COALESCE(r.region, all_regions.r_name) AS region,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    COALESCE(r.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN COALESCE(r.total_orders, 0) = 0 THEN 'No Orders'
+        ELSE CAST(ROUND((r.total_sales / NULLIF(r.total_orders, 0)), 2) AS VARCHAR)
+    END AS average_order_value,
+    CASE 
+        WHEN COALESCE(r.total_sales, 0) = 0 AND COALESCE(r.total_orders, 0) = 0 THEN 'Undefined'
+        ELSE 'Defined'
+    END AS sales_status
+FROM
+    high_value_sales r
+FULL OUTER JOIN (
+    SELECT DISTINCT
+        r_name
+    FROM
+        region
+) all_regions ON r.region = all_regions.r_name
+WHERE
+    r.rn <= 5 OR r.region IS NULL
+ORDER BY
+    total_sales DESC NULLS LAST, region ASC;

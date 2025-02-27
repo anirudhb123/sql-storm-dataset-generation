@@ -1,0 +1,82 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, Reputation, DisplayName, CreationDate, LastAccessDate, 1 AS Level
+    FROM Users
+    WHERE Reputation > 0
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.DisplayName, u.CreationDate, u.LastAccessDate, uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Id = uh.Id 
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score,
+        COALESCE(
+            (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+BadgesWithCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+),
+FinalReport AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        uh.Level,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        COALESCE(bc.BadgeCount, 0) AS TotalBadges,
+        bc.BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserHierarchy uh ON u.Id = uh.Id
+    LEFT JOIN 
+        PostStats ps ON ps.PostId = (
+            SELECT Id FROM Posts WHERE OwnerUserId = u.Id ORDER BY Score DESC LIMIT 1
+        )
+    LEFT JOIN 
+        BadgesWithCounts bc ON u.Id = bc.UserId
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    Level,
+    Title,
+    ViewCount,
+    Score,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    TotalBadges,
+    BadgeNames
+FROM 
+    FinalReport
+WHERE 
+    Level >= 2 AND TotalBadges > 0
+ORDER BY 
+    Reputation DESC, Score DESC
+LIMIT 100;

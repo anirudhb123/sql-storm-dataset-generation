@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+RankedOrders AS (
+    SELECT od.o_orderkey, od.total_price_after_discount,
+           ROW_NUMBER() OVER (ORDER BY od.total_price_after_discount DESC) AS order_rank
+    FROM OrderDetails od
+    WHERE od.total_price_after_discount > 1000
+)
+SELECT p.p_partkey, p.p_name, p.p_brand,
+       COALESCE(tp.total_available, 0) AS available_quantity,
+       SUM(CASE WHEN lo.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+       COUNT(DISTINCT lo.o_orderkey) AS order_count,
+       MAX(so.level) AS supplier_level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN TotalParts tp ON p.p_partkey = tp.ps_partkey
+LEFT JOIN lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+LEFT JOIN SupplierHierarchy so ON ps.ps_suppkey = so.s_suppkey
+WHERE p.p_retailprice > 50 AND 
+      (p.p_mfgr LIKE 'Manufacturer%' OR p.p_type IN ('Type1', 'Type2'))
+GROUP BY p.p_partkey, p.p_name, p.p_brand
+HAVING COUNT(DISTINCT lo.l_orderkey) > 5
+ORDER BY available_quantity DESC, p.p_name ASC;

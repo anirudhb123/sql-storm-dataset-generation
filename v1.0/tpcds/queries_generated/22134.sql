@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_customer_sk, 
+        ws_item_sk, 
+        ws_sales_price, 
+        RANK() OVER (PARTITION BY ws_customer_sk ORDER BY ws_sold_date_sk DESC) AS sale_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > (SELECT AVG(ws_sales_price) 
+                           FROM web_sales 
+                           WHERE ws_item_sk IS NOT NULL)
+),
+high_value_customers AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        COUNT(DISTINCT cs_bill_customer_sk) AS high_value_customer_count
+    FROM 
+        customer_demographics
+    JOIN 
+        catalog_sales CS ON cs_bill_customer_sk = cd_demo_sk
+    WHERE 
+        cs_sales_price > (SELECT AVG(cs_sales_price) 
+                           FROM catalog_sales)
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+sales_summary AS (
+    SELECT 
+        w.warehouse_name, 
+        COUNT(ws_item_sk) AS total_items_sold,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        (SELECT COUNT(*) 
+         FROM customer 
+         WHERE c_current_addr_sk IS NOT NULL) AS total_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws_ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.warehouse_name
+)
+SELECT 
+    s.wharehouse_name,
+    COALESCE(hvc.high_value_customer_count, 0) AS high_value_customer_count,
+    ss.total_items_sold,
+    ss.total_sales,
+    ss.avg_sales_price,
+    (CASE 
+        WHEN ss.total_sales > 100000 THEN 'High Performer'
+        WHEN ss.total_sales BETWEEN 50000 AND 100000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END) AS performance_category
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    high_value_customers hvc ON ss.total_items_sold = hvc.high_value_customer_count
+FULL OUTER JOIN 
+    ranked_sales rs ON ss.total_items_sold = rs.ws_item_sk
+WHERE 
+    ss.total_sales IS NOT NULL
+ORDER BY 
+    ss.avg_sales_price DESC, high_value_customer_count ASC
+LIMIT 10 OFFSET 5;

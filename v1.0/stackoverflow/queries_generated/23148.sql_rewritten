@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(ROUND((rp.Score::decimal / NULLIF(rp.ViewCount, 0)), 4), 0) AS ScorePerView
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+
+PostDetails AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.ViewCount,
+        fp.CreationDate,
+        fp.Score,
+        fp.ScorePerView,
+        COALESCE(pvc.UpVotes, 0) AS UpVoteCount,
+        COALESCE(pvc.DownVotes, 0) AS DownVoteCount,
+        (fp.Score - COALESCE(pvc.DownVotes, 0) + COALESCE(pvc.UpVotes, 0)) AS AdjustedScore,
+        (CASE 
+            WHEN fp.ScorePerView IS NULL THEN 'N/A'
+            WHEN fp.ScorePerView > 0.1 THEN 'Very High'
+            WHEN fp.ScorePerView BETWEEN 0.05 AND 0.1 THEN 'Moderate'
+            ELSE 'Low'
+         END) AS ScoreRating
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostVoteCounts pvc ON fp.PostId = pvc.PostId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.CreationDate,
+    pd.Score,
+    pd.ScorePerView,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.AdjustedScore,
+    pd.ScoreRating,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS t
+JOIN 
+    Tags tg ON tg.TagName = t 
+GROUP BY 
+    pd.PostId
+HAVING 
+    pd.AdjustedScore >= 0
+ORDER BY 
+    pd.AdjustedScore DESC, pd.ViewCount DESC;

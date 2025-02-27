@@ -1,0 +1,92 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        ParentId, 
+        1 AS Level
+    FROM Posts 
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostScoreStats AS (
+    SELECT 
+        p.OwnerUserId, 
+        SUM(p.Score) AS TotalScore, 
+        COUNT(p.Id) AS PostCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserBadgeCount AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        ps.TotalScore, 
+        ps.PostCount, 
+        ub.BadgeCount,
+        RANK() OVER (ORDER BY ps.TotalScore DESC, ps.PostCount DESC) AS UserRank
+    FROM Users u
+    JOIN PostScoreStats ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN UserBadgeCount ub ON u.Id = ub.UserId
+    WHERE u.Reputation > 1000
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId, 
+        MAX(ph.CreationDate) AS LastEdit, 
+        COUNT(ph.Id) AS EditCount, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate ELSE NULL END) AS DeletedDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId 
+    GROUP BY p.Id
+)
+
+SELECT 
+    u.DisplayName AS UserName, 
+    u.Location,
+    ps.TotalScore AS TotalPostScore, 
+    ps.PostCount AS TotalPosts, 
+    ub.BadgeCount AS TotalBadges, 
+    phs.EditCount AS TotalEdits, 
+    phs.LastEdit AS LastEdited,
+    COUNT(pv.Id) AS TotalVotes,
+    COUNT(DISTINCT ph.PostId) AS TotalPostHistories,
+    COUNT(DISTINCT CASE WHEN phs.DeletedDate IS NOT NULL THEN phs.PostId END) AS TotalDeletedPosts,
+    STRING_AGG(DISTINCT 
+        CASE WHEN p.Tags IS NOT NULL THEN SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2) ELSE NULL END, ', ') AS UserTags
+FROM Users u
+JOIN TopActiveUsers tau ON u.Id = tau.UserId
+JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN Votes pv ON p.Id = pv.PostId 
+JOIN PostHistoryStats phs ON p.Id = phs.PostId
+LEFT JOIN RecursivePostHierarchy rph ON p.Id = rph.PostId
+WHERE rph.Level <= 2 
+GROUP BY 
+    u.DisplayName, 
+    u.Location, 
+    ps.TotalScore, 
+    ps.PostCount, 
+    ub.BadgeCount, 
+    phs.EditCount, 
+    phs.LastEdit
+ORDER BY 
+    TotalPostScore DESC, 
+    TotalPosts DESC;

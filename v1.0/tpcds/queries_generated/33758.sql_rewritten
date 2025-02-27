@@ -1,0 +1,41 @@
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.store_sk,
+        SUM(ss.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.customer_sk) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY ss.store_sk ORDER BY SUM(ss.net_profit) DESC) AS rank
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.sold_date_sk, ss.store_sk
+),
+TopStores AS (
+    SELECT 
+        store_sk,
+        total_net_profit,
+        unique_customers,
+        ROW_NUMBER() OVER (ORDER BY total_net_profit DESC) AS store_rank
+    FROM 
+        SalesSummary
+)
+
+SELECT 
+    st.store_id,
+    st.store_name,
+    ts.total_net_profit,
+    COALESCE(ts.unique_customers, 0) AS unique_customers,
+    dc.d_year,
+    dc.d_month_seq,
+    dc.d_week_seq
+FROM 
+    TopStores ts
+LEFT JOIN 
+    store st ON ts.store_sk = st.s_store_sk
+LEFT JOIN 
+    date_dim dc ON dc.d_date_sk = ts.sold_date_sk
+WHERE 
+    ts.store_rank <= 10
+    AND (dc.d_month_seq IS NOT NULL OR dc.d_year = 2001)
+ORDER BY 
+    ts.total_net_profit DESC;

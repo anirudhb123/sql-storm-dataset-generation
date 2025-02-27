@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        1 AS level
+    FROM title
+    WHERE production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        t.id, 
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM title t
+    INNER JOIN movie_link ml ON t.id = ml.linked_movie_id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank_within_year
+    FROM MovieHierarchy mh
+),
+
+ActorRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        ct.kind AS role,
+        COUNT(ci.id) AS movie_count
+    FROM cast_info ci
+    INNER JOIN aka_name a ON ci.person_id = a.person_id
+    INNER JOIN role_type rt ON ci.role_id = rt.id
+    INNER JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY a.name, ct.kind
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    INNER JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(ak.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(ak.role, 'No Role') AS role,
+    rm.rank_within_year,
+    mwk.keywords,
+    CASE 
+        WHEN rm.production_year IS NULL THEN 'Year Unknown' 
+        ELSE 'Released in ' || rm.production_year::text 
+    END AS release_info,
+    (SELECT COUNT(*) FROM cast_info WHERE movie_id = rm.movie_id) AS total_cast_members
+FROM RankedMovies rm
+LEFT JOIN ActorRoles ak ON rm.movie_id = ak.movie_count
+LEFT JOIN MoviesWithKeywords mwk ON rm.movie_id = mwk.movie_id
+WHERE rm.rank_within_year <= 3
+ORDER BY rm.production_year DESC, rm.rank_within_year;

@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankOrder
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+      AND p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)  
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostVotes AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  
+    GROUP BY p.Id
+),
+PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM Posts p
+    JOIN Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '>')::TEXT[])
+    GROUP BY p.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pv.VoteCount,
+    pt.TagsList,
+    rp.CreationDate,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer Exists'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM RankedPosts rp
+JOIN Users rt ON rp.OwnerUserId = rt.Id
+JOIN UserBadges ub ON rt.Id = ub.UserId
+JOIN PostVotes pv ON rp.PostId = pv.PostId
+JOIN PostTags pt ON rp.PostId = pt.PostId
+WHERE rp.RankOrder <= 5  
+ORDER BY rp.CreationDate DESC;

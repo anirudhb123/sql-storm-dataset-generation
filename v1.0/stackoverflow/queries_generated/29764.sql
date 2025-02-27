@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.OwnerName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Get the top 5 posts for each tag
+),
+TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, ',')) AS TagName,
+        COUNT(*) AS TotalPosts
+    FROM 
+        TopPosts
+    GROUP BY 
+        TagName
+),
+BadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.Tags,
+    tp.OwnerName,
+    tp.CommentCount,
+    ts.TotalPosts,
+    bs.BadgeCount
+FROM 
+    TopPosts tp
+JOIN 
+    TagStats ts ON tp.Tags LIKE '%' || ts.TagName || '%'
+JOIN 
+    BadgeStats bs ON tp.OwnerName = (SELECT DisplayName FROM Users WHERE Id = tp.OwnerUserId)
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

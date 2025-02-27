@@ -1,0 +1,37 @@
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    STRING_AGG(DISTINCT r.role, ',') AS roles,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT cn.name, ',') AS company_names,
+    COUNT(DISTINCT pi.info) AS info_count,
+    MIN(m.production_year) AS earliest_release
+FROM 
+    aka_title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name a ON a.id = ci.person_id
+JOIN 
+    role_type r ON r.id = ci.role_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    info_type pi ON pi.id = mi.info_type_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, a.name
+HAVING 
+    COUNT(DISTINCT r.role) > 1
+ORDER BY 
+    keyword_count DESC, earliest_release ASC;

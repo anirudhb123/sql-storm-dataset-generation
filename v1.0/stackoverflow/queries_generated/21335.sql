@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+           COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS NetVotes
+    FROM Posts p
+    LEFT JOIN (SELECT PostId, 
+                       SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                       SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+                FROM Votes 
+                GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AggregatedBadges AS (
+    SELECT UserId, 
+           COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+           COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+           COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+UserEstablished AS (
+    SELECT u.Id,
+           u.DisplayName,
+           CASE 
+               WHEN u.CreationDate < NOW() - INTERVAL '1 year' THEN 1 
+               ELSE 0 
+           END AS IsEstablished,
+           COALESCE(ab.GoldBadges, 0) AS GoldBadges,
+           COALESCE(ab.SilverBadges, 0) AS SilverBadges,
+           COALESCE(ab.BronzeBadges, 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN AggregatedBadges ab ON u.Id = ab.UserId
+),
+PostHistoryWithComments AS (
+    SELECT ph.PostId,
+           MIN(ph.CreationDate) AS FirstEditDate,
+           ARRAY_AGG(DISTINCT c.Text ORDER BY c.CreationDate) AS Comments,
+           COUNT(c.Id) AS CommentCount
+    FROM PostHistory ph
+    LEFT JOIN Comments c ON ph.PostId = c.PostId
+    WHERE ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY ph.PostId
+)
+SELECT rp.PostId,
+       rp.Title,
+       rp.CreationDate,
+       rp.Score,
+       rp.ViewCount,
+       rp.NetVotes,
+       up.DisplayName AS Owner,
+       up.IsEstablished,
+       up.GoldBadges,
+       up.SilverBadges,
+       up.BronzeBadges,
+       ph.Comments,
+       ph.FirstEditDate,
+       ph.CommentCount
+FROM RankedPosts rp
+JOIN Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN PostHistoryWithComments ph ON rp.PostId = ph.PostId
+WHERE rp.Rank <= 5
+  AND (up.Reputation > 1000 OR up.IsEstablished = 1)
+ORDER BY rp.ViewCount DESC, rp.Score DESC
+LIMIT 10;

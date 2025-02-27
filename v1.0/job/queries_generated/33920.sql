@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           1 AS depth
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id,
+           m.title,
+           m.production_year,
+           mh.depth + 1
+    FROM aka_title m
+    INNER JOIN movie_link ml ON ml.linked_movie_id = m.id
+    INNER JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+RankedMovies AS (
+    SELECT m.id,
+           m.title,
+           m.production_year,
+           COUNT(ci.person_id) AS cast_count,
+           ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM aka_title m
+    LEFT JOIN cast_info ci ON ci.movie_id = m.id
+    GROUP BY m.id, m.title, m.production_year
+),
+MoviesWithKeywords AS (
+    SELECT m.id,
+           m.title,
+           m.production_year,
+           GROUP_CONCAT(k.keyword) AS keywords
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    GROUP BY m.id, m.title, m.production_year
+)
+SELECT m.id,
+       m.title,
+       COALESCE(mw.keywords, 'No keywords') AS keywords,
+       mh.depth AS movie_depth,
+       rk.rank AS production_year_rank,
+       (SELECT COUNT(*) 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = m.id 
+          AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind LIKE '%Production%')) AS production_company_count
+FROM RankedMovies rk
+JOIN MoviesWithKeywords mw ON mw.id = rk.id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = rk.id
+WHERE rk.rank <= 5
+ORDER BY rk.production_year DESC, rk.cast_count DESC;

@@ -1,0 +1,66 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL
+
+    SELECT 
+        co.c_custkey, 
+        co.c_name, 
+        co.total_orders + 1,
+        co.total_spent + (CASE WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 0 ELSE SUM(l.l_extendedprice * (1 - l.l_discount)) END)
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'R'
+        AND EXISTS (SELECT 1 FROM supplier s WHERE s.s_suppkey = l.l_suppkey AND s.s_acctbal > 500)
+)
+
+SELECT 
+    cn.n_name AS nation_name,
+    SUM(co.total_orders) AS total_orders,
+    SUM(co.total_spent) AS total_spent,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers
+FROM 
+    CustomerOrders co
+JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+JOIN 
+    nation cn ON c.c_nationkey = cn.n_nationkey
+GROUP BY 
+    cn.n_name
+HAVING 
+    SUM(co.total_spent) > 10000
+ORDER BY 
+    total_spent DESC
+LIMIT 5;
+
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.ps_partkey) AS total_suppliers
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+WHERE 
+    p.p_size > 10
+GROUP BY 
+    p.p_name
+HAVING 
+    total_suppliers > 1
+ORDER BY 
+    total_suppliers DESC
+LIMIT 10;

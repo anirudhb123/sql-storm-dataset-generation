@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.PostTypeId = 1  
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(COALESCE(vs.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(vs.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes
+         GROUP BY 
+            PostId) vs ON p.Id = vs.PostId
+    GROUP BY 
+        u.Id
+),
+TopActiveUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.QuestionsAsked,
+        us.TotalUpVotes - us.TotalDownVotes AS NetVotes,
+        RANK() OVER (ORDER BY us.NetVotes DESC) AS UserRank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.QuestionsAsked > 0
+)
+
+SELECT 
+    tuku.UserRank,
+    tuku.DisplayName,
+    COUNT(rp.Id) AS QuestionsRanked,
+    SUM(rp.Score) AS TotalScore,
+    SUM(rp.ViewCount) AS TotalViews
+FROM 
+    TopActiveUsers tuku
+LEFT JOIN 
+    RankedPosts rp ON tuku.UserId = rp.OwnerUserId
+WHERE 
+    tuku.UserRank <= 10  
+GROUP BY 
+    tuku.UserRank, tuku.DisplayName
+ORDER BY 
+    tuku.UserRank;

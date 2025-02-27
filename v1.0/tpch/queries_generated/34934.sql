@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(CASE WHEN l.l_shipdate IS NOT NULL THEN l.l_shipdate END) AS last_ship_date,
+    MIN(CASE WHEN l.l_shipdate IS NOT NULL THEN l.l_shipdate END) AS first_ship_date,
+    DENSE_RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    (SELECT DISTINCT c_nationkey 
+     FROM customer 
+     WHERE c_acctbal IS NOT NULL) AS cust_nation ON c.c_nationkey = cust_nation.c_nationkey
+WHERE 
+    l.l_shipdate BETWEEN DATEADD(MONTH, -6, GETDATE()) AND GETDATE()
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    region_name, revenue_rank;

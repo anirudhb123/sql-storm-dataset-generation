@@ -1,0 +1,64 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.season_nr IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1
+    FROM 
+        aka_title et
+    INNER JOIN 
+        aka_title mt ON mt.id = et.episode_of_id
+    INNER JOIN 
+        movie_hierarchy mh ON mh.movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT cc.id) AS total_cast,
+    AVG(ci.rating) AS avg_rating,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY NULL) AS row_num
+FROM 
+    aka_name ak
+INNER JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = at.id
+INNER JOIN 
+    movie_info mi ON mi.movie_id = at.id AND mi.info_type_id = 1  
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = at.id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    ak.name IS NOT NULL AND
+    ak.name <> '' AND
+    at.production_year = 2023
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT cc.id) > 1
+ORDER BY 
+    total_cast DESC, avg_rating DESC;

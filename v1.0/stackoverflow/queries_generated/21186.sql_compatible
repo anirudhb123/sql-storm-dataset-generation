@@ -1,0 +1,92 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpVoteCount,
+        DownVoteCount,
+        BadgeCount,
+        PostCount,
+        CommentCount,
+        TotalViews,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        ROW_NUMBER() OVER (PARTITION BY BadgeCount ORDER BY TotalViews DESC) AS TopViewsByBadges
+    FROM 
+        UserStatistics
+),
+ClosedPosts AS (
+    SELECT 
+        DISTINCT P.Id AS PostId,
+        P.Title,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment AS CloseReason
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+    AND 
+        PH.Comment IS NOT NULL
+),
+UserPostInteraction AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsInteractedWith,
+        MAX(P.CreationDate) AS LastInteractionDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Posts P ON C.PostId = P.Id 
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    CS.PostId,
+    CS.Title AS ClosedPostTitle,
+    CS.CloseReason AS ClosureReason,
+    TS.TotalViews,
+    TS.BadgeCount
+FROM 
+    TopUsers TS
+LEFT JOIN 
+    ClosedPosts CS ON TS.UserId = (SELECT U.Id FROM Users U ORDER BY RANDOM() LIMIT 1)
+JOIN 
+    UserPostInteraction U ON TS.UserId = U.UserId
+WHERE 
+    TS.ReputationRank <= 10
+AND 
+    CS.CloseReason IS NOT NULL
+ORDER BY 
+    TS.Reputation DESC, TS.TotalViews DESC;

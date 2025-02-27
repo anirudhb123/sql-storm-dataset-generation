@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesRanking AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales, 
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+DateRange AS (
+    SELECT 
+        d_year, 
+        d_month_seq, 
+        d_dow,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        date_dim
+    LEFT JOIN 
+        web_sales ON d_date_sk = ws_sold_date_sk
+    WHERE 
+        d_year BETWEEN 2022 AND 2023
+    GROUP BY 
+        d_year, d_month_seq, d_dow
+),
+HighIncomeCustomers AS (
+    SELECT 
+        hd_demo_sk, 
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        household_demographics
+    JOIN 
+        customer ON hd_demo_sk = c_current_hdemo_sk
+    WHERE 
+        hd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_upper_bound > 100000)
+    GROUP BY 
+        hd_demo_sk
+)
+SELECT 
+    ctypes.c_type AS customer_type, 
+    dr.d_year, 
+    dr.d_month_seq, 
+    dr.d_dow, 
+    IFNULL(sales.total_sales, 0) AS total_sales, 
+    IFNULL(hic.customer_count, 0) AS high_income_count, 
+    dr.order_count
+FROM
+    DateRange dr
+LEFT JOIN 
+    SalesRanking sales ON dr.d_year = sales.ws_bill_customer_sk
+LEFT JOIN 
+    (SELECT 
+         cd.gender, 
+         COUNT(DISTINCT c_customer_sk) AS c_count 
+     FROM 
+         customer_demographics cd
+     JOIN 
+         customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+     GROUP BY 
+         cd.gender) AS ctypes ON TRUE
+LEFT JOIN 
+    HighIncomeCustomers hic ON hic.hd_demo_sk = c_current_hdemo_sk
+ORDER BY 
+    total_sales DESC, 
+    high_income_count DESC;

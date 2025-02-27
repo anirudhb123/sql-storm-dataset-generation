@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        kind.kind AS movie_kind,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    JOIN 
+        kind_type kind ON t.kind_id = kind.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TitleKeywordCount AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS person_name,
+        MAX(ri.role) AS max_role
+    FROM 
+        name a
+    JOIN 
+        cast_info ci ON a.id = ci.person_id
+    JOIN 
+        role_type ri ON ci.role_id = ri.id
+    GROUP BY 
+        p.id, a.name
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.movie_kind,
+    tk.keyword_count,
+    pd.person_name,
+    pd.max_role
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    TitleKeywordCount tk ON rt.title_id = tk.movie_id
+LEFT JOIN 
+    complete_cast cc ON rt.title_id = cc.movie_id
+LEFT JOIN 
+    PersonDetails pd ON cc.subject_id = pd.person_id
+WHERE 
+    rt.title_rank <= 10
+ORDER BY 
+    rt.production_year, rt.title;

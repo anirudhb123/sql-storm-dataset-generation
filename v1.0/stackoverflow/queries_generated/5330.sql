@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS UsageCount
+    FROM
+        Tags t
+    JOIN
+        Posts pt ON t.Id IN (SELECT UNNEST(string_to_array(pt.Tags, ',')))
+    GROUP BY
+        t.TagName
+    ORDER BY
+        UsageCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+    ORDER BY
+        PostCount DESC
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    pt.TagName,
+    ua.DisplayName AS ActiveUserName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.BadgeCount
+FROM
+    RankedPosts rp
+JOIN
+    PopularTags pt ON pt.UsageCount > 5
+JOIN
+    UserActivity ua ON ua.PostCount > 10
+WHERE
+    rp.Rank <= 5
+ORDER BY
+    rp.Score DESC, rp.ViewCount DESC;

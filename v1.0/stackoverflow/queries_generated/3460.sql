@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Considering only questions
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    ur.Reputation,
+    ur.BadgeCount,
+    COALESCE(rv.UpVotes, 0) AS RecentUpVotes,
+    COALESCE(rv.DownVotes, 0) AS RecentDownVotes,
+    rp.ViewCount,
+    rp.CreationDate,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'Experienced User'
+        WHEN ur.Reputation > 500 THEN 'Moderate User'
+        ELSE 'New User'
+    END AS UserLevel,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    RecentVotes rv ON rp.Id = rv.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t
+WHERE 
+    rp.rn = 1
+GROUP BY 
+    p.Id, rp.Title, ur.Reputation, ur.BadgeCount, rv.UpVotes, rv.DownVotes, rp.ViewCount, rp.CreationDate
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,100 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+TopComments AS (
+    SELECT
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate 
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        COUNT(*) AS RevisionCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+        COALESCE(ub.BadgeNames, 'No Badges') AS BadgeList
+    FROM 
+        Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+),
+PostAnalytics AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(tc.CommentCount, 0) AS CommentCount,
+        COALESCE(tc.LastCommentDate, 'No Comments') AS LastCommentDate,
+        COALESCE(SUM(CASE WHEN pha.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN pha.PostHistoryTypeId = 52 THEN 1 ELSE 0 END), 0) AS HotCount,
+        COALESCE(uba.TotalBadges, 0) AS UserBadgeCount,
+        COALESCE(uba.BadgeList, 'No Badges') AS UserBadgeList
+    FROM 
+        RankedPosts rp
+    LEFT JOIN TopComments tc ON rp.Id = tc.PostId
+    LEFT JOIN PostHistoryAggregated pha ON rp.Id = pha.PostId
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN UserStats uba ON u.Id = uba.UserId
+    GROUP BY 
+        rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, tc.CommentCount, tc.LastCommentDate, uba.TotalBadges, uba.BadgeList 
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.LastCommentDate,
+    pa.CloseCount,
+    pa.HotCount,
+    COALESCE(pa.UserBadgeCount, 0) AS UserBadgeCount,
+    pa.UserBadgeList
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.ViewCount > 10
+ORDER BY 
+    pa.ViewCount DESC, pa.Score DESC
+LIMIT 100;

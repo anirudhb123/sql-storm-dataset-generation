@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) as rn,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY c.c_nationkey) as total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate <= cast('1998-10-01' as date) AND 
+        l.l_returnflag = 'N'
+),
+LatestOrders AS (
+    SELECT *
+    FROM RankedOrders
+    WHERE rn = 1
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(lo.total_revenue) AS total_nation_revenue
+    FROM 
+        LatestOrders lo
+    JOIN 
+        nation n ON lo.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(nr.total_nation_revenue, 0) AS total_nation_revenue,
+    ss.total_supply_cost,
+    CASE 
+        WHEN nr.total_nation_revenue IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Present'
+    END AS revenue_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    NationRevenue nr ON n.n_nationkey = nr.n_nationkey
+LEFT JOIN 
+    SupplierSummary ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_brand LIKE 'Brand%') 
+ORDER BY 
+    r.r_name;

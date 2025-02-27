@@ -1,0 +1,28 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.role_id, 
+    COALESCE(COUNT(DISTINCT mk.keyword), 0) AS keyword_count,
+    COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', '), 'No Keywords') AS keywords,
+    GROUP_CONCAT(DISTINCT co.name ORDER BY co.name SEPARATOR ', ') AS company_names,
+    MAX(cast.year) AS latest_cast_year
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+GROUP BY 
+    a.name, t.title, c.role_id
+HAVING 
+    MAX(t.production_year) >= 2000
+ORDER BY 
+    keyword_count DESC, actor_name ASC, movie_title ASC;

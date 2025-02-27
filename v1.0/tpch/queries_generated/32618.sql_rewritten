@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+   
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, sh.level + 1
+    FROM supplier s2
+    INNER JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+    WHERE s2.s_acctbal IS NOT NULL AND s2.s_acctbal > 5000
+)
+
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_rate,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+  AND s.s_nationkey IN (
+      SELECT n.n_nationkey 
+      FROM nation n 
+      WHERE n.n_regionkey IN (
+          SELECT r.r_regionkey 
+          FROM region r 
+          WHERE r.r_name LIKE 'S%' 
+            AND r.r_comment IS NOT NULL
+      )
+  )
+GROUP BY p.p_name
+HAVING total_orders > 10 AND revenue > 10000
+ORDER BY revenue DESC
+LIMIT 10;

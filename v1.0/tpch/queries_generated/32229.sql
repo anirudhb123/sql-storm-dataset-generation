@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+), 
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ch.c_name AS customer_name, 
+       COUNT(DISTINCT co.o_orderkey) AS order_count,
+       MAX(co.o_totalprice) AS max_order_value,
+       AVG(ps.total_supply_cost) AS avg_supply_cost,
+       p.p_name AS part_name,
+       CASE WHEN ps.supplier_count > 5 THEN 'Diverse Supply' ELSE 'Limited Supply' END AS supply_diversity
+FROM CustomerOrders co
+JOIN CustomerOrders ch ON co.c_custkey = ch.c_custkey
+LEFT JOIN PartSupplierDetails ps ON ps.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = ch.c_custkey))
+GROUP BY ch.c_name, p.p_name
+ORDER BY customer_name, order_count DESC
+LIMIT 10;

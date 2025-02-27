@@ -1,0 +1,34 @@
+
+WITH RECURSIVE sales_ranks AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim) 
+)
+, address_info AS (
+    SELECT ca_address_sk, ca_city, ca_state, 
+           CASE 
+               WHEN ca_state IN ('CA', 'NY') THEN 'Major'
+               ELSE 'Minor'
+           END AS address_type
+    FROM customer_address
+)
+SELECT 
+    c.c_customer_id,
+    SUM(ws.ws_quantity) AS total_quantity,
+    SUM(ws.ws_net_profit) AS total_profit,
+    ai.address_type,
+    COUNT(DISTINCT r.reason_id) AS reason_count
+FROM customer c
+JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN address_info ai ON c.c_current_addr_sk = ai.ca_address_sk
+LEFT JOIN (
+    SELECT sr_reason_sk, r_reason_id
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+) r ON r.sr_reason_sk = (SELECT sr_reason_sk FROM store_returns WHERE sr_item_sk = ws.ws_item_sk ORDER BY sr_returned_date_sk DESC LIMIT 1)
+WHERE c.c_birth_year < 1980
+GROUP BY c.c_customer_id, ai.address_type
+HAVING total_profit > 1000
+ORDER BY total_profit DESC
+LIMIT 50;

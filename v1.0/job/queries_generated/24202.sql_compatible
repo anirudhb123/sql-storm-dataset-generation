@@ -1,0 +1,77 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(kt.keyword_id) DESC) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        t.id, t.title, t.production_year, k.keyword
+),
+TopMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year
+    FROM
+        RankedMovies
+    WHERE
+        rn <= 5
+),
+CastDetails AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        a.surname_pcode,
+        COALESCE(cp.kind, 'Unknown') AS cast_type,
+        COUNT(DISTINCT cp.id) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN
+        comp_cast_type cp ON c.person_role_id = cp.id
+),
+MovieInfo AS (
+    SELECT
+        m.movie_id,
+        COALESCE(mi.info, 'N/A') AS movie_info
+    FROM
+        TopMovies m
+    LEFT JOIN
+        movie_info mi ON m.movie_id = mi.movie_id
+    WHERE
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info IN ('Synopsis', 'Trailer'))
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    cd.actor_name,
+    cd.surname_pcode,
+    cd.cast_type,
+    mi.movie_info,
+    CASE 
+        WHEN cd.total_cast > 10 THEN 'Large Ensemble' 
+        WHEN cd.total_cast > 5 THEN 'Moderate Ensemble' 
+        ELSE 'Small Cast' 
+    END AS cast_category,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_types_involved
+FROM
+    TopMovies tm
+LEFT JOIN
+    CastDetails cd ON tm.movie_id = cd.movie_id
+LEFT JOIN
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN
+    company_type c ON mc.company_type_id = c.id
+GROUP BY
+    tm.movie_id, tm.title, tm.production_year, cd.actor_name, cd.surname_pcode, cd.cast_type, mi.movie_info
+ORDER BY
+    tm.production_year DESC, tm.title;

@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus IN ('O', 'F') THEN 'Active'
+            ELSE 'Inactive'
+        END AS order_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01' 
+        AND o.o_orderstatus NOT IN ('C')
+), CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(coalesce(lo.l_extendedprice, 0) * (1 - lo.l_discount)) AS total_spent,
+        COUNT(DISTINCT coalesce(lo.l_orderkey, -1)) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        FilteredOrders fo ON c.c_custkey = fo.o_custkey
+    LEFT JOIN 
+        lineitem lo ON fo.o_orderkey = lo.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    (CASE 
+        WHEN SUM(l.l_quantity) IS NULL THEN 0 
+        ELSE SUM(l.l_quantity)
+    END) AS total_quantity,
+    COALESCE(MAX(cs.total_spent), 0) AS highest_spending_customer,
+    r.r_name AS region_name,
+    s.s_name AS best_supplier
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers s ON p.p_partkey = s.ps_partkey AND s.rank = 1
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrderSummary cs ON l.l_orderkey = cs.o_orderkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, r.r_name, s.s_name
+HAVING 
+    SUM(l.l_quantity) > COALESCE(NULLIF(AVG(l.l_quantity), 0), 1)
+ORDER BY 
+    total_quantity DESC, highest_spending_customer DESC
+LIMIT 10;

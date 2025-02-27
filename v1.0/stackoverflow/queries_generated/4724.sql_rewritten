@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT v.PostId) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostActivity AS (
+    SELECT 
+        p.Id,
+        COALESCE(ph.CloseReasonId, 0) AS CloseReasonId, 
+        p.LastActivityDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+)
+SELECT 
+    up.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    pa.CommentCount,
+    CASE 
+        WHEN pa.CloseReasonId > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    CASE 
+        WHEN pa.LastActivityDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' THEN 'Inactive' 
+        ELSE 'Active' 
+    END AS ActivityStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+JOIN 
+    UserVoteStats uvs ON rp.OwnerUserId = uvs.UserId
+LEFT JOIN 
+    PostActivity pa ON rp.PostId = pa.Id
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,42 @@
+WITH top_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT m.company_id) AS production_company_count
+    FROM aka_title a
+    LEFT JOIN movie_companies m ON a.id = m.movie_id
+    WHERE a.production_year >= 2000
+    GROUP BY a.id, a.title, a.production_year
+    HAVING COUNT(DISTINCT m.company_id) > 2
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        c.name AS director_name,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS row_num
+    FROM title t
+    JOIN cast_info ci ON t.id = ci.movie_id
+    JOIN aka_name c ON ci.person_id = c.person_id 
+                     AND ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    WHERE c.name IS NOT NULL
+),
+keywords_per_movie AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    k.keywords,
+    tm.production_company_count
+FROM movie_details md
+LEFT JOIN keywords_per_movie k ON md.title = (SELECT title FROM aka_title WHERE id = md.title_id)
+LEFT JOIN top_movies tm ON md.title = tm.movie_title AND md.production_year = tm.production_year
+WHERE md.row_num <= 5
+AND (tm.production_company_count IS NULL OR tm.production_company_count >= 3)
+ORDER BY md.production_year DESC, md.title;

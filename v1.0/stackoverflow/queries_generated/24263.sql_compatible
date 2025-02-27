@@ -1,0 +1,87 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(CASE WHEN v.VoteTypeId IN (2, 3) THEN v.VoteTypeId END) AS AvgVoteType
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        COALESCE(p.FavoriteCount, 0) AS FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE((
+            SELECT 
+                SUM(v.BountyAmount)
+            FROM 
+                Votes v 
+            WHERE 
+                v.PostId = p.Id AND v.VoteTypeId = 8
+        ), 0) AS TotalBounty
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN p.Id END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation, 
+    ups.PostsCreated, 
+    ups.TotalViews, 
+    ups.AcceptedAnswers,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    CASE 
+        WHEN uvs.TotalVotes = 0 THEN NULL 
+        ELSE CAST(uvs.UpVotes AS FLOAT) / NULLIF(uvs.TotalVotes, 0) 
+    END AS UpvoteRatio,
+    pd.Title,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.FavoriteCount,
+    pd.TotalBounty
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteStats uvs ON u.Id = uvs.UserId
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostDetails pd ON pd.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id 
+        ORDER BY p.ViewCount DESC 
+        LIMIT 5
+    )
+WHERE 
+    ups.PostsCreated > 0
+ORDER BY 
+    UpvoteRatio DESC NULLS LAST, 
+    ups.TotalViews DESC;

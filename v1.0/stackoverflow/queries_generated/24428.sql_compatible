@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS IsClosed,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 2 YEAR)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS TagPopularity
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.ViewCount > 100
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(*) > 5
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.PostCount,
+    COALESCE(ARRAY_AGG(DISTINCT rp.TagsArray), ARRAY[]::text[]) AS Tags,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.IsClosed = 1 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    pt.TagName AS PopularTag,
+    pt.TagPopularity
+FROM 
+    UserStats up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId LIMIT 1)
+LEFT JOIN 
+    PopularTags pt ON pt.TagName = ANY(rp.TagsArray)
+WHERE 
+    up.PostCount > 5
+GROUP BY 
+    up.UserId, up.DisplayName, rp.Title, rp.CreationDate, rp.ViewCount, rp.IsClosed, pt.TagName, pt.TagPopularity
+ORDER BY 
+    up.PostCount DESC, rp.ViewCount DESC
+LIMIT 100;

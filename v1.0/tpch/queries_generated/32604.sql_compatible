@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, pp.ps_supplycost
+    FROM part p
+    JOIN partsupp pp ON p.p_partkey = pp.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1' YEAR
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CombinedData AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        h.p_partkey,
+        h.p_name,
+        h.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY h.p_retailprice DESC) AS part_rank,
+        sh.s_acctbal,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Fulfilled'
+            ELSE 'Pending'
+        END AS order_status
+    FROM RecentOrders o
+    JOIN HighValueParts h ON o.o_orderkey = h.p_partkey
+    LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = o.o_custkey
+)
+SELECT 
+    cd.o_orderkey,
+    cd.o_custkey,
+    cd.p_name,
+    cd.order_status,
+    cd.part_rank,
+    COALESCE(SUM(cd.s_acctbal), 0) AS total_supplier_acctbal
+FROM CombinedData cd
+GROUP BY cd.o_orderkey, cd.o_custkey, cd.p_name, cd.order_status, cd.part_rank
+HAVING COALESCE(SUM(cd.s_acctbal), 0) > (SELECT AVG(sac.s_acctbal) FROM SupplierHierarchy sac)
+ORDER BY cd.o_orderkey, cd.part_rank;

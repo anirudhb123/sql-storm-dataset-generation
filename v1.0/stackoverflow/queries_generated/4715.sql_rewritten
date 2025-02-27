@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id, u.Reputation
+),
+PostWithMaxComment AS (
+    SELECT p.*, 
+           (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS TotalComments,
+           (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+)
+
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    rp.Title,
+    rp.PostId,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(pm.TotalComments, 0) AS PostComments,
+    pm.Upvotes
+FROM RankedPosts rp
+JOIN Users u ON u.Id = rp.OwnerUserId
+JOIN UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN PostWithMaxComment pm ON pm.Id = rp.PostId
+WHERE rp.rn = 1
+  AND ur.Reputation > 1000
+ORDER BY ur.Reputation DESC, rp.Score DESC
+LIMIT 10;

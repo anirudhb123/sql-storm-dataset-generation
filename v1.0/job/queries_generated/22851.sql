@@ -1,0 +1,85 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT cc.person_id) AS cast_size
+    FROM 
+        aka_title t 
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    GROUP BY 
+        t.id
+),
+MinMaxCasting AS (
+    SELECT 
+        md.title_id,
+        MIN(c.nr_order) AS min_order,
+        MAX(c.nr_order) AS max_order
+    FROM 
+        MovieDetails md
+    JOIN 
+        complete_cast c ON md.title_id = c.movie_id
+    GROUP BY 
+        md.title_id
+),
+RoleInfo AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 END) AS role_count,
+        COUNT(CASE WHEN ci.note IS NULL OR ci.note = '' THEN 1 END) AS null_note_count
+    FROM 
+        cast_info ci 
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+CombiningCasting AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.cast_size,
+        r.role,
+        r.role_count,
+        r.null_note_count,
+        mm.min_order,
+        mm.max_order
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        MinMaxCasting mm ON md.title_id = mm.title_id
+    LEFT JOIN 
+        RoleInfo r ON md.title_id = r.movie_id
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN cast_size > 5 THEN 'Large Cast' 
+        WHEN cast_size BETWEEN 3 AND 5 THEN 'Medium Cast' 
+        ELSE 'Small Cast' 
+    END AS cast_size_label,
+    COALESCE(NULLIF(keywords, ''), 'No Keywords') AS keywords_display,
+    EXTRACT(YEAR FROM CURRENT_DATE) - production_year AS age_of_movie,
+    ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY title) AS rank_per_year
+FROM 
+    CombiningCasting
+WHERE 
+    (EXISTS (
+        SELECT 1 
+        FROM cast_info ci 
+        WHERE ci.movie_id = title_id AND ci.nr_order IS NOT NULL
+    ) OR role_count > 1)
+    AND (production_year >= 2000 OR production_year IS NULL)
+ORDER BY 
+    age_of_movie DESC, 
+    cast_size DESC;

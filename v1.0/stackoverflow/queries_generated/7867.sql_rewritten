@@ -1,0 +1,82 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(DISTINCT SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), ', ') AS TagsList
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS Owner
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+    ORDER BY 
+        P.Score DESC, P.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    AU.UserId,
+    AU.DisplayName AS UserName,
+    AU.QuestionCount,
+    AU.TotalViews,
+    UB.BadgeCount,
+    UB.HighestBadgeClass,
+    TP.PostId,
+    TP.Title,
+    TP.Score,
+    TP.ViewCount,
+    TP.CreationDate,
+    PT.TagsList
+FROM 
+    ActiveUsers AU
+LEFT JOIN 
+    UserBadges UB ON AU.UserId = UB.UserId
+LEFT JOIN 
+    TopPosts TP ON AU.UserId = TP.Owner
+LEFT JOIN 
+    PostTags PT ON TP.PostId = PT.PostId
+WHERE 
+    AU.QuestionCount > 0
+ORDER BY 
+    AU.TotalViews DESC, UB.BadgeCount DESC, TP.Score DESC;

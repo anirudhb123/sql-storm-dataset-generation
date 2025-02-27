@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY LENGTH(a.title) DESC) AS title_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+AggregateMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.cast_count,
+        m.cast_names,
+        r.title_rank
+    FROM 
+        AggregateMovies m
+    JOIN 
+        RankedTitles r ON m.title = r.title AND m.production_year = r.production_year
+    WHERE 
+        r.title_rank <= 5 AND m.cast_count > 5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.cast_names
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

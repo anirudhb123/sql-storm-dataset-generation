@@ -1,0 +1,81 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        COALESCE(ws.ws_ext_sales_price, 0) AS ext_sales_price,
+        ws.ws_sold_date_sk,
+        1 AS level
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    
+    UNION ALL
+    
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_sales_price,
+        cs.cs_quantity,
+        COALESCE(cs.cs_ext_sales_price, 0) AS ext_sales_price,
+        cs.cs_sold_date_sk,
+        cte.level + 1
+    FROM 
+        catalog_sales cs
+    INNER JOIN 
+        SalesCTE cte ON cs.cs_order_number = cte.ws_order_number
+    WHERE 
+        cs.cs_sold_date_sk < (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(s.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT s.ws_order_number) AS order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesCTE s ON i.i_item_sk = s.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_gender
+),
+HighSalesItems AS (
+    SELECT 
+        i.i_item_id,
+        is.total_sales,
+        RANK() OVER (ORDER BY is.total_sales DESC) AS sales_rank
+    FROM 
+        ItemSales is
+    WHERE 
+        is.total_sales > (SELECT AVG(total_sales) FROM ItemSales)
+)
+SELECT 
+    hsi.i_item_id,
+    hsi.total_sales,
+    cs.avg_purchase_estimate,
+    cs.customer_count
+FROM 
+    HighSalesItems hsi
+LEFT JOIN 
+    CustomerStats cs ON hsi.i_item_id = (SELECT MIN(i.i_item_sk) FROM item i WHERE i.i_item_id = hsi.i_item_id)
+WHERE 
+    hsi.sales_rank <= 10
+ORDER BY 
+    hsi.total_sales DESC;

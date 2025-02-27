@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1983-1987) (seasons 1-5)', '(1999) (USA) (VHS) (as Acme Video)', '(2000) (USA) (VHS) (on "Classroom Scare Films Vol. 7: Drugs & Beyond!")', '(2009) (Argentina) (DVD) (Edición de Colección)', '(2011) (Germany) (DVD) (blu-ray)') AND n.gender LIKE '%f%';

@@ -1,0 +1,68 @@
+WITH ranked_movies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS cast_count,
+        RANK() OVER (ORDER BY at.production_year DESC, COUNT(DISTINCT ci.person_id) DESC) AS rank_year_cast
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    WHERE
+        at.production_year IS NOT NULL
+),
+high_cast_movies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        cast_count
+    FROM
+        ranked_movies
+    WHERE
+        cast_count > (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                ranked_movies
+        )
+    AND production_year >= (
+       SELECT 
+            MAX(production_year) - 5 
+        FROM 
+            ranked_movies
+    )
+),
+final_results AS (
+    SELECT
+        hcm.title, 
+        hcm.production_year,
+        COALESCE(ki.keyword, 'No Keywords') AS keyword,
+        COALESCE(comp.kind, 'Independent') AS company_type
+    FROM
+        high_cast_movies hcm
+    LEFT JOIN
+        movie_keyword mk ON hcm.title_id = mk.movie_id
+    LEFT JOIN
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN
+        movie_companies mc ON hcm.title_id = mc.movie_id
+    LEFT JOIN
+        company_type comp ON mc.company_type_id = comp.id
+)
+SELECT 
+    title, 
+    production_year,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords,
+    MAX(company_type) AS company_type
+FROM 
+    final_results
+GROUP BY 
+    title, 
+    production_year
+HAVING 
+    COUNT(DISTINCT keyword) > 1
+ORDER BY 
+    production_year DESC, 
+    title;

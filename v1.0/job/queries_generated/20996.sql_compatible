@@ -1,0 +1,46 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           1 AS level, ARRAY[m.title] AS title_path
+    FROM aka_title m
+    WHERE m.production_year > 2000 
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           mh.level + 1, mh.title_path || m.title
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.level < 5 
+),
+ranked_movies AS (
+    SELECT mh.movie_id, mh.title, mh.production_year,
+           ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS year_rank,
+           COUNT(*) OVER (PARTITION BY mh.production_year) AS year_count
+    FROM movie_hierarchy mh
+)
+SELECT 
+    COALESCE(aka.name, 'Unknown Actor') AS actor_name,
+    title.title AS movie_title,
+    title.production_year,
+    COUNT(DISTINCT c.id) AS num_cast,
+    MAX(CASE WHEN c.nr_order IS NULL THEN 'No Order' ELSE CAST(c.nr_order AS VARCHAR) END) AS max_order,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM ranked_movies title
+LEFT JOIN cast_info c ON title.movie_id = c.movie_id
+LEFT JOIN aka_name aka ON c.person_id = aka.person_id
+LEFT JOIN movie_keyword mk ON title.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+WHERE 
+    title.year_rank <= 3 
+    AND (aka.name IS NOT NULL AND aka.name <> '')
+    AND title.production_year IS NOT NULL
+GROUP BY 
+    title.movie_id, title.title, title.production_year, aka.name
+HAVING 
+    COUNT(DISTINCT k.id) > 1
+ORDER BY 
+    title.production_year DESC, 
+    num_cast DESC,
+    actor_name;

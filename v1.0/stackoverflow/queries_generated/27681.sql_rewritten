@@ -1,0 +1,74 @@
+WITH PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        ARRAY_AGG(DISTINCT c.UserDisplayName) AS Commenters,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Posts sub 
+            WHERE sub.ParentId = p.Id
+        ), 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+), TagInfo AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.Id, t.TagName
+), RankedPosts AS (
+    SELECT 
+        pi.PostId,
+        pi.Title,
+        pi.Score,
+        pi.ViewCount,
+        pi.CreationDate,
+        pi.Tags,
+        pi.Commenters,
+        pi.VoteCount,
+        pi.CommentCount,
+        pi.AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY pi.Score DESC, pi.ViewCount DESC) AS Rank
+    FROM 
+        PostInfo pi
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.Tags,
+    rp.Commenters,
+    rp.VoteCount,
+    rp.CommentCount,
+    rp.AnswerCount,
+    ti.TagName,
+    ti.PostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagInfo ti ON ti.TagId = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')::int[])
+WHERE 
+    rp.Rank <= 10  
+ORDER BY 
+    rp.Rank;

@@ -1,0 +1,87 @@
+
+WITH RECURSIVE UserReputationHistory AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CreationDate,
+        LastAccessDate,
+        CAST(0 AS INT) AS UserLevel
+    FROM 
+        Users
+    WHERE 
+        CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id, 
+        U.Reputation, 
+        U.CreationDate,
+        U.LastAccessDate,
+        CASE 
+            WHEN U.Reputation >= 1000 THEN 3
+            WHEN U.Reputation >= 500 THEN 2
+            ELSE 1
+        END
+    FROM 
+        Users U
+    JOIN 
+        UserReputationHistory UR ON U.Id = UR.Id
+    WHERE 
+        UR.UserLevel < 3
+),
+PostsWithVoteCount AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        COALESCE(Comments.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) Comments ON P.Id = Comments.PostId
+),
+PopularPosts AS (
+    SELECT 
+        Title,
+        ViewCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC, CommentCount DESC) AS PopularityRank
+    FROM 
+        PostsWithVoteCount
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PP.Title,
+    PP.ViewCount,
+    PP.CommentCount,
+    U.UserLevel
+FROM 
+    UserReputationHistory U
+JOIN 
+    PopularPosts PP ON U.Id = PP.PostId 
+WHERE 
+    PP.PopularityRank <= 10
+ORDER BY 
+    U.Reputation DESC;

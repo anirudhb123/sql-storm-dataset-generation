@@ -1,0 +1,32 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    c.kind AS role,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END), 'N/A') AS movie_rating,
+    COALESCE(MAX(CASE WHEN pi.info_type_id = 1 THEN pi.info END), 'N/A') AS actor_bio
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.movie_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    c.kind = 'Actor' 
+    AND t.production_year BETWEEN 2000 AND 2023
+    AND t.title ILIKE '%action%'
+GROUP BY 
+    a.id, t.id, c.kind
+ORDER BY 
+    t.production_year DESC, actor_name;

@@ -1,0 +1,55 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM Posts p2
+    INNER JOIN RecursivePostHierarchy r ON p2.ParentId = r.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COALESCE(SUM(v.Score), 0) AS TotalVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(p.LastActivityDate) AS LastActivity
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN Posts a ON p.Id = a.ParentId 
+LEFT JOIN Votes v ON v.PostId IN (SELECT Id FROM RecursivePostHierarchy WHERE PostId = p.Id)
+LEFT JOIN LATERAL (
+    SELECT DISTINCT 
+        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, '><', numbers.n), '><', -1)) AS TagName
+    FROM 
+        (SELECT @row := @row + 1 AS n FROM 
+            (SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) t1,
+            (SELECT @row := 0) t2
+        ) numbers
+    WHERE 
+        numbers.n <= (LENGTH(p.Tags) - LENGTH(REPLACE(p.Tags, '><', '')) + 1)
+) t ON true
+WHERE 
+    u.Reputation > 1000
+    AND p.LastActivityDate >= ('2024-10-01 12:34:56' - INTERVAL '1 year')
+GROUP BY u.Id, u.DisplayName, u.Reputation
+HAVING COUNT(DISTINCT p.Id) > 0 
+   AND COALESCE(SUM(v.Score), 0) > 0
+ORDER BY u.Reputation DESC
+LIMIT 10;

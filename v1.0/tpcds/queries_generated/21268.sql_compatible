@@ -1,0 +1,65 @@
+
+WITH RECURSIVE DateHierarchy AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq, d_week_seq, d_quarter_seq, d_day_name, 
+           1 AS level
+    FROM date_dim
+    WHERE d_date = '2023-01-01'
+    UNION ALL
+    SELECT dd.d_date_sk, dd.d_date, dd.d_year, dd.d_month_seq, dd.d_week_seq, dd.d_quarter_seq, dd.d_day_name, 
+           dh.level + 1
+    FROM date_dim dd
+    JOIN DateHierarchy dh ON dd.d_date_sk = dh.d_date_sk + 1
+    WHERE dh.level < 30
+),
+SalesAnalysis AS (
+    SELECT 
+        w.w_warehouse_name,
+        COALESCE(sm.sm_type, 'Unknown') AS shipping_type,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    LEFT JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM DateHierarchy)
+    GROUP BY w.w_warehouse_name, sm.sm_type
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(cd.cd_purchase_estimate) AS total_estimated_purchase,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(cd.cd_purchase_estimate) DESC) AS purchase_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    sa.w_warehouse_name,
+    sa.shipping_type,
+    sa.total_orders,
+    sa.total_profit,
+    cd.cd_gender,
+    cd.customer_count,
+    cd.total_estimated_purchase,
+    CASE 
+        WHEN cd.purchase_rank = 1 THEN 'Top Customer Demographics'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    COALESCE((SELECT MAX(income.ib_upper_bound) 
+              FROM household_demographics hd 
+              JOIN income_band income ON hd.hd_income_band_sk = income.ib_income_band_sk 
+              WHERE hd.hd_dep_count IS NOT NULL), 'No Income Info') AS max_income_band
+FROM SalesAnalysis sa
+FULL OUTER JOIN CustomerDemographics cd ON sa.total_orders > 0
+ORDER BY sa.total_profit DESC, cd.total_estimated_purchase DESC
+LIMIT 100
+UNION ALL
+SELECT 'Total', 'N/A', COUNT(*), SUM(total_profit), 'N/A', SUM(customer_count), SUM(total_estimated_purchase),
+       'Aggregate Metrics', 'N/A'
+FROM (
+    SELECT 
+        sa.total_profit,
+        cd.total_estimated_purchase
+    FROM SalesAnalysis sa
+    JOIN CustomerDemographics cd ON sa.total_orders > 0
+) AS metrics;

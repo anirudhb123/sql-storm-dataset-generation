@@ -1,0 +1,67 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS title,
+        t.production_year,
+        kt.kind AS kind,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.imdb_index) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+popular_actors AS (
+    SELECT 
+        ci.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+detailed_movie_info AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ka.actor_name,
+        rk.title AS ranked_title,
+        mk.keywords
+    FROM 
+        ranked_titles rk
+    JOIN 
+        title t ON rk.title_id = t.id
+    JOIN 
+        popular_actors ka ON t.id IN (SELECT movie_id FROM cast_info ci WHERE ci.person_id = ka.person_id)
+    LEFT JOIN 
+        movie_keywords mk ON t.id = mk.movie_id
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_name,
+    ranked_title,
+    keywords
+FROM 
+    detailed_movie_info
+WHERE 
+    year_rank <= 3
+ORDER BY 
+    production_year DESC, actor_name, movie_title;

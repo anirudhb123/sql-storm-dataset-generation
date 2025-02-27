@@ -1,0 +1,54 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        rn.title AS movie_title,
+        a.name AS actor_name,
+        rt.role
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    JOIN 
+        RankedMovies rn ON ci.movie_id = rn.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    ar.movie_title,
+    ar.actor_name,
+    ar.role,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COUNT(*) OVER (PARTITION BY ar.movie_id) AS total_cast,
+    ar.production_year
+FROM 
+    ActorRoles ar
+LEFT JOIN 
+    MovieKeywords mk ON ar.movie_id = mk.movie_id
+WHERE 
+    ar.movie_title LIKE '%Adventure%'
+ORDER BY 
+    ar.production_year DESC, 
+    ar.movie_title;

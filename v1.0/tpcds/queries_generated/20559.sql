@@ -1,0 +1,72 @@
+
+WITH RECURSIVE customer_returns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_return_quantity,
+        SUM(cr.return_amount) AS total_return_amount
+    FROM catalog_returns cr
+    WHERE cr.returned_date_sk > 0
+    GROUP BY cr.returning_customer_sk
+),
+address_details AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS state_city_rank
+    FROM customer_address ca
+    WHERE ca.ca_country IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(ws_order_number) AS total_web_sales,
+        AVG(ws_net_profit) AS avg_web_profit
+    FROM web_sales
+    WHERE ws_sales_price > 0
+    GROUP BY ws_bill_customer_sk
+),
+high_return_customers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_return_quantity,
+        cr.total_return_amount
+    FROM customer_returns cr
+    JOIN sales_summary ss ON cr.returning_customer_sk = ss.ws_bill_customer_sk
+    WHERE cr.total_return_quantity > (SELECT AVG(total_return_quantity) FROM customer_returns)
+      AND ss.avg_web_profit < 0
+),
+recent_transactions AS (
+    SELECT 
+        DISTINCT ws.ws_order_number,
+        ws.ws_ship_customer_sk,
+        ws.ws_net_profit,
+        wm.web_name AS website_name
+    FROM web_sales ws
+    JOIN web_site wm ON ws.ws_web_site_sk = wm.web_site_sk
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+),
+final_analysis AS (
+    SELECT 
+        hrc.returning_customer_sk,
+        COUNT(DISTINCT rt.ws_order_number) AS recent_orders,
+        SUM(CASE WHEN ad.state_city_rank = 1 THEN rt.ws_net_profit END) AS first_city_profit,
+        SUM(rt.ws_net_profit) AS total_profit
+    FROM high_return_customers hrc
+    LEFT JOIN recent_transactions rt ON hrc.returning_customer_sk = rt.ws_ship_customer_sk
+    LEFT JOIN address_details ad ON ad.ca_address_sk = hrc.returning_customer_sk
+    GROUP BY hrc.returning_customer_sk
+)
+SELECT 
+    fa.returning_customer_sk,
+    fa.recent_orders,
+    fa.first_city_profit,
+    fa.total_profit,
+    CASE 
+        WHEN fa.total_profit IS NULL THEN 'No Profit' 
+        WHEN fa.total_profit < 0 THEN 'Loss' 
+        ELSE 'Profit' 
+    END AS profit_status
+FROM final_analysis fa
+WHERE fa.recent_orders > 0
+ORDER BY fa.total_profit DESC NULLS LAST;

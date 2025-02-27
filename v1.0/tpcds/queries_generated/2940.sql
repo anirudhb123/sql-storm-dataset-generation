@@ -1,0 +1,46 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+top_customers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.order_count,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM customer_stats cs
+)
+SELECT 
+    t.c_first_name,
+    t.c_last_name,
+    t.order_count,
+    t.total_spent,
+    COALESCE(SUM(CASE WHEN wit.wr_returned_date_sk IS NOT NULL THEN 1 ELSE 0 END), 0) AS return_count,
+    ROUND((t.total_spent - COALESCE(SUM(CASE WHEN wit.wr_returned_amt IS NOT NULL THEN wit.wr_returned_amt END), 0)), 2) AS net_spent
+FROM top_customers t
+LEFT JOIN (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.wr_return_amt) AS wr_returned_amt,
+        COUNT(wr.wr_return_number) AS wr_returned_count,
+        wr.wr_return_date_sk
+    FROM web_returns wr
+    GROUP BY wr.returning_customer_sk, wr.wr_return_date_sk
+) wit ON t.c_customer_sk = wit.returning_customer_sk
+WHERE t.rank <= 100 AND t.order_count > 0
+GROUP BY t.c_first_name, t.c_last_name, t.order_count, t.total_spent
+ORDER BY t.total_spent DESC;

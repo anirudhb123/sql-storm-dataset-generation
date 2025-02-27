@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt2.id,
+        mt2.title,
+        mt2.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt2
+    INNER JOIN 
+        movie_link ml ON mt2.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS "Movie Title",
+    mh.production_year AS "Year",
+    COALESCE(ak.name, 'Unknown Actor') AS "Actor Name",
+    COALESCE(cg.kind, 'Unknown Role') AS "Character Type",
+    COUNT(DISTINCT mc.company_id) AS "Companies Involved",
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS "Keywords",
+    CASE 
+        WHEN mh.level = 0 THEN 'Main Movie'
+        ELSE 'Linked Movie Level ' || mh.level
+    END AS "Movie Level"
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    role_type cg ON ci.role_id = cg.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.title, mh.production_year, ak.name, cg.kind, mh.level
+ORDER BY 
+    mh.production_year DESC, mh.title;

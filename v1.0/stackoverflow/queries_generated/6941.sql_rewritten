@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.LastActivityDate >= cast('2024-10-01' as date) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentActivityCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), 
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RecentActivityCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        PostCount > 0
+),
+VoteStatistics AS (
+    SELECT 
+        UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        UserId
+),
+CombinedStats AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        tu.Reputation,
+        tu.PostCount,
+        tu.QuestionCount,
+        tu.AnswerCount,
+        tu.RecentActivityCount,
+        vs.VoteCount,
+        vs.TotalUpvotes,
+        vs.TotalDownvotes
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        VoteStatistics vs ON tu.UserId = vs.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    RecentActivityCount,
+    VoteCount,
+    TotalUpvotes,
+    TotalDownvotes
+FROM 
+    CombinedStats 
+WHERE 
+    ReputationRank <= 10 
+ORDER BY 
+    Reputation DESC;

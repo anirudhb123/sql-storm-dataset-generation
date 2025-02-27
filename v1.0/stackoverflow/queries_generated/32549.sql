@@ -1,0 +1,93 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(P.CreationDate, '1970-01-01') AS FirstPostDate,
+        COALESCE(P.Title, 'No Posts') AS FirstPostTitle,
+        COALESCE(C.Count, 0) AS CommentCount
+    FROM
+        Users U
+    LEFT JOIN (
+        SELECT
+            OwnerUserId,
+            MIN(CreationDate) AS CreationDate,
+            FIRST_VALUE(Title) OVER (PARTITION BY OwnerUserId ORDER BY CreationDate) AS Title
+        FROM
+            Posts
+        WHERE
+            OwnerUserId IS NOT NULL
+        GROUP BY
+            OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT
+            UserId,
+            COUNT(*) AS Count
+        FROM
+            Comments
+        GROUP BY
+            UserId
+    ) C ON U.Id = C.UserId
+    WHERE
+        U.Reputation > 0
+
+    UNION ALL
+
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(P.CreationDate, '1970-01-01') AS FirstPostDate,
+        COALESCE(P.Title, 'No Posts') AS FirstPostTitle,
+        COALESCE(C.Count, 0) AS CommentCount
+    FROM
+        Users U
+    JOIN UserActivity A ON U.Id = A.UserId
+    LEFT JOIN (
+        SELECT
+            OwnerUserId,
+            MIN(CreationDate) AS CreationDate,
+            FIRST_VALUE(Title) OVER (PARTITION BY OwnerUserId ORDER BY CreationDate) AS Title
+        FROM
+            Posts
+        WHERE
+            OwnerUserId IS NOT NULL
+        GROUP BY
+            OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT
+            UserId,
+            COUNT(*) AS Count
+        FROM
+            Comments
+        GROUP BY
+            UserId
+    ) C ON U.Id = C.UserId
+    WHERE
+        U.Reputation > 0 AND A.Reputation < U.Reputation
+)
+
+SELECT
+    UA.DisplayName,
+    UA.Reputation,
+    UA.FirstPostDate,
+    UA.FirstPostTitle,
+    UA.CommentCount,
+    COUNT(DISTINCT V.Id) AS VoteCount,
+    CASE 
+        WHEN UA.CommentCount > 5 THEN 'Active User'
+        WHEN UA.Reputation > 1000 THEN 'Highly Respected'
+        ELSE 'New User'
+    END AS UserCategory
+FROM
+    UserActivity UA
+LEFT JOIN Votes V ON UA.UserId = V.UserId
+GROUP BY
+    UA.DisplayName, UA.Reputation, UA.FirstPostDate, UA.FirstPostTitle, UA.CommentCount
+HAVING
+    COUNT(DISTINCT V.Id) > 5
+ORDER BY
+    UA.Reputation DESC, UA.DisplayName;
+

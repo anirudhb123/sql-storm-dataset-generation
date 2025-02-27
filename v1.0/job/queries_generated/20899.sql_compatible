@@ -1,0 +1,95 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title ASC) AS rank_by_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorMovieCount AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    GROUP BY 
+        ci.person_id
+),
+ActorsWithMultipleRoles AS (
+    SELECT
+        ci.person_id,
+        an.name,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id, an.name
+    HAVING 
+        COUNT(DISTINCT ci.role_id) > 1
+),
+MovieInfoWithKeywords AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords_concat
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.id, at.title
+),
+CompanyContributions AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+FullMovieDetails AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title AS movie_title,
+        COALESCE(c.movie_count, 0) AS actor_count,
+        COALESCE(cc.company_count, 0) AS company_count,
+        COALESCE(mik.keywords_concat, 'No Keywords') AS keywords,
+        COALESCE(rv.rank_by_year, 'Not Ranked') AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        ActorMovieCount c ON at.id = c.movie_id
+    LEFT JOIN 
+        CompanyContributions cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        MovieInfoWithKeywords mik ON at.id = mik.movie_id
+    LEFT JOIN 
+        RankedTitles rv ON at.id = rv.title_id 
+)
+SELECT 
+    fmd.movie_title,
+    fmd.actor_count,
+    fmd.company_count,
+    fmd.keywords,
+    fmd.year_rank
+FROM 
+    FullMovieDetails fmd
+ORDER BY 
+    fmd.year_rank DESC,
+    fmd.actor_count DESC,
+    fmd.company_count ASC
+LIMIT 10;

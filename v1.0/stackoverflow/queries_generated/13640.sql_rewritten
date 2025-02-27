@@ -1,0 +1,52 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(V.VoteTypeId = 1) AS TotalAcceptedVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    GROUP BY P.Id, P.PostTypeId
+),
+Summary AS (
+    SELECT 
+        US.UserId,
+        US.Reputation,
+        PS.PostTypeId,
+        COUNT(PS.PostId) AS TotalPosts,
+        SUM(PS.TotalComments) AS CommentsPerPost,
+        SUM(PS.TotalUpVotes) AS UpVotesPerPost,
+        SUM(PS.TotalDownVotes) AS DownVotesPerPost,
+        SUM(PS.TotalAcceptedVotes) AS AcceptedVotesPerPost
+    FROM UserStats US
+    JOIN PostStats PS ON US.UserId = PS.PostId
+    GROUP BY US.UserId, US.Reputation, PS.PostTypeId
+)
+SELECT 
+    UserId,
+    Reputation,
+    PostTypeId,
+    TotalPosts,
+    ROUND(AVG(CommentsPerPost), 2) AS AvgCommentsPerPost,
+    ROUND(AVG(UpVotesPerPost), 2) AS AvgUpVotesPerPost,
+    ROUND(AVG(DownVotesPerPost), 2) AS AvgDownVotesPerPost,
+    ROUND(AVG(AcceptedVotesPerPost), 2) AS AvgAcceptedVotesPerPost
+FROM Summary
+ORDER BY Reputation DESC, TotalPosts DESC;

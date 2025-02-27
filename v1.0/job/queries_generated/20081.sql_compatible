@@ -1,0 +1,84 @@
+
+WITH RECURSIVE company_movies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_order
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_order,
+        COUNT(DISTINCT ci.role_id) OVER (PARTITION BY ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = t.id) AS complete_cast_count
+    FROM 
+        title t
+),
+keyword_info AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+ranked_movies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        ci.actor_name,
+        cm.company_name,
+        cm.company_type,
+        ki.keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, COUNT(DISTINCT ci.actor_name) DESC) AS movie_rank
+    FROM 
+        title_info t
+    LEFT JOIN 
+        movie_cast ci ON t.title_id = ci.movie_id
+    LEFT JOIN 
+        company_movies cm ON t.title_id = cm.movie_id
+    LEFT JOIN 
+        keyword_info ki ON t.title_id = ki.movie_id
+    GROUP BY 
+        t.title, t.production_year, ci.actor_name, cm.company_name, cm.company_type, ki.keywords
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    STRING_AGG(DISTINCT rm.actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT CONCAT(rm.company_name, ' (', rm.company_type, ')'), ', ') AS companies,
+    COALESCE(ki.keywords, 'No Keywords') AS keywords,
+    rm.movie_rank
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    keyword_info ki ON rm.title_id = ki.movie_id
+WHERE 
+    rm.production_year >= 1990
+GROUP BY 
+    rm.title, rm.production_year, rm.movie_rank
+ORDER BY 
+    rm.movie_rank ASC,
+    rm.production_year DESC
+LIMIT 10;

@@ -1,0 +1,104 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS OrderRank
+    FROM 
+        orders
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 100000 
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        COUNT(*) AS SupplierCount
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LastOrderDates AS (
+    SELECT 
+        o.o_custkey,
+        MAX(o.o_orderdate) AS LastOrderDate
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+CustomerOrderDetails AS (
+    SELECT 
+        hc.c_custkey,
+        hc.c_name,
+        lo.LastOrderDate,
+        ro.o_totalprice,
+        ro.OrderRank
+    FROM 
+        HighValueCustomers hc
+    JOIN 
+        LastOrderDates lo ON hc.c_custkey = lo.o_custkey
+    LEFT JOIN 
+        RankedOrders ro ON hc.c_custkey = ro.o_custkey AND ro.OrderRank = 1
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS SupplyCount
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, p.p_name, s.s_acctbal
+    HAVING 
+        COUNT(ps.ps_partkey) > 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    c.TotalSpent,
+    COALESCE(lo.LastOrderDate, DATE '1900-01-01') AS LastOrderDate,
+    sp.s_name,
+    sp.p_name,
+    sp.SupplyCount,
+    CASE 
+        WHEN sp.SupplyCount IS NULL THEN 'No Supply'
+        ELSE 'Available'
+    END AS SupplyStatus,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY c.TotalSpent DESC) AS CustomerRank
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    CustomerOrderDetails lo ON c.c_custkey = lo.c_custkey
+LEFT JOIN 
+    SupplierParts sp ON sp.s_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > c.c_acctbal ORDER BY s.s_acctbal DESC LIMIT 1)
+WHERE 
+    c.c_acctbal IS NOT NULL 
+    AND c.c_mktsegment = 'BUILDING'
+ORDER BY 
+    c.TotalSpent DESC, c.c_name ASC
+LIMIT 100;

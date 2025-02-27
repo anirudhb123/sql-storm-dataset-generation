@@ -1,0 +1,75 @@
+WITH TagDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Tags,
+        ARRAY_LENGTH(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><'), 1) AS TagCount,
+        P.CreationDate
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1  
+),
+TopUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS UserRank
+    FROM
+        Users U
+    JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id
+),
+MostActiveTags AS (
+    SELECT
+        tag,
+        COUNT(*) AS Count
+    FROM (
+        SELECT
+            unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS tag
+        FROM
+            Posts
+        WHERE
+            PostTypeId = 1
+    ) AS TagList
+    GROUP BY
+        tag
+    ORDER BY
+        Count DESC
+    LIMIT 5
+),
+TagUsage AS (
+    SELECT
+        TD.PostId,
+        TD.Title,
+        M.tag AS MostActiveTag,
+        TD.TagCount
+    FROM
+        TagDetails TD
+    JOIN
+        MostActiveTags M ON TD.Tags LIKE '%' || M.tag || '%'
+)
+SELECT
+    U.DisplayName,
+    U.QuestionCount,
+    U.TotalBounty,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    TU.Title AS QuestionTitle,
+    TU.MostActiveTag,
+    TU.TagCount,
+    TU.CreationDate
+FROM
+    TopUsers U
+JOIN
+    TagUsage TU ON U.QuestionCount > 0
+ORDER BY
+    U.UserRank, U.TotalBounty DESC;

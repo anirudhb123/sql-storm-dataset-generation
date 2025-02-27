@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+actor_movie_info AS (
+    SELECT 
+        ai.person_id,
+        ai.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ai.person_id ORDER BY mt.production_year DESC) AS recent_movie_rank
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name ak ON ai.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ai.movie_id = mt.movie_id
+),
+keyword_movie_info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+comprehensive_cast AS (
+    SELECT 
+        mh.title AS movie_title,
+        mh.production_year,
+        a.actor_name,
+        k.keywords,
+        COUNT(c.id) OVER (PARTITION BY mh.id) AS cast_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movie_info a ON mh.movie_id = a.movie_id
+    LEFT JOIN 
+        keyword_movie_info k ON mh.movie_id = k.movie_id
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+)
+SELECT 
+    cc.movie_title,
+    cc.production_year,
+    cc.actor_name,
+    cc.keywords,
+    cc.cast_count,
+    AVG(CASE WHEN cc.cast_count > 0 THEN 1 ELSE 0 END) OVER() AS avg_cast_count,
+    COALESCE(MAX(cc.cast_count) FILTER (WHERE cc.production_year >= 2000), 'None') AS max_cast_count_after_2000
+FROM 
+    comprehensive_cast cc
+WHERE 
+    cc.recent_movie_rank = 1 OR cc.keywords LIKE '%drama%'
+ORDER BY 
+    cc.production_year DESC
+LIMIT 100;

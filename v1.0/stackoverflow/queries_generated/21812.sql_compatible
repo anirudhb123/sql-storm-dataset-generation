@@ -1,0 +1,60 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS TotalBadges,
+        JSON_AGG(B.Name) AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        ROW_NUMBER() OVER(PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    WHERE P.CreationDate > DATEADD(day, -30, CAST('2024-10-01' AS DATE))
+),
+PostHistoryCount AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastHistoryDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    UB.TotalBadges,
+    UB.BadgeNames,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS PostCreationDate,
+    COALESCE(PHC.HistoryCount, 0) AS HistoryCount,
+    PHC.LastHistoryDate,
+    CASE 
+        WHEN PHC.HistoryCount IS NULL THEN 'No history'
+        WHEN PHC.LastHistoryDate < (DATEADD(day, -7, CAST('2024-10-01 12:34:56' AS TIMESTAMP))) THEN 'Inactive'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN U.Reputation > 500 THEN 'High Reputation'
+        ELSE 'New User'
+    END AS UserStatus
+FROM UserBadges UB
+JOIN Users U ON U.Id = UB.UserId
+LEFT JOIN RecentPosts RP ON RP.OwnerUserId = U.Id
+LEFT JOIN PostHistoryCount PHC ON PHC.PostId = RP.PostId
+WHERE 
+    (U.Location IS NOT NULL AND U.Location != '') OR 
+    (U.AboutMe IS NOT NULL AND U.AboutMe != '') 
+ORDER BY 
+    U.Reputation DESC,
+    RP.CreationDate DESC
+LIMIT 50;

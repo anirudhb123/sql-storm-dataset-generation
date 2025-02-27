@@ -1,0 +1,90 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorMovieMap AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        a.nr_order,
+        CASE WHEN a.note IS NULL THEN 'None' ELSE a.note END AS role_note
+    FROM 
+        cast_info a
+    JOIN 
+        aka_title m ON a.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+),
+
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COALESCE(pi.info, 'No Info') AS additional_info
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+    WHERE 
+        ak.name_pcode_cf IS NOT NULL
+),
+
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.hierarchy_level DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+)
+
+SELECT 
+    am.actor_name,
+    rm.title AS movie_title,
+    rm.production_year,
+    rm.rank,
+    ami.role_note,
+    ai.additional_info
+FROM 
+    ActorMovieMap ami
+JOIN 
+    RankedMovies rm ON ami.movie_id = rm.movie_id
+JOIN 
+    ActorInfo ai ON ami.person_id = ai.actor_id
+WHERE 
+    rm.rank <= 5 AND
+    (rm.kind_id = (
+         SELECT MAX(kind_id) 
+         FROM kind_type 
+         WHERE kind ILIKE '%Action%'
+     ) OR 
+     rm.production_year IS NOT NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.rank ASC;

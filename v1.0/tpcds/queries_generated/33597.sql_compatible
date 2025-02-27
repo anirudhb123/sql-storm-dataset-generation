@@ -1,0 +1,58 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_quantity DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2500 AND 2600
+),
+Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        CASE 
+            WHEN SUM(ws.ws_ext_sales_price) IS NULL THEN 'No Sales'
+            WHEN SUM(ws.ws_ext_sales_price) <= 100 THEN 'Low'
+            WHEN SUM(ws.ws_ext_sales_price) BETWEEN 101 AND 500 THEN 'Medium'
+            ELSE 'High'
+        END AS sales_band
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+Sales_Analysis AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.sales_band,
+        COALESCE(ct.ct_return_count, 0) AS return_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM Customer_Sales cs
+    LEFT JOIN (
+        SELECT 
+            wr_returning_customer_sk,
+            COUNT(*) AS ct_return_count
+        FROM web_returns
+        WHERE wr_returned_date_sk BETWEEN 2500 AND 2600
+        GROUP BY wr_returning_customer_sk
+    ) ct ON cs.c_customer_id = ct.wr_returning_customer_sk
+)
+SELECT
+    sa.c_customer_id,
+    sa.total_sales,
+    sa.order_count,
+    sa.sales_band,
+    sa.return_count,
+    CASE 
+        WHEN sa.sales_rank <= 10 THEN 'Top 10%'
+        WHEN sa.sales_rank <= 50 THEN 'Top 50%'
+        ELSE 'Others'
+    END AS sales_category
+FROM Sales_Analysis sa
+WHERE sa.return_count < 5
+ORDER BY sa.total_sales DESC
+FETCH FIRST 20 ROWS ONLY;

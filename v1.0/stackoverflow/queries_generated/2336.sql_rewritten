@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '365 days'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(pc.CloseReasonId, 0) AS CloseReasonId,
+        pc.CreationDate AS PostClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY pc.CreationDate DESC) AS ClosureRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    ub.UserId,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ra.CommentCount,
+    pa.CloseReasonId,
+    pa.PostClosedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostActivity pa ON rp.Id = pa.Id
+WHERE 
+    rp.rn = 1
+    AND (ub.GoldBadges > 0 OR ub.SilverBadges > 1)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

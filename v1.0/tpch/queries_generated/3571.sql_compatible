@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerNation AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(sp.total_avail_qty), 0) AS total_available_quantity,
+    COALESCE(SUM(sp.total_supply_cost), 0.00) AS total_supply_expense,
+    COUNT(DISTINCT cn.c_custkey) AS unique_customers,
+    RANK() OVER (ORDER BY COALESCE(SUM(sp.total_supply_cost), 0) DESC) AS supply_rank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    CustomerNation cn ON cn.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sp.ps_suppkey))
+WHERE 
+    p.p_size BETWEEN 10 AND 30
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    COUNT(DISTINCT ro.o_orderkey) > 5
+ORDER BY 
+    supply_rank ASC;

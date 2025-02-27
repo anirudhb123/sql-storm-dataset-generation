@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate > DATEADD(DAY, -30, '2024-10-01')
+),
+PostStatistics AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        ViewCount,
+        Score,
+        UpVotes,
+        DownVotes,
+        (CASE 
+            WHEN Score < 0 THEN 'Negative'
+            WHEN Score BETWEEN 0 AND 10 THEN 'Neutral'
+            ELSE 'Positive'
+        END) AS ScoreCategory
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+ClosedPosts AS (
+    SELECT 
+        DISTINCT ph.PostId AS ClosedPostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        prh.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        PostHistory prh ON ph.PostId = prh.PostId AND prh.PostHistoryTypeId = 10
+    WHERE 
+        pht.Name = 'Post Closed'
+),
+CombinedInfo AS (
+    SELECT 
+        ps.Title,
+        ps.OwnerDisplayName,
+        ps.ViewCount,
+        ps.Score,
+        ps.UpVotes,
+        ps.DownVotes,
+        cp.ClosedPostId,
+        cp.CloseReason
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.ClosedPostId
+)
+
+SELECT 
+    ci.Title,
+    ci.OwnerDisplayName,
+    ci.ViewCount,
+    ci.Score,
+    ci.ScoreCategory,
+    COALESCE(ci.UpVotes, 0) AS UpVotesCount,
+    COALESCE(ci.DownVotes, 0) AS DownVotesCount,
+    CASE 
+        WHEN ci.CloseReason IS NOT NULL THEN 'Closed: ' || ci.CloseReason
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    CombinedInfo ci
+ORDER BY 
+    ci.Score DESC, ci.ViewCount DESC;

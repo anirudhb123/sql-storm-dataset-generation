@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        COUNT(c.Id) AS CommentCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT tag.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags)-2), '><')) AS tag(TagName) ON true
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '3 months'
+    GROUP BY p.Id, p.Title, p.Body, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CommentCount,
+        rp.Score,
+        rp.Tags
+    FROM RankedPosts rp
+    WHERE rp.UserRank <= 3
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS NumberOfPosts,
+        SUM(CASE WHEN b.class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+    HAVING u.Reputation > 1000
+),
+FinalResults AS (
+    SELECT 
+        tr.PostId,
+        tr.Title,
+        tr.Body,
+        tr.CommentCount,
+        tr.Score,
+        ARRAY_TO_STRING(tr.Tags, ', ') AS Tags,
+        ur.DisplayName AS UserName,
+        ur.Reputation AS UserReputation,
+        ur.NumberOfPosts,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges
+    FROM TopPosts tr
+    JOIN UserReputation ur ON tr.UserId = ur.UserId
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.Score >= 150 THEN 'Highly Rated'
+        WHEN fr.Score BETWEEN 50 AND 149 THEN 'Moderate Rating'
+        ELSE 'Low Rating'
+    END AS RatingCategory
+FROM FinalResults fr
+ORDER BY fr.Score DESC, fr.CommentCount DESC
+LIMIT 50;

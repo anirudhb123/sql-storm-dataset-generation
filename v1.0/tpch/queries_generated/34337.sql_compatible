@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS lineitem_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+      AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+RegionAggregate AS (
+    SELECT r.r_regionkey, 
+           r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(s.s_acctbal) AS total_account_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.n_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    ra.total_account_balance,
+    SUM(os.total_revenue) AS total_revenue,
+    SUM(os.lineitem_count) AS total_lineitem,
+    MAX(os.rank) AS highest_rank,
+    CASE 
+        WHEN ra.total_account_balance IS NULL THEN 'No Data'
+        ELSE CAST(ra.total_account_balance AS VARCHAR)
+    END AS account_balance_str
+FROM RegionAggregate ra
+JOIN OrderStats os ON ra.nation_count > 0
+LEFT JOIN supplier s ON s.s_acctbal < 1000
+GROUP BY r.r_name, ra.total_account_balance
+HAVING SUM(os.total_revenue) > 50000
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE DateSalesCTE AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date_sk, d.d_date
+    UNION ALL
+    SELECT 
+        d.d_date_sk,
+        d.d_date,
+        SUM(cs.cs_net_profit) AS total_net_profit
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY 
+        d.d_date_sk, d.d_date
+)
+SELECT 
+    d.d_date,
+    COALESCE(ds.total_net_profit, 0) AS web_sales_profit,
+    COALESCE(cs.total_net_profit, 0) AS catalog_sales_profit,
+    COALESCE(ws.total_net_profit, 0) + COALESCE(cs.total_net_profit, 0) AS total_profit,
+    SUM(CASE WHEN c.c_current_addr_sk IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY d.d_date_id) AS customer_count,
+    SUM(CASE WHEN ih.IH_count > 0 THEN 1 ELSE 0 END) OVER (PARTITION BY d.d_date_id) AS inventory_high
+FROM 
+    date_dim d
+LEFT JOIN 
+    (SELECT d_date_sk, SUM(ws_net_profit) AS total_net_profit FROM web_sales GROUP BY d_date_sk) ws ON d.d_date_sk = ws.d_date_sk
+LEFT JOIN 
+    (SELECT d_date_sk, SUM(cs_net_profit) AS total_net_profit FROM catalog_sales GROUP BY d_date_sk) cs ON d.d_date_sk = cs.d_date_sk
+LEFT JOIN 
+    customer c ON c.c_current_addr_sk IS NOT NULL
+LEFT JOIN 
+    (SELECT 
+         inv_date_sk, COUNT(DISTINCT inv_item_sk) AS IH_count 
+     FROM 
+         inventory 
+     WHERE 
+         inv_quantity_on_hand > 0 
+     GROUP BY 
+         inv_date_sk) ih ON d.d_date_sk = ih.inv_date_sk
+WHERE 
+    d.d_year IN (2021, 2022)
+ORDER BY 
+    d.d_date DESC;

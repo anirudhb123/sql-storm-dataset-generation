@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > DATEADD(year, -2, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.Tags, p.PostTypeId
+), 
+PostHistoryWithReason AS (
+    SELECT 
+        ph.PostId, 
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS DeletedDate,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11, 12)) AS ActionCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > DATEADD(month, -6, CURRENT_TIMESTAMP)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Tags,
+    rp.Rank,
+    ph.CloseReason,
+    ph.DeletedDate,
+    ph.ActionCount,
+    CASE 
+        WHEN ph.CloseReason IS NOT NULL THEN 'Closed'
+        WHEN ph.DeletedDate IS NOT NULL THEN 'Deleted'
+        ELSE 'Active' 
+    END AS PostStatus,
+    COALESCE(rp.CommentCount, 0) AS CommentCount,
+    COALESCE(rp.UpVotes - rp.DownVotes, 0) AS NetVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryWithReason ph ON rp.PostId = ph.PostId
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(rp.Tags, '>')))
+WHERE 
+    rp.Rank <= 5 
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.Tags, 
+    rp.Rank, ph.CloseReason, ph.DeletedDate, ph.ActionCount
+ORDER BY 
+    PostStatus DESC, rp.Score DESC;

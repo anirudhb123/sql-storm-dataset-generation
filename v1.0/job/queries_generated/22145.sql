@@ -1,0 +1,52 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ak.name AS actor_name, 
+           ak.person_id, 
+           ARRAY[ak.name] AS name_path, 
+           1 AS depth
+    FROM aka_name ak
+    WHERE ak.name IS NOT NULL
+    UNION ALL
+    SELECT ak.name AS actor_name, 
+           ak.person_id, 
+           ah.name_path || ak.name,  -- accumulating the names in the path
+           depth + 1
+    FROM aka_name ak
+    JOIN ActorHierarchy ah ON ak.person_id = ah.person_id
+    WHERE ak.name IS NOT NULL AND depth < 5  -- limiting recursion depth
+),
+TitleInfo AS (
+    SELECT at.id AS title_id,
+           at.title,
+           at.production_year,
+           ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+           COUNT(DISTINCT mc.company_id) AS company_count
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+    WHERE at.production_year IS NOT NULL
+    GROUP BY at.id, at.title, at.production_year
+)
+SELECT 
+    th.actor_name, 
+    th.name_path, 
+    ti.title, 
+    ti.production_year,
+    CASE
+        WHEN ti.company_count = 0 THEN 'Independent'
+        WHEN ti.company_count > 0 AND ti.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    ROW_NUMBER() OVER (PARTITION BY ti.production_year ORDER BY ti.title) AS title_rank
+FROM ActorHierarchy th
+JOIN cast_info ci ON th.person_id = ci.person_id
+JOIN TitleInfo ti ON ci.movie_id = ti.title_id
+WHERE th.actor_name IS NOT NULL
+AND ti.production_year > 1980
+AND (EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = ti.title_id 
+        AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')
+    ) OR ti.keywords @> ARRAY['Drama', 'Thriller'])  -- using array containment for keywords
+ORDER BY ti.production_year DESC, th.depth, th.actor_name;

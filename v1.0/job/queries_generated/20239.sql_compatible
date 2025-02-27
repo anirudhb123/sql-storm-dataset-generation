@@ -1,0 +1,76 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        COALESCE(mt.production_year, 0) AS production_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1,
+        COALESCE(m.production_year, mh.production_year) AS production_year
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ch.name AS character_name,
+    pa.name AS actor_name,
+    mt.title AS movie_title,
+    mh.level AS episode_level,
+    mh.production_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    CAST(SUM(mv.info) AS TEXT) AS runtime_info,
+    COUNT(DISTINCT co.country_code) FILTER (WHERE co.country_code IS NOT NULL) AS distinct_country_codes,
+    MAX(CASE 
+        WHEN mh.production_year BETWEEN 1920 AND 1960 THEN 'Classic Era'
+        WHEN mh.production_year BETWEEN 1961 AND 1980 THEN 'Golden Era'
+        ELSE 'Modern Era' 
+    END) AS movie_era,
+    ROW_NUMBER() OVER (PARTITION BY pa.id ORDER BY mh.production_year DESC) AS rn
+FROM 
+    movie_keyword mk
+JOIN 
+    aka_title mt ON mk.movie_id = mt.id
+JOIN 
+    cast_info ci ON ci.movie_id = mt.id
+JOIN 
+    aka_name pa ON ci.person_id = pa.person_id
+JOIN 
+    char_name ch ON ci.role_id = ch.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id AND co.country_code IS NOT NULL
+LEFT JOIN 
+    movie_info mv ON mt.id = mv.movie_id AND mv.info_type_id = (SELECT id FROM info_type WHERE info = 'Runtime')
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+JOIN 
+    (SELECT movie_id, COUNT(*) AS total_keywords 
+     FROM movie_keyword
+     GROUP BY movie_id 
+     HAVING COUNT(*) > 3) AS kw_count ON mk.movie_id = kw_count.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    pa.name IS NOT NULL
+    AND (mh.production_year IS NULL OR mh.production_year >= 1950)
+GROUP BY 
+    ch.name, pa.id, mt.id, mh.level, mh.production_year
+HAVING 
+    SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) > 1
+    AND MIN(mh.production_year) < (SELECT MAX(production_year) FROM aka_title)
+ORDER BY 
+    mh.level DESC, pa.name, mt.title;

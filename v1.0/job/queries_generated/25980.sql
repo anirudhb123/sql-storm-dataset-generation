@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        mt.company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords
+    FROM 
+        movie_companies mt
+    JOIN 
+        company_name c ON mt.company_id = c.id
+    JOIN 
+        company_type ct ON mt.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id, mt.company_id, c.name, ct.kind
+), 
+PersonCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        r.role AS role
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+), 
+FullMovieInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        md.company_name,
+        md.company_type,
+        pc.actor_name,
+        pc.role
+    FROM 
+        RankedTitles t
+    JOIN 
+        MovieDetails md ON t.title_id = md.movie_id
+    LEFT JOIN 
+        PersonCast pc ON md.movie_id = pc.movie_id
+)
+
+SELECT 
+    title, 
+    production_year, 
+    company_name, 
+    company_type, 
+    STRING_AGG(DISTINCT actor_name || ' (' || role || ')', ', ') AS cast
+FROM 
+    FullMovieInfo
+GROUP BY 
+    title, production_year, company_name, company_type
+ORDER BY 
+    production_year DESC, 
+    LENGTH(title) DESC;

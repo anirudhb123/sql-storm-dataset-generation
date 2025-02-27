@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    UNION ALL
+    SELECT 
+        wd.ws_sold_date_sk,
+        wd.ws_item_sk,
+        wd.ws_order_number,
+        wd.ws_quantity,
+        wd.ws_sales_price,
+        wd.ws_net_profit,
+        sd.level + 1
+    FROM 
+        web_sales wd
+    JOIN sales_data sd ON wd.ws_item_sk = sd.ws_item_sk
+    WHERE 
+        sd.level < 5
+), 
+inventory_check AS (
+    SELECT 
+        inv_date_sk,
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory
+    GROUP BY 
+        inv_date_sk, inv_item_sk
+), 
+customer_metrics AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    cm.total_net_profit,
+    cm.total_orders,
+    COALESCE(ic.total_quantity_on_hand, 0) AS quantity_on_hand
+FROM 
+    customer_metrics cm
+JOIN 
+    customer c ON cm.c_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    inventory_check ic ON cm.total_orders >= 10 AND ic.inv_item_sk IN (SELECT sd.ws_item_sk FROM sales_data sd)
+WHERE 
+    c.c_birth_year > 1980
+ORDER BY 
+    cm.total_net_profit DESC
+LIMIT 50;

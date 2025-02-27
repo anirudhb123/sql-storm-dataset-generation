@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -3, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(ro.total_revenue) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        RecentOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ts.c_custkey,
+    ts.c_name,
+    ts.total_spent,
+    rs.s_name AS top_supplier,
+    rs.total_cost
+FROM 
+    nation ns
+LEFT JOIN 
+    TotalSales ts ON ns.n_nationkey = ts.c_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rnk = 1 AND ts.total_spent IS NOT NULL
+WHERE 
+    ts.total_spent > (SELECT AVG(total_spent) FROM TotalSales)
+ORDER BY 
+    ts.total_spent DESC, ns.n_name

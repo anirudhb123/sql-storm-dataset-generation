@@ -1,0 +1,69 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        1 AS level,
+        CAST(m.title AS CHAR(255)) AS path
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+    UNION ALL
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        mh.level + 1 AS level,
+        CAST(mh.path || ' > ' || e.title AS CHAR(255)) AS path
+    FROM
+        aka_title e
+    JOIN
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_performance AS (
+    SELECT
+        c.movie_id,
+        COUNT(c.id) AS total_cast,
+        STRING_AGG(CONCAT(a.name, ' as ', r.role) ORDER BY c.nr_order) AS cast_members
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        c.movie_id
+),
+keyword_summary AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    m.id AS movie_id,
+    m.title AS movie_title,
+    COALESCE(cp.total_cast, 0) AS total_cast_members,
+    COALESCE(cp.cast_members, 'No Cast Information') AS cast_info,
+    COALESCE(ks.keywords, 'No Keywords') AS keywords,
+    mh.level AS hierarchy_level,
+    mh.path AS movie_path
+FROM
+    aka_title m
+LEFT JOIN
+    cast_performance cp ON m.id = cp.movie_id
+LEFT JOIN
+    keyword_summary ks ON m.id = ks.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON m.id = mh.movie_id
+WHERE
+    m.production_year BETWEEN 2000 AND 2023
+GROUP BY
+    m.id, m.title, cp.total_cast, cp.cast_members, ks.keywords, mh.level, mh.path
+ORDER BY
+    mh.level, m.production_year DESC;

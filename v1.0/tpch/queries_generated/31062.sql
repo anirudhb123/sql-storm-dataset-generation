@@ -1,0 +1,35 @@
+WITH RECURSIVE nested_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+high_value_customers AS (
+    SELECT c_custkey, c_name, SUM(o_totalprice) AS total_spent
+    FROM customer c
+    JOIN nested_orders no ON c.c_custkey = no.o_custkey
+    GROUP BY c.custkey, c.c_name
+    HAVING SUM(o_totalprice) > (
+        SELECT AVG(o_totalprice) FROM orders
+    )
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_availability, AVG(ps.ps_supplycost) AS avg_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    hs.total_spent,
+    ps.p_name AS part_name,
+    ps.total_availability,
+    ps.avg_cost,
+    RANK() OVER (ORDER BY hs.total_spent DESC) AS spend_rank
+FROM high_value_customers hs
+JOIN lineitem li ON hs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = li.l_orderkey)
+JOIN part_supplier ps ON li.l_partkey = ps.p_partkey
+WHERE ps.total_availability IS NOT NULL
+ORDER BY hs.total_spent DESC, ps.avg_cost ASC
+LIMIT 10;
+

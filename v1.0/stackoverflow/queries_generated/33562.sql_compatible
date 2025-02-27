@@ -1,0 +1,71 @@
+
+WITH RecursiveTagCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+), UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), RecentPostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month')
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Title, P.CreationDate, P.ViewCount, P.Score
+), UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    RT.TagName,
+    RT.PostCount,
+    RPS.Title,
+    RPS.ViewCount,
+    RPS.Score,
+    RPS.CommentCount,
+    UBC.BadgeCount,
+    U.ReputationRank
+FROM 
+    UserReputation U
+INNER JOIN 
+    RecentPostStatistics RPS ON U.UserId = RPS.OwnerUserId
+LEFT JOIN 
+    RecursiveTagCounts RT ON RT.TagId = ANY(string_to_array(RPS.Tags, ','))
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.UserId = UBC.UserId
+ORDER BY 
+    U.ReputationRank,
+    RPS.ViewCount DESC
+LIMIT 100;

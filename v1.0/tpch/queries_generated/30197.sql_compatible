@@ -1,0 +1,54 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           o.o_orderpriority, o.o_clerk, o.o_shippriority, 
+           1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           o.o_orderpriority, o.o_clerk, o.o_shippriority,
+           oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON oh.o_orderkey = o.o_orderkey
+    WHERE oh.level < 5
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_amount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS part_count,
+           RANK() OVER (ORDER BY COUNT(ps.ps_partkey) DESC) AS rank
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT oh.o_orderkey, oh.o_orderstatus, oh.o_totalprice, 
+       c.c_name AS customer_name, 
+       COALESCE(s.total_supply_cost, 0) AS supplier_cost,
+       rs.part_count AS supplier_part_count,
+       RANK() OVER (PARTITION BY oh.o_orderstatus ORDER BY oh.o_totalprice DESC) AS order_rank
+FROM OrderHierarchy oh
+JOIN CustomerOrders c ON c.total_order_amount > 1000
+LEFT JOIN SupplierCosts s ON s.ps_partkey IN (
+    SELECT DISTINCT ps.ps_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = oh.o_orderkey
+) 
+LEFT JOIN RankedSuppliers rs ON s.ps_suppkey = rs.s_suppkey
+WHERE oh.o_orderdate >= '1997-01-01' 
+AND oh.o_orderdate < '1998-01-01'
+AND (oh.o_shippriority IS NULL OR oh.o_shippriority >= 1)
+GROUP BY oh.o_orderkey, oh.o_orderstatus, oh.o_totalprice, c.c_name, s.total_supply_cost, rs.part_count, oh.o_orderdate
+ORDER BY oh.o_orderdate, order_rank;

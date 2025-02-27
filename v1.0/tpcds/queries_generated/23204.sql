@@ -1,0 +1,85 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        ROUND(AVG(COALESCE(cd.cd_purchase_estimate, 0)), 2) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+),
+SalesAnalysis AS (
+    SELECT 
+        rs.c_customer_id,
+        rs.total_orders,
+        rs.total_sales,
+        CASE 
+            WHEN cd.cd_gender = 'M' AND cd.cd_marital_status = 'M' THEN 'Married Male'
+            WHEN cd.cd_gender = 'F' AND cd.cd_marital_status = 'M' THEN 'Married Female'
+            WHEN cd.cd_gender = 'M' AND cd.cd_marital_status = 'S' THEN 'Single Male'
+            ELSE 'Single Female' 
+        END AS demographic_group,
+        ROW_NUMBER() OVER (PARTITION BY demographic_group ORDER BY rs.total_sales DESC) AS group_rank
+    FROM 
+        RankedSales rs
+    JOIN 
+        CustomerDemographics cd ON rs.c_customer_id = cd.cd_gender
+    WHERE 
+        total_orders > (
+            SELECT 
+                AVG(total_orders) 
+            FROM 
+                RankedSales
+        )
+)
+SELECT
+    s.demographic_group,
+    COUNT(*) AS customer_count,
+    SUM(s.total_sales) AS total_sales_value,
+    AVG(s.total_sales) AS avg_sales_per_customer
+FROM 
+    SalesAnalysis s
+GROUP BY 
+    s.demographic_group
+HAVING 
+    SUM(s.total_sales) > (SELECT 
+                             SUM(total_sales) 
+                           FROM 
+                             RankedSales) * 0.1
+ORDER BY 
+    customer_count DESC
+FETCH FIRST 10 ROWS ONLY
+UNION 
+SELECT 
+    'Others' AS demographic_group,
+    COUNT(*) AS customer_count,
+    SUM(total_sales) AS total_sales_value,
+    AVG(total_sales) AS avg_sales_per_customer
+FROM 
+    SalesAnalysis
+WHERE 
+    demographic_group NOT IN (SELECT DISTINCT demographic_group FROM SalesAnalysis)
+GROUP BY 
+    demographic_group
+ORDER BY 
+    customer_count DESC;

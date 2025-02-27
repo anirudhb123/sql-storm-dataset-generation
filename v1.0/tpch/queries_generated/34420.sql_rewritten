@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderStats AS (
+    SELECT o.o_orderstatus, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderstatus
+),
+NationCustomer AS (
+    SELECT n.n_name, COUNT(c.c_custkey) AS customer_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+)
+
+SELECT r.r_name, 
+       COALESCE(ns.customer_count, 0) AS customer_count,
+       COALESCE(ps.total_available, 0) AS total_available,
+       CASE 
+           WHEN os.o_orderstatus IS NOT NULL THEN os.order_count
+           ELSE 0 
+       END AS order_count,
+       sh.level AS supplier_level,
+       sh.s_name AS supplier_name
+FROM region r
+LEFT JOIN NationCustomer ns ON r.r_name = ns.n_name
+LEFT JOIN PartSupplierStats ps ON ps.ps_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+LEFT JOIN OrderStats os ON os.o_orderstatus = 'O'
+JOIN SupplierHierarchy sh ON sh.s_nationkey = (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    WHERE n.n_name = 'USA'
+)
+ORDER BY r.r_name, sh.level DESC, supplier_name;

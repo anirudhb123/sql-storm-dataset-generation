@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+        JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+        JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.w_warehouse_id, i.i_item_id
+),
+TopSellingItems AS (
+    SELECT 
+        warehouse_id, 
+        i_item_id, 
+        total_quantity, 
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+),
+CustomerPurchase AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_spend
+    FROM 
+        customer c
+        JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    t.warehouse_id,
+    t.i_item_id,
+    t.total_quantity,
+    t.total_sales,
+    cp.c_customer_id,
+    cp.order_count,
+    cp.total_spend
+FROM 
+    TopSellingItems t
+JOIN 
+    CustomerPurchase cp ON t.total_sales > 1000
+ORDER BY 
+    t.warehouse_id, t.total_sales DESC;

@@ -1,0 +1,78 @@
+
+WITH RankedParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM
+        part p
+),
+SupplierPartInfo AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity
+    FROM
+        partsupp ps
+    LEFT JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey AND l.l_shippingdate < DATE('1998-10-01')
+    WHERE
+        ps.ps_availqty > 0
+    GROUP BY
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(sp.total_quantity) AS supplier_total_quantity
+    FROM
+        SupplierPartInfo sp
+    JOIN
+        supplier s ON sp.ps_suppkey = s.s_suppkey
+    GROUP BY
+        s.s_suppkey,
+        s.s_name
+    HAVING
+        SUM(sp.total_quantity) > 100
+),
+ProductSummary AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(AVG(sp.total_quantity), 0) AS avg_quantity,
+        MAX(sp.s_acctbal) AS max_supplier_acctbal
+    FROM
+        RankedParts p
+    LEFT JOIN
+        SupplierPartInfo sp ON p.p_partkey = sp.ps_partkey
+    WHERE
+        p.price_rank <= 5
+    GROUP BY
+        p.p_partkey,
+        p.p_name
+)
+SELECT
+    ps.p_partkey,
+    ps.p_name,
+    ps.avg_quantity,
+    ps.max_supplier_acctbal,
+    CASE 
+        WHEN ps.avg_quantity IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM
+    ProductSummary ps
+JOIN
+    TopSuppliers ts ON ps.avg_quantity > 5
+ORDER BY
+    ps.avg_quantity DESC, 
+    ps.max_supplier_acctbal DESC;

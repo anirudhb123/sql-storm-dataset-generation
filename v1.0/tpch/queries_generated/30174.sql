@@ -1,0 +1,34 @@
+WITH RECURSIVE SupplierRank AS (
+    SELECT s_suppkey, s_name, s_acctbal, 
+           RANK() OVER (ORDER BY s_acctbal DESC) as rank
+    FROM supplier
+), AvgOrderPrice AS (
+    SELECT o_custkey, AVG(o_totalprice) AS avg_price
+    FROM orders
+    GROUP BY o_custkey
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, a.avg_price
+    FROM customer c
+    JOIN AvgOrderPrice a ON c.c_custkey = a.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+), PartSupplier AS (
+    SELECT ps.ps_partkey, p.p_name, ps.ps_supplycost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 5
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT h.c_custkey) AS high_value_customer_count,
+    SUM(COALESCE(pr.ps_supplycost, 0)) AS total_supply_cost,
+    MAX(s.rank) AS max_supplier_rank,
+    STRING_AGG(h.c_name, ', ') AS customer_names
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN HighValueCustomers h ON s.suppkey = h.c_custkey
+LEFT JOIN PartSupplier pr ON s.suppkey = pr.ps_partkey
+WHERE r.r_name LIKE 'N%' OR r.r_comment IS NOT NULL
+GROUP BY r.r_name
+ORDER BY high_value_customer_count DESC
+LIMIT 10;

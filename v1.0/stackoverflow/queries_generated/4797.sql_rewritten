@@ -1,0 +1,65 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(A.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, A.AcceptedAnswerId
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.UserPostRank
+    FROM 
+        PostStatistics PS
+    WHERE 
+        PS.UserPostRank <= 10
+)
+
+SELECT 
+    PS.Title AS "Post Title",
+    PS.ViewCount AS "View Count",
+    PS.CommentCount AS "Total Comments",
+    PS.UpVotes - PS.DownVotes AS "Net Votes",
+    RANK() OVER (ORDER BY PS.ViewCount DESC) AS ViewRank
+FROM 
+    TopPosts PS
+WHERE 
+    PS.ViewCount IS NOT NULL
+ORDER BY 
+    PS.ViewCount DESC
+LIMIT 10
+
+UNION ALL
+
+SELECT 
+    'Overall Sum' AS "Post Title",
+    SUM(PS.ViewCount) AS "View Count",
+    SUM(PS.CommentCount) AS "Total Comments",
+    SUM(PS.UpVotes - PS.DownVotes) AS "Net Votes",
+    NULL AS ViewRank
+FROM 
+    TopPosts PS
+WHERE 
+    PS.CommentCount IS NOT NULL;

@@ -1,0 +1,82 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate, 
+        ph.UserDisplayName, 
+        ph.Comment, 
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn 
+    FROM 
+        PostHistory ph
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.Body,
+        COALESCE(v.TotalVotes, 0) AS TotalVotes,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(uh.UserDisplayName, 'Unknown') AS LastEditor,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalVotes 
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN RecursivePostHistory uh ON p.LastEditorUserId = uh.UserId AND uh.rn = 1
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+RankedPosts AS (
+    SELECT 
+        pd.*, 
+        RANK() OVER (ORDER BY pd.TotalVotes DESC, pd.CommentCount DESC) AS Rank
+    FROM 
+        PostDetails pd
+)
+
+SELECT 
+    up.UserId, 
+    up.DisplayName, 
+    up.TotalPosts, 
+    up.TotalBounty, 
+    up.AvgReputation, 
+    rp.PostId, 
+    rp.Title, 
+    rp.TotalVotes, 
+    rp.CommentCount, 
+    rp.LastEditor, 
+    rp.PostRank,
+    COALESCE(rp.Rank, 0) AS PostRank
+FROM 
+    UserReputation up
+JOIN 
+    RankedPosts rp ON up.TotalPosts > 0
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    up.AvgReputation DESC;

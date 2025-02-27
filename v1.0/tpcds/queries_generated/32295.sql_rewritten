@@ -1,0 +1,79 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity_sold,
+        SUM(ss_sales_price) AS total_sales_value,
+        1 AS level
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_sold_date_sk, ss_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.ss_quantity) + cte.total_quantity_sold AS total_quantity_sold,
+        SUM(ss.ss_sales_price) + cte.total_sales_value AS total_sales_value,
+        level + 1
+    FROM 
+        store_sales ss
+    JOIN 
+        Sales_CTE cte ON ss.ss_sold_date_sk = cte.ss_sold_date_sk
+        AND ss.ss_item_sk = cte.ss_item_sk
+    WHERE 
+        level < 5  
+    GROUP BY 
+        ss.sold_date_sk, ss.item_sk
+),
+Customer_Info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 500
+),
+Sales_Analysis AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        COALESCE(cte.total_quantity_sold, 0) AS total_quantity_sold,
+        COALESCE(cte.total_sales_value, 0) AS total_sales_value,
+        ROW_NUMBER() OVER (PARTITION BY ci.c_customer_sk ORDER BY COALESCE(cte.total_sales_value, 0) DESC) AS ranking
+    FROM 
+        Customer_Info ci
+    LEFT JOIN 
+        Sales_CTE cte ON ci.c_customer_sk = cte.ss_item_sk  
+)
+SELECT 
+    sa.c_customer_sk,
+    sa.c_first_name,
+    sa.c_last_name,
+    sa.cd_gender,
+    sa.total_quantity_sold,
+    sa.total_sales_value,
+    sa.ranking,
+    CASE 
+        WHEN sa.total_sales_value > 1000 THEN 'High Value'
+        WHEN sa.total_sales_value BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    Sales_Analysis sa
+WHERE 
+    sa.total_quantity_sold > 0
+ORDER BY 
+    sa.total_sales_value DESC
+LIMIT 100;

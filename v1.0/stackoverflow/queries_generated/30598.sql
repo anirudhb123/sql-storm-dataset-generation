@@ -1,0 +1,61 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        0 AS Level,
+        P.ParentId
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.CreationDate,
+        R.Level + 1,
+        P2.ParentId
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    COUNT(DISTINCT p1.Id) AS QuestionCount,
+    COUNT(DISTINCT COALESCE(p2.Id, 0)) AS AnswerCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    AVG(Score) AS AverageScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    MAX(RH.CreationDate) AS MostRecentActivity
+FROM 
+    Users U
+LEFT JOIN 
+    Posts p1 ON U.Id = p1.OwnerUserId AND p1.PostTypeId = 1 -- Questions
+LEFT JOIN 
+    Posts p2 ON p1.Id = p2.ParentId AND p2.PostTypeId = 2 -- Answers
+LEFT JOIN 
+    Votes V ON V.PostId IN (p1.Id, p2.Id)
+LEFT JOIN 
+    PostHistory PH ON PH.UserId = U.Id
+LEFT JOIN 
+    Tags T ON POSITION(' ' || T.TagName || ' ' IN ' ' || p1.Tags || ' ') > 0 -- Matching tags
+LEFT JOIN 
+    RecursivePostHierarchy RH ON RH.PostId = p1.Id OR RH.PostId = p2.Id
+WHERE 
+    U.CreationDate >= '2020-01-01 00:00:00' -- Focusing on users created after a certain date
+GROUP BY 
+    U.DisplayName
+HAVING 
+    COUNT(DISTINCT p1.Id) > 5 -- Users must have more than 5 questions
+ORDER BY 
+    AverageScore DESC, 
+    UserName
+

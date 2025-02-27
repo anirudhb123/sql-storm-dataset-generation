@@ -1,0 +1,42 @@
+WITH TopUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+),
+PostStats AS (
+    SELECT p.OwnerUserId,
+           COUNT(p.Id) AS PostCount,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 YEAR'
+    GROUP BY p.OwnerUserId
+),
+RecentVotes AS (
+    SELECT v.UserId, v.PostId, v.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY v.UserId ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM Votes v
+    WHERE v.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 DAYS'
+),
+PostHistorySummary AS (
+    SELECT ph.PostId, COUNT(ph.Id) AS EditCount,
+           MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ph.PostId
+)
+
+SELECT tu.DisplayName, tu.Reputation, ps.PostCount, ps.QuestionCount, ps.AnswerCount, ps.TotalViews,
+       IFNULL(phe.EditCount, 0) AS EditCount, 
+       COALESCE(rv.VoteRank, 0) AS RecentVoteCount,
+       COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+FROM TopUsers tu
+LEFT JOIN PostStats ps ON tu.Id = ps.OwnerUserId
+LEFT JOIN PostHistorySummary phe ON ps.OwnerUserId = phe.PostId
+LEFT JOIN RecentVotes rv ON tu.Id = rv.UserId AND rv.VoteRank <= 5
+LEFT JOIN PostLinks pl ON ps.OwnerUserId = pl.PostId
+WHERE tu.Reputation > 1000 
+  AND (ps.QuestionCount > 5 OR ps.AnswerCount > 10)
+GROUP BY tu.Id, tu.DisplayName, tu.Reputation, ps.PostCount, ps.QuestionCount, ps.AnswerCount, ps.TotalViews, phe.EditCount, rv.VoteRank
+ORDER BY tu.Reputation DESC;

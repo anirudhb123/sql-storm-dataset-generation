@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_net_profit) AS total_net_profit
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year >= 2022)
+    GROUP BY 
+        ss_sold_date_sk, ss_item_sk
+    UNION ALL
+    SELECT 
+        d.d_date_sk,
+        st.ss_item_sk,
+        SUM(st.total_net_profit) OVER (PARTITION BY st.ss_item_sk ORDER BY d.d_date_sk ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
+    FROM 
+        date_dim d
+    JOIN 
+        sales_trends st ON d.d_date_sk = st.ss_sold_date_sk + 1
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        COUNT(DISTINCT ss_item_sk) AS item_count,
+        SUM(CASE WHEN ss.net_profit IS NULL THEN 0 ELSE ss.net_profit END) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.total_spent,
+        RANK() OVER (ORDER BY ci.total_spent DESC) AS rank
+    FROM 
+        customer_info ci
+)
+SELECT 
+    t.c_first_name,
+    t.c_last_name,
+    t.total_spent,
+    s.ss_item_sk,
+    s.total_net_profit
+FROM 
+    top_customers t
+JOIN 
+    sales_trends s ON t.c_customer_sk = s.ss_item_sk
+WHERE 
+    t.rank <= 10
+ORDER BY 
+    t.total_spent DESC, s.total_net_profit DESC
+OPTION (MAXRECURSION 100);

@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM
+        aka_title at
+    WHERE
+        at.production_year IS NOT NULL
+),
+ActorRoleCounts AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM
+        cast_info ci
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.person_id
+),
+PersonDetails AS (
+    SELECT
+        ak.id AS aka_id,
+        ak.person_id,
+        ak.name,
+        ak.name_pcode_nf,
+        COALESCE(ai.info, 'No Info') AS additional_info
+    FROM
+        aka_name ak
+    LEFT JOIN
+        person_info ai ON ak.person_id = ai.person_id AND ai.info_type_id = (SELECT id FROM info_type WHERE info = 'biography')
+)
+SELECT
+    pd.name AS actor_name,
+    pd.additional_info,
+    rt.title,
+    rt.production_year,
+    ar.movie_count,
+    ar.roles,
+    COALESCE(LOWER(pd.name), 'unknown actor') AS normalized_actor_name,
+    (
+        SELECT COUNT(*) 
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        WHERE mk.movie_id IN (
+            SELECT movie_id FROM cast_info WHERE person_id = pd.person_id
+        ) AND k.keyword ILIKE '%drama%'
+    ) AS drama_movies_count
+FROM
+    PersonDetails pd
+JOIN
+    ActorRoleCounts ar ON pd.person_id = ar.person_id
+LEFT JOIN
+    RankedTitles rt ON ar.movie_count > 1 AND ar.roles LIKE '%' || rt.title || '%'
+WHERE
+    rt.title_rank = 1 OR rt.production_year IS NULL
+ORDER BY
+    rt.production_year DESC,
+    ar.movie_count DESC
+LIMIT 100
+OFFSET 10;

@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 -- assuming '1' represents a movie
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedCast AS (
+    SELECT 
+        c.movie_id,
+        p.name AS actor_name,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+),
+CompCompanies AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT co.name SEPARATOR ', ') AS companies
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    GROUP BY 
+        m.movie_id
+),
+OuterJoinInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        co.companies,
+        rc.actor_name,
+        rc.actor_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CompCompanies co ON mh.movie_id = co.movie_id
+    LEFT JOIN 
+        RankedCast rc ON mh.movie_id = rc.movie_id AND rc.actor_rank <= 3 -- Get top 3 actors
+)
+SELECT 
+    o.movie_id,
+    o.movie_title,
+    COALESCE(o.companies, 'No Companies') AS associated_companies,
+    CASE 
+        WHEN o.actor_name IS NULL THEN 'No Cast Available'
+        ELSE o.actor_name 
+    END AS top_actor
+FROM 
+    OuterJoinInfo o
+ORDER BY 
+    o.movie_title ASC,
+    o.actor_rank;
+
+In this query:
+
+1. A recursive CTE `MovieHierarchy` builds a hierarchy of movies, assuming a certain kind_id indicates movies.
+2. `RankedCast` CTE ranks actors for each movie based on their order in the cast info.
+3. `CompCompanies` aggregates companies associated with each movie.
+4. `OuterJoinInfo` performs outer joins to gather all necessary information while allowing for NULLs.
+5. Finally, the main SELECT statement retrieves a list of movies, associated companies, and the top actor or a default message when no actors are available. The results are ordered by movie title and actor rank.

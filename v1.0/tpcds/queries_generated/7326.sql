@@ -1,0 +1,44 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        DATE_FORMAT(DATE_ADD(dd.d_date, INTERVAL 1 DAY), '%Y-%m-%d') AS sales_date,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_ship_date_sk = dd.d_date_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN store s ON ws.ws_store_sk = s.s_store_sk
+    WHERE dd.d_year = 2023
+    AND sales_date BETWEEN '2023-01-01' AND '2023-12-31'
+    AND cd.cd_gender = 'F'
+    GROUP BY ws.web_site_id, dd.d_date
+),
+AggregateSales AS (
+    SELECT 
+        web_site_id,
+        AVG(total_sales) AS avg_daily_sales,
+        MAX(total_sales) AS max_daily_sales,
+        MIN(total_sales) AS min_daily_sales,
+        SUM(total_orders) AS total_orders_year,
+        SUM(unique_customers) AS total_unique_customers
+    FROM SalesData
+    GROUP BY web_site_id
+)
+SELECT 
+    a.web_site_id,
+    a.avg_daily_sales,
+    a.max_daily_sales,
+    a.min_daily_sales,
+    a.total_orders_year,
+    a.total_unique_customers,
+    s.s_store_name,
+    c.c_first_name,
+    c.c_last_name
+FROM AggregateSales a
+JOIN store s ON a.web_site_id = s.s_store_id
+JOIN customer c ON s.s_store_sk = c.c_current_addr_sk
+ORDER BY a.avg_daily_sales DESC
+LIMIT 10;

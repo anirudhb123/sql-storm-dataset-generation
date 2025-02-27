@@ -1,0 +1,59 @@
+WITH RECURSIVE cust_hierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN cust_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+lineitem_analysis AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate > '2023-01-01'
+    GROUP BY l.l_orderkey
+),
+combined_data AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(c.c_acctbal) AS total_customer_balance,
+        COALESCE(SUM(l.total_revenue), 0) AS total_order_revenue,
+        COALESCE(SUM(s.total_supply_cost), 0) AS total_supply_cost
+    FROM orders o
+    LEFT JOIN lineitem_analysis l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN supplier_summary s ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_retailprice > 100
+    )
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    cd.o_orderkey,
+    cd.total_customer_balance,
+    cd.total_order_revenue,
+    cd.total_supply_cost,
+    ROW_NUMBER() OVER (ORDER BY cd.total_order_revenue DESC) AS revenue_rank
+FROM combined_data cd
+WHERE cd.total_order_revenue > (
+    SELECT AVG(total_order_revenue)
+    FROM combined_data
+)
+ORDER BY cd.total_order_revenue DESC
+LIMIT 100;

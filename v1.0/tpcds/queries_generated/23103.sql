@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        wb.ws_order_number,
+        SUM(ws_sales_price - ws_ext_discount_amt) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price - ws_ext_discount_amt) DESC) AS sales_rank
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year = 2023 AND 
+        (ws_ext_discount_amt IS NULL OR ws_ext_discount_amt < 0)
+    GROUP BY 
+        ws_bill_customer_sk, ws_order_number
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+)
+SELECT 
+    c.first_name,
+    c.last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    CASE 
+        WHEN cd.income_band IS NULL THEN 'Unknown'
+        WHEN cd.income_band = 0 THEN 'No income'
+        ELSE 'Income Band ' || cd.income_band 
+    END AS income_band,
+    COUNT(rs.ws_order_number) AS order_count,
+    SUM(rs.total_sales) AS total_spent,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_gender, cd.cd_marital_status ORDER BY SUM(rs.total_sales) DESC) AS ranking
+FROM 
+    RankedSales rs
+JOIN 
+    CustomerDemographics cd ON rs.ws_bill_customer_sk = cd.c_customer_sk
+JOIN 
+    customer c ON c.c_customer_sk = cd.c_customer_sk
+GROUP BY 
+    c.first_name, c.last_name, cd.cd_gender, cd.cd_marital_status, cd.income_band
+HAVING 
+    SUM(rs.total_sales) > 1000 AND 
+    (cd.cd_gender IS NOT NULL OR cd.cd_marital_status IS NOT NULL)
+ORDER BY 
+    total_spent DESC, order_count
+LIMIT 100
+OFFSET 10;

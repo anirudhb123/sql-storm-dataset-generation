@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS hierarchy_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mg.id AS movie_id,
+        mg.title,
+        mg.production_year,
+        mh.level + 1,
+        CAST(hierarchy_path || ' > ' || mg.title AS VARCHAR(255)) AS hierarchy_path
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mg ON ml.linked_movie_id = mg.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.hierarchy_path,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+    STRING_AGG(DISTINCT ak.name, ', ') AS all_actor_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    cast_info ci ON c.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.production_year > 2000
+    AND ak.name IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.hierarchy_path
+ORDER BY 
+    mh.production_year DESC, total_cast DESC
+LIMIT 100;
+
+This query uses a recursive Common Table Expression (CTE) to create a hierarchy of movies based on links between films (such as sequels, prequels, or related titles). It aggregates information about the cast for each movie, including the total number of distinct actors and their average order of appearance. The query also concatenates actor names into a single string for each movie and filters for movies produced after the year 2000. The results are ordered by production year and total cast size.

@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(p.Title, 'No Title') AS Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT v.UserId) AS VoterCount,
+        MAX(p.CreationDate) AS MostRecentActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        p.Id, p.Title
+),
+
+ClosingStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseVoteCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    ps.CommentCount,
+    ps.TotalBounty,
+    ps.VoterCount,
+    cs.CloseVoteCount,
+    ur.DisplayName AS TopUser,
+    ur.Reputation AS UserReputation,
+    p.MostRecentActivity
+FROM 
+    PostStats ps
+JOIN 
+    Posts p ON ps.PostId = p.Id
+LEFT JOIN 
+    ClosingStats cs ON p.Id = cs.PostId
+LEFT JOIN 
+    UserReputation ur ON ur.ReputationRank = 1
+ORDER BY 
+    ps.CommentCount DESC, 
+    ps.TotalBounty DESC
+OPTION (MAXRECURSION 50);

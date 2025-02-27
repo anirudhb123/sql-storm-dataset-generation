@@ -1,0 +1,55 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_brand
+    FROM item
+    WHERE i_brand = 'BrandA'
+    
+    UNION ALL
+
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_current_price, i.i_brand
+    FROM item i
+    JOIN item_hierarchy ih ON ih.i_item_sk = i.i_manufact_id
+),
+sales_summary AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_net_paid) AS total_sales,
+        COUNT(cs_order_number) AS order_count,
+        AVG(cs_net_paid) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY cs_bill_customer_sk ORDER BY SUM(cs_net_paid) DESC) AS sales_rank
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_dep_count,
+        s.total_sales,
+        s.order_count,
+        s.avg_order_value,
+        COALESCE(cd.cd_dep_employed_count, 0) AS employed_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN sales_summary s ON c.c_customer_sk = s.customer_sk
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT cd.c_customer_sk) AS customer_count,
+    SUM(cd.total_sales) AS total_sales,
+    SUM(cd.order_count) AS total_orders,
+    AVG(cd.avg_order_value) AS avg_order_value,
+    STRING_AGG(DISTINCT cd.cd_gender) AS unique_genders,
+    CASE 
+        WHEN AVG(cd.dep_count) IS NOT NULL THEN 'Available'
+        ELSE 'Not Available'
+    END AS dependency_status
+FROM customer_details cd
+JOIN customer_address ca ON cd.c_customer_sk = ca.ca_address_sk
+GROUP BY ca.ca_city
+HAVING SUM(cd.total_sales) > 10000
+ORDER BY total_sales DESC;

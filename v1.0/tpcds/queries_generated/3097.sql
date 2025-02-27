@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_net_paid, 
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= 2458653 -- example date filter
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns
+    FROM web_returns
+    GROUP BY wr_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        i_item_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_tax) AS total_revenue,
+        MAX(ws_net_paid) AS max_order_value,
+        MIN(ws_net_paid) AS min_order_value
+    FROM web_sales
+    GROUP BY i_item_sk
+),
+ItemsWithReturnInfo AS (
+    SELECT 
+        a.i_item_sk,
+        a.total_orders,
+        a.total_revenue,
+        a.max_order_value,
+        a.min_order_value,
+        COALESCE(b.total_returns, 0) AS total_returns
+    FROM AggregateSales a
+    LEFT JOIN CustomerReturns b ON a.i_item_sk = b.wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    sales.total_orders,
+    sales.total_revenue,
+    sales.max_order_value,
+    sales.min_order_value,
+    sales.total_returns,
+    CASE 
+        WHEN sales.total_revenue > 100000 THEN 'High Performer'
+        WHEN sales.total_revenue BETWEEN 50000 AND 100000 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM item i
+JOIN ItemsWithReturnInfo sales ON i.i_item_sk = sales.i_item_sk
+WHERE i.i_current_price IS NOT NULL
+  AND i.i_rec_start_date <= CURRENT_DATE
+  AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+ORDER BY sales.total_revenue DESC
+LIMIT 50;

@@ -1,0 +1,52 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, 
+           1 AS Level
+    FROM Tags t
+    WHERE t.WikiPostId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, 
+           Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON rth.WikiPostId = t.Id
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(COALESCE(v.BountyAmount, 0)) AS AvgBounty,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    COUNT(DISTINCT bh.Id) AS BadgeCount,
+    COUNT(DISTINCT ph.Id) AS HistoryChangeCount
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, ',')))
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+    AND (p.CreationDate >= DATEADD(year, -1, GETDATE()) OR p.CreationDate IS NULL)
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    TotalPosts DESC, u.Reputation DESC;
+
+-- Performance Observations:
+-- - The query uses a recursive CTE to establish hierarchical relationships from tags if needed.
+-- - Using `STRING_AGG` to concatenate tag names associated with users' posts.
+-- - Filtering users with reputation above average while ensuring they have a significant count of posts.
+-- - Employing multiple left joins to aggregate data meaningfully, while handling NULLs with COALESCE for the average bounty calculation.
+-- - Using GROUP BY to pull aggregated statistics per user efficiently while maintaining order based on performance metrics.

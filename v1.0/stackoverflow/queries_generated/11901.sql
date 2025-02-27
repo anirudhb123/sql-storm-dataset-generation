@@ -1,0 +1,61 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END), 0) AS WikiCount,
+        COALESCE(SUM(V.Id), 0) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.LastActivityDate,
+        COALESCE(AVG(CAST(CommentCount AS FLOAT)), 0) AS AvgCommentsPerPost
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation AS UserReputation,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.WikiCount,
+    U.TotalVotes,
+    P.Title AS PostTitle,
+    P.ViewCount,
+    P.Score,
+    P.AnswerCount AS PostAnswers,
+    P.CommentCount AS PostComments,
+    P.FavoriteCount AS PostFavorites,
+    P.AvgCommentsPerPost
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 100;

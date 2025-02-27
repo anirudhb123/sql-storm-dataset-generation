@@ -1,0 +1,70 @@
+
+WITH RECURSIVE RevenueCTE AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_paid) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_paid) DESC) AS revenue_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_id
+    HAVING SUM(ws.net_paid) > 5000
+),
+ReturnsCTE AS (
+    SELECT 
+        wr.returned_date_sk,
+        SUM(wr.return_amt) AS total_returns,
+        COUNT(wr.return_order_number) AS total_return_count
+    FROM web_returns wr
+    JOIN date_dim dd ON wr.returned_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023 AND wr.return_quantity > 0
+    GROUP BY wr.returned_date_sk
+),
+RankedReturns AS (
+    SELECT 
+        rr.returned_date_sk,
+        rr.total_returns,
+        rr.total_return_count,
+        RANK() OVER (ORDER BY rr.total_returns DESC) AS return_rank
+    FROM ReturnsCTE rr
+),
+FilteredWarehouse AS (
+    SELECT 
+        w.w_warehouse_name,
+        COUNT(ws.ws_item_sk) AS total_sales_items
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    WHERE w.w_country IS NOT NULL
+    GROUP BY w.w_warehouse_name
+    HAVING COUNT(ws.ws_item_sk) > 10
+),
+FinalReport AS (
+    SELECT 
+        rct.web_site_id,
+        rct.total_revenue,
+        rrt.returned_date_sk,
+        rrt.total_returns,
+        rrt.total_return_count,
+        fw.w_warehouse_name,
+        fw.total_sales_items,
+        CASE 
+            WHEN rct.total_revenue IS NULL THEN 'No Revenue'
+            WHEN rrt.total_returns IS NULL THEN 'No Returns'
+            ELSE 'Both Present'
+        END AS revenue_return_status
+    FROM RevenueCTE rct
+    FULL OUTER JOIN RankedReturns rrt ON rct.web_site_id = rrt.returned_date_sk
+    LEFT JOIN FilteredWarehouse fw ON fw.total_sales_items > 10
+    WHERE (rct.total_revenue IS NOT NULL OR rrt.total_returns IS NOT NULL)
+)
+SELECT 
+    fr.web_site_id,
+    fr.total_revenue,
+    fr.total_returns,
+    fr.w_warehouse_name,
+    fr.revenue_return_status
+FROM FinalReport fr
+WHERE fr.revenue_return_status = 'Both Present'
+AND (fr.total_revenue IS NOT NULL OR fr.total_returns > 1000)
+ORDER BY fr.total_revenue DESC, fr.total_returns ASC
+LIMIT 50;

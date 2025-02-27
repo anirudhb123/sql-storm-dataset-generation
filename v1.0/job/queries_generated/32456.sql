@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL AS parent_id
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.kind_id = 1  -- Assuming '1' is the ID for movies
+
+    UNION ALL
+
+    SELECT
+        m.linked_movie_id AS movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM
+        movie_link AS m
+    JOIN
+        MovieHierarchy AS mh ON m.movie_id = mh.movie_id
+    JOIN
+        aka_title AS lt ON m.linked_movie_id = lt.id
+)
+SELECT
+    ak.name AS aka_name,
+    a.title AS movie_title,
+    mh.level,
+    COALESCE(c.person_id, 0) AS person_id,
+    COALESCE(ci.role_id, 0) AS role_id,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY ak.name) AS name_rank,
+    COUNT(DISTINCT kw.keyword) OVER (PARTITION BY mh.movie_id) AS keyword_count
+FROM
+    MovieHierarchy AS mh
+LEFT JOIN
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    company_name AS cn ON mc.company_id = cn.id
+LEFT JOIN
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info AS ci ON cc.subject_id = ci.person_id
+LEFT JOIN
+    aka_name AS ak ON ci.person_id = ak.person_id
+LEFT JOIN
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword AS kw ON mk.keyword_id = kw.id
+LEFT JOIN
+    title AS a ON mh.movie_id = a.id
+WHERE
+    mh.level <= 2 AND
+    (ci.role_id IS NULL OR ci.role_id = 1)  -- Apply a complicated predicate concerning roles
+ORDER BY
+    mh.level, name_rank, a.title;

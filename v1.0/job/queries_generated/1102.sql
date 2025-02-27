@@ -1,0 +1,58 @@
+WITH YearlyProduction AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(cp.id) AS actor_count,
+        AVG(p.info::numeric) AS avg_rating
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id AND p.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actor_count DESC) AS rn
+    FROM 
+        YearlyProduction
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(d.comp_count,0) AS company_count,
+    COALESCE(k.keyword_count, 0) AS keyword_count
+FROM 
+    TopMovies t
+LEFT JOIN 
+    (SELECT 
+        m.movie_id,
+        COUNT(mc.company_id) AS comp_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        m.movie_id) d ON t.title = d.movie_id
+LEFT JOIN 
+    (SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id) k ON t.title = k.movie_id
+WHERE 
+    t.avg_rating IS NOT NULL AND
+    t.rn <= 5
+ORDER BY 
+    t.production_year DESC, 
+    t.actor_count DESC;

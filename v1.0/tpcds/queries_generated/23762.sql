@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+), HighReturnItems AS (
+    SELECT sr_item_sk
+    FROM RankedReturns
+    WHERE total_returns > (SELECT AVG(total_returns) FROM RankedReturns)
+), ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_ext_tax) AS total_tax
+    FROM 
+        web_sales
+    WHERE 
+        ws_item_sk IN (SELECT sr_item_sk FROM HighReturnItems)
+    GROUP BY 
+        ws_item_sk
+), SalesAnalytics AS (
+    SELECT 
+        i.i_item_id,
+        isa.total_sales,
+        isa.total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS store_sales_count,
+        COALESCE(SUM(ss_net_paid), 0) AS total_store_sales,
+        IIF(isa.total_sales > 0, (isa.total_profit / isa.total_sales) * 100, 0) AS profit_margin
+    FROM 
+        ItemSales isa
+    LEFT JOIN 
+        item i ON isa.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_id, isa.total_sales, isa.total_profit
+), CombinedResults AS (
+    SELECT 
+        s.i_item_id,
+        s.total_sales,
+        s.total_profit,
+        s.store_sales_count,
+        s.total_store_sales,
+        CASE 
+            WHEN s.total_sales = 0 THEN NULL 
+            ELSE CAST((s.total_store_sales / s.total_sales) * 100 AS DECIMAL(5,2))
+        END AS store_sales_percentage,
+        RANK() OVER (ORDER BY s.profit_margin DESC) AS sales_rank
+    FROM 
+        SalesAnalytics s
+)
+SELECT 
+    c.ca_city,
+    SUM(cr.total_store_sales) AS total_sales_per_city,
+    AVG(cr.profit_margin) AS avg_profit_margin
+FROM 
+    CombinedResults cr
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT MAX(c_customer_sk) FROM customer WHERE c_current_addr_sk IS NOT NULL)
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ca.ca_city IS NOT NULL
+GROUP BY 
+    c.ca_city
+HAVING 
+    total_sales_per_city > 10000
+ORDER BY 
+    avg_profit_margin DESC NULLS LAST;

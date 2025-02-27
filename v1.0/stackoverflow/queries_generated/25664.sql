@@ -1,0 +1,65 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id
+),
+
+PostHistoryAggregated AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT CASE WHEN PostHistoryTypeId IN (10, 11) THEN UserId END) AS CloseReopenCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    ur.DisplayName AS UserName,
+    ur.PostCount AS UserPostCount,
+    ur.Upvotes AS UserUpvotes,
+    ur.Downvotes AS UserDownvotes,
+    pha.EditCount,
+    pha.CloseReopenCount
+FROM 
+    TagCounts tc
+JOIN 
+    Posts p ON tc.PostCount > 0
+JOIN 
+    Users ur ON p.OwnerUserId = ur.Id
+JOIN 
+    PostHistoryAggregated pha ON p.Id = pha.PostId
+WHERE 
+    tc.PostCount > 50 AND ur.Reputation > 1000
+ORDER BY 
+    tc.QuestionCount DESC, ur.Upvotes DESC;

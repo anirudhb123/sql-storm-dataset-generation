@@ -1,0 +1,86 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+), RankedUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        TotalUpvotes,
+        TotalDownvotes,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStatistics
+), PostsDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(ah.UserDisplayName, 'Community User') AS AcceptedAnswerer,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts ah ON p.AcceptedAnswerId = ah.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+                           )
+    GROUP BY 
+        p.Id, ah.UserDisplayName
+), HighestScoringPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        CreationDate,
+        AcceptedAnswerer,
+        Status,
+        Tags,
+        DENSE_RANK() OVER (PARTITION BY Status ORDER BY Score DESC) AS ScoreRank
+    FROM 
+        PostsDetails
+)
+SELECT 
+    ru.UserId,
+    ru.Reputation,
+    ru.TotalPosts,
+    ru.TotalAnswers,
+    hsp.Title,
+    hsp.Score,
+    hsp.ViewCount,
+    hsp.AcceptedAnswerer,
+    hsp.Tags,
+    hsp.Status
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    HighestScoringPosts hsp ON hsp.ScoreRank = 1
+WHERE 
+    ru.TotalPosts > 0 
+    AND ru.Reputation > (SELECT AVG(Reputation) FROM Users) 
+ORDER BY 
+    ru.Reputation DESC, hsp.Score DESC;

@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+TopPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+VoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostFeedback AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(vs.TotalUpvotes, 0) AS UpVotes,
+        COALESCE(vs.TotalDownvotes, 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN VoteStatistics vs ON p.Id = vs.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.ViewCount, vs.TotalUpvotes, vs.TotalDownvotes
+),
+FinalResults AS (
+    SELECT 
+        tp.Id,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        ph.Level AS PostLevel,
+        uf.BadgeCount,
+        uf.MaxBadgeClass,
+        fb.ViewCount,
+        fb.UpVotes,
+        fb.DownVotes,
+        fb.CommentCount
+    FROM TopPosts tp
+    LEFT JOIN UserBadges uf ON tp.OwnerUserId = uf.UserId
+    LEFT JOIN RecursivePostHierarchy ph ON tp.Id = ph.Id
+    LEFT JOIN PostFeedback fb ON tp.Id = fb.Id
+    WHERE tp.rn = 1
+)
+SELECT 
+    fr.Id AS PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.PostLevel,
+    fr.BadgeCount,
+    fr.MaxBadgeClass,
+    fr.ViewCount,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.CommentCount
+FROM FinalResults fr
+WHERE fr.Score >= 10 
+ORDER BY fr.Score DESC, fr.ViewCount DESC;

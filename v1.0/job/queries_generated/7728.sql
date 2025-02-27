@@ -1,0 +1,38 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        c.company_id,
+        c.note AS company_note,
+        k.keyword AS movie_keyword,
+        cc.role AS cast_role
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    WHERE 
+        t.production_year BETWEEN 1990 AND 2020
+)
+
+SELECT 
+    md.title_id,
+    md.title,
+    md.production_year,
+    COUNT(DISTINCT md.company_id) AS num_companies,
+    STRING_AGG(DISTINCT md.movie_keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT md.cast_role, ', ') AS cast_roles
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.title_id, md.title, md.production_year
+ORDER BY 
+    md.production_year DESC, md.title;

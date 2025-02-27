@@ -1,0 +1,73 @@
+
+WITH RecursiveActorMovies AS (
+    SELECT 
+        a.name AS actor_name, 
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+), 
+RecentMovies AS (
+    SELECT 
+        movie_title, 
+        COUNT(actor_name) AS actor_count 
+    FROM 
+        RecursiveActorMovies 
+    WHERE 
+        movie_rank <= 3
+    GROUP BY 
+        movie_title
+    HAVING 
+        COUNT(actor_name) > 1
+), 
+HighActorCountMovies AS (
+    SELECT 
+        movie_title, 
+        actor_count 
+    FROM 
+        RecentMovies 
+    WHERE 
+        actor_count = (SELECT MAX(actor_count) FROM RecentMovies)
+), 
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mk.keyword AS keyword,
+        company.name AS company_name,
+        ci.nr_order AS cast_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name company ON mc.company_id = company.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000
+)
+SELECT 
+    md.movie_title,
+    COUNT(DISTINCT md.company_name) AS distinct_companies,
+    COUNT(DISTINCT md.keyword) AS distinct_keywords,
+    MAX(md.cast_order) AS highest_cast_order,
+    SUM(CASE WHEN md.cast_order IS NULL THEN 1 ELSE 0 END) AS null_cast_order_count
+FROM 
+    MovieDetails md
+JOIN 
+    HighActorCountMovies ham ON md.movie_title = ham.movie_title
+GROUP BY 
+    md.movie_title
+ORDER BY 
+    distinct_companies DESC, 
+    highest_cast_order DESC
+FETCH FIRST 10 ROWS ONLY;

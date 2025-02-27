@@ -1,0 +1,59 @@
+WITH RECURSIVE part_summaries AS (
+    SELECT 
+        ps_partkey,
+        SUM(ps_supplycost * ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps_suppkey) AS supplier_count
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+ranked_parts AS (
+    SELECT 
+        p.p_name,
+        p.p_retailprice,
+        ps.total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY CASE WHEN p.p_size IS NULL THEN 'Unknown' ELSE CAST(p.p_size AS VARCHAR) END ORDER BY total_supply_value DESC) AS rank_within_size
+    FROM 
+        part p
+    JOIN 
+        part_summaries ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT 
+    r.r_name,
+    np.supplier_name,
+    np.part_name,
+    np.total_supply_value,
+    COALESCE(n.n_comment, 'No comment available') AS nation_comment,
+    CONCAT('Supplier ', np.supplier_name, ' provides part ', np.part_name, ' with a total value of ', ROUND(np.total_supply_value, 2)) AS custom_message
+FROM 
+    (SELECT 
+        n.n_name AS supplier_name, 
+        p.p_name AS part_name, 
+        ps.total_supply_value
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        (s.s_acctbal > 0 AND n.n_regionkey IS NULL) 
+        OR (s.s_acctbal < 1000 AND n.n_regionkey IS NOT NULL)
+    ) AS np
+JOIN 
+    region r ON r.r_regionkey = (SELECT MIN(r2.r_regionkey)
+                                  FROM region r2
+                                  WHERE r2.r_name LIKE 'B%')
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT CASE WHEN MAX(n3.n_nationkey) IS NULL THEN NULL ELSE MAX(n3.n_nationkey) END
+                                   FROM nation n3
+                                   WHERE n3.n_name IS NOT NULL)
+WHERE 
+    np.total_supply_value IS NOT NULL
+    AND EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F'))
+    AND rank_within_size <= 5
+ORDER BY 
+    r.r_name, np.total_supply_value DESC;

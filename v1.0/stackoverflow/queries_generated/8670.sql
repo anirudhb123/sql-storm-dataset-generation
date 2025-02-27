@@ -1,0 +1,55 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END) AS AvgUpvoteDate,
+        AVG(CASE WHEN v.VoteTypeId = 3 THEN v.CreationDate END) AS AvgDownvoteDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, ',')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON tag = t.TagName
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.AvgUpvoteDate,
+    rp.AvgDownvoteDate,
+    rp.RelatedTags,
+    PH.Comment AS PostHistoryComment
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    PostHistory PH ON rp.PostId = PH.PostId AND PH.CreationDate = (
+        SELECT MAX(PH2.CreationDate) FROM PostHistory PH2 WHERE PH2.PostId = rp.PostId
+    )
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC
+LIMIT 10;

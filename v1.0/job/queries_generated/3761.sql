@@ -1,0 +1,50 @@
+WITH MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors_list
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id, 
+        md.movie_title, 
+        md.production_year, 
+        md.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rn
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000
+)
+SELECT 
+    fn.name AS actor_name,
+    fm.movie_title,
+    fm.production_year,
+    fm.cast_count,
+    CASE 
+        WHEN fm.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Cast Available'
+    END AS cast_status
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = fm.movie_id
+LEFT JOIN 
+    aka_name fn ON fn.person_id = ci.person_id
+WHERE 
+    fm.rn <= 5 
+    AND (fn.name IS NOT NULL OR ci.note IS NOT NULL)
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

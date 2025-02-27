@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSales AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS nation,
+    r.r_name AS region,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty) / NULLIF(SUM(ps.ps_availqty), 0), 0) AS avg_supply_cost,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    MAX(cs.total_spent) AS max_spent_customer,
+    MIN(cs.order_count) AS min_orders_per_customer,
+    STRING_AGG(DISTINCT sh.s_name, ', ') AS suppliers_list
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartSales p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN CustomerOrders cs ON s.s_nationkey = cs.c_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE s.s_acctbal IS NOT NULL AND p.total_sales > 1000
+GROUP BY n.n_name, r.r_name
+ORDER BY total_supply_cost DESC
+LIMIT 10;

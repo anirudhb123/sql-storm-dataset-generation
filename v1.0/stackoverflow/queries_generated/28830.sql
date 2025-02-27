@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY 
+            CASE 
+                WHEN p.PostTypeId = 1 THEN 'Question'
+                WHEN p.PostTypeId = 2 THEN 'Answer'
+                ELSE 'Other'
+            END 
+            ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.ViewCount > 100
+),
+TagStats AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(TRIM(BOTH '<>' FROM p.Tags), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 5 -- Select tags with more than 5 associated questions
+),
+
+TopPostsByTag AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Rank,
+        tt.Tag
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts p ON rp.PostID = p.Id
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(TRIM(BOTH '<>' FROM p.Tags), '><')) AS rt(tag) ON TRUE
+    JOIN 
+        TopTags tt ON rt.tag = tt.Tag
+    WHERE 
+        rp.Rank <= 5 -- Get top 5 posts per tag
+)
+
+SELECT 
+    t.Tag,
+    STRING_AGG(CONCAT(tp.OwnerDisplayName, ': ', tp.Title), '; ') AS TopPosts
+FROM 
+    TopPostsByTag tp
+JOIN 
+    TopTags t ON tp.Tag = t.Tag
+GROUP BY 
+    t.Tag
+ORDER BY 
+    t.Tag;

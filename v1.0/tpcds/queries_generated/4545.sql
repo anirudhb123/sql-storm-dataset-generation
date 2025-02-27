@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_customer_sk ORDER BY ws.ws_sold_date_sk DESC) AS sales_rank,
+        cd_cd_demo_sk,
+        ca_city,
+        ca_state,
+        (ws.ws_sales_price - ws.ws_wholesale_cost) AS profit_margin
+    FROM 
+        web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date = CURRENT_DATE)
+),
+SalesDetail AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        rs.sales_rank,
+        COALESCE(cd.cd_gender, 'Unknown') AS customer_gender,
+        rs.ca_city,
+        CASE 
+            WHEN rs.profit_margin > 100 THEN 'High Profit'
+            WHEN rs.profit_margin BETWEEN 50 AND 100 THEN 'Moderate Profit'
+            ELSE 'Low Profit'
+        END AS profit_category
+    FROM 
+        RankedSales rs
+    LEFT JOIN customer_demographics cd ON rs.cd_cd_demo_sk = cd.cd_demo_sk
+)
+SELECT 
+    sd.ws_order_number,
+    sd.ws_item_sk,
+    MAX(sd.ws_sales_price) AS max_sales_price,
+    MIN(sd.ws_sales_price) AS min_sales_price,
+    COUNT(sd.ws_order_number) AS total_orders,
+    sd.customer_gender,
+    sd.ca_city,
+    sd.profit_category
+FROM 
+    SalesDetail sd
+GROUP BY 
+    sd.ws_order_number,
+    sd.ws_item_sk,
+    sd.customer_gender,
+    sd.ca_city,
+    sd.profit_category
+HAVING 
+    COUNT(sd.ws_order_number) > 5
+ORDER BY 
+    total_orders DESC, 
+    max_sales_price DESC;

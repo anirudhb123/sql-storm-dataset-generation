@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        rnk, 
+        s_suppkey, 
+        s_name 
+    FROM 
+        RankedSuppliers 
+    WHERE 
+        rnk <= 10
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, 
+        p.p_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    COALESCE(td.total_price, 0) AS total_order_price,
+    ts.s_name AS top_supplier,
+    n.n_name AS nation
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    OrderDetails td ON pd.p_partkey = ANY(SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderstatus = 'F')
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey = pd.p_partkey
+JOIN 
+    nation n ON n.n_nationkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_nationkey = ts.s_suppkey)
+WHERE 
+    (pd.total_cost > 1000 OR pd.p_size <= 10) 
+    AND ts.s_name IS NOT NULL
+ORDER BY 
+    pd.p_partkey NULLS LAST, 
+    total_order_price DESC, 
+    region.regionkey 
+LIMIT 50 OFFSET 10;

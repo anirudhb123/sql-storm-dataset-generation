@@ -1,0 +1,39 @@
+WITH RECURSIVE
+    RankedNations AS (
+        SELECT n.n_nationkey, n.n_name, n.n_comment, RANK() OVER (PARTITION BY n.n_regionkey ORDER BY n.n_name) AS nation_rank
+        FROM nation n
+    ),
+    PartSupplierDetails AS (
+        SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, s.s_name, s.s_acctbal,
+               CASE WHEN s.s_acctbal IS NULL THEN 'No Balance' ELSE 'Has Balance' END AS acct_status
+        FROM part p
+        JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+        LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    ),
+    CustomerPriorities AS (
+        SELECT c.c_custkey, c.c_name, o.o_orderpriority,
+               ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY c.c_acctbal DESC) AS priority_rank
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '1' YEAR
+    )
+SELECT
+    R.r_name AS region,
+    pn.n_name AS nation_name,
+    pp.p_name AS part_name,
+    COALESCE(ps.s_name, 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count,
+    SUM(pp.ps_supplycost * pp.ps_availqty) AS total_supply_cost,
+    MAX(ROW_NUMBER() OVER (PARTITION BY pn.n_name ORDER BY pp.p_retailprice DESC)) AS position,
+    CONCAT('Total customers: ', COUNT(DISTINCT c.c_custkey), '; Total Cost: ', SUM(pp.ps_supplycost * pp.ps_availqty)) AS summary
+FROM region R
+JOIN nation pn ON R.r_regionkey = pn.n_regionkey
+JOIN RankedNations rn ON pn.n_nationkey = rn.n_nationkey
+LEFT JOIN PartSupplierDetails pp ON pp.p_partkey IN (SELECT p_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN CustomerPriorities c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE rn.nation_rank = 1 AND pp.ps_supplycost IS NOT NULL
+GROUP BY R.r_name, pn.n_name, pp.p_name, pp.s_name
+HAVING SUM(CASE WHEN pp.ps_availqty > 100 THEN pp.ps_availqty ELSE 0 END) > 1000
+ORDER BY total_supply_cost DESC;

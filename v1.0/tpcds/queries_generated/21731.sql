@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS TotalSales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS SalesRank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY
+        ws.web_site_sk, ws_sold_date_sk
+), StoreItemReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnValue
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+), SalesSummary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS TotalSold,
+        SUM(ws_net_profit) AS TotalProfit,
+        COUNT(DISTINCT ws_order_number) AS UniqueOrders
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+), AnnualSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS AnnualSales
+    FROM
+        store_sales ss
+    WHERE
+        ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ws_item_sk
+)
+SELECT
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(ss.TotalSold, 0) AS TotalSold,
+    COALESCE(ss.TotalProfit, 0) AS TotalProfit,
+    COALESCE(ir.TotalReturns, 0) AS TotalReturns,
+    COALESCE(ir.TotalReturnValue, 0) AS TotalReturnValue,
+    COALESCE(asum.AnnualSales, 0) AS AnnualSales,
+    (COALESCE(ss.TotalProfit, 0) - COALESCE(ir.TotalReturnValue, 0)) AS NetProfit,
+    CASE 
+        WHEN SUM(ws.net_profit) IS NULL THEN 'Profit Data Missing' 
+        ELSE 'Data Available' 
+    END AS DataStatus
+FROM
+    item i
+LEFT JOIN
+    SalesSummary ss ON i.i_item_sk = ss.ws_item_sk
+LEFT JOIN
+    StoreItemReturns ir ON i.i_item_sk = ir.sr_item_sk
+LEFT JOIN
+    AnnualSales asum ON i.i_item_sk = asum.ws_item_sk
+LEFT JOIN
+    RankedSales rs ON rs.web_site_sk IN (SELECT web_site_sk FROM web_site WHERE web_country IS NULL)
+GROUP BY
+    i.i_item_id, i.i_item_desc, ss.TotalSold, ss.TotalProfit, ir.TotalReturns, ir.TotalReturnValue, asum.AnnualSales
+HAVING
+    SUM(ir.TotalReturnValue) < SUM(ss.TotalProfit)
+ORDER BY
+    NetProfit DESC
+FETCH FIRST 50 ROWS ONLY;

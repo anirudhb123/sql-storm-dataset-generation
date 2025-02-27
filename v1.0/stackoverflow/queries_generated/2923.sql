@@ -1,0 +1,49 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) FILTER (WHERE Class = 1) AS GoldCount,
+        COUNT(*) FILTER (WHERE Class = 2) AS SilverCount,
+        COUNT(*) FILTER (WHERE Class = 3) AS BronzeCount
+    FROM Badges
+    GROUP BY UserId
+),
+MostActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(P.AnswerCount), 0) DESC) AS ActivityRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(PH.CloseReasonId, 0) AS CloseReasonId
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    GROUP BY P.Id, PH.CloseReasonId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UB.GoldCount, 0) AS GoldCount,
+    COALESCE(UB.SilverCount, 0) AS SilverCount,
+    COALESCE(UB.BronzeCount, 0) AS BronzeCount,
+    COUNT(DISTINCT PS.Id) AS PostCount,
+    COUNT(DISTINCT PS.CommentCount) AS TotalComments,
+    SUM(PS.Score) AS TotalScore,
+    SUM(PS.ViewCount) AS TotalViews
+FROM MostActiveUsers U
+LEFT JOIN UserBadgeCounts UB ON U.Id = UB.UserId
+LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+WHERE U.Reputation > 1000
+GROUP BY U.Id, U.DisplayName, U.Reputation, UB.GoldCount, UB.SilverCount, UB.BronzeCount
+ORDER BY U.Reputation DESC, TotalScore DESC
+LIMIT 10;

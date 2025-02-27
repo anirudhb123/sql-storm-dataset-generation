@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.sold_date_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_return_quantity,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM 
+        web_returns 
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_id,
+        cd.cd_gender,
+        SUM(CASE WHEN rs.rank = 1 THEN rs.total_net_paid ELSE 0 END) AS best_sales,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt
+    FROM 
+        customer c
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.web_site_sk 
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    GROUP BY 
+        cs.c_customer_id, cd.cd_gender
+)
+SELECT 
+    f.c_customer_id,
+    f.cd_gender,
+    f.best_sales,
+    f.total_return_quantity,
+    f.total_return_amt,
+    CASE 
+        WHEN f.total_return_quantity > 0 THEN 'Some Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    FinalReport f
+WHERE 
+    f.best_sales > 0
+ORDER BY 
+    f.best_sales DESC;

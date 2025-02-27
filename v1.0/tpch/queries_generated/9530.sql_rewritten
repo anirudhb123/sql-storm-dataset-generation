@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_suppkey, s.s_name, ps.ps_partkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(p.p_retailprice) AS avg_retail_price,
+        COUNT(*) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        AVG(p.p_retailprice) > 100.00 AND COUNT(*) > 3
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    hp.p_partkey,
+    hp.p_name,
+    rs.s_name,
+    rs.total_supply_cost,
+    od.total_order_value
+FROM 
+    HighValueParts hp
+JOIN 
+    RankedSuppliers rs ON hp.p_partkey = rs.ps_partkey AND rs.supplier_rank = 1
+JOIN 
+    OrderDetails od ON od.total_order_value > 10000.00
+ORDER BY 
+    hp.p_partkey, rs.total_supply_cost DESC, od.total_order_value DESC
+LIMIT 50;

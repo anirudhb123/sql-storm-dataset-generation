@@ -1,0 +1,62 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_desc, 
+        i.i_current_price, 
+        i.i_brand, 
+        1 AS level
+    FROM item i
+    WHERE i.i_rec_start_date <= DATE '2002-10-01' AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+
+    UNION ALL
+
+    SELECT 
+        h.i_item_sk, 
+        h.i_item_desc,
+        h.i_current_price * 0.9 AS discounted_price, 
+        h.i_brand, 
+        ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item h ON h.i_manager_id = ih.i_item_sk
+    WHERE h.i_rec_start_date <= DATE '2002-10-01' AND (h.i_rec_end_date IS NULL OR h.i_rec_end_date > DATE '2002-10-01')
+),
+
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (
+        SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY ws.ws_item_sk
+),
+
+ranked_sales AS (
+    SELECT 
+        ih.i_item_sk,
+        ih.i_item_desc,
+        COALESCE(sd.total_sold, 0) AS total_sold,
+        COALESCE(sd.total_profit, 0) AS total_profit,
+        RANK() OVER (ORDER BY COALESCE(sd.total_profit, 0) DESC) AS sales_rank
+    FROM item_hierarchy ih
+    LEFT JOIN sales_data sd ON ih.i_item_sk = sd.ws_item_sk
+)
+
+SELECT 
+    r.i_item_sk,
+    r.i_item_desc,
+    r.total_sold,
+    r.total_profit,
+    r.sales_rank,
+    CASE 
+        WHEN r.sales_rank <= 10 THEN 'Top Seller'
+        WHEN r.sales_rank BETWEEN 11 AND 30 THEN 'Moderate Seller'
+        ELSE 'Low Seller'
+    END AS sales_category
+FROM ranked_sales r
+WHERE r.total_sold > 0
+ORDER BY r.sales_rank;

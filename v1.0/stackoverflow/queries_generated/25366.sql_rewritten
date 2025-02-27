@@ -1,0 +1,51 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        COUNT(DISTINCT PS.Id) AS QuestionCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN Posts PS ON PS.Tags LIKE '%' || T.TagName || '%' AND PS.PostTypeId = 1
+    LEFT JOIN Posts A ON A.ParentId = PS.Id
+    GROUP BY T.TagName
+),
+UserReputations AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN P.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewPostsCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopTags AS (
+    SELECT 
+        TagStatistics.TagName,
+        TagStatistics.PostCount,
+        TagStatistics.TotalViews,
+        TagStatistics.AverageScore,
+        ROW_NUMBER() OVER (ORDER BY TagStatistics.TotalViews DESC) AS Rank
+    FROM TagStatistics
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostsCount,
+    U.QuestionsCount,
+    U.AnswersCount,
+    U.HighViewPostsCount,
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.AverageScore
+FROM UserReputations U
+JOIN TopTags T ON T.PostCount > 10  
+WHERE U.Reputation > 1000  
+ORDER BY U.Reputation DESC, T.TotalViews DESC;

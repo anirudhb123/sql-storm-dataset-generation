@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mt.kind AS movie_kind,
+        1 AS level
+    FROM 
+        aka_title m
+    JOIN 
+        kind_type mt ON m.kind_id = mt.id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel: ', m.title) AS movie_title,
+        m.production_year,
+        mt.kind AS movie_kind,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        kind_type mt ON m.kind_id = mt.id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.movie_kind,
+    mh.production_year,
+    COALESCE(CAST(avg(cast_credits.nr_order) AS DECIMAL), 0) AS average_cast_order,
+    STRING_AGG(DISTINCT act.name, ', ') AS actors,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info cast_credits ON cc.subject_id = cast_credits.person_id
+LEFT JOIN 
+    aka_name act ON cast_credits.person_id = act.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.movie_kind, mh.production_year
+HAVING 
+    COUNT(DISTINCT act.name) > 5 
+    AND mh.production_year > 2010
+ORDER BY 
+    average_cast_order DESC, mh.production_year DESC;

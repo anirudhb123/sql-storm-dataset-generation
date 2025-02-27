@@ -1,0 +1,36 @@
+
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count, 
+           o.o_orderdate,
+           NTILE(5) OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount))) AS revenue_quintile
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+SupplierMetrics AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, (ps.ps_availqty * ps.ps_supplycost) AS supplier_value,
+           COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, SUM(os.total_revenue) AS total_nation_revenue
+    FROM nation n
+    LEFT JOIN OrderSummary os ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.o_custkey)
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, 
+       COALESCE(nr.total_nation_revenue, 0) AS total_nation_revenue,
+       COUNT(DISTINCT rs.s_suppkey) AS top_suppliers_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN NationRevenue nr ON n.n_nationkey = nr.n_nationkey
+LEFT JOIN RankedSuppliers rs ON rs.rank <= 3 
+GROUP BY r.r_name, nr.total_nation_revenue
+ORDER BY total_nation_revenue DESC, r.r_name;

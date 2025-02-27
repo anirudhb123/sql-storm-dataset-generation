@@ -1,0 +1,49 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS rank_order
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_date >= '2023-01-01' AND dd.d_date <= '2023-12-31'
+    GROUP BY ws.web_site_sk
+),
+top_websites AS (
+    SELECT web_site_sk, total_orders, total_sales
+    FROM ranked_sales
+    WHERE rank_order <= 5
+),
+customer_order_counts AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS customer_orders,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS customer_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+customer_demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(c.c_customer_sk) AS num_customers,
+        AVG(coc.customer_spent) AS avg_spent
+    FROM customer_order_counts coc
+    JOIN customer c ON coc.c_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    tw.web_site_sk,
+    tw.total_orders,
+    tw.total_sales,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.num_customers,
+    cd.avg_spent
+FROM top_websites tw
+LEFT JOIN customer_demographics cd ON tw.web_site_sk = cd.cd_demo_sk
+ORDER BY tw.total_sales DESC, cd.avg_spent DESC;

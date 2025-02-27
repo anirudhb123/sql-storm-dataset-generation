@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_container,
+    r.r_name,
+    COALESCE(cs.total_spent, 0) AS total_spent_by_customer,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    h.total_supply_value
+FROM 
+    part p
+LEFT JOIN 
+    HighValueParts h ON p.p_partkey = h.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON s.rn = 1 AND s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT TOP 1 o.o_custkey FROM orders o ORDER BY o.o_orderdate DESC)))
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+LEFT JOIN 
+    CustomerOrders cs ON cs.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) FROM orders o2 WHERE o2.o_custkey = cs.c_custkey))
+WHERE 
+    p.p_size < 20
+ORDER BY 
+    total_spent_by_customer DESC, 
+    p.p_name ASC;

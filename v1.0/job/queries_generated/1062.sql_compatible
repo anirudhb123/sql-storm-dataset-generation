@@ -1,0 +1,41 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS cast_count,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN CAST(pi.info AS INTEGER) ELSE NULL END) OVER (PARTITION BY at.id) AS avg_rating,
+        ROW_NUMBER() OVER (ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id 
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.cast_count, 
+        rm.avg_rating
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 10 AND (rm.avg_rating IS NOT NULL AND rm.avg_rating > 7)
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    COALESCE(tm.cast_count, 0) AS total_cast,
+    CASE 
+        WHEN tm.avg_rating IS NULL THEN 'No Rating'
+        ELSE CAST(tm.avg_rating AS VARCHAR) 
+    END AS formatted_avg_rating
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.avg_rating DESC, 
+    tm.production_year DESC;

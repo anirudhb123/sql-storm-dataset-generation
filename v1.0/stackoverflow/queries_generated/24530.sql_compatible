@@ -1,0 +1,102 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(P.Score) AS AveragePostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS TotalBadges,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserTags AS (
+    SELECT 
+        P.OwnerUserId,
+        STRING_AGG(DISTINCT TRIM(T.TagName), ', ') AS FavoriteTags
+    FROM 
+        Posts P
+    CROSS JOIN 
+        LATERAL unnest(string_to_array(P.Tags, '><')) AS T(TagName)
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        P.OwnerUserId
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS TotalComments,
+        P.SinceCreation AS CreationAge,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId, P.SinceCreation
+),
+UserPostStats AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.TotalPosts,
+        UR.TotalAnswers,
+        UR.AveragePostScore,
+        UB.TotalBadges,
+        UT.FavoriteTags,
+        PA.PostId,
+        PA.Title,
+        PA.TotalComments,
+        PA.CreationAge,
+        PA.RowNum
+    FROM 
+        UserReputation UR
+    LEFT JOIN 
+        UserBadges UB ON UR.UserId = UB.UserId
+    LEFT JOIN 
+        UserTags UT ON UR.UserId = UT.OwnerUserId
+    LEFT JOIN 
+        PostActivity PA ON UR.UserId = PA.OwnerUserId
+    WHERE 
+        UR.Reputation >= 1000 AND 
+        (PA.RowNum IS NULL OR PA.RowNum <= 5)  
+)
+SELECT 
+    UPS.UserId,
+    UPS.Reputation,
+    UPS.TotalPosts,
+    UPS.TotalAnswers,
+    UPS.AveragePostScore,
+    UPS.TotalBadges,
+    UPS.FavoriteTags,
+    UPS.PostId,
+    UPS.Title,
+    UPS.TotalComments,
+    UPS.CreationAge,
+    CASE 
+        WHEN UPS.TotalComments IS NULL THEN 'No comments yet'
+        ELSE 'Active comments'
+    END AS CommentStatus,
+    NULLIF(UPS.TotalBadges, 0) AS BadgeLevel
+FROM 
+    UserPostStats UPS
+ORDER BY 
+    UPS.Reputation DESC,
+    UPS.TotalPosts DESC;

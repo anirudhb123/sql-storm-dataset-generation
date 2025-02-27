@@ -1,0 +1,71 @@
+WITH ranked_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+top_products AS (
+    SELECT 
+        p_partkey, p_name 
+    FROM 
+        ranked_sales 
+    WHERE 
+        revenue_rank <= 10
+),
+national_supplier_totals AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    tp.p_name,
+    tp.p_partkey,
+    c.c_name,
+    coalesce(nst.total_acctbal, 0) AS supplier_acctbal,
+    coalesce(co.total_spent, 0) AS customer_spend,
+    CASE 
+        WHEN co.total_spent > 1000 THEN 'High Value Customer' 
+        ELSE 'Regular Customer' 
+    END AS customer_type
+FROM 
+    top_products tp
+LEFT JOIN 
+    partsupp ps ON tp.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    national_supplier_totals nst ON s.s_nationkey = nst.n_nationkey
+LEFT JOIN 
+    customer_orders co ON co.c_custkey = o.o_custkey
+WHERE 
+    tp.p_name LIKE '%gadget%'
+ORDER BY 
+    tp.total_revenue DESC, 
+    nst.total_acctbal DESC;

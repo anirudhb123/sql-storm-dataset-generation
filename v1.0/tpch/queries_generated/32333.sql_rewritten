@@ -1,0 +1,75 @@
+WITH RECURSIVE order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) + os.total_revenue,
+        COUNT(DISTINCT l.l_partkey) + os.unique_parts,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        order_summary os ON o.o_orderkey > os.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        o.o_orderkey, os.total_revenue, os.unique_parts
+),
+supplier_revenue AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+region_summary AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(sr.total_supply_cost) AS total_supply_cost
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier_revenue sr ON sr.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps LEFT JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_size > 10)
+    GROUP BY 
+        r.r_regionkey
+)
+SELECT 
+    rs.r_regionkey,
+    rs.nation_count,
+    rs.total_supply_cost,
+    os.total_revenue,
+    os.unique_parts,
+    os.last_order_date
+FROM 
+    region_summary rs
+JOIN 
+    order_summary os ON os.o_orderkey = (
+        SELECT MAX(o_orderkey) FROM orders WHERE o_orderdate < cast('1998-10-01' as date)
+    )
+ORDER BY 
+    rs.total_supply_cost DESC, 
+    os.last_order_date DESC 
+LIMIT 10;

@@ -1,0 +1,36 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+RankedLineItems AS (
+    SELECT l_orderkey, l_partkey, l_suppkey, 
+           RANK() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rank_position,
+           l_extendedprice, l_discount
+    FROM lineitem
+    WHERE l_shipdate >= '1997-01-01'
+),
+NationStats AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY n.n_name
+)
+SELECT ns.n_name, ns.supplier_count, ns.total_acctbal, ns.total_revenue,
+       (SELECT AVG(total_revenue) FROM NationStats) AS avg_revenue,
+       RANK() OVER (ORDER BY ns.total_revenue DESC) AS revenue_rank,
+       COALESCE(ns.total_revenue / NULLIF(ns.supplier_count, 0), 0) AS avg_revenue_per_supplier
+FROM NationStats ns
+JOIN SupplierHierarchy sh ON sh.s_nationkey = ns.n_name
+WHERE ns.total_revenue > (SELECT AVG(total_revenue) FROM NationStats)
+ORDER BY ns.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

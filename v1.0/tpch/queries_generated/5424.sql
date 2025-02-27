@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        o.o_orderpriority, 
+        o.o_clerk, 
+        o.o_shippriority, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > 10000
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        ps.ps_availqty, 
+        SUM(line.l_extendedprice * (1 - line.l_discount)) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem line ON p.p_partkey = line.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, ps.ps_availqty
+)
+
+SELECT 
+    co.rk AS order_rank,
+    cd.c_name AS customer_name,
+    cd.nation_name,
+    si.s_name AS supplier_name,
+    si.total_revenue,
+    oo.o_totalprice AS order_total
+FROM 
+    RankedOrders oo
+JOIN 
+    CustomerDetails cd ON oo.o_orderkey = (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            orders o 
+        WHERE 
+            o.o_custkey = cd.c_custkey 
+        ORDER BY 
+            o.o_orderdate DESC 
+        LIMIT 1
+    )
+JOIN 
+    SupplierInfo si ON si.ps_availqty > 0
+WHERE 
+    oo.rk <= 10
+ORDER BY 
+    oo.o_orderdate DESC, si.total_revenue DESC;

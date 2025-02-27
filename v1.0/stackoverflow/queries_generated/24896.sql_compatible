@@ -1,0 +1,48 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.VoteCount DESC) AS RankPost,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.OwnerUserId) AS TotalBounties,
+        p.OwnerUserId
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'
+)
+
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.VoteCount,
+    CASE 
+        WHEN rp.RankPost = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRank,
+    COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+    bp.BadgeCount
+FROM
+    RankedPosts rp
+LEFT JOIN
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Badges b
+    WHERE
+        b.Class = 1  
+    GROUP BY
+        b.UserId
+) bp ON rp.OwnerUserId = bp.UserId
+WHERE
+    rp.RankPost <= 5  
+ORDER BY
+    rp.PostId DESC;

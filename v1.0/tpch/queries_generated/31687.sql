@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, NULL::integer AS parent_suppkey
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.parent_suppkey
+),
+TotalLineItems AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationSales AS (
+    SELECT n.n_name, SUM(t.total_sales) AS total_sales_by_nation
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN TotalLineItems t ON o.o_orderkey = t.o_orderkey
+    GROUP BY n.n_name
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost < (
+        SELECT AVG(ps_supplycost) FROM partsupp
+    )
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    nh.n_name AS nation_name, 
+    hvp.p_name AS part_name, 
+    hvp.total_avail_qty,
+    SUM(ts.total_sales_by_nation) OVER (PARTITION BY nh.n_name) AS nation_total_sales
+FROM NationSales nh
+JOIN HighValueParts hvp ON nh.total_sales_by_nation > 10000
+LEFT JOIN (
+    SELECT c.c_nationkey, sum(l.l_extendedprice * (1 - l.l_discount)) AS total_sales_by_nation
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_nationkey
+) ts ON nh.n_nationkey = ts.c_nationkey
+WHERE hvp.total_avail_qty IS NOT NULL
+ORDER BY nation_name, part_name;

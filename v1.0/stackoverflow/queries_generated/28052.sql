@@ -1,0 +1,85 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViewCount,
+        COUNT(DISTINCT Comments.Id) AS TotalComments
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    GROUP BY 
+        Tags.TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViewCount,
+        TotalComments,
+        ROW_NUMBER() OVER (ORDER BY TotalViewCount DESC) AS Rnk
+    FROM 
+        TagCounts
+),
+
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.DisplayName
+),
+
+UserTagStats AS (
+    SELECT 
+        U.DisplayName,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS TagPostCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    JOIN 
+        Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    GROUP BY 
+        U.DisplayName, T.TagName
+),
+
+Benchmark AS (
+    SELECT 
+        TT.TagName,
+        SUM(UTS.TagPostCount) AS TotalPostsByUser,
+        SUM(TU.TotalViews) AS TotalViewsByUser
+    FROM 
+        TopTags TT
+    JOIN 
+        UserTagStats UTS ON TT.TagName = UTS.TagName
+    JOIN 
+        TopUsers TU ON UTS.DisplayName = TU.DisplayName
+    WHERE 
+        TT.Rnk <= 10
+    GROUP BY 
+        TT.TagName
+)
+
+SELECT 
+    TagName,
+    TotalPostsByUser,
+    TotalViewsByUser
+FROM 
+    Benchmark
+ORDER BY 
+    TotalViewsByUser DESC;

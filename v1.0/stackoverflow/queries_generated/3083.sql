@@ -1,0 +1,67 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.UserDisplayName AS LastEditor,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastEditDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 24
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, ph.UserDisplayName, p.LastEditDate
+)
+SELECT 
+    ud.UserId,
+    ud.DisplayName,
+    ud.Reputation,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.LastEditor,
+    pd.CommentCount,
+    pd.Upvotes,
+    pd.Downvotes
+FROM 
+    UserReputation ud
+JOIN 
+    PostDetails pd ON pd.Upvotes > 0
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Badges b 
+        WHERE b.UserId = ud.UserId AND b.Class = 1
+    )
+    OR (
+        SELECT COUNT(*) 
+        FROM Posts p2 
+        WHERE p2.OwnerUserId = ud.UserId 
+        AND p2.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+    ) > 5
+ORDER BY 
+    ud.Reputation DESC, pd.CreationDate DESC
+LIMIT 100;

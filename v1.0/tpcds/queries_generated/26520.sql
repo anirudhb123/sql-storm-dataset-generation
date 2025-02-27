@@ -1,0 +1,69 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.net_profit) AS avg_profit_per_order
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+),
+MergedData AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_country,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.cd_purchase_estimate,
+        sd.total_net_profit,
+        sd.total_orders,
+        sd.avg_profit_per_order
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesData sd ON ci.c_customer_sk = sd.bill_customer_sk
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    ca_country,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    cd_purchase_estimate,
+    COALESCE(total_net_profit, 0) AS total_net_profit,
+    COALESCE(total_orders, 0) AS total_orders,
+    COALESCE(avg_profit_per_order, 0) AS avg_profit_per_order
+FROM 
+    MergedData
+WHERE 
+    ca_city IS NOT NULL 
+    AND ca_state IS NOT NULL 
+    AND ca_country = 'USA'
+ORDER BY 
+    total_net_profit DESC
+LIMIT 100;

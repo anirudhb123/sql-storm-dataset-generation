@@ -1,0 +1,85 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        cm.movie_id,
+        ct.title,
+        ct.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        complete_cast cc
+    JOIN 
+        aka_title ct ON cc.movie_id = ct.id
+    JOIN 
+        movie_hierarchy mh ON cc.movie_id = mh.movie_id
+    WHERE 
+        cc.person_role_id IS NOT NULL
+),
+
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+),
+
+movie_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+),
+
+extended_movie_info AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note IS NOT NULL), 0) AS distinct_cast_count
+    FROM 
+        ranked_movies mv
+    LEFT JOIN 
+        cast_info ci ON mv.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_keywords mk ON mv.movie_id = mk.movie_id
+    GROUP BY 
+        mv.movie_id, mv.title, mv.production_year, mk.keywords
+)
+
+SELECT 
+    emi.title, 
+    emi.production_year,
+    emi.keywords,
+    emi.distinct_cast_count,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = emi.movie_id AND mi.info_type_id = 
+        (SELECT id FROM info_type WHERE info = 'Budget')) AS budget_info_count,
+    (SELECT COUNT(*) FROM movie_link ml WHERE ml.movie_id = emi.movie_id) AS linked_movies_count
+FROM 
+    extended_movie_info emi
+WHERE 
+    emi.distinct_cast_count > 0
+ORDER BY 
+    emi.production_year DESC, emi.distinct_cast_count DESC
+LIMIT 10;

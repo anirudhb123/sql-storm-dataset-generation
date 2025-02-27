@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER(PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- We focus on Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Tags,
+        Author,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1  -- Get the latest post for each question
+)
+SELECT 
+    Row_Number() OVER (ORDER BY NetVotes DESC) AS Rank,
+    Title,
+    Author,
+    CommentCount,
+    NetVotes
+FROM 
+    TopPosts
+ORDER BY 
+    NetVotes DESC
+LIMIT 10;  -- Return top 10 questions based on net votes
+

@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1,
+        CAST(mh.path || ' -> ' || at.title AS VARCHAR(255)) AS path
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    at.title AS movie_title,
+    at.production_year,
+    ak.name AS actor_name,
+    COALESCE(CAST(mk.keyword AS VARCHAR), 'No Keywords') AS keywords,
+    mh.path AS movie_path,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS actor_count,
+    MAX(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS birth_date,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_count
+FROM 
+    aka_title at
+LEFT JOIN 
+    cast_info ci ON at.id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id
+WHERE 
+    at.production_year BETWEEN 2000 AND 2020
+    AND (mk.keyword IS NULL OR mk.keyword LIKE '%action%')
+GROUP BY 
+    at.id, ak.name, mh.path
+ORDER BY 
+    at.production_year DESC, actor_count DESC;

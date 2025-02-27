@@ -1,0 +1,52 @@
+WITH SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate <= DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(sa.total_supply_cost) AS region_total_supply_cost,
+    AVG(co.total_spent) AS average_customer_spending,
+    SUM(ld.total_line_revenue) AS total_line_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierAggregates sa ON s.s_suppkey = sa.s_suppkey
+JOIN CustomerOrders co ON co.c_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = n.n_nationkey
+)
+JOIN LineItemDetails ld ON ld.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+)
+GROUP BY r.r_name
+ORDER BY region_total_supply_cost DESC;

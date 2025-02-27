@@ -1,0 +1,78 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id, 
+        TagName, 
+        Count, 
+        ExcerptPostId, 
+        WikiPostId 
+    FROM 
+        Tags 
+    WHERE 
+        Count > 10  
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,  
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,  
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.DisplayName,
+    ps.PostId,
+    ps.Title,
+    ps.TotalComments,
+    ps.Upvotes,
+    ps.Downvotes,
+    SELECTED_Badges.BadgeCount,
+    SELECTED_Badges.GoldBadges,
+    SELECTED_Badges.SilverBadges,
+    SELECTED_Badges.BronzeBadges,
+    TT.TagName
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges SELECTED_Badges ON u.Id = SELECTED_Badges.UserId
+LEFT JOIN LATERAL (
+    SELECT STRING_AGG(Tag.TagName, ', ') AS TagName 
+    FROM (
+        SELECT TRIM(value) AS TagName 
+        FROM STRING_SPLIT(p.Tags, ',') 
+        WHERE EXISTS (SELECT 1 FROM RecursiveTagHierarchy rt WHERE rt.TagName = TRIM(value))
+    ) Tag
+) TT ON TRUE
+WHERE 
+    ps.UserPostRank <= 3  
+ORDER BY 
+    ps.Upvotes DESC;

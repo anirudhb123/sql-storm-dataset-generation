@@ -1,0 +1,77 @@
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk, 
+        sr.item_sk, 
+        sr.return_quantity,
+        sr.return_amt,
+        RANK() OVER (PARTITION BY sr.item_sk ORDER BY sr.return_quantity DESC) AS rank_qty,
+        ROW_NUMBER() OVER (PARTITION BY sr.item_sk ORDER BY sr.return_amt DESC) AS row_amt
+    FROM 
+        store_returns sr
+    LEFT JOIN 
+        customer c ON sr.customer_sk = c.customer_sk
+    WHERE 
+        c.customer_id IS NOT NULL AND
+        sr.return_date_sk IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT 
+        rr.returned_date_sk,
+        rr.item_sk,
+        rr.return_quantity,
+        rr.return_amt,
+        rr.rank_qty
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rank_qty = 1 AND 
+        rr.return_quantity > (
+            SELECT 
+                AVG(return_quantity) 
+            FROM 
+                RankedReturns sub
+            WHERE 
+                sub.item_sk = rr.item_sk
+        )
+),
+AggregatedReturns AS (
+    SELECT 
+        rr.returned_date_sk,
+        SUM(rr.return_quantity) AS total_return_quantity,
+        SUM(rr.return_amt) AS total_return_amount
+    FROM 
+        FilteredReturns rr
+    GROUP BY 
+        rr.returned_date_sk
+),
+FinalOutput AS (
+    SELECT 
+        d.d_date,
+        COALESCE(ar.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(ar.total_return_amount, 0) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(ar.total_return_quantity, 0) > 100 THEN 'High'
+            WHEN COALESCE(ar.total_return_quantity, 0) BETWEEN 1 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS return_category
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        AggregatedReturns ar ON d.d_date_sk = ar.returned_date_sk
+    WHERE
+        d.d_date BETWEEN DATEADD(DAY, -30, cast('2002-10-01' as date)) AND cast('2002-10-01' as date)
+)
+SELECT 
+    f.d_date,
+    f.total_return_quantity,
+    f.total_return_amount,
+    f.return_category,
+    CASE 
+        WHEN f.total_return_amount IS NULL THEN 'Amount Not Available'
+        WHEN f.total_return_quantity IS NULL THEN 'Quantity Not Available'
+        ELSE 'Data Available'
+    END AS data_status
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.d_date DESC;

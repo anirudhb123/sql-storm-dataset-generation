@@ -1,0 +1,83 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        COALESCE(PV.VoteCount, 0) AS VoteCount,
+        COALESCE(AA.AnnualViews, 0) AS AnnualViews,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) PV ON P.Id = PV.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(ViewCount) AS AnnualViews
+        FROM 
+            Posts 
+        WHERE 
+            CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        GROUP BY 
+            PostId
+    ) AA ON P.Id = AA.PostId
+    LEFT JOIN (
+        SELECT 
+            PT.Id, 
+            T.TagName
+        FROM 
+            Posts PT
+        CROSS JOIN LATERAL 
+            STRING_TO_ARRAY(SUBSTRING(PT.Tags, 2, LENGTH(PT.Tags)-2), '><') AS Tag
+        JOIN 
+            Tags T ON T.TagName = Tag
+    ) T ON P.Id = T.Id
+    GROUP BY 
+        P.Id, PV.VoteCount, AA.AnnualViews
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        COUNT(DISTINCT C.Id) AS CommentsMade
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.Body,
+    PS.CreationDate,
+    PS.VoteCount,
+    PS.AnnualViews,
+    PS.Tags,
+    US.DisplayName AS OwnerDisplayName,
+    US.Reputation,
+    US.PostsCreated,
+    US.CommentsMade
+FROM 
+    PostStatistics PS
+JOIN 
+    Users U ON PS.PostId = U.Id
+JOIN 
+    UserStatistics US ON U.Id = US.UserId
+ORDER BY 
+    PS.VoteCount DESC, 
+    PS.AnnualViews DESC 
+LIMIT 100;

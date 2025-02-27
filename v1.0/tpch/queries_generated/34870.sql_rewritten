@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, pp.ps_supplycost
+    FROM supplier s
+    JOIN partsupp pp ON s.s_suppkey = pp.ps_suppkey
+    WHERE pp.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, pp.ps_supplycost
+    FROM supplier s
+    JOIN partsupp pp ON s.s_suppkey = pp.ps_suppkey
+    JOIN SupplyChain sc ON sc.s_suppkey = pp.ps_suppkey
+    WHERE pp.ps_availqty > 0
+),
+SalesData AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartRevenue AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedSales AS (
+    SELECT c.c_custkey, c.c_name, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesData c
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    SUM(pr.revenue) AS total_revenue,
+    COALESCE(SUM(sc.ps_supplycost), 0) AS total_supplycost,
+    COUNT(DISTINCT rs.c_custkey) AS customer_count
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN RankedSales rs ON rs.c_custkey = n.n_nationkey
+LEFT JOIN PartRevenue pr ON pr.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.c_custkey)
+LEFT JOIN SupplyChain sc ON sc.s_suppkey = rs.c_custkey
+WHERE n.n_name LIKE 'A%'
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT rs.c_custkey) > 0
+ORDER BY total_revenue DESC;

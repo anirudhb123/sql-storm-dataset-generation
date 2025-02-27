@@ -1,0 +1,43 @@
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 1000.00
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN nation_supplier ns ON s.s_acctbal < ns.s_acctbal
+),
+part_profit AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_partkey
+),
+customer_stats AS (
+    SELECT c.c_nationkey,
+           COUNT(DISTINCT c.c_custkey) AS total_customers,
+           AVG(c.c_acctbal) AS avg_acctbal
+    FROM customer c
+    GROUP BY c.c_nationkey
+)
+
+SELECT n.n_name AS nation_name,
+       COALESCE(SUM(pp.total_revenue - pp.total_cost), 0) AS net_profit,
+       cs.total_customers,
+       cs.avg_acctbal,
+       STRING_AGG(DISTINCT ss.s_name, ', ') FILTER (WHERE ss.s_acctbal IS NOT NULL) AS supplier_names
+FROM nation n
+LEFT JOIN nation_supplier ss ON n.n_nationkey = ss.n_nationkey
+LEFT JOIN part_profit pp ON pp.total_cost IS NOT NULL
+LEFT JOIN customer_stats cs ON cs.c_nationkey = n.n_nationkey
+GROUP BY n.n_name
+HAVING COUNT(ss.s_suppkey) > 0
+ORDER BY net_profit DESC
+LIMIT 10 OFFSET 5;

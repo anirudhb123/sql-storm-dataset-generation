@@ -1,0 +1,51 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) + ts.total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN top_suppliers ts ON ts.s_suppkey != s.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name, ts.total_cost
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) + ts.total_cost > 2000
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_quantity
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_quantity DESC
+    LIMIT 10
+),
+lineitem_summary AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_partkey
+),
+final_report AS (
+    SELECT 
+        c.c_name AS customer_name,
+        COALESCE(co.order_count, 0) AS order_count,
+        ss.total_quantity,
+        ts.total_cost AS supplier_cost,
+        ls.net_revenue
+    FROM customer_orders co
+    FULL OUTER JOIN supplier_summary ss ON ss.s_suppkey = (SELECT MIN(s.s_suppkey) FROM supplier s)
+    LEFT JOIN top_suppliers ts ON ts.s_suppkey = (SELECT MAX(s.s_suppkey) FROM supplier s)
+    LEFT JOIN lineitem_summary ls ON ls.l_partkey = (SELECT MIN(l.l_partkey) FROM lineitem l)
+)
+SELECT *
+FROM final_report
+WHERE (order_count > 0 OR supplier_cost IS NOT NULL) AND (net_revenue IS NOT NULL OR total_quantity > 50);

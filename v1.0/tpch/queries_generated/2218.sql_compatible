@@ -1,0 +1,99 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1994-01-01' 
+        AND o.o_orderdate < DATE '1995-01-01'
+),
+HighValueOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        n.n_name
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_orderkey = o.o_orderkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.rn <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(p.p_retailprice) AS avg_retail_price,
+        MAX(p.p_retailprice) AS max_retail_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+FinalReport AS (
+    SELECT 
+        hvo.o_orderkey,
+        hvo.o_orderdate,
+        hvo.o_totalprice,
+        pd.p_name,
+        pd.supplier_count,
+        pd.avg_retail_price,
+        pd.max_retail_price,
+        CASE 
+            WHEN pd.max_retail_price > 100 THEN 'High-End'
+            ELSE 'Standard'
+        END AS product_category,
+        hvo.c_nationkey
+    FROM 
+        HighValueOrders hvo
+    LEFT JOIN 
+        PartDetails pd ON hvo.o_orderkey = (SELECT l.l_orderkey 
+                                             FROM lineitem l 
+                                             WHERE l.l_orderkey = hvo.o_orderkey
+                                             LIMIT 1)
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(DISTINCT fr.o_orderkey) AS total_orders,
+    SUM(fr.o_totalprice) AS total_sales,
+    AVG(fr.o_totalprice) AS avg_order_value,
+    STRING_AGG(DISTINCT fr.product_category) AS product_categories
+FROM 
+    FinalReport fr
+JOIN 
+    nation n ON fr.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(fr.o_totalprice) > 1000000
+ORDER BY 
+    total_sales DESC;

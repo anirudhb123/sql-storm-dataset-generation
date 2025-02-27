@@ -1,0 +1,37 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TagEngagement AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY t.Id, t.TagName
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.TotalComments,
+    ue.TotalBounty,
+    te.TagId,
+    te.TagName,
+    te.PostCount,
+    te.TotalViews
+FROM UserEngagement ue
+JOIN TagEngagement te ON ue.TotalPosts > 0
+ORDER BY ue.TotalPosts DESC, te.TotalViews DESC
+LIMIT 100;

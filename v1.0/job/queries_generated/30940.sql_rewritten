@@ -1,0 +1,95 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+      AND mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        (SELECT title FROM aka_title WHERE id = ml.linked_movie_id) AS title,
+        mh.level + 1 
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3  
+),
+
+movie_roles AS (
+    SELECT 
+        ci.movie_id,
+        r.role AS role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+
+actor_details AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        ak.surname_pcode,
+        SUM(CASE WHEN ci.movie_id IS NOT NULL THEN 1 ELSE 0 END) AS movies_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name, ak.surname_pcode
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) >= 2  
+),
+
+movie_info_data AS (
+    SELECT 
+        mv.id AS movie_id,
+        mv.title,
+        mi.info,
+        ROW_NUMBER() OVER (PARTITION BY mv.id ORDER BY mt.production_year DESC) AS info_order
+    FROM 
+        aka_title mv
+    JOIN 
+        movie_info mi ON mv.id = mi.movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = mv.id
+    JOIN 
+        movie_info_idx mt ON mv.id = mt.movie_id
+    WHERE 
+        mh.level = 1
+      AND 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+)
+
+SELECT 
+    m.title AS Movie_Title,
+    COALESCE(GROUP_CONCAT(DISTINCT ad.name), 'No Actors') AS Actor_Names,
+    COALESCE(GROUP_CONCAT(DISTINCT CONCAT(adr.role, ' (', adr.role_count, ')')), 'No Roles') AS Role_Counts,
+    COUNT(DISTINCT mid.movie_id) AS Info_Entries,
+    MAX(mid.info) AS Latest_Info,
+    mh.level AS Hierarchy_Level
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info_data mid ON mh.movie_id = mid.movie_id
+LEFT JOIN 
+    movie_roles adr ON mh.movie_id = adr.movie_id
+LEFT JOIN 
+    actor_details ad ON mh.movie_id = ad.movies_count
+WHERE 
+    mh.level = 1
+GROUP BY 
+    m.title, mh.level
+ORDER BY 
+    COUNT(DISTINCT ad.actor_id) DESC;

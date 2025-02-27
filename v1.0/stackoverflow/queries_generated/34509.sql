@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        0 as Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+AggregateVotes AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS NewestPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        AggregateVotes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '<>')) AS t ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, v.UpVotes, v.DownVotes
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        COALESCE(SUM(p.AnswerCount), 0) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Tags,
+    tah.UserId,
+    tah.DisplayName,
+    tah.PostCount,
+    tah.TotalAnswers,
+    p.Level AS PostLevel
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    RecursivePostHierarchy p ON pd.PostId = p.Id
+LEFT JOIN 
+    TopActiveUsers tah ON pd.UpVotes >= 5 -- Example predicate to join with active users for top questions
+WHERE 
+    pd.NewestPostRank <= 100 -- Limit to the top 100 newest posts
+ORDER BY 
+    pd.CreationDate DESC;

@@ -1,0 +1,83 @@
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY total_avail_qty DESC) as rank
+    FROM
+        SupplierStats
+),
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+RegionSummary AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM
+        region r
+    LEFT JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY
+        r.r_regionkey, r.r_name
+),
+FilteredOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        DATEDIFF(CURDATE(), o.o_orderdate) AS days_since_order
+    FROM
+        orders o
+    WHERE
+        o.o_orderstatus = 'O' AND
+        DATEDIFF(CURDATE(), o.o_orderdate) <= 30
+)
+SELECT
+    c.c_name AS customer_name,
+    c.total_spent,
+    c.order_count,
+    s.s_name AS supplier_name,
+    s.total_avail_qty,
+    rs.r_name AS region_name,
+    COUNT(DISTINCT fo.o_orderkey) AS recent_order_count
+FROM
+    CustomerOrderSummary c
+JOIN
+    lineitem l ON c.c_custkey = l.l_suppkey
+JOIN
+    TopSuppliers s ON l.l_suppkey = s.s_suppkey
+JOIN
+    RegionSummary rs ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rs.r_regionkey)
+LEFT JOIN
+    FilteredOrders fo ON l.l_orderkey = fo.o_orderkey
+WHERE
+    (s.total_avail_qty > 100 OR c.total_spent > 5000) AND
+    s.rank <= 10 OR
+    (s.total_supply_cost IS NOT NULL AND s.total_supply_cost < 15000)
+GROUP BY
+    c.c_name, c.total_spent, c.order_count, s.s_name, s.total_avail_qty, rs.r_name
+ORDER BY
+    c.total_spent DESC, s.total_avail_qty ASC;

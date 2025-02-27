@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.CreationDate, p.Score, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Tags,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1 AND 
+        Score > 10 
+),
+TopTags AS (
+    SELECT 
+        TRIM(value) AS TagName
+    FROM 
+        FilteredPosts,
+        UNNEST(string_to_array(Tags, ',')) AS value
+),
+TagCount AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        TopTags
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5  
+),
+PopularQuestions AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.OwnerDisplayName,
+        tc.TagName
+    FROM 
+        FilteredPosts fp
+    JOIN 
+        TagCount tc ON tc.PostCount > 5
+    ORDER BY 
+        fp.Score DESC, fp.CreationDate DESC
+)
+SELECT 
+    pq.PostId,
+    pq.Title,
+    pq.CreationDate,
+    pq.Score,
+    pq.OwnerDisplayName,
+    STRING_AGG(DISTINCT tc.TagName, ', ') AS RelatedTags
+FROM 
+    PopularQuestions pq
+LEFT JOIN 
+    TopTags tt ON pq.PostId IN (SELECT DISTINCT PostId FROM FilteredPosts)
+LEFT JOIN 
+    TagCount tc ON tc.TagName IN (SELECT TRIM(value) FROM UNNEST(string_to_array(pq.Tags, ',')) AS value)
+GROUP BY 
+    pq.PostId, pq.Title, pq.CreationDate, pq.Score, pq.OwnerDisplayName
+ORDER BY 
+    pq.Score DESC, pq.CreationDate DESC
+LIMIT 10;

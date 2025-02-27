@@ -1,0 +1,79 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Views,
+        UpVotes,
+        DownVotes,
+        TotalPosts,
+        Questions,
+        Answers,
+        LastPostDate,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStats
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.Views,
+    tu.UpVotes - tu.DownVotes AS NetVotes,
+    tu.TotalPosts,
+    tu.Questions,
+    tu.Answers,
+    cp.CloseCount,
+    cp.ReopenCount,
+    tu.LastPostDate,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    ClosedPosts cp ON tu.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+LEFT JOIN 
+    Comments c ON c.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = tu.UserId)
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = tu.UserId
+LEFT JOIN 
+    Tags t ON t.WikiPostId = p.Id
+WHERE 
+    tu.Rank <= 10
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.Reputation, 
+    tu.Views, tu.UpVotes, tu.DownVotes, 
+    tu.TotalPosts, tu.Questions, tu.Answers, 
+    cp.CloseCount, cp.ReopenCount, 
+    tu.LastPostDate
+ORDER BY 
+    tu.Reputation DESC;

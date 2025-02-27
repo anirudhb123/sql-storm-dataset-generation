@@ -1,0 +1,91 @@
+WITH movie_cte AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY mt.movie_id ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Feature%')
+    GROUP BY 
+        mt.movie_id, mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT mc.company_id) > 1
+),
+
+person_info_cte AS (
+    SELECT 
+        pi.person_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        AVG(pi.info_type_id) AS avg_info_type
+    FROM 
+        person_info pi
+    LEFT JOIN 
+        aka_name a ON pi.person_id = a.person_id
+    LEFT JOIN 
+        cast_info c ON pi.person_id = c.person_id
+    GROUP BY 
+        pi.person_id
+    HAVING 
+        AVG(pi.info_type_id) > 1
+),
+
+bizarre_companies AS (
+    SELECT 
+        company_id,
+        name,
+        country_code,
+        CASE 
+            WHEN country_code IS NULL THEN 'Unknown Country'
+            WHEN LENGTH(name) % 2 = 0 THEN 'Even Name Length'
+            ELSE 'Odd Name Length'
+        END AS semantic_case
+    FROM 
+        company_name
+    WHERE 
+        country_code IS NOT NULL OR EXTRACT(YEAR FROM CURRENT_DATE) - 2023 > 0
+),
+
+final_output AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        pi.actor_names,
+        pi.movies_count,
+        bc.name AS company_name,
+        bc.semantic_case
+    FROM 
+        movie_cte m
+    JOIN 
+        person_info_cte pi ON m.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = pi.person_id)
+    LEFT JOIN 
+        bizarre_companies bc ON m.movie_id IN (SELECT movie_id FROM movie_companies WHERE company_id = bc.company_id)
+)
+
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    COALESCE(fo.actor_names, 'No Actors') AS actors,
+    COALESCE(fo.company_name, 'Self-Made') AS production_company,
+    COUNT(DISTINCT fo.actor_names) OVER (PARTITION BY fo.movie_id) AS distinct_actor_count,
+    CASE 
+        WHEN fo.semantic_case LIKE '%Even%' THEN 'Special Company'
+        ELSE 'Regular Company'
+    END AS company_status
+FROM 
+    final_output fo
+WHERE 
+    fo.production_year >= (SELECT AVG(production_year) FROM aka_title)
+ORDER BY 
+    fo.production_year DESC, fo.title;

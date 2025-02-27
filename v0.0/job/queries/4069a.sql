@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND mc.note IN ('(2006) (non-USA) (all media) (except for Canada)', '(2008) (USA) (DVD) (as "Satisfaction.")', '(2011) (Bahamas) (theatrical)', '(in co-production with) (as LE Vision)', '(present) (as 20th Century Fox)') AND cn.name > 'Orbita-Films' AND ci.note > '(associate producer) (as Julio A. Avello)';

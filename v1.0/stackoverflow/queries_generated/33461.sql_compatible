@@ -1,0 +1,69 @@
+
+WITH RecursivePosts AS (
+    SELECT p.Id,
+           p.Title,
+           p.Score,
+           p.CreationDate,
+           p.ParentId,
+           1 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT p.Id,
+           p.Title,
+           p.Score,
+           p.CreationDate,
+           p.ParentId,
+           rp.Depth + 1
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.Id
+    WHERE p.PostTypeId = 2  
+),
+PostWithVoteCounts AS (
+    SELECT p.Id,
+           p.Title,
+           p.Score,
+           COALESCE(v.UpVotes, 0) AS UpVotes,
+           COALESCE(v.DownVotes, 0) AS DownVotes,
+           COALESCE(v.VoteCount, 0) AS ViewCount,
+           p.CreationDate,
+           COUNT(DISTINCT cm.Id) AS CommentCount,
+           ROW_NUMBER() OVER (PARTITION BY rp.Depth ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId,
+               SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+               SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+               SUM(CASE WHEN VoteTypeId IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN Comments cm ON p.Id = cm.PostId
+    LEFT JOIN RecursivePosts rp ON p.Id = rp.Id
+    WHERE p.CreationDate >= '2020-01-01'
+    GROUP BY p.Id, p.Title, p.Score, v.UpVotes, v.DownVotes, p.CreationDate, rp.Depth
+),
+RankedPosts AS (
+    SELECT *,
+           (UpVotes - DownVotes) AS NetScore,
+           RANK() OVER (ORDER BY (UpVotes - DownVotes) DESC, CreationDate DESC) AS OverallRank
+    FROM PostWithVoteCounts
+)
+SELECT *,
+       CASE 
+           WHEN OverallRank <= 50 THEN 'Top Posts'
+           ELSE 'Other Posts'
+       END AS Category,
+       CASE 
+           WHEN UpVotes = 0 AND DownVotes = 0 THEN 'No Votes'
+           ELSE 
+               CASE 
+                   WHEN UpVotes > DownVotes THEN 'Majority Upvotes'
+                   ELSE 'Majority Downvotes'
+               END
+       END AS VotingAnalysis,
+       (SELECT STRING_AGG(DISTINCT TagName, ', ') 
+        FROM Tags t 
+        WHERE t.Id IN (SELECT CAST(UNNEST(STRING_TO_ARRAY(Tags, '<>')) AS INT))) AS Tags
+FROM RankedPosts
+WHERE Rank <= 10;

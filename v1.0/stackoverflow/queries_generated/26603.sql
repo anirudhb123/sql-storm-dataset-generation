@@ -1,0 +1,76 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.Tags,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagArray,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        p.Title AS OldTitle,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+),
+HighScorePosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.OwnerDisplayName,
+        ps.TagArray,
+        p.AcceptedAnswerId,
+        COALESCE(phd.Comment, 'No comments') AS HistoryComment,
+        COALESCE(phd.HistoryDate, p.CreationDate) AS LastActivityDate
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        PostHistoryDetails phd ON ps.PostId = phd.PostId
+    WHERE 
+        ps.Score > 100 AND ps.AnswerCount > 5
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.OwnerDisplayName,
+    COUNT(DISTINCT hsp.TagArray) AS UniqueTagsCount,
+    hsp.ViewCount,
+    hsp.Score,
+    hsp.HistoryComment,
+    hsp.LastActivityDate
+FROM 
+    HighScorePosts hsp
+INNER JOIN 
+    Users u ON hsp.OwnerDisplayName = u.DisplayName
+GROUP BY 
+    hsp.PostId, hsp.Title, hsp.OwnerDisplayName, hsp.ViewCount, hsp.Score, hsp.HistoryComment, hsp.LastActivityDate
+ORDER BY 
+    hsp.Score DESC, hsp.ViewCount DESC
+LIMIT 10;

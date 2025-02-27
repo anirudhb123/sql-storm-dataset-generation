@@ -1,0 +1,96 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+), 
+
+UserPostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+), 
+
+TopPostStatistics AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        UPS.TotalPosts,
+        UPS.TotalQuestions,
+        UPS.TotalAnswers,
+        UPS.TotalScore,
+        UPS.AverageViews,
+        ROW_NUMBER() OVER (ORDER BY UPS.TotalScore DESC) AS ScoreRank
+    FROM 
+        RankedUsers U
+    JOIN 
+        UserPostStatistics UPS ON U.UserId = UPS.OwnerUserId
+), 
+
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '><'))::int[]
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+
+UserWithMostQuestions AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        U.DisplayName
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 1
+)
+
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.TotalQuestions,
+    T.TotalAnswers,
+    T.TotalScore,
+    T.AverageViews,
+    P.TagName AS PopularTag,
+    UQ.DisplayName AS TopQuestionUser
+FROM 
+    TopPostStatistics T
+LEFT JOIN 
+    PopularTags P ON P.UsageCount > 5
+CROSS JOIN 
+    UserWithMostQuestions UQ
+WHERE 
+    T.ReputationRank <= 10
+ORDER BY 
+    T.TotalScore DESC, 
+    T.TotalPosts DESC;
+
+-- For performance benchmarking purposes, evaluating execution time and plan can reveal optimisations in joins and aggregates.

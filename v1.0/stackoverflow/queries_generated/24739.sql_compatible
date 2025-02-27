@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn,
+        COALESCE(NULLIF(DATEDIFF(DAY, p.CreationDate, CURRENT_DATE), 0), 1) AS DaysSinceCreation,
+        CASE 
+            WHEN p.Title LIKE '%?%' THEN 'Question'
+            WHEN p.Title LIKE '%Answer%' THEN 'Answer'
+            ELSE 'Other'
+        END AS PostCategory,
+        SUBSTRING(p.Title, 1, 30) || '...' AS ShortTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.IsDeleted = 0 AND 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+TopRanked AS (
+    SELECT 
+        rp.*,
+        AVG(c.Score) OVER (PARTITION BY rp.PostId) AS AvgCommentScore,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.rn <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, 
+        rp.CommentCount, rp.DaysSinceCreation, rp.PostCategory, rp.ShortTitle
+)
+SELECT 
+    tr.PostId,
+    tr.Title,
+    tr.ShortTitle,
+    tr.CreationDate,
+    tr.Score,
+    tr.ViewCount,
+    tr.AnswerCount,
+    tr.CommentCount,
+    tr.VoteCount,
+    CASE 
+        WHEN tr.AvgCommentScore IS NULL THEN 'No comments yet'
+        WHEN tr.AvgCommentScore > 0 THEN 'Has positive comments'
+        ELSE 'Has negative comments'
+    END AS CommentStatus,
+    CASE 
+        WHEN tr.DaysSinceCreation <= 7 THEN 'New'
+        WHEN tr.DaysSinceCreation BETWEEN 8 AND 30 THEN 'Recent'
+        ELSE 'Old'
+    END AS PostAgeCategory,
+    CONCAT('Post ', tr.PostCategory, ': ', tr.Title) AS FullDescription
+FROM 
+    TopRanked tr
+WHERE 
+    tr.CommentCount > 3
+ORDER BY 
+    tr.Score DESC, tr.ViewCount DESC, tr.DaysSinceCreation ASC;

@@ -1,0 +1,55 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+    UNION ALL
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) + s.total_spent AS total_spent,
+        COUNT(o.o_orderkey) + s.order_count AS order_count
+    FROM customer c
+    JOIN SalesCTE s ON s.c_custkey = c.c_custkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderdate < CURRENT_DATE
+    WHERE o.o_orderkey IS NULL
+    GROUP BY c.c_custkey, c.c_name, s.total_spent, s.order_count
+),
+RegionSales AS (
+    SELECT
+        r.r_name,
+        SUM(s.total_spent) AS total_sales,
+        COUNT(DISTINCT s.c_custkey) AS customer_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN SalesCTE sales ON sales.c_custkey = o.o_custkey
+    WHERE sales.total_spent IS NOT NULL
+    GROUP BY r.r_name
+),
+FinalResults AS (
+    SELECT
+        r.r_name,
+        COALESCE(rs.total_sales, 0) AS total_sales,
+        COALESCE(rs.customer_count, 0) AS customer_count,
+        DENSE_RANK() OVER (ORDER BY COALESCE(rs.total_sales, 0) DESC) AS sales_rank
+    FROM region r
+    LEFT JOIN RegionSales rs ON r.r_name = rs.r_name
+)
+SELECT
+    r.r_name,
+    r.total_sales,
+    r.customer_count,
+    r.sales_rank
+FROM FinalResults r
+WHERE r.total_sales > 50000
+ORDER BY r.sales_rank, r.r_name;

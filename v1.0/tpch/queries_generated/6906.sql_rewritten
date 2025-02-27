@@ -1,0 +1,44 @@
+WITH RevenueSummary AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_revenue_per_order
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        c.c_nationkey
+),
+RankedRevenue AS (
+    SELECT 
+        n.n_name,
+        r.total_revenue,
+        r.order_count,
+        r.avg_revenue_per_order,
+        RANK() OVER (ORDER BY r.total_revenue DESC) AS revenue_rank
+    FROM 
+        RevenueSummary r
+    JOIN 
+        nation n ON r.c_nationkey = n.n_nationkey
+)
+SELECT 
+    n.n_name,
+    n.r_comment,
+    rr.total_revenue,
+    rr.order_count,
+    rr.avg_revenue_per_order,
+    rr.revenue_rank
+FROM 
+    RankedRevenue rr
+JOIN 
+    region n ON n.r_regionkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_nationkey = rr.c_nationkey)
+WHERE 
+    rr.revenue_rank <= 10
+ORDER BY 
+    rr.total_revenue DESC;

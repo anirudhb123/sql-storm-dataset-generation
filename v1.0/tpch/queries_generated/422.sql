@@ -1,0 +1,57 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.n_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    SUM(oss.total_sales) AS total_sales,
+    s.sum_total_supply_cost,
+    ss.unique_suppliers,
+    CASE 
+        WHEN ss.total_supply_cost IS NULL THEN 'No suppliers' 
+        ELSE 'Suppliers present' 
+    END AS supplier_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier_summary ss ON n.n_nationkey = ss.n_nationkey
+LEFT JOIN 
+    order_summary os ON os.price_rank <= 10
+LEFT JOIN 
+    lineitem_summary oss ON oss.l_orderkey = os.o_orderkey
+GROUP BY 
+    r.r_name, ss.total_supply_cost, ss.unique_suppliers
+ORDER BY 
+    total_sales DESC NULLS LAST;

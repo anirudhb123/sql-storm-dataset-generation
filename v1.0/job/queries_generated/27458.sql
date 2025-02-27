@@ -1,0 +1,62 @@
+WITH actor_movie_count AS (
+    SELECT
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        a.person_id
+),
+top_actors AS (
+    SELECT
+        person_id,
+        movie_count
+    FROM
+        actor_movie_count
+    WHERE
+        movie_count > 10
+),
+movies_with_keywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        k.keyword
+    FROM
+        aka_title m
+    JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        m.production_year BETWEEN 2000 AND 2023
+),
+actor_movie_info AS (
+    SELECT
+        a.id AS actor_id,
+        a.name,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        movies_with_keywords t ON c.movie_id = t.movie_id
+    JOIN
+        top_actors ta ON a.person_id = ta.person_id
+)
+SELECT
+    ami.actor_id,
+    ami.name,
+    COUNT(DISTINCT ami.movie_title) AS total_movies,
+    STRING_AGG(DISTINCT ami.keyword, ', ') AS associated_keywords
+FROM
+    actor_movie_info ami
+GROUP BY
+    ami.actor_id, ami.name
+ORDER BY
+    total_movies DESC
+LIMIT 10;

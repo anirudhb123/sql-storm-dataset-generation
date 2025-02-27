@@ -1,0 +1,64 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2001)
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+AggregateReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(rs.ws_sales_price, 0) AS last_sales_price,
+    COALESCE(ar.total_returned, 0) AS total_returns,
+    COALESCE(ar.total_return_amount, 0) AS total_return_amount,
+    cd.total_net_profit AS total_customer_income,
+    COUNT(DISTINCT cd.c_customer_sk) AS unique_customers,
+    COUNT(r.rank) AS top_sales_count
+FROM 
+    item i
+LEFT JOIN 
+    RankedSales r ON i.i_item_sk = r.ws_item_sk AND r.rank <= 5
+LEFT JOIN 
+    AggregateReturns ar ON i.i_item_sk = ar.cr_item_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.total_net_profit > 100
+WHERE 
+    i.i_rec_start_date <= cast('2002-10-01' as date)
+    AND (r.ws_sales_price IS NOT NULL OR ar.total_returned IS NOT NULL)
+GROUP BY 
+    i.i_item_id, i.i_item_desc, ar.total_returned, ar.total_return_amount, cd.total_net_profit
+ORDER BY 
+    total_customer_income DESC, last_sales_price DESC;

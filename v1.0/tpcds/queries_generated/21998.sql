@@ -1,0 +1,94 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sales_price IS NOT NULL
+),
+CustomerPurchase AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        cp.total_spent
+    FROM
+        customer_purchase cp
+    JOIN
+        customer c ON cp.c_customer_sk = c.c_customer_sk
+    WHERE
+        cp.total_spent > (SELECT AVG(total_spent) FROM customer_purchase)  -- Above average spenders
+),
+ReturnStatistics AS (
+    SELECT
+        sr_async.returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_quantity) AS total_returned_quantity,
+        SUM(sr.return_amt_inc_tax) AS total_returned_amount
+    FROM
+        store_returns sr
+    GROUP BY
+        sr.returning_customer_sk
+),
+DetailReturns AS (
+    SELECT
+        c.c_customer_sk,
+        COALESCE(r.total_returns, 0) AS returns_count,
+        COALESCE(r.total_returned_quantity, 0) AS returned_quantity,
+        COALESCE(r.total_returned_amount, 0) AS returned_amount
+    FROM
+        customer c
+    LEFT JOIN
+        ReturnStatistics r ON c.c_customer_sk = r.returning_customer_sk
+),
+FinalSales AS (
+    SELECT
+        hvc.c_customer_sk,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales
+    FROM
+        HighValueCustomers hvc
+    LEFT JOIN
+        RankedSales rs ON hvc.c_customer_sk IN (
+            SELECT DISTINCT ws_bill_customer_sk
+            FROM web_sales
+            WHERE ws_item_sk IN (
+                SELECT ws_item_sk
+                FROM RankedSales
+                WHERE price_rank = 1  -- Highest price items
+            )
+        )
+    GROUP BY
+        hvc.c_customer_sk
+)
+
+SELECT
+    d.c_customer_sk,
+    fs.total_sales,
+    dr.returns_count,
+    dr.returned_quantity,
+    dr.returned_amount,
+    CASE 
+        WHEN dr.returns_count > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM
+    DetailReturns dr
+INNER JOIN
+    FinalSales fs ON dr.c_customer_sk = fs.c_customer_sk
+ORDER BY
+    dr.returned_amount DESC NULLS LAST
+FETCH FIRST 20 ROWS ONLY;

@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+TopOrders AS (
+    SELECT 
+        r.n_name AS region_name,
+        COUNT(ro.o_orderkey) AS total_orders,
+        SUM(ro.o_totalprice) AS total_revenue
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.order_rank <= 10
+    GROUP BY 
+        r.n_name
+)
+SELECT 
+    t.region_name,
+    t.total_orders,
+    t.total_revenue,
+    ROUND(AVG(c.c_acctbal), 2) AS average_account_balance
+FROM 
+    TopOrders t
+JOIN 
+    customer c ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey WHERE r.r_name = t.region_name)
+GROUP BY 
+    t.region_name, t.total_orders, t.total_revenue
+ORDER BY 
+    t.total_revenue DESC;

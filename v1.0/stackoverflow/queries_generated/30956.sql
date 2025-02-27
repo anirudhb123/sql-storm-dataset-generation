@@ -1,0 +1,115 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        OwnerUserId, 
+        ParentId, 
+        CreationDate, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        p.CreationDate, 
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+), 
+
+AggregatedUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        AVG(u.Reputation) AS AvgReputation,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentsCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.LastActivityDate
+),
+
+CombinedStats AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ur.PostsCount,
+        ur.TotalBounties,
+        ra.PostId,
+        ra.Title,
+        ra.CommentsCount,
+        ra.LastVoteDate
+    FROM 
+        AggregatedUserStats ur
+    JOIN 
+        Users u ON ur.UserId = u.Id
+    LEFT JOIN 
+        RecentActivity ra ON u.Id = ra.OwnerUserId
+)
+
+SELECT 
+    cs.DisplayName, 
+    cs.Reputation, 
+    cs.PostsCount, 
+    cs.TotalBounties,
+    ra.Title, 
+    ra.CommentsCount, 
+    ra.LastVoteDate,
+    COALESCE(vote_summary.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(vote_summary.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN ra.LastVoteDate IS NULL THEN 'No Votes'
+        ELSE 'Voted'
+    END AS VoteStatus
+FROM 
+    CombinedStats cs
+LEFT JOIN 
+    (
+        SELECT 
+            v.UserId, 
+            COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+        FROM 
+            Votes v
+        INNER JOIN 
+            VoteTypes vt ON v.VoteTypeId = vt.Id
+        GROUP BY 
+            v.UserId
+    ) vote_summary ON vote_summary.UserId = cs.UserId
+ORDER BY 
+    cs.Reputation DESC, 
+    cs.PostsCount DESC;
+

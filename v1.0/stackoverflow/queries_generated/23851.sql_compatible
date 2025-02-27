@@ -1,0 +1,86 @@
+
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(V.BountyAmount, 0) * CASE WHEN V.VoteTypeId IN (8, 9) THEN 1 ELSE 0 END) AS TotalBounty,
+        SUM(COALESCE(V.UserId, 0)) AS TotalVotes,
+        COUNT(DISTINCT P.Id) AS PublishedPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalComments,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalCloseVotes,
+        DENSE_RANK() OVER (ORDER BY P.CreationDate DESC) AS RecencyRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(*) > 5
+),
+MergedData AS (
+    SELECT 
+        P.Title,
+        P.ViewCount,
+        U.DisplayName AS Owner,
+        COALESCE(T.UsageCount, 0) AS PopularTagCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        PostSummary P
+    LEFT JOIN 
+        Users U ON P.PostId = U.Id
+    LEFT JOIN 
+        Votes V ON P.PostId = V.PostId
+    LEFT JOIN 
+        PopularTags T ON P.Title LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        P.Title, P.ViewCount, U.DisplayName
+    HAVING 
+        SUM(COALESCE(V.VoteTypeId, 0)) IS NOT NULL
+)
+SELECT 
+    MD.Title,
+    MD.Owner,
+    MD.ViewCount,
+    MD.PopularTagCount,
+    MD.UpVotes,
+    MD.DownVotes,
+    CASE 
+        WHEN MD.UpVotes - MD.DownVotes > 0 THEN 'Positive'
+        WHEN MD.UpVotes - MD.DownVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment
+FROM 
+    MergedData MD
+ORDER BY 
+    MD.ViewCount DESC, MD.PopularTagCount DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

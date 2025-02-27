@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_phone, s.s_acctbal, s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_phone, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderAnalytics AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT oa.o_orderkey, oa.o_orderdate, oa.total_revenue, oa.unique_customers,
+           p.p_mfgr, p.p_brand, p.p_type, p.pSize
+    FROM OrderAnalytics oa
+    JOIN lineitem l ON oa.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE total_revenue > 50000
+),
+FinalReport AS (
+    SELECT o.o_orderkey, o.o_orderdate, h.total_revenue, h.unique_customers,
+           n.n_name AS supplier_nation, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM HighValueOrders h
+    JOIN orders o ON h.o_orderkey = o.o_orderkey
+    JOIN supplier s ON s.s_nationkey = o.o_orderkey
+    JOIN customer c ON c.c_nationkey = o.o_orderkey
+    JOIN nation n ON n.n_nationkey = s.s_nationkey
+    GROUP BY o.o_orderkey, o.o_orderdate, h.total_revenue, h.unique_customers, n.n_name
+)
+SELECT * FROM FinalReport
+WHERE supplier_count > 5
+ORDER BY total_revenue DESC, orderdate ASC;

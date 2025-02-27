@@ -1,0 +1,52 @@
+-- Performance benchmarking query to analyze post activity and their respective tags
+
+WITH PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId IN (2)), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId IN (3)), 0) AS DownVotes,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tagname ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tagname)
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        LastActivityDate,
+        Score,
+        ViewCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        Tags,
+        ROW_NUMBER() OVER (ORDER BY LastActivityDate DESC) AS Rank
+    FROM 
+        PostActivity
+)
+
+SELECT 
+    *
+FROM 
+    RankedPosts
+WHERE 
+    Rank <= 100 -- Limit to the top 100 recent posts
+ORDER BY 
+    LastActivityDate DESC;

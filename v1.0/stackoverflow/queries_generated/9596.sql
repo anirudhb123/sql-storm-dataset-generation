@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score, p.ViewCount
+),
+UserPostActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.PostId) AS TotalPosts,
+        SUM(COALESCE(rp.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(rp.VoteCount, 0)) AS TotalVotes,
+        AVG(rp.Score) AS AverageScore,
+        AVG(rp.ViewCount) AS AverageViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalVotes,
+    u.AverageScore,
+    u.AverageViews,
+    RANK() OVER (ORDER BY u.TotalPosts DESC) AS UserRank
+FROM 
+    UserPostActivity u
+WHERE 
+    u.TotalPosts > 0 -- Only include users with posts
+ORDER BY 
+    u.TotalPosts DESC
+LIMIT 10; -- Top 10 users by number of posts

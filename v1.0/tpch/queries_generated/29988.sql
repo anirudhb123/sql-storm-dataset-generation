@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(CASE WHEN p.p_container LIKE '%BOX%' THEN p.p_retailprice ELSE NULL END) AS avg_box_price,
+    MAX(CHAR_LENGTH(p.p_comment)) AS max_comment_length,
+    GROUP_CONCAT(DISTINCT CONCAT(n.n_name, '(', s.s_name, ')') ORDER BY n.n_name SEPARATOR ', ') AS nation_supplier_info,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finished' 
+        WHEN o.o_orderstatus = 'P' THEN 'Pending' 
+        ELSE 'Other' 
+    END AS order_status_description
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_name LIKE '%steel%' 
+    AND s.s_acctbal > 1000 
+    AND o.o_orderdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+GROUP BY 
+    p.p_name, o.o_orderstatus
+ORDER BY 
+    total_available_quantity DESC, avg_box_price ASC
+LIMIT 50;

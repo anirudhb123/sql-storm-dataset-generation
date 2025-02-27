@@ -1,0 +1,62 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        a.surname_pcode
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+),
+actor_ranks AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS rank_position
+    FROM 
+        movie_details
+    GROUP BY 
+        actor_name
+),
+top_actors AS (
+    SELECT 
+        actor_name
+    FROM 
+        actor_ranks
+    WHERE 
+        rank_position <= 10
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    COALESCE(kw.keyword, 'No Keywords') AS keyword,
+    CASE 
+        WHEN md.surname_pcode IS NULL THEN 'Unknown'
+        ELSE md.surname_pcode
+    END AS surname_code
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_keyword mk ON md.title = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    md.actor_name IN (SELECT actor_name FROM top_actors)
+GROUP BY 
+    md.title, 
+    md.production_year, 
+    md.actor_name, 
+    kw.keyword, 
+    md.surname_pcode
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_name;

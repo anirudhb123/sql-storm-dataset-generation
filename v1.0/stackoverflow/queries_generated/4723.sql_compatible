@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year'
+        AND p.ViewCount > 50
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= DATE('2024-10-01') - INTERVAL '1 month'
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.AnswerCount,
+    tu.DisplayName AS TopUser,
+    tu.TotalScore,
+    phd.HistoryTypes,
+    phd.HistoryCount,
+    COALESCE(rv.UpVoteCount, 0) AS UpVotes,
+    COALESCE(rv.DownVoteCount, 0) AS DownVotes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+LEFT JOIN 
+    (
+        SELECT 
+            rv.PostId,
+            SUM(CASE WHEN rv.VoteTypeId = 2 THEN rv.VoteCount ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN rv.VoteTypeId = 3 THEN rv.VoteCount ELSE 0 END) AS DownVoteCount
+        FROM 
+            RecentVotes rv
+        GROUP BY 
+            rv.PostId
+    ) rv ON rp.Id = rv.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

@@ -1,0 +1,79 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_purchase
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+recent_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ISNULL(r.r_reason_desc, 'No reason') AS return_reason,
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        item i
+    LEFT JOIN 
+        store_returns sr ON i.i_item_sk = sr.sr_item_sk
+    LEFT JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc, r.r_reason_desc
+    HAVING 
+        SUM(sr_return_quantity) > 10
+),
+final_report AS (
+    SELECT 
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        rs.total_sales,
+        rs.total_profit,
+        ti.i_item_id,
+        ti.i_item_desc,
+        ti.total_returns
+    FROM 
+        customer_stats cs
+    JOIN 
+        recent_sales rs ON cs.c_customer_sk = rs.ws_item_sk 
+    LEFT JOIN 
+        top_items ti ON rs.ws_item_sk = ti.i_item_id
+    WHERE 
+        cs.rank_by_purchase <= 10
+        AND (cs.cd_marital_status = 'M' OR cs.cd_marital_status IS NULL)
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.total_sales,
+    f.total_profit,
+    f.i_item_id,
+    f.i_item_desc,
+    f.total_returns
+FROM 
+    final_report f
+ORDER BY 
+    f.total_profit DESC, f.total_sales DESC;

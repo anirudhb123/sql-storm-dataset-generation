@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id IS NOT NULL  
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+)
+, cast_with_roles AS (
+    
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        r.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+)
+, detailed_movie_info AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        array_agg(k.keyword) AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    dmi.title AS movie_title,
+    dmi.production_year,
+    ARRAY_AGG(DISTINCT ca.name) AS cast_names,
+    COUNT(DISTINCT dmi.keywords) AS total_keywords,
+    MAX(mh.level) AS max_link_level,
+    AVG(CASE WHEN cr.role_rank <= 2 THEN 1 ELSE NULL END) AS avg_top_roles,
+    CASE 
+        WHEN MAX(mh.level) = 0 THEN 'No Links'
+        WHEN MAX(mh.level) > 3 THEN 'High Linkage'
+        ELSE 'Moderate Linkage'
+    END AS linkage_analysis
+FROM 
+    detailed_movie_info dmi
+LEFT JOIN 
+    movie_hierarchy mh ON dmi.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_with_roles cr ON dmi.movie_id = cr.movie_id
+LEFT JOIN 
+    aka_title at ON dmi.movie_id = at.movie_id
+LEFT JOIN 
+    aka_name an ON an.person_id = cr.person_id AND an.name IS NOT NULL
+LEFT JOIN 
+    name n ON n.imdb_id = an.id
+WHERE 
+    dmi.production_year IS NOT NULL
+    AND (an.md5sum IS NULL OR an.md5sum LIKE '%abc%')  
+GROUP BY 
+    dmi.movie_id
+ORDER BY 
+    dmi.production_year
+LIMIT 100 OFFSET 50;

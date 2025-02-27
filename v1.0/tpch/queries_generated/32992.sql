@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice) AS total_price,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_totalprice IS NOT NULL
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       SUM(COALESCE(ps.total_available, 0)) AS total_part_avail,
+       SUM(os.net_revenue) AS total_net_revenue,
+       AVG(oo.total_price) AS average_order_value,
+       CASE 
+           WHEN COUNT(DISTINCT sh.s_suppkey) > 5 THEN 'Diverse Supplier'
+           ELSE 'Limited Supplier'
+       END AS supplier_variety
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN part_supplier ps ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 100.00)
+LEFT JOIN order_summary os ON os.o_orderkey IN (SELECT o_orderkey FROM ranked_orders WHERE order_rank <= 10)
+LEFT JOIN ranked_orders oo ON oo.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'F')
+GROUP BY r.r_name
+HAVING SUM(COALESCE(os.net_revenue, 0)) > 10000
+ORDER BY r.r_name;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score >= 0
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(pt.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10 
+),
+RecentActivity AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        COUNT(DISTINCT ph.PostId) AS DistinctPostsEdited
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+        AND ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.UserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(ra.EditCount, 0) AS RecentEditCount,
+        COALESCE(ra.DistinctPostsEdited, 0) AS DistinctPostsEdited
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecentActivity ra ON u.Id = ra.UserId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.RecentEditCount,
+    up.DistinctPostsEdited,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    pt.TagName,
+    pt.PostCount,
+    pt.TotalViews
+FROM 
+    UserReputation up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount >= 2 
+WHERE 
+    up.Reputation > 1000 
+    AND rp.rn = 1 
+ORDER BY 
+    up.Reputation DESC, 
+    rp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

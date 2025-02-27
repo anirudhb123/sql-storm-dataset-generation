@@ -1,0 +1,73 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 5 AND 15
+        AND p.p_retailprice > 10.00
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_suppliescost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_cost) FROM (SELECT SUM(ps_supplycost * ps_availqty) AS total_cost FROM partsupp ps GROUP BY ps.s_suppkey) AS supplier_totals)
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+        AND EXISTS (
+            SELECT 1 FROM lineitem l
+            WHERE l.l_orderkey = o.o_orderkey
+            AND l.l_returnflag = 'R'
+        )
+)
+SELECT 
+    r.r_name,
+    rp.p_name,
+    ts.s_name,
+    fo.o_orderkey,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    ranked_parts rp ON ps.ps_partkey = rp.p_partkey
+JOIN 
+    lineitem l ON l.l_partkey = rp.p_partkey
+JOIN 
+    filtered_orders fo ON fo.o_orderkey = l.l_orderkey
+WHERE 
+    rp.price_rank <= 5
+    AND ts.total_cost IS NOT NULL
+    AND (fo.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31') 
+GROUP BY 
+    r.r_name, rp.p_name, ts.s_name, fo.o_orderkey
+HAVING 
+    COUNT(DISTINCT l.l_linenumber) > 1
+ORDER BY 
+    total_revenue DESC, r.r_name ASC;

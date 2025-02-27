@@ -1,0 +1,52 @@
+
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        LENGTH(p.Body) AS BodyLength,
+        LENGTH(p.Title) AS TitleLength,
+        (LENGTH(p.Tags) - LENGTH(REPLACE(p.Tags, '<', ''))) / LENGTH('<') AS TagCount,
+        ARRAY_AGG(DISTINCT pt.Name) AS PostTypeNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') AS t ON TRUE
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATE '2023-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, U.DisplayName, U.Reputation
+),
+
+BenchmarkResults AS (
+    SELECT 
+        COUNT(PostId) AS TotalPosts,
+        AVG(BodyLength) AS AvgBodyLength,
+        AVG(TitleLength) AS AvgTitleLength,
+        AVG(TagCount) AS AvgTagCount,
+        STRING_AGG(DISTINCT TagList, '; ') AS ConsolidatedTags,
+        STRING_AGG(DISTINCT OwnerDisplayName ORDER BY U.Reputation DESC) AS TopOwners
+    FROM 
+        ProcessedPosts
+)
+
+SELECT 
+    TotalPosts,
+    AvgBodyLength,
+    AvgTitleLength,
+    AvgTagCount,
+    ConsolidatedTags,
+    TopOwners
+FROM 
+    BenchmarkResults;

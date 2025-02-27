@@ -1,0 +1,100 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Base case: starting with questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.Depth,
+        u.Reputation AS UserReputation,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.OwnerUserId, rp.Depth, u.Reputation
+),
+BadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.Depth,
+        pd.UserReputation,
+        COALESCE(bs.GoldCount, 0) AS GoldCount,
+        COALESCE(bs.SilverCount, 0) AS SilverCount,
+        COALESCE(bs.BronzeCount, 0) AS BronzeCount,
+        COALESCE(vs.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(vs.DownVoteCount, 0) AS DownVoteCount
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        BadgeSummary bs ON pd.OwnerUserId = bs.UserId
+    LEFT JOIN 
+        VoteSummary vs ON pd.PostId = vs.PostId
+    WHERE 
+        pd.Depth > 1 AND -- Exclude top-level Questions
+        pd.UserReputation >= 1000 -- Only include posts from users with reputation of 1000 or more
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Depth,
+    fp.UserReputation,
+    fp.GoldCount,
+    fp.SilverCount,
+    fp.BronzeCount,
+    fp.UpVoteCount,
+    fp.DownVoteCount,
+    (fp.UpVoteCount - fp.DownVoteCount) AS NetVotes
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    NetVotes DESC, 
+    fp.UserReputation DESC
+LIMIT 50;
+

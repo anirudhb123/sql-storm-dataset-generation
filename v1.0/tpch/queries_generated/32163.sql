@@ -1,0 +1,93 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus = 'O'
+),
+HighValueParts AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+    HAVING
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM
+        supplier s
+),
+RecentOrders AS (
+    SELECT DISTINCT
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+CustomerSummary AS (
+    SELECT
+        co.c_custkey,
+        co.c_name,
+        SUM(co.o_totalprice) AS total_spent,
+        COUNT(co.o_orderkey) AS order_count,
+        MAX(co.o_orderdate) AS last_order_date
+    FROM
+        CustomerOrders co
+    WHERE
+        co.rn = 1
+    GROUP BY
+        co.c_custkey, co.c_name
+)
+
+SELECT
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_spent,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank,
+    rp.supplier_rank,
+    hpp.total_supply_value
+FROM
+    CustomerSummary cs
+LEFT JOIN
+    RankedSuppliers rp ON cs.total_spent > 1000
+LEFT JOIN
+    HighValueParts hpp ON hpp.ps_partkey IN (
+        SELECT DISTINCT
+            l.l_partkey
+        FROM
+            RecentOrders ro
+        JOIN
+            lineitem l ON ro.o_orderkey = l.l_orderkey
+    )
+WHERE
+    cs.total_spent IS NOT NULL
+ORDER BY
+    cs.total_spent DESC;

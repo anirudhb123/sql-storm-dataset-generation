@@ -1,0 +1,69 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        AVG((EXTRACT(EPOCH FROM NOW()) - EXTRACT(EPOCH FROM v.CreationDate)) / 3600) AS AvgTimeSinceVoteInHours
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS AnswerCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedAnswers
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+    ORDER BY 
+        UpvotedAnswers DESC
+    LIMIT 10
+)
+SELECT 
+    uvs.DisplayName AS Voter,
+    uvs.TotalVotes,
+    uvs.Upvotes,
+    uvs.Downvotes,
+    uvs.AvgTimeSinceVoteInHours,
+    pt.TagName,
+    pt.PostCount,
+    pt.TotalViews,
+    tu.DisplayName AS TopUser,
+    tu.AnswerCount,
+    tu.UpvotedAnswers
+FROM 
+    UserVoteStats uvs
+CROSS JOIN 
+    PopularTags pt
+JOIN 
+    TopUsers tu ON uvs.UserId != tu.UserId
+ORDER BY 
+    uvs.TotalVotes DESC, pt.TotalViews DESC, tu.UpvotedAnswers DESC;

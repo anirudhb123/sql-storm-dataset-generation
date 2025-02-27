@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title,
+    t.production_year,
+    COUNT(DISTINCT c.id) AS number_of_roles,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    AVG(CASE 
+        WHEN m.production_year IS NULL THEN 0 
+        ELSE m.production_year 
+    END) AS avg_production_year,
+    RANK() OVER (PARTITION BY t.id ORDER BY COUNT(DISTINCT k.id) DESC) AS keyword_rank
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy m ON t.id = m.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+    AND a.name IS NOT NULL
+    AND a.name <> ''
+GROUP BY 
+    a.id, t.id, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.id) > 1
+ORDER BY 
+    number_of_roles DESC, actor_name ASC;

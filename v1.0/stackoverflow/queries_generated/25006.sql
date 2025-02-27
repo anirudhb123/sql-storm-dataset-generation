@@ -1,0 +1,60 @@
+WITH TagAggregate AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS SamplePostTitles
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY
+        t.TagName
+),
+UserReputationSample AS (
+    SELECT
+        u.DisplayName,
+        u.Reputation,
+        STRING_AGG(DISTINCT b.Name, ', ') AS Badges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS ChangeCount,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT
+    ta.TagName,
+    ta.PostCount,
+    ta.SamplePostTitles,
+    uru.DisplayName AS TopUser,
+    uru.Reputation AS TopUserReputation,
+    uru.Badges AS UserBadges,
+    uru.TotalPosts AS UserTotalPosts,
+    uru.TotalViews AS UserTotalViews,
+    phs.ChangeCount AS TotalChanges,
+    phs.EditComments
+FROM
+    TagAggregate ta
+JOIN
+    UserReputationSample uru ON ta.PostCount = (SELECT MAX(PostCount) FROM TagAggregate)
+JOIN
+    PostHistorySummary phs ON phs.PostId = (SELECT TOP 1 p.Id FROM Posts p ORDER BY p.LastActivityDate DESC)
+WHERE
+    ta.PostCount > 0
+ORDER BY
+    ta.TagName;

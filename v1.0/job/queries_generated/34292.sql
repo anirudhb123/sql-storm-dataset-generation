@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to get a hierarchy of movies and their linked movies
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS level
+    FROM
+        movie_link ml
+    WHERE
+        ml.linked_movie_id IS NOT NULL
+    UNION ALL
+    SELECT
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+MovieInfo AS (
+    -- CTE to aggregate information about movies
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        COUNT(DISTINCT pic.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM
+        aka_title mt
+    LEFT JOIN cast_info pic ON mt.id = pic.movie_id
+    LEFT JOIN aka_name ak ON pic.person_id = ak.person_id
+    WHERE
+        mt.production_year >= 2000
+    GROUP BY
+        mt.id, mt.title, mt.production_year, mt.kind_id
+),
+MovieCompanies AS (
+    -- CTE to calculate the count of unique companies involved in movies
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN movie_info mi ON mc.movie_id = mi.movie_id
+    JOIN MovieInfo m ON m.movie_id = mc.movie_id
+    GROUP BY
+        m.movie_id
+),
+ResultSet AS (
+    -- Final result set joining previous CTEs with complex predicates
+    SELECT
+        mi.movie_id,
+        mi.title,
+        mi.production_year,
+        COALESCE(comp.company_count, 0) AS company_count,
+        mi.actor_count,
+        mh.level AS hierarchy_level
+    FROM
+        MovieInfo mi
+    LEFT JOIN MovieCompanies comp ON mi.movie_id = comp.movie_id
+    LEFT JOIN MovieHierarchy mh ON mi.movie_id = mh.movie_id
+    WHERE
+        mi.actor_count > 5  -- Only movies with more than 5 actors
+        AND (mi.production_year IS NOT NULL OR mi.kind_id IS NOT NULL)  -- NULL logic in conditions
+)
+SELECT
+    rs.movie_id,
+    rs.title,
+    rs.production_year,
+    rs.company_count,
+    rs.actor_count,
+    rs.hierarchy_level
+FROM
+    ResultSet rs
+ORDER BY
+    rs.production_year DESC, rs.actor_count DESC;

@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        COUNT(p.ps_partkey) AS part_count,
+        SUM(p.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY COUNT(p.ps_partkey) DESC, SUM(p.ps_supplycost) ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    r.region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(co.o_totalprice) AS total_order_value,
+    AVG(co.lineitem_count) AS avg_line_items_per_order,
+    COUNT(DISTINCT rs.s_suppkey) AS total_suppliers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+JOIN 
+    CustomerOrders co ON s.s_nationkey = co.c_custkey
+GROUP BY 
+    r.region_name
+ORDER BY 
+    total_order_value DESC;

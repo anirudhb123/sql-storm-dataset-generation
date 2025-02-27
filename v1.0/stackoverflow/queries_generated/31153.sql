@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        IFNULL(u.DisplayName, 'Deleted User') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -2, GETDATE())  -- Posts from the last 2 years
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id
+),
+PostInteractions AS (
+    SELECT 
+        Ph.PostId,
+        COUNT(CASE WHEN Ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN Ph.PostHistoryTypeId IN (1, 2, 4, 6) THEN 1 END) AS EditCount,  -- Initial and Edit events
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        PostHistory Ph
+    LEFT JOIN 
+        Comments c ON Ph.PostId = c.PostId
+    GROUP BY 
+        Ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    ur.TotalReputation,
+    pi.CloseCount,
+    pi.EditCount,
+    pi.CommentCount
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostInteractions pi ON rp.PostId = pi.PostId
+WHERE 
+    rp.rn = 1  -- Get only the latest post per user
+ORDER BY 
+    TotalReputation DESC,
+    rp.ViewCount DESC
+LIMIT 100;  -- Fetch the top 100 posts

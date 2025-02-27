@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        OwnerDisplayName, 
+        CommentCount, 
+        UpVotes, 
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5 -- Global top 5 posts per user
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000 -- Consider users with a reputation greater than 1000
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.CreationDate,
+    t.OwnerDisplayName,
+    t.CommentCount,
+    t.UpVotes,
+    t.DownVotes,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    TopPosts t
+LEFT JOIN 
+    UserBadges ub ON t.OwnerDisplayName = ub.UserId 
+ORDER BY 
+    t.UpVotes DESC, 
+    t.CreationDate DESC;
+

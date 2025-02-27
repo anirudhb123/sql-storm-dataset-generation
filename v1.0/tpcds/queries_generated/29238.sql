@@ -1,0 +1,66 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_city || ', ' || ca_state || ' ' || ca_zip AS full_address,
+        ca_country,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_street_type) AS upper_street_type
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        LEFT(cd_education_status, 5) AS short_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+ItemDetails AS (
+    SELECT 
+        i_item_desc,
+        i_brand,
+        CONCAT('Item: ', i_item_id, ', Brand: ', i_brand) AS item_brand_info
+    FROM 
+        item
+    WHERE 
+        i_current_price BETWEEN 10 AND 100
+),
+Sales AS (
+    SELECT 
+        ss_customer_sk,
+        COUNT(ss_ticket_number) AS total_sales,
+        SUM(ss_sales_price) AS total_sales_amount
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_customer_sk
+)
+SELECT 
+    a.full_address,
+    d.cd_gender,
+    d.short_education_status,
+    SUM(s.total_sales) AS total_sales_count,
+    SUM(s.total_sales_amount) AS total_sales_value,
+    MAX(i.item_brand_info) AS item_info,
+    AVG(a.street_name_length) AS avg_street_name_length,
+    COUNT(DISTINCT a.ca_country) AS unique_countries
+FROM 
+    AddressParts a
+JOIN 
+    Demographics d ON a.full_address IS NOT NULL
+JOIN 
+    Sales s ON d.cd_demo_sk = s.ss_customer_sk
+JOIN 
+    ItemDetails i ON i.i_item_sk = ANY(ARRAY(SELECT ss_item_sk FROM store_sales WHERE ss_customer_sk = s.ss_customer_sk))
+GROUP BY 
+    a.full_address, d.cd_gender, d.short_education_status
+HAVING 
+    AVG(a.street_name_length) > 20
+ORDER BY 
+    total_sales_value DESC
+LIMIT 50;

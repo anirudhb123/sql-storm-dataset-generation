@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+UniqueCast AS (
+    SELECT 
+        DISTINCT ci.person_id, 
+        ci.movie_id
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        MovieHierarchy mh ON ci.movie_id = mh.movie_id
+),
+AggregatedCast AS (
+    SELECT 
+        uc.person_id,
+        COUNT(DISTINCT uc.movie_id) AS movie_count
+    FROM 
+        UniqueCast uc
+    GROUP BY 
+        uc.person_id
+),
+RankedCast AS (
+    SELECT 
+        ac.person_id,
+        ac.movie_count,
+        RANK() OVER (ORDER BY ac.movie_count DESC) AS rank_num
+    FROM 
+        AggregatedCast ac
+),
+PersonDetails AS (
+    SELECT 
+        a.id AS person_id,
+        a.name AS actor_name,
+        CASE 
+            WHEN p.gender = 'M' THEN 'Male'
+            WHEN p.gender = 'F' THEN 'Female'
+            ELSE 'Unspecified'
+        END AS gender_desc
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        name p ON a.person_id = p.imdb_id
+)
+SELECT 
+    pd.actor_name,
+    pd.gender_desc,
+    rc.movie_count,
+    rc.rank_num,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keyword_list
+FROM 
+    RankedCast rc
+JOIN 
+    PersonDetails pd ON rc.person_id = pd.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id IN (SELECT movie_id FROM UniqueCast WHERE person_id = pd.person_id)
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    rc.movie_count > 3
+GROUP BY 
+    pd.actor_name, pd.gender_desc, rc.movie_count, rc.rank_num
+ORDER BY 
+    rc.rank_num;
+
+This query constructs a recursive common table expression to build a hierarchy of movies with episodes. It also includes unique casting information and aggregates it to count the appearances of each actor. Additionally, it ranks the actors by the number of movies they have participated in, along with gender information and the count of distinct keywords associated with those movies. The query finally filters to include only actors who have appeared in more than three movies before presenting a ranked list of actors with combined keyword details.

@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.total_avail_qty
+    FROM SupplierStats s
+    WHERE s.rank <= 5
+),
+LineItemAggregates AS (
+    SELECT l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        AVG(l.l_tax) AS avg_tax,
+        COUNT(*) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01'
+    GROUP BY l.l_orderkey
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(lo.total_price) AS total_sales,
+       AVG(lo.avg_tax) AS average_tax,
+       MAX(s.total_avail_qty) AS max_supplier_avail_qty
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerOrderDetails cop ON c.c_custkey = cop.c_custkey
+LEFT JOIN LineItemAggregates lo ON lo.l_orderkey IN 
+    (SELECT o.o_orderkey 
+     FROM orders o 
+     WHERE o.o_orderstatus IN ('F', 'O'))
+LEFT JOIN TopSuppliers s ON s.s_suppkey IN 
+    (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON ps.ps_partkey = p.p_partkey WHERE p.p_size BETWEEN 5 AND 10)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0 OR SUM(lo.total_price) IS NOT NULL
+ORDER BY total_sales DESC;

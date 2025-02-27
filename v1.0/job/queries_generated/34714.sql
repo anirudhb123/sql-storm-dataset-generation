@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2020
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+),
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title AS movie_title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ai.actor_name, ', ') AS all_actors
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        actor_info ai ON ci.movie_id = ai.movie_title
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+top_movies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.actor_count,
+        md.all_actors
+    FROM 
+        movie_details md
+    WHERE 
+        md.actor_count > 5 
+        AND md.production_year = (
+            SELECT MAX(production_year) FROM movie_details
+        )
+)
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    tm.actor_count,
+    tm.all_actors
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_info mi ON tm.movie_id = mi.movie_id
+WHERE 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+    AND mi.info IS NOT NULL
+ORDER BY 
+    tm.actor_count DESC, tm.movie_title;

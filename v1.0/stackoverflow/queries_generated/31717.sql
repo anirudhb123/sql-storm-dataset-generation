@@ -1,0 +1,84 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Considering only Questions
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.Score,
+        P2.CreationDate,
+        rc.Level + 1,
+        CAST(rc.Path + ' -> ' + P2.Title AS VARCHAR(MAX))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        Posts P1 ON P1.AcceptedAnswerId = P2.Id
+    INNER JOIN 
+        RecursiveCTE rc ON rc.PostId = P1.Id
+),
+RankedPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViews,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY SUM(P.Score) DESC) AS ScoreRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 5
+),
+ScoreFiltered AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.QuestionCount,
+        U.TotalScore,
+        U.AvgViews
+    FROM 
+        RankedPosts U
+    WHERE 
+        U.ScoreRank <= 10 -- Top 10 users by score
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionCount,
+    U.TotalScore,
+    U.AvgViews,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    SUM(V.BountyAmount) AS TotalBounties,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed
+FROM 
+    ScoreFiltered U
+LEFT JOIN 
+    Comments C ON U.UserId = C.UserId
+LEFT JOIN 
+    Votes V ON U.UserId = V.UserId
+LEFT JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    unnest(string_to_array(P.Tags, ',')) AS T(TagName) ON TRUE
+GROUP BY 
+    U.DisplayName, U.QuestionCount, U.TotalScore, U.AvgViews
+ORDER BY 
+    U.TotalScore DESC;
+

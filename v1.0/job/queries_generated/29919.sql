@@ -1,0 +1,64 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+),
+top_movies AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        movie_title,
+        production_year
+    FROM 
+        ranked_titles
+    WHERE 
+        rn <= 3
+),
+movie_keywords AS (
+    SELECT 
+        tm.actor_name,
+        tm.movie_title,
+        k.keyword
+    FROM 
+        top_movies tm
+    JOIN 
+        movie_keyword mk ON tm.movie_title = (SELECT title FROM aka_title WHERE id = mk.movie_id)
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+keyword_counts AS (
+    SELECT 
+        actor_name,
+        COUNT(keyword) AS keyword_count
+    FROM 
+        movie_keywords
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    kc.actor_name,
+    kc.keyword_count,
+    ARRAY_AGG(DISTINCT mk.keyword) AS keywords
+FROM 
+    keyword_counts kc
+JOIN 
+    movie_keywords mk ON kc.actor_name = mk.actor_name
+GROUP BY 
+    kc.actor_name, kc.keyword_count
+ORDER BY 
+    kc.keyword_count DESC
+LIMIT 10;
+
+This query identifies the top 3 movies for each actor based on production year, then gathers keywords associated with those movies to create a summary of the most prolific keywords linked to top actors. The final output shows the top actors by keyword count along with the keywords themselves, providing insights into the common themes of their roles.

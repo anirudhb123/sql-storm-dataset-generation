@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws_item_sk,
+        ws.ext_sales_price,
+        ws.ext_discount_amt,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+        AND ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+HighValueCustomers AS (
+    SELECT 
+        ca.ca_address_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        SUM(r.ext_sales_price) AS total_spent
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        RankedSales r ON c.c_customer_sk = r.bill_customer_sk
+    WHERE 
+        r.sales_rank <= 3
+    GROUP BY 
+        ca.ca_address_id, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        SUM(r.ext_sales_price) > 1000
+)
+SELECT 
+    hvc.ca_address_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    COALESCE(hvc.total_spent, 0) AS total_spent,
+    COUNT(*) OVER (PARTITION BY hvc.cd_gender) AS gender_count
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    customer c ON hvc.cd_gender = c.c_gender
+WHERE 
+    c.c_current_cdemo_sk IS NOT NULL
+ORDER BY 
+    total_spent DESC
+LIMIT 10

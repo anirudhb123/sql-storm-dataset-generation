@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR(400)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Starting with Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        rph.Level + 1,
+        CAST(rph.Path || ' > ' || p.Title AS VARCHAR(400))
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId 
+)
+, RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS MostRecentVoteDate
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+), PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 5
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    u.DisplayName AS Owner,
+    rph.CreationDate,
+    rph.Level,
+    rv.VoteCount,
+    rv.MostRecentVoteDate,
+    pu.TotalViews AS PopularityScore
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentVotes rv ON rph.PostId = rv.PostId
+JOIN 
+    PopularUsers pu ON u.Id = pu.UserId
+WHERE 
+    rph.Level <= 3 -- Limiting to certain levels in hierarchy
+ORDER BY 
+    rph.Level, rv.VoteCount DESC NULLS LAST;
+

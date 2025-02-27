@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS RankProfit,
+        SUM(ws.ws_sales_price * ws.ws_quantity) OVER (PARTITION BY ws.web_site_sk) AS TotalSales,
+        COALESCE(SUM(sr.sr_return_qty), 0) AS TotalReturns
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_returns sr ON ws.ws_item_sk = sr.sr_item_sk AND ws.ws_order_number = sr.sr_ticket_number
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number, ws.ws_sales_price, ws.ws_quantity
+),
+FilteredSales AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_order_number,
+        r.ws_sales_price,
+        r.TotalReturns,
+        r.TotalSales,
+        r.RankProfit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.RankProfit <= 5 OR r.TotalSales > 10000
+)
+SELECT 
+    w.warehouse_id,
+    w.warehouse_name,
+    COALESCE(SUM(f.ws_sales_price * f.ws_quantity), 0) AS SalesAmount,
+    COUNT(DISTINCT f.ws_order_number) AS TotalOrders,
+    AVG(f.TotalReturns) AS AvgTotalReturns,
+    MAX(f.ws_sales_price) AS MaxSalesPrice,
+    MIN(f.ws_sales_price) AS MinSalesPrice
+FROM 
+    FilteredSales f
+JOIN 
+    warehouse w ON f.web_site_sk = w.warehouse_sk
+GROUP BY 
+    w.warehouse_id, w.warehouse_name
+HAVING 
+    SalesAmount > 50000
+ORDER BY 
+    SalesAmount DESC
+LIMIT 
+    10;

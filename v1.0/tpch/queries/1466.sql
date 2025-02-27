@@ -1,0 +1,69 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+), 
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(c.total_spent, 0) AS total_spent_by_customer,
+    COALESCE(c.total_orders, 0) AS total_orders_by_customer,
+    s.total_available_qty,
+    s.avg_supply_cost
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    customer_orders c ON c.c_custkey IN (
+        SELECT 
+            o.o_custkey
+        FROM 
+            orders o
+        WHERE 
+            o.o_orderkey = r.o_orderkey
+    )
+LEFT JOIN 
+    supplier_parts s ON s.ps_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_orderkey = r.o_orderkey
+    )
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    r.o_totalprice DESC, r.o_orderdate ASC;

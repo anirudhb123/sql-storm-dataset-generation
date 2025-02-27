@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate <= DATE '2023-12-31'
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN o.o_orderstatus = 'O' AND o.o_totalprice > 10000 THEN o.o_totalprice ELSE 0 END) AS high_value_orders,
+    AVG(RPD.total_supply_cost) AS avg_supply_cost,
+    AVG(cs.total_spent) AS avg_spent_per_customer
+FROM 
+    nation ns
+LEFT JOIN 
+    supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierPartDetails RPD ON s.s_suppkey = RPD.s_suppkey
+LEFT JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedOrders o ON c.c_custkey = o.o_orderkey  -- Correlating subquery over orders
+LEFT JOIN 
+    CustomerSummary cs ON c.c_custkey = cs.c_custkey
+WHERE 
+    ns.n_name LIKE 'A%' OR ns.n_name LIKE '%ia'
+GROUP BY 
+    ns.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY 
+    total_customers DESC;

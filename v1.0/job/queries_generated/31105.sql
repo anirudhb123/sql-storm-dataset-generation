@@ -1,0 +1,42 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id,
+           COUNT(*) AS total_movies,
+           ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.movie_id) AS rn
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.person_id
+),
+top_actors AS (
+    SELECT ah.person_id,
+           ah.total_movies,
+           RANK() OVER (ORDER BY ah.total_movies DESC) AS actor_rank
+    FROM actor_hierarchy ah
+    WHERE ah.total_movies > 5
+),
+movie_keywords AS (
+    SELECT mt.movie_id, 
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY mt.movie_id
+)
+SELECT t.title,
+       a.name AS actor_name,
+       mt.keywords,
+       COALESCE(mi.info, 'No info available') AS additional_info,
+       COALESCE(cn.name, 'Unknown Company') AS production_company,
+       CASE 
+           WHEN mt.production_year IS NULL THEN 'Year Not Available' 
+           ELSE CAST(mt.production_year AS text) 
+       END as production_year,
+       RANK() OVER (PARTITION BY mt.production_year ORDER BY a.name) AS rank_within_year
+FROM title t
+JOIN complete_cast cc ON t.id = cc.movie_id
+JOIN top_actors a ON cc.subject_id = a.person_id
+LEFT JOIN movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN movie_keywords mt ON t.id = mt.movie_id
+WHERE mt.keywords LIKE '%drama%'
+ORDER BY a.total_movies DESC, t.production_year DESC, a.name;

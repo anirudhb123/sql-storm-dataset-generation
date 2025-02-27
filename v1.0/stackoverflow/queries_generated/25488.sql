@@ -1,0 +1,72 @@
+WITH 
+    RankedPosts AS (
+        SELECT 
+            p.Id AS PostId,
+            p.Title,
+            p.Tags,
+            p.Score,
+            p.AnswerCount,
+            p.CreationDate,
+            ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+        FROM 
+            Posts p
+        WHERE 
+            p.PostTypeId = 1 -- Only questions
+            AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    ),
+    PopularTags AS (
+        SELECT 
+            UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1
+    ),
+    TagReputation AS (
+        SELECT 
+            pt.TagName,
+            COUNT(DISTINCT p.Id) AS PostCount,
+            SUM(u.Reputation) AS TotalReputation
+        FROM 
+            PopularTags pt
+        JOIN 
+            Posts p ON p.Tags LIKE '%' || pt.TagName || '%'
+        JOIN 
+            Users u ON p.OwnerUserId = u.Id
+        GROUP BY 
+            pt.TagName
+        HAVING 
+            COUNT(DISTINCT p.Id) > 10 -- Consider only tags with more than 10 associated questions
+    ),
+    RecentComments AS (
+        SELECT 
+            c.PostId,
+            COUNT(c.Id) AS CommentCount
+        FROM 
+            Comments c
+        WHERE 
+            c.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+        GROUP BY 
+            c.PostId
+    )
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CreationDate,
+    tr.PostCount,
+    tr.TotalReputation,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TagReputation tr ON rp.Tags LIKE '%' || tr.TagName || '%'
+LEFT JOIN 
+    RecentComments rc ON rp.PostId = rc.PostId
+WHERE 
+    rp.TagRank = 1 -- Select the highest scored post for each tag
+ORDER BY 
+    tr.TotalReputation DESC, rp.Score DESC
+LIMIT 50;

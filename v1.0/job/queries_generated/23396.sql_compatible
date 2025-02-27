@@ -1,0 +1,64 @@
+
+WITH 
+    MovieRatings AS (
+        SELECT 
+            m.id AS movie_id,
+            COALESCE(AVG(r.rating), 0) AS avg_rating
+        FROM 
+            aka_title m
+        LEFT JOIN 
+            ratings r ON m.id = r.movie_id
+        GROUP BY 
+            m.id
+    ),
+    CastRoles AS (
+        SELECT
+            c.movie_id,
+            COUNT(DISTINCT c.person_id) AS distinct_cast_count,
+            STRING_AGG(DISTINCT p.name, ', ') AS cast_names
+        FROM 
+            cast_info c
+        JOIN 
+            aka_name p ON c.person_id = p.person_id
+        GROUP BY 
+            c.movie_id
+    ),
+    MovieWithDetails AS (
+        SELECT 
+            m.id AS movie_id,
+            m.title,
+            m.production_year,
+            COALESCE(mr.avg_rating, -1) AS avg_rating,
+            COALESCE(cr.distinct_cast_count, 0) AS distinct_cast_count,
+            COALESCE(cr.cast_names, 'No Cast') AS cast_names
+        FROM 
+            aka_title m
+        LEFT JOIN 
+            MovieRatings mr ON m.id = mr.movie_id
+        LEFT JOIN 
+            CastRoles cr ON m.id = cr.movie_id
+        WHERE 
+            m.production_year IS NOT NULL
+            AND m.title IS NOT NULL
+    ),
+    FilteredMovies AS (
+        SELECT 
+            mwd.*,
+            ROW_NUMBER() OVER (PARTITION BY mwd.production_year ORDER BY mwd.avg_rating DESC NULLS LAST) AS ranking
+        FROM 
+            MovieWithDetails mwd
+        WHERE 
+            mwd.distinct_cast_count > 0
+    )
+SELECT 
+    f.title,
+    f.production_year,
+    f.avg_rating,
+    f.cast_names 
+FROM 
+    FilteredMovies f
+WHERE 
+    f.ranking <= 5
+ORDER BY 
+    f.production_year DESC, 
+    f.avg_rating DESC;

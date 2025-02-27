@@ -1,0 +1,70 @@
+WITH RECURSIVE MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS sales_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        DATE_TRUNC('month', o.o_orderdate)
+    UNION ALL
+    SELECT 
+        DATE_TRUNC('month', sales_month + INTERVAL '1 month'),
+        SUM(l.l_extendedprice * (1 - l.l_discount))
+    FROM 
+        MonthlySales ms
+    JOIN 
+        orders o ON DATE_TRUNC('month', o.o_orderdate) = ms.sales_month + INTERVAL '1 month'
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        DATE_TRUNC('month', sales_month + INTERVAL '1 month')
+),
+RegionSupplier AS (
+    SELECT 
+        r.r_name AS region,
+        s.s_name AS supplier,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS acctbal_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT 
+    r.region,
+    s.supplier,
+    ms.sales_month,
+    COALESCE(SUM(ms.total_sales), 0) AS monthly_sales,
+    hc.c_name AS high_value_customer,
+    hc.c_acctbal
+FROM 
+    RegionSupplier r
+LEFT JOIN 
+    MonthlySales ms ON TRUE
+LEFT JOIN 
+    HighValueCustomers hc ON hc.c_custkey IN 
+        (SELECT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_discount > 0.05)
+GROUP BY 
+    r.region, s.supplier, ms.sales_month, hc.c_name, hc.c_acctbal
+HAVING 
+    SUM(ms.total_sales) > 10000 
+ORDER BY 
+    r.region, ms.sales_month;

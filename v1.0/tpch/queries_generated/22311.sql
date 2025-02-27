@@ -1,0 +1,89 @@
+WITH RECURSIVE price_cte AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM
+        part AS p
+    WHERE
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+region_nation AS (
+    SELECT
+        r.r_regionkey,
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM
+        region AS r
+    LEFT JOIN
+        nation AS n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        supplier AS s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        r.r_regionkey, n.n_name
+),
+customer_orders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spending
+    FROM
+        customer AS c
+    JOIN
+        orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+    HAVING
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+supplier_part_info AS (
+    SELECT
+        s.s_suppkey,
+        p.p_partkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (CASE WHEN SUM(ps.ps_availqty) IS NULL THEN 0 ELSE SUM(ps.ps_availqty) END) AS total_availqty
+    FROM
+        supplier AS s
+    JOIN
+        partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part AS p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        s.s_suppkey, p.p_partkey, ps.ps_supplycost
+    HAVING
+        SUM(ps.ps_availqty) > 100
+    ORDER BY
+        ps.ps_supplycost DESC
+),
+final_result AS (
+    SELECT
+        cn.c_custkey,
+        rn.n_name,
+        p.p_name,
+        p.p_retailprice,
+        sp.total_availqty
+    FROM
+        customer_orders AS cn
+    JOIN
+        region_nation AS rn ON cn.c_custkey % 10 = rn.r_regionkey  -- Correlated subquery semantically peculiar
+    JOIN
+        supplier_part_info AS sp ON cn.c_custkey = sp.s_suppkey
+    JOIN
+        price_cte AS p ON sp.p_partkey = p.p_partkey AND p.price_rank <= 5 -- Obscure logic for price ranking
+)
+SELECT DISTINCT
+    f.c_custkey,
+    f.n_name,
+    COUNT(f.p_name) AS purchased_parts,
+    SUM(f.p_retailprice) AS total_price_spent,
+    (CASE WHEN SUM(f.total_availqty) IS NULL THEN 'No stock available' ELSE CAST(SUM(f.total_availqty) AS VARCHAR) END) AS stock_status
+FROM
+    final_result AS f
+WHERE
+    f.n_name IS NOT NULL
+GROUP BY
+    f.c_custkey, f.n_name
+ORDER BY
+    total_price_spent DESC;

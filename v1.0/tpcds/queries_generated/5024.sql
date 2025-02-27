@@ -1,0 +1,38 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        cs.sold_date_sk,
+        cs.ship_mode_sk,
+        SUM(cs.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT cs.order_number) AS total_orders,
+        SUM(cs.quantity) AS total_quantity
+    FROM catalog_sales cs
+    INNER JOIN item i ON cs.item_sk = i.item_sk
+    INNER JOIN promotion p ON cs.promo_sk = p.p_promo_sk
+    INNER JOIN store s ON cs.warehouse_sk = s.s_store_sk
+    WHERE 
+        p.discount_active = 'Y' 
+        AND i.current_price > 50 
+        AND s.state = 'CA'
+    GROUP BY 
+        cs.sold_date_sk, 
+        cs.ship_mode_sk
+)
+SELECT 
+    d.d_date AS sale_date,
+    sm.sm_type AS ship_mode,
+    ss.total_sales,
+    ss.total_orders,
+    ss.total_quantity,
+    CASE 
+        WHEN ss.total_sales > 10000 THEN 'High Revenue'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM SalesSummary ss
+INNER JOIN date_dim d ON ss.sold_date_sk = d.d_date_sk
+INNER JOIN ship_mode sm ON ss.ship_mode_sk = sm.sm_ship_mode_sk
+ORDER BY 
+    sale_date DESC, 
+    total_sales DESC
+LIMIT 100;

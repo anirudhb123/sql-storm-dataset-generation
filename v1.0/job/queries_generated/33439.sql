@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Starting from movies in the year 2000
+ 
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    ah.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(ks.keyword, 'No Keywords') AS keyword,
+    ROW_NUMBER() OVER (PARTITION BY ah.id ORDER BY mh.hierarchy_level DESC) AS rank,
+    COUNT(DISTINCT c.movie_id) OVER (PARTITION BY ah.id) AS total_movies,
+    AVG(m.production_year) OVER (PARTITION BY ah.id) AS avg_production_year,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS info_count
+FROM 
+    aka_name ah
+JOIN 
+    cast_info c ON ah.person_id = c.person_id
+JOIN 
+    aka_title at ON c.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN 
+    keyword ks ON mk.keyword_id = ks.id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = at.id
+WHERE 
+    ah.name IS NOT NULL
+    AND at.production_year IS NOT NULL
+    AND at.production_year > 2005
+    AND (ah.name LIKE 'A%' OR ah.name LIKE 'B%') -- Filtering for names starting with A or B
+ORDER BY 
+    total_movies DESC, 
+    avg_production_year DESC;

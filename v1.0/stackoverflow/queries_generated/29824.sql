@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- consider only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName, u.Reputation
+),
+TagSummary AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS TagName, 
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    GROUP BY 
+        TagName
+),
+SummaryMetrics AS (
+    SELECT 
+        TagName,
+        SUM(PostCount) AS TotalPosts,
+        AVG(OwnerReputation) AS AverageReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TagSummary ts ON ts.TagName = ANY(string_to_array(rp.Tags, '>'))
+    GROUP BY 
+        TagName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount,
+        ts.TotalPosts,
+        ts.AverageReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        SummaryMetrics ts ON ts.TagName = ANY(string_to_array(rp.Tags, '>'))
+    WHERE 
+        rp.Rank <= 5 -- top 5 posts for each tag
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tm.TagName,
+    tm.TotalPosts,
+    tm.AverageReputation
+FROM 
+    TopPosts tp
+JOIN 
+    TagSummary tm ON tm.TagName = ANY(string_to_array(tp.Tags, '>'))
+ORDER BY 
+    tp.ViewCount DESC, tp.CreationDate DESC;

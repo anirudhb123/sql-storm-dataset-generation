@@ -1,0 +1,72 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeleteVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+AnsweredPostCTE AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.CreationDate,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.DeleteVotes,
+        U.Reputation AS OwnerReputation,
+        COUNT(a.Id) AS AnswerCount,
+        AVG(a.Score) AS AverageAnswerScore
+    FROM 
+        RecursivePostCTE rp
+    LEFT JOIN 
+        Posts a ON rp.PostId = a.ParentId
+    JOIN 
+        Users U ON rp.OwnerUserId = U.Id
+    WHERE 
+        rp.PostTypeId = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.OwnerUserId, rp.CreationDate, rp.UpVotes, rp.DownVotes, rp.DeleteVotes, U.Reputation
+),
+FinalResults AS (
+    SELECT 
+        ap.PostId,
+        ap.Title,
+        ap.OwnerUserId,
+        ap.CreationDate,
+        ap.UpVotes,
+        ap.DownVotes,
+        ap.DeleteVotes,
+        ap.OwnerReputation,
+        ap.AnswerCount,
+        ap.AverageAnswerScore,
+        CASE 
+            WHEN ap.AnswerCount > 0 THEN 'Answered'
+            ELSE 'Unanswered'
+        END AS AnswerStatus
+    FROM 
+        AnsweredPostCTE ap
+)
+SELECT 
+    fr.*,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p 
+     JOIN Tags t ON t.Id = ANY(string_to_array(p.Tags, '>')::int[]) 
+     WHERE p.Id = fr.PostId) AS Tags
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.CreationDate DESC;

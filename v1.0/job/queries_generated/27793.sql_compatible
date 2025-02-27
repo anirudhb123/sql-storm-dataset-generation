@@ -1,0 +1,83 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS title,
+        at.production_year AS year, 
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY LENGTH(at.title) DESC) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2023
+),
+TopPersonRoles AS (
+    SELECT 
+        ci.person_id,
+        r.role AS role,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.person_role_id = r.id
+    GROUP BY 
+        ci.person_id, r.role
+    HAVING 
+        COUNT(ci.movie_id) > 5
+),
+CompaniesWithKeywords AS (
+    SELECT 
+        c.name AS company_name,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        c.name
+    HAVING 
+        COUNT(DISTINCT mk.keyword_id) > 3
+),
+SelectedMovies AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        c.name AS company_name
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        aka_name a ON cc.subject_id = a.person_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        CompaniesWithKeywords c ON c.company_name = (SELECT company_name FROM CompaniesWithKeywords ORDER BY RANDOM() LIMIT 1)
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+)
+
+SELECT 
+    rt.title AS Movie_Title,
+    rt.year AS Production_Year,
+    spr.role AS Person_Role,
+    spr.movie_count AS Movies_Played,
+    sm.actors AS Cast,
+    sm.company_name AS Production_Company
+FROM 
+    RankedTitles rt
+JOIN 
+    TopPersonRoles spr ON spr.movie_count > 5
+JOIN 
+    SelectedMovies sm ON rt.title = sm.title
+WHERE 
+    rt.title_rank <= 5
+ORDER BY 
+    rt.year DESC, 
+    rt.title ASC;

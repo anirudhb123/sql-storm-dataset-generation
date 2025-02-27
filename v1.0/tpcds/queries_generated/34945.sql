@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        s.ws_sold_date_sk,
+        s.ws_item_sk,
+        SUM(s.ws_quantity) + c.total_quantity AS total_quantity,
+        SUM(s.ws_ext_sales_price) + c.total_sales AS total_sales
+    FROM web_sales s
+    JOIN SalesCTE c ON s.ws_item_sk = c.ws_item_sk
+    WHERE s.ws_sold_date_sk > c.ws_sold_date_sk
+    GROUP BY s.ws_sold_date_sk, s.ws_item_sk
+),
+
+RankedSales AS (
+    SELECT 
+        w.i_item_id,
+        w.i_item_desc,
+        ROW_NUMBER() OVER (PARTITION BY w.i_item_id ORDER BY s.total_sales DESC) AS sales_rank,
+        s.total_quantity,
+        s.total_sales
+    FROM item w
+    JOIN SalesCTE s ON w.i_item_sk = s.ws_item_sk
+    WHERE s.total_sales IS NOT NULL
+)
+
+SELECT 
+    r.i_item_id,
+    r.i_item_desc,
+    COALESCE(r.total_quantity, 0) AS total_quantity,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN r.sales_rank = 1 THEN 'Top Seller'
+        WHEN r.sales_rank BETWEEN 2 AND 5 THEN 'Top 5 Seller'
+        ELSE 'Other'
+    END AS sales_category
+FROM RankedSales r
+LEFT JOIN customer c ON c.c_customer_sk = (SELECT cd_demo_sk FROM customer_demographics WHERE cd_demo_sk = c.c_current_cdemo_sk AND cd_gender = 'F')
+WHERE r.sales_rank <= 5 OR r.total_sales > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY r.sales_rank, r.total_sales DESC;
+

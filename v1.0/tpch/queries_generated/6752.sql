@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, c.c_mktsegment, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey, c.c_mktsegment, o.o_orderdate
+)
+SELECT r.nation_name, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+       SUM(r.a.s_acctbal) AS total_acctbal, AVG(p.total_value) AS avg_part_value
+FROM RankedSuppliers r
+JOIN RecentOrders o ON r.s_suppkey IN (SELECT ps.ps_suppkey 
+                                         FROM partsupp ps 
+                                         JOIN HighValueParts hvp ON ps.ps_partkey = hvp.ps_partkey)
+JOIN HighValueParts p ON p.ps_partkey IN (SELECT l.l_partkey 
+                                            FROM lineitem l 
+                                            JOIN orders o2 ON l.l_orderkey = o2.o_orderkey)
+GROUP BY r.nation_name
+ORDER BY order_count DESC, total_acctbal DESC;

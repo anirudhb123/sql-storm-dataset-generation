@@ -1,0 +1,66 @@
+
+WITH RecursiveActorTitles AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM cast_info a
+    JOIN aka_name ak ON a.person_id = ak.person_id
+    JOIN aka_title t ON a.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        person_id,
+        actor_name,
+        title,
+        production_year
+    FROM RecursiveActorTitles
+    WHERE rn <= 3   
+),
+ActorMovieCount AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS movie_count
+    FROM FilteredActors
+    GROUP BY person_id
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN cast_info c ON mc.movie_id = c.movie_id
+    GROUP BY mc.movie_id, cn.name, ct.kind
+),
+TopCompanies AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        cast_count,
+        RANK() OVER (ORDER BY cast_count DESC) AS company_rank
+    FROM CompanyMovieInfo
+)
+SELECT 
+    fa.actor_name,
+    fa.title,
+    fa.production_year,
+    tc.company_name,
+    tc.company_type,
+    COALESCE(amc.movie_count, 0) AS actor_movie_count,
+    tc.cast_count AS company_cast_count
+FROM FilteredActors fa
+FULL OUTER JOIN TopCompanies tc ON fa.title = tc.title
+LEFT JOIN ActorMovieCount amc ON fa.person_id = amc.person_id
+WHERE 
+    (fa.production_year > 2020 OR tc.company_rank IS NOT NULL) 
+ORDER BY 
+    fa.actor_name ASC,
+    tc.company_cast_count DESC;

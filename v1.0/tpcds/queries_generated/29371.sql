@@ -1,0 +1,55 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip)) AS address_length
+    FROM 
+        customer_address
+), 
+DemographicData AS (
+    SELECT 
+        cd_demo_sk,
+        CONCAT(cd_gender, '-', cd_marital_status, '-', cd_education_status) AS demographic_info
+    FROM 
+        customer_demographics
+),
+DateInfo AS (
+    SELECT 
+        d_date_sk, 
+        TO_CHAR(d_date, 'YYYY') AS year,
+        TO_CHAR(d_date, 'Month') AS month_name,
+        TO_CHAR(d_date, 'FMDay') AS day_name
+    FROM 
+        date_dim
+), 
+StringBenchmark AS (
+    SELECT 
+        ad.full_address,
+        ad.address_length,
+        dd.demographic_info,
+        CONCAT(LEFT(dd.demographic_info, 10), '...', RIGHT(dd.demographic_info, 10)) AS trimmed_demo_info,
+        di.year,
+        di.month_name,
+        di.day_name
+    FROM 
+        AddressData ad
+    JOIN 
+        DemographicData dd ON ad.ca_address_sk % 100 = dd.cd_demo_sk % 100 -- Mocking a join condition
+    JOIN 
+        DateInfo di ON ad.ca_address_sk % 30 = di.d_date_sk % 30 -- Mocking another join condition
+)
+SELECT 
+    full_address,
+    address_length,
+    demographic_info,
+    trimmed_demo_info,
+    year,
+    month_name,
+    day_name
+FROM 
+    StringBenchmark
+WHERE 
+    address_length > 50
+ORDER BY 
+    address_length DESC, year DESC, month_name, day_name;

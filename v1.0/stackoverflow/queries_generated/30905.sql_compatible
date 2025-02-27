@@ -1,0 +1,68 @@
+
+WITH RecursiveTags AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired
+    FROM Tags
+    WHERE IsModeratorOnly = 1
+    
+    UNION ALL
+    
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired
+    FROM Tags t
+    JOIN RecursiveTags rt ON t.Count > rt.Count
+),
+
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+           RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+
+ClosedPosts AS (
+    SELECT p.Id AS PostId, 
+           MAX(ph.CreationDate) AS LastClosedDate,
+           COUNT(*) AS ClosureCount
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY p.Id
+),
+
+PostDetails AS (
+    SELECT p.Id,
+           p.Title,
+           p.Score,
+           COALESCE(cp.ClosureCount, 0) AS ClosureCount,
+           cp.LastClosedDate,
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+    LEFT JOIN LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS tag_array ON TRUE
+    LEFT JOIN Tags t ON tag_array[1] = t.TagName
+    GROUP BY p.Id, cp.ClosureCount, cp.LastClosedDate
+)
+
+SELECT ua.UserId,
+       ua.DisplayName,
+       ua.TotalPosts,
+       ua.QuestionCount,
+       ua.AnswerCount,
+       ua.TotalCommentScore,
+       pd.PostId,
+       pd.Title,
+       pd.Score,
+       pd.ClosureCount,
+       pd.LastClosedDate,
+       rt.TagName AS ModeratorTag
+FROM UserActivity ua
+JOIN PostDetails pd ON ua.TotalPosts > 50
+LEFT JOIN RecursiveTags rt ON rt.IsModeratorOnly = 1
+WHERE ua.TotalCommentScore > 10
+ORDER BY ua.TotalPosts DESC, pd.Score DESC;

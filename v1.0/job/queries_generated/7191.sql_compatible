@@ -1,0 +1,31 @@
+
+SELECT 
+    ak.name AS actor_name,
+    tit.title AS movie_title,
+    comp.name AS company_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    COUNT(DISTINCT pi.info) AS info_count
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title tit ON ci.movie_id = tit.id
+JOIN 
+    movie_companies mc ON tit.id = mc.movie_id
+JOIN 
+    company_name comp ON mc.company_id = comp.id
+LEFT JOIN 
+    movie_keyword mk ON tit.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON tit.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    tit.production_year >= 2000
+    AND comp.country_code = 'USA'
+GROUP BY 
+    ak.name, tit.title, comp.name
+ORDER BY 
+    keyword_count DESC, info_count DESC
+LIMIT 50;

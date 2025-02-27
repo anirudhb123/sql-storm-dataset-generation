@@ -1,0 +1,75 @@
+
+WITH part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_name AS supplier_name,
+        s.s_nationkey,
+        n.n_name AS nation_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+final_benchmark AS (
+    SELECT 
+        pd.p_name,
+        pd.p_brand,
+        pd.p_type,
+        pd.p_retailprice,
+        cos.total_orders,
+        cos.total_spent,
+        (CASE 
+            WHEN cos.total_spent IS NULL THEN 0 
+            ELSE cos.total_spent / NULLIF(cos.total_orders, 0) 
+         END) AS avg_spent_per_order
+    FROM 
+        part_details pd
+    LEFT JOIN 
+        customer_order_summary cos ON pd.p_partkey = 
+        (SELECT ps.ps_partkey 
+         FROM partsupp ps 
+         JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+         WHERE s.s_nationkey = pd.s_nationkey 
+         LIMIT 1)  
+)
+SELECT 
+    p_name,
+    p_brand,
+    p_type,
+    p_retailprice,
+    total_orders,
+    total_spent,
+    avg_spent_per_order
+FROM 
+    final_benchmark
+WHERE 
+    avg_spent_per_order > 100
+ORDER BY 
+    avg_spent_per_order DESC;

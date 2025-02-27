@@ -1,0 +1,78 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        Title,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        CreationDate,
+        Tags,
+        1 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Tags,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE rp ON rp.Id = p.ParentId
+    WHERE p.PostTypeId = 2  
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(p.Score) AS AvgPostScore
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY u.Id, u.DisplayName
+),
+PostWithStats AS (
+    SELECT
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        us.UserId,
+        us.DisplayName,
+        us.PostsCount,
+        us.TotalBounty,
+        us.AvgPostScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+    FROM RecursivePostCTE rp
+    JOIN UserStats us ON rp.OwnerUserId = us.UserId
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array(rp.Tags, '><')) AS TagName
+    ) t ON TRUE
+    GROUP BY 
+        rp.Title, rp.Score, rp.ViewCount, us.UserId, us.DisplayName, us.PostsCount, us.TotalBounty, us.AvgPostScore
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    p.ViewCount AS PostViewCount,
+    us.DisplayName AS UserDisplayName,
+    us.PostsCount AS UserPostsCount,
+    us.TotalBounty AS UserTotalBounty,
+    us.AvgPostScore AS UserAvgPostScore,
+    p.AssociatedTags
+FROM PostWithStats p
+JOIN UserStats us ON p.UserId = us.UserId
+WHERE p.Score > 10  
+AND (us.GoldBadges > 0 OR us.SilverBadges > 0)  
+ORDER BY p.ViewCount DESC, p.Score DESC
+LIMIT 50;

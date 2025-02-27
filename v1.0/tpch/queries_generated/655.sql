@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey, 
+        n.n_regionkey
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+
+SELECT 
+    cr.n_regionkey,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(co.total_spent) AS total_sales,
+    GROUP_CONCAT(DISTINCT s.s_name ORDER BY s.s_acctbal DESC SEPARATOR ', ') AS top_suppliers,
+    AVG(co.order_count) AS avg_orders_per_customer
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    CustomerOrders co ON cr.c_custkey = co.c_custkey
+LEFT JOIN 
+    RankedSuppliers s ON cr.n_regionkey = s.rn
+LEFT JOIN 
+    TopParts tp ON tp.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_shipdate >= '2023-01-01')
+WHERE 
+    s.rn <= 3 
+GROUP BY 
+    cr.n_regionkey
+HAVING 
+    SUM(co.total_spent) IS NOT NULL AND SUM(co.total_spent) > 5000
+ORDER BY 
+    num_customers DESC;

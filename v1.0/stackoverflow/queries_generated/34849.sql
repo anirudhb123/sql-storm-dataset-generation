@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL -- Starting from root posts only
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        MAX(v.CreationDate) AS LastVoteDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(p.Score) OVER (PARTITION BY p.OwnerUserId) AS AvgUserScore
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    p.Title,
+    ps.TotalComments,
+    ps.UpVotes,
+    ps.DownVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(rp.Title, 'No Parent') AS ParentPostTitle,
+    ps.LastVoteDate
+FROM Users u
+JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN RecursivePostHierarchy rp ON rp.PostId = ps.Id
+JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE ps.TotalComments > 0
+AND ps.UpVotes > ps.DownVotes
+ORDER BY u.Reputation DESC, ps.UpVotes DESC;

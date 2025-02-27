@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT c.person_id) AS cast_member_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+TopYears AS (
+    SELECT 
+        production_year,
+        MIN(rank) AS min_rank
+    FROM 
+        RankedTitles
+    GROUP BY 
+        production_year
+),
+TopTitles AS (
+    SELECT 
+        rt.* 
+    FROM 
+        RankedTitles rt
+    JOIN 
+        TopYears ty ON rt.production_year = ty.production_year AND rt.rank <= ty.min_rank
+)
+SELECT 
+    tt.title AS movie_title,
+    tt.production_year,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    STRING_AGG(DISTINCT c_role.role, ', ') AS role_types,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    TopTitles tt
+JOIN 
+    aka_title at ON tt.title_id = at.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = tt.title_id)
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = tt.title_id
+LEFT JOIN 
+    role_type c_role ON c_role.id = (SELECT DISTINCT person_role_id FROM cast_info WHERE movie_id = tt.title_id)
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tt.title_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+GROUP BY 
+    tt.title, tt.production_year
+ORDER BY 
+    tt.production_year DESC, COUNT(DISTINCT c_role.role) DESC;

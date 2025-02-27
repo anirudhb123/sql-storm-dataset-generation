@@ -1,0 +1,75 @@
+
+WITH RECURSIVE GenreHierarchy AS (
+    SELECT 
+        kt.id AS kind_id, 
+        kt.kind AS genre, 
+        CAST(NULL AS integer) AS parent_id 
+    FROM 
+        kind_type kt 
+    WHERE 
+        kt.kind IS NOT NULL
+    UNION ALL
+    SELECT 
+        kt2.id AS kind_id, 
+        CONCAT(gh.genre, ' -> ', kt2.kind) AS genre, 
+        gh.kind_id 
+    FROM 
+        kind_type kt2 
+    JOIN 
+        GenreHierarchy gh ON kt2.id = gh.parent_id
+),
+MoviesWithCast AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names 
+    FROM 
+        aka_title mt 
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id 
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id 
+    WHERE 
+        mt.production_year > 2000 
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MovieRoles AS (
+    SELECT 
+        mv.movie_id, 
+        rc.role, 
+        COUNT(ci.id) AS role_count 
+    FROM 
+        MoviesWithCast mv 
+    JOIN 
+        cast_info ci ON mv.movie_id = ci.movie_id 
+    JOIN 
+        role_type rc ON ci.role_id = rc.id 
+    GROUP BY 
+        mv.movie_id, rc.role 
+    HAVING 
+        COUNT(ci.id) > 1
+)
+SELECT 
+    mv.movie_id, 
+    mv.title, 
+    mv.production_year, 
+    STRING_AGG(DISTINCT mr.role, ', ') AS roles, 
+    MAX(mv.actor_names) AS top_actor 
+FROM 
+    MoviesWithCast mv 
+LEFT JOIN 
+    MovieRoles mr ON mv.movie_id = mr.movie_id 
+LEFT JOIN 
+    info_type it ON mv.movie_id = it.id 
+WHERE 
+    mv.production_year = (SELECT MAX(production_year) FROM aka_title WHERE title LIKE '%Adventure%') 
+    AND it.info IS NOT NULL 
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year 
+HAVING 
+    COUNT(mr.role) > 0 
+ORDER BY 
+    mv.production_year DESC 
+LIMIT 10;

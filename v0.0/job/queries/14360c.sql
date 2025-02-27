@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mi.note IS NOT NULL AND mc.note IN ('(1934) (USA) (theatrical) (as A Radio Picture)', '(2000) (USA) (DVD) (as USA Home Entertainment) (a division of USA Films, LLC)', '(2005) (Norway) (DVD)', '(2005-2008) (Hungary) (TV) (original airing) (episodes 49-62, 68-80)', '(2006) (worldwide) (DVD) (telugu version)', '(2007) (Greece) (theatrical) (3-D version)', '(2009-2010) (Hungary) (TV) (seasons 1 & 2)', '(Production Company)', '(as Ammonite Productions)', '(as Producing Artists)') AND mi.info < 'David Rossi: Doomed to be star crossed lovers, destined to wander what might have been';

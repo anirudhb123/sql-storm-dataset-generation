@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHiearchy AS (
+    
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHiearchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(distinct ci.person_id) AS actor_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_exist,
+    AVG(COALESCE(year(tki.info), 0)) AS avg_info_years,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_types
+FROM 
+    MovieHiearchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_info tki ON mh.movie_id = tki.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    mh.production_year DESC, actor_count DESC;

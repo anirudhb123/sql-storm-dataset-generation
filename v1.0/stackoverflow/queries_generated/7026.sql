@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+        p.PostTypeId IN (1, 2) -- Filter for Questions and Answers
+),
+TopPosts AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName 
+    FROM 
+        RankedPosts 
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+    COUNT(DISTINCT ph.Id) AS EditHistoryCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON tp.Id = c.PostId
+LEFT JOIN 
+    Votes v ON tp.Id = v.PostId
+LEFT JOIN 
+    PostHistory ph ON tp.Id = ph.PostId
+LEFT JOIN 
+    Posts p ON tp.Id = p.Id 
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+GROUP BY 
+    tp.Id, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.OwnerDisplayName
+ORDER BY 
+    tp.Score DESC
+LIMIT 100;

@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           NULL::integer AS parent_movie_id
+    FROM aka_title m
+    WHERE m.kind_id = 1  
+
+    UNION ALL
+
+    SELECT m.id, 
+           m.title, 
+           m.production_year, 
+           mh.movie_id
+    FROM aka_title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+ActorMovieCount AS (
+    SELECT ci.person_id, 
+           COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM cast_info ci
+    JOIN aka_name an ON an.person_id = ci.person_id
+    WHERE an.name IS NOT NULL
+    GROUP BY ci.person_id
+),
+MovieKeywords AS (
+    SELECT mk.movie_id, 
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON k.id = mk.keyword_id
+    GROUP BY mk.movie_id
+)
+SELECT mh.movie_id, 
+       mh.title, 
+       mh.production_year, 
+       COALESCE(ak.name, 'Unknown') AS actor_name,
+       COALESCE(ak.movie_count, 0) AS actor_movie_count,
+       COALESCE(mk.keywords, 'No keywords') AS keywords
+FROM MovieHierarchy mh
+LEFT JOIN ActorMovieCount ak ON ak.person_id = (
+    SELECT ci.person_id 
+    FROM cast_info ci 
+    WHERE ci.movie_id = mh.movie_id 
+    ORDER BY ci.nr_order 
+    LIMIT 1
+)
+LEFT JOIN MovieKeywords mk ON mk.movie_id = mh.movie_id
+WHERE (mh.production_year > 2000 OR mh.title LIKE 'Star%')
+  AND mh.movie_id IS NOT NULL
+ORDER BY mh.production_year DESC, mh.title
+LIMIT 100;

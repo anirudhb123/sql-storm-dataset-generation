@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        web_site_id
+),
+FullAddress AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_city, ', ', ca.ca_state) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+),
+SalesDetails AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.cs_order_number, cs.cs_item_sk
+)
+SELECT 
+    t.web_site_id,
+    SUM(t.total_sales) AS combined_total_sales,
+    STRING_AGG(DISTINCT fa.full_address, '; ') AS customer_addresses,
+    MAX(cd.customer_count) AS max_customers,
+    AVG(sd.total_profit) FILTER (WHERE sd.total_profit IS NOT NULL) AS average_profit
+FROM 
+    TopSales t
+LEFT JOIN 
+    FullAddress fa ON fa.c_customer_id IN (SELECT c.c_customer_id FROM customer c WHERE c.c_first_name IS NOT NULL)
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_id = fa.c_customer_id)
+LEFT JOIN 
+    SalesDetails sd ON sd.cs_order_number = (SELECT MIN(ws.ws_order_number) FROM web_sales ws WHERE ws.ws_web_site_sk = t.web_site_id)
+GROUP BY 
+    t.web_site_id
+HAVING 
+    COUNT(DISTINCT fa.ca_address_id) > 2 
+    AND SUM(t.total_sales) > 1000
+ORDER BY 
+    combined_total_sales DESC;

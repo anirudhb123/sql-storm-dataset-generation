@@ -1,0 +1,66 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        SUM(CASE WHEN p.ViewCount > 0 THEN 1 ELSE 0 END) AS PostsViewed,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+HighActivityUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        QuestionsAsked, 
+        AnswersProvided, 
+        PostsViewed, 
+        UpVotesReceived, 
+        DownVotesReceived,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS ActivityRank
+    FROM 
+        UserActivity
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagUsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.QuestionsAsked,
+    u.AnswersProvided,
+    u.PostsViewed,
+    u.UpVotesReceived,
+    u.DownVotesReceived,
+    t.TagName,
+    t.TagUsageCount
+FROM 
+    HighActivityUsers u
+JOIN 
+    TopTags t ON t.TagUsageCount > 5
+WHERE 
+    u.ActivityRank <= 10
+ORDER BY 
+    u.TotalPosts DESC, t.TagUsageCount DESC;

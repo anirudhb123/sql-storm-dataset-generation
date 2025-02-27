@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        c.PostId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        array_agg(DISTINCT ph.UserId) AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostRank,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    COALESCE(rc.LastCommentDate, NULL) AS LastCommentDate,
+    COALESCE(SUM(DISTINCT ph.EditCount), 0) AS TotalEdits,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN rp.UpVotes > rp.DownVotes THEN 'Popular'
+        WHEN rp.DownVotes > rp.UpVotes THEN 'Unpopular'
+        ELSE 'Neutral'
+    END AS PopularityStatus,
+    CASE 
+        WHEN rp.PostTypeId = 1 AND ph.PostHistoryTypeId IS NOT NULL THEN 
+            (SELECT STRING_AGG(DISTINCT CONCAT(u.DisplayName, ' (', COUNT(*), ')'), ', ')
+             FROM PostHistoryAnalysis ph
+             JOIN Users u ON u.Id = ANY(ph.Editors)
+             WHERE ph.PostId = rp.PostId)
+        ELSE NULL
+    END AS EditorsList
+FROM 
+    RankedPosts rp
+    LEFT JOIN RecentComments rc ON rp.PostId = rc.PostId
+    LEFT JOIN PostHistoryAnalysis ph ON rp.PostId = ph.PostId
+    LEFT JOIN UserBadges ub ON rp.UserId = ub.UserId
+WHERE 
+    (rp.PostRank <= 10 OR rc.CommentCount IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC, rp.CreationDate DESC;

@@ -1,0 +1,50 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+),
+UserReputationStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.Reputation) AS TotalReputation
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM Tags t
+    JOIN PostTags pt ON pt.Tag = t.TagName
+    GROUP BY t.TagName
+    ORDER BY TagCount DESC
+    LIMIT 5  
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        usr.TotalReputation,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments
+    FROM Users u
+    JOIN UserReputationStats usr ON u.Id = usr.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    WHERE u.Reputation > 100  
+    GROUP BY u.Id, u.DisplayName, usr.TotalReputation
+)
+SELECT 
+    au.DisplayName,
+    au.TotalReputation,
+    au.TotalPosts,
+    au.TotalComments,
+    pt.Tag AS PopularTag,
+    pt.TagCount
+FROM ActiveUsers au
+CROSS JOIN PopularTags pt
+ORDER BY au.TotalReputation DESC, au.TotalPosts DESC;

@@ -1,0 +1,57 @@
+WITH PostStatistics AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.Score,
+        Posts.ViewCount,
+        COUNT(Comments.Id) AS CommentCount,
+        COUNT(Votes.Id) AS VoteCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.CreationDate >= DATEADD(year, -1, GETDATE())  
+    GROUP BY 
+        Posts.Id, Posts.Title, Posts.CreationDate, Posts.Score, Posts.ViewCount
+),
+UserStatistics AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Badges.Id) AS BadgeCount,
+        SUM(Posts.ViewCount) AS TotalPostViews,
+        SUM(Posts.Score) AS TotalPostScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.VoteCount,
+    US.UserId,
+    US.DisplayName,
+    US.BadgeCount,
+    US.TotalPostViews,
+    US.TotalPostScore
+FROM 
+    PostStatistics PS
+JOIN 
+    UserStatistics US ON PS.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId = US.UserId
+    )
+ORDER BY 
+    PS.CreationDate DESC;

@@ -1,0 +1,46 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        p.name AS person_name,
+        c.kind AS person_role,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY p.name) AS role_rank
+    FROM 
+        aka_title a
+    INNER JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    INNER JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    INNER JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    INNER JOIN 
+        role_type c ON ci.role_id = c.id
+    WHERE 
+        a.production_year >= 2000 AND 
+        k.keyword IS NOT NULL
+),
+AggregatedRoles AS (
+    SELECT
+        movie_title,
+        production_year,
+        STRING_AGG(DISTINCT CONCAT(person_name, ' as ', person_role), ', ') AS cast_summary,
+        COUNT(DISTINCT role_rank) AS distinct_roles_count
+    FROM 
+        RankedMovies
+    GROUP BY 
+        movie_title, production_year
+)
+SELECT 
+    movie_title,
+    production_year,
+    cast_summary,
+    distinct_roles_count
+FROM 
+    AggregatedRoles
+WHERE 
+    distinct_roles_count > 3
+ORDER BY 
+    production_year DESC, movie_title;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        sc.ws_sold_date_sk,
+        sc.total_sales + s.total_sales AS total_sales,
+        sc.total_orders + s.total_orders AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY sc.total_sales + s.total_sales DESC) AS sales_rank
+    FROM Sales_CTE sc
+    JOIN (
+        SELECT ws_sold_date_sk, SUM(ws_ext_sales_price) AS total_sales, COUNT(DISTINCT ws_order_number) AS total_orders
+        FROM web_sales
+        GROUP BY ws_sold_date_sk
+    ) s ON sc.ws_sold_date_sk < s.ws_sold_date_sk
+    WHERE sc.sales_rank < 10
+),
+Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_country ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS country_rank
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(COALESCE(ws.net_profit, 0)) AS total_profit,
+    MAX(cs.order_count) AS max_orders_per_customer
+FROM customer_address ca
+LEFT JOIN web_sales ws ON ca.ca_address_sk = ws.ws_bill_addr_sk
+LEFT JOIN Customer_Sales cs ON ws.ws_bill_customer_sk = cs.c_customer_sk
+GROUP BY ca.ca_city, ca.ca_state
+HAVING SUM(ws.net_profit) > 1000000
+ORDER BY total_profit DESC
+LIMIT 20;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankView
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -2, cast('2024-10-01 12:34:56' as timestamp))
+),
+PostSummary AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(*) AS TotalPosts,
+        AVG(Score) AS AvgScore,
+        AVG(ViewCount) AS AvgViews,
+        AVG(AnswerCount) AS AvgAnswers,
+        AVG(CommentCount) AS AvgComments,
+        AVG(FavoriteCount) AS AvgFavorites
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.RankScore = pt.Id
+    GROUP BY 
+        pt.Name
+),
+TopPosts AS (
+    SELECT 
+        p.PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.CommentCount, 
+        p.FavoriteCount
+    FROM 
+        RankedPosts p
+    WHERE 
+        p.RankScore <= 10 OR p.RankView <= 10
+)
+SELECT 
+    ps.PostType,
+    ps.TotalPosts,
+    ps.AvgScore,
+    ps.AvgViews,
+    ps.AvgAnswers,
+    ps.AvgComments,
+    ps.AvgFavorites,
+    (SELECT STRING_AGG(CONVERT(varchar, PostId) + ': ' + Title, ', ')
+     FROM TopPosts tp 
+     WHERE tp.PostId IN (SELECT TOP 10 PostId FROM RankedPosts rp WHERE rp.RankScore <= 10)) AS TopScoringPosts,
+    (SELECT STRING_AGG(CONVERT(varchar, PostId) + ': ' + Title, ', ')
+     FROM TopPosts tp 
+     WHERE tp.PostId IN (SELECT TOP 10 PostId FROM RankedPosts rp WHERE rp.RankView <= 10)) AS TopViewedPosts
+FROM 
+    PostSummary ps
+ORDER BY 
+    ps.TotalPosts DESC;

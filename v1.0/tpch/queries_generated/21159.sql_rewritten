@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate < cast('1998-10-01' as date)
+    )
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost * p.p_retailprice) AS avg_cost_price,
+        (SELECT COUNT(*) 
+         FROM lineitem l 
+         WHERE l.l_suppkey = ps.ps_suppkey AND l.l_discount > 0.1) as discounted_items_count
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE WHEN s.s_acctbal IS NULL THEN 'Unknown' ELSE s.s_name END AS supplier_name_status
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT 
+    r.r_name, 
+    SUM(so.o_totalprice) AS total_sales,
+    COUNT(DISTINCT so.o_orderkey) AS order_count,
+    AVG(sp.avg_cost_price) AS average_supply_cost,
+    CASE 
+        WHEN SUM(sp.total_avail_qty) > 1000 THEN 'High Availability'
+        WHEN SUM(sp.total_avail_qty) IS NULL THEN 'No Availability'
+        ELSE 'Moderate Availability'
+    END AS availability_status,
+    COALESCE(NULLIF(STRING_AGG(DISTINCT f.supplier_name_status, '; '), ''), 'No Supplier') AS associated_suppliers
+FROM RankedOrders so
+JOIN nation n ON so.o_orderkey % 5 = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN SupplierParts sp ON sp.ps_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_size BETWEEN 10 AND 20
+)
+LEFT JOIN FilteredSuppliers f ON f.s_suppkey = sp.ps_suppkey
+GROUP BY r.r_name
+ORDER BY total_sales DESC
+WITH ROLLUP;

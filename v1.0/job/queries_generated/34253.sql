@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255)) 
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m_linked ON m_linked.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = m_linked.id
+)
+
+, MovieCast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT cc.id) AS total_roles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = c.movie_id
+    GROUP BY 
+        c.movie_id, a.name
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    k.keyword,
+    mc.actor_name,
+    mc.total_roles,
+    COUNT(DISTINCT a.id) OVER (PARTITION BY mh.movie_id) AS actor_count,
+    STRING_AGG(DISTINCT ci.note, '; ') FILTER (WHERE ci.note IS NOT NULL) AS notes,
+    MAX(CASE WHEN c.note IS NOT NULL THEN c.note ELSE 'No Note' END) AS role_note
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    MovieCast mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info_idx mi_idx ON mi.movie_id = mi_idx.movie_id AND mi.info_type_id = mi_idx.info_type_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+WHERE 
+    mh.level <= 2 
+    AND mh.production_year IS NOT NULL 
+    AND mc.total_roles > 0
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, k.keyword, mc.actor_name
+
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC;

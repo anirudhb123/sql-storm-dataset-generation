@@ -1,0 +1,62 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Id, Reputation
+),
+BadgeStatistics AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostHistoryStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        MAX(CreationDate) AS LastEditDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    COALESCE(B.GoldBadges, 0) AS GoldBadges,
+    COALESCE(B.SilverBadges, 0) AS SilverBadges,
+    COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PH.EditCount, 0) AS EditCount,
+    PH.LastEditDate
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    BadgeStatistics B ON U.UserId = B.UserId
+LEFT JOIN 
+    PostHistoryStatistics PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+ORDER BY 
+    U.Reputation DESC;

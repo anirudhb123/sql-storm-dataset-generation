@@ -1,0 +1,65 @@
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT CASE WHEN P.Id IS NOT NULL THEN P.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN A.Id IS NOT NULL THEN A.Id END) AS AnswerCount,
+        SUM(COALESCE(V.Score, 0)) AS TotalVotes,
+        SUM(CASE 
+            WHEN B.Date IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1
+    LEFT JOIN Posts A ON A.OwnerUserId = U.Id AND A.PostTypeId = 2
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostStatus AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(P.Title, 'Untitled') AS Title,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS Status,
+        CASE 
+            WHEN COALESCE(A.Id, -1) <> -1 THEN 'Accepted' 
+            ELSE 'Not Accepted' 
+        END AS AnswerAcceptance
+    FROM Posts P
+    LEFT JOIN Posts A ON A.Id = P.AcceptedAnswerId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+)
+SELECT 
+    UM.UserId,
+    UM.DisplayName,
+    UM.Reputation,
+    PM.PostId,
+    PM.Title,
+    PM.ViewCount,
+    PM.Score,
+    PM.Status,
+    PM.AnswerAcceptance,
+    CASE 
+        WHEN PM.Status = 'Closed' THEN 'This post is closed.'
+        ELSE 'This post is open for discussion.'
+    END AS PostRemarks,
+    COALESCE(UM.QuestionCount, 0) AS UserQuestionCount,
+    COALESCE(UM.AnswerCount, 0) AS UserAnswerCount,
+    PM.ViewCount * (CASE WHEN PM.Score > 0 THEN 1 ELSE 0 END) AS ViewScore,
+    CASE 
+        WHEN UPPER(PM.Title) LIKE '%SQL%' THEN 'SQL related'
+        ELSE 'General discussion'
+    END AS TopicCategory
+FROM UserMetrics UM
+LEFT JOIN PostStatus PM ON PM.Status = 'Open'
+WHERE UM.Rank <= 10
+ORDER BY UM.Reputation DESC, PM.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

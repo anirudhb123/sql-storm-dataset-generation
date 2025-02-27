@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        0 AS level,
+        i.i_current_price,
+        CAST(i.i_product_name AS VARCHAR(200)) AS path
+    FROM
+        item i
+    WHERE
+        i.i_rec_start_date <= DATE '2002-10-01' AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+
+    UNION ALL
+
+    SELECT
+        cs.cs_item_sk,
+        NULL, 
+        NULL, 
+        sh.level + 1,
+        cs.cs_sales_price,
+        CAST(sh.path || ' -> ' || cs.cs_order_number AS VARCHAR(200))
+    FROM
+        catalog_sales cs
+        JOIN sales_hierarchy sh ON cs.cs_item_sk = sh.i_item_sk
+    WHERE
+        cs.cs_sold_date_sk = (
+            SELECT MAX(d_date_sk)
+            FROM date_dim
+            WHERE d_date = DATE '2002-10-01'
+        )
+)
+
+SELECT
+    sh.i_item_sk,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    AVG(ws.ws_net_profit) AS average_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+    MAX(CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN 'Shipped' ELSE 'Not Shipped' END) AS shipping_status,
+    ROW_NUMBER() OVER (PARTITION BY sh.i_item_sk ORDER BY AVG(ws.ws_net_profit) DESC) AS item_rank,
+    NULLIF(sh.path, '') AS sales_path
+FROM
+    web_sales ws
+    RIGHT JOIN sales_hierarchy sh ON ws.ws_item_sk = sh.i_item_sk
+    LEFT JOIN catalog_sales cs ON sh.i_item_sk = cs.cs_item_sk
+GROUP BY
+    sh.i_item_sk, sh.i_current_price, sh.path
+HAVING
+    SUM(ws.ws_quantity) IS NOT NULL
+ORDER BY
+    total_quantity_sold DESC
+LIMIT 100;

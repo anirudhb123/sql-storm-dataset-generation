@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 
+           1 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice 
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+PartAvailability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderLineStatistics AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           COUNT(l.l_orderkey) AS line_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate < cast('1998-10-01' as date)
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(a.total_avail, 0) AS total_available,
+    CASE 
+        WHEN o.line_count > 0 THEN ROUND(o.total_revenue / o.line_count, 2)
+        ELSE NULL 
+    END AS avg_revenue_per_line,
+    nh.r_name AS national_region,
+    COUNT(DISTINCT c.c_custkey) AS customer_count
+FROM part p
+LEFT JOIN PartAvailability a ON p.p_partkey = a.ps_partkey
+LEFT JOIN OrderLineStatistics o ON o.o_orderkey IN (
+    SELECT o_orderkey 
+    FROM CustomerOrders co 
+    WHERE co.c_custkey = (SELECT c_nationkey FROM nation WHERE n_name = 'USA')
+)
+FULL OUTER JOIN nation nh ON nh.n_nationkey IN (
+    SELECT s_nationkey FROM SupplierHierarchy
+    GROUP BY s_nationkey
+)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, a.total_avail, o.line_count, nh.r_name
+HAVING COALESCE(a.total_avail, 0) > 100
+ORDER BY avg_revenue_per_line DESC NULLS LAST;

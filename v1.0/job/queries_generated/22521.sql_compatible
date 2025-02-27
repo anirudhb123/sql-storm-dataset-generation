@@ -1,0 +1,74 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.person_id,
+        an.name AS actor_name,
+        COUNT(cc.movie_id) AS total_movies,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(cc.movie_id) DESC) AS role_rank
+    FROM aka_name an
+    JOIN cast_info cc ON an.person_id = cc.person_id
+    WHERE an.name IS NOT NULL
+    GROUP BY a.id, a.person_id, an.name
+),
+movie_stats AS (
+    SELECT 
+        mt.title AS movie_title,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        AVG(CAST(mi.info AS numeric)) AS avg_length
+    FROM aka_title mt
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'runtime'
+    )
+    GROUP BY mt.title
+),
+actors_with_movies AS (
+    SELECT 
+        ah.actor_name,
+        ah.total_movies,
+        ms.movie_title,
+        ROW_NUMBER() OVER (PARTITION BY ah.actor_id ORDER BY ah.total_movies DESC) AS movie_rank
+    FROM actor_hierarchy ah
+    JOIN cast_info ci ON ah.actor_id = ci.person_id
+    JOIN aka_title ms ON ci.movie_id = ms.id
+),
+high_rated_actors AS (
+    SELECT actor_name, total_movies, movie_title
+    FROM actors_with_movies
+    WHERE total_movies > (
+        SELECT AVG(total_movies) FROM actor_hierarchy 
+    )
+),
+movie_keywords AS (
+    SELECT 
+        mt.title AS movie_title,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY mt.title
+),
+final_report AS (
+    SELECT 
+        h.actor_name,
+        h.total_movies,
+        mk.keywords,
+        COUNT(DISTINCT passed_movies.movie_title) AS movies_with_keywords
+    FROM high_rated_actors h
+    LEFT JOIN movie_keywords mk ON h.movie_title = mk.movie_title
+    LEFT JOIN movie_stats passed_movies ON h.movie_title = passed_movies.movie_title
+    GROUP BY h.actor_name, h.total_movies, mk.keywords
+)
+SELECT 
+    fr.actor_name,
+    fr.total_movies,
+    COALESCE(fr.keywords, 'No keywords') AS movie_keywords,
+    CASE 
+        WHEN fr.movies_with_keywords > 5 THEN 'Prolific'
+        WHEN fr.movies_with_keywords = 0 THEN 'No Tags'
+        ELSE 'Moderate Contributor'
+    END AS contributor_status
+FROM final_report fr
+WHERE fr.total_movies > 10
+ORDER BY fr.total_movies DESC
+LIMIT 20;

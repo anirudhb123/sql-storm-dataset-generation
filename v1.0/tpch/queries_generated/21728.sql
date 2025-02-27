@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_nation AS (
+    SELECT s_nationkey, s_name, s_acctbal 
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.n_nationkey, s.s_name, s.s_acctbal
+    FROM supplier_nation sn
+    JOIN nation n ON sn.s_nationkey = n.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > sn.s_acctbal * 1.1
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' 
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+nation_regions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+final_summary AS (
+    SELECT ns.n_name AS supplier_nation, pr.p_name, od.total_amount, ps.total_supply_cost
+    FROM order_details od
+    JOIN part_summary ps ON od.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_partkey = ps.p_partkey
+    )
+    JOIN supplier_nation ns ON ns.s_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = ps.p_partkey LIMIT 1))
+    WHERE od.total_amount > COALESCE(ps.total_supply_cost, 0)
+    ORDER BY od.total_amount DESC, ps.total_supply_cost DESC
+)
+SELECT DISTINCT f.supplier_nation, f.p_name, f.total_amount, f.total_supply_cost
+FROM final_summary f
+WHERE f.total_amount IS NOT NULL
+  AND f.total_supply_cost IS NOT NULL
+  AND LENGTH(f.supplier_nation) BETWEEN 5 AND 25
+UNION 
+SELECT DISTINCT ns.n_name, NULL AS p_name, NULL AS total_amount, NULL AS total_supply_cost
+FROM nation_regions ns
+WHERE NOT EXISTS (SELECT 1 FROM final_summary f WHERE f.supplier_nation = ns.n_name)
+ORDER BY supplier_nation, p_name;

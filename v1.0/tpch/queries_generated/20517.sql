@@ -1,0 +1,47 @@
+WITH RecursiveSupplyCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank_acct
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate,
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND li.l_shipdate > DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate
+),
+NationSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, COUNT(DISTINCT fc.c_custkey) AS customer_count,
+       AVG(hv.total_order_value) AS average_order_value,
+       ns.total_suppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN FilteredCustomers fc ON n.n_nationkey = fc.c_nationkey
+LEFT JOIN HighValueOrders hv ON fc.c_custkey IN (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderkey IN (
+        SELECT o1.o_orderkey
+        FROM orders o1
+        JOIN lineitem li ON o1.o_orderkey = li.l_orderkey
+        WHERE li.l_returnflag = 'R'
+    )
+)
+LEFT JOIN NationSuppliers ns ON n.n_nationkey = ns.n_nationkey
+GROUP BY r.r_name, ns.total_suppliers
+HAVING COUNT(DISTINCT fc.c_custkey) > 5
+   AND AVG(hv.total_order_value) IS NOT NULL
+ORDER BY r.r_name ASC, average_order_value DESC;

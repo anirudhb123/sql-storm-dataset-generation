@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to find all posts and their parent hierarchy
+    SELECT 
+        Id, 
+        Title, 
+        PostTypeId, 
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.PostTypeId, 
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStats AS (
+    -- CTE to calculate statistics for questions and answers
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (8, 9) THEN v.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId
+),
+MostVotedPosts AS (
+    -- Filter to get only the most voted questions followed by their accepted answers
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TotalBounty,
+        CASE 
+            WHEN ps.PostTypeId = 1 THEN 
+                (SELECT COUNT(*) FROM Posts a WHERE a.AcceptedAnswerId = ps.PostId)
+            ELSE 
+                NULL
+        END AS AnswerCount
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.UpVotes > 0
+)
+SELECT 
+    p.Id AS PostID,
+    p.Title AS QuestionTitle,
+    pp.Title AS AcceptedAnswer,
+    pp.UpVotes AS AcceptedAnswerVotes,
+    pp.DownVotes AS AcceptedAnswerDownVotes,
+    CASE WHEN pp.Id IS NULL THEN 'No Accepted Answer' ELSE 'Accepted' END AS AnswerStatus,
+    COALESCE(p.CommentCount, 0) AS TotalComments,
+    COALESCE(p.TotalBounty, 0) AS TotalBountyAwards,
+    COALESCE(p.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(p.DownVotes, 0) AS TotalDownVotes
+FROM 
+    MostVotedPosts p 
+LEFT JOIN 
+    Posts pp ON p.PostId = pp.AcceptedAnswerId
+ORDER BY 
+    p.UpVotes DESC
+LIMIT 100;
+

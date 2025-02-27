@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Starting from Questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostScoreRank AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        Level,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY Score DESC) AS Rnk
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(us.TotalPosts, 0) AS TotalPosts,
+    COALESCE(us.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(us.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(us.TotalScore, 0) AS TotalScore,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Level,
+    ps.Rnk
+FROM 
+    Users u
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    PostScoreRank ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy p ON p.Scope = 'all' -- fictitious to illustrate logic
+WHERE 
+    (u.Reputation > 100) -- Filter for highly reputed users
+    AND (p.Level <= 1) -- Consider only direct responses to questions
+ORDER BY 
+    u.Reputation DESC, p.CreationDate DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        title.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title AS title
+    JOIN 
+        movie_link AS ml ON title.id = ml.movie_id 
+    WHERE 
+        title.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.child_movie_id AS movie_id, 
+        mh.movie_title,
+        mh.level + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS m ON mh.movie_id = m.movie_id
+    WHERE 
+        m.linked_movie_id IS NOT NULL
+)
+SELECT 
+    mh.movie_id, 
+    mh.movie_title,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG(pi.info IS NOT NULL) AS avg_info_present,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count,
+    MAX(mo.procedure_year) AS latest_production_year
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    person_info AS pi ON ci.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'bio')
+LEFT JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    aka_title AS at ON mh.movie_id = at.movie_id
+LEFT JOIN 
+    title AS mo ON mh.movie_id = mo.id
+WHERE 
+    mh.level <= 2 
+GROUP BY 
+    mh.movie_id, 
+    mh.movie_title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5 
+ORDER BY 
+    total_cast DESC, 
+    mh.movie_title ASC;
+
+This SQL query constructs a recursive Common Table Expression (CTE) to build a hierarchy of movies linked with one another. The main query aggregates various attributes such as total cast count, average presence of personal information, concatenated alternate names, count of NULL notes, and latest production year for movies filtered by certain criteria, demonstrating complex operations and conditional logic throughout.

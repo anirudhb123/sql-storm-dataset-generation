@@ -1,0 +1,78 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) as rn
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    WHERE
+        t.production_year IS NOT NULL
+        AND k.keyword IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        c.nr_order,
+        CAST(SUBSTRING(a.name FROM '^[^ ]*') AS VARCHAR(50)) AS first_name,
+        LEAST(2023 - t.production_year, 0) AS age_of_movie
+    FROM 
+        aka_name a
+    INNER JOIN cast_info ci ON a.person_id = ci.person_id
+    INNER JOIN aka_title t ON ci.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+        AND ci.nr_order > 0
+),
+CompanyStatistics AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(m.id) AS movies_produced,
+        AVG(t.production_year) AS average_production_year
+    FROM 
+        company_name c
+    LEFT JOIN movie_companies mc ON c.id = mc.company_id
+    LEFT JOIN aka_title m ON mc.movie_id = m.id
+    WHERE 
+        c.name IS NOT NULL
+    GROUP BY c.name
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    cd.actor_name,
+    cd.first_name,
+    cs.company_name,
+    cs.movies_produced,
+    cs.average_production_year,
+    CASE 
+        WHEN cd.age_of_movie < 5 THEN 'Recent'
+        WHEN cd.age_of_movie BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Old'
+    END AS movie_age_group
+FROM 
+    MovieDetails md
+LEFT JOIN CastDetails cd ON md.movie_title = cd.movie_title
+LEFT JOIN CompanyStatistics cs ON md.company_name = cs.company_name
+WHERE 
+    (md.keyword LIKE '%Drama%' OR cd.actor_name IS NOT NULL)
+    AND md.rn = 1
+ORDER BY 
+    cd.nr_order, 
+    md.production_year DESC
+LIMIT 100;
+
+-- The above SQL query illustrates various SQL features:
+-- 1. CTEs are used to organize movie details, cast details, and company statistics.
+-- 2. ROW_NUMBER() is demonstrated in the MovieDetails CTE.
+-- 3. LEFT JOINs are utilized to connect various details.
+-- 4. String manipulation and standard SQL functions are applied to derive meaningful data.
+-- 5. A CASE statement categorizes the age of the movies.
+-- 6. Complicated predicates filter for specific conditions in the WHERE clause.
+-- 7. The LIMIT clause is used to restrict the number of results displayed.

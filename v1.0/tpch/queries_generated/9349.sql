@@ -1,0 +1,70 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+CombinedData AS (
+    SELECT 
+        cp.c_custkey,
+        cp.c_name,
+        cp.o_orderkey,
+        cp.o_orderdate,
+        sp.s_suppkey,
+        sp.s_name,
+        sp.p_partkey,
+        sp.p_name,
+        sp.total_available_qty,
+        sp.total_supply_cost,
+        coalesce(cd.total_revenue, 0) AS revenue
+    FROM 
+        SupplierParts sp
+    LEFT JOIN 
+        CustomerOrders cp ON cp.o_orderkey = (
+            SELECT MIN(o_orderkey) 
+            FROM orders 
+            WHERE o_custkey = cp.c_custkey
+        )
+)
+SELECT 
+    c.s_name,
+    c.p_name,
+    SUM(c.total_available_qty) AS total_available_quantity,
+    AVG(c.total_supply_cost) AS avg_supply_cost,
+    SUM(c.revenue) AS total_revenue
+FROM 
+    CombinedData c
+GROUP BY 
+    c.s_name, c.p_name
+ORDER BY 
+    total_available_quantity DESC, total_revenue DESC
+LIMIT 10;

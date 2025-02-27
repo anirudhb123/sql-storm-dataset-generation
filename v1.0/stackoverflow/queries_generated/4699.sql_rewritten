@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score >= 10 THEN 1 ELSE 0 END) AS HighScoredPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(c.Score, 0) AS CommentScore,
+        COALESCE(v.VoteCount, 0) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS Score FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '3 months'
+)
+SELECT 
+    rs.Title,
+    rs.CreationDate,
+    us.DisplayName,
+    us.TotalPosts,
+    us.HighScoredPosts,
+    rp.CommentScore,
+    rp.VoteCount
+FROM 
+    RankedPosts rs
+JOIN 
+    UserStats us ON rs.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = us.UserId)
+LEFT JOIN 
+    RecentPosts rp ON rs.PostId = rp.Id
+WHERE 
+    rs.PostRank = 1
+ORDER BY 
+    us.TotalPosts DESC, rs.Score DESC;

@@ -1,0 +1,63 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.CreationDate, U.LastAccessDate, U.UpVotes, U.DownVotes
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(P.ClosedDate, 'No') AS ClosedStatus,
+        STRING_AGG(CAST(T.TagName AS varchar), ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON P.Id = T.WikiPostId OR P.Id = T.ExcerptPostId
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.ClosedDate
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalBadges,
+    U.TotalBounty,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.ClosedStatus,
+    P.Tags
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

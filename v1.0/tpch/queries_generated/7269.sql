@@ -1,0 +1,51 @@
+WITH SupplierPerformance AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(*) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+)
+SELECT
+    p.p_name,
+    sp.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    cs.total_order_value,
+    sp.supplied_parts,
+    cs.order_count,
+    sp.total_supply_value
+FROM
+    lineitem l
+JOIN
+    part p ON l.l_partkey = p.p_partkey
+JOIN
+    SupplierPerformance sp ON l.l_suppkey = sp.s_suppkey
+JOIN
+    CustomerOrderStats cs ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+WHERE
+    l.l_shipdate BETWEEN '2022-01-01' AND '2023-01-01'
+GROUP BY
+    p.p_name, sp.s_name, cs.c_name, cs.total_order_value, sp.supplied_parts, cs.order_count, sp.total_supply_value
+ORDER BY
+    revenue DESC
+LIMIT 10;

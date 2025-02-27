@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+TopSuppliers AS (
+    SELECT 
+        rs.ps_partkey, 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal 
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        total_spent > 10000
+),
+FinalResults AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.c_acctbal,
+        ts.s_name,
+        ts.s_acctbal AS supplier_acctbal,
+        co.total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        CustomerOrders co
+    JOIN 
+        TopSuppliers ts ON ts.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN lineitem l ON ps.ps_partkey = l.l_partkey WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o))
+    JOIN 
+        customer cs ON co.c_custkey = cs.c_custkey
+    GROUP BY 
+        cs.c_custkey, cs.c_name, cs.c_acctbal, ts.s_name, ts.s_acctbal, co.total_spent
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    fr.c_acctbal,
+    fr.s_name,
+    fr.supplier_acctbal,
+    fr.total_spent,
+    fr.order_count 
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.total_spent DESC, fr.order_count DESC
+LIMIT 10;

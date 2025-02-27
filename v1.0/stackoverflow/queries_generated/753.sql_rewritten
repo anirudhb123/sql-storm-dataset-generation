@@ -1,0 +1,71 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS PositivePostScore,
+        SUM(CASE WHEN P.Score < 0 THEN P.Score ELSE 0 END) AS NegativePostScore,
+        SUM(COALESCE(B.TagBased, 0)) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        U.Id
+),
+HighScorePosts AS (
+    SELECT 
+        P.OwnerUserId,
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.Score > 10
+),
+ClosedPostCounts AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS ClosedPosts
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.UserId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.PositivePostScore,
+    UA.NegativePostScore,
+    COALESCE(HSP.PostId, 0) AS HighScorePostId,
+    COALESCE(HSP.Title, 'No High Score Post') AS HighScorePostTitle,
+    COALESCE(HSP.Score, 0) AS HighScore,
+    COALESCE(HSC.ClosedPosts, 0) AS ClosedPosts
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    HighScorePosts HSP ON UA.UserId = HSP.OwnerUserId AND HSP.Rank = 1
+LEFT JOIN 
+    ClosedPostCounts HSC ON UA.UserId = HSC.UserId
+WHERE 
+    UA.TotalPosts > 5
+ORDER BY 
+    UA.Reputation DESC, 
+    UA.TotalPosts DESC
+LIMIT 50;

@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, p.p_partkey, p.p_brand, p.p_type,
+           ps.ps_availqty, ps.ps_supplycost, ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT sc.s_suppkey, sc.s_name, sc.s_nationkey, p.p_partkey, p.p_brand, p.p_type,
+           ps.ps_availqty, ps.ps_supplycost, ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sc.s_nationkey <> s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS finished_orders,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date,
+           PERCENT_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS price_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           AVG(s.s_acctbal) AS avg_account_balance,
+           MIN(s.s_acctbal) AS min_account_balance,
+           MAX(s.s_acctbal) AS max_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT sc.s_name, sc.p_brand, sc.p_type, sc.ps_availqty, sc.ps_supplycost,
+       co.finished_orders, co.order_count, co.last_order_date, co.price_rank,
+       ns.n_nationkey, ns.n_name, ns.supplier_count, ns.avg_account_balance,
+       CASE WHEN ns.avg_account_balance IS NULL THEN 'No Suppliers' ELSE 'Has Suppliers' END AS supplier_status
+FROM SupplyChain sc
+JOIN CustomerOrders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal IS NOT NULL ORDER BY RANDOM() LIMIT 1)
+FULL OUTER JOIN NationStats ns ON ns.n_nationkey = sc.s_nationkey
+WHERE (sc.ps_availqty > 100 OR sc.ps_supplycost <= 50) 
+AND ns.avg_account_balance IS NOT NULL
+ORDER BY sc.p_brand, sc.ps_supplycost DESC, co.last_order_date DESC
+LIMIT 100;

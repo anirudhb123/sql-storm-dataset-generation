@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_in_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        MIN(m.production_year) AS first_movie_year,
+        MAX(m.production_year) AS last_movie_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    GROUP BY 
+        ci.person_id
+),
+MasterActorInfo AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        ac.total_movies,
+        ac.first_movie_year,
+        ac.last_movie_year,
+        RANK() OVER (ORDER BY ac.total_movies DESC) AS movie_rank
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        ActorMovieCounts ac ON ak.person_id = ac.person_id
+)
+SELECT 
+    ma.actor_id,
+    ma.name,
+    ma.total_movies,
+    ma.first_movie_year,
+    ma.last_movie_year,
+    COALESCE(CAST(ma.first_movie_year AS text), 'N/A') || 
+    ' to ' || 
+    COALESCE(CAST(ma.last_movie_year AS text), 'N/A') AS movie_span,
+    CASE 
+        WHEN ma.last_movie_year IS NULL THEN 'No Movies'
+        WHEN ma.first_movie_year IS NULL THEN 'Future Star'
+        ELSE 'Active Actor'
+    END AS actor_status
+FROM 
+    MasterActorInfo ma
+WHERE 
+    ma.movie_rank <= 10
+ORDER BY 
+    ma.total_movies DESC
+LIMIT 5
+OFFSET (SELECT COUNT(*) FROM MasterActorInfo) % 3
+UNION ALL
+SELECT 
+    NULL AS actor_id,
+    'Aggregate Actors' AS name,
+    COUNT(*) AS total_movies,
+    MIN(first_movie_year) AS first_movie_year,
+    MAX(last_movie_year) AS last_movie_year,
+    COALESCE(MIN(first_movie_year)::text, 'N/A') || ' to ' || COALESCE(MAX(last_movie_year)::text, 'N/A') AS movie_span,
+    'Aggregate Actor' AS actor_status
+FROM 
+    MasterActorInfo
+WHERE 
+    total_movies IS NOT NULL
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    total_movies DESC
+LIMIT 1;

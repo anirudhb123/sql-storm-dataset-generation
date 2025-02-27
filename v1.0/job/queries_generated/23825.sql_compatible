@@ -1,0 +1,62 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS year_rank
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+),
+
+actor_role_counts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles_played
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id
+),
+
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN title m ON mk.movie_id = m.id
+    GROUP BY m.id
+),
+
+company_distribution AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, '; ') AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM movie_companies mc
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+)
+
+SELECT 
+    rm.year_rank,
+    rm.title AS movie_title,
+    rm.production_year,
+    COALESCE(ac.person_id, 0) AS actor_id,
+    COALESCE(ac.movie_count, 0) AS films_with_actor,
+    ac.roles_played,
+    COALESCE(mk.keywords, 'None') AS movie_keywords,
+    COALESCE(cd.companies, 'No companies') AS production_companies,
+    COALESCE(cd.company_count, 0) AS company_count
+FROM ranked_movies rm
+LEFT JOIN actor_role_counts ac ON ac.person_id IN (
+    SELECT DISTINCT c.person_id
+    FROM cast_info c
+    WHERE c.movie_id = rm.movie_id
+) AND ac.movie_count > 1
+LEFT JOIN movies_with_keywords mk ON mk.movie_id = rm.movie_id
+LEFT JOIN company_distribution cd ON cd.movie_id = rm.movie_id
+WHERE rm.year_rank <= 5
+ORDER BY rm.production_year DESC, rm.year_rank
+LIMIT 10;

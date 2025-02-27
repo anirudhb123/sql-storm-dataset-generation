@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.rank <= 5
+),
+ExtendedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_discount > 0.05 THEN (l.l_extendedprice * (1 - l.l_discount))
+            ELSE l.l_extendedprice
+        END AS effective_price
+    FROM 
+        lineitem l
+)
+SELECT 
+    p.p_name,
+    SUM(eli.effective_price) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    ns.nation_name
+FROM 
+    part p
+LEFT JOIN 
+    ExtendedLineItems eli ON p.p_partkey = eli.l_partkey
+LEFT JOIN 
+    orders o ON eli.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON eli.l_suppkey = ts.s_suppkey
+LEFT JOIN 
+    nation ns ON ts.nation_name = ns.n_name
+WHERE 
+    p.p_retailprice > 100.00
+    AND (o.o_orderdate >= DATE '2023-01-01' OR o.o_orderdate IS NULL)
+GROUP BY 
+    p.p_name, ns.nation_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

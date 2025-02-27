@@ -1,0 +1,62 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'AFRICA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+avg_price_per_part AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+      AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_type LIKE '%smart%')
+),
+orders_with_discount AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_discount > 0.1 AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+ranked_orders AS (
+    SELECT o.c_custkey, od.o_orderkey, od.total_discounted_price,
+           RANK() OVER (PARTITION BY o.c_custkey ORDER BY od.total_discounted_price DESC) AS rank
+    FROM customer_orders o
+    JOIN orders_with_discount od ON o.order_count > 0 AND o.c_custkey = od.o_orderkey
+)
+SELECT 
+    nh.n_name AS nation_name,
+    fp.p_name AS part_name,
+    fp.p_retailprice,
+    COALESCE(fo.order_count, 0) AS total_orders,
+    ro.total_discounted_price,
+    CASE 
+        WHEN ro.rank = 1 THEN 'Top Order'
+        ELSE 'Other Order'
+    END AS order_rank
+FROM filtered_parts fp
+JOIN nation_hierarchy nh ON nh.n_nationkey = (SELECT s.n_nationkey 
+                                                FROM supplier s 
+                                                JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey 
+                                                WHERE ps.ps_partkey = fp.p_partkey 
+                                                LIMIT 1)
+LEFT JOIN customer_orders fo ON fo.c_custkey = (SELECT c.c_nationkey FROM customer WHERE c.c_name = 'John Doe')
+LEFT JOIN ranked_orders ro ON fo.order_count > 0 AND fo.c_custkey = ro.c_custkey
+WHERE fp.p_retailprice IS NOT NULL
+ORDER BY nh.level, fp.p_name;

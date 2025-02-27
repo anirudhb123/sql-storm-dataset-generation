@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        mk.keyword,
+        CASE 
+            WHEN mk.keyword IS NULL THEN 'No Keyword'
+            ELSE mk.keyword 
+        END AS keyword_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+),
+ActorsCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.keyword_status,
+        ac.actor_count,
+        COALESCE(ac.actor_count, 0) AS actors_in_title
+    FROM 
+        MoviesWithKeywords mwk
+    LEFT JOIN 
+        ActorsCount ac ON mwk.movie_id = ac.movie_id
+)
+SELECT 
+    md.title,
+    md.keyword_status,
+    md.actors_in_title,
+    CASE 
+        WHEN md.actors_in_title > 10 THEN 'Star Cast'
+        WHEN md.actors_in_title BETWEEN 5 AND 10 THEN 'Supporting Cast'
+        ELSE 'Minor Role'
+    END AS cast_size_category,
+    CASE 
+        WHEN md.keyword_status = 'No Keyword' AND md.actors_in_title = 0 THEN 'Curiously Generic'
+        WHEN md.keyword_status IS NOT NULL THEN CONCAT('Keyword: ', md.keyword_status)
+        ELSE 'Mysteriously Missing'
+    END AS keyword_analysis
+FROM 
+    MovieDetails md
+WHERE 
+    md.actors_in_title > 0
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE 
+            mi.movie_id = md.movie_id 
+            AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office')
+    )
+ORDER BY 
+    md.title DESC;

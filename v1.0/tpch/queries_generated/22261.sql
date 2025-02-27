@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank_per_nation
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+AggregatedParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           CASE 
+               WHEN c.c_acctbal IS NULL THEN 'Unknown'
+               WHEN c.c_acctbal > 10000 THEN 'High Value'
+               ELSE 'Regular'
+           END AS customer_type
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL OR c.c_acctbal IS NULL
+),
+NullChecked AS (
+    SELECT coalesce(MAX(o.o_orderkey), 0) AS max_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus IS NOT NULL
+)
+SELECT hs.s_name, ap.p_name, ap.total_available, o.total_revenue, h.customer_type
+FROM RankedSuppliers hs
+FULL OUTER JOIN AggregatedParts ap ON hs.rank_per_nation = 1
+LEFT JOIN OrderDetails o ON o.o_orderkey = NULLChecked.max_orderkey
+JOIN HighValueCustomers h ON h.c_custkey = o.o_custkey
+WHERE ap.total_available IS NOT NULL
+  AND (h.customer_type = 'High Value' OR hs.s_acctbal < 1000)
+ORDER BY hs.s_name, ap.total_available DESC NULLS LAST;

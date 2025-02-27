@@ -1,0 +1,48 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        w.warehouse_id,
+        SUM(ws_net_profit) AS total_net_profit,
+        1 AS level
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.warehouse_id
+
+    UNION ALL
+
+    SELECT
+        w.warehouse_id,
+        SUM(ws.net_profit) AS total_net_profit,
+        sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN warehouse w ON sh.warehouse_id = w.warehouse_id
+    JOIN catalog_sales cs ON w.w_warehouse_sk = cs.cs_warehouse_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_month >= 6 
+      AND cs.cs_sales_price > ALL (
+          SELECT AVG(ss_sales_price) 
+          FROM store_sales ss 
+          WHERE ss.ss_sold_date_sk BETWEEN 
+              (SELECT d_date_sk FROM date_dim WHERE d_year = 2000 AND d_moy = 12 LIMIT 1) 
+              AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2001 AND d_moy = 1 LIMIT 1)
+      )
+    GROUP BY w.warehouse_id, sh.level
+),
+filtered_sales AS (
+    SELECT 
+        wh.warehouse_name,
+        sh.warehouse_id,
+        sh.total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY sh.warehouse_id ORDER BY sh.total_net_profit DESC) AS rank
+    FROM sales_hierarchy sh
+    JOIN warehouse wh ON sh.warehouse_id = wh.warehouse_id
+)
+SELECT 
+    warehouse_name,
+    total_net_profit,
+    CASE 
+        WHEN rank = 1 THEN 'Top Performer'
+        ELSE 'Under Performer'
+    END AS performance_category
+FROM filtered_sales
+WHERE total_net_profit IS NOT NULL
+ORDER BY total_net_profit DESC;

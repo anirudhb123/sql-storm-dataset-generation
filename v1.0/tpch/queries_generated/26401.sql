@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+    CONCAT('Region: ', r.r_name, ' | Comment: ', r.r_comment) AS region_info,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(p.p_comment, ' ', 5), ' ', -5) AS short_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND l.l_shipdate >= '2022-01-01'
+    AND l.l_shipdate <= '2022-12-31'
+GROUP BY 
+    p.p_name, r.r_name, r.r_comment
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY 
+    total_quantity DESC, avg_price ASC;

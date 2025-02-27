@@ -1,0 +1,83 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.PostTypeId,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        CASE 
+            WHEN p.OwnerUserId IS NOT NULL THEN (SELECT DisplayName FROM Users u WHERE u.Id = p.OwnerUserId)
+            ELSE 'Community User'
+        END AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Ranking
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.OwnerDisplayName,
+        CASE 
+            WHEN rp.PostTypeId = 1 THEN 'Question'
+            WHEN rp.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostTypeName
+    FROM 
+        RecentPosts rp
+    WHERE 
+        rp.Ranking <= 10
+),
+PostLinksSummary AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS LinkedPostsCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        PhT.Name AS HistoryType,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRanking
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes PhT ON ph.PostHistoryTypeId = PhT.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.CommentCount,
+    tp.OwnerDisplayName,
+    pl.LinkedPostsCount,
+    STRING_AGG(CONCAT(ph.HistoryType, ' on ', CONVERT(varchar, ph.HistoryDate, 120), 
+    CASE WHEN ph.Comment IS NOT NULL THEN CONCAT(' - ', ph.Comment) ELSE '' END), '; ') AS PostHistory
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostLinksSummary pl ON tp.PostId = pl.PostId
+LEFT JOIN 
+    PostHistoryDetails ph ON tp.PostId = ph.PostId AND ph.HistoryRanking <= 3
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, 
+    tp.CommentCount, tp.OwnerDisplayName, pl.LinkedPostsCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

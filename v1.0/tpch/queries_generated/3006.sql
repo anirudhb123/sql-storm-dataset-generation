@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_totalprice > 1000 
+        AND o.o_orderstatus IN ('O', 'P')
+)
+SELECT 
+    r.n_name AS supplier_nation,
+    rs.s_name AS supplier_name,
+    h.o_orderkey AS high_value_orderkey,
+    h.o_totalprice AS high_value_totalprice,
+    (SELECT COUNT(DISTINCT l.l_orderkey) 
+     FROM lineitem l
+     WHERE l.l_orderkey = h.o_orderkey
+     AND l.l_discount > 0.05) AS discounted_items,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_value
+FROM 
+    RankedSuppliers rs
+LEFT JOIN 
+    nation r ON rs.s_nationkey = r.n_nationkey
+JOIN 
+    lineitem l ON l.l_suppkey = rs.s_suppkey
+JOIN 
+    HighValueOrders h ON l.l_orderkey = h.o_orderkey
+WHERE 
+    h.order_rank <= 5
+GROUP BY 
+    r.n_name, rs.s_name, h.o_orderkey, h.o_totalprice
+ORDER BY 
+    total_value DESC, supplier_nation, supplier_name;

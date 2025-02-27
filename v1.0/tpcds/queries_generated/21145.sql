@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk DESC) AS rn
+    FROM
+        store_sales
+    WHERE 
+        ss_sales_price NOT LIKE '%[^0-9]%'
+),
+FilteredReturns AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS num_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+        AND sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr_store_sk
+),
+ProductSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        AVG(ws_sales_price) AS avg_price,
+        COUNT(*) AS sales_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+        AND (ws_ship_date_sk IS NOT NULL OR ws_bill_addr_sk IS NOT NULL)
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    COALESCE(s.store_id, 'Unknown') AS StoreID, 
+    COALESCE(P.total_sold, 0) AS TotalSold, 
+    COALESCE(R.total_returns, 0) AS TotalReturns, 
+    CASE 
+        WHEN COALESCE(P.total_sold, 0) > 0 
+        THEN CAST(ROUND(((COALESCE(P.total_sold, 0) - COALESCE(R.total_returns, 0)) * 100.0) / COALESCE(P.total_sold, 1), 2) AS DECIMAL(5,2))
+        ELSE NULL 
+    END AS ReturnRate,
+    MAX(CASE 
+        WHEN R.num_returns > 5 THEN 'High Return'
+        WHEN R.num_returns BETWEEN 1 AND 5 THEN 'Moderate Return'
+        ELSE 'Low Return' 
+    END) AS ReturnCategory
+FROM 
+    (SELECT DISTINCT s_store_sk, s_store_id FROM store) AS s
+LEFT JOIN 
+    ProductSales AS P ON s.s_store_sk = P.ws_item_sk 
+LEFT JOIN 
+    FilteredReturns AS R ON s.s_store_sk = R.sr_store_sk 
+GROUP BY 
+    s.s_store_sk, s.store_id
+ORDER BY 
+    StoreID;

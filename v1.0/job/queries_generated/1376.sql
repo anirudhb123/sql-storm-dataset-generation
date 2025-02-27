@@ -1,0 +1,71 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+    AND 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+),
+movie_actors AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        MAX(c.nr_order) AS max_order
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+company_movies AS (
+    SELECT 
+        mc.movie_id,
+        com.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name com ON mc.company_id = com.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        com.country_code IS NOT NULL
+),
+filtered_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ma.actor_count,
+        cm.company_name,
+        cm.company_type
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_actors ma ON rm.id = ma.movie_id
+    LEFT JOIN 
+        company_movies cm ON rm.id = cm.movie_id
+    WHERE 
+        rm.rank <= 10
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(f.actor_count, 0) AS total_actors,
+    COUNT(DISTINCT cm.company_name) AS total_companies
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    movie_keyword mk ON f.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    (f.company_type IS NOT NULL OR f.total_actors > 0)
+GROUP BY 
+    f.title, f.production_year, f.actor_count
+HAVING 
+    COUNT(DISTINCT k.id) > 3
+ORDER BY 
+    f.production_year DESC, total_actors DESC;

@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(u.total_spent, 0) AS total_customer_spent,
+    s.s_name AS supplier_name,
+    r.r_name AS region_name,
+    CASE 
+        WHEN co.order_count > 10 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS volume_category,
+    COUNT(DISTINCT n.n_nationkey) AS distinct_nations,
+    STRING_AGG(DISTINCT n.n_name, ', ') WITHIN GROUP (ORDER BY n.n_name) AS nation_names
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers r ON s.s_suppkey = r.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON s.s_nationkey = co.c_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 50
+    AND (n.n_name IS NOT NULL OR r.r_name IS NOT NULL)
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    r.r_name,
+    co.order_count
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+    OR MAX(s.s_acctbal) IS NULL
+ORDER BY 
+    total_customer_spent DESC NULLS LAST;

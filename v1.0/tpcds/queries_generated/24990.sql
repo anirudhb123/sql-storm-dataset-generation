@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_order_number ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+        AND c.c_birth_month BETWEEN 1 AND 12
+        AND c.c_current_cdemo_sk IS NOT NULL
+        AND (c.c_login IS NOT NULL OR c.c_email_address IS NOT NULL)
+),
+PotentiallyFraudulentReturns AS (
+    SELECT 
+        wr.wr_order_number,
+        wr.wr_return_quantity,
+        (wr.wr_return_amt_inc_tax - wr.wr_fee) AS potential_loss,
+        CASE 
+            WHEN wr.wr_return_quantity > 5 THEN 'High' 
+            WHEN wr.wr_return_quantity BETWEEN 3 AND 5 THEN 'Medium' 
+            ELSE 'Low' 
+        END AS return_severity
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_return_quantity IS NOT NULL
+        AND wr.wr_return_amt_inc_tax < 0
+),
+CustomerStats AS (
+    SELECT 
+        DISTINCT c.c_customer_id,
+        CASE
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Unknown'
+        END AS gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COALESCE(AVG(cd.cd_purchase_estimate), 0) AS avg_estimate,
+        AVG(cs.cs_net_profit) FILTER (WHERE cs.cs_net_profit IS NOT NULL) AS avg_store_profit
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    cs.gender,
+    cs.total_orders,
+    cs.avg_estimate,
+    rs.total_profit AS web_total_profit,
+    pwr.potential_loss,
+    pwr.return_severity
+FROM 
+    CustomerStats cs
+JOIN 
+    RankedSales rs ON cs.total_orders > 0
+LEFT JOIN 
+    PotentiallyFraudulentReturns pwr ON pwr.wr_order_number = rs.ws_order_number
+WHERE 
+    cs.total_orders > 10
+ORDER BY 
+    CASE WHEN pwr.potential_loss IS NULL THEN 1 ELSE 0 END, 
+    pwr.potential_loss DESC NULLS LAST, 
+    cs.avg_estimate DESC;

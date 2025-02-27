@@ -1,0 +1,63 @@
+WITH RECURSIVE supplier_ranks AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT p.ps_partkey) AS part_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.ps_partkey) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey, c.c_name
+), 
+lineitem_totals AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    AVG(co.total_spent) FILTER (WHERE co.total_spent IS NOT NULL) AS avg_spent,
+    SUM(COALESCE(l.total_lineitem_price, 0)) AS total_lineitems_price,
+    SUM(CASE 
+        WHEN s.rank = 1 THEN co.order_count 
+        ELSE 0 END) AS top_supplier_orders,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ':', s.rank), ', ') AS supplier_ranks
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer_orders co ON n.n_nationkey = co.c_custkey 
+LEFT JOIN 
+    supplier_ranks s ON s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand LIKE 'Brand%' AND p.p_size BETWEEN 20 AND 50))
+LEFT JOIN 
+    lineitem_totals l ON l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY 
+    r.r_name ASC
+LIMIT 10;

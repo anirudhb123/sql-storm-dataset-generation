@@ -1,0 +1,66 @@
+
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 3 THEN 1 ELSE 0 END) AS WikiCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.TagName
+), PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        WikiCount,
+        HighViewCount,
+        RANK() OVER (ORDER BY PostCount DESC, HighViewCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    pt.TagName,
+    pt.PostCount,
+    pt.QuestionCount,
+    pt.AnswerCount,
+    pt.WikiCount,
+    pt.HighViewCount,
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount
+FROM 
+    PopularTags pt
+JOIN 
+    Users u ON u.Id IN (
+        SELECT 
+            OwnerUserId 
+        FROM 
+            Posts 
+        WHERE 
+            Tags LIKE CONCAT('%', pt.TagName, '%') 
+        ORDER BY 
+            Score DESC 
+        LIMIT 1
+    )
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) b ON u.Id = b.UserId
+WHERE 
+    pt.TagRank <= 10
+ORDER BY 
+    pt.PostCount DESC, pt.HighViewCount DESC;

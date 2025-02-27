@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_addr as s_address, 1 as level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_address, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey AND s2.s_suppkey <> sh.s_suppkey
+    WHERE sh.level < 5
+),
+
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 25 AND p.p_retailprice > 10.00
+    GROUP BY p.p_partkey, p.p_name
+),
+
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+
+NationCustomer AS (
+    SELECT n.n_name AS nation_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+)
+
+SELECT 
+    nh.nation_name,
+    COALESCE(NC.customer_count, 0) AS total_customers,
+    COALESCE(ORDER_COUNT.order_count, 0) AS orders_per_customer,
+    ROUND(AVG(PI.total_supply_cost), 2) AS avg_supply_cost,
+    MAX(PI.total_avail_qty) AS max_avail_qty,
+    CASE 
+        WHEN MAX(R.order_price) IS NULL THEN 'No Orders'
+        ELSE MAX(R.order_price)::text
+    END AS highest_order_price
+FROM NationCustomer NC
+JOIN SupplierHierarchy sh ON NC.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = sh.s_nationkey)
+LEFT JOIN RankedOrders R ON R.order_rank = 1
+LEFT JOIN PartSupplierInfo PI ON PI.p_partkey = (SELECT MIN(p.p_partkey) FROM part p JOIN partsupp ps ON p.p_partkey = ps.ps_partkey)
+GROUP BY nh.nation_name
+HAVING total_customers >= 5 OR highest_order_price IS NOT NULL
+ORDER BY total_customers DESC, nation_name;

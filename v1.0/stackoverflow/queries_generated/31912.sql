@@ -1,0 +1,91 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentUserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS RecentEdits,
+        SUM(CASE WHEN p.LastEditDate >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPosts,
+        MAX(p.LastEditDate) AS LastActiveDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    GROUP BY 
+        UserId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(ph.Comment, 'No comments') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastEditDate DESC) AS LastPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ups.TotalPosts,
+        ups.TotalQuestions,
+        ups.TotalAnswers,
+        ups.TotalScore,
+        rua.RecentEdits,
+        rua.RecentPosts,
+        rua.LastActiveDate,
+        p.Title AS RecentPostTitle,
+        p.ViewCount AS RecentPostViewCount
+    FROM 
+        Users u
+    JOIN 
+        UserPostStats ups ON u.Id = ups.UserId
+    LEFT JOIN 
+        RecentUserActivity rua ON u.Id = rua.UserId
+    LEFT JOIN 
+        PostMetrics p ON u.Id = p.OwnerUserId AND p.LastPostRank = 1
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalScore,
+    up.RecentEdits,
+    up.RecentPosts,
+    COALESCE(p.LastActiveDate, 'No activity') AS LastActiveDate,
+    COALESCE(up.RecentPostTitle, 'No recent posts') AS RecentPostTitle,
+    COALESCE(up.RecentPostViewCount, 0) AS RecentPostViewCount,
+    CASE 
+        WHEN up.TotalScore > 1000 THEN 'Highly Active'
+        WHEN up.TotalScore >= 500 THEN 'Moderately Active'
+        ELSE 'Less Active' 
+    END AS ActivityLevel
+FROM 
+    UserPerformance up
+WHERE 
+    up.TotalPosts > 0
+ORDER BY 
+    up.TotalScore DESC;
+
+

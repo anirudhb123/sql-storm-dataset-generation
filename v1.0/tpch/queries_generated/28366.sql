@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 5
+),
+ProductStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SupplierProductMetrics AS (
+    SELECT 
+        ts.r_name AS region_name,
+        ts.s_name AS supplier_name,
+        ps.p_name AS product_name,
+        ps.total_available_quantity,
+        ps.avg_supply_cost,
+        (ps.total_available_quantity * ps.avg_supply_cost) AS total_value
+    FROM 
+        TopSuppliers ts
+    JOIN 
+        ProductStats ps ON ts.s_suppkey = ps.p_partkey
+)
+SELECT 
+    region_name,
+    supplier_name,
+    product_name,
+    total_available_quantity,
+    avg_supply_cost,
+    total_value
+FROM 
+    SupplierProductMetrics
+ORDER BY 
+    region_name, supplier_name, total_value DESC;

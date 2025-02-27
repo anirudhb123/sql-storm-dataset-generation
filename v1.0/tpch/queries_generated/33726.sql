@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal 
+    FROM supplier 
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal 
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal 
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01'
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) as cost_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 20
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+RegionSummary AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey
+)
+SELECT sh.s_suppkey, sh.s_name, o.o_orderkey, o.o_orderdate,
+       CASE 
+           WHEN RANK() OVER (ORDER BY o.o_totalprice) <= 10 THEN 'Top 10 Orders'
+           ELSE 'Other Orders'
+       END AS order_category,
+       ps.p_name, ps.ps_availqty, ps.ps_supplycost,
+       r.nation_count, 
+       COALESCE((SELECT MAX(total_revenue) FROM AggregatedLineItems WHERE l_orderkey = o.o_orderkey), 0) AS max_order_revenue
+FROM SupplierHierarchy sh
+LEFT JOIN RankedOrders o ON sh.s_suppkey = o.o_orderkey
+LEFT JOIN PartSupplier ps ON ps.cost_rank = 1 
+LEFT JOIN RegionSummary r ON sh.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE r.r_regionkey = n.n_regionkey)
+WHERE ps.ps_availqty IS NOT NULL 
+AND (sh.s_acctbal IS NOT NULL OR o.o_totalprice IS NOT NULL)
+ORDER BY order_category, sh.s_name, o.o_totalprice DESC;

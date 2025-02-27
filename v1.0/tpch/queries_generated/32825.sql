@@ -1,0 +1,49 @@
+WITH RECURSIVE RecursivePart AS (
+    SELECT p_partkey, p_name, p_brand, p_size, p_retailprice, 0 AS Level
+    FROM part
+    WHERE p_size = (SELECT MAX(p_size) FROM part)
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, p.p_retailprice, rp.Level + 1
+    FROM part p
+    INNER JOIN RecursivePart rp ON p.p_size < rp.p_size
+)
+
+SELECT 
+    n.n_name AS Nation,
+    r.r_name AS Region,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+    COUNT(DISTINCT c.c_custkey) AS UniqueCustomers,
+    AVG(p.p_retailprice) OVER (PARTITION BY n.n_name) AS AvgRetailPrice,
+    STRING_AGG(p.p_name, ', ') AS ProductList,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000 THEN 'High Revenue'
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) BETWEEN 50000 AND 100000 THEN 'Moderate Revenue'
+        ELSE 'Low Revenue'
+    END AS RevenueCategory
+FROM 
+    nation n
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+WHERE 
+    o.o_orderdate >= '2022-01-01' 
+    AND (p.p_brand IS NOT NULL OR p.p_container IS NOT NULL)
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+ORDER BY 
+    TotalRevenue DESC;

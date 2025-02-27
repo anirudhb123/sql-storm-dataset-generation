@@ -1,0 +1,67 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation > 0
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        COALESCE(SUM(p.Score), 0) AS TotalScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        r.UserId,
+        r.DisplayName,
+        COALESCE(ps.QuestionCount, 0) AS Questions,
+        COALESCE(ps.AnswerCount, 0) AS Answers,
+        ps.TotalScore
+    FROM RankedUsers r
+    LEFT JOIN PostStats ps ON r.UserId = ps.OwnerUserId
+),
+BadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    WHERE b.Class = 1 OR b.Class = 2
+    GROUP BY b.UserId
+),
+FinalStats AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.Questions,
+        ups.Answers,
+        ups.TotalScore,
+        COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY ups.TotalScore DESC, ups.ReputationRank ASC) AS FinalRank
+    FROM UserPostStats ups
+    LEFT JOIN BadgeCount bc ON ups.UserId = bc.UserId
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.Questions,
+    fs.Answers,
+    fs.TotalScore,
+    fs.BadgeCount,
+    CASE 
+        WHEN fs.BadgeCount > 0 THEN 'Gold/Silver Badge Holder'
+        ELSE 'No Badge'
+    END AS BadgeStatus,
+    (SELECT STRING_AGG(DISTINCT pt.Name, ', ') 
+     FROM PostHistory ph
+     JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+     WHERE ph.UserId = fs.UserId) AS RecentPostActions
+FROM FinalStats fs
+WHERE fs.BadgeCount > 0
+ORDER BY fs.FinalRank
+LIMIT 10;

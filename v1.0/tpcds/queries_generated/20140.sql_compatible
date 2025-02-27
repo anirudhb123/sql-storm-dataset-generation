@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2458593 AND 2458599 
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN '*no estimate*'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate,
+        c.c_email_address
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+InventoryStatus AS (
+    SELECT 
+        i.i_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk
+    HAVING SUM(inv.inv_quantity_on_hand) IS NOT NULL
+),
+FilteredReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amt) AS avg_return_amt
+    FROM store_returns 
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_item_sk
+),
+WebCommunity AS (
+    SELECT 
+        wp.wp_web_page_id,
+        wp.wp_creation_date_sk,
+        COUNT(DISTINCT wr.wr_returning_customer_sk) AS returning_customers,
+        MAX(COALESCE(wp.wp_rec_start_date, wp.wp_rec_end_date)) AS max_page_date
+    FROM web_page wp
+    LEFT JOIN web_returns wr ON wp.wp_web_page_sk = wr.wr_web_page_sk
+    GROUP BY wp.wp_web_page_id, wp.wp_creation_date_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.purchase_estimate,
+    rs.ws_item_sk,
+    rs.ws_order_number,
+    rs.ws_sales_price,
+    inv.total_quantity,
+    fr.total_returns,
+    fr.avg_return_amt,
+    wc.returning_customers,
+    wc.max_page_date
+FROM CustomerInfo ci
+JOIN RankedSales rs ON ci.c_customer_id IS NOT NULL
+LEFT JOIN InventoryStatus inv ON rs.ws_item_sk = inv.i_item_sk 
+LEFT JOIN FilteredReturns fr ON rs.ws_item_sk = fr.sr_item_sk
+LEFT JOIN WebCommunity wc ON rs.ws_item_sk IN (SELECT DISTINCT wr_item_sk FROM web_returns)
+WHERE ci.cd_gender = 'F' 
+AND inv.total_quantity > 0 
+AND (fr.total_returns IS NULL OR fr.avg_return_amt < (SELECT AVG(sr_return_amt) FROM FilteredReturns))
+ORDER BY rs.ws_sales_price DESC, wc.returning_customers
+LIMIT 100;

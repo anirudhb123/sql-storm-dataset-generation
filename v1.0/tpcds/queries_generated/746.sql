@@ -1,0 +1,55 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rn = 1
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(p.p_discount_active, 'N') AS discount_active
+    FROM 
+        item i
+    LEFT JOIN 
+        promotion p ON i.i_item_sk = p.p_item_sk AND p.p_start_date_sk <= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date = CURRENT_DATE) 
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.i_current_price,
+    ts.total_quantity,
+    ts.total_sales,
+    (CASE 
+        WHEN ts.total_sales > 10000 THEN 'High Value'
+        WHEN ts.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END) AS sales_category,
+    id.discount_active
+FROM 
+    TopSales ts
+JOIN 
+    ItemDetails id ON ts.ws_item_sk = id.i_item_sk
+ORDER BY 
+    ts.total_sales DESC
+LIMIT 10;

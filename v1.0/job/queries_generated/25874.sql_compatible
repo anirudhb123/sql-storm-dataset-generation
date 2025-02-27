@@ -1,0 +1,57 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.imdb_index,
+        k.keyword AS movie_keyword,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+PersonRoles AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+MovieDetails AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        p.actor_name,
+        p.role_name,
+        rt.movie_keyword
+    FROM 
+        RankedTitles rt
+    JOIN 
+        PersonRoles p ON rt.title_id = p.movie_id
+    WHERE 
+        rt.title_rank <= 5
+)
+SELECT 
+    md.title,
+    md.production_year,
+    STRING_AGG(CONCAT(md.actor_name, ' as ', md.role_name) ORDER BY p.role_order) AS cast_list,
+    STRING_AGG(DISTINCT md.movie_keyword) AS keywords
+FROM 
+    MovieDetails md
+GROUP BY 
+    md.title, md.production_year
+ORDER BY 
+    md.production_year DESC, LENGTH(md.title) DESC;

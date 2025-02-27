@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.LastActivityDate >= NOW() - INTERVAL '30 days' -- Recently active questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.CommentCount,
+        rp.BadgeCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rn = 1 -- Get only latest post details
+        AND rp.CommentCount > 5 -- Filter posts with more than 5 comments
+        AND (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = rp.PostId AND ph.PostHistoryTypeId IN (10, 11)) = 0 -- Exclude closed/reopened posts
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    fp.OwnerDisplayName,
+    fp.CreationDate,
+    fp.LastActivityDate,
+    fp.CommentCount,
+    fp.BadgeCount,
+    ARRAY_AGG(DISTINCT tg.TagName) AS RelatedTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Posts p ON fp.PostId = p.Id
+LEFT JOIN 
+    UNNEST(string_to_array(substring(fp.Tags, 2, length(fp.Tags) - 2), '><')) AS tg(TagName) 
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.Tags, fp.OwnerDisplayName, fp.CreationDate, fp.LastActivityDate, fp.CommentCount, fp.BadgeCount
+ORDER BY 
+    fp.LastActivityDate DESC
+LIMIT 10;

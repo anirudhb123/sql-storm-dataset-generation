@@ -1,0 +1,61 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS Sales_Rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 0
+    UNION ALL
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS Sales_Rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN CURRENT_DATE - INTERVAL '1 year' AND CURRENT_DATE
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+Nation_Sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(sc.Total_Sales) AS Nation_Total_Sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        Sales_CTE sc ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = sc.c_custkey)
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name,
+    COALESCE(n.Nation_Total_Sales, 0) AS Total_Sales,
+    CASE 
+        WHEN n.Nation_Total_Sales IS NULL THEN 'No Sales'
+        WHEN n.Nation_Total_Sales > 1000000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS Sales_Category
+FROM 
+    nation n
+LEFT JOIN 
+    Nation_Sales ns ON n.n_nationkey = ns.n_nationkey
+WHERE 
+    n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'Europe')
+ORDER BY 
+    Total_Sales DESC;

@@ -1,0 +1,60 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieStatistics AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mi.info_type_id) AS total_info,
+        AVG(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_density
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+TopMovies AS (
+    SELECT 
+        title.title,
+        title.production_year,
+        ms.total_cast,
+        ms.total_info,
+        ms.keyword_density
+    FROM 
+        RankedTitles title
+    JOIN 
+        MovieStatistics ms ON title.title_id = ms.movie_id
+    WHERE 
+        title.year_rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(tm.total_cast, 0) AS total_cast,
+    COALESCE(tm.total_info, 0) AS total_info,
+    COALESCE(tm.keyword_density, 0) AS keyword_density,
+    CASE 
+        WHEN tm.keyword_density > 0.5 THEN 'High'
+        WHEN tm.keyword_density BETWEEN 0.2 AND 0.5 THEN 'Medium'
+        ELSE 'Low' 
+    END AS keyword_density_category
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC;

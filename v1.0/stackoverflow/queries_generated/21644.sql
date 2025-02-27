@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation BETWEEN 0 AND 199 THEN 'Novice'
+            WHEN U.Reputation BETWEEN 200 AND 499 THEN 'Intermediate'
+            WHEN U.Reputation BETWEEN 500 AND 999 THEN 'Advanced'
+            ELSE 'Expert'
+        END AS ReputationTier
+    FROM Users U
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(P.Score, 0) AS Score,
+        P.CreateDate,
+        U.DisplayName AS OwnerName,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id) AS TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        GROUP_CONCAT(DISTINCT PH.Comment) AS CloseReasons
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+),
+LowReputationComments AS (
+    SELECT 
+        C.Id AS CommentId,
+        C.PostId,
+        C.Text,
+        C.CreationDate,
+        U.DisplayName AS UserName,
+        U.Reputation
+    FROM Comments C
+    JOIN Users U ON C.UserId = U.Id
+    WHERE U.Reputation < 50
+)
+
+SELECT 
+    U.R.UserId,
+    U.R.DisplayName AS UserName,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.TotalVotes,
+    COALESCE(CP.CloseReasons, 'No Close Reasons') AS CloseReasons,
+    LCC.CommentId,
+    LCC.Text AS LowReputationComment,
+    LCC.CreationDate AS CommentDate
+FROM UserReputation U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+LEFT JOIN ClosedPosts CP ON P.PostId = CP.PostId
+LEFT JOIN LowReputationComments LCC ON P.PostId = LCC.PostId
+WHERE (U.ReputationTier = 'Novice' OR U.ReputationTier = 'Intermediate')
+AND P.Score > 10
+ORDER BY U.Reputation DESC, P.ViewCount DESC, P.PostRank;

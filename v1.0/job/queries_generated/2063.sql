@@ -1,0 +1,73 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.kind_id, 
+        COUNT(c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY a.kind_id ORDER BY COUNT(c.person_id) DESC) AS movie_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.title, a.production_year, a.kind_id
+),
+recent_movies AS (
+    SELECT 
+        DISTINCT a.title, 
+        a.production_year,
+        a.kind_id
+    FROM 
+        aka_title a
+    JOIN 
+        movie_info m ON a.movie_id = m.movie_id
+    WHERE 
+        m.info_type_id IN (SELECT id FROM info_type WHERE info = 'box office' AND note IS NULL)
+        AND a.production_year = (SELECT MAX(production_year) FROM aka_title)
+),
+final_movies AS (
+    SELECT 
+        r.title, 
+        r.production_year, 
+        ct.kind AS kind_name
+    FROM 
+        ranked_movies r
+    LEFT JOIN 
+        kind_type ct ON r.kind_id = ct.id
+    WHERE 
+        r.actor_count > 2
+    UNION 
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        ct.kind AS kind_name
+    FROM 
+        recent_movies rm
+    LEFT JOIN 
+        kind_type ct ON rm.kind_id = ct.id
+)
+SELECT 
+    f.title, 
+    f.production_year, 
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    STRING_AGG(DISTINCT n.name, ', ') AS actor_names,
+    CASE 
+        WHEN COUNT(DISTINCT ci.person_id) > 5 THEN 'High'
+        WHEN COUNT(DISTINCT ci.person_id) BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low' 
+    END AS actor_group
+FROM 
+    final_movies f
+LEFT JOIN 
+    cast_info ci ON f.title = (SELECT title FROM aka_title WHERE movie_id = ci.movie_id LIMIT 1)
+LEFT JOIN 
+    aka_name n ON ci.person_id = n.person_id
+GROUP BY 
+    f.title, f.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1
+ORDER BY 
+    f.production_year DESC, 
+    actor_group DESC;

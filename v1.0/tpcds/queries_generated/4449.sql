@@ -1,0 +1,84 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+        AND i.i_rec_start_date <= CURRENT_DATE
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        it.i_item_desc
+    FROM 
+        sales_data sd
+    JOIN 
+        item it ON sd.ws_item_sk = it.i_item_sk
+    WHERE 
+        sd.profit_rank <= 10
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+customer_insights AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.order_count,
+        cs.total_spent,
+        CASE 
+            WHEN cs.total_spent IS NULL THEN 'No Sales'
+            WHEN cs.total_spent < 1000 THEN 'Low Value Customer'
+            WHEN cs.total_spent BETWEEN 1000 AND 5000 THEN 'Medium Value Customer'
+            ELSE 'High Value Customer'
+        END AS customer_segment
+    FROM 
+        customer_summary cs
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.order_count,
+    ci.total_spent,
+    ci.customer_segment,
+    ts.total_quantity,
+    ts.total_profit,
+    ts.i_item_desc
+FROM 
+    customer_insights ci
+LEFT JOIN 
+    top_sales ts ON ci.customer_segment = 
+        CASE 
+            WHEN ts.total_profit > 5000 THEN 'High Value Customer'
+            WHEN ts.total_profit BETWEEN 1000 AND 5000 THEN 'Medium Value Customer'
+            ELSE 'Low Value Customer'
+        END
+ORDER BY 
+    ci.total_spent DESC, ts.total_profit DESC;

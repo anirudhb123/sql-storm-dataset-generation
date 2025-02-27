@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        order_value > 5000
+),
+SupplierPartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue,
+    r.r_name AS region_name,
+    s.s_name AS supplier_name,
+    s_account_balance,
+    COUNT(DISTINCT ho.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    HighValueOrders ho ON ho.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_acctbal > 1500
+    )
+LEFT JOIN 
+    RankedSuppliers s ON s.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey
+    )
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 20 AND 
+    (p.p_comment LIKE '%brass%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, r.r_name, s.s_name, s.s_acctbal
+ORDER BY 
+    total_revenue DESC, p.p_partkey
+LIMIT 100;

@@ -1,0 +1,64 @@
+
+WITH top_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        cd.cd_gender, 
+        SUM(ss.ss_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING 
+        SUM(ss.ss_net_paid) > 5000
+),
+item_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 
+            (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 AND 
+            (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws.ws_item_sk
+),
+return_stats AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_returned_amount
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        item i ON wr.wr_item_sk = i.i_item_sk
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    ic.i_item_id,
+    ic.i_product_name,
+    COALESCE(ts.total_spent, 0) AS total_customer_spent,
+    COALESCE(is.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_returned_amount, 0) AS total_returned_amount
+FROM 
+    item ic
+LEFT JOIN 
+    top_customers ts ON ts.c_customer_sk = (SELECT c.c_customer_sk 
+                                              FROM customer c 
+                                              WHERE c.c_current_addr_sk = ic.i_item_sk
+                                              LIMIT 1)
+LEFT JOIN 
+    item_sales is ON ic.i_item_sk = is.ws_item_sk
+LEFT JOIN 
+    return_stats rs ON ic.i_item_sk = rs.wr_item_sk
+ORDER BY 
+    total_customer_spent DESC, total_quantity_sold DESC;

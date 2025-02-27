@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+        AND p.Score > 0
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        MAX(p.Score) AS MaxScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ps.PostCount,
+    ps.TotalScore,
+    ps.AvgViewCount,
+    ps.MaxScore,
+    rb.Badges,
+    COALESCE(rp.Title, 'No Posts') AS TopPostTitle,
+    COALESCE(rp.Score, 0) AS TopPostScore
+FROM 
+    Users u
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.UserRank = 1
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    ps.TotalScore DESC NULLS LAST;

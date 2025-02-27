@@ -1,0 +1,45 @@
+
+WITH RankedAddresses AS (
+    SELECT ca_address_sk, 
+           UPPER(ca_street_name) AS normalized_street_name, 
+           ca_city, 
+           ca_state, 
+           LENGTH(ca_street_name) AS street_length, 
+           DENSE_RANK() OVER (PARTITION BY ca_city, ca_state ORDER BY LENGTH(ca_street_name) DESC) AS rank
+    FROM customer_address
+), 
+TopAddresses AS (
+    SELECT * 
+    FROM RankedAddresses 
+    WHERE rank <= 5
+), 
+CustomerStats AS (
+    SELECT cd.cd_gender, 
+           cd.cd_marital_status, 
+           SUM(ws.ws_quantity) AS total_purchases, 
+           COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 1000
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+FinalReport AS (
+    SELECT ta.ca_city AS address_city, 
+           ta.ca_state AS address_state, 
+           cs.cd_gender, 
+           cs.cd_marital_status, 
+           cs.total_purchases, 
+           cs.customer_count
+    FROM TopAddresses ta
+    JOIN CustomerStats cs ON ta.ca_city = cs.cd_city AND ta.ca_state = cs.cd_state
+)
+SELECT address_city, 
+       address_state, 
+       cd_gender, 
+       cd_marital_status, 
+       SUM(total_purchases) AS total_sales, 
+       SUM(customer_count) AS num_customers
+FROM FinalReport
+GROUP BY address_city, address_state, cd_gender, cd_marital_status
+ORDER BY total_sales DESC;

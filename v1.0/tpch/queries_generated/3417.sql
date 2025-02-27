@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+SupplierContribution AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' AND l.l_shipmode IN ('AIR', 'TRUCK')
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    c.c_name,
+    COALESCE(l.line_count, 0) AS line_count,
+    COALESCE(l.total_revenue, 0) AS total_revenue,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemStats l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierContribution s ON s.ps_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+        WHERE li.l_orderkey = o.o_orderkey
+    )
+WHERE 
+    o.order_rank <= 10
+ORDER BY 
+    o.o_totalprice DESC;

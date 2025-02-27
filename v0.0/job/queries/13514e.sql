@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1938) (France) (theatrical) (as Les Artistes Associés)', '(1966) (Italy) (TV)', '(1983) (Finland) (TV) (YLE TV1)', '(20011) (UK) (TV) (Division of Guardian Media Group)', '(2007) (Greece) (theatrical) (re-release) (restored)', '(2011) (worldwide) (DVD) (Amazon)', '(2012-) (Ireland) (TV)', '(West Berlin and Düsseldorf)', '(as ZDF) (in association with)', '(financial support) (as Vienna Film Fund)') AND n.gender LIKE '%f%';

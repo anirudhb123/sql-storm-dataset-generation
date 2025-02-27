@@ -1,0 +1,35 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_nationkey = n.n_nationkey
+    )
+), HighVolumeOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           SUM(l.l_quantity) AS total_quantity,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING SUM(l.l_quantity) > 100
+), SupplierPartDetails AS (
+    SELECT ps.ps_partkey, p.p_name, p.p_brand, s.s_name, ps.ps_availqty, 
+           ROUND(ps.ps_supplycost * ps.ps_availqty, 2) AS total_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > 50
+)
+SELECT r.rnk, hvo.o_orderkey, hvo.total_quantity, hvo.total_revenue,
+       sp.p_name, sp.s_name, sp.total_cost
+FROM RankedSuppliers r
+FULL OUTER JOIN HighVolumeOrders hvo ON r.rnk <= 10
+LEFT JOIN SupplierPartDetails sp ON r.s_suppkey = sp.ps_suppkey
+ORDER BY r.rnk, hvo.total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

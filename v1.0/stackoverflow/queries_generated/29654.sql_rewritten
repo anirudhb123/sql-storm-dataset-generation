@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.PostId) AS PopularityScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PopularityScore DESC
+    LIMIT 10
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        (SELECT STRING_AGG(u.DisplayName, ', ') 
+         FROM Votes v
+         JOIN Users u ON v.UserId = u.Id
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvotedBy,
+        (SELECT COUNT(*) 
+         FROM PostHistory ph 
+         WHERE ph.PostId = p.Id AND ph.PostHistoryTypeId IN (10, 11)) AS ClosureHistoryCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.CreationDate,
+    r.OwnerDisplayName,
+    r.AnswerCount,
+    r.CommentCount,
+    p.PopularityScore,
+    pa.UpvotedBy,
+    pa.ClosureHistoryCount,
+    (SELECT 
+         STRING_AGG(t.TagName, ', ')
+     FROM 
+         Tags t 
+     WHERE 
+         p.Tags LIKE '%' || t.TagName || '%') AS AssociatedTags
+FROM 
+    RankedPosts r
+JOIN 
+    PopularTags p ON p.PopularityScore > 5 
+JOIN 
+    PostActivity pa ON r.PostId = pa.PostId
+WHERE 
+    r.OwnerPostRank = 1 
+ORDER BY 
+    r.CreationDate DESC;

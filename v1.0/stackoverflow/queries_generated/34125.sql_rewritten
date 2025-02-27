@@ -1,0 +1,56 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.ViewCount,
+        P2.CreationDate,
+        P2.ParentId,
+        PH.Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        PostHierarchy PH ON P2.ParentId = PH.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    COUNT(P.Id) AS TotalPosts,
+    SUM(P.ViewCount) AS TotalViews,
+    AVG(P.Score) AS AvgScore,
+    COUNT(DISTINCT B.Id) AS TotalBadges,
+    PH.Level AS PostLevel,
+    STRING_AGG(DISTINCT P.Tags, ', ') AS AssociatedTags,
+    COALESCE(MAX(V.CreationDate), 'No Votes') AS LastVoteDate,
+    DENSE_RANK() OVER (PARTITION BY PH.Level ORDER BY SUM(P.ViewCount) DESC) AS ViewRank
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Badges B ON B.UserId = U.Id
+LEFT JOIN 
+    Votes V ON V.PostId = P.Id
+LEFT JOIN 
+    PostHierarchy PH ON PH.PostId = P.Id
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.DisplayName, PH.Level
+HAVING 
+    COUNT(P.Id) > 5
+ORDER BY 
+    PH.Level, TotalViews DESC;

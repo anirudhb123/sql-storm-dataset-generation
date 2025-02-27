@@ -1,0 +1,55 @@
+WITH RECURSIVE CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+SuppliersAndParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s
+    INNER JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    coalesce(sap.p_name, 'Unknown Part') AS part_name,
+    COALESCE(cs.total_spent / NULLIF(cs.total_orders, 0), 0) AS avg_spent_per_order,
+    CASE 
+        WHEN rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    (SELECT COUNT(DISTINCT l.l_orderkey)
+     FROM lineitem l
+     WHERE l.l_partkey = COALESCE(sap.p_partkey, 0)) AS total_orders_for_part
+FROM 
+    CustomerOrderStats cs
+FULL OUTER JOIN 
+    SuppliersAndParts sap ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'Germany' LIMIT 1) LIMIT 1)
+WHERE 
+    (cs.total_spent IS NOT NULL OR sap.total_available IS NOT NULL)
+AND 
+    CASE 
+        WHEN cs.total_orders IS NULL THEN TRUE 
+        ELSE cs.total_orders > 5 
+    END
+ORDER BY 
+    cs.total_spent DESC NULLS LAST, 
+    sap.total_available DESC;

@@ -1,0 +1,58 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 50000
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    ps.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    hvo.total_spent AS top_customer_spending,
+    CASE 
+        WHEN ss.sales_rank = 1 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_category
+FROM PartSupplier ps
+LEFT JOIN SupplierSales ss ON ps.supplier_name = ss.s_name
+LEFT JOIN HighValueOrders hvo ON hvo.c_custkey = (
+    SELECT DISTINCT o.o_custkey 
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE l.l_partkey = ps.p_partkey 
+    ORDER BY o.o_totalprice DESC 
+    LIMIT 1
+)
+WHERE ps.ps_availqty IS NOT NULL
+ORDER BY total_sales DESC, top_customer_spending DESC;

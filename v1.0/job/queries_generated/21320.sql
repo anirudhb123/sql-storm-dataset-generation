@@ -1,0 +1,81 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+company_movie_stats AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COUNT(DISTINCT mi.id) AS info_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+cast_role_stats AS (
+    SELECT 
+        ci.movie_id,
+        ci.role_id,
+        COUNT(*) AS role_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id, ci.role_id
+),
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    cs.cast_count,
+    cs.company_name,
+    cs.company_type,
+    cr.role_id,
+    cr.role_count,
+    cr.actor_names,
+    kc.keyword_count
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    company_movie_stats cs ON r.movie_id = cs.movie_id
+LEFT JOIN 
+    cast_role_stats cr ON r.movie_id = cr.movie_id
+LEFT JOIN 
+    keyword_counts kc ON r.movie_id = kc.movie_id
+WHERE 
+    (r.production_year >= 2000 AND r.production_year < 2024)
+    AND (cs.company_name IS NOT NULL OR cr.role_count > 0) -- Filter for movies with companies or roles
+    AND COALESCE(kc.keyword_count, 0) > 5 -- Movies with more than 5 keywords
+ORDER BY 
+    r.production_year DESC, 
+    cs.cast_count DESC, 
+    cr.role_count ASC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,57 @@
+WITH RecursiveTags AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, rt.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTags rt ON t.Id = rt.Id
+    WHERE rt.Level < 5
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+UserVotes AS (
+    SELECT v.UserId, COUNT(*) AS VoteCount
+    FROM Votes v
+    INNER JOIN Posts p ON v.PostId = p.Id
+    WHERE p.PostTypeId = 1
+    GROUP BY v.UserId
+),
+PostHistoryWithClose AS (
+    SELECT ph.PostId, ph.CreationDate, ph.PostHistoryTypeId, ph.UserId, ph.Comment,
+           CASE 
+               WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+               WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+               ELSE 'Other Action'
+           END AS ChangeType
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+),
+TaggedQuestions AS (
+    SELECT p.Id AS PostId, STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    INNER JOIN RecursiveTags rt ON rt.Id = ANY (STRING_TO_ARRAY(p.Tags, ','))
+    GROUP BY p.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rv.VoteCount, 0) AS VoteCount,
+    COUNT(rp.Id) AS RecentPostCount,
+    STRING_AGG(tp.Tags, '; ') AS AllTags,
+    STRING_AGG(CASE WHEN ph.ChangeType = 'Closed' THEN 'Closed on ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD') END, '; ') AS ClosedPosts,
+    STRING_AGG(CASE WHEN ph.ChangeType = 'Reopened' THEN 'Reopened on ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD') END, '; ') AS ReopenedPosts
+FROM Users u
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN UserVotes rv ON u.Id = rv.UserId
+LEFT JOIN TaggedQuestions tp ON tp.PostId IN (SELECT PostId FROM RecentPosts) 
+LEFT JOIN PostHistoryWithClose ph ON ph.PostId IN (SELECT PostId FROM RecentPosts)
+GROUP BY u.Id, u.DisplayName, u.Reputation
+ORDER BY u.Reputation DESC;

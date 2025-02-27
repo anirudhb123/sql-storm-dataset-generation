@@ -1,0 +1,47 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title, 
+        t.production_year, 
+        c.name AS company_name, 
+        ct.kind AS company_type,
+        a.name AS actor_name
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        casting_info cast ON t.id = cast.movie_id
+    JOIN 
+        aka_name a ON cast.person_id = a.person_id
+),
+KeywordCount AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_keyword mk ON md.movie_title = mk.movie_id 
+    GROUP BY 
+        md.movie_title, md.production_year
+)
+SELECT 
+    md.movie_title, 
+    md.production_year, 
+    md.company_name, 
+    md.company_type, 
+    kc.keyword_count
+FROM 
+    MovieDetails md
+JOIN 
+    KeywordCount kc ON md.movie_title = kc.movie_title AND md.production_year = kc.production_year
+WHERE 
+    md.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    md.production_year DESC, 
+    kc.keyword_count DESC;

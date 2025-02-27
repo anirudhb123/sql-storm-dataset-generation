@@ -1,0 +1,90 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate <= DATE '1997-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TopRegions AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        r.r_name
+    HAVING 
+        COUNT(DISTINCT c.c_custkey) > 50
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_orderstatus,
+    r.r_name AS region_name,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Open Order'
+        WHEN o.o_orderstatus = 'F' THEN 'Filled Order'
+        ELSE 'Unknown Status'
+    END AS order_status_desc,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    hvp.net_revenue AS part_net_revenue,
+    sd.total_supply_cost AS supplier_total_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    TopRegions r ON o.o_orderkey % 10 = r.customer_count % 10
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey = o.o_orderkey % 100
+LEFT JOIN 
+    HighValueParts hvp ON hvp.p_partkey = o.o_orderkey % 1000
+WHERE 
+    o.o_orderkey IN (
+        SELECT o2.o_orderkey 
+        FROM orders o2 
+        WHERE o2.o_totalprice > (SELECT AVG(o3.o_totalprice) FROM orders o3)
+    )
+ORDER BY 
+    o.o_orderdate DESC,
+    part_net_revenue DESC;

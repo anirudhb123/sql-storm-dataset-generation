@@ -1,0 +1,35 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    ct.kind AS cast_type,
+    c.name AS company_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    MIN(mi.info) AS earliest_info,
+    MAX(mt.info) AS latest_info
+FROM 
+    title t
+JOIN 
+    cast_info ci ON ci.movie_id = t.id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+JOIN 
+    role_type rt ON rt.id = ci.role_id
+JOIN 
+    comp_cast_type ct ON ct.id = ci.person_role_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name c ON c.id = mc.company_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id 
+JOIN 
+    movie_info_idx mt ON mt.movie_id = t.id 
+WHERE 
+    t.production_year >= 2000 
+    AND ct.kind LIKE '%Cast%'
+GROUP BY 
+    t.title, a.name, ct.kind, c.name
+ORDER BY 
+    keyword_count DESC, movie_title ASC;

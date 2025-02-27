@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), 
+TotalLineItemSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RankedSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_sales,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(t.total_sales), 0) AS total_sales_by_region,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    AVG(cc.order_count) AS avg_orders_per_customer,
+    MAX(sp.supplier_count) AS max_suppliers_per_part
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN (SELECT DISTINCT o.o_orderkey FROM orders o) AS order_filtered ON TRUE
+LEFT JOIN TotalLineItemSales t ON order_filtered.o_orderkey = t.l_orderkey
+LEFT JOIN CustomerOrderCounts cc ON cc.c_custkey IN (
+    SELECT o.o_custkey FROM orders o 
+    WHERE o.o_orderstatus = 'O'
+)
+LEFT JOIN SupplierPartCounts sp ON sp.ps_partkey IN (
+    SELECT l.l_partkey FROM lineitem l WHERE l.l_shipdate > '1997-01-01'
+)
+WHERE r.r_comment IS NULL OR r.r_comment LIKE '%supply%'
+GROUP BY r.r_name
+HAVING SUM(t.total_sales) > 10000
+ORDER BY total_sales_by_region DESC;

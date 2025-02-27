@@ -1,0 +1,94 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate, u.UpVotes, u.DownVotes
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        us.Id,
+        us.DisplayName,
+        us.Reputation,
+        us.LastAccessDate,
+        ps.TotalPosts,
+        ps.Questions,
+        ps.Answers,
+        ps.AcceptedAnswers,
+        ps.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY us.Reputation DESC) AS Rank
+    FROM 
+        UserStatistics us
+    JOIN 
+        PostStatistics ps ON us.Id = ps.OwnerUserId
+    WHERE 
+        us.Reputation IS NOT NULL AND us.Reputation > 100
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    au.LastAccessDate,
+    COALESCE(au.TotalPosts, 0) AS TotalPosts,
+    COALESCE(au.Questions, 0) AS Questions,
+    COALESCE(au.Answers, 0) AS Answers,
+    COALESCE(au.AcceptedAnswers, 0) AS AcceptedAnswers,
+    COALESCE(au.TotalScore, 0) AS TotalScore,
+    CASE 
+        WHEN au.Rank IS NULL THEN 'N/A'
+        ELSE CAST(au.Rank AS VARCHAR)
+    END AS UserRank,
+    CASE 
+        WHEN au.LastAccessDate < CURRENT_DATE - INTERVAL '6 months' THEN 'Inactive'
+        ELSE 'Active'
+    END AS UserActivityStatus,
+    CASE 
+        WHEN au.TotalPosts = 0 THEN NULL 
+        ELSE (au.Answers::FLOAT / NULLIF(au.TotalPosts, 0)) * 100 
+    END AS AnswerPercentage
+FROM 
+    ActiveUsers au
+ORDER BY 
+    au.Reputation DESC, au.DisplayName
+LIMIT 100
+UNION ALL
+SELECT 
+    'N/A' AS DisplayName,
+    0 AS Reputation,
+    CURRENT_TIMESTAMP AS LastAccessDate,
+    0 AS TotalPosts,
+    0 AS Questions,
+    0 AS Answers,
+    0 AS AcceptedAnswers,
+    0 AS TotalScore,
+    NULL AS UserRank,
+    'Inactive' AS UserActivityStatus,
+    NULL AS AnswerPercentage
+WHERE NOT EXISTS (SELECT 1 FROM ActiveUsers);

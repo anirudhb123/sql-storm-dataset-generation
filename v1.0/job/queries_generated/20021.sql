@@ -1,0 +1,64 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        ka.person_id AS person_id,
+        ka.name AS actor_name,
+        ti.title AS movie_title,
+        ti.production_year AS production_year,
+        ROW_NUMBER() OVER (PARTITION BY ka.person_id ORDER BY ti.production_year DESC) AS rn
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        aka_title ti ON ci.movie_id = ti.id
+    WHERE 
+        ti.production_year IS NOT NULL
+        AND ti.production_year >= 2000
+        AND ti.production_year <= EXTRACT(YEAR FROM CURRENT_DATE)
+),
+FilteredCTE AS (
+    SELECT 
+        r.*,
+        COUNT(*) OVER (PARTITION BY r.person_id) AS movie_count,
+        CASE 
+            WHEN rn = 1 THEN 'Most Recent'
+            ELSE 'Earlier'
+        END AS recency
+    FROM 
+        RecursiveCTE r
+),
+MovieCompanyCTE AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    fc.actor_name,
+    fc.movie_title,
+    fc.production_year,
+    fc.movie_count,
+    mc.company_name,
+    mc.company_type,
+    COALESCE(NULLIF(fc.recency, 'Most Recent'), 'Recency Unknown') AS recency_status
+FROM 
+    FilteredCTE fc
+LEFT JOIN 
+    MovieCompanyCTE mc ON fc.movie_title = mc.movie_name
+WHERE 
+    fc.movie_count > 2
+    AND (mc.company_type IS NOT NULL OR mc.company_type IS NULL)
+ORDER BY 
+    fc.production_year DESC, 
+    fc.movie_title ASC;
+

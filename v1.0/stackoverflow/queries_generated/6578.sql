@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        Owner
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    trp.Title,
+    trp.CreationDate,
+    trp.ViewCount,
+    trp.Score,
+    trp.Owner,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    Comments c ON trp.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON trp.PostId = v.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(trp.Tags, ',') AS tag_ids ON TRUE
+LEFT JOIN 
+    Tags t ON t.Id = tag_ids::int
+GROUP BY 
+    trp.PostId, trp.Title, trp.CreationDate, trp.ViewCount, trp.Score, trp.Owner
+ORDER BY 
+    trp.Score DESC, trp.ViewCount DESC;

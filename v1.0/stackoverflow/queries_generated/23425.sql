@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        CASE 
+            WHEN p.ViewCount IS NULL THEN '0'
+            WHEN p.ViewCount > 100 THEN '>100'
+            ELSE '<=100'
+        END AS ViewCategory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.ViewCategory,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        COALESCE(b.Name, 'No Badge') AS UserBadge,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS DeleteCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1 -- Gold badge
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.UpVoteCount, rp.DownVoteCount, rp.ViewCategory, u.DisplayName, b.Name
+)
+
+SELECT 
+    pd.*,
+    CASE 
+        WHEN pd.UpVoteCount > pd.DownVoteCount THEN 'Positive'
+        WHEN pd.UpVoteCount < pd.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    EXISTS(
+        SELECT 1 
+        FROM PostHistory ph
+        WHERE ph.PostId = pd.PostId AND ph.PostHistoryTypeId = 10 AND ph.CreationDate < pd.CreationDate
+    ) AS PreviouslyClosed,
+    CONCAT('Post "', pd.Title, '" was created on ', to_char(pd.CreationDate, 'YYYY-MM-DD HH24:MI:SS'), ' by ', pd.OwnerDisplayName, '.')
+AS PostDescription
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ViewCategory = '>100'
+ORDER BY 
+    pd.Score DESC, pd.CommentCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

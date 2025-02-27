@@ -1,0 +1,52 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+TitleKeywordInfo AS (
+    SELECT 
+        rt.movie_title,
+        rt.production_year,
+        GROUP_CONCAT(DISTINCT mk.keyword) AS keywords
+    FROM 
+        RankedTitles rt
+    JOIN 
+        movie_keyword mk ON rt.movie_title = (
+            SELECT title FROM aka_title WHERE id = mk.movie_id
+        )
+    GROUP BY 
+        rt.movie_title, rt.production_year
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+FROM 
+    title t
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+ORDER BY 
+    t.production_year DESC, keyword_count DESC;
+
+This query benchmarks string processing by extracting movie titles produced after the year 2000. It counts the distinct keywords associated with each title, fetches names of the cast members, and filters for titles with more than three keywords. The results are ordered by production year and keyword count. The use of `STRING_AGG` and `GROUP_CONCAT` across multiple joins provides an interesting insight into string processing efficiency in the database.

@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+TopMovies AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        COUNT(cc.id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title
+    HAVING 
+        COUNT(cc.id) > 5
+),
+PopularMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        TopMovies tm ON m.movie_id = tm.id
+    WHERE 
+        m.level = 1
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT mk.keyword) > 3
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    pm.keyword_count,
+    COALESCE(aka.name, 'Unknown') AS main_actor
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    cast_info ci ON pm.movie_id = ci.movie_id AND ci.nr_order = 1
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+WHERE 
+    pm.keyword_count > 3
+ORDER BY 
+    pm.production_year DESC, pm.keyword_count DESC;

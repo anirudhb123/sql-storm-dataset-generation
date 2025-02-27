@@ -1,0 +1,46 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(sp.total_supply_cost) AS region_total_supply_cost,
+    COUNT(DISTINCT co.c_custkey) AS total_customers,
+    SUM(co.total_orders) AS total_orders_per_region
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierParts sp ON s.s_suppkey = sp.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_nationkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    region_total_supply_cost DESC, total_orders_per_region DESC;

@@ -1,0 +1,49 @@
+
+WITH RECURSIVE PostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.CreationDate,
+        A.Score,
+        A.ViewCount,
+        A.OwnerUserId,
+        Q.Level + 1
+    FROM Posts A
+    INNER JOIN PostCTE Q ON A.ParentId = Q.PostId
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT P.Id) AS TotalQuestions,
+    COUNT(DISTINCT A.PostId) AS TotalAnswers,
+    SUM(P.Score) AS TotalQuestionScore,
+    AVG(P.ViewCount) AS AvgQuestionViews,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    MAX(B.Date) AS LastBadgeDate,
+    CASE 
+        WHEN MAX(B.Date) IS NULL THEN 'No Badges Earned'
+        ELSE 'Badges Earned'
+    END AS BadgeStatus
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+LEFT JOIN Posts A ON A.ParentId = P.Id
+LEFT JOIN PostCTE CT ON CT.OwnerUserId = U.Id
+LEFT JOIN Badges B ON U.Id = B.UserId
+LEFT JOIN Posts PTag ON PTag.Id = ANY(string_to_array(P.Tags, ','))
+LEFT JOIN Tags T ON T.TagName = ANY(string_to_array(P.Tags, ','))
+WHERE U.Reputation > 1000
+GROUP BY U.DisplayName
+ORDER BY TotalQuestions DESC
+LIMIT 10;

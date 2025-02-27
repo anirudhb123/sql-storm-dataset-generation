@@ -1,0 +1,69 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastActiveDate,
+        u.DisplayName AS OwnerName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11, 12)
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName
+),
+ActiveUserPosts AS (
+    SELECT 
+        ur.UserId,
+        COUNT(ps.PostId) AS ActivePostCount,
+        AVG(DATEDIFF('2024-10-01 12:34:56', ps.LastActiveDate)) AS AvgPostAgeDays,
+        SUM(ps.CommentCount) AS TotalComments
+    FROM 
+        PostStats ps
+    INNER JOIN 
+        UserReputation ur ON ps.OwnerName = ur.DisplayName
+    WHERE 
+        ur.ReputationRank <= 10 
+    GROUP BY 
+        ur.UserId
+)
+SELECT 
+    u.Id,
+    u.DisplayName,
+    ur.Reputation,
+    a.ActivePostCount,
+    a.AvgPostAgeDays,
+    a.TotalComments,
+    CASE 
+        WHEN a.ActivePostCount > 0 THEN 'Active'
+        WHEN a.TotalComments > 100 THEN 'Engaged'
+        ELSE 'Passive'
+    END AS EngagementLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    ActiveUserPosts a ON u.Id = a.UserId
+WHERE 
+    u.Reputation >= 1000
+ORDER BY 
+    ur.Reputation DESC, a.ActivePostCount DESC NULLS LAST;

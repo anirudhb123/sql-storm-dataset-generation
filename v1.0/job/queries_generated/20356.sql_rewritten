@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT
+        a.person_id,
+        c.movie_id,
+        r.role,
+        COUNT(c.nr_order) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        name a ON c.person_id = a.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        a.person_id, c.movie_id, r.role
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        COALESCE(SUM(i.info::integer), 0) AS total_info 
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        Movie_info i ON m.movie_id = i.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+MoviesWithRoles AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actors,
+        ar.role,
+        ar.role_count
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        ActorRoles ar ON md.movie_id = ar.movie_id
+)
+
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.actors,
+    mw.role,
+    mw.role_count,
+    CASE 
+        WHEN mw.role_count > 0 THEN 'Has Roles'
+        ELSE 'No Roles'
+    END AS role_info,
+    COALESCE(SUM(CASE WHEN ar.role IS NOT NULL THEN 1 ELSE 0 END), 0) OVER (PARTITION BY mw.movie_id) AS active_roles,
+    NULLIF(mt.kind, '-') AS movie_kind_info 
+FROM 
+    MoviesWithRoles mw
+LEFT JOIN 
+    kind_type mt ON mw.kind_id = mt.id
+WHERE 
+    mw.production_year >= 2000
+ORDER BY 
+    mw.production_year DESC, mw.title;

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        orders o 
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.order_level + 1
+    FROM 
+        orders o 
+    INNER JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey + 1 
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s 
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), 
+LineItemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) AS total_lines
+    FROM 
+        lineitem l 
+    WHERE 
+        l.l_shipdate >= '1997-01-01'
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(l.total_sales) FILTER (WHERE r.r_regionkey IS NOT NULL), 0) AS total_sales,
+    SUM(sd.total_avail_qty) AS total_available_quantity,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    ROW_NUMBER() OVER (PARTITION BY CASE WHEN EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = s.s_nationkey AND n.n_name = 'USA') THEN 1 ELSE 0 END ORDER BY SUM(l.total_sales) DESC) AS rank
+FROM 
+    part p 
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierDetails sd ON l.l_suppkey = sd.s_suppkey
+LEFT JOIN customer c ON l.l_orderkey = c.c_custkey
+LEFT JOIN region r ON c.c_nationkey = r.r_regionkey
+WHERE 
+    p.p_size > 20 
+    AND p.p_retailprice BETWEEN 50.00 AND 500.00 
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.o_orderkey = l.l_orderkey AND o.o_orderstatus = 'O')
+GROUP BY 
+    p.p_name
+ORDER BY 
+    total_sales DESC, total_available_quantity ASC;

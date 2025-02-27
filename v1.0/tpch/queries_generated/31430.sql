@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS OrderLevel
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.OrderLevel + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+),
+AvgSupplierCost AS (
+    SELECT ps.ps_suppkey, AVG(ps.ps_supplycost) AS avg_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+RecentLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(osc.avg_cost) AS average_supplier_cost,
+    SUM(rli.total_revenue) AS total_revenue
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN RecentLineItems rli ON rli.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O'
+)
+FULL OUTER JOIN AvgSupplierCost osc ON osc.ps_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+)
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_revenue DESC;

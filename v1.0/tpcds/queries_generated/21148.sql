@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk, ws.ws_sold_date_sk
+),
+MissingDemographics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        (SELECT COUNT(*) 
+         FROM customer dem 
+         WHERE dem.c_current_cdemo_sk IS NULL AND dem.c_customer_id LIKE 'C%') AS null_customers_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    WHERE 
+        c.c_birth_year > (SELECT MAX(cd.cd_purchase_estimate) FROM customer_demographics cd WHERE cd.cd_gender = 'M') OR 
+        c.c_current_addr_sk IS NULL
+),
+FinalResults AS (
+    SELECT
+        a.ca_state,
+        COUNT(DISTINCT a.ca_address_sk) AS unique_addresses,
+        SUM(CASE WHEN d.d_holiday = 'Y' THEN 1 ELSE 0 END) AS holiday_count,
+        AVG(rn * cumulative_quantity) AS weighted_avg_quantity
+    FROM 
+        customer_address a
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    FULL OUTER JOIN 
+        RankedSales rs ON rs.ws_item_sk = (SELECT MAX(i.i_item_sk) FROM item i WHERE i.i_item_desc IS NOT NULL)
+    GROUP BY 
+        a.ca_state
+)
+SELECT 
+    fr.ca_state,
+    fr.unique_addresses,
+    fr.holiday_count,
+    COALESCE(fr.weighted_avg_quantity, 0) AS weighted_quantity,
+    CASE 
+        WHEN fr.holiday_count IS NULL THEN 'No Holidays' 
+        ELSE 'Has Holidays' 
+    END AS holiday_status
+FROM 
+    FinalResults fr
+WHERE 
+    fr.unique_addresses > (
+        SELECT COUNT(*) FROM MissingDemographics md WHERE md.income_band = -1
+    )
+ORDER BY 
+    fr.holiday_count DESC, fr.unique_addresses ASC;

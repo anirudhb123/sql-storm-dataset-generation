@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_customer_sk,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) as rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+DateMetrics AS (
+    SELECT 
+        d.d_date,
+        d.d_year,
+        COUNT(DISTINCT sr_customer_sk) AS unique_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        CustomerReturns r ON d.d_date_sk = r.sr_returned_date_sk
+    GROUP BY 
+        d.d_date, d.d_year
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        COUNT(sr_item_sk) AS total_returns,
+        MAX(rn) AS last_return
+    FROM 
+        CustomerReturns r
+    JOIN 
+        customer c ON r.sr_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    HAVING 
+        COUNT(sr_item_sk) > 5
+),
+CustomerIncome AS (
+    SELECT 
+        c.c_customer_sk,
+        hd.hd_income_band_sk,
+        SUM(COALESCE(f.total_returns, 0)) AS return_count
+    FROM 
+        customer c
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        FrequentCustomers f ON c.c_customer_sk = f.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, hd.hd_income_band_sk
+)
+SELECT 
+    d.d_year, 
+    COALESCE(SUM(cm.total_return_amt), 0) AS total_return_amt,
+    COALESCE(SUM(cm.total_return_tax), 0) AS total_return_tax,
+    AVG(CASE WHEN ci.hd_income_band_sk IS NOT NULL THEN ci.return_count END) AS avg_returns_per_income_band
+FROM 
+    DateMetrics cm
+LEFT JOIN 
+    CustomerIncome ci ON ci.hd_income_band_sk = 
+        (SELECT ib.ib_income_band_sk 
+         FROM income_band ib 
+         WHERE ci.return_count BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound)
+GROUP BY 
+    d.d_year
+ORDER BY 
+    d.d_year DESC
+LIMIT 10;

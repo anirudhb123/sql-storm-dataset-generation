@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s_name, 
+        s_acctbal, 
+        RANK() OVER (PARTITION BY n_regionkey ORDER BY s_acctbal DESC) AS rank,
+        n.n_name 
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        CASE 
+            WHEN c.c_acctbal BETWEEN 50000 AND 100000 THEN 'Mid-tier'
+            WHEN c.c_acctbal > 100000 THEN 'High-tier'
+            ELSE 'Low-tier' 
+        END AS customer_tier
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    COALESCE(sp.total_sales, 0) AS total_sales, 
+    CASE 
+        WHEN hs.rank IS NOT NULL THEN 'High Supplier'
+        ELSE 'Regular Supplier' 
+    END AS supplier_status,
+    c.customer_tier,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    RankedSuppliers hs ON sp.ps_suppkey = hs.s_suppkey
+LEFT JOIN 
+    orders o ON o.o_custkey IN (SELECT c_custkey FROM HighValueCustomers WHERE customer_tier = 'High-tier')
+LEFT JOIN 
+    HighValueCustomers c ON c.c_custkey = o.o_custkey
+WHERE 
+    (p.p_retailprice IS NOT NULL AND p.p_retailprice > 100) 
+    OR 
+    (p.p_container = 'Box' AND sp.ps_availqty < 50)
+GROUP BY 
+    p.p_name, p.p_brand, hs.rank, c.customer_tier
+HAVING 
+    SUM(sp.total_sales) > 10000
+ORDER BY 
+    total_sales DESC, c.c_acctbal ASC NULLS LAST;

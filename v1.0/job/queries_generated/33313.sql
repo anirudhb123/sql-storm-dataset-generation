@@ -1,0 +1,38 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           NULL::text AS parent_title, 0 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year,
+           mh.title AS parent_title, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    t.title AS movie_title,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    mh.parent_title AS linked_movie,
+    mh.level AS hierarchy_level,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year' 
+        ELSE mh.production_year::text 
+    END AS production_year,
+    ROW_NUMBER() OVER (PARTITION BY ah.id ORDER BY m.production_year DESC) AS row_num,
+    COALESCE(o.role, 'Unknown Role') AS role
+FROM movie_hierarchy mh 
+JOIN complete_cast cc ON cc.movie_id = mh.movie_id
+JOIN cast_info c ON c.movie_id = cc.movie_id
+JOIN aka_name ah ON ah.person_id = c.person_id
+JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN role_type o ON o.id = c.role_id
+JOIN aka_title t ON t.id = mh.movie_id
+WHERE t.production_year IS NOT NULL
+AND (mh.level > 0 OR mh.parent_title IS NOT NULL)
+GROUP BY ah.id, t.title, mh.parent_title, mh.level, mh.production_year, o.role
+ORDER BY actor_name, production_year DESC;

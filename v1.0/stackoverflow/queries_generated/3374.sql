@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::INT = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+), AggregatedPostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.UpVotes,
+        us.DownVotes,
+        COALESCE(cp.CloseReasonCount, 0) AS CloseReasonCount,
+        cp.CloseReasons
+    FROM 
+        RankedPosts rp
+    JOIN UserStats us ON rp.OwnerUserId = us.UserId
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    aps.Title,
+    aps.DisplayName,
+    aps.PostCount,
+    aps.UpVotes - aps.DownVotes AS NetScore,
+    CASE 
+        WHEN aps.CloseReasonCount > 0 THEN 'Closed: ' || aps.CloseReasons
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    AggregatedPostStats aps
+WHERE 
+    aps.NetScore > 0
+ORDER BY 
+    aps.NetScore DESC;

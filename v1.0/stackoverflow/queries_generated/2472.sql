@@ -1,0 +1,81 @@
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8
+    GROUP BY 
+        U.Id
+), RecentlyClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.UserId AS ClosedByUserId,
+        PH.CreationDate AS ClosedDate,
+        ROW_NUMBER() OVER (ORDER BY PH.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId 
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+PostSummary AS (
+    SELECT 
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        COUNT(C) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COALESCE(SUM(B.Id), 0) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UM.TotalPosts,
+    UM.TotalQuestions,
+    UM.TotalAnswers,
+    UM.TotalBounties,
+    RCP.PostId,
+    RCP.Title AS ClosedPostTitle,
+    RCP.ClosedDate,
+    PS.CommentCount,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.BadgeCount
+FROM 
+    UserMetrics UM
+LEFT JOIN 
+    RecentlyClosedPosts RCP ON UM.UserId = RCP.ClosedByUserId
+LEFT JOIN 
+    PostSummary PS ON RCP.PostId = PS.Title
+WHERE 
+    UM.TotalPosts > 0
+ORDER BY 
+    UM.Reputation DESC, RCP.ClosedDate DESC NULLS LAST
+LIMIT 100;

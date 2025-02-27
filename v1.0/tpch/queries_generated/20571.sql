@@ -1,0 +1,107 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+), 
+RecentLineItems AS (
+    SELECT 
+        l.*,
+        DATEDIFF(CURRENT_DATE, l.l_shipdate) AS days_since_ship
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales_value
+    FROM 
+        supplier s
+    LEFT JOIN 
+        RankedSuppliers rs ON s.s_suppkey = rs.ps_suppkey
+    LEFT JOIN 
+        RecentLineItems l ON rs.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_sales_value IS NOT NULL
+), 
+CustomerSegment AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_mktsegment
+), 
+SupplierPerformance AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        COUNT(DISTINCT rl.l_orderkey) AS orders_count,
+        AVG(rl.days_since_ship) AS avg_days_since_ship
+    FROM 
+        SupplierDetails sd
+    JOIN 
+        RecentLineItems rl ON sd.s_suppkey = rl.l_suppkey
+    GROUP BY 
+        sd.s_suppkey, sd.s_name
+), 
+FinalResults AS (
+    SELECT 
+        sp.s_name,
+        sp.orders_count,
+        cp.customer_count,
+        cp.c_mktsegment
+    FROM 
+        SupplierPerformance sp
+    JOIN 
+        CustomerSegment cp ON cp.customer_count > 5
+    WHERE 
+        sp.orders_count > 10
+    ORDER BY 
+        sp.orders_count DESC, cp.c_mktsegment
+)
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    (orders_count IS NOT NULL OR customer_count IS NOT NULL)
+    AND (s_name LIKE 'A%' OR s_name IS NULL)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM supplier s2
+        WHERE s2.s_name = FinalResults.s_name AND s2.s_suppkey = FinalResults.s_suppkey
+        AND s2.s_acctbal < 5000
+    )
+UNION ALL
+SELECT 
+    'Total' AS s_name,
+    SUM(orders_count) AS orders_count,
+    SUM(customer_count) AS customer_count,
+    NULL AS c_mktsegment
+FROM 
+    FinalResults;

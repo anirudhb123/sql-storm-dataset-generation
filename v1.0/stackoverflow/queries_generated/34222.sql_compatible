@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT
+        p2.Id,
+        p2.ParentId,
+        p2.Title,
+        p2.ViewCount,
+        p2.Score,
+        rh.Level + 1
+    FROM
+        Posts p2
+    INNER JOIN RecursivePostHierarchy rh ON p2.ParentId = rh.Id
+),
+PostVoteStats AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM
+        PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    rph.Level AS HierarchyLevel,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    COALESCE(uh.Reputation, 0) AS UserReputation,
+    COALESCE(uh.BadgeCount, 0) AS BadgeCount,
+    phs.HistoryTypes,
+    phs.LastUpdated
+FROM
+    Posts p
+LEFT JOIN RecursivePostHierarchy rph ON p.Id = rph.Id
+LEFT JOIN PostVoteStats pvs ON p.Id = pvs.PostId
+LEFT JOIN UserReputation uh ON p.OwnerUserId = uh.UserId
+LEFT JOIN PostHistorySummary phs ON p.Id = phs.PostId
+WHERE
+    p.CreationDate >= DATE '2022-01-01'  
+    AND (p.Score > 10 OR p.ViewCount > 100)  
+ORDER BY
+    p.LastActivityDate DESC,
+    rph.Level ASC;

@@ -1,0 +1,69 @@
+WITH UserVoteSummary AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes
+    FROM
+        Users U
+        LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COALESCE(MAX(B.Date), '0001-01-01') AS LastBadgeDate,
+        P.CreationDate,
+        P.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM
+        Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Badges B ON P.OwnerUserId = B.UserId
+    GROUP BY
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate, P.LastActivityDate
+),
+AggregatedPostData AS (
+    SELECT
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.CommentCount,
+        UVS.DisplayName,
+        UVS.UpVotes,
+        UVS.DownVotes,
+        UVS.CloseVotes,
+        PS.LastBadgeDate,
+        PS.PostRank
+    FROM
+        PostStatistics PS
+        INNER JOIN UserVoteSummary UVS ON PS.OwnerUserId = UVS.UserId
+)
+SELECT
+    APD.PostId,
+    APD.Title,
+    APD.Score,
+    APD.ViewCount,
+    APD.CommentCount,
+    APD.DisplayName,
+    APD.UpVotes,
+    APD.DownVotes,
+    APD.CloseVotes,
+    CASE
+        WHEN APD.LastBadgeDate = '0001-01-01' THEN 'No Badges'
+        ELSE CONCAT('Last Badge on ', TO_CHAR(APD.LastBadgeDate, 'YYYY-MM-DD'))
+    END AS BadgeInfo,
+    APD.PostRank
+FROM
+    AggregatedPostData APD
+WHERE
+    (APD.UpVotes - APD.DownVotes) > 10
+ORDER BY
+    APD.Score DESC, APD.LastActivityDate DESC;

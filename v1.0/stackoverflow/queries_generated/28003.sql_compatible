@@ -1,0 +1,67 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        STRING_AGG(DISTINCT P.Title, '; ') AS SampleTitles
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    GROUP BY T.TagName
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(C.Score) AS TotalCommentScore,
+        SUM(V.BountyAmount) AS TotalBountySpent
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        PH.Text,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11, 12, 13)  
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    TS.SampleTitles,
+    UE.DisplayName AS TopUser,
+    UE.PostCount AS UserPostCount,
+    UE.CommentCount,
+    UE.TotalCommentScore,
+    UE.TotalBountySpent,
+    PH.PostId AS PostId,
+    PH.UserDisplayName AS LastModifiedBy,
+    PH.CreationDate AS LastModifiedDate,
+    PH.Comment AS LastComment,
+    PH.Text AS ChangeDetails
+FROM TagStatistics TS
+JOIN UserEngagement UE ON UE.PostCount = (
+    SELECT MAX(PostCount) 
+    FROM UserEngagement
+)
+LEFT JOIN PostHistoryDetails PH ON PH.PostId IN (
+    SELECT Id 
+    FROM Posts 
+    WHERE Tags LIKE CONCAT('%<', TS.TagName, '>%')
+)
+WHERE PH.rn = 1
+ORDER BY TS.TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

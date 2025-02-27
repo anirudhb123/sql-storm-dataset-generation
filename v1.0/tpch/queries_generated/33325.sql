@@ -1,0 +1,30 @@
+WITH RECURSIVE ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+top_suppliers AS (
+    SELECT r.r_name, COUNT(rs.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN ranked_suppliers rs ON r.r_regionkey = rs.s_nationkey
+    WHERE rs.rank <= 3
+    GROUP BY r.r_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           p.p_type, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus, p.p_type
+)
+SELECT os.o_orderkey, os.total_revenue, os.o_orderstatus, os.customer_count,
+       ts.supplier_count, ts.r_name
+FROM order_summary os
+JOIN top_suppliers ts ON os.p_type = ts.r_name
+WHERE os.o_orderstatus IN ('F', 'O')
+AND (os.total_revenue IS NOT NULL AND os.total_revenue > 5000 OR ts.supplier_count IS NOT NULL)
+ORDER BY os.total_revenue DESC, ts.supplier_count ASC;

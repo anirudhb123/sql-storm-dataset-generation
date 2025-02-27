@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > 50000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    rnk,
+    hs.s_suppkey,
+    hs.s_name,
+    hvc.c_custkey,
+    hvc.c_name,
+    COUNT(rod.o_orderkey) AS recent_order_count,
+    SUM(rod.o_totalprice) AS total_recent_sales,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS total_returns,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM 
+    RankedSuppliers hs
+JOIN 
+    RecentOrders rod ON hs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = rod.o_orderkey))
+JOIN 
+    HighValueCustomers hvc ON rod.o_custkey = hvc.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = rod.o_orderkey
+GROUP BY 
+    rnk, hs.s_suppkey, hs.s_name, hvc.c_custkey, hvc.c_name
+ORDER BY 
+    recent_order_count DESC, total_recent_sales DESC;

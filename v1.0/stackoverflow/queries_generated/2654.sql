@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId AND v.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    GROUP BY u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalBadges,
+        us.TotalBounties,
+        COALESCE(CASE WHEN rp.Rank = 1 THEN 'Most Recent Post' END, 'Contributes with Multiple Posts') AS ContributionType
+    FROM RankedPosts rp
+    JOIN UserStats us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    tp.Title, 
+    tp.Score,
+    tp.ViewCount,
+    tp.DisplayName,
+    tp.TotalPosts,
+    tp.TotalBadges,
+    tp.TotalBounties,
+    tp.ContributionType
+FROM TopPosts tp
+WHERE tp.Score > 10
+ORDER BY tp.Score DESC, tp.ViewCount DESC
+LIMIT 10;
+
+-- This query fetches the top 10 posts of users with various statistics, filtered on score and recent activity.
+-- It uses CTEs to rank posts, aggregate user statistics, and to combine the results based on several complex metrics.

@@ -1,0 +1,51 @@
+
+WITH RECURSIVE part_count AS (
+    SELECT p_partkey, SUM(ps_availqty) AS total_avail
+    FROM part
+    JOIN partsupp ON part.p_partkey = partsupp.ps_partkey
+    GROUP BY p_partkey
+    HAVING SUM(ps_availqty) > 0
+),
+ranked_orders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_orderdate ORDER BY o_totalprice DESC) AS price_rank
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           MAX(s.s_acctbal) AS max_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 0
+),
+aggregate_parts AS (
+    SELECT p.p_brand, 
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           AVG(p.p_retailprice) AS avg_price
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY p.p_brand
+)
+SELECT 
+    n.n_name, 
+    pc.total_avail,
+    ao.part_count,
+    ao.avg_price,
+    ro.o_orderkey,
+    CASE WHEN ro.price_rank <= 5 THEN 'Top Price' ELSE 'Regular Price' END AS price_category,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', ps.ps_availqty, ')'), ', ') AS available_parts
+FROM nation_info n
+LEFT JOIN part_count pc ON pc.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty IS NOT NULL)
+LEFT JOIN aggregate_parts ao ON ao.part_count > 5
+LEFT JOIN ranked_orders ro ON ro.o_orderkey = (
+    SELECT MAX(o_orderkey) 
+    FROM orders 
+    WHERE o_orderdate = '1996-01-01' AND o_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey)
+)
+LEFT JOIN part p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty < 100)
+GROUP BY n.n_name, pc.total_avail, ao.part_count, ao.avg_price, ro.o_orderkey, ro.price_rank
+ORDER BY n.n_name, pc.total_avail DESC, ao.part_count ASC;

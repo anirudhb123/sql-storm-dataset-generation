@@ -1,0 +1,34 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        c.c_first_name,
+        c.c_last_name,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ws.ws_net_paid DESC) AS SalesRank
+    FROM 
+        store s
+    JOIN 
+        web_sales ws ON s.s_store_sk = ws.ws_ship_addr_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND d.d_month IN (6, 7)  -- Filtering for June and July 2023
+)
+SELECT 
+    r.s_store_id,
+    r.s_store_name,
+    COUNT(*) AS TopCustomersCount,
+    SUM(r.ws_net_paid) AS TotalRevenue
+FROM 
+    RankedSales r
+WHERE 
+    r.SalesRank <= 10
+GROUP BY 
+    r.s_store_id, r.s_store_name
+ORDER BY 
+    TotalRevenue DESC;

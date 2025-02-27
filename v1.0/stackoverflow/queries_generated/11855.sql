@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id,
+        U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        T.TagName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalComments,
+    US.TotalBounty,
+    US.TotalUpvotes,
+    US.TotalDownvotes,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.CreationDate,
+    PS.LastActivityDate,
+    PS.TagName
+FROM 
+    UserStats US
+JOIN 
+    PostStats PS ON PS.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId = US.UserId
+    )
+ORDER BY 
+    US.TotalPosts DESC, 
+    US.TotalBounty DESC;

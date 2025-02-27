@@ -1,0 +1,40 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS VARCHAR(255)) AS full_name
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CONCAT(sh.full_name, ' > ', s.s_name)
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+), part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr
+), order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_value,
+           COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY c.c_nationkey) AS orders_per_nation,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate > DATE '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT ns.n_name, 
+       SUM(osi.total_value) AS total_order_value,
+       COUNT(DISTINCT osi.o_orderkey) AS total_orders,
+       STRING_AGG(DISTINCT sh.full_name, '; ') AS supplier_hierarchy
+FROM nation ns
+LEFT JOIN order_summary osi ON ns.n_nationkey = osi.o_custkey
+LEFT JOIN supplier_hierarchy sh ON ns.n_nationkey = sh.s_nationkey
+WHERE ns.n_name IS NOT NULL
+GROUP BY ns.n_name
+HAVING SUM(osi.total_value) > 5000.00
+ORDER BY total_order_value DESC
+LIMIT 10;

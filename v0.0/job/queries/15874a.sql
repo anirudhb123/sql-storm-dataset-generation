@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND it.id > 1 AND mc.note IN ('(1929) (Denmark) (theatrical)', '(1953-1958) (Denmark) (TV)', '(1980) (Australia) (VHS) (original video release)', '(1980) (Soviet Union) (theatrical)', '(2005-2008) (Netherlands) (TV) (reruns) (RTL4) (RTL5)', '(2009) (USA) (all media) (Internet)', '(2009) (non-USA) (all media)', '(as Videocraft International Ltd. {us})', '(in associacion with) (as Asahi inryô)', '(in association with) (BBC Three)');

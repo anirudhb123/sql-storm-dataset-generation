@@ -1,0 +1,92 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p1 ON p2.ParentId = p1.Id
+    WHERE 
+        p1.PostTypeId = 1  -- Only continue with questions
+), PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 6 THEN 1 END) AS CloseVotes,
+        COUNT(CASE WHEN VoteTypeId = 7 THEN 1 END) AS ReopenVotes,
+        COUNT(CASE WHEN VoteTypeId = 10 THEN 1 END) AS DeletionVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), UserAggregation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.AnswerCount), 0) AS TotalAnswers,
+        COALESCE(SUM(ph.UpVotes), 0) AS TotalUserUpVotes,
+        COALESCE(SUBSTRING(u.AboutMe, 1, 100), 'No Description') AS UserDescription
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostVoteCounts ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    ph.UpVotes,
+    ph.DownVotes,
+    ph.CloseVotes,
+    u.UserId,
+    u.DisplayName,
+    u.TotalViews,
+    u.TotalAnswers,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ph.Level
+FROM 
+    RecursivePostHierarchy ph
+JOIN 
+    PostVoteCounts pv ON ph.PostId = pv.PostId
+JOIN 
+    UserAggregation u ON ph.PostId IN (u.UserId)
+JOIN 
+    UserBadges ub ON u.UserId = ub.UserId
+WHERE 
+    pv.UpVotes > pv.DownVotes 
+    AND u.TotalViews > 1000
+ORDER BY 
+    ph.Level ASC, u.TotalAnswers DESC;

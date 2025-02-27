@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2452000 AND 2453000
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_qty,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        i.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_sold_qty,
+        COALESCE(SUM(cr.total_returned_qty), 0) AS total_returned_qty,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON i.i_item_sk = cr.sr_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    sar.i_item_id, 
+    sar.total_sold_qty,
+    sar.total_returned_qty,
+    sar.total_net_profit,
+    CASE 
+        WHEN sar.total_sold_qty = 0 THEN 'No Sales'
+        WHEN sar.total_returned_qty > sar.total_sold_qty THEN 'High Return Rate'
+        ELSE 'Normal'
+    END AS sales_status
+FROM 
+    SalesAndReturns sar
+JOIN 
+    store s ON s.s_store_sk = (SELECT sr_store_sk FROM store_sales ss WHERE ss.ss_item_sk = sar.i_item_id LIMIT 1)
+WHERE 
+    sar.total_net_profit > 0
+ORDER BY 
+    sar.total_net_profit DESC
+LIMIT 100;

@@ -1,0 +1,66 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price,
+        COUNT(DISTINCT s.s_suppkey) OVER (PARTITION BY p.p_partkey) AS supply_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lineitem_cost,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+)
+SELECT 
+    f.o_orderkey,
+    f.o_totalprice,
+    f.o_orderdate,
+    f.o_orderstatus,
+    (SELECT 
+         SUM(rp.p_retailprice) 
+     FROM 
+         ranked_parts rp 
+     WHERE 
+         rp.rank_price = 1
+         AND rp.supply_count > 0) AS highest_retail_price,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         nation n 
+     WHERE 
+         n.n_nationkey IN (SELECT DISTINCT c.c_nationkey FROM customer c)
+         AND n.n_name LIKE 'A%') AS nations_starting_with_A,
+    (SELECT 
+         CASE 
+             WHEN COUNT(DISTINCT l.l_linenumber) > 5 THEN 'Bulk'
+             ELSE 'Normal'
+         END 
+     FROM 
+         lineitem l 
+     WHERE 
+         l.l_orderkey = f.o_orderkey) AS order_type
+FROM 
+    filtered_orders f
+WHERE 
+    f.o_totalprice > (SELECT AVG(o_avg.o_totalprice) FROM filtered_orders o_avg)
+ORDER BY 
+    f.o_orderdate DESC;

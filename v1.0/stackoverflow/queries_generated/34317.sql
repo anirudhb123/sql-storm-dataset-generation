@@ -1,0 +1,99 @@
+WITH RecursivePostCTE AS (
+    -- Base case: selecting all posts
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL  -- Start with top-level posts (no parent)
+
+    UNION ALL
+
+    -- Recursive case: finding child posts
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    -- Aggregate statistics per user based on their posts
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyPoints
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    -- Fetching top 10 posts based on score and view count
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    WHERE
+        p.AcceptedAnswerId IS NOT NULL  -- Only include questions with accepted answers
+),
+PostHistorySummary AS (
+    -- Summarizing post history types
+    SELECT
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosed,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    p.PostId,
+    p.Title AS PostTitle,
+    u.DisplayName AS Author,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    phs.EditCount AS TotalEdits,
+    phs.FirstClosed,
+    phs.LastEdited,
+    pp.Score,
+    pp.ViewCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t
+     INNER JOIN Posts pt ON t.ExcerptPostId = pt.Id
+     WHERE pt.Id = p.PostId) AS PostTags
+FROM 
+    RecursivePostCTE p
+JOIN 
+    UserPostStats ups ON p.OwnerUserId = ups.UserId
+JOIN 
+    PostHistorySummary phs ON p.PostId = phs.PostId
+JOIN 
+    PopularPosts pp ON p.PostId = pp.PostId
+WHERE
+    p.Level = 0  -- Only top-level posts
+    AND ups.TotalQuestions > 0  -- Users who have asked questions
+ORDER BY
+    ups.TotalPosts DESC
+LIMIT 20;  -- Limit the results for better performance benchmarking

@@ -1,0 +1,50 @@
+WITH RECURSIVE CTE_Supplier AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 1 AS depth
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, cs.depth + 1
+    FROM supplier s
+    JOIN CTE_Supplier cs ON s.s_acctbal > cs.s_acctbal
+    WHERE cs.depth < 5
+),
+CTE_OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           r.r_name AS region_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    p.p_mfgr,
+    ns.region_name,
+    o.total_revenue,
+    o.part_count,
+    CASE 
+        WHEN o.total_revenue > 100000 THEN 'High Revenue'
+        WHEN o.total_revenue BETWEEN 50000 AND 100000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue' 
+    END AS revenue_category,
+    COALESCE(cte.depth, 0) AS supplier_depth
+FROM part p
+LEFT JOIN CTE_OrderStats o ON p.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 10)
+LEFT JOIN NationRegion ns ON ns.n_nationkey IN (SELECT DISTINCT s_nationkey FROM supplier WHERE s_suppkey IN (SELECT s_suppkey FROM CTE_Supplier))
+LEFT JOIN CTE_Supplier cte ON cte.s_suppkey IN (SELECT ps.suppkey FROM partsupp ps WHERE ps.partkey = p.p_partkey)
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 50)
+  AND p.p_container IS NOT NULL
+ORDER BY o.total_revenue DESC, p.p_name ASC
+FETCH FIRST 100 ROWS ONLY;

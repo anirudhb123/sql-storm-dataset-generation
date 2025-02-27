@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    FIRST_VALUE(o.o_orderpriority) OVER (PARTITION BY p.p_partkey ORDER BY o.o_orderdate DESC) AS latest_order_priority,
+    TRIM(BOTH ' ' FROM SUBSTRING(p.p_comment FROM 1 FOR 23)) AS trimmed_comment,
+    CONCAT('Part:', p.p_partkey, ' - ', REPLACE(p.p_name, ' ', '_')) AS unique_part_identifier
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_type LIKE '%BRASS%'
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, avg_retail_price ASC;

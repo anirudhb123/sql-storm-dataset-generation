@@ -1,0 +1,87 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.movie_id, 
+        t.title, 
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id 
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 3
+),
+CastStats AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        MAX(t.production_year) AS last_movie_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        t.kind_id IN (1, 2) 
+    GROUP BY 
+        c.person_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        kt.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type kt ON mc.company_type_id = kt.id
+    GROUP BY 
+        mc.movie_id, kt.kind
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cs.movie_count AS total_casted_people,
+    cs.last_movie_year AS last_appearance_year,
+    ci.companies,
+    ci.company_type,
+    ks.keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastStats cs ON mh.movie_id = cs.person_id
+LEFT JOIN 
+    CompanyInfo ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    KeywordStats ks ON mh.movie_id = ks.movie_id
+WHERE 
+    mh.depth = 1 
+ORDER BY 
+    mh.production_year DESC, mh.title;

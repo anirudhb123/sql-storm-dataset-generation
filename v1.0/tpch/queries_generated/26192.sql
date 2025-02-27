@@ -1,0 +1,53 @@
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(ps.ps_comment, '; ') AS comments
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region,
+    ps.p_name AS part_name,
+    ps.retail_price,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    co.total_orders,
+    co.total_spent,
+    co.order_statuses,
+    ps.comments
+FROM 
+    PartStats ps
+JOIN 
+    supplier s ON ps.p_partkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    CustomerOrders co ON co.total_orders > 5
+WHERE 
+    ps.avg_supply_cost < (SELECT AVG(ps_avg.ps_supplycost) FROM partsupp ps_avg)
+ORDER BY 
+    r.r_name, ps.part_name;

@@ -1,0 +1,67 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        1 AS Level,
+        p.Title,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        ph.Level + 1,
+        p.Title,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.OwnerDisplayName,
+    ph.CreationDate,
+    ph.Level,
+    SUM(ph.ViewCount) OVER (PARTITION BY ph.OwnerDisplayName) AS TotalViewsByUser,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    MAX(b.Class) AS HighestBadgeClass -- Assuming multiple badges are associated
+FROM PostHierarchy ph
+LEFT JOIN Comments c ON c.PostId = ph.PostId
+LEFT JOIN Votes v ON v.PostId = ph.PostId
+LEFT JOIN Posts p ON p.Id = ph.PostId
+LEFT JOIN LATERAL (
+    SELECT 
+        t.TagName 
+    FROM Tags t 
+    WHERE t.Id IN (SELECT unnest(string_to_array(p.Tags, ','))::int)
+) t ON TRUE
+LEFT JOIN Badges b ON b.UserId = p.OwnerUserId
+WHERE 
+    ph.ViewCount > 10 
+    AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY
+    ph.PostId,
+    ph.Title,
+    ph.OwnerDisplayName,
+    ph.CreationDate,
+    ph.Level
+HAVING 
+    COUNT(c.Id) > 5 -- Only posts with more than 5 comments
+ORDER BY
+    TotalViewsByUser DESC,
+    ph.CreationDate DESC
+LIMIT 50;

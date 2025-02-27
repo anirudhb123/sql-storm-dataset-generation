@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(NULLIF(miw.info, ''), 'N/A') AS movie_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_info miw ON t.id = miw.movie_id AND miw.info_type_id = (SELECT id FROM info_type WHERE info = 'summary' LIMIT 1)
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, miw.info
+), ActorDetails AS (
+    SELECT 
+        c.person_id,
+        a.name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+), TopActors AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(name, ', ') AS actor_names
+    FROM 
+        ActorDetails
+    WHERE 
+        actor_rank <= 3
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    COALESCE(ta.actor_names, 'No prominent actors') AS prominent_actors,
+    rm.movie_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TopActors ta ON rm.movie_id = ta.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC, rm.title_rank;

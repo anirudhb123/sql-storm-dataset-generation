@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(p.AnswerCount, 0), 1) AS AnswerCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATE_TRUNC('year', CURRENT_DATE) -- Posts created this year
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.PostCount,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC, ur.PostCount DESC) AS ActivityRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > 1000 -- Focusing on users with a significant reputation
+),
+PostBadges AS (
+    SELECT 
+        ba.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges ba
+        JOIN Users u ON ba.UserId = u.Id
+        JOIN (
+            SELECT * 
+            FROM PostHistory ph 
+            WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13)
+        ) ph ON ph.UserId = u.Id
+        JOIN PostHistoryTypes b ON ph.PostHistoryTypeId = b.Id
+    GROUP BY 
+        ba.UserId
+)
+SELECT 
+    au.UserId,
+    u.DisplayName,
+    au.Reputation,
+    au.PostCount,
+    pb.BadgeNames,
+    rp.PostId,
+    rp.Title,
+    rp.Score
+FROM 
+    ActiveUsers au
+JOIN 
+    Users u ON au.UserId = u.Id
+LEFT JOIN 
+    PostBadges pb ON au.UserId = pb.UserId
+LEFT JOIN 
+    RankedPosts rp ON au.UserId = rp.OwnerUserId AND rp.rn = 1 -- Get the latest post for each active user
+WHERE 
+    (pb.BadgeNames IS NULL OR pb.BadgeNames NOT LIKE '%Gold%')
+    AND (rp.Score > 5 OR rp.Id IS NULL) -- Exclude low-scoring posts; include users with no posts
+ORDER BY 
+    au.ActivityRank, au.Reputation DESC
+LIMIT 50;

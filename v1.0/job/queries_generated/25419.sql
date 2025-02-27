@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT a.id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT a.id) DESC) AS year_rank
+    FROM 
+        title t 
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id 
+    JOIN 
+        cast_info a ON a.movie_id = t.id 
+    JOIN 
+        aka_name ak ON ak.person_id = a.person_id 
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+),
+
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        actor_names
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5
+),
+
+GenreStats AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(mt.id) AS movie_count,
+        AVG(mt.production_year) AS avg_production_year
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    JOIN 
+        title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        kt.kind
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    tm.actor_names,
+    gs.genre,
+    gs.movie_count,
+    gs.avg_production_year
+FROM 
+    TopMovies tm
+JOIN 
+    GenreStats gs ON tm.production_year BETWEEN gs.avg_production_year - 5 AND gs.avg_production_year + 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;

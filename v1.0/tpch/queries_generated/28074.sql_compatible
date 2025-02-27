@@ -1,0 +1,59 @@
+
+WITH EnrichedPart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_comment,
+        LEFT(p.p_name, 15) AS short_name,
+        LENGTH(p.p_comment) AS comment_length,
+        LOWER(p.p_comment) AS lower_comment
+    FROM 
+        part p
+), 
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        CONCAT(s.s_name, ' - ', s.s_address) AS supplier_details
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s_acctbal) FROM supplier
+        )
+),
+CombinedData AS (
+    SELECT 
+        e.p_partkey,
+        e.short_name,
+        f.supplier_details,
+        e.comment_length,
+        f.s_nationkey
+    FROM 
+        EnrichedPart e
+    JOIN 
+        partsupp ps ON e.p_partkey = ps.ps_partkey
+    JOIN 
+        FilteredSuppliers f ON ps.ps_suppkey = f.s_suppkey
+)
+SELECT 
+    c.c_name,
+    cd.short_name,
+    cd.supplier_details,
+    cd.comment_length,
+    r.r_name 
+FROM 
+    CombinedData cd
+JOIN 
+    customer c ON c.c_nationkey = cd.s_nationkey
+JOIN 
+    nation n ON n.n_nationkey = cd.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    cd.comment_length > 10
+ORDER BY 
+    cd.comment_length DESC, 
+    c.c_name;

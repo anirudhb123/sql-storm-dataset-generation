@@ -1,0 +1,81 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM
+        orders o
+    WHERE
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.o_totalprice,
+        oh.order_level + 1
+    FROM
+        OrderHierarchy oh
+    JOIN
+        orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE
+        oh.order_level < 5
+),
+SupplierRevenue AS (
+    SELECT
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        partsupp ps
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY
+        ps.ps_suppkey
+),
+RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ROUND(AVG(sr.total_revenue), 2) AS avg_revenue,
+        RANK() OVER (ORDER BY ROUND(AVG(sr.total_revenue), 2) DESC) AS revenue_rank
+    FROM
+        supplier s
+    LEFT JOIN
+        SupplierRevenue sr ON s.s_suppkey = sr.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    ph.order_level,
+    COALESCE(rs.avg_revenue, 0) AS avg_revenue,
+    CASE
+        WHEN rs.revenue_rank <= 10 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_category
+FROM
+    part p
+LEFT JOIN
+    OrderHierarchy ph ON p.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        JOIN orders o ON l.l_orderkey = o.o_orderkey 
+        WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    )
+LEFT JOIN
+    RankedSuppliers rs ON ph.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_acctbal IS NOT NULL 
+            AND c.c_acctbal > 200
+        )
+    )
+WHERE
+    p.p_size BETWEEN 10 AND 20
+ORDER BY
+    p.p_partkey DESC, avg_revenue DESC;

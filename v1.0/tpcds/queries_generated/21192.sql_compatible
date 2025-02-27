@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.ship_date_sk,
+        ws.item_sk,
+        SUM(ws.net_profit) AS total_profit,
+        SUM(ws.quantity) AS total_quantity,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ship_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023
+        ) AND (
+            SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023
+        )
+    GROUP BY 
+        ws.ship_date_sk, ws.item_sk
+), max_sales AS (
+    SELECT 
+        item_sk,
+        MAX(total_profit) AS max_profit
+    FROM 
+        sales_summary
+    GROUP BY 
+        item_sk
+), item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(ms.max_profit, 0) AS item_max_profit,
+        CASE 
+            WHEN i.i_current_price - COALESCE(ms.max_profit, 0) < 0 THEN 'Loss Leader'
+            ELSE 'Standard'
+        END AS price_status
+    FROM 
+        item i
+    LEFT JOIN 
+        max_sales ms ON i.i_item_sk = ms.item_sk
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.i_current_price,
+    id.item_max_profit,
+    id.price_status,
+    COALESCE(SUM(s.total_quantity), 0) AS total_sold,
+    CASE 
+        WHEN COUNT(s.ship_date_sk) > 5 THEN 'Frequent Seller'
+        ELSE 'Occasional Seller'
+    END AS selling_frequency,
+    NULLIF(AVG(d.d_week_seq) OVER (PARTITION BY id.i_item_sk ORDER BY id.i_item_id), 0) AS avg_week_sales
+FROM 
+    item_details id
+LEFT JOIN 
+    sales_summary s ON id.i_item_sk = s.item_sk
+LEFT JOIN 
+    date_dim d ON s.ship_date_sk = d.d_date_sk
+GROUP BY 
+    id.i_item_id, id.i_item_desc, id.i_current_price, id.item_max_profit, id.price_status 
+ORDER BY 
+    CASE
+        WHEN id.price_status = 'Loss Leader' THEN 0
+        ELSE 1
+    END, 
+    id.item_max_profit DESC
+LIMIT 50;

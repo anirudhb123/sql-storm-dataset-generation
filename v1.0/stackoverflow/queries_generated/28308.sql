@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId IN (SELECT Id FROM Posts)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        CAST((LENGTH(p.Body) - LENGTH(REPLACE(p.Body, ' ', ''))) AS INT) + 1 AS WordCount,
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.WordCount,
+    ps.TagCount,
+    ts.TagName,
+    ts.UsageCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostStatistics ps ON ua.UserId IN (
+        SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId
+    )
+LEFT JOIN 
+    TagStatistics ts ON ts.UsageCount > 10 -- Tags that are used more than 10 times
+ORDER BY 
+    ua.UpVotes DESC, ua.PostCount DESC, ps.Score DESC
+LIMIT 50;

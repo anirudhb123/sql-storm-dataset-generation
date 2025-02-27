@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT('Sequel:', m.title), 
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.depth < 3  
+),
+
+ActorInfo AS (
+    SELECT 
+        a.name,
+        a.id AS actor_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(m.production_year) AS avg_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name, a.id
+),
+
+ImportantMovies AS (
+    SELECT 
+        DISTINCT m.title,
+        m.production_year
+    FROM 
+        aka_title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Award Winner')
+    AND 
+        m.production_year < 2023
+),
+
+FinalResults AS (
+    SELECT 
+        m.title AS movie_title,
+        mh.depth,
+        ai.name AS actor_name,
+        ai.movie_count,
+        ai.avg_year,
+        COALESCE(im.production_year, 'N/A') AS award_year
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorInfo ai ON mh.movie_id IN (SELECT movie_id FROM cast_info WHERE person_role_id IS NOT NULL)
+    LEFT JOIN 
+        ImportantMovies im ON mh.title = im.title
+)
+
+SELECT 
+    *
+FROM 
+    FinalResults
+WHERE 
+    movie_title IS NOT NULL
+ORDER BY 
+    depth, movie_title;

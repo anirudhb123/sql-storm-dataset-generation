@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        SUM(ws_ext_sales_price) > 1000
+), 
+Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_order_date,
+        MIN(ws.ws_sold_date_sk) AS first_order_date,
+        DATEDIFF(MAX(ws.ws_sold_date_sk), MIN(ws.ws_sold_date_sk)) AS days_between_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+), 
+Annual_Sales AS (
+    SELECT 
+        YEAR(d.d_date) AS sales_year,
+        SUM(ws.ws_ext_sales_price) AS annual_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        YEAR(d.d_date)
+), 
+Top_Customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_net_profit,
+        cs.order_count,
+        cs.days_between_orders,
+        COALESCE(sa.annual_sales, 0) AS last_year_annual_sales
+    FROM 
+        Customer_Stats cs
+    LEFT JOIN 
+        Annual_Sales sa ON YEAR(cs.last_order_date) = sa.sales_year
+    WHERE 
+        cs.total_net_profit > 5000
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.total_net_profit,
+    tc.order_count,
+    tc.days_between_orders,
+    tc.last_year_annual_sales,
+    CASE 
+        WHEN tc.last_year_annual_sales > 10000 THEN 'High Value'
+        WHEN tc.last_year_annual_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    Top_Customers tc
+WHERE 
+    tc.c_customer_sk IN (SELECT ws_bill_customer_sk FROM Sales_CTE WHERE sales_rank <= 10)
+ORDER BY 
+    tc.total_net_profit DESC;

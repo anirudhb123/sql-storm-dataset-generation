@@ -1,0 +1,55 @@
+
+WITH Address_Analysis AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS total_addresses,
+        ARRAY_AGG(DISTINCT ca_city) AS unique_cities,
+        STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_type, ', ') AS street_details
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+Demographic_Analysis AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_marital_status, ', ') AS marital_statuses,
+        STRING_AGG(DISTINCT cd_credit_rating ORDER BY cd_credit_rating) AS credit_ratings
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+Date_Analysis AS (
+    SELECT 
+        d_year,
+        COUNT(*) AS total_dates,
+        STRING_AGG(DISTINCT d_day_name ORDER BY d_dow) AS days_of_week
+    FROM 
+        date_dim
+    GROUP BY 
+        d_year
+)
+SELECT 
+    a.ca_state,
+    a.total_addresses,
+    a.unique_cities,
+    a.street_details,
+    d.cd_gender,
+    d.total_customers,
+    d.avg_purchase_estimate,
+    d.marital_statuses,
+    d.credit_ratings,
+    da.d_year,
+    da.total_dates,
+    da.days_of_week
+FROM 
+    Address_Analysis a
+JOIN 
+    Demographic_Analysis d ON d.total_customers > 0
+JOIN 
+    Date_Analysis da ON da.total_dates > 0
+ORDER BY 
+    a.ca_state, d.cd_gender, da.d_year;

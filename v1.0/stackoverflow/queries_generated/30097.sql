@@ -1,0 +1,61 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting from Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.Id
+)
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountyReceived,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ph.Title AS QuestionTitle,
+    ph.Level AS QuestionLevel,
+    u.DisplayName AS AnswerOwner,
+    u.TotalUpVotes - u.TotalDownVotes AS NetVoteScore,
+    COUNT(v.Id) AS VoteCount,
+    COALESCE(MAX(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END), 'No Votes Yet') AS LastUpVoteDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Posts p ON ph.Id = p.ParentId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    unnest(string_to_array(p.Tags, '><')) AS t(TagName) ON TRUE
+WHERE 
+    ph.Level <= 5  -- Limit to a maximum of 5 levels of answers
+GROUP BY 
+    ph.Title, ph.Level, u.DisplayName, u.TotalUpVotes, u.TotalDownVotes
+ORDER BY 
+    ph.Level DESC, NetVoteScore DESC;

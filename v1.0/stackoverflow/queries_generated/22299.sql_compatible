@@ -1,0 +1,83 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserBadgeSummary AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS TotalBadges,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditSequence
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) /* Edit Title, Edit Body, Edit Tags */
+),
+ReputationOverview AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(UP.TotalPosts, 0) AS TotalPosts,
+        COALESCE(UP.QuestionCount, 0) AS QuestionCount,
+        COALESCE(UP.AnswerCount, 0) AS AnswerCount,
+        COALESCE(UB.TotalBadges, 0) AS TotalBadges,
+        COALESCE(UB.BadgeNames, 'None') AS BadgeNames,
+        COALESCE(PH.LastEdit, 'No Edits') AS LastEdit,
+        MAX(PH.EditSequence) AS LastEditSequence
+    FROM Users U
+    LEFT JOIN PostStatistics UP ON U.Id = UP.OwnerUserId
+    LEFT JOIN UserBadgeSummary UB ON U.Id = UB.UserId
+    LEFT JOIN (
+        SELECT 
+            P.Id AS PostId,
+            PH.UserId,
+            MAX(PH.CreationDate) AS LastEdit
+        FROM PostHistoryDetails PH
+        JOIN Posts P ON PH.PostId = P.Id
+        GROUP BY P.Id, PH.UserId
+    ) PH ON U.Id = PH.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+)
+SELECT 
+    UserR.DisplayName,
+    UserR.ReputationRank,
+    RO.TotalPosts,
+    RO.QuestionCount,
+    RO.AnswerCount,
+    RO.TotalBadges,
+    RO.BadgeNames,
+    CASE
+        WHEN RO.LastEdit IS NOT NULL THEN 
+            TO_CHAR(RO.LastEdit, 'YYYY-MM-DD HH24:MI:SS') 
+        ELSE 'Never'
+    END AS LastEditFormatted,
+    CASE 
+        WHEN RO.LastEditSequence IS NULL THEN 'No Edits Recorded'
+        ELSE 'Last Edit Sequence: ' || RO.LastEditSequence
+    END AS EditStatus
+FROM UserReputation UserR
+JOIN ReputationOverview RO ON UserR.UserId = RO.UserId 
+WHERE UserR.Reputation > 1000
+ORDER BY UserR.ReputationRank;

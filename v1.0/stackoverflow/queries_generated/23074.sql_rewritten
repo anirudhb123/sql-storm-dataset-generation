@@ -1,0 +1,94 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 12 THEN PH.CreationDate END) AS DeletedDate,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 12)
+    LEFT JOIN 
+        Tags T ON T.Id = P.Id  
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+AggregatedVotes AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 10 THEN 1 ELSE 0 END) AS DeletionVotes,
+        SUM(CASE 
+                WHEN V.VoteTypeId IN (1, 4) THEN 1 
+                ELSE 0 
+            END) AS SpecialVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+)
+SELECT 
+    U.DisplayName,
+    UR.Reputation,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    COALESCE(RP.ViewCount, 0) AS ViewCount,
+    COALESCE(RP.CommentCount, 0) AS CommentCount,
+    COALESCE(PV.UpVotes, 0) AS UpVotes,
+    COALESCE(PV.DownVotes, 0) AS DownVotes,
+    COUNT(PT.TagName) AS RelatedTags,
+    (SELECT COUNT(*) FROM PostLinks PL WHERE PL.PostId = RP.PostId) AS LinkCount,
+    DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), RP.DeletedDate) AS DaysSinceDeleted
+FROM 
+    RecentPosts RP
+JOIN 
+    Users U ON U.Id = RP.OwnerUserId
+JOIN 
+    UserReputation UR ON UR.UserId = U.Id
+LEFT JOIN 
+    AggregatedVotes PV ON PV.PostId = RP.PostId
+LEFT JOIN 
+    PopularTags PT ON RP.Tags LIKE CONCAT('%', PT.TagName, '%')
+WHERE
+    RP.DeletedDate IS NULL
+    AND RP.ViewCount > 100
+    AND RP.CommentCount / NULLIF(RP.ViewCount, 0) < 0.05
+ORDER BY 
+    UR.Reputation DESC,
+    RP.ViewCount DESC,
+    RP.CreationDate ASC
+LIMIT 
+    50
+OFFSET 
+    (SELECT COUNT(*) FROM Users WHERE Reputation > 1000);

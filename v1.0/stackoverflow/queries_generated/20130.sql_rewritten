@@ -1,0 +1,109 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS Questions,
+        COALESCE(COUNT(DISTINCT A.Id), 0) AS Answers,
+        NTILE(4) OVER (ORDER BY COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - 
+                           COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS VoteQuartile
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1 
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2 
+    LEFT JOIN 
+        Votes V ON V.PostId IN (P.Id, A.Id)
+    GROUP BY 
+        U.Id
+),
+TagPopularity AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    GROUP BY 
+        T.TagName
+),
+QuestionStatistics AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        MAX(COALESCE(CAST(EXTRACT(EPOCH FROM (P.LastActivityDate - P.CreationDate)) AS int), 0)) AS TimeToActive,
+        P.ViewCount,
+        CASE 
+            WHEN COALESCE(COUNT(DISTINCT A.Id), 0) = 0 THEN 'No Answers'
+            WHEN COALESCE(COUNT(DISTINCT A.Id), 0) < 5 THEN 'Few Answers'
+            ELSE 'Many Answers'
+        END AS AnswerQuality
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id
+),
+FinalResults AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        UStats.UpVotes,
+        UStats.DownVotes,
+        UStats.Questions,
+        UStats.Answers,
+        T.TagName,
+        T.PostCount,
+        T.CommentCount,
+        Q.Title,
+        Q.QuestionId,
+        Q.TimeToActive,
+        Q.ViewCount,
+        Q.AnswerQuality
+    FROM 
+        UserStats UStats
+    JOIN 
+        Users U ON U.Id = UStats.UserId
+    JOIN 
+        TagPopularity T ON T.TagRank <= 10 
+    JOIN 
+        QuestionStatistics Q ON Q.QuestionId IN (
+            SELECT P.Id
+            FROM Posts P
+            WHERE P.OwnerUserId = U.Id AND P.PostTypeId = 1
+        )
+    WHERE 
+        U.Reputation > 1000
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    UpVotes,
+    DownVotes,
+    Questions,
+    Answers,
+    TagName,
+    PostCount,
+    CommentCount,
+    Title,
+    TimeToActive,
+    ViewCount,
+    AnswerQuality
+FROM 
+    FinalResults
+ORDER BY 
+    UpVotes DESC, 
+    TagName,
+    ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

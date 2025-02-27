@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        NULL AS parent_id,
+        1 AS level
+    FROM
+        customer c
+    WHERE
+        c.c_customer_sk < 100
+    UNION ALL
+    SELECT
+        ws.ws_bill_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.c_customer_sk AS parent_id,
+        level + 1
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN
+        sales_hierarchy sh ON ws.ws_ship_customer_sk = sh.c_customer_sk
+)
+SELECT
+    sh.c_customer_sk,
+    sh.c_first_name,
+    sh.c_last_name,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit,
+    COUNT(ws.ws_order_number) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY sh.level ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank,
+    d.d_month_seq,
+    d.d_year
+FROM
+    sales_hierarchy sh
+LEFT JOIN
+    web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE
+    d.d_year = 2023
+    AND d.d_month_seq IN (SELECT d_month_seq FROM date_dim WHERE d_year = 2023 AND d_dow IN (6, 7))
+GROUP BY
+    sh.c_customer_sk, sh.c_first_name, sh.c_last_name, d.d_month_seq, d.d_year
+HAVING
+    total_profit > 1000
+ORDER BY
+    total_profit DESC
+UNION ALL
+SELECT
+    NULL AS c_customer_sk,
+    'Total' AS c_first_name,
+    NULL AS c_last_name,
+    SUM(COALESCE(ws.ws_net_profit, 0)) AS total_profit,
+    COUNT(ws.ws_order_number) AS order_count,
+    NULL AS profit_rank,
+    NULL AS d_month_seq,
+    NULL AS d_year
+FROM
+    web_sales ws
+JOIN
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE
+    d.d_year = 2023
+    AND d.d_month_seq IN (SELECT d_month_seq FROM date_dim WHERE d_year = 2023 AND d_dow IN (6, 7));

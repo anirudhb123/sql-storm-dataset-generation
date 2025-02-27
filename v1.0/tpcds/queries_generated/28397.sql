@@ -1,0 +1,60 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        LOWER(ca_city) AS lower_city,
+        UPPER(ca_state) AS upper_state
+    FROM customer_address
+),
+Demographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        INITCAP(cd_education_status) AS formatted_education,
+        CASE 
+            WHEN cd_purchase_estimate > 100000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_value
+    FROM customer_demographics
+),
+CustomerData AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_customer_name,
+        c.c_birth_country,
+        d.formatted_education,
+        a.full_address,
+        a.lower_city,
+        a.upper_state
+    FROM customer AS c
+    JOIN Demographics AS d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN AddressData AS a ON c.c_current_addr_sk = a.ca_address_sk
+),
+AggregatedData AS (
+    SELECT
+        lower_city,
+        upper_state,
+        COUNT(*) AS total_customers,
+        STRING_AGG(full_customer_name, ', ') AS customer_names
+    FROM CustomerData
+    GROUP BY lower_city, upper_state
+)
+
+SELECT 
+    lower_city,
+    upper_state,
+    total_customers,
+    customer_names,
+    LENGTH(customer_names) AS names_length,
+    CHAR_LENGTH(customer_names) AS character_count,
+    POSITION('High Value' IN STRING_AGG(customer_names, ' ')) AS high_value_mention
+FROM AggregatedData
+WHERE total_customers > 10
+ORDER BY total_customers DESC
+LIMIT 50;

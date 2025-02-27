@@ -1,0 +1,64 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+TopSuppliers AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_supplycost) > (
+        SELECT AVG(total_supplycost)
+        FROM (
+            SELECT SUM(ps_supplycost) AS total_supplycost
+            FROM partsupp
+            GROUP BY ps_suppkey
+        ) AS avg_supplier_costs
+    )
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+SupplierOrders AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY s.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL OR o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT nh.n_name AS NationName, 
+       COUNT(DISTINCT co.c_custkey) AS ActiveCustomers,
+       SUM(COALESCE(od.total_order_value, 0)) AS TotalOrderValue,
+       COUNT(DISTINCT s.s_suppkey) AS TotalSuppliers,
+       AVG(COALESCE(so.order_count, 0)) AS AvgSupplierOrders
+FROM NationHierarchy nh
+LEFT JOIN CustomerOrderSummary co ON nh.n_nationkey = co.c_custkey
+LEFT JOIN Supplier s ON s.s_nationkey = nh.n_nationkey
+LEFT JOIN OrderDetails od ON od.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = co.c_custkey
+)
+LEFT JOIN SupplierOrders so ON s.s_suppkey = so.s_suppkey
+WHERE nh.level > 0
+GROUP BY nh.n_name
+ORDER BY NationName;

@@ -1,0 +1,75 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, o.o_orderkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+FinalResults AS (
+    SELECT 
+        co.c_custkey,
+        co.o_orderkey,
+        rp.p_name,
+        rp.p_retailprice,
+        ss.total_supply_cost,
+        CASE 
+            WHEN ss.total_supply_cost IS NULL THEN 'NO SUPPLIER COST'
+            ELSE 'SUPPLIER EXISTS'
+        END AS supply_status
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        RankedParts rp ON co.total_spent > rp.p_retailprice
+    LEFT JOIN 
+        SupplierStats ss ON rp.p_partkey = ss.s_suppkey 
+    WHERE 
+        EXISTS (
+            SELECT 1
+            FROM supplier s 
+            WHERE s.s_nationkey IN (
+                SELECT n.n_nationkey 
+                FROM nation n 
+                WHERE n.n_name LIKE 'A%'
+            )
+        )
+    ORDER BY 
+        co.c_custkey, co.o_orderkey DESC, rp.p_retailprice
+)
+SELECT 
+    *,
+    CONCAT('Customer ', c_custkey, ' spent $', ROUND(total_spent, 2)) AS spending_info
+FROM 
+    FinalResults
+WHERE 
+    total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+    OR supply_status = 'NO SUPPLIER COST'
+    OR (total_spent IS NULL AND p_name IS NOT NULL)
+ORDER BY 
+    RAND() LIMIT 10;

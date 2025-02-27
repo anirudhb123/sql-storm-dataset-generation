@@ -1,0 +1,73 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = U.Id) AS PostCount,
+        (SELECT SUM(Score) FROM Posts WHERE OwnerUserId = U.Id) AS TotalScore,
+        CreationDate,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        TAG.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags TAG
+    LEFT JOIN 
+        Posts P ON TAG.Id = ANY(string_to_array(P.Tags, '><')::int[])
+    WHERE 
+        TAG.Count > 10
+    GROUP BY 
+        TAG.TagName
+    HAVING 
+        COUNT(P.Id) > 5
+),
+AggregatedPostHistory AS (
+    SELECT 
+        P.Id AS PostId, 
+        COUNT(H.Id) AS EditCount,
+        MAX(H.CreationDate) AS LastEdited
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory H ON P.Id = H.PostId
+    GROUP BY 
+        P.Id
+),
+VoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalScore,
+    U.Rank,
+    T.TagName,
+    PH.EditCount,
+    PH.LastEdited,
+    VS.UpVotes,
+    VS.DownVotes
+FROM 
+    RecursiveUserStats U
+JOIN 
+    PopularTags T ON U.PostCount > 2
+JOIN 
+    AggregatedPostHistory PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+LEFT JOIN 
+    VoteSummary VS ON VS.PostId = PH.PostId
+WHERE 
+    U.CreationDate < NOW() - INTERVAL '1 year'
+ORDER BY 
+    U.Reputation DESC, T.TagName;

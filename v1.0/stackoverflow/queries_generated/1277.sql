@@ -1,0 +1,58 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        TotalPosts, 
+        TotalComments, 
+        UpVotes, 
+        DownVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.AnswerCount,
+        P.CommentCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.AcceptedAnswerId, P.Score, P.ViewCount, P.CreationDate, P.AnswerCount, P.CommentCount, U.DisplayName
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalComments,
+    P.Title AS PostTitle,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViews,
+    RANK() OVER (PARTITION BY TU.UserId ORDER BY P.Score DESC) AS ScoreRank
+FROM TopUsers TU
+LEFT JOIN PostStatistics P ON TU.UserId = P.OwnerDisplayName
+WHERE TU.ReputationRank <= 10
+ORDER BY TU.Reputation DESC, P.Score DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

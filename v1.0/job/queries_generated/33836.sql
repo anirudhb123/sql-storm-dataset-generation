@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        count(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        SUM(CASE WHEN c.nr_order = 1 THEN 1 ELSE 0 END) AS lead_roles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(cd.actor_count, 0) AS actor_count,
+        COALESCE(cd.actors, 'No Actors') AS actors,
+        COALESCE(cd.lead_roles, 0) AS lead_roles
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        cast_details cd ON m.movie_id = cd.movie_id
+)
+SELECT 
+    mis.title,
+    mis.production_year,
+    mis.actor_count,
+    mis.actors,
+    mis.lead_roles,
+    COUNT(DISTINCT mkey.keyword) AS keyword_count,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    MAX(mc.note) AS last_company_note
+FROM 
+    movie_info_summary mis
+LEFT JOIN 
+    movie_keyword mkey ON mis.movie_id = mkey.movie_id
+LEFT JOIN 
+    movie_companies mc ON mis.movie_id = mc.movie_id
+GROUP BY 
+    mis.movie_id, mis.title, mis.production_year, 
+    mis.actor_count, mis.actors, mis.lead_roles
+HAVING 
+    mis.production_year > 2000 AND
+    (COUNT(DISTINCT mkey.keyword) > 5 OR mis.lead_roles > 0)
+ORDER BY 
+    mis.production_year DESC, mis.actor_count DESC;

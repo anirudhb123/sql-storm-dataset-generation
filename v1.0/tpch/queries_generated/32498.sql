@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_nationkey IS NOT NULL
+
+    UNION ALL
+    
+    SELECT sr.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM SupplierRegion sr
+    JOIN supplier s ON sr.n_nationkey = s.s_nationkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = sr.n_nationkey)
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+), CostAnalysis AS (
+    SELECT ps.ps_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_tax) AS avg_tax,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_tax IS NOT NULL
+    GROUP BY ps.ps_partkey
+)
+SELECT sr.r_name AS region, COUNT(DISTINCT co.c_custkey) AS customer_count,
+       SUM(ca.total_sales) AS total_sales,
+       AVG(ca.avg_tax) AS average_tax_percentage
+FROM SupplierRegion sr
+LEFT JOIN customer co ON sr.n_nationkey = co.c_nationkey
+LEFT JOIN CostAnalysis ca ON ca.ps_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_retailprice BETWEEN 10 AND 100
+)
+WHERE sr.r_regionkey IS NOT NULL
+GROUP BY sr.r_name
+HAVING COUNT(DISTINCT co.c_custkey) > 5
+ORDER BY total_sales DESC
+LIMIT 10;

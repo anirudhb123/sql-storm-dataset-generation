@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS NetVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.UserId) AS HistoryChangeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.TotalBounty,
+        ps.NetVotes,
+        ps.CommentCount,
+        ps.HistoryChangeCount,
+        ROW_NUMBER() OVER (PARTITION BY r.Level ORDER BY ps.TotalBounty DESC, ps.NetVotes DESC) AS RankWithinLevel
+    FROM 
+        PostScores ps
+    INNER JOIN 
+        RecursivePostHierarchy r ON ps.PostId = r.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.TotalBounty,
+    rp.NetVotes,
+    rp.CommentCount,
+    rp.HistoryChangeCount,
+    rp.RankWithinLevel,
+    CASE 
+        WHEN rp.RankWithinLevel = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRankCategory
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.RankWithinLevel <= 5
+ORDER BY 
+    rp.RankWithinLevel ASC;

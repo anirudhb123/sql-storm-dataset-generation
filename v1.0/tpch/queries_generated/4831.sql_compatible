@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_clerk,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY ps.ps_partkey, s.s_name
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'UNKNOWN' 
+            WHEN c.c_acctbal < 100 THEN 'LOW BALANCE' 
+            WHEN c.c_acctbal BETWEEN 100 AND 1000 THEN 'MEDIUM BALANCE' 
+            ELSE 'HIGH BALANCE' 
+        END AS account_status
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+),
+OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        COUNT(l.l_linenumber) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    COALESCE(c.c_name, 'No Customer') AS customer_name,
+    COALESCE(r.o_orderkey::TEXT, 'No Orders') AS order_id,
+    COALESCE(s.supplier_name, 'No Supplier') AS supplier_name,
+    oi.total_line_value,
+    oi.item_count,
+    c.account_status,
+    s.total_available,
+    s.total_cost
+FROM CustomerInfo c
+FULL OUTER JOIN RankedOrders r ON c.c_custkey = r.o_orderkey
+LEFT JOIN OrderLineSummary oi ON r.o_orderkey = oi.l_orderkey
+LEFT JOIN SupplierPart s ON oi.total_line_value > s.total_cost
+WHERE (c.account_status = 'LOW BALANCE' OR c.account_status IS NULL)
+  AND (r.o_orderdate >= '1997-01-01' OR r.o_orderdate IS NULL)
+ORDER BY customer_name, order_id;

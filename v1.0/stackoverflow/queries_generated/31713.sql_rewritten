@@ -1,0 +1,48 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(vt.Id = 2) AS UpVotes, 
+        SUM(vt.Id = 3) AS DownVotes, 
+        SUM(p.Score) AS TotalScore,
+        RANK() OVER (ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN VoteTypes vt ON vt.Id = v.VoteTypeId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+FilteredPostHistory AS (
+    SELECT 
+        rph.PostId,
+        rph.PostHistoryTypeId,
+        rph.CreationDate,
+        rph.UserDisplayName
+    FROM RecentPostHistory rph
+    WHERE rph.rn = 1 
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.UpVotes,
+    ups.DownVotes,
+    ups.TotalScore,
+    COALESCE(ph.PostId, 0) AS LastPostId,
+    COALESCE(ph.UserDisplayName, 'N/A') AS LastEditor,
+    COALESCE(ph.CreationDate, 'No history') AS LastEditDate
+FROM UserPostStats ups
+LEFT JOIN FilteredPostHistory ph ON ph.PostId = (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ups.UserId ORDER BY p.CreationDate DESC LIMIT 1)
+WHERE ups.PostCount > 0
+ORDER BY ups.UserRank;

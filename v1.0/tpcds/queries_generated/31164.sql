@@ -1,0 +1,83 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        s_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_revenue,
+        1 AS recursion_level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 10000 AND 20000
+    GROUP BY 
+        s_item_sk
+
+    UNION ALL
+
+    SELECT 
+        ws.s_item_sk,
+        sd.total_sales + ws.ws_quantity,
+        sd.total_revenue + ws.ws_sales_price,
+        sd.recursion_level + 1
+    FROM 
+        sales_data sd
+    JOIN 
+        web_sales ws ON sd.s_item_sk = ws.s_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 20000
+        AND sd.recursion_level < 5
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_purchase_estimate > 500
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+inventory_data AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_date_sk = 10000
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_income_band_sk,
+    sd.total_sales,
+    sd.total_revenue,
+    id.total_inventory,
+    CASE 
+        WHEN cd.total_orders > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status
+FROM 
+    customer_data cd
+JOIN 
+    sales_data sd ON cd.c_customer_sk = sd.s_item_sk
+LEFT JOIN 
+    inventory_data id ON sd.s_item_sk = id.inv_item_sk
+WHERE 
+    id.total_inventory IS NOT NULL
+    AND cd.cd_gender IS NOT NULL
+ORDER BY 
+    cd.total_spent DESC, sd.total_revenue ASC
+LIMIT 100;

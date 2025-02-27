@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        SUM(ss.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        n.n_name
+    ORDER BY 
+        total_acctbal DESC
+    LIMIT 5
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_orderkey) AS num_items,
+        SUM(l.l_extendedprice) AS total_extended_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate < DATE '1998-10-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ro.o_orderpriority,
+    tn.n_name,
+    lis.num_items,
+    lis.total_extended_price,
+    lis.avg_discount
+FROM 
+    RankedOrders ro
+JOIN 
+    LineItemStats lis ON ro.o_orderkey = lis.l_orderkey
+JOIN 
+    TopNations tn ON tn.total_acctbal > (SELECT AVG(total_acctbal) FROM TopNations)
+WHERE 
+    ro.rnk <= 10
+ORDER BY 
+    ro.o_totalprice DESC;

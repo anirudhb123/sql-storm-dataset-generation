@@ -1,0 +1,95 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS RN
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.CreationDate >= '2020-01-01'
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserRanked AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        UpVotes,
+        DownVotes,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC, UpVotes DESC) AS Rank
+    FROM 
+        RecursiveUserActivity
+    WHERE 
+        RN = 1
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        P.CreationDate >= '2021-01-01' 
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate
+    HAVING 
+        COUNT(DISTINCT T.TagName) > 1
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN P.CreationDate >= '2022-01-01' THEN 1 END) AS RecentPostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    UR.DisplayName,
+    UR.PostCount,
+    UR.UpVotes,
+    UR.DownVotes,
+    UR.BadgeCount,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.CreationDate,
+    P.Tags,
+    AU.RecentPostCount,
+    AU.CommentCount
+FROM 
+    UserRanked UR
+JOIN 
+    PopularPosts P ON UR.UserId = P.OwnerUserId
+JOIN 
+    ActiveUsers AU ON UR.UserId = AU.UserId
+WHERE 
+    UR.BadgeCount > 3 
+    AND (AU.RecentPostCount > 0 OR AU.CommentCount > 5)
+ORDER BY 
+    UR.Rank;

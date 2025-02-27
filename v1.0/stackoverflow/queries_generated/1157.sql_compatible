@@ -1,0 +1,65 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Date AS BadgeDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Users U
+    JOIN 
+        Badges B ON U.Id = B.UserId
+),
+RecentTopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC, P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND P.ViewCount > 100
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.Comment,
+        PH.CreationDate AS CloseDate,
+        PH.UserDisplayName AS CloserUser
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  
+)
+SELECT 
+    U.DisplayName AS UserName,
+    UB.BadgeName AS RecentBadge,
+    RTP.Title AS RecentTopPost,
+    RTP.CreationDate AS PostCreationDate,
+    RTP.Score AS PostScore,
+    CP.CloseDate,
+    CP.CloserUser,
+    CASE 
+        WHEN UB.BadgeName IS NULL THEN 'No Badge'
+        ELSE UB.BadgeName 
+    END AS BadgeStatus,
+    COALESCE(CP.Comment, 'No Close Reason') AS CloseReason
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId AND UB.BadgeRank = 1
+LEFT JOIN 
+    RecentTopPosts RTP ON U.Id = RTP.OwnerUserId AND RTP.PostRank = 1
+LEFT JOIN 
+    ClosedPosts CP ON RTP.PostId = CP.PostId
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.DisplayName, UB.BadgeName, RTP.Title, RTP.CreationDate, RTP.Score, CP.CloseDate, CP.CloserUser
+ORDER BY 
+    U.DisplayName;

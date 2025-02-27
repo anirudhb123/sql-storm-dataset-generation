@@ -1,0 +1,33 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    ua.UserId,
+    ua.Reputation,
+    ua.PostCount,
+    ua.CommentCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    (ua.UpVotes - ua.DownVotes) AS NetVotes
+FROM 
+    UserActivity ua
+ORDER BY 
+    ua.Reputation DESC, ua.NetVotes DESC
+LIMIT 100;

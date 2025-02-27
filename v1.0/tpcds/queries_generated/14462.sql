@@ -1,0 +1,28 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        store s ON ws.ws_ship_addr_sk = s.s_store_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 100
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    s.s_store_name,
+    ss.total_quantity,
+    ss.total_sales
+FROM 
+    sales_summary ss
+JOIN 
+    store s ON ss.web_site_sk = s.s_store_sk
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

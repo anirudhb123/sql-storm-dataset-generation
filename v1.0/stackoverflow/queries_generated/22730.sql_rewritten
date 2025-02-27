@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year' AND
+        p.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, Score, ViewCount,
+        UpVoteCount, DownVoteCount,
+        (UpVoteCount - DownVoteCount) AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+),
+PostStats AS (
+    SELECT 
+        t.Title,
+        t.Score,
+        t.ViewCount,
+        COALESCE(AVG(t.NetVotes) OVER (), 0) AS AverageNetVotes,
+        CASE 
+            WHEN t.NetVotes > 0 THEN 'Positive'
+            WHEN t.NetVotes < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment
+    FROM 
+        TopPosts t
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.AverageNetVotes,
+    ps.Sentiment,
+    u.DisplayName,
+    ub.BadgeCount,
+    CASE 
+        WHEN ub.HighestBadgeClass = 1 THEN 'Gold Star'
+        WHEN ub.HighestBadgeClass = 2 THEN 'Silver Star'
+        WHEN ub.HighestBadgeClass = 3 THEN 'Bronze Star'
+        ELSE 'No Badges'
+    END AS BadgeStatus
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId IN (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId)
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ps.Score > 10
+ORDER BY 
+    ps.AverageNetVotes DESC, ps.Score DESC;

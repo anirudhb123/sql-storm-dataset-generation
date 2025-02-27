@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        -- Generate a string of tags by splitting the Tags field
+        STRING_AGG(TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '> <'))), ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only include Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistorySummaries AS (
+    SELECT 
+        PostId,
+        MAX(CASE WHEN PostHistoryTypeId = 10 THEN CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN PostHistoryTypeId = 11 THEN CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN PostHistoryTypeId = 13 THEN 1 END) AS UndeleteCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    pv.UpVotes,
+    pv.DownVotes,
+    pv.TotalVotes,
+    ph.LastClosedDate,
+    ph.LastReopenedDate,
+    ph.DeleteCount,
+    ph.UndeleteCount,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteStats pv ON rp.PostId = pv.PostId
+LEFT JOIN 
+    PostHistorySummaries ph ON rp.PostId = ph.PostId
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 100;

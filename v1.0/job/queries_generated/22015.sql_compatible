@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        t.production_year, 
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS rank_per_year,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS count_per_year
+    FROM aka_title a
+    JOIN title t ON a.movie_id = t.id
+    WHERE t.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        k.keyword,
+        c.person_id,
+        COUNT(DISTINCT ca.movie_id) AS movies_played,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM cast_info c
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN movie_keyword k ON c.movie_id = k.movie_id
+    GROUP BY k.keyword, c.person_id
+),
+TopActors AS (
+    SELECT 
+        * 
+    FROM ActorStats 
+    WHERE movies_played = (SELECT MAX(movies_played) FROM ActorStats)
+),
+CompanyInfo AS (
+    SELECT 
+        company.name AS company_name,
+        COUNT(mc.movie_id) AS total_movies
+    FROM company_name company
+    LEFT JOIN movie_companies mc ON company.id = mc.company_id
+    WHERE company.country_code IS NOT NULL
+    GROUP BY company.name
+    HAVING COUNT(mc.movie_id) > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ta.actor_names,
+    ci.company_name,
+    ci.total_movies,
+    COALESCE(ta.movies_played, 0) AS movies_played,
+    CASE 
+        WHEN ci.total_movies IS NULL THEN 'No Company'
+        ELSE 'Company Active'
+    END AS company_status
+FROM RankedMovies rm
+LEFT JOIN TopActors ta ON rm.rank_per_year = 1
+LEFT JOIN CompanyInfo ci ON rm.production_year = ci.total_movies
+WHERE 
+    rm.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Drama%')
+ORDER BY rm.production_year DESC, rm.title;

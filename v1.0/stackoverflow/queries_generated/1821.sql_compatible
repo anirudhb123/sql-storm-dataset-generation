@@ -1,0 +1,65 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT b.Id) AS BadgesReceived,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyReceived,
+        MAX(p.CreationDate) AS LastActiveDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        CommentsMade,
+        BadgesReceived,
+        TotalBountyReceived,
+        LastActiveDate,
+        ROW_NUMBER() OVER (ORDER BY QuestionsAsked DESC, AnswersGiven DESC, TotalBountyReceived DESC) AS UserRank
+    FROM UserActivity
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersGiven,
+        CommentsMade,
+        BadgesReceived,
+        TotalBountyReceived,
+        UserRank,
+        RANK() OVER (PARTITION BY CASE 
+            WHEN QuestionsAsked > 5 THEN 'Expert' 
+            WHEN QuestionsAsked BETWEEN 3 AND 5 THEN 'Intermediate' 
+            ELSE 'Novice' 
+            END ORDER BY LastActiveDate DESC) AS ActivityRank
+    FROM RankedUsers
+)
+SELECT 
+    au.DisplayName,
+    au.QuestionsAsked,
+    au.AnswersGiven,
+    au.CommentsMade,
+    au.BadgesReceived,
+    au.TotalBountyReceived,
+    au.UserRank,
+    au.ActivityRank,
+    CASE 
+        WHEN au.ActivityRank = 1 THEN 'Top Contributor' 
+        ELSE NULL 
+    END AS ContributorStatus
+FROM ActiveUsers au
+WHERE au.UserRank <= 50
+ORDER BY au.UserRank, au.ActivityRank;

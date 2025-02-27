@@ -1,0 +1,66 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        c.kind AS genre,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.movie_id = mc.movie_id
+    JOIN 
+        kind_type c ON a.kind_id = c.id
+    GROUP BY 
+        a.title, a.production_year, c.kind
+),
+actor_roles AS (
+    SELECT 
+        ak.name,
+        ak.id AS actor_id,
+        ci.movie_id,
+        rt.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+movie_details AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ar.name AS actor_name,
+        ar.actor_role,
+        COALESCE(ar.role_rank, 0) AS role_rank
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        actor_roles ar ON rm.title = ar.movie_id
+    WHERE 
+        rm.rank <= 10
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_name,
+    md.actor_role,
+    md.role_rank,
+    CASE 
+        WHEN md.actor_name IS NULL THEN 'Unknown Actor'
+        ELSE 'Known Actor'
+    END AS actor_status
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_info mi ON md.title = mi.info
+WHERE 
+    mi.note IS NULL OR mi.note LIKE '%Awards%'
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_name ASC;

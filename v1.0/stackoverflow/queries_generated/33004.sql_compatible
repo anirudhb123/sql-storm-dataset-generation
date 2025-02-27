@@ -1,0 +1,56 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    JOIN RecursiveCTE r ON p.ParentId = r.PostId  
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,  
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes, 
+    CASE 
+        WHEN b.Id IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasBadge,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (PARTITION BY r.OwnerUserId ORDER BY r.Score DESC) AS UserPostRank
+FROM RecursiveCTE r
+JOIN Users u ON r.OwnerUserId = u.Id
+LEFT JOIN Comments c ON r.PostId = c.PostId
+LEFT JOIN Votes v ON r.PostId = v.PostId
+LEFT JOIN Badges b ON u.Id = b.UserId AND b.Class = 1 
+LEFT JOIN Posts p ON p.Id = r.PostId
+LEFT JOIN Tags t ON t.ExcerptPostId = p.Id
+WHERE r.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')  
+GROUP BY 
+    u.DisplayName, r.PostId, r.Title, r.CreationDate, r.Score, r.ViewCount, b.Id
+ORDER BY 
+    r.ViewCount DESC
+LIMIT 100;

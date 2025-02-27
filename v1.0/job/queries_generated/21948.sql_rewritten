@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY COUNT(DISTINCT cast_info.person_id) DESC) AS role_count_rank
+    FROM 
+        title
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.id
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        role_count_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(mi.info, 'No info available') AS movie_info,
+        COALESCE(gk.keyword, 'N/A') AS keyword_info,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_info mi ON tm.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword gk ON mk.keyword_id = gk.id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.movie_info,
+    md.keyword_info,
+    md.company_count,
+    md.company_names,
+    AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS cast_note_present_ratio,
+    SUM(CASE WHEN ci.role_id IS NULL THEN 1 ELSE 0 END) AS null_role_count,
+    COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.nr_order = 1) AS leading_role_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.movie_info, md.keyword_info, md.company_count, md.company_names
+ORDER BY 
+    md.production_year DESC, md.company_count DESC;

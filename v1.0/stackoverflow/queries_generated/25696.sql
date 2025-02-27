@@ -1,0 +1,65 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoterCount,
+        string_agg(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON tag != '' 
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalPostViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.PostsCreated,
+    ua.TotalPostViews,
+    ua.TotalPostScore,
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.UniqueVoterCount,
+    ps.TagsList
+FROM 
+    UserActivity ua
+JOIN 
+    Users u ON u.Id = ua.UserId
+JOIN 
+    PostStats ps ON ps.UniqueVoterCount > 0
+ORDER BY 
+    ua.TotalPostScore DESC, 
+    ps.Score DESC
+LIMIT 50;

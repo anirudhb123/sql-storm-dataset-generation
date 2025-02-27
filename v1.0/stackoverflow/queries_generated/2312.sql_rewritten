@@ -1,0 +1,44 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+),
+PostVoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM Votes v
+    GROUP BY v.PostId
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(STRING_AGG(DISTINCT p.Tags, ','), ',')) AS TagName
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id
+    HAVING COUNT(p.Tags) > 10
+)
+SELECT 
+    up.OwnerDisplayName,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(pvs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pvs.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(pvs.UniqueVoters, 0) AS TotalUniqueVoters,
+    COUNT(DISTINCT pt.TagName) AS TotalTags
+FROM RankedPosts rp
+JOIN Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN PostVoteStats pvs ON rp.PostId = pvs.PostId
+LEFT JOIN PopularTags pt ON rp.Title ILIKE '%' || pt.TagName || '%'
+WHERE rp.OwnerPostRank = 1
+GROUP BY up.OwnerDisplayName, rp.Title, rp.CreationDate, pvs.UpVotes, pvs.DownVotes, pvs.UniqueVoters
+ORDER BY TotalUpVotes DESC NULLS LAST, TotalDownVotes ASC;

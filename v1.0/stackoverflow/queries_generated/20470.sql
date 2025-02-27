@@ -1,0 +1,80 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(ABS(EXTRACT(EPOCH FROM NOW() - p.CreationDate))) AS AvgPostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+RecentlyActiveUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        RANK() OVER (ORDER BY Upvotes DESC) AS RankByUpvotes,
+        RANK() OVER (ORDER BY AvgPostAge DESC) AS RankByPostAge
+    FROM 
+        UserActivity
+    WHERE 
+        PostCount > 0
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS PostTags,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tag
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.Score > 0
+    GROUP BY 
+        p.Id, u.DisplayName
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+)
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    CASE 
+        WHEN r.RankByUpvotes = 1 THEN 'Top Contributor'
+        ELSE 'Regular Contributor' 
+    END AS UserRank,
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.PostTags
+FROM 
+    RecentlyActiveUsers r
+LEFT JOIN 
+    TopPosts tp ON r.UserId = ANY(ARRAY(
+        SELECT DISTINCT OwnerUserId 
+        FROM Posts 
+        WHERE Title ILIKE ANY(ARRAY['%SQL%', '%database%', '%query%'])
+    ))
+WHERE 
+    (r.RankByUpvotes <= 5 OR r.RankByPostAge <= 5)
+    AND r.rankByPostAge IS NOT NULL
+ORDER BY 
+    r.RankByUpvotes, r.RankByPostAge; 

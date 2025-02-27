@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        t.TagName AS Tag,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS RankByScore,
+        STRING_AGG(DISTINCT c.Text, ' | ') AS CommentTexts
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS t(TagName)
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.Score, u.DisplayName, t.TagName
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 5 
+),
+PostStats AS (
+    SELECT 
+        Tag,
+        COUNT(PostId) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AvgScore
+    FROM 
+        TopRankedPosts
+    GROUP BY 
+        Tag
+)
+SELECT 
+    ts.Tag,
+    ts.TotalPosts,
+    ts.TotalViews,
+    ts.AvgScore,
+    trp.Title,
+    trp.ViewCount,
+    trp.AnswerCount,
+    trp.CommentTexts
+FROM 
+    PostStats ts
+JOIN 
+    TopRankedPosts trp ON ts.Tag = trp.Tag
+ORDER BY 
+    ts.Tag, trp.Score DESC;

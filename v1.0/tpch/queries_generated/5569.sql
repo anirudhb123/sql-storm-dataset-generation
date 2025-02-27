@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name AS customer_name,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+),
+TopOrders AS (
+    SELECT 
+        r.* 
+    FROM 
+        RankedOrders r 
+    WHERE 
+        r.rank <= 5 
+),
+ItemDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue
+    FROM 
+        lineitem lo
+    JOIN 
+        TopOrders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.customer_name,
+    to.nation_name,
+    to.o_orderdate,
+    to.o_totalprice,
+    id.revenue
+FROM 
+    TopOrders to
+JOIN 
+    ItemDetails id ON to.o_orderkey = id.l_orderkey
+ORDER BY 
+    id.revenue DESC;

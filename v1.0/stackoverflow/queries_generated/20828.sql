@@ -1,0 +1,71 @@
+WITH UserParticipation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN P.CreationDate < NOW() - INTERVAL '5 years' THEN 1 ELSE 0 END) AS LegacyPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation >= 1000 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+AggTagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(CASE WHEN P.CreationDate >= NOW() - INTERVAL '1 year' THEN 1 ELSE 0 END) AS RecentPosts
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+VotesSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.AcceptedAnswers,
+    U.LegacyPosts,
+    T.TagName,
+    T.PostCount,
+    T.AvgScore,
+    T.RecentPosts,
+    V.UpVotes,
+    V.DownVotes,
+    V.TotalVotes,
+    COALESCE(V.TotalVotes, 0) - COALESCE(V.UpVotes, 0) AS NetVotes,
+    CASE 
+        WHEN U.TotalPosts > 0 THEN ROUND((U.AcceptedAnswers::decimal / U.TotalPosts) * 100, 2) 
+        ELSE 0 
+    END AS AcceptedAnswerRatio
+FROM 
+    UserParticipation U
+CROSS JOIN 
+    AggTagStatistics T
+LEFT JOIN 
+    VotesSummary V ON V.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.UserId)
+WHERE 
+    U.AcceptedAnswers > 0
+ORDER BY 
+    AcceptedAnswerRatio DESC NULLS LAST, 
+    T.AvgScore DESC;

@@ -1,0 +1,46 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        R.role,
+        ROW_NUMBER() OVER (PARTITION BY T.id ORDER BY T.production_year DESC) AS rank
+    FROM title T
+    JOIN cast_info C ON T.id = C.movie_id
+    JOIN role_type R ON C.role_id = R.id
+    WHERE T.production_year IS NOT NULL
+),
+CompanyData AS (
+    SELECT 
+        MC.movie_id,
+        CN.name AS company_name,
+        CT.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY MC.movie_id ORDER BY CN.name) AS company_rank
+    FROM movie_companies MC
+    JOIN company_name CN ON MC.company_id = CN.id
+    JOIN company_type CT ON MC.company_type_id = CT.id
+),
+MovieKeywords AS (
+    SELECT 
+        MK.movie_id,
+        STRING_AGG(K.keyword, ', ') AS keywords
+    FROM movie_keyword MK
+    JOIN keyword K ON MK.keyword_id = K.id
+    GROUP BY MK.movie_id
+)
+SELECT 
+    RM.title,
+    RM.production_year,
+    COALESCE(CD.company_name, 'No Companies') AS company_name,
+    COALESCE(CD.company_type, 'N/A') AS company_type,
+    CASE 
+        WHEN RM.rank = 1 THEN 'Latest'
+        ELSE 'Earlier'
+    END AS movie_rank,
+    MK.keywords
+FROM RankedMovies RM
+LEFT JOIN CompanyData CD ON RM.movie_id = CD.movie_id AND CD.company_rank = 1
+LEFT JOIN MovieKeywords MK ON RM.movie_id = MK.movie_id
+WHERE (RM.production_year BETWEEN 1990 AND 2020 OR RM.production_year IS NULL)
+ORDER BY RM.production_year DESC, RM.title;

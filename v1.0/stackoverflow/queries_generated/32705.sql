@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ', ')) AS t(TagName) ON TRUE -- Splitting the Tags string
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.Title,
+        rp.ViewCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        rp.OwnerDisplayName,
+        CASE 
+            WHEN rp.UpvoteCount > rp.DownvoteCount THEN 'Popular'
+            WHEN rp.UpvoteCount < rp.DownvoteCount THEN 'Controversial'
+            ELSE 'Neutral'
+        END AS PostType,
+        FIRST_VALUE(rp.Tags) OVER (ORDER BY rp.ViewCount DESC) AS MostAssociatedTag
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    pp.Title,
+    pp.ViewCount,
+    pp.UpvoteCount,
+    pp.DownvoteCount,
+    pp.OwnerDisplayName,
+    pp.PostType,
+    pp.MostAssociatedTag,
+    CASE 
+        WHEN pp.PostType = 'Popular' THEN 'Keep it trending!'
+        WHEN pp.PostType = 'Controversial' 
+            THEN 'Engage for clarity or re-evaluate!'
+        WHEN pp.PostType = 'Neutral' 
+            THEN 'Needs more visibility!'
+        ELSE 'Undefined Status'
+    END AS EngagementMessage
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.ViewCount DESC
+LIMIT 10;

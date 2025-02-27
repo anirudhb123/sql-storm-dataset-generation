@@ -1,0 +1,71 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           CASE 
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               ELSE 'Closed'
+           END AS order_status,
+           1 AS level
+    FROM orders o
+
+    UNION ALL
+
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, 
+           'Updated' AS order_status,
+           oh.level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+SupplierPartInfo AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name,
+           ps.ps_supplycost, ps.ps_availqty,
+           RANK() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING AVG(o.o_totalprice) IS NOT NULL
+),
+FinalStats AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        COALESCE(co.order_count, 0) AS order_count,
+        COALESCE(co.avg_order_value, 0) AS avg_order_value,
+        COUNT(spi.p_partkey) AS supplier_part_count,
+        MAX(spi.ps_supplycost) AS max_supply_cost
+    FROM CustomerOrderStats co
+    FULL OUTER JOIN SupplierPartInfo spi ON co.c_custkey = (
+        SELECT c_nationkey FROM customer WHERE c_custkey = co.c_custkey LIMIT 1
+    )
+    GROUP BY co.c_custkey, co.c_name
+)
+
+SELECT 
+    fh.o_orderkey,
+    fh.o_orderdate,
+    fps.total_spent,
+    fps.c_name,
+    fps.supplier_part_count,
+    fps.max_supply_cost,
+    CASE 
+        WHEN fps.max_supply_cost IS NULL THEN 'No Supplies'
+        ELSE 'Supplies Available'
+    END AS supply_status
+FROM OrderHierarchy fh
+LEFT JOIN FinalStats fps ON fh.o_orderkey = fps.c_custkey
+WHERE fh.order_status = 'Open' 
+  AND (fps.order_count = 0 OR fps.total_spent > 1000)
+ORDER BY fh.o_orderdate DESC, fh.o_orderkey
+LIMIT 50;

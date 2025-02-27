@@ -1,0 +1,55 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, 0 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+    
+    UNION ALL
+
+    SELECT U.Id, U.Reputation, U.CreationDate, UR.Level + 1
+    FROM Users U
+    INNER JOIN UserReputation UR ON U.Reputation < UR.Reputation
+    WHERE UR.Level < 5
+),
+TopUsers AS (
+    SELECT U.Id, U.DisplayName, U.Reputation,
+           RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+PostMetrics AS (
+    SELECT P.OwnerUserId, COUNT(*) AS TotalPosts,
+           SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+           SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+           SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+           SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserPostHistory AS (
+    SELECT U.Id AS UserId, U.DisplayName, PM.TotalPosts, PM.Questions,
+           PM.Answers, PM.AcceptedAnswers, PM.TotalViews,
+           COALESCE(B.Name, 'No Badge') AS BadgeName,
+           MAX(PH.CreationDate) AS LastActivityDate
+    FROM Users U
+    LEFT JOIN PostMetrics PM ON U.Id = PM.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId AND B.Class = 1
+    LEFT JOIN PostHistory PH ON U.Id = PH.UserId
+    GROUP BY U.Id, U.DisplayName, PM.TotalPosts, PM.Questions,
+             PM.Answers, PM.AcceptedAnswers, PM.TotalViews, B.Name
+),
+TopActivePosters AS (
+    SELECT UserId, DisplayName, TotalPosts, Questions, Answers,
+           AcceptedAnswers, TotalViews, BadgeName, LastActivityDate
+    FROM UserPostHistory
+    WHERE TotalPosts > 10
+    ORDER BY TotalViews DESC
+    LIMIT 10
+)
+SELECT TUP.DisplayName, TUP.TotalPosts, TUP.Questions, 
+       TUP.Answers, TUP.AcceptedAnswers, TUP.TotalViews,
+       R.Rank, U.Reputation
+FROM TopActivePosters TUP
+JOIN TopUsers R ON TUP.UserId = R.Id
+JOIN UserReputation U ON TUP.UserId = U.Id
+WHERE TUP.LastActivityDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+ORDER BY TUP.TotalViews DESC, U.Reputation DESC;

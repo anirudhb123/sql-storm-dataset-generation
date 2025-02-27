@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mv.id,
+        mv.title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mv ON ml.linked_movie_id = mv.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    AVG(mi.note IS NOT NULL::int) AS avg_info_notes, 
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COALESCE(NULLIF(STRING_AGG(DISTINCT cn.name, ', '), ''), 'No companies found') AS companies_list
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    aka_title mt ON mc.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title
+HAVING 
+    AVG(mi.info IS NOT NULL) > 0.5  
+ORDER BY 
+    num_companies DESC, 
+    actor_name;

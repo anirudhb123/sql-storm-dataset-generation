@@ -1,0 +1,75 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        CASE 
+            WHEN p.Score IS NULL THEN 'No Score'
+            ELSE CASE 
+                WHEN p.Score > 0 THEN 'Positive'
+                WHEN p.Score < 0 THEN 'Negative'
+                ELSE 'Neutral'
+                END
+        END AS ScoreCategory
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+), 
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount AS TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    rp.PostId,
+    rp.Score,
+    rp.ScoreCategory,
+    CASE 
+        WHEN pHi.LastClosedDate IS NOT NULL AND (pHi.LastReopenedDate IS NULL OR pHi.LastClosedDate > pHi.LastReopenedDate) THEN 'Closed'
+        WHEN pHi.LastReopenedDate IS NOT NULL THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostActivityStatus
+FROM 
+    UserBadges ub
+JOIN 
+    Users u ON ub.UserId = u.Id
+LEFT JOIN 
+    RecentPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryInfo pHi ON rp.PostId = pHi.PostId
+WHERE 
+    ub.BadgeCount > 0 
+    AND (rp.PostRank = 1 OR rp.PostRank IS NULL)
+ORDER BY 
+    TotalBadges DESC, 
+    u.MaxReputation DESC NULLS LAST, 
+    rp.Score DESC NULLS LAST;

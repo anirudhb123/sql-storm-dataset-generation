@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_and_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_info_detail AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(mi.info, 'No Info') AS info_detail
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ca.actor_name) AS total_actors,
+    STRING_AGG(DISTINCT ca.role_name, ', ') AS roles,
+    k.keyword_count,
+    COALESCE(mi.info_detail, 'No Details Available') AS details
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_and_roles ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    keyword_count k ON mh.movie_id = k.movie_id
+LEFT JOIN 
+    movie_info_detail mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, k.keyword_count, mi.info_detail
+HAVING 
+    COUNT(DISTINCT ca.actor_name) > 2 -- Only movies with more than 2 actors
+ORDER BY 
+    mh.production_year DESC, total_actors DESC;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+UserInformation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.CreationDate,
+    COALESCE(rp.RankByUser, 0) AS UserPostRank,
+    COALESCE(rp.Title, 'N/A') AS LastPostTitle,
+    COALESCE(rp.CreationDate, 'No posts') AS LastPostDate,
+    COALESCE(rp.CommentCount, 0) AS LastPostCommentCount,
+    COALESCE(rp.UpVoteCount, 0) AS LastPostUpVoteCount,
+    COALESCE(rp.DownVoteCount, 0) AS LastPostDownVoteCount,
+    COALESCE(cph.LastClosedDate, 'Never') AS LastClosedDate,
+    up.BadgeCount,
+    up.TotalPosts
+FROM 
+    UserInformation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.RankByUser = 1
+LEFT JOIN 
+    ClosedPostHistory cph ON rp.Id = cph.PostId
+WHERE 
+    up.Reputation > 100
+ORDER BY 
+    up.Reputation DESC, 
+    up.UserId
+LIMIT 100;

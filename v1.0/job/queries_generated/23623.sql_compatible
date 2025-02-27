@@ -1,0 +1,62 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.level < 5
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.level AS movie_level,
+    COALESCE(ROUND(AVG(mk.keyword_count), 2)::TEXT, 'No Keywords') AS avg_keyword_count,
+    CASE WHEN mh.kind_id IS NULL THEN 'Unknown Genre' ELSE kt.kind END AS genre,
+    STRING_AGG(DISTINCT it.info, ', ') AS info_summary
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON mh.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    kind_type kt ON at.kind_id = kt.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mh.production_year >= 2000
+    AND ak.name NOT LIKE '%Unknown%'
+GROUP BY 
+    ak.name, at.title, mh.level, kt.kind
+ORDER BY 
+    movie_level DESC, avg_keyword_count DESC NULLS LAST;

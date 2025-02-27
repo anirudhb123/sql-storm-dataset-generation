@@ -1,0 +1,57 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    c.c_name AS Customer_Name,
+    cs.total_orders AS Total_Orders,
+    cs.total_spent AS Total_Spent,
+    ts.s_name AS Top_Supplier_Name,
+    ts.total_supply_cost AS Total_Supply_Cost
+FROM 
+    CustomerSummary cs
+LEFT JOIN 
+    TopSuppliers ts ON cs.total_spent > 5000
+JOIN 
+    RankedOrders ro ON cs.total_orders > 1
+WHERE 
+    cs.total_orders > 0
+ORDER BY 
+    Total_Spent DESC, Total_Orders DESC;

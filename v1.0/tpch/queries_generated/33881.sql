@@ -1,0 +1,48 @@
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2021-01-01'
+    GROUP BY o.o_orderkey
+    UNION ALL
+    SELECT 
+        s.o_orderkey,
+        s.total_sales * 1.10
+    FROM SalesSummary s
+    JOIN orders o ON o.o_orderkey = s.o_orderkey
+    WHERE s.total_sales IS NOT NULL
+    AND o.o_orderstatus = 'F'
+    LIMIT 5
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100
+    GROUP BY s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) IS NOT NULL
+    ORDER BY total_cost DESC
+    LIMIT 10
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(ss.total_sales) AS total_sales_summary,
+    STRING_AGG(ts.s_name, ', ') AS top_suppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SalesSummary ss ON n.n_nationkey = (
+    SELECT c.c_nationkey 
+    FROM customer c 
+    WHERE c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT o_orderkey FROM SalesSummary))
+)
+LEFT JOIN TopSuppliers ts ON ts.total_cost > 5000
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 1
+AND SUM(ss.total_sales) IS NOT NULL
+ORDER BY total_sales_summary DESC;

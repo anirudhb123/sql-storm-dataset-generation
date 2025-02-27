@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS order_value,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(li.l_extendedprice * (1 - li.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ns.n_name AS nation_name,
+    hs.c_name AS high_value_customer,
+    rs.total_supplycost,
+    od.order_value
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation ns ON rs.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    HighValueCustomers hs ON rs.s_nationkey = hs.c_nationkey
+FULL OUTER JOIN 
+    OrderDetails od ON hs.c_custkey = (SELECT TOP 1 c.c_custkey FROM customer c WHERE c.c_nationkey = rs.s_nationkey ORDER BY c.c_acctbal DESC)
+WHERE 
+    rs.rn = 1 AND 
+    (od.order_value IS NOT NULL OR hs.total_spent IS NOT NULL)
+ORDER BY 
+    nation_name, high_value_customer;

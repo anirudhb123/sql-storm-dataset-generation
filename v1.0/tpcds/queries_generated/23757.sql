@@ -1,0 +1,71 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        (ws.net_profit > 0 OR ws.net_paid_inc_tax > 100)
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_returns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(DISTINCT wr.return_order_number) AS total_returns,
+        SUM(wr.return_amt) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+outer_joined_data AS (
+    SELECT 
+        cs.bill_customer_sk,
+        COALESCE(rs.total_orders, 0) AS total_orders,
+        COALESCE(rs.total_net_profit, 0) AS total_net_profit,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt
+    FROM 
+        ranked_sales rs
+    FULL OUTER JOIN customer_returns cr ON rs.web_site_sk = cr.returning_customer_sk
+),
+income_analysis AS (
+    SELECT 
+        ib.income_band_sk,
+        ib.lower_bound,
+        ib.upper_bound,
+        SUM(od.total_orders) AS orders_in_band,
+        SUM(od.total_net_profit) AS net_profit_in_band,
+        SUM(od.total_returns) AS returns_in_band,
+        1.0 * SUM(od.total_net_profit) / NULLIF(SUM(od.total_orders), 0) AS avg_profit_per_order
+    FROM 
+        income_band ib
+    LEFT JOIN outer_joined_data od ON (od.total_orders BETWEEN ib.lower_bound AND ib.upper_bound)
+    GROUP BY 
+        ib.income_band_sk, ib.lower_bound, ib.upper_bound
+)
+SELECT 
+    ia.income_band_sk,
+    ia.lower_bound,
+    ia.upper_bound,
+    ia.orders_in_band,
+    ia.net_profit_in_band,
+    ia.returns_in_band,
+    ia.avg_profit_per_order,
+    CASE 
+        WHEN ia.avg_profit_per_order IS NULL THEN 'No Data'
+        WHEN ia.avg_profit_per_order < 50 THEN 'Low Profitability'
+        WHEN ia.avg_profit_per_order BETWEEN 50 AND 100 THEN 'Moderate Profitability'
+        ELSE 'High Profitability'
+    END AS profitability_category
+FROM 
+    income_analysis ia
+ORDER BY 
+    ia.income_band_sk;

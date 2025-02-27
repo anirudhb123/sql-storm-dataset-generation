@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.Body,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Body, p.CreationDate
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(c.Score) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FrequentTags AS (
+    SELECT 
+        TRIM(value) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts, 
+        UNNEST(string_to_array(Tags, '><')) AS value
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TRIM(value)
+    ORDER BY 
+        TagCount DESC
+)
+SELECT 
+    rc.PostId,
+    rc.Title,
+    rc.Author,
+    rc.Body,
+    rc.CreationDate,
+    rc.CommentCount,
+    rc.VoteCount,
+    tc.DisplayName AS TopContributor,
+    tc.QuestionsAsked,
+    tc.AnswersGiven,
+    tc.TotalCommentScore,
+    ft.TagName,
+    ft.TagCount
+FROM 
+    RankedPosts rc
+JOIN 
+    TopContributors tc ON rc.Author = tc.DisplayName
+JOIN 
+    (SELECT TagName, TagCount FROM FrequentTags LIMIT 5) ft ON ft.TagCount > 10
+WHERE 
+    rc.PostRank <= 5 
+ORDER BY 
+    rc.CreationDate DESC, rc.VoteCount DESC;

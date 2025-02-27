@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerCTE AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    s.total_net_profit,
+    s.total_orders,
+    CASE 
+        WHEN cd.cd_marital_status = 'S' THEN 'Single'
+        WHEN cd.cd_marital_status = 'M' THEN 'Married'
+        ELSE 'Other'
+    END AS marital_status,
+    cd.cd_gender
+FROM 
+    CustomerCTE cd
+JOIN 
+    customer c ON cd.c_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    SalesCTE s ON s.web_site_sk = (
+        SELECT ws.web_site_sk 
+        FROM web_sales ws
+        WHERE ws.ws_bill_customer_sk = c.c_customer_sk 
+        ORDER BY ws.ws_net_profit DESC 
+        LIMIT 1
+    )
+WHERE 
+    cd.gender_rank <= 10
+    AND s.rank = 1
+ORDER BY 
+    s.total_net_profit DESC, 
+    c.c_last_name;

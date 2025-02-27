@@ -1,0 +1,71 @@
+
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent,
+        ROW_NUMBER() OVER (ORDER BY co.total_spent DESC) AS rank
+    FROM 
+        CustomerOrders co
+    WHERE 
+        co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity_sold,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    hvc.c_name,
+    hvc.total_spent,
+    p.p_name,
+    ps.total_available_qty,
+    ps.avg_supply_cost,
+    ps.avg_supply_cost - ps.avg_supply_cost * 0.1 AS discounted_supply_cost,
+    CASE 
+        WHEN ps.total_available_qty IS NULL THEN 'Out of Stock' 
+        ELSE 'In Stock' 
+    END AS stock_status
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    PartSummary p ON p.total_quantity_sold > 500
+JOIN 
+    SupplierPartInfo ps ON ps.total_available_qty > 100
+WHERE 
+    hvc.rank <= 10
+ORDER BY 
+    hvc.total_spent DESC, p.p_name ASC;

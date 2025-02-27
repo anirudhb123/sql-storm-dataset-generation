@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostID, 
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostID, 
+    r.Title, 
+    r.CreationDate, 
+    r.Score,
+    r.ViewCount,
+    r.AnswerCount,
+    r.CommentCount,
+    r.UserRank,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadgeCount,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadgeCount,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadgeCount,
+    COALESCE(cp.LastClosedDate, 'No Closures') AS LastClosed,
+    r.UpvoteCount
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    UserBadges ub ON r.OwnerUserId = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON r.PostID = cp.PostID
+WHERE 
+    r.UserRank <= 5 
+    AND (r.UpvoteCount > 10 OR r.AnswerCount > 5)
+ORDER BY 
+    r.Score DESC, r.Title;

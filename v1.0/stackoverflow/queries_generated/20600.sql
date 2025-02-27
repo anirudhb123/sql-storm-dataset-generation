@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'Unknown' 
+            ELSE 
+                CASE 
+                    WHEN u.Reputation >= 1000 THEN 'High Rep'
+                    WHEN u.Reputation >= 500 THEN 'Medium Rep'
+                    ELSE 'Low Rep'
+                END
+        END AS ReputationCategory
+    FROM 
+        Users u
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopened,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS ClosedCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.ReputationCategory,
+    COALESCE(phd.ClosedCount, 0) AS TotalClosed,
+    COALESCE(phd.LastClosed, 'Never Closed') AS LastClosed,
+    COALESCE(phd.LastReopened, 'Never Reopened') AS LastReopened
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.UserRank < 5 -- Fetching only the latest 4 posts per user
+ORDER BY 
+    rp.CreationDate DESC, rp.Score DESC
+LIMIT 50;

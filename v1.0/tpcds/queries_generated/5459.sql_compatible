@@ -1,0 +1,45 @@
+
+WITH sales_summary AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        s.s_store_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_net_paid) AS avg_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        d.d_year, d.d_month_seq, d.d_week_seq, s.s_store_name
+),
+top_stores AS (
+    SELECT 
+        ss.s_store_name,
+        ss.total_sales,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+)
+SELECT 
+    t.s_store_name,
+    t.total_sales,
+    t.sales_rank,
+    ts.total_quantity,
+    ts.avg_sales,
+    ts.total_orders
+FROM 
+    top_stores t
+JOIN 
+    sales_summary ts ON t.s_store_name = ts.s_store_name
+WHERE 
+    t.sales_rank <= 10
+ORDER BY 
+    t.sales_rank;

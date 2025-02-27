@@ -1,0 +1,87 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.id AS cast_id,
+        p.id AS person_id,
+        p.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        p.name IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT 
+        c.id AS cast_id,
+        p.id AS person_id,
+        p.name AS actor_name,
+        ah.depth + 1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        actor_hierarchy ah ON c.id = ah.cast_id
+    WHERE 
+        p.name IS NOT NULL
+),
+aggregated_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(COUNT(DISTINCT c.person_id), 0) AS actor_count,
+        EXTRACT(YEAR FROM DATE '2024-10-01') - MAX(t.production_year) AS years_since_release
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        actor_count,
+        years_since_release,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC, years_since_release ASC) AS rank
+    FROM 
+        aggregated_movies
+),
+movies_with_tags AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.actor_count,
+        tm.years_since_release,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+)
+SELECT 
+    mwt.title,
+    mwt.actor_count,
+    mwt.years_since_release,
+    STRING_AGG(mwt.movie_keyword, ', ') AS keywords
+FROM 
+    movies_with_tags mwt
+WHERE 
+    mwt.years_since_release <= 10 
+GROUP BY 
+    mwt.title, mwt.actor_count, mwt.years_since_release
+HAVING 
+    mwt.actor_count >= (
+        SELECT 
+            AVG(actor_count) 
+        FROM 
+            top_movies
+    )
+ORDER BY 
+    mwt.actor_count DESC;

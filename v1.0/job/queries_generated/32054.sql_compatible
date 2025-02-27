@@ -1,0 +1,66 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(COUNT(DISTINCT c.id), 0) AS total_casts,
+        COALESCE(SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS ordered_casts,
+        COALESCE(AVG(CAST(m.production_year AS DECIMAL)), 0) AS avg_production_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    GROUP BY 
+        m.id, m.title
+), 
+KeywordStats AS (
+    SELECT 
+        k.keyword,
+        COUNT(DISTINCT mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    LEFT JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.keyword
+    HAVING 
+        COUNT(DISTINCT mk.movie_id) > 1
+),
+CompanyStats AS (
+    SELECT 
+        comp.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT m.title, ', ') AS movies
+    FROM 
+        company_name comp
+    LEFT JOIN 
+        movie_companies mc ON comp.id = mc.company_id
+    LEFT JOIN 
+        aka_title m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        comp.name
+)
+SELECT 
+    mv.title,
+    mv.total_casts,
+    mv.ordered_casts,
+    mv.avg_production_year,
+    k.keyword,
+    ks.movie_count,
+    cs.company_name,
+    cs.total_movies,
+    cs.movies,
+    ROW_NUMBER() OVER (PARTITION BY mv.title ORDER BY mv.total_casts DESC) AS rn
+FROM 
+    RecursiveMovieCTE mv
+JOIN 
+    KeywordStats ks ON ks.movie_count > 2
+JOIN 
+    CompanyStats cs ON cs.total_movies > 5
+JOIN 
+    keyword k ON TRUE
+WHERE 
+    mv.avg_production_year BETWEEN 1990 AND 2023
+ORDER BY 
+    mv.avg_production_year DESC, 
+    mv.total_casts DESC;

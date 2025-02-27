@@ -1,0 +1,41 @@
+WITH RecursivePostCTE AS (
+    SELECT P.Id,
+           P.ParentId,
+           P.Title,
+           P.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY P.ParentId ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    WHERE P.PostTypeId = 2  
+    UNION ALL
+    SELECT P.Id,
+           P.ParentId,
+           P.Title,
+           P.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY P.ParentId ORDER BY P.CreationDate DESC) AS RN
+    FROM Posts P
+    INNER JOIN RecursivePostCTE RP ON P.Id = RP.ParentId
+)
+SELECT U.Id AS UserId,
+       U.DisplayName,
+       U.Reputation,
+       COUNT(DISTINCT P.Id) AS TotalPosts,
+       COUNT(DISTINCT C.Id) AS TotalComments,
+       SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+       SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+       MAX(P.CreationDate) AS LastPostDate,
+       COUNT(DISTINCT B.Id) AS TotalBadges
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN Votes V ON P.Id = V.PostId
+LEFT JOIN Badges B ON U.Id = B.UserId
+WHERE U.Reputation > (
+        SELECT AVG(U2.Reputation)
+        FROM Users U2
+        WHERE U2.Reputation IS NOT NULL
+    )
+GROUP BY U.Id, U.DisplayName, U.Reputation
+HAVING COUNT(DISTINCT P.Id) > 5
+   AND AVG(U.Reputation) >= 1000
+   AND MAX(P.CreationDate) >= '2023-01-01'
+ORDER BY LastPostDate DESC;

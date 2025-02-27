@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_nationkey,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 5000.00 
+        AND s.s_name NOT LIKE 'S%'
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 
+        (SELECT 
+            AVG(ps2.ps_availqty) 
+         FROM 
+            partsupp ps2 
+         WHERE 
+            ps2.ps_supplycost < ps.ps_supplycost)
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(s.s_name, ', ' ORDER BY s.s_name) AS supplier_names
+FROM 
+    part p
+JOIN 
+    PartSupplierDetails psd ON p.p_partkey = psd.ps_partkey
+JOIN 
+    FilteredSuppliers s ON psd.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON psd.ps_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey AND o.order_rank <= 10
+WHERE 
+    p.p_retailprice > (SELECT 
+                            AVG(p2.p_retailprice)
+                        FROM 
+                            part p2
+                        WHERE 
+                            p2.p_size IN (SELECT DISTINCT 
+                                              p3.p_size 
+                                          FROM 
+                                              part p3 
+                                          WHERE 
+                                              p3.p_type LIKE '%advanced%'))
+AND 
+    (s.s_acctbal IS NOT NULL OR s.s_nationkey IS NULL)
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000.00
+ORDER BY 
+    revenue DESC;

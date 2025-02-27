@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        rp.CommentCount,
+        COALESCE(o.UsersUpvoted, 0) AS UpvotedByUsers,
+        COALESCE(n.UsersNotUpvoted, 0) AS NotUpvotedByUsers
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            p.Id,
+            COUNT(v.UserId) AS UsersUpvoted
+        FROM 
+            Posts p
+        JOIN 
+            Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+        GROUP BY 
+            p.Id
+    ) o ON rp.PostId = o.Id
+    LEFT JOIN (
+        SELECT 
+            p.Id,
+            COUNT(u.Id) AS UsersNotUpvoted
+        FROM 
+            Posts p
+        CROSS JOIN 
+            Users u
+        WHERE 
+            u.Id NOT IN (SELECT v.UserId FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2)
+        GROUP BY 
+            p.Id
+    ) n ON rp.PostId = n.Id
+    WHERE 
+        rp.RankScore <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UpvotedByUsers,
+    tp.NotUpvotedByUsers,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts_tags pt ON tp.PostId = pt.PostId 
+     WHERE t.Id = pt.TagId) AS TagList
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

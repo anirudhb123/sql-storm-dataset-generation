@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ss_sold_date_sk,
+        ss_item_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM
+        store_sales
+    WHERE
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ss_sold_date_sk, ss_item_sk
+),
+TopItems AS (
+    SELECT
+        item.i_item_id,
+        item.i_item_desc,
+        sales.total_profit,
+        DENSE_RANK() OVER (ORDER BY sales.total_profit DESC) AS item_rank
+    FROM
+        SalesCTE sales
+    JOIN
+        item ON sales.ss_item_sk = item.i_item_sk
+    WHERE
+        sales.profit_rank <= 10
+),
+CustomerReturns AS (
+    SELECT
+        cr_returned_date_sk,
+        cr_item_sk,
+        COUNT(cr_return_quantity) AS total_returns,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM
+        catalog_returns
+    WHERE
+        cr_returned_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY
+        cr_returned_date_sk, cr_item_sk
+)
+SELECT
+    items.i_item_id AS Item_ID,
+    items.i_item_desc AS Item_Description,
+    items.total_profit AS Total_Profit,
+    COALESCE(returns.total_returns, 0) AS Total_Returns,
+    COALESCE(returns.total_return_amount, 0) AS Total_Return_Amount
+FROM
+    TopItems items
+LEFT JOIN
+    CustomerReturns returns ON items.i_item_id = returns.cr_item_sk
+WHERE
+    (items.total_profit > 5000 OR returns.total_returns > 0)
+ORDER BY
+    items.item_rank, Total_Returns DESC;

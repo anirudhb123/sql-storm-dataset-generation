@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to find all movies and their direct sequels
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+FilteredMovies AS (
+    -- Filter movies to get those produced after 2000 and have more than 1 sequel
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year, mh.level
+    HAVING 
+        COUNT(mh.movie_id) > 1 AND 
+        MAX(mh.production_year) > 2000
+),
+TopMovies AS (
+    -- Get top movies with their cast and info
+    SELECT 
+        fm.movie_id,
+        fm.movie_title,
+        CAST(COALESCE(ai.name, 'Unknown') AS text) AS actor_name,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY fm.movie_id ORDER BY COUNT(c.id) DESC) AS ranking
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        cast_info c ON fm.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ai ON c.person_id = ai.person_id
+    LEFT JOIN 
+        movie_keyword mk ON fm.movie_id = mk.movie_id
+    GROUP BY 
+        fm.movie_id, fm.movie_title, ai.name
+),
+FinalOutput AS (
+    -- Prepare final output with additional computations
+    SELECT 
+        tm.movie_id,
+        tm.movie_title,
+        tm.actor_name,
+        tm.keywords,
+        tm.cast_count,
+        CASE 
+            WHEN tm.ranking <= 3 THEN 'Top Cast'
+            ELSE 'Supporting Cast'
+        END AS cast_rank
+    FROM 
+        TopMovies tm
+    WHERE 
+        tm.cast_count > 0
+)
+SELECT 
+    fo.movie_id,
+    fo.movie_title,
+    fo.actor_name,
+    fo.keywords,
+    fo.cast_count,
+    fo.cast_rank
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.cast_count DESC, fo.movie_title;

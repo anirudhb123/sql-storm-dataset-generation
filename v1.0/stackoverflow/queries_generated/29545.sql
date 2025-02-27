@@ -1,0 +1,67 @@
+WITH PosterActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+TopPosters AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        QuestionCount,
+        AnswerCount,
+        AverageBounty,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostRank
+    FROM PosterActivities
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        p.Title,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+            FROM Tags t 
+            WHERE t.Id IN (
+                SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+            )) 
+        ) AS TagList,
+        u.DisplayName AS LastEditor
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    LEFT JOIN Users u ON ph.LastEditorUserId = u.Id
+    WHERE ph.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    tp.DisplayName,
+    tp.PostCount,
+    tp.CommentCount,
+    tp.BadgeCount,
+    tp.QuestionCount,
+    tp.AnswerCount,
+    tp.AverageBounty,
+    rph.PostId,
+    rph.Title,
+    rph.TagList,
+    rph.LastEditor,
+    rph.CreationDate,
+    ph.Name AS HistoryType
+FROM TopPosters tp
+LEFT JOIN RecentPostHistory rph ON rph.PostHistoryTypeId = 10 -- Join on Close posts only
+JOIN PostHistoryTypes ph ON rph.PostHistoryTypeId = ph.Id
+WHERE tp.PostRank <= 10
+ORDER BY tp.PostCount DESC, rph.CreationDate DESC;

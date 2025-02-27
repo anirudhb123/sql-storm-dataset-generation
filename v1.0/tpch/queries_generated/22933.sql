@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+HighValueCustomers AS (
+    SELECT 
+        DISTINCT c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IN (
+            SELECT 
+                MAX(c2.c_acctbal) 
+            FROM 
+                customer c2 
+            GROUP BY 
+                c2.c_mktsegment
+        )
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(od.total_revenue) AS total_revenue,
+    STRING_AGG(DISTINCT CONCAT('Cust:', c.c_custkey, ' - ', c.c_name), '; ') AS high_value_customers,
+    CASE 
+        WHEN AVG(ps.ps_supplycost) IS NULL THEN 'No Data'
+        ELSE AVG(ps.ps_supplycost)::TEXT
+    END AS avg_supply_cost
+FROM 
+    RankedSuppliers s
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+JOIN 
+    HighValueCustomers c ON c.c_acctbal = s.s_acctbal
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY 
+    total_revenue DESC NULLS LAST;

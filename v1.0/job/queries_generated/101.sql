@@ -1,0 +1,41 @@
+WITH RankedTitles AS (
+    SELECT
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS recent_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+PopularKeywords AS (
+    SELECT
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY k.keyword
+    HAVING COUNT(mk.movie_id) > 10
+),
+CompaniesWithMovies AS (
+    SELECT
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    WHERE cn.country_code IS NOT NULL
+    GROUP BY mc.movie_id
+)
+SELECT 
+    rt.actor_name,
+    rt.movie_title,
+    rt.production_year,
+    pk.keyword,
+    pw.company_names
+FROM RankedTitles rt
+JOIN PopularKeywords pk ON rt.movie_title LIKE '%' || pk.keyword || '%'
+LEFT JOIN CompaniesWithMovies pw ON rt.movie_title = pw.movie_id
+WHERE rt.recent_rank = 1
+  AND pk.keyword IS NOT NULL
+ORDER BY rt.production_year DESC, rt.actor_name;

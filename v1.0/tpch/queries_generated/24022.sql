@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn,
+        s.s_acctbal,
+        n.n_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    R.s_name,
+    R.s_acctbal,
+    TC.c_name,
+    TC.total_spent,
+    PS.avg_cost,
+    PS.supplier_count,
+    (CASE 
+        WHEN R.rn = 1 THEN 'Top Supplier'
+        ELSE 'Other Supplier'
+    END) AS supplier_rank,
+    (CASE 
+        WHEN TC.total_spent > 10000 THEN 'High Value Customer'
+        WHEN TC.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Regular Customer'
+    END) AS customer_status
+FROM 
+    RankedSuppliers R
+FULL OUTER JOIN 
+    TopCustomers TC ON R.s_nationkey = TC.c_nationkey
+LEFT JOIN 
+    PartStats PS ON R.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey IN (
+                SELECT 
+                    l.l_partkey 
+                FROM 
+                    lineitem l 
+                WHERE 
+                    l.l_discount BETWEEN 0.05 AND 0.07
+                    AND l.l_returnflag = 'N'
+            )
+    )
+WHERE 
+    (TC.total_spent > 5000 OR R.s_acctbal < 100) 
+    AND (R.s_name IS NOT NULL OR TC.c_name IS NOT NULL)
+ORDER BY 
+    R.s_name, TC.total_spent DESC;

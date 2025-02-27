@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        p.CreationDate,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotesCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+        AND p.Score IS NOT NULL
+        AND (p.Tags IS NOT NULL OR CHAR_LENGTH(p.Tags) > 0)
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        Score,
+        UpVotesCount,
+        DownVotesCount,
+        Rank
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+        AND UpVotesCount - DownVotesCount > 0
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '\n') AS Comments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Edit Title, Edit Body, Suggested Edit Applied
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.OwnerDisplayName,
+    fp.Score,
+    fh.EditCount,
+    fc.CommentCount,
+    COALESCE(fh.LastEditDate, 'No edits found') AS LastEditDate,
+    CASE 
+        WHEN fp.Score >= 100 THEN 'High Scoring'
+        WHEN fp.Score BETWEEN 50 AND 99 THEN 'Medium Scoring'
+        ELSE 'Low Scoring'
+    END AS ScoreCategory,
+    pht.Name AS PostType,
+    CONCAT('Tags: ', STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM UNNEST(string_to_array(fp.Tags, '> <'))), ', ')) AS FormattedTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostComments fc ON fp.PostId = fc.PostId
+LEFT JOIN 
+    PostHistoryCounts fh ON fp.PostId = fh.PostId
+JOIN 
+    PostTypes pht ON fp.PostTypeId = pht.Id
+GROUP BY 
+    fp.PostId, fp.Title, fp.OwnerDisplayName, fp.Score, fh.EditCount, fc.CommentCount, fh.LastEditDate, pht.Name
+ORDER BY 
+    fp.Score DESC, fp.CreationDate ASC;

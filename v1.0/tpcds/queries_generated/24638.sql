@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_id,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws_sales_price DESC) AS price_rank,
+        COUNT(*) OVER (PARTITION BY ws.web_site_id) AS total_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year IS NOT NULL AND c.c_birth_year BETWEEN 1970 AND 1990
+), ItemSales AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_qty_sold,
+        SUM(ws.ws_sales_price) AS total_sales_value
+    FROM inventory inv
+    LEFT JOIN web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    WHERE inv.inv_quantity_on_hand > 0
+    GROUP BY inv.inv_item_sk
+), CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'S')
+          AND (cd.cd_gender IS NOT NULL AND cd.cd_gender IN ('M', 'F'))
+), FilteredSales AS (
+    SELECT
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        cs.cs_net_profit,
+        sm.sm_type AS shipping_type,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_net_profit DESC) AS profit_rank
+    FROM catalog_sales cs
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN CustomerDemographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk    
+    WHERE cs.cs_sales_price > 0 AND cs.cs_quantity > 0
+)
+SELECT
+    fs.cs_order_number,
+    fs.shipping_type,
+    fs.cs_quantity,
+    fs.cs_sales_price,
+    fs.cs_net_profit,
+    rd.web_site_id,
+    rd.total_sales
+FROM FilteredSales fs
+JOIN RankedSales rd ON fs.cs_order_number = rd.ws_order_number
+WHERE fs.profit_rank = 1
+    AND rd.total_sales > 10
+    AND (fs.cs_net_profit > (SELECT AVG(cs_net_profit) FROM FilteredSales WHERE cs_net_profit < 100) OR fs.cs_net_profit IS NULL)
+ORDER BY rd.web_site_id, fs.cs_order_number
+LIMIT 100;

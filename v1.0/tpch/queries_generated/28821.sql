@@ -1,0 +1,43 @@
+WITH StringBenchmark AS (
+    SELECT 
+        p.p_name,
+        CONCAT(p.p_name, ' - ', s.s_name) AS supplier_part_info,
+        LENGTH(s.s_name) AS supplier_name_length,
+        UPPER(p.p_name) AS upper_case_name,
+        LOWER(p.p_name) AS lower_case_name,
+        REPLACE(p.p_comment, 'old', 'new') AS modified_comment,
+        SUBSTRING(p.p_type, 1, 10) AS short_part_type,
+        (SELECT COUNT(*) FROM nation n WHERE n.n_nationkey = s.s_nationkey) AS nation_count,
+        (SELECT COUNT(*) FROM region r WHERE r.r_regionkey = n.n_regionkey) AS region_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        customer c ON c.c_nationkey = s.s_nationkey
+    JOIN 
+        orders o ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        LENGTH(p.p_name) > 5
+        AND o.o_totalprice > 100
+        AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    supplier_part_info,
+    supplier_name_length,
+    upper_case_name,
+    lower_case_name,
+    modified_comment,
+    short_part_type,
+    nation_count,
+    region_count
+FROM 
+    StringBenchmark
+ORDER BY 
+    supplier_name_length DESC, 
+    upper_case_name ASC
+LIMIT 50;

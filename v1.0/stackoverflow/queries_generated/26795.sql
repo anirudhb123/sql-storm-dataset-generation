@@ -1,0 +1,68 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(AVG(vote_summary.UpVoteCount), 0) AS AvgUpVotes,
+        COALESCE(AVG(vote_summary.DownVoteCount), 0) AS AvgDownVotes
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) AS vote_summary ON p.Id = vote_summary.PostId
+    GROUP BY t.TagName
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ph.CreationDate AS LastEditDate,
+        ph.UserId AS LastEditorId,
+        ph.UserDisplayName AS LastEditorDisplayName,
+        ph.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditOrder
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (4, 5)  -- Title, Body edits
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AvgUpVotes,
+    ts.AvgDownVotes,
+    ub.UserId,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pa.PostId,
+    pa.Title,
+    pa.OwnerDisplayName,
+    pa.LastEditDate,
+    pa.LastEditorDisplayName,
+    pa.EditComment
+FROM TagStatistics ts
+JOIN UserBadges ub ON ts.PostCount > 5 AND ub.BadgeCount > 0 -- Filter users with badges linked to posts
+JOIN PostActivity pa ON pa.EditOrder = 1 -- Get latest edits
+ORDER BY ts.AvgUpVotes DESC, ts.AvgDownVotes ASC;

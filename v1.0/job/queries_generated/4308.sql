@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.id AS movie_id, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank_in_year
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+Actors AS (
+    SELECT 
+        c.movie_id, 
+        ak.name AS actor_name, 
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY c.movie_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+),
+MovieGenres AS (
+    SELECT 
+        m.movie_id, 
+        COUNT(DISTINCT mk.keyword_id) AS genre_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        a.actor_name,
+        a.actor_count,
+        COALESCE(mg.genre_count, 0) AS genre_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        Actors a ON rm.movie_id = a.movie_id
+    LEFT JOIN 
+        MovieGenres mg ON rm.movie_id = mg.movie_id
+)
+
+SELECT 
+    title, 
+    production_year, 
+    actor_name, 
+    actor_count,
+    genre_count
+FROM 
+    MoviesWithDetails
+WHERE 
+    actor_count > 3 
+    OR genre_count > 2
+ORDER BY 
+    production_year DESC, 
+    title ASC
+LIMIT 50;

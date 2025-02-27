@@ -1,0 +1,41 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        c.name AS director_name,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT k.keyword) DESC) AS rank
+    FROM aka_title a
+    JOIN cast_info ci ON a.id = ci.movie_id
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN person_info pi ON an.person_id = pi.person_id
+    JOIN company_name co ON pi.info LIKE '%' || co.name || '%'
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE a.production_year >= 2000
+      AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+      AND an.name IS NOT NULL
+    GROUP BY a.id, a.title, a.production_year, c.name
+),
+TopKeywords AS (
+    SELECT 
+        keyword,
+        COUNT(*) AS keyword_usage
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY keyword
+    ORDER BY keyword_usage DESC
+    LIMIT 10
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.director_name,
+    tk.keyword AS top_keyword,
+    tk.keyword_usage
+FROM RankedMovies rm
+JOIN TopKeywords tk ON tk.keyword IN (SELECT keyword FROM movie_keyword WHERE movie_id = rm.movie_id)
+WHERE rm.rank <= 5
+ORDER BY rm.production_year, rm.rank;
+
+This SQL query aims to benchmark string processing by providing insights into movie titles produced after the year 2000. It ranks them by the number of unique keywords associated with each movie, also including the director's name and the top 10 keywords across movies in the database.

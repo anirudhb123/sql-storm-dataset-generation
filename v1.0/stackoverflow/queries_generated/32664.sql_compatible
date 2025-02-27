@@ -1,0 +1,78 @@
+
+WITH RECURSIVE PostAncestors AS (
+    
+    SELECT Id, ParentId, Title, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NOT NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.ParentId, p.Title, pa.Level + 1
+    FROM Posts p
+    INNER JOIN PostAncestors pa ON p.Id = pa.ParentId
+),
+
+UserPosts AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AvgScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+PostActivity AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostHistoryTypes
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY p.Id, ph.UserDisplayName
+),
+
+RankedUsers AS (
+    
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.TotalPosts,
+        up.TotalQuestions,
+        up.TotalAnswers,
+        up.AvgScore,
+        up.LastPostDate,
+        ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY up.TotalPosts DESC, u.Reputation DESC) AS Rank
+    FROM UserPosts up
+    JOIN Users u ON up.UserId = u.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Body,
+    u.DisplayName AS OwnerName,
+    COALESCE(pa.Level, 0) AS AncestorLevel,
+    pa.Title AS AncestorTitle,
+    pa.Id AS AncestorId,
+    ra.UserId AS RankedUserId,
+    ra.DisplayName AS RankedUserName,
+    ra.TotalPosts AS UserPostsCount,
+    pa.LastActivityDate,
+    pa.PostHistoryTypes
+FROM Posts p
+LEFT JOIN PostAncestors pa ON p.Id = pa.Id
+LEFT JOIN RankedUsers ra ON p.OwnerUserId = ra.UserId
+WHERE 
+    p.ViewCount > 100 AND 
+    (p.Body LIKE '%help%' OR p.Title LIKE '%help%')
+ORDER BY p.CreationDate DESC, ra.TotalPosts DESC
+LIMIT 50 OFFSET 0;

@@ -1,0 +1,40 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    INNER JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > ch.c_acctbal
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TotalPrice AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+),
+RegionWiseSummary AS (
+    SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count, 
+           SUM(tp.total_price) AS total_revenue
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN TotalPrice tp ON c.c_custkey = tp.o_orderkey
+    GROUP BY r.r_name
+)
+SELECT rh.level, rs.r_name, rs.customer_count, rs.total_revenue, 
+       ROW_NUMBER() OVER (PARTITION BY rh.level ORDER BY rs.total_revenue DESC) AS revenue_rank
+FROM CustomerHierarchy rh
+JOIN RegionWiseSummary rs ON rh.c_nationkey = rs.r_name
+WHERE rs.total_revenue IS NOT NULL
+ORDER BY rh.level, rs.total_revenue DESC;

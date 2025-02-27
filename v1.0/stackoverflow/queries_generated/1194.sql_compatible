@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(IFNULL(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(*) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounties,
+        ua.VoteCount,
+        RANK() OVER (ORDER BY ua.TotalBounties DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalBounties > 0
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    u.Location,
+    u.EmailHash,
+    CASE 
+        WHEN u.Reputation IS NULL THEN 'No Reputation'
+        WHEN u.Reputation < 100 THEN 'Low Reputation'
+        ELSE 'High Reputation'
+    END AS ReputationCategory,
+    t.UserRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    TopUsers t ON u.Id = t.UserId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, t.UserRank
+LIMIT 10;

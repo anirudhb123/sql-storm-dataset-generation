@@ -1,0 +1,75 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS role,
+        COUNT(mk.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type c ON ci.role_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, c.kind
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+),
+FinalReport AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.actor_name,
+        md.role,
+        md.keyword_count,
+        cd.company_name,
+        cd.company_type,
+        COALESCE(cd.company_count, 0) AS total_companies,
+        COUNT(md.actor_name) OVER (PARTITION BY md.title_id) AS total_actors
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        CompanyDetails cd ON md.title_id = cd.movie_id
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    actor_name,
+    role,
+    keyword_count,
+    company_name,
+    company_type,
+    total_companies,
+    total_actors
+FROM 
+    FinalReport
+WHERE 
+    total_actors > 2 AND 
+    production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC,
+    actor_name;

@@ -1,0 +1,44 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        CAST(mt.title AS text) AS full_title
+    FROM title mt
+    WHERE mt.production_year >= 2000  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        lt.kind_id,
+        lt.episode_of_id,
+        CAST(ml.full_title || ' -> ' || lt.title AS text) AS full_title 
+    FROM movie_link ml
+    JOIN title lt ON ml.linked_movie_id = lt.id
+    JOIN MovieHierarchy mh ON mh.id = ml.movie_id
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT mo.movie_id) AS movie_count,
+    AVG(CASE 
+            WHEN mk.movie_id IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS avg_keyword_movies,
+    STRING_AGG(DISTINCT mh.full_title, ', ') AS linked_movies
+FROM movie_keyword mk
+LEFT JOIN complete_cast cc ON mk.movie_id = cc.movie_id
+LEFT JOIN MovieHierarchy mh ON mh.id = mk.movie_id
+LEFT JOIN aka_title at ON at.movie_id = mk.movie_id
+LEFT JOIN aka_name an ON an.person_id = cc.subject_id
+WHERE 
+    mh.production_year IS NOT NULL
+    AND (at.note IS NULL OR at.note NOT IN ('Documentary', 'Short'))
+GROUP BY mk.keyword
+HAVING COUNT(DISTINCT mo.movie_id) > 5  
+ORDER BY movie_count DESC;

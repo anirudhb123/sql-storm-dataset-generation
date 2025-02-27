@@ -1,0 +1,31 @@
+-- Performance Benchmarking SQL Query
+
+-- This query will generate aggregate statistics for posts including the number of votes by type, user reputation, and average comments per post
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    pt.Name AS PostType,
+    u.Reputation AS OwnerReputation,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    AVG(DATEDIFF(NOW(), p.CreationDate)) AS AverageDaysSinceCreation
+FROM 
+    Posts AS p
+JOIN 
+    Users AS u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments AS c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes AS v ON p.Id = v.PostId
+LEFT JOIN 
+    VoteTypes AS vt ON v.VoteTypeId = vt.Id
+JOIN 
+    PostTypes AS pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    p.Id, p.Title, pt.Name, u.Reputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,58 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        SUM(ViewCount) AS TotalViews,
+        SUM(Score) AS TotalScore,
+        AVG(COALESCE(DATEDIFF(second, p.CreationDate, p.LastActivityDate), 0)) AS AvgPostDurationInSeconds,
+        MAX(p.LastActivityDate) AS LastActivityDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+VoteStatistics AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    p.PostTypeId,
+    ps.TotalPosts,
+    ps.TotalViews,
+    ps.TotalScore,
+    ps.AvgPostDurationInSeconds,
+    u.TotalBadges,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    v.TotalVotes,
+    v.TotalUpVotes AS PostUpVotes,
+    v.TotalDownVotes AS PostDownVotes
+FROM 
+    PostStatistics ps
+JOIN 
+    Users u ON ps.LastActivityDate > u.LastAccessDate
+JOIN 
+    VoteStatistics v ON v.PostId = ps.PostTypeId
+ORDER BY 
+    ps.TotalPosts DESC;

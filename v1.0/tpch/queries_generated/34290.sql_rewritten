@@ -1,0 +1,70 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        level + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplyChain sc ON ps.ps_partkey = sc.s_suppkey
+    WHERE ps.ps_availqty > 10
+), SalesSummary AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' 
+    GROUP BY o.o_custkey
+), NationMaxSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        MAX(ss.total_sales) AS max_sales
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN SalesSummary ss ON c.c_custkey = ss.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING MAX(ss.total_sales) IS NOT NULL
+), SupplierPerformance AS (
+    SELECT 
+        sc.s_suppkey,
+        sc.level,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_value
+    FROM partsupp ps
+    JOIN SupplyChain sc ON ps.ps_suppkey = sc.s_suppkey
+    GROUP BY sc.s_suppkey, sc.level
+), FinalReport AS (
+    SELECT 
+        n.n_name AS nation_name,
+        COUNT(DISTINCT sp.s_suppkey) AS supplier_count,
+        SUM(sp.supplier_value) AS total_supplier_value,
+        nm.max_sales
+    FROM NationMaxSales nm
+    LEFT JOIN SupplierPerformance sp ON nm.n_nationkey = sp.s_suppkey
+    INNER JOIN nation n ON nm.n_nationkey = n.n_nationkey
+    GROUP BY n.n_name, nm.max_sales
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.max_sales IS NULL THEN 'No Sales'
+        WHEN fr.max_sales > 10000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM FinalReport fr
+ORDER BY fr.nation_name;

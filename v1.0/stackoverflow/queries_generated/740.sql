@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(coalesce(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CommentCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.TotalViews,
+    u.TotalBadges,
+    CASE 
+        WHEN p.ScoreRank = 1 THEN 'Top Post for User'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts p
+JOIN 
+    TopUsers u ON p.OwnerUserId = u.UserId
+WHERE 
+    p.CommentCount > 5
+    AND (u.TotalViews > 100 OR u.TotalBadges > 2)
+ORDER BY 
+    p.RecentPostRank, u.TotalViews DESC
+LIMIT 50;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss.ss_item_sk,
+        ss.ss_sales_price,
+        ss.ss_quantity,
+        ss.s_store_sk,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_item_sk ORDER BY ss.ss_sold_date_sk DESC) AS rn,
+        COALESCE(ss.ss_net_profit, 0) AS net_profit,
+        CASE 
+            WHEN ss.ss_sales_price > 100 THEN 'High'
+            WHEN ss.ss_sales_price BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_band
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk >= (SELECT MAX(ss2.ss_sold_date_sk) - 365 FROM store_sales ss2)
+),
+aggregated_sales AS (
+    SELECT 
+        s.s_store_sk,
+        COUNT(*) AS total_sales, 
+        SUM(s.net_profit) AS total_profit,
+        AVG(CASE WHEN s.price_band = 'High' THEN s.ss_sales_price ELSE NULL END) AS avg_high_price,
+        MIN(s.ss_sales_price) AS min_price,
+        MAX(s.ss_sales_price) AS max_price,
+        SUM(CASE WHEN s.ss_quantity IS NULL THEN 1 ELSE 0 END) AS null_quantity_count
+    FROM 
+        sales_summary s
+    WHERE 
+        s.rn = 1
+    GROUP BY 
+        s.s_store_sk
+),
+store_info AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_city,
+        s.s_state,
+        sa.total_sales,
+        sa.total_profit,
+        sa.avg_high_price,
+        sa.min_price,
+        sa.max_price,
+        sa.null_quantity_count
+    FROM 
+        store s
+    LEFT JOIN 
+        aggregated_sales sa ON s.s_store_sk = sa.s_store_sk
+)
+SELECT 
+    si.s_store_name,
+    si.s_city,
+    si.s_state,
+    COALESCE(si.total_sales, 0) AS sales_count,
+    COALESCE(si.total_profit, 0) AS profit_amount,
+    COALESCE(si.avg_high_price, 0) AS avg_high_price,
+    NVL(si.min_price, 'No Sales') AS minimum_price,
+    NVL(si.max_price, 'No Sales') AS maximum_price,
+    CASE 
+        WHEN si.null_quantity_count > 0 THEN 'Some Quantities Unknown'
+        ELSE 'All Quantities Known'
+    END AS quantity_status
+FROM 
+    store_info si
+WHERE 
+    si.s_state ILIKE 'CA'
+ORDER BY 
+    si.total_profit DESC,
+    si.total_sales ASC
+FETCH FIRST 10 ROWS ONLY;

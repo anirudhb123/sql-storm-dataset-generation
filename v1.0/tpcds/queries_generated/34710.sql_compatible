@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2450059 AND 2450425 
+    GROUP BY ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        s.ss_store_sk,
+        SUM(s.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_transactions,
+        sh.level + 1
+    FROM store_sales s
+    INNER JOIN sales_hierarchy sh ON s.ss_store_sk = sh.ss_store_sk
+    WHERE sh.level < 5  
+    GROUP BY s.ss_store_sk, sh.level
+),
+item_returns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_transactions
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+store_item_sales AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COALESCE(ir.total_returns, 0) AS total_returns,
+        (SUM(ss.ss_net_paid) - COALESCE(ir.total_returns, 0) * (SELECT AVG(ws_sales_price) FROM web_sales WHERE ws_item_sk = ss.ss_item_sk)) AS net_profit
+    FROM store_sales ss
+    LEFT JOIN item_returns ir ON ss.ss_item_sk = ir.sr_item_sk
+    GROUP BY ss.ss_item_sk
+)
+SELECT 
+    sh.ss_store_sk,
+    sh.total_sales,
+    sh.total_transactions,
+    sis.total_sales AS item_sales,
+    sis.total_returns,
+    sis.net_profit
+FROM sales_hierarchy sh
+JOIN store_item_sales sis ON sh.ss_store_sk = sis.ss_item_sk
+WHERE sh.total_sales > (SELECT AVG(total_sales) FROM sales_hierarchy)
+ORDER BY sh.total_sales DESC
+LIMIT 10;

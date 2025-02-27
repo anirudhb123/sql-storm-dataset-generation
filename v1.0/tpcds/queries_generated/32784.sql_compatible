@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_orders,
+        SUM(sr.sr_net_loss) AS total_profit,
+        sh.level + 1
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        store_returns sr ON sh.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.level
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate,
+        sha.total_orders,
+        sha.total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        SalesHierarchy sha ON c.c_customer_sk = sha.c_customer_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL 
+        AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+),
+AggregateSales AS (
+    SELECT 
+        COUNT(*) AS total_customers,
+        AVG(total_orders) AS avg_orders,
+        SUM(total_profit) AS overall_profit
+    FROM 
+        CustomerDetails
+)
+SELECT 
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.purchase_estimate,
+    COALESCE(agg.avg_orders, 0) AS avg_orders,
+    COALESCE(agg.overall_profit, 0) AS overall_profit
+FROM 
+    CustomerDetails cd
+FULL OUTER JOIN 
+    AggregateSales agg ON TRUE
+WHERE 
+    (cd.cd_gender = 'F' OR cd.cd_gender = 'M')
+    AND (cd.total_orders > 5 OR cd.total_profit IS NOT NULL)
+ORDER BY 
+    cd.total_profit DESC;

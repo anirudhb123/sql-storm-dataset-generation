@@ -1,0 +1,92 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+),
+UserScoreSummary AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        RANK() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(bs.UpVotes, 0) AS UpVotes,
+    COALESCE(bs.DownVotes, 0) AS DownVotes,
+    COALESCE(badges.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(tp.TotalBounty, 0) AS TotalBounties,
+    (SELECT COUNT(*)
+     FROM Comments c 
+     WHERE c.PostId = p.PostId) AS CommentCount,
+    (SELECT COUNT(*)
+     FROM Posts p2 
+     WHERE p2.ParentId = p.PostId) AS AnswerCount,
+    (SELECT 
+        STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM 
+        Tags t 
+     WHERE 
+        p.Tags LIKE '%' || t.TagName || '%') AS Tags
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    UserScoreSummary bs ON p.PostId = bs.UserId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS BadgeCount FROM Badges GROUP BY UserId) badges ON p.PostId = badges.UserId
+LEFT JOIN 
+    TopPosts tp ON p.PostId = tp.Id
+WHERE 
+    p.Level = (SELECT MAX(Level) FROM RecursivePostCTE) 
+ORDER BY 
+    TotalBounties DESC, UpVotes DESC, CommentCount DESC
+LIMIT 100;

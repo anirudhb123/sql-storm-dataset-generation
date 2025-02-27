@@ -1,0 +1,70 @@
+
+WITH RecursiveMovieList AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(t.season_nr, 1) AS season,
+        COALESCE(t.episode_nr, 1) AS episode
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        COALESCE(t.season_nr, r.season) + 1,
+        COALESCE(t.episode_nr, r.episode) + 1
+    FROM 
+        aka_title t
+    JOIN 
+        RecursiveMovieList r ON t.episode_of_id = r.movie_id
+    WHERE 
+        t.episode_of_id IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        COUNT(CI.id) AS cast_count
+    FROM 
+        RecursiveMovieList m
+    LEFT JOIN 
+        cast_info CI ON m.movie_id = CI.movie_id
+    GROUP BY 
+        m.movie_id, m.movie_title, m.production_year
+    HAVING 
+        COUNT(CI.id) > 0
+),
+TopMovies AS (
+    SELECT 
+        fm.movie_title,
+        fm.production_year,
+        fm.cast_count,
+        RANK() OVER (ORDER BY fm.cast_count DESC) AS rank
+    FROM 
+        FilteredMovies fm
+)
+SELECT 
+    t.movie_title,
+    t.production_year,
+    t.cast_count,
+    COALESCE((SELECT COUNT(DISTINCT mc.company_id)
+               FROM movie_companies mc 
+               WHERE mc.movie_id = t.movie_id), 0) AS company_count,
+    CASE 
+        WHEN t.rank <= 10 THEN 'Top 10'
+        WHEN t.rank <= 20 THEN 'Top 20'
+        ELSE 'Others'
+    END AS category
+FROM 
+    TopMovies t
+WHERE 
+    t.production_year BETWEEN 2000 AND EXTRACT(YEAR FROM TIMESTAMP '2024-10-01 12:34:56')
+ORDER BY 
+    t.cast_count DESC, t.production_year ASC;

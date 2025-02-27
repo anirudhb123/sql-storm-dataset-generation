@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -2, CURRENT_DATE)
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(p.ps_supplycost * p.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ProductAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS available_quantity,
+        COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        CASE WHEN r.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) THEN 'High' ELSE 'Normal' END AS price_category
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.price_rank <= 5
+),
+FinalReport AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        pa.p_name,
+        pa.available_quantity,
+        pa.total_supply_cost,
+        CASE 
+            WHEN s.total_cost >= (SELECT AVG(total_cost) FROM SupplierInfo) THEN 'Premium Supplier' 
+            ELSE 'Regular Supplier' 
+        END AS supplier_status
+    FROM 
+        HighValueOrders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN ProductAvailability pa ON l.l_partkey = pa.p_partkey
+    LEFT JOIN SupplierInfo s ON l.l_suppkey = s.s_suppkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        (pa.available_quantity IS NULL OR pa.available_quantity > 10) 
+        AND (CURRENT_DATE - o.o_orderdate) <= 365
+)
+SELECT * 
+FROM FinalReport 
+WHERE supplier_status IS NOT NULL 
+ORDER BY available_quantity DESC, o_orderdate DESC;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        NULL AS parent_customer_sk,
+        1 AS level
+    FROM
+        customer c
+    WHERE
+        c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT
+        t.customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.c_customer_sk AS parent_customer_sk,
+        sh.level + 1
+    FROM
+        store_sales t
+    JOIN customer c ON t.ss_customer_sk = c.c_customer_sk
+    JOIN sales_hierarchy sh ON t.ss_customer_sk = sh.c_customer_sk
+    WHERE
+        sh.level < 3
+),
+active_promotions AS (
+    SELECT
+        p.p_promo_id,
+        COUNT(*) AS total_purchases
+    FROM
+        promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE
+        p.p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+        AND p.p_end_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+    GROUP BY
+        p.p_promo_id
+),
+sales_summary AS (
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN sales_hierarchy sh ON ws.ws_ship_customer_sk = sh.c_customer_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.c_first_name, sh.c_last_name
+)
+SELECT 
+    s.customer_sk,
+    s.c_first_name,
+    s.c_last_name,
+    s.total_orders,
+    s.total_net_profit,
+    COALESCE(ap.total_purchases, 0) AS total_active_purchases,
+    CASE 
+        WHEN s.total_net_profit > 1000 THEN 'High Value'
+        WHEN s.total_net_profit BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM
+    sales_summary s
+LEFT JOIN active_promotions ap ON s.customer_sk = ap.p_promo_id
+WHERE
+    s.rank = 1
+ORDER BY 
+    s.total_net_profit DESC
+LIMIT 100;

@@ -1,0 +1,86 @@
+WITH PostTagSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreatedDate,
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+UserPostCount AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagUsageSummary AS (
+    SELECT 
+        ts.TagName,
+        COUNT(ps.Tag) AS UsageCount
+    FROM 
+        Tags ts
+    JOIN 
+        PostTagSummary ps ON ts.TagName = ps.Tag
+    GROUP BY 
+        ts.TagName
+    ORDER BY 
+        UsageCount DESC
+),
+PostDetails AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Name AS PostType,
+        us.DisplayName AS OwnerName,
+        (SELECT STRING_AGG(ts.TagName, ', ') 
+         FROM PostTagSummary ts 
+         WHERE ts.PostId = p.Id) AS Tags,
+        COALESCE(pe.Comment, 'No comments') AS LastEditComment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users us ON p.OwnerUserId = us.Id
+    LEFT JOIN 
+        PostHistory pe ON p.Id = pe.PostId AND pe.CreationDate = (
+            SELECT MAX(CreationDate) 
+            FROM PostHistory 
+            WHERE PostId = p.Id AND PostHistoryTypeId IN (4, 5)
+        )
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.PostType,
+    pd.OwnerName,
+    pd.Tags,
+    uqc.QuestionCount,
+    uqc.TotalViews,
+    uqc.TotalScore,
+    tu.UsageCount AS TagUsageCount
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    UserPostCount uqc ON pd.OwnerName = uqc.DisplayName
+LEFT JOIN 
+    TagUsageSummary tu ON tu.TagName IN (SELECT UNNEST(string_to_array(pd.Tags, ', ')))
+WHERE 
+    pd.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY 
+    uqc.TotalScore DESC, pd.CreationDate DESC
+LIMIT 100;

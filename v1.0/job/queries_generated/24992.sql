@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.id) OVER (PARTITION BY t.id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') OVER (PARTITION BY t.id) AS actors,
+        CASE 
+            WHEN t.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(t.production_year AS VARCHAR)
+        END AS year_display
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL OR c.note IS NULL
+),
+HighCastMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count,
+        actors,
+        year_display
+    FROM 
+        RankedMovies
+    WHERE 
+        cast_count > 5
+),
+FullMovieInfo AS (
+    SELECT 
+        h.title,
+        h.production_year,
+        h.cast_count,
+        h.actors,
+        COALESCE(m.info, 'No Info Available') AS additional_info
+    FROM 
+        HighCastMovies h
+    LEFT JOIN 
+        movie_info m ON h.title = m.info
+        AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Review')
+),
+FinalResult AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count,
+        actors,
+        additional_info,
+        ROW_NUMBER() OVER (ORDER BY production_year DESC, cast_count DESC) AS ranking
+    FROM 
+        FullMovieInfo
+    WHERE 
+        actors IS NOT NULL
+    ORDER BY 
+        production_year ASC, cast_count DESC
+)
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    actors,
+    additional_info,
+    CASE 
+        WHEN additional_info IS NULL THEN 'No Reviews Yet'
+        ELSE 'Reviews Present'
+    END AS review_status
+FROM 
+    FinalResult
+WHERE 
+    ranking <= 10;

@@ -1,0 +1,64 @@
+WITH RecursiveNames AS (
+    SELECT 
+        a.name AS person_name, 
+        c.kind AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.name) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    AND 
+        a.name <> ''
+),
+MovieRoles AS (
+    SELECT 
+        t.title AS movie_title, 
+        mc.company_name AS production_company,
+        a.person_id,
+        rn,
+        CASE 
+            WHEN c.note IS NULL THEN 'No Note'
+            ELSE c.note
+        END AS role_note
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        RecursiveNames a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    AND 
+        mc.company_type_id IN (
+            SELECT id FROM company_type WHERE kind LIKE '%Production%'
+        )
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_title,
+        m.production_company,
+        m.person_name,
+        COUNT(*) OVER (PARTITION BY m.movie_title) AS role_count,
+        ROW_NUMBER() OVER (PARTITION BY m.music_title ORDER BY m.role_note) AS row_num
+    FROM 
+        MovieRoles m
+)
+SELECT 
+    r.movie_title,
+    r.production_company,
+    r.person_name,
+    r.role_note,
+    r.role_count
+FROM 
+    RankedMovies r
+WHERE 
+    r.row_num <= 5
+AND 
+    r.role_count > 2
+ORDER BY 
+    r.production_company ASC,
+    r.movie_title DESC;

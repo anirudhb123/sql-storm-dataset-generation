@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        STRING_AGG(t.TagName, ',' ORDER BY t.TagName) AS ParsedTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT CAST(value AS INTEGER) FROM UNNEST(string_to_array(p.Tags, '>')) AS value)
+    WHERE 
+        p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.Score, p.Tags
+),
+
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        p.Title AS PostTitle,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS EditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+),
+
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        B.Name AS BadgeName,
+        COUNT(B.Id) AS BadgeCount,
+        u.Reputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges B ON u.Id = B.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(B.Id) >= 1
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ParsedTags,
+    phd.EditCount,
+    COALESCE(bu.DisplayName, 'No badge owner') AS BadgeOwner,
+    COALESCE(bu.BadgeCount, 0) AS TotalBadges,
+    COALESCE(COUNT(phd.UserId), 0) AS TotalEdits
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryData phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    BadgedUsers bu ON bu.UserId = rp.PostId
+WHERE 
+    (rp.Score > 0 OR phd.PostHistoryTypeId IS NULL)
+    AND (rp.ParsedTags LIKE '%SQL%' OR rp.ParsedTags LIKE '%Database%')
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.ParsedTags, phd.EditCount, bu.UserId, bu.DisplayName, bu.BadgeCount
+ORDER BY 
+    rp.Score DESC NULLS LAST, TotalBadges DESC;

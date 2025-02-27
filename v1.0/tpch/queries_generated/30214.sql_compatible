@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        1 AS Depth
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+
+    UNION ALL
+
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        co.Depth + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate > (
+            SELECT MAX(o2.o_orderdate)
+            FROM orders o2
+            WHERE o2.o_custkey = co.c_custkey
+        )
+)
+
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS TotalReturn,
+    AVG(o.o_totalprice) AS AvgOrderValue,
+    MAX(l.l_shipdate) AS LastShipmentDate,
+    RANK() OVER (PARTITION BY co.c_custkey ORDER BY SUM(l.l_extendedprice) DESC) AS OrderRank,
+    N.n_name AS NationName,
+    (SELECT COUNT(*) 
+     FROM lineitem l
+     WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)) AS TotalLineItems
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    lineitem l ON co.o_orderkey = l.l_orderkey
+JOIN 
+    supplier s ON s.s_suppkey = l.l_suppkey
+JOIN 
+    nation N ON s.s_nationkey = N.n_nationkey
+GROUP BY 
+    co.c_custkey, co.c_name, N.n_name
+HAVING 
+    SUM(l.l_extendedprice) > 10000 AND 
+    COUNT(DISTINCT co.o_orderkey) > 5
+ORDER BY 
+    TotalReturn DESC, AvgOrderValue ASC
+FETCH FIRST 10 ROWS ONLY;

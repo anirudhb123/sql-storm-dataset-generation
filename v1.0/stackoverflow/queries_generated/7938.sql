@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(pd.LastActivityDate, p.LastActivityDate) AS LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            MAX(CreationDate) AS LastActivityDate 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) pd ON p.Id = pd.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 3 WHEN b.Class = 2 THEN 2 ELSE 1 END) AS BadgePoints,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        us.BadgePoints + us.QuestionCount * 5 + us.TotalScore AS TotalPoints
+    FROM 
+        Users u
+    JOIN 
+        UserScores us ON u.Id = us.UserId
+)
+SELECT 
+    u.DisplayName,
+    up.TotalPoints,
+    rp.Title AS LastActiveQuestionTitle,
+    rp.CreationDate AS LastActiveQuestionDate,
+    rp.Score AS LastActiveQuestionScore
+FROM 
+    TopUsers up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.PostId 
+WHERE 
+    rp.UserRank = 1
+ORDER BY 
+    up.TotalPoints DESC
+LIMIT 10;

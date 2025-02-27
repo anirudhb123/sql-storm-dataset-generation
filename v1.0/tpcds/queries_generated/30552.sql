@@ -1,0 +1,86 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_order_number, ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sold_date_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk, cs_order_number, cs_sold_date_sk
+), 
+inventory_data AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+returns_data AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(sales.total_quantity, 0) AS total_sales_quantity,
+    COALESCE(sales.total_sales, 0.00) AS total_sales_value,
+    COALESCE(inv.total_inventory, 0) AS total_inventory,
+    COALESCE(returns.total_returns, 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(sales.total_quantity, 0) > inv.total_inventory THEN 'Out of Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    item i
+LEFT JOIN 
+    (SELECT 
+        ws_item_sk, 
+        SUM(total_quantity) AS total_quantity,
+        SUM(total_sales) AS total_sales
+     FROM 
+        sales_summary
+     GROUP BY 
+        ws_item_sk) sales ON i.i_item_sk = sales.ws_item_sk
+LEFT JOIN 
+    inventory_data inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    returns_data returns ON i.i_item_sk = returns.sr_item_sk
+WHERE 
+    i.i_current_price > (
+        SELECT 
+            AVG(i_current_price) 
+        FROM 
+            item 
+        WHERE 
+            i_category_id IN (
+                SELECT 
+                    wp_type 
+                FROM 
+                    web_page 
+                WHERE 
+                    wp_char_count IS NOT NULL
+            )
+    )
+ORDER BY 
+    total_sales_value DESC
+LIMIT 10;

@@ -1,0 +1,93 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        COALESCE(AVG(v.BountyAmount), 0) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    CONCAT(u.DisplayName, ' (ID: ', u.Id, ')') AS Owner,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    COALESCE(ph.LastClosedDate, ph.LastReopenedDate) AS MostRecentClosureOrReopening,
+    COALESCE(us.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(us.GoldBadges, 0) AS GoldBadges,
+    COALESCE(us.SilverBadges, 0) AS SilverBadges,
+    COALESCE(us.BronzeBadges, 0) AS BronzeBadges,
+    r.Level AS PostHierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteStats pv ON p.Id = pv.PostId
+LEFT JOIN 
+    PostHistoryChanges ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserBadgeStats us ON u.Id = us.UserId
+JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+ORDER BY 
+    p.CreationDate DESC,
+    pv.UpVotes DESC;

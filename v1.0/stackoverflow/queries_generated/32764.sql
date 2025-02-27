@@ -1,0 +1,81 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.ParentId, 
+        1 AS Depth
+    FROM Posts P
+    WHERE P.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.ParentId, 
+        PH.Depth + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy PH ON P.ParentId = PH.Id
+), 
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.Id IS NOT NULL THEN 1 END) AS ChildPostCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN RecursivePostHierarchy PH ON P.Id = PH.ParentId
+    GROUP BY P.Id
+),
+
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+), 
+
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(ps.UpVotes), 0) AS TotalUpVotes, 
+        COALESCE(SUM(ps.DownVotes), 0) AS TotalDownVotes, 
+        COALESCE(SUM(ps.CommentCount), 0) AS TotalComments, 
+        COALESCE(SUM(ps.ChildPostCount), 0) AS TotalChildPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostStats ps ON P.Id = ps.PostId
+    GROUP BY U.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    UHS.TotalUpVotes,
+    UHS.TotalDownVotes,
+    UHS.TotalComments,
+    UHS.TotalChildPosts,
+    CASE 
+        WHEN UHS.TotalUpVotes IS NULL THEN 'No votes' 
+        ELSE 'Has votes' 
+    END AS VoteStatus,
+    CONCAT(
+        'User ', 
+        U.DisplayName, 
+        ' has ', 
+        COALESCE(UHS.TotalChildPosts, 0), 
+        ' child posts.'
+    ) AS ChildPostDescription
+FROM 
+    UserBadges U
+JOIN UserPostStats UHS ON U.UserId = UHS.UserId
+WHERE 
+    U.Reputation > 500
+ORDER BY 
+    U.Reputation DESC;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title mv ON ml.movie_id = mv.id
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    WHERE 
+        m.level = 0
+    GROUP BY 
+        m.title, m.production_year
+    HAVING 
+        COUNT(mk.keyword_id) > 3
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(CAST(av.rating AS VARCHAR(255)), 'N/A') AS average_rating,
+    ARRAY_AGG(DISTINCT a.name ORDER BY a.name) AS actor_names
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = tm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = tm.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = cc.subject_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, AVG(rating) AS rating
+     FROM 
+         movie_info
+     WHERE 
+         info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+     GROUP BY 
+         movie_id) av ON av.movie_id = tm.movie_id
+WHERE 
+    tm.production_year IS NOT NULL
+GROUP BY 
+    tm.title, tm.production_year, av.rating
+ORDER BY 
+    tm.production_year DESC, keyword_count DESC;

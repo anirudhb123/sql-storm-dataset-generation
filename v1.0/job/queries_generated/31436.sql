@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, NULL::integer AS parent_movie_id
+    FROM aka_title m
+    WHERE m.production_year >= 2000 -- Only consider movies from 2000 onwards
+  UNION ALL
+    SELECT m.id, m.title, m.production_year, mh.movie_id
+    FROM aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+), 
+actor_statistics AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        AVG(EXTRACT(YEAR FROM NOW()) - t.production_year) AS average_years_since
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    GROUP BY a.person_id
+),
+recent_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(SUM(mk.id), 0) AS keyword_count
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE m.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(a.person_name, 'Unknown Actor') AS actor_name,
+    COUNT(DISTINCT cc.movie_id) AS total_movies_by_actor,
+    a.average_years_since,
+    COALESCE(r.keyword_count, 0) AS recent_keywords
+FROM movie_hierarchy mh
+LEFT JOIN (
+    SELECT 
+        a.id,
+        a.name AS person_name,
+        as.person_id,
+        as.movie_count,
+        as.average_years_since
+    FROM aka_name a
+    LEFT JOIN actor_statistics as ON a.person_id = as.person_id
+) a ON mh.movie_id IN (
+    SELECT movie_id 
+    FROM cast_info 
+    WHERE person_id = a.person_id
+)
+LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN recent_movies r ON mh.movie_id = r.title
+WHERE mh.title IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, a.person_name, a.average_years_since, r.keyword_count
+ORDER BY 
+    mh.production_year DESC, total_movies_by_actor DESC
+LIMIT 100;

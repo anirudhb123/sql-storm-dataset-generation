@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.ViewCount > 100
+      AND p.CreationDate >= DATEADD(month, -6, '2024-10-01 12:34:56')
+),
+PostWithVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes
+    FROM RankedPosts rp
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    GROUP BY rp.PostId, rp.Title, rp.Score
+),
+PostHistoryCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+FilteredHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS RecentHistoryCount,
+        STRING_AGG(ph.UserDisplayName, ', ') AS UserNames
+    FROM PostHistoryCTE ph
+    WHERE ph.HistoryRank <= 5 
+    GROUP BY ph.PostId
+)
+SELECT 
+    pw.PostId,
+    pw.Title,
+    pw.Score AS PostScore,
+    pw.UpVotes,
+    pw.DownVotes,
+    pw.CloseVotes,
+    COALESCE(fh.RecentHistoryCount, 0) AS RecentHistoryCount,
+    fh.UserNames,
+    CASE 
+        WHEN pw.CloseVotes > 0 THEN 'Closed'
+        WHEN pw.DownVotes > pw.UpVotes THEN 'Negative Feedback'
+        ELSE 'Active Post'
+    END AS Status,
+    CONCAT_WS(' | ', COALESCE(STRING_AGG(DISTINCT pt.Name, ', '), 'No Tags'), 'Reviewed: ', CAST(COUNT(DISTINCT ph.PostId) AS VARCHAR)) ) AS DetailedInfo
+FROM PostWithVotes pw
+LEFT JOIN FilteredHistory fh ON pw.PostId = fh.PostId
+LEFT JOIN Posts pt ON pt.Tags LIKE '%' || pw.PostId || '%'
+LEFT JOIN PostHistory ph ON pw.PostId = ph.PostId
+GROUP BY 
+    pw.PostId, 
+    pw.Title, 
+    pw.Score, 
+    pw.UpVotes, 
+    pw.DownVotes, 
+    pw.CloseVotes,
+    fh.RecentHistoryCount,
+    fh.UserNames
+ORDER BY 
+    PostScore DESC, 
+    RecentHistoryCount DESC;

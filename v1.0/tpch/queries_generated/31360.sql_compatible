@@ -1,0 +1,38 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal AND ch.level < 3
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+SupplierSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT ch.c_custkey, ch.c_name, SUM(ro.total_revenue) AS total_revenue,
+       COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+       COUNT(DISTINCT CASE WHEN ro.o_orderdate = DATE '1998-10-01' THEN ro.o_orderkey END) AS orders_today,
+       ROW_NUMBER() OVER (PARTITION BY ch.c_nationkey ORDER BY SUM(ro.total_revenue) DESC) AS revenue_rank
+FROM CustomerHierarchy ch
+LEFT JOIN RecentOrders ro ON ch.c_custkey = ro.o_custkey
+LEFT JOIN SupplierSummary ss ON ss.ps_partkey IN (
+    SELECT l.l_partkey
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_custkey = ch.c_custkey
+)
+GROUP BY ch.c_custkey, ch.c_name, ch.c_nationkey
+HAVING COUNT(DISTINCT ro.o_orderkey) > 0 AND SUM(ro.total_revenue) > 5000
+ORDER BY total_revenue DESC;

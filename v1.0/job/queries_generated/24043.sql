@@ -1,0 +1,36 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title,
+           mt.production_year,
+           1 AS level,
+           CAST(mt.title AS VARCHAR(255)) AS path
+    FROM aka_title AS mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT ml.linked_movie_id,
+           at.title,
+           at.production_year,
+           mh.level + 1,
+           CAST(mh.path || ' -> ' || at.title AS VARCHAR(255))
+    FROM movie_link AS ml
+    JOIN aka_title AS at ON ml.movie_id = at.id
+    JOIN MovieHierarchy AS mh ON mh.movie_id = ml.movie_id
+)
+SELECT name.name AS actor_name,
+       COUNT(DISTINCT mh.movie_id) AS total_movies,
+       MAX(mh.production_year) AS latest_movie_year,
+       STRING_AGG(DISTINCT mh.path, '; ') AS movie_paths,
+       SUM(CASE WHEN ci.nr_order IS NULL THEN 1 ELSE 0 END) AS uncredited_appearances,
+       AVG(COALESCE(length(mh.title::text) - length(REPLACE(mh.title::text, ' ', '')), 1), 10) AS avg_word_count
+FROM aka_name AS name
+JOIN cast_info AS ci ON name.person_id = ci.person_id
+JOIN MovieHierarchy AS mh ON mh.movie_id = ci.movie_id
+LEFT JOIN movie_info AS mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+WHERE name.name IS NOT NULL
+GROUP BY name.name
+HAVING COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY latest_movie_year DESC NULLS LAST
+LIMIT 10;
+

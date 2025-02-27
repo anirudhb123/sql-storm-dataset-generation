@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Film%')
+),
+TopMovies AS (
+    SELECT 
+        r.title, 
+        r.production_year 
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.rn <= 10
+),
+MovieDetails AS (
+    SELECT 
+        m.title, 
+        c.name AS company_name, 
+        COUNT(cc.person_id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    GROUP BY 
+        m.title, c.name
+)
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    coalesce(md.company_name, 'Independent') AS production_company, 
+    md.cast_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieDetails md ON tm.title = md.title
+ORDER BY 
+    tm.production_year DESC, 
+    md.cast_count DESC 
+LIMIT 15;

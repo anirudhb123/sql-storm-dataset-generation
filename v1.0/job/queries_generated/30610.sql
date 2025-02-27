@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    SUM(CASE WHEN r.role = 'lead' THEN 1 ELSE 0 END) AS lead_count,
+    AVG(CASE WHEN m.production_year > 2010 THEN m.production_year ELSE NULL END) AS avg_recent_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    MAX(mh.level) AS max_link_level
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    title m ON c.movie_id = m.id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_keyword kw ON c.movie_id = kw.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year IS NOT NULL
+    AND (m.production_year < 2020 OR mh.level > 0)
+GROUP BY 
+    a.name, m.title
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    lead_count DESC, avg_recent_year DESC;
+
+This query begins by establishing a recursive common table expression (CTE) called `movie_hierarchy`, which gathers movies produced from the year 2000 onwards alongside their associated linked movies. This allows for exploration of movie relationships in a tree-like structure based on links.
+
+The main query then retrieves data about actors, including their lead role count, average production year of recent movies, associated keywords, and the total number of movies they participated in. Using aggregate functions alongside various joins and conditions enhances both complexity and the potential utility of the results, filtering for actors with a notable filmography and allowing for rich datasets to be generated for performance benchmarking.

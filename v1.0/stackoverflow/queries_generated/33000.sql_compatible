@@ -1,0 +1,71 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        rph.Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId 
+    WHERE 
+        ph.CreationDate < rph.CreationDate  
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    AVG(u.Reputation) AS AvgUserReputation,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    CASE 
+        WHEN MAX(rph.PostHistoryTypeId) = 10 THEN 'Closed'
+        WHEN MAX(rph.PostHistoryTypeId) = 11 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    RecursivePostHistory rph ON p.Id = rph.PostId
+WHERE 
+    p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.DisplayName
+HAVING 
+    AVG(u.Reputation) > 100  
+ORDER BY 
+    COUNT(DISTINCT v.Id) DESC,  
+    p.CreationDate DESC;

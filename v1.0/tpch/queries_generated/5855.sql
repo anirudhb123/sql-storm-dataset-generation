@@ -1,0 +1,54 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate <= DATE '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), customer_revenue AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(r.total_revenue) AS total_customer_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        ranked_orders r ON o.o_orderkey = r.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), nation_supplier_revenue AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(cr.total_customer_revenue) AS total_nation_revenue
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        customer_revenue cr ON cr.total_customer_revenue IS NOT NULL
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    n.n_name, 
+    n.total_nation_revenue
+FROM 
+    nation_supplier_revenue n
+WHERE 
+    n.total_nation_revenue > (SELECT AVG(total_nation_revenue) FROM nation_supplier_revenue)
+ORDER BY 
+    n.total_nation_revenue DESC;

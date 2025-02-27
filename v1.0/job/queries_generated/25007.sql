@@ -1,0 +1,67 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT c.name) AS companies,
+        ARRAY_AGG(DISTINCT a.name) AS actors
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    JOIN 
+        aka_name a ON cc.subject_id = a.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+ranked_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.companies,
+        md.actors,
+        RANK() OVER (ORDER BY md.production_year DESC) AS production_year_rank
+    FROM 
+        movie_details md
+),
+selected_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keywords,
+        rm.companies,
+        rm.actors
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.production_year_rank <= 10
+)
+SELECT 
+    sm.movie_id,
+    sm.title,
+    sm.production_year,
+    sm.keywords,
+    sm.companies,
+    sm.actors,
+    LENGTH(sm.title) AS title_length,
+    COUNT(DISTINCT unnest(sm.keywords)) AS keyword_count,
+    COUNT(DISTINCT unnest(sm.companies)) AS company_count,
+    COUNT(DISTINCT unnest(sm.actors)) AS actor_count
+FROM 
+    selected_movies sm
+GROUP BY 
+    sm.movie_id, sm.title, sm.production_year, sm.keywords, sm.companies, sm.actors
+ORDER BY 
+    sm.production_year DESC;

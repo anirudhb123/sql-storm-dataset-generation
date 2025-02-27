@@ -1,0 +1,83 @@
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp)
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount)
+            ELSE l.l_extendedprice
+        END AS adjusted_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate > CURRENT_DATE - INTERVAL '30' DAY
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_availqty,
+    ho.total_spent,
+    ho.total_orders,
+    SUM(f.adjusted_price) AS total_adjusted_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(f.adjusted_price) DESC) AS rn
+FROM 
+    PartStats ps
+JOIN 
+    FilteredLineItems f ON ps.p_partkey = f.l_partkey
+JOIN 
+    CustomerOrders ho ON ho.total_spent IS NOT NULL
+LEFT JOIN 
+    HighValueSuppliers hvs ON hvs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = ps.p_partkey LIMIT 1)
+WHERE 
+    ps.total_availqty IS NOT NULL 
+    AND (ho.total_orders > 5 OR f.l_quantity > 10)
+GROUP BY 
+    p.p_partkey, p.p_name, ps.total_availqty, ho.total_spent, ho.total_orders
+HAVING 
+    SUM(f.adjusted_price) > 1000
+ORDER BY 
+    total_adjusted_revenue DESC
+LIMIT 10;

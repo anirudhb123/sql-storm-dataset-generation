@@ -1,0 +1,64 @@
+WITH RECURSIVE RegionSales AS (
+    SELECT 
+        r.r_name AS region_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS recent_order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+)
+SELECT 
+    r.region_name,
+    r.total_sales,
+    COALESCE(c.total_spent, 0) AS total_spent_by_high_value_customer,
+    COALESCE(o.o_orderdate, 'No recent orders') AS recent_order_date
+FROM 
+    RegionSales r
+LEFT JOIN 
+    HighValueCustomers c ON r.region_name = c.c_name
+LEFT JOIN 
+    RecentOrders o ON c.c_name = o.c_name AND o.recent_order_rank = 1
+WHERE 
+    r.sales_rank <= 3
+ORDER BY 
+    r.total_sales DESC;

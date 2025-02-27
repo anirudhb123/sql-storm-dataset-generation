@@ -1,0 +1,62 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM 
+        lineitem l
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ss.total_avail_qty) AS total_available_quantity,
+    SUM(co.total_spent) AS total_spent_by_customers,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS product_names,
+    MAX(CASE WHEN l.price_rank = 1 THEN l.l_extendedprice END) AS max_order_price
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = s.s_suppkey
+LEFT JOIN 
+    RankedLineItems l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    part p ON p.p_partkey = l.l_partkey
+WHERE 
+    n.n_comment IS NOT NULL
+    AND (ss.avg_supply_cost IS NULL OR ss.avg_supply_cost > 20.00)
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_spent_by_customers DESC;

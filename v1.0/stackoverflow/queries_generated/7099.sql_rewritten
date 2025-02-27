@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp 
+    WHERE 
+        rp.Rank <= 10
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS Upvotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS Downvotes,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerUserId) AS BadgeCount,
+    (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t 
+     INNER JOIN LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') AS tag ON tag = t.TagName
+     WHERE p.Id = tp.PostId) AS TagsUsed
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate DESC;

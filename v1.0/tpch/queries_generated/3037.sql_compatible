@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.nationkey,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) 
+            FROM supplier s2 
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), 
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+)
+
+SELECT 
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    r.s_name AS top_supplier,
+    r.s_acctbal
+FROM 
+    CustomerOrderSummary cs
+JOIN 
+    RankedSuppliers r ON r.rank = 1
+LEFT JOIN 
+    nation n ON r.nationkey = n.n_nationkey
+WHERE 
+    n.n_name IN ('USA', 'Canada')
+UNION ALL
+SELECT 
+    'Total' AS c_name,
+    COUNT(c.c_custkey),
+    SUM(cs.total_spent),
+    NULL AS top_supplier,
+    NULL AS s_acctbal
+FROM 
+    CustomerOrderSummary cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+WHERE 
+    cs.total_spent IS NOT NULL
+GROUP BY
+    c.c_custkey
+ORDER BY 
+    total_spent DESC;

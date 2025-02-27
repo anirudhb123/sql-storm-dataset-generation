@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes -- counting upvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1 -- answering questions
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><'))::varchar) AS TagName, Id
+         FROM Posts) t ON t.Id = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount
+    ORDER BY 
+        AnswerCount DESC, UpVotes DESC
+    LIMIT 10
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName AS EditedBy,
+        ph.Comment,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 'Edit'
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Close/Reopen'
+            ELSE 'Other' 
+        END AS EditType
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10, 11) -- title/body edits and close/reopen events
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Tags,
+    rp.AnswerCount,
+    ph.EditDate,
+    ph.EditedBy,
+    ph.Comment,
+    ph.EditType
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostEditHistory ph ON rp.PostId = ph.PostId
+ORDER BY 
+    rp.ViewCount DESC, rp.AnswerCount DESC;

@@ -1,0 +1,92 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+CastWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieGenres AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(c.person_id, 'No Cast') AS cast_person_id,
+    COALESCE(c.role, 'No Role Assigned') AS role,
+    COALESCE(cp.company_name, 'No Company') AS production_company,
+    COALESCE(cp.company_type, 'Unknown Type') AS company_type,
+    COALESCE(mg.keywords, 'No Keywords') AS keywords,
+    mh.depth
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastWithRoles c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    CompanyDetails cp ON mh.movie_id = cp.movie_id
+LEFT JOIN 
+    MovieGenres mg ON mh.movie_id = mg.movie_id
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    c.person_id,
+    c.role,
+    cp.company_name,
+    cp.company_type,
+    mg.keywords,
+    mh.depth
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title, 
+    mh.depth, 
+    c.role_order;

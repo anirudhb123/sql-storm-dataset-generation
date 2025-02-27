@@ -1,0 +1,96 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        movie_hierarchy mh
+),
+distinct_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        MIN(m.production_year) AS first_year,
+        MAX(m.production_year) AS last_year
+    FROM 
+        ranked_movies m
+    GROUP BY 
+        m.movie_id, m.title
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        c.movie_id,
+        c.nr_order,
+        c.note,
+        c.role_id
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+),
+movies_with_actors AS (
+    SELECT 
+        dm.movie_id,
+        dm.title,
+        dm.first_year,
+        dm.last_year,
+        ARRAY_AGG(DISTINCT ai.actor_name) AS actor_names
+    FROM 
+        distinct_movies dm
+    LEFT JOIN 
+        actor_info ai ON dm.movie_id = ai.movie_id
+    GROUP BY 
+        dm.movie_id, dm.title, dm.first_year, dm.last_year
+)
+
+SELECT 
+    m.title,
+    m.first_year,
+    m.last_year,
+    m.actor_names,
+    CASE 
+        WHEN MIN(m.first_year) < 2000 THEN 'Before 2000'
+        WHEN MIN(m.first_year) >= 2000 AND MIN(m.first_year) < 2010 THEN '2000s'
+        ELSE '2010s and beyond'
+    END AS decade
+FROM 
+    movies_with_actors m
+GROUP BY 
+    m.title, 
+    m.first_year, 
+    m.last_year, 
+    m.actor_names
+HAVING 
+    COUNT(DISTINCT m.actor_names) > 2
+ORDER BY 
+    m.first_year DESC, 
+    m.title;

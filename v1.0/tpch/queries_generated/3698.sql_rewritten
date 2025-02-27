@@ -1,0 +1,45 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_size,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS brand_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_size
+),
+ActiveCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_shipmode = 'TRUCK' AND l.l_returnflag = 'N'
+    GROUP BY s.s_suppkey
+)
+
+SELECT 
+    r.n_name AS nation,
+    pp.p_name AS part_name,
+    pp.total_supply_cost,
+    ac.total_spent,
+    COALESCE(sp.total_revenue, 0) AS supplier_revenue
+FROM RankedParts pp
+LEFT JOIN nation r ON pp.p_partkey % 5 = r.n_nationkey
+LEFT JOIN ActiveCustomers ac ON r.n_nationkey = ac.c_custkey % 5
+LEFT JOIN SupplierParts sp ON pp.p_partkey % 10 = sp.s_suppkey
+WHERE pp.brand_rank <= 10
+AND pp.total_supply_cost > (SELECT AVG(total_supply_cost) FROM RankedParts WHERE brand_rank <= 10)
+ORDER BY pp.total_supply_cost DESC, ac.total_spent DESC;

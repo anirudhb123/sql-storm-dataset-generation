@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    INNER JOIN movie_link ml ON m.id = ml.movie_id
+    INNER JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+RankedActors AS (
+    SELECT
+        ka.name AS actor_name,
+        ka.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+    FROM
+        aka_name ka
+    JOIN
+        cast_info c ON ka.person_id = c.person_id
+    GROUP BY
+        ka.name, ka.person_id
+),
+MostActiveCompanies AS (
+    SELECT
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS total_movies,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT mc.movie_id) DESC) AS company_rank
+    FROM
+        company_name cn
+    JOIN
+        movie_companies mc ON cn.id = mc.company_id
+    GROUP BY
+        cn.name
+)
+SELECT
+    mh.title AS movie_title,
+    mh.production_year,
+    ra.actor_name,
+    ra.movie_count,
+    ca.company_name,
+    ca.total_movies
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN
+    RankedActors ra ON ci.person_id = ra.person_id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    MostActiveCompanies ca ON mc.company_id = ca.company_id
+WHERE
+    mh.level > 0  -- Only get movies that have dependencies
+    AND (ra.movie_count >= 5 OR ra.actor_rank IS NULL)  -- Actors in 5 or more movies or no actors at all
+ORDER BY
+    mh.production_year DESC,
+    mh.title,
+    ra.actor_rank;

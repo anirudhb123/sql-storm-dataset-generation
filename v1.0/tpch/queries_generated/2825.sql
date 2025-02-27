@@ -1,0 +1,70 @@
+WITH Supplier_Details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+Customer_Orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS order_count,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_mktsegment
+),
+Nation_Region AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sr.region_name,
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    sd.s_name,
+    sd.total_available_quantity,
+    sd.total_supply_cost,
+    (sd.total_supply_cost / NULLIF(sd.total_available_quantity, 0)) AS avg_supply_cost_per_unit
+FROM 
+    Supplier_Details sd
+JOIN 
+    Nation_Region nr ON sd.s_nationkey = nr.n_nationkey
+JOIN 
+    Customer_Orders cs ON nr.n_nationkey = cs.c_custkey
+WHERE 
+    cs.order_count > 0
+ORDER BY 
+    sr.region_name, cs.total_spent DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total' AS region_name,
+    NULL AS c_name,
+    SUM(order_count) AS order_count,
+    SUM(total_spent) AS total_spent,
+    NULL AS s_name,
+    NULL AS total_available_quantity,
+    NULL AS total_supply_cost,
+    NULL AS avg_supply_cost_per_unit
+FROM 
+    Customer_Orders;

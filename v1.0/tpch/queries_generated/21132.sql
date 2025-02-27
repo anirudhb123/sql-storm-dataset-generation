@@ -1,0 +1,70 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_supplycost) AS supply_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), 
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+PartSupplierCost AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        STRING_AGG(s.s_name, ', ') AS supplier_names
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN o.o_orderstatus = 'O' THEN 1 ELSE 0 END) AS open_orders,
+    MAX(pd.avg_supply_cost) AS highest_avg_cost,
+    MIN(ps.total_supply_cost) AS lowest_total_cost,
+    COALESCE(SUM(CASE WHEN cd.total_order_value IS NULL THEN 0 ELSE cd.total_order_value END), 0) AS total_customer_spending,
+    STRING_AGG(DISTINCT s.s_name, ', ' ORDER BY s.s_name) AS all_suppliers
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+FULL OUTER JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+LEFT JOIN 
+    PartSupplierCost pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = sd.total_supply_cost)
+LEFT JOIN 
+    CustomerOrderDetails cd ON cd.c_custkey = c.c_custkey AND cd.order_rank <= 5
+WHERE 
+    n.n_regionkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 OR SUM(o.o_totalprice) IS NULL
+ORDER BY 
+    customer_count DESC, highest_avg_cost DESC;

@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, sh.nationkey, level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = s.s_partkey
+)
+, order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-02-01'
+    GROUP BY o.o_orderkey
+),
+nation_statistics AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(o.o_totalprice) AS total_orders,
+           AVG(c.c_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_name
+),
+part_summary AS (
+    SELECT p.p_partkey, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    ps.p_name AS part_name,
+    SUM(os.total_revenue) AS total_revenue,
+    psytd.avg_supply_cost,
+    sh.level AS supplier_level
+FROM order_summary os
+JOIN nation_statistics n ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+JOIN part_summary psytd ON psytd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey)
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE n.customer_count > 10 AND psytd.supplier_count > 5 
+GROUP BY n.n_name, ps.p_name, sh.level
+ORDER BY total_revenue DESC, n.n_name;

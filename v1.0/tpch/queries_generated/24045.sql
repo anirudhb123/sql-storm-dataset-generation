@@ -1,0 +1,51 @@
+WITH RECURSIVE PARTS_HIERARCHY AS (
+    SELECT p_partkey, p_name, p_retailprice, 0 AS level
+    FROM part
+    WHERE p_size BETWEEN 1 AND 5
+    UNION ALL
+    SELECT p.p_partkey, CONCAT(p.p_name, ' (Level ', ph.level + 1, ')'), p.p_retailprice * 0.9, ph.level + 1 
+    FROM part p
+    JOIN PARTS_HIERARCHY ph ON ph.p_partkey = p.p_partkey
+    WHERE ph.level < 5
+),
+PARTS_AVAIL AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CUSTOMER_INFO AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+ORDER_SUMMARY AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NATION_SUPPLIER AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+)
+SELECT
+    p.p_name,
+    p.level,
+    COALESCE(pa.total_avail, 0) AS total_avail,
+    ci.c_name,
+    SUM(os.order_total) AS total_order_value,
+    ns.supplier_count
+FROM PARTS_HIERARCHY p
+LEFT JOIN PARTS_AVAIL pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN CUSTOMER_INFO ci ON ci.rank = 1
+LEFT JOIN ORDER_SUMMARY os ON os.o_orderkey IN 
+      (SELECT o.o_orderkey
+       FROM orders o
+       WHERE o.o_orderstatus = 'F' AND o.o_totalprice > 1000)
+LEFT JOIN NATION_SUPPLIER ns ON ns.n_nationkey = 1 -- Assuming we want nation with key 1
+GROUP BY p.p_name, p.level, pa.total_avail, ci.c_name, ns.supplier_count
+HAVING SUM(os.order_total) > (SELECT AVG(order_total) FROM ORDER_SUMMARY)
+ORDER BY p.level DESC, total_order_value DESC;

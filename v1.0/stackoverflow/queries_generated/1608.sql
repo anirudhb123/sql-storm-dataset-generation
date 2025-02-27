@@ -1,0 +1,77 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+PostMetrics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN bh.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN bh.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory bh ON rp.PostId = bh.PostId
+    GROUP BY 
+        rp.PostId, u.DisplayName
+    ORDER BY 
+        rp.CreationDate DESC
+)
+SELECT 
+    pm.Title,
+    pm.OwnerDisplayName,
+    pm.ViewCount,
+    pm.Score,
+    pm.CloseCount,
+    pm.DeleteCount,
+    CASE 
+        WHEN pm.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pm.PostId) AS CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag ON t.TagName = tag) AS PostTags
+FROM 
+    PostMetrics pm
+JOIN 
+    TopUsers tu ON pm.OwnerDisplayName = tu.DisplayName
+WHERE 
+    pm.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+    AND pm.Score > 0
+ORDER BY 
+    pm.Score DESC, pm.ViewCount DESC
+LIMIT 50;

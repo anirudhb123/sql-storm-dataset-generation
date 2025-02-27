@@ -1,0 +1,47 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(P.Score) AS AverageScore
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        RANK() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS RecentPostRank,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.Id IS NOT NULL THEN 1 END) AS PostHistoryCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.BadgeCount,
+    US.UpVotes,
+    US.DownVotes,
+    US.PostCount,
+    US.AverageScore,
+    RA.RecentPostRank,
+    RA.CommentCount,
+    RA.PostHistoryCount
+FROM UserStats US
+JOIN RecentActivity RA ON US.UserId = RA.UserId
+WHERE US.Reputation > 1000
+ORDER BY US.Reputation DESC, RA.RecentPostRank
+FETCH FIRST 10 ROWS ONLY;

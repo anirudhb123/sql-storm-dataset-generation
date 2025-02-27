@@ -1,0 +1,36 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    c.kind AS company_type,
+    GROUP_CONCAT(k.keyword) AS keywords,
+    COUNT(distinct m.id) AS related_movies_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_link ml ON t.id = ml.movie_id
+LEFT JOIN 
+    title tm ON ml.linked_movie_id = tm.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND c.kind IS NOT NULL
+GROUP BY 
+    a.name, t.title, t.production_year, c.kind
+HAVING 
+    COUNT(distinct tm.id) > 1
+ORDER BY 
+    t.production_year DESC, actor_name;

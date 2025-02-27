@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.suppkey <> sh.s_suppkey AND s.s_acctbal > 5000
+), 
+OrderStats AS (
+    SELECT o_custkey, COUNT(o_orderkey) AS total_orders, SUM(o_totalprice) AS total_spent
+    FROM orders
+    GROUP BY o_custkey
+), 
+PartSupplierStats AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_supplycost, SUM(ps_availqty) AS total_avail
+    FROM partsupp
+    GROUP BY ps_partkey
+), 
+LineItemStats AS (
+    SELECT l_orderkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS revenue,
+           RANK() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS rnk
+    FROM lineitem
+    WHERE l_shipdate >= '2023-01-01'
+    GROUP BY l_orderkey
+)
+SELECT r_name AS region_name, 
+       n_name AS nation_name,
+       s.s_name AS supplier_name,
+       os.total_orders,
+       os.total_spent,
+       p.p_name AS part_name,
+       ps.avg_supplycost,
+       ps.total_avail,
+       li.revenue,
+       CASE WHEN li.revenue IS NULL THEN 'No Revenue' ELSE 'Revenue Generated' END AS revenue_status,
+       SH.level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN OrderStats os ON s.s_suppkey = os.o_custkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN LineItemStats li ON li.l_orderkey = os.o_custkey
+JOIN SupplierHierarchy SH ON s.s_suppkey = SH.s_suppkey
+ORDER BY revenue DESC NULLS LAST, os.total_spent DESC;

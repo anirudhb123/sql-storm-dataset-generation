@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, p.AnswerCount, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.Rank,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    u.DisplayName AS Author,
+    tp.Title,
+    tp.Score,
+    tp.Tags,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.VoteTypeId = 2) AS Upvotes,
+    SUM(v.VoteTypeId = 3) AS Downvotes
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON u.Id = tp.OwnerUserId 
+LEFT JOIN 
+    Comments c ON c.PostId = tp.PostId 
+LEFT JOIN 
+    Votes v ON v.PostId = tp.PostId 
+GROUP BY 
+    u.DisplayName, tp.Title, tp.Score, tp.Tags
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

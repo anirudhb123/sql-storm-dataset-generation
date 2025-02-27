@@ -1,0 +1,63 @@
+WITH PostTagStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 10
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(ps.TotalViews) AS AvgViews,
+        AVG(ps.TotalScore) AS AvgScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN 
+        PostTagStatistics ps ON ps.PostId = p.Id
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName AS ActiveUser,
+    t.TagName AS PopularTag,
+    t.PostCount AS RelatedPostCount,
+    t.AvgViews AS AverageViews,
+    t.AvgScore AS AverageScore
+FROM 
+    MostActiveUsers u
+CROSS JOIN 
+    TopTags t
+ORDER BY 
+    u.QuestionCount DESC, t.PostCount DESC;

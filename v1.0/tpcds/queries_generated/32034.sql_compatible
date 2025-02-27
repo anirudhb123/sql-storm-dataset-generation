@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        1 AS level,
+        CAST(s_store_name AS VARCHAR) AS path
+    FROM store
+    WHERE s_open_date_sk IS NOT NULL
+
+    UNION ALL 
+
+    SELECT 
+        a.s_store_sk,
+        a.s_store_name,
+        sh.level + 1,
+        CONCAT(sh.path, ' -> ', a.s_store_name)
+    FROM store a
+    INNER JOIN sales_hierarchy sh ON a.s_store_sk = sh.s_store_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_cdemo_sk ORDER BY SUM(ws_net_profit) DESC) AS ranking
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY ws_bill_cdemo_sk
+),
+returns_summary AS (
+    SELECT 
+        wr_returning_cdemo_sk,
+        SUM(wr_net_loss) AS total_net_loss,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM web_returns
+    WHERE wr_returned_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY wr_returning_cdemo_sk
+),
+final_summary AS (
+    SELECT 
+        cs.c_current_cdemo_sk,
+        COALESCE(ss.total_net_profit, 0) AS total_net_profit,
+        COALESCE(rs.total_net_loss, 0) AS total_net_loss,
+        (COALESCE(ss.total_net_profit, 0) - COALESCE(rs.total_net_loss, 0)) AS net_gain_loss,
+        CONCAT(cs.c_first_name, ' ', cs.c_last_name) AS customer_name,
+        sh.path AS store_path
+    FROM customer cs
+    LEFT JOIN sales_summary ss ON cs.c_current_cdemo_sk = ss.ws_bill_cdemo_sk
+    LEFT JOIN returns_summary rs ON cs.c_current_cdemo_sk = rs.wr_returning_cdemo_sk
+    LEFT JOIN sales_hierarchy sh ON sh.s_store_sk = cs.c_current_addr_sk
+)
+SELECT 
+    customer_name,
+    total_net_profit,
+    total_net_loss,
+    net_gain_loss,
+    store_path
+FROM final_summary
+WHERE net_gain_loss > 5000
+ORDER BY total_net_profit DESC, customer_name ASC;

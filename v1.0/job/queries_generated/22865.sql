@@ -1,0 +1,80 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+TitleCount AS (
+    SELECT
+        production_year,
+        COUNT(*) AS title_count
+    FROM
+        RankedTitles
+    GROUP BY
+        production_year
+),
+MovieWithCompany AS (
+    SELECT 
+        m.id AS movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.name) AS company_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+ActorsWithTitles AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        ak.name,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS acting_rank
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name ak ON a.person_id = ak.person_id
+    JOIN 
+        aka_title t ON a.movie_id = t.id
+),
+DetailedInfo AS (
+    SELECT
+        ak.name AS actor_name,
+        tt.title,
+        tt.production_year,
+        COALESCE(mc.company_name, 'Unknown Company') AS production_company,
+        at.title_count
+    FROM 
+        ActorsWithTitles ak
+    LEFT JOIN 
+        MovieWithCompany mc ON ak.movie_id = mc.movie_id
+    LEFT JOIN 
+        TitleCount tt ON ak.production_year = tt.production_year
+    WHERE 
+        ak.acting_rank <= 3
+)
+SELECT
+    actor_name,
+    title,
+    production_year,
+    production_company,
+    title_count
+FROM 
+    DetailedInfo
+WHERE 
+    title IS NOT NULL
+    AND production_year >= 1990
+    AND (production_company IS NULL OR production_company <> 'Unknown Company')
+ORDER BY 
+    production_year DESC, actor_name;

@@ -1,0 +1,53 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(vt.VoteTypeId IN (2)), 0) AS UpVotes,
+        COALESCE(SUM(vt.VoteTypeId IN (3)), 0) AS DownVotes
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes vt ON p.Id = vt.PostId
+    WHERE p.PostTypeId = 1 -- Only Questions
+    GROUP BY p.Id, u.DisplayName, u.Reputation
+    ORDER BY p.CreationDate DESC
+    LIMIT 100
+), TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) ) AS Tag, 
+        COUNT(*) AS TagCount
+    FROM RecentPosts
+    GROUP BY Tag
+), TopTags AS (
+    SELECT 
+        Tag, 
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM TagStats
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.OwnerName,
+    rp.OwnerReputation,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    t.Tag AS MostPopularTag
+FROM RecentPosts rp
+JOIN (
+    SELECT 
+        Tag,
+        Rank
+    FROM TopTags
+    WHERE Rank <= 3 -- Get top 3 tags
+) t ON rp.Tags LIKE '%' || t.Tag || '%'
+ORDER BY rp.CreationDate DESC, rp.UpVotes DESC;
+This query retrieves the latest 100 questions, their owner details, comment counts, and vote counts. It also breaks down the tags associated with these questions to provide insights into their popularity, showing the top 3 most used tags along with each question.

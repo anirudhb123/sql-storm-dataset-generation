@@ -1,0 +1,87 @@
+WITH RecursiveMovie AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_order
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorPerformance AS (
+    SELECT
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        SUM(CASE WHEN ti.info_type_id = 1 THEN 1 ELSE 0 END) AS award_nominations,
+        SUM(CASE WHEN ti.info_type_id = 2 THEN 1 ELSE 0 END) AS awards
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        movie_info ti ON c.movie_id = ti.movie_id
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        ak.name,
+        ap.movie_count,
+        ap.award_nominations,
+        ap.awards,
+        RANK() OVER (ORDER BY ap.movie_count DESC, ap.awards DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorPerformance ap ON ak.person_id = ap.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        CASE 
+            WHEN km.keywords IS NULL THEN 'No Keywords'
+            ELSE km.keywords
+        END AS keywords
+    FROM 
+        RecursiveMovie rm
+    LEFT JOIN 
+        MovieKeywords km ON rm.movie_id = km.movie_id
+    WHERE 
+        rm.year_order <= 10
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    ta.name AS lead_actor,
+    ta.movie_count,
+    ta.award_nominations,
+    ta.awards,
+    fm.keywords
+FROM 
+    FilteredMovies fm
+JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+JOIN 
+    TopActors ta ON ci.person_id = ta.person_id
+WHERE 
+    fm.production_year >= 2000 
+    AND fm.keywords NOT LIKE '%horror%' 
+    AND ta.rank <= 50
+ORDER BY 
+    fm.production_year DESC, ta.awards DESC;

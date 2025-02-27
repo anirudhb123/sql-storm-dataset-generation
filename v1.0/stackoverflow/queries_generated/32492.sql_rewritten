@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.ParentId,
+        PH.Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostHierarchy PH ON A.ParentId = PH.PostId
+)
+, PostViewCounts AS (
+    SELECT 
+        OwnerUserId,
+        SUM(ViewCount) AS TotalViews,
+        COUNT(Id) AS TotalPosts
+    FROM 
+        Posts
+    WHERE 
+        OwnerUserId IS NOT NULL
+    GROUP BY 
+        OwnerUserId
+)
+, UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COALESCE(PC.TotalPosts, 0) AS PostsCreated
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostViewCounts PC ON U.Id = PC.OwnerUserId
+    WHERE 
+        U.Reputation > 1000  
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostsCreated,
+    COUNT(DISTINCT PH.PostId) AS TotalReplies,
+    AVG(PH.Level) AS AveragePostDepth,
+    MAX(PH.Title) AS MostDeeplyNestedPost
+FROM 
+    UserReputation U
+LEFT JOIN 
+    RecursivePostHierarchy PH ON U.UserId = PH.PostId
+LEFT JOIN 
+    Posts P ON PH.PostId = P.Id
+GROUP BY 
+    U.UserId
+HAVING 
+    COUNT(DISTINCT PH.PostId) >= 5  
+ORDER BY 
+    U.Reputation DESC;

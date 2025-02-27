@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rn,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_movies
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), 
+HighestRatedMovies AS (
+    SELECT 
+        cm.movie_id,
+        COUNT(DISTINCT cc.id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS actor_presence_ratio
+    FROM 
+        complete_cast cm
+    LEFT JOIN 
+        cast_info ci ON cm.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        cm.movie_id
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+), 
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+), 
+CombinedResults AS (
+    SELECT 
+        r.movie_id,
+        r.movie_title,
+        r.production_year,
+        COALESCE(k.keywords, 'No Keywords') AS keywords,
+        COALESCE(h.cast_count, 0) AS cast_count,
+        COALESCE(h.actor_presence_ratio, 0) AS actor_presence_ratio,
+        r.total_movies,
+        CASE 
+            WHEN r.rn <= r.total_movies / 10 THEN 'Top 10%'
+            ELSE 'Other'
+        END AS ranking_category
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        MoviesWithKeywords k ON r.movie_id = k.movie_id
+    LEFT JOIN 
+        HighestRatedMovies h ON r.movie_id = h.movie_id
+)
+SELECT 
+    c.movie_title,
+    c.production_year,
+    c.keywords,
+    c.cast_count,
+    c.actor_presence_ratio,
+    c.ranking_category
+FROM 
+    CombinedResults c
+WHERE 
+    c.production_year = (SELECT MAX(production_year) FROM RankedMovies) OR
+    c.keywords LIKE '%action%'
+ORDER BY 
+    c.cast_count DESC,
+    c.movie_title;

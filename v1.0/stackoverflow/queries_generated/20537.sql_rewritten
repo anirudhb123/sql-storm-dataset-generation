@@ -1,0 +1,88 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), 
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        COALESCE(P.LastActivityDate, P.CreationDate) AS LastActivity,
+        U.Reputation AS OwnerReputation,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+), 
+HighestScoringPosts AS (
+    SELECT 
+        PM.PostId,
+        PM.PostTypeId,
+        PM.Score,
+        PM.ViewCount,
+        PM.CommentCount,
+        U.DisplayName,
+        CASE 
+            WHEN PM.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+            ELSE 'No Accepted Answer'
+        END AS AcceptedAnswerStatus
+    FROM 
+        PostMetrics PM
+    JOIN 
+        Users U ON PM.OwnerReputation = U.Reputation
+    WHERE 
+        PM.PostRank <= 5
+),
+CommentsStatistics AS (
+    SELECT 
+        PC.PostId,
+        COUNT(*) AS TotalComments,
+        MAX(PC.CreationDate) AS LastCommentDate
+    FROM 
+        Comments PC
+    GROUP BY 
+        PC.PostId
+),
+FinalResults AS (
+    SELECT 
+        HSP.PostId,
+        HSP.PostTypeId,
+        HSP.Score,
+        HSP.ViewCount,
+        HSP.CommentCount,
+        HSP.DisplayName,
+        HSP.AcceptedAnswerStatus,
+        COALESCE(CS.TotalComments, 0) AS TotalComments,
+        COALESCE(CS.LastCommentDate, 'No Comments') AS LastCommentDate
+    FROM 
+        HighestScoringPosts HSP
+    LEFT JOIN 
+        CommentsStatistics CS ON HSP.PostId = CS.PostId
+)
+SELECT 
+    F.*,
+    CASE 
+        WHEN F.AcceptedAnswerStatus = 'Has Accepted Answer' AND F.CommentCount > 0 THEN 'Engaging Post' 
+        ELSE 'Needs Attention' 
+    END AS EngagementStatus,
+    ROUND(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - F.CreationDate)) / 60, 2) AS AgeInMinutes,
+    CASE 
+        WHEN F.TotalComments > 10 THEN 'Highly Engaged'
+        ELSE 'Low Engagement' 
+    END AS EngagementLevel
+FROM 
+    FinalResults F
+ORDER BY 
+    F.Score DESC, F.ViewCount DESC, F.LastCommentDate DESC
+LIMIT 50;

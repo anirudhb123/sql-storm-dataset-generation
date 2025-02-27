@@ -1,0 +1,49 @@
+WITH UserReputation AS (
+    SELECT U.Id AS UserId, U.Reputation, COUNT(P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.Reputation
+),
+RecentPostHistory AS (
+    SELECT PH.PostId, MAX(PH.CreationDate) AS LastChangeDate, 
+           STRING_AGG(CONCAT(PH.UserDisplayName, ': ', PH.Comment), '; ') AS ChangeComments
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+HighestAndLowestRank AS (
+    SELECT UserId, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+),
+FilterConditions AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, 
+           COALESCE(UP.PostCount, 0) AS PostCount,
+           CASE 
+               WHEN U.Reputation > 1000 THEN 'High' 
+               WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+               ELSE 'Low' 
+           END AS ReputationCategory
+    FROM Users U
+    LEFT JOIN UserReputation UP ON U.Id = UP.UserId
+)
+SELECT FC.UserId, FC.DisplayName, FC.Reputation, FC.PostCount, FC.ReputationCategory, 
+       PH.LastChangeDate, PH.ChangeComments
+FROM FilterConditions FC
+LEFT JOIN RecentPostHistory PH ON FC.Id = PH.PostId
+WHERE FC.ReputationCategory = 'High'
+  AND PH.LastChangeDate IS NOT NULL
+  AND EXISTS (
+      SELECT 1 FROM Votes V
+      WHERE V.UserId = FC.UserId
+      AND V.CreationDate > NOW() - INTERVAL '30 days'
+      AND V.VoteTypeId IN (2, 3)  -- Considering only upvotes and downvotes
+  )
+ORDER BY FC.Reputation DESC, PH.LastChangeDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT U.Id, U.DisplayName, U.Reputation, COALESCE(UP.PostCount, 0) AS PostCount, 
+       'Low' AS ReputationCategory, NULL AS LastChangeDate, NULL AS ChangeComments
+FROM Users U
+LEFT JOIN UserReputation UP ON U.Id = UP.UserId
+WHERE U.Reputation < 100
+ORDER BY U.Reputation DESC;

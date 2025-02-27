@@ -1,0 +1,62 @@
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        CASE 
+            WHEN COUNT(o.o_orderkey) > 5 THEN 'Frequent'
+            ELSE 'Occasional'
+        END AS order_type
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartCapacity AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT n.n_nationkey) > 2
+)
+SELECT 
+    c.c_name AS customer_name,
+    cos.total_spent,
+    cos.order_type,
+    spc.total_available_quantity AS supplier_capacity,
+    tr.r_name AS region_name
+FROM 
+    CustomerOrderSummary cos
+JOIN 
+    customer c ON cos.c_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierPartCapacity spc ON c.c_nationkey = spc.s_suppkey  -- Assuming nation key aligns with supplier key for demo purposes
+LEFT JOIN 
+    TopRegions tr ON c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = tr.r_regionkey)
+WHERE 
+    cos.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+ORDER BY 
+    cos.total_spent DESC
+LIMIT 10
+OFFSET 5;

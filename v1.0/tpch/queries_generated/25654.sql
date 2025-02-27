@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name,
+    p.p_size,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    SUBSTRING_INDEX(p.p_name, ' ', -1) AS last_word,
+    CONCAT('Supplier ', s.s_name, ' provides ', p.p_name) AS supplier_info,
+    UPPER(SUBSTRING(p.p_comment, 1, 10)) AS short_comment,
+    DATE_FORMAT(o.o_orderdate, '%Y-%m-%d') AS order_date_formatted,
+    (SELECT COUNT(*) FROM lineitem li WHERE li.l_partkey = p.p_partkey) AS total_lines
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND s.s_acctbal > 1000
+    AND o.o_orderstatus = 'O'
+ORDER BY 
+    last_word DESC, 
+    o.o_orderdate ASC
+LIMIT 100;

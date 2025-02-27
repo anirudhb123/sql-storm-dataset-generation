@@ -1,0 +1,67 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users) -- filter users with above-average reputation
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+), 
+TopUsers AS (
+    SELECT UserId, DisplayName, TotalPosts, TotalComments, TotalBountyAmount, TotalScore
+    FROM UserStats
+    WHERE UserRank <= 10 
+), 
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+), 
+RecentPostTagLinks AS (
+    SELECT 
+        PL.PostId, 
+        PL.RelatedPostId,
+        LT.Name AS LinkTypeName,
+        ROW_NUMBER() OVER (PARTITION BY PL.PostId ORDER BY PL.CreationDate DESC) AS RecentLinkRank
+    FROM PostLinks PL
+    JOIN LinkTypes LT ON PL.LinkTypeId = LT.Id
+)
+
+SELECT 
+    U.DisplayName AS TopUser,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalBountyAmount,
+    U.TotalScore,
+    T.TagName AS PopularTag,
+    T.PostCount AS NumberOfPostsForTag,
+    T.TotalViews AS ViewsForTag,
+    RPL.LinkTypeName AS RecentLinkType,
+    (SELECT COUNT(*) 
+     FROM PostHistory PH 
+     WHERE PH.UserId = U.UserId 
+     AND PH.PostHistoryTypeId IN (10, 11, 12)) AS TotalCloseActions,
+    CASE 
+        WHEN U.TotalBountyAmount IS NULL THEN 'No bounty awarded'
+        WHEN U.TotalBountyAmount > 0 THEN 'Bounty awarded'
+        ELSE 'No bounty'
+    END AS BountyStatus
+FROM TopUsers U
+CROSS JOIN PopularTags T
+LEFT JOIN RecentPostTagLinks RPL ON RPL.PostId = (SELECT TOP 1 PostId FROM Posts ORDER BY CreationDate DESC)
+WHERE T.TagRank <= 5 -- Get top 5 popular tags
+AND (U.TotalScore > 100 OR U.TotalComments > 20)
+ORDER BY U.TotalScore DESC, T.PostCount DESC;

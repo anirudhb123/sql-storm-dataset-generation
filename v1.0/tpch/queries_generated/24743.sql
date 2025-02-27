@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           o.o_orderdate,
+           o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+),
+SupplierPartCost AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c1.c_acctbal) FROM customer c1)
+),
+CombinedData AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           o.o_orderdate,
+           s.s_name,
+           rp.total_supplycost,
+           CASE 
+               WHEN l.l_discount > 0.1 THEN 'High Discount'
+               ELSE 'Low Discount'
+           END AS discount_category
+    FROM RankedOrders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN SupplierPartCost rp ON l.l_partkey = rp.ps_partkey
+    JOIN supplier s ON rp.ps_suppkey = s.s_suppkey
+    WHERE o.o_orderdate >= '2023-01-01' 
+      AND l.l_returnflag = 'N'
+),
+FinalResults AS (
+    SELECT cd.o_orderkey,
+           cd.o_totalprice,
+           cd.o_orderdate,
+           COALESCE(cd.s_name, 'Unknown Supplier') AS supplier_name,
+           SUM(CASE WHEN cd.discount_category = 'High Discount' THEN cd.o_totalprice END) AS high_discount_total,
+           SUM(CASE WHEN cd.discount_category = 'Low Discount' THEN cd.o_totalprice END) AS low_discount_total,
+           COUNT(DISTINCT h.c_custkey) AS customer_count
+    FROM CombinedData cd
+    LEFT JOIN HighValueCustomers h ON cd.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = h.c_custkey)
+    GROUP BY cd.o_orderkey, cd.o_totalprice, cd.o_orderdate, cd.s_name
+)
+SELECT fr.o_orderkey,
+       fr.o_totalprice,
+       fr.o_orderdate,
+       fr.supplier_name,
+       fr.high_discount_total,
+       fr.low_discount_total,
+       fr.customer_count
+FROM FinalResults fr
+WHERE fr.high_discount_total IS NOT NULL
+  AND fr.o_orderdate IN (SELECT DISTINCT o.o_orderdate
+                         FROM orders o
+                         WHERE o.o_orderstatus = 'O'
+                         GROUP BY o.o_orderdate
+                         HAVING COUNT(*) > 1)
+ORDER BY fr.o_orderdate DESC, fr.o_totalprice DESC;

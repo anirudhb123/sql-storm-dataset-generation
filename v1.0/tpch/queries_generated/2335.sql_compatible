@@ -1,0 +1,56 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS rank_sales
+    FROM supplier s
+    JOIN SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_acctbal IS NOT NULL
+    )
+)
+SELECT 
+    hs.s_name, 
+    hs.total_sales AS supplier_total_sales, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names
+FROM TopSuppliers hs
+LEFT JOIN lineitem l ON l.l_suppkey = hs.s_suppkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+WHERE hs.rank_sales <= 10 
+AND c.c_nationkey IN (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    WHERE n.r_regionkey = (
+        SELECT r.r_regionkey 
+        FROM region r 
+        WHERE r.r_name = 'ASIA'
+    )
+)
+GROUP BY hs.s_name, hs.total_sales
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY hs.total_sales DESC;

@@ -1,0 +1,29 @@
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostStatistics AS (
+    SELECT p.OwnerUserId, 
+           COUNT(DISTINCT p.Id) AS TotalPosts, 
+           SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+           SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+           SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT ur.DisplayName, ur.Reputation, ps.TotalPosts, ps.TotalQuestions, ps.TotalAnswers, ps.TotalScore,
+           RANK() OVER (ORDER BY ps.TotalScore DESC) AS ScoreRank
+    FROM UserReputation ur
+    JOIN PostStatistics ps ON ur.Id = ps.OwnerUserId
+    WHERE ur.Reputation IS NOT NULL
+)
+SELECT tu.DisplayName, tu.Reputation, tu.TotalPosts, tu.TotalQuestions, tu.TotalAnswers, tu.TotalScore
+FROM TopUsers tu
+LEFT OUTER JOIN Badges b ON tu.TotalScore > 1000 AND b.UserId = tu.Reputation
+WHERE tu.ScoreRank <= 10
+ORDER BY tu.TotalScore DESC, tu.Reputation DESC
+UNION ALL
+SELECT 'No Users Found' AS DisplayName, 0 AS Reputation, 0 AS TotalPosts, 0 AS TotalQuestions, 0 AS TotalAnswers, 0 AS TotalScore
+WHERE NOT EXISTS (SELECT 1 FROM TopUsers);

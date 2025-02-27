@@ -1,0 +1,42 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COALESCE(ph.RevisionCount, 0) AS PostHistoryCount,
+    COALESCE(c.CommentCount, 0) AS TotalComments
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS RevisionCount 
+     FROM PostHistory 
+     GROUP BY PostId) ph ON p.Id = ph.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+GROUP BY 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    u.DisplayName,
+    u.Reputation,
+    ph.RevisionCount,
+    c.CommentCount
+ORDER BY 
+    p.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

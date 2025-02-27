@@ -1,0 +1,93 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01' AS DATE) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= CAST('2024-10-01' AS DATE) - INTERVAL '1 month'
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.Id AS PostHistoryId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Other History'
+        END AS HistoryAction,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ActionRank
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    u.DisplayName,
+    p.Title,
+    stats.TotalPosts,
+    stats.TotalBadges,
+    stats.MaxReputation,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    COALESCE(rc.LastCommentDate, 'No Comments Yet') AS LastCommentCommented,
+    phd.HistoryAction,
+    phd.CreationDate AS HistoryActionDate
+FROM 
+    Users u
+JOIN 
+    UserStats stats ON u.Id = stats.UserId
+LEFT JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId AND p.PostRank = 1
+LEFT JOIN 
+    RecentComments rc ON p.PostId = rc.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.PostId = phd.PostId AND phd.ActionRank = 1
+WHERE 
+    stats.TotalPosts > 0 
+    AND (u.Location LIKE '%California%' OR u.Reputation > 1000)
+GROUP BY 
+    u.DisplayName,
+    p.Title,
+    stats.TotalPosts,
+    stats.TotalBadges,
+    stats.MaxReputation,
+    rc.CommentCount,
+    rc.LastCommentDate,
+    phd.HistoryAction,
+    phd.CreationDate
+ORDER BY 
+    stats.MaxReputation DESC, 
+    p.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,41 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS order_level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.custkey = oh.custkey AND o_orderdate > oh.o_orderdate
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue,
+    AVG(oh.order_level) AS avg_order_level,
+    r.r_name AS region_name
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN 
+    supplier s ON li.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+WHERE 
+    c.c_acctbal > 1000.00 
+    AND r.r_name IS NOT NULL
+GROUP BY 
+    c.c_name, r.r_name
+HAVING 
+    total_orders > 5
+ORDER BY 
+    total_revenue DESC, total_orders ASC;

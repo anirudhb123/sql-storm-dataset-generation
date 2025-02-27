@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.web_site_id, ws.ws_sold_date_sk
+),
+ItemReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        AVG(wr.wr_return_amt) AS avg_return_amt
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk
+),
+ItemStats AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(ir.total_returned, 0) AS total_returned,
+        COALESCE(ir.avg_return_amt, 0) AS avg_return_amt,
+        SUM(ws.ws_quantity) AS total_sold
+    FROM item i
+    LEFT JOIN ItemReturns ir ON i.i_item_sk = ir.wr_item_sk
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_id
+)
+SELECT 
+    ia.i_item_id,
+    ia.total_sold,
+    ia.total_returned,
+    ia.avg_return_amt,
+    CASE 
+        WHEN ia.total_returned > 0 THEN (ia.avg_return_amt / NULLIF(ia.total_returned, 0))
+        ELSE 0
+    END AS return_ratio,
+    r.r_reason_desc
+FROM ItemStats ia
+JOIN reason r ON ia.total_returned > 0
+WHERE ia.total_sold > 100
+ORDER BY return_ratio DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    ia.i_item_id,
+    ia.total_sold,
+    ia.total_returned,
+    ia.avg_return_amt,
+    CASE 
+        WHEN ia.total_returned > 0 THEN (ia.avg_return_amt / NULLIF(ia.total_returned, 0))
+        ELSE 0
+    END AS return_ratio,
+    'No Returns' AS r_reason_desc
+FROM ItemStats ia
+WHERE ia.total_returned = 0
+AND ia.total_sold > 100
+ORDER BY return_ratio DESC
+LIMIT 10;

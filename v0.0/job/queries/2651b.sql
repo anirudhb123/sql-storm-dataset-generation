@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS from_company, min(mc.note) AS production_note, min(t.title) AS movie_based_on_book
+FROM company_name AS cn, company_type AS ct, keyword AS k, link_type AS lt, movie_companies AS mc, movie_keyword AS mk, movie_link AS ml, title AS t
+WHERE lt.id = ml.link_type_id AND ml.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_type_id = ct.id AND mc.company_id = cn.id AND ml.movie_id = mk.movie_id AND ml.movie_id = mc.movie_id AND mk.movie_id = mc.movie_id
+AND ml.id < 16125 AND mc.movie_id < 2470350 AND ct.kind LIKE '%production%' AND lt.link IN ('featured in', 'features', 'follows', 'references', 'similar to', 'spin off from', 'spoofs');

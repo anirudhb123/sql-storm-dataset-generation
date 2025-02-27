@@ -1,0 +1,62 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+MoviesWithCast AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        rc.actor_name,
+        rc.title_rank,
+        COALESCE(mc.company_count, 0) AS associated_company_count,
+        mc.company_names
+    FROM 
+        RankedTitles rc
+    LEFT JOIN 
+        aka_title mt ON rc.title = mt.title AND rc.production_year = mt.production_year
+    LEFT JOIN 
+        MovieCompanies mc ON mt.id = mc.movie_id
+)
+SELECT 
+    m.title,
+    m.actor_name,
+    m.production_year,
+    m.title_rank,
+    m.associated_company_count,
+    m.company_names,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY m.title ORDER BY m.title_rank) AS total_cast_count,
+    CASE 
+        WHEN m.associated_company_count > 1 THEN 'Multiple Companies'
+        ELSE 'Single or No Company'
+    END AS company_association
+FROM 
+    MoviesWithCast m
+WHERE 
+    m.title_rank = 1 AND 
+    (m.production_year < 2000 OR m.production_year IS NULL)  
+ORDER BY 
+    m.production_year DESC;

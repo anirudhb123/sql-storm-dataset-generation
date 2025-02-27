@@ -1,0 +1,38 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title AS movie_title,
+           0 AS depth,
+           NULL AS parent_movie_id
+    FROM aka_title AS mt
+    WHERE mt.production_year > 2000
+    UNION ALL
+    SELECT m.id AS movie_id,
+           m.title AS movie_title,
+           mh.depth + 1 AS depth,
+           mh.movie_id AS parent_movie_id
+    FROM movie_link AS ml
+    JOIN MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title AS m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    at.title AS parent_movie_title,
+    COALESCE(NULLIF(aka.name, ''), 'Unnamed') AS actor_name,
+    COUNT(DISTINCT mc.company_id) AS num_studios,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS associated_keywords,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN LENGTH(mi.info) ELSE 0 END) AS avg_info_length,
+    COUNT(DISTINCT ci.id) FILTER (WHERE ci.note IS NOT NULL) AS num_cast_with_notes,
+    SUM(CASE WHEN ci.note ILIKE '%lead%' THEN 1 ELSE 0 END) AS num_lead_roles
+FROM MovieHierarchy AS mh
+JOIN aka_title AS at ON mh.movie_id = at.id
+LEFT JOIN cast_info AS ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name AS aka ON aka.person_id = ci.person_id
+LEFT JOIN movie_companies AS mc ON mc.movie_id = mh.movie_id
+LEFT JOIN movie_keyword AS mk ON mk.movie_id = mh.movie_id
+LEFT JOIN keyword AS kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info AS mi ON mi.movie_id = mh.movie_id
+WHERE mh.depth = 1
+GROUP BY at.title, aka.name
+HAVING COUNT(DISTINCT mc.company_id) > 1
+   AND STRING_AGG(DISTINCT kw.keyword, ', ') ILIKE '%action%'
+   AND AVG(LENGTH(mi.info)) > 50
+ORDER BY num_studios DESC, parent_movie_title;

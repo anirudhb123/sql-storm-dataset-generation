@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ss_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss_store_sk
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        SUM(ws_net_paid) AS total_web_sales
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    JOIN 
+        web_sales ON ws_bill_customer_sk = c_customer_sk
+    WHERE 
+        total_web_sales IS NOT NULL
+    GROUP BY 
+        c_customer_sk, c_first_name, c_last_name, cd_gender, cd_marital_status
+),
+filtered_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.total_web_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.cd_gender ORDER BY c.total_web_sales DESC) AS gender_sales_rank
+    FROM 
+        customer_info c
+    WHERE 
+        c.total_web_sales > (
+            SELECT 
+                AVG(total_web_sales) 
+            FROM 
+                customer_info
+        )
+)
+SELECT 
+    s.sales_rank,
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.total_web_sales,
+    COALESCE(s.total_sales, 0) AS store_sales
+FROM 
+    sales_cte s
+FULL OUTER JOIN 
+    filtered_customers f ON s.ss_store_sk = (
+        SELECT 
+            s_store_sk 
+        FROM 
+            store 
+        WHERE 
+            s_store_sk IS NOT NULL
+        LIMIT 1
+    )
+WHERE 
+    s.sales_rank <= 10 OR f.gender_sales_rank <= 10
+ORDER BY 
+    store_sales DESC, total_web_sales DESC;
+```

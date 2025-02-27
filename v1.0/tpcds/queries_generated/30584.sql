@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        1 AS level
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year >= 1980
+    
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ch.level + 1
+    FROM 
+        customer c 
+    JOIN 
+        CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ch.c_customer_id) AS total_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    COUNT(ws.ws_order_number) AS total_orders,
+    MAX(ws.ws_sales_price) AS max_sales_price,
+    MIN(ws.ws_sales_price) AS min_sales_price,
+    STRING_AGG(DISTINCT ca.ca_country) AS countries_involved
+FROM 
+    CustomerHierarchy ch
+LEFT JOIN 
+    web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    customer_address ca ON ch.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_demographics cd ON ch.c_customer_id = cd.cd_demo_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND cd.cd_dep_count IS NOT NULL
+    AND ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    COUNT(DISTINCT ch.c_customer_id) > 10
+ORDER BY 
+    total_net_profit DESC
+LIMIT 50;

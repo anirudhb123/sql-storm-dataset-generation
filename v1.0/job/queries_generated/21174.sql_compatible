@@ -1,0 +1,54 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        ci.person_id,
+        t.title,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS actor_order
+    FROM cast_info ci
+    JOIN title t ON ci.movie_id = t.id
+    WHERE ci.nr_order IS NOT NULL
+),
+TopPerformingActors AS (
+    SELECT
+        a.person_id,
+        COUNT(DISTINCT a.title) AS movie_count,
+        MIN(a.nr_order) AS lowest_order,
+        AVG(a.nr_order) AS average_order
+    FROM ActorHierarchy a
+    GROUP BY a.person_id
+    HAVING AVG(a.nr_order) < 5  
+),
+ActorNames AS (
+    SELECT
+        an.person_id,
+        STRING_AGG(an.name, ', ') AS full_name
+    FROM aka_name an
+    JOIN TopPerformingActors t ON an.person_id = t.person_id
+    GROUP BY an.person_id
+),
+MovieDetails AS (
+    SELECT
+        t.title,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS company_notes
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    GROUP BY t.title
+    HAVING COUNT(DISTINCT k.keyword) > 1
+)
+SELECT
+    an.full_name,
+    t.movie_count,
+    t.lowest_order,
+    t.average_order,
+    md.title,
+    md.keyword_count,
+    md.company_notes
+FROM TopPerformingActors t
+JOIN ActorNames an ON t.person_id = an.person_id
+JOIN MovieDetails md ON md.keyword_count > 2
+ORDER BY t.average_order DESC, md.company_notes ASC
+LIMIT 10;

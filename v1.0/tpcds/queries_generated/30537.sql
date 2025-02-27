@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_salutation, cd.cd_marital_status, cd.cd_gender,
+           cd.cd_dep_count, cd.cd_purchase_estimate, 1 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+    
+    UNION ALL
+    
+    SELECT ch.c_customer_sk, c.c_first_name, c.c_last_name, c.c_salutation, cd.cd_marital_status, cd.cd_gender,
+           cd.cd_dep_count, cd.cd_purchase_estimate, ch.level + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F' AND cd.cd_dep_count > 2 AND ch.level < 4
+),
+AvgSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        AVG(ws_net_paid_inc_tax) AS avg_sales
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.level, asc.avg_sales
+    FROM CustomerHierarchy ch
+    LEFT JOIN AvgSales asc ON ch.c_customer_sk = asc.ws_bill_customer_sk
+    WHERE asc.avg_sales IS NOT NULL AND asc.avg_sales > 1000
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    CH.level AS customer_level,
+    COALESCE(CASE 
+                 WHEN hvc.avg_sales > 2000 THEN 'VIP Customer'
+                 WHEN hvc.avg_sales BETWEEN 1000 AND 2000 THEN 'Regular Customer'
+                 ELSE 'Low Value Customer'
+              END, 'Unknown') AS customer_status,
+    CONCAT(ch.c_salutation, ' ', ch.c_first_name, ' ', ch.c_last_name) AS full_name,
+    CASE 
+        WHEN hvc.avg_sales IS NULL THEN 'No Sales Found'
+        ELSE hvc.avg_sales::decimal(10,2)::text
+    END AS sales_amount
+FROM CustomerHierarchy ch
+LEFT JOIN HighValueCustomers hvc ON ch.c_customer_sk = hvc.c_customer_sk
+ORDER BY customer_level DESC, sales_amount DESC
+LIMIT 50;

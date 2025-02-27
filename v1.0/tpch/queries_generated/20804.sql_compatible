@@ -1,0 +1,66 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' 
+        AND o.o_orderdate <= '1996-12-31'
+        AND o.o_totalprice IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerSegment AS (
+    SELECT 
+        c.c_name,
+        SUM(o.o_totalprice) FILTER (WHERE o.o_orderstatus = 'O') AS total_orders
+    FROM 
+        customer c
+        LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS total_nations,
+    SUM(COALESCE(CASE WHEN lo.l_returnflag = 'R' THEN lo.l_extendedprice ELSE 0 END, 0)) AS total_returned_revenue,
+    ROUND(AVG(rank_val), 2) AS avg_rank_by_region
+FROM 
+    region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    FULL OUTER JOIN (
+        SELECT 
+            ss.ps_suppkey,
+            SUM(ss.ps_supplycost) AS total_supply_cost,
+            RANK() OVER (ORDER BY SUM(ss.ps_supplycost) DESC) AS rank_val
+        FROM 
+            partsupp ss
+        GROUP BY 
+            ss.ps_suppkey
+    ) t ON n.n_nationkey = (SELECT DISTINCT n2.n_nationkey FROM nation n2 WHERE n2.n_regionkey = r.r_regionkey)
+    LEFT JOIN lineitem lo ON lo.l_suppkey = t.ps_suppkey
+WHERE 
+    r.r_comment NOT LIKE '%obsolete%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY 
+    total_returned_revenue DESC;

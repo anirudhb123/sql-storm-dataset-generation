@@ -1,0 +1,70 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_container, 
+        p.p_retailprice, 
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+),
+FilteredParts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_size, 
+        rp.p_retailprice
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank <= 5
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        ps.ps_partkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice, 
+        l.l_partkey, 
+        l.l_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(co.l_quantity) AS total_quantity_ordered,
+    AVG(sd.ps_supplycost) AS avg_supply_cost,
+    SUM(sd.ps_availqty) AS total_avail_qty,
+    CONCAT(p.p_name, ' (', p.p_size, ' ', p.p_container, ')') AS part_description
+FROM 
+    FilteredParts p
+JOIN 
+    SupplierDetails sd ON p.p_partkey = sd.ps_partkey
+JOIN 
+    CustomerOrders co ON p.p_partkey = co.l_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_size, p.p_container
+ORDER BY 
+    total_quantity_ordered DESC, avg_supply_cost ASC
+FETCH FIRST 10 ROWS ONLY;

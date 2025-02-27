@@ -1,0 +1,59 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(t.production_year) ORDER BY RAND()) AS random_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+
+actor_movie_info AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ci.nr_order,
+        CASE 
+            WHEN ci.note IS NULL THEN 'Unknown Role'
+            ELSE ci.note
+        END AS role_note
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+)
+
+SELECT 
+    am.actor_name,
+    am.movie_title,
+    am.production_year,
+    am.nr_order,
+    COUNT(*) OVER (PARTITION BY am.actor_name ORDER BY am.production_year DESC) AS movie_count,
+    STRING_AGG(DISTINCT keyword.keyword, ', ') FILTER (WHERE keyword.keyword IS NOT NULL) AS keywords
+FROM 
+    actor_movie_info am
+LEFT JOIN 
+    movie_keyword mk ON am.movie_title = mk.movie_id
+LEFT JOIN 
+    keyword ON mk.keyword_id = keyword.id
+WHERE 
+    am.production_year IS NOT NULL
+    AND (am.nr_order IS NULL OR am.nr_order <= 3)
+    AND am.movie_title IN (
+        SELECT title 
+        FROM ranked_movies 
+        WHERE random_rank < 100
+    )
+GROUP BY 
+    am.actor_name, am.movie_title, am.production_year, am.nr_order
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    am.actor_name ASC, am.production_year DESC;

@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_nationkey, 
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        c.c_custkey
+),
+LineitemDiscounts AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COALESCE(ss.unique_parts, 0) AS supplier_unique_parts,
+    COALESCE(ss.total_available_quantity, 0) AS supplier_total_available_quantity,
+    COALESCE(cs.total_order_value, 0) AS customer_total_order_value,
+    COALESCE(cs.order_count, 0) AS customer_order_count,
+    ld.total_discounted_price AS lineitem_discounted_price
+FROM 
+    nation n
+LEFT JOIN 
+    SupplierStats ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    CustomerOrders cs ON n.n_nationkey = (SELECT n2.n_nationkey 
+                                            FROM customer c2 
+                                            JOIN supplier s2 ON c2.c_nationkey = s2.s_nationkey 
+                                            WHERE c2.c_custkey = cs.c_custkey 
+                                            LIMIT 1)
+LEFT JOIN 
+    LineitemDiscounts ld ON ld.l_orderkey IN (SELECT o.o_orderkey 
+                                                FROM orders o 
+                                                WHERE o.o_custkey = cs.c_custkey)
+WHERE 
+    n.n_nationkey IS NOT NULL 
+ORDER BY 
+    nation_name;

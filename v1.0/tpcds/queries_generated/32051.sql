@@ -1,0 +1,52 @@
+
+WITH RECURSIVE DateRange AS (
+    SELECT d_date_sk, d_date FROM date_dim
+    WHERE d_date >= '2023-01-01' AND d_date < '2024-01-01'
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date 
+    FROM date_dim d
+    JOIN DateRange r ON d.d_date_sk = r.d_date_sk + 1
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM web_sales ws
+    JOIN DateRange d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY ws.ws_item_sk, sales_month
+),
+RankedSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.sales_month,
+        sd.total_sales,
+        RANK() OVER (PARTITION BY sd.sales_month ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM SalesData sd
+),
+TopProducts AS (
+    SELECT 
+        r.ws_item_sk,
+        r.sales_month,
+        r.total_sales
+    FROM RankedSales r
+    WHERE r.sales_rank <= 5
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    tp.sales_month,
+    tp.total_sales
+FROM TopProducts tp
+JOIN item i ON tp.ws_item_sk = i.i_item_sk
+LEFT JOIN customer c ON c.c_customer_sk IN (
+    SELECT ss.ss_customer_sk
+    FROM store_sales ss
+    WHERE ss.ss_item_sk = tp.ws_item_sk
+    GROUP BY ss.ss_customer_sk
+    HAVING COUNT(ss.ss_ticket_number) > 2
+)
+WHERE c.c_birth_month IS NOT NULL
+ORDER BY tp.sales_month, tp.total_sales DESC;

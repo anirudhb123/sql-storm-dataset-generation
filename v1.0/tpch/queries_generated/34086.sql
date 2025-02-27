@@ -1,0 +1,76 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        sh.level + 1
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        supplier s ON sh.s_nationkey = s.s_nationkey
+    WHERE 
+        sh.level < 3 AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrder AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_type,
+    ph.s_name AS supplier_name,
+    ph.level AS supplier_level,
+    co.total_orders,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No orders'
+        ELSE 'Orders placed'
+    END AS order_status,
+    COALESCE(ps.total_available_qty, 0) AS available_qty,
+    ps.avg_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierHierarchy ph ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ph.s_suppkey)
+LEFT JOIN 
+    CustomerOrder co ON co.total_orders > 5
+WHERE 
+    p.p_retailprice > 100.00
+ORDER BY 
+    p.p_name, ph.level DESC, co.total_spent DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

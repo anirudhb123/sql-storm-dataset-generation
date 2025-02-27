@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.PostTypeId IN (1, 2)  -- Only Questions and Answers
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 END) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(ph.Comment, ', ') AS PostComments,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS TotalEdits
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+),
+ClosingDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN c.Name END) AS CloseReason
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        CloseReasonTypes c ON c.Id = CAST(ph.Comment AS INT)  -- Assuming Comment contains the CloseReasonId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(rv.VoteCount, 0) AS TotalVotes,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    phs.PostComments,
+    phs.FirstEditDate,
+    phs.LastEditDate,
+    phs.TotalEdits,
+    cd.CloseDate,
+    cd.CloseReason
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN 
+    ClosingDetails cd ON rp.PostId = cd.PostId
+WHERE 
+    rp.RankByViews <= 10  -- Top 10 posts by view count
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

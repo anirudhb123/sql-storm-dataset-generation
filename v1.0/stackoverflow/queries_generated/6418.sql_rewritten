@@ -1,0 +1,29 @@
+WITH UserBadges AS (
+    SELECT UserId, COUNT(*) AS TotalBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PopularPosts AS (
+    SELECT OwnerUserId, Title, COUNT(*) AS TotalVotes
+    FROM Posts
+    JOIN Votes ON Posts.Id = Votes.PostId
+    WHERE Votes.VoteTypeId IN (2, 3) 
+    GROUP BY OwnerUserId, Title
+    HAVING COUNT(*) > 10
+),
+UserReputation AS (
+    SELECT Id, Reputation, DisplayName
+    FROM Users
+    WHERE Reputation > 1000
+),
+ActiveUsers AS (
+    SELECT DISTINCT U.Id, U.DisplayName, U.Reputation, UB.TotalBadges, PP.TotalVotes
+    FROM UserReputation U
+    JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PopularPosts PP ON U.Id = PP.OwnerUserId
+    WHERE U.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT AU.DisplayName, AU.Reputation, AU.TotalBadges, COALESCE(AU.TotalVotes, 0) AS TotalVotes
+FROM ActiveUsers AU
+ORDER BY AU.Reputation DESC, AU.TotalVotes DESC
+LIMIT 10;

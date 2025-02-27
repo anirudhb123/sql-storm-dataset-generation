@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+FilteredSales AS (
+    SELECT s.o_orderkey,
+           s.total_sales,
+           CASE 
+               WHEN s.total_sales IS NULL THEN 0 
+               WHEN s.total_sales > 10000 THEN 'High'
+               ELSE 'Low' 
+           END AS sales_category
+    FROM SalesCTE s
+),
+RecursiveJoin AS (
+    SELECT s.o_orderkey,
+           s.sales_category,
+           r.r_name
+    FROM FilteredSales s
+    LEFT JOIN nation n ON s.o_orderkey % 10 = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT COALESCE(j.sales_category, 'Unknown') AS sales_category,
+       COUNT(DISTINCT j.o_orderkey) AS order_count,
+       SUM(COALESCE(l.l_extendedprice, 0)) AS total_revenue,
+       AVG(l.l_discount) AS avg_discount_rate
+FROM RecursiveJoin j
+FULL OUTER JOIN lineitem l ON j.o_orderkey = l.l_orderkey
+WHERE j.sales_category IS NOT NULL OR l.l_returnflag = 'Y'
+GROUP BY j.sales_category
+HAVING COUNT(DISTINCT j.o_orderkey) > 5
+ORDER BY total_revenue DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

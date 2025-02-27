@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 50000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipdate > '2023-01-01'
+    GROUP BY l.l_partkey
+),
+TopPartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 10
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COALESCE(SUM(as.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    STRING_AGG(CONCAT(th.p_name, ' - ', th.total_supply_cost) ORDER BY th.total_supply_cost DESC) AS supplier_supply_info
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN AggregatedSales as ON c.c_custkey = as.l_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN TopPartSuppliers th ON th.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost IS NOT NULL AND ps.ps_availqty > 0
+) 
+WHERE r.r_name LIKE 'E%' 
+AND c.c_acctbal IS NOT NULL 
+AND EXISTS (
+    SELECT 1 
+    FROM supplier 
+    WHERE s_acctbal < ALL (
+        SELECT avg(sp.s_acctbal) 
+        FROM supplier sp 
+        WHERE sp.s_acctbal IS NOT NULL
+    )
+)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY unique_customers DESC;

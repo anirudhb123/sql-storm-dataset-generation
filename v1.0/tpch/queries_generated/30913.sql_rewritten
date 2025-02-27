@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000
+),
+CustomerStats AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_by_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierSummary AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           CASE 
+               WHEN l.l_returnflag = 'R' THEN 'Returned'
+               ELSE 'Not Returned'
+           END AS return_status
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY l.l_orderkey, l.l_returnflag
+)
+SELECT DISTINCT
+    c.c_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.total_revenue) AS total_revenue,
+    p.total_available,
+    ps.avg_supply_cost,
+    sh.level AS supplier_level
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN FilteredLineItems l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN PartSupplierSummary p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT sh.s_suppkey FROM SupplierHierarchy sh WHERE sh.level <= 2))
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = c.c_nationkey
+WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 2000
+GROUP BY c.c_name, r.r_name, p.total_available, ps.avg_supply_cost, sh.level
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC, c.c_name;

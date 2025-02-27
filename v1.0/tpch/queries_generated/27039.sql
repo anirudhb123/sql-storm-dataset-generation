@@ -1,0 +1,40 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    SUBSTRING(p.p_comment, 1, 10) AS short_comment,
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    o.o_orderdate,
+    o.o_orderstatus,
+    (SELECT COUNT(*) 
+     FROM orders o2 
+     WHERE o2.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+     AND o2.o_orderdate > DATEADD(year, -1, o.o_orderdate)
+    ) AS recent_orders
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 100.00 
+AND 
+    o.o_orderstatus = 'O'
+GROUP BY 
+    p.p_name, r.r_name, n.n_name, c.c_name, o.o_orderdate, o.o_orderstatus
+ORDER BY 
+    total_available_quantity DESC, average_supply_cost ASC;

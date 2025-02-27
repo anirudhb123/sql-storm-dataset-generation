@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+
+TopBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, b.Name
+    HAVING 
+        COUNT(b.Id) > 1 -- Users with more than one badge
+),
+
+PostHistoryCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.ViewCount,
+    rp.Score,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    ts.Tag,
+    ts.TagCount,
+    tb.BadgeName,
+    tb.BadgeCount,
+    phc.HistoryCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStatistics ts ON ts.Tag IN (SELECT unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')))
+    LEFT JOIN 
+    TopBadges tb ON tb.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryCounts phc ON phc.PostId = rp.PostId
+WHERE 
+    rp.PostRank <= 5 -- Limit to top 5 recent questions per user
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.Score DESC;

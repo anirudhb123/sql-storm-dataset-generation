@@ -1,0 +1,51 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        RANK() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS BountyRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS TagRank
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY t.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS ClosedPostRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBounty,
+    pt.TagName,
+    pt.PostCount,
+    cp.PostId,
+    cp.Title,
+    cp.CreationDate,
+    cp.CloseReason
+FROM UserActivity ua
+FULL OUTER JOIN PopularTags pt ON ua.TotalPosts >= 5  -- Having a minimum of 5 posts to consider
+FULL OUTER JOIN ClosedPosts cp ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+WHERE ua.BountyRank <= 10 OR pt.TagRank <= 5
+ORDER BY ua.TotalBounty DESC, pt.PostCount DESC, cp.ClosedPostRank
+LIMIT 50;

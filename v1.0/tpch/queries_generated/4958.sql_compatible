@@ -1,0 +1,55 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+MaxOrderDate AS (
+    SELECT 
+        MAX(o.o_orderdate) AS max_date
+    FROM 
+        orders o
+)
+SELECT 
+    r.s_name,
+    r.rank,
+    c.c_name,
+    c.total_spent,
+    COALESCE(m.max_date, 'No orders') AS last_order_date,
+    CASE 
+        WHEN c.total_spent > 10000 THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS customer_value_segment
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    HighValueCustomers c ON r.rank = 1
+CROSS JOIN 
+    MaxOrderDate m
+WHERE 
+    r.total_supply_cost IS NOT NULL OR c.total_spent IS NOT NULL
+ORDER BY 
+    customer_value_segment DESC, c.total_spent DESC;

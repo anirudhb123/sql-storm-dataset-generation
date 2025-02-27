@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, 
+           SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+           1 AS level
+    FROM partsupp
+    GROUP BY ps_partkey
+    
+    UNION ALL
+
+    SELECT p.ps_partkey,
+           SUM(ps_supplycost * ps_availqty) + s.total_supply_cost,
+           level + 1
+    FROM partsupp p
+    JOIN SupplyCostCTE s ON p.ps_partkey = s.ps_partkey
+    WHERE level < 2
+    GROUP BY p.ps_partkey, s.total_supply_cost
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_fully_paid_orders,
+    AVG(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice END) AS avg_price_high_discount,
+    ARRAY_AGG(DISTINCT p.p_name) FILTER (WHERE ps.ps_availqty IS NOT NULL AND ps.ps_supplycost > 100) AS expensive_parts,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice) DESC) AS rank_within_nation
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    SupplyCostCTE sc ON ps.ps_partkey = sc.ps_partkey
+WHERE 
+    (o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31')
+    AND (l.l_returnflag IS NULL OR l.l_returnflag <> 'R')
+GROUP BY 
+    n.n_name, r.r_name
+ORDER BY 
+    customer_count DESC, total_fully_paid_orders DESC;

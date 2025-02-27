@@ -1,0 +1,101 @@
+
+WITH RecursivePosts AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.Score,
+        a.CreationDate,
+        a.ViewCount,
+        a.AcceptedAnswerId,
+        0 AS AnswerCount,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePosts rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2  
+), UserStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+), QuestionStats AS (
+    
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        ust.TotalPosts,
+        ust.TotalBadges,
+        ust.UpVotes,
+        ust.DownVotes,
+        COUNT(DISTINCT a.Id) AS AnswerCount
+    FROM
+        RecursivePosts rp
+    LEFT JOIN 
+        Posts a ON rp.PostId = a.ParentId
+    LEFT JOIN 
+        UserStats ust ON rp.OwnerUserId = ust.UserId
+    WHERE 
+        rp.Level = 1  
+    GROUP BY 
+        rp.PostId, rp.Title, rp.OwnerUserId, rp.Score, rp.CreationDate, rp.ViewCount, ust.TotalPosts, ust.TotalBadges, ust.UpVotes, ust.DownVotes
+)
+SELECT 
+    qs.Title,
+    qs.ViewCount,
+    qs.Score,
+    qs.AnswerCount,
+    u.DisplayName AS OwnerName,
+    ust.Reputation,
+    ust.TotalPosts,
+    ust.TotalBadges,
+    ust.UpVotes,
+    ust.DownVotes
+FROM 
+    QuestionStats qs
+JOIN 
+    Users u ON qs.OwnerUserId = u.Id
+WHERE 
+    qs.AnswerCount > 0
+ORDER BY 
+    qs.ViewCount DESC, qs.Score DESC
+LIMIT 10;

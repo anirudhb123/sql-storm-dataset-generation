@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_orderstatus, o_totalprice, o_orderdate, 
+           1 AS level, CAST(ARRAY[o_orderkey] AS INTEGER[]) AS path
+    FROM orders
+    WHERE o_orderstatus = 'F'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           oh.level + 1, oh.path || o.o_orderkey
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '30 days' 
+      AND NOT o.o_orderkey = ANY(oh.path)
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+CombinedStats AS (
+    SELECT cs.c_custkey, cs.c_name, co.order_count, co.total_spent, 
+           ss.total_avail_qty, ss.avg_supply_cost,
+           CASE 
+               WHEN co.total_spent IS NULL THEN 'No Orders' 
+               WHEN co.total_spent > 1000 THEN 'High Value' 
+               ELSE 'Regular' 
+           END AS customer_segment
+    FROM CustomerOrders co
+    FULL OUTER JOIN supplier s ON co.c_custkey = s.s_suppkey
+    FULL OUTER JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT DISTINCT r.r_name, COUNT(DISTINCT cs.c_custkey) AS customer_count,
+       AVG(cs.total_spent) AS avg_spent,
+       MAX(ls.total_avail_qty) AS max_avail_qty
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN CombinedStats cs ON s.s_suppkey = cs.s_suppkey
+LEFT JOIN lineitem ls ON cs.c_custkey = ls.l_suppkey
+WHERE cs.customer_segment = 'High Value'
+GROUP BY r.r_name
+HAVING AVG(cs.total_spent) > 500
+ORDER BY customer_count DESC, avg_spent DESC;

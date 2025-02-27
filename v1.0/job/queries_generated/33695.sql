@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        CONCAT('Sequel of ', m.title),
+        m.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        mh.depth < 3  -- Limit depth for performance
+)
+
+SELECT
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    AVG(
+        CASE WHEN i.info IS NOT NULL THEN LENGTH(i.info) END
+    ) AS avg_info_length,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY a.name) AS actor_rank
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON ci.person_id = a.person_id
+JOIN
+    movie_companies mc ON mc.movie_id = ci.movie_id
+RIGHT OUTER JOIN
+    movie_info i ON i.movie_id = ci.movie_id
+JOIN
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+JOIN
+    keyword kc ON kc.id = mk.keyword_id
+JOIN
+    movie_hierarchy m ON m.movie_id = ci.movie_id
+WHERE
+    m.production_year > 2000
+    AND a.name IS NOT NULL
+GROUP BY
+    a.name, m.title, m.production_year
+HAVING
+    COUNT(DISTINCT kc.keyword) > 5
+ORDER BY
+    m.production_year DESC, avg_info_length DESC;

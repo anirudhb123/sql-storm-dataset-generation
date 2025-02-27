@@ -1,0 +1,46 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 as level
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_nationkey <> nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.nationkey, COUNT(s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    GROUP BY s.nationkey
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_order_amount, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+part_supplier_count AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ps.pc_partkey AS part_key,
+    p.p_name AS part_name,
+    COUNT(DISTINCT s.s_suppkey) AS number_of_suppliers,
+    AVG(s.s_acctbal) AS average_supplier_balance,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+    MAX(o.total_order_amount) OVER (PARTITION BY n.n_nationkey) AS max_order_amount_in_nation
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT OUTER JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN part p ON p.p_partkey = ps.ps_partkey
+JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+LEFT JOIN order_summary o ON o.o_custkey = s.s_nationkey
+WHERE p.p_retailprice > 50.00 
+AND l.l_shipdate >= DATE('2023-01-01')
+AND (s.s_acctbal IS NOT NULL OR s.s_acctbal > 0)
+GROUP BY r.r_name, n.n_name, ps.ps_partkey, p.p_name
+ORDER BY region_name, nation_name, total_revenue DESC;

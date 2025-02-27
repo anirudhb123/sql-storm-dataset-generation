@@ -1,0 +1,68 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS hierarchy_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.hierarchy_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey 
+    WHERE o.o_orderdate > oh.o_orderdate AND oh.hierarchy_level < 4
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        AVG(l.l_discount) AS avg_discount,
+        SUM(l.l_extendedprice) AS total_extended_price 
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY p.p_partkey
+)
+SELECT 
+    c.c_name,
+    cs.order_count,
+    cs.total_spent,
+    cs.avg_order_value,
+    p.p_name,
+    pd.avg_discount,
+    pd.total_extended_price,
+    s.s_name,
+    sp.total_supply_cost
+FROM CustomerStats cs
+JOIN customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN PartDetails pd ON c.c_custkey IN (SELECT p.ps_suppkey FROM partsupp p WHERE p.ps_partkey = pd.p_partkey)
+JOIN SupplierPerformance sp ON sp.total_supply_cost > 1000
+LEFT JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT pd.p_partkey FROM PartDetails pd))
+WHERE cs.total_spent IS NOT NULL 
+ORDER BY cs.avg_order_value DESC, sp.total_supply_cost ASC;

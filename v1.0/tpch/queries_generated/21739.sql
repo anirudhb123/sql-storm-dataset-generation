@@ -1,0 +1,75 @@
+WITH RECURSIVE regional_stats AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+highest_value_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+max_order_value AS (
+    SELECT 
+        MAX(order_value) AS max_value
+    FROM 
+        highest_value_orders
+),
+low_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(lo.order_value) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        highest_value_orders lo ON lo.o_orderkey IN (
+            SELECT o.o_orderkey
+            FROM orders o
+            WHERE o.o_custkey = c.c_custkey AND lo.order_value < (SELECT max_value FROM max_order_value)
+        )
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_order_value IS NOT NULL AND total_order_value = 0
+),
+detailed_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(lc.c_name, 'No Customers') AS low_value_customer,
+    COUNT(do.o_orderkey) AS order_count,
+    AVG(do.o_totalprice) AS avg_order_value,
+    MAX(r.total_acctbal) AS max_region_balance
+FROM 
+    regional_stats r
+LEFT JOIN 
+    low_value_customers lc ON r.nation_count = 0
+LEFT JOIN 
+    detailed_orders do ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE lc.c_custkey = n.n_nationkey)
+GROUP BY 
+    r.r_name, lc.c_name
+ORDER BY 
+    1, 2 NULLS LAST;

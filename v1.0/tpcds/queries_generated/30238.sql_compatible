@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.ship_date_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_sales,
+        SUM(ws.net_profit) AS total_profit
+    FROM web_sales ws
+    WHERE ws.ship_date_sk BETWEEN 2459265 AND 2459930  
+    GROUP BY ws.ship_date_sk
+
+    UNION ALL
+
+    SELECT 
+        ss.ship_date_sk + 1 AS ship_date_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_sales,
+        SUM(ws.net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN sales_summary ss ON ws.ship_date_sk = ss.ship_date_sk + 1
+    GROUP BY ss.ship_date_sk
+),
+customer_stats AS (
+    SELECT 
+        cu.c_customer_id,
+        cd.cd_gender,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_spent
+    FROM customer cu
+    LEFT JOIN customer_demographics cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON cu.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE cu.c_current_addr_sk IS NOT NULL
+    GROUP BY cu.c_customer_id, cd.cd_gender
+),
+top_products AS (
+    SELECT 
+        i.item_id,
+        COUNT(ws.order_number) AS total_sales,
+        SUM(ws.net_profit) AS total_profit
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.item_id
+    ORDER BY total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    ds.ship_date_sk,
+    ss.total_orders,
+    ss.total_sales,
+    ss.total_profit,
+    ARRAY_AGG(DISTINCT c.c_customer_id) AS customers,
+    ARRAY_AGG(DISTINCT tp.item_id) AS top_sold_items
+FROM sales_summary ss
+JOIN date_dim ds ON ds.d_date_sk = ss.ship_date_sk
+LEFT JOIN customer_stats c ON ss.total_orders > 0
+LEFT JOIN top_products tp ON tp.total_sales > 0
+GROUP BY ds.ship_date_sk, ss.total_orders, ss.total_sales, ss.total_profit
+ORDER BY ds.ship_date_sk;

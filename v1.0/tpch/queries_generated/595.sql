@@ -1,0 +1,31 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS distinct_parts,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       SUM(COALESCE(ss.total_cost, 0)) AS total_cost,
+       (SELECT COUNT(DISTINCT ho.o_orderkey) FROM HighValueOrders ho) AS high_value_order_count,
+       SUM(ls.total_sales) AS total_sales,
+       AVG(ls.avg_quantity) AS avg_quantity_per_order
+FROM nation n
+LEFT JOIN SupplierStats ss ON n.n_nationkey = ss.s_suppkey
+LEFT JOIN LineItemSummary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM HighValueOrders ho WHERE ho.o_orderdate >= '2021-01-01')
+GROUP BY n.n_name
+ORDER BY supplier_count DESC, total_cost DESC;

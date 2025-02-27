@@ -1,0 +1,32 @@
+
+SELECT 
+    ca_city AS city,
+    ca_state AS state,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    COUNT(DISTINCT s.s_store_id) AS total_stores,
+    SUM(ws_ext_sales_price) AS total_sales,
+    AVG(CASE 
+        WHEN cd_gender = 'M' THEN cd_purchase_estimate 
+        ELSE NULL 
+    END) AS avg_male_purchase_estimate,
+    AVG(CASE 
+        WHEN cd_gender = 'F' THEN cd_purchase_estimate 
+        ELSE NULL 
+    END) AS avg_female_purchase_estimate
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    store s ON ws.ws_ship_addr_sk = s.ss_addr_sk
+WHERE 
+    ca_city IS NOT NULL AND ca_state IS NOT NULL
+GROUP BY 
+    ca_city, ca_state
+ORDER BY 
+    total_sales DESC, total_customers DESC
+LIMIT 10;

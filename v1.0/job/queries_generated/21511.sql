@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(ci.person_id) AS total_actors,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id
+),
+MovieDescriptions AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        m.production_year,
+        it.info AS additional_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_info m_info ON m.id = m_info.movie_id
+    LEFT JOIN 
+        info_type it ON m_info.info_type_id = it.id
+),
+FilteredMovies AS (
+    SELECT 
+        md.*,
+        CASE 
+            WHEN md.production_year < 2000 THEN 'Classic'
+            WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM 
+        MovieDescriptions md
+    WHERE 
+        md.keyword IS NOT NULL
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.era,
+    COALESCE(rm.total_actors, 0) AS number_of_cast,
+    CASE 
+        WHEN fm.production_year % 2 = 0 THEN 'Even Year' 
+        ELSE 'Odd Year' 
+    END AS year_type,
+    CONCAT('Film: ', fm.title, ' | Year: ', fm.production_year, ' | Cast Count: ', COALESCE(rm.total_actors, 0)) AS descriptive_label
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    RankedMovies rm ON fm.title = rm.title AND fm.production_year = rm.production_year
+WHERE 
+    fm.era = 'Modern'
+ORDER BY 
+    fm.production_year DESC, 
+    number_of_cast DESC
+LIMIT 10;
+
+This SQL query incorporates several advanced SQL constructs and techniques:
+- **Common Table Expressions (CTEs)**: Split into three CTEs, `RankedMovies`, `MovieDescriptions`, and `FilteredMovies` for modular processing.
+- **LEFT JOINs**: Used to bring together data from multiple tables while accommodating cases of missing data.
+- **Window Functions**: Utilized to rank movies based on their actor count within each production year.
+- **String Expressions**: Created a descriptive label concatenating film title, year, and cast count.
+- **Complicated Predicates**: Used in the era categorization and filtering logic.
+- **NULL Logic**: Implemented with `COALESCE` to handle potential NULL values.
+- **ORDER BY and LIMIT**: To control the output and performance insight generation from results.

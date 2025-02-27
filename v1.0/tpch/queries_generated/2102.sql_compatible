@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+DiscountedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    d.discounted_price,
+    RANK() OVER (ORDER BY d.discounted_price DESC) AS price_rank,
+    r.r_name AS region
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    RankedSuppliers s ON c.c_custkey = s.s_suppkey
+LEFT JOIN 
+    DiscountedLineItems d ON d.l_orderkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (s.s_acctbal IS NOT NULL AND s.s_acctbal > 100) OR d.discounted_price IS NULL
+GROUP BY 
+    c.c_name, s.s_name, d.discounted_price, r.r_name
+ORDER BY 
+    price_rank, c.c_name;

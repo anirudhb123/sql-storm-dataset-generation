@@ -1,0 +1,42 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers
+    FROM 
+        customer_address AS ca
+    JOIN 
+        customer AS c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        ca.ca_state
+),
+SalesData AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.net_paid) AS total_sales,
+        SUM(ws.net_profit) AS total_profit
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    a.ca_state,
+    a.unique_customers,
+    a.male_customers,
+    a.female_customers,
+    s.total_sales,
+    s.total_profit
+FROM 
+    AddressStats AS a
+LEFT JOIN 
+    SalesData AS s ON a.unique_customers > 1000
+ORDER BY 
+    a.unique_customers DESC, s.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,47 @@
+WITH recursive suppliers_cte AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+), 
+matched_parts AS (
+    SELECT p_partkey, p_name, p_brand, p_retailprice,
+           COALESCE(NULLIF(p_comment, ''), 'No Comment') AS p_comment
+    FROM part
+    WHERE p_size > 10
+),
+high_value_orders AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM orders
+    JOIN lineitem ON o_orderkey = l_orderkey
+    GROUP BY o_orderkey
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > 1000000
+),
+ranked_nations AS (
+    SELECT n_nationkey, n_name, n_regionkey,
+           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT s_suppkey) DESC) AS nation_rank
+    FROM nation
+    JOIN supplier ON n_nationkey = s_nationkey
+    GROUP BY n_nationkey
+)
+SELECT
+    a.n_name AS nation_name,
+    b.s_name AS supplier_name,
+    c.p_name AS part_name,
+    d.o_orderkey AS order_number,
+    e.total_revenue,
+    COUNT(f.l_orderkey) AS line_item_count,
+    AVG(f.l_quantity) AS avg_quantity,
+    MAX(f.l_extendedprice) AS max_price,
+    MIN(f.l_discount) AS min_discount,
+    RANK() OVER (PARTITION BY a.n_nationkey ORDER BY e.total_revenue DESC) AS revenue_rank
+FROM ranked_nations a
+LEFT OUTER JOIN suppliers_cte b ON a.n_nationkey = b.s_nationkey AND b.rank <= 3
+INNER JOIN matched_parts c ON c.p_retailprice > (SELECT AVG(p_retailprice) FROM part) 
+LEFT JOIN high_value_orders d ON b.s_suppkey = d.o_orderkey
+LEFT JOIN lineitem f ON d.o_orderkey = f.l_orderkey
+GROUP BY a.n_name, b.s_name, c.p_name, d.o_orderkey, e.total_revenue
+HAVING (COUNT(f.l_orderkey) > 5 AND e.total_revenue IS NOT NULL) OR 
+       (SUM(f.l_quantity) < 500 AND b.s_comment LIKE '%urgent%')
+ORDER BY revenue_rank, e.total_revenue DESC, avg_quantity DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

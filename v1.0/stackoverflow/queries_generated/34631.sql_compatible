@@ -1,0 +1,68 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostsCount,
+        UpVotesCount,
+        DownVotesCount
+    FROM 
+        UserActivity
+    WHERE 
+        ActivityRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        COALESCE(P.ViewCount, 0) AS ViewCount,
+        P.CreationDate,
+        CASE 
+            WHEN P.AbandonedDate IS NOT NULL THEN 'Abandoned'
+            ELSE 'Active'
+        END AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    PS.Title,
+    PS.PostStatus,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    (TU.UpVotesCount - TU.DownVotesCount) AS NetUpVotes
+FROM 
+    TopUsers TU
+JOIN 
+    PostStatistics PS ON TU.UserId = PS.OwnerUserId
+WHERE 
+    PS.PostRank <= 3
+ORDER BY 
+    TU.Reputation DESC, PS.ViewCount DESC;

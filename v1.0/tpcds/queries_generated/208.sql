@@ -1,0 +1,46 @@
+
+WITH MonthlySales AS (
+    SELECT 
+        d.d_month_seq,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        RANK() OVER (ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        d.d_month_seq
+), 
+CustomerReturns AS (
+    SELECT 
+        sr.store_sk AS store_id,
+        SUM(sr.return_amt) AS total_return_amt,
+        COUNT(sr.return_quantity) AS total_return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+) 
+SELECT 
+    ca.ca_city,
+    mos.total_sales,
+    coalesce(cr.total_return_amt, 0) AS total_return_amt,
+    mos.order_count,
+    CASE 
+        WHEN mos.total_sales > 100000 THEN 'High Performer'
+        WHEN mos.total_sales > 50000 THEN 'Mid Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    MonthlySales mos
+LEFT JOIN 
+    CustomerReturns cr ON mos.d_month_seq = cr.store_id
+JOIN 
+    customer_address ca ON ca.ca_address_sk = cr.store_id
+WHERE 
+    mos.sales_rank <= 10
+ORDER BY 
+    mos.total_sales DESC;

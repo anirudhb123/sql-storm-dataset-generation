@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year'
+), 
+UserStats AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount,
+           SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePostCount,
+           SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+CommentCounts AS (
+    SELECT PostId, 
+           COUNT(*) AS TotalComments
+    FROM Comments
+    GROUP BY PostId
+),
+PostVoteStats AS (
+    SELECT p.Id AS PostId, 
+           COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes, 
+           COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+           COUNT(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 END) AS CloseVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+
+SELECT u.DisplayName, 
+       COUNT(DISTINCT rp.Id) AS RecentPostCount, 
+       u.PostCount, 
+       u.PositivePostCount, 
+       u.NegativePostCount, 
+       COALESCE(cc.TotalComments, 0) AS TotalComments, 
+       pvs.UpVotes,
+       pvs.DownVotes,
+       pvs.CloseVotes,
+       json_agg(rp.Title) AS RecentPostTitles
+FROM Users u
+LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn <= 5
+LEFT JOIN UserStats us ON u.Id = us.UserId
+LEFT JOIN CommentCounts cc ON cc.PostId = rp.Id
+LEFT JOIN PostVoteStats pvs ON pvs.PostId = rp.Id
+WHERE u.Reputation > 1000
+GROUP BY u.DisplayName, u.PostCount, u.PositivePostCount, u.NegativePostCount, cc.TotalComments, pvs.UpVotes, pvs.DownVotes, pvs.CloseVotes
+ORDER BY u.DisplayName;

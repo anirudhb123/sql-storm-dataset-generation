@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+ActiveUsers AS (
+    SELECT 
+        um.UserId,
+        um.DisplayName,
+        um.TotalPosts,
+        um.TotalScore,
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.Score
+    FROM 
+        UserMetrics um
+    JOIN 
+        RankedPosts rp ON um.UserId = rp.OwnerName
+    WHERE 
+        um.TotalPosts > 5 AND
+        um.TotalScore > 50
+)
+SELECT 
+    au.DisplayName AS User,
+    au.TotalPosts,
+    au.TotalScore,
+    au.Score AS PostScore,
+    au.Title,
+    au.Tags,
+    au.CreationDate,
+    au.AnswerCount
+FROM 
+    ActiveUsers au
+ORDER BY 
+    au.TotalScore DESC, 
+    au.CreationDate DESC;

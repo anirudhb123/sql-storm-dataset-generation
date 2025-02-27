@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+),
+RecentClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+        AND ph.CreationDate >= NOW() - INTERVAL '30 days'
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ubc.BadgeCount, 0) AS TotalBadges,
+        COALESCE(ubc.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ubc.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ubc.BronzeBadges, 0) AS BronzeBadges,
+        RANK() OVER (ORDER BY COALESCE(ubc.BadgeCount, 0) DESC) AS BadgeRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ubc ON u.Id = ubc.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.OwnerDisplayName,
+    rc.Comment AS CloseComment,
+    tu.DisplayName AS TopUserDisplayName,
+    tu.TotalBadges,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentClosedPosts rc ON rp.PostId = rc.PostId
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+WHERE 
+    rp.rn = 1
+    AND (rp.Score > 5 OR rp.ViewCount > 1000)
+ORDER BY 
+    rp.CreationDate DESC;

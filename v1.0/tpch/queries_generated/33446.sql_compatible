@@ -1,0 +1,53 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+item_stats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    sh.s_name,
+    is.p_name,
+    is.total_available,
+    is.avg_supply_cost,
+    cos.total_orders,
+    cos.total_spent
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+JOIN item_stats is ON sh.s_suppkey IN (
+    SELECT DISTINCT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%widget%')
+)
+LEFT JOIN customer_order_summary cos ON cos.total_spent > (SELECT AVG(total_spent) FROM customer_order_summary)
+WHERE sh.level <= 2
+ORDER BY cos.total_spent DESC, is.total_available ASC
+LIMIT 50;

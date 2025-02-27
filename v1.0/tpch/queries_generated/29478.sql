@@ -1,0 +1,40 @@
+WITH supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_brand, ')'), ', ') AS supplied_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value,
+        STRING_AGG(DISTINCT o.o_orderstatus, ', ') AS order_statuses
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    sd.s_suppkey,
+    sd.s_name,
+    sd.s_phone,
+    sd.total_available_quantity,
+    sd.total_supply_cost,
+    sd.supplied_parts,
+    co.c_custkey,
+    co.c_name,
+    co.total_orders,
+    co.avg_order_value,
+    co.order_statuses
+FROM supplier_details sd
+JOIN customer_orders co ON sd.total_available_quantity > 1000 AND co.total_orders > 5
+ORDER BY sd.total_supply_cost DESC, co.avg_order_value ASC;

@@ -1,0 +1,58 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS keyword,
+        p.name AS person_name,
+        r.role AS person_role
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+        AND k.keyword LIKE '%action%'
+),
+movie_companies_info AS (
+    SELECT 
+        md.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        movie_details md ON mc.movie_id = md.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        STRING_AGG(DISTINCT md.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT CONCAT(p.person_name, ' as ', r.person_role), ', ') AS cast,
+        STRING_AGG(DISTINCT CONCAT(c.company_name, ' (', ct.company_type, ')'), ', ') AS production_companies
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        movie_companies_info c ON md.movie_id = c.movie_id
+    GROUP BY 
+        md.movie_title, md.production_year
+    ORDER BY 
+        md.production_year DESC, md.movie_title
+)
+SELECT *
+FROM final_benchmark
+LIMIT 100;

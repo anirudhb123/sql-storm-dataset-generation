@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE oh.level < 5
+),
+SupplierAggregate AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerSummary AS (
+    SELECT c.c_nationkey, AVG(c.c_acctbal) AS avg_acctbal, COUNT(c.c_custkey) AS cust_count
+    FROM customer c
+    GROUP BY c.c_nationkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    AVG(oh.o_totalprice) AS avg_order_value,
+    COALESCE(SUM(sa.total_supply_cost), 0) AS total_supply_cost,
+    SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_quantity ELSE 0 END) AS discounted_quantity,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY AVG(oh.o_totalprice) DESC) AS rank_within_region
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders oh ON oh.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = oh.o_orderkey
+LEFT JOIN SupplierAggregate sa ON sa.ps_partkey IN (
+    SELECT ps_partkey 
+    FROM partsupp 
+    WHERE ps_supplycost < 50
+)
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_orders DESC, total_supply_cost DESC
+LIMIT 10;

@@ -1,0 +1,84 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        Posts answers ON p.Id = answers.ParentId
+    WHERE 
+        answers.PostTypeId = 2  
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+TopQuestions AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.OwnerUserId,
+        COALESCE(pm.CommentCount, 0) AS CommentCount,
+        COALESCE(pm.UpVotes, 0) AS UpVotes,
+        COALESCE(pm.DownVotes, 0) AS DownVotes,
+        pl.RevisionGUID
+    FROM 
+        RecursivePostCTE r
+    LEFT JOIN 
+        PostMetrics pm ON r.PostId = pm.PostId
+    LEFT JOIN 
+        PostLinks pl ON r.PostId = pl.PostId
+    WHERE 
+        r.Level = 1  
+)
+SELECT 
+    u.DisplayName AS OwnerDisplayName,
+    tq.Title,
+    tq.CommentCount,
+    tq.UpVotes - tq.DownVotes AS NetVotes,
+    tq.RevisionGUID,
+    CASE 
+        WHEN tq.UpVotes > tq.DownVotes THEN 'Positive'
+        WHEN tq.UpVotes < tq.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    TopQuestions tq
+JOIN 
+    Users u ON tq.OwnerUserId = u.Id
+WHERE 
+    tq.CommentCount > 0  
+ORDER BY 
+    NetVotes DESC
+LIMIT 10;

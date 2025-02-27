@@ -1,0 +1,98 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts p2 ON p.ParentId = p2.Id
+    INNER JOIN 
+        RecursiveCTE r ON p2.Id = r.PostId
+),
+
+VotesCount AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+BadgesCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+        u.Reputation AS UserReputation,
+        COALESCE(vc.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(vc.DownVotes, 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        BadgesCount bc ON u.Id = bc.UserId
+    LEFT JOIN 
+        VotesCount vc ON u.Id = vc.UserId
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    ud.DisplayName AS OwnerDisplayName,
+    ud.BadgeCount,
+    ud.UserReputation,
+    ud.TotalUpVotes,
+    ud.TotalDownVotes,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = r.PostId) AS CommentCount,
+    (SELECT COUNT(*) 
+     FROM PostLinks pl 
+     WHERE pl.PostId = r.PostId) AS RelatedPostCount,
+    CASE 
+        WHEN r.AcceptedAnswerId IS NOT NULL THEN 
+            (SELECT COUNT(*) 
+             FROM Votes v 
+             WHERE v.PostId = r.AcceptedAnswerId AND v.VoteTypeId = 2) 
+        ELSE 0 
+    END AS AcceptedAnswerUpVotes
+FROM 
+    RecursiveCTE r
+INNER JOIN 
+    UserDetails ud ON r.OwnerUserId = ud.UserId
+WHERE 
+    r.Level <= 2 -- Limit the recursion to the second level
+ORDER BY 
+    r.CreationDate DESC 
+OPTION (MAXRECURSION 100);

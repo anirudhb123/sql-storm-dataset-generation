@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= ('2024-10-01 12:34:56'::timestamp - INTERVAL '1 year') 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId, p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+AcceptedAnswers AS (
+    SELECT 
+        p.AcceptedAnswerId, 
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.AcceptedAnswerId = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.AcceptedAnswerId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(bp.BadgeCount) AS TotalBadges,
+    COALESCE(SUM(a.TotalVotes), 0) AS TotalAcceptedVotes,
+    STRING_AGG(DISTINCT pp.Title, '; ') AS Titles,
+    AVG(CASE WHEN rp.RankByScore <= 5 THEN rp.Score ELSE NULL END) AS AvgTopPostScore,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(rp.ViewCount) AS TotalViews,
+    SUM(rp.UpVotes) AS TotalUpVotes,
+    SUM(rp.DownVotes) AS TotalDownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges bp ON u.Id = bp.UserId
+LEFT JOIN 
+    AcceptedAnswers a ON rp.Id = a.AcceptedAnswerId
+LEFT JOIN 
+    Comments c ON c.UserId = u.Id
+LEFT JOIN 
+    Posts pp ON pp.OwnerUserId = u.Id
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.Id) > 0 
+ORDER BY 
+    TotalViews DESC, 
+    TotalUpVotes DESC;

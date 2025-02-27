@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey = s.s_nationkey)
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linestatus) AS unique_line_statuses
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COALESCE(SUM(l.l_extendedprice), 0) AS total_extended_price,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS total_returns,
+    rs.s_name AS top_supplier,
+    o.total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rank = 1
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    OrderSummaries o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rs.s_nationkey LIMIT 1)
+WHERE 
+    p.p_retailprice < 50.00
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice, rs.s_name, o.total_revenue
+HAVING 
+    SUM(l.l_quantity) >= 100
+ORDER BY 
+    total_extended_price DESC, p.p_name;

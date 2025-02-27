@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER(PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER(PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER(PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName) AS Contributors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name || ' (Class: ' || b.Class || ')', ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+EnhancedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        COALESCE(ps.HistoryCount, 0) AS HistoryCount,
+        COALESCE(ps.Contributors, 'None') AS Contributors,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistorySummary ps ON rp.PostId = ps.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    ep.PostId,
+    ep.Title,
+    ep.Score,
+    ep.ViewCount,
+    ep.CommentCount,
+    ep.UpVotes,
+    ep.DownVotes,
+    ep.HistoryCount,
+    ep.Contributors,
+    ep.BadgeCount,
+    ep.BadgeNames
+FROM 
+    EnhancedPosts ep
+WHERE 
+    (ep.Score > 10 OR ep.ViewCount > 100) AND 
+    ep.BadgeCount > 0
+ORDER BY 
+    ep.Score DESC, ep.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,62 @@
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '> <')))::varchar) AS Tag,
+        COUNT(*) AS PostCount
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY Tag
+), 
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        MAX(U.CreationDate) AS AccountCreated
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id
+), 
+BadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+), 
+CombinedStats AS (
+    SELECT 
+        U.DisplayName,
+        U.TotalScore,
+        U.QuestionsAsked,
+        U.CommentsMade,
+        U.AccountCreated,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges,
+        T.Tag,
+        T.PostCount
+    FROM UserStats U
+    LEFT JOIN BadgeStats B ON U.UserId = B.UserId
+    LEFT JOIN TagStats T ON T.PostCount > 0
+)
+
+SELECT 
+    DisplayName,
+    TotalScore,
+    QuestionsAsked,
+    CommentsMade,
+    AccountCreated,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    Tag,
+    PostCount
+FROM CombinedStats
+ORDER BY TotalScore DESC, QuestionsAsked DESC, CommentsMade DESC
+LIMIT 10;

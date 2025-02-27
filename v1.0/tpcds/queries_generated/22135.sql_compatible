@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        COALESCE(SUM(ws.ws_ext_tax) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) AS total_tax
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+),
+ItemReturns AS (
+    SELECT 
+        ir.cr_item_sk,
+        COUNT(ir.cr_return_quantity) AS total_returns
+    FROM catalog_returns ir
+    WHERE ir.cr_return_quantity IS NOT NULL
+    GROUP BY ir.cr_item_sk
+),
+SalesReturns AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_return_amt) AS total_returned
+    FROM store_sales s
+    WHERE s.ss_return_amt IS NOT NULL
+    GROUP BY s.ss_item_sk
+)
+SELECT 
+    i.i_item_id,
+    COALESCE(s.total_returns, 0) AS total_returns,
+    COALESCE(r.total_returned, 0) AS total_returned,
+    CASE 
+        WHEN COALESCE(r.total_returned, 0) = 0 AND COALESCE(s.total_returns, 0) = 0 THEN 'No Returns' 
+        WHEN COALESCE(s.total_returns, 0) > 0 AND COALESCE(r.total_returned, 0) > 0 THEN 'Mixed Returns'
+        ELSE 'Standard Returns' 
+    END AS return_type,
+    SUM(CASE 
+        WHEN COALESCE(s.total_returns, 0) > 0 THEN s.total_returns * 0.1 
+        ELSE 0 
+    END) OVER (PARTITION BY i.i_item_sk) AS adjusted_returns
+FROM item i
+LEFT JOIN ItemReturns s ON i.i_item_sk = s.cr_item_sk
+LEFT JOIN SalesReturns r ON i.i_item_sk = r.ss_item_sk
+WHERE (COALESCE(r.total_tax, 0) > 100 OR i.i_item_desc LIKE '%special%')
+AND i.i_current_price < (SELECT AVG(i2.i_current_price) FROM item i2 WHERE i2.i_current_price IS NOT NULL)
+GROUP BY 
+    i.i_item_id,
+    s.total_returns,
+    r.total_returned,
+    i.i_item_sk,
+    i.i_item_desc,
+    i.i_current_price
+ORDER BY i.i_item_id
+FETCH FIRST 50 ROWS ONLY;

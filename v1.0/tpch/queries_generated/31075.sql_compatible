@@ -1,0 +1,46 @@
+
+WITH RECURSIVE RecursiveSupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, r.level + 1
+    FROM supplier s
+    JOIN RecursiveSupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE s.s_acctbal > r.s_acctbal
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           STRING_AGG(CONCAT(s.s_name, '(', s.s_acctbal, ')'), ', ') AS suppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey
+)
+SELECT r.r_name AS region_name, 
+       SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_sales,
+       COUNT(DISTINCT c.c_custkey) AS unique_customers,
+       AVG(cc.order_count) AS avg_orders_per_customer,
+       JSON_BUILD_OBJECT('partkey', p.p_partkey, 'total_available', psd.total_available, 
+                         'avg_supplycost', psd.avg_supplycost, 
+                         'suppliers', psd.suppliers) AS part_supplier_info
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN CustomerOrderCounts cc ON o.o_custkey = cc.c_custkey
+LEFT JOIN PartSupplierDetails psd ON p.p_partkey = psd.p_partkey
+WHERE (CASE WHEN l.l_returnflag = 'R' THEN NULL ELSE l.l_shipdate END) IS NOT NULL
+GROUP BY r.r_name, p.p_partkey, psd.total_available, psd.avg_supplycost, psd.suppliers
+ORDER BY total_sales DESC, unique_customers DESC
+LIMIT 10;

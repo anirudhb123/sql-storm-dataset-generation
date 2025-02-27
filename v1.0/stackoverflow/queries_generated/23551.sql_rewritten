@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.Value) AS AverageVoteValue
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId,
+                CASE 
+                    WHEN VoteTypeId = 2 THEN 1 
+                    WHEN VoteTypeId = 3 THEN -1 
+                    ELSE 0 
+                END AS Value
+            FROM 
+                Votes
+        ) v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+),
+TopClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Owner,
+        cp.LastClosedDate,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.PostRank <= 5  
+)
+SELECT 
+    tcp.Title,
+    tcp.Owner,
+    tcp.LastClosedDate,
+    CASE 
+        WHEN tcp.CommentCount > 10 THEN 'Active Discussion'
+        ELSE 'Low Activity' 
+    END AS DiscussionStatus,
+    COALESCE(NULLIF(tcp.LastClosedDate, (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')), 'Not Recently Closed') AS ClosureSummary
+FROM 
+    TopClosedPosts tcp
+ORDER BY 
+    tcp.LastClosedDate DESC;

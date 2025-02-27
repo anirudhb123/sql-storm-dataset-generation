@@ -1,0 +1,71 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.BadgeCount,
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.UpVotes - pd.DownVotes AS NetScore,
+        ROW_NUMBER() OVER (PARTITION BY ub.UserId ORDER BY pd.ViewCount DESC, pd.CreationDate ASC) AS PostRank
+    FROM 
+        UserBadges ub
+    JOIN 
+        PostDetails pd ON ub.UserId = pd.OwnerUserId
+    WHERE 
+        ub.BadgeCount > 0
+)
+SELECT 
+    u.DisplayName,
+    u.Badges,
+    t.PostId,
+    t.Title,
+    t.ViewCount,
+    t.NetScore,
+    CASE 
+        WHEN t.PostRank = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostRankStatus
+FROM 
+    TopUsers t
+JOIN 
+    UserBadges u ON t.UserId = u.UserId
+WHERE 
+    t.PostRank <= 3 
+ORDER BY 
+    u.BadgeCount DESC, t.ViewCount DESC;

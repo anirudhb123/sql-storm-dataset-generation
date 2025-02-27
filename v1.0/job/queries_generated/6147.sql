@@ -1,0 +1,37 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    ci.note AS cast_note,
+    mc.note AS movie_company_note,
+    ti.info AS movie_info,
+    w.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON cc.movie_id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    info_type it ON mc.company_type_id = it.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    keyword w ON mi.info_type_id = w.id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+WHERE 
+    a.name ILIKE '%Smith%'
+AND 
+    t.production_year BETWEEN 2000 AND 2023
+AND 
+    c.kind IN ('actor', 'actress')
+ORDER BY 
+    t.production_year DESC, 
+    a.name ASC;

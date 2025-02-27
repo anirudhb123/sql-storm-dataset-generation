@@ -1,0 +1,70 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000 THEN 'High Value'
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+),
+RegionCustomerCounts AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name AS region_name,
+    si.s_name AS supplier_name,
+    COUNT(os.o_orderkey) AS orders_count,
+    SUM(os.total_order_value) AS total_order_value,
+    rc.customer_count AS distinct_customers
+FROM 
+    SupplierInfo si
+LEFT JOIN 
+    lineitem l ON si.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    orders os ON l.l_orderkey = os.o_orderkey
+JOIN 
+    customer c ON os.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    RegionCustomerCounts rc ON n.n_regionkey = rc.n_regionkey
+WHERE 
+    si.total_supply_cost IS NOT NULL
+GROUP BY 
+    r.r_name, si.s_name, rc.customer_count
+ORDER BY 
+    total_order_value DESC, orders_count DESC;

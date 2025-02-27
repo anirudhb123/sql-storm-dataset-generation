@@ -1,0 +1,54 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(B.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges B ON u.Id = B.UserId
+    WHERE 
+        u.CreationDate >= '2023-01-01'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.CommentCount,
+    ps.VoteCount,
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.TotalReputation
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.PostId = us.UserId
+ORDER BY 
+    ps.Score DESC, 
+    ps.CommentCount DESC;

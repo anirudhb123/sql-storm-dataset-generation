@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+        JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (
+            SELECT d_date_sk FROM date_dim 
+            WHERE d_date = '2023-01-01'
+        )
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+        JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        cs.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerSales cs
+        JOIN CustomerDemographics cd ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_spent >= (
+            SELECT AVG(total_spent) FROM CustomerSales
+        )
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_spent,
+    tc.order_count,
+    COALESCE(STRING_AGG(cd.cd_marital_status, ', '), 'N/A') AS marital_status,
+    COALESCE(STRING_AGG(cd.cd_gender, ', '), 'N/A') AS gender
+FROM 
+    TopCustomers tc
+    LEFT JOIN CustomerDemographics cd ON tc.c_customer_sk = cd.cd_demo_sk
+GROUP BY 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_spent,
+    tc.order_count
+ORDER BY 
+    tc.total_spent DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

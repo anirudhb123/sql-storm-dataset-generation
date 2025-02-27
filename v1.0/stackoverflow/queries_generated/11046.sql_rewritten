@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 3) AS TotalDownvotes,
+        SUM(V.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(B.Class = 1) AS TotalGoldBadges,
+        SUM(B.Class = 2) AS TotalSilverBadges,
+        SUM(B.Class = 3) AS TotalBronzeBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.OwnerUserId, P.PostTypeId, P.CreationDate, P.ViewCount, P.Score
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalDownvotes,
+    U.TotalUpvotes,
+    U.TotalGoldBadges,
+    U.TotalSilverBadges,
+    U.TotalBronzeBadges,
+    COUNT(DISTINCT PS.PostId) AS PostsInvolved,
+    AVG(PS.ViewCount) AS AvgPostViewCount,
+    AVG(PS.Score) AS AvgPostScore,
+    SUM(PS.CommentCount) AS TotalCommentsOnUserPosts,
+    SUM(PS.VoteCount) AS TotalVotesOnUserPosts
+FROM UserStats U
+JOIN PostStats PS ON U.UserId = PS.OwnerUserId
+GROUP BY U.UserId, U.DisplayName, U.TotalPosts, U.TotalComments, U.TotalDownvotes, U.TotalUpvotes, U.TotalGoldBadges, U.TotalSilverBadges, U.TotalBronzeBadges
+ORDER BY U.TotalPosts DESC;

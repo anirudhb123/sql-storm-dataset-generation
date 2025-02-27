@@ -1,0 +1,89 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, Reputation, PostCount, CommentCount, TotalBounty
+    FROM UserActivity
+    WHERE ReputationRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus,
+        ARRAY(
+            SELECT tag.TagName
+            FROM Tags AS tag
+            WHERE tag.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><')::int[]))
+        ) AS TagList
+    FROM Posts p
+),
+ActivePosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.AnswerStatus,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM PostDetails pd
+    LEFT JOIN Comments c ON pd.PostId = c.PostId
+    LEFT JOIN Votes v ON pd.PostId = v.PostId
+    WHERE pd.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY pd.PostId, pd.Title, pd.CreationDate, pd.AnswerStatus
+),
+Combined AS (
+    SELECT 
+        tu.DisplayName,
+        tu.Reputation,
+        ap.PostId,
+        ap.Title,
+        ap.CommentCount,
+        ap.UpVotes,
+        ap.DownVotes,
+        ap.AnswerStatus
+    FROM TopUsers tu
+    INNER JOIN ActivePosts ap ON tu.UserId = ap.PostId
+),
+Statistics AS (
+    SELECT 
+        AVG(Reputation) AS AvgReputation,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM Combined
+)
+SELECT 
+    c.DisplayName,
+    c.Reputation,
+    c.PostId,
+    c.Title,
+    c.CommentCount,
+    c.UpVotes,
+    c.DownVotes,
+    c.AnswerStatus,
+    s.AvgReputation,
+    s.TotalComments,
+    s.TotalUpVotes,
+    s.TotalDownVotes
+FROM Combined c
+CROSS JOIN Statistics s
+ORDER BY c.Reputation DESC, c.UpVotes DESC
+LIMIT 20;

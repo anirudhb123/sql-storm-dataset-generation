@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT COALESCE(rd.o_orderkey, sd.s_suppkey) AS entity_key,
+       rd.o_orderdate,
+       rd.o_totalprice,
+       sd.s_name,
+       cd.c_name,
+       cd.order_count,
+       cd.total_spent,
+       CASE 
+           WHEN cd.total_spent IS NULL THEN 'No orders'
+           ELSE 'Orders placed'
+       END AS order_status,
+       CASE 
+           WHEN sd.total_available_qty IS NULL THEN 'Supplier not available'
+           ELSE CONCAT('Available qty: ', sd.total_available_qty)
+       END AS supplier_availability
+FROM RankedOrders rd
+FULL OUTER JOIN SupplierDetails sd ON sd.total_supply_cost > 5000
+FULL OUTER JOIN CustomerOrders cd ON cd.order_count > 0
+WHERE (rd.o_orderkey IS NOT NULL OR sd.s_suppkey IS NOT NULL OR cd.c_custkey IS NOT NULL)
+ORDER BY rd.o_orderdate DESC NULLS LAST;

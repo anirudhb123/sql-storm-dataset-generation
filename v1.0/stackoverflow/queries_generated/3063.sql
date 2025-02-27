@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        h.PostId,
+        h.CreationDate,
+        h.UserDisplayName,
+        h.Comment,
+        p.Title AS PostTitle,
+        ROW_NUMBER() OVER (PARTITION BY h.PostId ORDER BY h.CreationDate DESC) AS CloseHistoryRank
+    FROM 
+        PostHistory h
+    INNER JOIN 
+        Posts p ON h.PostId = p.Id
+    WHERE 
+        h.PostHistoryTypeId = 10
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    COALESCE(u.BadgeCounts, 'No Badges') AS BadgeCounts,
+    rp.PostId,
+    rp.Title AS PostTitle,
+    rp.Score AS PostScore,
+    COALESCE(cp.Comment, 'No Close Comments') AS CloseComment,
+    COALESCE(cp.CreationDate, 'N/A') AS CloseDate
+FROM 
+    Users up
+LEFT JOIN 
+    (SELECT 
+        ub.UserId,
+        CONCAT(ub.GoldBadges, ' Gold, ', ub.SilverBadges, ' Silver, ', ub.BronzeBadges, ' Bronze') AS BadgeCounts
+    FROM 
+        UserBadges ub) u ON up.Id = u.UserId
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.Rank = 1
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId AND cp.CloseHistoryRank = 1
+WHERE 
+    up.Reputation > 1000
+    AND up.CreationDate < NOW() - INTERVAL '1 year'
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC
+LIMIT 100;

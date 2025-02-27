@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.episode_of_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    INNER JOIN aka_title at ON ml.linked_movie_id = at.id
+    INNER JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+SELECT
+    m.title,
+    m.production_year,
+    a.name AS actor_name,
+    mp.name AS production_company,
+    (SELECT COUNT(*)
+     FROM movie_keyword mk
+     WHERE mk.movie_id = m.movie_id
+       AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%action%')) AS action_keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.level DESC) AS movie_rank
+FROM
+    movie_hierarchy m
+LEFT JOIN
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN
+    cast_info c ON c.movie_id = m.movie_id AND c.person_id IS NOT NULL
+LEFT JOIN
+    aka_name a ON a.id = c.person_id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = m.movie_id
+LEFT JOIN
+    company_name mp ON mp.id = mc.company_id
+WHERE
+    m.production_year BETWEEN 2000 AND 2023
+    AND (a.gender = 'M' OR a.gender IS NULL)
+    AND (mp.country_code = 'USA' OR mp.country_code IS NULL)
+ORDER BY
+    m.production_year DESC, movie_rank;

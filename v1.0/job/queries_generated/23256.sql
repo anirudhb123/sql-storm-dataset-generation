@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS total_movies
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%action%'
+),
+
+CastSummary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        MAX(CASE WHEN r.role = 'Lead' THEN 1 ELSE 0 END) AS has_lead,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+MoviesWithDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        cs.total_cast,
+        cs.has_lead,
+        cs.cast_names,
+        CASE 
+            WHEN cs.total_cast = 0 THEN 'No cast available'
+            WHEN cs.has_lead = 1 THEN 'Has Lead Cast'
+            ELSE 'No Lead Cast'
+        END AS cast_details
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastSummary cs ON rm.movie_id = cs.movie_id
+    WHERE 
+        rm.year_rank <= 5 -- Only top 5 movies per year
+)
+
+SELECT 
+    mw.title,
+    mw.production_year,
+    mw.total_cast,
+    mw.cast_details,
+    COALESCE(p.info, 'No additional info available') AS person_info
+FROM 
+    MoviesWithDetails mw
+LEFT JOIN 
+    person_info p ON mw.movie_id = p.person_id  -- Using person_id as a join key, which could lead to NULLs
+WHERE 
+    mw.total_cast > 0 AND
+    (mw.cast_details = 'Has Lead Cast' OR mw.production_year < 2000)  -- Filter for lead casts or movies before the year 2000
+ORDER BY 
+    mw.production_year DESC, mw.total_cast DESC
+LIMIT 10;
+

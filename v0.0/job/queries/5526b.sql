@@ -1,0 +1,4 @@
+SELECT min(at.title) AS aka_title, min(t.title) AS internet_movie_title
+FROM aka_title AS at, company_name AS cn, company_type AS ct, info_type AS it1, keyword AS k, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = at.movie_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mc.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mc.movie_id AND mk.movie_id = at.movie_id AND mi.movie_id = mc.movie_id AND mi.movie_id = at.movie_id AND mc.movie_id = at.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND k.phonetic_code IN ('A3142', 'I1645', 'N5262', 'N5635', 'P415', 'U5326', 'W3623') AND it1.id IN (111, 13, 2, 20, 25, 41, 53, 71, 89) AND t.season_nr IS NOT NULL AND ct.kind LIKE '%ors%' AND t.title < 'Das perfekte Promi-Dinner in Frankfurt #4';

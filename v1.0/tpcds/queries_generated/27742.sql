@@ -1,0 +1,44 @@
+
+WITH RankedAddresses AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_street_name) AS address_rank
+    FROM customer_address
+),
+CityDemographics AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ra.full_address,
+        ra.address_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN RankedAddresses ra ON c.c_current_addr_sk = ra.ca_address_sk
+    WHERE ra.address_rank <= 5 -- Top 5 addresses per city
+)
+SELECT
+    city,
+    COUNT(DISTINCT c_customer_sk) AS number_of_customers,
+    COUNT(DISTINCT full_address) AS unique_addresses,
+    COUNT(DISTINCT cd_gender) AS unique_genders,
+    COUNT(DISTINCT cd_marital_status) AS unique_marital_statuses,
+    AVG(cd_dep_count) AS average_dependents
+FROM (
+    SELECT
+        ca_city AS city,
+        c_customer_sk,
+        full_address,
+        cd_gender,
+        cd_marital_status,
+        cd_dep_count
+    FROM CityDemographics
+) AS DemographicsByCity
+GROUP BY city
+HAVING COUNT(DISTINCT c_customer_sk) > 10
+ORDER BY number_of_customers DESC;

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_first_name) AS row_num
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        COUNT(ws.ws_order_number) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_product_name
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.ws_sold_date_sk,
+    ss.total_net_profit,
+    ss.total_orders,
+    ss.total_quantity,
+    id.i_product_name,
+    id.total_sales,
+    id.avg_net_profit
+FROM 
+    customer_info cs
+JOIN 
+    web_sales ws ON cs.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    sales_summary ss ON ws.ws_sold_date_sk = ss.ws_sold_date_sk
+JOIN 
+    item_details id ON ws.ws_item_sk = id.i_item_sk
+WHERE 
+    (ss.total_net_profit > 5000 OR ss.total_quantity > 100) 
+    AND cs.row_num = 1
+ORDER BY 
+    cs.c_last_name, cs.c_first_name, ss.total_net_profit DESC
+LIMIT 50;

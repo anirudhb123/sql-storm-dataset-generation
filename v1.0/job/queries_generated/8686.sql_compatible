@@ -1,0 +1,53 @@
+
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT c.name) AS companies,
+        ARRAY_AGG(DISTINCT a.name) AS actors
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        companies,
+        actors,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY movie_id DESC) AS year_rank
+    FROM 
+        RecursiveMovieInfo
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    keywords,
+    companies,
+    actors
+FROM 
+    FilteredMovies
+WHERE 
+    year_rank <= 5
+ORDER BY 
+    production_year DESC, movie_id;

@@ -1,0 +1,70 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT c.role_id) AS roles,
+        COUNT(mc.company_id) AS company_count,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword k ON t.id = k.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id
+),
+avg_role_count AS (
+    SELECT 
+        AVG(role_count) AS average_roles
+    FROM (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT role_id) AS role_count
+        FROM 
+            cast_info
+        GROUP BY 
+            movie_id
+    ) AS subquery
+),
+genre_distribution AS (
+    SELECT 
+        kt.kind AS genre,
+        COUNT(t.id) AS movie_count
+    FROM 
+        title t
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    GROUP BY 
+        kt.kind
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.kind_id,
+    md.aka_names,
+    md.roles,
+    md.company_count,
+    md.keyword_count,
+    avg_role_count.average_roles,
+    gd.genre,
+    gd.movie_count
+FROM 
+    movie_details md
+CROSS JOIN 
+    avg_role_count
+JOIN 
+    genre_distribution gd ON md.kind_id = (SELECT id FROM kind_type WHERE kind = gd.genre)
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

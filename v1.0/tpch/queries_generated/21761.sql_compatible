@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           CASE WHEN s.s_acctbal < 1000 THEN 'Low Value' 
+                WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Value' 
+                ELSE 'High Value' END AS Value_Category
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           CASE WHEN s.s_acctbal < 1000 THEN 'Low Value' 
+                WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Value' 
+                ELSE 'High Value' END AS Value_Category
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey != sh.s_suppkey
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           DATEDIFF(CURRENT_DATE, o.o_orderdate) AS Days_Since_Order,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS Order_Count, 
+           SUM(l.l_extendedprice) AS Total_Expenditure
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS Supplier_Rank
+    FROM partsupp ps
+),
+FinalResults AS (
+    SELECT c.c_name AS Customer_Name, 
+           SUM(COALESCE(os.Total_Sales, 0)) AS Total_Order_Sales,
+           COALESCE(sh.Value_Category, 'Unknown') AS Supplier_Value_Category
+    FROM CustomerPurchases cp
+    LEFT JOIN OrderStats os ON cp.Order_Count = os.o_orderkey
+    LEFT JOIN SupplierHierarchy sh ON cp.c_custkey = sh.s_suppkey
+    GROUP BY c.c_name, sh.Value_Category
+)
+SELECT fr.Customer_Name, 
+       SUM(fr.Total_Order_Sales) AS Aggregated_Sales,
+       COUNT(DISTINCT fr.Supplier_Value_Category) AS Unique_Supplier_Values
+FROM FinalResults fr
+GROUP BY fr.Customer_Name
+HAVING SUM(fr.Total_Order_Sales) > 10000
+ORDER BY Aggregated_Sales DESC
+LIMIT 10;

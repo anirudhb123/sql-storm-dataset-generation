@@ -1,0 +1,51 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+HighValueCustomers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        RankedOrders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.OrderRank <= 10
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS UniqueCustomers,
+    AVG(hvc.TotalSpent) AS AvgSpent
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    HighValueCustomers hvc ON r.r_regionkey = hvc.r_regionkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    AvgSpent DESC
+LIMIT 5;

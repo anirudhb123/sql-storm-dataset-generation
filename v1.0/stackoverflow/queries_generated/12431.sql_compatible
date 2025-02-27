@@ -1,0 +1,17 @@
+
+SELECT 
+    PH.PostHistoryTypeId,
+    COUNT(*) AS TotalChanges,
+    MIN(PH.CreationDate) AS FirstChangeDate,
+    MAX(PH.CreationDate) AS LastChangeDate,
+    AVG(EXTRACT(EPOCH FROM (PH.CreationDate - LAG(PH.CreationDate) OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate))) / 60.0) AS AvgTimeBetweenChanges
+FROM 
+    PostHistory PH
+JOIN 
+    Posts P ON PH.PostId = P.Id
+WHERE 
+    P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+GROUP BY 
+    PH.PostHistoryTypeId
+ORDER BY 
+    TotalChanges DESC;

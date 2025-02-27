@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId  
+),
+PostStatistics AS (
+    SELECT
+        ph.PostId,
+        ph.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.Level) AS MaxLevel
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN Comments c ON ph.PostId = c.PostId
+    LEFT JOIN Votes v ON ph.PostId = v.PostId
+    GROUP BY
+        ph.PostId,
+        ph.Title
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'  
+)
+
+SELECT
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    rph.CreationDate AS RecentChangeDate,
+    rph.Comment AS RecentChangeComment,
+    rph.PostHistoryTypeId AS RecentChangeType
+FROM 
+    PostStatistics ps
+LEFT JOIN UserBadges ub ON ps.PostId = ub.UserId  
+LEFT JOIN RecentPostHistory rph ON ps.PostId = rph.PostId AND rph.rn = 1  
+WHERE 
+    ps.MaxLevel > 0  
+ORDER BY 
+    ps.UpVotes DESC,
+    ps.CommentCount DESC;

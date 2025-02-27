@@ -1,0 +1,69 @@
+
+WITH movie_characteristics AS (
+    SELECT 
+        a.title AS movie_title,
+        c.name AS character_name,
+        p.name AS actor_name,
+        a.production_year,
+        k.keyword AS genre,
+        t.kind AS movie_type,
+        m.note AS company_note
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id 
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type t ON a.kind_id = t.id
+    WHERE 
+        a.production_year >= 2000 
+),
+character_actors AS (
+    SELECT 
+        character_name,
+        actor_name,
+        production_year,
+        movie_title,
+        COUNT(*) AS character_count
+    FROM 
+        movie_characteristics
+    GROUP BY 
+        character_name, actor_name, production_year, movie_title
+),
+most_frequent_characters AS (
+    SELECT 
+        character_name,
+        actor_name,
+        MAX(character_count) AS max_count
+    FROM 
+        character_actors
+    GROUP BY 
+        character_name, actor_name
+)
+SELECT 
+    m.actor_name,
+    m.character_name,
+    m.production_year,
+    m.movie_title,
+    mf.max_count
+FROM 
+    character_actors m
+JOIN 
+    most_frequent_characters mf ON 
+        m.character_name = mf.character_name AND 
+        m.actor_name = mf.actor_name 
+ORDER BY 
+    m.production_year DESC, 
+    mf.max_count DESC
+LIMIT 10;

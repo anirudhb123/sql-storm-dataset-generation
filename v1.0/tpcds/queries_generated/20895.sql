@@ -1,0 +1,87 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY c.c_last_name) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+),
+total_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_ship_tax) AS total_net_paid,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+),
+recent_activity AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_return AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr_returning_customer_sk
+),
+final_summary AS (
+    SELECT 
+        ch.c_customer_id,
+        ch.c_first_name,
+        ch.c_last_name,
+        ch.cd_marital_status,
+        ts.total_net_paid,
+        ra.last_purchase_date,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        (CASE 
+            WHEN ts.total_net_paid > 1000 THEN 'High Value'
+            WHEN ts.total_net_paid BETWEEN 500 AND 1000 THEN 'Mid Value'
+            ELSE 'Low Value' 
+        END) AS customer_value
+    FROM 
+        customer_hierarchy ch
+    LEFT JOIN 
+        total_sales ts ON ch.c_customer_sk = ts.ws_bill_customer_sk
+    LEFT JOIN 
+        recent_activity ra ON ch.c_customer_sk = ra.c_customer_sk
+    LEFT JOIN 
+        customer_return cr ON ch.c_customer_sk = cr.cr_returning_customer_sk
+)
+SELECT 
+    *,
+    (CASE 
+        WHEN total_net_paid IS NULL THEN 'No Purchases'
+        ELSE 'Active' 
+    END) AS customer_status,
+    CONCAT(c_first_name, ' ', c_last_name, ' ', customer_value) AS customer_info
+FROM 
+    final_summary
+WHERE 
+    rn = 1
+ORDER BY 
+    last_purchase_date DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

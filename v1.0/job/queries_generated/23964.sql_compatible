@@ -1,0 +1,87 @@
+
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+company_movie_info AS (
+    SELECT 
+        mv.id AS movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_kind,
+        COALESCE(mi.info, 'No Info Available') AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY mv.id ORDER BY ct.kind) AS info_rank
+    FROM
+        title mv
+    LEFT JOIN
+        movie_companies mc ON mv.id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN
+        movie_info mi ON mv.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+    WHERE
+        cn.country_code IS NOT NULL
+),
+movie_keyword_info AS (
+    SELECT
+        mt.id AS movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY
+        mt.id
+),
+final_report AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        cm.company_name,
+        cm.company_kind,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        CASE 
+            WHEN rm.rank = 1 THEN 'Top Cast Movie'
+            WHEN rm.total_cast < 5 THEN 'Low Cast Movie'
+            ELSE 'Regular Movie' 
+        END AS movie_category
+    FROM
+        ranked_movies rm
+    LEFT JOIN
+        company_movie_info cm ON rm.movie_id = cm.movie_id
+    LEFT JOIN
+        movie_keyword_info mk ON rm.movie_id = mk.movie_id
+    WHERE
+        rm.rank IS NOT NULL
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.total_cast,
+    f.company_name,
+    f.company_kind,
+    f.keywords,
+    f.movie_category
+FROM
+    final_report f
+WHERE
+    f.total_cast > 1
+ORDER BY
+    f.production_year DESC, f.total_cast DESC
+LIMIT 100;

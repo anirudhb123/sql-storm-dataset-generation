@@ -1,0 +1,22 @@
+SELECT 
+    akn.name AS aka_name,
+    tit.title AS movie_title,
+    per.name AS person_name,
+    rol.role AS person_role,
+    mov.info AS movie_info
+FROM 
+    aka_name akn
+JOIN 
+    cast_info cst ON akn.person_id = cst.person_id
+JOIN 
+    title tit ON cst.movie_id = tit.id
+JOIN 
+    role_type rol ON cst.role_id = rol.id
+JOIN 
+    movie_info mov ON tit.id = mov.movie_id
+WHERE 
+    mov.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+  AND 
+    tit.production_year > 2000
+ORDER BY 
+    tit.production_year DESC, akn.name;

@@ -1,0 +1,57 @@
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) as rn
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+company_stats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS info_types_count,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_details
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(cs.company_count, 0) AS company_count,
+    COALESCE(cs.company_names, 'No Companies') AS company_names,
+    COALESCE(isum.info_types_count, 0) AS info_types_count,
+    COALESCE(isum.info_details, 'No Info') AS info_details
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    company_stats cs ON rm.id = cs.movie_id
+LEFT JOIN 
+    info_summary isum ON rm.id = isum.movie_id
+WHERE 
+    rm.rn <= 5
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

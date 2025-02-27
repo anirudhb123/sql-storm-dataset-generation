@@ -1,0 +1,72 @@
+
+WITH RECURSIVE popular_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title
+    HAVING 
+        COUNT(c.person_id) > 5
+),
+highly_rated_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(AVG(r.rating), 0) AS average_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, rating FROM movie_rating) r ON m.id = r.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title
+    HAVING 
+        COALESCE(AVG(r.rating), 0) > 7
+),
+combined_movies AS (
+    SELECT 
+        pm.movie_id,
+        pm.movie_title,
+        pm.cast_count,
+        hr.average_rating
+    FROM 
+        popular_movies pm
+    JOIN 
+        highly_rated_movies hr ON pm.movie_id = hr.movie_id 
+)
+SELECT 
+    cm.movie_id,
+    cm.movie_title,
+    cm.cast_count,
+    cm.average_rating,
+    COALESCE((
+        SELECT 
+            STRING_AGG(k.keyword, ', ') 
+        FROM 
+            movie_keyword mk 
+        JOIN 
+            keyword k ON mk.keyword_id = k.id 
+        WHERE 
+            mk.movie_id = cm.movie_id
+    ), 'No keywords') AS keywords
+FROM 
+    combined_movies cm
+LEFT JOIN 
+    movie_companies mc ON cm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    cn.country_code IS NOT NULL
+ORDER BY 
+    cm.average_rating DESC, cm.cast_count DESC
+LIMIT 10;

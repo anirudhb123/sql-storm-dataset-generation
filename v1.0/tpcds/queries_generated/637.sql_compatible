@@ -1,0 +1,68 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk >= (
+            SELECT MAX(d_date_sk)
+            FROM date_dim
+            WHERE d_year = 2023
+        ) - 30
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'S'
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+    HAVING
+        SUM(ws.ws_net_profit) > 1000
+),
+top_items AS (
+    SELECT
+        ri.ws_item_sk,
+        ri.ws_quantity,
+        ri.ws_net_profit,
+        ca.ca_city,
+        sm.sm_type,
+        ROW_NUMBER() OVER (PARTITION BY ri.ws_item_sk ORDER BY ri.ws_net_profit DESC) AS rank_within_city
+    FROM
+        ranked_sales ri
+    INNER JOIN customer c ON ri.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN ship_mode sm ON ri.ws_ship_mode_sk = sm.sm_ship_mode_sk
+)
+SELECT
+    ts.ws_item_sk,
+    ts.ws_quantity,
+    ts.ws_net_profit,
+    cs.total_net_profit AS customer_total_profit,
+    cs.total_orders AS number_of_orders,
+    COALESCE(ts.ca_city, 'Unknown City') AS shipping_city,
+    CASE
+        WHEN ts.rank_within_city <= 5 THEN 'Top 5 Item in City'
+        ELSE 'Other Items'
+    END AS item_category
+FROM
+    top_items ts
+JOIN customer_summary cs ON cs.c_customer_sk = ts.ws_bill_customer_sk
+ORDER BY
+    ts.ws_net_profit DESC
+FETCH FIRST 50 ROWS ONLY;

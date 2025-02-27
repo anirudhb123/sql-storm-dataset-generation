@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+PartStatistics AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopParts AS (
+    SELECT p.*, 
+           RANK() OVER (ORDER BY p.total_supply_cost DESC) AS rank
+    FROM PartStatistics p
+    WHERE p.supplier_count > 10
+)
+SELECT s.s_name AS supplier_name,
+       p.p_name AS part_name,
+       p.total_supply_cost,
+       COALESCE(ROUND((p.total_supply_cost / NULLIF(SUM(p.total_supply_cost) OVER ()), 2), 2), 0) AS cost_percentage,
+       CASE WHEN p.total_supply_cost > 10000 THEN 'High' ELSE 'Low' END AS supply_cost_category
+FROM TopParts p
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey IN (SELECT ps.ps_suppkey 
+                                                   FROM partsupp ps 
+                                                   WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN supplier s ON s.s_suppkey = sh.s_suppkey
+WHERE p.rank <= 10 
+GROUP BY s.s_name, p.p_name, p.total_supply_cost 
+ORDER BY p.total_supply_cost DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

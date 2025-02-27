@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, 1 AS OrderLevel
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, oh.OrderLevel + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate < oh.o_orderdate
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    ps.ps_availqty AS Available_Quantity,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+    AVG(s.s_acctbal) AS Average_Supplier_Account_Balance,
+    first_value(c.c_name) OVER (PARTITION BY p.p_partkey ORDER BY c.c_acctbal DESC) AS Top_Customer,
+    rd.r_name AS Region_Name,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Revenue'
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Revenue'
+        ELSE 'Moderate Revenue'
+    END AS Revenue_Category
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN customer c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region rd ON n.n_regionkey = rd.r_regionkey
+LEFT JOIN OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+GROUP BY p.p_partkey, p.p_name, p.p_brand, ps.ps_availqty, rd.r_name
+HAVING Revenue > 5000 OR REGEXP_LIKE(p.p_name, 'special', 'i')
+ORDER BY Revenue DESC, p.p_partkey
+LIMIT 100;

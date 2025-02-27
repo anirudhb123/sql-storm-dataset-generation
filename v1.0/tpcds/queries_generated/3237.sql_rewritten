@@ -1,0 +1,65 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = cast('2002-10-01' as date))
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+store_location AS (
+    SELECT 
+        s.s_store_sk,
+        CONCAT(s.s_street_number, ' ', s.s_street_name, ' ', s.s_city, ', ', s.s_state, ' ', s.s_zip) AS full_address
+    FROM 
+        store s
+    WHERE 
+        s.s_open_date_sk IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_order_number
+)
+
+SELECT 
+    c.customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    COALESCE(TOTAL.total_sales, 0) AS total_sales,
+    COALESCE(RS.ws_sales_price, 0) AS highest_item_price,
+    SL.full_address
+FROM 
+    customer_info ci
+LEFT JOIN 
+    total_sales TOTAL ON ci.c_customer_id = TOTAL.ws_order_number
+LEFT JOIN 
+    ranked_sales RS ON TOTAL.ws_order_number = RS.ws_order_number AND RS.rank = 1
+LEFT JOIN 
+    store_location SL ON ci.c_customer_sk = SL.s_store_sk
+WHERE 
+    ci.gender_rank <= 10
+    AND TOTAL.total_sales > 1000
+ORDER BY 
+    total_sales DESC;

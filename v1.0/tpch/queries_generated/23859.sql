@@ -1,0 +1,50 @@
+WITH RECURSIVE relevant_parts AS (
+    SELECT p_partkey, p_name, p_retailprice, p_comment 
+    FROM part 
+    WHERE p_size > 10 AND p_retailprice IS NOT NULL
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment 
+    FROM part p 
+    JOIN relevant_parts rp ON p.p_partkey = rp.p_partkey + 1
+),
+customer_statistics AS (
+    SELECT 
+        c.c_nationkey, 
+        COUNT(DISTINCT c.c_custkey) AS cust_count,
+        AVG(c.c_acctbal) AS avg_acctbal
+    FROM customer c
+    GROUP BY c.c_nationkey
+),
+orders_aggregated AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+)
+SELECT 
+    r.r_name,
+    ns.nation_sales,
+    AVG(cp.avg_acctbal) AS average_cust_balance,
+    SUM(COALESCE(lp.discounted_price, 0)) AS total_discounted_price
+FROM region r
+LEFT JOIN (
+    SELECT 
+        n.n_nationkey, 
+        SUM(oi.total_spent) AS nation_sales
+    FROM nation n
+    JOIN orders_aggregated oi ON n.n_nationkey = oi.o_custkey
+    GROUP BY n.n_nationkey
+) ns ON r.r_regionkey = ns.n_nationkey
+LEFT JOIN customer_statistics cp ON cp.c_nationkey = ns.n_nationkey
+LEFT JOIN (
+    SELECT 
+        l.l_partkey, 
+        (l.l_extendedprice * (1 - l.l_discount)) AS discounted_price 
+    FROM lineitem l 
+    WHERE l.l_returnflag = 'R' AND l.l_shipmode = 'SHIP'
+) lp ON lp.l_partkey = ANY(ARRAY(SELECT p_partkey FROM relevant_parts))
+GROUP BY r.r_name, ns.nation_sales
+HAVING AVG(cp.avg_acctbal) IS NOT NULL AND SUM(lp.discounted_price) > 1000
+ORDER BY r.r_name DESC NULLS LAST;

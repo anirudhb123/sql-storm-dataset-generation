@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    COALESCE(STRING_AGG(DISTINCT n.name, ', '), 'No Cast') AS cast_names,
+    SUM(CASE 
+        WHEN ci.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS non_null_notes,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    complete_cast AS cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name AS n ON c.person_id = n.person_id
+WHERE 
+    m.production_year IS NOT NULL 
+GROUP BY 
+    m.movie_id, m.movie_title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 0
+ORDER BY 
+    m.production_year DESC, total_cast DESC
+LIMIT 10;

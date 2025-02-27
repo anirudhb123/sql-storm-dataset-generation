@@ -1,0 +1,41 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name, 
+           DENSE_RANK() OVER (PARTITION BY r.r_regionkey ORDER BY n.n_name) AS nation_rank
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT p.p_name,
+       COALESCE(MAX(ps.ps_availqty), 0) AS max_available_quantity,
+       AVG(COALESCE(cod.total_order_value, 0)) AS avg_order_value,
+       COUNT(DISTINCT ns.n_nationkey) AS distinct_nations,
+       COUNT(DISTINCT CASE WHEN s.rank = 1 THEN s.s_suppkey END) AS top_suppliers_count
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN CustomerOrderDetails cod ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = cod.o_orderkey)
+LEFT JOIN NationRegion ns ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cod.c_custkey)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL
+) OR p.p_size IS NULL
+GROUP BY p.p_name
+HAVING AVG(cod.total_order_value) > (
+    SELECT SUM(o.o_totalprice) / NULLIF(COUNT(DISTINCT o.o_orderkey), 0)
+    FROM orders o WHERE o.o_orderstatus = 'O'
+) AND COUNT(DISTINCT ns.n_nationkey) < NULLIF((SELECT COUNT(*) FROM nation), 0) / 2
+ORDER BY max_available_quantity DESC, p.p_name ASC;

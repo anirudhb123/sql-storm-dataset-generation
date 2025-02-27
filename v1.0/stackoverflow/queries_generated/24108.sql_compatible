@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(a.Body, 'No accepted answer') AS AcceptedAnswerBody,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(NULLIF(u.DisplayName, ''), 'Anonymous') AS UserName,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.AcceptedAnswerId, u.DisplayName
+),
+PostHistoryWithScores AS (
+    SELECT
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS Closed,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 24 THEN 3 WHEN ph.PostHistoryTypeId = 12 THEN -5 ELSE 0 END) AS ScoreAdjustment
+    FROM PostHistory ph
+    WHERE ph.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY ph.PostId
+),
+TagPostCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t 
+    JOIN Posts p ON POSITION(t.TagName IN p.Tags) > 0 
+    GROUP BY t.TagName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.UserName,
+    rp.ViewCount,
+    rp.AcceptedAnswerBody,
+    pws.Closed,
+    pws.ScoreAdjustment,
+    (rp.CommentCount + COALESCE(pws.ScoreAdjustment, 0)) AS TotalInteractions,
+    STRING_AGG(tp.TagName, ', ') AS RelatedTags
+FROM RankedPosts rp
+LEFT JOIN PostHistoryWithScores pws ON rp.PostId = pws.PostId
+LEFT JOIN TagPostCounts tp ON tp.PostCount > 1 
+WHERE rp.Rank = 1 
+  AND (rp.ViewCount >= 10 OR pws.Closed = 1) 
+GROUP BY rp.PostId, rp.Title, rp.UserName, rp.ViewCount, rp.AcceptedAnswerBody, pws.Closed, pws.ScoreAdjustment, rp.CommentCount
+HAVING COUNT(DISTINCT tp.TagName) > 3 
+ORDER BY TotalInteractions DESC
+LIMIT 15;

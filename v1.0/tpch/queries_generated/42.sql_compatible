@@ -1,0 +1,72 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(os.revenue) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(os.revenue) > (SELECT AVG(total_revenue) FROM (
+            SELECT SUM(os.revenue) AS total_revenue
+            FROM customer c
+            JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+            GROUP BY c.c_custkey
+        ) AS avg_rev)
+)
+SELECT 
+    td.s_name AS supplier_name,
+    td.nation AS supplier_nation,
+    td.avg_supplycost AS average_supply_cost,
+    tc.c_name AS top_customer_name,
+    tc.total_revenue AS top_customer_revenue
+FROM 
+    SupplierDetails td
+FULL OUTER JOIN 
+    TopCustomers tc ON td.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_orderkey IN (SELECT os.o_orderkey FROM OrderSummary os)
+        ORDER BY ps.ps_supplycost DESC
+        LIMIT 1
+    )
+ORDER BY 
+    td.avg_supplycost DESC NULLS LAST, 
+    tc.total_revenue DESC NULLS LAST;

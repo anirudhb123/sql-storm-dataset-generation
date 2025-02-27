@@ -1,0 +1,60 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND t.production_year >= 2000 
+), actor_statistics AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_title) AS total_movies,
+        AVG(production_year) AS avg_production_year
+    FROM 
+        ranked_movies
+    GROUP BY 
+        actor_name
+), movie_keywords AS (
+    SELECT 
+        t.title AS movie_title,
+        k.keyword
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+), keyword_summary AS (
+    SELECT 
+        keyword,
+        COUNT(movie_title) AS movie_count
+    FROM 
+        movie_keywords
+    GROUP BY 
+        keyword
+    HAVING 
+        COUNT(movie_title) > 5
+)
+SELECT 
+    as.actor_name,
+    as.total_movies,
+    as.avg_production_year,
+    group_concat(ks.keyword) AS keywords
+FROM 
+    actor_statistics as
+LEFT JOIN 
+    keyword_summary ks ON as.total_movies > 3
+GROUP BY 
+    as.actor_name, as.total_movies, as.avg_production_year
+ORDER BY 
+    as.total_movies DESC, as.avg_production_year ASC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        CAST(mh.path || ' -> ' || mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked_mt ON linked_mt.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = linked_mt.id
+)
+SELECT 
+    mh.path,
+    mh.movie_id,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count,
+    STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS actor_names,
+    AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN LENGTH(mi.info) ELSE NULL END) AS avg_info_length
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+WHERE 
+    mh.production_year > (SELECT AVG(production_year) FROM aka_title WHERE production_year IS NOT NULL)
+GROUP BY 
+    mh.path, mh.movie_id, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2
+ORDER BY 
+    mh.production_year DESC,
+    total_actors DESC
+LIMIT 10;

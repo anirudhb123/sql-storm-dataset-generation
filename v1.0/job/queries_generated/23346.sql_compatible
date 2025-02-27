@@ -1,0 +1,80 @@
+
+WITH RecursiveMovieLinks AS (
+    SELECT 
+        ml.movie_id AS original_movie,
+        ml.linked_movie_id AS linked_movie,
+        ml.link_type_id,
+        1 AS link_depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        ml.link_type_id,
+        rml.link_depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        RecursiveMovieLinks rml ON ml.movie_id = rml.linked_movie
+    WHERE 
+        rml.link_depth < 5
+),
+FieldInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info, ', ') AS movie_infos
+    FROM 
+        movie_info mi
+    INNER JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        LOWER(it.info) LIKE '%director%'
+    GROUP BY 
+        mi.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        title.id,
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        title
+    LEFT JOIN 
+        cast_info c ON title.id = c.movie_id
+    WHERE 
+        title.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        title.id, title.title, title.production_year
+    HAVING 
+        COUNT(DISTINCT c.id) > 5
+)
+SELECT 
+    t.title,
+    t.production_year,
+    rml.linked_movie,
+    fi.movie_infos,
+    COALESCE(LENGTH(t.title) - LENGTH(REPLACE(t.title, ' ', '')), 0) + 1 AS word_count,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM movie_keyword mk WHERE mk.movie_id = t.id AND mk.keyword_id = (SELECT id FROM keyword WHERE keyword LIKE '%award%'))
+        THEN 'Award Nominated'
+        ELSE 'No Award'
+    END AS award_status
+FROM 
+    FilteredTitles t
+LEFT JOIN 
+    RecursiveMovieLinks rml ON t.id = rml.original_movie
+LEFT JOIN 
+    FieldInfo fi ON t.id = fi.movie_id
+WHERE 
+    (rml.linked_movie IS NOT NULL OR t.production_year < 2010)
+    AND t.title IS NOT NULL
+ORDER BY 
+    t.production_year DESC,
+    word_count DESC,
+    t.title;

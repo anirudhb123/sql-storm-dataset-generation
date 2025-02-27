@@ -1,0 +1,98 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        R.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PhH.PostId IS NOT NULL THEN 1 END) AS AnswerCount,
+        SUM(P.Score) AS TotalScore,
+        SUM(V.BountyAmount) AS TotalBounty,
+        MIN(P.CreationDate) AS FirstPostDate,
+        MAX(P.LastActivityDate) AS LastPostDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts PhH ON P.Id = PhH.ParentId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (1, 2)
+    GROUP BY 
+        PH.PostId
+),
+UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+ActiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        MAX(P.LastActivityDate) AS LastActivity
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PS.AnswerCount,
+    PS.TotalScore,
+    PS.TotalBounty,
+    PS.FirstPostDate,
+    PS.LastPostDate,
+    UBS.BadgeCount,
+    UBS.GoldBadges,
+    UBS.SilverBadges,
+    UBS.BronzeBadges,
+    AUP.TotalPosts,
+    AUP.TotalViews,
+    AUP.LastActivity
+FROM 
+    Users U
+JOIN 
+    PostStats PS ON U.Id = PS.UserId
+JOIN 
+    UserBadgeStats UBS ON U.Id = UBS.UserId
+JOIN 
+    ActiveUserPosts AUP ON U.Id = AUP.UserId
+WHERE 
+    U.Reputation > 100
+AND 
+    (AUP.LastActivity > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days') OR UBS.BadgeCount > 0)
+ORDER BY 
+    PS.TotalScore DESC, U.Reputation DESC
+LIMIT 50;

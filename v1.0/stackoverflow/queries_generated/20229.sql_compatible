@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        LENGTH(p.Tags) - LENGTH(REPLACE(p.Tags, '<>', '')) + 1 AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months'
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rb.BadgeCount, 0) AS RecentBadges,
+    SUM(rp.ViewCount) AS TotalViews,
+    COUNT(DISTINCT rp.PostId) AS DistinctPosts,
+    SUM(rp.Score) AS TotalScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsContributed,
+    MAX(rp.CreationDate) AS LastPostDate
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.Rank <= 5
+LEFT JOIN 
+    RecentBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT unnest(string_to_array(p.Tags, '<>')) AS TagName
+        FROM 
+            Posts p
+        WHERE 
+            p.OwnerUserId = u.Id
+    ) AS t ON TRUE
+WHERE 
+    u.Reputation > 100
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    SUM(rp.ViewCount) > 1000
+ORDER BY 
+    TotalScore DESC, LastPostDate DESC
+LIMIT 10;

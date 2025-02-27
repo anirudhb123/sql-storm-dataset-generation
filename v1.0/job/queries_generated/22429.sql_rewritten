@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.imdb_index,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.imdb_index,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+cast_and_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles,
+        MAX(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS has_female_cast,
+        MAX(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS has_male_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        name p ON ci.person_id = p.imdb_id
+    GROUP BY 
+        ci.movie_id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id,
+        SUM(CASE WHEN it.info = 'budget' THEN TO_NUMBER(mi.info, '9999999999') ELSE 0 END) AS total_budget,
+        COUNT(DISTINCT ik.keyword) AS keyword_count,
+        MAX(CASE WHEN mi.info LIKE '%Oscar%' THEN 1 ELSE 0 END) AS has_oscar_info
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword ik ON mk.keyword_id = ik.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    ca.total_cast,
+    ca.roles,
+    mis.total_budget,
+    mis.keyword_count,
+    mis.has_oscar_info,
+    COALESCE(ca.has_female_cast, 0) AS has_female_cast,
+    COALESCE(ca.has_male_cast, 0) AS has_male_cast,
+    CASE 
+        WHEN ca.total_cast IS NULL THEN 'No Cast Information'
+        WHEN ca.total_cast > 10 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_and_roles ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    mh.depth = (SELECT MAX(depth) FROM movie_hierarchy) 
+ORDER BY 
+    mh.production_year DESC, 
+    ca.total_cast DESC NULLS LAST;

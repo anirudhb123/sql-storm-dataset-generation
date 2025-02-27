@@ -1,0 +1,52 @@
+WITH TagAggregates AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        AVG(u.Reputation) AS AverageUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+PostDetailAnalysis AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        ta.PostCount AS TagPostCount,
+        ta.TotalVotes AS TagTotalVotes,
+        ta.AverageUserReputation AS TagAverageUserReputation
+    FROM 
+        Posts p
+    JOIN 
+        TagAggregates ta ON p.Tags LIKE '%' || ta.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1  
+)
+SELECT 
+    pda.Title,
+    pda.CreationDate,
+    pda.ViewCount,
+    pda.AnswerCount,
+    pda.CommentCount,
+    pda.Score,
+    ROUND((pda.TagTotalVotes::numeric / NULLIF(pda.TagPostCount, 0)), 2) AS AverageVotesPerPost,
+    ROUND((pda.TagAverageUserReputation::numeric), 2) AS AverageUserReputation
+FROM 
+    PostDetailAnalysis pda
+ORDER BY 
+    pda.ViewCount DESC
+LIMIT 10;

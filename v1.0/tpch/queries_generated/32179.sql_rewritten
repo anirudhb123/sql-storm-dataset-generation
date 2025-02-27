@@ -1,0 +1,65 @@
+WITH RECURSIVE CTE_Supplier AS (
+    SELECT s_nationkey, COUNT(*) AS supplier_count
+    FROM supplier
+    GROUP BY s_nationkey
+),
+CTE_Orders AS (
+    SELECT o_custkey, SUM(o_totalprice) AS total_spent
+    FROM orders
+    WHERE o_orderdate >= '1997-01-01'
+    GROUP BY o_custkey
+),
+CTE_PartSupp AS (
+    SELECT ps_partkey, SUM(ps_supplycost * ps_availqty) AS total_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+CTE_LineItem AS (
+    SELECT l_orderkey, COUNT(DISTINCT l_partkey) AS part_count
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+CTE_Region AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_regionkey IN (SELECT DISTINCT n_regionkey FROM nation WHERE n_name LIKE 'A%')
+)
+SELECT 
+    c.c_name,
+    COALESCE(o.total_spent, 0) AS total_spent,
+    p.p_name,
+    p.p_retailprice,
+    ps.total_supplycost,
+    CASE 
+        WHEN li.part_count > 5 THEN 'Large Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    r.r_name AS delivery_region,
+    s.s_name AS supplier_name,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.total_spent DESC) AS rank
+FROM 
+    customer c
+LEFT JOIN 
+    CTE_Orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT l_partkey FROM lineitem WHERE l_orderkey = li.l_orderkey)
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    CTE_Region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_nationkey = s.s_nationkey
+    )
+WHERE 
+    c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_mktsegment = c.c_mktsegment
+    )
+ORDER BY 
+    total_spent DESC, c.c_name;

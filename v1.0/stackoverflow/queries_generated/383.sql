@@ -1,0 +1,83 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(P.Score) AS AvgScore,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+RecentPostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UPS.PostCount,
+        UPS.QuestionCount,
+        UPS.AvgScore,
+        CASE 
+            WHEN UPS.PostCount > 50 AND UPS.AvgScore > 10 THEN 'Expert'
+            WHEN UPS.PostCount BETWEEN 20 AND 50 AND UPS.AvgScore BETWEEN 5 AND 10 THEN 'Intermediate'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        UserPostStats UPS
+    JOIN 
+        Users U ON UPS.UserId = U.Id
+    WHERE 
+        UPS.Rank <= 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.UserLevel,
+    RPS.PostId,
+    RPS.Title,
+    RPS.CreationDate,
+    RPS.Score
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPostStats RPS ON TU.UserId = P.OwnerUserId
+WHERE 
+    RPS.RowNum = 1
+ORDER BY 
+    TU.UserLevel, TU.DisplayName;
+
+-- Select only users with posts having a score greater than the average score of all posts.
+WITH AveragePostScore AS (
+    SELECT AVG(Score) AS AvgScore FROM Posts
+)
+SELECT 
+    U.DisplayName,
+    P.Title,
+    P.Score,
+    P.CreationDate
+FROM 
+    Users U
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+WHERE 
+    P.Score > (SELECT AvgScore FROM AveragePostScore)
+ORDER BY 
+    P.Score DESC;

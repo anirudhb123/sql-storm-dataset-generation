@@ -1,0 +1,59 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        region r
+        JOIN nation n ON r.r_regionkey = n.n_regionkey
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        JOIN lineitem l ON p.p_partkey = l.l_partkey
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+        AND o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        r.r_name
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS account_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_acctbal > (
+            SELECT AVG(c2.c_acctbal) 
+            FROM customer c2 
+            WHERE c2.c_nationkey = c.c_nationkey
+        )
+),
+SalesSummary AS (
+    SELECT 
+        rs.region_name, 
+        SUM(rs.total_sales) AS total_region_sales
+    FROM 
+        RegionalSales rs
+    GROUP BY 
+        rs.region_name
+)
+SELECT 
+    fs.c_name,
+    fs.c_acctbal,
+    COALESCE(ss.total_region_sales, 0) AS region_sales
+FROM 
+    FilteredCustomers fs
+LEFT JOIN 
+    SalesSummary ss ON fs.c_nationkey = ss.region_name
+WHERE 
+    fs.account_rank <= 5
+ORDER BY 
+    fs.c_acctbal DESC, 
+    fs.c_name
+LIMIT 10;

@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.UserId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(PH.Id) AS EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        P.Id, P.Title, PH.UserId
+),
+UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    COALESCE(PVC.UpvoteCount, 0) AS UpvoteCount,
+    COALESCE(PVC.DownvoteCount, 0) AS DownvoteCount,
+    COALESCE(PHS.LastEditDate, '1970-01-01') AS LastEditDate,
+    COALESCE(PHS.EditCount, 0) AS EditCount,
+    U.DisplayName AS AuthorDisplayName,
+    U.Reputation,
+    UBC.BadgeCount,
+    RPH.Level AS PostLevel
+FROM 
+    Posts P
+LEFT JOIN 
+    PostVoteCounts PVC ON P.Id = PVC.PostId
+LEFT JOIN 
+    PostHistorySummary PHS ON P.Id = PHS.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.Id = UBC.UserId
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON P.Id = RPH.PostId
+WHERE 
+    P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+ORDER BY 
+    P.CreationDate DESC,
+    RPH.Level,
+    P.Title;

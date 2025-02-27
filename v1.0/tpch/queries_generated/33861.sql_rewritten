@@ -1,0 +1,48 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+best_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+region_counts AS (
+    SELECT r.r_name, COUNT(n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(nc.nation_count, 0) AS nation_count,
+    COALESCE(SUM(bs.total_spent), 0) AS best_customers_spent,
+    COALESCE(SUM(os.total_revenue), 0) AS total_order_revenue,
+    COUNT(DISTINCT sh.s_suppkey) AS active_suppliers
+FROM region_counts nc
+LEFT JOIN region r ON nc.r_name = r.r_name
+LEFT JOIN best_customers bs ON r.r_regionkey = bs.c_custkey
+LEFT JOIN order_summary os ON r.r_regionkey = os.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON r.r_regionkey = sh.s_nationkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name, nc.nation_count
+HAVING nation_count > 1
+ORDER BY r.r_name;

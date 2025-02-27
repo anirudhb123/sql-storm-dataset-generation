@@ -1,0 +1,67 @@
+
+WITH customer_stats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_depend_count,
+        SUM(ws.ws_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_marital_status ORDER BY SUM(ws.ws_sales_price) DESC) AS spending_rank
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_depend_count
+),
+inventory_summary AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM
+        inventory inv
+    GROUP BY
+        inv.inv_item_sk
+),
+sales_summary AS (
+    SELECT
+        CASE 
+            WHEN cs.cs_item_sk IS NOT NULL THEN 'catalog'
+            WHEN ss.ss_item_sk IS NOT NULL THEN 'store'
+            ELSE 'web'
+        END AS sales_type,
+        COALESCE(cs.cs_item_sk, ss.ss_item_sk, ws.ws_item_sk) AS item_id,
+        SUM(COALESCE(cs.cs_ext_sales_price, 0) + COALESCE(ss.ss_ext_sales_price, 0) + COALESCE(ws.ws_ext_sales_price, 0)) AS total_sales
+    FROM
+        catalog_sales cs
+    FULL OUTER JOIN store_sales ss ON cs.cs_item_sk = ss.ss_item_sk
+    FULL OUTER JOIN web_sales ws ON cs.cs_item_sk = ws.ws_item_sk OR ss.ss_item_sk = ws.ws_item_sk
+    GROUP BY
+        sales_type, item_id
+)
+SELECT
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.total_spent,
+    COALESCE(sales.total_sales, 0) AS sales_total,
+    sales.sales_type,
+    inv.total_quantity_on_hand,
+    CASE
+        WHEN COALESCE(sales.total_sales, 0) > 1000 THEN 'High Roller'
+        WHEN COALESCE(sales.total_sales, 0) BETWEEN 500 AND 1000 THEN 'Moderate Spender'
+        ELSE 'Low Stinger'
+    END AS spender_category
+FROM
+    customer_stats cs
+LEFT JOIN sales_summary sales ON cs.c_customer_sk = sales.item_id
+LEFT JOIN inventory_summary inv ON sales.item_id = inv.inv_item_sk
+WHERE
+    cs.spending_rank <= 10 AND 
+    (cs.cd_gender = 'F' OR cs.total_orders > 5) AND
+    (COALESCE(sales.total_sales, 0) IS NOT NULL OR inv.total_quantity_on_hand IS NOT NULL)
+ORDER BY
+    cs.total_spent DESC, cs.c_last_name ASC;

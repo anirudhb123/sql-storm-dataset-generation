@@ -1,0 +1,84 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) as BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount,
+        COALESCE(SUM(P.Views), 0) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS ViewRanking,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, U.DisplayName, P.PostTypeId
+),
+VoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.TotalViews,
+    PP.PostId,
+    PP.Title,
+    PP.CreationDate,
+    PP.ViewCount,
+    PP.CommentCount,
+    VS.TotalBounty,
+    VS.UpVotes,
+    VS.DownVotes,
+    PP.ViewRanking,
+    CASE 
+        WHEN PP.ViewCount IS NULL THEN 'No Views Yet' 
+        ELSE CAST(PP.ViewCount AS VARCHAR)
+    END AS ViewDescription,
+    (SELECT STRING_AGG(Tag.TagName, ', ') 
+     FROM Tags Tag 
+     WHERE Tag.Id IN (SELECT unnest(string_to_array(PP.Tags, '<>'))::int)) AS AssociatedTags
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    RankedPosts PP ON U.UserId = PP.OwnerDisplayName
+LEFT JOIN 
+    VoteSummary VS ON PP.PostId = VS.PostId
+WHERE 
+    (U.Reputation > 1000 AND U.BadgeCount > 0) OR (U.TotalViews < 1000 AND PP.ViewRanking < 5)
+ORDER BY 
+    U.DisplayName, PP.ViewRanking ASC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

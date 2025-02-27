@@ -1,0 +1,87 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        Rank() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.PostTypeId, 
+        p.Title,
+        p.Body,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS CloseCount, 
+        ARRAY_AGG(DISTINCT ctr.Name) AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes ctr ON ph.Comment::int = ctr.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY ph.PostId
+),
+
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        COALESCE(cp.CloseReasons, '{}') AS CloseReasons,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS TotalUpvotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS TotalDownvotes
+    FROM Posts p 
+    LEFT JOIN Comments c ON p.Id = c.PostId 
+    LEFT JOIN Votes v ON p.Id = v.PostId 
+    LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+    GROUP BY p.Id
+),
+
+UserPostDetails AS (
+    SELECT 
+        ur.Id AS UserId,
+        ur.Reputation,
+        ur.ReputationRank,
+        rp.PostId,
+        rp.Title,
+        pm.CloseCount,
+        pm.CloseReasons,
+        pm.CommentCount,
+        pm.LastVoteDate,
+        pm.TotalUpvotes,
+        pm.TotalDownvotes
+    FROM UserReputation ur
+    JOIN RecentPosts rp ON ur.Id = rp.OwnerUserId
+    JOIN PostMetrics pm ON rp.PostId = pm.Id
+    WHERE ur.ReputationRank <= 10
+)
+
+SELECT 
+    u.DisplayName,
+    u.Location,
+    COALESCE(upd.CloseCount, 0) AS CloseCount,
+    upd.CloseReasons,
+    upd.CommentCount,
+    EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - upd.LastVoteDate)) AS SecondsSinceLastVote,
+    (upd.TotalUpvotes - upd.TotalDownvotes) AS NetVotes,
+    CASE 
+        WHEN upd.CommentCount > 20 THEN 'Engaged User'
+        WHEN upd.TotalUpvotes > 50 THEN 'Popular User'
+        WHEN u.Reputation < 100 THEN 'New User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM Users u
+LEFT JOIN UserPostDetails upd ON u.Id = upd.UserId
+WHERE u.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+AND (u.Location IS NOT NULL OR u.AboutMe IS NOT NULL)
+ORDER BY u.Reputation DESC, CloseCount DESC NULLS LAST;

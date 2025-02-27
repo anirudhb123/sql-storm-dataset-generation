@@ -1,0 +1,49 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_id, ws.ws_order_number
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender_desc
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+TotalReturns AS (
+    SELECT 
+        wr.wr_order_number,
+        SUM(wr.wr_return_qty) AS total_return_qty,
+        COUNT(wr.wr_item_sk) AS total_items_returned
+    FROM web_returns wr
+    GROUP BY wr.wr_order_number
+)
+SELECT 
+    cs.web_site_id,
+    cs.unique_customers,
+    cs.total_sales,
+    COALESCE(tr.total_return_qty, 0) AS total_returned_quantity,
+    COALESCE(tr.total_items_returned, 0) AS total_items_returned,
+    cd.gender_desc,
+    cd.ib_income_band_sk
+FROM SalesData cs
+LEFT JOIN TotalReturns tr ON cs.ws_order_number = tr.wr_order_number
+JOIN CustomerDemographics cd ON cs.ws_bill_customer_sk = cd.cd_demo_sk
+WHERE cs.total_sales > 5000
+ORDER BY cs.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryOrder
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    up.ViewCount,
+    up.AnswerCount,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pha.PostHistoryTypeId,
+    pha.Comment,
+    rua.CommentCount AS UserCommentCount,
+    rua.LastCommentDate
+FROM 
+    RankedPosts up
+LEFT JOIN 
+    UserBadges ub ON up.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistories pha ON up.PostId = pha.PostId AND pha.HistoryOrder = 1
+LEFT JOIN 
+    RecentUserActivity rua ON up.OwnerUserId = rua.UserId
+WHERE 
+    up.rn = 1  
+ORDER BY 
+    up.CreationDate DESC
+FETCH FIRST 100 ROWS ONLY;

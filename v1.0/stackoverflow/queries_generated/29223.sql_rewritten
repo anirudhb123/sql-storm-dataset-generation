@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+        JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+TopPosts AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount
+    FROM 
+        RankedPosts p
+    WHERE 
+        p.rn = 1
+),
+
+PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+        JOIN Tags t ON POSITION(CONCAT('<', t.TagName, '>') IN p.Tags) > 0
+    GROUP BY 
+        p.Id
+),
+
+PostScoreViews AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        pt.TagCount,
+        CASE 
+            WHEN pt.TagCount > 5 THEN 'High Tag Count'
+            WHEN pt.TagCount BETWEEN 3 AND 5 THEN 'Medium Tag Count'
+            ELSE 'Low Tag Count'
+        END AS TagCountCategory
+    FROM 
+        TopPosts tp
+        JOIN PostTagCounts pt ON tp.PostId = pt.PostId
+)
+
+SELECT 
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.TagCount,
+    ps.TagCountCategory,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBounties
+FROM 
+    PostScoreViews ps
+    LEFT JOIN Comments c ON ps.PostId = c.PostId
+    LEFT JOIN Votes v ON ps.PostId = v.PostId AND v.VoteTypeId = 8 
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.TagCount, ps.TagCountCategory
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

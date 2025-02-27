@@ -1,0 +1,92 @@
+WITH RECURSIVE UserAnalytics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Location,
+        U.UpVotes,
+        U.DownVotes,
+        U.Views,
+        0 AS AnswerCount,
+        0 AS QuestionCount,
+        U.CreationDate AS FirstActiveDate
+    FROM Users U
+    WHERE U.CreationDate <= cast('2024-10-01 12:34:56' as timestamp)
+    
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Location,
+        U.UpVotes + COALESCE(V.UpVotes, 0) AS UpVotes,
+        U.DownVotes + COALESCE(V.DownVotes, 0) AS DownVotes,
+        U.Views + COALESCE(P.ViewCount, 0) AS Views,
+        UAnalytics.AnswerCount + COALESCE(Q.AnswerCount, 0) AS AnswerCount,
+        UAnalytics.QuestionCount + 1 AS QuestionCount,
+        U.FirstActiveDate
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1
+    LEFT JOIN (
+          SELECT OwnerUserId, COUNT(*) AS AnswerCount 
+          FROM Posts 
+          WHERE PostTypeId = 2 
+          GROUP BY OwnerUserId
+    ) Q ON Q.OwnerUserId = U.Id
+    JOIN UserAnalytics UAnalytics ON UAnalytics.UserId = U.Id
+    WHERE U.Id IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UA.AnswerCount,
+        UA.QuestionCount,
+        DENSE_RANK() OVER (ORDER BY UA.Reputation DESC) AS Rank
+    FROM UserAnalytics UA
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.AnswerCount,
+    TU.QuestionCount,
+    U.BadgesCount,
+    COALESCE(TotalVotes.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(TotalVotes.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN AnyClosed.CloseCount IS NOT NULL THEN 'Has Closed Posts' 
+        ELSE 'No Closed Posts' 
+    END AS ClosePostStatus
+FROM TopUsers TU
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgesCount 
+    FROM Badges 
+    GROUP BY UserId
+) U ON U.UserId = TU.UserId
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes V
+    JOIN Posts P ON P.Id = V.PostId
+    WHERE P.OwnerUserId IS NOT NULL
+    GROUP BY P.OwnerUserId
+) TotalVotes ON TotalVotes.OwnerUserId = TU.UserId
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS CloseCount 
+    FROM PostHistory PH
+    JOIN Posts P ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY P.OwnerUserId
+) AnyClosed ON AnyClosed.OwnerUserId = TU.UserId
+WHERE TU.Rank <= 100 
+ORDER BY TU.Reputation DESC;

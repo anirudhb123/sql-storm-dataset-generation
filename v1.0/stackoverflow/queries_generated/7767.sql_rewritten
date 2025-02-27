@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, ',')) AS tName ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = trim(both ' ' from tName)
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN RankScore <= 5 THEN 'Top Ranked'
+            ELSE 'Others'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    RankCategory,
+    COUNT(PostId) AS PostCount,
+    AVG(Score) AS AvgScore,
+    SUM(ViewCount) AS TotalViewCount,
+    STRING_AGG(DISTINCT OwnerDisplayName) AS UniqueAuthors,
+    STRING_AGG(DISTINCT Tags) AS AssociatedTags
+FROM 
+    FilteredPosts
+GROUP BY 
+    RankCategory
+ORDER BY 
+    RankCategory DESC;

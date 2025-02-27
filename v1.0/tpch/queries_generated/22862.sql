@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_acctbal < s.s_acctbal
+),
+PartSummary AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(l.l_discount) AS avg_discount,
+           COUNT(DISTINCT l.l_orderkey) AS total_orders
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RegionStats AS (
+    SELECT r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(COALESCE(c.c_acctbal, 0)) AS total_customer_balance
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY r.r_name
+),
+ComplexQuery AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           ps.ps_availqty,
+           COALESCE(NULLIF(l.l_discount, 0), 1) * ps.ps_supplycost AS adjusted_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS rn
+    FROM partsupp ps
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, l.l_discount
+)
+SELECT 
+    ph.s_name,
+    ph.level,
+    ps.p_name,
+    ps.total_available_qty,
+    ps.avg_discount,
+    r.r_name,
+    r.nation_count,
+    r.total_customer_balance,
+    cq.adjusted_cost
+FROM SupplierHierarchy ph
+JOIN PartSummary ps ON ps.total_orders > 0
+JOIN RegionStats r ON r.total_customer_balance > 10000
+LEFT JOIN ComplexQuery cq ON cq.ps_partkey = ps.p_partkey
+WHERE 
+    ps.total_available_qty IS NOT NULL 
+    AND (ph.level > 1 OR r.nation_count < 5) 
+    AND (ps.avg_discount < 0.25 OR r.total_customer_balance IS NULL)
+ORDER BY ph.s_name, ps.p_name;

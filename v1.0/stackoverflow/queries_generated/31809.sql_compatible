@@ -1,0 +1,101 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        1 AS Depth,
+        p.OwnerUserId,
+        p.OwnerDisplayName,
+        p.AcceptedAnswerId,
+        p.Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        r.Depth + 1 AS Depth,
+        p.OwnerUserId,
+        p.OwnerDisplayName,
+        p.AcceptedAnswerId,
+        p.Tags
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Depth,
+    rp.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ua.TotalPosts,
+    ua.TotalBadges,
+    ua.TotalViews,
+    ph.CloseCount,
+    CASE 
+        WHEN ph.CloseCount IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    PostVoteSummary ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    UserActivity ua ON rp.OwnerUserId = ua.UserId
+LEFT JOIN 
+    ClosedPosts ph ON rp.PostId = ph.PostId
+WHERE 
+    (rp.Score > 10 OR rp.Depth > 1)  
+ORDER BY 
+    rp.Depth, rp.Score DESC;

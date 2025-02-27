@@ -1,0 +1,45 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TagUsage AS (
+    SELECT 
+        p.OwnerUserId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+    FROM 
+        Posts p
+    JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tagIds ON TRUE 
+    JOIN 
+        Tags t ON t.Id = tagIds::int
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.OwnerUserId
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalQuestions,
+    us.TotalViews,
+    us.AcceptedAnswers,
+    tu.TagsUsed
+FROM 
+    UserStats us
+LEFT JOIN 
+    TagUsage tu ON us.UserId = tu.OwnerUserId
+ORDER BY 
+    us.Reputation DESC, us.TotalQuestions DESC;

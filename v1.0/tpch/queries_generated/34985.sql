@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 3
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate > DATE '2023-01-01'
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT s.s_name) AS supplier_names,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey = n.n_nationkey AND c.c_acctbal IS NOT NULL) AS distinct_customer_count
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+WHERE p.p_retailprice > 50.00
+AND l.l_shipdate BETWEEN DATE '2023-02-01' AND DATE '2023-12-31'
+AND EXISTS (
+    SELECT 1
+    FROM RankedOrders ro
+    WHERE ro.o_orderkey = o.o_orderkey
+    AND ro.order_rank <= 5
+)
+GROUP BY p.p_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY revenue DESC;

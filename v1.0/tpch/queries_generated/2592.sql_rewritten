@@ -1,0 +1,64 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_sales,
+        COUNT(l.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    c.c_name AS customer_name,
+    COALESCE(os.total_line_sales, 0) AS total_order_sales,
+    cs.total_orders,
+    ss.total_available,
+    ss.avg_supply_cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CustomerOrders cs ON cs.total_orders > 0
+LEFT JOIN 
+    OrderDetails os ON os.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cs.c_custkey)
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = s.s_suppkey
+WHERE 
+    ss.avg_supply_cost IS NOT NULL
+    AND cs.total_spent > 1000
+ORDER BY 
+    total_order_sales DESC, customer_name ASC;

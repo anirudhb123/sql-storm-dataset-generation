@@ -1,0 +1,29 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+), 
+NationSales AS (
+    SELECT n.n_name, SUM(s.total_spent) AS nation_total
+    FROM SalesCTE s
+    JOIN nation n ON s.c_custkey = n.n_nationkey
+    WHERE s.rank_within_nation <= 10
+    GROUP BY n.n_name
+)
+SELECT r.r_name, ns.nation_total, 
+       CASE 
+           WHEN ns.nation_total IS NULL THEN 'No Sales'
+           ELSE CONCAT('Total Sales: ', ns.nation_total)
+       END AS sales_info
+FROM region r
+LEFT JOIN NationSales ns ON r.r_regionkey = n.n_regionkey
+WHERE r.r_name NOT LIKE '%East%'
+ORDER BY ns.nation_total DESC NULLS LAST
+UNION ALL
+SELECT 'Total' AS r_name, SUM(nation_total) AS nation_total, 'Aggregate Sales' AS sales_info
+FROM NationSales
+GROUP BY 'Total'
+ORDER BY nation_total DESC;

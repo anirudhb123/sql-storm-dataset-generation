@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0 
+        AND p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE))
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON ph.UserId = u.Id 
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserPostRanks AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        us.ClosedPosts,
+        us.BadgeCount,
+        us.VoteCount
+    FROM 
+        UserStatistics us
+    JOIN 
+        RankedPosts rp ON us.UserId = rp.OwnerUserId
+)
+SELECT 
+    upr.DisplayName,
+    COUNT(upr.PostId) AS TotalPosts,
+    SUM(upr.ClosedPosts) AS TotalClosedPosts,
+    AVG(upr.Score) AS AverageScore,
+    STRING_AGG(upr.Title, ', ') AS TopPostTitles
+FROM 
+    UserPostRanks upr
+GROUP BY 
+    upr.DisplayName
+HAVING 
+    COUNT(upr.PostId) > 5
+ORDER BY 
+    AverageScore DESC
+FETCH FIRST 10 ROWS ONLY;

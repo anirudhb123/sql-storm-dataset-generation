@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+), SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey
+), OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(*) AS item_count,
+        MAX(l.l_shipdate) AS latest_ship_date
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    n.n_name AS supplier_nation,
+    sm.total_supply_value,
+    od.net_revenue,
+    od.item_count,
+    CASE 
+        WHEN od.latest_ship_date IS NULL THEN 'No shipments'
+        ELSE TO_CHAR(od.latest_ship_date, 'YYYY-MM-DD')
+    END AS last_shipment_date,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders
+FROM 
+    SupplierMetrics sm
+LEFT JOIN 
+    orders o ON sm.s_suppkey = o.o_custkey
+LEFT JOIN 
+    RankedOrders ro ON o.o_orderkey = ro.o_orderkey AND ro.rnk = 1
+JOIN 
+    nation n ON n.n_nationkey = (SELECT n_nationkey FROM supplier s WHERE s.s_suppkey = sm.s_suppkey)
+JOIN 
+    OrderDetails od ON od.l_orderkey = o.o_orderkey
+WHERE 
+    sm.total_supply_value > (SELECT AVG(total_supply_value) FROM SupplierMetrics) 
+    OR od.net_revenue > (SELECT SUM(l.l_extendedprice) FROM lineitem l WHERE l.l_returnflag = 'R')
+    OR od.latest_ship_date IS NULL
+GROUP BY 
+    n.n_name, sm.total_supply_value, od.net_revenue, od.item_count, od.latest_ship_date
+ORDER BY 
+    supplier_nation DESC, sm.total_supply_value DESC;

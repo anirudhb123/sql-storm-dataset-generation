@@ -1,0 +1,82 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = cr.Id::varchar
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.Id) > 10
+),
+CombinedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COALESCE(cph.CloseCount, 0) AS CloseCount,
+        COALESCE(cph.CloseReasons, 'None') AS CloseReasons,
+        pt.TagName,
+        pt.PostCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        ClosedPostHistory cph ON rp.PostId = cph.PostId
+    LEFT JOIN 
+        PopularTags pt ON rp.PostId IN (SELECT postid FROM Posts WHERE Tags LIKE '%' || pt.TagName || '%')
+    WHERE 
+        rp.OwnerPostRank <= 3  
+)
+SELECT 
+    c.PostId,
+    c.Title,
+    c.CreationDate,
+    c.Score,
+    c.ViewCount,
+    c.OwnerDisplayName,
+    c.CloseCount,
+    c.CloseReasons,
+    STRING_AGG(DISTINCT c.TagName, ', ') AS Tags
+FROM 
+    CombinedResults c
+GROUP BY 
+    c.PostId, c.Title, c.CreationDate, c.Score, c.ViewCount, c.OwnerDisplayName, c.CloseCount, c.CloseReasons
+ORDER BY 
+    c.Score DESC, c.ViewCount DESC;

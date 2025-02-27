@@ -1,0 +1,77 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        COUNT(b.Id) AS BadgeCount,
+        CASE 
+            WHEN u.Reputation >= 10000 THEN 'Elite'
+            WHEN u.Reputation >= 1000 THEN 'Experienced'
+            WHEN u.Reputation >= 100 THEN 'Novice'
+            ELSE 'Beginner' 
+        END AS UserLevel
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(ph.Id) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.UserId, ph.PostId, ph.Comment
+),
+UserActivity AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ps.TotalPosts,
+        ps.QuestionCount,
+        ps.AnswerCount,
+        ps.AvgScore,
+        cr.CloseCount,
+        cr.CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY ur.UserId ORDER BY ps.TotalPosts DESC, cr.CloseCount DESC) AS ActivityRank
+    FROM UserReputation ur
+    JOIN PostStatistics ps ON ur.UserId = ps.OwnerUserId
+    LEFT JOIN ClosedPostReasons cr ON ur.UserId = cr.UserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.UserLevel,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+    COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+    COALESCE(ps.AvgScore, 0) AS AvgScore,
+    COALESCE(cr.CloseCount, 0) AS CloseCount,
+    COALESCE(cr.CloseReason, 'No close reasons') AS CloseReason,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    COUNT(DISTINCT ph.Id) AS TotalPostHistoryEntries
+FROM UserReputation u
+LEFT JOIN PostStatistics ps ON u.UserId = ps.OwnerUserId
+LEFT JOIN ClosedPostReasons cr ON u.UserId = cr.UserId
+LEFT JOIN Badges b ON u.UserId = b.UserId
+LEFT JOIN PostHistory ph ON u.UserId = ph.UserId
+GROUP BY u.UserId, u.DisplayName, u.Reputation, 
+         u.UserLevel, ps.TotalPosts, ps.QuestionCount, 
+         ps.AnswerCount, ps.AvgScore, cr.CloseCount, cr.CloseReason
+HAVING (COALESCE(ps.TotalPosts, 0) > 5 AND 
+         COALESCE(cr.CloseCount, 0) >= 1) 
+      OR (u.Reputation >= 10000)
+ORDER BY u.Reputation DESC;

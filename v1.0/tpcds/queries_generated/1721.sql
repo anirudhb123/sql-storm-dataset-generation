@@ -1,0 +1,54 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+TopItems AS (
+    SELECT 
+        ss_item_sk, 
+        total_sales, 
+        total_quantity
+    FROM SalesSummary
+    WHERE sales_rank <= 10
+),
+CustomerIncomeBand AS (
+    SELECT 
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM CustomerDemographics cd
+    JOIN household_demographics hd ON cd.cd_income_band_sk = hd.hd_income_band_sk
+    GROUP BY cd.cd_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COALESCE(cib.customer_count, 0) AS customer_count,
+    SUM(tti.total_sales) AS total_item_sales,
+    AVG(tti.total_quantity) AS avg_quantity_per_item
+FROM income_band ib
+LEFT JOIN CustomerIncomeBand cib ON ib.ib_income_band_sk = cib.cd_income_band_sk
+LEFT JOIN TopItems tti ON ib.ib_income_band_sk = (CASE 
+                                                    WHEN tti.total_sales BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound THEN ib.ib_income_band_sk 
+                                                    ELSE NULL 
+                                                END)
+GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY ib.ib_income_band_sk;

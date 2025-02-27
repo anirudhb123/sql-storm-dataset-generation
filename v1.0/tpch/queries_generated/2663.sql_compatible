@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank 
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierNation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey 
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    CN.c_custkey, 
+    CN.c_name,
+    COALESCE(CO.total_order_value, 0) AS total_order_value,
+    COALESCE(CO.total_orders, 0) AS total_orders,
+    RN.s_suppkey, 
+    RN.s_name,
+    RN.total_supply_cost,
+    SN.supplier_count,
+    (RN.total_supply_cost / NULLIF(SN.supplier_count, 0)) AS avg_supply_cost_per_supplier
+FROM 
+    CustomerOrders CO 
+RIGHT JOIN 
+    customer CN ON CO.c_custkey = CN.c_custkey 
+LEFT JOIN 
+    RankedSuppliers RN ON RN.rank = 1 
+LEFT JOIN 
+    SupplierNation SN ON RN.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p))
+WHERE 
+    RN.total_supply_cost > 1000
+ORDER BY 
+    total_order_value DESC, avg_supply_cost_per_supplier ASC;

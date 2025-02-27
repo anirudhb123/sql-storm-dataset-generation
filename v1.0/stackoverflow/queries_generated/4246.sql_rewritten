@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        Score,
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        ph.Comment AS PostComment,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostLinks pl ON tp.PostId = pl.PostId
+    LEFT JOIN 
+        Posts rp ON pl.RelatedPostId = rp.Id
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = rp.Id
+    LEFT JOIN 
+        Comments ph ON tp.PostId = ph.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.OwnerDisplayName, tp.CreationDate, tp.Score, tp.ViewCount
+)
+SELECT 
+    pd.*,
+    CASE 
+        WHEN pd.Score > 100 THEN 'High Score'
+        WHEN pd.Score BETWEEN 50 AND 100 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = pd.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = pd.PostId AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    PostDetails pd
+WHERE 
+    EXISTS (SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = pd.PostId AND v.UserId IS NULL) 
+ORDER BY 
+    pd.CreationDate DESC;

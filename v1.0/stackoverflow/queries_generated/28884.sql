@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rnk
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '>')) AS t(TagName) ON TRUE
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        OwnerDisplayName,
+        AnswerCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        Rnk = 1
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT rp.PostId) AS PostCount,
+        AVG(rp.AnswerCount) AS AvgAnswersPerPost
+    FROM 
+        RecentPosts rp
+    JOIN 
+        UNNEST(rp.Tags) AS t(TagName) ON TRUE
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgAnswersPerPost,
+    COUNT(b.Id) AS BadgeCount
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    Badges b ON b.UserId IN (SELECT DISTINCT rp.OwnerDisplayName FROM RecentPosts rp WHERE rp.Tags @> ARRAY[ts.TagName])
+GROUP BY 
+    ts.TagName, ts.PostCount, ts.AvgAnswersPerPost
+ORDER BY 
+    ts.PostCount DESC,
+    ts.AvgAnswersPerPost DESC;
+
+This query generates a comprehensive overview of recently created questions on Stack Overflow, segmented by tags. It first ranks posts per owner, retrieves the most recent post per user, analyzes tag statistics, and correlates badge counts to give insight into user engagement with those tags.

@@ -1,0 +1,115 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId  
+    WHERE 
+        p.PostTypeId = 2 AND p.AcceptedAnswerId IS NULL  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountySpent,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3)  
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS Id,
+        p.Title AS Title,
+        p.ViewCount AS ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.VoteCount, 0) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        p.CreationDate AS CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::int[])  
+    WHERE 
+        p.CreationDate > CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate
+),
+FinalMetrics AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        up.TotalBountySpent,
+        up.TotalPosts,
+        up.TotalViews,
+        pm.Id AS PostId,
+        pm.Title AS Title,
+        pm.ViewCount AS ViewCount,
+        pm.CommentCount AS CommentCount,
+        pm.VoteCount AS VoteCount,
+        pm.Tags AS Tags
+    FROM 
+        UserReputation up
+    INNER JOIN 
+        Posts pm ON up.UserId = pm.OwnerUserId
+    INNER JOIN 
+        RecursivePostHierarchy rph ON pm.Id = rph.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalBountySpent,
+    TotalPosts,
+    TotalViews,
+    PostId,
+    Title,
+    ViewCount,
+    CommentCount,
+    VoteCount,
+    Tags
+FROM 
+    FinalMetrics
+ORDER BY 
+    TotalViews DESC,
+    TotalPosts DESC
+LIMIT 100;

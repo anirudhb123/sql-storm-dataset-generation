@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM
+        aka_title m
+    INNER JOIN
+        movie_link ml ON ml.linked_movie_id = m.id
+    INNER JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    coalesce(cast.name, 'Unknown') AS lead_actor,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS rn
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN
+    cast_info ci ON ci.movie_id = cc.movie_id AND ci.nr_order = 1
+LEFT JOIN
+    aka_name cast ON cast.person_id = ci.person_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = mh.movie_id
+WHERE
+    mh.production_year >= 2000
+AND
+    (ci.person_role_id IS NOT NULL OR ci.note IS NOT NULL)
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, mh.level, cast.name
+HAVING
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY
+    mh.production_year DESC,
+    mh.title ASC;

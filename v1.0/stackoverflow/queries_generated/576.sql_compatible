@@ -1,0 +1,60 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        PS.PostCount,
+        PS.AnswerCount,
+        PS.QuestionCount,
+        PS.TotalScore,
+        CASE 
+            WHEN PS.QuestionCount > 0 THEN ROUND(COALESCE(PS.TotalScore, 0) / PS.QuestionCount, 2)
+            ELSE 0
+        END AS AvgScorePerQuestion
+    FROM 
+        UserReputation U
+    LEFT JOIN 
+        PostStatistics PS ON U.UserId = PS.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+)
+SELECT 
+    CS.*,
+    CASE 
+        WHEN CS.AvgScorePerQuestion > 5 THEN 'High Scorer'
+        WHEN CS.AvgScorePerQuestion BETWEEN 1 AND 5 THEN 'Moderate Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoringCategory,
+    (SELECT STRING_AGG(CONCAT(T.TagName, ': ', T.Count), ', ') 
+     FROM Tags T 
+     WHERE T.Id IN (SELECT CAST(value AS int) FROM UNNEST(STRING_TO_ARRAY(P.Tags, '><')) AS value)
+    ) AS TagSummary
+FROM 
+    CombinedStats CS
+ORDER BY 
+    CS.Reputation DESC, 
+    CS.PostCount DESC
+LIMIT 10;

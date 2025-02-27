@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_discount, 
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount BETWEEN 0.05 AND 0.2
+    AND 
+        l.l_shipdate < CURRENT_DATE - INTERVAL '30 days'
+),
+AggregatedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    COALESCE(r.total_revenue, 0) as total_revenue,
+    (SELECT COUNT(*) FROM FilteredLineItems fli WHERE fli.l_partkey = p.p_partkey) AS total_lines,
+    (SELECT COUNT(DISTINCT n.n_name) 
+     FROM nation n 
+     JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey 
+     WHERE rs.supplier_rank <= 5) AS unique_nations_served
+FROM 
+    part p
+LEFT JOIN 
+    AggregatedOrders r ON p.p_partkey = r.o_orderkey
+WHERE 
+    p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_size < 10
+    )
+ORDER BY 
+    total_revenue DESC, 
+    p.p_name ASC
+FETCH FIRST 50 ROWS ONLY;

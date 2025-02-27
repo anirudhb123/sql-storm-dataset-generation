@@ -1,0 +1,56 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighCostSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        total_cost,
+        part_count
+    FROM 
+        SupplierStats s
+    WHERE 
+        total_cost > (SELECT AVG(total_cost) FROM SupplierStats)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_spent,
+    s.s_name AS supplier_name,
+    s.total_cost,
+    s.part_count,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY c.total_spent DESC) as customer_rank,
+    ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.total_cost DESC) as supplier_rank
+FROM 
+    CustomerOrders c
+LEFT OUTER JOIN 
+    HighCostSuppliers s ON c.total_spent > 10000 -- Filter based on total spent
+WHERE 
+    c.order_count > 5
+ORDER BY 
+    c.total_spent DESC, s.total_cost DESC
+LIMIT 100;

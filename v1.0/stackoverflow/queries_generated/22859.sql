@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Ranking
+    FROM
+        Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND P.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS Badges
+    FROM
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY
+        U.Id
+),
+ClosePostCounts AS (
+    SELECT
+        PostId,
+        COUNT(*) AS CloseCount
+    FROM
+        PostHistory
+    WHERE
+        PostHistoryTypeId = 10
+    GROUP BY
+        PostId
+),
+PostTags AS (
+    SELECT
+        P.Id AS PostId,
+        T.TagName
+    FROM
+        Posts P
+    CROSS JOIN LATERAL string_to_array(P.Tags, ',') AS T(TagName)
+    WHERE
+        P.Tags IS NOT NULL
+),
+PostMetrics AS (
+    SELECT
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        UB.BadgeCount,
+        CU.CloseCount,
+        PT.TagName,
+        ROW_NUMBER() OVER (PARTITION BY RP.PostId ORDER BY PT.TagName) AS TagRank
+    FROM
+        RankedPosts RP
+    LEFT JOIN UserBadges UB ON RP.OwnerUserId = UB.UserId
+    LEFT JOIN ClosePostCounts CU ON RP.PostId = CU.PostId
+    LEFT JOIN PostTags PT ON RP.PostId = PT.PostId
+)
+SELECT
+    PM.PostId,
+    PM.Title,
+    PM.CreationDate,
+    COALESCE(PM.BadgeCount, 0) AS BadgeCount,
+    COALESCE(PM.CloseCount, 0) AS CloseCount,
+    STRING_AGG(PM.TagName, ', ') FILTER (WHERE PM.TagRank IS NOT NULL) AS Tags,
+    CASE
+        WHEN PM.BadgeCount IS NULL THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus
+FROM
+    PostMetrics PM
+WHERE
+    PM.Ranking <= 5
+GROUP BY
+    PM.PostId, PM.Title, PM.CreationDate, PM.BadgeCount, PM.CloseCount
+ORDER BY
+    PM.CreationDate DESC NULLS LAST;

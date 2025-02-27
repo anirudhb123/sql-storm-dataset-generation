@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(COALESCE(a.production_year, 0)) AS latest_movie_year
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title a ON ci.movie_id = a.id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MoviesWithNotes AS (
+    SELECT 
+        a.title,
+        STRING_AGG(COALESCE(m.note, 'No Note'), '; ') AS combined_notes
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_info m ON a.id = m.movie_id
+    GROUP BY 
+        a.title
+)
+SELECT 
+    rm.title AS Movie_Title,
+    rm.production_year AS Release_Year,
+    rm.actor_count AS Number_of_Actors,
+    ta.actor_name AS Lead_Actor,
+    mw.combined_notes AS Movie_Notes,
+    CASE 
+        WHEN rm.actor_count > 20 THEN 'Blockbuster'
+        WHEN rm.actor_count BETWEEN 10 AND 20 THEN 'Major Release'
+        ELSE 'Independent'
+    END AS Movie_Category
+FROM 
+    RankedMovies rm
+JOIN 
+    TopActors ta ON rm.rn = 1
+LEFT JOIN 
+    MoviesWithNotes mw ON rm.title = mw.Movie_Title
+WHERE 
+    rm.actor_count IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC;

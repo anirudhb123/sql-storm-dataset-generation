@@ -1,0 +1,46 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws.ws_item_sk, ws.ws_sold_date_sk, ws.ws_sales_price, ws.ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) as rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+    UNION ALL
+    SELECT cs.cs_item_sk, cs.cs_sold_date_sk, cs.cs_sales_price, cs.cs_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sold_date_sk DESC) as rn
+    FROM catalog_sales cs
+    JOIN Sales_CTE ON Sales_CTE.ws_item_sk = cs.cs_item_sk
+    WHERE Sales_CTE.ws_sold_date_sk IS NOT NULL
+),
+Sales_Summary AS (
+    SELECT sc.ws_item_sk,
+           COUNT(sc.ws_item_sk) AS total_sales,
+           SUM(sc.ws_net_profit) AS total_net_profit,
+           AVG(sc.ws_sales_price) AS avg_sales_price
+    FROM Sales_CTE sc
+    WHERE sc.rn <= 10
+    GROUP BY sc.ws_item_sk
+),
+High_Profit_Products AS (
+    SELECT item.i_item_sk, item.i_item_id, item.i_product_name, ss.total_sales, ss.total_net_profit
+    FROM item
+    JOIN Sales_Summary ss ON item.i_item_sk = ss.ws_item_sk
+    WHERE ss.total_net_profit > (SELECT AVG(total_net_profit) FROM Sales_Summary) 
+      AND ss.total_sales > 5
+)
+SELECT hpp.i_item_sk, 
+       hpp.i_item_id, 
+       COALESCE(hpp.i_product_name, 'UNKNOWN PRODUCT') AS product_name,
+       hpp.total_sales, 
+       CASE
+           WHEN hpp.total_net_profit > 1000 THEN 'High Profit'
+           WHEN hpp.total_net_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+           ELSE 'Low Profit'
+       END AS profit_category,
+       'Sales Target: ' || CASE 
+           WHEN hpp.total_sales >= 10 THEN 'Achieved'
+           ELSE 'Not Achieved'
+       END AS sales_target_status
+FROM High_Profit_Products hpp
+LEFT JOIN customer demog ON demog.cd_demo_sk = (SELECT cd_demo_sk FROM customer WHERE c_customer_sk = (SELECT c_customer_sk FROM store_sales WHERE ss_item_sk = hpp.i_item_sk LIMIT 1))
+WHERE demog.cd_gender IS NULL OR demog.cd_gender = 'F'
+ORDER BY hpp.total_net_profit DESC NULLS LAST;

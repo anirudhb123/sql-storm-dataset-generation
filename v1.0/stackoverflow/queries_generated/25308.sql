@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.Score,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY STRING_AGG(t.TagName, ',') ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int))
+    WHERE 
+        p.PostTypeId = 1 AND  -- Only Questions
+        p.Score > 0  -- Only Questions with Positive Scores
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS QuestionCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(p.Id) > 10  -- Users must have asked more than 10 questions
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 5
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Author,
+    rp.Rank,
+    tu.DisplayName AS TopUser,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.VoteTypeId = 2) AS UpVotes,
+    SUM(v.VoteTypeId = 3) AS DownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Comments c ON c.PostId = rp.PostId
+JOIN 
+    Votes v ON v.PostId = rp.PostId
+JOIN 
+    TopUsers tu ON tu.Id = rp.PostId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')::int))
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Author, rp.Rank, tu.DisplayName
+HAVING 
+    rp.Rank <= 3  -- Only top-ranked Posts
+ORDER BY 
+    rp.Rank, rp.Score DESC;

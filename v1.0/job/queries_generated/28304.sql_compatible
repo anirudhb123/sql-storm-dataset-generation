@@ -1,0 +1,62 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    WHERE 
+        kt.kind LIKE '%Drama%'
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id, 
+        mt.keyword_id,
+        k.keyword
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+CompleteCastInfo AS (
+    SELECT 
+        cc.movie_id, 
+        COUNT(DISTINCT cc.subject_id) AS total_actors
+    FROM 
+        complete_cast cc
+    GROUP BY 
+        cc.movie_id
+),
+CombinedData AS (
+    SELECT
+        rt.title,
+        rt.production_year,
+        COALESCE(cc.total_actors, 0) AS total_actors,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CompleteCastInfo cc ON rt.title_id = cc.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON rt.title_id = mwk.movie_id
+    GROUP BY 
+        rt.title, rt.production_year, cc.total_actors
+)
+SELECT 
+    title,
+    production_year,
+    total_actors,
+    keywords
+FROM 
+    CombinedData
+WHERE 
+    total_actors > 5
+ORDER BY 
+    production_year DESC, total_actors DESC;

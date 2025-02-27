@@ -1,0 +1,98 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        Level + 1 
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON r.PostId = p.ParentId
+    WHERE 
+        p.PostTypeId = 2 
+),
+UserRankedPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        RANK() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostClosureDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pt.Name AS PostHistoryType,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND ph.PostHistoryTypeId IN (10, 11) 
+),
+UserPostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        pcd.PostHistoryType,
+        pcd.Comment,
+        u.DisplayName AS Owner
+    FROM 
+        RecursivePostCTE r
+    LEFT JOIN 
+        PostClosureDetails pcd ON r.PostId = pcd.PostId
+    LEFT JOIN 
+        Users u ON r.OwnerUserId = u.Id
+)
+SELECT 
+    upd.Owner,
+    COUNT(DISTINCT upd.PostId) AS TotalPosts,
+    SUM(upd.Score) AS TotalScore,
+    MAX(upd.CreationDate) AS LastActiveDate,
+    STRING_AGG(upd.Title, ', ') AS Titles,
+    CASE 
+        WHEN COUNT(DISTINCT upd.PostId) > 5 THEN 'High Activity'
+        WHEN COUNT(DISTINCT upd.PostId) BETWEEN 1 AND 5 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel
+FROM 
+    UserPostDetails upd
+WHERE 
+    upd.Owner IS NOT NULL
+GROUP BY 
+    upd.Owner
+HAVING 
+    SUM(upd.Score) > 50
+ORDER BY 
+    TotalScore DESC;

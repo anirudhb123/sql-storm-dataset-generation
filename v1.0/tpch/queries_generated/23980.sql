@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+ValidOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS RecentRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    AND 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS TotalSpent,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 0
+    AND 
+        COALESCE(SUM(o.o_totalprice), 0) > 1000
+)
+SELECT 
+    cs.c_name,
+    COUNT(DISTINCT lo.l_orderkey) AS UniqueLineItems,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS TotalRevenue,
+    rs.TotalSupplyCost,
+    rs.s_name AS TopSupplier,
+    cs.TotalSpent,
+    cs.OrderCount,
+    (SELECT COUNT(*) FROM region) AS TotalRegions,
+    (SELECT CASE WHEN COUNT(*) IS NULL THEN 'NO SUPPLY' ELSE 'SUPPLIED' END 
+     FROM RankedSuppliers rs2 
+     WHERE rs2.Rank <= 5) AS SupplyStatus
+FROM 
+    lineitem lo
+JOIN 
+    ValidOrders vo ON lo.l_orderkey = vo.o_orderkey
+JOIN 
+    CustomerSummary cs ON vo.o_orderkey IN (
+        SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+LEFT JOIN 
+    RankedSuppliers rs ON lo.l_suppkey = rs.s_suppkey
+WHERE 
+    lo.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+AND 
+    lo.l_returnflag = 'N'
+GROUP BY 
+    cs.c_name, rs.TotalSupplyCost, rs.s_name, cs.TotalSpent, cs.OrderCount
+ORDER BY 
+    TotalRevenue DESC
+LIMIT 10;

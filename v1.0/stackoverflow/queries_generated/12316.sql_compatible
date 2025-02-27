@@ -1,0 +1,54 @@
+
+WITH PostVoteCounts AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(pvc.UpVotes, 0) AS UpVotes,
+        COALESCE(pvc.DownVotes, 0) AS DownVotes,
+        COALESCE(pvc.TotalVotes, 0) AS TotalVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN PostVoteCounts pvc ON p.Id = pvc.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pvc.UpVotes, pvc.DownVotes, pvc.TotalVotes
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.TotalVotes,
+    pd.CommentCount,
+    ud.DisplayName AS Author,
+    ud.Reputation,
+    ud.BadgeCount
+FROM PostDetails pd
+JOIN Users u ON pd.OwnerUserId = u.Id
+JOIN UserDetails ud ON u.Id = ud.UserId
+ORDER BY pd.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_quantity,
+        COUNT(*) OVER (PARTITION BY ws.ws_item_sk) AS total_orders,
+        MAX(ws.ws_net_paid) AS max_net_paid,
+        MIN(ws.ws_net_paid) AS min_net_paid,
+        AVG(ws.ws_net_paid) AS avg_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = CURRENT_DATE)
+),
+SaleReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_returned_date_sk = (SELECT d.d_date_sk FROM date_dim d WHERE d.d_date = CURRENT_DATE)
+    GROUP BY 
+        sr.sr_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.cumulative_quantity,
+        rs.total_orders,
+        sr.total_returned,
+        sr.total_return_amount,
+        rs.max_net_paid,
+        rs.min_net_paid,
+        rs.avg_net_paid
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        SaleReturns sr ON rs.ws_item_sk = sr.sr_item_sk
+)
+SELECT 
+    cs.ws_item_sk,
+    cs.cumulative_quantity,
+    cs.total_orders,
+    COALESCE(cs.total_returned, 0) AS total_returned,
+    COALESCE(cs.total_return_amount, 0) AS total_return_amount,
+    cs.max_net_paid,
+    cs.min_net_paid,
+    cs.avg_net_paid,
+    CASE 
+        WHEN cs.total_orders > 100 THEN 'High Volume'
+        WHEN cs.total_orders BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS volume_category,
+    NULLIF(cs.avg_net_paid, 0) AS avg_net_paid_non_zero,
+    cs.rank
+FROM 
+    CombinedSales cs
+WHERE 
+    cs.avg_net_paid IS NOT NULL 
+    OR cs.max_net_paid IS NOT NULL
+ORDER BY 
+    cs.ws_item_sk;

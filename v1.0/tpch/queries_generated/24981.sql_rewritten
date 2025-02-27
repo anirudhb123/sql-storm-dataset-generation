@@ -1,0 +1,54 @@
+WITH RECURSIVE Supplier_Rank AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        COUNT(ps.ps_partkey) AS total_parts,
+        RANK() OVER (PARTITION BY s.n_nationkey ORDER BY COUNT(ps.ps_partkey) DESC) AS part_rank
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+Filtered_Orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        CASE 
+            WHEN EXTRACT(YEAR FROM o.o_orderdate) = 1997 THEN 'Current Year'
+            ELSE 'Prior Year'
+        END AS order_age
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+Nation_Supplier_Data AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    n.n_name,
+    n.supplier_count,
+    n.total_account_balance,
+    COALESCE(sr.part_rank, 'Unranked') AS supplier_rank,
+    fo.o_orderkey,
+    fo.net_revenue,
+    fo.o_totalprice,
+    fo.order_age
+FROM Nation_Supplier_Data n
+LEFT JOIN Supplier_Rank sr ON n.n_name = (SELECT DISTINCT n_name FROM nation WHERE n_regionkey = (SELECT DISTINCT n_regionkey FROM nation WHERE n.n_name = n.n_name))
+LEFT JOIN Filtered_Orders fo ON sr.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#2'))
+WHERE 
+    n.supplier_count > 5 
+    AND (fo.o_totalprice BETWEEN 1000 AND 10000 OR fo.net_revenue IS NULL)
+ORDER BY 
+    n.total_account_balance DESC,
+    fo.Order_age ASC NULLS LAST;

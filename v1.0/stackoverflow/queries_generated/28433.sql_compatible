@@ -1,0 +1,72 @@
+
+WITH PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Tags
+),
+TagPopularity AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostedQuestions,
+        COUNT(DISTINCT c.Id) AS CommentedPosts,
+        AVG(EXTRACT(EPOCH FROM (CAST('2024-10-01 12:34:56' AS timestamp) - u.CreationDate))) / 3600 AS AverageAgeInHours
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ta.Tag,
+    ps.TagCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostedQuestions,
+    ua.CommentedPosts,
+    ua.AverageAgeInHours
+FROM 
+    PostTagStats ps
+JOIN 
+    UserActivity ua ON ps.OwnerUserId = ua.UserId
+JOIN 
+    TagPopularity ta ON ta.PostCount = ps.TagCount  
+ORDER BY 
+    ps.UpVotes DESC, ps.CommentCount DESC, ua.PostedQuestions DESC;

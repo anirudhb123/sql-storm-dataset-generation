@@ -1,0 +1,29 @@
+SELECT 
+    a.name AS aka_name, 
+    t.title AS movie_title, 
+    c.nr_order AS cast_order, 
+    r.role AS role_type, 
+    pn.name AS person_name, 
+    ci.kind AS company_type, 
+    mi.info AS movie_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    person_info pi ON a.person_id = pi.person_id
+JOIN 
+    company_name cn ON cn.id = (SELECT company_id FROM movie_companies mc WHERE mc.movie_id = c.movie_id LIMIT 1)
+JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    a.name IS NOT NULL
+ORDER BY 
+    a.name, 
+    t.production_year DESC;

@@ -1,0 +1,49 @@
+WITH SupplierStatistics AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_availqty) AS total_available_quantity, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_custkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+        COUNT(li.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+)
+SELECT 
+    r.r_name AS region, 
+    n.n_name AS nation, 
+    s.s_name AS supplier_name, 
+    ss.total_available_quantity,
+    od.total_price, 
+    od.total_line_items
+FROM 
+    SupplierStatistics ss
+JOIN 
+    nation n ON ss.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    OrderDetails od ON ss.s_suppkey = od.o_custkey
+WHERE 
+    ss.total_supply_cost > 10000 AND 
+    od.total_price > 500000
+ORDER BY 
+    region, nation, supplier_name;

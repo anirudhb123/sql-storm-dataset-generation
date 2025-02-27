@@ -1,0 +1,89 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id, 
+        m.title, 
+        m.production_year, 
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year, 
+        COUNT(cc.id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(cc.id) > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        tm.movie_id, 
+        tm.title, 
+        tm.production_year, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+),
+MoviesWithRatings AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.production_year,
+        mwk.keywords,
+        COALESCE(mi.info, 'N/A') AS movie_rating
+    FROM 
+        MoviesWithKeywords mwk
+    LEFT JOIN 
+        movie_info mi ON mwk.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+)
+SELECT 
+    mw.title,
+    mw.production_year, 
+    mw.keywords,
+    mw.movie_rating,
+    ARRAY_AGG(DISTINCT a.name) AS actors,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM 
+    MoviesWithRatings mw
+LEFT JOIN 
+    complete_cast cc ON mw.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name a ON cc.person_id = a.person_id
+LEFT JOIN 
+    movie_companies mc ON mw.movie_id = mc.movie_id
+WHERE 
+    mw.production_year >= 2000
+GROUP BY 
+    mw.movie_id, mw.title, mw.production_year, mw.keywords, mw.movie_rating
+ORDER BY 
+    mw.production_year DESC, mw.title;

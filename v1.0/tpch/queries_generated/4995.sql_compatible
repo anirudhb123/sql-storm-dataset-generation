@@ -1,0 +1,59 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 10
+),
+MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+        EXTRACT(MONTH FROM o.o_orderdate) AS order_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY EXTRACT(YEAR FROM o.o_orderdate), EXTRACT(MONTH FROM o.o_orderdate)
+)
+SELECT 
+    ns.n_name,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(hv.total_spent, 0) AS high_value_customer_spending,
+    COALESCE(fp.supplier_count, 0) AS part_supplier_count,
+    ms.order_year,
+    ms.order_month,
+    ms.total_sales
+FROM nation ns
+LEFT JOIN SupplierStats ss ON ns.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ss.s_suppkey LIMIT 1)
+LEFT JOIN HighValueCustomers hv ON ns.n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = hv.c_custkey LIMIT 1)
+LEFT JOIN FilteredParts fp ON ns.n_nationkey = (
+    SELECT p.p_type 
+    FROM part p 
+    WHERE p.p_partkey = (SELECT p_partkey FROM partsupp WHERE ps_supplycost = (SELECT MAX(ps_supplycost) FROM partsupp) LIMIT 1)
+)
+LEFT JOIN MonthlySales ms ON ms.order_year = EXTRACT(YEAR FROM DATE '1998-10-01') AND ms.order_month = EXTRACT(MONTH FROM DATE '1998-10-01')
+ORDER BY ns.n_name, ms.order_year, ms.order_month;

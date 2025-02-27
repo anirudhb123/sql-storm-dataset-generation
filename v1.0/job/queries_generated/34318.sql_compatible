@@ -1,0 +1,88 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+aggregated_movie_info AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        COUNT(DISTINCT mk.keyword_id) AS num_keywords
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+final_report AS (
+    SELECT 
+        a.movie_id,
+        a.title,
+        a.production_year,
+        a.num_companies,
+        a.num_keywords,
+        COALESCE(cd.actor_name, 'Unknown Actor') AS leading_actor,
+        COALESCE(cd.role, 'No Role') AS role,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.num_companies DESC) AS year_rank
+    FROM 
+        aggregated_movie_info a
+    LEFT JOIN 
+        cast_details cd ON a.movie_id = cd.movie_id AND cd.rank_order = 1
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.num_companies > 5 THEN 'High Production'
+        WHEN fr.num_companies BETWEEN 3 AND 5 THEN 'Medium Production'
+        ELSE 'Low Production'
+    END AS production_level,
+    CASE 
+        WHEN fr.production_year IS NULL THEN 'No Year Listed'
+        ELSE CAST(fr.production_year AS VARCHAR)
+    END AS production_year_str
+FROM 
+    final_report fr
+WHERE 
+    fr.year_rank <= 10
+ORDER BY 
+    fr.num_companies DESC,
+    fr.production_year DESC;

@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVotesCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(day, -30, '2024-10-01')
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerDisplayName,
+        RankScore,
+        UpVotesCount - DownVotesCount AS NetVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        RankScore <= 5 AND
+        NetVotes IS NOT NULL
+),
+TagsStats AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(TRIM(BOTH '"' FROM T.TagName), ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(SPLIT(P.Tags, ',')) AS Tag ON P.Id = Tag.PostId
+    JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '"' FROM Tag) 
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.CreationDate,
+    FP.ViewCount,
+    FP.Score,
+    FP.OwnerDisplayName,
+    FP.NetVotes,
+    COALESCE(TS.Tags, 'No Tags') AS Tags,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = FP.PostId) AS CommentCount,
+    CASE 
+        WHEN FP.NetVotes > 0 THEN 'Positive'
+        WHEN FP.NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM 
+    FilteredPosts FP
+LEFT JOIN 
+    TagsStats TS ON FP.PostId = TS.PostId
+ORDER BY 
+    FP.NetVotes DESC, FP.Score DESC;

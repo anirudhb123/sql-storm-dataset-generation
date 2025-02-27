@@ -1,0 +1,53 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount
+    FROM customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    WHERE COALESCE(cr.total_returns, 0) > 0
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        DATEDIFF(CURRENT_DATE, DATE(CONCAT(cd.cd_birth_day, '-', cd.cd_birth_month, '-', cd.cd_birth_year))) / 365 AS age,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY total_return_amount DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN TopCustomers tc ON c.c_customer_sk = tc.sr_customer_sk
+),
+HighReturnDemographics AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(*) AS count,
+        AVG(age) AS avg_age,
+        MAX(total_return_amount) AS max_return
+    FROM CustomerDemographics cd
+    WHERE rank <= 10
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    hrd.cd_gender,
+    hrd.count,
+    hrd.avg_age,
+    hrd.max_return
+FROM HighReturnDemographics hrd
+ORDER BY hrd.cd_gender;
+

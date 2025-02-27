@@ -1,0 +1,46 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+movies_with_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        rm.rn <= 5
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(mwk.keywords, 'No Keywords') AS keywords,
+    COALESCE(ROUND(AVG(CASE WHEN ci.role_id IS NOT NULL THEN ci.role_id END), 2), 0) AS avg_role_id
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movies_with_keywords mwk ON rm.movie_id = mwk.movie_id
+LEFT JOIN 
+    complete_cast cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+WHERE 
+    rm.cast_count > 3
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

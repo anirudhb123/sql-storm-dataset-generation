@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName)
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.Score, p.ViewCount
+),
+PostSummary AS (
+    SELECT 
+        r.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(r.Score) AS TotalScore,
+        AVG(r.ViewCount) AS AvgViewCount,
+        MAX(r.Score) AS MaxScore,
+        MIN(r.Score) AS MinScore,
+        STRING_AGG(DISTINCT r.Tags, '; ') AS AllTags
+    FROM 
+        RankedPosts r
+    GROUP BY 
+        r.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Date BETWEEN TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' AND TIMESTAMP '2024-10-01 12:34:56'
+    GROUP BY 
+        u.Id
+),
+ActiveUsers AS (
+    SELECT 
+        ps.OwnerUserId,
+        ps.TotalPosts,
+        ps.TotalScore,
+        ps.AvgViewCount,
+        ps.MaxScore,
+        ps.MinScore,
+        ub.TotalBadges,
+        COALESCE(ub.MaxBadgeClass, 0) AS MaxBadgeClass
+    FROM 
+        PostSummary ps
+    LEFT JOIN 
+        UserBadges ub ON ps.OwnerUserId = ub.UserId
+    WHERE 
+        ps.TotalPosts > 10
+)
+SELECT 
+    u.DisplayName,
+    au.TotalPosts,
+    au.TotalScore,
+    au.AvgViewCount,
+    au.MaxScore,
+    au.MinScore,
+    CASE 
+        WHEN au.MaxBadgeClass = 1 THEN 'Gold'
+        WHEN au.MaxBadgeClass = 2 THEN 'Silver'
+        WHEN au.MaxBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS HighestBadge
+FROM 
+    Users u
+JOIN 
+    ActiveUsers au ON u.Id = au.OwnerUserId
+ORDER BY 
+    au.TotalScore DESC, 
+    au.TotalPosts DESC
+LIMIT 50;

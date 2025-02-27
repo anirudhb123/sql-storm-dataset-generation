@@ -1,0 +1,24 @@
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(P.Id) AS TotalPosts,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+    SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+    SUM(V.BountyAmount) AS TotalBounties,
+    SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+    SUM(P.ViewCount) AS TotalViews
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+ORDER BY 
+    U.Reputation DESC;

@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.id) AS cast_ids,
+        ARRAY_AGG(DISTINCT a.name) AS actors_names
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_keyword AS mk ON m.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info AS ci ON ci.movie_id = m.id
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS companies,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.movie_keyword,
+    md.actors_names,
+    cd.companies,
+    cd.company_types
+FROM 
+    MovieDetails AS md
+LEFT JOIN 
+    CompanyDetails AS cd ON md.movie_id = cd.movie_id
+WHERE 
+    md.production_year BETWEEN 1990 AND 2020
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title ASC;
+
+This query retrieves detailed movie information, including titles and production years, keywords associated with each movie, names of the actors, as well as the companies and their types involved in the production, all while filtering for movies produced between 1990 and 2020. The use of common table expressions (CTEs) enhances readability and organization, aggregating actors and companies into arrays for compactness. Results are sorted by production year, then by movie title for easy navigation.

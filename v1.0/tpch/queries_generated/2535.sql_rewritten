@@ -1,0 +1,35 @@
+WITH SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM supplier s
+    LEFT JOIN SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+    WHERE s.s_acctbal > 5000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    ts.s_name AS supplier_name,
+    ts.s_acctbal AS supplier_account_balance,
+    COALESCE(co.total_orders, 0) AS total_orders_by_customer,
+    nr.r_name AS region_name
+FROM TopSuppliers ts
+LEFT JOIN CustomerOrders co ON ts.s_suppkey = co.c_custkey
+JOIN NationRegion nr ON ts.s_suppkey = nr.n_nationkey
+WHERE ts.sales_rank <= 10
+ORDER BY ts.total_sales DESC, ts.s_name;

@@ -1,0 +1,82 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_web_site_sk,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_web_site_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_year AS purchase_year,
+        COUNT(ws_order_number) AS order_count,
+        SUM(ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+    HAVING 
+        SUM(ws_net_paid_inc_tax) > (SELECT AVG(total_spent) FROM (
+            SELECT SUM(ws_net_paid_inc_tax) AS total_spent 
+            FROM web_sales 
+            GROUP BY ws_bill_customer_sk
+        ) AS avg_spend)
+),
+TopPromotions AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_order_count
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+    HAVING 
+        COUNT(DISTINCT ws.ws_order_number) > 10
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_return_amt,
+        COUNT(wr.return_order_number) AS return_count
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    hp.promo_order_count AS popular_promo_count
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    (SELECT ws_bill_customer_sk, SUM(ws_sales_price) AS total_sales 
+     FROM web_sales 
+     GROUP BY ws_bill_customer_sk) r ON c.c_customer_sk = r.ws_bill_customer_sk
+LEFT JOIN 
+    TopPromotions hp ON c.c_customer_sk IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_promo_sk IN (SELECT p_promo_sk FROM promotion) GROUP BY ws_bill_customer_sk)
+WHERE 
+    c.c_current_cdemo_sk IS NOT NULL
+ORDER BY 
+    total_sales DESC, total_return_amt ASC
+FETCH FIRST 100 ROWS ONLY;

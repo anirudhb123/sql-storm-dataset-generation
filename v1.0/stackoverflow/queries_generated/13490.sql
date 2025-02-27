@@ -1,0 +1,56 @@
+-- Performance benchmarking query to analyze post statistics and user contributions
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, pt.Name
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.PostType,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalScore,
+    us.LastPostDate
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    UserStats us ON u.Id = us.UserId
+ORDER BY 
+    ps.VoteCount DESC, us.TotalScore DESC;

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        c_salutation,
+        c_birth_year,
+        0 AS level
+    FROM 
+        customer
+    WHERE 
+        c_birth_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_salutation,
+        c_birth_year,
+        ch.level + 1
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+AggregatedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS average_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    COUNT(DISTINCT CASE WHEN ws.ws_sold_date_sk BETWEEN 2450000 AND 2450500 THEN ws.ws_order_number END) AS orders_in_period,
+    SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_revenue,
+    avg(income.ib_lower_bound + income.ib_upper_bound) AS average_income_band,
+    COUNT(DISTINCT CASE WHEN sr_item_sk IS NOT NULL THEN sr_ticket_number END) AS returns_count,
+    RANK() OVER (PARTITION BY ch.level ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank,
+    CONCAT(ch.c_salutation, ' ', ch.c_first_name, ' ', ch.c_last_name) AS full_name
+FROM 
+    CustomerHierarchy ch
+LEFT JOIN 
+    web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_returns sr ON sr.sr_customer_sk = ch.c_customer_sk
+LEFT JOIN 
+    household_demographics hd ON ch.c_current_hdemo_sk = hd.hd_demo_sk
+LEFT JOIN 
+    income_band income ON hd.hd_income_band_sk = income.ib_income_band_sk
+LEFT JOIN 
+    AggregatedSales aggr ON aggr.web_site_sk = ws.ws_web_site_sk
+GROUP BY 
+    ch.c_first_name, ch.c_last_name, ch.c_birth_year, ch.level
+HAVING 
+    SUM(ws.ws_ext_sales_price) > 1000 OR COUNT(DISTINCT ws.ws_order_number) > 5
+ORDER BY 
+    total_revenue DESC;

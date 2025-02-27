@@ -1,0 +1,46 @@
+WITH SupplierCosts AS (
+    SELECT 
+        ps_suppkey, 
+        SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c_custkey, 
+        COUNT(o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c_custkey
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey, 
+        r.r_regionkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    n.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COALESCE(SUM(sc.total_cost), 0) AS total_supplier_cost,
+    AVG(oc.order_count) AS avg_orders_per_customer,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+FROM 
+    NationRegion nr
+LEFT JOIN 
+    supplier s ON s.s_nationkey = nr.n_nationkey
+LEFT JOIN 
+    SupplierCosts sc ON s.s_suppkey = sc.ps_suppkey
+LEFT JOIN 
+    CustomerOrderCounts oc ON s.s_suppkey = oc.c_custkey
+JOIN 
+    customer c ON c.c_nationkey = nr.n_nationkey
+WHERE 
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    n.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_supplier_cost DESC, unique_customers DESC;

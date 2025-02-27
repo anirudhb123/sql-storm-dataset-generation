@@ -1,0 +1,23 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+
+-- This query retrieves comprehensive statistics about posts, including their types, scores, view counts, and comments,
+-- grouped by post types, to evaluate performance across different post categories.
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    COALESCE(SUM(p.Score), 0) AS TotalScore,
+    COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount,
+    COALESCE(SUM(p.AnswerCount), 0) AS TotalAnswers,
+    COALESCE(SUM(p.CommentCount), 0) AS TotalComments,
+    AVG(p.CreationDate) AS AverageCreationTime,
+    MIN(p.Score) AS MinScore,
+    MAX(p.Score) AS MaxScore
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

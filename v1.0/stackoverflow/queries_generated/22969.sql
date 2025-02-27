@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankByEngagement,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes v
+        JOIN 
+            VoteTypes vt ON v.VoteTypeId = vt.Id
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.RankByEngagement,
+        CASE 
+            WHEN rp.UpVotes > 10 THEN 'Popular'
+            ELSE 'Normal'
+        END AS EngagementCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByEngagement <= 5
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.RankByEngagement,
+    fp.EngagementCategory,
+    CASE 
+        WHEN fp.CommentCount IS NULL THEN 'No Comments'
+        WHEN fp.CommentCount > 0 THEN 'Commented'
+        ELSE 'Zero Comments'
+    END AS CommentStatus,
+    CONCAT('Score: ', fp.Score, ' | Views: ', fp.ViewCount) AS EngagementDetails
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.RankByEngagement,
+    CASE 
+        WHEN fp.EngagementCategory = 'Popular' THEN 1
+        ELSE 2
+    END,
+    fp.CreationDate DESC;
+
+-- Additional filtering for edge cases: posts created on weekends
+WITH WeekendPosts AS (
+    SELECT 
+        fp.*,
+        EXTRACT(DOW FROM fp.CreationDate) AS DayOfWeek
+    FROM 
+        FilteredPosts fp
+    WHERE 
+        EXTRACT(DOW FROM fp.CreationDate) IN (0, 6)  -- 0 = Sunday, 6 = Saturday
+)
+SELECT 
+    wp.PostId,
+    wp.Title,
+    wp.CreationDate,
+    wp.Score,
+    wp.ViewCount,
+    wp.CommentCount,
+    wp.RankByEngagement,
+    wp.EngagementCategory,
+    wp.CommentStatus,
+    wp.EngagementDetails,
+    'Weekend Post' AS PostTypeDescription
+FROM 
+    WeekendPosts wp
+ORDER BY 
+    wp.CreationDate DESC;

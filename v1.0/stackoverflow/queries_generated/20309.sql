@@ -1,0 +1,72 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostHistoryInfo AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(PH.Comment, '; ') FILTER (WHERE PH.Comment IS NOT NULL) AS EditComments
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY PH.PostId, PH.UserId
+),
+ClosedPostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(PH.ID) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId 
+    WHERE PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY P.Id
+),
+CommonTags AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(P.Tags, '>'))) AS TagName
+    FROM Posts P
+    WHERE P.Tags IS NOT NULL
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM CommonTags T
+    JOIN Posts P ON T.TagName = ANY(STRING_TO_ARRAY(P.Tags, '>'))
+    GROUP BY T.TagName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    UPS.Upvotes,
+    UDS.Downvotes,
+    P.PostCount,
+    PH.LastEditDate,
+    PH.EditCount,
+    PH.EditComments,
+    CPS.CloseCount,
+    CPS.LastClosedDate,
+    TS.TagName,
+    TS.PostCount AS TagPostCount,
+    TS.TotalViews
+FROM UserVoteStats U
+LEFT JOIN UPPER(ClosedPostStats CPS ON U.UserId = CPS.UserId
+LEFT JOIN PostHistoryInfo PH ON PH.UserId = U.UserId
+LEFT JOIN TagStats TS ON TS.PostCount > 0
+WHERE U.Reputation > 500 -- Only include users with a reputation greater than 500
+ORDER BY U.Reputation DESC, U.DisplayName ASC
+LIMIT 100;
+

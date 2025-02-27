@@ -1,0 +1,41 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid_inc_tax,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid_inc_tax DESC) as sales_rank,
+        DATEADD(DAY, -30, DATEDIFF(DAY, 0, CAST(d.d_date AS DATE))) AS sales_period
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date > DATEADD(MONTH, -1, GETDATE())
+)
+
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(ss.ws_quantity) AS total_quantity,
+    AVG(ss.ws_net_paid_inc_tax) AS average_sales,
+    COUNT(ss.ws_order_number) AS total_orders
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    SalesSummary ss ON c.c_customer_sk = ss.ws_item_sk
+WHERE 
+    c.c_birth_year IS NOT NULL
+    AND (c.c_first_shipto_date_sk > 0 OR c.c_first_sales_date_sk < 100)
+GROUP BY 
+    ca.ca_address_id, ca.ca_city, ca.ca_state
+HAVING 
+    SUM(ss.ws_quantity) > 5
+ORDER BY 
+    average_sales DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

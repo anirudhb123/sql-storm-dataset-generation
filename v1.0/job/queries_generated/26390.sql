@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT cast_info.person_id) AS cast_count,
+        AVG(
+            CASE 
+                WHEN role_type.role LIKE '%lead%' THEN 1
+                WHEN role_type.role LIKE '%support%' THEN 0.5
+                ELSE 0
+            END
+        ) AS average_role_level
+    FROM 
+        title
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    JOIN 
+        role_type ON cast_info.role_id = role_type.id
+    WHERE 
+        title.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        title.id
+    ORDER BY 
+        production_year DESC
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.average_role_level,
+        ka.name AS director_name,
+        co.name AS company_name,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        complete_cast cc ON rm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN 
+        movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.cast_count, rm.average_role_level, ka.name, co.name
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_count,
+    md.average_role_level,
+    md.director_name,
+    md.company_name,
+    md.keywords
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count > 5 
+ORDER BY 
+    md.average_role_level DESC, 
+    md.cast_count DESC
+LIMIT 10;

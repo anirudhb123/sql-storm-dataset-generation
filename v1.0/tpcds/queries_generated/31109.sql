@@ -1,0 +1,52 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i.item_sk,
+        i.item_desc,
+        i.brand,
+        CAST(NULL AS VARCHAR(200)) AS parent_item_desc,
+        1 AS level
+    FROM 
+        item i
+    WHERE 
+        i.brand IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        i.item_sk,
+        i.item_desc,
+        i.brand,
+        ih.item_desc AS parent_item_desc,
+        ih.level + 1
+    FROM 
+        item_hierarchy ih
+    JOIN 
+        item i ON i.brand_id = ih.item_sk
+)
+
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    SUM(ws.net_paid_inc_tax) AS total_spent,
+    COUNT(ws.ws_order_number) AS total_orders,
+    AVG(ws.ws_quantity) AS avg_order_quantity,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY SUM(ws.net_paid_inc_tax) DESC) AS city_rank,
+    STRING_AGG(DISTINCT i.item_desc, ', ') AS purchased_items
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    item_hierarchy i ON ws.ws_item_sk = i.item_sk
+WHERE 
+    ca.ca_country = 'USA'
+    AND ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+HAVING 
+    SUM(ws.net_paid_inc_tax) > (SELECT AVG(ws2.net_paid_inc_tax) FROM web_sales ws2 WHERE ws2.ws_bill_customer_sk = c.c_customer_sk)
+ORDER BY 
+    total_spent DESC;

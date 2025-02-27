@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, CONCAT(sh.s_name, ' -> ', s.s_name), sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           (ps.ps_supplycost * 1.10) AS adjusted_cost, 
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+MaxDiscounts AS (
+    SELECT l.l_partkey, MAX(l.l_discount) AS max_discount
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_partkey
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           COALESCE(NULLIF(c.c_mktsegment, ''), 'N/A') AS market_segment,
+           DENSE_RANK() OVER (ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus IN ('O', 'P')
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    ps.ps_suppkey, 
+    sh.s_name AS supplier_name,
+    'Supplier Hierarchy' AS hierarchy,
+    MAX(COALESCE(ps.adjusted_cost, 0)) AS max_adjusted_cost,
+    MAX(COALESCE(md.max_discount, 0)) AS max_discount_per_part,
+    CASE WHEN MAX(co.o_totalprice) IS NULL THEN 'No Orders' 
+         ELSE 'Has Orders' END AS order_status
+FROM part p
+LEFT JOIN PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN MaxDiscounts md ON p.p_partkey = md.l_partkey
+LEFT JOIN CustomerOrders co ON co.o_orderkey = ps.ps_partkey
+GROUP BY p.p_partkey, p.p_name, ps.ps_suppkey, sh.s_name
+HAVING MAX(ps.ps_availqty) > 0
+ORDER BY p.p_partkey ASC NULLS LAST;

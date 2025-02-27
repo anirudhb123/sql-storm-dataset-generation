@@ -1,0 +1,56 @@
+
+WITH RECURSIVE PossibleOrders AS (
+    SELECT o_custkey, 
+           o_orderkey, 
+           o_orderdate, 
+           o_orderstatus, 
+           o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+SupplierTotalCosts AS (
+    SELECT ps.s_suppkey, 
+           SUM(ps.ps_supplycost * li.l_quantity) AS total_supplycost
+    FROM partsupp ps 
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    GROUP BY ps.s_suppkey
+),
+CustomerPreferences AS (
+    SELECT c.c_custkey, 
+           COUNT(*) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (
+        SELECT AVG(c_acctbal) FROM customer
+    )
+    GROUP BY c.c_custkey
+),
+RegionNationalSummary AS (
+    SELECT r.r_name, 
+           n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+           SUM(sc.total_supplycost) AS total_supplier_costs
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN SupplierTotalCosts sc ON s.s_suppkey = sc.s_suppkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT rp.r_name, 
+       np.n_name, 
+       cp.cust_orders,
+       COALESCE(cp.total_spent, 0) AS total_spent,
+       COALESCE(rn.total_suppliers, 0) AS supplier_count,
+       COALESCE(rn.total_supplier_costs, 0) AS supplier_costs
+FROM RegionNationalSummary rn
+FULL OUTER JOIN (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS cust_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c 
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+) AS cp ON cp.c_custkey = rn.supp_key
+ORDER BY total_spent DESC, rp.r_name, np.n_name;

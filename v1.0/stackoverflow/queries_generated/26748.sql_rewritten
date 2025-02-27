@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        P.CreationDate,
+        U.DisplayName AS UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+        AND P.Body IS NOT NULL
+),
+LatestBadges AS (
+    SELECT
+        B.UserId,
+        JSON_AGG(B.Name) AS Badges
+    FROM 
+        Badges B
+    WHERE 
+        B.Date = (
+            SELECT 
+                MAX(Date) 
+            FROM 
+                Badges 
+            WHERE 
+                UserId = B.UserId
+        )
+    GROUP BY 
+        B.UserId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        COALESCE(LB.Badges, '[]') AS Badges
+    FROM 
+        Users U
+    LEFT JOIN 
+        LatestBadges LB ON U.Id = LB.UserId
+)
+SELECT 
+    RP.PostId,
+    RP.Title AS PostTitle,
+    RP.Body AS PostBody,
+    RP.Tags,
+    RP.CreationDate AS PostCreationDate,
+    US.DisplayName AS OwnerDisplayName,
+    US.Reputation AS OwnerReputation,
+    US.Views AS OwnerViews,
+    US.Badges AS OwnerBadges,
+    RP.PostRank
+FROM 
+    RankedPosts RP
+JOIN 
+    UserStats US ON RP.PostRank = 1 AND RP.OwnerUserId = US.UserId
+ORDER BY 
+    RP.CreationDate DESC
+LIMIT 100;

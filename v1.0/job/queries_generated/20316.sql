@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorTitleInfo AS (
+    SELECT 
+        a.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(c.id) AS role_count,
+        STRING_AGG(DISTINCT c.note, ', ') AS role_notes
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        RankedMovies t ON c.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id, a.name, t.title, t.production_year
+),
+CompanyMovieRelations AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    a.actor_name,
+    t.movie_title,
+    t.production_year,
+    COALESCE(cmr.companies, 'No companies associated') AS companies,
+    a.role_count,
+    CASE 
+        WHEN a.role_count > 1 THEN 'Multiple Roles'
+        WHEN a.role_count = 1 THEN 'Single Role'
+        ELSE 'No Role'
+    END AS role_status,
+    CASE 
+        WHEN t.rank_by_year = 1 THEN 'Latest Movie of that Year'
+        ELSE 'Earlier Movie'
+    END AS movie_timing
+FROM 
+    ActorTitleInfo a
+JOIN 
+    RankedMovies t ON a.movie_title = t.title AND a.production_year = t.production_year
+LEFT JOIN 
+    CompanyMovieRelations cmr ON cmr.movie_id = t.movie_id
+WHERE 
+    (a.role_count > 0 OR t.production_year < 2000) AND 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = t.movie_id AND mi.info_type_id IS NULL
+    ) 
+ORDER BY 
+    a.actor_name, t.production_year DESC;

@@ -1,0 +1,51 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales_amount,
+        SUM(ws_ext_discount_amt) AS total_discounted_amount,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        s.s_store_name,
+        ws_summary.total_quantity_sold,
+        ws_summary.total_sales_amount,
+        ws_summary.total_discounted_amount,
+        ws_summary.total_orders
+    FROM 
+        SalesSummary ws_summary
+    JOIN 
+        item i ON ws_summary.ws_item_sk = i.i_item_sk
+    JOIN 
+        store s ON s.s_store_sk = (SELECT ss_store_sk FROM store_sales WHERE ss_item_sk = i.i_item_sk ORDER BY ss_sold_date_sk DESC FETCH FIRST 1 ROW ONLY)
+    ORDER BY 
+        ws_summary.total_sales_amount DESC
+    FETCH FIRST 10 ROWS ONLY
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.s_store_name,
+    ti.total_quantity_sold,
+    ti.total_sales_amount,
+    ti.total_discounted_amount,
+    ti.total_orders
+FROM 
+    TopItems ti
+JOIN 
+    customer c ON c.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = ti.ws_item_sk)
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+ORDER BY 
+    ti.total_sales_amount DESC;

@@ -1,0 +1,42 @@
+WITH PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        PT.Name AS PostType,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount,
+        SUM(B.Id IS NOT NULL) AS BadgeCount,
+        P.ViewCount,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY 
+        P.Id, PT.Name, P.ViewCount, P.CreationDate
+),
+PostStatistics AS (
+    SELECT 
+        PostType,
+        COUNT(PostId) AS TotalPosts,
+        AVG(CommentCount) AS AverageComments,
+        AVG(VoteCount) AS AverageVotes,
+        AVG(BadgeCount) AS AverageBadges,
+        AVG(ViewCount) AS AverageViews
+    FROM 
+        PostMetrics
+    GROUP BY 
+        PostType
+)
+SELECT 
+    P.*, 
+    ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS Rank
+FROM 
+    PostStatistics P
+ORDER BY 
+    TotalPosts DESC;

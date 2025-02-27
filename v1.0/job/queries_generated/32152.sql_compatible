@@ -1,0 +1,65 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT a.id AS actor_id, a.name AS actor_name, 0 AS level
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.id AS actor_id, a.name AS actor_name, ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE ah.actor_id IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year, 
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COALESCE(SUM(CASE WHEN mci.note IS NOT NULL THEN 1 END), 0) AS has_company_info,
+        COALESCE(SUM(CASE WHEN mk.id IS NOT NULL THEN 1 END), 0) AS has_keywords
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_companies mci ON mt.id = mci.movie_id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_title, 
+        production_year, 
+        actors,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY actors DESC, movie_title ASC) AS rn
+    FROM MovieDetails
+)
+SELECT 
+    fm.movie_title, 
+    fm.production_year, 
+    fm.actors,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id IN (SELECT m.id FROM aka_title m WHERE m.production_year = fm.production_year)) AS info_count,
+    (SELECT STRING_AGG(DISTINCT kn.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword kn ON mk.keyword_id = kn.id 
+     WHERE mk.movie_id IN (SELECT m.id FROM aka_title m WHERE m.production_year = fm.production_year)) AS keywords,
+    (SELECT ci.note 
+     FROM complete_cast ci 
+     JOIN aka_title mt ON ci.movie_id = mt.id 
+     WHERE mt.title = fm.movie_title 
+     ORDER BY ci.status_id DESC 
+     LIMIT 1) AS last_status,
+    CASE 
+        WHEN fm.has_company_info > 0 THEN 'Contains Company Info' 
+        ELSE 'No Company Info' 
+    END AS company_info_status, 
+    CASE 
+        WHEN fm.has_keywords > 0 THEN 'Contains Keywords' 
+        ELSE 'No Keywords' 
+    END AS keyword_status
+FROM FilteredMovies fm
+WHERE fm.rn = 1
+ORDER BY fm.production_year DESC, fm.movie_title;

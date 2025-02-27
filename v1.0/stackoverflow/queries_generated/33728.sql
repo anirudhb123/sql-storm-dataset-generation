@@ -1,0 +1,44 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AcceptedAnswerId,
+        0 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Select only Questions
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.CreationDate,
+        P2.LastActivityDate,
+        P2.AcceptedAnswerId,
+        RP.Level + 1
+    FROM Posts P2
+    INNER JOIN RecursivePostCTE RP ON P2.ParentId = RP.PostId
+)
+SELECT 
+    U.DisplayName AS User,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    SUM(COALESCE(P.Score, 0)) AS TotalScore,
+    MAX(P.CreationDate) AS LastPostDate,
+    AVG(EXTRACT(EPOCH FROM (P.LastActivityDate - P.CreationDate))/60) AS AvgTimeToActivityMin,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    AVG(B.Class) AS AvgBadgeClass,
+    SUM(CASE WHEN Ph.PostId IS NOT NULL THEN 1 ELSE 0 END) AS PostsWithHistory
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN PostHistory Ph ON P.Id = Ph.PostId
+LEFT JOIN Badges B ON U.Id = B.UserId
+LEFT JOIN Tags T ON T.ExcerptPostId = P.Id
+WHERE 
+    U.Reputation > 500 -- Only consider users with reputation > 500
+    AND P.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+    AND (P.ClosedDate IS NULL OR P.AcceptedAnswerId IS NOT NULL) -- Considering only open questions or accepted answers
+GROUP BY U.DisplayName
+ORDER BY TotalPosts DESC, TotalScore DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

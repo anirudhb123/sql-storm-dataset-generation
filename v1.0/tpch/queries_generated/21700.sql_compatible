@@ -1,0 +1,40 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_custkey <> ch.c_custkey
+      AND ch.level < 5
+),
+part_nation AS (
+    SELECT p.p_partkey, n.n_name, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY p.p_partkey, n.n_name
+),
+complex_order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+
+SELECT ch.c_name, p.n_name, co.total_sales, co.o_orderstatus
+FROM customer_hierarchy ch
+LEFT JOIN part_nation p ON ch.c_nationkey = p.n_name
+LEFT JOIN complex_order_summary co ON ch.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = co.o_orderkey)
+WHERE p.avg_supplycost IS NOT NULL
+  AND co.rank <= 10
+ORDER BY ch.c_name, co.total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

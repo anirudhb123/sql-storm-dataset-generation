@@ -1,0 +1,46 @@
+WITH RankedOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name AS region,
+    c.c_name AS customer_name,
+    ts.s_name AS supplier_name,
+    ro.total_spent,
+    ts.total_supply_cost
+FROM 
+    RankedOrders ro
+JOIN 
+    nation n ON ro.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    TopSuppliers ts ON ts.rank <= 10
+WHERE 
+    ro.rank <= 5
+ORDER BY 
+    r.r_name, ro.total_spent DESC;

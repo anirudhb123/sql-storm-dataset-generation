@@ -1,0 +1,87 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStats AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.Id = v.PostId
+    GROUP BY 
+        ph.Id, ph.Title
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(u.Reputation) > 1000
+)
+SELECT 
+    ps.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    u.DisplayName AS TopUser,
+    u.TotalBadges,
+    u.TotalReputation,
+    COALESCE(pc.PostCount, 0) AS RelatedPostsCount
+FROM 
+    PostStats ps
+CROSS JOIN 
+    (SELECT * FROM TopUsers ORDER BY TotalReputation DESC LIMIT 1) u
+LEFT JOIN 
+    (SELECT 
+        PostId, 
+        COUNT(*) AS PostCount 
+     FROM 
+        PostLinks 
+     GROUP BY 
+        PostId) pc ON ps.Id = pc.PostId
+WHERE 
+    ps.CommentCount > 5
+ORDER BY 
+    ps.VoteCount DESC, 
+    ps.UpVotes DESC;

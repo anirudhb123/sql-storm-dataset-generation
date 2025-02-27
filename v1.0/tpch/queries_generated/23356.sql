@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice)
+        FROM orders o2
+        WHERE o2.o_orderdate >= '2023-01-01'
+    )
+),
+HighValueLineItems AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS high_value
+    FROM lineitem li
+    WHERE li.l_returnflag = 'R'
+    GROUP BY li.l_orderkey
+),
+UnionedData AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, 
+           CASE 
+               WHEN ps.ps_availqty IS NULL THEN 'Unavailable'
+               ELSE 'Available'
+           END AS availability_status
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, NULL, NULL, NULL, 'Not Applicable'
+    FROM part p
+    WHERE p.p_retailprice <= 100
+)
+SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+       SUM(COALESCE(s.s_acctbal, 0)) AS total_supplier_balance,
+       AVG(COALESCE(o.o_totalprice, 0)) AS average_order_value,
+       COUNT(DISTINCT hd.l_orderkey) AS high_value_orders
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rank <= 3
+LEFT JOIN RecentOrders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN HighValueLineItems hd ON o.o_orderkey = hd.l_orderkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 1
+   AND SUM(COALESCE(s.s_acctbal, 0)) <> 0
+   AND AVG(COALESCE(o.o_totalprice, 0)) IS NOT NULL
+ORDER BY nation_count DESC, average_order_value DESC;

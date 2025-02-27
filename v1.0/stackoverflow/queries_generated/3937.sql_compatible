@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+        AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.Tags
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.Rank,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN u.Reputation >= 5000 THEN 'High'
+            WHEN u.Reputation >= 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.Tags,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.ReputationCategory
+FROM 
+    TopPosts tp
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM PostHistory ph 
+        WHERE ph.PostId = tp.PostId 
+        AND ph.PostHistoryTypeId IN (10, 11) 
+        AND ph.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 6 MONTH)
+    )
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC
+LIMIT 10;

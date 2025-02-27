@@ -1,0 +1,59 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        postTypes.Name AS PostType,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS GlobalPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    INNER JOIN 
+        PostTypes postTypes ON p.PostTypeId = postTypes.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, postTypes.Name
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.GoldBadges,
+    r.PostId,
+    r.Title AS PostTitle,
+    r.TotalComments,
+    r.Upvotes,
+    r.Downvotes,
+    r.PostType,
+    COALESCE(r.UserPostRank, 0) AS UserPostRanking,
+    COALESCE(r.GlobalPostRank, 0) AS OverallPostRanking
+FROM 
+    UserBadges u
+JOIN 
+    RecursiveCTE r ON u.UserId = r.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    r.Upvotes DESC
+LIMIT 10;

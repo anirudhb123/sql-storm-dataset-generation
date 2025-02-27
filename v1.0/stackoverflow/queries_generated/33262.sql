@@ -1,0 +1,47 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+), 
+PostScores AS (
+    SELECT
+        P.OwnerUserId,
+        SUM(P.Score) AS TotalPostScore,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(DISTINCT P.Id) FILTER (WHERE P.PostTypeId = 2) AS TotalAnswers
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserPosts AS (
+    SELECT
+        U.Id AS UserId,
+        COALESCE(BC.BadgeCount, 0) AS TotalBadges,
+        COALESCE(PS.TotalPostScore, 0) AS TotalPostScore,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.TotalAnswers, 0) AS TotalAnswers
+    FROM Users U
+    LEFT JOIN UserBadgeCounts BC ON U.Id = BC.UserId
+    LEFT JOIN PostScores PS ON U.Id = PS.OwnerUserId
+)
+SELECT
+    U.UserId,
+    U.TotalBadges,
+    U.TotalPostScore,
+    U.TotalPosts,
+    U.TotalAnswers,
+    (CASE
+        WHEN U.TotalPostScore = 0 THEN 0
+        ELSE ROUND((U.TotalPostScore::numeric / NULLIF(U.TotalPosts, 0)), 2)
+    END) AS AverageScorePerPost,
+    (SELECT AVG(VB.TotalBadges) 
+     FROM UserBadgeCounts VB) AS AvgBadgesGlobally,
+    (SELECT COUNT(DISTINCT P.Id)
+     FROM Posts P
+     WHERE P.LastActivityDate > (CURRENT_TIMESTAMP - INTERVAL '90 days')) AS RecentActivePosts
+FROM UserPosts U
+WHERE U.TotalBadges > (SELECT AVG(TotalBadges) FROM UserBadgeCounts)
+ORDER BY U.TotalPostScore DESC
+LIMIT 100;

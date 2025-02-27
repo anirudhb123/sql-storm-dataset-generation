@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate > '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COUNT(DISTINCT l.l_orderkey) AS total_lineitems,
+    COALESCE(SUM(CASE WHEN hs.rank = 1 THEN hs.total_cost END), 0) AS top_supplier_cost,
+    COALESCE(SUM(hv.net_value), 0) AS total_net_value
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers hs ON s.s_suppkey = hs.s_suppkey
+LEFT JOIN 
+    lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    HighValueOrders hv ON l.l_orderkey = hv.o_orderkey
+WHERE 
+    n.n_name IS NOT NULL AND r.r_name IS NOT NULL
+GROUP BY 
+    n.n_name, r.r_name
+ORDER BY 
+    total_orders DESC, total_lineitems DESC;

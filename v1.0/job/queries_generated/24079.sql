@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS title_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.movie_id) AS cast_count
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+HighCastTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.cast_count
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.cast_count >= (SELECT AVG(cast_count) FROM RankedTitles)
+),
+FilteredTitles AS (
+    SELECT 
+        ht.*,
+        (SELECT COUNT(*) 
+         FROM movie_info mi 
+         WHERE mi.movie_id = ht.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS rating_count
+    FROM 
+        HighCastTitles ht
+    WHERE 
+        ht.production_year > 2000
+        AND ht.cast_count IS NOT NULL
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.cast_count,
+    ft.rating_count,
+    COALESCE(NULLIF(ft.cast_count - ft.rating_count, 0), 'no ratings') AS rating_difference,
+    ARRAY_AGG(DISTINCT ct.kind ORDER BY ct.kind) AS company_types
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    movie_companies mc ON ft.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    ft.production_year < 2025
+GROUP BY 
+    ft.title, ft.production_year, ft.cast_count, ft.rating_count
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    ft.production_year DESC, ft.title ASC;

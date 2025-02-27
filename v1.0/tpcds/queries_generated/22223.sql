@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_net_paid DESC) AS rnk,
+        SUM(ws_ext_sales_price) OVER (PARTITION BY ws.web_site_sk) AS total_sales,
+        DATE_TRUNC('month', d_date) AS sales_month,
+        COALESCE(c.c_first_name || ' ' || c.c_last_name, 'Unknown Customer') AS customer_full_name,
+        CASE 
+            WHEN ws_net_paid > 500 THEN 'High Value'
+            WHEN ws_net_paid BETWEEN 200 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_segment
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND 
+        (c.c_current_addr_sk IS NOT NULL OR c.c_current_hdemo_sk IS NOT NULL)
+),
+FilteredSales AS (
+    SELECT 
+        web_site_sk,
+        sales_month,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_quantity) AS avg_quantity,
+        MIN(ws_quantity) AS min_quantity,
+        MAX(ws_quantity) AS max_quantity,
+        RANK() OVER (PARTITION BY sales_month ORDER BY SUM(ws_quantity) DESC) AS month_rank
+    FROM 
+        RankedSales
+    WHERE 
+        rnk = 1
+    GROUP BY 
+        web_site_sk, sales_month
+)
+SELECT 
+    fs.web_site_sk,
+    fs.sales_month,
+    fs.total_quantity,
+    fs.avg_quantity,
+    fs.min_quantity,
+    fs.max_quantity,
+    CASE 
+        WHEN fs.month_rank < 3 THEN 'Top Performer'
+        ELSE 'Needs Improvement'
+    END AS performance_review
+FROM 
+    FilteredSales fs 
+LEFT JOIN 
+    warehouse w ON fs.web_site_sk = w.w_warehouse_sk
+WHERE 
+    (w.w_country IS NULL OR w.w_country = 'USA')
+    AND fs.avg_quantity IS NOT NULL
+ORDER BY 
+    fs.sales_month DESC, fs.total_quantity DESC
+FETCH FIRST 100 ROWS ONLY;

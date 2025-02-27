@@ -1,0 +1,57 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.cd_gender = 'F'
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id
+),
+item_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_ext_sales_price) AS item_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT DISTINCT ws_sold_date_sk FROM web_sales)
+    GROUP BY 
+        i.i_item_id
+),
+top_items AS (
+    SELECT 
+        i.i_item_id,
+        ts.total_sales
+    FROM 
+        sales_data ts
+    JOIN 
+        item_sales is ON ts.web_site_id = is.i_item_id
+    ORDER BY 
+        ts.total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    t.web_site_id,
+    ts.total_sales,
+    ti.item_sales,
+    t.total_orders
+FROM 
+    sales_data t
+JOIN 
+    top_items ti ON t.web_site_id = ti.i_item_id
+ORDER BY 
+    t.total_sales DESC;

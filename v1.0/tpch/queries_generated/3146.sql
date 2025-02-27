@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_clerk,
+        ROW_NUMBER() OVER (PARTITION BY o.o_clerk ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        COUNT(*) AS line_item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.order_rank,
+    co.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    ol.total_price_after_discount,
+    ss.avg_supply_cost,
+    COALESCE(ss.total_available_qty, 0) AS available_qty
+FROM 
+    RankedOrders r
+JOIN 
+    OrderLineItem ol ON r.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    CustomerOrders co ON r.o_clerk = co.c_custkey
+LEFT JOIN 
+    SupplierSummary ss ON ol.l_orderkey = ss.s_suppkey
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_orderdate DESC, co.total_order_value DESC;

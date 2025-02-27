@@ -1,0 +1,65 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        d.d_year,
+        d.d_month_seq,
+        c.cd_gender,
+        c.cd_marital_status,
+        r.r_reason_desc,
+        i.i_item_id,
+        i.i_item_desc
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        web_returns wr ON ws.ws_order_number = wr.wr_order_number
+    JOIN 
+        reason r ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        d.d_year = 2023 AND
+        (c.cd_gender = 'F' AND c.cd_marital_status = 'M') OR 
+        (c.cd_gender = 'M' AND c.cd_marital_status = 'S')
+    GROUP BY 
+        ws.web_site_id, d.d_year, d.d_month_seq, c.cd_gender, c.cd_marital_status, r.r_reason_desc, i.i_item_id, i.i_item_desc
+),
+RankedSales AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_sales,
+        d_year,
+        d_month_seq,
+        cd_gender,
+        cd_marital_status,
+        r_reason_desc,
+        i_item_id,
+        i_item_desc,
+        RANK() OVER (PARTITION BY web_site_id ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    web_site_id,
+    total_quantity,
+    total_sales,
+    d_year,
+    d_month_seq,
+    cd_gender,
+    cd_marital_status,
+    r_reason_desc,
+    i_item_id,
+    i_item_desc
+FROM 
+    RankedSales
+WHERE 
+    sales_rank <= 5
+ORDER BY 
+    web_site_id, total_sales DESC;

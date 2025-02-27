@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        o.o_orderdate,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierComments AS (
+    SELECT 
+        ps.ps_partkey,
+        STRING_AGG(s.s_comment, '; ') AS aggregated_comments
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(r.aggregated_comments, 'No comments') AS supplier_comments,
+    COALESCE(r_sup.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(r_sup.s_acctbal, 0) AS top_supplier_balance,
+    AVG(h.total_sales) AS average_order_value,
+    COUNT(DISTINCT h.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    SupplierComments r ON p.p_partkey = r.ps_partkey
+LEFT JOIN 
+    RankedSuppliers r_sup ON r_sup.rank = 1 AND r_sup.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+LEFT JOIN 
+    HighValueOrders h ON h.o_orderkey IN (SELECT DISTINCT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+GROUP BY 
+    p.p_partkey, p.p_name, r.aggregated_comments, r_sup.s_name, r_sup.s_acctbal
+ORDER BY 
+    average_order_value DESC;

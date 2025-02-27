@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Starting point for filtering movies
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        path || at.id
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+AggregatedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        STRING_AGG(DISTINCT ci.role_id::text, ', ') AS roles,
+        MAX(mo.info) AS highest_box_office
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info mo ON mh.movie_id = mo.movie_id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.level
+),
+FilteredMovies AS (
+    SELECT 
+        am.*,
+        ROW_NUMBER() OVER (PARTITION BY am.level ORDER BY am.highest_box_office DESC NULLS LAST) AS rn
+    FROM 
+        AggregatedMovies am
+    WHERE 
+        am.num_cast_members > 0 -- Ensuring there are cast members
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.level,
+    fm.num_cast_members,
+    fm.roles,
+    fm.highest_box_office
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.rn <= 5 -- Selecting top 5 movies per hierarchy level
+ORDER BY 
+    fm.level, fm.highest_box_office DESC;

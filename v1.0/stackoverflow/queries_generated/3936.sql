@@ -1,0 +1,68 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PHT.Name = 'Post Closed' THEN PH.CreationDate END) AS LastClosedDate,
+        COUNT(CASE WHEN PHT.Name = 'Edit Body' THEN 1 END) AS TotalEdits,
+        string_agg(DISTINCT PHT.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(HD.LastClosedDate, 'No Closures') AS LastClosedDate,
+        HD.TotalEdits,
+        HD.HistoryTypes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistoryDetails HD ON P.Id = HD.PostId
+    WHERE 
+        P.Id IN (SELECT PostId FROM PostHistory WHERE PostHistoryTypeId = 10)  -- Closed posts
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    UPS.UpVotes,
+    UPS.DownVotes,
+    CP.PostId,
+    CP.Title,
+    CP.CreationDate,
+    CP.Score,
+    CP.LastClosedDate,
+    CP.TotalEdits,
+    CP.HistoryTypes
+FROM 
+    UserVoteSummary UPS
+JOIN 
+    ClosedPosts CP ON UPS.UserId = CP.PostId  -- Main join
+WHERE 
+    UPS.TotalPosts > 5                -- Filtering for active users
+ORDER BY 
+    UPS.UpVotes DESC, 
+    CP.CreationDate DESC
+LIMIT 100;

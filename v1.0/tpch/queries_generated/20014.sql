@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier AS s
+    WHERE s.s_acctbal IS NOT NULL
+),
+AvailableParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_retailprice,
+        p.p_name
+    FROM partsupp AS ps
+    JOIN part AS p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer AS c
+    LEFT JOIN orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+InactiveRegions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name
+    FROM region AS r
+    LEFT JOIN nation AS n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier AS s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+    HAVING COUNT(s.s_suppkey) = 0
+)
+
+SELECT 
+    cp.c_custkey,
+    cp.total_spent,
+    cp.order_count,
+    COALESCE(rs.s_name, 'No Supplier') AS top_supplier,
+    COALESCE(ap.p_name, 'No Available Part') AS part_name,
+    ir.r_name AS inactive_region
+FROM CustomerOrders AS cp
+LEFT JOIN RankedSuppliers AS rs ON cp.total_spent > 1000 AND rs.rank = 1
+LEFT JOIN AvailableParts AS ap ON ap.ps_supplycost < (cp.total_spent / NULLIF(cp.order_count, 0) + 10)
+LEFT JOIN InactiveRegions AS ir ON ir.r_regionkey NOT IN (SELECT DISTINCT n.n_regionkey FROM nation AS n WHERE n.n_nationkey = cp.c_custkey) 
+WHERE cp.total_spent IS NOT NULL
+AND (cp.order_count > 5 OR cp.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders) AND EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cp.c_custkey)))
+ORDER BY cp.total_spent DESC, cp.c_custkey ASC;

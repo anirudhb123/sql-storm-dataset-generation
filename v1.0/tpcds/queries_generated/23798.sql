@@ -1,0 +1,94 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr_returning_customer_sk
+    FROM 
+        CustomerReturns
+    WHERE 
+        return_count > (SELECT AVG(return_count) FROM CustomerReturns)
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_gender = 'F' AND (cd_marital_status IS NULL OR cd_marital_status <> 'S')
+),
+CustomerAddresses AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+    WHERE 
+        ca_city IS NOT NULL AND ca_state IS NOT NULL
+),
+WebSalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+),
+AggregatedData AS (
+    SELECT 
+        wsd.ws_bill_customer_sk,
+        wsd.total_spent,
+        wsd.order_count,
+        COALESCE(hrc.cr_returning_customer_sk, NULL) AS high_return_customer,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM 
+        WebSalesData wsd
+    LEFT JOIN 
+        HighReturnCustomers hrc ON wsd.ws_bill_customer_sk = hrc.cr_returning_customer_sk
+    JOIN 
+        CustomerAddresses ca ON wsd.ws_bill_customer_sk = ca.ca_address_sk
+    WHERE 
+        wsd.total_spent > (SELECT AVG(total_spent) FROM WebSalesData)
+)
+SELECT 
+    ad.ws_bill_customer_sk,
+    ad.total_spent,
+    ad.order_count,
+    ad.high_return_customer,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    CASE 
+        WHEN ad.high_return_customer IS NOT NULL THEN 'High Return Customer' 
+        ELSE 'Regular Customer' 
+    END AS customer_type,
+    CASE 
+        WHEN ROUND(ad.total_spent, 0) % 2 = 0 THEN 'Even Total' 
+        ELSE 'Odd Total' 
+    END AS total_type,
+    current_date - INTERVAL '1 day' * (SELECT MAX(d_dom) FROM date_dim WHERE d_current_day = 'N') AS last_non_current_day
+FROM 
+    AggregatedData ad
+ORDER BY 
+    ad.total_spent DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH MovieStats AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT cc.person_id) AS actor_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_ratio
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+), 
+
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        has_notes_ratio,
+        RANK() OVER (ORDER BY actor_count DESC) AS rank_by_actors
+    FROM 
+        MovieStats
+), 
+
+FilteredMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        has_notes_ratio
+    FROM 
+        TopMovies
+    WHERE 
+        actor_count > 5 AND has_notes_ratio >= 0.5
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    COALESCE(cn.name, 'Unknown') AS company_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = fm.title AND production_year = fm.production_year LIMIT 1)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = fm.title AND production_year = fm.production_year LIMIT 1)
+GROUP BY 
+    fm.title, fm.production_year, company_name
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 3
+ORDER BY 
+    fm.actor_count DESC, fm.production_year ASC;

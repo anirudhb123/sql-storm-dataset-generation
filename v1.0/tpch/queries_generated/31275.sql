@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS total_customer_revenue
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(COALESCE(cr.total_customer_revenue, 0)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(COALESCE(cr.total_customer_revenue, 0)) DESC) AS revenue_rank
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN CustomerRevenue cr ON c.c_custkey = cr.c_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT nh.n_name, nh.customer_count, nh.total_revenue, sh.level AS supplier_level
+FROM NationStats nh
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = nh.n_nationkey
+WHERE nh.total_revenue > 10000
+ORDER BY nh.total_revenue DESC, nh.n_name ASC;

@@ -1,0 +1,51 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    INNER JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal
+), 
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+), 
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT 
+    ch.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_totalprice,
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    ps.supplier_count,
+    CASE 
+        WHEN o.o_totalprice > 5000 THEN 'High Value'
+        WHEN o.o_totalprice BETWEEN 2000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = o.o_orderkey AND l.l_discount > 0.1) AS discounted_items,
+    coalesce(r.r_name, 'Unknown Region') AS region_name
+FROM ranked_orders o
+JOIN customer_hierarchy ch ON o.o_custkey = ch.c_custkey
+LEFT JOIN supplier s ON s.s_nationkey = ch.c_nationkey
+LEFT JOIN part_supplier_summary ps ON ps.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = o.o_orderkey
+)
+LEFT JOIN nation n ON n.n_nationkey = ch.c_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE o.order_rank = 1
+ORDER BY o.o_totalprice DESC, ch.level ASC;

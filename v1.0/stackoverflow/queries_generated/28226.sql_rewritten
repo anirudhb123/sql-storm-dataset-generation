@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        u.Reputation,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+TopAuthors AS (
+    SELECT 
+        PostId,
+        Author,
+        Reputation,
+        Tags,
+        COUNT(*) AS QuestionCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1 
+    GROUP BY 
+        PostId, Author, Reputation, Tags
+),
+
+TagStatistics AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(Tags, ','))) AS TagName,
+        COUNT(DISTINCT PostId) AS TagCount
+    FROM 
+        TopAuthors
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(DISTINCT PostId) > 1 
+),
+
+PostHistories AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        JSON_AGG(DISTINCT CLOSE_REASON.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes CLOSE_REASON ON ph.Comment = CLOSE_REASON.Id::text
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ta.Author,
+    ta.Reputation,
+    ta.QuestionCount,
+    ts.TagName,
+    ts.TagCount,
+    ph.CloseReopenCount,
+    ph.CloseReasons
+FROM 
+    TopAuthors ta
+JOIN 
+    TagStatistics ts ON ts.TagName = ANY(string_to_array(ta.Tags, ','))
+JOIN 
+    PostHistories ph ON ph.PostId = ta.PostId
+ORDER BY 
+    ta.Reputation DESC, 
+    ts.TagCount DESC;

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostStats AS (
+    SELECT 
+        COUNT(*) AS TotalPosts, 
+        AVG(Score) AS AvgScore, 
+        SUM(ViewCount) AS TotalViews 
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+QuestionComments AS (
+    SELECT 
+        pc.PostId, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts pc
+    LEFT JOIN 
+        Comments c ON pc.Id = c.PostId
+    WHERE 
+        pc.PostTypeId = 1
+    GROUP BY 
+        pc.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    ps.TotalPosts,
+    ps.AvgScore,
+    ps.TotalViews,
+    ub.BadgeCount,
+    qc.CommentCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PostStats ps ON 1=1
+LEFT JOIN 
+    UserBadges ub ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ub.UserId)
+LEFT JOIN 
+    QuestionComments qc ON rp.PostId = qc.PostId
+WHERE 
+    rp.RankScore <= 5
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

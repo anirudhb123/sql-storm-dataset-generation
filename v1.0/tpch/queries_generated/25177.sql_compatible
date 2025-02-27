@@ -1,0 +1,48 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_name,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT p.p_container, ', ') AS container_types,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_type
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sp.total_avail_qty,
+        sp.avg_supply_cost,
+        sp.container_types,
+        sp.unique_parts,
+        RANK() OVER (PARTITION BY sp.total_avail_qty ORDER BY sp.avg_supply_cost DESC) AS rank_by_cost
+    FROM 
+        SupplierParts sp
+    JOIN 
+        supplier s ON sp.s_suppkey = s.s_suppkey
+)
+SELECT 
+    rs.s_suppkey,
+    rs.s_name,
+    rs.total_avail_qty,
+    rs.avg_supply_cost,
+    rs.container_types,
+    rs.unique_parts,
+    rs.rank_by_cost
+FROM 
+    RankedSuppliers rs
+WHERE 
+    rs.rank_by_cost <= 5
+ORDER BY 
+    rs.total_avail_qty DESC, rs.avg_supply_cost ASC;

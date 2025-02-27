@@ -1,0 +1,93 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(vote.VoteTypeId = 2)::int, 0) AS TotalUpvotes,
+        COALESCE(SUM(vote.VoteTypeId = 3)::int, 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT p.Id) DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId,
+        COALESCE(ph.ClosedDate, '1970-01-01') AS EffectiveCloseDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- 10: Closed, 11: Reopened
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, ph.ClosedDate
+),
+
+TopUsers AS (
+    SELECT 
+        ua.UserId, 
+        ua.DisplayName, 
+        ua.TotalUpvotes,
+        ua.TotalDownvotes,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ntile(5) OVER (ORDER BY ua.TotalUpvotes DESC) AS UpvoteTier
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalPosts > 0
+), 
+
+PostRankings AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title, 
+        ps.OwnerUserId, 
+        ps.CommentCount,
+        ps.UpVotes, 
+        ps.DownVotes,
+        DENSE_RANK() OVER (ORDER BY (ps.UpVotes - ps.DownVotes) DESC, ps.CommentCount DESC) AS PostScore
+    FROM 
+        PostStatistics ps
+    WHERE 
+        ps.EffectiveCloseDate < NOW() 
+        OR ps.EffectiveCloseDate = '1970-01-01'
+)
+
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.TotalUpvotes AS Upvotes,
+    tu.TotalDownvotes AS Downvotes,
+    ps.Title AS PostTitle,
+    ps.CommentCount AS TotalComments,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes,
+    pr.PostScore
+FROM 
+    TopUsers tu
+JOIN 
+    PostRankings ps ON tu.UserId = ps.OwnerUserId
+JOIN 
+    PostStatistics pr ON ps.PostId = pr.PostId
+WHERE 
+    tu.UpvoteTier = 1 -- Filtering to show the top tier users
+ORDER BY 
+    pr.PostScore DESC, tu.TotalUpvotes DESC
+LIMIT 10;

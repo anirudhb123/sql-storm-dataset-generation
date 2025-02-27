@@ -1,0 +1,77 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS revenue_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+ReturnSummary AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt_inc_tax) AS total_refunded
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+CombinedSummary AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_sold,
+        ss.total_revenue,
+        ss.avg_profit,
+        COALESCE(rs.total_returned, 0) AS total_returned,
+        COALESCE(rs.total_refunded, 0) AS total_refunded,
+        CASE 
+            WHEN ss.total_sold > 0 THEN (COALESCE(rs.total_returned, 0) * 1.0 / ss.total_sold) * 100 
+            ELSE NULL 
+        END AS return_percentage
+    FROM 
+        SalesSummary ss
+    LEFT JOIN 
+        ReturnSummary rs ON ss.ws_item_sk = rs.wr_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(cs.cs_net_paid) AS total_spent,
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+    AVG(cs.cs_net_paid_inc_ship_tax) AS avg_order_value,
+    MAX(cs.cs_sales_price) AS highest_purchase,
+    MIN(cs.cs_sales_price) AS lowest_purchase,
+    CASE 
+        WHEN AVG(cs.cs_net_paid_inc_ship_tax) IS NULL THEN 'No Purchases'
+        ELSE 
+            CASE 
+                WHEN AVG(cs.cs_net_paid_inc_ship_tax) > 100 THEN 'High Spender'
+                WHEN AVG(cs.cs_net_paid_inc_ship_tax) BETWEEN 50 AND 100 THEN 'Medium Spender'
+                ELSE 'Low Spender'
+            END
+    END AS spender_category
+FROM 
+    customer c
+JOIN 
+    store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+JOIN 
+    CombinedSummary comb ON cs.ss_item_sk = comb.ws_item_sk
+WHERE 
+    c.c_birth_year BETWEEN (SELECT MIN(d_year) FROM date_dim WHERE d_year = 1980) 
+                       AND (SELECT MAX(d_year) FROM date_dim WHERE d_year = 2000)
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    COUNT(DISTINCT cs.cs_order_number) > 5
+ORDER BY 
+    total_spent DESC;

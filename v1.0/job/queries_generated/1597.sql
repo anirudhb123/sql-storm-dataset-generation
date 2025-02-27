@@ -1,0 +1,43 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RelatedMovies AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        lt.link AS link_type
+    FROM 
+        movie_link ml
+    JOIN 
+        link_type lt ON ml.link_type_id = lt.id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(rl.linked_movie_id, 'No Related Movies') AS related_movie_id,
+    rmt.title AS related_title
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    RelatedMovies rl ON rm.movie_id = rl.movie_id
+LEFT JOIN 
+    aka_title rmt ON rl.linked_movie_id = rmt.id
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) AS HistoryEditCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+),
+TagCounts AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(LOWER(Tags), '>')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    (rp.UpVotes - rp.DownVotes) AS NetVotes,
+    rp.CommentCount,
+    rp.HistoryEditCount,
+    tt.Tag,
+    tt.TagCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TopTags tt ON tt.Tag = ANY (STRING_TO_ARRAY(rp.Tags, '>'))
+WHERE 
+    tt.TagRank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100;

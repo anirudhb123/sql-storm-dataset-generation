@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(s.total_sales) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        SalesCTE s ON c.c_custkey = s.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(s.total_sales) > 1000
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS num_parts_supplied,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 5
+)
+SELECT 
+    c.c_name AS customer_name,
+    tc.total_spent,
+    si.s_name AS supplier_name,
+    si.avg_supply_cost,
+    RANK() OVER (ORDER BY tc.total_spent DESC) AS customer_rank
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SupplierInfo si ON si.num_parts_supplied = (
+        SELECT 
+            COUNT(*) 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey IN (
+                SELECT 
+                    l.l_partkey 
+                FROM 
+                    lineitem l 
+                JOIN 
+                    orders o ON l.l_orderkey = o.o_orderkey 
+                WHERE 
+                    o.o_orderdate >= DATE '1997-01-01'
+            )
+    )
+WHERE 
+    tc.total_spent IS NOT NULL
+ORDER BY 
+    customer_rank;

@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        PHT.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(DAY, -365, CAST('2024-10-01' AS DATE))
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.CreationDate AS PostCreationDate,
+    COALESCE(a.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(a.DownVotes, 0) AS TotalDownVotes,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY r.Score DESC) AS UserPostRank,
+    COALESCE(h.Comment, 'No history') AS LastActionComment,
+    COALESCE(h.CreationDate, 'No history found') AS LastActionDate,
+    COALESCE(h.HistoryTypeName, 'No history type') AS HistoryType
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    AggregatedVotes a ON r.PostId = a.PostId
+LEFT JOIN 
+    PostHistoryDetails h ON r.PostId = h.PostId 
+                          AND h.CreationDate = (SELECT MAX(CreationDate) FROM PostHistoryDetails WHERE PostId = r.PostId)
+WHERE 
+    (u.Reputation >= 100 AND COALESCE(a.UpVotes, 0) > COALESCE(a.DownVotes, 0)) 
+    OR (u.Reputation < 100 AND COALESCE(a.UpVotes, 0) <= COALESCE(a.DownVotes, 0))
+ORDER BY 
+    UserName, UserPostRank
+LIMIT 100;

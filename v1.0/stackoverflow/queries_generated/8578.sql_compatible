@@ -1,0 +1,67 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PostDetail AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        P.CreationDate AS PostCreationDate,
+        PT.Name AS PostType,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.Tags, P.CreationDate, PT.Name, U.DisplayName
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostsCount,
+    US.CommentsCount,
+    US.Upvotes,
+    US.Downvotes,
+    JSON_AGG(PD.PostId) AS RecentPostIds,
+    JSON_AGG(PD.Title) AS RecentPostTitles,
+    JSON_AGG(PD.PostCreationDate) AS RecentPostDates,
+    JSON_AGG(PD.ViewCount) FILTER (WHERE PD.ViewCount > 100) AS HighViewPosts
+FROM 
+    UserStats US
+LEFT JOIN 
+    PostDetail PD ON US.UserId = PD.OwnerDisplayName
+GROUP BY 
+    US.UserId, US.DisplayName, US.Reputation, US.PostsCount, US.CommentsCount, US.Upvotes, US.Downvotes
+ORDER BY 
+    US.Reputation DESC
+LIMIT 10;

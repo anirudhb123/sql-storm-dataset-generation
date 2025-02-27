@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returning_customer_sk,
+        sr.returned_date_sk,
+        sr.returned_time_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_quantity) AS total_returned_quantity,
+        SUM(sr.return_amt) AS total_returned_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr.returning_customer_sk ORDER BY SUM(sr.return_amt) DESC) AS rn
+    FROM 
+        store_returns sr
+    LEFT JOIN 
+        customer c ON sr.returning_customer_sk = c.c_customer_sk
+    GROUP BY 
+        sr.returning_customer_sk, sr.returned_date_sk, sr.returned_time_sk
+), 
+TopReturningCustomers AS (
+    SELECT 
+        r.returning_customer_sk,
+        r.total_returns,
+        r.total_returned_quantity,
+        r.total_returned_amount
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rn = 1
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    SUM(coalesce(ws.ws_sales_price, 0)) AS total_sales,
+    AVG(NULLIF(coalesce(ws.ws_sales_price, 0), 0)) AS avg_sales_price,
+    MAX(NULLIF(ws.ws_sold_date_sk, 0)) AS last_sales_date_sk,
+    CASE 
+        WHEN COALESCE((
+            SELECT COUNT(*)
+            FROM web_sales ws_inner
+            WHERE ws_inner.ws_bill_customer_sk = c.c_customer_sk
+            AND ws_inner.ws_sales_price > 100
+        ), 0) > 5 THEN 'Frequent High Spender'
+        ELSE 'Regular Buyer'
+    END AS customer_category,
+    CASE 
+        WHEN c.c_birth_year IS NULL THEN 'Unknown Age'
+        ELSE CONCAT('Age: ', YEAR(CURRENT_DATE) - c.c_birth_year)
+    END AS customer_age,
+    RANK() OVER (ORDER BY SUM(coalesce(ws.ws_sales_price, 0)) DESC) AS sales_rank
+FROM 
+    TopReturningCustomers trc
+JOIN 
+    customer c ON trc.returning_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, c.c_birth_year
+HAVING 
+    SUM(coalesce(ws.ws_sales_price, 0)) > 1000 OR COUNT(ws.ws_order_number) > 10
+ORDER BY 
+    total_sales DESC, customer_category;

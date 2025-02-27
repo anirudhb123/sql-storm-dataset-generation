@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AvgBountyAmount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rph.Title,
+    rph.CreationDate,
+    ur.DisplayName AS OwnerName,
+    ur.Reputation,
+    ur.BadgeCount,
+    ps.CommentCount,
+    ps.AvgBountyAmount,
+    COALESCE((SELECT STRING_AGG(CONVERT(varchar, rph2.Title), ', ') 
+               FROM RecursivePostHierarchy rph2 
+               WHERE rph2.ParentId = rph.Id), 'No Parent') AS RelatedPosts
+FROM 
+    RecursivePostHierarchy rph
+JOIN 
+    UserReputation ur ON rph.OwnerUserId = ur.UserId
+JOIN 
+    PostStats ps ON rph.Id = ps.PostId
+ORDER BY 
+    ur.Reputation DESC,
+    ps.CommentCount DESC,
+    ps.AvgBountyAmount DESC
+OPTION (MAXRECURSION 0);

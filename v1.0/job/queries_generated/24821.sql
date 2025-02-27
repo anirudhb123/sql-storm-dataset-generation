@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS level,
+        m.production_year,
+        COALESCE(NULLIF(replace(m.title, ' ', ''), ''), 'Unknown') AS simplified_title
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL 
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(NULLIF(replace(m.title, ' ', ''), ''), 'Unknown') AS title,
+        mh.level + 1,
+        m.production_year,
+        mh.simplified_title
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.level < 5
+)
+, RankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY level DESC) AS rank_level
+    FROM MovieHierarchy
+)
+SELECT 
+    mv.movie_id,
+    mv.title,
+    mv.production_year,
+    km.keyword AS movie_keyword,
+    CASE 
+        WHEN kr.production_year IS NULL THEN 'No Keywords Found'
+        ELSE kr.production_year::text
+    END AS keywords_status,
+    ARRAY_AGG(DISTINCT ci.note) FILTER (WHERE ci.note IS NOT NULL) AS cast_notes
+FROM RankedMovies mv
+LEFT JOIN movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN keyword km ON mk.keyword_id = km.id
+LEFT JOIN cast_info ci ON mv.movie_id = ci.movie_id
+LEFT JOIN aka_title kr ON mv.movie_id = kr.id AND kr.production_year IS NOT NULL
+WHERE mv.rank_level = 1
+GROUP BY mv.movie_id, mv.title, mv.production_year, kr.production_year
+HAVING COUNT(ci.id) > 2
+ORDER BY mv.production_year DESC, mv.title
+LIMIT 100
+OFFSET 10;

@@ -1,0 +1,47 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        ca_zip,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        a.full_address
+    FROM customer c
+    JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    JOIN AddressComponents a ON c.c_current_addr_sk = a.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        sd.ss_store_sk,
+        SUM(sd.ss_net_paid) AS total_sales,
+        COUNT(sd.ss_ticket_number) AS transaction_count,
+        STRING_AGG(DISTINCT c.c_customer_id, ', ') AS customer_ids
+    FROM store_sales sd
+    JOIN CustomerDetails c ON sd.ss_customer_sk = c.c_customer_sk
+    GROUP BY sd.ss_store_sk
+)
+SELECT 
+    s.s_store_id,
+    s.s_store_name,
+    ss.total_sales,
+    ss.transaction_count,
+    ss.customer_ids,
+    s.s_city,
+    s.s_state,
+    s.s_zip,
+    s.s_country
+FROM store s
+LEFT JOIN SalesSummary ss ON s.s_store_sk = ss.ss_store_sk
+ORDER BY ss.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, ViewCount, Score, AnswerCount, CommentCount, OwnerDisplayName, Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        ViewRank <= 10
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.OwnerDisplayName,
+    tp.Tags,
+    pv.TotalUpvotes,
+    pv.TotalDownvotes
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostVotes pv ON tp.PostId = pv.PostId
+ORDER BY 
+    tp.ViewCount DESC, tp.Score DESC;

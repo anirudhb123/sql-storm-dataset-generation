@@ -1,0 +1,86 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer AS c 
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        total_spent > 1000
+    UNION ALL
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(cs.cs_ext_sales_price) AS total_spent
+    FROM 
+        customer AS c 
+    JOIN 
+        catalog_sales AS cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        total_spent > 1000
+), 
+customer_demo AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        COUNT(DISTINCT cu.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics AS cd
+    JOIN 
+        customer AS cu ON cd.cd_demo_sk = cu.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+), 
+date_info AS (
+    SELECT 
+        d.d_date_sk, 
+        d.d_year, 
+        d.d_month_seq, 
+        COUNT(ws.ws_order_number) AS web_orders
+    FROM 
+        date_dim AS d
+    LEFT JOIN 
+        web_sales AS ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date_sk, d.d_year, d.d_month_seq
+)
+SELECT 
+    cu.c_first_name, 
+    cu.c_last_name,
+    cd.cd_gender, 
+    DATE_PART('year', CURRENT_DATE) - MIN(cu.c_birth_year) AS age,
+    COALESCE(SUM(ws.ws_net_paid_inc_tax), 0) AS total_web_spend,
+    COALESCE(SUM(cs.cs_net_paid_inc_tax), 0) AS total_catalog_spend,
+    di.d_year,
+    di.d_month_seq,
+    ROW_NUMBER() OVER (PARTITION BY di.d_year ORDER BY COALESCE(SUM(ws.ws_net_paid_inc_tax), 0) DESC) AS rank
+FROM 
+    top_customers AS cu
+LEFT JOIN 
+    web_sales AS ws ON cu.c_customer_sk = ws.ws_ship_customer_sk
+LEFT JOIN 
+    catalog_sales AS cs ON cu.c_customer_sk = cs.cs_ship_customer_sk
+LEFT JOIN 
+    customer_demo AS cd ON cu.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    date_info AS di ON ws.ws_sold_date_sk = di.d_date_sk OR cs.cs_sold_date_sk = di.d_date_sk
+GROUP BY 
+    cu.c_first_name, 
+    cu.c_last_name, 
+    cd.cd_gender, 
+    cu.c_birth_year, 
+    di.d_year, 
+    di.d_month_seq
+ORDER BY 
+    di.d_year, rank;

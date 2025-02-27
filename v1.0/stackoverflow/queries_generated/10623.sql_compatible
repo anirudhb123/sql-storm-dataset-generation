@@ -1,0 +1,58 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(V.Amount, 0)) AS TotalBounty 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        (SELECT UserId, SUM(BountyAmount) AS Amount 
+         FROM Votes 
+         WHERE VoteTypeId = 8 
+         GROUP BY UserId) V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        C.CommentCount,
+        P.AcceptedAnswerId IS NOT NULL AS HasAcceptedAnswer,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(Id) AS CommentCount 
+         FROM Comments 
+         GROUP BY PostId) C ON P.Id = C.PostId
+)
+
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    SUM(CASE WHEN PS.HasAcceptedAnswer THEN 1 ELSE 0 END) AS TotalAcceptedAnswers,
+    AVG(PS.Score) AS AveragePostScore,
+    SUM(PS.ViewCount) AS TotalViews,
+    AVG(COALESCE(PS.CommentCount, 0)) AS AverageCommentsPerPost
+FROM 
+    UserStats US
+LEFT JOIN 
+    PostStats PS ON US.UserId = PS.OwnerUserId
+GROUP BY 
+    US.UserId, US.DisplayName
+ORDER BY 
+    US.TotalPosts DESC
+LIMIT 100;

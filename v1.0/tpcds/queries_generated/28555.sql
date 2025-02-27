@@ -1,0 +1,66 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CountrySummary AS (
+    SELECT 
+        ca_country,
+        COUNT(*) AS address_count,
+        STRING_AGG(DISTINCT ca_city, ', ') AS cities,
+        STRING_AGG(DISTINCT ca_state, ', ') AS states
+    FROM 
+        AddressDetails
+    GROUP BY 
+        ca_country
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        SalesData cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    cs.address_count,
+    cs.cities,
+    cs.states,
+    COALESCE(cs.total_sales, 0) AS total_sales,
+    COALESCE(cs.order_count, 0) AS order_count
+FROM 
+    CustomerInfo ci
+LEFT JOIN 
+    CountrySummary cs ON ci.c_last_name LIKE '%' || SUBSTRING(cs.ca_country FROM 1 FOR 3) || '%'
+ORDER BY 
+    ci.total_sales DESC, ci.c_customer_id;

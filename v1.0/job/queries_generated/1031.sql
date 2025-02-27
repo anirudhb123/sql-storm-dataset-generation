@@ -1,0 +1,60 @@
+WITH MovieStats AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        SUM(CASE WHEN t.production_year = 2023 THEN 1 ELSE 0 END) AS is_current_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.id, t.title, t.production_year
+), ActorRankings AS (
+    SELECT 
+        ak.name,
+        COUNT(*) AS movies_count,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+), MovieKeywords AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.total_cast,
+    ms.actors,
+    CASE 
+        WHEN ms.is_current_year = 1 THEN 'Current'
+        ELSE 'Past'
+    END AS release_status,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    ar.rank AS actor_rank
+FROM 
+    MovieStats ms
+LEFT JOIN 
+    MovieKeywords mk ON ms.id = mk.movie_id
+LEFT JOIN 
+    ActorRankings ar ON ar.name IN (SELECT unnest(string_to_array(ms.actors, ', ')))
+ORDER BY 
+    ms.production_year DESC, ms.total_cast DESC;

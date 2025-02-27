@@ -1,0 +1,69 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT t.Id) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(tag_array)
+    GROUP BY 
+        p.Id, p.Title
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(v.BountyAmount) AS TotalBounty,
+        MAX(p.CreationDate) AS LastActivity
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Id END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.PostsCreated,
+    u.Questions,
+    u.Answers,
+    u.TotalBounty,
+    u.LastActivity,
+    p.PostId,
+    p.Title,
+    p.TagCount,
+    p.Tags,
+    h.EditCount,
+    h.CloseCount,
+    h.ReopenCount
+FROM 
+    UserActivity u
+JOIN 
+    PostTagCounts p ON u.UserId = p.PostId
+JOIN 
+    PostHistoryAnalysis h ON p.PostId = h.PostId
+ORDER BY 
+    u.Reputation DESC, 
+    p.TagCount DESC, 
+    h.EditCount DESC
+LIMIT 50;

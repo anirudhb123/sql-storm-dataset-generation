@@ -1,0 +1,65 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(cs.cs_net_profit) AS Total_Net_Profit,
+        COUNT(cs.cs_order_number) AS Total_Orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(cs.cs_net_profit) DESC) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        s.Total_Net_Profit,
+        s.Total_Orders
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_customer_sk = c.c_customer_sk
+    WHERE 
+        s.rn <= 10
+),
+SalesByMonth AS (
+    SELECT
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_profit) AS Monthly_Net_Profit
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+StoreReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        SUM(sr_return_amount) AS Total_Returned_Amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+)
+SELECT 
+    t.c_customer_id,
+    t.c_first_name,
+    t.c_last_name,
+    tm.d_year,
+    tm.d_month_seq,
+    tm.Monthly_Net_Profit,
+    COALESCE(sr.Total_Returned_Amount, 0) AS Total_Returned_Amount
+FROM 
+    TopCustomers t
+JOIN 
+    SalesByMonth tm ON tm.d_year = YEAR(cast('2002-10-01' as date)) 
+                    AND tm.d_month_seq = MONTH(cast('2002-10-01' as date))
+LEFT JOIN 
+    StoreReturns sr ON sr.sr_returned_date_sk = tm.d_month_seq
+ORDER BY 
+    t.Total_Net_Profit DESC;

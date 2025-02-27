@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(v.BountyAmount) AS TotalBountyAmount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        pt.Name AS PostTypeName,
+        MAX(ph.CreationDate) AS LastUpdate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT CONCAT(ph.Comment, ' (', ph.CreationDate, ')'), '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostTypes pt ON ph.PostHistoryTypeId IN (1, 4, 6, 24)
+    GROUP BY 
+        ph.PostId, pt.Name
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pht.Name = 'Post Closed'
+        AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+)
+
+SELECT 
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalBountyAmount,
+    COALESCE(pht.EditCount, 0) AS TotalEdits,
+    COALESCE(pht.LastUpdate, 'No Edits') AS LastEdited,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    COALESCE(cp.PostTypeName, 'N/A') AS PostTypeName
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostHistorySummary pht ON us.UserId = pht.PostId
+LEFT JOIN 
+    ClosedPosts cp ON us.TotalPosts > 0
+WHERE 
+    us.TotalPosts > 0
+ORDER BY 
+    us.TotalBountyAmount DESC NULLS LAST
+LIMIT 100
+OFFSET 10;

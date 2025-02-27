@@ -1,0 +1,76 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-10-01' 
+        AND l.l_shipdate < DATE '1997-11-01' 
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierDetails AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        s.s_name AS supplier_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        s.s_suppkey  -- Added s.s_suppkey for the join condition
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+)
+SELECT 
+    sd.region_name,
+    sd.nation_name,
+    sd.supplier_name,
+    COUNT(DISTINCT hv.o_orderkey) AS high_value_order_count,
+    AVG(sd.ps_supplycost) AS avg_supply_cost,
+    SUM(sd.ps_availqty) AS total_available_quantity,
+    MAX(rs.rn) AS max_rank  -- Changed from MAX(rn) to MAX(rs.rn)
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    HighValueOrders hv ON sd.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+        WHERE ps.ps_suppkey = sd.s_suppkey  -- Corrected from ps.ps_supplierkey to ps.ps_suppkey
+    )
+LEFT JOIN 
+    RankedSuppliers rs ON sd.ps_partkey = rs.p_partkey  -- Used correct column from RankSuppliers
+GROUP BY 
+    sd.region_name, 
+    sd.nation_name, 
+    sd.supplier_name
+ORDER BY 
+    total_available_quantity DESC,
+    high_value_order_count DESC;

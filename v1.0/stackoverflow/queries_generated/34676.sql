@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER(PARTITION BY p.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) OVER(PARTITION BY p.Id) AS UpVotes,
+        SUM(v.VoteTypeId = 3) OVER(PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName) AS Contributors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name || ' (Class: ' || b.Class || ')', ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+EnhancedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        COALESCE(ps.HistoryCount, 0) AS HistoryCount,
+        COALESCE(ps.Contributors, 'None') AS Contributors,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistorySummary ps ON rp.PostId = ps.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    ep.PostId,
+    ep.Title,
+    ep.Score,
+    ep.ViewCount,
+    ep.CommentCount,
+    ep.UpVotes,
+    ep.DownVotes,
+    ep.HistoryCount,
+    ep.Contributors,
+    ep.BadgeCount,
+    ep.BadgeNames
+FROM 
+    EnhancedPosts ep
+WHERE 
+    (ep.Score > 10 OR ep.ViewCount > 100) AND 
+    ep.BadgeCount > 0
+ORDER BY 
+    ep.Score DESC, ep.ViewCount DESC
+LIMIT 50;
+This elaborate SQL query extracts and enhances data from the StackOverflow schema, specifically looking for posts created within the last 30 days. It ranks posts per user, summarizes post histories, aggregates badge information for users, and constructs a final dataset where the posts meet specific criteria on score and view count, and filters only those users with at least one badge. The result is ordered by score and view count for performance benchmarking.

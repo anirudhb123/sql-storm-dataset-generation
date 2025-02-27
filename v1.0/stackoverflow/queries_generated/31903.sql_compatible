@@ -1,0 +1,82 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        PostTypeId,
+        ParentId,
+        OwnerUserId,
+        CreationDate,
+        Score,
+        Title,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.Title,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 50 WHEN b.Class = 2 THEN 10 WHEN b.Class = 3 THEN 5 ELSE 0 END) AS BadgePoints
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostMetrics AS (
+    SELECT 
+        r.Id AS PostId,
+        r.Title,
+        r.CreationDate,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        COALESCE(ur.BadgePoints, 0) AS UserBadgePoints
+    FROM RecursivePostHierarchy r
+    LEFT JOIN PostStats ps ON r.Id = ps.Id
+    LEFT JOIN Users u ON r.OwnerUserId = u.Id
+    LEFT JOIN UserReputation ur ON u.Id = ur.UserId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.CreationDate,
+    pm.CommentCount,
+    pm.VoteCount,
+    pm.UpVoteCount,
+    pm.DownVoteCount,
+    pm.UserBadgePoints,
+    pht.Name AS PostHistoryType,
+    (SELECT STRING_AGG(ptt.Name, ', ')
+       FROM PostHistory ph
+       INNER JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+       WHERE ph.PostId = pm.PostId) AS HistoryTypeNames
+FROM PostMetrics pm
+LEFT JOIN PostHistory ph ON pm.PostId = ph.PostId
+LEFT JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+WHERE pm.UserBadgePoints > 0
+ORDER BY pm.UserBadgePoints DESC, pm.CreationDate DESC;

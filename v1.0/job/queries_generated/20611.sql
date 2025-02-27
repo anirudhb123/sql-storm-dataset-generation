@@ -1,0 +1,81 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        ci.person_id AS actor_id,
+        ci.movie_id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NULL OR ci.note <> 'Cameo'
+), 
+
+MovieWithActorCounts AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title
+), 
+
+MoviesWithFemaleActors AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.actor_count,
+        COUNT(DISTINCT n.id) AS female_actor_count
+    FROM 
+        MovieWithActorCounts m
+    LEFT JOIN 
+        aka_name n ON n.person_id IN (SELECT DISTINCT ci.person_id 
+                                       FROM cast_info ci 
+                                       WHERE ci.movie_id = m.movie_id 
+                                       AND EXISTS (SELECT 1 FROM name na WHERE na.id = ci.person_id AND na.gender = 'F'))
+    GROUP BY 
+        m.movie_id, m.title, m.actor_count
+), 
+
+DistinctKeywordActors AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title at ON mk.movie_id = at.id
+    GROUP BY 
+        m.movie_id
+), 
+
+FinalResult AS (
+    SELECT 
+        m.title,
+        m.actor_count,
+        m.female_actor_count,
+        k.keyword_count
+    FROM 
+        MoviesWithFemaleActors m
+    LEFT JOIN 
+        DistinctKeywordActors k ON m.movie_id = k.movie_id
+)
+
+SELECT 
+    fr.title,
+    fr.actor_count,
+    COALESCE(fr.female_actor_count, 0) AS female_actor_count,
+    COALESCE(fr.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN fr.female_actor_count > (fr.actor_count * 0.5) THEN 'Dominantly Female'
+        WHEN fr.female_actor_count IS NULL AND fr.actor_count > 0 THEN 'No Female Actors'
+        ELSE 'Mixed or None'
+    END AS gender_ratio
+FROM 
+    FinalResult fr
+WHERE 
+    fr.actor_count > 3
+ORDER BY 
+    fr.actor_count DESC, fr.female_actor_count DESC;

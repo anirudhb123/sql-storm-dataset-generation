@@ -1,0 +1,82 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.CreationDate,
+        P.Score,
+        P.Title,
+        P.ViewCount,
+        1 AS PostLevel
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000  -- Only consider users with reputation greater than 1000
+    UNION ALL 
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        P.Id,
+        P.CreationDate,
+        P.Score,
+        P.Title,
+        P.ViewCount,
+        RP.PostLevel + 1
+    FROM 
+        RecursiveUserPosts RP
+    JOIN 
+        Posts P ON RP.PostId = P.ParentId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        U.Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(P.PostId) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        ROW_NUMBER() OVER (PARTITION BY U.UserId ORDER BY SUM(P.Score) DESC) AS Rank
+    FROM 
+        RecursiveUserPosts U
+    GROUP BY 
+        U.UserId, U.DisplayName
+),
+TopBadgedUsers AS (
+    SELECT 
+        B.UserId,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+FinalResult AS (
+    SELECT 
+        PS.DisplayName,
+        PS.TotalPosts,
+        PS.TotalScore,
+        PS.AverageViews,
+        TB.BadgeCount
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        TopBadgedUsers TB ON PS.UserId = TB.UserId
+    WHERE 
+        PS.TotalPosts > 5 AND
+        (TB.BadgeCount IS NULL OR TB.BadgeCount >= 3)   -- Applying conditions on badges
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    TotalScore,
+    AverageViews,
+    COALESCE(BadgeCount, 0) AS BadgeCount
+FROM 
+    FinalResult
+ORDER BY 
+    TotalScore DESC, AverageViews DESC;

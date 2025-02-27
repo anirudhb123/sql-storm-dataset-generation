@@ -1,0 +1,46 @@
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 
+                 WHEN V.VoteTypeId = 3 THEN -1 
+                 ELSE 0 END) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 WHEN V.VoteTypeId = 3 THEN -1 ELSE 0 END) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount, 
+        COALESCE(COUNT(C.Comments), 0) AS CommentCount, 
+        COALESCE(SUM(CASE WHEN C.UserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ActiveCommenters
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+    GROUP BY P.Id
+),
+RankedPosts AS (
+    SELECT 
+        PD.*, 
+        RANK() OVER (ORDER BY PD.Score DESC, PD.ViewCount DESC) AS ScoreRank
+    FROM PostDetails PD
+)
+SELECT 
+    U.DisplayName,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.CommentCount,
+    RP.ActiveCommenters,
+    US.TotalScore
+FROM RankedPosts RP
+JOIN UserScore US ON RP.ActiveCommenters = US.UserRank
+LEFT JOIN Badges B ON B.UserId = US.UserId
+WHERE B.Class = 1 OR B.Class = 2
+ORDER BY US.TotalScore DESC, RP.ScoreRank;

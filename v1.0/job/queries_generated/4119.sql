@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    GROUP BY 
+        c.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON co.id = mc.company_id
+    GROUP BY 
+        mc.movie_id
+),
+TitleInfo AS (
+    SELECT 
+        tt.id AS title_id,
+        tt.title,
+        tt.production_year,
+        COALESCE(cr.actor_count, 0) AS total_actors,
+        COALESCE(cc.company_count, 0) AS total_companies,
+        tt.title_rank
+    FROM 
+        RankedTitles tt
+    LEFT JOIN 
+        CastRoles cr ON tt.title_id = cr.movie_id
+    LEFT JOIN 
+        MovieCompanies cc ON tt.title_id = cc.movie_id
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.total_actors,
+    ti.total_companies,
+    CASE 
+        WHEN ti.total_actors > 5 THEN 'Ensemble'
+        WHEN ti.total_actors > 0 THEN 'Small Cast'
+        ELSE 'No Cast'
+    END AS cast_type,
+    CASE 
+        WHEN ti.total_companies = 0 THEN 'Independent'
+        ELSE 'Production Company'
+    END AS company_type
+FROM 
+    TitleInfo ti
+WHERE 
+    ti.title_rank <= 10
+ORDER BY 
+    ti.production_year DESC, ti.title;

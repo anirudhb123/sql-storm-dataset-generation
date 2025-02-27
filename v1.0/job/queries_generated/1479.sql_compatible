@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ct.kind AS role,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS note_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        comp_cast_type ct ON ct.id = c.person_role_id
+    LEFT JOIN 
+        complete_cast co ON co.movie_id = c.movie_id
+    GROUP BY 
+        c.movie_id, a.name, ct.kind
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ',') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cd.actor_name,
+        cd.role,
+        cd.note_count,
+        mk.keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON cd.movie_id = rm.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON mk.movie_id = rm.movie_id
+    WHERE 
+        cd.note_count > 0 OR mk.keywords IS NOT NULL
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    COALESCE(fr.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(fr.role, 'Unknown Role') AS role,
+    COALESCE(fr.note_count, 0) AS note_count,
+    COALESCE(fr.keywords, 'No Keywords') AS keywords
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.production_year DESC, 
+    fr.title ASC;

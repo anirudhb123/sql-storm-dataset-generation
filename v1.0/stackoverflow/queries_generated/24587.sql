@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+), CommentsDetails AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ' | ') AS CommentsSample
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), HistoricalChanges AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(ph.Comment, ', ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Closed, Reopened, Deleted, Undeleted
+    GROUP BY 
+        ph.PostId
+), PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(t.Id) AS TagUsage
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(t.Id) > 5
+), GetTagId AS (
+    SELECT 
+        Id,
+        TagName, 
+        ROW_NUMBER() OVER (ORDER BY Count DESC) AS TagRank
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(cd.CommentCount, 0) AS CommentCount,
+    COALESCE(cd.CommentsSample, 'No comments yet') AS CommentsSample,
+    COALESCE(hc.HistoryCount, 0) AS HistoryCount,
+    COALESCE(hc.LastChangeDate, 'Never') AS LastChangeDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.VoteCount,
+    t.TagName AS PopularTag,
+    t.TagRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CommentsDetails cd ON rp.PostId = cd.PostId
+LEFT JOIN 
+    HistoricalChanges hc ON rp.PostId = hc.PostId
+LEFT JOIN 
+    GetTagId t ON t.Id = (
+        SELECT Top 1 Id FROM Tags 
+        WHERE TagName IN (SELECT DISTINCT UNNEST(string_to_array(rp.Title, ' ')))
+        ORDER BY Count DESC
+    )
+WHERE 
+    rp.rn = 1 -- Get the latest post of each type
+    AND rp.ViewCount > (SELECT AVG(ViewCount) FROM Posts) -- Filter by view count greater than average
+ORDER BY 
+    COALESCE(rp.Score, 0) DESC, 
+    rp.CreationDate DESC
+LIMIT 50;

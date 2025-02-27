@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier sh
+    JOIN SupplierHierarchy shier ON sh.s_nationkey = shier.s_nationkey
+    WHERE sh.s_acctbal BETWEEN 1000 AND 5000
+),
+AggregatedOrders AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS line_count,
+        MIN(l.l_shipdate) AS first_ship_date,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT
+        sp.s_suppkey,
+        sp.s_name,
+        AVG(ao.total_sales) AS avg_sale,
+        MAX(ao.line_count) AS max_lines,
+        COUNT(ao.o_orderkey) AS order_count
+    FROM SupplierHierarchy sp
+    LEFT JOIN AggregatedOrders ao ON sp.s_suppkey = ao.o_orderkey
+    GROUP BY sp.s_suppkey, sp.s_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    sp.s_name,
+    COALESCE(sp.avg_sale, 0) AS avg_sale,
+    COALESCE(sp.max_lines, 0) AS max_lines,
+    COALESCE(sp.order_count, 0) AS order_count
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierPerformance sp ON n.n_nationkey = sp.s_nationkey
+ORDER BY region_name, nation_name, sp.avg_sale DESC
+FETCH FIRST 10 ROWS ONLY;

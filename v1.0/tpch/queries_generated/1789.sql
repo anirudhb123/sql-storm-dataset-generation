@@ -1,0 +1,48 @@
+WITH AverageSupplyCost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+HighValueOrders AS (
+    SELECT o_orderkey, 
+           o_orderdate, 
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+           COUNT(DISTINCT o_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o_orderkey, o_orderdate
+    HAVING SUM(l_extendedprice * (1 - l_discount)) > (SELECT AVG(total_revenue) FROM (SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_revenue FROM orders o2 JOIN lineitem l2 ON o2.o_orderkey = l2.l_orderkey GROUP BY o2.o_orderkey) AS revenue_subquery)
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l_extendedprice * (1 - l_discount)) AS total_nation_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    R.r_name AS region_name,
+    SUM(n.total_nation_revenue) AS overall_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(asc.avg_supply_cost) AS avg_supply_cost_per_part,
+    STRING_AGG(CONCAT(s.s_name, ' (', s.s_acctbal, ')'), ', ') AS suppliers_info
+FROM region R
+JOIN nation n ON R.r_regionkey = n.n_regionkey
+LEFT JOIN NationRevenue n ON n.n_nationkey = n.n_nationkey
+LEFT JOIN HighValueOrders o ON o.o_orderkey IS NOT NULL 
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+JOIN AverageSupplyCost asc ON asc.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+JOIN SupplierInfo s ON s.s_nationkey = n.n_nationkey AND s.rank <= 3
+GROUP BY R.r_name
+ORDER BY overall_revenue DESC, total_orders DESC;

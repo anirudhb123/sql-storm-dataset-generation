@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    UNION ALL
+    SELECT 
+        ps.ps_partkey, 
+        SUM(supp.total_supply_cost) 
+    FROM 
+        partsupp ps
+    JOIN 
+        SupplyCostCTE supp ON ps.ps_partkey = supp.ps_partkey
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS num_orders, 
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(hvo.total_value) AS avg_high_value,
+    MAX(supply_cost.total_supply_cost) AS max_supply_cost
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    HighValueOrders hvo ON o.o_orderkey = hvo.o_orderkey
+LEFT JOIN 
+    (SELECT ps.ps_partkey, SUM(total_supply_cost) AS total_supply_cost FROM SupplyCostCTE GROUP BY ps.ps_partkey) supply_cost 
+    ON supply_cost.ps_partkey = hvo.total_value
+WHERE 
+    n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC, avg_high_value DESC;

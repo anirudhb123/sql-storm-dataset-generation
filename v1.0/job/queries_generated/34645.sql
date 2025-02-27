@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM title m
+    WHERE m.season_nr IS NULL  -- Top-level movies only
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+average_rating AS (
+    SELECT 
+        movie_id,
+        AVG(rating) AS avg_rating
+    FROM (
+        SELECT 
+            movie_id,
+            CASE 
+                WHEN rating IS NULL THEN 0
+                ELSE rating
+            END AS rating
+        FROM movie_info
+        WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    ) AS ratings
+    GROUP BY movie_id
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+final_output AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COALESCE(cd.actor_count, 0) AS actor_count,
+        COALESCE(cd.actors, 'N/A') AS actors,
+        COALESCE(ar.avg_rating, 'No Rating') AS avg_rating
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN average_rating ar ON mh.movie_id = ar.movie_id
+)
+SELECT 
+    fon.movie_title,
+    fon.actor_count,
+    fon.actors,
+    fon.avg_rating
+FROM final_output fon
+ORDER BY fon.actor_count DESC, fon.movie_title;
+
+This elaborate SQL query serves multiple purposes:
+
+1. It first defines a recursive CTE `movie_hierarchy` to list all movies, distinguishing between standalone and linked movies.
+2. A second CTE `average_rating` computes the average ratings for each movie, handling NULL ratings appropriately.
+3. `cast_details` collects the number and names of unique actors for each movie.
+4. Finally, the `final_output` CTE aggregates the data from previous CTEs, providing a complete picture of each movie with its title, count of actors, names of actors, and average rating.
+5. The main query outputs the movie titles sorted by the number of actors in descending order and by title alphabetically. 
+
+This query showcases various SQL constructs, such as CTEs, outer joins, aggregate functions, string aggregation, and NULL handling, all aimed at creating a comprehensive report on movies and their cast.

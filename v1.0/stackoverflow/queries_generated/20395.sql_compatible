@@ -1,0 +1,106 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        CASE WHEN p.ClosedDate IS NOT NULL THEN 'Closed' ELSE 'Open' END AS PostStatus,
+        (SELECT STRING_AGG(t.TagName, ', ') FROM Tags t WHERE t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(p.Tags, ','))) ) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.PostStatus,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1
+        AND (rp.Score IS NULL OR rp.Score >= 10)
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+AggregateResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.OwnerDisplayName,
+        fp.ViewCount,
+        fp.Score,
+        fp.CommentCount,
+        fp.UpVotes,
+        fp.DownVotes,
+        fp.PostStatus,
+        fp.Tags,
+        phs.CloseCount,
+        phs.ReopenCount,
+        phs.EditorCount,
+        phs.LastEdited,
+        CASE 
+            WHEN phs.CloseCount > 0 AND phs.ReopenCount = 0 THEN 'Closed Permanently'
+            WHEN phs.ReopenCount > 0 THEN 'Reopened'
+            ELSE 'Active'
+        END AS ClosureStatus
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistorySummary phs ON fp.PostId = phs.PostId
+)
+
+SELECT 
+    ag.PostId,
+    ag.Title,
+    ag.OwnerDisplayName,
+    ag.ViewCount,
+    ag.Score,
+    ag.CommentCount,
+    ag.UpVotes,
+    ag.DownVotes,
+    ag.PostStatus,
+    ag.Tags,
+    ag.CloseCount,
+    ag.ReopenCount,
+    ag.EditorCount,
+    ag.LastEdited,
+    ag.ClosureStatus
+FROM 
+    AggregateResults ag
+WHERE 
+    ag.PostStatus = 'Open' 
+    AND ag.UpVotes - ag.DownVotes > 5
+ORDER BY 
+    ag.ViewCount DESC, 
+    ag.CreationDate DESC
+LIMIT 100;

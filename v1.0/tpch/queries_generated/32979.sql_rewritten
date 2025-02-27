@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, NULL AS parent_s_suppkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, sh.s_suppkey AS parent_s_suppkey, s2.s_acctbal, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_suppkey = sh.parent_s_suppkey
+),
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+RankedOrders AS (
+    SELECT o.*, RANK() OVER (ORDER BY o.total_price DESC) AS price_rank
+    FROM OrderSummary o
+)
+SELECT 
+    ph.p_name,
+    ph.p_brand,
+    SUM(l.l_quantity) AS total_quantity,
+    SUM(l.l_extendedprice) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey = n.n_nationkey) AS distinct_customers,
+    COALESCE(r.total_available, 0) AS total_available_parts,
+    sh.level
+FROM PartInfo r
+JOIN lineitem l ON r.p_partkey = l.l_partkey
+JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+JOIN nation n ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = l.l_suppkey)
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = l.l_suppkey
+WHERE l.l_discount > 0.05 AND l.l_returnflag = 'R'
+GROUP BY ph.p_name, ph.p_brand, n.n_name, sh.level
+HAVING total_revenue > 10000
+ORDER BY total_revenue DESC, ph.p_name ASC;

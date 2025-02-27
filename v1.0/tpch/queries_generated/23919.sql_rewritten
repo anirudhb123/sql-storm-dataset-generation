@@ -1,0 +1,42 @@
+WITH TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(sub.total_value)
+        FROM (
+            SELECT SUM(ps1.ps_supplycost * ps1.ps_availqty) AS total_value
+            FROM supplier s1
+            JOIN partsupp ps1 ON s1.s_suppkey = ps1.ps_suppkey
+            GROUP BY s1.s_suppkey
+        ) AS sub
+    )
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+), SelectedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice - (l.l_extendedprice * l.l_discount) AS final_price
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+    AND l.l_shipdate >= DATEADD(day, -30, GETDATE())
+), AllSegments AS (
+    SELECT c.c_mktsegment, SUM(li.final_price) AS total_sales
+    FROM customer c
+    LEFT JOIN RankedOrders ro ON c.c_custkey = ro.o_custkey
+    LEFT JOIN SelectedLineItems li ON ro.o_orderkey = li.l_orderkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_mktsegment
+)
+SELECT r.r_name, SUM(total_sales) AS region_sales
+FROM region r
+LEFT JOIN (
+    SELECT n.n_regionkey, a.c_mktsegment, SUM(a.total_sales) AS total_sales
+    FROM nation n
+    LEFT JOIN AllSegments a ON n.n_nationkey = a.c_mktsegment 
+    GROUP BY n.n_regionkey, a.c_mktsegment
+) AS region_sales ON r.r_regionkey = region_sales.n_regionkey
+GROUP BY r.r_name
+HAVING SUM(total_sales) IS NOT NULL AND COUNT(DISTINCT total_sales) > 1
+ORDER BY region_sales DESC NULLS LAST;

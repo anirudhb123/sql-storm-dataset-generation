@@ -1,0 +1,91 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorPerformance AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies,
+        AVG(COALESCE(years_worked, 0)) AS average_years,
+        SUM(CASE WHEN mt.production_year IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(ci.movie_id) DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN (
+        SELECT 
+            person_id,
+            COUNT(DISTINCT movie_id) AS years_worked
+        FROM 
+            cast_info
+        GROUP BY 
+            person_id
+    ) AS actor_years ON ak.person_id = actor_years.person_id
+    WHERE 
+        ak.name IS NOT NULL 
+        AND ak.md5sum IS NOT NULL 
+    GROUP BY 
+        ak.id, ak.name
+),
+MovieSummary AS (
+    SELECT 
+        mv.movie_id,
+        mv.movie_title,
+        mv.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        MAX(CASE WHEN mv.production_year IS NOT NULL THEN 1 ELSE 0 END) AS has_production_year
+    FROM 
+        MovieHierarchy mv
+    LEFT JOIN 
+        cast_info ci ON mv.movie_id = ci.movie_id
+    GROUP BY 
+        mv.movie_id, mv.movie_title, mv.production_year
+)
+
+SELECT 
+    ap.actor_name,
+    ap.total_movies AS actor_movies,
+    ms.total_actors AS movie_actors,
+    ms.has_production_year,
+    CASE
+        WHEN ms.has_production_year = 1 THEN 'Yes'
+        ELSE 'No'
+    END AS has_year_info,
+    COALESCE(CAST(ms.production_year AS VARCHAR), 'Unknown') AS production_year,
+    CASE 
+        WHEN ap.average_years IS NULL THEN 'N/A'
+        ELSE ROUND(ap.average_years, 2)
+    END AS average_years_experience
+FROM 
+    ActorPerformance ap
+JOIN 
+    MovieSummary ms ON ap.total_movies > 0 AND ms.total_actors > 0
+WHERE 
+    ap.rank <= 10
+ORDER BY 
+    ap.total_movies DESC, ap.actor_name;

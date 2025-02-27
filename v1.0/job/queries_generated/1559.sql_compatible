@@ -1,0 +1,69 @@
+
+WITH ActorMovieCount AS (
+    SELECT
+        ai.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        aka_name ai
+    JOIN
+        cast_info ci ON ai.person_id = ci.person_id
+    GROUP BY
+        ai.person_id
+),
+TopActors AS (
+    SELECT
+        person_id,
+        movie_count
+    FROM
+        ActorMovieCount
+    WHERE
+        movie_count > 5
+),
+GenreMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        kt.kind AS genre
+    FROM
+        aka_title m
+    JOIN
+        kind_type kt ON m.kind_id = kt.id
+    WHERE
+        m.production_year BETWEEN 2000 AND 2023
+),
+Companies AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    gm.title,
+    gm.production_year,
+    a.name,
+    a.name_pcode_nf,
+    COALESCE(c.company_name, 'Independent') AS company_name,
+    COALESCE(c.company_type, 'N/A') AS company_type,
+    COUNT(DISTINCT gm.movie_id) OVER (PARTITION BY a.person_id) AS total_movies,
+    ROW_NUMBER() OVER (PARTITION BY gm.production_year ORDER BY gm.title) AS title_rank
+FROM
+    GenreMovies gm
+LEFT JOIN
+    cast_info ci ON gm.movie_id = ci.movie_id
+LEFT JOIN
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN
+    Companies c ON gm.movie_id = c.movie_id
+WHERE
+    a.person_id IN (SELECT person_id FROM TopActors)
+    AND gm.production_year IS NOT NULL
+ORDER BY
+    gm.production_year DESC, 
+    title_rank;

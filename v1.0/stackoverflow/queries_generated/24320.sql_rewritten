@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        COUNT(a.Id) AS AnswerCount,
+        AVG(a.Score) AS AvgAnswerScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+),
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id AND PostTypeId = 1) AS QuestionsAsked,
+        (SELECT COUNT(*) FROM Comments WHERE UserId = u.Id) AS CommentsMade
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReason
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.DisplayName,
+    tp.Reputation,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges,
+    qp.QuestionId,
+    COALESCE(qs.AnswerCount, 0) AS AnswerCount,
+    COALESCE(qs.AvgAnswerScore, 0) AS AvgAnswerScore,
+    cr.CloseReason
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    RankedPosts rp ON tp.UserId = rp.OwnerUserId
+LEFT JOIN 
+    QuestionStats qs ON rp.PostId = qs.QuestionId
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.PostId
+WHERE 
+    rp.Rank <= 3 
+ORDER BY 
+    tp.Reputation DESC, tp.DisplayName;

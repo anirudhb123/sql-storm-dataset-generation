@@ -1,0 +1,80 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS total_movies
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+
+PersonRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+
+FilteredActors AS (
+    SELECT 
+        ak.name,
+        ak.person_id,
+        pr.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        PersonRoles pr ON ak.person_id = pr.person_id
+    WHERE 
+        pr.movie_count > 5
+),
+
+TitleInfo AS (
+    SELECT 
+        t.title,
+        COALESCE(mci.note, 'No company') AS company_note,
+        CASE 
+            WHEN at.production_year IS NULL THEN 'Unknown Year'
+            ELSE at.production_year::text
+        END AS release_year
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+    LEFT JOIN 
+        aka_title at ON t.imdb_id = at.imdb_index
+)
+
+SELECT 
+    fa.name AS actor_name,
+    tm.title AS movie_title,
+    tm.release_year,
+    COUNT(DISTINCT tm.title) OVER (PARTITION BY fa.person_id) AS titles_with_same_actor,
+    STRING_AGG(DISTINCT ti.company_note, ', ') AS production_companies
+FROM 
+    FilteredActors fa
+JOIN 
+    TitleInfo tm ON fa.person_id = (SELECT person_id FROM cast_info WHERE movie_id = (SELECT id FROM aka_title WHERE title = tm.title LIMIT 1))
+LEFT JOIN 
+    (SELECT title, release_year FROM RankedMovies WHERE title_rank = 1) ranked_tm 
+    ON ranked_tm.title = tm.title
+GROUP BY 
+    fa.name, tm.title, tm.release_year
+HAVING 
+    COUNT(DISTINCT tm.title) OVER (PARTITION BY fa.name) > 2
+ORDER BY 
+    fa.name, tm.release_year DESC;

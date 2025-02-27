@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+), UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v 
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+), RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'
+    GROUP BY 
+        c.PostId
+)
+
+SELECT 
+    UpPosts.PostId,
+    UpPosts.Title,
+    UpPosts.Score / NULLIF(UpVotes.UpVotes, 0) AS ScorePerUpvote,
+    u.GoldCount,
+    u.SilverCount,
+    u.BronzeCount,
+    pvs.TotalVotes,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    rp.Title AS TopPostTitle,
+    rp.Score AS TopPostScore
+FROM 
+    RankedPosts rp 
+LEFT JOIN 
+    UserBadgeCounts u ON rp.OwnerUserId = u.UserId
+JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    RecentComments rc ON rc.PostId = rp.PostId
+JOIN 
+    (SELECT PostId, COUNT(*) AS UpVotes FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) UpVotes ON rp.PostId = UpVotes.PostId
+WHERE 
+    rp.PostRank <= 3 
+ORDER BY 
+    ScorePerUpvote DESC, 
+    rp.CreationDate DESC;

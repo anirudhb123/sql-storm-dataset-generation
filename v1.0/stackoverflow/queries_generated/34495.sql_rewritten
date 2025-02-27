@@ -1,0 +1,92 @@
+WITH RecursivePostCounts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(DISTINCT p2.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts p2 ON p.Id = p2.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+    
+    UNION ALL
+    
+    SELECT 
+        pp.Id,
+        pp.Title,
+        pp.OwnerUserId,
+        COUNT(DISTINCT pp2.Id) AS AnswerCount
+    FROM 
+        RecursivePostCounts pp
+    LEFT JOIN 
+        Posts pp2 ON pp.Id = pp2.ParentId
+    GROUP BY 
+        pp.Id, pp.Title, pp.OwnerUserId
+),
+
+UserVotingSummary AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        u.DisplayName AS EditorName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+
+SELECT 
+    u.DisplayName AS QuestionOwner,
+    pp.Title AS QuestionTitle,
+    rpc.AnswerCount,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    us.UpVotes,
+    us.DownVotes
+FROM 
+    RecursivePostCounts rpc
+JOIN 
+    Posts pp ON rpc.Id = pp.Id
+JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        PostId, COUNT(*) AS EditCount
+    FROM 
+        PostHistorySummary
+    WHERE 
+        EditRank = 1
+    GROUP BY 
+        PostId
+) phs ON pp.Id = phs.PostId
+LEFT JOIN 
+    UserVotingSummary us ON u.Id = us.UserId
+WHERE 
+    u.Reputation > 1000 
+ORDER BY 
+    rpc.AnswerCount DESC, u.DisplayName ASC;

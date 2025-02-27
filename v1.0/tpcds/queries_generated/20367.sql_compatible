@@ -1,0 +1,68 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        C.c_customer_sk,
+        C.c_customer_id,
+        CD.cd_gender,
+        CD.cd_marital_status,
+        CD.cd_purchase_estimate,
+        R.r_reason_desc,
+        ROW_NUMBER() OVER (PARTITION BY C.c_customer_id ORDER BY CD.cd_purchase_estimate DESC) AS rn
+    FROM 
+        customer C
+    LEFT JOIN 
+        customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    LEFT JOIN 
+        store_returns SR ON C.c_customer_sk = SR.sr_customer_sk
+    LEFT JOIN 
+        reason R ON SR.sr_reason_sk = R.r_reason_sk
+    WHERE 
+        CD.cd_marital_status IS NOT NULL AND
+        (CD.cd_purchase_estimate > 100 OR CD.cd_gender = 'M')
+),
+MonthlySales AS (
+    SELECT 
+        D.d_year,
+        SUM(WS.ws_net_paid) AS total_sales,
+        COUNT(WS.ws_order_number) AS total_orders
+    FROM 
+        web_sales WS
+    JOIN 
+        date_dim D ON WS.ws_sold_date_sk = D.d_date_sk
+    GROUP BY 
+        D.d_year
+),
+HighValueCustomers AS (
+    SELECT 
+        RC.c_customer_id, 
+        RC.cd_gender, 
+        RC.cd_marital_status,
+        CASE 
+            WHEN RC.cd_purchase_estimate > 1000 THEN 'High'
+            WHEN RC.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS customer_value
+    FROM 
+        RankedCustomers RC
+    WHERE 
+        RC.rn = 1
+)
+SELECT 
+    HVC.customer_value,
+    HVC.cd_gender,
+    M.total_sales,
+    M.total_orders,
+    COUNT(HVC.c_customer_id) AS customer_count
+FROM 
+    HighValueCustomers HVC
+JOIN 
+    MonthlySales M ON DATE '2002-10-01' = M.d_year
+GROUP BY 
+    HVC.customer_value, HVC.cd_gender, M.total_sales, M.total_orders
+HAVING 
+    (HVC.customer_value = 'High' AND M.total_orders > 50)
+    OR
+    (HVC.customer_value = 'Medium' AND M.total_sales > 5000)
+ORDER BY 
+    HVC.customer_value DESC, 
+    M.total_sales DESC;

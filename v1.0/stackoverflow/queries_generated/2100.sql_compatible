@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.Score, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS rn,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.Score > 0 
+        AND p.CreationDate > DATEADD(year, -1, '2024-10-01')
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        p.Title, 
+        ph.CreationDate AS ClosedDate,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    LEFT JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, p.Title, ph.CreationDate
+)
+SELECT 
+    up.DisplayName AS UserName,
+    COUNT(DISTINCT rp.Id) AS PostCount, 
+    SUM(rp.Score) AS TotalScore, 
+    SUP.UpvoteCount,
+    SDOWN.DownvoteCount,
+    cp.Title AS ClosedPostTitle,
+    cp.ClosedDate,
+    cp.CloseReasons
+FROM 
+    RankedPosts rp 
+JOIN 
+    UserStats up ON rp.OwnerUserId = up.UserId
+LEFT JOIN 
+    (SELECT PostId, SUM(UpvoteCount) AS UpvoteCount FROM RankedPosts GROUP BY PostId) AS SUP ON rp.Id = SUP.PostId
+LEFT JOIN 
+    (SELECT PostId, SUM(DownvoteCount) AS DownvoteCount FROM RankedPosts GROUP BY PostId) AS SDOWN ON rp.Id = SDOWN.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId AND rp.Score < 0
+GROUP BY 
+    up.UserId, up.DisplayName, cp.Title, cp.ClosedDate, cp.CloseReasons
+ORDER BY 
+    TotalScore DESC, PostCount DESC;

@@ -1,0 +1,49 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(COALESCE(p.Score, 0)) AS AvgPostScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        BadgeCount,
+        TotalBounty,
+        AvgPostScore,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY BadgeCount DESC, TotalBounty DESC) AS UserRank
+    FROM UserStats
+)
+SELECT 
+    tu.DisplayName,
+    tu.BadgeCount,
+    tu.TotalBounty,
+    tu.AvgPostScore,
+    tu.PostCount,
+    COALESCE(ph.PostId, -1) AS LastPostId,
+    COALESCE(ph.CreationDate, '1970-01-01 00:00:00') AS LastPostDate,
+    COALESCE(p_score.MaxScore, 0) AS MaxScore,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM TopUsers tu
+LEFT JOIN Posts p ON tu.UserId = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+LEFT JOIN (
+    SELECT 
+        PostId, 
+        MAX(Score) AS MaxScore
+    FROM Posts
+    GROUP BY PostId
+) p_score ON p.Id = p_score.PostId
+LEFT JOIN Comments c ON p.Id = c.PostId
+WHERE tu.UserRank <= 10
+GROUP BY tu.DisplayName, tu.BadgeCount, tu.TotalBounty, tu.AvgPostScore, tu.PostCount, ph.PostId, ph.CreationDate, p_score.MaxScore
+ORDER BY tu.BadgeCount DESC, tu.TotalBounty DESC;

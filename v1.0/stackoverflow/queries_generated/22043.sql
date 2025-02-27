@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) OVER (PARTITION BY p.OwnerUserId) AS UserBadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE()) 
+        AND p.Score >= 0 
+        AND p.ViewCount > 0
+),
+TagStats AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON tag.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+    GROUP BY 
+        tag.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        DATEDIFF(DAY, ph.CreationDate, GETDATE()) AS DaysClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+),
+TopClosedReasons AS (
+    SELECT 
+        ph.Comment AS CloseReason,
+        COUNT(ph.PostId) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.Comment
+    ORDER BY 
+        CloseCount DESC
+    LIMIT 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.RankScore,
+    ts.PostCount AS TagCount,
+    ts.TotalViews AS CombinedTagViews,
+    cp.DaysClosed,
+    (SELECT 
+        string_agg(DISTINCT CloseReason ORDER BY CloseCount DESC)
+     FROM 
+        TopClosedReasons) AS FrequentCloseReasons,
+    rp.UserBadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.TagCount > 1
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = rp.PostId 
+WHERE 
+    rp.RankScore <= 5 
+    AND (rp.RankScore BETWEEN 1 AND 5 OR rp.CommentCount = 0)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

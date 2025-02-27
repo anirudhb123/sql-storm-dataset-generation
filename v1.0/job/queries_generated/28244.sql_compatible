@@ -1,0 +1,73 @@
+
+WITH ActorMovieCounts AS (
+    SELECT 
+        akn.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name akn
+    JOIN 
+        cast_info ci ON akn.person_id = ci.person_id
+    GROUP BY 
+        akn.name
+),
+TopActors AS (
+    SELECT 
+        actor_name 
+    FROM 
+        ActorMovieCounts
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.title ILIKE '%Adventure%'
+    GROUP BY 
+        t.title, t.production_year
+),
+ActorMovieKeyword AS (
+    SELECT 
+        akn.name AS actor_name,
+        t.title AS movie_title,
+        mk.keyword AS movie_keyword
+    FROM 
+        aka_name akn
+    JOIN 
+        cast_info ci ON akn.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        akn.name IN (SELECT actor_name FROM TopActors)
+)
+SELECT 
+    am.actor_name,
+    COUNT(DISTINCT amk.movie_title) AS total_movies,
+    STRING_AGG(DISTINCT amk.movie_keyword, ', ') AS all_keywords,
+    md.production_year,
+    md.keyword_count,
+    md.companies
+FROM 
+    ActorMovieKeyword amk
+JOIN 
+    MovieDetails md ON amk.movie_title = md.title
+JOIN 
+    TopActors am ON amk.actor_name = am.actor_name
+GROUP BY 
+    am.actor_name, md.production_year, md.keyword_count, md.companies
+ORDER BY 
+    total_movies DESC;

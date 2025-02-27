@@ -1,0 +1,62 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, h.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy h ON s.s_nationkey = h.s_nationkey
+    WHERE s.s_acctbal > 5000 AND h.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate <= '2022-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+RegionNation AS (
+    SELECT n.n_name AS nation_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT rN.nation_name, rN.region_name, 
+       COUNT(DISTINCT oSumm.o_orderkey) AS total_orders,
+       COALESCE(SUM(pSup.total_avail_qty), 0) AS total_avail_qty,
+       COALESCE(AVG(pSup.avg_supply_cost), 0) AS avg_supply_cost,
+       COUNT(DISTINCT tCust.c_custkey) AS total_customers,
+       SUBSTR(sHier.s_name, 1, 10) AS short_supplier_name
+FROM RegionNation rN
+LEFT JOIN OrderSummary oSumm ON rN.nation_name = (
+    SELECT n.n_name 
+    FROM nation n 
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_suppkey IN (
+        SELECT DISTINCT s.s_suppkey FROM SupplierHierarchy h
+    )
+)
+LEFT JOIN PartSupplier pSup ON rN.nation_name = (
+    SELECT n.n_name 
+    FROM nation n 
+    WHERE n.n_nationkey = (
+        SELECT DISTINCT s_nationkey
+        FROM supplier s WHERE s.s_suppkey = pSup.ps_partkey
+    )
+)
+LEFT JOIN TopCustomers tCust ON tCust.c_custkey = oSumm.o_orderkey
+LEFT JOIN SupplierHierarchy sHier ON sHier.s_nationkey = rN.nation_name
+GROUP BY rN.nation_name, rN.region_name, sHier.s_name
+ORDER BY total_orders DESC, total_customers DESC;

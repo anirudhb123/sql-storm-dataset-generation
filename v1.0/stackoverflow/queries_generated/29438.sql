@@ -1,0 +1,63 @@
+WITH PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        U.Reputation AS OwnerReputation,
+        ARRAY_AGG(t.TagName) AS TagsArray,
+        ST_Dev(p.Score) AS ScoreDeviation,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(substring(p.Tags, 2, length(p.Tags)-2)::varchar[])
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Users U ON U.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, U.Reputation
+),
+TagUsage AS (
+    SELECT 
+        unnest(TagsArray) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        PostTagStats
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName
+    FROM 
+        TagUsage
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    p.Title,
+    p.Body,
+    p.CreationDate,
+    p.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.ScoreDeviation,
+    t.TagName
+FROM 
+    PostTagStats ps
+JOIN 
+    TopTags t ON t.TagName = ANY(ps.TagsArray)
+ORDER BY 
+    ps.UpVotes DESC, ps.CommentCount DESC;

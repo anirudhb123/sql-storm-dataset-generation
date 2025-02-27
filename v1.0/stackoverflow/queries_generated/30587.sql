@@ -1,0 +1,55 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, OwnerUserId, ParentId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.OwnerUserId, p.ParentId, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT Id, Reputation,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+QuestionStats AS (
+    SELECT q.Id AS QuestionId, 
+           q.Title, 
+           COUNT(DISTINCT a.Id) AS AnswerCount, 
+           COUNT(DISTINCT c.Id) AS CommentCount, 
+           COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM Posts q
+    LEFT JOIN Posts a ON a.ParentId = q.Id
+    LEFT JOIN Comments c ON c.PostId = q.Id
+    LEFT JOIN Votes v ON v.PostId = q.Id AND v.VoteTypeId = 8
+    WHERE q.PostTypeId = 1
+    GROUP BY q.Id
+),
+ClosedQuestions AS (
+    SELECT DISTINCT p.Id, 
+           p.Title, 
+           ph.CreationDate AS CloseDate
+    FROM Posts p
+    INNER JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE p.PostTypeId = 1 AND
+          ph.PostHistoryTypeId = 10  -- Post Closed
+)
+SELECT u.DisplayName, 
+       u.Reputation, 
+       q.Title AS QuestionTitle, 
+       qs.AnswerCount, 
+       qs.CommentCount, 
+       qs.TotalBounty, 
+       CASE 
+           WHEN cq.CloseDate IS NOT NULL THEN 'Closed' 
+           ELSE 'Open' 
+       END AS QuestionStatus,
+       RANK() OVER (PARTITION BY CASE 
+                                      WHEN cq.CloseDate IS NOT NULL THEN 'Closed' 
+                                      ELSE 'Open' 
+                                  END ORDER BY u.Reputation DESC) AS RankInStatus
+FROM UserReputation u
+JOIN QuestionStats qs ON qs.QuestionId = u.Id
+LEFT JOIN ClosedQuestions cq ON cq.Id = qs.QuestionId
+WHERE u.Reputation > 100 -- Considering users with a reputation greater than 100
+ORDER BY QuestionStatus DESC, RankInStatus;

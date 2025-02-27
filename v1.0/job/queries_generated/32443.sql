@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        a.title, 
+        a.production_year,
+        a.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title a ON ml.linked_movie_id = a.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN CAST(mi.info AS INTEGER) ELSE 0 END) AS total_budget
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.kind_id
+),
+FilteredMovies AS (
+    SELECT 
+        ms.*,
+        RANK() OVER (PARTITION BY ms.production_year ORDER BY ms.cast_count DESC) AS rank_by_year
+    FROM 
+        MovieStats ms
+    WHERE 
+        ms.cast_count > 5 AND 
+        ms.total_budget > 1000000
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    STRING_AGG(DISTINCT fm.actor_names::text, ', ') AS actors,
+    fm.total_budget,
+    CASE 
+        WHEN fm.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%') THEN 'Feature Film'
+        WHEN fm.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'short%') THEN 'Short Film'
+        ELSE 'Other'
+    END AS film_category
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.rank_by_year <= 10
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.cast_count, fm.total_budget, fm.kind_id
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

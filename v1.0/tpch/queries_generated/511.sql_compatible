@@ -1,0 +1,66 @@
+
+WITH CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_by_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_spent,
+        cs.last_order_date
+    FROM CustomerOrderStats cs
+    JOIN customer c ON cs.c_custkey = c.c_custkey
+    WHERE cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats)
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+RelevantOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS effective_price,
+        o.o_orderdate,
+        l.l_returnflag
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, l.l_returnflag
+)
+SELECT 
+    hvc.c_custkey,
+    hvc.c_name,
+    hvc.total_spent,
+    sp.p_name,
+    sp.ps_supplycost,
+    ro.effective_price,
+    ro.l_returnflag,
+    CASE 
+        WHEN ro.effective_price IS NULL THEN 'No Orders'
+        ELSE 'Orders Present'
+    END AS order_status
+FROM HighValueCustomers hvc
+LEFT JOIN SupplierParts sp ON 1 = 1
+LEFT JOIN RelevantOrders ro ON ro.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = hvc.c_custkey
+)
+ORDER BY hvc.total_spent DESC, sp.ps_supplycost ASC;

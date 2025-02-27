@@ -1,0 +1,52 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ct.kind AS company_type,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword) AS total_keywords,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year, ct.kind
+),
+TopMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.company_type,
+        md.total_cast,
+        md.total_keywords
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.rn <= 10
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(t.company_type, 'Independent') AS company_type,
+    t.total_cast,
+    t.total_keywords,
+    CASE 
+        WHEN t.total_cast > 20 THEN 'Large Ensemble'
+        WHEN t.total_cast BETWEEN 10 AND 20 THEN 'Moderate Ensemble'
+        ELSE 'Small Ensemble' 
+    END AS cast_size_category
+FROM 
+    TopMovies t
+ORDER BY 
+    t.production_year DESC, 
+    t.title ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

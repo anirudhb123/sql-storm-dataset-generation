@@ -1,0 +1,31 @@
+WITH RECURSIVE supplier_hierarchy (s_suppkey, s_name, level) AS (
+    SELECT s.s_suppkey, s.s_name, 1
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = sh.s_suppkey LIMIT 1)
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(CASE 
+        WHEN l.l_discount BETWEEN 0.05 AND 0.1 THEN l.l_extendedprice * (1 - l.l_discount) 
+        ELSE 0 
+    END) AS discounted_sales,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE NULL END) AS max_returned_price,
+    COUNT(DISTINCT CASE WHEN sh.level IS NOT NULL THEN sh.s_suppkey END) AS supplier_count,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS product_names
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+LEFT JOIN supplier_hierarchy sh ON sh.s_suppkey = l.l_suppkey
+WHERE o.o_orderdate BETWEEN DATEADD(month, -6, cast('1998-10-01' as date)) AND cast('1998-10-01' as date)
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10 AND SUM(l.l_tax) IS NULL
+ORDER BY nation_name, region_name DESC;

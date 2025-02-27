@@ -1,0 +1,58 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        ib.ib_income_band_sk, 
+        cd.cd_demo_sk
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    JOIN 
+        income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+), 
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_income_band_sk,
+        cs.total_sales,
+        cs.order_count
+    FROM 
+        CustomerSales cs
+    JOIN 
+        CustomerDemographics cd ON cd.cd_demo_sk = cs.c_customer_id
+)
+SELECT 
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.ib_income_band_sk,
+    COUNT(ss.c_customer_id) AS customer_count,
+    AVG(ss.total_sales) AS avg_sales,
+    SUM(ss.order_count) AS total_orders
+FROM 
+    SalesSummary ss
+GROUP BY 
+    ss.cd_gender, 
+    ss.cd_marital_status, 
+    ss.ib_income_band_sk
+ORDER BY 
+    customer_count DESC
+LIMIT 10;

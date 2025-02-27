@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+MaxSales AS (
+    SELECT 
+        ws_item_sk,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        SalesData
+    WHERE 
+        rn = 1
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single'
+        END AS marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_cdemo_sk = hd.hd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS total_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerData cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        cd.c_customer_sk, cd.c_first_name, cd.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.marital_status,
+    tc.cd_purchase_estimate,
+    ms.total_quantity,
+    ms.total_sales
+FROM 
+    TopCustomers tc
+JOIN 
+    (SELECT ms.ws_item_sk, sd.total_quantity, sd.total_sales 
+     FROM MaxSales ms 
+     JOIN SalesData sd ON ms.ws_item_sk = sd.ws_item_sk 
+     WHERE ms.rank <= 10) ms ON tc.c_customer_sk = ms.ws_item_sk
+WHERE 
+    tc.cd_purchase_estimate IS NOT NULL
+ORDER BY 
+    tc.total_rank, total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

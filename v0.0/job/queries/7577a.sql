@@ -1,0 +1,4 @@
+SELECT min(t.title) AS complete_downey_ironman_movie
+FROM complete_cast AS cc, comp_cast_type AS cct1, comp_cast_type AS cct2, char_name AS chn, cast_info AS ci, keyword AS k, kind_type AS kt, movie_keyword AS mk, name AS n, title AS t
+WHERE kt.id = t.kind_id AND t.id = mk.movie_id AND t.id = ci.movie_id AND t.id = cc.movie_id AND mk.movie_id = ci.movie_id AND mk.movie_id = cc.movie_id AND ci.movie_id = cc.movie_id AND chn.id = ci.person_role_id AND n.id = ci.person_id AND k.id = mk.keyword_id AND cct1.id = cc.subject_id AND cct2.id = cc.status_id
+AND n.md5sum > '9c45cb5a0327b6687bd05ddf93985af7' AND n.surname_pcode > 'I262' AND k.phonetic_code IN ('F6342', 'G236', 'G642', 'H146', 'H342', 'K4342', 'K6453', 'P456', 'Q5323', 'R5361') AND cc.movie_id > 1287332;

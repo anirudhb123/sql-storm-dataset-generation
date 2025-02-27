@@ -1,0 +1,60 @@
+WITH RecursiveCte AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        m.id AS movie_id,
+        m.title AS movie_title,
+        c.person_id,
+        c.nr_order,
+        p.gender,
+        p.name AS actor_name,
+        k.keyword AS movie_keyword,
+        ti.info AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title m ON c.movie_id = m.id
+    JOIN 
+        name p ON a.person_id = p.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type ti ON mi.info_type_id = ti.id
+    WHERE 
+        a.name IS NOT NULL
+),
+AggregatedData AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        COUNT(DISTINCT aka_id) AS actors_count,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors_list,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords_list,
+        STRING_AGG(DISTINCT movie_info, ', ') AS info_list
+    FROM 
+        RecursiveCte
+    WHERE 
+        actor_order <= 5  
+    GROUP BY 
+        movie_id, movie_title
+)
+SELECT 
+    title.movie_title,
+    ad.actors_count,
+    ad.actors_list,
+    ad.keywords_list,
+    ad.info_list
+FROM 
+    AggregatedData ad
+JOIN 
+    title title ON ad.movie_id = title.id
+ORDER BY 
+    ad.actors_count DESC, 
+    title.movie_title;

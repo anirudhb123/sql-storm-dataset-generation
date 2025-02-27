@@ -1,0 +1,52 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><')::text[])
+    WHERE Posts.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY Tags.TagName
+),
+UserStats AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        SUM(COALESCE(CASE WHEN Votes.UserId = Users.Id THEN 1 ELSE 0 END, 0)) AS TotalVotes,
+        SUM(COALESCE(Posts.UpVotes, 0)) AS UpVoteCount
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    GROUP BY Users.DisplayName
+),
+ClosingStats AS (
+    SELECT 
+        PH.UserDisplayName,
+        COUNT(*) AS CloseCount,
+        COUNT(DISTINCT PH.PostId) AS ClosedPosts
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY PH.UserDisplayName
+),
+CombinedStats AS (
+    SELECT 
+        T.TagName,
+        U.DisplayName AS UserDisplayName,
+        COALESCE(T.PostCount, 0) AS TotalPostsWithTags,
+        COALESCE(U.PostsCreated, 0) AS TotalPostsCreated,
+        COALESCE(C.CloseCount, 0) AS TotalClosures
+    FROM TagStats T
+    FULL OUTER JOIN UserStats U ON U.UpVoteCount > 0
+    FULL OUTER JOIN ClosingStats C ON C.UserDisplayName = U.DisplayName
+)
+
+SELECT 
+    TagName,
+    UserDisplayName,
+    TotalPostsWithTags,
+    TotalPostsCreated,
+    TotalClosures
+FROM CombinedStats
+ORDER BY TotalPostsWithTags DESC, TotalPostsCreated DESC;

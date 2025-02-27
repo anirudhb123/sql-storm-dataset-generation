@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank,
+        COUNT(tc.id) AS total_cast
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopRankedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank,
+        COALESCE(mi.info, 'No info available') AS movie_info,
+        ROW_NUMBER() OVER (ORDER BY rm.total_cast DESC) AS total_cast_rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = 1
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    trm.title,
+    trm.production_year,
+    trm.movie_info,
+    COALESCE(ARRAY_AGG(DISTINCT an.name) FILTER (WHERE an.name IS NOT NULL), ARRAY['No cast available']) AS cast_names
+FROM 
+    TopRankedMovies trm
+LEFT JOIN 
+    complete_cast cc ON trm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+GROUP BY 
+    trm.title, trm.production_year, trm.movie_info, trm.total_cast_rank
+ORDER BY 
+    trm.total_cast_rank;

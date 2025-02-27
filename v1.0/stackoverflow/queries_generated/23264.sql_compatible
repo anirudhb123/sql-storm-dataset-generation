@@ -1,0 +1,100 @@
+
+WITH UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(COALESCE(p.Score, 0)) AS AveragePostScore,
+        RANK() OVER (PARTITION BY u.Id ORDER BY COUNT(v.Id) DESC) AS VoteRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE((SELECT MAX(Score) FROM Posts WHERE ParentId = p.Id), 0) AS MaxChildScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+TopPostAuthors AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.OwnerUserId
+),
+FinalBenchmark AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        ups.UpVotes,
+        ups.DownVotes,
+        ps.PostId,
+        ps.Title,
+        ps.Score AS PostScore,
+        ps.MaxChildScore,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ta.PostCount,
+        ta.TotalScore,
+        CASE 
+            WHEN ups.UpVotes > ups.DownVotes THEN 'Positive Contributor'
+            WHEN ups.UpVotes < ups.DownVotes THEN 'Negative Contributor'
+            ELSE 'Neutral Contributor'
+        END AS ContributorType
+    FROM 
+        UserVoteStatistics ups
+    INNER JOIN 
+        PostStatistics ps ON ps.PostId = (
+            SELECT p.Id 
+            FROM Posts p 
+            WHERE p.OwnerUserId = ups.UserId 
+            ORDER BY p.Score DESC 
+            LIMIT 1
+        )
+    INNER JOIN 
+        TopPostAuthors ta ON ta.OwnerUserId = ups.UserId
+    WHERE 
+        ups.VoteRank = 1
+)
+SELECT 
+    UserName,
+    UpVotes,
+    DownVotes,
+    PostId,
+    Title,
+    PostScore,
+    MaxChildScore,
+    CommentCount,
+    TotalBounty,
+    PostCount,
+    TotalScore,
+    ContributorType
+FROM 
+    FinalBenchmark
+ORDER BY 
+    TotalScore DESC, UpVotes DESC;

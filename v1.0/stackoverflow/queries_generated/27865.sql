@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(a.Id) DESC) AS Rank
+    FROM
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Posts a ON a.ParentId = p.Id AND p.PostTypeId = 1 -- Answers related to Questions
+        LEFT JOIN Comments c ON c.PostId = p.Id
+        LEFT JOIN Votes v ON v.PostId = p.Id
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+        AND p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY
+        p.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Author,
+        Tags,
+        AnswerCount,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        Rank
+    FROM
+        RankedPosts
+    WHERE
+        Rank <= 10
+)
+
+SELECT
+    *,
+    CASE
+        WHEN AnswerCount > 0 THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS QuestionStatus,
+    (UpVoteCount - DownVoteCount) AS NetVotes
+FROM
+    TopQuestions
+ORDER BY
+    UpVoteCount DESC;

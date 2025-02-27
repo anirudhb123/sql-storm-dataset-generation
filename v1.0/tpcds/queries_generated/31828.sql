@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesPattern AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk, ws_sold_date_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sp.ws_bill_customer_sk,
+        ws.ws_sold_date_sk,
+        sp.total_profit + SUM(ws.ws_net_profit) AS total_profit,
+        sp.level + 1
+    FROM 
+        SalesPattern sp
+    JOIN 
+        web_sales ws ON sp.ws_bill_customer_sk = ws.ws_bill_customer_sk 
+    WHERE 
+        ws.ws_sold_date_sk > sp.ws_sold_date_sk
+    GROUP BY 
+        sp.ws_bill_customer_sk, ws.ws_sold_date_sk, sp.total_profit, sp.level
+),
+FilteredSales AS (
+    SELECT 
+        p.c_customer_id,
+        s.ws_sold_date_sk,
+        SUM(s.ws_net_profit) AS total_net_profit,
+        COUNT(s.ws_order_number) AS purchase_count
+    FROM 
+        SalesPattern sp
+    JOIN 
+        customer p ON sp.ws_bill_customer_sk = p.c_customer_sk 
+    JOIN 
+        web_sales s ON s.ws_bill_customer_sk = p.c_customer_sk 
+    GROUP BY 
+        p.c_customer_id, s.ws_sold_date_sk
+    HAVING 
+        total_net_profit > (
+            SELECT 
+                AVG(total_profit)
+            FROM 
+                SalesPattern
+        )
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        total_net_profit,
+        ROW_NUMBER() OVER (ORDER BY total_net_profit DESC) AS rn
+    FROM 
+        FilteredSales
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    t.total_net_profit
+FROM 
+    TopCustomers t
+JOIN 
+    customer c ON t.customer_id = c.c_customer_id
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    t.rn <= 10
+ORDER BY 
+    t.total_net_profit DESC;

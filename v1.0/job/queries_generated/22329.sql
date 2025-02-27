@@ -1,0 +1,55 @@
+WITH Recursive MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(t.production_year, 0) AS production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY t.production_year DESC) AS role_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        title t ON ca.movie_id = t.id
+    JOIN 
+        role_type r ON ca.role_id = r.id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(MAX(a.actor_name) FILTER (WHERE a.role_rank = 1), 'Unknown Actor') AS most_recent_actor,
+    COUNT(DISTINCT a.person_id) AS total_actors,
+    SUM(CASE WHEN a.role_name LIKE '%Lead%' THEN 1 ELSE 0 END) AS lead_roles_count,
+    STRING_AGG(DISTINCT a.actor_name, ', ') AS all_actors,
+    ARRAY_AGG(DISTINCT CASE WHEN a.role_name IS NULL THEN 'No Role' ELSE a.role_name END) AS actor_roles,
+    COALESCE((SELECT MAX(mii.info) 
+              FROM movie_info mii 
+              WHERE mii.movie_id = m.movie_id 
+              AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')), 
+             'Budget data unavailable') AS budget_info
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    ActorRoles a ON m.movie_id = a.movie_title
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    m.production_year > 2000 
+    OR MAX(a.role_name) IS NULL
+ORDER BY 
+    m.production_year DESC, 
+    m.title ASC;

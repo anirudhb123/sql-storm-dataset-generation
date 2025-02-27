@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        COUNT(mc.company_id) AS total_companies,
+        COUNT(DISTINCT ct.kind) AS distinct_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name
+),
+
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    cs.total_companies,
+    cs.distinct_types,
+    ks.keywords,
+    CASE 
+        WHEN rm.cast_count > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    CASE 
+        WHEN cs.total_companies IS NULL THEN 'No Companies'
+        ELSE cs.company_name
+    END AS company_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyStats cs ON rm.movie_id = cs.movie_id
+LEFT JOIN 
+    KeywordStats ks ON rm.movie_id = ks.movie_id
+WHERE 
+    (rm.title_rank <= 5 OR cs.total_companies > 2)
+AND 
+    (rm.production_year BETWEEN 2000 AND 2023)
+AND 
+    (ks.keywords IS NOT NULL OR rm.title LIKE '%Action%')
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

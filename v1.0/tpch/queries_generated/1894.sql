@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    o.o_orderkey,
+    c.c_name,
+    p.p_name,
+    l.l_quantity,
+    ROUND((l.l_extendedprice * (1 - l.l_discount)), 2) AS discounted_price,
+    r.r_name AS region,
+    s.s_name AS supplier_name
+FROM 
+    orders o
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    FilteredParts p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers s ON c.c_nationkey = s.s_nationkey AND s.rank <= 3
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= '2023-01-01' AND 
+    l.l_shipdate < '2023-12-31' AND 
+    (s.s_acctbal IS NULL OR s.s_acctbal > 50000)
+ORDER BY 
+    region, discounted_price DESC;

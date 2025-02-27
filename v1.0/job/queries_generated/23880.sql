@@ -1,0 +1,79 @@
+WITH Recursive ActorsWithCast AS (
+    SELECT
+        ka.person_id,
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+RankedActors AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        ActorsWithCast
+),
+FilteredActors AS (
+    SELECT 
+        ra.actor_name,
+        ra.movie_count
+    FROM 
+        RankedActors ra
+    WHERE 
+        ra.rank <= 10 
+),
+MoviesWithDetails AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies_involved,
+        COUNT(DISTINCT mw.id) AS total_keywords
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = at.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = at.id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mw ON mw.movie_id = at.id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+ActorMoviePair AS (
+    SELECT 
+        fa.actor_name,
+        mwd.title,
+        mwd.production_year,
+        mwd.companies_involved
+    FROM 
+        FilteredActors fa
+    CROSS JOIN 
+        MoviesWithDetails mwd
+)
+SELECT 
+    amp.actor_name,
+    amp.title,
+    amp.production_year,
+    COALESCE(amp.companies_involved, 'No Companies') AS companies_involved,
+    NULLIF(amp.production_year % 2, 0) AS is_even_year,
+    CASE 
+        WHEN amp.production_year IS NULL THEN 'Unknown Year' 
+        ELSE 'Known Year' 
+    END AS year_status,
+    COUNT(*) OVER (PARTITION BY amp.actor_name) AS total_movies_for_actor,
+    RANK() OVER (PARTITION BY amp.actor_name ORDER BY amp.production_year DESC) AS yearly_rank
+FROM 
+    ActorMoviePair amp
+WHERE 
+    amp.companies_involved IS NOT NULL 
+    OR amp.production_year IS NOT NULL 
+ORDER BY 
+    amp.actor_name, amp.production_year DESC;

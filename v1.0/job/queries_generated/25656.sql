@@ -1,0 +1,51 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        c.kind AS company_type,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT p.info) AS person_info
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id
+    GROUP BY 
+        t.id, c.kind
+),
+yearly_benchmark AS (
+    SELECT 
+        production_year,
+        COUNT(title_id) AS total_movies,
+        COUNT(DISTINCT aka_names) AS unique_aka_names,
+        COUNT(DISTINCT keywords) AS unique_keywords,
+        COUNT(DISTINCT person_info) AS unique_person_info
+    FROM 
+        movie_data
+    GROUP BY 
+        production_year
+)
+SELECT 
+    production_year,
+    total_movies,
+    unique_aka_names,
+    unique_keywords,
+    unique_person_info,
+    RANK() OVER (ORDER BY total_movies DESC) AS movie_rank
+FROM 
+    yearly_benchmark
+ORDER BY 
+    production_year DESC;

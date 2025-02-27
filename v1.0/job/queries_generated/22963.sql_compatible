@@ -1,0 +1,69 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL AND mt.title IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1 AS depth
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 3  
+)
+
+SELECT 
+    kh.keyword,
+    COUNT(DISTINCT ca.id) AS actor_count,
+    AVG(mv.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT mt.title, '; ') AS linked_movies,
+    COALESCE(MAX(pc.country_code), 'Unknown') AS country_code,
+    SUM(CASE 
+        WHEN ca.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS notes_present,
+    COUNT(DISTINCT mh.movie_id) AS total_linked_movies
+FROM 
+    keyword kh
+LEFT JOIN 
+    movie_keyword mk ON kh.id = mk.keyword_id
+LEFT JOIN 
+    aka_title mt ON mk.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name pc ON mc.company_id = pc.id 
+LEFT JOIN 
+    cast_info ca ON mt.id = ca.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year >= 2000  
+    AND kh.keyword IS NOT NULL 
+GROUP BY 
+    kh.keyword
+HAVING 
+    COUNT(DISTINCT ca.id) > 1  
+ORDER BY 
+    actor_count DESC NULLS LAST, 
+    avg_production_year ASC
+LIMIT 50;

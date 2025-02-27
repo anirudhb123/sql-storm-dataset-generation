@@ -1,0 +1,55 @@
+
+WITH CustomerNames AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        ca_city,
+        ca_state,
+        cd_gender,
+        cd_marital_status
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand
+    FROM 
+        item i
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        cd.cd_gender
+    FROM 
+        web_sales ws
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    cn.full_name,
+    cn.ca_city,
+    cn.ca_state,
+    id.i_item_desc,
+    id.i_current_price,
+    SUM(sd.ws_quantity) AS total_quantity,
+    SUM(sd.ws_net_paid) AS total_net_paid
+FROM 
+    CustomerNames cn
+JOIN 
+    SalesData sd ON cn.cd_gender = sd.cd_gender
+JOIN 
+    ItemDetails id ON sd.ws_item_sk = id.i_item_sk
+GROUP BY 
+    cn.full_name, cn.ca_city, cn.ca_state, id.i_item_desc, id.i_current_price
+HAVING 
+    SUM(sd.ws_quantity) > 10
+ORDER BY 
+    total_net_paid DESC
+LIMIT 100;

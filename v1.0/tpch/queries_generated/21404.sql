@@ -1,0 +1,49 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, r.depth + 1
+    FROM partsupp ps
+    JOIN RecursiveSupplier r ON ps.ps_suppkey = r.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    AND r.depth < 5
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+           COUNT(l.l_orderkey) AS total_orders
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+)
+SELECT 
+       r.r_name AS region_name,
+       n.n_name AS nation_name,
+       ps.s_suppkey,
+       ps.l_shipmode,
+       pd.p_name,
+       pd.total_orders,
+       pd.total_returned,
+       c.c_name,
+       c.c_acctbal,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN PartDetails pd ON ps.ps_partkey = pd.p_partkey
+LEFT JOIN orders o ON o.o_custkey IN (SELECT c.c_custkey FROM FilteredCustomers c WHERE c.cust_rank <= 5)
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+WHERE pd.total_orders > 1000
+AND (s.s_acctbal < 10000 OR (pd.total_returned > 0 AND ps.ps_availqty > 10))
+GROUP BY r.r_name, n.n_name, ps.s_suppkey, ps.l_shipmode, pd.p_name, c.c_name, c.c_acctbal
+HAVING COUNT(DISTINCT o.o_orderkey) > 20
+ORDER BY total_revenue DESC, pd.p_retailprice DESC NULLS LAST;

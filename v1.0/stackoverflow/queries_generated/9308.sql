@@ -1,0 +1,61 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS tag_id ON tag_id IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.Id = tag_id::int
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC) AS Rank
+    FROM 
+        PostStatistics ps
+)
+SELECT 
+    rp.PostId,
+    rp.PostTitle,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.BadgeCount,
+    rp.Rank,
+    rp.OwnerDisplayName,
+    rp.Tags
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Rank;

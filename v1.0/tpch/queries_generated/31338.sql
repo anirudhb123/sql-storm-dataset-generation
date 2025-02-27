@@ -1,0 +1,40 @@
+WITH RECURSIVE RegionSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000.00
+),
+AverageSales AS (
+    SELECT AVG(total_sales) AS avg_sales FROM RegionSales
+),
+TopRegion AS (
+    SELECT n.n_name, r.total_sales
+    FROM RegionSales r
+    JOIN nation n ON r.n_nationkey = n.n_nationkey
+    WHERE r.total_sales > (SELECT avg_sales FROM AverageSales)
+    ORDER BY r.total_sales DESC
+    LIMIT 5
+)
+SELECT 
+    t.n_name,
+    COALESCE(t.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN t.total_sales > (SELECT avg_sales FROM AverageSales) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS sales_category,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    TopRegion t
+LEFT JOIN 
+    customer c ON c.c_nationkey = t.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+GROUP BY 
+    t.n_name, t.total_sales
+ORDER BY 
+    total_sales DESC;

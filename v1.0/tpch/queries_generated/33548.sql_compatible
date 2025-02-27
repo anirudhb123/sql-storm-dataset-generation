@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'United States')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+ProductInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_part_count,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(oi.total_line_revenue) AS total_revenue,
+    COUNT(DISTINCT oi.o_orderkey) AS order_count,
+    AVG(pi.total_available) AS avg_available_per_product,
+    SUM(sh.level) AS total_supplier_levels,
+    COUNT(DISTINCT ci.c_custkey) AS unique_customers
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer ci ON ci.c_nationkey = n.n_nationkey
+LEFT JOIN OrderDetails oi ON oi.o_totalprice > 0
+LEFT JOIN ProductInfo pi ON pi.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = oi.o_orderkey)
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE r.r_name IS NOT NULL AND n.n_name IS NOT NULL
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

@@ -1,0 +1,59 @@
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_brand, i_current_price, 0 AS level
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date > cast('2002-10-01' as date))
+
+    UNION ALL
+
+    SELECT i_item_sk, i_item_desc, i_brand, i_current_price * 0.9 AS i_current_price, level + 1
+    FROM ItemHierarchy
+    JOIN item i ON i.i_item_sk = ItemHierarchy.i_item_sk
+    WHERE level < 3
+),
+SalesData AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_date BETWEEN '2001-01-01' AND '2001-12-31'
+    )
+    GROUP BY w.w_warehouse_name
+),
+CustomerAddress AS (
+    SELECT ca.ca_city, COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    WHERE ca.ca_state = 'CA'
+    GROUP BY ca.ca_city
+),
+AggregateSales AS (
+    SELECT
+        sds.warehouse_name,
+        sds.total_quantity,
+        sds.total_sales,
+        CASE
+            WHEN sds.total_sales > 10000 THEN 'High Revenue'
+            WHEN sds.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+            ELSE 'Low Revenue'
+        END AS revenue_category
+    FROM SalesData sds
+)
+
+SELECT
+    a.ca_city,
+    a.customer_count,
+    asls.warehouse_name,
+    asls.total_quantity,
+    asls.total_sales,
+    asls.revenue_category,
+    h.i_item_desc,
+    MAX(h.i_current_price) OVER (PARTITION BY a.ca_city) AS max_item_price
+FROM CustomerAddress a
+JOIN AggregateSales asls ON a.customer_count > 10
+LEFT JOIN ItemHierarchy h ON h.i_item_sk IN (SELECT i_item_sk FROM item WHERE i_brand = 'BrandX')
+ORDER BY a.ca_city, asls.total_sales DESC;

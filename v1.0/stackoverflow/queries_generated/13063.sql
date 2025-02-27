@@ -1,0 +1,63 @@
+-- Performance Benchmarking SQL Query
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(DISTINCT A.Id) AS AnswerCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId
+), 
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(PS.CommentCount) AS TotalComments,
+        COUNT(PS.PostId) AS TotalPosts,
+        SUM(PS.AnswerCount) AS TotalAnswers,
+        SUM(PS.TotalUpVotes) AS UpVotes,
+        SUM(PS.TotalDownVotes) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStatistics PS ON U.Id = PS.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    UP.TotalPosts,
+    UP.TotalAnswers,
+    UP.TotalComments,
+    UP.UpVotes,
+    UP.DownVotes,
+    (UP.UpVotes - UP.DownVotes) AS NetVotes
+FROM 
+    UserPostStats UP
+JOIN 
+    UserVoteCounts UVC ON UP.UserId = UVC.UserId
+ORDER BY 
+    NetVotes DESC;

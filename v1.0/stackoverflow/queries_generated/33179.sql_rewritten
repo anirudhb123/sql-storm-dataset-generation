@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        child.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy child ON p.ParentId = child.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+UserReputationTrend AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.DisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS Rank
+    FROM 
+        Users u
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation,
+    pp.Title AS PopularPostTitle,
+    pp.UpVotes,
+    pp.DownVotes,
+    ph.Level AS PostLevel
+FROM 
+    UserReputationTrend u
+INNER JOIN 
+    PostVoteSummary pp ON pp.TotalVotes > 5  
+INNER JOIN 
+    RecursivePostHierarchy ph ON pp.PostId = ph.PostId
+WHERE 
+    u.Reputation > 1000  
+ORDER BY 
+    pp.UpVotes DESC,  
+    u.Reputation DESC;

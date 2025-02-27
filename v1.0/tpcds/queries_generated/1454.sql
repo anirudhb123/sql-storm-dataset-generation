@@ -1,0 +1,59 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS ranking
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.sales_rank <= 5
+),
+RecentReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        COUNT(sr.sr_ticket_number) AS returns_count,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_returned_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)
+    GROUP BY 
+        sr.sr_customer_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.total_orders,
+    COALESCE(rr.returns_count, 0) AS returns_count,
+    COALESCE(rr.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN rr.total_return_amount IS NULL THEN 'No Returns'
+        WHEN rr.total_return_amount > 0 THEN 'Returned Items'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RecentReturns rr ON tc.c_customer_id = rr.sr_customer_sk
+ORDER BY 
+    tc.ranking;

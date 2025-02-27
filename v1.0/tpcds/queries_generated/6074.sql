@@ -1,0 +1,45 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        i.i_item_id,
+        SUM(ws.ws_quantity) as total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, i.i_item_id
+),
+TopSellingItems AS (
+    SELECT 
+        web_site_id,
+        i_item_id,
+        total_quantity,
+        total_sales,
+        total_discount,
+        total_profit,
+        RANK() OVER (PARTITION BY web_site_id ORDER BY total_sales DESC) as sales_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    tsi.web_site_id,
+    tsi.i_item_id,
+    tsi.total_quantity,
+    tsi.total_sales,
+    tsi.total_discount,
+    tsi.total_profit
+FROM 
+    TopSellingItems tsi
+WHERE 
+    tsi.sales_rank <= 5
+ORDER BY 
+    tsi.web_site_id, tsi.total_sales DESC;

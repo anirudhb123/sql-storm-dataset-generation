@@ -1,0 +1,58 @@
+
+WITH supplier_totals AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_analysis AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_within_customer
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+high_value_orders AS (
+    SELECT 
+        oa.o_orderkey, 
+        oa.o_custkey,
+        oa.total_price,
+        oa.line_item_count,
+        RANK() OVER (ORDER BY oa.total_price DESC) AS order_rank
+    FROM order_analysis oa
+    WHERE oa.total_price > (SELECT AVG(total_price) FROM order_analysis)
+),
+supplier_region AS (
+    SELECT 
+        s.s_suppkey, 
+        n.n_name AS supplier_nation,
+        r.r_name AS supplier_region
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sr.supplier_nation, 
+    sr.supplier_region,
+    SUM(st.total_supply_value) AS total_value,
+    COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count
+FROM supplier_region sr
+LEFT JOIN supplier_totals st ON sr.s_suppkey = st.s_suppkey
+LEFT JOIN high_value_orders hvo ON st.s_suppkey = 
+    (SELECT ps.ps_suppkey 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey IN 
+        (SELECT p.p_partkey 
+         FROM part p 
+         WHERE p.p_size IN (1, 2, 3)))
+GROUP BY sr.supplier_nation, sr.supplier_region
+HAVING SUM(st.total_supply_value) IS NOT NULL
+ORDER BY total_value DESC;

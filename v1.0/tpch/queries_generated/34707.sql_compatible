@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplyStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FinalReport AS (
+    SELECT c.c_name AS customer_name, co.order_count, co.avg_order_value,
+           p.p_name AS part_name, ps.supplier_count, ps.total_available
+    FROM CustomerOrderStats co
+    CROSS JOIN PartSupplyStats ps
+    JOIN nation n ON co.c_nationkey = n.n_nationkey
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE n.n_name ILIKE '%east%'
+    AND (ps.total_available IS NOT NULL OR ps.supplier_count > 0)
+)
+SELECT f.customer_name, f.order_count, f.avg_order_value, 
+       f.part_name, f.supplier_count, f.total_available,
+       ROW_NUMBER() OVER (PARTITION BY f.customer_name ORDER BY f.order_count DESC) AS rank
+FROM FinalReport f
+WHERE f.order_count > 10
+ORDER BY f.customer_name, rank;

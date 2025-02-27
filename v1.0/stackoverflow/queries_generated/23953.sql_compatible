@@ -1,0 +1,95 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        DATEDIFF(DAY, U.CreationDate, CURRENT_DATE) AS AccountAgeDays
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.CreationDate
+), UserRankings AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        TotalScore,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalVotes,
+        AccountAgeDays,
+        RANK() OVER (ORDER BY TotalScore DESC, TotalViews DESC) AS ScoreRank
+    FROM 
+        UserEngagement
+), HighEngagementUsers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN TotalScore > 1000 AND TotalPosts > 50 THEN 'Expert'
+            WHEN TotalScore BETWEEN 500 AND 1000 THEN 'Intermediate'
+            ELSE 'Novice'
+        END AS UserCategory
+    FROM 
+        UserRankings
+    WHERE 
+        TotalPosts > 0
+), BannedUsers AS (
+    SELECT 
+        U.Id AS BannedUserId,
+        U.DisplayName AS BannedDisplayName,
+        PH.Comment AS BanReason
+    FROM 
+        Users U
+    JOIN 
+        PostHistory PH ON U.Id = PH.UserId
+    WHERE 
+        PH.PostHistoryTypeId = 12 
+), FinalReport AS (
+    SELECT 
+        H.UserId,
+        H.DisplayName,
+        H.TotalViews,
+        H.TotalScore,
+        H.TotalPosts,
+        H.TotalComments,
+        H.TotalBadges,
+        H.TotalVotes,
+        H.AccountAgeDays,
+        H.ScoreRank,
+        H.UserCategory,
+        COALESCE(B.BannedDisplayName, 'Not Banned') AS BannedStatus,
+        COALESCE(B.BanReason, 'N/A') AS BanReason
+    FROM 
+        HighEngagementUsers H
+    LEFT JOIN 
+        BannedUsers B ON H.DisplayName = B.BannedDisplayName
+)
+SELECT 
+    *,
+    CASE 
+        WHEN AccountAgeDays > 365 THEN 'Veteran'
+        ELSE 'Newbie'
+    END AS VeteranStatus,
+    CASE 
+        WHEN TotalScore = (SELECT MAX(TotalScore) FROM UserRankings) THEN 'Top Scorer'
+        ELSE 'Standard'
+    END AS SpecialRecognition
+FROM 
+    FinalReport
+ORDER BY 
+    ScoreRank;

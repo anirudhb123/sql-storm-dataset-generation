@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CategoryHierarchy AS (
+    SELECT i_category_id, i_category, i_class_id, i_class 
+    FROM item
+    WHERE i_class_id IS NOT NULL
+    
+    UNION ALL
+
+    SELECT i.category_id, i.category, c.i_class_id, c.i_class
+    FROM item AS i
+    JOIN CategoryHierarchy AS c ON i.class_id = c.i_class_id
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_net_profit) AS total_profit 
+    FROM customer AS c
+    LEFT JOIN store_sales AS cs ON c.c_customer_sk = cs.ss_customer_sk 
+    GROUP BY c.c_customer_sk
+),
+DemographicAnalysis AS (
+    SELECT
+        cd.cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM customer_demographics as cd
+    JOIN customer as c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk
+),
+Quantiles AS (
+    SELECT 
+        total_profit,
+        NTILE(4) OVER (ORDER BY total_profit DESC) AS profit_quartile
+    FROM CustomerStats
+),
+FinalAnalysis AS (
+    SELECT
+        ds.customer_count,
+        ds.avg_purchase_estimate,
+        q.total_profit,
+        CASE 
+            WHEN q.total_profit IS NULL THEN 'No Profit'
+            ELSE 'Profit in Quartile ' || q.profit_quartile
+        END AS profit_status
+    FROM DemographicAnalysis AS ds
+    LEFT JOIN Quantiles AS q ON ds.customer_count = q.customer_count
+)
+SELECT 
+    ch.i_category,
+    ch.i_class,
+    fa.customer_count,
+    fa.avg_purchase_estimate,
+    fa.total_profit,
+    fa.profit_status
+FROM CategoryHierarchy AS ch
+JOIN FinalAnalysis AS fa ON ch.i_category_id = fa.customer_count
+WHERE fa.avg_purchase_estimate > 500 AND fa.total_profit IS NOT NULL
+ORDER BY fa.total_profit DESC
+LIMIT 100;

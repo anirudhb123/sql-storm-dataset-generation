@@ -1,0 +1,59 @@
+WITH CTE_Supplier_Summary AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    GROUP BY s.s_nationkey
+),
+CTE_Part_Avg_Cost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CTE_Customers_Orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+CTE_Lineitem_Summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS total_items
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    p.p_name,
+    IFNULL(avg_cost.avg_supplycost, 0) AS avg_supply_cost,
+    cust.z_total_orders,
+    cust.total_spent,
+    lineitem_summary.total_revenue,
+    (SELECT 
+        MAX(total_acctbal) 
+     FROM CTE_Supplier_Summary s 
+     WHERE s.s_nationkey = n.n_nationkey) AS max_supplier_acctbal
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN part p ON p.p_partkey IN (1, 2, 3, 4)
+LEFT JOIN CTE_Part_Avg_Cost avg_cost ON p.p_partkey = avg_cost.ps_partkey
+LEFT JOIN CTE_Customers_Orders cust ON cust.c_custkey IN (
+    SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey
+)
+JOIN CTE_Lineitem_Summary lineitem_summary ON lineitem_summary.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cust.c_custkey
+)
+WHERE n.n_name IS NOT NULL
+  AND (lineitem_summary.total_items > 0 OR cust.total_orders IS NULL)
+ORDER BY r.r_name, n.n_name, p.p_name;

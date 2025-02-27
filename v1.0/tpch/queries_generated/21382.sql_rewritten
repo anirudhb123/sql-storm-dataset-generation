@@ -1,0 +1,54 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS ranked_order
+    FROM orders
+    WHERE o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           MAX(s.s_acctbal) AS max_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+),
+high_value_suppliers AS (
+    SELECT sd.s_suppkey, sd.s_name
+    FROM supplier_details sd
+    WHERE sd.total_avail_qty > 1000 AND sd.max_acctbal IS NOT NULL
+),
+final_report AS (
+    SELECT cs.c_custkey, cs.c_name, cs.total_spent, 
+           MAX(cs.last_order_date) AS last_order_date,
+           COALESCE(hvs.s_name, 'No High Value Supplier') AS supplier_name
+    FROM customer_summary cs
+    LEFT JOIN high_value_suppliers hvs ON cs.order_count > 10
+    GROUP BY cs.c_custkey, cs.c_name, cs.total_spent
+)
+SELECT f.customer_report AS report_summary, f.last_order_date
+FROM (
+    SELECT CONCAT('Customer: ', cr.c_name, ', Total Spent: $', 
+           ROUND(cr.total_spent, 2), ', Last Order: ', 
+           CASE 
+               WHEN cr.last_order_date IS NULL THEN 'No Orders'
+               ELSE TO_CHAR(cr.last_order_date, 'YYYY-MM-DD')
+           END, 
+           ', Supplier: ', COALESCE(cr.supplier_name, 'N/A')) AS customer_report,
+           cr.last_order_date
+    FROM final_report cr
+    WHERE cr.total_spent > (SELECT AVG(total_spent) FROM final_report) 
+      AND cr.last_order_date BETWEEN cast('1998-10-01' as date) - INTERVAL '30 days' AND cast('1998-10-01' as date)
+) AS f
+ORDER BY 2 DESC
+LIMIT 10 OFFSET 5;

@@ -1,0 +1,90 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        1 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.Reputation,
+        Level + 1
+    FROM 
+        Users u
+    JOIN 
+        UserReputationCTE cte ON u.Reputation < cte.Reputation
+    WHERE 
+        Level < 5
+),
+RecentPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdit,
+        STRING_AGG(ph.Comment, ', ') AS HistoryComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, Tags
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(up.RecentActivityCount, 0) AS RecentActivityCount,
+    COALESCE(p.Title, 'No Recent Posts') AS PostTitle,
+    p.CommentCount,
+    p.UpVotes,
+    p.DownVotes,
+    COALESCE(ph.LastEdit, p.LastActivity) AS LastEditOrActivityDate,
+    ph.HistoryComments
+FROM 
+    Users u
+JOIN 
+    UserReputationCTE cte ON u.Id = cte.UserId
+LEFT JOIN 
+    RecentPostActivity p ON p.PostId IN (
+        SELECT PostId 
+        FROM Posts 
+        WHERE OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    PostHistorySummary ph ON ph.PostId = p.PostId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS RecentActivityCount 
+     FROM Posts 
+     WHERE CreationDate >= NOW() - INTERVAL '7 days' 
+     GROUP BY UserId) up ON up.UserId = u.Id
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    p.LastActivity DESC NULLS LAST
+LIMIT 50;
+This query retrieves a ranked list of users with a reputation above 1000, their recent activities and post interactions, including recent edits from the post history, while utilizing recursive CTEs, subqueries, outer joins, and aggregate functions.

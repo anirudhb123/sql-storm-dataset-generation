@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_availqty > 0)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS unique_customers,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierData AS (
+    SELECT 
+        sh.s_nationkey,
+        COUNT(DISTINCT sh.s_suppkey) AS active_suppliers,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+    GROUP BY sh.s_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    COALESCE(sd.active_suppliers, 0) AS active_suppliers,
+    COALESCE(sd.total_account_balance, 0) AS total_balance,
+    SUM(os.total_revenue) AS total_order_revenue,
+    SUM(os.unique_customers) AS total_unique_customers,
+    AVG(os.avg_quantity) AS avg_order_quantity,
+    SUM(os.lineitem_count) AS total_lineitems
+FROM region r
+LEFT JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN SupplierData sd ON ns.n_nationkey = sd.s_nationkey
+LEFT JOIN OrderSummary os ON os.o_orderkey IS NOT NULL
+GROUP BY r.r_name, ns.n_name, sd.active_suppliers, sd.total_account_balance
+ORDER BY total_order_revenue DESC, total_unique_customers DESC
+LIMIT 10;

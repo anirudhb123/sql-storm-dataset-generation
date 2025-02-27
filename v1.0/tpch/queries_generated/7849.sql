@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' 
+        AND l.l_shipdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderdate, 
+        ro.total_revenue 
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rank_order <= 10
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_nationkey, 
+        COUNT(t.o_orderkey) AS order_count, 
+        SUM(t.total_revenue) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        TopOrders t ON c.c_custkey = (
+            SELECT o.o_custkey 
+            FROM orders o 
+            WHERE o.o_orderkey = t.o_orderkey
+        )
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    c.c_name, 
+    r.r_name AS region, 
+    co.order_count, 
+    co.total_spent
+FROM 
+    CustomerOrders co
+JOIN 
+    nation n ON co.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+ORDER BY 
+    co.total_spent DESC;

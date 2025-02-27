@@ -1,0 +1,55 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 10000 
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 0.9, sh.depth + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey AND sh.depth < 10
+    WHERE s.s_acctbal <= (sh.s_acctbal * 0.8)
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice > 100
+),
+supplier_stats AS (
+    SELECT sh.s_suppkey, sh.s_name, COUNT(ps.ps_partkey) AS total_parts,
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           SUM(ps.ps_availqty) AS total_availability
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_custkey
+),
+customer_region AS (
+    SELECT c.c_custkey, c.c_name, n.n_regionkey
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+),
+ranked_orders AS (
+    SELECT os.o_custkey, os.total_sales,
+           RANK() OVER (PARTITION BY os.o_custkey ORDER BY os.total_sales DESC) AS sales_rank
+    FROM order_summary os
+)
+SELECT cr.c_name, ps.p_name, ss.s_name, ps.p_retailprice, ss.avg_supplycost,
+       COUNT(DISTINCT cr.c_custkey) AS customer_count,
+       RANK() OVER (ORDER BY ps.p_retailprice / (NULLIF(ss.avg_supplycost, 0) * 1.0) DESC) AS price_effectiveness
+FROM filtered_parts ps
+JOIN supplier_stats ss ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = ss.s_suppkey)
+JOIN customer_region cr ON cr.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN ranked_orders ro ON cr.c_custkey = ro.o_custkey AND ro.sales_rank = 1
+WHERE ps.p_name IS NOT NULL OR ss.total_parts > 5
+GROUP BY cr.c_name, ps.p_name, ss.s_name, ps.p_retailprice, ss.avg_supplycost
+HAVING COUNT(DISTINCT cr.c_custkey) > 1
+ORDER BY price_effectiveness, customer_count DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+MonthlyOrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        EXTRACT(MONTH FROM o.o_orderdate) AS order_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, EXTRACT(MONTH FROM o.o_orderdate)
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(SUM(ss.total_spent), 0) AS supplier_sales,
+    COALESCE(SUM(mos.total_sales), 0) AS monthly_sales,
+    COUNT(DISTINCT tc.c_custkey) AS top_customers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierSales ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN MonthlyOrderSummary mos ON mos.order_month = EXTRACT(MONTH FROM CURRENT_DATE)
+LEFT JOIN TopCustomers tc ON tc.rank <= 10
+WHERE n.n_nationkey IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING SUM(ss.total_spent) > 0 OR SUM(mos.total_sales) > 0
+ORDER BY r.r_name, n.n_name;

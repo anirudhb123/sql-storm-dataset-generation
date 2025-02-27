@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+EnhancedCustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name AS region_name,
+        STRING_AGG(CONCAT('$', CAST(c.c_acctbal AS VARCHAR), ' on ', c.c_comment), '; ') AS balance_comments
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, c.c_name, r.r_name
+)
+SELECT 
+    e.c_name AS customer_name,
+    e.region_name,
+    p.p_name AS product_name,
+    p.total_value,
+    s.s_name AS supplier_name,
+    e.balance_comments
+FROM 
+    EnhancedCustomerInfo e
+JOIN 
+    orders o ON e.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    HighValueParts p ON l.l_partkey = p.p_partkey
+JOIN 
+    RankedSuppliers s ON e.c_nationkey = s.s_suppkey
+WHERE 
+    s.rank <= 3
+ORDER BY 
+    e.c_name, p.total_value DESC;

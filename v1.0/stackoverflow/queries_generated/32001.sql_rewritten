@@ -1,0 +1,49 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, PostTypeId, ParentId, Title, CreationDate, OwnerUserId, 
+           ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS UserPostRank
+    FROM Posts
+    WHERE PostTypeId IN (1, 2)  
+    UNION ALL
+    SELECT p.Id, p.PostTypeId, p.ParentId, p.Title, p.CreationDate, p.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC)
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserReputation AS (
+    SELECT u.Id AS UserId, u.DisplayName, 
+           SUM(b.Class) AS TotalBadges, 
+           SUM(v.BountyAmount) AS TotalBounties,
+           COUNT(v.Id) AS VoteCount
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+PostPerformance AS (
+    SELECT rph.OwnerUserId, COUNT(rph.Id) AS PostCount, 
+           AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - rph.CreationDate))) AS AvgPostAgeSeconds,
+           SUM(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS TotalScore
+    FROM RecursivePostHierarchy rph
+    JOIN Posts p ON rph.Id = p.Id
+    GROUP BY rph.OwnerUserId
+)
+SELECT 
+    ur.DisplayName,
+    ur.TotalBadges,
+    ur.TotalBounties,
+    ur.VoteCount,
+    pp.PostCount,
+    pp.AvgPostAgeSeconds,
+    pp.TotalScore,
+    CASE 
+        WHEN pp.PostCount > 0 THEN ROUND((pp.TotalScore::numeric / pp.PostCount), 2)
+        ELSE 0 
+    END AS AvgScorePerPost,
+    (SELECT COUNT(DISTINCT Ph.Id) 
+     FROM PostHistory Ph 
+     WHERE Ph.UserId = ur.UserId AND Ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+FROM UserReputation ur
+JOIN PostPerformance pp ON ur.UserId = pp.OwnerUserId
+WHERE ur.TotalBadges > 0 AND ur.VoteCount > 10
+ORDER BY AvgScorePerPost DESC
+LIMIT 50;

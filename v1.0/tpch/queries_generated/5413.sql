@@ -1,0 +1,89 @@
+WITH RegionAggregate AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_supplier_acctbal,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey
+),
+FinalStats AS (
+    SELECT 
+        ra.r_regionkey,
+        ra.r_name,
+        ca.order_count,
+        ca.total_order_value,
+        pss.total_available_qty,
+        pss.avg_supply_cost,
+        ra.total_supplier_acctbal,
+        ra.nation_count
+    FROM 
+        RegionAggregate ra
+    LEFT JOIN 
+        CustomerOrderStats ca ON ra.r_regionkey = ca.c_nationkey
+    LEFT JOIN 
+        PartSupplierStats pss ON pss.ps_partkey IN (
+            SELECT 
+                ps_partkey 
+            FROM 
+                partsupp 
+            WHERE 
+                ps_suppkey IN (
+                    SELECT 
+                        s_suppkey 
+                    FROM 
+                        supplier 
+                    WHERE 
+                        s_nationkey IN (
+                            SELECT 
+                                n_nationkey 
+                            FROM 
+                                nation 
+                            WHERE 
+                                n_regionkey = ra.r_regionkey
+                        )
+                )
+        )
+)
+SELECT 
+    r.r_name AS Region_Name,
+    COALESCE(order_count, 0) AS Order_Count,
+    COALESCE(total_order_value, 0) AS Total_Order_Value,
+    COALESCE(total_available_qty, 0) AS Total_Available_Quantity,
+    COALESCE(avg_supply_cost, 0) AS Average_Supply_Cost,
+    total_supplier_acctbal AS Total_Supplier_Account_Balance,
+    nation_count AS Nation_Count
+FROM 
+    FinalStats r
+ORDER BY 
+    r.r_name;

@@ -1,0 +1,52 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+FilteredCustomers AS (
+    SELECT
+        full_name,
+        ca_city,
+        ca_state,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CASE
+            WHEN cd_gender = 'M' THEN CONCAT('Mr. ', full_name)
+            WHEN cd_gender = 'F' AND cd_marital_status = 'M' THEN CONCAT('Mrs. ', full_name)
+            WHEN cd_gender = 'F' AND cd_marital_status = 'S' THEN CONCAT('Ms. ', full_name)
+            ELSE full_name
+        END AS salutation
+    FROM CustomerInfo
+    WHERE ca_city LIKE '%York%'
+      AND cd_education_status IN ('PhD', 'Masters')
+),
+SalesAnalytics AS (
+    SELECT
+        s.ss_item_sk,
+        SUM(s.ss_quantity) AS total_quantity,
+        SUM(s.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT s.ss_customer_sk) AS unique_customers
+    FROM store_sales s
+    JOIN FilteredCustomers fc ON s.ss_customer_sk = fc.c_customer_sk
+    GROUP BY s.ss_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    sa.total_quantity,
+    sa.total_sales,
+    sa.unique_customers
+FROM SalesAnalytics sa
+JOIN item i ON sa.ss_item_sk = i.i_item_sk
+WHERE sa.total_sales > 1000
+ORDER BY sa.total_sales DESC;

@@ -1,0 +1,44 @@
+
+WITH AddressStats AS (
+    SELECT ca_state,
+           COUNT(*) AS total_addresses,
+           AVG(ca_gmt_offset) AS avg_gmt_offset,
+           STRING_AGG(ca_city, ', ') AS all_cities,
+           STRING_AGG(DISTINCT CONCAT(ca_street_name, ' ', ca_street_number), ', ') AS unique_street_names
+    FROM customer_address
+    GROUP BY ca_state
+),
+DemoStats AS (
+    SELECT cd_gender,
+           COUNT(*) AS total_customers,
+           AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+           STRING_AGG(cd_marital_status, ', ') AS all_marital_statuses,
+           STRING_AGG(DISTINCT cd_education_status, ', ') AS unique_education_statuses
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+DateStats AS (
+    SELECT d_year, 
+           COUNT(*) AS days_in_year,
+           STRING_AGG(d_day_name, ', ') AS all_days,
+           STRING_AGG(d_month_seq, ', ') AS month_sequences
+    FROM date_dim
+    GROUP BY d_year
+)
+SELECT addr.ca_state,
+       addr.total_addresses,
+       addr.avg_gmt_offset,
+       addr.all_cities,
+       demo.cd_gender,
+       demo.total_customers,
+       demo.avg_purchase_estimate,
+       demo.all_marital_statuses,
+       demo.unique_education_statuses,
+       date.d_year,
+       date.days_in_year,
+       date.all_days,
+       date.month_sequences
+FROM AddressStats addr
+JOIN DemoStats demo ON addr.total_addresses > 1000 AND demo.total_customers > 500
+JOIN DateStats date ON date.days_in_year > 200
+ORDER BY addr.ca_state, demo.cd_gender, date.d_year;

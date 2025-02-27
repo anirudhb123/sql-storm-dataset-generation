@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS revenue_rank
+    FROM web_sales ws
+    INNER JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        CASE 
+            WHEN wr.returning_customer_sk IS NULL THEN 'Unknown' 
+            ELSE 'Known' 
+        END AS customer_type,
+        COUNT(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM web_returns wr
+    LEFT JOIN customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    GROUP BY customer_type
+),
+TopSellingItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_revenue,
+        COUNT(DISTINCT cr.customer_type) AS types_of_customers,
+        CASE 
+            WHEN SUM(cr.total_returns) > 0 THEN 'Returned' 
+            ELSE 'Not Returned' 
+        END AS return_status
+    FROM RankedSales rs
+    LEFT JOIN CustomerReturns cr ON rs.ws_item_sk = cr.wr_item_sk
+    WHERE rs.revenue_rank <= 10
+    GROUP BY rs.ws_item_sk, rs.total_quantity, rs.total_revenue
+)
+SELECT 
+    ti.ws_item_sk,
+    ti.total_quantity,
+    ti.total_revenue,
+    COALESCE(ti.types_of_customers, 0) AS types_of_customers,
+    ti.return_status,
+    CASE 
+        WHEN ti.total_revenue > 10000 THEN 'High Value' 
+        WHEN ti.total_revenue BETWEEN 5000 AND 10000 THEN 'Mid Value' 
+        ELSE 'Low Value' 
+    END AS revenue_classification
+FROM TopSellingItems ti
+ORDER BY ti.total_revenue DESC
+FETCH FIRST 50 ROWS ONLY;

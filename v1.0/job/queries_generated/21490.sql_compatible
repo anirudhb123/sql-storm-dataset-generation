@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastWithRoles AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role,
+        c.note,
+        c.nr_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MoviesWithActorCount AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COALESCE(COUNT(DISTINCT c.actor_name), 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastWithRoles c ON rm.movie_id = c.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title
+),
+ActorNotInAnyMovie AS (
+    SELECT 
+        ak.name AS missing_actor
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    WHERE 
+        c.movie_id IS NULL
+),
+TopMovies AS (
+    SELECT 
+        m.movie_id, 
+        m.title, 
+        m.production_year, 
+        m.actor_count,
+        ROW_NUMBER() OVER (ORDER BY m.actor_count DESC, m.title) AS ranking
+    FROM 
+        MoviesWithActorCount m
+    WHERE 
+        m.actor_count > 0
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    COALESCE(an.missing_actor, 'No missing actors') AS missing_actor
+FROM 
+    TopMovies tm
+FULL OUTER JOIN 
+    ActorNotInAnyMovie an ON 1=1
+WHERE 
+    tm.ranking <= 10
+ORDER BY 
+    tm.actor_count DESC, 
+    tm.title ASC;

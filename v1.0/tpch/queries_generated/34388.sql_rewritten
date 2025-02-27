@@ -1,0 +1,39 @@
+WITH RECURSIVE date_series AS (
+    SELECT MIN(o_orderdate) AS order_date
+    FROM orders
+    UNION ALL
+    SELECT DATE_ADD(order_date, INTERVAL 1 DAY)
+    FROM date_series
+    WHERE order_date < (SELECT MAX(o_orderdate) FROM orders)
+), 
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_suppkey) AS number_of_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ds.order_date,
+    COALESCE(oss.total_price, 0) AS total_revenue,
+    COALESCE(sus.total_supply_cost, 0) AS supplier_cost,
+    ROW_NUMBER() OVER (PARTITION BY ds.order_date ORDER BY COALESCE(oss.total_price, 0) DESC) AS revenue_rank,
+    SUM(COALESCE(oss.total_price, 0)) OVER (ORDER BY ds.order_date) AS cumulative_revenue
+FROM date_series ds
+LEFT JOIN order_details oss ON ds.order_date = oss.o_orderdate
+LEFT JOIN supplier_summary sus ON sus.total_supply_cost > 0
+WHERE ds.order_date BETWEEN '1997-01-01' AND '1997-12-31'
+ORDER BY ds.order_date;

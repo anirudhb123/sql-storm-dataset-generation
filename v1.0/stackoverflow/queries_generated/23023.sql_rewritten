@@ -1,0 +1,69 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        DENSE_RANK() OVER (ORDER BY U.CreationDate ASC) AS AccountAgeRank
+    FROM Users U
+    WHERE U.Reputation > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.PostTypeId,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+CommentCounts AS (
+    SELECT 
+        C.PostId,
+        COUNT(*) AS TotalComments
+    FROM Comments C
+    GROUP BY C.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS HistoryCount,
+        STRING_AGG(PH.Comment, ', ') AS Comments
+    FROM PostHistory PH
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+),
+TopBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount
+    FROM Badges B
+    WHERE B.Class IN (1, 2)  
+    GROUP BY B.UserId
+)
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.ReputationRank,
+    RU.AccountAgeRank,
+    COALESCE(RP.Title, 'No Posts Yet') AS LastPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS LastPostDate,
+    COALESCE(CC.TotalComments, 0) AS CommentCount,
+    CASE 
+        WHEN RU.Reputation BETWEEN 0 AND 100 THEN 'Newcomer'
+        WHEN RU.Reputation BETWEEN 101 AND 1000 THEN 'Intermediate'
+        ELSE 'Veteran'
+    END AS ExperienceLevel,
+    COALESCE(B.BadgeCount, 0) AS TotalBadges,
+    COALESCE(PH.HistoryCount, 0) AS HistoryEventCount,
+    COALESCE(PH.Comments, 'No Comments') AS PostHistoryComments
+FROM RankedUsers RU
+LEFT JOIN RecentPosts RP ON RU.Id = RP.OwnerUserId AND RP.PostRank = 1
+LEFT JOIN CommentCounts CC ON RP.PostId = CC.PostId
+LEFT JOIN TopBadges B ON RU.Id = B.UserId
+LEFT JOIN PostHistoryDetails PH ON RP.PostId = PH.PostId
+WHERE RU.ReputationRank <= 50   
+ORDER BY RU.Reputation DESC, RU.AccountAgeRank
+LIMIT 100;

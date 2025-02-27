@@ -1,0 +1,73 @@
+
+WITH QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopQuestions AS (
+    SELECT 
+        qs.QuestionId,
+        qs.Title,
+        qs.CreationDate,
+        qs.AnswerCount,
+        qs.UpVotes,
+        qs.DownVotes,
+        qs.LastVoteDate,
+        RANK() OVER (ORDER BY qs.UpVotes - qs.DownVotes DESC) AS VoteRank
+    FROM 
+        QuestionStats qs
+    WHERE 
+        qs.AnswerCount > 0  
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS RelatedQuestionCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10  
+)
+SELECT 
+    tq.QuestionId,
+    tq.Title,
+    tq.CreationDate,
+    tq.AnswerCount,
+    tq.UpVotes,
+    tq.DownVotes,
+    tq.LastVoteDate,
+    pt.TagName,
+    pt.RelatedQuestionCount
+FROM 
+    TopQuestions tq
+JOIN 
+    PostLinks pl ON tq.QuestionId = pl.PostId
+JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+JOIN 
+    Tags pt ON rp.Tags LIKE CONCAT('%', pt.TagName, '%')
+WHERE 
+    tq.VoteRank <= 10  
+ORDER BY 
+    tq.UpVotes - tq.DownVotes DESC, tq.LastVoteDate DESC;

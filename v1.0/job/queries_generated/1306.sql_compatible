@@ -1,0 +1,45 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.id) AS total_cast,
+        SUM(CASE WHEN cr.role_id IS NOT NULL THEN 1 ELSE 0 END) AS credited_cast,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type cr ON ci.person_role_id = cr.id
+    LEFT JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cr.total_cast,
+    cr.credited_cast,
+    CASE 
+        WHEN cr.total_cast > 0 THEN (CAST(cr.credited_cast AS DECIMAL) / cr.total_cast) * 100 
+        ELSE NULL 
+    END AS credited_percentage,
+    cr.cast_names
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastRoles cr ON rt.title_id = cr.movie_id
+WHERE 
+    rt.title_rank = 1
+ORDER BY 
+    rt.production_year, credited_percentage DESC;

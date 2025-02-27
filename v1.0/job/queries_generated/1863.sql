@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoleCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        array_agg(DISTINCT r.role) AS roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id
+),
+MoviesWithActors AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        a.person_id,
+        a.roles
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        ActorRoleCounts a ON m.movie_id = a.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(a.movie_count, 0) AS actor_movie_count,
+    COALESCE(a.roles, '{}') AS roles,
+    CASE 
+        WHEN a.movie_count > 5 THEN 'Prolific Actor'
+        WHEN a.movie_count IS NULL THEN 'No Actors'
+        ELSE 'Occasional Actor'
+    END AS actor_type,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    MoviesWithActors m
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    m.title, m.production_year, a.movie_count, a.roles
+ORDER BY 
+    m.production_year DESC, m.title;

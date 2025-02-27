@@ -1,0 +1,64 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostTypeStats AS (
+    SELECT 
+        P.PostTypeId,
+        COUNT(P.Id) AS TotalPosts,
+        AVG(P.ViewCount) AS AvgViews,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.PostTypeId
+),
+ClosedPosts AS (
+    SELECT
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        ARRAY_AGG(DISTINCT C.Name) AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  -- Closed and Reopened
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UVS.TotalVotes, 0) AS TotalVotes,
+    COALESCE(UVS.UpVotes, 0) AS UpVotes,
+    COALESCE(UVS.DownVotes, 0) AS DownVotes,
+    PTS.PostTypeId,
+    PTS.TotalPosts,
+    PTS.AvgViews,
+    PTS.PositiveScorePosts,
+    COALESCE(CP.CloseCount, 0) AS PostClosedCount,
+    COALESCE(CP.CloseReasons, '{}') AS CloseReasons
+FROM 
+    UserVoteStats UVS
+FULL OUTER JOIN 
+    PostTypeStats PTS ON UVS.UserId = PTS.PostTypeId  -- Arbitrary link for demonstration
+LEFT JOIN 
+    ClosedPosts CP ON CP.PostId = ANY(ARRAY(SELECT Id FROM Posts WHERE OwnerUserId = UVS.UserId))
+WHERE 
+    UVS.TotalVotes > 5 OR PTS.TotalPosts > 10
+ORDER BY 
+    UVS.TotalVotes DESC, 
+    PTS.AvgViews DESC;

@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to get the hierarchy of posts and their answers
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        Level + 1,
+        a.CreationDate
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON a.ParentId = r.PostId
+)
+, PostVoteCounts AS (
+    -- CTE to count the number of votes on each post
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId IN (1, 2) THEN 1 ELSE NULL END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE NULL END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregates AS (
+    -- CTE to gather historical data on post edits
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.CreationDate END) AS LastTitleEdit,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 5 THEN ph.CreationDate END) AS LastBodyEdit,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        RANK() OVER (ORDER BY SUM(u.Reputation) DESC) AS UserRank
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+-- Final query aggregating all previously computed CTEs
+SELECT 
+    r.PostId,
+    r.Title,
+    u.DisplayName AS OwnerName,
+    ph.LastTitleEdit,
+    ph.LastBodyEdit,
+    ph.CloseReopenCount,
+    vc.UpVotes,
+    vc.DownVotes,
+    CASE 
+        WHEN vc.UpVotes IS NULL THEN 'No Votes'
+        ELSE CONCAT(COALESCE(vc.UpVotes, 0), ' Upvotes, ', COALESCE(vc.DownVotes, 0), ' Downvotes')
+    END AS VoteSummary,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = r.PostId) AS LinkedPostsCount,
+    tu.DisplayName AS TopUserName,
+    tu.UserRank
+FROM 
+    RecursivePostHierarchy r
+INNER JOIN 
+    Users u ON r.OwnerUserId = u.Id
+LEFT JOIN 
+    PostVoteCounts vc ON r.PostId = vc.PostId
+LEFT JOIN 
+    PostHistoryAggregates ph ON r.PostId = ph.PostId
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+WHERE 
+    r.Level = 0  -- Only selecting top-level questions
+    AND (vc.UpVotes > 10 OR vc.DownVotes > 0)  -- Applying vote condition
+ORDER BY 
+    r.CreationDate DESC
+LIMIT 50;  -- Limiting the output for performance

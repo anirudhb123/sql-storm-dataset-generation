@@ -1,0 +1,65 @@
+WITH RECURSIVE CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NationSuppliers AS (
+    SELECT 
+        n.n_name,
+        COUNT(s.s_suppkey) AS total_suppliers,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+),
+PartSupplierCost AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    c.c_name,
+    c.total_spent,
+    c.total_orders,
+    n.n_name,
+    ns.total_suppliers,
+    ns.total_acctbal,
+    p.p_name,
+    pcs.avg_supplycost,
+    pcs.suppliers
+FROM 
+    CustomerOrderStats c
+JOIN 
+    nation n ON c.c_custkey IN (SELECT DISTINCT c2.c_custkey FROM customer c2 WHERE c2.c_nationkey = n.n_nationkey)
+LEFT JOIN 
+    NationSuppliers ns ON n.n_name IS NOT NULL
+JOIN 
+    PartSupplierCost pcs ON pcs.avg_supplycost IS NOT NULL
+WHERE 
+    c.spend_rank <= 10
+ORDER BY 
+    c.total_spent DESC, 
+    ns.total_acctbal DESC;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(b.Name, 'No Badge') AS BadgeName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        BadgeName,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        rn
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId,
+        ph.PostHistoryTypeId
+),
+ActivePosts AS (
+    SELECT 
+        trp.PostId,
+        trp.Title,
+        trp.Score,
+        trp.BadgeName,
+        trp.CommentCount,
+        trp.UpVotes,
+        trp.DownVotes,
+        COALESCE(ph.LastUpdated, 'Never Updated') AS LastUpdated
+    FROM 
+        TopRankedPosts trp
+    LEFT JOIN 
+        PostHistoryData ph ON trp.PostId = ph.PostId
+    WHERE 
+        trp.Score > 0 -- Only consider posts with a positive score
+)
+SELECT 
+    ap.PostId,
+    ap.Title,
+    ap.Score,
+    ap.BadgeName,
+    ap.CommentCount,
+    ap.UpVotes,
+    ap.DownVotes,
+    ap.LastUpdated,
+    CASE 
+        WHEN ap.LastUpdated = 'Never Updated' THEN 'No updates made'
+        ELSE 'Updated recently'
+    END AS UpdateStatus
+FROM 
+    ActivePosts ap
+WHERE 
+    (ap.CommentCount > 5 OR ap.UpVotes > 10)
+ORDER BY 
+    ap.Score DESC, ap.LastUpdated DESC;

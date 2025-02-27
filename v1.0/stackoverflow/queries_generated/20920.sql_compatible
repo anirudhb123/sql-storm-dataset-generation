@@ -1,0 +1,94 @@
+
+WITH UserVoteDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 2) AS UpVotes,
+        COUNT(V.Id) FILTER (WHERE V.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 
+            CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE -1 END 
+            ELSE 0 END) AS VoteNet,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS PraiseScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.OwnerDisplayName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        unnest(string_to_array(P.Tags, '>')) AS T(TagName) ON TRUE
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate, P.OwnerDisplayName
+),
+RecentClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS ClosedDate, 
+        CLOSE.Comment AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CLOSE ON CAST(PH.Comment AS INTEGER) = CLOSE.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+        AND PH.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+),
+DetailedVoteSummary AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        CU.UpVotes,
+        CU.DownVotes,
+        RCP.ClosedDate,
+        RCP.CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UserVoteDetails CU ON P.OwnerUserId = CU.UserId
+    LEFT JOIN 
+        RecentClosedPosts RCP ON P.Id = RCP.PostId
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+        AND (CU.UpVotes IS NOT NULL OR CU.DownVotes IS NOT NULL)
+)
+SELECT 
+    DVS.Title,
+    DVS.Score,
+    DVS.UpVotes,
+    DVS.DownVotes,
+    COALESCE(DVS.ClosedDate, 'Not Closed') AS PostStatus,
+    COALESCE(DVS.CloseReason, 'N/A') AS CloseReason,
+    JSON_BUILD_OBJECT(
+        'Tags', PD.Tags,
+        'CreationDetails', (
+            SELECT 
+                JSON_AGG(PD.CreationDate ORDER BY PD.CreationDate DESC)
+            FROM 
+                PostDetails PD
+            WHERE 
+                PD.PostId = DVS.Id
+        )
+    ) AS ExtraDetails
+FROM 
+    DetailedVoteSummary DVS
+LEFT JOIN 
+    PostDetails PD ON PD.PostId = DVS.Id
+WHERE 
+    DVS.RowNum = 1
+ORDER BY 
+    DVS.Score DESC, DVS.Title ASC
+LIMIT 50;

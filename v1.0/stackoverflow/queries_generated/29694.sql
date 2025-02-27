@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only consider Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate
+),
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.VoteCount) AS TotalVotes,
+        SUM(rp.CommentCount) AS TotalComments
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.UserRank <= 5  -- Top 5 posts per user
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL (
+            SELECT
+                TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) ) AS TagName
+        ) t ON TRUE
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pu.DisplayName,
+    pu.TotalVotes,
+    pu.TotalComments,
+    rp.Title,
+    rp.CreationDate,
+    pt.Tags,
+    rp.UpVoteCount,
+    rp.DownVoteCount
+FROM 
+    PopularUsers pu
+JOIN 
+    RankedPosts rp ON pu.UserId = rp.OwnerUserId
+JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+ORDER BY 
+    pu.TotalVotes DESC, pu.TotalComments DESC;

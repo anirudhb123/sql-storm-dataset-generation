@@ -1,0 +1,55 @@
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31'
+),
+supplier_part_info AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           p.p_name, p.p_brand, 
+           COALESCE(NULLIF(p.p_container, 'BOX'), 'UNKNOWN') AS container_type
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 10
+),
+customer_summary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           MAX(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS last_paid_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey
+),
+recent_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= (CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    r.o_orderstatus,
+    spi.p_name,
+    spi.container_type,
+    cs.total_spent,
+    cs.last_paid_order,
+    CASE 
+        WHEN r.o_orderstatus IS NULL THEN 'No Status' 
+        ELSE r.o_orderstatus END AS safe_status,
+    COALESCE(
+        (SELECT COUNT(*)
+         FROM lineitem l
+         WHERE l.l_orderkey = r.o_orderkey AND l.l_returnflag = 'R'), 0) AS return_count,
+    CASE 
+        WHEN COUNT(ro.o_orderkey) > 0 THEN 'Recent Orders Available' 
+        ELSE 'No Recent Orders' END AS recent_orders_status
+FROM ranked_orders r
+LEFT JOIN supplier_part_info spi ON r.o_orderkey = spi.ps_partkey
+LEFT JOIN customer_summary cs ON r.o_orderkey = cs.c_custkey
+LEFT JOIN recent_orders ro ON r.o_orderkey = ro.o_orderkey
+GROUP BY r.o_orderkey, r.o_totalprice, r.o_orderstatus, spi.p_name, spi.container_type, cs.total_spent, cs.last_paid_order
+HAVING SUM(l_extendedprice - (l_extendedprice * l_discount)) > 1000
+ORDER BY r.o_totalprice DESC
+LIMIT 100;

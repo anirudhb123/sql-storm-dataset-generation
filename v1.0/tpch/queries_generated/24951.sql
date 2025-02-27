@@ -1,0 +1,52 @@
+WITH RecursivePart AS (
+    SELECT p_partkey, p_name, p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) AS rn
+    FROM part 
+    WHERE p_size IS NOT NULL
+), SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, (s.s_acctbal * 0.1) AS calculated_balance,
+           n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name LIKE 'A%'
+), OrdersSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           CASE WHEN o.o_orderstatus = 'F' THEN 'Finished' ELSE 'Pending' END AS order_status,
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderstatus
+), FilteredOrders AS (
+    SELECT os.o_orderkey, os.o_totalprice, os.order_status, os.line_item_count,
+           COALESCE(SUM(p.p_retailprice) OVER (PARTITION BY os.o_orderkey), 0) AS total_part_price
+    FROM OrdersSummary os
+    JOIN RecursivePart p ON os.line_item_count > 5 AND p.rn <= 10
+)
+SELECT
+    fo.o_orderkey,
+    fo.o_totalprice,
+    fo.order_status,
+    CASE 
+        WHEN fo.total_part_price IS NULL THEN 'No parts'
+        WHEN fo.total_part_price > 1000 THEN 'High value'
+        ELSE 'Moderate value'
+    END AS part_value_category,
+    sd.s_name AS supplier_name,
+    sd.calculated_balance
+FROM 
+    FilteredOrders fo
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_retailprice < fo.total_part_price
+        )
+    )
+WHERE 
+    fo.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) 
+    OR fo.order_status = 'Finished'
+ORDER BY 
+    part_value_category DESC, fo.o_orderkey DESC;

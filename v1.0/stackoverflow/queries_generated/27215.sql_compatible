@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(pw.AnswerCount, 0) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(Id) AS AnswerCount
+         FROM Posts
+         WHERE PostTypeId = 2
+         GROUP BY PostId) pw ON p.Id = pw.PostId
+    LEFT JOIN
+        PostTags pt ON p.Id = pt.PostId
+    LEFT JOIN
+        Tags t ON pt.TagId = t.Id
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.Reputation, u.DisplayName, pw.AnswerCount
+),
+FilteredPosts AS (
+    SELECT
+        rp.*,
+        CASE 
+            WHEN rp.ViewCount > 1000 AND rp.Score > 10 THEN 'High Engagement'
+            WHEN rp.ViewCount BETWEEN 500 AND 1000 AND rp.Score BETWEEN 5 AND 10 THEN 'Medium Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.PostRank = 1 
+)
+
+SELECT
+    fp.OwnerDisplayName,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.OwnerReputation,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.Tags,
+    fp.EngagementLevel
+FROM
+    FilteredPosts fp
+WHERE
+    fp.OwnerReputation > 1000 
+ORDER BY
+    fp.CreationDate DESC;

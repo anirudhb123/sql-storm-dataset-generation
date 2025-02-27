@@ -1,0 +1,56 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        s.s_comment,
+        REPLACE(s.s_name, 'Supplier', 'Vendor') AS VendorName,
+        CONCAT('Country: ', (SELECT n.n_name FROM nation n WHERE n.n_nationkey = s.s_nationkey)) AS NationInfo
+    FROM 
+        supplier s
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_container,
+        CONCAT(p.p_name, ' (', p.p_brand, ') - ', p.p_container) AS FullPartDescription
+    FROM 
+        part p
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderstatus,
+        FORMAT(o.o_orderdate, 'yyyy-MM-dd') AS FormattedOrderDate,
+        CONCAT(c.c_name, ' has an order status of ', o.o_orderstatus) AS CustomerOrderInfo
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    sd.s_name AS SupplierName, 
+    pd.FullPartDescription AS PartDescription, 
+    cod.CustomerOrderInfo, 
+    cod.FormattedOrderDate, 
+    sd.VendorName, 
+    sd.NationInfo, 
+    COUNT(*) OVER () AS TotalRecords
+FROM 
+    SupplierDetails sd
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    CustomerOrderDetails cod ON cod.o_orderkey = ps.ps_partkey
+WHERE 
+    sd.s_acctbal > 5000
+ORDER BY 
+    sd.s_name, pd.p_name;

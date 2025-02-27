@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RoleCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(rc.actor_count, 0) AS actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        RoleCount rc ON mh.movie_id = rc.movie_id
+),
+
+RecentMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.actor_count DESC) AS rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= (SELECT MAX(production_year) - 5 FROM aka_title)
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    COALESCE((SELECT AVG(actor_count) FROM MovieDetails), 0) AS avg_actor_count,
+    CASE 
+        WHEN rm.actor_count > COALESCE((SELECT AVG(actor_count) FROM MovieDetails), 0) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS performance_category
+FROM 
+    RecentMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC;

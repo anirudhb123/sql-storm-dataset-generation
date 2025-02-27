@@ -1,0 +1,61 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+order_summary AS (
+    SELECT
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(l.l_quantity) AS avg_quantity,
+        DENSE_RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey, c.c_mktsegment
+),
+nation_stats AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_supplier_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS available_parts
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+final_report AS (
+    SELECT
+        ns.n_name AS nation_name,
+        ns.supplier_count,
+        ns.avg_supplier_acctbal,
+        os.total_sales,
+        os.order_count,
+        os.avg_quantity
+    FROM nation_stats ns
+    LEFT JOIN order_summary os ON ns.n_nationkey = os.o_custkey
+)
+SELECT 
+    fr.nation_name,
+    fr.supplier_count,
+    COALESCE(fr.avg_supplier_acctbal, 0) AS avg_acctbal,
+    COALESCE(fr.total_sales, 0) AS total_sales,
+    COALESCE(fr.order_count, 0) AS total_orders,
+    COALESCE(fr.avg_quantity, 0) AS avg_quantity,
+    COUNT(DISTINCT sh.s_suppkey) AS related_suppliers
+FROM final_report fr
+LEFT JOIN supplier_hierarchy sh ON fr.supplier_count > 0
+GROUP BY fr.nation_name, fr.supplier_count, fr.avg_supplier_acctbal, fr.total_sales, fr.order_count, fr.avg_quantity
+ORDER BY fr.total_sales DESC, fr.nation_name;

@@ -1,0 +1,86 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        1 AS level
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 100
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        sc.level + 1
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        sc.level < 3 AND ps.ps_availqty < 50
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity_sold
+    FROM 
+        lineitem l
+    JOIN 
+        part p ON l.l_partkey = p.p_partkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1998-10-01' - INTERVAL '1 year' AND DATE '1998-10-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    DISTINCT r.r_name,
+    co.c_name,
+    sc.s_name,
+    pd.p_name,
+    pd.total_revenue,
+    pd.avg_quantity_sold,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY r.r_regionkey) AS orders_in_region
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerOrders co ON TRUE
+LEFT JOIN 
+    SupplyChain sc ON sc.level = 2
+LEFT JOIN 
+    ProductDetails pd ON pd.total_revenue > 1000
+WHERE 
+    (sc.ps_supplycost IS NULL OR sc.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp))
+AND 
+    COALESCE(co.order_count, 0) > 5
+ORDER BY 
+    r.r_name, co.total_spent DESC, pd.total_revenue DESC;

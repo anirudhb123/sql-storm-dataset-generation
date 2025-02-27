@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+        AND p.Score > 0
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(p.UpVotes) AS TotalUpVotes,
+        SUM(p.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ClosedQuestions AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        STRING_AGG(DISTINCT CONCAT_WS(': ', u.DisplayName, ph.Comment), '; ') AS CloseReasonComments
+    FROM 
+        PostHistory ph
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(cq.CloseCount, 0) AS CloseCount,
+        COALESCE(cq.CloseReasonComments, '') AS CloseReasonComments,
+        COALESCE(ua.PostCount, 0) AS UserPostCount,
+        COALESCE(ua.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ua.TotalUpVotes, 0) AS TotalUpVotes,
+        COALESCE(ua.TotalDownVotes, 0) AS TotalDownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedQuestions cq ON rp.PostId = cq.PostId
+    LEFT JOIN 
+        Users u ON rp.PostId = u.Id
+    LEFT JOIN 
+        UserActivity ua ON u.Id = ua.UserId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.CloseCount,
+    pm.CloseReasonComments,
+    pm.UserPostCount,
+    pm.BadgeCount,
+    pm.TotalUpVotes,
+    pm.TotalDownVotes,
+    CASE 
+        WHEN pm.Score > 100 THEN 'Hot'
+        WHEN pm.Score BETWEEN 50 AND 100 THEN 'Warm'
+        ELSE 'Cold'
+    END AS Temperature,
+    CASE 
+        WHEN pm.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    PostMetrics pm
+ORDER BY 
+    pm.CreationDate DESC
+LIMIT 50;

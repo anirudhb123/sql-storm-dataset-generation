@@ -1,0 +1,70 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price AS sold_price,
+        ws.ws_quantity AS quantity_sold,
+        ws.ws_net_paid AS net_paid,
+        w.w_warehouse_name,
+        d.d_year AS sales_year
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        (ws.ws_sales_price > 0 OR ws.ws_quantity > 0)
+        AND d.d_year >= 2018
+),
+returns_data AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_brand,
+        COALESCE(rd.total_returns, 0) AS returned_quantity,
+        COALESCE(rd.total_return_amt, 0) AS total_return_amount
+    FROM 
+        item i
+    LEFT JOIN 
+        returns_data rd ON i.i_item_sk = rd.sr_item_sk
+)
+SELECT 
+    sd.warehouse_name,
+    id.i_item_desc,
+    id.i_brand,
+    SUM(sd.quantity_sold) AS total_quantity_sold,
+    SUM(sd.net_paid) AS total_net_paid,
+    SUM(sd.sold_price * sd.quantity_sold) AS total_sales_value,
+    AVG(CASE 
+        WHEN id.returned_quantity > 0 THEN (id.returned_quantity / NULLIF(SUM(sd.quantity_sold), 0)) 
+        ELSE 0 
+    END) AS return_percentage,
+    COUNT(DISTINCT sd.ws_order_number) AS unique_orders
+FROM 
+    sales_data sd
+JOIN 
+    item_details id ON sd.ws_item_sk = id.i_item_sk
+WHERE 
+    sd.sold_price IS NOT NULL
+    AND (sd.warehouse_name IS NOT NULL OR id.i_brand IS NOT NULL)
+GROUP BY 
+    sd.warehouse_name, id.i_item_desc, id.i_brand, id.returned_quantity
+HAVING 
+    SUM(sd.quantity_sold) > 0
+    AND SUM(sd.net_paid) > 1000
+ORDER BY 
+    return_percentage DESC,
+    total_sales_value DESC
+FETCH FIRST 50 ROWS ONLY OFFSET 10;

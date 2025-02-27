@@ -1,0 +1,83 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT 
+        ca.address_sk,
+        ca.city,
+        ca.state,
+        ca.country,
+        1 AS level
+    FROM customer_address ca
+    WHERE ca.country IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ca.address_sk,
+        ca.city,
+        ca.state,
+        ca.country,
+        ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.address_sk = ah.address_sk
+    WHERE ca.city IS NOT NULL
+), 
+
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.ws_order_number, ws.ws_item_sk
+), 
+
+customer_info AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        SUM(ws.ws_net_profit) AS total_profit,
+        MAX(ws.ws_sales_price) AS max_sale_price
+    FROM customer_demographics cd
+    JOIN web_sales ws ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender
+) 
+
+SELECT 
+    ah.city,
+    ah.state,
+    ah.country,
+    ci.cd_gender,
+    SUM(ci.total_profit) AS profit_sum,
+    COUNT(CASE WHEN ci.max_sale_price > 50 THEN 1 END) AS high_value_sales,
+    CASE 
+        WHEN COUNT(DISTINCT sd.ws_order_number) > 100 
+        THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS sales_category,
+    COALESCE(NULLIF(MAX(sd.total_sales), 0), 'No Sales') AS max_total_sales
+FROM address_hierarchy ah
+LEFT JOIN customer_info ci ON ah.city = 'Some City' AND ah.state = ci.cd_gender
+LEFT JOIN sales_data sd ON sd.ws_item_sk IN (
+    SELECT i.i_item_sk 
+    FROM item i 
+    WHERE i.i_current_price > (
+        SELECT AVG(i_current_price) 
+        FROM item 
+        WHERE i_rec_end_date IS NULL 
+        GROUP BY i_brand
+    )
+) 
+GROUP BY ah.city, ah.state, ah.country, ci.cd_gender
+HAVING SUM(ci.total_profit) > (
+    SELECT AVG(total_profit) 
+    FROM customer_info 
+    WHERE cd_gender IS NOT NULL 
+    GROUP BY cd_gender 
+    HAVING COUNT(cd_demo_sk) > 5
+) 
+ORDER BY ah.country DESC, profit_sum ASC
+OFFSET 10 ROWS 
+FETCH NEXT 20 ROWS ONLY;

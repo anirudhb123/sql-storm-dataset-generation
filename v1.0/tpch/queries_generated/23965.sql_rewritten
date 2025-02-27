@@ -1,0 +1,52 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Expensive'
+            ELSE 'Affordable'
+        END AS price_category
+    FROM part p
+),
+OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_items,
+        AVG(l.l_discount) AS avg_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    n.n_name,
+    ns.supplier_count,
+    COALESCE(most_val, 'None') AS most_valued_provider,
+    COUNT(DISTINCT p.p_partkey) FILTER (WHERE hp.price_category = 'Expensive') AS expensive_part_count,
+    SUM(COALESCE(os.total_revenue, 0)) AS total_revenue_generated
+FROM NationSupplier ns
+JOIN nation n ON ns.n_name = n.n_name
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_suppkey
+LEFT JOIN HighValueParts hp ON hp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+LEFT JOIN OrderStatistics os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+GROUP BY n.n_name, ns.supplier_count, rs.s_name
+HAVING SUM(COALESCE(os.total_revenue, 0)) > 1000000
+ORDER BY supplier_count DESC, n.n_name ASC;

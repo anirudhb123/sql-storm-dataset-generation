@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostTypeName,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+MostVotedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        COUNT(v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+    ORDER BY 
+        VoteCount DESC
+    LIMIT 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.PostTypeName,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ts.TagName,
+    ts.TagCount,
+    mvp.VoteCount,
+    mvp.LastVoteDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON ts.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+LEFT JOIN 
+    MostVotedPosts mvp ON rp.PostId = mvp.PostId
+WHERE 
+    rp.RankByViews <= 5 OR rp.RankByScore <= 5
+ORDER BY 
+    rp.RankByViews, rp.RankByScore;

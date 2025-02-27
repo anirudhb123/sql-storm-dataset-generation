@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '2 years'
+    GROUP BY 
+        p.Id
+),
+RecentEdits AS (
+    SELECT 
+        pe.PostId, 
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY pe.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts pe ON ph.PostId = pe.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(v.BountyAmount) > 100 -- Users who have received substantial bounties
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(re.EditDate, '1970-01-01') AS LastEditDate,
+        CASE 
+            WHEN rp.AcceptedAnswerId IS NOT NULL 
+            THEN 'Accepted' 
+            WHEN rp.Score > 0 
+            THEN 'Positive' 
+            ELSE 'Neutral or Negative' 
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+),
+FinalOutput AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.ViewCount,
+        pm.Score,
+        pm.CommentCount,
+        pm.LastEditDate,
+        pm.PostStatus,
+        au.DisplayName AS TopActiveUser
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        ActiveUsers au ON pm.CommentCount >= 5 -- Only consider posts with significant comments
+    ORDER BY 
+        pm.Score DESC, pm.CommentCount DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN LastEditDate IS NOT NULL AND PostStatus = 'Accepted'
+        THEN 'Highly Engaging Post'
+        WHEN LastEditDate IS NULL AND PostStatus = 'Neutral or Negative'
+        THEN 'Needs Attention'
+        ELSE 'General Post'
+    END AS PostCategory
+FROM 
+    FinalOutput
+WHERE 
+    PostStatus != 'Neutral or Negative' 
+ORDER BY 
+    CreationDate DESC
+LIMIT 100;

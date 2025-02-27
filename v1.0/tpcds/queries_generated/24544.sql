@@ -1,0 +1,68 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rn
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+    GROUP BY c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cp.c_customer_sk,
+        cp.total_orders,
+        cp.total_spent,
+        DENSE_RANK() OVER (ORDER BY cp.total_spent DESC) AS customer_rank
+    FROM CustomerPurchases cp
+    WHERE cp.total_orders > 0
+),
+ItemStatistics AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(rr.total_returns, 0) AS total_item_returns,
+        COALESCE(rr.total_returned_quantity, 0) AS total_returned_qty,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_revenue
+    FROM item i
+    LEFT JOIN RankedReturns rr ON i.i_item_sk = rr.sr_item_sk
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    tc.c_customer_sk,
+    itm.i_item_sk,
+    itm.i_item_desc,
+    itm.total_item_returns,
+    itm.total_returned_qty,
+    itm.total_orders,
+    itm.total_revenue,
+    CASE 
+        WHEN itm.total_orders > 0 THEN itm.total_revenue / NULLIF(itm.total_orders, 0)
+        ELSE NULL
+    END AS avg_revenue_per_order,
+    CASE 
+        WHEN total_item_returns > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM TopCustomers tc
+JOIN ItemStatistics itm ON (tc.customer_rank <= 10 AND itm.total_orders IS NOT NULL)
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM store s
+        WHERE s.s_store_sk = (SELECT MAX(s2.s_store_sk) FROM store s2)
+        AND s.s_number_employees > 5 AND s.s_closed_date_sk IS NULL
+    )
+ORDER BY tc.total_spent DESC, itm.total_revenue DESC;

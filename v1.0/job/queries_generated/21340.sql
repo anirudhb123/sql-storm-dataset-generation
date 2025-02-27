@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_order,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ExtendedTitleInfo AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        cm.name AS company_name,
+        mt.kind AS company_type,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        CASE WHEN tm.production_year IS NULL THEN 'Unknown Year' ELSE tm.production_year::text END AS year_info,
+        COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note LIKE '%lead%') OVER (PARTITION BY tm.id) AS lead_count
+    FROM 
+        RankedMovies tm
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cm ON mc.company_id = cm.id
+    LEFT JOIN 
+        company_type mt ON mc.company_type_id = mt.id
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON tm.movie_id = ci.movie_id
+)
+SELECT 
+    eti.title,
+    eti.production_year,
+    eti.company_name,
+    eti.company_type,
+    eti.keyword,
+    eti.year_info,
+    MAX(mk.keyword) AS most_common_keyword,
+    CASE 
+        WHEN lead_count > 0 THEN 'Has Lead Role'
+        ELSE 'No Lead Role' 
+    END AS role_information
+FROM 
+    ExtendedTitleInfo eti
+LEFT JOIN 
+    movie_keyword mk ON eti.movie_id = mk.movie_id
+GROUP BY 
+    eti.title, eti.production_year, eti.company_name, eti.company_type, eti.keyword, eti.year_info, lead_count
+HAVING 
+    COUNT(eti.keyword) > 1 
+    OR COUNT(CASE WHEN eti.keyword IS NOT NULL THEN 1 END) > 0
+ORDER BY 
+    eti.production_year DESC, 
+    lead_count DESC, 
+    eti.title;

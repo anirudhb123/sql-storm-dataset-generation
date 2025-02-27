@@ -1,0 +1,25 @@
+SELECT 
+    SUBSTRING(p.p_name, 1, 15) AS short_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(p.p_retailprice) AS avg_price,
+    r.r_name AS region_name,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20 
+    AND s.s_acctbal > 1000.00
+GROUP BY 
+    short_name, region_name
+HAVING 
+    COUNT(DISTINCT ps.ps_suppkey) > 5
+ORDER BY 
+    avg_price DESC, short_name ASC;

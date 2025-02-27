@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(m.img_url, 'No Image') AS img_url,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_companies mc ON tm.title = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = tm.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = tm.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, max(img_url) as img_url FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'image') GROUP BY movie_id) m ON m.movie_id = tm.movie_id
+    GROUP BY 
+        tm.title, tm.production_year, m.img_url
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.img_url,
+    md.actors
+FROM 
+    MovieDetails md
+WHERE 
+    md.actors IS NOT NULL;

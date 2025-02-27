@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+PostWithAnswers AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        rp.Score,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount 
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        (SELECT 
+            ParentId AS PostId, 
+            COUNT(*) AS AnswerCount 
+         FROM 
+            Posts 
+         WHERE 
+            PostTypeId = 2 
+         GROUP BY 
+            ParentId) a ON rp.PostId = a.PostId
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, a.AnswerCount, rp.Score, ph.PostHistoryTypeId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalOutput AS (
+    SELECT 
+        pwa.PostId,
+        pwa.Title,
+        pwa.ViewCount,
+        pwa.AnswerCount,
+        pwa.Score,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pwa.PostId AND v.VoteTypeId = 2) AS UpVotes, 
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = pwa.PostId AND v.VoteTypeId = 3) AS DownVotes, 
+        pwa.CloseReopenCount
+    FROM 
+        PostWithAnswers pwa
+    LEFT JOIN 
+        UserBadges ub ON pwa.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ub.UserId)
+    WHERE 
+        pwa.UserPostRank <= 3 
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.ViewCount,
+    f.AnswerCount,
+    f.Score,
+    f.GoldBadges,
+    f.SilverBadges,
+    f.BronzeBadges,
+    f.UpVotes,
+    f.DownVotes,
+    CASE 
+        WHEN f.CloseReopenCount > 0 THEN 'Closed/Reopened' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM 
+    FinalOutput f
+WHERE 
+    f.ViewCount > 100 
+ORDER BY 
+    f.Score DESC, f.ViewCount DESC;

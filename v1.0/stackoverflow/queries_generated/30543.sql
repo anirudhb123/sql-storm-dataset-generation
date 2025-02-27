@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+), 
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        cr.Name AS CloseReason,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id -- Assuming Comment stores CloseReasonId.
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or reopened posts
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.AnswerCount,
+    COALESCE(cr.CloseReason, 'Not Closed') AS CloseReason,
+    ub.BadgeCount,
+    CASE 
+        WHEN p.ScoreRank = 1 THEN 'Top Post'
+        WHEN p.RecentPostRank = 1 THEN 'Most Recent'
+        ELSE 'Regular Post'
+    END AS PostStatus
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    CloseReasons cr ON p.PostId = cr.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+WHERE 
+    p.ViewCount > 100 AND (ub.BadgeCount > 0 OR cr.CloseReason IS NOT NULL)
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;
+

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        COALESCE(SUM(vt.Id = 2), 0) AS TotalUpvotes, 
+        COALESCE(SUM(vt.Id = 3), 0) AS TotalDownvotes, 
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(bp.Date), '1900-01-01') AS LastBadgeDate 
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes vt ON rp.PostId = vt.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Badges bp ON rp.OwnerUserId = bp.UserId
+    WHERE 
+        bp.Date IS NULL OR bp.Date >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months' 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.OwnerUserId,
+        (TotalUpvotes - TotalDownvotes) AS NetScore,
+        DENSE_RANK() OVER (ORDER BY (TotalUpvotes - TotalDownvotes) DESC) AS ScoreRank
+    FROM 
+        PostMetrics pm
+    WHERE 
+        pm.TotalUpvotes - pm.TotalDownvotes > 0 
+)
+SELECT 
+    u.DisplayName,
+    tp.Title,
+    tp.NetScore,
+    tp.ScoreRank,
+    CASE 
+        WHEN tp.ScoreRank = 1 THEN 'Gold Star'
+        WHEN tp.ScoreRank <= 5 THEN 'Silver Star'
+        ELSE 'Participant'
+    END AS ParticipationLevel, 
+    ph.Comment AS PostHistoryComment,
+    (SELECT string_agg(pt.Name, ', ') 
+     FROM PostHistoryTypes pt 
+     JOIN PostHistory ph ON pt.Id = ph.PostHistoryTypeId 
+     WHERE ph.PostId = tp.PostId
+    ) AS PostHistoryTypes,
+    CASE 
+        WHEN LastBadgeDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' THEN 'Recently Honored'
+        ELSE 'Seasoned Contributor'
+    END AS ContributorStatus
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId 
+WHERE 
+    ph.Comment IS NOT NULL 
+ORDER BY 
+    tp.ScoreRank;

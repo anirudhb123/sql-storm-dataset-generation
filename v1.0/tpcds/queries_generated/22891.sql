@@ -1,0 +1,36 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT sr_returned_date_sk, sr_item_sk, sr_return_quantity, sr_customer_sk,
+           ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL
+),
+AggregateReturns AS (
+    SELECT sr_customer_sk, SUM(sr_return_quantity) AS total_return_quantity,
+           COUNT(DISTINCT sr_item_sk) AS unique_item_returns
+    FROM CustomerReturns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographicsWithReturns AS (
+    SELECT cd.*, ar.total_return_quantity, ar.unique_item_returns
+    FROM customer_demographics cd
+    LEFT JOIN AggregateReturns ar ON cd.cd_demo_sk = ar.sr_customer_sk
+)
+SELECT ca.city, ca.state, cd.cd_gender, cd.cd_marital_status, 
+       COUNT(DISTINCT c.c_customer_id) AS total_customers,
+       AVG(COALESCE(cd.total_return_quantity, 0)) AS avg_return_quantity,
+       MAX(cd.unique_item_returns) AS max_unique_item_returns,
+       SUM(CASE WHEN cd.cd_credit_rating = 'Excellent' THEN 1 ELSE 0 END) AS excellent_credit_count,
+       SUM(CASE WHEN cd.cd_credit_rating IS NULL THEN 1 ELSE 0 END) AS null_credit_count
+FROM customer_address ca
+JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN CustomerDemographicsWithReturns cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN date_dim dd ON dd.d_date_sk = c.c_first_sales_date_sk
+WHERE dd.d_year = 2022 
+  AND (cd.cd_marital_status IS NULL OR cd.cd_marital_status = 'S') 
+  AND ca.state IN ('CA', 'NY') 
+  AND (ca.ca_zip LIKE '9%' OR ca.ca_zip LIKE '1%')
+GROUP BY ca.city, ca.state, cd.cd_gender, cd.cd_marital_status
+HAVING COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY avg_return_quantity DESC NULLS LAST
+LIMIT 100;

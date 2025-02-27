@@ -1,0 +1,65 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_container, 
+        p.p_retailprice, 
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) as rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost > 100.00)
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_address, 
+        n.n_name AS nation, 
+        r.r_name AS region
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > 500.00 
+        AND s.s_comment LIKE '%reliable%'
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(DISTINCT li.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000.00
+)
+SELECT 
+    rp.p_name, 
+    rp.p_brand, 
+    sd.s_name, 
+    os.item_count, 
+    os.total_revenue
+FROM 
+    RankedParts rp
+JOIN 
+    SupplierDetails sd ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey)
+JOIN 
+    OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sd.nation))
+WHERE 
+    rp.rn <= 5
+ORDER BY 
+    rp.p_retailprice DESC, 
+    sd.s_name ASC;

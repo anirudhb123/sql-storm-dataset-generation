@@ -1,0 +1,61 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, h.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy h ON s.s_nationkey = h.s_nationkey
+    WHERE s.s_acctbal < h.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_custkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           r.r_name AS region_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON n.n_nationkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_name
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           coalesce(os.total_revenue, 0) AS total_revenue,
+           coalesce(os.order_count, 0) AS order_count
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+),
+FilteredSuppliers AS (
+    SELECT sh.s_suppkey, 
+           sh.s_name, 
+           nt.total_cost
+    FROM SupplierHierarchy sh
+    JOIN NationDetails nt ON sh.s_nationkey = nt.n_nationkey
+    WHERE sh.level <= 3
+)
+SELECT cr.c_custkey,
+       cr.c_name,
+       cr.total_revenue,
+       fs.s_name AS supplier_name,
+       fs.total_cost,
+       CASE 
+           WHEN cr.order_count = 0 THEN 'No Orders'
+           WHEN fs.total_cost < 10000 THEN 'Low Cost Supplier'
+           ELSE 'Regular Supplier' 
+       END AS supplier_status
+FROM CustomerRevenue cr
+LEFT JOIN FilteredSuppliers fs ON fs.s_suppkey = cr.c_custkey
+WHERE cr.total_revenue > 1000
+ORDER BY cr.total_revenue DESC, fs.total_cost ASC;

@@ -1,0 +1,42 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+ValidOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           CASE 
+               WHEN o.o_orderstatus = 'F' THEN 'Finalized'
+               WHEN o.o_orderstatus = 'P' AND o.o_totalprice > 0 THEN 'Pending'
+               ELSE 'Unknown' 
+           END AS status
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01'
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+           (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT r.r_name, COUNT(DISTINCT lo.l_orderkey) AS order_count, 
+       SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS total_revenue,
+       AVG(ld.l_tax) AS average_tax,
+       STRING_AGG(DISTINCT ds.s_name, ', ') AS distinct_supplier_names
+FROM region r
+LEFT OUTER JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN ValidOrders vo ON vo.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderkey % 2 = 0
+)
+LEFT JOIN lineitem ld ON ld.l_orderkey = vo.o_orderkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rn <= 3
+LEFT JOIN PartDetails pd ON ld.l_partkey = pd.p_partkey
+WHERE pd.profit_margin > 10 AND 
+      (s.s_name IS NULL OR s.s_name NOT LIKE '%temporary%')
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT lo.l_orderkey) > 5 OR SUM(ld.l_extendedprice) IS NULL
+ORDER BY total_revenue DESC, r.r_name ASC;

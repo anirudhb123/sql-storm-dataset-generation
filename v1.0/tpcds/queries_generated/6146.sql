@@ -1,0 +1,49 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        DATEDIFF(CURDATE(), MIN(d_date)) AS days_since_first_purchase
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        ss.total_sales,
+        ss.total_quantity,
+        ss.total_discount,
+        ss.days_since_first_purchase
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer c ON ss.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ss.total_sales > 1000
+    ORDER BY 
+        ss.total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.total_quantity,
+    tc.total_discount,
+    tc.days_since_first_purchase,
+    cd.cd_marital_status,
+    cd.cd_gender,
+    cd.cd_education_status
+FROM 
+    top_customers tc
+JOIN 
+    customer_demographics cd ON tc.ws_bill_customer_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_credit_rating = 'Good'
+ORDER BY 
+    tc.total_sales DESC;

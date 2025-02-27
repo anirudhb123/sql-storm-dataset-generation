@@ -1,0 +1,79 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_store_sk,
+        ws_item_sk,
+        RANK() OVER (PARTITION BY ws_store_sk ORDER BY ws_net_profit DESC) AS rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity,
+        SUM(ws_net_profit) OVER (PARTITION BY ws_item_sk) AS total_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS item_ranking
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+item_details AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        i.i_current_price,
+        i.i_brand,
+        COALESCE(ib.ib_lower_bound, 0) AS income_lower,
+        COALESCE(ib.ib_upper_bound, 1000000) AS income_upper
+    FROM 
+        item i
+    LEFT JOIN 
+        income_band ib ON i.i_item_sk = ib.ib_income_band_sk
+),
+sales_info AS (
+    SELECT 
+        s.ss_store_sk,
+        COUNT(DISTINCT s.ss_ticket_number) AS unique_transactions,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        AVG(s.ss_list_price) AS avg_list_price,
+        CASE 
+            WHEN AVG(s.ss_net_profit) IS NULL THEN 'No Profit'
+            ELSE 'Has Profit'
+        END AS profit_status
+    FROM 
+        store_sales s
+    GROUP BY 
+        s.ss_store_sk
+),
+final_report AS (
+    SELECT 
+        s.ss_store_sk AS store_id,
+        d.i_item_id AS item_id,
+        d.i_product_name AS product_name,
+        SUM(s.total_net_profit) AS total_store_profit,
+        COUNT(s.unique_transactions) AS transaction_count,
+        ROUND(SUM(d.i_current_price) / NULLIF(COUNT(d.i_item_id), 0), 2) AS avg_price,
+        SUM(CASE WHEN s.profit_status = 'No Profit' THEN 1 ELSE 0 END) AS no_profit_count,
+        (SELECT COUNT(*) FROM customer WHERE c_current_addr_sk IS NULL) AS null_address_count
+    FROM 
+        sales_info s
+    JOIN 
+        ranked_sales r ON s.ss_store_sk = r.ws_store_sk
+    JOIN 
+        item_details d ON r.ws_item_sk = d.i_item_id
+    WHERE 
+        r.rank <= 5 AND 
+        d.income_lower < 50000 AND 
+        d.income_upper > 20000
+    GROUP BY 
+        s.ss_store_sk, d.i_item_id, d.i_product_name
+)
+SELECT 
+    store_id,
+    item_id,
+    product_name,
+    total_store_profit,
+    transaction_count,
+    avg_price,
+    NULLIF(no_profit_count, 0) AS no_profit_transactions,
+    NULLIF(null_address_count, 0) AS address_issues
+FROM 
+    final_report
+ORDER BY 
+    total_store_profit DESC
+FETCH FIRST 10 ROWS ONLY;

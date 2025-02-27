@@ -1,0 +1,48 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS MovieTitle,
+        t.production_year AS Year,
+        GROUP_CONCAT(DISTINCT ak.name) AS AlternateNames,
+        GROUP_CONCAT(DISTINCT k.keyword) AS Keywords,
+        GROUP_CONCAT(DISTINCT cn.name) AS Companies,
+        GROUP_CONCAT(DISTINCT p.info) AS PersonInfo
+    FROM 
+        title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN person_info p ON ci.person_id = p.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+RankedMovies AS (
+    SELECT 
+        md.MovieTitle,
+        md.Year,
+        md.AlternateNames,
+        md.Keywords,
+        md.Companies,
+        md.PersonInfo,
+        RANK() OVER (ORDER BY md.Year DESC) AS YearRank
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    MovieTitle,
+    Year,
+    AlternateNames,
+    Keywords,
+    Companies,
+    PersonInfo
+FROM 
+    RankedMovies
+WHERE 
+    YearRank <= 10
+ORDER BY 
+    Year DESC;

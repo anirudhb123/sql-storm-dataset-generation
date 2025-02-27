@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn,
+        COUNT(DISTINCT c.person_id) AS total_cast
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+), 
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(mi.info, ', ') AS movie_info
+    FROM 
+        title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    r.title, 
+    r.production_year, 
+    r.total_cast, 
+    COALESCE(mi.movie_info, 'No Info Available') AS additional_info,
+    CASE 
+        WHEN r.total_cast > 10 THEN 'Large Ensemble'
+        WHEN r.total_cast BETWEEN 5 AND 10 THEN 'Medium Ensemble'
+        ELSE 'Small Cast' 
+    END AS cast_size_category
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    MovieInfo mi ON r.id = mi.movie_id
+WHERE 
+    r.rn <= 5 
+ORDER BY 
+    r.production_year DESC, r.total_cast DESC;

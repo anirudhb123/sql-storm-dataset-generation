@@ -1,0 +1,34 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 
+           c_current_cdemo_sk, c_pref_customer_flag, 
+           1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           c.c_current_cdemo_sk, c.c_pref_customer_flag, 
+           ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_current_cdemo_sk = c.c_current_hdemo_sk
+)
+SELECT ca.ca_state, 
+       cd.cd_gender, 
+       SUM(ws.ws_ext_sales_price) AS total_sales,
+       AVG(ws.ws_net_profit) AS avg_net_profit,
+       COUNT(DISTINCT ch.c_customer_sk) AS total_customers
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT OUTER JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN customer_hierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+WHERE ca.ca_state IS NOT NULL 
+  AND (cd.cd_gender = 'F' OR cd.cd_gender = 'M')
+  AND ws.ws_sales_price BETWEEN 10.00 AND 1000.00
+  AND NOT EXISTS (SELECT 1 FROM store_returns sr 
+                  WHERE sr.sr_customer_sk = c.c_customer_sk 
+                    AND sr.sr_return_quantity > 0)
+GROUP BY ca.ca_state, cd.cd_gender
+HAVING SUM(ws.ws_ext_sales_price) > 50000
+ORDER BY total_sales DESC, avg_net_profit DESC
+LIMIT 100;

@@ -1,0 +1,76 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        ARRAY(SELECT TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))) AS Tag
+              ORDER BY Tag) AS TagsArray
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+PostMetrics AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ARRAY(SELECT DISTINCT bt.Name FROM Badges bt JOIN Users u ON bt.UserId = u.Id WHERE u.Id = p.OwnerUserId) AS UserBadges
+    FROM 
+        TaggedPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 14, 15) 
+),
+FinalResults AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.ViewCount,
+        pm.CommentCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        tags.TagsArray,
+        h.HistoryType,
+        h.UserDisplayName AS HistoryEditor,
+        h.HistoryDate,
+        h.Comment AS EditorComment
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        PostHistoryDetails h ON pm.PostId = h.PostId
+)
+SELECT 
+    *,
+    (UpVotes - DownVotes) AS NetVotes
+FROM 
+    FinalResults
+ORDER BY 
+    ViewCount DESC, CreationDate DESC
+LIMIT 100;

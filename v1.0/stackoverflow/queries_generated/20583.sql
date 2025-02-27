@@ -1,0 +1,115 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        AvgScore,
+        RANK() OVER (ORDER BY TotalViews DESC) as ViewRank,
+        RANK() OVER (ORDER BY AvgScore DESC) as ScoreRank
+    FROM 
+        UserPostStats
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        h.UserId AS EditorId,
+        h.UserDisplayName AS EditorName,
+        h.CreationDate AS EditDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY h.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId AND h.PostHistoryTypeId IN (4, 5, 6, 10)
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AnswerCount,
+        p.ViewCount,
+        p.CreationDate,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(MIN(pa.EditDate), p.CreationDate) AS FirstEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostActivity pa ON p.Id = pa.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tu.DisplayName,
+    S.UserId,
+    S.PostId,
+    S.Title,
+    S.AnswerCount,
+    S.ViewCount,
+    S.UpVotes,
+    S.DownVotes,
+    S.FirstEditDate,
+    CASE 
+        WHEN S.FirstEditDate = S.CreationDate THEN 'Never Edited'
+        ELSE 'Edited'
+    END AS EditStatus
+FROM 
+    TopUsers tu
+JOIN 
+    PostSummary S ON tu.UserId = S.UserId
+WHERE 
+    tu.ViewRank <= 10 OR 
+    tu.ScoreRank <= 10
+ORDER BY 
+    S.ViewCount DESC, S.AnswerCount DESC;
+
+-- Additional insights into badges earned by top users.
+WITH BadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    bs.BadgeCount, 
+    bs.GoldBadges, 
+    bs.SilverBadges, 
+    bs.BronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    BadgeStats bs ON u.Id = bs.UserId
+WHERE 
+    bs.BadgeCount IS NOT NULL
+ORDER BY 
+    bs.BadgeCount DESC;

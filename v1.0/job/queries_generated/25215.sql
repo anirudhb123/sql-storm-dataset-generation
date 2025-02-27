@@ -1,0 +1,64 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name ORDER BY c.nr_order), 'No Cast') AS cast_list,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names,
+        COUNT(DISTINCT m.id) AS total_movie_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+cast_details AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles,
+        COUNT(DISTINCT cc.movie_id) AS total_movies
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    GROUP BY 
+        c.person_id, a.name
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.cast_list,
+    md.company_names,
+    cd.actor_name,
+    cd.roles,
+    cd.total_movies,
+    md.total_movie_info
+FROM 
+    movie_details md
+LEFT JOIN 
+    cast_details cd ON md.movie_id = cd.total_movies
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, md.title;

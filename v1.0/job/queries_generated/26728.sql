@@ -1,0 +1,64 @@
+WITH movie_summary AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+),
+actor_summary AS (
+    SELECT 
+        actor_name,
+        COUNT(movie_title) AS movie_count,
+        ARRAY_AGG(DISTINCT movie_keyword) AS keywords
+    FROM 
+        movie_summary
+    GROUP BY 
+        actor_name
+),
+popular_actors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        keywords
+    FROM 
+        actor_summary
+    WHERE 
+        movie_count > 3
+),
+keyword_analysis AS (
+    SELECT 
+        keyword,
+        COUNT(DISTINCT movie_title) AS movie_count
+    FROM 
+        movie_summary
+    GROUP BY 
+        keyword
+    HAVING 
+        COUNT(DISTINCT movie_title) > 1
+)
+SELECT 
+    pa.actor_name,
+    pa.movie_count AS total_movies,
+    STRING_AGG(DISTINCT pa.keywords::text, ', ') AS associated_keywords,
+    ka.keyword,
+    ka.movie_count AS keyword_movie_count
+FROM 
+    popular_actors pa
+JOIN 
+    keyword_analysis ka ON pa.keywords @> ARRAY[ka.keyword]
+GROUP BY 
+    pa.actor_name, pa.movie_count, ka.keyword, ka.movie_count
+ORDER BY 
+    pa.movie_count DESC, ka.movie_count DESC;

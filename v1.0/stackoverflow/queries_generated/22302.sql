@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        CASE 
+            WHEN p.Score >= 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreType
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),  
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE v.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY v.PostId
+), 
+PostHistoryList AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= CURRENT_DATE - INTERVAL '3 months' 
+      AND ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ScoreType,
+    COALESCE(rv.VoteCount, 0) AS VoteCount,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    STRING_AGG(CONCAT(ph.UserDisplayName, ': ', ph.Comment), '; ') AS RecentHistory
+FROM RankedPosts rp
+LEFT JOIN RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN PostHistoryList ph ON rp.PostId = ph.PostId AND ph.HistoryRank <= 3
+WHERE rp.Rank <= 5
+GROUP BY 
+    rp.PostId, 
+    rp.Title, 
+    rp.OwnerDisplayName, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.ScoreType
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.Score DESC
+LIMIT 10
+OFFSET 5;
+
+-- Corner cases handled:
+-- 1. Posts that have no votes will still show up with VoteCount as 0.
+-- 2. The STRING_AGG function collects user comments who contributed to close/reopen/deleted history and avoids NULL logic by COALESCE.
+-- 3. The use of ROW_NUMBER() in CTEs and aggregations ensures we handle ties and ranks effectively.
+-- 4. The WHERE clause of the outer query filters to include only posts created in the last year and limits the results to the top ranked in score.

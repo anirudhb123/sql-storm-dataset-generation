@@ -1,0 +1,83 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk) AS return_rank
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        cd.cd_credit_rating,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        CASE 
+            WHEN cd.cd_gender = 'M' AND cd.cd_marital_status = 'S' 
+                THEN 'Single Male' 
+            WHEN cd.cd_gender = 'F' AND cd.cd_marital_status = 'M' 
+                THEN 'Married Female' 
+            ELSE 'Other' 
+        END AS demographic_group
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE 
+        wp.wp_creation_date_sk IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk
+),
+ReturnSummary AS (
+    SELECT 
+        cr.return_rank,
+        cd.demographic_group,
+        COUNT(*) AS total_returns,
+        SUM(cr.sr_return_quantity) AS total_return_quantity,
+        SUM(cr.sr_return_amt) AS total_return_amt
+    FROM 
+        CustomerReturns cr
+    LEFT JOIN 
+        CustomerDemographics cd ON cr.s_customer_sk = cd.c_customer_sk
+    WHERE 
+        cr.return_rank <= 10
+    GROUP BY 
+        cr.return_rank, cd.demographic_group
+)
+SELECT 
+    rs.demographic_group,
+    COALESCE(SD.total_sold, 0) AS total_sold,
+    COALESCE(SD.total_sales, 0.00) AS total_sales,
+    COALESCE(RS.total_returns, 0) AS total_returns,
+    COALESCE(RS.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(RS.total_return_amt, 0.00) AS total_return_amt,
+    CASE 
+        WHEN COALESCE(SD.total_sales, 0) = 0 THEN NULL
+        ELSE (COALESCE(RS.total_return_amt, 0) / COALESCE(SD.total_sales, 0)) * 100 
+    END AS return_to_sale_ratio
+FROM 
+    ReturnSummary RS
+FULL OUTER JOIN 
+    SalesData SD ON RS.demographic_group = SD.ws_item_sk
+WHERE 
+    (total_returns > 5 OR total_sales > 1000)
+ORDER BY 
+    return_to_sale_ratio DESC NULLS LAST;

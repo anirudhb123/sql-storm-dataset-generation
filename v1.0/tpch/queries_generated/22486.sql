@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_orderdate, o_orderpriority, 
+           1 AS level, CAST(o_orderkey AS VARCHAR) AS path
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_orderdate, o.o_orderpriority,
+           oh.level + 1, CAST(oh.path || ' -> ' || o.o_orderkey AS VARCHAR)
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+CustomersWithOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING COUNT(o.o_orderkey) > 5
+),
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT DISTINCT 
+    p.p_partkey, 
+    p.p_name, 
+    CASE 
+        WHEN (ps.total_supply_cost IS NULL OR ps.total_supply_cost = 0) THEN 'No Supplier'
+        ELSE 'Supplier Available' 
+    END AS supplier_status,
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY c.c_acctbal DESC) AS customer_rank,
+    COUNT(DISTINCT l.l_orderkey) FILTER (WHERE l.l_returnflag = 'R') OVER (PARTITION BY p.p_partkey) AS returns_count
+FROM part p
+LEFT JOIN PartSupplierInfo ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN CustomersWithOrders c ON l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2 
+    WHERE p2.p_container IS NOT NULL
+) 
+AND p.p_size IS NOT NULL
+ORDER BY customer_rank DESC, supplier_status, returns_count DESC;

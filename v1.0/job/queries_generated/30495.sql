@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id,
+        CONCAT('Sequel of: ', mv.title),
+        mh.level + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info a
+    JOIN 
+        role_type r ON a.role_id = r.id
+    GROUP BY 
+        a.person_id, a.movie_id, r.role
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        SUM(role_count) AS total_roles
+    FROM 
+        ActorRoles
+    GROUP BY 
+        person_id
+    HAVING 
+        SUM(role_count) > 5
+),
+MovieDetails AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT p.name, ', ') AS actor_names
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        a.prodæuction_year > 2010 AND
+        a.title IS NOT NULL AND 
+        a.title NOT LIKE '%demo%'
+    GROUP BY 
+        a.id
+)
+SELECT 
+    d.movie_id,
+    d.title,
+    d.production_year,
+    d.actor_count,
+    d.actor_names,
+    mh.level,
+    COALESCE(t.total_roles, 0) AS actor_role_count
+FROM 
+    MovieDetails d
+LEFT JOIN 
+    MovieHierarchy mh ON d.movie_id = mh.movie_id
+LEFT JOIN 
+    TopActors t ON t.person_id IN (SELECT UNNEST(STRING_TO_ARRAY(d.actor_names, ', '))) 
+ORDER BY 
+    d.production_year DESC, 
+    mh.level ASC,
+    d.actor_count DESC
+LIMIT 20;

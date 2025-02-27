@@ -1,0 +1,96 @@
+
+WITH CustomerReturnStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returned_qty,
+        COUNT(DISTINCT sr_ticket_number) AS total_return_count,
+        AVG(sr_return_amt_inc_tax) AS avg_return_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_qty_on_hand
+    FROM 
+        inventory inv
+    JOIN 
+        warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        inv.inv_item_sk, w.w_warehouse_id
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales_qty,
+        SUM(ws.ws_sales_price) AS total_sales_value
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+SalesReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(COALESCE(wr_return_quantity, 0)) AS total_web_returns_qty
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_returns wr ON ws.ws_item_sk = wr.wr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+ItemStatistics AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(sd.total_sales_qty, 0) AS total_sales_qty,
+        COALESCE(sd.total_sales_value, 0) AS total_sales_value,
+        COALESCE(rs.total_web_returns_qty, 0) AS total_web_returns_qty,
+        COALESCE(qo.total_returned_qty, 0) AS total_customer_returns,
+        COALESCE(qo.total_return_count, 0) AS total_returned_transactions,
+        CASE 
+            WHEN COALESCE(sd.total_sales_qty, 0) = 0 THEN NULL 
+            ELSE ROUND(COALESCE(qo.total_returned_qty, 0) * 100.0 / COALESCE(sd.total_sales_qty, 0), 2) 
+        END AS return_rate_percentage
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesData sd ON i.i_item_sk = sd.ws_item_sk
+    LEFT JOIN 
+        SalesReturns rs ON i.i_item_sk = rs.ws_item_sk
+    LEFT JOIN 
+        CustomerReturnStats qo ON qo.c_customer_sk = (
+            SELECT 
+                sr_customer_sk 
+            FROM 
+                store_returns sr 
+            WHERE 
+                sr.sr_item_sk = i.i_item_sk 
+            ORDER BY 
+                total_return_count DESC 
+            LIMIT 1
+        )
+)
+SELECT 
+    is.i_item_sk,
+    is.i_item_desc,
+    is.total_sales_qty,
+    is.total_sales_value,
+    is.total_web_returns_qty,
+    is.total_customer_returns,
+    is.total_returned_transactions,
+    COALESCE(is.return_rate_percentage, 'No Sales') AS return_rate_percentage
+FROM 
+    ItemStatistics is
+WHERE 
+    is.total_sales_qty > 50 OR is.total_customer_returns > 5
+HAVING 
+    COALESCE(is.return_rate_percentage, 'No Sales') IS NOT NULL
+ORDER BY 
+    return_rate_percentage DESC NULLS LAST;

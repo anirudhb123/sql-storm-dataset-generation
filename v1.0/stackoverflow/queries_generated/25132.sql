@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY COUNT(C.Id) DESC) AS RankByComments,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'::text)::int[])
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.OwnerUserId
+),
+TopCommentedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByComments <= 5 -- Top 5 by comments per user
+)
+SELECT 
+    U.DisplayName AS Author,
+    TCP.Title,
+    TCP.CommentCount,
+    TCP.UpVotes,
+    TCP.DownVotes,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagList
+FROM 
+    TopCommentedPosts TCP
+JOIN 
+    Users U ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = TCP.PostId)
+JOIN 
+    (SELECT UNNEST(Tags) AS TagName FROM TopCommentedPosts) AS T ON TRUE
+GROUP BY 
+    U.DisplayName, TCP.Title, TCP.CommentCount, TCP.UpVotes, TCP.DownVotes
+ORDER BY 
+    TCP.CommentCount DESC, TCP.UpVotes DESC;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            MAX(Class) AS Class
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    cp.CloseCount,
+    cp.CloseReasons,
+    us.TotalBounty
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.UserId)
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UserStats us ON up.UserId = us.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    up.Reputation DESC, rp.Score DESC;

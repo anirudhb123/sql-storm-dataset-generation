@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           DENSE_RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice > 1000
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_sales,
+           RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM supplier s
+    JOIN SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, COALESCE(cte.ps_supplycost, 0) AS lowest_supplycost, 
+       COALESCE(cs.total_sales, 0) AS total_sales,
+       r.s_name AS top_supplier,
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY cs.total_sales DESC) AS rank_sales,
+       (SELECT COUNT(*) FROM CustomerOrders WHERE o_orderkey = co.o_orderkey) AS order_count
+FROM part p
+LEFT JOIN SupplyCostCTE cte ON p.p_partkey = cte.ps_partkey AND cte.rn = 1
+LEFT JOIN RankedSuppliers cs ON cs.s_suppkey IN (SELECT ps_supkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+LEFT JOIN (SELECT DISTINCT o.o_orderkey, l.l_partkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey) co ON co.l_partkey = p.p_partkey
+LEFT JOIN (SELECT s.s_suppkey, s.s_name, RANK() OVER (ORDER BY total_sales DESC) as sales_rank
+            FROM SupplierSales
+            WHERE total_sales IS NOT NULL) r ON r.sales_rank = 1
+WHERE p.p_retailprice IS NOT NULL
+ORDER BY p.p_partkey, total_sales DESC;

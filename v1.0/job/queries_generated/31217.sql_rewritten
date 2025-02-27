@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year BETWEEN 2000 AND 2020
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_details AS (
+    SELECT
+        c.movie_id,
+        p.name,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name p ON c.person_id = p.person_id
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+movie_info_aggregation AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_details
+    FROM
+        movie_info mi
+    GROUP BY
+        mi.movie_id
+),
+combined_results AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cd.name AS cast_member,
+        cd.role AS role,
+        cd.role_order,
+        COALESCE(mia.info_details, 'No info available') AS additional_info
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN
+        movie_info_aggregation mia ON mh.movie_id = mia.movie_id
+)
+SELECT
+    cr.movie_id,
+    cr.title,
+    cr.production_year,
+    cr.cast_member,
+    cr.role,
+    cr.role_order,
+    cr.additional_info
+FROM
+    combined_results cr
+WHERE
+    (cr.role_order IS NOT NULL AND cr.role_order <= 5) OR
+    (cr.additional_info IS NOT NULL AND cr.additional_info LIKE '%Award%')
+ORDER BY
+    cr.production_year DESC,
+    cr.movie_id,
+    cr.role_order;

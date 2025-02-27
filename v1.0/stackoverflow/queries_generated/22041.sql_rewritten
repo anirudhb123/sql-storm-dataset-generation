@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(COUNT(c.Id) FILTER (WHERE c.Score > 0), 0) AS PositiveComments,
+        COALESCE(MAX(b.Class), 0) AS HighestBadgeClass,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVotesCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.PostRank,
+        rp.PositiveComments,
+        rp.HighestBadgeClass,
+        (rp.UpVotesCount - rp.DownVotesCount) AS VoteBalance
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10 
+), PostDetails AS (
+    SELECT 
+        mcp.PostId,
+        mcp.Title,
+        mcp.CreationDate,
+        CASE WHEN mcp.VoteBalance > 0 THEN 'Positive'
+             WHEN mcp.VoteBalance < 0 THEN 'Negative'
+             ELSE 'Neutral' END AS PostVoteCategory,
+        pt.Name AS PostTypeName,
+        COALESCE(ph.Comment, 'No close reason') AS CloseReason,
+        mcp.PositiveComments
+    FROM 
+        MostCommentedPosts mcp
+    LEFT JOIN 
+        PostTypes pt ON pt.Id = (SELECT DISTINCT pt2.Id FROM Posts p2 
+                                  JOIN PostTypes pt2 ON p2.PostTypeId = pt2.Id 
+                                  WHERE p2.Id = mcp.PostId LIMIT 1)
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = mcp.PostId AND ph.PostHistoryTypeId = 10
+)
+SELECT 
+    pd.*,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') FROM Tags t 
+     JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+     WHERE p.Id = pd.PostId) AS RelatedTags,
+    (SELECT COUNT(*) FROM Votes v 
+     WHERE v.PostId = pd.PostId AND v.VoteTypeId = 2) AS TotalUpVotes,
+    (SELECT COUNT(*) FROM Votes v 
+     WHERE v.PostId = pd.PostId AND v.VoteTypeId = 3) AS TotalDownVotes
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PositiveComments > 5
+ORDER BY 
+    pd.CreationDate DESC, 
+    pd.Score DESC;

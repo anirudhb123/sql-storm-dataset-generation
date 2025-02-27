@@ -1,0 +1,78 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM 
+        customer_address ca
+),
+Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        AddressDetails a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+DateRange AS (
+    SELECT 
+        d.d_date_id,
+        d.d_date
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerData c ON ws.ws_bill_customer_sk = c.c_customer_id
+)
+SELECT 
+    COUNT(sd.ws_order_number) AS total_orders,
+    SUM(sd.ws_net_paid) AS total_sales,
+    AVG(sd.ws_net_paid) AS avg_order_value,
+    c.ca_city,
+    c.ca_state
+FROM 
+    SalesData sd
+JOIN 
+    customer_address c ON sd.c_customer_id = c.ca_address_sk
+JOIN 
+    DateRange dr ON sd.ws_sold_date_sk = dr.d_date_id
+GROUP BY 
+    c.ca_city, c.ca_state
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,93 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 10
+),
+titles_with_cast AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        c.person_id,
+        p.name AS person_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS cast_order,
+        COUNT(c.id) OVER (PARTITION BY a.id) AS total_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name p ON c.person_id = p.person_id
+),
+keyword_movie AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+distinct_roles AS (
+    SELECT 
+        movie_id,
+        ARRAY_AGG(DISTINCT r.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    tc.total_cast,
+    SUM(tc.total_cast) OVER () AS grand_total_cast,
+    COALESCE(km.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN COUNT(dc.roles) = 0 THEN 'No Roles Assigned'
+        ELSE STRING_AGG(DISTINCT unnest(dc.roles), ', ')
+    END AS roles_summary
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    titles_with_cast tc ON mh.movie_id = tc.title_id
+LEFT JOIN 
+    keyword_movie km ON mh.movie_id = km.movie_id
+LEFT JOIN 
+    distinct_roles dc ON mh.movie_id = dc.movie_id
+WHERE 
+    mh.level = 1
+AND 
+    (mh.production_year > 2000 OR mh.production_year IS NULL)
+GROUP BY 
+    mh.title, mh.production_year, km.keywords
+ORDER BY 
+    mh.production_year DESC, mh.title
+LIMIT 50;

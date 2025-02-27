@@ -1,0 +1,54 @@
+
+WITH concatenated_addresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+gender_distribution AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+purchase_summary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    ga.gender,
+    ga.customer_count,
+    COALESCE(ps.total_orders, 0) AS total_orders,
+    COALESCE(ps.total_sales, 0.00) AS total_sales,
+    MAX(ca.full_address) AS sample_address
+FROM 
+    gender_distribution ga
+LEFT JOIN 
+    purchase_summary ps ON ga.cd_gender = ps.cd_gender
+LEFT JOIN 
+    concatenated_addresses ca ON ca.ca_address_sk = (SELECT TOP 1 ca_address_sk FROM customer_address WHERE ca_city = 'New York')
+GROUP BY 
+    ga.gender, ga.customer_count
+ORDER BY 
+    ga.gender;

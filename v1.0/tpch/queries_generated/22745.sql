@@ -1,0 +1,64 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost) DESC) AS brand_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name, p.p_brand
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        LAG(o.o_orderdate) OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 5
+)
+SELECT 
+    r.r_name AS region,
+    np.n_nationkey AS nation_key,
+    COUNT(DISTINCT np.n_name) AS num_nations,
+    SUM(RP.total_supply_cost) AS total_supply_cost,
+    MAX(o.o_orderdate) AS latest_order_date,
+    COUNT(DISTINCT o.o_orderkey) FILTER (WHERE o.o_orderkey IS NOT NULL) AS order_count,
+    CASE 
+        WHEN AVG(si.num_parts) IS NULL THEN 'No Suppliers'
+        ELSE CAST(AVG(si.num_parts) AS VARCHAR)
+    END AS avg_parts_per_supplier
+FROM 
+    region r
+LEFT JOIN 
+    nation np ON r.r_regionkey = np.n_regionkey
+LEFT JOIN 
+    RankedParts RP ON RP.brand_rank <= 5
+LEFT JOIN 
+    RecentOrders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = np.n_nationkey)
+LEFT JOIN 
+    SupplierInfo si ON si.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT RP.p_partkey FROM RankedParts RP))
+GROUP BY 
+    r.r_name, np.n_nationkey
+HAVING 
+    SUM(RP.total_supply_cost) > 10000.00 OR COUNT(DISTINCT np.n_name) >= 3;

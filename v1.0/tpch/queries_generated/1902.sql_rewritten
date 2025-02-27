@@ -1,0 +1,72 @@
+WITH SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+MaxSupplierCost AS (
+    SELECT 
+        sp.ps_partkey,
+        MAX(sp.avg_supply_cost) AS max_cost
+    FROM 
+        SupplierParts sp
+    GROUP BY 
+        sp.ps_partkey
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        o.o_orderdate,
+        o.o_orderstatus
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '1997-01-01'
+),
+RegionSummary AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT od.l_orderkey) AS num_orders,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_sales,
+    COALESCE(MAX(mc.max_cost), 0) AS highest_supplier_cost,
+    AVG(od.l_quantity) AS avg_order_quantity,
+    rs.supplier_count,
+    rs.total_supply_value
+FROM 
+    OrderDetails od
+LEFT JOIN 
+    MaxSupplierCost mc ON od.l_partkey = mc.ps_partkey
+JOIN 
+    RegionSummary rs ON rs.supplier_count > 0
+GROUP BY 
+    r.r_name, rs.supplier_count, rs.total_supply_value
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,57 @@
+
+WITH ranked_web_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_ship_tax) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_ship_tax) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT 
+        wd.ws_bill_customer_sk,
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        wd.total_spent,
+        COUNT(ws_item_sk) AS total_items_purchased
+    FROM ranked_web_sales wd
+    JOIN customer_details cd ON wd.ws_bill_customer_sk = cd.c_customer_id
+    WHERE wd.rank <= 5
+    GROUP BY wd.ws_bill_customer_sk, cd.c_customer_id, cd.c_first_name, cd.c_last_name, wd.total_spent
+),
+store_sales_summary AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (ORDER BY SUM(ss_net_profit) DESC) AS store_rank
+    FROM store_sales
+    GROUP BY ss_store_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_spent,
+    sss.total_net_profit,
+    CASE 
+        WHEN sss.total_net_profit IS NULL THEN 'No sales data' 
+        WHEN sss.total_net_profit > 1000 THEN 'High performer' 
+        ELSE 'Regular performer' 
+    END AS performance_category
+FROM top_customers tc
+LEFT JOIN store_sales_summary sss 
+    ON tc.total_items_purchased = (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = tc.ws_bill_customer_sk AND ss.ss_net_paid > 0)
+WHERE tc.total_spent > (SELECT AVG(total_spent) FROM ranked_web_sales)
+ORDER BY tc.total_spent DESC, sss.total_net_profit ASC
+FETCH FIRST 10 ROWS ONLY;

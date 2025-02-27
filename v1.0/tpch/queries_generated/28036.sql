@@ -1,0 +1,37 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+), FilteredSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.nation_name,
+        rs.part_count,
+        rs.total_supply_value
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+)
+SELECT 
+    fs.nation_name,
+    STRING_AGG(CONCAT(fs.s_name, ' (Parts: ', fs.part_count, ', Total Value: $', FORMAT(fs.total_supply_value, 'N2'), ')'), '; ') AS supplier_info
+FROM 
+    FilteredSuppliers fs
+GROUP BY 
+    fs.nation_name
+ORDER BY 
+    fs.nation_name;

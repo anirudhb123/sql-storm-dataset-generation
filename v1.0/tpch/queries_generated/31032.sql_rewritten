@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 1 AS level 
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1 
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 100 ORDER BY ps.ps_supplycost LIMIT 1)
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS cust_count, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 
+       MIN(l.l_shipdate) AS first_ship_date,
+       MAX(l.l_shipdate) AS last_ship_date,
+       s.s_name AS supplier_name,
+       STRING_AGG(s2.s_name, ', ') AS related_suppliers,
+       ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY total_sales DESC) AS sales_rank,
+       NULLIF(MAX(l.l_tax), 0) AS max_tax_or_null
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN part p ON p.p_partkey = ps.ps_partkey
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN customer c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = l.l_orderkey)
+LEFT JOIN supplier s2 ON s2.s_nationkey = n.n_nationkey AND s2.s_suppkey <> s.s_suppkey
+WHERE l.l_returnflag = 'N' 
+  AND l.l_shipdate BETWEEN DATE '1996-01-01' AND cast('1998-10-01' as date)
+GROUP BY r.r_name, s.s_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+ORDER BY total_sales DESC;

@@ -1,0 +1,79 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        1 AS sale_level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20220101 AND 20221231
+        AND ws_quantity > 0
+    
+    UNION ALL
+    
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        sc.sale_level + 1
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        Sales_CTE sc ON ws.ws_order_number = sc.ws_order_number
+    WHERE 
+        ws.ws_quantity > 1 
+        AND sc.sale_level < 5
+),
+Item_Summary AS (
+    SELECT 
+        i.i_item_id,
+        SUM(sc.ws_ext_sales_price) AS total_sales,
+        AVG(sc.ws_sales_price) AS average_price,
+        COUNT(DISTINCT sc.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY SUM(sc.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        Sales_CTE sc ON i.i_item_sk = sc.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        total_sales IS NOT NULL
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        d.d_month_seq,
+        COALESCE(SUM(CASE WHEN id.order_count > 10 THEN 1 ELSE 0 END), 0) AS high_spender_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        Item_Summary id ON cd.cd_demo_sk = id.sales_rank
+    JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, d.d_month_seq
+)
+SELECT 
+    cust.cd_demo_sk,
+    cust.cd_gender,
+    cust.cd_marital_status,
+    cust.high_spender_count,
+    CONCAT('Q', md.d_month_seq, ' ', EXTRACT(YEAR FROM now())) AS sales_period
+FROM 
+    Customer_Demographics cust
+JOIN 
+    date_dim md ON cust.d_month_seq = md.d_month_seq
+WHERE 
+    cust.high_spender_count > 0
+ORDER BY 
+    cust.high_spender_count DESC
+FETCH FIRST 10 ROWS ONLY;

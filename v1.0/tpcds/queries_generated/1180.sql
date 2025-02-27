@@ -1,0 +1,52 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        CASE 
+            WHEN cd.cd_purchase_estimate < 5000 THEN 'Low' 
+            WHEN cd.cd_purchase_estimate BETWEEN 5000 AND 15000 THEN 'Medium' 
+            ELSE 'High' 
+        END AS purchase_category
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+customer_sales AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.purchase_category,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.order_count, 0) AS order_count
+    FROM customer_info ci
+    LEFT JOIN sales_summary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    purchase_category,
+    total_sales,
+    order_count,
+    CASE 
+        WHEN total_sales = 0 THEN 'No Purchases' 
+        WHEN total_sales < 1000 THEN 'Low Sales'
+        WHEN total_sales < 5000 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_level
+FROM customer_sales
+ORDER BY total_sales DESC
+LIMIT 10
+OFFSET 5;

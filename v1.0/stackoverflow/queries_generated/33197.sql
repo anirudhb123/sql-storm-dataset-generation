@@ -1,0 +1,89 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only include questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+    WHERE 
+        p.PostTypeId = 2  -- Include answers
+),
+
+PostMetrics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.Level,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        ph.PostId, ph.Title, ph.CreationDate, ph.Level
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+TopPosts AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.CommentCount,
+        pm.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY pm.Level ORDER BY pm.TotalBounty DESC) AS Rank
+    FROM 
+        PostMetrics pm
+)
+
+SELECT 
+    tp.Title,
+    tp.CommentCount,
+    tp.TotalBounty,
+    ub.BadgeCount,
+    CASE 
+        WHEN tp.TotalBounty = 0 THEN 'No Bounty'
+        ELSE 'Bounty Granted'
+    END AS BountyStatus
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.PostId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    tp.Rank <= 5  -- Top 5 posts per level
+ORDER BY 
+    tp.Level, tp.TotalBounty DESC;

@@ -1,0 +1,95 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+),
+PartSupplierRank AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        partsupp ps
+),
+KeyedOrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+        COUNT(l.l_orderkey) AS line_count,
+        MAX(l.l_shipdate) AS last_shipdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(total_spent) AS customer_spent,
+    AVG(l_discount) AS avg_discount,
+    STRING_AGG(CONCAT(p.p_name, ' (', ps.ps_availqty, ')'), ', ') AS available_parts,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN o.o_orderkey END) AS returned_orders,
+    MAX(od.last_shipdate) AS latest_shipdate
+FROM 
+    CustomerOrderSummary cos
+JOIN 
+    customer c ON cos.c_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    PartSupplierRank ps ON l.l_partkey = ps.ps_partkey AND ps.rn = 1
+LEFT JOIN 
+    FilteredParts p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    c.c_name, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5 AND 
+    SUM(total_spent) <> 0 
+ORDER BY 
+    customer_spent DESC, total_orders DESC;

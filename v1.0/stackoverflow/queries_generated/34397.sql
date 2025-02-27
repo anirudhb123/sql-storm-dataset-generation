@@ -1,0 +1,93 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 0
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate,
+        Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputation UR ON U.Reputation > UR.Reputation
+    WHERE 
+        U.Id != UR.Id
+),
+PostScoreCalc AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank,
+        COALESCE(COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END), 0) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Score, P.ViewCount, P.OwnerUserId
+),
+Closures AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  -- 10 = Post Closed, 11 = Post Reopened
+    GROUP BY 
+        PH.PostId
+),
+LatestVotes AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    COALESCE(PS.PostId, 0) AS PostId,
+    PS.Score,
+    PS.ViewCount,
+    COALESCE(CL.CloseCount, 0) AS CloseCount,
+    COALESCE(CL.LastClosedDate, 'No Closures') AS LastClosedDate,
+    COALESCE(LV.VoteCount, 0) AS VoteCount,
+    COALESCE(LV.UpVotes, 0) AS UpVotes,
+    COALESCE(LV.DownVotes, 0) AS DownVotes,
+    UR.Level
+FROM 
+    Users U
+LEFT JOIN 
+    PostScoreCalc PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    Closures CL ON PS.PostId = CL.PostId
+LEFT JOIN 
+    LatestVotes LV ON PS.PostId = LV.PostId
+JOIN 
+    UserReputation UR ON U.Id = UR.Id
+WHERE 
+    U.Reputation >= (SELECT AVG(Reputation) FROM Users)  -- Users with above-average reputation
+ORDER BY 
+    U.Reputation DESC, PS.Score DESC
+LIMIT 100;

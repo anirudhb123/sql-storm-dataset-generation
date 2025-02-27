@@ -1,0 +1,86 @@
+
+WITH RECURSIVE ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank_sales
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+inventory_check AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inv_quantity_on_hand,
+        CASE 
+            WHEN inv.inv_quantity_on_hand IS NULL THEN 'Out of Stock'
+            WHEN inv.inv_quantity_on_hand < 10 THEN 'Low Stock'
+            ELSE 'In Stock' 
+        END AS stock_status
+    FROM 
+        inventory inv
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+combined_data AS (
+    SELECT 
+        rss.ws_item_sk,
+        SUM(rss.total_quantity) AS web_sales_quantity,
+        css.total_profit,
+        css.order_count,
+        cs.c_customer_id,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        ic.stock_status
+    FROM 
+        ranked_sales rss
+    LEFT JOIN 
+        sales_summary css ON rss.ws_item_sk = css.ws_item_sk
+    LEFT JOIN 
+        customer_stats cs ON cs.rank_by_estimate <= 10 
+    LEFT JOIN 
+        inventory_check ic ON ic.inv_item_sk = rss.ws_item_sk
+    WHERE 
+        (cs.cd_gender = 'F' OR cs.cd_marital_status = 'M') 
+    GROUP BY 
+        rss.ws_item_sk, css.total_profit, css.order_count, cs.c_customer_id, cs.cd_gender, cs.cd_marital_status, ic.stock_status
+    HAVING 
+        SUM(rss.total_quantity) IS NOT NULL AND 
+        COUNT(cs.c_customer_id) > 0
+)
+SELECT 
+    cd.ws_item_sk, 
+    cd.web_sales_quantity, 
+    cd.total_profit,
+    cd.order_count,
+    COUNT(DISTINCT cd.c_customer_id) AS unique_customers,
+    MAX(cd.stock_status) AS stock_status
+FROM 
+    combined_data cd
+GROUP BY 
+    cd.ws_item_sk, cd.web_sales_quantity, cd.total_profit, cd.order_count
+ORDER BY 
+    cd.total_profit DESC, 
+    cd.web_sales_quantity DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM combined_data) / 10;

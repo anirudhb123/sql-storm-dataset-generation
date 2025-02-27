@@ -1,0 +1,96 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        r.Level + 1 AS Level
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalScore,
+    ups.AverageViews,
+    COALESCE(phs.EditCount, 0) AS TotalEdits,
+    phs.LastEditDate,
+    (SELECT COUNT(*) 
+     FROM Posts p 
+     WHERE p.OwnerUserId = u.Id AND p.ViewCount > 1000) AS HighViewPosts,
+    COUNT(DISTINCT rph.PostId) AS ActiveEngagementLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostHistoryStats phs ON phs.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId IN (SELECT a.ParentId FROM Posts a WHERE a.OwnerUserId = u.Id AND a.PostTypeId = 2)
+WHERE 
+    ups.TotalPosts > 0
+GROUP BY 
+    u.DisplayName, 
+    ups.TotalPosts, 
+    ups.TotalQuestions, 
+    ups.TotalAnswers, 
+    ups.TotalScore, 
+    ups.AverageViews,
+    phs.EditCount, 
+    phs.LastEditDate
+HAVING 
+    COUNT(DISTINCT rph.PostId) > 0 
+ORDER BY 
+    ups.TotalScore DESC, 
+    ups.TotalPosts DESC;

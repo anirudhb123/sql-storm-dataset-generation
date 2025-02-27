@@ -1,0 +1,53 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.full_name,
+        rc.c_customer_id,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        rc.cd_purchase_estimate
+    FROM 
+        RankedCustomers rc
+    WHERE 
+        rc.rank <= 10
+),
+ShippingInfo AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ws.ws_ext_sales_price,
+        wm.sm_carrier
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode wm ON ws.ws_ship_mode_sk = wm.sm_ship_mode_sk
+)
+SELECT 
+    hvc.full_name,
+    hvc.c_customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    SUM(si.ws_net_profit) AS total_net_profit,
+    AVG(si.ws_ext_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT si.ws_order_number) AS total_orders
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    ShippingInfo si ON hvc.c_customer_id = si.ws_order_number
+GROUP BY 
+    hvc.full_name, hvc.c_customer_id, hvc.cd_gender, hvc.cd_marital_status
+ORDER BY 
+    total_net_profit DESC;

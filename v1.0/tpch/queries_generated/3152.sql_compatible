@@ -1,0 +1,39 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales,
+        COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS SalesRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        SUM(TotalSales) AS HighValueSales
+    FROM SupplierSales s
+    WHERE OrderCount > 10
+    GROUP BY s.s_nationkey
+),
+TopRegions AS (
+    SELECT 
+        r.r_name,
+        COALESCE(hv.HighValueSales, 0) AS TotalHighValueSales
+    FROM region r
+    LEFT JOIN HighValueSuppliers hv ON r.r_regionkey = hv.s_nationkey
+)
+SELECT 
+    t.r_name,
+    t.TotalHighValueSales,
+    CASE 
+        WHEN t.TotalHighValueSales > (SELECT AVG(TotalHighValueSales) FROM TopRegions) 
+        THEN 'Above Average' 
+        ELSE 'Below Average' 
+    END AS SalesPerformance
+FROM TopRegions t
+ORDER BY t.TotalHighValueSales DESC;

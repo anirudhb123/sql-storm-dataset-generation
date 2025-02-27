@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    (CASE WHEN rp.UpVoteCount - rp.DownVoteCount > 0 THEN 'Popular' ELSE 'Not Popular' END) AS Popularity,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag ON tag = t.TagName
+     WHERE p.Id = rp.PostId) AS AssociatedTags,
+    CASE 
+        WHEN ru.Reputation IS NULL THEN 'No User' 
+        ELSE ru.DisplayName 
+    END AS LastEditor
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users ru ON ru.Id = (SELECT LastEditorUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    rp.rn <= 10
+ORDER BY 
+    rp.ViewCount DESC, rp.Score DESC
+UNION ALL
+SELECT 
+    'Total' AS PostId,
+    NULL AS Title,
+    NULL AS CreationDate,
+    SUM(rp.Score) AS Score,
+    SUM(rp.ViewCount) AS ViewCount,
+    SUM(rp.UpVoteCount) AS UpVoteCount,
+    SUM(rp.DownVoteCount) AS DownVoteCount,
+    NULL AS Popularity,
+    NULL AS AssociatedTags,
+    NULL AS LastEditor
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Score IS NOT NULL
+HAVING 
+    SUM(rp.Score) > 0
+ORDER BY 
+    ViewCount DESC
+LIMIT 100;

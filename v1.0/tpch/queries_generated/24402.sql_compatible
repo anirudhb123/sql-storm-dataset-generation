@@ -1,0 +1,88 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.n_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) 
+                        FROM supplier s2 
+                        WHERE s2.n_nationkey = s.n_nationkey)
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey, 
+        ps.ps_supplycost, 
+        ps.ps_availqty, 
+        COALESCE(NULLIF(ps.ps_supplycost, 0), 1) AS adjusted_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        PartSupplier ps ON l.l_partkey = ps.p_partkey
+    JOIN 
+        part p ON p.p_partkey = ps.p_partkey
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+            SELECT 
+                AVG(total_revenue) 
+            FROM (
+                SELECT 
+                    SUM(l2.l_extendedprice * (1 - l2.l_discount)) AS total_revenue
+                FROM 
+                    lineitem l2
+                JOIN 
+                    part p2 ON l2.l_partkey = p2.p_partkey
+                GROUP BY 
+                    p2.p_partkey
+            ) AS revenue_summary
+        )
+),
+FinalResult AS (
+    SELECT 
+        t.p_partkey,
+        r.s_name,
+        r.adjusted_supplycost,
+        t.total_revenue,
+        (SELECT MAX(l3.l_shipdate) 
+         FROM lineitem l3 
+         WHERE l3.l_partkey = t.p_partkey) AS last_ship_date,
+        COUNT(DISTINCT r.s_suppkey) OVER (PARTITION BY t.p_partkey) AS supplier_count
+    FROM 
+        TopParts t
+    LEFT JOIN 
+        RankedSuppliers r ON r.rnk <= 3
+)
+SELECT 
+    f.p_partkey, 
+    f.s_name,
+    f.adjusted_supplycost,
+    CASE 
+        WHEN f.total_revenue IS NULL THEN 'No Revenue'
+        ELSE CAST(f.total_revenue AS VARCHAR(255))
+    END AS revenue_statement,
+    f.last_ship_date,
+    f.supplier_count
+FROM 
+    FinalResult f
+WHERE 
+    f.supplier_count > 2 OR f.supplier_count IS NULL
+ORDER BY 
+    f.adjusted_supplycost DESC, f.total_revenue DESC;

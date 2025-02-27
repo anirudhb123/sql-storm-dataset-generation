@@ -1,0 +1,27 @@
+SELECT 
+    CONCAT('Supplier: ', s.s_name, '; Part: ', p.p_name, '; Address: ', s.s_address, 
+           '; Nation: ', n.n_name, '; Total Supplied: ', SUM(ps.ps_availqty)) AS supplier_part_info,
+    LEFT(s.s_comment, 50) AS supplier_comment,
+    REPLACE(s.s_phone, '-', '') AS clean_phone,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    n.n_name LIKE 'A%' 
+    AND p.p_retailprice > 50.00
+GROUP BY 
+    s.s_name, p.p_name, s.s_address, n.n_name, s.s_comment
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_supplied DESC, clean_phone;

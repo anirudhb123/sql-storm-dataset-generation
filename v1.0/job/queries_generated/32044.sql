@@ -1,0 +1,84 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mtl.title, 'N/A') AS linked_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mtl ON ml.linked_movie_id = mtl.id
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mtl.title, 'N/A') AS linked_title,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    LEFT JOIN 
+        aka_title mtl ON ml.linked_movie_id = mtl.id
+    WHERE 
+        mh.level < 5
+),
+movie_info_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS info_types_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS company_notes_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id
+),
+final_summary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mis.info_types_count,
+        mis.keywords,
+        mis.company_notes_count
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_info_summary mis ON mh.movie_id = mis.movie_id
+    WHERE 
+        mis.info_types_count > 2
+        AND mh.level = 1
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.info_types_count,
+    f.keywords,
+    f.company_notes_count
+FROM 
+    final_summary f
+LEFT JOIN 
+    cast_info ci ON f.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+WHERE 
+    an.name IS NOT NULL
+ORDER BY 
+    f.production_year DESC, f.title
+LIMIT 100;

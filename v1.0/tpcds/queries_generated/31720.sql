@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+max_sales AS (
+    SELECT 
+        m.ws_item_sk, 
+        m.total_quantity,
+        m.total_profit,
+        RANK() OVER (ORDER BY m.total_profit DESC) AS profit_rank
+    FROM 
+        sales_summary m
+    WHERE 
+        m.rn = 1
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_purchases,
+        SUM(s.ss_net_profit) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+customer_ranks AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.total_purchases,
+        cd.total_spent,
+        DENSE_RANK() OVER (ORDER BY cd.total_spent DESC) AS spending_rank
+    FROM 
+        customer_data cd
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_state,
+    r.profit_rank,
+    cr.spending_rank
+FROM 
+    customer c
+JOIN 
+    customer_ranks cr ON c.c_customer_sk = cr.c_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    max_sales r ON r.ws_item_sk IN (
+        SELECT DISTINCT ws_item_sk 
+        FROM web_sales 
+        WHERE ws_bill_customer_sk = c.c_customer_sk
+    )
+WHERE 
+    ca.ca_state IS NOT NULL
+ORDER BY 
+    cr.spending_rank, r.profit_rank
+LIMIT 100;

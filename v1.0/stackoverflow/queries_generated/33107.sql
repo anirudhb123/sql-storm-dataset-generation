@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           p.ViewCount, 
+           p.AnswerCount, 
+           p.CommentCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+PostVoteCounts AS (
+    SELECT PostId, 
+           SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+LatestPostComments AS (
+    SELECT c.PostId, 
+           COUNT(c.Id) AS CommentCount,
+           MAX(c.CreationDate) AS LastCommentDate
+    FROM Comments c
+    GROUP BY c.PostId
+),
+ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.CreationDate AS ClosedDate,
+           crt.Name AS CloseReasonName
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN CloseReasonTypes crt ON ph.Comment::INT = crt.Id
+    WHERE pht.Name IN ('Post Closed')
+),
+PostStatistics AS (
+    SELECT rp.Id AS PostId,
+           rp.Title,
+           rp.CreationDate,
+           rp.Score,
+           rp.ViewCount,
+           COALESCE(pvc.UpVotes, 0) AS UpVotes,
+           COALESCE(pvc.DownVotes, 0) AS DownVotes,
+           COALESCE(lpc.CommentCount, 0) AS LatestCommentCount,
+           COALESCE(lpc.LastCommentDate, NULL) AS LastCommentDate,
+           cp.ClosedDate,
+           cp.CloseReasonName
+    FROM RankedPosts rp
+    LEFT JOIN PostVoteCounts pvc ON rp.Id = pvc.PostId
+    LEFT JOIN LatestPostComments lpc ON rp.Id = lpc.PostId
+    LEFT JOIN ClosedPosts cp ON rp.Id = cp.PostId
+)
+SELECT ps.Title, 
+       ps.CreationDate,
+       ps.Score,
+       ps.ViewCount,
+       ps.UpVotes,
+       ps.DownVotes,
+       ps.LatestCommentCount,
+       ps.LastCommentDate,
+       ps.ClosedDate,
+       ps.CloseReasonName,
+       CASE 
+           WHEN ps.ClosedDate IS NOT NULL THEN 'Closed' 
+           ELSE 'Active' 
+       END AS PostStatus,
+       CASE 
+           WHEN ps.AnswerCount > 0 THEN 'Answered' 
+           ELSE 'Unanswered' 
+       END AS AnswerStatus
+FROM PostStatistics ps
+WHERE ps.Rank = 1
+ORDER BY ps.Score DESC, ps.ViewCount DESC;

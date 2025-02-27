@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpvoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownvoteCount,
+        (p.UpVotes - p.DownVotes) AS VoteDifference,
+        CASE WHEN (p.ViewCount IS NULL) THEN 0 ELSE (p.Score / NULLIF(p.ViewCount, 0)) END AS ScorePerView
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only Questions and Answers
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ChangeCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        ph.ChangeCount,
+        ph.LastClosedDate,
+        ph.LastReopenedDate,
+        ph.Editors,
+        CASE 
+            WHEN ph.ChangeCount IS NULL THEN 'No Changes'
+            WHEN ph.ChangeCount > 5 THEN 'Frequently Edited'
+            ELSE 'Few Edits'
+        END AS EditFrequency,
+        CASE 
+            WHEN rp.VoteDifference > 10 THEN 'High Engagement'
+            WHEN rp.ScorePerView > 0.5 THEN 'Good Visibility'
+            ELSE 'Low Activity'
+        END AS ActivityLevel
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryStats ph ON rp.PostId = ph.PostId
+    WHERE 
+        rp.Rank = 1 AND (rp.Score > 0 OR rp.ViewCount > 100)
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.OwnerUserId,
+    fr.ViewCount,
+    fr.UpvoteCount,
+    fr.DownvoteCount,
+    fr.ChangeCount,
+    fr.LastClosedDate,
+    fr.LastReopenedDate,
+    fr.Editors,
+    fr.EditFrequency,
+    fr.ActivityLevel
+FROM 
+    FinalResults fr
+WHERE 
+    (fr.LastClosedDate IS NULL OR fr.LastReopenedDate IS NOT NULL)
+ORDER BY 
+    fr.ViewCount DESC, fr.Score DESC
+LIMIT 50;

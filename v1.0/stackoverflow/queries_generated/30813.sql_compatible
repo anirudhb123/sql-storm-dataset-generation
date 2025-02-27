@@ -1,0 +1,58 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT u.Id, u.Reputation, u.CreationDate, 1 AS Level
+    FROM Users u
+    WHERE u.Reputation >= 1000
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.CreationDate, ur.Level + 1
+    FROM Users u
+    JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation AND ur.Level < 5
+),
+PostScoreCTE AS (
+    SELECT p.Id AS PostId, 
+           p.Score,
+           p.CreationDate,
+           u.DisplayName,
+           DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+           p.Tags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+),
+ClosedPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           ph.CreationDate,
+           ph.Comment
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+),
+TagPostCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 5
+)
+SELECT 
+    up.DisplayName AS UserName,
+    up.Reputation,
+    ps.PostId,
+    ps.Score,
+    ps.ScoreRank,
+    cp.Title AS ClosedPostTitle,
+    cp.Comment AS CloseComment,
+    tp.TagName AS PopularTag,
+    tp.PostCount 
+FROM UserReputationCTE up
+LEFT JOIN PostScoreCTE ps ON up.Id = ps.OwnerUserId
+LEFT JOIN ClosedPosts cp ON ps.PostId = cp.Id
+LEFT JOIN TagPostCounts tp ON tp.TagName IN (SELECT tag FROM UNNEST(string_to_array(ps.Tags, ', ')) AS tag)
+WHERE up.Reputation > 1000
+  AND (cp.Title IS NOT NULL OR cp.Comment IS NOT NULL)
+ORDER BY up.Reputation DESC, ps.Score DESC;

@@ -1,0 +1,90 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+VotesSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+BadgesEarned AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    COALESCE(be.GoldBadges, 0) AS GoldBadges,
+    COALESCE(be.SilverBadges, 0) AS SilverBadges,
+    COALESCE(be.BronzeBadges, 0) AS BronzeBadges,
+    json_agg(json_build_object(
+        'PostId', rp.PostId,
+        'Title', rp.Title,
+        'PostTypeId', rp.PostTypeId,
+        'CreationDate', rp.CreationDate,
+        'ViewCount', rp.ViewCount,
+        'PostRank', rp.PostRank
+    )) FILTER (WHERE rp.PostRank IS NOT NULL) AS RecentPosts
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecentPosts rp ON rp.OwnerUserId = ru.UserId
+LEFT JOIN 
+    VotesSummary vs ON vs.PostId = rp.PostId
+LEFT JOIN 
+    PostsWithComments pc ON pc.PostId = rp.PostId
+LEFT JOIN 
+    BadgesEarned be ON be.UserId = ru.UserId
+WHERE 
+    ru.UserRank <= 10
+GROUP BY 
+    ru.UserId, ru.DisplayName, ru.Reputation, be.GoldBadges, be.SilverBadges, be.BronzeBadges
+ORDER BY 
+    ru.Reputation DESC;

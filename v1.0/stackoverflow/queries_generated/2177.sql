@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) as PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > 1000
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(uc.BadgeCount, 0) AS UserBadgeCount,
+        ur.UserId AS TopUserId,
+        ur.Reputation AS UserReputation,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        TopUsers ur ON p.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        UserReputation uc ON p.OwnerUserId = uc.UserId
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+FinalResults AS (
+    SELECT 
+        pd.Title,
+        pd.Score,
+        pd.ViewCount,
+        pd.UserBadgeCount,
+        pd.UserReputation,
+        pd.GoldBadges,
+        pd.SilverBadges,
+        pd.BronzeBadges,
+        RANK() OVER (ORDER BY pd.ViewCount DESC) AS ViewRank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.GoldBadges > 0 THEN 'Gold'
+        WHEN fr.SilverBadges > 0 THEN 'Silver'
+        WHEN fr.BronzeBadges > 0 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeStatus
+FROM 
+    FinalResults fr
+WHERE 
+    fr.ViewRank <= 10
+ORDER BY 
+    fr.ViewCount DESC;

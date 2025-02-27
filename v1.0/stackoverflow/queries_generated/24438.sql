@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(NULLIF(p.Tags, ''), 'No Tags') AS Tags,
+        CASE 
+            WHEN p.ViewCount >= 1000 THEN 'Hot Post'
+            WHEN p.ViewCount BETWEEN 500 AND 999 THEN 'Trending'
+            ELSE 'New'
+        END AS PopularityLevel
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(b.Class) AS AvgBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId 
+    GROUP BY u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+SelectPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.PopularityLevel,
+        ub.BadgeCount,
+        ub.AvgBadgeClass,
+        phd.HistoryTypes,
+        phd.LastActionDate,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Comments c
+            WHERE c.PostId = rp.PostId
+        ), 0) AS CommentCount
+    FROM RankedPosts rp
+    LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+    LEFT JOIN PostHistoryDetails phd ON rp.PostId = phd.PostId
+    WHERE rp.Score > 0
+)
+SELECT 
+    sp.PostId,
+    sp.Title,
+    sp.CreationDate,
+    sp.Score,
+    sp.ViewCount,
+    sp.Tags,
+    sp.PopularityLevel,
+    sp.BadgeCount,
+    sp.AvgBadgeClass,
+    sp.HistoryTypes,
+    sp.LastActionDate,
+    sp.CommentCount
+FROM SelectPosts sp
+ORDER BY sp.Score DESC, sp.CreationDate DESC
+LIMIT 10
+OFFSET 5
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Aggregate Summary' AS Title,
+    NULL AS CreationDate,
+    SUM(sp.Score) AS Score,
+    SUM(sp.ViewCount) AS ViewCount,
+    STRING_AGG(DISTINCT sp.Tags, ', ') AS Tags,
+    NULL AS PopularityLevel,
+    SUM(sp.BadgeCount) AS TotalBadges,
+    AVG(sp.AvgBadgeClass) AS AverageBadgeClass,
+    NULL AS HistoryTypes,
+    NULL AS LastActionDate,
+    SUM(sp.CommentCount) AS TotalComments
+FROM SelectPosts sp;

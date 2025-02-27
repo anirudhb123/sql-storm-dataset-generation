@@ -1,0 +1,91 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) as price_rank
+    FROM 
+        part p 
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1) 
+        AND p.p_size BETWEEN 1 AND 20
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        total_value > 10000
+),
+CustomerNations AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c 
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        n.n_name IS NOT NULL
+    GROUP BY 
+        c.c_custkey, n.n_name
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        total_supply_cost > (SELECT AVG(ps1.ps_supplycost * ps1.ps_availqty) FROM partsupp ps1)
+),
+FinalResults AS (
+    SELECT 
+        cp.custkey, 
+        cn.n_name, 
+        SUM(hvo.total_value) AS total_order_value, 
+        COUNT(rp.p_partkey) AS high_value_parts
+    FROM 
+        CustomerNations cp 
+    LEFT JOIN 
+        HighValueOrders hvo ON cp.c_custkey = hvo.o_orderkey
+    LEFT JOIN 
+        RankedParts rp ON rp.price_rank = 1
+    LEFT JOIN 
+        SupplierSummary ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_mfgr = 'Manufacturer A'))
+    GROUP BY 
+        cp.c_custkey, cn.n_name
+)
+SELECT 
+    fr.custkey, 
+    fr.n_name, 
+    fr.total_order_value, 
+    fr.high_value_parts,
+    CASE 
+        WHEN fr.total_order_value IS NULL THEN 'No orders'
+        WHEN fr.high_value_parts IS NULL THEN 'No high-value parts'
+        ELSE 'Data present'
+    END AS order_part_status
+FROM 
+    FinalResults fr
+WHERE 
+    (fr.total_order_value > 50000 OR fr.high_value_parts > 10)
+AND 
+    NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_returnflag = 'R' AND l.l_orderkey = fr.custkey)
+ORDER BY 
+    fr.total_order_value DESC, fr.high_value_parts ASC;

@@ -1,0 +1,73 @@
+WITH Recursive ActorMovies AS (
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY ct.kind) AS movie_order,
+        SUM(CASE WHEN mt.info_type_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ca.person_id) AS total_movies
+    FROM 
+        cast_info ca
+    LEFT JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    LEFT JOIN 
+        title t ON ca.movie_id = t.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id
+    LEFT JOIN 
+        info_type it ON it.id = mi.info_type_id
+    LEFT JOIN 
+        kind_type kt ON kt.id = t.kind_id
+    LEFT JOIN 
+        comp_cast_type ct ON ct.id = ca.role_id
+    WHERE 
+        (AN.md5sum IS NOT NULL OR t.production_year IS NOT NULL) 
+        AND (mi.note IS NULL OR (mi.note LIKE '%Award%' AND it.info = 'Nominated'))
+),
+ActorMovieCount AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS movie_count,
+        MAX(movie_order) AS last_movie_order
+    FROM 
+        ActorMovies
+    GROUP BY 
+        person_id
+),
+TopActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        amc.movie_count,
+        amc.last_movie_order
+    FROM 
+        ActorMovieCount amc
+    JOIN 
+        aka_name ak ON ak.person_id = amc.person_id
+    WHERE 
+        amc.movie_count BETWEEN 5 AND 20
+        AND ak.name NOT LIKE '%Unknown%'
+        AND ak.name IS NOT NULL
+)
+SELECT 
+    ta.actor_name,
+    ta.movie_count,
+    CASE 
+        WHEN ta.movie_count > 15 THEN 'Superstar'
+        WHEN ta.movie_count BETWEEN 10 AND 15 THEN 'Genre Expert'
+        ELSE 'Regular'
+    END AS Actor_Category,
+    STRING_AGG(DISTINCT t.title, ', ') FILTER (WHERE t.production_year IS NOT NULL) AS Movies_Starred,
+    COUNT(DISTINCT mk.keyword) AS Keyword_Count
+FROM 
+    TopActors ta
+LEFT JOIN 
+    cast_info ci ON ci.person_id = ta.person_id
+LEFT JOIN 
+    title t ON t.id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+WHERE 
+    (t.production_year IS NOT NULL OR t.title IS NULL)
+GROUP BY 
+    ta.actor_name, ta.movie_count
+ORDER BY 
+    ta.movie_count DESC, ta.actor_name ASC
+LIMIT 10;

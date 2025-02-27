@@ -1,0 +1,68 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_orders > 1
+),
+SalesByMonth AS (
+    SELECT 
+        dd.d_month_seq,
+        SUM(ws.ws_net_paid) AS monthly_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        dd.d_month_seq
+),
+SalesByCategory AS (
+    SELECT 
+        i.i_category,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_category
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.total_orders,
+    tc.total_spent,
+    s_monthly.monthly_sales,
+    s_category.total_sales
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesByMonth s_monthly ON s_monthly.d_month_seq = EXTRACT(MONTH FROM DATE '2002-10-01')
+LEFT JOIN 
+    SalesByCategory s_category ON s_category.i_category IN (
+        SELECT i.i_category
+        FROM item i
+        JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+        WHERE ws.ws_bill_customer_sk = tc.c_customer_sk
+        GROUP BY i.i_category
+    )
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_spent DESC;

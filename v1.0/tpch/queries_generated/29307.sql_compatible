@@ -1,0 +1,58 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name
+),
+Regions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        r.r_comment,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name, r.r_comment
+)
+SELECT 
+    rd.r_name,
+    rd.nation_count,
+    sd.s_name,
+    sd.total_available_qty,
+    sd.total_supply_cost,
+    SUBSTRING(sd.s_address, 1, 25) AS short_address,
+    CONCAT('Supplier: ', sd.s_name, ' - ', sd.nation_name) AS supplier_info,
+    STRING_AGG(DISTINCT TRIM(REPLACE(s.s_comment, 'specific', 'replaced')), '; ') AS comments_summary
+FROM 
+    SupplierDetails sd
+JOIN 
+    Regions rd ON sd.nation_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT MAX(n2.n_nationkey) 
+            FROM nation n2 
+            JOIN region r2 ON n2.n_regionkey = r2.r_regionkey 
+            WHERE r2.r_name = rd.r_name
+        )
+    )
+GROUP BY 
+    rd.r_name, rd.nation_count, sd.s_name, sd.total_available_qty, sd.total_supply_cost
+ORDER BY 
+    total_supply_cost DESC, sd.s_name;

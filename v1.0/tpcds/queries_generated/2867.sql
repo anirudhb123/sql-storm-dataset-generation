@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+top_sales AS (
+    SELECT
+        w.w_warehouse_name,
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM
+        catalog_sales cs
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    GROUP BY
+        w.w_warehouse_name, cs.cs_item_sk
+),
+return_stats AS (
+    SELECT
+        cr.cr_item_sk,
+        COUNT(cr.cr_order_number) AS num_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.cr_item_sk
+)
+SELECT
+    p.p_promo_id,
+    p.p_promo_name,
+    ts.w_warehouse_name,
+    ts.cs_item_sk,
+    ts.total_quantity,
+    ts.total_profit,
+    COALESCE(rs.num_returns, 0) AS num_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount
+FROM
+    top_sales ts
+LEFT JOIN promotion p ON ts.cs_item_sk = p.p_item_sk
+LEFT JOIN return_stats rs ON ts.cs_item_sk = rs.cr_item_sk
+WHERE
+    ts.total_quantity > (
+        SELECT AVG(total_quantity) FROM top_sales
+    )
+ORDER BY
+    ts.total_profit DESC
+LIMIT 10;

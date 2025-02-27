@@ -1,0 +1,26 @@
+
+SELECT 
+    ca.city AS city,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(ws.ws_net_paid) AS total_sales,
+    AVG(LENGTH(c.c_first_name) + LENGTH(c.c_last_name)) AS avg_name_length,
+    MIN(c.c_birth_year) AS earliest_birth_year,
+    MAX(c.c_birth_year) AS latest_birth_year,
+    STRING_AGG(DISTINCT cd.cd_gender, ', ') AS unique_genders,
+    STRING_AGG(DISTINCT cd.cd_marital_status, ', ') AS unique_marital_statuses
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    ca.ca_state = 'CA'
+GROUP BY 
+    ca.city
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    total_sales DESC;

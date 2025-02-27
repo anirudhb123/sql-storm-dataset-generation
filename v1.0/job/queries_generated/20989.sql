@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS depth,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.depth + 1,
+        mh.path || ' > ' || m.title
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = linked.id
+)
+
+SELECT 
+    a.id AS actor_id,
+    n.name AS actor_name,
+    t.title AS title,
+    COALESCE(mk.keyword, 'No keyword') AS movie_keyword,
+    mh.path AS movie_path,
+    COUNT(DISTINCT ci.movie_id) OVER (PARTITION BY a.id) AS total_movies
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = t.id
+JOIN 
+    name n ON a.id = n.id
+WHERE 
+    t.production_year IS NOT NULL
+    AND (t.title LIKE '%the%' OR t.title LIKE '%a%')
+    AND (COALESCE(t.note, '') NOT LIKE '%unreleased%' OR t.production_year < 2000)
+    AND n.gender IS NOT NULL
+GROUP BY 
+    actor_id, 
+    actor_name, 
+    title, 
+    movie_keyword, 
+    movie_path
+ORDER BY 
+    total_movies DESC, 
+    movie_path ASC
+LIMIT 10;

@@ -1,0 +1,42 @@
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    r.role AS role_name,
+    c.note AS cast_note,
+    tc.kind AS company_type,
+    k.keyword AS movie_keyword,
+    COALESCE(MIN(m.production_year), 0) AS first_production_year,
+    COUNT(DISTINCT k.id) AS keyword_count,
+    STRING_AGG(DISTINCT COALESCE(mi.info, 'N/A'), ', ') AS movie_info
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type tc ON mc.company_type_id = tc.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.person_id AND cc.movie_id = c.movie_id
+JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mii ON t.id = mii.movie_id
+WHERE 
+    t.production_year >= 2000 
+    AND ak.name IS NOT NULL 
+    AND cn.country_code = 'USA'
+GROUP BY 
+    t.title, ak.name, r.role, c.note, tc.kind
+ORDER BY 
+    t.title, ak.name;

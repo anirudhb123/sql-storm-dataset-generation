@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mv.title,
+        mv.production_year,
+        COUNT(c.person_id) AS cast_count,
+        AVG(p.info_type_id) AS avg_info_type
+    FROM 
+        MovieHierarchy mv
+    LEFT JOIN 
+        complete_cast cc ON mv.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+    WHERE 
+        mv.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY 
+        mv.title,
+        mv.production_year
+    HAVING 
+        COUNT(c.person_id) > 5
+),
+FilteredMovies AS (
+    SELECT 
+        tm.*,
+        ROW_NUMBER() OVER (ORDER BY tm.cast_count DESC) AS rank
+    FROM 
+        TopMovies tm
+    WHERE 
+        tm.avg_info_type IS NOT NULL
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.rank,
+    COALESCE(STRING_AGG(DISTINCT ak.name, ', '), 'No Cast') AS actors
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    fm.title, 
+    fm.production_year, 
+    fm.cast_count, 
+    fm.rank
+ORDER BY 
+    fm.rank
+LIMIT 20;

@@ -1,0 +1,69 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_sold_date_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS running_total
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+avg_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        AVG(sd.running_total) AS avg_running_total
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_item_sk
+),
+highest_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        COUNT(*) AS total_sales
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_item_sk
+    HAVING 
+        COUNT(*) > 10
+),
+item_details AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price
+    FROM 
+        item i
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.i_current_price,
+    hs.total_sales,
+    as.avg_running_total,
+    CASE 
+        WHEN as.avg_running_total IS NULL THEN 'No sales'
+        ELSE 'Average calculated'
+    END AS sales_status
+FROM 
+    item_details id
+LEFT JOIN 
+    highest_sales hs ON id.i_item_sk = hs.ws_item_sk
+LEFT JOIN 
+    avg_sales as ON id.i_item_sk = as.ws_item_sk
+WHERE 
+    (id.i_current_price > 0 OR hs.total_sales IS NOT NULL)
+ORDER BY 
+    hs.total_sales DESC NULLS LAST;

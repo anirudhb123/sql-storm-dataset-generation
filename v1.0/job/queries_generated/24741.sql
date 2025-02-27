@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        rm.cast_count,
+        CASE 
+            WHEN rm.cast_count > 0 THEN 'Has Cast'
+            ELSE 'No Cast' 
+        END AS cast_status
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.title_rank <= 5 -- Retain top 5 titles per year
+),
+KeywordCounts AS (
+    SELECT 
+        movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+FinalResults AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_status,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        CASE 
+            WHEN fm.production_year < 2000 THEN 'Classic'
+            ELSE 'Modern'
+        END AS movie_age
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        KeywordCounts kc ON fm.movie_id = kc.movie_id
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.cast_status,
+    f.keyword_count,
+    f.movie_age,
+    CASE 
+        WHEN f.keyword_count > 10 THEN 'Popular'
+        WHEN f.keyword_count BETWEEN 5 AND 10 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS popularity_category
+FROM 
+    FinalResults f
+WHERE 
+    (f.cast_status = 'Has Cast' OR f.keyword_count > 0) -- Check for cast or keywords
+ORDER BY 
+    f.production_year DESC,
+    f.title ASC
+LIMIT 15;
+
+-- NOTE: This query retrieves the top 5 movie titles per year along with their cast status, keyword count, and categorizes them by age and popularity. It also leverages window functions, CTEs and NULL logic to gather additional insights.

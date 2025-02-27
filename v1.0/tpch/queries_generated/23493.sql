@@ -1,0 +1,79 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank,
+        CASE 
+            WHEN p.p_size > 15 THEN 'Large'
+            WHEN p.p_size BETWEEN 5 AND 15 THEN 'Medium'
+            ELSE 'Small'
+        END AS size_category
+    FROM 
+        part p
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 10000
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 500000
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+        AND o.o_orderdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(coalesce(p.p_retailprice, 0)) * COUNT(DISTINCT os.o_orderkey), 0) AS total_retail_value,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    COUNT(DISTINCT hp.s_suppkey) AS high_value_suppliers,
+    MAX(rp.price_rank) AS highest_price_rank,
+    STRING_AGG(DISTINCT rp.size_category, ', ') AS size_distribution
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    HighValueSuppliers hp ON hp.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        WHERE c.c_nationkey = n.n_nationkey
+    )
+LEFT JOIN 
+    RankedParts rp ON rp.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_suppkey = s.s_suppkey
+    )
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(COALESCE(rp.p_retailprice, 0)) > 1000
+ORDER BY 
+    total_retail_value DESC NULLS LAST;

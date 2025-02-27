@@ -1,0 +1,4 @@
+SELECT min(n.name) AS voicing_actress, min(t.title) AS jap_engl_voiced_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, movie_companies AS mc, movie_info AS mi, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mi.movie_id = ci.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id
+AND t.md5sum < '614a4bd5c80fbb88c1aeebcf983984b3' AND t.production_year > 1981 AND mi.info_type_id > 96 AND an.id > 873988 AND mi.note < '(Fuji Super F-64D 8622, Eterna 250D 8663, Eterna 500T 8673)' AND mc.note IS NOT NULL AND mi.info > 'Japan:20 July 1966';

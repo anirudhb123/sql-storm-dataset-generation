@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        NULL::integer AS parent_id,  -- "Root" movies (stand-alone movies with no parent)
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL 
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        cmt.movie_id AS parent_id,
+        ch.level + 1
+    FROM 
+        aka_title mt
+    JOIN movie_link ml ON ml.movie_id = ch.movie_id
+    JOIN aka_title cmt ON cmt.id = ml.linked_movie_id
+    JOIN movie_hierarchy ch ON ch.movie_id = cmt.id
+)
+
+SELECT 
+    title.title,
+    title.production_year,
+    ARRAY_AGG(DISTINCT ak.name) AS aliases,
+    string_agg(DISTINCT CONCAT(cn.name, ' (', ct.kind, ')'), '; ') FILTER (WHERE cn.name IS NOT NULL) AS company_information,
+    COUNT(DISTINCT pi.person_id) AS contributing_people,
+    COUNT(DISTINCT kc.keyword) AS keywords_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+    ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title) AS row_num
+FROM 
+    movie_hierarchy mh
+JOIN 
+    aka_title title ON mh.movie_id = title.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = title.id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id 
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = title.id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = title.id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+GROUP BY 
+    title.title, title.production_year
+HAVING 
+    COUNT(DISTINCT pi.info) FILTER (WHERE pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')) > 0 
+ORDER BY 
+    title.production_year DESC, 
+    title.title;

@@ -1,0 +1,32 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_name, SUM(ro.total_revenue) AS customer_revenue
+    FROM RankedOrders ro
+    JOIN customer c ON ro.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    GROUP BY c.c_name
+    ORDER BY customer_revenue DESC
+    LIMIT 10
+),
+SupplierPartDetails AS (
+    SELECT ps.ps_partkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+)
+SELECT
+    tc.c_name AS top_customer,
+    tc.customer_revenue,
+    spd.s_name AS supplier_name,
+    spd.total_cost,
+    p.p_name AS part_name
+FROM TopCustomers tc
+JOIN SupplierPartDetails spd ON spd.total_cost = (SELECT MAX(total_cost) FROM SupplierPartDetails)
+JOIN part p ON p.p_partkey = spd.ps_partkey
+ORDER BY tc.customer_revenue DESC, spd.total_cost ASC;

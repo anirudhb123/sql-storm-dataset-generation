@@ -1,0 +1,66 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(t.Id) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::text[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        pt.OwnerUserId AS UserId,
+        pt.TagCount,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges,
+        ROW_NUMBER() OVER (PARTITION BY pt.OwnerUserId ORDER BY pt.TagCount DESC) AS Rank
+    FROM 
+        PostTagCounts pt
+    JOIN 
+        UserReputation ur ON ur.UserId = pt.OwnerUserId
+)
+SELECT 
+    ps.UserId,
+    u.DisplayName,
+    ps.TagCount,
+    ps.Reputation,
+    ps.BadgeCount,
+    ps.GoldBadges,
+    ps.SilverBadges,
+    ps.BronzeBadges,
+    ps.Rank
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON u.Id = ps.UserId
+WHERE 
+    ps.Rank <= 5 
+ORDER BY 
+    ps.UserId, ps.TagCount DESC;

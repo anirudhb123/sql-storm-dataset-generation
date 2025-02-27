@@ -1,0 +1,79 @@
+WITH TagCounts AS (
+    SELECT 
+        tag.TagName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId IN (10, 11, 12) THEN 1 ELSE 0 END) AS ClosedPostCount
+    FROM 
+        Tags AS tag
+    LEFT JOIN 
+        Posts AS p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY 
+        tag.TagName
+),
+HighScorePosts AS (
+    SELECT 
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        p.CreationDate
+    FROM 
+        Posts AS p
+    JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.Score > 100
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.AcceptedAnswerId,
+        ph.Comment,
+        p.Score,
+        p.ViewCount
+    FROM 
+        PostHistory AS ph
+    JOIN 
+        Posts AS p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (24, 10)  
+)
+SELECT 
+    tc.TagName,
+    tc.TotalPosts,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    tc.ClosedPostCount,
+    hsp.Title AS HighScoringPostTitle,
+    hsp.Score AS HighScoringPostScore,
+    hsp.ViewCount AS HighScoringPostViews,
+    hsp.Author AS HighScoringPostAuthor,
+    hsp.CreationDate AS HighScoringPostDate,
+    phd.EditDate,
+    phd.UserDisplayName AS Editor,
+    phd.Comment,
+    phd.Title AS EditedPostTitle,
+    phd.Body AS EditedPostBody,
+    phd.Tags AS EditedPostTags,
+    phd.Score AS EditedPostScore,
+    phd.ViewCount AS EditedPostViews
+FROM 
+    TagCounts AS tc
+LEFT JOIN 
+    HighScorePosts AS hsp ON tc.TagName = ANY(STRING_TO_ARRAY(hsp.Tags, ','))
+LEFT JOIN 
+    PostHistoryDetail AS phd ON tc.TagName = ANY(STRING_TO_ARRAY(phd.Tags, ','))
+ORDER BY 
+    tc.TotalPosts DESC, 
+    hsp.Score DESC,
+    phd.EditDate DESC;

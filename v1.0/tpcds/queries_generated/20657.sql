@@ -1,0 +1,68 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender, cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+high_value_customers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_customer_id,
+        rc.cd_gender,
+        rc.cd_marital_status
+    FROM 
+        ranked_customers rc
+    WHERE 
+        rc.purchase_rank <= 10
+),
+return_data AS (
+    SELECT 
+        COALESCE(sr_customer_sk, wr_returning_customer_sk) AS returning_customer_sk,
+        SUM(sr_return_quantity + COALESCE(wr_return_quantity, 0)) AS total_returns
+    FROM 
+        store_returns sr
+    FULL OUTER JOIN 
+        web_returns wr ON sr_item_sk = wr_item_sk
+    GROUP BY 
+        COALESCE(sr_customer_sk, wr_returning_customer_sk)
+),
+customer_return_summary AS (
+    SELECT 
+        hvc.c_customer_id,
+        COALESCE(rd.total_returns, 0) AS total_return_quantity,
+        CASE 
+            WHEN COALESCE(rd.total_returns, 0) > 0 THEN 'Literal Returner'
+            ELSE 'First Timer'
+        END AS return_category
+    FROM 
+        high_value_customers hvc
+    LEFT JOIN 
+        return_data rd ON hvc.c_customer_sk = rd.returning_customer_sk
+)
+SELECT 
+    crs.return_category,
+    COUNT(*) AS customer_count,
+    AVG(c.cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(c.c_customer_id, '; ') AS customer_ids
+FROM 
+    customer_return_summary crs
+JOIN 
+    customer_demographics c ON crs.c_customer_id = c.c_demo_sk
+WHERE 
+    c.cd_credit_rating IS NOT NULL
+GROUP BY 
+    crs.return_category
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    avg_purchase_estimate DESC, 
+    return_category ASC;

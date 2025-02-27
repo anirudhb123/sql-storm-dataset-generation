@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) as sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site s ON ws.ws_web_site_sk = s.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_date = '2023-01-01') AND (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_date = '2023-12-31')
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000 
+    GROUP BY 
+        c.c_customer_sk
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_profit,
+        ROW_NUMBER() OVER (ORDER BY cs.total_profit DESC) AS customer_rank
+    FROM 
+        customer_summary cs
+    WHERE 
+        cs.total_profit IS NOT NULL
+)
+SELECT 
+    st.web_site_sk,
+    st.total_sales AS web_site_sales,
+    tc.c_customer_sk,
+    tc.total_orders,
+    tc.total_profit
+FROM 
+    sales_totals st
+FULL OUTER JOIN 
+    top_customers tc ON st.web_site_sk = (
+        SELECT DISTINCT ws.ws_web_site_sk 
+        FROM web_sales ws 
+        WHERE ws.ws_ext_sales_price = (
+            SELECT MAX(ws_ext_sales_price) 
+            FROM web_sales 
+            WHERE ws.web_site_sk = st.web_site_sk)
+        LIMIT 1
+    )
+WHERE 
+    tc.customer_rank <= 10 OR st.sales_rank <= 10
+ORDER BY 
+    web_site_sales DESC, total_profit DESC;

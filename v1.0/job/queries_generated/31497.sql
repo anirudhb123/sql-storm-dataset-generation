@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        t.production_year >= 2000  -- Keep titles from the year 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 3  -- Limit to 3 levels of recursive links
+)
+
+SELECT 
+    t.title AS original_title,
+    t.production_year AS original_year,
+    CASE 
+        WHEN mh.level IS NULL 
+        THEN 'No linked movies' 
+        ELSE 'Links found' 
+    END AS link_status,
+    COUNT(mh.movie_id) AS linked_movies_count,
+    ARRAY_AGG(DISTINCT m.company_name) AS production_companies,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    title t
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name m ON mc.company_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year = (
+        SELECT 
+            MAX(production_year)
+        FROM 
+            title
+        WHERE 
+            kind_id = (
+                SELECT id FROM kind_type WHERE kind = 'feature'
+            )
+    )
+GROUP BY 
+    t.id, t.title, t.production_year, mh.level
+ORDER BY 
+    original_year DESC, linked_movies_count DESC;

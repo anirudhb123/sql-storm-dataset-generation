@@ -1,0 +1,28 @@
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) as order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.o_orderkey, r.o_orderdate, r.o_totalprice, 
+       COALESCE(ls.total_revenue, 0) AS total_revenue, 
+       ss.total_supply_cost,
+       CASE WHEN r.order_rank <= 5 THEN 'Top Order' ELSE 'Other Order' END AS order_category
+FROM ranked_orders r
+LEFT JOIN lineitem_summary ls ON r.o_orderkey = ls.l_orderkey
+JOIN supplier_summary ss ON ss.total_supply_cost > 1000
+WHERE r.o_totalprice > 500
+ORDER BY r.o_orderdate DESC, r.o_totalprice DESC;

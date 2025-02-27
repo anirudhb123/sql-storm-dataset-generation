@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rnk
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+
+MovieRatings AS (
+    SELECT 
+        c.movie_id,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN CAST(pi.info AS NUMERIC) END) AS avg_rating,
+        COUNT(DISTINCT pi.person_id) AS rating_count
+    FROM 
+        complete_cast cc
+    JOIN 
+        movie_info mi ON cc.movie_id = mi.movie_id
+    JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    WHERE 
+        mi.info_type_id IN (1, 2) 
+    GROUP BY 
+        c.movie_id
+),
+
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS production_company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL 
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.movie_keyword,
+    COALESCE(mr.avg_rating, 0) AS average_rating,
+    COALESCE(mr.rating_count, 0) AS total_ratings,
+    COALESCE(mcp.production_company_count, 0) AS company_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieRatings mr ON rm.rnk = 1 AND rm.movie_title = (SELECT title FROM aka_title WHERE id = mr.movie_id)
+LEFT JOIN 
+    MovieCompanies mcp ON rm.rnk = 1 AND rm.movie_title = (SELECT title FROM aka_title WHERE id = mcp.movie_id)
+WHERE 
+    rm.production_year > 2000
+ORDER BY 
+    rm.production_year DESC, rm.movie_title;

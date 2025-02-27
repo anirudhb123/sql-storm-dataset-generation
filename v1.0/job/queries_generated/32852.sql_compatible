@@ -1,0 +1,51 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        t.id AS episode_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        CAST(NULL AS INTEGER) AS parent_id
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        et.id,
+        et.title,
+        et.production_year,
+        et.season_nr,
+        et.episode_nr,
+        m.episode_id AS parent_id
+    FROM title et
+    INNER JOIN movie_hierarchy m ON m.episode_id = et.episode_of_id
+)
+
+SELECT 
+    ka.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(c.role_id, -1) AS role_id,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ka.person_id ORDER BY mt.production_year DESC) AS rank_by_year,
+    COUNT(DISTINCT ch.name) FILTER (WHERE ch.name IS NOT NULL) AS character_count,
+    MAX(CASE WHEN mo.info_type_id IS NOT NULL THEN mo.info ELSE 'No Info' END) AS movie_info,
+    AVG(COALESCE(c.nr_order, 0)) AS avg_order
+FROM aka_name ka
+INNER JOIN cast_info c ON ka.person_id = c.person_id
+INNER JOIN aka_title mt ON c.movie_id = mt.movie_id
+LEFT JOIN movie_keyword mk ON mt.movie_id = mk.movie_id
+LEFT JOIN char_name ch ON ch.id = c.role_id
+LEFT JOIN movie_info mo ON mt.movie_id = mo.movie_id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'plot' LIMIT 1)
+LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN movie_hierarchy mh ON mh.episode_id = mt.id
+WHERE mt.production_year > 2000 
+  AND (mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+       OR mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'tv series'))
+GROUP BY ka.name, mt.title, mt.production_year, c.role_id, ka.person_id
+HAVING COUNT(DISTINCT mt.id) > 1
+ORDER BY keyword_count DESC, actor_name;

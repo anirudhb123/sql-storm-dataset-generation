@@ -1,0 +1,101 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS text) AS parent_title,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        et.id,
+        et.title,
+        et.production_year,
+        mh.title AS parent_title,
+        mh.level + 1
+    FROM 
+        aka_title et
+    JOIN 
+        movie_hierarchy mh ON et.episode_of_id = mh.movie_id
+),
+actor_movies AS (
+    SELECT 
+        a.name,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY m.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+),
+keyword_counts AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id
+),
+company_movies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+final_selection AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        am.name AS actor,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        cm.company_name,
+        cm.company_type,
+        CASE 
+            WHEN COALESCE(kc.keyword_count, 0) > 5 THEN 'Popular Movie'
+            WHEN kc.keyword_count IS NULL THEN 'No Keywords'
+            ELSE 'Regular Movie'
+        END AS movie_category
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movies am ON mh.movie_id = am.movie_id AND am.movie_rank = 1
+    LEFT JOIN 
+        keyword_counts kc ON mh.movie_id = kc.movie_id
+    LEFT JOIN 
+        company_movies cm ON mh.movie_id = cm.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor,
+    keyword_count,
+    company_name,
+    company_type,
+    movie_category
+FROM 
+    final_selection
+WHERE 
+    (company_type IS NOT NULL AND keyword_count > 0)
+    OR (actor IS NOT NULL AND movie_category = 'Popular Movie')
+ORDER BY 
+    production_year DESC, 
+    title ASC;

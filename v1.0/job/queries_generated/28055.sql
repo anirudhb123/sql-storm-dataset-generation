@@ -1,0 +1,46 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS title_rank
+    FROM aka_title at
+    JOIN cast_info ci ON at.id = ci.movie_id
+    WHERE at.production_year IS NOT NULL
+    GROUP BY at.title, at.production_year
+), 
+
+TopTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.cast_count
+    FROM RankedTitles rt
+    WHERE rt.title_rank <= 5
+),
+
+TitleKeywords AS (
+    SELECT 
+        mt.movie_id,
+        GROUP_CONCAT(mk.keyword) AS keywords_list
+    FROM movie_keyword mk
+    JOIN movie_companies mc ON mk.movie_id = mc.movie_id
+    JOIN title t ON mc.movie_id = t.id
+    WHERE t.title IN (SELECT title FROM TopTitles)
+    GROUP BY mt.movie_id
+)
+
+SELECT 
+    tt.title,
+    tt.production_year,
+    tt.cast_count,
+    tk.keywords_list,
+    ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+    ARRAY_AGG(DISTINCT c.name) AS company_names
+FROM TopTitles tt
+LEFT JOIN TitleKeywords tk ON tt.title = tk.title
+LEFT JOIN aka_name ak ON ak.person_id IN (SELECT ci.person_id FROM cast_info ci JOIN aka_title at ON ci.movie_id = at.id WHERE at.title = tt.title)
+LEFT JOIN movie_companies mc ON mc.movie_id IN (SELECT at.id FROM aka_title at WHERE at.title = tt.title)
+LEFT JOIN company_name c ON mc.company_id = c.id
+GROUP BY tt.title, tt.production_year, tt.cast_count
+ORDER BY tt.production_year DESC;

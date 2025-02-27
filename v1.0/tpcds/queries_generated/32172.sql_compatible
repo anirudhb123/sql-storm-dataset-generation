@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        cs_net_profit,
+        sd.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_data sd ON cs.cs_order_number = sd.ws_order_number 
+    WHERE 
+        DATE(cs.cs_sold_date_sk) = DATE('2002-10-01')
+),
+ranked_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.ws_order_number,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY SUM(sd.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_item_sk, sd.ws_order_number
+),
+inventory_data AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand,
+        COALESCE(MAX(inv.inv_quantity_on_hand), 0) AS total_inventory
+    FROM 
+        item i
+    JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    r.ws_item_sk,
+    r.ws_order_number,
+    r.total_quantity AS total_sales,
+    r.total_net_profit AS total_profit,
+    i.total_quantity_on_hand,
+    (r.total_net_profit / NULLIF(r.total_quantity, 0)) AS avg_profit_per_item,
+    (CASE 
+        WHEN i.total_quantity_on_hand < 100 THEN 'Low Stock' 
+        WHEN i.total_quantity_on_hand BETWEEN 100 AND 500 THEN 'Moderate Stock' 
+        ELSE 'High Stock' 
+    END) AS stock_status
+FROM 
+    ranked_sales r
+JOIN 
+    inventory_data i ON r.ws_item_sk = i.i_item_sk
+WHERE 
+    r.profit_rank <= 10
+ORDER BY 
+    r.total_net_profit DESC;

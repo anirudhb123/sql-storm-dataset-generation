@@ -1,0 +1,98 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        p2.Score,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p ON p2.ParentId = p.Id
+    WHERE 
+        p2.PostTypeId = 2 
+),
+
+UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+
+VoteDistribution AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    r.Level AS AnswerLevel,
+    COALESCE(ph.EditCount, 0) AS EditCount,
+    COALESCE(ph.EditTypes, 'No edits') AS EditTypes,
+    COALESCE(vd.UpVotes, 0) AS UpVotes,
+    COALESCE(vd.DownVotes, 0) AS DownVotes,
+    up.PostCount AS UserPostCount,
+    up.TotalScore AS UserTotalScore
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursiveCTE r ON p.Id = r.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistoryInfo ph ON p.Id = ph.PostId
+LEFT JOIN 
+    VoteDistribution vd ON p.Id = vd.PostId
+LEFT JOIN 
+    UserPosts up ON u.Id = up.UserId
+WHERE 
+    p.CreationDate >= '2023-01-01' 
+ORDER BY 
+    p.CreationDate DESC, r.Level, up.TotalScore DESC;

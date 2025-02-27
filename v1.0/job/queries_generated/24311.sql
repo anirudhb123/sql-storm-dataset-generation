@@ -1,0 +1,83 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CHAR_LENGTH(t.title)) OVER (PARTITION BY t.production_year) AS avg_title_length
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        avg_title_length,
+        ROW_NUMBER() OVER (ORDER BY CAST(cast_count AS INT) DESC, production_year) AS rn
+    FROM 
+        RankedMovies
+    WHERE 
+        (cast_count > 5 OR production_year < 2000)
+        AND title NOT LIKE '%[A-Za-z0-9]%'
+
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.avg_title_length,
+    COALESCE(mk.keywords, 'No keywords') AS keywords
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    MovieKeywords mk ON fm.movie_id = mk.movie_id
+WHERE 
+    fm.rn <= 50
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;
+
+WITH NullCheck AS (
+    SELECT 
+        p.person_id,
+        COALESCE(NULLIF(p.info, ''), 'No information') AS info
+    FROM 
+        person_info p
+    WHERE 
+        p.info IS NOT NULL
+)
+SELECT 
+    a.id AS aka_id,
+    a.name,
+    nc.info AS person_info
+FROM 
+    aka_name a
+LEFT JOIN 
+    NullCheck nc ON a.person_id = nc.person_id
+WHERE 
+    a.name IS NOT NULL
+    AND a.name NOT LIKE '%XYZ%' -- Exclude obscure names
+ORDER BY 
+    a.id
+LIMIT 100;

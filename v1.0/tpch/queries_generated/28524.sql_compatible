@@ -1,0 +1,44 @@
+
+WITH RECURSIVE string_benchmark AS (
+    SELECT 
+        s.s_name,
+        CONCAT(s.s_name, ' - ', p.p_name) AS combined_string,
+        LENGTH(CONCAT(s.s_name, ' - ', p.p_name)) AS string_length,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY LENGTH(CONCAT(s.s_name, ' - ', p.p_name)) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_comment LIKE '%reliable%'
+),
+aggregated AS (
+    SELECT 
+        n.n_name,
+        COUNT(*) AS total_suppliers,
+        AVG(string_length) AS avg_string_length,
+        MAX(string_length) AS max_string_length
+    FROM 
+        string_benchmark sb
+    JOIN 
+        nation n ON sb.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    a.n_name,
+    a.total_suppliers,
+    a.avg_string_length,
+    a.max_string_length,
+    CASE 
+        WHEN a.avg_string_length < 40 THEN 'Short'
+        WHEN a.avg_string_length BETWEEN 40 AND 70 THEN 'Medium'
+        ELSE 'Long'
+    END AS string_length_category
+FROM 
+    aggregated a
+ORDER BY 
+    a.total_suppliers DESC, 
+    a.avg_string_length ASC;

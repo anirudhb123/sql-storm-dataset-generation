@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ProductStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(ps.ps_partkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+        HAVING COUNT(ps.ps_partkey) > 1
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_orders,
+    co.total_spent,
+    ps.p_partkey,
+    ps.p_name,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    CustomerOrders co
+JOIN 
+    lineitem l ON co.c_custkey = l.l_orderkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    co.c_custkey, co.c_name, ps.p_partkey, ps.p_name, ps.supplier_count, ps.avg_supply_cost
+HAVING 
+    SUM(l.l_quantity) > 10
+ORDER BY 
+    co.total_spent DESC, ps.avg_supply_cost ASC;

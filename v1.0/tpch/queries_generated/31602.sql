@@ -1,0 +1,78 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier ss
+    JOIN 
+        SupplierHierarchy sh ON ss.s_nationkey = sh.s_nationkey
+    WHERE 
+        ss.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+        AND sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND 
+        o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(os.total_revenue) AS region_revenue
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        OrderSummary os ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN part p ON p.p_partkey = ps.ps_partkey WHERE p.p_size > 20))
+    GROUP BY 
+        n.n_regionkey, r.r_name
+),
+FinalReport AS (
+    SELECT 
+        tr.r_name,
+        tr.region_revenue,
+        COUNT(sh.s_suppkey) AS supplier_count
+    FROM 
+        TopRegions tr
+    LEFT JOIN 
+        SupplierHierarchy sh ON sh.s_nationkey = tr.n_regionkey
+    GROUP BY 
+        tr.r_name, tr.region_revenue
+    HAVING 
+        MAX(tr.region_revenue) > 10000
+)
+SELECT 
+    fr.r_name,
+    fr.region_revenue,
+    fr.supplier_count,
+    LEAD(fr.region_revenue, 1) OVER (ORDER BY fr.region_revenue DESC) AS next_region_revenue
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.region_revenue DESC
+LIMIT 10;

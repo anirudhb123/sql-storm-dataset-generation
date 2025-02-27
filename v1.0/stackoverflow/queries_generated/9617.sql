@@ -1,0 +1,67 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        COALESCE(P.ViewCount, 0) AS ViewCount,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(DISTINCT Id) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            OwnerUserId
+    ) B ON P.OwnerUserId = B.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        PS.*,
+        ROW_NUMBER() OVER (PARTITION BY PS.PostTypeId ORDER BY PS.ViewCount DESC) AS Rank
+    FROM 
+        PostStats PS
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    PT.Name AS PostType,
+    RP.ViewCount,
+    RP.AnswerCount,
+    RP.CommentCount,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.BadgeCount
+FROM 
+    RankedPosts RP
+JOIN 
+    PostTypes PT ON RP.PostTypeId = PT.Id
+WHERE 
+    RP.Rank <= 5
+ORDER BY 
+    RP.PostTypeId, RP.ViewCount DESC;

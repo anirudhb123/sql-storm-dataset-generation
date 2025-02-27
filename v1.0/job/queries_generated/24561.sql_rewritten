@@ -1,0 +1,53 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT t.id AS title_id,
+           t.title,
+           t.production_year,
+           0 AS level
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT t.id,
+           t.title,
+           t.production_year,
+           th.level + 1
+    FROM title_hierarchy th
+    JOIN title t ON th.title_id = t.episode_of_id
+)
+
+, ranked_movies AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+           COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM title t
+    WHERE t.production_year BETWEEN 1990 AND 2000
+)
+
+, movie_cast AS (
+    SELECT c.movie_id,
+           a.name AS actor_name,
+           r.role AS role
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    WHERE a.name IS NOT NULL
+)
+
+SELECT th.title_id,
+       th.title,
+       th.production_year,
+       COALESCE(rm.year_rank, 'N/A') AS year_rank,
+       COALESCE(mc.actor_name, 'Unknown Actor') AS actor_name,
+       COUNT(mc.actor_name) OVER (PARTITION BY th.production_year) AS actor_count,
+       SUM(CASE WHEN mc.role LIKE '%Lead%' THEN 1 ELSE 0 END) OVER (PARTITION BY th.production_year) AS lead_actor_count,
+       STRING_AGG(DISTINCT mc.role, ', ') AS roles,
+       NULLIF(CAST(NULLIF(th.production_year, 1995) AS VARCHAR), 'NULL') AS adjusted_year
+FROM title_hierarchy th
+LEFT JOIN ranked_movies rm ON th.title_id = rm.movie_id
+LEFT JOIN movie_cast mc ON th.title_id = mc.movie_id
+WHERE th.level = 0 AND (th.production_year IS NOT NULL OR th.production_year IS NULL)
+GROUP BY th.title_id, th.title, th.production_year, rm.year_rank, mc.actor_name
+ORDER BY th.production_year DESC, th.title;

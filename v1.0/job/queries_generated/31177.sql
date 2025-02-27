@@ -1,0 +1,39 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT t.id AS movie_id, 
+           t.title, 
+           t.production_year, 
+           t.kind_id,
+           0 AS level
+    FROM title t
+    WHERE t.production_year >= 2000  -- Filter for recent movies
+
+    UNION ALL
+
+    SELECT t.id, 
+           t.title, 
+           t.production_year, 
+           t.kind_id,
+           mh.level + 1
+    FROM title t
+    INNER JOIN movie_link ml ON t.id = ml.linked_movie_id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(cc.id) AS cast_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS character_names,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info='rating') THEN CAST(mi.info AS FLOAT) END) AS avg_rating,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(cc.id) DESC) AS rank_within_year,
+    COALESCE(k.keyword, 'No Keywords') AS movie_keyword
+FROM MovieHierarchy mh
+LEFT JOIN cast_info cc ON mh.movie_id = cc.movie_id
+LEFT JOIN char_name cn ON cc.person_id = cn.imdb_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+WHERE mh.production_year IS NOT NULL
+GROUP BY mh.movie_id, mh.title, mh.production_year, k.keyword
+HAVING COUNT(cc.id) > 5 -- Movies with more than 5 cast members
+ORDER BY mh.production_year DESC, cast_count DESC;

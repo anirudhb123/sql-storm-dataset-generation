@@ -1,0 +1,69 @@
+-- Performance Benchmarking Query
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation
+),
+
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY t.Id, t.TagName
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(POST_COUNT.VoteCount, 0) AS VoteCount,
+        COALESCE(POST_COUNT.CommentCount, 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            COUNT(DISTINCT c.Id) AS CommentCount
+        FROM Votes v
+        LEFT JOIN Comments c ON v.PostId = c.PostId
+        GROUP BY PostId
+    ) AS POST_COUNT ON p.Id = POST_COUNT.PostId
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.PostCount,
+    us.BadgeCount,
+    us.TotalBounties,
+    ts.TagName,
+    ts.TotalViews,
+    ts.PostCount AS TagPostCount,
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.VoteCount,
+    ps.CommentCount
+FROM UserStats us
+JOIN TagStats ts ON us.PostCount > 0
+JOIN PostStats ps ON us.PostCount > 0
+ORDER BY us.Reputation DESC, ts.TotalViews DESC, ps.Score DESC
+LIMIT 100;

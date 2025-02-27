@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey = s.s_nationkey)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+TopProducts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_quantity) > (SELECT AVG(total_quantity) FROM (SELECT SUM(l2.l_quantity) AS total_quantity FROM lineitem l2 GROUP BY l2.l_partkey) AS avg_quantities)
+)
+SELECT 
+    r.r_name AS region,
+    COALESCE(s.s_name, 'No Suppliers') AS supplier_name,
+    COALESCE(tp.p_name, 'No Products') AS product_name,
+    COUNT(DISTINCT oo.o_orderkey) AS order_count,
+    SUM(oo.total_value) AS total_order_value,
+    SUM(tp.total_quantity) AS total_product_quantity
+FROM 
+    RankedSuppliers s
+FULL OUTER JOIN 
+    HighValueOrders oo ON s.s_suppkey = oo.o_orderkey
+FULL OUTER JOIN 
+    TopProducts tp ON tp.p_partkey = oo.o_orderkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    r.r_name IS NOT NULL 
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 5000)
+GROUP BY 
+    r.r_name, s.s_name, tp.p_name
+ORDER BY 
+    total_order_value DESC, order_count ASC
+OFFSET 5 ROWS FETCH NEXT 100 ROWS ONLY;

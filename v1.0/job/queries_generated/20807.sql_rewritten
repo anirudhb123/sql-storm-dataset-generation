@@ -1,0 +1,49 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(STRING_AGG(DISTINCT c.name, ', '), 'No Cast') AS cast_names,
+        COALESCE(STRING_AGG(DISTINCT co.name, ', '), 'No Companies') AS producing_companies,
+        COUNT(DISTINCT mkii.keyword) AS keyword_count,
+        COUNT(ca.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+        LEFT JOIN cast_info ca ON t.id = ca.movie_id
+        LEFT JOIN aka_name c ON ca.person_id = c.person_id
+        LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+        LEFT JOIN company_name co ON mc.company_id = co.id
+        LEFT JOIN movie_keyword mkii ON t.id = mkii.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year <> 0
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.cast_names,
+        md.producing_companies,
+        md.keyword_count,
+        md.cast_count,
+        md.year_rank,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id IN (SELECT id FROM aka_title WHERE production_year = md.production_year)) AS same_year_keyword_count
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.production_year,
+    COUNT(rm.movie_title) AS total_movies,
+    AVG(rm.cast_count)::numeric(10, 2) AS average_cast_per_movie,
+    MAX(rm.keyword_count) AS max_keywords,
+    SUM(CASE WHEN rm.same_year_keyword_count > 5 THEN 1 ELSE 0 END) AS movies_with_many_keywords
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.year_rank <= 5
+GROUP BY 
+    rm.production_year
+ORDER BY 
+    rm.production_year DESC;

@@ -1,0 +1,50 @@
+WITH RECURSIVE part_supply AS (
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps.supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.supplycost DESC) as rn
+    FROM partsupp ps
+    WHERE ps.availqty > 0
+),
+high_value_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'UNKNOWN'
+               ELSE CASE 
+                   WHEN s.s_acctbal > 10000 THEN 'HIGH VALUE'
+                   ELSE 'LOW VALUE'
+               END
+           END AS supplier_value
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL OR s.s_acctbal IS NOT NULL
+),
+recent_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_orderdate,
+           DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) as recent_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(day, -30, cast('1998-10-01' as date))
+),
+critical_part_supply AS (
+    SELECT ps.partkey, SUM(ps.availqty * ps.supplycost) AS total_supply_value
+    FROM part_supply ps
+    GROUP BY ps.partkey
+    HAVING total_supply_value > 50000
+),
+part_info AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment,
+           COALESCE(SUM(l.l_quantity * l.l_extendedprice), 0) AS total_revenue,
+           RANK() OVER (ORDER BY COALESCE(SUM(l.l_quantity * l.l_extendedprice), 0) DESC) as revenue_rank
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.total_supply_value,
+       rv.supplier_value, coalesce(l.recent_order_count, 0) AS recent_order_count
+FROM part_info p
+JOIN critical_part_supply ps ON p.p_partkey = ps.partkey
+LEFT JOIN high_value_suppliers rv ON ps.suppkey = rv.s_suppkey
+LEFT JOIN (
+    SELECT r.o_custkey, COUNT(r.o_orderkey) AS recent_order_count
+    FROM recent_orders r
+    GROUP BY r.o_custkey
+) l ON l.o_custkey = rv.s_suppkey
+WHERE p.p_retailprice BETWEEN 50 AND 500
+ORDER BY p.p_partkey, total_supply_value DESC NULLS LAST;

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE income_ranges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL AND ib_upper_bound IS NOT NULL
+
+    UNION ALL
+
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_ranges ir ON ib.ib_upper_bound > ir.ib_lower_bound AND ir.ib_upper_bound IS NOT NULL
+    WHERE ib.ib_income_band_sk <> ir.ib_income_band_sk
+),
+
+customer_data AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ARRAY_AGG(DISTINCT ca.ca_city) AS cities
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+
+sales_data AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ARRAY_AGG(DISTINCT sm.sm_type) AS shipping_methods
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE ws.ws_net_paid IS NOT NULL OR ws.ws_net_profit IS NOT NULL
+    GROUP BY ws.ws_item_sk
+),
+
+combined_data AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ir.ib_income_band_sk,
+        ir.ib_lower_bound,
+        ir.ib_upper_bound,
+        sd.total_quantity,
+        sd.total_profit,
+        sd.shipping_methods
+    FROM customer_data cd
+    LEFT JOIN household_demographics hd ON cd.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN income_ranges ir ON hd.hd_income_band_sk = ir.ib_income_band_sk
+    LEFT JOIN sales_data sd ON cd.c_customer_sk = sd.ws_item_sk
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(c.total_quantity, 0) AS total_quantity,
+    COALESCE(c.total_profit, 0) AS total_profit,
+    CASE 
+        WHEN c.cd_marital_status = 'S' THEN 'Single' 
+        ELSE 'Not Single' 
+    END AS marital_status,
+    CASE 
+        WHEN c.cd_gender IS NULL THEN 'Unknown' 
+        ELSE c.cd_gender 
+    END AS gender,
+    STRING_AGG(DISTINCT c.cities) AS customer_cities,
+    IIF(c.ib_lower_bound IS NOT NULL AND c.ib_upper_bound IS NOT NULL, 
+        CONCAT('Income range: $', c.ib_lower_bound, ' - $', c.ib_upper_bound), 
+        'Income range: Unknown') AS income_range,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.total_profit DESC) as rank
+FROM combined_data c
+GROUP BY c.c_first_name, c.c_last_name, c.cd_gender, c.cd_marital_status, c.ib_lower_bound, c.ib_upper_bound
+HAVING SUM(COALESCE(c.total_profit, 0)) > 1000
+ORDER BY total_profit DESC NULLS LAST;

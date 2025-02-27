@@ -1,0 +1,66 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(vs.UpVotes, 0) - COALESCE(vs.DownVotes, 0) AS NetVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(vs.UpVotes, 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserVoteStats vs ON p.OwnerUserId = vs.UserId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+)
+SELECT 
+    ph.PostId,
+    ph.Title AS PostTitle,
+    ph.Level,
+    pp.NetVotes,
+    u.DisplayName AS Owner,
+    pp.Rank
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    PopularPosts pp ON ph.PostId = pp.PostId
+LEFT JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+WHERE 
+    pp.Rank <= 3 
+ORDER BY 
+    ph.Level, pp.NetVotes DESC;

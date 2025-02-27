@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+), RankedTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.TagId) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        (SELECT 
+            UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int AS TagId, 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.PostTypeId = 1) pt ON t.Id = pt.TagId
+    GROUP BY 
+        t.Id, t.TagName
+), PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(v.BountyAmount) > 0
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerName,
+    rp.Score,
+    rt.TagName,
+    pu.DisplayName AS TopBountyUser,
+    pu.TotalBounty
+FROM 
+    RankedPosts rp
+JOIN 
+    RankedTags rt ON rp.PostId IN (SELECT DISTINCT post_id FROM PostTags WHERE tag_id = rt.TagId)
+JOIN 
+    PopularUsers pu ON pu.TotalBounty = (SELECT MAX(TotalBounty) FROM PopularUsers)
+WHERE 
+    rp.rn <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

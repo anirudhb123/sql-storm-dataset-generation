@@ -1,0 +1,55 @@
+WITH ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk 
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459365 AND 2459390  
+    GROUP BY 
+        i.i_item_id
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS customer_total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.cd_gender,
+        SUM(cs.customer_total_sales) AS total_customer_sales,
+        ISNULL(its.total_quantity_sold, 0) AS total_quantity_sold,
+        ISNULL(its.total_sales, 0) AS total_sales
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        ItemSales its ON cs.c_customer_id = its.i_item_id
+    GROUP BY 
+        cs.c_customer_id, cs.cd_gender, its.total_quantity_sold, its.total_sales
+)
+SELECT 
+    s.cd_gender,
+    COUNT(DISTINCT s.c_customer_id) AS distinct_customers,
+    SUM(s.total_customer_sales) AS aggregate_sales,
+    SUM(s.total_quantity_sold) AS aggregate_quantity_sold,
+    AVG(s.total_sales) AS average_sales_per_item
+FROM 
+    SalesSummary s
+GROUP BY 
+    s.cd_gender
+ORDER BY 
+    aggregate_sales DESC;

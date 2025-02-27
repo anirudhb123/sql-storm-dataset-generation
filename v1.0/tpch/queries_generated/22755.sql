@@ -1,0 +1,68 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.n_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS distinct_suppliers,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(s.s_acctbal) AS avg_account_balance,
+        DENSE_RANK() OVER (PARTITION BY s.n_nationkey ORDER BY AVG(s.s_acctbal) DESC) AS balance_rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_customer_orders,
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS cust_order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+),
+FlaggedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'High Discount'
+            WHEN l.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Normal'
+        END AS item_flag
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= (CURRENT_DATE - INTERVAL '1 year')
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(ss.total_available_quantity), 0) AS total_avail_qty,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    SUM(CASE WHEN fl.item_flag = 'High Discount' THEN 1 ELSE 0 END) AS high_discount_count,
+    AVG(co.total_customer_orders) AS avg_customer_spending,
+    MIN(co.cust_order_rank) AS min_order_rank,
+    MAX(co.order_count) AS max_order_count
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierStats ss ON n.n_nationkey = ss.n_nationkey
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_nationkey
+LEFT JOIN 
+    FlaggedLineItems fl ON fl.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1 AND 
+    (SUM(ss.total_available_quantity) > 100 OR MAX(ss.distinct_suppliers) > 5)
+ORDER BY 
+    region_name ASC;

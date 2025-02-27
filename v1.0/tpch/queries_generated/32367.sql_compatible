@@ -1,0 +1,49 @@
+
+WITH RECURSIVE sales_rank AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (ORDER BY total_spent DESC) AS rank
+    FROM sales_rank
+    WHERE total_spent IS NOT NULL
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_nation AS (
+    SELECT c.c_custkey, n.n_name AS nation_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    tc.c_name,
+    tc.rank AS customer_rank,
+    pss.p_name,
+    pss.total_supply_cost,
+    cn.nation_name,
+    CASE
+        WHEN pss.total_supply_cost IS NULL THEN 'No Supply'
+        ELSE 'Available'
+    END AS supply_status,
+    COUNT(l.l_orderkey) AS total_orders
+FROM top_customers tc
+LEFT JOIN lineitem l ON l.l_orderkey IN (
+      SELECT o.o_orderkey
+      FROM orders o
+      WHERE o.o_custkey = tc.c_custkey
+)
+JOIN part_supplier_summary pss ON l.l_partkey = pss.p_partkey
+JOIN customer_nation cn ON tc.c_custkey = cn.c_custkey
+WHERE pss.total_supply_cost > (
+      SELECT AVG(total_supply_cost) FROM part_supplier_summary
+)
+GROUP BY tc.c_custkey, tc.c_name, pss.p_name, pss.total_supply_cost, cn.nation_name, tc.rank
+ORDER BY tc.rank, pss.total_supply_cost DESC
+LIMIT 10;

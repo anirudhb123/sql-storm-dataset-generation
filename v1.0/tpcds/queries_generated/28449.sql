@@ -1,0 +1,36 @@
+
+WITH AddressInfo AS (
+    SELECT ca.city, ca.state, 
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+           LENGTH(c.c_email_address) AS email_length,
+           CASE 
+               WHEN cd.cd_gender = 'M' THEN 'Male'
+               WHEN cd.cd_gender = 'F' THEN 'Female'
+               ELSE 'Other' 
+           END AS gender,
+           COUNT(c.c_customer_sk) AS number_of_customers
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.city, ca.state, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+SalesData AS (
+    SELECT
+        CASE 
+            WHEN T.d_current_month = 'Y' THEN 'Current Month'
+            WHEN T.d_month_seq = (SELECT max(d_month_seq) FROM date_dim) THEN 'Last Month'
+            ELSE 'Earlier' 
+        END AS sales_period,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM web_sales ws
+    JOIN date_dim T ON ws.ws_sold_date_sk = T.d_date_sk
+    GROUP BY sales_period
+)
+SELECT AI.city, AI.state, AI.customer_name, AI.email_length, AI.gender, 
+       SD.sales_period, SD.total_sales, SD.total_orders, SD.avg_net_paid
+FROM AddressInfo AI
+JOIN SalesData SD ON AI.number_of_customers > 5
+WHERE AI.state = 'CA'
+ORDER BY AI.city, SD.total_sales DESC;

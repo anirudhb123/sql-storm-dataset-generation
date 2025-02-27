@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON co.o_orderkey = o.o_orderkey
+    WHERE o.o_totalprice < co.o_totalprice
+),
+RegionSupplier AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE r.r_name IS NOT NULL
+    GROUP BY r.r_regionkey, r.r_name
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    co.c_name,
+    co.o_orderdate,
+    rp.r_name,
+    tp.p_name,
+    tp.total_revenue
+FROM 
+    CustomerOrders co
+JOIN 
+    RegionSupplier rp ON rp.supplier_count > 5
+JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM TopProducts tp WHERE tp.total_revenue > 500)
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = co.o_orderkey
+LEFT JOIN 
+    part p ON p.p_partkey = l.l_partkey
+WHERE 
+    l.l_shipdate IS NOT NULL
+    AND co.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+ORDER BY 
+    co.o_orderdate DESC, rp.r_name, tp.total_revenue;

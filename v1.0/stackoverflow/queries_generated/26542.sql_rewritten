@@ -1,0 +1,67 @@
+WITH RelevantPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate
+),
+TaggedPosts AS (
+    SELECT 
+        PostId, 
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags)-2), '><')) AS TagName
+    FROM 
+        RelevantPosts
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM 
+        TaggedPosts
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10  
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CommentCount, 
+        rp.UpVoteCount, 
+        tt.TagName
+    FROM 
+        RelevantPosts rp
+    JOIN 
+        TaggedPosts tp ON rp.PostId = tp.PostId
+    JOIN 
+        TopTags tt ON tp.TagName = tt.TagName
+    WHERE 
+        rp.UpVoteCount > 10  
+)
+SELECT 
+    pp.PostId, 
+    pp.Title, 
+    pp.CommentCount, 
+    pp.UpVoteCount, 
+    STRING_AGG(DISTINCT pp.TagName, ', ') AS Tags
+FROM 
+    PopularPosts pp
+GROUP BY 
+    pp.PostId, pp.Title, pp.CommentCount, pp.UpVoteCount
+ORDER BY 
+    pp.UpVoteCount DESC, pp.CommentCount DESC;

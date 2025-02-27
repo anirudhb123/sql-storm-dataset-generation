@@ -1,0 +1,120 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+    WHERE 
+        p.PostTypeId = 2  -- Only Answers
+),
+
+TagSummary AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))  -- Using string to array to match tags
+    GROUP BY 
+        t.Id, t.TagName
+),
+
+UserAchievements AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        ph.Level,
+        pt.Name AS PostType,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.Score,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY ps.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(Comment.Id) AS CommentCount,
+            SUM(Vote.VoteTypeId = 2) AS Upvotes,
+            SUM(Vote.VoteTypeId = 3) AS Downvotes,
+            SUM(Vote.VoteTypeId = 4) AS OffensiveVotes
+        FROM 
+            Posts
+        LEFT JOIN 
+            Comments Comment ON Posts.Id = Comment.PostId
+        LEFT JOIN 
+            Votes Vote ON Posts.Id = Vote.PostId
+        GROUP BY 
+            PostId) AS ps ON p.Id = ps.PostId
+)
+
+SELECT 
+    p.Title AS PostTitle,
+    p.OwnerDisplayName,
+    p.ViewCount,
+    p.CommentCount,
+    p.Score,
+    ph.Level AS AnswerLevel,
+    t.TagName,
+    u.BadgeCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    tg.PostCount AS TotalPostsPerTag,
+    tg.TotalViews AS TotalViewsPerTag
+FROM 
+    PostMetrics p
+LEFT JOIN 
+    UserAchievements u ON p.OwnerDisplayName = u.DisplayName
+LEFT JOIN 
+    TagSummary tg ON p.Id IN (SELECT unnest(string_to_array(Tags, ','))::int);
+WHERE 
+    p.CommentCount > 0
+AND 
+    p.Rank <= 5  -- Limit to top 5 posts per user
+ORDER BY 
+    p.ViewCount DESC, 
+    tg.TotalViews DESC;

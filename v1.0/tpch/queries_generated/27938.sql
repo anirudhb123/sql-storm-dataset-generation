@@ -1,0 +1,29 @@
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    MIN(p.p_retailprice) AS min_price,
+    MAX(p.p_retailprice) AS max_price,
+    AVG(p.p_retailprice) AS avg_price,
+    STRING_AGG(DISTINCT s.s_name, '; ') AS supplier_names,
+    CONCAT('Part: ', p.p_name, ', Brand: ', p.p_brand, ', Type: ', p.p_type) AS full_description
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name LIKE 'Asia%' AND 
+    p.p_size BETWEEN 10 AND 20
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type
+ORDER BY 
+    avg_price DESC, supplier_count DESC;

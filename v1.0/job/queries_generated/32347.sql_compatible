@@ -1,0 +1,68 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.movie_id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    t.title AS movie_title,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    ARRAY_AGG(DISTINCT a.actor_name) AS actor_names,
+    COALESCE(MAX(ci.note), 'No Role Note') AS role_note,
+    SUM(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS male_actors,
+    SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_actors,
+    AVG(EXTRACT(YEAR FROM TIMESTAMP '2024-10-01 12:34:56') - t.production_year) AS avg_age_of_movie,
+    COUNT(DISTINCT kw.keyword) AS unique_keywords
+FROM 
+    title t
+LEFT JOIN 
+    cast_info c ON t.id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    person_info p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword kw ON t.id = kw.movie_id
+LEFT JOIN 
+    info_type it ON p.info_type_id = it.id
+LEFT JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    t.production_year IS NOT NULL 
+GROUP BY 
+    t.title
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1
+ORDER BY 
+    avg_age_of_movie DESC
+LIMIT 50;

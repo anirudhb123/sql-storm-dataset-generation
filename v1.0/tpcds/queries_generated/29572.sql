@@ -1,0 +1,56 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws_c.bill_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site ws_c ON ws.ws_web_site_sk = ws_c.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        ws_c.bill_customer_sk
+)
+SELECT 
+    cd.full_name,
+    ad.full_address,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(sd.total_sales, 0) AS total_sales_last_30_days
+FROM 
+    CustomerDetails cd
+JOIN 
+    AddressDetails ad ON ad.ca_address_sk = cd.c_current_addr_sk
+LEFT JOIN 
+    SalesDetails sd ON cd.c_customer_sk = sd.bill_customer_sk
+ORDER BY 
+    total_sales_last_30_days DESC
+LIMIT 100;

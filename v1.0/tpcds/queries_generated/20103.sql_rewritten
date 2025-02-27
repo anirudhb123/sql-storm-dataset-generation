@@ -1,0 +1,77 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk,
+        ca.ca_city
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+CustomerPurchases AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        RankedCustomers rc ON ws.ws_bill_customer_sk = rc.c_customer_id
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.ca_city,
+        cp.total_net_profit,
+        cp.total_orders
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        CustomerPurchases cp ON rc.c_customer_id = cp.ws_bill_customer_sk
+    WHERE 
+        rc.rnk <= 5 
+        AND cp.total_net_profit IS NOT NULL
+        AND cp.total_net_profit > 1000
+),
+OutlierReturns AS (
+    SELECT 
+        sr.returned_date,
+        COUNT(*) AS return_count
+    FROM 
+        store_returns sr
+    JOIN 
+        HighValueCustomers hvc ON sr.sr_customer_sk = hvc.c_customer_id
+    GROUP BY 
+        sr.returned_date
+    HAVING 
+        COUNT(*) > (SELECT AVG(return_count) FROM (
+                        SELECT COUNT(*) AS return_count
+                        FROM store_returns
+                        GROUP BY sr_customer_sk
+                    ) AS subquery)
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.ca_city,
+    COALESCE(SUM(rt.return_count), 0) AS total_returns,
+    (hvc.total_net_profit / NULLIF(hvc.total_orders, 0)) AS avg_order_value
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    OutlierReturns rt ON rt.returned_date = cast('2002-10-01' as date) 
+GROUP BY 
+    hvc.c_first_name, hvc.c_last_name, hvc.ca_city, hvc.total_net_profit, hvc.total_orders
+ORDER BY 
+    avg_order_value DESC;

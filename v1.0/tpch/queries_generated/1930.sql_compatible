@@ -1,0 +1,44 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(l.l_orderkey) AS item_count,
+        c.c_mktsegment
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_mktsegment
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(rs.total_supply_cost, 0) AS supplier_cost,
+    os.order_total,
+    os.item_count,
+    r.r_name AS region_name
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN OrderSummary os ON ps.ps_partkey = os.o_orderkey
+LEFT JOIN nation n ON rs.n_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (p.p_container LIKE '%box%' OR p.p_type = 'fragile')
+    AND (os.order_total IS NULL OR os.item_count > 5)
+ORDER BY p.p_retailprice DESC, supplier_cost ASC;

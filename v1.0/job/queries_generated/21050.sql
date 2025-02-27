@@ -1,0 +1,83 @@
+WITH RecursiveActorRoles AS (
+    SELECT 
+        ca.person_id,
+        COUNT(DISTINCT ca.movie_id) AS num_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    JOIN 
+        aka_title t ON ca.movie_id = t.movie_id
+    GROUP BY 
+        ca.person_id
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 5
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mca.company_id) AS num_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code != 'USA'
+    GROUP BY 
+        mc.movie_id
+),
+MovieInfoWithKeywords AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        mi.info IS NOT NULL AND mi.note IS NULL
+    GROUP BY 
+        mi.movie_id
+),
+QualifiedMovies AS (
+    SELECT 
+        DISTINCT t.title,
+        t.production_year,
+        ra.num_movies,
+        cs.num_companies,
+        mk.keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        RecursiveActorRoles ra ON ra.person_id IN (
+            SELECT 
+                DISTINCT ca.person_id 
+            FROM 
+                cast_info ca 
+            WHERE 
+                ca.movie_id = t.id
+        )
+    LEFT JOIN 
+        CompanyStats cs ON cs.movie_id = t.id
+    LEFT JOIN 
+        MovieInfoWithKeywords mk ON mk.movie_id = t.id
+    WHERE 
+        (t.production_year <= 1990 OR ra.num_movies IS NULL)
+        AND (cs.num_companies > 1 OR cs.num_companies IS NULL)
+)
+SELECT 
+    q.title, 
+    q.production_year, 
+    q.num_movies, 
+    COALESCE(q.num_companies, 0) AS num_companies, 
+    COALESCE(q.keywords, 'No keywords found') AS keywords
+FROM 
+    QualifiedMovies q
+ORDER BY 
+    q.production_year DESC,
+    q.num_movies DESC,
+    q.num_companies ASC;

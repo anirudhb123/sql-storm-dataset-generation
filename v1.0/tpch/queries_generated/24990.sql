@@ -1,0 +1,61 @@
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_nationkey,
+        c.c_custkey,
+        c.c_name,
+        cp.total_spent,
+        cp.order_count
+    FROM nation n
+    JOIN CustomerPurchases cp ON n.n_nationkey = cp.c_nationkey
+    JOIN customer c ON c.c_custkey = cp.c_custkey
+    WHERE cp.rank <= 3
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS lowest_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+HighValueSupplies AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+        AVG(ps.ps_supplycost) AS average_cost,
+        SUM(ps.ps_availqty) AS total_quantity
+    FROM PartSupplier ps
+    JOIN part p ON p.p_partkey = ps.p_partkey
+    WHERE ps.lowest_cost = 1
+    GROUP BY p.p_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    n.n_name AS nation_name,
+    SUM(h.total_quantity) AS total_supplied_quantity,
+    SUM(h.average_cost) AS average_supply_cost,
+    CASE 
+        WHEN SUM(h.total_quantity) IS NULL THEN 'No Supplies'
+        ELSE 'Supplies Available'
+    END AS supply_status
+FROM TopCustomers c
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN HighValueSupplies h ON c.c_custkey = h.p_partkey
+GROUP BY c.c_name, n.n_name
+ORDER BY total_supplied_quantity DESC NULLS LAST;

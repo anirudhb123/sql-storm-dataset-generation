@@ -1,0 +1,76 @@
+
+WITH UserAggregates AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount,
+        RANK() OVER (ORDER BY SUM(COALESCE(V.BountyAmount, 0)) DESC) AS BountyRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(COALESCE(V.Score, 0)) AS TotalVotes,
+        P.CreationDate,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PHT.Name AS PostHistoryType,
+        COUNT(PH.Id) AS VersionCount,
+        MAX(PH.CreationDate) AS LastEdited
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId, PHT.Name
+)
+
+SELECT 
+    UA.UserId,
+    UA.Reputation,
+    UA.TotalPosts,
+    UA.TotalBounty,
+    PStats.Title AS MostRecentPost,
+    PStats.CommentCount AS MostRecentPostComments,
+    PHDetails.VersionCount AS PostHistoryVersionCount,
+    PHDetails.LastEdited,
+    CASE 
+        WHEN UA.TotalPosts > 10 THEN 'Regular Contributor'
+        WHEN UA.TotalPosts = 0 THEN 'No Contributions'
+        ELSE 'New Contributor'
+    END AS ContributorStatus
+FROM 
+    UserAggregates UA
+LEFT JOIN 
+    PostStatistics PStats ON UA.UserId = PStats.OwnerUserId AND PStats.PostRank = 1
+LEFT JOIN 
+    PostHistoryDetails PHDetails ON PStats.PostId = PHDetails.PostId
+WHERE 
+    UA.Reputation IS NOT NULL
+AND 
+    (UA.TotalPosts > 0 OR UA.UserId IN (SELECT DISTINCT UserId FROM Badges WHERE Class = 1))
+ORDER BY 
+    UA.Reputation DESC, UA.TotalBounty DESC;

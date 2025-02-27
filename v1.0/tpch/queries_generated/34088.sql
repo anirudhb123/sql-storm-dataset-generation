@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 4
+),
+PartSupplierStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+AnnualOrderSummary AS (
+    SELECT EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+           SUM(o.o_totalprice) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY order_year
+),
+EnhancedCustomerInfo AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(COALESCE(p.total_supply_cost, 0)) AS total_supply_cost,
+    MAX(a.total_revenue) AS peak_annual_revenue,
+    AVG(s.total_spent) AS average_spent_per_customer,
+    COUNT(DISTINCT sh.s_suppkey) AS distinct_suppliers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN EnhancedCustomerInfo s ON s.c_nationkey = n.n_nationkey
+LEFT JOIN AnnualOrderSummary a ON a.order_year BETWEEN 2020 AND 2023
+LEFT JOIN PartSupplierStats p ON p.supplier_count > 2
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY total_customers DESC, peak_annual_revenue DESC;

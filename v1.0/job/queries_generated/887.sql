@@ -1,0 +1,71 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        title t
+    WHERE 
+        t.production_year >= 2000
+),
+ActorMovieInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        kt.keyword,
+        tm.title
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title kt ON ci.movie_id = kt.movie_id
+    JOIN 
+        RankedTitles tm ON kt.movie_id = tm.title_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CompleteInfo AS (
+    SELECT 
+        ami.actor_id,
+        ami.name AS actor_name,
+        cm.company_name,
+        cm.company_type,
+        am.title,
+        am.production_year,
+        am.title_rank,
+        am.total_titles 
+    FROM 
+        ActorMovieInfo ami
+    LEFT JOIN 
+        CompanyInfo cm ON ami.title = cm.movie_id
+    LEFT JOIN 
+        RankedTitles am ON ami.title = am.title
+)
+SELECT 
+    ci.actor_id,
+    ci.actor_name,
+    ci.title,
+    COALESCE(ci.company_name, 'Not Available') AS company_name,
+    COALESCE(ci.company_type, 'Not Classified') AS company_type,
+    ci.production_year,
+    ci.title_rank,
+    ci.total_titles
+FROM 
+    CompleteInfo ci
+WHERE 
+    ci.total_titles > 5
+ORDER BY 
+    ci.production_year DESC, ci.title_rank;

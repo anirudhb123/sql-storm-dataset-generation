@@ -1,0 +1,74 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        p.p_retailprice BETWEEN 10.00 AND 100.00
+    AND 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        r.r_name
+),
+TopRegions AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales
+),
+FilteredRegions AS (
+    SELECT 
+        region_name,
+        total_sales 
+    FROM 
+        TopRegions
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    fr.region_name,
+    fr.total_sales,
+    COALESCE(
+        (SELECT SUM(l.l_quantity)
+         FROM lineitem l
+         JOIN orders o ON l.l_orderkey = o.o_orderkey
+         WHERE o.o_orderstatus = 'F' AND l.l_returnflag = 'R'
+         AND EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = l.l_partkey)
+        ), 0) AS total_returned_quantity
+FROM 
+    FilteredRegions fr
+LEFT JOIN 
+    (SELECT DISTINCT n.n_name, r.r_name
+     FROM nation n
+     JOIN region r ON n.n_regionkey = r.r_regionkey) AS nation_region ON 1=1
+WHERE 
+    fr.total_sales IS NOT NULL 
+ORDER BY 
+    fr.total_sales DESC
+UNION ALL
+SELECT 
+    'Total' AS region_name,
+    SUM(total_sales) AS total_sales,
+    NULL
+FROM 
+    FilteredRegions
+HAVING 
+    SUM(total_sales) >= 1000
+ORDER BY 
+    total_sales DESC;

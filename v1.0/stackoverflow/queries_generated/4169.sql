@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ua.UserId,
+        ua.DisplayName,
+        ua.CommentCount,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserActivity ua ON ua.CommentCount > 0
+    WHERE 
+        rp.RankScore <= 10
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.DisplayName,
+    COALESCE(pd.GoldBadges, 0) AS GoldBadges,
+    COALESCE(pd.SilverBadges, 0) AS SilverBadges,
+    COALESCE(pd.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Votes v ON v.PostId = pd.PostId 
+WHERE 
+    v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Score, pd.DisplayName
+ORDER BY 
+    pd.Score DESC, pd.Title ASC
+LIMIT 20;

@@ -1,0 +1,63 @@
+
+WITH regional_supply AS (
+    SELECT 
+        r.r_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+),
+popular_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS return_quantity,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 5 OR SUM(l.l_quantity) > 100
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank_value
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+            SELECT 
+                AVG(c2.c_acctbal)
+            FROM 
+                customer c2
+        )
+)
+SELECT 
+    r.r_name,
+    pp.p_name,
+    pp.return_quantity,
+    hvc.c_name AS high_value_customer
+FROM 
+    regional_supply r
+FULL OUTER JOIN popular_parts pp ON r.supplier_count > 10
+LEFT JOIN high_value_customers hvc ON hvc.rank_value = 1
+WHERE 
+    r.total_supply_cost IS NOT NULL 
+    OR pp.return_quantity > 50 
+ORDER BY 
+    r.r_name, pp.p_name;

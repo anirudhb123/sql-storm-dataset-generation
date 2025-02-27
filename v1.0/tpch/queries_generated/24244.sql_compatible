@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, l.l_partkey, l.l_discount, 
+           l.l_extendedprice * (1 - l.l_discount) AS adjusted_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > 500 AND l.l_returnflag = 'N'
+)
+SELECT DISTINCT
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    SUM(COALESCE(ps.ps_availqty, 0)) AS total_availqty,
+    SUM(COALESCE(ps.ps_supplycost, 0)) AS total_supplycost,
+    CASE 
+        WHEN COUNT(DISTINCT l.l_orderkey) = 0 THEN 'No orders'
+        ELSE 'Orders exist'
+    END AS order_status,
+    (SELECT COUNT(*) 
+     FROM TopCustomers tc 
+     WHERE tc.rank <= 5 AND tc.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT o_orderkey FROM HighValueOrders))) AS top_customers_count,
+    NULLIF(MAX(s.s_acctbal), 0) AS max_supplier_balance,
+    sh.level AS supplier_hierarchy_level
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN HighValueOrders hvo ON p.p_partkey = hvo.l_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_mfgr, 
+    p.p_brand, 
+    p.p_type, 
+    sh.level
+HAVING SUM(COALESCE(ps.ps_availqty, 0)) > 100 OR MAX(l.l_discount) IS NULL
+ORDER BY order_status, p.p_partkey;

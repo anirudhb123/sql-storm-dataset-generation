@@ -1,0 +1,95 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        1 AS depth
+    FROM 
+        cast_info c
+    WHERE 
+        c.nr_order = 1  
+
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        ah.depth + 1
+    FROM 
+        cast_info c
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        c.nr_order > ah.depth
+),
+MovieGenres AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        kt.keyword AS genre
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+AggregatedInfo AS (
+    SELECT 
+        m.title,
+        COUNT(distinct c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT gi.genre, ', ') AS genres,
+        STRING_AGG(DISTINCT ci.company_name, ', ') AS companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        MovieGenres gi ON m.id = gi.title
+    LEFT JOIN 
+        CompanyInfo ci ON m.id = ci.movie_id
+    WHERE 
+        m.production_year >= 2000  
+    GROUP BY 
+        m.title
+),
+RankedMovies AS (
+    SELECT 
+        title,
+        total_cast,
+        genres,
+        companies,
+        RANK() OVER (ORDER BY total_cast DESC) AS rank_order
+    FROM 
+        AggregatedInfo
+)
+
+SELECT 
+    rm.title,
+    rm.total_cast,
+    rm.genres,
+    rm.companies,
+    COALESCE(rm.total_cast / NULLIF((SELECT COUNT(*) FROM aka_title WHERE production_year >= 2000), 0), 0) AS relative_cast_size,
+    CASE 
+        WHEN rm.total_cast > 10 THEN 'Ensemble Cast'
+        WHEN rm.total_cast BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    (SELECT AVG(total_cast) FROM AggregatedInfo) AS average_cast
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank_order <= 10 
+ORDER BY 
+    rm.rank_order;

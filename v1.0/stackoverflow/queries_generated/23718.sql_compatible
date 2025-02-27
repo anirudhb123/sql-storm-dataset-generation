@@ -1,0 +1,91 @@
+
+WITH RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentAction
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserId AS CloserUserId,
+        ph.CreationDate AS CloseDate,
+        CASE 
+            WHEN ph.Comment IS NOT NULL THEN ph.Comment
+            ELSE 'No Reason Provided' 
+        END AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+),
+FullUserData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ue.CommentCount, 0) AS CommentCount,
+        COALESCE(ue.TotalViews, 0) AS TotalViews,
+        COALESCE(cl.CloseCount, 0) AS CloseCount,
+        COALESCE(cl.TotalCloseReasons, '') AS CloseReasons,
+        COUNT(DISTINCT ph.PostId) AS RecentActionsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserEngagement ue ON u.Id = ue.UserId
+    LEFT JOIN (
+        SELECT 
+            CloserUserId,
+            COUNT(DISTINCT PostId) AS CloseCount,
+            STRING_AGG(DISTINCT CloseReason, ', ') AS TotalCloseReasons
+        FROM 
+            ClosedPosts
+        GROUP BY 
+            CloserUserId
+    ) cl ON u.Id = cl.CloserUserId
+    LEFT JOIN 
+        RecentPostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    DisplayName,
+    CommentCount,
+    TotalViews,
+    CloseCount,
+    CloseReasons,
+    RecentActionsCount
+FROM 
+    FullUserData
+WHERE 
+    TotalViews > 0
+ORDER BY 
+    CloseCount DESC NULLS LAST, 
+    RecentActionsCount DESC
+LIMIT 50;

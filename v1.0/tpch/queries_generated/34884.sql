@@ -1,0 +1,49 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_custkey
+    FROM orders
+    WHERE o_orderdate >= DATEADD(YEAR, -1, CURRENT_DATE)
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    INNER JOIN RecentOrders ro ON o.o_orderkey < ro.o_orderkey
+    WHERE o.o_orderdate >= DATEADD(YEAR, -1, CURRENT_DATE)
+),
+CustomerSpending AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('F', 'P') -- Filter for finalized and processing orders
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierPartRevenue AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATEADD(YEAR, -1, CURRENT_DATE)
+    GROUP BY s.s_suppkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cs.total_spent,
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM customer c
+    JOIN CustomerSpending cs ON c.c_custkey = cs.c_custkey
+)
+
+SELECT
+    rc.o_orderkey,
+    rc.o_orderdate,
+    rc.o_totalprice,
+    tc.c_name AS customer_name,
+    COALESCE(sp.supplier_revenue, 0) AS supplier_revenue,
+    'Total Spending by Customer: ' || CAST(tc.total_spent AS VARCHAR) AS customer_spending_overview,
+    CASE 
+        WHEN rc.o_totalprice IS NOT NULL THEN ROUND(rc.o_totalprice * 0.1, 2)
+        ELSE NULL
+    END AS expected_tax
+FROM RecentOrders rc
+LEFT JOIN TopCustomers tc ON rc.o_custkey = tc.c_custkey AND tc.spending_rank <= 10
+LEFT JOIN SupplierPartRevenue sp ON rc.o_orderkey = sp.s_suppkey
+WHERE rc.o_orderdate IS NOT NULL
+ORDER BY rc.o_orderdate DESC, rc.o_totalprice DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

@@ -1,0 +1,38 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, t.total_price
+    FROM TotalSales t
+    JOIN orders o ON t.o_orderkey = o.o_orderkey
+    WHERE t.total_price > 5000
+),
+SupplierInfo AS (
+    SELECT DISTINCT s.s_suppkey, s.s_name, n.n_name
+    FROM supplier s
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT s.s_name, n.n_name, o.o_orderkey, t.total_price
+FROM HighValueOrders o
+JOIN SupplierInfo s ON s.s_suppkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 20
+    UNION
+    SELECT l.l_partkey
+    FROM lineitem l
+    WHERE l.l_quantity < 10
+)
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN RankedSuppliers r ON s.s_suppkey = r.s_suppkey AND r.rank <= 3
+ORDER BY n.n_name, o.total_price DESC;

@@ -1,0 +1,29 @@
+
+SELECT 
+    CONCAT('Customer: ', c.c_name, ' | Nation: ', n.n_name, ' | Total Spend: ', SUM(o.o_totalprice)) AS CustomerDetails,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', '), ', ', 5) AS Top5PurchasedParts,
+    COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+    AVG(o.o_totalprice) AS AverageOrderValue,
+    COUNT(DISTINCT o.o_custkey) AS UniqueCustomers,
+    SUM(o.o_totalprice) AS TotalSpend
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    n.n_name LIKE 'A%' 
+GROUP BY 
+    c.c_custkey, c.c_name, n.n_name
+HAVING 
+    TotalOrders > 10 
+ORDER BY 
+    TotalSpend DESC
+LIMIT 10;

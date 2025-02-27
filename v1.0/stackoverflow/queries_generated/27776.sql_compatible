@@ -1,0 +1,58 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(p.DownVotes), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopEngagedUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.TotalBounties,
+        ue.TotalPosts,
+        ue.TotalComments,
+        ue.TotalBadges,
+        ue.TotalViews,
+        ue.TotalUpVotes,
+        ue.TotalDownVotes,
+        RANK() OVER (ORDER BY ue.TotalPosts DESC, ue.TotalUpVotes DESC) AS EngagementRank
+    FROM 
+        UserEngagement ue
+)
+SELECT 
+    teu.DisplayName,
+    teu.TotalPosts,
+    teu.TotalComments,
+    teu.TotalViews,
+    teu.TotalBounties,
+    teu.TotalBadges,
+    CASE 
+        WHEN teu.TotalComments > 20 THEN 'Highly Engaged'
+        WHEN teu.TotalPosts > 10 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    TopEngagedUsers teu
+WHERE 
+    teu.EngagementRank <= 10
+ORDER BY 
+    teu.EngagementRank;

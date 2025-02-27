@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.kind_id IN (0, 1, 2, 4, 6, 7) AND mi.info IN ('SYNC: The voice of Dr. Esperanza used in the voice-over scene does not match with the voice of the actress in other scenes.');

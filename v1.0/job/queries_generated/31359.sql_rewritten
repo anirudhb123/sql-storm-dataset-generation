@@ -1,0 +1,76 @@
+WITH RECURSIVE actor_hierarchy AS (
+    
+    SELECT 
+        c.person_id, 
+        ak.name AS actor_name, 
+        1 AS depth
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        t.title = 'Inception'
+        
+    UNION ALL
+    
+    
+    SELECT 
+        c.person_id, 
+        ak.name AS actor_name, 
+        ah.depth + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.person_id = c.person_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        movie_link ml ON c.movie_id = ml.movie_id 
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        ml.link_type_id = 1  
+),
+actor_movie_count AS (
+    
+    SELECT 
+        actor_name, 
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.person_id = c.person_id
+    GROUP BY 
+        actor_name
+),
+movies_with_keyword AS (
+    
+    SELECT 
+        m.title,
+        m.production_year
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    WHERE 
+        k.keyword = 'Sci-Fi'
+)
+SELECT 
+    a.actor_name,
+    COALESCE(a.movie_count, 0) AS related_movie_count,
+    COUNT(DISTINCT mwk.title) AS sci_fi_movie_count,
+    RANK() OVER (ORDER BY COALESCE(a.movie_count, 0) DESC) AS actor_rank
+FROM 
+    actor_movie_count a
+LEFT JOIN 
+    movies_with_keyword mwk ON a.actor_name = mwk.title
+GROUP BY 
+    a.actor_name, a.movie_count
+HAVING 
+    a.movie_count > 0
+ORDER BY 
+    actor_rank;

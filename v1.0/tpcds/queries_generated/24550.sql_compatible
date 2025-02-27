@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        CASE 
+            WHEN rs.total_sales > 1000 THEN 'High Value'
+            WHEN rs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS sales_segment
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank = 1
+),
+CustomerAddressInfo AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+)
+SELECT 
+    ca_info.ca_city,
+    ca_info.ca_state,
+    sa.total_quantity,
+    sa.total_sales,
+    ca_info.customer_count,
+    COALESCE(NULLIF(sa.sales_segment, 'High Value'), 'Unknown') AS sales_category,
+    CASE 
+        WHEN ca_info.customer_count = (SELECT MAX(customer_count) FROM CustomerAddressInfo) 
+        THEN 'Top City' ELSE 'Other City' 
+    END AS city_status
+FROM 
+    CustomerAddressInfo ca_info
+LEFT JOIN 
+    SalesAnalysis sa ON ca_info.ca_address_sk = (SELECT c.c_current_addr_sk 
+        FROM customer c WHERE c.c_customer_sk = (SELECT MIN(c2.c_customer_sk) 
+            FROM customer c2 WHERE c2.c_current_addr_sk IS NOT NULL 
+            AND c2.c_current_addr_sk = ca_info.ca_address_sk))
+WHERE 
+    ca_info.ca_state IN ('CA', 'NY')
+ORDER BY 
+    ca_info.customer_count DESC, 
+    sa.total_sales DESC 
+LIMIT 100;

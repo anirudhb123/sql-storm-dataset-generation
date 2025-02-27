@@ -1,0 +1,44 @@
+
+WITH AddressStats AS (
+    SELECT
+        ca_state,
+        COUNT(*) AS total_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        AVG(LENGTH(ca_city)) AS avg_city_name_length
+    FROM customer_address
+    GROUP BY ca_state
+),
+DemographicsStats AS (
+    SELECT
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT cd_demo_sk) AS unique_demographics
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+SalesStats AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT
+    a.ca_state,
+    a.total_addresses,
+    a.avg_street_name_length,
+    a.avg_city_name_length,
+    d.cd_gender,
+    d.total_customers,
+    d.avg_purchase_estimate,
+    s.total_sales,
+    s.total_orders
+FROM AddressStats a
+JOIN DemographicsStats d ON d.total_customers > 50
+LEFT JOIN SalesStats s ON s.ws_bill_customer_sk IN (
+    SELECT c_customer_sk FROM customer WHERE c_current_addr_sk = a.ca_address_sk
+)
+ORDER BY a.ca_state, d.cd_gender, s.total_sales DESC
+LIMIT 100;

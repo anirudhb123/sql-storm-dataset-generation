@@ -1,0 +1,57 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT c.id AS cast_id, c.person_id, a.name AS actor_name, 1 AS level 
+    FROM cast_info c 
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE c.movie_id IN (
+        SELECT id FROM aka_title WHERE kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND production_year BETWEEN 2000 AND 2020
+    )
+    
+    UNION ALL
+    
+    SELECT cc.id AS cast_id, cc.person_id, a.name AS actor_name, ah.level + 1
+    FROM cast_info cc 
+    JOIN ActorHierarchy ah ON cc.movie_id = (
+        SELECT m.movie_id FROM complete_cast m WHERE m.subject_id = ah.cast_id LIMIT 1
+    )
+    JOIN aka_name a ON cc.person_id = a.person_id
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COALESCE(SUM(mk.keyword IS NOT NULL), 0) AS keyword_count,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword), 'No Keywords') AS keywords,
+        AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+                 THEN CAST(mi.info AS numeric) END) AS avg_rating
+    FROM aka_title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    GROUP BY t.id, t.title
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.actor_count,
+    md.keyword_count,
+    md.keywords,
+    md.avg_rating,
+    ah.actor_name AS top_actor,
+    ah.level AS actor_level
+FROM MovieDetails md
+LEFT JOIN ActorHierarchy ah ON md.movie_id IN (
+    SELECT DISTINCT movie_id FROM cast_info WHERE person_id = ah.person_id
+)
+WHERE md.avg_rating IS NOT NULL
+ORDER BY md.avg_rating DESC, md.actor_count DESC
+LIMIT 10;
+
+This SQL query uses multiple advanced SQL constructs for performance benchmarking:
+
+1. Recursive CTE (`ActorHierarchy`) to build a hierarchy of actors based on their movies.
+2. Complex aggregations and computations in the second CTE (`MovieDetails`) to extract relevant movie metadata.
+3. The main query combines these aggregates, filtering, ordering, and limiting the results to showcase the functionally rich data pulled from the schema provided. 
+4. Utilization of outer joins and aggregate functions such as `COUNT` and `AVG`, along with string aggregations using `GROUP_CONCAT` and `COALESCE` for handling NULL scenarios.
+5. It incorporates CTEs, joins, and subqueries to enhance complexity and showcase the structure of relationships in the data.

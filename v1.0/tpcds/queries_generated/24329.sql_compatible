@@ -1,0 +1,84 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) AS rnk,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_quantity DESC) AS quantity_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0 AND 
+        ws.ws_net_paid IS NOT NULL 
+),
+SalesSummary AS (
+    SELECT 
+        rs.ws_item_sk,
+        COUNT(*) AS sale_count,
+        SUM(rs.ws_sales_price) AS total_sales,
+        AVG(rs.ws_sales_price) AS avg_sales,
+        MAX(rs.ws_sales_price) AS max_sales,
+        COALESCE(SUM(CASE WHEN rs.ws_quantity > 5 THEN 1 ELSE 0 END), 0) AS high_volume_sales
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rnk = 1 
+    GROUP BY 
+        rs.ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(ii.inv_quantity_on_hand, 0) AS quantity_on_hand
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory ii ON i.i_item_sk = ii.inv_item_sk 
+    WHERE 
+        i.i_formulation IS NOT NULL
+),
+FinalReport AS (
+    SELECT 
+        id.i_item_id,
+        id.i_item_desc,
+        ss.sale_count,
+        ss.total_sales,
+        ss.avg_sales,
+        ss.max_sales,
+        ss.high_volume_sales,
+        id.quantity_on_hand,
+        CASE 
+            WHEN ss.total_sales > 1000 THEN 'High'
+            WHEN ss.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM 
+        ItemDetails id
+    INNER JOIN 
+        SalesSummary ss ON id.i_item_id IN (SELECT DISTINCT ws_item_sk FROM RankedSales WHERE rnk = 1)
+)
+SELECT 
+    fr.i_item_id,
+    fr.i_item_desc,
+    fr.sale_count,
+    fr.total_sales,
+    fr.avg_sales,
+    fr.max_sales,
+    fr.high_volume_sales,
+    fr.quantity_on_hand,
+    fr.sales_category,
+    CASE 
+        WHEN fr.high_volume_sales = 0 THEN NULL
+        ELSE ROUND(fr.total_sales / fr.high_volume_sales, 2)
+    END AS sales_per_high_volume
+FROM 
+    FinalReport fr
+WHERE 
+    fr.high_volume_sales > 0
+ORDER BY 
+    fr.total_sales DESC
+LIMIT 10;

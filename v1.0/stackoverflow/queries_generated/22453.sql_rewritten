@@ -1,0 +1,87 @@
+WITH UserRank AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY u.Reputation DESC) AS RankByLocation
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL AND u.Location IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation
+    FROM UserRank
+    WHERE RankByLocation <= 5
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) as QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) as AnswerCount,
+        SUM(p.Score) as TotalScore,
+        SUM(v.BountyAmount) as TotalBounty
+    FROM Posts p
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id,
+        COALESCE(ps.QuestionCount, 0) AS Questions,
+        COALESCE(ps.AnswerCount, 0) AS Answers,
+        COALESCE(ps.TotalScore, 0) AS Score,
+        COALESCE(ps.TotalBounty, 0) AS Bounty,
+        CASE 
+            WHEN COALESCE(ps.QuestionCount, 0) > 10 THEN 'Active Questioner'
+            WHEN COALESCE(ps.AnswerCount, 0) > 10 THEN 'Active Responder'
+            ELSE 'Newcomer'
+        END AS UserType
+    FROM Users u
+    LEFT JOIN PostStats ps ON ps.OwnerUserId = u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN LATERAL STRING_TO_ARRAY(p.Tags, ',') AS tag_array ON TRUE
+    JOIN Tags t ON t.TagName = TRIM(BOTH ' ' FROM tag_array)
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id
+),
+UserPostInteraction AS (
+    SELECT 
+        ua.Id AS UserId,
+        f.PostId,
+        f.Title,
+        f.CreationDate,
+        f.ViewCount,
+        f.Tags,
+        COALESCE(c.CommentCount, 0) AS CommentsCount
+    FROM UserActivity ua
+    JOIN FilteredPosts f ON ua.Id = f.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON c.PostId = f.PostId
+)
+SELECT 
+    ua.DisplayName,
+    ua.Reputation,
+    u.UserType,
+    COUNT(DISTINCT f.PostId) AS TotalPosts,
+    SUM(uB.Bounty) AS TotalBounty,
+    AVG(uB.Score) AS AverageScore,
+    STRING_AGG(DISTINCT f.Tags, ', ') AS TagsRelated
+FROM UserActivity uB
+JOIN FilteredPosts f ON uB.Id = f.PostId
+JOIN TopUsers ua ON uB.Id = ua.UserId
+GROUP BY ua.DisplayName, ua.Reputation, u.UserType
+HAVING SUM(uB.Bounty) > 0 OR AVG(uB.Score) > 0
+ORDER BY TotalPosts DESC, ua.Reputation DESC;

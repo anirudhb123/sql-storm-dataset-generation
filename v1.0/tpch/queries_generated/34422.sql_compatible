@@ -1,0 +1,80 @@
+
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT 
+        p_partkey, 
+        p_name, 
+        p_retailprice,
+        p_brand,
+        1 AS level
+    FROM 
+        part
+    WHERE 
+        p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100.00)
+    
+    UNION ALL
+    
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        p.p_brand,
+        ph.level + 1
+    FROM 
+        part p
+    JOIN 
+        PriceHierarchy ph ON p.p_partkey = ph.p_partkey
+    WHERE 
+        p.p_retailprice < ph.p_retailprice
+), CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    MAX(o.o_orderdate) AS last_order,
+    s.s_name AS supplier_name,
+    ps.total_available_qty,
+    ps.avg_supply_cost,
+    ph.level AS price_level
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierSummary ps ON l.l_suppkey = ps.s_suppkey
+JOIN 
+    PriceHierarchy ph ON l.l_partkey = ph.p_partkey
+WHERE 
+    o.o_orderstatus = 'O'
+    AND o.o_orderdate >= DATE '1997-01-01'
+GROUP BY 
+    c.c_name, s.s_name, ps.total_available_qty, ps.avg_supply_cost, ph.level
+ORDER BY 
+    total_orders DESC, revenue DESC
+LIMIT 10;

@@ -1,0 +1,33 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+sales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY o.o_orderkey
+),
+highest_sales AS (
+    SELECT s.s_name, s.s_acctbal, sh.level, RANK() OVER (PARTITION BY sh.level ORDER BY SUM(s.s_acctbal) DESC) AS rank
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    JOIN sales sa ON sa.o_orderkey = s.s_suppkey
+    GROUP BY s.s_name, s.s_acctbal, sh.level
+)
+SELECT hs.s_name, hs.s_acctbal, COALESCE(SUM(sa.total_sales), 0.00) AS total_sales
+FROM highest_sales hs
+LEFT JOIN sales sa ON hs.s_suppkey = sa.o_orderkey
+WHERE hs.rank <= 5
+GROUP BY hs.s_name, hs.s_acctbal
+ORDER BY hs.s_acctbal DESC, total_sales DESC;

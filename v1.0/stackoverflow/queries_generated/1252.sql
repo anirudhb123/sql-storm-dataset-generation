@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        p.LastActivityDate,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ur.DisplayName AS OwnerName,
+        ur.Reputation AS OwnerReputation,
+        rp.CommentCount,
+        rp.Rank,
+        rp.LastActivityDate,
+        rp.AnswerStatus
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        rp.Rank <= 3
+)
+SELECT 
+    tp.Title,
+    tp.OwnerName,
+    tp.OwnerReputation,
+    tp.Score,
+    tp.CommentCount,
+    tp.LastActivityDate,
+    CASE 
+        WHEN tp.AnswerStatus = 'Accepted' THEN 'This post has an accepted answer.'
+        ELSE 'This post does not have an accepted answer.'
+    END AS AnswerMessage,
+    (SELECT AVG(Score) FROM Posts WHERE OwnerUserId = tp.OwnerUserId) AS AverageScore,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = tp.OwnerUserId AND b.Class = 1) AS GoldBadgeCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC
+LIMIT 10;

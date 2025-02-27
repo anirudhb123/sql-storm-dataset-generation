@@ -1,0 +1,74 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk
+), top_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity_sold,
+        sd.total_sales
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.sales_rank <= 10
+), customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+), customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_net_paid_inc_tax) AS customer_sales_total
+    FROM 
+        web_sales ws 
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    cu.c_customer_sk,
+    cu.cd_gender,
+    cu.cd_marital_status,
+    cu.hd_buy_potential,
+    cu.hd_dep_count,
+    cu.hd_vehicle_count,
+    ts.total_quantity_sold,
+    ts.total_sales,
+    cs.orders_count,
+    cs.customer_sales_total
+FROM 
+    customer_data cu
+JOIN 
+    customer_sales cs ON cu.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    top_sales ts ON ts.ws_item_sk = cu.hd_income_band_sk
+WHERE 
+    (cu.cd_marital_status = 'M' OR cu.cd_gender = 'F') 
+    AND (cs.customer_sales_total IS NOT NULL AND cs.orders_count > 0)
+ORDER BY 
+    cs.customer_sales_total DESC
+LIMIT 50;

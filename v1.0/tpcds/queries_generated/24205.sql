@@ -1,0 +1,73 @@
+
+WITH customer_metrics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_date,
+        SUM(ss_net_paid) AS total_spent,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_date
+),
+
+qualified_customers AS (
+    SELECT 
+        cm.c_customer_sk,
+        cm.c_first_name,
+        cm.c_last_name,
+        cm.total_spent,
+        cm.transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY cm.c_customer_sk ORDER BY cm.total_spent DESC) AS rn
+    FROM customer_metrics cm
+    WHERE cm.total_spent IS NOT NULL AND cm.transaction_count > 0
+),
+
+promotion_summary AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        SUM(cs.net_profit) AS promo_total_profit
+    FROM promotion p
+    JOIN catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    WHERE p.p_discount_active = 'Y' 
+    GROUP BY p.p_promo_sk, p.p_promo_name
+),
+
+customer_promo AS (
+    SELECT 
+        qc.c_customer_sk,
+        qc.c_first_name,
+        qc.c_last_name,
+        ps.promo_total_profit,
+        COALESCE(ps.promo_total_profit, 0) - qc.total_spent AS profit_after_expenses
+    FROM qualified_customers qc
+    LEFT JOIN promotion_summary ps ON qc.transaction_count >= 1
+)
+
+SELECT 
+    cp.c_customer_sk,
+    cp.c_first_name,
+    cp.c_last_name,
+    cp.profit_after_expenses,
+    CASE 
+        WHEN cp.profit_after_expenses > 500 THEN 'High Value Customer'
+        WHEN cp.profit_after_expenses BETWEEN 200 AND 500 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value
+FROM customer_promo cp
+WHERE cp.profit_after_expenses IS NOT NULL
+ORDER BY cp.profit_after_expenses DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS c_customer_sk,
+    'Total Customers' AS c_first_name,
+    NULL AS c_last_name,
+    SUM(profit_after_expenses) AS profit_after_expenses,
+    'Aggregate' AS customer_value
+FROM customer_promo 
+HAVING SUM(profit_after_expenses) IS NOT NULL

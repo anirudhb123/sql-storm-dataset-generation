@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostsWithScore AS (
+    SELECT 
+        ap.PostId,
+        ap.Title,
+        ap.PostTypeId,
+        (pw.UpVotes - pw.DownVotes) AS Score,
+        ur.ReputationLevel
+    FROM ActivePosts ap
+    LEFT JOIN PostWithVotes pw ON ap.PostId = pw.PostId
+    JOIN UserReputation ur ON ap.OwnerUserId = ur.UserId
+    WHERE pw.Score IS NOT NULL
+),
+FinalResults AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.ReputationLevel,
+        RANK() OVER (PARTITION BY ps.ReputationLevel ORDER BY ps.Score DESC) AS RankWithinLevel
+    FROM PostsWithScore ps
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Score,
+    fr.ReputationLevel,
+    fr.RankWithinLevel
+FROM FinalResults fr
+WHERE fr.RankWithinLevel <= 5
+ORDER BY fr.ReputationLevel, fr.RankWithinLevel;

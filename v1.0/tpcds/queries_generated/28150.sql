@@ -1,0 +1,38 @@
+
+WITH StringMerged AS (
+    SELECT
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        DATE_FORMAT(DATE_SUB(NOW(), INTERVAL cd.cd_birth_year YEAR), '%Y-%m-%d') AS birth_date
+    FROM
+        customer c
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FilteredCustomers AS (
+    SELECT
+        *,
+        CHAR_LENGTH(full_name) AS name_length,
+        LOWER(full_address) AS lower_address,
+        REGEXP_REPLACE(lower_address, '[^a-z0-9 ]', '') AS normalized_address
+    FROM
+        StringMerged
+    WHERE
+        cd_gender = 'F' AND cd_marital_status = 'M'
+)
+SELECT
+    full_name,
+    full_address,
+    name_length,
+    normalized_address,
+    COUNT(*) OVER (PARTITION BY normalized_address) AS address_count
+FROM
+    FilteredCustomers
+ORDER BY
+    name_length DESC, full_name;

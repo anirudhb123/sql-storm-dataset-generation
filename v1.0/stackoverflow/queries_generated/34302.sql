@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        pc.UpVotes,
+        pc.DownVotes,
+        COALESCE(ph.Level, 0) AS HierarchyLevel,
+        COALESCE(u.Reputation, 0) AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteCounts pc ON pc.PostId = p.Id
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON ph.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.ViewCount,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.HierarchyLevel,
+    CASE 
+        WHEN pm.UserReputation < 1000 THEN 'New Contributor'
+        WHEN pm.UserReputation BETWEEN 1000 AND 5000 THEN 'Moderate Contributor'
+        ELSE 'Top Contributor'
+    END AS ContributorLevel,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    Comments c ON c.PostId = pm.PostId
+GROUP BY 
+    pm.PostId, pm.Title, pm.ViewCount, pm.UpVotes, pm.DownVotes, pm.HierarchyLevel, pm.UserReputation
+ORDER BY 
+    pm.ViewCount DESC, pm.UpVotes DESC;

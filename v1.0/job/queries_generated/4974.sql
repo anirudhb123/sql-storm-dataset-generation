@@ -1,0 +1,51 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) as rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(cc.company_count, 0) AS total_companies,
+        CASE 
+            WHEN rm.rank <= 5 THEN 'Top 5'
+            ELSE 'Others'
+        END AS movie_category
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyCounts cc ON rm.title = (SELECT title FROM aka_title WHERE id = cc.movie_id) 
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.total_companies,
+    md.movie_category,
+    AVG(pi.info) AS avg_info
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    person_info pi ON pi.person_id IN (SELECT person_id FROM cast_info ci WHERE ci.movie_id = md.title)
+GROUP BY 
+    md.title, md.production_year, md.total_companies, md.movie_category
+ORDER BY 
+    md.production_year DESC, md.total_companies DESC;

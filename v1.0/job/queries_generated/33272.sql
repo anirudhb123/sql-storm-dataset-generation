@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierachy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        CASE 
+            WHEN c.kind_id IS NOT NULL THEN (SELECT kind FROM kind_type WHERE id = c.kind_id) 
+            ELSE 'Unknown' 
+        END AS movie_kind,
+        1 AS level
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        company_name cn ON cn.id = (SELECT company_id FROM movie_companies WHERE movie_id = t.id LIMIT 1)
+    LEFT JOIN 
+        kind_type c ON t.kind_id = c.id
+    WHERE 
+        t.production_year >= 2000
+ 
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.movie_kind,
+        level + 1 
+    FROM 
+        MovieHierachy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title tt ON tt.id = ml.linked_movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.movie_kind,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    AVG(pi.info::numeric) AS avg_rating,
+    MIN(pi.info) AS min_info,
+    MAX(pi.info) AS max_info
+FROM 
+    MovieHierachy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+WHERE 
+    mh.level = 1
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.movie_kind
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    total_cast DESC, mh.production_year DESC
+LIMIT 10;
+
+This SQL query performs the following:
+
+1. It defines a recursive common table expression (CTE) called `MovieHierarchy` to explore a hierarchy of movies and their links.
+2. It joins various tables to accumulate relevant data, including company details, casting information, movie details, and ratings.
+3. It employs aggregate functions such as `COUNT`, `STRING_AGG`, `AVG`, `MIN`, and `MAX` to summarize data.
+4. Uses `HAVING` to filter results where the total cast exceeds five actors.
+5. Orders the final output by the number of cast members and the production year, restricting the number of results to the top 10.

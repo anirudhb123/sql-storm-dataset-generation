@@ -1,0 +1,52 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_revenue,
+        i.i_product_name,
+        p.p_promo_name,
+        ROW_NUMBER() OVER (ORDER BY ss.total_revenue DESC) AS rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        item i ON ss.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        promotion p ON ss.ws_item_sk = p.p_item_sk
+    WHERE 
+        ss.rn = 1
+)
+SELECT 
+    t.rank,
+    ts.i_product_name,
+    ts.total_quantity,
+    ts.total_revenue,
+    COALESCE(p.p_promo_name, 'No Promotion') AS promo_name
+FROM 
+    top_sales ts
+JOIN 
+    (SELECT 
+        ws_item_sk, SUM(ws_quantity) AS total_quantity
+     FROM 
+        web_sales
+     WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+     GROUP BY 
+        ws_item_sk) AS t ON ts.ws_item_sk = t.ws_item_sk
+ORDER BY 
+    ts.total_revenue DESC
+LIMIT 10;

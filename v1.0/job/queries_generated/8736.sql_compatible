@@ -1,0 +1,27 @@
+
+SELECT 
+    p.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    c.kind AS role_type,
+    STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+FROM 
+    cast_info ci
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.movie_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2020
+    AND m.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+    AND p.name IS NOT NULL
+GROUP BY 
+    p.name, m.title, m.production_year, c.kind
+ORDER BY 
+    m.production_year DESC, actor_name;

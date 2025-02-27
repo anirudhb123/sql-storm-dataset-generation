@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_availqty,
+        ps_supplycost,
+        1 AS level
+    FROM partsupp
+    WHERE ps_availqty > 0
+  UNION ALL
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.availqty - sc.availqty,
+        ps.supplycost * 1.1 AS updated_supplycost,
+        level + 1
+    FROM SupplyCostCTE sc
+    JOIN partsupp ps ON sc.ps_partkey = ps.ps_partkey AND sc.ps_suppkey != ps.ps_suppkey
+    WHERE ps.ps_availqty > sc.availqty
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(sc.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN SupplyCostCTE sc ON s.s_suppkey = sc.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(l.l_orderkey) AS item_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS row_num
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    r.r_name,
+    ts.s_name AS top_supplier,
+    ol.item_count,
+    ol.order_value
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+LEFT JOIN region r ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = r.r_regionkey)
+LEFT JOIN TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+LEFT JOIN OrderLineItems ol ON ps.ps_partkey = ol.o_orderkey
+WHERE (p.p_container IS NOT NULL OR p.p_size BETWEEN 1 AND 10)
+AND (ol.item_count > 0 OR ts.total_supply_cost IS NULL)
+ORDER BY ol.order_value DESC NULLS LAST, p.p_name;

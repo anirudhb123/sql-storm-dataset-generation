@@ -1,0 +1,53 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON dd.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, ws_sold_date_sk
+),
+CustomerData AS (
+    SELECT 
+        customer.c_current_cdemo_sk, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(sd.total_quantity) AS total_quantity,
+        SUM(sd.total_profit) AS total_profit,
+        AVG(sd.avg_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT sd.total_orders) AS total_orders
+    FROM 
+        SalesData sd
+    JOIN 
+        web_site w ON w.web_site_sk = sd.web_site_id
+    JOIN 
+        customer customer ON customer.c_current_addr_sk = w.web_site_sk
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = customer.c_current_cdemo_sk
+    GROUP BY 
+        customer.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(cd.c_current_cdemo_sk) AS customers_count,
+    SUM(cd.total_quantity) AS total_quantity,
+    SUM(cd.total_profit) AS overall_profit,
+    AVG(cd.avg_sales_price) AS average_sales_price,
+    SUM(cd.total_orders) AS total_orders
+FROM 
+    CustomerData cd
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    overall_profit DESC
+LIMIT 10;

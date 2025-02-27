@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        h.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        MovieHierarchy h ON t.episode_of_id = h.movie_id
+),
+
+MovieCredits AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(aka.name, c.name) AS person_name,
+        r.role AS role_type,
+        COUNT(DISTINCT c.id) AS total_cast
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name aka ON aka.person_id = ci.person_id
+    LEFT JOIN 
+        char_name c ON c.id = ci.person_role_id
+    LEFT JOIN 
+        role_type r ON r.id = ci.role_id
+    GROUP BY 
+        m.id, aka.name, c.name, r.role
+),
+
+MovieCompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.movie_id
+    LEFT JOIN 
+        company_name cn ON cn.id = mc.company_id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT mc.total_cast) AS num_cast_members,
+    mci.company_names,
+    mci.total_companies,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.movie_id) AS rank_within_year
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieCredits mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    MovieCompanyInfo mci ON mci.movie_id = mh.movie_id
+WHERE 
+    mh.production_year > 1990
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mci.company_names, mci.total_companies
+ORDER BY 
+    mh.production_year DESC, rank_within_year;

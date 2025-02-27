@@ -1,0 +1,55 @@
+
+WITH RECURSIVE customer_paths AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, 1 AS path_level
+    FROM customer c
+    WHERE c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, cp.path_level + 1
+    FROM customer c
+    JOIN customer_paths cp ON c.c_current_cdemo_sk = cp.c_current_cdemo_sk
+    WHERE cp.path_level < 5
+),
+item_sales AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_quantity) AS total_quantity_sold, 
+           SUM(ws.ws_net_profit) AS total_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+    GROUP BY ws.ws_item_sk
+),
+recent_orders AS (
+    SELECT DISTINCT ws.ws_order_number, 
+           MAX(d.d_date) AS max_date
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = EXTRACT(YEAR FROM current_date) 
+    GROUP BY ws.ws_order_number
+),
+qualifying_customers AS (
+    SELECT ca.ca_address_sk, 
+           ca.ca_city,
+           SUM(cd.cd_purchase_estimate) AS total_purchase_estimate
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+    GROUP BY ca.ca_address_sk, ca.ca_city
+    HAVING SUM(cd.cd_purchase_estimate) > 1000
+)
+SELECT 
+    cp.c_first_name, 
+    cp.c_last_name,
+    ips.total_quantity_sold,
+    ips.total_profit,
+    qc.ca_city,
+    COUNT(ro.ws_order_number) AS recent_order_count
+FROM customer_paths cp
+JOIN item_sales ips ON cp.c_current_cdemo_sk = ips.ws_item_sk
+LEFT JOIN recent_orders ro ON ips.ws_order_number = ro.ws_order_number
+JOIN qualifying_customers qc ON cp.c_current_addr_sk = qc.ca_address_sk
+WHERE ips.profit_rank <= 10
+AND (qc.total_purchase_estimate IS NOT NULL OR qc.ca_city LIKE '%New%')
+GROUP BY cp.c_first_name, cp.c_last_name, ips.total_quantity_sold, ips.total_profit, qc.ca_city
+ORDER BY ips.total_profit DESC, cp.c_last_name ASC, cp.c_first_name ASC
+FETCH FIRST 50 ROWS ONLY;

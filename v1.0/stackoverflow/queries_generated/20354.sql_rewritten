@@ -1,0 +1,83 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN VH.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN VH.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes VH ON U.Id = VH.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerName,
+        COALESCE(AVG(VB.BountyAmount), 0) AS AvgBountyAmount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes VB ON P.Id = VB.PostId AND VB.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' AND 
+        P.Score > 0 
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+PostHistoryEvents AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(HT.Name, ', ') AS EventTypes,
+        COUNT(PH.Id) AS EventCount,
+        MAX(PH.CreationDate) AS LastEventDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes HT ON PH.PostHistoryTypeId = HT.Id
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    UP.TotalPosts AS UserPostCount,
+    UP.TotalComments AS UserCommentCount,
+    AP.Title AS ActivePostTitle,
+    AP.Score AS ActivePostScore,
+    AP.ViewCount AS ActivePostViewCount,
+    AP.OwnerName AS PostOwnerName,
+    PE.EventTypes AS PostEvents,
+    PE.EventCount AS TotalEventCount,
+    PE.LastEventDate AS LastEvent
+FROM 
+    UserReputation UP
+JOIN 
+    Users U ON UP.UserId = U.Id
+JOIN 
+    ActivePosts AP ON UP.UserId = AP.OwnerName 
+LEFT JOIN 
+    PostHistoryEvents PE ON AP.PostId = PE.PostId
+WHERE 
+    U.Reputation > 1000 AND
+    UP.UpVotesReceived - UP.DownVotesReceived >= 50 
+ORDER BY 
+    UP.Reputation DESC, 
+    AP.ViewCount DESC
+LIMIT 100;

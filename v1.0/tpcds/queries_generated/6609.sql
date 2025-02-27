@@ -1,0 +1,52 @@
+
+WITH CustomerSpending AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS web_orders,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    cs.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    cs.total_spent,
+    cs.web_orders,
+    cs.catalog_orders,
+    cs.store_orders
+FROM 
+    CustomerSpending cs
+JOIN 
+    customer c ON cs.c_customer_id = c.c_customer_id
+JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    cs.total_spent > 1000 AND 
+    (cd.cd_gender = 'M' OR cd.cd_marital_status = 'S')
+ORDER BY 
+    total_spent DESC;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+AggregatedShipping AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_ext_ship_cost) AS avg_ship_cost
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_ship_mode_id
+),
+HighProfitItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        ROW_NUMBER() OVER (ORDER BY sd.total_profit DESC) AS top_rank
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_profit > 5000
+)
+SELECT 
+    hi.ws_item_sk,
+    hi.total_quantity,
+    hi.total_profit,
+    shipping.sm_ship_mode_id,
+    shipping.order_count,
+    shipping.avg_ship_cost
+FROM 
+    HighProfitItems hi
+LEFT JOIN 
+    AggregatedShipping shipping ON hi.ws_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_shipped_date_sk IS NOT NULL)
+WHERE 
+    hi.top_rank <= 10
+ORDER BY 
+    hi.total_profit DESC, shipping.avg_ship_cost ASC
+UNION ALL
+SELECT 
+    inv.inv_item_sk, 
+    SUM(inv.inv_quantity_on_hand) AS total_inventory,
+    NULL AS total_profit,
+    NULL AS sm_ship_mode_id,
+    NULL AS order_count,
+    NULL AS avg_ship_cost
+FROM 
+    inventory inv
+WHERE 
+    inv.inv_quantity_on_hand < 100
+GROUP BY 
+    inv.inv_item_sk
+ORDER BY 
+    total_inventory ASC;

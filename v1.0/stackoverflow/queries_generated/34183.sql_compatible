@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(ub.BadgeCount, 0) AS OwnerBadgeCount,
+    COALESCE(ub.BadgeNames, 'No Badges') AS OwnerBadgeNames,
+    COALESCE(phd.HistoryTypes, 'No History') AS HistoryTypes,
+    phd.HistoryCount,
+    phd.LastEditDate,
+    CASE 
+        WHEN rp.ViewCount > 1000 THEN 'Hot'
+        WHEN rp.ViewCount BETWEEN 100 AND 1000 THEN 'Popular'
+        ELSE 'New'
+    END AS PopularityStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteStats pvs ON rp.Id = pvs.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    rp.rn = 1  
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

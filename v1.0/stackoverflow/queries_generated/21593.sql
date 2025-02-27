@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) AS UpvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        MAX(p.CreationDate) AS LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalResult AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ur.Reputation,
+        ra.QuestionCount,
+        ra.UpvotesReceived,
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        coalesce(ua.CommentCount, 0) AS RecentCommentCount
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    JOIN 
+        RankedPosts r ON u.Id = r.OwnerUserId AND r.rn = 1
+    LEFT JOIN 
+        RecentUserActivity ua ON u.Id = ua.UserId
+    WHERE 
+        ur.Reputation > 1000
+        AND COALESCE(ua.CommentCount, 0) > 5
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.Reputation,
+    f.QuestionCount,
+    f.UpvotesReceived,
+    f.Title,
+    f.CreationDate,
+    f.Score,
+    CASE 
+        WHEN f.Score IS NULL THEN 'No Score Available'
+        WHEN f.Score < 0 THEN 'Negative Score'
+        ELSE 'Positive Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN f.QuestionCount = 0 THEN 'No Questions'
+        ELSE CONCAT(f.QuestionCount, ' Questions')
+    END AS QuestionsSummary,
+    CASE 
+        WHEN f.RecentCommentCount IS NULL THEN 'No Comments Made Recently'
+        ELSE CONCAT(f.RecentCommentCount, ' Comments in Last 30 Days')
+    END AS RecentActivitySummary
+FROM 
+    FinalResult f
+ORDER BY 
+    f.Reputation DESC, f.Score DESC;

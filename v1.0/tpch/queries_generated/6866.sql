@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps_suppkey,
+        SUM(ps_supplycost * ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY p_partkey ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS supplier_rank
+    FROM 
+        partsupp
+    JOIN 
+        part ON partsupp.ps_partkey = part.p_partkey
+    GROUP BY 
+        ps_suppkey, p_partkey
+),
+
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.total_revenue) AS total_revenue,
+    COUNT(DISTINCT rs.ps_suppkey) AS total_suppliers,
+    AVG(rs.total_cost) AS average_supplier_cost
+FROM 
+    CustomerOrders co
+JOIN 
+    customer c ON co.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    RankedSuppliers rs ON rs.ps_suppkey IN (
+        SELECT ps_suppkey FROM RankedSuppliers WHERE supplier_rank <= 5
+    )
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

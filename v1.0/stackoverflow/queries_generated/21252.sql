@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL 
+        AND p.ViewCount > 100 
+        AND p.Title NOT LIKE '%draft%'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(*) AS TotalCloseReasons,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.Comment
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        tu.DisplayName,
+        tu.Reputation,
+        COALESCE(cpr.CloseReason, 'No close reason') AS CloseReason,
+        COALESCE(cpr.TotalCloseReasons, 0) AS TotalCloseReasons,
+        COALESCE(cpr.FirstClosedDate, 'N/A') AS FirstClosedDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.Id
+    LEFT JOIN 
+        ClosedPostReasons cpr ON rp.PostId = cpr.PostId
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalCloseReasons = 0 THEN 'No closures'
+        WHEN TotalCloseReasons > 5 THEN 'Frequently Closed'
+        ELSE 'Occasionally Closed'
+    END AS ClosureFrequency,
+    CONCAT(DisplayName, ' – Reputation: ', Reputation) AS UserProfileDescription
+FROM 
+    FinalResults
+ORDER BY 
+    Score DESC, CreationDate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

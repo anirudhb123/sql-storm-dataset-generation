@@ -1,0 +1,58 @@
+
+WITH customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(cc.cc_name, 'No Call Center') AS call_center_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        RANK() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS state_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        call_center cc ON c.c_current_hdemo_sk = cc.cc_call_center_sk
+),
+aggregated_data AS (
+    SELECT 
+        full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(*) AS total_purchases,
+        SUM(cd.cd_purchase_estimate) AS total_estimate
+    FROM 
+        customer_details
+    WHERE 
+        state_rank <= 10
+    GROUP BY 
+        full_name, cd_gender, cd_marital_status, cd_education_status
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.total_purchases,
+    cd.total_estimate,
+    SUBSTRING(cd.full_name FROM '\\w+$') AS last_name,
+    CASE 
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        WHEN cd.cd_gender = 'M' THEN 'Male'
+        ELSE 'Other' 
+    END AS gender_description
+FROM 
+    aggregated_data cd
+WHERE 
+    cd.total_purchases > 5
+ORDER BY 
+    cd.total_estimate DESC
+LIMIT 50;

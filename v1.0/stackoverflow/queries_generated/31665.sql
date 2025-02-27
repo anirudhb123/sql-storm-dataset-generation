@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UserPostRank,
+        rp.CommentCount,
+        rp.TotalBounty,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'Hot'
+            WHEN rp.CommentCount > 5 THEN 'Discussion'
+            ELSE 'Standard'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 3
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.TotalBounty,
+    tp.PostCategory
+FROM 
+    UserReputation ur
+JOIN 
+    Users u ON ur.UserId = u.Id
+JOIN 
+    TopPosts tp ON u.Id = tp.OwnerUserId
+WHERE 
+    ur.Reputation > 500  -- only include users with meaningful reputation
+ORDER BY 
+    ur.Reputation DESC, 
+    tp.CommentCount DESC;

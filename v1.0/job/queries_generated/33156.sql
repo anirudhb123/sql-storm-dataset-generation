@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+avg_cast_per_movie AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+movie_company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ac.total_cast, 0) AS average_cast,
+    COALESCE(mci.companies, 'No Companies') AS companies,
+    COALESCE(mci.company_types, 'N/A') AS company_types,
+    ROW_NUMBER() OVER (ORDER BY mh.production_year DESC, mh.title) AS movie_rank
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    avg_cast_per_movie ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    movie_company_info mci ON mh.movie_id = mci.movie_id
+WHERE 
+    mh.depth = 1
+ORDER BY 
+    mh.production_year DESC, mh.title;
+
+This query generates a list of movies produced from the year 2000 onwards, their cast size (number of unique cast members), and the companies involved in their production, while utilizing various SQL constructs such as Common Table Expressions (CTEs), string aggregation, outer joins, and window functions. The recursive CTE builds a hierarchy of movies that can link to other linked movies, allowing exploration of connections between film titles.

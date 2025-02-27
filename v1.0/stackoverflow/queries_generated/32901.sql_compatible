@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS CreationRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name ELSE NULL END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes cr ON CAST(JSON_VALUE(ph.Comment, '$.CloseReasonId') AS TEXT) = cr.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    rb.BadgeCount,
+    COALESCE(pc.CloseReasons, 'No close reasons') AS CloseReasons,
+    CASE 
+        WHEN p.AnswerCount > 5 THEN 'Highly Active'
+        WHEN p.AnswerCount BETWEEN 1 AND 5 THEN 'Moderately Active'
+        ELSE 'No Answers'
+    END AS ActivityLevel
+FROM 
+    Users u
+JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN 
+    PostCloseReasons pc ON p.PostId = pc.PostId
+WHERE 
+    p.ViewRank <= 3 
+ORDER BY 
+    u.Reputation DESC, p.ViewCount DESC;

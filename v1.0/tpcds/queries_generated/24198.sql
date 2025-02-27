@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) as rank,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_net_paid DESC) as rank_net_paid
+    FROM web_sales
+    WHERE ws_net_paid IS NOT NULL
+),
+AggregatedSales AS (
+    SELECT 
+        w.w_warehouse_sk,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_store_sales,
+        SUM(s.ss_ext_sales_price) AS total_store_revenue,
+        AVG(s.ss_net_profit) AS avg_store_net_profit
+    FROM store_sales s
+    JOIN warehouse w ON s.ss_store_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        SUM(cd_dep_count) AS total_dependents
+    FROM customer_demographics
+    GROUP BY cd_demo_sk, cd_gender
+)
+SELECT 
+    c.c_customer_id,
+    MAX(r.ws_quantity) AS max_web_quantity,
+    AVG(a.total_store_revenue) AS avg_store_revenue,
+    d.total_dependents,
+    COUNT(DISTINCT r.rank) as unique_ranks,
+    COUNT(DISTINCT r.rank_net_paid) as unique_rank_net_paid
+FROM 
+    RankedSales r 
+JOIN 
+    customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    AggregatedSales a ON a.w_warehouse_sk = (SELECT DISTINCT ws_warehouse_sk FROM web_sales WHERE ws_item_sk = r.ws_item_sk) 
+LEFT JOIN 
+    CustomerDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+WHERE 
+    r.rank <= 3 
+    AND (
+        c.c_birth_year IS NULL OR 
+        (EXTRACT(YEAR FROM CURRENT_DATE) - c.c_birth_year) > 21
+    )
+GROUP BY 
+    c.c_customer_id, d.total_dependents
+HAVING 
+    MAX(r.ws_quantity) > (SELECT AVG(ws_quantity) FROM web_sales)
+ORDER BY 
+    avg_store_revenue DESC NULLS LAST;

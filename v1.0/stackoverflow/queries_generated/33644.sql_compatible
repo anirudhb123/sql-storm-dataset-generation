@@ -1,0 +1,89 @@
+
+WITH RecursivePostedStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Body,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Class AS BadgeClass,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, B.Class
+),
+AverageScores AS (
+    SELECT 
+        P.OwnerUserId,
+        AVG(P.Score) AS AvgPostScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+HighActivityUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        A.AvgPostScore,
+        COUNT(P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadges B ON U.Id = B.UserId
+    LEFT JOIN 
+        AverageScores A ON U.Id = A.OwnerUserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, B.BadgeCount, A.AvgPostScore
+    HAVING 
+        COUNT(P.Id) > 5 
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(B.BadgeClass, 'No Badge') AS BadgeClass,
+    H.TotalPosts,
+    H.AvgPostScore,
+    CASE 
+        WHEN H.AvgPostScore > 50 THEN 'High'
+        WHEN H.AvgPostScore BETWEEN 20 AND 50 THEN 'Medium'
+        ELSE 'Low' 
+    END AS ActivityLevel,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount
+FROM 
+    HighActivityUsers H
+LEFT JOIN 
+    Posts P ON H.UserId = P.OwnerUserId
+LEFT JOIN 
+    (SELECT DISTINCT UserId, BadgeClass
+     FROM UserBadges) AS B ON H.UserId = B.UserId
+WHERE 
+    P.CreationDate >= CURRENT_DATE - INTERVAL '3 month' 
+ORDER BY 
+    H.TotalPosts DESC,
+    H.UserId,
+    P.CreationDate DESC;

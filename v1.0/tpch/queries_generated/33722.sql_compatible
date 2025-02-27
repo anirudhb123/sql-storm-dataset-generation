@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierRanking AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), CustomerOrderInfo AS (
+    SELECT c.c_custkey, c.c_name AS cust_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, s.s_suppkey
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+), OrderDetails AS (
+    SELECT o.o_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice, l.l_discount, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_rank, 
+           o.o_custkey 
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+)
+SELECT c.cust_name, COALESCE(c.total_orders, 0) AS order_count, 
+       COALESCE(sp.supp_name, 'None') AS supplier_name, 
+       pp.p_name AS part_name,
+       SUM(od.l_extendedprice * (1 - od.l_discount)) AS revenue,
+       CASE WHEN SUM(od.l_quantity) > 100 THEN 'High Volume' ELSE 'Low Volume' END AS volume_status
+FROM CustomerOrderInfo c
+FULL OUTER JOIN ( 
+    SELECT s.s_name AS supp_name, r.r_name 
+    FROM SupplierRanking sr
+    JOIN supplier s ON sr.s_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE sr.rank <= 10
+) sp ON TRUE
+JOIN OrderDetails od ON c.c_custkey = od.o_custkey
+JOIN PartSupplier pp ON od.l_partkey = pp.p_partkey
+GROUP BY c.cust_name, sp.supp_name, pp.p_name
+HAVING SUM(od.l_extendedprice * (1 - od.l_discount)) IS NOT NULL 
+ORDER BY revenue DESC;

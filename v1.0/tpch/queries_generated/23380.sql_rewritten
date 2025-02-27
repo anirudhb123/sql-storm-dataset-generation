@@ -1,0 +1,67 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+),
+CriticalSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+ExploratoryOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(DISTINCT l.l_partkey) AS total_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '6 months'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 20000
+)
+SELECT 
+    r.r_regionkey,
+    r.r_name,
+    rc.c_name AS top_customer,
+    cs.s_name AS critical_supplier,
+    eo.o_orderkey,
+    eo.o_orderstatus,
+    eo.net_revenue,
+    eo.total_parts
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedCustomers rc ON n.n_nationkey = rc.c_nationkey AND rc.rank = 1
+LEFT JOIN 
+    CriticalSuppliers cs ON n.n_nationkey = cs.s_nationkey
+RIGHT JOIN 
+    ExploratoryOrders eo ON rc.c_custkey = eo.o_custkey
+WHERE 
+    (rc.c_custkey IS NOT NULL OR cs.s_suppkey IS NOT NULL)
+    AND (eo.o_orderstatus = 'O' OR eo.o_orderstatus = 'F')
+ORDER BY 
+    r.r_name, net_revenue DESC, total_parts ASC;

@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) as rank
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS NationName,
+    COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+    SUM(CASE WHEN l.l_discount > 0.05 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS TotalRevenue,
+    AVG(COALESCE(s.s_acctbal, 0)) AS AvgSupplierBalance,
+    (SELECT COUNT(*) FROM TopParts tp WHERE tp.rank <= 10) AS Top10PartsCount
+FROM
+    nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+INNER JOIN CustomerOrders co ON co.c_custkey = l.l_orderkey
+WHERE 
+    l.l_shipdate >= DATEADD(month, -6, '1998-10-01') 
+    AND n.n_comment IS NOT NULL
+GROUP BY n.n_name
+ORDER BY TotalRevenue DESC
+FETCH FIRST 5 ROWS ONLY;

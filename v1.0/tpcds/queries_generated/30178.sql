@@ -1,0 +1,70 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM web_sales
+    WHERE ws_net_profit > 0
+    
+    UNION ALL
+    
+    SELECT 
+        ws.order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        h.level + 1
+    FROM web_sales ws
+    INNER JOIN order_hierarchy h ON ws.ws_order_number = h.ws_order_number
+    WHERE h.level < 3
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk
+),
+filtered_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        is.total_quantity_sold,
+        is.total_net_profit
+    FROM item_summary is
+    JOIN item i ON is.i_item_sk = i.i_item_sk
+    WHERE is.total_net_profit > 1000
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    fi.i_item_desc,
+    fi.total_quantity_sold,
+    fi.total_net_profit,
+    oh.ws_net_profit AS order_net_profit
+FROM customer_summary cs
+JOIN filtered_items fi ON cs.total_orders > 10
+LEFT OUTER JOIN order_hierarchy oh ON cs.total_orders = oh.level
+WHERE cs.total_profit > 5000
+  AND fi.total_quantity_sold IS NOT NULL
+ORDER BY cs.c_customer_sk, fi.total_net_profit DESC
+LIMIT 100;

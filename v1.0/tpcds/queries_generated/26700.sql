@@ -1,0 +1,49 @@
+
+WITH CustomerInfo AS (
+    SELECT c.c_customer_sk, CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+           d.d_date AS first_purchase_date, 
+           a.ca_city, a.ca_state, a.ca_country,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk,
+           ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY d.d_date ASC) AS rn
+    FROM customer c
+    JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    WHERE d.d_year >= 2020
+),
+Purchases AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    JOIN CustomerInfo ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    WHERE ci.rn = 1
+    GROUP BY ws.ws_bill_customer_sk
+),
+DemographicInsights AS (
+    SELECT 
+        ci.full_name, 
+        ci.ca_city, 
+        ci.ca_state, 
+        ci.ca_country,
+        pi.total_quantity,
+        pi.total_spent,
+        (SELECT ib.ib_income_band_sk FROM household_demographics hd 
+         JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk 
+         WHERE hd.hd_demo_sk = ci.cd_income_band_sk) AS income_band
+    FROM CustomerInfo ci
+    JOIN Purchases pi ON ci.c_customer_sk = pi.ws_bill_customer_sk
+)
+SELECT 
+    city,
+    state,
+    country,
+    AVG(total_quantity) AS avg_quantity,
+    AVG(total_spent) AS avg_spent,
+    COUNT(full_name) AS customer_count
+FROM DemographicInsights
+GROUP BY ca_city, ca_state, ca_country
+ORDER BY avg_spent DESC
+LIMIT 10;

@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        p.p_brand, 
+        ps.ps_availqty,
+        COALESCE(NULLIF(ps.ps_supplycost, 0), NULL) as supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) as lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' AND o.o_totalprice > 10000
+),
+NationSummary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    pd.p_name,
+    pd.p_retailprice,
+    ns.n_name AS supplier_nation,
+    hs.o_orderkey,
+    hs.lineitem_count,
+    CASE 
+        WHEN pd.supply_cost IS NULL 
+        THEN 'Not Available' 
+        ELSE FORMAT(pd.supply_cost, 'C')
+    END AS formatted_supply_cost
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    RankedSuppliers rs ON pd.ps_availqty > 100 AND rs.rank = 1
+LEFT JOIN 
+    HighValueOrders hs ON pd.p_partkey = hs.o_orderkey
+INNER JOIN 
+    NationSummary ns ON rs.s_nationkey = ns.n_nationkey
+WHERE 
+    pd.p_brand LIKE '%Special%'
+    AND (pd.p_type NOT LIKE '%Test%' OR pd.p_retailprice IS NULL)
+    AND COALESCE(pd.ps_availqty, 0) > 0
+ORDER BY 
+    pd.p_retailprice DESC,
+    ns.total_acctbal ASC
+FETCH FIRST 100 ROWS ONLY;

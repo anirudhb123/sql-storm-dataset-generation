@@ -1,0 +1,57 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_totalprice,
+           0 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1998-01-01'
+      AND o.o_orderdate < '1999-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_totalprice,
+           oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey
+                                               FROM customer c
+                                               WHERE c.c_acctbal IS NOT NULL
+                                                 AND c.c_nationkey IN (SELECT n.n_nationkey
+                                                                      FROM nation n
+                                                                      WHERE n.n_comment LIKE '%revenue%')
+                                               LIMIT 1)
+    WHERE o.o_orderdate BETWEEN '1998-01-01' AND '1998-10-01'
+      AND oh.level < 5
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           (SELECT COUNT(*)
+            FROM partsupp ps
+            WHERE ps.ps_partkey = p.p_partkey
+              AND ps.ps_supplycost > (SELECT AVG(ps_supplycost)
+                                       FROM partsupp 
+                                       WHERE ps_supplycost IS NOT NULL)) AS high_cost_suppliers
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 15
+      AND p.p_container LIKE 'SMALL%'
+      AND (p.p_comment IS NULL OR p.p_comment LIKE '%optimal%')
+)
+SELECT oh.o_orderkey, 
+       FORMAT(oh.o_totalprice, 'C', 'en-US') AS formatted_price,
+       pp.p_partkey, 
+       pp.p_name, 
+       pp.p_retailprice,
+       RANK() OVER (PARTITION BY oh.o_orderkey ORDER BY pp.p_retailprice DESC) AS price_rank,
+       CASE WHEN pp.high_cost_suppliers IS NULL THEN 'None'
+            ELSE CAST(pp.high_cost_suppliers AS VARCHAR(255)) END AS supplier_info
+FROM OrderHierarchy oh
+LEFT JOIN FilteredParts pp ON pp.p_partkey IN (SELECT l.l_partkey 
+                                                FROM lineitem l 
+                                                WHERE l.l_orderkey = oh.o_orderkey
+                                                  AND l.l_discount BETWEEN 0.1 AND 0.15
+                                                  AND l.l_tax IS NOT NULL)
+WHERE oh.o_orderstatus NOT IN ('O', 'F')
+  AND EXISTS (SELECT 1 
+              FROM lineitem l
+              WHERE l.l_orderkey = oh.o_orderkey 
+                AND l.l_shipmode NOT IN ('AIR', 'MAIL'))
+  AND pp.p_partkey IS NOT NULL
+GROUP BY oh.o_orderkey, oh.o_orderdate, oh.o_orderstatus, oh.o_totalprice, 
+         pp.p_partkey, pp.p_name, pp.p_retailprice, pp.high_cost_suppliers
+ORDER BY oh.o_orderdate DESC, price_rank ASC;

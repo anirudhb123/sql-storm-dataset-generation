@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS year_rank,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name), 'No Cast') AS cast_list
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year, a.id
+), 
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_list
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 3  
+), 
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+CombinedResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.cast_list,
+        mk.keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        MovieKeywords mk ON tm.movie_id = mk.movie_id
+)
+
+SELECT 
+    cr.title,
+    cr.production_year,
+    cr.cast_list,
+    COALESCE(cr.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN cb.company_name IS NOT NULL THEN 'Produced by: ' || cb.company_name 
+        ELSE 'Production company info unavailable' 
+    END AS production_info
+FROM 
+    CombinedResults cr
+LEFT JOIN 
+    movie_companies mb ON cr.movie_id = mb.movie_id
+LEFT JOIN 
+    company_name cb ON mb.company_id = cb.id
+WHERE 
+    cr.production_year >= 2000 AND
+    (cr.production_year % 2 = 0 OR cr.keywords IS NOT NULL)  
+ORDER BY 
+    cr.production_year DESC,
+    cr.title;

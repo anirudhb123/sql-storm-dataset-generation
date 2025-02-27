@@ -1,0 +1,88 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '2020-01-01'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Account Balance Unknown'
+            WHEN s.s_acctbal > 10000 THEN 'High Value Supplier'
+            ELSE 'Regular Supplier'
+        END AS supplier_category
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name LIKE '%land%'
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available_quantity,
+        AVG(p.p_retailprice) AS avg_retail_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        l.l_returnflag,
+        l.l_linestatus,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_number
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    pi.p_name,
+    pi.total_available_quantity,
+    pi.avg_retail_price,
+    si.s_name,
+    si.s_acctbal,
+    si.supplier_category,
+    old.l_quantity,
+    old.l_extendedprice,
+    old.l_discount,
+    old.l_returnflag,
+    old.l_linestatus
+FROM 
+    RankedOrders ro
+JOIN 
+    OrderLineDetails old ON ro.o_orderkey = old.l_orderkey 
+JOIN 
+    PartDetails pi ON old.l_partkey = pi.p_partkey
+LEFT JOIN 
+    SupplierInfo si ON old.l_orderkey IN (SELECT DISTINCT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = si.nation_name))
+WHERE 
+    ro.order_rank <= 5
+    AND (old.l_discount > 0.1 OR old.l_returnflag = 'R')
+ORDER BY 
+    ro.o_orderdate DESC, 
+    pi.avg_retail_price ASC;

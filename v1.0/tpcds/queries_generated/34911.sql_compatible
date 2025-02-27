@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ws_sold_date_sk
+    FROM web_sales
+    GROUP BY ws_item_sk, ws_sold_date_sk
+), sales_by_date AS (
+    SELECT 
+        d.d_date AS sale_date,
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_net_paid,
+        RANK() OVER (PARTITION BY ss.ws_item_sk ORDER BY ss.total_net_paid DESC) AS sales_rank
+    FROM sales_summary ss
+    JOIN date_dim d ON ss.ws_sold_date_sk = d.d_date_sk
+), promotional_sales AS (
+    SELECT 
+        sbd.sale_date,
+        sbd.ws_item_sk,
+        sbd.total_quantity,
+        sbd.total_net_paid,
+        p.p_promo_name,
+        COALESCE(COUNT(DISTINCT ws.ws_order_number), 0) AS promo_count
+    FROM sales_by_date sbd
+    LEFT JOIN promotion p ON p.p_item_sk = sbd.ws_item_sk
+    LEFT JOIN web_sales ws ON sbd.ws_item_sk = ws.ws_item_sk AND ws.ws_sold_date_sk = sbd.sale_date
+    GROUP BY sbd.sale_date, sbd.ws_item_sk, sbd.total_quantity, sbd.total_net_paid, p.p_promo_name
+)
+SELECT 
+    sale_date,
+    ws_item_sk,
+    SUM(total_quantity) AS cumulative_quantity,
+    SUM(total_net_paid) AS cumulative_net_paid,
+    AVG(total_net_paid) AS avg_net_paid_per_sale,
+    MAX(total_net_paid) AS max_net_paid
+FROM promotional_sales
+WHERE total_net_paid > 0
+GROUP BY sale_date, ws_item_sk
+HAVING AVG(total_net_paid) > 100
+ORDER BY sale_date, ws_item_sk;

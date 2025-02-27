@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty - 10, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON sc.ps_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 10
+),
+CustomerTotalOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RegionNation AS (
+    SELECT r.r_name, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    r.r_name,
+    SUM(sc.ps_availqty) AS total_available,
+    COALESCE(cto.total_spent, 0) AS total_customer_spent,
+    rn.customer_count
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN SupplyChain sc ON ps.ps_partkey = sc.ps_partkey
+JOIN RegionNation rn ON rn.r_name IS NOT NULL
+LEFT JOIN CustomerTotalOrders cto ON cto.total_spent > 1000
+GROUP BY p.p_name, p.p_mfgr, r.r_name, cto.total_spent, rn.customer_count
+HAVING SUM(sc.ps_availqty) > 0
+ORDER BY total_available DESC, p.p_name;

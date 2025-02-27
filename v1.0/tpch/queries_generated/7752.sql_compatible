@@ -1,0 +1,52 @@
+
+WITH regional_supplier_summary AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, n.n_name, s.s_name
+), 
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_partkey) AS parts_ordered
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1996-07-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    rss.region_name,
+    rss.nation_name,
+    rss.supplier_name,
+    rss.total_available_quantity,
+    rss.average_supply_cost,
+    rss.unique_parts_supplied,
+    os.total_value,
+    os.parts_ordered,
+    ROW_NUMBER() OVER (PARTITION BY rss.region_name ORDER BY os.total_value DESC) AS order_rank
+FROM 
+    regional_supplier_summary rss
+LEFT JOIN 
+    order_summary os ON rss.supplier_name = os.o_orderkey
+ORDER BY 
+    rss.region_name, order_rank;

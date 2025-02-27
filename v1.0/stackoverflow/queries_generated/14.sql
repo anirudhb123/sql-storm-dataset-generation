@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId 
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        u.UserId, 
+        u.Reputation, 
+        u.TotalBounty,
+        RANK() OVER (ORDER BY u.Reputation + u.TotalBounty DESC) AS UserRank
+    FROM 
+        UserReputation u
+)
+SELECT 
+    p.PostId, 
+    p.Title, 
+    p.Score, 
+    p.CreationDate,
+    tu.UserId, 
+    tu.Reputation AS UserReputation, 
+    pu.RankScore, 
+    pu.CommentCount
+FROM 
+    RankedPosts pu
+JOIN 
+    TopUsers tu ON pu.PostId IN (SELECT p1.Id FROM Posts p1 WHERE p1.OwnerUserId = tu.UserId)
+WHERE 
+    tu.UserRank <= 10 
+    AND pu.RankScore = 1
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC
+LIMIT 50;

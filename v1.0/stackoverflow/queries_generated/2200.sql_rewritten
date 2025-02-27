@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        RANK() OVER (ORDER BY COALESCE(SUM(P.Score), 0) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+), 
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(V.CreationDate) AS LastVoteDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+), 
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT CT.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CT ON PH.Comment = CT.Id::text
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.QuestionCount,
+    UA.AnswerCount,
+    PS.Title,
+    PS.Score,
+    PS.TotalViews,
+    PS.CommentCount,
+    PS.LastVoteDate,
+    COALESCE(CP.CloseCount, 0) AS CloseCount,
+    COALESCE(CP.CloseReasons, 'No closure reasons') AS CloseReasons
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStatistics PS ON UA.UserId = PS.PostId
+LEFT JOIN 
+    ClosedPosts CP ON PS.PostId = CP.PostId
+WHERE 
+    UA.Reputation > 100
+ORDER BY 
+    UA.UserRank, PS.Score DESC 
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,59 @@
+
+WITH Address_Overview AS (
+    SELECT
+        ca_state,
+        ca_city,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        COUNT(DISTINCT ca_street_name) AS unique_streets
+    FROM customer_address
+    GROUP BY ca_state, ca_city
+),
+Customer_Stats AS (
+    SELECT
+        cd_gender,
+        COUNT(DISTINCT c_customer_id) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_dep_count) AS max_dependents,
+        MIN(cd_dep_count) AS min_dependents
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd_gender
+),
+Date_Analysis AS (
+    SELECT
+        d_year,
+        COUNT(DISTINCT d_date_id) AS total_days,
+        COUNT(*) FILTER (WHERE d_holiday = 'Y') AS holiday_count,
+        AVG(d_dom) AS avg_day_of_month
+    FROM date_dim
+    GROUP BY d_year
+),
+String_Benchmark AS (
+    SELECT
+        COALESCE(GROUP_CONCAT(c.c_first_name || ' ' || c.c_last_name), '') AS customer_names,
+        (SELECT COUNT(DISTINCT ca_street_name) 
+         FROM customer_address 
+         WHERE ca_city IN (SELECT ca_city FROM Address_Overview)) AS unique_street_names_count
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    a.ca_state,
+    a.ca_city,
+    a.unique_addresses,
+    a.unique_streets,
+    cs.total_customers,
+    cs.avg_purchase_estimate,
+    cs.max_dependents,
+    cs.min_dependents,
+    d.d_year,
+    d.total_days,
+    d.holiday_count,
+    d.avg_day_of_month,
+    sb.customer_names,
+    sb.unique_street_names_count
+FROM Address_Overview a
+JOIN Customer_Stats cs ON TRUE
+JOIN Date_Analysis d ON TRUE
+JOIN String_Benchmark sb ON TRUE
+ORDER BY a.ca_state, a.ca_city, d.d_year;

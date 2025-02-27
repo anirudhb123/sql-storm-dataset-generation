@@ -1,0 +1,54 @@
+WITH actor_movies AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(m.id) OVER (PARTITION BY c.person_id ORDER BY t.production_year) AS movie_count,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS latest_movie_row
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL AND 
+        a.name != ''
+),
+filtered_actors AS (
+    SELECT 
+        actor_name, 
+        movie_title, 
+        production_year, 
+        movie_count
+    FROM 
+        actor_movies
+    WHERE 
+        latest_movie_row = 1 AND 
+        production_year >= 2000
+),
+actor_keyword_counts AS (
+    SELECT 
+        fa.actor_name,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        filtered_actors fa
+    LEFT JOIN 
+        movie_keyword mk ON fa.movie_title = (SELECT t.title FROM aka_title t WHERE t.id = (SELECT movie_id FROM cast_info WHERE person_id = (SELECT a.id FROM aka_name a WHERE a.name = fa.actor_name) LIMIT 1))
+    GROUP BY 
+        fa.actor_name
+)
+SELECT 
+    f.actor_name,
+    f.movie_title,
+    f.production_year,
+    f.movie_count,
+    akc.keyword_count
+FROM 
+    filtered_actors f
+JOIN 
+    actor_keyword_counts akc ON f.actor_name = akc.actor_name
+ORDER BY 
+    f.production_year DESC, 
+    akc.keyword_count DESC;

@@ -1,0 +1,69 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword AS main_keyword,
+        COALESCE(mc.note, 'No Company Info') AS company_note,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, mc.note
+),
+detailed_actors AS (
+    SELECT
+        a.name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS actor_order,
+        COUNT(DISTINCT c.movie_id) OVER (PARTITION BY a.id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+),
+aggregated_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.main_keyword,
+        md.company_note,
+        AVG(da.movie_count) AS avg_movies_per_actor,
+        MAX(da.actor_order) AS max_order
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        detailed_actors da ON md.movie_id = da.movie_id
+    GROUP BY 
+        md.movie_id, md.title, md.production_year, md.main_keyword, md.company_note
+)
+SELECT 
+    am.title,
+    am.production_year,
+    am.main_keyword,
+    am.company_note,
+    CASE 
+        WHEN am.avg_movies_per_actor IS NULL THEN 'No Data' 
+        ELSE CAST(am.avg_movies_per_actor AS VARCHAR(10)) 
+    END AS avg_movies_per_actor_display,
+    COALESCE(am.max_order, 0) AS max_actor_order
+FROM 
+    aggregated_movies am
+WHERE 
+    am.production_year >= 2000
+    AND (am.main_keyword IS NOT NULL OR am.company_note LIKE 'Universal%')
+ORDER BY 
+    am.production_year DESC,
+    am.max_actor_order ASC;

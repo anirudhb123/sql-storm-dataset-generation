@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_address, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.n_nationkey, sp.s_suppkey, sp.s_name, sp.s_address, sp.s_acctbal, sh.level + 1
+    FROM supplier sp
+    JOIN nation s ON sp.s_nationkey = s.n_nationkey
+    JOIN SupplierHierarchy sh ON sp.s_acctbal > sh.s_acctbal
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names,
+    REGION_INFO.r_name || ' - ' || COUNT(DISTINCT n.n_nationkey) AS region_nation_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region REGION_INFO ON n.n_regionkey = REGION_INFO.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+    AND (l.l_discount BETWEEN 0.05 AND 0.15 OR l.l_discount IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, REGION_INFO.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+    OR EXISTS (SELECT 1 FROM SupplierHierarchy sh WHERE sh.s_nationkey = s.s_nationkey)
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

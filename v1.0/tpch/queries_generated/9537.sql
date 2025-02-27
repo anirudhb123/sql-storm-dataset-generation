@@ -1,0 +1,33 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name,
+           RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING total_value > 50000
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ps.ps_comment,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, ps.ps_comment
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+)
+SELECT r.r_name, AVG(s.s_acctbal) AS avg_acctbal, COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(COALESCE(p.total_value, 0)) AS total_high_value_order
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers s ON s.rank <= 10 AND n.n_nationkey = s.n_nationkey
+LEFT JOIN HighValueOrders o ON o.o_orderkey IN (SELECT o_orderkey FROM HighValueOrders) 
+LEFT JOIN PartSupplierDetails p ON p.p_partkey IN (SELECT ps_partkey FROM PartSupplierDetails)
+GROUP BY r.r_name
+ORDER BY avg_acctbal DESC, order_count DESC
+LIMIT 10;

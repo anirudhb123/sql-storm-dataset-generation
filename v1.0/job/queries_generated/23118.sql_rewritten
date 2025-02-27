@@ -1,0 +1,70 @@
+WITH Recursive_Actor_Movies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ct.kind AS role,
+        m.title AS movie_title,
+        m.production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title m ON c.movie_id = m.movie_id
+    JOIN 
+        comp_cast_type ct ON c.role_id = ct.id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL 
+
+    SELECT 
+        ra.actor_id,
+        ra.actor_name,
+        ra.role,
+        second_m.title AS movie_title,
+        second_m.production_year
+    FROM 
+        Recursive_Actor_Movies ra
+    JOIN 
+        cast_info ci ON ra.actor_id = ci.person_id
+    JOIN 
+        aka_title second_m ON ci.movie_id = second_m.movie_id
+    WHERE 
+        second_m.production_year > ra.production_year
+),
+Filtered_Movies AS (
+    SELECT 
+        actor_id, 
+        actor_name, 
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movie_list
+    FROM 
+        Recursive_Actor_Movies
+    GROUP BY 
+        actor_id, actor_name
+    HAVING 
+        COUNT(DISTINCT movie_title) > 2
+)
+SELECT 
+    f.actor_id,
+    f.actor_name,
+    f.movie_count,
+    f.movie_list,
+    COALESCE(k.keyword, 'No keyword') AS movie_keyword,
+    CASE 
+        WHEN f.movie_count > 10 THEN 'Prolific Actor'
+        WHEN f.movie_count BETWEEN 5 AND 10 THEN 'Moderate Actor'
+        ELSE 'Occasional Actor'
+    END AS actor_category
+FROM 
+    Filtered_Movies f
+LEFT JOIN 
+    movie_keyword mk ON f.actor_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    f.actor_name NOT LIKE '%Smith%' 
+    AND f.movie_count IS NOT NULL
+ORDER BY 
+    f.movie_count DESC;

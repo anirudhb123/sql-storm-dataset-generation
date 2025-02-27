@@ -1,0 +1,60 @@
+WITH RecursiveSales AS (
+    SELECT 
+        w.warehouse_name,
+        ws_sold_date_sk,
+        ws_ship_mode_sk,
+        COUNT(ws_order_number) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM
+        web_sales W
+    JOIN warehouse w ON w.warehouse_sk = W.ws_warehouse_sk
+    GROUP BY w.warehouse_name, ws_sold_date_sk, ws_ship_mode_sk
+    HAVING SUM(ws_net_profit) IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        w.warehouse_name,
+        ws_sold_date_sk,
+        ws_ship_mode_sk,
+        COUNT(cs_order_number) AS total_sales,
+        SUM(cs_net_profit) AS total_profit
+    FROM
+        catalog_sales C
+    JOIN warehouse w ON w.warehouse_sk = C.cs_warehouse_sk
+    GROUP BY w.warehouse_name, ws_sold_date_sk, ws_ship_mode_sk
+    HAVING SUM(cs_net_profit) IS NOT NULL
+),
+CombinedResults AS (
+    SELECT
+        r.warehouse_name,
+        d.d_date,
+        r.ws_ship_mode_sk,
+        COALESCE(r.total_sales, 0) AS total_sales,
+        COALESCE(r.total_profit, 0) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY r.warehouse_name ORDER BY COALESCE(r.total_profit, 0) DESC) AS profit_ranking
+    FROM 
+        RecursiveSales r
+    JOIN date_dim d ON d.d_date_sk = r.ws_sold_date_sk
+    WHERE d.d_year = (
+        SELECT MAX(d_year) FROM date_dim
+    )
+)
+SELECT 
+    warehouse_name,
+    d_date,
+    ws_ship_mode_sk,
+    total_sales,
+    total_profit,
+    profit_ranking
+FROM 
+    CombinedResults
+WHERE 
+    total_sales > (
+        SELECT AVG(total_sales)
+        FROM CombinedResults
+        WHERE profit_ranking < 5
+    )
+OR total_profit IS NULL
+ORDER BY 
+    warehouse_name, d_date DESC;

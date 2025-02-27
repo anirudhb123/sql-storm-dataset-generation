@@ -1,0 +1,70 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        n.n_name AS nation_name,
+        n.n_comment AS nation_comment,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, n.n_name, n.n_comment
+), HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        c.c_mktsegment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_custkey, c.c_name, c.c_mktsegment
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000.00
+)
+SELECT 
+    rp.p_name,
+    rp.p_brand,
+    rp.p_retailprice,
+    si.s_name AS supplier_name,
+    si.nation_name,
+    hvo.o_orderkey,
+    hvo.total_line_value
+FROM 
+    RankedParts rp
+JOIN 
+    SupplierInfo si ON si.part_count > 5  -- Filter suppliers with more than 5 parts
+JOIN 
+    HighValueOrders hvo ON hvo.o_totalprice > 5000.00  -- Filter high-value orders
+WHERE 
+    rp.rnk = 1  -- Only select the top retail priced parts by brand
+ORDER BY 
+    rp.p_retailprice DESC, hvo.total_line_value DESC;

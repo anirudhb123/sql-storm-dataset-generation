@@ -1,0 +1,75 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY a.production_year) AS total_roles
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+actor_details AS (
+    SELECT 
+        ak.name AS actor_name, 
+        t.title, 
+        t.production_year,
+        COUNT(DISTINCT c.movie_id) AS movies_count
+    FROM 
+        aka_name ak 
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name, t.title, t.production_year
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        mk.keywords_list,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = rm.movie_id) AS complete_cast_count
+    FROM 
+        ranked_movies rm 
+    LEFT JOIN 
+        movie_keywords mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.rank <= 5 
+        AND (rm.total_roles IS NOT NULL AND rm.total_roles > 0)
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.keywords_list,
+    ad.actor_name,
+    ad.movies_count,
+    CASE 
+        WHEN f.complete_cast_count IS NULL THEN 'No complete cast'
+        WHEN f.complete_cast_count = 0 THEN 'Incomplete cast'
+        ELSE 'Complete cast'
+    END AS cast_status
+FROM 
+    filtered_movies f 
+JOIN 
+    actor_details ad ON f.movie_id IN (SELECT c.movie_id FROM cast_info c WHERE c.person_id IN (SELECT id FROM aka_name WHERE name = ad.actor_name))
+ORDER BY 
+    f.production_year DESC, 
+    f.title ASC;

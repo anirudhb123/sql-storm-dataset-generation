@@ -1,0 +1,69 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_totalprice IS NOT NULL
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+filtered_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 'N/A'
+            ELSE CONCAT('USD ', FORMAT(p.p_retailprice, 2))
+        END AS formatted_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20 OR 
+        EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_shipdate < '2021-01-01')
+),
+supply_data AS (
+    SELECT 
+        f.p_partkey,
+        f.p_name,
+        COALESCE(sp.total_avail, 0) AS available_quantity,
+        f.formatted_price
+    FROM 
+        filtered_parts f
+    LEFT JOIN 
+        supplier_parts sp ON f.p_partkey = sp.ps_partkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ro.c_name,
+    sd.p_name,
+    sd.available_quantity,
+    sd.formatted_price
+FROM 
+    ranked_orders ro
+FULL OUTER JOIN 
+    supply_data sd ON ro.order_rank = 1
+WHERE 
+    (sd.available_quantity IS NULL OR sd.available_quantity > 5) AND 
+    ro.o_orderdate BETWEEN '2020-01-01' AND '2023-12-31'
+ORDER BY 
+    ro.o_orderdate DESC, sd.p_name ASC;

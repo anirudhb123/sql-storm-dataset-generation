@@ -1,0 +1,45 @@
+
+WITH Recursive_Aka_Titles AS (
+    SELECT a.id AS aka_id, a.person_id, a.name, a.name_pcode_cf, a.name_pcode_nf, a.surname_pcode
+    FROM aka_name a
+    WHERE a.name LIKE '%Smith%'
+    
+    UNION ALL
+
+    SELECT ak.id AS aka_id, ak.person_id, ak.name, ak.name_pcode_cf, ak.name_pcode_nf, ak.surname_pcode 
+    FROM aka_name ak
+    JOIN Recursive_Aka_Titles r ON ak.person_id = r.person_id
+    WHERE ak.name_pcode_cf IS NOT NULL
+),
+Movie_AkTitles AS (
+    SELECT 
+        at.id AS title_id, 
+        at.title, 
+        m.production_year, 
+        ak.name AS actor_name, 
+        c.kind
+    FROM aka_title at
+    JOIN movie_companies mc ON mc.movie_id = at.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN comp_cast_type c ON mc.company_type_id = c.id
+    JOIN cast_info ci ON ci.movie_id = at.movie_id
+    JOIN Recursive_Aka_Titles ak ON ci.person_id = ak.person_id
+    WHERE at.production_year >= 2000  
+),
+Ranked_Movie_AkTitles AS (
+    SELECT 
+        mat.*,
+        ROW_NUMBER() OVER (PARTITION BY mat.actor_name ORDER BY mat.production_year DESC) AS actor_rank
+    FROM Movie_AkTitles mat
+)
+SELECT 
+    actor_name,
+    COUNT(*) AS movie_count,
+    MIN(production_year) AS first_movie_year,
+    MAX(production_year) AS last_movie_year,
+    STRING_AGG(title, ', ') AS movies_list
+FROM Ranked_Movie_AkTitles
+WHERE actor_rank = 1  
+GROUP BY actor_name
+ORDER BY movie_count DESC
+LIMIT 10;

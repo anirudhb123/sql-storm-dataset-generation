@@ -1,0 +1,71 @@
+
+WITH RECURSIVE RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        r.r_name
+),
+TopRegions AS (
+    SELECT 
+        region_name
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 5
+),
+SupplierSales AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_name
+),
+CombinedSales AS (
+    SELECT 
+        tp.region_name,
+        ss.supplier_name,
+        ss.supplier_sales
+    FROM 
+        TopRegions tp
+    LEFT JOIN 
+        SupplierSales ss ON tp.region_name = ss.supplier_name
+)
+SELECT 
+    cs.region_name,
+    cs.supplier_name,
+    COALESCE(cs.supplier_sales, 0) AS total_from_supplier,
+    CASE 
+        WHEN cs.supplier_sales IS NULL THEN 'No sales'
+        WHEN cs.supplier_sales > 10000 THEN 'High sales'
+        ELSE 'Low sales'
+    END AS sales_status,
+    STRING_AGG(CONCAT('Region: ', cs.region_name, ' - Supplier: ', COALESCE(cs.supplier_name, '(None)'))) AS sales_info
+FROM 
+    CombinedSales cs
+GROUP BY 
+    cs.region_name, cs.supplier_name
+HAVING 
+    COUNT(cs.supplier_sales) IS NOT NULL
+ORDER BY 
+    cs.region_name, total_from_supplier DESC
+FETCH FIRST 10 ROWS ONLY;

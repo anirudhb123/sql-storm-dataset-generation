@@ -1,0 +1,55 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        k.keyword AS genre
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+),
+GenreCount AS (
+    SELECT 
+        genre,
+        COUNT(*) AS genre_movie_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        genre
+),
+MostPopularGenres AS (
+    SELECT 
+        genre,
+        genre_movie_count,
+        RANK() OVER (ORDER BY genre_movie_count DESC) AS rank
+    FROM 
+        GenreCount
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.aka_names,
+    md.cast_count,
+    mpg.genre,
+    mpg.genre_movie_count
+FROM 
+    MovieDetails md 
+JOIN 
+    MostPopularGenres mpg ON md.genre = mpg.genre
+WHERE 
+    mpg.rank <= 5
+ORDER BY 
+    mpg.genre_movie_count DESC, md.production_year DESC;

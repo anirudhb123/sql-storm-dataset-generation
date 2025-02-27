@@ -1,0 +1,72 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '> <'))) AS Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '> <')))
+),
+PopularTags AS (
+    SELECT 
+        Tag,
+        Frequency,
+        RANK() OVER (ORDER BY Frequency DESC) AS Rank
+    FROM 
+        TagFrequency
+    WHERE 
+        Frequency > 1  
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        CommentCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS ActiveRank
+    FROM 
+        UserActivity
+    WHERE 
+        PostCount > 0  
+)
+SELECT 
+    au.DisplayName,
+    au.PostCount,
+    au.CommentCount,
+    au.GoldBadges,
+    au.SilverBadges,
+    au.BronzeBadges,
+    pt.Tag AS PopularTag,
+    pt.Frequency AS TagFrequency
+FROM 
+    ActiveUsers au
+JOIN 
+    PopularTags pt ON au.ActiveRank <= 10  
+ORDER BY 
+    au.PostCount DESC, pt.Frequency DESC;

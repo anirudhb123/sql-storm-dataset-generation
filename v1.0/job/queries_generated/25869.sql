@@ -1,0 +1,62 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        COALESCE(GROUP_CONCAT(DISTINCT cn.name), 'No company') AS companies,
+        STRING_AGG(DISTINCT pi.info, '; ') AS person_infos
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN 
+        aka_name ak ON at.id = ak.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    GROUP BY 
+        t.id
+),
+benchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        LENGTH(md.aka_names) AS aka_names_length,
+        LENGTH(md.keywords) AS keywords_length,
+        LENGTH(md.companies) AS companies_length,
+        LENGTH(md.person_infos) AS person_infos_length,
+        md.aka_names,
+        md.keywords,
+        md.companies,
+        md.person_infos
+    FROM 
+        movie_details md
+    WHERE 
+        md.production_year > 2000
+)
+SELECT 
+    movie_title,
+    production_year,
+    aka_names_length,
+    keywords_length,
+    companies_length,
+    person_infos_length,
+    aka_names,
+    keywords,
+    companies,
+    person_infos
+FROM 
+    benchmark
+ORDER BY 
+    production_year DESC, 
+    movie_title;

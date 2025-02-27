@@ -1,0 +1,54 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        SUBSTRING(ca_street_name, 1, 20) AS short_street_name,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state, ca_street_number, ca_street_name, ca_street_type
+),
+DemographicInfo AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(*) AS demo_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+SalesInfo AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    a.ca_city AS city,
+    a.ca_state AS state,
+    a.address_count,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.demo_count,
+    s.total_sales,
+    s.order_count
+FROM 
+    AddressDetails a
+LEFT JOIN 
+    DemographicInfo d ON a.ca_city = 'Los Angeles' AND d.cd_gender = 'F'
+LEFT JOIN 
+    SalesInfo s ON s.web_site_sk = 1
+WHERE 
+    a.address_count > 1
+ORDER BY 
+    a.address_count DESC, s.total_sales DESC;

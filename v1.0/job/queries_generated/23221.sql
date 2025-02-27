@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COALESCE(NULLIF(c.note, ''), 'No Note') AS cast_note
+    FROM
+        aka_title a 
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE
+        a.production_year IS NOT NULL 
+        AND a.production_year > 2000
+),
+TopRanked AS (
+    SELECT
+        title,
+        production_year,
+        cast_note
+    FROM
+        RankedMovies
+    WHERE
+        year_rank <= 5
+),
+MovieKeywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+    GROUP BY
+        m.movie_id
+),
+MovieInfoWithKeywords AS (
+    SELECT
+        tr.title,
+        tr.production_year,
+        tr.cast_note,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords
+    FROM
+        TopRanked tr
+    LEFT JOIN 
+        MovieKeywords mk ON tr.title = (
+            SELECT title FROM aka_title WHERE movie_id = tr.production_year LIMIT 1
+        )
+)
+SELECT
+    mi.title,
+    mi.production_year,
+    TRIM(both ' ' from mi.cast_note) AS cleaned_cast_note,
+    CASE 
+        WHEN mi.keywords LIKE '%Drama%' THEN 'Drama'
+        WHEN mi.keywords LIKE '%Action%' THEN 'Action'
+        ELSE 'Other'
+    END AS genre,
+    COUNT(DISTINCT ci.person_id) AS unique_actor_count,
+    AVG(l.link_count) AS avg_other_links
+FROM
+    MovieInfoWithKeywords mi
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = (
+        SELECT id FROM aka_title WHERE title = mi.title LIMIT 1
+    )
+LEFT JOIN (
+    SELECT 
+        ml.movie_id,
+        COUNT(ml.linked_movie_id) AS link_count
+    FROM
+        movie_link ml
+    GROUP BY 
+        ml.movie_id
+) l ON l.movie_id = (
+    SELECT id FROM aka_title WHERE title = mi.title LIMIT 1
+)
+WHERE 
+    mi.production_year BETWEEN 2005 AND 2010
+GROUP BY 
+    mi.title, mi.production_year, mi.cast_note, mi.keywords
+ORDER BY 
+    mi.production_year DESC, 
+    unique_actor_count DESC, 
+    cleaned_cast_note;

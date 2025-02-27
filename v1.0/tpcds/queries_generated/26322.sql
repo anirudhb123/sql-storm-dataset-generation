@@ -1,0 +1,65 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(SUBSTR(ca_street_name, 1, 10)) AS short_street_name,
+        TRIM(SUBSTR(ca_city, 1, 10)) AS short_city,
+        CONCAT(TRIM(SUBSTR(ca_street_type, 1, 5)), ' ', TRIM(SUBSTR(ca_state, 1, 2))) AS formatted_address
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        w.web_site_id,
+        ws_order_number,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        w.web_site_id, ws_order_number
+),
+FinalBenchmark AS (
+    SELECT 
+        a.ca_address_sk,
+        c.full_name,
+        c.cd_gender,
+        c.cd_marital_status,
+        a.short_street_name,
+        a.short_city,
+        a.formatted_address,
+        s.web_site_id,
+        s.total_sales,
+        s.order_count
+    FROM 
+        AddressParts a
+    JOIN 
+        CustomerInfo c ON c.c_customer_sk = a.ca_address_sk
+    JOIN 
+        SalesData s ON s.web_site_id = a.ca_address_sk
+)
+SELECT 
+    formatted_address,
+    COUNT(DISTINCT full_name) AS unique_customers,
+    SUM(total_sales) AS total_sales_amount,
+    AVG(order_count) AS avg_orders_per_customer
+FROM 
+    FinalBenchmark
+GROUP BY 
+    formatted_address
+HAVING 
+    COUNT(DISTINCT full_name) > 1
+ORDER BY 
+    total_sales_amount DESC;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestHistoryDate,
+        STRING_AGG(CASE WHEN pht.Name LIKE '%Close%' THEN 'Closed' ELSE 'Other' END, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreationDate,
+    p.Score,
+    u.Reputation,
+    ur.UpVotesCount,
+    ur.DownVotesCount,
+    CASE 
+        WHEN pu.rn = 1 THEN 'Most Recent Post'
+        ELSE 'Less Recent Post'
+    END AS RecentStatus,
+    COALESCE(phd.LatestHistoryDate, p.CreationDate) AS LastHistoryUpdate,
+    phd.HistoryTypes
+FROM 
+    Users u
+JOIN 
+    RankedPosts pu ON u.Id = pu.OwnerUserId
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+JOIN 
+    Posts p ON pu.PostId = p.Id
+LEFT JOIN 
+    PostHistoryDetails phd ON p.Id = phd.PostId 
+WHERE 
+    u.Reputation > 1000 
+    AND EXISTS (
+        SELECT 1
+        FROM Comments c
+        WHERE c.PostId = p.Id 
+        HAVING COUNT(c.Id) > 5
+    )
+ORDER BY 
+    p.CreationDate DESC 
+LIMIT 10;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS cool_actor_pseudonym, min(t.title) AS series_named_after_char
+FROM aka_name AS an, cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE an.person_id = n.id AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND an.person_id = ci.person_id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND an.surname_pcode < 'I53' AND an.name_pcode_nf > 'U543' AND ci.role_id = 10 AND mc.note IN ('(1999) (Canada) (theatrical) (Québec)', '(2007-2010) (worldwide) (all media) (copyright holder)', '(2011) (Sweden) (DVD) (Blu-ray)', '(????) (USA) (VHS) (softcore double feature #2)') AND ci.id > 33880908;

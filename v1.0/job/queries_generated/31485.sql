@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = 1  -- Assuming this is the Kind for movies.
+    
+    UNION ALL
+    
+    SELECT 
+        linked_movie.linked_movie_id AS movie_id,
+        l.title AS movie_title,
+        l.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS linked_movie
+    JOIN 
+        title AS l ON l.id = linked_movie.linked_movie_id
+    JOIN 
+        movie_hierarchy AS mh ON mh.movie_id = linked_movie.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS num_actors,
+    AVG(p.info) FILTER (WHERE p.info_type_id = 1) AS average_age,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.num_actors DESC) AS rank_by_actors
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    cast_info AS c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    person_info AS p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 3  -- Only include movies with more than 3 actors
+ORDER BY 
+    mh.production_year DESC, num_actors DESC;
+
+This query first establishes a recursive Common Table Expression (CTE) to generate a hierarchy of movies including linked movies. It aggregates data including the number of actors, average age of actors involved, and the associated keywords for each movie in the hierarchy. Various SQL constructs such as outer joins, filtering, and window functions are utilized to derive the necessary statistics and ensure nuanced insight into the movie dataset.

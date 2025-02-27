@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostVoterStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 100
+),
+PostTagStats AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(t.Id) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pts.TagCount,
+    pts.TagList,
+    COALESCE(tu.DisplayName, 'No Top User') AS TopUser,
+    ph.Level
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    PostVoterStats pvs ON ph.PostId = pvs.PostId
+LEFT JOIN 
+    PostTagStats pts ON ph.PostId = pts.PostId
+LEFT JOIN 
+    TopUsers tu ON tu.Id = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = ph.PostId)
+WHERE 
+    ph.Level <= 2 
+ORDER BY 
+    ph.Level, pvs.UpVotes DESC;

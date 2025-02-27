@@ -1,0 +1,67 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END, 0)) AS AcceptedAnswers,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        COALESCE(VoteCounts.UpVotes, 0) AS UpVotes,
+        COALESCE(VoteCounts.DownVotes, 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            V.PostId,
+            SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM Votes V
+        GROUP BY V.PostId
+    ) AS VoteCounts ON P.Id = VoteCounts.PostId
+),
+RecentPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Title,
+        P.CreationDate,
+        DATEDIFF(CURRENT_TIMESTAMP, P.CreationDate) AS DaysAgo,
+        P.ViewCount
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalViews,
+    UA.AcceptedAnswers,
+    UA.CommentCount,
+    PP.PostId,
+    PP.Title AS RecentPostTitle,
+    PP.CreationDate AS RecentPostDate,
+    PP.DaysAgo,
+    PP.ViewCount AS RecentPostViews,
+    CASE
+        WHEN PP.UpVotes > PP.DownVotes THEN 'Positive'
+        WHEN PP.UpVotes < PP.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS PostVoteSentiment
+FROM UserActivity UA
+LEFT JOIN RecentPostActivity PP ON UA.UserId = PP.UserId
+WHERE UA.TotalPosts > 10
+ORDER BY UA.TotalViews DESC, PP.DaysAgo ASC
+LIMIT 100;

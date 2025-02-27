@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS OwnerRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownvoteCount,
+        COALESCE(NULLIF(P.ClosedDate, ''), NULL) AS IsClosed,
+        (SELECT COUNT(*) 
+         FROM Comments C 
+         WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= DATEADD(DAY, -30, CAST('2024-10-01' AS DATE))
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        RP.AcceptedAnswerId,
+        RP.OwnerRank,
+        RP.UpvoteCount,
+        RP.DownvoteCount,
+        RP.IsClosed,
+        RP.CommentCount,
+        CASE 
+            WHEN RP.IsClosed IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        (SELECT STRING_AGG(T.TagName, ', ') 
+         FROM Tags T 
+         JOIN PostsTags PT ON PT.PostId = RP.PostId AND PT.TagId = T.Id) AS Tags
+    FROM RankedPosts RP
+),
+UserPerformance AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        SUM(P.Score) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.Score,
+    PD.OwnerDisplayName,
+    PD.PostStatus,
+    U.DisplayName AS UserDisplayName,
+    UP.TotalPosts,
+    UP.AcceptedAnswers,
+    UP.GoldBadges,
+    UP.SilverBadges,
+    UP.BronzeBadges,
+    UP.TotalScore
+FROM PostDetails PD
+JOIN UserPerformance UP ON PD.OwnerDisplayName = UP.DisplayName
+WHERE UP.TotalScore > 1000
+ORDER BY PD.ViewCount DESC, PD.Score DESC;

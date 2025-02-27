@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName ORDER BY t.TagName) AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(MAX(v.CreationDate), '1900-01-01') AS LastVoteDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_name ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_name
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostActivity AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.Tags,
+        rp.LastVoteDate,
+        rp.Rank,
+        CASE 
+            WHEN rp.LastVoteDate > (CURRENT_DATE - INTERVAL '1 month') THEN 'Recently Active'
+            ELSE 'Less Active' 
+        END AS ActivityStatus,
+        CASE 
+            WHEN rp.Rank <= 10 THEN 'Top Posts'
+            WHEN rp.Rank <= 50 THEN 'Popular Posts'
+            ELSE 'Regular Posts' 
+        END AS PopularityStatus
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.AnswerCount,
+    pa.Tags,
+    pa.ActivityStatus,
+    pa.PopularityStatus
+FROM 
+    PostActivity pa
+ORDER BY 
+    pa.PopularityStatus DESC, pa.ViewCount DESC;

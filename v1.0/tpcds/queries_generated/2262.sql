@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ws.ws_sold_date_sk,
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY ws.ws_net_paid DESC) as sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 
+            (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 AND 
+            (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+TotalReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_returned_date_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerInsights AS (
+    SELECT 
+        r.c_customer_sk,
+        r.c_first_name,
+        r.c_last_name,
+        COALESCE(tr.total_returns, 0) AS total_returns,
+        COALESCE(tr.total_return_amount, 0) AS total_return_amount,
+        COUNT(DISTINCT r.ws_order_number) AS total_orders,
+        SUM(r.ws_sales_price) AS total_sales,
+        AVG(r.ws_sales_price) AS avg_sales_price
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        TotalReturns tr ON r.c_customer_sk = tr.sr_customer_sk
+    GROUP BY 
+        r.c_customer_sk, r.c_first_name, r.c_last_name
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.total_orders,
+    ci.total_sales,
+    ci.avg_sales_price,
+    ci.total_returns,
+    ci.total_return_amount
+FROM 
+    CustomerInsights ci
+WHERE 
+    ci.total_sales > 1000 AND 
+    ci.total_orders > 5 AND 
+    ci.total_returns = 0
+ORDER BY 
+    ci.total_sales DESC
+LIMIT 10;

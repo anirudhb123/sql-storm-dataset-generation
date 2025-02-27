@@ -1,0 +1,43 @@
+WITH RECURSIVE region_sales AS (
+    SELECT r.r_regionkey, r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, 0 
+    FROM region r
+    WHERE NOT EXISTS (SELECT 1 FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+),
+filtered_sales AS (
+    SELECT r.r_name, r.total_sales,
+           RANK() OVER (ORDER BY r.total_sales DESC) AS sales_rank
+    FROM region_sales r
+    WHERE r.total_sales IS NOT NULL
+),
+combined_sales AS (
+    SELECT f.r_name, f.total_sales, e.cust_total
+    FROM filtered_sales f
+    LEFT JOIN (
+        SELECT c.c_nationkey, SUM(o.o_totalprice) AS cust_total
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        GROUP BY c.c_nationkey
+    ) e ON e.c_nationkey = (SELECT n.n_nationkey 
+                             FROM nation n 
+                             WHERE n.n_regionkey = (SELECT r.r_regionkey 
+                                                     FROM region r 
+                                                     WHERE f.r_name = r.r_name LIMIT 1))
+)
+SELECT cs.r_name, cs.total_sales, cs.cust_total
+FROM combined_sales cs
+WHERE cs.total_sales IS NOT NULL 
+  AND cs.cust_total IS NOT NULL 
+ORDER BY cs.sales_rank
+LIMIT 10;

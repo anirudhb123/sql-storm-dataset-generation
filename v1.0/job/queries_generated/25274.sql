@@ -1,0 +1,54 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS movie_keywords,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ty.kind AS company_type
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ty ON mc.company_type_id = ty.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        keyword k ON t.id = k.id
+    GROUP BY 
+        t.id, cn.name, ty.kind
+), ranked_movies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        cast_names,
+        movie_keywords,
+        company_name,
+        company_type,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY title) AS rank
+    FROM 
+        movie_details
+)
+SELECT 
+    title,
+    production_year,
+    cast_names,
+    movie_keywords,
+    company_name,
+    company_type
+FROM 
+    ranked_movies
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year DESC, 
+    title;

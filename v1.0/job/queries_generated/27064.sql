@@ -1,0 +1,51 @@
+WITH movie_rankings AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        ARRAY_AGG(DISTINCT aka_name.name) AS actor_names,
+        COUNT(DISTINCT cast_info.person_id) AS total_actors,
+        COUNT(DISTINCT movie_info.info) AS info_count
+    FROM 
+        title
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    JOIN 
+        aka_name ON cast_info.person_id = aka_name.person_id
+    LEFT JOIN 
+        movie_info ON title.id = movie_info.movie_id
+    WHERE 
+        title.production_year >= 2000
+        AND title.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        title.id
+),
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        actor_names,
+        total_actors,
+        info_count,
+        RANK() OVER (ORDER BY total_actors DESC, info_count DESC) AS ranking
+    FROM 
+        movie_rankings
+)
+SELECT 
+    rm.ranking,
+    rm.movie_title,
+    rm.production_year,
+    rm.total_actors,
+    rm.info_count,
+    STRING_AGG(actor_name, ', ') AS actor_list
+FROM 
+    ranked_movies rm
+JOIN 
+    LATERAL UNNEST(rm.actor_names) AS actor_name ON TRUE
+WHERE 
+    rm.ranking <= 10
+GROUP BY 
+    rm.ranking, rm.movie_title, rm.production_year, rm.total_actors, rm.info_count
+ORDER BY 
+    rm.ranking;

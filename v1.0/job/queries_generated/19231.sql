@@ -1,0 +1,16 @@
+SELECT 
+    t.title, 
+    ak.name AS actor_name, 
+    c.kind AS role
+FROM 
+    aka_title t
+JOIN 
+    cast_info ci ON t.id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+WHERE 
+    t.production_year = 2023
+ORDER BY 
+    t.title, ak.name;

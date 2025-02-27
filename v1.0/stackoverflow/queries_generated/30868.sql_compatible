@@ -1,0 +1,88 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        PH.Id,
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  
+    UNION ALL
+    SELECT 
+        PH.Id,
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        RP.Level + 1
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        RecursivePostHistory RP ON PH.PostId = RP.PostId
+    WHERE 
+        PH.CreationDate < RP.CreationDate  
+),
+
+PostWithVotes AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId
+),
+
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COALESCE(SUM(COALESCE(PW.UpVotes, 0)), 0) AS TotalUpVotes,
+        COALESCE(SUM(COALESCE(PW.DownVotes, 0)), 0) AS TotalDownVotes,
+        COALESCE(SUM(P.AnswerCount), 0) AS TotalAnswers,
+        COALESCE(SUM(P.CommentCount), 0) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostWithVotes PW ON P.Id = PW.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.TotalAnswers,
+    U.TotalComments,
+    RP.Level AS PostHistoryLevel,
+    COUNT(DISTINCT RP.PostId) AS ClosedPostsCount
+FROM 
+    UserPostStats U
+LEFT JOIN 
+    RecursivePostHistory RP ON U.TotalPosts > 0
+GROUP BY 
+    U.UserId, U.DisplayName, RP.Level
+HAVING 
+    U.TotalUpVotes > U.TotalDownVotes
+ORDER BY 
+    U.TotalUpVotes DESC, 
+    U.TotalPosts DESC;

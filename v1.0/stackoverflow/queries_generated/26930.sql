@@ -1,0 +1,47 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+)
+
+SELECT 
+    rp.OwnerDisplayName,
+    COUNT(rp.PostId) AS QuestionCount,
+    SUM(rp.Score) AS TotalScore,
+    AVG(rp.ViewCount) AS AverageViews,
+    STRING_AGG(DISTINCT CONCAT(t.TagName, ' [', t.Count, ']'), ', ') AS TagSummary,
+    MAX(rp.CreationDate) AS LatestPostDate,
+    STRING_AGG(DISTINCT bh.Name, ', ') AS BadgeNames
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    STRING_SPLIT(rp.Tags, ',') AS tag ON t.TagName = LTRIM(RTRIM(tag.value))
+LEFT JOIN 
+    Tags t ON t.TagName = LTRIM(RTRIM(tag.value))
+LEFT JOIN 
+    Badges b ON rp.OwnerUserId = b.UserId
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = rp.PostId AND ph.PostHistoryTypeId IN (1, 6) -- Initial Title or Tags
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    rp.OwnerDisplayName
+HAVING 
+    COUNT(rp.PostId) > 5 -- Only users with more than 5 questions
+ORDER BY 
+    TotalScore DESC, QuestionCount DESC;

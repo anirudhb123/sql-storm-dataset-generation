@@ -1,0 +1,86 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01'
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        SUM(CASE WHEN ps.ps_availqty = 0 THEN 1 ELSE 0 END) AS unavailable_parts_count,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), HighValueOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY ro.o_orderdate ORDER BY ro.o_totalprice DESC) AS order_position
+    FROM RankedOrders ro
+    WHERE ro.order_rank = 1
+), PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        COALESCE(s.s_name, 'Unknown') AS supplier_name,
+        COALESCE(NULLIF(s.s_acctbal, 0), -1) AS supplier_account_balance
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_size > 10
+    AND (p.p_retailprice BETWEEN 100 AND 500 OR p.p_name LIKE '%widget%')
+), cum_df AS (
+    SELECT 
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l 
+    JOIN PartInfo p ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_name
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    hi.o_orderdate,
+    hi.o_totalprice,
+    pi.p_name,
+    pi.p_retailprice,
+    src.supplied_parts,
+    src.max_supplycost,
+    CASE 
+        WHEN src.unavailable_parts_count > 0 THEN 'Some Parts Unavailable'
+        ELSE 'All Parts Available'
+    END AS availability_status
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN HighValueOrders hi ON o.o_orderkey = hi.o_orderkey
+JOIN PartInfo pi ON hi.o_orderkey = pi.p_partkey
+JOIN SupplierInfo src ON pi.supplier_name = src.s_name
+WHERE c.c_acctbal > 1000 
+ORDER BY hi.o_orderdate DESC, pi.p_name ASC
+LIMIT 50
+UNION ALL
+SELECT 
+    NULL AS c_name,
+    NULL AS c_acctbal,
+    NULL AS o_orderdate,
+    NULL AS o_totalprice,
+    p.p_name,
+    p.p_retailprice,
+    NULL AS supplied_parts,
+    NULL AS max_supplycost,
+    'Sourced from Unordered' AS availability_status
+FROM PartInfo p
+WHERE p.p_retailprice < 100
+ORDER BY p.p_name
+OFFSET 10 ROWS;

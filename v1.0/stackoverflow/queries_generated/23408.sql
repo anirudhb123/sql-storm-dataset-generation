@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RankByDate,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        r.*,
+        (UpvoteCount - DownvoteCount) AS VoteBalance
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.RankByDate <= 10  -- Top 10 newest posts
+        AND r.RankByScore <= 5  -- Top 5 scored posts per user
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Post Closed' THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN pht.Name = 'Post Reopened' THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(CASE WHEN pht.Name = 'Post Deleted' THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.Body,
+    fp.CommentCount,
+    fp.VoteBalance,
+    COALESCE(pha.LastClosedDate, 'No Closing Activity') AS LastClosedDate,
+    COALESCE(pha.LastReopenedDate, 'No Reopening Activity') AS LastReopenedDate,
+    pha.DeleteCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryAnalysis pha ON fp.PostId = pha.PostId
+WHERE 
+    (fp.VoteBalance > 0 OR (fp.CommentCount IS NULL))
+    AND (fp.Score > 5 OR fp.ViewCount >= 100)
+ORDER BY 
+    fp.ViewCount DESC, fp.CreationDate ASC
+LIMIT 100;

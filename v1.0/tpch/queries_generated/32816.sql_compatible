@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PriceStats AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS total_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+RegionWiseStats AS (
+    SELECT
+        r.r_name,
+        SUM(os.total_revenue) AS total_revenue,
+        AVG(ps.avg_supplycost) AS avg_supplycost
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN PriceStats ps ON s.s_suppkey = ps.p_partkey
+    LEFT JOIN OrderSummary os ON s.s_suppkey = os.total_parts
+    GROUP BY r.r_name
+)
+SELECT
+    rh.level,
+    rw.r_name,
+    COALESCE(rw.total_revenue, 0) AS revenue,
+    COALESCE(rw.avg_supplycost, 0) AS avg_cost,
+    (CASE WHEN COALESCE(rw.total_revenue, 0) > 1000000 THEN 'High' ELSE 'Low' END) AS revenue_category
+FROM SupplierHierarchy rh
+JOIN RegionWiseStats rw ON rh.s_nationkey = rw.r_name
+ORDER BY rh.level, rw.total_revenue DESC;

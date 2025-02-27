@@ -1,0 +1,54 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity, 
+           SUM(ws_net_paid) AS total_net_paid 
+    FROM web_sales 
+    WHERE ws_sold_date_sk BETWEEN 1 AND 365 
+    GROUP BY ws_item_sk 
+    HAVING SUM(ws_quantity) > 0
+), Customer_Details AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           d.d_year, 
+           d.d_month_seq, 
+           cd.cd_gender 
+    FROM customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk 
+    WHERE cd.cd_marital_status = 'M' 
+      AND cd.cd_purchase_estimate > 1000 
+      AND d.d_year = (SELECT MAX(d_year) FROM date_dim)
+), Potential_Promotions AS (
+    SELECT p.p_promo_id, 
+           COUNT(ws_order_number) AS promo_usage_count,
+           SUM(ws_ext_sales_price) AS total_sales 
+    FROM web_sales ws 
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk 
+    GROUP BY p.p_promo_id 
+    HAVING COUNT(ws_order_number) > 10 
+), Filtered_Addresses AS (
+    SELECT ca.*, 
+           NULLIF(TRIM(ca_street_name), '') AS clean_street_name 
+    FROM customer_address ca 
+    WHERE ca_state IN ('CA', 'NY') 
+      AND ca_zip LIKE '9____' 
+      AND ca_location_type IS NOT NULL
+)
+SELECT DISTINCT 
+    cd.c_first_name, 
+    cd.c_last_name, 
+    sa.clean_street_name, 
+    pot.p_promo_id,
+    ( CASE 
+        WHEN pot.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present' 
+      END ) AS sales_status,
+    AVG(SUM(sc.total_net_paid)) OVER (PARTITION BY cd.c_customer_sk) AS avg_sales_per_customer
+FROM Customer_Details cd 
+LEFT JOIN Filtered_Addresses sa ON cd.c_customer_sk = (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = cd.c_customer_sk) 
+LEFT JOIN Sales_CTE sc ON sc.ws_item_sk = ANY(SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cd.c_customer_sk)
+LEFT JOIN Potential_Promotions pot ON pot.promo_usage_count > 5
+WHERE EXISTS (SELECT 1 FROM web_sales ws WHERE ws.ws_bill_customer_sk = cd.c_customer_sk AND ws.ws_ext_sales_price > 200)
+ORDER BY cd.c_last_name, cd.c_first_name;

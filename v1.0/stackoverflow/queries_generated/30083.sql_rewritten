@@ -1,0 +1,69 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+),
+PostInteractionDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.Comment, 'No history comment') AS HistoryComment,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS OwnerPostRank
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (
+        SELECT MAX(PH2.CreationDate) 
+        FROM PostHistory PH2 
+        WHERE PH2.PostId = P.Id
+    )
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years' AND P.Score > 5
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(PostId) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+),
+RecentChanges AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        (SELECT COUNT(1) 
+         FROM Comments C 
+         WHERE C.PostId = P.Id) AS TotalComments,
+        (SELECT COUNT(1) 
+         FROM PostHistory PH 
+         WHERE PH.PostId = P.Id) AS HistoryChangeCount
+    FROM Posts P
+    WHERE P.LastEditDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+)
+
+SELECT 
+    UVC.DisplayName,
+    PIC.PostId,
+    PIC.Title,
+    PIC.CreationDate,
+    PIC.Score,
+    PIC.HistoryComment,
+    PIC.OwnerPostRank,
+    TT.TagName,
+    RT.TotalComments,
+    RT.HistoryChangeCount
+FROM UserVoteCounts UVC
+JOIN PostInteractionDetails PIC ON UVC.UserId = PIC.OwnerUserId
+LEFT JOIN TopTags TT ON TT.PostCount > 3  
+JOIN RecentChanges RT ON RT.Id = PIC.PostId
+WHERE UVC.VoteCount > 10
+ORDER BY UVC.VoteCount DESC, PIC.Score DESC;

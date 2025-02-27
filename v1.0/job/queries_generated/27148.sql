@@ -1,0 +1,49 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS alternative_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.name) AS companies,
+        GROUP_CONCAT(DISTINCT p.name) AS cast_names,
+        COUNT(DISTINCT c.id) AS company_count,
+        COUNT(DISTINCT p.id) AS cast_count
+    FROM 
+        title t
+    LEFT JOIN aka_title ak ON ak.movie_id = t.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_name c ON c.id = mc.company_id
+    LEFT JOIN cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN aka_name p ON p.person_id = ci.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id
+),
+ranked_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.cast_count DESC) AS rank
+    FROM 
+        movie_details md
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    alternative_names,
+    keywords,
+    companies,
+    cast_names,
+    company_count,
+    cast_count,
+    rank
+FROM 
+    ranked_movies
+WHERE 
+    rank <= 10
+ORDER BY 
+    rank;

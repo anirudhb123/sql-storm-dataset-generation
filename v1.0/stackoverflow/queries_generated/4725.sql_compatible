@@ -1,0 +1,64 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        vt.Name AS VoteTypeName
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        AVG(rp.ViewCount) OVER (PARTITION BY rp.OwnerDisplayName) AS AvgViewCount
+    FROM RecentPosts rp
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY rp.PostId, rp.Title, rp.OwnerDisplayName
+)
+SELECT 
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalBountyAmount,
+    ur.ReputationRank,
+    ur.Reputation
+FROM PostStatistics ps
+JOIN UserReputation ur ON ps.OwnerDisplayName = ur.DisplayName
+WHERE ps.TotalBountyAmount > 0
+ORDER BY ps.VoteCount DESC, ur.Reputation DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'No recent Bounty Posts' AS Title,
+    'System' AS OwnerDisplayName,
+    0 AS VoteCount,
+    0 AS UpVotes,
+    0 AS DownVotes,
+    0 AS TotalBountyAmount,
+    NULL AS ReputationRank,
+    NULL AS Reputation
+WHERE NOT EXISTS (SELECT 1 FROM PostStatistics WHERE TotalBountyAmount > 0);

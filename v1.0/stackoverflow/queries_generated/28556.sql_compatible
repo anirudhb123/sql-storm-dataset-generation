@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        (SELECT COUNT(*) FROM UNNEST(STRING_TO_ARRAY(SUBSTR(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+), 
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS QuestionCount,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(rp.Score), 0) AS TotalScore,
+        COALESCE(AVG(rp.TagCount), 0) AS AvgTagsPerPost
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        TotalViews,
+        TotalScore,
+        AvgTagsPerPost,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    t.QuestionCount,
+    t.TotalViews,
+    t.TotalScore,
+    ROUND(t.AvgTagsPerPost, 2) AS AvgTagsPerPost,
+    (SELECT STRING_AGG(DISTINCT p.Title, ', ') 
+     FROM Posts p 
+     WHERE p.OwnerUserId = t.UserId 
+     AND p.PostTypeId = 1 
+     AND p.Score = (SELECT MAX(Score) FROM Posts WHERE OwnerUserId = t.UserId AND PostTypeId = 1)) AS BestPerformingPost
+FROM 
+    TopUsers t
+WHERE 
+    t.ScoreRank <= 10 
+ORDER BY 
+    t.TotalScore DESC;

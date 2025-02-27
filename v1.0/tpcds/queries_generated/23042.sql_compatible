@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) as price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) as total_quantity_sold,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) OVER (PARTITION BY ws.ws_item_sk) as unique_customers
+    FROM 
+        web_sales ws
+),
+filtered_sales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.total_quantity_sold,
+        rs.unique_customers
+    FROM 
+        ranked_sales rs
+    WHERE 
+        rs.price_rank = 1 AND 
+        rs.total_quantity_sold > (SELECT AVG(total_quantity_sold) FROM ranked_sales WHERE unique_customers > 5)
+),
+inventory_check AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) as total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+sales_and_inventory AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.ws_order_number,
+        fs.ws_sales_price,
+        fs.total_quantity_sold,
+        CASE 
+            WHEN ic.total_inventory IS NULL THEN 'No Inventory'
+            WHEN ic.total_inventory < fs.total_quantity_sold THEN 'Insufficient Inventory'
+            ELSE 'Sufficient Inventory'
+        END as inventory_status
+    FROM 
+        filtered_sales fs
+    LEFT JOIN 
+        inventory_check ic ON fs.ws_item_sk = ic.inv_item_sk
+)
+SELECT 
+    s.ws_item_sk,
+    s.ws_order_number,
+    s.ws_sales_price,
+    s.total_quantity_sold,
+    s.inventory_status,
+    COALESCE((SELECT COUNT(*) 
+              FROM store st 
+              WHERE st.s_state IN ('CA', 'NY') 
+              AND st.s_market_manager IS NOT NULL 
+              AND st.s_number_employees > 10), 0) as valid_stores_count,
+    CASE 
+        WHEN s.total_quantity_sold > 100 THEN 'High Demand'
+        WHEN s.total_quantity_sold BETWEEN 51 AND 100 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END as demand_category
+FROM 
+    sales_and_inventory s
+WHERE 
+    s.inventory_status != 'No Inventory'
+ORDER BY 
+    s.ws_sales_price DESC
+LIMIT 10;

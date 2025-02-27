@@ -1,0 +1,78 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(p2.Title, 'N/A') AS AcceptedAnswerTitle,
+        COALESCE(COUNT(c.Id) FILTER (WHERE c.Score > 0), 0) AS PositiveComments,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts p2 ON p.AcceptedAnswerId = p2.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'  
+    GROUP BY 
+        p.Id, u.DisplayName, p2.Title
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(p.Score) AS TotalPostScore,
+        COUNT(DISTINCT b.Id) AS BadgesEarned,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT v.Id) AS VotesGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerDisplayName,
+    ps.AcceptedAnswerTitle,
+    ps.PositiveComments,
+    ps.VoteCount,
+    ue.UserId,
+    ue.DisplayName AS UserDisplayName,
+    ue.PostsCreated,
+    ue.TotalPostScore,
+    ue.BadgesEarned,
+    ue.CommentsMade,
+    ue.VotesGiven
+FROM 
+    PostStats ps
+JOIN 
+    UserEngagement ue ON ps.OwnerDisplayName = ue.DisplayName
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

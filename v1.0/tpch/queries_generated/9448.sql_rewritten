@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    rs.s_name,
+    rs.TotalSupplyCost,
+    ro.o_orderkey,
+    ro.TotalSales
+FROM 
+    RankedSuppliers rs
+JOIN 
+    RecentOrders ro ON rs.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        JOIN 
+            part p ON ps.ps_partkey = p.p_partkey
+        WHERE 
+            p.p_partkey IN (
+                SELECT 
+                    DISTINCT l.l_partkey
+                FROM 
+                    lineitem l
+                JOIN 
+                    orders o ON l.l_orderkey = o.o_orderkey
+                WHERE 
+                    o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+            )
+        ORDER BY 
+            ps.ps_supplycost * ps.ps_availqty DESC
+        LIMIT 1
+    )
+ORDER BY 
+    rs.TotalSupplyCost DESC, 
+    ro.TotalSales DESC;

@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales 
+    GROUP BY 
+        cs_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_info AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+inventory_info AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.marital_status,
+    di.d_year,
+    di.d_month_seq,
+    s.total_quantity,
+    s.total_sales,
+    COALESCE(ii.total_quantity_on_hand, 0) AS total_inventory
+FROM 
+    customer_info ci
+JOIN 
+    date_info di ON di.d_year = 2023 -- Assuming we want data for 2023
+LEFT JOIN 
+    sales_cte s ON s.ws_item_sk = ci.c_customer_sk
+LEFT JOIN 
+    inventory_info ii ON ii.inv_item_sk = ci.c_customer_sk
+WHERE 
+    di.total_orders > 10
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

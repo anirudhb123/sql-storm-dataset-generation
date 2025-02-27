@@ -1,0 +1,66 @@
+
+WITH RegionSummary AS (
+    SELECT 
+        r.r_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_extendedprice) OVER (PARTITION BY l.l_partkey) AS median_price,
+        AVG(l.l_discount) OVER (PARTITION BY l.l_partkey) AS avg_discount
+    FROM 
+        lineitem l
+),
+FinalResults AS (
+    SELECT 
+        rs.r_name,
+        cs.c_name,
+        cs.order_count,
+        cs.total_spent,
+        li.median_price,
+        li.avg_discount
+    FROM 
+        RegionSummary rs
+    JOIN 
+        CustomerOrders cs ON rs.unique_suppliers > 10
+    LEFT JOIN 
+        LineItemAnalysis li ON cs.order_count > 1
+)
+
+SELECT 
+    r_name,
+    c_name,
+    COALESCE(order_count, 0) AS order_count,
+    COALESCE(total_spent, 0) AS total_spent,
+    COALESCE(median_price, 0) AS median_price,
+    COALESCE(avg_discount, 0) AS avg_discount
+FROM 
+    FinalResults
+ORDER BY 
+    r_name, total_spent DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS TotalNetPaid,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS RevenueRank
+    FROM store_sales
+    GROUP BY s_store_sk
+),
+TopStores AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        r.TotalNetPaid
+    FROM store s
+    JOIN RankedSales r ON s.s_store_sk = r.s_store_sk
+    WHERE r.RevenueRank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_returned_date_sk) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnAmount
+    FROM store_returns
+    WHERE sr_returned_date_sk IS NOT NULL
+    GROUP BY sr_customer_sk
+),
+WebSalesReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(wr_order_number) AS TotalWebReturns,
+        SUM(wr_return_amt) AS TotalWebReturnAmount
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+CombinedReturns AS (
+    SELECT 
+        COALESCE(csr.sr_customer_sk, wrr.wr_returning_customer_sk) AS CustomerID,
+        COALESCE(csr.TotalReturns, 0) AS StoreReturns,
+        COALESCE(csr.TotalReturnAmount, 0) AS StoreReturnAmount,
+        COALESCE(wrr.TotalWebReturns, 0) AS WebReturns,
+        COALESCE(wrr.TotalWebReturnAmount, 0) AS WebReturnAmount
+    FROM CustomerReturns csr
+    FULL OUTER JOIN WebSalesReturns wrr ON csr.sr_customer_sk = wrr.wr_returning_customer_sk
+)
+SELECT 
+    cs.CustomerID,
+    cs.StoreReturns,
+    cs.StoreReturnAmount,
+    cs.WebReturns,
+    cs.WebReturnAmount,
+    ts.s_store_name
+FROM CombinedReturns cs
+JOIN TopStores ts ON cs.CustomerID IN (
+    SELECT DISTINCT 
+        ss_customer_sk 
+    FROM store_sales 
+    WHERE ss_store_sk = ts.s_store_sk
+)
+WHERE cs.StoreReturns > 0 OR cs.WebReturns > 0
+ORDER BY cs.StoreReturnAmount DESC, cs.WebReturnAmount DESC
+FETCH FIRST 10 ROWS ONLY
+```

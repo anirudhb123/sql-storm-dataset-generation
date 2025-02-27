@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+),
+
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVoteCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+
+PostCommentStats AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    u.DisplayName AS OwnerDisplayName,
+    rp.CreationDate,
+    COALESCE(uv.UpVoteCount, 0) AS UpVoteCount,
+    COALESCE(uv.DownVoteCount, 0) AS DownVoteCount,
+    COALESCE(uv.TotalBounty, 0) AS TotalBounty,
+    COALESCE(cs.CommentCount, 0) AS CommentCount,
+    COALESCE(cs.LastCommentDate, 'No Comments') AS LastCommentDate,
+    CASE 
+        WHEN rp.RN = 1 THEN 'Latest Post by User'
+        ELSE 'Older Posts by User'
+    END AS PostRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    PostCommentStats cs ON rp.PostId = cs.PostId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND (uv.UpVoteCount - uv.DownVoteCount) > 0
+    AND (rp.CreationDate > (cast('2024-10-01' as date) - INTERVAL '3 months') OR cs.CommentCount > 0)
+ORDER BY 
+    UpVoteCount DESC, 
+    rp.CreationDate DESC_nulls_last;

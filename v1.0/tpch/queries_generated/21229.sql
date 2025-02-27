@@ -1,0 +1,38 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+TopRankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000.00
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_availability,
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 0
+)
+SELECT DISTINCT p.p_name, 
+                COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+                CASE WHEN c.order_count IS NULL THEN 0 ELSE c.order_count END AS order_count,
+                CASE WHEN r.rn IS NOT NULL THEN 'Top Priority' ELSE 'Normal' END AS order_priority,
+                ps.total_availability * ps.avg_supplycost AS supply_value
+FROM PartStats ps
+LEFT JOIN partsupp ps2 ON ps.p_partkey = ps2.ps_partkey
+LEFT JOIN TopRankedSuppliers s ON ps2.ps_suppkey = s.s_suppkey OR s.s_suppkey IS NULL
+LEFT JOIN CustomerOrderCounts c ON s.s_suppkey = c.c_custkey
+LEFT JOIN RankedOrders r ON c.order_count = (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE ps.total_availability > 0 AND (ps.avg_supplycost IS NOT NULL OR s.s_name IS NULL)
+ORDER BY supply_value DESC NULLS LAST;

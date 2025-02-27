@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId = 3 THEN 1 ELSE 0 END) AS Wikis,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(P.ClosedDate, 'No') AS ClosedStatus,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 10 THEN 1 END) AS CloseVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.ViewCount, P.AnswerCount, P.CommentCount, P.ClosedDate
+),
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        UR.PostCount,
+        UR.TotalScore,
+        RANK() OVER (ORDER BY UR.Reputation DESC) AS ReputationRank
+    FROM UserReputation UR
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.AnswerCount,
+        PS.CommentCount,
+        PS.ClosedStatus,
+        RANK() OVER (ORDER BY PS.ViewCount DESC) AS PopularityRank
+    FROM PostStatistics PS
+)
+SELECT 
+    TU.UserId,
+    TU.Reputation,
+    TU.PostCount,
+    TU.TotalScore,
+    TP.PostId,
+    TP.Title,
+    TP.ViewCount,
+    TP.AnswerCount,
+    TP.CommentCount,
+    TP.ClosedStatus,
+    TU.ReputationRank,
+    TP.PopularityRank
+FROM TopUsers TU
+JOIN TopPosts TP ON TU.PostCount > 5 AND TU.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = TP.PostId)
+WHERE TU.ReputationRank <= 10 AND TP.PopularityRank <= 10
+ORDER BY TU.Reputation DESC, TP.ViewCount DESC;

@@ -1,0 +1,132 @@
+WITH UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.Score) AS TotalScore,
+        SUM (CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        MIN(Posts.CreationDate) AS FirstPostDate,
+        MAX(Posts.CreationDate) AS LastPostDate
+    FROM 
+        Users 
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName, Users.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        r.UserId,
+        RANK() OVER (PARTITION BY r.UserId ORDER BY p.CreationDate DESC) AS RankInRecents
+    FROM 
+        Posts p
+    INNER JOIN
+        Users r ON p.OwnerUserId = r.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ActiveUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.PostCount,
+        ur.TotalScore,
+        ur.QuestionCount,
+        rp.Title AS RecentPostTitle
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        RecentPosts rp ON ur.UserId = rp.UserId
+    WHERE 
+        ur.Reputation >= 1000
+    ORDER BY 
+        ur.Reputation DESC
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        p.PostTypeId,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditHistory
+    FROM 
+        PostHistory ph 
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Only title, body, and tag edits
+),
+UserEditCount AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edits only
+    GROUP BY 
+        ph.UserId
+),
+BizarreVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+    HAVING 
+        COUNT(v.Id) > 10 
+        AND COUNT(DISTINCT v.UserId) > 5
+),
+FinalSelection AS (
+    SELECT 
+        au.UserId,
+        au.DisplayName,
+        au.Reputation,
+        au.PostCount,
+        au.TotalScore,
+        au.QuestionCount,
+        hp.Title AS LatestEditPostTitle,
+        he.EditCount,
+        bv.VoteCount,
+        bv.UpVotes,
+        bv.DownVotes
+    FROM 
+        ActiveUsers au
+    LEFT JOIN 
+        PostHistoryDetails hp ON au.UserId = hp.UserId AND hp.EditHistory = 1
+    LEFT JOIN 
+        UserEditCount he ON au.UserId = he.UserId
+    LEFT JOIN 
+        BizarreVotes bv ON hp.PostId = bv.PostId
+    WHERE 
+        (bv.UpVotes - bv.DownVotes) > 5 -- Posts that are overwhelmingly upvoted
+)
+
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.Reputation,
+    fs.PostCount,
+    fs.TotalScore,
+    fs.QuestionCount,
+    fs.LatestEditPostTitle,
+    fs.EditCount,
+    COALESCE(fs.VoteCount, 0) AS TotalVotes,
+    COALESCE(fs.UpVotes, 0) AS UpVotes,
+    COALESCE(fs.DownVotes, 0) AS DownVotes
+FROM 
+    FinalSelection fs
+ORDER BY 
+    fs.Reputation DESC, fs.PostCount DESC;

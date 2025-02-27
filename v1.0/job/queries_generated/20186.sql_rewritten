@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), 
+FilteredMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year > 1990
+)
+SELECT 
+    r.aka_id,
+    r.aka_name,
+    r.title,
+    r.production_year,
+    c.company_name,
+    c.company_type,
+    f.keywords,
+    COUNT(DISTINCT i.id) AS info_count
+FROM 
+    RankedTitles r
+LEFT JOIN 
+    CompanyMovies c ON r.title_rank = c.company_rank AND r.title = c.movie_id
+LEFT JOIN 
+    movie_info i ON r.title = i.movie_id
+JOIN 
+    FilteredMovies f ON r.title = f.title
+WHERE 
+    r.title_rank = 1
+    AND (c.company_type IS NOT NULL OR f.keywords IS NOT NULL)
+    AND r.production_year IS NOT NULL 
+    AND (r.production_year < 2000 OR r.production_year > 2010)
+GROUP BY 
+    r.aka_id, r.aka_name, r.title, r.production_year, c.company_name, c.company_type, f.keywords
+HAVING 
+    COUNT(DISTINCT i.id) > 0
+ORDER BY 
+    r.production_year DESC, r.aka_name;

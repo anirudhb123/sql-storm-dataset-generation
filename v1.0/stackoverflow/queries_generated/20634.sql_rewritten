@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate BETWEEN '2022-01-01' AND cast('2024-10-01 12:34:56' as timestamp)
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+CommentCount AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened on: ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD HH24:MI:SS')
+            ELSE NULL 
+        END, ', ') AS ClosureHistory,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId = 24 THEN 'Edit by: ' || ph.UserDisplayName || ' on ' || TO_CHAR(ph.CreationDate, 'YYYY-MM-DD HH24:MI:SS')
+            ELSE NULL 
+        END, ', ') AS SuggestedEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    COALESCE(uv.Reputation, 0) AS UserReputation,
+    COALESCE(pc.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pc.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(cc.TotalComments, 0) AS CommentCount,
+    COALESCE(phd.ClosureHistory, 'No closures') AS ClosureHistory,
+    COALESCE(phd.SuggestedEdits, 'No suggested edits') AS SuggestedEdits,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Latest ' || CASE WHEN rp.PostTypeId = 1 THEN 'Question' ELSE 'Answer' END
+        ELSE 'Older ' || CASE WHEN rp.PostTypeId = 1 THEN 'Question' ELSE 'Answer' END 
+    END AS PostTypeRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation uv ON rp.PostId = uv.UserId 
+LEFT JOIN 
+    PostVoteCounts pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    CommentCount cc ON rp.PostId = cc.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    (rp.Score > 0 OR (rp.Score = 0 AND rp.PostTypeId <> 2)) 
+    AND (uv.Reputation IS NULL OR uv.Reputation > 50)
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.Score DESC;

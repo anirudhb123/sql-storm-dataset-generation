@@ -1,0 +1,72 @@
+
+WITH AddressBlends AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(', Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        ca_address_sk
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressBlends ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+DateDetails AS (
+    SELECT 
+        d.d_date AS transaction_date,
+        d.d_day_name,
+        d.d_month_seq,
+        d.d_year,
+        d.d_week_seq,
+        d.d_date_sk
+    FROM date_dim d
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.cd_purchase_estimate,
+    cd.full_address,
+    cd.ca_city,
+    cd.ca_state,
+    dd.transaction_date,
+    dd.d_day_name,
+    dd.d_month_seq,
+    dd.d_year,
+    dd.d_week_seq,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_paid) AS total_spent
+FROM CustomerDetails cd
+LEFT JOIN web_sales ws ON cd.full_address LIKE CONCAT('%', ws.ws_bill_addr_sk, '%')
+LEFT JOIN DateDetails dd ON ws.ws_sold_date_sk = dd.d_date_sk
+GROUP BY 
+    cd.full_name, 
+    cd.cd_gender, 
+    cd.cd_marital_status,
+    cd.cd_education_status, 
+    cd.cd_purchase_estimate,
+    cd.full_address, 
+    cd.ca_city, 
+    cd.ca_state,
+    dd.transaction_date, 
+    dd.d_day_name, 
+    dd.d_month_seq, 
+    dd.d_year, 
+    dd.d_week_seq
+ORDER BY 
+    total_spent DESC
+LIMIT 50;

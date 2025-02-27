@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_sk,
+        ws_item_sk,
+        COUNT(ws_order_number) AS total_sales,
+        SUM(ws_ext_sales_price) AS total_revenue,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS revenue_rank
+    FROM 
+        web_sales
+    JOIN 
+        store ON web_sales.ws_store_sk = store.s_store_sk
+    GROUP BY 
+        s_store_sk, ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_returned_date_sk) AS returns_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        hd_income_band_sk
+    FROM 
+        customer_demographics
+    LEFT JOIN 
+        household_demographics ON customer_demographics.cd_demo_sk = household_demographics.hd_demo_sk
+    WHERE 
+        cd_gender IS NOT NULL
+),
+Promotions AS (
+    SELECT 
+        p_item_sk,
+        SUM(p_cost) AS total_promo_cost,
+        COUNT(p_promo_sk) AS promo_count
+    FROM 
+        promotion
+    GROUP BY 
+        p_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    COALESCE(r.total_revenue, 0) AS total_revenue,
+    COALESCE(returns.returns_count, 0) AS returns_count,
+    COALESCE(returns.total_return_value, 0) AS total_return_value,
+    CONCAT('Total Revenue: $', FORMAT(COALESCE(r.total_revenue, 0), 2)) AS revenue_string,
+    p.total_promo_cost,
+    p.promo_count
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    RankedSales r ON c.c_customer_sk = r.s_store_sk
+LEFT JOIN 
+    CustomerReturns returns ON c.c_customer_sk = returns.sr_customer_sk
+LEFT JOIN 
+    Promotions p ON r.ws_item_sk = p.p_item_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND cd.cd_gender = 'F' 
+    AND coalesce(returns_count, 0) < 5
+ORDER BY 
+    total_revenue DESC
+LIMIT 100;

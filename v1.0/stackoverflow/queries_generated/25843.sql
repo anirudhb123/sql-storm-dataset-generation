@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= DATEADD(year, -1, GETDATE()) -- Within the last year
+),
+ExtendedTags AS (
+    SELECT 
+        STRING_AGG(t.TagName, ', ') AS TagList,
+        rp.PostId
+    FROM 
+        RankedPosts rp
+    CROSS APPLY 
+        STRING_SPLIT(rp.Tags, '<>') AS ts -- Split tags using the specified delimiter
+    JOIN 
+        Tags t ON t.TagName = ts.value
+    GROUP BY 
+        rp.PostId
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        et.TagList,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'High Engagement'
+            WHEN rp.ViewCount BETWEEN 500 AND 1000 THEN 'Moderate Engagement'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ExtendedTags et ON rp.PostId = et.PostId
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.OwnerDisplayName,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.TagList,
+    pa.EngagementLevel
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.EngagementLevel = 'High Engagement'
+ORDER BY 
+    pa.ViewCount DESC, pa.CreationDate DESC;

@@ -1,0 +1,62 @@
+WITH RecursiveTitleHierarchy AS (
+    SELECT t.id AS title_id,
+           t.title,
+           t.production_year,
+           t.season_nr,
+           t.episode_nr,
+           0 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+    UNION ALL
+    SELECT t.id,
+           t.title,
+           t.production_year,
+           t.season_nr,
+           t.episode_nr,
+           r.level + 1
+    FROM title t
+    INNER JOIN RecursiveTitleHierarchy r ON t.episode_of_id = r.title_id
+),
+RankedNames AS (
+    SELECT ak.id AS aka_id,
+           ak.name,
+           ROW_NUMBER() OVER(PARTITION BY ak.person_id ORDER BY ak.name) AS name_rank
+    FROM aka_name ak
+),
+CastAggregates AS (
+    SELECT ci.movie_id,
+           STRING_AGG(DISTINCT cn.name, ', ') AS actor_names,
+           COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    LEFT JOIN char_name cn ON ci.person_id = cn.imdb_id
+    GROUP BY ci.movie_id
+),
+TitleKeywordInfo AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           k.keyword,
+           COUNT(mk.keyword_id) AS keyword_count
+    FROM title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE k.keyword IS NOT NULL
+    GROUP BY t.id, k.keyword
+)
+SELECT RTH.title,
+       RTH.production_year,
+       CA.actor_count,
+       CA.actor_names,
+       COALESCE(TKI.keyword, 'No Keywords') AS keyword,
+       CASE 
+           WHEN TKI.keyword_count IS NULL THEN 'Keyword Missing'
+           WHEN TKI.keyword_count = 0 THEN 'No Keywords Associated'
+           ELSE 'Keyword Present'
+       END AS keyword_status,
+       NT.md5sum AS name_md5
+FROM RecursiveTitleHierarchy RTH
+LEFT JOIN CastAggregates CA ON RTH.title_id = CA.movie_id
+LEFT JOIN TitleKeywordInfo TKI ON RTH.title_id = TKI.movie_id
+LEFT JOIN RankedNames NT ON TKI.keyword_count IS NOT NULL AND NT.name_rank = 1
+WHERE RTH.production_year BETWEEN 2000 AND 2023
+  AND (RTH.season_nr IS NULL OR RTH.episode_nr IS NULL OR RTH.level = 0)
+ORDER BY RTH.production_year DESC, CA.actor_count DESC, RTH.title;

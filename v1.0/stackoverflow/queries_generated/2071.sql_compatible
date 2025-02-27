@@ -1,0 +1,63 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), 
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation
+    FROM 
+        UserReputation
+    WHERE 
+        ReputationRank <= 10
+), 
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+), 
+UserPostMetrics AS (
+    SELECT 
+        U.Id,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.QuestionsCount, 0) AS QuestionsCount,
+        COALESCE(PS.AnswersCount, 0) AS AnswersCount,
+        COALESCE(PS.AverageScore, 0) AS AverageScore,
+        R.Reputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+    LEFT JOIN 
+        TopUsers R ON U.Id = R.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Location,
+    U.Views,
+    COALESCE(UPM.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UPM.QuestionsCount, 0) AS QuestionsCount,
+    COALESCE(UPM.AnswersCount, 0) AS AnswersCount,
+    COALESCE(UPM.AverageScore, 0) AS AverageScore,
+    COALESCE(UPM.Reputation, 0) AS Reputation
+FROM 
+    Users U
+LEFT JOIN 
+    UserPostMetrics UPM ON U.Id = UPM.Id
+WHERE 
+    U.LastAccessDate > DATEADD(year, -1, CURRENT_TIMESTAMP)
+ORDER BY 
+    UPM.Reputation DESC,
+    UPM.TotalPosts DESC;

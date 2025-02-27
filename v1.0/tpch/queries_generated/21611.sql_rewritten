@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           CAST(s.s_name AS varchar(100)) AS full_name,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey,
+           CONCAT(h.full_name, ' -> ', s.s_name) AS full_name,
+           h.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy h ON h.s_suppkey = (SELECT ps.ps_suppkey 
+                                                FROM partsupp ps 
+                                                WHERE ps.ps_partkey IN 
+                                                      (SELECT p.p_partkey 
+                                                       FROM part p 
+                                                       WHERE p.p_price < 100.00)
+                                                LIMIT 1)
+    WHERE s.s_nationkey = h.s_nationkey
+), 
+
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, 
+           l.l_extendedprice * (1 - l.l_discount) AS final_price,
+           CASE WHEN l.l_returnflag = 'R' THEN 0 ELSE l.l_quantity END AS non_returned_qty
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+)
+
+SELECT 
+    s.s_name, 
+    SUM(f.final_price) AS total_spend, 
+    AVG(h.o_totalprice) AS avg_order_value,
+    COUNT(DISTINCT f.l_orderkey) AS distinct_orders,
+    COUNT(DISTINCT CASE WHEN h.rn = 1 THEN h.o_orderkey END) AS high_value_orders,
+    MAX(CASE WHEN f.non_returned_qty IS NULL THEN 'No returns' ELSE 'Returns' END) AS return_status
+FROM SupplierHierarchy s
+LEFT JOIN FilteredLineItems f ON f.l_partkey IN (SELECT ps.ps_partkey 
+                                                  FROM partsupp ps 
+                                                  WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN HighValueOrders h ON h.o_orderkey = f.l_orderkey
+WHERE s.level > 0
+GROUP BY s.s_name
+HAVING total_spend > 5000.00
+ORDER BY total_spend DESC
+LIMIT 10;

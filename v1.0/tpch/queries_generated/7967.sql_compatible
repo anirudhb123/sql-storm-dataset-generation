@@ -1,0 +1,28 @@
+
+WITH supplier_part_info AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY o.o_custkey
+),
+ranked_suppliers AS (
+    SELECT spi.s_suppkey, spi.s_name, SUM(osi.total_revenue) AS total_revenue,
+    ROW_NUMBER() OVER (ORDER BY SUM(osi.total_revenue) DESC) AS revenue_rank
+    FROM supplier_part_info spi
+    JOIN order_summary osi ON spi.s_suppkey = osi.o_custkey
+    GROUP BY spi.s_suppkey, spi.s_name
+)
+SELECT r.n_name AS nation_name, rs.s_name AS supplier_name, rs.total_revenue
+FROM ranked_suppliers rs
+JOIN supplier s ON rs.s_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE rs.revenue_rank <= 10
+ORDER BY r.n_name, rs.total_revenue DESC;

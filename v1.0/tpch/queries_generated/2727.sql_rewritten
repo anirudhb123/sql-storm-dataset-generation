@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        (CASE 
+            WHEN SUM(sc.total_cost) IS NULL THEN 0 
+            ELSE SUM(sc.total_cost) 
+         END) AS total_cost 
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierCost sc ON s.s_suppkey = sc.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000 
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name
+    HAVING 
+        total_cost > 5000
+)
+SELECT 
+    DISTINCT c.c_name,
+    c.c_acctbal,
+    r.r_name,
+    COALESCE(HS.total_cost, 0) AS high_supplier_cost
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighCostSuppliers HS ON c.c_custkey = HS.s_suppkey
+JOIN 
+    RankedOrders ro ON ro.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    c.c_mktsegment = 'BUILDING' 
+    AND ro.rn <= 5
+ORDER BY 
+    high_supplier_cost DESC,
+    c.c_name ASC
+LIMIT 10;

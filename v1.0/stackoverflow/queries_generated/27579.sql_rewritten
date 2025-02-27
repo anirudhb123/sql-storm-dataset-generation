@@ -1,0 +1,81 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')) AS t(TagName) 
+    JOIN 
+        Tags T ON T.TagName = t.TagName
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, U.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.ViewCount,
+        COALESCE(VoteCounts.UpVotes, 0) AS UpVotes,
+        COALESCE(VoteCounts.DownVotes, 0) AS DownVotes,
+        COALESCE(C.CmntCount, 0) AS CommentCount,
+        U.BadgeCount,
+        U.BadgeNames
+    FROM 
+        RecentPosts RP
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) AS VoteCounts ON RP.PostId = VoteCounts.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CmntCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) AS C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        UserBadges U ON U.UserId = RP.OwnerDisplayName
+)
+SELECT 
+    PE.PostId,
+    PE.Title,
+    PE.ViewCount,
+    PE.UpVotes,
+    PE.DownVotes,
+    PE.CommentCount,
+    PE.BadgeCount,
+    PE.BadgeNames
+FROM 
+    PostEngagement PE
+ORDER BY 
+    PE.ViewCount DESC, PE.UpVotes DESC;

@@ -1,0 +1,67 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title AS PostTitle, 
+        p.CreationDate AS PostDate, 
+        p.Score AS PostScore, 
+        p.ViewCount AS PostViews, 
+        p.OwnerUserId AS OwnerId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId, 
+        a.Title AS PostTitle, 
+        a.CreationDate AS PostDate, 
+        a.Score AS PostScore, 
+        a.ViewCount AS PostViews, 
+        a.OwnerUserId AS OwnerId,
+        Level + 1
+    FROM Posts a
+    INNER JOIN Posts q ON a.ParentId = q.Id
+    WHERE q.PostTypeId = 1  
+),
+PostVoteStats AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS UserBadges,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    rph.PostId AS AnswerPostId,
+    rph.PostTitle AS AnswerPostTitle,
+    rph.PostDate AS AnswerCreationDate,
+    rph.PostScore AS AnswerScore,
+    rph.PostViews AS AnswerViewCount,
+    u.DisplayName AS AnswerOwnerName,
+    ps.UpVotes,
+    ps.DownVotes,
+    pb.UserBadges,
+    pb.BadgeCount
+FROM RecursivePostHierarchy rph
+JOIN Users u ON rph.OwnerId = u.Id
+JOIN PostVoteStats ps ON rph.PostId = ps.PostId
+LEFT JOIN PostBadges pb ON u.Id = pb.UserId
+WHERE rph.Level > 1  
+AND rph.PostScore > 10  
+ORDER BY rph.PostDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

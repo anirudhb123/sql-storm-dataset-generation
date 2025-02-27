@@ -1,0 +1,55 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS level
+    FROM nation n
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+), 
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           COALESCE(SUM(CASE WHEN ps.ps_supplycost > 100 THEN ps.ps_availqty ELSE 0 END), 0) AS expensive_supply_qty
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), 
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+), 
+LineItemAggregates AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity, 
+           MAX(l.l_discount) AS highest_discount,
+           COUNT(l.l_orderkey) AS total_lines
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), 
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment,
+           (SELECT COUNT(*) FROM lineitem li WHERE li.l_partkey = p.p_partkey AND li.l_returnflag = 'R') AS return_count
+    FROM part p
+    WHERE LENGTH(p.p_comment) <= 15 AND p.p_retailprice IS NOT NULL
+), 
+FinalMetrics AS (
+    SELECT DISTINCT nh.n_name, 
+           COALESCE(SUM(sd.expensive_supply_qty), 0) AS total_expensive_supply_qty,
+           SUM(ha.o_totalprice) AS total_high_value_orderings,
+           SUM(pa.total_revenue) AS total_revenue_generated
+    FROM NationHierarchy nh
+    LEFT JOIN SupplierDetails sd ON nh.n_nationkey = sd.s_suppkey % (SELECT COUNT(*) FROM supplier)
+    LEFT JOIN HighValueOrders ha ON ha.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = sd.s_suppkey)
+    LEFT JOIN LineItemAggregates pa ON pa.l_orderkey = ha.o_orderkey
+    GROUP BY nh.n_name
+)
+
+SELECT f.n_name AS nation_name, 
+       f.total_expensive_supply_qty, 
+       f.total_high_value_orderings, 
+       ROUND(f.total_revenue_generated, 2) AS rounded_revenue,
+       (CASE WHEN f.total_expensive_supply_qty IS NULL THEN 'No Supplies' ELSE 'Supplies Exist' END) AS supply_status
+FROM FinalMetrics f
+WHERE f.total_high_value_orderings > 5000 OR f.total_revenue_generated < 10000;

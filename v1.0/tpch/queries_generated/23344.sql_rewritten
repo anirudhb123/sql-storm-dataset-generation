@@ -1,0 +1,37 @@
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank_price,
+           SUM(o.o_totalprice) OVER (PARTITION BY c.c_mktsegment) AS total_mkt_segment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+), 
+
+supplier_part_stats AS (
+    SELECT ps.ps_partkey, s.s_name, SUM(ps.ps_availqty) AS total_availability
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+), 
+
+outer_joined_stats AS (
+    SELECT p.p_partkey, p.p_name, COALESCE(s.total_availability, 0) AS avail_qty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY COALESCE(s.total_availability, 0) DESC) AS rank_supply
+    FROM part p
+    LEFT JOIN supplier_part_stats s ON p.p_partkey = s.ps_partkey
+)
+
+SELECT r.o_orderkey, r.o_orderdate, r.o_totalprice, r.c_mktsegment,
+       os.p_partkey, os.p_name, os.avail_qty,
+       CASE 
+           WHEN r.rank_price = 1 THEN 'Top Order'
+           ELSE 'Regular Order'
+       END AS order_type,
+       CASE 
+           WHEN os.avail_qty IS NULL THEN 'No Supply'
+           ELSE 'Supply Available'
+       END AS supply_status
+FROM ranked_orders r
+FULL OUTER JOIN outer_joined_stats os ON r.o_orderkey % 10 = os.p_partkey % 10
+WHERE r.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate < cast('1998-10-01' as date))
+  AND (os.avail_qty < 50 OR EXISTS (SELECT 1 FROM lineitem l WHERE l.l_orderkey = r.o_orderkey AND l.l_quantity > 100))
+ORDER BY r.o_orderdate DESC, os.avail_qty DESC;

@@ -1,0 +1,95 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+UserAggregate AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+ClosedPostDetails AS (
+    SELECT
+        p.Title,
+        p.CreationDate,
+        ph.Comment AS Reason,
+        COALESCE(ph.UserId, -1) AS ClosingUserId,
+        up.Reputation AS ClosingUserReputation,
+        COUNT(DISTINCT v.UserId) AS TotalVotesOnClose,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users up ON ph.UserId = up.Id 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 6 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Title, p.CreationDate, ph.Comment, ph.UserId, up.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.Reputation,
+        ROW_NUMBER() OVER (ORDER BY ua.Reputation DESC) AS Rnk
+    FROM 
+        UserAggregate ua
+    WHERE 
+        ua.TotalPosts > 10 AND ua.BadgeCount > 1
+)
+SELECT 
+    cpd.Title,
+    cpd.CreationDate,
+    cpd.Reason,
+    cpd.ClosingUserReputation,
+    t.Reputation AS TopUserReputation,
+    CASE 
+        WHEN t.UserId IS NOT NULL THEN 'Top User Participated'
+        ELSE 'No Participation'
+    END AS ParticipationStatus,
+    (SELECT COUNT(DISTINCT p2.Id)
+     FROM Posts p2
+     WHERE p2.CreationDate < cpd.CreationDate) AS PreviousPostCount,
+    STRING_AGG(DISTINCT CONCAT('User:', u.DisplayName, ' - Votes:', v.VoteTypeId), '; ') AS VoteDetails
+FROM 
+    ClosedPostDetails cpd
+LEFT JOIN 
+    TopUsers t ON cpd.ClosingUserId = t.UserId
+LEFT JOIN 
+    Votes v ON v.PostId = cpd.PostId
+LEFT JOIN 
+    Users u ON v.UserId = u.Id
+GROUP BY 
+    cpd.Title, cpd.CreationDate, cpd.Reason, cpd.ClosingUserReputation, t.Reputation
+ORDER BY 
+    cpd.CreationDate DESC;

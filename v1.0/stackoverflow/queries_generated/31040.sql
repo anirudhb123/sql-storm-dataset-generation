@@ -1,0 +1,103 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.ParentId,
+        0 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Questions only
+    UNION ALL
+    SELECT 
+        A.Id,
+        A.Title,
+        A.OwnerUserId,
+        A.ParentId,
+        R.Level + 1,
+        A.CreationDate
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostHierarchy R ON A.ParentId = R.PostId
+    WHERE 
+        A.PostTypeId = 2  -- Answers only; must be an answer to a question
+), 
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalComments,
+        AverageScore,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        P.CommentCount,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(DAY, -30, GETDATE())  -- Posts from the last 30 days
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    UP.TotalPosts,
+    UP.TotalQuestions,
+    UP.TotalAnswers,
+    UP.TotalComments,
+    UP.AverageScore,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.Score AS RecentPostScore,
+    RP.CommentCount AS RecentPostComments,
+    RP.ViewCount AS RecentPostViews,
+    RPH.PostId AS AnsweringPostId,
+    RPH.Title AS AnsweringPostTitle,
+    RPH.Level AS AnswerLevel
+FROM 
+    TopUsers U
+JOIN 
+    UserPostStats UP ON U.UserId = UP.UserId
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerUserId AND RP.PostRank = 1  -- Only the most recent post
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON RP.ParentId = RPH.PostId  -- Find if it answers any question
+WHERE 
+    UP.AverageScore >= 10  -- Only include users with average score of posts greater than or equal to 10
+ORDER BY 
+    U.PostRank;

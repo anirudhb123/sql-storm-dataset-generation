@@ -1,0 +1,88 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(SUM(CASE WHEN p.OwnerUserId = u.Id THEN 1 ELSE 0 END), 0) AS PostCount,
+        COALESCE(SUM(CASE WHEN c.UserId = u.Id THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.UserId = u.Id THEN 1 ELSE 0 END), 0) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        VoteCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserActivity
+),
+EngagementStats AS (
+    SELECT 
+        p.OwnerUserId AS UserId,
+        COUNT(DISTINCT p.Id) AS DistinctPostCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS AnswerCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE Pos < 10) AS TopPostCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.OwnerUserId
+),
+FinalStats AS (
+    SELECT 
+        ru.UserId,
+        ru.DisplayName,
+        ru.Reputation,
+        ru.PostCount,
+        ru.CommentCount,
+        ru.VoteCount,
+        es.DistinctPostCount,
+        es.TopPostCount,
+        es.QuestionCount,
+        es.AnswerCount
+    FROM 
+        RankedUsers ru
+    LEFT JOIN 
+        EngagementStats es ON ru.UserId = es.UserId
+    WHERE 
+        ru.ReputationRank <= 100
+)
+SELECT 
+    fs.DisplayName,
+    fs.Reputation,
+    fs.PostCount,
+    fs.CommentCount,
+    fs.VoteCount,
+    fs.DistinctPostCount,
+    fs.TopPostCount,
+    fs.QuestionCount,
+    fs.AnswerCount,
+    CASE 
+        WHEN fs.QuestionCount > 10 THEN 'Active Questioner'
+        WHEN fs.AnswerCount > 10 THEN 'Active Responder'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    FinalStats fs
+WHERE 
+    fs.VoteCount > 5
+ORDER BY 
+    fs.Reputation DESC;

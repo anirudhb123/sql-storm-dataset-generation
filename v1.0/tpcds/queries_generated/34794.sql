@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ss_store_sk, ss_sales_price, 1 AS level 
+    FROM store_sales 
+    WHERE ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT sh.ss_store_sk, sh.ss_sales_price * 1.05, sh.level + 1
+    FROM store_sales sh
+    JOIN SalesHierarchy sh2 ON sh.ss_store_sk = sh2.ss_store_sk
+    WHERE sh2.level < 3
+), 
+AggregatedSales AS (
+    SELECT DISTINCT s.s_store_name,
+                    SUM(sh.ss_sales_price) AS total_sales,
+                    COUNT(DISTINCT sh.ss_ticket_number) AS total_transactions
+    FROM store s
+    LEFT JOIN store_sales sh ON s.s_store_sk = sh.ss_store_sk
+    WHERE s.s_country = 'USA' 
+    GROUP BY s.s_store_name
+),
+TopStores AS (
+    SELECT s.s_store_name, 
+           ROUND(AVG(as.total_sales), 2) AS avg_sales,
+           MAX(as.total_transactions) AS max_transactions
+    FROM AggregatedSales as
+    JOIN store s ON as.s_store_name = s.s_store_name
+    WHERE as.total_sales IS NOT NULL
+    GROUP BY s.s_store_name
+    ORDER BY avg_sales DESC
+    LIMIT 10
+),
+CustomerReturns AS (
+    SELECT sr_returned_date_sk, COUNT(*) AS return_count, SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_returned_date_sk
+)
+SELECT ts.s_store_name,
+       ts.avg_sales,
+       ts.max_transactions,
+       cr.return_count,
+       cr.total_return_amount
+FROM TopStores ts
+LEFT JOIN CustomerReturns cr ON cr.sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+WHERE EXISTS (
+    SELECT 1 
+    FROM store_sales ss
+    WHERE ss.ss_store_sk = ts.s_store_sk AND ss.ss_sales_price > 0
+)
+ORDER BY ts.avg_sales DESC, ts.max_transactions ASC;

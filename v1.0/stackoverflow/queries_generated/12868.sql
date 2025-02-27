@@ -1,0 +1,55 @@
+-- Performance Benchmarking Query
+WITH PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id, p.Title
+),
+PostCommentStats AS (
+    SELECT 
+        PostId,
+        COUNT(Id) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        PostId,
+        COUNT(Id) AS TotalHistoryRecords,
+        MAX(CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    COALESCE(cs.TotalComments, 0) AS TotalComments,
+    COALESCE(phs.TotalHistoryRecords, 0) AS TotalHistoryRecords,
+    COALESCE(phs.LastHistoryDate, 'N/A') AS LastHistoryDate
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteStats pvs ON p.Id = pvs.PostId
+LEFT JOIN 
+    PostCommentStats cs ON p.Id = cs.PostId
+LEFT JOIN 
+    PostHistoryStats phs ON p.Id = phs.PostId
+ORDER BY 
+    p.Id;

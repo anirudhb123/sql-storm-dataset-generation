@@ -1,0 +1,82 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        VoteCount,
+        BadgeCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStats
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS Author,
+        pt.Name AS PostType,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    ORDER BY 
+        p.CreationDate DESC
+    LIMIT 10
+)
+
+SELECT 
+    tu.Rank,
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS PostDate,
+    rp.Score AS PostScore,
+    rp.Author AS PostAuthor,
+    rp.UpVotes,
+    rp.DownVotes,
+    CASE 
+        WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+        ELSE 'Negative'
+    END AS VoteTrend
+FROM 
+    TopUsers tu
+JOIN 
+    RecentPosts rp ON tu.UserId = rp.Author
+ORDER BY 
+    tu.Rank, rp.PostDate DESC;

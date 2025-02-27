@@ -1,0 +1,95 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) 
+                                FROM orders 
+                                WHERE o_orderdate >= DATE '2023-01-01')
+),
+PartSupplierCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LowAvailabilityParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(ps.supplier_count, 0) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        PartSupplierCounts ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice < (SELECT AVG(p_retailprice) FROM part)
+        AND p.p_size > (SELECT AVG(p_size) FROM part)
+),
+OrdersWithMostItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_quantity) AS total_items,
+        FIRST_VALUE(o.o_orderdate) OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_first_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_quantity) > 10
+)
+SELECT 
+    hvc.c_custkey, 
+    hvc.c_name, 
+    lpp.p_partkey, 
+    lpp.p_name, 
+    lpp.p_retailprice,
+    COUNT(DISTINCT hl.s_suppkey) AS total_suppliers,
+    SUM(oi.total_items) AS items_in_orders,
+    r.r_name,
+    CASE 
+        WHEN COUNT(DISTINCT hl.s_suppkey) = 0 THEN 'No Supplies'
+        ELSE 'Supplied'
+    END AS supply_status
+FROM 
+    HighValueCustomers hvc
+JOIN 
+    LowAvailabilityParts lpp ON lpp.supplier_count < 2
+JOIN 
+    orders o ON o.o_orderkey IN (SELECT o_orderkey FROM OrdersWithMostItems)
+LEFT JOIN 
+    supplier hl ON hvc.c_custkey = hl.s_nationkey
+JOIN 
+    nation n ON n.n_nationkey = hl.s_nationkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+WHERE 
+    r.r_name LIKE 'A%'
+GROUP BY 
+    hvc.c_custkey, hvc.c_name, lpp.p_partkey, lpp.p_name, lpp.p_retailprice, r.r_name
+HAVING 
+    SUM(o.o_totalprice) > (SELECT MAX(o_totalprice) FROM orders WHERE o_orderdate < CURRENT_DATE - INTERVAL '1' YEAR)
+ORDER BY 
+    supply_status, hvc.c_custkey, lpp.p_partkey DESC;

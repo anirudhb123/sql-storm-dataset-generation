@@ -1,0 +1,57 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           1 AS order_level, 
+           CAST(o.o_orderkey AS VARCHAR) AS order_path
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           oh.order_level + 1, 
+           CAST(oh.order_path || '->' || o.o_orderkey AS VARCHAR)
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_orderkey 
+    WHERE o.o_orderstatus <> 'O'
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000
+    GROUP BY ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+)
+SELECT 
+    rh.order_key,
+    rh.order_status,
+    rh.order_total,
+    rh.order_date,
+    ss.total_supply_cost,
+    ss.supplier_count,
+    windowed_rank.rn
+FROM 
+    (SELECT o.o_orderkey AS order_key, 
+            o.o_orderstatus AS order_status, 
+            o.o_totalprice AS order_total, 
+            o.o_orderdate AS order_date,
+            ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+     FROM orders o
+     JOIN HighValueOrders hvo ON o.o_orderkey = hvo.o_orderkey) rh
+LEFT JOIN SupplierStats ss ON rh.order_key = ss.ps_partkey
+WHERE ss.supplier_count IS NOT NULL
+OR EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = rh.order_key 
+    AND l.l_returnflag = 'R'
+)
+ORDER BY rh.order_date DESC, rh.order_total DESC;

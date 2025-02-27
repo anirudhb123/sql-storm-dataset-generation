@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(case when P.PostTypeId = 1 then 1 end) AS Questions,
+        COUNT(case when P.PostTypeId = 2 then 1 end) AS Answers,
+        SUM(P.Score) AS TotalScore,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(B.Class) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate AS PostCreationDate, 
+        U.DisplayName AS OwnerDisplayName, 
+        P.Score AS PostScore, 
+        P.ViewCount, 
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, P.Score, P.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserStats
+    WHERE 
+        TotalPosts > 10
+)
+SELECT 
+    TU.Rank, 
+    TU.DisplayName, 
+    TU.Reputation, 
+    PD.Title AS RecentPostTitle, 
+    PD.PostScore, 
+    PD.ViewCount, 
+    PD.CommentCount
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PD ON PD.OwnerDisplayName = TU.DisplayName
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank;

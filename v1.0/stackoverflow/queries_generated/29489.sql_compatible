@@ -1,0 +1,79 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        COUNT(DISTINCT COALESCE(c.Id, NULL)) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS tag ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(tag) 
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, U.DisplayName, p.Body, p.CreationDate, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+BenchmarkData AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.OwnerDisplayName,
+        pm.ViewCount,
+        pm.UpVoteCount,
+        pm.DownVoteCount,
+        (SELECT COUNT(*) FROM PostHistoryDetails phd WHERE phd.PostId = pm.PostId) AS HistoryChanges,
+        (SELECT COUNT(*) FROM PostLinks pl WHERE pl.PostId = pm.PostId) AS RelatedLinksCount
+    FROM 
+        PostMetrics pm
+)
+SELECT 
+    bd.PostId,
+    bd.Title,
+    bd.OwnerDisplayName,
+    bd.ViewCount,
+    bd.UpVoteCount,
+    bd.DownVoteCount,
+    bd.HistoryChanges,
+    bd.RelatedLinksCount,
+    CASE 
+        WHEN bd.HistoryChanges > 5 THEN 'Highly Processed'
+        WHEN bd.HistoryChanges BETWEEN 3 AND 5 THEN 'Moderately Processed'
+        ELSE 'Less Processed'
+    END AS ProcessingLevel
+FROM 
+    BenchmarkData bd
+ORDER BY 
+    bd.ViewCount DESC, bd.UpVoteCount DESC;

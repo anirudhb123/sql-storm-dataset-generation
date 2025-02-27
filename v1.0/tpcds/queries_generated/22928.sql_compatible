@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ext_sales_price DESC) AS rnk
+    FROM web_sales
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(T.total_returned, 0) AS total_returned,
+        T.return_count,
+        CASE 
+            WHEN DATEDIFF(CURRENT_DATE, i.i_rec_start_date) < 30 THEN 'New'
+            ELSE 'Old'
+        END AS item_age_category
+    FROM item i
+    LEFT JOIN TotalReturns T ON i.i_item_sk = T.sr_item_sk
+),
+TopReturnedItems AS (
+    SELECT 
+        i.*,
+        R.rnk,
+        ROW_NUMBER() OVER (PARTITION BY item_age_category ORDER BY total_returned DESC) AS age_rnk
+    FROM ItemDetails i
+    JOIN RankedSales R ON i.i_item_sk = R.ws_item_sk
+    WHERE i.total_returned > 1
+)
+SELECT 
+    tr.item_age_category,
+    tr.i_item_desc,
+    tr.total_returned,
+    tr.return_count,
+    CASE 
+        WHEN tr.rnk = 1 AND tr.age_rnk <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS return_category
+FROM TopReturnedItems tr
+WHERE 
+    tr.total_returned IS NOT NULL
+    AND EXISTS (
+        SELECT 1 
+        FROM inventory inv
+        WHERE inv.inv_item_sk = tr.i_item_sk
+        AND inv.inv_quantity_on_hand = (
+            SELECT MIN(inv_inner.inv_quantity_on_hand)
+            FROM inventory inv_inner
+            WHERE inv_inner.inv_item_sk = inv.inv_item_sk
+        )
+    )
+ORDER BY tr.item_age_category, tr.total_returned DESC
+LIMIT 10;

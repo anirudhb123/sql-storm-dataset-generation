@@ -1,0 +1,101 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        urc.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE urc ON u.Id = urc.Id
+    WHERE 
+        u.Reputation < urc.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id, 
+        p.OwnerUserId, 
+        p.CreationDate,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+VoteStats AS (
+    SELECT 
+        v.PostId, 
+        vt.Name AS VoteTypeName, 
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId, vt.Name
+),
+PostDetails AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate AS PostCreationDate,
+        u.DisplayName AS Owner,
+        COALESCE(SUM(CASE WHEN vs.VoteTypeName = 'UpMod' THEN vs.VoteCount ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN vs.VoteTypeName = 'DownMod' THEN vs.VoteCount ELSE 0 END), 0) AS DownvoteCount,
+        COALESCE(SUM(CASE WHEN vs.VoteTypeName = 'Favorite' THEN vs.VoteCount ELSE 0 END), 0) AS FavoriteCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        VoteStats vs ON rp.Id = vs.PostId
+    GROUP BY 
+        rp.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    ud.Id AS UserId,
+    ud.Reputation,
+    ud.CreationDate,
+    pd.Title AS RecentPostTitle,
+    pd.PostCreationDate,
+    pd.UpvoteCount,
+    pd.DownvoteCount,
+    pd.FavoriteCount,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    UserReputationCTE ud
+LEFT JOIN 
+    PostDetails pd ON ud.Id = pd.Owner
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = ud.Id
+WHERE 
+    ud.Level = 0 
+ORDER BY 
+    ud.Reputation DESC, pd.PostCreationDate DESC NULLS LAST
+LIMIT 50;

@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS budget, min(t.title) AS unsuccsessful_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it1, info_type AS it2, movie_companies AS mc, movie_info AS mi, movie_info_idx AS mi_idx, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND mi.info_type_id = it1.id AND mi_idx.info_type_id = it2.id AND t.id = mc.movie_id AND ct.id = mc.company_type_id AND cn.id = mc.company_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id
+AND it1.id < 19 AND t.md5sum IN ('20815eebe728931c362ba61d64e86136', '2e793d2845bc141b2f8b0a1f2d435d52', '688dcee94b7bc082352f2b03fbd98eb1', '69f9799be8ee30bb343ef6f02212fd2e', '6c4e8624e7c969552d61a51440c526ee', '75403250398efff80aab2da4c158e08e', 'c69741f3b92af04945f0ce253a0fd371', 'ca80f199c72b5f05ae290a421792947c', 'cf5408d5916e4c65af50a3bb75fc641d', 'd231399657151c7327397b9aac1db380');

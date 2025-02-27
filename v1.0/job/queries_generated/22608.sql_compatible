@@ -1,0 +1,105 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt2.title, 'N/A') AS linked_title,
+        COALESCE(mt2.production_year, 'UNKNOWN') AS linked_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt2.title, 'N/A'),
+        COALESCE(mt2.production_year, 'UNKNOWN'),
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.level < 5  
+),
+actor_statistics AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(COALESCE(mk.year, 0) + COALESCE(ci.nr_order, 0)) AS avg_year_order
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        (SELECT DISTINCT 
+             movie_id,
+             EXTRACT(YEAR FROM MIN(production_year)) AS year
+         FROM 
+             aka_title 
+         GROUP BY 
+             movie_id) mk ON ci.movie_id = mk.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+keyword_summary AS (
+    SELECT 
+        mk.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.keyword
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.linked_title,
+    mh.linked_year,
+    ak.actor_name,
+    ak.movie_count AS actor_movie_count,
+    ak.avg_year_order,
+    ks.keyword,
+    COALESCE(ks.keyword_count, 0) AS count_per_keyword,
+    CASE 
+        WHEN ak.movie_count > 10 THEN 'Prolific Actor'
+        WHEN ak.movie_count BETWEEN 5 AND 10 THEN 'Moderate Actor'
+        ELSE 'Occasional Actor' 
+    END AS actor_type,
+    (SELECT STRING_AGG(DISTINCT pi.info, ', ') 
+     FROM person_info pi 
+     WHERE pi.person_id = ak.person_id 
+     AND pi.info_type_id IN (1, 2)) AS personal_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_statistics ak ON ak.movie_count > 0
+LEFT JOIN 
+    keyword_summary ks ON ks.keyword_count > 0
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.linked_title,
+    mh.linked_year,
+    ak.actor_name,
+    ak.movie_count,
+    ak.avg_year_order,
+    ks.keyword
+ORDER BY 
+    mh.production_year DESC, ak.movie_count DESC, mh.title;

@@ -1,0 +1,68 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS title_count
+    FROM
+        title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        mt.movie_id,
+        GROUP_CONCAT(DISTINCT mk.keyword) AS keywords,
+        COALESCE(mi.info, 'No info') AS additional_info
+    FROM
+        movie_keyword mk
+    JOIN
+        movie_info mi ON mk.movie_id = mi.movie_id
+    LEFT JOIN
+        aka_title at ON mk.movie_id = at.id
+    GROUP BY
+        mt.movie_id, mi.info
+),
+CastCounts AS (
+    SELECT
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+OuterJoinDetails AS (
+    SELECT
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        COALESCE(md.keywords, 'No keywords') AS keywords,
+        COALESCE(cc.total_cast, 0) AS total_cast
+    FROM
+        RankedTitles rt
+    LEFT JOIN
+        MovieDetails md ON rt.title_id = md.movie_id
+    LEFT JOIN
+        CastCounts cc ON rt.title_id = cc.movie_id
+)
+SELECT
+    oj.title,
+    oj.production_year,
+    oj.keywords,
+    oj.total_cast,
+    CASE
+        WHEN oj.total_cast > 10 THEN 'Large Cast'
+        WHEN oj.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    (SELECT AVG(total_cast) FROM CastCounts) AS average_cast
+FROM
+    OuterJoinDetails oj
+WHERE
+    oj.production_year >= 2000
+ORDER BY
+    oj.production_year DESC,
+    oj.total_cast DESC
+LIMIT 50;

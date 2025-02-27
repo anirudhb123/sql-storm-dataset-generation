@@ -1,0 +1,81 @@
+WITH RegionSupplier AS (
+    SELECT 
+        r.r_name AS region_name,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+DiscountedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'High Discount'
+            ELSE 'Low Discount'
+        END AS discount_category
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+),
+RankedSuppliers AS (
+    SELECT 
+        region_name,
+        s_suppkey,
+        s_name,
+        total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY region_name ORDER BY total_supply_cost DESC) AS rank
+    FROM 
+        RegionSupplier
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.total_orders,
+    co.total_spent,
+    rs.region_name,
+    rs.s_suppkey,
+    rs.s_name,
+    rs.total_supply_cost,
+    d.li_orderkey,
+    d.l_quantity,
+    d.l_extendedprice,
+    d.l_discount,
+    d.discount_category
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    RankedSuppliers rs ON co.total_orders > 0
+LEFT JOIN 
+    DiscountedLineItems d ON d.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+WHERE 
+    co.total_spent IS NOT NULL
+ORDER BY 
+    co.c_custkey, rs.total_supply_cost DESC;

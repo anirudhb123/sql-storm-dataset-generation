@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sold_date_sk DESC) AS sales_rank,
+        COUNT(*) OVER (PARTITION BY ws.web_site_sk) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+),
+SalesSummary AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.web_sales_price) AS total_sales_value,
+        AVG(r.web_sales_price) AS average_sales_price,
+        MAX(r.web_sales_price) AS max_sales_price,
+        MIN(r.web_sales_price) AS min_sales_price,
+        r.total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+    GROUP BY 
+        r.web_site_sk, r.total_sales
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        COALESCE(AVG(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END), 0) AS male_percentage
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ss.web_site_sk,
+    ss.total_sales_value,
+    ss.average_sales_price,
+    ss.max_sales_price,
+    ss.min_sales_price,
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.customer_count,
+    cd.male_percentage
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IS NOT NULL)
+WHERE 
+    ss.total_sales_value > (SELECT AVG(total_sales_value) FROM SalesSummary)
+ORDER BY 
+    ss.total_sales_value DESC;

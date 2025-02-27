@@ -1,0 +1,60 @@
+
+WITH customer_metrics AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amt,
+        AVG(d.d_year) AS avg_purchase_year,
+        MIN(d.d_year) AS first_purchase_year,
+        MAX(d.d_year) AS last_purchase_year
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id
+),
+high_value_customers AS (
+    SELECT 
+        cm.c_customer_id,
+        cm.total_returns,
+        cm.total_return_amt,
+        cm.avg_purchase_year,
+        cm.first_purchase_year,
+        cm.last_purchase_year
+    FROM 
+        customer_metrics cm
+    WHERE 
+        cm.total_returns > 0 AND cm.total_return_amt > 1000
+),
+top_shipped_items AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk > 20230101
+    GROUP BY 
+        ws.ws_item_sk
+    ORDER BY 
+        total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    hvc.c_customer_id, 
+    hvc.total_returns,
+    hvc.total_return_amt,
+    tsi.ws_item_sk,
+    tsi.total_quantity_sold,
+    tsi.total_profit
+FROM 
+    high_value_customers hvc
+JOIN 
+    top_shipped_items tsi ON hvc.first_purchase_year = FLOOR(RAND() * (2023 - hvc.last_purchase_year + 1)) + hvc.last_purchase_year
+ORDER BY 
+    hvc.total_return_amt DESC, 
+    tsi.total_profit DESC;

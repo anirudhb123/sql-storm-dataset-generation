@@ -1,0 +1,84 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS rank
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+),
+HighReturnItems AS (
+    SELECT
+        rr.sr_item_sk,
+        rr.total_returns,
+        rr.total_returned_quantity,
+        rr.total_returned_amt,
+        CASE
+            WHEN rr.total_returned_amt IS NULL THEN 'No returns'
+            WHEN rr.total_returned_amt > 1000 THEN 'High'
+            WHEN rr.total_returned_amt <= 1000 AND rr.total_returned_amt > 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS return_category
+    FROM
+        RankedReturns rr
+    WHERE
+        rr.rank = 1
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_purchases,
+        IFNULL(SUM(ws.ws_net_paid), 0) AS total_spent,
+        DENSE_RANK() OVER (ORDER BY total_spent DESC) AS spending_rank
+    FROM
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+ReturnReasons AS (
+    SELECT
+        CASE
+            WHEN r.r_reason_desc IS NULL THEN 'Unknown'
+            ELSE r.r_reason_desc
+        END AS reason_description,
+        COUNT(cr.cr_item_sk) AS total_returns
+    FROM
+        reason r
+    LEFT JOIN catalog_returns cr ON r.r_reason_sk = cr.cr_reason_sk
+    GROUP BY
+        r.r_reason_desc
+)
+SELECT
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    ch.return_category,
+    COALESCE(h.total_returns, 0) AS total_returns,
+    COALESCE(h.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(h.total_returned_amt, 0) AS total_returned_amt,
+    cs.total_purchases,
+    cs.total_spent,
+    rr.reason_description,
+    MAX(cs.spending_rank) AS max_spending_rank
+FROM
+    CustomerStats cs
+LEFT JOIN HighReturnItems h ON h.sr_item_sk = cs.c_customer_sk
+LEFT JOIN ReturnReasons rr ON rr.total_returns = h.total_returns
+LEFT JOIN customer c ON c.c_customer_sk = cs.c_customer_sk
+GROUP BY
+    c.c_customer_sk, c.c_first_name, c.c_last_name, h.return_category, rr.reason_description, cs.total_purchases, cs.total_spent
+HAVING
+    total_returns < 10 AND total_spent > 500
+ORDER BY
+    total_spent DESC,
+    c.c_last_name ASC;

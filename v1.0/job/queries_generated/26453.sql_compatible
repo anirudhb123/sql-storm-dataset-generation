@@ -1,0 +1,74 @@
+
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS role_description
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name ILIKE '%Smith%' 
+),
+KeywordMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        k.keyword AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword ILIKE '%action%' 
+),
+CompanyMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    am.actor_name,
+    am.movie_title,
+    am.production_year,
+    am.role_description,
+    km.keywords,
+    cm.company_name,
+    cm.company_type
+FROM 
+    ActorMovies am
+LEFT JOIN 
+    KeywordMovies km ON am.movie_title = km.movie_title
+LEFT JOIN 
+    CompanyMovies cm ON am.movie_title = cm.movie_title
+WHERE
+    am.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    am.actor_name,
+    am.movie_title,
+    am.production_year,
+    am.role_description,
+    km.keywords,
+    cm.company_name,
+    cm.company_type
+ORDER BY 
+    am.production_year DESC, 
+    am.actor_name;

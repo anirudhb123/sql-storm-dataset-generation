@@ -1,0 +1,87 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputationAndBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.LastActivityDate,
+    p.ViewCount,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    u.UserId,
+    u.Reputation,
+    u.BadgeCount,
+    u.HighestBadge,
+    r.Level AS CommentLevel,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary vs ON p.Id = vs.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.ViewCount > 50 
+    AND (u.Reputation IS NULL OR u.Reputation > 100) 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount, 
+    vs.TotalVotes, vs.UpVotes, vs.DownVotes, 
+    u.UserId, u.Reputation, u.BadgeCount, u.HighestBadge, 
+    r.Level
+ORDER BY 
+    p.ViewCount DESC, 
+    u.Reputation DESC
+LIMIT 10;

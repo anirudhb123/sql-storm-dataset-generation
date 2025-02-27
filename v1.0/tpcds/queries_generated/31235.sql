@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ss.sold_date_sk,
+        ss.item_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        SUM(ss.ext_discount_amt) AS total_discount,
+        ROW_NUMBER() OVER (PARTITION BY ss.item_sk ORDER BY SUM(ss.ext_sales_price) DESC) as rank_sales
+    FROM
+        store_sales ss
+    WHERE
+        ss.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY
+        ss.sold_date_sk, ss.item_sk
+),
+item_details AS (
+    SELECT
+        i.item_sk,
+        i.item_desc,
+        i.current_price,
+        COALESCE(ca.city, 'Unknown') AS city,
+        COALESCE(gender, 'Not Specified') AS gender
+    FROM
+        item i
+    LEFT JOIN customer c ON c.c_current_addr_sk = (
+        SELECT ca_addr_sk 
+        FROM customer_address 
+        WHERE ca_city LIKE 'San%'
+        LIMIT 1
+    )
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_items AS (
+    SELECT
+        sales_summary.item_sk,
+        total_sales,
+        total_discount,
+        item_details.item_desc,
+        item_details.current_price,
+        item_details.city,
+        item_details.gender
+    FROM
+        sales_summary
+    JOIN item_details ON sales_summary.item_sk = item_details.item_sk
+    WHERE
+        sales_summary.rank_sales <= 10
+)
+SELECT
+    ti.item_desc,
+    ti.total_sales,
+    ti.total_discount,
+    ti.current_price,
+    ti.city,
+    ti.gender,
+    (ti.total_sales - ti.total_discount) AS net_sales
+FROM
+    (SELECT item_sk, SUM(total_sales) AS total_sales, SUM(total_discount) AS total_discount
+     FROM top_items
+     GROUP BY item_sk) AS ti
+ORDER BY net_sales DESC;

@@ -1,0 +1,63 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        COUNT(c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.AnswerCount, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.AnswerCount,
+        ps.ViewCount,
+        ps.TotalComments,
+        ps.Upvotes,
+        ps.Downvotes,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.ReputationRank
+    FROM PostStats ps
+    JOIN UserReputation ur ON ps.OwnerUserId = ur.UserId
+    WHERE ps.RowNum <= 5
+),
+VoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS TotalUpvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS TotalDownvotes
+    FROM Votes
+    GROUP BY PostId
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.AnswerCount,
+    tp.ViewCount,
+    COALESCE(vs.TotalUpvotes, 0) AS TotalUpvotes,
+    COALESCE(vs.TotalDownvotes, 0) AS TotalDownvotes,
+    tp.DisplayName AS Author,
+    tp.Reputation,
+    tp.ReputationRank
+FROM TopPosts tp
+LEFT JOIN VoteSummary vs ON tp.PostId = vs.PostId
+ORDER BY tp.Reputation DESC, tp.ViewCount DESC;

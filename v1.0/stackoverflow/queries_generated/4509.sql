@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) as Rank,
+        COUNT(c.Id) AS CommentCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer' 
+            ELSE 'No Accepted Answer' 
+        END AS AnswerStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.AcceptedAnswerId, p.PostTypeId
+),
+ClosureReasons AS (
+    SELECT 
+        ph.PostId, 
+        GROUP_CONCAT(cr.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    rp.AnswerStatus,
+    COALESCE(cr.CloseReasons, 'No Close Reasons') AS CloseReasons
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosureReasons cr ON rp.Id = cr.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total Commented Posts', 
+    COUNT(*) AS TotalScore, 
+    NULL, 
+    NULL, 
+    NULL 
+FROM 
+    Comments
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 month'
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    TotalScore DESC;

@@ -1,0 +1,57 @@
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserPostCounts
+    WHERE 
+        PostCount > 0
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+    AVG(rp.Score) AS AvgScore
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    tu.Rank <= 10
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.PostCount, tu.QuestionCount, tu.AnswerCount
+ORDER BY 
+    tu.Rank;

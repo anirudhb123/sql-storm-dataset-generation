@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        CASE 
+            WHEN rs.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS Price_Category,
+        rs.ws_net_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1
+),
+ItemSales AS (
+    SELECT 
+        fs.ws_item_sk,
+        COUNT(fs.ws_order_number) AS Order_Count,
+        SUM(fs.ws_net_profit) AS Total_Profit
+    FROM 
+        FilteredSales fs
+    GROUP BY 
+        fs.ws_item_sk 
+    HAVING 
+        SUM(fs.ws_net_profit) > 1000
+)
+SELECT 
+    ia.i_item_id,
+    ia.i_item_desc,
+    isales.Order_Count,
+    isales.Total_Profit,
+    COALESCE(income.ib_income_band_sk, -1) AS Income_Band,
+    date_dim.d_year,
+    COUNT(DISTINCT ws.web_page_sk) AS Page_Count
+FROM 
+    item ia
+LEFT JOIN 
+    ItemSales isales ON ia.i_item_sk = isales.ws_item_sk
+LEFT JOIN 
+    household_demographics income ON income.hd_demo_sk = (
+        SELECT MAX(hd_demo_sk) 
+        FROM household_demographics 
+        WHERE hd_income_band_sk BETWEEN 0 AND 5
+    )
+JOIN 
+    date_dim ON date_dim.d_date_sk = (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+JOIN 
+    web_sales ws ON ws.ws_item_sk = ia.i_item_sk
+WHERE 
+    (isales.Total_Profit IS NOT NULL OR isales.Order_Count > 0)
+    AND (date_dim.d_year BETWEEN 2020 AND 2023)
+GROUP BY 
+    ia.i_item_id, ia.i_item_desc, isales.Order_Count, isales.Total_Profit, income.ib_income_band_sk, date_dim.d_year
+ORDER BY 
+    isales.Total_Profit DESC NULLS LAST
+LIMIT 100;

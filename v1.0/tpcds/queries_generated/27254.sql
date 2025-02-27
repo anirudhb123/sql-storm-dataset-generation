@@ -1,0 +1,54 @@
+
+WITH address_parts AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ad.full_address
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN address_parts ad ON c.c_current_addr_sk = ad.ca_address_id
+), 
+item_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        it.i_item_desc,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_sold_date_sk
+    FROM web_sales ws
+    JOIN item it ON ws.ws_item_sk = it.i_item_sk
+), 
+sales_summary AS (
+    SELECT 
+        cs.c_customer_id,
+        COUNT(DISTINCT isales.ws_order_number) AS total_orders,
+        SUM(isales.ws_net_profit) AS total_profit
+    FROM customer_info cs
+    LEFT JOIN item_sales isales ON cs.c_customer_id = isales.ws_order_number
+    GROUP BY cs.c_customer_id
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.full_address,
+    ss.total_orders,
+    ss.total_profit
+FROM sales_summary ss
+JOIN customer_info cs ON ss.c_customer_id = cs.c_customer_id
+WHERE ss.total_profit > (SELECT AVG(total_profit) FROM sales_summary)
+ORDER BY ss.total_profit DESC
+LIMIT 10;

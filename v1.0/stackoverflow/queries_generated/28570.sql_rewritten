@@ -1,0 +1,40 @@
+WITH RecentPostEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName AS EditorName,
+        ph.Comment AS EditComment,
+        ph.Text AS NewEditText,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+)
+
+SELECT 
+    pr.PostId,
+    pr.Title,
+    pr.EditDate,
+    pr.EditorName,
+    pr.EditComment,
+    pr.NewEditText,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    RecentPostEdits pr
+INNER JOIN 
+    Posts p ON pr.PostId = p.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tagList ON TRUE 
+LEFT JOIN 
+    Tags t ON t.TagName = tagList
+WHERE 
+    pr.rn = 1 
+GROUP BY 
+    pr.PostId, pr.Title, pr.EditDate, pr.EditorName, pr.EditComment, pr.NewEditText
+ORDER BY 
+    pr.EditDate DESC
+LIMIT 100;

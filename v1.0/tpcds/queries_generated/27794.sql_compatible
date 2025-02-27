@@ -1,0 +1,40 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM
+        RankedCustomers c
+    WHERE
+        c.rn <= 5
+)
+SELECT 
+    fc.full_name,
+    fc.cd_gender,
+    fc.cd_marital_status,
+    fc.cd_education_status,
+    CONCAT('Email: ', SUBSTRING(c.c_email_address, 1, 20), '...') AS email_preview,
+    LOWER(CONCAT(fc.full_name, '-', fc.cd_gender, '-', fc.cd_marital_status)) AS unique_identifier
+FROM 
+    FilteredCustomers fc
+JOIN 
+    customer c ON fc.c_customer_sk = c.c_customer_sk
+ORDER BY 
+    fc.cd_gender, fc.cd_marital_status, fc.full_name;

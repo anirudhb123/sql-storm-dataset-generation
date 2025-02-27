@@ -1,0 +1,58 @@
+
+WITH UserScore AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Users U 
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostRetention AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - P.CreationDate)) / 3600) AS AvgAgeInHours,
+        SUM(COALESCE(P.ViewCount::float, 0) * COALESCE(UP.VoteCount, 0)) AS WeightedViewCount
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM Votes 
+        WHERE VoteTypeId = 2 
+        GROUP BY PostId
+    ) UP ON P.Id = UP.PostId
+    GROUP BY P.OwnerUserId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CASE WHEN PH.Comment IS NOT NULL THEN PH.Comment END, '; ') AS EditComments
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6) 
+    WHERE P.CreationDate > DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate
+)
+SELECT 
+    US.DisplayName,
+    PS.PostCount,
+    PS.AvgAgeInHours,
+    PS.WeightedViewCount,
+    PH.PostId,
+    PH.Title,
+    PH.EditCount,
+    PH.LastEditDate,
+    PH.EditComments,
+    (US.UpVotes - US.DownVotes) AS NetVotes
+FROM UserScore US
+JOIN PostRetention PS ON US.UserId = PS.OwnerUserId
+JOIN PostHistoryAnalysis PH ON PS.OwnerUserId = PH.OwnerUserId
+WHERE PS.PostCount > 10
+AND (US.UpVotes - US.DownVotes) BETWEEN 5 AND 50
+ORDER BY PS.PostCount DESC, PH.EditCount DESC, PH.LastEditDate DESC;

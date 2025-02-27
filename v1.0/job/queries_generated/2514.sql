@@ -1,0 +1,57 @@
+WITH movie_details AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        mk.keyword,
+        COUNT(cc.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY cc.nr_order) AS role_order
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        cast_info cc ON mt.id = cc.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, mk.keyword
+),
+movie_companies_summary AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+final_summary AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.cast_count,
+        mcs.company_count,
+        mcs.companies
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        movie_companies_summary mcs ON md.movie_id = mcs.movie_id
+)
+
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.keyword,
+    fs.cast_count,
+    fs.company_count,
+    COALESCE(fs.companies, 'No companies') AS companies_involved
+FROM 
+    final_summary fs
+WHERE 
+    fs.cast_count > 3
+ORDER BY 
+    fs.production_year DESC, fs.cast_count DESC;

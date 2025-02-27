@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s_store_name,
+        ws_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_net_profit) AS avg_net_profit,
+        RANK() OVER (PARTITION BY s_store_name ORDER BY SUM(ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales
+    JOIN 
+        store ON web_sales.ws_store_sk = store.s_store_sk
+    GROUP BY 
+        s_store_name, ws_date_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    JOIN 
+        customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    JOIN 
+        customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status
+    HAVING 
+        SUM(ws_quantity) > 10
+),
+TopStores AS (
+    SELECT 
+        DISTINCT s_store_name
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    R.s_store_name,
+    R.ws_date_sk,
+    COALESCE(CD.total_quantity, 0) AS customer_quantity,
+    R.total_quantity AS store_quantity,
+    CASE 
+        WHEN R.total_quantity > 0 THEN (COALESCE(CD.total_quantity, 0) / R.total_quantity) * 100 
+        ELSE 0 
+    END AS customer_percentage,
+    R.avg_net_profit
+FROM 
+    RankedSales R
+LEFT JOIN 
+    CustomerDemographics CD ON R.sales_rank = CD.cd_demo_sk
+WHERE 
+    R.s_store_name IN (SELECT s_store_name FROM TopStores)
+ORDER BY 
+    R.s_store_name, R.ws_date_sk;

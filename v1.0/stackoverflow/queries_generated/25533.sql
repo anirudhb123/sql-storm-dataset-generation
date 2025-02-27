@@ -1,0 +1,84 @@
+WITH TagStats AS (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT post.Id) AS PostCount,
+        SUM(post.ViewCount) AS TotalViews,
+        SUM(post.Score) AS TotalScore
+    FROM 
+        Tags AS tag
+    JOIN 
+        Posts AS post ON post.Tags LIKE CONCAT('%<', tag.TagName, '>%')
+    GROUP BY 
+        tag.TagName
+),
+UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AcceptedAnswer, NULL) AS AcceptedAnswer,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY PostId) AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            p.Id AS AcceptedAnswer, 
+            a.Id AS AcceptedAnswerId
+         FROM 
+            Posts p 
+         INNER JOIN 
+            Posts a ON p.AcceptedAnswerId = a.Id
+         WHERE p.PostTypeId = 1) AS a ON p.Id = a.AcceptedAnswer
+    JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalScore,
+    ubs.DisplayName AS UserName,
+    ubs.BadgeCount,
+    ubs.GoldBadgeCount,
+    ubs.SilverBadgeCount,
+    ubs.BronzeBadgeCount,
+    pa.Title AS ActivePostTitle,
+    pa.CreationDate AS PostCreationDate,
+    pa.LastActivityDate AS PostLastActivityDate,
+    pa.CommentCount,
+    pa.AcceptedAnswer,
+    pa.OwnerDisplayName AS PostOwner
+FROM 
+    TagStats AS ts
+JOIN 
+    UserBadgeStats AS ubs ON ts.PostCount > 10 -- Join users who have worked on over 10 posts
+JOIN 
+    PostActivity AS pa ON pa.PostCount > 5 -- Join posts with more than 5 comments
+WHERE 
+    ts.TotalViews > 1000 -- filter tags with more than 1000 total views
+ORDER BY 
+    ts.TotalScore DESC, 
+    ts.PostCount DESC;

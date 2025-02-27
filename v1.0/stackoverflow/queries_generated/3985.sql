@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON p.Id = C.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, U.DisplayName
+), PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        PHT.Name AS HistoryType,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Closed, Reopened, Deleted
+), UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), PostScoreSummary AS (
+    SELECT 
+        p.Id,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes V ON p.Id = V.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    RP.Id AS PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    RP.CommentCount,
+    PHI.HistoryType,
+    PHI.HistoryDate,
+    PHI.UserDisplayName AS HistoryUser,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    PSS.UpVotes,
+    PSS.DownVotes
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostHistoryInfo PHI ON RP.Id = PHI.PostId AND PHI.HistoryRank = 1
+LEFT JOIN 
+    UserBadges UB ON RP.OwnerDisplayName = UB.UserId
+LEFT JOIN 
+    PostScoreSummary PSS ON RP.Id = PSS.Id
+WHERE 
+    RP.PostRank = 1
+ORDER BY 
+    RP.Score DESC, RP.CreationDate ASC
+LIMIT 100;

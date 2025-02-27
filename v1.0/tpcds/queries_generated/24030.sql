@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.quantity,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS profit_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022 AND d_moy IN (6, 7, 8))
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(DISTINCT wr.return_order_number) AS total_returns,
+        SUM(wr.net_loss) AS total_net_loss
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.returned_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        wr.returning_customer_sk
+),
+HighRiskCustomers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(*) as return_count,
+        SUM(cr.total_returns) AS net_loss
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_returns > 5 OR cr.total_net_loss > 1000
+    GROUP BY 
+        cr.returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(SUM(r.ws_net_profit), 0) AS total_profit,
+    COALESCE(SUM(br.total_net_loss), 0) AS total_net_loss,
+    CASE 
+        WHEN COUNT(hr.return_count) > 0 THEN 'High Risk'
+        ELSE 'Low Risk'
+    END AS risk_status
+FROM 
+    customer c
+LEFT JOIN 
+    RankedSales r ON c.c_customer_sk = r.web_site_sk
+LEFT JOIN 
+    HighRiskCustomers hr ON c.c_customer_sk = hr.returning_customer_sk
+LEFT JOIN 
+    (SELECT DISTINCT returning_customer_sk, total_net_loss FROM CustomerReturns) br ON c.c_customer_sk = br.returning_customer_sk
+WHERE 
+    c.c_birth_year <= 1980
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    SUM(r.ws_net_profit) > 5000 OR COUNT(hr.return_count) > 0
+ORDER BY 
+    total_profit DESC, risk_status;

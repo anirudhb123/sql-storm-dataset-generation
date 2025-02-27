@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.PostTypeId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+), 
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosureDate,
+        COUNT(ph.Id) AS CloseReasonCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.Title, ph.CreationDate
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>') AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON tag::int = t.Id 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.RankScore,
+    rp.CommentCount,
+    rp.TotalBounties,
+    cp.ClosureDate,
+    cp.CloseReasonCount,
+    pt.TagsList,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No score' 
+        WHEN rp.Score < 0 THEN 'Negative Score'
+        ELSE 'Positive Score'
+    END AS ScoreStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    PostTags pt ON rp.PostId = pt.PostId
+WHERE 
+    rp.RankScore <= 5
+    AND (cp.CloseReasonCount IS NULL OR cp.CloseReasonCount = 0)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

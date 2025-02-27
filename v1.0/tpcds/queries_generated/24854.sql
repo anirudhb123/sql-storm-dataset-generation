@@ -1,0 +1,60 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk AS customer_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_quantity) DESC) AS rn
+    FROM web_returns
+    WHERE wr_returned_date_sk >= 1000 AND wr_returned_date_sk <= 2000
+    GROUP BY wr_returning_customer_sk
+),
+FrequentCustomers AS (
+    SELECT 
+        cr.customer_sk,
+        cr.total_returns,
+        cr.return_count,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        CASE
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Unknown'
+        END AS marital_status,
+        COUNT(DISTINCT ws_order_number) AS orders_count,
+        SUM(ws_ext_sales_price) AS total_spent
+    FROM CustomerReturns cr
+    LEFT JOIN customer c ON cr.customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE cr.rn <= 10
+    GROUP BY cr.customer_sk, cr.total_returns, cr.return_count, cd.cd_gender, cd.cd_marital_status
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_id, ca.ca_city, ca.ca_state
+)
+SELECT 
+    fc.customer_sk,
+    fc.gender,
+    fc.marital_status,
+    fc.total_returns,
+    fc.return_count,
+    fc.orders_count,
+    fc.total_spent,
+    COALESCE(ad.customer_count, 0) AS address_customer_count,
+    CASE 
+        WHEN fc.total_spent > 1000 THEN 'Premium'
+        WHEN fc.total_spent BETWEEN 500 AND 1000 THEN 'Standard'
+        ELSE 'Budget'
+    END AS customer_category,
+    NULLIF(fc.total_spent / NULLIF(fc.return_count, 0), 0) AS avg_returns_spent
+FROM FrequentCustomers fc
+FULL OUTER JOIN AddressDetails ad ON fc.customer_sk IS NULL OR EXISTS (SELECT 1 FROM customer c WHERE c.c_current_addr_sk = ad.ca_address_id)
+WHERE (fc.total_returns IS NOT NULL OR ad.customer_count > 0)
+ORDER BY fc.total_spent DESC NULLS LAST, ad.customer_count DESC;

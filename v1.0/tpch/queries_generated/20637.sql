@@ -1,0 +1,47 @@
+WITH RegionalSummary AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(o_totalprice) FROM orders
+    )
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        COUNT(*) OVER (PARTITION BY l.l_orderkey) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    hs.c_name,
+    COUNT(DISTINCT l.l_orderkey) AS orders_placed,
+    SUM(COALESCE(l.total_line_value, 0)) AS total_value,
+    AVG(COALESCE(l.line_count, 0)) FILTER (WHERE l.line_count > 0) AS avg_lines_per_order,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM RegionalSummary rs WHERE rs.nation_count > 5) 
+        THEN 'Diverse Regions' 
+        ELSE 'Consolidated Regions' 
+    END AS region_diversity
+FROM RegionalSummary r
+FULL OUTER JOIN HighValueCustomers hs ON r.r_regionkey = hs.c_custkey
+LEFT JOIN LineItemDetails l ON l.l_orderkey = hs.c_custkey
+GROUP BY r.r_name, hs.c_name
+ORDER BY total_value DESC NULLS LAST;

@@ -1,0 +1,100 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS role_count,
+        AVG(relatives.depth) AS avg_depth
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        MovieHierarchy relatives ON ci.movie_id = relatives.movie_id
+    GROUP BY 
+        a.id, ak.name
+),
+
+KeywordCount AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+
+FinalMetrics AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COALESCE(ac.actor_count, 0) AS total_actors,
+        COALESCE(kc.keyword_count, 0) AS total_keywords,
+        COALESCE(role.role_count, 0) AS total_roles,
+        (CASE 
+            WHEN ac.actor_count IS NULL THEN 'No Actors'
+            WHEN ac.actor_count < 5 THEN 'Low Cast'
+            ELSE 'Rich Cast'
+        END) AS cast_quality,
+        COALESCE(kc.keyword_count, 0) AS keyword_status
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        (SELECT 
+             ci.movie_id, 
+             COUNT(DISTINCT ci.person_id) AS actor_count 
+         FROM 
+             cast_info ci
+         GROUP BY ci.movie_id) ac ON at.id = ac.movie_id
+    LEFT JOIN 
+        KeywordCount kc ON at.id = kc.movie_id
+    LEFT JOIN 
+        ActorRoles role ON at.id = role.movie_id
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2023
+        AND (at.note IS NULL OR at.note NOT LIKE '%unreleased%')
+)
+
+SELECT 
+    title_id,
+    title,
+    production_year,
+    total_actors,
+    total_keywords,
+    cast_quality,
+    keyword_status
+FROM 
+    FinalMetrics
+WHERE 
+    (total_actors > 0 AND keyword_status > 0) OR (cast_quality = 'Low Cast' AND keyword_status = 0)
+ORDER BY 
+    production_year DESC, total_actors DESC, total_keywords ASC
+LIMIT 100;

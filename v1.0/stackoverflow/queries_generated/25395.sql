@@ -1,0 +1,55 @@
+WITH UserPostStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM UserPostStats
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsage
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    ORDER BY TagUsage DESC
+),
+TopTags AS (
+    SELECT
+        TagName,
+        TagUsage,
+        ROW_NUMBER() OVER (ORDER BY TagUsage DESC) AS Rank
+    FROM PopularTags
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.TotalViews,
+    T.TotalScore,
+    TG.TagName,
+    TG.TagUsage
+FROM TopUsers T
+JOIN TopTags TG ON TG.Rank <= 5
+WHERE T.Rank <= 10
+ORDER BY T.TotalScore DESC, TG.TagUsage DESC;

@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+), 
+TopSuppliers AS (
+    SELECT 
+        r.rank, 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal, 
+        rs.total_cost
+    FROM (
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY total_cost DESC) AS rank, 
+            s_suppkey, 
+            s_name, 
+            s_acctbal, 
+            total_cost
+        FROM 
+            RankedSuppliers
+    ) AS rs
+    WHERE 
+        rs.rank <= 10
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+) 
+SELECT 
+    ts.s_name AS supplier_name, 
+    ts.total_cost AS supplier_total_cost, 
+    os.o_orderkey, 
+    os.o_orderdate, 
+    os.c_name AS customer_name, 
+    os.revenue
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrderSummary os ON ts.s_suppkey = os.o_orderkey
+ORDER BY 
+    ts.total_cost DESC, os.revenue DESC;

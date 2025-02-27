@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        u.DisplayName AS AuthorName,
+        COALESCE(SUM(vb.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(vb.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes vb ON p.Id = vb.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+CommentsCount AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        c.Description
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.AuthorName,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(cc.CommentCount, 0) AS TotalComments,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CommentsCount cc ON rp.PostId = cc.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

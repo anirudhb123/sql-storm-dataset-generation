@@ -1,0 +1,80 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE_SUB(cast('1998-10-01' as date), INTERVAL 1 YEAR)
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        oh.order_level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.order_level < 5
+),
+total_sales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COALESCE(SUM(ts.total_revenue), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN total_sales ts ON o.o_orderkey = ts.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+nation_stats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS average_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+ranked_customers AS (
+    SELECT 
+        co.*,
+        ROW_NUMBER() OVER (PARTITION BY co.order_count ORDER BY co.total_spent DESC) AS customer_rank
+    FROM customer_orders co
+    WHERE co.total_spent IS NOT NULL OR co.order_count > 0
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    ns.n_name AS nation_name,
+    COALESCE(r_customer.customer_rank, 0) AS customer_rank,
+    RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank,
+    (CASE 
+        WHEN r_customer.order_count IS NULL THEN 'No Orders' 
+        ELSE CONCAT('Orders:', r_customer.order_count, ', Spent:', r_customer.total_spent) 
+    END) AS order_info,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    (SELECT 
+        MAX(l.l_extendedprice) 
+     FROM lineitem l 
+     WHERE l.l_partkey = p.p_partkey AND 
+           l.l_quantity > (SELECT AVG(l_inner.l_quantity) FROM lineitem l_inner WHERE l_inner.l_partkey = p.p_partkey)
+    ) AS max_price_for_part
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation_stats ns ON s.s_nationkey = ns.n_nationkey
+LEFT JOIN ranked_customers r_customer ON r_customer.c_custkey = s.s_nationkey
+WHERE p.p_retailprice > 10.00
+  AND (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_discount > 0.15) > 0
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, ns.n_name, r_customer.customer_rank
+ORDER BY p.p_partkey, price_rank, customer_rank DESC;

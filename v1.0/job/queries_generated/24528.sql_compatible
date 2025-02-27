@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY ak.name) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY at.id) AS total_actors
+    FROM 
+        aka_title at
+    INNER JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year IS NOT NULL AND
+        ak.name IS NOT NULL
+),
+
+MoviesWithKeyword AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        mk.keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title = mk.movie_id
+),
+
+DistinctMovies AS (
+    SELECT DISTINCT 
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COUNT(mk.keyword) OVER (PARTITION BY m.title, m.production_year) AS keyword_count
+    FROM 
+        MoviesWithKeyword m
+    LEFT JOIN 
+        keyword k ON m.keyword = k.id
+)
+
+SELECT 
+    id,
+    title,
+    production_year,
+    keyword,
+    keyword_count,
+    (CASE
+        WHEN keyword_count > 0 THEN 'Keyword Present'
+        WHEN keyword_count IS NULL THEN 'No Keyword Info'
+        ELSE 'No Keywords'
+    END) AS keyword_status,
+    (SELECT COUNT(DISTINCT ci.person_id)
+     FROM cast_info ci
+     WHERE ci.movie_id = DISTINCT_MOVIE.id) AS total_distinct_actors
+FROM 
+    (SELECT ROW_NUMBER() OVER (ORDER BY production_year DESC) AS id, 
+            title, 
+            production_year, 
+            keyword, 
+            keyword_count
+     FROM 
+         DistinctMovies) AS DISTINCT_MOVIE
+WHERE 
+    production_year >= 2000 OR 
+    (keyword_count = 0 AND keyword LIKE '%Sci-Fi%')
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC
+LIMIT 10;

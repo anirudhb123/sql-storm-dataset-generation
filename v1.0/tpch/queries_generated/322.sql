@@ -1,0 +1,88 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+), 
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+AverageSpent AS (
+    SELECT 
+        AVG(total_spent) AS avg_spent
+    FROM 
+        CustomerOrders
+), 
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name
+    FROM 
+        CustomerOrders c
+    WHERE 
+        c.order_count > (SELECT avg_order_count FROM (SELECT AVG(order_count) AS avg_order_count FROM CustomerOrders) as A)
+), 
+ProductPerformance AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(i.l_quantity) AS total_sold,
+        MAX(i.l_discount) AS max_discount
+    FROM 
+        part p
+    JOIN 
+        lineitem i ON p.p_partkey = i.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    pp.p_partkey,
+    pp.p_name,
+    pp.total_sold,
+    pp.max_discount,
+    AVG(s.total_supplycost) AS average_supply_cost,
+    RANK() OVER(ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+FROM 
+    FrequentCustomers f
+JOIN 
+    orders o ON f.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    ProductPerformance pp ON l.l_partkey = pp.p_partkey
+LEFT JOIN 
+    SupplierCost s ON pp.p_partkey = s.ps_partkey
+WHERE 
+    o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND pp.total_sold > (SELECT AVG(total_sold) FROM ProductPerformance)
+GROUP BY 
+    f.c_custkey,
+    f.c_name,
+    pp.p_partkey,
+    pp.p_name
+ORDER BY 
+    customer_rank, f.c_custkey;

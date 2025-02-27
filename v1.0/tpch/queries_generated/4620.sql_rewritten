@@ -1,0 +1,59 @@
+WITH SupplierSales AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey AND ps.ps_suppkey = l.l_suppkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerRanked AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(ss.total_sales, 0) AS total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE 
+        COALESCE(ss.total_sales, 0) > (SELECT AVG(total_sales) FROM SupplierSales)
+)
+SELECT 
+    t.s_name,
+    r.r_name,
+    cr.c_name,
+    cr.cust_rank,
+    t.total_sales
+FROM 
+    TopSuppliers t
+JOIN 
+    nation n ON n.n_nationkey = (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey = t.s_suppkey)
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerRanked cr ON cr.c_custkey IN (
+        SELECT 
+            o.o_custkey
+        FROM 
+            orders o
+        WHERE 
+            o.o_orderstatus = 'F'
+            AND o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+    )
+WHERE 
+    t.total_sales > 10000
+ORDER BY 
+    r.r_name, 
+    t.total_sales DESC;

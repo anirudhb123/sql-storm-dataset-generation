@@ -1,0 +1,57 @@
+
+WITH RankedDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+RecentPurchases AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.bill_cdemo_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_date > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY ws.bill_customer_sk, ws.bill_cdemo_sk
+),
+CustomerAddresses AS (
+    SELECT 
+        c.c_customer_sk,
+        a.ca_city,
+        a.ca_state,
+        a.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY a.ca_address_sk DESC) AS addr_rank
+    FROM customer c
+    LEFT JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+),
+AggregateSales AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT cs.cs_bill_customer_sk) AS customer_count,
+        SUM(cs.cs_net_profit) AS total_profit
+    FROM catalog_sales cs
+    JOIN household_demographics hd ON cs.cs_bill_cdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk
+)
+SELECT 
+    da.addr_rank,
+    cd.gender_rank,
+    SUM(COALESCE(rp.total_profit, 0)) AS total_recent_profit,
+    SUM(ag.customer_count) AS unique_customers,
+    MIN(CASE WHEN ad.ca_state IS NULL THEN 'State Unknown' ELSE ad.ca_state END) AS state_info
+FROM CustomerAddresses ad
+FULL OUTER JOIN RankedDemographics cd ON ad.c_customer_sk = cd.cd_demo_sk
+FULL OUTER JOIN RecentPurchases rp ON ad.c_customer_sk = rp.bill_customer_sk
+LEFT JOIN AggregateSales ag ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE (ad.ca_country IS NOT NULL AND cd.cd_marital_status IS NOT NULL)
+  OR cd.gender_rank IS NOT NULL
+GROUP BY da.addr_rank, cd.gender_rank
+HAVING SUM(rp.total_profit) > 0 OR COUNT(DISTINCT ad.c_customer_sk) > 5
+ORDER BY total_recent_profit DESC NULLS LAST;

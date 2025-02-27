@@ -1,0 +1,61 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CreationDate,
+        LastAccessDate,
+        DisplayName,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id, 
+        u.Reputation, 
+        u.CreationDate,
+        u.LastAccessDate,
+        u.DisplayName,
+        ur.Level + 1
+    FROM 
+        Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation AND ur.Level < 5
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    CASE 
+        WHEN p.DividedBy = 0 THEN 'Unknown'
+        ELSE CAST(p.Score AS VARCHAR) || ' / ' || CAST(p.AcceptedAnswerId AS VARCHAR)
+    END AS InteractionScore,
+    u.DisplayName AS OwnerName,
+    COALESCE(MAX(c.CreationDate), p.LastActivityDate) AS LastActivity
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON t.WikiPostId = p.Id
+LEFT JOIN 
+    LinkTypes l ON l.Id = v.VoteTypeId
+WHERE 
+    u.Reputation IN (SELECT Reputation FROM UserReputationCTE) 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AcceptedAnswerId, u.DisplayName
+HAVING 
+    COUNT(c.Id) > 3 OR (p.Score = 0 AND EXISTS (SELECT 1 FROM Votes WHERE PostId = p.Id))
+ORDER BY 
+    p.ViewCount DESC, 
+    LastActivity DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

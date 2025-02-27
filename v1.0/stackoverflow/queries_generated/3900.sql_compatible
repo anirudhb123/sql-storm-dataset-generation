@@ -1,0 +1,63 @@
+
+WITH UserBadges AS (
+    SELECT UserId, 
+           COUNT(*) FILTER (WHERE Class = 1) AS GoldBadges,
+           COUNT(*) FILTER (WHERE Class = 2) AS SilverBadges,
+           COUNT(*) FILTER (WHERE Class = 3) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+MostActiveUsers AS (
+    SELECT OwnerUserId, 
+           COUNT(*) AS PostCount, 
+           SUM(ViewCount) AS TotalViews
+    FROM Posts
+    WHERE CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY OwnerUserId
+    HAVING COUNT(*) > 5
+),
+PostStats AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.ViewCount, 
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+           COALESCE(RANK() OVER (ORDER BY p.ViewCount DESC), 0) AS ViewRank,
+           p.UserId
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 month'
+    GROUP BY p.Id, p.Title, p.ViewCount
+),
+UserPosts AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           up.PostCount,
+           COALESCE(b.GoldBadges, 0) AS GoldBadges,
+           COALESCE(b.SilverBadges, 0) AS SilverBadges,
+           COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+           SUM(ps.Upvotes) AS TotalUpvotes,
+           SUM(ps.Downvotes) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN MostActiveUsers up ON u.Id = up.OwnerUserId
+    LEFT JOIN UserBadges b ON u.Id = b.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.UserId
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName, up.PostCount, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+)
+SELECT u.UserId,
+       u.DisplayName,
+       u.PostCount,
+       u.GoldBadges,
+       u.SilverBadges,
+       u.BronzeBadges,
+       u.TotalUpvotes,
+       u.TotalDownvotes,
+       CASE 
+           WHEN u.PostCount > 10 THEN 'Expert'
+           WHEN u.PostCount > 5 THEN 'Intermediate'
+           ELSE 'Novice'
+       END AS SkillLevel
+FROM UserPosts u
+ORDER BY u.PostCount DESC, u.TotalUpvotes DESC
+LIMIT 10;

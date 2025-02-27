@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        m.episode_of_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level,
+        m.episode_of_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    COALESCE(n.name, 'Unknown') AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level AS hierarchy_level,
+    COUNT(DISTINCT cc.id) AS total_cast_count,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    MAX(CASE WHEN mpi.info_type_id = 2 THEN mpi.info END) AS movie_summary  
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name n ON ci.person_id = n.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mpi ON mh.movie_id = mpi.movie_id
+GROUP BY 
+    n.name, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_role_id) >= 1  
+ORDER BY 
+    mh.production_year DESC,
+    hierarchy_level ASC,
+    actor_name;

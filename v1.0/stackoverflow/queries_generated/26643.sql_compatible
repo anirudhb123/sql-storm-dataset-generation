@@ -1,0 +1,58 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgUserReputation,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AvgUserReputation
+    FROM 
+        TopTags
+    WHERE 
+        TagRank <= 10
+)
+SELECT 
+    pt.TagName,
+    pt.PostCount,
+    pt.QuestionCount,
+    pt.AnswerCount,
+    pt.AvgUserReputation,
+    COALESCE(MAX(b.Date), 'No Badges') AS LastBadgeDate,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    PopularTags pt
+LEFT JOIN 
+    Badges b ON b.UserId IN (SELECT OwnerUserId FROM Posts WHERE Tags LIKE CONCAT('%', pt.TagName, '%'))
+LEFT JOIN 
+    Comments c ON c.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%', pt.TagName, '%'))
+GROUP BY 
+    pt.TagName, pt.PostCount, pt.QuestionCount, pt.AnswerCount, pt.AvgUserReputation
+ORDER BY 
+    pt.PostCount DESC;

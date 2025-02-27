@@ -1,0 +1,82 @@
+
+WITH RECURSIVE store_sales_summary AS (
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_sales,
+        DATE(d.d_date) AS sales_date
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ss.s_store_sk, d.d_date
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        AVG(ss.ss_net_paid) AS average_purchase,
+        MAX(ss.ss_net_paid) AS max_purchase
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+total_income AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        household_demographics hd
+    JOIN 
+        customer_demographics cd ON hd.hd_demo_sk = cd.cd_demo_sk
+    GROUP BY 
+        hd.hd_income_band_sk
+)
+SELECT 
+    s.w_warehouse_name,
+    ss.total_quantity,
+    ss.total_sales,
+    cs.total_transactions,
+    cs.average_purchase,
+    cs.max_purchase,
+    ti.male_count,
+    ti.female_count,
+    COUNT(DISTINCT wp.wp_web_page_id) AS web_page_count
+FROM 
+    warehouse s
+LEFT JOIN 
+    store_sales_summary ss ON s.w_warehouse_sk = ss.s_store_sk
+LEFT JOIN 
+    customer_summary cs ON cs.c_customer_sk IN (
+        SELECT 
+            c.c_customer_sk
+        FROM 
+            customer c
+        WHERE 
+            c.c_current_addr_sk IS NOT NULL
+    )
+LEFT JOIN 
+    total_income ti ON ti.hd_income_band_sk IN (
+        SELECT 
+            hd.hd_income_band_sk
+        FROM 
+            household_demographics hd
+        WHERE 
+            hd.hd_buy_potential = 'High'
+    )
+LEFT JOIN 
+    web_sales ws ON ss.s_store_sk = ws.ws_warehouse_sk
+LEFT JOIN 
+    web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+WHERE 
+    ss.total_sales > 10000 OR cs.total_transactions > 5
+GROUP BY 
+    s.w_warehouse_name, ss.total_quantity, ss.total_sales, cs.total_transactions, 
+    cs.average_purchase, cs.max_purchase, ti.male_count, ti.female_count
+ORDER BY 
+    total_sales DESC;

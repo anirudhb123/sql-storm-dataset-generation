@@ -1,0 +1,82 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        COALESCE(vt.UpVotes, 0) as TotalUpvotes,
+        COALESCE(vt.DownVotes, 0) as TotalDownvotes,
+        COALESCE(vt.Reputation, 0) as Reputation
+    FROM Users u
+    LEFT JOIN ( 
+        SELECT 
+            UserId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) as UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) as DownVotes,
+            SUM(CASE WHEN VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) as TotalVotes
+        FROM Votes
+        GROUP BY UserId
+    ) vt ON u.Id = vt.UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as PostRank
+    FROM Posts p 
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+FilteredUserVotes AS (
+    SELECT 
+        uvc.UserId, 
+        uvc.DisplayName, 
+        uvc.TotalUpvotes, 
+        uvc.TotalDownvotes, 
+        uvc.Reputation,
+        rp.PostTitle,
+        rp.CreationDate,
+        rpv.UserDisplayName as PostOwner
+    FROM UserVoteCounts uvc
+    JOIN RecentPosts rp ON uvc.UserId = rp.OwnerUserId
+    LEFT JOIN Users rpv ON rp.OwnerUserId = rpv.Id
+    WHERE uvc.TotalVotes > 10
+)
+
+SELECT 
+    fui.DisplayName as VoterName,
+    fui.TotalUpvotes,
+    fui.TotalDownvotes,
+    COUNT(rp.PostId) as PostCount,
+    SUM(CASE WHEN rp.CreationDate >= NOW() - INTERVAL '1 week' THEN 1 ELSE 0 END) as RecentPostCount,
+    STRING_AGG(rp.Title, ', ') as RecentPostTitles
+FROM FilteredUserVotes fui
+JOIN Posts rp ON fui.UserId = rp.OwnerUserId
+GROUP BY fui.DisplayName, fui.TotalUpvotes, fui.TotalDownvotes
+ORDER BY TotalUpvotes DESC, TotalDownvotes ASC;
+
+WITH PostScoreHistory AS (
+    SELECT 
+        p.Id as PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) as Upvotes,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) as Downvotes
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    LEFT JOIN Votes vt ON vt.PostId = p.Id
+    GROUP BY p.Id, ph.CreationDate, ph.UserId, ph.UserDisplayName, ph.PostHistoryTypeId
+)
+
+SELECT 
+    PostId,
+    UserDisplayName,
+    SUM(Upvotes) as TotalUpvotes,
+    SUM(Downvotes) as TotalDownvotes,
+    RANK() OVER (ORDER BY SUM(Upvotes) - SUM(Downvotes) DESC) as ScoreRank
+FROM PostScoreHistory
+WHERE CreationDate >= NOW() - INTERVAL '1 month'
+GROUP BY PostId, UserDisplayName
+HAVING SUM(Upvotes) + SUM(Downvotes) > 5
+ORDER BY ScoreRank;

@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.ParentId,
+        rh.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rh ON p2.ParentId = rh.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        TOTAL(b.Class) AS TotalBadges,
+        SUM(b.Class) AS ReputationScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.CreationDate,
+        COALESCE(pvs.UpVotes, 0) - COALESCE(pvs.DownVotes, 0) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary pvs ON p.Id = pvs.PostId
+    WHERE 
+        p.CreationDate >= '2022-01-01' 
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.ReputationScore,
+        RANK() OVER (ORDER BY ur.ReputationScore DESC) AS Rank
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.TotalBadges > 5 
+)
+SELECT 
+    f.Title AS PostTitle,
+    f.ViewCount,
+    f.NetVotes,
+    rp.Level AS CommentDepth,
+    tu.DisplayName AS TopUserName,
+    tu.Rank
+FROM 
+    FilteredPosts f
+LEFT JOIN 
+    RecursivePostHierarchy rp ON f.PostId = rp.PostId
+LEFT JOIN 
+    TopUsers tu ON f.OwnerUserId = tu.UserId
+ORDER BY 
+    f.ViewCount DESC, tu.Rank ASC
+OPTION (MAXRECURSION 100) 
+;

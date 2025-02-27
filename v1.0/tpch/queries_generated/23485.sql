@@ -1,0 +1,79 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_order_value,
+        COUNT(DISTINCT l.l_partkey) AS parts_in_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'R' OR l.l_returnflag IS NULL
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.total_supply_value,
+        RANK() OVER (ORDER BY s.total_supply_value DESC) AS supply_rank
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.avg_supply_cost < (
+            SELECT 
+                AVG(ps.ps_supplycost) 
+            FROM 
+                partsupp ps
+            WHERE 
+                ps.ps_availqty > 10
+        )
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    r.s_name,
+    r.total_supply_value,
+    o.o_orderkey,
+    o.net_order_value,
+    CASE 
+        WHEN o.parts_in_order > 10 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category,
+    COALESCE(MAX(ROUND(o.net_order_value / NULLIF(r.total_supply_value, 0), 2)), 0) AS supply_value_ratio
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    RecentOrders o ON o.o_orderkey = CAST(r.supply_rank AS integer)
+WHERE 
+    o.order_rank = 1
+GROUP BY 
+    r.s_name, r.total_supply_value, o.o_orderkey, o.net_order_value, o.parts_in_order
+HAVING 
+    supply_value_ratio > 0.5 OR r.total_supply_value IS NULL
+ORDER BY 
+    r.total_supply_value DESC NULLS LAST;

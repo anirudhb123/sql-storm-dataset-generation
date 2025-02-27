@@ -1,0 +1,46 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT mh.actor_name, ', ') AS actors,
+    COUNT(DISTINCT mh.level) AS depth
+FROM 
+    MovieHierarchy mh
+GROUP BY 
+    mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mh.actor_name) >= 3
+ORDER BY 
+    mh.production_year DESC;

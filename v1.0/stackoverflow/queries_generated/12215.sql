@@ -1,0 +1,64 @@
+-- Performance Benchmarking Query Example
+-- This query retrieves statistics from multiple tables to analyze post engagement and user activity.
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.ID) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, U.DisplayName
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(P.ViewCount) AS TotalPostViews,
+        SUM(P.Score) AS TotalPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.OwnerDisplayName,
+    US.UserId,
+    US.DisplayName AS UserDisplayName,
+    US.BadgeCount,
+    US.TotalPostViews,
+    US.TotalPostScore
+FROM 
+    PostStats PS
+JOIN 
+    UserStats US ON PS.OwnerDisplayName = US.DisplayName
+ORDER BY 
+    PS.ViewCount DESC, PS.Score DESC;

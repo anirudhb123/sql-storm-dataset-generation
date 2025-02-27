@@ -1,0 +1,63 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.ParentId,
+        P.Title,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RP ON P.ParentId = RP.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+RankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.TotalVotes,
+        DENSE_RANK() OVER (ORDER BY PS.UpVotes DESC, PS.TotalVotes DESC) AS PostRank
+    FROM 
+        RecursivePostHierarchy RP
+    LEFT JOIN 
+        PostVoteStats PS ON RP.PostId = PS.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    COALESCE(PS.UpVotes, 0) AS UpVotes,
+    COALESCE(PS.DownVotes, 0) AS DownVotes,
+    RP.PostRank
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostVoteStats PS ON RP.PostId = PS.PostId
+WHERE 
+    RP.PostRank <= 10
+ORDER BY 
+    RP.PostRank;

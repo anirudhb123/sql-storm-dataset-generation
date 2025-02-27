@@ -1,0 +1,61 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.movie_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND (t.kind_id IS NULL OR t.kind_id > 0)
+),
+
+MostFrequentActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(c.movie_id) DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+)
+
+SELECT 
+    md.title AS Movie_Title,
+    md.production_year AS Production_Year,
+    mf.actor_name AS Leading_Actor,
+    COALESCE(mf.movie_count, 0) AS Movie_Count,
+    STRING_AGG(DISTINCT md.keyword, ', ') FILTER (WHERE md.keyword IS NOT NULL) AS Keywords,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS Era,
+    CASE 
+        WHEN COUNT(DISTINCT c.note) > 1 THEN 'Multiple Notes'
+        ELSE 'Single Note or No Note'
+    END AS Notes_Status,
+    (SELECT COUNT(DISTINCT cc.person_role_id) FROM cast_info cc WHERE cc.movie_id = c.movie_id) AS Unique_Role_Count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    MostFrequentActors mf ON md.rn = 1
+LEFT JOIN 
+    complete_cast c ON md.movie_id = c.movie_id
+WHERE 
+    md.rn <= 5
+GROUP BY 
+    md.title, md.production_year, mf.actor_name, mf.movie_count
+HAVING 
+    SUM(CASE WHEN c.status_id IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    md.production_year DESC NULLS LAST;

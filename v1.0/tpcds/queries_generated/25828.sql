@@ -1,0 +1,62 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer_demographics
+),
+AddressDemo AS (
+    SELECT 
+        a.ca_address_sk,
+        a.full_address,
+        a.ca_city,
+        a.ca_state,
+        a.ca_zip,
+        a.ca_country,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_purchase_estimate
+    FROM 
+        AddressComponents a
+    JOIN
+        customer c ON a.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    COUNT(*) AS customer_count,
+    AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(CONCAT(cd_gender, ': ', COUNT(*)), ', ') AS gender_breakdown,
+    STRING_AGG(CONCAT(cd_marital_status, ': ', COUNT(*)), ', ') AS marital_status_breakdown
+FROM 
+    AddressDemo
+GROUP BY 
+    full_address, ca_city, ca_state, ca_zip, ca_country
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    avg_purchase_estimate DESC;

@@ -1,0 +1,38 @@
+-- Performance Benchmarking Query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(a.Id) AS TotalAnswers,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(b.Class = 1) AS TotalGoldBadges,
+        SUM(b.Class = 2) AS TotalSilverBadges,
+        SUM(b.Class = 3) AS TotalBronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalAnswers,
+    TotalComments,
+    TotalViews,
+    TotalUpVotes,
+    TotalDownVotes,
+    TotalGoldBadges,
+    TotalSilverBadges,
+    TotalBronzeBadges
+FROM UserPostStats
+ORDER BY TotalPosts DESC
+LIMIT 10; -- Adjust the limit for performance testing

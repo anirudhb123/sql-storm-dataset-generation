@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate
+    FROM RankedPosts rp
+    WHERE rp.Rank <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(ph.Id) AS EditCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    up.DisplayName AS Owner,
+    ubs.BadgeCount,
+    ps.CommentCount,
+    phs.EditCount,
+    phs.LastEditDate,
+    DATEDIFF(DAY, phs.FirstEditDate, GETDATE()) AS DaysSinceFirstEdit
+FROM TopPosts tp
+JOIN Users up ON tp.PostId = up.Id
+LEFT JOIN UserBadges ubs ON up.Id = ubs.UserId
+LEFT JOIN PostComments ps ON tp.PostId = ps.PostId
+LEFT JOIN PostHistoryStats phs ON tp.PostId = phs.PostId
+WHERE tp.ViewCount > 100
+ORDER BY tp.Score DESC, tp.ViewCount DESC;

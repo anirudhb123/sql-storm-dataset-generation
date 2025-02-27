@@ -1,0 +1,56 @@
+WITH actor_info AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.id, a.name
+),
+yearly_production AS (
+    SELECT 
+        t.production_year,
+        COUNT(DISTINCT t.id) AS movies_released,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.production_year
+),
+company_info AS (
+    SELECT 
+        c.name AS company_name,
+        COUNT(mc.movie_id) AS movies_produced
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    GROUP BY 
+        c.name
+)
+SELECT 
+    ai.actor_name,
+    ai.movie_count,
+    ai.movie_titles,
+    yp.production_year,
+    yp.movies_released,
+    yp.titles AS yearly_titles,
+    ci.company_name,
+    ci.movies_produced
+FROM 
+    actor_info ai
+JOIN 
+    yearly_production yp ON ai.movie_count > 5 -- Actors involved in more than 5 movies
+LEFT JOIN 
+    company_info ci ON ai.movie_titles LIKE '%' || ci.company_name || '%' -- Company related to movies
+ORDER BY 
+    ai.movie_count DESC, 
+    yp.production_year DESC;

@@ -1,0 +1,79 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_tax) AS total_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rnk
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_moy IN (1, 2, 3)
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        sales.total_quantity,
+        sales.total_sales,
+        sales.total_tax
+    FROM 
+        SalesData sales
+    JOIN 
+        item ON sales.ws_item_sk = item.i_item_sk
+    WHERE 
+        sales.rnk <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+ReturnsInfo AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_sales,
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(ri.return_count, 0) AS return_count,
+    COALESCE(ri.total_returned, 0.00) AS total_returned,
+    CASE 
+        WHEN ti.total_sales > 5000 THEN 'High Value'
+        WHEN ti.total_sales BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS sales_category
+FROM 
+    TopItems ti
+JOIN 
+    CustomerInfo ci ON ci.c_customer_id IN (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = ti.ws_item_sk LIMIT 10)
+LEFT JOIN 
+    ReturnsInfo ri ON ri.sr_item_sk = ti.ws_item_sk
+ORDER BY 
+    ti.total_sales DESC;

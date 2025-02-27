@@ -1,0 +1,40 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        wr.returned_date,
+        COUNT(wr.wr_order_number) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        web_returns wr
+    JOIN 
+        customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state, wr.returned_date
+),
+ReturnStatistics AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        AVG(total_returns) AS avg_returns_per_customer,
+        SUM(total_returned_amount) AS total_returned_amount
+    FROM 
+        CustomerReturns
+    GROUP BY 
+        ca_city, ca_state
+)
+SELECT 
+    ca_state,
+    COUNT(DISTINCT ca_city) AS total_cities,
+    AVG(avg_returns_per_customer) AS avg_returns_per_city,
+    SUM(total_returned_amount) AS overall_returned_amount
+FROM 
+    ReturnStatistics
+GROUP BY 
+    ca_state
+ORDER BY 
+    overall_returned_amount DESC;

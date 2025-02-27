@@ -1,0 +1,77 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth,
+        mt.title || '' AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        qt.title AS movie_title,
+        mh.depth + 1 AS depth,
+        mh.path || ' -> ' || qt.title AS path
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title qt ON ml.linked_movie_id = qt.id
+    WHERE 
+        mh.depth < 5  
+),
+
+MovieInfo AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        movie_info.info,
+        movie_info.note,
+        COUNT(DISTINCT cast_info.person_id) FILTER (WHERE cast_info.role_id IS NOT NULL OR cast_info.note IS NOT NULL) AS actor_count
+    FROM 
+        title
+    LEFT JOIN 
+        movie_info ON title.id = movie_info.movie_id 
+    LEFT JOIN 
+        complete_cast ON title.id = complete_cast.movie_id
+    LEFT JOIN 
+        cast_info ON complete_cast.subject_id = cast_info.id
+    GROUP BY 
+        title.id, title.title, movie_info.info, movie_info.note
+),
+
+FilteredInfo AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        mi.info,
+        mi.note,
+        mi.actor_count,
+        RANK() OVER (PARTITION BY mi.info ORDER BY mi.actor_count DESC) AS rank
+    FROM 
+        MovieInfo mi
+    WHERE 
+        mi.info IS NOT NULL AND mi.note NOT LIKE '%uncertain%'
+)
+
+SELECT 
+    mh.depth,
+    mh.path,
+    fi.title,
+    fi.info,
+    fi.note,
+    fi.actor_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    FilteredInfo fi ON mh.movie_id = fi.movie_id
+WHERE 
+    fi.rank <= 3 OR fi.rank IS NULL  
+ORDER BY 
+    mh.depth, fi.actor_count DESC NULLS LAST;

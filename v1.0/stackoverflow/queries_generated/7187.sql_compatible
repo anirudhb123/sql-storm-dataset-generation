@@ -1,0 +1,87 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBadges,
+        TotalPosts,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC, TotalViews DESC) AS Rank
+    FROM 
+        UserReputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount, p.AnswerCount, p.Score, u.DisplayName
+),
+CombinedData AS (
+    SELECT 
+        tu.UserId,
+        tu.DisplayName,
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.LastActivityDate,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.Score,
+        pd.CommentCount,
+        tu.TotalBadges,
+        tu.TotalPosts,
+        tu.TotalViews,
+        tu.TotalScore,
+        tu.Rank
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        PostDetails pd ON tu.UserId = pd.OwnerDisplayName
+)
+SELECT 
+    *
+FROM 
+    CombinedData
+WHERE 
+    TotalScore > 500
+ORDER BY 
+    Rank, TotalScore DESC, ViewCount DESC;

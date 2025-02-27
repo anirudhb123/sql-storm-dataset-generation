@@ -1,0 +1,78 @@
+-- Performance Benchmarking Query
+-- This query retrieves user statistics, post metrics, and badge counts 
+-- to evaluate the performance and relationships within the Stack Overflow schema.
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+),
+Summary AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.PostCount,
+        us.BadgeCount,
+        us.UpVotes,
+        us.DownVotes,
+        COUNT(ps.PostId) AS TotalPosts,
+        SUM(ps.Score) AS TotalScore,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.AnswerCount) AS TotalAnswers,
+        SUM(ps.CommentCount) AS TotalComments
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        PostStats ps ON us.UserId = ps.OwnerUserId
+    GROUP BY 
+        us.UserId, us.DisplayName, us.Reputation, us.PostCount, us.BadgeCount, us.UpVotes, us.DownVotes
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    UpVotes,
+    DownVotes,
+    TotalPosts,
+    TotalScore,
+    TotalViews,
+    TotalAnswers,
+    TotalComments
+FROM 
+    Summary
+ORDER BY 
+    Reputation DESC, PostCount DESC;

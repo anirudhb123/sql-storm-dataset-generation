@@ -1,0 +1,89 @@
+
+WITH RecursiveTagCount AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = Posts.Id AND Posts.Title IS NOT NULL
+    WHERE 
+        Tags.IsModeratorOnly = 0 OR Tags.IsRequired = 1
+    GROUP BY 
+        Tags.TagName
+),
+UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (8, 9) THEN V.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+HistoricalPostChanges AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        MAX(CASE WHEN PH.PostHistoryTypeId IN (4, 5, 6) THEN PH.CreationDate END) AS LastEditDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title
+),
+FinalSummarizedResults AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT PH.PostId) AS TotalPosts,
+        SUM(RTC.PostCount) AS TotalTagsUsed,
+        SUM(UPS.UpVotes) AS UserUpVotes,
+        SUM(UPS.DownVotes) AS UserDownVotes,
+        SUM(UPS.TotalBounty) AS UserTotalBounty,
+        MAX(PH.LastEditDate) AS MostRecentEdit,
+        SUM(PH.CloseCount) AS TotalCloseEvents,
+        SUM(PH.ReopenCount) AS TotalReopenEvents
+    FROM 
+        Users U
+    LEFT JOIN 
+        HistoricalPostChanges PH ON U.Id = PH.PostId
+    LEFT JOIN 
+        UserVoteSummary UPS ON U.Id = UPS.UserId
+    LEFT JOIN 
+        RecursiveTagCount RTC ON RTC.TagName = ANY(STRING_TO_ARRAY(PH.Title, ' '))
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    TotalTagsUsed,
+    UserUpVotes,
+    UserDownVotes,
+    UserTotalBounty,
+    MostRecentEdit,
+    CASE 
+        WHEN TotalCloseEvents > TotalReopenEvents THEN 'More Closed'
+        WHEN TotalCloseEvents < TotalReopenEvents THEN 'More Reopened'
+        ELSE 'Equal'
+    END AS CloseVsReopenStatus
+FROM 
+    FinalSummarizedResults
+WHERE 
+    (UserUpVotes - UserDownVotes) > 10
+    OR UserTotalBounty > 100
+ORDER BY 
+    UserTotalBounty DESC, Reputation DESC
+LIMIT 100;

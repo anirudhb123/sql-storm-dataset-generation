@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 100
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    s.s_name, 
+    fs.c_name,
+    os.o_orderkey,
+    os.total_revenue,
+    COALESCE(fs.total_spent, 0) AS total_spent,
+    COUNT(DISTINCT os.o_orderkey) OVER (PARTITION BY r.r_regionkey) AS order_count
+FROM 
+    RankedSuppliers s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderStats os ON os.total_revenue > 100000
+LEFT JOIN 
+    FilteredCustomers fs ON fs.total_spent > (SELECT AVG(total_spent) FROM FilteredCustomers)
+WHERE 
+    s.rank = 1 AND 
+    (os.o_orderstatus = 'F' OR os.o_orderstatus IS NULL)
+ORDER BY 
+    r.r_name, os.total_revenue DESC;

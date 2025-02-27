@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS movie_rank,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.actor_names,
+        COALESCE(mn.info, 'No extra info') AS movie_note,
+        COALESCE(mi.info, 'N/A') AS extra_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mn ON rm.movie_id = mn.movie_id AND mn.info_type_id IN (SELECT id FROM info_type WHERE info = 'Note')
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Genre')
+    WHERE 
+        rm.production_year BETWEEN 1990 AND 2023
+),
+FinalOutput AS (
+    SELECT 
+        mwi.movie_id,
+        mwi.title,
+        mwi.production_year,
+        mwi.total_cast,
+        mwi.actor_names,
+        mwi.movie_note,
+        mwi.extra_info,
+        DENSE_RANK() OVER (ORDER BY mwi.total_cast DESC) AS rank_by_cast
+    FROM 
+        MoviesWithInfo mwi
+)
+SELECT 
+    fo.movie_id,
+    fo.title,
+    fo.production_year,
+    fo.total_cast,
+    fo.actor_names,
+    fo.movie_note,
+    fo.extra_info,
+    fo.rank_by_cast,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    MAX(gk.keyword) AS most_common_keyword
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    movie_companies mc ON fo.movie_id = mc.movie_id
+LEFT JOIN 
+    keyword gk ON fo.movie_id = gk.id
+LEFT JOIN 
+    (SELECT movie_id, COUNT(*) AS cnt FROM movie_keyword GROUP BY movie_id) mk ON fo.movie_id = mk.movie_id
+LEFT JOIN 
+    (SELECT movie_id, STRING_AGG(DISTINCT tk.keyword, ', ') AS keywords FROM movie_keyword tk GROUP BY movie_id) AS tokens ON fo.movie_id = tokens.movie_id
+WHERE 
+    fo.rank_by_cast < 10 
+GROUP BY 
+    fo.movie_id, fo.title, fo.production_year, fo.total_cast, fo.actor_names, fo.movie_note, fo.extra_info, fo.rank_by_cast
+ORDER BY 
+    fo.production_year DESC, fo.rank_by_cast;

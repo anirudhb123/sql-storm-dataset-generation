@@ -1,0 +1,77 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rnk
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(P.Count, 0) AS PostCount,
+        COALESCE(UP.ScoreSum, 0) AS ScoreSum
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(*) AS Count
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 1
+        GROUP BY 
+            OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            SUM(Score) AS ScoreSum
+        FROM 
+            Posts
+        GROUP BY 
+            OwnerUserId
+    ) UP ON U.Id = UP.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    UBC.BadgeCount,
+    UBC.GoldCount,
+    UBC.SilverCount,
+    UBC.BronzeCount,
+    PSU.PostCount,
+    PSU.ScoreSum,
+    PP.Title AS PopularPostTitle,
+    PP.Score AS PopularPostScore
+FROM 
+    Users U
+LEFT JOIN 
+    UserBadgeCounts UBC ON U.Id = UBC.UserId
+LEFT JOIN 
+    UserPostStats PSU ON U.Id = PSU.UserId
+LEFT JOIN 
+    PopularPosts PP ON U.Id = PP.OwnerUserId AND PP.Rnk = 1
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC
+LIMIT 10;

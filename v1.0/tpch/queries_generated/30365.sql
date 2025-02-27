@@ -1,0 +1,79 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '2022-01-01'
+    UNION ALL
+    SELECT
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.order_level + 1
+    FROM
+        customer_orders co
+    JOIN
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '2022-01-01' AND
+        o.o_orderkey > co.o_orderkey
+),
+average_order_value AS (
+    SELECT
+        c.c_custkey,
+        AVG(o.o_totalprice) AS avg_order
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+part_supplier_details AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_name
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        ps.ps_availqty > 0
+)
+SELECT
+    co.c_name AS customer_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_spent,
+    AVG(a.avg_order) AS customer_avg_order,
+    MAX(p.p_name) AS most_expensive_part,
+    SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) END) AS discounted_sales
+FROM
+    customer_orders co
+LEFT JOIN
+    average_order_value a ON co.c_custkey = a.c_custkey
+LEFT JOIN
+    lineitem l ON l.l_orderkey = co.o_orderkey
+LEFT JOIN
+    part_supplier_details p ON p.p_partkey = l.l_partkey
+GROUP BY
+    co.c_name
+HAVING
+    SUM(co.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY
+    total_spent DESC
+LIMIT 10;

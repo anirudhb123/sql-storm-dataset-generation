@@ -1,0 +1,60 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_quantity > 0
+),
+CustomerAddress AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(NULLIF(ca.ca_zip, ''), 'N/A') AS ca_zip_coalesced
+    FROM 
+        customer_address AS ca
+    WHERE 
+        ca.ca_city IS NOT NULL OR ca.ca_state IS NOT NULL
+),
+SalesWithAddr AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_sales_price,
+        r.ws_net_profit,
+        ca.ca_city,
+        ca.ca_state,
+        SUM(CASE 
+                WHEN r.ws_net_profit > 500 THEN 1 
+                ELSE 0 
+            END) OVER (PARTITION BY ca.ca_state) AS HighProfitCount
+    FROM 
+        RankedSales AS r
+    JOIN 
+        customer AS c ON c.c_customer_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_id = 'CUST123')
+    LEFT JOIN 
+        CustomerAddress AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    s.ws_order_number,
+    s.ws_item_sk,
+    s.ws_sales_price,
+    s.ws_net_profit,
+    sa.ca_city,
+    sa.ca_state,
+    sa.HighProfitCount
+FROM 
+    SalesWithAddr AS sa
+JOIN 
+    inventory AS inv ON inv.inv_item_sk = sa.ws_item_sk AND inv.inv_quantity_on_hand > 0
+WHERE 
+    sa.HighProfitCount IS NOT NULL
+ORDER BY 
+    sa.ca_state DESC,
+    sa.ws_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

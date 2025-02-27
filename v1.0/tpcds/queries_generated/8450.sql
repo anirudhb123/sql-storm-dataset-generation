@@ -1,0 +1,71 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_sales_price) AS avg_sale_price,
+        SUM(ws.ws_sales_price) / COUNT(DISTINCT ws.ws_order_number) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cs.total_sales, 
+        cs.order_count, 
+        cs.avg_sale_price,
+        cs.avg_order_value,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+SalesAnalytics AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.total_sales,
+        tc.order_count,
+        tc.avg_sale_price,
+        tc.avg_order_value,
+        d.d_month_id,
+        AVG(ws.ws_sales_price) OVER (PARTITION BY d.d_month_seq) AS avg_sales_per_month,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY d.d_month_seq) AS total_profit_per_month
+    FROM 
+        TopCustomers tc
+    JOIN 
+        web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    sa.total_sales,
+    sa.order_count,
+    sa.avg_sale_price,
+    sa.avg_order_value,
+    sa.avg_sales_per_month,
+    sa.total_profit_per_month
+FROM 
+    SalesAnalytics sa
+JOIN 
+    customer c ON sa.c_customer_sk = c.c_customer_sk
+WHERE 
+    sa.sales_rank <= 10
+ORDER BY 
+    sa.total_sales DESC;

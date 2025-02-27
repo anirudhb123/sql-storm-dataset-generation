@@ -1,0 +1,67 @@
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.PostTypeId,
+           p.OwnerUserId,
+           p.CreationDate,
+           p.ParentId,
+           0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT a.Id, 
+           a.Title, 
+           a.PostTypeId,
+           a.OwnerUserId,
+           a.CreationDate,
+           a.ParentId,
+           Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePostHierarchy rph ON a.ParentId = rph.Id
+), VoteCount AS (
+    SELECT PostId, 
+           SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+), UserPosts AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           COALESCE(v.UpVotes, 0) AS UpVotes,
+           COALESCE(v.DownVotes, 0) AS DownVotes,
+           COUNT(c.Id) AS CommentCount
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN VoteCount v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id, u.DisplayName, p.Id, p.Title, p.CreationDate, v.UpVotes, v.DownVotes
+), PopularTags AS (
+    SELECT Tags.TagName,
+           COUNT(p.Id) AS PostCount
+    FROM Posts p
+    CROSS JOIN LATERAL string_to_array(p.Tags, ',') AS Tags
+    GROUP BY Tags.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT u.UserId,
+       u.DisplayName,
+       COUNT(p.PostId) AS PostCount,
+       SUM(u.UpVotes) AS TotalUpVotes,
+       SUM(u.DownVotes) AS TotalDownVotes,
+       MAX(u.PostId) AS LastPostId,
+       (SELECT COUNT(*) 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.UserId 
+          AND p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') AS RecentPostsCount,
+       string_agg(DISTINCT t.TagName, ', ') AS PopularTags
+FROM UserPosts u
+LEFT JOIN RecursivePostHierarchy rph ON u.PostId = rph.Id
+LEFT JOIN Tags t ON POSITION(t.TagName IN u.PostId) > 0
+WHERE u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY u.UserId, u.DisplayName
+ORDER BY TotalUpVotes DESC, PostCount DESC;

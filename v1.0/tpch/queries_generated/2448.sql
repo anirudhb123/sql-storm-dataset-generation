@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        c.c_name,
+        o.o_totalprice,
+        o.o_orderdate,
+        LEAD(o.o_orderdate) OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate) AS next_order_date
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    R.s_suppkey,
+    R.s_name,
+    C.c_name,
+    C.o_orderkey,
+    COALESCE(H.total_revenue, 0) AS total_revenue,
+    H.item_count,
+    CASE 
+        WHEN H.item_count IS NULL THEN 'No items'
+        ELSE 'Items present'
+    END AS item_status,
+    DATEDIFF(C.next_order_date, C.o_orderdate) AS days_until_next_order
+FROM 
+    RankedSuppliers R
+FULL OUTER JOIN 
+    CustomerOrders C ON R.s_suppkey = (SELECT ps.ps_suppkey 
+                                         FROM partsupp ps 
+                                         WHERE ps.ps_partkey = (SELECT p.p_partkey 
+                                                                FROM part p 
+                                                                WHERE p.p_brand = 'BrandX' 
+                                                                LIMIT 1) 
+                                         ORDER BY ps.ps_supplycost DESC 
+                                         LIMIT 1)
+LEFT JOIN 
+    HighValueLineItems H ON C.o_orderkey = H.l_orderkey
+WHERE 
+    R.s_suppkey IS NOT NULL OR C.o_orderkey IS NOT NULL
+ORDER BY 
+    total_revenue DESC, C.o_orderdate;

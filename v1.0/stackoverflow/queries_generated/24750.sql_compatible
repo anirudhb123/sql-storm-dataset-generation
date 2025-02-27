@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+ModeratedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.CreationDate, u.DisplayName
+    HAVING 
+        COUNT(c.Id) < 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::integer = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    mp.PostId,
+    mp.Title,
+    mp.Score,
+    mp.ViewCount,
+    mp.OwnerName,
+    COALESCE(cp.CloseReasonCount, 0) AS CloseReasonCount,
+    COALESCE(cp.CloseReasons, 'None') AS CloseReasons,
+    CASE 
+        WHEN mp.NetVotes > 50 THEN 'Popular' 
+        WHEN mp.NetVotes <= 50 AND mp.NetVotes > 0 THEN 'Moderately Liked' 
+        WHEN mp.NetVotes < 0 THEN 'Disliked' 
+        ELSE 'Neutral' 
+    END AS Popularity
+FROM 
+    ModeratedPosts mp
+LEFT JOIN 
+    ClosedPosts cp ON mp.PostId = cp.PostId
+WHERE 
+    mp.Rank <= 5
+ORDER BY 
+    mp.Score DESC NULLS LAST, 
+    mp.ViewCount DESC NULLS LAST;

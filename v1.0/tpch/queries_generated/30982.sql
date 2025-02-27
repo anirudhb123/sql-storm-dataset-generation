@@ -1,0 +1,52 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+Top_Customers AS (
+    SELECT 
+        c_custkey,
+        c_name,
+        total_sales
+    FROM 
+        Sales_CTE
+    WHERE 
+        sales_rank <= 10
+    ORDER BY 
+        total_sales DESC
+)
+SELECT 
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_sales,
+    r.r_name AS region_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) OVER (PARTITION BY tc.c_custkey) AS total_supply_cost,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    (SELECT COUNT(DISTINCT p.p_partkey) 
+     FROM part p 
+     INNER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+     WHERE ps.ps_supplycost < tc.total_sales) AS part_count
+FROM 
+    Top_Customers tc
+LEFT JOIN 
+    supplier s ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+GROUP BY 
+    tc.c_custkey, tc.c_name, tc.total_sales, r.r_name
+HAVING 
+    SUM(ps.ps_availqty) IS NOT NULL OR total_supply_cost > 0
+ORDER BY 
+    total_sales DESC;

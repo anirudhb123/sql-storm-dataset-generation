@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            WHEN c.c_acctbal < 0 THEN 'Neg Bal'
+            ELSE 'Positive Bal'
+        END AS balance_status
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL OR c.c_acctbal < 0
+),
+SubsetOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.cust_name AS customer_name,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(MONTH FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS monthly_order_rank
+    FROM orders o
+    JOIN FilteredCustomers f ON o.o_custkey = f.c_custkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate > CURRENT_DATE - INTERVAL '1 year')
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COALESCE(AVG(l.l_discount), 0) AS average_discount,
+    ns.n_name AS nation_name,
+    CASE 
+        WHEN MAX(supply_rank) IS NULL THEN 'No Suppliers'
+        ELSE CONCAT('Rank ', MAX(supply_rank))
+    END AS max_supplier_rank,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM lineitem l
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+LEFT JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+LEFT JOIN nation ns ON ns.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = l.l_suppkey)
+JOIN SubsetOrders so ON l.l_orderkey = so.o_orderkey
+WHERE l.l_shipdate BETWEEN CURRENT_DATE - INTERVAL '90 days' AND CURRENT_DATE
+GROUP BY p.p_partkey, p.p_name, ns.n_name
+HAVING COUNT(DISTINCT so.customer_name) > 3
+ORDER BY total_quantity DESC
+LIMIT 10;

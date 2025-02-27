@@ -1,0 +1,30 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_availqty > 100)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    sum(o.o_totalprice) AS total_sales,
+    count(distinct o.o_orderkey) AS order_count,
+    sh.level AS supplier_level,
+    r.r_name AS region_name
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY c.c_custkey, c.c_name, sh.level, r.r_name
+ORDER BY total_sales DESC
+LIMIT 50;

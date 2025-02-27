@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        0 AS level
+    FROM title t
+    WHERE t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        mh.level + 1
+    FROM title t
+    INNER JOIN movie_hierarchy mh ON t.episode_of_id = mh.movie_id
+),
+actor_roles AS (
+    
+    SELECT
+        ci.person_id,
+        ci.movie_id,
+        MAX(rt.role) AS max_role,
+        COUNT(DISTINCT rt.role) AS role_count
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    JOIN movie_keyword mk ON ci.movie_id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE k.keyword = 'Drama'
+    GROUP BY ci.person_id, ci.movie_id
+),
+
+movie_info_summary AS (
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT mi.info) AS info_array,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM title m
+    LEFT JOIN movie_info mi ON mi.movie_id = m.id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY m.id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ak.name, 'Unknown') AS actor_name,
+    arp.max_role,
+    mis.keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY arp.role_count DESC) AS role_rank
+FROM movie_hierarchy mh
+LEFT JOIN actor_roles arp ON mh.movie_id = arp.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = arp.person_id
+LEFT JOIN movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE mh.production_year >= 2000
+  AND mis.keyword_count > 1
+ORDER BY mh.production_year DESC, role_rank;

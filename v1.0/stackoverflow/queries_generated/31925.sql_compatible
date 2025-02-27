@@ -1,0 +1,68 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        AVG(p.Score) AS AvgScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '<>')) AS TagName) AS t ON TRUE
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.DisplayName,
+    ps.TotalPosts,
+    ps.TotalUpvotes,
+    ps.TotalDownvotes,
+    ps.AvgScore,
+    COALESCE(ps.Tags, 'No Tags') AS Tags,
+    rpc.PostId AS RelatedPostId,
+    rcp.Title AS RelatedPostTitle
+FROM 
+    PostStats ps
+LEFT JOIN 
+    RecursivePostCTE rpc ON ps.TotalPosts > 5  
+LEFT JOIN 
+    Posts rcp ON rpc.AcceptedAnswerId = rcp.Id
+WHERE 
+    ps.TotalDownvotes < ps.TotalUpvotes
+ORDER BY 
+    ps.TotalPosts DESC,
+    ps.AvgScore DESC
+LIMIT 10;

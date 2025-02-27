@@ -1,0 +1,74 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR(8000)) AS FullTitle
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        rp.Level + 1 AS Level,
+        CAST(rp.FullTitle || ' -> ' || p.Title AS VARCHAR(8000)) AS FullTitle
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        MAX(u.LastAccessDate) AS LastActive
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerUserId,
+        Score,
+        RANK() OVER (PARTITION BY OwnerUserId ORDER BY Score DESC) AS Rank
+    FROM 
+        RecursivePostCTE
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ua.QuestionCount,
+    ua.TotalVotes,
+    ua.LastActive,
+    tq.PostId,
+    tq.Title AS TopQuestionTitle,
+    tq.Score AS TopQuestionScore,
+    tq.Rank AS TopQuestionRank
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    TopQuestions tq ON u.Id = tq.OwnerUserId AND tq.Rank = 1
+WHERE 
+    ua.QuestionCount > 0
+ORDER BY 
+    ua.TotalVotes DESC, 
+    ua.LastActive DESC;

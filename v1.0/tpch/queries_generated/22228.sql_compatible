@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS supplier_rank,
+        (SELECT COUNT(*) FROM partsupp ps2 WHERE ps2.ps_partkey = ps.ps_partkey) AS total_suppliers
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_items,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+RegionSummaries AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(n.n_nationkey) > 0
+)
+SELECT 
+    pr.p_name,
+    rs.supplier_rank,
+    SUM(co.total_price) AS total_ordered_value,
+    SUM(co.line_items) AS total_line_item_count,
+    MAX(rs.total_suppliers) AS max_suppliers,
+    rg.r_name AS region_name,
+    (CASE WHEN SUM(co.total_price) IS NULL THEN 'No Orders' ELSE 'Orders Present' END) AS order_status,
+    (SELECT AVG(ps.ps_supplycost) FROM partsupp ps WHERE ps.ps_partkey = pr.p_partkey) AS avg_supply_cost
+FROM 
+    part pr
+LEFT JOIN 
+    RankedSuppliers rs ON pr.p_partkey = rs.ps_partkey AND rs.supplier_rank = 1
+LEFT JOIN 
+    CustomerOrders co ON rs.ps_suppkey = co.o_custkey
+LEFT JOIN 
+    region rg ON co.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = co.o_custkey)
+WHERE 
+    pr.p_size BETWEEN 5 AND 10 
+    AND pr.p_mfgr LIKE 'Manufacturer%'
+GROUP BY 
+    pr.p_name, rs.supplier_rank, rg.r_name
+ORDER BY 
+    SUM(co.total_price) DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

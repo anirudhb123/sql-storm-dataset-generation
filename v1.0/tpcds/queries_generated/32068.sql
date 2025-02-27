@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Category_Hierarchy AS (
+    SELECT i_category_id, i_category, 1 AS level
+    FROM item
+    WHERE i_category_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.i_category_id, c.i_category, ch.level + 1
+    FROM item c
+    JOIN Category_Hierarchy ch ON c.i_category_id = ch.i_category_id
+),
+Sales_Summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY ws.ws_item_sk
+),
+Top_Stores AS (
+    SELECT
+        ss.ss_store_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk BETWEEN 20210101 AND 20211231
+    GROUP BY ss.ss_store_sk
+    HAVING SUM(ss.ss_net_profit) > 0
+),
+Customer_Preference AS (
+    SELECT
+        ca.ca_address_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT cs.cs_order_number) AS orders,
+        SUM(cs.cs_net_paid) AS total_spent
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY ca.ca_address_sk, cd.cd_gender
+    HAVING total_spent IS NOT NULL
+)
+
+SELECT
+    ch.i_category AS category,
+    COALESCE(s.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    s.order_count AS total_orders,
+    st.total_net_profit AS store_profit,
+    CASE WHEN cp.orders > 0 THEN 'Active' ELSE 'Inactive' END AS customer_status
+FROM Category_Hierarchy ch
+LEFT JOIN Sales_Summary s ON ch.i_category_id = s.ws_item_sk
+LEFT JOIN Top_Stores st ON s.ws_item_sk IN (SELECT ss.ss_item_sk FROM store_sales ss WHERE ss.ss_store_sk = st.ss_store_sk)
+LEFT JOIN Customer_Preference cp ON cp.ca_address_sk IS NOT NULL
+WHERE ch.level = 1
+ORDER BY total_sales DESC, customer_status;

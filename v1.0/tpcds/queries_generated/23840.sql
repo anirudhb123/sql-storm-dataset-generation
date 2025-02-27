@@ -1,0 +1,72 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+aggregated_sales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_paid) AS avg_paid
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+return_analysis AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr_return_amount) AS total_returned
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+    HAVING COUNT(*) > 5
+),
+sales_and_returns AS (
+    SELECT 
+        r.c_customer_id,
+        r.c_first_name,
+        r.c_last_name,
+        COALESCE(a.total_profit, 0) AS total_profit,
+        COALESCE(ret.total_returns, 0) AS total_returns
+    FROM ranked_customers r
+    LEFT JOIN aggregated_sales a ON r.c_customer_id = a.ws_bill_customer_sk
+    LEFT JOIN return_analysis ret ON r.c_customer_id = ret.cr_returning_customer_sk
+    WHERE r.rank = 1
+),
+final_report AS (
+    SELECT 
+        customer_id, 
+        first_name, 
+        last_name, 
+        total_profit, 
+        total_returns,
+        CASE 
+            WHEN total_returns = 0 THEN 'No Returns'
+            WHEN total_returns > 0 AND total_profit > 1000 THEN 'High Profits, Some Returns'
+            ELSE 'Moderate Activity'
+        END AS customer_activity
+    FROM sales_and_returns
+)
+SELECT 
+    fr.customer_id,
+    fr.first_name,
+    fr.last_name,
+    fr.total_profit,
+    fr.total_returns,
+    fr.customer_activity,
+    CASE 
+        WHEN fr.total_profit IS NOT NULL AND fr.total_returns IS NOT NULL THEN 
+            fr.total_profit / NULLIF(fr.total_returns, 0)
+        ELSE NULL
+    END AS profit_per_return
+FROM final_report fr
+ORDER BY fr.total_profit DESC, fr.total_returns ASC
+LIMIT 100;

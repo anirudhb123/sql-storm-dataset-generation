@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, 0 AS depth
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_orderstatus, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_quantity) AS avg_quantity,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice) DESC) AS region_rank
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    AND (l.l_discount BETWEEN 0.05 AND 0.15 OR l.l_returnflag = 'R')
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+HAVING 
+    total_sales > 100000
+ORDER BY 
+    r.r_name, total_sales DESC;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.id < 190866 AND t.kind_id IN (0, 2, 6, 7) AND mc.note IN ('(1948) (Japan) (theatrical)', '(1986) (India) (theatrical) (Naizam area)', '(1986) (USA) (all media) (arcade version)', '(1996-2006) (UK) (TV) (ITV1)', '(2005) (USA) (DVD) (season two)', '(2006) (UK) (TV) (BBC4)', '(2009) (USA) (TV) (Video on Demand)', '(2009-2013) (worldwide) (all media)', '(2010) (Federal Republic of Yugoslavia) (DVD)', '(????) (Germany) (TV) (as "Girlfriends: Eine Nacht und nie wieder")');

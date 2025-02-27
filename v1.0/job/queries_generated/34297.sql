@@ -1,0 +1,66 @@
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT c.id AS company_id, c.name, c.country_code, 0 AS level
+    FROM company_name c
+    WHERE c.name LIKE 'A%'  -- Selecting companies starting with 'A'
+
+    UNION ALL
+
+    SELECT cm.id AS company_id, cm.name, cm.country_code, ch.level + 1
+    FROM company_name cm
+    JOIN movie_companies mc ON mc.company_id = cm.id
+    JOIN company_name ch ON mc.company_id = ch.id
+    WHERE ch.country_code IS NOT NULL 
+),
+
+FilteredMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    GROUP BY m.id
+    HAVING COUNT(DISTINCT mc.company_id) > 0
+),
+
+RankedMovies AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.company_count,
+        fm.note_count,
+        RANK() OVER (ORDER BY fm.company_count DESC, fm.production_year DESC) AS movie_rank
+    FROM FilteredMovies fm
+),
+
+ActorMovies AS (
+    SELECT
+        ak.name AS actor_name,
+        am.title AS movie_title,
+        am.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY am.production_year DESC) AS role_number
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN aka_title am ON ci.movie_id = am.id
+    WHERE ak.name IS NOT NULL
+)
+
+SELECT
+    cmh.name AS company_name,
+    cmh.country_code,
+    COUNT(DISTINCT am.actor_name) AS actor_count,
+    COUNT(DISTINCT rm.movie_id) AS movie_count,
+    AVG(rm.company_count) AS avg_company_per_movie
+FROM CompanyHierarchy cmh
+LEFT JOIN RankedMovies rm ON rm.movie_id IN (
+    SELECT movie_id
+    FROM ActorMovies am
+    WHERE am.role_number < 3   -- Considering only top 2 roles per actor
+)
+LEFT JOIN ActorMovies am ON rm.movie_id = am.movie_title
+GROUP BY cmh.company_id, cmh.name, cmh.country_code
+HAVING COUNT(DISTINCT rm.movie_id) > 0
+ORDER BY actor_count DESC, movie_count DESC;

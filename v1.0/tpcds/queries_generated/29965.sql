@@ -1,0 +1,67 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM customer_address
+),
+CustomerDemo AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        CONCAT(cd_gender, ' - ', cd_marital_status, ' - ', cd_education_status) AS demographic_info
+    FROM customer_demographics
+),
+CustomerAddress AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        dem.demographic_info
+    FROM customer c
+    JOIN AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+    JOIN CustomerDemo dem ON c.c_current_cdemo_sk = dem.cd_demo_sk
+),
+SalesData AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        TotalSales = ws.ws_quantity * ws.ws_sales_price
+    FROM web_sales ws
+)
+SELECT
+    ca.c_first_name,
+    ca.c_last_name,
+    ca.c_email_address,
+    ca.full_address,
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_zip,
+    SUM(sd.TotalSales) AS total_sales
+FROM CustomerAddress ca
+JOIN SalesData sd ON ca.c_customer_sk = sd.ws_bill_customer_sk
+GROUP BY
+    ca.c_first_name,
+    ca.c_last_name,
+    ca.c_email_address,
+    ca.full_address,
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_zip
+ORDER BY total_sales DESC
+LIMIT 50;

@@ -1,0 +1,69 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+    HAVING 
+        order_value > 10000
+),
+NationOrderCounts AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT ho.o_orderkey) AS order_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        HighValueOrders ho ON c.c_custkey = ho.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    n.order_count,
+    ss.total_supplycost,
+    ss.part_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    NationOrderCounts n ON n.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 20
+        )
+        ORDER BY ps.ps_supplycost DESC
+        LIMIT 1
+    )
+WHERE 
+    n.order_count IS NOT NULL OR ss.total_supplycost IS NOT NULL
+ORDER BY 
+    r.r_name, n.n_name;

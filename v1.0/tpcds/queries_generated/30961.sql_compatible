@@ -1,0 +1,60 @@
+
+WITH RECURSIVE CustomerTree AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk,
+           hd.hd_buy_potential, hd.hd_dep_count, 1 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE c.c_customer_sk < 1000  
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk,
+           hd.hd_buy_potential, hd.hd_dep_count, ct.level + 1
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN CustomerTree ct ON c.c_current_cdemo_sk = ct.c_customer_sk
+    WHERE ct.level < 5
+),
+AgeDistribution AS (
+    SELECT CASE 
+             WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) < 18 THEN 'Under 18'
+             WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 18 AND 25 THEN '18-25'
+             WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 26 AND 35 THEN '26-35'
+             WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 36 AND 45 THEN '36-45'
+             ELSE '46 and above'
+           END AS age_group, COUNT(*) AS count
+    FROM customer
+    GROUP BY CASE 
+               WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) < 18 THEN 'Under 18'
+               WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 18 AND 25 THEN '18-25'
+               WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 26 AND 35 THEN '26-35'
+               WHEN (EXTRACT(YEAR FROM DATE('2002-10-01')) - c_birth_year) BETWEEN 36 AND 45 THEN '36-45'
+               ELSE '46 and above'
+             END
+),
+SalesData AS (
+    SELECT ws.ws_sales_price, ws.ws_quantity, w.w_warehouse_name, d.d_date
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE w.w_country = 'USA' AND d.d_year = 2001
+),
+SalesSummary AS (
+    SELECT w.w_warehouse_name,
+           SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(sd.ws_sales_price * sd.ws_quantity) DESC) AS rnk
+    FROM SalesData sd
+    JOIN warehouse w ON sd.w_warehouse_name = w.w_warehouse_name
+    GROUP BY w.w_warehouse_name
+),
+FinalReport AS (
+    SELECT ct.c_first_name, ct.c_last_name, ct.cd_gender, ct.hd_buy_potential, ct.hd_dep_count,
+           ad.age_group, ss.total_sales
+    FROM CustomerTree ct
+    INNER JOIN AgeDistribution ad ON ct.c_customer_sk = ad.c_customer_sk
+    LEFT JOIN SalesSummary ss ON ct.cd_income_band_sk = ss.w_warehouse_name
+    WHERE ss.rnk = 1 OR ss.total_sales IS NULL
+)
+SELECT * FROM FinalReport
+ORDER BY c_last_name, c_first_name;

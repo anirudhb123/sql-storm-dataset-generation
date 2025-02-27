@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        0 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ParentId,
+        R.Depth + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId AND V.VoteTypeId IN (8, 9)  -- Bounty votes
+    GROUP BY 
+        U.Id
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(COUNT(C.ID), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId IN (2)), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId IN (3)), 0) AS DownVotes,
+        (SELECT COUNT(*) FROM Posts P2 WHERE P2.ParentId = P.Id) AS AnswerCount,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.Reputation,
+    UA.TotalBounties,
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.ViewCount,
+    PA.CommentCount,
+    PA.UpVotes,
+    PA.DownVotes,
+    PA.AnswerCount,
+    PA.ViewRank,
+    R.Depth AS QuestionDepth
+FROM 
+    UserReputation UA
+JOIN 
+    Posts P ON P.OwnerUserId = UA.UserId
+JOIN 
+    PostAnalytics PA ON P.Id = PA.PostId
+LEFT JOIN 
+    RecursivePostHierarchy R ON P.ParentId = R.PostId
+WHERE 
+    UA.Reputation >= 1000  -- Filter users with reputation 1000 or more
+ORDER BY 
+    UA.Reputation DESC, PA.ViewRank, R.Depth;

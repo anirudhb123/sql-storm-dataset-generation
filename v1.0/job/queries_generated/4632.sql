@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorTitles AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title,
+        at.production_year,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        at.title_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title at ON mk.movie_id = at.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.title_id
+)
+SELECT 
+    rt.title,
+    COALESCE(at.actor_name, 'Unknown Actor') AS actor_name,
+    rt.production_year,
+    mwk.keywords,
+    COUNT(ci.id) OVER (PARTITION BY rt.production_year) AS total_movies_in_year,
+    CASE 
+        WHEN rt.title_rank = 1 THEN 'First Title of Year'
+        ELSE 'Subsequent Title of Year'
+    END AS title_status
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorTitles at ON rt.title = at.title AND rt.production_year = at.production_year
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rt.title_id = mwk.title_id
+ORDER BY 
+    rt.production_year DESC, rt.title;

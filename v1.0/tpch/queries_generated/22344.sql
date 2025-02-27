@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS Level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3
+), HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS HighValue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate
+    HAVING HighValue > 5000
+), NationStats AS (
+    SELECT n.n_name, COUNT(c.c_custkey) AS CustomerCount, 
+           SUM(s.s_acctbal) AS TotalSupplierBalance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COUNT(ps.ps_suppkey) AS SupplierCount
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING COUNT(ps.ps_suppkey) > 0
+)
+SELECT
+    n.n_name,
+    COALESCE(fs.SupplierCount, 0) AS ActivePartSuppliers,
+    ROUND(SUM(o.o_totalprice) FILTER (WHERE o.o_orderdate >= '2022-01-01'), 2) AS TotalSales,
+    SUM(CASE WHEN sh.Level IS NOT NULL THEN sh.s_acctbal ELSE 0 END) AS TotalHighValueSupplierBalance,
+    STRING_AGG(DISTINCT p.p_name || ' (' || p.p_retailprice || ')', '; ') AS PartsDetails
+FROM NationStats ns
+LEFT JOIN FilteredParts fs ON ns.n_name = fs.p_name
+LEFT JOIN HighValueOrders o ON ns.CustomerCount > 0
+LEFT JOIN SupplierHierarchy sh ON ns.TotalSupplierBalance > 0
+LEFT JOIN part p ON fs.p_partkey = p.p_partkey
+GROUP BY n.n_name
+ORDER BY TotalSales DESC NULLS LAST;

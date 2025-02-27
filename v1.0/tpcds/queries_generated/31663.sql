@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_paid_inc_tax) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+aggregate_stats AS (
+    SELECT 
+        s_store_sk,
+        AVG(ss_net_profit) AS avg_profit,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        MAX(ss_ext_sales_price) AS max_price
+    FROM store_sales 
+    GROUP BY s_store_sk
+),
+customer_return_stats AS (
+    SELECT
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        AVG(sr_return_amt_inc_tax) AS avg_return_value
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returns,
+        cr.avg_return_value,
+        ROW_NUMBER() OVER (ORDER BY cr.total_returns DESC) AS customer_rank 
+    FROM customer c
+    JOIN customer_return_stats cr ON c.c_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    a.s_store_sk, 
+    a.avg_profit, 
+    a.transaction_count, 
+    a.max_price,
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_returns,
+    tc.avg_return_value
+FROM aggregate_stats a
+LEFT JOIN top_customers tc ON a.s_store_sk = (
+    SELECT s_store_sk 
+    FROM store 
+    WHERE s_number_employees = (
+        SELECT MAX(s_number_employees) 
+        FROM store)) 
+ORDER BY a.avg_profit DESC, tc.total_returns DESC
+LIMIT 10;

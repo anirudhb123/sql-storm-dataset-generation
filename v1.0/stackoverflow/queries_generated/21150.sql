@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(MAX(b.Class), 0) AS HighestBadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        hp.PostId,
+        hp.CreationDate AS CloseDate,
+        hp.UserId AS ClosedByUserId
+    FROM 
+        PostHistory hp
+    INNER JOIN 
+        Posts p ON hp.PostId = p.Id
+    WHERE 
+        hp.PostHistoryTypeId = 10 
+        AND hp.CreationDate >= NOW() - INTERVAL '1 month'
+),
+UserVoteCount AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.CommentCount,
+    pd.OwnerName,
+    cp.CloseDate,
+    uvc.TotalVotes,
+    uvc.UpVotesCount,
+    uvc.DownVotesCount,
+    CASE 
+        WHEN cp.ClosedPostId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsClosed,
+    COALESCE(pd.HighestBadgeClass, 'No badge') AS HighestBadge,
+    CASE 
+        WHEN pd.Score IS NULL THEN NULL 
+        WHEN pd.Score > 100 THEN 'Highly Rated' 
+        WHEN pd.Score BETWEEN 10 AND 100 THEN 'Moderately Rated' 
+        ELSE 'Low Rated' 
+    END AS RatingCategory
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    ClosedPosts cp ON pd.PostId = cp.PostId
+LEFT JOIN 
+    UserVoteCount uvc ON pd.OwnerUserId = uvc.UserId
+WHERE 
+    pd.RankByScore <= 5
+ORDER BY 
+    pd.Score DESC, pd.CreationDate DESC;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_growth AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        1 AS growth_stage
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        growth_stage + 1
+    FROM web_sales
+    JOIN sales_growth ON web_sales.ws_sold_date_sk = sales_growth.ws_sold_date_sk + 1 
+                       AND web_sales.ws_item_sk = sales_growth.ws_item_sk
+    WHERE growth_stage < 10
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+address_customer AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY c.c_customer_sk) AS row_num
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_customers AS (
+    SELECT 
+        ac.c_customer_sk,
+        ac.c_first_name,
+        ac.c_last_name,
+        ac.ca_city,
+        ac.ca_state,
+        s.ss_net_paid,
+        RANK() OVER (PARTITION BY ac.ca_state ORDER BY s.ss_net_paid DESC) AS rank
+    FROM address_customer ac
+    JOIN store_sales s ON ac.c_customer_sk = s.ss_customer_sk
+    WHERE ac.row_num <= 10
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.ca_city,
+    tc.ca_state,
+    COALESCE(SUM(sg.total_profit), 0) AS total_growth_profit
+FROM top_customers tc
+LEFT JOIN sales_growth sg ON tc.c_customer_sk = sg.ws_item_sk
+GROUP BY 
+    tc.c_customer_sk, 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    tc.ca_city, 
+    tc.ca_state
+HAVING COALESCE(SUM(sg.total_profit), 0) > 1000
+ORDER BY tc.ca_state, total_growth_profit DESC
+LIMIT 100;

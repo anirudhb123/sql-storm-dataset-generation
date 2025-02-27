@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+RankedSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS rnk
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+AvailableParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+)
+SELECT 
+    r.region_name,
+    sa.s_name AS supplier_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(os.o_totalprice) AS avg_order_value,
+    SUM(ap.total_sales) AS total_part_sales,
+    CASE 
+        WHEN COALESCE(c.c_acctbal, 0) > 500 THEN 'High'
+        ELSE 'Low'
+    END AS customer_balance_category
+FROM region r 
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier sa ON n.n_nationkey = sa.s_nationkey 
+LEFT JOIN RankedSales os ON os.o_orderkey = sa.s_suppkey 
+LEFT JOIN AvailableParts ap ON sa.s_suppkey = ap.p_partkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+WHERE sa.s_suppkey IS NOT NULL
+GROUP BY r.region_name, sa.s_name, c.c_acctbal
+HAVING SUM(ap.total_sales) > 1000
+ORDER BY total_part_sales DESC
+LIMIT 10;

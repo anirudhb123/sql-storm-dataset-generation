@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  -- BountyStart, BountyClose
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        AnswerCount, 
+        TotalBounty,
+        UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        UserRank <= 10  -- Get top 10 users based on activity
+), RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    TU.UserId,
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount, 
+    TU.AnswerCount,
+    TU.TotalBounty,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts RP ON TU.UserId = RP.OwnerDisplayName
+WHERE 
+    RP.RecentPostRank <= 3  -- Get up to 3 recent posts per user
+ORDER BY 
+    TU.Reputation DESC, 
+    RP.CreationDate DESC;

@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RatedActors AS (
+    SELECT 
+        ci.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(COALESCE(CAST(mvi.info AS FLOAT), 0)) AS average_rating
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_info mvi ON ci.movie_id = mvi.movie_id 
+        AND mvi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY ci.person_id, ak.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 1
+),
+
+PopularMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM MovieHierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+    HAVING COUNT(DISTINCT ci.person_id) > 5
+),
+
+ActorsWithLinks AS (
+    SELECT 
+        ra.actor_name,
+        COALESCE(pm.actor_count, 0) AS popular_movie_count,
+        ra.average_rating
+    FROM RatedActors ra
+    LEFT JOIN (
+        SELECT DISTINCT ci.person_id, COUNT(pm.movie_id) AS actor_count
+        FROM cast_info ci
+        JOIN PopularMovies pm ON ci.movie_id = pm.movie_id
+        GROUP BY ci.person_id
+    ) pm ON ra.person_id = pm.person_id
+)
+
+SELECT 
+    actor_name,
+    popular_movie_count,
+    average_rating,
+    ROW_NUMBER() OVER (ORDER BY average_rating DESC NULLS LAST) AS rating_rank
+FROM ActorsWithLinks
+WHERE average_rating IS NOT NULL
+ORDER BY rating_rank, actor_name
+LIMIT 10;

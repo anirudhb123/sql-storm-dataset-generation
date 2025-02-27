@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(mi.info::numeric) AS avg_rating,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    CASE 
+        WHEN MIN(mh.hierarchy_level) > 1 THEN 'Linked Movie'
+        ELSE 'Original Movie'
+    END AS movie_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id 
+    AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2
+ORDER BY 
+    avg_rating DESC NULLS LAST;

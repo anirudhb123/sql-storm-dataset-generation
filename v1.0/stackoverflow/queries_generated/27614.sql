@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+DistinctTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) ) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+),
+CountedTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagFrequency
+    FROM 
+        DistinctTags
+    GROUP BY 
+        TagName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Author,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.AnswerCount,
+    ct.TagFrequency
+FROM 
+    RankedPosts rp
+JOIN 
+    CountedTags ct ON rp.TagRank = ct.TagFrequency
+WHERE 
+    rp.TagRank = 1  -- Get top-ranked post per tag
+ORDER BY 
+    rp.Score DESC,
+    rp.CreationDate DESC
+LIMIT 100;  -- Limit to top 100 results for benchmarking

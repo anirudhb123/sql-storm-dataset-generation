@@ -1,0 +1,70 @@
+
+WITH address_parts AS (
+    SELECT 
+        ca_address_id,
+        ca_street_number || ' ' || ca_street_name || ' ' || ca_street_type AS full_address,
+        ca_city || ', ' || ca_state || ' ' || ca_zip AS location,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_country) AS country_upper,
+        LEFT(ca_zip, 5) AS zip_prefix
+    FROM 
+        customer_address
+),
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CASE
+            WHEN cd_purchase_estimate > 10000 THEN 'High'
+            WHEN cd_purchase_estimate BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low'
+        END AS purchase_level,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+customer_info AS (
+    SELECT 
+        c_customer_id,
+        c_first_name || ' ' || c_last_name AS full_name,
+        c_email_address,
+        cd.cd_gender,
+        cd.purchase_level,
+        ad.full_address,
+        ad.location
+    FROM 
+        customer c
+    JOIN 
+        demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        address_parts ad ON c.c_current_addr_sk = ad.ca_address_id
+),
+sales_info AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.email_address,
+    ci.gender,
+    ci.purchase_level,
+    ad.full_address,
+    ad.location,
+    COALESCE(si.total_sales, 0) AS total_sales,
+    COALESCE(si.order_count, 0) AS order_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_info si ON ci.c_customer_sk = si.ws_bill_customer_sk
+WHERE 
+    LENGTH(ci.email_address) > 15
+ORDER BY 
+    total_sales DESC, ci.full_name;

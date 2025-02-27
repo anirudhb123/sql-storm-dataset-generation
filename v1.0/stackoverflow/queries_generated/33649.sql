@@ -1,0 +1,70 @@
+WITH RecursivePosts AS (
+    SELECT Id, Title, Score, ParentId, CreationDate, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.Score, p.ParentId, p.CreationDate, rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.Id
+),
+RankedPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        RANK() OVER (PARTITION BY rp.Level ORDER BY rp.Score DESC) AS Rank
+    FROM RecursivePosts rp
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(up.UpVotes, 0) AS UpVotes,
+        COALESCE(dn.DownVotes, 0) AS DownVotes,
+        (COALESCE(up.UpVotes, 0) - COALESCE(dn.DownVotes, 0)) AS NetVotes,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpVotes
+    LEFT JOIN Votes dn ON p.Id = dn.PostId AND dn.VoteTypeId = 3 -- DownVotes
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseEventCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY ph.PostId
+),
+FinalResult AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.NetVotes,
+        ps.CommentCount,
+        COALESCE(cp.CloseEventCount, 0) AS CloseEventCount
+    FROM PostStats ps
+    LEFT JOIN ClosedPosts cp ON ps.Id = cp.PostId
+)
+SELECT 
+    fr.Id,
+    fr.Title,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.NetVotes,
+    fr.CommentCount,
+    fr.CloseEventCount,
+    CASE 
+        WHEN fr.CloseEventCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM FinalResult fr
+WHERE fr.NetVotes > 5 -- Filter for posts with more than 5 net votes
+ORDER BY fr.CommentCount DESC, fr.CloseEventCount DESC
+LIMIT 25;

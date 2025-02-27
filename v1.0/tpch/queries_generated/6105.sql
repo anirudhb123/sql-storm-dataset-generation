@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.*, 
+        ROW_NUMBER() OVER (ORDER BY total_order_value DESC) AS order_rank
+    FROM CustomerOrders c
+    WHERE total_order_value > 10000
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT h.c_custkey) AS high_value_customer_count,
+    AVG(h.total_order_value) AS average_high_value,
+    SUM(rs.total_supply_cost) AS total_supply_cost_for_high_value_customers
+FROM rankSuppliers rs
+JOIN HighValueCustomers h ON rs.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN part p ON ps.ps_partkey = p.p_partkey 
+    WHERE p.p_brand IN (
+          SELECT DISTINCT p_brand 
+          FROM part 
+          WHERE p_size > 10
+    )
+)
+JOIN nation n ON h.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE rs.rank = 1
+GROUP BY r.r_name
+ORDER BY high_value_customer_count DESC;

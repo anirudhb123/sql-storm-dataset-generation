@@ -1,0 +1,57 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COUNT(p.Id) OVER (PARTITION BY t.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        COUNT(DISTINCT p.Id) AS QuestionCount
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id OR p.OwnerUserId IS NULL 
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    WHERE u.Reputation > 100
+    GROUP BY u.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    ua.TotalViews,
+    ua.TotalCommentScore,
+    ua.TotalUpVotes,
+    ua.QuestionCount,
+    rt.TagName,
+    rt.PostCount,
+    rt.AnswerCount
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN RecursiveTagCounts rt ON rt.TagId IN (
+    SELECT DISTINCT unnest(string_to_array(p.Tags, '><'))::int
+    FROM Posts p WHERE p.OwnerUserId = u.Id
+)
+WHERE rt.PostCount > 0
+ORDER BY r.AvgTagUsage DESC, u.Reputation DESC
+LIMIT 100;

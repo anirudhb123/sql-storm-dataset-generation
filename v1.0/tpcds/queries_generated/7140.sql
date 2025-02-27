@@ -1,0 +1,76 @@
+
+WITH CustomerActivity AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_quantity_purchased,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_web_page_sk) AS unique_web_pages,
+        DATEDIFF(CURRENT_DATE, DATE(MIN(ws.ws_sold_date_sk))) AS days_since_first_purchase
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        COUNT(ws.ws_order_number) AS usage_count
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_sk, p.p_promo_name
+),
+CustomerSummary AS (
+    SELECT 
+        ca.c_customer_sk,
+        ca.c_first_name,
+        ca.c_last_name,
+        ca.cd_gender,
+        ca.cd_marital_status,
+        ca.total_quantity_purchased,
+        ca.total_sales,
+        ca.total_orders,
+        ca.unique_web_pages,
+        ca.days_since_first_purchase,
+        COALESCE(p.usage_count, 0) AS promo_usage_count
+    FROM 
+        CustomerActivity ca
+    LEFT JOIN 
+        Promotions p ON ca.c_customer_sk = p.p_promo_sk  -- Assuming we wish to join on customer_id
+)
+SELECT 
+    customer_summary.c_customer_sk,
+    customer_summary.c_first_name,
+    customer_summary.c_last_name,
+    customer_summary.cd_gender,
+    customer_summary.cd_marital_status,
+    customer_summary.total_quantity_purchased,
+    customer_summary.total_sales,
+    customer_summary.total_orders,
+    customer_summary.unique_web_pages,
+    customer_summary.days_since_first_purchase,
+    customer_summary.promo_usage_count,
+    CASE 
+        WHEN customer_summary.total_sales > 1000 THEN 'High Value'
+        WHEN customer_summary.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    CustomerSummary customer_summary
+WHERE 
+    customer_summary.total_orders > 5
+ORDER BY 
+    customer_summary.total_sales DESC
+LIMIT 100;

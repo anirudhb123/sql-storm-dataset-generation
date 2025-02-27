@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           0 AS level,
+           CAST(m.title AS text) AS path
+    FROM aka_title m 
+    WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           mh.level + 1 AS level,
+           CAST(mh.path || ' 
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title linked ON linked.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = linked.id
+),
+cast_details AS (
+    SELECT c.movie_id, 
+           a.name as actor_name,
+           a.id AS actor_id,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name a ON a.person_id = c.person_id
+    WHERE a.name IS NOT NULL
+),
+movie_metadata AS (
+    SELECT mt.movie_id, 
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+           COUNT(mc.company_id) AS company_count,
+           AVG(m.prod_year) AS avg_production_year
+    FROM movie_keyword mk
+    JOIN keyword k ON k.id = mk.keyword_id
+    JOIN movie_companies mc ON mc.movie_id = mk.movie_id
+    JOIN aka_title m ON m.id = mk.movie_id
+    GROUP BY mt.movie_id
+)
+SELECT mh.movie_id,
+       mh.title AS movie_title,
+       mh.production_year,
+       cd.actor_name,
+       cd.actor_rank,
+       COALESCE(mm.keywords, 'No keywords') AS movie_keywords,
+       COALESCE(mm.company_count, 0) AS production_company_count,
+       CASE 
+           WHEN cd.actor_rank = 1 THEN 'Lead Role' 
+           ELSE 'Supporting Role' 
+       END AS role_description,
+       CASE 
+           WHEN mh.level = 0 THEN 'Top Level Movie'
+           ELSE 'Part of a Series'
+       END AS movie_hierarchy_status
+FROM movie_hierarchy mh
+LEFT JOIN cast_details cd ON cd.movie_id = mh.movie_id
+LEFT JOIN movie_metadata mm ON mm.movie_id = mh.movie_id
+WHERE mh.production_year BETWEEN 2000 AND 2023
+  AND (cd.actor_name IS NOT NULL OR mm.keywords IS NOT NULL)
+UNION ALL
+SELECT mh.movie_id,
+       CONCAT(mh.title, ' (Unlinked)') AS movie_title,
+       mh.production_year,
+       'Unknown Actor' AS actor_name,
+       NULL AS actor_rank,
+       'No keywords' AS movie_keywords,
+       0 AS production_company_count,
+       'No Role' AS role_description,
+       'Uniquely Unlinked' AS movie_hierarchy_status
+FROM movie_hierarchy mh
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM cast_details cd 
+    WHERE cd.movie_id = mh.movie_id
+)
+ORDER BY movie_hierarchy_status, mh.production_year DESC, mh.title;

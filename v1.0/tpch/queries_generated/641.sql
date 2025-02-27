@@ -1,0 +1,85 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' 
+        AND o.o_orderdate <= DATE '2021-12-31'
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty * ps.ps_supplycost AS supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(sp.supply_value) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        SupplierPart sp ON p.p_partkey = sp.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(sp.supply_value) > 10000
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue,
+        SUM(lo.l_quantity) AS total_quantity,
+        COUNT(DISTINCT lo.l_partkey) AS unique_parts
+    FROM 
+        lineitem lo
+    WHERE 
+        lo.l_shipdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    o.o_orderdate,
+    COALESCE(od.revenue, 0) AS order_revenue,
+    COALESCE(od.total_quantity, 0) AS order_total_quantity,
+    COALESCE(od.unique_parts, 0) AS order_unique_parts,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finalized' 
+        ELSE 'Pending' 
+    END AS order_status,
+    CASE 
+        WHEN hvp.total_supply_value IS NOT NULL THEN 'High Value Part' 
+        ELSE 'Regular Part' 
+    END AS part_type_info
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    OrderDetails od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    HighValueParts hvp ON hvp.p_partkey = (
+        SELECT 
+            ll.l_partkey 
+        FROM 
+            lineitem ll 
+        WHERE 
+            ll.l_orderkey = o.o_orderkey 
+        LIMIT 1
+    )
+WHERE 
+    o.order_rank <= 10
+ORDER BY 
+    o.o_totalprice DESC;

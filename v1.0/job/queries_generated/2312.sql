@@ -1,0 +1,44 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS keyword_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        c.role_id,
+        r.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id, c.role_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.person_role_id = r.id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    COALESCE(cr.role, 'Unknown Role') AS role,
+    SUM(cr.role_count) OVER (PARTITION BY md.movie_id) AS total_roles,
+    md.keyword AS first_keyword,
+    md.keyword_rank
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CastRoles cr ON md.movie_id = cr.movie_id
+WHERE 
+    (md.production_year > 2000 AND cr.role_count > 1)
+    OR (md.production_year <= 2000 AND md.keyword_rank = 1)
+ORDER BY 
+    md.production_year DESC, total_roles DESC;

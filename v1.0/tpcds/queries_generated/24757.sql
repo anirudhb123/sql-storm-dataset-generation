@@ -1,0 +1,71 @@
+
+WITH RankedStores AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_state,
+        ROW_NUMBER() OVER (PARTITION BY s_state ORDER BY s_net_profit DESC) AS rn
+    FROM (
+        SELECT 
+            ss_store_sk,
+            SUM(ss_net_profit) AS s_net_profit
+        FROM store_sales
+        GROUP BY ss_store_sk
+    ) AS StoreProfits
+    JOIN store ON StoreProfits.ss_store_sk = store.s_store_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_state,
+        COALESCE(COUNT(DISTINCT wr_order_number), 0) AS web_return_count,
+        COALESCE(SUM(wr_return_amt), 0) AS total_web_return_amount
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, ca.ca_state
+),
+IncomeStatistics AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(hd.hd_dep_count) as average_dependency_count
+    FROM household_demographics hd
+    JOIN customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY hd.hd_income_band_sk
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.ca_state,
+    COUNT(DISTINCT cs.web_return_count) AS unique_web_returns,
+    ISNULL(sum(CASE WHEN cs.total_web_return_amount > 100 THEN 1 ELSE 0 END), 0) AS high_value_web_returns,
+    COALESCE(MAX(ss.total_profit), 0) AS max_sales_profit,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COALESCE(is.customer_count, 0) AS customer_count_in_income_band,
+    COALESCE(is.average_dependency_count, 0) AS average_dependency_count
+FROM CustomerData cs
+LEFT JOIN IncomeStatistics is ON cs.ca_state = (SELECT ca_state FROM customer_address WHERE ca_address_sk = c.c_current_addr_sk)
+LEFT JOIN RankedStores rs ON cs.ca_state = rs.s_state AND rs.rn = 1
+LEFT JOIN SalesData ss ON ss.ws_item_sk = (SELECT i_item_sk FROM item WHERE i_item_id = 'SOME_IDENTIFIER_TO_FILTER')
+LEFT JOIN income_band ib ON is.hd_income_band_sk = ib.ib_income_band_sk
+GROUP BY 
+    cs.c_customer_sk, cs.cd_gender, cs.cd_marital_status, cs.ca_state, ib.ib_lower_bound, ib.ib_upper_bound
+HAVING 
+    SUM(COALESCE(cs.total_web_return_amount, 0)) >= 500 OR COUNT(DISTINCT cs.web_return_count) > 5
+ORDER BY 
+    cs.ca_state, unique_web_returns DESC, max_sales_profit ASC;

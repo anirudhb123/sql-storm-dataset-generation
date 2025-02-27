@@ -1,0 +1,98 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+        COALESCE(CAST(SUBSTRING(t.title FROM '([0-9]+)') AS INTEGER), 1) AS title_numeric_part
+    FROM 
+        aka_title AS t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+
+ActorsWithRoles AS (
+    SELECT
+        a.id AS actor_id,
+        a.person_id,
+        ak.name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_order,
+        CASE 
+            WHEN c.nr_order IS NULL THEN 'Unknown'
+            ELSE rt.role 
+        END AS role_name
+    FROM 
+        aka_name AS ak
+    JOIN 
+        cast_info AS c ON ak.person_id = c.person_id
+    LEFT JOIN 
+        role_type AS rt ON c.role_id = rt.id
+),
+
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS company_count,
+        MAX(ct.kind) AS primary_company_type
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON mc.company_id = c.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+EnrichedMovieData AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        mv.company_count,
+        mv.primary_company_type,
+        r.actor_id,
+        r.name,
+        r.role_order,
+        r.role_name
+    FROM 
+        RankedMovies AS rm
+    FULL OUTER JOIN 
+        MovieCompanies AS mv ON rm.title_id = mv.movie_id
+    LEFT JOIN 
+        ActorsWithRoles AS r ON mv.movie_id = r.movie_id
+)
+
+SELECT 
+    emd.title,
+    emd.production_year,
+    COUNT(DISTINCT emd.actor_id) AS total_actors,
+    AVG(CASE WHEN emd.role_order IS NOT NULL THEN emd.role_order ELSE 0 END) AS avg_role_order,
+    STRING_AGG(DISTINCT emd.name, ', ') AS actor_names,
+    CASE 
+        WHEN emd.company_count = 0 THEN 'No Companies'
+        ELSE emd.primary_company_type
+    END AS company_type_info,
+    MIN(CASE 
+            WHEN emd.role_name IS NOT NULL THEN 1 
+            ELSE 0 
+       END) AS has_roles,
+
+    CASE 
+        WHEN COUNT(DISTINCT emd.actor_id) > 10 THEN 'Large Cast'
+        WHEN COUNT(DISTINCT emd.actor_id) > 0 THEN 'Small Cast'
+        ELSE 'No Cast'
+    END AS cast_size_category
+
+FROM 
+    EnrichedMovieData AS emd
+WHERE 
+    emd.production_year > 2000
+GROUP BY 
+    emd.title_id, emd.title, emd.production_year, emd.company_count, emd.primary_company_type
+HAVING 
+    COUNT(DISTINCT emd.actor_id) <= 50 OR (COUNT(DISTINCT emd.actor_id) > 100 AND emd.company_count > 2)
+ORDER BY 
+    emd.production_year DESC, avg_role_order ASC;

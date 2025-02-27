@@ -1,0 +1,38 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, 
+           CAST(m.production_year AS TEXT) AS production_year, 
+           1 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title AS movie_title, 
+           CAST(m.production_year AS TEXT) AS production_year, 
+           mh.level + 1 AS level
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    ak.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS actor_roles,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    SUM(CASE 
+            WHEN mi.note IS NOT NULL THEN length(mi.info) 
+            ELSE 0 END) AS total_info_length
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title at ON ci.movie_id = at.id
+LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+WHERE ak.name IS NOT NULL
+AND ak.name NOT LIKE '%[0-9]%'
+GROUP BY ak.name, at.title, ak.production_year
+HAVING COUNT(DISTINCT mc.company_id) > 0
+ORDER BY actor_name, movie_title;

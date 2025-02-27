@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        SUM(ws.ws_net_profit) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name, c.c_birth_year
+    
+    UNION ALL
+    
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_customer_id,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.c_birth_year,
+        sh.total_sales + SUM(ws.ws_net_profit) AS total_sales
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        sh.c_customer_sk, sh.c_customer_id, sh.c_first_name, sh.c_last_name, sh.c_birth_year, sh.total_sales
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        s.total_sales
+    FROM 
+        sales_hierarchy s
+    JOIN 
+        customer c ON s.c_customer_sk = c.c_customer_sk
+    WHERE 
+        s.total_sales > (SELECT AVG(total_sales) FROM sales_hierarchy)
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    CASE 
+        WHEN tc.total_sales BETWEEN 1 AND 100 THEN 'Low'
+        WHEN tc.total_sales BETWEEN 101 AND 1000 THEN 'Medium'
+        ELSE 'High'
+    END AS sales_category,
+    ROW_NUMBER() OVER (ORDER BY tc.total_sales DESC) AS sales_rank
+FROM 
+    top_customers tc 
+WHERE 
+    tc.total_sales IS NOT NULL
+ORDER BY 
+    tc.total_sales DESC;

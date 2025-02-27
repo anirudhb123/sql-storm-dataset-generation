@@ -1,0 +1,72 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid_inc_tax) AS total_paid
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+), 
+item_analysis AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(SUM(inv.inv_quantity_on_hand), 0) AS available_stock,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(ROUND(ci.total_paid, 2), 0) AS total_paid,
+    sa.total_sales,
+    ia.available_stock,
+    ia.sales_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary sa ON ci.c_customer_sk IN (
+        SELECT ws_bill_customer_sk 
+        FROM web_sales 
+        WHERE ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price > 100)
+    )
+LEFT JOIN 
+    item_analysis ia ON ia.i_item_sk IN (
+        SELECT ws_item_sk 
+        FROM web_sales 
+        GROUP BY ws_item_sk 
+        HAVING COUNT(ws_order_number) > 10
+    )
+WHERE 
+    ci.total_paid IS NOT NULL OR ia.available_stock > 0
+ORDER BY 
+    ci.total_paid DESC, sa.total_sales DESC
+LIMIT 100;

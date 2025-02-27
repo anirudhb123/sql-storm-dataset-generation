@@ -1,0 +1,58 @@
+WITH TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000.00
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_totalprice > 500.00
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineItemValue,
+        COUNT(*) AS LineItemCount,
+        AVG(l.l_quantity) AS AvgQuantity,
+        MAX(l.l_shipdate) AS LatestShipDate
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    TOPS.s_name,
+    COALESCE(HVO.o_orderkey, 'N/A') AS OrderKey,
+    HVO.o_totalprice AS OrderTotal,
+    COALESCE(LIS.TotalLineItemValue, 0) AS TotalLineItemValue,
+    LIS.LineItemCount,
+    LIS.AvgQuantity,
+    LIS.LatestShipDate
+FROM 
+    TopSuppliers TOPS
+LEFT JOIN 
+    HighValueOrders HVO ON HVO.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l JOIN partsupp ps ON l.l_partkey = ps.ps_partkey WHERE ps.ps_supplycost > 50)
+LEFT JOIN 
+    LineItemStats LIS ON HVO.o_orderkey = LIS.l_orderkey
+WHERE 
+    TOPS.TotalSupplyCost IS NOT NULL
+ORDER BY 
+    TOPS.TotalSupplyCost DESC, HVO.o_totalprice DESC;

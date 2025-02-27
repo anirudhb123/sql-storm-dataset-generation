@@ -1,0 +1,88 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TotalSales AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY
+        l.l_orderkey
+),
+SupplierProduct AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold
+    FROM
+        partsupp ps
+    LEFT JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY
+        ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty
+),
+PriceAnalysis AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        CASE
+            WHEN p.p_retailprice < (SELECT AVG(p1.p_retailprice) FROM part p1) THEN 'below avg'
+            WHEN p.p_retailprice = (SELECT AVG(p1.p_retailprice) FROM part p1) THEN 'avg'
+            ELSE 'above avg'
+        END AS price_category
+    FROM
+        part p
+),
+RegionSupplier AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        r.r_regionkey, r.r_name
+)
+SELECT
+    o.o_orderkey,
+    RO.o_orderstatus,
+    PS.p_name,
+    PS.total_quantity_sold,
+    T.total_sales,
+    R.supplier_count,
+    P.price_category
+FROM
+    RankedOrders RO
+JOIN
+    TotalSales T ON RO.o_orderkey = T.l_orderkey
+JOIN
+    SupplierProduct PS ON PS.ps_availqty > 0
+LEFT JOIN
+    PriceAnalysis P ON P.p_partkey = PS.ps_partkey
+JOIN
+    RegionSupplier R ON R.supplier_count > 5
+WHERE
+    RO.order_rank <= 10
+    AND (P.price_category = 'below avg' OR P.price_category = 'above avg')
+ORDER BY
+    o.o_orderkey, PS.total_quantity_sold DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

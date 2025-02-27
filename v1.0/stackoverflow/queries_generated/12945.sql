@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  -- Considering only Questions
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rb.BadgeCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.TotalVotes,
+    rp.CreationDate,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+LEFT JOIN 
+    PostVoteStats pvs ON rp.PostId = pvs.PostId
+WHERE 
+    rp.Rank <= 5  -- Getting top 5 posts per user
+ORDER BY 
+    rp.OwnerUserId, rp.Score DESC;

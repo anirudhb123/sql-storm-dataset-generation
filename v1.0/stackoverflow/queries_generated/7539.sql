@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostStatistics AS (
+    SELECT 
+        pst.PostTypeId,
+        COUNT(pst.PostId) AS TotalPosts,
+        AVG(pst.ViewCount) AS AvgViewCount,
+        SUM(pst.Score) AS TotalScore
+    FROM 
+        RankedPosts pst
+    GROUP BY 
+        pst.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Author,
+        rp.Score,
+        rp.ViewCount,
+        ps.TotalPosts,
+        ps.AvgViewCount,
+        ps.TotalScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostStatistics ps ON rp.PostTypeId = ps.PostTypeId
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.Author,
+    tp.Score,
+    tp.ViewCount,
+    tp.TotalPosts,
+    tp.AvgViewCount,
+    tp.TotalScore
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC;

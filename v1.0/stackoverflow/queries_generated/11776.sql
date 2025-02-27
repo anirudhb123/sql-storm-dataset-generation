@@ -1,0 +1,57 @@
+-- Performance benchmarking query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(V.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownvotes,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId 
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        PT.Name AS PostType,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.AnswerCount) AS TotalAnswers,
+        SUM(P.CommentCount) AS TotalComments,
+        SUM(P.FavoriteCount) AS TotalFavorites
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY PT.Name
+),
+VoteStatistics AS (
+    SELECT 
+        VT.Name AS VoteType,
+        COUNT(V.Id) AS VoteCount
+    FROM Votes V
+    JOIN VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY VT.Name
+)
+SELECT 
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalUpvotes,
+    US.TotalDownvotes,
+    US.TotalBadges,
+    US.TotalViews,
+    PS.PostType,
+    PS.PostCount,
+    PS.AvgScore,
+    PS.TotalViews AS PostTypeViews,
+    PS.TotalAnswers,
+    PS.TotalComments,
+    PS.TotalFavorites,
+    VS.VoteType,
+    VS.VoteCount
+FROM UserStatistics US
+JOIN PostStatistics PS ON US.TotalPosts > 0
+JOIN VoteStatistics VS ON US.TotalPosts > 0
+ORDER BY US.TotalViews DESC, PS.PostCount DESC;

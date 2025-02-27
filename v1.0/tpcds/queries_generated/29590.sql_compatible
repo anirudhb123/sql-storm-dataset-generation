@@ -1,0 +1,67 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS total_addresses,
+        SUM(CASE WHEN ca_city ILIKE '%Spring%' THEN 1 ELSE 0 END) AS spring_count,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        MAX(LENGTH(ca_street_name)) AS max_street_name_length
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd_dep_count) AS max_dependents
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_addr_sk,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_net_profit) AS avg_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_addr_sk
+),
+CombinedStats AS (
+    SELECT 
+        a.ca_state,
+        c.cd_gender,
+        a.total_addresses,
+        c.total_customers,
+        s.total_sales,
+        s.avg_profit,
+        a.spring_count,
+        a.avg_street_name_length,
+        a.ca_address_sk
+    FROM 
+        AddressStats a
+    JOIN 
+        CustomerStats c ON (a.total_addresses > 1000)
+    JOIN 
+        SalesStats s ON (s.ws_bill_addr_sk = a.ca_address_sk)
+)
+SELECT 
+    ca_state,
+    cd_gender,
+    SUM(total_addresses) AS total_addresses,
+    SUM(total_customers) AS total_customers,
+    SUM(total_sales) AS total_sales,
+    AVG(avg_profit) AS overall_avg_profit,
+    SUM(spring_count) AS total_spring_addresses,
+    AVG(avg_street_name_length) AS avg_length_of_street_names
+FROM 
+    CombinedStats
+GROUP BY 
+    ca_state, cd_gender
+ORDER BY 
+    total_sales DESC, total_addresses DESC;

@@ -1,0 +1,62 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_returned_date_sk,
+        sr_return_quantity,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL AND sr_return_quantity > 0
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        MAX(cd_purchase_estimate) AS max_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd_purchase_estimate > 5000
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+ReturnDetails AS (
+    SELECT 
+        r.sr_item_sk,
+        r.sr_ret,
+        r.return_quantity,
+        COALESCE(a.ca_city, 'Unknown') AS return_city,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(r.return_quantity) OVER (PARTITION BY r.sr_item_sk) AS avg_return_qty,
+        DENSE_RANK() OVER (ORDER BY SUM(r.return_quantity) DESC) AS item_rank
+    FROM RankedReturns r
+    LEFT JOIN customer c ON r.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    WHERE r.return_rank = 1
+    GROUP BY r.sr_item_sk, r.sr_returned_date_sk, r.return_quantity, a.ca_city
+),
+FinalResults AS (
+    SELECT 
+        h.c_customer_sk,
+        h.c_first_name,
+        h.c_last_name,
+        COALESCE(rd.return_city, 'N/A') AS city,
+        SUM(rd.return_quantity) AS total_return_qty,
+        COUNT(rd.customer_count) FILTER (WHERE rd.customer_count > 5) AS multiple_returns
+    FROM HighValueCustomers h
+    JOIN ReturnDetails rd ON h.c_customer_sk = rd.sr_customer_sk
+    GROUP BY h.c_customer_sk, h.c_first_name, h.c_last_name, rd.return_city
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    CASE 
+        WHEN f.multiple_returns > 0 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_type,
+    f.city,
+    f.total_return_qty,
+    f.total_return_qty / NULLIF(COALESCE(NULLIF(MAX(f.total_return_qty), 0), NULL), 0) AS return_ratio
+FROM FinalResults f
+WHERE f.total_return_qty > (SELECT AVG(total_return_qty) FROM FinalResults)
+ORDER BY return_type DESC, f.total_return_qty DESC;

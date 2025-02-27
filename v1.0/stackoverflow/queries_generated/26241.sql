@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        LATERAL (SELECT * FROM unnest(string_to_array(p.Tags, '><')) AS tag WHERE tag <> '') t ON TRUE
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        p.Title,
+        ph.PostHistoryTypeId,
+        p.Body,
+        STRING_AGG(DISTINCT ph.Text, '; ') AS EditDetails
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edits to Title, Body or Tags
+    GROUP BY 
+        ph.UserDisplayName, ph.PostId, ph.EditDate, ph.Comment, p.Title, ph.PostHistoryTypeId, p.Body
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.ViewCount,
+    tp.Score,
+    tp.Author,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.Tags,
+    COALESCE(phd.EditDetails, 'No edits available') AS EditDetails,
+    COUNT(DISTINCT v.Id) AS TotalVotes
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Votes v ON v.PostId = tp.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON tp.PostId = phd.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.ViewCount, tp.Score, tp.Author, tp.CommentCount, tp.AnswerCount, tp.Tags, phd.EditDetails
+ORDER BY 
+    tp.ViewCount DESC, tp.Score DESC;

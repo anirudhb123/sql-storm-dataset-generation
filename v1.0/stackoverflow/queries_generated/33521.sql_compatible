@@ -1,0 +1,92 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursiveCTE R ON R.PostId = P.ParentId
+), RankedPosts AS (
+    SELECT 
+        R.PostId,
+        R.OwnerUserId,
+        R.Title,
+        R.CreationDate,
+        R.Score,
+        R.Level,
+        RANK() OVER (PARTITION BY R.OwnerUserId ORDER BY R.Score DESC) AS ScoreRank
+    FROM 
+        RecursiveCTE R
+), PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+), UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(PES.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(PES.AnswerCount, 0)) AS TotalAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts PES ON U.Id = PES.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalViews,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    PVS.VoteCount,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    RP.Level AS PostLevel,
+    RP.ScoreRank
+FROM 
+    UserPosts U
+LEFT JOIN 
+    RankedPosts RP ON U.UserId = RP.OwnerUserId
+LEFT JOIN 
+    PostVoteSummary PVS ON RP.PostId = PVS.PostId
+WHERE 
+    (U.TotalPosts > 10 OR U.TotalViews > 1000)
+    AND (RP.ScoreRank <= 5 OR RP.Score IS NULL)
+ORDER BY 
+    U.TotalPosts DESC, 
+    RP.Score DESC, 
+    PVS.VoteCount DESC;

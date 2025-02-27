@@ -1,0 +1,28 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), SupplierDetails AS (
+    SELECT rs.s_suppkey, rs.s_name, rs.total_supply_cost, n.n_name AS nation_name, 
+           ROW_NUMBER() OVER (PARTITION BY rs.nation_key ORDER BY rs.total_supply_cost DESC) AS rank
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+), PopularProducts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 10
+), SummaryStatistics AS (
+    SELECT AVG(total_supply_cost) AS avg_supply_cost, MAX(total_supply_cost) AS max_supply_cost, 
+           MIN(total_supply_cost) AS min_supply_cost
+    FROM RankedSuppliers
+)
+SELECT sd.s_suppkey, sd.s_name, sd.nation_name, pp.p_partkey, pp.p_name, pp.order_count, 
+       ss.avg_supply_cost, ss.max_supply_cost, ss.min_supply_cost
+FROM SupplierDetails sd
+CROSS JOIN PopularProducts pp
+CROSS JOIN SummaryStatistics ss
+WHERE sd.rank <= 5
+ORDER BY pp.order_count DESC, sd.total_supply_cost DESC;

@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        COUNT(DISTINCT PostId) AS PostCount,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes,
+        SUM(CommentsCount) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentsCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' + t.TagName + '%'
+    GROUP BY 
+        t.Id, t.TagName
+)
+
+SELECT 
+    u.UserId,
+    u.PostCount,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    u.TotalComments,
+    p.PostId,
+    p.PostTypeId,
+    p.VoteCount,
+    p.CommentCount,
+    t.TagId,
+    t.TagName,
+    t.TotalViews,
+    t.PostCount AS TagPostCount
+FROM 
+    UserStats u
+JOIN 
+    PostStats p ON u.UserId = p.OwnerUserId
+JOIN 
+    TagStats t ON p.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' + t.TagName + '%')
+ORDER BY 
+    u.TotalUpVotes DESC, p.VoteCount DESC, t.TotalViews DESC
+LIMIT 100;

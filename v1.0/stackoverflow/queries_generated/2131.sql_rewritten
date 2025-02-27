@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        p.OwnerUserId,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) AND 
+        ph.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    COALESCE(up.TotalBounty, 0) AS TotalBounty,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ph.HistoryDate,
+    ph.Comment
+FROM 
+    Users up
+LEFT JOIN 
+    UserReputation ur ON up.Id = ur.UserId
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    up.Reputation >= 1000
+ORDER BY 
+    up.Reputation DESC, 
+    rp.Score DESC;

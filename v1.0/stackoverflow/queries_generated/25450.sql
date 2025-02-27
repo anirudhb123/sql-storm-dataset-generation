@@ -1,0 +1,49 @@
+WITH string_processing AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'), 1) AS TagCount,
+        p.Body,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName, 
+        ph.CreationDate AS PostCreationDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY p.Id) AS LastEditDate,
+        st.Name AS StatusType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        MAX(b.Date) AS LatestBadgeDate 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    LEFT JOIN 
+        CloseReasonTypes st ON ph.PostHistoryTypeId = st.Id AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        p.Id, u.DisplayName, ph.CreationDate, st.Name
+)
+SELECT 
+    PostId,
+    Title,
+    Tags,
+    TagCount,
+    Body,
+    OwnerDisplayName,
+    PostCreationDate,
+    LastEditDate,
+    StatusType, 
+    CommentCount,
+    COALESCE(LatestBadgeDate, 'No Badges') AS LatestBadgeDate
+FROM 
+    string_processing
+WHERE 
+    TagCount > 3 
+    AND LastEditDate IS NOT NULL
+ORDER BY 
+    CommentCount DESC, 
+    LastEditDate DESC
+LIMIT 50;

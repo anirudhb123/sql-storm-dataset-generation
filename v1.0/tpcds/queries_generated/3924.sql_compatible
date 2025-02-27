@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+),
+CustomerStatistics AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_quantity) AS avg_quantity
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+ReturnStatistics AS (
+    SELECT
+        wr_returning_customer_sk AS c_customer_sk,
+        SUM(wr_return_amt) AS total_returned,
+        COUNT(wr_return_number) AS return_count,
+        AVG(wr_return_quantity) AS avg_return_quantity
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_spent,
+    cs.order_count,
+    rs.rank,
+    rs.ws_sales_price AS highest_price,
+    COALESCE(rs.ws_quantity, 0) AS quantity,
+    COALESCE(rs.ws_sales_price, 0) - COALESCE(rs.rank, 0) * 0.1 AS adjusted_price,
+    COALESCE(rs.ws_sales_price * cs.avg_quantity, 0) AS sales_per_avg_quantity,
+    COALESCE(rs_high.total_returned, 0) AS total_returned,
+    COALESCE(rs_high.return_count, 0) AS return_count
+FROM CustomerStatistics cs
+LEFT JOIN RankedSales rs ON cs.order_count >= 1 AND rs.ws_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_bill_customer_sk = cs.c_customer_id)
+LEFT JOIN ReturnStatistics rs_high ON cs.c_customer_id = rs_high.c_customer_sk
+WHERE (cs.total_spent IS NOT NULL AND cs.order_count > 0)
+ORDER BY cs.order_count DESC, cs.total_spent DESC;

@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND at.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        ci.person_id,
+        am.title_id,
+        COUNT(*) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name kn ON ci.person_id = kn.person_id
+    JOIN 
+        RankedMovies am ON ci.movie_id = am.title_id
+    GROUP BY 
+        ci.person_id, am.title_id
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        SUM(movie_count) AS total_movies
+    FROM 
+        ActorMovies
+    GROUP BY 
+        person_id
+    HAVING 
+        SUM(movie_count) > 5
+)
+SELECT 
+    a.id AS actor_id,
+    a.name,
+    COUNT(DISTINCT am.title_id) AS num_movies,
+    MAX(am.production_year) AS latest_movie_year,
+    STRING_AGG(DISTINCT am.title, ', ') AS movie_titles,
+    CASE 
+        WHEN MAX(am.production_year) IS NULL THEN 'No Movies'
+        ELSE 'Active Actor'
+    END AS actor_status
+FROM 
+    aka_name a
+LEFT JOIN 
+    ActorMovies am ON a.person_id = am.person_id
+LEFT JOIN 
+    company_name cn ON EXISTS (SELECT 1 FROM movie_companies mc WHERE mc.movie_id = am.title_id AND mc.company_id = cn.id)
+WHERE 
+    a.name IS NOT NULL
+    AND (a.name_pcode_cf IS NOT NULL OR a.name_pcode_nf IS NOT NULL)
+GROUP BY 
+    a.id, a.name
+ORDER BY 
+    num_movies DESC NULLS LAST, latest_movie_year DESC;

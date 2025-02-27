@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ws.web_site_sk, 
+           ws.web_name,
+           1 AS level,
+           ws.ws_sold_date_sk,
+           ws.ws_item_sk, 
+           SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk, ws.web_name, ws.ws_sold_date_sk, ws.ws_item_sk
+
+    UNION ALL
+
+    SELECT sh.web_site_sk, 
+           sh.web_name,
+           sh.level + 1,
+           sh.ws_sold_date_sk,
+           sh.ws_item_sk, 
+           SUM(ws.ws_net_profit) AS total_profit
+    FROM SalesHierarchy sh
+    JOIN web_sales ws ON sh.web_site_sk = ws.web_site_sk AND sh.ws_item_sk = ws.ws_item_sk
+    WHERE sh.level < 5 
+    GROUP BY sh.web_site_sk, sh.web_name, sh.level, sh.ws_sold_date_sk, sh.ws_item_sk
+),
+
+TotalSales AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_net_paid) AS total_net_paid,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+           MAX(ws.ws_ship_date_sk) AS last_ship_date,
+           DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS item_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+)
+
+SELECT ca.ca_city, 
+       ca.ca_state, 
+       SUM(ts.total_net_paid) AS city_revenue,
+       AVG(ts.total_orders) AS avg_orders_per_item,
+       MAX(th.total_profit) AS max_profit,
+       CASE 
+           WHEN SUM(ts.total_net_paid) IS NULL THEN 'No Sales'
+           ELSE 'Sales Recorded'
+       END AS sales_status
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN TotalSales ts ON c.c_customer_sk = ts.ws_item_sk
+LEFT JOIN SalesHierarchy th ON ts.ws_item_sk = th.ws_item_sk
+WHERE ca.ca_state IN ('CA', 'NY')
+AND (ts.total_orders > 0 OR ts.total_net_paid IS NULL)
+GROUP BY ca.ca_city, ca.ca_state
+HAVING SUM(ts.total_net_paid) > 10000
+ORDER BY city_revenue DESC;

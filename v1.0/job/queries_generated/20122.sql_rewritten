@@ -1,0 +1,40 @@
+WITH RecursiveTitleStats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        AVG(ci.nr_order) AS avg_order,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_assigned
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id
+),
+TopTitles AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY avg_order DESC) AS rank
+    FROM 
+        RecursiveTitleStats
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    tt.total_cast,
+    tt.avg_order,
+    tt.roles_assigned,
+    CASE 
+        WHEN tt.roles_assigned > 0 THEN ROUND(CAST(tt.total_cast AS numeric) / tt.roles_assigned, 2)
+        ELSE NULL 
+    END AS cast_to_roles_ratio
+FROM 
+    TopTitles tt
+WHERE 
+    tt.rank <= 10
+ORDER BY 
+    tt.cast_to_roles_ratio DESC NULLS LAST;

@@ -1,0 +1,79 @@
+WITH TagStats AS (
+    SELECT
+        tag.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId IN (10, 11, 12, 13, 14, 15) THEN 1 ELSE 0 END) AS CloseActionCount
+    FROM
+        Tags AS tag
+    LEFT JOIN
+        Posts AS p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY
+        tag.TagName
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM
+        Users AS u
+    LEFT JOIN
+        Badges AS b ON b.UserId = u.Id
+    GROUP BY
+        u.Id
+),
+PostEditHistory AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM
+        PostHistory AS ph
+    WHERE
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Tracking edits on title, body, and tags
+    GROUP BY
+        ph.PostId, ph.PostHistoryTypeId
+),
+BenchmarkResults AS (
+    SELECT
+        ts.TagName,
+        ts.PostCount,
+        ts.QuestionCount,
+        ts.AnswerCount,
+        ts.CloseActionCount,
+        ub.UserId,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        pe.EditCount,
+        pe.Editors
+    FROM
+        TagStats AS ts
+    LEFT JOIN
+        UserBadges AS ub ON ts.PostCount > 10 -- arbitrary threshold for user badges
+    LEFT JOIN
+        PostEditHistory AS pe ON pe.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%')
+)
+SELECT
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    CloseActionCount,
+    UserId,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    EditCount,
+    Editors
+FROM
+    BenchmarkResults
+ORDER BY
+    PostCount DESC, QuestionCount DESC;

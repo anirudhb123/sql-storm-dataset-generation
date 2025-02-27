@@ -1,0 +1,66 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t ON t.TAG = p.Tags
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' AND
+        p.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId = u.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN p.OwnerUserId = u.Id AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        ActivePosts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ru.DisplayName AS UserDisplayName,
+    ru.Reputation AS UserReputation,
+    ta.PostsCreated,
+    ta.AcceptedAnswers,
+    COUNT(DISTINCT ap.PostId) AS TotalActivePosts,
+    STRING_AGG(DISTINCT ap.TagsList, '; ') AS AllTags
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    TopActiveUsers ta ON ru.UserId = ta.UserId
+LEFT JOIN 
+    ActivePosts ap ON ta.UserId = ap.OwnerUserId
+WHERE 
+    ru.ReputationRank <= 10 -- Select top 10 users by reputation
+GROUP BY 
+    ru.DisplayName, ru.Reputation, ta.PostsCreated, ta.AcceptedAnswers
+ORDER BY 
+    ru.Reputation DESC;

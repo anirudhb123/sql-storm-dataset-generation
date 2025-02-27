@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY NULL) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.cd_gender,
+        sh.cd_marital_status,
+        sh.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY NULL) AS rn
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer_demographics cd ON sh.cd_income_band_sk = cd.cd_income_band_sk
+    WHERE 
+        cd.cd_dep_count > 2
+)
+, total_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    sh.c_customer_sk,
+    sh.c_first_name,
+    sh.c_last_name,
+    sh.cd_gender,
+    sh.cd_marital_status,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN sh.cd_gender = 'M' AND ts.total_sales > 5000 THEN 'High Value Male'
+        WHEN sh.cd_gender = 'F' AND ts.total_sales > 5000 THEN 'High Value Female'
+        ELSE 'Other'
+    END AS customer_segment
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    total_sales ts ON sh.c_customer_sk = ts.c_customer_sk
+WHERE 
+    sh.rn = 1
+ORDER BY 
+    total_sales DESC
+LIMIT 50;

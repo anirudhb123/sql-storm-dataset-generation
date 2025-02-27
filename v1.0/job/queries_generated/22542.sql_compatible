@@ -1,0 +1,50 @@
+
+WITH ranked_movies AS (
+    SELECT t.id AS movie_id,
+           t.title,
+           t.production_year,
+           ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS yearly_rank
+    FROM aka_title t
+    WHERE t.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+      AND t.production_year IS NOT NULL
+),
+movie_details AS (
+    SELECT m.movie_id,
+           m.title,
+           COALESCE(GROUP_CONCAT(DISTINCT c.name ORDER BY c.name), 'No Cast') AS cast,
+           COALESCE(GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword), 'No Keywords') AS keywords,
+           CASE 
+               WHEN COUNT(DISTINCT j.company_id) > 0 THEN 'Has Production Companies'
+               ELSE 'No Production Companies'
+           END AS production_info
+    FROM ranked_movies m
+    LEFT JOIN cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies j ON j.movie_id = m.movie_id
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+final_results AS (
+    SELECT md.*,
+           CASE 
+               WHEN md.production_info = 'No Production Companies' THEN 'Check Company Data'
+               ELSE NULL
+           END AS additional_info,
+           CASE WHEN md.cast LIKE '%Keanu%' THEN 'Starring Keanu Reeves'
+                ELSE NULL
+           END AS special_cast
+    FROM movie_details md
+    WHERE md.yearly_rank <= 5
+    AND md.production_year <> (SELECT MAX(production_year) FROM ranked_movies)
+)
+SELECT DISTINCT title,
+       production_year,
+       cast,
+       keywords,
+       production_info,
+       additional_info,
+       special_cast
+FROM final_results
+WHERE production_info = 'Has Production Companies'
+ORDER BY production_year DESC, title;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity_sold
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+CustomerCounts AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN cd.cd_demo_sk END) AS female_count,
+        COUNT(DISTINCT CASE WHEN cd.cd_gender = 'M' THEN cd.cd_demo_sk END) AS male_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        COALESCE(ca.ca_city, 'Unknown City') AS city,
+        SUM(rs.ws_sales_price) AS total_sales,
+        MAX(rs.ws_sales_price) AS max_sales_price,
+        MIN(rs.ws_sales_price) AS min_sales_price,
+        COUNT(DISTINCT c.c_customer_id) AS distinct_customers
+    FROM RankedSales rs
+    LEFT JOIN customer c ON c.c_customer_sk IN (SELECT sr_customer_sk FROM store_returns WHERE sr_returned_date_sk IS NULL)
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY COALESCE(ca.ca_city, 'Unknown City')
+),
+TopSales AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.ws_order_number,
+        ss.ws_sales_price,
+        COALESCE(rs.total_quantity_sold, 0) AS total_quantity,
+        CASE 
+            WHEN rs.price_rank = 1 THEN 'Top Seller'
+            ELSE 'Regular'
+        END AS sales_category
+    FROM RankedSales rs
+    JOIN web_sales ss ON rs.ws_order_number = ss.ws_order_number
+)
+SELECT 
+    ss.city, 
+    ss.total_sales, 
+    ss.max_sales_price, 
+    ss.min_sales_price, 
+    cc.female_count, 
+    cc.male_count, 
+    ts.total_quantity, 
+    ts.sales_category
+FROM SalesSummary ss
+JOIN CustomerCounts cc ON ss.distinct_customers > 0
+FULL OUTER JOIN TopSales ts ON ss.total_sales > 10000 AND ts.total_quantity > 0
+WHERE ts.total_quantity IS NOT NULL OR ss.city IS NOT NULL
+ORDER BY ss.total_sales DESC, cc.female_count DESC;

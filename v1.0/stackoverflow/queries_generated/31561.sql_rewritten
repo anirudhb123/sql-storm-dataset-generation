@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        u.Id
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        au.DisplayName,
+        au.BadgeCount,
+        au.TotalViews,
+        COALESCE(phc.HistoryCount, 0) AS HistoryCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ActiveUsers au ON rp.OwnerUserId = au.UserId
+    LEFT JOIN 
+        PostHistoryCounts phc ON rp.PostId = phc.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN HistoryCount > 10 THEN 'Highly Edited'
+        WHEN HistoryCount BETWEEN 5 AND 10 THEN 'Moderately Edited'
+        ELSE 'Rarely Edited' 
+    END AS EditFrequency,
+    (UpVotes - DownVotes) AS ScoreAdjustment
+FROM 
+    FinalReport
+WHERE 
+    Rank <= 5
+ORDER BY 
+    Score DESC NULLS LAST;

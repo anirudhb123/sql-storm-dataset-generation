@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_sales_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_net_profit) IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(sc.total_net_profit, 0) AS total_net_profit,
+        COALESCE(sc.total_sales_count, 0) AS total_sales_count,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(sc.total_net_profit, 0) DESC) AS overall_rank
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesCTE sc ON i.i_item_sk = sc.ws_item_sk
+)
+SELECT 
+    t.i_item_id,
+    t.i_product_name,
+    t.total_net_profit,
+    t.total_sales_count,
+    t.overall_rank,
+    d.d_year,
+    d.d_month_seq,
+    a.ca_city,
+    s.s_store_name
+FROM 
+    TopSales t
+LEFT JOIN 
+    store_sales ss ON t.i_item_sk = ss.ss_item_sk
+LEFT JOIN 
+    customer_address a ON ss.ss_addr_sk = a.ca_address_sk
+LEFT JOIN 
+    date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    store s ON ss.ss_store_sk = s.s_store_sk
+WHERE 
+    d.d_year = 2023 AND 
+    (t.total_net_profit > 1000 OR t.total_sales_count > 50)
+ORDER BY 
+    t.overall_rank
+FETCH FIRST 100 ROWS ONLY;

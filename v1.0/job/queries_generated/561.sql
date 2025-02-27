@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+        AND m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+DirectorInfo AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS director_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        r.role = 'Director'
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithDirectorCount AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title,
+        rm.production_year,
+        COALESCE(di.director_count, 0) AS director_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        DirectorInfo di ON rm.movie_id = di.movie_id
+)
+SELECT 
+    mw.title, 
+    mw.production_year,
+    mw.director_count,
+    CASE 
+        WHEN mw.director_count = 0 THEN 'No Directors'
+        ELSE 'Has Directors'
+    END AS director_status,
+    STRING_AGG(a.name, ', ') AS actors_list
+FROM 
+    MoviesWithDirectorCount mw
+LEFT JOIN 
+    cast_info ci ON mw.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+WHERE 
+    mw.year_rank <= 10
+GROUP BY 
+    mw.movie_id, mw.title, mw.production_year, mw.director_count
+ORDER BY 
+    mw.production_year DESC, mw.title ASC;

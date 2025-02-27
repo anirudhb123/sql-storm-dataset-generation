@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        Score,
+        CreationDate,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserRankings AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(a.Id) AS TotalAnswers,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2  
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        u.DisplayName AS UserDisplayName,
+        STRING_AGG(DISTINCT h.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN Users u ON ph.UserId = u.Id
+    JOIN PostHistoryTypes h ON ph.PostHistoryTypeId = h.Id
+    WHERE ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY ph.PostId, ph.UserId, ph.PostHistoryTypeId, ph.CreationDate, u.DisplayName
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,  
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,  
+        COALESCE(MAX(ph.CreationDate), p.CreationDate) AS LastActivityDate
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId  
+    LEFT JOIN Comments c ON p.Id = c.PostId  
+    LEFT JOIN Votes v ON p.Id = v.PostId  
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId  
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id, p.Title
+)
+
+SELECT 
+    qs.QuestionId,
+    qs.Title,
+    qs.AnswerCount,
+    qs.CommentCount,
+    qs.UpVotes,
+    qs.DownVotes,
+    RPHC.Id AS RelatedAnswerId,
+    U.DisplayName AS AnswerOwner,
+    U.Reputation AS AnswerOwnerReputation,
+    U.TotalAnswers AS AnswerOwnerTotalAnswers,
+    RPHC.Level AS HierarchyLevel,
+    RPHC.Title AS ParentPostTitle,
+    RPHC.Score AS ParentPostScore,
+    RPHC.CreationDate AS ParentPostCreationDate,
+    U.ReputationRank AS UserReputationRank,
+    RPHC.LastActivityDate AS ParentPostLastActivity
+FROM QuestionStats qs
+LEFT JOIN RecursivePostHierarchy RPHC ON qs.QuestionId = RPHC.ParentId
+LEFT JOIN UserRankings U ON RPHC.OwnerUserId = U.UserId
+WHERE qs.UpVotes > qs.DownVotes  
+ORDER BY qs.LastActivityDate DESC, RPHC.Score DESC;

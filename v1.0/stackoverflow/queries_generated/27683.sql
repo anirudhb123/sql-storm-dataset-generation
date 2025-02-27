@@ -1,0 +1,68 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        TotalUpvotes,
+        TotalDownvotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank 
+    FROM UserStatistics
+    WHERE Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    GROUP BY t.TagName
+    HAVING COUNT(DISTINCT p.Id) > 5
+),
+EngagementMetrics AS (
+    SELECT 
+        t.TagName,
+        SUM(us.TotalUpvotes) AS TotalUpvotes,
+        SUM(us.TotalDownvotes) AS TotalDownvotes,
+        MAX(ts.PostCount) AS TagPostCount,
+        AVG(us.Reputation) AS AverageUserReputation
+    FROM PopularTags ts
+    JOIN UserStatistics us ON ts.PostCount = us.TotalPosts
+    GROUP BY t.TagName
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.TotalUpvotes,
+    tu.TotalDownvotes,
+    pt.PostCount AS TagPostCount,
+    pt.TotalViews,
+    pt.AverageScore,
+    em.TotalUpvotes AS TagTotalUpvotes,
+    em.TotalDownvotes AS TagTotalDownvotes,
+    em.AverageUserReputation
+FROM TopUsers tu
+JOIN PopularTags pt ON pt.TagName = ANY (STRING_TO_ARRAY(tu.Tags, ','))
+JOIN EngagementMetrics em ON pt.TagName = em.TagName
+ORDER BY tu.ReputationRank ASC, pt.PostCount DESC;

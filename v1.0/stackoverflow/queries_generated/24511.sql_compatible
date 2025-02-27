@@ -1,0 +1,96 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(CASE WHEN V.VoteTypeId = 2 THEN P.Score ELSE NULL END) AS AvgUpVoteScore,
+        AVG(CASE WHEN V.VoteTypeId = 3 THEN P.Score ELSE NULL END) AS AvgDownVoteScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalVotes,
+        UpVotes,
+        DownVotes,
+        RANK() OVER (ORDER BY TotalVotes DESC) AS UserRank
+    FROM 
+        UserVoteStats
+    WHERE 
+        TotalVotes > 0
+),
+
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS ChangeCount,
+        STRING_AGG(PH.Comment, ' | ') AS CommentsMade
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CH.PostId) AS CloseCount,
+        MAX(PH.CreationDate) AS LastEdit
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    LEFT JOIN 
+        PostHistory CH ON P.Id = CH.PostId AND CH.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+    HAVING 
+        COUNT(CH.PostId) > 0
+)
+
+SELECT 
+    TU.DisplayName,
+    TU.TotalVotes,
+    PH.PostId,
+    PH.CommentsMade,
+    CP.Title,
+    CP.CloseCount,
+    CP.LastEdit,
+    CASE 
+        WHEN CP.CloseCount > 1 THEN 'Multiple Closures' 
+        ELSE 'Single Closure' 
+    END AS ClosureStatus,
+    CASE 
+        WHEN CU.UserId IS NOT NULL THEN 'Has Badges' 
+        ELSE 'No Badges' 
+    END AS BadgeStatus
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostHistorySummary PH ON TU.UserId = PH.UserId
+LEFT JOIN 
+    ClosedPosts CP ON PH.PostId = CP.PostId
+LEFT JOIN 
+    Badges CU ON TU.UserId = CU.UserId
+WHERE 
+    TU.UserRank <= 10
+ORDER BY 
+    TU.TotalVotes DESC, CP.CloseCount DESC, CP.LastEdit DESC
+LIMIT 50;

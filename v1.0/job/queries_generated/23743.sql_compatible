@@ -1,0 +1,57 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+full_cast AS (
+    SELECT 
+        c.id AS cast_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(NULLIF(c.nr_order, 0), -1) AS display_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    r.aka_name,
+    r.movie_title,
+    COALESCE(CAST(r.production_year AS TEXT), 'Unknown') AS production_year,
+    COUNT(*) OVER (PARTITION BY r.aka_name) AS movie_count,
+    MAX(f.display_order) AS highest_order,
+    (SELECT COUNT(*) FROM full_cast ff WHERE ff.actor_name = r.aka_name) AS roles_count
+FROM 
+    ranked_titles r
+LEFT JOIN 
+    full_cast f ON r.movie_title = f.movie_title AND r.production_year = f.production_year
+WHERE 
+    r.rn = 1 OR f.display_order = -1
+GROUP BY 
+    r.aka_name, r.movie_title, r.production_year
+HAVING 
+    COUNT(*) > 1 OR MAX(f.display_order) IS NULL
+ORDER BY 
+    CASE 
+        WHEN r.production_year IS NULL THEN 1 
+        ELSE 0 
+    END, 
+    r.production_year DESC
+LIMIT 100 OFFSET 10;

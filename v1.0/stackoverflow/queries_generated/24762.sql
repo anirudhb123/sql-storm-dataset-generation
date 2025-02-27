@@ -1,0 +1,89 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS TotalBadges, 
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges, 
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges, 
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(pc.BadgeCount, 0) AS UserBadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId, 
+            COUNT(*) AS BadgeCount
+        FROM Posts
+        WHERE CreationDate >= NOW() - INTERVAL '1 year'
+        GROUP BY OwnerUserId
+    ) pc ON p.OwnerUserId = pc.OwnerUserId
+    WHERE p.CreationDate < NOW() 
+    AND (p.ViewCount IS NULL OR p.ViewCount > 10)
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        p.Title AS PostTitle,
+        p.Score AS PostScore,
+        r.Rank AS PostRank
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    LEFT JOIN LATERAL (
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY ph.CreationDate DESC) AS Rank
+        FROM PostHistory ph2
+        WHERE ph2.PostId = ph.PostId
+    ) r ON TRUE
+    WHERE ph.PostHistoryTypeId IN (10, 12, 4)  -- Closing, Deleting, and Editing posts
+),
+HighestScoredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id
+    HAVING p.Score = (SELECT MAX(Score) FROM Posts WHERE PostTypeId = 1) -- Only Questions
+),
+AggregateBadges AS (
+    SELECT 
+        b.UserId,
+        MAX(b.Name) AS HighestBadgeName,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT ab.UserId) AS UsersWithBadges,
+    COALESCE(SUM(ub.TotalBadges), 0) AS TotalBadges,
+    COALESCE(MAX(ub.GoldBadges), 0) AS GoldBadges,
+    COALESCE(MAX(ub.SilverBadges), 0) AS SilverBadges,
+    COALESCE(MAX(ub.BronzeBadges), 0) AS BronzeBadges,
+    ARRAY_AGG(DISTINCT h.PostTitle ORDER BY h.HistoryDate DESC) AS RecentEditsTitles,
+    AVG(p.ViewCount) AS AveragePostViews,
+    COUNT(DISTINCT hp.PostId) AS ClosedPostsCount,
+    MAX(hp.PostScore) AS HighestClosedPostScore
+FROM Users u
+LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN ActivePosts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostHistoryDetails hp ON p.PostId = hp.PostId
+LEFT JOIN AggregateBadges ab ON u.Id = ab.UserId
+WHERE u.Reputation > 1000 
+GROUP BY u.DisplayName
+ORDER BY TotalBadges DESC NULLS LAST, u.DisplayName
+LIMIT 50;

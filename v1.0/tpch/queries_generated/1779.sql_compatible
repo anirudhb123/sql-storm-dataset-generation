@@ -1,0 +1,54 @@
+
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    co.c_name,
+    co.total_spent,
+    sp.s_name AS supplier_name,
+    sp.supplied_parts,
+    HVO.o_orderkey AS high_value_order
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierParts sp ON co.order_count > 5
+LEFT JOIN 
+    HighValueOrders HVO ON HVO.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = co.c_custkey)
+WHERE 
+    co.total_spent IS NOT NULL
+    AND sp.total_supply_cost IS NOT NULL
+ORDER BY 
+    co.total_spent DESC, sp.total_supply_cost DESC;

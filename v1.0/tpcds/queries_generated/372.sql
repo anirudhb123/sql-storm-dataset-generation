@@ -1,0 +1,51 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 0
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk, ws_item_sk
+),
+customer_return_data AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(COALESCE(cr.cr_return_qty, 0)) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_returned_amt
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+)
+SELECT
+    ca.ca_city,
+    ca.ca_state,
+    COALESCE(SUM(r.total_net_profit), 0) AS total_sales_profit,
+    COALESCE(SUM(c.total_returns), 0) AS total_returns,
+    COUNT(DISTINCT CASE WHEN r.profit_rank = 1 THEN r.ws_item_sk END) AS top_selling_items,
+    COUNT(DISTINCT c.returning_customer_sk) AS unique_returning_customers
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    ranked_sales r ON c.c_customer_sk = r.ws_bill_customer_sk
+LEFT JOIN 
+    customer_return_data crd ON c.c_customer_sk = crd.returning_customer_sk
+WHERE 
+    ca.ca_state IN ('NY', 'CA')
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    SUM(r.total_net_profit) > 10000 OR COUNT(DISTINCT c.returning_customer_sk) > 5
+ORDER BY 
+    total_sales_profit DESC
+LIMIT 10;

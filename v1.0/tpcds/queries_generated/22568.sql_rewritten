@@ -1,0 +1,65 @@
+WITH sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        COUNT(ws.ws_order_number) OVER (PARTITION BY ws.ws_item_sk) AS order_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+item_stats AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        AVG(sd.ws_net_profit) AS avg_profit,
+        COUNT(DISTINCT sd.ws_order_number) FILTER (WHERE sd.ws_net_profit > 0) AS positive_profit_orders,
+        NULLIF(SUM(sd.ws_quantity), 0) AS total_quantity
+    FROM 
+        sales_data sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+ranked_items AS (
+    SELECT 
+        is.i_item_sk,
+        is.total_sales,
+        is.avg_profit,
+        is.positive_profit_orders,
+        (ROW_NUMBER() OVER (ORDER BY is.total_sales DESC) +
+         COUNT(*) OVER () - 
+         COUNT(NULLIF(is.total_sales, 0)) -
+         COUNT(NULLIF(is.avg_profit, 0))) AS rank_value
+    FROM 
+        item_stats is
+)
+SELECT 
+    i.i_item_sk,
+    i.i_item_desc,
+    r.total_sales,
+    r.avg_profit,
+    r.positive_profit_orders,
+    r.rank_value,
+    CASE 
+        WHEN r.rank_value IS NULL THEN 'No Data'
+        ELSE CASE 
+            WHEN r.total_sales > 1000 THEN 'High Sales'
+            WHEN r.total_sales BETWEEN 500 AND 1000 THEN 'Medium Sales'
+            ELSE 'Low Sales'
+        END
+    END AS sales_category
+FROM 
+    ranked_items r
+JOIN 
+    item i ON r.i_item_sk = i.i_item_sk
+WHERE
+    r.rank_value < 100
+    OR (r.rank_value IS NOT NULL AND r.avg_profit IS NOT NULL)
+ORDER BY 
+    r.rank_value, i.i_item_sk
+FETCH FIRST 50 ROWS ONLY;

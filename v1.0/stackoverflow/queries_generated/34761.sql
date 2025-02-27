@@ -1,0 +1,117 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id, 
+        ph.PostId, 
+        ph.UserId, 
+        ph.UserDisplayName, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Only considering Close and Reopen actions
+    UNION ALL
+    SELECT 
+        ph.Id, 
+        ph.PostId, 
+        ph.UserId, 
+        ph.UserDisplayName, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate,
+        Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON ph.Id = rph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+),
+
+UserTags AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT t.Id) AS TagCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(vu.UpVotes, 0) AS UpVotes,
+        COALESCE(vd.DownVotes, 0) AS DownVotes,
+        COALESCE(c.CommentsCount, 0) AS CommentsCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             PostId, 
+             COUNT(*) AS UpVotes 
+         FROM 
+             Votes 
+         WHERE 
+             VoteTypeId = 2 
+         GROUP BY 
+             PostId) vu ON p.Id = vu.PostId
+    LEFT JOIN 
+        (SELECT 
+             PostId, 
+             COUNT(*) AS CommentsCount 
+         FROM 
+             Comments 
+         GROUP BY 
+             PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+),
+
+ClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        RecursivePostHistory rp
+    GROUP BY 
+        rp.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentsCount,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    ut.DisplayName AS TopUser,
+    ut.TagCount AS UserTagCount
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId
+LEFT JOIN 
+    (SELECT 
+         UserId, 
+         DisplayName, 
+         TagCount 
+     FROM 
+         UserTags 
+     ORDER BY 
+         TagCount DESC 
+     LIMIT 1) ut ON ut.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ps.PostId) 
+WHERE 
+    ps.UpVotes >= 5 OR ps.DownVotes >= 5
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 10;

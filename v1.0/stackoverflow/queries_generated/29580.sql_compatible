@@ -1,0 +1,70 @@
+
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        PH.Text AS EditContent,
+        P.Title,
+        P.Tags
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days' AND 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.QuestionCount,
+    U.CommentCount,
+    U.UpVotesReceived,
+    T.TagName,
+    T.PostCount,
+    RE.UserDisplayName AS LastEditor,
+    RE.CreationDate AS EditDate,
+    RE.EditContent AS LastEditContent,
+    RE.Title AS PostTitle,
+    RE.Tags AS PostTags
+FROM 
+    UserActivity U
+JOIN 
+    TagStats T ON T.PostCount > 5 
+LEFT JOIN 
+    RecentEdits RE ON RE.UserDisplayName = U.DisplayName
+ORDER BY 
+    U.UpVotesReceived DESC, 
+    U.UserId;

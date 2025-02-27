@@ -1,0 +1,25 @@
+
+SELECT 
+    t.title, 
+    p.name AS actor_name, 
+    c.note AS role_note 
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+WHERE 
+    cn.country_code = 'USA' 
+AND 
+    t.production_year > 2000 
+GROUP BY 
+    t.title, p.name, c.note 
+ORDER BY 
+    t.production_year DESC;

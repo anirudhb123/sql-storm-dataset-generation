@@ -1,0 +1,65 @@
+WITH UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyEarned,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesReceived,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+QuestionDetails AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(ph.RoleType, 'No History') AS LastAction,
+        COALESCE(MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)), '1970-01-01') AS LastClosedOrReopened,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, u.DisplayName
+),
+TagCount AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::int[])
+    GROUP BY t.TagName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalBountyEarned,
+    us.UpVotesReceived,
+    us.DownVotesReceived,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    qd.QuestionId,
+    qd.Title,
+    qd.CreationDate,
+    qd.OwnerDisplayName,
+    qd.LastAction,
+    qd.LastClosedOrReopened,
+    qd.CommentCount,
+    tc.TagName,
+    tc.PostCount
+FROM UserScores us
+LEFT JOIN QuestionDetails qd ON us.UserId IN (
+    SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1
+)
+LEFT JOIN TagCount tc ON (qd.QuestionId IS NOT NULL AND tc.PostCount > 0)
+WHERE (us.TotalPosts > 0 OR us.TotalBountyEarned > 0)
+ORDER BY us.TotalBountyEarned DESC, us.UpVotesReceived DESC, us.DownVotesReceived ASC NULLS LAST
+FETCH FIRST 50 ROWS ONLY;

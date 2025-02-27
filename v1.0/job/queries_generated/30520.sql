@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        CONCAT('-> ', h.title) AS title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+)
+SELECT 
+    a.id AS aka_id,
+    a.name AS aka_name,
+    m.title AS movie_title,
+    m.production_year,
+    c.kind AS company_type,
+    COUNT(DISTINCT c.name) AS total_companies,
+    COUNT(DISTINCT k.keyword) AS total_keywords,
+    ROW_NUMBER() OVER(PARTITION BY a.id ORDER BY m.production_year DESC) AS rn,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        ELSE m.production_year::text
+    END AS production_year_display
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    aka_title m ON ci.movie_id = m.id
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL
+    AND m.production_year > 2000
+    AND c.country_code IS NOT NULL
+GROUP BY 
+    a.id, a.name, m.title, m.production_year, c.kind
+HAVING 
+    COUNT(DISTINCT c.name) > 1
+ORDER BY 
+    total_companies DESC, 
+    rn
+LIMIT 100;

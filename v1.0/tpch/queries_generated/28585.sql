@@ -1,0 +1,23 @@
+SELECT 
+    CONCAT(s.s_name, ' (', c.c_name, ') - ', p.p_name) AS supplier_customer_part,
+    SUBSTRING_INDEX(REPLACE(p.p_comment, ' ', ' '), ' ', 5) AS short_comment,
+    SUM(l.l_quantity) AS total_quantity,
+    ROUND(AVG(l.l_extendedprice), 2) AS avg_extended_price,
+    MAX(l.l_discount) AS max_discount,
+    MIN(l.l_tax) AS min_tax
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    customer c ON c.c_custkey = l.l_orderkey
+GROUP BY 
+    supplier_customer_part, short_comment
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    avg_extended_price DESC, supplier_customer_part ASC;

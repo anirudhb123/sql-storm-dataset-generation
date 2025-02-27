@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_orderdate > DATE_SUB('1998-10-01', INTERVAL 1 YEAR)
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE_SUB('1998-10-01', INTERVAL 30 DAY)
+)
+SELECT 
+    s.s_name,
+    n.n_name AS nation,
+    COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied,
+    h.total_spent,
+    RANK() OVER (ORDER BY h.total_spent DESC) AS customer_rank,
+    COALESCE(AVG(l.l_extendedprice * (1 - l.l_discount)), 0) AS avg_order_value
+FROM 
+    RankedSuppliers s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    HighValueCustomers h ON h.c_custkey = (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderkey = l.l_orderkey)
+WHERE 
+    s.rank <= 5
+GROUP BY 
+    s.s_name, n.n_name, h.total_spent
+ORDER BY 
+    s.s_name, nation;

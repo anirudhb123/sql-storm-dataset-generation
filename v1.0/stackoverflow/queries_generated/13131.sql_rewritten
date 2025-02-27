@@ -1,0 +1,11 @@
+SELECT 
+    DATE(CreationDate) AS PostDate,
+    COUNT(*) AS TotalPosts,
+    AVG(Score) AS AverageScore,
+    AVG(ViewCount) AS AverageViewCount
+FROM 
+    Posts
+GROUP BY 
+    DATE(CreationDate)
+ORDER BY 
+    PostDate;

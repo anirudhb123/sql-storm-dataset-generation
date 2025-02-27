@@ -1,0 +1,61 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, 
+           ROW_NUMBER() OVER (PARTITION BY ParentId ORDER BY CreationDate DESC) AS RowNum
+    FROM Posts
+    WHERE ParentId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score,
+           ROW_NUMBER() OVER (PARTITION BY p.ParentId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.Id = rph.ParentId
+),
+
+UserScores AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           SUM(p.Score) AS TotalScore,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           DENSE_RANK() OVER (ORDER BY SUM(p.Score) DESC) AS ScoreRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+TopTags AS (
+    SELECT t.TagName, COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+),
+
+PostHistorySummary AS (
+    SELECT ph.PostId, 
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+
+FinalResult AS (
+    SELECT u.DisplayName,
+           us.TotalScore,
+           us.PostCount,
+           tt.TagName,
+           p.Title,
+           phs.CloseCount,
+           phs.ReopenCount,
+           ROW_NUMBER() OVER (ORDER BY us.TotalScore DESC) AS UserRank
+    FROM UserScores us
+    JOIN Users u ON us.UserId = u.Id
+    JOIN TopTags tt ON tt.PostCount > 0
+    JOIN Posts p ON p.OwnerUserId = u.Id
+    JOIN PostHistorySummary phs ON phs.PostId = p.Id
+)
+SELECT * 
+FROM FinalResult
+WHERE UserRank <= 10
+ORDER BY UserRank, CloseCount DESC, ReopenCount DESC;

@@ -1,0 +1,82 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+sufficient_part_supp AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+part_details AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_comment, ''), 'No Comment') AS p_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 50
+),
+max_discount AS (
+    SELECT 
+        l.l_partkey,
+        MAX(l.l_discount) AS max_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    r.r_name,
+    cnt.supplier_count AS number_of_suppliers,
+    COUNT(DISTINCT o.o_orderkey) AS fulfilled_orders,
+    SUM(pos.ps_supplycost) AS total_supply_cost,
+    COUNT(DISTINCT CASE WHEN ol.l_returnflag = 'R' THEN ol.l_orderkey END) AS returned_orders,
+    MAX(pd.p_retailprice) AS highest_price_part
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    (SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count 
+     FROM sufficient_part_supp ps 
+     GROUP BY ps.ps_partkey) cnt ON cnt.ps_partkey IN (SELECT p.p_partkey FROM part_details p)
+LEFT JOIN 
+    orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN 
+    lineitem ol ON o.o_orderkey = ol.l_orderkey
+JOIN 
+    max_discount md ON ol.l_partkey = md.l_partkey
+JOIN 
+    part_details pd ON pd.p_partkey = ol.l_partkey
+WHERE 
+    (pd.p_mfgr = 'ManufacturerName' OR pd.p_retailprice > 500)
+    AND (o.o_orderstatus IS NOT NULL OR o.o_orderstatus <> 'C')
+GROUP BY 
+    r.r_name, cnt.supplier_count
+HAVING 
+    SUM(CASE WHEN pd.p_retailprice IS NOT NULL THEN pd.p_retailprice ELSE 0 END) > 10000
+ORDER BY 
+    number_of_suppliers DESC, fulfilled_orders ASC
+LIMIT 100;

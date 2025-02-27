@@ -1,0 +1,60 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        a.PostTypeId,
+        a.AcceptedAnswerId,
+        ph.Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostHierarchy ph ON q.Id = ph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS TotalAcceptedAnswers,
+    AVG(p.Score) AS AverageScore,
+    MAX(COALESCE(DATEDIFF(NOW(), p.CreationDate), 0)) AS MaxAgeOfPosts,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    MIN(b.Date) AS FirstBadgeDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(p.Id) DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostsToTags pt ON p.Id = pt.PostId
+LEFT JOIN 
+    Tags t ON pt.TagId = t.Id
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(p.Id) > 10  -- Only include users with more than 10 posts
+ORDER BY 
+    AverageScore DESC, UserName
+LIMIT 100;

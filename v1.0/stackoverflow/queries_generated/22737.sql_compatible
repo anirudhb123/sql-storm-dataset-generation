@@ -1,0 +1,56 @@
+
+WITH UserReputation AS (
+    SELECT
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        MAX(P.CreationDate) AS LastActivity
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.PostTypeId,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        RANK() OVER (PARTITION BY PS.PostTypeId ORDER BY (PS.UpVotes - PS.DownVotes) DESC) AS VoteRank
+    FROM PostStats PS
+    WHERE PS.CommentCount > 0
+)
+SELECT 
+    U.Reputation,
+    U.DisplayName,
+    TP.PostId,
+    TP.UpVotes,
+    TP.DownVotes,
+    CASE 
+        WHEN (TP.UpVotes - TP.DownVotes) >= 10 THEN 'High Engagement'
+        WHEN (TP.UpVotes - TP.DownVotes) BETWEEN 1 AND 9 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    COALESCE(NULLIF(TP.CommentCount, 0), 'No Comments') AS CommentStatus,
+    REPLACE((SELECT STRING_AGG(CONCAT('<a href="', P.Body, '">', P.Title, '</a>'), ', ') 
+              FROM Posts P
+              WHERE P.Id = TP.PostId), 'NULL', 'n/a') AS PostLink
+FROM TopPosts TP
+JOIN UserReputation U ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = TP.PostId LIMIT 1)
+WHERE TP.VoteRank <= 5
+  AND EXISTS (SELECT 1 
+              FROM PostHistory PH 
+              WHERE PH.PostId = TP.PostId AND PH.PostHistoryTypeId = 10)
+ORDER BY U.Reputation DESC, TP.UpVotes DESC;

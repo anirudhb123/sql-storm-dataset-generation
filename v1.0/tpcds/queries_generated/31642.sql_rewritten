@@ -1,0 +1,67 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_item_sk, 
+        SUM(cs_quantity) AS total_sold,
+        SUM(cs_ext_sales_price) AS total_revenue,
+        0 AS level,
+        cs_order_number
+    FROM catalog_sales
+    GROUP BY cs_item_sk, cs_order_number
+
+    UNION ALL
+
+    SELECT 
+        cs.cs_item_sk, 
+        sh.total_sold + cs.cs_quantity AS total_sold,
+        sh.total_revenue + cs.cs_ext_sales_price AS total_revenue,
+        level + 1 AS level,
+        cs.cs_order_number
+    FROM catalog_sales cs
+    JOIN sales_hierarchy sh ON cs.cs_item_sk = sh.cs_item_sk WHERE level < 5
+),
+address AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM customer_address
+    JOIN customer ON ca_address_sk = c_current_addr_sk
+    GROUP BY ca_state
+),
+demographics AS (
+    SELECT
+        cd_gender,
+        COUNT(distinct c_customer_sk) AS gender_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    JOIN customer ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_gender
+),
+sales_summary AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_desc,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    JOIN item ON ws_item_sk = i_item_sk
+    WHERE ws_sold_date_sk BETWEEN 2449 AND 2459 
+    GROUP BY i_item_sk, i_item_desc
+)
+SELECT 
+    sh.cs_item_sk,
+    sh.total_sold,
+    sh.total_revenue,
+    a.ca_state,
+    d.cd_gender,
+    s.total_quantity_sold,
+    s.total_sales,
+    s.total_net_profit
+FROM sales_hierarchy sh
+LEFT JOIN address a ON sh.cs_item_sk = a.customer_count
+LEFT JOIN demographics d ON sh.cs_item_sk = d.gender_count
+LEFT JOIN sales_summary s ON sh.cs_item_sk = s.i_item_sk
+WHERE sh.total_revenue IS NOT NULL 
+  AND (sh.total_sold > 100 OR s.total_net_profit > 1000)
+ORDER BY total_sales DESC
+LIMIT 50;

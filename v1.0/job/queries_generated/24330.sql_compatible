@@ -1,0 +1,61 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ci.note AS cast_note,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS rn
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NOT NULL
+),
+MovieInfoCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_info
+    FROM 
+        movie_info mi
+    JOIN movie_keyword mk ON mk.movie_id = mi.movie_id
+    GROUP BY 
+        mk.movie_id
+),
+AggregatedTitles AS (
+    SELECT 
+        ak.person_id,
+        STRING_AGG(DISTINCT at.title, ' | ') AS titles,
+        COUNT(DISTINCT at.movie_id) AS title_count
+    FROM 
+        aka_name ak
+    LEFT JOIN aka_title at ON ak.person_id = at.id
+    GROUP BY 
+        ak.person_id
+),
+FinalOutput AS (
+    SELECT 
+        p.id AS person_id,
+        COALESCE(a.titles, 'No titles') AS titles,
+        m.movie_info,
+        rc.cast_note,
+        rc.rn
+    FROM 
+        name p
+    LEFT JOIN AggregatedTitles a ON p.id = a.person_id
+    LEFT JOIN MovieInfoCTE m ON m.movie_id IN (SELECT DISTINCT ci.movie_id FROM cast_info ci WHERE ci.person_id = p.id)
+    LEFT JOIN RecursiveCTE rc ON p.id = rc.person_id
+)
+SELECT 
+    fo.person_id,
+    fo.titles,
+    fo.movie_info,
+    fo.cast_note,
+    fo.rn,
+    CASE 
+        WHEN fo.cast_note IS NULL THEN 'No notes available'
+        ELSE fo.cast_note 
+    END AS formatted_note,
+    COUNT(*) OVER (PARTITION BY fo.person_id) AS total_movies
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.person_id, fo.rn DESC;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Select only questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.BadgeNames, 'None') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.LastAccessDate > NOW() - INTERVAL '30 days' 
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    COUNT(rp.PostId) AS TotalQuestions,
+    COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+    SUM(rp.CommentCount) AS TotalComments,
+    SUM(rp.UpVotes) AS TotalUpVotes,
+    SUM(rp.DownVotes) AS TotalDownVotes,
+    up.BadgeCount,
+    up.BadgeNames
+FROM 
+    ActiveUsers up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+GROUP BY 
+    up.UserId, up.DisplayName, up.Reputation, up.BadgeCount, up.BadgeNames
+HAVING 
+    COUNT(rp.PostId) > 0 -- Ensure users have questions
+ORDER BY 
+    TotalViews DESC, TotalUpVotes DESC
+LIMIT 10;

@@ -1,0 +1,69 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 4, 10, 12)
+),
+UserVotes AS (
+    SELECT
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    INNER JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId, vt.Name
+),
+TagViewScores AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS RelatedPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(COALESCE(up.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(up.DownVotes, 0)) AS TotalDownVotes,
+    SUM(COALESCE(up.Views, 0)) AS TotalViews,
+    MAX(rp.CreationDate) AS LastPostDate,
+    SUM(COALESCE(tv.TotalViews, 0)) AS TagTotalViews,
+    AVG(tv.AvgScore) AS AvgScorePerTag
+FROM 
+    Users up
+LEFT JOIN 
+    Posts p ON up.Id = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHistory rph ON p.Id = rph.PostId AND rph.rn = 1
+LEFT JOIN 
+    UserVotes uv ON p.Id = uv.PostId
+LEFT JOIN
+    TagViewScores tv ON p.Tags LIKE '%' || tv.TagName || '%'
+WHERE 
+    up.Reputation > 500 
+GROUP BY 
+    up.Id, up.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    TotalViews DESC;

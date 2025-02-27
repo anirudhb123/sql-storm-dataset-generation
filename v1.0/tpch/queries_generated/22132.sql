@@ -1,0 +1,67 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_regionkey, r.r_name
+)
+SELECT 
+    pr.p_partkey,
+    pr.p_name,
+    pr.p_brand,
+    COALESCE(av.total_avail_qty, 0) AS available_quantity,
+    cr.r_name AS customer_region,
+    cr.order_count,
+    AVG(line.l_extendedprice * (1 - line.l_discount)) OVER (PARTITION BY pr.p_partkey) AS avg_price_per_part,
+    CASE 
+        WHEN cr.order_count IS NULL THEN 'No Orders'
+        WHEN cr.order_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer' 
+    END AS customer_order_frequency,
+    (SELECT COUNT(DISTINCT s.s_suppkey) 
+     FROM supplier s 
+     WHERE s.s_acctbal IS NOT NULL 
+     AND s.s_acctbal >= (SELECT AVG(s_acctbal) FROM supplier)) AS num_high_balance_suppliers
+FROM 
+    RankedParts pr
+LEFT JOIN 
+    SupplierAvailability av ON pr.p_partkey = av.ps_partkey
+LEFT JOIN 
+    CustomerRegions cr ON av.ps_suppkey = (SELECT TOP 1 ps_suppkey FROM partsupp WHERE ps_partkey = pr.p_partkey ORDER BY ps_supplycost ASC)
+WHERE 
+    pr.rn <= 5 
+    AND (pr.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_mfgr = 'Manufacturer#1') OR pr.p_retailprice < 100.00)
+ORDER BY 
+    pr.p_partkey, cr.r_name;

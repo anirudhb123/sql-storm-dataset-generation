@@ -1,0 +1,82 @@
+WITH ranked_sales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        customer_summary c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM customer_summary) 
+),
+supplier_part_cost AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    NVL(hvc.c_name, 'No Customer') AS high_value_customer,
+    NVL(ranked.p_name, 'No Part') AS best_selling_part,
+    ranked.total_sales,
+    sp.total_supply_cost,
+    CASE 
+        WHEN ranked.sales_rank = 1 THEN 'Best Seller'
+        ELSE 'Other'
+    END AS part_status
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    high_value_customers hvc ON hvc.c_custkey IN (
+        SELECT DISTINCT c.c_custkey 
+        FROM customer c WHERE c.c_nationkey = n.n_nationkey
+    )
+LEFT JOIN 
+    ranked_sales ranked ON ranked.total_sales = (
+        SELECT MAX(total_sales) 
+        FROM ranked_sales 
+        WHERE p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50)
+    )
+LEFT JOIN 
+    supplier_part_cost sp ON sp.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+    )
+WHERE 
+    r.r_name IS NOT NULL
+ORDER BY 
+    r.r_name, ranked.total_sales DESC;

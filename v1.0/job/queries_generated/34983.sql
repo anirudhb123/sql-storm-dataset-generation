@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+cast_details AS (
+    SELECT 
+        ai.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        cc.kind AS cast_type,
+        RANK() OVER (PARTITION BY at.id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ai ON ci.person_id = ai.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    LEFT JOIN 
+        comp_cast_type cc ON ci.person_role_id = cc.id
+),
+
+movie_keywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        GROUP_CONCAT(mk.keyword) AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id
+)
+
+SELECT 
+    mh.title AS episode_title,
+    mh.production_year AS episode_year,
+    mdh.title AS parent_title,
+    mdh.production_year AS parent_year,
+    cd.actor_name,
+    cd.cast_type,
+    COALESCE(mk.keywords, 'No keywords') AS keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_hierarchy mdh ON mh.parent_id = mdh.movie_id
+LEFT JOIN 
+    cast_details cd ON mh.movie_id = cd.movie_title
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.level = 1
+    AND (mh.production_year >= 2000 OR mh.production_year IS NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    cd.role_rank;

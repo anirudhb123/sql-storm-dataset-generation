@@ -1,0 +1,32 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_kind,
+    r.role AS role_name,
+    m.production_year,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    GROUP_CONCAT(DISTINCT co.name) AS companies 
+FROM 
+    aka_name a 
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id 
+JOIN 
+    title t ON ci.movie_id = t.id 
+JOIN 
+    role_type r ON ci.role_id = r.id 
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id 
+JOIN 
+    keyword k ON mk.keyword_id = k.id 
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id 
+JOIN 
+    company_name co ON mc.company_id = co.id 
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id 
+GROUP BY 
+    a.name, t.title, c.kind, r.role, m.production_year
+HAVING 
+    COUNT(DISTINCT k.keyword) > 3 
+ORDER BY 
+    production_year DESC, actor_name;

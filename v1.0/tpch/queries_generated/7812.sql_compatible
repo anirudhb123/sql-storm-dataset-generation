@@ -1,0 +1,59 @@
+
+WITH SupplierPart AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    nr.region_name,
+    sp.s_name,
+    sp.total_supply_cost,
+    os.total_revenue
+FROM 
+    SupplierPart sp
+JOIN 
+    partsupp ps ON sp.s_suppkey = ps.ps_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    NationRegion nr ON c.c_nationkey = nr.n_nationkey
+JOIN 
+    OrderSummary os ON o.o_custkey = os.o_custkey
+WHERE 
+    os.total_revenue > (SELECT AVG(ts.total_revenue) FROM OrderSummary ts)
+ORDER BY 
+    nr.region_name, sp.total_supply_cost DESC;

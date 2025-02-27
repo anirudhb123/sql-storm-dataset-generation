@@ -1,0 +1,43 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey AND sh.s_suppkey <> s.s_suppkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = sh.s_nationkey
+    )
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+),
+nation_info AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS region_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, n.n_name, o.o_orderkey
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN nation_info n ON c.c_nationkey = n.n_nationkey
+)
+SELECT COALESCE(osh.s_name, 'Unknown Supplier') AS supplier_name,
+       COUNT(DISTINCT co.o_orderkey) AS order_count,
+       SUM(os.total_price) AS total_revenue,
+       ROW_NUMBER() OVER (PARTITION BY nsh.region_name ORDER BY SUM(os.total_price) DESC) AS revenue_rank
+FROM supplier_hierarchy osh
+LEFT JOIN customer_orders co ON osh.s_nationkey = co.n_nationkey
+LEFT JOIN order_summary os ON co.o_orderkey = os.o_orderkey
+JOIN nation_info nsh ON osh.s_nationkey = nsh.n_nationkey
+GROUP BY osh.s_name, nsh.region_name
+HAVING SUM(os.total_price) > 50000
+ORDER BY revenue_rank, total_revenue DESC;

@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Upvotes,
+        Downvotes,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        RANK() OVER (ORDER BY PostCount DESC, Upvotes - Downvotes DESC) AS UserRank
+    FROM 
+        UserStats
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+)
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.PostCount,
+    tu.Upvotes,
+    tu.Downvotes,
+    tu.BadgeCount,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPosts rp ON tu.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.UserRank;

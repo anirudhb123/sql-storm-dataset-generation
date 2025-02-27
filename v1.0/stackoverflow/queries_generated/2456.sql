@@ -1,0 +1,49 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank 
+    FROM Users
+),
+PostStats AS (
+    SELECT p.Id AS PostId, 
+           p.OwnerUserId, 
+           COUNT(c.Id) AS CommentCount, 
+           SUM(voteType.VoteTypeId = 2) AS UpVotes,
+           SUM(voteType.VoteTypeId = 3) AS DownVotes,
+           SUM(voteType.VoteTypeId = 1 AND p.PostTypeId = 1) AS AcceptedCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes voteType ON p.Id = voteType.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId,
+           ph.UserId,
+           MAX(ph.CreationDate) AS LastEditDate,
+           STRING_AGG(pt.Name, ', ') AS PostTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY ph.PostId, ph.UserId
+)
+SELECT u.DisplayName, 
+       uRep.Reputation,
+       ps.PostId,
+       ps.CommentCount,
+       ps.UpVotes,
+       ps.DownVotes,
+       COALESCE(pHist.LastEditDate, 'No Edits') AS LastEdit,
+       COALESCE(pHist.PostTypes, 'No History') AS HistoryTypes
+FROM Users u
+JOIN UserReputation uRep ON u.Id = uRep.Id
+JOIN PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN PostHistoryDetails pHist ON ps.PostId = pHist.PostId
+WHERE uRep.Reputation > 1000
+  AND ps.CommentCount > 0
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM Votes v 
+      WHERE v.UserId = u.Id 
+        AND v.PostId = ps.PostId 
+        AND v.VoteTypeId = 3
+  )
+ORDER BY uRep.Reputation DESC, ps.UpVotes DESC
+LIMIT 50;

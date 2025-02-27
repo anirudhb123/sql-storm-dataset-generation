@@ -1,0 +1,59 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank_price,
+        COUNT(*) OVER (PARTITION BY ws.ws_item_sk) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+    UNION ALL
+    SELECT 
+        cs.cs_item_sk, 
+        cs.cs_order_number, 
+        cs.cs_sales_price, 
+        RANK() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sales_price DESC) AS rank_price,
+        COUNT(*) OVER (PARTITION BY cs.cs_item_sk) AS total_sales
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sales_price IS NOT NULL
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_item_id, 
+        COALESCE(MAX(r.rank_price), 0) AS max_rank_price,
+        SUM(CASE WHEN r.ws_sales_price IS NOT NULL THEN r.ws_sales_price ELSE 0 END) AS total_web_sales,
+        SUM(CASE WHEN r.cs_sales_price IS NOT NULL THEN r.cs_sales_price ELSE 0 END) AS total_catalog_sales
+    FROM 
+        item i
+    LEFT JOIN 
+        ranked_sales r ON i.i_item_sk = r.ws_item_sk OR i.i_item_sk = r.cs_item_sk
+    GROUP BY 
+        i.i_item_sk, 
+        i.i_item_id
+)
+SELECT 
+    ia.i_item_id,
+    ia.max_rank_price,
+    ia.total_web_sales,
+    ia.total_catalog_sales,
+    COALESCE(ia.total_web_sales + ia.total_catalog_sales, 0) AS total_sales_combined,
+    CASE
+        WHEN ia.total_web_sales > ia.total_catalog_sales THEN 'More Sales via Web'
+        WHEN ia.total_web_sales < ia.total_catalog_sales THEN 'More Sales via Catalog'
+        ELSE 'Sales are Equal'
+    END AS sales_comparison,
+    (SELECT COUNT(*) FROM customer_address ca 
+     WHERE ca.ca_city LIKE '%New%' AND ca.ca_state = 'CA' AND ca.ca_country IS NOT NULL) AS new_customer_addresses
+FROM 
+    item_summary ia
+WHERE 
+    ia.max_rank_price > 0
+ORDER BY 
+    total_sales_combined DESC
+LIMIT 10;

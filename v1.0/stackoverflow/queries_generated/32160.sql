@@ -1,0 +1,103 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 2, 3) AND 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+),
+
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS TotalScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        p.Id
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(COALESCE(ph.UserId, 0)), 0) AS HistoryChangeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+),
+
+CombinedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        pt.TotalScore,
+        ut.CommentCount,
+        ut.HistoryChangeCount,
+        ROW_NUMBER() OVER (ORDER BY pt.TotalScore DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostScores pt ON rp.PostId = pt.PostId
+    JOIN 
+        UserActivity ut ON rp.OwnerDisplayName = ut.DisplayName
+)
+
+SELECT 
+    *,
+    pt.TagName
+FROM 
+    CombinedResults cr
+JOIN 
+    PopularTags pt ON cr.OverallRank <= 10 AND cr.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.Tags ILIKE '%#%' -- Looking for posts tagged with specific tags
+    )
+ORDER BY 
+    OverallRank, Score DESC
+LIMIT 100;

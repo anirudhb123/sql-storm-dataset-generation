@@ -1,0 +1,39 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, LastAccessDate, 1 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, u.DisplayName, u.LastAccessDate, Level + 1
+    FROM Users u
+    INNER JOIN UserReputationCTE ur ON ur.Reputation < u.Reputation
+    WHERE ur.Level < 5
+),
+PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName AS AuthorDisplayName,
+           (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+           (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+           (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId, ph.CreationDate AS EditDate, p.Title, p.Score, p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5)  -- Title and Body edits
+)
+SELECT u.DisplayName AS UserName, ur.Reputation AS UserReputation, 
+       pd.PostId, pd.Title, pd.CreationDate AS PostCreationDate, 
+       pd.Score, pd.ViewCount, pd.CommentCount,
+       COALESCE(pd.UpVoteCount, 0) - COALESCE(pd.DownVoteCount, 0) AS NetVoteCount,
+       phed.EditDate AS LastEditDate
+FROM UserReputationCTE ur
+JOIN Posts pd ON ur.Id = pd.OwnerUserId
+LEFT JOIN PostDetails pd ON pd.PostId = pd.Id
+LEFT JOIN PostHistoryDetails phed ON pd.PostId = phed.PostId AND phed.EditRank = 1
+WHERE pd.Score > 10
+ORDER BY UserReputation DESC, pd.ViewCount DESC
+LIMIT 50;
+

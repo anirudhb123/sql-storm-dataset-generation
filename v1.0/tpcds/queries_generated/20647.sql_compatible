@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2400 AND 2420
+), ReturnedItems AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+), SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_sold,
+        AVG(COALESCE(ws.ws_sales_price, 0) * NULLIF(ws.ws_quantity, 0)) AS avg_sales_price,
+        COALESCE(ri.return_count, 0) AS total_returns,
+        COALESCE(ri.total_return_amt, 0) AS total_returned_amt
+    FROM 
+        item
+    LEFT JOIN 
+        web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        ReturnedItems ri ON item.i_item_sk = ri.wr_item_sk
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    s.i_item_id,
+    s.total_sold,
+    s.avg_sales_price,
+    s.total_returns,
+    s.total_returned_amt,
+    CASE 
+        WHEN s.total_returns > 0 AND s.total_sold = 0 THEN 'Highly Suspicious'
+        WHEN s.total_returns > 0 THEN 'Returned Items'
+        ELSE 'Sold Items Only'
+    END AS sale_trend
+FROM 
+    SalesSummary s
+JOIN 
+    RankedSales r ON s.i_item_id = r.ws_item_sk
+WHERE 
+    r.rn = 1
+ORDER BY 
+    s.total_sold DESC,
+    s.avg_sales_price ASC
+FETCH FIRST 10 ROWS ONLY;

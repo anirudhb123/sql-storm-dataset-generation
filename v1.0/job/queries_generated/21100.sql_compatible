@@ -1,0 +1,64 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        ARRAY[m.id] AS movie_path
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1 AS level,
+        h.movie_path || m.id
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN
+        movie_hierarchy h ON ml.movie_id = h.movie_id
+    WHERE
+        NOT m.id = ANY(h.movie_path)  
+)
+SELECT
+    DISTINCT a.id AS aka_id,
+    a.name AS aka_name,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(cast_role.role_id, -1) AS cast_role_id,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS production_year_rank
+FROM
+    aka_name a
+LEFT JOIN
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    aka_title t ON t.id = mh.movie_id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    role_type cast_role ON ci.role_id = cast_role.id
+WHERE
+    (t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'short')))
+    AND (a.name IS NOT NULL AND a.name <> '') 
+    AND (t.production_year > (SELECT AVG(production_year) FROM aka_title WHERE production_year IS NOT NULL))  
+GROUP BY
+    a.id, a.name, t.title, t.production_year, cast_role.role_id
+HAVING
+    COUNT(DISTINCT mh.movie_id) > 1  
+ORDER BY
+    t.production_year DESC, 
+    a.name ASC 
+LIMIT 50;

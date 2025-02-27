@@ -1,0 +1,67 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        u.CreationDate, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(v.VoteTypeId = 2) AS UpVotes, 
+        SUM(v.VoteTypeId = 3) AS DownVotes, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(p.LastActivityDate) AS LastActive
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question' 
+            WHEN p.PostTypeId = 2 THEN 'Answer' 
+            ELSE 'Other' 
+        END AS PostType, 
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        STRING_SPLIT(p.Tags, ',') AS t ON t.value = p.Tags
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId
+)
+SELECT 
+    us.UserId, 
+    us.DisplayName, 
+    us.Reputation, 
+    us.PostCount, 
+    us.UpVotes, 
+    us.DownVotes, 
+    us.GoldBadges, 
+    us.SilverBadges, 
+    us.BronzeBadges, 
+    us.LastActive, 
+    rp.PostId, 
+    rp.Title AS RecentPostTitle, 
+    rp.CreationDate AS PostCreationDate, 
+    rp.PostType, 
+    rp.Tags
+FROM 
+    UserStats us
+LEFT JOIN 
+    RecentPosts rp ON us.UserId = rp.OwnerUserId 
+ORDER BY 
+    us.Reputation DESC, 
+    rp.CreationDate DESC
+LIMIT 10;

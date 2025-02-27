@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.CreationDate, p.Score, p.ViewCount
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS ClosureDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+), UserStatistics AS (
+    SELECT 
+        UserId,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM 
+        Users
+    GROUP BY 
+        UserId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Owner,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    cp.CloseReason,
+    cp.ClosureDate,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    CASE 
+        WHEN cp.CloseReason IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UserStatistics us ON rp.PostId = us.UserId
+WHERE 
+    rp.RankByScore <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

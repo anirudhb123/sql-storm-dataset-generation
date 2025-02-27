@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        mk.title,
+        mk.production_year,
+        mk.kind_id,
+        mh.level + 1,
+        mh.path || mk.linked_movie_id
+    FROM 
+        movie_link mk
+    JOIN 
+        MovieHierarchy mh ON mk.movie_id = mh.movie_id
+)
+SELECT 
+    ah.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ARRAY_AGG(DISTINCT mt.title) AS related_movies,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    SUM(mv.info = 'Box Office') AS box_offices_count,
+    ROW_NUMBER() OVER (PARTITION BY ah.person_id ORDER BY at.production_year DESC) AS movie_rank
+FROM 
+    aka_name ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    movie_info mv ON at.id = mv.movie_id AND mv.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ah.name IS NOT NULL 
+    AND at.production_year BETWEEN 2000 AND 2023
+    AND (at.kind_id IS NOT NULL OR EXISTS (SELECT 1 FROM movie_keyword mk WHERE mk.movie_id = at.id))
+GROUP BY 
+    ah.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    movie_rank, actor_name;
+
+### Explanation:
+
+1. **Common Table Expressions (CTE)**: 
+   - A recursive CTE `MovieHierarchy` is created to build a hierarchy of movies based on links between them. This will allow us to gather related movies for each title.
+
+2. **SELECT Clause**: 
+   - Selects the actor's name, movie title, production year, related movies from the hierarchical structure, the count of production companies involved, and a sum of box office entries.
+   - `ROW_NUMBER()` is used as a window function to rank the movies for each actor in descending order of production year.
+
+3. **Joins**:
+   - Joins are made between `aka_name` (actors), `cast_info`, `aka_title` (movies), `movie_companies` (to count production companies), and `movie_info` (filter based on box office entries).
+   - A left join with the CTE allows the collection of repeated related titles.
+
+4. **WHERE Clause**: 
+   - Filters for movies produced between 2000 and 2023 and ensures that valid movie types exist or that the movie has associated keywords.
+
+5. **GROUP BY Clause**:
+   - Grouping is done based on actor name, movie title, and year to aggregate the counts and arrays.
+
+6. **HAVING Clause**: 
+   - Ensures that there is at least one production company associated with each movie.
+
+7. **Order By Clause**: 
+   - Orders the final results based on actor movie rank followed by actor name.
+
+This SQL query is crafted to provide deep insights into film collaborations of actors, including their contributions to productions while aggregating relevant data about the movies connected to them.

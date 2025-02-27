@@ -1,0 +1,61 @@
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i_item_sk, 
+        i_item_id, 
+        i_rec_start_date, 
+        i_rec_end_date, 
+        i_item_desc, 
+        i_current_price, 
+        0 AS level
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date > cast('2002-10-01' as date))
+
+    UNION ALL
+
+    SELECT 
+        ih.i_item_sk, 
+        ih.i_item_id, 
+        ih.i_rec_start_date, 
+        ih.i_rec_end_date, 
+        ih.i_item_desc, 
+        ih.i_current_price, 
+        ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON i.i_item_sk = ih.i_item_sk
+    WHERE i.i_rec_start_date <= cast('2002-10-01' as date) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+    GROUP BY ws.ws_item_sk
+),
+inventory_status AS (
+    SELECT 
+        i.inv_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM inventory i
+    JOIN item_hierarchy ih ON i.inv_item_sk = ih.i_item_sk
+    GROUP BY i.inv_item_sk
+)
+SELECT 
+    ih.i_item_id,
+    ih.i_item_desc,
+    COALESCE(ss.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(is.total_quantity_on_hand, 0) AS total_quantity_on_hand,
+    CASE 
+        WHEN COALESCE(ss.total_quantity_sold, 0) = 0 THEN 'No Sales'
+        WHEN COALESCE(is.total_quantity_on_hand, 0) = 0 THEN 'Out of Stock'
+        ELSE 'Available'
+    END AS stock_status
+FROM item_hierarchy ih
+LEFT JOIN sales_summary ss ON ih.i_item_sk = ss.ws_item_sk
+LEFT JOIN inventory_status is ON ih.i_item_sk = is.inv_item_sk
+ORDER BY total_sales DESC
+LIMIT 10;

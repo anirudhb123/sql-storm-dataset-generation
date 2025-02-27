@@ -1,0 +1,74 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(*) AS TotalPosts, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedQuestions
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId AS EditorUserId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 6, 24)  -- Edit Title, Edit Tags, Suggested Edit Applied
+),
+PostWithRecentEdits AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        URE.DisplayName AS OwnerDisplayName,
+        RS.EditorUserId,
+        RS.CreationDate AS LastEditDate,
+        RS.Comment AS LastEditComment
+    FROM 
+        Posts P
+    JOIN 
+        UserReputation URE ON P.OwnerUserId = URE.UserId
+    LEFT JOIN 
+        RecentEdits RS ON P.Id = RS.PostId AND RS.EditRank = 1
+)
+
+SELECT 
+    P.Title,
+    P.OwnerDisplayName,
+    P.LastEditDate,
+    P.LastEditComment,
+    PS.TotalPosts,
+    PS.Questions,
+    PS.Answers,
+    PS.AcceptedQuestions,
+    CASE 
+        WHEN PS.AcceptedQuestions > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer,
+    URE.Reputation AS OwnerReputation,
+    URE.ReputationRank AS OwnerReputationRank
+FROM 
+    PostWithRecentEdits P
+JOIN 
+    PostStats PS ON P.OwnerUserId = PS.OwnerUserId
+JOIN 
+    UserReputation URE ON P.OwnerUserId = URE.UserId
+ORDER BY 
+    URE.Reputation DESC, P.LastEditDate DESC
+LIMIT 10;

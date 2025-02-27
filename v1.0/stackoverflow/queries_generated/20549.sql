@@ -1,0 +1,105 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        p.TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPostsByUser
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= DATEADD(DAY, -30, GETDATE())
+),
+CommentAggregates AS (
+    SELECT
+        PostId,
+        COUNT(*) AS CommentCount,
+        MAX(CreationDate) AS LastCommentDate
+    FROM
+        Comments
+    GROUP BY
+        PostId
+),
+FilteredUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        CASE WHEN u.Reputation IS NULL THEN 'Newbie' ELSE 'Veteran' END AS UserStatus
+    FROM
+        Users u
+    WHERE
+        u.Reputation > 1000
+),
+PostHistoryInfo AS (
+    SELECT
+        ph.PostId,
+        ph.UserId AS EditorUserId,
+        ph.CreationDate AS EditDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        PH2.Name AS HistoryType,
+        CASE
+            WHEN ph.UserId IS NULL THEN 'Unknown Editor'
+            ELSE (SELECT DisplayName FROM Users WHERE Id = ph.UserId)
+        END AS EditorName
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes PH2 ON ph.PostHistoryTypeId = PH2.Id
+    WHERE
+        ph.CreationDate BETWEEN DATEADD(MONTH, -6, GETDATE()) AND GETDATE()
+)
+SELECT
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.TagCount,
+    p.UserPostRank,
+    p.TotalPostsByUser,
+    coalesce(c.CommentCount, 0) AS CommentCount,
+    COALESCE(FORMAT(c.LastCommentDate, 'yyyy-MM-dd HH:mm:ss'), 'No Comments') AS LastComment,
+    u.DisplayName AS OwnerName,
+    ph.EditDate AS LastEditDate,
+    ph.EditorName,
+    ph.HistoryType
+FROM
+    RankedPosts p
+LEFT JOIN
+    CommentAggregates c ON p.PostId = c.PostId
+JOIN
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN
+    PostHistoryInfo ph ON p.PostId = ph.PostId
+WHERE
+    p.TotalPostsByUser > 1
+ORDER BY
+    p.UserPostRank, p.Score DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+UNION ALL
+SELECT
+    -1 AS PostId,
+    'Aggregate Posts' AS Title,
+    SUM(p.Score) AS Score,
+    COUNT(p.Id) AS TagCount,
+    NULL AS UserPostRank,
+    NULL AS TotalPostsByUser,
+    NULL AS CommentCount,
+    'N/A' AS LastComment,
+    NULL AS OwnerName,
+    NULL AS LastEditDate,
+    NULL AS EditorName,
+    'Summary' AS HistoryType
+FROM
+    RankedPosts p
+WHERE
+    EXISTS (SELECT 1 FROM FilteredUsers WHERE UserId = p.OwnerUserId)
+GROUP BY
+    p.UserPostRank
+HAVING
+    SUM(p.Score) > 100
+ORDER BY
+    PostId;

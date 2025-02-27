@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+HighRatedMovies AS (
+    SELECT 
+        t.id, 
+        t.title, 
+        AVG(m.rating) AS avg_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, rating FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) m ON m.movie_id = t.id
+    GROUP BY 
+        t.id, t.title
+    HAVING 
+        AVG(m.rating) > 7
+),
+MoviesWithKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+)
+SELECT 
+    rt.aka_name,
+    rt.title,
+    rt.production_year,
+    hm.avg_rating,
+    mwk.keywords
+FROM 
+    RankedTitles rt
+JOIN 
+    HighRatedMovies hm ON rt.title_id = hm.id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rt.title_id = mwk.title_id
+WHERE 
+    rt.rank = 1
+ORDER BY 
+    rt.production_year DESC, hm.avg_rating DESC
+LIMIT 10;

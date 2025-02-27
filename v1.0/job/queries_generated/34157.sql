@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(episode_season.season_nr, 0) AS episode_season,
+           COALESCE(episode_season.episode_nr, 0) AS episode_number,
+           1 AS hierarchy_level
+    FROM aka_title AS m
+    LEFT JOIN aka_title AS episode_season
+      ON m.episode_of_id = episode_season.id
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(episode_season.season_nr, 0),
+           COALESCE(episode_season.episode_nr, 0),
+           mh.hierarchy_level + 1
+    FROM movie_hierarchy AS mh
+    JOIN aka_title AS m
+      ON mh.episode_of_id = m.id
+    LEFT JOIN aka_title AS episode_season
+      ON m.episode_of_id = episode_season.id
+),
+ranked_cast AS (
+    SELECT ci.movie_id,
+           a.name AS actor_name,
+           c.kind AS role_type,
+           RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN comp_cast_type c ON ci.person_role_id = c.id
+),
+movie_keywords AS (
+    SELECT mk.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT mh.movie_id,
+       mh.title,
+       mh.episode_season,
+       mh.episode_number,
+       COALESCE(rc.actor_name, 'Unknown Actor') AS top_actor,
+       COALESCE(rk.keywords, 'No Keywords') AS keywords,
+       COUNT(DISTINCT mc.company_id) AS company_count
+FROM movie_hierarchy mh
+LEFT JOIN ranked_cast rc ON mh.movie_id = rc.movie_id AND rc.actor_rank = 1
+LEFT JOIN movie_keywords rk ON mh.movie_id = rk.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+GROUP BY mh.movie_id, mh.title, mh.episode_season, mh.episode_number, rc.actor_name, rk.keywords
+ORDER BY mh.production_year DESC, mh.title;

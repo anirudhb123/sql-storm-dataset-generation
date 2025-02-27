@@ -1,0 +1,72 @@
+
+WITH RECURSIVE cte_inventory AS (
+    SELECT 
+        inv_date_sk,
+        inv_item_sk,
+        inv_warehouse_sk,
+        inv_quantity_on_hand
+    FROM 
+        inventory
+    WHERE 
+        inv_quantity_on_hand > 0
+    UNION ALL
+    SELECT 
+        inv.inv_date_sk,
+        inv.inv_item_sk,
+        inv.inv_warehouse_sk,
+        inv.inv_quantity_on_hand
+    FROM 
+        inventory inv
+    INNER JOIN 
+        cte_inventory cte ON inv.inv_item_sk = cte.inv_item_sk 
+    WHERE 
+        inv.inv_quantity_on_hand < cte.inv_quantity_on_hand
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+        MAX(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count,
+        SUM(CASE WHEN cd.cd_age IS NULL THEN 0 ELSE cd.cd_age END) AS total_age
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        AVG(ws.ws_quantity) AS avg_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    w.web_site_name,
+    s.total_sales,
+    s.avg_quantity,
+    ci.female_count,
+    ci.male_count,
+    ci.married_count,
+    ci.total_age,
+    (SELECT COUNT(*) FROM cte_inventory) AS inventory_count
+FROM 
+    sales_data s
+JOIN 
+    web_site w ON s.web_site_sk = w.web_site_sk
+JOIN 
+    customer_info ci ON ci.c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+WHERE 
+    w.web_country = 'USA'
+ORDER BY 
+    s.total_sales DESC
+LIMIT 10;

@@ -1,0 +1,55 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        BadgeCount,
+        TotalBounty,
+        RANK() OVER (ORDER BY Reputation DESC, PostCount DESC) AS UserRank
+    FROM 
+        UserStatistics
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.BadgeCount,
+    tu.TotalBounty,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate
+FROM 
+    TopUsers tu
+LEFT JOIN RecentPosts rp ON tu.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.UserRank;

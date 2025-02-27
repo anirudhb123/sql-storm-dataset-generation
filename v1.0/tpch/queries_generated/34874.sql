@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'P') AND o.o_totalprice > 100
+), SizeStats AS (
+    SELECT p.p_size, COUNT(*) AS size_count, AVG(p.p_retailprice) AS avg_price
+    FROM part p
+    GROUP BY p.p_size
+    HAVING COUNT(*) > 10
+)
+SELECT 
+    n.n_name AS nation_name, 
+    s.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    p.p_name AS part_name,
+    COALESCE(ss.avg_price, 0) AS average_price,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    COUNT(DISTINCT sh.s_suppkey) AS hierarchy_count
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN SizeStats ss ON p.p_size = ss.p_size
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+AND (o.o_orderpriority BETWEEN '1-URGENT' AND '5-LOW')
+GROUP BY n.n_name, s.s_name, p.p_name, ss.avg_price
+HAVING total_revenue > 50000
+ORDER BY total_revenue DESC;

@@ -1,0 +1,83 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.ParentId,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.ParentId,
+        rp.PostLevel + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON rp.PostId = a.ParentId
+    WHERE 
+        a.PostTypeId = 2  
+),
+AggregatedVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.ViewCount,
+    r.Score,
+    r.PostLevel,
+    av.UpVotes,
+    av.TotalVotes,
+    av.DownVotes,
+    COALESCE(phts.EditTypes, 'No Edits') AS EditTypes,
+    CASE 
+        WHEN r.Score > 100 THEN 'High Scoring'
+        WHEN r.Score BETWEEN 50 AND 100 THEN 'Medium Scoring'
+        ELSE 'Low Scoring'
+    END AS ScoreCategory
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    AggregatedVotes av ON r.PostId = av.PostId
+LEFT JOIN 
+    PostHistorySummary phts ON r.PostId = phts.PostId
+WHERE 
+    r.PostLevel <= 3  
+ORDER BY 
+    r.PostLevel, 
+    r.Title;

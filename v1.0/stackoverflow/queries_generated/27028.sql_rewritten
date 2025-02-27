@@ -1,0 +1,85 @@
+WITH TagAndPostStats AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount
+    FROM
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY
+        t.TagName
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.PostId) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostTrend AS (
+    SELECT
+        p.Title,
+        p.CreationDate,
+        EXTRACT(YEAR FROM p.CreationDate) AS PostYear,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoreCount
+    FROM
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Title, p.CreationDate
+),
+FinalStats AS (
+    SELECT
+        t.TagName,
+        t.PostCount,
+        t.QuestionCount,
+        t.AnswerCount,
+        t.AvgViewCount,
+        u.DisplayName AS ActiveUser,
+        u.VoteCount,
+        u.UpvoteCount,
+        u.DownvoteCount,
+        p.PostYear,
+        p.Title,
+        p.CommentCount,
+        p.PositiveScoreCount,
+        p.NegativeScoreCount
+    FROM
+        TagAndPostStats t
+    JOIN
+        UserActivity u ON t.PostCount > 10  
+    JOIN
+        PostTrend p ON EXTRACT(YEAR FROM p.CreationDate) = 2023  
+)
+SELECT
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    AvgViewCount,
+    ActiveUser,
+    VoteCount,
+    UpvoteCount,
+    DownvoteCount,
+    Title,
+    CommentCount,
+    PositiveScoreCount,
+    NegativeScoreCount
+FROM
+    FinalStats
+ORDER BY
+    AvgViewCount DESC, PostCount DESC, VoteCount DESC
+LIMIT 50;

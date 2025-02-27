@@ -1,0 +1,79 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        c.role AS cast_role,
+        a.name AS actor_name,
+        COALESCE(mk.keyword, 'No keyword') AS movie_keyword
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        complete_cast cc ON rm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.title_rank <= 10 -- Top 10 movies per year
+),
+production_companies AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+final_output AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.actor_name,
+        tm.cast_role,
+        pc.company_names,
+        pc.company_count,
+        CASE 
+            WHEN pc.company_count IS NULL THEN 'Independent'
+            ELSE 'Studio'
+        END AS company_type
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        production_companies pc ON tm.movie_id = pc.movie_id
+)
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_name,
+    f.cast_role,
+    f.company_names,
+    f.company_count,
+    f.company_type,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = f.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')) AS award_count
+FROM 
+    final_output f
+WHERE 
+    f.production_year >= 2000 
+    AND (f.actor_name IS NOT NULL OR f.company_names IS NOT NULL) -- Show rows with relevant actor or company info
+ORDER BY 
+    f.production_year DESC, 
+    f.title ASC
+LIMIT 50;

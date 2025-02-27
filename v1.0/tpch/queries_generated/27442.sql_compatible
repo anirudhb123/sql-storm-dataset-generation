@@ -1,0 +1,48 @@
+
+WITH PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        LENGTH(p.p_name) AS name_length,
+        COUNT(ps.ps_partkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), OrderStatistics AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.name_length,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    ps.suppliers,
+    os.line_count,
+    os.total_price,
+    os.last_ship_date
+FROM 
+    PartStatistics ps
+LEFT JOIN 
+    OrderStatistics os ON ps.p_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o) LIMIT 1)
+WHERE 
+    ps.supplier_count > 1
+ORDER BY 
+    ps.avg_supply_cost DESC, os.total_price DESC;

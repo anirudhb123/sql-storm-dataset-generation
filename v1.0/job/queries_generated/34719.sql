@@ -1,0 +1,70 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  -- Assuming '1' reflects a primary movie
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id  
+),
+
+industry_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names 
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+info_aggregates AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT mi.info_type_id) AS total_info_types,
+        MAX(mi.info) AS latest_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(stats.total_cast, 0) AS total_cast_members,
+    COALESCE(stats.cast_names, 'No Cast') AS cast_members,
+    COALESCE(info.total_info_types, 0) AS info_type_count,
+    COALESCE(info.latest_info, 'No Info Available') AS latest_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    industry_stats stats ON mh.movie_id = stats.movie_id
+LEFT JOIN 
+    info_aggregates info ON mh.movie_id = info.movie_id
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+
+
+This SQL query performs several advanced tasks, including the use of recursive CTEs to build a hierarchy of movies, aggregates information about cast members and associated information types, and applies outer joins to ensure that all movies are listed, regardless of whether they have associated cast or info.

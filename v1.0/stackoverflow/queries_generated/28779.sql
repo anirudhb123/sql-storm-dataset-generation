@@ -1,0 +1,48 @@
+WITH TagSummary AS (
+    SELECT 
+        TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN pt.Name = 'Question' THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        TagName
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.PopularPostCount,
+    ubc.DisplayName AS TopUser,
+    ubc.GoldBadges,
+    ubc.SilverBadges,
+    ubc.BronzeBadges
+FROM 
+    TagSummary ts
+JOIN 
+    UserBadgeCounts ubc ON ts.QuestionCount = (SELECT MAX(QuestionCount) FROM TagSummary)
+ORDER BY 
+    ts.PopularPostCount DESC, 
+    ts.PostCount DESC 
+LIMIT 5;

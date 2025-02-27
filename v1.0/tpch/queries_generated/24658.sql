@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS rank,
+           CAST(c_name AS VARCHAR(100)) AS path
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > (
+        SELECT AVG(c_acctbal) 
+        FROM customer
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.n_nationkey ORDER BY c.c_acctbal DESC) AS rank,
+           CAST(CONCAT(ch.path, ' -> ', c.c_name) AS VARCHAR(100))
+    FROM customer c
+    JOIN CustomerHierarchy ch ON ch.c_nationkey = c.c_nationkey
+    WHERE ch.rank < 5
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp
+    )
+),
+OrderStats AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS item_count,
+           SUM(l.l_extendedprice) AS total_price
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FinalResults AS (
+    SELECT ch.c_name, ts.s_name, os.item_count,
+           os.total_price, CASE 
+               WHEN os.item_count > 10 THEN 'High' 
+               WHEN os.item_count BETWEEN 5 AND 10 THEN 'Medium' 
+               ELSE 'Low'
+           END AS order_category
+    FROM CustomerHierarchy ch
+    FULL OUTER JOIN TopSuppliers ts ON ch.c_nationkey = ts.s_suppkey
+    LEFT JOIN OrderStats os ON os.o_orderkey = (
+        SELECT MAX(o_orderkey) FROM orders WHERE o_custkey = ch.c_custkey
+    )
+)
+SELECT *
+FROM FinalResults
+WHERE (order_category = 'High' AND total_price IS NOT NULL)
+   OR (order_category IS NULL AND total_price < 1000)
+ORDER BY c_name, s_name;

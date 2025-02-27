@@ -1,0 +1,37 @@
+
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, r.hierarchy_level + 1
+    FROM supplier s
+    JOIN RecursiveCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE s.s_acctbal < r.s_acctbal
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           CASE WHEN p.p_size IS NULL THEN 'UNSIZED' ELSE CAST(p.p_size AS VARCHAR) END AS size_description
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) AND p.p_mfgr NOT LIKE 'Brand%'
+),
+OrderedDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(i.l_extendedprice * (1 - i.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(i.l_extendedprice * (1 - i.l_discount)) DESC) AS price_rank
+    FROM orders o
+    JOIN lineitem i ON o.o_orderkey = i.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT r.hierarchy_level, p.p_partkey, p.p_name, COALESCE(o.total_price, 0) AS total_price,
+       CASE 
+           WHEN o.total_price IS NULL THEN 'No Orders'
+           WHEN o.total_price < 1000 THEN 'Low Value'
+           ELSE 'High Value' 
+       END AS order_value_category
+FROM RecursiveCTE r
+FULL OUTER JOIN PartDetails p ON r.s_suppkey = (SELECT ps.s_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)
+LEFT JOIN OrderedDetails o ON r.s_suppkey = o.o_custkey
+WHERE (r.s_acctbal IS NOT NULL OR p.p_name IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = r.s_nationkey AND n.n_name = 'NATION UNKNOWN')
+ORDER BY r.hierarchy_level, p.p_partkey DESC
+LIMIT 100 OFFSET 10;

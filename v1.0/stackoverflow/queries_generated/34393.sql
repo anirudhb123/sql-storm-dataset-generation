@@ -1,0 +1,104 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        UR.Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputation UR ON U.Reputation > UR.Reputation
+    WHERE 
+        U.Reputation IS NOT NULL
+),
+
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation >= 1000
+),
+
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS TotalClosedPosts
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+
+FinalReport AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        P.TotalPosts,
+        P.TotalQuestions,
+        P.TotalAnswers,
+        P.TotalClosedPosts,
+        B.TotalBadges,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges,
+        R.Level AS ReputationLevel
+    FROM 
+        TopUsers U
+    LEFT JOIN 
+        PostStatistics P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UserBadges B ON U.Id = B.UserId
+    LEFT JOIN
+        UserReputation R ON U.Id = R.UserId
+)
+
+SELECT 
+    DisplayName,
+    Reputation,
+    COALESCE(TotalPosts, 0) AS TotalPosts,
+    COALESCE(TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(TotalClosedPosts, 0) AS TotalClosedPosts,
+    COALESCE(TotalBadges, 0) AS TotalBadges,
+    COALESCE(GoldBadges, 0) AS GoldBadges,
+    COALESCE(SilverBadges, 0) AS SilverBadges,
+    COALESCE(BronzeBadges, 0) AS BronzeBadges,
+    ReputationLevel
+FROM 
+    FinalReport
+WHERE 
+    ReputationLevel > 2  -- Filter for users with levels greater than 2
+ORDER BY 
+    Reputation DESC
+LIMIT 50;  -- Limit the results to top 50 users

@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHistory AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'P')
+), 
+SupplierPartDetails AS (
+    SELECT DISTINCT p.p_partkey, p.p_name, s.s_name, 
+           p.p_retailprice * (1 - COALESCE(NULLIF(l.l_discount, 0), 0)) AS adjusted_price,
+           ps.ps_availqty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+        AND l.l_returnflag = 'N'
+        AND l.l_linestatus = 'O'
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+)
+
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    SUM(s.adjusted_price) AS total_adjusted_price,
+    MAX(o.o_orderdate) AS latest_order_date,
+    MIN(ps.ps_availqty) AS min_avail_qty,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) IS NULL 
+        THEN 'No Orders' 
+        ELSE 'Has Orders' 
+    END AS order_status
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = c.c_custkey
+LEFT JOIN SupplierPartDetails s ON s.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    GROUP BY ps.ps_partkey 
+    HAVING AVG(ps.ps_supplycost) > (
+        SELECT AVG(ps_supplycost) 
+        FROM partsupp 
+        WHERE ps_supplycost IS NOT NULL
+    )
+)
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+GROUP BY n.n_name
+ORDER BY num_customers DESC, latest_order_date DESC
+LIMIT 10;

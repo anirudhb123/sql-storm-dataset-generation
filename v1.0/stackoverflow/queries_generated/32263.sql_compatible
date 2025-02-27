@@ -1,0 +1,99 @@
+
+WITH RecursiveTagCounts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        SUM(P.Score) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+    HAVING 
+        COUNT(DISTINCT P.Id) > 0
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+),
+PostMetrics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(RTC.TagCount, 0) AS TagCount,
+        P.ViewCount,
+        P.Score,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer'
+            ELSE 'No Accepted Answer'
+        END AS AnswerStatus
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecursiveTagCounts RTC ON P.Id = RTC.PostId
+),
+RecentClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS CloseDate,
+        CR.Name AS CloseReason
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment = CR.Id::text
+    WHERE 
+        PH.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '30 days')
+),
+VotesSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(PM.PostId, RCP.PostId) AS PostId,
+    COALESCE(PM.Title, RCP.Title) AS Title,
+    COALESCE(PM.TagCount, 0) AS TagCount,
+    COALESCE(PM.ViewCount, 0) AS ViewCount,
+    COALESCE(PM.Score, 0) AS Score,
+    COALESCE(VS.UpVotes, 0) AS UpVotes,
+    COALESCE(VS.DownVotes, 0) AS DownVotes,
+    COALESCE(RCP.CloseDate, CAST('2024-10-01 12:34:56' AS TIMESTAMP)) AS CloseDate,
+    RCP.CloseReason,
+    PM.AnswerStatus
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PostMetrics PM ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = PM.PostId LIMIT 1)
+LEFT JOIN 
+    RecentClosedPosts RCP ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = RCP.PostId LIMIT 1)
+LEFT JOIN 
+    VotesSummary VS ON PM.PostId = VS.PostId
+ORDER BY 
+    U.Reputation DESC, 
+    COALESCE(PM.Score, 0) DESC;

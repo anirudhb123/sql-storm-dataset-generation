@@ -1,0 +1,66 @@
+WITH TagCounts AS (
+    SELECT
+        Tags.TagName,
+        COUNT(P.Id) AS PostCount,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS AuthorNames,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM
+        Tags
+    JOIN
+        Posts P ON P.Tags LIKE '%' || Tags.TagName || '%'
+    LEFT JOIN
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY
+        Tags.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        AuthorNames,
+        TotalViews,
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM
+        TagCounts
+),
+DetailedPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        T.TagName,
+        P.ViewCount,
+        P.Score,
+        C.Comment AS LastComment
+    FROM
+        Posts P
+    JOIN
+        Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN
+        Comments C ON P.Id = C.PostId
+    WHERE
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT
+    TT.TagName,
+    TT.PostCount,
+    TT.AuthorNames,
+    TT.TotalViews,
+    TT.AverageScore,
+    DP.PostId,
+    DP.Title,
+    DP.Body,
+    DP.ViewCount,
+    DP.Score,
+    DP.LastComment
+FROM
+    TopTags TT
+JOIN
+    DetailedPosts DP ON TT.TagName = DP.TagName
+WHERE
+    TT.Rank <= 10
+ORDER BY
+    TT.Rank, DP.ViewCount DESC;

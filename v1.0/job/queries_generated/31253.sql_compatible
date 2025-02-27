@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS depth,
+        COALESCE(NULLIF(m.production_year, 0), 'Unknown') AS production_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('S', h.depth + 1, ': ', m.title) AS movie_title,
+        h.depth + 1,
+        COALESCE(NULLIF(m.production_year, 0), 'Unknown')
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id 
+    WHERE 
+        h.depth < 5
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth DESC) AS rank_by_year
+    FROM 
+        MovieHierarchy mh
+),
+ActorRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        c.movie_id,
+        r.role AS role_name,
+        COALESCE(NULLIF(c.nr_order, 0), 'Not Ordered') AS order_status
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        ak.name IS NOT NULL
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    ar.actor_name,
+    ar.role_name,
+    ar.order_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+WHERE 
+    (ar.order_status IS NOT NULL OR rm.production_year = '2022')
+ORDER BY 
+    rm.production_year, rm.rank_by_year DESC, ar.actor_name;

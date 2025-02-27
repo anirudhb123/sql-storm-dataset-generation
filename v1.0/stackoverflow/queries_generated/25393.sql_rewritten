@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS t(TagName) ON t.TagName IS NOT NULL
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id, p.Title, p.Body, u.DisplayName, p.CreationDate, p.LastActivityDate
+), 
+Benchmark AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.CommentCount,
+        rp.AnswerCount,
+        ARRAY_LENGTH(STRING_TO_ARRAY(rp.Tags, ', '), 1) AS TagCount,
+        RANK() OVER (ORDER BY rp.LastActivityDate DESC) AS ActivityRank
+    FROM RankedPosts rp
+)
+SELECT 
+    b.PostId,
+    b.Title,
+    b.Author,
+    b.CreationDate,
+    b.LastActivityDate,
+    b.CommentCount,
+    b.AnswerCount,
+    b.TagCount,
+    b.ActivityRank,
+    CASE 
+        WHEN b.AnswerCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM Benchmark b
+WHERE b.TagCount > 2 
+ORDER BY b.ActivityRank
+LIMIT 100;

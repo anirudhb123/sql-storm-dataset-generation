@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 10)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.nationkey = sh.nationkey
+    WHERE sh.level < 5
+),
+SelectedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 20
+),
+OrderSums AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, cs.total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY cs.total_spent DESC) AS rank
+    FROM customer c
+    LEFT JOIN OrderSums cs ON c.c_custkey = cs.o_custkey
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT cs.c_name, cs.total_spent, sh.s_name AS supplier_name, ps.p_name, ps.avg_supply_cost
+FROM CustomerStats cs
+LEFT JOIN SupplierHierarchy sh ON cs.c_custkey = sh.s_suppkey
+LEFT JOIN PartStats ps ON ps.p_partkey IN (SELECT l.l_partkey
+                                             FROM lineitem l
+                                             WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O'))
+LEFT JOIN region r ON r.r_regionkey IN (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sh.nationkey)
+WHERE cs.total_spent IS NOT NULL
+  AND cs.rank <= 3
+ORDER BY cs.total_spent DESC, ps.avg_supply_cost;

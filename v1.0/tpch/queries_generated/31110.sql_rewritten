@@ -1,0 +1,47 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT co.c_custkey, co.c_name, co.total_spent
+    FROM CustomerOrders co
+    WHERE co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+),
+HeavyLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_quantity) AS total_quantity, COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_quantity) > 500
+)
+SELECT 
+    ns.n_name AS nation_name,
+    p.p_name AS part_name,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    SUM(l.l_quantity) AS quantity_sold,
+    CASE 
+        WHEN SUM(l.l_discount) IS NULL THEN 'No Discount'
+        ELSE SUM(l.l_discount)::varchar
+    END AS total_discount,
+    ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY revenue DESC) AS rank
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN nation ns ON ns.n_nationkey = s.s_nationkey
+JOIN HighValueCustomers hvc ON hvc.c_custkey = l.l_orderkey
+LEFT JOIN HeavyLineItems hli ON hli.l_orderkey = l.l_orderkey
+WHERE p.p_retailprice > 50
+AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY ns.n_name, p.p_name
+HAVING COUNT(DISTINCT l.l_orderkey) > 0
+ORDER BY ns.n_name, revenue DESC;

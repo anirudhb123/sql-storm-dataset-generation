@@ -1,0 +1,48 @@
+WITH ActorMovieCounts AS (
+    SELECT 
+        akn.name AS actor_name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name akn
+    JOIN 
+        cast_info ci ON akn.person_id = ci.person_id
+    GROUP BY 
+        akn.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+), 
+TopActors AS (
+    SELECT 
+        actor_name
+    FROM 
+        ActorMovieCounts
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+), 
+MovieDetails AS (
+    SELECT 
+        t.title AS movie_title, 
+        t.production_year, 
+        GROUP_CONCAT(DISTINCT akn.name ORDER BY akn.name SEPARATOR ', ') AS cast_names
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name akn ON ci.person_id = akn.person_id
+    WHERE 
+        akn.name IN (SELECT actor_name FROM TopActors)
+    GROUP BY 
+        t.id
+)
+SELECT 
+    md.movie_title, 
+    md.production_year, 
+    md.cast_names
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, md.movie_title;

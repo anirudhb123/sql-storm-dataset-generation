@@ -1,0 +1,80 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        rp.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId  
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.OwnerUserId,
+    r.CreationDate,
+    r.ViewCount,
+    r.AnswerCount,
+    r.Score,
+    COALESCE(v.UpVotes, 0) AS UpVotes,
+    COALESCE(v.DownVotes, 0) AS DownVotes,
+    COALESCE(v.TotalVotes, 0) AS TotalVotes,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    PostVoteSummary v ON r.PostId = v.PostId
+LEFT JOIN 
+    UserBadgeCounts b ON r.OwnerUserId = b.UserId
+WHERE 
+    r.AnswerCount > 0
+ORDER BY 
+    r.Score DESC, r.CreationDate DESC;

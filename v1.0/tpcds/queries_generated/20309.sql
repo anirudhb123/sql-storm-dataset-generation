@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year >= 2020 AND dd.d_year <= 2023
+    GROUP BY 
+        ws.web_site_sk
+), 
+HighPerformers AS (
+    SELECT 
+        w.w_warehouse_id,
+        ws.total_sales,
+        ws.order_count
+    FROM 
+        RankedSales ws
+    LEFT JOIN 
+        warehouse w ON ws.web_site_sk = w.w_warehouse_sk
+    WHERE 
+        ws.sales_rank <= 10
+    AND 
+        w.w_warehouse_id IS NOT NULL
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COALESCE(SUM(sr_return_amt_inc_tax), 0) AS total_returned_amount,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+), 
+ReturnAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+        cr.return_count,
+        CASE 
+            WHEN cr.return_count > 5 THEN 'Frequent Returner'
+            WHEN cr.total_returned_amount > 1000 THEN 'High Value Returner'
+            ELSE 'Standard Customer'
+        END AS return_category
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    hp.w_warehouse_id,
+    r.return_category,
+    AVG(hp.total_sales) AS avg_total_sales,
+    SUM(r.return_count) AS total_returns
+FROM 
+    HighPerformers hp
+JOIN 
+    ReturnAnalysis r ON hp.ws_order_count = r.return_count
+GROUP BY 
+    hp.w_warehouse_id, r.return_category
+HAVING 
+    AVG(hp.total_sales) > 5000
+ORDER BY 
+    avg_total_sales DESC;

@@ -1,0 +1,87 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        COALESCE(cp.kind, 'Unknown') AS company_type,
+        rm.actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON rm.title = mc.movie_id
+    LEFT JOIN 
+        company_type cp ON mc.company_type_id = cp.id
+    WHERE 
+        rm.rank <= 10
+),
+ActorInfo AS (
+    SELECT 
+        c.role_id,
+        p.name,
+        COUNT(c.movie_id) AS movies_participated
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    GROUP BY 
+        c.role_id, p.name
+),
+FinalReport AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.company_type,
+        md.actor_count,
+        ai.name AS actor_name,
+        ai.movies_participated
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        ActorInfo ai ON md.actor_count = ai.movies_participated
+    ORDER BY 
+        md.production_year DESC, md.actor_count DESC
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.keyword,
+    fr.company_type,
+    fr.actor_count,
+    fr.actor_name,
+    COALESCE(fr.movies_participated, 0) AS movies_participated
+FROM 
+    FinalReport fr
+WHERE 
+    fr.production_year IS NOT NULL
+    AND fr.actor_count > 0
+UNION ALL
+SELECT 
+    'Summary' AS title,
+    NULL AS production_year,
+    NULL AS keyword,
+    'Total Movies' AS company_type,
+    COUNT(*) AS actor_count,
+    NULL AS actor_name,
+    NULL AS movies_participated
+FROM 
+    movie_info
+WHERE 
+    info_type_id = (SELECT id FROM info_type WHERE info = 'count')
+GROUP BY 
+    NULL;

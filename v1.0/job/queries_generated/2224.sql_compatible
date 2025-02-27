@@ -1,0 +1,64 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        ak.name,
+        ac.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorMovieCounts ac ON ak.person_id = ac.person_id
+    WHERE 
+        ac.movie_count > 5
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    COALESCE(ta.name, 'Unknown Actor') AS leading_actor,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS associated_keywords
+FROM 
+    RankedTitles tt
+LEFT JOIN 
+    TopActors ta ON tt.rn = 1 AND ta.movie_count >= 3
+LEFT JOIN 
+    MoviesWithKeywords kw ON tt.title = kw.title AND tt.production_year = kw.production_year
+WHERE 
+    tt.production_year >= 2000
+GROUP BY 
+    tt.title, 
+    tt.production_year, 
+    ta.name
+ORDER BY 
+    tt.production_year DESC, 
+    tt.title;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        DATEADD(DAY, ws.ws_sold_date_sk, '1970-01-01') AS sale_date
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1000 AND 1100
+    GROUP BY ws.ws_item_sk, ws.ws_sold_date_sk
+    
+    UNION ALL
+    
+    SELECT
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_net_profit) AS total_profit,
+        DATEADD(DAY, cs.cs_sold_date_sk, '1970-01-01') AS sale_date
+    FROM catalog_sales cs
+    WHERE cs.cs_sold_date_sk BETWEEN 1000 AND 1100
+    GROUP BY cs.cs_item_sk, cs.cs_sold_date_sk
+),
+item_summary AS (
+    SELECT
+        i.i_item_sk,
+        COALESCE(SUM(sd.total_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(sd.total_profit), 0) AS total_profit_earned,
+        i.i_item_desc,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(sd.total_profit), 0) DESC) AS profit_rank
+    FROM item i
+    LEFT JOIN sales_data sd ON i.i_item_sk = sd.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+),
+top_items AS (
+    SELECT
+        *
+    FROM item_summary
+    WHERE profit_rank <= 10
+)
+SELECT
+    ti.i_item_desc,
+    ti.total_quantity_sold,
+    ti.total_profit_earned,
+    CASE
+        WHEN ti.total_profit_earned IS NULL THEN 'Unknown'
+        WHEN ti.total_profit_earned < 500 THEN 'Low'
+        WHEN ti.total_profit_earned < 1000 THEN 'Medium'
+        ELSE 'High'
+    END AS profit_category
+FROM top_items ti
+LEFT JOIN customer_demographics cd ON cd.cd_demo_sk = (
+    SELECT c.c_current_cdemo_sk
+    FROM customer c
+    WHERE c.c_customer_sk IN (
+        SELECT ws.ws_bill_customer_sk
+        FROM web_sales ws
+        WHERE ws.ws_item_sk IN (SELECT i.i_item_sk FROM top_items)
+    )
+    ORDER BY c.c_current_cdemo_sk
+    LIMIT 1
+)
+WHERE cd.cd_income_band_sk IS NOT NULL
+ORDER BY ti.total_profit_earned DESC;

@@ -1,0 +1,39 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+    UNION ALL
+    SELECT s.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount))
+    FROM SalesCTE s
+    JOIN orders o ON s.o_orderkey <> o.o_orderkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY s.o_orderkey
+),
+AvgSales AS (
+    SELECT AVG(total_sales) AS avg_sales
+    FROM SalesCTE
+),
+NationSupplier AS (
+    SELECT n.n_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name
+),
+PartSaleInfo AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS order_count, COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_part_sales
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT ns.n_name, ps.p_name, ps.order_count, ps.total_part_sales, ns.total_supply_cost,
+       CASE 
+           WHEN ps.total_part_sales > (SELECT avg_sales FROM AvgSales) THEN 'Above Average'
+           ELSE 'Below Average'
+       END AS sales_performance
+FROM NationSupplier ns
+JOIN PartSaleInfo ps ON ns.total_supply_cost > 0
+ORDER BY ns.n_name, ps.total_part_sales DESC;

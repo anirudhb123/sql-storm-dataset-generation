@@ -1,0 +1,71 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0 -- Start from non-moderator tags
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        r.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        PostLinks pl ON pl.RelatedPostId = t.Id
+    INNER JOIN 
+        RecursiveTagHierarchy r ON r.TagId = pl.PostId
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyAmount,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8) AS BountiesGiven,
+        SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 9) AS BountiesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), 
+PostStatusChanges AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount, -- Count of close actions
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount, -- Count of reopen actions
+        MAX(ph.CreationDate) AS LastUpdate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ts.TagName,
+    us.DisplayName,
+    us.TotalPosts,
+    us.TotalBountyAmount,
+    psc.CloseCount,
+    psc.ReopenCount,
+    ROW_NUMBER() OVER (PARTITION BY ts.TagName ORDER BY us.TotalPosts DESC) AS Rank
+FROM 
+    RecursiveTagHierarchy ts
+JOIN 
+    UserScores us ON us.TotalPosts > 0
+LEFT JOIN 
+    PostStatusChanges psc ON psc.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE '%' || ts.TagName || '%') 
+WHERE 
+    us.BountiesReceived > 0 OR us.BountiesGiven > 0
+ORDER BY 
+    ts.TagName, Rank;

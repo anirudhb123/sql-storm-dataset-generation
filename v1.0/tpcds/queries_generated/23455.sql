@@ -1,0 +1,62 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_brand, i_size, i_color, 1 AS depth
+    FROM item
+    WHERE i_color IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT i.i_item_sk, i.i_item_desc, i.i_brand, i.i_size, i.i_color, ih.depth + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_item_sk = ih.i_item_sk
+    WHERE ih.depth < 5
+),
+CustomerIncomeEstimate AS (
+    SELECT cd.cd_demo_sk, 
+           SUM(CASE 
+               WHEN h.hd_income_band_sk IS NOT NULL THEN 1 
+               ELSE 0 
+           END) AS income_count,
+           COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    GROUP BY ws.ws_item_sk
+),
+TopItems AS (
+    SELECT ws.ws_item_sk, 
+           ROW_NUMBER() OVER (ORDER BY total_net_profit DESC) AS rank
+    FROM SalesData ws
+)
+SELECT ci.income_count,
+       c.customer_count,
+       th.item_desc,
+       th.brand,
+       th.size,
+       th.color,
+       th.total_sales,
+       th.order_count,
+       COALESCE(NULLIF(th.total_net_profit, 0), 1) AS adjusted_net_profit
+FROM CustomerIncomeEstimate ci
+JOIN TopItems ti ON ci.cd_demo_sk = ti.ws_item_sk
+JOIN ItemHierarchy th ON th.i_item_sk = ti.ws_item_sk
+LEFT JOIN store s ON th.i_color = s.s_color AND th.i_size = s.s_size
+WHERE th.depth = 5
+AND EXISTS (
+    SELECT 1 
+    FROM store_returns sr 
+    WHERE sr.sr_item_sk = th.i_item_sk 
+      AND sr.sr_return_quantity > 0
+)
+ORDER BY ci.income_count DESC, adjusted_net_profit DESC
+LIMIT 100 OFFSET 10;

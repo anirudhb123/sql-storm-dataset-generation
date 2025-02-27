@@ -1,0 +1,73 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        CASE 
+            WHEN CreationDate < NOW() - INTERVAL '1 year' THEN 'Veteran'
+            WHEN CreationDate BETWEEN NOW() - INTERVAL '1 year' AND NOW() - INTERVAL '1 month' THEN 'Intermediate'
+            ELSE 'Newcomer'
+        END AS UserCategory
+    FROM Users
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Score,
+        P.CreationDate,
+        P.LastActivityDate,
+        COALESCE(V. VoteCount, 0) AS TotalVotes,
+        P.Title,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS RecentPostRank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.UserId, 
+        PH.CreationDate AS CloseDate,
+        CRT.Name AS CloseReason,
+        PH.Comment AS CloseComment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS CloseRank
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CRT ON PH.Comment::json->>'CloseReasonId'::int = CRT.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+AggregatedPosts AS (
+    SELECT 
+        A.UserId,
+        COUNT(DISTINCT A.PostId) AS PostCount,
+        SUM(A.Score) AS TotalScore,
+        AVG(A.TotalVotes) AS AvgVotes,
+        MAX(CASE WHEN A.RecentPostRank <= 3 THEN A.Title END) AS RecentHighEngagementPost
+    FROM PostActivity A
+    INNER JOIN UserReputation UR ON A.OwnerUserId = UR.UserId
+    GROUP BY A.UserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    UR.UserCategory,
+    COALESCE(AP.PostCount, 0) AS TotalPosts,
+    COALESCE(AP.TotalScore, 0) AS TotalScore,
+    COALESCE(AP.AvgVotes, 0) AS AverageVotes,
+    (SELECT COUNT(*) FROM ClosedPosts CP WHERE CP.UserId = U.Id AND CP.CloseRank = 1) AS ClosedPostCount,
+    (SELECT STRING_AGG(DISTINCT CP.CloseReason, ', ') FROM ClosedPosts CP WHERE CP.UserId = U.Id AND CP.CloseRank = 1) AS RecentCloseReasons,
+    AP.RecentHighEngagementPost
+FROM Users U
+LEFT JOIN AggregatedPosts AP ON U.Id = AP.UserId
+LEFT JOIN PostLinks PL ON U.Id = PL.PostId
+WHERE U.Reputation > 1000 
+  AND (U.Location IS NOT NULL OR U.WebsiteUrl IS NOT NULL)
+  AND (U.LastAccessDate > NOW() - INTERVAL '1 month')
+ORDER BY U.Reputation DESC, TotalPosts DESC
+LIMIT 50;
+

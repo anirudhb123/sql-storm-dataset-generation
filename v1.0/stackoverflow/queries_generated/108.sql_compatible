@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+), 
+TopPosts AS (
+    SELECT 
+        r.PostId, 
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId) AS CommentCount,
+        COALESCE((SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = r.PostId AND v.VoteTypeId = 8), 0) AS TotalBounty
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.UserRank = 1 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.TotalBounty,
+    COALESCE(
+        (SELECT STRING_AGG(t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.WikiPostId IN (SELECT p.WikiPostId FROM Posts p WHERE p.Id = tp.PostId)), 
+        'No Tags') AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostLinks pl ON tp.PostId = pl.PostId
+LEFT JOIN 
+    Posts related ON pl.RelatedPostId = related.Id
+WHERE 
+    tp.Score > (SELECT AVG(Score) FROM Posts) OR tp.CommentCount > 5
+GROUP BY 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.TotalBounty
+ORDER BY 
+    tp.Score DESC, tp.CreationDate ASC
+LIMIT 100;

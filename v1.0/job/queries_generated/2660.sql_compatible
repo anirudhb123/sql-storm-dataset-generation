@@ -1,0 +1,55 @@
+
+WITH MovieReviews AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title,
+        COALESCE(SUM(CASE WHEN r.rating IS NOT NULL THEN r.rating ELSE 0 END), 0) AS total_rating,
+        COUNT(r.id) AS review_count
+    FROM 
+        title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            CAST(info AS FLOAT) AS rating
+        FROM movie_info 
+        WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    ) r ON m.id = r.movie_id
+    GROUP BY m.id, m.title
+), ActorMovie AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN title t ON c.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+    GROUP BY a.person_id
+), RankedMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        total_rating,
+        review_count,
+        RANK() OVER (ORDER BY total_rating DESC) AS rating_rank
+    FROM MovieReviews
+)
+SELECT 
+    am.person_id,
+    am.movie_count,
+    am.movie_titles,
+    rm.movie_title,
+    rm.total_rating,
+    rm.review_count,
+    rm.rating_rank,
+    CASE 
+        WHEN rm.review_count > 0 THEN rm.total_rating / rm.review_count 
+        ELSE NULL 
+    END AS average_rating
+FROM 
+    ActorMovie am
+LEFT JOIN RankedMovies rm ON am.movie_count > 10 AND rm.rating_rank <= 10
+ORDER BY am.movie_count DESC, rm.total_rating DESC;

@@ -1,0 +1,45 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        CreationDate,
+        1 AS Level
+    FROM Posts 
+    WHERE PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.ParentId,
+        a.CreationDate,
+        p.Level + 1 AS Level
+    FROM Posts a
+    INNER JOIN RecursivePostHierarchy p ON a.ParentId = p.PostId
+)
+
+SELECT 
+    q.Id AS QuestionId,
+    q.Title AS QuestionTitle,
+    q.CreationDate AS QuestionDate,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    AVG(u.Reputation) AS AvgReputation,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoted
+FROM Posts q
+LEFT JOIN RecursivePostHierarchy a ON q.Id = a.ParentId
+LEFT JOIN Users u ON q.OwnerUserId = u.Id
+LEFT JOIN Badges b ON u.Id = b.UserId
+LEFT JOIN LATERAL STRING_TO_ARRAY(q.Tags, ',') AS t(TagName) ON (t.TagName IS NOT NULL)
+LEFT JOIN Votes v ON q.Id = v.PostId
+WHERE q.PostTypeId = 1 
+GROUP BY q.Id, q.Title, q.CreationDate
+HAVING COUNT(DISTINCT a.PostId) > 0 
+ORDER BY q.CreationDate DESC;

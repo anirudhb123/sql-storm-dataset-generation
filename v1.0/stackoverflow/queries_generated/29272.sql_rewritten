@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substr(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.Score > 0   
+),
+
+TopRankedPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5  
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeletionCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 52 THEN 1 END) AS HotQuestionCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.Body,
+    trp.CreationDate,
+    trp.Tags,
+    trp.OwnerDisplayName,
+    trp.Score,
+    trp.ViewCount,
+    COALESCE(phs.CloseReopenCount, 0) AS CloseReopenCount,
+    COALESCE(phs.DeletionCount, 0) AS DeletionCount,
+    COALESCE(phs.HotQuestionCount, 0) AS HotQuestionCount
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    PostHistorySummary phs ON trp.PostId = phs.PostId
+ORDER BY 
+    trp.Score DESC, trp.CreationDate DESC;

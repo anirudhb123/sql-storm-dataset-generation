@@ -1,0 +1,56 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        CommentCount,
+        DENSE_RANK() OVER (ORDER BY (UpVotes - DownVotes) DESC) AS Rank
+    FROM 
+        UserStats
+)
+
+SELECT 
+    lu.UserId,
+    lu.DisplayName,
+    lu.UpVotes,
+    lu.DownVotes,
+    lu.PostCount,
+    lu.CommentCount,
+    COALESCE(SUM(b.Class), 0) AS TotalBadges,
+    COALESCE(MAX(pf.FavoriteCount), 0) AS MostFavoritedPost
+FROM 
+    RankedUsers lu
+LEFT JOIN 
+    Badges b ON lu.UserId = b.UserId
+LEFT JOIN 
+    Posts pf ON lu.UserId = pf.OwnerUserId
+WHERE 
+    lu.PostCount > 5
+GROUP BY 
+    lu.UserId, lu.DisplayName, lu.UpVotes, lu.DownVotes, lu.PostCount, lu.CommentCount
+HAVING 
+    COUNT(DISTINCT b.Id) > 0
+ORDER BY 
+    lu.Rank
+FETCH FIRST 10 ROWS ONLY;

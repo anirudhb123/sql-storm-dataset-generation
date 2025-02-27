@@ -1,0 +1,58 @@
+WITH RecursiveActors AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        c.movie_id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+), 
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT ga.actor_id) AS guest_appearances
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ca ON t.id = ca.movie_id
+    LEFT JOIN 
+        RecursiveActors ga ON ca.person_id = ga.actor_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        md.movie_id, 
+        md.movie_title,
+        md.guest_appearances,
+        RANK() OVER (ORDER BY md.guest_appearances DESC) AS rank
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    tm.movie_id, 
+    tm.movie_title, 
+    tm.guest_appearances,
+    CASE 
+        WHEN tm.guest_appearances IS NULL THEN 'No guests'
+        ELSE CONCAT('Number of guest appearances: ', tm.guest_appearances)
+    END AS guest_info,
+    COALESCE(mc.name, 'Unknown Company') AS production_company
+FROM 
+    TopMovies tm
+FULL OUTER JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+WHERE 
+    tm.rank <= 10 OR mc.company_type_id IS NOT NULL
+ORDER BY 
+    tm.guest_appearances DESC, 
+    tm.movie_title;

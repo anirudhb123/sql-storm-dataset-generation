@@ -1,0 +1,45 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes > 0 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN p.DownVotes > 0 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalUpvotes,
+        TotalDownvotes,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts
+    FROM 
+        UserActivity
+)
+SELECT 
+    ru.*,
+    (SELECT COUNT(*) FROM Comments c WHERE c.UserId = ru.UserId) AS TotalComments
+FROM 
+    RankedUsers ru
+WHERE 
+    ru.RankByPosts <= 10
+ORDER BY 
+    ru.RankByPosts;

@@ -1,0 +1,91 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        id,
+        title,
+        episode_of_id,
+        season_nr,
+        episode_nr,
+        1 AS level
+    FROM 
+        aka_title
+    WHERE 
+        production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        a.id,
+        a.title,
+        a.episode_of_id,
+        a.season_nr,
+        a.episode_nr,
+        mh.level + 1
+    FROM 
+        aka_title a
+    JOIN movie_hierarchy mh ON a.episode_of_id = mh.id
+),
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+popular_movies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+movie_info_summary AS (
+    SELECT 
+        title.id,
+        title.title,
+        COUNT(mi.id) AS info_count,
+        STRING_AGG(mi.info, ', ') AS info_details
+    FROM 
+        title
+    LEFT JOIN 
+        movie_info mi ON title.id = mi.movie_id
+    GROUP BY 
+        title.id, title.title
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.level AS episode_level,
+    rc.actor_name,
+    pi.info_count,
+    pi.info_details
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    ranked_cast rc ON mh.id = rc.movie_id 
+LEFT JOIN 
+    movie_info_summary pi ON mh.id = pi.id
+WHERE 
+    mh.level = 1 AND 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_keyword mk 
+        WHERE mk.movie_id = mh.id AND mk.keyword_id IN (
+            SELECT id FROM keyword WHERE keyword = 'blockbuster'
+        )
+    )
+ORDER BY 
+    mh.production_year DESC, 
+    rc.role_rank
+LIMIT 50;

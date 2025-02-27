@@ -1,0 +1,67 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        array_agg(distinct trim(both '<>' from unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))) AS TagsArray
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountySpent
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryRecent AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.TagsArray,
+    ua.DisplayName AS UserDisplayName,
+    ua.QuestionsAsked,
+    ua.CommentsMade,
+    ua.TotalBountySpent,
+    COALESCE(MAX(ph.LastChangeDate), 'No Recent Changes') AS LastPostChange
+FROM 
+    TaggedPosts tp
+JOIN 
+    UserActivity ua ON tp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+LEFT JOIN 
+    PostHistoryRecent ph ON tp.PostId = ph.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.ViewCount, tp.TagsArray, ua.DisplayName, ua.QuestionsAsked, ua.CommentsMade, ua.TotalBountySpent
+ORDER BY 
+    tp.ViewCount DESC, ua.QuestionsAsked DESC
+LIMIT 10;

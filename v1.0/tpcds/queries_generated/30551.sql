@@ -1,0 +1,51 @@
+
+WITH RECURSIVE DateCTE AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq
+    FROM date_dim
+    WHERE d_year = 2023
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year, d.d_month_seq
+    FROM date_dim d
+    INNER JOIN DateCTE dcte ON dcte.d_date_sk = d.d_date_sk - 1
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM DateCTE)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.customer_id,
+        ROW_NUMBER() OVER (PARTITION BY c.c_gender ORDER BY cs.total_sales DESC) AS rnk,
+        cs.total_sales
+    FROM customer c
+    JOIN (
+        SELECT 
+            c_customer_sk,
+            SUM(ws_net_paid) AS total_sales
+        FROM web_sales
+        GROUP BY c_customer_sk
+    ) cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE cs.total_sales > 1000
+)
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(ss.ss_net_profit) AS store_profit,
+    SUM(ws.ws_net_profit) AS web_profit
+FROM customer_address ca
+FULL OUTER JOIN store_sales ss ON ss.ss_net_paid > 0
+FULL OUTER JOIN web_sales ws ON ws.ws_net_paid > 0
+WHERE ca.ca_state IN (SELECT DISTINCT ca_state FROM customer_address WHERE ca_country = 'USA')
+GROUP BY ca.ca_address_id, ca.ca_city, ca.ca_state
+HAVING SUM(ss.ss_net_profit) IS NOT NULL OR SUM(ws.ws_net_profit) IS NOT NULL
+ORDER BY store_profit DESC, web_profit DESC
+LIMIT 100;

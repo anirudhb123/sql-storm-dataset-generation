@@ -1,0 +1,28 @@
+
+SELECT 
+    CONCAT(p.p_brand, ' - ', p.p_name, ' - ', p.p_container) AS part_description,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    COUNT(DISTINCT CASE WHEN c.c_mktsegment = 'BUILDING' THEN c.c_custkey END) AS building_customers
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_name LIKE '%PROD%' AND
+    p.p_retailprice BETWEEN 50.00 AND 150.00
+GROUP BY 
+    p.p_brand, p.p_name, p.p_container
+HAVING 
+    SUM(ps.ps_availqty) > 100
+ORDER BY 
+    supplier_count DESC, total_available_quantity DESC;

@@ -1,0 +1,52 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(PH.UserId, -1) AS LastEditorUserId,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.PostTypeId, P.CreationDate, P.ViewCount, P.Score, PH.UserId
+),
+TopPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.ViewCount,
+        PA.Score,
+        PA.CommentCount,
+        RANK() OVER (ORDER BY PA.Score DESC) AS Rank
+    FROM PostActivity PA
+    WHERE PA.ViewCount > 100
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.StartedOn,
+    UVote.TotalVotes,
+    TOP.Title AS PostTitle,
+    TOP.ViewCount AS PostViews,
+    TOP.Score AS PostScore,
+    TOP.CommentCount AS PostComments
+FROM UserVoteStats UVote
+JOIN Users U ON U.Id = UVote.UserId
+JOIN TopPosts TOP ON U.Id = TOP.LastEditorUserId
+WHERE UVote.TotalVotes > 50
+ORDER BY UVote.TotalVotes DESC;

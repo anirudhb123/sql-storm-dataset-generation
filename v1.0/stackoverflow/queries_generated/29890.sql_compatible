@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        u.Reputation,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, u.Reputation, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Author,
+        rp.Reputation,
+        rp.AnswerCount,
+        rp.CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVotes,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.Author = u.DisplayName
+    WHERE 
+        rp.RankScore <= 5  
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(TRIM(BOTH ' ' FROM SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2)), '> <')) AS t(TagName)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Author,
+    tp.Reputation,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.BadgeCount,
+    pt.Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostTags pt ON tp.PostId = pt.PostId
+ORDER BY 
+    tp.Reputation DESC, tp.AnswerCount DESC;

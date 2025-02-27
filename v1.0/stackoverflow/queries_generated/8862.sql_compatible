@@ -1,0 +1,63 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserPostActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT p.AgreementId) AS AcceptedAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+CombinedData AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        up.PostCount,
+        up.AcceptedAnswers,
+        up.TotalViews,
+        up.AverageScore
+    FROM 
+        UserBadges ub
+    LEFT JOIN 
+        UserPostActivity up ON ub.UserId = up.OwnerUserId
+)
+SELECT 
+    UserId, 
+    DisplayName, 
+    BadgeCount, 
+    GoldBadges, 
+    SilverBadges, 
+    BronzeBadges,
+    PostCount,
+    AcceptedAnswers,
+    TotalViews,
+    AverageScore
+FROM 
+    CombinedData
+WHERE 
+    BadgeCount > 0
+ORDER BY 
+    TotalViews DESC, AverageScore DESC
+LIMIT 50;

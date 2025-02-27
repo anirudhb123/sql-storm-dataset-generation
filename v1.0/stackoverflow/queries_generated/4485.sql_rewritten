@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+TopUserPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(SUM(CASE WHEN bh.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+    COALESCE(SUM(CASE WHEN bh.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+    COALESCE(SUM(CASE WHEN bh.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+    COUNT(tp.PostId) AS TotalTopPosts
+FROM 
+    Users u
+LEFT JOIN 
+    Badges bh ON u.Id = bh.UserId
+LEFT JOIN 
+    TopUserPosts tp ON u.Id = tp.OwnerUserId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(tp.PostId) > 0
+ORDER BY 
+    TotalTopPosts DESC, u.DisplayName ASC
+LIMIT 10;

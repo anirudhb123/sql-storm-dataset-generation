@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SalesRecursion AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_quantity, 
+        ws_sales_price, 
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales) 
+    UNION ALL
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_quantity, 
+        ws.ws_sales_price, 
+        sr.level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        SalesRecursion sr ON ws.ws_order_number = sr.ws_order_number
+    WHERE 
+        sr.level < 5
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk, 
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.ws_item_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        MAX(ws.ws_sales_price) AS max_sale_price
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        CustomerReturns cr ON ws.ws_bill_customer_sk = cr.returning_customer_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    ss.ws_item_sk,
+    ss.total_orders,
+    ss.total_profit,
+    ss.total_quantity_sold,
+    ss.max_sale_price,
+    CASE 
+        WHEN cr.total_returned_quantity IS NULL THEN 0
+        ELSE cr.total_returned_quantity 
+    END AS total_returned_quantity,
+    CASE 
+        WHEN cr.total_return_amount IS NULL THEN 0 
+        ELSE cr.total_return_amount 
+    END AS total_return_amount,
+    ROW_NUMBER() OVER (PARTITION BY ss.ws_item_sk ORDER BY ss.total_profit DESC) AS rank
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    CustomerReturns cr ON ss.ws_item_sk = cr.returning_customer_sk
+WHERE 
+    ss.total_orders > 10
+ORDER BY 
+    ss.total_profit DESC;

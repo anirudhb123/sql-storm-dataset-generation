@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(c.movie_id) AS total_movies
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        ak.name,
+        ac.total_movies
+    FROM 
+        ActorCounts ac
+    JOIN 
+        aka_name ak ON ac.person_id = ak.person_id
+    WHERE 
+        ac.total_movies > 5
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'Unknown') AS genre,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    ta.name AS top_actor_name,
+    ta.total_movies,
+    md.genre,
+    CASE 
+        WHEN md.year_rank = 1 THEN 'Latest Release'
+        ELSE 'Older Release'
+    END AS release_category
+FROM 
+    MovieDetails md
+JOIN 
+    RankedMovies rm ON md.movie_id = rm.movie_id
+LEFT JOIN 
+    TopActors ta ON rm.rank = 1 AND md.movie_id IN (
+        SELECT DISTINCT movie_id
+        FROM cast_info ci WHERE ci.person_id = ta.person_id
+    )
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC,
+    ta.total_movies DESC NULLS LAST;

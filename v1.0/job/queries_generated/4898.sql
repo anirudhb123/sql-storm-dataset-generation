@@ -1,0 +1,55 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+recent_movies AS (
+    SELECT 
+        DISTINCT ON (production_year) title, production_year
+    FROM 
+        ranked_movies
+    ORDER BY 
+        production_year DESC, rn
+),
+keyword_count AS (
+    SELECT 
+        m.movie_id,
+        COUNT(mk.keyword_id) AS kw_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    r.title AS movie_title,
+    r.production_year,
+    COALESCE(kw.kw_count, 0) AS keyword_count,
+    CASE 
+        WHEN r.cast_count = 0 THEN 'No Cast'
+        ELSE 'Cast Present'
+    END AS cast_status,
+    ARRAY_AGG(DISTINCT a.name) AS actor_names
+FROM 
+    recent_movies r
+LEFT JOIN 
+    cast_info ci ON ci.movie_id IN (SELECT id FROM aka_title WHERE title = r.title)
+LEFT JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    keyword_count kw ON kw.movie_id IN (SELECT id FROM aka_title WHERE title = r.title)
+GROUP BY 
+    r.title, r.production_year, kw.kw_count
+ORDER BY 
+    r.production_year DESC;

@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+KeywordMovies AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+TitleInfo AS (
+    SELECT 
+        t.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.company_name || ' (' || c.company_type || ')', ', ') AS companies
+    FROM 
+        RankedMovies t
+    LEFT JOIN 
+        CompanyMovies c ON t.movie_id = c.movie_id
+    LEFT JOIN 
+        KeywordMovies k ON t.movie_id = k.movie_id
+    WHERE 
+        t.rn <= 5
+    GROUP BY 
+        t.movie_id
+)
+SELECT 
+    t.id AS title_id,
+    t.title,
+    COALESCE(t.production_year, 'Unknown') AS production_year,
+    ti.keywords,
+    ti.companies
+FROM 
+    aka_title t
+LEFT JOIN 
+    TitleInfo ti ON t.id = ti.movie_id
+WHERE 
+    (t.production_year IS NOT NULL AND t.production_year >= 2000) OR 
+    (ti.keywords IS NOT NULL AND ti.companies IS NOT NULL)
+ORDER BY 
+    t.production_year DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,73 @@
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        (ws_sales_price * ws_quantity) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 1000 AND 2000
+),
+item_details AS (
+    SELECT 
+        i_item_sk,
+        i_product_name,
+        i_brand,
+        i_color,
+        i_current_price
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date > cast('2002-10-01' as date))
+),
+customer_analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(sd.total_sales) AS total_spent,
+        COUNT(*) AS total_purchases
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN sales_data sd ON c.c_customer_sk = sd.ws_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+ranked_customers AS (
+    SELECT 
+        ca.*,
+        RANK() OVER (PARTITION BY ca.cd_gender ORDER BY ca.total_spent DESC) AS rank_within_gender
+    FROM customer_analysis ca
+),
+final_output AS (
+    SELECT 
+        rc.c_first_name,
+        rc.c_last_name,
+        rc.cd_gender,
+        rc.total_spent,
+        rc.total_purchases,
+        id.i_item_sk,
+        id.i_product_name,
+        id.i_brand,
+        id.i_color,
+        CASE 
+            WHEN rc.rank_within_gender <= 10 THEN 'Top Customer'
+            ELSE 'Regular Customer'
+        END AS customer_tier
+    FROM ranked_customers rc
+    LEFT JOIN item_details id ON rc.total_spent IS NOT NULL AND rc.total_spent > id.i_current_price
+)
+SELECT 
+    fo.c_first_name,
+    fo.c_last_name,
+    fo.cd_gender,
+    fo.total_spent,
+    fo.total_purchases,
+    fo.i_product_name,
+    fo.i_brand,
+    fo.customer_tier,
+    CASE 
+        WHEN fo.total_spent IS NULL THEN 'No Spend'
+        ELSE 'Has Spend'
+    END AS spending_status
+FROM final_output fo
+WHERE fo.cd_gender IS NOT NULL
+ORDER BY fo.total_spent DESC, fo.cd_gender;

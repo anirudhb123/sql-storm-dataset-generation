@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND t.md5sum < 'ce1d38e643ed87c4f2ea8b9e809b5876' AND n.md5sum IN ('162ccf465a1bac714ef6427c2c814cfd', '23ce1a6434b05e81930a272eb6bb2bb4', '27715ed967c23aca4702857642ae7b8e', '2b484fd4a10499f558a6f8e16737d7e5', '98ef62c059ba54b8b4d88f0c17a97d68', 'a72aa4d0edb13b5d4288b647f59eda96', 'e8c20cf799e3e2b2733ba42c4ec1eea6', 'f047440cec6daa1e3a3ee97314e7a0ec', 'f8806b267207b4f0f4109478d9fd0440', 'fa0f0777d6de00d5cf074ec457978365') AND k.phonetic_code IS NOT NULL;

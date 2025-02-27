@@ -1,0 +1,51 @@
+
+WITH date_range AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    WHERE ws.sold_date_sk IN (SELECT d_date_sk FROM date_range)
+    GROUP BY ws.web_site_sk
+),
+customer_summary AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ss.total_sales) AS total_sales_by_demographics,
+        SUM(ss.total_orders) AS total_orders_by_demographics,
+        SUM(ss.unique_customers) AS unique_customers_by_demographics
+    FROM customer c
+    JOIN customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    JOIN sales_summary ss ON ss.web_site_sk = c.current_hdemo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+warehouse_summary AS (
+    SELECT 
+        w.w_warehouse_sk,
+        COUNT(DISTINCT ws.order_number) AS orders_fulfilled,
+        SUM(ws.net_profit) AS total_profit
+    FROM warehouse w
+    JOIN web_sales ws ON ws.warehouse_sk = w.warehouse_sk
+    WHERE ws.sold_date_sk IN (SELECT d_date_sk FROM date_range)
+    GROUP BY w.w_warehouse_sk
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_sales_by_demographics,
+    cs.total_orders_by_demographics,
+    cs.unique_customers_by_demographics,
+    ws.warehouse_sk,
+    ws.orders_fulfilled,
+    ws.total_profit
+FROM customer_summary cs
+FULL OUTER JOIN warehouse_summary ws ON cs.total_orders_by_demographics IS NOT NULL AND ws.orders_fulfilled IS NOT NULL
+ORDER BY total_sales_by_demographics DESC, total_profit DESC
+LIMIT 100;

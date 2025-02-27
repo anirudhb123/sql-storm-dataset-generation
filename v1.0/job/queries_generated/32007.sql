@@ -1,0 +1,40 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title AS movie_title, m.production_year, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year >= 2000  -- Start from movies after 2000
+    UNION ALL
+    SELECT m.id AS movie_id, m.title AS movie_title, m.production_year, mh.depth + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS co_actors_count,
+    AVG(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS avg_has_note,
+    STRING_AGG(DISTINCT g.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) as cast_order
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword g ON mk.keyword_id = g.id
+JOIN 
+    movie_hierarchy m ON t.id = m.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    m.depth <= 3  -- Limit to a depth of 3 in the hierarchy
+GROUP BY 
+    a.name, t.title, m.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1  -- Only consider movies with more than one actor
+ORDER BY 
+    m.production_year DESC, co_actors_count DESC;

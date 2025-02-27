@@ -1,0 +1,79 @@
+WITH RecursiveTitleHierarchy AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title AS title, 
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        t.kind_id
+    FROM 
+        title t
+    WHERE 
+        t.title IS NOT NULL
+), 
+ExtendedMovieInfo AS (
+    SELECT 
+        mt.movie_id,
+        mt.info_type_id,
+        mt.info,
+        mt.note,
+        ROW_NUMBER() OVER (PARTITION BY mt.movie_id ORDER BY mt.info_type_id) AS info_rank
+    FROM 
+        movie_info mt
+    WHERE 
+        mt.info IS NOT NULL AND mt.note IS NOT NULL
+), 
+CastRoleDetails AS (
+    SELECT 
+        ci.movie_id,
+        ca.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ca ON ci.person_id = ca.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+), 
+FilteredMovies AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        cf.cast_count,
+        em.info,
+        COALESCE(em.note, 'No Note Available') AS note
+    FROM 
+        RecursiveTitleHierarchy rt
+    LEFT JOIN 
+        CastRoleDetails cf ON rt.title_id = cf.movie_id
+    LEFT JOIN 
+        ExtendedMovieInfo em ON rt.title_id = em.movie_id 
+    WHERE 
+        rt.production_year > 2000 AND  
+        cf.cast_count > 5 
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COUNT(DISTINCT fm.info) AS unique_info_count,
+    STRING_AGG(DISTINCT fm.note, ', ') AS collected_notes,
+    (SELECT COUNT(*) 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = fm.title_id AND k.keyword LIKE 'Drama%') AS drama_keyword_count,
+    CASE 
+        WHEN fg.kind_id IS NOT NULL THEN 'Has Genre Information'
+        ELSE 'No Genre Information'
+    END AS genre_status
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    kind_type fg ON fg.id = fm.kind_id
+GROUP BY 
+    fm.title, fm.production_year, fg.kind_id
+HAVING 
+    COUNT(DISTINCT fm.info) > 1  
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

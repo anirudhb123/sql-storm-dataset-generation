@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY unnest(string_to_array(substring(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score
+), TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, LENGTH(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS TotalPosts,
+        AVG(Score) AS AverageScore,
+        MAX(Score) AS MaxScore,
+        MIN(Score) AS MinScore
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id 
+    GROUP BY 
+        u.Id, 
+        u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    ts.Tag,
+    ts.TotalPosts,
+    ts.AverageScore,
+    ts.MaxScore,
+    ts.MinScore,
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalQuestions,
+    ua.TotalComments,
+    ua.Upvotes,
+    ua.Downvotes
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.Tag = ANY(string_to_array(substring(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><'))
+JOIN 
+    UserActivity ua ON ua.UserId = p.OwnerUserId
+WHERE 
+    rp.TagRank <= 3 
+ORDER BY 
+    ts.TotalPosts DESC, 
+    rp.CreationDate DESC;

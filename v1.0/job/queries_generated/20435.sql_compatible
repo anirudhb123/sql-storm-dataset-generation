@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+FilteredRanked AS (
+    SELECT 
+        rm.title, 
+        rm.production_year, 
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > 2
+        AND rm.rank <= 10
+),
+MoviesWithKeywords AS (
+    SELECT 
+        at.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        FilteredRanked f 
+    JOIN 
+        movie_keyword mk ON f.title = (SELECT title FROM aka_title WHERE movie_id = mk.movie_id)
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title at ON at.movie_id = mk.movie_id
+    GROUP BY 
+        at.title
+),
+FinalResults AS (
+    SELECT 
+        fw.title,
+        fw.production_year,
+        fw.cast_count,
+        COALESCE(mk.keywords, 'No keywords available') AS keywords,
+        CASE 
+            WHEN fw.production_year > 2000 THEN 'Modern'
+            WHEN fw.production_year BETWEEN 1980 AND 2000 THEN 'Classic'
+            ELSE 'Vintage'
+        END AS era
+    FROM 
+        FilteredRanked fw
+    LEFT JOIN 
+        MoviesWithKeywords mk ON fw.title = mk.title
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.keywords,
+    fr.era
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC;

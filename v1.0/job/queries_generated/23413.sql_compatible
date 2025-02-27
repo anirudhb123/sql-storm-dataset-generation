@@ -1,0 +1,95 @@
+
+WITH RecursiveActorCount AS (
+    SELECT
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.person_id
+),
+PopularActors AS (
+    SELECT
+        a.id AS actor_id,
+        a.name,
+        ac.movie_count
+    FROM
+        aka_name a
+    JOIN
+        RecursiveActorCount ac ON a.person_id = ac.person_id
+    WHERE
+        ac.movie_count > (
+            SELECT
+                AVG(movie_count)
+            FROM
+                RecursiveActorCount
+        )
+),
+HighBudgetMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        m.info AS budget
+    FROM
+        title t
+    JOIN
+        movie_info m ON t.id = m.movie_id
+    WHERE
+        m.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+        AND (m.info ILIKE '%million%' OR m.info ILIKE '%billion%')
+),
+ActorMovies AS (
+    SELECT
+        a.actor_id,
+        m.movie_id,
+        m.budget
+    FROM
+        PopularActors a
+    JOIN
+        cast_info c ON a.actor_id = c.person_id
+    JOIN
+        HighBudgetMovies m ON c.movie_id = m.movie_id
+),
+RankedActors AS (
+    SELECT
+        a.actor_id,
+        a.name,
+        m.title,
+        m.budget,
+        ROW_NUMBER() OVER (PARTITION BY a.actor_id ORDER BY m.budget DESC) AS rank
+    FROM
+        ActorMovies a
+    JOIN
+        HighBudgetMovies m ON a.movie_id = m.movie_id
+),
+FinalResult AS (
+    SELECT
+        ac.name AS actor_name,
+        COUNT(DISTINCT am.movie_id) AS movie_count,
+        SUM(CASE WHEN am.budget IS NOT NULL THEN 1 ELSE 0 END) AS high_budget_count,
+        STRING_AGG(DISTINCT m.title, ', ') AS movie_titles
+    FROM
+        PopularActors ac
+    LEFT JOIN
+        ActorMovies am ON ac.actor_id = am.actor_id
+    JOIN
+        RankedActors r ON ac.actor_id = r.actor_id
+    WHERE
+        r.rank <= 3 
+    GROUP BY
+        ac.name
+)
+SELECT
+    result.actor_name,
+    result.movie_count,
+    COALESCE(result.high_budget_count, 0) AS high_budget_movies,
+    CASE
+        WHEN result.movie_count > 0 THEN
+            CONCAT('Actor ', result.actor_name, ' has starred in ', result.movie_count, ' movies, of which ', result.high_budget_count, ' are high budget: ', result.movie_titles)
+        ELSE
+            CONCAT('No movies found for actor ', result.actor_name)
+    END AS output_message
+FROM
+    FinalResult result
+ORDER BY
+    result.high_budget_count DESC, result.movie_count DESC, result.actor_name;

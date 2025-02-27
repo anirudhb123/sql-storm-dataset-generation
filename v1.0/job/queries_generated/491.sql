@@ -1,0 +1,68 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rank_per_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        ranked_movies rm ON c.movie_id = rm.movie_id
+    GROUP BY 
+        c.person_id
+),
+top_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        COALESCE(an.name, '') AS actor_name,
+        a.movie_count
+    FROM 
+        actor_movie_counts a
+    LEFT JOIN 
+        aka_name an ON a.person_id = an.person_id
+    WHERE 
+        a.movie_count > 5
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    ta.actor_name,
+    tm.keywords,
+    COUNT(DISTINCT c.id) OVER (PARTITION BY tm.id) AS cast_count,
+    CASE 
+        WHEN COUNT(DISTINCT c.id) OVER (PARTITION BY tm.id) = 0 THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM 
+    ranked_movies tm
+LEFT JOIN 
+    cast_info c ON tm.movie_id = c.movie_id
+LEFT JOIN 
+    top_actors ta ON c.person_id = ta.actor_id
+LEFT JOIN 
+    movie_keywords mk ON tm.movie_id = mk.movie_id
+WHERE 
+    tm.rank_per_year <= 10
+ORDER BY 
+    tm.production_year DESC, cast_count DESC;

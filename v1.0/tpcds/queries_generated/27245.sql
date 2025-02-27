@@ -1,0 +1,60 @@
+
+WITH CustomerAcademic AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_education_status,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ca.ca_address_id) AS address_count,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        SUM(cd.cd_dep_college_count) AS total_college_dependents
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_education_status, cd.cd_gender, cd.cd_marital_status
+),
+DateRange AS (
+    SELECT 
+        d.d_date_id,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2022-01-01' AND '2022-12-31'
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM DateRange)
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    ca.full_name,
+    ca.cd_gender,
+    ca.cd_marital_status,
+    ca.address_count,
+    ca.total_dependents,
+    ca.total_college_dependents,
+    COALESCE(sd.total_spent, 0) AS total_spent,
+    COALESCE(sd.total_orders, 0) AS total_orders,
+    COALESCE(sd.total_quantity, 0) AS total_quantity
+FROM 
+    CustomerAcademic ca
+LEFT JOIN 
+    SalesData sd ON ca.c_customer_id = sd.ws_bill_customer_sk
+ORDER BY 
+    total_spent DESC, full_name ASC
+LIMIT 100;

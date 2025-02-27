@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        l.orderkey,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.orderkey ORDER BY SUM(l.extendedprice * (1 - l.discount)) DESC) AS rn
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.orderkey = o.orderkey
+    WHERE 
+        o.orderstatus = 'O' AND 
+        l.shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.orderkey
+),
+top_customers AS (
+    SELECT 
+        c.custkey,
+        c.name AS customer_name,
+        SUM(ss.total_sales) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        sales_summary ss ON c.custkey = ss.orderkey
+    GROUP BY 
+        c.custkey, c.name
+    HAVING 
+        SUM(ss.total_sales) > 10000
+),
+region_supplier AS (
+    SELECT 
+        r.name AS region_name,
+        s.name AS supplier_name,
+        COUNT(DISTINCT ps.partkey) AS part_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.regionkey = n.regionkey
+    JOIN 
+        supplier s ON n.nationkey = s.nationkey
+    JOIN 
+        partsupp ps ON s.suppkey = ps.suppkey
+    GROUP BY 
+        r.name, s.name
+)
+SELECT 
+    COALESCE(ts.customer_name, 'Unknown Customer') AS customer_name,
+    COALESCE(ts.total_spent, 0) AS total_spent, 
+    COALESCE(rs.region_name, 'Unknown Region') AS region_name,
+    COALESCE(rs.part_count, 0) AS supply_parts_count
+FROM 
+    top_customers ts
+FULL OUTER JOIN 
+    region_supplier rs ON ts.customer_name = rs.supplier_name
+WHERE 
+    (COALESCE(ts.total_spent, 0) > 0 OR COALESCE(rs.part_count, 0) > 0)
+ORDER BY 
+    total_spent DESC, supply_parts_count DESC
+LIMIT 50;

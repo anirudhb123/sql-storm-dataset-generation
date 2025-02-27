@@ -1,0 +1,78 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId, 
+        ParentId, 
+        OwnerUserId, 
+        Title, 
+        Score, 
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+UserReputation AS (
+    
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostVoteCount AS (
+    
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score AS QuestionScore,
+    r.CreationDate AS QuestionDate,
+    u.Reputation AS UserReputation,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    COUNT(DISTINCT CASE WHEN r.Level > 0 THEN r.PostId END) AS AnswerCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy r
+JOIN 
+    UserReputation u ON r.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostVoteCount pv ON r.PostId = pv.PostId
+LEFT JOIN 
+    Posts post ON r.PostId = post.Id
+LEFT JOIN 
+    Tags t ON post.Tags LIKE CONCAT('%', t.TagName, '%')
+WHERE 
+    r.Level = 0 
+GROUP BY 
+    r.PostId, r.Title, r.Score, r.CreationDate, u.Reputation, pv.UpVotes, pv.DownVotes
+ORDER BY 
+    u.Reputation DESC, QuestionScore DESC
+LIMIT 10;

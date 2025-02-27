@@ -1,0 +1,49 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS MovieTitle,
+        a.production_year AS ProductionYear,
+        k.keyword AS Keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS Rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS ActorCount
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rt.MovieTitle,
+        rt.ProductionYear,
+        rt.Keyword,
+        ac.ActorCount
+    FROM 
+        RankedTitles rt
+    JOIN 
+        ActorCounts ac ON rt.MovieTitle = ac.movie_id
+    WHERE 
+        rt.Rank <= 5 -- Top 5 titles per production year
+)
+SELECT 
+    fm.MovieTitle,
+    fm.ProductionYear,
+    fm.Keyword,
+    fm.ActorCount
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.ProductionYear DESC, 
+    fm.ActorCount DESC;
+
+This query is designed to benchmark complex string processing across multiple tables in your benchmark schema. It identifies the top 5 movie titles per production year based on associated keywords and counts the number of actors involved in each movie, providing a rich dataset that supports various string manipulation and filtering operations.

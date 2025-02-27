@@ -1,0 +1,77 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(MAX(PH.CreationDate), P.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.ViewCount, P.AnswerCount
+),
+TagPopularity AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT U.Id) AS UserContributors
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    PS.PostId,
+    PS.Title AS PostTitle,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.LastEditDate,
+    TP.TagName,
+    TP.PostCount AS RelatedPostCount,
+    TP.UserContributors AS ContributorsToTag
+FROM 
+    UserReputation U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+JOIN 
+    PostStats PS ON P.Id = PS.PostId
+LEFT JOIN 
+    PostLinks PL ON P.Id = PL.PostId
+LEFT JOIN 
+    TagPopularity TP ON TP.TagName = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+WHERE 
+    U.Reputation > 500
+ORDER BY 
+    U.Reputation DESC, PS.ViewCount DESC;

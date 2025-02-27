@@ -1,0 +1,89 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+), RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY UpVotes DESC, DownVotes ASC, PostCount DESC) AS UserRank
+    FROM 
+        UserVoteStats
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorId,
+        ph.CreationDate AS EditDate,
+        p.Title,
+        ph.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentEditRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+), ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.UserDisplayName AS CloserName,
+        MIN(ph.CreationDate) AS ClosedDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, ph.UserDisplayName
+), FinalBenchmarking AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        ru.UserRank,
+        cp.Title AS ClosedPostTitle,
+        cp.ClosedDate,
+        cp.CommentCount,
+        r.EditDate,
+        r.EditComment
+    FROM 
+        RankedUsers ru
+    JOIN 
+        RecentPostHistory r ON ru.UserId = r.EditorId
+    JOIN 
+        ClosedPosts cp ON r.PostId = cp.Id
+    WHERE 
+        ru.UserRank <= 10 AND 
+        cp.ClosedDate IS NOT NULL
+)
+SELECT 
+    UserName,
+    UserRank,
+    ClosedPostTitle,
+    ClosedDate,
+    CommentCount,
+    COALESCE(EditComment, 'No edits made') AS LatestEditComment
+FROM 
+    FinalBenchmarking
+ORDER BY 
+    UserRank, ClosedDate DESC;

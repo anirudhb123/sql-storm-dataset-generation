@@ -1,0 +1,45 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost, 
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+    GROUP BY s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity, 
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, 
+       COALESCE(SUM(os.total_value), 0) AS total_value, 
+       AVG(ss.part_count) AS avg_parts_per_supplier,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM nation n
+LEFT JOIN (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, 
+           (oh.o_totalprice - COALESCE(lis.total_revenue, 0)) AS total_value
+    FROM order_hierarchy oh
+    LEFT JOIN lineitem_summary lis ON oh.o_orderkey = lis.l_orderkey
+) os ON n.n_nationkey = (
+    SELECT s_nationkey FROM supplier s WHERE s.s_suppkey IN (
+        SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT TOP 1 ps_partkey FROM partsupp WHERE ps_availqty > 100)
+    )
+)
+JOIN supplier_stats ss ON ss.s_suppkey = (
+    SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey
+)
+JOIN part p ON p.p_partkey IN (
+    SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey
+)
+GROUP BY n.n_name
+ORDER BY total_value DESC, n.n_name
+LIMIT 10;

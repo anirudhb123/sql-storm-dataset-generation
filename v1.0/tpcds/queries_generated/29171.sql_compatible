@@ -1,0 +1,74 @@
+
+WITH address_details AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM
+        customer_address
+),
+customer_age AS (
+    SELECT
+        c_customer_sk,
+        FLOOR(DATEDIFF(DATE '2002-10-01', DATE(CONCAT(c_birth_year, '-', LPAD(c_birth_month, 2, '0'), '-', LPAD(c_birth_day, 2, '0')))) / 365.25) AS age
+    FROM
+        customer
+),
+sales_summary AS (
+    SELECT
+        ss_store_sk,
+        COUNT(ss_ticket_number) AS total_sales,
+        SUM(ss_net_profit) AS total_profit,
+        AVG(ss_sales_price) AS avg_sales_price
+    FROM
+        store_sales
+    GROUP BY
+        ss_store_sk
+),
+top_stores AS (
+    SELECT
+        ss_store_sk,
+        total_sales,
+        total_profit,
+        avg_sales_price,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM
+        sales_summary
+),
+address_customer AS (
+    SELECT
+        ca_address_id,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country,
+        c.c_customer_sk,
+        ca.age
+    FROM
+        address_details ad
+    JOIN customer c ON c.c_current_addr_sk = ad.ca_address_id
+    JOIN customer_age ca ON c.c_customer_sk = ca.c_customer_sk
+)
+SELECT
+    ac.full_address,
+    ac.ca_city,
+    ac.ca_state,
+    ac.ca_zip,
+    ac.ca_country,
+    ac.c_customer_sk,
+    ac.age,
+    ts.total_sales,
+    ts.total_profit,
+    ts.avg_sales_price
+FROM
+    address_customer ac
+JOIN top_stores ts ON ac.c_customer_sk = ts.ss_store_sk
+WHERE
+    ac.ca_state = 'CA'
+ORDER BY
+    ts.total_profit DESC
+LIMIT 100;

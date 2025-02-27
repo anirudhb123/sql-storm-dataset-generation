@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    sd.total_supplycost,
+    CASE 
+        WHEN co.total_spent > 10000 THEN 'High Value Customer'
+        WHEN co.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ro.o_orderstatus
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierDetails sd ON co.c_custkey = sd.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON co.order_count > 0 AND ro.rnk = 1
+WHERE 
+    co.total_spent IS NOT NULL
+ORDER BY 
+    customer_value DESC,
+    co.order_count DESC,
+    sd.total_supplycost DESC;

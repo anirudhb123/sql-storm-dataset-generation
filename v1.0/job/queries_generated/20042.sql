@@ -1,0 +1,100 @@
+WITH Recursive MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorMovieInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    WHERE 
+        ci.note IS NULL
+    GROUP BY 
+        a.name, mt.title, mt.production_year
+),
+
+CompanyStats AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(mc.id) AS total_movies,
+        ARRAY_AGG(DISTINCT mt.production_year) AS production_years,
+        MAX(mt.production_year) AS last_movie_year
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        aka_title mt ON mc.movie_id = mt.id
+    GROUP BY 
+        cn.name
+),
+
+FinalStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ai.actor_name, 'Unknown Actor') AS actor_name,
+        COALESCE(cs.company_name, 'Independent') AS company_name,
+        mh.level,
+        ai.role_count,
+        cs.total_movies
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorMovieInfo ai ON mh.title = ai.movie_title AND mh.production_year = ai.production_year
+    LEFT JOIN 
+        CompanyStats cs ON mh.movie_id IN (SELECT movie_id FROM movie_companies WHERE company_id = cs.company_name)
+)
+
+SELECT 
+    fs.title,
+    fs.actor_name,
+    fs.company_name,
+    fs.production_year,
+    fs.level,
+    fs.role_count,
+    fs.total_movies,
+    CASE 
+        WHEN fs.production_year IS NULL THEN 'Year Unknown'
+        ELSE fs.production_year::text
+    END AS year_info,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = fs.movie_id 
+       AND mi.info_type_id IS NOT NULL) AS additional_info_count
+FROM 
+    FinalStats fs
+ORDER BY 
+    fs.production_year DESC,
+    fs.level ASC,
+    fs.role_count DESC;

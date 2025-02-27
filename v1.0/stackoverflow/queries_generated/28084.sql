@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        LEAD(p.CreationDate) OVER (PARTITION BY u.Id ORDER BY p.CreationDate) AS NextPostCreationDate,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Editing history: Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.AnswerCount,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(ph.LastEditedDate, rp.CreationDate) AS MostRecentActivityDate,
+    rp.NextPostCreationDate,
+    rp.TagsArray,
+    CASE 
+        WHEN rp.CreationDate < CURRENT_TIMESTAMP - INTERVAL '30 days' 
+        THEN 'Old Question' 
+        ELSE 'Recent Question' 
+    END AS QuestionAgeCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    PostHistoryInfo ph ON rp.PostId = ph.PostId
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

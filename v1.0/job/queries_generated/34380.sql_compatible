@@ -1,0 +1,64 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ah.id AS alias_id,
+    ah.name AS alias_name,
+    mt.movie_id,
+    mt.movie_title,
+    mt.production_year,
+    COALESCE(COUNT(ci.person_id), 0) AS cast_count,
+    STRING_AGG(DISTINCT CONCAT(COALESCE(cn.name, 'Unknown'), ' (', rt.role, ')'), '; ') AS cast_details,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN mi.info END) AS budget,
+    MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'runtime') THEN mi.info END) AS runtime,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    COUNT(DISTINCT mg.company_id) AS company_count,
+
+    ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_within_year
+FROM
+    movie_hierarchy mt
+LEFT JOIN
+    cast_info ci ON ci.movie_id = mt.movie_id
+LEFT JOIN
+    aka_name ah ON ah.person_id = ci.person_id
+LEFT JOIN
+    char_name cn ON cn.imdb_index = ah.imdb_index
+LEFT JOIN
+    role_type rt ON rt.id = ci.role_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = mt.movie_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mt.movie_id
+LEFT JOIN
+    movie_companies mg ON mg.movie_id = mt.movie_id
+GROUP BY
+    ah.id, ah.name, mt.movie_id, mt.movie_title, mt.production_year 
+HAVING
+    COUNT(DISTINCT ci.person_id) > 2
+ORDER BY
+    mt.production_year DESC,
+    cast_count DESC;

@@ -1,0 +1,75 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id AS customer_id,
+        cd.cd_gender,
+        total_orders,
+        total_net_profit,
+        CASE 
+            WHEN total_net_profit > 5000 THEN 'High Value'
+            WHEN total_net_profit BETWEEN 1000 AND 5000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer_stats cs
+    WHERE 
+        total_orders > 0
+)
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    c.c_email_address,
+    cv.customer_value,
+    COALESCE(rs.web_sales_price, 0) AS last_sales_price,
+    f.fifty_percent_discount,
+    (SELECT COUNT(*) 
+     FROM store_sales ss 
+     WHERE ss.ss_customer_sk = c.c_customer_sk 
+     AND ss.ss_net_paid > (
+         SELECT AVG(ss_net_paid) 
+         FROM store_sales 
+         WHERE ss_sold_date_sk BETWEEN 20220101 AND 20221231)) AS above_average_sales
+FROM 
+    customer c
+LEFT JOIN 
+    high_value_customers cv ON c.c_customer_id = cv.customer_id
+LEFT JOIN 
+    (SELECT 
+             web_site_sk, 
+             MAX(ws_sales_price) * 0.5 AS fifty_percent_discount 
+     FROM 
+             web_sales 
+     GROUP BY 
+             web_site_sk) f ON cv.customer_value IS NOT NULL
+LEFT JOIN 
+    ranked_sales rs ON c.c_customer_sk = rs.web_site_sk AND rs.sales_rank = 1
+WHERE 
+    c.c_current_hdemo_sk IS NOT NULL
+ORDER BY 
+    cv.total_net_profit DESC, 
+    last_sales_price DESC;

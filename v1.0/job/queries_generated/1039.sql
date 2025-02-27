@@ -1,0 +1,83 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(cc.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(cc.id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.person_id = ak.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+TopMovies AS (
+    SELECT 
+        md.* 
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.rn <= 5
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    COALESCE(tm.actors, 'No cast') AS actors,
+    CASE 
+        WHEN tm.cast_count > 0 THEN 'Has Cast'
+        ELSE 'No Cast'
+    END AS cast_status,
+    COALESCE((
+        SELECT 
+            GROUP_CONCAT(DISTINCT mk.keyword) 
+        FROM 
+            movie_keyword mk 
+        WHERE 
+            mk.movie_id = tm.movie_id
+    ), 'No Keywords') AS keywords
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC;
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.level
+FROM 
+    MovieHierarchy mh
+ORDER BY 
+    mh.level DESC;

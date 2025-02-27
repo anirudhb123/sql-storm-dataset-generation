@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        (ws.ws_net_paid_inc_tax + ws.ws_ext_discount_amt) AS total_paid
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_item_sk IN (SELECT cr.cr_item_sk FROM catalog_returns cr WHERE cr.cr_return_quantity > 0)
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        SUM(COALESCE(cr.total_return_amt, 0)) AS total_losses
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name
+    HAVING 
+        SUM(COALESCE(cr.total_return_amt, 0)) > (
+            SELECT AVG(total_return_amt) 
+            FROM CustomerReturns
+        )
+),
+Enhancement AS (
+    SELECT 
+        r.ws_order_number,
+        r.ws_item_sk,
+        r.ws_sales_price,
+        hvc.c_customer_sk
+    FROM 
+        RankedSales r
+    JOIN 
+        HighValueCustomers hvc ON r.ws_order_number = hvc.c_customer_sk
+)
+SELECT 
+    eh.c_customer_sk,
+    eh.ws_order_number,
+    eh.ws_item_sk,
+    eh.ws_sales_price,
+    CASE 
+        WHEN eh.ws_sales_price IS NULL THEN 'No Sale'
+        ELSE 'Sale'
+    END AS sale_status,
+    COALESCE(eh.total_paid, 0) AS net_payments,
+    ROW_NUMBER() OVER (PARTITION BY eh.c_customer_sk ORDER BY eh.ws_sales_price DESC) AS order_rank
+FROM 
+    Enhancement eh
+WHERE 
+    eh.ws_sales_price NOT IN (SELECT ws.ws_sales_price FROM web_sales ws WHERE ws.ws_ship_date_sk IS NULL)
+ORDER BY 
+    eh.c_customer_sk, order_rank
+LIMIT 100
+OFFSET (SELECT 
+            COUNT(*) 
+        FROM 
+            web_sales ws2 
+        WHERE 
+            ws2.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_formulation LIKE '%Liquid%')
+            AND ws2.ws_order_number IS NOT NULL
+        ) / 2;

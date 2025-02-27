@@ -1,0 +1,62 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ws.ws_net_profit,
+        d.d_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+),
+GenderSales AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(sd.ws_net_paid) AS total_net_paid,
+        AVG(sd.ws_net_profit) AS avg_net_profit,
+        COUNT(sd.ws_order_number) AS order_count
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        SalesData sd ON cd.c_customer_id = sd.ws_order_number -- Assuming ws_order_number matches c_customer_id for example purposes
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    gs.cd_gender,
+    gs.total_net_paid,
+    gs.avg_net_profit,
+    gs.order_count,
+    CONCAT('Total Net Paid: $', FORMAT(gs.total_net_paid, 2)) AS formatted_total_net_paid,
+    CONCAT('Average Net Profit: $', FORMAT(gs.avg_net_profit, 2)) AS formatted_avg_net_profit
+FROM 
+    GenderSales gs
+ORDER BY 
+    gs.total_net_paid DESC;

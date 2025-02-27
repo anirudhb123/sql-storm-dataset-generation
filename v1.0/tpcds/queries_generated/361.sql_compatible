@@ -1,0 +1,71 @@
+
+WITH sales_statistics AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws 
+    INNER JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+inventory_overview AS (
+    SELECT 
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+sales_inventory AS (
+    SELECT 
+        ss.web_site_sk,
+        sv.ws_item_sk AS inv_item_sk,
+        ss.total_quantity,
+        ii.i_item_desc,
+        COALESCE(io.total_inventory, 0) AS available_inventory
+    FROM 
+        sales_statistics ss
+    LEFT JOIN 
+        web_sales sv ON ss.web_site_sk = sv.ws_web_site_sk
+    LEFT JOIN 
+        inventory_overview io ON sv.ws_item_sk = io.inv_item_sk
+    JOIN 
+        item ii ON sv.ws_item_sk = ii.i_item_sk
+),
+return_summary AS (
+    SELECT 
+        cr.cr_item_sk,
+        COUNT(cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        cr.cr_item_sk
+)
+SELECT 
+    si.web_site_sk,
+    si.i_item_desc,
+    si.total_quantity,
+    si.available_inventory,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    CASE 
+        WHEN si.available_inventory = 0 THEN 'Out of Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM 
+    sales_inventory si
+LEFT JOIN 
+    return_summary rs ON si.inv_item_sk = rs.cr_item_sk
+ORDER BY 
+    si.total_quantity DESC, 
+    si.web_site_sk;

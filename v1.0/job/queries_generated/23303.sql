@@ -1,0 +1,74 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_count
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actors_with_movies AS (
+    SELECT 
+        DISTINCT a.person_id,
+        ak.name AS actor_name,
+        ct.kind AS role_type,
+        r.rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    LEFT JOIN (
+        SELECT 
+            person_id,
+            COUNT(ci.movie_id) AS rank
+        FROM 
+            cast_info ci
+        GROUP BY 
+            person_id
+    ) r ON ak.person_id = r.person_id
+    WHERE 
+        ak.name IS NOT NULL
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    a.actor_name,
+    a.role_type,
+    COALESCE(a.rank, 0) AS role_rank,
+    CASE 
+        WHEN rt.total_count > 5 THEN 
+            'Popular Year'
+        ELSE 
+            'Less Popular Year'
+    END AS year_popularity,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT m.id) > 0 THEN
+            'Has Movie Companies'
+        ELSE 
+            NULL
+    END AS company_info
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    actors_with_movies a ON a.actor_name IS NOT NULL
+LEFT JOIN 
+    movie_info mi ON rt.title_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON rt.title_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies m ON rt.title_id = m.movie_id
+WHERE 
+    rt.rn <= 3
+    AND (a.rank IS NULL OR a.rank > 1)  -- Filter for actors in more than one movie
+GROUP BY 
+    rt.title_id, rt.title, rt.production_year, a.actor_name, a.role_type, a.rank, rt.total_count
+ORDER BY 
+    rt.production_year DESC, role_rank DESC;

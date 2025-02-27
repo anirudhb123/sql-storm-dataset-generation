@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 5000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > 5000 AND ch.level < 3
+),
+CriticalOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+)
+SELECT ch.c_name AS Customer_Name, 
+       o.o_orderkey AS Order_Key, 
+       ci_total_cost.total_cost AS Part_Supplier_Cost,
+       CASE 
+           WHEN o.o_totalprice > 10000 THEN 'High Value'
+           ELSE 'Regular Value'
+       END AS Order_Category,
+       r.r_name AS Region
+FROM CriticalOrders o
+JOIN CustomerHierarchy ch ON o.o_custkey = ch.c_custkey
+JOIN PartSupplierDetails ci_total_cost ON ci_total_cost.p_partkey IN (
+       SELECT l.l_partkey
+       FROM lineitem l
+       WHERE l.l_orderkey = o.o_orderkey
+)
+JOIN region r ON ch.c_nationkey IN (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_regionkey = r.r_regionkey
+)
+FULL OUTER JOIN TopSuppliers ts ON ts.rank <= 10
+ORDER BY ch.c_acctbal DESC, o.o_orderdate DESC;

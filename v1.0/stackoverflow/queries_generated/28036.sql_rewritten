@@ -1,0 +1,92 @@
+WITH TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    GROUP BY 
+        T.Id, T.TagName
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN C.PostId IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Body,
+        CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN 'Closing/Reopening Post'
+            WHEN PH.PostHistoryTypeId IN (12, 13) THEN 'Deleting/Restoring Post'
+            ELSE 'Other Actions'
+        END AS ActionType,
+        PH.UserDisplayName AS Actor
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+Benchmark AS (
+    SELECT
+        T.TagId,
+        T.TagName,
+        T.PostCount,
+        T.QuestionCount,
+        T.AnswerCount,
+        U.DisplayName AS TopUser,
+        U.UpVotes,
+        U.CommentCount,
+        PA.PostId,
+        PA.Title,
+        PA.CreationDate AS ActionDate,
+        PA.ActionType,
+        PA.Actor
+    FROM 
+        TagStats T
+    JOIN 
+        UserActivity U ON U.UpVotes = (SELECT MAX(UpVotes) FROM UserActivity)
+    JOIN 
+        PostActions PA ON PA.PostId = (SELECT P.Id FROM Posts P ORDER BY P.CreationDate DESC LIMIT 1)
+    WHERE 
+        T.PostCount > 0
+)
+SELECT 
+    B.TagId,
+    B.TagName,
+    B.PostCount,
+    B.QuestionCount,
+    B.AnswerCount,
+    B.TopUser,
+    B.UpVotes,
+    B.CommentCount,
+    B.Title AS LatestPostTitle,
+    B.ActionDate,
+    B.ActionType,
+    B.Actor
+FROM 
+    Benchmark B
+ORDER BY 
+    B.PostCount DESC, 
+    B.QuestionCount DESC;

@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ws.ws_ship_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_customer_sk ORDER BY ws.ws_net_paid DESC) AS rnk
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 5000 AND 6000
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(p.p_discount_active, 'N') AS discount_active,
+        CASE 
+            WHEN i.i_current_price IS NULL THEN 'Price Not Available'
+            ELSE i.i_current_price::VARCHAR
+        END AS current_price_string
+    FROM item i
+    LEFT JOIN promotion p ON i.i_item_sk = p.p_item_sk AND p.p_start_date_sk < 6000 AND p.p_end_date_sk > 5000
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    INNER JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_preferred_cust_flag = 'Y' 
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    id.i_item_desc,
+    id.current_price_string,
+    SUM(rs.ws_quantity) AS total_quantity,
+    SUM(rs.ws_net_paid) AS total_net_paid,
+    cd.gender_count,
+    MAX(rs.ws_ship_date_sk) AS last_ship_date,
+    MIN(CASE WHEN id.discount_active = 'Y' THEN 'Discounted' ELSE 'Regular' END) AS discount_status
+FROM RankedSales rs
+JOIN ItemDetails id ON rs.ws_item_sk = id.i_item_sk
+JOIN CustomerDetails cd ON rs.ws_order_number IN (SELECT ws_order_number FROM RankedSales WHERE rnk <= 5)
+GROUP BY cd.c_first_name, cd.c_last_name, id.i_item_desc, id.current_price_string
+HAVING SUM(rs.ws_quantity) > 10 OR COUNT(DISTINCT rs.ws_order_number) > 2
+ORDER BY total_net_paid DESC NULLS LAST;

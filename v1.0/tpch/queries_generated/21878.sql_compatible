@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_orderkey
+    WHERE 
+        ro.rn = 1  
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND SUM(o.o_totalprice) > 10000
+),
+SuppliersAboveAverage AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        AVG(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(ld.l_extendedprice * (1 - ld.l_discount)), 0) AS total_sales,
+    pd.p_name,
+    pd.supplier_count,
+    CASE 
+        WHEN COUNT(ld.l_orderkey) > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS has_line_items
+FROM 
+    FilteredCustomers c
+LEFT JOIN 
+    lineitem ld ON c.c_custkey = ld.l_orderkey
+LEFT JOIN 
+    PartDetails pd ON ld.l_partkey = pd.p_partkey
+LEFT JOIN 
+    SuppliersAboveAverage sa ON pd.supplier_count = sa.s_suppkey
+WHERE 
+    (pd.supplier_count IS NULL OR pd.supplier_count > 5)
+GROUP BY 
+    c.c_name, pd.p_name, pd.supplier_count
+ORDER BY 
+    total_sales DESC, c.c_name ASC;

@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey  
+    WHERE s.s_suppkey <> sh.s_suppkey
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'  
+), TopSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000  
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING COUNT(ps.ps_suppkey) > 0
+), CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000  
+)
+SELECT r.r_name AS region_name, 
+       ns.n_name AS nation_name, 
+       COALESCE(cs.order_count, 0) AS total_orders, 
+       COALESCE(th.total_cost, 0) AS total_cost, 
+       sh.s_suppkey AS high_balance_supplier,
+       COUNT(DISTINCT ro.o_orderkey) AS rank_orders
+FROM region r
+LEFT JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey = ns.n_nationkey
+LEFT JOIN TopSuppliers th ON ns.n_nationkey = th.ps_suppkey
+LEFT JOIN RankedOrders ro ON ro.o_custkey = ns.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+WHERE r.r_name LIKE 'N%'  
+GROUP BY r.r_name, ns.n_name, sh.s_suppkey
+ORDER BY total_orders DESC, total_cost DESC;

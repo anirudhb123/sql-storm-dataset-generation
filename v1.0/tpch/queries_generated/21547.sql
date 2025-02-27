@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+),
+RecentLineItems AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_tax IS NOT NULL 
+        AND l.l_tax < 0.1
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierAvailability AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_avail_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost IS NOT NULL 
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_comment LIKE '%special%'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(c.c_acctbal), 0) AS total_cust_balance,
+    MAX(s.s_name) AS leading_supplier,
+    AVG(SA.total_avail_cost) AS avg_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY p.p_retailprice DESC) AS rank_by_price
+FROM 
+    part p
+LEFT OUTER JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT OUTER JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    RankedOrders ro ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey)
+LEFT JOIN 
+    RecentLineItems rli ON ro.o_orderkey = rli.l_orderkey
+LEFT JOIN 
+    customer c ON ro.o_custkey = c.c_custkey
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN 
+    SupplierAvailability SA ON p.p_partkey = SA.ps_partkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND r.r_name IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_regionkey
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    rank_by_price, total_cust_balance DESC
+FETCH FIRST 100 ROWS ONLY;

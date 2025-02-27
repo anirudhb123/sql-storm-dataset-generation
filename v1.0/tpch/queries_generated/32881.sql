@@ -1,0 +1,66 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_suppkey = (SELECT MIN(s1.s_suppkey) FROM supplier s1)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 3
+),
+PartStats AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available_qty, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           o.o_orderstatus, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           COUNT(DISTINCT l.l_linenumber) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           c.c_acctbal,
+           COALESCE((
+               SELECT AVG(dc.discount_rate)
+               FROM discounts dc
+               WHERE dc.customer_key = c.c_custkey), 0) AS avg_discount_rate
+    FROM customer c
+    WHERE c.c_acctbal > 100.00
+)
+SELECT 
+    p.p_name, 
+    ps.total_available_qty, 
+    ps.supplier_count, 
+    os.total_order_value, 
+    os.lineitem_count, 
+    COALESCE(fc.c_name, 'Unknown') AS customer_name, 
+    fc.avg_discount_rate,
+    rh.r_name,
+    CASE 
+        WHEN os.total_order_value > 1000 THEN 'High Value'
+        WHEN os.total_order_value BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM PartStats ps
+JOIN SupplierHierarchy sh ON ps.p_partkey = sh.s_suppkey
+FULL OUTER JOIN OrderStats os ON os.lineitem_count = ps.supplier_count
+LEFT JOIN FilteredCustomers fc ON fc.c_custkey = os.o_orderkey
+JOIN nation n ON n.n_nationkey = sh.s_nationkey
+JOIN region rh ON rh.r_regionkey = n.n_regionkey
+WHERE ps.total_available_qty > 0 
+  AND (os.total_order_value IS NULL OR os.total_order_value > 500)
+ORDER BY p.p_name, fc.avg_discount_rate DESC
+LIMIT 100;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        CAST(NULL AS INTEGER) AS parent_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    
+    UNION ALL
+    
+    SELECT 
+        l.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id
+    FROM 
+        movie_link l
+    JOIN 
+        aka_title mt ON l.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON l.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title AS main_movie,
+    mh.production_year AS year,
+    ARRAY_AGG(DISTINCT ak.name) AS alternate_names,
+    COUNT(cl.id) AS total_cast,
+    AVG(CASE WHEN pi.info IS NOT NULL THEN LENGTH(pi.info) ELSE 0 END) AS avg_person_info_length,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    CASE 
+        WHEN COUNT(DISTINCT mk.keyword) > 0 THEN 'Contains Keywords'
+        ELSE 'No Keywords'
+    END AS keyword_status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info cl ON cc.subject_id = cl.person_id
+LEFT JOIN 
+    aka_name ak ON cl.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id IN (SELECT cl.person_id FROM cast_info cl WHERE cl.movie_id = mh.movie_id)
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC;

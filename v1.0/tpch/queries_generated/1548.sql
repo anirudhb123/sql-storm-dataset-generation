@@ -1,0 +1,70 @@
+WITH CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT
+        cos.c_custkey,
+        cos.c_name,
+        cos.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cos.total_spent DESC) AS rank
+    FROM
+        CustomerOrderSummary cos
+    WHERE
+        cos.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+),
+PartSupplierDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+OrderLineDetail AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_linenumber) AS lineitem_count
+    FROM
+        lineitem l
+    GROUP BY
+        l.l_orderkey
+)
+
+SELECT
+    hvc.c_name,
+    hvc.total_spent,
+    p.p_name,
+    ps.total_available,
+    ps.avg_supply_cost,
+    OLD.total_lineitem_value,
+    OLD.lineitem_count
+FROM
+    HighValueCustomers hvc
+LEFT JOIN
+    PartSupplierDetails ps ON ps.total_available > 100
+INNER JOIN
+    OrderLineDetail OLD ON OLD.total_lineitem_value > 1000
+JOIN
+    lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = hvc.c_custkey)
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+WHERE
+    s.s_acctbal IS NULL OR s.s_acctbal > 500
+ORDER BY
+    hvc.total_spent DESC, ps.avg_supply_cost ASC;

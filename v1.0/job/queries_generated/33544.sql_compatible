@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM title m
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(CONCAT(it.info, ': ', mi.info), '; ') AS info_details
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY mi.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    ARRAY_AGG(DISTINCT a.actor_name) AS cast_names,
+    COALESCE(mi.info_details, 'No additional info') AS additional_info,
+    CASE WHEN mh.depth > 1 THEN 'Sequel or Related Movie' ELSE 'Standalone' END AS movie_type,
+    SUM(CASE WHEN rt.role = 'Leading' THEN 1 ELSE 0 END) AS leading_roles_count,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count
+FROM movie_hierarchy mh
+LEFT JOIN cast_with_roles ci ON mh.movie_id = ci.movie_id
+LEFT JOIN movie_info_details mi ON mh.movie_id = mi.movie_id
+LEFT JOIN movie_link ml ON mh.movie_id = ml.movie_id
+LEFT JOIN role_type rt ON ci.role_id = rt.id
+WHERE mh.production_year IS NOT NULL
+GROUP BY mh.movie_id, mh.title, mh.production_year, mh.depth
+ORDER BY mh.production_year DESC, total_cast DESC;

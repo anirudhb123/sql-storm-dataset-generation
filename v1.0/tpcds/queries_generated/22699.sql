@@ -1,0 +1,63 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_paid DESC) as item_rank,
+        COUNT(ws.ws_order_number) OVER (PARTITION BY ws.ws_item_sk) as total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+        AND ws.ws_net_paid > 100
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ca.ca_city
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.ca_city,
+    isum.i_item_desc,
+    isum.total_quantity_sold,
+    isum.avg_net_paid,
+    COALESCE(rnk.item_rank, 'N/A') AS rank,
+    COALESCE(rnk.total_orders, 0) AS number_of_orders
+FROM 
+    customer_info ci
+LEFT JOIN 
+    ranked_sales rnk ON ci.c_customer_sk IN (SELECT ws.ws_ship_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = rnk.ws_item_sk)
+LEFT JOIN 
+    item_summary isum ON rnk.ws_item_sk = isum.i_item_sk
+WHERE 
+    (ci.cd_gender = 'F' OR ci.cd_gender IS NULL) 
+    AND (isum.avg_net_paid IS NOT NULL OR rnk.item_rank IS NOT NULL)
+ORDER BY 
+    ci.ca_city, isum.avg_net_paid DESC, rank
+LIMIT 100;

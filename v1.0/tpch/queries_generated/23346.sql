@@ -1,0 +1,62 @@
+WITH TotalSales AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        lineitem
+    GROUP BY 
+        l_orderkey
+),
+NationSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(TS.total_sales) AS nation_total_sales
+    FROM 
+        TotalSales TS
+    JOIN 
+        orders O ON TS.l_orderkey = O.o_orderkey
+    JOIN 
+        customer C ON O.o_custkey = C.c_custkey
+    JOIN 
+        nation N ON C.c_nationkey = N.n_nationkey
+    GROUP BY 
+        n.n_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+RankedSales AS (
+    SELECT 
+        ns.nation_name,
+        ns.nation_total_sales,
+        RANK() OVER (ORDER BY ns.nation_total_sales DESC) AS sales_rank
+    FROM 
+        NationSales ns
+)
+SELECT 
+    NS.nation_name,
+    COALESCE(SS.part_count, 0) AS supplier_part_count,
+    COALESCE(SS.avg_supply_cost, 0) AS supplier_avg_cost,
+    CASE 
+        WHEN NS.nation_total_sales IS NULL THEN 'No Sales'
+        ELSE CAST(NS.nation_total_sales AS DECIMAL(12, 2))
+    END AS formatted_sales,
+    ROW_NUMBER() OVER (PARTITION BY CASE WHEN NS.nation_total_sales IS NULL THEN 'No Sales' ELSE 'Sales Present' END 
+                 ORDER BY NS.nation_name) AS sales_category_rank
+FROM 
+    RankedSales NS
+LEFT JOIN 
+    SupplierStats SS ON (SS.part_count > 5 OR (SS.avg_supply_cost IS NULL AND NS.nation_total_sales > 1000))
+WHERE 
+    NS.sales_rank < 10
+ORDER BY 
+    NS.sales_rank, NS.nation_name DESC;

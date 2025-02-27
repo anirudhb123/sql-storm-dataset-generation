@@ -1,0 +1,85 @@
+
+WITH RECURSIVE elaborate_metrics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        d.d_date,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        COUNT(ws.ws_item_sk) AS items_purchased,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year >= 2020
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_date
+),
+customer_metrics AS (
+    SELECT 
+        em.c_customer_sk,
+        em.c_first_name,
+        em.c_last_name,
+        em.total_spent,
+        em.orders_count,
+        em.items_purchased,
+        CASE 
+            WHEN em.total_spent IS NULL THEN 'Unknown'
+            WHEN em.total_spent > 1000 THEN 'High Value'
+            WHEN em.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_segment
+    FROM 
+        elaborate_metrics em 
+    WHERE 
+        em.rank = 1
+),
+inventory_data AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        inv.inv_quantity_on_hand,
+        ROW_NUMBER() OVER (ORDER BY inv.inv_quantity_on_hand DESC) AS inv_rank
+    FROM 
+        item i
+    JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    WHERE 
+        inv.inv_quantity_on_hand IS NOT NULL
+),
+final_report AS (
+    SELECT 
+        cm.c_customer_sk,
+        cm.c_first_name,
+        cm.c_last_name,
+        cm.total_spent,
+        cm.orders_count,
+        cm.customer_value_segment,
+        i.i_item_desc,
+        i.inv_quantity_on_hand,
+        CASE 
+            WHEN i.inv_quantity_on_hand IS NULL THEN 'Out of stock'
+            ELSE NULLIF(i.inv_quantity_on_hand * 1.0 / NULLIF(cm.orders_count, 0), 0)
+        END AS avg_quantity_per_order
+    FROM 
+        customer_metrics cm
+    LEFT JOIN 
+        inventory_data i ON cm.c_customer_sk = i.i_item_sk
+    WHERE 
+        i.inv_rank <= 10
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_spent IS NOT NULL THEN ROUND(total_spent / 100.0, 2)
+        ELSE NULL 
+    END AS adjusted_spending
+FROM 
+    final_report
+ORDER BY 
+    adjusted_spending DESC;

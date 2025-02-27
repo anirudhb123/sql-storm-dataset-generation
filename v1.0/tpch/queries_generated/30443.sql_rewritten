@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal BETWEEN 500.00 AND 1000.00
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_name,
+    ps.ps_supplycost,
+    COALESCE(total_ad_orders.total_orders, 0) AS total_orders,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COUNT(DISTINCT c.c_custkey) OVER (PARTITION BY p.p_partkey) AS customer_count,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN ActiveOrders total_ad_orders ON total_ad_orders.o_orderkey = l.l_orderkey
+JOIN customer c ON c.c_custkey = total_ad_orders.o_custkey
+JOIN NationRegion nr ON c.c_nationkey = nr.n_nationkey
+WHERE p.p_retailprice > 50.00
+AND (p.p_comment LIKE '%urgent%' OR l.l_returnflag = 'R')
+GROUP BY p.p_partkey, ps.ps_supplycost
+ORDER BY sales_rank, total_quantity DESC
+LIMIT 100;

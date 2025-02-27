@@ -1,0 +1,97 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 500
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        sh.level + 1
+    FROM 
+        supplier s
+    INNER JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > sh.s_acctbal
+),
+MaxSupplierBalance AS (
+    SELECT 
+        sh.s_nationkey,
+        MAX(sh.s_acctbal) AS max_acctbal
+    FROM 
+        SupplierHierarchy sh
+    GROUP BY 
+        sh.s_nationkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+RankedCustomers AS (
+    SELECT 
+        tc.c_custkey,
+        tc.c_name,
+        tc.total_spent,
+        RANK() OVER (ORDER BY tc.total_spent DESC) AS rank
+    FROM 
+        TopCustomers tc
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    SUM(COALESCE(sb.max_acctbal, 0)) AS total_supplier_balance,
+    COUNT(DISTINCT rc.c_custkey) AS total_top_customers,
+    AVG(ol.order_value) AS avg_order_value
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    MaxSupplierBalance sb ON n.n_nationkey = sb.s_nationkey
+LEFT JOIN 
+    RankedCustomers rc ON n.n_nationkey = rc.c_nationkey
+LEFT JOIN 
+    OrderLineItems ol ON rc.c_custkey = ol.o_orderkey
+WHERE 
+    r.r_comment IS NOT NULL 
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT rc.c_custkey) > 5
+ORDER BY 
+    total_supplier_balance DESC, 
+    avg_order_value DESC;

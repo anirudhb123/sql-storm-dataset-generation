@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue,
+        COUNT(li.l_orderkey) AS order_count
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        COUNT(li.l_orderkey) > 5 OR COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) > 5000
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(hv.total_order_value, 0) AS high_value_customer_orders,
+    pd.total_revenue,
+    pd.order_count
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    RankedSuppliers rs ON pd.p_partkey = rs.s_suppkey AND rs.rnk = 1
+LEFT JOIN 
+    HighValueCustomers hv ON hv.c_custkey = (SELECT MIN(c.custkey) FROM HighValueCustomers)
+WHERE 
+    pd.total_revenue BETWEEN 1000 AND 5000
+AND 
+    (pd.order_count IS NULL OR pd.order_count > 0) 
+ORDER BY 
+    pd.total_revenue DESC, supplier_name ASC;

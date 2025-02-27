@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL AND 
+        ws.ws_net_profit > (
+            SELECT 
+                AVG(ws_inner.ws_net_profit) 
+            FROM 
+                web_sales ws_inner 
+            WHERE 
+                ws_inner.ws_item_sk = ws.ws_item_sk
+        )
+), 
+StoreSummary AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        AVG(ss.ss_sales_price) AS avg_sales_price,
+        MAX(ss.ss_net_paid) AS max_net_paid
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 500 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1500 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cd.purchase_category,
+    COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+    COALESCE(SUM(rs.ws_net_profit), 0) AS total_net_profit,
+    MAX(ss.avg_sales_price) AS highest_avg_price,
+    SUM(ss.total_quantity) FILTER (WHERE ss.total_quantity > 10) AS total_high_quantity_sales
+FROM 
+    customer cs 
+LEFT JOIN 
+    customer_demographics cd ON cs.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    RankedSales rs ON cs.c_customer_sk = rs.ws_item_sk
+LEFT JOIN 
+    StoreSummary ss ON cs.c_current_addr_sk = ss.s_store_id
+WHERE 
+    cd.cd_gender = 'F' OR cd.cd_marital_status = 'M'
+GROUP BY 
+    cs.c_customer_id, cs.c_first_name, cs.c_last_name, cd.purchase_category
+HAVING 
+    COUNT(DISTINCT rs.ws_order_number) > 2 AND 
+    COALESCE(SUM(rs.ws_net_profit), 0) > 1000
+ORDER BY 
+    total_net_profit DESC, highest_avg_price ASC
+LIMIT 50;

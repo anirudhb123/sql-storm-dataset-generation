@@ -1,0 +1,63 @@
+
+WITH RECURSIVE date_range AS (
+    SELECT MIN(d_date_sk) AS start_date, MAX(d_date_sk) AS end_date
+    FROM date_dim
+), sales_summary AS (
+    SELECT 
+        d.d_date_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date BETWEEN (SELECT start_date FROM date_range) AND (SELECT end_date FROM date_range)
+    GROUP BY d.d_date_id
+), promotional_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS promotional_net_sales,
+        COUNT(ws.ws_order_number) AS total_promotions
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+    GROUP BY ws.ws_item_sk
+), rank_sales AS (
+    SELECT 
+        s.item_id,
+        s.total_sales,
+        p.promotional_net_sales,
+        COALESCE(p.promotional_net_sales, 0) AS promotional_net_sales,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM (
+        SELECT 
+            ds.d_date_id AS date_id,
+            SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+            ws.ws_item_sk AS item_id
+        FROM web_sales ws
+        JOIN date_dim ds ON ws.ws_sold_date_sk = ds.d_date_sk
+        GROUP BY ds.d_date_id, ws.ws_item_sk
+    ) s
+    LEFT JOIN promotional_sales p ON s.item_id = p.ws_item_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    r.date_id,
+    r.item_id,
+    r.total_sales,
+    r.promotional_net_sales,
+    ci.total_orders AS customer_order_count,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    r.sales_rank
+FROM rank_sales r
+JOIN customer_info ci ON ci.total_orders > 10 -- customers with more than 10 orders
+WHERE r.sales_rank <= 100; -- top 100 items by sales

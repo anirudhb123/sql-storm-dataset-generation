@@ -1,0 +1,66 @@
+
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics AS cd
+    JOIN 
+        customer AS c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+BenchmarkingResults AS (
+    SELECT 
+        c.customer_id,
+        c.full_name,
+        c.ca_city,
+        c.ca_state,
+        c.total_orders,
+        c.total_spent,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.customer_count
+    FROM 
+        CustomerOrders AS c
+    JOIN 
+        CustomerDemographics AS d ON c.c_customer_id = (SELECT c.c_customer_id FROM customer AS c WHERE c.c_current_addr_sk = d.cd_demo_sk)
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN total_spent > 5000 THEN 'Gold'
+        WHEN total_spent BETWEEN 2000 AND 5000 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS customer_tier,
+    CONCAT(ca_city, ', ', ca_state) AS full_address,
+    LENGTH(cd_education_status) AS education_length
+FROM 
+    BenchmarkingResults
+WHERE 
+    total_orders > 10
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

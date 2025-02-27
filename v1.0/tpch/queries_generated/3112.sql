@@ -1,0 +1,61 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PopularProducts AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        l.l_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_spent,
+    c.order_count,
+    p.total_quantity AS product_quantity,
+    p.order_count AS product_order_count,
+    s.s_name AS supplier_name,
+    s.total_cost,
+    s.total_parts
+FROM 
+    CustomerOrders c
+OUTER JOIN 
+    PopularProducts p ON c.order_count > 5
+LEFT JOIN 
+    SupplierDetails s ON s.total_cost > (
+        SELECT AVG(total_cost) FROM SupplierDetails
+    )
+WHERE 
+    c.total_spent > 1000
+ORDER BY 
+    c.total_spent DESC, p.total_quantity DESC;

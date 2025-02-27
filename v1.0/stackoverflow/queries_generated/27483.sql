@@ -1,0 +1,67 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9)  -- Bounty Start and Bounty Close
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.CommentId) AS CommentCount,
+        P.Score,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN LATERAL (
+        SELECT TRIM(value) AS TagName
+        FROM unnest(string_to_array(P.Tags, '<>')) AS value
+    ) T ON TRUE
+    GROUP BY P.Id, P.Title, P.Body, P.CreationDate, P.LastActivityDate, U.DisplayName, P.Score
+),
+FilteredPosts AS (
+    SELECT 
+        AP.PostId,
+        AP.Title,
+        AP.OwnerDisplayName,
+        AP.CreationDate,
+        AP.LastActivityDate,
+        AP.CommentCount,
+        AP.Score,
+        R.UserId,
+        R.ReputationRank,
+        R.TotalBounties
+    FROM ActivePosts AP
+    INNER JOIN RankedUsers R ON R.ReputationRank <= 50  -- Top 50 users
+    WHERE AP.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    ORDER BY AP.Score DESC
+)
+SELECT 
+    FP.Title,
+    FP.OwnerDisplayName,
+    FP.CreationDate,
+    FP.LastActivityDate,
+    FP.CommentCount,
+    FP.Score,
+    FP.TotalBounties,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    STRING_AGG(DISTINCT B.Name, ', ') AS BadgeNames
+FROM FilteredPosts FP
+LEFT JOIN Badges B ON FP.UserId = B.UserId
+GROUP BY FP.PostId, FP.Title, FP.OwnerDisplayName, FP.CreationDate, FP.LastActivityDate, FP.CommentCount, FP.Score, FP.TotalBounties
+ORDER BY FP.Score DESC
+LIMIT 10;
+
+This SQL query benchmarks string processing by calculating derived metrics related to user reputation, post activity, and associated badges while filtering and aggregating posts. It also ranks users based on their reputation and incorporates string manipulation with tags to provide a comprehensive dataset that showcases activity over the last year.

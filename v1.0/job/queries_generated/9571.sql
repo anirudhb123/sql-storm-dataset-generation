@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS average_roles,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, title, production_year, total_cast, average_roles,
+        RANK() OVER (ORDER BY total_cast DESC) AS rank_by_cast,
+        RANK() OVER (ORDER BY average_roles DESC) AS rank_by_roles
+    FROM 
+        RankedMovies
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    tm.average_roles,
+    CASE 
+        WHEN tm.rank_by_cast = 1 THEN 'Top Cast Movie' 
+        ELSE 'Other Movie' 
+    END AS cast_rank,
+    CASE 
+        WHEN tm.rank_by_roles = 1 THEN 'Top Role Movie' 
+        ELSE 'Other Movie' 
+    END AS role_rank,
+    tm.keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank_by_cast <= 10 OR tm.rank_by_roles <= 10
+ORDER BY 
+    tm.rank_by_cast, tm.rank_by_roles;

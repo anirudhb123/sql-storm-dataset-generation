@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+),
+AvailableParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, 
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY p.p_partkey, p.p_name, p.p_size
+),
+SummarizedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_size,
+    COALESCE(s.avg_supplycost, 0) AS avg_supplycost,
+    COALESCE(s.supplier_count, 0) AS supplier_count,
+    o.total_revenue,
+    CASE 
+        WHEN o.total_revenue IS NULL THEN 'No Orders'
+        WHEN o.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Moderate Revenue' 
+    END AS revenue_status,
+    r.r_name AS region_name
+FROM AvailableParts p
+LEFT JOIN RankedSuppliers s ON p.p_partkey = s.s_suppkey
+LEFT JOIN SummarizedOrders o ON p.p_partkey = o.o_orderkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE (p.p_size IS NULL OR p.p_size BETWEEN 5 AND 20 OR p.p_name LIKE 'A%')
+  AND (s.rnk = 1 OR s.rnk IS NULL)
+ORDER BY p.p_name, avg_supplycost DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

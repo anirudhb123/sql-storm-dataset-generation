@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate
+),
+TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(SPLIT(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) ) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag, 
+        TagCount
+    FROM 
+        TagCounts 
+    ORDER BY 
+        TagCount DESC 
+    LIMIT 10
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Body, 
+        rp.CreationDate, 
+        rp.CommentCount, 
+        rp.UpvoteCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags tt ON rp.Tags LIKE CONCAT('%', tt.Tag, '%') 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CommentCount,
+    fp.UpvoteCount,
+    CASE 
+        WHEN fp.UpvoteCount > 10 THEN 'Highly Upvoted'
+        WHEN fp.UpvoteCount BETWEEN 5 AND 10 THEN 'Moderately Upvoted'
+        ELSE 'Less Upvoted' 
+    END AS VoteCategory,
+    (SELECT STRING_AGG(tt.Tag, ', ') FROM TopTags tt WHERE fp.Title LIKE CONCAT('%', tt.Tag, '%')) AS RelatedTags
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.UpvoteCount DESC, 
+    fp.CommentCount DESC;

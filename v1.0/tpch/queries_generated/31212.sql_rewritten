@@ -1,0 +1,48 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount))
+    FROM nation_sales ns
+    JOIN nation n ON ns.n_nationkey = n.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate < cast('1998-10-01' as date)
+    GROUP BY n.n_nationkey, n.n_name
+),
+ranked_sales AS (
+    SELECT n.n_name, ns.total_sales,
+           RANK() OVER (ORDER BY ns.total_sales DESC) AS sales_rank
+    FROM nation_sales ns
+    JOIN nation n ON ns.n_nationkey = n.n_nationkey
+),
+filtered_sales AS (
+    SELECT n_name, total_sales
+    FROM ranked_sales
+    WHERE sales_rank <= 10
+)
+SELECT fs.n_name,
+       fs.total_sales,
+       coalesce((SELECT SUM(ps_availqty) 
+                  FROM partsupp ps 
+                  WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                          FROM part p 
+                                          WHERE p.p_brand = 'Brand#44')), 0) AS total_available_quantity
+FROM filtered_sales fs
+LEFT JOIN (SELECT n.n_name,
+                   COUNT(DISTINCT c.c_custkey) AS customer_count
+            FROM customer c
+            JOIN orders o ON c.c_custkey = o.o_custkey
+            JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+            JOIN supplier s ON l.l_suppkey = s.s_suppkey
+            JOIN nation n ON s.s_nationkey = n.n_nationkey
+            GROUP BY n.n_name) AS nation_customer_count
+ON fs.n_name = nation_customer_count.n_name
+ORDER BY fs.total_sales DESC, customer_count DESC;

@@ -1,0 +1,69 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) 
+                                  FROM web_sales ws_inner 
+                                  WHERE ws_inner.ws_ship_date_sk BETWEEN 20230101 AND 20231231)
+),
+TotalReturns AS (
+    SELECT 
+        CASE WHEN sr_item_sk IS NOT NULL THEN 'store' ELSE 'web' END AS return_source,
+        SUM(COALESCE(sr_return_quantity, 0)) AS total_return_quantity,
+        SUM(COALESCE(sr_return_amt, 0)) AS total_return_amount
+    FROM 
+        store_returns sr
+    FULL OUTER JOIN web_returns wr ON sr.wr_returning_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        1
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+PromotionsOverview AS (
+    SELECT 
+        p.p_promo_name,
+        COUNT(DISTINCT cs.cs_order_number) AS promo_order_count,
+        SUM(cs.cs_net_profit) AS total_net_profit
+    FROM 
+        promotion p
+    LEFT JOIN catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+    GROUP BY 
+        p.p_promo_name
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(SUM(T.total_return_quantity), 0) AS total_returned_items,
+    COALESCE(SUM(T.total_return_amount), 0) AS total_returned_amount,
+    RANK() OVER (PARTITION BY cd.cd_gender, cd.cd_marital_status ORDER BY SUM(T.total_return_amount) DESC) AS return_rank,
+    P.promo_order_count,
+    P.total_net_profit
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    TotalReturns T ON cd.customer_count > (SELECT COUNT(*) FROM customer) * 0.1 
+LEFT JOIN 
+    PromotionsOverview P ON cd.customer_count > 50  
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status, P.promo_order_count, P.total_net_profit
+HAVING 
+    (SUM(T.total_return_amount) IS NOT NULL OR SUM(T.total_returned_items) IS NOT NULL)
+    AND (P.total_net_profit IS NOT NULL OR P.promo_order_count > 0)
+ORDER BY 
+    return_rank, cd.cd_gender;

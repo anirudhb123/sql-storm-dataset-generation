@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(p.Score) AS TotalScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalQuestions,
+        us.TotalScore,
+        us.AcceptedAnswers,
+        us.TotalViews,
+        RANK() OVER (ORDER BY us.TotalScore DESC, us.TotalViews DESC) AS UserRank
+    FROM 
+        UserStatistics us
+    WHERE 
+        us.TotalQuestions > 5 
+),
+TagsParsing AS (
+    SELECT 
+        p.Id AS PostId,
+        UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+)
+SELECT 
+    tu.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS QuestionsPosted,
+    SUM(rp.ViewCount) AS TotalViewsOnQuestions,
+    AVG(rp.Score) AS AverageScoreOfQuestions,
+    STRING_AGG(DISTINCT tp.Tag, ', ') AS TagsUsed,
+    MAX(rp.CreationDate) AS LastQuestionDate
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+JOIN 
+    TagsParsing tp ON rp.PostId = tp.PostId
+GROUP BY 
+    tu.UserId, tu.DisplayName
+ORDER BY 
+    QuestionsPosted DESC, TotalViewsOnQuestions DESC;

@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_balance
+    FROM 
+        supplier s
+), AvailableParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+), CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND 
+        COUNT(o.o_orderkey) > 0
+), PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        COALESCE(NULLIF(REPLACE(p.p_comment, 'obsolete', NULL), NULL), 'Active') AS status
+    FROM 
+        part p
+)
+SELECT 
+    p.p_name,
+    ps.total_available,
+    cs.order_count,
+    cs.total_spent,
+    rs.s_name AS supplier_name,
+    rs.rank_balance
+FROM 
+    PartDetails p
+JOIN 
+    AvailableParts ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_partkey IN (
+        SELECT 
+            ps_partkey 
+        FROM 
+            partsupp 
+        WHERE 
+            ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+JOIN 
+    CustomerOrderStats cs ON cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats WHERE order_count > 1)
+WHERE 
+    p.p_retailprice > 
+    (SELECT AVG(p_retailprice) FROM part WHERE p_retailprice IS NOT NULL)
+ORDER BY 
+    rs.rank_balance DESC
+FETCH FIRST 50 ROWS ONLY;

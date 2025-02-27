@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Ranking
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  -- Posts from the last year
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        TagCount,
+        RANK() OVER (ORDER BY TagCount DESC) AS TagRanking
+    FROM 
+        TagStats
+    WHERE 
+        TagCount > 10  -- Arbitrary threshold for top tags
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pht.Name AS ChangeType,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '6 months'  -- Recent changes
+        AND ph.PostHistoryTypeId NOT IN (1, 3, 4, 6, 8)  -- Exclude some types of changes
+    GROUP BY 
+        ph.PostId, ph.CreationDate, pht.Name
+),
+FinalReport AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        tt.Tag,
+        phc.ChangeType,
+        phc.ChangeCount,
+        rp.Ranking
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TopTags tt ON tt.Tag IN (SELECT unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))) 
+                                  FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN 
+        PostHistoryChanges phc ON phc.PostId = rp.PostId
+    WHERE 
+        rp.Ranking <= 10  -- Fetch only top 10 ranked posts
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+ORDER BY 
+    Ranking, CreationDate DESC;

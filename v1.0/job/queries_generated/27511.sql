@@ -1,0 +1,48 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    GROUP BY a.id, a.name
+    HAVING COUNT(DISTINCT c.movie_id) > 5
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM aka_title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id, t.title, t.production_year
+    HAVING COUNT(DISTINCT k.keyword) > 2
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    am.actor_id,
+    am.actor_name,
+    am.total_movies,
+    am.movie_titles,
+    mi.movie_id,
+    mi.movie_title,
+    mi.production_year,
+    mi.keyword_count,
+    cd.company_name,
+    cd.company_type
+FROM ActorMovies am
+JOIN MovieInfo mi ON am.total_movies > 10 -- Filter actors who've acted in more than 10 movies
+JOIN CompanyDetails cd ON mi.movie_id = cd.movie_id
+ORDER BY am.total_movies DESC, mi.production_year DESC;

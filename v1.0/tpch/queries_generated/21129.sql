@@ -1,0 +1,69 @@
+WITH MonthlySales AS (
+    SELECT 
+        EXTRACT(YEAR FROM o_orderdate) AS sales_year,
+        EXTRACT(MONTH FROM o_orderdate) AS sales_month,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        sales_year, sales_month
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (
+            SELECT AVG(total_cost) FROM (
+                SELECT 
+                    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+                FROM 
+                    partsupp ps 
+                GROUP BY 
+                    ps.ps_partkey
+            ) AS avg_cost
+        )
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    m.sales_year, 
+    m.sales_month, 
+    MAX(hp.total_cost) AS max_part_cost,
+    COALESCE(SUM(s.s_acctbal), 0) AS total_supplier_balance,
+    COUNT(DISTINCT sd.s_suppkey) AS unique_suppliers,
+    CASE 
+        WHEN SUM(m.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    MonthlySales m
+LEFT JOIN 
+    HighValueParts hp ON m.sales_year = 2023 AND hp.total_cost > 1000
+LEFT JOIN 
+    SupplierDetails sd ON hp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey)
+WHERE 
+    sd.rank <= 5 OR sd.rank IS NULL
+GROUP BY 
+    m.sales_year, m.sales_month
+ORDER BY 
+    m.sales_year DESC, m.sales_month DESC
+FETCH FIRST 10 ROWS ONLY;

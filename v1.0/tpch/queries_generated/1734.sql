@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        CustomerSales c
+    WHERE 
+        c.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+)
+SELECT 
+    p.p_name,
+    r.r_name AS region,
+    ns.s_name,
+    COALESCE(cv.total_spent, 0) as customer_total_spent,
+    CASE 
+        WHEN cv.order_count IS NULL THEN 'No Orders'
+        ELSE CONCAT('Orders: ', cv.order_count) 
+    END AS order_summary
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier ns ON ps.ps_suppkey = ns.s_suppkey
+JOIN 
+    nation n ON ns.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers cv ON ns.s_nationkey = cv.c_custkey
+WHERE 
+    ps.ps_availqty > 0
+    AND ns.s_acctbal IS NOT NULL
+    AND (ns.s_comment IS NULL OR ns.s_comment LIKE '%important%')
+    AND r.r_name NOT LIKE '%test%'
+ORDER BY 
+    r.r_name, total_supply_cost DESC;

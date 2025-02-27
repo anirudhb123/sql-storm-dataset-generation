@@ -1,0 +1,75 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+        AND P.PostTypeId = 1
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS EditCount,
+        MIN(PH.CreationDate) AS FirstEdit,
+        MAX(PH.CreationDate) AS LastEdit
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+CombinedStats AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.CreationDate,
+        R.CommentCount,
+        U.TotalVotes,
+        U.UpVotes,
+        U.DownVotes,
+        PH.EditCount,
+        PH.FirstEdit,
+        PH.LastEdit
+    FROM 
+        RecentPosts R
+    JOIN 
+        UserVoteStats U ON R.OwnerUserId = U.UserId
+    LEFT JOIN 
+        PostHistorySummary PH ON R.PostId = PH.PostId
+)
+SELECT 
+    C.*,
+    COALESCE(PH.EditCount, 0) AS TotalEdits,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = C.PostId AND V.VoteTypeId = 4) AS TotalBounties
+FROM 
+    CombinedStats C
+LEFT JOIN 
+    Posts P ON C.PostId = P.Id
+WHERE 
+    C.TotalVotes > 10
+ORDER BY 
+    C.CreationDate DESC, C.TotalVotes DESC
+LIMIT 50;

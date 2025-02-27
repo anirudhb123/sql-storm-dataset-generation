@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity_sold
+    FROM 
+        web_sales ws
+),
+SubqueryCounts AS (
+    SELECT 
+        ir.item_sold,
+        COUNT(DISTINCT CASE WHEN ir.order_status IS NULL THEN NULL ELSE ir.order_number END) AS order_count
+    FROM (
+        SELECT 
+            cs.cs_item_sk AS item_sold,
+            cs.cs_order_number AS order_number,
+            NULLIF(ws.ws_order_number, cs.cs_order_number) AS order_status
+        FROM 
+            catalog_sales cs 
+        FULL OUTER JOIN web_sales ws ON cs.cs_item_sk = ws.ws_item_sk
+    ) ir
+    GROUP BY 
+        ir.item_sold
+),
+UpdatedInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        inv.inv_quantity_on_hand - COALESCE(SUM(ws.ws_quantity), 0) AS updated_quantity
+    FROM 
+        inventory inv
+    LEFT JOIN web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    GROUP BY 
+        inv.inv_item_sk, inv.inv_quantity_on_hand
+)
+SELECT 
+    r.ws_item_sk, 
+    r.ws_order_number, 
+    r.ws_quantity, 
+    r.total_quantity_sold,
+    COALESCE(s.order_count, 0) AS catalog_order_count,
+    CASE 
+        WHEN inv.updated_quantity IS NULL THEN 'Not Available' 
+        WHEN inv.updated_quantity >= 0 THEN 'In Stock' 
+        ELSE 'Out of Stock' 
+    END AS stock_status
+FROM 
+    RankedSales r
+LEFT JOIN SubqueryCounts s ON r.ws_item_sk = s.item_sold
+LEFT JOIN UpdatedInventory inv ON r.ws_item_sk = inv.inv_item_sk
+WHERE 
+    r.rank_profit <= 5
+ORDER BY 
+    r.ws_net_profit DESC, r.ws_item_sk
+HAVING 
+    SUM(r.ws_quantity) > 10 OR (SUM(r.ws_quantity) IS NULL AND (SELECT COUNT(*) FROM store_sales WHERE ss_item_sk = r.ws_item_sk) = 0);

@@ -1,0 +1,34 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_address, s.n_nationkey, 
+           1 AS level
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_address, s.n_nationkey,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey + 1
+)
+SELECT r.r_name, 
+       SUM(CASE WHEN l.l_shipmode = 'AIR' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS Total_Air_Sales,
+       COUNT(DISTINCT o.o_orderkey) AS Order_Count,
+       AVG(l.l_quantity) AS Avg_Quantity,
+       STRING_AGG(DISTINCT n.n_name, ', ') AS Nations_Supplied
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate >= DATE '1997-01-01' 
+  AND o.o_orderstatus = 'O'
+  AND l.l_shipdate IS NOT NULL
+  AND (l.l_discount < 0.05 OR l.l_discount IS NULL)
+GROUP BY r.r_name
+HAVING AVG(s.s_acctbal) > 5000
+ORDER BY Total_Air_Sales DESC
+LIMIT 10;

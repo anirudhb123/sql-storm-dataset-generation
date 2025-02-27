@@ -1,0 +1,17 @@
+
+SELECT 
+    ca_state,
+    COUNT(DISTINCT c_customer_sk) AS customer_count,
+    AVG(c_purchase_estimate) AS avg_purchase_estimate,
+    SUM(ws_sales_price) AS total_sales_amount
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY 
+    ca_state
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10;

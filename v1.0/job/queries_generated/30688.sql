@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        mh.level + 1
+    FROM 
+        aka_title t
+    INNER JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.id
+    WHERE 
+        mh.level < 3
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT c.person_id) AS total_actors,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order,
+    COUNT(DISTINCT CASE WHEN mi.info IS NOT NULL THEN mi.info END) AS total_movie_info,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies_involved,
+    MIN(th.production_year) AS first_prod_year,
+    MAX(th.production_year) AS last_prod_year,
+    ROW_NUMBER() OVER (PARTITION BY mk.keyword ORDER BY COUNT(DISTINCT c.person_id) DESC) AS ranking
+FROM 
+    movie_keyword mk
+INNER JOIN 
+    aka_title at ON mk.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id 
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+INNER JOIN 
+    MovieHierarchy th ON at.id = th.id
+WHERE 
+    mk.keyword IS NOT NULL 
+    AND (mi.info_type_id IS NULL OR mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis'))
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    ranking, total_actors DESC;

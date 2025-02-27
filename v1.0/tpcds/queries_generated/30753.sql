@@ -1,0 +1,72 @@
+
+WITH RECURSIVE Customer_Returns AS (
+    SELECT 
+        wr_returned_date_sk,
+        wr_item_sk,
+        wr_return_qty,
+        wr_return_amt,
+        wr_return_tax,
+        wr_return_amt_inc_tax,
+        wr_returning_customer_sk,
+        1 as level
+    FROM web_returns
+    WHERE wr_returned_date_sk = (
+        SELECT MAX(wr_returned_date_sk) 
+        FROM web_returns
+    )
+    
+    UNION ALL
+
+    SELECT 
+        wr.returned_date_sk,
+        wr.item_sk,
+        wr.return_quantity,
+        wr.return_amt,
+        wr.return_tax,
+        wr.return_amt_inc_tax,
+        wr.returning_customer_sk,
+        cr.level + 1
+    FROM web_returns wr
+    JOIN Customer_Returns cr ON wr.returning_customer_sk = cr.returning_customer_sk
+    WHERE cr.level < 3
+),
+Sales_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_quantity) AS total_web_sales,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_web_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+Return_Stats AS (
+    SELECT 
+        cr.wr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr.wr_return_amt_inc_tax) AS total_return_value,
+        AVG(cr.wr_return_amt) AS avg_return_amt
+    FROM Customer_Returns cr
+    GROUP BY cr.wr_returning_customer_sk
+)
+SELECT 
+    s.c_customer_sk,
+    s.total_web_sales,
+    s.total_web_sales_price,
+    s.total_orders,
+    s.avg_net_profit,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_value, 0.00) AS total_return_value,
+    COALESCE(r.avg_return_amt, 0.00) AS avg_return_amt,
+    CASE 
+        WHEN r.total_returns IS NOT NULL THEN 
+            (100.0 * r.total_return_value / NULLIF(s.total_web_sales_price, 0))
+        ELSE 
+            0
+    END AS return_rate
+FROM Sales_Summary s
+LEFT JOIN Return_Stats r ON s.c_customer_sk = r.wr_returning_customer_sk
+WHERE s.total_orders > 10
+ORDER BY return_rate DESC
+LIMIT 50;

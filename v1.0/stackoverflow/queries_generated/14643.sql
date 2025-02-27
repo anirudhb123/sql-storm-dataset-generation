@@ -1,0 +1,64 @@
+-- Performance benchmarking query to analyze post activity and user interactions
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= '2023-01-01' -- filter for posts created in 2023
+    GROUP BY 
+        P.Id
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCreated,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.PostsCreated,
+    U.TotalViews,
+    U.TotalScore,
+    U.TotalComments,
+    U.TotalBadges,
+    PS.ViewCount AS PostViewCount,
+    PS.Score AS PostScore,
+    PS.AnswerCount AS PostAnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.UpVotes,
+    PS.DownVotes
+FROM 
+    UserActivity U
+JOIN 
+    PostStats PS ON U.UserId = PS.PostId -- Getting user's posts for further analysis
+ORDER BY 
+    U.TotalViews DESC; -- Order by total views for performance benchmarking

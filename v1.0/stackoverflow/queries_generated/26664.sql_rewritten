@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        u.Id
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM
+        UserStats
+),
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::int[])
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY
+        p.Id
+    ORDER BY
+        p.CreationDate DESC
+)
+SELECT
+    tu.Rank,
+    tu.DisplayName,
+    tu.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Tags,
+    rp.PostId
+FROM
+    TopUsers tu
+JOIN
+    RecentPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE
+    tu.Rank <= 10
+ORDER BY
+    tu.Rank;

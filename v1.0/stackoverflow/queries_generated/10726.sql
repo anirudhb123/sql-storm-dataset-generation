@@ -1,0 +1,60 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        C.CommentCount,
+        PH.EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) C ON P.Id = C.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS EditCount FROM PostHistory WHERE PostHistoryTypeId IN (4, 5, 6) GROUP BY PostId) PH ON P.Id = PH.PostId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.PostCount,
+    US.QuestionCount,
+    US.AnswerCount,
+    US.TotalBounties,
+    US.UpVotes,
+    US.DownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.Tags,
+    PS.CommentCount,
+    PS.EditCount
+FROM 
+    UserStats US
+LEFT JOIN 
+    PostSummary PS ON US.UserId = PS.OwnerUserId
+ORDER BY 
+    US.Reputation DESC, PS.Score DESC;

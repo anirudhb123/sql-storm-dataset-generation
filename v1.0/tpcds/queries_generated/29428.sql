@@ -1,0 +1,59 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_ship_mode_sk,
+        sm.sm_type AS shipping_type,
+        d.d_date AS sale_date,
+        dd.cd_demo_sk AS customer_demo_key
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        CustomerDetails dd ON ws.ws_bill_customer_sk = dd.c_customer_id
+)
+SELECT 
+    cs.full_name,
+    SUM(sd.ws_quantity) AS total_quantity,
+    SUM(sd.ws_ext_sales_price) AS total_sales_amount,
+    AVG(sd.ws_sales_price) AS average_sales_price,
+    MAX(sd.sale_date) AS last_purchase_date,
+    COUNT(DISTINCT sd.ws_order_number) AS total_orders,
+    STRING_AGG(DISTINCT sd.shipping_type, ', ') AS shipping_types
+FROM 
+    CustomerDetails cs
+JOIN 
+    SalesDetails sd ON cs.c_customer_id = sd.customer_demo_key
+WHERE 
+    cs.ca_city LIKE 'San%' AND 
+    cs.ca_state = 'CA'
+GROUP BY 
+    cs.full_name
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10;

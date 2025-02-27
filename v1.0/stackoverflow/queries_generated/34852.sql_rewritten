@@ -1,0 +1,96 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursiveCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TotalViews AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COUNT(DISTINCT r.PostId) AS TotalQuestions,
+    SUM(COALESCE(ps.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(ps.DownVotes, 0)) AS TotalDownVotes,
+    tv.TotalViews,
+    AVG(r.Score) AS AverageScore,
+    SUM(CASE WHEN r.AnswerCount > 0 THEN 1 ELSE 0 END) AS AnsweredQuestions
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecursiveCTE r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    PostVoteStats ps ON r.PostId = ps.PostId
+LEFT JOIN 
+    TotalViews tv ON u.Id = tv.UserId
+GROUP BY 
+    u.Id, u.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges, tv.TotalViews
+HAVING 
+    COUNT(DISTINCT r.PostId) > 10 
+ORDER BY 
+    TotalUpVotes DESC,
+    AverageScore DESC;

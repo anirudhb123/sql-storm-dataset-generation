@@ -1,0 +1,67 @@
+WITH MovieStatistics AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        COUNT(DISTINCT k.keyword) AS total_keywords,
+        COALESCE(SUM(mi.info LIKE '%Award%') FILTER (WHERE mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Awards')), 0) AS awards_count
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+Keywords AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(keyword, ', ') AS keyword_list
+    FROM 
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalReport AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        ms.total_cast_members,
+        ms.actor_names,
+        COALESCE(kw.keyword_list, 'No keywords') AS keyword_list,
+        ms.awards_count
+    FROM 
+        MovieStatistics ms
+    LEFT JOIN 
+        Keywords kw ON ms.movie_id = kw.movie_id
+)
+SELECT 
+    FR.movie_id,
+    FR.title,
+    FR.production_year,
+    FR.total_cast_members,
+    FR.actor_names,
+    FR.keyword_list,
+    FR.awards_count,
+    CASE
+        WHEN FR.awards_count > 0 THEN 'Award-winning film'
+        ELSE 'Non Award-winning film'
+    END AS film_status
+FROM 
+    FinalReport FR
+ORDER BY 
+    FR.production_year DESC, FR.total_cast_members DESC;

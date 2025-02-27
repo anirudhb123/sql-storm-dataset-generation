@@ -1,0 +1,79 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn,
+        CASE 
+            WHEN EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey AND ps.ps_supplycost < 50.00) 
+            THEN 'Cheap Supply'
+            ELSE 'Regular Supply'
+        END AS SupplyType
+    FROM 
+        part p
+),
+RegionStats AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l.l_extendedprice) FROM lineitem)
+),
+FinalSelection AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT h.o_orderkey) AS high_value_order_count,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        AVG(p.p_retailprice) AS average_part_price
+    FROM 
+        RegionStats r
+    LEFT JOIN 
+        HighValueOrders h ON r.total_order_value > 10000
+    LEFT JOIN 
+        RankedParts p ON p.rn = 1 AND p.SupplyType = 'Cheap Supply'
+    GROUP BY 
+        r.r_name
+    HAVING 
+        COUNT(DISTINCT h.o_orderkey) > (SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'F') / 10
+)
+SELECT 
+    f.r_name,
+    COALESCE(f.high_value_order_count, 0) AS high_value_orders,
+    COALESCE(f.part_count, 0) AS available_parts,
+    COALESCE(f.average_part_price, 0.00) AS avg_part_price,
+    CASE 
+        WHEN f.high_value_order_count > 100 THEN 'High Activity Region'
+        ELSE 'Regular Activity Region'
+    END AS ActivityLevel
+FROM 
+    FinalSelection f
+ORDER BY 
+    f.high_value_order_count DESC, f.avg_part_price ASC;

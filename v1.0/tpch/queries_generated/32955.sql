@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_per_status
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_container, p.p_retailprice,
+           COALESCE((SELECT AVG(ps.total_cost) FROM PartSupplier ps), 0) AS avg_supplier_cost
+    FROM part p
+    WHERE p.p_size BETWEEN 5 AND 50
+)
+SELECT r.r_name, n.n_name, SUM(os.o_totalprice) AS total_order_value,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       STRING_AGG(DISTINCT tp.p_name) FILTER (WHERE tp.p_retailprice > tp.avg_supplier_cost) AS profitable_parts
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+JOIN orders o ON o.o_custkey = c.c_custkey
+JOIN OrderSummary os ON os.o_orderkey = o.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_acctbal > 1000
+LEFT JOIN TopParts tp ON EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = o.o_orderkey AND l.l_partkey = tp.p_partkey
+)
+WHERE o.o_orderstatus IN ('F', 'O')
+GROUP BY r.r_name, n.n_name
+HAVING SUM(os.o_totalprice) > 10000
+ORDER BY total_order_value DESC;

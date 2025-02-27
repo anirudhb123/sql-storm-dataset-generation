@@ -1,0 +1,70 @@
+
+WITH HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        l.l_partkey, 
+        l.l_quantity, 
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_number 
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_value,
+    COALESCE(hp.total_supplycost, 0) AS supply_cost_value,
+    si.nation_name
+FROM 
+    CustomerOrders c
+LEFT JOIN 
+    OrderDetails od ON c.c_custkey = od.o_orderkey
+LEFT JOIN 
+    HighValueParts hp ON od.l_partkey = hp.p_partkey
+LEFT JOIN 
+    SupplierInfo si ON od.l_partkey = si.s_suppkey
+WHERE 
+    c.total_spent > 50000
+GROUP BY 
+    c.c_custkey, c.c_name, si.nation_name
+ORDER BY 
+    total_value DESC, total_orders DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        aka_title mt
+    JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+RatedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(CASE WHEN k.keyword = 'Action' THEN 1 ELSE 0 END), 0) AS action_count,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        MovieCTE m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast ci ON m.movie_id = ci.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+TopRated AS (
+    SELECT 
+        title,
+        production_year,
+        action_count,
+        DENSE_RANK() OVER (ORDER BY action_count DESC) AS rn
+    FROM 
+        RatedMovies
+    WHERE 
+        total_cast > 5
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.action_count
+FROM 
+    TopRated t
+WHERE 
+    t.rn <= 10
+ORDER BY 
+    t.action_count DESC, t.production_year DESC;

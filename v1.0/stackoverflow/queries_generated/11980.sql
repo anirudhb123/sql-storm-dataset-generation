@@ -1,0 +1,37 @@
+-- Performance Benchmark Query: Analyze User Engagement
+
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.CreationDate IS NOT NULL) AS TotalVotes,
+        SUM(B.Id IS NOT NULL) AS TotalBadges,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalVotes,
+    TotalBadges,
+    TotalViews
+FROM 
+    UserEngagement
+ORDER BY 
+    TotalPosts DESC, TotalComments DESC;

@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2022
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        ss.ws_item_sk, 
+        ss.total_quantity, 
+        ss.total_sales
+    FROM 
+        sales_summary ss
+    WHERE 
+        ss.sales_rank <= 10
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_stock
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.total_quantity,
+    ts.total_sales,
+    COALESCE(is.total_stock, 0) AS available_stock,
+    REGEXP_REPLACE(STRING_AGG(DISTINCT CONCAT('Sales: ', CAST(ts.total_sales AS VARCHAR)), '; '), '^;|;$', '') AS sales_details
+FROM 
+    top_sales ts
+LEFT JOIN 
+    inventory_summary is ON ts.ws_item_sk = is.inv_item_sk
+GROUP BY 
+    ts.ws_item_sk, ts.total_quantity, ts.total_sales, is.total_stock
+HAVING 
+    available_stock < total_quantity
+ORDER BY 
+    total_sales DESC;

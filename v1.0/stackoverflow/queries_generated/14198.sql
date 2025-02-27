@@ -1,0 +1,42 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalBadges,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    ps.TotalPosts AS UserTotalPosts,
+    ps.TotalQuestions,
+    ps.TotalAnswers,
+    ps.AverageScore,
+    ps.TotalViews
+FROM UserStatistics us
+LEFT JOIN PostStatistics ps ON us.UserId = ps.OwnerUserId
+ORDER BY us.Reputation DESC;

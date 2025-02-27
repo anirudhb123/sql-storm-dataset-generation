@@ -1,0 +1,54 @@
+-- Performance Benchmarking SQL Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        COALESCE(p.FavoriteCount, 0) AS FavoriteCount,
+        CTE.UserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserStats CTE ON p.OwnerUserId = CTE.UserId
+)
+SELECT 
+    u.DisplayName,
+    us.PostCount,
+    us.BadgeCount,
+    us.TotalBounty,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.UserId
+ORDER BY 
+    us.PostCount DESC, us.BadgeCount DESC;

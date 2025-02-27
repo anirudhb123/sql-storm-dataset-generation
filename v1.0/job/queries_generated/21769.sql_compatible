@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(b.id) AS actor_count,
+        COUNT(DISTINCT c.company_id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info b ON a.id = b.movie_id
+    LEFT JOIN 
+        movie_companies c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+RecentMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count, 
+        company_count
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 5
+),
+HighProductionMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.actor_count,
+        m.company_count,
+        CASE 
+            WHEN m.actor_count >= 10 THEN 'Blockbuster'
+            ELSE 'Indie'
+        END AS movie_type
+    FROM 
+        RecentMovies m
+    WHERE 
+        m.company_count > 1
+),
+MovieStatistics AS (
+    SELECT 
+        hs.title,
+        hs.production_year,
+        hs.movie_type,
+        SUM(CASE WHEN hs.movie_type = 'Blockbuster' THEN 1 ELSE 0 END) AS blockbuster_count,
+        SUM(CASE WHEN hs.movie_type = 'Indie' THEN 1 ELSE 0 END) AS indie_count
+    FROM 
+        HighProductionMovies hs
+    GROUP BY 
+        hs.title, hs.production_year, hs.movie_type
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.movie_type,
+    COALESCE(NULLIF(ms.blockbuster_count, 0), 'No Blockbusters') AS blockbuster_info,
+    COALESCE(NULLIF(ms.indie_count, 0), 'No Indies') AS indie_info,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    MovieStatistics ms
+LEFT JOIN 
+    movie_keyword mk ON ms.title = (SELECT title FROM title WHERE id = ms.title)
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ms.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ms.title, ms.production_year, ms.movie_type
+HAVING 
+    COUNT(DISTINCT k.id) > 2 OR ms.movie_type = 'Blockbuster'
+ORDER BY 
+    ms.production_year DESC, 
+    ms.blockbuster_count DESC, 
+    ms.indie_count DESC;

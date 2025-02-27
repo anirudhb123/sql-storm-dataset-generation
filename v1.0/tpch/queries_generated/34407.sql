@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 5
+),
+CustomerOrderData AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSpending,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS SpendingRank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey
+),
+TopCustomerRegions AS (
+    SELECT DISTINCT c.c_nationkey, r.r_name,
+           COUNT(DISTINCT cd.o_orderkey) AS OrderCount,
+           SUM(cd.TotalSpending) AS TotalSpending
+    FROM CustomerOrderData cd
+    JOIN customer c ON cd.c_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE cd.SpendingRank <= 3
+    GROUP BY c.c_nationkey, r.r_name
+)
+SELECT r.r_name, COUNT(sh.s_suppkey) AS SupplierCount, 
+       COALESCE(SUM(t.TotalSpending), 0) AS TotalCustomerSpending
+FROM region r
+LEFT JOIN SupplierHierarchy sh ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sh.s_nationkey)
+LEFT JOIN TopCustomerRegions t ON r.r_name = t.r_name
+GROUP BY r.r_name
+HAVING COUNT(sh.s_suppkey) > 0 OR COALESCE(SUM(t.TotalSpending), 0) > 10000
+ORDER BY r.r_name;

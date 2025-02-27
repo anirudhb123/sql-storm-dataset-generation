@@ -1,0 +1,88 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) as profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+    AND 
+        ws_net_profit IS NOT NULL
+),
+high_profit_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.ws_net_profit
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    WHERE 
+        rs.profit_rank = 1
+),
+customer_returns AS (
+    SELECT 
+        cr.returned_item_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT cr.returning_customer_sk) AS unique_customers
+    FROM 
+        (SELECT cr_item_sk as returned_item_sk, cr_return_quantity, cr_returning_customer_sk 
+         FROM catalog_returns 
+         WHERE cr_return_quantity > 0) cr
+    GROUP BY 
+        cr.returned_item_sk
+),
+sales_summary AS (
+    SELECT 
+        hps.i_item_id,
+        hps.i_item_desc,
+        hps.ws_order_number,
+        hps.ws_net_profit,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returns,
+        COALESCE(cr.unique_customers, 0) AS unique_customers,
+        CASE 
+            WHEN COALESCE(cr.total_returned_quantity, 0) > 0 
+            THEN 'High Risk'
+            ELSE 'Low Risk'
+        END AS risk_category
+    FROM 
+        high_profit_sales hps
+    LEFT JOIN 
+        customer_returns cr ON hps.ws_item_sk = cr.returned_item_sk
+),
+final_summary AS (
+    SELECT 
+        item_id,
+        COUNT(ws_order_number) AS total_sales,
+        SUM(ws_net_profit) AS net_profit,
+        AVG(ws_net_profit) AS avg_profit,
+        SUM(total_returns) AS total_returns,
+        SUM(unique_customers) AS unique_customers,
+        MIN(risk_category) AS risk_category
+    FROM 
+        sales_summary
+    GROUP BY 
+        item_id
+)
+SELECT 
+    fs.*,
+    CASE 
+        WHEN avg_profit IS NULL THEN 'No Data'
+        ELSE 'Data Available'
+    END AS data_status,
+    (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk IS NULL) AS customers_with_no_demo
+FROM 
+    final_summary fs
+WHERE 
+    (total_sales > 100 OR total_returns > 10)
+    AND (risk_category = 'High Risk' OR risk_category = 'Low Risk')
+ORDER BY 
+    total_sales DESC, net_profit DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.season_nr IS NULL   
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id   
+)
+
+SELECT 
+    a.name AS actor_name,
+    STRING_AGG(DISTINCT CONCAT('Year: ', t.production_year, ', Title: ', t.title), '; ') AS movies,
+    COUNT(DISTINCT t.id) AS movie_count,
+    SUM(CASE WHEN t.production_year >= 2000 THEN 1 ELSE 0 END) AS modern_movies,
+    MAX(t.production_year) AS latest_movie_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy t ON ci.movie_id = t.movie_id  
+LEFT JOIN 
+    movie_info mi ON t.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')  
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT t.id) > 3  
+ORDER BY 
+    movie_count DESC;

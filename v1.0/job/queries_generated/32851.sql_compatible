@@ -1,0 +1,52 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(NULLIF(a.name, ''), 'Unknown') AS actor_name,
+        1 AS level
+    FROM 
+        aka_title a_t
+    JOIN 
+        title m ON m.id = a_t.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(NULLIF(a.name, ''), 'Unknown') AS actor_name,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        cast_info c ON c.movie_id = mh.movie_id
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        mh.level < 3 
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    STRING_AGG(mh.actor_name, ', ') AS full_actor_list,
+    COUNT(*) AS actor_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS movie_level
+FROM 
+    MovieHierarchy mh
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(*) > 5  
+ORDER BY 
+    mh.production_year DESC, 
+    actor_count DESC;

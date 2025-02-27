@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        LATERAL string_to_array(p.Tags, '>') AS t(tag) ON true
+    GROUP BY 
+        p.Id, pt.Name
+),
+UserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+CloseReasonSummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        STRING_AGG(CASE WHEN crt.Name IS NULL THEN 'Unknown Reason' ELSE crt.Name END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Tags,
+    ua.Upvotes,
+    ua.Downvotes,
+    ua.LastPostDate,
+    crs.CloseCount,
+    crs.CloseReasons,
+    CASE 
+        WHEN crs.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserActivities ua ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+LEFT JOIN 
+    CloseReasonSummary crs ON rp.PostId = crs.PostId
+WHERE 
+    (rp.Rank <= 3 OR ua.Upvotes > 10) AND 
+    (ua.LastPostDate IS NULL OR ua.LastPostDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

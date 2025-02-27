@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+FilteredTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 10
+),
+TagRanks AS (
+    SELECT 
+        TagName,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM FilteredTags
+),
+TopPostsByTags AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        r.OwnerDisplayName,
+        tr.TagName
+    FROM RankedPosts r
+    JOIN TagRanks tr ON r.RankByViews <= 5 AND r.ViewCount > 100
+)
+SELECT 
+    t.TagName,
+    COUNT(p.PostId) AS RelatedPostCount,
+    AVG(p.ViewCount) AS AvgViewCount,
+    AVG(p.Score) AS AvgScore,
+    ARRAY_AGG(DISTINCT p.OwnerDisplayName) AS TopPostOwners
+FROM TopPostsByTags p
+JOIN Tags t ON p.TagName = t.TagName
+GROUP BY t.TagName
+ORDER BY AvgViewCount DESC
+LIMIT 10;

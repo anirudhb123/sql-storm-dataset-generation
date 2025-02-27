@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COALESCE(MAX(k.keyword), 'No Keywords') AS keywords,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS male_ratio
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        name p ON an.person_id = p.imdb_id
+    GROUP BY 
+        a.id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        MAX(ct.kind) AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.actor_count,
+    mc.companies,
+    mc.company_type,
+    CASE 
+        WHEN md.actor_count > 5 THEN 'Ensemble Cast'
+        WHEN md.actor_count BETWEEN 3 AND 5 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    MovieCompanies mc ON md.title = mc.movie_id
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC
+LIMIT 100;

@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        COALESCE(ws.ws_ext_sales_price - ws.ws_ext_discount_amt, 0) AS total_sales,
+        CASE 
+            WHEN ws.ws_net_profit IS NULL THEN 0 
+            ELSE ws.ws_net_profit 
+        END AS net_profit
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 1000
+),
+JoinedSales AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        rs.total_sales,
+        rs.net_profit
+    FROM 
+        catalog_sales cs
+    JOIN RankedSales rs ON cs.cs_order_number = rs.ws_order_number
+    WHERE 
+        (cs.cs_quantity > 0 OR rs.ws_quantity IS NULL)
+        AND (rs.total_sales > 50 OR rs.total_sales IS NOT NULL)
+),
+FinalAnalysis AS (
+    SELECT 
+        ws.web_site_sk,
+        COALESCE(SUM(js.cs_sales_price), 0) AS total_catalog_sales,
+        MAX(ws.ws_sales_price) AS max_web_sales,
+        COUNT(DISTINCT js.cs_order_number) AS unique_catalog_orders
+    FROM 
+        web_sales ws
+    LEFT JOIN JoinedSales js ON ws.ws_order_number = js.cs_order_number
+    GROUP BY 
+        ws.web_site_sk
+)
+
+SELECT 
+    wa.warehouse_name,
+    fa.total_catalog_sales,
+    fa.max_web_sales,
+    fa.unique_catalog_orders
+FROM 
+    warehouse wa
+LEFT JOIN FinalAnalysis fa ON fa.web_site_sk = wa.warehouse_sk
+WHERE 
+    fa.total_catalog_sales > 100
+    AND wa.warehouse_sq_ft > (SELECT AVG(w.warehouse_sq_ft) FROM warehouse w)
+ORDER BY 
+    fa.total_catalog_sales DESC
+FETCH FIRST 10 ROWS ONLY;

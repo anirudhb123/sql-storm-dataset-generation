@@ -1,0 +1,86 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.CreationDate,
+        P2.LastActivityDate,
+        P2.Score,
+        P2.ViewCount,
+        P2.AnswerCount,
+        P2.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        Posts P ON P2.ParentId = P.Id
+    WHERE 
+        P.PostTypeId = 1   
+),
+
+UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id AND P.PostTypeId = 1
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.PostId IN (SELECT PostId FROM RecursivePostCTE)
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+BadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    U.DisplayName,
+    U.TotalBounty,
+    U.TotalScore,
+    U.QuestionsAsked,
+    B.GoldBadges,
+    B.SilverBadges,
+    B.BronzeBadges,
+    RANK() OVER (ORDER BY U.TotalScore DESC) AS ScoreRank,
+    RANK() OVER (ORDER BY U.TotalBounty DESC) AS BountyRank
+FROM 
+    UserScores U
+LEFT JOIN 
+    BadgeCounts B ON U.UserId = B.UserId
+WHERE 
+    U.TotalScore > 0  
+ORDER BY 
+    U.TotalScore DESC, U.TotalBounty DESC;

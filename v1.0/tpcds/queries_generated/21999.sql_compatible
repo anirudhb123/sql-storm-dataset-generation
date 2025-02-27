@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.s_store_sk,
+        ss.ss_item_sk,
+        ss.ss_ticket_number,
+        ss.ss_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ss.s_store_sk ORDER BY ss.ss_sales_price DESC) AS rank_sales
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sales_price IS NOT NULL
+),
+AddressData AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+),
+TopStores AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price >= (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2 WHERE ws2.ws_sales_price IS NOT NULL)
+    GROUP BY 
+        ws.ws_item_sk
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+)
+
+SELECT 
+    r.s_store_sk,
+    r.ss_item_sk,
+    MAX(r.ss_sales_price) AS max_sales_price,
+    COALESCE(SUM(a.customer_count), 0) AS total_customers,
+    COUNT(DISTINCT s.s_store_id) AS distinct_stores
+FROM 
+    RankedSales r
+LEFT JOIN 
+    AddressData a ON r.s_store_sk = a.ca_address_sk
+FULL OUTER JOIN 
+    TopStores s ON r.ss_item_sk = s.ws_item_sk
+WHERE 
+    r.rank_sales = 1
+    AND r.ss_sales_price IS NOT NULL
+GROUP BY 
+    r.s_store_sk, r.ss_item_sk
+HAVING 
+    MAX(r.ss_sales_price) > (SELECT COALESCE(AVG(ss2.ss_sales_price), 0) FROM store_sales ss2 WHERE ss2.ss_sales_price IS NOT NULL)
+ORDER BY 
+    total_customers DESC, max_sales_price DESC;

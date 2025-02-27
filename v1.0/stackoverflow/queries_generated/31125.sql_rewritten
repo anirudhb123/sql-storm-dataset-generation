@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        Ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy Ph ON p.ParentId = Ph.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+BadgesSummary AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+RecentPostHistories AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        h.CreationDate,
+        h.Comment,
+        h.UserDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory h ON p.Id = h.PostId
+    WHERE 
+        h.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    Ph.PostId,
+    Ph.Title,
+    Ph.CreationDate,
+    U.DisplayName AS PostOwner,
+    U.Reputation AS OwnerReputation,
+    COALESCE(BG.GoldBadges, 0) AS GoldBadges,
+    COALESCE(BS.SilverBadges, 0) AS SilverBadges,
+    COALESCE(BR.BronzeBadges, 0) AS BronzeBadges,
+    PVS.Upvotes,
+    PVS.Downvotes,
+    PVS.TotalVotes,
+    RPH.Level AS HierarchyLevel,
+    COUNT(RPH.PostId) OVER (PARTITION BY Ph.PostId) AS ChildPostCount,
+    RPH.Level = 1 AS IsTopLevel
+FROM 
+    RecursivePostHierarchy Ph
+JOIN 
+    Users U ON Ph.OwnerUserId = U.Id
+LEFT JOIN 
+    BadgesSummary BG ON U.Id = BG.UserId
+LEFT JOIN 
+    BadgesSummary BS ON U.Id = BS.UserId
+LEFT JOIN 
+    BadgesSummary BR ON U.Id = BR.UserId
+LEFT JOIN 
+    PostVoteSummary PVS ON Ph.PostId = PVS.PostId
+LEFT JOIN 
+    RecentPostHistories RPH ON Ph.PostId = RPH.PostId
+WHERE 
+    PVS.Upvotes IS NOT NULL AND 
+    (U.Reputation > 100 OR IsTopLevel) 
+ORDER BY 
+    Ph.CreationDate DESC;

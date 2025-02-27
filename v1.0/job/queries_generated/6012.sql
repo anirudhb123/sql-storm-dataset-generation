@@ -1,0 +1,33 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    c.kind AS comp_cast_type, 
+    GROUP_CONCAT(CONCAT(COALESCE(CONCAT(ca.name, ' (' , ck.keyword, ')'), ''), ' ')) AS keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword ck ON mk.keyword_id = ck.id
+LEFT JOIN 
+    char_name ca ON a.id = ca.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, t.title, c.kind
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 5
+ORDER BY 
+    a.name, t.title;

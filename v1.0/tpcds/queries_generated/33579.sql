@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = '1')
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        total_sales > 100
+), 
+customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        ca.ca_city,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales AS ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, ca.ca_city
+)
+SELECT 
+    cus.c_customer_id,
+    cus.gender,
+    cus.ca_city,
+    SUM(ss.total_sales) AS overall_sales,
+    SUM(ss.total_revenue) AS overall_revenue,
+    ROW_NUMBER() OVER (PARTITION BY cus.ca_city ORDER BY SUM(ss.total_revenue) DESC) AS city_rank
+FROM 
+    customer_data AS cus
+JOIN 
+    sales_summary AS ss ON cus.c_customer_id = ss.ws_item_sk 
+GROUP BY 
+    cus.c_customer_id, cus.gender, cus.ca_city
+HAVING 
+    SUM(ss.total_revenue) IS NOT NULL
+ORDER BY 
+    overall_revenue DESC;

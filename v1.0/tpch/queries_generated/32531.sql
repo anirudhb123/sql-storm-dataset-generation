@@ -1,0 +1,48 @@
+WITH RECURSIVE nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name 
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name 
+    FROM nation n
+    JOIN nation_region nr ON n.n_regionkey = nr.r_regionkey
+    WHERE n.n_nationkey <> nr.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count, 
+           STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent, co.order_count,
+           RANK() OVER (ORDER BY co.total_spent DESC) AS rank
+    FROM customer_orders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE co.total_spent IS NOT NULL AND co.order_count > 0
+)
+
+SELECT nr.n_name, nr.r_name, 
+       SUM(ls.l_extendedprice * (1 - ls.l_discount)) AS revenue,
+       AVG(cs.total_spent) AS avg_customer_spent,
+       COUNT(DISTINCT ss.s_suppkey) AS number_of_suppliers,
+       string_agg(DISTINCT ss.supplier_names, '; ') AS suppliers_list
+FROM lineitem ls
+JOIN orders o ON ls.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier_summary ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = ls.l_partkey)
+JOIN nation_region nr ON c.c_nationkey = nr.n_nationkey
+WHERE ls.l_returnflag = 'R' 
+AND ls.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY nr.n_name, nr.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY revenue DESC;

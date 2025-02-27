@@ -1,0 +1,48 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS date_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+TopItems AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM SalesData sd
+    WHERE sd.date_rank = 1
+),
+DetailedSales AS (
+    SELECT
+        ti.ws_item_sk,
+        ti.total_quantity,
+        ti.total_sales,
+        i.i_item_desc,
+        COALESCE(sm.sm_type, 'Regular') AS shipping_type,
+        CASE 
+            WHEN ti.total_sales > 1000 THEN 'High'
+            WHEN ti.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM TopItems ti
+    LEFT JOIN item i ON ti.ws_item_sk = i.i_item_sk
+    LEFT JOIN ship_mode sm ON ti.ws_item_sk = sm.sm_ship_mode_sk
+    WHERE ti.sales_rank <= 10
+)
+SELECT
+    ds.ws_item_sk,
+    ds.i_item_desc,
+    ds.total_quantity,
+    ds.total_sales,
+    ds.shipping_type,
+    ds.sales_category
+FROM DetailedSales ds
+ORDER BY ds.total_sales DESC
+LIMIT 10;

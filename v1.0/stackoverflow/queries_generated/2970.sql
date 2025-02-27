@@ -1,0 +1,61 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(DISTINCT p.Tags) AS UniqueTags,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.OwnerUserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVotes,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) -- 10 = Post Closed, 11 = Post Reopened
+    GROUP BY ph.PostId
+),
+RankedUsers AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ps.TotalPosts,
+        ps.UniqueTags,
+        ps.TotalScore,
+        ps.AvgViewCount,
+        RANK() OVER (ORDER BY ps.TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY ub.BadgeCount DESC) AS BadgeRank
+    FROM UserBadges ub
+    JOIN PostStatistics ps ON ub.UserId = ps.OwnerUserId
+)
+SELECT 
+    ru.DisplayName,
+    ru.TotalPosts,
+    ru.UniqueTags,
+    COALESCE(cpd.CloseVotes, 0) AS CloseVotesReceived,
+    COALESCE(cpd.LastClosedDate, 'Not Closed') AS LastClosedDate,
+    ru.ScoreRank,
+    ru.BadgeRank,
+    CASE 
+        WHEN ru.MaxBadgeClass = 1 THEN 'Gold'
+        WHEN ru.MaxBadgeClass = 2 THEN 'Silver'
+        WHEN ru.MaxBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No badges'
+    END AS HighestBadgeType
+FROM RankedUsers ru
+LEFT JOIN ClosedPostDetails cpd ON ru.UserId = cpd.PostId
+WHERE ru.TotalPosts > 5
+ORDER BY ru.ScoreRank, ru.BadgeRank;

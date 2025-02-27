@@ -1,0 +1,73 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        r.r_name
+),
+CustomerSales AS (
+    SELECT 
+        c.c_name AS customer_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= o.o_orderdate
+    GROUP BY 
+        c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        customer_name,
+        RANK() OVER (ORDER BY customer_sales DESC) AS rank
+    FROM 
+        CustomerSales
+)
+SELECT 
+    rs.region_name,
+    tc.customer_name,
+    tc.customer_sales,
+    COALESCE(SUM(rs.total_sales), 0) AS region_sales
+FROM 
+    RegionalSales rs
+FULL OUTER JOIN 
+    (SELECT 
+         c_name AS customer_name,
+         SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_sales
+     FROM 
+         lineitem l
+     LEFT JOIN 
+         orders o ON l.l_orderkey = o.o_orderkey 
+     LEFT JOIN 
+         customer c ON o.o_custkey = c.c_custkey 
+     WHERE 
+         c.c_acctbal IS NOT NULL
+     GROUP BY 
+         c.c_name) AS tc ON rs.region_name = (SELECT r_name FROM region WHERE r_regionkey = (SELECT n_regionkey FROM nation WHERE n_nationkey = (SELECT c_nationkey FROM customer WHERE c_name = tc.customer_name)))
+WHERE 
+    tc.rank <= 10 OR tc.customer_name IS NULL
+GROUP BY 
+    rs.region_name, tc.customer_name, tc.customer_sales
+ORDER BY 
+    rs.region_name, region_sales DESC, tc.customer_name;

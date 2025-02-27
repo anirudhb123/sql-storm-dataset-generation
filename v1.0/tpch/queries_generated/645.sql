@@ -1,0 +1,39 @@
+WITH SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS parts_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT si.s_suppkey, si.s_name, si.total_cost, si.parts_count,
+           RANK() OVER (ORDER BY si.total_cost DESC) AS cost_rank,
+           RANK() OVER (PARTITION BY si.s_nationkey ORDER BY si.total_cost DESC) AS nation_rank
+    FROM SupplierInfo si
+),
+RecentOrders AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice,
+           DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+)
+SELECT r.s_name, r.total_cost, r.parts_count,
+       COALESCE(co.total_orders, 0) AS customer_orders,
+       COALESCE(co.total_spent, 0) AS total_spent,
+       SUM(rn.l_quantity) AS total_recent_quantity
+FROM RankedSuppliers r
+LEFT JOIN CustomerOrders co ON r.s_nationkey = co.c_custkey
+LEFT JOIN RecentOrders rn ON rn.l_suppkey = r.s_suppkey
+WHERE r.cost_rank <= 10
+AND (co.total_orders > 5 OR co.total_spent > 1000.00)
+GROUP BY r.s_name, r.total_cost, r.parts_count, co.total_orders, co.total_spent
+ORDER BY r.total_cost DESC, customer_orders DESC;

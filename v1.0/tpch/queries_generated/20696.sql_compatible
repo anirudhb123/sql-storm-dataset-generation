@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CAST('1998-10-01' AS DATE)) 
+        AND o.o_totalprice IS NOT NULL
+),
+CustomerWithBalance AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(*) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000 OR COUNT(*) > 5
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    c.c_name,
+    c.total_spent,
+    s.total_supply_cost,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No Orders'
+        WHEN s.total_supply_cost IS NULL THEN 'No Supplies'
+        ELSE 'Active Customer'
+    END AS customer_status,
+    RANK() OVER (ORDER BY c.total_spent DESC NULLS LAST) AS rank_by_spending,
+    COALESCE(
+        (SELECT AVG(o.o_totalprice) 
+         FROM orders o 
+         WHERE o.o_orderkey IN (SELECT order_rank FROM RankedOrders WHERE order_rank <= 5)), 
+        0
+    ) AS avg_top_orders
+FROM 
+    CustomerWithBalance c
+FULL OUTER JOIN 
+    SupplierCosts s ON c.c_custkey = s.ps_suppkey
+WHERE 
+    COALESCE(c.total_spent, 0) > 
+    (SELECT AVG(total_spent) FROM CustomerWithBalance WHERE total_orders > 2)
+ORDER BY 
+    c.total_spent DESC, 
+    s.total_supply_cost ASC;

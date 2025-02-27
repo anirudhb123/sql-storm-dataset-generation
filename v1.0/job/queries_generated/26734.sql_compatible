@@ -1,0 +1,49 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS role_type,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    GROUP BY 
+        t.id, t.title, a.name, c.kind, t.production_year
+),
+movie_keyword_summary AS (
+    SELECT 
+        md.movie_title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_details md
+    JOIN 
+        movie_keyword mk ON md.movie_title = (SELECT title FROM title WHERE id = mk.movie_id) 
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        md.movie_title
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_name,
+    md.role_type,
+    md.production_companies,
+    COALESCE(mks.keywords, '') AS keywords
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_keyword_summary mks ON md.movie_title = mks.movie_title
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC, md.movie_title;

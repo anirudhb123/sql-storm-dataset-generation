@@ -1,0 +1,95 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY SUM(cs.cs_net_profit) DESC) AS rank,
+        DENSE_RANK() OVER (ORDER BY SUM(cs.cs_net_profit) DESC) AS dense_rank
+    FROM 
+        catalog_sales AS cs
+    WHERE
+        EXISTS (
+            SELECT 1 
+            FROM item AS i 
+            WHERE i.i_item_sk = cs.cs_item_sk 
+              AND i.i_current_price > 0
+        )
+    GROUP BY 
+        cs.cs_item_sk
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(DISTINCT cs.cs_order_number) AS num_orders,
+        SUM(cs.cs_net_paid) AS total_spend,
+        MIN(cs.cs_sold_date_sk) AS first_order_date,
+        MAX(cs.cs_sold_date_sk) AS last_order_date,
+        COALESCE(NULLIF(MIN(cs.cs_sold_date_sk), 0), MAX(cs.cs_sold_date_sk)) AS first_non_null_order_date
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_sales AS cs ON cs.cs_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cs.num_orders,
+        cs.total_spend,
+        RANK() OVER (ORDER BY cs.total_spend DESC) AS customer_rank
+    FROM 
+        customer_summary AS cs
+    JOIN 
+        customer AS c ON cs.c_customer_id = c.c_customer_id
+),
+zero_sales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count,
+        SUM(ws.ws_net_paid) AS web_total_spend
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.num_orders,
+    tc.total_spend,
+    COALESCE(zs.web_order_count, 0) AS web_order_count,
+    COALESCE(zs.web_total_spend, 0.00) AS web_total_spend,
+    CASE 
+        WHEN tc.total_spend > 1000 THEN 'High Value'
+        WHEN tc.total_spend > 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category,
+    rs.total_quantity,
+    rs.total_profit,
+    rs.rank AS sales_rank
+FROM 
+    top_customers AS tc
+LEFT JOIN 
+    zero_sales AS zs ON tc.c_customer_id = zs.c_customer_id
+LEFT JOIN 
+    ranked_sales AS rs ON tc.c_customer_id = (SELECT DISTINCT wr_returning_customer_sk FROM web_returns WHERE wr_returning_customer_sk IS NOT NULL LIMIT 1)
+WHERE 
+    (tc.num_orders > 0 OR zs.web_order_count > 0)
+AND 
+    (rs.total_profit IS NULL OR rs.total_profit > 0) 
+ORDER BY 
+    customer_value_category DESC, 
+    tc.total_spend DESC, 
+    tc.c_customer_id;

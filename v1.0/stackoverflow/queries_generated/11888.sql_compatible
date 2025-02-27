@@ -1,0 +1,26 @@
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(p.Id) AS PostCount,
+    AVG(p.ViewCount) AS AvgViewsPerPost,
+    COALESCE(SUM(v.UpVotes), 0) AS TotalUpVotes,
+    COALESCE(SUM(v.DownVotes), 0) AS TotalDownVotes
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    (SELECT 
+        OwnerUserId, 
+        SUM(UpVotes) AS UpVotes, 
+        SUM(DownVotes) AS DownVotes 
+     FROM 
+        Users 
+     GROUP BY 
+        OwnerUserId) v ON u.Id = v.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    u.Reputation DESC;

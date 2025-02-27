@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+)
+SELECT 
+    u.DisplayName AS UserName,
+    rp.Title AS PostTitle,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.TotalBounties,
+    ARRAY_AGG(t.TagName) AS Tags,
+    CASE 
+        WHEN rp.CommentCount > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS PostStatus,
+    CASE
+        WHEN rp.TotalBounties > 0 THEN 'Has Bounty'
+        ELSE 'No Bounty'
+    END AS BountyStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.PostId = u.Id
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.WikiPostId = p.Id
+WHERE 
+    rp.rn <= 5 AND
+    rp.ViewCount IS NOT NULL AND 
+    (p.CreationDate < NOW() - INTERVAL '1 year' OR p.ViewCount > 100)
+GROUP BY 
+    u.DisplayName, rp.Title, rp.ViewCount, rp.CommentCount, rp.TotalBounties
+HAVING 
+    SUM(CASE WHEN t.IsModeratorOnly = 1 THEN 1 ELSE 0 END) = 0
+ORDER BY 
+    rp.ViewCount DESC NULLS LAST
+LIMIT 100;
+
+-- The outer query aggregates data from the ranked posts 
+-- while excluding posts linked with moderator-only tags 
+-- and only selects active posts with sufficient views or older posts.
+

@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        CTE1.rank AS rank,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            COUNT(*) AS rank
+        FROM 
+            web_sales
+        WHERE 
+            ws_sales_price IS NOT NULL
+        GROUP BY 
+            ws_item_sk
+    ) AS CTE1 ON ws.ws_item_sk = CTE1.ws_item_sk
+), ItemReturns AS (
+    SELECT
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+), FinalReport AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        MAX(rs.ws_sales_price) AS max_sales_price,
+        COALESCE(ir.total_returns, 0) AS total_returns,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        CASE WHEN MAX(rs.ws_sales_price) IS NULL THEN 'NO SALES'
+             WHEN COALESCE(ir.total_returns, 0) > 0 THEN 'RETURNED'
+             ELSE 'ACTIVE' END AS sale_status
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    LEFT JOIN 
+        ItemReturns ir ON i.i_item_sk = ir.cr_item_sk
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01'
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+)
+SELECT 
+    fr.i_item_id,
+    fr.i_item_desc,
+    fr.max_sales_price,
+    fr.total_returns,
+    fr.order_count,
+    fr.sale_status,
+    DENSE_RANK() OVER (ORDER BY fr.max_sales_price DESC) AS price_rank
+FROM 
+    FinalReport fr
+WHERE 
+    fr.sale_status <> 'NO SALES' 
+    OR fr.total_returns > 5
+ORDER BY 
+    fr.price_rank, fr.order_count DESC;

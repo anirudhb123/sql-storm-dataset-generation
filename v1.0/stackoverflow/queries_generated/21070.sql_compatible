@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.AcceptedAnswerId,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS RunningTotal
+    FROM
+        Posts p
+    JOIN
+        Users U ON p.OwnerUserId = U.Id
+    WHERE
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+RecentChanges AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Text,
+        PHType.Name AS ChangeType,
+        U.Reputation AS UserReputation
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes PHType ON ph.PostHistoryTypeId = PHType.Id
+    JOIN
+        Users U ON ph.UserId = U.Id
+    WHERE
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '3 months'
+),
+PostStatistics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.RunningTotal AS TotalViews,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END), 0) AS AcceptedCount,
+        COALESCE(AVG(UT.UserReputation), 0) AS AvgUserReputation
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN
+        Users UT ON UT.Id IN (SELECT DISTINCT ph.UserId FROM RecentChanges ph WHERE ph.PostId = rp.PostId)
+    GROUP BY
+        rp.PostId, rp.Title, rp.Score, rp.RunningTotal
+)
+SELECT
+    p.Title,
+    ps.TotalViews,
+    ps.Upvotes,
+    ps.Downvotes,
+    ps.AcceptedCount,
+    ps.AvgUserReputation,
+    CASE 
+        WHEN ps.Upvotes > ps.Downvotes THEN 'Positive'
+        WHEN ps.Upvotes < ps.Downvotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    CASE
+        WHEN ps.AvgUserReputation >= 1000 THEN 'Influential'
+        WHEN ps.AvgUserReputation BETWEEN 500 AND 999 THEN 'Moderate'
+        ELSE 'Newcomer'
+    END AS UserClassification
+FROM
+    PostStatistics ps
+INNER JOIN
+    Posts p ON ps.PostId = p.Id
+WHERE
+    ps.AcceptedCount > 0 
+    AND ps.TotalViews IS NOT NULL
+ORDER BY
+    ps.TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

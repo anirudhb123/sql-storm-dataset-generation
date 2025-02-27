@@ -1,0 +1,75 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title AS t
+    JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info AS ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name AS a ON ci.person_id = a.person_id
+    GROUP BY 
+        t.id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        t.kind AS company_type
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        company_type AS t ON mc.company_type_id = t.id
+    GROUP BY 
+        mc.movie_id, t.kind
+),
+keyword_stats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        ci.company_names,
+        ci.company_type,
+        COALESCE(ks.keyword_count, 0) AS keyword_count
+    FROM 
+        movie_details AS md
+    LEFT JOIN 
+        company_info AS ci ON md.title_id = ci.movie_id
+    LEFT JOIN 
+        keyword_stats AS ks ON md.title_id = ks.movie_id
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    CAST(cast_count AS INTEGER) AS total_cast,
+    company_names,
+    company_type,
+    keyword_count
+FROM 
+    final_benchmark
+WHERE 
+    (production_year >= 2000 AND production_year < 2023)
+    OR (company_type IS NOT NULL)
+ORDER BY 
+    production_year DESC, 
+    cast_count DESC;

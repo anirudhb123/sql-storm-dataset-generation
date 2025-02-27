@@ -1,0 +1,63 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM Comments C
+    GROUP BY C.PostId
+),
+TopContributors AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        COALESCE(PC.CommentCount, 0) AS TotalComments
+    FROM UserReputation UR
+    JOIN RecentPosts P ON UR.UserId = P.OwnerUserId
+    LEFT JOIN PostComments PC ON P.PostId = PC.PostId
+    GROUP BY UR.UserId, UR.DisplayName
+    HAVING SUM(P.ViewCount) > 1000 
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.TotalViews,
+    T.TotalScore,
+    T.TotalComments,
+    CASE 
+        WHEN T.TotalScore > 100 THEN 'High Scoring Contributor'
+        WHEN T.TotalScore BETWEEN 50 AND 100 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel,
+    COALESCE(ER.EditCount, 0) AS EditCount
+FROM TopContributors T
+LEFT JOIN (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS EditCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY PH.UserId
+) ER ON T.UserId = ER.UserId
+ORDER BY T.TotalViews DESC, T.TotalScore DESC
+LIMIT 10;

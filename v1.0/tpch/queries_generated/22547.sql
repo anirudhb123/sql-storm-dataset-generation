@@ -1,0 +1,79 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), 
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal < 0 THEN 'In Debt' 
+            ELSE 'In Credit' 
+        END AS account_status
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS total_line_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_orderkey) > 5
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE 
+            WHEN ps.ps_availqty < 100 THEN ps.ps_supplycost * 0.9 
+            ELSE ps.ps_supplycost 
+        END) AS adjusted_supply_cost,
+    AVG(CASE 
+        WHEN ls.l_returnflag = 'R' THEN l.l_extendedprice * 0.5 
+        ELSE l.l_extendedprice 
+    END) AS avg_lineitem_price,
+    STRING_AGG(DISTINCT p.p_name ORDER BY p.p_name) AS part_names
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedParts rp ON ps.ps_partkey = rp.p_partkey AND rp.rank_price <= 5
+LEFT JOIN 
+    FilteredSuppliers fs ON fs.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey = o.o_orderkey
+WHERE 
+    (n.n_name LIKE '%land%' OR r.r_name IS NULL)
+    AND (l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31' OR l.l_shipdate IS NULL)
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    SUM(CASE WHEN fs.account_status = 'In Credit' THEN 1 ELSE 0 END) > 5
+ORDER BY 
+    total_customers DESC, adjusted_supply_cost ASC

@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 0 AS lvl
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal * 0.9 AS s_acctbal, s.s_comment, lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.lvl < 5
+    AND s.s_comment IS NOT NULL
+),
+PartMetrics AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_suppkey) AS supply_count, 
+           SUM(ps.ps_supplycost) AS total_supply_cost, 
+           AVG(ps.ps_availqty) AS avg_avail_qty,
+           STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers_list
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber DESC) AS row_num
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+SELECT DISTINCT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(pm.avg_avail_qty, 0) AS avg_avail_qty,
+    s.s_name,
+    od.net_value,
+    CASE 
+        WHEN od.net_value > 10000 THEN 'High Value'
+        WHEN od.net_value BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS value_category,
+    CASE 
+        WHEN s.s_acctbal IS NOT NULL THEN s.s_acctbal * 2
+        ELSE 0 
+    END AS adjusted_acctbal
+FROM PartMetrics pm
+LEFT JOIN SupplierHierarchy s ON pm.supply_count > 3
+LEFT JOIN OrderDetails od ON od.net_value > 5000
+WHERE pm.total_supply_cost > (SELECT AVG(ps_supplycost) FROM partsupp)
+AND pm.p_name LIKE 'A%'
+ORDER BY value_category, p.p_partkey;

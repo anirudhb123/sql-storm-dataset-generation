@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SignificantCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.order_count,
+        co.total_spent
+    FROM 
+        customer c
+    INNER JOIN 
+        CustomerOrderStats co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_spent > 10000
+)
+SELECT 
+    sc.c_custkey,
+    sc.c_name,
+    ro.o_orderkey,
+    ro.o_totalprice,
+    ss.total_availability,
+    ss.avg_supply_cost,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+    COUNT(DISTINCT l.l_orderkey) AS total_lines,
+    COALESCE(MAX(l.l_shipdate), 'No shipments') AS last_shipment_date
+FROM 
+    SignificantCustomers sc
+JOIN 
+    RankedOrders ro ON sc.c_custkey = ro.o_custkey
+LEFT JOIN 
+    lineitem l ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierSummary ss ON l.l_suppkey = ss.s_suppkey
+WHERE 
+    sc.order_count > 5 
+    AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY 
+    sc.c_custkey, sc.c_name, ro.o_orderkey, ro.o_totalprice, ss.total_availability, ss.avg_supply_cost
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 2000
+ORDER BY 
+    sc.c_custkey, ro.o_orderdate DESC;

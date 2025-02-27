@@ -1,0 +1,47 @@
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT c.id AS company_id, c.name AS company_name, 0 AS level
+    FROM company_name c
+    WHERE c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT mc.company_id, cn.name AS company_name, ch.level + 1
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN CompanyHierarchy ch ON mc.movie_id IN (
+        SELECT movie_id
+        FROM movie_info mi
+        WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Production Company')
+    )
+)
+
+SELECT 
+    ak.name AS actor_name,
+    m.title AS movie_title,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') THEN CAST(mi.info AS FLOAT) END) AS average_rating,
+    CASE 
+        WHEN ch.level IS NULL THEN 'Independent'
+        ELSE ch.company_name
+    END AS production_company,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY COUNT(DISTINCT kw.keyword) DESC) AS rank
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN aka_title at ON ci.movie_id = at.movie_id
+JOIN title m ON at.movie_id = m.id
+LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info mi ON m.id = mi.movie_id
+LEFT JOIN CompanyHierarchy ch ON ch.company_id IN (
+    SELECT mc.company_id 
+    FROM movie_companies mc
+    WHERE mc.movie_id = m.id
+)
+WHERE 
+    ak.name IS NOT NULL 
+    AND m.production_year >= 2000 
+    AND (mi.note IS NULL OR mi.note NOT LIKE '%unreleased%')
+GROUP BY ak.name, m.title, ch.company_name, ch.level
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 0 
+ORDER BY rank, average_rating DESC;

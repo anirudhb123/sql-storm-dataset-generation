@@ -1,0 +1,39 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COUNT(ps.ps_partkey) AS part_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_within_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+StringProcessed AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', s.s_acctbal, ')'), ', ') AS suppliers_list 
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.rank_within_nation <= 5
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    region_name, 
+    nation_name, 
+    REPLACE(SUBSTRING(suppliers_list, 1, POSITION(',' IN suppliers_list || ',') - 1), '(', ' - ') AS top_suppliers
+FROM 
+    StringProcessed
+ORDER BY 
+    region_name, nation_name;

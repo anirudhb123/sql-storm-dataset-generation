@@ -1,0 +1,79 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        1 AS Level 
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.CreationDate, 
+        UR.Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputation UR ON U.Reputation > UR.Reputation
+    WHERE 
+        UR.Level < 5
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        T.TagName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(string_to_array(P.Tags, '><')) AS TagName ON TRUE
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, T.TagName
+),
+RecentActivePosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        RANK() OVER (ORDER BY P.LastActivityDate DESC) AS RecentRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UR.Level, 0) AS ReputationLevel,
+    PP.PostId,
+    PP.Title AS PostTitle,
+    PP.ViewCount,
+    PP.Score,
+    COALESCE(TP.TagName, 'No Tags') AS Tag,
+    COALESCE(TP.CommentCount, 0) AS CommentsCount,
+    RAP.RecentRank
+FROM 
+    Users U
+LEFT JOIN 
+    UserReputation UR ON U.Id = UR.Id
+LEFT JOIN 
+    TaggedPosts TP ON TP.PostId = U.Id
+FULL OUTER JOIN 
+    RecentActivePosts RAP ON TP.PostId = RAP.Id
+WHERE 
+    (U.Reputation IS NOT NULL OR UR.Level IS NOT NULL)
+    AND (TP.CommentCount > 0 OR RAP.RecentRank IS NOT NULL)
+ORDER BY 
+    U.Reputation DESC, 
+    RAP.RecentRank ASC;

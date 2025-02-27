@@ -1,0 +1,69 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ci.c_customer_id,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders
+    FROM 
+        ranked_sales rs
+    JOIN 
+        customer_info ci ON rs.ws_item_sk = ci.cd_income_band_sk
+    GROUP BY 
+        ci.c_customer_id
+),
+final_summary AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        CASE 
+            WHEN cs.total_sales IS NULL THEN 'No Sales'
+            WHEN cs.total_sales > 1000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        sales_summary cs
+)
+SELECT 
+    f.c_customer_id,
+    f.total_sales,
+    f.total_orders,
+    f.customer_value,
+    (SELECT COUNT(*) FROM promotion p WHERE p.p_discount_active = 'Y') AS active_promotions_count,
+    COALESCE((SELECT MAX(inv_quantity_on_hand) 
+              FROM inventory 
+              WHERE inv_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = f.c_customer_id)), 0) AS max_stock_on_hand
+FROM 
+    final_summary f
+ORDER BY 
+    f.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,54 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        MAX(P.Score) AS MaxScore,
+        MIN(P.Score) AS MinScore,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    US.UserId,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    US.TotalBadges,
+    US.TotalPosts,
+    US.TotalComments,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.TotalComments AS PostTotalComments,
+    PS.TotalVotes AS PostTotalVotes,
+    PS.MaxScore,
+    PS.MinScore,
+    PS.AvgScore
+FROM 
+    UserStats US
+JOIN 
+    PostStats PS ON PS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = US.UserId)
+ORDER BY 
+    US.UserId, PS.CreationDate DESC;

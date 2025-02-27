@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS RankScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        rp.Tags,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = rp.PostId AND c.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 day') AS RecentCommentsCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5 AND 
+        rp.Score > 0 AND 
+        rp.Tags IS NOT NULL
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Considering only close and reopen actions
+    GROUP BY 
+        ph.PostId
+),
+FinalPosts AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.Score,
+        fp.ViewCount,
+        fp.Tags,
+        fp.RecentCommentsCount,
+        ph.FirstCloseDate,
+        ph.CloseCount,
+        CASE 
+            WHEN ph.FirstCloseDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistoryData ph ON fp.PostId = ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.Tags,
+    fp.RecentCommentsCount,
+    fp.Status,
+    COALESCE(NULLIF(fp.CloseCount, 0), 'No closures') AS ClosureStats
+FROM 
+    FinalPosts fp
+WHERE 
+    fp.RecentCommentsCount > 0
+ORDER BY 
+    fp.Score DESC, 
+    fp.CreationDate DESC
+LIMIT 100 OFFSET 0;
+
+-- Explanation of constructs:
+-- CTEs: Used to break down the complexity into manageable parts (RankedPosts, FilteredPosts, PostHistoryData, FinalPosts).
+-- Window Function: Used ROW_NUMBER() to rank posts within their type based on score.
+-- String Aggregation: STRING_AGG to concatenate tags associated with posts.
+-- Subqueries: For generating recent comment counts within the FilteredPosts CTE.
+-- Outer Join: LEFT JOIN to include posts that might not have any related tags or histories.
+-- NULL Logic: COALESCE with NULLIF to provide flexible closure stats messaging.
+-- Complicated Predicates: Multiple conditions in the WHERE clauses for advanced filtering.
+-- Set Operators: Utilizing aggregation and `COUNT` with a conditional CASE statement.

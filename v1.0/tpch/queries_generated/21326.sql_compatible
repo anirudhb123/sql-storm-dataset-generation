@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS cost_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o1.o_totalprice) FROM orders o1)
+),
+SupplierShipments AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT l.l_orderkey) AS shipment_count,
+        SUM(CASE 
+                WHEN l.l_returnflag = 'R' THEN 1 
+                ELSE 0 
+            END) AS returned_items
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(hv.o_orderkey, 'No Orders') AS high_value_order,
+    ss.shipment_count AS supplier_shipments,
+    hs.total_supply_cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    HighValueOrders hv ON n.n_nationkey = hv.o_orderkey
+LEFT JOIN 
+    SupplierShipments ss ON ss.s_suppkey IN (SELECT s.s_suppkey FROM RankedSuppliers rs WHERE rs.cost_rank <= 5)
+LEFT JOIN 
+    RankedSuppliers hs ON n.n_nationkey = hs.s_nationkey
+WHERE 
+    NOT EXISTS (SELECT 1 FROM customer c WHERE c.c_nationkey = n.n_nationkey AND c.c_acctbal < 0)
+    AND (hs.total_supply_cost > 10000 OR hs.total_supply_cost IS NULL)
+ORDER BY 
+    r.r_name, hv.o_orderkey DESC;

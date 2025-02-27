@@ -1,0 +1,78 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    
+    UNION ALL
+    
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ParentId,
+        p2.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.Id
+)
+, VotingSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 10 THEN 1 END) AS Deletions,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title,
+    ph.CreationDate,
+    ph.Level,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN vs.Deletions > 0 THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN TagsArray IS NOT NULL THEN ARRAY_LENGTH(TagsArray, 1)
+        ELSE 0
+    END AS TagCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    VotingSummary vs ON ph.Id = vs.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            STRING_TO_ARRAY(Trim(Both ' ' FROM Tags), ',') AS TagsArray
+        FROM 
+            Posts
+        WHERE 
+            Id = ph.Id
+    ) AS tagInfo ON true
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(Trim(Both ' ' FROM STRING_TO_ARRAY(Posts.Tags, ','))) 
+WHERE 
+    ph.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    ph.Id, ph.Title, ph.CreationDate, ph.Level, vs.UpVotes, vs.DownVotes, vs.Deletions
+ORDER BY 
+    ph.CreationDate DESC, ph.Level ASC;
+
+This SQL query performs a recursive Common Table Expression (CTE) to build a post hierarchy of questions and their answers, summarizes the voting activity on those posts, and counts associated tags while handling various potential nulls and conditions. It features outer joins, correlated subqueries, window functions, set operations, and complicated predicate expressions.

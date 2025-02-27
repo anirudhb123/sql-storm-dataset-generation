@@ -1,0 +1,35 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+           SUM(CASE WHEN ps.ps_availqty > 100 THEN ps.ps_supplycost ELSE 0 END) AS high_supplycost,
+           AVG(ps.ps_supplycost) OVER (PARTITION BY s.s_suppkey) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+SalesData AS (
+    SELECT o.o_orderkey, c.c_custkey, c.c_mktsegment, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, c.c_custkey, c.c_mktsegment
+),
+TopSuppliers AS (
+    SELECT sd.s_suppkey, sd.s_name, sd.total_parts, sd.high_supplycost, sd.avg_supplycost,
+           ROW_NUMBER() OVER (ORDER BY sd.total_parts DESC, sd.high_supplycost DESC) AS rn
+    FROM SupplierDetails sd
+    WHERE sd.s_acctbal IS NOT NULL AND sd.total_parts > 0
+),
+FilteredSales AS (
+    SELECT sd.o_orderkey, sd.c_custkey, sd.c_mktsegment, sd.total_sales
+    FROM SalesData sd
+    WHERE sd.total_sales > (SELECT AVG(total_sales) FROM SalesData)
+)
+SELECT ts.s_name, ts.total_parts, ts.high_supplycost, ts.avg_supplycost, fs.c_mktsegment,
+       COALESCE(fs.total_sales, 0) AS total_sales
+FROM TopSuppliers ts
+FULL OUTER JOIN FilteredSales fs ON ts.s_suppkey = fs.c_custkey
+WHERE (ts.avg_supplycost IS NULL OR ts.avg_supplycost < 2000)
+  AND (fs.total_sales IS NOT NULL OR fs.total_sales <= (1000 + COALESCE(ts.avg_supplycost, 0)))
+ORDER BY ts.total_parts DESC NULLS LAST, fs.total_sales DESC;

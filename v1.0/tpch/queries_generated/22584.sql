@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate <= DATE '2023-01-01'
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost IS NOT NULL
+        AND ps.ps_availqty > 0
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returned_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-06-01' AND DATE '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sa.supplier_count, 0) AS supplier_count,
+    ro.o_orderstatus,
+    ro.o_totalprice
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAggregates sa ON p.p_partkey = sa.ps_partkey
+JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    FilteredLineItems fl ON fl.l_orderkey = ro.o_orderkey
+WHERE 
+    (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) OR p.p_container = 'SM CASE')
+    AND p.p_size IS NOT NULL
+ORDER BY 
+    p.p_name ASC,
+    ro.o_totalprice DESC;

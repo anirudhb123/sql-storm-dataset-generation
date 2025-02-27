@@ -1,0 +1,44 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title at ON c.movie_id = at.movie_id
+),
+movie_companies_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.actor_name,
+    rt.movie_title,
+    rt.production_year,
+    mci.company_names,
+    mci.company_count,
+    (SELECT AVG(production_year) 
+     FROM ranked_titles rt2 
+     WHERE rt2.year_rank <= 3) AS avg_recent_year
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    movie_companies_info mci ON rt.movie_title = mci.movie_id
+WHERE 
+    rt.year_rank = 1 
+    AND rt.production_year IS NOT NULL
+    AND (rt.production_year - (SELECT MIN(production_year) FROM ranked_titles rt3 WHERE rt3.year_rank <= 3)) > 5
+ORDER BY 
+    rt.production_year DESC;

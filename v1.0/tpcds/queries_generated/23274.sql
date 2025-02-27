@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+    HAVING SUM(ws_net_profit) > 0
+),
+recent_demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS gender_rank
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+address_info AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        CASE 
+            WHEN ca_city IS NULL THEN 'Unknown City'
+            ELSE ca_city 
+        END AS city_name
+    FROM customer_address
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_gender, 'Not Specified') AS gender,
+        COALESCE(rd.gender_rank, 0) AS gender_rank,
+        SUM(ss.ss_net_profit) AS total_store_sales,
+        SUM(ws.ws_net_profit) AS total_web_sales
+    FROM customer c
+    LEFT JOIN recent_demographics rd ON c.c_current_cdemo_sk = rd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, rd.gender_rank
+),
+final_report AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.gender,
+        (ci.total_store_sales + ci.total_web_sales) AS total_sales,
+        CASE 
+            WHEN ci.gender_rank <= 5 THEN 'High Value'
+            ELSE 'Regular Customer'
+        END AS customer_segment,
+        a.full_address,
+        a.city_name,
+        ss.total_net_profit AS total_net_profit
+    FROM customer_info ci
+    LEFT JOIN address_info a ON ci.c_customer_sk = a.ca_address_sk
+    LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_bill_customer_sk
+    WHERE (ci.total_store_sales IS NOT NULL OR ci.total_web_sales IS NOT NULL)
+      AND a.city_name IS NOT NULL
+)
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.gender,
+    f.total_sales,
+    f.customer_segment,
+    f.full_address,
+    f.city_name,
+    COALESCE(f.total_net_profit, 0) AS total_net_profit
+FROM final_report f
+WHERE f.total_sales > 
+    (SELECT AVG(total_sales) FROM final_report)
+ORDER BY f.total_sales DESC
+LIMIT 100 OFFSET 10;

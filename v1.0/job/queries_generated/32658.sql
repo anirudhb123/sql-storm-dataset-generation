@@ -1,0 +1,87 @@
+WITH RECURSIVE ActorMovies AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS rn
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.id
+    WHERE
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT
+        person_id,
+        actor_name,
+        COUNT(*) AS movie_count
+    FROM
+        ActorMovies
+    WHERE
+        rn <= 5  -- We only want the top 5 movies for each actor
+    GROUP BY
+        person_id, actor_name
+    ORDER BY
+        movie_count DESC
+    LIMIT 10
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+MoviesWithCompanies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT cd.company_name || ' (' || cd.company_type || ')') AS companies
+    FROM
+        aka_title t
+    LEFT JOIN
+        CompanyDetails cd ON t.id = cd.movie_id
+    WHERE
+        t.production_year > 2000
+    GROUP BY
+        t.id, t.title, t.production_year
+)
+SELECT
+    ta.actor_name,
+    ta.movie_count,
+    mwc.title,
+    mwc.production_year,
+    COALESCE(mwc.companies, ARRAY['No companies associated']) AS companies
+FROM
+    TopActors ta
+JOIN
+    ActorMovies am ON ta.person_id = am.person_id
+LEFT JOIN
+    MoviesWithCompanies mwc ON am.movie_title = mwc.title AND am.production_year = mwc.production_year
+WHERE
+    ta.movie_count > 3
+ORDER BY
+    ta.movie_count DESC, mwc.production_year DESC
+This SQL query performs several tasks:
+
+1. **Recursive CTE (ActorMovies)**: This CTE retrieves actors along with their recent movies and ranks them by production year.
+
+2. **TopActors CTE**: Filters out the top 10 actors based on their number of movies for the last 5 movies they worked in.
+
+3. **CompanyDetails CTE**: Gathers company details related to movies from the movie_companies table, along with the company's name and type.
+
+4. **MoviesWithCompanies CTE**: Aggregates companies for each movie with the title and production year, specifically focusing on movies produced after the year 2000.
+
+5. **Final Selection**: Joins all the CTEs to get a comprehensive view of the top actors, their movie counts, the titles of the movies they featured in, their production years, and the companies associated with those movies. It also handles NULL logic using `COALESCE` to provide a fallback message when no companies are associated.
+
+6. **Ordering**: The final results are ordered by the number of movies and the production year.

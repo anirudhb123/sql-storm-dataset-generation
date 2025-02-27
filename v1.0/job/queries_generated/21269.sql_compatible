@@ -1,0 +1,90 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+MovieDetails AS (
+    SELECT 
+        r.movie_id, 
+        r.title, 
+        r.production_year, 
+        c.name AS company_name,
+        k.keyword AS movie_keyword,
+        COALESCE(mi.info, 'No Info Available') AS movie_info,
+        COUNT(ci.id) OVER (PARTITION BY r.movie_id) AS cast_count,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY r.movie_id) AS unique_cast_count
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = r.movie_id
+    LEFT JOIN 
+        company_name c ON c.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = r.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = r.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = r.movie_id
+), 
+FilteredMovies AS (
+    SELECT 
+        md.movie_id, 
+        md.title, 
+        md.production_year, 
+        md.company_name,
+        md.movie_keyword,
+        md.movie_info,
+        md.cast_count,
+        md.unique_cast_count,
+        CASE 
+            WHEN md.cast_count > 0 THEN 'Has Cast'
+            ELSE 'No Cast'
+        END AS cast_status
+    FROM 
+        MovieDetails md
+    WHERE 
+        (md.unique_cast_count > 10 OR md.movie_keyword IS NOT NULL) 
+        AND md.production_year >= 2000
+), 
+FinalResults AS (
+    SELECT 
+        DISTINCT f.movie_id, 
+        f.title, 
+        f.production_year, 
+        f.company_name,
+        f.movie_keyword,
+        f.movie_info,
+        f.cast_count,
+        f.unique_cast_count
+    FROM 
+        FilteredMovies f
+    WHERE 
+        NOT EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = f.movie_id AND mi.info_type_id IS NULL)
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.company_name || ' - ' || COALESCE(fr.movie_keyword, 'N/A') AS company_and_keyword,
+    fr.movie_info,
+    fr.cast_count,
+    fr.unique_cast_count,
+    CASE 
+        WHEN fr.cast_count > 0 THEN 'This movie has a cast member and is a notable movie!'
+        ELSE 'This movie has no cast members, interesting!'
+    END AS movie_narrative
+FROM 
+    FinalResults fr
+WHERE
+    NOT (fr.movie_info LIKE '%unrated%' OR fr.movie_info LIKE '%tbd%')
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC;

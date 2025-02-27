@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+CloseVoteCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVotes
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+),
+ScoreWithCloseVotes AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(c.CloseVotes, 0) AS CloseVotes
+    FROM RankedPosts p
+    LEFT JOIN CloseVoteCounts c ON p.PostId = c.PostId
+),
+UserReport AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    sr.PostId, 
+    sr.Title, 
+    sr.ViewCount, 
+    sr.Score,
+    sr.CloseVotes, 
+    ur.UserId, 
+    ur.DisplayName, 
+    ur.BadgeCount, 
+    ur.UpVotes, 
+    ur.DownVotes
+FROM ScoreWithCloseVotes sr
+JOIN UserReport ur ON sr.PostId = (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = ur.UserId
+    ORDER BY p.Score DESC LIMIT 1
+)
+WHERE sr.Rank <= 5
+  AND sr.CloseVotes > 0
+  AND ur.BadgeCount > 0
+  AND ur.LastAccessDate IS NOT NULL
+  AND ur.Reputation BETWEEN 100 AND 1000
+ORDER BY sr.Score DESC, sr.ViewCount DESC;

@@ -1,0 +1,93 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 3
+),
+ClosedPostStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    r.Level,
+    COALESCE(c.CloseCount, 0) AS PostCloseCount,
+    COALESCE(TOP_USERS.Upvotes, 0) AS UserUpvotes,
+    COALESCE(TOP_USERS.Downvotes, 0) AS UserDownvotes,
+    COALESCE(TOP_USERS.PostCount, 0) AS UserPostCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer'
+        ELSE 'Unanswered'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPostStats c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    STRING_SPLIT(p.Tags, ',') AS TagSplit ON TagSplit.Value IS NOT NULL
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(TagSplit.Value)
+LEFT JOIN 
+    TopUsers TOP_USERS ON TOP_USERS.UserId = p.OwnerUserId
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.DisplayName, r.Level, c.CloseCount, TOP_USERS.Upvotes, TOP_USERS.Downvotes, TOP_USERS.PostCount
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

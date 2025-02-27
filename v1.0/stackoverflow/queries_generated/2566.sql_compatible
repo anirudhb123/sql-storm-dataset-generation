@@ -1,0 +1,55 @@
+
+WITH UserVoteStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS TotalCloseVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(A.AverageScore, 0) AS AverageScore,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM P.CreationDate) ORDER BY P.ViewCount DESC) AS Rank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT
+            PostId,
+            AVG(Score) AS AverageScore
+        FROM Posts
+        GROUP BY PostId
+    ) A ON P.Id = A.PostId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) C ON P.Id = C.PostId
+)
+SELECT
+    U.DisplayName,
+    P.Title,
+    P.ViewCount,
+    P.AverageScore,
+    P.CommentCount,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    CASE WHEN U.TotalVotes = 0 THEN 'No Votes' ELSE 'Has Votes' END AS VoteStatus,
+    CASE WHEN P.Rank <= 3 THEN 'Top Post' ELSE 'Regular Post' END AS PostStatus
+FROM UserVoteStats U
+JOIN PostStats P ON U.UserId = P.PostId
+WHERE P.ViewCount > 100
+AND P.CreationDate BETWEEN TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' AND TIMESTAMP '2024-10-01 12:34:56'
+ORDER BY U.TotalVotes DESC, P.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())  -- Posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.OwnerUserId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        AVG(COALESCE(p.Score, 0)) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Filter for Close events
+    GROUP BY 
+        ph.PostId
+),
+
+FinalResults AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        us.QuestionsAsked,
+        us.AnswersGiven,
+        us.AvgPostScore,
+        cr.CloseReasonNames
+    FROM 
+        RankedPosts p
+    JOIN 
+        UserStats us ON p.OwnerUserId = us.UserId
+    LEFT JOIN 
+        CloseReasons cr ON p.PostId = cr.PostId
+    WHERE 
+        p.RankByScore <= 5  -- Top 5 posts per user
+)
+
+SELECT *
+FROM FinalResults OF TABLE
+WHERE 
+    (CloseReasonNames IS NOT NULL OR AvgPostScore > 10) -- with Close reasons or high average score
+ORDER BY 
+    Score DESC;

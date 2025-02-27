@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+), 
+CompanyMovieCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT m.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        movie_info mi ON mc.movie_id = mi.movie_id
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        LOWER(it.info) LIKE '%production%'
+    GROUP BY 
+        mc.movie_id
+), 
+KeywordAggregation AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(cmc.company_count, 0) AS company_count,
+    COALESCE(ka.keywords, 'No keywords') AS keywords,
+    CASE 
+        WHEN rm.cast_count > 10 THEN 'Popular'
+        WHEN rm.cast_count BETWEEN 5 AND 10 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS popularity
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyMovieCount cmc ON rm.id = cmc.movie_id
+LEFT JOIN 
+    KeywordAggregation ka ON rm.id = ka.movie_id
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

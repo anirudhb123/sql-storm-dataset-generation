@@ -1,0 +1,57 @@
+WITH RecursivePostLinks AS (
+    SELECT 
+        p.Id AS PostId,
+        pl.RelatedPostId,
+        1 AS LinkLevel
+    FROM 
+        PostLinks pl
+    JOIN 
+        Posts p ON pl.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+
+    UNION ALL
+
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        LinkLevel + 1
+    FROM 
+        PostLinks pl
+    JOIN 
+        RecursivePostLinks rpl ON pl.PostId = rpl.RelatedPostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    SUM(CASE WHEN pt.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+    SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+    SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS TagsUsed,
+    AVG(pl.LinkLevel) AS AvgLinkDepth
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    RecursivePostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS tag ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = tag
+WHERE 
+    u.Reputation > 1000 
+    AND p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    Reputation DESC
+LIMIT 10;

@@ -1,0 +1,97 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgePoints,
+        (SELECT AVG(ViewCount) FROM Posts) AS AverageViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        p.CreationDate,
+        COALESCE(ets.TagCount, 0) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(DISTINCT TagName) AS TagCount
+        FROM 
+            Posts
+        CROSS JOIN LATERAL UNNEST(string_to_array(Tags, '<>')) AS TagName
+        GROUP BY 
+            PostId
+    ) ets ON p.Id = ets.PostId
+),
+RankedPosts AS (
+    SELECT 
+        pe.PostId,
+        pe.Title,
+        pe.UpVotes,
+        pe.DownVotes,
+        pe.CommentCount,
+        pe.ViewCount,
+        RANK() OVER (ORDER BY (pe.UpVotes - pe.DownVotes) DESC) AS EngagementRank
+    FROM 
+        PostEngagement pe
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalPosts,
+    us.Questions,
+    us.Answers,
+    us.TotalBadgePoints,
+    rp.PostId,
+    rp.Title,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    rp.ViewCount,
+    rp.EngagementRank
+FROM 
+    UserStatistics us
+JOIN 
+    RankedPosts rp ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+WHERE 
+    rp.EngagementRank <= 10
+ORDER BY 
+    us.TotalBadgePoints DESC, rp.EngagementRank;

@@ -1,0 +1,88 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation >= 100
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserActivity
+),
+MostActiveTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        MostActiveTags
+)
+SELECT 
+    t.DisplayName AS User,
+    t.Reputation,
+    t.PostCount,
+    t.CommentCount,
+    t.UpVotes,
+    t.DownVotes,
+    t.GoldBadges,
+    t.SilverBadges,
+    t.BronzeBadges,
+    tp.TagName,
+    tp.PostCount AS TagPostCount,
+    tp.CommentCount AS TagCommentCount,
+    tp.Rank AS TagRank
+FROM 
+    TopUsers t
+LEFT JOIN 
+    TopTags tp ON tp.Rank <= 10
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.Rank, tp.TagRank;

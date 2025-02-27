@@ -1,0 +1,89 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorUserId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerName,
+    COALESCE(ps.Upvotes, 0) AS Upvotes,
+    COALESCE(ps.Downvotes, 0) AS Downvotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    pa.LastEditDate,
+    COUNT(c.Id) AS CommentCount,
+    ROW_NUMBER() OVER (PARTITION BY p.PostId ORDER BY pa.LastEditDate DESC) AS LastEditRank,
+    CASE 
+        WHEN COUNT(c.Id) > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    VoteSummary ps ON p.PostId = ps.PostId
+LEFT JOIN 
+    UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostActivity pa ON p.PostId = pa.PostId
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+GROUP BY 
+    p.PostId, p.Title, p.CreationDate, u.DisplayName, ps.Upvotes, ps.Downvotes, ub.BadgeCount, pa.LastEditDate
+ORDER BY 
+    p.CreationDate DESC;

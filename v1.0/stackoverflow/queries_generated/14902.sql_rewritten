@@ -1,0 +1,47 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.UserId,
+    U.BadgeCount,
+    U.TotalBounty,
+    U.VoteCount,
+    P.PostId,
+    P.CommentCount,
+    P.VoteCount AS PostVoteCount,
+    P.PositiveScoreCount
+FROM 
+    UserStats U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.TotalBounty DESC, 
+    P.Score DESC
+LIMIT 100;

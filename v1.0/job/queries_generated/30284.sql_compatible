@@ -1,0 +1,72 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        COUNT(ci.person_id) AS actor_count,
+        AVG(pi.info_id) AS average_info_type 
+    FROM 
+        MovieHierarchy m
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = m.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.movie_id
+    LEFT JOIN 
+        person_info pi ON pi.person_id = ci.person_id
+    WHERE 
+        ci.note IS NULL OR ci.note <> 'star'
+    GROUP BY 
+        m.title
+),
+RankedMovies AS (
+    SELECT 
+        tm.title,
+        tm.actor_count,
+        tm.average_info_type,
+        RANK() OVER (ORDER BY tm.actor_count DESC, tm.average_info_type ASC) AS rank
+    FROM 
+        TopMovies tm
+)
+SELECT 
+    rm.title,
+    rm.actor_count,
+    rm.average_info_type,
+    CASE 
+        WHEN rm.actor_count > 10 THEN 'Popular'
+        WHEN rm.actor_count BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Less Popular'
+    END AS popularity_category
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.actor_count > 0 AND
+    rm.average_info_type IS NOT NULL
+ORDER BY 
+    rm.rank
+LIMIT 10;

@@ -1,0 +1,58 @@
+
+WITH MovieStats AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN pi.info IS NOT NULL THEN 1 ELSE 0 END) AS has_info_type,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        aka_title a
+    LEFT JOIN
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN
+        person_info pi ON ci.person_id = pi.person_id
+    LEFT JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        a.production_year BETWEEN 2000 AND 2020
+    GROUP BY
+        a.title, a.production_year
+),
+RankedMovies AS (
+    SELECT
+        title,
+        production_year,
+        cast_count,
+        has_info_type,
+        keywords,
+        RANK() OVER (ORDER BY cast_count DESC, production_year ASC) AS rank
+    FROM
+        MovieStats
+),
+TopMovies AS (
+    SELECT
+        title,
+        production_year,
+        cast_count,
+        has_info_type,
+        keywords
+    FROM
+        RankedMovies
+    WHERE
+        rank <= 10
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    COALESCE(NULLIF(tm.has_info_type, 0), 'No Info') AS info_status,
+    tm.keywords
+FROM
+    TopMovies tm
+ORDER BY
+    tm.production_year DESC;

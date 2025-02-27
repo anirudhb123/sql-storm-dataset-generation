@@ -1,0 +1,43 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM title m
+    WHERE m.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_movie_id
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(mr.cast_members) AS average_cast_members,
+    MAX(mh.level) AS max_hierarchy_level
+FROM MovieHierarchy mh
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_members
+    FROM cast_info ci
+    GROUP BY movie_id
+) mr ON mh.movie_id = mr.movie_id
+JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+    AND mk.keyword IS NOT NULL
+GROUP BY mk.keyword
+ORDER BY total_movies DESC, max_hierarchy_level DESC
+LIMIT 10;

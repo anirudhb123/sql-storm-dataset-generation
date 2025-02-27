@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        ts.s_suppkey,
+        ts.s_name,
+        n.n_name,
+        ts.total_supply_cost
+    FROM 
+        RankedSuppliers ts
+    JOIN 
+        nation n ON ts.n_nationkey = n.n_nationkey
+    WHERE 
+        ts.supplier_rank <= 3
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        c.c_mktsegment
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+)
+SELECT 
+    ts.s_name,
+    ts.n_name,
+    os.o_orderkey,
+    os.total_revenue,
+    os.c_mktsegment
+FROM 
+    TopSuppliers ts
+JOIN 
+    OrderSummary os ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'BrandX') LIMIT 1)
+WHERE 
+    os.total_revenue > 10000
+ORDER BY 
+    ts.n_name, os.total_revenue DESC;

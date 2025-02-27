@@ -1,0 +1,75 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+
+), TagSummary AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS PostCount,
+        STRING_AGG(p.Title, ', ') AS PostTitles
+    FROM 
+        RecursiveTagCounts r
+    JOIN 
+        Posts p ON r.PostId = p.Id
+    GROUP BY 
+        Tag
+    HAVING 
+        COUNT(*) > 2  -- Only consider tags used in more than 2 questions
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  -- Filter to questions
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), CombinedResults AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        ts.Tag,
+        ts.PostCount,
+        ts.PostTitles
+    FROM 
+        UserReputation us
+    JOIN 
+        TagSummary ts ON us.QuestionCount > 2
+)
+
+SELECT 
+    c.UserId,
+    c.DisplayName,
+    c.Reputation,
+    c.Tag,
+    c.PostCount,
+    c.PostTitles,
+    (SELECT 
+         AVG(v.BountyAmount) 
+     FROM 
+         Votes v 
+     JOIN 
+         Posts post ON v.PostId = post.Id 
+     WHERE 
+         post.OwnerUserId = c.UserId) AS AvgBountyAmount,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Badges b 
+     WHERE 
+         b.UserId = c.UserId AND b.Class = 1) AS GoldBadges
+FROM 
+    CombinedResults c
+ORDER BY 
+    c.Reputation DESC, c.PostCount DESC;

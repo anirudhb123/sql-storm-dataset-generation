@@ -1,0 +1,69 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+customer_discounts AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE WHEN c.c_acctbal IS NULL THEN 0 ELSE c.c_acctbal * 0.1 END AS discount_amount
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+)
+SELECT 
+    n.n_name,
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    COALESCE(AVG(l.l_quantity), 0) AS avg_quantity,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    MAX(CASE WHEN lo.o_orderstatus = 'F' THEN lo.o_totalprice ELSE NULL END) AS max_filled_order_price,
+    STRING_AGG(DISTINCT p.p_comment, '; ') AS part_comments
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey 
+JOIN 
+    part p ON p.p_partkey = l.l_partkey
+JOIN 
+    supplier_summary ss ON ps.ps_suppkey = ss.s_suppkey
+LEFT JOIN 
+    ranked_orders lo ON lo.o_orderkey = l.l_orderkey
+JOIN 
+    customer_discounts cd ON cd.c_custkey = lo.o_custkey
+JOIN 
+    nation n ON n.n_nationkey = cd.c_nationkey
+WHERE 
+    l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    AND (l.l_discount IS NOT NULL AND l.l_discount < 0.1 OR l.l_returnflag = 'R')
+GROUP BY 
+    n.n_name, p.p_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(total_available) FROM supplier_summary
+    )
+ORDER BY 
+    total_revenue DESC;

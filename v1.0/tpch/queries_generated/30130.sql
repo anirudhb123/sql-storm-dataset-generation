@@ -1,0 +1,44 @@
+WITH RECURSIVE CTE_SupplierCosts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CTE_OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CTE_RegionSales AS (
+    SELECT n.n_regionkey, r.r_name, SUM(os.total_price) AS region_sales
+    FROM CTE_OrderStats os
+    JOIN customer c ON os.o_orderkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_regionkey, r.r_name
+),
+CTE_SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sc.total_cost, sd.part_count,
+           RANK() OVER (ORDER BY sc.total_cost DESC) AS rank_cost,
+           RANK() OVER (ORDER BY sd.part_count DESC) AS rank_part
+    FROM CTE_SupplierCosts sc
+    JOIN CTE_SupplierDetails sd ON sc.s_suppkey = sd.s_suppkey
+)
+SELECT r.r_name, rs.total_price, COALESCE(SUM(rs.total_price) OVER (PARTITION BY r.r_name), 0) AS total_region_sales,
+       COUNT(DISTINCT sub.s_suppkey) AS number_of_suppliers,
+       STRING_AGG(DISTINCT sub.s_name, ', ') AS supplier_names
+FROM CTE_RegionSales rs
+LEFT JOIN RankedSuppliers sub ON rs.n_regionkey = sub.s_suppkey
+LEFT JOIN region r ON rs.n_regionkey = r.r_regionkey
+WHERE rs.region_sales IS NOT NULL
+GROUP BY r.r_name, rs.total_price
+HAVING COUNT(DISTINCT sub.s_suppkey) > 0
+ORDER BY total_region_sales DESC;

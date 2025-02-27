@@ -1,0 +1,39 @@
+
+WITH RegionStats AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+),
+SalesStats AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    rs.region_name,
+    (SELECT COUNT(DISTINCT n.n_nationkey) FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = rs.region_name)) AS nation_count,
+    (SELECT SUM(s.s_acctbal) FROM supplier s JOIN nation n ON n.n_nationkey = s.s_nationkey JOIN region r ON r.r_regionkey = n.n_regionkey WHERE r.r_name = rs.region_name) AS total_supplier_balance,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.order_count, 0) AS order_count
+FROM 
+    RegionStats rs
+LEFT JOIN 
+    SalesStats ss ON ss.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = rs.region_name))
+ORDER BY 
+    rs.region_name;

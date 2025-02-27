@@ -1,0 +1,79 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ParentId, 
+        p.CreationDate, 
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStatistics AS (
+    SELECT
+        p.Id,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RecentActivityLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ClosedDate
+),
+
+RankedPosts AS (
+    SELECT 
+        ps.Id,
+        ps.Title, 
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.PostStatus,
+        psh.Level AS HierarchyLevel,
+        RANK() OVER (ORDER BY ps.UpVoteCount DESC, ps.CommentCount DESC) AS PostRank
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        RecursivePostHierarchy psh ON ps.Id = psh.Id
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.PostStatus,
+    rp.HierarchyLevel,
+    rp.PostRank,
+    (CASE 
+        WHEN rp.PostStatus = 'Closed' THEN 'This post is closed.'
+        ELSE 'This post is open for discussion.'
+    END) AS StatusMessage
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    rp.PostRank;

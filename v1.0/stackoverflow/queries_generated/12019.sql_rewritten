@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBountyAmount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        p.CommentCount,
+        p.FavoriteCount,
+       ARRAY_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount, p.Score, p.CommentCount, p.FavoriteCount
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalBountyAmount,
+    us.QuestionCount,
+    us.AnswerCount,
+    us.TotalViewCount,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.LastActivityDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.Tags
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY 
+    us.TotalViewCount DESC, us.BadgeCount DESC;

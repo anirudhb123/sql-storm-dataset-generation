@@ -1,0 +1,69 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_name,
+        c.c_acctbal,
+        c.c_mktsegment,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, c.c_name, c.c_acctbal, c.c_mktsegment
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_totalprice,
+        sd.nation_name,
+        sd.region_name,
+        r.total_quantity,
+        CASE 
+            WHEN r.o_totalprice > 1000 THEN 'High'
+            WHEN r.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS order_value_category
+    FROM 
+        RecentOrders r
+    LEFT JOIN 
+        SupplierDetails sd ON r.o_custkey = sd.s_suppkey
+)
+SELECT 
+    h.order_value_category,
+    h.nation_name,
+    h.region_name,
+    AVG(h.total_quantity) AS avg_quantity,
+    COUNT(h.o_orderkey) AS order_count
+FROM 
+    HighValueOrders h
+GROUP BY 
+    h.order_value_category, h.nation_name, h.region_name
+HAVING 
+    COUNT(h.o_orderkey) > 5
+ORDER BY 
+    nation_name, region_name, order_value_category;

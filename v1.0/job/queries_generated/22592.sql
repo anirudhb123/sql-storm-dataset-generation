@@ -1,0 +1,69 @@
+WITH RecursiveMovieStats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(mi.info_length) AS avg_info_length
+    FROM title t
+    LEFT JOIN (
+        SELECT 
+            mi.movie_id,
+            LENGTH(mi.info) AS info_length
+        FROM movie_info mi
+        WHERE mi.note IS NULL AND mi.info IS NOT NULL
+    ) AS mi ON t.id = mi.movie_id
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    GROUP BY t.id
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        cast_count,
+        avg_info_length,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, avg_info_length DESC) AS rn
+    FROM RecursiveMovieStats
+),
+InterestingTitles AS (
+    SELECT 
+        DISTINCT tt.title,
+        tt.production_year,
+        tt.cast_count,
+        CASE 
+            WHEN tt.avg_info_length > 100 THEN 'Long info'
+            WHEN tt.avg_info_length IS NULL THEN 'No info available'
+            ELSE 'Regular info'
+        END AS info_description
+    FROM TopMovies tt
+    WHERE tt.rn <= 10
+),
+AkaNames AS (
+    SELECT 
+        ak.name,
+        tt.title,
+        tt.production_year,
+        tt.cast_count,
+        tt.info_description
+    FROM aka_name ak
+    JOIN InterestingTitles tt ON ak.person_id = (
+        SELECT ci.person_id 
+        FROM cast_info ci 
+        WHERE ci.movie_id = tt.title_id 
+        ORDER BY ci.nr_order LIMIT 1
+    )
+)
+SELECT 
+    an.name,
+    an.title,
+    an.production_year,
+    an.cast_count,
+    an.info_description,
+    COALESCE(cn.name, 'No Company') AS company_name
+FROM AkaNames an
+LEFT JOIN movie_companies mc ON an.title_id = mc.movie_id
+LEFT JOIN company_name cn ON mc.company_id = cn.id
+WHERE an.cast_count IS NOT NULL 
+  AND (an.info_description LIKE '%info%' OR an.info_description IS NULL)
+ORDER BY an.production_year DESC, an.cast_count DESC;

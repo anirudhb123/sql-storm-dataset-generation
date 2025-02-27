@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title, 
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(cc.role_id) AS number_of_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    COUNT(DISTINCT mi.info) FILTER (WHERE it.info = 'rating') AS rating_count,
+    AVG(CASE WHEN it.info = 'rating' THEN CAST(mi.info AS FLOAT) ELSE NULL END) AS average_rating
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year
+ORDER BY 
+    average_rating DESC NULLS LAST,
+    number_of_roles DESC
+LIMIT 10;

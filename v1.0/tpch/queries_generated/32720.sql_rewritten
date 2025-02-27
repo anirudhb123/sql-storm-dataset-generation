@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_cost > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp ps)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_discount > 0.1 AND l.l_shipdate < cast('1998-10-01' as date)
+)
+SELECT DISTINCT
+    c.c_name,
+    s.s_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(sl.level) AS supplier_level
+FROM CustomerOrders co
+JOIN Customer c ON co.c_custkey = c.c_custkey
+JOIN TopSuppliers s ON c.c_nationkey = s.s_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN SupplierHierarchy sl ON s.s_suppkey = sl.s_suppkey
+WHERE c.c_acctbal IS NOT NULL AND (s.s_name IS NOT NULL OR s.s_name <> '')
+GROUP BY c.c_name, s.s_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 5000
+ORDER BY revenue DESC;

@@ -1,0 +1,84 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ws.ws_ext_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rank_sales,
+        C.c_first_name,
+        C.c_last_name,
+        C.c_email_address,
+        CD.cd_gender,
+        COALESCE(SM.sm_type, 'UNKNOWN') AS shipping_method
+    FROM
+        web_sales AS ws
+    JOIN customer AS C ON ws.ws_bill_customer_sk = C.c_customer_sk
+    LEFT JOIN customer_demographics AS CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    LEFT JOIN ship_mode AS SM ON ws.ws_ship_mode_sk = SM.sm_ship_mode_sk
+    WHERE
+        ws.ws_sold_date_sk >= (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2001 
+              AND d_month_seq IN (2,3) 
+        )
+        AND C.c_preferred_cust_flag = 'Y'
+),
+RecentSales AS (
+    SELECT
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        AVG(sd.ws_net_paid) AS avg_net_paid,
+        SUM(sd.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT sd.c_email_address) AS unique_customers
+    FROM
+        SalesData AS sd
+    WHERE
+        sd.rank_sales = 1 
+    GROUP BY
+        sd.ws_item_sk
+),
+TotalSales AS (
+    SELECT
+        r.ws_item_sk,
+        r.total_quantity,
+        r.avg_net_paid,
+        r.total_sales,
+        (SELECT COUNT(*) FROM web_sales WHERE ws_item_sk = r.ws_item_sk) AS total_transactions
+    FROM 
+        RecentSales AS r
+)
+SELECT
+    T.ws_item_sk,
+    T.total_quantity,
+    T.avg_net_paid,
+    T.total_sales,
+    T.total_transactions,
+    CASE 
+        WHEN T.total_sales IS NULL THEN 'NO SALES'
+        WHEN T.total_sales > 10000 THEN 'HIGH VALUE'
+        ELSE 'OTHER'
+    END AS sales_category
+FROM
+    TotalSales AS T
+WHERE
+    T.total_quantity > 50
+
+UNION ALL
+
+SELECT 
+    COALESCE(ws.ws_item_sk, 'N/A') AS ws_item_sk,
+    0 AS total_quantity,
+    0 AS avg_net_paid,
+    0 AS total_sales,
+    COUNT(*) AS total_transactions
+FROM 
+    web_sales AS ws
+WHERE 
+    ws.ws_item_sk NOT IN (SELECT ws_item_sk FROM TotalSales)
+GROUP BY 
+    ws.ws_item_sk
+ORDER BY 
+    total_sales DESC, total_quantity ASC;

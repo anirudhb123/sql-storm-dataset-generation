@@ -1,0 +1,51 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        p.Title,
+        p.Tags,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Only focus on close/reopen actions
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AverageReputation,
+    rp.CreationDate AS RecentActionDate,
+    rp.UserDisplayName AS RecentActionUser,
+    rp.Comment AS RecentComment,
+    rp.Title AS RecentPostTitle
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    RecentPostHistory rp ON ts.TagName = ANY (STRING_TO_ARRAY(rp.Tags, ','))
+WHERE 
+    rp.rn = 1 -- Get the most recent action for each post
+ORDER BY 
+    ts.PostCount DESC, 
+    ts.TagName;

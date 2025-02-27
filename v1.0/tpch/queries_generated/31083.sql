@@ -1,0 +1,77 @@
+WITH RECURSIVE SupplyCosts AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost, 
+        1 AS depth 
+    FROM 
+        partsupp 
+    WHERE 
+        ps_availqty > 0
+    UNION ALL
+    SELECT 
+        s.ps_partkey, 
+        s.ps_suppkey, 
+        s.ps_availqty - 10, 
+        s.ps_supplycost * 0.95, 
+        depth + 1 
+    FROM 
+        partsupp s
+    INNER JOIN 
+        SupplyCosts sc ON s.ps_partkey = sc.ps_partkey 
+    WHERE 
+        s.ps_availqty > 10 
+        AND depth < 5
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total 
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE 
+        l.l_shipdate >= '2023-01-01' 
+        AND l.l_shipdate < '2023-12-31' 
+    GROUP BY 
+        o.o_orderkey 
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts 
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name 
+    HAVING 
+        supplied_parts > 5
+)
+SELECT 
+    r.r_name AS region, 
+    n.n_name AS nation, 
+    sd.s_name AS supplier_name, 
+    SUM(sc.ps_supplycost * (SELECT COUNT(*) FROM OrderTotals)) AS total_supply_cost,
+    AVG(ot.total) OVER (PARTITION BY r.r_name) AS avg_order_total 
+FROM 
+    region r 
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey 
+JOIN 
+    supplier_details sd ON sd.s_suppkey IN (SELECT ps_suppkey FROM partsupp) 
+LEFT JOIN 
+    SupplyCosts sc ON sc.ps_suppkey = sd.s_suppkey 
+LEFT JOIN 
+    OrderTotals ot ON ot.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_returnflag = 'R') 
+WHERE 
+    r.r_name IS NOT NULL 
+GROUP BY 
+    r.r_name, n.n_name, sd.s_name 
+ORDER BY 
+    total_supply_cost DESC 
+LIMIT 10;

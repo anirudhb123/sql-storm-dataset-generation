@@ -1,0 +1,77 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS ClosedPostCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.UserId
+),
+EnrichedUserStats AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.AverageScore, 0) AS AverageScore,
+        COALESCE(cp.ClosedPostCount, 0) AS ClosedPostCount,
+        COALESCE(cp.CloseReasons, 'N/A') AS CloseReasons
+    FROM Users u
+    LEFT JOIN UserBadgeCounts ub ON u.Id = ub.UserId
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN ClosedPostDetails cp ON u.Id = cp.UserId
+),
+RankedUsers AS (
+    SELECT 
+        eus.*,
+        ROW_NUMBER() OVER (ORDER BY eus.TotalViews DESC, eus.BadgeCount DESC) AS UserRank
+    FROM EnrichedUserStats eus
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.BadgeCount,
+    ru.PostCount,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.TotalViews,
+    ru.AverageScore,
+    ru.ClosedPostCount,
+    ru.CloseReasons,
+    CASE 
+        WHEN ru.ClosedPostCount > 0 THEN 'Has closed posts'
+        ELSE 'No closed posts'
+    END AS PostClosureStatus,
+    CASE 
+        WHEN ru.BadgeCount = 0 AND ru.PostCount = 0 THEN 'New User'
+        ELSE 'Established User'
+    END AS UserStatus
+FROM RankedUsers ru
+WHERE ru.UserRank <= 10
+ORDER BY ru.UserRank;

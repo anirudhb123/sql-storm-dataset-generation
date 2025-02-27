@@ -1,0 +1,77 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year = 2023
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5  -- Limit depth to avoid excessive recursion
+),
+
+TopActors AS (
+    SELECT 
+        ai.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Production')
+    GROUP BY 
+        ai.person_id, ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        array_agg(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.depth,
+    COALESCE(ta.movie_count, 0) AS top_actor_movie_count,
+    COALESCE(mw.keywords, ARRAY[]::text[]) AS keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    TopActors ta ON mh.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = ta.person_id)
+LEFT JOIN 
+    MoviesWithKeywords mw ON mh.movie_id = mw.movie_id
+WHERE 
+    (mh.depth = 1 OR mw.keywords IS NOT NULL)
+ORDER BY 
+    mh.depth, mh.title;

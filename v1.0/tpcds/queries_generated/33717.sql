@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_paid,
+        1 AS depth
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim WHERE d_current_day = 'Y')
+    
+    UNION ALL
+    
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_net_paid,
+        depth + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.cs_item_sk = sh.ws_item_sk AND cs.cs_order_number = sh.ws_order_number
+    WHERE 
+        cs.cs_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim WHERE d_current_day = 'Y') 
+)
+SELECT 
+    ca.ca_city,
+    SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0)) AS total_sales,
+    COUNT(DISTINCT c.c_customer_sk) AS distinct_customers,
+    MAX(ws.ws_sales_price) AS max_web_price,
+    MIN(cs.cs_sales_price) AS min_catalog_price
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+JOIN 
+    sales_hierarchy sh ON ws.ws_item_sk = sh.ws_item_sk OR cs.cs_item_sk = sh.cs_item_sk
+WHERE 
+    ca.ca_city IS NOT NULL AND 
+    (ca.ca_state = 'CA' OR ca.ca_state = 'NY') AND
+    ws.ws_sold_date_sk > (SELECT max(d_date_sk) - 30 FROM date_dim WHERE d_current_day = 'Y')
+GROUP BY 
+    ca.ca_city
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 10
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

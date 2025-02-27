@@ -1,0 +1,70 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        AVG(NULLIF(U.Reputation, 0)) AS AvgReputation
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY U.Id, U.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalBounty,
+        AvgReputation,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM UserActivity
+    WHERE PostCount > 0
+),
+TopUsers AS (
+    SELECT 
+        ROW_NUMBER() OVER (ORDER BY TotalBounty DESC) AS RowNum,
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalBounty,
+        AvgReputation
+    FROM ActiveUsers
+    WHERE Rank <= 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalBounty,
+    CASE 
+        WHEN U.AvgReputation IS NULL THEN 'No Reputation'
+        ELSE CAST(U.AvgReputation AS CHAR)
+    END AS AvgReputation,
+    COALESCE((SELECT GROUP_CONCAT(T.TagName SEPARATOR ', ') 
+              FROM Tags T
+              JOIN (
+                  SELECT 
+                      SUBSTRING_INDEX(SUBSTRING_INDEX(P.Tags, '><', numbers.n), '><', -1) AS Tag
+                  FROM Posts P
+                  INNER JOIN (
+                      SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL 
+                      SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 UNION ALL 
+                      SELECT 10
+                  ) numbers ON CHAR_LENGTH(P.Tags) - CHAR_LENGTH(REPLACE(P.Tags, '><', '')) >= numbers.n - 1
+                  WHERE P.OwnerUserId = U.UserId
+              ) ST ON ST.Tag = T.TagName
+              WHERE T.Count > 50), 'No Tags') AS PopularTags
+FROM TopUsers U
+LEFT JOIN Badges B ON U.UserId = B.UserId
+WHERE B.Class = 1 OR B.Class = 2 
+ORDER BY U.TotalBounty DESC, U.PostCount DESC;

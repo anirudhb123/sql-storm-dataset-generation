@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select movies with no parent (root level)
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+
+    -- Recursive case: Join with movie_link to find child movies
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    p.name AS person_name,
+    t.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COUNT(CASE WHEN c.role_id IS NOT NULL THEN 1 END) AS role_count,
+    SUM(mi.info LIKE '%Awards%') AS awards_appearances,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    CASE 
+        WHEN p.gender IS NULL THEN 'Not Specified'
+        ELSE p.gender
+    END AS person_gender
+FROM 
+    aka_name p
+JOIN 
+    cast_info ci ON p.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title t ON mh.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = 1  -- Filter for awards info
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    mh.level <= 2  -- Limit to top two levels in hierarchy
+GROUP BY 
+    p.name, t.title, mh.level
+ORDER BY 
+    mh.level, role_count DESC, p.name;

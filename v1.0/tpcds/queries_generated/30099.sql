@@ -1,0 +1,41 @@
+
+WITH RECURSIVE Address_CTE AS (
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_state, level + 1
+    FROM customer_address AS ca
+    JOIN Address_CTE AS cte ON ca.ca_state = cte.ca_state AND cte.level < 3
+),
+Income_Band_Demographics AS (
+    SELECT h.hd_income_band_sk, COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           MAX(cd.cd_purchase_estimate) AS max_purchase_estimate,
+           MAX(cd.cd_credit_rating) AS max_credit_rating
+    FROM household_demographics h
+    JOIN customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY h.hd_income_band_sk
+),
+Sales_Analysis AS (
+    SELECT ws_sold_date_sk, SUM(ws_sales_price) AS total_sales,
+           AVG(ws_net_profit) AS avg_net_profit, COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_sold_date_sk
+)
+SELECT A.ca_city, A.ca_state, I.hd_income_band_sk, ID.customer_count,
+       S.total_sales, S.avg_net_profit, S.order_count
+FROM Address_CTE A
+LEFT JOIN Income_Band_Demographics I ON I.hd_income_band_sk = (
+    SELECT ib.ib_income_band_sk
+    FROM income_band ib
+    WHERE ib.ib_lower_bound <= (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    AND ib.ib_upper_bound >= (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+    LIMIT 1
+)
+LEFT JOIN Sales_Analysis S ON S.ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+WHERE A.ca_state IS NOT NULL AND A.ca_city IS NOT NULL
+ORDER BY A.ca_state DESC, ID.customer_count DESC
+LIMIT 100;

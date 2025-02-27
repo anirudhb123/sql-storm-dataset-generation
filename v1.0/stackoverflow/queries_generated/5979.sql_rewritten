@@ -1,0 +1,62 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(B.Id) AS BadgeCount, 
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ViewCount, 
+        P.CreationDate,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        COUNT(P.Id) AS TotalPosts, 
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+
+SELECT 
+    U.DisplayName,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    UPS.TotalPosts,
+    UPS.AnswerCount,
+    PP.Title AS MostPopularPost,
+    PP.ViewCount AS MostPopularPostViewCount,
+    PP.CreationDate AS MostPopularPostDate
+FROM 
+    UserBadges UB
+JOIN 
+    UserPostStats UPS ON UB.UserId = UPS.UserId
+JOIN 
+    PopularPosts PP ON PP.OwnerUserId = UB.UserId
+WHERE 
+    PP.PopularityRank = 1
+ORDER BY 
+    UB.BadgeCount DESC, UPS.TotalPosts DESC;

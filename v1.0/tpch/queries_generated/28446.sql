@@ -1,0 +1,48 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        ps.ps_availqty AS available_quantity,
+        ps.ps_supplycost AS supply_cost,
+        CONCAT('Supplier ', s.s_name, ' provides part ', p.p_name, ' with availability of ', ps.ps_availqty) AS description
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        o.o_orderdate AS order_date,
+        o.o_totalprice AS total_price,
+        CONCAT('Order ', o.o_orderkey, ' placed by ', c.c_name, ' on ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD'), ' totaling ', o.o_totalprice) AS order_description
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+)
+SELECT 
+    sp.supplier_name,
+    sp.part_name,
+    sp.available_quantity,
+    sp.supply_cost,
+    co.customer_name,
+    co.order_key,
+    co.order_date,
+    co.total_price,
+    COALESCE(sp.description, 'No description available') AS supplier_part_description,
+    COALESCE(co.order_description, 'No order information available') AS customer_order_description
+FROM 
+    SupplierParts sp
+FULL OUTER JOIN 
+    CustomerOrders co ON sp.available_quantity > 0 AND co.total_price > 0
+ORDER BY 
+    sp.supplier_name, co.customer_name
+LIMIT 100;

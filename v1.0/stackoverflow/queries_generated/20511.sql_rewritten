@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.OwnerUserId IS NOT NULL
+      AND p.ViewCount IS NOT NULL
+      AND p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score
+    FROM RankedPosts rp
+    WHERE rp.rn = 1 AND p.PostTypeId = 1
+),
+TopAnswers AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score
+    FROM RankedPosts rp
+    WHERE rp.rn = 1 AND p.PostTypeId = 2
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id
+),
+FilteredEngagement AS (
+    SELECT 
+        pe.PostId,
+        pe.UpVotes,
+        pe.DownVotes,
+        pe.CommentCount,
+        CASE 
+            WHEN pe.UpVotes = 0 AND pe.DownVotes = 0 THEN NULL
+            ELSE (pe.UpVotes::decimal / NULLIF((pe.UpVotes + pe.DownVotes), 0)) * 100
+        END AS EngagementRate
+    FROM PostEngagement pe
+)
+SELECT 
+    tq.Title AS TopQuestion,
+    ta.Title AS TopAnswer,
+    fe.EngagementRate AS EngagementRate
+FROM TopQuestions tq
+FULL OUTER JOIN TopAnswers ta ON tq.PostId = ta.PostId
+FULL OUTER JOIN FilteredEngagement fe ON COALESCE(tq.PostId, ta.PostId) = fe.PostId
+WHERE fe.EngagementRate IS NOT NULL
+  AND (fe.UpVotes > 10 OR fe.CommentCount > 5)
+ORDER BY fe.EngagementRate DESC NULLS LAST
+LIMIT 10;

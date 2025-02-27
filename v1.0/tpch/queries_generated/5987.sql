@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+OrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+ProductStats AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATEADD(month, -6, CURRENT_DATE)
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    ss.s_name AS supplier_name, 
+    os.c_name AS customer_name, 
+    ps.p_name AS product_name, 
+    ss.total_value AS supplier_total_value, 
+    os.order_count AS customer_order_count, 
+    os.total_spent AS customer_total_spent, 
+    ps.total_revenue AS product_total_revenue
+FROM 
+    SupplierStats ss
+JOIN 
+    OrderStats os ON ss.unique_parts > 5
+JOIN 
+    ProductStats ps ON ps.order_count > 10
+WHERE 
+    ss.total_value > 10000
+ORDER BY 
+    ps.total_revenue DESC;

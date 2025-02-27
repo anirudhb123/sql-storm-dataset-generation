@@ -1,0 +1,66 @@
+
+WITH movie_info_filtered AS (
+    SELECT 
+        mi.movie_id, 
+        mi.info,
+        it.info AS info_type
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        CHAR_LENGTH(mi.info) > 50 
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id, 
+        r.role AS person_role,
+        a.name AS actor_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.person_role_id = r.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id, r.role, a.name
+),
+movies_with_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    c.actor_name,
+    c.person_role,
+    k.keywords,
+    m.info,
+    COUNT(DISTINCT cc.company_id) AS company_count,
+    COUNT(DISTINCT c1.person_id) AS guest_appearances
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_info_filtered m ON t.id = m.movie_id
+JOIN 
+    cast_with_roles c ON t.id = c.movie_id
+LEFT JOIN 
+    movies_with_keywords k ON t.id = k.movie_id
+LEFT JOIN 
+    cast_info c1 ON t.id = c1.movie_id AND c1.person_role_id <> c.person_role_id
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, t.production_year, m.info, c.actor_name, c.person_role, k.keywords
+ORDER BY 
+    t.production_year DESC, company_count DESC;

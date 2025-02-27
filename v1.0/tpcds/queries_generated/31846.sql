@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss.s_store_sk,
+        COUNT(ss.ss_ticket_number) AS total_transactions,
+        SUM(ss.ss_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ss.s_store_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS rank
+    FROM 
+        store_sales ss
+    INNER JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        ss.s_store_sk
+    HAVING 
+        COUNT(ss.ss_ticket_number) > 10
+    UNION ALL
+    SELECT 
+        h.s_store_sk,
+        h.total_transactions,
+        h.total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY h.s_store_sk ORDER BY h.total_revenue DESC) AS rank
+    FROM 
+        sales_hierarchy h
+    JOIN 
+        store s ON h.s_store_sk = s.s_store_sk
+    WHERE 
+        h.total_revenue > (SELECT AVG(total_revenue) FROM sales_hierarchy)
+)
+SELECT 
+    s.s_store_name,
+    sh.total_transactions,
+    sh.total_revenue,
+    CASE 
+        WHEN sh.rank = 1 THEN 'Top Store'
+        ELSE 'Regular Store'
+    END AS store_type
+FROM 
+    store s
+LEFT JOIN 
+    sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+ORDER BY 
+    sh.total_revenue DESC NULLS LAST
+LIMIT 10;

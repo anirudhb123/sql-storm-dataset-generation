@@ -1,0 +1,83 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS depth
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.depth + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        oh.depth < 5
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LargeOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        total_order_value > 10000
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS number_of_customers,
+    AVG(cs.total_spent) AS avg_spent,
+    MAX(sd.part_count) AS max_parts_supplied,
+    (SELECT COUNT(*) FROM LargeOrders) AS total_large_orders,
+    COUNT(oh.o_orderkey) FILTER (WHERE oh.o_orderdate < cast('1998-10-01' as date)) AS historical_orders
+FROM 
+    nation n
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerSummary cs ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps LIMIT 1) 
+LEFT JOIN 
+    OrderHierarchy oh ON oh.o_orderkey = (SELECT o.o_orderkey FROM orders o ORDER BY o.o_orderdate DESC LIMIT 1)
+GROUP BY 
+    n.n_name
+ORDER BY 
+    number_of_customers DESC, avg_spent DESC
+LIMIT 10;

@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(STRING_AGG(DISTINCT a.name, ', '), 'No Actors') AS actors,
+        COALESCE(STRING_AGG(DISTINCT c.kind, ', '), 'No Companies') AS companies
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = m.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.movie_id
+    LEFT JOIN 
+        company_type c ON c.id = mc.company_type_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN production_year < 2000 THEN 'Classic'
+            ELSE 'Modern'
+        END AS era
+    FROM 
+        MovieDetails
+    WHERE 
+        movies_count > 5
+)
+SELECT 
+    era,
+    COUNT(*) AS movie_count,
+    AVG(EXTRACT(YEAR FROM age('now'::date, production_year::date))) AS avg_age,
+    MAX(CASE WHEN actors LIKE '%Tom Hanks%' THEN title END) AS tom_hanks_movie
+FROM 
+    FilteredMovies
+GROUP BY 
+    era
+ORDER BY 
+    movie_count DESC;

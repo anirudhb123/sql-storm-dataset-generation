@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' 
+        AND o.o_orderdate < DATE '1996-01-01'
+),
+SupplierSales AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-10-01' -- adjusted date logic without cast
+    GROUP BY 
+        ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE 
+        ss.total_sales IS NOT NULL
+    ORDER BY 
+        ss.total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ts.s_name,
+    ts.total_sales,
+    COALESCE(n.n_name, 'Unknown') AS supplier_nation
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    lineitem l ON ro.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierSales ss ON ps.ps_suppkey = ss.ps_suppkey
+LEFT JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    ro.order_rank <= 5
+    AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+ORDER BY 
+    ro.o_orderdate DESC, ts.total_sales ASC;

@@ -1,0 +1,67 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id
+),
+store_summary AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_quantity) AS total_store_quantity,
+        SUM(ss.ss_sales_price) AS total_store_sales,
+        AVG(ss.ss_net_profit) AS avg_store_net_profit
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        date_dim dd ON ss.ss_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        s.s_store_id
+),
+warehouse_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    JOIN 
+        warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.avg_net_profit,
+    st.total_store_quantity,
+    st.total_store_sales,
+    st.avg_store_net_profit,
+    wh.total_inventory
+FROM 
+    sales_summary ss
+JOIN 
+    store_summary st ON ss.web_site_id = st.total_store_quantity
+JOIN 
+    warehouse_summary wh ON wh.total_inventory > 0
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

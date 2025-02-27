@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        CAST(NULL AS text) AS linked_movies
+    FROM
+        aka_title AS m
+    WHERE
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT
+        mk.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        CONCAT(mh.linked_movies, ', ', t.title)
+    FROM
+        movie_link AS mk
+    JOIN
+        title AS t ON mk.linked_movie_id = t.id
+    JOIN
+        movie_hierarchy AS mh ON mk.movie_id = mh.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    mo.title AS movie_title,
+    mo.production_year,
+    mo.kind_id,
+    COUNT(DISTINCT CASE WHEN mo.kind_id IS NOT NULL THEN mo.id END) OVER (PARTITION BY ak.id) AS movie_count,
+    STRING_AGG(DISTINCT mh.linked_movies, ', ') AS linked_titles,
+    AVG(COALESCE(mk.info_type_id, -1)) AS average_info_type_id
+FROM
+    aka_name AS ak
+JOIN
+    cast_info AS ci ON ak.person_id = ci.person_id
+JOIN
+    title AS mo ON ci.movie_id = mo.id
+LEFT JOIN
+    movie_info AS mk ON mo.id = mk.movie_id
+LEFT JOIN
+    movie_hierarchy AS mh ON mo.id = mh.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND (mo.production_year IS NULL OR mo.production_year > 2010)
+    AND ak.md5sum IS NOT DISTINCT FROM ak.md5sum  -- using IS NOT DISTINCT FOR NULL handling
+GROUP BY
+    ak.id, mo.id, mo.title, mo.production_year
+HAVING
+    COUNT(DISTINCT ci.role_id) > 2
+ORDER BY
+    movie_count DESC, ak.name ASC
+LIMIT 50 OFFSET 10;

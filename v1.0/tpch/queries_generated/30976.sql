@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(255)) AS full_path
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT sp.s_suppkey, sp.s_name, sp.s_address, sp.s_nationkey, sp.s_acctbal, CONCAT(sh.full_path, ' -> ', sp.s_name)
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal > sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerOrderCounts AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT
+    s.s_name AS Supplier_Name,
+    s.s_address AS Supplier_Address,
+    SUM(COALESCE(os.total_value, 0)) AS Total_Sales,
+    COUNT(DISTINCT co.o_custkey) AS Unique_Customers,
+    COUNT(DISTINCT sh.s_suppkey) AS Hierarchical_Suppliers_Count,
+    nd.n_name AS Nation_Name,
+    CASE 
+        WHEN SUM(COALESCE(os.total_value, 0)) > 100000 THEN 'High Value'
+        ELSE 'Low Value' 
+    END AS Sales_Category
+FROM supplier s
+LEFT JOIN OrderSummary os ON s.s_suppkey = os.o_custkey
+LEFT JOIN CustomerOrderCounts co ON s.s_suppkey = co.o_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN NationDetails nd ON s.s_nationkey = nd.n_nationkey
+WHERE s.s_acctbal IS NOT NULL
+GROUP BY s.s_name, s.s_address, nd.n_name
+ORDER BY Total_Sales DESC, Unique_Customers DESC;

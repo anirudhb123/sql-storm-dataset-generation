@@ -1,0 +1,119 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(COALESCE(CM.Score, 0)) AS TotalCommentScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        TotalBounty,
+        TotalCommentScore,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalBounty DESC) AS UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(CM.CommentCount, 0) AS CommentCount,
+        COALESCE(A.AnswerCount, 0) AS AnswerCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        (
+            SELECT 
+                ParentId,
+                COUNT(Id) AS AnswerCount
+            FROM 
+                Posts
+            WHERE 
+                PostTypeId = 2 
+            GROUP BY 
+                ParentId
+        ) A ON P.Id = A.ParentId
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId,
+                COUNT(Id) AS CommentCount
+            FROM 
+                Comments
+            GROUP BY 
+                PostId
+        ) CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2)
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        MAX(P.LastActivityDate) AS LastActivity,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    TU.UserId,
+    TU.DisplayName,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalBounty,
+    TU.TotalCommentScore,
+    PE.PostId,
+    PE.Title,
+    PE.CreationDate,
+    PE.CommentCount,
+    PE.AnswerCount,
+    PE.UpVotes,
+    PE.DownVotes,
+    RA.LastActivity,
+    RA.PostCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostEngagement PE ON TU.UserId = PE.OwnerDisplayName
+LEFT JOIN 
+    RecentActivity RA ON TU.UserId = RA.UserId
+ORDER BY 
+    TU.UserRank,
+    PE.UpVotes DESC NULLS LAST;

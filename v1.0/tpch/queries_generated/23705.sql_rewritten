@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+HighValueParts AS (
+    SELECT p_partkey, p_name, p_mfgr, p_brand, p_retailprice, 
+           CASE 
+               WHEN p_size IS NULL THEN 'Unknown Size' 
+               ELSE CAST(p_size AS VARCHAR) 
+           END AS size_description
+    FROM part
+    WHERE p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS fulfilled_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+OrderLineSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice - l.l_discount) AS total_price,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice - l.l_discount) DESC) AS rank_value
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT DISTINCT ch.c_name, h.p_name, h.size_description, 
+       COUNT(CASE WHEN ol.return_count > 0 THEN 1 END) OVER (PARTITION BY ch.c_name) AS return_orders,
+       MAX(ol.total_price) AS max_order_value
+FROM CustomerOrders ch
+INNER JOIN HighValueParts h ON h.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+)
+LEFT JOIN OrderLineSummary ol ON ol.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = ch.c_custkey AND o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+WHERE ch.order_count > 0
+AND EXISTS (
+    SELECT 1 FROM SupplierHierarchy sh 
+    WHERE sh.s_nationkey = ch.c_custkey
+)
+ORDER BY ch.c_name, h.p_name;

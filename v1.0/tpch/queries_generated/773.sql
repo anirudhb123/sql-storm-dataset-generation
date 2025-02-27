@@ -1,0 +1,83 @@
+WITH CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+SupplierParts AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+RelevantSuppliers AS (
+    SELECT
+        sp.s_suppkey,
+        sp.s_name,
+        sp.p_partkey,
+        sp.p_name,
+        sp.ps_availqty,
+        sp.ps_supplycost
+    FROM 
+        SupplierParts sp
+    WHERE 
+        sp.supply_rank <= 3
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COALESCE(COUNT(DISTINCT o.o_orderkey), 0) AS order_count,
+        SUM(CASE WHEN co.order_rank = 1 THEN co.total_lineitem_revenue ELSE 0 END) AS high_value_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(co.total_lineitem_revenue) > 10000
+)
+SELECT
+    r.s_suppkey,
+    r.s_name,
+    r.p_partkey,
+    r.p_name,
+    r.ps_availqty,
+    r.ps_supplycost,
+    c.c_custkey,
+    c.c_name,
+    c.order_count,
+    c.high_value_revenue
+FROM 
+    RelevantSuppliers r
+FULL OUTER JOIN 
+    HighValueCustomers c ON r.p_partkey = c.c_custkey
+WHERE 
+    (c.order_count > 0 OR r.ps_availqty IS NOT NULL)
+ORDER BY 
+    high_value_revenue DESC, r.ps_supplycost ASC;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           0 AS level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+),
+SalesInformation AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           SUM(ws.ws_ext_sales_price - ws.ws_ext_discount_amt) AS net_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+HighIncomeDemographics AS (
+    SELECT hd.hd_demo_sk, hb.ib_income_band_sk, hb.ib_lower_bound, hb.ib_upper_bound
+    FROM household_demographics hd
+    JOIN income_band hb ON hd.hd_income_band_sk = hb.ib_income_band_sk
+    WHERE hb.ib_upper_bound > 100000
+)
+SELECT 
+    c.c_customer_sk, 
+    c.c_first_name, 
+    c.c_last_name,
+    SUM(si.total_sales) AS total_sales_amount,
+    COUNT(DISTINCT si.ws_item_sk) AS distinct_items_sold,
+    CASE 
+        WHEN COUNT(DISTINCT si.ws_item_sk) > 10 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS sales_category,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(si.total_sales) DESC) AS sales_rank,
+    NULLIF(MAX(cd.cd_purchase_estimate), 0) as purchase_estimate,
+    COALESCE(MIN(hb.ib_lower_bound), 0) AS min_income_band,
+    COALESCE(AVG(hb.ib_upper_bound), 0) AS avg_income_band
+FROM customer c
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN SalesInformation si ON c.c_customer_sk = si.ws_bill_customer_sk
+LEFT JOIN HighIncomeDemographics hb ON cd.cd_demo_sk = hb.hd_demo_sk
+WHERE c.c_country = 'USA' AND (c.c_birth_year > 1980 OR c.c_birth_country IS NULL)
+GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+HAVING SUM(si.total_sales) > 5000
+ORDER BY total_sales_amount DESC
+LIMIT 50;

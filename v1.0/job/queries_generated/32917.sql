@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year > 2000  -- Filter for more recent movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN ala_title mt ON ml.movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.movie_id
+),
+
+movie_info_summary AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        i.info AS info_type,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY i.id) AS info_order
+    FROM aka_title mt
+    JOIN movie_info mi ON mt.id = mi.movie_id
+    JOIN info_type i ON mi.info_type_id = i.id
+),
+
+final_result AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(cd.actor_count, 0) AS actor_count,
+        cd.actors,
+        mi.info_type AS additional_info
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_details cd ON mh.movie_id = cd.movie_id
+    LEFT JOIN movie_info_summary mi ON mh.movie_id = mi.movie_id
+    WHERE mh.level < 3 -- Limits the hierarchy level for performance
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.actors,
+    fr.additional_info
+FROM final_result fr
+WHERE fr.additional_info IS NOT NULL -- Only movies with additional info
+ORDER BY fr.production_year DESC, fr.actor_count DESC;

@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        ARRAY_AGG(DISTINCT ph.PostHistoryTypeId) AS HistoryTypes 
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE((SELECT COUNT(DISTINCT b.Id) 
+                   FROM Badges b 
+                   WHERE b.UserId = u.Id AND b.Class = 1), 0) AS GoldBadgesCount
+    FROM 
+        Users u
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.GoldBadgesCount,
+    rp.Title,
+    rp.VoteCount,
+    pa.LastActivityDate,
+    CASE 
+        WHEN pa.HistoryTypes IS NOT NULL THEN 'Post is actively managed'
+        ELSE 'No recent actions on post'
+    END AS ManagementStatus,
+    STRING_AGG(DISTINCT CASE 
+        WHEN p.OwnerUserId IS NOT NULL THEN 'Owned' 
+        ELSE 'Community-owned' 
+        END, ', ') AS Ownership
+FROM 
+    UserReputation up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostActivity pa ON rp.PostId = pa.PostId
+LEFT JOIN 
+    Posts p ON p.Id = rp.PostId
+GROUP BY 
+    up.UserId, up.Reputation, up.GoldBadgesCount, rp.Title, rp.VoteCount, pa.LastActivityDate
+HAVING 
+    VoteCount > 10 AND 
+    (pa.HistoryTypes IS NULL OR pa.LastActivityDate IS NOT NULL)
+ORDER BY 
+    up.Reputation DESC, rp.VoteCount DESC
+LIMIT 100;

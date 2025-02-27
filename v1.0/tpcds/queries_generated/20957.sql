@@ -1,0 +1,83 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk, 
+        ws_sold_date_sk
+),
+TotalSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws_sales_price) AS grand_total
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        d.d_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+),
+SalesWithCustomerInfo AS (
+    SELECT 
+        r.ws.web_site_sk,
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        r.total_sales,
+        COALESCE(ts.grand_total, 0) AS grand_total,
+        CASE 
+            WHEN r.total_sales > 0.5 * COALESCE(ts.grand_total, 0) THEN 'High Contributor'
+            WHEN r.total_sales = 0 THEN 'No Contribution'
+            ELSE 'Medium Contributor' 
+        END AS contribution_category
+    FROM 
+        RankedSales r
+    JOIN 
+        CustomerInfo ci ON r.web_site_sk = ci.c_customer_sk  -- possibly incorrect join for demonstration
+    LEFT JOIN 
+        TotalSales ts ON r.web_site_sk = ts.web_site_sk
+)
+SELECT 
+    wsp.wp_web_page_id,
+    SUM(swc.total_sales) AS total_web_sales,
+    COUNT(DISTINCT swc.c_customer_sk) AS customer_count,
+    MAX(swc.contribution_category) AS contribution_category
+FROM 
+    web_page wsp
+LEFT JOIN 
+    SalesWithCustomerInfo swc ON wsp.wp_web_page_sk = swc.c_customer_sk  -- demonstration of bizarre join
+WHERE 
+    (swc.total_sales > 500 OR swc.grand_total IS NULL)
+    AND wsp.wp_char_count IS NOT NULL
+    AND (wsp.wp_autogen_flag = 'Y' OR wsp.wp_type IS NULL)
+GROUP BY 
+    wsp.wp_web_page_id
+HAVING 
+    SUM(swc.total_sales) > 1000
+    OR (COUNT(DISTINCT swc.c_customer_sk) > 10 AND MAX(swc.contribution_category) = 'High Contributor')
+ORDER BY 
+    total_web_sales DESC
+LIMIT 10;

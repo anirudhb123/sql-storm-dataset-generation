@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level,
+        CASE
+            WHEN mt.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(mt.production_year AS TEXT)
+        END AS year_label
+    FROM
+        aka_title mt
+    WHERE
+        mt.title IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        lt.kind_id,
+        mh.level + 1 AS level,
+        CASE
+            WHEN lt.production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(lt.production_year AS TEXT)
+        END AS year_label
+    FROM
+        movie_link ml
+    JOIN
+        aka_title lt ON ml.movie_id = lt.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.year_label,
+    mt.production_year,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mh.level DESC) AS role_rank,
+    SUM(CASE WHEN ki.keyword IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ak.person_id) AS total_keywords
+FROM
+    cast_info ci
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN
+    aka_title mt ON mc.movie_id = mt.id
+LEFT JOIN
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN
+    keyword ki ON mk.keyword_id = ki.id
+JOIN
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE
+    mc.note IS NULL OR mc.note NOT LIKE '%not credited%'
+    AND ak.name IS NOT NULL
+    AND (mt.production_year > 1990 OR mh.level < 2)
+ORDER BY
+    ak.name,
+    role_rank DESC,
+    mh.level
+LIMIT 100 OFFSET 20;

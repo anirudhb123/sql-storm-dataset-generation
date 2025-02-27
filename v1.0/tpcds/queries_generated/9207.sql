@@ -1,0 +1,70 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 2458600 AND 2458650
+    GROUP BY
+        ws_item_sk
+),
+demographic_summary AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender, cd_marital_status
+),
+item_category_stats AS (
+    SELECT
+        i_category,
+        COUNT(i_item_sk) AS item_count,
+        AVG(i_current_price) AS avg_price
+    FROM
+        item
+    GROUP BY
+        i_category
+),
+final_summary AS (
+    SELECT
+        s.item_sk,
+        s.total_quantity,
+        s.total_sales,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.total_dependents,
+        d.avg_purchase_estimate,
+        c.category,
+        c.item_count,
+        c.avg_price
+    FROM
+        sales_summary s
+    JOIN
+        demographic_summary d ON d.total_dependents > 2
+    JOIN
+        item_category_stats c ON s.ws_item_sk = c.item_count
+)
+SELECT
+    f.item_sk,
+    f.total_quantity,
+    f.total_sales,
+    f.cd_gender,
+    f.cd_marital_status,
+    f.total_dependents,
+    f.avg_purchase_estimate,
+    f.category,
+    f.item_count,
+    f.avg_price
+FROM
+    final_summary f
+ORDER BY
+    f.total_sales DESC
+LIMIT 100;

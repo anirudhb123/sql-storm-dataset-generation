@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_year,
+        COUNT(ci.person_id) OVER (PARTITION BY at.movie_id) AS cast_count,
+        COALESCE(SUM(CASE WHEN ai.name IS NOT NULL THEN 1 ELSE 0 END), 0) AS aka_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name ai ON ci.person_id = ai.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        rank_year, 
+        cast_count, 
+        aka_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_year <= 5 
+        AND cast_count > 0
+)
+SELECT 
+    DISTINCT fm.title, 
+    fm.production_year, 
+    CASE 
+        WHEN fm.aka_count > 3 THEN 'Popular' 
+        ELSE 'Less Known' 
+    END AS popularity,
+    COALESCE(ct.kind, 'Unknown') AS company_type
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT movie_id FROM movie_companies WHERE movie_id IN (SELECT movie_id FROM aka_title WHERE title = fm.title) LIMIT 1)
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    fm.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    fm.title, 
+    fm.production_year, 
+    fm.aka_count, 
+    ct.kind
+ORDER BY 
+    fm.production_year DESC, 
+    popularity DESC, 
+    fm.title;

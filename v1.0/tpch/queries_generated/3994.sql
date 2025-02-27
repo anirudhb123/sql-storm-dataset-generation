@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM 
+        supplier s
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+), 
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        avg(ps.ps_supplycost) as avg_supply_cost,
+        count(DISTINCT ps.ps_suppkey) as supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    n.n_name,
+    r.r_name,
+    hvc.c_name,
+    p.name,
+    r_supplier_count = COUNT(DISTINCT ps.ps_suppkey),
+    total_spent,
+    (CASE 
+        WHEN total_spent > 50000 THEN 'High Value'
+        WHEN total_spent BETWEEN 20000 AND 50000 THEN 'Medium Value'
+        ELSE 'Low Value' END) AS customer_value
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers hvc ON n.n_nationkey = hvc.c_custkey
+JOIN 
+    PartSupplierInfo p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM RankedSuppliers s WHERE s.rnk <= 10))
+LEFT JOIN 
+    (SELECT 
+        ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) as supplier_count 
+     FROM 
+        partsupp ps 
+     GROUP BY 
+        ps.ps_partkey) AS ps ON p.p_partkey = ps.ps_partkey
+GROUP BY 
+    n.n_name, r.r_name, hvc.c_name, p.p_name, total_spent
+HAVING 
+    r.r_name IS NOT NULL OR hvc.c_name IS NOT NULL
+ORDER BY 
+    total_spent DESC, n.n_name;

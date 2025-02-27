@@ -1,0 +1,51 @@
+
+WITH MovieRoles AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        t.production_year >= 2000
+),
+TopActors AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS movie_count
+    FROM 
+        MovieRoles
+    WHERE 
+        role_rank <= 5
+    GROUP BY 
+        person_id
+    HAVING 
+        COUNT(*) > 2
+)
+SELECT 
+    a.name AS actor_name,
+    a.id AS actor_id,
+    COUNT(DISTINCT m.title) AS total_movies,
+    STRING_AGG(DISTINCT m.title, ', ') AS movie_titles,
+    AVG(m.rating) AS avg_rating
+FROM 
+    aka_name a
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id IN (SELECT mi.movie_id FROM movie_info mi WHERE mi.info LIKE '%Award%')
+LEFT JOIN 
+    MovieRoles m ON a.person_id = m.person_id
+RIGHT JOIN 
+    TopActors ta ON a.id = ta.person_id
+GROUP BY 
+    a.name, a.id
+HAVING 
+    COUNT(DISTINCT m.title) > 3
+ORDER BY 
+    avg_rating DESC
+;

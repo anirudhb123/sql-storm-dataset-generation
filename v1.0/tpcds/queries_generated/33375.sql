@@ -1,0 +1,62 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_salutation,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_country,
+        NULL AS supervisor_id,
+        0 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_salutation,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_country,
+        ch.c_customer_sk AS supervisor_id,
+        ch.level + 1
+    FROM 
+        customer_hierarchy ch
+    JOIN 
+        customer c ON ch.c_customer_sk = c.c_current_hdemo_sk
+)
+
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ws.ws_order_number) AS total_web_sales,
+    SUM(ws.ws_sales_price) AS total_sales,
+    AVG(ws.ws_sales_price) AS avg_sales_price,
+    MAX(ws.ws_sales_price) AS max_sales_price,
+    MIN(ws.ws_sales_price) AS min_sales_price,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', ') AS customer_names
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_hierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+WHERE 
+    ws.ws_sold_date_sk = (
+        SELECT MAX(d.d_date_sk) 
+        FROM date_dim d 
+        WHERE d.d_year = 2023
+    ) 
+    AND (ch.level < 2 OR ch.supervisor_id IS NULL)
+GROUP BY 
+    ca.ca_city, ca.ca_state
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

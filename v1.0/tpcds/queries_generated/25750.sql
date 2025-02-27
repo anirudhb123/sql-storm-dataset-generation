@@ -1,0 +1,49 @@
+
+WITH processed_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        TRIM(UPPER(c.c_email_address)) AS normalized_email,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS web_returns_count,
+        COUNT(DISTINCT cs_order_number) AS catalog_returns_count,
+        COUNT(DISTINCT ss_ticket_number) AS store_returns_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, c.c_email_address
+),
+ranked_returns AS (
+    SELECT 
+        full_name,
+        normalized_email,
+        total_returns,
+        web_returns_count,
+        catalog_returns_count,
+        store_returns_count,
+        RANK() OVER (ORDER BY total_returns DESC) AS return_rank
+    FROM 
+        processed_data
+)
+SELECT 
+    full_name,
+    normalized_email,
+    total_returns,
+    web_returns_count,
+    catalog_returns_count,
+    store_returns_count,
+    return_rank
+FROM 
+    ranked_returns
+WHERE 
+    return_rank <= 10
+ORDER BY 
+    return_rank;

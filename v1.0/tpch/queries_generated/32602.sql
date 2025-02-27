@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CAST(s.s_name AS varchar(255)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal AND s.s_suppkey <> sh.s_suppkey
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_discount) AS avg_discount,
+           COUNT(DISTINCT l.l_linenumber) AS line_count,
+           o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+PartSupplier AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    nh.n_name AS nation_name,
+    sh.path AS supplier_path,
+    os.total_revenue,
+    ps.total_avail_qty,
+    ps.total_supply_cost,
+    RANK() OVER (PARTITION BY nh.n_name ORDER BY os.total_revenue DESC) AS revenue_rank
+FROM nation nh
+LEFT JOIN SupplierHierarchy sh ON nh.n_nationkey = sh.s_nationkey
+LEFT JOIN OrderStats os ON os.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+)
+LEFT JOIN PartSupplier ps ON ps.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2023-01-01'
+)
+WHERE sh.s_acctbal IS NOT NULL AND ps.total_supply_cost IS NOT NULL
+ORDER BY nh.n_name, revenue_rank;

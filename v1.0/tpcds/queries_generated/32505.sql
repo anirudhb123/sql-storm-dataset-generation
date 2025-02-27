@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_sales,
+        1 AS level
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+
+    UNION ALL
+
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) + sh.total_sales AS total_sales,
+        sh.level + 1
+    FROM SalesHierarchy sh
+    JOIN customer ch ON sh.c_customer_sk = ch.c_current_hdemo_sk
+    LEFT JOIN web_sales ws ON ch.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY ch.c_customer_sk, ch.c_first_name, ch.c_last_name, sh.total_sales, sh.level
+),
+FilteredSales AS (
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.total_sales,
+        DENSE_RANK() OVER (ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM SalesHierarchy sh
+    WHERE sh.total_sales > (SELECT AVG(total_sales) FROM SalesHierarchy)
+)
+
+SELECT 
+    f.c_customer_sk,
+    f.c_first_name,
+    f.c_last_name,
+    f.total_sales,
+    f.sales_rank,
+    CASE 
+        WHEN f.total_sales IS NULL THEN 'No Sales'
+        WHEN f.total_sales > 10000 THEN 'High Value'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM FilteredSales f
+LEFT JOIN customer_demographics cd ON f.c_customer_sk = cd.cd_demo_sk
+LEFT JOIN customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = f.c_customer_sk)
+WHERE cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+ORDER BY f.sales_rank
+LIMIT 100;

@@ -1,0 +1,95 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > sh.s_acctbal
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+), SupplierStats AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+), OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), FinalReport AS (
+    SELECT 
+        c.c_name AS customer_name,
+        sh.level AS supplier_level,
+        s.s_name AS supplier_name,
+        hs.total_spent AS customer_spending,
+        ss.total_available AS parts_available,
+        ss.max_supply_cost AS max_cost
+    FROM 
+        HighValueCustomers hs
+    LEFT JOIN 
+        SupplierHierarchy sh ON hs.c_name LIKE CONCAT('%', sh.s_name, '%')
+    LEFT JOIN 
+        supplier s ON sh.s_nationkey = s.s_nationkey
+    JOIN 
+        SupplierStats ss ON ss.p_partkey = (SELECT ps.ps_partkey 
+                                             FROM partsupp ps 
+                                             WHERE ps.ps_suppkey = s.s_suppkey 
+                                             ORDER BY ps.ps_availqty DESC 
+                                             LIMIT 1)
+)
+SELECT 
+    customer_name,
+    supplier_level,
+    supplier_name,
+    customer_spending,
+    parts_available,
+    max_cost
+FROM 
+    FinalReport
+WHERE 
+    customer_spending IS NOT NULL
+ORDER BY 
+    customer_spending DESC, supplier_level ASC;

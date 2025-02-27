@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        CASE 
+            WHEN o.o_totalprice > 10000 THEN 'High'
+            WHEN o.o_totalprice BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS order_size,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+ComplementaryProducts AS (
+    SELECT 
+        p.p_partkey, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 1
+),
+FinalReport AS (
+    SELECT 
+        o.order_size, 
+        o.line_count, 
+        SUM(o.total_line_value) AS total_order_value,
+        r.r_name AS region_name,
+        rs.s_name AS top_supplier,
+        COALESCE(cp.supplier_count, 0) AS complementary_product_count
+    FROM FilteredOrders o
+    LEFT JOIN RankedSuppliers rs ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rs.s_nationkey)
+    LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey LIMIT 1))
+    LEFT JOIN ComplementaryProducts cp ON cp.p_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey LIMIT 1)
+    GROUP BY o.order_size, o.line_count, r.r_name, rs.s_name
+)
+SELECT 
+    order_size, 
+    line_count, 
+    total_order_value, 
+    region_name, 
+    top_supplier, 
+    complementary_product_count
+FROM FinalReport
+WHERE order_size = 'High'
+ORDER BY total_order_value DESC
+LIMIT 10;

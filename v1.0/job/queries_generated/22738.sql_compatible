@@ -1,0 +1,91 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id,
+        t.title,
+        t.production_year
+    HAVING 
+        COUNT(ci.id) > 0
+),
+AverageKeywords AS (
+    SELECT 
+        AVG(total_keywords) AS avg_keywords
+    FROM 
+        MovieDetails
+),
+CompanyTypes AS (
+    SELECT 
+        ct.kind,
+        COUNT(mc.id) AS company_count
+    FROM 
+        company_type ct
+    JOIN 
+        movie_companies mc ON mc.company_type_id = ct.id
+    GROUP BY 
+        ct.kind
+),
+TopCompanies AS (
+    SELECT 
+        c.name,
+        COUNT(mc.id) AS movie_count
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON mc.company_id = c.id
+    GROUP BY 
+        c.name
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+)
+SELECT 
+    mv.title,
+    mv.production_year,
+    mv.total_cast,
+    mv.total_keywords,
+    mv.total_companies,
+    c.kind AS company_type,
+    company_ct.company_count,
+    ta.name AS top_company_name,
+    ta.movie_count AS top_company_movie_count
+FROM 
+    MovieDetails mv 
+LEFT JOIN 
+    CompanyTypes company_ct ON mv.total_companies = company_ct.company_count
+LEFT JOIN 
+    TopCompanies ta ON mv.total_companies > 5 
+WHERE 
+    mv.total_keywords > (SELECT avg_keywords FROM AverageKeywords) 
+    AND mv.production_year IS NOT NULL
+ORDER BY 
+    mv.production_year DESC,
+    mv.total_cast DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

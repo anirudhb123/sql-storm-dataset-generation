@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+)
+
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    COUNT(DISTINCT ci.person_id) AS Total_Cast,
+    AVG(CAST(pi.info AS numeric)) AS Avg_Age, 
+    STRING_AGG(DISTINCT an.name, ', ') AS Actor_Names,
+    COALESCE(SUM(DISTINCT CAST(mc.note AS int)), 0) AS Total_Production_Notes,
+    CASE 
+        WHEN mh.level = 1 THEN 'Top Level Movie'
+        WHEN mh.level > 1 THEN 'Linked Movie'
+        ELSE 'Unknown' 
+    END AS Movie_Level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+LEFT JOIN 
+    aka_name an ON an.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'age')
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+WHERE 
+    mh.production_year IS NOT NULL AND 
+    (mh.production_year BETWEEN 2000 AND 2023) AND
+    (an.name IS NOT NULL AND an.name <> '')
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC,
+    Total_Cast DESC;

@@ -1,0 +1,75 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        c.c_name,
+        n.n_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+), supplier_part_info AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        MAX(ps.ps_supplycost) AS max_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+), low_profit_part AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(INLINE_PART.sales_total, 0) AS sales_total,
+        (((p.p_retailprice * 0.9) - COALESCE(INLINE_PART.sales_total, 0)) * 0.25) AS profit_margin
+    FROM part p
+    LEFT JOIN (
+        SELECT 
+            l.l_partkey,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales_total
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE o.o_orderstatus = 'F'
+        GROUP BY l.l_partkey
+    ) INLINE_PART ON p.p_partkey = INLINE_PART.l_partkey
+    WHERE p.p_size < 20
+), suspicious_activity AS (
+    SELECT 
+        coalesce(s.s_name, 'Unknown Supplier') AS supplier_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderkey IS NULL OR l.l_shipdate < l.l_commitdate
+    GROUP BY s.s_name
+), final_benchmark AS (
+    SELECT 
+        r.region_name,
+        po.p_name AS part_name,
+        po.sales_total,
+        po.max_supplycost,
+        sa.order_count,
+        ROW_NUMBER() OVER (PARTITION BY r.region_name ORDER BY po.sales_total DESC) AS sales_rank
+    FROM low_profit_part po
+    JOIN region r ON r.r_regionkey = (
+        SELECT n.n_regionkey FROM nation n 
+        WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c 
+                             JOIN orders o ON c.c_custkey = o.o_custkey
+                             WHERE o.o_orderkey IN (SELECT o_orderkey FROM ranked_orders WHERE order_rank = 1)
+                             LIMIT 1)
+    )
+    LEFT JOIN suspicious_activity sa ON sa.supplier_name = po.p_name
+)
+SELECT 
+    *
+FROM final_benchmark
+WHERE 
+    (order_count > 10 OR sales_total < 500) AND 
+    (profit_margin BETWEEN 0 AND 0.10) 
+ORDER BY region_name, sales_rank;

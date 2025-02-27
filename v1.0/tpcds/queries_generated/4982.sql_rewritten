@@ -1,0 +1,63 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459565 AND 2459580  
+    GROUP BY 
+        ws.ws_item_sk,
+        ws.ws_order_number
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, hd.hd_income_band_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.sales_rank <= 5  
+)
+SELECT 
+    si.i_item_id,
+    si.i_product_name,
+    tsi.total_quantity,
+    tsi.total_sales,
+    ci.gender,
+    ci.income_band
+FROM 
+    item AS si
+JOIN 
+    TopSellingItems AS tsi ON si.i_item_sk = tsi.ws_item_sk
+JOIN 
+    CustomerInfo AS ci ON ci.c_customer_sk IN (
+        SELECT DISTINCT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk = tsi.ws_item_sk
+    )
+ORDER BY 
+    tsi.total_sales DESC
+LIMIT 10;

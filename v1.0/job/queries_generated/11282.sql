@@ -1,0 +1,21 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    y.production_year,
+    r.role AS actor_role
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    r.role LIKE '%actor%'
+AND 
+    mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'box office')
+ORDER BY 
+    y.production_year DESC;

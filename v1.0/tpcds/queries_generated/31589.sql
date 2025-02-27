@@ -1,0 +1,39 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT c_customer_sk, c_first_name || ' ' || c_last_name AS customer_name, 
+           SUM(ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE c.c_birth_year < 1980
+    GROUP BY c_customer_sk, c_first_name, c_last_name
+    ORDER BY total_profit DESC
+    LIMIT 5
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name || ' ' || c.c_last_name,
+           SUM(ws.ws_net_profit) + tc.total_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN top_customers tc ON tc.c_customer_sk != c.c_customer_sk
+    WHERE c.c_birth_year >= 1980
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, tc.total_profit
+), 
+demographic_info AS (
+    SELECT cd.cd_gender, COUNT(c.c_customer_sk) AS customer_count,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+           AVG(cd.cd_dep_count) AS avg_dep_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT ti.customer_name, ti.total_profit, di.cd_gender, 
+       di.customer_count, di.avg_purchase_estimate, di.avg_dep_count
+FROM top_customers ti
+LEFT JOIN demographic_info di ON ti.customer_name LIKE '%' || di.cd_gender || '%'
+WHERE ti.total_profit > (
+    SELECT AVG(total_profit) 
+    FROM top_customers
+)
+ORDER BY ti.total_profit DESC, di.customer_count DESC
+FETCH FIRST 10 ROWS ONLY;

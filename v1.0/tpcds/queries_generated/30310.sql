@@ -1,0 +1,73 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_current_price, 1 AS level
+    FROM item
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date > CURRENT_DATE)
+    UNION ALL
+    SELECT i.item_sk, i.i_item_id, i.i_current_price, ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_manager_id = ih.i_item_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_bill_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sd.total_sales,
+        sd.order_count,
+        sd.sales_rank
+    FROM customer c
+    LEFT JOIN SalesData sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cs.total_sales, 0) AS total_sales,
+        CASE 
+            WHEN cs.sales_rank IS NULL THEN 'Not Ranked'
+            ELSE CAST(cs.sales_rank AS VARCHAR)
+        END AS sales_rank_status
+    FROM customer c
+    LEFT JOIN CustomerSales cs ON c.c_customer_sk = cs.c_customer_sk
+),
+CustomersWithAddresses AS (
+    SELECT 
+        tc.*,
+        ca.ca_city,
+        ca.ca_state
+    FROM TopCustomers tc
+    LEFT JOIN customer_address ca ON tc.c_customer_sk = ca.ca_address_sk
+)
+SELECT 
+    cu.c_customer_sk,
+    cu.c_first_name,
+    cu.c_last_name,
+    COALESCE(ca.ca_city, 'Unknown') AS city,
+    COALESCE(ca.ca_state, 'Unknown') AS state,
+    cu.total_sales,
+    cu.sales_rank_status,
+    ARRAY_AGG(DISTINCT i.i_item_id) AS related_items
+FROM CustomersWithAddresses cu
+LEFT JOIN ItemHierarchy i ON cu.c_customer_sk IN (
+    SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = i.i_item_sk
+)
+GROUP BY 
+    cu.c_customer_sk,
+    cu.c_first_name,
+    cu.c_last_name,
+    ca.ca_city,
+    ca.ca_state
+ORDER BY total_sales DESC
+LIMIT 100;

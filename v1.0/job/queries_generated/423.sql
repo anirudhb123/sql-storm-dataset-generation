@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank
+    FROM
+        aka_title a
+    WHERE
+        a.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Information') AS info,
+        COALESCE(GROUP_CONCAT(DISTINCT k.keyword), 'No Keywords') AS keywords
+    FROM
+        RankedMovies m
+    LEFT JOIN movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.movie_id, m.title, mi.info
+),
+TopMovies AS (
+    SELECT
+        md.movie_id,
+        md.title,
+        md.info,
+        md.keywords
+    FROM
+        MovieDetails md
+    WHERE
+        md.rank <= 5
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    CASE WHEN tm.keywords IS NOT NULL THEN 'Keywords found' ELSE 'No Keywords' END AS keyword_status,
+    CASE WHEN tm.info IS NOT NULL THEN 'Information available' ELSE 'No Information' END AS info_status,
+    COUNT(DISTINCT c.person_id) AS cast_count
+FROM
+    TopMovies tm
+LEFT JOIN cast_info c ON tm.movie_id = c.movie_id
+LEFT JOIN aka_name an ON c.person_id = an.person_id
+WHERE
+    tm.production_year > 2000
+GROUP BY
+    tm.title, tm.production_year, tm.keywords, tm.info
+ORDER BY
+    tm.production_year DESC, CAST(SUBSTRING(tm.title FROM '([0-9]+)') AS INTEGER)
+LIMIT 10;

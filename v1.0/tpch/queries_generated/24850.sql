@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), 
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice 
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+), 
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, 
+           CASE WHEN p.p_size IS NULL THEN 'Unknown Size' ELSE CAST(p.p_size AS VARCHAR) END AS SizeDescription
+    FROM part p
+)
+SELECT DISTINCT 
+    r.r_name AS Region,
+    n.n_name AS Nation,
+    p.p_name AS PartName,
+    SUM(COALESCE(l.l_quantity * (1 - l.l_discount), 0)) AS NetSales,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    MAX(COALESCE(s.s_acctbal, 0)) AS MaxAccountBalance,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice) DESC) AS SalesRank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN HighValueOrders o ON l.l_orderkey = o.o_orderkey
+JOIN PartDetails p ON l.l_partkey = p.p_partkey
+LEFT JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+WHERE p.p_retailprice IS NOT NULL
+  AND EXISTS (SELECT 1 FROM orders o2 
+              WHERE o2.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+              AND o2.o_orderstatus = 'O')
+GROUP BY r.r_name, n.n_name, p.p_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY SalesRank, NetSales DESC;

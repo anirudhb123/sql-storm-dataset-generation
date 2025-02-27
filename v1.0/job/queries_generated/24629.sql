@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+, ActorRoles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        c.movie_id,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+)
+, MoviesWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        COALESCE(STRING_AGG(mk.keyword, ', '), 'No Keywords') AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.id, mt.title
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(ar.actor_name, 'Unknown Actor') AS actor_name,
+    ar.role_name,
+    mwk.keywords,
+    mh.level,
+    SUM(CASE WHEN ar.actor_order IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mh.movie_id) AS total_actors,
+    CASE WHEN ar.role_name IS NOT NULL THEN 'Has Role' ELSE 'No Role' END AS role_status,
+    CASE WHEN mwk.keywords IS NULL THEN 'Keywords are NULL' ELSE 'Keywords exist' END AS keywords_status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON mh.movie_id = mwk.movie_id
+WHERE 
+    mh.production_year > 2000
+    AND (ar.role_name IS NOT NULL OR mwk.keywords IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, mh.movie_title ASC, total_actors DESC;

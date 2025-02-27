@@ -1,0 +1,39 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS level
+    FROM nation n
+    WHERE n.n_nationkey = (SELECT MIN(n_nationkey) FROM nation)
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipdate < CURRENT_DATE
+    GROUP BY o.o_orderkey, o.o_orderstatus
+), 
+RankedOrders AS (
+    SELECT od.o_orderkey, od.total_price,
+           RANK() OVER (ORDER BY od.total_price DESC) as price_rank
+    FROM OrderDetails od
+)
+SELECT p.p_name, p.p_retailprice, ns.n_name, ss.total_supply_cost, 
+       ro.total_price AS order_total_price, ro.price_rank
+FROM part p
+LEFT JOIN SupplierStats ss ON ss.part_count > 10
+JOIN NationHierarchy ns ON ns.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+LEFT JOIN RankedOrders ro ON ro.total_price > p.p_retailprice
+WHERE p.p_size BETWEEN 5 AND 20
+AND p.p_comment LIKE '%essential%'
+ORDER BY ns.n_name ASC, order_total_price DESC;

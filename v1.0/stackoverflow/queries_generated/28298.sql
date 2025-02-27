@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    JOIN
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <')) AS tag_id
+        ON tag_id = t.Id
+    LEFT JOIN
+        Tags t ON t.TagName = tag_id
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT
+        p.Id,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM
+        Posts p
+    JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        ph.PostHistoryTypeId = 10 -- Closed
+),
+PostStats AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(cp.ClosedDate, 'No') AS ClosedDate,
+        COALESCE(cp.CloseReason, 'Not Applicable') AS CloseReason,
+        rp.Tags
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        ClosedPosts cp ON rp.PostId = cp.Id
+)
+SELECT
+    *,
+    CASE
+        WHEN ClosedDate <> 'No' THEN 'Closed'
+        ELSE 'Open'
+    END AS Status
+FROM
+    PostStats
+ORDER BY
+    CASE
+        WHEN ClosedDate <> 'No' THEN 0
+        ELSE 1
+    END,
+    Score DESC,
+    CreationDate DESC;

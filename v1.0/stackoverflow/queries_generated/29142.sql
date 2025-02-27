@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        Tags, 
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5 -- Top 5 posts per tag
+    GROUP BY 
+        Tags
+    ORDER BY 
+        PostCount DESC
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.OwnerDisplayName,
+    r.CreationDate,
+    r.CommentCount,
+    r.UpVotes,
+    r.DownVotes,
+    t.PostCount AS TagPostCount,
+    u.BadgeCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges
+FROM 
+    RankedPosts r
+JOIN 
+    TopTags t ON r.Tags = t.Tags
+JOIN 
+    UserBadges u ON r.OwnerUserId = u.UserId
+WHERE 
+    r.Rank <= 5 -- Limit to top posts only
+ORDER BY 
+    t.PostCount DESC, r.Score DESC;

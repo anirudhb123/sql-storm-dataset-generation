@@ -1,0 +1,93 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rpc ON p.ParentId = rpc.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionsCount,
+        AnswersCount,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Ranking
+    FROM 
+        UserPostStats
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        GROUP_CONCAT(pht.Name ORDER BY ph.CreationDate DESC) AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastHistoryUpdate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    p.Title,
+    p.ViewCount,
+    CASE 
+        WHEN ph.HistoryTypes IS NULL THEN 'No History'
+        ELSE ph.HistoryTypes
+    END AS PostHistory,
+    COALESCE(rpc.Level, 0) AS ReplyLevel,
+    pu.PostCount AS UserPostCount,
+    pu.QuestionsCount AS UserQuestionsCount,
+    pu.AnswersCount AS UserAnswersCount,
+    pu.TotalScore AS UserTotalScore
+FROM 
+    Users u
+LEFT JOIN 
+    UserPostStats pu ON u.Id = pu.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostHistoryInfo ph ON p.Id = ph.PostId
+LEFT JOIN 
+    RecursivePostCTE rpc ON p.AcceptedAnswerId = rpc.PostId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users)
+    AND (pu.PostCount > 0 OR pu.QuestionsCount > 0)
+ORDER BY 
+    u.Reputation DESC, 
+    pu.TotalScore DESC
+LIMIT 10;

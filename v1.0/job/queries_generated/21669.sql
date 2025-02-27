@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        mt.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        m.note,
+        1 AS level
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_info m ON mt.id = m.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        NULL AS note,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.keyword,
+        mh.note,
+        ROW_NUMBER() OVER (PARTITION BY mh.keyword ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.keyword,
+    r.note,
+    CASE 
+        WHEN r.rank = 1 THEN 'Latest'
+        WHEN r.rank <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS movie_category
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    aka_name an ON r.movie_id = an.person_id
+WHERE 
+    r.keyword IS NOT NULL
+    AND (r.production_year >= 2000 OR r.note IS NOT NULL)
+    AND (r.production_year != 2010 OR an.name IS NOT NULL) 
+ORDER BY 
+    r.production_year DESC, r.keyword, r.rank
+LIMIT 100;
+
+-- Use a set operator to combine the results of two related but distinct queries
+UNION ALL
+
+SELECT 
+    r2.movie_id,
+    r2.title,
+    r2.production_year,
+    r2.keyword,
+    r2.note,
+    'Archived' AS movie_category
+FROM 
+    ranked_movies r2
+WHERE 
+    r2.production_year < 2000
+    AND r2.keyword IS NULL 
+ORDER BY 
+    r2.production_year DESC 
+LIMIT 100;

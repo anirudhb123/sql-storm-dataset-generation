@@ -1,0 +1,64 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoredQuestions
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    UBadge.BadgeCount,
+    UBadge.GoldBadges,
+    UBadge.SilverBadges,
+    UBadge.BronzeBadges,
+    UPost.TotalQuestions,
+    UPost.PositiveScoredQuestions,
+    TP.Title AS TopPostTitle,
+    TP.Score AS TopPostScore,
+    TP.ViewCount AS TopPostViewCount
+FROM 
+    UserBadgeStats UBadge
+JOIN 
+    UserPostStats UPost ON UBadge.UserId = UPost.UserId
+LEFT JOIN 
+    TopPosts TP ON UBadge.UserId = TP.OwnerUserId AND TP.Rank = 1
+WHERE 
+    UBadge.BadgeCount > 0
+ORDER BY 
+    UBadge.BadgeCount DESC, UPost.PositiveScoredQuestions DESC
+LIMIT 50;

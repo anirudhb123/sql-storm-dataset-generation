@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss_item_sk
+), 
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ss.ticket_number) AS store_visit_count,
+        SUM(ss.net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), 
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        cs.total_spent,
+        CASE 
+            WHEN cs.total_spent > 1000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_type
+    FROM 
+        customer_stats cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.store_visit_count >= 5
+), 
+top_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        s.total_sales
+    FROM 
+        item i
+    JOIN 
+        sales_cte s ON i.i_item_sk = s.ss_item_sk
+    WHERE 
+        s.sales_rank <= 10
+)
+
+SELECT 
+    cu.c_first_name,
+    cu.c_last_name,
+    hv.customer_type,
+    ti.i_product_name,
+    ti.total_sales
+FROM 
+    high_value_customers hv
+JOIN 
+    customer cu ON hv.c_customer_sk = cu.c_customer_sk
+CROSS JOIN 
+    top_items ti
+WHERE 
+    hv.customer_type = 'High Value'
+ORDER BY 
+    ti.total_sales DESC, cu.c_last_name ASC;
+

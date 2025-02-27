@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(month, -6, GETDATE()) -- Posts from the last 6 months
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts po WHERE po.OwnerUserId = u.Id) AS TotalPosts,
+        (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS TotalComments,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), 
+CloseReasonSummary AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(CAST(crt.Name AS VARCHAR), ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.PostHistoryTypeId IN (10, 11) AND crt.Id = CAST(ph.Comment AS INT)
+    GROUP BY 
+        ph.UserId
+), 
+PostWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, ',') AS tag ON p.Id = tag.Value
+    JOIN 
+        Tags t ON t.TagName = tag.Value
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.TotalPosts,
+    up.TotalComments,
+    up.AcceptedAnswers,
+    coalesce(crs.CloseReasonCount, 0) AS CloseReasonCount,
+    coalesce(crs.CloseReasonNames, 'None') AS CloseReasons,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    pwt.Tags
+FROM 
+    UserStatistics up
+LEFT JOIN 
+    CloseReasonSummary crs ON up.UserId = crs.UserId
+LEFT JOIN 
+    RankedPosts rp ON rp.rn <= 5 -- Getting top 5 recent posts per type
+LEFT JOIN 
+    PostWithTags pwt ON rp.PostId = pwt.PostId
+ORDER BY 
+    up.Reputation DESC, 
+    rp.CreationDate DESC;

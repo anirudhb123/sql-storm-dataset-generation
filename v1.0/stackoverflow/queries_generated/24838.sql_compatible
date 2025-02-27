@@ -1,0 +1,65 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 999 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPosts,
+        AVG(EXTRACT(EPOCH FROM COALESCE(p.LastActivityDate, TIMESTAMP '2024-10-01 12:34:56') - p.CreationDate) / 60) AS AvgActivityDelay
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.OwnerUserId
+),
+QualifiedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.OwnerUserId,
+        u.ReputationCategory,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.CommentCount,
+        ps.RelatedPosts,
+        ps.AvgActivityDelay,
+        ROW_NUMBER() OVER (PARTITION BY u.ReputationCategory ORDER BY ps.Upvotes DESC, ps.CommentCount DESC) AS RankWithinCategory
+    FROM PostStatistics ps
+    JOIN UserReputation u ON ps.OwnerUserId = u.UserId
+    WHERE ps.AvgActivityDelay < 60 
+)
+
+SELECT 
+    qp.PostId,
+    qp.Upvotes,
+    qp.Downvotes,
+    qp.CommentCount,
+    qp.RelatedPosts,
+    u.DisplayName,
+    CASE 
+        WHEN qp.RankWithinCategory = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostLabel,
+    CASE 
+        WHEN qp.CommentCount > 10 THEN 'Highly Discussed'
+        WHEN qp.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel,
+    COALESCE(NULLIF(qp.ReputationCategory, 'Low'), 'No Reputation') AS EffectiveReputationCategory
+FROM QualifiedPosts qp
+JOIN Users u ON qp.OwnerUserId = u.Id
+WHERE qp.RankWithinCategory <= 5 
+ORDER BY u.ReputationCategory, qp.Upvotes DESC;

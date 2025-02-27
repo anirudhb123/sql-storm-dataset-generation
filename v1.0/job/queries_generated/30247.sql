@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        t.kind,
+        1 AS level
+    FROM 
+        aka_title AS m
+    JOIN 
+        kind_type AS t ON m.kind_id = t.id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        lt.title,
+        lt.production_year,
+        kt.kind,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        title AS lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        kind_type AS kt ON lt.kind_id = kt.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 4
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind,
+        RANK() OVER (PARTITION BY mh.kind ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        movie_hierarchy AS mh
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.kind,
+    COALESCE(CAST(COUNT(DISTINCT ci.person_id) AS INTEGER), 0) AS num_actors,
+    COALESCE(CAST(GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS TEXT), 'No Names Available') AS actors
+FROM 
+    top_movies AS tm
+LEFT JOIN 
+    complete_cast AS cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name AS ak ON ci.person_id = ak.person_id
+WHERE 
+    tm.rank <= 5
+GROUP BY 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.kind
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

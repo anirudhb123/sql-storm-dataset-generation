@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY(SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))) ORDER BY RANDOM()) ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND -- Only considering questions
+        p.ViewCount > 100 -- Filter for popular questions
+),
+TagStatistics AS (
+    SELECT
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName,
+        COUNT(*) AS QuestionCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only considering questions
+        p.ViewCount > 100 -- Popular questions again
+    GROUP BY 
+        TagName
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountyEarned,
+        SUM(CASE WHEN bh.Date > NOW() - INTERVAL '1 year' THEN 1 ELSE 0 END) AS BadgesEarnedLastYear
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges bh ON u.Id = bh.UserId
+    WHERE 
+        u.Reputation > 1000 -- Considering users with significant reputation
+    GROUP BY 
+        u.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ts.TagName,
+    ts.QuestionCount,
+    ur.DisplayName AS UserWithReputation,
+    ur.TotalBountyEarned,
+    ur.BadgesEarnedLastYear
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+JOIN 
+    UserReputation ur ON ur.UserId = rp.OwnerUserId
+WHERE 
+    rp.Rank <= 10 -- Get top 10 ranked posts for each tag
+ORDER BY 
+    ts.QuestionCount DESC, rp.Score DESC;

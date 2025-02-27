@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS RankByTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        Tags,
+        OwnerDisplayName,
+        CommentCount,
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByTag = 1
+),
+TagCounts AS (
+    SELECT 
+        TRIM(unnest(string_to_array(Tags, '<>'))) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+MostCommonTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.VoteCount,
+    mct.Tag,
+    mct.PostCount
+FROM 
+    TopPosts tp
+JOIN 
+    MostCommonTags mct ON tp.Tags LIKE '%' || mct.Tag || '%'
+ORDER BY 
+    mct.PostCount DESC, tp.VoteCount DESC
+LIMIT 10;

@@ -1,0 +1,32 @@
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    u.Reputation AS OwnerReputation,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    MAX(ph.CreationDate) AS LastEditDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') AS tag_array
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag_array)
+
+WHERE 
+    p.PostTypeId = 1 
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.Reputation
+ORDER BY 
+    p.CreationDate DESC;

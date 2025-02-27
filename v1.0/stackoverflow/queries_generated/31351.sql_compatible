@@ -1,0 +1,71 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id, 
+        TagName, 
+        COUNT(*) OVER() AS TotalTags,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+
+    UNION ALL
+    
+    SELECT 
+        t.Id, 
+        t.TagName, 
+        p.Title, 
+        r.Level + 1
+    FROM 
+        Posts p
+        JOIN PostLinks pl ON p.Id = pl.RelatedPostId 
+        JOIN Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+        JOIN RecursiveTagHierarchy r ON pl.PostId = r.Id
+    WHERE 
+        p.AcceptedAnswerId IS NULL
+),
+LatestPostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Author,
+        p.CreationDate,
+        DENSE_RANK() OVER(PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT
+    t.TagName,
+    COUNT(DISTINCT lp.PostId) AS PostCount,
+    SUM(COALESCE(vs.UpVotes, 0) - COALESCE(vs.DownVotes, 0)) AS NetVotes,
+    STRING_AGG(lp.Title, ', ') AS RecentPostsTitles,
+    CONCAT('Total Tags: ', r.TotalTags) AS TagInfo,
+    MAX(lp.CreationDate) AS LatestPostDate
+FROM 
+    RecursiveTagHierarchy t
+LEFT JOIN 
+    LatestPostCTE lp ON t.TagName IN (SELECT value FROM STRING_SPLIT(lp.Tags, ','))
+LEFT JOIN 
+    VoteSummary vs ON lp.PostId = vs.PostId
+GROUP BY 
+    t.TagName, r.TotalTags
+HAVING 
+    COUNT(DISTINCT lp.PostId) > 1
+ORDER BY 
+    NetVotes DESC, 
+    PostCount DESC;

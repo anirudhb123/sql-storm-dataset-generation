@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(CAST(m.production_year AS VARCHAR), 'Unknown Year') AS production_year,
+        COALESCE(k.keyword, 'No Keywords') AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT 
+        m.id,
+        m.title,
+        COALESCE(CAST(m.production_year AS VARCHAR), 'Unknown Year'),
+        COALESCE(k.keyword, 'No Keywords')
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+)
+
+SELECT 
+    aka.name AS actor_name,
+    title.title AS movie_title,
+    title.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    (SELECT AVG(m.production_year) 
+     FROM aka_title m 
+     WHERE m.production_year IS NOT NULL) AS avg_production_year,
+    ROW_NUMBER() OVER (PARTITION BY aka.name ORDER BY title.production_year DESC) AS rn
+FROM 
+    aka_name aka
+JOIN 
+    cast_info ci ON aka.person_id = ci.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_hierarchy title ON ci.movie_id = title.movie_id
+LEFT JOIN 
+    movie_info mi ON title.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+LEFT JOIN 
+    movie_keyword mk ON title.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    aka.name IS NOT NULL AND aka.name <> ''
+    AND (CASE WHEN title.production_year IS NULL THEN 'Before ' || EXTRACT(YEAR FROM DATE '2024-10-01') ELSE 'After ' || title.production_year END) IS NOT NULL
+GROUP BY 
+    aka.name, title.title, title.production_year, avg_production_year, rn
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    avg_production_year DESC, rn
+LIMIT 100 OFFSET 0;

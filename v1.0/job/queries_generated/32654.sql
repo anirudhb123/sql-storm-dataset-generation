@@ -1,0 +1,52 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT t.id AS title_id, t.title, t.production_year, t.episode_of_id, t.season_nr, 1 AS level
+    FROM title t
+    WHERE t.kind_id IN (1, 2)  -- Assume 1 and 2 are some type IDs for series and episodes
+
+    UNION ALL
+
+    SELECT t.id, t.title, t.production_year, t.episode_of_id, t.season_nr, th.level + 1
+    FROM title t
+    JOIN title_hierarchy th ON t.episode_of_id = th.title_id
+)
+
+SELECT 
+    t.title AS title,
+    EXTRACT(YEAR FROM CURRENT_DATE) - MAX(t.production_year) AS years_since_release,
+    COUNT(DISTINCT c.person_id) AS num_cast,
+    STRING_AGG(a.name, ', ') AS cast_names,
+    k.keyword AS movie_keyword,
+    ci.kind AS company_type,
+    CASE 
+        WHEN COUNT(ci.id) > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS has_companies
+FROM 
+    title_hierarchy th
+LEFT JOIN 
+    aka_title t ON th.title_id = t.id
+LEFT JOIN 
+    cast_info c ON t.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    company_type ci ON mc.company_type_id = ci.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year IS NOT NULL
+GROUP BY 
+    t.title, k.keyword, ci.kind
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    years_since_release DESC, t.title;
+
+-- Recursive CTE to find titles with their episodes
+-- Aggregates on cast names and filters based on having more than 5 cast members

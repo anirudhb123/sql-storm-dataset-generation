@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        cd_gender,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS total_orders,
+        AVG(ws.net_paid) AS avg_order_value,
+        COUNT(DISTINCT ws.customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+        AND cd.marital_status = 'M'
+    GROUP BY 
+        ws.web_site_id, cd_gender
+),
+ranked_sales AS (
+    SELECT 
+        sales.web_site_id,
+        sales.cd_gender,
+        sales.total_profit,
+        sales.total_orders,
+        sales.avg_order_value,
+        sales.unique_customers,
+        RANK() OVER (PARTITION BY sales.web_site_id ORDER BY sales.total_profit DESC) AS profit_rank
+    FROM 
+        sales_summary sales
+)
+SELECT 
+    ws.web_site_id,
+    ws.total_profit,
+    ws.total_orders,
+    ws.avg_order_value,
+    ws.unique_customers,
+    ws.cd_gender,
+    CASE 
+        WHEN ws.profit_rank <= 3 THEN 'Top Performer'
+        ELSE 'Regular Performer'
+    END AS performance_category
+FROM 
+    ranked_sales ws
+WHERE 
+    ws.total_orders > 100
+ORDER BY 
+    ws.web_site_id, ws.profit_rank;

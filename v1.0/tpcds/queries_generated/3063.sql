@@ -1,0 +1,69 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer AS c
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= 2451916 -- Assuming a certain date range
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    JOIN customer AS c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_sales IS NOT NULL
+),
+ReturningCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns
+    FROM 
+        customer AS c
+    LEFT JOIN store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+FinalReport AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.total_sales,
+        tc.order_count,
+        rc.total_returns,
+        (tc.total_sales - COALESCE(rc.total_returns, 0) * (SELECT AVG(ws.ws_sales_price) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_sk)) AS net_sales
+    FROM 
+        TopCustomers tc
+    LEFT JOIN ReturningCustomers rc ON tc.c_customer_sk = rc.c_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ROUND(fr.net_sales, 2) AS net_sales,
+    fr.order_count,
+    fr.total_returns
+FROM 
+    FinalReport fr
+JOIN customer AS c ON fr.c_customer_sk = c.c_customer_sk
+WHERE 
+    fr.sales_rank <= 10
+ORDER BY 
+    fr.net_sales DESC;

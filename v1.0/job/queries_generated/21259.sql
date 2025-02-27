@@ -1,0 +1,91 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+MovieKeywordCount AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        GROUP_CONCAT(rt.role ORDER BY ci.nr_order) AS roles 
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.note IS NULL OR ci.note = ''
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        COALESCE(mkc.keyword_count, 0) AS keyword_count,
+        COALESCE(cr.roles, 'No roles') AS roles,
+        mv.production_year,
+        mv.year_rank
+    FROM 
+        RankedMovies mv
+    LEFT JOIN 
+        MovieKeywordCount mkc ON mv.movie_id = mkc.movie_id
+    LEFT JOIN 
+        CastRoles cr ON mv.movie_id = cr.movie_id
+),
+FinalSelection AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN year_rank <= 5 THEN 'Top 5 in Year'
+            WHEN keyword_count > 10 THEN 'Popular Movie'
+            ELSE 'Standard Movie' 
+        END AS movie_category
+    FROM 
+        MoviesWithKeywords
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.keyword_count,
+    f.roles,
+    f.movie_category
+FROM 
+    FinalSelection f
+WHERE 
+    f.production_year BETWEEN 2000 AND 2020
+    AND (f.keyword_count > 0 OR f.roles IS NOT NULL)
+ORDER BY 
+    f.production_year DESC,
+    f.keyword_count DESC NULLS LAST
+LIMIT 100
+UNION ALL
+SELECT 
+    DISTINCT mv.movie_id,
+    mv.title,
+    mv.production_year,
+    -1 AS keyword_count,
+    'No roles' AS roles,
+    'Legacy Movie' AS movie_category
+FROM 
+    aka_title mv
+WHERE 
+    (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = mv.movie_id) = 0
+    AND mv.production_year < 2000
+ORDER BY 2;

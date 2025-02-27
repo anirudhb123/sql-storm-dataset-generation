@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level, 
+           CAST(s.s_name AS VARCHAR(255)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey,
+           s.s_acctbal, 
+           sh.level + 1,
+           CAST(sh.path || ' -> ' || s.s_name AS VARCHAR(255))
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierHierarchy sh ON ps.ps_partkey = sh.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+OrderStats AS (
+    SELECT o.o_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY o.o_custkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(os.total_revenue, 0) AS total_revenue
+    FROM customer c
+    LEFT JOIN OrderStats os ON c.c_custkey = os.o_custkey
+),
+MaxRevenue AS (
+    SELECT MAX(total_revenue) AS max_revenue
+    FROM CustomerRevenue
+),
+FilteredCustomers AS (
+    SELECT *,
+           RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM CustomerRevenue
+    WHERE total_revenue = (SELECT max_revenue FROM MaxRevenue)
+)
+SELECT DISTINCT
+    ph.s_name AS Supplier_Name,
+    ph.path AS Supplier_Hierarchy,
+    fc.c_name AS Customer_Name,
+    fc.total_revenue AS Revenue,
+    'High Revenue' AS Revenue_Classification
+FROM FilteredCustomers fc
+JOIN SupplierHierarchy ph ON fc.total_revenue > (SELECT AVG(total_revenue) FROM CustomerRevenue)
+WHERE ph.level > 1
+ORDER BY fc.total_revenue DESC;

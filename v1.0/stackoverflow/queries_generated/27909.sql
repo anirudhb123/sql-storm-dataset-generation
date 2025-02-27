@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body, 
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT rp.PostId) AS PostsCreated,
+        SUM(rp.AnswerCount) AS TotalAnswers,
+        SUM(rp.UpVotes) AS TotalUpVotes,
+        SUM(rp.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostsCreated,
+    ups.TotalAnswers,
+    ups.TotalUpVotes,
+    ups.TotalDownVotes,
+    CASE 
+        WHEN ups.TotalUpVotes > ups.TotalDownVotes THEN 'Positive Impact' 
+        WHEN ups.TotalUpVotes < ups.TotalDownVotes THEN 'Negative Impact' 
+        ELSE 'Neutral Impact' 
+    END AS ImpactAssessment
+FROM 
+    UserPostStats ups
+WHERE 
+    ups.PostsCreated > 0
+ORDER BY 
+    ups.TotalUpVotes DESC, ups.TotalAnswers DESC;

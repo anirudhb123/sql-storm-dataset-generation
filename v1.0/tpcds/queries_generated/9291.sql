@@ -1,0 +1,66 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2022
+    GROUP BY
+        ws.web_site_sk, ws_item_sk
+),
+top_sales AS (
+    SELECT
+        web_site_sk,
+        ws_item_sk,
+        total_quantity,
+        total_sales
+    FROM
+        ranked_sales
+    WHERE
+        rank <= 10
+),
+customer_details AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    ts.web_site_sk,
+    ts.ws_item_sk,
+    ts.total_quantity,
+    ts.total_sales
+FROM
+    customer_details cs
+JOIN
+    web_sales ws ON cs.c_customer_sk = ws.ws_bill_customer_sk
+JOIN
+    top_sales ts ON ws.ws_item_sk = ts.ws_item_sk
+WHERE
+    ws.ws_sold_date_sk IN (
+        SELECT d_date_sk FROM date_dim WHERE d_year = 2022 AND d_moy = 12
+    )
+ORDER BY
+    ts.total_sales DESC, cs.c_last_name, cs.c_first_name;

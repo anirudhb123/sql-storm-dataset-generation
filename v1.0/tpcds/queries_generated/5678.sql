@@ -1,0 +1,43 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id, 
+        SUM(ws.ws_net_paid) AS total_sales, 
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        d.d_year = 2022 AND 
+        d.d_moy IN (11, 12) 
+    GROUP BY 
+        ws.web_site_id 
+),
+TopSales AS (
+    SELECT 
+        web_site_id, 
+        total_sales, 
+        order_count, 
+        avg_order_value 
+    FROM 
+        SalesData 
+    WHERE 
+        sales_rank <= 5
+)
+SELECT 
+    w.web_name, 
+    ts.total_sales, 
+    ts.order_count, 
+    ts.avg_order_value, 
+    ROUND((ts.total_sales / SUM(ts.total_sales) OVER ()) * 100, 2) AS sales_percentage
+FROM 
+    TopSales ts
+JOIN 
+    web_site w ON ts.web_site_id = w.web_site_id
+ORDER BY 
+    ts.total_sales DESC;

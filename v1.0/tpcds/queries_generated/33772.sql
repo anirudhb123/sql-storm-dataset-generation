@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_quantity, 
+        ws_sales_price, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+AddressCTE AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+    WHERE 
+        ca_country = 'USA'
+),
+CustomerCTE AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_income_band_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedSales AS (
+    SELECT 
+        item.i_item_id,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        SalesCTE s
+    JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        item.i_item_id
+    HAVING 
+        SUM(ws_net_profit) > 10000
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    s.total_quantity,
+    s.total_profit,
+    CASE 
+        WHEN s.total_profit IS NULL THEN 'No Profit'
+        ELSE CONCAT('Profit of $', FORMAT(s.total_profit, 2))
+    END AS profit_statement
+FROM 
+    CustomerCTE c
+LEFT JOIN 
+    AddressCTE a ON c.c_customer_sk = a.ca_address_sk
+LEFT JOIN 
+    AggregatedSales s ON c.c_customer_sk = s.i_item_id
+WHERE 
+    (c.cd_income_band_sk IS NOT NULL OR s.total_profit > 5000)
+ORDER BY 
+    c.c_last_name, c.c_first_name;

@@ -1,0 +1,79 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(MAX(l.l_discount), 0) AS highest_discount,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_brand, p.p_retailprice
+),
+TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.total_parts,
+        ss.total_supply_cost,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS rank
+    FROM 
+        SupplierStats ss
+    WHERE 
+        ss.total_supply_cost > 0
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    o.o_orderstatus,
+    pd.p_brand,
+    pd.p_retailprice,
+    pd.highest_discount,
+    pd.total_quantity_sold,
+    ts.s_suppkey,
+    ts.total_parts,
+    ts.total_supply_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    PartDetails pd ON l.l_partkey = pd.p_partkey
+LEFT JOIN 
+    TopSuppliers ts ON pd.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps
+        WHERE ps.ps_supplycost < pd.p_retailprice
+    )
+WHERE 
+    (o.o_orderstatus = 'F' AND ts.rank <= 5) 
+    OR (pd.total_quantity_sold > 1000 AND pd.highest_discount IS NOT NULL)
+ORDER BY 
+    o.o_orderdate DESC, o.o_totalprice ASC;

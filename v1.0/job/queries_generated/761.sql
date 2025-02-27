@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(ak.name, 'Unknown') AS main_actor,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(CASE 
+            WHEN ci.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS noted_cast_ratio
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id 
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, ak.name
+ORDER BY 
+    tm.production_year DESC, tm.cast_count DESC;

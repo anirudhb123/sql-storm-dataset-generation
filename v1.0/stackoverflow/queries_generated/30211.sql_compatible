@@ -1,0 +1,86 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.OwnerUserId,
+        COALESCE(p.ClosedDate, 'Open') AS Status,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalVotes,
+        RANK() OVER(ORDER BY ua.TotalVotes DESC) AS VoteRank
+    FROM UserActivity ua
+    WHERE ua.TotalVotes > 0
+),
+PostStats AS (
+    SELECT
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.Status,
+        tu.DisplayName AS TopUser,
+        tu.VoteRank
+    FROM PostDetails pd
+    LEFT JOIN TopUsers tu ON pd.OwnerUserId = tu.UserId
+    WHERE pd.Status = 'Open'
+),
+AggregatedPostStats AS (
+    SELECT
+        Status,
+        COUNT(*) AS TotalPosts,
+        AVG(Score) AS AverageScore,
+        SUM(ViewCount) AS TotalViews
+    FROM PostDetails
+    GROUP BY Status
+),
+FinalReport AS (
+    SELECT
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = ps.PostId) AS TotalComments,
+        ps.TopUser,
+        ps.VoteRank,
+        aps.TotalPosts,
+        aps.AverageScore,
+        aps.TotalViews
+    FROM PostStats ps
+    JOIN AggregatedPostStats aps ON ps.Status = aps.Status
+)
+SELECT 
+    fr.*,
+    (CASE 
+        WHEN fr.VoteRank IS NOT NULL THEN 'Ranked User'
+        ELSE 'Non-ranked User'
+    END) AS UserRankStatus
+FROM FinalReport fr
+WHERE fr.TotalComments > 0
+ORDER BY fr.Score DESC, fr.ViewCount DESC;

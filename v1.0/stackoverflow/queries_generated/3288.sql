@@ -1,0 +1,63 @@
+WITH UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+), PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) ) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+), RecentActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        DATE_TRUNC('day', p.LastActivityDate) AS PostDate,
+        COUNT(*) AS ActivityCount
+    FROM 
+        Posts p
+    WHERE 
+        p.LastActivityDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId, PostDate
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.TotalPosts,
+    COALESCE(r.ActivityCount, 0) AS RecentActivity,
+    COALESCE((SELECT STRING_AGG(pt.TagName, ', ') 
+               FROM PopularTags pt 
+               JOIN Posts p ON pt.TagName = ANY(STRING_TO_ARRAY(p.Tags, '><')) 
+               WHERE p.OwnerUserId = u.UserId), 'No Tags') AS PopularTags,
+    CASE 
+        WHEN u.UpVotes - u.DownVotes > 10 THEN 'High Performer'
+        WHEN u.UpVotes - u.DownVotes BETWEEN 1 AND 10 THEN 'Moderate Performer'
+        ELSE 'Needs Improvement'
+    END AS PerformanceCategory
+FROM 
+    UserScores u
+LEFT JOIN 
+    RecentActivity r ON u.UserId = r.OwnerUserId
+ORDER BY 
+    u.Reputation DESC
+FETCH FIRST 10 ROWS ONLY;

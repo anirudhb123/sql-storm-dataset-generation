@@ -1,0 +1,60 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, 
+           o_custkey, 
+           o_orderstatus, 
+           o_totalprice, 
+           o_orderdate
+    FROM orders
+    WHERE o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, 
+           o.o_custkey, 
+           o.o_orderstatus, 
+           o.o_totalprice, 
+           o.o_orderdate
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey AND o.o_orderdate > oh.o_orderdate
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_availqty, 
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           co.total_spent
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+    WHERE co.total_spent > 10000
+)
+SELECT ph.p_partkey, 
+       ph.p_name, 
+       ph.p_retailprice, 
+       ps.total_availqty, 
+       ps.total_supplycost, 
+       COALESCE(hv.total_spent, 0) AS customer_spent,
+       COUNT(DISTINCT oh.o_orderkey) OVER (PARTITION BY ph.p_partkey) AS order_count,
+       RANK() OVER (ORDER BY ps.total_supplycost DESC) AS supplier_rank
+FROM part ph
+LEFT JOIN PartSupplier ps ON ph.p_partkey = ps.ps_partkey
+LEFT JOIN HighValueCustomers hv ON ps.ps_partkey IN (
+    SELECT ps_partkey 
+    FROM partsupp 
+    WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = hv.c_custkey)
+)
+LEFT JOIN lineitem l ON ph.p_partkey = l.l_partkey
+LEFT JOIN OrderHierarchy oh ON l.l_orderkey = oh.o_orderkey
+WHERE ph.p_retailprice < (SELECT AVG(p_retailprice) FROM part) 
+AND (ps.total_availqty IS NOT NULL OR ps.total_availqty > 100)
+ORDER BY supplier_rank, customer_spent DESC;

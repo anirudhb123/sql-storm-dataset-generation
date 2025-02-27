@@ -1,0 +1,61 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(V.Id) DESC) AS VoteRank
+    FROM
+        Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEdited,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    PST.RecentPostId,
+    PST.Title,
+    PST.CreationDate AS PostCreation,
+    U.Reputation,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    PHS.LastEdited,
+    PHS.CloseReopenCount,
+    CASE WHEN U.TotalVotes IS NULL THEN 'No votes yet'
+         WHEN U.TotalVotes >= 50 THEN 'Popular user'
+         ELSE 'Growing presence' END AS UserStatus
+FROM 
+    UserVoteStats U
+JOIN 
+    RecentPosts PST ON U.UserId = PST.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary PHS ON PST.PostId = PHS.PostId
+WHERE 
+    U.VoteRank <= 10
+ORDER BY 
+    U.TotalVotes DESC, PST.CreationDate DESC;

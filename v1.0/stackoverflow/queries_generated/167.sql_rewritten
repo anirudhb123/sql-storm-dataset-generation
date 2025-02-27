@@ -1,0 +1,83 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        UpVotesCount, 
+        DownVotesCount, 
+        ReputationRank, 
+        PostsCount
+    FROM 
+        UserStats 
+    WHERE 
+        Reputation > 1000
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ViewCount, 
+        P.Score, 
+        U.DisplayName AS OwnerName,
+        COUNT(C.OId) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS PopularRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+UserPostStats AS (
+    SELECT 
+        U.UserId, 
+        U.DisplayName, 
+        ARRAY_AGG(DISTINCT P.Tags) AS UserTags,
+        COUNT(P.Id) AS UserPostsCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        TopUsers U
+    LEFT JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    GROUP BY 
+        U.UserId, U.DisplayName
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation,
+    P.Title AS PopularPost,
+    P.ViewCount,
+    C.UserTags,
+    UP.UserPostsCount,
+    UP.TotalViews
+FROM 
+    TopUsers U
+JOIN 
+    PopularPosts P ON U.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = P.PostId)
+JOIN 
+    UserPostStats UP ON U.UserId = UP.UserId
+ORDER BY 
+    U.Reputation DESC, P.ViewCount DESC
+LIMIT 10;

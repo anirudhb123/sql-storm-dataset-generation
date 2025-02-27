@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+sales_summary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(address.ca_city, 'Unknown') AS city,
+        demo.cd_gender,
+        CASE 
+            WHEN demo.cd_marital_status = 'M' THEN 'Married'
+            WHEN demo.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        sales.total_quantity,
+        sales.total_sales
+    FROM 
+        item 
+    LEFT JOIN 
+        ranked_sales sales ON item.i_item_sk = sales.ws_item_sk AND sales.sales_rank = 1
+    LEFT JOIN 
+        customer c ON c.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = sales.ws_item_sk)
+    LEFT JOIN 
+        customer_demographics demo ON c.c_current_cdemo_sk = demo.cd_demo_sk
+    LEFT JOIN 
+        customer_address address ON c.c_current_addr_sk = address.ca_address_sk
+    WHERE 
+        address.ca_state IS NOT NULL AND 
+        (demo.cd_purchase_estimate > 500 AND demo.cd_credit_rating IS NOT NULL)
+)
+SELECT 
+    s.i_item_id,
+    s.i_item_desc,
+    s.city,
+    s.marital_status,
+    s.total_quantity,
+    ROUND(s.total_sales, 2) AS formatted_total_sales,
+    CASE 
+        WHEN s.total_sales IS NULL THEN 'No Sales'
+        WHEN s.total_sales = 0 THEN 'Zero Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    sales_summary s
+WHERE 
+    s.total_quantity > 10
+ORDER BY 
+    s.total_sales DESC
+LIMIT 100;

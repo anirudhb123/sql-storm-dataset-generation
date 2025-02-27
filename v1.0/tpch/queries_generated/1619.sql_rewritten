@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        MAX(ps.ps_supplycost) > 300
+)
+SELECT 
+    r.r_name AS region,
+    c.c_name AS customer_name,
+    COALESCE(occ.order_count, 0) AS total_orders,
+    COALESCE(occ.total_spent, 0) AS total_revenue,
+    COUNT(DISTINCT ep.p_partkey) AS expensive_parts_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON rs.s_suppkey = n.n_nationkey
+FULL OUTER JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    CustomerOrderCounts occ ON c.c_custkey = occ.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_suppkey = rs.s_suppkey
+LEFT JOIN 
+    ExpensiveParts ep ON l.l_partkey = ep.p_partkey
+WHERE 
+    l.l_shipdate > '1997-01-01' 
+    AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY 
+    r.r_name, c.c_name
+ORDER BY 
+    r.r_name, total_revenue DESC;

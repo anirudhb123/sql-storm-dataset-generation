@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT 
+            UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+            PostId 
+         FROM 
+            Posts) t ON p.Id = t.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, u.DisplayName, pt.Name
+), FilteredPosts AS (
+    SELECT 
+        rp.*, 
+        CASE 
+            WHEN rp.CommentCount > 5 THEN 'Highly Engaged'
+            WHEN rp.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Engaged'
+            ELSE 'Low Engagement'
+        END AS EngagementLevel
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewRank <= 10
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    fp.PostType,
+    fp.CommentCount,
+    fp.UpVoteCount,
+    fp.DownVoteCount,
+    fp.Tags,
+    fp.EngagementLevel
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.ViewCount DESC, 
+    fp.CommentCount DESC;

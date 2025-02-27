@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS rn
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 2457318 AND 2457343  -- Example date range
+),
+return_summary AS (
+    SELECT
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_count
+    FROM
+        web_returns
+    GROUP BY
+        wr_item_sk
+),
+sales_summary AS (
+    SELECT
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_sold_quantity,
+        SUM(sd.ws_ext_sales_price) AS total_sales_amount,
+        MAX(sd.ws_sales_price) AS max_sale_price,
+        COALESCE(rs.total_returned, 0) AS total_returned,
+        COALESCE(rs.total_return_amt, 0) AS total_return_amt
+    FROM
+        sales_data sd
+    LEFT JOIN
+        return_summary rs ON sd.ws_item_sk = rs.wr_item_sk
+    GROUP BY
+        sd.ws_item_sk
+),
+top_sales AS (
+    SELECT
+        ss.ws_item_sk,
+        ss.total_sold_quantity,
+        ss.total_sales_amount,
+        ss.max_sale_price,
+        ss.total_returned,
+        ss.total_return_amt,
+        RANK() OVER (ORDER BY ss.total_sales_amount DESC) AS sales_rank
+    FROM
+        sales_summary ss
+)
+SELECT
+    s.i_item_id,
+    s.i_product_name,
+    ts.total_sold_quantity,
+    ts.total_sales_amount,
+    ts.max_sale_price,
+    ts.total_returned,
+    ts.total_return_amt,
+    ts.sales_rank
+FROM
+    top_sales ts
+JOIN
+    item s ON ts.ws_item_sk = s.i_item_sk
+WHERE
+    ts.sales_rank <= 10
+ORDER BY
+    ts.total_sales_amount DESC;

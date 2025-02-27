@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(sub.StringCount, 0) AS TagCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS StringCount
+        FROM (
+            SELECT 
+                PostId,
+                UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag
+            FROM Posts
+            WHERE Tags IS NOT NULL AND Tags <> ''
+        ) AS subquery
+        GROUP BY PostId
+    ) AS sub ON p.Id = sub.PostId
+),
+CombinedData AS (
+    SELECT 
+        ur.DisplayName AS UserDisplayName,
+        ur.Reputation AS UserReputation,
+        ps.Title AS PostTitle,
+        ps.ViewCount,
+        ps.Score AS PostScore,
+        ps.AnswerCount,
+        ps.CommentCount,
+        ps.TagCount
+    FROM UserReputation ur
+    JOIN Posts p ON ur.UserId = p.OwnerUserId
+    JOIN PostStatistics ps ON p.Id = ps.PostId
+)
+SELECT 
+    UserDisplayName,
+    UserReputation,
+    PostTitle,
+    ViewCount,
+    PostScore,
+    AnswerCount,
+    CommentCount,
+    TagCount,
+    RANK() OVER (ORDER BY UserReputation DESC) AS RankByReputation,
+    RANK() OVER (ORDER BY PostScore DESC) AS RankByScore
+FROM CombinedData
+ORDER BY UserReputation DESC, PostScore DESC
+LIMIT 50;

@@ -1,0 +1,82 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        COALESCE(p.Title, 'No Title') AS Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AverageBounty,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpVoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RecentPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        COALESCE(CommentCount, 0) AS CommentCount,
+        COALESCE(AverageBounty, 0) AS AverageBounty,
+        COALESCE(TotalBounty, 0) AS TotalBounty,
+        UpVoteCount,
+        DownVoteCount,
+        Level
+    FROM 
+        PostStats
+    JOIN 
+        RecursivePostCTE ON PostStats.Id = RecursivePostCTE.PostId
+    WHERE 
+        PostStats.RowNum <= 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CommentCount,
+    rp.AverageBounty,
+    rp.TotalBounty,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    rp.Level,
+    CASE 
+        WHEN rp.UpVoteCount IS NULL THEN 'No Votes'
+        WHEN rp.DownVoteCount IS NULL THEN 'Potentially very popular'
+        ELSE 'Mixed reception'
+    END AS Reception,
+    HOUR(cast('2024-10-01 12:34:56' as timestamp) - rp.CreationDate) AS HoursSincePost
+FROM 
+    RecentPosts rp
+ORDER BY 
+    rp.Level DESC, rp.UpVoteCount DESC;

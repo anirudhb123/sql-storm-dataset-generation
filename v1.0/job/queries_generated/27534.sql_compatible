@@ -1,0 +1,77 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (
+            SELECT 
+                ci.person_id 
+            FROM 
+                complete_cast ci 
+            WHERE 
+                ci.movie_id = mt.id
+        )
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.title, mt.production_year, cn.name, ct.kind
+),
+role_distribution AS (
+    SELECT 
+        ci.role_id,
+        rt.role,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.role_id, rt.role
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.company_type,
+    md.aka_names,
+    md.keywords,
+    rd.role,
+    rd.role_count
+FROM 
+    movie_details md
+JOIN 
+    role_distribution rd ON rd.role_id IN (
+        SELECT 
+            ci.role_id 
+        FROM 
+            complete_cast c
+        JOIN 
+            cast_info ci ON c.id = ci.movie_id
+        WHERE 
+            c.movie_id IN (
+                SELECT DISTINCT 
+                    mt.id 
+                FROM 
+                    aka_title mt
+            )
+    )
+ORDER BY 
+    md.production_year DESC, 
+    rd.role_count DESC;

@@ -1,0 +1,98 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        c.person_id,
+        c.role_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rn,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY a.id) AS keyword_count
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+        AND a.production_year >= 2000
+),
+
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COUNT(cf.id) AS cast_count,
+        COALESCE(MAX(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END), 0) AS female_cast,
+        COALESCE(MAX(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END), 0) AS male_cast
+    FROM 
+        RankedMovies rm
+    JOIN 
+        cast_info cf ON rm.person_id = cf.person_id
+    LEFT JOIN 
+        name p ON cf.person_id = p.id
+    WHERE 
+        rm.rn = 1
+    GROUP BY 
+        rm.title, rm.production_year
+),
+
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS unique_company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+),
+
+FinalResults AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_count,
+        fm.female_cast,
+        fm.male_cast,
+        ci.company_name,
+        ci.company_type,
+        ci.unique_company_count,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = fm.movie_id) AS info_count,
+        (SELECT STRING_AGG(DISTINCT mk.keyword, ', ') FROM movie_keyword mk WHERE mk.movie_id = fm.movie_id) AS keywords
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        CompanyInfo ci ON fm.movie_id = ci.movie_id
+    WHERE 
+        fm.cast_count > 0
+    ORDER BY 
+        fm.production_year DESC, fm.title
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN unique_company_count IS NULL THEN 'No companies'
+        ELSE 'Companies included'
+    END AS company_status,
+    CAST(female_cast AS FLOAT) / NULLIF(cast_count, 0) AS female_ratio,
+    NULLIF(male_cast - female_cast, 0) AS male_female_difference,
+    CASE 
+        WHEN (SELECT COUNT(*) FROM FinalResults) FILTER (WHERE production_year < 2010) > 0 THEN 'Golden Era'
+        ELSE 'New Age'
+    END AS era_classification
+FROM 
+    FinalResults
+WHERE 
+    keywords IS NOT NULL
+    OR company_status = 'No companies'
+ORDER BY 
+    female_ratio DESC NULLS LAST, production_year DESC;

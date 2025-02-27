@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS item_rank,
+        ws.ws_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+MaxProfits AS (
+    SELECT 
+        rs.ws_item_sk, 
+        MAX(rs.ws_net_profit) AS max_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.item_rank = 1
+    GROUP BY 
+        rs.ws_item_sk
+),
+CustomerReturnStats AS (
+    SELECT 
+        cr.cr_returning_customer_sk,
+        COUNT(DISTINCT cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_returning_customer_sk
+),
+DemographicSummary AS (
+    SELECT 
+        cd.cd_gender, 
+        COUNT(DISTINCT c.c_customer_id) AS total_customers,
+        SUM(CASE WHEN hd.hd_income_band_sk IS NOT NULL THEN 1 ELSE 0 END) AS income_band_count,
+        COUNT(DISTINCT cd.cd_demo_sk) OVER (PARTITION BY cd.cd_gender) AS gender_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    ds.cd_gender,
+    ds.total_customers,
+    ds.income_band_count,
+    MAX(m.max_profit) AS max_web_profit,
+    SUM(cr.total_returns) AS total_customer_returns,
+    SUM(cr.total_return_value) AS total_return_value
+FROM 
+    DemographicSummary ds
+LEFT JOIN 
+    MaxProfits m ON m.ws_item_sk IN (SELECT i.i_item_sk FROM item i)
+LEFT JOIN 
+    CustomerReturnStats cr ON ds.total_customers = cr.cr_returning_customer_sk
+GROUP BY 
+    ds.cd_gender, ds.total_customers, ds.income_band_count
+HAVING 
+    MAX(m.max_profit) > 500 AND SUM(cr.total_return_value) IS NOT NULL
+ORDER BY 
+    ds.cd_gender DESC;

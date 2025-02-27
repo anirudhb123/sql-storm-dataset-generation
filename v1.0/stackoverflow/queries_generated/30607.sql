@@ -1,0 +1,59 @@
+WITH RecursiveQuestionStats AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(A.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        (SELECT COUNT(*) FROM Posts AS A WHERE A.ParentId = P.Id) AS TotalAnswers,
+        (SELECT COUNT(*) FROM Comments AS C WHERE C.PostId = P.Id) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY DATEDIFF(DAY, P.CreationDate, GETDATE()) ORDER BY P.Score DESC) AS Ranking
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON P.Id = A.AcceptedAnswerId
+    WHERE 
+        P.PostTypeId = 1 -- Questions
+),
+PopularQuestions AS (
+    SELECT 
+        Q.QuestionId,
+        Q.Title,
+        Q.CreationDate,
+        Q.Score,
+        Q.ViewCount,
+        Q.TotalAnswers,
+        Q.TotalComments,
+        Q.Ranking
+    FROM 
+        RecursiveQuestionStats Q
+    WHERE 
+        Q.Ranking <= 10
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PQ.Title,
+    PQ.Score,
+    PQ.ViewCount,
+    PQ.TotalAnswers,
+    PQ.TotalComments,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T
+     INNER JOIN Posts P ON P.Id = T.ExcerptPostId
+     WHERE P.Id = PQ.QuestionId) AS TagsUsed,
+    PH.UserDisplayName AS LastEditor
+FROM 
+    PopularQuestions PQ
+JOIN 
+    Users U ON PQ.QuestionId = U.Id
+LEFT JOIN 
+    PostHistory PH ON PQ.QuestionId = PH.PostId 
+                    AND PH.CreationDate = (SELECT MAX(PH2.CreationDate) 
+                                            FROM PostHistory PH2 
+                                            WHERE PH2.PostId = PQ.QuestionId)
+ORDER BY 
+    PQ.Score DESC,
+    PQ.ViewCount DESC;
+

@@ -1,0 +1,45 @@
+WITH RECURSIVE PartDetails AS (
+    SELECT p_partkey, p_name, p_retailprice, p_comment, 0 AS Level
+    FROM part
+    WHERE p_size BETWEEN 1 AND 20
+    UNION ALL
+    SELECT p.p_partkey, CONCAT(pd.p_name, ' => ', p.p_name), p.p_retailprice * 1.1, p.p_comment, Level + 1
+    FROM part p
+    JOIN PartDetails pd ON p.p_partkey <> pd.p_partkey
+    WHERE pd.Level < 5
+),
+AggregatedData AS (
+    SELECT n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE n.n_comment IS NOT NULL
+    GROUP BY n.n_name
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, c.c_mktsegment,
+           COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY c.c_mktsegment) AS CustomerOrders,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_returnflag = 'N'
+    WHERE o.o_orderstatus IN ('O', 'F')
+    AND EXISTS (SELECT 1 FROM PartDetails WHERE p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = s.s_suppkey))
+),
+FinalResults AS (
+    SELECT fd.o_orderkey, fd.c_mktsegment, fd.Revenue,
+           ROW_NUMBER() OVER (PARTITION BY fd.c_mktsegment ORDER BY fd.Revenue DESC) AS Rank
+    FROM FilteredOrders fd
+    WHERE fd.Revenue IS NOT NULL
+),
+DistinctTopOrders AS (
+    SELECT DISTINCT o.*
+    FROM FinalResults f
+    JOIN orders o ON f.o_orderkey = o.o_orderkey
+    WHERE f.Rank <= 5
+)
+SELECT d.*, ad.TotalCost
+FROM DistinctTopOrders d
+LEFT JOIN AggregatedData ad ON d.c_mktsegment = ad.n_name
+WHERE ad.TotalCost IS NULL OR ad.TotalCost > (SELECT AVG(TotalCost) FROM AggregatedData)
+ORDER BY d.o_orderkey, d.c_mktsegment;

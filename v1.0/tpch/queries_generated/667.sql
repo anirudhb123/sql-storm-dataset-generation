@@ -1,0 +1,61 @@
+WITH supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(s.s_acctbal) AS avg_acct_balance,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+nation_region AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sr.nation_name,
+    sr.region_name,
+    ss.total_available,
+    ss.avg_acct_balance,
+    od.total_revenue,
+    od.line_count,
+    CASE 
+        WHEN od.total_revenue IS NULL THEN 'No Revenue'
+        WHEN od.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Regular Revenue'
+    END AS revenue_category
+FROM 
+    supplier_summary ss
+OUTER JOIN 
+    order_details od ON ss.s_suppkey = od.o_orderkey 
+LEFT JOIN 
+    nation_region sr ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT MAX(p.p_partkey) FROM part p))
+WHERE 
+    ss.total_available > 50
+ORDER BY 
+    ss.avg_acct_balance DESC, od.total_revenue DESC;

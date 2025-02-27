@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS total_lines, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT d.n_name, 
+       COALESCE(d.total_acctbal, 0) AS nation_total_acctbal,
+       sh.supp_total_acctbal,
+       os.total_revenue,
+       ROW_NUMBER() OVER (PARTITION BY d.n_nationkey ORDER BY os.total_lines DESC) AS line_rank
+FROM NationDetails d
+FULL OUTER JOIN (
+    SELECT n.n_nationkey, SUM(s.s_acctbal) AS supp_total_acctbal
+    FROM SupplierHierarchy s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey
+) sh ON d.n_nationkey = sh.n_nationkey
+FULL OUTER JOIN OrderSummary os ON sh.n_nationkey = os.o_orderkey
+WHERE (os.total_lines IS NOT NULL OR d.total_acctbal > 5000)
+  AND (sh.supp_total_acctbal IS NULL OR sh.supp_total_acctbal < 20000)
+GROUP BY d.n_name, d.total_acctbal, sh.supp_total_acctbal, os.total_revenue, d.n_nationkey
+ORDER BY d.n_name, line_rank;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(NULLIF(p.OwnerDisplayName, ''), 'Anonymous') AS DisplayName
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount
+    FROM 
+        Comments pc
+    GROUP BY 
+        pc.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    us.DisplayName,
+    us.Reputation,
+    COALESCE(ps.CommentCount, 0) AS TotalComments,
+    MAX(CASE WHEN phd.HistoryRank = 1 THEN phd.Comment END) AS LastActionComment,
+    AVG(rp.Score) OVER () AS AvgPostScore,
+    COUNT(DISTINCT phd.UserId) AS UniqueEditors
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.PostId = us.UserId
+LEFT JOIN 
+    PostComments ps ON rp.PostId = ps.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.PostRank = 1
+GROUP BY 
+    rp.PostId, us.DisplayName, us.Reputation, ps.CommentCount
+HAVING 
+    MAX(CASE WHEN phd.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) = 1
+ORDER BY 
+    rp.Score DESC
+LIMIT 100 OFFSET 0;

@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY m.id) AS cast_count,
+        ROW_NUMBER() OVER (ORDER BY m.production_year DESC, m.title) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+), MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+), CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        MIN(CASE WHEN ct.kind = 'Production' THEN cn.name END) AS production_company,
+        MIN(CASE WHEN ct.kind = 'Distributor' THEN cn.name END) AS distributor
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.production_company, 'Unknown') AS production_company,
+    COALESCE(ci.distributor, 'Unknown') AS distributor,
+    rm.cast_count
+FROM 
+    RankedMovies rm
+FULL OUTER JOIN 
+    MovieKeywords mk ON mk.movie_id = rm.movie_id
+FULL OUTER JOIN 
+    CompanyInfo ci ON ci.movie_id = rm.movie_id
+WHERE 
+    rm.rn <= 100 OR rm.rn IS NULL
+ORDER BY 
+    rm.production_year DESC, rm.title;
+
+-- Additionally, add some unusual conditions to examine NULL logic
+WITH SubqueryContainingNULLs AS (
+    SELECT 
+        title, 
+        CASE 
+            WHEN production_year IS NOT NULL THEN 'Released' 
+            ELSE 'Not Released' 
+        END AS release_status
+    FROM 
+        aka_title
+)
+SELECT 
+    sub.title,
+    sub.release_status,
+    CASE 
+        WHEN release_status = 'Released' AND title IS NULL THEN 'Mysterious title' 
+        ELSE 'Known title' 
+    END AS title_status
+FROM 
+    SubqueryContainingNULLs sub
+WHERE 
+    (release_status = 'Not Released' OR 
+     (release_status = 'Released' AND sub.title ILIKE '%a%'))
+ORDER BY 
+    title_status, sub.title;

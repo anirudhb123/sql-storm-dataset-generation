@@ -1,0 +1,50 @@
+
+WITH SalesData AS (
+    SELECT 
+        cs_sold_date_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        SUM(cs_quantity) AS total_quantity
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2021-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2021-12-31')
+    GROUP BY 
+        cs_sold_date_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        SUM(sd.total_sales) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        SalesData sd ON c.c_customer_sk = sd.cs_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+GenderSales AS (
+    SELECT 
+        cd.gender,
+        SUM(cd.total_sales) AS gender_sales,
+        COUNT(cd.c_customer_sk) AS customer_count
+    FROM 
+        CustomerData cd
+    GROUP BY 
+        cd.gender
+)
+SELECT 
+    g.gender,
+    g.gender_sales,
+    g.customer_count,
+    ROUND(g.gender_sales / NULLIF(g.customer_count, 0), 2) AS average_sales_per_customer
+FROM 
+    GenderSales g
+ORDER BY 
+    g.gender_sales DESC;

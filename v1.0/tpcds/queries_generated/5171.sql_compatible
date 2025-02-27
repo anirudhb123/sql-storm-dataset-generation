@@ -1,0 +1,44 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        COUNT(DISTINCT cr.order_number) AS total_returns,
+        SUM(cr.return_amount) AS total_return_amount,
+        SUM(cr.return_tax) AS total_return_tax
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+CustomerPurchases AS (
+    SELECT
+        ws.bill_customer_sk,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_spent
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+ReturnStatistics AS (
+    SELECT
+        cr.returning_customer_sk,
+        COALESCE(cu.total_orders, 0) AS total_orders,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(cr.total_return_tax, 0) AS total_return_tax,
+        CASE 
+            WHEN COALESCE(cu.total_orders, 0) > 0 
+            THEN (COALESCE(cr.total_returns, 0) * 100.0 / cu.total_orders)
+            ELSE 0 
+        END AS return_rate
+    FROM CustomerReturns cr
+    LEFT JOIN CustomerPurchases cu ON cr.returning_customer_sk = cu.bill_customer_sk
+)
+SELECT 
+    r.returning_customer_sk,
+    r.total_orders,
+    r.total_returns,
+    r.total_return_amount,
+    r.total_return_tax,
+    r.return_rate
+FROM ReturnStatistics r
+WHERE r.return_rate > 10
+ORDER BY r.return_rate DESC
+FETCH FIRST 100 ROWS ONLY;

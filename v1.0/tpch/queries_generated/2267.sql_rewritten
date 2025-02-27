@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT ps_suppkey, 
+           SUM(ps_supplycost * ps_availqty) AS total_supplycost,
+           RANK() OVER (PARTITION BY ps_partkey ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS rank
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RecentOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderstatus,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_line_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT n.n_name,
+       COUNT(DISTINCT c.c_custkey) AS num_customers,
+       SUM(COALESCE(r.total_supplycost, 0)) AS total_supply_cost,
+       AVG(COALESCE(cos.total_spent, 0)) AS avg_spent_per_customer,
+       SUM(ros.avg_line_total) AS total_avg_line_total
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN RankedSuppliers r ON ps.ps_suppkey = r.ps_suppkey AND r.rank = 1
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerOrderStats cos ON c.c_custkey = cos.c_custkey
+LEFT JOIN RecentOrders ros ON ros.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O'
+)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY num_customers DESC;

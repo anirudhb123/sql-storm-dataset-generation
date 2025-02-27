@@ -1,0 +1,99 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        Score,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.Score,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+    WHERE 
+        p.PostTypeId = 2 -- Answers
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerDisplayName
+),
+RankedPosts AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.OwnerDisplayName,
+        pm.CommentCount,
+        pm.UpvoteCount,
+        pm.DownvoteCount,
+        pm.TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY pm.OwnerDisplayName ORDER BY pm.UpvoteCount DESC, pm.CommentCount DESC) AS PostRank
+    FROM 
+        PostMetrics pm
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    pm.OwnerDisplayName,
+    pm.CommentCount,
+    pm.UpvoteCount,
+    pm.DownvoteCount,
+    pm.TotalBounty,
+    ub.BadgeCount,
+    ub.LastBadgeDate,
+    rp.Level AS AnswerLevel
+FROM 
+    RecursivePosts rp
+JOIN 
+    PostMetrics pm ON rp.PostId = pm.PostId
+LEFT JOIN 
+    UserBadges ub ON pm.OwnerDisplayName = ub.DisplayName
+WHERE 
+    pm.CommentCount > 5 -- Only consider posts with more than 5 comments
+AND 
+    (pm.UpvoteCount - pm.DownvoteCount) > 10 -- More upvotes than downvotes
+ORDER BY 
+    rp.Score DESC, 
+    pm.CommentCount DESC;

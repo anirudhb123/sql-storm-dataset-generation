@@ -1,0 +1,79 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0 
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        rtc.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagCounts rtc ON t.ExcerptPostId = rtc.Id
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        (SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        U.DisplayName AS Owner,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(NULLIF(P.ClosedDate, '1970-01-01'), P.LastActivityDate) AS EffectiveDate,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+),
+VoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+
+SELECT 
+    PA.Title,
+    PA.Owner,
+    PA.CreationDate,
+    PA.Score,
+    PA.ViewCount,
+    PA.AnswerCount,
+    TS.TagName,
+    U.UserId,
+    U.DisplayName AS UserName,
+    U.Reputation,
+    U.NetVotes,
+    PA.EffectiveDate,
+    R.Level AS TagLevel,
+    COUNT(DISTINCT PH.UserId) AS EditCount 
+FROM PostAnalytics PA
+LEFT JOIN PostLinks PL ON PL.PostId = PA.Id
+LEFT JOIN Tags TS ON PL.RelatedPostId = TS.Id
+LEFT JOIN UserReputation U ON PA.Owner = U.DisplayName
+LEFT JOIN PostHistory PH ON PA.Id = PH.PostId
+LEFT JOIN RecursiveTagCounts R ON TS.Id = R.Id
+WHERE PA.ViewCount > 100 AND PA.Score >= 0
+GROUP BY PA.Id, PA.Title, PA.Owner, PA.CreationDate, PA.Score, PA.ViewCount, PA.AnswerCount, 
+         TS.TagName, U.UserId, U.DisplayName, U.Reputation, U.NetVotes, PA.EffectiveDate, R.Level
+HAVING COUNT(DISTINCT PH.UserId) > 5 
+ORDER BY PA.Score DESC, PA.EffectiveDate DESC;

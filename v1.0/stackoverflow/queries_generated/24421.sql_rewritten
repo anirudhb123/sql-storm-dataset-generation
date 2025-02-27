@@ -1,0 +1,63 @@
+WITH UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges,
+        COALESCE(SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS PostCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS CloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+)
+SELECT 
+    um.UserId,
+    um.DisplayName,
+    um.Reputation,
+    um.GoldBadges,
+    um.SilverBadges,
+    um.BronzeBadges,
+    um.PostCount,
+    COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+    SUM(COALESCE(pc.CommentCount, 0)) AS TotalComments,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    STRING_AGG(DISTINCT cp.CloseReason, '; ') AS ClosedReasons
+FROM UserMetrics um
+LEFT JOIN RecentPosts rp ON um.UserId = rp.OwnerUserId AND rp.rn <= 5
+LEFT JOIN PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN ClosedPosts cp ON um.UserId IN (
+    SELECT OwnerUserId 
+    FROM Posts p 
+    WHERE p.Id = cp.PostId  
+)
+GROUP BY um.UserId, um.DisplayName, um.Reputation, um.GoldBadges, um.SilverBadges, um.BronzeBadges, um.PostCount
+HAVING SUM(um.Reputation) > 100
+ORDER BY um.Reputation DESC
+LIMIT 50;

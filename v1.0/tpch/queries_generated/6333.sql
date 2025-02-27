@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_partkey, 
+        p.p_name, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 1000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    rs.s_name, 
+    COUNT(DISTINCT od.o_orderkey) AS order_count,
+    SUM(od.total_revenue) AS total_revenue,
+    r.r_name AS region_name
+FROM 
+    RankedSuppliers rs
+JOIN 
+    customer c ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = rs.s_suppkey)
+JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+WHERE 
+    rs.rank = 1
+GROUP BY 
+    rs.s_name, r.r_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

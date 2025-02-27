@@ -1,0 +1,90 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostCTE R ON P.ParentId = R.PostId
+    WHERE 
+        P.PostTypeId = 2
+),
+PostMetrics AS (
+    SELECT 
+        UserId, 
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    GROUP BY 
+        UserId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Name AS BadgeName,
+        B.Class
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        PM.PostCount,
+        PM.QuestionCount,
+        PM.AnswerCount,
+        PM.TotalViews,
+        ROW_NUMBER() OVER (ORDER BY PM.PostCount DESC) AS RN
+    FROM 
+        PostMetrics PM
+    JOIN 
+        Users U ON PM.UserId = U.Id
+    WHERE 
+        PM.PostCount > 0
+)
+SELECT
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.TotalViews,
+    STRING_AGG(UB.BadgeName, ', ') AS Badges,
+    COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END), 0) AS ClosedPosts,
+    COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END), 0) AS ReopenedPosts
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    UserBadges UB ON TU.UserId = UB.UserId
+LEFT JOIN 
+    PostHistory PH ON TU.UserId = PH.UserId
+WHERE 
+    TU.RN <= 10
+GROUP BY 
+    TU.DisplayName, TU.Reputation, TU.PostCount, TU.QuestionCount, TU.AnswerCount, TU.TotalViews
+ORDER BY 
+    TU.Reputation DESC;

@@ -1,0 +1,74 @@
+
+WITH actor_movie AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        c.nr_order AS cast_order,
+        c.note AS role_note
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+        AND c.nr_order IS NOT NULL
+),
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+actor_stats AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, '; ') AS movies
+    FROM 
+        actor_movie
+    GROUP BY 
+        actor_name
+),
+julmovies AS (
+    SELECT 
+        am.actor_name,
+        md.movie_title,
+        md.production_year,
+        am.cast_order,
+        am.role_note
+    FROM 
+        actor_movie am
+    JOIN 
+        movie_details md ON am.movie_title = md.movie_title
+    WHERE 
+        md.production_year > 2000
+    ORDER BY 
+        md.production_year DESC
+)
+SELECT 
+    as.actor_name,
+    as.movie_count,
+    as.movies,
+    COUNT(DISTINCT jm.movie_title) AS jules_movies_count,
+    STRING_AGG(DISTINCT jm.movie_title, ', ') AS jules_movies_list
+FROM 
+    actor_stats as
+LEFT JOIN 
+    julmovies jm ON as.actor_name = jm.actor_name
+GROUP BY 
+    as.actor_name, as.movie_count, as.movies
+HAVING 
+    COUNT(DISTINCT jm.movie_title) > 2
+ORDER BY 
+    as.movie_count DESC, as.actor_name ASC;

@@ -1,0 +1,74 @@
+
+WITH CustomerSpend AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_spent,
+        cs.order_count
+    FROM 
+        CustomerSpend cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSpend)
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cs.total_spent) AS total_spent,
+        COUNT(*) AS customer_count
+    FROM 
+        HighSpenders hs
+    JOIN customer_demographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_id = hs.c_customer_id)
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_net_paid) AS monthly_sales
+    FROM 
+        web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+),
+SalesRank AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        monthly_sales,
+        RANK() OVER (PARTITION BY d_year ORDER BY monthly_sales DESC) AS sales_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(sd.monthly_sales) AS total_sales,
+    COUNT(*) AS number_of_customers,
+    AVG(sd.monthly_sales) AS average_monthly_sales,
+    MIN(sd.monthly_sales) AS min_monthly_sales,
+    MAX(sd.monthly_sales) AS max_monthly_sales
+FROM 
+    CustomerDemographics cd
+JOIN 
+    SalesRank sr ON cd.total_spent > 10000 -- example threshold for a significant spending
+JOIN 
+    SalesData sd ON sr.d_year = sd.d_year AND sr.d_month_seq = sd.d_month_seq
+WHERE 
+    sr.sales_rank <= 5 -- top 5 months in sales
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status
+ORDER BY 
+    cd.cd_gender, cd.cd_marital_status;

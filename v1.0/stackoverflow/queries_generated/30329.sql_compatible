@@ -1,0 +1,63 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostsCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+           COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT ph.PostId,
+           MIN(ph.CreationDate) AS FirstEditDate,
+           COUNT(*) AS EditCount,
+           SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedCount,
+           SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalResults AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate AS PostCreationDate, 
+           p.Score, 
+           COALESCE(ps.EditCount, 0) AS EditCount, 
+           COALESCE(ps.ClosedCount, 0) AS ClosedCount,
+           COALESCE(ps.ReopenedCount, 0) AS ReopenedCount,
+           ua.UserId,
+           ua.DisplayName AS UserDisplayName,
+           ua.PostsCount,
+           ua.UpVotesCount,
+           ua.DownVotesCount,
+           ua.CommentsCount,
+           r.Level AS PostLevel
+    FROM Posts p
+    LEFT JOIN PostHistoryStats ps ON p.Id = ps.PostId
+    LEFT JOIN UserActivity ua ON p.OwnerUserId = ua.UserId
+    LEFT JOIN RecursivePostHierarchy r ON p.Id = r.Id
+)
+SELECT *,
+       CASE 
+           WHEN ClosedCount > 0 THEN 'Closed' 
+           WHEN ReopenedCount > 0 THEN 'Reopened'
+           ELSE 'Active' 
+       END AS PostStatus
+FROM FinalResults
+WHERE PostsCount > 10
+ORDER BY Score DESC, PostCreationDate ASC;

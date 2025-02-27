@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    pers.name AS actor_name,
+    mv.title AS movie_title,
+    mv.production_year,
+    COUNT(ct.id) AS total_roles,
+    AVG(CASE WHEN ct.note IS NOT NULL THEN 1 ELSE 0 END) AS average_has_note,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COALESCE(c.comp_cast_type, 'Unknown') AS composition_type,
+    ROW_NUMBER() OVER(PARTITION BY pers.id ORDER BY mv.production_year DESC) AS role_rank
+FROM 
+    cast_info ct
+JOIN 
+    aka_name pers ON ct.person_id = pers.person_id
+JOIN 
+    MovieHierarchy mh ON ct.movie_id = mh.movie_id
+JOIN 
+    aka_title mv ON mh.movie_id = mv.id
+LEFT JOIN 
+    movie_keyword mk ON mv.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    comp_cast_type c ON ct.role_id = c.id
+WHERE 
+    mv.production_year IS NOT NULL
+    AND mv.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    pers.id, mv.id, c.comp_cast_type
+ORDER BY 
+    average_has_note DESC, total_roles DESC, movie_title;

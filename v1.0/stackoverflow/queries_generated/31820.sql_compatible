@@ -1,0 +1,80 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        1 AS Level
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+    UNION ALL
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        rph.Level + 1
+    FROM PostHistory ph
+    JOIN RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE rph.Level < 5  
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        MAX(ph.CreationDate) AS LastActivityDate,
+        MIN(ph.CreationDate) AS FirstActivityDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN RecursivePostHistory rph ON p.Id = rph.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+PostOwners AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        pm.Title,
+        pm.CommentCount,
+        pm.VoteCount,
+        pm.UpVoteCount,
+        pm.DownVoteCount,
+        pm.LastActivityDate,
+        pm.FirstActivityDate
+    FROM PostMetrics pm
+    JOIN Users u ON pm.OwnerUserId = u.Id
+)
+SELECT 
+    po.DisplayName,
+    po.Reputation,
+    po.Title,
+    po.CommentCount,
+    po.VoteCount,
+    po.UpVoteCount,
+    po.DownVoteCount,
+    DATEDIFF(TIMESTAMP '2024-10-01 12:34:56', po.FirstActivityDate) AS DaysSinceFirstPost,
+    CASE 
+        WHEN po.UpVoteCount > po.DownVoteCount THEN 'Positive'
+        WHEN po.UpVoteCount < po.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    AVG(CASE 
+        WHEN rph.PostHistoryTypeId = 10 THEN 1
+        ELSE 0 
+    END) AS AvgCloseVotes,
+    COUNT(DISTINCT rph.UserId) AS UniqueEditors
+FROM PostOwners po
+LEFT JOIN RecursivePostHistory rph ON po.UserId = rph.UserId
+GROUP BY po.DisplayName, po.Reputation, po.Title, po.CommentCount, po.VoteCount, po.UpVoteCount, po.DownVoteCount, po.FirstActivityDate
+ORDER BY DaysSinceFirstPost DESC, po.VoteCount DESC;

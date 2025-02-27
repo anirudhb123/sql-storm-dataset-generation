@@ -1,0 +1,35 @@
+
+WITH RecursiveCTE AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_availqty DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+), TotalCost AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+), RankedOrders AS (
+    SELECT o.o_orderkey, COUNT(*) AS line_count, SUM(total_cost) OVER (ORDER BY COUNT(*) DESC) AS running_total
+    FROM TotalCost tc
+    JOIN orders o ON tc.o_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+), SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(*) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(*) > 2
+)
+
+SELECT r.s_suppkey, r.s_name, p.p_name, sr.part_count, o.o_orderkey, o.line_count, o.running_total
+FROM RecursiveCTE r
+JOIN RankedOrders o ON r.s_suppkey = o.o_orderkey
+JOIN SupplierRank sr ON sr.s_suppkey = r.s_suppkey
+JOIN part p ON r.p_partkey = p.p_partkey
+WHERE (r.ps_availqty > 10 OR r.ps_supplycost < 20.00)
+  AND (o.line_count > 5 OR o.running_total IS NULL)
+ORDER BY r.s_name, o.running_total DESC;

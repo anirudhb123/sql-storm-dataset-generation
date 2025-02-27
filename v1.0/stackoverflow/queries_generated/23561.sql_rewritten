@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        
+        COUNT(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 END) AS AcceptedAnswerCount
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.AcceptedAnswerCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1  
+        AND rp.CommentCount > 0
+        AND rp.AcceptedAnswerCount = 0  
+),
+
+PostTags AS (
+    SELECT
+        p.Id AS PostID,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+        JOIN PostsTags pt ON p.Id = pt.PostId
+        JOIN Tags t ON pt.TagId = t.Id
+    GROUP BY
+        p.Id
+)
+
+SELECT 
+    fp.PostID,
+    fp.Title,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    pt.Tags,
+    CASE WHEN CAST(fp.UpVotes AS FLOAT) / NULLIF(fp.DownVotes, 0) > 2 THEN 'Hot' ELSE 'Normal' END AS PostHeat,
+    COALESCE(fp.UpVotes - fp.DownVotes, 0) AS VoteBalance,
+    CASE WHEN fp.CommentCount > 10 THEN 'Highly Discussed' ELSE 'Less Discussed' END AS DiscussionLevel
+FROM 
+    FilteredPosts fp
+    LEFT JOIN PostTags pt ON fp.PostID = pt.PostID
+ORDER BY 
+    VoteBalance DESC,
+    fp.CommentCount DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.Reputation
+),
+
+PopularTags AS (
+    SELECT 
+        TRIM(SUBSTRING_TAGS) AS Tag,
+        COUNT(P.Id) AS PostCount
+    FROM (
+        SELECT 
+            P.Id,
+            UNNEST(string_to_array(P.Tags, '><')) AS SUBSTRING_TAGS
+        FROM Posts P
+    ) AS Tags
+    GROUP BY TRIM(SUBSTRING_TAGS) 
+    HAVING COUNT(P.Id) > 20
+),
+
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        PH.UserDisplayName AS UserDisplayName, 
+        PH.CreationDate AS ClosureDate,
+        PH.Comment AS CloseReason
+    FROM Posts P
+    INNER JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId = 10
+),
+
+TopUsers AS (
+    SELECT 
+        U.DisplayName, 
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        U.Id AS UserId
+    FROM Users U
+    WHERE U.Reputation > 1000
+)
+
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.AnswerCount,
+    U.AvgScore,
+    PT.Tag,
+    PT.PostCount AS PopularTagCount,
+    CP.ClosureDate,
+    CP.CloseReason,
+    TU.DisplayName AS TopUser,
+    TU.UserRank
+FROM UserStats U
+LEFT JOIN PopularTags PT ON U.PostCount > 5
+LEFT JOIN ClosedPosts CP ON U.UserId = CP.UserDisplayName
+FULL OUTER JOIN TopUsers TU ON U.UserId = TU.UserId
+WHERE 
+    U.Reputation IS NOT NULL 
+    AND (U.AnswerCount > 1 OR PT.Tag IS NOT NULL)
+ORDER BY U.Reputation DESC, PT.PostCount DESC, U.AvgScore DESC;

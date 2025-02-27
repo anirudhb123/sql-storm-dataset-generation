@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate AS CloseDate, 
+        ph.UserId AS CloserUserId,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+PostComments AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS CommentTexts
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    COALESCE(c.CloseDate, 'No Close Date') AS CloseDate,
+    c.CloseReason,
+    pc.CommentCount,
+    pc.CommentTexts,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    CASE 
+        WHEN rp.UserRank = 1 THEN 'Top Post for User'
+        WHEN rp.UserRank <= 3 THEN 'Top 3 Post for User'
+        ELSE 'Other'
+    END AS RankDescription
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts c ON rp.PostId = c.PostId
+LEFT JOIN 
+    PostComments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.Score > (SELECT AVG(Score) FROM Posts WHERE CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    AND (rp.ViewCount IS NULL OR rp.ViewCount > 100)
+UNION ALL 
+SELECT 
+    -1 AS PostId,
+    'Special Total Posts' AS Title,
+    COUNT(*) AS Score,
+    COUNT(*) AS ViewCount,
+    cast('2024-10-01 12:34:56' as timestamp) AS CreationDate,
+    NULL AS CloseDate,
+    NULL AS CloseReason,
+    NULL AS CommentCount,
+    NULL AS CommentTexts,
+    NULL AS BadgeCount,
+    NULL AS BadgeNames,
+    'Aggregate' AS RankDescription
+FROM 
+    Posts
+WHERE 
+    CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+ORDER BY 
+    CASE WHEN PostId = -1 THEN 0 ELSE 1 END, Score DESC;

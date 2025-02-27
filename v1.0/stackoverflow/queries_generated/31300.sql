@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        OwnerUserId,
+        CreationDate,
+        Score,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserId,
+        p.Title,
+        ph.Comment,
+        ph.UserDisplayName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10)
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalScore,
+        Row_Number() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserPostStats
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts
+    CROSS JOIN 
+        (SELECT UNNEST(string_to_array(Tags, '><')) AS TagName FROM Posts) AS T
+    GROUP BY 
+        TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    COALESCE(u.DisplayName, 'Deleted User') AS UserDisplayName,
+    p.Title AS PostTitle,
+    phd.EditDate,
+    phd.Comment AS EditComment,
+    rph.Depth AS CommentDepth,
+    pht.TagName AS PopularTag,
+    tu.Rank
+FROM 
+    Posts p
+LEFT JOIN 
+    PostHistoryDetails phd ON p.Id = phd.PostId
+INNER JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.Id
+LEFT JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.UserId
+LEFT JOIN 
+    PopularTags pht ON p.Tags LIKE '%' || pht.TagName || '%'
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' 
+AND 
+    p.Score > 0
+ORDER BY 
+    p.CreationDate DESC,
+    rph.Depth;

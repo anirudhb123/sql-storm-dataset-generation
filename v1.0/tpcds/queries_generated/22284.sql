@@ -1,0 +1,67 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ', ', ca.ca_city, ', ', ca.ca_state) AS full_address
+    FROM customer_address ca
+),
+sales_info AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_sales
+    FROM web_sales ws 
+    GROUP BY ws.ws_item_sk
+),
+high_value_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_quantity,
+        cs.total_spent,
+        CASE 
+            WHEN cs.total_spent > (SELECT AVG(total_spent) FROM customer_stats) THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_type
+    FROM customer_stats cs
+    WHERE cs.total_spent IS NOT NULL
+),
+inventory_check AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS inventory_level
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+    HAVING SUM(inv.inv_quantity_on_hand) < (SELECT AVG(inv_quantity_on_hand) FROM inventory)
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ai.full_address,
+    hvc.customer_type,
+    si.total_sales,
+    si.total_profit,
+    ic.inventory_level,
+    (CASE 
+        WHEN ic.inventory_level IS NULL THEN 'No Inventory'
+        ELSE NULLIF(ic.inventory_level, 0)
+    END) AS effective_inventory
+FROM customer c
+JOIN address_info ai ON c.c_current_addr_sk = ai.ca_address_sk
+JOIN high_value_customers hvc ON c.c_customer_sk = hvc.c_customer_sk
+JOIN sales_info si ON si.ws_item_sk = (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk LIMIT 1)
+FULL OUTER JOIN inventory_check ic ON si.ws_item_sk = ic.inv_item_sk
+WHERE hvc.total_orders > 5
+AND (hvc.customer_type = 'High Value' OR hvc.total_spent > 1000)
+ORDER BY hvc.total_spent DESC, hvc.total_orders DESC;

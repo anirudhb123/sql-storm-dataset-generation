@@ -1,0 +1,91 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieMetadata AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(ci.total_cast, 0) AS total_cast,
+        COALESCE(ci.cast_names, 'N/A') AS cast_names,
+        COALESCE(cmi.company_names, '{N/A}') AS company_names,
+        COALESCE(cmi.company_types, '{N/A}') AS company_types
+    FROM 
+        title t
+    LEFT JOIN 
+        CastDetails ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        CompanyMovieInfo cmi ON t.id = cmi.movie_id
+    WHERE 
+        (t.production_year < (SELECT MAX(production_year) FROM title) OR t.production_year IS NULL)
+),
+
+FinalOutput AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.total_cast,
+        m.cast_names,
+        m.company_names,
+        m.company_types,
+        rt.title_rank
+    FROM 
+        MovieMetadata m
+    LEFT JOIN 
+        RankedTitles rt ON m.movie_id = rt.title_id
+    WHERE 
+        m.total_cast > 0 OR m.production_year IS NULL
+)
+
+SELECT 
+    title, 
+    production_year,
+    total_cast,
+    cast_names,
+    company_names,
+    company_types,
+    LEAST(COALESCE(title_rank, 100), 99) AS title_rank_adjusted
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, 
+    title_rank_adjusted ASC;
+
+This query performs an extensive performance benchmark across multiple aspects of the schema. It combines CTEs, handles NULL logic, and utilizes window functions to rank titles, ultimately creating a comprehensive summary of movie details, including cast and company information. The use of `ARRAY_AGG` and `STRING_AGG` for grouping demonstrates the complexity of SQL aggregations and string manipulations.

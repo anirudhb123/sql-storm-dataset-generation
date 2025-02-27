@@ -1,0 +1,58 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 3) AS DownVoteCount,
+        (SELECT COUNT(*) FROM PostHistory WHERE PostId = P.Id) AS EditHistoryCount
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+)
+SELECT 
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    UA.AvgPostScore,
+    PS.Title,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.EditHistoryCount
+FROM 
+    UserActivity UA
+JOIN 
+    PostStatistics PS ON UA.UserId = PS.PostId
+ORDER BY 
+    UA.TotalPosts DESC, UA.TotalUpVotes DESC
+LIMIT 50;

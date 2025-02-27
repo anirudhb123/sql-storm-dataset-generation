@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankPerType,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '3 months'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.ViewCount, 
+        rp.Score, 
+        rp.AnswerCount, 
+        rp.OwnerDisplayName, 
+        rp.OwnerReputation
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankPerType <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.*, 
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId::int), 0) AS TotalVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    GROUP BY 
+        tp.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.TotalVotes,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pt.Name AS PostType
+FROM 
+    PostDetails pd
+JOIN 
+    PostTypes pt ON pd.PostTypeId = pt.Id
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

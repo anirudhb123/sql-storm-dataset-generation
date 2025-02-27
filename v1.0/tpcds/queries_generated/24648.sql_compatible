@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss.customer_sk,
+        ss.store_sk,
+        ss.net_profit,
+        RANK() OVER (PARTITION BY ss.store_sk ORDER BY ss.net_profit DESC) AS rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+        AND ss.discount_amount IS NOT NULL
+), 
+CustomerWithReturns AS (
+    SELECT 
+        wr.returned_date_sk,
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returned_date_sk, wr.returning_customer_sk
+), 
+HighProfitItems AS (
+    SELECT 
+        item_sk, 
+        SUM(net_profit) AS total_profit 
+    FROM 
+        store_sales 
+    WHERE 
+        item_sk IN (
+            SELECT 
+                i.i_item_sk 
+            FROM 
+                item i 
+            WHERE 
+                i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2)
+        )
+    GROUP BY 
+        item_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit_web,
+    COALESCE(SUM(cs.cs_net_profit), 0) AS total_net_profit_catalog,
+    COALESCE(NULLIF(RANK() OVER (ORDER BY SUM(ws.ws_net_profit), SUM(cs.cs_net_profit) DESC), NULL), 'No Sales') AS sales_rank,
+    CASE 
+        WHEN COUNT(DISTINCT wr.returning_customer_sk) > 0 
+        THEN 'Returns Incurred'
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+FULL OUTER JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN CustomerWithReturns ctr ON c.c_customer_sk = ctr.returning_customer_sk
+WHERE 
+    EXISTS (SELECT 1 FROM RankedSales rs WHERE rs.customer_sk = c.c_customer_sk AND rs.rank <= 5)
+GROUP BY 
+    c.c_customer_id, ca.ca_city
+HAVING 
+    COALESCE(SUM(ws.ws_net_profit), 0) > 1000 OR COALESCE(SUM(cs.cs_net_profit), 0) > 1000
+ORDER BY 
+    total_net_profit_web DESC, total_net_profit_catalog DESC;

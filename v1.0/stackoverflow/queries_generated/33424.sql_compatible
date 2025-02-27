@@ -1,0 +1,70 @@
+
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.PostTypeId,
+        rpc.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostChain rpc ON q.Id = rpc.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(c.Score, 0)) AS TotalComments,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalViews,
+    ua.TotalComments,
+    ua.TotalPosts,
+    COALESCE(rpc.Level, 0) AS MaxPostChainLevel,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes,
+    COUNT(DISTINCT ph.Id) AS HistoryRecords,
+    AVG(v.BountyAmount) AS AvgBountyAmount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = ua.UserId
+LEFT JOIN 
+    RecursivePostChain rpc ON p.Id = rpc.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    ua.DisplayName, ua.TotalViews, ua.TotalComments, ua.TotalPosts, rpc.Level
+ORDER BY 
+    ua.TotalViews DESC
+LIMIT 100;

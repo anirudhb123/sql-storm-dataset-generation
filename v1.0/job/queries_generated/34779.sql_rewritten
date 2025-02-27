@@ -1,0 +1,41 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.movie_id, 
+           mt.title AS movie_title, 
+           mt.production_year,
+           1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT m.movie_id,
+           m.title,
+           m.production_year,
+           mh.depth + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.movie_id
+    WHERE mh.depth < 5  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mc.name AS company_name,
+    mt.movie_title,
+    DENSE_RANK() OVER (PARTITION BY ak.id ORDER BY mm.production_year DESC) AS rank_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    COUNT(DISTINCT mi.id) AS info_count,
+    AVG(CASE WHEN clr.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_percentage
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN movie_keyword kw ON ci.movie_id = kw.movie_id
+JOIN movie_info mi ON ci.movie_id = mi.movie_id
+JOIN movie_hierarchy mm ON ci.movie_id = mm.movie_id
+LEFT JOIN complete_cast clr ON ci.movie_id = clr.movie_id AND clr.subject_id = ak.person_id
+WHERE ak.name IS NOT NULL
+  AND mc.company_type_id = (SELECT id FROM company_type WHERE kind ILIKE 'Production%')
+  AND mm.production_year > 2000
+  AND NOT EXISTS (SELECT 1 FROM movie_info_idx WHERE movie_id = ci.movie_id AND LOWER(info) LIKE '%unreleased%')
+GROUP BY ak.id, mc.name, mm.movie_title
+ORDER BY ak.actor_name, mm.production_year DESC;

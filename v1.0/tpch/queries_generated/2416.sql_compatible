@@ -1,0 +1,43 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    r.o_orderdate,
+    r.o_orderkey,
+    COALESCE(sr.s_name, 'Unknown Supplier') AS supplier_name,
+    r.revenue,
+    CASE 
+        WHEN r.rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS order_rank_group,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM RankedOrders r
+LEFT JOIN SupplierRevenue sr ON r.o_orderkey = sr.s_suppkey
+LEFT JOIN customer c ON c.c_custkey IN (
+    SELECT DISTINCT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderkey = r.o_orderkey
+)
+WHERE r.revenue IS NOT NULL 
+GROUP BY r.o_orderdate, r.o_orderkey, sr.s_name, r.revenue, r.rank
+ORDER BY r.o_orderdate, revenue DESC
+LIMIT 100;

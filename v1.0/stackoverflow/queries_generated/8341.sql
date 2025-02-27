@@ -1,0 +1,42 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PopularityRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.OwnerUserId
+),
+TagsWithPostCount AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON t.Id = ANY(string_to_array(p.Tags, '')) 
+    GROUP BY t.Id, t.TagName
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PostScore,
+    tp.TagName,
+    tp.PostCount,
+    pp.CommentCount
+FROM RankedUsers ru
+JOIN PopularPosts pp ON ru.UserId = pp.OwnerUserId AND pp.PopularityRank <= 5
+JOIN TagsWithPostCount tp ON pp.PostId IN (SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' || tp.TagName || '%')
+WHERE ru.Rank <= 10
+ORDER BY ru.Rank, pp.Score DESC;

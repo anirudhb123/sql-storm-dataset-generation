@@ -1,0 +1,75 @@
+
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ct.kind AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS cast_order,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+),
+actor_movies AS (
+    SELECT 
+        mc.movie_id,
+        mc.actor_name,
+        mc.role_name,
+        COALESCE(NULLIF(mc.role_name, ''), 'Unknown Role') AS safe_role_name,
+        ARRAY_AGG(DISTINCT mk.keyword) AS keywords
+    FROM 
+        movie_cast mc
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    WHERE 
+        mc.cast_order <= 5 AND mc.total_cast > 0
+    GROUP BY 
+        mc.movie_id, mc.actor_name, mc.role_name
+),
+distinct_titles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        kt.kind AS kind_name
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, kt.kind
+)
+SELECT 
+    at.title AS movie_title,
+    d.actor_name,
+    d.safe_role_name,
+    d.keywords,
+    t.kind_name AS title_kind,
+    COUNT(*) FILTER (WHERE d.keywords IS NOT NULL AND ARRAY_LENGTH(d.keywords, 1) > 0) AS keyword_count,
+    (SELECT AVG(COALESCE(m.production_year, -1)) 
+     FROM aka_title m 
+     WHERE m.title = at.title AND m.production_year BETWEEN 1980 AND 2020) AS avg_production_year,
+    CASE 
+        WHEN EXISTS(SELECT 1 FROM movie_info mi WHERE mi.movie_id = at.id AND mi.info_type_id IN (1, 2)) 
+        THEN 'Has Additional Info' 
+        ELSE 'No Extra Info' 
+    END AS info_status
+FROM 
+    distinct_titles at
+JOIN 
+    actor_movies d ON d.movie_id = at.id
+LEFT JOIN 
+    title t ON t.imdb_id = at.id
+WHERE 
+    d.role_name NOT LIKE '%extra%'
+    AND (at.production_year IS NOT NULL OR at.production_year IS NULL)
+GROUP BY 
+    at.title, at.production_year, d.actor_name, d.safe_role_name, d.keywords, t.kind_name
+HAVING 
+    COUNT(*) > 2
+ORDER BY 
+    movie_title, d.actor_name;

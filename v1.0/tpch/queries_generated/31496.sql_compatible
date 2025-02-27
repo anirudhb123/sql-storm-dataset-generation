@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, NULL AS parent_id
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey AS parent_id
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+), TotalOrderAmounts AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+), SupplierPartPrices AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), ImportantParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, spp.avg_supply_cost
+    FROM part p
+    JOIN SupplierPartPrices spp ON p.p_partkey = spp.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+      AND spp.avg_supply_cost < 50
+), RankParts AS (
+    SELECT p.*, RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM ImportantParts p
+    WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_size IS NOT NULL)
+)
+SELECT
+    c.c_name,
+    c.c_acctbal,
+    T.total_amount,
+    R.p_name,
+    R.price_rank,
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_acctbal
+FROM customer c
+LEFT JOIN TotalOrderAmounts T ON c.c_custkey = T.o_custkey
+JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN SupplierHierarchy s ON l.l_suppkey = s.s_suppkey
+JOIN RankParts R ON R.p_partkey = l.l_partkey
+WHERE T.total_amount IS NOT NULL
+  AND R.price_rank <= 10
+  AND (s.s_acctbal IS NOT NULL OR s.parent_id IS NULL)
+ORDER BY T.total_amount DESC, R.price_rank ASC;

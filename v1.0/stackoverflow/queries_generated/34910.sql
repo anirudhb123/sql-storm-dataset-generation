@@ -1,0 +1,45 @@
+WITH RecursivePostFlow AS (
+    SELECT p.Id AS PostId, 
+           p.OwnerUserId, 
+           p.ParentId, 
+           p.Title, 
+           p.CreationDate,
+           1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Start with Questions
+
+    UNION ALL
+
+    SELECT a.Id, 
+           a.OwnerUserId, 
+           a.ParentId, 
+           a.Title, 
+           a.CreationDate, 
+           Level + 1
+    FROM Posts a
+    INNER JOIN RecursivePostFlow rpf ON a.ParentId = rpf.PostId
+    WHERE a.PostTypeId = 2  -- Joining with Answers
+)
+
+SELECT u.Id AS UserId,
+       u.DisplayName,
+       COUNT(DISTINCT rpf.PostId) AS TotalPosts,
+       COUNT(DISTINCT CASE WHEN rpf.Level = 1 THEN rpf.PostId END) AS TotalQuestions,
+       COUNT(DISTINCT CASE WHEN rpf.Level = 2 THEN rpf.PostId END) AS TotalAnswers,
+       SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+       AVG(COALESCE(p.Score, 0)) AS AverageScore,
+       STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+       MAX(COALESCE(b.Date, '1900-01-01')) AS LastBadgeDate,
+       COUNT(b.Id) AS TotalBadges
+FROM Users u
+LEFT JOIN RecursivePostFlow rpf ON rpf.OwnerUserId = u.Id
+LEFT JOIN Posts p ON p.Id = rpf.PostId
+LEFT JOIN PostLinks pl ON pl.PostId = p.Id
+LEFT JOIN Tags t ON t.Id = pl.RelatedPostId
+LEFT JOIN Badges b ON b.UserId = u.Id
+WHERE u.Reputation > 1000  -- Users with reputation over 1000
+AND (p.CreationDate IS NULL OR p.CreationDate >= '2020-01-01') -- Optional filter on post creation date
+GROUP BY u.Id, u.DisplayName
+HAVING COUNT(DISTINCT rpf.PostId) > 10  -- Only include users with more than 10 posts
+ORDER BY TotalPosts DESC, TotalViews DESC
+LIMIT 50; -- Limit results to top 50 users

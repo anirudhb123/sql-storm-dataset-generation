@@ -1,0 +1,61 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        DENSE_RANK() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_spent IS NOT NULL 
+        AND cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+),
+StoreReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+)
+
+SELECT 
+    c.c_customer_id,
+    cs.total_orders,
+    cs.total_spent,
+    COALESCE(sr.total_returns, 0) AS total_returns,
+    COALESCE(sr.total_return_amt, 0) AS total_return_amt,
+    CASE 
+        WHEN h.rank IS NOT NULL THEN 'High Spender'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerSales cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN 
+    StoreReturns sr ON c.c_customer_sk = sr.sr_returning_customer_sk
+LEFT JOIN 
+    HighSpenders h ON cs.c_customer_sk = h.c_customer_sk
+WHERE 
+    c.c_birth_year = (SELECT MAX(c2.c_birth_year) FROM customer c2) 
+    OR c.c_birth_day IS NULL
+ORDER BY 
+    total_spent DESC,
+    total_orders DESC
+FETCH FIRST 100 ROWS ONLY;

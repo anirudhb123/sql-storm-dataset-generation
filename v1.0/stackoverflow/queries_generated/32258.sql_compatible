@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+),
+RecentComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Comments C
+    WHERE 
+        C.CreationDate >= DATEADD(MONTH, -6, CURRENT_TIMESTAMP)
+    GROUP BY 
+        C.PostId
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(T.Count) AS TotalCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        SUM(T.Count) > 10
+),
+PostMetrics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.ViewCount,
+        RP.CreationDate,
+        RP.OwnerName,
+        COALESCE(RC.CommentCount, 0) AS CommentCount,
+        COALESCE(RC.LastCommentDate, 'No Comments') AS LastCommentDate,
+        TT.TagName,
+        TT.TotalCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecentComments RC ON RP.PostId = RC.PostId
+    LEFT JOIN 
+        TopTags TT ON RP.Title LIKE CONCAT('%', TT.TagName, '%')
+    WHERE 
+        RP.RankScore <= 5
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.OwnerName,
+    PM.Score,
+    PM.ViewCount,
+    PM.CommentCount,
+    PM.LastCommentDate,
+    PM.TagName,
+    PM.TotalCount,
+    CASE 
+        WHEN PM.CommentCount > 10 THEN 'Highly Engaged'
+        ELSE 'Moderately Engaged'
+    END AS EngagementLevel
+FROM 
+    PostMetrics PM
+ORDER BY 
+    PM.Score DESC, PM.ViewCount DESC;

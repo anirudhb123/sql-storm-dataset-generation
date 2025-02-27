@@ -1,0 +1,79 @@
+WITH TagStats AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><')))::VARCHAR) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts
+    GROUP BY 
+        TagName
+),
+
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 5  
+),
+
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsPosted,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersPosted,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentsMade
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        U.Reputation > 100  
+    GROUP BY 
+        U.Id
+),
+
+EngagementScore AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.TotalPosts,
+        ue.QuestionsPosted,
+        ue.AnswersPosted,
+        ue.CommentsMade,
+        (ue.TotalPosts * 0.5 + ue.QuestionsPosted * 1.0 + ue.AnswersPosted * 0.75 + ue.CommentsMade * 0.25) AS Score
+    FROM 
+        UserEngagement ue
+)
+
+SELECT 
+    tt.TagName,
+    tt.PostCount AS NumberOfPosts,
+    tt.QuestionCount AS TotalQuestions,
+    tt.AnswerCount AS TotalAnswers,
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.QuestionsPosted,
+    ue.AnswersPosted,
+    ue.CommentsMade,
+    es.Score
+FROM 
+    TopTags tt
+JOIN 
+    EngagementScore es ON es.Score > 10  
+JOIN 
+    Users u ON u.Id = es.UserId
+WHERE 
+    tt.TagRank <= 10 
+ORDER BY 
+    tt.PostCount DESC, es.Score DESC;

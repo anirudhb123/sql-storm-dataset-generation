@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(500)) AS path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || at.title AS VARCHAR(500))
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path,
+    COALESCE(CAST(array_agg(DISTINCT ka.name) AS VARCHAR), 'No Actors') AS actors,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN
+    aka_name ka ON cc.subject_id = ka.person_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+GROUP BY
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path
+HAVING
+    COUNT(DISTINCT cc.subject_id) > 5
+ORDER BY
+    mh.production_year DESC, 
+    mh.level ASC,
+    keyword_count DESC;
+
+The query achieves several key objectives: it constructs a recursive Common Table Expression (CTE) to traverse a hierarchy of movies. It aggregates actor names, counts keywords and companies, and applies filtering and ordering based on specific criteria. The combination of left joins, grouping, and aggregated results showcases the complexity and performance of the query while allowing for insights into the movie data up to the specified year threshold.

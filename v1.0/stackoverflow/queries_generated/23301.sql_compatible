@@ -1,0 +1,92 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation IS NULL THEN 'Unknown'
+            WHEN U.Reputation < 1000 THEN 'Novice'
+            WHEN U.Reputation BETWEEN 1000 AND 5000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationLevel,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(COALESCE(V.Score, 0)) AS TotalVoteScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN PH.Comment IS NOT NULL AND PH.PostHistoryTypeId = 10 
+                 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN PH.Comment IS NULL AND PH.PostHistoryTypeId = 11 
+                 THEN 1 ELSE 0 END) AS ReopenCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+RankedPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.ViewCount,
+        PD.CommentCount,
+        PD.CloseCount,
+        PD.ReopenCount,
+        RANK() OVER (ORDER BY PD.ViewCount DESC) AS RankByViews
+    FROM 
+        PostDetails PD
+),
+FinalOutput AS (
+    SELECT 
+        UR.DisplayName,
+        UR.ReputationLevel,
+        RP.Title,
+        RP.ViewCount,
+        RP.CommentCount,
+        RP.CloseCount,
+        RP.ReopenCount,
+        CASE 
+            WHEN RP.CloseCount > 0 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        UserReputation UR
+    JOIN 
+        Posts P ON UR.UserId = P.OwnerUserId
+    JOIN 
+        RankedPosts RP ON P.Id = RP.PostId
+    WHERE 
+        UR.ReputationLevel IN ('Expert', 'Intermediate') 
+        AND (RP.CloseCount - RP.ReopenCount) > 0
+)
+SELECT 
+    DisplayName,
+    ReputationLevel,
+    Title,
+    ViewCount,
+    CommentCount,
+    CloseCount,
+    ReopenCount,
+    PostStatus
+FROM 
+    FinalOutput
+ORDER BY 
+    ReputationLevel ASC, ViewCount DESC;

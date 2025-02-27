@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year = (SELECT MAX(production_year) FROM aka_title)
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    string_agg(DISTINCT at.title || ' (' || at.production_year || ')', ', ') FILTER (WHERE at.production_year IS NOT NULL) AS movies,
+    COUNT(DISTINCT mh.movie_id) AS linked_movies_count,
+    MAX(mh.production_year) FILTER (WHERE mh.production_year IS NOT NULL) AS latest_linked_movie_year
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND a.name NOT ILIKE '%unknown%'  -- Exclude unknown names
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT at.id) > 1 -- Only those actors that appeared in more than one movie
+    OR COUNT(DISTINCT mh.movie_id) > 0  -- Or have linked movies
+ORDER BY 
+    latest_linked_movie_year DESC NULLS LAST,
+    linked_movies_count DESC,
+    actor_name;
+
+This query builds a recursive Common Table Expression (CTE) to establish a hierarchy of linked movies from the most recent production year. It fetches the names of actors, their movies, and the linked movies, excluding any actors with "unknown" as part of their names. With the use of window functions and aggregates, the query determines the count of movies and linked movies, and sorts the results accordingly, handling NULL values bespoke.

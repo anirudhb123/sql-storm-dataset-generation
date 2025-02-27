@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser,
+        COALESCE(u.Reputation, 0) AS UserReputation,
+        pg_size_pretty(pg_total_relation_size('Posts')) AS PostSize
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+TopClosedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.RankPerUser,
+        cp.ClosedDate,
+        cp.CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RankPerUser <= 5
+)
+SELECT 
+    tcp.Title,
+    tcp.ViewCount,
+    tcp.ClosedDate,
+    tcp.CloseReason,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = tcp.PostId) AS CommentCount,
+    (SELECT AVG(VoteTypeId) FROM Votes v WHERE v.PostId = tcp.PostId AND v.VoteTypeId IN (2, 3)) AS AvgVoteType
+FROM 
+    TopClosedPosts tcp
+WHERE 
+    tcp.CloseReason IS NOT NULL
+ORDER BY 
+    tcp.ClosedDate DESC
+LIMIT 10;

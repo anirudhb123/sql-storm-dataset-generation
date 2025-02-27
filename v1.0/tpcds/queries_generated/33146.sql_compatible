@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_net_profit,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        sc.level + 1
+    FROM web_sales ws
+    JOIN Sales_CTE sc ON ws.ws_order_number = sc.ws_order_number
+    WHERE sc.level < 5
+),
+Customer_Stats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(cd_purchase_estimate) AS total_estimate,
+        AVG(cd_dep_count) AS avg_dependencies
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY cd_gender
+),
+Warehouse_Ship AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_ship_mode_sk) AS avg_ship_mode
+    FROM warehouse w
+    JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.customer_count,
+    cs.total_estimate,
+    ws.w_warehouse_id,
+    ws.total_sales,
+    ws.avg_ship_mode,
+    sct.ws_quantity,
+    SUM(sct.ws_net_profit) OVER (PARTITION BY cs.cd_gender, ws.w_warehouse_id) AS total_profit_per_gender
+FROM Customer_Stats cs
+FULL OUTER JOIN Warehouse_Ship ws ON cs.customer_count IS NOT NULL OR ws.total_sales IS NOT NULL
+LEFT JOIN Sales_CTE sct ON cs.customer_count > 0
+WHERE 
+    (cs.cd_gender IS NOT NULL OR ws.w_warehouse_id IS NOT NULL)
+    AND (sct.ws_quantity IS NOT NULL OR sct.ws_net_profit IS NOT NULL)
+ORDER BY cs.cd_gender, ws.total_sales DESC;

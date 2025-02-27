@@ -1,0 +1,53 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey FROM nation
+    WHERE n_nationkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, CONCAT(n.n_name, ' (Derived)') AS n_name, n.n_regionkey
+    FROM nation n
+    JOIN nation_hierarchy nh ON nh.n_regionkey = n.n_nationkey
+),
+supplier_analysis AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_within_region,
+           SUM(ps.ps_supplycost) OVER (PARTITION BY s.s_suppkey) AS total_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_orderkey
+),
+bizarre_conditions AS (
+    SELECT p.p_partkey, p.p_name, p.p_container, p.p_retailprice,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'No Price'
+               WHEN p.p_retailprice < 10 THEN 'Bargain'
+               ELSE 'Premium'
+           END AS price_category,
+           LAG(p.p_retailprice) OVER (ORDER BY p.p_partkey) AS previous_price
+    FROM part p
+    WHERE (p.p_size % 2 = 0 OR p.p_comment IS NULL)
+    OR (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey) > 10
+),
+final_results AS (
+    SELECT n.n_name, sa.s_name, sa.rank_within_region, os.total_sales,
+           CASE 
+               WHEN os.unique_customers > 0 THEN os.total_sales / os.unique_customers
+               ELSE NULL
+           END AS avg_sales_per_customer,
+           bc.p_name, bc.price_category
+    FROM nation_hierarchy n
+    LEFT JOIN supplier_analysis sa ON n.n_nationkey = sa.s_suppkey
+    FULL OUTER JOIN order_summary os ON os.o_orderkey = sa.s_suppkey
+    LEFT JOIN bizarre_conditions bc ON bc.p_partkey = sa.s_suppkey
+)
+SELECT *
+FROM final_results
+WHERE avg_sales_per_customer IS NOT NULL 
+AND price_category = 'Premium'
+ORDER BY rank_within_region DESC, total_sales DESC;

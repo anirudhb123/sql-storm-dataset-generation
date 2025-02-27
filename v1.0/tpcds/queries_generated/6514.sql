@@ -1,0 +1,50 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.ext_discount_amt) AS total_discount,
+        SUM(ws.net_profit) AS total_net_profit,
+        AVG(ws.ext_sales_price) AS avg_sales_price,
+        AVG(ws.net_paid) AS avg_net_paid,
+        d.year AS sales_year,
+        d.month AS sales_month
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.date_sk
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    WHERE 
+        d.year = 2022 AND 
+        cd.gender = 'F' AND 
+        cd.education_status IN ('Bachelors', 'Masters')
+    GROUP BY 
+        ws.web_site_sk, d.year, d.month
+),
+warehouse_summary AS (
+    SELECT 
+        w.warehouse_sk,
+        w.warehouse_name,
+        SUM(ws.total_sales) AS warehouse_total_sales,
+        SUM(ws.total_orders) AS warehouse_total_orders
+    FROM 
+        warehouse w
+    JOIN 
+        sales_summary ws ON w.warehouse_sk = ws.web_site_sk
+    GROUP BY 
+        w.warehouse_sk, w.warehouse_name
+)
+SELECT 
+    ws.warehouse_name,
+    ws.warehouse_total_sales,
+    ws.warehouse_total_orders,
+    ws.warehouse_total_sales / NULLIF(ws.warehouse_total_orders, 0) AS avg_order_value
+FROM 
+    warehouse_summary ws
+ORDER BY 
+    warehouse_total_sales DESC
+LIMIT 10;

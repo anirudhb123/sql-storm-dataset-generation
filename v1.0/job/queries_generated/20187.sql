@@ -1,0 +1,95 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorWithMovieCount AS (
+    SELECT 
+        a.id AS actor_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(k.keyword, 'No Keywords') AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COALESCE(aw.movie_count, 0) AS movie_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        ActorWithMovieCount aw ON a.id = aw.actor_id
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id
+)
+
+SELECT 
+    ad.name AS actor_name,
+    ad.movie_count AS total_movies,
+    rt.title AS title,
+    rt.production_year,
+    ad.keywords
+FROM 
+    ActorDetails ad
+JOIN 
+    RankedTitles rt ON ad.movie_count = rt.year_rank
+LEFT JOIN 
+    company_name cp ON ad.actor_id = cp.imdb_id 
+WHERE 
+    rt.title IS NOT NULL 
+    AND (ad.keywords IS NOT NULL OR ad.keywords IS NULL)
+ORDER BY 
+    ad.movie_count DESC, rt.production_year DESC;
+
+-- Additional testing of NULL and non-NULL semantics
+SELECT
+    t.title,
+    COUNT(DISTINCT m.id) AS keyword_count
+FROM 
+    aka_title t
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    (k.keyword IS NULL OR ts.title LIKE '%The%')
+GROUP BY 
+    t.title
+HAVING 
+    COUNT(mk.id) > 0 
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = t.id 
+        AND mi.info IS NULL
+    );

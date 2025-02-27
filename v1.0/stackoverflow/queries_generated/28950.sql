@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS PostRank,
+        ARRAY_AGG(DISTINCT pi.ImageUrl) AS PostImages
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        LATERAL (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName) AS t ON true
+    LEFT JOIN 
+        PostImages pi ON pi.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.Tags
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation,
+        COUNT(DISTINCT PostId) AS PostsContributed
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        b.Class = 1 -- Gold badges
+    GROUP BY 
+        UserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Name AS BadgeName,
+        b.Date 
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        b.Class = 1 OR b.Class = 2 -- Gold or Silver badges
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Tags,
+    rp.PostRank,
+    ur.TotalReputation,
+    ur.PostsContributed,
+    ARRAY_AGG(ub.BadgeName) AS UserBadges,
+    ARRAY_AGG(DISTINCT rp.PostImages) AS AllImages
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.PostRank <= 3 -- Top 3 posts for each tag
+GROUP BY 
+    rp.PostId, rp.Title, rp.OwnerDisplayName, rp.CreationDate, rp.Tags, rp.PostRank, ur.TotalReputation, ur.PostsContributed
+ORDER BY 
+    rp.PostId;

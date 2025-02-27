@@ -1,0 +1,83 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.season_nr,
+        mt.episode_nr,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+    UNION ALL
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        a.season_nr,
+        a.episode_nr,
+        mh.level + 1
+    FROM 
+        aka_title a
+    JOIN 
+        MovieHierarchy mh ON a.episode_of_id = mh.movie_id
+),
+MovieWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+),
+PersonRoleCounts AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TopPersons AS (
+    SELECT 
+        p.id AS person_id, 
+        pn.name, 
+        pr.role_count
+    FROM 
+        aka_name pn
+    JOIN 
+        PersonRoleCounts pr ON pn.person_id = pr.person_id
+    WHERE 
+        pr.role_count > 5  
+    ORDER BY 
+        pr.role_count DESC
+    LIMIT 10
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(mk.keywords, '{}') AS keywords,
+    tp.name AS top_person,
+    tp.role_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieWithKeywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    TopPersons tp ON ci.person_id = tp.person_id
+WHERE 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, mh.level, tp.role_count DESC;

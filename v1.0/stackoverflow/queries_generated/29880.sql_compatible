@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS AuthorDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tagName ON TRUE
+    LEFT JOIN 
+        Tags t ON tagName = t.TagName
+    WHERE 
+        p.PostTypeId = 1 AND  
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+TopViewCountPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.CreationDate,
+        rp.Score,
+        rp.AuthorDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ViewCount > 1000
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.AuthorDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > 10
+)
+SELECT 
+    vcp.PostId AS MostViewedPostId,
+    vcp.Title AS MostViewedPostTitle,
+    vcp.ViewCount AS MostViewedPostViews,
+    vcp.CommentCount AS MostViewedPostComments,
+    vcp.CreationDate AS MostViewedPostDate,
+    sp.PostId AS TopScoringPostId,
+    sp.Title AS TopScoringPostTitle,
+    sp.Score AS TopScoringPostScore,
+    sp.AuthorDisplayName AS TopScoringPostAuthor
+FROM 
+    TopViewCountPosts vcp
+FULL OUTER JOIN 
+    TopScoringPosts sp ON vcp.PostId = sp.PostId
+ORDER BY 
+    vcp.ViewCount DESC, sp.Score DESC
+LIMIT 10;

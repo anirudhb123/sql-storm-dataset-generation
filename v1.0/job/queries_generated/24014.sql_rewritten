@@ -1,0 +1,60 @@
+WITH recursive movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           m.kind_id, NULL AS parent_movie_id
+    FROM aka_title m 
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, 
+           m.kind_id, mh.movie_id AS parent_movie_id
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE m.production_year IS NOT NULL
+),
+cast_summary AS (
+    SELECT ci.movie_id, COUNT(DISTINCT ci.person_id) AS total_cast,
+           STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY ci.movie_id
+),
+keywords_summary AS (
+    SELECT mk.movie_id, STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+production_year_summary AS (
+    SELECT movie_id, production_year, COUNT(*) AS num_movies
+    FROM aka_title
+    GROUP BY movie_id, production_year
+    HAVING COUNT(DISTINCT id) > 1
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cs.total_cast,
+    cs.cast_names,
+    ks.keywords,
+    py.num_movies,
+    (CASE 
+         WHEN mh.kind_id IS NULL OR mh.kind_id = 0 THEN 'Unknown'
+         ELSE (SELECT kt.kind FROM kind_type kt WHERE kt.id = mh.kind_id)
+     END) AS kind_description
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    keywords_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    production_year_summary py ON mh.movie_id = py.movie_id
+WHERE 
+    mh.production_year >= 2000 
+    AND (py.num_movies IS NULL OR py.num_movies > 1) 
+ORDER BY 
+    mh.production_year DESC, cs.total_cast DESC
+LIMIT 100;

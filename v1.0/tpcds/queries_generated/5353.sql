@@ -1,0 +1,42 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_quantity) AS total_quantity,
+        Year(d.d_date) AS sales_year,
+        Month(d.d_date) AS sales_month
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, Year(d.d_date), Month(d.d_date)
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        SUM(ss.total_sales) AS total_spent,
+        COUNT(DISTINCT ss.order_count) AS order_count
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer c ON ss.web_site_sk = c.c_current_cdemo_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+)
+SELECT 
+    cs.cd_gender,
+    COUNT(cs.c_customer_sk) AS customer_count,
+    AVG(cs.total_spent) AS avg_spent,
+    SUM(cs.order_count) AS total_orders
+FROM 
+    customer_summary cs
+GROUP BY 
+    cs.cd_gender
+ORDER BY 
+    customer_count DESC;

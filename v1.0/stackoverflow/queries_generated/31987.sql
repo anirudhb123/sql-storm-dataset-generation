@@ -1,0 +1,64 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT U.Id, U.Reputation, 
+           CASE 
+               WHEN U.Reputation >= 1000 THEN 'High Reputation'
+               WHEN U.Reputation BETWEEN 500 AND 999 THEN 'Medium Reputation' 
+               ELSE 'Low Reputation' 
+           END AS ReputationCategory
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+
+    UNION ALL 
+
+    SELECT U.Id, U.Reputation + 10, 
+           CASE 
+               WHEN U.Reputation + 10 >= 1000 THEN 'High Reputation'
+               WHEN U.Reputation + 10 BETWEEN 500 AND 999 THEN 'Medium Reputation' 
+               ELSE 'Low Reputation' 
+           END AS ReputationCategory
+    FROM Users U
+    JOIN UserReputationCTE UR ON U.Id = UR.Id
+    WHERE U.Reputation + 10 < 1000
+),
+
+RecentPosts AS (
+    SELECT P.Id, P.Title, P.CreationDate, P.OwnerUserId,
+           ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+      AND P.OwnerUserId IS NOT NULL
+),
+
+PostVoteSummary AS (
+    SELECT PV.PostId, 
+           SUM(CASE WHEN PT.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN PT.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes PV
+    JOIN VoteTypes PT ON PV.VoteTypeId = PT.Id
+    GROUP BY PV.PostId
+),
+
+PostHistorySummary AS (
+    SELECT PH.PostId, 
+           COUNT(*) AS EditCount,
+           MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+
+SELECT U.DisplayName,  
+       U.Reputation, 
+       UR.ReputationCategory, 
+       RP.Title AS RecentPostTitle, 
+       RPS.UpVotes, 
+       RPS.DownVotes, 
+       PHS.EditCount AS TotalEdits,
+       PHS.LastEditDate
+FROM Users U
+JOIN UserReputationCTE UR ON U.Id = UR.Id
+LEFT JOIN RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.PostRank = 1
+LEFT JOIN PostVoteSummary RPS ON RP.Id = RPS.PostId
+LEFT JOIN PostHistorySummary PHS ON RP.Id = PHS.PostId
+WHERE U.Reputation >= 100
+AND (RPS.UpVotes IS NOT NULL OR RPS.DownVotes IS NOT NULL)
+ORDER BY U.Reputation DESC, UR.ReputationCategory;

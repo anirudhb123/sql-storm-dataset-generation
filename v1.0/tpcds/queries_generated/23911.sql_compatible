@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_returning_customer_sk ORDER BY sr_return_quantity DESC) AS rn
+    FROM
+        store_returns
+    WHERE
+        sr_return_quantity IS NOT NULL
+        AND sr_return_quantity > 0
+),
+JoinWarehouse AS (
+    SELECT
+        r.rn,
+        r.sr_returning_customer_sk,
+        w.w_warehouse_name,
+        w.w_city,
+        w.w_state,
+        SUM(CASE WHEN r.sr_return_quantity > 10 THEN r.sr_return_quantity ELSE 0 END) AS high_volume_returns
+    FROM
+        RankedReturns r
+    LEFT JOIN warehouse w ON w.w_warehouse_sk = 1 
+    WHERE
+        w.w_city IS NOT NULL
+    GROUP BY
+        r.rn, r.sr_returning_customer_sk, w.w_warehouse_name, w.w_city, w.w_state
+),
+CustomerDemographics AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        FIRST_VALUE(c.c_first_name) OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS top_customer_first_name
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+)
+SELECT
+    cd.c_customer_id,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(jw.high_volume_returns, 0) AS high_volume_returns,
+    jw.w_warehouse_name,
+    jw.w_city,
+    jw.w_state,
+    (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = cd.c_customer_id) AS total_store_sales,
+    NET_PROFIT_PROJECTION.total_net_profit
+FROM
+    CustomerDemographics cd
+LEFT JOIN JoinWarehouse jw ON jw.sr_returning_customer_sk = cd.c_customer_id
+LEFT JOIN (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM
+        web_sales
+    WHERE
+        ws_sales_price BETWEEN 10 AND 100
+    GROUP BY
+        ws_bill_customer_sk
+) AS NET_PROFIT_PROJECTION ON NET_PROFIT_PROJECTION.ws_bill_customer_sk = cd.c_customer_id
+WHERE
+    cd.cd_gender IS NOT NULL
+    AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+ORDER BY
+    high_volume_returns DESC NULLS LAST;

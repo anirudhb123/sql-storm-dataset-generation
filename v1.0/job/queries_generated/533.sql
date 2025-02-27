@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                RankedMovies
+        )
+),
+CompanyMovies AS (
+    SELECT 
+        m.title,
+        COUNT(m.company_id) AS company_count
+    FROM 
+        movie_companies m
+    INNER JOIN 
+        FilteredMovies fm ON m.movie_id = (
+            SELECT id 
+            FROM aka_title 
+            WHERE title = fm.title AND production_year = fm.production_year
+        )
+    GROUP BY 
+        m.title
+),
+FinalMovies AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_count,
+        COALESCE(cm.company_count, 0) AS company_count
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        CompanyMovies cm ON fm.title = cm.title
+)
+SELECT 
+    f.title, 
+    f.production_year, 
+    f.cast_count, 
+    f.company_count, 
+    CASE 
+        WHEN f.company_count > 5 THEN 'High'
+        WHEN f.company_count IS NULL OR f.company_count = 0 THEN 'None'
+        ELSE 'Low'
+    END AS company_rating
+FROM 
+    FinalMovies f
+WHERE 
+    f.cast_count > 10
+ORDER BY 
+    f.production_year DESC, f.cast_count DESC;

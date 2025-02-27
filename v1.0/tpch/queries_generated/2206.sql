@@ -1,0 +1,83 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerPerformance AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+ProductPerformance AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+),
+FinalReport AS (
+    SELECT 
+        cp.c_custkey,
+        cp.total_spent,
+        sp.unique_parts,
+        pp.revenue,
+        COUNT(DISTINCT ro.o_orderkey) AS order_count_distinct
+    FROM 
+        CustomerPerformance cp
+    LEFT JOIN 
+        SupplierStats sp ON cp.order_count > 0
+    LEFT JOIN 
+        ProductPerformance pp ON pp.order_count > 0
+    LEFT JOIN 
+        RankedOrders ro ON cp.order_count > 0
+    GROUP BY 
+        cp.c_custkey, cp.total_spent, sp.unique_parts, pp.revenue
+)
+SELECT 
+    fr.c_custkey,
+    fr.total_spent,
+    COALESCE(fr.unique_parts, 0) AS unique_parts,
+    COALESCE(fr.revenue, 0.00) AS revenue,
+    CASE 
+        WHEN fr.total_spent > 1000 THEN 'High Value'
+        WHEN fr.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value_category
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_spent IS NOT NULL
+ORDER BY 
+    fr.total_spent DESC;

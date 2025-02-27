@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+UpdatedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+NationalSupplierStats AS (
+    SELECT n.n_nationkey, n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty,
+           COALESCE(ps.ps_supplycost, 0) AS supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY COALESCE(ps.ps_supplycost, 0) DESC) AS supply_rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT nh.n_name, COUNT(DISTINCT oh.o_orderkey) AS order_count,
+       SUM(oh.o_totalprice) AS total_revenue,
+       AVG(ps.supplycost) AS average_supply_cost,
+       MAX(ps.ps_availqty) AS max_avail_qty
+FROM NationalSupplierStats nh
+LEFT JOIN UpdatedOrders oh ON nh.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = oh.o_custkey)
+LEFT JOIN PartSupplierInfo ps ON ps.supply_rank = 1
+WHERE nh.total_acctbal > (SELECT AVG(total_acctbal) FROM NationalSupplierStats)
+GROUP BY nh.n_name
+HAVING COUNT(DISTINCT oh.o_orderkey) > 10
+ORDER BY total_revenue DESC;

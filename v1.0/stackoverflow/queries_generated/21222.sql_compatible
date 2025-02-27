@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    AND 
+        p.PostTypeId = 1  
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT v.Id) AS UpvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopQuestions AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.DisplayName AS OwnerDisplayName,
+        us.Reputation AS OwnerReputation,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = rp.Id) AS CommentCount,
+        (SELECT COUNT(*) 
+         FROM Badges b 
+         WHERE b.UserId = rp.OwnerUserId) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.Rank = 1
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT crt.Comment SEPARATOR ', ') AS CloseReasons
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+        AND ph.PostHistoryTypeId = 10  
+    LEFT JOIN 
+        CloseReasonTypes crt ON ph.Comment = crt.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tq.Title,
+    tq.CreationDate,
+    tq.Score,
+    tq.OwnerDisplayName,
+    tq.OwnerReputation,
+    tq.CommentCount,
+    tq.BadgeCount,
+    COALESCE(cp.CloseReasons, 'Not Closed') AS PostCloseReasons,
+    CASE 
+        WHEN tq.Score > 100 THEN 'Highly Popular'
+        WHEN tq.Score BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular' 
+    END AS Popularity
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    ClosedPosts cp ON tq.PostId = cp.PostId
+WHERE 
+    tq.Score > (SELECT AVG(Score) FROM Posts WHERE PostTypeId = 1)  
+ORDER BY 
+    tq.Score DESC, tq.OwnerReputation DESC
+LIMIT 10;

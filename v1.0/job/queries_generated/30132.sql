@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM title t
+    WHERE t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title t ON ml.linked_movie_id = t.id
+    WHERE mh.level < 5
+),
+
+DirectorInfo AS (
+    SELECT
+        a.name AS director_name,
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN movie_companies mc ON c.movie_id = mc.movie_id
+    WHERE mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Director')
+    GROUP BY a.name, c.movie_id
+),
+
+MoviesWithKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        count(k.id) AS keyword_count
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    dh.director_name,
+    COALESCE(dh.total_cast, 0) AS total_cast,
+    mwk.keyword_count,
+    CASE
+        WHEN mwk.keyword_count > 3 THEN 'Popular'
+        WHEN mwk.keyword_count BETWEEN 1 AND 3 THEN 'Moderate'
+        ELSE 'Niche'
+    END AS keyword_category
+FROM MovieHierarchy mh
+LEFT JOIN DirectorInfo dh ON mh.movie_id = dh.movie_id
+LEFT JOIN MoviesWithKeywords mwk ON mh.movie_id = mwk.movie_id
+ORDER BY mh.production_year DESC, mh.level, mwk.keyword_count DESC;

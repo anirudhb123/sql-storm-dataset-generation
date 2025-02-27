@@ -1,0 +1,66 @@
+
+WITH address_stats AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_type, ', ') AS unique_streets
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_info AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_ship_date_sk, ws.ws_item_sk
+),
+detailed_report AS (
+    SELECT 
+        a.ca_city,
+        a.ca_state,
+        c.full_name,
+        s.total_sales,
+        s.total_orders,
+        COUNT(DISTINCT s.ws_item_sk) AS unique_items_sold
+    FROM 
+        address_stats a
+    JOIN 
+        customer_info c ON a.ca_city = c.c_current_addr_sk
+    JOIN 
+        sales_info s ON s.ws_ship_date_sk = (SELECT MAX(ws_ship_date_sk) FROM web_sales)
+    GROUP BY 
+        a.ca_city, a.ca_state, c.full_name, s.total_sales, s.total_orders
+)
+SELECT 
+    ca_city, 
+    ca_state, 
+    full_name, 
+    total_sales, 
+    total_orders, 
+    unique_items_sold,
+    ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    detailed_report
+WHERE 
+    total_sales > 0
+ORDER BY 
+    ca_city, sales_rank;

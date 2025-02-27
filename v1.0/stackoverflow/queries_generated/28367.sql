@@ -1,0 +1,86 @@
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreQuestions,
+        SUM(CASE WHEN p.AnswerCount > 0 THEN 1 ELSE 0 END) AS QuestionsWithAnswers,
+        SUM(CASE WHEN p.VoteCount > 0 THEN p.VoteCount ELSE 0 END) AS TotalVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        u.Id
+),
+TagPerformance AS (
+    SELECT 
+        pt.Tag,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(com.Score, 0)) AS TotalComments,
+        AVG(p.Score) AS AvgQuestionScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        PostTags pt
+    LEFT JOIN 
+        Posts p ON pt.PostId = p.Id
+    LEFT JOIN 
+        Comments com ON p.Id = com.PostId
+    GROUP BY 
+        pt.Tag
+),
+UserStatsWithTags AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        COUNT(DISTINCT pt.Tag) AS DistinctTags,
+        SUM(tp.QuestionCount) AS TotalTagQuestions,
+        AVG(tp.AvgQuestionScore) AS AvgTagScore
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        PostTags pt ON ups.TotalQuestions > 0 -- Ensuring only users with posted questions
+    LEFT JOIN 
+        TagPerformance tp ON pt.Tag = tp.Tag
+    GROUP BY 
+        ups.UserId
+)
+SELECT 
+    ust.UserId,
+    ust.DisplayName,
+    ust.DistinctTags,
+    ust.TotalTagQuestions,
+    ust.AvgTagScore,
+    tp.QuestionCount AS TotalQuestionsForTopTag,
+    tp.AvgQuestionScore AS TopTagAvgScore
+FROM 
+    UserStatsWithTags ust
+JOIN 
+    (SELECT 
+         pt.Tag,
+         COUNT(DISTINCT p.Id) AS QuestionCount,
+         AVG(p.Score) AS AvgQuestionScore
+     FROM 
+         PostTags pt
+     JOIN 
+         Posts p ON pt.PostId = p.Id
+     GROUP BY 
+         pt.Tag
+     ORDER BY 
+         QuestionCount DESC 
+     LIMIT 1) tp ON ust.TotalTagQuestions = tp.QuestionCount
+ORDER BY 
+    ust.DistinctTags DESC,
+    ust.TotalTagQuestions DESC;

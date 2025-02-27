@@ -1,0 +1,87 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_ext_discount_amt,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 0
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+), 
+SalesAggregation AS (
+    SELECT 
+        sd.cc_call_center_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        SUM(ws_quantity * (1 - (CASE WHEN ws_ext_discount_amt > 0 THEN 0.1 ELSE 0 END))) AS adjusted_sales,
+        SUM(ws_net_paid) AS total_net_paid,
+        AVG(ws_ext_sales_price) AS avg_sales_price
+    FROM 
+        store_sales ss
+    JOIN 
+        CustomerDetails cd ON ss.ss_customer_sk = cd.c_customer_sk
+    LEFT JOIN 
+        call_center sd ON ss.ss_store_sk = sd.cc_call_center_sk
+    GROUP BY 
+        sd.cc_call_center_sk
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_paid,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerDetails c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    sa.cc_call_center_sk,
+    sa.total_customers,
+    sa.adjusted_sales,
+    (SELECT 
+         SUM(ws_quantity) 
+     FROM 
+         SalesCTE 
+     WHERE 
+         ws_item_sk IN (SELECT TOP 5 i.i_item_sk FROM item i 
+                        WHERE i.i_brand LIKE '%A%' 
+                        ORDER BY i.i_current_price DESC) 
+     ) AS total_top_item_quantity,
+    tc.total_quantity,
+    tc.total_paid
+FROM 
+    SalesAggregation sa
+LEFT JOIN 
+    TopCustomers tc ON sa.total_customers > 10 AND tc.rank <= 10
+WHERE 
+    sa.total_net_paid IS NOT NULL 
+    AND sa.adjusted_sales > (SELECT AVG(adjusted_sales) FROM SalesAggregation)
+    AND EXISTS (SELECT 1 FROM inventory inv WHERE inv.inv_quantity_on_hand IS NULL)
+ORDER BY 
+    sa.cc_call_center_sk,
+    tc.total_quantity DESC NULLS LAST;

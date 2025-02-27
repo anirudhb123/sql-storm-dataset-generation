@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByCategory,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS tags ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tags
+    JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId, p.ViewCount, p.Score, pt.Name
+),
+AggregatedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        MAX(rp.RankByCategory) AS HighestRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate
+)
+SELECT 
+    ar.PostId,
+    ar.Title,
+    ar.CreationDate,
+    ar.VoteCount,
+    ar.Upvotes,
+    ar.Downvotes,
+    ar.HighestRank,
+    rp.AssociatedTags
+FROM 
+    AggregatedResults ar
+JOIN 
+    RankedPosts rp ON ar.PostId = rp.PostId
+WHERE 
+    ar.HighestRank <= 5
+ORDER BY 
+    ar.Upvotes DESC, 
+    ar.VoteCount DESC;

@@ -1,0 +1,43 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT t.id AS movie_id, t.title, t.production_year, 0 AS level
+    FROM aka_title t
+    WHERE t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') AND t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT t.id AS movie_id, t.title, t.production_year, mh.level + 1 AS level
+    FROM aka_title t
+    INNER JOIN movie_link ml ON t.id = ml.linked_movie_id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+, MovieCast AS (
+    SELECT 
+        mc.movie_id, 
+        ARRAY_AGG(DISTINCT an.name) AS actor_names,
+        COUNT(DISTINCT c.person_id) AS total_actors
+    FROM complete_cast mc
+    JOIN cast_info c ON mc.movie_id = c.movie_id
+    LEFT JOIN aka_name an ON c.person_id = an.person_id
+    GROUP BY mc.movie_id
+)
+, MovieInfo AS (
+    SELECT 
+        mt.movie_id, 
+        STRING_AGG(DISTINCT mi.info, '; ') AS additional_info
+    FROM movie_info mi
+    JOIN movie_companies mc ON mi.movie_id = mc.movie_id
+    JOIN MovieHierarchy mh ON mc.movie_id = mh.movie_id
+    GROUP BY mt.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mc.actor_names,
+    mc.total_actors,
+    COALESCE(mi.additional_info, 'No additional info') AS additional_info
+FROM MovieHierarchy mh
+LEFT JOIN MovieCast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE mh.level <= 2
+ORDER BY mh.production_year DESC, mh.title;

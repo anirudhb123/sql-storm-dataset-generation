@@ -1,0 +1,32 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CONCAT(s.s_name, ' (', s.s_phone, ')') AS full_details
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+           TRIM(REPLACE(p.p_comment, 'special', '')) AS sanitized_comment
+    FROM part p
+    WHERE LENGTH(p.p_name) > 10
+), 
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, c.c_name, o.o_totalprice, o.o_orderdate,
+           COALESCE(SUM(l.l_quantity), 0) AS total_quantity
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, c.c_name, o.o_totalprice, o.o_orderdate
+)
+SELECT s.full_details, p.p_name, c.c_name, o.o_orderdate, o.total_quantity
+FROM SupplierDetails s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN PartDetails p ON ps.ps_partkey = p.p_partkey
+JOIN CustomerOrders o ON o.o_orderkey = (
+    SELECT MIN(o2.o_orderkey) 
+    FROM orders o2 
+    WHERE o2.o_custkey = o.o_custkey
+)
+WHERE p.sanitized_comment IS NOT NULL
+ORDER BY o.total_quantity DESC, o.o_orderdate ASC;

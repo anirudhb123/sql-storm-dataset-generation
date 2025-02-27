@@ -1,0 +1,88 @@
+WITH RecursiveMovieCTE AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        r.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        RecursiveMovieCTE r ON ml.movie_id = r.movie_id
+),
+DistinctMovieKeywords AS (
+    
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyDetails AS (
+    
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+ActorRoles AS (
+    
+    SELECT 
+        ci.movie_id,
+        r.role AS actor_role,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COALESCE(c.company_name, 'Independent') AS production_company,
+    COALESCE(ct.kind, 'Unknown') AS company_type,
+    COALESCE(ar.actor_role, 'Miscellaneous') AS primary_actor_role,
+    ar.actor_count AS number_of_actors,
+    m.depth AS link_depth
+FROM 
+    RecursiveMovieCTE m
+LEFT JOIN 
+    DistinctMovieKeywords k ON m.movie_id = k.movie_id
+LEFT JOIN 
+    CompanyDetails c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    actorRoles ar ON m.movie_id = ar.movie_id
+WHERE 
+    m.production_year >= 2000 
+    AND (m.depth < 3 OR u(depth IS NULL)) 
+ORDER BY 
+    m.production_year DESC, 
+    m.title;

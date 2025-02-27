@@ -1,0 +1,83 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        ss_sold_date_sk, 
+        SUM(ss_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ss_sold_date_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk
+),
+weekly_summary AS (
+    SELECT 
+        d.d_date, 
+        SUM(total_profit) AS weekly_profit
+    FROM 
+        date_dim d
+    JOIN 
+        sales_hierarchy sh ON d.d_date_sk = sh.ss_sold_date_sk 
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        d.d_date
+),
+monthly_profit AS (
+    SELECT 
+        EXTRACT(YEAR FROM d.d_date) AS year,
+        EXTRACT(MONTH FROM d.d_date) AS month,
+        SUM(ws.ws_ext_sales_price) AS monthly_sales,
+        COALESCE(SUM(ws.ws_coupon_amt), 0) AS total_coupons,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        EXTRACT(YEAR FROM d.d_date), EXTRACT(MONTH FROM d.d_date)
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_ext_sales_price) AS total_spent 
+    FROM 
+        web_sales ws 
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk 
+    GROUP BY 
+        c.c_customer_id 
+    HAVING 
+        SUM(ws.ws_ext_sales_price) > 1000
+)
+SELECT 
+    md.year,
+    md.month,
+    md.monthly_sales,
+    md.total_coupons,
+    md.total_orders,
+    COALESCE(tc.total_spent, 0) AS top_customer_spending,
+    w.weekly_profit
+FROM 
+    monthly_profit md
+LEFT JOIN 
+    (SELECT 
+        EXTRACT(YEAR FROM d.d_date) AS year, 
+        EXTRACT(MONTH FROM d.d_date) AS month, 
+        SUM(weekly_profit) AS weekly_profit 
+     FROM 
+        weekly_summary 
+     GROUP BY 
+        EXTRACT(YEAR FROM d.d_date), EXTRACT(MONTH FROM d.d_date)) w ON md.year = w.year AND md.month = w.month
+LEFT JOIN 
+    (SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_ext_sales_price) AS total_spent 
+     FROM 
+        top_customers 
+     GROUP BY 
+        c.c_customer_id) tc ON md.year = tc.year AND md.month = tc.month
+ORDER BY 
+    md.year, md.month;

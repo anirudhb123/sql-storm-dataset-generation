@@ -1,0 +1,81 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        ROW_NUMBER() OVER (PARTITION BY cr_returning_customer_sk ORDER BY SUM(cr_return_quantity) DESC) AS rnk
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+), CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cs.total_returns,
+        cs.total_returned_quantity,
+        COALESCE(HAVING_VALUE(100.0 * cs.total_returned_quantity / NULLIF(ws.ws_quantity, 0)), 0) AS return_rate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        (SELECT 
+            ws_ship_customer_sk,
+            SUM(ws_quantity) AS ws_quantity
+         FROM 
+            web_sales 
+         GROUP BY 
+            ws_ship_customer_sk) ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        CustomerReturns cs ON c.c_customer_sk = cs.cr_returning_customer_sk
+), DateSummary AS (
+    SELECT 
+        d_year, 
+        d_month_seq,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_returns,
+    cs.total_returned_quantity,
+    cs.return_rate,
+    ds.d_year,
+    ds.order_count,
+    ds.total_profit,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS store_profit
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    store_sales ss ON cs.c_customer_id = ss.ss_customer_sk
+LEFT JOIN 
+    DateSummary ds ON EXTRACT(YEAR FROM CURRENT_DATE) = ds.d_year 
+    AND EXTRACT(MONTH FROM CURRENT_DATE) = ds.d_month_seq
+WHERE 
+    cs.return_rate > 50 
+    AND (cs.cd_marital_status = 'M' OR cs.cd_gender = 'F')
+GROUP BY 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_returns,
+    cs.total_returned_quantity,
+    cs.return_rate,
+    ds.d_year,
+    ds.order_count,
+    ds.total_profit
+ORDER BY 
+    cs.return_rate DESC, 
+    ds.total_profit DESC
+LIMIT 10;

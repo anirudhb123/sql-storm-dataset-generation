@@ -1,0 +1,63 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+
+TopUsers AS (
+    SELECT 
+        UPS.DisplayName,
+        UPS.TotalVotes,
+        UPS.UpVotes,
+        UPS.DownVotes,
+        UPS.TotalBounty,
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount
+    FROM UserVoteStats UPS
+    JOIN RecentPosts RP ON UPS.UserId = RP.OwnerUserId
+    WHERE UPS.TotalVotes > 10
+      AND RP.UserPostRank = 1
+)
+
+SELECT 
+    TU.DisplayName,
+    TU.TotalVotes,
+    TU.UpVotes,
+    TU.DownVotes,
+    TU.TotalBounty,
+    COALESCE(PH.Comment, 'No close reason available') AS CloseReason,
+    COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount
+FROM TopUsers TU
+LEFT JOIN PostHistory PH ON PH.UserId = TU.UserId AND PH.PostId IN (SELECT PostId FROM RecentPosts) AND PH.PostHistoryTypeId = 10
+LEFT JOIN PostLinks PL ON PL.PostId = TU.PostId
+GROUP BY 
+    TU.DisplayName, 
+    TU.TotalVotes, 
+    TU.UpVotes, 
+    TU.DownVotes, 
+    TU.TotalBounty, 
+    PH.Comment
+ORDER BY TU.TotalVotes DESC, TU.UpVotes DESC;

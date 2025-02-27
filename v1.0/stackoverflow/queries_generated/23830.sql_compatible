@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, ',')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(tag)
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' AND 
+        p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.AnswerCount, p.PostTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+HighlyRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.Tags,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        cp.LastCloseDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.ScoreRank = 1 AND 
+        (rp.AnswerCount > 5 OR COALESCE(cp.CloseCount, 0) = 0)
+)
+SELECT 
+    hrp.PostId,
+    hrp.Title,
+    hrp.CreationDate,
+    hrp.Score,
+    hrp.AnswerCount,
+    hrp.UpVotes,
+    hrp.DownVotes,
+    hrp.Tags,
+    CASE 
+        WHEN hrp.CloseCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    CASE 
+        WHEN hrp.LastCloseDate IS NULL 
+            THEN 'Never Closed' 
+        ELSE 'Last Closed on ' || TO_CHAR(hrp.LastCloseDate, 'YYYY-MM-DD HH24:MI:SS') 
+    END AS CloseStatus
+FROM 
+    HighlyRankedPosts hrp
+WHERE 
+    hrp.CloseCount < 3 
+    OR hrp.UpVotes > hrp.DownVotes
+ORDER BY 
+    hrp.Score DESC,
+    hrp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.UserRank <= 5 -- Get top 5 posts per user
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.OwnerDisplayName,
+    tp.OwnerReputation,
+    ISNULL((
+        SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM Tags t 
+        JOIN Posts p ON p.Tags LIKE '%' + t.TagName + '%' 
+        WHERE p.Id = tp.Id
+    ), 'No Tags') AS TagList
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- Post closed/reopened
+WHERE 
+    ph.Id IS NULL -- Exclude closed or reopened posts
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY; -- Pagination option

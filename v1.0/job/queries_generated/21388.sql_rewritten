@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+HighestCastMovies AS (
+    SELECT 
+        movie_id, title, production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank = 1
+), 
+CompanyInfos AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS associated_cast_count
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id, company_name, company_type
+), 
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    hm.movie_id,
+    hm.title,
+    hm.production_year,
+    COALESCE(ci.company_name, 'Unknown') AS company_name,
+    COALESCE(ci.company_type, 'Independent') AS company_type,
+    COALESCE(cc.associated_cast_count, 0) AS associated_cast_count,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN hm.production_year < 2000 THEN 'Classic'
+        WHEN hm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COUNT(DISTINCT ci.company_name) AS distinct_company_count
+FROM 
+    HighestCastMovies hm
+LEFT JOIN 
+    CompanyInfos ci ON hm.movie_id = ci.movie_id
+LEFT JOIN 
+    KeywordCounts kc ON hm.movie_id = kc.movie_id
+WHERE 
+    (ci.company_name IS NOT NULL OR kc.keyword_count IS NOT NULL)
+GROUP BY 
+    hm.movie_id, hm.title, hm.production_year, ci.company_name, ci.company_type
+HAVING 
+    COUNT(DISTINCT ci.company_name) > 1 
+ORDER BY 
+    hm.production_year DESC, 
+    distinct_company_count DESC, 
+    associated_cast_count DESC;

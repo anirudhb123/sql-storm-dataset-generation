@@ -1,0 +1,67 @@
+
+WITH CTE_Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_net_paid), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_net_paid), 0) AS total_store_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_order_count,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk 
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CTE_Aggregate_Sales AS (
+    SELECT 
+        ccs.c_customer_sk,
+        ccs.c_first_name,
+        ccs.c_last_name,
+        ccs.total_web_sales,
+        ccs.total_catalog_sales,
+        ccs.total_store_sales,
+        (ccs.total_web_sales + ccs.total_catalog_sales + ccs.total_store_sales) AS total_all_sales,
+        CASE 
+            WHEN (ccs.total_web_sales + ccs.total_catalog_sales + ccs.total_store_sales) > 1000 THEN 'High Roller'
+            WHEN (ccs.total_web_sales + ccs.total_catalog_sales + ccs.total_store_sales) BETWEEN 500 AND 1000 THEN 'Moderate Spender'
+            ELSE 'Budget Buyer'
+        END AS spending_category,
+        ROW_NUMBER() OVER (PARTITION BY ccs.spending_category ORDER BY ccs.total_all_sales DESC) AS rank_within_category
+    FROM 
+        CTE_Customer_Sales ccs
+)
+SELECT 
+    c.*,
+    r.reason_desc,
+    CASE 
+        WHEN r.reason_desc IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END AS return_status,
+    COALESCE(sales.sales_summary, 'No Sales Data') AS sales_summary
+FROM 
+    CTE_Aggregate_Sales c
+LEFT JOIN 
+    (SELECT 
+        cr_returning_customer_sk,
+        STRING_AGG(cr_reason_sk || ': ' || cr_return_amount, ', ') AS sales_summary
+     FROM 
+        catalog_returns
+     GROUP BY 
+        cr_returning_customer_sk
+    ) sales ON c.c_customer_sk = sales.cr_returning_customer_sk
+LEFT JOIN 
+    reason r ON r.r_reason_sk IN (SELECT DISTINCT cr_reason_sk FROM catalog_returns WHERE cr_returning_customer_sk = c.c_customer_sk)
+WHERE 
+    c.total_all_sales IS NOT NULL 
+    AND c.spending_category LIKE 'Moderate%'
+ORDER BY 
+    c.total_all_sales DESC;

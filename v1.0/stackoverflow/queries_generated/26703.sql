@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserPostRank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+    LEFT JOIN 
+        Tags t ON POSITION(('<' || t.TagName || '>') IN p.Tags) > 0 -- Using string processing
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' AND
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.ViewCount, p.Score
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Body,
+        rp.Tags,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.TagList
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 5 -- Top 5 posts per user
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Body,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.VoteCount,
+    fp.TagList
+FROM 
+    Users u
+JOIN 
+    FilteredPosts fp ON u.Id = fp.OwnerUserId
+WHERE 
+    u.Reputation > 100 -- Users with reputation greater than 100
+ORDER BY 
+    u.DisplayName, fp.CreationDate DESC;

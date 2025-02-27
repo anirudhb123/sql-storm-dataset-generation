@@ -1,0 +1,39 @@
+WITH ProcessedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUBSTRING(s.s_comment FROM 1 FOR 35) AS short_comment,
+        LENGTH(s.s_comment) AS comment_length
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+),
+SupplierRegions AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        r.r_name AS region_name,
+        p.p_name AS part_name,
+        p.p_brand AS brand,
+        p.p_type AS type,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CONCAT(sp.short_comment, ' | ', r.r_comment) AS processed_comment
+    FROM partsupp ps
+    JOIN ProcessedSuppliers sp ON ps.ps_suppkey = sp.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON sp.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name ILIKE '%East%'
+)
+SELECT 
+    region_name,
+    COUNT(DISTINCT part_name) AS unique_parts,
+    SUM(ps_supplycost * ps_availqty) AS total_supply_value,
+    AVG(p_retailprice) AS avg_retail_price,
+    MAX(comment_length) AS max_comment_length,
+    STRING_AGG(processed_comment, '; ') AS combined_comments
+FROM SupplierRegions
+GROUP BY region_name
+ORDER BY total_supply_value DESC;

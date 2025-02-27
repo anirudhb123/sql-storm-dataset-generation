@@ -1,0 +1,54 @@
+
+WITH MovieDetails AS (
+    SELECT
+        at.title,
+        at.production_year,
+        kc.keyword,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS num_cast,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_order
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        at.title, at.production_year, kc.keyword, ct.kind
+),
+
+RankedMovies AS (
+    SELECT
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.num_cast DESC) AS rank_by_cast,
+        DENSE_RANK() OVER (ORDER BY md.production_year DESC, md.num_cast DESC) AS rank_by_year
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.keyword,
+    rm.company_type,
+    rm.num_cast,
+    rm.avg_order,
+    CASE 
+        WHEN rm.rank_by_cast <= 5 THEN 'Top 5 by Cast' 
+        ELSE 'Below Top 5' 
+    END AS cast_rank_category,
+    COALESCE(NULLIF(rm.rank_by_year, 1), 'No Ranking') AS year_rank_status
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.num_cast > 0
+ORDER BY 
+    rm.production_year DESC, rm.num_cast DESC;

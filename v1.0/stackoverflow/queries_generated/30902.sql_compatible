@@ -1,0 +1,83 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputationAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBountyAmount,
+        AVG(u.Reputation) AS AvgReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+        AND ph.CreationDate >= ('2024-10-01 12:34:56'::timestamp - INTERVAL '30 days')
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS Rank
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    r.Id AS PostId,
+    r.Title,
+    r.CreationDate,
+    up.UserId,
+    up.DisplayName AS UserDisplayName,
+    up.AvgReputation,
+    up.BadgeCount,
+    uc.TotalBountyAmount,
+    uc.TotalUpVotes,
+    uc.TotalDownVotes,
+    r.Level AS PostLevel,
+    COALESCE(rh.CloseReason, 'Open') AS CloseReason
+FROM RecursivePostHierarchy r
+LEFT JOIN UserReputationAggregates up ON r.OwnerUserId = up.UserId
+LEFT JOIN RecentClosedPosts rh ON r.Id = rh.Id
+LEFT JOIN TopUsers uc ON r.OwnerUserId = uc.Id
+WHERE r.ViewCount > 10
+  AND r.Score > 0
+  AND up.AvgReputation IS NOT NULL
+ORDER BY r.Level, r.CreationDate DESC;

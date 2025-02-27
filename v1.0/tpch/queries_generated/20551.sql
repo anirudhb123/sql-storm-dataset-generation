@@ -1,0 +1,83 @@
+WITH RegionalAggregates AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+), 
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY 
+        c.c_custkey
+),
+
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        LAG(s.s_acctbal) OVER (ORDER BY s.s_acctbal DESC) AS prev_acctbal,
+        CASE WHEN s.s_acctbal IS NULL THEN 'Unknown' ELSE 'Known' END AS account_status
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+
+SELECT 
+    ra.region_name,
+    ra.total_supply_value,
+    ra.supplier_count,
+    co.order_count,
+    co.total_spent,
+    hvs.s_suppkey,
+    hvs.s_name,
+    hvs.prev_acctbal,
+    hvs.account_status,
+    fli.l_orderkey,
+    fli.l_partkey,
+    fli.net_revenue
+FROM 
+    RegionalAggregates ra
+LEFT JOIN 
+    CustomerOrders co ON ra.supplier_count > co.order_count
+FULL OUTER JOIN 
+    HighValueSuppliers hvs ON ra.supplier_count = (SELECT COUNT(*) FROM supplier s WHERE s.s_acctbal > 1000)
+JOIN 
+    FilteredLineItems fli ON fli.l_orderkey = co.c_custkey OR co.c_custkey IS NULL
+WHERE 
+    (ra.total_supply_value > (SELECT AVG(total_supply_value) FROM RegionalAggregates) OR fli.net_revenue IS NOT NULL)
+ORDER BY 
+    ra.region_name, co.total_spent DESC, fli.net_revenue ASC;

@@ -1,0 +1,65 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sr_return_quantity + COALESCE(wr_return_quantity, 0)), 0) AS total_returns,
+        COUNT(DISTINCT wr_order_number) FILTER (WHERE wr_return_quantity IS NOT NULL) AS web_return_count,
+        COUNT(DISTINCT sr_ticket_number) FILTER (WHERE sr_return_quantity IS NOT NULL) AS store_return_count
+    FROM
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+IncomeDemographics AS (
+    SELECT
+        h.hd_demo_sk,
+        CASE
+            WHEN ib.ib_lower_bound IS NULL OR ib.ib_upper_bound IS NULL THEN 'Unknown'
+            ELSE CONCAT('$', ib.ib_lower_bound, ' - $', ib.ib_upper_bound)
+        END AS income_range,
+        h.hd_buy_potential
+    FROM
+        household_demographics h
+    LEFT JOIN income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+),
+TopReturnCustomers AS (
+    SELECT 
+        cr.c_customer_sk,
+        cr.c_first_name,
+        cr.c_last_name,
+        cr.total_returns,
+        id.income_range
+    FROM
+        CustomerReturns cr
+    JOIN IncomeDemographics id ON cr.c_customer_sk = id.hd_demo_sk
+    WHERE cr.total_returns > (
+        SELECT 
+            AVG(total_returns) 
+        FROM 
+            CustomerReturns
+    )
+    ORDER BY cr.total_returns DESC
+    LIMIT 10
+)
+SELECT 
+    tr.c_first_name,
+    tr.c_last_name,
+    tr.total_returns,
+    COALESCE(tr.income_range, 'Non-disclosed') AS income_bracket,
+    ROW_NUMBER() OVER (ORDER BY tr.total_returns DESC) AS return_rank,
+    DENSE_RANK() OVER (PARTITION BY tr.income_range ORDER BY tr.total_returns DESC) AS income_based_rank
+FROM 
+    TopReturnCustomers tr
+WHERE 
+    (tr.income_range NOT LIKE 'Unknown' OR tr.total_returns > 0)
+    AND EXISTS (
+        SELECT 1
+        FROM customer_demographics cd
+        WHERE cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = tr.c_customer_sk)
+        AND cd.cd_marital_status = 'M'
+    )
+ORDER BY 
+    tr.total_returns DESC, tr.c_last_name ASC;

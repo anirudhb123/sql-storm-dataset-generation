@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY (STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(CASE WHEN p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopContributors AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalScore,
+        ua.RecentPostCount,
+        RANK() OVER (ORDER BY ua.TotalScore DESC) AS ContributorRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    pc.PostId,
+    pc.Title,
+    pc.Body,
+    pc.CreationDate AS PostDate,
+    tc.DisplayName AS ContributorName,
+    tc.PostCount AS ContributorPosts,
+    tc.TotalScore AS ContributorScore,
+    tc.RecentPostCount AS ContributorRecentPosts,
+    pc.TagsList
+FROM 
+    RankedPosts pc
+JOIN 
+    TopContributors tc ON pc.OwnerUserId = tc.UserId
+WHERE 
+    pc.Rank <= 5
+ORDER BY 
+    tc.TotalScore DESC, pc.CreationDate DESC;

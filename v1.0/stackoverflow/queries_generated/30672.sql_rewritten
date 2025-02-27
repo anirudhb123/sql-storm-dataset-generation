@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS UserName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVotes
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        UpVotes, 
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TitleEditCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    TP.UpVotes,
+    TP.DownVotes,
+    COALESCE(PHS.EditCount, 0) AS TotalEdits,
+    COALESCE(PHS.TitleEditCount, 0) AS TotalTitleEdits,
+    COALESCE(PHS.CloseReopenCount, 0) AS TotalCloseReopen
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    PostHistorySummary PHS ON TP.PostId = PHS.PostId
+ORDER BY 
+    TP.Score DESC, TP.ViewCount DESC
+LIMIT 50;

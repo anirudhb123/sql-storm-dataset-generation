@@ -1,0 +1,42 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        n.n_name AS nation_name,
+        rs.total_supply_cost
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+    WHERE rs.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+)
+SELECT 
+    ts.nation_name, 
+    ts.s_name AS supplier_name, 
+    COUNT(co.o_orderkey) AS order_count, 
+    SUM(co.o_totalprice) AS total_spent, 
+    AVG(co.o_totalprice) AS average_order_value
+FROM TopSuppliers ts
+LEFT JOIN CustomerOrders co ON ts.s_suppkey = co.o_orderkey
+GROUP BY ts.nation_name, ts.s_name
+ORDER BY total_spent DESC, order_count DESC;

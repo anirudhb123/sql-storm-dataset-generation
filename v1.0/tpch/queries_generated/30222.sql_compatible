@@ -1,0 +1,82 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+part_suppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+supplier_region AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.order_count,
+    cs.total_spent,
+    ps.p_name AS part_name,
+    psc.total_supply_cost,
+    sr.r_name AS region_name,
+    sr.total_account_balance,
+    COALESCE(cs.total_spent / NULLIF(cs.order_count, 0), 0) AS avg_spent_per_order
+FROM 
+    customer_orders cs
+JOIN 
+    part_suppliers psc ON psc.total_supply_cost = (
+        SELECT 
+            MAX(psc2.total_supply_cost)
+        FROM 
+            part_suppliers psc2
+        WHERE 
+            psc2.p_partkey IN (
+                SELECT DISTINCT ps.ps_partkey
+                FROM lineitem l
+                WHERE l.l_shipdate >= DATE('1998-10-01') - INTERVAL '1 year'
+            )
+    )
+LEFT JOIN 
+    supplier_region sr ON sr.total_account_balance > 10000
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM customer_orders)
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 10;

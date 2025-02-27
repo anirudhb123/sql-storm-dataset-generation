@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS rn,
+           AVG(v.BountyAmount) OVER (PARTITION BY p.Id) AS AverageBounty
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+      AND p.Score IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT *,
+           CASE 
+               WHEN Score > 10 THEN 'High Score'
+               WHEN Score BETWEEN 5 AND 10 THEN 'Medium Score' 
+               ELSE 'Low Score'
+           END AS ScoreCategory
+    FROM RankedPosts
+    WHERE AverageBounty IS NOT NULL
+      AND rn <= 5
+),
+PostTags AS (
+    SELECT pt.PostId,
+           STRING_AGG(t.TagName, ', ') AS TagsListed
+    FROM PostTags pt
+    JOIN Tags t ON pt.TagId = t.Id
+    GROUP BY pt.PostId
+)
+SELECT fp.PostId,
+       fp.Title,
+       fp.CreationDate,
+       fp.Score,
+       fp.ScoreCategory,
+       fp.ViewCount,
+       COALESCE(pt.TagsListed, 'No Tags') AS TagsListed
+FROM FilteredPosts fp
+LEFT JOIN PostTags pt ON fp.PostId = pt.PostId
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM Comments c
+    WHERE c.PostId = fp.PostId
+      AND c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '3 months'
+      AND COALESCE(c.UserDisplayName, '') <> ''
+)
+ORDER BY fp.Score DESC
+LIMIT 10;

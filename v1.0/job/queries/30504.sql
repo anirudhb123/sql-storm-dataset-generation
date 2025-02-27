@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Movie_CTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        cte.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        Movie_CTE cte ON m.episode_of_id = cte.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    AVG(mr.level) AS average_recursion_level
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    Movie_CTE t ON c.movie_id = t.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    (SELECT 
+        movie_id, 
+        ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY production_year ASC) AS level
+     FROM 
+        aka_title
+     WHERE 
+        production_year IS NOT NULL) mr ON t.movie_id = mr.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name <> ''
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(c.person_id) > 5 
+    AND AVG(mr.level) IS NOT NULL
+ORDER BY 
+    average_recursion_level DESC, total_cast DESC;

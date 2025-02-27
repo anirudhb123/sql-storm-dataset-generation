@@ -1,0 +1,90 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (4, 5)) AS EditCount,
+        DENSE_RANK() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC NULLS LAST) AS EditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+CommentStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments,
+        AVG(LENGTH(Text)) AS AvgCommentLength
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostSummary AS (
+    SELECT 
+        ap.PostId,
+        ap.Title,
+        ap.CreationDate,
+        ap.ViewCount,
+        ap.CommentCount,
+        cs.TotalComments,
+        cs.AvgCommentLength,
+        us.UserRank
+    FROM 
+        ActivePosts ap
+    LEFT JOIN 
+        CommentStats cs ON cs.PostId = ap.PostId
+    LEFT JOIN 
+        UserStats us ON us.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ap.PostId)
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.TotalComments,
+    ps.AvgCommentLength,
+    CASE 
+        WHEN ps.UserRank <= 10 THEN 'Top User' 
+        ELSE 'Regular User' 
+    END AS UserCategory,
+    CONCAT('Post with ID ', ps.PostId, ' was created on ', to_char(ps.CreationDate, 'YYYY-MM-DD HH24:MI:SS')) AS PostDetails
+FROM 
+    PostSummary ps
+WHERE 
+    (ps.CommentCount > 5 OR ps.UserCategory = 'Top User') 
+    AND (ps.AvgCommentLength IS NOT NULL AND ps.AvgCommentLength < 200)
+ORDER BY 
+    ps.ViewCount DESC, ps.CommentCount DESC;

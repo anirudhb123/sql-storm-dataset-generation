@@ -1,0 +1,44 @@
+-- Performance Benchmark Query
+WITH UserReputation AS (
+  SELECT Id, Reputation, COUNT(DISTINCT Posts.Id) AS PostCount
+  FROM Users
+  LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+  GROUP BY Id, Reputation
+),
+PopularTopics AS (
+  SELECT Tags.TagName, COUNT(Posts.Id) AS PostsCount
+  FROM Posts
+  JOIN LATERAL unnest(string_to_array(Tags, '<>')) AS Tags ON TRUE
+  GROUP BY Tags.TagName
+  ORDER BY PostsCount DESC
+  LIMIT 10
+),
+PostStatistics AS (
+  SELECT
+      p.Id,
+      p.Title,
+      p.CreationDate,
+      COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+      COALESCE(p.Score, 0) AS Score,
+      COALESCE(p.ViewCount, 0) AS ViewCount,
+      COUNT(DISTINCT c.Id) AS CommentCount
+  FROM Posts p
+  LEFT JOIN Comments c ON p.Id = c.PostId
+  GROUP BY p.Id
+)
+
+SELECT 
+    ur.Id AS UserId, 
+    ur.Reputation, 
+    ur.PostCount, 
+    pt.TagName AS PopularTag, 
+    ps.Title AS PostTitle, 
+    ps.CreationDate AS PostCreationDate, 
+    ps.AcceptedAnswerId, 
+    ps.Score AS PostScore, 
+    ps.ViewCount AS PostViewCount, 
+    ps.CommentCount AS PostCommentCount
+FROM UserReputation ur
+CROSS JOIN PopularTopics pt
+JOIN PostStatistics ps ON pt.TagName = ANY(string_to_array(substring(ps.Tags, 2, length(ps.Tags) - 2), '<>'))
+ORDER BY ur.Reputation DESC, ps.Score DESC;

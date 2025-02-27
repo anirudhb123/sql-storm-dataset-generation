@@ -1,0 +1,62 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+), 
+CityWiseTopCustomers AS (
+    SELECT 
+        ca.ca_city,
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        customer_address ca ON rc.c_customer_sk = ca.ca_address_sk
+    WHERE 
+        rc.rank <= 3
+), 
+SalesData AS (
+    SELECT 
+        ss.ss_customer_sk,
+        SUM(ss.ss_net_paid) AS total_spent,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales ss
+    GROUP BY 
+        ss.ss_customer_sk
+)
+
+SELECT 
+    ct.ca_city,
+    ct.c_first_name,
+    ct.c_last_name,
+    ct.cd_gender,
+    ct.cd_marital_status,
+    ct.cd_purchase_estimate,
+    COALESCE(sd.total_spent, 0) AS total_spent,
+    COALESCE(sd.total_transactions, 0) AS total_transactions
+FROM 
+    CityWiseTopCustomers ct
+LEFT JOIN 
+    SalesData sd ON ct.c_customer_sk = sd.ss_customer_sk
+ORDER BY 
+    ct.ca_city, total_spent DESC;

@@ -1,0 +1,48 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_member_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+top_movies AS (
+    SELECT 
+        *,
+        (SELECT COUNT(*) FROM ranked_movies) AS total_movies
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.cast_member_count,
+    tm.aka_names,
+    tm.keywords,
+    (tm.cast_member_count::decimal / NULLIF(total_movies, 0)) * 100 AS cast_percentage
+FROM 
+    top_movies tm
+ORDER BY 
+    tm.cast_member_count DESC;
+
+This query does the following:
+1. **CTE `ranked_movies`**: Calculates the number of cast members for each movie using joins and aggregates the AKA names and keywords.
+2. **CTE `top_movies`**: Filters to get the top 10 movies based on the number of cast members and includes the total count of movies for percentage calculations.
+3. **Final Selection**: Selects movie details including the title, production year, count of cast members, associated AKA names, and keywords, along with a percentage of cast members relative to total movies, sorted by the cast member count.

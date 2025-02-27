@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        CAST(Title AS VARCHAR(MAX)) AS FullTitle
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Starting from Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        CAST(r.FullTitle + ' > ' + p.Title AS VARCHAR(MAX)) AS FullTitle
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+    WHERE 
+        p.PostTypeId = 2  -- Answers
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        PH.CreationDate AS PostCreationDate,
+        P.ViewCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Comments C
+            WHERE C.PostId = P.Id
+        ), 0) AS CommentCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes V
+            WHERE V.PostId = P.Id AND V.VoteTypeId = 2
+        ), 0) AS UpvoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1  -- Only Questions
+),
+BestQuestions AS (
+    SELECT
+        PD.PostId,
+        PD.Title,
+        PD.OwnerDisplayName,
+        PD.PostCreationDate,
+        PD.ViewCount,
+        PD.CommentCount,
+        PD.UpvoteCount,
+        R.ReputationRank
+    FROM 
+        PostDetails PD
+    JOIN 
+        UserReputation R ON PD.OwnerDisplayName = R.UserId
+    WHERE 
+        R.ReputationRank <= 10  -- Top 10 users by reputation
+)
+SELECT 
+    BQ.Title,
+    BQ.OwnerDisplayName,
+    BQ.PostCreationDate,
+    BQ.ViewCount,
+    BQ.CommentCount,
+    BQ.UpvoteCount,
+    (
+        SELECT 
+            STRING_AGG(CONVERT(VARCHAR, Id), ', ') 
+        FROM 
+            PostLinks PL 
+        WHERE 
+            PL.PostId = BQ.PostId
+    ) AS RelatedPostLinks
+FROM 
+    BestQuestions BQ
+ORDER BY 
+    BQ.UpvoteCount DESC, 
+    BQ.ViewCount DESC;

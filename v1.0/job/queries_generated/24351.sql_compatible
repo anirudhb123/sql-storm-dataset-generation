@@ -1,0 +1,65 @@
+
+WITH ranked_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_cast
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        m.company_id,
+        m.note AS company_note,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS recent_keyword
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN movie_companies m ON t.id = m.movie_id
+    WHERE m.company_id IS NOT NULL
+),
+
+actor_summary AS (
+    SELECT 
+        r.movie_id,
+        COUNT(*) AS total_actors,
+        AVG(r.role_rank) AS avg_role_rank,
+        MAX(r.role_rank) AS max_role_rank
+    FROM ranked_cast r
+    GROUP BY r.movie_id
+)
+
+SELECT 
+    md.title,
+    md.production_year,
+    md.company_note,
+    rc.actor_name,
+    rc.total_cast,
+    COALESCE(summary.total_actors, 0) AS total_actors,
+    summary.avg_role_rank,
+    summary.max_role_rank,
+    CASE 
+        WHEN md.recent_keyword = 1 THEN 'Latest Keyword Present'
+        ELSE 'Keyword Not Latest'
+    END AS keyword_status
+FROM movie_details md
+LEFT JOIN ranked_cast rc ON md.movie_id = rc.movie_id
+LEFT JOIN actor_summary summary ON md.movie_id = summary.movie_id
+WHERE md.keyword IS NOT NULL
+  AND md.production_year > 2000
+  AND (md.company_note IS NULL OR md.company_note LIKE '%produced%')
+GROUP BY 
+    md.title,
+    md.production_year,
+    md.company_note,
+    rc.actor_name,
+    rc.total_cast,
+    summary.total_actors,
+    summary.avg_role_rank,
+    summary.max_role_rank,
+    md.recent_keyword
+ORDER BY md.production_year DESC, total_actors DESC, rc.actor_name;

@@ -1,0 +1,82 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS movie_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY m.id) AS total_cast
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+AggregatedCompanyData AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+TitleWithKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        STRING_AGG(k.keyword, ', ') AS keywords 
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+),
+SubqueryExample AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.total_cast,
+        a.company_count,
+        a.companies,
+        tk.keywords,
+        COALESCE(SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS roles_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        AggregatedCompanyData a ON m.movie_id = a.movie_id
+    LEFT JOIN 
+        TitleWithKeywords tk ON m.movie_id = tk.title_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id, m.movie_title, m.production_year, a.company_count, a.companies, tk.keywords
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_cast > 10 THEN 'Large Cast' 
+        WHEN total_cast IS NULL THEN 'No Cast Info'
+        ELSE 'Small/Missing Cast Info'
+    END AS cast_size_category,
+    CASE 
+        WHEN companies IS NULL THEN 'Unknown Company'
+        ELSE 'Known Companies'
+    END AS company_info_status,
+    LAG(m.production_year) OVER (ORDER BY total_cast DESC) AS previous_production_year,
+    LEAD(m.movie_title) OVER (ORDER BY total_cast DESC) AS next_movie_title
+FROM 
+    SubqueryExample m
+WHERE 
+    m.production_year >= (SELECT MAX(production_year) - 10 FROM aka_title)
+ORDER BY 
+    total_cast DESC, m.production_year ASC;

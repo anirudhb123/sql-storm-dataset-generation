@@ -1,0 +1,61 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        IsModeratorOnly,
+        IsRequired,
+        0 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 1  -- Start from moderator-only tags
+    UNION ALL
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        r.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy r ON t.WikiPostId = r.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(b.Name) AS BadgeName
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' -- Filter posts from the last year
+    GROUP BY p.Id
+),
+AggregatedResults AS (
+    SELECT 
+        th.TagName,
+        COUNT(pd.PostId) AS PostCount,
+        SUM(pd.CommentCount) AS TotalComments,
+        AVG(pd.TotalBounty) AS AverageBounty,
+        COUNT(DISTINCT pd.BadgeName) AS UniqueBadges
+    FROM RecursiveTagHierarchy th
+    LEFT JOIN Posts p ON th.Id = p.Tags::jsonb->>'id'  -- Assuming Tags are stored in JSON format
+    LEFT JOIN PostDetails pd ON p.Id = pd.PostId
+    GROUP BY th.TagName
+)
+SELECT 
+    ar.TagName,
+    ar.PostCount,
+    ar.TotalComments,
+    ar.AverageBounty,
+    ar.UniqueBadges,
+    COALESCE(NULLIF(ar.PostCount, 0), 1) AS AdjustedPostCount,  -- Avoid division by zero
+    ROW_NUMBER() OVER (ORDER BY ar.AverageBounty DESC) AS Rank
+FROM AggregatedResults ar
+ORDER BY ar.PostCount DESC, ar.AverageBounty DESC;

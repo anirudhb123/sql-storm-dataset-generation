@@ -1,0 +1,63 @@
+
+WITH temp_addresses AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_city) AS city_uppercase
+    FROM 
+        customer_address
+    WHERE 
+        ca_state IN ('CA', 'NY')
+), 
+temp_demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS row_num
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 50000
+),
+combined AS (
+    SELECT 
+        ta.ca_address_id,
+        ta.full_address,
+        ta.ca_city,
+        ta.ca_state,
+        ta.ca_zip,
+        td.cd_demo_sk,
+        td.cd_gender,
+        td.cd_marital_status,
+        td.cd_purchase_estimate,
+        td.cd_credit_rating,
+        td.row_num,
+        CONCAT(ta.full_address, ' ', td.cd_gender, ' ', td.cd_marital_status) AS combined_string
+    FROM 
+        temp_addresses ta
+    JOIN 
+        temp_demographics td ON ta.ca_zip LIKE '%1%'
+)
+SELECT 
+    combined_string,
+    street_name_length,
+    COUNT(*) OVER (PARTITION BY combined_string) AS string_count,
+    AVG(cd_purchase_estimate) OVER (PARTITION BY ca_state) AS avg_purchase_per_state
+FROM 
+    combined
+WHERE 
+    row_num <= 10
+GROUP BY 
+    combined_string,
+    street_name_length
+ORDER BY 
+    street_name_length DESC, ca_city ASC;

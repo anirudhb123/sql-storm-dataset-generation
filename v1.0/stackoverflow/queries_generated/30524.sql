@@ -1,0 +1,86 @@
+WITH RecursiveTopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.UpVotes,
+        u.DownVotes,
+        u.CreationDate,
+        u.LastAccessDate,
+        RANK() OVER (ORDER BY u.Reputation DESC) as Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, '><')::int[]) -- Splitting the Tags string into an array
+    GROUP BY 
+        t.Id
+    HAVING 
+        COUNT(p.Id) > 10
+),
+PostMetrics AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        SUM(v.BountyAmount) AS TotalBountyAmount,
+        MAX(p.CreationDate) AS LastModifiedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        pm.CommentCount,
+        pm.UpVoteCount,
+        pm.DownVoteCount,
+        pm.TotalBountyAmount,
+        ROW_NUMBER() OVER (ORDER BY pm.UpVoteCount DESC) AS PostRank
+    FROM 
+        PostMetrics pm
+    JOIN 
+        Posts p ON pm.PostId = p.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    r.DisplayName,
+    COUNT(DISTINCT r.PostId) AS PostCount,
+    SUM(r.UpVoteCount) AS TotalUpVotes,
+    SUM(r.DownVoteCount) AS TotalDownVotes,
+    COALESCE(SUM(pt.PostCount), 0) AS TotalPopularTags,
+    MAX(r.LastModifiedDate) AS MostRecentPostModified
+FROM 
+    RecursiveTopUsers ru
+JOIN 
+    RankedPosts r ON ru.Id = r.OwnerUserId
+LEFT JOIN 
+    PopularTags pt ON r.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || pt.TagName || '%')
+WHERE 
+    r.PostRank <= 10
+GROUP BY 
+    r.DisplayName
+ORDER BY 
+    TotalUpVotes DESC;

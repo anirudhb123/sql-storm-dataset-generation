@@ -1,0 +1,19 @@
+
+SELECT 
+    Posts.Id AS PostId,
+    Posts.Title,
+    Users.DisplayName AS Owner,
+    Posts.CreationDate,
+    Posts.ViewCount,
+    Posts.Score
+FROM 
+    Posts
+JOIN 
+    Users ON Posts.OwnerUserId = Users.Id
+WHERE 
+    Posts.PostTypeId = 1 
+GROUP BY 
+    Posts.Id, Posts.Title, Users.DisplayName, Posts.CreationDate, Posts.ViewCount, Posts.Score
+ORDER BY 
+    Posts.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

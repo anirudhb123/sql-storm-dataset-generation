@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = 1 -- Assuming kind_id 1 indicates main feature films
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    INNER JOIN aka_title AS mt ON ml.linked_movie_id = mt.movie_id
+    INNER JOIN movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    actor.name AS actor_name,
+    title.title AS movie_title,
+    COUNT(DISTINCT co.id) AS company_count,
+    SUM(MIN(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END)) OVER (PARTITION BY title.id) AS has_budget,
+    AVG(TIMESTAMP 'epoch' + (CAST(mi.info AS INTEGER) * INTERVAL '1 second')) AS avg_movie_duration,
+    mh.level
+FROM 
+    aka_name AS actor
+INNER JOIN cast_info AS ci ON actor.person_id = ci.person_id
+INNER JOIN aka_title AS title ON ci.movie_id = title.movie_id
+LEFT JOIN movie_companies AS mc ON mc.movie_id = title.id
+LEFT JOIN company_name AS co ON mc.company_id = co.id
+LEFT JOIN movie_info AS mi ON title.id = mi.movie_id AND mi.info_type_id IN (1, 2) -- 1: budget, 2: duration
+LEFT JOIN movie_hierarchy AS mh ON title.id = mh.movie_id
+WHERE 
+    title.production_year BETWEEN 2000 AND 2023 
+    AND actor.name IS NOT NULL 
+GROUP BY 
+    actor.name, title.title, mh.level
+HAVING 
+    COUNT(DISTINCT co.id) > 2
+ORDER BY 
+    avg_movie_duration DESC,
+    actor.name ASC;

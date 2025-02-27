@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+PartProvider AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > (
+            SELECT 
+                AVG(ps_inner.ps_availqty)
+            FROM 
+                partsupp ps_inner
+        )
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    c.c_name AS customer_name,
+    CASE 
+        WHEN l.l_discount > 0.1 THEN 'Discounted'
+        ELSE 'Regular Price'
+    END AS price_category,
+    RANK() OVER (ORDER BY p.p_retailprice DESC) AS price_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rank = 1
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    FrequentCustomers c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' AND
+    (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+    AND EXISTS (
+        SELECT 1 
+        FROM PartProvider pp 
+        WHERE pp.ps_partkey = ps.ps_partkey
+    )
+GROUP BY 
+    p.p_name, 
+    p.p_retailprice,
+    s.s_name,
+    c.c_name,
+    l.l_discount
+ORDER BY 
+    price_rank, supplier_name;

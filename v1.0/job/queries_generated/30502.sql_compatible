@@ -1,0 +1,66 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ah.movie_count + COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN
+        actor_hierarchy ah ON ci.person_id = ah.person_id
+    WHERE 
+        ah.movie_count < 10  
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT cm.movie_id) AS movies_count,
+    STRING_AGG(DISTINCT km.keyword, ', ') AS keywords,
+    AVG(m.production_year) AS average_production_year,
+    (SELECT COUNT(DISTINCT ma.linked_movie_id) 
+     FROM movie_link ma 
+     WHERE ma.movie_id IN (SELECT movie_id 
+                           FROM movie_info mi 
+                           WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'boxoffice'))) AS box_office_movies_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword km ON mk.keyword_id = km.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+JOIN 
+    movie_info mi ON mi.movie_id = ci.movie_id
+JOIN 
+    (SELECT movie_id, 
+            MAX(production_year) AS max_production_year 
+     FROM title 
+     GROUP BY movie_id) AS m ON t.id = m.movie_id
+WHERE 
+    a.name IS NOT NULL
+AND 
+    t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, 
+    m.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5
+ORDER BY 
+    movies_count DESC;

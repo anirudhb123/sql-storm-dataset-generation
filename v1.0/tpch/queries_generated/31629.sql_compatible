@@ -1,0 +1,54 @@
+
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_retailprice, p_comment,
+           0 AS level
+    FROM part
+    WHERE p_size < 10
+    
+    UNION ALL
+    
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_retailprice, p.p_comment,
+           ph.level + 1
+    FROM part p
+    JOIN PartHierarchy ph ON p.p_size = ph.p_size + 1
+),
+SupplierAvgCost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationsWithAvg AS (
+    SELECT n.n_nationkey, n.n_name, AVG(s.s_acctbal) AS avg_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT
+    ph.p_partkey,
+    ph.p_name,
+    ph.p_brand,
+    ph.p_retailprice,
+    COALESCE(sac.avg_cost, 0) AS avg_supply_cost,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    SUM(co.total_spent) AS total_revenue,
+    n.avg_balance AS average_supplier_balance
+FROM PartHierarchy ph
+LEFT JOIN SupplierAvgCost sac ON ph.p_partkey = sac.ps_partkey
+LEFT JOIN CustomerOrders co ON co.order_count > 0
+LEFT JOIN NationsWithAvg n ON n.n_nationkey = (
+    SELECT s.s_nationkey
+    FROM supplier s
+    WHERE s.s_suppkey = sac.ps_partkey
+    LIMIT 1
+)
+GROUP BY ph.p_partkey, ph.p_name, ph.p_brand, ph.p_retailprice, sac.avg_cost, n.avg_balance
+HAVING COUNT(DISTINCT co.c_custkey) > 5 
+ORDER BY total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,78 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        GROUP_CONCAT(DISTINCT ak.name) AS aliases,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        aka_name AS ak ON ak.person_id IN (
+            SELECT 
+                c.person_id 
+            FROM 
+                cast_info AS c 
+            WHERE 
+                c.movie_id = t.id
+        )
+    GROUP BY 
+        t.id
+),
+top_movies AS (
+    SELECT 
+        md.movie_title,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_details AS md
+    JOIN 
+        movie_companies AS mc ON mc.movie_id IN (
+            SELECT 
+                t.id 
+            FROM 
+                aka_title AS t 
+            WHERE 
+                t.title = md.movie_title
+        )
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword AS mk ON mk.movie_id IN (
+            SELECT 
+                t.id 
+            FROM 
+                aka_title AS t 
+            WHERE 
+                t.title = md.movie_title
+        )
+    GROUP BY 
+        md.movie_title 
+    ORDER BY 
+        keyword_count DESC,
+        company_count DESC
+    LIMIT 10
+)
+SELECT 
+    tm.movie_title,
+    tm.keyword_count,
+    tm.company_count,
+    md.production_year,
+    md.aliases
+FROM 
+    top_movies AS tm
+JOIN 
+    movie_details AS md ON tm.movie_title = md.movie_title
+ORDER BY 
+    tm.keyword_count DESC;
+
+This SQL query analyzes and benchmarks string processing on the provided schema. It aggregates movie information by counting keywords and associated companies, and retrieves relevant details such as production year and aliases in a structured manner. The final result showcases the top movies along with their keyword and company associations, facilitating a comprehensive understanding of the data relation.

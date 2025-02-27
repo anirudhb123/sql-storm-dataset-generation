@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_quantity DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 50 AND ws_quantity BETWEEN 1 AND 5
+),
+AggregatedSales AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_quantity * ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_item_sk) AS unique_items
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 2450000 AND 2450500
+    GROUP BY 
+        ws_order_number
+),
+ItemInventory AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory,
+        COUNT(*) AS inventory_records
+    FROM 
+        inventory
+    WHERE 
+        inv_date_sk = 2450500
+    GROUP BY 
+        inv_item_sk
+)
+SELECT 
+    COALESCE(s.ws_order_number, r.ws_order_number) AS order_id,
+    i.i_item_id,
+    i.i_product_name,
+    ISNULL(RANK() OVER (ORDER BY total_sales DESC), 0) AS sales_rank,
+    r.total_sales,
+    i.total_inventory,
+    CASE 
+        WHEN r.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status,
+    DATEDIFF(DAY, (SELECT MIN(d_date) FROM date_dim WHERE d_date_sk BETWEEN 2450000 AND 2450500), GETDATE()) AS days_since_first_sale
+FROM 
+    (SELECT DISTINCT ws_order_number FROM web_sales) AS s
+FULL OUTER JOIN 
+    AggregatedSales AS r ON s.ws_order_number = r.ws_order_number
+JOIN 
+    RankedSales AS rs ON r.ws_order_number = rs.ws_order_number
+JOIN 
+    item i ON rs.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    ItemInventory AS inv ON i.i_item_sk = inv.inv_item_sk
+WHERE 
+    (i.i_current_price < 100 OR inv.total_inventory IS NULL)
+    AND EXISTS (SELECT * FROM store_returns WHERE sr_item_sk = i.i_item_sk)
+ORDER BY 
+    order_id, total_sales DESC;

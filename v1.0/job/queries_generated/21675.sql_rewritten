@@ -1,0 +1,76 @@
+WITH RecursiveMovieList AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(mk.keyword, 'Unknown') AS keyword
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mk.keyword
+    FROM 
+        aka_title m
+    INNER JOIN 
+        RecursiveMovieList rml ON m.id = rml.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+), 
+AggregatedCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cc.id) AS total_companies,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rml.movie_id,
+    rml.movie_title,
+    rml.production_year,
+    rml.keyword,
+    COALESCE(ac.total_cast, 0) AS total_cast,
+    COALESCE(ac.cast_names, 'No Cast') AS cast_names,
+    COALESCE(mci.total_companies, 0) AS total_companies,
+    COALESCE(mci.company_names, 'No Companies') AS company_names,
+    ROW_NUMBER() OVER (PARTITION BY rml.production_year ORDER BY rml.movie_id) AS row_num
+FROM 
+    RecursiveMovieList rml
+LEFT JOIN 
+    AggregatedCast ac ON rml.movie_id = ac.movie_id
+LEFT JOIN 
+    MovieCompanyInfo mci ON rml.movie_id = mci.movie_id
+WHERE 
+    rml.production_year = (SELECT MAX(production_year) FROM aka_title)
+    AND rml.keyword IS NOT NULL
+ORDER BY 
+    rml.movie_title ASC,
+    total_cast DESC
+LIMIT 100;

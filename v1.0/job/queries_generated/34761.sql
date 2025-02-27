@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000  -- Filter for movies in the 2000s
+    UNION ALL
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        level + 1
+    FROM 
+        MovieCTE m
+    JOIN 
+        movie_link ml ON m.movie_id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+),
+RankedCast AS (
+    SELECT 
+        c.movie_id,
+        a.name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS cast_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    a.name AS leading_actor,
+    r.cast_rank,
+    COALESCE(mk.keywords, 'No keywords found') AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    RankedCast r ON m.movie_id = r.movie_id AND r.cast_rank = 1 -- Get leading actor
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON m.movie_id = mk.movie_id
+WHERE 
+    m.production_year IS NOT NULL
+GROUP BY 
+    m.movie_id, m.title, m.production_year, a.name, r.cast_rank, mk.keywords
+ORDER BY 
+    m.production_year DESC, company_count DESC
+LIMIT 10;
+
+-- This query retrieves details of movies produced after the year 2000,
+-- including the title, production year, leading actor, keywords associated,
+-- and the count of companies involved in its production,
+-- while employing recursive CTEs, outer joins, and window functions for ranking.

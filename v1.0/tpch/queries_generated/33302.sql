@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal <= (SELECT AVG(s_acctbal) FROM supplier)
+      AND sh.level < 5
+),
+RegionSuppliers AS (
+    SELECT r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY c.c_custkey
+),
+LineItemStats AS (
+    SELECT l.l_partkey,
+           SUM(l.l_quantity) AS total_quantity,
+           AVG(l.l_discount) AS avg_discount,
+           AVG(l.l_tax) AS avg_tax
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-07-01'
+    GROUP BY l.l_partkey
+)
+SELECT p.p_name,
+       rh.r_name,
+       COALESCE(cs.total_orders, 0) AS total_orders,
+       lh.total_quantity,
+       lh.avg_discount,
+       lh.avg_tax,
+       COUNT(DISTINCT sh.s_suppkey) AS hierarchical_supplier_count
+FROM part p
+LEFT JOIN RegionSuppliers rh ON p.p_brand = rh.r_name
+LEFT JOIN CustomerOrders cs ON cs.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN LineItemStats lh ON p.p_partkey = lh.l_partkey
+LEFT JOIN SupplierHierarchy sh ON p.p_partkey = sh.s_nationkey
+WHERE p.p_retailprice > 50 AND 
+      (lh.total_quantity IS NULL OR lh.total_quantity > 100)
+GROUP BY p.p_name, rh.r_name, cs.total_orders, lh.total_quantity, lh.avg_discount, lh.avg_tax
+HAVING COUNT(DISTINCT sh.s_suppkey) > 1
+ORDER BY p.p_name, rh.r_name;

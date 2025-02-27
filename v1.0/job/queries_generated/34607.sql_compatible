@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        mt.season_nr,
+        mt.episode_nr,
+        CASE 
+            WHEN mt.episode_of_id IS NOT NULL THEN (SELECT title FROM aka_title WHERE id = mt.episode_of_id)
+            ELSE NULL 
+        END AS parent_title
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        at.season_nr,
+        at.episode_nr,
+        mh.title AS parent_title
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.parent_title,
+    COUNT(cc.role_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(CASE WHEN ak.name IS NULL THEN 0 ELSE 1 END) AS non_null_actor_count,
+    MAX(mk.keyword) AS most_common_keyword,
+    CASE 
+        WHEN COUNT(DISTINCT c.company_id) = 0 THEN 'No Companies'
+        ELSE STRING_AGG(DISTINCT c.name, ', ')
+    END AS companies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id 
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.parent_title
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title,
+    mh.level,
+    total_cast DESC
+LIMIT 100;

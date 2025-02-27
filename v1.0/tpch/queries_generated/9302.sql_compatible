@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    c.c_name AS customer_name,
+    r.r_name AS region_name,
+    ts.total_supply_cost
+FROM 
+    RankedOrders ro
+JOIN 
+    nation n ON n.n_nationkey = ro.c_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopSuppliers ts ON ro.o_orderkey IN (
+        SELECT DISTINCT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_brand = 'Brand#23'
+        )
+    )
+WHERE 
+    ro.rank <= 5
+ORDER BY 
+    ts.total_supply_cost DESC, ro.o_totalprice DESC;

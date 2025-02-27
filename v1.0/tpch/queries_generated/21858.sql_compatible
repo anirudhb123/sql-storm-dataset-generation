@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+            THEN 'Expensive' 
+            ELSE 'Cheap' 
+        END AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty 
+                      FROM partsupp ps 
+                      WHERE ps.ps_supplycost < 100.00)
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    fp.price_category,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    SUM(od.total_order_value) AS total_value,
+    MAX(fp.p_retailprice) AS max_price,
+    MIN(fp.p_retailprice) AS min_price
+FROM 
+    RankedSuppliers rs
+JOIN 
+    region r ON rs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM FilteredParts p) LIMIT 1)
+LEFT JOIN 
+    FilteredParts fp ON fp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey)
+FULL OUTER JOIN 
+    OrderDetails od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rs.s_nationkey) LIMIT 1)
+WHERE 
+    COALESCE(rs.rn, 0) < 10
+GROUP BY 
+    r.r_name, fp.price_category, fp.p_retailprice
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 2 OR SUM(od.total_order_value) IS NOT NULL
+ORDER BY 
+    r.r_name, total_value DESC NULLS LAST;

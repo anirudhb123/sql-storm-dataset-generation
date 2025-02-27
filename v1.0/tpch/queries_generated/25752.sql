@@ -1,0 +1,56 @@
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_name AS SupplierName,
+        p.p_name AS PartName,
+        p.p_retailprice AS RetailPrice,
+        ps.ps_availqty AS AvailableQuantity,
+        ps.ps_supplycost AS SupplyCost,
+        SUBSTRING(p.p_comment, 1, 10) AS ShortComment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+NationRegionDetails AS (
+    SELECT 
+        n.n_name AS NationName,
+        r.r_name AS RegionName
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CombinedDetails AS (
+    SELECT 
+        spd.SupplierName,
+        spd.PartName,
+        spd.RetailPrice,
+        spd.AvailableQuantity,
+        spd.SupplyCost,
+        spd.ShortComment,
+        nrd.NationName,
+        nrd.RegionName
+    FROM 
+        SupplierPartDetails spd
+    JOIN 
+        supplier s ON spd.SupplierName = s.s_name
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        NationRegionDetails nrd ON n.n_name = nrd.NationName
+)
+SELECT 
+    SupplierName,
+    PartName,
+    CONCAT('Price: $', FORMAT(RetailPrice, 2), ' | Available: ', AvailableQuantity) AS PriceAndAvailability,
+    CONCAT('Supply Cost: $', FORMAT(SupplyCost, 2), ' | Nation: ', NationName, ' | Region: ', RegionName) AS SupplierDetails,
+    ShortComment
+FROM 
+    CombinedDetails
+WHERE 
+    RetailPrice > 20.00
+ORDER BY 
+    RetailPrice DESC, SupplierName
+LIMIT 50;

@@ -1,0 +1,83 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.UpVotes IS NULL THEN 0 ELSE p.UpVotes END) AS TotalUpVotes,
+        COALESCE(SUM(p.Score), 0) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+), 
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        EXTRACT(YEAR FROM p.CreationDate) AS CreationYear,
+        COUNT(c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT pl.RelatedPostId) AS TotalRelatedPosts
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '5 years'
+    GROUP BY p.Id, p.Title, p.CreationDate
+),
+UserTopPosts AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ps.PostId,
+        ps.Title,
+        RANK() OVER (PARTITION BY ua.UserId ORDER BY ps.TotalComments DESC, ps.UpVotes - ps.DownVotes DESC) AS Rank
+    FROM UserActivity ua
+    JOIN PostStatistics ps ON ua.UserId = ps.OwnerUserId
+),
+BadgesSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    uT.Title AS TopPostTitle,
+    uT.Rank,
+    b.TotalBadges,
+    b.BadgeNames
+FROM UserActivity ua
+LEFT JOIN UserTopPosts uT ON ua.UserId = uT.UserId AND uT.Rank = 1
+LEFT JOIN BadgesSummary b ON ua.UserId = b.UserId
+WHERE COALESCE(b.TotalBadges, 0) > 0
+ORDER BY ua.TotalPosts DESC, COALESCE(b.TotalBadges, 0) DESC;
+
+### Explanation:
+
+1. **CTEs (Common Table Expressions)**: We define multiple CTEs for clarity and modularity:
+   - `UserActivity`: Aggregates user interaction statistics.
+   - `PostStatistics`: Gathers statistics about posts, including comment and vote counts.
+   - `UserTopPosts`: Ranks each user's posts based on comments and vote differences.
+   - `BadgesSummary`: Summarizes the number of badges achieved by each user.
+
+2. **LEFT JOINs**: Used to ensure all users are listed even if they have no posts or badges.
+
+3. **COALESCE**: This is used to handle NULL values, particularly in badge counts.
+
+4. **STRING_AGG**: This function is used to concatenate badge names into a single string.
+
+5. **RANK()**: A window function that allows us to rank the top posts for each user.
+
+6. **WHERE clauses**: Filters out users with zero badges and only includes posts created in the last 5 years.
+
+This query can be optimized for performance benchmarking by testing execution time as it incorporates complex joins, aggregations, and filters.

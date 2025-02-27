@@ -1,0 +1,69 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_web_site_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_range AS (
+    SELECT 
+        d_year, 
+        d_month_seq
+    FROM 
+        date_dim 
+    WHERE 
+        d_date BETWEEN '2023-01-01' AND '2023-12-31'
+),
+warehouse_info AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w 
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name
+)
+SELECT 
+    d.d_year,
+    d.d_month_seq,
+    SUM(ss.total_quantity) AS total_quantity,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(ss.total_discount) AS total_discount,
+    SUM(ss.total_profit) AS total_profit,
+    COUNT(DISTINCT ci.c_customer_sk) AS total_customers,
+    COUNT(DISTINCT wi.w_warehouse_sk) AS total_warehouses
+FROM 
+    sales_summary ss
+JOIN 
+    date_range d ON d.d_month_seq = MONTH(ws_sold_date_sk) AND d.d_year = YEAR(ws_sold_date_sk)
+JOIN 
+    customer_info ci ON ss.ws_bill_customer_sk = ci.c_customer_sk
+JOIN 
+    warehouse_info wi ON ss.ws_warehouse_sk = wi.w_warehouse_sk
+GROUP BY 
+    d.d_year, d.d_month_seq
+ORDER BY 
+    d.d_year, d.d_month_seq;

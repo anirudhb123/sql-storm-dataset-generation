@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ss_sold_date_sk, 
+        ss_item_sk, 
+        SUM(ss_quantity) + scte.total_quantity AS total_quantity, 
+        SUM(ss_net_profit) + scte.total_profit AS total_profit
+    FROM 
+        store_sales 
+    JOIN 
+        sales_cte scte ON ss_item_sk = scte.ws_item_sk 
+    GROUP BY 
+        ss_sold_date_sk, 
+        ss_item_sk
+), 
+ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        total_quantity, 
+        total_profit, 
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        sales_cte
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_marital_status, 
+        cd.cd_gender, 
+        ca.ca_city, 
+        ca.ca_state,
+        CASE 
+            WHEN cd.cd_credit_rating IS NULL THEN 'Unknown' 
+            ELSE cd.cd_credit_rating 
+        END AS credit_rating
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ci.ca_city,
+    ci.ca_state, 
+    ci.credit_rating, 
+    rs.total_quantity, 
+    rs.total_profit
+FROM 
+    customer_info ci 
+LEFT JOIN 
+    ranked_sales rs ON ci.c_customer_sk = (SELECT MAX(ws_bill_customer_sk) FROM web_sales WHERE ws_item_sk = rs.ws_item_sk) 
+WHERE 
+    rs.profit_rank <= 10 
+ORDER BY 
+    rs.total_profit DESC 
+LIMIT 20;

@@ -1,0 +1,45 @@
+WITH AvgSupplierCost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           o.o_orderdate,
+           COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           n.n_name AS nation_name,
+           COUNT(ps.ps_supplycost) AS supply_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+)
+SELECT os.o_orderkey,
+       os.total_revenue,
+       si.s_name AS supplier_name,
+       si.s_acctbal,
+       si.nation_name,
+       CASE 
+           WHEN si.s_acctbal > (SELECT SUM(s_acctbal) / COUNT(*) FROM supplier) 
+           THEN 'High Account Balance' 
+           ELSE 'Regular Account Balance' 
+       END AS balance_category,
+       COALESCE(asc.avg_cost, 0) AS avg_part_cost
+FROM OrderSummary os
+JOIN lineitem l ON os.o_orderkey = l.l_orderkey
+JOIN SupplierInfo si ON l.l_suppkey = si.s_suppkey
+LEFT JOIN AvgSupplierCost asc ON l.l_partkey = asc.ps_partkey
+WHERE (si.s_acctbal IS NOT NULL AND si.s_acctbal > 1000)
+  OR (os.total_revenue > 500000)
+ORDER BY os.total_revenue DESC, si.s_name ASC
+LIMIT 100;

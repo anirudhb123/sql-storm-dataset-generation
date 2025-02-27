@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostSummary AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(DISTINCT ph.PostId) AS EditedPosts,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.UserId
+),
+VoteSummary AS (
+    
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.TotalScore, 0) AS TotalScore,
+    COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+    COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    COALESCE(phs.EditedPosts, 0) AS EditedPosts,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    CASE WHEN ps.TotalPosts > 100 THEN 'Highly Active'
+         WHEN ps.TotalPosts > 50 THEN 'Moderately Active'
+         ELSE 'Less Active' END AS ActivityLevel
+FROM 
+    Users u
+LEFT JOIN 
+    PostSummary ps ON u.Id = ps.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON u.Id = phs.UserId
+LEFT JOIN 
+    VoteSummary vs ON u.Id = vs.UserId
+ORDER BY 
+    ps.TotalScore DESC,
+    TotalPosts DESC;

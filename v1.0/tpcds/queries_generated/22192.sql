@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank,
+        DATE_TRUNC('month', d_date) AS sales_month
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        ws_item_sk, sales_month
+),
+DiscountedSales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_ext_sales_price) * 0.95 AS discounted_sales, 
+        COUNT(*) AS discount_count
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_ext_discount_amt > 0
+    GROUP BY 
+        cs_item_sk
+),
+CustomerPurchases AS (
+    SELECT 
+        c_customer_sk, 
+        SUM(ws_ext_sales_price + COALESCE(sr_return_amt, 0)) AS total_net_spent,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_ext_sales_price + COALESCE(sr_return_amt, 0)) DESC) AS customer_rank
+    FROM 
+        customer
+    LEFT JOIN 
+        web_sales ON c_customer_sk = ws_bill_customer_sk
+    LEFT JOIN 
+        store_returns ON ws_order_number = sr_ticket_number
+    GROUP BY 
+        c_customer_sk
+)
+SELECT 
+    w.warehouse_name, 
+    SUM(RS.total_sales) AS warehouse_sales,
+    SUM(ds.discounted_sales) AS discounted_income,
+    COUNT(DISTINCT cp.c_customer_sk) AS returning_customers,
+    AVG(cp.total_net_spent) AS avg_spent_per_customer
+FROM 
+    RankedSales RS
+JOIN 
+    inventory IN ON RS.ws_item_sk = IN.inv_item_sk
+JOIN 
+    warehouse W ON IN.inv_warehouse_sk = W.w_warehouse_sk
+LEFT JOIN 
+    DiscountedSales ds ON RS.ws_item_sk = ds.cs_item_sk
+LEFT JOIN 
+    CustomerPurchases cp ON cp.total_orders > 1
+GROUP BY 
+    w.warehouse_name
+HAVING 
+    COUNT(DISTINCT w.warehouse_sk) > 0 
+    AND SUM(RS.total_sales) > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY 
+    warehouse_sales DESC
+LIMIT 10;

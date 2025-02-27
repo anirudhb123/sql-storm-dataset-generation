@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RecentOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        s.s_name,
+        cd.total_spent,
+        cd.order_count,
+        COUNT(l.l_orderkey) AS line_count
+    FROM RankedOrders ro
+    JOIN lineitem l ON ro.o_orderkey = l.l_orderkey
+    LEFT JOIN SupplierDetails s ON l.l_suppkey = s.s_suppkey
+    LEFT JOIN CustomerOrderSummary cd ON ro.o_custkey = cd.c_custkey
+    WHERE ro.rn = 1
+    GROUP BY ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, s.s_name, cd.total_spent, cd.order_count
+),
+FinalOutput AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        COALESCE(r.s_name, 'Unknown Supplier') AS supplier_name,
+        COALESCE(c.total_spent, 0) AS total_spent,
+        COALESCE(c.order_count, 0) AS order_count,
+        r.line_count
+    FROM RecentOrders r
+    LEFT JOIN CustomerOrderSummary c ON r.customer_id = c.c_custkey
+)
+SELECT 
+    f.o_orderkey,
+    f.o_orderdate,
+    f.o_totalprice,
+    f.supplier_name,
+    CASE 
+        WHEN f.total_spent IS NULL THEN 'Customer Not Found'
+        WHEN f.total_spent > 1000 THEN 'High Spender'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    (SELECT COUNT(*) FROM CustomerOrderSummary WHERE total_spent > 500) AS high_value_customers,
+    AVG(f.line_count) OVER () AS avg_line_per_order
+FROM FinalOutput f
+ORDER BY f.o_orderdate DESC
+LIMIT 50;

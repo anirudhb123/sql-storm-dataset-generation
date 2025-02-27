@@ -1,0 +1,51 @@
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(ps.ps_supplycost) AS supply_count,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_nationkey
+),
+high_value_suppliers AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(s.s_acctbal) AS total_acctbal,
+        COUNT(DISTINCT s.s_suppkey) AS num_suppliers
+    FROM 
+        ranked_suppliers s
+    JOIN 
+        nation n ON s.rank_per_nation = 1
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    r.r_name AS region,
+    hs.total_acctbal,
+    hs.num_suppliers,
+    ROUND(AVG(o.o_totalprice), 2) AS avg_order_value
+FROM 
+    high_value_suppliers hs
+JOIN 
+    orders o ON hs.r_regionkey = (
+        SELECT n.n_regionkey
+        FROM customer c
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+        WHERE c.c_custkey = o.o_custkey
+    )
+GROUP BY 
+    r.r_name, hs.total_acctbal, hs.num_suppliers
+ORDER BY 
+    avg_order_value DESC;

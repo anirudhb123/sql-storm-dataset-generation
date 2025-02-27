@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN A.PostId IS NOT NULL THEN 1 END) AS AnswerCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId AND A.PostTypeId = 2
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, U.DisplayName
+),
+StringProcessedData AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        RP.CommentCount,
+        RP.AnswerCount,
+        RP.VoteCount,
+        CONCAT(RP.Title, ' ', RP.OwnerDisplayName) AS TitleOwnerConcat,
+        REPLACE(RP.Title, ' ', '-') AS TitleHyphened,
+        LENGTH(RP.Title) AS TitleLength
+    FROM 
+        RankedPosts RP
+),
+FinalData AS (
+    SELECT 
+        SPD.PostId,
+        SPD.Title,
+        SPD.CreationDate,
+        SPD.ViewCount,
+        SPD.OwnerDisplayName,
+        SPD.CommentCount,
+        SPD.AnswerCount,
+        SPD.VoteCount,
+        SPD.TitleOwnerConcat,
+        SPD.TitleHyphened,
+        SPD.TitleLength,
+        CASE 
+            WHEN SPD.VoteCount > 100 THEN 'Hot'
+            WHEN SPD.VoteCount BETWEEN 50 AND 100 THEN 'Trending'
+            ELSE 'New'
+        END AS Popularity
+    FROM 
+        StringProcessedData SPD
+)
+SELECT 
+    FD.PostId,
+    FD.Title,
+    FD.CreationDate,
+    FD.ViewCount,
+    FD.OwnerDisplayName,
+    FD.CommentCount,
+    FD.AnswerCount,
+    FD.VoteCount,
+    FD.TitleOwnerConcat,
+    FD.TitleHyphened,
+    FD.TitleLength,
+    FD.Popularity
+FROM 
+    FinalData FD
+ORDER BY 
+    FD.VoteCount DESC, FD.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

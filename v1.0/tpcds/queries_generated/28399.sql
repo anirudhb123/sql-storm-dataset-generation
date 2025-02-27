@@ -1,0 +1,61 @@
+
+WITH CustomerWithAddress AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type || 
+        CASE WHEN ca.ca_suite_number IS NOT NULL THEN ' Suite ' || ca.ca_suite_number ELSE '' END AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_billing_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_billing_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.full_name,
+        c.full_address,
+        c.ca_city,
+        c.ca_state,
+        c.ca_zip,
+        c.ca_country,
+        sd.total_sales,
+        sd.total_orders
+    FROM 
+        CustomerWithAddress c
+    LEFT JOIN 
+        SalesData sd ON c.c_customer_sk = sd.ws_billing_customer_sk
+)
+SELECT 
+    full_name,
+    full_address,
+    CONCAT(ca_city, ', ', ca_state, ' ', ca_zip, ', ', ca_country) AS complete_location,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(total_orders, 0) AS total_orders,
+    CASE 
+        WHEN COALESCE(total_orders, 0) > 0 THEN 
+            ROUND(COALESCE(total_sales, 0) / total_orders, 2)
+        ELSE 
+            0 
+    END AS average_order_value
+FROM 
+    CombinedData
+WHERE 
+    ca_city ILIKE '%new%' 
+ORDER BY 
+    average_order_value DESC
+LIMIT 100;

@@ -1,0 +1,56 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        CommentCount,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        RANK() OVER (ORDER BY PostCount DESC, QuestionCount DESC) AS ActivityRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    ru.DisplayName,
+    ru.PostCount,
+    ru.QuestionCount,
+    ru.AnswerCount,
+    ru.CommentCount,
+    ru.GoldBadges,
+    ru.SilverBadges,
+    ru.BronzeBadges,
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT AVG(PostCount) FROM UserActivity) AS AveragePostsPerUser
+FROM 
+    RankedUsers ru
+WHERE 
+    ru.ActivityRank <= 10
+ORDER BY 
+    ru.ActivityRank;

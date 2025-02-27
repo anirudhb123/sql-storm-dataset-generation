@@ -1,0 +1,86 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND 
+        (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk
+),
+top_stores AS (
+    SELECT 
+        s_store_sk,
+        total_sales,
+        total_transactions
+    FROM 
+        sales_summary
+    WHERE 
+        sales_rank <= 5
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        AVG(ws_net_paid_inc_tax) AS avg_spent,
+        COALESCE(cd_gender, 'Unknown') AS gender,
+        RANK() OVER (PARTITION BY COALESCE(cd_gender, 'Unknown') ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS gender_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd_gender
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_id
+),
+final_report AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        cs.avg_spent,
+        ts.total_sales AS store_sales,
+        ts.total_transactions AS store_transactions,
+        ps.total_discount
+    FROM 
+        customer_stats cs
+    JOIN 
+        top_stores ts ON cs.c_customer_sk IN (SELECT DISTINCT ws_ship_customer_sk FROM web_sales ws WHERE ws.ws_web_site_sk IN (SELECT w_warehouse_sk FROM warehouse))
+    LEFT JOIN 
+        promotion_summary ps ON ps.promo_id = (SELECT p.p_promo_id FROM promotion p WHERE p.promo_sk = (SELECT MAX(ws_promo_sk) FROM web_sales ws))
+    WHERE 
+        cs.total_orders > 5
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(cs.gender, 'Unknown') AS gender,
+    cr.total_spent,
+    cr.store_sales,
+    cr.store_transactions,
+    cr.total_discount
+FROM 
+    final_report cr
+JOIN 
+    customer c ON cr.c_customer_sk = c.c_customer_sk
+ORDER BY 
+    cr.total_spent DESC
+LIMIT 50;

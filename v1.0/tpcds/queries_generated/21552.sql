@@ -1,0 +1,73 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS distinct_orders,
+        ROW_NUMBER() OVER (PARTITION BY cr_returning_customer_sk ORDER BY SUM(cr_return_quantity) DESC) AS rnk
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        CASE
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CASE
+                WHEN cd.cd_purchase_estimate < 500 THEN 'Low'
+                WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium'
+                ELSE 'High'
+            END
+        END AS purchase_level
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+MaxReturns AS (
+    SELECT 
+        cr_returning_customer_sk, 
+        MAX(total_returned) AS max_returned
+    FROM 
+        RankedReturns
+    WHERE 
+        rnk <= 5
+    GROUP BY 
+        cr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.purchase_level,
+        COALESCE(mr.max_returned, 0) AS max_product_returns,
+        CASE 
+            WHEN ci.cd_income_band_sk IS NOT NULL THEN (SELECT ib_lower_bound FROM income_band WHERE ib_income_band_sk = ci.cd_income_band_sk)
+            ELSE NULL
+        END AS income_lower_bound
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        MaxReturns mr ON ci.c_customer_sk = mr.cr_returning_customer_sk
+    WHERE 
+        ci.cd_gender IS NOT NULL
+        AND ci.cd_marital_status IN ('M', 'S')
+)
+SELECT 
+    fr.*,
+    (CASE
+        WHEN fr.max_product_returns > 10 THEN 'Frequent Returner'
+        ELSE 'Infrequent Returner'
+    END) AS returner_category
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.max_product_returns DESC, fr.c_customer_sk
+LIMIT 100;

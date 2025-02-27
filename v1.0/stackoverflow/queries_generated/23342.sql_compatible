@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+),
+CombinedBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+QuestionCloseReasons AS (
+    SELECT
+        ph.PostId,
+        ph.Comment AS CloseReason,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.Comment
+),
+FinalOutput AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.PostTypeId,
+        rp.Score,
+        pb.UpVotes,
+        pb.DownVotes,
+        cb.GoldBadges,
+        cb.SilverBadges,
+        cb.BronzeBadges,
+        COALESCE(qcr.CloseReason, 'No close reason') AS CloseReason,
+        COALESCE(qcr.CloseCount, 0) AS CloseCount,
+        CASE 
+            WHEN rp.Score < 0 AND (pb.TotalVotes IS NULL OR pb.TotalVotes = 0) THEN 'Needs Attention' 
+            ELSE 'Active' 
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteDetails pb ON rp.PostId = pb.PostId
+    LEFT JOIN 
+        CombinedBadges cb ON rp.OwnerUserId = cb.UserId
+    LEFT JOIN 
+        QuestionCloseReasons qcr ON rp.PostId = qcr.PostId
+)
+SELECT 
+    *,
+    (CASE 
+        WHEN CloseCount > 5 THEN 'Highly Closed' 
+        ELSE 'Stable' 
+    END) AS ClosureStatus
+FROM 
+    FinalOutput
+WHERE 
+    (PostTypeId = 1 AND ScoreRank <= 10) OR 
+    (PostTypeId IN (2, 3) AND UpVotes > 5)
+ORDER BY 
+    Score DESC, UpVotes DESC;

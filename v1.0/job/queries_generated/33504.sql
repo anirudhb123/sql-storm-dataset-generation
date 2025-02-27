@@ -1,0 +1,62 @@
+WITH RECURSIVE title_hierarchy AS (
+    -- CTE to retrieve titles and their related titles recursively
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        1 AS level
+    FROM
+        title t
+    WHERE
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        t.id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        th.level + 1
+    FROM
+        title_hierarchy th
+    JOIN
+        title t ON th.id = t.episode_of_id
+)
+
+SELECT
+    a.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(cc.movie_id) AS total_casts,
+    COALESCE(MAX(mk.keyword), 'N/A') AS primary_keyword,
+    AVG(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY at.id) AS has_info_percentage,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS company_types
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN
+    movie_info mi ON at.id = mi.movie_id
+WHERE
+    a.name IS NOT NULL
+    AND at.production_year >= 2000
+    AND (mi.info IS NULL OR mi.note != 'hidden')
+GROUP BY
+    a.name, at.title, at.production_year
+HAVING
+    COUNT(cc.movie_id) > 1
+ORDER BY
+    at.production_year DESC,
+    total_casts DESC;

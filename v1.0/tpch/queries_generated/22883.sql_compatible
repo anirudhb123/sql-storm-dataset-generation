@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal * 0.9, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS orders_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+), 
+PartAvail AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    GROUP BY ps.ps_partkey
+)
+SELECT CONCAT(c.c_name, ' ', c.c_address) AS customer_info,
+       COALESCE(sh.level, -1) AS supplier_level,
+       p.p_name, 
+       pa.total_available,
+       COALESCE(co.total_orders, 0) AS order_count,
+       ROUND(COALESCE(co.total_spent, 0) / NULLIF(co.total_orders, 0), 2) AS avg_spent
+FROM supplier s
+FULL OUTER JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN customer c ON c.c_nationkey = s.s_nationkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = c.c_custkey
+JOIN lineitem l ON l.l_suppkey = s.s_suppkey 
+LEFT JOIN part p ON p.p_partkey = l.l_partkey
+LEFT JOIN PartAvail pa ON p.p_partkey = pa.ps_partkey
+WHERE (s.s_name LIKE '%Inc%' OR s.s_acctbal > 5000) 
+      AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+      AND (pa.total_available IS NULL OR pa.total_available > 50)
+ORDER BY avg_spent DESC, customer_info;

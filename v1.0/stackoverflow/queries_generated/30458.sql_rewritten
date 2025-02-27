@@ -1,0 +1,76 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id, 
+        U.Reputation, 
+        U.DisplayName, 
+        0 AS Level 
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL 
+
+    UNION ALL 
+
+    SELECT 
+        U.Id,
+        (U.Reputation + COALESCE(PR.Reputation, 0)) AS Reputation,
+        U.DisplayName,
+        Level + 1 
+    FROM Users U
+    JOIN UserReputationCTE PR ON PR.Id = U.Id 
+    WHERE U.Reputation IS NOT NULL
+), 
+PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount
+    FROM Posts P
+    LEFT JOIN LATERAL UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '><')) AS TagName ON TRUE
+    INNER JOIN Tags T ON T.TagName = TagName
+    GROUP BY P.Id
+),
+UserBadges AS (
+    SELECT 
+        B.UserId, 
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM Badges B
+    GROUP BY B.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+        COALESCE(UB.HighestBadgeClass, 0) AS HighestBadgeClass,
+        COALESCE(PT.TagCount, 0) AS PostTagCount
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PostTagCounts PT ON U.Id = PT.PostId
+    ORDER BY U.Reputation DESC
+    LIMIT 100
+)
+SELECT 
+    U.Id,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBadges,
+    U.HighestBadgeClass,
+    COALESCE(U.TotalBadges, 0) AS Badge_NonNull,
+    CASE 
+        WHEN U.Reputation > 1000 THEN 'High Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM TopUsers U
+LEFT JOIN (
+    SELECT 
+        PostId, 
+        AVG(Score) AS AverageScore
+    FROM Comments 
+    GROUP BY PostId
+) C ON C.PostId = U.Id
+LEFT JOIN Votes V ON V.PostId = U.Id
+WHERE 
+    (U.Reputation >= 100 AND U.TotalBadges > 0)
+    OR (U.Reputation IS NULL AND U.HighestBadgeClass != 0)
+ORDER BY U.Reputation DESC, U.DisplayName
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

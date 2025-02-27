@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        r.r_name AS region_name, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+),
+TopCustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderpriority, 
+        r.region_name
+    FROM 
+        RankedOrders o
+    WHERE 
+        o.rn <= 5
+)
+SELECT 
+    tco.o_orderkey, 
+    tco.o_orderdate, 
+    tco.o_totalprice, 
+    tco.o_orderpriority, 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    COUNT(li.l_orderkey) AS items_count
+FROM 
+    TopCustomerOrders tco
+JOIN 
+    lineitem li ON tco.o_orderkey = li.l_orderkey
+GROUP BY 
+    tco.o_orderkey, tco.o_orderdate, tco.o_totalprice, tco.o_orderpriority
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

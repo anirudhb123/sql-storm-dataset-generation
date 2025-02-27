@@ -1,0 +1,56 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderstatus,
+        o_totalprice,
+        o_orderdate,
+        o_orderpriority,
+        o_clerk,
+        o_shippriority,
+        1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        o.o_clerk,
+        o.o_shippriority,
+        oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > DATE_SUB('1998-10-01', INTERVAL 1 YEAR)
+)
+
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_spent,
+    AVG(o.o_totalprice) AS avg_order_value,
+    p.p_brand,
+    p.p_type,
+    SUM(CASE WHEN li.l_discount > 0.1 THEN li.l_extendedprice * (1 - li.l_discount) ELSE 0 END) AS discounted_amount,
+    SUM(CASE WHEN li.l_discount <= 0.1 THEN li.l_extendedprice END) AS normal_amount,
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(li.l_extendedprice) DESC) AS rank,
+    STRING_AGG(s.s_name, ', ') AS suppliers
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE o.o_orderdate < DATE_SUB('1998-10-01', INTERVAL 90 DAY) 
+AND p.p_retailprice IS NOT NULL
+AND n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'S%')
+GROUP BY n.n_name, p.p_brand, p.p_type
+HAVING SUM(li.l_extendedprice) > 10000
+ORDER BY total_spent DESC;

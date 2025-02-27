@@ -1,0 +1,52 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size > 10
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        s.s_comment
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 50000
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_orderprice,
+        o.o_orderdate,
+        o.o_clerk,
+        o.o_comment,
+        COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_orderprice, o.o_orderdate, o.o_clerk, o.o_comment
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    si.s_name AS supplier_name,
+    fo.line_count,
+    fo.o_orderkey
+FROM RankedParts rp
+JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN SupplierInfo si ON ps.ps_suppkey = si.s_suppkey
+JOIN FilteredOrders fo ON fo.o_orderkey = ps.ps_partkey
+WHERE rp.price_rank <= 5
+ORDER BY rp.p_retailprice DESC, si.s_name ASC;

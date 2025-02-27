@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY COUNT(c.movie_id) DESC) AS movie_rank,
+        COALESCE(SUM(CASE WHEN p.info_type_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS info_count
+    FROM
+        aka_title AS a
+    LEFT JOIN
+        complete_cast AS cc ON a.id = cc.movie_id
+    LEFT JOIN
+        person_info AS p ON cc.subject_id = p.person_id
+    GROUP BY
+        a.title, a.production_year, a.kind_id
+),
+
+TopMovies AS (
+    SELECT
+        movie_title,
+        production_year,
+        info_count
+    FROM
+        RankedMovies
+    WHERE
+        movie_rank <= 5
+),
+
+MovieKeywords AS (
+    SELECT
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        aka_title AS m
+    JOIN
+        movie_keyword AS mk ON m.id = mk.movie_id
+    JOIN
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id
+),
+
+FinalOutput AS (
+    SELECT
+        t.movie_title,
+        t.production_year,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        CASE 
+            WHEN t.info_count > 5 THEN 'Highly Informative'
+            WHEN t.info_count BETWEEN 3 AND 5 THEN 'Moderately Informative'
+            ELSE 'Minimally Informative'
+        END AS info_desc
+    FROM
+        TopMovies AS t
+    LEFT JOIN
+        MovieKeywords AS mk ON t.movie_title = mk.movie_id
+)
+
+SELECT DISTINCT
+    fo.movie_title,
+    fo.production_year,
+    fo.keywords,
+    fo.info_desc,
+    CASE 
+        WHEN fo.keywords IS NULL THEN 'No keywords available for this movie'
+        ELSE 'Keywords present'
+    END AS keyword_presence,
+    ROUND(AVG(e.profit / NULLIF(ct.budget, 0)), 2) AS avg_profit_ratio
+FROM
+    FinalOutput AS fo
+LEFT JOIN
+    movie_info AS e ON fo.movie_title = e.info
+LEFT JOIN
+    movie_companies AS ct ON e.movie_id = ct.movie_id
+GROUP BY
+    fo.movie_title, fo.production_year, fo.keywords, fo.info_desc
+HAVING
+    COUNT(e.id) > 0 OR fo.production_year IS NULL
+ORDER BY
+    fo.production_year DESC, fo.movie_title ASC;

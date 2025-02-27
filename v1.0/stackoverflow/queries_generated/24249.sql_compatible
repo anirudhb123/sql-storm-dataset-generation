@@ -1,0 +1,92 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation AS UserReputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.UserId END) AS UniqueUpVotes,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.UserId END) AS UniqueDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.PostTypeId,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.UniqueUpVotes,
+        ps.UniqueDownVotes,
+        ur.UserReputation,
+        ur.ReputationRank
+    FROM 
+        PostStatistics ps
+    JOIN 
+        Users u ON u.Id = (
+            SELECT OwnerUserId 
+            FROM Posts 
+            WHERE Id = ps.PostId
+        )
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        ps.PostRank <= 10
+),
+ConcernedPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.PostTypeId,
+        tp.CommentCount,
+        tp.TotalBounty,
+        tp.UniqueUpVotes,
+        tp.UniqueDownVotes,
+        tp.UserReputation,
+        tp.ReputationRank,
+        CASE 
+            WHEN tp.TotalBounty > 0 THEN 'Has Bounty'
+            ELSE 'No Bounty'
+        END AS BountyStatus
+    FROM 
+        TopPosts tp 
+    WHERE 
+        (tp.CommentCount > 5 OR tp.UniqueUpVotes >= 10)
+)
+
+SELECT 
+    cp.PostId,
+    p.Title,
+    COUNT(c.Id) AS TotalComments,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+    cp.UserReputation,
+    cp.ReputationRank,
+    cp.BountyStatus,
+    (SELECT Name FROM PostTypes WHERE Id = cp.PostTypeId) AS PostType
+FROM 
+    ConcernedPosts cp
+JOIN 
+    Posts p ON cp.PostId = p.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+GROUP BY 
+    cp.PostId, p.Title, cp.UserReputation, cp.ReputationRank, cp.BountyStatus
+ORDER BY 
+    cp.UserReputation DESC, TotalComments DESC;

@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        mh.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    a.name,
+    ARRAY_AGG(DISTINCT t.title) AS titles,
+    MAX(t.production_year) AS latest_production_year,
+    COUNT(mh.movie_id) AS linked_movies_count,
+    SUM(CASE 
+            WHEN ci.nr_order IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS cast_with_order,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_used
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_title t ON mh.movie_id = t.id
+WHERE 
+    a.md5sum IS NOT NULL
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(mh.movie_id) > 1
+ORDER BY 
+    latest_production_year DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

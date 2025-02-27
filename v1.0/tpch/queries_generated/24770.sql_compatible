@@ -1,0 +1,46 @@
+
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+),
+PopularParts AS (
+    SELECT 
+        p.p_partkey, 
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT l.l_orderkey) > 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(COUNT(DISTINCT n.n_nationkey), 0) AS nation_count,
+    COALESCE(SUM(sc.total_cost), 0) AS total_supplier_cost,
+    COUNT(DISTINCT pp.p_partkey) AS popular_part_count,
+    MAX(cs.total_spent) AS max_customer_spent
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierCosts sc ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = sc.s_suppkey)
+LEFT JOIN PopularParts pp ON pp.order_count > 25
+LEFT JOIN CustomerStats cs ON cs.order_count > 5 AND cs.spending_rank <= 10
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT n.n_nationkey) > 0 OR MAX(cs.total_spent) IS NULL
+ORDER BY r.r_name;

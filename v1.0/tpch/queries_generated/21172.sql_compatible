@@ -1,0 +1,53 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY sp.ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp sp ON s.s_suppkey = sp.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueProducts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+QuarterlyRevenue AS (
+    SELECT EXTRACT(YEAR FROM o.o_orderdate) AS order_year,
+           EXTRACT(QUARTER FROM o.o_orderdate) AS order_quarter,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY order_year, order_quarter
+)
+SELECT DISTINCT 
+    n.n_name AS nation_name, 
+    p.p_name AS product_name, 
+    rs.s_name AS supplier_name, 
+    tc.c_name AS customer_name, 
+    o.total_revenue AS order_revenue,
+    qr.order_year,
+    qr.order_quarter
+FROM RankedSuppliers rs
+JOIN HighValueProducts p ON rs.ps_partkey = p.p_partkey
+JOIN TopCustomers tc ON rs.s_suppkey = tc.c_custkey
+LEFT JOIN OrderAnalysis o ON o.o_orderkey = rs.s_suppkey
+FULL OUTER JOIN QuarterlyRevenue qr ON o.order_year = qr.order_year AND o.order_quarter = qr.order_quarter
+WHERE p.p_retailprice IS NOT NULL 
+AND ((o.total_revenue IS NOT NULL OR qr.total_revenue IS NULL) OR (rs.s_acctbal IS NULL AND tc.total_spent > 20000))
+ORDER BY nation_name, product_name, supplier_name;

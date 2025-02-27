@@ -1,0 +1,54 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.sold_date_sk,
+        SUM(ws.net_paid) AS total_net_paid,
+        SUM(ws.quantity) AS total_quantity,
+        COUNT(DISTINCT ws.order_number) AS order_count,
+        w.warehouse_id,
+        c.customer_id,
+        cd.gender,
+        cd.marital_status,
+        DENSE_RANK() OVER (PARTITION BY c.customer_sk ORDER BY SUM(ws.net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    GROUP BY 
+        ws.sold_date_sk, w.warehouse_id, c.customer_id, cd.gender, cd.marital_status
+),
+top_sales AS (
+    SELECT 
+        sold_date_sk,
+        warehouse_id,
+        total_net_paid,
+        total_quantity,
+        order_count,
+        customer_id,
+        gender,
+        marital_status
+    FROM 
+        sales_data
+    WHERE 
+        rank = 1
+)
+SELECT 
+    t.sold_date_sk,
+    t.warehouse_id,
+    t.total_net_paid,
+    t.total_quantity,
+    t.order_count,
+    COALESCE(t.gender, 'Unknown') AS customer_gender,
+    COALESCE(t.marital_status, 'Unknown') AS marital_status,
+    COUNT(*) OVER (PARTITION BY t.warehouse_id) AS customer_count_in_warehouse
+FROM 
+    top_sales t
+WHERE 
+    t.total_net_paid > (SELECT AVG(total_net_paid) FROM sales_data)
+ORDER BY 
+    t.total_net_paid DESC
+FETCH FIRST 100 ROWS ONLY;

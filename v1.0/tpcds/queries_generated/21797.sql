@@ -1,0 +1,62 @@
+
+WITH RankedCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_marital_status IS NOT NULL
+),
+RecentReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM
+        store_returns
+    WHERE
+        sr_returned_date_sk IN (
+            SELECT d_date_sk FROM date_dim WHERE d_year = 2023
+        )
+    GROUP BY
+        sr_returning_customer_sk
+),
+CustomerIncome AS (
+    SELECT
+        h.hd_demo_sk,
+        COUNT(CASE WHEN ib.ib_income_band_sk IS NOT NULL THEN 1 END) AS income_count
+    FROM
+        household_demographics h
+    LEFT JOIN
+        income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        h.hd_demo_sk
+)
+SELECT
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    rr.total_returned_quantity,
+    rr.return_count,
+    ci.income_count
+FROM
+    RankedCustomers rc
+LEFT JOIN
+    RecentReturns rr ON rc.c_customer_sk = rr.sr_returning_customer_sk
+FULL OUTER JOIN
+    CustomerIncome ci ON rc.c_customer_sk = ci.hd_demo_sk
+WHERE
+    (rr.return_count IS NULL OR rr.total_returned_quantity > 5)
+    AND (rc.rn = 1 OR ci.income_count = 0)
+ORDER BY
+    rc.cd_gender,
+    rc.c_last_name DESC NULLS LAST,
+    ci.income_count ASC NULLS FIRST;

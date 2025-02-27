@@ -1,0 +1,19 @@
+title: SQLStorm v1.0 Postgres Benchmark (24h, versions)
+repetitions: 1
+warmup: 0
+timeout: 0
+fetch_result: false
+query_seed: 42
+output: results/v1.0/postgres_versions
+systems:
+   -  title: Postgres ${version}
+      dbms: postgres
+      parameter:
+         version:
+            - "12.0"
+            - "13.0"
+            - "14.0"
+            - "15.0"
+            - "16.0"
+            - "17.0"
+            - "latest"

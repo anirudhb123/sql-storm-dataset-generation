@@ -1,0 +1,45 @@
+WITH ActorMovieCount AS (
+    SELECT ca.person_id, COUNT(DISTINCT ca.movie_id) AS movie_count
+    FROM cast_info ca
+    JOIN aka_name an ON ca.person_id = an.person_id
+    GROUP BY ca.person_id
+), 
+TopActors AS (
+    SELECT a.person_id, an.name, am.movie_count
+    FROM ActorMovieCount am
+    JOIN aka_name an ON am.person_id = an.person_id
+    WHERE am.movie_count > 10
+    ORDER BY am.movie_count DESC
+    LIMIT 10
+), 
+MovieGenres AS (
+    SELECT mt.production_year, k.keyword AS genre, COUNT(DISTINCT mt.id) AS genre_count
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mt.production_year, k.keyword
+), 
+YearGenreSummary AS (
+    SELECT production_year, genre, SUM(genre_count) AS total_genre_count
+    FROM MovieGenres
+    GROUP BY production_year, genre
+)
+
+SELECT 
+    ta.name AS actor_name,
+    ta.movie_count,
+    yg.production_year,
+    yg.genre,
+    yg.total_genre_count,
+    (SELECT COUNT(*)
+     FROM cast_info ci
+     WHERE ci.movie_id IN (SELECT id FROM aka_title WHERE production_year = yg.production_year)
+       AND ci.role_id IN (SELECT id FROM role_type WHERE role = 'lead')) AS lead_roles_count
+FROM 
+    TopActors ta
+JOIN 
+    YearGenreSummary yg ON yg.total_genre_count > 0
+WHERE 
+    yg.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    ta.movie_count DESC, yg.total_genre_count DESC;

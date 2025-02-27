@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        PostTypeId,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.PostTypeId,
+        p.Score,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostVoteDetails AS (
+    
+    SELECT 
+        postId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        postId
+),
+UserBadges AS (
+    
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(pvd.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(pvd.DownVotes, 0) AS TotalDownVotes,
+        rph.Level,
+        ub.BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteDetails pvd ON p.Id = pvd.PostId
+    LEFT JOIN 
+        UserBadges ub ON p.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.Id
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year' 
+        AND p.ViewCount > 100
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.TotalUpVotes,
+    pd.TotalDownVotes,
+    pd.Level,
+    pd.BadgeCount,
+    RANK() OVER (ORDER BY pd.TotalUpVotes DESC) AS RankByUpVotes,
+    DENSE_RANK() OVER (ORDER BY pd.Score DESC) AS DenseRankByScore
+FROM 
+    PostDetails pd
+WHERE 
+    pd.BadgeCount > 0 
+ORDER BY 
+    pd.Level, pd.Score DESC;

@@ -1,0 +1,67 @@
+WITH regional_totals AS (
+    SELECT 
+        r.r_name,
+        SUM(COALESCE(ps.ps_supplycost, 0) * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+),
+customer_order_stats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') AND
+        o.o_totalprice IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+),
+supplier_product_summary AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS product_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    rt.total_supply_cost,
+    rt.unique_suppliers,
+    cos.c_custkey,
+    cos.total_spent,
+    cos.spending_rank,
+    sps.s_suppkey,
+    sps.product_count,
+    sps.avg_supply_cost
+FROM 
+    regional_totals rt
+JOIN 
+    customer_order_stats cos ON cos.spending_rank = 1
+FULL OUTER JOIN 
+    supplier_product_summary sps ON rt.unique_suppliers = sps.product_count
+WHERE 
+    rt.total_supply_cost IS NOT NULL
+    AND (sps.avg_supply_cost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+         OR sps.product_count IS NULL)
+ORDER BY 
+    rt.r_name, cos.total_spent DESC, sps.avg_supply_cost ASC
+LIMIT 
+    50;

@@ -1,0 +1,55 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS sale_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales 
+    WHERE 
+        ws_ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        ws_item_sk
+),
+HighValueItems AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        total_sales,
+        sale_count
+    FROM 
+        SalesCTE
+    JOIN 
+        item ON SalesCTE.ws_item_sk = item.i_item_sk
+    WHERE 
+        total_sales > (SELECT AVG(total_sales) FROM SalesCTE)
+),
+CustomerAddress AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+    WHERE 
+        ca_state IN ('CA', 'NY')
+)
+SELECT 
+    hvi.i_item_desc,
+    hvi.total_sales,
+    (SELECT COUNT(DISTINCT c_customer_sk) 
+     FROM web_sales ws 
+     WHERE ws.ws_item_sk = hvi.i_item_sk) AS customer_count,
+    ca.full_address,
+    ca.ca_city,
+    ca.ca_state
+FROM 
+    HighValueItems hvi
+LEFT JOIN 
+    CustomerAddress ca ON TRUE 
+WHERE 
+    EXISTS (SELECT 1 FROM store_sales ss WHERE ss.ss_item_sk = hvi.i_item_sk)
+ORDER BY 
+    hvi.total_sales DESC
+LIMIT 50;

@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS PriceRank,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ship_date_sk DESC) AS RecentShipRank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+        AND ws.ws_quantity > 0
+),
+FilteredSales AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_sales_price) AS TotalSales,
+        COUNT(*) AS SaleCount
+    FROM RankedSales s
+    WHERE s.PriceRank = 1
+    GROUP BY s.ws_item_sk
+),
+ItemCategories AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_category
+    FROM item i
+    WHERE i.i_rec_start_date < DATE '2002-10-01'
+        AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+),
+CategorySales AS (
+    SELECT 
+        c.i_category,
+        SUM(f.TotalSales) AS CategorySales
+    FROM ItemCategories c
+    JOIN FilteredSales f ON c.i_item_sk = f.ws_item_sk
+    GROUP BY c.i_category
+)
+SELECT 
+    cs.i_category,
+    cs.CategorySales,
+    CASE 
+        WHEN cs.CategorySales IS NULL THEN 'No Sales' 
+        ELSE CONCAT('Total Sales: ', TO_CHAR(cs.CategorySales, 'FM999,999.00'))
+    END AS SalesDescription
+FROM CategorySales cs
+FULL OUTER JOIN warehouse w ON cs.i_category IS NOT NULL AND MOD(w.w_warehouse_sk, 2) = 0
+WHERE COALESCE(cs.CategorySales, 0) > 5000
+    OR w.w_warehouse_name IS NULL
+ORDER BY cs.CategorySales DESC NULLS LAST;

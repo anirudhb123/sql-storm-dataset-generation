@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, c.level + 1
+    FROM supplier s
+    JOIN SupplierCTE c ON s.s_nationkey = c.s_nationkey
+    WHERE c.level < 5
+),
+TotalPriceCTE AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, t.total_spent, RANK() OVER (ORDER BY t.total_spent DESC) AS spending_rank
+    FROM customer c
+    JOIN TotalPriceCTE t ON c.c_custkey = t.custkey
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+FinalResults AS (
+    SELECT c.c_name, n.n_name, COALESCE(s.s_name, 'No Supplier') AS supplier_name, 
+           COALESCE(s.s_acctbal, 0) AS supplier_acctbal
+    FROM TopCustomers c
+    FULL OUTER JOIN Nations n ON c.c_custkey = n.n_nationkey
+    LEFT JOIN SupplierCTE s ON n.n_nationkey = s.s_nationkey
+    WHERE c.spending_rank <= 10 OR s.level IS NOT NULL
+)
+SELECT DISTINCT f.c_name, f.n_name, f.supplier_name, f.supplier_acctbal
+FROM FinalResults f
+WHERE f.supplier_acctbal IS NOT NULL
+ORDER BY f.supplier_acctbal DESC, f.c_name;

@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select all titles and their episodic relationships
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.season_nr,
+        t.episode_nr,
+        t.episode_of_id,
+        ARRAY[t.id] AS movie_path
+    FROM title t
+    WHERE t.episode_of_id IS NULL -- Start with top-level movies
+    UNION ALL
+    -- Recursive case: Join to find episodes
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.season_nr,
+        t.episode_nr,
+        t.episode_of_id,
+        mh.movie_path || t.id
+    FROM title t
+    JOIN movie_hierarchy mh ON t.episode_of_id = mh.movie_id
+),
+actor_information AS (
+    -- Get unique actors along with their roles in movies
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ci.movie_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY c.note) AS role_rank
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN role_type c ON ci.role_id = c.id
+),
+movies_with_keywords AS (
+    -- Gather movies with their associated keywords
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id, t.title
+),
+movie_stats AS (
+    -- Calculate stats for each movie including total roles and average actor rank
+    SELECT 
+        m.movie_id,
+        m.title,
+        COUNT(DISTINCT ai.actor_id) AS total_roles,
+        AVG(ai.role_rank) AS avg_role_rank,
+        m.keywords
+    FROM movies_with_keywords m
+    LEFT JOIN actor_information ai ON m.movie_id = ai.movie_id
+    GROUP BY m.movie_id, m.title, m.keywords
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.season_nr,
+    mh.episode_nr,
+    ms.total_roles,
+    ms.avg_role_rank,
+    COALESCE(mh.movie_path::text, '{}') AS path,
+    CASE 
+        WHEN ms.avg_role_rank IS NOT NULL THEN 
+            CASE 
+                WHEN ms.avg_role_rank < 2 THEN 'High'
+                WHEN ms.avg_role_rank BETWEEN 2 AND 3 THEN 'Medium'
+                ELSE 'Low'
+            END
+        ELSE 'Unknown'
+    END AS role_quality,
+    ROW_NUMBER() OVER (ORDER BY ms.total_roles DESC) AS rank_by_roles
+FROM movie_hierarchy mh
+LEFT JOIN movie_stats ms ON mh.movie_id = ms.movie_id
+WHERE
+    (mh.season_nr IS NULL OR mh.season_nr > 0)  -- Filter out invalid seasons
+    AND (ms.total_roles IS NOT NULL OR ms.total_roles > 0) -- Ensure we have role data
+ORDER BY rank_by_roles;

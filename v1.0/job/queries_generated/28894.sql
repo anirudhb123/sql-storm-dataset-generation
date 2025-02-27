@@ -1,0 +1,73 @@
+WITH actor_movie_count AS (
+    SELECT
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM
+        aka_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    JOIN
+        aka_title t ON c.movie_id = t.movie_id
+    GROUP BY
+        a.person_id
+),
+popular_roles AS (
+    SELECT
+        r.role,
+        COUNT(DISTINCT c.id) AS role_count
+    FROM
+        role_type r
+    JOIN
+        cast_info c ON r.id = c.role_id
+    GROUP BY
+        r.role
+    ORDER BY
+        role_count DESC
+    LIMIT 5
+),
+actor_role_details AS (
+    SELECT
+        a.name AS actor_name,
+        a.person_id,
+        acr.role,
+        acr.total_movies,
+        acr.movie_titles
+    FROM
+        actor_movie_count acr
+    JOIN
+        aka_name a ON acr.person_id = a.person_id
+    WHERE
+        acr.total_movies > 5
+),
+movies_with_keywords AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        aka_title m
+    JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id, m.title
+)
+
+SELECT
+    ard.actor_name,
+    ard.role,
+    ard.total_movies,
+    ard.movie_titles,
+    m.title AS movie_title,
+    mwk.keywords
+FROM
+    actor_role_details ard
+JOIN
+    movies_with_keywords mwk ON mwk.title LIKE '%' || ard.movie_titles || '%'
+JOIN
+    popular_roles pr ON ard.role IN (SELECT role FROM popular_roles)
+
+ORDER BY
+    ard.actor_name, mwk.title;

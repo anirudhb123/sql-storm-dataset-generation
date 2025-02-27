@@ -1,0 +1,60 @@
+-- Performance benchmarking query to analyze posts and their associated data
+
+WITH PostData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        pt.Name AS PostType,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'  -- Filter for posts created in 2023
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, pt.Name
+),
+UserData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.PostType,
+    pd.VoteCount,
+    pd.CommentCount,
+    ud.UserId AS OwnerUserId,
+    ud.DisplayName AS OwnerDisplayName,
+    ud.Reputation AS OwnerReputation,
+    ud.BadgeCount AS OwnerBadgeCount
+FROM 
+    PostData pd
+JOIN 
+    Users u ON pd.OwnerUserId = u.Id
+JOIN 
+    UserData ud ON u.Id = ud.UserId
+ORDER BY 
+    pd.CreationDate DESC;  -- Order by most recent posts

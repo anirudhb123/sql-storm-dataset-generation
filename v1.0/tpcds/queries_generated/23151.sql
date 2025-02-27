@@ -1,0 +1,50 @@
+
+WITH RankedCustomers AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+), AddressWithState AS (
+    SELECT ca.ca_address_sk, 
+           ca.ca_state, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_state
+), SalesSummary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_net_profit) AS total_profit,
+           SUM(ws_quantity) AS total_quantity,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales 
+    GROUP BY ws_bill_customer_sk
+), CombinedSales AS (
+    SELECT rc.c_customer_id, 
+           a.ca_state,
+           ss.total_profit,
+           ss.total_quantity,
+           ss.order_count,
+           COALESCE(a.customer_count, 0) AS address_customer_count
+    FROM RankedCustomers rc
+    LEFT JOIN AddressWithState a ON rc.c_customer_sk = a.customer_count
+    LEFT JOIN SalesSummary ss ON rc.c_customer_sk = ss.ws_bill_customer_sk
+)
+SELECT c.c_customer_id, 
+       c.rnk, 
+       COALESCE(c.total_profit, 0) AS total_profit,
+       COALESCE(c.total_quantity, 0) AS total_quantity,
+       COALESCE(c.order_count, 0) AS order_count,
+       CASE 
+           WHEN a.ca_state IS NULL THEN 'UNKNOWN'
+           ELSE a.ca_state 
+       END AS state_info
+FROM CombinedSales c
+FULL OUTER JOIN AddressWithState a ON c.ca_state = a.ca_state
+WHERE (c.total_profit > 1000 OR a.customer_count > 5)
+  AND (a.customer_count IS NULL OR a.customer_count > 2)
+ORDER BY c.total_profit DESC, a.customer_count ASC
+FETCH FIRST 50 ROWS ONLY;

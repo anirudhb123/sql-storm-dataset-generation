@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS company_rank
+    FROM 
+        title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+),
+CompleteMovieInfo AS (
+    SELECT 
+        mv.movie_id,
+        mv.title,
+        mv.production_year,
+        COUNT(c.id) AS cast_count,
+        STRING_AGG(DISTINCT i.info, ', ') AS additional_info
+    FROM 
+        FilteredMovies mv
+    LEFT JOIN 
+        complete_cast cc ON mv.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_info i ON mv.movie_id = i.movie_id
+    GROUP BY 
+        mv.movie_id, mv.title, mv.production_year
+)
+SELECT 
+    cm.movie_id,
+    cm.title,
+    cm.production_year,
+    cm.cast_count,
+    cm.additional_info,
+    rt.title_rank
+FROM 
+    CompleteMovieInfo cm
+JOIN 
+    RankedTitles rt ON cm.movie_id = rt.title_id
+WHERE 
+    rt.title_rank <= 10
+ORDER BY 
+    cm.production_year DESC, cm.title ASC;

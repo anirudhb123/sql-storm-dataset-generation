@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws_net_profit) AS total_net_profit,
+        1 AS level,
+        CAST(NULL AS DECIMAL(10,2)) AS parent_total_net_profit
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458112 AND 2458119 -- filtering for a week
+    GROUP BY 
+        w.warehouse_id
+
+    UNION ALL
+
+    SELECT 
+        st.w_warehouse_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        st.level + 1,
+        st.total_net_profit AS parent_total_net_profit
+    FROM 
+        sales_trends st
+    JOIN 
+        web_sales ws ON st.w_warehouse_id = ws.ws_warehouse_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458110 AND 2458111 -- getting more data for calculations
+    GROUP BY 
+        st.w_warehouse_id
+),
+demographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+returns AS (
+    SELECT 
+        sr_returned_date_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+)
+SELECT 
+    dt.d_date AS date,
+    st.w_warehouse_id,
+    COALESCE(SUM(st.total_net_profit), 0) AS total_net_profit,
+    COALESCE(d.avg_purchase_estimate, 0) AS avg_purchase_estimate,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    AVG(CASE WHEN r.total_returns > 0 THEN (st.total_net_profit / NULLIF(r.total_returns, 0)) END) OVER (PARTITION BY dt.d_date ORDER BY total_net_profit DESC) AS average_profit_per_return
+FROM 
+    date_dim dt
+LEFT JOIN 
+    sales_trends st ON st.level = 1
+LEFT JOIN 
+    demographics d ON st.w_warehouse_id = d.cd_gender -- just for illustration, would match properly instead
+LEFT JOIN 
+    returns r ON dt.d_date_sk = r.sr_returned_date_sk
+WHERE 
+    dt.d_current_year = '1'
+GROUP BY 
+    dt.d_date, st.w_warehouse_id, d.avg_purchase_estimate, r.total_returns, r.total_return_amount
+ORDER BY 
+    total_net_profit DESC;

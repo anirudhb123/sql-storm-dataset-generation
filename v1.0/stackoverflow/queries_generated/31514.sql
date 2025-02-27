@@ -1,0 +1,106 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  -- Edit Title, Edit Body
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(SUM(v.UserId IS NOT NULL), 0) AS VoteCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END), 0) AS DeleteCount,
+        COALESCE(rh.PostId IS NULL, 0) AS IsRootPost,
+        rh.Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy rh ON p.Id = rh.PostId
+    GROUP BY 
+        p.Id, rh.Level
+),
+
+RankedPosts AS (
+    SELECT 
+        pm.Id,
+        pm.Title,
+        pm.ViewCount,
+        pm.VoteCount,
+        pm.CloseCount,
+        pm.DeleteCount,
+        pm.IsRootPost,
+        pm.Level,
+        ur.Rank,
+        ROW_NUMBER() OVER (PARTITION BY pm.IsRootPost ORDER BY pm.ViewCount DESC) AS ViewRank
+    FROM 
+        PostMetrics pm
+    LEFT JOIN 
+        UserReputation ur ON pm.Id = ur.UserId -- Assuming a link to user, modify based on your schema needs
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.VoteCount,
+    rp.CloseCount,
+    rp.DeleteCount,
+    rp.IsRootPost,
+    rp.Level,
+    rp.Rank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.VoteCount > 0
+    AND rp.CloseCount > 0
+    AND (rp.DeleteCount = 0 OR rp.DeleteCount IS NULL)
+ORDER BY 
+    rp.ViewCount DESC,
+    rp.Rank ASC
+LIMIT 10;

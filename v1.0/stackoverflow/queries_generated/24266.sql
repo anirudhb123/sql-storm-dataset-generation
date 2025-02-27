@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STUFF((SELECT ',' + t.TagName
+               FROM Tags t
+               WHERE t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]))
+                             )
+               FOR XML PATH('')), 1, 1, '') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.Score IS NULL THEN 'No Score'
+            WHEN rp.Score > 100 THEN 'High Score'
+            ELSE 'Moderate Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 10
+        OR rp.CommentCount > 5 
+        OR EXISTS (SELECT 1 FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 3))
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreatedDate,
+        ph.Comment,
+        ph.Text,
+        CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12, 13) THEN 'Closure Action' ELSE 'Other Action' END AS ActionType
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+    AND 
+        ph.UserId IS NOT NULL
+    ORDER BY 
+        ph.CreationDate DESC
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.ViewCount,
+    fp.ScoreCategory,
+    fd.UserDisplayName,
+    COUNT(DISTINCT fd.PostId) FILTER (WHERE fd.ActionType = 'Closure Action') AS CloseActions,
+    fd.Comment,
+    fd.Text,
+    fd.CreatedDate
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryDetails fd ON fd.PostId = fp.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.Score, fp.ViewCount, fp.ScoreCategory, fd.UserDisplayName, fd.Comment, fd.Text, fd.CreatedDate
+ORDER BY 
+    fp.Score DESC, CloseActions DESC
+LIMIT 50;

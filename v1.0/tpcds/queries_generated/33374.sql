@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_sold_date_sk,
+        SUM(s.ss_net_paid) AS total_sales
+    FROM 
+        customer c
+    INNER JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, s.ss_sold_date_sk
+    UNION ALL
+    SELECT 
+        h.hd_demo_sk,
+        'Aggregate' AS c_first_name,
+        'Sales' AS c_last_name,
+        sh.ss_sold_date_sk,
+        SUM(sh.total_sales) AS total_sales
+    FROM 
+        SalesHierarchy sh
+    INNER JOIN 
+        household_demographics h ON sh.c_customer_sk = h.hd_demo_sk
+    GROUP BY 
+        h.hd_demo_sk, sh.ss_sold_date_sk
+),
+NullHandling AS (
+    SELECT 
+        sh.c_first_name,
+        sh.c_last_name,
+        COALESCE(sh.total_sales, 0) AS net_sales,
+        ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY sh.total_sales DESC) AS sales_rank
+    FROM 
+        SalesHierarchy sh
+)
+SELECT 
+    n.c_first_name,
+    n.c_last_name,
+    n.net_sales,
+    CASE
+        WHEN n.net_sales IS NULL THEN 'No Sales'
+        WHEN n.net_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_rating
+FROM 
+    NullHandling n
+JOIN 
+    customer_address ca ON n.c_customer_sk = ca.ca_address_sk
+WHERE 
+    ca.ca_state = 'CA' 
+    AND n.sales_rank = 1
+ORDER BY 
+    n.net_sales DESC
+LIMIT 10;

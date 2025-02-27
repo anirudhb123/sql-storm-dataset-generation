@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.Score > 0
+), 
+AggregatedUserData AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        SUM(CASE WHEN p.CreationDate > NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPosts,
+        AVG(p.ViewCount) AS AverageViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+HighlightedTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS UsageCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    ORDER BY UsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.OwnerDisplayName,
+    a.TotalPosts,
+    a.TotalScore,
+    a.RecentPosts,
+    a.AverageViews,
+    (SELECT STRING_AGG(ht.TagName, ', ') FROM HighlightedTags ht) AS PopularTags
+FROM RankedPosts r
+JOIN AggregatedUserData a ON r.OwnerDisplayName = a.UserId
+WHERE r.PostRank <= 5
+ORDER BY r.Score DESC, r.CreationDate DESC;

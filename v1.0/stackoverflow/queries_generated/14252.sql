@@ -1,0 +1,26 @@
+-- Performance Benchmarking SQL Query
+-- This query retrieves a summary of posts, their associated votes, and user information to test performance.
+
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(V.Id) AS VoteCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+GROUP BY 
+    P.Id, U.Id
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 1000;  -- Limit to 1000 records for benchmarking

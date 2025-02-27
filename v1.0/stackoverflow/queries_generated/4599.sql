@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStats
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.Comment, 'No comments made') AS LastEditComment,
+        U.DisplayName AS LastEditor
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (
+            SELECT MAX(PH2.CreationDate)
+            FROM PostHistory PH2
+            WHERE PH2.PostId = P.Id
+        )
+    LEFT JOIN 
+        Users U ON P.LastEditorUserId = U.Id
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.Reputation,
+    T.PostCount,
+    T.CommentCount,
+    T.TotalBounty,
+    json_agg(DISTINCT PD) AS PostDetails
+FROM 
+    TopUsers T
+LEFT JOIN 
+    PostDetails PD ON T.UserId = PD.LastEditor
+WHERE 
+    T.Rank <= 10
+GROUP BY 
+    T.UserId, T.DisplayName, T.Reputation, T.PostCount, T.CommentCount, T.TotalBounty
+ORDER BY 
+    T.Reputation DESC;

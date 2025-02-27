@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 5
+), EffectiveCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(o2.o_totalprice)
+        FROM orders o2
+        WHERE o2.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    )
+), HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty * ps.ps_supplycost) > 50000
+)
+SELECT 
+    e.c_custkey,
+    e.c_name,
+    sh.s_name,
+    p.p_name,
+    sh.hierarchy_level,
+    e.total_spent,
+    pv.total_value
+FROM EffectiveCustomers e
+JOIN SupplierHierarchy sh ON e.c_nationkey = sh.s_nationkey
+JOIN HighValueParts p ON sh.s_suppkey = p.p_partkey
+ORDER BY e.total_spent DESC, sh.hierarchy_level ASC;

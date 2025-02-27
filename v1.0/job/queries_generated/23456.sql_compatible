@@ -1,0 +1,78 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.name AS aka_name,
+        t.title,
+        t.production_year,
+        DENSE_RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        COUNT(DISTINCT m.company_id) AS company_count
+    FROM 
+        movie_companies m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        r.aka_name,
+        cs.keyword_count,
+        cs.company_count
+    FROM 
+        RankedTitles r
+    LEFT JOIN 
+        CompanyStats cs ON r.aka_id = cs.movie_id
+    WHERE 
+        r.rank_year = 1
+),
+FinalResults AS (
+    SELECT 
+        md.title, 
+        md.production_year, 
+        md.aka_name,
+        COALESCE(md.keyword_count, 0) AS keyword_count,
+        COALESCE(md.company_count, 0) AS company_count,
+        RANK() OVER (ORDER BY md.company_count DESC, md.keyword_count DESC) AS rank
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.aka_name,
+    fr.keyword_count,
+    fr.company_count,
+    fr.rank,
+    CASE 
+        WHEN fr.company_count > 5 THEN 'High'
+        WHEN fr.company_count BETWEEN 1 AND 5 THEN 'Medium'
+        ELSE 'Low' 
+    END AS company_influence_level,
+    CASE 
+        WHEN fr.keyword_count > 10 THEN 'Highly Tagged'
+        ELSE 'Moderately Tagged' 
+    END AS keyword_influence_level
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year BETWEEN 2000 AND 2023 
+ORDER BY 
+    fr.rank, fr.production_year DESC
+FETCH FIRST 100 ROWS ONLY;

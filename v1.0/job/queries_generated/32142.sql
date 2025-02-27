@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.level < 5  -- limit depth of recursion
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS number_of_companies,
+    AVG(mi.info::numeric) AS average_rating,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS rn
+FROM 
+    aka_name ak
+INNER JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+INNER JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+INNER JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+INNER JOIN 
+    title mt ON mh.movie_id = mt.id
+WHERE 
+    mt.production_year IS NOT NULL
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    number_of_companies > 2
+ORDER BY 
+    rn, mt.production_year DESC;
+
+This query features:
+- A recursive CTE for exploring linked movies produced from 2000 onwards.
+- Joins multiple tables to gather details about actors, movies, companies involved in productions, and associated ratings.
+- Includes window functions for generating row numbers partitioned by actor names to rank their movie appearances.
+- Complex predicates to filter results based on specific conditions, including the handling of NULL values.
+- Aggregations to calculate the number of companies and the average rating for movies associated with each actor.

@@ -1,0 +1,69 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstCloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(phs.FirstCloseDate, p.CreationDate) AS StatusChangeDate
+    FROM Posts p
+    LEFT JOIN PostHistorySummary phs ON p.Id = phs.PostId
+    WHERE p.LastActivityDate > NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalScore,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COUNT(ap.PostId) AS ActivePostCount,
+    AVG(ap.ViewCount) AS AvgPostViews,
+    COUNT(DISTINCT CASE WHEN phs.FirstCloseDate IS NOT NULL THEN ap.PostId END) AS ClosedPosts
+FROM UserPostStats ups
+LEFT JOIN UserBadges ub ON ups.UserId = ub.UserId
+LEFT JOIN ActivePosts ap ON ups.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ap.PostId)
+LEFT JOIN PostHistorySummary phs ON ap.PostId = phs.PostId
+GROUP BY 
+    ups.UserId,
+    ups.DisplayName,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+ORDER BY 
+    ups.TotalScore DESC,
+    ups.TotalPosts DESC;

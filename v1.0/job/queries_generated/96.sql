@@ -1,0 +1,63 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT co.name) AS companies_count,
+        SUM(CASE WHEN a.production_year >= 2000 THEN 1 ELSE 0 END) AS recent_movies
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+TopActors AS (
+    SELECT 
+        movie_id,
+        name,
+        role,
+        role_order
+    FROM 
+        ActorRoles
+    WHERE 
+        role_order <= 3
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    COALESCE(ta.name, 'No Lead Actors') AS lead_actor,
+    COUNT(DISTINCT ta.name) AS total_lead_actors,
+    md.companies_count,
+    md.recent_movies
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    TopActors ta ON md.movie_id = ta.movie_id
+GROUP BY 
+    md.movie_id, md.title, md.production_year, md.keywords, ta.name
+ORDER BY 
+    md.production_year DESC, 
+    md.total_lead_actors DESC NULLS LAST;

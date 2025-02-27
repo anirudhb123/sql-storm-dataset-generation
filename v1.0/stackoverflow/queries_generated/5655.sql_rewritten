@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 5
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.OwnerDisplayName,
+    t.CommentCount,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount
+FROM 
+    TopPosts t
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(*) AS BadgeCount 
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = t.PostId);

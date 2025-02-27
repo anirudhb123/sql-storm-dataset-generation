@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Tags, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(tag) AS TagName,
+        COUNT(*) AS Frequency
+    FROM 
+        (SELECT UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS tag 
+         FROM Posts
+         WHERE PostTypeId = 1) AS TagList
+    GROUP BY 
+        tag
+    HAVING 
+        COUNT(*) > 10 
+),
+TopAuthors AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Tags,
+    rp.ViewCount,
+    rp.Author,
+    rp.CommentCount,
+    rp.VoteCount,
+    rp.BadgeCount,
+    pt.TagName AS PopularTag,
+    ta.DisplayName AS TopAuthor
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%' 
+LEFT JOIN 
+    TopAuthors ta ON rp.Author = ta.DisplayName
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+        AND ws.ws_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        ws.web_site_id
+),
+ReturnData AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_return_amount,
+        COUNT(wr.wr_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_web_page_sk
+),
+Summary AS (
+    SELECT 
+        sd.web_site_id,
+        sd.total_net_profit,
+        sd.total_orders,
+        sd.unique_customers,
+        rd.total_return_amount,
+        rd.total_returns,
+        COALESCE(sd.total_net_profit / NULLIF(sd.total_orders, 0), 0) AS avg_net_profit_per_order,
+        COALESCE(rd.total_return_amount / NULLIF(rd.total_returns, 0), 0) AS avg_return_amount
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnData rd ON sd.web_site_id = rd.wr_web_page_sk
+)
+SELECT 
+    s.web_site_id,
+    s.total_net_profit,
+    s.total_orders,
+    s.unique_customers,
+    s.avg_net_profit_per_order,
+    s.total_return_amount,
+    s.avg_return_amount,
+    CASE 
+        WHEN s.avg_return_amount > s.avg_net_profit_per_order THEN 'High Return Rate'
+        WHEN s.avg_return_amount < s.avg_net_profit_per_order THEN 'Stable'
+        ELSE 'Neutral'
+    END AS return_status
+FROM 
+    Summary s
+ORDER BY 
+    s.total_net_profit DESC
+LIMIT 10;

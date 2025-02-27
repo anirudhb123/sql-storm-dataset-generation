@@ -1,0 +1,68 @@
+
+WITH RecursiveUserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId IN (1, 2) THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    GROUP BY 
+        UserId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+TopActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ua.TotalPosts,
+        ua.TotalQuestions,
+        ua.TotalAnswers,
+        ua.TotalViews,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecursiveUserActivity ua ON u.Id = ua.UserId
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000 
+)
+
+SELECT 
+    t.DisplayName,
+    t.TotalPosts,
+    t.TotalQuestions,
+    t.TotalAnswers,
+    t.TotalViews,
+    CONCAT('Gold: ', t.GoldBadges, ', Silver: ', t.SilverBadges, ', Bronze: ', t.BronzeBadges) AS BadgeSummary,
+    CASE 
+        WHEN t.ActivityRank <= 10 THEN 'Top User'
+        WHEN t.ActivityRank <= 50 THEN 'Active User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    TopActiveUsers t
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.OwnerUserId = t.Id AND p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+    )
+ORDER BY 
+    t.ActivityRank;

@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '2022-01-01'
+),
+HighValueSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM
+        supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+    HAVING
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+PopularProducts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+        JOIN part p ON l.l_partkey = p.p_partkey
+    WHERE
+        l.l_shipdate >= DATE '2022-01-01'
+    GROUP BY
+        p.p_partkey, p.p_name
+    ORDER BY
+        total_sales DESC
+    LIMIT 10
+)
+SELECT
+    r.r_name,
+    p.p_name,
+    p.total_sales,
+    s.s_name,
+    o.o_orderkey,
+    o.o_totalprice
+FROM
+    region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN HighValueSuppliers hvs ON s.s_suppkey = hvs.s_suppkey
+    LEFT JOIN PopularProducts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+    LEFT JOIN RankedOrders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+WHERE
+    r.r_name IS NOT NULL AND
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+ORDER BY
+    r.r_name, hvs.total_supplycost DESC, o.o_totalprice;

@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_value
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank_per_nation <= 5
+),
+SupplierOrders AS (
+    SELECT
+        ts.s_suppkey,
+        os.total_order_value
+    FROM
+        TopSuppliers ts
+    LEFT JOIN 
+        lineitem l ON ts.s_suppkey = l.l_suppkey
+    LEFT JOIN 
+        OrderSummary os ON l.l_orderkey = os.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    ts.s_name AS supplier_name,
+    COALESCE(SUM(so.total_order_value), 0) AS total_order_value,
+    COUNT(DISTINCT os.o_orderkey) AS order_count,
+    AVG(so.total_order_value) OVER (PARTITION BY r.r_regionkey) AS avg_order_value_per_region
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+LEFT JOIN 
+    SupplierOrders so ON ts.s_suppkey = so.s_suppkey
+LEFT JOIN 
+    OrderSummary os ON so.total_order_value = os.total_order_value
+GROUP BY 
+    r.r_name, ts.s_name
+ORDER BY 
+    r.r_name, total_order_value DESC;

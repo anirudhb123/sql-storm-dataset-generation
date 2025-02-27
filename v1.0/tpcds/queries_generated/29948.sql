@@ -1,0 +1,59 @@
+
+WITH address_summary AS (
+    SELECT 
+        ca.city,
+        ca.state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        COUNT(DISTINCT s.s_store_sk) AS store_count,
+        SUM(LENGTH(ca.ca_street_name) + LENGTH(ca.ca_street_type)) AS total_street_length
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        store s ON s.s_street_name LIKE CONCAT('%', ca.ca_street_name, '%') 
+                  AND s.s_state = ca.ca_state
+    GROUP BY 
+        ca.city, ca.state
+),
+promotion_summary AS (
+    SELECT
+        EXTRACT(YEAR FROM d.d_date) AS promotion_year,
+        COUNT(DISTINCT p.p_promo_sk) AS total_promotions,
+        SUM(LENGTH(p.p_promo_name)) AS total_promo_name_length
+    FROM 
+        promotion p
+    LEFT JOIN 
+        date_dim d ON p.p_start_date_sk = d.d_date_sk
+    GROUP BY 
+        EXTRACT(YEAR FROM d.d_date)
+),
+web_return_summary AS (
+    SELECT 
+        wr_order_number,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt) AS total_return_value
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_order_number
+)
+SELECT 
+    a.city,
+    a.state,
+    a.customer_count,
+    a.store_count,
+    a.total_street_length,
+    p.promotion_year,
+    p.total_promotions,
+    p.total_promo_name_length,
+    wr.total_returned_quantity,
+    wr.total_return_value
+FROM 
+    address_summary a
+JOIN 
+    promotion_summary p ON a.customer_count > 5 -- Arbitrary filtering
+LEFT JOIN 
+    web_return_summary wr ON wr.total_returned_quantity > 0
+ORDER BY 
+    a.city, a.state, p.promotion_year;

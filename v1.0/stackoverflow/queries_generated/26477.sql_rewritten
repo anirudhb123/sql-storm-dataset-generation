@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+), 
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RowNum <= 10 
+), 
+EnhancedPostData AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.OwnerDisplayName,
+        fp.ViewCount,
+        fp.CommentCount,
+        COALESCE(JSON_AGG(DISTINCT t.TagName) FILTER (WHERE t.TagName IS NOT NULL), '[]') AS Tags,
+        COALESCE(MAX(b.Name), 'No Badges') AS TopBadge,
+        COUNT(ph.Id) AS EditCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Posts p ON fp.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]) 
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId BETWEEN 4 AND 6 
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8 
+    GROUP BY 
+        fp.PostId, fp.Title, fp.OwnerDisplayName, fp.ViewCount, fp.CommentCount
+)
+SELECT 
+    epd.*,
+    CASE 
+        WHEN epd.CommentCount > 5 THEN 'High Engagement'
+        WHEN epd.CommentCount BETWEEN 2 AND 5 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    EnhancedPostData epd
+ORDER BY 
+    epd.ViewCount DESC, epd.CreationDate DESC;

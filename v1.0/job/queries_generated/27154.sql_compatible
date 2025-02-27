@@ -1,0 +1,48 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        COUNT(DISTINCT m.id) AS company_count,
+        ARRAY_AGG(DISTINCT c.name) AS company_names
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        t.id, t.title, t.production_year, ct.kind
+), MovieActors AS (
+    SELECT 
+        c.movie_id,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.company_count,
+    rm.company_names,
+    ma.actor_count,
+    ma.actor_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieActors ma ON rm.movie_id = ma.movie_id
+WHERE 
+    rm.production_year >= 2000
+ORDER BY 
+    rm.company_count DESC, ma.actor_count DESC
+LIMIT 10;

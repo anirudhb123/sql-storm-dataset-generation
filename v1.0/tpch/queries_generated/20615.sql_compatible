@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), 
+MaxRank AS (
+    SELECT 
+        MAX(rank) AS max_rank,
+        n.n_nationkey
+    FROM RankedSuppliers rs
+    JOIN nation n ON n.n_nationkey = rs.s_nationkey
+    GROUP BY n.n_nationkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) >= 1 AND SUM(o.o_totalprice) IS NOT NULL
+), 
+SupplyDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+), 
+TotalVolume AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(co.total_spent) AS grand_total_spent,
+    COUNT(DISTINCT t.l_orderkey) AS total_orders,
+    COALESCE(SUM(sd.ps_supplycost * sd.ps_availqty), 0) AS total_supply_cost,
+    CASE 
+        WHEN COUNT(DISTINCT t.l_orderkey) > 0 THEN ROUND(AVG(tv.total_quantity), 2)
+        ELSE NULL 
+    END AS avg_quantity_per_order
+FROM nation n
+LEFT JOIN CustomerOrders co ON n.n_nationkey = co.c_custkey
+LEFT JOIN TotalVolume t ON t.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+LEFT JOIN SupplyDetails sd ON sd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = t.l_orderkey)
+JOIN RankedSuppliers rs ON rs.rank = (SELECT max_rank FROM MaxRank WHERE n.n_nationkey = MaxRank.n_nationkey)
+WHERE n.r_regionkey IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(co.total_spent) > 50000 OR COUNT(DISTINCT co.c_custkey) > 20
+ORDER BY grand_total_spent DESC;

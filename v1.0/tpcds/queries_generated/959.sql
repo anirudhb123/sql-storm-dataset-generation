@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+),
+CustomerWithReturns AS (
+    SELECT 
+        c.c_customer_sk, 
+        COUNT(DISTINCT wr_order_number) AS return_count,
+        SUM(wr_return_amt) AS total_return_amt,
+        AVG(wr_return_quantity) AS avg_return_quantity
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(ss.ticket_number) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit,
+        SUM(ss.ss_quantity) AS total_items_sold
+    FROM 
+        store_sales ss
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE 
+        ss.ss_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        w.w_warehouse_id
+)
+
+SELECT 
+    c.c_customer_id,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(cr.avg_return_quantity, 0) AS avg_return_quantity,
+    s.total_sales,
+    s.total_profit,
+    s.total_items_sold,
+    rs.ws_net_profit AS highest_net_profit_item,
+    rs.ws_item_sk AS item_sk, 
+    rs.ws_quantity AS sold_quantity
+FROM 
+    CustomerWithReturns cr
+JOIN 
+    SalesSummary s ON cr.c_customer_sk = s.total_sales
+LEFT JOIN 
+    RankedSales rs ON rs.ws_item_sk = s.total_items_sold AND rs.rn = 1
+WHERE 
+    cr.return_count > 0
+ORDER BY 
+    total_return_amt DESC, 
+    return_count DESC
+LIMIT 100;

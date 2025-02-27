@@ -1,0 +1,55 @@
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        s_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY ss_sold_date_sk DESC) AS rnk
+    FROM store_sales
+    JOIN store ON store.s_store_sk = store_sales.ss_store_sk
+    WHERE ss_sales_price > (SELECT AVG(ss_sales_price) FROM store_sales)   
+),
+HighestSelling AS (
+    SELECT
+        s_store_sk,
+        s_store_name,
+        SUM(ss_sales_price) AS total_sales
+    FROM store_sales
+    GROUP BY s_store_sk, s_store_name
+    HAVING SUM(ss_sales_price) > 1000000   
+),
+ProductReturns AS (
+    SELECT
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_returned
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ResolvedReturns AS (
+    SELECT
+        pr.sr_item_sk,
+        pr.return_count,
+        pr.total_returned,
+        COALESCE(s.total_sales, 0) AS sales_count,
+        (pr.total_returned / NULLIF(s.total_sales, 0)) * 100 AS return_percentage  
+    FROM ProductReturns pr
+    LEFT JOIN HighestSelling s ON pr.sr_item_sk = s.s_store_sk
+)
+SELECT 
+    sh.s_store_name,
+    hh.c_demo_sk,
+    CASE 
+        WHEN hh.hd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE ib.ib_lower_bound || '-' || ib.ib_upper_bound
+    END AS income_band,
+    sh.total_sales,
+    r.return_percentage
+FROM SalesHierarchy sh
+LEFT JOIN customer c ON sh.s_store_sk = c.c_customer_sk
+LEFT JOIN household_demographics hh ON c.c_current_hdemo_sk = hh.hd_demo_sk
+LEFT JOIN income_band ib ON hh.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN ResolvedReturns r ON sh.rnk = r.return_count
+WHERE sh.s_sales_price > 20 
+AND r.return_percentage IS NOT NULL  
+ORDER BY sh.total_sales DESC
+LIMIT 100;

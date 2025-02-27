@@ -1,0 +1,102 @@
+WITH ranked_titles AS (
+    SELECT
+        title.title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY title.title) AS title_rank
+    FROM
+        title
+    WHERE
+        title.kind_id = (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        )
+),
+company_movies AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) OVER (PARTITION BY mc.movie_id) AS num_companies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+cast_info_details AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS distinct_roles,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+)
+SELECT
+    rt.title,
+    rt.production_year,
+    c.mnum_companies,
+    c.company_name,
+    c.company_type,
+    c.distinct_roles,
+    CASE 
+        WHEN r.title_rank = 1 THEN 'Best movie of the year'
+        WHEN r.title_rank > 1 AND r.title_rank <= 5 THEN 'Top 5 movies of the year'
+        ELSE 'Other movies'
+    END AS movie_category,
+    CASE 
+        WHEN ci.has_note = 1 THEN 'Has additional notes'
+        ELSE 'No additional notes'
+    END AS note_status
+FROM
+    ranked_titles rt
+LEFT OUTER JOIN
+    company_movies c ON rt.movie_id = c.movie_id
+LEFT OUTER JOIN
+    cast_info_details ci ON rt.movie_id = ci.movie_id
+WHERE
+    rt.production_year = (SELECT MAX(production_year) FROM title)
+    AND (c.num_companies IS NULL OR c.num_companies > 1)
+ORDER BY
+    rt.production_year DESC,
+    c.company_name ASC,
+    rt.title_rank;
+
+WITH actors_with_years AS (
+    SELECT DISTINCT
+        kai.name,
+        tt.production_year
+    FROM
+        aka_name kai
+    JOIN
+        cast_info ci ON kai.person_id = ci.person_id
+    JOIN
+        aka_title tt ON ci.movie_id = tt.movie_id
+    WHERE
+        kai.name IS NOT NULL AND kai.name <> ''
+),
+unusual_case AS (
+    SELECT
+        MIN(NULLIF(ki.keyword, '')) AS non_empty_keyword,
+        COUNT(*) AS total_count
+    FROM
+        movie_keyword mk
+    JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY
+        mk.movie_id
+    HAVING 
+        COUNT(*) < 5
+)
+SELECT
+    a.name AS actor_name,
+    uc.non_empty_keyword,
+    uc.total_count,
+    a.production_year
+FROM
+    actors_with_years a
+LEFT JOIN
+    unusual_case uc ON a.production_year = uc.total_count
+ORDER BY
+    a.name ASC, a.production_year DESC;

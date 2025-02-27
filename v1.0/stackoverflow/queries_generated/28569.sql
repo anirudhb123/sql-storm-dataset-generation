@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= now() - interval '1 year'
+),
+
+TopPosts AS (
+    SELECT 
+        RP.*, 
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Comments c ON RP.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON RP.PostId = v.PostId
+    WHERE 
+        RP.Rank <= 5
+    GROUP BY 
+        RP.PostId, RP.Title, RP.Tags, RP.OwnerDisplayName, RP.CreationDate, RP.Score
+),
+
+PostStatistics AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        tp.TagCount,
+        tp.CommentCount,
+        tp.UpVotes,
+        tp.DownVotes,
+        (tp.UpVotes - tp.DownVotes) AS NetVotes
+    FROM 
+        TopPosts tp
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.OwnerDisplayName,
+    ps.CreationDate,
+    ps.Score,
+    ps.TagCount,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.NetVotes,
+    CASE 
+        WHEN ps.NetVotes >= 10 THEN 'Highly Voted'
+        WHEN ps.NetVotes BETWEEN 1 AND 9 THEN 'Moderately Voted'
+        ELSE 'Low Voted'
+    END AS VoteCategory
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.NetVotes DESC, 
+    ps.CreationDate DESC;

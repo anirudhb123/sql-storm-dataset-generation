@@ -1,0 +1,74 @@
+WITH ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        RANK() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY a.id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year IS NOT NULL
+        AND a.name IS NOT NULL
+),
+CompanyProduction AS (
+    SELECT 
+        m.id AS movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    WHERE 
+        c.country_code IS NOT NULL 
+        AND c.name IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        am.actor_id,
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        am.year_rank,
+        cp.company_name,
+        cp.company_type
+    FROM 
+        ActorMovies am
+    LEFT JOIN 
+        CompanyProduction cp ON am.movie_title = cp.movie_name
+    WHERE 
+        am.year_rank = 1
+)
+SELECT 
+    a.actor_name,
+    a.movie_title,
+    a.production_year,
+    COALESCE(cp.company_name, 'Independent') AS production_company,
+    a.movie_count AS total_movies,
+    CASE 
+        WHEN a.production_year IS NOT NULL 
+        THEN EXTRACT(YEAR FROM CURRENT_DATE) - a.production_year 
+        ELSE NULL 
+    END AS years_since_release
+FROM 
+    TopMovies a
+FULL OUTER JOIN 
+    CompanyProduction cp ON a.actor_id = cp.movie_id
+WHERE 
+    a.production_year < 2020 
+    OR cp.company_type IS NOT NULL
+ORDER BY 
+    years_since_release DESC NULLS FIRST, 
+    total_movies DESC;

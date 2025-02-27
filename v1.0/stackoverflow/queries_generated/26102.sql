@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+    GROUP BY 
+        p.Id
+),
+
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UserPostRank,
+        CASE 
+            WHEN rp.UserPostRank = 1 THEN 'Latest Post'
+            ELSE 'Earlier Post'
+        END AS PostStatus,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+    FROM 
+        RankedPosts rp
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.PostStatus,
+    STRING_AGG(DISTINCT tag, ', ') AS TagsAssociated
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    UNNEST(ps.AssociatedTags) AS tag ON TRUE
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.Score, ps.ViewCount, ps.CommentCount, ps.PostStatus
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 10;

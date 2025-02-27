@@ -1,0 +1,69 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) as rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sales_price IS NOT NULL AND 
+        ws.ws_net_profit >= 0
+    GROUP BY 
+        ws.web_site_sk, ws.web_id
+),
+top_sites AS (
+    SELECT 
+        web_site_sk, 
+        web_id 
+    FROM 
+        sales_summary 
+    WHERE 
+        rank <= 10
+),
+sales_details AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        COALESCE(cr.cr_return_quantity, 0) AS return_quantity,
+        COALESCE(cr.cr_return_amount, 0) AS return_amount,
+        cs.cs_net_profit
+    FROM 
+        catalog_sales cs
+    LEFT JOIN 
+        catalog_returns cr ON cs.cs_order_number = cr.cr_order_number AND cs.cs_item_sk = cr.cr_item_sk
+    WHERE 
+        cs.cs_sold_date_sk BETWEEN 1 AND 365
+),
+returned_sales AS (
+    SELECT 
+        c.customer_sk,
+        SUM(CASE WHEN sd.return_quantity > 0 THEN sd.cs_quantity ELSE 0 END) AS total_returned_quantity,
+        SUM(sd.cs_sales_price * sd.cs_quantity) AS total_sales_value
+    FROM 
+        sales_details sd
+    JOIN 
+        customer c ON c.c_customer_sk = sd.cs_order_number % 1000 -- Here we assume a hypothetical relation for demonstration
+    GROUP BY 
+        c.customer_sk
+)
+SELECT 
+    t.web_site_id,
+    r.customer_sk,
+    r.total_returned_quantity,
+    r.total_sales_value,
+    CASE 
+        WHEN r.total_returned_quantity IS NULL OR r.total_sales_value IS NULL THEN 'Data Not Available'
+        ELSE 'Data Available'
+    END AS availability_status
+FROM 
+    top_sites t
+LEFT JOIN 
+    returned_sales r ON t.web_site_sk = r.customer_sk
+ORDER BY 
+    t.web_site_id, r.total_sales_value DESC;

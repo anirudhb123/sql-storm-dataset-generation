@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+    GROUP BY 
+        n.n_regionkey, r.r_name
+    ORDER BY 
+        order_count DESC
+    LIMIT 5
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    rs.s_name AS top_supplier, 
+    COALESCE(co.order_count, 0) AS customer_orders,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    th.o_orderkey,
+    th.net_revenue
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.s_suppkey AND rs.rnk = 1
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM TopRegions tr WHERE tr.r_name = r.r_name)))
+LEFT JOIN 
+    HighValueOrders th ON th.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    p.p_partkey;

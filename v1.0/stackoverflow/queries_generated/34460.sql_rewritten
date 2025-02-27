@@ -1,0 +1,61 @@
+WITH RecursivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePosts RP ON P.ParentId = RP.PostId
+)
+SELECT 
+    U.DisplayName AS Author,
+    RP.Title AS QuestionTitle,
+    COUNT(DISTINCT A.Id) AS AnswerCount,
+    SUM(COALESCE(V.UpVotes, 0)) AS TotalUpVotes,
+    AVG(COALESCE(V.DownVotes, 0)) AS AvgDownVotes,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags,
+    R.CreationDate AS FirstAnswerDate,
+    CASE 
+        WHEN RP.Score > 0 THEN 'Popular'
+        ELSE 'Not Popular'
+    END AS Popularity
+FROM 
+    RecursivePosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    Posts A ON A.ParentId = RP.PostId AND A.PostTypeId = 2  
+LEFT JOIN 
+    Votes V ON V.PostId = RP.PostId
+LEFT JOIN 
+    LATERAL (SELECT CreationDate FROM Posts WHERE AcceptedAnswerId = RP.PostId LIMIT 1) AS R ON true
+LEFT JOIN 
+    STRING_TO_ARRAY(Substring(RP.Tags FROM 2 FOR LENGTH(RP.Tags)-2), '><') AS TagIds
+JOIN 
+    Tags T ON T.Id = ANY(TagIds)
+WHERE 
+    RP.Level <= 5
+GROUP BY 
+    U.DisplayName, RP.Title, R.CreationDate, RP.Score
+ORDER BY 
+    TotalUpVotes DESC, RP.CreationDate DESC;

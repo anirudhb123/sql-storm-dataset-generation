@@ -1,0 +1,25 @@
+-- Performance benchmarking query to find the most active users based on post interactions
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(v.VoteTypeId = 2) AS TotalUpvotes, 
+    SUM(v.VoteTypeId = 3) AS TotalDownvotes,
+    SUM(b.Class = 1) AS TotalGoldBadges,
+    SUM(b.Class = 2) AS TotalSilverBadges,
+    SUM(b.Class = 3) AS TotalBronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON u.Id = c.UserId
+LEFT JOIN 
+    Votes v ON u.Id = v.UserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC, TotalComments DESC, TotalUpvotes DESC;

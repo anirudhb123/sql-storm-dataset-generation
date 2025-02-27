@@ -1,0 +1,53 @@
+WITH recursive movie_cast AS (
+    SELECT 
+        c.movie_id,
+        ka.name AS actor_name,
+        COUNT(DISTINCT ka.person_id) OVER (PARTITION BY c.movie_id) AS actor_count,
+        MAX(aka.title) AS movie_title
+    FROM 
+        cast_info c
+        JOIN aka_name ka ON c.person_id = ka.person_id
+        LEFT JOIN aka_title aka ON c.movie_id = aka.movie_id
+    GROUP BY c.movie_id, ka.name
+),
+ranked_movies AS (
+    SELECT 
+        mc.movie_id,
+        mc.actor_name,
+        mc.actor_count,
+        mc.movie_title,
+        ROW_NUMBER() OVER (PARTITION BY mc.actor_count ORDER BY mc.movie_title) AS rn
+    FROM 
+        movie_cast mc
+),
+genre_movies AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT m.keyword) AS genre_count
+    FROM 
+        movie_keyword m
+    JOIN 
+        aka_title mt ON m.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.actor_name,
+    rm.actor_count,
+    gm.genre_count,
+    CASE 
+        WHEN rm.actor_count IS NULL THEN 'No Actors Found'
+        ELSE 'Actors Present'
+    END AS actor_status,
+    COALESCE(NULLIF(gm.genre_count, 0), 'Unknown Genre') AS genre_info
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    genre_movies gm ON rm.movie_id = gm.movie_id
+WHERE 
+    rm.rn <= 5  
+ORDER BY 
+    rm.actor_count DESC, 
+    rm.movie_title ASC;

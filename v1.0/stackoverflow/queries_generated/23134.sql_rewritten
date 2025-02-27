@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(NULLIF(p.Body, ''), '<No Content>') AS BodyContent,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,  
+        SUM(v.VoteTypeId = 3) AS DownVotes 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name = 'Post Closed'
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    us.DisplayName AS User,
+    us.Reputation,
+    COALESCE(rp.LatestPostRank, 0) AS Rank,
+    rp.Title AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    rp.BodyContent AS LatestPostContent,
+    (SELECT COUNT(*) FROM ClosedPosts cp WHERE cp.PostId = rp.PostId) AS ClosedCount,
+    us.UpVotes AS TotalUpVotes,
+    us.PostCount AS TotalPosts
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.PostId
+WHERE 
+    us.Reputation > 100
+ORDER BY 
+    us.Reputation DESC, 
+    rp.CreationDate DESC NULLS LAST
+LIMIT 100;

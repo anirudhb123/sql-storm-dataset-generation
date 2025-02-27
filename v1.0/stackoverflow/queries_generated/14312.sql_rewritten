@@ -1,0 +1,28 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBounty,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ROUND(COALESCE(ua.TotalUpVotes, 0) * 1.0 / NULLIF(ua.TotalPosts, 0), 2) AS UpVoteRate,
+    ROUND(COALESCE(ua.TotalDownVotes, 0) * 1.0 / NULLIF(ua.TotalPosts, 0), 2) AS DownVoteRate
+FROM UserActivity ua
+ORDER BY ua.TotalPosts DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,  -- Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,  -- Downvotes
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rv.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+ORDER BY 
+    tu.TotalScore DESC, 
+    rp.Score DESC;

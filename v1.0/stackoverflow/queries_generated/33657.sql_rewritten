@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.ParentId,
+        0 AS Level 
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL 
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1 
+    FROM 
+        Posts p 
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+PostStats AS (
+    SELECT 
+        r.Id AS PostId,
+        r.Title,
+        r.ViewCount,
+        CONVERT(varchar, r.CreationDate, 120) AS CreationDate,
+        COUNT(cm.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        CAST(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS bit) AS HasGoldBadge,
+        CAST(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS bit) AS HasSilverBadge,
+        CAST(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS bit) AS HasBronzeBadge
+    FROM 
+        RecursivePostHierarchy r 
+    LEFT JOIN 
+        Comments cm ON r.Id = cm.PostId 
+    LEFT JOIN 
+        Votes v ON r.Id = v.PostId 
+    LEFT JOIN 
+        Badges b ON b.UserId = r.Id 
+    GROUP BY 
+        r.Id, r.Title, r.ViewCount, r.CreationDate
+),
+
+FAQ_Posts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(ph.ParentId, 0) AS ParentId,
+        s.CommentCount,
+        s.UpVoteCount,
+        s.DownVoteCount,
+        s.HasGoldBadge,
+        s.HasSilverBadge,
+        s.HasBronzeBadge
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    LEFT JOIN 
+        PostStats s ON p.Id = s.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        (s.CommentCount > 10 OR s.UpVoteCount > 100) 
+),
+
+FinalOutput AS (
+    SELECT 
+        f.Id,
+        f.Title,
+        f.ViewCount,
+        CASE 
+            WHEN f.HasGoldBadge = 1 THEN 'Gold'
+            WHEN f.HasSilverBadge = 1 THEN 'Silver'
+            WHEN f.HasBronzeBadge = 1 THEN 'Bronze'
+            ELSE 'No Badge'
+        END AS BadgeStatus,
+        f.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY f.ParentId ORDER BY f.ViewCount DESC) AS RankWithinParent
+    FROM 
+        FAQ_Posts f
+)
+
+SELECT 
+    *
+FROM 
+    FinalOutput
+WHERE 
+    RankWithinParent <= 5 
+ORDER BY 
+    ParentId, RankWithinParent;

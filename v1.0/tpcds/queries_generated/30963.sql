@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_item_sk) as rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 1 LIMIT 1) 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 12 LIMIT 1)
+),
+item_details AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(SUM(ws_ext_sales_price), 0) as total_sales,
+        AVG(ws_sales_price) as avg_sales_price
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL AND cd.cd_purchase_estimate > 1000
+),
+combined_data AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        id.i_item_desc,
+        id.total_sales,
+        id.avg_sales_price,
+        ss.ws_quantity,
+        ss.ws_order_number
+    FROM 
+        customer_info cs
+    JOIN 
+        sales_summary ss ON cs.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_order_number = ss.ws_order_number)
+    JOIN 
+        item_details id ON ss.ws_item_sk = id.i_item_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    id.i_item_desc,
+    SUM(cd.total_sales) as year_total_sales,
+    AVG(id.avg_sales_price) as average_sale_price,
+    COUNT(sd.ws_order_number) as order_count,
+    CASE 
+        WHEN SUM(cd.total_sales) IS NULL THEN 'No Sales'
+        WHEN SUM(cd.total_sales) = 0 THEN 'No Sales'
+        ELSE 'Sales Present'
+    END as sales_status
+FROM 
+    combined_data cd
+JOIN 
+    date_dim d ON cd.ws_order_number = d.d_date_sk
+LEFT JOIN 
+    store_sales sd ON cd.ws_item_sk = sd.ss_item_sk
+WHERE 
+    d.d_year = 2023
+GROUP BY 
+    c.c_first_name, c.c_last_name, id.i_item_desc
+ORDER BY 
+    year_total_sales DESC 
+LIMIT 50;

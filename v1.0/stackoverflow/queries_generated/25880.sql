@@ -1,0 +1,77 @@
+WITH PostTagCounts AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(DISTINCT Tags.TagName) AS TagCount
+    FROM 
+        Posts
+    JOIN 
+        unnest(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')) AS TagName ON TRUE
+    JOIN 
+        Tags ON Tags.TagName = TagName
+    GROUP BY 
+        Posts.Id
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount 
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Votes ON Votes.UserId = Users.Id AND Votes.PostId IN (SELECT Id FROM Posts)
+    GROUP BY 
+        Users.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PostHistory.PostId,
+        COUNT(CASE WHEN PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN PostHistoryTypeId IN (24, 25) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostHistory.PostId
+)
+
+SELECT 
+    Users.DisplayName,
+    Users.Reputation,
+    UserReputation.PostCount,
+    UserReputation.UpVoteCount,
+    PostHistorySummary.CloseCount,
+    PostHistorySummary.ReopenCount,
+    PostHistorySummary.EditCount,
+    PostTagCounts.TagCount,
+    COUNT(DISTINCT Comments.Id) AS CommentCount
+FROM 
+    Users
+LEFT JOIN 
+    UserReputation ON UserReputation.UserId = Users.Id
+LEFT JOIN 
+    Posts ON Posts.OwnerUserId = Users.Id
+LEFT JOIN 
+    Comments ON Comments.PostId = Posts.Id
+LEFT JOIN 
+    PostHistorySummary ON PostHistorySummary.PostId = Posts.Id
+LEFT JOIN 
+    PostTagCounts ON PostTagCounts.PostId = Posts.Id
+WHERE 
+    Users.Reputation > 1000 
+GROUP BY 
+    Users.DisplayName, 
+    Users.Reputation, 
+    UserReputation.PostCount, 
+    UserReputation.UpVoteCount,
+    PostHistorySummary.CloseCount,
+    PostHistorySummary.ReopenCount,
+    PostHistorySummary.EditCount,
+    PostTagCounts.TagCount
+ORDER BY 
+    Users.Reputation DESC, 
+    CommentCount DESC;

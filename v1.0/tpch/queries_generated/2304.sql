@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS cost_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomersWithHighOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+OrdersWithLineItem AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS high_spending_customers,
+    COUNT(DISTINCT ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_name)) AS unique_supplier_count,
+    AVG(ol.total_lineitem_price) AS avg_order_value,
+    MAX(s.total_cost) AS max_supplier_cost
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    CustomersWithHighOrders c ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    OrdersWithLineItem ol ON ol.o_orderkey = o.o_orderkey
+WHERE 
+    s.s_name LIKE '%Supplier%' AND 
+    s.s_acctbal IS NOT NULL AND 
+    n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    AVG(ol.total_lineitem_price) > 2000
+ORDER BY 
+    high_spending_customers DESC, max_supplier_cost DESC;

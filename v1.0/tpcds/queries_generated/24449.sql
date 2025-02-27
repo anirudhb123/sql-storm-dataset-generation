@@ -1,0 +1,74 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'Unknown' 
+            ELSE CAST(cd.cd_dep_count AS VARCHAR) 
+        END AS dependent_count,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+return_summary AS (
+    SELECT 
+        sr_returning_customer_sk AS customer_sk,
+        SUM(sr_return_amt) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ss.total_sales,
+        COALESCE(rs.total_returned, 0) AS total_returned,
+        (ss.total_sales - COALESCE(rs.total_returned, 0)) AS net_spending
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        sales_summary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+    LEFT JOIN 
+        return_summary rs ON ci.c_customer_id = rs.customer_sk
+    WHERE 
+        ci.rank <= 10 AND ci.cd_marital_status = 'M'
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.total_returned,
+    CASE 
+        WHEN tc.net_spending < 0 THEN 'Negative'
+        WHEN tc.net_spending = 0 THEN 'Neutral'
+        ELSE 'Positive' 
+    END AS spending_status,
+    RANK() OVER (ORDER BY tc.net_spending DESC) AS spending_rank
+FROM 
+    top_customers tc
+ORDER BY 
+    spending_rank
+FETCH FIRST 5 ROWS ONLY;

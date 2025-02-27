@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_paid) AS total_sales, 
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = '1')
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        ss_store_sk, 
+        total_sales + SUM(ss_net_paid), 
+        transaction_count + COUNT(DISTINCT ss_ticket_number),
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC)
+    FROM 
+        store_sales 
+    JOIN 
+        sales_cte ON store_sales.ss_store_sk = sales_cte.ss_store_sk
+    WHERE 
+        ss_sold_date_sk < (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = '1')
+    GROUP BY 
+        ss_store_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        d.d_year,
+        a.ca_city,
+        ROW_NUMBER() OVER (PARTITION BY a.ca_city ORDER BY cd.cd_purchase_estimate DESC) as city_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_paid) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ss.ss_net_paid) > 1000
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    st.store_sk,
+    st.total_sales,
+    st.transaction_count,
+    COALESCE(tc.total_spent, 0) AS total_spent
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_cte st ON ci.d_year = st.ss_store_sk
+LEFT JOIN 
+    top_customers tc ON ci.c_customer_id = tc.c_customer_id
+WHERE 
+    ci.city_rank <= 5
+ORDER BY 
+    total_sales DESC,
+    ci.cd_purchase_estimate DESC;

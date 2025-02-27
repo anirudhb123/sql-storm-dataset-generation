@@ -1,0 +1,87 @@
+WITH RECURSIVE RecentPostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1
+            ELSE 0
+        END AS HasAcceptedAnswer
+    FROM Posts p
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1
+            ELSE 0
+        END AS HasAcceptedAnswer
+    FROM Posts p
+    JOIN RecentPostsCTE r ON r.PostId = p.ParentId
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    p.Title,
+    COALESCE(lt.Name, 'N/A') AS LinkType,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBounty,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank,
+    DATE_PART('year', AGE(p.CreationDate)) AS PostAge,
+    CASE 
+        WHEN SUM(v.VoteTypeId = 2) > SUM(v.VoteTypeId = 3) THEN 'More Upvotes'
+        WHEN SUM(v.VoteTypeId = 2) < SUM(v.VoteTypeId = 3) THEN 'More Downvotes'
+        ELSE 'Equal Votes'
+    END AS VoteSummary
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId
+LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN LinkTypes lt ON pl.LinkTypeId = lt.Id
+LEFT JOIN Badges b ON u.Id = b.UserId
+WHERE p.PostTypeId = 1
+GROUP BY 
+    u.Id, 
+    p.Id, 
+    lt.Name
+HAVING 
+    (CASE WHEN COUNT(DISTINCT c.Id) = 0 THEN 'No Comments' ELSE 'Has Comments' END) = 'Has Comments'
+    AND SUM(v.BountyAmount) > 100
+ORDER BY 
+    PostRank,
+    p.CreationDate DESC
+LIMIT 50;
+
+-- Further analyses with outer join and handling NULLs
+SELECT 
+    p.Title,
+    COALESCE(bp.BadgeCount, 0) AS UserBadges,
+    CASE 
+        WHEN v.UserId IS NOT NULL THEN 'Voted'
+        ELSE 'Not Voted'
+    END AS VoteStatus
+FROM Posts p
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(*) AS BadgeCount 
+    FROM Badges 
+    GROUP BY UserId
+) bp ON p.OwnerUserId = bp.UserId
+LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+WHERE p.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+AND p.CreationDate < CURRENT_DATE - INTERVAL '60 days'
+ORDER BY p.ViewCount DESC
+LIMIT 10;

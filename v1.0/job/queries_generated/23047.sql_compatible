@@ -1,0 +1,71 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS Title,
+        at.production_year AS ProductionYear,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS YearRank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS TotalTitles
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+DistinctRoles AS (
+    SELECT DISTINCT 
+        ci.role_id,
+        rt.role AS RoleDescription
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.note IS NULL OR ci.note NOT LIKE '%uncredited%'
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS CompanyCount
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code NOT IN ('USA', 'CAN')
+    GROUP BY 
+        mc.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rt.Title,
+        rt.ProductionYear,
+        COALESCE(cc.CompanyCount, 0) AS CompanyCount,
+        dr.RoleDescription
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CompanyCounts cc ON rt.Title IN (SELECT title FROM aka_title WHERE movie_id = cc.movie_id)
+    LEFT JOIN 
+        DistinctRoles dr ON rt.Title IN (SELECT at.title FROM aka_title at WHERE at.production_year = rt.ProductionYear)
+)
+SELECT 
+    MD.Title,
+    MD.ProductionYear,
+    MD.CompanyCount,
+    MD.RoleDescription,
+    CASE 
+        WHEN MD.CompanyCount > 5 THEN 'High Production'
+        WHEN MD.CompanyCount BETWEEN 2 AND 5 THEN 'Medium Production'
+        ELSE 'Low Production'
+    END AS ProductionType,
+    STRING_AGG(MD.RoleDescription, ', ') AS AllRoles,
+    COUNT(DISTINCT MD.Title) OVER() AS TotalDistinctMovies
+FROM 
+    MovieDetails MD
+WHERE 
+    MD.ProductionYear >= 2000
+GROUP BY 
+    MD.Title, MD.ProductionYear, MD.CompanyCount
+HAVING 
+    COUNT(DISTINCT MD.RoleDescription) > 2
+ORDER BY 
+    MD.ProductionYear DESC, MD.Title;

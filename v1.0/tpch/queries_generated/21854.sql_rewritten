@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopRegions AS (
+    SELECT
+        n.n_regionkey, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_regionkey
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 5
+),
+LineitemValues AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM
+        lineitem l
+    WHERE
+        l.l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+    SUM(CASE 
+        WHEN l.total_price IS NULL THEN 0 
+        ELSE l.total_price 
+    END) AS total_lineitem_value,
+    COUNT(DISTINCT s.s_suppkey) AS suppliers_ranked,
+    ARRAY_AGG(DISTINCT s.s_name) AS supplier_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    TopRegions tr ON n.n_regionkey = tr.n_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rank_acctbal <= 3
+LEFT JOIN 
+    LineitemValues l ON s.s_suppkey = (SELECT TOP 1 ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE 'Part%') ORDER BY ps.ps_supplycost DESC)
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT ps.ps_partkey) > 0 
+    OR TOTAL_LINEITEM_VALUE > 1000.00
+ORDER BY 
+    total_parts DESC, total_lineitem_value DESC;

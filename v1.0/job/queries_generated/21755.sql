@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS cast_count,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_cast <= 3
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+SelectedMovieInfo AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        mk.keywords,
+        COALESCE(mi.info, 'No Information') AS additional_info
+    FROM 
+        TopMovies AS m
+    LEFT JOIN 
+        MovieKeywords AS mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        movie_info AS mi ON m.title = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+)
+
+SELECT 
+    s.title,
+    s.production_year,
+    s.keywords,
+    s.additional_info
+FROM 
+    SelectedMovieInfo AS s
+WHERE 
+    s.production_year IS NOT NULL
+    AND (s.keywords IS NOT NULL OR s.additional_info IS NOT NULL)
+ORDER BY 
+    s.production_year DESC, 
+    s.title;
+
+In this query:
+1. **CTEs (Common Table Expressions)** are used to break down complex logic into manageable parts: `RankedMovies` ranks movies by the count of their cast members, `TopMovies` selects the top movies based on that rank, `MovieKeywords` aggregates keywords for those movies, and `SelectedMovieInfo` gathers all necessary information.
+2. The main query then selects from these CTEs and applies various filtering logic, including using `COALESCE` to handle NULL cases.
+3. The use of `RANK()`, `STRING_AGG()`, and `LEFT JOIN` emphasizes the complexity and allows for the handling of missing data effectively.
+4. The final output is sorted based on production year and title for better readability.

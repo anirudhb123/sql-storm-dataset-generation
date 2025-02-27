@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        t.id AS title_id,
+        t.season_nr,
+        t.episode_nr,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        title t ON mt.movie_id = t.id
+    WHERE 
+        mt.production_year >= 2000
+        
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.title_id,
+        m.season_nr,
+        m.episode_nr,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT t.title, ', ') AS movie_titles,
+    AVG(m.production_year) AS avg_year,
+    MAX(COALESCE(mh.level, 0)) AS max_story_depth,
+    SUM(CASE WHEN m.surname_pcode IS NULL THEN 1 ELSE 0 END) AS null_surnames_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = c.movie_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_info m ON t.id = m.movie_id
+WHERE 
+    a.name LIKE '%Smith%' 
+    AND m.info_type_id IN (SELECT id FROM info_type WHERE info = 'summary')
+GROUP BY 
+    a.name, a.person_id
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    total_movies DESC;

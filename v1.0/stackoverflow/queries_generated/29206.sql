@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(DELETE_COUNT.CLOSE_COUNT, 0) AS CloseCount,
+        COALESCE(VOTE_COUNT.VOTE_SUM, 0) AS TotalVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ah.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            COUNT(*) AS CLOSE_COUNT
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId = 10
+        GROUP BY 
+            PostId) DELETE_COUNT ON p.Id = DELETE_COUNT.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS VOTE_SUM
+        FROM 
+            Votes
+        GROUP BY 
+            PostId) VOTE_COUNT ON p.Id = VOTE_COUNT.PostId
+    LEFT JOIN 
+        Posts ah ON p.Id = ah.ParentId
+    WHERE 
+        p.PostTypeId = 1 -- only questions
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, DELETE_COUNT.CLOSE_COUNT, VOTE_COUNT.VOTE_SUM
+),
+FinalBenchmark AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.OwnerName,
+        RP.OwnerReputation,
+        RP.CloseCount,
+        RP.TotalVotes,
+        RP.CommentCount,
+        RP.AnswerCount,
+        CASE 
+            WHEN RP.TotalVotes > 0 THEN 'Positive'
+            WHEN RP.TotalVotes < 0 THEN 'Negative'
+            ELSE 'Neutral' 
+        END AS VoteStatus
+    FROM 
+        RankedPosts RP
+)
+SELECT 
+    FB.*,
+    COUNT(B.Id) AS BadgeCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    FinalBenchmark FB
+LEFT JOIN 
+    Badges B ON FB.PostId = B.UserId
+LEFT JOIN 
+    Posts P ON FB.PostId = P.Id
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        STRING_AGG(Tags.TagName, ', ') AS TagNames
+     FROM 
+        Posts 
+     LEFT JOIN 
+        (SELECT 
+            Id, 
+            TagName 
+         FROM 
+            Tags) Tags ON Tags.ExcerptPostId = Posts.Id
+     GROUP BY 
+        PostId) t ON P.Id = t.PostId
+GROUP BY 
+    FB.PostId, FB.Title, FB.Body, FB.CreationDate, FB.OwnerName, FB.OwnerReputation, 
+    FB.CloseCount, FB.TotalVotes, FB.CommentCount, FB.AnswerCount
+ORDER BY 
+    FB.CreationDate DESC
+LIMIT 100;

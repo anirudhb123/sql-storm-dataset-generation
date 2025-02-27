@@ -1,0 +1,82 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COALESCE(SUM(cr_return_quantity), 0) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS total_orders
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+CustomerWithDemographics AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(crs.total_returned, 0) AS total_returned,
+        COALESCE(crs.total_orders, 0) AS total_orders,
+        DENSE_RANK() OVER (ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns crs ON c.c_customer_sk = crs.returning_customer_sk
+    WHERE 
+        (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+        AND (cd.cd_purchase_estimate > 1000 OR cd.cd_credit_rating IS NULL)
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS average_sales_price,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cwd.c_first_name,
+        cwd.c_last_name,
+        cwd.cd_gender,
+        cwd.cd_marital_status,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        cwd.total_returned,
+        cwd.total_orders,
+        cwd.customer_rank,
+        CASE 
+            WHEN COALESCE(sd.total_sales, 0) > 5000 THEN 'High Value'
+            WHEN COALESCE(sd.total_sales, 0) BETWEEN 1000 AND 5000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value_category
+    FROM 
+        CustomerWithDemographics cwd
+    LEFT JOIN 
+        SalesData sd ON cwd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.cd_gender,
+    f.total_sales,
+    f.total_returned,
+    f.total_orders,
+    ROW_NUMBER() OVER (PARTITION BY f.customer_value_category ORDER BY f.total_sales DESC) AS value_category_rank
+FROM 
+    FinalReport f
+WHERE 
+    (f.total_orders > 5 AND f.total_returned < f.total_orders)
+    OR (f.cd_gender = 'M' AND f.total_sales IS NOT NULL)
+ORDER BY 
+    f.customer_value_category, 
+    f.total_sales DESC
+LIMIT 50;

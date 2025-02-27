@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, h.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy h ON s.s_nationkey = h.suppkey
+),
+OrderedCustomer AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_mktsegment, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey, c.c_mktsegment
+),
+PartSupplierInfo AS (
+    SELECT p.p_name, COUNT(*) AS supplier_count, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_name
+),
+CountryStats AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+           SUM(c.c_acctbal) AS total_balance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name, 
+    COALESCE(cs.customer_count, 0) AS total_customers,
+    COALESCE(cs.total_balance, 0.00) AS total_account_balance,
+    psi.p_name AS product_name,
+    psi.supplier_count,
+    psi.avg_supplycost,
+    ch.suppkey AS supplier_key,
+    ch.level AS hierarchy_level
+FROM region r
+LEFT JOIN CountryStats cs ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN PartSupplierInfo psi ON psi.supplier_count > 0
+LEFT JOIN SupplierHierarchy ch ON ch.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_name LIKE 'Customer%')
+WHERE r.r_name IS NOT NULL
+ORDER BY region_name, total_customers DESC, total_account_balance DESC;

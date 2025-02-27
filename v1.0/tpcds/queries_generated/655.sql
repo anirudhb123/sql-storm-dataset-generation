@@ -1,0 +1,61 @@
+
+WITH CustomerSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amt,
+        SUM(sr.return_tax) AS total_return_tax,
+        COUNT(DISTINCT ws.order_number) AS total_web_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, cd.cd_credit_rating
+), 
+RankedCustomers AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY total_web_sales DESC) AS sales_rank
+    FROM 
+        CustomerSummary
+)
+SELECT 
+    r.c_first_name, 
+    r.c_last_name, 
+    r.cd_gender,
+    r.total_returns,
+    r.total_return_amt,
+    r.total_return_tax,
+    r.total_web_sales
+FROM 
+    RankedCustomers r
+WHERE 
+    r.sales_rank <= 10
+ORDER BY 
+    r.cd_gender, r.total_web_sales DESC
+UNION ALL
+SELECT 
+    'TOTAL', 
+    NULL, 
+    NULL,
+    COUNT(*) AS total_returns,
+    SUM(total_return_amt) AS total_return_amt,
+    SUM(total_return_tax) AS total_return_tax,
+    SUM(total_web_sales) AS total_web_sales
+FROM 
+    RankedCustomers
+WHERE 
+    total_web_sales > (SELECT AVG(total_web_sales) FROM RankedCustomers)
+ORDER BY 
+    total_web_sales DESC;

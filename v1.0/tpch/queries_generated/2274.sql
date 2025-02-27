@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderstatus IN ('O', 'F')
+),
+HighValueSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000000
+),
+OrderDetails AS (
+    SELECT 
+        li.l_orderkey,
+        COUNT(li.l_linenumber) AS total_lines,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_line_value
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    si.s_name AS supplier_name,
+    si.nation_name,
+    od.total_lines,
+    od.total_line_value,
+    CASE 
+        WHEN hvs.ps_suppkey IS NOT NULL THEN 'High Value Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_type
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    OrderDetails od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON si.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice < 50) LIMIT 1)
+LEFT JOIN 
+    HighValueSuppliers hvs ON hvs.ps_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size >= 10 AND p.p_size <= 20) LIMIT 1)
+WHERE 
+    o.o_orderkey IN (SELECT DISTINCT o_orderkey FROM lineitem)
+ORDER BY 
+    o.o_orderdate, o.o_orderkey;

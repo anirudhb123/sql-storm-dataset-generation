@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN 2455 AND 2470 -- Assuming these date keys map to a valid date range
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_sales
+    FROM 
+        customer c
+    JOIN 
+        RankedSales r ON c.c_customer_sk = r.ws_bill_customer_sk
+    WHERE 
+        r.rn = 1 AND r.total_sales > 1000
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+AggSalesData AS (
+    SELECT 
+        c.c_state,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COALESCE(SUM(CASE WHEN ws.ws_quantity > 5 THEN ws.ws_quantity ELSE 0 END), 0) AS bulk_orders
+    FROM 
+        web_sales ws 
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_state
+)
+SELECT 
+    d.d_month_seq,
+    d.d_year,
+    a.total_net_profit,
+    a.total_orders,
+    COALESCE(cd.customer_count, 0) AS customer_count,
+    hvc.c_first_name,
+    hvc.c_last_name
+FROM 
+    date_dim d
+LEFT JOIN 
+    AggSalesData a ON d.d_date_sk = a.total_orders -- A logical join condition for demonstration
+LEFT JOIN 
+    CustomerDemographics cd ON d.d_year = cd.cd_demo_sk % 100 
+LEFT JOIN 
+    HighValueCustomers hvc ON cd.customer_count > 5
+WHERE 
+    d.d_month_seq IN (3, 4, 5) -- March, April, May
+ORDER BY 
+    d.d_year, d.d_month_seq DESC;

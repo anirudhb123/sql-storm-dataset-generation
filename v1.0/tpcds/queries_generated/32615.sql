@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d.d_year, 
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim d ON d.d_date_sk = ws_sold_date_sk 
+    GROUP BY 
+        d.d_year
+    UNION ALL
+    SELECT 
+        d.d_year, 
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales 
+    JOIN 
+        date_dim d ON d.d_date_sk = cs_sold_date_sk 
+    GROUP BY 
+        d.d_year
+), SalesData AS (
+    SELECT 
+        d.d_year, 
+        SUM(ss_ext_sales_price) AS store_sales,
+        SUM(ws_ext_sales_price) AS web_sales,
+        COALESCE(SUM(cs_ext_sales_price), 0) AS catalog_sales
+    FROM 
+        store_sales 
+    JOIN 
+        date_dim d ON d.d_date_sk = ss_sold_date_sk 
+    LEFT JOIN 
+        catalog_sales cs ON cs.cs_sold_date_sk = ss_sold_date_sk
+    JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = ss_sold_date_sk
+    GROUP BY 
+        d.d_year
+), RevenueSummary AS (
+    SELECT 
+        d.d_year, 
+        SUM(ss_ext_sales_price) as total_store_sales,
+        SUM(ws_ext_sales_price) as total_web_sales,
+        SUM(cs_ext_sales_price) as total_catalog_sales,
+        COUNT(DISTINCT s_store_sk) AS total_stores
+    FROM 
+        store_sales ss
+    JOIN 
+        date_dim d ON d.d_date_sk = ss_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON cs.cs_sold_date_sk = ss_sold_date_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = ss_sold_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    y.d_year,
+    y.total_store_sales,
+    y.total_web_sales,
+    y.total_catalog_sales,
+    (y.total_store_sales + y.total_web_sales + y.total_catalog_sales) AS overall_sales,
+    RANK() OVER (ORDER BY (y.total_store_sales + y.total_web_sales + y.total_catalog_sales) DESC) AS sales_rank
+FROM 
+    RevenueSummary y
+ORDER BY 
+    y.d_year DESC
+LIMIT 10;

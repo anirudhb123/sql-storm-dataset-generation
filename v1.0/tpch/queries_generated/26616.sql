@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        LEN(s.s_comment) AS comment_length,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY LEN(s.s_comment) DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        REPLACE(p.p_comment, 'fluffy', 'furry') AS modified_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (
+            SELECT AVG(p2.p_retailprice) 
+            FROM part p2 
+            WHERE p2.p_type LIKE '%WOOD%'
+        )
+),
+FinalSelection AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        ss.r_name AS region_name,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS cost_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        FilteredParts p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region ss ON n.n_regionkey = ss.r_regionkey
+    WHERE 
+        s.rank = 1
+)
+SELECT 
+    COUNT(*) AS total_parts,
+    AVG(p.p_retailprice) AS average_retail_price,
+    STRING_AGG(DISTINCT supplier_name, ', ') AS suppliers_list
+FROM 
+    FinalSelection p
+WHERE 
+    p.cost_rank <= 5
+GROUP BY 
+    p.region_name;

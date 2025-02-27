@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL 
+        AND m.title IS NOT NULL
+),
+CastInfoWithRoles AS (
+    SELECT 
+        c.movie_id, 
+        c.person_id,
+        cr.role AS person_role,
+        COALESCE(c.nota, 'No notes') AS notes,
+        COUNT(*) OVER (PARTITION BY c.movie_id) AS total_cast_in_movie
+    FROM 
+        cast_info c
+    JOIN 
+        role_type cr ON c.role_id = cr.id
+),
+MoviesWithCompanyData AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mc.company_name, 'No Company') AS company_name
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_companies mco ON rm.movie_id = mco.movie_id
+    LEFT JOIN 
+        company_name mc ON mco.company_id = mc.id
+)
+SELECT 
+    mwc.title,
+    mwc.production_year,
+    mwc.company_name,
+    COUNT(DISTINCT ci.person_id) AS number_of_actors,
+    STRING_AGG(DISTINCT ci.person_role || ': ' || ci.notes, '; ') AS roles_notes,
+    RANK() OVER (ORDER BY mwc.production_year DESC) AS overall_movie_rank
+FROM 
+    MoviesWithCompanyData mwc
+JOIN 
+    CastInfoWithRoles ci ON mwc.movie_id = ci.movie_id
+WHERE 
+    mwc.company_name IS DISTINCT FROM 'No Company'
+    AND ci.total_cast_in_movie > 1
+GROUP BY 
+    mwc.movie_id, mwc.title, mwc.production_year, mwc.company_name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3
+ORDER BY 
+    mwc.production_year DESC,
+    overall_movie_rank ASC;
+
+-- Additional quirky semantics included:
+-- - Use of STRING_AGG to concatenate roles and notes.
+-- - Coalescing NULL values to ensure meaningful output.
+-- - Handling of varying production year availability.
+-- - Filtering for scenarios where there’s a disclaimer (e.g., no company).
+-- - RANK function to establish a ranking based on production year.

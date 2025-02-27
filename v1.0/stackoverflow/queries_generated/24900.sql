@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(uh.UserImpact, 0) AS UserImpact,
+        CASE 
+            WHEN rp.ViewCount > 1000 THEN 'High'
+            WHEN rp.ViewCount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            p.Id AS PostId,
+            SUM(u.Reputation) AS UserImpact
+        FROM 
+            Posts p
+        JOIN 
+            Users u ON p.OwnerUserId = u.Id
+        WHERE 
+            u.Reputation > 50
+        GROUP BY 
+            p.Id
+    ) uh ON rp.PostId = uh.PostId
+    WHERE 
+        rp.ScoreRank <= 5
+),
+PostAnalytics AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        tp.UserImpact,
+        tp.ViewCategory,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = tp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        TopPosts tp
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Score,
+    pa.ViewCount,
+    pa.UserImpact,
+    pa.ViewCategory,
+    pa.CommentCount,
+    pa.UpVoteCount,
+    pa.DownVoteCount,
+    CASE 
+        WHEN pa.UpVoteCount > pa.DownVoteCount THEN 'Positive'
+        WHEN pa.UpVoteCount < pa.DownVoteCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM PostHistory ph WHERE ph.PostId = pa.PostId AND ph.PostHistoryTypeId IN (10, 11)) THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    PostAnalytics pa
+LEFT JOIN 
+    Posts p ON pa.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            SUBSTRING(tag.TagName FROM 2 FOR CHAR_LENGTH(tag.TagName) - 2) AS TagName
+        FROM 
+            UNNEST(string_to_array(p.Tags, '><')) AS tag
+    ) t ON TRUE
+GROUP BY 
+    pa.PostId, pa.Title, pa.Score, pa.ViewCount, pa.UserImpact, pa.ViewCategory,
+    pa.CommentCount, pa.UpVoteCount, pa.DownVoteCount
+ORDER BY 
+    pa.Score DESC, pa.ViewCount DESC;

@@ -1,0 +1,85 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+
+EligibleParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        p.p_size,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown'
+            WHEN p.p_size <= 10 THEN 'Small'
+            WHEN p.p_size <= 50 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice BETWEEN 1.00 AND 100.00
+        AND p.p_size IS NOT NULL
+), 
+
+AggregatedSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        l.l_partkey
+), 
+
+FilteredSales AS (
+    SELECT 
+        es.p_partkey,
+        es.p_name,
+        es.size_category,
+        as.total_revenue,
+        as.order_count 
+    FROM 
+        EligibleParts es
+    LEFT JOIN 
+        AggregatedSales as ON es.p_partkey = as.l_partkey
+)
+
+SELECT 
+    fs.p_partkey,
+    fs.p_name,
+    fs.size_category,
+    fs.total_revenue,
+    fs.order_count,
+    s.s_name AS top_supplier_name,
+    s.s_acctbal AS top_supplier_balance
+FROM 
+    FilteredSales fs
+LEFT JOIN 
+    RankedSuppliers s ON s.rank = 1 AND s.s_nationkey = (
+        SELECT 
+            c.c_nationkey 
+        FROM 
+            customer c 
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey 
+        WHERE 
+            o.o_totalprice = (SELECT MAX(o2.o_totalprice) FROM orders o2)
+        LIMIT 1
+    )
+WHERE 
+    fs.total_revenue IS NOT NULL
+ORDER BY 
+    fs.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

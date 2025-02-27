@@ -1,0 +1,66 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_linenumber) AS total_lines
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+EnhancedSupplier AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_supply_value,
+        ss.avg_acctbal,
+        od.total_price,
+        ROW_NUMBER() OVER (PARTITION BY ss.s_suppkey ORDER BY od.total_price DESC) AS rn
+    FROM 
+        SupplierStats ss
+    LEFT JOIN 
+        OrderDetails od ON ss.s_suppkey = od.o_orderkey
+)
+
+SELECT 
+    es.s_name,
+    es.total_supply_value,
+    es.avg_acctbal,
+    es.total_price
+FROM 
+    EnhancedSupplier es
+WHERE 
+    es.rn = 1
+ORDER BY 
+    es.total_supply_value DESC, es.avg_acctbal ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Overall Total' AS s_name,
+    SUM(total_supply_value) AS total_supply_value,
+    AVG(avg_acctbal) AS avg_acctbal,
+    SUM(total_price) AS total_price
+FROM 
+    EnhancedSupplier
+WHERE 
+    total_price IS NOT NULL
+ORDER BY 
+    total_supply_value DESC;

@@ -1,0 +1,44 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS TopUsers,
+        MAX(p.CreationDate) AS LastUsed
+    FROM 
+        Tags t
+        LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+        LEFT JOIN Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        t.TagName
+),
+ActiveUserTags AS (
+    SELECT 
+        u.DisplayName,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.CreationDate)) / 3600) AS AvgHoursSinceCreation
+    FROM 
+        Users u
+        JOIN Posts p ON u.Id = p.OwnerUserId
+        JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        u.Reputation > 50 -- considering users with a reputation greater than 50
+    GROUP BY 
+        u.DisplayName, t.TagName
+)
+SELECT 
+    ts.TagName,
+    ts.TotalPosts,
+    ts.TotalQuestions,
+    ts.TotalAnswers,
+    ts.TopUsers,
+    ts.LastUsed,
+    aut.PostCount AS ActiveUserPostCount,
+    aut.AvgHoursSinceCreation
+FROM 
+    TagStatistics ts
+    LEFT JOIN ActiveUserTags aut ON aut.TagName = ts.TagName
+ORDER BY 
+    ts.TotalPosts DESC;

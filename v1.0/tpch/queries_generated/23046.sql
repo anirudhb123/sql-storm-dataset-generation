@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O') AND l.l_returnflag IS NULL
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(ps.ps_availqty) AS available_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           CASE WHEN MIN(p.p_retailprice) IS NULL THEN 'NO PRICE' ELSE 'HAS PRICE' END AS price_status
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+ExtendedView AS (
+    SELECT co.c_custkey, co.c_name, co.total_spent, ps.available_count, ps.avg_supply_cost, ps.price_status,
+           RANK() OVER (PARTITION BY ps.price_status ORDER BY co.total_spent DESC) AS price_rank,
+           first_value(co.o_orderdate) OVER (PARTITION BY co.c_custkey ORDER BY co.o_orderdate) AS first_order_date
+    FROM CustomerOrderDetails co
+    LEFT JOIN PartStats ps ON ps.available_count > 1
+    WHERE co.rn = 1 AND ps.price_status = 'HAS PRICE'
+)
+SELECT ev.c_name, ev.total_spent, ev.available_count, ev.avg_supply_cost, ev.price_status
+FROM ExtendedView ev
+WHERE ev.first_order_date < CURRENT_DATE - INTERVAL '1 YEAR'
+ORDER BY ev.total_spent DESC
+FETCH FIRST 10 ROWS ONLY
+UNION
+SELECT DISTINCT r.r_name, NULL AS total_spent, NULL AS available_count, NULL AS avg_supply_cost,
+       'REGION ONLY' AS price_status
+FROM region r
+WHERE EXISTS (SELECT 1 FROM nation n WHERE n.n_regionkey = r.r_regionkey AND n.n_comment NOT LIKE '%bizarre%')
+ORDER BY price_status, r.r_name;

@@ -1,0 +1,53 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(CASE WHEN cd.cd_gender = 'F' THEN cd.cd_purchase_estimate END) AS avg_female_purchase_estimate
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ws.web_site_id
+),
+address_counts AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(ca.ca_address_sk) AS address_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_state
+)
+SELECT 
+    rs.web_site_id,
+    rs.total_sales,
+    rs.sales_rank,
+    rs.customer_count,
+    ac.address_count,
+    CASE 
+        WHEN rs.avg_female_purchase_estimate IS NULL THEN 'No Data'
+        WHEN rs.avg_female_purchase_estimate > 500 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS purchase_estimate_category,
+    COALESCE(MAX(ws.ws_net_profit), 0) AS max_net_profit,
+    COALESCE(STRING_AGG(DISTINCT ca.ca_city, ', '), 'No Cities') AS cities_served
+FROM ranked_sales rs
+FULL OUTER JOIN address_counts ac ON rs.sales_rank = ac.address_count
+LEFT JOIN web_sales ws ON rs.web_site_id = ws.ws_web_site_sk
+LEFT JOIN customer_address ca ON ca.ca_address_sk = (
+    SELECT c.c_current_addr_sk 
+    FROM customer c 
+    WHERE c.c_customer_sk IN (
+        SELECT DISTINCT ws.ws_bill_customer_sk 
+        FROM web_sales ws 
+        WHERE ws.ws_web_site_sk = rs.web_site_id
+          AND ws.ws_sold_date_sk = COALESCE((SELECT d.d_date_sk 
+                                               FROM date_dim d 
+                                               WHERE d.d_date = '2002-10-01'), -1)
+    )
+)
+GROUP BY rs.web_site_id, rs.total_sales, rs.sales_rank, rs.customer_count, ac.address_count
+HAVING (COUNT(ws.ws_order_number) > 10 AND rs.total_sales > 1000) OR 
+       (AVG(ws.ws_ext_discount_amt) IS NOT NULL AND MAX(ws.ws_ext_discount_amt) IS NOT NULL)
+ORDER BY rs.total_sales DESC, ac.address_count ASC;

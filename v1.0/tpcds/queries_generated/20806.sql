@@ -1,0 +1,75 @@
+
+WITH RecursiveCTE AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        CA.ca_city,
+        s.s_store_id,
+        COALESCE(CAST(SUM(ws.ws_sales_price) AS DECIMAL(10,2)), 0) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN customer_address CA ON c.c_current_addr_sk = CA.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE
+        (c.c_birth_year IS NOT NULL AND c.c_birth_year > 1970) OR
+        (CA.ca_city LIKE '%town%' AND c.c_first_name IS NOT NULL)
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, CA.ca_city, s.s_store_id
+    UNION ALL
+    SELECT
+        rc.c_customer_sk,
+        rc.c_first_name || ' Jr.' AS c_first_name, -- Bizarre name alteration
+        rc.c_last_name,
+        rc.ca_city,
+        rc.s_store_id,
+        (SELECT SUM(ws_net_profit) 
+         FROM web_sales 
+         WHERE ws_bill_customer_sk = rc.c_customer_sk) / NULLIF(COUNT(ws_item_sk), 0) AS avg_net_profit
+    FROM
+        RecursiveCTE rc
+    WHERE
+        LEAST(rc.total_spent, rc.total_spent + 100) > 50
+),
+RankedSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        CA.ca_city,
+        total_spent,
+        RANK() OVER (PARTITION BY CA.ca_city ORDER BY total_spent DESC) AS rank
+    FROM
+        RecursiveCTE
+    JOIN customer_address CA ON CA.ca_address_sk = RecursiveCTE.c_customer_sk
+)
+SELECT
+    r.c_customer_sk,
+    r.c_first_name,
+    r.c_last_name,
+    r.ca_city,
+    r.total_spent,
+    CASE 
+        WHEN r.rank = 1 THEN 'Top Spender'
+        WHEN r.rank <= 5 THEN 'Top 5 Spender'
+        ELSE 'Regular Customer'
+    END AS customer_type,
+    (SELECT COUNT(*) 
+     FROM store_sales ss 
+     WHERE ss.ss_customer_sk = r.c_customer_sk 
+       AND ss.ss_sold_date_sk > (
+           SELECT MAX(ss2.ss_sold_date_sk)
+           FROM store_sales ss2
+           WHERE ss2.ss_customer_sk = r.c_customer_sk
+           AND ss2.ss_sales_price > 0
+       )) AS purchases_since_last_return
+FROM
+    RankedSales r
+WHERE
+    r.total_spent > (SELECT AVG(total_spent) FROM RankedSales) 
+    AND r.ca_city IS NOT NULL AND r.ca_city <> ''
+ORDER BY
+    r.ca_city, r.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

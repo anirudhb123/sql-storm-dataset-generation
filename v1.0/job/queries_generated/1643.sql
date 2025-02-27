@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.title, at.production_year
+),
+RecentTitles AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedTitles
+    WHERE 
+        rn <= 5
+),
+TitleKeywords AS (
+    SELECT 
+        mt.title,
+        GROUP_CONCAT(mk.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.title
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.cast_count,
+    tk.keywords,
+    CASE 
+        WHEN rt.cast_count IS NULL THEN 'No cast available'
+        ELSE 'Available'
+    END AS cast_status
+FROM 
+    RecentTitles rt
+LEFT JOIN 
+    TitleKeywords tk ON rt.title = tk.title
+ORDER BY 
+    rt.production_year DESC, rt.cast_count DESC;

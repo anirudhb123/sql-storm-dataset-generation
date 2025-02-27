@@ -1,0 +1,54 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        ROW_NUMBER() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_sales > 0
+),
+SalesTrends AS (
+    SELECT 
+        dd.d_year,
+        SUM(ws.ws_net_paid) AS yearly_sales
+    FROM 
+        date_dim dd
+    JOIN 
+        web_sales ws ON dd.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        dd.d_year
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    st.yearly_sales,
+    COALESCE(tc.total_sales - st.yearly_sales, 0) AS difference_from_yearly_sales,
+    (SELECT COUNT(DISTINCT ws2.ws_order_number) 
+     FROM web_sales ws2 
+     WHERE ws2.ws_ship_customer_sk = tc.c_customer_sk) AS distinct_orders,
+    CASE 
+        WHEN tc.total_sales IS NOT NULL THEN 'Active Customer'
+        ELSE 'Inactive Customer'
+    END AS customer_status
+FROM 
+    TopCustomers tc
+FULL OUTER JOIN 
+    SalesTrends st ON tc.sales_rank = 1 AND tc.total_orders = 1
+WHERE 
+    (tc.total_sales IS NOT NULL OR st.yearly_sales IS NOT NULL)
+ORDER BY 
+    TC.total_sales DESC NULLS LAST;

@@ -1,0 +1,92 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.Path,
+        ps.UpVotes,
+        ps.DownVotes,
+        u.BadgeCount,
+        u.HighestBadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             ph.PostId, 
+             STRING_AGG(ph.Title, ' -> ') AS Path
+         FROM 
+             RecursivePostHierarchy ph 
+         GROUP BY 
+             ph.PostId) AS ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        UserBadges u ON p.OwnerUserId = u.UserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+)
+SELECT 
+    ps.Title AS PostTitle,
+    ps.Path,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.BadgeCount,
+    CASE 
+        WHEN ps.HighestBadgeClass = 1 THEN 'Gold'
+        WHEN ps.HighestBadgeClass = 2 THEN 'Silver'
+        WHEN ps.HighestBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS HighestBadge
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.UpVotes DESC, ps.DownVotes ASC;

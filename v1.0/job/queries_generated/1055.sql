@@ -1,0 +1,52 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COALESCE(SUM(mk.keyword::text), 'No Keywords') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighCastMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.actors,
+        RANK() OVER (ORDER BY md.cast_count DESC) AS rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.cast_count > (SELECT AVG(cast_count) FROM MovieDetails)
+)
+SELECT 
+    hc.movie_id,
+    hc.title,
+    hc.production_year,
+    hc.cast_count,
+    hc.actors,
+    CASE 
+        WHEN hc.rank <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS category
+FROM 
+    HighCastMovies hc
+WHERE 
+    hc.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    hc.rank;

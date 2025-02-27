@@ -1,0 +1,63 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank,
+        COALESCE(b.keyword, 'No Keywords') AS keywords,
+        ARRAY_AGG(DISTINCT c.name ORDER BY c.name) AS cast_names
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword d ON a.id = d.movie_id
+    LEFT JOIN 
+        keyword b ON d.keyword_id = b.id
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+aggregated_info AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.rank,
+        m.keywords,
+        m.cast_names,
+        COUNT(ci.id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS non_null_note_ratio
+    FROM 
+        ranked_movies m
+    JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, m.rank, m.keywords, m.cast_names
+)
+SELECT 
+    ai.movie_id,
+    ai.title,
+    ai.production_year,
+    ai.rank,
+    ai.keywords,
+    ai.cast_names,
+    ai.cast_count,
+    ai.non_null_note_ratio,
+    CASE 
+        WHEN ai.cast_count > 10 THEN 'Large Cast'
+        WHEN ai.cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    (SELECT COUNT(DISTINCT c.company_id)
+     FROM movie_companies c
+     WHERE c.movie_id = ai.movie_id
+       AND c.company_id IS NOT NULL
+       AND c.company_id IN (SELECT company_id FROM company_name WHERE country_code = 'USA')) AS usa_company_count
+FROM 
+    aggregated_info ai
+WHERE 
+    ai.rank <= 5
+ORDER BY 
+    ai.production_year DESC, 
+    ai.rank ASC
+LIMIT 20;

@@ -1,0 +1,58 @@
+
+WITH item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+top_items AS (
+    SELECT 
+        i.i_item_id,
+        is.total_quantity,
+        is.total_sales,
+        is.order_count
+    FROM 
+        item_sales is
+    WHERE 
+        is.rank <= 10
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ti.i_item_id,
+    cs.c_customer_id,
+    cs.total_orders,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No purchases'
+        WHEN cs.total_spent > 500 THEN 'High spender'
+        WHEN cs.total_spent BETWEEN 100 AND 500 THEN 'Moderate spender'
+        ELSE 'Low spender'
+    END AS spending_category
+FROM 
+    top_items ti
+CROSS JOIN 
+    customer_sales cs
+WHERE 
+    cs.total_orders > 5
+ORDER BY 
+    ti.total_sales DESC, cs.total_spent DESC;

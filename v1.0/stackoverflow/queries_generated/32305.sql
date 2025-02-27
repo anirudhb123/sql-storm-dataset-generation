@@ -1,0 +1,92 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        OwnerUserId, 
+        AcceptedAnswerId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Start with Questions
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostScore AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeList
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.Id AS RootPostId,
+        rp.Title AS RootPostTitle,
+        rp.OwnerUserId,
+        u.DisplayName AS OwnerName,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.NetScore,
+        ub.BadgeCount,
+        ub.BadgeList
+    FROM 
+        RecursivePosts rp
+    JOIN 
+        PostScore ps ON rp.Id = ps.PostId
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    pd.RootPostId,
+    pd.RootPostTitle,
+    pd.OwnerName,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.NetScore,
+    pd.BadgeCount,
+    pd.BadgeList,
+    COUNT(c.Id) AS CommentCount,
+    MAX(c.CreationDate) AS LastCommentDate
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Comments c ON pd.RootPostId = c.PostId
+WHERE
+    pd.NetScore > 0
+GROUP BY 
+    pd.RootPostId, pd.RootPostTitle, pd.OwnerName, pd.UpVotes, pd.DownVotes, pd.NetScore, pd.BadgeCount, pd.BadgeList
+ORDER BY 
+    pd.NetScore DESC, pd.UpVotes DESC
+LIMIT 10;

@@ -1,0 +1,80 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS account_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        CASE 
+            WHEN r.r_name IS NULL THEN 'Unknown'
+            ELSE r.r_name
+        END AS safe_region_name
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_discount BETWEEN 0 AND 0.1 
+        AND l.l_shipdate <= CURRENT_DATE
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    np.n_name,
+    np.safe_region_name,
+    SUM(f.total_revenue) AS total_order_value,
+    MAX(rp.p_retailprice) AS max_part_price,
+    STRING_AGG(DISTINCT ps.ps_comment) AS unique_comments
+FROM 
+    NationDetails np
+LEFT JOIN 
+    HighValueSuppliers hvs ON hvs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM RankedParts rp WHERE rp.rank <= 5))
+LEFT JOIN 
+    FilteredOrders f ON f.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = np.n_nationkey LIMIT 1)
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = f.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey = l.l_partkey
+GROUP BY 
+    np.n_nationkey, np.n_name, np.safe_region_name
+HAVING 
+    COUNT(DISTINCT f.o_orderkey) > 10 
+    AND MAX(rp.p_retailprice) > (
+        SELECT AVG(p.p_retailprice) FROM part p 
+        WHERE p.p_size IS NOT NULL
+    )
+ORDER BY 
+    total_order_value DESC
+FETCH FIRST 20 ROWS ONLY;

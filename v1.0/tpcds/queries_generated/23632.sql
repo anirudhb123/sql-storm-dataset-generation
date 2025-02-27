@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        ws.ws_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+TotalSales AS (
+    SELECT 
+        i.i_item_id, 
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_amount,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    JOIN 
+        web_sales ws ON rs.ws_order_number = ws.ws_order_number
+    WHERE 
+        rs.rn = 1 
+    GROUP BY 
+        i.i_item_id
+),
+SalesWithRank AS (
+    SELECT 
+        ts.*,
+        DENSE_RANK() OVER (ORDER BY ts.total_sales_amount DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+)
+SELECT 
+    w.w_warehouse_id, 
+    w.w_warehouse_name,
+    COALESCE(swr.total_sales_amount, 0) AS total_sales_amount,
+    CASE 
+        WHEN swr.sales_rank IS NULL THEN 'No Sales'
+        ELSE CAST(swr.sales_rank AS VARCHAR)
+    END AS sales_rank
+FROM 
+    warehouse w
+LEFT JOIN 
+    SalesWithRank swr ON w.w_warehouse_sk = (SELECT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_item_sk IN (SELECT ws_item_sk FROM RankedSales) LIMIT 1) -- hypothetical warehouse logic
+WHERE 
+    w.w_state = 'CA'
+ORDER BY 
+    total_sales_amount DESC, 
+    w.w_warehouse_name ASC
+LIMIT 10;

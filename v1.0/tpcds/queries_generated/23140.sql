@@ -1,0 +1,69 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as rank,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count_normalized
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.rank
+    FROM 
+        customer_info ci
+    WHERE 
+        ci.rank <= 10
+),
+sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+customer_sales AS (
+    SELECT 
+        tc.c_customer_id,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.order_count, 0) AS order_count
+    FROM 
+        top_customers tc
+    LEFT JOIN 
+        sales_data sd ON tc.c_customer_id = sd.ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_sales,
+    cs.order_count,
+    CASE 
+        WHEN cs.total_sales > 1000 THEN 'High Value'
+        WHEN cs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value,
+    ROUND(cs.total_sales - (cs.order_count * 5), 2) AS adjusted_sales, -- subtract a fee (for illustrative purpose)
+    STRING_AGG(CONCAT(cs.c_customer_id, ' spent ', cs.total_sales), '; ') 
+        FILTER (WHERE cs.total_sales >= 50) AS high_spenders 
+FROM 
+    customer_sales cs
+GROUP BY 
+    cs.c_customer_id, cs.total_sales, cs.order_count
+HAVING 
+    (cs.total_sales IS NOT NULL AND cs.total_sales <> 0) 
+    OR (cs.order_count IS NULL AND cs.c_customer_id IS NOT NULL)
+ORDER BY 
+    cs.total_sales DESC
+LIMIT 20;

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS mh ON mh.movie_id = ml.movie_id
+),
+MovieStats AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(c.person_id) AS cast_count,
+        AVG(CAST(p.info->>'rating' AS FLOAT)) AS avg_rating
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    LEFT JOIN 
+        person_info AS p ON c.person_id = p.person_id
+    WHERE 
+        p.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COALESCE(ms.cast_count, 0) AS cast_count,
+    ms.avg_rating,
+    CASE
+        WHEN ms.avg_rating IS NULL THEN 'No Rating'
+        ELSE CASE 
+            WHEN ms.avg_rating >= 8 THEN 'Excellent'
+            WHEN ms.avg_rating >= 5 THEN 'Average'
+            ELSE 'Poor'
+        END
+    END AS rating_status,
+    STRING_AGG(DISTINCT c.note, ', ') AS cast_roles
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    MovieStats AS ms ON mh.movie_id = ms.movie_id
+LEFT JOIN 
+    cast_info AS c ON mh.movie_id = c.movie_id
+WHERE 
+    ms.cast_count IS NOT NULL
+GROUP BY 
+    mh.title, mh.production_year, ms.cast_count, ms.avg_rating
+ORDER BY 
+    mh.production_year DESC, ms.avg_rating DESC
+LIMIT 10;

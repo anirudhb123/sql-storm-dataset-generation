@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_orders >= 5
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000.00
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderstatus,
+    r.revenue,
+    c.c_name AS customer_name,
+    sp.s_name AS supplier_name,
+    CASE 
+        WHEN r.revenue > 1000 THEN 'High Value'
+        WHEN r.revenue BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS revenue_category,
+    ROW_NUMBER() OVER (PARTITION BY r.o_orderstatus ORDER BY r.revenue DESC) AS order_rank
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    TopCustomers c ON r.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    SupplierPerformance sp ON sp.total_available > 0
+WHERE 
+    r.revenue IS NOT NULL
+ORDER BY 
+    r.o_orderstatus, r.revenue DESC
+LIMIT 100;

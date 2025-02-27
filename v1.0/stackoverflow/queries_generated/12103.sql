@@ -1,0 +1,71 @@
+-- Performance benchmarking query on the Stack Overflow schema
+
+-- This query retrieves metrics from various tables to assess the performance and relationships 
+-- within the Stack Overflow dataset. It provides a summary of Posts, Users, Votes, and Comments.
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Id = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Id = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(b.Id IS NOT NULL) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.PostTypeId,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.BadgeCount
+FROM 
+    PostSummary ps
+JOIN 
+    Users u ON ps.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+ORDER BY 
+    ps.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND LENGTH(s_comment) > 10
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+PartDistribution AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+CustomerPerformance AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING AVG(o.o_totalprice) > 500 OR SUM(o.o_totalprice) IS NULL
+),
+CriticalOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_revenue) FROM (SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_revenue FROM lineitem l GROUP BY l_orderkey) AS sub)
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(cp.order_count), 0) AS total_customers,
+    COALESCE(ps.total_avail_qty, 0) AS total_available_quantity,
+    COUNT(DISTINCT c.c_custkey) FILTER (WHERE c.c_acctbal IS NOT NULL) AS non_null_customers,
+    COUNT(DISTINCT co.o_orderkey) AS critical_orders_count,
+    ROUND(AVG(COALESCE(sh.s_acctbal, 0)) OVER (PARTITION BY r.r_regionkey), 2) AS avg_supplier_balance,
+    CASE 
+        WHEN COUNT(DISTINCT co.o_orderkey) > 0 THEN 'High'
+        ELSE 'Low'
+    END AS order_performance
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerPerformance cp ON c.c_custkey = cp.c_custkey
+LEFT JOIN PartDistribution ps ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp)
+LEFT JOIN CriticalOrders co ON co.o_orderkey IN (SELECT o_orderkey FROM orders)
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_suppkey
+GROUP BY r.r_name, r.r_regionkey
+ORDER BY region_name ASC, total_customers DESC;

@@ -1,0 +1,90 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mc.company_id DESC) AS rank,
+        COUNT(*) OVER (PARTITION BY mt.production_year) AS total_movies
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_companies AS mc ON mt.id = mc.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_note_ratio
+    FROM 
+        aka_name AS ak
+    JOIN 
+        cast_info AS ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+),
+
+CompanyStats AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS movies_produced,
+        STRING_AGG(DISTINCT mt.title, ', ') AS produced_movies
+    FROM 
+        company_name AS cn
+    LEFT JOIN 
+        movie_companies AS mc ON cn.id = mc.company_id
+    LEFT JOIN 
+        aka_title AS mt ON mc.movie_id = mt.id
+    GROUP BY 
+        cn.name
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    ai.actor_name,
+    ai.movie_count,
+    ai.null_note_ratio,
+    cs.company_name,
+    cs.movies_produced,
+    cs.produced_movies,
+    CASE 
+        WHEN rm.rank <= 3 THEN 'Top 3'
+        WHEN rm.rank <= (total_movies / 2) THEN 'Middle'
+        ELSE 'Bottom'
+    END AS movie_rank_category
+FROM 
+    RankedMovies AS rm
+LEFT JOIN 
+    (SELECT 
+        ak.person_id, 
+        ak.name, 
+        COUNT(ci.movie_id) AS total_movies
+     FROM 
+        aka_name AS ak
+     JOIN 
+        cast_info AS ci ON ak.person_id = ci.person_id
+     GROUP BY 
+        ak.person_id, ak.name
+     HAVING 
+        COUNT(ci.movie_id) > 5) AS ai ON rm.movie_id = ai.total_movies
+LEFT JOIN 
+    CompanyStats AS cs ON cs.movies_produced = (SELECT MAX(movies_produced) FROM CompanyStats)
+WHERE 
+    (rm.production_year > 2000 OR rm.title LIKE '%Hero%')
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info AS mi 
+        WHERE mi.movie_id = rm.movie_id 
+        AND EXISTS (
+            SELECT 1 
+            FROM info_type AS it 
+            WHERE mi.info_type_id = it.id 
+            AND it.info = 'Documentary'
+        )
+    )
+ORDER BY 
+    rm.production_year DESC, ai.movie_count DESC;

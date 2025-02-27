@@ -1,0 +1,66 @@
+WITH RecursiveCustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+SupplierPartPrices AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS price_rank
+    FROM 
+        partsupp ps
+),
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS sales_month,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate >= '1996-01-01' AND l.l_shipdate < '1997-01-01'
+    GROUP BY 
+        sales_month
+),
+BestSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        SupplierPartPrices spp ON s.s_suppkey = spp.ps_suppkey
+    WHERE 
+        spp.price_rank = 1
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COALESCE(bp.total_supplycost, 0) AS best_supplier_cost,
+    ms.total_sales
+FROM 
+    RecursiveCustomerOrders o
+LEFT JOIN 
+    BestSuppliers bp ON o.o_orderkey = bp.s_suppkey
+LEFT JOIN 
+    MonthlySales ms ON DATE_TRUNC('month', o.o_orderdate) = ms.sales_month
+WHERE 
+    o.order_rank = 1 
+ORDER BY 
+    o.o_orderdate DESC, c.c_name;

@@ -1,0 +1,87 @@
+WITH RecursiveMovieCTE AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN cc.kind = 'Director' THEN 1 ELSE 0 END) AS director_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY
+        t.id
+),
+RankedMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        actor_count,
+        director_count,
+        DENSE_RANK() OVER (ORDER BY production_year DESC, actor_count DESC) AS rank
+    FROM
+        RecursiveMovieCTE
+    WHERE
+        production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        actor_count,
+        director_count
+    FROM
+        RankedMovies
+    WHERE
+        rank <= 10
+),
+KeywordCounts AS (
+    SELECT
+        m.movie_id,
+        COUNT(k.keyword) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+),
+MoviesWithKeywordCount AS (
+    SELECT
+        tm.title_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        tm.actor_count,
+        tm.director_count
+    FROM
+        TopMovies tm
+    LEFT JOIN
+        KeywordCounts kc ON tm.title_id = kc.movie_id
+)
+SELECT
+    mwk.title,
+    mwk.production_year,
+    mwk.actor_count,
+    mwk.director_count,
+    mwk.keyword_count,
+    CASE 
+        WHEN mwk.actor_count > mwk.director_count THEN 'More Actors'
+        WHEN mwk.actor_count < mwk.director_count THEN 'More Directors'
+        ELSE 'Equal'
+    END AS actor_director_balance,
+    CONCAT(mwk.title, ' (', CAST(mwk.production_year AS VARCHAR), ')') AS full_title
+FROM
+    MoviesWithKeywordCount mwk
+WHERE
+    mwk.production_year > (SELECT AVG(production_year) FROM aka_title)
+ORDER BY
+    mwk.actor_count DESC,
+    mwk.keyword_count ASC NULLS LAST;
+

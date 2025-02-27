@@ -1,0 +1,64 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        k.keyword
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorMovies AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+CompanyInvolvement AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS movies_produced
+    FROM 
+        company_name cn
+    JOIN 
+        movie_companies mc ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        cn.name
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    am.movie_count AS actor_movie_count,
+    ci.company_name,
+    ci.movies_produced
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorMovies am ON am.name IN (
+        SELECT a.name 
+        FROM aka_name a 
+        JOIN cast_info c ON a.person_id = c.person_id 
+        WHERE c.movie_id = rt.id
+    )
+LEFT JOIN 
+    CompanyInvolvement ci ON ci.movies_produced > 10
+WHERE 
+    rt.title_rank <= 5
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

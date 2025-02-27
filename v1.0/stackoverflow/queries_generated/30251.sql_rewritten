@@ -1,0 +1,107 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.Views, 
+        U.CreationDate,
+        0 AS ActivityLevel
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000  
+
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.Views, 
+        U.CreationDate,
+        UA.ActivityLevel + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        UserActivity UA ON U.Reputation > 1000 AND U.views > (UA.Views + 50)
+),
+TopPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND P.Score > 0
+),
+ReportedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+    GROUP BY 
+        PH.PostId, PH.Comment
+),
+RecentActivity AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Views,
+        UA.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = UA.UserId
+    GROUP BY 
+        UA.UserId, UA.DisplayName, UA.Views, UA.Reputation
+),
+CombinedResults AS (
+    SELECT 
+        UA.UserId, 
+        UA.DisplayName, 
+        UA.Views, 
+        UA.Reputation,
+        RA.PostCount,
+        RA.TotalScore,
+        PP.PostId,
+        PP.Title,
+        PP.Score,
+        PP.ViewCount
+    FROM 
+        RecentActivity RA
+    JOIN 
+        UserActivity UA ON UA.UserId = RA.UserId
+    LEFT JOIN 
+        TopPosts PP ON PP.PostId IN (SELECT PostId FROM ReportedPosts) 
+    ORDER BY 
+        UA.Reputation DESC, 
+        RA.TotalScore DESC
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(SUM(RA.PostCount), 0) AS TotalPosts,
+    COALESCE(SUM(RA.TotalScore), 0) AS OverallScore,
+    STRING_AGG(P.Title, ', ') AS ReportedPostTitles
+FROM 
+    CombinedResults U
+LEFT JOIN 
+    TopPosts P ON P.PostId = U.PostId
+GROUP BY 
+    U.UserId, U.DisplayName
+HAVING 
+    SUM(RA.PostCount) > 5 OR SUM(RA.TotalScore) > 50
+ORDER BY 
+    OverallScore DESC, 
+    TotalPosts DESC;

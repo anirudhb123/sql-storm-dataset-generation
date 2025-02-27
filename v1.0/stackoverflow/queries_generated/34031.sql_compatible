@@ -1,0 +1,65 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, Location, UpVotes, DownVotes, 0 AS Level
+    FROM Users
+    WHERE Reputation > 1000  
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.Location, u.UpVotes, u.DownVotes, uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Id = uh.Id + 1  
+    WHERE uh.Level < 5  
+),
+PostStats AS (
+    SELECT p.OwnerUserId, 
+           COUNT(p.Id) AS TotalPosts, 
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+           SUM(p.Score) AS TotalScore,
+           AVG(p.ViewCount) AS AverageViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+RecentVotes AS (
+    SELECT v.PostId, 
+           COUNT(*) AS VoteCount,
+           SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE v.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+    GROUP BY v.PostId
+),
+TopPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           ps.TotalPosts, 
+           ps.TotalQuestions, 
+           ps.TotalAnswers, 
+           ps.TotalScore,
+           rv.VoteCount
+    FROM Posts p
+    JOIN PostStats ps ON p.OwnerUserId = ps.OwnerUserId
+    LEFT JOIN RecentVotes rv ON p.Id = rv.PostId
+    WHERE ps.TotalPosts > 10 
+    ORDER BY ps.TotalScore DESC, rv.VoteCount DESC
+    LIMIT 10
+)
+SELECT u.DisplayName,
+       u.Location,
+       uh.Level,
+       tp.Title,
+       tp.TotalPosts,
+       tp.TotalQuestions,
+       tp.TotalAnswers,
+       tp.TotalScore,
+       COALESCE(rv.UpVotes, 0) AS UpVotes,
+       COALESCE(rv.DownVotes, 0) AS DownVotes,
+       tp.VoteCount
+FROM UserHierarchy uh
+JOIN PostStats ps ON uh.Id = ps.OwnerUserId
+JOIN TopPosts tp ON ps.OwnerUserId = tp.OwnerUserId
+LEFT JOIN RecentVotes rv ON tp.Id = rv.PostId
+WHERE uh.Reputation > 2000
+ORDER BY uh.Level, uh.Reputation DESC;

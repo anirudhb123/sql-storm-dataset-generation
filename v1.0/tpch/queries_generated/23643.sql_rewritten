@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+AggPartSupp AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderstatus = 'F' 
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_cost,
+    COALESCE(o.total_revenue, 0) AS total_revenue,
+    RANK() OVER (PARTITION BY r.r_regionkey ORDER BY COALESCE(o.total_revenue, 0) DESC) AS revenue_rank,
+    (CASE 
+        WHEN ps.total_cost IS NULL THEN 'No cost data'
+        ELSE CONCAT('Cost: ', ps.total_cost::text)
+    END) AS cost_info,
+    (SELECT COUNT(*) 
+     FROM lineitem l2 
+     WHERE l2.l_partkey = p.p_partkey 
+     AND l2.l_shipdate < cast('1998-10-01' as date)
+    ) AS shipped_quantity
+FROM 
+    part p
+LEFT JOIN 
+    AggPartSupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    FilteredOrders o ON o.o_orderkey = (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')) LIMIT 1)
+LEFT JOIN 
+    nation n ON n.n_nationkey = (CASE 
+                                    WHEN p.p_size IS NULL THEN 0 
+                                    ELSE MOD(p.p_size, 5) 
+                                  END)
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_comment IS NOT NULL) OR p.p_comment IS NULL)
+    AND (EXISTS (SELECT 1 FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey AND ps2.ps_availqty > 0) OR p.p_container IS NOT NULL)
+ORDER BY 
+    revenue_rank, p.p_partkey;

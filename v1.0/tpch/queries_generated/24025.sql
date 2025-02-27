@@ -1,0 +1,74 @@
+WITH RECURSIVE RegionAggregates AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 0 
+    UNION ALL
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_nationkey = s.s_nationkey)
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 0
+), LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1996-01-01' AND l.l_shipdate < '1997-01-01'
+    GROUP BY 
+        l.l_orderkey
+), OrderRanking AS (
+    SELECT 
+        o.o_orderkey,
+        o.c_custkey,
+        SUM(l.total_sales) OVER (PARTITION BY o.o_orderkey) AS order_total_sales,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.total_sales) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        LineItemSummary l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.c_custkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ra.supplier_count, 0) AS supplier_count,
+    COALESCE(ra.total_acctbal, 0) AS total_acctbal,
+    COALESCE(or.sales_rank, 0) AS order_sales_rank,
+    COALESCE(or.order_total_sales, 0) AS order_total_sales
+FROM 
+    region r
+LEFT JOIN 
+    RegionAggregates ra ON r.r_regionkey = ra.r_regionkey
+LEFT JOIN 
+    OrderRanking or ON or.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey))
+ORDER BY 
+    r.r_name, supplier_count DESC NULLS LAST;

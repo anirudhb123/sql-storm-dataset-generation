@@ -1,0 +1,69 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        a.person_id,
+        CAST(NULL AS text) AS parent_name,
+        0 AS level
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.id AS actor_id,
+        c.name AS actor_name,
+        c.person_id,
+        ah.actor_name AS parent_name,
+        ah.level + 1
+    FROM char_name c
+    JOIN actor_hierarchy ah ON c.imdb_index = ah.actor_id
+    WHERE c.name IS NOT NULL
+),
+ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM aka_title t
+    JOIN cast_info c ON t.id = c.movie_id
+    WHERE t.production_year IS NOT NULL
+),
+non_film_keywords AS (
+    SELECT 
+        k.keyword,
+        COUNT(m.movie_id) AS movie_count
+    FROM keyword k
+    LEFT JOIN movie_keyword m ON k.id = m.keyword_id
+    WHERE m.movie_id IS NULL  -- Keywords not associated with any movie
+    GROUP BY k.keyword
+),
+movie_info_with_notes AS (
+    SELECT 
+        m.id AS movie_id,
+        m.info AS movie_info,
+        COALESCE(m.note, 'No additional info') AS movie_note
+    FROM movie_info m
+    WHERE m.info_type_id IN (
+        SELECT id FROM info_type WHERE info LIKE 'Plot%'
+    )
+)
+SELECT 
+    ah.actor_name,
+    ah.level,
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    nk.keyword,
+    nk.movie_count,
+    mi.movie_info,
+    mi.movie_note
+FROM actor_hierarchy ah
+LEFT JOIN ranked_movies rm ON ah.actor_id = rm.actor_id
+LEFT JOIN non_film_keywords nk ON nk.movie_count < 3  -- Filtering keywords associated with less than 3 movies
+LEFT JOIN movie_info_with_notes mi ON mi.movie_id = rm.title
+WHERE ah.parent_name IS NULL 
+    AND ah.level = 0
+ORDER BY ah.actor_name, rm.production_year DESC
+LIMIT 100;

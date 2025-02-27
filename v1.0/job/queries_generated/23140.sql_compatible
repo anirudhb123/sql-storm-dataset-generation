@@ -1,0 +1,78 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighestCastCount AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn = 1
+),
+SeriouslyBizarreMovies AS (
+    SELECT 
+        mc.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    FULL OUTER JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id 
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind LIKE '%Studios%')
+        AND m.production_year IS NOT NULL
+    GROUP BY 
+        mc.movie_id, m.title, m.production_year
+    HAVING 
+        COUNT(DISTINCT mk.keyword) > 5 OR SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) > 10
+)
+SELECT 
+    s.movie_id,
+    s.title,
+    s.production_year,
+    COALESCE(s.keyword_count, 0) AS keywords,
+    COALESCE(s.female_cast_count, 0) AS female_casts,
+    (SELECT 
+         COUNT(*)
+     FROM 
+         complete_cast cc 
+     WHERE 
+         cc.movie_id = s.movie_id AND cc.status_id IS NOT NULL) AS complete_count,
+    (SELECT 
+         STRING_AGG(DISTINCT c.name, ', ') 
+     FROM 
+         char_name c 
+     JOIN 
+         aka_title t ON c.imdb_index = t.imdb_index
+     WHERE 
+         t.id = s.movie_id) AS associated_character_names
+FROM 
+    HighestCastCount h
+LEFT JOIN 
+    SeriouslyBizarreMovies s ON h.movie_id = s.movie_id
+ORDER BY 
+    h.production_year DESC, 
+    COALESCE(s.female_cast_count, 0) DESC NULLS LAST
+LIMIT 50;

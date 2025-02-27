@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC, a.title) AS rn,
+        COUNT(DISTINCT mci.company_id) OVER (PARTITION BY a.id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mci ON a.id = mci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT * 
+    FROM RankedMovies
+    WHERE rn <= 5
+),
+PersonRoles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        MIN(rt.role) AS role
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id, ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        p.role,
+        COALESCE(COUNT(cm.company_id), 0) AS production_company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        TopMovies t
+    LEFT JOIN 
+        PersonRoles p ON t.id = p.movie_id
+    LEFT JOIN 
+        movie_companies cm ON t.id = cm.movie_id
+    LEFT JOIN 
+        company_name cn ON cm.company_id = cn.id
+    GROUP BY 
+        t.id, p.role
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.role,
+    md.production_company_count,
+    md.company_names
+FROM 
+    MovieDetails md
+WHERE 
+    (md.production_company_count > 1 OR md.role IS NULL)
+    AND (md.production_year BETWEEN 2000 AND 2023)
+ORDER BY 
+    md.production_year DESC,
+    md.title ASC
+LIMIT 10;

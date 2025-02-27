@@ -1,0 +1,45 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           SUM(o.o_totalprice) AS total_orders,
+           COUNT(o.o_orderkey) AS order_count,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+LargeLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           l.l_returnflag
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_orderkey, l.l_returnflag
+)
+SELECT c.c_name, 
+       cs.rank,
+       cl.net_revenue,
+       CASE 
+           WHEN cl.l_returnflag = 'R' THEN 'Returned' 
+           ELSE 'Not Returned' 
+       END AS return_status,
+       cd.total_orders,
+       cd.order_count,
+       cd.avg_order_value
+FROM CustomerOrderDetails cd
+JOIN RankedSuppliers cs ON cd.total_orders > 100000 AND cs.rank <= 3
+LEFT JOIN LargeLineItems cl ON cd.c_custkey = cl.l_orderkey
+WHERE cl.net_revenue IS NOT NULL OR cd.total_orders = 0
+ORDER BY cs.rank, cd.avg_order_value DESC;

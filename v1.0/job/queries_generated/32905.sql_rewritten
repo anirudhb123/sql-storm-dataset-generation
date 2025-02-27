@@ -1,0 +1,69 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.title) AS title_rank
+    FROM 
+        MovieHierarchy mh
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_member_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieRatings AS (
+    SELECT 
+        mi.movie_id,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN CAST(mi.info AS FLOAT) ELSE NULL END) AS avg_rating
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.level,
+    COALESCE(cd.cast_member_count, 0) AS cast_member_count,
+    COALESCE(cd.cast_names, 'No cast found') AS cast_names,
+    COALESCE(mr.avg_rating, 0) AS avg_rating
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastDetails cd ON rm.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieRatings mr ON rm.movie_id = mr.movie_id
+WHERE 
+    (rm.level = 0 OR rm.level IS NOT NULL) 
+ORDER BY 
+    rm.level, rm.title_rank;

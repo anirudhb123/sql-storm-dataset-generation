@@ -1,0 +1,38 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        CAST(NULL AS integer) AS parent_movie_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        (SELECT title FROM aka_title WHERE id = ml.linked_movie_id) AS movie_title,
+        (SELECT production_year FROM aka_title WHERE id = ml.linked_movie_id) AS production_year,
+        ml.movie_id AS parent_movie_id,
+        level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(ci.id) AS total_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS total_roles,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE NULL END) AS avg_order
+FROM MovieHierarchy mh
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN title t ON t.id = mh.movie_id
+LEFT JOIN movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+GROUP BY mh.movie_id, mh.movie_title, mh.production_year
+HAVING COUNT(ci.id) > 5
+ORDER BY total_cast_members DESC, mh.production_year DESC
+LIMIT 10;

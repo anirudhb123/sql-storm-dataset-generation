@@ -1,0 +1,45 @@
+WITH nation_summary AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+customer_orders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           AVG(o.o_totalprice) AS avg_order_price,
+           SUM(o.o_totalprice) AS total_order_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+lineitem_analysis AS (
+    SELECT l.l_orderkey,
+           COUNT(l.l_partkey) AS item_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name,
+       cs.c_name,
+       ns.supplier_count,
+       cs.total_order_price,
+       la.item_count,
+       la.total_revenue,
+       CASE 
+           WHEN la.total_revenue IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Generated'
+       END AS revenue_status
+FROM nation_summary ns
+JOIN customer_orders cs ON ns.n_nationkey = cs.c_custkey
+LEFT JOIN lineitem_analysis la ON la.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_custkey = cs.c_custkey
+)
+WHERE ns.total_acctbal > 1000.00
+ORDER BY ns.n_name, cs.c_name;

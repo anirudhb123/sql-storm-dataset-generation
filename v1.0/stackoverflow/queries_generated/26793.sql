@@ -1,0 +1,58 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.Id AS TagId,
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.Id, Tags.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagId,
+        TagName,
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 5  -- Focus on tags with more than 5 posts
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COALESCE(SUM(CASE WHEN VoteTypes.Name = 'UpMod' THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN VoteTypes.Name = 'DownMod' THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN 
+        VoteTypes ON Votes.VoteTypeId = VoteTypes.Id
+    GROUP BY 
+        Users.Id, Users.DisplayName
+)
+SELECT 
+    ua.DisplayName,
+    ua.PostsCreated,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    pt.TagName,
+    pt.PostCount AS TagPostCount
+FROM 
+    UserActivity ua
+JOIN 
+    PopularTags pt ON ua.PostsCreated > 0
+ORDER BY 
+    ua.TotalUpvotes DESC, 
+    pt.PostCount DESC
+LIMIT 10;
+
+This query benchmarks string processing by focusing on tags associated with posts, calculating user activity metrics, and leveraging window functions to rank tags based on their post counts.

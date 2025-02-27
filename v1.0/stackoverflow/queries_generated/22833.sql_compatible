@@ -1,0 +1,63 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+), 
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ClosedDate,
+        PH.CreationDate AS HistoryDate,
+        C.Name AS CloseReason
+    FROM Posts P
+    JOIN PostHistory PH ON PH.PostId = P.Id AND PH.PostHistoryTypeId = 10 
+    LEFT JOIN CloseReasonTypes C ON CAST(PH.Comment AS INTEGER) = C.Id 
+    WHERE P.ClosedDate IS NOT NULL
+), 
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes V
+    WHERE V.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+    GROUP BY V.PostId
+), 
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+
+SELECT 
+    R.DisplayName,
+    R.Reputation,
+    R.ReputationRank,
+    COALESCE(CP.PostId, 'No Closed Posts') AS ClosedPostId,
+    COALESCE(CP.Title, 'N/A') AS ClosedPostTitle,
+    COALESCE(CP.ClosedDate, 'N/A') AS ClosedPostDate,
+    COALESCE(CP.CloseReason, 'No Close Reason') AS CloseReason,
+    COALESCE(rv.TotalVotes, 0) AS RecentVotes,
+    COALESCE(rv.UpVotes, 0) AS RecentUpVotes,
+    COALESCE(rv.DownVotes, 0) AS RecentDownVotes,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+FROM RankedUsers R
+LEFT JOIN ClosedPosts CP ON CP.PostId IS NOT NULL
+LEFT JOIN RecentVotes rv ON rv.PostId = CP.PostId
+LEFT JOIN UserBadges UB ON UB.UserId = R.UserId
+WHERE R.ReputationRank <= 50
+    AND (R.Reputation > 1000 OR (R.Reputation = 0 AND R.DisplayName IS NOT NULL))
+ORDER BY R.Reputation DESC, CloseReason;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND P.Score > 10 -- Consider only questions with a score greater than 10
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        C.CloseReason AS Reason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::json->>'CloseReasonId'::int = C.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10  -- Only closed posts
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.OwnerDisplayName,
+    CP.ClosedDate,
+    CP.Reason,
+    UB.BadgeCount,
+    UB.BadgeNames
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+LEFT JOIN 
+    UserBadges UB ON RP.OwnerUserId = UB.UserId
+WHERE 
+    RP.Rank = 1 -- Get the latest post for each user
+ORDER BY 
+    RP.Score DESC NULLS LAST; -- Order by score, placing NULLs last

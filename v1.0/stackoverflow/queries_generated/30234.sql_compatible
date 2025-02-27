@@ -1,0 +1,82 @@
+
+WITH RECURSIVE TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation,
+        CAST(NULL AS VARCHAR(50)) AS ParentUser,
+        1 AS Level
+    FROM Users u
+    WHERE u.Reputation = (SELECT MAX(Reputation) FROM Users)
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        tu.DisplayName AS ParentUser,
+        tu.Level + 1 AS Level
+    FROM Users u
+    INNER JOIN TopUsers tu ON u.Reputation < tu.Reputation
+    WHERE tu.Level < 5  
+),
+MostActivePosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rn
+    FROM Posts p
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE u.Reputation > 1000
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    INNER JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE pht.Name = 'Post Closed'
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        AVG(u.Reputation) AS AverageUserReputation
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Users u ON v.UserId = u.Id
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.OwnerDisplayName
+),
+FinalReport AS (
+    SELECT 
+        tu.DisplayName AS TopUser,
+        COUNT(DISTINCT ma.PostId) AS ActivePostCount,
+        COUNT(DISTINCT cph.PostId) AS ClosedPostCount,
+        COUNT(DISTINCT pa.PostId) AS ActiveLastYearPosts
+    FROM TopUsers tu
+    LEFT JOIN MostActivePosts ma ON tu.Id = ma.OwnerUserId
+    LEFT JOIN ClosedPostHistory cph ON ma.PostId = cph.PostId AND cph.rn = 1
+    LEFT JOIN PostAnalytics pa ON tu.DisplayName = pa.OwnerDisplayName
+    GROUP BY tu.DisplayName
+)
+
+SELECT 
+    TopUser,
+    ActivePostCount,
+    ClosedPostCount,
+    ActiveLastYearPosts
+FROM FinalReport
+ORDER BY ActivePostCount DESC, ClosedPostCount DESC
+LIMIT 10;

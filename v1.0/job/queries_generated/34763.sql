@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Consider movies produced from the year 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        sub.title,
+        sub.production_year,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title sub ON ml.linked_movie_id = sub.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        sub.production_year >= 2000  -- Consider linked movies from the year 2000 onwards
+),
+
+ActorStats AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        AVG(COALESCE(m.production_year, 0)) AS average_production_year
+    FROM 
+        aka_name ka
+    LEFT JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title m ON ci.movie_id = m.id
+    GROUP BY 
+        ka.name
+),
+
+KeywordStats AS (
+    SELECT 
+        mk.keyword,
+        COUNT(DISTINCT mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.keyword
+),
+
+FinalReport AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        as.actor_name,
+        as.total_movies,
+        as.average_production_year,
+        ks.keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorStats as ON mh.movie_id = as.total_movies  -- Join with ActorStats on movie_id
+    LEFT JOIN 
+        KeywordStats ks ON mh.movie_id IN (SELECT mk.movie_id FROM movie_keyword mk WHERE mk.keyword_id IN (SELECT id FROM keyword WHERE keyword = 'Action')) 
+    ORDER BY 
+        mh.production_year DESC, as.total_movies DESC  -- Order by production year and number of movies
+)
+
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    actor_name,
+    total_movies,
+    average_production_year,
+    COALESCE(keyword_count, 0) AS keyword_count  -- Fallen back to 0 for NULL keyword counts
+FROM 
+    FinalReport
+WHERE 
+    production_year > 2010  -- Filter for movies produced after 2010
+    AND total_movies > 5  -- Filter for actors who have acted in more than 5 movies
+ORDER BY 
+    average_production_year DESC;

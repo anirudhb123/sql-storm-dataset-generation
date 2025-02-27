@@ -1,0 +1,54 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            MAX(Class) AS Class 
+        FROM Badges 
+        GROUP BY UserId
+    ) b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        UpVotes,
+        DownVotes,
+        BadgeClass,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UserStatistics
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.UpVotes,
+    tu.DownVotes,
+    CASE 
+        WHEN tu.BadgeClass = 1 THEN 'Gold'
+        WHEN tu.BadgeClass = 2 THEN 'Silver'
+        WHEN tu.BadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS TopBadge
+FROM TopUsers tu
+WHERE tu.Rank <= 10
+ORDER BY tu.Rank;

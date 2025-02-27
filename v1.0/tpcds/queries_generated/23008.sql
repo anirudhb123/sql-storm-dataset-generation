@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank,
+        COALESCE(NULLIF(ws.ws_quantity, 0), 1) AS QuantityNonZero
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year < 1980
+),
+SalesSummary AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_sales_price / QuantityNonZero) AS AdjustedSales,
+        COUNT(*) AS TotalSales
+    FROM 
+        RankedSales
+    WHERE 
+        SalesRank <= 5
+    GROUP BY 
+        web_site_sk
+),
+AverageIncome AS (
+    SELECT 
+        hd.hd_income_band_sk,
+        AVG(CASE WHEN c.c_customer_id IS NOT NULL THEN hd.hd_dep_count ELSE NULL END) AS AvgDependents
+    FROM 
+        household_demographics hd
+    LEFT JOIN 
+        customer c ON hd.hd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        hd.hd_income_band_sk
+),
+ReturnStats AS (
+    SELECT 
+        sr.customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS TotalReturns,
+        SUM(sr_return_amt_inc_tax) AS TotalReturnAmount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr.customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    ss.AdjustedSales,
+    ai.AvgDependents,
+    COALESCE(rs.TotalReturns, 0) AS TotalReturns,
+    COALESCE(rs.TotalReturnAmount, 0) AS TotalReturnAmount
+FROM 
+    customer c
+LEFT JOIN 
+    SalesSummary ss ON ss.web_site_sk = c.c_current_addr_sk
+LEFT JOIN 
+    AverageIncome ai ON ai.hd_income_band_sk = c.c_current_hdemo_sk
+LEFT JOIN 
+    ReturnStats rs ON rs.customer_sk = c.c_customer_sk
+WHERE 
+    (ss.AdjustedSales > 100 OR (ss.AdjustedSales IS NULL AND ai.AvgDependents IS NOT NULL))
+    AND (c.c_birth_year IS NOT NULL OR c.c_birth_month IS NULL)
+ORDER BY 
+    ss.AdjustedSales DESC NULLS LAST, c.c_customer_id;

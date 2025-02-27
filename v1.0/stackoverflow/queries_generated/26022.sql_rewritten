@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypeNames
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.Tags
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON ',' + p.Tags + ',' LIKE '%,' + t.TagName + ',%'
+    GROUP BY 
+        t.TagName
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND (v.VoteTypeId = 8 OR v.VoteTypeId = 9) 
+    GROUP BY 
+        u.DisplayName, u.Reputation
+    ORDER BY 
+        TotalBounties DESC, Reputation DESC
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.PostTypeNames,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    tu.PostsCount,
+    tu.TotalBounties
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStatistics ts ON ts.TagName IN (SELECT UNNEST(STRING_TO_ARRAY(rp.Tags, ',')))
+JOIN 
+    TopUsers tu ON tu.TotalBounties > 0
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

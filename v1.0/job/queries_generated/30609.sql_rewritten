@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movies_count,
+        SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS credited_roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+movie_details AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ai.actor_name, 'Unknown Actor') AS actor_name,
+        ai.movies_count,
+        ai.credited_roles
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_info ai ON mh.movie_id = ai.movies_count
+),
+
+ranked_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.movies_count DESC) AS rank_by_count
+    FROM 
+        movie_details md
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_name,
+    rm.movies_count,
+    rm.credited_roles,
+    CASE 
+        WHEN rm.credited_roles = 0 THEN 'No roles credited'
+        ELSE 'Roles credited: ' || rm.credited_roles::TEXT
+    END AS role_summary,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = rm.movie_id AND mi.info_type_id = 1) AS related_info_count 
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.rank_by_count <= 5  
+ORDER BY 
+    rm.production_year DESC, rm.movies_count DESC;

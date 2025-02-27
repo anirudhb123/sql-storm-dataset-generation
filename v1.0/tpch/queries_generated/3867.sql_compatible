@@ -1,0 +1,60 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT p.p_partkey) AS DistinctPartsSupplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpending
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY s.TotalSupplyCost DESC) AS SupplyRank
+    FROM SupplierStats s
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_totalprice > 1000 THEN 'High Value'
+            WHEN o.o_totalprice BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS OrderValueCategory
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(YEAR, -1, DATE '1998-10-01')
+)
+SELECT 
+    r.s_name,
+    s.TotalSupplyCost,
+    s.DistinctPartsSupplied,
+    o.c_name,
+    o.TotalOrders,
+    o.TotalSpending,
+    fo.OrderValueCategory
+FROM RankedSuppliers r
+JOIN SupplierStats s ON r.s_suppkey = s.s_suppkey
+FULL OUTER JOIN OrderSummary o ON o.TotalOrders > 0
+JOIN FilteredOrders fo ON fo.o_custkey = o.c_custkey
+WHERE s.TotalSupplyCost IS NOT NULL
+AND (s.DistinctPartsSupplied > 10 OR o.TotalOrders > 5)
+ORDER BY s.TotalSupplyCost DESC, o.TotalSpending DESC
+LIMIT 100;

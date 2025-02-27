@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) AND
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PostMetadata AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.PostRank,
+        rp.Upvotes,
+        rp.Downvotes,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) OVER (PARTITION BY rp.OwnerUserId), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY rp.OwnerUserId), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY rp.OwnerUserId), 0) AS BronzeBadges
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId
+),
+PostEngagement AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.ViewCount,
+        pm.PostRank,
+        pm.Upvotes,
+        pm.Downvotes,
+        CASE 
+            WHEN pm.Upvotes + pm.Downvotes > 0 THEN (1.0 * pm.Upvotes / (pm.Upvotes + pm.Downvotes)) 
+            ELSE NULL 
+        END AS UpvoteRatio,
+        pm.OwnerUserId,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pm.PostId) AS CommentCount
+    FROM 
+        PostMetadata pm
+)
+SELECT 
+    pe.PostId,
+    pe.Title,
+    pe.ViewCount,
+    pe.PostRank,
+    pe.Upvotes,
+    pe.Downvotes,
+    pe.UpvoteRatio,
+    pe.CommentCount,
+    CASE
+        WHEN pe.UpvoteRatio IS NULL THEN 'No votes yet'
+        WHEN pe.UpvoteRatio >= 0.75 THEN 'Highly upvoted'
+        WHEN pe.UpvoteRatio >= 0.5 THEN 'Moderately upvoted'
+        ELSE 'Mostly downvoted'
+    END AS EngagementStatus
+FROM 
+    PostEngagement pe
+WHERE 
+    pe.Upvotes > 0 OR pe.Downvotes > 0
+ORDER BY 
+    pe.PostRank ASC
+LIMIT 100;

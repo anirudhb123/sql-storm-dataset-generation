@@ -1,0 +1,111 @@
+-- Performance Benchmarking Query for the Stack Overflow schema
+
+WITH RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        p.ViewCount,
+        at.Name AS PostType,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM
+        Posts p
+    LEFT JOIN PostTypes at ON p.PostTypeId = at.Id
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBountyPerPost
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    GROUP BY
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseAndReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeletionCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 17 THEN 1 END) AS MigrationCount
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+),
+PostMetrics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        pha.CloseAndReopenCount,
+        pha.DeletionCount,
+        pha.MigrationCount,
+        ufa.UserId,
+        ufa.DisplayName,
+        ufa.Reputation,
+        ufa.PostCount,
+        ufa.TotalBounties,
+        ufa.AvgBountyPerPost
+    FROM
+        RecentPosts rp
+    JOIN PostHistoryAnalysis pha ON rp.PostId = pha.PostId
+    LEFT JOIN UserActivity ufa ON rp.AcceptedAnswerId = ufa.UserId 
+    WHERE
+        rp.ViewCount > 10
+),
+RankedPosts AS (
+    SELECT
+        *,
+        RANK() OVER (PARTITION BY PostId ORDER BY UpVoteCount DESC, CreationDate ASC) AS VoteRank
+    FROM
+        PostMetrics
+)
+SELECT
+    PostId,
+    Title,
+    CreationDate,
+    CommentCount,
+    UpVoteCount,
+    DownVoteCount,
+    CloseAndReopenCount,
+    DeletionCount,
+    MigrationCount,
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    TotalBounties,
+    AvgBountyPerPost
+FROM
+    RankedPosts
+WHERE
+    VoteRank = 1
+    AND (ViewCount > (SELECT AVG(ViewCount) FROM Posts) OR UpVoteCount > 0)
+ORDER BY
+    CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;
+
+This query incorporates several SQL constructs including:
+
+1. Common Table Expressions (CTEs) for organized subqueries.
+2. Correlated subqueries to calculate comment count and vote counts per post.
+3. Outer joins to include all posts regardless of associated votes/orders.
+4. Advanced predicates to filter posts that are either more popular than average or have received votes.
+5. Window functions to rank posts based on the number of upvotes and creation date.
+6. NULL handling using `COALESCE` for deriving meaningful metrics from possibly absent values. 
+
+The result would be a set of posts that are hot or trending, filtering out the top entries based on user engagement while also providing user activity analytics tied to each post.

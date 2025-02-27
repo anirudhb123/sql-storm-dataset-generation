@@ -1,0 +1,68 @@
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        p.ClosedDate,
+        LEFT(p.Body, 100) AS PostSnippet
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ActiveComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ') AS AllComments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS CloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS DeleteDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.PostId,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+        WHEN ph.ReopenDate IS NOT NULL THEN 'Reopened'
+        ELSE 'Active' 
+    END AS PostStatus,
+    COALESCE(ac.CommentCount, 0) AS CommentCount,
+    COALESCE(ac.AllComments, 'No comments') AS AllComments,
+    ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY up.Score DESC) AS Rank,
+    LEAD(up.CreationDate) OVER (PARTITION BY up.UserId ORDER BY up.CreationDate) AS NextPostDate,
+    CASE 
+        WHEN up.PostTypeId = 1 THEN 'Question'
+        WHEN up.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other'
+    END AS PostTypeDescription
+FROM 
+    UserPosts up
+LEFT JOIN 
+    ActiveComments ac ON up.PostId = ac.PostId
+LEFT JOIN 
+    PostHistoryDetails ph ON up.PostId = ph.PostId
+WHERE 
+    (p.Score >= 0 OR (p.ClosedDate IS NOT NULL AND p.Score < 0)) AND
+    (ph.CloseDate IS NULL OR ph.ReopenDate IS NOT NULL)
+ORDER BY 
+    up.UserId, up.Score DESC;

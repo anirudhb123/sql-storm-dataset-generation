@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COALESCE(MAX(l.l_discount), 0) AS max_discount,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_suppkey = l.l_suppkey AND l.l_quantity > 100
+    WHERE 
+        p.p_size > 10
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+        AND COUNT(DISTINCT ps.ps_suppkey) > 5
+), 
+ActiveOrders AS (
+    SELECT 
+        DISTINCT o.o_orderkey, 
+        o.o_orderdate, 
+        DATEADD(day, 7, o.o_orderdate) AS expected_ship_date
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN '1997-01-01' AND '1998-10-01'
+), 
+FinalSupplierInfo AS (
+    SELECT 
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        RankedSuppliers s
+    LEFT JOIN 
+        ActiveOrders o ON s.s_suppkey = o.o_orderkey
+    WHERE 
+        s.acctbal_rank <= 5
+    GROUP BY 
+        s.s_name, s.s_acctbal
+)
+
+SELECT 
+    p.p_name,
+    p.total_cost,
+    p.max_discount,
+    s.s_name,
+    s.order_count
+FROM 
+    PartInfo p
+JOIN 
+    FinalSupplierInfo s ON p.supplier_count = s.order_count
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM lineitem li 
+        WHERE li.l_orderkey IN (SELECT o.o_orderkey FROM ActiveOrders o WHERE o.expected_ship_date < '1998-10-01')
+        AND li.l_returnflag = 'N'
+    )
+ORDER BY 
+    p.total_cost DESC, 
+    s.order_count ASC
+LIMIT 100;

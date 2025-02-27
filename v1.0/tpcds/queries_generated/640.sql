@@ -1,0 +1,41 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity,
+        AVG(ws_sales_price) OVER (PARTITION BY ws_item_sk) AS avg_price
+    FROM 
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+)
+SELECT 
+    item.i_item_id,
+    item.i_item_desc,
+    COALESCE(total_sales.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(total_sales.avg_price, 0) AS avg_sales_price,
+    item.i_current_price,
+    item.i_current_price - COALESCE(total_sales.avg_price, 0) AS price_difference
+FROM 
+    item
+LEFT JOIN (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_sales_price) AS avg_price
+    FROM 
+        ranked_sales
+    WHERE 
+        sales_rank = 1
+    GROUP BY 
+        ws_item_sk
+) total_sales ON item.i_item_sk = total_sales.ws_item_sk
+WHERE 
+    item.i_current_price IS NOT NULL
+ORDER BY 
+    price_difference DESC
+LIMIT 10;
+

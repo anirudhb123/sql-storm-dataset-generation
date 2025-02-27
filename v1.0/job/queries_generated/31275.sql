@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')  -- Select only movies
+   
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 3  -- Limit to 3 levels deep for hierarchy
+)
+
+SELECT 
+    mn.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keyword_list,
+    AVG(pi.rating) FILTER (WHERE pi.rating IS NOT NULL) AS avg_person_rating, -- Conditional aggregation
+    CASE 
+        WHEN m.production_year < 2000 THEN 'Before 2000'
+        WHEN m.production_year BETWEEN 2000 AND 2010 THEN '2000-2010'
+        ELSE 'After 2010'
+    END AS production_period,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY kw.keyword) AS keyword_rank
+FROM 
+    MovieHierarchy m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    aka_name mn ON cc.subject_id = mn.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    (SELECT person_id, AVG(rating) AS rating 
+     FROM person_info
+     GROUP BY person_id) pi ON mn.person_id = pi.person_id
+WHERE 
+    mn.name IS NOT NULL AND 
+    mn.name <> ''
+GROUP BY 
+    mn.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 3  -- Filter groups that have more than 3 unique keywords
+ORDER BY 
+    production_year DESC, keyword_count DESC;

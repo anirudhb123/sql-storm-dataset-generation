@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+QualifiedParts AS (
+    SELECT p.p_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice BETWEEN 10.00 AND 100.00
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+)
+SELECT
+    r.r_name AS region_name,
+    SUM(ts.total_sales) AS region_sales,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+    MIN(p.p_retailprice) AS lowest_price,
+    MAX(p.p_retailprice) AS highest_price
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN QualifiedParts p ON s.s_suppkey = p.p_partkey
+LEFT JOIN TotalSales ts ON ts.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+)
+GROUP BY r.r_name
+HAVING SUM(ts.total_sales) IS NOT NULL
+ORDER BY region_sales DESC;

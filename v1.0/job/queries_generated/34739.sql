@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT(m.title, ' (SE ', c.season_nr, 'E', c.episode_nr, ')') AS movie_title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        complete_cast c
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+    WHERE 
+        c.season_nr IS NOT NULL
+)
+
+SELECT 
+    h.movie_title,
+    h.production_year,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = h.movie_id) AS cast_count,
+    COALESCE(n.name, 'Unknown') AS lead_actor,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY h.production_year ORDER BY h.level DESC) AS rank_within_year
+FROM 
+    MovieHierarchy h
+LEFT JOIN 
+    cast_info c ON h.movie_id = c.movie_id 
+LEFT JOIN 
+    aka_name n ON c.person_id = n.person_id AND n.id IN (
+        SELECT 
+            person_id 
+        FROM 
+            role_type rt 
+        WHERE 
+            rt.role ILIKE '%lead%'
+    )
+LEFT JOIN 
+    movie_keyword mk ON h.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    h.level = 1 OR h.production_year IS NOT NULL
+GROUP BY 
+    h.movie_id, h.movie_title, h.production_year, n.name
+HAVING 
+    COUNT(DISTINCT k.keyword) > 2
+ORDER BY 
+    h.production_year DESC, rank_within_year;

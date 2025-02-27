@@ -1,0 +1,98 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CombinedCast AS (
+    SELECT 
+        cc.movie_id,
+        c.person_id,
+        ak.name AS actor_name,
+        ct.kind AS cast_type,
+        COALESCE(c.note, 'No additional info') AS cast_note
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON ct.id = c.person_role_id
+),
+MovieKeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(co.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        ca.actor_name,
+        ca.cast_type,
+        ca.cast_note,
+        mki.keywords,
+        mci.companies,
+        (SELECT 
+            COUNT(*) 
+         FROM 
+            complete_cast cc 
+         WHERE 
+            cc.movie_id = rt.title_id) AS total_cast_count,
+        EXISTS (
+            SELECT 1 
+            FROM 
+                movie_info mi 
+            WHERE 
+                mi.movie_id = rt.title_id AND mi.info_type_id = 1 
+        ) AS has_trivia
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CombinedCast ca ON rt.title_id = ca.movie_id
+    LEFT JOIN 
+        MovieKeywordInfo mki ON rt.title_id = mki.movie_id
+    LEFT JOIN 
+        MovieCompanies mci ON rt.title_id = mci.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    cast_type,
+    cast_note,
+    keywords,
+    companies,
+    total_cast_count,
+    has_trivia
+FROM 
+    FinalOutput
+WHERE 
+    (production_year > 2000 OR keywords IS NOT NULL)
+    AND NOT (actor_name LIKE '%John%' AND production_year < 2010)
+ORDER BY 
+    production_year DESC, title ASC
+LIMIT 50;

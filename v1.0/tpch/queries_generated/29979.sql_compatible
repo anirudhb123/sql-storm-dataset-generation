@@ -1,0 +1,75 @@
+
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_retailprice,
+        supplier.s_name AS supplier_name,
+        nation.n_name AS nation_name,
+        region.r_name AS region_name,
+        p.p_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier ON ps.ps_suppkey = supplier.s_suppkey
+    JOIN 
+        nation ON supplier.s_nationkey = nation.n_nationkey
+    JOIN 
+        region ON nation.n_regionkey = region.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        o.o_comment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderpriority, o.o_comment
+),
+Results AS (
+    SELECT 
+        pd.p_name AS part_name,
+        pd.supplier_name,
+        co.c_name AS customer_name,
+        co.o_totalprice AS order_total_price,
+        co.total_lineitem_price,
+        pd.p_retailprice,
+        CASE 
+            WHEN co.o_totalprice > co.total_lineitem_price THEN 'Overpaid'
+            WHEN co.o_totalprice < co.total_lineitem_price THEN 'Underpaid'
+            ELSE 'Correctly Paid'
+        END AS payment_status,
+        TRIM(CONCAT(pd.p_comment, ' - ', COALESCE(co.o_comment, 'No comment'))) AS final_comment
+    FROM 
+        PartDetails pd
+    LEFT JOIN 
+        CustomerOrders co ON pd.supplier_name LIKE CONCAT('%', co.customer_name, '%')
+)
+SELECT 
+    part_name,
+    supplier_name,
+    customer_name,
+    order_total_price,
+    total_lineitem_price,
+    payment_status,
+    final_comment
+FROM 
+    Results
+WHERE 
+    payment_status != 'Correctly Paid'
+ORDER BY 
+    order_total_price DESC, part_name ASC;

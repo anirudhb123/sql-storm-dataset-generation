@@ -1,0 +1,47 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        0 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2400 AND 2420
+    GROUP BY s_store_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_net_paid * 1.1) AS total_sales, 
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions, 
+        level + 1
+    FROM store_sales ss
+    JOIN sales_summary ss_prev ON ss.s_store_sk = ss_prev.s_store_sk
+    WHERE level < 3
+    AND ss.ss_sold_date_sk BETWEEN 2400 AND 2420
+    GROUP BY ss.s_store_sk, level
+), ranked_sales AS (
+    SELECT 
+        s.s_store_sk,
+        s.total_sales,
+        s.total_transactions,
+        DENSE_RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM sales_summary s
+)
+SELECT 
+    w.w_warehouse_id,
+    r.total_sales,
+    r.total_transactions,
+    COALESCE(r.sales_rank, 0) AS sales_rank,
+    CASE 
+        WHEN r.total_sales IS NULL THEN 'No Sales'
+        WHEN r.total_sales > 10000 THEN 'High'
+        WHEN r.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM warehouse w
+LEFT JOIN ranked_sales r ON w.w_warehouse_sk = r.s_store_sk 
+WHERE w.w_state = 'CA' 
+  AND (r.total_sales IS NULL OR r.total_sales > 5000)
+ORDER BY r.total_sales DESC, w.w_warehouse_id;

@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        rs.total_sales
+    FROM 
+        customer c
+    JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    AVG(ws.ws_sales_price) AS avg_order_value,
+    MAX(ws.ws_net_profit) AS max_profit,
+    MIN(ws.ws_net_paid) AS min_paid
+FROM 
+    TopCustomers tc
+JOIN 
+    web_sales ws ON tc.total_sales = ws.ws_ext_sales_price
+JOIN 
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state
+ORDER BY 
+    total_sales_amount DESC;

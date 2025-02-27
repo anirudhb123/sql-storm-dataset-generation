@@ -1,0 +1,76 @@
+
+WITH RECURSIVE ActorMovies AS (
+    SELECT 
+        a.id AS actor_id, 
+        ak.name AS actor_name, 
+        c.movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        name a ON ak.person_id = a.imdb_id
+    WHERE 
+        ak.name IS NOT NULL
+), 
+FilteredMovies AS (
+    SELECT 
+        am.actor_id, 
+        am.actor_name, 
+        am.title, 
+        am.production_year,
+        am.rank
+    FROM 
+        ActorMovies am
+    WHERE 
+        am.rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+AggregatedInfo AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        COUNT(DISTINCT cm.company_id) AS production_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies cm ON t.id = cm.movie_id
+    WHERE 
+        (t.production_year >= 2000 OR mi.info_type_id IS NULL)
+    GROUP BY 
+        t.id, t.title, t.production_year, mk.keywords
+)
+SELECT 
+    am.actor_id, 
+    am.actor_name, 
+    ai.title, 
+    ai.production_year, 
+    ai.keywords, 
+    ai.production_count
+FROM 
+    FilteredMovies am
+JOIN 
+    AggregatedInfo ai ON am.movie_id = ai.movie_id
+ORDER BY 
+    am.actor_name, ai.production_year DESC;

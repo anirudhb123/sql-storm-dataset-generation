@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, CAST(NULL AS VARCHAR) AS parent_supplier
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_name
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+    WHERE s.s_acctbal > 5000
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING total_value > 50000
+)
+SELECT 
+    r.r_name, 
+    n.n_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(p.total_supplycost, 0)) AS total_supplycost,
+    MAX(COALESCE(hvo.total_value, 0)) AS max_order_value,
+    STRING_AGG(DISTINCT sh.s_name, ', ') AS suppliers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN PartStats p ON r.r_regionkey = (SELECT n.r_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN HighValueOrders hvo ON hvo.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) <> 0
+ORDER BY total_supplycost DESC, max_order_value ASC;

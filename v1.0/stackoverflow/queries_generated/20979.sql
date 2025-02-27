@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+),
+UserBadgeSummary AS (
+    SELECT 
+        b.UserId, 
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    rp.Score,
+    COALESCE(cp.CloseDate, 'No Closure') AS CloseDate,
+    COALESCE(cp.CloseReason, 'Not Applicable') AS CloseReason,
+    u.UserDisplayName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    VoteSummary vs ON rp.PostId = vs.PostId
+LEFT JOIN 
+    ClosedPostDetails cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    Users u ON rp.Score > 0 AND u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadgeSummary ub ON u.Id = ub.UserId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.CreationDate DESC
+LIMIT 100;
+

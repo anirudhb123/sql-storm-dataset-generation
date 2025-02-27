@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment,
+           CAST(s_name AS varchar) AS full_name,
+           1 AS level
+    FROM supplier
+    WHERE s_acctbal >= (
+        SELECT AVG(s_acctbal) 
+        FROM supplier
+    )
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment,
+           CONCAT(sh.full_name, ' -> ', s.s_name) AS full_name,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+PartStats AS (
+    SELECT p.p_mfgr, SUM(ps.ps_availqty) AS total_avail,
+           AVG(ps.ps_supplycost) AS avg_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_mfgr
+),
+RegionalOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           n.n_name AS region, c.c_name AS customer_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderdate > (CAST('1998-10-01' AS DATE) - INTERVAL '1 year')
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING AVG(o.o_totalprice) IS NOT NULL
+)
+SELECT r.region, COUNT(DISTINCT co.c_custkey) AS distinct_customers,
+       SUM(co.total_spent) AS total_revenue,
+       MAX(ps.total_avail) AS max_available_parts,
+       MIN(ps.avg_cost) AS min_average_cost,
+       COUNT(DISTINCT sh.s_suppkey) AS total_suppliers
+FROM RegionalOrders r
+JOIN CustomerOrders co ON r.customer_name = co.c_custkey
+JOIN PartStats ps ON r.region = ps.p_mfgr
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = co.c_custkey
+WHERE COALESCE(sh.level, 0) > 1
+AND LENGTH(r.region) > 3
+GROUP BY r.region
+ORDER BY total_revenue DESC, distinct_customers ASC
+LIMIT 10 OFFSET 5;

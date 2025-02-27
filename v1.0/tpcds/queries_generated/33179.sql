@@ -1,0 +1,37 @@
+
+WITH RECURSIVE sku_sales AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           SUM(ws.ws_net_profit) AS total_net_profit, 
+           DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM customer AS c
+    JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING SUM(ws.ws_net_profit) > 0
+), sku_inventory AS (
+    SELECT i.i_item_sk, i.i_rec_start_date, 
+           SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM item AS i
+    JOIN inventory AS inv ON i.i_item_sk = inv.inv_item_sk
+    WHERE inv.inv_date_sk IN (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY i.i_item_sk, i.i_rec_start_date
+), sku_returns AS (
+    SELECT sr_item_sk, SUM(sr_return_quantity) AS total_returned
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT c.c_first_name, c.c_last_name, 
+       COALESCE(sku_sales.total_net_profit, 0) AS total_net_profit,
+       COALESCE(si.total_quantity, 0) AS total_quantity_on_hand,
+       COALESCE(sr.total_returned, 0) AS total_returns,
+       CASE 
+           WHEN COALESCE(sku_sales.total_net_profit, 0) > 1000 THEN 'High Value Customer'
+           ELSE 'Standard Customer'
+       END AS customer_segment
+FROM customer AS c
+LEFT JOIN sku_sales ON c.c_customer_sk = sku_sales.c_customer_sk
+LEFT JOIN sku_inventory AS si ON si.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales AS ws WHERE ws.ws_ship_customer_sk = c.c_customer_sk)
+LEFT JOIN sku_returns AS sr ON sr.sr_item_sk = si.i_item_sk
+WHERE c.c_birth_year BETWEEN 1980 AND 2000
+ORDER BY total_net_profit DESC, c.c_last_name ASC
+LIMIT 50;

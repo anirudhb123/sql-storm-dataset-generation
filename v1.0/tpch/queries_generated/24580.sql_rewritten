@@ -1,0 +1,70 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+),
+supplier_part AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    WHERE ps.ps_supplycost IS NOT NULL
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+high_value_nations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING SUM(s.s_acctbal) > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+),
+distinct_line_items AS (
+    SELECT DISTINCT
+        l.l_orderkey,
+        l.l_partkey
+    FROM lineitem l
+    WHERE l.l_discount IS NOT NULL AND l.l_returnflag = 'N'
+),
+fetched_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice,
+        ro.o_orderdate,
+        CASE 
+            WHEN ro.o_orderdate < cast('1998-10-01' as date) - INTERVAL '30 days' THEN 'OLD'
+            ELSE 'NEW'
+        END AS order_age
+    FROM ranked_orders ro
+    WHERE ro.price_rank = 1
+),
+consolidated_data AS (
+    SELECT 
+        fn.n_name AS nation_name,
+        fo.o_orderkey,
+        fo.o_totalprice,
+        fo.order_age,
+        sp.total_avail_qty,
+        sp.avg_supply_cost
+    FROM fetched_orders fo
+    LEFT JOIN high_value_nations fn ON fo.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = fn.n_nationkey))
+    LEFT JOIN supplier_part sp ON sp.ps_partkey IN (SELECT li.l_partkey FROM distinct_line_items li WHERE li.l_orderkey = fo.o_orderkey)
+)
+SELECT 
+    cd.nation_name,
+    COUNT(DISTINCT cd.o_orderkey) AS order_count,
+    AVG(cd.o_totalprice) AS avg_order_price,
+    SUM(cd.total_avail_qty * CASE WHEN cd.avg_supply_cost IS NOT NULL THEN cd.avg_supply_cost ELSE 0 END) AS weighted_supply_cost
+FROM consolidated_data cd
+GROUP BY cd.nation_name
+HAVING COUNT(DISTINCT cd.o_orderkey) > 10
+ORDER BY avg_order_price DESC
+LIMIT 10;

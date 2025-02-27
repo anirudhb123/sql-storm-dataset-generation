@@ -1,0 +1,87 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name IS NOT NULL
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND 
+        AVG(o.o_totalprice) > 1000
+), 
+LineItemAnalytics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    INNER JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate < DATE '1998-10-01' 
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+)
+SELECT 
+    cu.c_custkey,
+    cu.order_count,
+    cu.total_spent,
+    ps.s_name AS top_supplier,
+    hp.p_name AS high_value_part,
+    la.net_revenue,
+    la.last_ship_date
+FROM 
+    CustomerOrders cu
+LEFT JOIN 
+    RankedSuppliers ps ON cu.order_count = (SELECT MAX(cu2.order_count) FROM CustomerOrders cu2 WHERE cu2.c_custkey = cu.c_custkey) 
+LEFT JOIN 
+    HighValueParts hp ON hp.supplier_count > 10
+LEFT JOIN 
+    LineItemAnalytics la ON la.l_orderkey = (SELECT MAX(l.l_orderkey) FROM lineitem l WHERE l.l_shipdate < la.last_ship_date)
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM supplier s 
+        WHERE s.s_suppkey = ps.s_suppkey AND s.s_acctbal IS NOT NULL
+    )
+ORDER BY 
+    cu.total_spent DESC,
+    hp.p_retailprice ASC;

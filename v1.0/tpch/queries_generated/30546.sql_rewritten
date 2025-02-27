@@ -1,0 +1,55 @@
+WITH RECURSIVE recent_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    INNER JOIN recent_orders ro ON o.o_orderkey = ro.o_orderkey + 1
+), 
+
+supplier_parts AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_availqty) AS total_available
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+), 
+
+customer_purchases AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+), 
+
+avg_price_per_part AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+
+SELECT 
+    n.n_name,
+    p.p_name,
+    COALESCE(cp.total_spent, 0) AS total_spent,
+    COALESCE(sp.total_available, 0) AS total_available,
+    ap.avg_supplycost,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY p.p_retailprice DESC) AS rank_per_region
+FROM part p
+LEFT JOIN supplier_parts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN customer_purchases cp ON cp.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'France')
+)
+LEFT JOIN nation n ON p.p_brand = n.n_name
+LEFT JOIN avg_price_per_part ap ON p.p_partkey = ap.ps_partkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_type LIKE '%metal%')
+OR n.r_name IN (SELECT r.r_name FROM region r WHERE r.r_comment IS NOT NULL)
+
+ORDER BY n.n_name, total_spent DESC, total_available DESC;

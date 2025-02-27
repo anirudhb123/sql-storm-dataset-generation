@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_name, 
+        0 AS level
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk, 
+        sh.s_store_name, 
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.s_store_sk = s.s_store_sk
+    WHERE 
+        s.s_closed_date_sk IS NULL
+), temp_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001
+        AND ws.ws_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_carrier = 'UPS')
+    GROUP BY 
+        ws.ws_item_sk
+), ranked_sales AS (
+    SELECT 
+        ti.i_item_id,
+        ts.total_quantity,
+        ts.total_sales,
+        ROW_NUMBER() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        temp_sales ts
+    JOIN 
+        item ti ON ts.ws_item_sk = ti.i_item_sk
+    WHERE 
+        ts.rn = 1
+)
+SELECT 
+    sh.s_store_name,
+    rs.sales_rank,
+    rs.total_quantity,
+    rs.total_sales,
+    CASE 
+        WHEN rs.total_sales >= 10000 THEN 'High Performer'
+        WHEN rs.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS performance_category,
+    COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+FROM 
+    sales_hierarchy sh
+LEFT JOIN 
+    ranked_sales rs ON sh.s_store_sk = rs.i_item_id
+LEFT JOIN 
+    store_sales ss ON rs.i_item_id = ss.ss_item_sk
+WHERE 
+    sh.level > 0  
+GROUP BY 
+    sh.s_store_name, rs.sales_rank, rs.total_quantity, rs.total_sales
+ORDER BY 
+    sh.s_store_name, rs.sales_rank;

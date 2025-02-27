@@ -1,0 +1,73 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        ps.OwnerUserId,
+        ps.TotalPosts,
+        ps.Questions,
+        ps.Answers,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+    FROM PostStatistics ps
+    LEFT JOIN UserBadges ub ON ps.OwnerUserId = ub.UserId
+),
+MaxPostsByUser AS (
+    SELECT 
+        OwnerUserId, 
+        MAX(TotalPosts) AS MaxPosts
+    FROM UserEngagement
+    GROUP BY OwnerUserId
+)
+SELECT 
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.Questions,
+    ue.Answers,
+    ue.BadgeCount,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges,
+    CASE 
+        WHEN ue.TotalPosts IS NULL THEN 'No Activity'
+        WHEN ue.TotalPosts > 100 THEN 'Top Contributor'
+        ELSE 'Regular User'
+    END AS EngagementLevel,
+    CASE 
+        WHEN (SELECT COUNT(*) FROM Votes v WHERE v.UserId = ue.UserId AND v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days') > 5 THEN 'Active Voter'
+        ELSE 'Infrequent Voter'
+    END AS VotingActivity,
+    (SELECT STRING_AGG(pt.Name, ', ') 
+     FROM PostHistory ph
+     JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+     WHERE ph.UserId = ue.UserId
+     AND ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+     GROUP BY ph.UserId) AS RecentPostHistory
+FROM UserEngagement ue
+LEFT JOIN MaxPostsByUser mp ON ue.OwnerUserId = mp.OwnerUserId
+WHERE 
+    (mp.MaxPosts > 50 OR ue.BadgeCount > 10)
+    AND ue.BadgeCount IS NOT NULL
+ORDER BY ue.TotalPosts DESC;

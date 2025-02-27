@@ -1,0 +1,77 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ABS(c.c_birth_month - EXTRACT(MONTH FROM DATE '2002-10-01')) AS month_difference,
+        CASE 
+            WHEN c.c_birth_year < 1980 THEN 'Baby Boomer'
+            WHEN c.c_birth_year BETWEEN 1980 AND 1996 THEN 'Millennial'
+            WHEN c.c_birth_year > 1996 THEN 'Gen Z'
+            ELSE 'Unknown'
+        END AS generational_label
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_country = 'USA' 
+        AND cd.cd_marital_status = 'M'
+),
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sales_price) AS max_order_value,
+        MIN(ws.ws_sales_price) AS min_order_value
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.ca_city,
+        ci.ca_state,
+        sd.total_spent,
+        sd.total_orders,
+        sd.max_order_value,
+        sd.min_order_value,
+        ci.generational_label
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesData sd ON ci.c_customer_id = sd.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    ca_city,
+    ca_state,
+    total_spent,
+    CASE 
+        WHEN total_spent IS NULL THEN 'No Purchases'
+        WHEN total_spent < 100 THEN 'Low Spender'
+        WHEN total_spent BETWEEN 100 AND 500 THEN 'Medium Spender'
+        WHEN total_spent > 500 THEN 'High Spender'
+    END AS spending_category,
+    total_orders,
+    max_order_value,
+    min_order_value,
+    generational_label
+FROM 
+    CombinedData
+ORDER BY 
+    total_spent DESC NULLS LAST;

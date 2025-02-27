@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost, 
+           p.p_name, p.p_brand, p.p_type, p.p_size, p.p_container,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 1 AND 50
+),
+
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+)
+
+SELECT r.r_name, COUNT(DISTINCT cs.c_custkey) AS unique_customers, 
+       SUM(cs.total_revenue) AS total_revenue, 
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+       STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+JOIN CustomerOrderStats cs ON cs.c_custkey = c.c_custkey
+JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size BETWEEN 1 AND 50)
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN SupplyChain sc ON ps.ps_partkey = sc.ps_partkey
+WHERE cs.total_revenue > 10000
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

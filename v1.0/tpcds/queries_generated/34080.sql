@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        ws_ext_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_ext_sales_price DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+ReturnsCTE AS (
+    SELECT 
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        sr_order_number
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CombinedSales AS (
+    SELECT 
+        s.ws_order_number,
+        SUM(COALESCE(s.ws_quantity, 0)) AS total_sales_quantity,
+        SUM(s.ws_ext_sales_price) AS total_sales_price,
+        SUM(COALESCE(r.sr_return_quantity, 0)) AS total_returned_quantity,
+        SUM(COALESCE(r.sr_return_amt, 0)) AS total_returned_price
+    FROM 
+        SalesCTE s
+    LEFT JOIN 
+        ReturnsCTE r ON s.ws_order_number = r.sr_order_number
+    GROUP BY 
+        s.ws_order_number
+)
+SELECT 
+    cs.ws_order_number,
+    cs.total_sales_quantity,
+    cs.total_sales_price,
+    cs.total_returned_quantity,
+    (cs.total_sales_price - cs.total_returned_price) AS net_revenue,
+    CASE 
+        WHEN cs.total_sales_price IS NULL OR cs.total_sales_price = 0 THEN 0
+        ELSE (cs.total_returned_price / cs.total_sales_price) * 100 
+    END AS return_ratio
+FROM 
+    CombinedSales cs
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_order_number = cs.ws_order_number)
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_marital_status = 'M'
+ORDER BY 
+    net_revenue DESC
+LIMIT 100;

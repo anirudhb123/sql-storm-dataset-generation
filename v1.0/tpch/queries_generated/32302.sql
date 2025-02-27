@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 100000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 50000.00 AND sh.level < 5
+),
+AggregateOrders AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+TopCustomers AS (
+    SELECT a.o_custkey, a.order_count, a.total_spent
+    FROM AggregateOrders a
+    ORDER BY a.total_spent DESC
+    LIMIT 10
+)
+SELECT 
+    n.n_name AS nation_name,
+    ARRAY_AGG(DISTINCT sh.s_name) AS suppliers,
+    COUNT(DISTINCT tc.o_custkey) AS unique_customers,
+    SUM(COALESCE(ps.ps_supplycost, 0)) AS total_supply_cost
+FROM nation n
+LEFT JOIN supplier sh ON n.n_nationkey = sh.s_nationkey 
+LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN (
+    SELECT o.o_custkey
+    FROM TopCustomers tc
+) AS tc ON tc.o_custkey = CASE
+    WHEN n.n_nationkey IS NULL THEN NULL
+    ELSE tc.o_custkey
+END
+GROUP BY n.n_name
+HAVING COUNT(sh.s_suppkey) > 5
+ORDER BY unique_customers DESC;

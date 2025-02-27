@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieStats AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        AVG(coalesce(mg.movie_rating, 0)) AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            AVG(rating) AS movie_rating 
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') 
+         GROUP BY 
+            movie_id) mg ON t.id = mg.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FinalReport AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.num_cast_members,
+        ms.num_companies,
+        letter_rating(mg.avg_rating) AS rating_category,
+        rm.keywords
+    FROM 
+        MovieStats ms
+    LEFT JOIN 
+        RankedMovies rm ON ms.title = rm.title AND ms.production_year = rm.production_year
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.num_cast_members,
+    fr.num_companies,
+    fr.rating_category,
+    COALESCE(fr.keywords, 'No Keywords Available') AS keywords
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.production_year DESC, fr.num_cast_members DESC;

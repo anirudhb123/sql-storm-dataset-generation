@@ -1,0 +1,40 @@
+WITH RECURSIVE supplier_rank AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+recent_order_dates AS (
+    SELECT o.o_orderkey, o.o_orderdate,
+           DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supply_count, 
+       COALESCE(SUM(ls.net_revenue), 0) AS total_net_revenue,
+       MAX(sr.rank) AS max_supplier_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem_summary ls ON ps.ps_partkey = ls.l_orderkey
+LEFT JOIN supplier_rank sr ON ps.ps_suppkey = sr.s_suppkey
+LEFT JOIN high_value_customers hvc ON hvc.total_spent > p.p_retailprice
+WHERE p.p_size IS NOT NULL 
+      AND (ps.ps_availqty > 100 OR p.p_comment LIKE '%fragile%')
+      AND (hvc.c_custkey IS NULL OR EXISTS (SELECT 1 FROM recent_order_dates rod 
+                                              WHERE rod.o_orderkey = ls.l_orderkey))
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+ORDER BY total_net_revenue DESC NULLS LAST;

@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+RelevantPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        PH.Level,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        COALESCE(V.TotalVotes, 0) AS TotalVotes,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecursivePostHierarchy PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        PostVotes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1 
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(U.Reputation) AS TotalReputation
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        TotalReputation DESC
+    LIMIT 10
+)
+SELECT 
+    RP.Title AS QuestionTitle,
+    RP.CreationDate,
+    RP.Level,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.TotalVotes,
+    RP.AnswerCount,
+    RP.CommentCount,
+    RP.FavoriteCount,
+    TU.DisplayName AS TopUserName,
+    TU.TotalReputation
+FROM 
+    RelevantPosts RP
+LEFT JOIN 
+    TopUsers TU ON RP.OwnerUserId = TU.UserId
+WHERE 
+    RP.UpVotes > 5 AND RP.AnswerCount > 2
+ORDER BY 
+    RP.CreationDate DESC;

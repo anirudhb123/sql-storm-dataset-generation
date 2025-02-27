@@ -1,0 +1,79 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        0 AS Level
+    FROM
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserVoteActivity AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostHistoryWithLatest AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(uh.UpVotes, 0) AS UpVotes,
+    COALESCE(uh.DownVotes, 0) AS DownVotes,
+    p.AcceptedAnswerId,
+    ph.HistoryDetail,
+    r.Level
+FROM 
+    Posts p
+LEFT JOIN 
+    UserVoteActivity uh ON p.OwnerUserId = uh.UserId
+LEFT JOIN 
+    (SELECT 
+         PostId, 
+         UserId, 
+         PostHistoryTypeId,
+         JSON_AGG(CAST(CreationDate AS TEXT)) AS HistoryDetail
+     FROM 
+         PostHistoryWithLatest
+     WHERE 
+         rn = 1
+     GROUP BY 
+         PostId, UserId, PostHistoryTypeId) ph ON p.Id = ph.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+WHERE 
+    p.CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'
+AND 
+    (p.Title ILIKE '%performance%' OR p.Tags ILIKE '%performance%')
+ORDER BY 
+    r.Level, p.Title;

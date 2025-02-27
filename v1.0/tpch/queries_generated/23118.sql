@@ -1,0 +1,104 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_supply_cost) FROM (SELECT SUM(ps_supplycost * ps_availqty) AS total_supply_cost FROM partsupp GROUP BY ps_partkey) AS avg_cost)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplierCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_discount > 0.5 THEN 'High Discount'
+            ELSE 'Regular Discount'
+        END AS discount_category
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_tax IS NULL OR l.l_tax < 0.1
+),
+FinalReport AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        pp.p_partkey,
+        pp.p_name,
+        pp.total_supply_cost,
+        l.l_quantity,
+        l.discount_category,
+        s.s_name AS supplier_name,
+        CASE 
+            WHEN r.rnk = 1 THEN 'Top Supplier'
+            ELSE 'Other Supplier'
+        END AS supplier_rank
+    FROM 
+        HighValueParts pp
+    JOIN 
+        FilteredLineItems l ON pp.p_partkey = l.l_partkey
+    JOIN 
+        PartSupplierCounts psc ON pp.p_partkey = psc.ps_partkey
+    JOIN 
+        RankedSuppliers r ON r.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = pp.p_partkey)
+    LEFT JOIN 
+        CustomerOrders co ON co.order_count > 0
+    LEFT JOIN 
+        supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = pp.p_partkey)
+)
+SELECT 
+    f.c_custkey, 
+    f.c_name,
+    f.p_partkey,
+    f.p_name,
+    f.total_supply_cost,
+    f.l_quantity,
+    f.discount_category,
+    f.supplier_name,
+    f.supplier_rank
+FROM 
+    FinalReport f
+ORDER BY 
+    f.total_supply_cost DESC, 
+    f.c_name ASC
+FETCH FIRST 100 ROWS ONLY;

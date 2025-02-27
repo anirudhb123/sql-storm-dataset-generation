@@ -1,0 +1,81 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        ak.name AS actor_name,
+        1 AS depth
+    FROM
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        a.person_id,
+        ak.name AS actor_name,
+        ah.depth + 1
+    FROM
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.movie_id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        movie_link ml ON c.movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    WHERE 
+        t.production_year < 2000 AND
+        ah.depth < 5
+),
+
+-- CTE to rank depth levels of actors
+ranked_actors AS (
+    SELECT 
+        movie_id,
+        person_id,
+        actor_name,
+        depth,
+        RANK() OVER (PARTITION BY movie_id ORDER BY depth) AS rank_depth
+    FROM 
+        actor_hierarchy
+)
+
+SELECT 
+    t.title,
+    ra.actor_name,
+    ra.depth,
+    COUNT(DISTINCT c.id) AS num_movies_co_starring,
+    MAX(CASE WHEN mc.company_type_id IS NOT NULL THEN cn.name END) AS production_company,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list
+FROM 
+    ranked_actors ra
+JOIN 
+    title t ON ra.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    cast_info c ON c.movie_id = t.id AND c.person_id != ra.person_id
+WHERE 
+    ra.rank_depth = 1 -- Only top-level actors
+GROUP BY 
+    t.title, ra.actor_name, ra.depth
+HAVING 
+    COUNT(DISTINCT c.id) >= 1 AND -- Actors who co-starred in at least one other movie
+    SUM(CASE WHEN mc.company_type_id IS NULL THEN 1 ELSE 0 END) < 2 -- At most one movie without a production company
+ORDER BY 
+    ra.depth DESC, num_movies_co_starring DESC;

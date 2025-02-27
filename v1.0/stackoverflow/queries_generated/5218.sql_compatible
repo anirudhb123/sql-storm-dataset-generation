@@ -1,0 +1,46 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.AnswerCount,
+    (SELECT STRING_AGG(tag.TagName, ', ') 
+     FROM Tags tag 
+     INNER JOIN (SELECT TRIM(value) AS tagName FROM STRING_SPLIT(fp.Tags, ',')) AS t ON tag.TagName = t.tagName) AS Tags
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC;

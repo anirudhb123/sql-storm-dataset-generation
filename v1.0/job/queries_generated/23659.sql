@@ -1,0 +1,87 @@
+WITH RankedTitles AS (
+    SELECT 
+        akn.name AS actor_name,
+        ttl.title AS movie_title,
+        ttl.production_year,
+        ROW_NUMBER() OVER (PARTITION BY akn.id ORDER BY ttl.production_year DESC) AS rank
+    FROM 
+        aka_name akn
+    JOIN 
+        cast_info ci ON akn.person_id = ci.person_id
+    JOIN 
+        aka_title ttl ON ci.movie_id = ttl.movie_id
+    WHERE 
+        ttl.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS total_movies
+    FROM 
+        RankedTitles
+    WHERE 
+        rank <= 5
+    GROUP BY 
+        actor_name
+),
+HighProfileActors AS (
+    SELECT 
+        actor_name
+    FROM 
+        ActorCounts
+    WHERE 
+        total_movies > 10
+),
+HighRatedMovies AS (
+    SELECT 
+        ttl.title,
+        ttl.production_year,
+        COALESCE(SUBSTRING(mv_info.info, 'Rating: ([0-9]+(?:\.[0-9]+)?)'::text), 'N/A') AS movie_rating
+    FROM 
+        aka_title ttl
+    LEFT JOIN 
+        movie_info mv_info ON ttl.movie_id = mv_info.movie_id AND mv_info.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    WHERE 
+        ttl.production_year >= 2000
+),
+SharedMovies AS (
+    SELECT 
+        hpa.actor_name,
+        hpm.movie_title,
+        hpm.production_year,
+        hpm.movie_rating
+    FROM 
+        HighProfileActors hpa
+    JOIN 
+        RankedTitles hrt ON hpa.actor_name = hrt.actor_name
+    JOIN 
+        HighRatedMovies hpm ON hrt.movie_title = hpm.title
+),
+NullCheck AS (
+    SELECT 
+        s.actor_name,
+        s.movie_title,
+        s.production_year,
+        CASE 
+            WHEN s.movie_rating IS NULL THEN 'No Rating'
+            ELSE s.movie_rating
+        END AS normalized_rating
+    FROM 
+        SharedMovies s
+)
+SELECT 
+    n.actor_name,
+    n.movie_title,
+    n.production_year,
+    n.normalized_rating,
+    COUNT(CASE WHEN n.normalized_rating <> 'No Rating' THEN 1 END) AS rated_movies_count
+FROM 
+    NullCheck n
+GROUP BY 
+    n.actor_name, n.movie_title, n.production_year, n.normalized_rating
+HAVING 
+    COUNT(*) > 2
+ORDER BY 
+    n.actor_name, n.production_year DESC;
+
+This SQL query retrieves information about actors who have appeared in a significant number of movies, focusing on their top titles and associated ratings. It utilizes several features like Common Table Expressions (CTEs), window functions, COALESCE for null-handling, and grouping to create a comprehensive analysis.

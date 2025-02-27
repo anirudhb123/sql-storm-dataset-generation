@@ -1,0 +1,57 @@
+WITH RecursivePostHistory AS (
+    SELECT ph.Id, ph.PostId, ph.UserId, ph.CreationDate, 
+           ph.PostHistoryTypeId, ph.Comment, 
+           1 AS Level, 
+           ph.UserDisplayName
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10  -- Start with closed posts
+    UNION ALL
+    SELECT ph.Id, ph.PostId, ph.UserId, ph.CreationDate, 
+           ph.PostHistoryTypeId, ph.Comment, 
+           Level + 1, 
+           ph.UserDisplayName
+    FROM PostHistory ph
+    INNER JOIN RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE ph.CreationDate < rph.CreationDate  -- Recursive join to find earlier changes
+),
+UserBadgeCounts AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostMeta AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT l.RelatedPostId) AS RelatedPostCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9  -- BountyClose
+    LEFT JOIN PostLinks l ON p.Id = l.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Location,
+    ubc.BadgeCount,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.CommentCount,
+    pm.TotalBounty,
+    pm.RelatedPostCount,
+    rph.UserDisplayName AS LastClosedBy,
+    rph.CreationDate AS LastClosedDate,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY pm.CreationDate DESC) AS Rank
+FROM Users u
+JOIN UserBadgeCounts ubc ON u.Id = ubc.UserId
+JOIN PostMeta pm ON u.Id = pm.PostId
+LEFT JOIN RecursivePostHistory rph ON pm.PostId = rph.PostId
+WHERE rph.Level = 1 OR rph.Level IS NULL  -- Only get the first level of closed posts
+AND u.Reputation > 500  -- Filter for users with higher reputation
+ORDER BY u.Reputation DESC, pm.Score DESC;

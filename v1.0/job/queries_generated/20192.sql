@@ -1,0 +1,93 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY m.info_type_id DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        movie_info m ON t.id = m.movie_id
+    WHERE 
+        m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget')
+),
+
+PopularMovies AS (
+    SELECT 
+        t.id,
+        COUNT(c.id) AS cast_count,
+        MAX(t.production_year) AS latest_year
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id
+    HAVING 
+        COUNT(c.id) > 5
+),
+
+CompanyData AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+
+FilteredKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        cm.company_name,
+        cm.company_type,
+        fkw.keywords,
+        COALESCE(rm.rank, 0) AS rank,
+        CASE 
+            WHEN rm.rank = 1 THEN 'Blockbuster'
+            WHEN rm.rank BETWEEN 2 AND 5 THEN 'Hit'
+            ELSE 'Cult Classic'
+        END AS classification
+    FROM 
+        PopularMovies pm
+    JOIN 
+        RankedMovies rm ON pm.id = rm.title_id
+    LEFT JOIN 
+        CompanyData cm ON pm.id = cm.movie_id
+    LEFT JOIN 
+        FilteredKeywords fkw ON pm.id = fkw.movie_id
+    WHERE 
+        pm.latest_year > 2000
+)
+
+SELECT 
+    title,
+    production_year,
+    company_name,
+    company_type,
+    keywords,
+    rank,
+    classification
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, rank ASC;

@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size > 10 AND p.p_retailprice < 100.00
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(sp.total_supply_value) AS total_value
+    FROM 
+        SupplierParts sp
+    JOIN 
+        supplier s ON sp.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(sp.total_supply_value) > 5000
+)
+SELECT 
+    coalesce(r.o_orderkey, 'No Orders') AS order_key,
+    r.o_orderstatus,
+    r.o_totalprice,
+    sp.supp_name,
+    sp.total_value AS supplier_total_value,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_orderkey = r.o_orderkey) AS lineitem_count
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    TopSuppliers sp ON sp.s_suppkey = r.o_custkey
+WHERE 
+    r.order_rank <= 5
+ORDER BY 
+    r.o_orderdate DESC, sp.total_value DESC;

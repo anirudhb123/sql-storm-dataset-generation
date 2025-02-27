@@ -1,0 +1,63 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        COALESCE(ws.ws_ext_sales_price, 0) AS total_sales,
+        CASE 
+            WHEN ws.ws_sales_price > 0 THEN (COALESCE(ws.ws_ext_sales_price, 0) / ws.ws_sales_price) * 100
+            ELSE 0
+        END AS discount_percentage,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+), 
+return_summary AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns,
+        AVG(cr.cr_return_amt) AS avg_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+ranked_sales AS (
+    SELECT 
+        ss.ws_item_sk, 
+        ss.total_sales,
+        ss.discount_percentage,
+        rs.total_returns,
+        rs.avg_return_amount,
+        RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary ss
+    LEFT JOIN 
+        return_summary rs ON ss.ws_item_sk = rs.cr_item_sk
+    WHERE 
+        ss.rn = 1
+)
+SELECT 
+    isb.i_item_id,
+    COALESCE(iss.total_sales, 0) AS total_sales,
+    COALESCE(iss.discount_percentage, 0) AS discount_percentage,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.avg_return_amount, 0) AS avg_return_amount,
+    ROW_NUMBER() OVER (PARTITION BY isb.i_item_id ORDER BY rs.sales_rank) AS item_rank
+FROM 
+    item isb
+LEFT JOIN 
+    ranked_sales rs ON isb.i_item_sk = rs.ws_item_sk
+GROUP BY 
+    isb.i_item_id, 
+    iss.total_sales, 
+    iss.discount_percentage, 
+    rs.total_returns, 
+    rs.avg_return_amount
+ORDER BY 
+    total_sales DESC, 
+    discount_percentage DESC
+FETCH FIRST 100 ROWS ONLY;

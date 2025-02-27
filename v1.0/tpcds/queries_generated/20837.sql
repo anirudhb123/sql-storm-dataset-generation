@@ -1,0 +1,86 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+    AND 
+        ws.ws_quantity > 0
+),
+
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+
+DetailedReturns AS (
+    SELECT 
+        wr_returned_customer_sk,
+        AVG(wr_return_amt) AS avg_return_amt,
+        SUM(wr_return_quantity) AS total_web_returns,
+        MAX(wr_returned_date_sk) AS last_return_date
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returned_customer_sk
+),
+
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dep_count,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL
+)
+
+SELECT DISTINCT 
+    CONCAT(CAST(c.c_first_name AS VARCHAR(20)), ' ', CAST(c.c_last_name AS VARCHAR(30))) AS full_customer_name,
+    c.c_customer_sk,
+    cd.cd_gender,
+    CASE 
+        WHEN c_birth_year IS NULL THEN 'Unknown Year'
+        WHEN c_birth_year < 1900 THEN 'Historic'
+        ELSE 'Modern'
+    END AS birth_category,
+    COALESCE(CAST(SUM(rs.ws_sales_price) AS DECIMAL(10,2)), 0) AS total_spent,
+    COALESCE(cr.total_returns, 0) AS total_store_returns,
+    COALESCE(dr.total_web_returns, 0) AS total_web_returns
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_customer_sk = cd.c_customer_sk
+LEFT JOIN 
+    RankedSales rs ON c.c_customer_sk = rs.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    DetailedReturns dr ON c.c_customer_sk = dr.returned_customer_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+AND 
+    (cd.cd_dep_count > 0 OR cd.cd_dep_count IS NULL)
+AND 
+    (c.c_birth_month BETWEEN 1 AND 6 OR c.c_birth_month IS NULL)
+ORDER BY 
+    total_spent DESC, full_customer_name
+FETCH FIRST 10 ROWS ONLY;

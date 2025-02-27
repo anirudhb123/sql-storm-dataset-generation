@@ -1,0 +1,53 @@
+WITH UserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalViews,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        AvgScore,
+        RANK() OVER (ORDER BY TotalViews DESC, TotalPosts DESC) AS Rank
+    FROM UserActivities
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    ru.Rank,
+    ru.DisplayName,
+    ru.TotalViews,
+    ru.TotalPosts,
+    ru.TotalComments,
+    ru.TotalBadges,
+    ru.AvgScore,
+    rp.Title AS RecentPostTitle,
+    rp.ViewCount AS RecentPostViewCount
+FROM RankedUsers ru
+LEFT JOIN RecentPosts rp ON ru.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+ORDER BY ru.Rank
+LIMIT 10;

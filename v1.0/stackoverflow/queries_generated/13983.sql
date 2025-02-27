@@ -1,0 +1,51 @@
+-- Performance Benchmarking Query
+WITH PostStatistics AS (
+    SELECT
+        p.PostTypeId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN p.Id END) AS TotalAcceptedAnswers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.AnswerCount ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.CommentCount ELSE 0 END) AS TotalComments,
+        AVG(p.CreationDate::timestamp) AS AvgPostCreationDate
+    FROM
+        Posts p
+    GROUP BY
+        p.PostTypeId
+),
+UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        AVG(u.Reputation) AS AvgReputation
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+)
+SELECT
+    ph.PostTypeId,
+    ps.TotalPosts,
+    ps.TotalAcceptedAnswers,
+    ps.TotalScore,
+    ps.TotalViews,
+    ps.TotalAnswers,
+    ps.TotalComments,
+    us.UserId,
+    us.TotalBadges,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.AvgReputation
+FROM
+    PostStatistics ps
+JOIN
+    Posts p ON ps.PostTypeId = p.PostTypeId
+JOIN
+    UserStatistics us ON p.OwnerUserId = us.UserId
+ORDER BY
+    ps.TotalScore DESC;

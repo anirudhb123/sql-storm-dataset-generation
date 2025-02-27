@@ -1,0 +1,63 @@
+WITH PostTagCounts AS (
+    SELECT
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.Title
+    FROM
+        Posts P
+    JOIN
+        UNNEST(string_to_array(TRIM(BOTH '>' FROM TRIM(BOTH '<' FROM P.Tags)), '><')) AS TagName ON TRUE
+    JOIN
+        Tags T ON T.TagName = TagName
+    WHERE
+        P.PostTypeId = 1 
+    GROUP BY
+        P.Id, P.OwnerUserId, P.CreationDate, P.Title
+),
+UserReputation AS (
+    SELECT
+        U.Id AS UserId,
+        U.Reputation,
+        U.DisplayName,
+        U.CreationDate
+    FROM
+        Users U
+    WHERE
+        U.Reputation > 1000 
+),
+TopPosts AS (
+    SELECT
+        PTC.PostId,
+        PTC.TagCount,
+        U.DisplayName,
+        U.Reputation,
+        PTC.CreationDate,
+        PTC.Title,
+        RANK() OVER (PARTITION BY PTC.OwnerUserId ORDER BY PTC.TagCount DESC) AS Rank
+    FROM
+        PostTagCounts PTC
+    JOIN
+        UserReputation U ON PTC.OwnerUserId = U.UserId
+)
+SELECT
+    T.Title,
+    T.TagCount,
+    U.DisplayName,
+    U.Reputation,
+    T.CreationDate,
+    COUNT(C.Id) AS CommentCount,
+    ARRAY_AGG(DISTINCT T.TagCount) AS UserTagCounts
+FROM
+    TopPosts T
+LEFT JOIN
+    Comments C ON C.PostId = T.PostId
+JOIN
+    UserReputation U ON T.OwnerUserId = U.UserId
+WHERE
+    T.Rank = 1 
+GROUP BY
+    T.Title, T.TagCount, U.DisplayName, U.Reputation, T.CreationDate
+ORDER BY
+    U.Reputation DESC, T.TagCount DESC;

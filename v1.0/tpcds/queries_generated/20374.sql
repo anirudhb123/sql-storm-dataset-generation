@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank
+    FROM 
+        web_sales
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk AS customer_sk,
+        COUNT(wr_return_quantity) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        wr_returning_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.customer_sk
+    FROM 
+        CustomerReturns cr
+    WHERE 
+        cr.total_returns > (SELECT AVG(total_returns) FROM CustomerReturns)
+),
+SalesWithCategory AS (
+    SELECT 
+        ss.ss_item_sk,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        IIF(SUM(ss.ss_quantity) > 100, 'High', 'Low') AS sales_category
+    FROM 
+        store_sales ss
+    JOIN 
+        item I ON ss.ss_item_sk = I.i_item_sk
+    GROUP BY 
+        ss.ss_item_sk
+)
+SELECT 
+    s.store_sk,
+    COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+    COALESCE(SUM(s.total_net_profit), 0) AS total_net_profit,
+    MAX(hr.total_returns) AS max_customer_returns,
+    COUNT(DISTINCT hr.customer_sk) AS number_of_high_return_customers,
+    COUNT(DISTINCT r.ws_item_sk) AS total_distinct_items_returned
+FROM 
+    store s
+LEFT JOIN 
+    store_returns sr ON sr.s_store_sk = s.s_store_sk
+LEFT JOIN 
+    SalesWithCategory s ON s.ss_item_sk = sr.sr_item_sk
+LEFT JOIN 
+    HighReturnCustomers hr ON hr.customer_sk = sr.sr_returning_customer_sk
+LEFT JOIN 
+    web_sales r ON r.ws_item_sk = sr.sr_item_sk
+WHERE 
+    s.s_state IS NOT NULL AND 
+    (s.s_county = 'Some County' OR s.s_city LIKE '%City%') AND 
+    NOT EXISTS (
+        SELECT 1 
+        FROM customer c 
+        WHERE c.c_customer_sk = hr.customer_sk AND 
+              c.c_birth_month = 1 AND 
+              c.c_birth_year < 1980
+    )
+GROUP BY 
+    s.store_sk
+ORDER BY 
+    total_store_returns DESC, 
+    total_net_profit DESC
+LIMIT 100;

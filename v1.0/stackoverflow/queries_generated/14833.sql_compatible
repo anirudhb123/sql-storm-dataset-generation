@@ -1,0 +1,60 @@
+
+WITH PostCount AS (
+    SELECT 
+        PostTypeId, 
+        COUNT(*) AS TotalPosts
+    FROM 
+        Posts
+    GROUP BY 
+        PostTypeId
+),
+UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = Users.Id) AS TotalUserPosts,
+        (SELECT COUNT(*) FROM Badges WHERE UserId = Users.Id) AS TotalBadges
+    FROM 
+        Users
+),
+VoteStats AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    pt.Name AS PostType,
+    pc.TotalPosts,
+    us.UserId,
+    us.Reputation,
+    us.TotalUserPosts,
+    us.TotalBadges,
+    vs.TotalVotes,
+    vs.UpVotes,
+    vs.DownVotes
+FROM 
+    PostCount pc
+JOIN 
+    PostTypes pt ON pc.PostTypeId = pt.Id
+JOIN 
+    UserStats us ON us.TotalUserPosts > 0
+LEFT JOIN 
+    VoteStats vs ON vs.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = pc.PostTypeId)
+GROUP BY 
+    pt.Name, 
+    pc.TotalPosts, 
+    us.UserId, 
+    us.Reputation, 
+    us.TotalUserPosts, 
+    us.TotalBadges, 
+    vs.TotalVotes, 
+    vs.UpVotes, 
+    vs.DownVotes
+ORDER BY 
+    pt.Name;

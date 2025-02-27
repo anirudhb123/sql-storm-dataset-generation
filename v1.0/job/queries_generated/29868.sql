@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT mk.keyword_id) DESC) AS keyword_rank
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword
+), 
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.keyword_rank <= 5  -- Get top 5 keywords per production year
+), 
+CastDetails AS (
+    SELECT 
+        ca.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        role_type rt ON ca.role_id = rt.id
+), 
+MovieHighlights AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        td.actor_name,
+        td.role_name
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        CastDetails td ON tm.movie_id = td.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT mh.actor_name || ' (' || mh.role_name || ')', ', ' ORDER BY mh.actor_name) AS actors
+FROM 
+    MovieHighlights mh
+GROUP BY 
+    mh.title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, mh.title;

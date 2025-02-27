@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    SUM(CASE WHEN l.returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    AVG(CASE WHEN l.returnflag = 'R' THEN l.l_extendedprice ELSE NULL END) AS avg_returned_price,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    r.r_name AS region_name
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_name LIKE '%steel%' 
+    AND o.o_orderdate BETWEEN '2022-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_name, p.p_brand, p.p_type, r.r_name
+HAVING 
+    total_returned_quantity > 100
+ORDER BY 
+    avg_returned_price DESC;

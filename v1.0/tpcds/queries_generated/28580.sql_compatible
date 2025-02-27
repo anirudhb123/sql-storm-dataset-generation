@@ -1,0 +1,46 @@
+
+WITH processed_address AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        TRIM(UPPER(ca_city)) AS city_upper,
+        CONCAT(ca_zip, ' ', ca_state) AS zip_state,
+        LENGTH(CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, ca_city, ca_state)) AS address_length
+    FROM 
+        customer_address
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.full_address,
+        ca.city_upper,
+        ca.zip_state,
+        ca.address_length
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        processed_address ca ON c.c_current_addr_sk = ca.ca_address_id
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    SUM(ws.ws_net_profit) AS total_profit,
+    AVG(CASE WHEN ci.address_length > 100 THEN 1 ELSE 0 END) AS long_address_ratio,
+    COUNT(DISTINCT ws.ws_order_number) AS orders_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    web_sales ws ON ci.c_customer_id = ws.ws_bill_customer_sk
+GROUP BY 
+    ci.full_name, ci.cd_gender, ci.cd_marital_status, ci.address_length
+ORDER BY 
+    total_profit DESC
+LIMIT 50;

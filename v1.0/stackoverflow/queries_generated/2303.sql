@@ -1,0 +1,52 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId IN (6, 7) THEN 1 END) AS VotesOnClosure,
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END, 0)) - 
+        SUM(COALESCE(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END, 0)) AS VoteBalance
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+)
+SELECT 
+    u.DisplayName,
+    ups.UserId,
+    p.PostId,
+    p.Title,
+    ups.UpVotes,
+    ups.DownVotes,
+    ups.VoteBalance,
+    COUNT(c.Id) AS CommentCount,
+    AVG(EXTRACT(EPOCH FROM (c.CreationDate - p.CreationDate)) / 60) AS AvgCommentAgeMinutes
+FROM 
+    UserVoteSummary ups
+JOIN 
+    PopularPosts p ON ups.UserId = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+WHERE 
+    ups.VoteBalance > 0
+    AND p.PopularityRank <= 5
+GROUP BY 
+    u.DisplayName, ups.UserId, p.PostId, p.Title, ups.UpVotes, ups.DownVotes, ups.VoteBalance
+ORDER BY 
+    ups.VoteBalance DESC, p.Score DESC
+LIMIT 10;

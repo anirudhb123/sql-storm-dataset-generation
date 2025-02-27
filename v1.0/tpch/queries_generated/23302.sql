@@ -1,0 +1,47 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), 
+part_stats AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), 
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2023-12-31'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ps.p_name,
+    ps.p_retailprice,
+    ps.supplier_count,
+    ps.total_available_qty,
+    ps.avg_supply_cost,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No orders placed'
+        WHEN co.total_spent > (SELECT AVG(total_spent) FROM customer_orders) THEN 'High spender'
+        ELSE 'Regular customer'
+    END AS customer_profile,
+    COUNT(DISTINCT sh.s_suppkey) OVER (PARTITION BY ps.p_partkey) AS unique_supplier_count,
+    ROW_NUMBER() OVER (ORDER BY ps.total_available_qty DESC) AS availability_rank
+FROM part_stats ps
+LEFT JOIN customer_orders co ON ps.p_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier_hierarchy))
+LEFT JOIN supplier_hierarchy sh ON sh.level = 0
+WHERE ps.total_available_qty > 100 OR (ps.total_available_qty IS NULL AND sh.s_nationkey IS NOT NULL)
+ORDER BY ps.avg_supply_cost DESC, ps.p_retailprice ASC;

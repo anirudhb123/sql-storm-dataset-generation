@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE t.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM cast_info ca
+    JOIN aka_name a ON ca.person_id = a.person_id
+    GROUP BY ca.movie_id
+),
+DirectorStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS director_count
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE ct.kind = 'Director'
+    GROUP BY mc.movie_id
+),
+CombinedResults AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(a.actor_count, 0) AS actor_count,
+        COALESCE(d.director_count, 0) AS director_count,
+        rm.keyword_count
+    FROM RankedMovies rm
+    LEFT JOIN ActorStats a ON rm.movie_id = a.movie_id
+    LEFT JOIN DirectorStats d ON rm.movie_id = d.movie_id
+    WHERE rm.rn <= 5
+)
+SELECT 
+    title, 
+    production_year, 
+    actor_count, 
+    director_count, 
+    CASE 
+        WHEN actor_count >= 3 AND director_count >= 1 THEN 'Highly Collaborated'
+        WHEN actor_count = 0 THEN 'No Actors'
+        ELSE 'Standard'
+    END AS collaboration_type
+FROM CombinedResults
+WHERE keyword_count > 0
+ORDER BY production_year DESC, actor_count DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- Select using an obscure NULL logic to find movies where in certain conditions, directors exist but actors do not
+UNION ALL
+SELECT 
+    'Unknown Title' AS title,
+    NULL AS production_year,
+    NULL AS actor_count,
+    COUNT(DISTINCT mc.company_id) AS director_count,
+    NULL AS keyword_count,
+    'No Actors' AS collaboration_type
+FROM movie_companies mc
+JOIN company_type ct ON mc.company_type_id = ct.id
+WHERE mc.movie_id NOT IN (SELECT movie_id FROM cast_info)
+AND ct.kind = 'Director'
+GROUP BY mc.movie_id
+HAVING COUNT(DISTINCT mc.company_id) > 0
+LIMIT 5;

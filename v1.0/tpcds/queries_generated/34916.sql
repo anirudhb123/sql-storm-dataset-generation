@@ -1,0 +1,32 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           CAST(NULL AS VARCHAR(50)) AS parent_customer, 1 AS level
+    FROM customer c
+    WHERE c.c_customer_sk IN (SELECT DISTINCT sr_customer_sk FROM store_returns)
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           sh.c_first_name || ' ' || sh.c_last_name AS parent_customer, sh.level + 1
+    FROM customer c
+    INNER JOIN sales_hierarchy sh ON c.c_current_cdemo_sk = sh.c_current_cdemo_sk
+)
+
+SELECT sh.c_customer_sk,
+       sh.c_first_name,
+       sh.c_last_name,
+       MAX(CASE WHEN cd.cd_gender = 'M' THEN 'Male' ELSE 'Female' END) AS gender,
+       COUNT(DISTINCT sr.ticket_number) AS total_returns,
+       SUM(sr_return_amt) AS total_return_amount,
+       SUM(sr_return_tax) AS total_return_tax,
+       SUM(sr_return_amt_inc_tax) AS total_amount_with_tax,
+       ROW_NUMBER() OVER (PARTITION BY sh.c_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+FROM sales_hierarchy sh
+LEFT JOIN store_returns sr ON sh.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN customer_demographics cd ON sh.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY sh.c_customer_sk, sh.c_first_name, sh.c_last_name
+HAVING COUNT(DISTINCT sr.ticket_number) > 1 
+   AND MAX(COALESCE(sr_return_amt, 0)) > 100
+ORDER BY return_rank
+FETCH FIRST 10 ROWS ONLY;

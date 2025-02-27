@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT pt.PostId, t.TagName
+         FROM Posts pt
+         CROSS JOIN LATERAL 
+            (SELECT UNNEST(string_to_array(SUBSTRING(pt.Tags, 2, LENGTH(pt.Tags) - 2), '><'))::varchar) AS TagName) t
+         ) t ON p.Id = t.PostId 
+    GROUP BY 
+        p.Id, u.DisplayName
+), PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.Score,
+    rp.CreationDate,
+    rp.TagList,
+    pv.VoteCount,
+    pv.UpvoteCount,
+    pv.DownvoteCount
+FROM 
+    RankedPosts rp
+JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.OwnerDisplayName,
+    pv.Score DESC,
+    pv.VoteCount DESC;

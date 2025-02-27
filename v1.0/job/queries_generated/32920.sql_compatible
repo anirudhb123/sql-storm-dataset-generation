@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m 
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL 
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT(m.title, ' -> ', mh.title) AS title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m 
+    JOIN 
+        movie_link ml ON m.id = ml.movie_id  
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(k.keyword, 'No Keyword') AS keyword,
+    COUNT(c.id) OVER (PARTITION BY a.person_id) AS roles_count,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY m.production_year DESC) AS recent_role,
+    CASE 
+        WHEN COUNT(DISTINCT mc.company_id) > 2 THEN 'Major Production Company'
+        ELSE 'Independent Production' 
+    END AS production_status
+FROM 
+    aka_name a 
+JOIN 
+    cast_info c ON a.person_id = c.person_id 
+JOIN 
+    aka_title m ON c.movie_id = m.id 
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id 
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id 
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id 
+WHERE 
+    m.production_year > 2000 
+    AND c.note IS NULL 
+    AND a.md5sum IS NOT NULL 
+GROUP BY 
+    a.name, m.title, m.production_year, k.keyword 
+ORDER BY 
+    m.production_year ASC, a.name;

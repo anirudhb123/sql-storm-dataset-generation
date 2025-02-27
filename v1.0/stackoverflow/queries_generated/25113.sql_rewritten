@@ -1,0 +1,75 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBountySpent
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId, COUNT(*) AS CommentCount 
+            FROM 
+                Comments 
+            GROUP BY 
+                PostId
+        ) c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS CloseDate,
+        DATEDIFF(DAY, p.CreationDate, ph.CreationDate) AS DaysUntilClosed,
+        cr.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ue.DisplayName AS TopUser,
+    ue.PostsCreated,
+    ue.TotalComments,
+    ue.TotalBountySpent,
+    cpa.Title AS ClosedPostTitle,
+    cpa.DaysUntilClosed,
+    cpa.CloseReason
+FROM 
+    TagStatistics ts
+JOIN 
+    UserEngagement ue ON ue.PostsCreated = (SELECT MAX(PostsCreated) FROM UserEngagement)
+LEFT JOIN 
+    ClosedPostAnalytics cpa ON cpa.PostId = (SELECT TOP 1 PostId FROM ClosedPostAnalytics ORDER BY CloseDate DESC)
+ORDER BY 
+    ts.TotalViews DESC;

@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d.d_date_sk 
+            FROM date_dim d 
+            WHERE d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 3
+        )
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_name
+),
+TopSales AS (
+    SELECT 
+        w.w_warehouse_name AS warehouse_name,
+        total_sales,
+        order_count,
+        sales_rank
+    FROM 
+        SalesCTE 
+    WHERE 
+        sales_rank <= 5
+),
+CustomerReturnStats AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(sr.sr_ticket_number) AS return_count,
+        COALESCE(SUM(sr.sr_return_amt), 0) AS total_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+)
+SELECT 
+    t.warehouse_name,
+    t.total_sales,
+    t.order_count,
+    cds.cd_gender,
+    cds.customer_count,
+    crs.return_count,
+    crs.total_return_amt,
+    CASE 
+        WHEN t.total_sales IS NULL THEN 'No Sales'
+        WHEN crs.return_count > 0 THEN 'Some Returns'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    TopSales t
+FULL OUTER JOIN 
+    CustomerReturnStats crs ON crs.c_customer_id = t.warehouse_name 
+JOIN 
+    CustomerDemographics cds ON crs.c_customer_id = cds.cd_demo_sk 
+ORDER BY 
+    t.total_sales DESC NULLS LAST;

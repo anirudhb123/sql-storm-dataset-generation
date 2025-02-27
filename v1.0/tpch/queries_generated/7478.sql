@@ -1,0 +1,33 @@
+WITH recent_orders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, c_nationkey
+    FROM orders
+    JOIN customer ON o_custkey = c_custkey
+    WHERE o_orderdate >= DATE '2023-01-01'
+),
+part_supply AS (
+    SELECT ps_partkey, SUM(ps_availqty) AS total_avail_qty, SUM(ps_supplycost) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+agg_lineitem AS (
+    SELECT l_orderkey, SUM(l_quantity) AS total_quantity, SUM(l_extendedprice) AS total_extended_price
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+order_details AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ps.total_avail_qty, ps.total_supply_cost, ali.total_quantity, ali.total_extended_price
+    FROM recent_orders ro
+    LEFT JOIN part_supply ps ON ps.ps_partkey IN (SELECT l_partkey FROM lineitem WHERE l_orderkey = ro.o_orderkey)
+    LEFT JOIN agg_lineitem ali ON ali.l_orderkey = ro.o_orderkey
+),
+nation_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT od.o_orderkey) AS order_count, SUM(od.o_totalprice) AS total_revenue
+    FROM order_details od
+    JOIN nation n ON od.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, ns.order_count, ns.total_revenue, ROUND(ns.total_revenue / ns.order_count, 2) AS avg_order_value
+FROM nation_summary ns
+JOIN nation n ON ns.n_name = n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

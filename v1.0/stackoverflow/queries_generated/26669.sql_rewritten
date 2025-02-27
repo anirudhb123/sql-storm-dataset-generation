@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank,
+        ARRAY_AGG(DISTINCT c.Text) AS Comments,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(badges.Id) AS BadgeCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON a.ParentId = p.Id
+    LEFT JOIN Badges badges ON badges.UserId = u.Id
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId, u.DisplayName, p.ViewCount, p.Score, p.Tags
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.*, 
+        STRING_AGG(DISTINCT CAST(t.TagName AS VARCHAR), ', ') AS AssociatedTags
+    FROM RankedPosts rp
+    LEFT JOIN PostsToTags pt ON pt.PostId = rp.PostId
+    LEFT JOIN Tags t ON t.Id = pt.TagId
+    WHERE rp.TagRank <= 5 AND rp.ViewCount > 100 
+    GROUP BY rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.OwnerUserId, rp.OwnerDisplayName, rp.ViewCount, rp.Score, rp.Tags, rp.Comments, rp.AnswerCount, rp.BadgeCount
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.OwnerDisplayName,
+    fp.ViewCount,
+    fp.Score,
+    fp.Comments,
+    fp.AnswerCount,
+    fp.BadgeCount,
+    fp.AssociatedTags
+FROM FilteredPosts fp
+ORDER BY fp.CreationDate DESC
+LIMIT 10;

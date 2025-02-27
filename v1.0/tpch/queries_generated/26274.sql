@@ -1,0 +1,52 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 50.00
+),
+SupplierParts AS (
+    SELECT 
+        s.s_name,
+        rp.p_name,
+        rp.p_brand,
+        rp.p_retailprice
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+FinalBenchmark AS (
+    SELECT 
+        r.r_name,
+        sp.p_brand,
+        COUNT(DISTINCT sp.s_name) AS supplier_count,
+        AVG(sp.p_retailprice) AS avg_retail_price
+    FROM 
+        SupplierParts sp
+    JOIN 
+        nation n ON sp.r_regionkey = n.n_regionkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name, sp.p_brand
+)
+SELECT 
+    r_name,
+    p_brand,
+    supplier_count,
+    avg_retail_price,
+    CONCAT('The ', p_brand, ' parts available in ', r_name, ' have an average retail price of ', ROUND(avg_retail_price, 2), ' and are supplied by ', supplier_count, ' suppliers.') AS benchmark_description
+FROM 
+    FinalBenchmark
+WHERE 
+    supplier_count > 5
+ORDER BY 
+    avg_retail_price DESC;

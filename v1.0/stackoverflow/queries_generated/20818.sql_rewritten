@@ -1,0 +1,80 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(U.LastAccessDate) AS LastActivity
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Upvotes,
+        UA.Downvotes,
+        UA.PostCount,
+        UA.CommentCount,
+        UA.LastActivity,
+        ROW_NUMBER() OVER (ORDER BY UA.Upvotes - UA.Downvotes DESC, UA.LastActivity DESC) AS Rank
+    FROM UserActivity UA
+    WHERE UA.LastActivity >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+),
+TopActiveUsers AS (
+    SELECT DISTINCT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        CASE 
+            WHEN U.Location IS NOT NULL THEN U.Location
+            ELSE 'No Location Specified'
+        END AS UserLocation,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount
+    FROM Users U
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS BadgeCount
+        FROM Badges
+        GROUP BY UserId
+    ) B ON U.Id = B.UserId
+    JOIN ActiveUsers A ON U.Id = A.UserId
+    WHERE A.Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Body,
+        STUFF((SELECT ',' + T.TagName 
+                FROM Tags T 
+                WHERE ',' + P.Tags + ',' LIKE '%,' + T.TagName + ',%'
+                FOR XML PATH('')), 1, 1, '') AS Tags,
+        COALESCE(PC.PC_Count, 0) AS CommentCount
+    FROM Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS PC_Count
+        FROM Comments 
+        GROUP BY PostId
+    ) PC ON P.Id = PC.PostId
+    WHERE P.CreationDate >= (SELECT MIN(CreationDate) FROM Posts) 
+)
+SELECT 
+    AU.DisplayName AS ActiveUser, 
+    AU.UserLocation,
+    AU.BadgeCount,
+    PD.PostId, 
+    PD.Title, 
+    PD.ViewCount,
+    PD.Tags,
+    PD.CommentCount
+FROM TopActiveUsers AU
+FULL OUTER JOIN PostDetails PD ON AU.UserId = PD.OwnerUserId
+WHERE (AU.BadgeCount > 0 OR PD.PostId IS NOT NULL)
+ORDER BY AU.BadgeCount DESC NULLS LAST, PD.ViewCount DESC NULLS LAST;

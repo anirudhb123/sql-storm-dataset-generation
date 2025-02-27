@@ -1,0 +1,45 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        RANK() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY c.c_customer_sk) AS income_rank
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_income_band_sk,
+    ss.total_sales,
+    ss.order_count,
+    CASE 
+        WHEN ss.total_sales IS NULL THEN 'No Sales'
+        WHEN ss.order_count > 10 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM 
+    sales_summary ss
+    LEFT JOIN customer_info ci ON ci.c_customer_sk = (SELECT MIN(ws_bill_customer_sk) FROM web_sales WHERE ws_item_sk = ss.ws_item_sk)
+WHERE 
+    ss.sales_rank <= 10
+ORDER BY 
+    ss.total_sales DESC;

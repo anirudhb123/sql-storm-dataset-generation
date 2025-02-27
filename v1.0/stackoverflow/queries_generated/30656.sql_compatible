@@ -1,0 +1,60 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.Score, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS Owner,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    COUNT(DISTINCT a.Id) AS TotalAnswers,
+    SUM(CASE WHEN COALESCE(a.Score, 0) > 0 THEN a.Score ELSE 0 END) AS PositiveAnswerScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(p.CreationDate) AS MostRecentActivity
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2 
+
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT t.TagName 
+        FROM 
+            Tags t 
+        WHERE 
+            t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::integer)
+    ) t ON true
+
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    TotalQuestions DESC, 
+    PositiveAnswerScore DESC;

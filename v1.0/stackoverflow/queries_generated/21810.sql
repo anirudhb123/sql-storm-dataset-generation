@@ -1,0 +1,71 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+        LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.Changes, 0) AS ChangeCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+        LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6) -- Title/Body/Tags edits
+        LEFT JOIN Comments C ON P.Id = C.PostId
+        LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, PH.Changes, P.Title, P.Score, P.ViewCount
+),
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Score,
+        PS.ViewCount,
+        PS.ChangeCount,
+        PS.CommentCount,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        CASE 
+            WHEN PS.ChangeCount > 5 THEN 'Highly Modified'
+            WHEN PS.Rank <= 10 THEN 'Top Rank'
+            ELSE 'Average Post'
+        END AS PostCategory,
+        ABS(PS.UpVoteCount - PS.DownVoteCount) AS VoteBalance
+    FROM 
+        PostSummary PS
+    WHERE 
+        PS.ChangeCount IS NOT NULL OR PS.CommentCount > 0
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    Uvs.TotalVotes,
+    COALESCE(FR.PostId, -1) AS BestPostId,
+    COALESCE(FR.Title, 'No Posts Found') AS BestPostTitle,
+    FR.PostCategory,
+    FR.VoteBalance
+FROM 
+    Users U
+    LEFT JOIN UserVoteStats Uvs ON U.Id = Uvs.UserId
+    LEFT JOIN FinalResults FR ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = FR.BestPostId ORDER BY Score DESC LIMIT 1)
+WHERE 
+    U.Reputation > 100
+ORDER BY 
+    U.Reputation DESC,
+    VoteBalance DESC
+FETCH FIRST 50 ROWS ONLY;

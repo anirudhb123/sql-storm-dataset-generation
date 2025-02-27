@@ -1,0 +1,107 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY mh.kind_id ORDER BY mh.production_year DESC) AS rn,
+        COUNT(mh.movie_id) OVER (PARTITION BY mh.kind_id) AS kind_count
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.level <= 3
+),
+
+UserSummaries AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN co.company_type_id IS NOT NULL THEN 1 ELSE 0 END) AS movie_company_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies co ON ci.movie_id = co.movie_id
+    GROUP BY 
+        ak.name
+),
+
+FinalOutput AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.kind_id,
+        us.name,
+        us.total_movies,
+        us.movie_company_count,
+        CASE
+            WHEN fm.kind_count = 0 THEN 'No related movies'
+            WHEN us.total_movies > 10 THEN 'Popular Actor'
+            ELSE 'Emerging Talent'
+        END AS talent_rating
+    FROM 
+        FilteredMovies fm
+    JOIN 
+        UserSummaries us ON us.total_movies > 5
+    WHERE 
+        fm.rn <= 5 
+        AND fm.production_year BETWEEN 2000 AND 2023
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    kt.kind AS movie_kind,
+    f.name AS actor_name,
+    f.total_movies,
+    f.movie_company_count,
+    f.talent_rating,
+    CASE 
+        WHEN f.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(f.production_year AS VARCHAR(255))
+    END AS formatted_year,
+    COALESCE(f.movie_company_count, 0) AS company_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    FinalOutput f
+LEFT JOIN 
+    kind_type kt ON f.kind_id = kt.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = f.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    f.title, f.production_year, kt.kind, f.name, f.total_movies, f.movie_company_count, f.talent_rating
+ORDER BY 
+    f.production_year DESC, f.name
+LIMIT 100;

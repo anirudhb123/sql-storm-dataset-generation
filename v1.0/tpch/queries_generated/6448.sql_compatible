@@ -1,0 +1,30 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), OrderedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal > 1000
+), RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '3 months'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+), CombinedData AS (
+    SELECT cs.c_name, rs.s_name, r.r_name, ro.total_order_value
+    FROM RecentOrders ro
+    JOIN OrderedCustomers cs ON ro.o_custkey = cs.c_custkey
+    JOIN RankedSuppliers rs ON rs.total_supply_value > 10000
+    JOIN nation n ON cs.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT r.r_name, COUNT(*) AS customer_count, AVG(ro.total_order_value) AS avg_order_value
+FROM CombinedData
+GROUP BY r.r_name
+ORDER BY customer_count DESC, avg_order_value DESC
+LIMIT 10;

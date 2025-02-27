@@ -1,0 +1,55 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names
+    FROM 
+        title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+movie_details AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        md.info AS synopsis,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_info md ON rm.movie_id = md.movie_id AND md.info_type_id = (SELECT id FROM info_type WHERE info = 'synopsis')
+    LEFT JOIN 
+        movie_keyword mw ON rm.movie_id = mw.movie_id
+    LEFT JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, md.info
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.synopsis,
+    COALESCE(md.keywords, ARRAY[]::text[]) AS keywords,
+    CASE 
+        WHEN md.production_year < 2000 THEN 'Classic'
+        WHEN md.production_year BETWEEN 2000 AND 2015 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    movie_details md
+WHERE 
+    md.actor_count > 3
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC
+LIMIT 50;

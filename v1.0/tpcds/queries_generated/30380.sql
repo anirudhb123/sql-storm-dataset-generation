@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_ticket_number,
+        ss_item_sk,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_net_paid
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    
+    UNION ALL
+
+    SELECT 
+        ss_store_sk,
+        ss_ticket_number,
+        ss_item_sk,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_net_paid
+    FROM 
+        store_sales
+    INNER JOIN SalesHierarchy ON store_sales.ss_ticket_number = SalesHierarchy.ss_ticket_number
+    WHERE 
+        store_sales.ss_item_sk <> SalesHierarchy.ss_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(COALESCE(ssh.ss_quantity, 0)) AS total_quantity,
+    SUM(COALESCE(ssh.ss_ext_sales_price, 0)) AS total_sales,
+    AVG(COALESCE(ssh.ss_net_paid, 0)) AS avg_payment,
+    sm.sm_type AS ship_mode,
+    d.d_day_name,
+    CASE
+        WHEN cd.cd_gender = 'M' THEN 'Male'
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        ELSE 'Other'
+    END AS customer_gender
+FROM 
+    SalesHierarchy ssh
+LEFT JOIN 
+    customer c ON ssh.ss_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    ship_mode sm ON ssh.ss_item_sk IN (SELECT p.p_item_sk FROM promotion p WHERE p.p_discount_active = 'Y')
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = ssh.ss_sold_date_sk
+WHERE 
+    c.c_birth_year BETWEEN 1970 AND 2000
+    AND (c.c_first_name LIKE 'A%' OR c.c_last_name LIKE 'B%')
+GROUP BY 
+    c.c_customer_id, sm.sm_type, d.d_day_name, cd.cd_gender
+HAVING 
+    total_quantity > 10
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

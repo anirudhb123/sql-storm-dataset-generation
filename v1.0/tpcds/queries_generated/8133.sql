@@ -1,0 +1,42 @@
+
+WITH SalesSummary AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+),
+CustomerRanks AS (
+    SELECT
+        *,
+        RANK() OVER (PARTITION BY cd_income_band_sk ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesSummary
+)
+SELECT 
+    c.c_first_name, 
+    c.c_last_name, 
+    cs.total_sales, 
+    cs.order_count, 
+    cs.cd_gender, 
+    CONCAT('Income Band: ', cs.ib_lower_bound, ' - ', cs.ib_upper_bound) AS income_band,
+    cs.sales_rank
+FROM 
+    CustomerRanks cs
+WHERE 
+    cs.sales_rank <= 10
+ORDER BY 
+    cs.cd_income_band_sk, cs.sales_rank;

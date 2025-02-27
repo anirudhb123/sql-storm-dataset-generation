@@ -1,0 +1,95 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+        
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyEarned,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        AVG(DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate)) AS AvgDaysSinceCreation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag ON tag IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag)
+    GROUP BY 
+        p.Id
+),
+UserPostRank AS (
+    SELECT 
+        up.UserId,
+        up.PostId,
+        ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts up ON up.AcceptedAnswerId = p.Id
+)
+SELECT 
+    u.DisplayName,
+    us.PostsCreated,
+    us.TotalBountyEarned,
+    us.AvgDaysSinceCreation,
+    rp.Level AS PostLevel,
+    pt.TagsList,
+    COUNT(*) OVER () AS TotalUsers,
+    COALESCE(v.TotalVotes, 0) AS TotalVotesGiven
+FROM 
+    Users u
+JOIN 
+    UserStatistics us ON us.UserId = u.Id
+LEFT JOIN 
+    RecursivePosts rp ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostTags pt ON pt.PostId = rp.PostId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalVotes 
+    FROM 
+        Votes 
+    GROUP BY 
+        UserId
+) v ON v.UserId = u.Id
+WHERE 
+    us.PostsCreated > 0
+ORDER BY 
+    us.TotalBountyEarned DESC
+LIMIT 100;

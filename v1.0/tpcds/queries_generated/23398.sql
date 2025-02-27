@@ -1,0 +1,93 @@
+
+WITH RECURSIVE income_level AS (
+    SELECT 
+        ib_income_band_sk, 
+        ib_lower_bound, 
+        ib_upper_bound,
+        ROW_NUMBER() OVER (ORDER BY ib_income_band_sk) AS rn
+    FROM income_band 
+    WHERE ib_lower_bound IS NOT NULL OR ib_upper_bound IS NOT NULL
+),
+customer_focus AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_day,
+        c.c_birth_month,
+        c.c_birth_year,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        COALESCE(cd.cd_marital_status, 'N') AS marital_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        (SELECT COUNT(*) 
+         FROM date_dim d 
+         WHERE d.d_year = EXTRACT(YEAR FROM current_date)
+         AND d.d_moy = c.c_birth_month) AS birth_month_count,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Undefined' 
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low' 
+            ELSE 'High' 
+        END AS purchase_category
+    FROM customer c
+    LEFT JOIN customer_demographics cd 
+        ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+),
+promotion_activity AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM promotion p
+    LEFT JOIN web_sales ws 
+        ON p.p_item_sk = ws.ws_item_sk AND ws.ws_sold_date_sk BETWEEN p.p_start_date_sk AND p.p_end_date_sk
+    GROUP BY p.p_promo_id
+),
+aggregated_data AS (
+    SELECT 
+        cf.c_customer_id,
+        SUM(COALESCE(pa.total_profit, 0)) AS total_customer_profit,
+        COUNT(DISTINCT pa.p_promo_id) AS promo_count,
+        AVG(f.income) AS average_income
+    FROM customer_focus cf
+    LEFT JOIN promotion_activity pa 
+        ON cf.c_customer_id = pa.p_promo_id 
+    LEFT JOIN (
+        SELECT 
+            c.c_customer_id,
+            COUNT(DISTINCT ib.ib_income_band_sk) AS income,
+            MAX(ib.ib_upper_bound) AS max_income
+        FROM customer c
+        JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+        GROUP BY c.c_customer_id
+    ) f ON cf.c_customer_id = f.c_customer_id
+    GROUP BY cf.c_customer_id
+)
+SELECT 
+    cf.c_customer_id,
+    cf.c_first_name,
+    cf.c_last_name,
+    af.total_customer_profit,
+    af.promo_count,
+    CASE 
+        WHEN af.average_income IS NULL THEN 'No Income Data' 
+        WHEN af.average_income BETWEEN 0 AND 30000 THEN 'Low Income' 
+        WHEN af.average_income BETWEEN 30001 AND 70000 THEN 'Middle Income' 
+        ELSE 'High Income' 
+    END AS income_level,
+    (SELECT COUNT(*) 
+     FROM store_sales 
+     WHERE ss_customer_sk = cf.c_customer_sk 
+     AND ss_sales_price IS NOT NULL) AS store_purchase_count,
+    (SELECT COUNT(*) 
+     FROM catalog_sales 
+     WHERE cs_bill_customer_sk = cf.c_customer_id) AS catalog_purchase_count,
+    (SELECT COUNT(*) 
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = cf.c_customer_sk) AS web_purchase_count
+FROM customer_focus cf
+JOIN aggregated_data af ON cf.c_customer_id = af.c_customer_id
+WHERE cf.gender IN ('M', 'F')
+ORDER BY af.total_customer_profit DESC
+FETCH FIRST 10 ROWS ONLY;

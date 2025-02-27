@@ -1,0 +1,25 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    is.i_item_id,
+    is.i_product_name,
+    ss.total_sales,
+    ss.total_quantity
+FROM 
+    sales_summary ss
+JOIN 
+    item is ON ss.ws_item_sk = is.i_item_sk
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

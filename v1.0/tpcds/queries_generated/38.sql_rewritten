@@ -1,0 +1,54 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales,
+        COUNT(rs.ws_item_sk) AS total_transactions,
+        AVG(rs.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT CASE WHEN rs.ws_quantity > 5 THEN rs.ws_item_sk END) AS high_volume_sales,
+        cast('2002-10-01' as date) - MIN(date_dim.d_date) AS days_since_first_sale
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+    JOIN 
+        date_dim ON rs.ws_sold_date_sk = date_dim.d_date_sk
+    WHERE 
+        rs.rn = 1
+    GROUP BY 
+        item.i_item_id, item.i_product_name
+)
+SELECT 
+    ss.i_item_id,
+    ss.i_product_name,
+    ss.total_sales,
+    ss.total_transactions,
+    ss.avg_sales_price,
+    ss.high_volume_sales,
+    COALESCE(ss.days_since_first_sale, 'No sales yet') AS days_since_first_sale,
+    CASE 
+        WHEN ss.total_sales > 5000 THEN 'High Performer'
+        WHEN ss.total_sales BETWEEN 1000 AND 5000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    promotion p ON ss.i_item_id = p.p_item_sk
+WHERE 
+    p.p_start_date_sk <= 20230101 AND 
+    (p.p_end_date_sk >= 20230101 OR p.p_end_date_sk IS NULL)
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 50;

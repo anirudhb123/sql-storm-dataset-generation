@@ -1,0 +1,69 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        MAX(u.LastAccessDate) AS LastAccess
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsWithTag,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews
+    FROM Tags t
+    LEFT JOIN Posts p ON POSITION(t.TagName IN p.Tags) > 0
+    GROUP BY t.TagName
+),
+PostHistoryInformation AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        MIN(ph.CreationDate) AS FirstClosedDate,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+LatestVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(v.CreationDate) AS LatestVoteDate
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    ur.UpVotesCount,
+    ur.DownVotesCount,
+    COUNT(DISTINCT ts.TagName) AS DistinctTags,
+    ph.CloseCount,
+    ph.ReopenCount,
+    ph.FirstClosedDate,
+    ph.LastHistoryDate,
+    lv.LatestVoteDate,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'High Reputation User' 
+        WHEN ur.Reputation BETWEEN 500 AND 1000 THEN 'Moderate Reputation User'
+        ELSE 'Low Reputation User'
+    END AS ReputationCategory
+FROM UserReputation ur
+LEFT JOIN PostHistoryInformation ph ON ur.UserId = ph.PostId
+LEFT JOIN TagStatistics ts ON POSITION(ts.TagName IN (SELECT Tags FROM Posts WHERE OwnerUserId = ur.UserId)) > 0
+LEFT JOIN LatestVotes lv ON ur.PostCount = (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = ur.UserId)
+WHERE ur.LastAccess > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+GROUP BY ur.UserId, ur.DisplayName, ur.Reputation, ur.PostCount, ur.UpVotesCount, 
+         ur.DownVotesCount, ph.CloseCount, ph.ReopenCount, ph.FirstClosedDate, 
+         ph.LastHistoryDate, lv.LatestVoteDate;

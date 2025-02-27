@@ -1,0 +1,54 @@
+
+WITH sales_data AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        d.d_year,
+        d.d_month_seq,
+        c.cd_gender,
+        c.cd_income_band_sk
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE
+        d.d_year = 2023
+        AND c.cd_gender = 'F'
+),
+profit_data AS (
+    SELECT
+        sd.ws_item_sk,
+        SUM(sd.ws_net_profit) AS total_net_profit,
+        SUM(sd.ws_quantity) AS total_quantity_sold
+    FROM
+        sales_data sd
+    GROUP BY
+        sd.ws_item_sk
+),
+brand_performance AS (
+    SELECT
+        i.i_brand,
+        SUM(pd.total_net_profit) AS brand_total_net_profit,
+        SUM(pd.total_quantity_sold) AS brand_total_quantity_sold
+    FROM
+        profit_data pd
+    JOIN
+        item i ON pd.ws_item_sk = i.i_item_sk
+    GROUP BY
+        i.i_brand
+)
+SELECT
+    bp.i_brand,
+    bp.brand_total_net_profit,
+    bp.brand_total_quantity_sold,
+    (bp.brand_total_net_profit / NULLIF(bp.brand_total_quantity_sold, 0)) AS avg_net_profit_per_item
+FROM
+    brand_performance bp
+ORDER BY
+    avg_net_profit_per_item DESC
+FETCH FIRST 10 ROWS ONLY;

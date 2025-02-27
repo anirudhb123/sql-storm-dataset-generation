@@ -1,0 +1,53 @@
+
+WITH MovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        AVG(CAST(p.info AS numeric)) AS avg_age,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        person_info p ON p.person_id = ci.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'age')
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title
+),
+HighCastMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.total_cast,
+        m.avg_age,
+        m.keywords,
+        RANK() OVER (ORDER BY m.total_cast DESC) AS cast_rank
+    FROM 
+        MovieStats m
+    WHERE 
+        m.total_cast > 5
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.total_cast,
+    COALESCE(h.avg_age, 0) AS avg_age,
+    h.keywords,
+    CASE 
+        WHEN h.cast_rank <= 10 THEN 'Top Cast'
+        ELSE 'Regular'
+    END AS cast_category
+FROM 
+    HighCastMovies h
+ORDER BY 
+    h.cast_rank ASC, 
+    h.total_cast DESC;

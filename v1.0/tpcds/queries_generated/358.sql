@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(ws.ws_net_paid_inc_tax, 0)) AS total_web_sales,
+        SUM(COALESCE(cs.cs_net_paid_inc_tax, 0)) AS total_catalog_sales,
+        SUM(COALESCE(ss.ss_net_paid_inc_tax, 0)) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesSummary AS (
+    SELECT 
+        c.first_name,
+        c.last_name,
+        COALESCE(c.total_web_sales, 0) AS total_web_sales,
+        COALESCE(c.total_catalog_sales, 0) AS total_catalog_sales,
+        COALESCE(c.total_store_sales, 0) AS total_store_sales,
+        (COALESCE(c.total_web_sales, 0) + COALESCE(c.total_catalog_sales, 0) + COALESCE(c.total_store_sales, 0)) AS overall_sales,
+        ROW_NUMBER() OVER (ORDER BY (COALESCE(c.total_web_sales, 0) + COALESCE(c.total_catalog_sales, 0) + COALESCE(c.total_store_sales, 0)) DESC) AS sales_rank
+    FROM 
+        CustomerSales c
+),
+HighSpenders AS (
+    SELECT 
+        first_name,
+        last_name,
+        overall_sales
+    FROM 
+        SalesSummary
+    WHERE 
+        overall_sales > (SELECT AVG(overall_sales) FROM SalesSummary)
+)
+SELECT 
+    hs.first_name,
+    hs.last_name,
+    hs.overall_sales,
+    CASE 
+        WHEN hs.overall_sales BETWEEN 1000 AND 5000 THEN 'Moderate Spender'
+        WHEN hs.overall_sales > 5000 THEN 'High Spender'
+        ELSE 'Light Spender'
+    END AS spending_category
+FROM 
+    HighSpenders hs
+ORDER BY 
+    hs.overall_sales DESC;

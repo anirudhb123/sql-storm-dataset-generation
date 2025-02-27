@@ -1,0 +1,48 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+CustomerStats AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_availqty) AS total_availability,
+           MAX(ps.ps_supplycost) AS max_supplycost,
+           COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 1000
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT ch.c_custkey,
+       ch.c_name,
+       SUM(ch.total_spent) AS total_spent,
+       AVG(ch.order_count) AS avg_order_count,
+       fs.total_availability,
+       fs.max_supplycost,
+       fs.part_count
+FROM CustomerStats ch
+JOIN FilteredSuppliers fs ON fs.part_count >= 10
+GROUP BY ch.c_custkey, ch.c_name, fs.total_availability, fs.max_supplycost, fs.part_count
+HAVING MAX(ch.rank) <= 5
+ORDER BY total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

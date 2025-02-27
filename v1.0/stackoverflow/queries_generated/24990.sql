@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > (
+            SELECT AVG(Score) 
+            FROM Posts 
+            WHERE OwnerUserId = p.OwnerUserId
+        )
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        CommentId,
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        c.UserId,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS RecentComment
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    up.DisplayName,
+    SUM(up.TotalViews) AS TotalViews,
+    COUNT(DISTINCT rp.PostId) AS HighScoringPosts,
+    AVG(CASE WHEN rp.rn = 1 THEN rp.Score ELSE NULL END) AS AvgHighScore,
+    ARRAY_AGG(DISTINCT ra.Text) FILTER (WHERE ra.RecentComment <= 3) AS RecentComments,
+    STRING_AGG(CASE WHEN b.Class IS NOT NULL THEN b.Name ELSE 'No Badge' END, ', ') AS BadgeNames,
+    CASE 
+        WHEN SUM(up.PostCount) < 5 THEN 'Newbie'
+        WHEN SUM(up.PostCount) BETWEEN 5 AND 15 THEN 'Engaged'
+        ELSE 'Veteran'
+    END AS UserTier
+FROM 
+    UserStatistics up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId AND ra.RecentComment <= 3
+LEFT JOIN 
+    Badges b ON up.UserId = b.UserId
+GROUP BY 
+    up.DisplayName
+HAVING 
+    SUM(up.TotalViews) > 100
+ORDER BY 
+    AvgHighScore DESC NULLS LAST, 
+    TotalViews DESC;

@@ -1,0 +1,71 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(p.ViewCount) AS AvgViews,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        PositivePosts,
+        NegativePosts,
+        AvgViews,
+        ClosedPostsCount,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 0
+)
+SELECT 
+    t.DisplayName,
+    t.TotalPosts,
+    t.PositivePosts,
+    t.NegativePosts,
+    t.AvgViews,
+    t.ClosedPostsCount,
+    COALESCE(ph.CreationDate, 'N/A') AS LastPostClosedDate
+FROM 
+    TopUsers t
+LEFT JOIN 
+    PostHistory ph ON t.UserId = ph.UserId AND ph.PostHistoryTypeId = 10
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.Rank;

@@ -1,0 +1,85 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_in_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+
+HighCastMovies AS (
+    SELECT 
+        title, production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        cast_count > 0
+        AND rank_in_year <= 5
+), 
+
+CompanyMovies AS (
+    SELECT 
+        m.title,
+        c.company_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    INNER JOIN 
+        aka_title a ON m.movie_id = a.id
+    INNER JOIN 
+        company_name cn ON m.company_id = cn.id
+    INNER JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    WHERE 
+        cn.country_code = 'US'
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        a.title,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.title ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+)
+
+SELECT 
+    DISTINCT
+    h.title,
+    h.production_year,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    c.company_name,
+    ARRAY_AGG(DISTINCT c.company_type) AS company_types,
+    CASE
+        WHEN h.production_year < 2000 THEN 'Classic'
+        WHEN h.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    SUM(CASE WHEN mc.company_id IS NOT NULL THEN 1 ELSE 0 END) AS company_associations
+FROM 
+    HighCastMovies h
+LEFT JOIN 
+    MoviesWithKeywords mk ON h.title = mk.title
+LEFT JOIN 
+    CompanyMovies c ON h.title = c.title
+LEFT JOIN 
+    (SELECT movie_id, COUNT(*) AS count FROM movie_companies GROUP BY movie_id) mc ON h.title = mc.movie_id
+GROUP BY 
+    h.title, h.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 2
+ORDER BY 
+    h.production_year DESC, 
+    h.title;

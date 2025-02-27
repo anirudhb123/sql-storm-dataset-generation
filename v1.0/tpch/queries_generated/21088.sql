@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT o.custkey, o.orderkey, o.totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.custkey ORDER BY o.orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.orderstatus IN ('O', 'F')
+), FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'No Balance'
+               WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+               ELSE 'Sufficient Balance'
+           END AS balance_status
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL OR s.s_name LIKE '%Inc%'
+), HighValueLineItems AS (
+    SELECT l.orderkey, SUM(l.extendedprice * (1 - l.discount)) AS total_lineitem_value
+    FROM lineitem l
+    WHERE l.returnflag = 'N' AND l.linestatus = 'O'
+    GROUP BY l.orderkey
+), CustomerStats AS (
+    SELECT c.custkey, COUNT(DISTINCT o.orderkey) AS order_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spending
+    FROM customer c
+    LEFT JOIN orders o ON c.custkey = o.custkey
+    LEFT JOIN lineitem l ON o.orderkey = l.orderkey
+    GROUP BY c.custkey
+), MixedRegionData AS (
+    SELECT n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT r.r_name, COUNT(DISTINCT c.custkey) AS distinct_customers,
+       SUM(CASE WHEN fs.balance_status = 'Sufficient Balance' THEN 1 ELSE 0 END) AS sufficient_balance_count,
+       AVG(cs.total_spending) AS avg_spending_per_customer,
+       STRING_AGG(p.p_name, ', ') AS product_names
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN FilteredSuppliers fs ON n.n_nationkey = fs.s_nationkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerStats cs ON c.custkey = cs.custkey
+LEFT JOIN partsupp ps ON c.custkey = ps.ps_partkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN HighValueLineItems hv ON c.custkey = hv.orderkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT c.custkey) > 0
+ORDER BY r.r_name DESC
+LIMIT 10 OFFSET 5;

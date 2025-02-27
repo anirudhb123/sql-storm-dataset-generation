@@ -1,0 +1,43 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+-- This query retrieves basic statistics about posts, users, and activity.
+
+WITH PostStats AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(Score) AS AvgScore,
+        AVG(AnswerCount) AS AvgAnswerCount,
+        AVG(CommentCount) AS AvgCommentCount,
+        AVG(FavoriteCount) AS AvgFavoriteCount
+    FROM Posts
+    WHERE CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Only consider the last year
+    GROUP BY PostTypeId
+),
+
+UserStats AS (
+    SELECT 
+        COUNT(*) AS TotalUsers,
+        AVG(Reputation) AS AvgReputation,
+        AVG(Views) AS AvgViews,
+        AVG(UpVotes) AS AvgUpVotes,
+        AVG(DownVotes) AS AvgDownVotes
+    FROM Users
+    WHERE CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Only consider users created in the last year
+)
+
+SELECT 
+    ps.PostTypeId,
+    ps.TotalPosts,
+    ps.AvgViewCount,
+    ps.AvgScore,
+    ps.AvgAnswerCount,
+    ps.AvgCommentCount,
+    ps.AvgFavoriteCount,
+    us.TotalUsers,
+    us.AvgReputation,
+    us.AvgViews,
+    us.AvgUpVotes,
+    us.AvgDownVotes
+FROM PostStats ps, UserStats us
+ORDER BY ps.PostTypeId;

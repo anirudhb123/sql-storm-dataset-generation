@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(ws.ws_sales_price), 0) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        h.total_sales,
+        h.order_count,
+        h.sales_rank
+    FROM 
+        sales_hierarchy h
+    JOIN 
+        customer c ON h.c_customer_sk = c.c_customer_sk
+    WHERE 
+        h.sales_rank <= 100
+),
+sales_summary AS (
+    SELECT 
+        t.c_first_name,
+        t.c_last_name,
+        t.total_sales,
+        t.order_count,
+        COALESCE(
+            (SELECT AVG(total_sales) FROM top_customers WHERE order_count > 0), 0
+        ) AS avg_sales
+    FROM 
+        top_customers t
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    s.order_count,
+    s.avg_sales,
+    CASE 
+        WHEN s.total_sales > s.avg_sales THEN 'Above Average'
+        WHEN s.total_sales < s.avg_sales THEN 'Below Average'
+        ELSE 'Average'
+    END AS sales_performance,
+    COALESCE(
+        (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = s.c_customer_sk AND ss.ss_sales_price > 100), 0
+    ) AS high_value_orders
+FROM 
+    sales_summary s
+ORDER BY 
+    s.total_sales DESC;

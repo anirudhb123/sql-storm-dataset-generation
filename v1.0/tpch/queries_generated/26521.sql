@@ -1,0 +1,39 @@
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_type,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    SUBSTRING_INDEX(p.p_name, ' ', 1) AS first_word_of_part_name,
+    CONCAT_WS(', ', r.r_name, n.n_name) AS region_nation,
+    LENGTH(p.p_comment) AS comment_length,
+    CASE 
+        WHEN p.p_retailprice > 100 THEN 'Expensive' 
+        WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Moderately Priced' 
+        ELSE 'Cheap' 
+    END AS price_category,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    LENGTH(p.p_name) > 10
+    AND p.p_type LIKE '%rubber%'
+    AND o.o_orderstatus = 'O'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_type, s.s_name, c.c_name, r.r_name, n.n_name, p.p_retailprice, p.p_comment
+ORDER BY 
+    order_count DESC, p.p_retailprice ASC;

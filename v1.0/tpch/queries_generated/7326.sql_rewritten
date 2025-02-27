@@ -1,0 +1,31 @@
+WITH SupplierCost AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, COUNT(l.l_orderkey) AS line_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sr.r_name AS region_name,
+    na.n_name AS nation_name,
+    COUNT(DISTINCT ord.o_orderkey) AS total_orders,
+    SUM(ord.o_totalprice) AS sum_order_total,
+    SUM(su.total_supply_cost) AS total_supply_costs
+FROM OrderAnalysis ord
+JOIN NationRegion na ON ord.o_orderkey % 10 = na.n_nationkey  
+JOIN SupplierCost su ON su.s_suppkey % 10 = na.n_nationkey  
+JOIN supplier s ON su.s_suppkey = s.s_suppkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+GROUP BY sr.r_name, na.n_name
+ORDER BY total_orders DESC, sum_order_total DESC;

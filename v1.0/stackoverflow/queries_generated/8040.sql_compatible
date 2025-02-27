@@ -1,0 +1,80 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(C.CommentId) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId, P.CreationDate
+),
+PostOwner AS (
+    SELECT 
+        P.PostId, 
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        PostStats P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+),
+FinalStats AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PO.OwnerDisplayName,
+        PS.CommentCount,
+        PS.UpVotes AS PostUpVotes,
+        PS.DownVotes AS PostDownVotes,
+        UVS.UpVotes AS UserUpVotes,
+        UVS.DownVotes AS UserDownVotes,
+        UVS.TotalVotes AS UserTotalVotes,
+        PS.CreationDate
+    FROM 
+        PostStats PS
+    JOIN 
+        PostOwner PO ON PS.PostId = PO.PostId
+    JOIN 
+        UserVoteStats UVS ON PS.OwnerUserId = UVS.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CommentCount,
+    PostUpVotes,
+    PostDownVotes,
+    UserUpVotes,
+    UserDownVotes,
+    UserTotalVotes,
+    CreationDate
+FROM 
+    FinalStats
+WHERE 
+    CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+ORDER BY 
+    PostUpVotes DESC, 
+    CreationDate DESC
+LIMIT 100;

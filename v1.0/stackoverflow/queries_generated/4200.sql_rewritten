@@ -1,0 +1,43 @@
+WITH ActiveUsers AS (
+    SELECT Id, Reputation, CreationDate, 
+           DENSE_RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 1000
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName AS OwnerDisplayName,
+           COUNT(c.Id) AS CommentCount,
+           RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT ph.PostId, 
+           MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+           COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalResults AS (
+    SELECT rp.Id, rp.Title, rp.Score, rp.CreationDate,
+           rp.OwnerDisplayName, rp.CommentCount, 
+           COALESCE(ps.ClosedDate, 'No Closure') AS ClosedStatus,
+           ps.DeleteCount, au.Reputation AS UserReputation,
+           CONCAT('Post Score: ', rp.Score, ' | Comments: ', rp.CommentCount) AS PostMetrics
+    FROM RecentPosts rp
+    LEFT JOIN PostHistoryStats ps ON rp.Id = ps.PostId
+    JOIN ActiveUsers au ON rp.OwnerUserId = au.Id
+    WHERE rp.PostRank = 1
+)
+SELECT *, 
+       CASE 
+           WHEN UserReputation >= 2000 THEN 'High Reputation'
+           WHEN UserReputation BETWEEN 1000 AND 2000 THEN 'Medium Reputation'
+           ELSE 'Low Reputation'
+       END AS ReputationCategory
+FROM FinalResults
+ORDER BY CreationDate DESC
+LIMIT 10;

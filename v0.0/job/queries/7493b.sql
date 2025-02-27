@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND cn.name < 'Laika Pictures' AND cn.name_pcode_sf > 'M6246' AND mc.note IN ('(1986) (USA) (all media) (Sega Master System & Wii versions)', '(2002) (Japan)', '(2007) (Italy) (DVD) (special edition)', '(2008) (non-USA) (all media) (world sales)', '(2010) (Australia) (video)', '(2011) (Bulgaria) (DVD)', '(2012) (worldwide) (video) (streaming)', '(2013) (USA) (all media) (Xbox 360)', '(as Rete 1)', '(presents) (as CTV)');

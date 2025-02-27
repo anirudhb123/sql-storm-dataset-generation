@@ -1,0 +1,71 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderSummary AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS net_revenue,
+        AVG(lo.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT lo.l_suppkey) AS supplier_count
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    c.c_name,
+    co.order_count,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent > 10000 THEN 'High Value'
+        WHEN co.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    os.net_revenue,
+    os.avg_quantity,
+    os.supplier_count,
+    sd.total_supply_cost
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    OrderSummary os ON co.custkey = os.l_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem li ON ps.ps_partkey = li.l_partkey WHERE li.l_orderkey = os.l_orderkey)
+WHERE 
+    os.net_revenue IS NOT NULL 
+    AND sd.total_supply_cost IS NOT NULL
+ORDER BY 
+    co.total_spent DESC, os.net_revenue DESC;

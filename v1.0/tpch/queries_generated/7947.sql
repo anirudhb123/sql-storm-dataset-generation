@@ -1,0 +1,70 @@
+WITH RegionalSupplierCosts AS (
+    SELECT 
+        r.r_name AS region_name,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_name
+),
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey AS order_key,
+        o.o_totalprice AS total_price,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        c.c_name, o.o_orderkey, o.o_totalprice
+),
+CombinedReport AS (
+    SELECT 
+        rsc.region_name,
+        rsc.supplier_name,
+        cod.customer_name,
+        cod.order_key,
+        cod.total_price,
+        cod.revenue,
+        (cod.revenue / NULLIF(cod.total_price, 0)) * 100 AS revenue_percentage
+    FROM 
+        RegionalSupplierCosts rsc
+    JOIN 
+        CustomerOrderDetails cod ON rsc.region_name IN (
+            SELECT r_name 
+            FROM region 
+            JOIN nation n ON n.n_regionkey = region.r_regionkey 
+            WHERE n.n_nationkey IN (
+                SELECT s_nationkey 
+                FROM supplier 
+                WHERE s_name = rsc.supplier_name
+            )
+        )
+)
+SELECT 
+    region_name,
+    supplier_name,
+    customer_name,
+    order_key,
+    total_price,
+    revenue,
+    revenue_percentage
+FROM 
+    CombinedReport
+WHERE 
+    revenue_percentage > 50
+ORDER BY 
+    region_name, supplier_name, revenue DESC;

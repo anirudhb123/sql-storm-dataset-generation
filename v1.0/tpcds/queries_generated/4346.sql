@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_revenue,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk, ws_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ci.RankCount
+    FROM 
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+        LEFT JOIN (
+            SELECT 
+                ws_bill_customer_sk,
+                COUNT(DISTINCT ws_item_sk) AS RankCount
+            FROM 
+                web_sales 
+            WHERE 
+                ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+            GROUP BY 
+                ws_bill_customer_sk
+        ) AS ci ON c.c_customer_sk = ci.ws_bill_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    ci.ca_state,
+    rs.total_quantity,
+    rs.total_revenue
+FROM 
+    RankedSales rs
+    INNER JOIN CustomerInfo ci ON rs.ws_bill_customer_sk = ci.c_customer_id
+WHERE 
+    rs.sales_rank <= 10
+    AND (ci.cd_gender = 'F' OR ci.cd_marital_status = 'M')
+    AND ci.ca_state IN ('CA', 'NY')
+ORDER BY 
+    rs.total_revenue DESC;

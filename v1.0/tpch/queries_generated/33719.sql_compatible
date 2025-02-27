@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'AUSTRALIA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrdersSummary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_sales, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity,
+           SUM(l.l_tax) AS total_tax
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+TopProducts AS (
+    SELECT ps.ps_partkey, SUM(l.l_extendedprice) AS total_sales
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY ps.ps_partkey
+    ORDER BY total_sales DESC
+    LIMIT 10
+)
+SELECT n.n_name, 
+       r.r_name,
+       SUM(COALESCE(oss.total_sales, 0)) AS total_orders_value,
+       COUNT(DISTINCT oss.o_custkey) AS customer_count,
+       MAX(l.total_revenue) AS max_order_revenue,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS top_products,
+       CASE 
+            WHEN AVG(oss.order_count) > 10 THEN 'High' 
+            WHEN AVG(oss.order_count) BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low' 
+       END AS order_frequency
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN OrdersSummary oss ON n.n_nationkey = oss.o_custkey
+JOIN LineItemSummary l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = oss.o_custkey)
+LEFT JOIN TopProducts tp ON tp.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN lineitem li ON ps.ps_partkey = li.l_partkey)
+WHERE n.n_name IS NOT NULL AND r.r_name IS NOT NULL
+GROUP BY n.n_name, r.r_name
+ORDER BY total_orders_value DESC;

@@ -1,0 +1,82 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        COALESCE(NULLIF(MAX(P.CreationDate), '1970-01-01'), cast('2024-10-01 12:34:56' as timestamp)) AS LastPostDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        MAX(PH.CreationDate) AS LastHistoryAction
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.Score
+),
+AggregateTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.QuestionCount,
+    UA.AnswerCount,
+    UA.UpvoteCount,
+    UA.DownvoteCount,
+    UA.LastPostDate,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.Rank,
+    PS.CommentCount,
+    AT.TagName,
+    AT.PostCount AS TagPostCount,
+    AT.QuestionCount AS TagQuestionCount,
+    AT.ActiveUsers AS TagActiveUsers
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStatistics PS ON UA.UserId = PS.PostId 
+LEFT JOIN 
+    AggregateTags AT ON AT.PostCount > 5 AND AT.QuestionCount > 1 
+WHERE 
+    UA.UpvoteCount > 10
+    OR (UA.DisplayName IS NOT NULL AND UA.Reputation >= (SELECT AVG(Reputation) FROM Users WHERE Reputation IS NOT NULL))
+ORDER BY 
+    UA.LastPostDate DESC,
+    PS.Rank;

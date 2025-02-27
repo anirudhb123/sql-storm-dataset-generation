@@ -1,0 +1,74 @@
+
+WITH RECURSIVE ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), order_details AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_price,
+        COUNT(DISTINCT lo.l_partkey) AS part_count,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+        RANK() OVER (PARTITION BY lo.l_orderkey ORDER BY SUM(lo.l_extendedprice * (1 - lo.l_discount)) DESC) AS detail_rank
+    FROM 
+        lineitem lo
+    JOIN 
+        part p ON lo.l_partkey = p.p_partkey
+    GROUP BY 
+        lo.l_orderkey
+), supplier_info AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey
+), combined_info AS (
+    SELECT
+        o.order_rank,
+        od.l_orderkey,
+        od.total_price,
+        od.part_count,
+        si.total_supplycost,
+        si.avg_supplier_balance
+    FROM 
+        ranked_orders o
+    LEFT JOIN 
+        order_details od ON o.o_orderkey = od.l_orderkey
+    LEFT JOIN 
+        supplier_info si ON od.l_orderkey % 2 = 0 AND si.ps_partkey = od.part_count 
+    WHERE 
+        o.order_rank < 10
+)
+SELECT 
+    ci.order_rank,
+    ci.l_orderkey,
+    ci.total_price,
+    COALESCE(ci.part_count, 0) AS part_count,
+    CASE 
+        WHEN ci.total_supplycost IS NULL THEN 'N/A'
+        ELSE CAST(ci.total_supplycost AS VARCHAR)
+    END AS total_supplycost,
+    CASE 
+        WHEN ci.avg_supplier_balance IS NULL THEN 'No supplier'
+        ELSE FORMAT(ci.avg_supplier_balance, 'C')
+    END AS avg_supplier_balance
+FROM 
+    combined_info ci
+WHERE 
+    ci.total_price IS NOT NULL AND 
+    ci.total_price > (SELECT AVG(total_price) FROM order_details) 
+ORDER BY 
+    ci.total_price DESC;

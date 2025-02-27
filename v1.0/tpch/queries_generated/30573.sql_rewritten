@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal + sh.s_acctbal AS total_acctbal,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        sh.level < 5
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(s.s_acctbal) AS max_supplier_acctbal
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+INNER JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 50)
+GROUP BY 
+    p.p_name
+HAVING 
+    revenue > (SELECT AVG(total_revenue) FROM (SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_revenue FROM lineitem GROUP BY l_partkey) AS avg_revenue)
+ORDER BY 
+    revenue DESC
+FETCH FIRST 10 ROWS ONLY;

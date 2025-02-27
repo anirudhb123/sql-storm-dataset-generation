@@ -1,0 +1,56 @@
+WITH CTE_SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_revenue
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CTE_CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+CTE_HighValueCustomers AS (
+    SELECT 
+        *
+    FROM 
+        CTE_CustomerOrders
+    WHERE 
+        total_spent > (SELECT AVG(total_spent) FROM CTE_CustomerOrders)
+)
+SELECT 
+    r.r_name,
+    nv.n_name,
+    s.s_name,
+    COALESCE(sr.total_revenue, 0) AS revenue,
+    COUNT(DISTINCT c.c_custkey) AS high_value_customer_count,
+    SUM(CASE WHEN c.c_custkey IS NOT NULL THEN c.total_spent ELSE 0 END) AS total_high_value_spent
+FROM 
+    region r
+JOIN 
+    nation nv ON r.r_regionkey = nv.n_regionkey
+LEFT JOIN 
+    supplier s ON nv.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    CTE_SupplierRevenue sr ON s.s_suppkey = sr.s_suppkey
+LEFT JOIN 
+    CTE_HighValueCustomers c ON nv.n_nationkey = c.c_custkey
+GROUP BY 
+    r.r_name, nv.n_name, s.s_name
+ORDER BY 
+    revenue DESC, high_value_customer_count DESC;

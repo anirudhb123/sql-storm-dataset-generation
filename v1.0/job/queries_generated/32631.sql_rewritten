@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(nullif(mk.keyword, ''), 'No Keywords') AS keyword
+    FROM 
+        aka_title AS mt
+    LEFT JOIN 
+        movie_keyword AS mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mx.id,
+        mx.title,
+        mx.production_year,
+        COALESCE(nullif(mk.keyword, ''), 'No Keywords')
+    FROM 
+        aka_title AS mx
+    JOIN 
+        movie_link AS ml ON mx.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON mx.id = mk.movie_id
+    WHERE 
+        mx.production_year IS NOT NULL
+), ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.keyword,
+        ROW_NUMBER() OVER(PARTITION BY mh.keyword ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        movie_hierarchy AS mh
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(p.name, 'Unknown') AS person_name,
+    ci.note AS role_type,
+    COALESCE(GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name), 'No Companies') AS companies_involved
+FROM 
+    ranked_movies AS rm
+LEFT JOIN 
+    complete_cast AS cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name AS p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_companies AS mc ON mc.movie_id = rm.movie_id
+LEFT JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+WHERE 
+    rm.rn = 1 
+    AND (p.gender IS NULL OR p.gender = 'M') 
+GROUP BY 
+    rm.movie_id, rm.movie_title, rm.production_year, p.name, ci.note
+ORDER BY 
+    rm.production_year DESC;

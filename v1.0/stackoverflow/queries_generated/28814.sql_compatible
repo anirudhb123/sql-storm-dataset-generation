@@ -1,0 +1,43 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        pf.PostCount,
+        ROW_NUMBER() OVER (PARTITION BY pf.TagName ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    JOIN 
+        TagFrequency pf ON pf.TagName = ANY(string_to_array(p.Tags, '><'))
+    WHERE 
+        p.CreationDate > DATEADD(month, -1, '2024-10-01')
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.PostCount,
+    tg.TagName
+FROM 
+    RecentPosts rp
+JOIN 
+    TagFrequency tg ON tg.TagName = ANY(string_to_array(rp.Title, '><'))
+WHERE 
+    rp.RN <= 5
+ORDER BY 
+    tg.PostCount DESC, 
+    rp.CreationDate DESC;

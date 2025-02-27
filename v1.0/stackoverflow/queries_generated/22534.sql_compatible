@@ -1,0 +1,100 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS TotalClosures,
+        COUNT(DISTINCT CASE WHEN b.Id IS NOT NULL THEN b.Id END) AS TotalBadges,
+        RANK() OVER (ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FilteredUserActivity AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        TotalViews,
+        TotalPosts,
+        TotalAnswers,
+        TotalClosures,
+        TotalBadges,
+        UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        UserRank <= 10 
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        p.Score,
+        COALESCE(v.UpVoteCount, 0) AS UpVotes,
+        COALESCE(v.DownVoteCount, 0) AS DownVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p 
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT 
+            t.TagName,
+            t.PostId
+         FROM 
+            Tags t) t ON t.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerDisplayName, p.Score
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        ROW_NUMBER() OVER (ORDER BY ps.Score DESC) AS Rank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.TotalViews,
+    u.TotalPosts,
+    u.TotalAnswers,
+    u.TotalClosures,
+    u.TotalBadges,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.OwnerDisplayName,
+    pp.Score,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.Rank
+FROM 
+    FilteredUserActivity u
+LEFT JOIN 
+    RankedPosts pp ON pp.Rank <= 5 
+ORDER BY 
+    u.UserRank, pp.Score DESC;

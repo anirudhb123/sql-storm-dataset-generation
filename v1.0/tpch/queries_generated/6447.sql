@@ -1,0 +1,57 @@
+WITH RankedSales AS (
+    SELECT
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY
+        s.s_suppkey, p.p_partkey
+),
+TopSuppliers AS (
+    SELECT
+        supplier_name,
+        part_name,
+        total_revenue
+    FROM
+        RankedSales
+    WHERE
+        revenue_rank <= 5
+),
+CustomerOrders AS (
+    SELECT
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT
+    c.customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    SUM(ts.total_revenue) AS total_revenue_from_top_suppliers
+FROM
+    CustomerOrders o
+JOIN
+    TopSuppliers ts ON o.o_orderkey = ts.part_name
+JOIN
+    customer c ON o.customer_name = c.c_name
+GROUP BY
+    c.customer_name, o.o_orderkey, o.o_orderdate
+ORDER BY
+    total_revenue_from_top_suppliers DESC;

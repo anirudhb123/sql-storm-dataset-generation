@@ -1,0 +1,60 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        0 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.id IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mv.id,
+        mv.title,
+        mv.production_year,
+        mv.kind_id,
+        mh.depth + 1
+    FROM
+        movie_hierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title mv ON ml.linked_movie_id = mv.id
+)
+
+SELECT
+    a.name AS actor_name,
+    at.title AS title,
+    at.production_year,
+    kc.keyword AS keyword,
+    COUNT(mh.movie_id) AS linked_movie_count,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS average_order,
+    ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY at.production_year DESC) AS rn
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN
+    movie_hierarchy mh ON at.id = mh.movie_id
+WHERE
+    a.name IS NOT NULL
+    AND at.production_year >= 2000
+    AND (ci.nr_order > 1 OR ci.nr_order IS NULL)
+GROUP BY
+    a.name, at.title, at.production_year, kc.keyword, a.person_id
+HAVING
+    COUNT(mh.movie_id) > 1
+    OR AVG(ci.nr_order) < 10
+ORDER BY
+    average_order DESC, actor_name;

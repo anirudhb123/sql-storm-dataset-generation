@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT
+        w.warehouse_name,
+        ws.web_site_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY w.warehouse_name ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY
+        w.warehouse_name, ws.web_site_id, c.c_first_name, c.c_last_name
+),
+TopPerformers AS (
+    SELECT
+        warehouse_name,
+        web_site_id,
+        c_first_name,
+        c_last_name,
+        total_sales,
+        total_profit
+    FROM
+        RankedSales
+    WHERE
+        rank_profit <= 5
+)
+SELECT
+    t.warehouse_name,
+    t.web_site_id,
+    t.c_first_name,
+    t.c_last_name,
+    t.total_sales,
+    t.total_profit,
+    d.d_year,
+    d.d_month_seq,
+    d.d_week_seq
+FROM
+    TopPerformers t
+JOIN
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws.ws_sold_date_sk) FROM web_sales ws WHERE t.web_site_id = ws.ws_web_site_sk)
+ORDER BY
+    t.total_profit DESC;

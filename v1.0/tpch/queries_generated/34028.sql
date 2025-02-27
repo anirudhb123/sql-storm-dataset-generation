@@ -1,0 +1,62 @@
+WITH RECURSIVE SupplyCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+RegionCost AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(CASE 
+            WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) 
+            ELSE 0 
+        END) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_nationkey, r.r_name
+), 
+SupplyRegion AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name,
+        COALESCE(SUM(sc.total_supplycost), 0) AS total_supplycost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplyCosts sc ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = sc.ps_partkey)
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    rc.total_sales,
+    sr.total_supplycost,
+    (rc.total_sales - sr.total_supplycost) AS net_profit,
+    ROW_NUMBER() OVER (ORDER BY (rc.total_sales - sr.total_supplycost) DESC) AS profit_rank
+FROM 
+    RegionCost rc
+LEFT JOIN 
+    SupplyRegion sr ON rc.n_nationkey = sr.s_suppkey
+JOIN 
+    region r ON rc.r_regionkey = r.r_regionkey
+WHERE 
+    rc.total_sales IS NOT NULL AND sr.total_supplycost IS NOT NULL
+ORDER BY 
+    net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

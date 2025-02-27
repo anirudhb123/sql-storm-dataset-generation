@@ -1,0 +1,73 @@
+
+WITH movie_actors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        mc.movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS actor_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_performance AS (
+    SELECT 
+        ma.person_id,
+        ma.name,
+        COUNT(*) AS total_movies,
+        MAX(ma.production_year) AS latest_movie_year,
+        MIN(ma.production_year) AS earliest_movie_year
+    FROM 
+        movie_actors ma
+    WHERE 
+        ma.actor_rank <= 5
+    GROUP BY 
+        ma.person_id, ma.name
+),
+null_movie_companies AS (
+    SELECT 
+        DISTINCT m.movie_id
+    FROM 
+        movie_info m
+    WHERE 
+        m.info IS NULL
+),
+joined_data AS (
+    SELECT 
+        a.name AS actor_name,
+        ap.total_movies,
+        COALESCE(nmc.movie_id, 'No Company Info') AS movie_id
+    FROM 
+        actor_performance ap
+    LEFT JOIN 
+        null_movie_companies nmc ON nmc.movie_id IN (SELECT mc.movie_id FROM movie_companies mc)
+    JOIN 
+        aka_name a ON a.person_id = ap.person_id
+)
+SELECT 
+    j.actor_name,
+    j.total_movies,
+    j.movie_id,
+    CASE 
+        WHEN j.total_movies > 10 THEN 'Prolific Actor'
+        WHEN j.total_movies BETWEEN 5 AND 10 THEN 'Established Actor'
+        ELSE 'Newcomer'
+    END AS actor_category,
+    STRING_AGG(DISTINCT ci.note, ', ') AS notes
+FROM 
+    joined_data j
+LEFT JOIN 
+    cast_info ci ON ci.person_id = (SELECT person_id FROM aka_name WHERE name = j.actor_name LIMIT 1)
+GROUP BY 
+    j.actor_name, j.total_movies, j.movie_id
+ORDER BY 
+    j.total_movies DESC,
+    j.actor_name;

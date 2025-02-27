@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        GROUP_CONCAT(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, '>') AS t ON TRIM(t.value) = t.value
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10  -- Top 10 most recent questions
+),
+PostDetails AS (
+    SELECT 
+        pp.*,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        PopularPosts pp
+    LEFT JOIN 
+        PostHistory ph ON pp.PostId = ph.PostId
+    GROUP BY 
+        pp.PostId, pp.Title, pp.OwnerDisplayName, pp.CreationDate, pp.CommentCount, pp.AnswerCount, pp.Tags
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.AnswerCount,
+    pd.Tags,
+    pd.HistoryCount,
+    CASE 
+        WHEN pd.HistoryCount > 5 THEN 'Active'
+        WHEN pd.HistoryCount > 0 THEN 'Moderately Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.CreationDate DESC;

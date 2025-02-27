@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey AND sh.level < 5
+), 
+
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_linenumber) AS item_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+
+SELECT DISTINCT 
+    p.p_partkey, 
+    p.p_name, 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN ps.ps_availqty IS NULL THEN 'Not Available' 
+        ELSE CAST(ps.ps_availqty / NULLIF(ps.ps_supplycost, 0) AS DECIMAL(12,4)) 
+    END AS supply_ratio,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY COALESCE(NULLIF(ps.ps_supplycost, 0), NULL) DESC, p.p_retailprice ASC) AS brand_supply_rank,
+    rs.r_name AS region_name,
+    COUNT(CASE WHEN o.o_orderdate >= DATE '1998-10-01' - INTERVAL '30 days' THEN 1 END) AS recent_orders_count,
+    STRING_AGG(o.o_orderstatus, ', ') FILTER (WHERE o.o_orderstatus IS NOT NULL) AS order_statuses,
+    MAX(CASE WHEN o.o_orderdate IS NULL THEN 'No Orders' ELSE NULL END) AS order_status_check
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN national n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region rs ON n.n_regionkey = rs.r_regionkey
+LEFT JOIN OrderStats o ON o.o_orderkey = ps.ps_suppkey
+WHERE (p.p_size BETWEEN 5 AND 10 OR p.p_type LIKE 's%')
+  AND p.p_comment IS NOT NULL
+  AND s.s_acctbal IS NOT NULL
+GROUP BY p.p_partkey, p.p_name, s.s_name, ps.ps_availqty, rs.r_name, p.p_brand, ps.ps_supplycost
+HAVING COALESCE(SUM(l.l_discount), 0) > 0
+ORDER BY brand_supply_rank DESC, supply_ratio, recent_orders_count DESC;

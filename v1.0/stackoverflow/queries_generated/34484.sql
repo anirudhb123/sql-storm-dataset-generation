@@ -1,0 +1,92 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        PHT.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ChangeOrder
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+),
+FilteredUserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(uv.Upvotes, 0) AS Upvotes,
+    COALESCE(uv.Downvotes, 0) AS Downvotes,
+    phd.HistoryType,
+    phd.UserDisplayName AS EditorName,
+    phd.Comment,
+    rb.BadgeCount AS GoldBadgeCount,
+    CASE 
+        WHEN p.Body IS NULL THEN 'No content available'
+        ELSE LEFT(p.Body, 100) || '...' 
+    END AS PreviewBody
+FROM 
+    RecursivePosts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVotes uv ON p.PostId = uv.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.PostId = phd.PostId AND phd.ChangeOrder = 1
+LEFT JOIN 
+    FilteredUserBadges rb ON u.Id = rb.UserId
+WHERE 
+    p.CreationDate >= '2023-01-01'
+    AND (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.PostId) > 5
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50;

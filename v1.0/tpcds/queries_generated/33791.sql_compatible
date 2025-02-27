@@ -1,0 +1,66 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_day = 'Y')
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), 
+Filtered_Sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(ws_ext_sales_price), 0) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(total_quantity) AS avg_quantity_per_order
+    FROM 
+        item 
+    LEFT JOIN 
+        web_sales ON item.i_item_sk = web_sales.ws_item_sk
+    LEFT JOIN 
+        Sales_CTE ON Sales_CTE.ws_item_sk = item.i_item_sk
+    LEFT JOIN 
+        store_sales ON store_sales.ss_item_sk = item.i_item_sk
+    WHERE 
+        item.i_rec_start_date <= DATE '2002-10-01' AND
+        (item.i_rec_end_date IS NULL OR item.i_rec_end_date > DATE '2002-10-01')
+    GROUP BY 
+        item.i_item_id, item.i_product_name
+    HAVING 
+        total_sales > 1000 AND
+        order_count > 10
+),
+Top_Sales AS (
+    SELECT 
+        *, 
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        Filtered_Sales
+)
+SELECT 
+    fs.i_item_id, 
+    fs.i_product_name, 
+    fs.total_sales, 
+    fs.order_count, 
+    fs.avg_quantity_per_order,
+    CASE 
+        WHEN fs.order_count <= 5 THEN 'Low Volume'
+        WHEN fs.order_count BETWEEN 6 AND 15 THEN 'Medium Volume'
+        ELSE 'High Volume'
+    END AS volume_category,
+    wd.d_day_name,
+    wd.d_date 
+FROM 
+    Top_Sales fs
+CROSS JOIN 
+    (SELECT d_day_name, d_date FROM date_dim WHERE d_current_day = 'Y') wd
+WHERE 
+    fs.rank <= 10
+ORDER BY 
+    fs.total_sales DESC;

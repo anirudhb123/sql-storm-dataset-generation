@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice, 
+           SUM(ps.ps_availqty) AS total_availability,
+           COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice
+),
+OrderAmounts AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+WinnerOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate <= DATE '1998-10-01' - INTERVAL '30' DAY
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    MAX(pd.total_availability) AS max_availability,
+    AVG(oa.total_amount) AS average_order_amount,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM region r 
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+JOIN PartDetails pd ON pd.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey 
+    GROUP BY ps.ps_partkey 
+    HAVING SUM(l.l_quantity) > 100
+)
+JOIN OrderAmounts oa ON oa.o_orderkey IN (
+    SELECT oo.o_orderkey
+    FROM WinnerOrders oo
+    WHERE oo.price_rank = 1
+)
+GROUP BY r.r_name, n.n_name
+HAVING MAX(pd.total_availability) IS NOT NULL
+ORDER BY supplier_count DESC, average_order_amount DESC;

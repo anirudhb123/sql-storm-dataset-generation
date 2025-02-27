@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy h ON ml.movie_id = h.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN MIN(c.nr_order) IS NULL THEN 'No Role'
+        ELSE STRING_AGG(DISTINCT r.role, ', ') 
+    END AS roles,
+    AVG(p.info::float) FILTER (WHERE p.info IS NOT NULL) AS average_rating
+FROM 
+    movie_hierarchy m
+JOIN 
+    cast_info c ON m.movie_id = c.movie_id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_info p ON m.movie_id = p.movie_id 
+    AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    m.level = 1
+GROUP BY 
+    m.id, a.name
+ORDER BY 
+    m.production_year DESC, total_cast DESC;

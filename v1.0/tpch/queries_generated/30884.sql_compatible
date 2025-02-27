@@ -1,0 +1,38 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, NULL AS parent_suppkey
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.s_suppkey AS parent_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT p.p_partkey, p.p_name, ps.total_available, ps.avg_supply_cost,
+       od.total_revenue,
+       CASE 
+           WHEN od.total_revenue IS NULL THEN 'No Revenue'
+           ELSE 'Has Revenue'
+       END AS revenue_status,
+       ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+FROM part p
+LEFT JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN OrderDetails od ON p.p_partkey = (SELECT ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM SupplierHierarchy WHERE parent_suppkey IS NULL) LIMIT 1)
+WHERE p.p_size > 10 AND p.p_retailprice < 100
+GROUP BY p.p_partkey, p.p_name, ps.total_available, ps.avg_supply_cost, od.total_revenue, revenue_status
+ORDER BY p.p_retailprice, revenue_status DESC;

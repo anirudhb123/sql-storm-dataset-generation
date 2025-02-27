@@ -1,0 +1,70 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        MAX(u.CreationDate) AS LatestAccountCreationDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QuestionCloseHistory AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseVoteCount,
+        MIN(ph.CreationDate) AS FirstCloseVoteDate,
+        MAX(ph.CreationDate) AS LastCloseVoteDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.UserId
+),
+BizarreTagAnalysis AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS AssociatedPostCount,
+        AVG(LENGTH(p.Body) - LENGTH(REPLACE(p.Body, '!', ''))) AS AvgExclamations 
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        t.IsModeratorOnly = 1 
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    uvs.UserId,
+    uvs.DisplayName,
+    uvs.UpVotesCount,
+    uvs.DownVotesCount,
+    uvs.PostCount,
+    qch.CloseVoteCount,
+    COALESCE(qch.FirstCloseVoteDate, '1900-01-01') AS FirstCloseVoteDate,
+    COALESCE(qch.LastCloseVoteDate, '1900-01-01') AS LastCloseVoteDate,
+    bta.TagName,
+    bta.AssociatedPostCount,
+    bta.AvgExclamations
+FROM 
+    UserVoteStats uvs
+LEFT JOIN 
+    QuestionCloseHistory qch ON uvs.UserId = qch.UserId
+LEFT JOIN 
+    BizarreTagAnalysis bta ON uvs.PostCount > 0
+WHERE 
+    (uvs.UpVotesCount - uvs.DownVotesCount) > 10
+    OR uvs.PostCount > 5
+ORDER BY 
+    uvs.UpVotesCount - uvs.DownVotesCount DESC,
+    uvs.PostCount DESC,
+    COALESCE(qch.CloseVoteCount, 0) ASC
+LIMIT 50;

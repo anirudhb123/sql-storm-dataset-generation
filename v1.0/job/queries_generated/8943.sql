@@ -1,0 +1,38 @@
+SELECT 
+    a.name AS actor_name, 
+    t.title AS movie_title, 
+    tc.kind AS company_type, 
+    r.role AS role_type, 
+    MIN(m.production_year) AS first_roles_year, 
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON cc.movie_id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type it ON mi.info_type_id = it.id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year >= 2000 
+    AND ct.kind LIKE '%Film%'
+GROUP BY 
+    a.name, t.title, tc.kind, r.role
+ORDER BY 
+    first_roles_year DESC, keyword_count DESC
+LIMIT 50;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS CloseVoteCount,
+        STRING_AGG(DISTINCT UserDisplayName, ', ') AS Voters
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b 
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    CASE WHEN cp.CloseVoteCount IS NULL THEN 'Open'
+         ELSE 'Closed (Votes: ' || cp.CloseVoteCount || ') - Voters: ' || COALESCE(cp.Voters, 'None')
+    END AS Status,
+    rp.TotalPosts, 
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.BadgeNames, 'None') AS BadgeNames,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Score' 
+        WHEN rp.TotalPosts > 5 THEN 'Frequent Contributor' 
+        ELSE 'New Contributor' 
+    END AS ContributorType
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.Score > 0
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,50 @@
+WITH RecursiveStringManipulation AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        CONCAT(SUBSTR(p.p_name, 1, 5), '-', SUBSTR(p.p_name, 6, 5), '-', SUBSTR(p.p_name, 11, 5)) AS processed_name,
+        REPLACE(p.p_comment, 'FOOBAR', 'BARFOO') AS modified_comment
+    FROM 
+        part p
+    WHERE 
+        LENGTH(p.p_name) > 10
+),
+AggregatedData AS (
+    SELECT 
+        s.s_name,
+        SUM(PD.l_extendedprice * (1 - PD.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COUNT(DISTINCT c.c_custkey) AS total_customers,
+        AVG(CAST(SUBSTR(pd.processed_name, INSTR(pd.processed_name, '-') + 1) AS DECIMAL)) AS avg_processed_value
+    FROM 
+        RecursiveStringManipulation pd
+    JOIN 
+        partsupp ps ON pd.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON pd.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    r.r_name AS region,
+    ad.s_name AS supplier_name,
+    ad.total_revenue,
+    ad.total_orders,
+    ad.total_customers,
+    ad.avg_processed_value
+FROM 
+    AggregatedData ad
+JOIN 
+    nation n ON ad.s_name LIKE '%' || n.n_name || '%'
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+ORDER BY 
+    ad.total_revenue DESC
+LIMIT 10;

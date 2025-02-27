@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS PostsCount
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+),
+AggregateUserStats AS (
+    SELECT
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS AnsweredQuestions,
+        COUNT(DISTINCT c.Id) AS CommentsMade
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2 
+    LEFT JOIN
+        Comments c ON u.Id = c.UserId
+    GROUP BY
+        u.Id
+),
+PostHistoryCounts AS (
+    SELECT
+        postId,
+        COUNT(*) FILTER (WHERE pht.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        COUNT(*) FILTER (WHERE pht.PostHistoryTypeId = 12) AS DeleteCount
+    FROM
+        PostHistory pht
+    JOIN
+        Posts p ON pht.PostId = p.Id
+    GROUP BY
+        postId
+),
+TopUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        COALESCE(MIN(p.CreationDate), '9999-12-31') AS FirstPostDate
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY
+        u.Id
+    ORDER BY
+        TotalScore DESC,
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT
+    tui.Id AS UserId,
+    tui.DisplayName,
+    tui.TotalScore,
+    tui.TotalViews,
+    au.GoldBadges,
+    au.SilverBadges,
+    au.BronzeBadges,
+    au.AnsweredQuestions,
+    au.CommentsMade,
+    PH.CloseReopenCount,
+    PH.DeleteCount,
+    CASE
+        WHEN tui.FirstPostDate > cast('2024-10-01' as date) - INTERVAL '1 year' THEN 'New User'
+        ELSE 'Veteran User'
+    END AS UserType
+FROM
+    TopUsers tui
+LEFT JOIN
+    AggregateUserStats au ON tui.Id = au.UserId
+LEFT JOIN
+    PostHistoryCounts PH ON tui.Id = PH.postId
+ORDER BY
+    tui.TotalScore DESC, tui.TotalViews DESC, au.AnsweredQuestions DESC;

@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        u.Reputation,
+        u.DisplayName,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    WHERE 
+        rp.PostRank = 1
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = CAST(cr.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+FinalStats AS (
+    SELECT 
+        ps.*,
+        cp.ClosedDate,
+        cp.CloseReason
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+)
+SELECT 
+    DisplayName,
+    Title,
+    Score,
+    ViewCount,
+    UpVotes,
+    DownVotes,
+    COALESCE(ClosedDate, 'Not Closed') AS Closures,
+    COALESCE(CloseReason, 'N/A') AS CloseReason
+FROM 
+    FinalStats
+WHERE 
+    Reputation > 1000
+ORDER BY 
+    Score DESC, ViewCount DESC
+LIMIT 50;

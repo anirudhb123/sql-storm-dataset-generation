@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag_ids ON true
+    LEFT JOIN 
+        Tags t ON tag_ids::int = t.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate
+), 
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        MAX(ph.PostHistoryTypeId) AS LastHistoryTypeId
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(ph.HistoryDate, '1900-01-01') AS LastEditDate,
+        CASE 
+            WHEN ph.LastHistoryTypeId = 10 THEN 'Closed'
+            WHEN ph.LastHistoryTypeId = 11 THEN 'Reopened'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryCTE ph ON rp.PostId = ph.PostId
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.Rank,
+    tp.Tags,
+    tp.LastEditDate,
+    tp.PostStatus,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+WHERE 
+    tp.PostStatus = 'Active'
+ORDER BY 
+    tp.Score DESC;

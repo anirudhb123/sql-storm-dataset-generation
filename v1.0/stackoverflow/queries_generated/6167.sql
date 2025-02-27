@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(rp.VoteCount) AS TotalVotes,
+        SUM(rp.CommentCount) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalVotes,
+    us.TotalComments,
+    COALESCE(SUM(b.Class), 0) AS TotalBadges
+FROM 
+    UserStats us
+LEFT JOIN 
+    Badges b ON us.UserId = b.UserId
+WHERE 
+    us.TotalPosts > 0
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, us.TotalPosts, us.TotalVotes, us.TotalComments
+ORDER BY 
+    us.Reputation DESC, us.TotalPosts DESC
+LIMIT 50;

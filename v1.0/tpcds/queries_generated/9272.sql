@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT cs.c_customer_id) AS customer_count,
+        SUM(cs.total_net_profit) AS total_net_profit,
+        AVG(cs.avg_net_paid) AS avg_net_order_value
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ss.cd_gender,
+    ss.cd_marital_status,
+    ss.customer_count,
+    ss.total_net_profit,
+    ss.avg_net_order_value,
+    COUNT(DISTINCT r.r_reason_desc) AS total_return_reasons,
+    SUM(CASE WHEN ws.ws_ext_discount_amt > 0 THEN 1 ELSE 0 END) AS discount_orders
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    web_returns wr ON wr.wr_returning_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_birth_year BETWEEN 1980 AND 2000)
+LEFT JOIN 
+    reason r ON wr.wr_reason_sk = r.r_reason_sk
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_birth_year BETWEEN 1980 AND 2000)
+GROUP BY 
+    ss.cd_gender, 
+    ss.cd_marital_status
+ORDER BY 
+    ss.total_net_profit DESC;

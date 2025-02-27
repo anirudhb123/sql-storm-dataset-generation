@@ -1,0 +1,54 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(DISTINCT sr.ticket_number) AS total_returns,
+        SUM(sr.return_qty) AS total_return_qty,
+        AVG(sr.return_amt) AS avg_return_amount,
+        MAX(sr.return_amt) AS max_return_amt
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    WHERE cd.cd_gender IS NOT NULL 
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.total_returns,
+    cs.total_return_qty,
+    cs.avg_return_amount,
+    cs.max_return_amt,
+    COALESCE((SELECT COUNT(*)
+              FROM web_sales ws
+              WHERE ws.ws_bill_customer_sk = cs.c_customer_sk 
+                AND ws.ws_net_paid > 100), 0) AS high_spender_count,
+    CASE 
+        WHEN cs.total_return_qty = 0 THEN 'No Returns'
+        WHEN cs.total_returns IS NULL THEN 'Suspicious'
+        ELSE 'Regular'
+    END AS customer_status,
+    (SELECT
+        CASE WHEN MAX(rr.sr_return_quantity) IS NULL THEN 'N/A'
+             ELSE CAST(ROUND(AVG(rr.sr_return_amt), 2) AS VARCHAR)
+        END
+     FROM RankedReturns rr
+     WHERE rr.sr_item_sk IN (SELECT sr_item_sk FROM store_returns WHERE sr_customer_sk = cs.c_customer_sk)) AS average_item_return_value
+FROM CustomerStats cs
+WHERE cs.total_returns > 5
+ORDER BY cs.avg_return_amount DESC
+LIMIT 10;

@@ -1,0 +1,86 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        CAST(0 AS INTEGER) AS TotalPosts,
+        CAST(0 AS INTEGER) AS TotalComments
+    FROM Users u
+    WHERE u.CreationDate >= '2020-01-01'
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(DISTINCT p.Id) + r.TotalPosts,
+        COUNT(DISTINCT c.Id) + r.TotalComments
+    FROM UserReputation r
+    INNER JOIN Posts p ON p.OwnerUserId = r.UserId
+    LEFT JOIN Comments c ON c.UserId = r.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate, r.TotalPosts, r.TotalComments
+),
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        SUM(TotalPosts) AS TotalPosts,
+        SUM(TotalComments) AS TotalComments,
+        SUM(Reputation) AS TotalReputation
+    FROM UserReputation
+    GROUP BY UserId, DisplayName
+    ORDER BY TotalReputation DESC
+    LIMIT 10
+),
+PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(pt.Name, 'Unknown') AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        CASE 
+            WHEN p.ViewCount > 1000 THEN 'High Traffic'
+            WHEN p.ViewCount BETWEEN 500 AND 1000 THEN 'Medium Traffic'
+            ELSE 'Low Traffic'
+        END AS TrafficCategory
+    FROM Posts p
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    WHERE p.CreationDate >= '2022-01-01'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.Score,
+        pa.PostType,
+        pa.CommentCount,
+        pa.TrafficCategory,
+        ROW_NUMBER() OVER (PARTITION BY pa.TrafficCategory ORDER BY pa.Score DESC) AS rnk
+    FROM PostAnalysis pa
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    p.Title,
+    p.Score,
+    p.TrafficCategory
+FROM MostActiveUsers u
+JOIN TopPosts p ON u.UserId IN (
+    SELECT OwnerUserId 
+    FROM Posts 
+    WHERE Id = p.PostId
+)
+WHERE p.rnk <= 5
+ORDER BY u.TotalReputation DESC, p.Score DESC;

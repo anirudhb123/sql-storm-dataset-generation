@@ -1,0 +1,44 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 0 AS level
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE mh.level < 5
+),
+CastWithRoles AS (
+    SELECT c.movie_id, c.person_id, r.role, ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+),
+MovieInfoAggregates AS (
+    SELECT m.movie_id,
+           COUNT(DISTINCT ci.person_id) AS total_cast,
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+           MAX(mi.info) AS latest_info
+    FROM movie_info mi
+    JOIN aka_title m ON mi.movie_id = m.id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info ci ON m.id = ci.movie_id
+    GROUP BY m.movie_id
+)
+SELECT mh.movie_id,
+       mh.title,
+       COALESCE(info.total_cast, 0) AS total_cast,
+       COALESCE(info.keywords, 'None') AS keywords,
+       COALESCE(info.latest_info, 'No info available') AS latest_info,
+       CASE WHEN mh.level = 0 THEN 'Top Level'
+            WHEN mh.level BETWEEN 1 AND 3 THEN 'Mid Level'
+            ELSE 'Deep Level' END AS level_description,
+       COUNT(DISTINCT ca.person_id) FILTER (WHERE ca.role_order < 3) AS featured_cast_count
+FROM MovieHierarchy mh
+LEFT JOIN MovieInfoAggregates info ON mh.movie_id = info.movie_id
+LEFT JOIN CastWithRoles ca ON mh.movie_id = ca.movie_id
+GROUP BY mh.movie_id, mh.title, info.total_cast, info.keywords, info.latest_info, mh.level
+ORDER BY mh.title;

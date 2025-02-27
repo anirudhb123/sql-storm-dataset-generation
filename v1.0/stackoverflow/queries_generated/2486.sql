@@ -1,0 +1,75 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentsCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+), RankedPosts AS (
+    SELECT 
+        PD.*,
+        RANK() OVER (ORDER BY (UpVotes - DownVotes) DESC) AS PostRank
+    FROM 
+        PostDetails PD
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UB.GoldCount,
+    UB.SilverCount,
+    UB.BronzeCount,
+    RP.Title,
+    RP.UpVotes,
+    RP.DownVotes,
+    RP.CommentsCount,
+    RP.CreationDate,
+    CASE 
+        WHEN RP.UpVotes + RP.DownVotes = 0 THEN NULL 
+        ELSE ROUND((RP.UpVotes::decimal / (RP.UpVotes + RP.DownVotes)) * 100, 2) 
+    END AS VotePercentage,
+    COALESCE(
+        (SELECT 
+            STRING_AGG(T.TagName, ', ') 
+         FROM 
+            Posts P
+         JOIN 
+            Tags T ON P.Tags @> CONCAT('<', T.TagName, '>')::varchar[] 
+         WHERE 
+            P.Id = RP.PostId), 
+        'No Tags'
+    ) AS RelatedTags
+FROM 
+    Users U
+JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+JOIN 
+    RankedPosts RP ON P.Id = RP.PostId
+WHERE 
+    RP.PostRank <= 10
+ORDER BY 
+    U.Reputation DESC, RP.UpVotes DESC;

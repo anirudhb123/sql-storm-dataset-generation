@@ -1,0 +1,81 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagCount
+    FROM Tags
+    GROUP BY TagName
+    UNION ALL
+    SELECT 
+        T.TagName,
+        TC.TagCount + 1
+    FROM Tags AS T
+    JOIN RecursiveTagCounts AS TC ON T.Id = TC.TagCount
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        MAX(CASE WHEN C.PostId IS NOT NULL THEN C.CreationDate END) AS LastCommentDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.AcceptedAnswerId
+),
+BadgeStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        STRING_AGG(B.Name, ', ') AS Badges,
+        COUNT(B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(Badges.Badges, 'No Badges') AS BadgeSummary,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore
+    FROM Users U
+    LEFT JOIN PostStatistics P ON U.Id = P.OwnerUserId
+    LEFT JOIN BadgeStatistics Badges ON U.Id = Badges.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, Badges.Badges
+    ORDER BY TotalScore DESC, PostCount DESC
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        ROW_NUMBER() OVER (ORDER BY P.LastActivityDate DESC) AS RecentRank
+    FROM Posts P
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(Badges.Badges, 'None') AS Badges,
+    COUNT(RP.PostId) AS RecentPostsCount,
+    SUM(RP.Score) AS RecentPostsScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+FROM TopUsers U
+LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerUserId
+LEFT JOIN Posts P ON P.Id = RP.PostId
+LEFT JOIN Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+WHERE RP.RecentRank <= 5 AND (
+    PH.PostHistoryTypeId IN (1, 4, 10) OR PH.Comment IS NOT NULL
+)
+GROUP BY U.UserId, U.DisplayName, U.Reputation, Badges.Badges
+ORDER BY RecentPostsScore DESC, RecentPostsCount DESC;

@@ -1,0 +1,81 @@
+WITH RankedQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+),
+PopularTags AS (
+    SELECT 
+        tag,
+        COUNT(*) AS TagCount
+    FROM (
+        SELECT 
+            UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS tag
+        FROM 
+            Posts P
+        WHERE 
+            P.PostTypeId = 1
+    ) AS TagsTable
+    GROUP BY 
+        tag
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title,
+        P.Tags
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '7 days' AND 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13)
+)
+SELECT 
+    Q.PostId,
+    Q.Title,
+    Q.CreationDate,
+    Q.Score,
+    Q.ViewCount,
+    T.Tag AS PopularTag,
+    TU.DisplayName AS TopUser,
+    RPH.UserDisplayName AS RecentEditor
+FROM 
+    RankedQuestions Q
+LEFT JOIN 
+    PopularTags T ON T.TagCount > 1
+LEFT JOIN 
+    TopUsers TU ON Q.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = TU.UserId)
+LEFT JOIN 
+    RecentPostHistory RPH ON RPH.PostId = Q.PostId
+WHERE 
+    Q.Rank <= 5
+ORDER BY 
+    Q.Score DESC, Q.ViewCount DESC;

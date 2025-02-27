@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate BETWEEN '2023-01-01' AND '2023-10-31'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(DISTINCT p.Score) AS TotalScore,
+        SUM(DISTINCT rp.UpVotes) AS TotalUpVotes,
+        SUM(DISTINCT rp.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalScore,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    CASE 
+        WHEN us.TotalPosts > 0 THEN 
+            ROUND((us.TotalScore * 1.0 / us.TotalPosts), 2) 
+        ELSE 0 
+    END AS AverageScorePerPost,
+    CASE 
+        WHEN us.TotalPosts > 0 THEN 
+            ROUND((us.TotalUpVotes * 1.0 / us.TotalPosts), 2) 
+        ELSE 0 
+    END AS AverageUpVotesPerPost,
+    CASE 
+        WHEN us.TotalPosts > 0 THEN 
+            ROUND((us.TotalDownVotes * 1.0 / us.TotalPosts), 2) 
+        ELSE 0 
+    END AS AverageDownVotesPerPost
+FROM 
+    UserStats us
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.TotalScore DESC;

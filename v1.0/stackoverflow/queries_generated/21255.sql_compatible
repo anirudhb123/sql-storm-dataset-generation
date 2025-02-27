@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount IS NOT NULL 
+        AND p.Score >= 0
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rn <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        CASE 
+            WHEN COUNT(b.Id) > 0 THEN 'Has Badges'
+            ELSE 'No Badges'
+        END AS BadgeStatus
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        Comments c ON tp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+    GROUP BY 
+        tp.PostId, tp.Title
+),
+PostHistoryDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.BadgeStatus,
+    COALESCE(phd.EditCount, 0) AS EditCount,
+    phd.LastEditDate,
+    CASE 
+        WHEN phd.LastEditDate IS NULL THEN 'Never Edited'
+        WHEN phd.LastEditDate < (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days') THEN 'Old Edit'
+        ELSE 'Recently Edited'
+    END AS EditStatus
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    PostHistoryDetails phd ON pd.PostId = phd.PostId
+WHERE 
+    pd.BadgeStatus = 'Has Badges'
+ORDER BY 
+    pd.UpVotes DESC, 
+    pd.ViewCount DESC;

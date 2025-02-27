@@ -1,0 +1,44 @@
+WITH FilteredPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.Body,
+           p.Tags,
+           u.DisplayName AS OwnerDisplayName,
+           p.CreationDate,
+           p.LastActivityDate,
+           p.ViewCount,
+           COALESCE(s.AvgScore, 0) AS AvgScore,
+           COUNT(c.Id) AS CommentCount,
+           STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, AVG(Score) AS AvgScore
+        FROM Posts
+        WHERE Score > 0
+        GROUP BY PostId
+    ) s ON p.Id = s.PostId
+    LEFT JOIN Tags t ON t.WikiPostId = p.Id OR t.ExcerptPostId = p.Id
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year' 
+      AND p.PostTypeId = 1 -- Only Questions
+    GROUP BY p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.ViewCount, s.AvgScore
+),
+RankedPosts AS (
+    SELECT fp.*,
+           ROW_NUMBER() OVER (ORDER BY fp.AvgScore DESC, fp.ViewCount DESC) AS Rank
+    FROM FilteredPosts fp
+)
+SELECT rp.Rank,
+       rp.PostId,
+       rp.Title,
+       rp.OwnerDisplayName,
+       rp.CreationDate,
+       rp.LastActivityDate,
+       rp.ViewCount,
+       rp.CommentCount,
+       rp.AvgScore,
+       rp.TagList
+FROM RankedPosts rp
+WHERE rp.Rank <= 100
+ORDER BY rp.Rank;

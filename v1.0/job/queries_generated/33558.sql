@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    JOIN 
+        movie_hierarchy mh ON m2.production_year > mh.production_year
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_statistics AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT c.actor_name) AS number_of_actors,
+        COALESCE(ks.keywords, 'No Keywords') AS keywords_list
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_details c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        keyword_summary ks ON mh.movie_id = ks.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.production_year,
+    ms.number_of_actors,
+    ms.keywords_list
+FROM 
+    movie_statistics ms
+WHERE 
+    ms.number_of_actors > 5
+ORDER BY 
+    ms.production_year DESC, 
+    ms.title;

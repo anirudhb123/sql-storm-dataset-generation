@@ -1,0 +1,72 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        COUNT(c.Id) AS CommentCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+UserComments AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Users u
+    JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ru.PostId,
+    ru.Title,
+    ru.CreationDate,
+    ru.Score,
+    ru.ViewCount,
+    ru.CommentCount,
+    tu.DisplayName AS OwnerDisplayName,
+    tu.Reputation AS OwnerReputation,
+    tu.QuestionCount AS OwnerQuestionCount,
+    tu.TotalBounty AS OwnerTotalBounty,
+    uc.TotalComments AS CommenterCount
+FROM 
+    RankedPosts ru
+JOIN 
+    TopUsers tu ON ru.OwnerUserId = tu.UserId
+LEFT JOIN 
+    UserComments uc ON ru.OwnerUserId = uc.UserId
+WHERE 
+    ru.RN <= 5
+ORDER BY 
+    ru.Score DESC, ru.ViewCount DESC;

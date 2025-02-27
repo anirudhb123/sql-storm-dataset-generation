@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+total_order_value AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+customer_region AS (
+    SELECT c.c_custkey, c.c_name, r.r_name
+    FROM customer c
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+suppliers_with_orders AS (
+    SELECT ss.s_suppkey, SUM(l.l_extendedprice) AS total_supply_value
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN supplier ss ON ps.ps_suppkey = ss.s_suppkey
+    GROUP BY ss.s_suppkey
+)
+SELECT cr.r_name, 
+       COALESCE(SUM(t.total_value), 0) AS total_order_value,
+       COUNT(DISTINCT cr.c_custkey) AS customer_count,
+       COALESCE(SUM(s.total_supply_value), 0) AS total_supply_value,
+       COUNT(DISTINCT sh.s_suppkey) AS distinct_suppliers
+FROM customer_region cr
+LEFT JOIN total_order_value t ON cr.c_custkey = t.o_custkey
+LEFT JOIN suppliers_with_orders s ON cr.c_custkey = s.s_suppkey
+LEFT JOIN supplier_hierarchy sh ON cr.c_nationkey = sh.s_nationkey
+WHERE cr.r_name IS NOT NULL
+GROUP BY cr.r_name
+ORDER BY total_order_value DESC 
+LIMIT 10;

@@ -1,0 +1,62 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+TopUserBadges AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.DisplayName
+),
+PostFrequency AS (
+    SELECT 
+        WEEK(CreationDate) AS WeekNum,
+        COUNT(Id) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Posts
+    GROUP BY 
+        WEEK(CreationDate)
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.AvgReputation,
+    ts.TopUsers,
+    tub.BadgeCount AS TopUserBadgeCount,
+    tub.BadgeNames AS TopUserBadges,
+    pf.WeekNum,
+    pf.TotalPosts,
+    pf.TotalQuestions,
+    pf.TotalAnswers
+FROM 
+    TagStats ts
+LEFT JOIN 
+    TopUserBadges tub ON ts.TopUsers LIKE '%' || tub.DisplayName || '%'
+JOIN 
+    PostFrequency pf ON pf.TotalPosts > 0
+ORDER BY 
+    ts.PostCount DESC, 
+    pf.WeekNum DESC;

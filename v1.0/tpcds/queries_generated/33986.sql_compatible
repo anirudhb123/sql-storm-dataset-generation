@@ -1,0 +1,78 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c_customer_sk, 
+        c_first_name, 
+        c_last_name, 
+        c_birth_month, 
+        c_birth_year, 
+        1 AS Level
+    FROM customer
+    WHERE c_birth_month IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ch.c_customer_sk, 
+        ch.c_first_name, 
+        ch.c_last_name, 
+        ch.c_birth_month, 
+        ch.c_birth_year, 
+        ch.Level + 1
+    FROM customer AS ch
+    JOIN CustomerHierarchy AS ch_parent ON ch.c_current_cdemo_sk = ch_parent.c_customer_sk
+    WHERE ch.Level < 5
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_bill_customer_sk IS NOT NULL
+    GROUP BY ws_item_sk
+),
+ReturnedItems AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_sales,
+        COALESCE(ri.total_returned, 0) AS total_returned,
+        COALESCE(ri.total_return_amt, 0) AS total_return_amt,
+        sd.order_count,
+        sd.sales_rank
+    FROM SalesData AS sd
+    LEFT JOIN ReturnedItems AS ri ON sd.ws_item_sk = ri.sr_item_sk
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.c_birth_month,
+    ch.c_birth_year,
+    fs.ws_item_sk,
+    fs.total_sales,
+    fs.total_returned,
+    fs.total_return_amt,
+    CASE 
+        WHEN fs.total_sales > 1000 THEN 'High Value'
+        WHEN fs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS Sale_Category,
+    fs.order_count,
+    CASE 
+        WHEN fs.order_count IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS Order_Status
+FROM CustomerHierarchy AS ch
+JOIN FilteredSales AS fs ON ch.c_customer_sk = fs.ws_item_sk
+WHERE ch.c_birth_year > 1980
+ORDER BY ch.c_birth_month, fs.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.sales_price,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.sales_price DESC) AS rank
+    FROM web_sales ws
+    JOIN customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+        AND c.c_preferred_cust_flag = 'Y'
+),
+TotalSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(*) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk
+),
+FilteredReturns AS (
+    SELECT 
+        wr.reason_sk,
+        SUM(wr.return_quantity) AS total_returns,
+        SUM(wr.return_amt) AS total_return_amt
+    FROM web_returns wr
+    WHERE 
+        wr.return_quantity > 0
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM catalog_returns cr 
+            WHERE cr.returning_customer_sk = wr.returning_customer_sk 
+            AND cr.returning_addr_sk IS NULL
+        )
+    GROUP BY wr.reason_sk
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(SUM(rs.net_profit), 0) AS total_profit,
+    COALESCE(SUM(tr.total_return_amt), 0) AS total_return,
+    COUNT(DISTINCT rs.order_number) AS unique_orders,
+    COUNT(DISTINCT rs.web_site_sk) AS unique_websites
+FROM customer_address ca
+LEFT JOIN RankedSales rs ON ca.ca_address_sk = rs.web_site_sk
+LEFT JOIN TotalSales ts ON rs.web_site_sk = ts.web_site_sk
+LEFT JOIN FilteredReturns tr ON tr.reason_sk = (
+    SELECT r.r_reason_sk FROM reason r
+    WHERE r.r_reason_desc LIKE '%damaged%'
+    FETCH FIRST 1 ROW ONLY
+)
+WHERE 
+    ca.ca_state IN ('NY', 'CA') 
+    AND (ca.ca_country IS NULL OR ca.ca_country = 'USA')
+GROUP BY 
+    ca.ca_city,
+    ts.total_net_profit,
+    tr.total_return_amt
+HAVING 
+    COALESCE(SUM(rs.net_profit), 0) - COALESCE(SUM(tr.total_return_amt), 0) > 1000
+ORDER BY total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

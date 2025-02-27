@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales,
+        COALESCE(ss.ss_quantity, 0) AS store_quantity,
+        COALESCE(cs.cs_quantity, 0) AS catalog_quantity
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        store_sales ss ON ws.ws_item_sk = ss.ss_item_sk AND ws.ws_order_number = ss.ss_ticket_number
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk AND ws.ws_order_number = cs.cs_order_number
+    WHERE 
+        ws.ws_sales_price > 0
+)
+SELECT 
+    r.web_site_sk,
+    SUM(CASE WHEN r.rank_sales <= 10 THEN r.ws_quantity ELSE 0 END) AS top_10_sales_qty,
+    AVG(r.ws_sales_price) AS avg_sales_price,
+    COUNT(r.ws_order_number) AS total_orders,
+    (SUM(r.store_quantity) + SUM(r.catalog_quantity)) AS total_quantity_sold,
+    STRING_AGG(DISTINCT DATE_FORMAT(CAST(d.d_date AS DATE), '%Y-%m-%d'), ', ') AS sold_dates
+FROM 
+    RankedSales r
+JOIN 
+    web_site w ON r.web_site_sk = w.web_site_sk
+LEFT JOIN 
+    date_dim d ON r.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    r.web_site_sk IS NOT NULL
+    AND (DATEDIFF(CAST('2002-10-01' AS DATE), d.d_date) < 30 OR d.d_date IS NULL)
+GROUP BY 
+    r.web_site_sk
+HAVING 
+    SUM(r.ws_quantity) > 100
+ORDER BY 
+    total_orders DESC
+LIMIT 5
+OFFSET 3;

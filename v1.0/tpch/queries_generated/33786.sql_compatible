@@ -1,0 +1,40 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, c.c_name, 
+           ROW_NUMBER() OVER (PARTITION BY oh.o_orderkey ORDER BY oh.o_orderdate ASC) AS order_rank
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+AggregatedSuppliers AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_availqty) AS total_available_quantity,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           STRING_AGG(DISTINCT p.p_name, ', ') AS parts_supplied
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.s_suppkey
+),
+HighValueOrders AS (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.c_name
+    FROM OrderHierarchy oh
+    WHERE oh.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) AND oh.order_rank = 1
+)
+SELECT HVO.o_orderkey, HVO.o_orderdate, HVO.o_totalprice, S.s_name, A.total_available_quantity, A.avg_supply_cost,
+       A.parts_supplied
+FROM HighValueOrders HVO
+LEFT JOIN AggregatedSuppliers A ON A.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_orderkey = HVO.o_orderkey
+)
+JOIN supplier S ON A.s_suppkey = S.s_suppkey
+WHERE A.total_available_quantity IS NOT NULL
+ORDER BY HVO.o_totalprice DESC, S.s_name ASC;

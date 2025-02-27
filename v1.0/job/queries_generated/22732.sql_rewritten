@@ -1,0 +1,85 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS yearly_count
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.movie_id = t.id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature film'))
+        AND t.production_year IS NOT NULL
+),
+ActorMovieRoles AS (
+    SELECT 
+        p.name AS actor_name,
+        t.title AS movie_title,
+        COUNT(DISTINCT cc.id) AS total_roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    JOIN 
+        title t ON at.id = t.id
+    LEFT JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id AND ci.person_id = cc.subject_id
+    GROUP BY 
+        p.name, t.title
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+MovieSummary AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        am.actor_name,
+        am.total_roles,
+        kc.keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorMovieRoles am ON rm.title = am.movie_title
+    LEFT JOIN 
+        KeywordCounts kc ON rm.title = (SELECT title FROM aka_title WHERE movie_id = kc.movie_id LIMIT 1)
+    WHERE 
+        rm.yearly_count > 5
+),
+FinalResult AS (
+    SELECT 
+        movie_summary.*,
+        CASE 
+            WHEN keyword_count IS NULL THEN 'No Keywords'
+            WHEN keyword_count > 10 THEN 'Popular'
+            ELSE 'Niche'
+        END AS movie_type
+    FROM 
+        MovieSummary movie_summary
+    WHERE 
+        EXTRACT(YEAR FROM cast('2024-10-01' as date)) - production_year > 20
+    ORDER BY 
+        production_year DESC
+)
+SELECT 
+    *,
+    (SELECT COUNT(*) FROM info_type it WHERE EXTRACT(YEAR FROM cast('2024-10-01' as date)) - production_year < 15) AS recent_movies,
+    IIF(keyword_count IS NULL, 'No Keyword Data', keyword_count) AS keyword_info
+FROM 
+    FinalResult
+WHERE 
+    (total_roles IS NOT NULL AND total_roles > 2)
+    OR (movie_type = 'Niche' AND actor_name LIKE '%J%')
+ORDER BY 
+    actor_name ASC, production_year DESC;

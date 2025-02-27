@@ -1,0 +1,71 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        COALESCE(ba.BadgeCount, 0) AS UserBadgeCount,
+        s.USER_COUNT
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(DISTINCT BadgeId) AS BadgeCount
+        FROM 
+            Badges b
+        GROUP BY 
+            OwnerUserId
+    ) ba ON p.OwnerUserId = ba.OwnerUserId
+    JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(*) AS USER_COUNT
+        FROM 
+            Posts
+        GROUP BY 
+            OwnerUserId
+    ) s ON p.OwnerUserId = s.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  
+),
+TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        Count(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        ROW_NUMBER() OVER (ORDER BY ps.ViewCount DESC) AS RankByViewCount,
+        ROW_NUMBER() OVER (ORDER BY ps.UserBadgeCount DESC) AS RankByBadgeCount,
+        ROW_NUMBER() OVER (ORDER BY ps.AnswerCount DESC, ps.CommentCount DESC) AS RankByEngagement
+    FROM 
+        PostStats ps
+)
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.CreationDate,
+    rp.UserBadgeCount,
+    tg.Tag,
+    tg.TagCount,
+    rp.RankByViewCount,
+    rp.RankByBadgeCount,
+    rp.RankByEngagement
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStats tg ON rp.PostId IN (SELECT PostId FROM Posts WHERE Tags LIKE '%' || tg.Tag || '%')
+ORDER BY 
+    rp.RankByViewCount, rp.RankByBadgeCount, rp.RankByEngagement;

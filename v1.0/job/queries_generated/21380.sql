@@ -1,0 +1,82 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+),
+CastCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast_members,
+        MAX(CASE WHEN r.role = 'Director' THEN 'Director Present' ELSE 'No Director' END) AS director_status
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+),
+Movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(cc.total_cast_members, 0) AS total_cast,
+        CASE 
+            WHEN cc.total_cast > 0 THEN 'Cast Present'
+            ELSE 'No Cast'
+        END AS cast_presence,
+        cc.director_status
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        CastCounts cc ON t.id = cc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.total_cast,
+        m.cast_presence,
+        m.director_status
+    FROM 
+        Movies m
+    WHERE 
+        (m.total_cast > 5 OR m.director_status = 'Director Present') 
+        AND m.production_year >= 2000
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    fm.cast_presence,
+    fm.director_status,
+    ak.name,
+    COALESCE(ak.name, 'Unknown') AS adjusted_name
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci
+        WHERE 
+            ci.movie_id = fm.movie_id
+        GROUP BY 
+            ci.person_id
+        HAVING 
+            COUNT(ci.person_id) > 1
+    )
+WHERE 
+    (fm.production_year BETWEEN 2000 AND 2023 AND fm.cast_presence = 'Cast Present')
+    OR (fm.director_status = 'Director Present' AND fm.total_cast < 5)
+ORDER BY 
+    fm.production_year DESC, 
+    adjusted_name ASC
+FETCH FIRST 10 ROWS ONLY; 
+

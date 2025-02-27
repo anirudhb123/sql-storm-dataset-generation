@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT rp.PostId) AS TotalPosts,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore
+    FROM
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY
+        u.Id
+    HAVING
+        COUNT(DISTINCT rp.PostId) > 5
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS Badges,
+        COUNT(*) AS BadgeCount
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+),
+UserVoteSummary AS (
+    SELECT
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM
+        Votes v
+    JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        v.UserId
+)
+SELECT
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalViews,
+    ups.TotalScore,
+    ub.Badges,
+    uvs.Upvotes,
+    uvs.Downvotes
+FROM
+    Users u
+JOIN
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN
+    UserVoteSummary uvs ON u.Id = uvs.UserId
+ORDER BY
+    ups.TotalScore DESC NULLS LAST
+LIMIT 10;

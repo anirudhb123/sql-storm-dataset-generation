@@ -1,0 +1,62 @@
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+
+ActivityStats AS (
+    SELECT 
+        P.OwnerUserId,
+        EXTRACT(YEAR FROM P.CreationDate) AS Year,
+        COUNT(*) AS ActivityCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        P.OwnerUserId, Year
+)
+
+SELECT 
+    US.DisplayName,
+    US.QuestionCount,
+    US.AcceptedAnswers,
+    US.BadgeCount,
+    COALESCE(AS1.ActivityCount, 0) AS LastYearActivityCount,
+    COALESCE(AS1.TotalScore, 0) AS LastYearTotalScore,
+    TS.TagName,
+    TS.PostCount
+FROM 
+    UserStats US
+LEFT JOIN 
+    ActivityStats AS1 ON US.UserId = AS1.OwnerUserId
+LEFT JOIN 
+    TagStats TS ON US.QuestionCount > 0
+ORDER BY 
+    US.QuestionCount DESC,
+    LastYearTotalScore DESC,
+    TS.PostCount DESC;

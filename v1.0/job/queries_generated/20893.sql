@@ -1,0 +1,79 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+AggregateActors AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+EligibleMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(a.num_actors, 0) AS actor_count
+    FROM 
+        title mt
+    LEFT JOIN 
+        AggregateActors a ON mt.id = a.movie_id
+    WHERE 
+        mt.production_year > 2000
+    AND 
+        mt.id NOT IN (SELECT movie_id FROM movie_info WHERE info LIKE '%blockbuster%')
+),
+DetailedMovies AS (
+    SELECT 
+        em.movie_id,
+        em.title,
+        em.production_year,
+        em.actor_count,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword
+    FROM 
+        EligibleMovies em
+    LEFT JOIN 
+        movie_keyword mk ON em.movie_id = mk.movie_id
+),
+FinalResult AS (
+    SELECT 
+        dm.title,
+        dm.production_year,
+        dm.actor_count,
+        dm.movie_keyword,
+        RANK() OVER (ORDER BY dm.actor_count DESC) AS actor_rank
+    FROM 
+        DetailedMovies dm
+)
+SELECT 
+    FR.title,
+    FR.production_year,
+    FR.actor_count,
+    FR.movie_keyword,
+    CASE 
+        WHEN FR.actor_count >= 5 THEN 'Star Cast'
+        WHEN FR.actor_count BETWEEN 3 AND 4 THEN 'Notable Cast'
+        ELSE 'Minor Cast'
+    END AS cast_description,
+    COALESCE(rt.year_rank, 'N/A') AS year_ranking
+FROM 
+    FinalResult FR
+LEFT JOIN 
+    RankedTitles rt ON FR.production_year = rt.production_year AND rt.year_rank <= 10
+WHERE 
+    FR.actor_count IS NOT NULL
+ORDER BY 
+    actor_rank, FR.production_year DESC;

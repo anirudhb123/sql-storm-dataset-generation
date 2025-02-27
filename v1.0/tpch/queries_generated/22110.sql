@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS PartCount
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+    GROUP BY s.s_suppkey
+),
+CustomerType AS (
+    SELECT 
+        c.c_custkey,
+        CASE 
+            WHEN c.c_acctbal < 100 THEN 'Low'
+            WHEN c.c_acctbal BETWEEN 100 AND 1000 THEN 'Medium'
+            ELSE 'High'
+        END AS CustType
+    FROM 
+        customer c
+),
+SuccessfulOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS LineItemCount
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' OR o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.o_orderstatus,
+    COALESCE(ss.TotalSupplyCost, 0) AS TotalSupplierCost,
+    ct.CustType,
+    COALESCE(so.LineItemCount, 0) AS LineItemCount
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierStats ss ON ss.TotalSupplyCost > (SELECT AVG(TotalSupplyCost) FROM SupplierStats)
+JOIN 
+    CustomerType ct ON ct.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = r.o_orderkey)
+LEFT JOIN 
+    SuccessfulOrders so ON so.o_orderkey = r.o_orderkey
+WHERE 
+    (r.OrderRank <= 5 OR r.o_totalprice IS NULL)
+    AND (ss.PartCount IS NOT NULL OR r.o_orderstatus = 'O')
+    AND (r.o_totalprice * COALESCE(NULLIF(r.o_orderstatus, 'F'), 1) > 1000)
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice ASC;

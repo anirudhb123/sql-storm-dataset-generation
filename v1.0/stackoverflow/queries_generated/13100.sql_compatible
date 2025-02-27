@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        COUNT(DISTINCT Badges.Id) AS TotalBadges,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+PostStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.Score,
+        Posts.ViewCount,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT Votes.Id) AS TotalVotes
+    FROM 
+        Posts
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id, Posts.Title, Posts.CreationDate, Posts.Score, Posts.ViewCount
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalBadges,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.TotalViews,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.TotalComments,
+    P.TotalVotes
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.UserId -- Corrected to join on UserId instead of PostId
+ORDER BY 
+    U.TotalPosts DESC, U.TotalUpVotes DESC;

@@ -1,0 +1,71 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_net_paid) AS avg_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+item_details AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        i.i_current_price,
+        COALESCE(NULLIF(i.i_current_price - AVG(i2.i_current_price) OVER (PARTITION BY i.i_category_id), 0), 0) AS price_difference
+    FROM 
+        item i
+    JOIN 
+        item i2 ON i.i_category_id = i2.i_category_id
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS order_count,
+        SUM(cs.cs_net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    i.product_name,
+    i.total_quantity,
+    i.total_sales,
+    i.avg_sales_price,
+    c.order_count,
+    c.total_spent,
+    CASE
+        WHEN c.total_spent IS NULL THEN 'No Purchases'
+        WHEN c.total_spent > 1000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_segment,
+    CASE 
+        WHEN ss.total_sales > 1000 THEN 'High Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    CONCAT(i.i_product_name, ' (ID: ', i.i_item_id, ')') AS product_info
+FROM 
+    sales_summary ss
+JOIN 
+    item_details i ON ss.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer_summary c ON ss.ws_ship_customer_sk = c.c_customer_sk
+WHERE 
+    ss.sales_rank = 1 
+    AND ss.ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_moy IN (6, 7)
+    )
+ORDER BY 
+    ss.total_sales DESC, c.total_spent DESC;

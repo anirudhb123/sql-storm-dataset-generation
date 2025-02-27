@@ -1,0 +1,66 @@
+
+WITH sales_summary AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rn
+    FROM
+        web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE
+        w.web_open_date_sk < (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+        AND i.i_current_price IS NOT NULL
+    GROUP BY
+        ws.ws_item_sk
+),
+high_value_sales AS (
+    SELECT
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_revenue,
+        ss.total_discount
+    FROM
+        sales_summary ss
+    WHERE
+        ss.total_revenue > 10000
+),
+top_items AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        hv.total_revenue,
+        hv.total_quantity
+    FROM
+        high_value_sales hv
+    JOIN item i ON hv.ws_item_sk = i.i_item_sk
+),
+item_details AS (
+    SELECT
+        ti.i_item_id,
+        ti.i_product_name,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_catalog_returns
+    FROM
+        top_items ti
+    LEFT JOIN store_returns sr ON ti.i_item_id = (SELECT ws_item_id FROM web_sales WHERE ws_item_sk = ti.ws_item_sk)
+    LEFT JOIN catalog_returns cr ON ti.i_item_id = (SELECT cr_item_sk FROM catalog_sales WHERE cs_item_sk = ti.ws_item_sk)
+    GROUP BY
+        ti.i_item_id, ti.i_product_name
+)
+SELECT
+    id.i_item_id,
+    id.i_product_name,
+    id.total_returns,
+    id.total_catalog_returns,
+    CASE 
+        WHEN id.total_returns > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status,
+    ROUND((id.total_catalog_returns::decimal / NULLIF(id.total_returns, 0)), 2) AS catalog_return_ratio
+FROM
+    item_details id
+ORDER BY
+    id.total_returns DESC, id.i_product_name;

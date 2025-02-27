@@ -1,0 +1,63 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT s.p_size FROM part s WHERE s.p_retailprice > 100.00)
+),
+AggSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 1000
+),
+EligibleCustomers AS (
+    SELECT 
+        c.c_custkey,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 0 
+            ELSE c.c_acctbal 
+        END AS acctbal_adj
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = (SELECT DISTINCT n.r_name FROM region n WHERE n.r_regionkey = 1)
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_spent,
+    MAX(li.l_tax) AS max_tax_rate,
+    COALESCE(MAX(rp.p_name), 'No Parts') AS most_expensive_part,
+    ROUND(AVG(a.avg_acctbal), 2) AS avg_supplier_acctbal
+FROM 
+    EligibleCustomers c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    RankedParts rp ON li.l_partkey = rp.p_partkey AND rp.price_rank <= 5
+LEFT JOIN 
+    AggSuppliers a ON li.l_suppkey = a.s_suppkey
+WHERE 
+    o.o_orderstatus IN ('O', 'F')
+AND 
+    (li.l_returnflag IS NULL OR li.l_returnflag = 'N')
+GROUP BY 
+    c.c_name
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

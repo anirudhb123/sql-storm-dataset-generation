@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+        AND p.Score IS NOT NULL
+), PopularPosts AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.OwnerName,
+        r.CreationDate,
+        r.Score,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.OwnerName, r.CreationDate, r.Score
+    HAVING 
+        COUNT(c.Id) > 5
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        CASE 
+            WHEN u.Reputation > 10000 THEN 'Expert'
+            WHEN u.Reputation BETWEEN 5000 AND 10000 THEN 'Experienced'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM 
+        Users u
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.OwnerName,
+    pp.CreationDate,
+    pp.Score,
+    pp.CommentCount,
+    ur.UserLevel
+FROM 
+    PopularPosts pp
+JOIN 
+    UserReputation ur ON pp.OwnerName = ur.UserId
+LEFT JOIN 
+    PostHistory ph ON pp.PostId = ph.PostId AND ph.PostHistoryTypeId = 10 
+WHERE 
+    ph.PostId IS NULL  
+ORDER BY 
+    pp.Score DESC
+LIMIT 10;

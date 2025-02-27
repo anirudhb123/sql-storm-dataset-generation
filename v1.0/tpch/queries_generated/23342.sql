@@ -1,0 +1,53 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_orderdate, o.o_totalprice,
+           RANK() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, GETDATE())
+),
+ExtremeSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CASE WHEN s.s_acctbal IS NULL THEN 'No Balance'
+                WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+                ELSE 'High Balance' END AS balance_category
+    FROM supplier s
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS adjusted_price
+    FROM lineitem l
+    WHERE l.l_shipmode IN ('AIR', 'GROUND')
+    GROUP BY l.l_orderkey
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           (SELECT COUNT(*) 
+            FROM partsupp ps_sub 
+            WHERE ps_sub.ps_partkey = ps.ps_partkey) AS supplier_count
+    FROM partsupp ps
+),
+CustomerRegionStats AS (
+    SELECT c.c_custkey, n.n_regionkey, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, n.n_regionkey
+)
+SELECT DISTINCT 
+    p.p_name, 
+    r.r_name AS region_name,
+    CASE WHEN COUNT(DISTINCT c.c_custkey) = 0 THEN 'No Customers' 
+         ELSE 'Customers Available' END AS customer_status,
+    SUM(COALESCE(l.adjusted_price, 0)) AS total_line_price,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    STRING_AGG(CONVERT(varchar, ranking.rank_order) + ': ' + p.p_comment, ', ') AS comments
+FROM part p
+LEFT JOIN PartSupplierDetails ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN ExtremeSuppliers s ON ps.ps_suppkey = s.s_suppkey
+FULL OUTER JOIN CustomerRegionStats cr ON cr.n_regionkey = ps.ps_suppkey
+OUTER APPLY (SELECT rank_order FROM RankedOrders ranking WHERE ranking.o_orderkey = cr.c_custkey) AS ranking
+LEFT JOIN FilteredLineItems l ON l.l_orderkey = cr.c_custkey
+GROUP BY p.p_name, r.r_name
+HAVING SUM(COALESCE(l.adjusted_price, 0)) > 10000
+   OR AVG(s.s_acctbal) IS NULL
+   OR customer_status = 'No Customers'
+ORDER BY total_line_price DESC, avg_supplier_balance ASC;

@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        rs.nation_name
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 5
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_name,
+        ps.ps_supplycost,
+        ts.s_name,
+        ts.nation_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+),
+RevenueByPart AS (
+    SELECT 
+        ps.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        PartSupplierDetails ps ON ps.p_name = l.l_partkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-12-31'
+    GROUP BY 
+        ps.p_name
+)
+SELECT 
+    r.p_name,
+    r.total_revenue,
+    ps.s_name,
+    ps.nation_name
+FROM 
+    RevenueByPart r
+JOIN 
+    PartSupplierDetails ps ON r.p_name = ps.p_name
+WHERE 
+    r.total_revenue > 10000
+ORDER BY 
+    r.total_revenue DESC;

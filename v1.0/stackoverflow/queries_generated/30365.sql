@@ -1,0 +1,79 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 13 THEN 1 END) AS UndeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.Upvotes,
+    p.Downvotes,
+    p.CommentCount,
+    p.RelatedPostCount,
+    COALESCE(ph.CloseCount, 0) AS TotalCloses,
+    COALESCE(ph.ReopenCount, 0) AS TotalReopens,
+    COALESCE(ph.DeleteCount, 0) AS TotalDeletes,
+    COALESCE(ph.UndeleteCount, 0) AS TotalUndeletes,
+    pp.Id AS ParentPostId,
+    pp.Title AS ParentPostTitle,
+    pp.Level
+FROM 
+    PostMetrics p
+LEFT JOIN 
+    PostHistoryStats ph ON p.PostId = ph.PostId
+LEFT JOIN 
+    RecursivePostHierarchy pp ON p.PostId = pp.Id
+ORDER BY 
+    p.Score DESC, p.CommentCount DESC;

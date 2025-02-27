@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        ROW_NUMBER() OVER(PARTITION BY sr_item_sk ORDER BY COUNT(*) DESC) AS rn
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_returned_date_sk, sr_item_sk
+),
+TopReturns AS (
+    SELECT 
+        rr.sr_item_sk,
+        SUM(rr.total_returns) AS total_returned_units,
+        (SELECT SUM(ws.ws_quantity) 
+         FROM web_sales ws 
+         WHERE ws.ws_item_sk = rr.sr_item_sk) AS web_sales_units
+    FROM 
+        RankedReturns rr
+    WHERE 
+        rr.rn = 1
+    GROUP BY 
+        rr.sr_item_sk
+),
+IncomeBandSummary AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        SUM(CASE WHEN c.c_birth_year IS NOT NULL THEN 1 ELSE 0 END) AS customers_with_birth_year
+    FROM 
+        household_demographics h
+    JOIN 
+        customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY 
+        h.hd_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    COALESCE(ts.total_returned_units, 0) AS total_returned_units,
+    COALESCE(ts.web_sales_units, 0) AS web_sales_units,
+    i.customer_count,
+    i.customers_with_birth_year
+FROM 
+    income_band ib
+LEFT JOIN 
+    TopReturns ts ON ts.sr_item_sk IN (SELECT i.i_item_sk FROM item i WHERE i.i_current_price BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound)
+LEFT JOIN 
+    IncomeBandSummary i ON ib.ib_income_band_sk = i.hd_income_band_sk
+ORDER BY 
+    ib.ib_income_band_sk, 
+    total_returned_units DESC, 
+    web_sales_units DESC
+LIMIT 100;

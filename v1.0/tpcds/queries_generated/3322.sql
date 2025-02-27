@@ -1,0 +1,69 @@
+
+WITH regional_sales AS (
+    SELECT 
+        s.s_state,
+        SUM(ss.ss_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        COUNT(DISTINCT ss.ss_customer_sk) AS unique_customers
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        s.s_state IS NOT NULL
+    GROUP BY 
+        s.s_state
+),
+customer_segments AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        COUNT(DISTINCT CASE WHEN ss.ss_net_paid > 100 THEN c.c_customer_sk END) AS high_value_customers
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+sales_analysis AS (
+    SELECT 
+        r.s_state,
+        rs.total_net_paid,
+        cs.customer_count,
+        cs.high_value_customers
+    FROM 
+        regional_sales rs
+    LEFT JOIN 
+        customer_segments cs ON rs.total_transactions > 0
+    LEFT JOIN 
+        store s ON s.s_store_sk = rs.total_transactions
+)
+SELECT 
+    sa.s_state,
+    sa.total_net_paid,
+    sa.customer_count,
+    sa.high_value_customers,
+    RANK() OVER (ORDER BY sa.total_net_paid DESC) AS sales_rank
+FROM 
+    sales_analysis sa
+ORDER BY 
+    sa.total_net_paid DESC
+
+UNION ALL
+
+SELECT 
+    'Total' AS s_state,
+    SUM(total_net_paid) AS total_net_paid,
+    SUM(customer_count) AS customer_count,
+    SUM(high_value_customers) AS high_value_customers,
+    NULL AS sales_rank
+FROM 
+    sales_analysis
+WHERE 
+    total_net_paid IS NOT NULL

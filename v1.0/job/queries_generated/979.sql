@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS rn
+    FROM 
+        aka_title at
+    JOIN 
+        movie_info mi ON at.id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+        AND mi.info IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 10
+), 
+MovieCast AS (
+    SELECT 
+        cm.movie_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM 
+        cast_info cm
+    INNER JOIN 
+        aka_name ak ON cm.person_id = ak.person_id
+    GROUP BY 
+        cm.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(mc.actor_names, 'No Cast Available') AS cast_names,
+    CASE 
+        WHEN tm.production_year < 2000 THEN 'Vintage'
+        WHEN tm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieCast mc ON tm.title = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON tm.title = mk.movie_id
+GROUP BY 
+    tm.title, tm.production_year, mc.actor_names
+ORDER BY 
+    tm.production_year DESC, tm.title;

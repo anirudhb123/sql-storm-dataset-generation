@@ -1,0 +1,84 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458850 AND 2458860  
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 2458850 AND 2458860
+    GROUP BY 
+        cs_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(SUM(s.total_quantity), 0) AS total_quantity,
+        COALESCE(SUM(s.total_sales), 0) AS total_sales,
+        IIF(SUM(s.total_sales) IS NULL, 'No Sales', 'Sales Recorded') AS sales_status
+    FROM 
+        item
+    LEFT JOIN 
+        SalesCTE s ON item.i_item_sk = s.ws_item_sk
+    GROUP BY 
+        item.i_item_id, 
+        item.i_item_desc
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_net_loss) AS total_loss
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY 
+        wr_item_sk
+),
+FinalSalesData AS (
+    SELECT 
+        ag.i_item_id,
+        ag.i_item_desc,
+        ag.total_quantity,
+        ag.total_sales,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.total_loss, 0) AS total_loss,
+        ag.sales_status,
+        RANK() OVER (ORDER BY ag.total_sales DESC) AS sales_rank
+    FROM 
+        AggregateSales ag
+    LEFT JOIN 
+        CustomerReturns cr ON ag.i_item_id = cr.wr_item_sk
+)
+SELECT 
+    f.i_item_id,
+    f.i_item_desc,
+    f.total_quantity,
+    f.total_sales,
+    f.total_returned,
+    f.total_loss,
+    f.sales_status,
+    CASE 
+        WHEN f.sales_rank <= 10 THEN 'Top Performer'
+        ELSE 'Regular Performer' 
+    END AS performance_category
+FROM 
+    FinalSalesData f
+WHERE 
+    f.total_sales > 1000  
+ORDER BY 
+    f.total_sales DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE SeniorSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+    FROM supplier s
+    WHERE s.s_acctbal >= (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment
+    FROM supplier s
+    JOIN SeniorSuppliers ss ON s.s_acctbal > ss.s_acctbal
+    WHERE s.s_suppkey <> ss.s_suppkey
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           CASE 
+               WHEN p.p_size IS NULL THEN 'UNKNOWN SIZE' 
+               ELSE CAST(p.p_size AS VARCHAR) 
+           END AS adjusted_size
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+      AND LENGTH(p.p_comment) > 10
+), NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 0
+), OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), TempResults AS (
+    SELECT fp.p_partkey, fp.p_name, ns.n_name, ds.total_spent,
+           ROW_NUMBER() OVER (PARTITION BY ns.n_nationkey ORDER BY ds.total_spent DESC) as rank
+    FROM FilteredParts fp
+    JOIN NationSummary ns ON ns.n_nationkey = (SELECT DISTINCT n.n_nationkey 
+                                                FROM nation n
+                                                JOIN supplier s ON n.n_nationkey = s.s_nationkey
+                                                WHERE s.s_suppkey IN (SELECT s_suppkey FROM SeniorSuppliers))
+    LEFT JOIN OrderDetails ds ON ds.o_orderkey IN (SELECT o.o_orderkey 
+                                                    FROM orders o 
+                                                    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+                                                    WHERE l.l_partkey = fp.p_partkey)
+)
+SELECT tr.p_partkey, tr.p_name, tr.n_name, tr.total_spent,
+       CASE 
+           WHEN tr.rank = 1 THEN 'TOP ITEM IN REGION'
+           ELSE 'OTHER'
+       END AS item_rank_status
+FROM TempResults tr
+WHERE tr.total_spent IS NOT NULL
+ORDER BY tr.n_name, tr.total_spent DESC;
+

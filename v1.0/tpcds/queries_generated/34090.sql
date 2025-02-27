@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_by_day AS (
+    SELECT 
+        d.d_date, 
+        SUM(ws.ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (ORDER BY d.d_date) AS date_rank
+    FROM 
+        date_dim d 
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+    HAVING 
+        total_profit IS NOT NULL
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+), 
+ranked_customers AS (
+    SELECT 
+        ci.*, 
+        RANK() OVER (PARTITION BY ci.cd_income_band_sk ORDER BY ci.total_orders DESC) AS order_rank
+    FROM 
+        customer_info ci
+), 
+warehouse_inventory AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(i.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w 
+    JOIN 
+        inventory i ON w.w_warehouse_sk = i.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    rd.d_date,
+    COALESCE(rk.total_spent, 0) AS customer_total_spent,
+    COALESCE(rk.order_rank, 0) AS customer_rank,
+    wi.total_inventory,
+    CASE 
+        WHEN wi.total_inventory < 500 THEN 'Low Stock'
+        WHEN wi.total_inventory < 1000 THEN 'Moderate Stock'
+        ELSE 'High Stock'
+    END AS inventory_level
+FROM 
+    sales_by_day rd
+LEFT JOIN 
+    ranked_customers rk ON rd.date_rank = rk.order_rank
+LEFT JOIN 
+    warehouse_inventory wi ON rk.cd_income_band_sk = wi.w_warehouse_id
+ORDER BY 
+    rd.d_date;

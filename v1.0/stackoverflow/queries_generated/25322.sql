@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Ranking
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 /* Filtering for Questions */
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        crt.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 /* Post Closed */
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        cp.ClosedDate,
+        cp.CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostDetails cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.Ranking <= 5 /* Top 5 posts per tag based on score */
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.Body,
+    trp.Tags,
+    trp.CreationDate,
+    trp.ViewCount,
+    trp.Score,
+    trp.OwnerDisplayName,
+    COALESCE(trp.ClosedDate, 'Not Closed') AS StatusDate,
+    COALESCE(trp.CloseReason, 'Active') AS PostStatus
+FROM 
+    TopRankedPosts trp
+ORDER BY 
+    trp.Score DESC, trp.CreationDate DESC;

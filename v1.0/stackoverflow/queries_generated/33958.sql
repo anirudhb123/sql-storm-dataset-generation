@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreatedDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id,
+        a.Title,
+        a.CreatedDate,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy rph ON rph.PostId = a.ParentId
+)
+, UserReputation AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+)
+, RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '1 month'
+)
+SELECT 
+    p.Title,
+    ph.UserDisplayName AS LastEditor,
+    ph.CreationDate AS LastEditDate,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.ReputationRank,
+    CASE 
+        WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+        WHEN ph.PostHistoryTypeId = 11 THEN 'Reopened'
+        ELSE 'Edited'
+    END AS ActionType,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+FROM 
+    Posts p
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart or BountyClose
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId AND ph.HistoryRank = 1
+JOIN 
+    UserReputation u ON p.OwnerUserId = u.Id
+GROUP BY 
+    p.Title, ph.UserDisplayName, ph.CreationDate, u.DisplayName, u.Reputation, u.ReputationRank
+ORDER BY 
+    u.Reputation DESC, TotalBounties DESC;

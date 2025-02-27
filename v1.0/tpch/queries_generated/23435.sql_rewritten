@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = n.n_nationkey
+    )
+    UNION ALL
+    SELECT ns.n_nationkey, ns.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_supplier ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > ns.s_acctbal
+),
+part_ordered AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+),
+lineitems_with_conditions AS (
+    SELECT l.*, 
+           CASE 
+               WHEN l.l_discount = 0 THEN 'No Discount'
+               WHEN l.l_discount < 0.1 THEN 'Low Discount'
+               WHEN l.l_discount BETWEEN 0.1 AND 0.3 THEN 'Medium Discount'
+               ELSE 'High Discount' 
+           END AS discount_category,
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+    WHERE l.l_shipdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+)
+SELECT DISTINCT
+    ns.n_name AS supplier_nation,
+    po.p_name AS part_name,
+    li.discount_category,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_sales,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM nation_supplier ns
+JOIN partsupp ps ON ns.s_suppkey = ps.ps_suppkey
+JOIN part_ordered po ON ps.ps_partkey = po.p_partkey AND po.rank <= 5
+JOIN lineitems_with_conditions li ON ps.ps_partkey = li.l_partkey
+JOIN orders o ON li.l_orderkey = o.o_orderkey
+WHERE o.o_orderstatus = 'O'
+AND li.discount_category IN ('Medium Discount', 'High Discount')
+GROUP BY ns.n_name, po.p_name, li.discount_category
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) IS NOT NULL
+ORDER BY net_sales DESC, total_orders ASC;

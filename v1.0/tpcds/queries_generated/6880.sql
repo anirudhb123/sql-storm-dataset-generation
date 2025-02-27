@@ -1,0 +1,63 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d) AND (SELECT MAX(d.d_date_sk) FROM date_dim d)
+    GROUP BY 
+        c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cs.total_web_sales,
+        cs.order_count,
+        cs.avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        CustomerSales cs ON c.c_customer_id = cs.c_customer_id
+    WHERE 
+        cs.total_web_sales > (SELECT AVG(total_web_sales) FROM CustomerSales)
+),
+RecentReturns AS (
+    SELECT 
+        cr.cr_returning_customer_sk,
+        COUNT(cr.cr_order_number) AS total_returns,
+        SUM(cr.cr_return_amt) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    JOIN 
+        HighValueCustomers hvc ON cr.cr_returning_customer_sk = hvc.c_customer_id
+    GROUP BY 
+        cr.cr_returning_customer_sk
+)
+
+SELECT 
+    hvc.customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.cd_education_status,
+    hvc.total_web_sales,
+    hvc.order_count,
+    hvc.avg_net_profit,
+    COALESCE(rr.total_returns, 0) AS total_returns,
+    COALESCE(rr.total_return_amount, 0) AS total_return_amount
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    RecentReturns rr ON hvc.customer_id = rr.cr_returning_customer_sk
+ORDER BY 
+    hvc.total_web_sales DESC;

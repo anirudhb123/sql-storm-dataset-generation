@@ -1,0 +1,44 @@
+WITH RegionNation AS (
+    SELECT r.r_regionkey, r.r_name, n.n_name
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal)
+                         FROM supplier s2
+                         WHERE s2.s_acctbal IS NOT NULL)
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) as rn
+    FROM partsupp ps
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity,
+           l.l_extendedprice * (1 - l.l_discount) AS net_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate <= '2022-12-31' 
+          AND l.l_returnflag = 'N'
+)
+SELECT 
+    RND.r_regionkey,
+    RND.r_name,
+    NVL(HS.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT O.o_orderkey) AS total_orders,
+    SUM(FLI.net_price) AS total_revenue,
+    AVG(FLI.l_quantity) AS avg_quantity,
+    MAX(FLI.net_price) AS max_net_price
+FROM RegionNation RND
+LEFT JOIN nation N ON RND.n_nationkey = N.n_nationkey
+LEFT JOIN HighValueSuppliers HS ON N.n_nationkey = HS.s_nationkey
+LEFT JOIN FilteredLineItems FLI ON FLI.l_suppkey IN (SELECT DISTINCT ps.ps_suppkey 
+                                                      FROM PartSupplierDetails ps
+                                                      WHERE ps.ps_partkey IN (SELECT p.p_partkey 
+                                                                              FROM part p
+                                                                              WHERE p.p_size >= 10 AND p.p_size <= 30))
+LEFT JOIN orders O ON O.o_orderkey = FLI.l_orderkey
+GROUP BY RND.r_regionkey, RND.r_name, HS.s_name
+HAVING SUM(FLI.net_price) > 10000
+ORDER BY RND.r_regionkey, total_orders DESC, total_revenue DESC;

@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS TotalBadgeClass,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COUNT(DISTINCT ph.PostId) FILTER (WHERE ph.PostHistoryTypeId = 10) AS ClosedPostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+UserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT PostId) AS TotalPosts,
+        SUM(Score) AS TotalScore
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY 
+        UserId
+)
+
+SELECT 
+    u.DisplayName,
+    u.CreationDate,
+    u.Reputation,
+    ur.TotalBadgeClass,
+    ur.GoldBadges,
+    ra.PostId,
+    ra.Title,
+    ra.CreationDate AS PostCreationDate,
+    ra.Score AS PostScore,
+    ra.CommentCount,
+    ua.TotalPosts,
+    ua.TotalScore,
+    ur.ClosedPostsCount,
+    CASE 
+        WHEN ur.Reputation > 1000 THEN 'Expert'
+        WHEN ur.Reputation BETWEEN 500 AND 1000 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserTier,
+    CASE 
+        WHEN ra.PostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Other Post'
+    END AS PostRankStatus
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    RankedPosts ra ON u.Id = ra.OwnerUserId
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+WHERE 
+    (ur.TotalBadgeClass > 0 OR ua.TotalPosts > 5)
+    AND ra.Score IS NOT NULL
+    AND (ra.CommentCount IS NULL OR ra.CommentCount > 0)
+ORDER BY 
+    ur.Reputation DESC, ra.CreationDate DESC
+LIMIT 50;

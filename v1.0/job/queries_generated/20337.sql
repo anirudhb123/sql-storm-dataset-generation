@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+CombinedInfo AS (
+    SELECT 
+        c.id AS cast_id,
+        p.id AS person_id,
+        p.name,
+        COALESCE(kt.keyword, 'No Keyword') AS keyword,
+        rt.year_rank,
+        rt.total_titles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = c.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    LEFT JOIN 
+        RankedTitles rt ON c.movie_id = rt.title_id
+    WHERE 
+        p.name IS NOT NULL 
+        AND (p.md5sum IS NOT NULL OR p.md5sum IS NULL)
+), 
+NullRoleTests AS (
+    SELECT 
+        ci.cast_id,
+        ci.name,
+        ci.keyword,
+        COALESCE(r.role, 'Unknown Role') AS role,
+        CASE 
+            WHEN ci.year_rank IS NULL THEN 'Rank Not Assigned'
+            ELSE CAST(ci.year_rank AS TEXT)
+        END AS year_rank_text
+    FROM 
+        CombinedInfo ci
+    LEFT JOIN 
+        role_type r ON r.id = ci.cast_id -- Intentionally bizarre join with potentially no direct mapping
+)
+SELECT 
+    n.name AS actor_name,
+    MAX(CASE WHEN r.total_titles < 5 THEN 'Fewer than 5 Titles' ELSE '5 or More Titles' END) AS title_count_category,
+    GROUP_CONCAT(DISTINCT kt.keyword, ', ') AS keywords,
+    SUM(CASE WHEN r.total_titles < 5 THEN 1 ELSE 0 END) OVER (PARTITION BY n.name ORDER BY NULL) AS fewer_titles_count
+FROM 
+    NullRoleTests nt
+JOIN 
+    aka_name n ON n.id = nt.person_id
+GROUP BY 
+    n.name
+HAVING 
+    COUNT(*) > 1 
+    AND MAX(nt.year_rank) IS NOT NULL
+ORDER BY 
+    actor_name ASC,
+    title_count_category DESC;

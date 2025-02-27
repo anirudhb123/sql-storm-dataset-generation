@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- Recursive CTE to gather all linked movies and their chain
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title,
+        ARRAY[m.title] AS movie_chain,
+        1 AS depth
+    FROM 
+        title m
+    WHERE 
+        m.id IN (SELECT linked_movie_id FROM movie_link WHERE link_type_id = (SELECT id FROM link_type WHERE link = 'sequel'))
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title AS movie_title,
+        mh.movie_chain || m.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.depth < 10 -- Limiting the depth for performance and sanity check
+),
+AggregatedMovieInfo AS (
+    -- CTE to gather aggregated information about each movie
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info END) AS budget,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+),
+FinalResults AS (
+    -- Final CTE to generate the required output
+    SELECT 
+        ami.title AS movie_title,
+        COALESCE(ami.actor_count, 0) AS total_actors,
+        COALESCE(h.movie_chain, ARRAY[]::text[]) AS movie_chain,
+        COALESCE(ami.budget, 'Unknown') AS budget,
+        ami.companies,
+        ami.keywords,
+        ROW_NUMBER() OVER (PARTITION BY ami.budget ORDER BY ami.actor_count DESC) AS rank
+    FROM 
+        AggregatedMovieInfo ami
+    LEFT JOIN MovieHierarchy h ON ami.movie_id = h.movie_id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN rank <= 5 THEN 'Top Budget Movies'
+        WHEN rank <= 10 THEN 'Mid Budget Movies'
+        ELSE 'Low Budget Movies'
+    END AS budget_category
+FROM 
+    FinalResults
+WHERE 
+    total_actors > 0 -- Only include movies that have actors
+ORDER BY 
+    budget_category, total_actors DESC, movie_title;

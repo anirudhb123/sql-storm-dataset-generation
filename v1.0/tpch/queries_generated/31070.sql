@@ -1,0 +1,47 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           1 AS level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey,
+           co.c_name,
+           o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           level + 1
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > (SELECT MAX(o2.o_orderdate) 
+                            FROM orders o2 
+                            WHERE o2.o_custkey = co.c_custkey AND o2.o_orderstatus = 'O')
+)
+SELECT co.c_custkey,
+       co.c_name,
+       COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       SUM(co.o_totalprice) AS total_spent,
+       MAX(co.o_orderdate) AS last_order_date,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS purchased_parts,
+       r.r_name AS region
+FROM CustomerOrders co
+LEFT JOIN lineitem li ON li.l_orderkey = co.o_orderkey
+LEFT JOIN partsupp ps ON ps.ps_partkey = li.l_partkey
+LEFT JOIN part p ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+JOIN nation n ON n.n_nationkey = s.s_nationkey
+JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE co.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+  AND (p.p_size IS NULL OR p.p_size > 10)
+GROUP BY co.c_custkey, co.c_name, r.r_name
+HAVING SUM(CASE WHEN li.l_quantity < 50 THEN li.l_extendedprice ELSE 0 END) > 5000
+ORDER BY total_spent DESC
+LIMIT 100;

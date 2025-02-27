@@ -1,0 +1,77 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 0
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopRevenueOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_revenue,
+        os.customer_count,
+        RANK() OVER (ORDER BY os.total_revenue DESC) AS rank
+    FROM 
+        OrdersSummary os
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(td.total_cost), 0) AS total_supplier_cost,
+    COUNT(DISTINCT tr.o_orderkey) AS total_orders,
+    AVG(tr.total_revenue) AS average_revenue,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    TopRevenueOrders tr ON tr.o_orderkey IN (
+        SELECT DISTINCT o.o_orderkey
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_shipdate <= CURRENT_DATE - INTERVAL '30 days'
+    )
+LEFT JOIN 
+    RankedParts p ON p.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+        WHERE s.s_nationkey = n.n_nationkey
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

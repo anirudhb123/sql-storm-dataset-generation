@@ -1,0 +1,52 @@
+WITH movie_counts AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS number_of_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+),
+top_actors AS (
+    SELECT 
+        actor_name,
+        number_of_movies,
+        RANK() OVER (ORDER BY number_of_movies DESC) AS actor_rank
+    FROM 
+        movie_counts
+    WHERE 
+        number_of_movies > 10 
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        tt.kind AS title_type
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type tt ON t.kind_id = tt.id
+)
+SELECT 
+    ta.actor_name,
+    ta.number_of_movies,
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.title_type
+FROM 
+    top_actors ta
+JOIN 
+    cast_info ci ON ta.actor_name = (SELECT name FROM aka_name WHERE person_id = ci.person_id)
+JOIN 
+    movie_details md ON ci.movie_id = md.movie_id
+ORDER BY 
+    ta.actor_rank, md.production_year DESC;

@@ -1,0 +1,28 @@
+-- Performance Benchmarking Query
+-- This query retrieves user activity and post information to assess overall performance.
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    U.LastAccessDate,
+    COUNT(P.Id) AS TotalPosts,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+    AVG(P.Score) AS AveragePostScore,
+    SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+    SUM(V.BountyAmount) AS TotalBounty
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate
+ORDER BY 
+    TotalPosts DESC
+LIMIT 100;

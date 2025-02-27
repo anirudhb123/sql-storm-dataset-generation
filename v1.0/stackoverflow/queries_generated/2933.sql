@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(*) FILTER (WHERE V.VoteTypeId = 2) AS UpVotesCount,
+        COUNT(*) FILTER (WHERE V.VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        V.PostId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    RP.Id,
+    RP.Title,
+    RP.CreationDate,
+    COALESCE(RV.UpVotesCount, 0) AS UpVotes,
+    COALESCE(RV.DownVotesCount, 0) AS DownVotes,
+    COALESCE(PC.CommentCount, 0) AS TotalComments,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    RP.OwnerDisplayName,
+    CASE 
+        WHEN RP.RankByUser <= 3 THEN 'Top Posts'
+        ELSE 'Regular Posts'
+    END AS PostCategory
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    RecentVotes RV ON RP.Id = RV.PostId
+LEFT JOIN 
+    PostComments PC ON RP.Id = PC.PostId
+LEFT JOIN 
+    UserBadges UB ON RP.OwnerUserId = UB.UserId
+WHERE 
+    RP.RankByUser <= 10
+ORDER BY 
+    RP.CreationDate DESC;

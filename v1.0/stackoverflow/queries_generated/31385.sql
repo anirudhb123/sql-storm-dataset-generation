@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankPerType
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Only consider posts from the last year
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, BadgeCount DESC) AS UserRank
+    FROM 
+        UserReputation
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pu.UserId,
+    pu.DisplayName AS TopUser,
+    pu.Reputation,
+    pu.BadgeCount,
+    pv.Upvotes,
+    pv.Downvotes,
+    CASE 
+        WHEN pv.Upvotes IS NULL THEN 0
+        ELSE pv.Upvotes 
+    END AS UpvotesOrZero,
+    CASE 
+        WHEN pv.Downvotes IS NULL THEN 0
+        ELSE pv.Downvotes 
+    END AS DownvotesOrZero
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers pu ON pu.UserRank <= 10  -- Join to get top 10 users or less if there are not enough
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    rp.RankPerType <= 5  -- Only consider top 5 posts per type
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

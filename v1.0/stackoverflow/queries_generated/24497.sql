@@ -1,0 +1,114 @@
+WITH RecursiveBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        b.Class,
+        b.Date,
+        1 AS Level
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  -- Gold badges for top-tier users
+    
+    UNION ALL
+    
+    SELECT 
+        b.UserId,
+        b.Name,
+        b.Class,
+        b.Date,
+        rb.Level + 1
+    FROM 
+        Badges b
+    INNER JOIN 
+        RecursiveBadges rb ON b.UserId = rb.UserId
+    WHERE 
+        b.Class < rb.Class  -- Only follow down to lower classes (Silver, Bronze)
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+    ORDER BY 
+        u.Reputation DESC
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.AcceptedAnswerId, pt.Name
+),
+BizarreFilter AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.ViewCount,
+        pd.CommentCount,
+        pd.UpVoteCount,
+        pd.DownVoteCount,
+        CASE 
+            WHEN pd.ViewCount IS NULL THEN 'N/A'
+            WHEN pd.ViewCount < 100 THEN 'Low Views'
+            ELSE 'Popular'
+        END AS ViewCategory
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.CommentCount BETWEEN 1 AND 50
+        AND pd.UpVoteCount - pd.DownVoteCount > 10
+),
+CombinedResults AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        b.UserId AS BadgeUserId,
+        rb.Name AS BadgeName,
+        rb.Level AS BadgeLevel,
+        bf.Title AS PostTitle,
+        bf.ViewCategory,
+        bf.CreationDate
+    FROM 
+        TopUsers u
+    LEFT JOIN 
+        RecursiveBadges rb ON rb.UserId = u.Id
+    FULL OUTER JOIN 
+        BizarreFilter bf ON u.Id = bf.CommentCount % 3  -- Unusual join for testing edge cases
+)
+SELECT 
+    UserName,
+    Reputation,
+    BadgeName,
+    BadgeLevel,
+    PostTitle,
+    ViewCategory,
+    CreationDate
+FROM 
+    CombinedResults
+WHERE 
+    (BadgeLevel IS NOT NULL OR ViewCategory = 'Popular')  -- Filtering based on either badge level or popularity
+ORDER BY 
+    Reputation DESC, BadgeLevel DESC NULLS LAST, ViewCategory
+LIMIT 100;

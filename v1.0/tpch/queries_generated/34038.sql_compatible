@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(100)) AS full_name
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CONCAT(sh.full_name, ' -> ', s.s_name) AS full_name
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000
+),
+ProductSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           RANK() OVER (ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+RegionSummary AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+)
+SELECT 
+    p.p_name,
+    ps.total_available,
+    ps.avg_supply_cost,
+    sh.full_name AS supplier_hierarchy,
+    c.c_name AS high_value_customer,
+    rs.r_name AS region_name,
+    COALESCE(ws.avg_spend, 0) AS avg_spend_per_customer,
+    CASE 
+        WHEN ws.avg_spend IS NULL THEN 'No Spend'
+        ELSE 'Has Spend'
+    END AS spend_status
+FROM ProductSummary ps
+LEFT JOIN SupplierHierarchy sh ON sh.s_acctbal > ps.avg_supply_cost
+LEFT JOIN HighValueCustomers c ON c.total_spent > ps.avg_supply_cost
+FULL OUTER JOIN RegionSummary rs ON rs.nation_count > 5
+LEFT JOIN (
+    SELECT c.c_nationkey, AVG(o.o_totalprice) AS avg_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+) ws ON ws.c_nationkey = c.c_nationkey
+WHERE ps.rank <= 10
+ORDER BY ps.total_available DESC, ps.avg_supply_cost ASC;

@@ -1,0 +1,73 @@
+
+WITH address_parts AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM
+        customer_address
+),
+customer_info AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN address_parts ca ON c.c_current_addr_sk = ca.ca_address_id
+),
+sales_summary AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS orders_count
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+customer_sales_info AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.cd_education_status,
+        c.cd_purchase_estimate,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.orders_count, 0) AS orders_count
+    FROM
+        customer_info c
+    LEFT JOIN sales_summary ss ON c.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT
+    CSI.c_customer_id,
+    CSI.c_first_name,
+    CSI.c_last_name,
+    CSI.c_email_address,
+    CSI.total_sales,
+    CSI.orders_count,
+    CASE 
+        WHEN CSI.total_sales > 1000 THEN 'High Value'
+        WHEN CSI.total_sales BETWEEN 500 AND 1000 THEN 'Mid Value'
+        ELSE 'Low Value'
+    END AS customer_value_category,
+    ROW_NUMBER() OVER (ORDER BY CSI.total_sales DESC) AS rank
+FROM
+    customer_sales_info CSI
+ORDER BY
+    rank;

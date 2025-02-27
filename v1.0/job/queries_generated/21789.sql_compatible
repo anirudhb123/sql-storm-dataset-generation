@@ -1,0 +1,91 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL 
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+),
+CastInfoCTE AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        COUNT(*) OVER (PARTITION BY ci.role_id) AS role_count,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank,
+        CASE 
+            WHEN ci.note IS NULL THEN 'No Note'
+            ELSE ci.note
+        END AS note_status
+    FROM 
+        cast_info AS ci
+    WHERE 
+        ci.role_id IS NOT NULL
+),
+NestedQuery AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT a.name) AS alias_count
+    FROM 
+        cast_info AS c
+    JOIN 
+        aka_name AS a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        c.role_count,
+        n.alias_count,
+        CASE 
+            WHEN mh.production_year IS NOT NULL AND mh.production_year < 2000 THEN 'Classic'
+            ELSE 'Modern'
+        END AS era
+    FROM 
+        MovieHierarchy AS mh
+    LEFT JOIN 
+        CastInfoCTE AS c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        NestedQuery AS n ON mh.movie_id = n.movie_id
+    WHERE 
+        mh.level = 0 AND c.role_count IS NOT NULL
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.era,
+    COALESCE(fm.role_count, 0) AS role_total,
+    COALESCE(fm.alias_count, 0) AS alias_total,
+    CASE 
+        WHEN COALESCE(fm.role_count, 0) >= 2 THEN 'Multiple Roles'
+        WHEN COALESCE(fm.alias_count, 0) >= 3 THEN 'Multiple Aliases'
+        ELSE 'Solo Feature'
+    END AS movie_status
+FROM 
+    FilteredMovies AS fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title ASC;

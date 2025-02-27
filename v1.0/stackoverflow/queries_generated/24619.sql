@@ -1,0 +1,84 @@
+WITH RecursiveCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.PostTypeId,
+        COALESCE(SUM(vt.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(vt.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(SUM(CASE 
+            WHEN vt.VoteTypeId IN (2, 3) THEN vt.VoteTypeId
+            END) OVER (PARTITION BY p.Id), 0) AS TotalVotes
+    FROM
+        Posts p
+    LEFT JOIN Votes vt ON p.Id = vt.PostId
+    WHERE
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '30 days')
+    UNION ALL
+    SELECT
+        pl.RelatedPostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.PostTypeId,
+        COALESCE(SUM(vt.VoteTypeId = 2) OVER (PARTITION BY pl.RelatedPostId), 0),
+        COALESCE(SUM(vt.VoteTypeId = 3) OVER (PARTITION BY pl.RelatedPostId), 0),
+        COALESCE(SUM(CASE 
+            WHEN vt.VoteTypeId IN (2, 3) THEN vt.VoteTypeId
+            END) OVER (PARTITION BY pl.RelatedPostId), 0)
+    FROM
+        PostLinks pl
+    JOIN Posts p ON pl.PostId = p.Id
+    LEFT JOIN Votes vt ON pl.RelatedPostId = vt.PostId
+    WHERE
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '30 days')
+),
+RankedPosts AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) as UserPostRank
+    FROM 
+        RecursiveCTE
+)
+SELECT 
+    up.OwnerDisplayName,
+    up.Reputation,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Body,
+    CASE 
+        WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+        WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    rp.TotalVotes,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    CASE 
+        WHEN rp.CreationDate IS NULL THEN 'No Creation Date'
+        ELSE TO_CHAR(rp.CreationDate, 'YYYY-MM-DD HH24:MI:SS')
+    END AS FormattedCreationDate,
+    STRING_AGG(DISTINCT tag.TagName, ', ') AS Tags
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+LEFT JOIN 
+    UNNEST(string_to_array(rp.Body, ' ')) AS tag ON LOWER(tag) LIKE '%sql%'
+WHERE 
+    rp.UserPostRank <= 5 
+    AND (up.Reputation > 1000 OR up.Location IS NOT NULL) 
+    AND rp.PostTypeId IN (1, 2)
+GROUP BY 
+    up.OwnerDisplayName, up.Reputation, rp.PostId, rp.Title, 
+    rp.CreationDate, rp.Body, rp.UpVotes, rp.DownVotes, rp.TotalVotes
+HAVING 
+    COUNT(DISTINCT c.Id) > 0
+ORDER BY 
+    rp.TotalVotes DESC, rp.CreationDate DESC
+LIMIT 50;

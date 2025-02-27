@@ -1,0 +1,40 @@
+WITH NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+), 
+TopSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > 100
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    ns.n_name AS nation_name,
+    ts.total_available_qty,
+    od.total_revenue
+FROM NationSupplier ns
+JOIN TopSuppliers ts ON ts.ps_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey IN (
+        SELECT s.s_suppkey 
+        FROM supplier s 
+        WHERE s.s_nationkey = ns.n_nationkey
+    )
+)
+JOIN OrderDetails od ON od.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+)
+ORDER BY ns.n_name, ts.total_available_qty DESC;

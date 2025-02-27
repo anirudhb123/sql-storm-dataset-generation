@@ -1,0 +1,118 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to recursively get posts and their answers
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Start with questions
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.ParentId,
+        P2.Title,
+        P2.CreationDate,
+        P2.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy R ON P2.ParentId = R.PostId
+    WHERE 
+        P2.PostTypeId = 2  -- Only answers
+),
+UserReputation AS (
+    -- CTE to calculate user reputation and their badge counts
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(BadgeCount, 0) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) B ON U.Id = B.UserId
+),
+PostWithVoteCounts AS (
+    -- CTE to compute vote counts for posts
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+ClosedPosts AS (
+    -- CTE to identify closed posts
+    SELECT 
+        PH.PostId,
+        PH.Comment,
+        PH.CreationDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10  -- Post Closed
+),
+PostAnalytics AS (
+    SELECT 
+        RPH.PostId,
+        RPH.Title,
+        RPH.CreationDate,
+        UR.DisplayName AS OwnerName,
+        UR.Reputation AS OwnerReputation,
+        PWC.UpVotes,
+        PWC.DownVotes,
+        (PWC.UpVotes - PWC.DownVotes) AS NetVotes,
+        COALESCE(CP.Comment, 'Open') AS PostStatus,
+        COUNT(DISTINCT RPH2.PostId) AS AnswerCount
+    FROM 
+        RecursivePostHierarchy RPH
+    INNER JOIN 
+        UserReputation UR ON RPH.OwnerUserId = UR.UserId
+    LEFT JOIN 
+        PostWithVoteCounts PWC ON RPH.PostId = PWC.PostId
+    LEFT JOIN 
+        ClosedPosts CP ON RPH.PostId = CP.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy RPH2 ON RPH.PostId = RPH2.ParentId
+    GROUP BY 
+        RPH.PostId, RPH.Title, RPH.CreationDate, UR.DisplayName, UR.Reputation, PWC.UpVotes, PWC.DownVotes, CP.Comment
+)
+SELECT 
+    PA.*,
+    CASE 
+        WHEN PA.NetVotes > 0 THEN 'Positive'
+        WHEN PA.NetVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus,
+    CASE 
+        WHEN PA.OwnerReputation >= 1000 THEN 'Gold Badge'
+        WHEN PA.OwnerReputation >= 500 THEN 'Silver Badge'
+        ELSE 'Bronze Badge'
+    END AS BadgeCategory
+FROM 
+    PostAnalytics PA
+WHERE 
+    PA.PostStatus = 'Open' OR PA.NetVotes > 0
+ORDER BY 
+    PA.CreationDate DESC;

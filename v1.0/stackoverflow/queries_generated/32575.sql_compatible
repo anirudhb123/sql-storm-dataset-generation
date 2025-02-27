@@ -1,0 +1,79 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        Title,
+        CreationDate,
+        0 AS Depth
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+),
+RecentBadges AS (
+    SELECT 
+        B.UserId,
+        B.Name,
+        B.Date,
+        ROW_NUMBER() OVER (PARTITION BY B.UserId ORDER BY B.Date DESC) AS BadgeRank
+    FROM 
+        Badges B
+    WHERE 
+        B.Date >= DATEADD(day, -30, '2024-10-01')
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Depth,
+    COALESCE(vs.TotalUpVotes, 0) AS UpVotes,
+    COALESCE(vs.TotalDownVotes, 0) AS DownVotes,
+    tu.DisplayName AS TopUserName,
+    rb.Name AS RecentBadge,
+    rb.Date AS BadgeDate
+FROM 
+    RecursivePostCTE rp
+LEFT JOIN 
+    VoteStatistics vs ON rp.PostId = vs.PostId
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.UserId
+LEFT JOIN 
+    RecentBadges rb ON p.OwnerUserId = rb.UserId AND rb.BadgeRank = 1
+WHERE 
+    rp.CreationDate >= DATEADD(day, -60, '2024-10-01')
+ORDER BY 
+    rp.Depth, 
+    rp.CreationDate DESC;

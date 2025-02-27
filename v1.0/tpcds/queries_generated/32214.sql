@@ -1,0 +1,81 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk 
+                                FROM date_dim d 
+                                WHERE d.d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name
+    UNION ALL
+    SELECT 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.total_profit + COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+    FROM
+        sales_hierarchy sh
+    LEFT JOIN
+        web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk 
+                                FROM date_dim d 
+                                WHERE d.d_year < 2023)
+    GROUP BY 
+        sh.c_customer_sk,
+        sh.c_first_name,
+        sh.c_last_name,
+        sh.total_profit
+),
+store_info AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS store_profit,
+        COUNT(ss.ss_ticket_number) AS total_sales
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_id,
+        s.s_store_name
+)
+SELECT 
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.total_profit,
+    si.s_store_name,
+    si.store_profit,
+    si.total_sales,
+    CASE
+        WHEN ch.total_profit > 10000 THEN 'High Value'
+        WHEN ch.total_profit BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    sales_hierarchy ch
+LEFT JOIN 
+    store_info si ON ch.c_customer_sk = (
+        SELECT ss.ss_customer_sk FROM store_sales ss 
+        WHERE ss.ss_net_profit = (
+            SELECT MAX(ss2.ss_net_profit) 
+            FROM store_sales ss2 
+            WHERE ss2.ss_customer_sk = ch.c_customer_sk
+        )
+    )
+WHERE 
+    si.store_profit IS NOT NULL
+ORDER BY 
+    ch.total_profit DESC
+LIMIT 100;

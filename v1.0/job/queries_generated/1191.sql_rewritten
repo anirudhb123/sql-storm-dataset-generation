@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL AND
+        t.production_year IS NOT NULL
+),
+ActorStats AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS total_movies,
+        MIN(production_year) AS first_movie_year,
+        MAX(production_year) AS last_movie_year
+    FROM 
+        RankedMovies
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    as.actor_name,
+    as.total_movies,
+    as.first_movie_year,
+    as.last_movie_year,
+    CASE 
+        WHEN as.total_movies > 10 THEN 'Veteran Actor'
+        WHEN as.total_movies BETWEEN 5 AND 10 THEN 'Established Actor'
+        ELSE 'Newcomer Actor'
+    END AS actor_category
+FROM 
+    ActorStats as
+WHERE 
+    as.first_movie_year IS NOT NULL
+ORDER BY 
+    as.total_movies DESC,
+    as.actor_name ASC;

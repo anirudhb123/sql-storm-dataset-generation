@@ -1,0 +1,62 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostUserActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(VC.Score) AS TotalVotes,
+        COALESCE(MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END), '1900-01-01') AS LastClosedDate,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes VC ON P.Id = VC.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+UserActivityStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COALESCE(PA.PostCount, 0) AS TotalPosts,
+        COALESCE(PA.TotalVotes, 0) AS TotalVotes,
+        COALESCE(PA.TotalComments, 0) AS TotalComments,
+        PA.LastClosedDate,
+        UR.Reputation,
+        UR.ReputationRank
+    FROM 
+        UserReputation UR
+    LEFT JOIN 
+        PostUserActivity PA ON UR.UserId = PA.OwnerUserId
+)
+SELECT 
+    UAS.DisplayName,
+    UAS.TotalPosts,
+    UAS.TotalVotes,
+    UAS.TotalComments,
+    UAS.LastClosedDate,
+    UAS.Reputation,
+    UAS.ReputationRank,
+    CASE 
+        WHEN UAS.LastClosedDate IS NOT NULL 
+            THEN DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), UAS.LastClosedDate) 
+        ELSE NULL 
+    END AS DaysSinceLastClosed
+FROM 
+    UserActivityStats UAS
+ORDER BY 
+    UAS.ReputationRank
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH RECURSIVE CTE_Supplier_Sales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CAST(NULLIF(s.s_comment, '') AS varchar(101)) AS clean_comment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_comment
+    HAVING SUM(l.l_extendedprice) IS NOT NULL
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CONCAT('Repeat: ', t.clean_comment) AS clean_comment,
+        t.total_sales * 0.9 AS total_sales
+    FROM CTE_Supplier_Sales t
+    JOIN supplier s ON t.s_suppkey = s.s_suppkey
+    WHERE t.total_sales > 10000
+),
+MaxSales AS (
+    SELECT 
+        MAX(total_sales) AS max_sales
+    FROM CTE_Supplier_Sales
+),
+Relevant_Nations AS (
+    SELECT n.n_nationkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name LIKE '%Amer%'
+),
+Filtered_Customers AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+Final_Report AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_sales AS supplier_sales,
+        cf.total_spent AS customer_spent,
+        MAX(cs.total_sales) OVER (PARTITION BY c.c_custkey) AS max_supplier_sales,
+        CASE 
+            WHEN cf.total_spent > mt.max_sales THEN 'High Spender'
+            ELSE 'Regular Spender' 
+        END AS spending_classification
+    FROM Filtered_Customers cf
+    JOIN CTE_Supplier_Sales cs ON cs.total_sales IN (SELECT max_sales FROM MaxSales mt)
+    WHERE cf.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM Relevant_Nations))
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    fr.supplier_sales,
+    fr.customer_spent,
+    fr.spending_classification
+FROM Final_Report fr
+WHERE supplier_sales IS NOT NULL OR customer_spent IS NOT NULL
+ORDER BY spending_classification DESC, supplier_sales DESC;

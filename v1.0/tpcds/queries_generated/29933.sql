@@ -1,0 +1,47 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        cd.cd_marital_status = 'M' AND 
+        cd.cd_education_status IN ('PhD', 'Masters')
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status, 
+        cd.cd_purchase_estimate, ca.ca_city, ca.ca_state, ca.ca_country
+),
+StringProcessed AS (
+    SELECT 
+        full_name, 
+        ca_city, 
+        UPPER(ca_state) AS upper_state, 
+        INITCAP(ca_country) AS capitalized_country,
+        LENGTH(full_name) AS name_length
+    FROM 
+        CustomerDetails
+)
+SELECT 
+    COUNT(*) AS total_customers,
+    AVG(name_length) AS avg_name_length,
+    SUM(CASE WHEN total_orders > 5 THEN 1 ELSE 0 END) AS frequent_shoppers,
+    STRING_AGG(UPPER(full_name), ', ') AS all_names_in_uppercase
+FROM 
+    StringProcessed;

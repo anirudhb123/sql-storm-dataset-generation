@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        1 AS depth
+    FROM 
+        title
+    WHERE 
+        title.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        cte.depth + 1
+    FROM 
+        MovieCTE cte
+    JOIN 
+        movie_link ml ON cte.movie_id = ml.movie_id
+    JOIN 
+        title t ON t.id = ml.linked_movie_id
+    WHERE 
+        cte.depth < 5  
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT cc.movie_id) AS total_movies_casted = COUNT(DISTINCT cc.movie_id) ~ 10,
+    CASE 
+        WHEN COUNT(DISTINCT cc.movie_id) > 10 THEN 'Veteran Actor' 
+        ELSE 'Newcomer Actor' 
+    END AS actor_experience,
+    string_agg(DISTINCT k.keyword, ', ') AS associated_keywords,
+    COALESCE(ci.note, 'No role note available') AS role_note
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieCTE m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+WHERE 
+    ci.nr_order < 10  
+    AND (m.production_year IS NOT NULL OR m.production_year > 2000)  
+GROUP BY 
+    a.name, m.title, m.production_year, ci.note
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 2  
+    AND m.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    total_movies_casted DESC,
+    actor_name ASC;

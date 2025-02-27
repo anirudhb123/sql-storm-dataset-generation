@@ -1,0 +1,52 @@
+WITH HighValueOrders AS (
+    SELECT o_custkey, SUM(o_totalprice) AS total_spent
+    FROM orders
+    WHERE o_orderdate >= DATE '2022-01-01' AND o_orderstatus IN ('O', 'F')
+    GROUP BY o_custkey
+    HAVING SUM(o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(ps_supplycost * ps_availqty)
+        FROM partsupp
+    )
+),
+SupplierDetails AS (
+    SELECT DISTINCT s.s_name, n.n_name AS nation_name, r.r_name AS region_name,
+           COALESCE(NULLIF(s.s_comment, ''), 'No comment provided') AS adjusted_comment
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+ActiveCustomers AS (
+    SELECT DISTINCT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c_acctbal) FROM customer
+    )
+)
+SELECT a.c_name, a.c_acctbal, s.s_name AS supplier_name, s.adjusted_comment,
+       CASE
+           WHEN ha.total_spent IS NOT NULL THEN ha.total_spent
+           ELSE 0
+       END AS total_spent,
+       ROW_NUMBER() OVER (PARTITION BY a.c_custkey ORDER BY a.c_acctbal DESC) AS rank,
+       COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY a.c_custkey) AS order_count
+FROM ActiveCustomers a
+LEFT JOIN HighValueOrders ha ON a.c_custkey = ha.o_custkey
+LEFT JOIN SupplierDetails s ON a.c_nationkey = (
+    SELECT n.n_nationkey FROM nation n 
+    WHERE n.n_name = (
+        SELECT n2.n_name FROM nation n2 WHERE n2.n_nationkey = a.c_nationkey
+    )
+)
+LEFT JOIN lineitem l ON l.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = a.c_custkey AND o.o_orderstatus = 'O'
+) OR l.l_partkey IN (
+    SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 1000 AND ps.ps_availqty > 0
+)
+ORDER BY a.c_name, total_spent DESC NULLS LAST;

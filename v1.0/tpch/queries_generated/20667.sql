@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_name,
+    ps.total_availqty,
+    ps.avg_supplycost,
+    COALESCE(cs.order_count, 0) AS customer_orders,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN cs.total_spent IS NOT NULL AND cs.total_spent > 10000 THEN 'High Roller'
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM PartStats ps
+LEFT JOIN CustomerOrders cs ON ps.p_partkey = cs.c_custkey
+JOIN RankedSuppliers rs ON rs.rnk = 1
+WHERE ps.total_availqty >= (
+    SELECT 
+        AVG(total_availqty) 
+    FROM PartStats
+) 
+OR EXISTS (
+    SELECT 1
+    FROM supplier s
+    WHERE s.s_suppkey = rs.s_suppkey
+    AND s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+)
+ORDER BY customer_orders DESC, average_supplycost ASC;

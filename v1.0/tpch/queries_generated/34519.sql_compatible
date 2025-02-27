@@ -1,0 +1,50 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal > 500 AND ch.level < 3
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT o.o_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+),
+RankedCustomers AS (
+    SELECT ch.c_custkey, 
+           ch.c_name, 
+           os.order_count,
+           os.total_spent,
+           RANK() OVER (ORDER BY os.total_spent DESC) AS rank
+    FROM CustomerHierarchy ch
+    LEFT JOIN OrderSummary os ON ch.c_custkey = os.o_custkey
+)
+SELECT r.n_name AS nation_name,
+       COUNT(DISTINCT rc.c_custkey) AS customer_count,
+       AVG(rc.total_spent) AS avg_spent,
+       MAX(rc.rank) AS max_rank,
+       CASE 
+           WHEN AVG(rc.total_spent) > 10000 THEN 'High Value'
+           WHEN AVG(rc.total_spent) BETWEEN 5000 AND 10000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_segment
+FROM RankedCustomers rc
+JOIN nation r ON rc.c_nationkey = r.n_nationkey
+LEFT JOIN PartSupplierStats ps ON rc.c_custkey = ps.ps_partkey
+WHERE rc.rank <= 10 OR ps.avg_supplycost IS NOT NULL
+GROUP BY r.n_name
+ORDER BY customer_count DESC, nation_name;

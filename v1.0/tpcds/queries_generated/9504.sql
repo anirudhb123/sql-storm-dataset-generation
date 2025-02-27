@@ -1,0 +1,46 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(ws.ws_order_number) AS web_order_count,
+        MAX(ws.ws_sold_date_sk) AS last_web_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id
+),
+StoreSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        COUNT(ss.ss_ticket_number) AS store_order_count,
+        MAX(ss.ss_sold_date_sk) AS last_store_purchase_date
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cs.c_customer_id,
+    COALESCE(cs.total_web_sales, 0) AS total_web_sales,
+    COALESCE(cs.web_order_count, 0) AS web_order_count,
+    COALESCE(cs.last_web_purchase_date, '1900-01-01') AS last_web_purchase_date,
+    COALESCE(ss.total_store_sales, 0) AS total_store_sales,
+    COALESCE(ss.store_order_count, 0) AS store_order_count,
+    COALESCE(ss.last_store_purchase_date, '1900-01-01') AS last_store_purchase_date
+FROM 
+    CustomerSales cs
+FULL OUTER JOIN 
+    StoreSales ss ON cs.c_customer_id = ss.c_customer_id
+ORDER BY 
+    total_web_sales + total_store_sales DESC
+LIMIT 100;

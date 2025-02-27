@@ -1,0 +1,51 @@
+
+WITH AggregatedSales AS (
+    SELECT 
+        ws.sold_date_sk, 
+        ws.ship_date_sk, 
+        SUM(ws.quantity) AS total_quantity, 
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.item_sk = i.item_sk
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    WHERE 
+        cd.gender = 'M' 
+        AND cd.marital_status = 'M' 
+        AND cd.education_status IN ('High School', 'College')
+        AND ws.sold_date_sk BETWEEN 2450000 AND 2451000
+    GROUP BY 
+        ws.sold_date_sk, ws.ship_date_sk
+),
+DailySales AS (
+    SELECT 
+        dd.d_date AS sale_date,
+        AS.total_quantity,
+        AS.total_sales,
+        AS.total_discount
+    FROM 
+        AggregatedSales AS AS
+    JOIN 
+        date_dim dd ON AS.sold_date_sk = dd.date_sk
+)
+SELECT 
+    sale_date,
+    SUM(total_quantity) AS daily_total_quantity,
+    SUM(total_sales) AS daily_total_sales,
+    SUM(total_discount) AS daily_total_discount,
+    COUNT(DISTINCT c.customer_sk) AS unique_customers
+FROM 
+    DailySales
+JOIN 
+    web_sales ws ON ws.sold_date_sk = AS.sold_date_sk
+JOIN 
+    customer c ON ws.bill_customer_sk = c.customer_sk
+GROUP BY 
+    sale_date
+ORDER BY 
+    sale_date;

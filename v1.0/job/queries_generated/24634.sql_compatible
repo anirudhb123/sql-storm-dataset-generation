@@ -1,0 +1,38 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank,
+        COUNT(DISTINCT mk.keyword) OVER (PARTITION BY mt.movie_id) AS keyword_count,
+        MAX(CASE WHEN ko.info = 'Oscar' THEN 1 ELSE 0 END) OVER (PARTITION BY mt.movie_id) AS has_oscar,
+        mt.movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_info ko ON mt.movie_id = ko.movie_id AND ko.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+)
+
+SELECT 
+    r.title AS Movie_Title,
+    r.production_year AS Year,
+    r.year_rank AS Rank_within_Year,
+    COALESCE(k.keyword_count, 0) AS Unique_Keyword_Count,
+    CASE 
+        WHEN r.has_oscar = 1 THEN 'Yes'
+        ELSE 'No' 
+    END AS Awarded
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    (SELECT movie_id, COUNT(DISTINCT keyword_id) AS keyword_count
+     FROM movie_keyword
+     GROUP BY movie_id) k ON r.movie_id = k.movie_id
+WHERE 
+    (r.production_year IS NOT NULL AND r.production_year > 2000) 
+    AND (r.title LIKE '%Avengers%' OR r.title LIKE '%Star Wars%')
+ORDER BY 
+    r.production_year DESC, Unique_Keyword_Count DESC
+FETCH FIRST 20 ROWS ONLY;

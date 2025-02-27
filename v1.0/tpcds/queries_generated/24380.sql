@@ -1,0 +1,60 @@
+
+WITH RECURSIVE address_recursion AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 
+           CASE 
+               WHEN ca_street_number IS NULL THEN 'Unknown'
+               ELSE ca_street_number 
+           END AS street_info
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    UNION ALL
+    SELECT ca_address_sk, 'Unknown City' AS ca_city, 
+           CASE 
+               WHEN ca_state IS NULL THEN 'Unknown State'
+               ELSE ca_state 
+           END AS ca_state, 
+           ca_country,
+           street_info || ' (recursive)' 
+    FROM address_recursion
+    JOIN customer_address ON address_recursion.ca_city = customer_address.ca_city
+    WHERE address_recursion.ca_address_sk <> customer_address.ca_address_sk
+    AND ca_country = 'USA'
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           d.cd_gender, d.cd_marital_status,
+           d.cd_purchase_estimate,
+           COALESCE(CAST(d.cd_dep_count AS TEXT), 'No Dependents') AS dependents_info
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+),
+sales_summary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_sales_price) AS total_sales,
+           COUNT(ws_order_number) AS total_orders,
+           ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws_bill_customer_sk
+)
+SELECT c.c_first_name, c.c_last_name, ci.street_info, 
+       COALESCE(a.ca_city, 'City Unknown') AS city, 
+       COALESCE(a.ca_state, 'State Unknown') AS state,
+       s.total_sales, s.total_orders,
+       CASE 
+           WHEN s.total_sales > 1000 THEN 'High Value'
+           WHEN s.total_sales BETWEEN 500 AND 1000 THEN 'Mid Value'
+           ELSE 'Low Value'
+       END AS customer_value,
+       CASE 
+           WHEN s.total_orders > 10 THEN 'Frequent Shopper'
+           ELSE 'Occasional Shopper' 
+       END AS shopping_behavior
+FROM customer_info c
+LEFT JOIN address_recursion a ON a.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN sales_summary s ON c.c_customer_sk = s.ws_bill_customer_sk
+WHERE (c.cd_marital_status IS NULL OR c.cd_marital_status IN ('M', 'S'))
+  AND (s.rank <= 5 OR s.total_orders IS NULL)
+ORDER BY total_sales DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

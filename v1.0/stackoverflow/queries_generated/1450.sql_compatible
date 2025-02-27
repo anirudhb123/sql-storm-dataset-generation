@@ -1,0 +1,77 @@
+
+WITH UserPerformance AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(V.BountyAmount) AS AverageBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 10, 11) 
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COALESCE(RE.EditRank, 0) AS RecentEdit,
+        COUNT(C.CommentId) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecentEdits RE ON P.Id = RE.PostId AND RE.EditRank = 1
+    LEFT JOIN 
+        (SELECT Id AS CommentId, PostId FROM Comments) C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= timestamp '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, RE.EditRank
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalViews,
+    U.AverageBounty,
+    PA.PostId,
+    PA.Title,
+    PA.ViewCount,
+    PA.RecentEdit,
+    PA.TotalComments,
+    CASE 
+        WHEN PA.TotalComments > 50 THEN 'Highly commented'
+        WHEN PA.TotalComments BETWEEN 20 AND 50 THEN 'Moderately commented'
+        ELSE 'Low comments'
+    END AS CommentCategory
+FROM 
+    UserPerformance U
+JOIN 
+    PostAnalytics PA ON PA.UserId = U.UserId
+ORDER BY 
+    U.Reputation DESC, PA.ViewCount DESC;

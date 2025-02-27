@@ -1,0 +1,60 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_street_name, ca_city, ca_state, ca_zip, 0 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+
+    UNION ALL
+
+    SELECT ca.ca_address_sk, ca.ca_street_name, ca.ca_city, ca.ca_state, ca.ca_zip, ah.level + 1
+    FROM customer_address ca
+    JOIN AddressHierarchy ah ON ah.ca_address_sk = ca.ca_address_sk
+    WHERE ah.level < 3
+),
+TotalSales AS (
+    SELECT 
+        d.d_date_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_date_id
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+QualifiedReturns AS (
+    SELECT 
+        sr.returning_customer_sk,
+        SUM(sr.return_qty) AS total_return_quantity
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+    GROUP BY sr.returning_customer_sk
+)
+
+SELECT
+    ah.ca_street_name,
+    ah.ca_city,
+    ah.ca_state,
+    ts.total_sales,
+    cs.cd_gender,
+    cs.avg_purchase_estimate,
+    COALESCE(qr.total_return_quantity, 0) AS total_return_quantity,
+    (CASE 
+        WHEN cs.avg_purchase_estimate > 500 THEN 'High Value'
+        WHEN cs.avg_purchase_estimate BETWEEN 200 AND 500 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END) AS customer_value_segment
+FROM AddressHierarchy ah
+JOIN TotalSales ts ON ts.d_date_id = '2023-03-01' -- Example date
+JOIN CustomerStats cs ON cs.customer_count > 10
+LEFT JOIN QualifiedReturns qr ON qr.returning_customer_sk = cs.customer_count
+WHERE ah.ca_zip IS NOT NULL
+ORDER BY ts.total_sales DESC, cs.cd_gender;

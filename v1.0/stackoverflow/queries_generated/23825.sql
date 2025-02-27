@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+), AuthorDetails AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(UR.PostCount, 0) AS RecentPostCount,
+        COALESCE(UR.QuestionCount, 0) AS RecentQuestionCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserActivity UR ON U.Id = UR.UserId
+), CloseReasons AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CloseReasonCount,
+        STRING_AGG(DISTINCT CR.Name, ', ') AS CloseReasonsList
+    FROM 
+        Comments C
+    JOIN 
+        PostHistory PH ON C.PostId = PH.PostId AND PH.PostHistoryTypeId = 10  -- Post Closed
+    JOIN 
+        CloseReasonTypes CR ON PH.Comment::integer = CR.Id
+    GROUP BY 
+        C.PostId
+)
+SELECT 
+    A.DisplayName,
+    AD.RecentPostCount,
+    AD.RecentQuestionCount,
+    COUNT(DISTINCT RP.PostId) AS TotalRecentPosts,
+    COALESCE(CR.CloseReasonCount, 0) AS TotalCloseReasons,
+    COALESCE(CR.CloseReasonsList, 'No Reasons') AS CloseReasons
+FROM 
+    AuthorDetails AD
+JOIN 
+    RecentPosts RP ON AD.DisplayName = RP.OwnerUserId
+LEFT JOIN 
+    CloseReasons CR ON RP.PostId = CR.PostId
+WHERE 
+    AD.RecentPostCount > 0 
+    AND AD.ReputationRank <= 10
+GROUP BY 
+    A.DisplayName, AD.RecentPostCount, AD.RecentQuestionCount, CR.CloseReasonCount, CR.CloseReasonsList
+ORDER BY 
+    TotalRecentPosts DESC, AD.ReputationRank ASC;
+This complex query showcases the use of CTEs, aggregate functions, window functions, multi-level joins, correlated metrics, and subtle conditional logic to pull insights about users, their post activities, and feedback status in a benchmarking style.

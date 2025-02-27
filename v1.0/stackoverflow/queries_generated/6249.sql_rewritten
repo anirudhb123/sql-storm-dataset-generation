@@ -1,0 +1,57 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        AVG(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotePercentage,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    LEFT JOIN 
+        Tags T ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+),
+TopPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.ViewCount,
+        PS.Score,
+        PS.CommentCount,
+        PS.VoteCount,
+        PS.UpVotePercentage,
+        PS.DownVotes,
+        PS.Tags,
+        RANK() OVER (ORDER BY PS.Score DESC, PS.ViewCount DESC) AS Rank
+    FROM 
+        PostStats PS
+)
+SELECT 
+    TP.Rank,
+    TP.Title,
+    TP.ViewCount,
+    TP.Score,
+    TP.CommentCount,
+    TP.VoteCount,
+    TP.UpVotePercentage,
+    TP.DownVotes,
+    TP.Tags
+FROM 
+    TopPosts TP
+WHERE 
+    TP.Rank <= 10
+ORDER BY 
+    TP.Rank;

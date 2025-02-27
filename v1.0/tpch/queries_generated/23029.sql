@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS supply_rank,
+        SUM(ps_supplycost * ps_availqty) OVER (PARTITION BY s.s_suppkey) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count,
+        STRING_AGG(o.o_orderstatus, ', ') AS order_statuses
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierMetrics AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(MAX(ps.ps_availqty) / NULLIF(MIN(ps.ps_supplycost), 0), 0) AS price_per_avail,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name 
+    FROM customer c 
+    WHERE c.c_acctbal > 10000 
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' 
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) FILTER (WHERE o.o_orderstatus = 'O') AS open_orders_count,
+    SUM(CASE WHEN lm.l_shipmode IN ('AIR', 'TRUCK') THEN lm.net_revenue ELSE 0 END) AS fast_shipping_revenue,
+    AVG(sm.price_per_avail) AS average_supply_cost_efficiency,
+    COUNT(DISTINCT ps.ps_partkey) AS supplied_parts_count,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ' (Rank: ', rs.supply_rank, ')'), '; ') AS suppliers
+FROM CustomerOrders co
+JOIN HighValueCustomers hvc ON co.c_custkey = hvc.c_custkey
+JOIN orders o ON o.o_custkey = hvc.c_custkey
+JOIN FilteredLineItems lm ON lm.l_orderkey = o.o_orderkey
+JOIN supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = lm.l_partkey)
+JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+JOIN nation n ON n.n_nationkey = s.s_nationkey
+JOIN region r ON r.r_regionkey = n.n_regionkey
+GROUP BY c.c_name, r.r_name
+ORDER BY fast_shipping_revenue DESC, open_orders_count DESC NULLS LAST;

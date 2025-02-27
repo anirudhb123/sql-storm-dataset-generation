@@ -1,0 +1,33 @@
+WITH RECURSIVE PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           SUM(ps.ps_supplycost) OVER (PARTITION BY ps.ps_partkey) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+), 
+TopSuppliers AS (
+    SELECT p.p_partkey, p.p_name, s.s_name, ps.total_supply_cost
+    FROM part p
+    JOIN PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.rn <= 3
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, co.total_spent, 
+           DENSE_RANK() OVER (ORDER BY co.total_spent DESC) AS cust_rank
+    FROM CustomerOrders co
+    JOIN customer c ON co.c_custkey = c.c_custkey
+)
+SELECT tr.p_name, tr.s_name, cr.c_name, cr.total_spent 
+FROM TopSuppliers tr
+FULL OUTER JOIN CustomerRanked cr ON tr.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_name = tr.s_name LIMIT 1) LIMIT 1)
+WHERE cr.cust_rank <= 10 OR tr.total_supply_cost IS NOT NULL
+ORDER BY tr.total_supply_cost DESC, cr.total_spent DESC;

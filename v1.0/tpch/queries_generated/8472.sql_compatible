@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        rs.total_supply_cost,
+        n.n_name
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        rs.rn <= 3
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax,
+        ts.n_name AS supplier_nation
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+)
+SELECT 
+    ts.n_name,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders,
+    SUM(od.o_totalprice) AS total_revenue,
+    AVG(od.l_quantity) AS avg_quantity,
+    SUM(od.l_discount) AS total_discount_given,
+    SUM(od.l_tax) AS total_tax_collected
+FROM 
+    OrderDetails od
+JOIN 
+    TopSuppliers ts ON od.supplier_nation = ts.n_name
+GROUP BY 
+    ts.n_name
+ORDER BY 
+    total_revenue DESC;

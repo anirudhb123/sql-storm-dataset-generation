@@ -1,0 +1,101 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        t.Count,
+        1 AS Level
+    FROM 
+        Tags t
+    WHERE 
+        t.Count > 0
+    
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        rtc.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagCounts rtc ON t.Id = rtc.TagId
+    WHERE 
+        rtc.Level < 5  -- Limiting depth of recursion
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS VoteScore,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'), '::int')
+    WHERE 
+        p.PostTypeId = 1 -- Only consider questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.AcceptedAnswerId
+), 
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes, 
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+AggregatedPostData AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.AcceptedAnswerId,
+        ps.VoteScore,
+        ps.CommentCount,
+        mu.UserId,
+        mu.DisplayName,
+        mu.TotalUpvotes,
+        mu.TotalDownvotes
+    FROM 
+        PostSummary ps
+    JOIN 
+        MostActiveUsers mu ON mu.UserId = ps.AcceptedAnswerId
+)
+
+SELECT 
+    apd.PostId,
+    apd.Title,
+    apd.CreationDate,
+    apd.VoteScore,
+    apd.CommentCount,
+    mu.Reputation,
+    rt.TagName,
+    rt.Level
+FROM 
+    AggregatedPostData apd
+LEFT JOIN 
+    RecursiveTagCounts rt ON rt.TagId = ANY(string_to_array(substring(apd.Tags, 2, length(apd.Tags)-2), '>')::int[])
+WHERE 
+    apd.VoteScore > 10  -- Only consider posts with a positive vote score
+ORDER BY 
+    apd.VoteScore DESC, 
+    apd.CreationDate DESC;

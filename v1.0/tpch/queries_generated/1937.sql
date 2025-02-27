@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+LineItemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    ld.total_revenue,
+    ld.avg_quantity,
+    COALESCE(sd.total_supply_cost, 0) AS total_supply_cost,
+    n.n_name AS nation_name
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    LineItemAggregates ld ON r.o_orderkey = ld.l_orderkey
+LEFT JOIN 
+    supplier s ON ld.total_revenue IS NOT NULL
+LEFT JOIN 
+    SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    r.order_rank <= 10
+AND 
+    (r.o_orderstatus = 'O' OR r.o_orderstatus = 'P')
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice DESC;

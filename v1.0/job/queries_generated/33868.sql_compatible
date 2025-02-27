@@ -1,0 +1,47 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(c.role_id, 0), 'Unknown') AS role_id,
+        COALESCE(NULLIF(c.nr_order, 0), 1) AS cast_order
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ch.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(c.role_id, 0), 'Unknown') AS role_id,
+        COALESCE(NULLIF(c.nr_order, 0), 1) AS cast_order
+    FROM 
+        complete_cast ch
+    JOIN 
+        aka_title m ON ch.movie_id = m.id
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    WHERE 
+        m.production_year < 2000
+)
+SELECT 
+    mh.title, 
+    mh.production_year, 
+    mh.role_id,
+    COUNT(*) OVER(PARTITION BY mh.role_id) AS total_cast,
+    STRING_AGG(DISTINCT a.name, ', ') AS aliased_names
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    aka_name a ON mh.movie_id = a.person_id 
+GROUP BY 
+    mh.title, mh.production_year, mh.role_id
+HAVING 
+    COUNT(*) FILTER (WHERE mh.cast_order > 1) > 5
+ORDER BY 
+    mh.production_year DESC, 
+    mh.role_id;

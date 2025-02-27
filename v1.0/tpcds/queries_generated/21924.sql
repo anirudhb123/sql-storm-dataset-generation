@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_ship_date_sk IS NOT NULL
+        AND ws.ws_sales_price IS NOT NULL
+),
+SalesSummary AS (
+    SELECT
+        cs.cs_item_sk,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        COUNT(cs.cs_order_number) AS total_orders,
+        MAX(cs.cs_sales_price) AS max_sales_price
+    FROM
+        catalog_sales cs
+    GROUP BY
+        cs.cs_item_sk
+),
+TotalReturns AS (
+    SELECT
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        COALESCE(SUM(sr.sr_return_amt), 0) AS total_return_amount
+    FROM
+        store_returns sr
+    GROUP BY
+        sr.sr_item_sk
+),
+FinalResult AS (
+    SELECT
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(ss.total_orders, 0) AS total_orders,
+        COALESCE(tr.total_returned, 0) AS total_returned,
+        COALESCE(tr.total_return_amount, 0) AS total_return_amount,
+        CASE
+            WHEN COALESCE(ss.total_sales, 0) > 0 THEN COALESCE(tr.total_return_amount, 0) / COALESCE(ss.total_sales, 1) 
+            ELSE NULL 
+        END AS return_ratio,
+        COUNT(rk.price_rank) AS high_price_sales_count
+    FROM
+        item i
+    LEFT JOIN SalesSummary ss ON i.i_item_sk = ss.cs_item_sk
+    LEFT JOIN TotalReturns tr ON i.i_item_sk = tr.sr_item_sk
+    LEFT JOIN RankedSales rk ON i.i_item_sk = rk.ws_item_sk AND rk.price_rank = 1
+    GROUP BY
+        i.i_item_sk, i.i_item_id, i.i_item_desc, ss.total_sales, ss.total_orders, tr.total_returned, tr.total_return_amount
+)
+SELECT
+    f.i_item_id,
+    f.i_item_desc,
+    f.total_sales,
+    f.total_orders,
+    f.total_returned,
+    f.total_return_amount,
+    f.return_ratio,
+    (SELECT AVG(ws.net_profit) FROM web_sales ws WHERE ws.ws_item_sk = f.i_item_sk) AS avg_web_profit,
+    (SELECT COUNT(DISTINCT w.web_site_id) FROM web_site w WHERE w.web_mkt_desc IS NOT NULL) AS active_websites
+FROM
+    FinalResult f
+WHERE
+    f.return_ratio IS NOT NULL OR f.total_orders > 10
+ORDER BY
+    f.total_sales DESC, f.total_returned ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

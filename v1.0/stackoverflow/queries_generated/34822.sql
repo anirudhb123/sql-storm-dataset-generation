@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreatedDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+
+TagUsage AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryCount AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title AS LatestQuestionTitle,
+    rp.CreationDate AS LatestQuestionCreationDate,
+    rp.Score AS LatestQuestionScore,
+    bp.BadgeCount,
+    GROUP_CONCAT(tu.TagName) AS AssociatedTags,
+    COALESCE(phc.HistoryCount, 0) AS PostHistoryCount
+FROM 
+    Users up
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    UserBadges bp ON up.Id = bp.UserId
+LEFT JOIN 
+    TagUsage tu ON rp.PostId = tu.TagId -- Example of improper join, will yield a NULL if there's no tag associated
+LEFT JOIN 
+    PostHistoryCount phc ON rp.PostId = phc.PostId
+WHERE 
+    up.Reputation > 1000 -- Only users with reputation greater than 1000
+GROUP BY 
+    up.Id, rp.Title, rp.CreationDate, rp.Score, bp.BadgeCount
+ORDER BY 
+    up.Reputation DESC, rp.CreationDate DESC;

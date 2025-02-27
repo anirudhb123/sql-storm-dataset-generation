@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2412 AND 2450  -- Filter by date range
+    GROUP BY ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        ir.i_item_id,
+        rs.total_quantity,
+        rs.total_net_paid
+    FROM RankedSales rs
+    JOIN item ir ON rs.ws_item_sk = ir.i_item_sk
+    WHERE rs.rank <= 10  -- Top 10 items by sales
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(ts.total_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN TopSellingItems ts ON ts.i_item_id IN (
+        SELECT wsp.ws_item_id 
+        FROM web_sales wsp
+        WHERE wsp.ws_bill_customer_sk = c.c_customer_sk
+    )
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    AVG(total_spent) AS average_spending,
+    COUNT(customer_count) AS number_of_customers
+FROM CustomerDemographics
+GROUP BY cd_gender, cd_marital_status, cd_education_status
+ORDER BY average_spending DESC;

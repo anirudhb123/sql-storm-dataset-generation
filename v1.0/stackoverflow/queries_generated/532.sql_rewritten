@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    um.Reputation,
+    um.TotalPosts,
+    um.TotalViews,
+    COALESCE(p.EditCount, 0) AS TotalEdits,
+    COALESCE(ph.LastEdited, 'No Edits') AS LastEditDate,
+    COUNT(DISTINCT lp.RelatedPostId) AS LinkedPosts,
+    SUM(CASE WHEN ph.Comment IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments
+FROM UserMetrics um
+JOIN Users u ON u.Id = um.UserId
+LEFT JOIN PostHistoryDetails p ON u.Id = p.PostId
+LEFT JOIN PostLinks lp ON u.Id = lp.PostId
+LEFT JOIN Comments c ON u.Id = c.UserId
+WHERE u.Reputation > 1000
+GROUP BY u.DisplayName, um.Reputation, um.TotalPosts, um.TotalViews, p.EditCount, ph.LastEdited
+ORDER BY um.TotalPosts DESC, u.DisplayName ASC
+LIMIT 50;

@@ -1,0 +1,53 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, 1 AS Generation
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, ur.Generation + 1
+    FROM Users u
+    JOIN UserReputation ur ON ur.Id = u.Id
+    WHERE ur.Generation < 5
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId, p.PostTypeId,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostStats AS (
+    SELECT p.OwnerUserId,
+           COUNT(*) AS PostCount,
+           SUM(CASE WHEN p.Score > 10 THEN 1 ELSE 0 END) AS HighScorePosts,
+           AVG(p.ViewCount) AS AvgViewCount,
+           COALESCE(u.Reputation, 0) AS Reputation
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 -- Questions only
+    GROUP BY p.OwnerUserId, u.Reputation
+),
+TopUsers AS (
+    SELECT us.Id, us.DisplayName, ps.Reputation, ps.PostCount, ps.HighScorePosts, ps.AvgViewCount
+    FROM PostStats ps
+    JOIN Users us ON ps.OwnerUserId = us.Id
+    WHERE ps.Reputation IS NOT NULL
+    ORDER BY ps.HighScorePosts DESC, ps.PostCount DESC
+    LIMIT 10
+),
+UserBadges AS (
+    SELECT u.Id AS UserId, COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+FinalStats AS (
+    SELECT tu.DisplayName, tu.Reputation, tu.PostCount, ub.BadgeCount
+    FROM TopUsers tu
+    LEFT JOIN UserBadges ub ON tu.Id = ub.UserId
+)
+SELECT f.DisplayName, f.Reputation, f.PostCount, COALESCE(f.BadgeCount, 0) AS BadgeCount,
+       ISNULL(ur.Generation, 0) AS UserGeneration
+FROM FinalStats f
+LEFT JOIN UserReputation ur ON f.UserId = ur.Id
+WHERE f.PostCount > 5
+ORDER BY f.Reputation DESC, f.BadgeCount DESC;
+

@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT
+        m.linked_movie_id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1
+    FROM
+        movie_link m
+    JOIN
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+    JOIN
+        aka_title m2 ON m.linked_movie_id = m2.id
+)
+
+SELECT
+    n.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT c.id) AS total_casts,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+    AVG(mh.level) AS avg_link_depth,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM
+    aka_name n
+JOIN
+    cast_info ci ON n.person_id = ci.person_id
+JOIN
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    MovieHierarchy mh ON mh.movie_id = t.id
+WHERE
+    n.name IS NOT NULL
+    AND t.production_year > 2000
+GROUP BY
+    n.name, t.title, t.production_year
+HAVING
+    COUNT(DISTINCT ci.id) > 1
+ORDER BY
+    total_casts DESC,
+    n.name ASC;
+
+This SQL query accomplishes several objectives:
+1. It creates a recursive CTE to build a hierarchy of movies based on linked movies.
+2. It retrieves actor names, movie titles, production years, and aggregates information on cast and keywords.
+3. Utilizes `LEFT JOIN` for optional connections, while ensuring non-null values for names.
+4. Applies various aggregate functions to gather insightful metrics such as counts and averages.
+5. The `HAVING` clause filters results to only include actors with more than one credit.
+6. Results are sorted by the total number of casts and actor names, allowing for easy analysis of actor activity in movies.

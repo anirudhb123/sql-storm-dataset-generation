@@ -1,0 +1,53 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        d.d_year,
+        cs.cs_quantity,
+        ss.ss_quantity,
+        COALESCE(ws.ws_quantity, 0) + COALESCE(cs.cs_quantity, 0) + COALESCE(ss.ss_quantity, 0) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number DESC) AS order_rank
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    FULL OUTER JOIN store_sales ss ON ws.ws_item_sk = ss.ss_item_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk OR cs.cs_sold_date_sk = d.d_date_sk OR ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year IN (2000, 2001) 
+        AND (ws.ws_net_paid IS NOT NULL OR cs.cs_net_paid IS NOT NULL OR ss.ss_net_paid IS NOT NULL)
+),
+AggregateSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.total_quantity) AS sum_quantity,
+        AVG(sd.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT sd.ws_order_number) AS unique_order_count
+    FROM 
+        SalesData sd
+    GROUP BY 
+        sd.ws_item_sk
+)
+SELECT 
+    ia.i_item_id,
+    ia.i_product_name,
+    COALESCE(as.sum_quantity, 0) AS total_sales,
+    COALESCE(as.avg_sales_price, 0.00) AS average_price,
+    as.unique_order_count AS distinct_orders,
+    CASE 
+        WHEN as.sum_quantity IS NULL THEN 'No Sales'
+        WHEN as.sum_quantity < 100 THEN 'Low Sales'
+        WHEN as.sum_quantity BETWEEN 100 AND 500 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category
+FROM 
+    item ia
+LEFT JOIN 
+    AggregateSales as ON ia.i_item_sk = as.ws_item_sk
+WHERE 
+    ia.i_rec_start_date <= cast('2002-10-01' as date)
+    AND (ia.i_rec_end_date IS NULL OR ia.i_rec_end_date > cast('2002-10-01' as date))
+ORDER BY 
+    total_sales DESC;

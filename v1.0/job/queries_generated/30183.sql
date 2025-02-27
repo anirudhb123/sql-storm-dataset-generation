@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(ci.id) AS total_cast,
+    SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS num_roles_filled,
+    ARRAY_AGG(DISTINCT ak.name) AS known_aliases,
+    COALESCE(MIN(mk.keyword), 'No Keywords') AS first_keyword,
+    COUNT(DISTINCT CASE WHEN mt.company_id IS NULL THEN NULL ELSE mt.company_id END) AS total_companies_involved
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mt ON mh.movie_id = mt.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(ci.id) > 0 AND 
+    COUNT(DISTINCT mt.company_id) > 1
+ORDER BY 
+    mh.production_year DESC, 
+    total_cast DESC;

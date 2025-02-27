@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk >= 2459115
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk, 
+        SUM(cs_sales_price * cs_quantity) AS total_sales,
+        level + 1
+    FROM catalog_sales cs
+    JOIN SalesCTE s ON cs_item_sk = s.ws_item_sk
+    GROUP BY cs_item_sk
+),
+TotalSales AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(s.total_sales, 0) DESC) AS sales_rank
+    FROM item
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            SUM(ws_sales_price * ws_quantity) AS total_sales
+        FROM web_sales
+        GROUP BY ws_item_sk
+    ) s ON item.i_item_sk = s.ws_item_sk
+)
+SELECT 
+    ta.i_item_id,
+    ta.total_sales,
+    CASE 
+        WHEN ta.total_sales > 100000 THEN 'High Performer' 
+        WHEN ta.total_sales BETWEEN 50000 AND 100000 THEN 'Moderate Performer' 
+        ELSE 'Low Performer' 
+    END AS performance_category,
+    COUNT(wo.warehouse_sk) AS num_warehouses
+FROM TotalSales ta
+LEFT JOIN warehouse wo ON ta.i_item_id = wo.w_warehouse_id
+WHERE ta.total_sales IS NOT NULL
+GROUP BY ta.i_item_id, ta.total_sales
+HAVING COUNT(wo.warehouse_sk) > 1
+ORDER BY ta.total_sales DESC
+LIMIT 10;

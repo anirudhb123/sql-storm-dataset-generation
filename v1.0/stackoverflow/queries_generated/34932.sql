@@ -1,0 +1,61 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Focus on questions
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), RecentActivity AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(*) AS TotalHistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year' -- Focus on recent activity
+    GROUP BY 
+        ph.UserId, ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    r.PostId,
+    r.UserPostRank,
+    COALESCE(a.Activity, 0) AS RecentCloseReopenCount,
+    COALESCE(a.TotalPostHistoryCount, 0) AS TotalPostHistoryCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RecursiveCTE r ON u.Id = r.OwnerUserId AND r.UserPostRank <= 5
+LEFT JOIN 
+    RecentActivity a ON u.Id = a.UserId
+ORDER BY 
+    u.Reputation DESC, 
+    r.CreationDate DESC;

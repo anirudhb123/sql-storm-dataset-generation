@@ -1,0 +1,59 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.ParentId,
+        PH.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy PH ON P.ParentId = PH.PostId
+)
+
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT Q.PostId) AS TotalQuestions,
+    COUNT(DISTINCT A.PostId) AS TotalAnswers,
+    COUNT(PHT.Id) AS TotalPostHistoryRecords,
+    SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+    SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+    SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+    MAX(Q.CreationDate) AS LatestQuestionDate,
+    MIN(A.CreationDate) AS EarliestAnswerDate
+FROM 
+    Users U
+LEFT JOIN 
+    Posts Q ON U.Id = Q.OwnerUserId AND Q.PostTypeId = 1 
+LEFT JOIN 
+    Posts A ON U.Id = A.OwnerUserId AND A.PostTypeId = 2 
+LEFT JOIN 
+    PostHistory PHT ON Q.Id = PHT.PostId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+WHERE 
+    U.Reputation > 1000 
+GROUP BY 
+    U.DisplayName
+HAVING 
+    COUNT(DISTINCT Q.PostId) > 0 AND 
+    COUNT(DISTINCT A.PostId) > 0
+ORDER BY 
+    TotalAnswers DESC, 
+    UserDisplayName ASC;

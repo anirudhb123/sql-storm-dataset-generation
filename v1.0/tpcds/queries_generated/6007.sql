@@ -1,0 +1,26 @@
+
+SELECT 
+    ca.ca_country,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate,
+    DATE_FORMAT(d.d_date, '%Y-%m') AS sales_month
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    d.d_year = 2023
+    AND d.d_moy IN (1, 2, 3)  -- First quarter
+    AND ws.ws_net_profit > 0
+GROUP BY 
+    ca.ca_country, DATE_FORMAT(d.d_date, '%Y-%m')
+ORDER BY 
+    total_net_profit DESC, total_customers DESC
+LIMIT 10;

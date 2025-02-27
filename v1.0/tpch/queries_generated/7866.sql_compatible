@@ -1,0 +1,69 @@
+
+WITH regional_supplier_stats AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(s.s_acctbal) AS total_acctbal,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+),
+customer_order_stats AS (
+    SELECT 
+        c.c_custkey AS customer_id,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+lineitem_revenue AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.region_name,
+    rss.nation_name,
+    rss.total_acctbal,
+    rss.supplier_count,
+    cos.customer_id,
+    cos.total_orders,
+    cos.total_spent,
+    lr.total_revenue
+FROM 
+    regional_supplier_stats rss
+JOIN 
+    customer_order_stats cos ON rss.nation_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        WHERE n.n_regionkey = (
+            SELECT r.r_regionkey 
+            FROM region r 
+            WHERE r.r_name = rss.region_name 
+            LIMIT 1
+        ) 
+        LIMIT 1
+    )
+JOIN 
+    lineitem_revenue lr ON lr.l_orderkey = (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = cos.customer_id 
+        LIMIT 1
+    )
+ORDER BY 
+    rss.region_name, rss.nation_name, cos.total_spent DESC;

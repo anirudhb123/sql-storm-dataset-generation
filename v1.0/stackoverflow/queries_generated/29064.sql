@@ -1,0 +1,43 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%' 
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+
+HistoricalChanges AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12, 13) THEN 1 END) AS CloseOpenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEditCount 
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.AnswerCount,
+    ts.AcceptedAnswerCount,
+    ts.AvgUserReputation,
+    hc.CloseOpenCount,
+    hc.SuggestedEditCount
+FROM 
+    TagStats ts
+LEFT JOIN 
+    HistoricalChanges hc ON ts.TagName = (SELECT string_agg(tg.TagName, ', ') FROM Tags tg WHERE p.Tags LIKE '%' || tg.TagName || '%')
+ORDER BY 
+    ts.PostCount DESC, ts.AvgUserReputation DESC
+LIMIT 10;

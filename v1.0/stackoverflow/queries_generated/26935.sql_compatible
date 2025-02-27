@@ -1,0 +1,55 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><'))
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS AnswerCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        MAX(Posts.CreationDate) AS LastAnswered
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Posts.PostTypeId = 2 
+    GROUP BY 
+        Users.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagCounts.TagName,
+        TagCounts.PostCount,
+        TagCounts.PopularPostCount,
+        RANK() OVER (ORDER BY TagCounts.PopularPostCount DESC) AS PopularityRank
+    FROM 
+        TagCounts
+)
+SELECT 
+    TopTags.TagName,
+    TopTags.PostCount,
+    TopTags.PopularPostCount,
+    UserActivity.DisplayName,
+    UserActivity.AnswerCount,
+    UserActivity.Upvotes,
+    UserActivity.LastAnswered
+FROM 
+    TopTags
+JOIN 
+    UserActivity ON TopTags.TagName = ANY(string_to_array(UserActivity.DisplayName, ' ')) 
+WHERE 
+    TopTags.PopularityRank <= 10 
+ORDER BY 
+    TopTags.PopularityRank, UserActivity.Upvotes DESC;

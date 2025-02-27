@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        COALESCE(ws_bill_customer_sk, ss_customer_sk, cs_bill_customer_sk) AS customer_id,
+        COALESCE(ws_net_profit, ss_net_profit, cs_net_profit) AS net_profit,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(ws_bill_customer_sk, ss_customer_sk, cs_bill_customer_sk) 
+                           ORDER BY COALESCE(ws_net_profit, ss_net_profit, cs_net_profit) DESC) AS rn
+    FROM 
+        web_sales ws FULL OUTER JOIN 
+        store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+        FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL OR 
+        ss.ss_sold_date_sk IS NOT NULL OR 
+        cs.cs_sold_date_sk IS NOT NULL
+),
+AggregateSales AS (
+    SELECT 
+        customer_id,
+        SUM(net_profit) AS total_net_profit,
+        COUNT(*) AS sales_count,
+        CASE 
+            WHEN COUNT(*) > 5 THEN 'Frequent'
+            WHEN COUNT(*) BETWEEN 1 AND 5 THEN 'Occasional'
+            ELSE 'Rare'
+        END AS purchase_frequency
+    FROM 
+        RankedSales
+    WHERE 
+        rn = 1
+    GROUP BY 
+        customer_id
+)
+SELECT 
+    ca_city,
+    ca_state,
+    MAX(total_net_profit) AS max_net_profit,
+    AVG(total_net_profit) AS avg_net_profit,
+    STRING_AGG(CASE WHEN purchase_frequency = 'Frequent' THEN customer_id ELSE NULL END, ', ') AS frequent_customers
+FROM 
+    AggregateSales AS a
+JOIN 
+    customer AS c ON c.c_customer_sk = a.customer_id
+JOIN 
+    customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ca_country = 'USA'
+    AND (ca_state IS NOT NULL OR ca_city IS NOT NULL)
+GROUP BY 
+    ca_city, ca_state
+HAVING 
+    AVG(total_net_profit) > 1000
+ORDER BY 
+    MAX(total_net_profit) DESC, 
+    ca_city,
+    ca_state;

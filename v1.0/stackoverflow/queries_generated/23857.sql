@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS UserName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > DATEADD(YEAR, -1, CURRENT_TIMESTAMP) 
+        AND p.Score > 5
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostActivity AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.UserName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        CASE 
+            WHEN rp.rn = 1 THEN 'Latest Post'
+            WHEN rp.CommentCount > 10 THEN 'Popular Post'
+            ELSE 'Regular Post'
+        END AS PostClassification
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+)
+SELECT 
+    pa.Title,
+    pa.UserName,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.PostClassification,
+    JSON_AGG(
+        JSON_BUILD_OBJECT(
+            'PostId', c.PostId,
+            'Comment', c.Text,
+            'CreationDate', c.CreationDate,
+            'UserDisplayName', c.UserDisplayName
+        )
+    ) AS Comments
+FROM 
+    PostActivity pa
+LEFT JOIN 
+    Comments c ON pa.PostId = c.PostId
+GROUP BY 
+    pa.Title, pa.UserName, pa.CreationDate, pa.Score, pa.ViewCount, pa.UpVotes, pa.DownVotes, pa.PostClassification
+HAVING 
+    SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    pa.CreationDate DESC;

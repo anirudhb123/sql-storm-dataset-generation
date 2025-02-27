@@ -1,0 +1,75 @@
+WITH RankedLines AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_shippriority,
+        CASE WHEN o.o_orderstatus = 'F' THEN 'Completed' ELSE 'In Process' END AS order_status_desc
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+        AND o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+), PartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_mfgr,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice
+        END AS adjusted_retailprice
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 100
+), NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n 
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.total_price,
+    ps.adjusted_retailprice,
+    ns.n_name,
+    ns.supplier_count,
+    CASE 
+        WHEN ns.supplier_count IS NULL THEN 'No Suppliers'
+        ELSE 'Suppliers Available'
+    END AS supplier_availability
+FROM 
+    FilteredOrders o
+JOIN 
+    RankedLines r ON o.o_orderkey = r.l_orderkey
+JOIN 
+    PartSupplier ps ON r.rn = 1 AND ps.ps_availqty > (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+LEFT JOIN 
+    NationSupplier ns ON ns.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ps.ps_suppkey LIMIT 1)
+WHERE 
+    o.o_orderstatus IN ('O', 'F')
+ORDER BY 
+    o.o_orderkey ASC, supplier_availability DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid_inc_ship_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    UNION ALL
+    SELECT
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_net_paid_inc_ship_tax,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_sold_date_sk DESC) AS rn
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+)
+, customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_paid_inc_ship_tax) AS total_net_paid
+    FROM 
+        customer c
+    JOIN 
+        sales_data sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        sd.ws_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ROUND(SUM(cs.total_net_paid), 2), 0) AS total_spent,
+    COALESCE(MAX((SELECT MAX(d.d_year) FROM date_dim d WHERE d.d_date_sk = sd.ws_sold_date_sk)), 'N/A') AS last_purchase_year,
+    COUNT(DISTINCT cs.ws_item_sk) AS unique_items_purchased
+FROM 
+    customer c
+LEFT JOIN 
+    customer_sales cs ON c.c_customer_id = cs.c_customer_id
+LEFT JOIN 
+    web_sales ws ON cs.ws_item_sk = ws.ws_item_sk AND cs.c_customer_id = ws.ws_bill_customer_sk
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name
+HAVING 
+    total_spent > (SELECT AVG(total) FROM (SELECT SUM(rs.ws_net_paid_inc_ship_tax) AS total FROM web_sales rs GROUP BY rs.ws_bill_customer_sk) AS overall_avg)
+ORDER BY 
+    total_spent DESC;

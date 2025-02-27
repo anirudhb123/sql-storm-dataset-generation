@@ -1,0 +1,58 @@
+WITH MovieStats AS (
+    SELECT
+        mt.title AS movie_title,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        AVG(mv.production_year) AS avg_production_year,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM
+        aka_title mt
+    LEFT JOIN
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    WHERE
+        mi.info IS NOT NULL
+    GROUP BY
+        mt.id
+),
+CastRoles AS (
+    SELECT
+        mt.id AS movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        RANK() OVER (PARTITION BY mt.id ORDER BY cc.nr_order) AS role_rank
+    FROM
+        cast_info cc
+    JOIN
+        aka_name a ON cc.person_id = a.person_id
+    JOIN
+        role_type rt ON cc.role_id = rt.id
+    JOIN
+        aka_title mt ON cc.movie_id = mt.id
+)
+SELECT
+    ms.movie_title,
+    ms.cast_count,
+    ms.avg_production_year,
+    cr.actor_name,
+    cr.role_name,
+    cr.role_rank,
+    CASE
+        WHEN ms.cast_count > 3 THEN 'Large Cast'
+        WHEN ms.cast_count BETWEEN 2 AND 3 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM
+    MovieStats ms
+LEFT JOIN
+    CastRoles cr ON ms.movie_title = cr.movie_title
+WHERE
+    ms.avg_production_year > 2000
+ORDER BY
+    ms.avg_production_year DESC,
+    ms.cast_count DESC
+LIMIT 100;

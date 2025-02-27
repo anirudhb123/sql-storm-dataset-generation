@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.ANSWERS AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Consider only Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserID,
+        u.DisplayName,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserID,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.UserID,
+    us.DisplayName,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.TotalPosts,
+    ua.Upvotes,
+    ua.Downvotes,
+    rp.PostID,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate
+FROM 
+    UserStats us
+LEFT JOIN 
+    UserActivity ua ON us.UserID = ua.UserID
+LEFT JOIN 
+    RankedPosts rp ON us.UserID = rp.OwnerUserId AND rp.RN = 1
+WHERE 
+    us.TotalPosts > 5
+ORDER BY 
+    us.TotalPosts DESC, ua.Upvotes - ua.Downvotes DESC
+LIMIT 10;
+

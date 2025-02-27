@@ -1,0 +1,73 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputationCTE UR ON U.Reputation > UR.Reputation
+    WHERE 
+        UR.Level < 5
+),
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(VoteTypeId = 2, 0)) AS TotalUpvotes,
+        SUM(COALESCE(VoteTypeId = 3, 0)) AS TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B
+    WHERE 
+        B.Class = 1 
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.LastAccessDate,
+    PS.PostCount,
+    PS.Questions,
+    PS.Answers,
+    PS.TotalUpvotes,
+    PS.TotalDownvotes,
+    COALESCE(UB.BadgeNames, 'No Gold Badges') AS GoldBadges,
+    UR.Level AS ReputationLevel
+FROM 
+    Users U
+LEFT JOIN 
+    PostStatistics PS ON U.Id = PS.OwnerUserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    UserReputationCTE UR ON U.Id = UR.UserId
+WHERE 
+    U.Reputation > 500
+ORDER BY 
+    U.Reputation DESC
+LIMIT 50;

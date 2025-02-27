@@ -1,0 +1,64 @@
+WITH RankedSales AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS rank_sales
+    FROM 
+        lineitem
+    GROUP BY 
+        l_orderkey
+), 
+SupplierParts AS (
+    SELECT 
+        ps.partkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No account balance'
+            WHEN s.s_acctbal < 0 THEN 'Overdrawn'
+            ELSE 'Good standing'
+        END AS account_status
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        COALESCE(o.o_comment, 'Unspecified') AS order_comment
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        MONTH(o.o_orderdate) = 12 AND 
+        YEAR(o.o_orderdate) = 2022
+)
+SELECT 
+    ro.l_orderkey,
+    ro.total_sales,
+    sp.s_name,
+    sp.account_status,
+    fo.o_totalprice,
+    fo.order_comment,
+    CASE 
+        WHEN fo.order_comment LIKE '%urgent%' THEN 'Prioritize shipment' 
+        ELSE 'Regular shipment' 
+    END AS shipment_priority
+FROM 
+    RankedSales ro
+LEFT JOIN 
+    lineitem li ON ro.l_orderkey = li.l_orderkey
+INNER JOIN 
+    SupplierParts sp ON li.l_partkey = sp.partkey
+FULL OUTER JOIN 
+    FilteredOrders fo ON fo.o_orderkey = ro.l_orderkey
+WHERE 
+    ro.rank_sales = 1 
+    AND (sp.s_acctbal > 1000 OR sp.account_status = 'No account balance')
+ORDER BY 
+    ro.total_sales DESC, fo.o_totalprice ASC
+LIMIT 100;

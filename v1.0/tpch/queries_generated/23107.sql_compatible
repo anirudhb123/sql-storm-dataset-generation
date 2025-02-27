@@ -1,0 +1,70 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation,
+        r.r_name AS region,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        n.n_name, r.r_name
+),
+TopNations AS (
+    SELECT 
+        nation, region, total_sales, order_count
+    FROM 
+        RegionalSales
+    WHERE 
+        sales_rank <= 3
+),
+AverageSales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales
+    FROM 
+        TopNations
+),
+SupplierSales AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        nt.nation,
+        COUNT(DISTINCT l.l_orderkey) AS supplier_order_count
+    FROM 
+        lineitem l
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        TopNations nt ON s.s_nationkey = nt.nation
+    GROUP BY 
+        s.s_name, nt.nation
+)
+SELECT 
+    nt.nation,
+    nt.region,
+    nt.total_sales,
+    nt.order_count,
+    ss.supplier_name,
+    ss.supplier_order_count,
+    CASE 
+        WHEN nt.total_sales > (SELECT avg_sales FROM AverageSales) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS sales_comparison
+FROM 
+    TopNations nt
+LEFT JOIN 
+    SupplierSales ss ON nt.nation = ss.nation
+ORDER BY 
+    nt.region, nt.total_sales DESC;

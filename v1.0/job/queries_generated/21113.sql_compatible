@@ -1,0 +1,89 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id) AS year_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorCompanyCTE AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY mc.movie_id) AS company_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+TheaterAwardsCTE AS (
+    SELECT 
+        mt.title,
+        COUNT(DISTINCT a.actor_id) AS actor_count,
+        SUM(CASE WHEN c.kind = 'Best Picture' THEN 1 ELSE 0 END) AS awards_won,
+        mt.id AS movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = 1
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    GROUP BY 
+        mt.id, mt.title
+),
+FinalActors AS (
+    SELECT 
+        ac.actor_name,
+        ac.movie_id,
+        ac.company_name,
+        ac.company_type,
+        ma.awards_won,
+        ma.actor_count,
+        CASE 
+            WHEN ac.company_rank IS NULL THEN 'Unknown Company'
+            ELSE ac.company_type
+        END AS final_company_type
+    FROM 
+        ActorCompanyCTE ac
+    LEFT JOIN 
+        TheaterAwardsCTE ma ON ac.movie_id = ma.movie_id
+    WHERE 
+        ac.actor_name IS NOT NULL
+    AND 
+        (ac.company_name IS NOT NULL OR ac.company_type IS NOT NULL)
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY actor_name) AS rank,
+    actor_name,
+    movie_id,
+    COALESCE(company_name, 'No Company Info') AS company_name_info,
+    MAX(final_company_type) AS final_company_type,
+    MAX(awards_won) AS total_awards,
+    MAX(actor_count) AS total_actors
+FROM 
+    FinalActors
+GROUP BY 
+    actor_name, movie_id
+ORDER BY 
+    total_awards DESC, actor_name ASC;

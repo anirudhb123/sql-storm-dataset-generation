@@ -1,0 +1,67 @@
+
+WITH RECURSIVE income_brackets AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        CASE 
+            WHEN ib_upper_bound IS NULL THEN 'Unknown'
+            ELSE CONCAT(ib_lower_bound, ' - ', ib_upper_bound)
+        END AS income_range
+    FROM income_band
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cd.gender = 'M' THEN c.c_customer_id END) AS male_count,
+        COUNT(DISTINCT CASE WHEN cd.gender = 'F' THEN c.c_customer_id END) AS female_count,
+        SUM(COALESCE(cd.cd_purchase_estimate, 0)) AS total_purchase_estimate,
+        MAX(cd.cd_credit_rating) AS highest_credit_rating
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY c.c_customer_sk
+),
+sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue
+    FROM web_sales ws
+    GROUP BY ws.web_site_id
+),
+return_data AS (
+    SELECT 
+        sr.store_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.sr_return_quantity) AS total_returned_quantity
+    FROM store_returns sr
+    GROUP BY sr.store_sk
+),
+final_result AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.male_count,
+        cs.female_count,
+        cs.total_purchase_estimate,
+        cs.highest_credit_rating,
+        sd.total_orders,
+        sd.total_revenue,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN cs.total_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cs.total_purchase_estimate BETWEEN 501 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value,
+        ib.income_range
+    FROM customer_summary cs
+    LEFT JOIN sales_data sd ON cs.c_customer_sk = CAST(sd.web_site_id AS INTEGER)
+    LEFT JOIN return_data rd ON cs.c_customer_sk = rd.store_sk
+    LEFT JOIN income_brackets ib ON cs.total_purchase_estimate BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+)
+SELECT 
+    *
+FROM final_result
+WHERE (total_orders > 5 OR total_returns > 2)
+  AND (customer_value = 'High Value' OR highest_credit_rating = 'Excellent')
+ORDER BY total_revenue DESC, total_purchase_estimate ASC
+LIMIT 50;

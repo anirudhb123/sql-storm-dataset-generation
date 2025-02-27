@@ -1,0 +1,46 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, 
+           CAST(i_item_desc AS VARCHAR(1000)) AS full_description
+    FROM item
+    WHERE i_item_sk IS NOT NULL
+    UNION ALL
+    SELECT ih.i_item_sk, ih.i_item_id, ih.i_item_desc, ih.i_current_price, 
+           CAST(concat(ih.full_description, ' -> ', i.i_item_desc) AS VARCHAR(1000))
+    FROM ItemHierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk AND ih.i_item_sk <> i.i_item_sk
+), CustomerReturns AS (
+    SELECT sr_customer_sk, SUM(sr_return_amt_inc_tax) AS total_return
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), WebReturns AS (
+    SELECT wr_returning_customer_sk, SUM(wr_return_amt_inc_tax) AS total_web_return
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+), ReturnStats AS (
+    SELECT c.c_customer_sk, 
+           COALESCE(cr.total_return, 0) AS store_return,
+           COALESCE(wr.total_web_return, 0) AS web_return,
+           (COALESCE(cr.total_return, 0) + COALESCE(wr.total_web_return, 0)) AS total_return
+    FROM customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN WebReturns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    rs.total_return,
+    COUNT(DISTINCT ihi.i_item_sk) AS related_items_count,
+    SUM(ihi.i_current_price) AS total_price_of_related_items
+FROM ReturnStats rs
+JOIN customer ci ON rs.c_customer_sk = ci.c_customer_sk
+LEFT JOIN ItemHierarchy ihi ON ihi.i_item_sk IN (
+    SELECT cs_item_sk
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 2450000 AND 2451000
+      AND cs_bill_customer_sk = rs.c_customer_sk
+)
+WHERE rs.total_return > 0
+GROUP BY ci.c_customer_id, ci.c_first_name, ci.c_last_name, rs.total_return
+ORDER BY total_return DESC, related_items_count DESC;

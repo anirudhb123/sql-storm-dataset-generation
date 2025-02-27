@@ -1,0 +1,72 @@
+
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id IN (SELECT unnest(string_to_array(P.Tags, ','))) 
+    WHERE 
+        P.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 5
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        U.DisplayName AS ClosedBy
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    JOIN 
+        Users U ON PH.UserId = U.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.TotalScore,
+    U.Upvotes,
+    U.Downvotes,
+    T.TagName,
+    T.TotalViews,
+    CP.Title AS ClosedPostTitle,
+    CP.ClosedDate,
+    CP.ClosedBy
+FROM 
+    UserScores U
+CROSS JOIN 
+    TopTags T
+LEFT JOIN 
+    ClosedPosts CP ON U.UserId = CP.PostId
+WHERE 
+    U.Upvotes > U.Downvotes
+ORDER BY 
+    U.TotalScore DESC,
+    T.TotalViews DESC;

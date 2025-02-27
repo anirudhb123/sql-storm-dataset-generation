@@ -1,0 +1,57 @@
+
+WITH AddressProcessing AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        INITCAP(ca_city) AS formatted_city,
+        CONCAT(ca_zip, ' ', ca_state) AS zip_state,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM 
+        customer_address
+),
+DemographicsProcessing AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(c_demo_sk) AS customer_count,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate,
+        MIN(cd_dep_count) AS min_dep_count,
+        SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+        SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_demo_sk
+),
+StringBenchmark AS (
+    SELECT 
+        a.full_address,
+        a.formatted_city,
+        a.zip_state,
+        a.address_length,
+        d.customer_count,
+        d.max_purchase_estimate,
+        d.min_dep_count,
+        d.male_count,
+        d.female_count
+    FROM 
+        AddressProcessing a
+    JOIN 
+        DemographicsProcessing d ON d.cd_demo_sk = a.ca_address_sk
+)
+SELECT 
+    full_address,
+    formatted_city,
+    zip_state,
+    address_length,
+    customer_count,
+    max_purchase_estimate,
+    min_dep_count,
+    male_count,
+    female_count
+FROM 
+    StringBenchmark
+WHERE 
+    address_length > 50
+ORDER BY 
+    address_length DESC, customer_count DESC
+LIMIT 100;

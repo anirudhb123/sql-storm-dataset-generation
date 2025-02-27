@@ -1,0 +1,37 @@
+
+WITH StringBenchmark AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUBSTRING(c.c_email_address, 1, 20) AS email_substring,
+        REPLACE(c.c_email_address, '@', '[at]') AS email_with_substitution,
+        LENGTH(c.c_email_address) AS email_length,
+        LOWER(c.c_first_name) AS lower_first_name,
+        UPPER(c.c_last_name) AS upper_last_name,
+        TRIM(c.ca_address_id) AS trimmed_address_id,
+        LPAD(CAST(c.ca_address_sk AS CHAR), 10, '0') AS padded_address_sk,
+        REGEXP_REPLACE(c.c_first_name, '[aeiou]', '') AS consonants_in_first_name
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y' 
+        AND LENGTH(c.c_email_address) > 5
+)
+SELECT 
+    COUNT(*) AS total_records,
+    MIN(email_length) AS min_email_length,
+    MAX(email_length) AS max_email_length,
+    AVG(email_length) AS avg_email_length,
+    STRING_AGG(DISTINCT full_name, ', ') AS sample_full_names,
+    padded_address_sk
+FROM 
+    StringBenchmark
+WHERE 
+    CHAR_LENGTH(lower_first_name) BETWEEN 3 AND 15
+GROUP BY 
+    padded_address_sk
+ORDER BY 
+    total_records DESC
+LIMIT 10;

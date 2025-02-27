@@ -1,0 +1,74 @@
+
+WITH AddressCounts AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        CONCAT(ca_city, ', ', ca_state) AS city_state
+    FROM 
+        customer_address
+    WHERE 
+        ca_country = 'USA'
+    GROUP BY 
+        ca_state, ca_city
+),
+FormattedData AS (
+    SELECT 
+        city_state,
+        address_count,
+        CASE 
+            WHEN address_count > 1000 THEN 'High'
+            WHEN address_count BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS address_group
+    FROM 
+        AddressCounts
+),
+DemographicData AS (
+    SELECT 
+        cd.gender,
+        fd.city_state,
+        fd.address_count,
+        fd.address_group
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        FormattedData fd ON c.c_current_addr_sk = (
+            SELECT 
+                ca_address_sk 
+            FROM 
+                customer_address 
+            WHERE 
+                CONCAT(ca_city, ', ', ca_state) = fd.city_state 
+            LIMIT 1
+        )
+)
+SELECT 
+    fd.city_state,
+    fd.address_count,
+    fd.address_group,
+    COUNT(DISTINCT cd.cd_demo_sk) AS demographic_count,
+    GROUP_CONCAT(DISTINCT cd.cd_gender) AS genders
+FROM 
+    DemographicData fd
+JOIN 
+    customer_demographics cd ON cd.cd_demo_sk IN (
+        SELECT 
+            DISTINCT cd_demo_sk 
+        FROM 
+            customer c
+        WHERE 
+            c.c_current_addr_sk IN (
+                SELECT 
+                    ca_address_sk 
+                FROM 
+                    customer_address 
+                WHERE 
+                    CONCAT(ca_city, ', ', ca_state) = fd.city_state
+            )
+    )
+GROUP BY 
+    fd.city_state, fd.address_count, fd.address_group
+ORDER BY 
+    fd.address_count DESC;

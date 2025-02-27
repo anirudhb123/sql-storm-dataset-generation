@@ -1,0 +1,81 @@
+WITH TagStats AS (
+    SELECT 
+        TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        MIN(p.CreationDate) AS FirstPostDate,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersProvided,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(a.Score, 0)) AS TotalAnswerScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    GROUP BY 
+        u.DisplayName
+),
+RecentPostChanges AS (
+    SELECT
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text
+    FROM
+        PostHistory ph
+    WHERE
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+        AND ph.PostHistoryTypeId IN (10, 11, 12, 13, 14)
+),
+BenchmarkResults AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        ts.TotalViews,
+        ts.AverageScore,
+        ua.DisplayName,
+        ua.QuestionsAsked,
+        ua.AnswersProvided,
+        ua.TotalViews AS UserTotalViews,
+        ua.TotalAnswerScore,
+        rpc.UserDisplayName AS RecentChangeBy,
+        rpc.CreationDate AS ChangeDate
+    FROM 
+        TagStats ts
+    LEFT JOIN 
+        UserActivity ua ON ua.TotalViews >= 100
+    LEFT JOIN 
+        RecentPostChanges rpc ON ts.PostCount > 10
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalViews,
+    AverageScore,
+    DisplayName AS ActiveUser,
+    QuestionsAsked,
+    AnswersProvided,
+    UserTotalViews,
+    TotalAnswerScore,
+    RecentChangeBy,
+    ChangeDate
+FROM 
+    BenchmarkResults
+ORDER BY 
+    TotalViews DESC, PostCount DESC;

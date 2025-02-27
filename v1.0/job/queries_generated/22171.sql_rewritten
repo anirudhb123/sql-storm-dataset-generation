@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorRoleCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.person_id
+),
+
+SpecialMovies AS (
+    SELECT 
+        m.title, 
+        m.production_year,
+        a.name AS actor_name,
+        AC.movie_count,
+        AC.roles
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        aka_name a ON a.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.title_id)
+    LEFT JOIN 
+        ActorRoleCounts AC ON AC.person_id = a.person_id
+    WHERE 
+        m.total_movies > 1 AND (m.production_year % 2 = 0 OR AC.roles LIKE '%Director%')
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    sm.title,
+    sm.production_year,
+    COALESCE(sm.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(sm.movie_count, 0) AS movie_count,
+    COALESCE(sm.roles, 'No Role Assigned') AS roles,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    CASE
+        WHEN sm.production_year IS NULL THEN 'Year Unknown'
+        WHEN sm.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS classification,
+    ROW_NUMBER() OVER (ORDER BY sm.production_year DESC, sm.title) AS rank
+FROM 
+    SpecialMovies sm
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = sm.title_id
+WHERE 
+    sm.actor_name IS NOT NULL OR mk.keywords IS NOT NULL
+ORDER BY 
+    rank;

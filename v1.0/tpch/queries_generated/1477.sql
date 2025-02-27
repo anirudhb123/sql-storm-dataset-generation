@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 3000 AND sh.level < 5
+),
+PartsWithMargin AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           (p.p_retailprice - AVG(ps.ps_supplycost)) AS profit_margin
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       SUM(wo.total_spent) AS total_spent_in_region,
+       COUNT(DISTINCT p.p_partkey) AS unique_parts_count,
+       AVG(pm.profit_margin) AS average_profit_margin
+FROM nation n
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN CustomerOrders wo ON n.n_nationkey = wo.order_count
+LEFT JOIN PartsWithMargin pm ON pm.p_partkey = (SELECT MAX(p2.p_partkey)
+                                                  FROM part p2 
+                                                  WHERE p2.p_mfgr NOT LIKE 'A%')
+WHERE n.r_regionkey IS NULL OR n.r_comment IS NOT NULL
+GROUP BY n.n_name
+HAVING total_spent_in_region > 10000
+ORDER BY supplier_count DESC, average_profit_margin DESC;

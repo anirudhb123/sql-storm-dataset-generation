@@ -1,0 +1,61 @@
+WITH RECURSIVE supplier_rank AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY CASE WHEN s.s_acctbal IS NULL THEN 'Unknown' ELSE 'Known' END ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+part_availability AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+filtered_supply AS (
+    SELECT sr.s_suppkey, sr.s_name, 
+           CASE 
+               WHEN sr.rank <= 5 THEN 'Top Supplier'
+               ELSE 'Other Supplier' 
+           END AS supplier_category
+    FROM supplier_rank sr
+    WHERE sr.s_acctbal IS NOT NULL
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           RANK() OVER (ORDER BY c.total_spent DESC) AS customer_rank
+    FROM customer_orders c
+    WHERE c.order_count > 0
+),
+final_result AS (
+    SELECT pc.p_partkey, pc.p_name, 
+           fu.s_name AS supplier_name, cc.c_name AS customer_name,
+           pc.total_available, cc.total_spent
+    FROM part_availability pc
+    LEFT JOIN filtered_supply fu ON pc.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_availqty > 0 AND 
+              fu.s_suppkey = ps.ps_suppkey
+    )
+    LEFT JOIN top_customers cc ON cc.c_acctbal IS NOT NULL 
+    WHERE pc.total_available > 0
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    COALESCE(s.supplier_name, 'No Supplier') AS supplier_name, 
+    COALESCE(c.customer_name, 'No Customer') AS customer_name,
+    ROUND(AVG(p.total_available * 1.1), 2) AS adjusted_availability,
+    MIN(CASE WHEN p.total_available > 10 THEN 'Sufficient' ELSE 'Low Stock' END) AS stock_status
+FROM part p
+LEFT JOIN final_result fr ON p.p_partkey = fr.p_partkey
+GROUP BY p.p_partkey, p.p_name, s.supplier_name, c.customer_name
+ORDER BY adjusted_availability DESC, p.p_name COLLATE SQL_Latin1_General_CP1_CI_AS;

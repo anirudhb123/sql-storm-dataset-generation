@@ -1,0 +1,82 @@
+
+WITH CTE_UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+CTE_PostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+CTE_Comments AS (
+    SELECT 
+        C.UserId,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Comments C
+    GROUP BY 
+        C.UserId
+),
+CTE_FailedConnections AS (
+    SELECT 
+        C.UserId,
+        COUNT(P.Id) AS FailedLinkCount
+    FROM 
+        Comments C
+    LEFT JOIN 
+        Posts P ON C.PostId = P.Id
+    WHERE 
+        P.Id IS NULL 
+    GROUP BY 
+        C.UserId
+)
+SELECT 
+    U.DisplayName,
+    US.Reputation,
+    COALESCE(US.Views, 0) AS Views,
+    COALESCE(US.BadgeCount, 0) AS BadgeCount,
+    COALESCE(PA.TotalPosts, 0) AS TotalPosts,
+    COALESCE(PA.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(PA.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(PA.TotalUpvotes, 0) AS TotalUpvotes,
+    COALESCE(PA.TotalDownvotes, 0) AS TotalDownvotes,
+    COALESCE(CM.TotalComments, 0) AS TotalComments,
+    COALESCE(FC.FailedLinkCount, 0) AS FailedLinkCount,
+    CASE WHEN COALESCE(PA.TotalPosts, 0) = 0 THEN 'No activity' 
+         ELSE CASE WHEN US.Reputation > 500 THEN 'High Contributor' ELSE 'Regular Contributor' END 
+    END AS ContributorType,
+    CASE WHEN COALESCE(FC.FailedLinkCount, 0) > 0 THEN 'Needs Review' ELSE 'All Good' END AS LinkStatus
+FROM 
+    CTE_UserStats US
+LEFT JOIN 
+    CTE_PostActivity PA ON US.UserId = PA.OwnerUserId
+LEFT JOIN 
+    CTE_Comments CM ON US.UserId = CM.UserId
+LEFT JOIN 
+    CTE_FailedConnections FC ON US.UserId = FC.UserId
+ORDER BY 
+    US.UserRank ASC, 
+    US.Reputation DESC;

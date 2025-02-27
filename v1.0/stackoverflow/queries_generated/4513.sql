@@ -1,0 +1,54 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rnk
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT * 
+    FROM UserActivity
+    WHERE Rnk <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(ph.CreatedDate, 'No History') AS LastEditDate,
+        P.ViewCount,
+        P.AnswerCount,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes
+    FROM Posts P
+    LEFT JOIN PostHistory ph ON P.Id = ph.PostId AND ph.PostHistoryTypeId = 4
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, ph.CreatedDate
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.AnswerCount,
+    (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = U.UserId) AS TotalPosts,
+    P.Title,
+    P.CreationDate AS PostCreationDate,
+    P.Score,
+    P.LastEditDate,
+    P.ViewCount,
+    P.TotalComments,
+    P.TotalVotes
+FROM TopUsers U
+INNER JOIN PostDetails P ON U.UserId = P.UserId 
+WHERE U.QuestionCount > 5
+ORDER BY U.Reputation DESC, P.Score DESC;

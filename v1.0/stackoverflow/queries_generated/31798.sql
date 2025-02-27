@@ -1,0 +1,78 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT
+        Id,
+        TagName,
+        Count,
+        WikiPostId,
+        0 AS Level
+    FROM 
+        Tags 
+    WHERE 
+        IsRequired = 1
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.WikiPostId,
+        r.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostOwnershipInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        COALESCE(p.FavoriteCount, 0) AS FavoriteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    t.TagName,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    poi.OwnerName,
+    poi.OwnerReputation,
+    poi.AnswerCount,
+    poi.CommentCount,
+    poi.FavoriteCount,
+    ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.CreationDate DESC) AS TagPostRank
+FROM 
+    Posts p
+JOIN 
+    RecursiveTagHierarchy t ON p.Tags LIKE '%' || t.TagName || '%'
+JOIN 
+    PostVoteSummary pvs ON p.Id = pvs.PostId
+JOIN 
+    PostOwnershipInfo poi ON p.Id = poi.PostId
+WHERE 
+    p.Score > 0 
+    AND p.CreationDate >= NOW() - INTERVAL '1 year'
+    AND (poi.OwnerReputation >= 100 OR poi.OwnerReputation IS NULL)
+ORDER BY 
+    t.TagName, p.CreationDate DESC;

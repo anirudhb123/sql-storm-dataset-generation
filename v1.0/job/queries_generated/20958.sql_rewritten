@@ -1,0 +1,74 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+augmented_cast AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE NULL END) AS avg_order
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+
+filtered_movies AS (
+    SELECT 
+        rm.actor_name,
+        rm.movie_title,
+        rm.production_year
+    FROM 
+        ranked_movies rm
+    JOIN 
+        augmented_cast ac ON rm.rank <= 3 AND ac.movie_id IN (
+            SELECT 
+                ci.movie_id 
+            FROM 
+                cast_info ci 
+            WHERE 
+                ci.role_id IN (
+                    SELECT 
+                        id 
+                    FROM 
+                        role_type 
+                    WHERE 
+                        role LIKE 'Lead%' 
+                        OR role IS NULL
+                )
+        )
+)
+
+SELECT 
+    f.actor_name,
+    f.movie_title,
+    f.production_year,
+    coalesce((SELECT COUNT(*) 
+               FROM complete_cast cc 
+               WHERE cc.movie_id = f.movie_id), 0) AS complete_cast_count,
+    EXISTS (SELECT 1 
+            FROM movie_info mi 
+            WHERE mi.movie_id = f.movie_id AND mi.info_type_id = 1 
+              AND mi.info IS NULL) AS has_null_info
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    movie_companies mc ON f.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+WHERE 
+    f.production_year > 2000
+ORDER BY 
+    f.production_year DESC,
+    f.actor_name;

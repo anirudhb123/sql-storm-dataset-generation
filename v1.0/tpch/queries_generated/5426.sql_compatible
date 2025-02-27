@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS rank 
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost 
+    FROM 
+        partsupp ps 
+    GROUP BY 
+        ps.ps_partkey 
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    r.region_name, 
+    s.s_name AS supplier_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    HighValueParts hvp ON l.l_partkey = hvp.ps_partkey
+JOIN 
+    partsupp ps ON hvp.ps_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    part p ON l.l_partkey = p.p_partkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    AND s.s_acctbal > 10000
+    AND hvp.total_supply_cost IS NOT NULL
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    r.region_name, 
+    s.s_name
+ORDER BY 
+    total_revenue DESC, 
+    r.region_name, 
+    s.s_name;

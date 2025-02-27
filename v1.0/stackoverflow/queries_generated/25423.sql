@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '1 year') 
+        AND p.ViewCount > 100
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount, pt.Name
+),
+PopularPosts AS (
+    SELECT 
+        rp.*, 
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 1)) AS TotalUpvotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS TotalDownvotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Body,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    pp.OwnerDisplayName,
+    pp.OwnerReputation,
+    pp.AnswerCount,
+    pp.CommentCount,
+    pp.FavoriteCount,
+    pp.Tags,
+    pp.TotalUpvotes,
+    pp.TotalDownvotes,
+    ((pp.TotalUpvotes - pp.TotalDownvotes)::float / NULLIF(pp.TotalUpvotes + pp.TotalDownvotes, 0)) AS UpvoteRatio
+FROM 
+    PopularPosts pp
+ORDER BY 
+    pp.Score DESC;

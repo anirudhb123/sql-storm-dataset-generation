@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('P', 'O') AND o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate = o.o_orderdate
+    )
+), SupplierStats AS (
+    SELECT ps_partkey, COUNT(DISTINCT ps_suppkey) AS num_suppliers,
+           SUM(ps_supplycost) OVER (PARTITION BY ps_partkey) AS total_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey
+)
+SELECT p.p_name, 
+       COALESCE(MAX(ss.num_suppliers), 0) AS supplier_count,
+       COALESCE(AVG(ros.o_totalprice), 0) AS avg_order_price,
+       COUNT(DISTINCT n.n_name) FILTER (WHERE n.n_regionkey IS NOT NULL) AS nation_count,
+       p.p_comment || ' - ' || COALESCE(CONCAT('Available in ', STRING_AGG(DISTINCT r.r_name, ', ')), 'No regions') AS region_availability
+FROM part p
+LEFT JOIN SupplierStats ss ON ss.ps_partkey = p.p_partkey
+LEFT JOIN RankedOrders ros ON ros.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l 
+    WHERE l.l_partkey = p.p_partkey AND l.l_discount < 0.05
+)
+LEFT JOIN supplier s ON s.s_suppkey = ss.ps_suppkey
+LEFT JOIN nation n ON n.n_nationkey = s.s_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE p.p_size BETWEEN 1 AND 10
+  AND (p.p_container IS NULL OR p.p_container LIKE '%Box%')
+GROUP BY p.p_name, p.p_comment
+HAVING MAX(ss.total_supplycost) IS NOT NULL
+   OR COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY supplier_count DESC, avg_order_price ASC;

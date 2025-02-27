@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+  
+    UNION ALL
+  
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        at.title, 
+        at.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    ak.name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(mh.level) AS avg_hierarchy_level,
+    STRING_AGG(DISTINCT nk.keyword, ', ') AS keywords,
+    CASE 
+        WHEN AVG(COALESCE(mi.info, '0')) = 0 THEN 'No Info'
+        ELSE 'Has Info'
+    END AS info_status
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON c.movie_id = mi.movie_id AND mi.note IS NULL
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword nk ON mk.keyword_id = nk.id
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND ak.name NOT LIKE '%[0-9]%' -- Avoid names with numbers
+    AND (c.nr_order IS NULL OR c.nr_order < 10) -- Filter by order
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 2
+    AND (avg_hierarchy_level > 1 OR info_status = 'Has Info')
+ORDER BY 
+    movie_count DESC, 
+    ak.name ASC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
+This query implements complex constructs including a recursive CTE to create a movie hierarchy, utilizes aggregate functions and string functions to return a count of movies, average levels, and keywords associated with actors. It also incorporates window functions and various JOINs and filtering logic to create an elaborate assessment of relationships in the schema, showcasing interesting SQL semantics and predicates.

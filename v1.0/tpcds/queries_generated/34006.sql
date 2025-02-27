@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                            AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_spent,
+        AVG(ws_net_paid) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+item_last_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        MAX(sales_cte.ws_sold_date_sk) AS last_sale_date 
+    FROM 
+        item i
+    JOIN sales_cte ON i.i_item_sk = sales_cte.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_item_id
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    SUM(cs.cs_net_paid) AS total_catalog_sales,
+    SUM(ws.ws_net_paid) AS total_web_sales,
+    SUM(ss.ss_net_paid) AS total_store_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    item.i_item_id,
+    item_last_sales.last_sale_date,
+    cust_sum.total_orders AS customer_order_count,
+    cust_sum.total_spent AS customer_total_spent,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY total_web_sales DESC) AS order_rank
+FROM 
+    customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN item_last_sales item_last_sales ON ws.ws_item_sk = item_last_sales.i_item_sk
+LEFT JOIN customer_summary cust_sum ON c.c_customer_sk = cust_sum.c_customer_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 2000
+    AND (ws.ws_net_paid > 100 OR cs.cs_net_paid > 100 OR ss.ss_net_paid > 100)
+GROUP BY 
+    c.c_first_name, c.c_last_name, item.i_item_id, item_last_sales.last_sale_date, cust_sum.total_orders, cust_sum.total_spent
+HAVING 
+    SUM(ws.ws_net_paid) > 1000
+ORDER BY 
+    total_web_sales DESC, c.c_first_name;

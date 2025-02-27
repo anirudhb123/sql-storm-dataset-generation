@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+ActorDetails AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.person_id, ak.name
+),
+TopActors AS (
+    SELECT 
+        ad.person_id, 
+        ad.name, 
+        ad.movies_count
+    FROM 
+        ActorDetails ad
+    WHERE 
+        ad.movies_count >= 3
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(ta.name, 'Unknown Actor') AS top_actor,
+    rm.actor_count,
+    cs.company_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TopActors ta ON ta.movies_count = rm.actor_count
+LEFT JOIN 
+    CompanyStats cs ON rm.title = cs.movie_id
+WHERE 
+    rm.rank = 1
+ORDER BY 
+    rm.production_year DESC, 
+    rm.actor_count DESC
+LIMIT 10;

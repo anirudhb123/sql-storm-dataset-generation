@@ -1,0 +1,63 @@
+WITH RecursiveTitleHierarchy AS (
+    SELECT t.id AS title_id, t.title, t.production_year, t.episode_of_id,
+           COALESCE(NULLIF(t.season_nr, 0), NULL) AS season, 
+           COALESCE(NULLIF(t.episode_nr, 0), NULL) AS episode,
+           1 AS level
+    FROM aka_title t
+    WHERE t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT t.id AS title_id, t.title, t.production_year, t.episode_of_id,
+           COALESCE(NULLIF(t.season_nr, 0), NULL) AS season, 
+           COALESCE(NULLIF(t.episode_nr, 0), NULL) AS episode,
+           level + 1
+    FROM aka_title t
+    INNER JOIN RecursiveTitleHierarchy rth ON t.episode_of_id = rth.title_id
+),
+
+AggregatedCastInfo AS (
+    SELECT ci.movie_id,
+           COUNT(DISTINCT ci.person_id) AS actor_count,
+           STRING_AGG(DISTINCT a.name, ', ' ORDER BY a.name) AS actor_names,
+           MAX(CASE WHEN ci.nr_order = 1 THEN a.name END) AS first_actor
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY ci.movie_id
+),
+
+FilteredMovies AS (
+    SELECT DISTINCT at.id AS movie_id, at.title, 
+           COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No keywords') AS keywords,
+           COALESCE(STRING_AGG(DISTINCT c.name, ', '), 'No companies') AS companies,
+           CASE WHEN at.production_year < 2000 THEN 'Old Movie' ELSE 'Recent Movie' END AS movie_age
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    WHERE at.production_year IS NOT NULL
+    GROUP BY at.id, at.title, at.production_year
+)
+
+SELECT f.title, 
+       f.production_year, 
+       f.keywords, 
+       f.companies, 
+       f.movie_age, 
+       a.actor_count, 
+       a.actor_names,
+       CASE 
+           WHEN f.movie_age = 'Old Movie' AND a.actor_count > 5 THEN 'Classic Ensemble'
+           WHEN f.movie_age = 'Recent Movie' AND a.actor_count BETWEEN 1 AND 5 THEN 'Emerging Talent'
+           ELSE 'Mixed Bag'
+       END AS classification,
+       ROW_NUMBER() OVER (PARTITION BY f.movie_age ORDER BY f.production_year DESC) AS rank_within_category,
+       ROW_NUMBER() OVER (ORDER BY f.production_year DESC) AS overall_rank
+FROM FilteredMovies f
+LEFT JOIN AggregatedCastInfo a ON f.movie_id = a.movie_id
+LEFT JOIN RecursiveTitleHierarchy rth ON f.movie_id = rth.title_id
+WHERE f.production_year BETWEEN 1980 AND 2023
+  AND (rth.level IS NULL OR rth.level <= 3)
+  AND (f.keywords IS NOT NULL OR f.companies IS NOT NULL)
+ORDER BY f.production_year DESC, a.actor_count DESC;

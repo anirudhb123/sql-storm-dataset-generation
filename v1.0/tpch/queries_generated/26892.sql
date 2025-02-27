@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    MAX(CHAR_LENGTH(p.p_comment)) AS max_comment_length,
+    SUBSTRING_INDEX(p.p_name, ' ', 1) AS first_word_of_product
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name LIKE '%Asia%'
+    AND p.p_size BETWEEN 1 AND 50
+GROUP BY 
+    p.p_name
+HAVING 
+    supplier_count > 5
+ORDER BY 
+    total_available_quantity DESC
+LIMIT 10;

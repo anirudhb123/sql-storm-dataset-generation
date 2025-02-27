@@ -1,0 +1,66 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_class_id
+    FROM item
+    WHERE i_current_price IS NOT NULL
+),
+RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+NullGrabber AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) as address_count
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    GROUP BY ca_state
+    HAVING COUNT(DISTINCT ca_address_id) <= (SELECT AVG(address_count) FROM (
+        SELECT COUNT(DISTINCT ca_address_id) as address_count
+        FROM customer_address
+        GROUP BY ca_state
+    ) AS state_counts)
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS net_profit,
+    CASE 
+        WHEN SUM(ws.ws_net_profit) IS NULL THEN 'No Sales'
+        WHEN SUM(ws.ws_net_profit) > 1000 THEN 'High Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    (SELECT AVG(total_profit) FROM RankedSales) as average_profit,
+    (SELECT COUNT(DISTINCT c.c_customer_id) 
+     FROM customer c 
+     JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+     WHERE cd.cd_gender IS NOT NULL 
+       AND cd.cd_marital_status IN ('S', 'M')
+       AND EXISTS (
+           SELECT 1 
+           FROM store s 
+           WHERE s.s_store_id = 
+                 (CASE WHEN (SELECT COUNT(*) FROM store) % 2 = 0 
+                 THEN (SELECT MIN(s2.s_store_id) FROM store s2) 
+                 ELSE (SELECT MAX(s2.s_store_id) FROM store s2) END)
+        )
+    ) AS customer_count,
+    nh.address_count
+FROM ItemHierarchy i
+LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+FULL OUTER JOIN NullGrabber nh ON nh.ca_state = (
+    SELECT ca_state FROM customer_address 
+    WHERE ca_address_sk = (SELECT MIN(ca_address_sk) FROM customer_address)
+    LIMIT 1
+)
+WHERE i.class_id IN (SELECT DISTINCT i.class_id FROM item) 
+  AND i.i_item_desc LIKE '%' || (SELECT MAX(i2.i_item_desc) FROM item i2 WHERE i2.i_current_price IS NOT NULL) || '%'
+GROUP BY i.i_item_id, i.i_item_desc, nh.address_count
+HAVING AVG(ws_net_profit) < (SELECT MAX(total_profit) FROM RankedSales WHERE profit_rank = 1)
+ORDER BY net_profit DESC, i.i_item_id
+FETCH FIRST 100 ROW ONLY;

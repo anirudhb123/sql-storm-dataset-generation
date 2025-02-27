@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk DESC) as rn
+    FROM store_sales
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_estimate as purchase_estimate,
+        COALESCE(ba.ca_city, 'Unknown') as city,
+        CASE
+            WHEN cd.cd_credit_rating IS NULL THEN 'Unrated'
+            ELSE cd.cd_credit_rating
+        END as credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ba ON c.c_current_addr_sk = ba.ca_address_sk
+), ranked_sales AS (
+    SELECT 
+        s.ss_sold_date_sk,
+        i.i_item_id,
+        SUM(s.ss_quantity) as total_quantity,
+        SUM(s.ss_net_paid) as total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY s.ss_item_sk ORDER BY SUM(s.ss_net_paid) DESC) as sales_rank
+    FROM store_sales s
+    JOIN item i ON s.ss_item_sk = i.i_item_sk
+    WHERE s.ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY s.ss_sold_date_sk, i.i_item_id
+), aggregated_sales AS (
+    SELECT 
+        rr.ss_sold_date_sk,
+        SUM(rr.total_quantity) as cumulative_quantity,
+        SUM(rr.total_net_paid) as cumulative_net_paid
+    FROM ranked_sales rr
+    GROUP BY rr.ss_sold_date_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.city,
+    ci.cd_gender as gender,
+    ag.cumulative_quantity,
+    ag.cumulative_net_paid,
+    CASE 
+        WHEN ag.cumulative_net_paid > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END as customer_type,
+    COALESCE(p.p_promo_name, 'No Promotion') as promotion_name
+FROM customer_info ci
+LEFT JOIN (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_net_paid) as cumulative_net_paid,
+        SUM(ws_quantity) as cumulative_quantity
+    FROM web_sales
+    GROUP BY ws_bill_cdemo_sk
+) as web_sales_summary ON ci.c_customer_sk = web_sales_summary.ws_bill_cdemo_sk
+JOIN aggregated_sales ag ON ag.ss_sold_date_sk = DATE '2002-10-01' -- Use DATE literal instead of cast
+LEFT JOIN promotion p ON ag.cumulative_net_paid > p.p_cost
+WHERE ci.city IS NOT NULL
+ORDER BY ag.cumulative_net_paid DESC
+LIMIT 100;

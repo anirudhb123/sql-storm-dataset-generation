@@ -1,0 +1,49 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS hierarchy_level,
+        ARRAY[mt.id] AS path
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        mh.hierarchy_level + 1,
+        mh.path || ml.linked_movie_id
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE ml.linked_movie_id IS NOT NULL
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ak.id AS actor_id,
+    mh.movie_title,
+    mh.hierarchy_level,
+    COUNT(DISTINCT mc.company_id) AS companies_involved,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS associated_keywords,
+    AVG(mi.year) AS avg_year_info
+FROM actor ak
+JOIN cast_info ci ON ak.id = ci.person_id
+JOIN movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        EXTRACT(YEAR FROM MIN(production_year)) AS year
+    FROM aka_title
+    GROUP BY movie_id
+) mi ON mh.movie_id = mi.movie_id
+WHERE ak.gender IS NOT NULL
+AND mh.hierarchy_level <= 3
+GROUP BY ak.id, ak.name, mh.movie_title, mh.hierarchy_level
+HAVING COUNT(DISTINCT mc.company_id) > 0
+AND STRING_AGG(DISTINCT kc.keyword, ', ') IS NOT NULL
+ORDER BY mh.hierarchy_level DESC, actor_name;

@@ -1,0 +1,78 @@
+
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS QuestionTitle,
+        p.CreationDate AS QuestionCreated,
+        a.Id AS AnswerId,
+        a.CreationDate AS AnswerCreated,
+        a.Score AS AnswerScore,
+        1 AS Level
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        a.Id,
+        a.CreationDate,
+        a.Score,
+        rh.Level + 1
+    FROM Posts p
+    INNER JOIN Posts a ON p.Id = a.ParentId
+    INNER JOIN RecursivePostHierarchy rh ON a.ParentId = rh.AnswerId
+),
+UserScore AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(COUNT(b.Id), 0) AS BadgeCount,
+        u.Reputation
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RankedUsers AS (
+    
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Upvotes,
+        u.Downvotes,
+        u.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY (u.Upvotes - u.Downvotes) DESC, u.BadgeCount DESC) AS UserRank
+    FROM UserScore u
+)
+SELECT 
+    rp.PostId,
+    rp.QuestionTitle,
+    rp.QuestionCreated,
+    rp.AnswerId,
+    rp.AnswerCreated,
+    rp.AnswerScore,
+    ru.DisplayName AS TopResponder,
+    ru.UserRank,
+    COUNT(c.Id) AS CommentsCount
+FROM RecursivePostHierarchy rp
+LEFT JOIN Comments c ON rp.AnswerId = c.PostId
+INNER JOIN RankedUsers ru ON rp.AnswerId = ru.UserId
+WHERE rp.AnswerCreated > rp.QuestionCreated  
+GROUP BY 
+    rp.PostId,
+    rp.QuestionTitle, 
+    rp.QuestionCreated, 
+    rp.AnswerId, 
+    rp.AnswerCreated, 
+    rp.AnswerScore,
+    ru.DisplayName, 
+    ru.UserRank
+ORDER BY rp.QuestionCreated DESC, ru.UserRank
+LIMIT 100;

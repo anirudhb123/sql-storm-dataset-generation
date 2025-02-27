@@ -1,0 +1,60 @@
+WITH RECURSIVE CastHierarchy AS (
+    SELECT 
+        ci.id AS cast_id,
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        1 AS hierarchy_level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ci.id AS cast_id,
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        ch.hierarchy_level + 1
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        CastHierarchy ch ON ci.movie_id = ch.movie_id AND ci.nr_order > ch.nr_order
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    AVG(ch.hierarchy_level) AS avg_hierarchy_level,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    ARRAY_AGG(DISTINCT co.name) FILTER (WHERE co.country_code IS NOT NULL) AS production_companies,
+    COALESCE(mi.info, 'No info') AS movie_info,
+    COUNT(DISTINCT cs.subject_id) AS complete_cast_count
+FROM 
+    CastHierarchy ch
+JOIN 
+    aka_name ak ON ak.person_id = ch.person_id
+JOIN 
+    aka_title at ON at.id = ch.movie_id 
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = ch.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Tagline') 
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = ch.movie_id
+LEFT JOIN 
+    company_name co ON co.id = mc.company_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = ch.movie_id
+LEFT JOIN 
+    keyword kt ON kt.id = mk.keyword_id
+LEFT JOIN 
+    complete_cast cs ON cs.movie_id = ch.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name,
+    mi.info
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

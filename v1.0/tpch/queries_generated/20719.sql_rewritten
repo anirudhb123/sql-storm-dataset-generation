@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_cost > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp ps)
+),
+RecentOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_totalprice,
+        DENSE_RANK() OVER (ORDER BY ro.o_orderdate) AS order_rank
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn = 1 AND 
+        ro.o_orderdate >= DATEADD(DAY, -90, cast('1998-10-01' as date))
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    DISTINCT ps.ps_partkey,
+    p.p_name,
+    COALESCE(NT.n_name, 'Unknown Nation') AS supplier_nation,
+    cs.total_spent,
+    r.os_order_count,
+    (SELECT COUNT(DISTINCT li.l_orderkey) 
+     FROM lineitem li 
+     WHERE li.l_partkey = ps.ps_partkey AND 
+           li.l_shipdate BETWEEN '1997-01-01' AND cast('1998-10-01' as date)) AS total_shipped
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation NT ON s.s_nationkey = NT.n_nationkey
+LEFT JOIN 
+    CustomerStats cs ON s.s_suppkey = cs.c_custkey
+LEFT JOIN 
+    RecentOrders r ON r.o_orderkey = ps.ps_partkey
+WHERE 
+    (p.p_retailprice * 1.1 > ps.ps_supplycost) OR 
+    (ps.ps_availqty IS NULL OR ps.ps_availqty < 0)
+ORDER BY 
+    total_spent DESC, 
+    p.p_name ASC 
+LIMIT 50 OFFSET 10;

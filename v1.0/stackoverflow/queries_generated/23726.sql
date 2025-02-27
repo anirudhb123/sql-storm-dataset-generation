@@ -1,0 +1,71 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS HasGold,
+        MAX(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS HasSilver,
+        MAX(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS HasBronze
+    FROM Badges
+    GROUP BY UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts AS p
+    LEFT JOIN Comments AS c ON p.Id = c.PostId
+    LEFT JOIN Votes AS v ON p.Id = v.PostId
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId
+),
+RecentPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.OwnerUserId,
+        pd.PostTypeId,
+        pd.CommentCount,
+        pd.UpVoteCount,
+        pd.DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY pd.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM PostDetails AS pd
+    JOIN Posts AS p ON pd.PostId = p.Id
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(p.Tags, '>')) AS TagName
+    ) AS t ON t.TagName IS NOT NULL
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY pd.PostId, pd.OwnerUserId, pd.PostTypeId, pd.CommentCount, pd.UpVoteCount, pd.DownVoteCount
+),
+UserSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ub.HasGold, 0) AS HasGold,
+        COALESCE(ub.HasSilver, 0) AS HasSilver,
+        COALESCE(ub.HasBronze, 0) AS HasBronze,
+        COUNT(rp.PostId) AS RecentPostCount,
+        STRING_AGG(rp.Tags, '; ') AS RecentPostTags
+    FROM Users AS u
+    LEFT JOIN UserBadgeCounts AS ub ON u.Id = ub.UserId
+    LEFT JOIN RecentPosts AS rp ON u.Id = rp.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.HasGold,
+    us.HasSilver,
+    us.HasBronze,
+    us.RecentPostCount,
+    us.RecentPostTags
+FROM UserSummary AS us
+WHERE us.RecentPostCount > 0
+ORDER BY us.Reputation DESC, us.BadgeCount DESC
+LIMIT 50;

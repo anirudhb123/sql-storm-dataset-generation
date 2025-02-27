@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        COUNT(C.Comments) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+EnhancedPostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.Author,
+        RP.CreationDate,
+        RP.TotalComments,
+        (RP.UpVotes - RP.DownVotes) AS NetVotes,
+        PT.Name AS PostType,
+        (SELECT STRING_AGG(Tag.TagName, ', ') 
+         FROM Tags Tag 
+         WHERE Tag.Id = ANY(string_to_array(RP.Tags, ',')::int[])) AS TagNames
+    FROM 
+        RankedPosts RP
+    JOIN 
+        PostTypes PT ON RP.PostTypeId = PT.Id
+    WHERE 
+        RP.PostRank <= 5
+)
+SELECT 
+    EPD.*,
+    COALESCE(PT.PostCount, 0) AS TagPopularity
+FROM 
+    EnhancedPostDetails EPD
+LEFT JOIN 
+    PopularTags PT ON EPD.TagNames LIKE '%' || PT.TagName || '%'
+ORDER BY 
+    EPD.CreationDate DESC;

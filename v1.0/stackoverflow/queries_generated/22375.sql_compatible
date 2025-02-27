@@ -1,0 +1,81 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN SP.Recommendation IS NOT NULL THEN 1 ELSE 0 END) AS SuggestedTagsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                STRING_AGG(T.TagName, ', ') AS Recommendation
+            FROM 
+                Tags T
+            WHERE 
+                T.Count > 10 AND 
+                T.TagName LIKE '%' || SUBSTRING(U.DisplayName, 1, 3) || '%'
+        ) SP ON true
+    GROUP BY 
+        U.Id, U.Reputation, U.Views
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AcceptedAnswerId,
+        PH.PostHistoryTypeId,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate IS NOT NULL
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    US.PostCount,
+    US.QuestionCount,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    COALESCE(PA.Title, 'No Accepted Answer') AS AcceptedAnswerTitle,
+    CASE 
+        WHEN P.ClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    CASE 
+        WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    P.CommentCount
+FROM 
+    UserStats US
+JOIN 
+    Users U ON U.Id = US.UserId
+JOIN 
+    PostDetails P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Posts PA ON P.AcceptedAnswerId = PA.Id
+WHERE 
+    US.PostCount > 5
+    AND (US.Reputation >= 100 OR P.Score > 10)
+    AND P.PostRank <= 3
+ORDER BY 
+    U.Reputation DESC, 
+    P.CreationDate DESC
+LIMIT 50
+OFFSET 0;

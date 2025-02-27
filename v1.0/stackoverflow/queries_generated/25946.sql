@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankWithinType,
+        pt.Name AS PostType,
+        STRING_AGG(DISTINCT tag.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag(tagname) ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.OwnerUserId, p.ViewCount, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.OwnerUserId,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.TagsList,
+        rp.PostType,
+        CASE 
+            WHEN rp.RankWithinType <= 10 THEN 'Top 10'
+            ELSE 'Others'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.TagsList, 
+    tp.RankCategory
+FROM 
+    Users up
+JOIN 
+    TopPosts tp ON up.Id = tp.OwnerUserId
+WHERE 
+    up.Reputation > 5000
+ORDER BY 
+    tp.RankCategory DESC, 
+    tp.ViewCount DESC;

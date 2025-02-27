@@ -1,0 +1,106 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        COALESCE(cv.CloseDate, NULL) AS ClosedDate,
+        COALESCE(cv.ClosedBy, 'Not Closed') AS ClosedBy,
+        COALESCE(cv.CloseReason, 'N/A') AS CloseReason,
+        ps.UpVotes,
+        ps.DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPosts cv ON p.Id = cv.PostId
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01 12:34:56')
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.ClosedDate,
+    pd.ClosedBy,
+    pd.CloseReason,
+    pd.UpVotes,
+    pd.DownVotes,
+    rp.Level AS Level,
+    u.DisplayName AS TopUser,
+    u.Rank
+FROM 
+    PostDetails pd
+JOIN 
+    RecursivePostHierarchy rp ON pd.PostId = rp.PostId
+LEFT JOIN 
+    UserReputation u ON pd.UpVotes > 10
+ORDER BY 
+    pd.UpVotes DESC, 
+    pd.CreationDate DESC
+LIMIT 100;

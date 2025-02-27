@@ -1,0 +1,52 @@
+WITH RecursiveTagHierarchy AS (
+    -- Base case: selecting top-level tags
+    SELECT t.Id, t.TagName, t.Count, NULL AS ParentId
+    FROM Tags t
+    WHERE t.IsModeratorOnly = 0
+    
+    UNION ALL
+    
+    -- Recursive case: selecting child tags
+    SELECT t.Id, t.TagName, t.Count, rth.Id AS ParentId
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON t.WikiPostId = rth.Id
+)
+, UserActivity AS (
+    -- Compute user activity by aggregating posts and votes
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalVotes,
+    ua.TotalUpvotes,
+    ua.TotalDownvotes,
+    COUNT(DISTINCT ph.Id) AS TotalHistoryChanges,
+    STRING_AGG(DISTINCT COALESCE(pt.Name, 'Unknown'), ', ') AS PostTypes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM UserActivity ua
+JOIN Users u ON ua.UserId = u.Id
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN RecursiveTagHierarchy rth ON rth.Id = p.Tags::int
+LEFT JOIN Tags t ON rth.Id = t.Id
+WHERE (ua.TotalPosts > 0 OR ua.TotalVotes > 0)
+GROUP BY u.DisplayName, u.Reputation, ua.TotalPosts, ua.TotalComments, ua.TotalVotes, ua.TotalUpvotes, ua.TotalDownvotes
+HAVING COUNT(DISTINCT ph.Id) > 5
+ORDER BY u.Reputation DESC, ua.TotalPosts DESC;

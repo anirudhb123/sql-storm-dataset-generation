@@ -1,0 +1,37 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    INNER JOIN part p ON ps.ps_partkey = p.p_partkey
+    INNER JOIN lineitem l ON l.l_partkey = p.p_partkey
+    WHERE l.l_extendedprice > 500 AND s.s_acctbal > 10000
+)
+
+SELECT
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_order_value,
+    AVG(s.sh_acctbal) AS average_supplier_balance
+FROM
+    customer c
+JOIN
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN
+    orders o ON c.c_custkey = o.o_custkey
+JOIN
+    SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE
+    o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+GROUP BY
+    n.n_name, sh.s_acctbal
+HAVING
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY
+    total_order_value DESC;

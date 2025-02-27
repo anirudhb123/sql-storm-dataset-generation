@@ -1,0 +1,75 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_item_sk,
+        sr_return_qty,
+        sr_return_amt,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_qty DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_qty IS NOT NULL
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ss_net_paid) AS total_spent,
+        COUNT(DISTINCT ss_ticket_number) AS purchase_count
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+    GROUP BY c.c_customer_sk
+),
+ItemSales AS (
+    SELECT
+        ws_item_sk,
+        COUNT(DISTINCT ws_order_number) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+FilteredItems AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price
+    FROM item i
+    WHERE i.i_current_price > (
+        SELECT AVG(i2.i_current_price)
+        FROM item i2
+        WHERE i2.i_item_sk IS NOT NULL
+    )
+),
+ReturnSummary AS (
+    SELECT
+        r.sr_item_sk,
+        SUM(r.sr_return_amt) AS total_return_amt,
+        COUNT(r.sr_return_qty) AS total_return_count
+    FROM store_returns r
+    LEFT JOIN FilteredItems fi ON r.sr_item_sk = fi.i_item_sk
+    GROUP BY r.sr_item_sk
+    HAVING COUNT(r.sr_return_qty) > 5
+),
+FinalAnalysis AS (
+    SELECT
+        c.c_customer_sk,
+        cs.total_spent,
+        cs.purchase_count,
+        COALESCE(ir.total_return_amt, 0) AS total_return_amt,
+        COALESCE(ir.total_return_count, 0) AS total_return_count
+    FROM CustomerSales cs
+    LEFT JOIN ReturnSummary ir ON cs.c_customer_sk = ir.sr_item_sk
+    WHERE cs.total_spent > 1000
+)
+SELECT
+    fa.c_customer_sk,
+    fa.total_spent AS customer_spent,
+    fa.purchase_count AS total_purchases,
+    fa.total_return_amt AS returns_amount,
+    fa.total_return_count AS returns_count,
+    (fa.total_spent / NULLIF(fa.purchase_count, 0)) AS avg_spent_per_purchase,
+    CASE 
+        WHEN fa.total_return_count > 0 THEN 'Significant Returns'
+        ELSE 'Low Returns'
+    END AS return_category
+FROM FinalAnalysis fa
+ORDER BY fa.total_spent DESC
+FETCH FIRST 100 ROWS ONLY;

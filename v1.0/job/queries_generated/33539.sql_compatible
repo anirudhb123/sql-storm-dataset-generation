@@ -1,0 +1,66 @@
+
+WITH RECURSIVE YearlyMovieCount AS (
+    SELECT 
+        production_year, 
+        COUNT(movie_id) AS movie_count
+    FROM 
+        aka_title 
+    WHERE 
+        production_year IS NOT NULL
+    GROUP BY 
+        production_year
+),
+ActorMovieCount AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS total_movies,
+        SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS movies_with_roles
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+),
+CompanyMovieCount AS (
+    SELECT 
+        mc.company_id,
+        c.name AS company_name,
+        COUNT(m.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        aka_title m ON mc.movie_id = m.movie_id
+    LEFT JOIN 
+        title t ON m.id = t.id
+    GROUP BY 
+        mc.company_id, c.name
+)
+SELECT 
+    a.actor_name,
+    a.total_movies,
+    a.movies_with_roles,
+    cm.company_name,
+    cm.movie_count,
+    c.production_year,
+    yc.movie_count AS yearly_movie_count,
+    CASE 
+        WHEN (a.total_movies > 0) THEN (a.movies_with_roles * 1.0 / a.total_movies) * 100 
+        ELSE 0 
+    END AS role_percentage,
+    COALESCE(yc.movie_count, 0) AS count_by_year
+FROM 
+    ActorMovieCount a
+LEFT JOIN 
+    CompanyMovieCount cm ON a.total_movies > cm.movie_count
+FULL OUTER JOIN 
+    YearlyMovieCount yc ON 1=1
+WHERE 
+    a.total_movies > 5
+ORDER BY 
+    a.total_movies DESC, 
+    cm.movie_count DESC;

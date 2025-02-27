@@ -1,0 +1,48 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56' - INTERVAL '1 year' AND 
+        p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    tp.PostType
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, 
+    tp.CreationDate DESC;

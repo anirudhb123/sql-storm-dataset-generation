@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+role_counts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(
+            STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL), 
+            'No Keywords'
+        ) AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(rc.role_count, 0) AS total_roles,
+    mh.depth AS hierarchy_level,
+    mi.keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    role_counts rc ON mh.movie_id = rc.movie_id
+LEFT JOIN 
+    movie_info_with_keywords mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.production_year = (SELECT MAX(production_year) FROM aka_title)
+    OR mh.title ILIKE '%Adventure%'
+    OR EXISTS (
+        SELECT 1 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = mh.movie_id 
+        AND mc.note IS NULL
+    )
+ORDER BY 
+    mh.depth, total_roles DESC;

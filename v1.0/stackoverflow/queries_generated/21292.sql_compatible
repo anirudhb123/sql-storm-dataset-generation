@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '>') AS tag ON TRUE
+    JOIN 
+        Tags t ON tag = t.TagName
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+        AND p.ViewCount IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.PostTypeId
+), 
+FilteredPosts AS (
+    SELECT 
+        rp.*, 
+        CASE 
+            WHEN p2.Score IS NULL THEN 'No Accepted Answer'
+            ELSE 'Has Accepted Answer'
+        END AS AnswerStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Posts p2 ON rp.PostId = p2.AcceptedAnswerId
+    WHERE 
+        rp.RankByScore <= 5
+        AND rp.CommentCount > 0
+), 
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+        MAX(ph.CreationDate) AS LastStatusChange
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.ViewCount,
+    fp.Score,
+    fp.Tags,
+    fp.AnswerStatus,
+    phd.CloseReason,
+    phd.CloseReopenCount,
+    phd.LastStatusChange,
+    COALESCE((SELECT AVG(Score) 
+              FROM Posts 
+              WHERE CreationDate < fp.CreationDate 
+              AND ViewCount > 100), 0) AS AvgScorePrevPosts
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryDetails phd ON fp.PostId = phd.PostId
+WHERE 
+    fp.Score > (SELECT AVG(Score) FROM Posts) 
+    OR fp.CloseReason IS NOT NULL
+ORDER BY 
+    fp.Score DESC, fp.ViewCount ASC;

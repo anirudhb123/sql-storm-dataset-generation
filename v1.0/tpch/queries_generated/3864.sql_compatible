@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ParticipatingParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    pp.p_partkey,
+    pp.p_name,
+    ps.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.total_spent, 0.00) AS total_spent,
+    pp.total_quantity,
+    pp.avg_discount,
+    CASE 
+        WHEN pp.total_quantity > 100 THEN 'High Demand'
+        WHEN pp.total_quantity BETWEEN 50 AND 100 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM 
+    ParticipatingParts pp
+LEFT JOIN 
+    RankedSuppliers ps ON pp.p_partkey = ps.ps_partkey AND ps.rank_cost = 1
+LEFT JOIN 
+    CustomerOrders cs ON pp.p_partkey IN (
+        SELECT l.l_partkey
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    )
+WHERE 
+    pp.avg_discount IS NOT NULL
+ORDER BY 
+    pp.total_quantity DESC,
+    total_spent DESC;

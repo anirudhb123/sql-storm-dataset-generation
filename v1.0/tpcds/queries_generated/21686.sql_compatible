@@ -1,0 +1,66 @@
+
+WITH RECURSIVE IncomeRanges AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound,
+           CASE 
+               WHEN ib_income_band_sk IS NULL THEN 'Unknown'
+               WHEN ib_upper_bound IS NULL THEN 'Infinity'
+               ELSE CONCAT('From ', ib_lower_bound, ' to ', COALESCE(CAST(ib_upper_bound AS VARCHAR), 'Unknown')) 
+           END AS range_descr
+    FROM income_band
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_return_quantity,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+ReturnStats AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_return_quantity,
+        cr.total_return_amt,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(cd.cd_marital_status, 'N') AS marital_status,
+        ig.range_descr AS income_range
+    FROM CustomerReturns cr
+    LEFT JOIN customer c ON cr.returning_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN IncomeRanges ig ON (cd.cd_purchase_estimate >= ig.ib_lower_bound AND 
+                                   (cd.cd_purchase_estimate < ig.ib_upper_bound OR ig.ib_upper_bound IS NULL))
+),
+PurchaseTrends AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS distinct_orders,
+        AVG(ws_net_profit) AS avg_net_profit,
+        SUM(ws_quantity) AS total_quantity_sold,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    rs.returning_customer_sk,
+    rs.total_return_quantity,
+    rs.total_return_amt,
+    rs.gender,
+    rs.marital_status,
+    rs.income_range,
+    COALESCE(pt.distinct_orders, 0) AS distinct_orders,
+    COALESCE(pt.avg_net_profit, 0) AS avg_net_profit,
+    COALESCE(pt.total_quantity_sold, 0) AS total_quantity_sold
+FROM ReturnStats rs
+LEFT JOIN PurchaseTrends pt ON rs.returning_customer_sk = pt.ws_bill_customer_sk
+WHERE 
+    (rs.total_return_quantity > 5 OR rs.total_return_amt > 100) AND
+    (rs.gender <> 'M' OR (rs.marital_status = 'D' AND rs.income_range LIKE '%to%'))
+ORDER BY 
+    CASE 
+        WHEN rs.total_return_amt > 500 THEN 1 
+        ELSE 2 
+    END,
+    rs.gender ASC,
+    rs.total_return_quantity DESC
+LIMIT 100;

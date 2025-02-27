@@ -1,0 +1,81 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_revenue
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+),
+RankedItems AS (
+    SELECT 
+        i.i_item_id,
+        sd.total_quantity,
+        sd.total_revenue,
+        DENSE_RANK() OVER (ORDER BY sd.total_revenue DESC) AS revenue_rank
+    FROM 
+        item i
+    JOIN 
+        SalesData sd ON i.i_item_sk = sd.ws_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+),
+TopItems AS (
+    SELECT 
+        ri.i_item_id,
+        ri.total_quantity,
+        ri.total_revenue
+    FROM 
+        RankedItems ri
+    WHERE 
+        ri.revenue_rank <= 10
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+SalesByCustomer AS (
+    SELECT 
+        sd.i_item_id,
+        cd.c_customer_id,
+        SUM(ws_quantity) AS quantity_by_customer,
+        SUM(ws_net_paid_inc_tax) AS revenue_by_customer
+    FROM 
+        web_sales ws
+    JOIN 
+        TopItems ti ON ws.ws_item_sk = ti.ws_item_sk
+    JOIN 
+        CustomerData cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        sd.i_item_id, cd.c_customer_id
+)
+SELECT 
+    ti.i_item_id,
+    MAX(sbc.quantity_by_customer) AS max_quantity_by_customer,
+    AVG(sbc.revenue_by_customer) AS avg_revenue_by_customer,
+    COUNT(DISTINCT sbc.c_customer_id) AS unique_customers,
+    CASE 
+        WHEN MAX(sbc.revenue_by_customer) > 1000 THEN 'High Seller'
+        ELSE 'Low Seller'
+    END AS seller_type
+FROM 
+    TopItems ti
+JOIN 
+    SalesByCustomer sbc ON ti.i_item_id = sbc.i_item_id
+GROUP BY 
+    ti.i_item_id
+ORDER BY 
+    avg_revenue_by_customer DESC;

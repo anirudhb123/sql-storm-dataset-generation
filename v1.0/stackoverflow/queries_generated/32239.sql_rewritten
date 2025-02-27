@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.PostTypeId, p.ParentId, p.CreationDate, 1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    UNION ALL
+    SELECT p2.Id, p2.Title, p2.PostTypeId, p2.ParentId, p2.CreationDate, Level + 1
+    FROM Posts p2
+    INNER JOIN RecursivePostHierarchy rph ON p2.ParentId = rph.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersGiven,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id AND p.PostTypeId = 1  
+    LEFT JOIN Posts a ON a.OwnerUserId = u.Id AND a.PostTypeId = 2  
+    LEFT JOIN Votes v ON v.UserId = u.Id AND v.VoteTypeId = 8 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 5  
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.PostId
+),
+RankedUsers AS (
+    SELECT
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        RANK() OVER (ORDER BY us.Reputation DESC) AS ReputationRank
+    FROM UserStats us
+    WHERE us.QuestionsAsked > 0
+)
+
+SELECT 
+    r.UserId,
+    r.DisplayName,
+    r.Reputation,
+    r.ReputationRank,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT op.Id) AS TotalClosedPosts,
+    STRING_AGG(DISTINCT pt.TagName, ', ') AS PopularTags
+FROM RankedUsers r
+LEFT JOIN Posts p ON p.OwnerUserId = r.UserId
+LEFT JOIN Comments c ON c.UserId = r.UserId
+LEFT JOIN ClosedPosts op ON op.PostId = p.Id
+LEFT JOIN PopularTags pt ON pt.PostCount > 0
+GROUP BY r.UserId, r.DisplayName, r.Reputation, r.ReputationRank
+ORDER BY r.ReputationRank;

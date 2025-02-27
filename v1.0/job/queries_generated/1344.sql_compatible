@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), ActorCount AS (
+    SELECT 
+        ci.role_id, 
+        COUNT(DISTINCT ci.person_id) AS actor_count 
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.role_id
+), MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+), FilteredMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(ac.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        ActorCount ac ON ac.role_id IN (SELECT role_id FROM cast_info WHERE movie_id = rm.movie_id)
+    WHERE 
+        rm.rank = 1 
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.keywords,
+    fm.actor_count,
+    CASE 
+        WHEN fm.actor_count > 10 THEN 'Popular'
+        WHEN fm.actor_count BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Rare'
+    END AS popularity
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.production_year IS NOT NULL
+ORDER BY 
+    fm.production_year DESC, 
+    fm.actor_count DESC;

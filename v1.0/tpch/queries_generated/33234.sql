@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice) AS total_sales,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(l.l_extendedprice) DESC) AS rank_within_nation
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    ch.c_name AS customer_name,
+    sh.s_name AS supplier_name,
+    hp.p_name AS part_name,
+    hs.total_spent AS total_customer_spent,
+    rs.total_sales AS supplier_sales,
+    sh.level AS supplier_level
+FROM CustomerOrderStats hs
+JOIN RankedSuppliers rs ON hs.order_count > 10
+LEFT JOIN HighValueParts hp ON hp.total_cost > 10000
+JOIN SupplierHierarchy sh ON sh.s_suppkey = rs.s_suppkey
+WHERE hs.total_spent IS NOT NULL AND hs.order_count > 0
+ORDER BY hs.total_spent DESC, supplier_level ASC;

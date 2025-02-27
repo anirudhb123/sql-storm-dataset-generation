@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(r.UpVotes) AS TotalUpVotes
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts r ON u.Id = r.OwnerUserId
+    WHERE 
+        r.PostRank <= 3
+    GROUP BY 
+        u.Id
+),
+
+PostsInfo AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        pu.DisplayName,
+        CASE 
+            WHEN pu.UserId IS NULL THEN 'No posts'
+            ELSE 'Has posts'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    FULL OUTER JOIN 
+        PopularUsers pu ON rp.OwnerUserId = pu.UserId
+    WHERE 
+        rp.Score > 10 OR pu.UserId IS NOT NULL
+)
+
+SELECT 
+    pi.Title,
+    pi.CreationDate,
+    pi.Score,
+    pi.ViewCount,
+    pi.DisplayName,
+    pi.PostStatus,
+    COALESCE(pu.TotalUpVotes, 0) AS UserTotalUpVotes
+FROM 
+    PostsInfo pi
+LEFT JOIN 
+    PopularUsers pu ON pi.DisplayName = pu.DisplayName
+ORDER BY 
+    pi.Score DESC, pi.ViewCount DESC
+LIMIT 10;

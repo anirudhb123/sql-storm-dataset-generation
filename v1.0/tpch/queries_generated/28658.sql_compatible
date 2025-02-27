@@ -1,0 +1,59 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost,
+        SUBSTRING(p.p_comment, 1, 23) AS short_comment,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY COUNT(DISTINCT ps.ps_suppkey) DESC) AS brand_rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type
+),
+ActiveCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        c.c_phone,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_address, c.c_phone
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_mfgr,
+    rp.p_brand,
+    rp.p_type,
+    rp.supplier_count,
+    rp.total_available,
+    rp.total_cost,
+    rp.short_comment,
+    ac.c_custkey,
+    ac.c_name,
+    ac.c_address,
+    ac.c_phone,
+    ac.total_spent
+FROM 
+    RankedParts rp
+JOIN 
+    ActiveCustomers ac ON ac.total_spent >= rp.total_cost
+WHERE 
+    rp.brand_rank <= 3
+ORDER BY 
+    rp.supplier_count DESC, ac.total_spent DESC;

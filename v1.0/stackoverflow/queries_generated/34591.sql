@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Only questions
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostHistoryWithComments AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ', ') AS Comments
+    FROM PostHistory ph
+    LEFT JOIN Comments c ON ph.PostId = c.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Only closed and reopened posts
+    GROUP BY ph.PostId, ph.CreationDate, ph.UserId, ph.PostHistoryTypeId
+    
+)
+SELECT 
+    u.DisplayName,
+    us.QuestionCount,
+    us.TotalScore,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    rp.Score,
+    ph.Comments,
+    ph.HistoryDate
+FROM Users u
+JOIN UserScores us ON u.Id = us.UserId
+JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN PostHistoryWithComments ph ON rp.PostId = ph.PostId
+WHERE us.QuestionCount > 5  -- User has more than 5 questions
+AND us.TotalScore > 100  -- User's total score is above 100
+ORDER BY us.TotalScore DESC, rp.Score DESC
+LIMIT 50;  -- Limit to top 50 results

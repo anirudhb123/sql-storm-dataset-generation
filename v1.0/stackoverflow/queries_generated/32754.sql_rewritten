@@ -1,0 +1,71 @@
+WITH RecursiveAnswers AS (
+    SELECT 
+        P.Id AS AnswerId,
+        P.ParentId,
+        P.OwnerUserId,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.ParentId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 2
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS ClosedDate,
+        PH.UserDisplayName AS ClosedBy
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10 
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(A.ViewCount, 0)) AS TotalAnswerViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionCount,
+    U.TotalScore,
+    U.TotalAnswerViews,
+    COALESCE(CP.ClosedDate, 'No Closure') AS LastClosedDate,
+    COALESCE(CP.ClosedBy, 'N/A') AS ClosedBy,
+    TS.PostCount AS TagPostCount,
+    TS.TotalScore AS TagTotalScore
+FROM 
+    UserStats U
+LEFT JOIN 
+    ClosedPosts CP ON U.UserId = CP.Id
+LEFT JOIN 
+    TagStats TS ON TS.TagName IN (SELECT UNNEST(string_to_array(P.Tags, '>')) FROM Posts P WHERE P.OwnerUserId = U.UserId)
+ORDER BY 
+    U.TotalScore DESC, U.QuestionCount DESC;

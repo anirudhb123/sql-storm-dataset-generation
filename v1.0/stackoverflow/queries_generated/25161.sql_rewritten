@@ -1,0 +1,55 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+        COALESCE(MAX(b.Class), 0) AS HighestBadgeClass,
+        array_agg(DISTINCT t.TagName) AS TagNames
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.ViewCount, p.Score
+),
+RankedPosts AS (
+    SELECT 
+        pp.*,
+        RANK() OVER (ORDER BY pp.Score DESC, pp.ViewCount DESC, pp.CommentCount DESC) AS Rank
+    FROM 
+        ProcessedPosts pp
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    rp.HighestBadgeClass,
+    rp.TagNames,
+    rp.Rank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 10  
+ORDER BY 
+    rp.Rank;

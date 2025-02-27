@@ -1,0 +1,86 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        u.DisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2
+        GROUP BY ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    INNER JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.DisplayName,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT ph.UserId) AS HistoryEditCount
+    FROM RecentPosts rp
+    LEFT JOIN Votes v ON rp.PostId = v.PostId AND v.VoteTypeId = 8
+    LEFT JOIN PostHistory ph ON rp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY rp.PostId, rp.Title, rp.DisplayName, rp.ViewCount, rp.AnswerCount, rp.CommentCount
+),
+UserActivity AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        up.UserPostRank,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(pm.TotalBounty) AS TotalBountyReceived,
+        COUNT(DISTINCT pm.PostId) AS UniquePostsWithBounty
+    FROM UserReputation ur
+    LEFT JOIN RecentPosts up ON ur.UserId = up.OwnerUserId
+    LEFT JOIN PostMetrics pm ON up.PostId = pm.PostId
+    GROUP BY ur.UserId, ur.Reputation, up.UserPostRank
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalViews,
+    u.TotalBountyReceived,
+    u.UniquePostsWithBounty,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'Veteran'
+        WHEN u.Reputation BETWEEN 500 AND 999 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserLevel,
+    RANK() OVER (ORDER BY u.TotalBountyReceived DESC) AS BountyRanking,
+    COUNT(DISTINCT pm.PostId) FILTER (WHERE pm.TotalBounty > 0) AS PostsWithBounty
+FROM UserActivity u
+LEFT JOIN PostMetrics pm ON u.TotalPosts = pm.PostId IS NOT NULL
+WHERE u.TotalBountyReceived IS NOT NULL
+GROUP BY u.UserId, u.Reputation, u.TotalPosts, u.TotalViews, u.TotalBountyReceived, u.UniquePostsWithBounty
+ORDER BY u.Reputation DESC, u.TotalBountyReceived DESC;

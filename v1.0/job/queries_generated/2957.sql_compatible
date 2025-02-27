@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        at.production_year >= 2000
+),
+MoviesWithInfo AS (
+    SELECT 
+        rm.actor_id,
+        rm.actor_name,
+        rm.movie_title,
+        rm.production_year,
+        mi.info AS movie_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_title = mi.movie_id
+    WHERE 
+        rm.rank = 1
+),
+MovieKeywords AS (
+    SELECT 
+        mw.actor_id,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        MoviesWithInfo mw
+    JOIN 
+        movie_keyword mk ON mw.movie_title = mk.movie_id
+    GROUP BY 
+        mw.actor_id
+),
+FinalResults AS (
+    SELECT 
+        mw.actor_id,
+        mw.actor_name,
+        mw.movie_title,
+        mw.production_year,
+        COALESCE(mw.movie_info, 'No Info Available') AS movie_info,
+        COALESCE(mk.keyword_count, 0) AS keyword_count
+    FROM 
+        MoviesWithInfo mw
+    LEFT JOIN 
+        MovieKeywords mk ON mw.actor_id = mk.actor_id
+)
+
+SELECT 
+    fr.actor_id,
+    fr.actor_name,
+    fr.movie_title,
+    fr.production_year,
+    fr.movie_info,
+    fr.keyword_count,
+    CASE 
+        WHEN fr.keyword_count > 5 THEN 'High'
+        WHEN fr.keyword_count BETWEEN 1 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_density
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fr.production_year DESC, fr.keyword_density DESC;

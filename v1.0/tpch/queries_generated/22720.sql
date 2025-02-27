@@ -1,0 +1,93 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        COALESCE(
+            (SELECT AVG(ps_supplycost) 
+             FROM partsupp ps 
+             WHERE ps.ps_suppkey = s.s_suppkey), 0) AS avg_supplycost
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_brand,
+        (CASE 
+            WHEN p.p_retailprice > 50 
+            THEN 'High'
+            WHEN p.p_retailprice <= 50 AND p.p_retailprice > 20 
+            THEN 'Medium'
+            ELSE 'Low'
+        END) AS price_category
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT l.l_quantity 
+                      FROM lineitem l 
+                      WHERE l.l_discount > 0.1)
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    f.part_summary,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(SUM(s.s_acctbal), 0) AS total_supplier_balance,
+    MAX(cs.total_spent) AS max_customer_spending,
+    AVG(s.avg_supplycost) AS avg_supplier_cost,
+    CASE 
+        WHEN MAX(cs.order_count) > 5 
+        THEN 'Frequent'
+        ELSE 'Infrequent'
+    END AS customer_order_status
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails s ON TRUE
+JOIN 
+    FilteredParts p ON s.s_suppkey = (SELECT TOP 1 ps.ps_suppkey 
+                                       FROM partsupp ps 
+                                       WHERE ps.ps_partkey = p.p_partkey 
+                                       ORDER BY ps.ps_supplycost ASC)
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IN (SELECT DISTINCT l.l_orderkey 
+                                         FROM lineitem l 
+                                         WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    CustomerSummary cs ON cs.c_custkey = o.o_custkey
+GROUP BY 
+    r.r_name, p.p_name, f.part_summary
+HAVING 
+    SUM(s.s_acctbal) > 10000 
+    AND COUNT(DISTINCT o.o_orderkey) > 2
+ORDER BY 
+    r.r_name, p.p_retailprice DESC;

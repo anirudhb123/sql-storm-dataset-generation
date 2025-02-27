@@ -1,0 +1,52 @@
+WITH CTE_Sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS site_profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001 AND 
+        dd.d_moy IN (6, 7)  
+    GROUP BY 
+        ws.web_site_sk
+),
+CTE_Returns AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr.wr_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    JOIN 
+        date_dim dd ON wr.wr_returned_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2001 AND
+        dd.d_moy IN (6, 7)  
+    GROUP BY 
+        wr.wr_web_page_sk
+)
+SELECT 
+    CTE_Sales.web_site_sk,
+    CTE_Sales.total_net_profit,
+    COALESCE(CTE_Returns.total_return_amt, 0) AS total_return_amt,
+    CTE_Sales.total_orders,
+    (CTE_Sales.total_net_profit - COALESCE(CTE_Returns.total_return_amt, 0)) AS net_profit_after_returns,
+    CASE
+        WHEN CTE_Sales.total_orders > 0 THEN 
+            (CTE_Sales.total_net_profit / CTE_Sales.total_orders) 
+        ELSE 
+            0 
+    END AS avg_net_profit_per_order,
+    (CTE_Sales.site_profit_rank) AS profit_rank
+FROM 
+    CTE_Sales
+LEFT JOIN 
+    CTE_Returns ON CTE_Sales.web_site_sk = CTE_Returns.wr_web_page_sk
+ORDER BY 
+    net_profit_after_returns DESC
+LIMIT 10;

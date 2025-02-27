@@ -1,0 +1,49 @@
+
+WITH CTE_SupplierCost AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp
+),
+CTE_AvgOrderValue AS (
+    SELECT o_custkey, AVG(o_totalprice) AS avg_order_value
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    GROUP BY o_custkey
+),
+CTE_ShipDate AS (
+    SELECT l_orderkey, COUNT(*) AS total_lineitems,
+           MIN(l_shipdate) AS first_shipdate,
+           MAX(l_shipdate) AS last_shipdate
+    FROM lineitem
+    GROUP BY l_orderkey
+)
+SELECT n.n_name, 
+       s.s_name,
+       p.p_name,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       COALESCE(AVG(cte_avg.avg_order_value), 0) AS avg_order_value,
+       CASE 
+           WHEN COUNT(DISTINCT o.o_orderkey) = 0 THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status,
+       COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns_count,
+       COUNT(DISTINCT l.l_orderkey) AS distinct_orders_count,
+       CASE 
+           WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Revenue'
+           ELSE 'Low Revenue'
+       END AS revenue_category
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN CTE_AvgOrderValue cte_avg ON s.s_nationkey = cte_avg.o_custkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN CTE_ShipDate sd ON l.l_orderkey = sd.l_orderkey
+WHERE p.p_size > 10 
+  AND p.p_retailprice BETWEEN 50 AND 500 
+  AND l.l_shipdate > DATEADD(year, -1, CURRENT_DATE)
+GROUP BY n.n_name, s.s_name, p.p_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY total_revenue DESC;

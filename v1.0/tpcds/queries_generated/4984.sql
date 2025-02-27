@@ -1,0 +1,47 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_store_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_store_sk ORDER BY SUM(sr_return_amt) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk, sr_item_sk
+),
+ReturnSummary AS (
+    SELECT 
+        sr.store_sk,
+        r.store_name,
+        COALESCE(SUM(r.total_return_quantity), 0) AS total_return_quantity,
+        COALESCE(SUM(r.total_return_amt), 0) AS total_return_amt
+    FROM 
+        store AS sr
+    LEFT JOIN 
+        RankedReturns r ON sr.s_store_sk = r.sr_store_sk
+    GROUP BY 
+        sr.s_store_sk, r.store_name
+)
+SELECT 
+    SUM(CASE WHEN total_return_quantity > 0 THEN total_return_amt ELSE 0 END) AS sum_positive_returns,
+    AVG(total_return_amt) AS avg_return_amt,
+    COUNT(DISTINCT store_sk) AS store_count,
+    MAX(total_return_amt) AS max_return_amt
+FROM 
+    ReturnSummary
+WHERE 
+    total_return_quantity > 0
+    AND total_return_amt IS NOT NULL
+UNION ALL
+SELECT 
+    0 AS sum_positive_returns,
+    AVG(total_return_amt) AS avg_return_amt,
+    COUNT(DISTINCT store_sk) AS store_count,
+    MAX(total_return_amt) AS max_return_amt
+FROM 
+    ReturnSummary
+WHERE 
+    total_return_quantity <= 0
+    AND total_return_amt IS NOT NULL;

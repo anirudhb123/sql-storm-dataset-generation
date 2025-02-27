@@ -1,0 +1,60 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        ph.CreationDate AS PostCreationDate,
+        ph.UserDisplayName AS LastEditor,
+        ph.CreationDate AS LastEditDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS FormattedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_name ON TRUE
+    LEFT JOIN
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.CreationDate >= '2020-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, ph.UserDisplayName, ph.CreationDate
+),
+AggregateStats AS (
+    SELECT 
+        pd.OwnerName,
+        COUNT(pd.PostId) AS TotalPosts,
+        SUM(pd.UpVoteCount) AS TotalUpVotes,
+        SUM(pd.DownVoteCount) AS TotalDownVotes,
+        AVG(EXTRACT(EPOCH FROM (cast('2024-10-01 12:34:56' as timestamp) - pd.PostCreationDate)) / 86400) AS AvgPostAgeDays
+    FROM 
+        PostDetails pd
+    GROUP BY 
+        pd.OwnerName
+)
+SELECT 
+    as.OwnerName,
+    as.TotalPosts,
+    as.TotalUpVotes,
+    as.TotalDownVotes,
+    as.AvgPostAgeDays,
+    CASE 
+        WHEN as.TotalPosts > 10 THEN 'Active Contributor'
+        WHEN as.TotalPosts BETWEEN 5 AND 10 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel
+FROM 
+    AggregateStats as
+ORDER BY 
+    as.TotalUpVotes DESC, as.TotalPosts DESC;

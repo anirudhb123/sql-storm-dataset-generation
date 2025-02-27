@@ -1,0 +1,53 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name, 
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(*) OVER (PARTITION BY a.id) AS movie_count,
+    AVG(EXTRACT(EPOCH FROM (CAST('2024-10-01 12:34:56' AS timestamp) - pi.info))) AS avg_years_since_info
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'release date')
+LEFT JOIN 
+    person_info pi ON a.person_id = pi.person_id
+WHERE 
+    a.name IS NOT NULL
+    AND mh.depth = 1
+    AND (mi.info IS NULL OR mi.info < (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '5 years'))
+GROUP BY 
+    a.name, 
+    at.title, 
+    mh.production_year
+ORDER BY 
+    movie_count DESC,
+    actor_name;

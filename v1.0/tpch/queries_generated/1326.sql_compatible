@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sp.total_available_qty, 0) AS available_qty,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        WHEN cs.total_spent > 10000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerSummary cs ON cs.total_orders > 0
+WHERE 
+    p.p_retailprice > (SELECT AVG(p1.p_retailprice) FROM part p1)
+ORDER BY 
+    p.p_retailprice DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS p_partkey,
+    'Total' AS p_name,
+    SUM(p.p_retailprice) AS p_retailprice,
+    COUNT(DISTINCT sp.ps_partkey) AS total_parts,
+    SUM(cs.total_spent) AS total_spent,
+    NULL AS customer_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    CustomerSummary cs ON cs.total_orders > 0
+GROUP BY 
+    cs.total_orders; 

@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.* 
+    FROM 
+        RankedMovies rm 
+    WHERE 
+        rm.rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        mk.keyword,
+        COALESCE(mi.info, 'No Additional Info') AS info,
+        CASE 
+            WHEN ko.kind IS NULL THEN 'Unknown Kind'
+            ELSE ko.kind 
+        END AS kind_description,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = mk.movie_id 
+    LEFT JOIN 
+        movie_info mi ON tm.title = mi.movie_id 
+    LEFT JOIN 
+        kind_type ko ON mk.keyword = ko.id
+    LEFT JOIN 
+        cast_info ci ON tm.title = ci.movie_id
+    GROUP BY 
+        tm.title, 
+        tm.production_year, 
+        mk.keyword, 
+        mi.info, 
+        ko.kind
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.info,
+    md.kind_description,
+    CONCAT('Title: ', md.title, ', Year: ', md.production_year) AS title_description
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year IS NOT NULL 
+ORDER BY 
+    md.production_year DESC, 
+    md.cast_count DESC;

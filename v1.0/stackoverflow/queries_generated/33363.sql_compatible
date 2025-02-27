@@ -1,0 +1,68 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level,
+        p.Title AS FullPath
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        a.OwnerUserId,
+        rp.Level + 1 AS Level,
+        rp.FullPath || ' > ' || a.Title AS FullPath
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2 
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId IN (6, 7) THEN 1 END) AS CloseVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 5 THEN 1 END) AS Favorites
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title AS QuestionTitle,
+    r.Score AS QuestionScore,
+    r.CreationDate AS QuestionCreationDate,
+    r.OwnerUserId AS QuestionOwnerId,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CloseVotes,
+    ps.Favorites,
+    r.Level,
+    r.FullPath
+FROM 
+    RecursivePostCTE r
+LEFT JOIN 
+    PostVoteSummary ps ON r.PostId = ps.PostId
+WHERE 
+    r.Level = 0 
+    AND r.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+ORDER BY 
+    r.Score DESC,
+    ps.UpVotes DESC

@@ -1,0 +1,91 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+),
+CastWithRoles AS (
+    SELECT 
+        ca.movie_id,
+        STRING_AGG(DISTINCT co.role ORDER BY co.role) AS roles,
+        COUNT(DISTINCT c.id) AS unique_cast_count
+    FROM 
+        cast_info ca
+    JOIN 
+        role_type co ON ca.role_id = co.id
+    GROUP BY 
+        ca.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        cwr.roles,
+        cwr.unique_cast_count,
+        mwk.keyword_count,
+        CASE 
+            WHEN mwk.keyword_count IS NULL THEN 'No Keywords'
+            ELSE 'Has Keywords'
+        END AS keyword_status
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        CastWithRoles cwr ON tm.movie_id = cwr.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON tm.movie_id = mwk.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        md.*,
+        CASE 
+            WHEN md.unique_cast_count > 0 THEN 'Featuring Cast'
+            ELSE 'No Cast Information'
+        END AS cast_status,
+        COALESCE(md.roles, 'Unknown') AS role_summary
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    roles,
+    unique_cast_count,
+    keyword_count,
+    keyword_status,
+    cast_status,
+    role_summary
+FROM 
+    FinalOutput
+WHERE 
+    production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    production_year DESC, title ASC;

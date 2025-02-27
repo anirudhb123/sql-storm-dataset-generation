@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(s.s_name AS varchar(100)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, CAST(CONCAT(sh.path, ' -> ', s.s_name) AS varchar(100))
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+PartSupplierCount AS (
+    SELECT ps.ps_partkey, COUNT(*) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+JoinResults AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.supplier_count,
+           COALESCE(l.l_quantity / NULLIF(l.l_extendedprice, 0), 0) AS price_adjustment,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY p.p_retailprice DESC) AS nation_rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    JOIN nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = l.l_orderkey) 
+    WHERE p.p_retailprice > 1000.00
+)
+
+SELECT s.s_name, j.p_name, j.supplier_count, j.price_adjustment, r.o_orderdate, r.o_orderstatus
+FROM JoinResults j
+JOIN SupplierHierarchy s ON j.supplier_count >= 2
+FULL OUTER JOIN RankedOrders r ON j.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = j.supplier_count)
+WHERE r.rank <= 5
+ORDER BY r.o_orderdate DESC, j.price_adjustment ASC;

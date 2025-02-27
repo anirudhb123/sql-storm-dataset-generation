@@ -1,0 +1,77 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+RegionalSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_nationkey, 
+        r.r_regionkey,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey, r.r_regionkey
+),
+TopRegions AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS unique_nations,
+        SUM(COALESCE(s.supplied_parts, 0)) AS total_supplied_parts
+    FROM 
+        region r
+    LEFT JOIN 
+        RegionalSuppliers s ON r.r_regionkey = s.r_regionkey
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey
+),
+FinalReport AS (
+    SELECT 
+        tr.r_regionkey, 
+        tr.unique_nations, 
+        tr.total_supplied_parts, 
+        MAX(rs.total_sales) AS max_sales
+    FROM 
+        TopRegions tr
+    LEFT JOIN 
+        RankedSales rs ON tr.total_supplied_parts > 0
+    GROUP BY 
+        tr.r_regionkey, tr.unique_nations, tr.total_supplied_parts
+    HAVING 
+        MAX(rs.total_sales) IS NOT NULL OR tr.unique_nations < 5
+)
+SELECT 
+    r.r_name,
+    fr.unique_nations,
+    fr.total_supplied_parts,
+    COALESCE(fr.max_sales, 0) AS max_total_sales,
+    CASE 
+        WHEN fr.unique_nations < 3 THEN 'Underperforming'
+        WHEN fr.max_total_sales IS NULL THEN 'No Sales Data'
+        ELSE 'Active'
+    END AS performance_category
+FROM 
+    FinalReport fr
+JOIN 
+    region r ON fr.r_regionkey = r.r_regionkey
+ORDER BY 
+    fr.max_total_sales DESC NULLS LAST, 
+    fr.unique_nations ASC;

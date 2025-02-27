@@ -1,0 +1,32 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAnswers,
+        SUM(v.VoteAmount) AS TotalVotes,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalAnswers,
+    TotalVotes,
+    TotalBadges
+FROM 
+    UserStats
+ORDER BY 
+    TotalVotes DESC, TotalPosts DESC;

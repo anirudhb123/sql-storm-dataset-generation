@@ -1,0 +1,71 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE Count > 100 -- starting with popular tags
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, th.Level + 1
+    FROM Tags t
+    JOIN PostLinks pl ON t.Id = pl.RelatedPostId
+    JOIN TagHierarchy th ON pl.PostId = th.Id
+    WHERE th.Level < 3 -- limiting the hierarchy depth
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pt.Name AS PostType,
+        u.DisplayName AS Editor,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE pht.Name IN ('Edit Body', 'Edit Title')
+)
+SELECT 
+    th.TagName,
+    us.DisplayName AS User,
+    us.Reputation,
+    pp.Title AS PopularPost,
+    pp.ViewCount,
+    re.Editor AS LastEditor,
+    COUNT(DISTINCT re.PostId) AS EditCount,
+    MAX(re.CreationDate) AS LastEditDate
+FROM TagHierarchy th
+JOIN UserStats us ON us.UserId = (
+    SELECT UserId FROM Posts WHERE Tags LIKE '%' || th.TagName || '%' LIMIT 1
+)
+JOIN PopularPosts pp ON pp.Rank <= 10
+LEFT JOIN RecentEdits re ON re.PostId = pp.PostId AND re.EditRank = 1
+WHERE us.Reputation > 1000
+GROUP BY th.TagName, us.DisplayName, us.Reputation, pp.Title, pp.ViewCount, re.Editor
+ORDER BY th.TagName, us.Reputation DESC;

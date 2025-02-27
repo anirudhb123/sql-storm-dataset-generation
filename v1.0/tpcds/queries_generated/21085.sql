@@ -1,0 +1,67 @@
+
+WITH RECURSIVE customer_incomes AS (
+    SELECT cd_demo_sk, 
+           cd_gender, 
+           cd_marital_status, 
+           cd_purchase_estimate, 
+           cd_credit_rating, 
+           cd_dep_count,
+           LEAD(cd_purchase_estimate) OVER (PARTITION BY cd_gender ORDER BY cd_demo_sk) AS next_purchase_estimate
+    FROM customer_demographics
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+gathered_sales AS (
+    SELECT ws.bill_customer_sk AS customer_id,
+           COUNT(ws.ws_order_number) AS order_count,
+           SUM(ws.ws_net_profit) AS total_profit,
+           MAX(ws.ws_sales_price) AS max_item_price
+    FROM web_sales ws
+    GROUP BY ws.bill_customer_sk
+),
+redacted_returns AS (
+    SELECT sr.customer_sk,
+           SUM(CASE WHEN sr_return_quantity IS NULL THEN 0 ELSE sr_return_quantity END * COALESCE(sr_return_amt, 0.00)) AS total_return
+    FROM store_returns sr
+    WHERE sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY sr.customer_sk
+),
+income_summary AS (
+    SELECT ci.cd_gender, 
+           ci.cd_marital_status,
+           SUM(COALESCE(gs.order_count, 0)) AS total_orders,
+           SUM(COALESCE(gs.total_profit, 0)) AS total_profit,
+           SUM(COALESCE(rr.total_return, 0)) AS total_returns,
+           AVG(ci.cd_purchase_estimate) AS avg_purchase_estimate,
+           COUNT(DISTINCT ci.cd_demo_sk) AS demographic_count
+    FROM customer_incomes ci
+    LEFT JOIN gathered_sales gs ON ci.cd_demo_sk = gs.customer_id
+    LEFT JOIN redacted_returns rr ON rr.customer_sk = ci.cd_demo_sk
+    GROUP BY ci.cd_gender, ci.cd_marital_status
+),
+final_results AS (
+    SELECT gender, 
+           marital_status, 
+           total_orders, 
+           total_profit, 
+           total_returns, 
+           avg_purchase_estimate,
+           demographic_count,
+           CASE 
+               WHEN total_profit IS NULL OR total_profit <= 0 THEN 'NO PROFIT'
+               WHEN total_orders <= 50 THEN 'LOW ACTIVITY'
+               ELSE 'ACTIVE CUSTOMER' 
+           END AS activity_status
+    FROM income_summary
+)
+
+SELECT * 
+FROM final_results
+WHERE demographic_count >= (
+    SELECT AVG(demographic_count) FROM (
+        SELECT COUNT(DISTINCT cd_demo_sk) AS demographic_count 
+        FROM customer_incomes 
+        GROUP BY cd_gender, cd_marital_status
+    ) AS avg_counts
+) OR activity_status = 'ACTIVE CUSTOMER'
+ORDER BY avg_purchase_estimate DESC, total_profit DESC
+FETCH FIRST 100 ROWS ONLY;

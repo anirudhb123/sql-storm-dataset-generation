@@ -1,0 +1,51 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS web_return_count,
+        COUNT(DISTINCT sr_ticket_number) AS store_return_count,
+        SUM(wr_return_amt) AS total_web_return_amt,
+        SUM(sr_return_amt) AS total_store_return_amt,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM customer c
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.w_returning_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+),
+income_levels AS (
+    SELECT cd_demo_sk, 
+           CASE 
+               WHEN hd_income_band_sk IS NOT NULL THEN 
+                   (SELECT ib_income_band_sk FROM household_demographics WHERE hd_demo_sk = cd_demo_sk)
+               ELSE NULL 
+           END AS income_band
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+profit_summary AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.web_return_count,
+        cs.store_return_count,
+        cs.total_web_return_amt,
+        cs.total_store_return_amt,
+        cs.profit_rank,
+        il.income_band
+    FROM customer_stats cs
+    JOIN income_levels il ON cs.c_customer_sk = il.cd_demo_sk
+)
+SELECT 
+    ps.c_customer_sk,
+    COALESCE(ps.total_web_return_amt, 0) AS total_web_return_amt,
+    COALESCE(ps.total_store_return_amt, 0) AS total_store_return_amt,
+    ps.income_band,
+    CASE 
+        WHEN ps.profit_rank = 1 THEN 'Top Profit Customer'
+        WHEN ps.profit_rank BETWEEN 2 AND 5 THEN 'High Profit Customer'
+        WHEN ps.profit_rank BETWEEN 6 AND 10 THEN 'Medium Profit Customer'
+        ELSE 'Low Profit Customer'
+    END AS customer_category
+FROM profit_summary ps
+WHERE ps.income_band IS NOT NULL
+ORDER BY ps.total_web_return_amt DESC, ps.total_store_return_amt DESC;

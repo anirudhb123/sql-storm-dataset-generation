@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS no_notes_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name, ak.person_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        no_notes_count,
+        DENSE_RANK() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM 
+        ActorDetails
+    WHERE 
+        movie_count > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ta.actor_name,
+    ta.movie_count,
+    ta.no_notes_count,
+    COALESCE(mc.company_count, 0) AS company_count,
+    COALESCE(mc.company_names, 'N/A') AS company_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    TopActors ta ON ci.person_id = ta.person_id
+LEFT JOIN 
+    MovieCompanies mc ON rm.movie_id = mc.movie_id
+WHERE 
+    rm.rn <= 5
+    AND (rm.production_year BETWEEN 1980 AND 1990 OR rm.title LIKE '%Final%')
+ORDER BY 
+    rm.production_year DESC, rm.title,
+    ta.movie_count DESC NULLS LAST,
+    mc.company_count ASC NULLS FIRST
+LIMIT 50;

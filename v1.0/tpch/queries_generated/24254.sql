@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No Comment') AS supplier_comment
+    FROM 
+        supplier s
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        p.p_partkey
+),
+FilteredSales AS (
+    SELECT 
+        ps.p_partkey,
+        ps.total_sales,
+        ps.order_count
+    FROM 
+        PartSales ps
+    WHERE 
+        ps.total_sales > (SELECT AVG(total_sales) FROM PartSales)
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(f.total_sales) AS total_filtered_sales,
+    STRING_AGG(DISTINCT s.s_name, ', ') FILTER (WHERE s.s_acctbal > 10000) AS high_value_suppliers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers s ON s.s_nationkey = n.n_nationkey AND s.supplier_rank <= 5
+LEFT JOIN 
+    FilteredSales f ON f.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey) 
+WHERE 
+    r.r_name IS NOT NULL AND
+    n.n_name IS NOT NULL AND
+    c.c_acctbal IS NOT NULL
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    SUM(COALESCE(f.total_sales, 0)) > 0
+ORDER BY 
+    region_name, nation_name;

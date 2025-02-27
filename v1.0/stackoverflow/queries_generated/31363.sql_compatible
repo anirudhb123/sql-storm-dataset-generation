@@ -1,0 +1,96 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        Ph.Id AS HistoryId,
+        Ph.PostId,
+        Ph.CreationDate,
+        Ph.UserId,
+        Ph.Comment,
+        Ph.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.PostHistoryTypeId IN (10, 11)  
+    UNION ALL
+    SELECT 
+        Ph.Id,
+        Ph.PostId,
+        Ph.CreationDate,
+        Ph.UserId,
+        Ph.Comment,
+        Ph.PostHistoryTypeId,
+        RPh.Level + 1
+    FROM 
+        PostHistory Ph
+    JOIN 
+        RecursivePostHistory RPh ON RPh.PostId = Ph.PostId
+    WHERE 
+        RPh.UserId != Ph.UserId AND RPh.Level < 5  
+),
+UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(UP.TotalUpvotes, 0) AS Upvotes,
+        COALESCE(DOWN.TotalDownvotes, 0) AS Downvotes,
+        COALESCE(PH.ClosedCount, 0) AS ClosedCount,
+        COALESCE(PH.ReopenedCount, 0) AS ReopenedCount,
+        P.OwnerUserId
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS ClosedCount,
+            SUM(CASE WHEN PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedCount 
+        FROM 
+            RecursivePostHistory
+        GROUP BY 
+            PostId
+    ) PH ON P.Id = PH.PostId
+    LEFT JOIN UserScores UP ON P.OwnerUserId = UP.UserId
+    LEFT JOIN UserScores DOWN ON P.OwnerUserId = DOWN.UserId
+)
+SELECT    
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.ClosedCount,
+    PS.ReopenedCount,
+    U.Reputation AS UserReputation,
+    CASE 
+        WHEN PS.ClosedCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    PostStats PS
+JOIN 
+    Users U ON PS.OwnerUserId = U.Id
+WHERE 
+    PS.Score > 0 
+    AND U.Reputation > 1000
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC 
+LIMIT 100;

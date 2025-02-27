@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SuppliersOfInterest AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CAST(NULLIF(s.s_comment, '') AS VARCHAR(100)) AS normalized_comment
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CAST(NULLIF(s.s_comment, '') AS VARCHAR(100)) 
+    FROM supplier s
+    JOIN SuppliersOfInterest soi ON s.s_nationkey = soi.s_nationkey 
+    WHERE s.s_acctbal < soi.s_acctbal
+), 
+PartSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost, COUNT(ps.ps_suppkey) AS number_of_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps_num FROM (VALUES (1), (2), (3), (4), (5)) AS sizes(ps_num))
+      AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size BETWEEN 1 AND 10)
+),
+CriticalOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderstatus, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o 
+    WHERE o.o_totalprice > 3000 AND o.o_orderstatus IN ('O', 'F')
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_extendedprice 
+    FROM lineitem l
+    JOIN CriticalOrders co ON l.l_orderkey = co.o_orderkey
+    WHERE l.l_discount > 0.05
+), 
+SupplierPartCosts AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS evaluated_cost
+    FROM partsupp ps
+    JOIN FilteredLineItems l ON ps.ps_partkey = l.l_partkey 
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT p.p_partkey, p.p_name, spc.evaluated_cost, COALESCE(sp.total_supply_cost, 0) AS total_cost_of_part, 
+       soi.s_name AS supplier_name, soi.normalized_comment
+FROM HighValueParts p
+LEFT JOIN SupplierPartCosts spc ON spc.p_partkey = p.p_partkey
+LEFT JOIN SuppliersOfInterest soi ON soi.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey IN (1, 2, 3, 4, 5))
+WHERE p.p_retailprice - COALESCE(spc.evaluated_cost, 0) > 1000
+ORDER BY p.p_partkey DESC, supplier_name
+FETCH FIRST 10 ROWS ONLY;

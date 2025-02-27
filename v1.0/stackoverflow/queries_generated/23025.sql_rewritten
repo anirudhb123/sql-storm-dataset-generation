@@ -1,0 +1,78 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        CASE 
+            WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryChanges,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+AggregateStats AS (
+    SELECT 
+        ps.UserId,
+        SUM(COALESCE(pd.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(pd.DownVotes, 0)) AS TotalDownVotes,
+        AVG(pd.CommentCount) AS AvgComments
+    FROM Posts ps
+    LEFT JOIN PostDetails pd ON ps.Id = pd.PostId
+    GROUP BY ps.UserId
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.Views,
+    us.BadgeCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COALESCE(pds.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(pds.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(pts.HistoryChanges, 0) AS TotalHistoryChanges,
+    COALESCE(pts.LastChangeDate, 'No Changes') AS LastChangeDate,
+    COALESCE(pts.ChangeTypes, 'No Changes') AS ChangeTypes,
+    CASE 
+        WHEN us.Reputation IS NULL THEN 'Unknown'
+        WHEN us.Reputation < 100 THEN 'Low Reputation'
+        WHEN us.Reputation >= 100 AND us.Reputation < 1000 THEN 'Medium Reputation'
+        ELSE 'High Reputation'
+    END AS ReputationCategory
+FROM UserStats us
+LEFT JOIN AggregateStats pds ON us.UserId = pds.UserId
+LEFT JOIN PostHistoryStats pts ON us.UserId = pts.PostId
+WHERE us.Reputation IS NOT NULL
+  AND us.BadgeCount > 0
+ORDER BY us.Reputation DESC, us.DisplayName ASC
+LIMIT 100;

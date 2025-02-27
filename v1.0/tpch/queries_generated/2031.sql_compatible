@@ -1,0 +1,81 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+        SUM(rs.total_cost) AS total_supplier_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 3
+    GROUP BY 
+        r.r_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        MAX(o.o_orderdate) AS latest_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price,
+        AVG(l.l_discount) AS avg_discount,
+        COUNT(*) AS line_item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    ts.r_name,
+    ts.supplier_count,
+    ts.total_supplier_cost,
+    COALESCE(co.total_orders, 0) AS total_customer_orders,
+    COALESCE(co.latest_order_date, 'No Orders') AS latest_order_date,
+    oli.total_line_price,
+    oli.avg_discount,
+    oli.line_item_count
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    CustomerOrders co ON ts.supplier_count > 0
+LEFT JOIN 
+    region r ON ts.supplier_count > 0
+LEFT JOIN 
+    OrderLineItems oli ON oli.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+WHERE 
+    ts.total_supplier_cost > (
+        SELECT AVG(total_supplier_cost) FROM TopSuppliers
+    )
+ORDER BY 
+    ts.total_supplier_cost DESC, r.r_name;

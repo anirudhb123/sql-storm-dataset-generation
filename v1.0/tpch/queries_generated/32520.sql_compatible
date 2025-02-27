@@ -1,0 +1,67 @@
+
+WITH RECURSIVE OrderTotals AS (
+    SELECT o_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_price
+    FROM orders
+    JOIN lineitem ON o_orderkey = l_orderkey
+    GROUP BY o_orderkey
+    
+    UNION ALL
+    
+    SELECT o_orderkey, total_price * 1.05 AS total_price
+    FROM OrderTotals
+    WHERE total_price < 10000
+),
+SupplierStats AS (
+    SELECT s_nationkey, COUNT(DISTINCT s_suppkey) AS supplier_count, AVG(s_acctbal) AS avg_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_purchases
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey
+),
+MaxPurchase AS (
+    SELECT c.c_custkey, ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS purchase_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+)
+SELECT p.p_name, p.p_mfgr, p.p_brand, p.p_type, 
+    COALESCE(cs.total_purchases, 0) AS customer_total_purchases,
+    (SELECT s.s_name 
+     FROM supplier s
+     LEFT JOIN SupplierStats ss ON s.s_nationkey = ss.s_nationkey
+     WHERE ss.supplier_count > 5
+     ORDER BY ss.avg_acctbal DESC
+     LIMIT 1) AS top_supplier,
+    ot.total_price AS order_total_price,
+    (SELECT AVG(total_price) 
+     FROM OrderTotals
+    ) AS avg_order_total_price,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size'
+        ELSE CAST(p.p_size AS VARCHAR)
+    END AS part_size,
+    (SELECT MAX(c.account_balance) 
+     FROM customer c 
+     WHERE c.n_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'CANADA')
+    ) AS max_canadian_balance
+FROM part p
+LEFT JOIN CustomerPurchases cs ON p.p_partkey = cs.c_custkey
+LEFT JOIN OrderTotals ot ON p.p_partkey = ot.o_orderkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2
+    WHERE p2.p_type LIKE '%metal%'
+) OR EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey AND l.l_discount > 0.1
+)
+GROUP BY p.p_name, p.p_mfgr, p.p_brand, p.p_type, cs.total_purchases, ot.total_price
+ORDER BY customer_total_purchases DESC, p.p_name;

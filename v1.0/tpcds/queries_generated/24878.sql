@@ -1,0 +1,56 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ship_date_sk,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_quantity DESC) AS quantity_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2 WHERE ws2.ws_ship_date_sk IS NOT NULL)
+),
+item_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(COALESCE(rs.ws_sales_price, 0) * rs.ws_quantity) AS total_sales_value,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders,
+        MAX(rs.ws_quantity) AS max_order_quantity,
+        MIN(rs.ws_quantity) AS min_order_quantity
+    FROM 
+        item i
+    LEFT JOIN 
+        ranked_sales rs ON i.i_item_sk = rs.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+high_value_items AS (
+    SELECT 
+        iv.*,
+        d.d_date AS shipment_date,
+        CASE 
+            WHEN iv.total_sales_value IS NULL THEN 'NO SALES'
+            WHEN iv.total_sales_value >= 10000 THEN 'HIGH'
+            ELSE 'LOW'
+        END AS sales_category
+    FROM 
+        item_sales iv
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = (SELECT MIN(ws_ship_date_sk) FROM web_sales WHERE ws_item_sk = iv.ws_item_sk)
+)
+SELECT 
+    hvi.i_item_id,
+    hvi.total_sales_value,
+    hvi.sales_category,
+    COALESCE(hvi.shipment_date, '1970-01-01') AS shipment_date
+FROM 
+    high_value_items hvi
+WHERE 
+    hvi.total_orders > 2
+    AND NOT (hvi.sales_category = 'LOW' AND hvi.total_sales_value = 0)
+ORDER BY 
+    hvi.sales_category DESC, 
+    hvi.total_sales_value DESC;

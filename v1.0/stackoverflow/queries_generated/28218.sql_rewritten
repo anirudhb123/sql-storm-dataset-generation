@@ -1,0 +1,76 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(DISTINCT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))::text) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeleteVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN 1 END) AS ClosureHistoryCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResult AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(ptc.TagCount), 0) AS TotalTags,
+        COALESCE(SUM(pbs.ClosureHistoryCount), 0) AS TotalClosureHistory,
+        MAX(pbs.LastEditDate) AS MostRecentEditDate,
+        u.UpvoteCount,
+        u.DeleteVoteCount,
+        u.CommentCount
+    FROM 
+        UserActivity u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.UserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        PostTagCounts ptc ON p.Id = ptc.PostId
+    LEFT JOIN 
+        PostHistoryStats pbs ON p.Id = pbs.PostId
+    GROUP BY 
+        u.UserId, u.DisplayName
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.QuestionCount,
+    f.TotalTags,
+    f.TotalClosureHistory,
+    f.MostRecentEditDate,
+    f.UpvoteCount,
+    f.DeleteVoteCount,
+    f.CommentCount
+FROM 
+    FinalResult f
+WHERE 
+    f.QuestionCount > 0
+ORDER BY 
+    f.TotalTags DESC, f.UpvoteCount DESC, f.CommentCount DESC
+LIMIT 10;

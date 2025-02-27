@@ -1,0 +1,58 @@
+WITH RecentQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tagName ON tagName IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tagName
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    rq.QuestionId,
+    rq.Title,
+    rq.OwnerDisplayName,
+    rq.CreationDate,
+    rq.AnswerCount,
+    rq.UpVotes,
+    rq.DownVotes,
+    rq.Tags,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RecentQuestions rq
+LEFT JOIN 
+    UserBadges ub ON rq.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = ub.UserId)
+ORDER BY 
+    rq.CreationDate DESC
+LIMIT 10;

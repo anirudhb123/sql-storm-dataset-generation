@@ -1,0 +1,50 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+), 
+SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderLineSummary AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate > DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY o.o_orderkey
+)
+SELECT o.rn, 
+       o.o_orderkey, 
+       o.o_orderdate, 
+       o.o_totalprice, 
+       COALESCE(ols.total_revenue, 0) AS total_revenue,
+       COALESCE(sd.total_supply_cost, 0) AS supplier_total_cost,
+       CASE 
+           WHEN ols.unique_parts > 10 THEN 'High Variety'
+           ELSE 'Low Variety'
+       END AS part_variety,
+       r.r_name
+FROM RankedOrders o
+LEFT JOIN OrderLineSummary ols ON o.o_orderkey = ols.o_orderkey
+LEFT JOIN supplier s ON s.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_container = 'SM BOX'
+    LIMIT 1
+)
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE r.r_name IS NOT NULL
+ORDER BY o.o_orderdate DESC, total_revenue DESC;

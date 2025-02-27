@@ -1,0 +1,59 @@
+WITH RecursivePosts AS (
+    SELECT Id, PostTypeId, Title, ParentId, Score, OwnerUserId, CreationDate,
+           1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.PostTypeId, p.Title, p.ParentId, p.Score, p.OwnerUserId, p.CreationDate,
+           rp.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePosts rp ON p.ParentId = rp.Id
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName,
+           COUNT(DISTINCT p.Id) AS PostCount,
+           COUNT(DISTINCT c.Id) AS CommentCount,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > 1000  
+    GROUP BY u.Id
+),
+PostHistoryStats AS (
+    SELECT ph.PostId,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT u.DisplayName, 
+       u.PostCount, 
+       u.CommentCount, 
+       u.TotalBounties,
+       u.Upvotes, 
+       u.Downvotes,
+       p.Id AS PostId,
+       p.Title,
+       COALESCE(ph.CloseCount, 0) AS CloseCount,
+       COALESCE(ph.ReopenCount, 0) AS ReopenCount,
+       COALESCE(ph.DeleteCount, 0) AS DeleteCount,
+       rp.Level AS NestedLevel,
+       CASE
+           WHEN p.Score > 100 THEN 'High Score'
+           WHEN p.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+           ELSE 'Low Score'
+       END AS ScoreCategory
+FROM UserActivity u
+JOIN Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN PostHistoryStats ph ON p.Id = ph.PostId
+LEFT JOIN RecursivePosts rp ON p.Id = rp.Id
+WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+ORDER BY p.Score DESC, u.DisplayName;

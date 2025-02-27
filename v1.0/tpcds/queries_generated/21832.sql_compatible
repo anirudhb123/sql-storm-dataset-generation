@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS SaleRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.wr_return_quantity) AS total_returned
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        wr.returning_customer_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_quantity_on_hand >= 0 
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(rs.ws_sales_price, 0) AS max_sales_price,
+    COALESCE(cr.total_returned, 0) AS total_returned_items,
+    COALESCE(ii.total_quantity, 0) AS inventory_count
+FROM 
+    customer c
+LEFT JOIN 
+    (SELECT * FROM RankedSales WHERE SaleRank = 1) rs ON c.c_customer_sk = rs.web_site_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    ItemInventory ii ON rs.ws_order_number = ii.inv_item_sk
+WHERE 
+    (c.c_birth_year BETWEEN 1980 AND 1995 OR c.c_birth_country IS NULL)
+    AND (c.c_preferred_cust_flag = 'Y' OR c.c_last_name LIKE '%son%')
+GROUP BY 
+    c.c_customer_id, 
+    rs.ws_sales_price, 
+    cr.total_returned, 
+    ii.total_quantity
+ORDER BY 
+    max_sales_price DESC,
+    total_returned_items ASC;

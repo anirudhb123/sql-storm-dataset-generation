@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(up.UserCount, 0) AS UpVoteCount,
+        COALESCE(dn.UserCount, 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(up.UserCount, 0) - COALESCE(dn.UserCount, 0) DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(UserId) AS UserCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 2 
+        GROUP BY 
+            PostId
+    ) up ON p.Id = up.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(UserId) AS UserCount
+        FROM 
+            Votes
+        WHERE 
+            VoteTypeId = 3 
+        GROUP BY 
+            PostId
+    ) dn ON p.Id = dn.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        us.DisplayName,
+        us.Reputation,
+        ROW_NUMBER() OVER (ORDER BY rp.UpVoteCount - rp.DownVoteCount DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserStats us ON rp.OwnerUserId = us.UserId
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.DisplayName,
+    trp.Reputation,
+    COALESCE(NULLIF(trp.Reputation, 0), NULL) AS ReputationDisplay,
+    CASE 
+        WHEN trp.OverallRank <= 10 THEN 'Top 10'
+        WHEN trp.Reputation > 1000 THEN 'High Reputation'
+        ELSE 'Standard'
+    END AS PostCategory
+FROM 
+    TopRankedPosts trp
+WHERE 
+    trp.Reputation IS NOT NULL OR 
+    EXISTS (SELECT 1 FROM Posts p WHERE p.OwnerUserId = trp.UserId AND p.Score >= 5)
+ORDER BY 
+    trp.OverallRank
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

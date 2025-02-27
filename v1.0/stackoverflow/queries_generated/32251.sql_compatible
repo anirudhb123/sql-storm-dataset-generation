@@ -1,0 +1,97 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.Level,
+        MAX(ph.Level) OVER (PARTITION BY p.Id) AS MaxLevel,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoterCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.ClosedDate IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, ph.Level
+),
+FinalStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.BadgeCount,
+        us.TotalBounty,
+        COUNT(cp.Id) AS ClosedPostCount,
+        SUM(CASE WHEN cp.Level = 1 THEN 1 ELSE 0 END) AS ClosedPostLevel1,
+        SUM(CASE WHEN cp.MaxLevel > 1 THEN 1 ELSE 0 END) AS ClosedPostHigherLevels,
+        COALESCE(SUM(cp.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(cp.VoterCount), 0) AS TotalVoters
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        ClosedPosts cp ON us.UserId = cp.VoterCount 
+    GROUP BY 
+        us.UserId, us.DisplayName, us.PostCount, us.BadgeCount, us.TotalBounty
+)
+
+SELECT 
+    u.*, 
+    COALESCE(f.ClosedPostCount, 0) AS ClosedPostCount,
+    COALESCE(f.ClosedPostLevel1, 0) AS ClosedPostLevel1,
+    COALESCE(f.ClosedPostHigherLevels, 0) AS ClosedPostHigherLevels,
+    COALESCE(f.TotalComments, 0) AS TotalComments,
+    COALESCE(f.TotalVoters, 0) AS TotalVoters
+FROM 
+    UserStats u
+LEFT JOIN 
+    FinalStats f ON u.UserId = f.UserId
+ORDER BY 
+    u.Reputation DESC
+LIMIT 100;

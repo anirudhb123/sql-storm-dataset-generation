@@ -1,0 +1,53 @@
+WITH TagStats AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 3 THEN 1 ELSE 0 END) AS WikiCount,
+        AVG(u.Reputation) AS AvgUserReputation,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS Contributors
+    FROM
+        Tags t
+    JOIN
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY
+        t.TagName
+),
+PostActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(h.Comment, 'No Comments') AS LastEditComment,
+        p.LastEditDate,
+        h.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY h.CreationDate DESC) AS RecentChanges
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory h ON p.Id = h.PostId
+    WHERE
+        h.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+)
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.WikiCount,
+    ts.AvgUserReputation,
+    ts.Contributors,
+    pa.Title AS LatestActivityTitle,
+    pa.CreationDate AS PostCreationDate,
+    pa.LastEditComment,
+    pa.LastEditDate,
+    pa.HistoryDate
+FROM
+    TagStats ts
+LEFT JOIN
+    PostActivity pa ON ts.PostCount > 0
+ORDER BY
+    ts.PostCount DESC, ts.TagName;

@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.web_site_sk, ws.ws_order_number
+),
+TopWebsites AS (
+    SELECT 
+        web_site_sk,
+        total_net_profit 
+    FROM 
+        RankedSales 
+    WHERE 
+        rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(*) AS total_return_count
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+CombinedResults AS (
+    SELECT 
+        tw.web_site_sk,
+        tw.total_net_profit,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(cr.total_return_count, 0) AS total_return_count
+    FROM 
+        TopWebsites tw
+    LEFT JOIN 
+        CustomerReturns cr ON tw.web_site_sk = cr.returning_customer_sk
+)
+SELECT 
+    cb.web_site_sk,
+    cb.total_net_profit,
+    cb.total_return_amount,
+    cb.total_return_count,
+    CASE 
+        WHEN cb.total_return_count = 0 THEN 'No Returns'
+        ELSE 'Has Returns'
+    END AS return_status,
+    CONCAT('Total Profit: $', CAST(cb.total_net_profit AS VARCHAR), ' - Total Returns: $', CAST(cb.total_return_amount AS VARCHAR)) AS summary 
+FROM 
+    CombinedResults cb
+ORDER BY 
+    cb.total_net_profit DESC;

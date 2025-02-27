@@ -1,0 +1,56 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_country
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_web_sites AS (
+    SELECT 
+        s.web_site_sk,
+        s.total_orders,
+        s.total_profit
+    FROM 
+        sales_summary s
+    WHERE 
+        s.rank <= 5      
+)
+
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    tw.total_orders,
+    tw.total_profit,
+    COUNT(cr.cr_item_sk) AS total_returns,
+    SUM(cr.cr_return_amount) AS total_return_amount,
+    COALESCE(SUM(cr.cr_return_quantity), 0) AS total_return_quantity
+FROM 
+    customer_info ci
+    LEFT JOIN web_returns cr ON ci.c_customer_sk = cr.wr_returning_customer_sk
+    JOIN top_web_sites tw ON cr.cr_warehouse_sk = tw.web_site_sk
+GROUP BY 
+    ci.c_first_name, ci.c_last_name, ci.cd_gender, ci.cd_marital_status, tw.total_orders, tw.total_profit
+ORDER BY 
+    tw.total_profit DESC;

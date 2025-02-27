@@ -1,0 +1,66 @@
+
+WITH UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array(p.Tags, '><')) AS TagName
+    ) t ON true
+    GROUP BY p.Id, p.Title, p.PostTypeId, p.CreationDate, p.Score, p.ViewCount
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.UpVoteCount DESC, ps.CreationDate ASC) AS PostRank
+    FROM PostSummary ps
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(rp.Title, 'No posts') AS PostTitle,
+    COALESCE(rp.UpVoteCount, 0) AS TotalUpVotes,
+    COALESCE(rp.DownVoteCount, 0) AS TotalDownVotes,
+    rp.PostRank,
+    CASE 
+        WHEN rp.PostRank IS NULL THEN 'No ranking'
+        ELSE 'Ranked'
+    END AS RankStatus
+FROM UserVotes u
+LEFT JOIN RankedPosts rp ON u.UserId = (
+    SELECT OwnerUserId 
+    FROM Posts 
+    WHERE Posts.Id = (
+        SELECT PostId
+        FROM RankedPosts 
+        WHERE PostRank = 1
+        LIMIT 1
+    )
+)
+WHERE u.TotalVotes > 0
+ORDER BY u.Reputation DESC, u.DisplayName ASC;

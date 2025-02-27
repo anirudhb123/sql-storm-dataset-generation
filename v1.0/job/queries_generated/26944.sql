@@ -1,0 +1,68 @@
+WITH ActorMovieInfo AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.role_id,
+        r.role AS character_role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year BETWEEN 2000 AND 2020
+),
+KeywordInfo AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2010
+    GROUP BY 
+        t.id
+),
+CompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(c.name, ', ') AS companies,
+        STRING_AGG(ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    ami.actor_name,
+    ami.movie_title,
+    ami.production_year,
+    ami.character_role,
+    ki.keywords,
+    ci.companies,
+    ci.company_types
+FROM 
+    ActorMovieInfo ami
+LEFT JOIN 
+    KeywordInfo ki ON ami.movie_title = (SELECT title FROM title WHERE id = ki.movie_id)
+LEFT JOIN 
+    CompanyInfo ci ON ami.movie_title = (SELECT title FROM title WHERE id = ci.movie_id)
+ORDER BY 
+    ami.production_year DESC, 
+    ami.actor_name;
+
+This query retrieves detailed information about actors, the movies they appeared in, their roles, associated keywords, and the companies involved in those movies from the specified years, allowing for comprehensive benchmarking of string processing capabilities.

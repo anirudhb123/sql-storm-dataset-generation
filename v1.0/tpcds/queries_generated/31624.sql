@@ -1,0 +1,72 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ws_sold_date_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales,
+        cs_sold_date_sk
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        cs_item_sk, cs_sold_date_sk
+),
+AggregatedSales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        item.i_current_price,
+        COALESCE(SD.total_quantity, 0) AS total_quantity_sold,
+        COALESCE(SD.total_sales, 0) AS total_sales,
+        CASE 
+            WHEN COALESCE(SD.total_quantity, 0) > 0 
+            THEN COALESCE(SD.total_sales, 0) / COALESCE(SD.total_quantity, 1) 
+            ELSE 0 
+        END AS avg_price_per_item,
+        RANK() OVER (PARTITION BY item.i_item_id ORDER BY COALESCE(SD.total_sales, 0) DESC) AS sales_rank
+    FROM 
+        item
+    LEFT JOIN 
+        SalesData SD ON item.i_item_sk = SD.ws_item_sk OR item.i_item_sk = SD.cs_item_sk
+)
+SELECT 
+    AS.address,
+    CD.cd_gender,
+    AGS.i_product_name,
+    AGS.total_quantity_sold,
+    AGS.total_sales,
+    AGS.avg_price_per_item
+FROM 
+    AggregatedSales AGS
+JOIN 
+    customer C ON C.c_customer_sk = (
+        SELECT DISTINCT C1.c_customer_sk
+        FROM customer C1
+        WHERE C1.c_current_addr_sk IS NOT NULL
+        AND C1.c_current_cdemo_sk IN (
+            SELECT cd_demo_sk
+            FROM customer_demographics
+            WHERE cd_marital_status = 'M'
+        )
+    )
+JOIN 
+    customer_address CA ON C.c_current_addr_sk = CA.ca_address_sk
+JOIN 
+    customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+WHERE 
+    AGS.total_sales > 1000
+ORDER BY 
+    AGS.avg_price_per_item DESC;

@@ -1,0 +1,60 @@
+WITH supplier_info AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    s.s_name,
+    si.total_available_quantity,
+    si.total_supply_value,
+    si.part_count,
+    co.order_count,
+    co.total_spent,
+    ls.total_revenue,
+    ls.avg_quantity
+FROM 
+    supplier_info si
+LEFT JOIN 
+    customer_orders co ON si.s_suppkey = co.c_custkey 
+LEFT JOIN 
+    lineitem_summary ls ON co.order_count > 0 AND ls.l_orderkey = co.c_custkey 
+WHERE 
+    si.total_supply_value > (SELECT AVG(total_supply_value) FROM supplier_info) 
+    AND co.total_spent IS NOT NULL
+ORDER BY 
+    si.total_supply_value DESC, co.total_spent ASC
+LIMIT 100;

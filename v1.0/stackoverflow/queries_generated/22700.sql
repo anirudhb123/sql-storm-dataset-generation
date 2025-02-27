@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= NOW() - INTERVAL '1 year' -- Only posts from the last year
+),
+PostStats AS (
+    SELECT
+        p.PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotesReceived,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotesReceived,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) DESC) AS VoteRank
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        Votes v ON p.PostId = v.PostId -- Votes on posts
+    LEFT JOIN 
+        (SELECT 
+             PostId, COUNT(*) AS CommentCount 
+         FROM 
+             Comments 
+         GROUP BY PostId) c ON p.PostId = c.PostId
+    LEFT JOIN 
+        (SELECT 
+             UserId, COUNT(*) AS BadgeCount 
+         FROM 
+             Badges 
+         GROUP BY UserId) b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.PostId, c.CommentCount, b.BadgeCount
+)
+SELECT 
+    ps.PostId,
+    p.Title,
+    ps.UpVotesReceived,
+    ps.DownVotesReceived,
+    ps.CommentCount,
+    ps.BadgeCount,
+    CASE 
+        WHEN ps.UpVotesReceived > ps.DownVotesReceived THEN 'Positive'
+        WHEN ps.UpVotesReceived = ps.DownVotesReceived THEN 'Neutral'
+        ELSE 'Negative' 
+    END AS Sentiment,
+    (
+        SELECT 
+            STRING_AGG(DISTINCT t.TagName, ', ') 
+        FROM 
+            Posts p2 
+        JOIN 
+            TAGS t ON t.ExcerptPostId = p2.Id 
+        WHERE 
+            p2.Id = ps.PostId
+    ) AS AssociatedTags
+FROM 
+    PostStats ps
+JOIN 
+    Posts p ON ps.PostId = p.Id
+WHERE 
+    ps.PostRank = 1 -- Get the best post of each user
+ORDER BY 
+    ps.CommentCount DESC,
+    ps.UpVotesReceived - ps.DownVotesReceived DESC
+LIMIT 100;

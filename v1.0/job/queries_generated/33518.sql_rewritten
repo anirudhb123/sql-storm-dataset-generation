@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title AS movie_title,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.movie_id
+    WHERE 
+        mh.level < 5  
+),
+
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+),
+
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+movie_summary AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COUNT(DISTINCT rc.actor_name) AS total_actors,
+        COALESCE(kc.keyword_count, 0) AS total_keywords,
+        mh.level
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        ranked_cast rc ON mh.movie_id = rc.movie_id
+    LEFT JOIN 
+        keyword_counts kc ON mh.movie_id = kc.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.level
+)
+
+SELECT 
+    ms.movie_id,
+    ms.movie_title,
+    ms.total_actors,
+    ms.total_keywords,
+    CASE 
+        WHEN ms.total_actors = 0 THEN 'No actors'
+        WHEN ms.level = 1 THEN 'Direct movie'
+        ELSE 'Linked movie'
+    END AS movie_type
+FROM 
+    movie_summary ms
+WHERE 
+    ms.total_actors > 0
+ORDER BY 
+    ms.total_keywords DESC, ms.total_actors DESC;

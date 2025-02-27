@@ -1,0 +1,69 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS total_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        COUNT(DISTINCT ca_city) AS unique_cities
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS total_customers,
+        AVG(cd_dep_count) AS avg_dependents,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_cdemo_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_cdemo_sk
+),
+FinalStats AS (
+    SELECT 
+        a.ca_state,
+        a.total_addresses,
+        a.avg_street_name_length,
+        a.unique_cities,
+        c.cd_gender,
+        c.total_customers,
+        c.avg_dependents,
+        c.total_purchase_estimate,
+        s.total_sales,
+        s.total_orders
+    FROM 
+        AddressStats a
+    JOIN 
+        CustomerStats c ON 1=1
+    JOIN 
+        SalesStats s ON c.cd_demo_sk = s.ws_bill_cdemo_sk
+)
+SELECT 
+    ca_state,
+    total_addresses,
+    avg_street_name_length,
+    unique_cities,
+    cd_gender,
+    total_customers,
+    avg_dependents,
+    total_purchase_estimate,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(total_orders, 0) AS total_orders
+FROM 
+    FinalStats
+ORDER BY 
+    ca_state, cd_gender;

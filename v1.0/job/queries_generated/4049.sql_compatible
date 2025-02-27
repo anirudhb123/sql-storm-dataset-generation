@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        t.title, t.production_year
+), 
+HighCastMovies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 3
+), 
+MovieKeywords AS (
+    SELECT 
+        m.title, 
+        k.keyword
+    FROM 
+        HighCastMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    h.title, 
+    h.production_year, 
+    COALESCE(ARRAY_AGG(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL), ARRAY[]::TEXT[]) AS keywords
+FROM 
+    HighCastMovies h
+LEFT JOIN 
+    MovieKeywords mk ON h.title = mk.title
+GROUP BY 
+    h.title, h.production_year
+ORDER BY 
+    h.production_year DESC, 
+    h.title ASC;

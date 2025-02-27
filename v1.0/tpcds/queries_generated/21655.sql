@@ -1,0 +1,59 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_returned_date_sk,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_time_sk DESC) AS rnk
+    FROM 
+        store_returns
+),
+FilteredReturns AS (
+    SELECT 
+        rr.sr_item_sk,
+        rr.sr_returned_date_sk,
+        COALESCE(SUM(ws_quantity), 0) AS total_ship_quantity,
+        COUNT(DISTINCT ws_order_number) AS ship_count
+    FROM 
+        RankedReturns rr
+    LEFT JOIN 
+        web_sales ws ON rr.sr_item_sk = ws.ws_item_sk AND rr.sr_returned_date_sk = ws.ws_ship_date_sk
+    WHERE 
+        rr.rnk = 1
+    GROUP BY 
+        rr.sr_item_sk, rr.sr_returned_date_sk
+),
+CustomerDiscounts AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        RANK() OVER (ORDER BY COALESCE(cd.cd_purchase_estimate, 0) DESC) AS discount_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y'
+)
+SELECT 
+    f.sr_item_sk,
+    SUM(CASE WHEN f.total_ship_quantity > 0 THEN f.total_ship_quantity ELSE NULL END) AS valid_ship_quantity,
+    COUNT(DISTINCT cd.c_customer_sk) AS total_discounted_customers,
+    AVG(cd.purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT CONCAT(cd.c_first_name, ' ', cd.c_last_name), ', ') AS customer_names
+FROM 
+    FilteredReturns f
+JOIN 
+    CustomerDiscounts cd ON f.sr_item_sk = (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_order_number = f.sr_item_sk)
+WHERE 
+    f.total_ship_quantity IS NOT NULL
+GROUP BY 
+    f.sr_item_sk
+HAVING 
+    SUM(f.total_ship_quantity) > 10
+    AND COUNT(DISTINCT cd.c_customer_sk) > 5
+ORDER BY 
+    avg_purchase_estimate DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM FilteredReturns) / 2;

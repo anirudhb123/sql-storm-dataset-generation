@@ -1,0 +1,46 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+), UserRankings AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpvotes,
+        TotalDownvotes,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY TotalUpvotes DESC) AS UpvoteRank
+    FROM UserEngagement
+)
+SELECT 
+    ur.DisplayName,
+    ur.TotalPosts,
+    ur.TotalComments,
+    ur.TotalUpvotes,
+    ur.TotalDownvotes,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    (ur.PostRank + ur.UpvoteRank) AS OverallRank
+FROM UserRankings ur
+WHERE ur.TotalPosts > 0
+ORDER BY OverallRank
+LIMIT 10;

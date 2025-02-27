@@ -1,0 +1,62 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS VoteCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY SUM(v.VoteTypeId = 2) DESC) AS VoteRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ps.Title) AS Title,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM PostHistory ph
+    JOIN Posts ps ON ph.PostId = ps.Id
+    WHERE ph.PostHistoryTypeId IN (4, 5) -- Title and Body Edits
+    GROUP BY ph.PostId, ph.CreationDate
+),
+PostCommentStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN (ph.Comment IS NOT NULL AND ph.PostHistoryTypeId = 10) THEN 1 ELSE 0 END), 0) AS ClosedCount,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01') AS LastClosedDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10)  -- Closed posts
+    GROUP BY p.Id
+)
+SELECT 
+    p.Title,
+    p.ViewCount,
+    up.UpVotes,
+    up.DownVotes,
+    cs.CommentCount,
+    eds.LastClosedDate,
+    ud.UserId,
+    ud.DisplayName,
+    ud.VoteCount AS UserVoteCount
+FROM PopularPosts up
+JOIN Posts p ON up.PostId = p.Id
+LEFT JOIN PostCommentStats cs ON p.Id = cs.PostId
+LEFT JOIN RecentEdits eds ON p.Id = eds.PostId AND eds.EditRank = 1
+CROSS JOIN (SELECT * FROM UserVoteCounts) ud
+WHERE up.VoteRank <= 10  -- limit to top 10 popular posts
+  AND p.ViewCount > 100  -- only posts with significant views
+ORDER BY up.UpVotes DESC, p.ViewCount DESC;

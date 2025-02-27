@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR) AS path
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR) AS path
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS m ON ml.linked_movie_id = m.movie_id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+),
+
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info AS ci
+    GROUP BY 
+        ci.movie_id
+),
+
+most_common_keywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id, k.keyword
+    HAVING 
+        COUNT(*) > 1
+),
+
+final_results AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mc.cast_count, 0) AS cast_count,
+        COALESCE(mck.keyword, 'No Keywords') AS most_common_keyword
+    FROM 
+        movie_hierarchy AS mh
+    LEFT JOIN 
+        movie_cast AS mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        most_common_keywords AS mck ON mh.movie_id = mck.movie_id
+    WHERE 
+        mh.level = 0
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.most_common_keyword,
+    ROW_NUMBER() OVER (PARTITION BY fr.production_year ORDER BY fr.cast_count DESC) AS rank
+FROM 
+    final_results AS fr
+WHERE 
+    fr.production_year > 2000
+ORDER BY 
+    fr.production_year DESC, 
+    fr.cast_count DESC;
+
+This SQL query structure is designed to benchmark performances by utilizing several advanced SQL constructs such as a Recursive Common Table Expression (CTE) for creating a movie linkage hierarchy, multiple joins, and window functions to generate rankings, while also filtering results based on production year and calculating various statistics related to movie casts and keywords.

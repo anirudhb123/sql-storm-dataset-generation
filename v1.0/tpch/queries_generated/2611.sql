@@ -1,0 +1,69 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    AND 
+        o.o_orderstatus = 'O'
+),
+supp_part AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+nation_avg AS (
+    SELECT 
+        n.n_nationkey,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    ra.avg_acctbal,
+    r.r_name,
+    CASE 
+        WHEN COUNT(DISTINCT ra.o_orderkey) > 5 THEN 'High'
+        ELSE 'Low'
+    END AS order_volume
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    ranked_orders ra ON ra.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    nation_avg na ON s.s_nationkey = na.n_nationkey
+JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+WHERE 
+    p.p_size IN (SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice > 100)
+    AND na.avg_acctbal > (SELECT AVG(s2.s_acctbal) * 0.9 FROM supplier s2)
+GROUP BY 
+    p.p_name, p.p_mfgr, ra.avg_acctbal, r.r_name
+ORDER BY 
+    total_revenue DESC, p.p_name
+LIMIT 10;

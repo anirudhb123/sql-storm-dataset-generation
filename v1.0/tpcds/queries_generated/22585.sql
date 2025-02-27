@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_order_number,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_net_profit DESC) AS rn,
+        SUM(ws_net_profit) OVER (PARTITION BY ws_order_number) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL AND ws_net_profit IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        COUNT(DISTINCT cr.cr_order_number) AS unique_returns
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.return_quantity > 0 
+    GROUP BY 
+        cr.returning_customer_sk
+),
+MaxReturns AS (
+    SELECT 
+        returning_customer_sk,
+        ROW_NUMBER() OVER (ORDER BY total_returned DESC) AS rn
+    FROM 
+        CustomerReturns
+),
+WarehouseProfit AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        inventory inv
+    JOIN 
+        web_sales ws ON inv.inv_item_sk = ws.ws_item_sk
+    WHERE 
+        inv.inv_quantity_on_hand IS NOT NULL AND ws.ws_net_profit IS NOT NULL
+    GROUP BY 
+        inv.inv_warehouse_sk
+),
+FinalComparison AS (
+    SELECT 
+        WS.ws_order_number,
+        WS.ws_net_profit,
+        CASE 
+            WHEN WS.ws_net_profit >= 0 THEN 'Profitable'
+            ELSE 'Loss'
+        END AS profit_status,
+        COALESCE(RS.rn, 0) AS rank_in_sales,
+        COALESCE(MR.rn, 0) AS rank_in_returns
+    FROM 
+        web_sales WS
+    LEFT JOIN 
+        RankedSales RS ON WS.ws_order_number = RS.ws_order_number
+    LEFT JOIN 
+        MaxReturns MR ON WS.ws_bill_customer_sk = MR.returning_customer_sk
+)
+SELECT 
+    FC.ws_order_number,
+    FC.ws_net_profit,
+    FC.profit_status,
+    W.warehouse_id,
+    W.total_profit AS warehouse_profit
+FROM 
+    FinalComparison FC
+JOIN 
+    WarehouseProfit W ON W.inv_warehouse_sk = (SELECT inv_warehouse_sk FROM inventory LIMIT 1) -- to demonstrate a bizarre behavior
+WHERE 
+    FC.rank_in_sales = 1 OR FC.rank_in_returns = 1
+ORDER BY 
+    warehouse_profit DESC NULLS LAST, 
+    FC.ws_net_profit DESC,
+    FC.ws_order_number;

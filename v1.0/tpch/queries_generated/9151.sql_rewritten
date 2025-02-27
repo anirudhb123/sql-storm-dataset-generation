@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 3
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        p.p_name,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+ExtendedDetails AS (
+    SELECT 
+        to.o_orderkey,
+        to.o_orderdate,
+        to.o_totalprice,
+        to.c_name,
+        SUM(sd.ps_supplycost) AS total_supplycost,
+        COUNT(sd.p_name) AS part_count
+    FROM 
+        TopOrders to
+    LEFT JOIN 
+        SupplierDetails sd ON to.o_orderkey = sd.ps_suppkey
+    GROUP BY 
+        to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name
+)
+SELECT 
+    ed.o_orderkey,
+    ed.o_orderdate,
+    ed.o_totalprice,
+    ed.c_name,
+    ed.total_supplycost,
+    ed.part_count
+FROM 
+    ExtendedDetails ed
+ORDER BY 
+    ed.o_totalprice DESC, ed.o_orderdate ASC;

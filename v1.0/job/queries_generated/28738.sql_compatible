@@ -1,0 +1,54 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT mc.company_id) AS production_company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_members,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        name n ON an.person_id = n.imdb_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+DetailedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.production_company_count,
+        md.cast_members,
+        md.keywords,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.production_company_count DESC) AS rank_by_companies,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.movie_title) AS rank_by_title
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    production_company_count,
+    cast_members,
+    keywords,
+    rank_by_companies,
+    rank_by_title
+FROM 
+    DetailedMovies
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year, rank_by_companies DESC;

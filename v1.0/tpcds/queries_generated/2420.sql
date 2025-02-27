@@ -1,0 +1,81 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank_by_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, 
+        ws_order_number
+),
+top_sales AS (
+    SELECT 
+        ws_item_sk,
+        total_quantity,
+        total_net_paid
+    FROM 
+        ranked_sales
+    WHERE 
+        rank_by_sales <= 5
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        SUM(ts.total_quantity) AS total_quantity,
+        SUM(ts.total_net_paid) AS total_net_spent,
+        CASE 
+            WHEN SUM(ts.total_net_paid) > 1000 THEN 'High' 
+            WHEN SUM(ts.total_net_paid) > 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS spending_category
+    FROM 
+        top_sales ts
+    JOIN 
+        web_sales ws ON ts.ws_order_number = ws.ws_order_number AND ts.ws_item_sk = ws.ws_item_sk
+    JOIN 
+        customer_details cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    GROUP BY 
+        cd.c_customer_sk, 
+        cd.c_first_name, 
+        cd.c_last_name
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.total_quantity,
+    s.total_net_spent,
+    s.spending_category,
+    COALESCE((SELECT MAX(cs_ext_sales_price) 
+              FROM catalog_sales 
+              WHERE cs_item_sk IN (SELECT ws_item_sk FROM top_sales)), 0) AS max_catalog_price,
+    COALESCE((SELECT SUM(sr_returned_date_sk) 
+              FROM store_returns sr 
+              WHERE sr_returning_customer_sk = s.c_customer_sk), 0) AS total_returns
+FROM 
+    sales_summary s
+LEFT JOIN 
+    customer_address ca ON s.c_customer_sk = ca.ca_address_sk
+WHERE 
+    ca.ca_country = 'USA'
+ORDER BY 
+    s.total_net_spent DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+
+WITH RECURSIVE PostsHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostsHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT ph.PostId) AS TotalQuestions,
+    COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoredAnswers,
+    AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+    MAX(DATEDIFF(TIMESTAMP '2024-10-01 12:34:56', u.CreationDate)) AS AccountAgeInDays,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    CASE
+        WHEN COUNT(DISTINCT b.Id) > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    MAX(CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END) AS PostStatus,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT ph.PostId) DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostsHierarchy ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostHistory phs ON p.Id = phs.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '>'))::int)
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName 
+HAVING 
+    COUNT(DISTINCT ph.PostId) > 5
+ORDER BY 
+    TotalQuestions DESC, UserName;

@@ -1,0 +1,52 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        COALESCE(i.i_brand, 'Unknown') AS item_brand,
+        ROW_NUMBER() OVER (ORDER BY rs.total_sales DESC) AS overall_rank
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.sales_rank = 1
+)
+SELECT 
+    ts.ws_item_sk,
+    ts.total_quantity,
+    ts.total_sales,
+    ts.item_brand,
+    CASE 
+        WHEN ts.total_quantity < 50 THEN 'Low Sales'
+        WHEN ts.total_quantity BETWEEN 50 AND 150 THEN 'Moderate Sales'
+        ELSE 'High Sales'
+    END AS sales_category,
+    (SELECT AVG(total_sales) FROM top_sales) AS average_sales,
+    (SELECT COUNT(*) FROM top_sales WHERE total_sales > (SELECT AVG(total_sales) FROM top_sales)) AS above_average_count,
+    COALESCE(NULLIF(ts.total_sales, 0), 'No Sales') AS sales_in_view
+FROM 
+    top_sales ts
+LEFT JOIN 
+    store s ON ts.ws_item_sk IN (SELECT DISTINCT ws.ws_item_sk FROM store_sales ss JOIN item i ON ss.ss_item_sk = i.i_item_sk WHERE i.i_brand = ts.item_brand)
+WHERE 
+    ts.overall_rank <= 10
+ORDER BY 
+    ts.total_sales DESC
+LIMIT 25;

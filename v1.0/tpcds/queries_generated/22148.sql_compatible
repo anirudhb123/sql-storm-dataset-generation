@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1 AND 1000
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+),
+TopSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity, 
+        sd.total_net_paid,
+        COALESCE(sd.total_net_paid / NULLIF(sd.total_quantity, 0), 0.00) AS avg_price,
+        (SELECT AVG(sp.ws_net_paid) 
+         FROM web_sales sp 
+         WHERE sp.ws_item_sk = sd.ws_item_sk AND sp.ws_ship_date_sk IS NOT NULL) AS historical_avg_price,
+        CASE
+            WHEN sd.total_net_paid >= (SELECT AVG(total_net_paid) FROM SalesData) THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS category
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rnk <= 10
+)
+SELECT 
+    ca.city, 
+    ca.state, 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    AVG(ts.avg_price) AS average_item_price,
+    SUM(ts.total_quantity) AS total_quantity_sold,
+    STRING_AGG(CASE WHEN ts.category = 'Above Average' THEN 'A' ELSE 'B' END, ', ') AS category_distribution
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+INNER JOIN 
+    TopSales ts ON ts.ws_item_sk = (SELECT ws_item_sk 
+                                      FROM web_sales 
+                                      WHERE ws_bill_customer_sk = c.c_customer_sk 
+                                      ORDER BY ws_sold_date_sk DESC
+                                      LIMIT 1)
+GROUP BY 
+    ca.city, ca.state
+HAVING 
+    AVG(ts.avg_price) IS NOT NULL
+ORDER BY 
+    customer_count DESC, total_quantity_sold DESC;

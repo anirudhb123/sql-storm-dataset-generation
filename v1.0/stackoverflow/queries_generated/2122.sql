@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.Score, 0)) AS TotalVoteScore,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.AcceptedAnswerId END) AS AcceptedCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        p.PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId,
+        p.CommentCount,
+        p.TotalVoteScore,
+        p.AcceptedCount,
+        RANK() OVER (ORDER BY p.TotalVoteScore DESC) AS PostRank
+    FROM 
+        PostInfo p
+    WHERE 
+        p.CommentCount > 2
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.ReputationRank,
+    rp.Title AS PostTitle,
+    rp.CommentCount,
+    rp.TotalVoteScore,
+    rp.AcceptedCount,
+    CASE 
+        WHEN us.BadgeCount > 5 THEN 'Highly Accomplished'
+        ELSE 'Regular User'
+    END AS UserStatus
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+WHERE 
+    rp.PostRank <= 10
+ORDER BY 
+    us.Reputation DESC, rp.TotalVoteScore DESC;

@@ -1,0 +1,66 @@
+WITH RecursiveMovieCast AS (
+    -- CTE to recursively find actors linked to movies
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        cast_info c
+    INNER JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+CastFrequency AS (
+    -- CTE to count the frequency of actors in distinct movies
+    SELECT 
+        person_id,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        RecursiveMovieCast
+    GROUP BY 
+        person_id
+),
+TopActors AS (
+    -- CTE to find the top 10 actors by frequency in movies
+    SELECT 
+        person_id
+    FROM 
+        CastFrequency
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+),
+InjectedReviews AS (
+    -- CTE simulating injected reviews with potential NULL values
+    SELECT 
+        t.title,
+        COALESCE(m.info, 'No reviews available') AS review_summary,
+        COALESCE(m.movie_id, 0) AS safe_movie_id
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Review')
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    r.review_summary,
+    COUNT(DISTINCT r.safe_movie_id) OVER (PARTITION BY a.name) AS total_movies_with_reviews,
+    CASE 
+        WHEN r.review_summary IS NOT NULL THEN 'Reviewed'
+        ELSE 'No review'
+    END AS review_status
+FROM 
+    aka_name a
+JOIN
+    cast_info c ON a.person_id = c.person_id
+JOIN
+    title t ON c.movie_id = t.id
+JOIN
+    InjectedReviews r ON t.title = r.title
+WHERE 
+    a.id IN (SELECT person_id FROM TopActors)
+    AND (t.production_year > 2000 OR t.title LIKE '%Action%')
+ORDER BY 
+    total_movies_with_reviews DESC, actor_name;

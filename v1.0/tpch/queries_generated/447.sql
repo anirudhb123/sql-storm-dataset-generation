@@ -1,0 +1,72 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RegionNation AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        n.n_nationkey,
+        n.n_name
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY ss.total_supply_value DESC) AS supply_rank
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        l.l_returnflag,
+        l.l_discount,
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS item_number
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+)
+
+SELECT 
+    rn.r_name,
+    tn.n_name,
+    ts.s_name AS supplier_name,
+    COUNT(od.o_orderkey) AS order_count,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS total_revenue,
+    AVG(ts.total_parts) AS avg_parts_per_supplier
+FROM 
+    RegionNation rn
+JOIN 
+    TopSuppliers ts ON rn.n_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name = rn.r_name))
+JOIN 
+    OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = rn.n_nationkey))
+LEFT JOIN 
+    supplier s ON ts.s_suppkey = s.s_suppkey
+WHERE 
+    od.l_returnflag <> 'R' AND
+    od.l_discount BETWEEN 0.05 AND 0.2
+GROUP BY 
+    rn.r_name, tn.n_name, ts.s_name
+HAVING 
+    SUM(od.l_extendedprice * (1 - od.l_discount)) > 1000
+ORDER BY 
+    total_revenue DESC, order_count DESC;

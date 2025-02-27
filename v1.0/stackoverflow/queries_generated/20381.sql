@@ -1,0 +1,72 @@
+WITH RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(a.Score, 0) AS AcceptScore,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS RecentActivityRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            p.Id AS AnsweredPostId,
+            COUNT(v.Id) AS Score
+        FROM Posts p
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 1
+        WHERE p.PostTypeId = 2
+        GROUP BY p.Id
+    ) a ON p.AcceptedAnswerId = a.AnsweredPostId
+    LEFT JOIN (
+        SELECT 
+            c.PostId,
+            COUNT(c.Id) AS CommentCount
+        FROM Comments c
+        GROUP BY c.PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        WHERE VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosingDetails AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId AS CloserId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.AcceptScore,
+    r.CommentCount,
+    r.VoteCount,
+    CASE 
+        WHEN c.ClosedDate IS NOT NULL THEN 'Closed on ' || TO_CHAR(c.ClosedDate, 'YYYY-MM-DD HH24:MI:SS') || ' for: ' || c.CloseReason
+        ELSE 'Open'
+    END AS Status,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM RecentActivity r
+LEFT JOIN ClosingDetails c ON r.PostId = c.PostId
+LEFT JOIN UserBadges ub ON r.OwnerUserId = ub.UserId
+WHERE r.RecentActivityRank = 1 -- Only show the most recent activity per user
+ORDER BY r.CreationDate DESC, r.VoteCount DESC;

@@ -1,0 +1,87 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+),
+top_movies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.level
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank <= 3
+),
+company_cast AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(ci.id) AS cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+final_selection AS (
+    SELECT 
+        tm.title,
+        tc.company_name,
+        tc.company_type,
+        tc.cast_count,
+        COALESCE(NULLIF(tc.cast_count, 0), 'No Cast') AS adjusted_cast_count
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        company_cast tc ON tm.movie_id = tc.movie_id
+)
+SELECT 
+    f.title,
+    f.company_name,
+    f.company_type,
+    f.cast_count,
+    f.adjusted_cast_count
+FROM 
+    final_selection f
+WHERE 
+    f.cast_count > 0 OR f.company_name IS NOT NULL
+ORDER BY 
+    f.production_year DESC, f.title;

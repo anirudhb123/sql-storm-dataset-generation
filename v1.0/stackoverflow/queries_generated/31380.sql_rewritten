@@ -1,0 +1,53 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, Location, 
+           CAST(DisplayName AS varchar(255)) AS FullPath
+    FROM Users
+    WHERE Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, 
+           u.Location, 
+           CONCAT(uh.FullPath, ' -> ', u.DisplayName) AS FullPath
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Id = uh.Id
+),
+RecentPosts AS (
+    SELECT p.*, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn 
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+PostAggregates AS (
+    SELECT p.Id AS PostId, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.OwnerUserId IS NOT NULL 
+    GROUP BY p.Id
+)
+
+SELECT uh.Id AS UserId, 
+       uh.DisplayName AS UserName, 
+       uh.Reputation, 
+       uh.Location,
+       pp.PostId,
+       pp.Title,
+       pp.CreationDate AS PostCreated,
+       pa.UpVotes,
+       pa.DownVotes,
+       pa.CloseCount,
+       substring_index(substring_index(p.Tags, '>', -1), '<', 1) AS MostFrequentTag,
+       COUNT(DISTINCT c.Id) AS CommentCount
+FROM UserHierarchy uh
+JOIN RecentPosts pp ON uh.Id = pp.OwnerUserId
+LEFT JOIN PostAggregates pa ON pp.Id = pa.PostId
+LEFT JOIN Comments c ON pp.Id = c.PostId
+GROUP BY uh.Id, pp.Id, pa.UpVotes, pa.DownVotes, pa.CloseCount
+HAVING COUNT(DISTINCT c.Id) > 5
+ORDER BY uh.Reputation DESC, pp.CreationDate DESC
+LIMIT 10;

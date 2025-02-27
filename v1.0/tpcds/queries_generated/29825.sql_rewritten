@@ -1,0 +1,53 @@
+WITH processed_addresses AS (
+    SELECT 
+        ca_address_sk,
+        UPPER(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+                     CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END)) AS full_address,
+        TRIM(REPLACE(ca_city, ' ', '')) AS clean_city,
+        CONCAT(ca_state, '-', ca_zip) AS state_zip
+    FROM 
+        customer_address
+),
+demographic_summary AS (
+    SELECT
+        cd.gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(cd.purchase_estimate) AS total_purchase_estimate
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.gender
+),
+sales_performance AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    pa.full_address,
+    pa.clean_city,
+    pa.state_zip,
+    ds.gender,
+    ds.customer_count,
+    ds.total_purchase_estimate,
+    sp.total_sales,
+    sp.total_orders
+FROM 
+    processed_addresses AS pa
+JOIN 
+    demographic_summary AS ds ON ds.gender = 'F'  
+CROSS JOIN 
+    sales_performance AS sp
+WHERE 
+    pa.clean_city LIKE 'N%'
+ORDER BY 
+    pa.clean_city, ds.customer_count DESC;

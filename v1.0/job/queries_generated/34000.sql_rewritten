@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id,
+        mt.season_nr,
+        mt.episode_nr
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mt.episode_of_id,
+        mt.season_nr,
+        mt.episode_nr
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS movies_linked,
+    MAX(mh.production_year) AS latest_production_year,
+    STRING_AGG(DISTINCT mt.title, ', ') AS movie_titles,
+    AVG(CASE WHEN mt.production_year IS NULL THEN 0 ELSE mt.production_year END) AS average_production_year
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    movie_info mi ON mt.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+WHERE 
+    ak.name IS NOT NULL
+    AND (mt.production_year BETWEEN 1990 AND 2023 OR mh.level = 1)
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    movies_linked DESC,
+    latest_production_year DESC;

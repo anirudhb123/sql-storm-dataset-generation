@@ -1,0 +1,94 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt1.id AS movie_id,
+        mt1.title,
+        mt1.production_year,
+        1 AS level
+    FROM 
+        aka_title mt1
+    WHERE 
+        mt1.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt2.id,
+        mt2.title,
+        mt2.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt2
+    JOIN 
+        movie_link ml ON ml.movie_id = mt2.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+    WHERE 
+        mh.level < 5 
+),
+aggregated_movie_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ci.note) AS cast_notes,
+        AVG(mi.info_length) AS avg_info_length,
+        MAX(mi.production_year) AS latest_production_year
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            LENGTH(info) AS info_length
+        FROM 
+            movie_info
+        WHERE 
+            info IS NOT NULL
+    ) mi ON mi.movie_id = m.id
+    GROUP BY 
+        m.id
+),
+distinct_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COALESCE(am.cast_count, 0) AS cast_count,
+        COALESCE(kw.keywords, 'No Keywords') AS keywords,
+        am.avg_info_length,
+        am.latest_production_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        aggregated_movie_info am ON am.movie_id = a.id
+    LEFT JOIN 
+        distinct_keywords kw ON kw.movie_id = a.id
+)
+SELECT 
+    fh.movie_id,
+    fh.title,
+    fh.production_year,
+    fh.cast_count,
+    fh.keywords,
+    DECODE(fh.avg_info_length, NULL, 'N/A', fh.avg_info_length) AS avg_info_length,
+    fh.latest_production_year,
+    CASE 
+        WHEN fh.producer_count IS NOT NULL THEN fh.producer_count 
+        ELSE (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = fh.movie_id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Producer')) 
+    END AS producer_count
+FROM 
+    final_benchmark fh
+ORDER BY 
+    fh.production_year DESC, fh.cast_count DESC;

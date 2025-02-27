@@ -1,0 +1,70 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(CASE WHEN v.Id IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        COUNT(DISTINCT ph.Id) AS PostEditCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        a.UserId,
+        a.DisplayName,
+        a.QuestionCount,
+        a.AnswerCount,
+        a.CommentCount,
+        a.VoteCount,
+        a.PostEditCount,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+        a.Reputation
+    FROM 
+        UserActivity a
+    LEFT JOIN 
+        UserBadges b ON a.UserId = b.UserId
+)
+SELECT 
+    DisplayName,
+    QuestionCount,
+    AnswerCount,
+    CommentCount,
+    VoteCount,
+    PostEditCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    ActiveUsers
+ORDER BY 
+    Reputation DESC, 
+    QuestionCount DESC
+FETCH FIRST 100 ROWS ONLY;

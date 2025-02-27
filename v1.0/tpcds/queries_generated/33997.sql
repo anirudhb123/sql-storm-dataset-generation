@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_sales AS sales,
+           CAST(NULL AS VARCHAR(100)) AS parent_store_name
+    FROM store
+    WHERE s_store_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT st.s_store_sk, st.s_store_name, st.s_number_employees, st.s_sales,
+           sh.s_store_name AS parent_store_name
+    FROM store st
+    JOIN SalesHierarchy sh ON st.s_manager_id = sh.s_store_sk
+)
+, ItemSales AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+CustomerSales AS (
+    SELECT c.c_customer_sk, SUM(ws.ws_net_paid) AS total_spent,
+           COUNT(ws.ws_order_number) AS purchase_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk
+),
+DateRanges AS (
+    SELECT d.d_year, d.d_month_seq, d.d_week_seq, d.d_quarter_seq,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+           SUM(ws.ws_sales_price) AS total_revenue
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year, d.d_month_seq, d.d_week_seq, d.d_quarter_seq
+)
+SELECT sh.s_store_name, sh.s_number_employees, 
+       COALESCE(total_spent, 0) AS total_sales_per_customer,
+       ISNULL(DATEADD(MONTH, d.d_month_seq, CAST(CONCAT(d.d_year, '-01-01') AS DATE)), DATEADD(YEAR, -1, GETDATE())) AS predicted_opportunity_value,
+       total_orders,
+       DENSE_RANK() OVER (PARTITION BY sh.s_store_name ORDER BY total_revenue DESC) AS revenue_rank,
+       ROW_NUMBER() OVER (ORDER BY sh.s_store_name) AS store_rank
+FROM SalesHierarchy sh
+LEFT JOIN CustomerSales cs ON sh.s_store_sk = cs.c_customer_sk
+LEFT JOIN DateRanges d ON sh.s_store_sk = d.d_year
+FULL OUTER JOIN ItemSales isales ON sh.s_store_sk = isales.ws_item_sk
+WHERE sh.s_number_employees > (
+    SELECT AVG(s_number_employees) 
+    FROM store
+)
+OR (cs.total_spent IS NULL AND cs.purchase_count < 5)
+ORDER BY sh.s_store_name, revenue_rank DESC
+LIMIT 100;

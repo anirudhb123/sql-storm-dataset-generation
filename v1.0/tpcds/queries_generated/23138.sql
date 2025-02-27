@@ -1,0 +1,86 @@
+
+WITH RecursiveSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        MAX(ws_sales_price) AS max_sales_price,
+        MIN(ws_sales_price) AS min_sales_price,
+        ws_web_site_sk
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk, ws_web_site_sk
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate > 1000 THEN 'High Value'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+),
+AggregatedData AS (
+    SELECT
+        cs.cs_item_sk,
+        SUM(cs.cs_net_profit) AS total_net_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        AVG(cs.cs_list_price) AS avg_list_price
+    FROM
+        catalog_sales cs
+    GROUP BY
+        cs.cs_item_sk
+),
+CombinedResults AS (
+    SELECT
+        cs.item_sk,
+        COALESCE(rs.total_quantity, 0) AS total_quantity,
+        COALESCE(ad.total_net_profit, 0) AS total_net_profit,
+        COALESCE(ad.total_orders, 0) AS total_orders,
+        c.c_first_name,
+        c.c_last_name,
+        c.customer_value,
+        c.income_band,
+        (CASE WHEN rs.max_sales_price - rs.min_sales_price > 0 THEN 'Varied Price' ELSE 'Stable Price' END) AS price_variation
+    FROM
+        RecursiveSales rs
+    FULL OUTER JOIN AggregatedData ad ON rs.ws_item_sk = ad.cs_item_sk
+    JOIN CustomerDetails c ON c.c_customer_sk = (
+        SELECT csk
+        FROM customer
+        WHERE c_current_cdemo_sk IS NOT NULL
+        ORDER BY RANDOM()
+        LIMIT 1
+    )
+)
+SELECT
+    cr.item_sk,
+    cr.total_quantity,
+    cr.total_net_profit,
+    cr.total_orders,
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.customer_value,
+    cr.income_band,
+    cr.price_variation
+FROM
+    CombinedResults cr
+WHERE
+    (cr.total_orders > 10 OR cr.total_quantity = 0)
+    AND cr.income_band != 0
+    AND (cr.total_net_profit IS NOT NULL OR cr.customer_value = 'Low Value')
+ORDER BY
+    cr.total_net_profit DESC,
+    cr.total_quantity ASC
+LIMIT 100;

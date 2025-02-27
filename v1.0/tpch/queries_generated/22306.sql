@@ -1,0 +1,50 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 50
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'NULL ACCOUNT'
+               WHEN s.s_acctbal > 1000 THEN 'HIGH VALUE'
+               ELSE 'LOW VALUE' 
+           END AS acct_status
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'N%' OR n.n_comment IS NOT NULL)
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sale
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O') 
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+FilteredSuppliers AS (
+    SELECT si.s_suppkey, si.s_name
+    FROM SupplierInfo si
+    WHERE si.acct_status = 'HIGH VALUE' AND si.s_acctbal IS NOT NULL
+),
+TotalSales AS (
+    SELECT od.o_orderkey, od.total_sale,
+           CASE 
+               WHEN od.total_sale IS NULL THEN 0 
+               ELSE od.total_sale 
+           END AS sale_value
+    FROM OrderDetails od
+)
+
+SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+       COALESCE(ts.sales_value, 0) AS total_sales,
+       sr.s_name, sr.acct_status 
+FROM RankedParts p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN FilteredSuppliers sr ON ps.ps_suppkey = sr.s_suppkey
+LEFT JOIN TotalSales ts ON ts.o_orderkey = ps.ps_partkey 
+WHERE p.rn = 1
+  AND (ps.ps_availqty > 0 OR sr.s_name IS NOT NULL)
+  AND (p.p_retailprice BETWEEN 100 AND 500 OR LOCATE('special', p.p_comment) > 0)
+ORDER BY total_sales DESC,
+         p.p_name ASC;

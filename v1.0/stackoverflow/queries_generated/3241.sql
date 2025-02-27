@@ -1,0 +1,52 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON (u.Id = v.UserId AND p.Id = v.PostId)
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalUpvotes,
+        TotalDownvotes,
+        RANK() OVER (ORDER BY TotalUpvotes DESC) AS UpvoteRank,
+        RANK() OVER (ORDER BY TotalComments DESC) AS CommentRank
+    FROM UserActivity
+),
+BestUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalUpvotes,
+        TotalDownvotes
+    FROM TopUsers
+    WHERE UpvoteRank <= 10 OR CommentRank <= 10
+)
+SELECT 
+    bu.DisplayName,
+    bu.TotalPosts,
+    bu.TotalComments,
+    bu.TotalBadges,
+    bu.TotalUpvotes,
+    bu.TotalDownvotes,
+    COALESCE(ROUND((bu.TotalUpvotes::float / NULLIF(bu.TotalDownvotes, 0)), 2), 0) AS UpvoteToDownvoteRatio
+FROM BestUsers bu
+ORDER BY bu.TotalUpvotes DESC, bu.TotalComments DESC;

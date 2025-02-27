@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title AS movie_title, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mh.movie_id) AS actor_count,
+        ROW_NUMBER() OVER (ORDER BY mh.level DESC, mh.movie_title) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+), TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.actor_count
+    FROM
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+)
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.actor_count,
+    (SELECT AVG(actor_count) 
+     FROM TopMovies 
+     WHERE actor_count IS NOT NULL) AS avg_actor_count,
+    (SELECT COUNT(*) 
+     FROM aka_title 
+     WHERE production_year BETWEEN 2000 AND 2023) AS total_movies,
+    CASE 
+        WHEN tm.actor_count > (SELECT AVG(actor_count) 
+                                FROM TopMovies) THEN 'Above Average'
+        ELSE 'Below Average' 
+    END AS actor_performance
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.actor_count DESC;

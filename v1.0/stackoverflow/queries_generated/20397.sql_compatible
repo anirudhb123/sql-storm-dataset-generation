@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsAggregated
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    )
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+VoteSummary AS (
+    SELECT 
+        v.PostId, 
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.TagsAggregated,
+        vs.Upvotes,
+        vs.Downvotes,
+        (vs.Upvotes - vs.Downvotes) AS NetVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        VoteSummary vs ON rp.PostId = vs.PostId
+    WHERE 
+        rp.Rank <= 5
+)
+
+SELECT 
+    tp.PostId, 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.ViewCount, 
+    tp.TagsAggregated,
+    COALESCE(tp.Upvotes, 0) AS Upvotes,
+    COALESCE(tp.Downvotes, 0) AS Downvotes,
+    tp.NetVotes,
+    COUNT(c.Id) AS CommentCount,
+    MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON c.PostId = tp.PostId
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.TagsAggregated, tp.Upvotes, tp.Downvotes
+ORDER BY 
+    tp.NetVotes DESC, tp.CreationDate DESC;

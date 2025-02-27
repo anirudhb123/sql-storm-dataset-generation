@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    UNION ALL
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON m.episode_of_id = mh.movie_id
+),
+RankedCast AS (
+    SELECT 
+        ci.movie_id, 
+        an.name AS actor_name,
+        ci.nr_order,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    COALESCE(fm.production_year, 'Unknown') AS production_year,
+    rc.actor_name,
+    rc.actor_rank,
+    COALESCE(mk.keywords, 'None') AS movie_keywords,
+    mh.depth
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    FilteredMovies fm ON mh.movie_id = fm.movie_id
+JOIN 
+    RankedCast rc ON mh.movie_id = rc.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    rc.actor_rank = 1
+ORDER BY 
+    mh.depth, 
+    fm.production_year DESC NULLS LAST;

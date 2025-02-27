@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATEADD(YEAR, -5, GETDATE()) 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        r.*,
+        pht.Name AS PostHistoryTypeName,
+        ph.CreationDate AS PostHistoryDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+    FROM 
+        RankedPosts r
+    JOIN 
+        PostHistory ph ON r.PostId = ph.PostId
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id 
+    LEFT JOIN 
+        Posts p ON p.Id = r.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(p.Tags, ',') AS tag_ids ON p.Tags IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.Id = tag_ids::INT
+    WHERE 
+        r.RankByScore <= 10 
+    GROUP BY 
+        r.PostId, r.Title, r.Body, r.CreationDate, r.ViewCount, r.Score, r.OwnerDisplayName, pht.Name, ph.CreationDate
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    ViewCount,
+    Score,
+    OwnerDisplayName,
+    PostHistoryTypeName,
+    PostHistoryDate,
+    AssociatedTags
+FROM 
+    FilteredPosts
+ORDER BY 
+    ViewCount DESC, Score DESC;

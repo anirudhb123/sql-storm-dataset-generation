@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_orderkey ORDER BY o_orderdate DESC) AS rn
+    FROM orders
+),
+CustomerSums AS (
+    SELECT c_custkey, SUM(o_totalprice) AS total_spent
+    FROM customer
+    JOIN orders ON customer.c_custkey = orders.o_custkey
+    GROUP BY c_custkey
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, SUM(ps.ps_availqty) AS available_quantity,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           COALESCE(MAX(CASE WHEN ps.ps_supplycost > (p.p_retailprice / 2) THEN 'EXPENSIVE' ELSE 'AFFORDABLE' END), 'UNKNOWN') AS price_category
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+FilteredLineItems AS (
+    SELECT l.*, 
+           CASE WHEN l.l_discount < 0.1 THEN 'Low Discount' 
+                WHEN l.l_discount BETWEEN 0.1 AND 0.2 THEN 'Moderate Discount' 
+                ELSE 'High Discount' END AS discount_category,
+           DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, n.n_name AS nation_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT c.c_name, cr.nation_name, o.o_orderkey, o.o_orderdate, li.price_rank,
+       p.p_name, ps.available_quantity, ps.price_category,
+       CASE WHEN cs.total_spent IS NULL THEN 0 ELSE cs.total_spent END AS total_spent,
+       li.discount_category
+FROM RankedOrders o
+JOIN CustomerRegion cr ON o.o_custkey = cr.c_custkey
+LEFT JOIN FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN CustomerSums cs ON cr.c_custkey = cs.c_custkey
+FULL OUTER JOIN PartSupplierDetails ps ON li.l_partkey = ps.p_partkey
+WHERE (li.discount_category IS NOT NULL OR ps.supplier_count > 0)
+      AND (o.o_totalprice BETWEEN (SELECT AVG(o2.o_totalprice) FROM orders o2) AND (SELECT MAX(o3.o_totalprice) FROM orders o3 WHERE o3.o_orderstatus = 'F'))
+ORDER BY cr.nation_name, total_spent DESC, o.o_orderdate DESC
+LIMIT 50 OFFSET (SELECT COUNT(*) FROM orders) / 2;

@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 10
+)
+SELECT 
+    po.p_partkey,
+    po.p_name,
+    po.p_brand,
+    po.p_retailprice,
+    COALESCE(ts.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(r.total_avail_qty, 0) AS total_available,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    part po
+LEFT JOIN 
+    lineitem l ON po.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    SupplierParts r ON po.p_partkey = r.ps_partkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey = l.l_suppkey
+WHERE 
+    po.p_retailprice BETWEEN 10 AND 100
+    AND (ro.order_rank IS NULL OR ro.order_rank <= 10)
+GROUP BY 
+    po.p_partkey, po.p_name, po.p_brand, po.p_retailprice, ts.s_name
+HAVING 
+    total_orders > 5
+ORDER BY 
+    total_revenue DESC, po.p_retailprice ASC;

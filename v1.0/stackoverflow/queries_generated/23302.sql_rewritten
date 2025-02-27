@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountyAmount,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        P.Title,
+        P.Tags,
+        PH.Comment
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10
+      AND P.CreationDate < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        UReputation.ReputationRank,
+        UReputation.TotalPosts,
+        UReputation.TotalComments,
+        UReputation.TotalBountyAmount
+    FROM Users U
+    JOIN UserReputation UReputation ON U.Id = UReputation.UserId
+    WHERE UReputation.ReputationRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    GROUP BY P.Id, P.Title, P.ViewCount
+)
+SELECT 
+    U.DisplayName,
+    PS.Title,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.TotalBounty,
+    (SELECT COUNT(*) FROM ClosedPosts CP WHERE CP.PostId = PS.PostId) AS ClosureCount,
+    CASE 
+        WHEN PS.ViewCount IS NULL OR PS.ViewCount = 0 THEN 'No Views'
+        WHEN PS.TotalBounty > 100 THEN 'Highly Bountied'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    COALESCE(PH.Comment, 'No Close Reason') AS LastCloseReason
+FROM TopUsers U
+JOIN PostStatistics PS ON U.UserId = PS.OwnerUserId
+LEFT JOIN ClosedPosts PH ON PS.PostId = PH.PostId
+WHERE PS.TotalBounty > 0
+   OR U.ReputationRank < 5
+ORDER BY U.ReputationRank, PS.ViewCount DESC, PS.Title;

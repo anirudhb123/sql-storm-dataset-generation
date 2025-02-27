@@ -1,0 +1,50 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LENGTH(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS name_length
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+DemographicInfo AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        LENGTH(cd.cd_education_status) AS education_length,
+        address_info.full_name,
+        address_info.ca_city,
+        address_info.ca_state
+    FROM 
+        customer_demographics cd
+    JOIN 
+        AddressInfo address_info ON cd.cd_demo_sk = address_info.c_customer_id
+),
+FilteredDemo AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY name_length DESC) AS rn
+    FROM 
+        DemographicInfo
+    WHERE 
+        cd_gender = 'F' AND cd_marital_status = 'M'
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    cd_purchase_estimate,
+    education_length
+FROM 
+    FilteredDemo
+WHERE 
+    rn <= 10
+ORDER BY 
+    ca_state, cd_purchase_estimate DESC;

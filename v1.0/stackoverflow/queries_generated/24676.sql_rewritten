@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.ViewCount > 10 
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+UserReputationHistory AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.LastAccessDate,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS history_rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+TopComments AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.PostId,
+        c.Text,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.Score DESC) AS CommentRank
+    FROM 
+        Comments c
+    WHERE 
+        c.Score > 0 
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount,
+    CASE 
+        WHEN u.UserId IS NOT NULL THEN 'Active User'
+        ELSE 'Inactive User'
+    END AS UserStatus,
+    tc.CommentId,
+    tc.Text AS TopComment,
+    COALESCE(uh.Reputation, 0) AS LastKnownReputation,
+    CASE 
+        WHEN uh.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Recently Active' 
+        ELSE 'Inactive for Long' 
+    END AS UserActivityStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    (SELECT DISTINCT u.Id AS UserId FROM Users u WHERE u.Reputation IS NOT NULL) u 
+    ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+LEFT JOIN 
+    TopComments tc ON rp.PostId = tc.PostId AND tc.CommentRank = 1
+LEFT JOIN 
+    UserReputationHistory uh ON uh.UserId = u.UserId AND uh.history_rank = 1
+WHERE 
+    rp.Score > (SELECT AVG(Score) FROM Posts WHERE ViewCount IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CommentCount DESC
+LIMIT 100;

@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.kind_id, 
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS ranking,
+        COALESCE(ki.info, 'No Info') AS additional_info
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type ki ON mi.info_type_id = ki.id
+    WHERE 
+        t.production_year >= 2000
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.additional_info,
+    cd.total_cast,
+    cd.cast_names,
+    cs.total_companies,
+    cs.company_names
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastDetails cd ON rm.title = cd.movie_id
+LEFT JOIN 
+    CompanyStats cs ON rm.title = cs.movie_id
+WHERE 
+    (cd.total_cast IS NOT NULL AND cd.total_cast > 5) 
+    OR (cs.total_companies IS NULL OR cs.total_companies < 3)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

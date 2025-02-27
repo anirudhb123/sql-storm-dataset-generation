@@ -1,0 +1,60 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        w.w_warehouse_name,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_sales_price * ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk ORDER BY d.d_year, d.d_month_seq) AS cumulative_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS customer_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        d.d_year = 2023
+        AND cd.cd_gender = 'F'
+        AND ws.ws_sales_price > 0
+),
+promotion_data AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(*) AS promo_count,
+        SUM(p.p_cost) AS total_cost
+    FROM 
+        promotion p
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    sd.ws_item_sk,
+    sd.ws_order_number,
+    sd.ws_sales_price,
+    sd.cumulative_sales,
+    pd.promo_count,
+    pd.total_cost
+FROM 
+    sales_data sd
+LEFT JOIN 
+    promotion_data pd ON sd.ws_item_sk IN (
+        SELECT p.p_item_sk 
+        FROM promotion p WHERE p.p_start_date_sk <= (SELECT MAX(ws.ws_sold_date_sk) FROM web_sales ws) 
+        AND p.p_end_date_sk >= (SELECT MIN(ws.ws_sold_date_sk) FROM web_sales ws)
+    )
+WHERE 
+    sd.customer_rank <= 10
+ORDER BY 
+    sd.cumulative_sales DESC, 
+    sd.c_customer_id;

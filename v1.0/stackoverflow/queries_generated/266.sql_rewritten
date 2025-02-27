@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    COALESCE(rb.Title, 'No Posts Yet') AS LastPostTitle,
+    COALESCE(rb.CreationDate, 'N/A') AS LastPostDate,
+    COALESCE(rb.Score, 0) AS LastPostScore,
+    COALESCE(bp.BadgeCount, 0) AS TotalBadges,
+    COALESCE(bp.GoldBadgeCount, 0) AS GoldBadges,
+    COALESCE(cp.CloseCount, 0) AS TotalClosedPosts
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rb ON u.Id = rb.OwnerUserId AND rb.rn = 1
+LEFT JOIN 
+    UserBadges bp ON u.Id = bp.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rb.PostId = cp.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC;

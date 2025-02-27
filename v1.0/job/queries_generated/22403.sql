@@ -1,0 +1,53 @@
+WITH ranked_titles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS year_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(a.name, ', ') AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        COUNT(DISTINCT CASE WHEN r.role IS NOT NULL THEN c.person_role_id END) AS distinct_roles
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id
+),
+movie_info_counts AS (
+    SELECT
+        m.movie_id,
+        COUNT(i.id) AS info_count,
+        MAX(CASE WHEN it.info = 'Award' THEN 1 ELSE 0 END) AS has_award_info
+    FROM movie_info m
+    JOIN info_type it ON m.info_type_id = it.id
+    GROUP BY m.movie_id
+)
+SELECT
+    t.title,
+    t.production_year,
+    mc.cast_names,
+    mc.cast_count,
+    mic.info_count,
+    mic.has_award_info,
+    CASE 
+        WHEN mc.cast_count > 5 THEN 'notable' 
+        WHEN mc.cast_count IS NULL THEN 'no cast' 
+        ELSE 'ordinary' 
+    END AS cast_size_category,
+    ARRAY_AGG(ct.kind ORDER BY ct.kind) AS company_types_involved,
+    RANK() OVER (ORDER BY t.production_year DESC, t.title) AS title_global_rank
+FROM ranked_titles t
+LEFT JOIN movie_cast mc ON t.title_id = mc.movie_id
+LEFT JOIN movie_info_counts mic ON t.title_id = mic.movie_id
+LEFT JOIN movie_companies mc2 ON mc2.movie_id = t.id
+LEFT JOIN company_type ct ON mc2.company_type_id = ct.id
+GROUP BY 
+    t.title, t.production_year, mc.cast_names, mc.cast_count, 
+    mic.info_count, mic.has_award_info
+ORDER BY 
+    t.production_year DESC, title_global_rank;

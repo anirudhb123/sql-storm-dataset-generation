@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title) AS title_rank
+    FROM title
+    WHERE title.production_year IS NOT NULL
+),
+CoActors AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS co_actor_count
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ak.name IS NOT NULL
+),
+CompanyDetails AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_details
+    FROM movie_info mi
+    GROUP BY mi.movie_id
+),
+FinalMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ca.actor_name,
+        ca.co_actor_count,
+        cd.company_name,
+        cd.company_type,
+        mi.info_details
+    FROM RankedMovies rm
+    LEFT JOIN CoActors ca ON rm.movie_id = ca.movie_id
+    LEFT JOIN CompanyDetails cd ON rm.movie_id = cd.movie_id
+    LEFT JOIN MovieInfo mi ON rm.movie_id = mi.movie_id
+)
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    COALESCE(f.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(f.co_actor_count, 0) AS co_actor_count,
+    f.company_name,
+    f.company_type,
+    COALESCE(f.info_details, 'No Details Available') AS info_details
+FROM FinalMovies f
+ORDER BY f.production_year DESC, f.title ASC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        A.Id,
+        A.Title,
+        A.CreationDate,
+        A.OwnerUserId,
+        A.AcceptedAnswerId,
+        RCTE.Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursiveCTE RCTE ON A.ParentId = RCTE.PostId
+    WHERE 
+        A.PostTypeId = 2 
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS TotalQuestions,
+    COUNT(DISTINCT A.Id) AS TotalAnswers,
+    COUNT(DISTINCT V.Id) AS TotalVotes,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    RCTE.Level,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+LEFT JOIN 
+    Posts A ON P.Id = A.ParentId 
+LEFT JOIN 
+    Votes V ON V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id) 
+LEFT JOIN 
+    PostLinks PL ON PL.PostId = P.Id
+LEFT JOIN 
+    Tags T ON T.Id = PL.RelatedPostId
+LEFT JOIN 
+    RecursiveCTE RCTE ON RCTE.PostId = P.Id
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.DisplayName, U.Reputation, RCTE.Level
+ORDER BY 
+    TotalQuestions DESC, UpVotes DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

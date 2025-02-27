@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS PriceRank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = 2023
+    )
+),
+TopSales AS (
+    SELECT 
+        rs.ws_bill_customer_sk,
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS TotalQuantity,
+        SUM(rs.ws_quantity * rs.ws_sales_price) AS TotalSales,
+        COUNT(DISTINCT rs.ws_item_sk) AS UniqueItemsSold
+    FROM RankedSales rs
+    WHERE rs.PriceRank <= 3
+    GROUP BY rs.ws_bill_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    COALESCE(ts.TotalSales, 0) AS TotalSalesAmount,
+    COALESCE(ts.UniqueItemsSold, 0) AS ItemsSoldCount,
+    CASE 
+        WHEN COALESCE(ts.TotalSales, 0) > 1000 THEN 'High Revenue'
+        WHEN COALESCE(ts.TotalSales, 0) BETWEEN 500 AND 1000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS RevenueCategory,
+    DENSE_RANK() OVER (ORDER BY COALESCE(ts.TotalSales, 0) DESC) AS SalesRank
+FROM customer AS c
+LEFT JOIN customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN TopSales AS ts ON c.c_customer_sk = ts.ws_bill_customer_sk
+WHERE ca.ca_state IS NOT NULL
+  AND (cd.cd_marital_status IS NOT NULL OR cd.cd_credit_rating IS NULL)
+  AND ((ts.TotalSales > 500) OR (ts.TotalSales IS NULL AND cd.cd_gender = 'F'))
+ORDER BY RevenueCategory, SalesRank
+FETCH FIRST 100 ROWS ONLY;

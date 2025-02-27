@@ -1,0 +1,59 @@
+
+WITH SupplierStatistics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+OrderStatistics AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineitemStatistics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ss.nation_name,
+    ss.s_name,
+    ss.total_avail_qty,
+    ss.total_value,
+    os.total_orders,
+    os.total_spent,
+    ls.total_revenue,
+    ls.total_quantity,
+    ls.distinct_parts
+FROM 
+    SupplierStatistics ss
+LEFT JOIN 
+    OrderStatistics os ON os.total_spent > 10000
+LEFT JOIN 
+    LineitemStatistics ls ON ls.total_quantity > 100
+ORDER BY 
+    ss.total_value DESC, os.total_orders DESC;

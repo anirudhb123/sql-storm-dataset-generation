@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplyChains AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 10
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN SupplyChains sc ON sc.p_partkey = p.p_partkey
+    WHERE ps.ps_supplycost < sc.ps_supplycost
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       AVG(sc.ps_supplycost) AS avg_supply_cost
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN SupplyChains sc ON sc.p_partkey = ps.ps_partkey
+WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'Europe%')
+  AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+  AND o.o_orderstatus IN ('O', 'F')
+GROUP BY n.n_name
+HAVING total_revenue > (
+    SELECT AVG(total_revenue) FROM (
+        SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+        FROM nation n
+        JOIN supplier s ON n.n_nationkey = s.s_nationkey
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        GROUP BY n.n_name
+    ) AS revenue_totals
+)
+ORDER BY total_revenue DESC;

@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_return_amount,
+        SUM(sr_return_tax) AS total_return_tax,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount_inclusive
+    FROM store_returns
+    WHERE sr_returned_date_sk IS NOT NULL
+    GROUP BY sr_returned_date_sk, sr_item_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returned_date_sk,
+        wr_item_sk,
+        COUNT(*) AS total_web_returns,
+        SUM(wr_return_quantity) AS total_web_returned_quantity,
+        SUM(wr_return_amt) AS total_web_return_amount,
+        SUM(wr_return_tax) AS total_web_return_tax,
+        SUM(wr_return_amt_inc_tax) AS total_web_return_amount_inclusive
+    FROM web_returns
+    WHERE wr_returned_date_sk IS NOT NULL
+    GROUP BY wr_returned_date_sk, wr_item_sk 
+),
+SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_web_sales,
+        SUM(ws_sales_price) AS total_web_sales_amount,
+        SUM(ws_ext_tax) AS total_web_sales_tax
+    FROM web_sales
+    WHERE ws_sold_date_sk IS NOT NULL
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+ReturnAnalysis AS (
+    SELECT
+        cs_sold_date_sk,
+        cs_item_sk,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(cr.total_return_tax, 0) AS total_return_tax,
+        COALESCE(wr.total_web_returns, 0) AS total_web_returns,
+        COALESCE(wr.total_web_returned_quantity, 0) AS total_web_returned_quantity,
+        COALESCE(wr.total_web_return_amount, 0) AS total_web_return_amount,
+        COALESCE(wr.total_web_return_tax, 0) AS total_web_return_tax,
+        sd.total_web_sales,
+        sd.total_web_sales_amount,
+        sd.total_web_sales_tax
+    FROM sales_data sd
+    LEFT JOIN customer_returns cr ON sd.ws_sold_date_sk = cr.sr_returned_date_sk AND sd.ws_item_sk = cr.sr_item_sk
+    LEFT JOIN web_returns wr ON sd.ws_sold_date_sk = wr.wr_returned_date_sk AND sd.ws_item_sk = wr.wr_item_sk
+)
+SELECT 
+    r.cs_sold_date_sk AS sold_date,
+    r.cs_item_sk AS item_id,
+    r.total_returns,
+    r.total_returned_quantity,
+    r.total_return_amount,
+    r.total_return_tax,
+    r.total_web_returns,
+    r.total_web_returned_quantity,
+    r.total_web_return_amount,
+    r.total_web_return_tax,
+    r.total_web_sales,
+    r.total_web_sales_amount,
+    r.total_web_sales_tax
+FROM ReturnAnalysis r
+WHERE r.total_returns > 0 OR r.total_web_returns > 0
+ORDER BY r.sold_date, r.item_id;

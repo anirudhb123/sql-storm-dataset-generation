@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER(PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    AND 
+        o.o_orderdate >= DATE '1996-01-01' 
+    AND 
+        o.o_orderdate < DATE '1997-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        o.o_orderkey,
+        o.o_totalprice
+    FROM 
+        RankedOrders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.order_rank <= 10
+)
+SELECT 
+    tc.region_name,
+    tc.nation_name,
+    COUNT(*) AS num_orders,
+    SUM(tc.o_totalprice) AS total_revenue
+FROM 
+    TopCustomers tc
+GROUP BY 
+    tc.region_name, 
+    tc.nation_name
+ORDER BY 
+    total_revenue DESC, 
+    num_orders DESC;

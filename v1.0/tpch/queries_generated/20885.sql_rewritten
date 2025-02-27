@@ -1,0 +1,77 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN date '1994-01-01' AND date '1994-12-31'
+        AND (l.l_returnflag = 'R' OR l.l_discount > 0.1)
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (
+            SELECT AVG(c2.c_acctbal) 
+            FROM customer c2 
+            WHERE c2.c_mktsegment = c.c_mktsegment
+        ) 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        order_count > 5
+),
+TopCustomers AS (
+    SELECT 
+        f.c_custkey,
+        f.c_name,
+        RANK() OVER (ORDER BY f.total_spent DESC) AS customer_rank
+    FROM 
+        FrequentCustomers f
+)
+SELECT 
+    r.region_name,
+    tc.c_name,
+    tc.customer_rank,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    CASE 
+        WHEN tc.customer_rank = 1 THEN 'Top Customer'
+        WHEN tc.customer_rank <= 10 THEN 'Top 10 Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RegionalSales rs ON rs.region_name IN (
+        SELECT
+            DISTINCT ON (r_name) r_name 
+        FROM 
+            RegionalSales
+        ORDER BY 
+            total_sales DESC
+    )
+ORDER BY 
+    r.region_name, tc.customer_rank DESC;

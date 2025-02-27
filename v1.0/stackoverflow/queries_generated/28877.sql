@@ -1,0 +1,56 @@
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Filter for Questions only
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags
+),
+
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, ',')) AS TagName
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1
+),
+
+TagStatistics AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS PostCount,
+        SUM(CommentCount) AS TotalComments,
+        SUM(Upvotes) AS TotalUpvotes,
+        SUM(Downvotes) AS TotalDownvotes
+    FROM 
+        TaggedPosts
+    JOIN 
+        PopularTags pt ON pt.TagName = ANY(string_to_array(Tags, ','))
+    GROUP BY 
+        TagName
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalComments,
+    ts.TotalUpvotes,
+    ts.TotalDownvotes,
+    ROW_NUMBER() OVER (ORDER BY ts.TotalUpvotes DESC) AS Rank
+FROM 
+    TagStatistics ts
+ORDER BY 
+    Rank;

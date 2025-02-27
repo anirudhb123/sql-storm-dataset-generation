@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT c.name) AS companies,
+        ARRAY_AGG(DISTINCT p.name) AS actors
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.companies,
+        md.actors
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000 AND 
+        md.production_year <= 2023
+)
+SELECT 
+    fm.title, 
+    fm.production_year, 
+    string_agg(DISTINCT fm.actors, ', ') AS actor_list, 
+    string_agg(DISTINCT fm.companies, ', ') AS company_list, 
+    string_agg(DISTINCT unnest(fm.keywords), ', ') AS keyword_list
+FROM 
+    FilteredMovies fm
+GROUP BY 
+    fm.movie_id
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

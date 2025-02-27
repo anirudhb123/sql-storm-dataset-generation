@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2020-01-01'
+), 
+PostsWithVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.PostType,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.OwnerUserId, rp.PostType
+), 
+FilteredPosts AS (
+    SELECT 
+        pw.PostId,
+        pw.Title,
+        pw.CreationDate,
+        pw.OwnerUserId,
+        pw.PostType,
+        pw.UpVotes,
+        pw.DownVotes,
+        pw.TotalVotes,
+        CAST((UpVotes - DownVotes) AS INT) AS Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = pw.PostId) AS CommentCount
+    FROM 
+        PostsWithVotes pw
+    WHERE 
+        pw.UpVotes > 0 OR pw.DownVotes > 0
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    fp.PostType,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.TotalVotes,
+    fp.Score,
+    fp.CommentCount,
+    CASE 
+        WHEN fp.Score > 100 THEN 'Highly Active'
+        WHEN fp.Score BETWEEN 50 AND 100 THEN 'Moderately Active'
+        ELSE 'Less Active'
+    END AS ActivityLevel,
+    COALESCE((SELECT MAX(b.Date) 
+              FROM Badges b 
+              WHERE b.UserId = fp.OwnerUserId 
+              AND b.Class = 1), 
+             'No Gold Badges') AS LastGoldBadge
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+ORDER BY 
+    fp.Score DESC, 
+    fp.CreationDate ASC
+LIMIT 50;

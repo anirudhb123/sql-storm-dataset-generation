@@ -1,0 +1,34 @@
+
+WITH sales_summary AS (
+    SELECT
+        DATE(DATEADD(day, d.d_date_sk, '1970-01-01')) AS sale_date,
+        SUM(ss_sales_price) AS total_sales,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        c.c_city,
+        c.c_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM store_sales ss
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY sale_date, c.c_city, c.c_state, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+
+SELECT
+    sale_date,
+    c_city,
+    c_state,
+    cd_gender,
+    cd_marital_status,
+    hd_income_band_sk,
+    total_sales,
+    total_profit,
+    total_transactions,
+    ROW_NUMBER() OVER (PARTITION BY c_city ORDER BY total_sales DESC) AS sales_rank
+FROM sales_summary
+ORDER BY total_sales DESC, c_city, sale_date;

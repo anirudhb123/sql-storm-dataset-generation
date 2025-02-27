@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation, EmailHash,
+           CASE
+               WHEN Reputation >= 1000 THEN 'High'
+               WHEN Reputation >= 100 THEN 'Medium'
+               ELSE 'Low'
+           END AS ReputationLevel
+    FROM Users
+),
+ActivePostMetrics AS (
+    SELECT p.Id AS PostId,
+           p.OwnerUserId,
+           p.PostTypeId,
+           p.AcceptedAnswerId,
+           COUNT(c.Id) AS CommentCount,
+           SUM(v.VoteTypeId = 2) AS UpVotes,
+           SUM(v.VoteTypeId = 3) AS DownVotes,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate > DATEADD(year, -1, GETDATE())
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId, p.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT p.Id AS ClosedPostId,
+           ph.UserId AS CloserUserId,
+           ph.CreationDate AS CloseDate,
+           CASE 
+               WHEN ph.Comment IS NOT NULL THEN ph.Comment
+               ELSE 'Reason not specified'
+           END AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+),
+PostStatistics AS (
+    SELECT upm.PostId,
+           upm.OwnerUserId,
+           rp.ReputationLevel,
+           upm.CommentCount,
+           upm.UpVotes,
+           upm.DownVotes,
+           cp.ClosedPostId,
+           cp.CloseReason
+    FROM ActivePostMetrics upm
+    LEFT JOIN UserReputation rp ON upm.OwnerUserId = rp.Id
+    LEFT JOIN ClosedPosts cp ON upm.PostId = cp.ClosedPostId
+    WHERE upm.RecentPostRank = 1
+)
+SELECT ps.OwnerUserId,
+       u.DisplayName,
+       ps.PostId,
+       CONCAT('Post ', ps.PostId, ' (', ps.ReputationLevel, ' user, ', ps.CommentCount, ' comments)') AS PostSummary,
+       COALESCE(ps.CloseReason, 'Not closed') AS CloseStatus,
+       CASE 
+           WHEN ps.UpVotes > ps.DownVotes THEN 'Positive'
+           WHEN ps.UpVotes < ps.DownVotes THEN 'Negative'
+           ELSE 'Neutral'
+       END AS VoteSentiment
+FROM PostStatistics ps
+JOIN Users u ON ps.OwnerUserId = u.Id
+WHERE u.Reputation >= 1000 OR (u.Reputation < 100 AND ps.CommentCount > 0)
+ORDER BY ps.UpVotes DESC, ps.DownVotes ASC;

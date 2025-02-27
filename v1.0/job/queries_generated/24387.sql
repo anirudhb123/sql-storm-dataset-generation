@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(m_comp.name, 'Independent') AS production_company,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank
+    FROM
+        aka_title mt
+    LEFT JOIN
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN
+        company_name m_comp ON mc.company_id = m_comp.id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND (m_comp.country_code = 'USA' OR m_comp.country_code IS NULL)
+),
+cast_and_roles AS (
+    SELECT
+        c.person_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        title.title,
+        CASE 
+            WHEN c.note IS NOT NULL THEN 'Noteworthy'
+            ELSE 'Standard'
+        END AS role_note,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS performance_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        role_type rt ON c.role_id = rt.id
+    JOIN
+        aka_title title ON c.movie_id = title.id
+    WHERE
+        a.name IS NOT NULL
+),
+keyword_info AS (
+    SELECT
+        mk.movie_id,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        k.keyword IS NOT NULL
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.production_company,
+    ca.actor_name,
+    ca.role_name,
+    ca.role_note,
+    ki.keywords,
+    ki.keyword_count,
+    CASE 
+        WHEN mh.year_rank <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS ranking_category
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    cast_and_roles ca ON mh.movie_id = ca.movie_id
+LEFT JOIN
+    keyword_info ki ON mh.movie_id = ki.movie_id
+WHERE
+    mh.production_year > 1990
+    AND (mh.production_company IS NOT NULL OR mh.production_company <> 'Independent')
+ORDER BY
+    mh.production_year DESC,
+    mh.title,
+    ca.performance_order;

@@ -1,0 +1,33 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           CASE WHEN o.o_orderkey IS NOT NULL THEN o.o_orderkey ELSE 0 END AS order_exists
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_mktsegment = 'BUILDING')
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           CASE WHEN o.o_orderkey IS NOT NULL THEN o.o_orderkey ELSE 0 END AS order_exists
+    FROM customer c
+    JOIN sales_hierarchy sh ON c.c_custkey = sh.c_custkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE sh.order_exists = 0
+)
+
+SELECT r.r_name,
+       SUM(p.p_retailprice * ps.ps_availqty) AS total_retail_value,
+       COUNT(DISTINCT sh.c_custkey) FILTER (WHERE sh.order_exists > 0) AS customers_with_orders,
+       AVG(sh.c_acctbal) OVER (PARTITION BY r.r_regionkey) AS avg_acctbal_in_region
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN sales_hierarchy sh ON sh.c_custkey IN (SELECT c.c_custkey FROM customer c)
+WHERE p.p_size > 10
+  AND (p.p_comment LIKE '%fragile%' OR p.p_retailprice < 100)
+GROUP BY r.r_name
+HAVING SUM(ps.ps_availqty) > 1000
+ORDER BY total_retail_value DESC
+LIMIT 10;

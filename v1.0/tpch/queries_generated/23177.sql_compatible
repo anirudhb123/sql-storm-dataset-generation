@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account'
+            ELSE CONCAT('Balance: ', CAST(s.s_acctbal AS CHAR))
+        END AS account_info
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL OR s.s_comment LIKE '%preferred%'
+),
+PartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty IS NOT NULL AND ps.ps_supplycost IS NOT NULL 
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(AVG(h.total_revenue), 0) AS avg_order_revenue,
+    sd.account_info,
+    ps.avg_supply_cost,
+    ps.suppliers_count
+FROM 
+    part p
+LEFT JOIN 
+    PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedOrders h ON h.o_orderstatus = 'F' AND h.revenue_rank <= 5
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+WHERE 
+    p.p_size BETWEEN 1 AND 20 
+    AND (p.p_comment IS NULL OR p.p_comment NOT LIKE '%defective%')
+GROUP BY 
+    p.p_name, p.p_retailprice, sd.account_info, ps.avg_supply_cost, ps.suppliers_count
+ORDER BY 
+    avg_order_revenue DESC
+LIMIT 10;

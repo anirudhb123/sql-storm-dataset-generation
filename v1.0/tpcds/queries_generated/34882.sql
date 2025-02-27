@@ -1,0 +1,51 @@
+
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d_year,
+        d_month_seq,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+    UNION ALL
+    SELECT 
+        d_year,
+        d_month_seq,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales 
+    JOIN 
+        date_dim ON cs_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year, d_month_seq
+), ranked_sales AS (
+    SELECT 
+        d_year, 
+        d_month_seq, 
+        total_sales,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        monthly_sales
+)
+SELECT 
+    year_sales.d_year AS sales_year,
+    year_sales.total_sales,
+    CASE 
+        WHEN year_sales.sales_rank = 1 THEN 'Top Month'
+        ELSE 'Other Month' END AS ranking,
+    COALESCE(NULLIF(year_sales.total_sales - LAG(year_sales.total_sales, 1) OVER (PARTITION BY year_sales.d_year ORDER BY year_sales.d_month_seq), 0), 0) AS sales_difference,
+    'Total Sales: $' || FORMAT(total_sales, 2) AS formatted_sales
+FROM 
+    ranked_sales year_sales
+JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = 
+        (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_sk IN 
+            (SELECT DISTINCT ws_bill_customer_sk FROM web_sales))
+WHERE 
+    cd.cd_marital_status = 'M' AND 
+    (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+ORDER BY 
+    year_sales.d_year, year_sales.sales_rank;

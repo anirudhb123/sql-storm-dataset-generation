@@ -1,0 +1,63 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        COALESCE(k.keyword, 'No Keyword') AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        COUNT(DISTINCT c.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id
+),
+CompanyDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        md.cast_names,
+        md.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS year_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.cast_count > 0
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.movie_keyword,
+    rm.cast_names,
+    cd.company_name,
+    cd.company_type
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyDetails cd ON rm.movie_title LIKE '%' || cd.movie_id || '%' 
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC
+FETCH FIRST 50 ROWS ONLY;

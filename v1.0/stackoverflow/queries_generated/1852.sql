@@ -1,0 +1,65 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS Questions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS Answers,
+        SUM(p.Score) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentPostActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.Questions,
+        ups.Answers,
+        ups.TotalScore,
+        ups.TotalViews,
+        ra.Title AS RecentPostTitle
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        RecentPostActivity ra ON ups.UserId = ra.OwnerUserId AND ra.RecentPostRank = 1
+    WHERE 
+        ups.TotalScore > 1000
+    ORDER BY 
+        ups.TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(ra.Title, 'No recent post') AS RecentPost,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalScore,
+    ups.TotalViews,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = ups.UserId) AS BadgeCount
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentPostActivity ra ON ups.UserId = ra.OwnerUserId
+WHERE 
+    ra.RecentPostRank IS NULL 
+    OR (SELECT COUNT(*) FROM Votes v WHERE v.UserId = ups.UserId AND v.CreationDate > CURRENT_TIMESTAMP - INTERVAL '90 days') > 5
+ORDER BY 
+    ups.TotalScore DESC;

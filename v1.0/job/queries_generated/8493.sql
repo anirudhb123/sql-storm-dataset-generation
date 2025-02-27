@@ -1,0 +1,33 @@
+SELECT
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    c.nr_order AS cast_order,
+    r.role AS role_type,
+    cn.name AS company_name,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    mi.info AS movie_info
+FROM
+    aka_name ak
+JOIN
+    cast_info c ON ak.person_id = c.person_id
+JOIN
+    title t ON c.movie_id = t.id
+JOIN
+    role_type r ON c.role_id = r.id
+JOIN
+    movie_companies mc ON t.id = mc.movie_id
+JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+WHERE
+    t.production_year >= 2000
+    AND cn.country_code = 'USA'
+GROUP BY
+    ak.name, t.title, c.nr_order, r.role, cn.name, mi.info
+ORDER BY
+    t.production_year DESC, c.nr_order ASC;

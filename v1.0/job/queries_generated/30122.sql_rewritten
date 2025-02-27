@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM title m
+    WHERE m.season_nr IS NULL  
+    
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM title e
+    JOIN MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        a.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+),
+GenreCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(*) AS genre_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title m ON mk.movie_id = m.movie_id
+    GROUP BY m.movie_id
+),
+AvgRating AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS average_rating
+    FROM movie_info m
+    JOIN (
+        SELECT movie_id, info 
+        FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    ) r ON m.movie_id = r.movie_id
+    GROUP BY m.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cd.actor_name,
+    cd.actor_order,
+    gc.genre_count,
+    ar.average_rating
+FROM MovieHierarchy mh
+LEFT JOIN CastDetails cd ON mh.movie_id = cd.movie_id
+LEFT JOIN GenreCounts gc ON mh.movie_id = gc.movie_id
+LEFT JOIN AvgRating ar ON mh.movie_id = ar.movie_id
+WHERE 
+    mh.level = 1  
+    AND (gc.genre_count IS NULL OR gc.genre_count > 2)  
+ORDER BY mh.production_year DESC, mh.title, cd.actor_order;

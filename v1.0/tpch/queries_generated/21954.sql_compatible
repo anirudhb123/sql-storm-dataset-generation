@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CAST(NULL AS integer) AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal * 0.9, sh.hierarchy_level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal < sh.s_acctbal
+), 
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+    ORDER BY o.o_totalprice DESC
+    LIMIT 50
+), 
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) >= 1000
+), 
+NationDetail AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(s.s_suppkey) > 0
+)
+SELECT 
+    ph.s_suppkey,
+    ph.s_name,
+    ph.s_acctbal,
+    od.o_orderkey,
+    od.o_orderstatus,
+    al.total_revenue,
+    nd.n_name,
+    CASE 
+        WHEN ph.hierarchy_level IS NULL THEN 'Top Supplier'
+        ELSE 'Nested Supplier'
+    END AS supplier_type
+FROM SupplierHierarchy ph
+FULL OUTER JOIN FilteredOrders od ON ph.s_suppkey = od.o_custkey
+LEFT JOIN AggregatedLineItems al ON od.o_orderkey = al.l_orderkey
+INNER JOIN NationDetail nd ON ph.s_nationkey = nd.n_nationkey
+WHERE COALESCE(ph.s_acctbal, 0) > 0
+AND (COALESCE(al.total_revenue, 0) > 2000 OR nd.supplier_count > 2)
+ORDER BY COALESCE(al.total_revenue, 0) DESC, ph.s_name, nd.n_name;

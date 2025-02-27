@@ -1,0 +1,80 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_name
+    UNION ALL
+    SELECT 
+        oh.o_orderkey,
+        oh.o_orderdate,
+        oh.c_custkey,
+        oh.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        OrderHierarchy oh
+    JOIN 
+        lineitem l ON oh.o_orderkey = l.l_orderkey
+    GROUP BY 
+        oh.o_orderkey, oh.o_orderdate, oh.c_custkey, oh.c_name
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+SupplierRegion AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.c_name,
+    oh.total_revenue,
+    ps.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    sr.r_name,
+    sr.total_acctbal
+FROM 
+    OrderHierarchy oh
+LEFT JOIN 
+    PartSupplier ps ON oh.o_orderkey = ps.p_partkey
+LEFT JOIN 
+    SupplierRegion sr ON sr.n_name IS NOT NULL 
+WHERE 
+    ps.rn = 1
+ORDER BY 
+    oh.total_revenue DESC
+LIMIT 100;

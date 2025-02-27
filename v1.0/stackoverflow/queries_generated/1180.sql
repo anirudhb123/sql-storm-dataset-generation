@@ -1,0 +1,75 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        UNNEST(string_to_array(Tags, '><'))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 5
+),
+PostHistoryData AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS Reason,
+        ph.UserDisplayName AS Editor,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 24) -- Closed, Reopened, or Suggested Edits
+)
+SELECT 
+    ups.DisplayName,
+    ups.PostCount,
+    ups.AnswerCount,
+    ups.AcceptedAnswers,
+    pt.TagName,
+    pt.TagCount,
+    pd.Title,
+    pd.Reason,
+    pd.Editor,
+    pd.CreationDate
+FROM 
+    UserPostStats ups
+OUTER APPLY (
+    SELECT 
+        pt.TagName, 
+        pt.TagCount
+    FROM 
+        PopularTags pt
+    WHERE 
+        pt.TagName IN (SELECT UNNEST(string_to_array(p.TAGS, '><')) FROM Posts p WHERE p.OwnerUserId = ups.UserId)
+) pt
+LEFT JOIN 
+    PostHistoryData pd ON pd.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId)
+WHERE 
+    ups.AverageReputation > 1000
+ORDER BY 
+    ups.PostCount DESC, 
+    pt.TagCount DESC, 
+    pd.CreationDate DESC;

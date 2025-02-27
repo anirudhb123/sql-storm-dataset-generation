@@ -1,0 +1,64 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DateInfo AS (
+    SELECT 
+        d_date_sk,
+        DATE_FORMAT(d_date, '%Y-%m-%d') AS formatted_date,
+        d_day_name,
+        d_moy
+    FROM 
+        date_dim 
+    WHERE 
+        d_year = 2022
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM DateInfo)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ai.full_address,
+    di.formatted_date,
+    di.d_day_name,
+    sd.total_sales,
+    sd.total_orders
+FROM 
+    CustomerInfo ci
+JOIN 
+    AddressInfo ai ON ci.c_customer_sk = ai.ca_address_sk
+JOIN 
+    SalesData sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+JOIN 
+    DateInfo di ON sd.ws_sold_date_sk = di.d_date_sk
+ORDER BY 
+    sd.total_sales DESC, 
+    ci.full_name;

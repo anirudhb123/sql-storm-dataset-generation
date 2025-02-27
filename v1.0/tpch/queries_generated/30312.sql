@@ -1,0 +1,42 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_customerkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_customerkey, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_customerkey AND o.o_orderkey <> oh.o_orderkey
+),
+supplier_summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, 
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_qty,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    l.l_orderkey,
+    COALESCE(l.total_revenue, 0) AS total_revenue,
+    COALESCE(ls.total_available_qty, 0) AS total_qty_available,
+    CASE 
+      WHEN COALESCE(l.total_returned_qty, 0) > 0 THEN 'Returns Exist' 
+      ELSE 'No Returns' 
+    END AS return_status,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY l.l_orderkey) AS order_rank
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem_summary l ON c.c_custkey = l.l_orderkey
+LEFT JOIN supplier_summary ls ON l.l_orderkey = ls.ps_partkey
+WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+ORDER BY r.r_name, order_rank DESC;

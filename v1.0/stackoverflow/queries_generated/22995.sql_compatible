@@ -1,0 +1,72 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes - U.DownVotes AS NetVotes,
+        COUNT(DISTINCT B.Name) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+TagTopPosts AS (
+    SELECT 
+        T.TagName,
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        RANK() OVER (PARTITION BY T.TagName ORDER BY P.Score DESC) AS TagRank
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    WHERE 
+        P.PostTypeId = 1 AND P.Score IS NOT NULL
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.Views,
+    U.NetVotes,
+    U.BadgeCount,
+    COALESCE(S.TotalPosts, 0) AS TotalPosts,
+    COALESCE(S.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(S.TotalAnswers, 0) AS TotalAnswers,
+    T.TagName,
+    T.Title,
+    T.Score,
+    T.TagRank,
+    CASE 
+        WHEN U.Reputation > 1000 THEN 'Expert'
+        WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    UserStats U
+LEFT JOIN 
+    UserPostStats S ON U.UserId = S.UserId
+LEFT JOIN 
+    TagTopPosts T ON T.TagRank = ROW_NUMBER() OVER (ORDER BY U.Reputation DESC)
+WHERE 
+    U.NetVotes > 0
+ORDER BY 
+    U.Reputation DESC, T.Score DESC
+LIMIT 20;

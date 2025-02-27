@@ -1,0 +1,78 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_container, 
+        p.p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_price 
+    FROM 
+        part p 
+    WHERE 
+        p.p_size BETWEEN 1 AND 30 AND 
+        p.p_retailprice IS NOT NULL
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        s.s_suppkey, 
+        s.s_acctbal 
+    FROM 
+        nation n 
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+        OR s.s_comment LIKE '%Delight%'
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count 
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name 
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    np.n_name, 
+    COUNT(DISTINCT np.s_suppkey) AS supplier_count,
+    (SELECT 
+        SUM(lp.l_extendedprice * (1 - lp.l_discount)) 
+     FROM 
+        lineitem lp 
+     JOIN 
+        orders o ON lp.l_orderkey = o.o_orderkey 
+     WHERE 
+        lp.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' 
+        AND o.o_orderstatus = 'F') AS total_sales,
+    SUM(rp.p_retailprice) AS total_price_from_parts 
+FROM 
+    NationSupplier np 
+JOIN 
+    RankedParts rp ON rp.p_partkey IN (
+        SELECT 
+            ps.ps_partkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_availqty > 0 
+            AND EXISTS (
+                SELECT 1 
+                FROM CustomerOrders co 
+                WHERE co.order_count > 0
+                AND np.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+            )
+    )
+WHERE 
+    np.n_name IS NOT NULL 
+GROUP BY 
+    np.n_name 
+HAVING 
+    COUNT(DISTINCT np.s_suppkey) > 0 
+    AND total_sales > 100000;

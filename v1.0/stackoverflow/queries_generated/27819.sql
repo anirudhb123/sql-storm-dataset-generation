@@ -1,0 +1,64 @@
+WITH PostTagCounts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT t.TagName) AS TagCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    LEFT JOIN
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY
+        p.Id, p.Title
+),
+PostHistories AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) as LastChangeDate
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalMetrics AS (
+    SELECT
+        pt.PostId,
+        pt.Title,
+        pt.TagCount,
+        pt.Upvotes,
+        pt.Downvotes,
+        pt.CommentCount,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.ChangeCount END), 0) AS ClosureChangeCount,
+        COALESCE(MAX(ph.LastChangeDate), '1970-01-01') AS LastChangeDate
+    FROM
+        PostTagCounts pt
+    LEFT JOIN
+        PostHistories ph ON pt.PostId = ph.PostId
+    GROUP BY
+        pt.PostId, pt.Title, pt.TagCount, pt.Upvotes, pt.Downvotes, pt.CommentCount
+)
+SELECT
+    PostId,
+    Title,
+    TagCount,
+    Upvotes,
+    Downvotes,
+    CommentCount,
+    ClosureChangeCount,
+    LastChangeDate
+FROM
+    FinalMetrics
+WHERE
+    Upvotes - Downvotes > 10
+ORDER BY
+    TagCount DESC, Upvotes DESC;

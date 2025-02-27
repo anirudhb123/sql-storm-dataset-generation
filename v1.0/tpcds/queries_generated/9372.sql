@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990 
+        AND c.c_preferred_cust_flag = 'Y'
+    GROUP BY 
+        c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.total_transactions,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    WHERE 
+        cd.cd_income_band_sk IS NOT NULL
+),
+AggregatedSummary AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(*) AS customer_count,
+        AVG(ss.total_sales) AS avg_sales,
+        AVG(ss.total_transactions) AS avg_transactions
+    FROM 
+        SalesSummary ss
+    JOIN 
+        customer_demographics cd ON ss.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+
+SELECT 
+    gender,
+    marital_status,
+    customer_count,
+    avg_sales,
+    avg_transactions
+FROM 
+    AggregatedSummary
+WHERE 
+    customer_count > 10
+ORDER BY 
+    avg_sales DESC, customer_count DESC;

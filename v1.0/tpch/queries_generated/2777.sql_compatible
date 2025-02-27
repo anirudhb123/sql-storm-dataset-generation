@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment') AS supplier_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    p.p_name, 
+    r.r_name AS region_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count, 
+    AVG(o.o_totalprice) AS average_order_value,
+    CONCAT(s.s_name, ' - ', s.s_phone) AS supplier_info
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierDetails s ON ps.ps_suppkey = s.s_suppkey
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN RankedOrders o ON o.o_orderkey = l.l_orderkey
+JOIN customer c ON c.c_custkey = o.o_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 20.00 
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 500.00)
+GROUP BY 
+    p.p_name, r.r_name, s.s_name, s.s_phone
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    average_order_value DESC
+LIMIT 10;

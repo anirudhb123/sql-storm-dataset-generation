@@ -1,0 +1,91 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN LATERAL (
+        SELECT 
+            unnest(string_to_array(P.Tags, '<>')) AS TagName
+    ) T ON true
+    GROUP BY P.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS CloseDate,
+        PH.UserDisplayName AS Closer,
+        CPR.Comment AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CPR ON CAST(PH.Comment AS int) = CPR.Id
+    WHERE PH.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+AggregatedData AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.ViewCount,
+        PD.Score,
+        COALESCE(CP.CloseDate, 'No Close') AS CloseDate,
+        CP.Closer,
+        CP.CloseReason,
+        PD.CommentCount,
+        PD.Tags,
+        UR.ReputationRank
+    FROM UserReputation UR
+    LEFT JOIN UserBadges UB ON UR.UserId = UB.UserId
+    LEFT JOIN PostDetails PD ON UR.DisplayName = PD.OwnerDisplayName
+    LEFT JOIN ClosedPosts CP ON PD.PostId = CP.PostId
+)
+SELECT 
+    A.UserId,
+    A.DisplayName,
+    A.GoldBadges,
+    A.SilverBadges,
+    A.BronzeBadges,
+    A.PostId,
+    A.Title,
+    A.CreationDate,
+    A.ViewCount,
+    A.Score,
+    A.CloseDate,
+    A.Closer,
+    A.CloseReason,
+    A.CommentCount,
+    A.Tags
+FROM AggregatedData A
+WHERE A.Score >= 0
+AND A.CloseDate IS NOT NULL
+ORDER BY A.ReputationRank, A.Score DESC;

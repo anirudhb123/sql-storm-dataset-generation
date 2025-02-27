@@ -1,0 +1,51 @@
+WITH RECURSIVE RegionCTE AS (
+    SELECT r_regionkey, r_name, r_comment
+    FROM region
+    WHERE r_regionkey IS NOT NULL
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment
+    FROM region r
+    JOIN RegionCTE rc ON r.r_regionkey = rc.r_regionkey
+),
+SupplierStats AS (
+    SELECT s.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS supplier_count, AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    GROUP BY s.n_nationkey
+),
+CustomerStats AS (
+    SELECT c.c_nationkey, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_nationkey
+),
+CombinedStats AS (
+    SELECT cs.c_nationkey, COALESCE(ss.supplier_count, 0) AS supplier_count, 
+           COALESCE(cs.total_spent, 0.00) AS total_spent,
+           COALESCE(cs.order_count, 0) AS order_count,
+           CASE
+               WHEN COALESCE(cs.total_spent, 0) = 0 THEN NULL
+               ELSE COALESCE(cs.total_spent, 0) / COALESCE(ss.supplier_count, 1)
+           END AS avg_spent_per_supplier
+    FROM CustomerStats cs
+    FULL OUTER JOIN SupplierStats ss ON cs.c_nationkey = ss.n_nationkey
+),
+FinalStats AS (
+    SELECT c.r_name, cb.supplier_count, cb.total_spent, cb.order_count, cb.avg_spent_per_supplier
+    FROM CombinedStats cb
+    JOIN nation n ON cb.c_nationkey = n.n_nationkey
+    JOIN RegionCTE c ON n.n_regionkey = c.r_regionkey
+)
+SELECT r.r_name,
+       COUNT(DISTINCT p.p_partkey) AS distinct_parts,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+       AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+       SUM(l.l_tax) AS total_tax,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM FinalStats fs
+JOIN partsupp ps ON fs.supplier_count > 0
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY r.r_name
+ORDER BY r.r_name;

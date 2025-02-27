@@ -1,0 +1,96 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_custkey,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' -- Open orders
+
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_custkey,
+        oh.order_level + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE 
+        o.o_orderdate > oh.o_orderdate
+),
+
+CustomerBalance AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        c.c_acctbal
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+),
+
+SupplierProducts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+
+ProductInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+
+SELECT 
+    c.c_name,
+    cb.total_spent,
+    cb.c_acctbal,
+    p.p_name,
+    p.p_retailprice,
+    sp.total_supplycost,
+    oh.order_level
+FROM 
+    CustomerBalance cb
+LEFT JOIN 
+    lineitem l ON cb.c_custkey = l.l_orderkey
+LEFT JOIN 
+    ProductInfo p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    SupplierProducts sp ON p.supplier_count > 1 
+LEFT JOIN 
+    OrderHierarchy oh ON cb.c_custkey = oh.o_custkey
+WHERE 
+    cb.total_spent IS NOT NULL 
+    AND (cb.c_acctbal IS NULL OR cb.c_acctbal > 1000)
+ORDER BY 
+    cb.total_spent DESC, 
+    sp.total_supplycost ASC 
+LIMIT 50;

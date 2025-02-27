@@ -1,0 +1,62 @@
+WITH RECURSIVE region_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        CAST(NULL AS DECIMAL(12, 2)) AS avg_order_value
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND 
+        l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        r.r_name
+    UNION ALL
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        CAST(NULL AS DECIMAL(12, 2)) AS avg_order_value
+    FROM 
+        region_sales rs
+    JOIN 
+        orders o ON rs.region_name = (SELECT r_name FROM region WHERE r_regionkey = o.o_orderkey % (SELECT COUNT(*) FROM region))
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        r.r_name
+),
+avg_order_values AS (
+    SELECT 
+        region_name, 
+        AVG(total_sales) AS avg_order_value
+    FROM 
+        region_sales
+    GROUP BY 
+        region_name
+)
+SELECT 
+    r.region_name,
+    r.total_sales,
+    COALESCE(a.avg_order_value, 0) AS avg_order_value,
+    CASE 
+        WHEN r.total_sales > 1000000 THEN 'High'
+        WHEN r.total_sales BETWEEN 500000 AND 1000000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS sales_category
+FROM 
+    region_sales r
+LEFT JOIN 
+    avg_order_values a ON r.region_name = a.region_name
+ORDER BY 
+    r.total_sales DESC;

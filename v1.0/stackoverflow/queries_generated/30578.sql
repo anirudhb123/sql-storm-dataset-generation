@@ -1,0 +1,59 @@
+WITH RECURSIVE UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        V.PostId,
+        COUNT(V.Id) AS NumberOfVotes,
+        SUM(CASE 
+                WHEN V.VoteTypeId = 2 THEN 1
+                WHEN V.VoteTypeId = 3 THEN -1
+                ELSE 0 
+            END) AS VoteScore
+    FROM Users U
+    JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PV.NumberOfVotes, 0) AS NumberOfVotes,
+        COALESCE(PV.VoteScore, 0) AS VoteScore,
+        COALESCE(PH.Comment, 'No edits') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate IS NOT NULL
+    LEFT JOIN UserVotes PV ON P.Id = PV.PostId
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.NumberOfVotes,
+    PD.VoteScore,
+    PD.LastEditComment,
+    CASE 
+        WHEN PD.EditRank = 1 THEN 'Latest Edit'
+        ELSE 'Earlier Edit'
+    END AS EditStatus
+FROM PostDetails PD
+WHERE PD.VoteScore > 0
+  AND PD.Score > 5
+  AND PD.CreationDate >= NOW() - INTERVAL '30 days'
+ORDER BY PD.VoteScore DESC, PD.CreationDate ASC
+LIMIT 10;
+
+-- Additionally, we will gather insights into posts that are closed and the reasons for closure.
+SELECT 
+    PH.PostId,
+    COUNT(*) AS ClosureCount,
+    STRING_AGG(CRT.Name, ', ') AS ClosureReasons
+FROM PostHistory PH
+JOIN CloseReasonTypes CRT ON PH.Comment::int = CRT.Id 
+WHERE PH.PostHistoryTypeId IN (10, 11)
+GROUP BY PH.PostId
+HAVING COUNT(*) > 2
+ORDER BY ClosureCount DESC;

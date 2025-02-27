@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_name = 'USA'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost, 
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           AVG(l.l_tax) AS avg_tax
+    FROM lineitem l
+    WHERE l.l_shipdate <= '2023-10-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    nh.n_name,
+    pd.p_name,
+    COALESCE(lst.revenue, 0) AS total_revenue,
+    COALESCE(sst.total_cost, 0) AS supplier_total_cost,
+    od.o_orderdate,
+    od.o_totalprice
+FROM NationHierarchy nh
+LEFT JOIN supplier s ON s.s_nationkey = nh.n_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part pd ON ps.ps_partkey = pd.p_partkey
+LEFT JOIN LineItemAnalysis lst ON lst.l_orderkey = od.o_orderkey
+LEFT JOIN OrderDetails od ON od.o_orderkey = lst.l_orderkey
+LEFT JOIN SupplierStats sst ON sst.s_suppkey = s.s_suppkey
+WHERE od.o_orderkey IS NOT NULL AND (od.o_totalprice > 5000 
+      OR (sst.avg_acctbal IS NOT NULL AND sst.avg_acctbal > 1000))
+ORDER BY total_revenue DESC, nh.n_name;

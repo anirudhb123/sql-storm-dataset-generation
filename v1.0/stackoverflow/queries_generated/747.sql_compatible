@@ -1,0 +1,76 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.LastAccessDate
+),
+RecentPostActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS RecentPostsCount,
+        COUNT(C.Id) AS RecentCommentsCount,
+        MAX(P.LastActivityDate) AS LastPostActivityDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 month'
+    GROUP BY 
+        P.OwnerUserId
+),
+UserRankings AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.TotalBounties,
+        U.TotalPosts,
+        U.TotalComments,
+        U.TotalBadges,
+        R.RecentPostsCount,
+        R.RecentCommentsCount,
+        CASE 
+            WHEN R.LastPostActivityDate IS NOT NULL THEN 'Active'
+            ELSE 'Inactive'
+        END AS ActivityStatus
+    FROM 
+        UserStatistics U
+    LEFT JOIN 
+        RecentPostActivity R ON U.UserId = R.OwnerUserId
+)
+SELECT 
+    UR.DisplayName,
+    UR.Reputation,
+    UR.TotalBounties,
+    UR.TotalPosts,
+    UR.TotalComments,
+    UR.TotalBadges,
+    UR.ReputationRank,
+    UR.ActivityStatus
+FROM 
+    UserRankings UR
+WHERE 
+    UR.Reputation > 1000
+ORDER BY 
+    UR.Reputation DESC;

@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- posts created in the last year
+),
+RecentActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 100  -- consider only high reputation users
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+CombinedResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        ra.DisplayName AS OwnerName,
+        ra.CommentCount,
+        ra.UpVoteCount,
+        ra.DownVoteCount,
+        pcd.LastEdited,
+        pcd.HistoryTypes,
+        COALESCE(rp.Score / NULLIF(rp.ViewCount, 0), 0) AS ScorePerView  -- avoid division by zero
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        Users ra ON rp.OwnerUserId = ra.Id
+    LEFT JOIN 
+        RecentActivity ra ON ra.UserId = rp.OwnerUserId
+    LEFT JOIN 
+        PostHistoryDetails pcd ON rp.PostId = pcd.PostId
+    WHERE 
+        rp.PostRank = 1  -- only the highest scoring post per user
+)
+SELECT 
+    *,
+    CAST((SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = c.UserId) AS VARCHAR(10)) + ' posts total' AS UserPostCount
+FROM 
+    CombinedResults c
+ORDER BY 
+    c.Score DESC, c.ViewCount DESC;

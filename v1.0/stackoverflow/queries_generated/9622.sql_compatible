@@ -1,0 +1,52 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        TotalBounty,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM UserReputation
+    WHERE PostCount > 5
+),
+PopularTags AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY T.Id, T.TagName
+    HAVING COUNT(P.Id) > 10
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.CommentCount,
+    TU.TotalBounty,
+    PT.TagName,
+    PT.PostCount AS TagPostCount
+FROM TopUsers TU
+JOIN PopularTags PT ON TU.PostCount > PT.PostCount
+WHERE TU.ReputationRank <= 50
+ORDER BY TU.Reputation DESC, PT.PostCount DESC;

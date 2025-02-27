@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_graph AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL AND mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mg.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_graph mg ON ml.movie_id = mg.movie_id
+    WHERE
+        mg.level < 3  
+)
+
+SELECT 
+    k.keyword,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    AVG(COALESCE(ci.nr_order, 0)) AS avg_order,
+    MAX(mg.production_year) AS latest_year
+FROM 
+    keyword k
+LEFT JOIN 
+    movie_keyword mk ON k.id = mk.keyword_id
+LEFT JOIN 
+    aka_title at ON mk.movie_id = at.id
+LEFT JOIN 
+    cast_info ci ON at.id = ci.movie_id
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN 
+    movie_graph mg ON at.id = mg.movie_id
+WHERE 
+    (k.keyword IS NOT NULL AND k.keyword NOT LIKE '%action%')
+    OR (mg.production_year IS NULL AND EXISTS(
+        SELECT 1
+        FROM title t
+        WHERE t.id = at.id AND t.production_year < 2005
+    ))
+GROUP BY 
+    k.keyword
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 5
+ORDER BY 
+    avg_order DESC,
+    actor_count DESC
+LIMIT 10;

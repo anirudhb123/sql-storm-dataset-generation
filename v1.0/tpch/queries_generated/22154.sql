@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+TotalOrderPrices AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(t.total_price, 0) AS total_price
+    FROM customer c
+    LEFT JOIN TotalOrderPrices t ON c.c_custkey = t.o_custkey
+    WHERE COALESCE(t.total_price, 0) > 10000
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ROUND(AVG(ps.ps_supplycost), 2), 0) AS avg_supplycost,
+    COALESCE(MAX(s.s_name), 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT CASE WHEN s.rank = 1 THEN s.s_suppkey END) AS top_suppliers,
+    (CASE 
+        WHEN p.p_size > 0 THEN (SELECT COUNT(*) FROM HighValueCustomers HAVING COUNT(*) > 1) 
+        ELSE NULL
+     END) AS customer_count,
+    (SELECT SUM(total_price) 
+     FROM HighValueCustomers 
+     WHERE total_price < (SELECT AVG(total_price) FROM HighValueCustomers)) AS lower_avg_price_count
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY p.p_partkey, p.p_name
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 2 
+   OR AVG(ps.ps_supplycost) IS NULL 
+ORDER BY p.p_partkey DESC
+LIMIT 50 OFFSET 10;

@@ -1,0 +1,62 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 4 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.EditCount,
+    u.DisplayName,
+    CASE 
+        WHEN ps.RowNum = 1 THEN 'Most Recent Post' 
+        ELSE NULL 
+    END AS PostStatus,
+    CASE 
+        WHEN ps.UpVoteCount > 0 THEN 'Popular' 
+        ELSE 'Needs Attention' 
+    END AS PopularityStatus
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    TopUsers tu ON u.Id = tu.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1
+WHERE 
+    ps.CommentCount > 5
+ORDER BY 
+    ps.UpVoteCount DESC, ps.EditCount DESC
+LIMIT 10;

@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND k.keyword < 'queen-mary-the-ocean-liner' AND ci.role_id IN (1, 2, 3, 7) AND n.surname_pcode IS NOT NULL AND mc.note IN ('(1927) (Norway) (theatrical)', '(1996) (USA) (VHS) (as Acme Video)', '(1997) (Austria) (TV) (live)', '(1999) (France) (theatrical) (re-release)', '(199?) (Netherlands) (VHS) (rental)', '(2008) (Israel) (theatrical)', '(2008) (worldwide) (video) (internet)', '(2012) (Latvia) (theatrical)', '(as A Viking Films International Production)', '(as Théâtre de la Ville de Paris)') AND k.phonetic_code LIKE '%1%';

@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank,
+        COALESCE(COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id), 0) AS Comment_Count,
+        STRING_AGG(t.TagName, ',') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON U.Id = p.OwnerUserId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, U.Reputation, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.Comment_Count > 5 THEN 'High Comment'
+            WHEN rp.Comment_Count BETWEEN 2 AND 5 THEN 'Medium Comment'
+            ELSE 'Low Comment'
+        END AS Comment_Category
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.Reputation,
+    fp.Comment_Category,
+    fp.TagList,
+    COALESCE((SELECT COUNT(*) 
+              FROM Votes v 
+              WHERE v.PostId = fp.PostId AND v.VoteTypeId = 2), 0) AS UpvoteCount,
+    COALESCE((SELECT COUNT(*) 
+              FROM Votes v 
+              WHERE v.PostId = fp.PostId AND v.VoteTypeId = 3), 0) AS DownvoteCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = fp.PostId AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = fp.PostId)
+WHERE 
+    fp.Comment_Category = 'High Comment' 
+    OR (fp.Comment_Category = 'Medium Comment' AND fp.Reputation > 100) 
+    OR (fp.Comment_Category = 'Low Comment' AND (fp.ViewCount BETWEEN 100 AND 5000 OR fp.Score > 10))
+ORDER BY 
+    fp.CreationDate DESC,
+    fp.Score DESC;

@@ -1,0 +1,52 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.imdb_index,
+        STRING_AGG(DISTINCT ka.name, ', ') AS aliases,
+        STRING_AGG(DISTINCT c.role_id, ', ') AS cast_roles,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id AND cc.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ka ON ka.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name co ON co.id = mc.company_id
+    GROUP BY 
+        t.id, t.title, t.production_year, t.imdb_index
+),
+KeywordStats AS (
+    SELECT 
+        t.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(k.id) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.imdb_index,
+    md.aliases,
+    md.cast_roles,
+    md.companies,
+    ks.keywords,
+    ks.keyword_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordStats ks ON md.imdb_index = ks.movie_id
+ORDER BY 
+    md.production_year DESC, md.movie_title;

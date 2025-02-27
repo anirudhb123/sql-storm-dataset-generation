@@ -1,0 +1,56 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.p_partkey,
+    r.p_name,
+    r.p_retailprice,
+    s.s_name,
+    s.total_available,
+    os.total_order_value,
+    os.avg_quantity
+FROM 
+    RankedParts r
+LEFT JOIN 
+    SupplierStats s ON r.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey ORDER BY ps.ps_supplycost DESC LIMIT 1)
+LEFT JOIN 
+    OrderSummary os ON os.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')) LIMIT 1)
+WHERE 
+    r.price_rank <= 10 
+    AND (s.total_available > 100 OR s.avg_acct_balance IS NULL)
+ORDER BY 
+    r.p_retailprice DESC, os.total_order_value DESC;

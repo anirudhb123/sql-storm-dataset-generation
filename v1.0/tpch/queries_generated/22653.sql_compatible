@@ -1,0 +1,39 @@
+
+WITH RECURSIVE supplier_orders AS (
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+      AND o.o_totalprice > (
+          SELECT AVG(o2.o_totalprice) 
+          FROM orders o2 
+          WHERE o2.o_orderdate < DATE '1998-10-01'
+      )
+),
+customer_spending AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(o3.o_totalprice) 
+        FROM orders o3 
+        WHERE o3.o_orderdate >= DATEADD('year', -1, DATE '1998-10-01')
+    )
+)
+SELECT 
+    so.s_name AS supplier_name,
+    cs.c_name AS customer_name,
+    so.o_orderkey AS order_key,
+    so.o_orderstatus AS order_status,
+    so.o_totalprice AS order_total,
+    ROW_NUMBER() OVER (PARTITION BY so.s_suppkey ORDER BY so.o_totalprice DESC) AS price_rank
+FROM supplier_orders so
+FULL OUTER JOIN customer_spending cs ON so.o_orderkey = cs.c_custkey
+WHERE so.order_rank <= 5 OR (cs.total_spending IS NOT NULL AND cs.total_spending > 1000)
+  AND (so.o_orderstatus IS NULL OR so.o_orderstatus != 'N')
+ORDER BY supplier_name, customer_name
+FETCH FIRST 50 ROWS ONLY;

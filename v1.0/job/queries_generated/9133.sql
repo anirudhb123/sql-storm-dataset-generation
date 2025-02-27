@@ -1,0 +1,46 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        row_number() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year >= 2000
+),
+top_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ci.person_role_id,
+        pt.kind AS role_type
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        role_type pt ON ci.role_id = pt.id
+    WHERE 
+        ci.nr_order < 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    tm.title AS top_movie_title,
+    tm.role_type
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    top_movies tm ON rm.year_rank = 1 AND rm.production_year = tm.production_year
+WHERE 
+    rm.keyword ILIKE '%action%'
+ORDER BY 
+    rm.production_year DESC, rm.title;

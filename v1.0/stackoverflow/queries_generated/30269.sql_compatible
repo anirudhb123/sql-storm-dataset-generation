@@ -1,0 +1,51 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        1 AS Level,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.AnswerCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.ParentId,
+        RPH.Level + 1,
+        P2.Title,
+        P2.CreationDate,
+        P2.OwnerUserId,
+        P2.AnswerCount
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON RPH.PostId = P2.ParentId
+)
+SELECT 
+    U.DisplayName AS OwnerName,
+    COUNT(P.Id) AS TotalPosts,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    RPH.Level AS HierarchyLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Tags T ON P.Tags IS NOT NULL AND T.TagName = ANY (STRING_TO_ARRAY(P.Tags, '><'))
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON P.Id = RPH.PostId
+WHERE 
+    U.Reputation > 1000
+GROUP BY 
+    U.DisplayName, RPH.Level
+HAVING 
+    SUM(P.Score) > 10
+ORDER BY 
+    TotalPosts DESC, U.DisplayName ASC;

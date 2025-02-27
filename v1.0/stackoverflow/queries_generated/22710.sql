@@ -1,0 +1,76 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes
+    FROM 
+        Users AS U
+    LEFT JOIN 
+        Votes AS V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostScoreAndActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        AVG(CASE WHEN C.Id IS NOT NULL THEN 1.0 ELSE 0 END) OVER (PARTITION BY P.Id) AS AverageComments,
+        SUM(COALESCE(PH.CreationDate > P.CreationDate, 0)::int) AS HistoryCount,
+        COUNT(DISTINCT C.Id) FILTER (WHERE C.CreationDate > P.CreationDate) AS RecentComments,
+        MAX(PH.UserId) AS LastEditorId,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts AS P
+    LEFT JOIN 
+        Comments AS C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory AS PH ON P.Id = PH.PostId
+    WHERE 
+        P.ViewCount IS NOT NULL OR P.Score BETWEEN 1 AND 100
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount
+),
+FlaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(UV.CloseVotes > 0, FALSE) AS IsClosed,
+        PS.AverageComments
+    FROM 
+        Posts AS P
+    LEFT JOIN 
+        UserVoteCounts AS UV ON P.OwnerUserId = UV.UserId
+    JOIN 
+        PostScoreAndActivity AS PS ON P.Id = PS.PostId
+    WHERE 
+        PS.AverageComments > 0 AND 
+        P.CreationDate > now() - INTERVAL '365 days'
+    ORDER BY 
+        PS.ViewCount DESC
+)
+SELECT 
+    FP.PostId,
+    FP.Title,
+    CASE 
+        WHEN FP.IsClosed THEN 'This post is closed.'
+        ELSE 'This post is open.'
+    END AS PostStatus,
+    PS.LastEditDate,
+    U.DisplayName AS LastEditorName,
+    PS.RecentComments
+FROM 
+    FlaggedPosts AS FP
+LEFT JOIN 
+    PostScoreAndActivity AS PS ON FP.PostId = PS.PostId
+LEFT JOIN 
+    Users AS U ON PS.LastEditorId = U.Id
+WHERE 
+    (FP.IsClosed IS TRUE OR PS.RecentComments > 2)
+ORDER BY 
+    PS.Score DESC NULLS LAST, 
+    FP.Title;
+

@@ -1,0 +1,65 @@
+
+WITH movie_ratings AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(r.rating) AS average_rating
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        (SELECT movie_id, rating FROM reviews) r ON m.id = r.movie_id
+    GROUP BY 
+        m.id
+),
+actor_counts AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        complete_cast mi
+    INNER JOIN 
+        cast_info ci ON mi.subject_id = ci.movie_id
+    GROUP BY 
+        mi.movie_id
+),
+actor_movies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COALESCE(mr.average_rating, 0) AS average_rating,
+        ac.actor_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    LEFT JOIN 
+        movie_ratings mr ON t.id = mr.movie_id
+    LEFT JOIN 
+        actor_counts ac ON t.id = ac.movie_id
+    WHERE 
+        a.name IS NOT NULL 
+        AND t.production_year > 2000
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    average_rating,
+    actor_count
+FROM 
+    actor_movies
+WHERE 
+    average_rating >= (
+        SELECT 
+            AVG(average_rating)
+        FROM 
+            movie_ratings
+    )
+ORDER BY 
+    actor_count DESC, 
+    average_rating DESC
+LIMIT 10;

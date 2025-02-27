@@ -1,0 +1,67 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        s.total_sales
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_custkey = c.c_custkey
+    WHERE 
+        s.sales_rank <= 10
+)
+SELECT 
+    rc.r_name AS region,
+    nc.n_name AS nation,
+    sc.s_name AS supplier,
+    pc.p_name AS part,
+    sum(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    COUNT(DISTINCT oc.o_orderkey) AS total_orders,
+    MAX(dim.total_sales) OVER (PARTITION BY rc.r_regionkey) AS max_sales_per_region
+FROM 
+    lineitem li
+JOIN 
+    orders oc ON li.l_orderkey = oc.o_orderkey
+JOIN 
+    customer cu ON oc.o_custkey = cu.c_custkey
+JOIN 
+    supplier sc ON li.l_suppkey = sc.s_suppkey
+JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey AND sc.s_suppkey = ps.ps_suppkey
+JOIN 
+    part pc ON ps.ps_partkey = pc.p_partkey
+JOIN 
+    nation nc ON sc.s_nationkey = nc.n_nationkey
+JOIN 
+    region rc ON nc.n_regionkey = rc.r_regionkey
+WHERE 
+    li.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+GROUP BY 
+    rc.r_name, nc.n_name, sc.s_name, pc.p_name
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > (
+        SELECT 
+            AVG(total_sales) 
+        FROM 
+            SalesCTE 
+        WHERE 
+            c_custkey IN (SELECT c_custkey FROM TopCustomers)
+    )
+ORDER BY 
+    total_revenue DESC
+LIMIT 100;

@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.online_purchase = 1
+        AND ws.net_profit IS NOT NULL
+), CustomerCounts AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        MAX(CASE WHEN cd_demo.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_order_flag,
+        MAX(CASE WHEN cd_demo.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_order_flag
+    FROM 
+        customer c
+    JOIN customer_demographics cd_demo ON c.c_current_cdemo_sk = cd_demo.cd_demo_sk
+    JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY c.c_customer_sk
+), StoreInfo AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.net_profit) AS total_store_profit,
+        COUNT(DISTINCT ss_ticket_number) AS total_sales_tickets,
+        AVG(ss.ss_sales_price) AS avg_sales_price
+    FROM 
+        store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk
+), DailyReturns AS (
+    SELECT 
+        d.d_date_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returned,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        date_dim d
+    LEFT JOIN store_returns sr ON d.d_date_sk = sr.sr_returned_date_sk
+    GROUP BY d.d_date_id
+)
+
+SELECT 
+    ci.c_customer_sk, 
+    COALESCE(RS.web_site_sk, S.s_store_sk) AS sales_channel,
+    C.total_orders,
+    R.total_returned,
+    S.total_store_profit,
+    CASE 
+        WHEN R.return_count > 0 THEN 'Has Returns'
+        ELSE 'No Returns'
+    END AS return_status,
+    'Channel: ' || COALESCE(CAST(RS.web_site_sk AS TEXT), CAST(S.s_store_sk AS TEXT)) || 
+    ' | Customer Orders: ' || C.total_orders || 
+    ' | Avg Price: ' || COALESCE(CAST(S.avg_sales_price AS TEXT), 'N/A') || 
+    ' | Total Returns: ' || R.total_returned AS channel_summary
+FROM 
+    customer ci
+LEFT JOIN CustomerCounts C ON ci.c_customer_sk = C.c_customer_sk
+LEFT JOIN StoreInfo S ON S.total_store_profit > 10000
+FULL OUTER JOIN RankedSales RS ON RS.rnk = 1
+LEFT JOIN DailyReturns R ON R.d_date_id = '2023-10-01'
+WHERE 
+    (C.total_orders > 5 OR R.total_returned = 0)
+    AND (ci.c_birth_year IS NOT NULL OR ci.c_birth_month IS NULL)
+ORDER BY 
+    return_status DESC, sales_channel;

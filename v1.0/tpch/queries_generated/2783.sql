@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(ps.ps_partkey) AS TotalParts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS LineItemCount,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        SUM(l.l_tax) AS TotalTax
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.TotalSupplyCost,
+        RANK() OVER (ORDER BY ss.TotalSupplyCost DESC) AS SupplierRank
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.TotalParts > 10
+),
+TopOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.LineItemCount,
+        od.TotalRevenue,
+        RANK() OVER (ORDER BY od.TotalRevenue DESC) AS OrderRank
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.TotalRevenue > 1000
+)
+SELECT 
+    ts.s_name AS SupplierName,
+    ts.TotalSupplyCost AS SupplierTotalCost,
+    to.o_orderkey AS OrderKey,
+    to.TotalRevenue AS OrderTotalRevenue
+FROM 
+    TopSuppliers ts
+LEFT JOIN 
+    TopOrders to ON ts.SupplierRank = to.OrderRank
+ORDER BY 
+    ts.TotalSupplyCost DESC, to.TotalRevenue ASC
+LIMIT 50;

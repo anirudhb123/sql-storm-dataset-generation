@@ -1,0 +1,65 @@
+WITH TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        ROW_NUMBER() OVER (ORDER BY SUM(v.VoteTypeId = 2) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.UpVotes,
+    u.DownVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COUNT(cp.PostId) AS ClosedPostsCount,
+    STRING_AGG(cp.Title || ' (Closed by: ' || cp.ClosedBy || ', Reason: ' || COALESCE(cp.CloseReason, 'N/A') || ')', '; ') AS ClosedPostsDetails
+FROM 
+    TopUsers u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON u.Id = cp.ClosedBy
+WHERE 
+    u.UserRank <= 10
+GROUP BY 
+    u.DisplayName, u.UpVotes, u.DownVotes, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY 
+    u.UpVotes DESC;

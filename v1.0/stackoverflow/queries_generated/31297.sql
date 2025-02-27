@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Starting with Questions
+    UNION ALL
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.Score,
+        a.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts p ON a.ParentId = p.Id -- Join to find answers
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+),
+TopPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Score,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY ph.Score DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy ph
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LatestCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    us.DisplayName,
+    us.UpVotes,
+    us.DownVotes,
+    rc.CommentCount,
+    rc.LatestCommentDate,
+    CASE
+        WHEN rc.CommentCount IS NULL THEN 'No Comments'
+        ELSE 'Comments Present'
+    END AS CommentStatus
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.PostId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    RecentComments rc ON tp.PostId = rc.PostId
+WHERE 
+    tp.Rank <= 5
+ORDER BY 
+    tp.Score DESC,
+    tp.Title
+OPTION (MAXRECURSION 0);

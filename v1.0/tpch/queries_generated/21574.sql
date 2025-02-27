@@ -1,0 +1,42 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           RANK() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) as supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.n_nationkey
+), OrderSummary AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           c.c_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o 
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+      AND l.l_quantity > 0
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+), SupplierRevenue AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(l.l_extendedprice) AS total_revenue
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT r.r_name, 
+       sr.s_name AS top_supplier, 
+       sr.total_revenue AS supplier_revenue,
+       COALESCE(os.revenue, 0) AS order_revenue,
+       CASE 
+           WHEN os.revenue IS NULL THEN 'No Orders'
+           ELSE 'Has Orders'
+       END AS order_status
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey AND rs.supplier_rank = 1
+LEFT JOIN SupplierRevenue sr ON rs.s_suppkey = sr.s_suppkey
+LEFT JOIN OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate > '2023-01-01')
+WHERE r.r_name LIKE 'E%' OR r.r_name IS NULL
+ORDER BY r.r_name, supplier_revenue DESC;

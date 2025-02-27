@@ -1,0 +1,65 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+        AND p.PostTypeId = 1
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.UpVotes,
+        us.DownVotes,
+        COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+        AVG(CASE WHEN rp.PostId IS NOT NULL THEN rp.Score ELSE NULL END) AS AvgScore
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        RecentPosts rp ON us.UserId = rp.OwnerUserId
+    GROUP BY 
+        us.UserId
+    ORDER BY 
+        us.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.UpVotes,
+    tu.DownVotes,
+    tu.RecentPostCount,
+    tu.AvgScore
+FROM 
+    TopUsers tu
+WHERE 
+    (tu.UpVotes - tu.DownVotes) > 10
+ORDER BY 
+    tu.Reputation DESC;

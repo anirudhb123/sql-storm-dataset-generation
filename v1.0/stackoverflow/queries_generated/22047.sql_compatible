@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank,
+        COALESCE((SELECT SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) 
+                    FROM Votes v 
+                    WHERE v.PostId = p.Id), 0) AS TotalUpvotes,
+        COALESCE((SELECT SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) 
+                    FROM Votes v 
+                    WHERE v.PostId = p.Id), 0) AS TotalDownvotes
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+      AND p.Score > 0
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(rp.TotalUpvotes) AS UpvotesReceived,
+        SUM(rp.TotalDownvotes) AS DownvotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC) AS PopularityRank 
+    FROM 
+        RankedPosts
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.UpvotesReceived,
+    us.DownvotesReceived,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViewCount
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    PopularPosts pp ON pp.PopularityRank = 1
+WHERE 
+    us.Reputation > 1000
+  AND (us.UpvotesReceived - us.DownvotesReceived) > 100
+ORDER BY 
+    us.Reputation DESC, us.PostCount DESC
+LIMIT 10;

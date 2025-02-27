@@ -1,0 +1,64 @@
+WITH RecursiveGenre AS (
+    SELECT 
+        kt.kind AS genre,
+        mt.production_year,
+        mt.id AS movie_id
+    FROM 
+        aka_title mt
+    JOIN 
+        kind_type kt ON mt.kind_id = kt.id
+),
+RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY rg.genre ORDER BY mt.production_year DESC) AS genre_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        RecursiveGenre rg ON mt.id = rg.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE NULL END) AS avg_note_length
+    FROM 
+        cast_info ci
+    JOIN 
+        RankedMovies rm ON ci.movie_id = rm.movie_id
+    GROUP BY 
+        c.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        mc.total_cast,
+        mc.avg_note_length
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieCast mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        rm.genre_rank <= 5
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    CASE 
+        WHEN tm.total_cast IS NULL THEN 'No cast available'
+        ELSE tm.total_cast::text
+    END AS cast_count,
+    COALESCE(tm.avg_note_length::text, 'No data') AS average_note_length,
+    (SELECT COUNT(*) FROM aka_name an WHERE an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = tm.movie_id)) AS distinct_actors_count,
+    (SELECT STRING_AGG(DISTINCT an.name, ', ') FROM aka_name an WHERE an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = tm.movie_id)) AS actor_names
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.total_cast DESC NULLS LAST;

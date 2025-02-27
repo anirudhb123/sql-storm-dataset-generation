@@ -1,0 +1,62 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s_suppkey, 
+        s_name,
+        total_sales,
+        order_count,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SupplierSales
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, n.n_name
+)
+SELECT 
+    t.s_name, 
+    t.total_sales, 
+    t.order_count, 
+    c.c_name AS customer_name, 
+    c.nation,
+    c.order_count AS customer_order_count,
+    COALESCE(t.order_count, 0) AS supplier_order_count
+FROM 
+    TopSuppliers t
+FULL OUTER JOIN 
+    CustomerRegion c ON t.s_suppkey = c.c_custkey
+WHERE 
+    (t.total_sales > 100000 OR t.supp_key IS NULL) 
+    AND (c.order_count > 5 OR c.cust_key IS NULL)
+ORDER BY 
+    t.total_sales DESC, c.customer_order_count DESC
+LIMIT 50;

@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT t.id AS movie_id, t.title, t.production_year, 1 AS level
+    FROM aka_title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT t.id AS movie_id, t.title, t.production_year, mh.level + 1
+    FROM aka_title t
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title t2 ON t2.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON t.id = mh.movie_id
+    WHERE mh.level < 5
+),
+TopMovies AS (
+    SELECT m.movie_id, m.title, COUNT(ci.person_id) AS actor_count
+    FROM MovieHierarchy m
+    LEFT JOIN complete_cast cc ON cc.movie_id = m.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = m.movie_id
+    GROUP BY m.movie_id, m.title
+    HAVING COUNT(ci.person_id) > 10
+),
+MovieDetails AS (
+    SELECT tm.movie_id, tm.title, tm.actor_count, 
+           STRING_AGG(DISTINCT cn.name, ', ') AS cast_names,
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM TopMovies tm
+    LEFT JOIN complete_cast cc ON cc.movie_id = tm.movie_id
+    LEFT JOIN cast_info ci ON ci.movie_id = tm.movie_id
+    LEFT JOIN name cn ON cn.id = ci.person_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = tm.movie_id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    GROUP BY tm.movie_id, tm.title, tm.actor_count
+)
+SELECT md.movie_id, md.title, md.actor_count,
+       COALESCE(md.cast_names, 'No Cast') AS cast_names,
+       COALESCE(md.keywords, 'No Keywords') AS keywords,
+       nt.kind AS movie_type,
+       CASE 
+           WHEN md.actor_count > 50 THEN 'Blockbuster'
+           WHEN md.actor_count BETWEEN 20 AND 50 THEN 'Mid-Tier'
+           ELSE 'Indie'
+       END AS classification
+FROM MovieDetails md
+LEFT JOIN aka_title at ON at.id = md.movie_id
+LEFT JOIN kind_type nt ON nt.id = at.kind_id
+WHERE at.production_year > 2010 AND nt.kind IS NOT NULL
+ORDER BY md.actor_count DESC, md.title;

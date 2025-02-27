@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY COUNT(a.Id) DESC) AS RankByLocation,
+        CONCAT_WS(', ', STRING_AGG(DISTINCT t.TagName, ', ' ORDER BY t.TagName)) AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '<>,')) AS TagName) t ON TRUE
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopLocationPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        OwnerDisplayName,
+        TagList
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByLocation <= 5
+),
+CommentsWithPostInfo AS (
+    SELECT 
+        c.Id AS CommentId,
+        c.Text,
+        c.CreationDate AS CommentDate,
+        tp.Title,
+        tp.OwnerDisplayName
+    FROM 
+        Comments c
+    JOIN 
+        TopLocationPosts tp ON tp.PostId = c.PostId
+)
+SELECT 
+    tp.Title AS PostTitle,
+    tp.OwnerDisplayName AS Author,
+    tp.CreationDate AS PostCreationDate,
+    tp.TagList AS AssociatedTags,
+    c.Text AS CommentText,
+    c.CommentDate AS CommentCreationDate
+FROM 
+    TopLocationPosts tp
+LEFT JOIN 
+    CommentsWithPostInfo c ON tp.PostId = c.PostId
+ORDER BY 
+    tp.CreationDate DESC, c.CommentDate DESC;

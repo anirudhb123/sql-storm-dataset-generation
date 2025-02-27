@@ -1,0 +1,60 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        rc.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE rc ON p.ParentId = rc.PostId  
+)
+SELECT 
+    u.DisplayName AS Answerer,
+    COUNT(DISTINCT a.Id) AS TotalAnswers,
+    SUM(a.Score) AS TotalScore,
+    AVG(DATE_PART('epoch', COALESCE(a.ClosedDate, cast('2024-10-01 12:34:56' as timestamp)) - a.CreationDate) / 3600) AS AvgHoursToAnswer,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    CASE 
+        WHEN SUM(v.VoteTypeId = 2) > 10 THEN 'Very Popular'
+        ELSE 'Moderately Popular'
+    END AS Popularity,    
+    CASE 
+        WHEN SUM(v.VoteTypeId = 3) > 0 THEN 'Has Downvotes'
+        ELSE 'No Downvotes'
+    END AS DownvotesStatus
+FROM 
+    Posts a
+LEFT JOIN 
+    Users u ON a.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON a.Id = v.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(UNNEST(STRING_TO_ARRAY(a.Tags, ','))) AS TagName  
+    ) AS t ON TRUE
+WHERE 
+    a.PostTypeId = 2  
+GROUP BY 
+    u.DisplayName, 
+    a.AcceptedAnswerId
+HAVING 
+    COUNT(DISTINCT a.Id) >= 5  
+ORDER BY 
+    TotalScore DESC
+LIMIT 10;

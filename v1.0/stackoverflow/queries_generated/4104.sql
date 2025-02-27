@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        p.Title AS PostTitle,
+        php.Text AS PreviousText
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        PostHistory php ON php.PostId = p.Id AND php.CreationDate < ph.CreationDate
+)
+SELECT DISTINCT
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(ph.PostHistoryTypeId, 0) AS LastPostHistoryType,
+    CASE 
+        WHEN rp.CommentCount > 10 THEN 'Highly Discussed'
+        WHEN rp.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.Id = ph.PostId
+WHERE 
+    rp.rn = 1
+    AND up.Reputation > (SELECT AVG(Reputation) FROM UserReputation)
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.Score DESC;

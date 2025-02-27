@@ -1,0 +1,47 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_ticket_number,
+        s.ss_sales_price,
+        s.ss_sold_date_sk,
+        1 AS level
+    FROM customer AS c
+    JOIN store_sales AS s ON c.c_customer_sk = s.ss_customer_sk
+    WHERE s.ss_sold_date_sk BETWEEN 2459115 AND 2459120  -- Example date range in Julian
+    UNION ALL
+    SELECT 
+        s.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        s.ss_ticket_number,
+        s.ss_sales_price,
+        s.ss_sold_date_sk,
+        sh.level + 1
+    FROM sales_hierarchy AS sh
+    JOIN store_sales AS s ON sh.c_customer_sk = s.ss_customer_sk
+    JOIN customer AS c ON s.ss_customer_sk = c.c_customer_sk
+    WHERE s.ss_sold_date_sk < sh.ss_sold_date_sk
+),
+sales_summary AS (
+    SELECT 
+        d.d_year,
+        COUNT(DISTINCT sh.ss_ticket_number) AS total_sales,
+        SUM(sh.ss_sales_price) AS total_revenue
+    FROM sales_hierarchy AS sh
+    JOIN date_dim AS d ON sh.ss_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+)
+SELECT 
+    d.d_year,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_revenue, 0.00) AS total_revenue,
+    CASE 
+        WHEN COALESCE(ss.total_sales, 0) > 0 THEN ROUND(COALESCE(ss.total_revenue, 0.00) / ss.total_sales, 2)
+        ELSE 0.00 
+    END AS average_sales_per_ticket
+FROM date_dim AS d
+LEFT JOIN sales_summary AS ss ON d.d_year = ss.d_year
+ORDER BY d.d_year;

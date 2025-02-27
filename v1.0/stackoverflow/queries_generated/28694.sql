@@ -1,0 +1,76 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore,
+        AVG(Posts.Score::float) AS AvgScore,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS Contributors
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = Posts.Tags::text::jsonb -> 'tag'
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE 
+        Posts.PostTypeId = 1  -- Only consider questions
+    GROUP BY 
+        Tags.TagName
+),
+TopContributors AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    WHERE 
+        Posts.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        Users.DisplayName
+    ORDER BY 
+        QuestionCount DESC
+    LIMIT 5
+),
+RecentEdits AS (
+    SELECT 
+        Posts.Title,
+        PostHistory.UserDisplayName,
+        PostHistory.CreationDate,
+        PostHistory.Comment,
+        PostHistory.Text
+    FROM 
+        PostHistory
+    JOIN 
+        Posts ON PostHistory.PostId = Posts.Id
+    WHERE 
+        PostHistory.PostHistoryTypeId IN (4, 5, 24)  -- Edit Title, Edit Body, Suggested Edit
+    ORDER BY 
+        PostHistory.CreationDate DESC
+    LIMIT 10
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalScore,
+    ts.AvgScore,
+    tc.DisplayName AS TopContributor,
+    tc.QuestionCount AS TopContributorQuestions,
+    tc.TotalViews AS TopContributorViews,
+    re.Title AS RecentEditTitle,
+    re.UserDisplayName AS EditorDisplayName,
+    re.CreationDate AS EditDate,
+    re.Comment AS EditComment,
+    re.Text AS EditText
+FROM 
+    TagStats ts
+LEFT JOIN 
+    TopContributors tc ON ts.PostCount = (SELECT MAX(PostCount) FROM TagStats)
+LEFT JOIN 
+    RecentEdits re ON re.Title = (SELECT MAX(Title) FROM RecentEdits)
+ORDER BY 
+    ts.TotalScore DESC, ts.PostCount DESC;

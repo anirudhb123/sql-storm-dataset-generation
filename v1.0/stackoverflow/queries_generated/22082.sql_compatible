@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) AND 
+        p.CreationDate > DATE_SUB(DATE '2024-10-01', INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.CreationDate, p.Score, p.ViewCount
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        AVG(p.Score) AS AvgPostScore,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank,
+        MAX(CASE WHEN p.CreationDate < DATE_SUB(DATE '2024-10-01', INTERVAL 6 MONTH) THEN 1 ELSE 0 END) AS InactiveFlag
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.SilverBadges,
+    us.GoldBadges,
+    us.AvgPostScore,
+    us.UserRank,
+    COUNT(rp.PostId) FILTER (WHERE rp.rn = 1) AS LatestPostCount,
+    CASE 
+        WHEN us.InactiveFlag = 1 THEN 'Inactive'
+        ELSE 'Active'
+    END AS AccountStatus,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    Posts p ON us.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    RankedPosts rp ON rp.OwnerUserId = us.UserId
+WHERE 
+    us.UserRank <= 10
+GROUP BY 
+    us.UserId, us.DisplayName, us.SilverBadges, us.GoldBadges,
+    us.AvgPostScore, us.UserRank, us.InactiveFlag
+ORDER BY 
+    us.UserRank;

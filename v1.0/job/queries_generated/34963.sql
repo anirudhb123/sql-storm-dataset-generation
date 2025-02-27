@@ -1,0 +1,59 @@
+WITH RECURSIVE related_movies AS (
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    WHERE 
+        t.title LIKE '%Adventure%'  -- Selecting movies containing 'Adventure' in their title
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        depth + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        related_movies rm ON ml.linked_movie_id = rm.movie_id
+    WHERE 
+        rm.depth < 3  -- Limiting the depth of recursion to avoid excessive processing
+)
+SELECT 
+    DISTINCT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT rm.movie_id) AS related_movies_count,
+    SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS movie_info_count,
+    (SELECT AVG(length(info)) FROM movie_info WHERE movie_id = t.id) AS avg_info_length
+FROM 
+    cast_info c
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%budget%')
+LEFT JOIN 
+    related_movies rm ON rm.movie_id = t.id
+WHERE 
+    t.production_year >= 2000
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT rm.movie_id) >= 1  -- Ensuring the movie has at least 1 related movie
+ORDER BY 
+    COUNT(DISTINCT rm.movie_id) DESC,
+    a.name ASC;

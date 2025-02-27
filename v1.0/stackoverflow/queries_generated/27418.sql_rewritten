@@ -1,0 +1,54 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        pt.TagCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.TagCount ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        PostTagCounts pt ON p.Id = pt.PostId
+    WHERE 
+        pScore > 0 
+),
+TopPosts AS (
+    SELECT 
+        Title, 
+        Score, 
+        ViewCount, 
+        AnswerCount, 
+        TagCount
+    FROM 
+        PopularPosts
+    WHERE 
+        Rank <= 5 
+)
+SELECT 
+    COALESCE(t.TagCount, 'No Tags') AS TagCategory,
+    COUNT(*) AS NumberOfPosts,
+    AVG(tp.Score) AS AverageScore,
+    SUM(tp.ViewCount) AS TotalViews,
+    SUM(tp.AnswerCount) AS TotalAnswers
+FROM 
+    TopPosts tp
+FULL OUTER JOIN 
+    (SELECT DISTINCT TagCount FROM PostTagCounts) t ON tp.TagCount = t.TagCount
+GROUP BY 
+    t.TagCount
+ORDER BY 
+    TagCategory;

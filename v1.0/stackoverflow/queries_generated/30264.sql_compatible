@@ -1,0 +1,76 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.Id 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames 
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.Score
+),
+PopularPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.BadgeCount,
+        us.BadgeNames,
+        ps.VoteCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        RANK() OVER (ORDER BY ps.Score DESC) AS Rank
+    FROM RecursivePosts rp
+    LEFT JOIN UserBadges us ON rp.OwnerUserId = us.UserId
+    LEFT JOIN PostScores ps ON rp.Id = ps.Id
+    WHERE rp.Level = 0 
+)
+SELECT 
+    pp.Rank,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    COALESCE(pp.BadgeCount, 0) AS BadgeCount,
+    COALESCE(pp.BadgeNames, 'No badges') AS BadgeNames,
+    COALESCE(pp.VoteCount, 0) AS VoteCount,
+    COALESCE(pp.UpVotes, 0) AS UpVotes,
+    COALESCE(pp.DownVotes, 0) AS DownVotes
+FROM PopularPosts pp
+WHERE pp.Rank <= 10 
+ORDER BY pp.Score DESC;

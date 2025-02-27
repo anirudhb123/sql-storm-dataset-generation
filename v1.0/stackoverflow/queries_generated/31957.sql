@@ -1,0 +1,68 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation >= 1000 -- Base level for reputed users
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        UH.Level + 1
+    FROM Users U
+    INNER JOIN UserHierarchy UH ON U.Id = (SELECT UserId FROM Posts P WHERE P.OwnerUserId = UH.Id LIMIT 1)
+    WHERE UH.Level < 5
+),
+LatestPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id
+),
+BadgesSummary AS (
+    SELECT
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeList,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    WHERE B.Class = 1 OR B.Class = 2 -- Consider Gold and Silver badges
+    GROUP BY B.UserId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UH.Level,
+    LP.Title,
+    LP.CreationDate,
+    LP.CommentCount,
+    LP.UpVotes,
+    LP.DownVotes,
+    BS.BadgeList,
+    COALESCE(BS.BadgeCount, 0) AS TotalBadges
+FROM UserHierarchy UH
+INNER JOIN Users U ON U.Id = UH.Id
+LEFT JOIN LatestPosts LP ON LP.OwnerUserId = U.Id
+LEFT JOIN BadgesSummary BS ON BS.UserId = U.Id
+WHERE U.Location IS NOT NULL 
+    AND LP.CreationDate BETWEEN '2022-01-01' AND '2023-01-01'
+    AND (LP.UpVotes - LP.DownVotes) > 5
+ORDER BY U.Reputation DESC, LP.CreationDate DESC;
+This query leverages several advanced SQL structures including recursive CTEs to establish a user hierarchy based on reputation, a window function over users' posts to calculate engagement metrics, and joins with badge data to summarize achievement recognition. The query aims to provide insights into the most reputable, active users who have made meaningful contributions in the past year.

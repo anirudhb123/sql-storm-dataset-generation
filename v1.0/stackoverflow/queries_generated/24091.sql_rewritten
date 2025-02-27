@@ -1,0 +1,68 @@
+WITH UserVotes AS (
+    SELECT 
+        V.UserId, 
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes V
+    GROUP BY V.UserId
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ViewCount, 
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(*) AS TagCount
+    FROM Posts P
+    JOIN Tags T ON POSITION(',' || T.TagName || ',' IN ',' || P.Tags || ',') > 0
+    GROUP BY T.TagName
+    HAVING COUNT(*) > 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId, 
+        P.Title AS PostTitle,
+        PH.CreationDate,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRank
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    JOIN Posts P ON P.Id = PH.PostId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PV.TotalVotes AS UserTotalVotes,
+    PV.UpVotes AS UserUpVotes,
+    PV.DownVotes AS UserDownVotes,
+    AP.PostId,
+    AP.Title AS RecentPostTitle,
+    AP.ViewCount,
+    AP.CreationDate AS PostCreationDate,
+    TT.TagName,
+    TT.TagCount,
+    PHD.HistoryType,
+    PHD.CreationDate AS HistoryCreationDate
+FROM Users U
+LEFT JOIN UserVotes PV ON U.Id = PV.UserId
+LEFT JOIN ActivePosts AP ON U.Id = AP.OwnerUserId
+LEFT JOIN TopTags TT ON POSITION(',' || TT.TagName || ',' IN ',' || AP.Tags || ',') > 0
+LEFT JOIN PostHistoryDetails PHD ON AP.PostId = PHD.PostId AND PHD.HistoryRank = 1
+WHERE 
+    U.Reputation IS NOT NULL
+    AND U.Location IS NOT NULL
+    AND (PV.TotalVotes IS NULL OR PV.TotalVotes > 10)
+    AND (AP.ViewCount > 100 OR AP.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days')
+ORDER BY 
+    U.Reputation DESC,
+    AP.ViewCount DESC NULLS LAST
+FETCH FIRST 50 ROWS ONLY;

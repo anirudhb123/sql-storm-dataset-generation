@@ -1,0 +1,50 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, h.level + 1
+    FROM region r
+    JOIN RegionHierarchy h ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = h.r_regionkey LIMIT 1)
+),
+ActiveSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment IS NOT NULL)
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_availqty * ps.ps_supplycost) > 10000
+),
+OrderSummary AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           COUNT(DISTINCT l.l_linenumber) AS lineitem_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerRanked AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank_within_segment
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c1.c_acctbal) FROM customer c1)
+)
+
+SELECT rh.r_name AS region_name,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(os.total_value) AS total_order_value,
+       AVG(CASE WHEN os.lineitem_count > 5 THEN os.total_value ELSE NULL END) AS average_order_value_large,
+       COUNT(DISTINCT cs.c_custkey) AS total_customers_with_active_suppliers
+FROM RegionHierarchy rh
+LEFT JOIN nation n ON n.n_regionkey = rh.r_regionkey
+LEFT JOIN customer cs ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN OrderSummary os ON os.o_orderkey = (SELECT o1.o_orderkey FROM orders o1 WHERE o1.o_custkey = cs.c_custkey LIMIT 1)
+LEFT JOIN ActiveSuppliers aas ON aas.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1) LIMIT 1)
+WHERE cs.rank_within_segment = 1
+GROUP BY rh.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_order_value DESC;

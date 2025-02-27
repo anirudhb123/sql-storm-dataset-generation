@@ -1,0 +1,54 @@
+
+WITH UserVotingStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesReceived,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesReceived,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) / NULLIF(COUNT(V.Id), 0) AS VoteRatio
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+), PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(C) AS CommentCount,
+        COUNT(DISTINCT PH.UserId) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 6, 24)  
+    WHERE P.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY P.Id, P.Title, P.Score, P.ViewCount
+), MaxPostScore AS (
+    SELECT 
+        MAX(Score) AS MaxScore
+    FROM Posts
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.EditCount,
+    PS.LastEditDate,
+    Uvs.UpVotesReceived,
+    Uvs.DownVotesReceived,
+    Uvs.TotalVotes,
+    Uvs.VoteRatio,
+    CASE 
+        WHEN PS.Score IS NULL OR PS.Score < (SELECT MaxScore FROM MaxPostScore) THEN 'Below Average'
+        ELSE 'Above Average'
+    END AS PostPerformance
+FROM UserVotingStats Uvs
+JOIN Posts PS ON Uvs.UserId = PS.OwnerUserId
+WHERE PS.Score > (SELECT AVG(Score) FROM Posts WHERE Score IS NOT NULL)
+ORDER BY Uvs.UpVotesReceived DESC, Uvs.DownVotesReceived ASC
+LIMIT 100;

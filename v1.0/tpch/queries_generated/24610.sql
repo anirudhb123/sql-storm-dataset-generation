@@ -1,0 +1,49 @@
+WITH RecursiveCTE AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(DISTINCT ps.s_suppkey) > 1
+), 
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '2023-01-01'
+    GROUP BY o.o_orderkey
+), 
+CustomerInfo AS (
+    SELECT c.c_custkey, c.c_name, 
+    CASE 
+        WHEN c.c_acctbal > 1000 THEN 'High Value'
+        WHEN c.c_acctbal IS NULL THEN 'Unknown Value'
+        ELSE 'Low Value'
+    END AS customer_value
+    FROM customer c
+    WHERE c.c_mktsegment IN ('BUILDING', 'AUTOMOBILE')
+), 
+SupplierStats AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+           AVG(s.s_acctbal) AS avg_acct_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+    HAVING AVG(s.s_acctbal) IS NOT NULL
+)
+
+SELECT c.c_name, od.total_price, r.r_name, ss.avg_acct_balance, 
+       COALESCE((SELECT MAX(ps.ps_availqty) 
+                 FROM partsupp ps 
+                 WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM RecursiveCTE p)), 0) AS max_avail_quantity
+FROM OrderDetails od
+JOIN CustomerInfo c ON od.o_orderkey = c.c_custkey 
+JOIN region r ON c.c_nationkey = r.r_regionkey
+LEFT OUTER JOIN SupplierStats ss ON r.r_name IS NOT NULL
+WHERE od.total_price > (
+    SELECT AVG(total_price) FROM OrderDetails
+    WHERE total_price IS NOT NULL
+    ) 
+AND c.c_custkey IS NOT NULL
+ORDER BY od.total_price DESC, max_avail_quantity ASC
+FETCH FIRST 10 ROWS ONLY;

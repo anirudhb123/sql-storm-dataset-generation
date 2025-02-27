@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_name,
+        s.s_nationkey,
+        DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        partsupp ps
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+TotalOrderValues AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+),
+CustomerSpend AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spend
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+HighlightedNations AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM
+        nation n
+    LEFT JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE
+        n.n_comment IS NOT NULL
+    GROUP BY
+        n.n_nationkey, n.n_name
+)
+SELECT
+    ps.ps_partkey,
+    s.s_name AS supplier_name,
+    tn.n_name AS nation_name,
+    COALESCE(ts.total_spend, 0) AS customer_spend,
+    tv.total_value AS order_total_value,
+    hs.supplier_count
+FROM
+    RankedSuppliers ps
+JOIN
+    supplier s ON ps.s_name = s.s_name
+FULL OUTER JOIN
+    TotalOrderValues tv ON ps.ps_partkey = tv.o_orderkey
+LEFT JOIN
+    CustomerSpend ts ON s.s_nationkey = ts.c_custkey
+INNER JOIN
+    HighlightedNations tn ON s.s_nationkey = tn.n_nationkey
+WHERE
+    rank = 1 AND (COALESCE(ts.total_spend, 0) > 0 OR tv.total_value IS NULL)
+ORDER BY
+    ps.ps_partkey, supplier_name DESC;

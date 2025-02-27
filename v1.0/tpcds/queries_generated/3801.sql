@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY ws.web_site_sk, ws.web_site_id
+),
+TopSales AS (
+    SELECT 
+        r.web_site_id,
+        r.total_profit,
+        (SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_gender = 'M') AS total_male_customers
+    FROM RankedSales r
+    WHERE r.rank_profit = 1
+),
+WarehouseInventory AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(i.inv_quantity_on_hand) AS total_inventory
+    FROM warehouse w
+    LEFT JOIN inventory i ON w.w_warehouse_sk = i.inv_warehouse_sk
+    GROUP BY w.w_warehouse_id
+),
+SalesAndInventory AS (
+    SELECT 
+        ts.web_site_id,
+        ts.total_profit,
+        wi.total_inventory,
+        CASE 
+            WHEN wi.total_inventory IS NULL OR wi.total_inventory = 0 THEN 'Out of Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM TopSales ts
+    JOIN WarehouseInventory wi ON ts.web_site_id = wi.w_warehouse_id
+)
+SELECT 
+    sai.web_site_id,
+    sai.total_profit,
+    sai.total_inventory,
+    sai.stock_status,
+    (SELECT COUNT(DISTINCT sr_ticket_number) FROM store_returns sr WHERE sr_sr_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk IN (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL))) AS total_store_returns,
+    (SELECT AVG(cd_purchase_estimate) FROM customer_demographics cd WHERE cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_hdemo_sk IS NOT NULL)) AS avg_purchase_estimate
+FROM SalesAndInventory sai
+ORDER BY sai.total_profit DESC;

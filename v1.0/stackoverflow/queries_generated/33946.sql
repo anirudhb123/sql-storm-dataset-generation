@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        PostTypeId,
+        ParentId,
+        Title,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.Id
+),
+UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        Users
+),
+RecentPostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        MAX(CASE WHEN p.LastActivityDate IS NULL THEN 'No Activity' ELSE 'Active' END) AS ActivityStatus,
+        p.Title
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rph.Id AS PostId,
+    rph.Title,
+    u.DisplayName AS TopUser,
+    ur.Reputation,
+    pss.CommentCount,
+    pss.UpVoteCount,
+    pss.DownVoteCount,
+    ph.PostHistoryTypes,
+    rph.Level
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    RecentPostStats pss ON rph.Id = pss.PostId
+LEFT JOIN 
+    UserReputation ur ON ur.Rank = 1
+LEFT JOIN 
+    Users u ON u.Id = ur.UserId
+LEFT JOIN 
+    PostHistoryData ph ON rph.Id = ph.PostId
+WHERE 
+    rph.PostTypeId IN (1, 2) -- Questions and Answers
+ORDER BY 
+    rph.Level, pss.CommentCount DESC;
+

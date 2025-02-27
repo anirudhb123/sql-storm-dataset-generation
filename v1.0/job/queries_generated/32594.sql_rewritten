@@ -1,0 +1,79 @@
+WITH RECURSIVE ParentMovies AS (
+    SELECT 
+        mt.movie_id, 
+        mt.title, 
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id, 
+        at.title, 
+        at.production_year,
+        pm.depth + 1
+    FROM 
+        movie_link AS m
+    JOIN 
+        aka_title AS at ON m.linked_movie_id = at.movie_id
+    JOIN 
+        ParentMovies AS pm ON m.movie_id = pm.movie_id
+    WHERE 
+        pm.depth < 3 
+),
+
+CastAggregates AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info AS ci
+    JOIN 
+        aka_name AS an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id, 
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    pm.movie_id,
+    pm.title,
+    pm.production_year,
+    COALESCE(ca.actor_names, 'No actors') AS actors,
+    COALESCE(ca.actor_count, 0) AS actor_count,
+    COALESCE(cd.company_names, 'No companies') AS companies,
+    COALESCE(cd.company_types, 'No types') AS company_types,
+    CASE 
+        WHEN pm.production_year < 2010 THEN 'Old'
+        ELSE 'Recent'
+    END AS category,
+    ROW_NUMBER() OVER (PARTITION BY category ORDER BY pm.production_year DESC) AS rank_within_category
+FROM 
+    ParentMovies AS pm
+LEFT JOIN 
+    CastAggregates AS ca ON pm.movie_id = ca.movie_id
+LEFT JOIN 
+    MovieCompanyDetails AS cd ON pm.movie_id = cd.movie_id
+WHERE 
+    pm.production_year IS NOT NULL
+ORDER BY 
+    pm.production_year DESC;

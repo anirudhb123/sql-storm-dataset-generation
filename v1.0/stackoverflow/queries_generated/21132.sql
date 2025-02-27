@@ -1,0 +1,85 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id
+),
+RecentVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        v.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS LastDeleted
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.AvgScore,
+    COALESCE(rv.VoteCount, 0) AS RecentVoteCount,
+    COALESCE(rv.UpVotes, 0) AS RecentUpVotes,
+    COALESCE(rv.DownVotes, 0) AS RecentDownVotes,
+    COALESCE(phs.LastClosed, 'Never') AS LastClosedDate,
+    COALESCE(phs.LastDeleted, 'Never') AS LastDeletedDate,
+    ub.BadgeCount,
+    COALESCE(ub.Badges, 'No Badges') AS BadgeList
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentVotes rv ON ups.UserId = rv.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.OwnerUserId = ups.UserId 
+        AND p.Id = phs.PostId
+    )
+LEFT JOIN 
+    UserBadges ub ON ups.UserId = ub.UserId
+WHERE 
+    (ups.TotalScore > 100 OR ub.BadgeCount > 0)
+ORDER BY 
+    ups.TotalScore DESC, 
+    ups.PostCount DESC;
+

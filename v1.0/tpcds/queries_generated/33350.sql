@@ -1,0 +1,52 @@
+
+WITH RECURSIVE ProductHierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, i_brand, i_category,
+           1 AS level
+    FROM item
+    WHERE i_current_price IS NOT NULL
+
+    UNION ALL
+
+    SELECT i_item_sk, CONCAT(ph.i_item_desc, ' -> ', i.i_item_desc) AS i_item_desc,
+           i.i_current_price, i.i_brand, i.i_category,
+           ph.level + 1
+    FROM ProductHierarchy ph
+    JOIN item i ON i.i_item_sk = ph.i_item_sk
+    WHERE ph.level < 5
+), SalesData AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales, COUNT(ws_order_number) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+), CustomerStats AS (
+    SELECT c.c_customer_sk, COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+           AVG(cs.cs_sales_price) AS avg_order_amount
+    FROM customer c
+    LEFT JOIN store_sales cs ON c.c_customer_sk = cs.ss_customer_sk
+    GROUP BY c.c_customer_sk
+), SalesWithPromo AS (
+    SELECT cs.cs_item_sk, SUM(cs.cs_net_profit) AS total_net_profit,
+           STRING_AGG(DISTINCT p.p_promo_name) AS promo_names
+    FROM catalog_sales cs
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    GROUP BY cs.cs_item_sk
+)
+SELECT ph.i_item_desc, ph.i_current_price, ph.i_brand, ph.i_category,
+       COALESCE(sd.total_sales, 0) AS total_sales,
+       COALESCE(sd.order_count, 0) AS order_count,
+       COALESCE(cs.total_orders, 0) AS customer_total_orders,
+       COALESCE(cs.avg_order_amount, 0) AS avg_order_amount,
+       COALESCE(sp.total_net_profit, 0) AS total_net_profit,
+       COALESCE(sp.promo_names, 'No Promotions') AS promotions
+FROM ProductHierarchy ph
+LEFT JOIN SalesData sd ON ph.i_item_sk = sd.ws_item_sk
+LEFT JOIN CustomerStats cs ON cs.c_customer_sk = (
+    SELECT c.c_customer_sk FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE ss.ss_item_sk = ph.i_item_sk
+    LIMIT 1
+)
+LEFT JOIN SalesWithPromo sp ON sp.cs_item_sk = ph.i_item_sk
+WHERE ph.level = 1 AND ph.i_current_price > 0
+ORDER BY total_sales DESC, i_item_desc
+LIMIT 100;

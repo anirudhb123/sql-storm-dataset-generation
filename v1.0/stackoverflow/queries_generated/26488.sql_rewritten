@@ -1,0 +1,74 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        TotalPosts, 
+        TotalAnswers, 
+        TotalBadges, 
+        TotalBounty, 
+        TotalViews,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalAnswers DESC, TotalBounty DESC) AS UserRank
+    FROM UserStats
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(pt.PostId) AS TagPostCount,
+        SUM(ps.ViewCount) AS TagViewCount
+    FROM Tags t
+    JOIN Posts pt ON t.Id = ANY(string_to_array(pt.Tags, '><'))::int[] 
+    LEFT JOIN Posts ps ON pt.Id = ps.Id
+    GROUP BY t.TagName
+    ORDER BY TagPostCount DESC
+    LIMIT 5
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount,
+        u.DisplayName AS AuthorName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN LATERAL string_to_array(p.Tags, '><') AS tag(tags) ON TRUE
+    LEFT JOIN Tags t ON t.TagName = tag.tags
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, u.DisplayName
+    ORDER BY p.Score DESC, p.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    tu.DisplayName AS TopUser,
+    tu.Reputation, 
+    tu.TotalPosts,
+    tu.TotalAnswers,
+    tu.TotalBounty,
+    pt.TagName,
+    pt.TagPostCount,
+    pt.TagViewCount,
+    tp.Title AS TopPostTitle,
+    tp.Score AS PostScore,
+    tp.ViewCount AS PostViews
+FROM TopUsers tu
+CROSS JOIN PopularTags pt
+JOIN TopPosts tp ON tp.Tags LIKE '%' || pt.TagName || '%'
+ORDER BY tu.UserRank, pt.TagPostCount DESC, tp.Score DESC;

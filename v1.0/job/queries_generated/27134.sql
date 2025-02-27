@@ -1,0 +1,70 @@
+WITH RankedTitles AS (
+    SELECT
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY LENGTH(at.title) DESC) AS title_rank
+    FROM
+        aka_title at
+    WHERE
+        at.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+),
+
+ActorMovieCount AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM
+        cast_info ci
+    JOIN
+        RankedTitles rt ON ci.movie_id = rt.id
+    GROUP BY
+        ci.person_id
+),
+
+TopActors AS (
+    SELECT
+        ak.name AS actor_name,
+        amc.movie_count
+    FROM
+        aka_name ak
+    JOIN
+        ActorMovieCount amc ON ak.person_id = amc.person_id
+    WHERE
+        amc.movie_count > 5
+    ORDER BY
+        amc.movie_count DESC
+    LIMIT 10
+),
+
+MovieKeywords AS (
+    SELECT
+        mt.movie_id,
+        GROUP_CONCAT(mk.keyword) AS keywords
+    FROM
+        movie_keyword mt
+    JOIN
+        keyword mk ON mt.keyword_id = mk.id
+    GROUP BY
+        mt.movie_id
+)
+
+SELECT
+    tt.title,
+    tt.production_year,
+    ta.actor_name,
+    tk.keywords
+FROM
+    RankedTitles tt
+JOIN
+    TopActors ta ON EXISTS (
+        SELECT 1
+        FROM cast_info ci
+        WHERE ci.movie_id = tt.id AND ci.person_id = ta.person_id
+    )
+JOIN
+    MovieKeywords tk ON tk.movie_id = tt.id
+WHERE
+    tt.title_rank <= 3
+ORDER BY
+    tt.production_year DESC, 
+    LENGTH(tt.title) ASC;

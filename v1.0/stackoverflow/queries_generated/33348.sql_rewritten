@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankByScore,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        AVG(CASE WHEN v.VoteTypeId IN (2, 3) THEN COALESCE(v.BountyAmount, 0) END) AS AvgBounty
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.RankByScore <= 5 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.RankByScore, u.DisplayName
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        STRING_AGG(DISTINCT rh.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes rh ON ph.PostHistoryTypeId = rh.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.CreationDate,
+    trp.Score,
+    trp.ViewCount,
+    trp.CommentCount,
+    trp.Upvotes,
+    trp.AvgBounty,
+    phd.FirstEditDate,
+    phd.HistoryTypes
+FROM 
+    TopRankedPosts trp
+LEFT JOIN 
+    PostHistoryData phd ON trp.PostId = phd.PostId
+ORDER BY 
+    trp.Score DESC, trp.ViewCount DESC, trp.CreatorDate DESC;

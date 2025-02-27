@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tvMovie'))
+),  
+CoStars AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) AS co_star_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id, ak.name
+), 
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL), 'No Cast') AS cast_names,
+        COALESCE(SUM(mp.info_type_id = 1), 0) AS awards_count,
+        COALESCE(SUM(mp.info_type_id = 2), 0) AS nominations_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mp ON m.id = mp.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    md.cast_names,
+    cs.co_star_count,
+    (CASE 
+        WHEN md.awards_count > 0 THEN 'Awarded' 
+        WHEN md.nominations_count > 0 THEN 'Nominated' 
+        ELSE 'No Recognition' 
+    END) AS recognition_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieDetails md ON rm.title = md.title
+LEFT JOIN 
+    CoStars cs ON md.movie_id = cs.movie_id
+WHERE 
+    rm.year_rank <= 10
+ORDER BY 
+    rm.production_year DESC, md.cast_names;

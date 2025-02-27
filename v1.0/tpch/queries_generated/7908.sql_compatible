@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        n.n_name AS nation_name, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+TopSuppliers AS (
+    SELECT 
+        r.n_name AS nation_name, 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        (SELECT DISTINCT r.r_name, n.n_nationkey 
+         FROM region r 
+         JOIN nation n ON r.r_regionkey = n.n_regionkey) AS r 
+    ON rs.nation_name = r.n_name
+    WHERE 
+        rs.rank <= 3
+), 
+OrdersWithLineItems AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        l.l_quantity, 
+        l.l_extendedprice
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT 
+    ts.nation_name, 
+    COUNT(DISTINCT owl.o_orderkey) AS total_orders, 
+    SUM(owl.l_extendedprice) AS total_revenue, 
+    AVG(owl.l_quantity) AS avg_quantity_per_order
+FROM 
+    TopSuppliers ts
+JOIN 
+    partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+JOIN 
+    OrdersWithLineItems owl ON ps.ps_partkey = owl.o_orderkey  
+GROUP BY 
+    ts.nation_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

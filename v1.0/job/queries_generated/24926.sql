@@ -1,0 +1,81 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        COALESCE(pt.title, 'N/A') AS parent_title,
+        1 AS level 
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title pt ON ml.linked_movie_id = pt.id
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mh.title AS parent_title,
+        mh.level + 1 
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        c.id AS role_id,
+        c.kind AS role
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type c ON ci.person_role_id = c.id
+    WHERE 
+        c.kind IN ('Actor', 'Director', 'Producer')
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.parent_title,
+    mh.level,
+    fk.keywords,
+    COUNT(DISTINCT fc.person_id) AS cast_count,
+    ARRAY_AGG(DISTINCT fc.role) AS roles,
+    CASE 
+        WHEN mh.level > 1 THEN 'Sequel/Prequel'
+        ELSE 'Stand-alone'
+    END AS movie_type,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = mh.movie_id AND mi.info_type_id = 1 AND mi.info IS NOT NULL) AS info_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keywords fk ON mh.movie_id = fk.movie_id
+LEFT JOIN 
+    filtered_cast fc ON mh.movie_id = fc.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.parent_title, mh.level, fk.keywords
+HAVING 
+    COUNT(DISTINCT fc.person_id) > 2
+ORDER BY 
+    mh.level DESC, movie_count DESC NULLS LAST;
+
+This SQL query generates a comprehensive result set that includes movies and their hierarchical connections, filters the movie casts based on specific roles, aggregates keywords for each movie, includes various calculated fields, and applies distinct counts and string aggregations. It demonstrates advanced SQL features such as recursive CTEs, window functions, CASE statements, and GROUP BY with HAVING clauses, ensuring intricate semantics and logical operations are in place. Additionally, it explores the ambiguous naming and relationships within the dataset, potentially revealing unusual movie structures in the records.

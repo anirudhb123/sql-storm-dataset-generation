@@ -1,0 +1,75 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.episode_of_id
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1 AS level,
+        mt.episode_of_id
+    FROM
+        aka_title mt
+    INNER JOIN
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+    WHERE
+        mh.level < 3  
+),
+
+movie_info_extended AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mc.company_id) AS companies_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+        AVG(CASE WHEN mi.info IS NOT NULL THEN mi.info_type_id END) AS avg_info_type
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY
+        m.id, m.title, m.production_year
+)
+
+SELECT
+    mh.title AS movie_title,
+    mh.production_year,
+    mics.companies_count,
+    mics.company_names,
+    mics.avg_info_type,
+    COALESCE(ka.name, 'Unknown') AS actor_name,
+    COUNT(DISTINCT ci.id) AS role_count,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS row_num
+FROM
+    movie_hierarchy mh
+LEFT JOIN
+    movie_info_extended mics ON mh.movie_id = mics.movie_id
+LEFT JOIN
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN
+    aka_name ka ON ci.person_id = ka.person_id
+WHERE
+    mh.level <= 3
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, mics.companies_count, mics.company_names, mics.avg_info_type, ka.name
+HAVING
+    COUNT(DISTINCT ci.id) > 0
+ORDER BY
+    mh.production_year DESC, mh.title;

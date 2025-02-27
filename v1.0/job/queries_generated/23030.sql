@@ -1,0 +1,72 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY mt.id DESC) AS title_rank,
+        mt.imdb_id AS movie_imdb_id,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title at
+    JOIN 
+        movie_companies mc ON mc.movie_id = at.movie_id
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = at.movie_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = at.movie_id
+    LEFT JOIN 
+        title mt ON mt.id = at.movie_id
+    GROUP BY 
+        at.title, at.production_year, mt.imdb_id
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.movie_imdb_id,
+        rt.cast_count
+    FROM 
+        RankedTitles rt
+    WHERE 
+        rt.cast_count > (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                RankedTitles
+        )
+),
+GenreKeywords AS (
+    SELECT 
+        mt.title,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    JOIN 
+        aka_title at ON mk.movie_id = at.movie_id
+    JOIN 
+        title mt ON mt.id = at.movie_id
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.cast_count,
+    COALESCE(SUM(CASE WHEN gk.keyword LIKE '%Drama%' THEN 1 ELSE 0 END), 0) AS drama_count,
+    STRING_AGG(DISTINCT gk.keyword, ', ') AS all_keywords,
+    CASE 
+        WHEN MAX(ft.cast_count) IS NULL THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    GenreKeywords gk ON gk.title = ft.title
+GROUP BY 
+    ft.title, ft.production_year, ft.cast_count
+HAVING 
+    COUNT(gk.keyword) > 2 -- At least 3 different keywords
+ORDER BY 
+    ft.production_year DESC, 
+    ft.title_rank ASC 
+LIMIT 10;
+

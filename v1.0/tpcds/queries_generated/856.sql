@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        rs.ws_bill_customer_sk,
+        rs.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_dependents_count, 0) AS dependents_count,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        RankedSales rs
+    JOIN 
+        customer_demographics cd ON rs.ws_bill_customer_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON cd.cd_demo_sk = ca.ca_address_sk
+    WHERE 
+        rs.sales_rank <= 5
+),
+SalesSummary AS (
+    SELECT 
+        ct.ca_city, 
+        ct.ca_state, 
+        SUM(ct.total_sales) AS city_sales,
+        COUNT(DISTINCT ct.ws_bill_customer_sk) AS num_customers
+    FROM 
+        TopCustomers ct
+    GROUP BY 
+        ct.ca_city, ct.ca_state
+)
+SELECT 
+    ss.ca_city,
+    ss.ca_state,
+    ss.city_sales,
+    ss.num_customers,
+    (ss.city_sales / NULLIF(ss.num_customers, 0)) AS avg_sales_per_customer
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.city_sales DESC
+
+UNION ALL
+
+SELECT 
+    'Total',
+    NULL,
+    SUM(city_sales),
+    SUM(num_customers),
+    NULL
+FROM 
+    SalesSummary;

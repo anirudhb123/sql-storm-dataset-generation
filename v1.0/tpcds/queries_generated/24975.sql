@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.quantity,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+CustomerAddressInfo AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, ca.ca_city, ca.ca_state
+    HAVING 
+        SUM(ws.net_profit) IS NOT NULL
+),
+ReturnDetails AS (
+    SELECT 
+        sr.returned_date_sk,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returned_date_sk
+)
+SELECT 
+    ca.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    coalesce(CAI.total_orders, 0) AS total_orders,
+    coalesce(CAI.total_net_profit, 0) AS total_net_profit,
+    RS.web_site_sk,
+    RS.order_number,
+    RS.quantity,
+    RS.net_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    CustomerAddressInfo CAI ON ca.ca_address_id = CAI.c_customer_id
+LEFT JOIN 
+    RankedSales RS ON CAI.total_net_profit > 0 AND RS.profit_rank <= 10
+LEFT JOIN 
+    ReturnDetails RD ON RD.returned_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+WHERE 
+    (ca.ca_state = 'CA' OR ca.ca_state IS NULL)
+    AND (CAI.total_orders > 5 OR CAI.total_net_profit IS NULL)
+    AND (RS.net_profit IS NOT NULL OR RS.order_number IS NULL)
+ORDER BY 
+    ca.ca_city, total_net_profit DESC NULLS LAST;

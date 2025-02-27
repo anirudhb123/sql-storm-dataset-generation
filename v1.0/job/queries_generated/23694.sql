@@ -1,0 +1,99 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level,
+        t.id AS root_title_id
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        th.level + 1 AS level,
+        th.root_title_id
+    FROM 
+        aka_title t
+        JOIN movie_link ml ON t.id = ml.linked_movie_id
+        JOIN title_hierarchy th ON th.title_id = ml.movie_id
+    WHERE 
+        th.level < 5  -- Limit the hierarchy level to avoid excessive recursion
+),
+
+cast_stats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_unique_actors,
+        COUNT(ci.id) AS total_roles,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notable_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        kt.kind AS title_kind,
+        COALESCE(ts.num_unique_actors, 0) AS unique_actors,
+        COALESCE(ts.total_roles, 0) AS total_roles,
+        COALESCE(ts.notable_roles, 0) AS notable_roles,
+        CASE 
+            WHEN t.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CAST(t.production_year AS text) 
+        END AS year_label
+    FROM 
+        aka_title t
+        LEFT JOIN cast_stats ts ON t.id = ts.movie_id
+        JOIN kind_type kt ON t.kind_id = kt.id
+),
+
+filtered_titles AS (
+    SELECT 
+        th.root_title_id,
+        th.title,
+        th.production_year,
+        th.kind_id,
+        th.level,
+        ti.title_kind,
+        ti.unique_actors,
+        ti.total_roles,
+        ti.notable_roles,
+        ti.year_label
+    FROM 
+        title_hierarchy th
+        JOIN title_info ti ON th.title_id = ti.title_id
+    WHERE 
+        th.production_year > 1990 AND  -- Filter by production year
+        ti.notable_roles > 0  -- Only include titles with notable roles
+)
+
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.title_kind,
+    ft.unique_actors,
+    ft.total_roles,
+    ft.notable_roles,
+    STRING_AGG(DISTINCT ka.name, ', ') AS aka_names
+FROM 
+    filtered_titles ft
+    LEFT JOIN aka_name ka ON ka.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = ft.root_title_id)
+GROUP BY 
+    ft.title, ft.production_year, ft.title_kind, ft.unique_actors, ft.total_roles, ft.notable_roles
+ORDER BY 
+    ft.production_year DESC,
+    ft.notable_roles DESC,
+    ft.title_kind;
+

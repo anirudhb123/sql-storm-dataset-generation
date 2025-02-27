@@ -1,0 +1,67 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(C.ScoringVote, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            V.UserId, 
+            SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS ScoringVote 
+         FROM Votes V 
+         GROUP BY V.UserId) C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostHistoryEvents AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EventRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 12, 19)  -- Closed, Deleted, Protected posts
+),
+RecentPostHistory AS (
+    SELECT 
+        P.UserId,
+        P.Title,
+        PH.UserDisplayName,
+        PH.CreationDate 
+    FROM 
+        Posts P
+    JOIN 
+        PostHistoryEvents PH ON P.Id = PH.PostId
+    WHERE 
+        PH.EventRank = 1
+)
+SELECT 
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalBounty,
+    R.Title AS RecentPostTitle,
+    R.UserDisplayName AS LastActionedBy,
+    R.CreationDate AS LastActionDate
+FROM 
+    UserStats US
+LEFT JOIN 
+    RecentPostHistory R ON US.UserId = R.UserId
+ORDER BY 
+    US.Reputation DESC,
+    US.TotalPosts DESC
+LIMIT 100;

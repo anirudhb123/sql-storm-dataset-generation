@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT cc.person_id) AS cast_count,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+    STRING_AGG(DISTINCT cn.name, ', ') AS character_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id AND cc.movie_id = ci.movie_id
+LEFT JOIN 
+    char_name cn ON cc.subject_id = cn.id
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, mk.keyword
+ORDER BY 
+    mh.production_year DESC, mh.level, cast_count DESC
+LIMIT 100;

@@ -1,0 +1,83 @@
+
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(P.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT T.Tag) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    JOIN 
+        TagStats T ON T.Tag = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+    WHERE 
+        P.Score > 100
+    GROUP BY 
+        P.Id, P.Title, P.Score, U.DisplayName
+),
+UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.TotalViews,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.PostsCount,
+    U.ClosedPostsCount,
+    COALESCE(B.GoldBadges, 0) AS GoldBadges,
+    COALESCE(B.SilverBadges, 0) AS SilverBadges,
+    COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+    P.Title AS HighScorePostTitle,
+    P.Score AS HighScorePostScore,
+    P.Tags AS HighScorePostTags
+FROM 
+    UserEngagement U
+LEFT JOIN 
+    UserBadgeCounts B ON U.UserId = B.UserId
+LEFT JOIN 
+    HighScoringPosts P ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = P.PostId LIMIT 1)
+ORDER BY 
+    U.TotalViews DESC, 
+    U.TotalUpVotes DESC;

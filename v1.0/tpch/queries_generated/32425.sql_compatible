@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_name LIKE 'S%'
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_name LIKE 'S%'
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01'
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(RC.total_order_value) AS max_order_value,
+    COALESCE(r.r_name, 'Unknown') AS region_name
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+LEFT JOIN RankedOrders RC ON RC.o_orderkey = l.l_orderkey
+LEFT JOIN nation n ON n.n_nationkey = ps.ps_suppkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_type = p.p_type
+)
+AND l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY p.p_partkey, p.p_name, r.r_name
+HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+ORDER BY total_revenue DESC;

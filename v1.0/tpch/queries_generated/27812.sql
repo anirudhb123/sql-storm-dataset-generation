@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_number,
+    o.o_orderdate AS order_date,
+    CONCAT('Part: ', p.p_name, ', Supplier: ', s.s_name, ', Customer: ', c.c_name, ', Order: ', o.o_orderkey, 
+           ', Date: ', DATE_FORMAT(o.o_orderdate, '%Y-%m-%d')) AS detailed_info,
+    LENGTH(CONCAT('Part: ', p.p_name, ', Supplier: ', s.s_name)) AS string_length
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND s.s_acctbal > 500.00 
+    AND LENGTH(c.c_comment) > 50
+ORDER BY 
+    LENGTH(detailed_info) DESC, o.o_orderdate ASC
+LIMIT 100;

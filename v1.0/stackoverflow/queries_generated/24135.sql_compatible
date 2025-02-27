@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserVoteStatistics AS (
+    SELECT 
+        v.UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    JOIN 
+        Posts p ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        v.UserId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN cr.Name 
+            ELSE NULL 
+        END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::integer = cr.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    COALESCE(uv.Upvotes, 0) AS UserUpvotes,
+    COALESCE(uv.Downvotes, 0) AS UserDownvotes,
+    pt.CloseReasons,
+    ROW_NUMBER() OVER (PARTITION BY rp.Rank ORDER BY rp.ViewCount DESC) AS PopularityRank,
+    STRING_AGG(DISTINCT ptag.TagName, ', ') AS RelatedTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserVoteStatistics uv ON uv.UserId = (SELECT MIN(Id) FROM Users)
+LEFT JOIN 
+    PostCloseReasons pt ON pt.PostId = rp.PostId
+LEFT JOIN 
+    PopularTags ptag ON rp.Title ILIKE '%' || ptag.TagName || '%'
+WHERE 
+    rp.Rank <= 10
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, uv.Upvotes, uv.Downvotes, pt.CloseReasons
+ORDER BY 
+    rp.Score DESC, rp.CreationDate ASC;

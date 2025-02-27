@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) - COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS NetVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostWithVoteAndBadge AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(v.NetVotes, 0) AS NetVotes,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary v ON p.Id = v.PostId
+    LEFT JOIN 
+        UserBadgeCounts b ON p.OwnerUserId = b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        DISTINCT ph.PostId
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.UpVotes,
+    p.DownVotes,
+    p.NetVotes,
+    p.GoldBadges,
+    p.SilverBadges,
+    p.BronzeBadges,
+    ph.Level AS PostLevel,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsClosed
+FROM 
+    PostWithVoteAndBadge p
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.PostId = ph.Id
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    p.ViewCount > 100 -- Filter for popular posts
+ORDER BY 
+    p.NetVotes DESC, p.ViewCount DESC;

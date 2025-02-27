@@ -1,0 +1,95 @@
+WITH PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM
+        Posts p
+    LEFT JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id, pt.Name
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        MAX(ph.UserId) AS ClosedByUserId,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS CloseReasons
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId = 10  -- Post Closed
+    GROUP BY
+        ph.PostId, ph.CreationDate
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM
+        Users u
+    WHERE
+        u.Reputation IS NOT NULL
+),
+PostDetails AS (
+    SELECT 
+        p.Title,
+        ps.PostType,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        COALESCE(cp.ClosedDate, 'Never Closed') AS ClosedDate,
+        cp.CloseReasons,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM
+        PostStatistics ps
+    LEFT JOIN
+        ClosedPosts cp ON ps.PostId = cp.PostId
+    LEFT JOIN
+        UserBadges ub ON ub.UserId = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = ps.PostId)
+)
+SELECT 
+    pd.Title,
+    pd.PostType,
+    pd.CommentCount,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.ClosedDate,
+    pd.CloseReasons,
+    ub.DisplayName AS TopUser,
+    ub.Rank,
+    pd.BadgeCount,
+    pd.BadgeNames
+FROM
+    PostDetails pd
+JOIN 
+    TopUsers ub ON ub.UserId = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = pd.PostId)
+WHERE 
+    pd.UpVoteCount - pd.DownVoteCount > 0 
+    AND pd.CloseReasons IS NULL
+ORDER BY 
+    pd.CommentCount DESC, 
+    ub.Rank
+LIMIT 10;

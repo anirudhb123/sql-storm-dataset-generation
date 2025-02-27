@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+)
+, TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    p.p_size,
+    MAX(CASE WHEN rs.rn = 1 THEN rs.s_name ELSE NULL END) AS top_supplier,
+    COALESCE(SUM(t.total_sales), 0) AS total_sales_for_part,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.ps_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TotalLineItems t ON ps.ps_partkey = t.l_orderkey
+WHERE 
+    p.p_retailprice > 100.00
+    AND p.p_size IS NOT NULL
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_mfgr, 
+    p.p_brand, 
+    p.p_type, 
+    p.p_size
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 1
+ORDER BY 
+    total_sales_for_part DESC, 
+    p.p_partkey;

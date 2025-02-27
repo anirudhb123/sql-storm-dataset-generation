@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws_quantity DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sales_price > 0
+),
+promotable_items AS (
+    SELECT 
+        p.p_promo_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_item_sk = ws.ws_item_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        p.p_promo_id
+),
+customer_analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_purchases,
+        SUM(s.ss_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_current_cdemo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ROUND(AVG(total_profit), 2) AS avg_profit,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    SUM(COALESCE(pi.total_sales, 0)) AS promotions_total_sales
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    customer_analysis ca_analysis ON c.c_customer_sk = ca_analysis.c_customer_sk
+LEFT JOIN 
+    promotable_items pi ON c.c_customer_sk = pi.p_promo_id
+WHERE 
+    (ca.ca_city LIKE '%San%' OR ca.ca_state = 'CA')
+AND 
+    (ca.ca_gmt_offset IS NOT NULL)
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY 
+    avg_profit DESC;

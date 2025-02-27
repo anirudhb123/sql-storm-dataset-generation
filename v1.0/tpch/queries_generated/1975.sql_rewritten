@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerPerf AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    COALESCE(cs.total_spent, 0) AS customer_total_spent,
+    ss.parts_supplied,
+    ss.total_supply_cost,
+    CASE 
+        WHEN r.o_orderstatus = 'O' THEN 'Open Order'
+        ELSE 'Completed Order'
+    END AS order_status,
+    ROW_NUMBER() OVER (PARTITION BY r.o_orderstatus ORDER BY r.o_orderdate) AS row_num
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    CustomerPerf cs ON r.o_orderkey = cs.order_count
+LEFT JOIN 
+    SupplierStats ss ON ss.parts_supplied > 0
+WHERE 
+    ss.total_supply_cost IS NOT NULL 
+    AND (r.o_orderstatus = 'O' OR r.o_orderdate < cast('1998-10-01' as date) - INTERVAL '30 DAYS')
+ORDER BY 
+    r.o_orderdate DESC, customer_total_spent DESC;

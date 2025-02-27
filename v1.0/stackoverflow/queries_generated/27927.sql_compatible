@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 /* Questions */
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS TagName, 
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 /* Questions */
+    GROUP BY 
+        unnest(string_to_array(Tags, '>')) 
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Tags,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        pt.TagName,
+        pt.TagCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularTags pt ON rp.Tags LIKE '%' || pt.TagName || '%'
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.Body,
+    cd.CreationDate,
+    cd.Tags,
+    cd.ViewCount,
+    cd.Score,
+    cd.OwnerDisplayName,
+    cd.TagName,
+    cd.TagCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = cd.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = cd.PostId AND v.VoteTypeId = 2) AS UpvoteCount /* UpMod */
+FROM 
+    CombinedData cd
+WHERE 
+    cd.TagRank <= 3 /* Top 3 questions per tag */
+ORDER BY 
+    cd.TagCount DESC, cd.ViewCount DESC;

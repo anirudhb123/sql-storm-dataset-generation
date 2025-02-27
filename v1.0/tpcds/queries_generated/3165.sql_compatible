@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        ws.ws_net_profit, 
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2450810 AND 2450816 
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk, 
+        SUM(cr.cr_return_quantity) AS total_return_quantity,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(cr.cr_order_number) AS number_of_returns
+    FROM catalog_returns cr
+    GROUP BY cr.cr_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_store_net_profit,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_web_net_profit,
+        COALESCE(cr.total_return_quantity, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        i.i_item_sk
+    FROM item i
+    LEFT JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN CustomerReturns cr ON i.i_item_sk = cr.cr_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc, i.i_item_sk
+),
+FinalReport AS (
+    SELECT 
+        ss.i_item_id, 
+        ss.i_item_desc, 
+        ss.total_store_net_profit,
+        ss.total_web_net_profit,
+        ss.total_returns,
+        ss.total_return_amount,
+        rs.rnk
+    FROM SalesSummary ss
+    LEFT JOIN RankedSales rs ON ss.i_item_sk = rs.ws_item_sk
+)
+
+SELECT 
+    f.i_item_id, 
+    f.i_item_desc, 
+    f.total_store_net_profit,
+    f.total_web_net_profit,
+    f.total_returns,
+    f.total_return_amount,
+    CASE 
+        WHEN f.total_web_net_profit > f.total_store_net_profit THEN 'Web Sales Higher'
+        WHEN f.total_store_net_profit > f.total_web_net_profit THEN 'Store Sales Higher'
+        ELSE 'Equal Sales'
+    END AS sales_comparison
+FROM FinalReport f
+WHERE f.rnk = 1
+ORDER BY f.total_web_net_profit DESC, f.total_store_net_profit DESC;

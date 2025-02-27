@@ -1,0 +1,93 @@
+WITH RecursivePostTree AS (
+    -- Recursive Common Table Expression to get all answers related to questions
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  -- Start with questions
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostTree rpt ON p.ParentId = rpt.PostId
+    WHERE
+        p.PostTypeId = 2  -- Join with answers
+)
+
+, UserBadges AS (
+    -- Get the number of gold, silver, and bronze badges per user
+    SELECT 
+        b.UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+, PostVotes AS (
+    -- Count the votes for each post and also compute a weighted score
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+
+-- Main query to benchmark performance
+SELECT 
+    rpt.PostId,
+    rpt.Title,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    CASE 
+        WHEN pv.TotalVotes IS NOT NULL AND pv.TotalVotes > 0 THEN
+            ROUND((COALESCE(pv.UpVotes, 0) * 1.0 / pv.TotalVotes) * 100, 2)
+        ELSE
+            0
+    END AS PositiveVotePercentage,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+    SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount
+FROM 
+    RecursivePostTree rpt
+LEFT JOIN 
+    Users u ON rpt.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostVotes pv ON rpt.PostId = pv.PostId
+LEFT JOIN 
+    Comments c ON rpt.PostId = c.PostId
+LEFT JOIN 
+    PostHistory ph ON rpt.PostId = ph.PostId
+WHERE 
+    rpt.Level = 1  -- Filter to only get top-level questions
+GROUP BY 
+    rpt.PostId, rpt.Title, u.DisplayName, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges, pv.UpVotes, pv.DownVotes, pv.TotalVotes 
+ORDER BY 
+    PositiveVotePercentage DESC;

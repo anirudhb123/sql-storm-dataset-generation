@@ -1,0 +1,67 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(V.BountyAmount) AS AverageBounty,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageBounty,
+        ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        PostCount > 0
+    ORDER BY 
+        ReputationRank
+    LIMIT 10
+),
+CommentDetails AS (
+    SELECT 
+        C.UserId,
+        U.DisplayName AS Commenter,
+        COUNT(C.Id) AS TotalComments,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Comments C
+    JOIN 
+        Users U ON C.UserId = U.Id
+    GROUP BY 
+        C.UserId
+)
+SELECT 
+    T.UserId,
+    T.DisplayName,
+    T.Reputation,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.AverageBounty,
+    COALESCE(CD.TotalComments, 0) AS CommentCount,
+    COALESCE(CD.LastCommentDate, 'No Comments') AS LastCommentDate
+FROM 
+    TopUsers T
+LEFT JOIN 
+    CommentDetails CD ON T.UserId = CD.UserId
+WHERE 
+    T.PostCount > 5
+ORDER BY 
+    T.Reputation DESC;

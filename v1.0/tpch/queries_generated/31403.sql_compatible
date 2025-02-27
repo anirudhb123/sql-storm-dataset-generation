@@ -1,0 +1,96 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS depth
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '1996-01-01'
+    UNION ALL
+    SELECT
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.depth + 1
+    FROM
+        CustomerOrders co
+    JOIN
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate < '1997-01-01' AND co.depth < 5
+),
+TotalPrices AS (
+    SELECT
+        co.c_custkey,
+        SUM(co.o_totalprice) AS total_spent,
+        COUNT(co.o_orderkey) AS order_count
+    FROM
+        CustomerOrders co
+    GROUP BY
+        co.c_custkey
+),
+TopCustomers AS (
+    SELECT
+        tp.c_custkey,
+        tp.total_spent,
+        tp.order_count,
+        RANK() OVER (ORDER BY tp.total_spent DESC) AS rank
+    FROM
+        TotalPrices tp
+    WHERE
+        tp.order_count > 2
+),
+SupplierDetails AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        p.p_name,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM
+        partsupp ps
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT
+    tc.c_custkey,
+    tc.total_spent,
+    tc.rank,
+    COUNT(DISTINCT sd.s_suppkey) AS distinct_suppliers,
+    SUM(sd.ps_supplycost) AS total_supplycost,
+    STRING_AGG(sd.s_name, ', ') AS supplier_names
+FROM
+    TopCustomers tc
+LEFT JOIN
+    SupplierDetails sd ON sd.ps_partkey IN (
+        SELECT
+            l.l_partkey
+        FROM
+            lineitem l
+        WHERE
+            l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = tc.c_custkey)
+        GROUP BY
+            l.l_partkey
+        HAVING
+            COUNT(l.l_linenumber) > 1
+    )
+GROUP BY
+    tc.c_custkey,
+    tc.total_spent,
+    tc.rank
+HAVING
+    total_supplycost > (SELECT AVG(ps.ps_supplycost) FROM partsupp)
+ORDER BY
+    tc.rank;

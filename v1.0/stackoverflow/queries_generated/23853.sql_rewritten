@@ -1,0 +1,80 @@
+WITH UserRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank,
+        CASE 
+            WHEN U.Reputation >= 10000 THEN 'Gold'
+            WHEN U.Reputation >= 1000 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS BadgeCategory
+    FROM Users U
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        MAX(P.CreationDate) OVER (PARTITION BY P.OwnerUserId) AS UserLatestPostDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    GROUP BY P.Id, P.Title, P.CreationDate, P.AcceptedAnswerId
+),
+UserPostHistory AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title AS PostTitle,
+        PH.PostHistoryTypeId
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+),
+RecentUserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(DISTINCT P.Id) AS PostsMade,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.Title AS PostTitle,
+    P.CommentCount,
+    P.VoteCount,
+    R.Rank AS UserRank,
+    CASE 
+        WHEN R.Rank <= 100 THEN 'Top Contributor'
+        ELSE 'Community Member'
+    END AS UserStatus,
+    COALESCE(MAX(PH.CreationDate), 'No recent activity') AS LastActivityDate,
+    CONCAT('This user has ', COALESCE(up.PostsMade, 0), ' posts and ', COALESCE(up.CommentsMade, 0), ' comments') AS UserEngagement,
+    STUFF((SELECT ', ' + U2.DisplayName
+           FROM Users U2
+           JOIN UserPostHistory UPH ON U2.Id = UPH.UserId
+           WHERE UPH.PostId = P.Id
+           FOR XML PATH('')), 1, 2, '') AS RecentEditors
+FROM PostStatistics P
+JOIN UserRankings R ON P.AcceptedAnswerId = R.UserId
+LEFT JOIN RecentUserActivity up ON R.UserId = up.UserId
+LEFT JOIN UserPostHistory PH ON P.PostId = PH.PostId
+WHERE P.VoteCount > 10
+GROUP BY U.DisplayName, U.Reputation, P.Title, P.CommentCount, P.VoteCount, R.Rank, up.PostsMade, up.CommentsMade
+HAVING MAX(P.CreationDate) < (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '7 days') 
+   OR R.Rank > 50 
+   OR R.BadgeCategory = 'Gold'
+ORDER BY R.Rank, UserEngagement DESC 
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

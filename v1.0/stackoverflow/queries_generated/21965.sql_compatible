@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankViewCount,
+        AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS AvgUpVotes,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentTotal,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11, 12) 
+    WHERE 
+        (p.ViewCount > 0 OR p.AcceptedAnswerId IS NOT NULL) 
+          AND (p.Title IS NOT NULL OR p.Body IS NOT NULL) 
+          AND p.CreationDate < DATE '2024-10-01' 
+),
+FilteredPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.RankViewCount,
+        COALESCE(rp.AvgUpVotes, 0) AS AvgUpVotes,
+        rp.CommentTotal,
+        rp.LastHistoryDate
+    FROM 
+        RankedPosts rp
+    WHERE
+        rp.RankViewCount <= 5 
+),
+FinalData AS (
+    SELECT 
+        fp.*,
+        CASE 
+            WHEN fp.CommentTotal > 5 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS PopularityStatus,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = fp.PostId AND v.VoteTypeId = 6) AS CloseVoteCount 
+    FROM 
+        FilteredPosts fp
+)
+
+SELECT 
+    f.*,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AcceptanceStatus,
+    CONCAT('Post ID: ', f.PostId, ' - Title: ', f.Title) AS PostDetails
+FROM 
+    FinalData f
+LEFT JOIN 
+    Posts p ON f.PostId = p.Id
+WHERE
+    COALESCE(f.CloseVoteCount, 0) = 0 
+ORDER BY 
+    f.ViewCount DESC, f.LastHistoryDate DESC;

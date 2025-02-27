@@ -1,0 +1,83 @@
+WITH UserInteractions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 3 THEN 1 ELSE 0 END) AS Wikis,
+        SUM(CASE WHEN u.Reputation < 100 THEN 1 ELSE 0 END) AS LowRepUsers,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        AVG(v.BountyAmount) FILTER (WHERE v.BountyAmount IS NOT NULL) AS AvgBountyAmount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        (u.LastAccessDate >= NOW() - INTERVAL '1 year' OR u.Reputation > 100)
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatus AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(h.Id) FILTER (WHERE h.PostHistoryTypeId IN (10, 11)) AS CloseReopenedCount,
+        COUNT(h.Id) FILTER (WHERE h.PostHistoryTypeId = 12) AS DeletionCount,
+        COALESCE(MAX(h.CreationDate) FILTER (WHERE h.PostHistoryTypeId IN (10, 11)), '1970-01-01') AS LastCloseOrReopen
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    GROUP BY 
+        p.Id
+),
+AggregatedTagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS UsageCount,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT h.Id) FILTER (WHERE h.PostHistoryTypeId IN (4, 6)) AS TitleOrTagEdits,
+        AVG(v.BountyAmount) FILTER (WHERE v.BountyAmount IS NOT NULL) AS AvgTagBounty
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        t.Id, t.TagName 
+)
+SELECT 
+    ui.UserId,
+    ui.DisplayName,
+    ui.TotalPosts,
+    ui.Questions,
+    ps.PostId,
+    ps.CloseReopenedCount,
+    ats.TagId,
+    ats.TagName,
+    ats.UsageCount,
+    ats.TotalViews,
+    ps.LastCloseOrReopen,
+    CASE 
+        WHEN ui.UserRank = 1 THEN 'Gold User'
+        WHEN ui.LowRepUsers > 10 THEN 'Frequent Low Rep User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    UserInteractions ui
+LEFT JOIN 
+    PostStatus ps ON ui.UserId = (SELECT OwnerUserId FROM Posts ORDER BY RANDOM() LIMIT 1)
+LEFT JOIN 
+    AggregatedTagStats ats ON ats.UsageCount > 5 AND ats.TotalViews IS NOT NULL
+WHERE 
+    ui.TotalPosts > 10
+ORDER BY 
+    ui.Reputation DESC, ps.CloseReopenedCount DESC, ats.UsageCount DESC
+LIMIT 100;

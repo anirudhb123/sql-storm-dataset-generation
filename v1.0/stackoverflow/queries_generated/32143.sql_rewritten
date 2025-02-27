@@ -1,0 +1,86 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        p.Id AS PostId,
+        h.CreationDate,
+        h.UserId,
+        h.Comment,
+        1 AS Level
+    FROM
+        Posts p
+    JOIN
+        PostHistory h ON p.Id = h.PostId
+    WHERE
+        h.PostHistoryTypeId IN (10, 11) 
+    UNION ALL
+    SELECT
+        p.Id AS PostId,
+        h.CreationDate,
+        h.UserId,
+        h.Comment,
+        Level + 1
+    FROM
+        Posts p
+    JOIN
+        PostHistory h ON p.Id = h.PostId
+    JOIN
+        RecursivePostHistory r ON r.PostId = p.Id
+    WHERE
+        h.CreationDate < r.CreationDate
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        ph.UserId AS CloserUserId,
+        ph.CreationDate AS ClosedDate,
+        u.DisplayName AS CloserUserName
+    FROM
+        Posts p
+    JOIN
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    JOIN
+        Users u ON ph.UserId = u.Id
+)
+SELECT
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    ups.AverageScore,
+    cp.PostId,
+    cp.Title,
+    cp.ClosedDate,
+    cp.CloserUserName,
+    COUNT(DISTINCT rp.PostId) AS RecursiveClosures
+FROM
+    UserPostStats ups
+LEFT JOIN
+    ClosedPosts cp ON EXISTS (
+        SELECT 1
+        FROM RecursivePostHistory rp
+        WHERE rp.UserId = ups.UserId
+        AND rp.PostId = cp.PostId
+    )
+GROUP BY
+    ups.UserId, ups.DisplayName, cp.PostId, cp.Title, cp.ClosedDate, cp.CloserUserName
+ORDER BY
+    ups.TotalPosts DESC, ups.AverageScore DESC
+OPTION (RECOMPILE);

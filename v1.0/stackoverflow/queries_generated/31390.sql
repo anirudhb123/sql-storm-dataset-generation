@@ -1,0 +1,95 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        U.CreationDate,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        C.Level + 1 AS Level
+    FROM 
+        Users U 
+    INNER JOIN UserReputationCTE C ON U.Reputation > C.Reputation
+    WHERE 
+        C.Level < 5
+),
+PostsWithVoteCounts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.OwnerUserId,
+        COALESCE(V.UpVotes, 0) AS UpVotes,
+        COALESCE(V.DownVotes, 0) AS DownVotes,
+        P.CreationDate
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+),
+CommentStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId, 
+        COUNT(*) AS EditCount, 
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6, 24) -- Edit Title, Edit Body, Edit Tags, Suggested Edit Applied
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    P.Title,
+    P.CreationDate AS PostDate,
+    PH.EditCount,
+    PH.LastEditDate,
+    PS.CommentCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS PostRank
+FROM 
+    Users U
+INNER JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    PostsWithVoteCounts PS ON P.Id = PS.PostId
+LEFT JOIN 
+    PostHistories PH ON P.Id = PH.PostId
+LEFT JOIN 
+    CommentStats CS ON P.Id = CS.PostId
+WHERE 
+    U.Reputation > (SELECT AVG(Reputation) FROM Users) -- Users with above average reputation
+    AND P.CreationDate >= CURRENT_DATE - INTERVAL '30 days' -- Posts from the last 30 days
+ORDER BY 
+    U.Reputation DESC, 
+    PostRank
+LIMIT 100;
+The query utilizes recursive Common Table Expressions (CTEs) to explore users with significant reputation and ranks their posts. It compiles vote counts, post edit statistics, comment counts, and filters users based on criteria while ensuring comprehensive data retrieval.

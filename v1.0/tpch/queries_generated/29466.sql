@@ -1,0 +1,32 @@
+SELECT 
+    CONCAT(s.s_name, ' from ', n.n_name, ' (', r.r_name, ')') AS supplier_info,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(l.l_extendedprice) AS max_price,
+    MIN(l.l_discount) AS min_discount,
+    GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', ') AS part_names
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    AND o.o_orderdate BETWEEN '2020-01-01' AND '2020-12-31'
+    AND l.l_returnflag = 'N'
+GROUP BY 
+    s.s_suppkey, n.n_nationkey, r.r_regionkey
+HAVING 
+    total_orders > 5
+ORDER BY 
+    total_revenue DESC;

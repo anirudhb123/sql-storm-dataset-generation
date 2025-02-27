@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+                          AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+top_customers AS (
+    SELECT 
+        customer_sk,
+        c_first_name,
+        c_last_name,
+        total_sales,
+        order_count
+    FROM 
+        sales_analysis
+    WHERE 
+        rank_sales <= 5
+),
+customer_details AS (
+    SELECT 
+        tc.c_first_name,
+        tc.c_last_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate
+    FROM 
+        top_customers tc
+    LEFT JOIN 
+        customer_demographics cd ON tc.customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    cd.gender,
+    cd.cd_credit_rating,
+    cd.cd_purchase_estimate,
+    COALESCE(MAX(ir.inv_quantity_on_hand), 0) AS total_inventory,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders_from_top_customers
+FROM 
+    customer_details cd
+LEFT JOIN 
+    inventory ir ON ir.inv_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_ship_customer_sk IN (SELECT tc.customer_sk FROM top_customers tc))
+LEFT JOIN 
+    store_sales ss ON ss.ss_item_sk = ir.inv_item_sk AND ss.ss_customer_sk IN (SELECT tc.customer_sk FROM top_customers tc)
+GROUP BY 
+    cd.c_first_name, cd.c_last_name, cd.gender, cd.cd_credit_rating, cd.cd_purchase_estimate
+ORDER BY 
+    total_inventory DESC, cd.cd_purchase_estimate DESC;

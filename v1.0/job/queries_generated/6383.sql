@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        GROUP_CONCAT(DISTINCT c.name) AS companies,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    GROUP BY 
+        t.id, ct.kind
+),
+EnhancedMovieDetails AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.company_type,
+        md.companies,
+        md.keywords,
+        md.aka_names,
+        mi.info AS additional_info
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        movie_info mi ON md.movie_id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+)
+SELECT 
+    emd.title,
+    emd.production_year,
+    emd.company_type,
+    emd.companies,
+    emd.keywords,
+    emd.aka_names,
+    emd.additional_info
+FROM 
+    EnhancedMovieDetails emd
+WHERE 
+    emd.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    emd.production_year DESC, emd.title;

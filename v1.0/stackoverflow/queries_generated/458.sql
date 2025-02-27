@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+),
+AnswerStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(a.Id) AS TotalAnswers,
+        AVG(a.Score) AS AvgAnswerScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title,
+    p.CreationDate,
+    p.Score AS PostScore,
+    COALESCE(a.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(a.AvgAnswerScore, 0) AS AvgAnswerScore,
+    bc.GoldBadges,
+    bc.SilverBadges,
+    bc.BronzeBadges
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    AnswerStats a ON rp.Id = a.PostId
+JOIN 
+    UserBadgeCounts bc ON u.Id = bc.UserId
+WHERE 
+    rp.UserPostRank <= 5 
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.AcceptedAnswerId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+)
+SELECT 
+    *,
+    CASE 
+        WHEN Level > 0 THEN 'Sub-Post'
+        ELSE 'Main Post'
+    END AS PostType
+FROM 
+    PostHierarchy;

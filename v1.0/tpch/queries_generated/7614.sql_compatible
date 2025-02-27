@@ -1,0 +1,67 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name AS supplier_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name AS customer_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationOrders AS (
+    SELECT 
+        n.n_name AS nation_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders_per_nation,
+        SUM(o.o_totalprice) AS total_spent_per_nation
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    no.nation_name,
+    ss.supplier_name,
+    cs.customer_name,
+    ss.total_available_qty,
+    ss.total_supply_cost,
+    cs.total_orders,
+    cs.total_spent,
+    no.total_orders_per_nation,
+    no.total_spent_per_nation
+FROM 
+    SupplierStats ss
+JOIN 
+    CustomerOrders cs ON ss.s_suppkey = cs.c_custkey
+JOIN 
+    NationOrders no ON cs.c_custkey = no.total_orders_per_nation
+JOIN 
+    region r ON no.nation_name = r.r_regionkey
+WHERE 
+    ss.total_available_qty > 100
+AND 
+    cs.total_spent > 50000
+ORDER BY 
+    ss.total_supply_cost DESC,
+    cs.total_orders DESC;

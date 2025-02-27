@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_comment,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        BRANCHING_FILTER_CONDITION = 'dummy_condition'
+),
+FilteredRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        LENGTH(r.r_comment) AS comment_length
+    FROM 
+        region r
+    WHERE 
+        UPPER(r.r_name) LIKE '%NORTH%'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COUNT(DISTINCT(sub.s_suppkey)) AS num_suppliers,
+    COUNT(DISTINCT(reg.r_regionkey)) AS num_regions,
+    AVG(LENGTH(sub.s_comment)) AS avg_supplier_comment_length,
+    SUM(sub.s_acctbal) AS total_supplier_balance
+FROM 
+    part p
+JOIN 
+    RankedSuppliers sub ON p.p_partkey = sub.s_suppkey
+JOIN 
+    FilteredRegions reg ON sub.s_suppkey = reg.r_regionkey
+WHERE 
+    p.p_size BETWEEN 1 AND 100
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type
+HAVING 
+    COUNT(DISTINCT(sub.s_suppkey)) > 5 AND 
+    SUM(sub.s_acctbal) > 10000
+ORDER BY 
+    p.p_name ASC;

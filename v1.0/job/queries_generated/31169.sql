@@ -1,0 +1,91 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.nr_order = 1
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        actor_hierarchy ah ON c.movie_id = (
+            SELECT 
+                movie_id 
+            FROM 
+                cast_info ci 
+            WHERE 
+                ci.person_id = ah.person_id
+            LIMIT 1
+        )
+),
+ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.id ASC) AS title_rank
+    FROM 
+        title t
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC) AS row_num
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keywords mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000
+)
+SELECT
+    ah.actor_name,
+    ti.title,
+    ti.keywords,
+    ti.production_year,
+    CASE
+        WHEN ti.row_num <= 5 THEN 'Top 5'
+        ELSE 'Other'
+    END AS title_category
+FROM 
+    actor_hierarchy ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    title_info ti ON ci.movie_id = ti.title_id
+WHERE 
+    ah.depth <= 3
+ORDER BY 
+    ti.production_year DESC, ti.title;
+
+This SQL query involves multiple advanced SQL constructs including:
+- A recursive Common Table Expression (CTE) to create an actor hierarchy.
+- A ranked titles CTE that ranks titles within the same production year.
+- Aggregation of keywords related to movies.
+- A main select statement that combines all the results and filters based on criteria, implementing both window functions and case logic.

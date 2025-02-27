@@ -1,0 +1,77 @@
+
+WITH RecursiveTagStats AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::text[])
+    GROUP BY 
+        Tags.TagName
+),
+PopularUsers AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT Posts.Id) AS QuestionCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+    HAVING 
+        COUNT(DISTINCT Posts.Id) > 5
+),
+MostActivePostHistory AS (
+    SELECT
+        PH.UserId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 24) 
+    GROUP BY 
+        PH.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(PU.UpVotes, 0) AS UpVotes,
+        COALESCE(PU.DownVotes, 0) AS DownVotes,
+        COALESCE(PH.EditCount, 0) AS EditCount,
+        RANK() OVER (ORDER BY (COALESCE(PU.UpVotes, 0) - COALESCE(PU.DownVotes, 0) + COALESCE(PH.EditCount, 0)) DESC) AS RankScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        PopularUsers PU ON U.Id = PU.UserId
+    LEFT JOIN 
+        MostActivePostHistory PH ON U.Id = PH.UserId
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalScore,
+    TS.TotalViews,
+    TU.DisplayName AS TopUser,
+    TU.UpVotes,
+    TU.DownVotes,
+    TU.EditCount
+FROM 
+    RecursiveTagStats TS
+LEFT JOIN 
+    TopUsers TU ON TU.RankScore = 1
+WHERE 
+    TS.TotalScore > 100
+ORDER BY 
+    TS.TotalScore DESC, 
+    TS.PostCount DESC
+LIMIT 10;

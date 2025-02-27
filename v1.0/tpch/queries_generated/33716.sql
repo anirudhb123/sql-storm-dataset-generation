@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+OrderAmounts AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalAmount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+           COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 20
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_name,
+       sh.s_name AS SupplierName,
+       oh.OrderKey,
+       oh.TotalAmount,
+       sc.TotalCost,
+       sc.SupplierCount,
+       RANK() OVER (PARTITION BY sc.SupplierCount ORDER BY oh.TotalAmount DESC) AS AmountRank
+FROM part p
+LEFT JOIN SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+JOIN SupplierHierarchy sh ON sh.s_nationkey = p.p_mfgr
+JOIN OrderAmounts oh ON oh.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey LIMIT 1)
+WHERE sc.TotalCost IS NOT NULL
+ORDER BY p.p_name, sh.s_name;

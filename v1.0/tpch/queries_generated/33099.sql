@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+PartSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(AVG(ps.ps_supplycost), 0) AS avg_supply_cost,
+    COALESCE(hvc.total_spent, 0) AS high_value_customer_spending,
+    COALESCE(ps.total_revenue, 0) AS part_revenue,
+    rh.r_name AS region_name
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN PartSales ps ON ps.l_partkey = p.p_partkey
+LEFT JOIN HighValueCustomers hvc ON hvc.c_custkey = (
+        SELECT o.o_custkey 
+        FROM orders o 
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey = p.p_partkey
+        ORDER BY o.o_totalprice DESC 
+        LIMIT 1
+    )
+LEFT JOIN nation n ON n.n_nationkey = (
+    SELECT s_nationkey FROM supplier 
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+)
+LEFT JOIN region rh ON rh.r_regionkey = n.n_regionkey
+WHERE p.p_retailprice IS NOT NULL
+GROUP BY p.p_partkey, p.p_name, p.p_brand, rh.r_name
+ORDER BY p.p_partkey;

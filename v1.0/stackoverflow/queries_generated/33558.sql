@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.OwnerUserId,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEdited
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, Tags
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    CASE 
+        WHEN U.BadgeCount > 0 THEN CONCAT('User has ', U.BadgeCount, ' badges')
+        ELSE 'User has no badges'
+    END AS UserBadgeInfo,
+    PH.EditCount,
+    PH.LastEdited,
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+    AVG(V.BountyAmount) AS AverageBounty,
+    COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostLinks
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    UserWithBadges ub ON ub.UserId = U.Id
+LEFT JOIN 
+    PostHistorySummary PH ON PH.PostId = RP.PostId
+LEFT JOIN 
+    Comments C ON C.PostId = RP.PostId
+LEFT JOIN 
+    Votes V ON V.PostId = RP.PostId AND V.VoteTypeId = 8 -- BountyStart
+LEFT JOIN 
+    PostLinks PL ON PL.PostId = RP.PostId
+WHERE 
+    RP.Rank <= 5 -- Get top 5 posts per type by score
+GROUP BY 
+    RP.PostId, RP.Title, RP.Score, U.BadgeCount, PH.EditCount, PH.LastEdited
+ORDER BY 
+    RP.Score DESC, RP.PostId;

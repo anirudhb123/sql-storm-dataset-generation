@@ -1,0 +1,72 @@
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+), 
+ValidOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           SUBSTRING(o.o_comment, 1, 20) AS short_comment,
+           CASE 
+               WHEN o.o_orderstatus = 'O' THEN 'Active'
+               WHEN o.o_orderstatus = 'F' THEN 'Finished' 
+               ELSE 'Unknown' 
+           END AS order_status_desc
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+), 
+AggregatedLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate IS NOT NULL
+    GROUP BY l.l_orderkey
+), 
+SupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           s.s_name, s.s_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+), 
+StringFilter AS (
+    SELECT DISTINCT p.p_partkey, 
+           REPLACE(REPLACE(REPLACE(p.p_name, ' ', ''), 'Part', ''), ' ', '') AS clean_name
+    FROM part p
+    WHERE LENGTH(REPLACE(p.p_name, ' ', '')) > 10
+), 
+FinalResults AS (
+    SELECT 
+        r.r_name,
+        SUM(oi.total_revenue) AS total_sales,
+        COUNT(DISTINCT oi.o_orderkey) AS order_count,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM region r
+    LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN RecursiveSupplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN ValidOrders oi ON oi.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_shipdate IS NOT NULL
+    )
+    LEFT JOIN AggregatedLineItems ali ON ali.l_orderkey = oi.o_orderkey
+    LEFT JOIN SupplierInfo si ON si.ps_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps
+        WHERE ps.ps_availqty IS NOT NULL
+    )
+    WHERE s.s_acctbal IS NOT NULL
+    AND r.r_name IS NOT NULL
+    GROUP BY r.r_name
+    HAVING COUNT(DISTINCT oi.o_orderkey) > 10
+    ORDER BY total_sales DESC 
+)
+
+SELECT * FROM FinalResults
+WHERE avg_supplier_balance IS NOT NULL
+UNION ALL
+SELECT r_name, 0 AS total_sales, 0 AS order_count, NULL AS avg_supplier_balance
+FROM region
+WHERE r_regionkey NOT IN (SELECT DISTINCT n.n_regionkey FROM nation n)
+ORDER BY total_sales DESC, r_name;

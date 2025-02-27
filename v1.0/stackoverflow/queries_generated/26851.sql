@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Only questions and answers
+),
+
+TagStatistics AS (
+    SELECT 
+        UNNEST(string_to_array(p.Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+    GROUP BY 
+        TagName
+),
+
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        t.TagName,
+        ts.TagCount,
+        ts.AvgViewCount,
+        ts.TotalScore,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TagStatistics ts ON ts.TagName = ANY(string_to_array(rp.Tags, '><'))
+    WHERE 
+        rp.Rank <= 5 -- Top 5 posts per type
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.TagName,
+    p.TagCount,
+    p.AvgViewCount,
+    p.TotalScore,
+    p.CommentCount,
+    CASE 
+        WHEN p.Score > 10 THEN 'High Score'
+        WHEN p.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopRankedPosts p
+ORDER BY 
+    p.TagName, p.Score DESC;

@@ -1,0 +1,72 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        COUNT(B.Id) AS BadgeCount, 
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+), 
+RecentPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostTypeCounts AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS PostsCount
+    FROM Posts
+    GROUP BY PostTypeId
+),
+CommentsWithUser AS (
+    SELECT 
+        C.Id AS CommentId,
+        C.Text,
+        U.DisplayName AS UserDisplayName,
+        P.Title AS PostTitle
+    FROM Comments C
+    JOIN Posts P ON C.PostId = P.Id
+    JOIN Users U ON C.UserId = U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CloseVoteCount,
+        MIN(CreationDate) AS FirstClosedDate
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10
+    GROUP BY PostId
+    HAVING COUNT(*) > 1
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostCreation,
+    C.CommentId,
+    C.Text AS CommentText,
+    C.UserDisplayName AS CommentUser,
+    CPP.CloseVoteCount,
+    CPP.FirstClosedDate
+FROM Users U
+JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.PostRank = 1
+LEFT JOIN CommentsWithUser C ON RP.PostId = C.PostId
+LEFT JOIN ClosedPosts CPP ON RP.PostId = CPP.PostId
+WHERE U.Reputation > 1000
+  AND (UB.BadgeCount > 0 OR RB.BadgeCount IS NOT NULL)
+  AND UB.BadgeNames IS NOT NULL
+ORDER BY U.Reputation DESC, RP.CreationDate DESC
+LIMIT 50;
+
+This SQL query utilizes various constructs including Common Table Expressions (CTEs), correlated subqueries, joins, window functions, and aggregation with string processing. It retrieves user information, badge details, and recent post activities, filtering based on reputation and closed post statistics, creating a complex, and diverse dataset suitable for performance benchmarking.

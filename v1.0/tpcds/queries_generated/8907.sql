@@ -1,0 +1,61 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        s_store_sk, 
+        s_store_id, 
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions
+    FROM 
+        store_sales 
+    GROUP BY 
+        s_store_sk, s_store_id
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws_ext_sales_price) AS total_web_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, cd.cd_gender
+),
+SalesByWarehouse AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_id,
+        SUM(cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ws_ext_sales_price) AS total_web_sales
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        catalog_sales cs ON w.w_warehouse_sk = cs.cs_warehouse_sk
+    LEFT JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk, w.w_warehouse_id
+)
+SELECT 
+    ss.s_store_id,
+    ss.total_quantity,
+    ss.total_sales,
+    cs.total_web_sales,
+    sw.total_catalog_sales,
+    sw.total_web_sales AS warehouse_web_sales
+FROM 
+    SalesSummary ss
+JOIN 
+    CustomerStats cs ON ss.s_store_sk = cs.c_customer_sk
+JOIN 
+    SalesByWarehouse sw ON ss.s_store_sk = sw.w_warehouse_sk
+WHERE 
+    cs.total_web_sales > 1000 AND 
+    sw.total_catalog_sales > 5000
+ORDER BY 
+    ss.total_sales DESC, cs.total_web_sales DESC;

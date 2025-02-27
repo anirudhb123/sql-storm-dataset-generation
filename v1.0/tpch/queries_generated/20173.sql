@@ -1,0 +1,85 @@
+WITH RegionStats AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT 
+                AVG(o2.o_totalprice) 
+            FROM 
+                orders o2 
+            WHERE 
+                o2.o_orderstatus = 'O'
+        )
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineitemStats AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) FILTER (WHERE l.l_returnflag = 'R') AS return_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS order_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.region_name,
+    ts.c_name AS top_customer,
+    ts.total_spent,
+    sd.s_name AS supplier_name,
+    ls.total_sales,
+    COALESCE(ls.return_count, 0) AS returns,
+    r.nation_count,
+    r.total_supplier_balance
+FROM 
+    RegionStats r
+CROSS JOIN 
+    TopCustomers ts
+LEFT JOIN 
+    SupplierDetails sd ON ts.total_spent > r.total_supplier_balance
+LEFT JOIN 
+    LineitemStats ls ON ts.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ls.l_orderkey)
+WHERE 
+    r.nation_count >= 5 
+    AND (sd.supplied_parts IS NULL OR sd.supplied_parts > 10)
+ORDER BY 
+    r.total_supplier_balance DESC, 
+    ts.total_spent DESC, 
+    returns ASC
+LIMIT 100 OFFSET 10;

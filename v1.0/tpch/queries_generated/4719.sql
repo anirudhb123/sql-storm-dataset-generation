@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        DENSE_RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal >= 10000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS customer_value
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+
+SELECT 
+    r.r_name,
+    hs.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    od.total_price,
+    od.line_count,
+    hs.total_cost
+FROM 
+    RankedSuppliers hs
+JOIN 
+    nation n ON hs.s_nationkey = n.n_nationkey
+JOIN 
+    HighValueCustomers c ON hs.s_nationkey = c.c_nationkey
+JOIN 
+    OrderDetails od ON c.c_custkey = od.o_custkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    hs.supplier_rank = 1 
+    AND od.order_rank <= 5
+    AND (od.total_price > 500 OR hs.total_cost < 1000)
+ORDER BY 
+    r.r_name, hs.total_cost DESC, c.c_name;

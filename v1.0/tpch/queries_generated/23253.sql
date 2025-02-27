@@ -1,0 +1,89 @@
+WITH RECURSIVE nation_supply AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        r.r_regionkey,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        n.n_name IS NOT NULL
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT 
+        ns.n_nationkey,
+        ns.n_name,
+        ns.r_regionkey,
+        ns.region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        nation_supply ns
+    JOIN 
+        supplier s ON ns.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        ns.n_nationkey, ns.n_name, ns.r_regionkey, ns.region_name
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+ranked_orders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_revenue,
+        os.customer_count,
+        RANK() OVER (PARTITION BY os.o_orderdate ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM 
+        order_summary os
+),
+final_report AS (
+    SELECT 
+        ns.n_name,
+        ns.region_name,
+        ro.total_revenue,
+        ro.customer_count,
+        COALESCE(NULLIF(ro.customer_count, 0), 1) / SUM(ro.customer_count) OVER () AS customer_ratio,
+        CASE 
+            WHEN ro.total_revenue > 1000000 THEN 'High Revenue' 
+            ELSE 'Low Revenue' 
+        END AS revenue_category
+    FROM 
+        nation_supply ns
+    JOIN 
+        ranked_orders ro ON ns.n_nationkey = ro.o_orderkey
+)
+SELECT 
+    fr.n_name,
+    fr.region_name,
+    fr.total_revenue,
+    fr.customer_count,
+    fr.customer_ratio,
+    fr.revenue_category
+FROM 
+    final_report fr
+WHERE 
+    fr.customer_ratio IS NOT NULL 
+OR 
+    (fr.customer_count IS NULL AND fr.total_revenue > 0)
+ORDER BY 
+    fr.customer_ratio DESC NULLS LAST, 
+    fr.total_revenue DESC;

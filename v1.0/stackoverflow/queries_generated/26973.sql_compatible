@@ -1,0 +1,72 @@
+
+WITH TagStats AS (
+    SELECT
+        tg.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN pl.CreationDate IS NOT NULL THEN 1 ELSE 0 END) AS LinkedPosts
+    FROM
+        Tags tg
+    LEFT JOIN
+        Posts p ON p.Tags LIKE '%' || tg.TagName || '%'
+    LEFT JOIN
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY
+        tg.TagName
+),
+
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        RANK() OVER (ORDER BY SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) DESC) AS EngagementRank
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+PostHistorySummary AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24) THEN 1 END) AS SuggestedEditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12) THEN 1 END) AS DeletionCount
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+)
+
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    ts.TagName,
+    ts.PostCount AS TotalPostsWithTag,
+    ts.LinkedPosts AS TotalLinkedPosts,
+    ue.UpVotesReceived AS TotalUpVotes,
+    ue.DownVotesReceived AS TotalDownVotes,
+    ue.PostCount AS UserPostCount,
+    ue.CommentCount AS UserCommentCount,
+    phs.CloseReopenCount,
+    phs.SuggestedEditCount,
+    phs.DeletionCount
+FROM
+    UserEngagement ue
+JOIN
+    TagStats ts ON ue.PostCount > 0 
+LEFT JOIN
+    PostHistorySummary phs ON ue.PostCount > 0
+LEFT JOIN
+    Users u ON ue.UserId = u.Id
+ORDER BY
+    ue.EngagementRank, ts.TagName;

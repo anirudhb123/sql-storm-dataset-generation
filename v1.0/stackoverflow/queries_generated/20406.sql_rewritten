@@ -1,0 +1,85 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        Posts p
+),
+CommentsStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Title,
+        p.PostId,
+        p.PostStatus,
+        us.DisplayName,
+        us.Reputation,
+        ps.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY us.UserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        PostsCTE p
+    JOIN 
+        UserStats us ON p.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = us.UserId)
+    LEFT JOIN 
+        CommentsStats ps ON p.PostId = ps.PostId
+)
+SELECT 
+    rp.DisplayName,
+    rp.Reputation,
+    rp.Title,
+    rp.PostId,
+    rp.PostStatus,
+    rp.CommentCount,
+    5 AS ArbitraryValue,
+    CASE 
+        WHEN rp.RecentPostRank = 1 THEN 'Latest Post'
+        ELSE 'Earlier Post'
+    END AS PostRankDescription,
+    MOUNT(rp.RecentPostRank) OVER (PARTITION BY rp.DisplayName) AS UserPostMount
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.PostStatus = 'Open' 
+    AND COALESCE(rp.CommentCount, 0) > 0
+ORDER BY 
+    rp.Reputation DESC,
+    rp.CommentCount DESC
+LIMIT 10;

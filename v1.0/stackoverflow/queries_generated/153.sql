@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostDetails AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.Reputation,
+        CASE 
+            WHEN rp.PostRank = 1 THEN 'Latest'
+            ELSE 'Older'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Reputation IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate AS ClosureDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.Reputation,
+    COALESCE(cp.ClosureDate, 'Active') AS StatusDate,
+    COALESCE(cp.CloseReason, 'Not Closed') AS CloseReason
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    ClosedPosts cp ON pd.PostId = cp.Id
+WHERE 
+    pd.Score > 10
+ORDER BY 
+    pd.Score DESC,
+    pd.CreationDate ASC
+LIMIT 100
+UNION ALL
+SELECT 
+    'Total Active Posts' AS Title,
+    COUNT(*) AS CreationDate,
+    SUM(p.Score) AS Score,
+    AVG(u.Reputation) AS Reputation,
+    NULL AS StatusDate,
+    NULL AS CloseReason
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+HAVING 
+    COUNT(*) > 0;

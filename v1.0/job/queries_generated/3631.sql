@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+RecentMovies AS (
+    SELECT 
+        actor_name, 
+        movie_title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rn <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.actor_name,
+    rm.movie_title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN rm.production_year < EXTRACT(YEAR FROM CURRENT_DATE) - 10 THEN 'Classic'
+        WHEN rm.production_year >= EXTRACT(YEAR FROM CURRENT_DATE) - 10 
+        AND rm.production_year <= EXTRACT(YEAR FROM CURRENT_DATE) THEN 'Recent'
+        ELSE 'Future'
+    END AS movie_age,
+    (SELECT COUNT(*) 
+     FROM cast_info c 
+     WHERE c.movie_id IN (SELECT movie_id FROM aka_title WHERE title = rm.movie_title)) AS cast_count
+FROM 
+    RecentMovies rm
+LEFT JOIN 
+    movie_info mi ON mi.movie_id IN (SELECT movie_id FROM aka_title WHERE title = rm.movie_title)
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id IN (SELECT movie_id FROM aka_title WHERE title = rm.movie_title)
+ORDER BY 
+    rm.production_year DESC, rm.actor_name;

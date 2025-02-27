@@ -1,0 +1,96 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) 
+                             FROM web_sales ws_inner 
+                             WHERE ws_inner.ws_item_sk = ws.ws_item_sk)
+),
+AggregatedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(sr_returned_date_sk) AS return_count,
+        MAX(sr_returned_date_sk) AS last_return_date
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturningCustomers AS (
+    SELECT 
+        a.rcustomer_sk,
+        GREATEST(COALESCE(a.total_returns, 0), COALESCE(b.total_returns, 0)) AS max_returns
+    FROM 
+        (SELECT sr_customer_sk AS rcustomer_sk 
+         FROM store_returns 
+         GROUP BY sr_customer_sk 
+         HAVING COUNT(sr_return_quantity) > 5) a
+    FULL OUTER JOIN 
+        (SELECT wr_returning_customer_sk AS rcustomer_sk 
+         FROM web_returns 
+         GROUP BY wr_returning_customer_sk 
+         HAVING COUNT(wr_return_quantity) > 5) b
+    ON a.rcustomer_sk = b.rcustomer_sk
+),
+BestSellingItems AS (
+    SELECT 
+        ir.item_id,
+        SUM(ir.sales_price) AS total_sales,
+        COUNT(ir.ws_order_number) AS sales_count
+    FROM 
+        (SELECT ws.ws_item_sk,
+                i.i_item_id,
+                ws.ws_sales_price
+         FROM web_sales ws
+         JOIN item i ON ws.ws_item_sk = i.i_item_sk
+        ) ir
+    GROUP BY 
+        ir.item_id
+    HAVING 
+        SUM(ir.sales_price) > 1000
+),
+ReturnStats AS (
+    SELECT 
+        cus.c_customer_id,
+        cus.c_first_name,
+        cus.c_last_name,
+        COALESCE(rt.total_returns, 0) AS total_returns,
+        COALESCE(rt.return_count, 0) AS return_count,
+        CASE 
+            WHEN rt.total_returns IS NULL OR rt.total_returns = 0 THEN 'No Returns'
+            ELSE 'Returns Made' 
+        END AS return_status
+    FROM 
+        customer cus 
+    LEFT JOIN 
+        AggregatedReturns rt ON cus.c_customer_sk = rt.sr_customer_sk
+)
+SELECT 
+    r.customer_id,
+    r.first_name,
+    r.last_name,
+    r.total_returns,
+    r.return_count,
+    CASE 
+        WHEN b.total_sales > 5000 THEN 'High Seller'
+        ELSE 'Average Seller' 
+    END AS seller_category
+FROM 
+    ReturnStats r
+LEFT JOIN 
+    BestSellingItems b ON r.customer_id = b.item_id
+WHERE 
+    (r.return_count > 2 OR r.return_status = 'No Returns')
+    AND r.last_return_date < '2023-01-01'
+ORDER BY 
+    r.total_returns DESC;

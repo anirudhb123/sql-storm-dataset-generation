@@ -1,0 +1,42 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, c.c_mktsegment, 0 AS level
+    FROM customer AS c
+    WHERE c.c_acctbal > (
+        SELECT AVG(c_acctbal)
+        FROM customer
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, c.c_mktsegment, ch.level + 1
+    FROM customer AS c
+    JOIN CustomerHierarchy AS ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 3
+),
+SupplierAggregates AS (
+    SELECT s.n_nationkey, COUNT(ps.ps_suppkey) AS supplier_count, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier AS s
+    JOIN partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+),
+NationSummary AS (
+    SELECT n.n_name, SUM(COALESCE(s.total_supplycost, 0)) AS total_supplycost, SUM(COALESCE(sa.cust_balance, 0)) AS total_cust_balance
+    FROM nation AS n
+    LEFT JOIN SupplierAggregates AS s ON n.n_nationkey = s.n_nationkey
+    LEFT JOIN (
+        SELECT c_nationkey, SUM(c_acctbal) AS cust_balance
+        FROM CustomerHierarchy
+        GROUP BY c_nationkey
+    ) AS sa ON n.n_nationkey = sa.c_nationkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, 
+       n.total_supplycost, 
+       n.total_cust_balance,
+       RANK() OVER (ORDER BY n.total_supplycost DESC) AS rank_by_supplycost,
+       DENSE_RANK() OVER (ORDER BY n.total_cust_balance DESC) AS rank_by_cust_balance
+FROM (
+    SELECT n.n_name, COALESCE(s.total_supplycost, 0) AS total_supplycost, COALESCE(sa.total_cust_balance, 0) AS total_cust_balance
+    FROM nation AS n
+    LEFT JOIN NationSummary AS s ON n.n_nationkey = s.n_nationkey
+) AS n
+WHERE n.total_supplycost > 0 OR n.total_cust_balance > 0
+ORDER BY rank_by_supplycost, rank_by_cust_balance;

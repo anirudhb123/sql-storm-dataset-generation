@@ -1,0 +1,89 @@
+WITH RECURSIVE cast_hierarchy AS (
+    SELECT ci.movie_id, ci.person_id, 1 AS depth
+    FROM cast_info ci
+    WHERE ci.person_role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ci.movie_id, ci.person_id, ch.depth + 1
+    FROM cast_info ci
+    JOIN cast_hierarchy ch ON ci.movie_id = ch.movie_id
+    WHERE ci.person_id != ch.person_id AND ci.person_role_id IS NOT NULL
+),
+
+movie_keywords AS (
+    SELECT m.id AS movie_id, ARRAY_AGG(k.keyword) AS keywords
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id
+),
+
+title_info AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        COALESCE(t.imdb_index, 'N/A') AS imdb_index,
+        COALESCE(t.note, 'No notes available') AS note,
+        tk.keywords
+    FROM title t 
+    LEFT JOIN movie_keywords tk ON t.id = tk.movie_id
+    WHERE t.production_year >= 2000
+    AND (t.kind_id IN (1, 2) OR t.title ILIKE '%Adventure%')
+),
+
+cast_details AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        MIN(c.nr_order) AS first_cast_order,
+        MAX(c.nr_order) AS last_cast_order,
+        CASE WHEN COUNT(DISTINCT c.person_id) > 10 THEN 'Large Cast' ELSE 'Small Cast' END AS cast_size
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+
+final_output AS (
+    SELECT 
+        ti.title,
+        ti.production_year,
+        ti.imdb_index,
+        ti.note,
+        coalesce(cd.total_cast, 0) AS total_cast,
+        cd.first_cast_order,
+        cd.last_cast_order,
+        cd.cast_size,
+        wh.depth AS cast_depth
+    FROM title_info ti
+    LEFT JOIN cast_details cd ON ti.id = cd.movie_id
+    LEFT JOIN cast_hierarchy wh ON ti.id = wh.movie_id
+)
+
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.imdb_index,
+    fo.note,
+    fo.total_cast,
+    fo.first_cast_order,
+    fo.last_cast_order,
+    fo.cast_size,
+    COALESCE(ARRAY_TO_STRING(ARRAY_AGG(DISTINCT k.keyword), ', '), 'No keywords') AS keywords,
+    CASE 
+        WHEN fo.cast_depth IS NULL THEN 'No cast depth'
+        ELSE fo.cast_depth::text
+    END AS cast_depth
+FROM final_output fo
+LEFT JOIN movie_keywords k ON fo.movie_id = k.movie_id
+GROUP BY 
+    fo.title,
+    fo.production_year,
+    fo.imdb_index,
+    fo.note,
+    fo.total_cast,
+    fo.first_cast_order,
+    fo.last_cast_order,
+    fo.cast_size,
+    fo.cast_depth
+ORDER BY fo.production_year DESC, fo.title;

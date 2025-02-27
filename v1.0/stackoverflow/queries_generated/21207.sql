@@ -1,0 +1,96 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(u.UpVotes, 0) AS UpVotes,
+        COALESCE(u.DownVotes, 0) AS DownVotes,
+        (COALESCE(u.UpVotes, 0) - COALESCE(u.DownVotes, 0)) AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    WHERE u.CreationDate < NOW() - INTERVAL '1 year'
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        (SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.PostTypeId, p.CreationDate, p.ViewCount, p.Score
+),
+
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+),
+
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ActivityRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 24) -- Close, Reopen, Suggested Edit Applied
+)
+
+SELECT 
+    us.DisplayName AS UserName,
+    COUNT(DISTINCT rp.PostId) AS PostsParticipated,
+    SUM(rp.CommentCount) AS TotalComments,
+    SUM(rp.NetVotes) AS TotalVotes,
+    MAX(rt.TotalViews) AS MaxViewsPerTag,
+    AVG(rt.AvgScore) AS AvgTagScores,
+    STRING_AGG(DISTINCT ts.TagName, ', ') AS AssociatedTags
+FROM UserStatistics us
+JOIN RecentPosts rp ON us.UserId = rp.OwnerUserId
+JOIN TagStatistics rt ON rt.PostCount > 0
+LEFT JOIN PostActivity pa ON rp.PostId = pa.PostId AND pa.ActivityRank = 1
+LEFT JOIN Tags ts ON ts.Id = rt.TagId
+GROUP BY us.UserId, us.DisplayName
+HAVING COUNT(DISTINCT rp.PostId) > 10 -- Only users with more than 10 posts
+ORDER BY TotalVotes DESC, UserRank ASC;
+
+-- Edge case handling for users with NULL values in tags, avoiding anomalies
+SELECT DISTINCT
+    rt.TagName,
+    COUNT(*) AS UsedCount
+FROM Tags rt 
+LEFT JOIN RecentPosts rp ON rp.Tags LIKE '%' || rt.TagName || '%'
+WHERE rt.IsModeratorOnly IS NOT TRUE 
+GROUP BY rt.TagName
+HAVING COUNT(*) > 1;
+
+-- Queries for checking complex NULL logic and bizarre cases for benchmarking
+SELECT 
+    ph.PostId,
+    COUNT(DISTINCT CASE WHEN ph.Comment IS NULL THEN ph.UserId END) AS UsersWithNullComments,
+    COUNT(DISTINCT CASE WHEN ph.Comment IS NOT NULL THEN ph.UserId END) AS UsersWithNonNullComments,
+    COALESCE(MAX(pa.CreationDate), '2020-01-01') AS LastActivityDate -- Default date for NULL cases
+FROM PostActivity ph
+LEFT JOIN Posts p ON p.Id = ph.PostId
+WHERE p.Score > 0 OR p.ViewCount IS NOT NULL
+GROUP BY ph.PostId
+HAVING COUNT(ph.Id) > 0
+ORDER BY UsersWithNullComments DESC;

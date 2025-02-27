@@ -1,0 +1,44 @@
+WITH RecursiveSupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           0 AS hierarchy_level,
+           CAST(s.s_name AS VARCHAR(100)) AS full_hierarchy
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           r.hierarchy_level + 1,
+           CAST(r.full_hierarchy || ' -> ' || s.s_name AS VARCHAR(100))
+    FROM supplier s
+    JOIN RecursiveSupplierHierarchy r ON s.s_nationkey = r.s_nationkey
+    WHERE r.hierarchy_level < 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    r.r_name AS region_name,
+    CASE 
+        WHEN COUNT(DISTINCT l.l_orderkey) > 100 
+        THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+INNER JOIN customer c ON o.o_custkey = c.c_custkey
+INNER JOIN nation n ON c.c_nationkey = n.n_nationkey
+INNER JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate >= '2023-01-01' 
+    AND (l.l_returnflag = 'N' OR l.l_returnflag IS NULL)
+    AND (s.s_acctbal IS NOT NULL OR s.s_acctbal < 0)
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name, n.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    revenue_rank DESC, total_revenue DESC;

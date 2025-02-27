@@ -1,0 +1,62 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_acctbal, sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_acctbal < sh.s_acctbal AND sp.s_suppkey != sh.s_suppkey 
+),
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+    GROUP BY l.l_partkey
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty,
+           COALESCE(NULLIF(s.s_name, ''), 'Unknown Supplier') AS supplier_name
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, AVG(s.s_acctbal) AS avg_acctbal
+    FROM supplier s
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING AVG(s.s_acctbal) > 5000
+)
+SELECT ph.p_name,
+       ps.supplier_name,
+       COALESCE(as.total_sales, 0) AS total_sales,
+       s.highest_balance,
+       COUNT(DISTINCT sh.s_suppkey) AS num_levels
+FROM PartSupplierInfo ps
+FULL OUTER JOIN AggregatedSales as ON ps.p_partkey = as.l_partkey
+JOIN (
+    SELECT s.s_suppkey, MAX(s.s_acctbal) AS highest_balance
+    FROM SupplierHierarchy s
+    GROUP BY s.s_suppkey
+) s ON ps.supplier_name = s.supp_name
+JOIN TopSuppliers ts ON ps.supplier_name = ts.s_name
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey
+    FROM nation n
+    WHERE n.n_nationkey = (
+        SELECT c.c_nationkey
+        FROM customer c
+        WHERE c.c_custkey = (
+            SELECT o.o_custkey
+            FROM orders o 
+            WHERE o.o_orderkey = (
+                SELECT MAX(o2.o_orderkey)
+                FROM orders o2
+                WHERE o2.o_orderstatus = 'O'
+            )
+            LIMIT 1
+        )
+    )
+)
+GROUP BY ph.p_name, ps.supplier_name, as.total_sales, s.highest_balance
+HAVING COUNT(ps.ps_availqty) >= 5 OR COUNT(ps.ps_availqty) IS NULL
+ORDER BY total_sales DESC, ps.supplier_name ASC NULLS LAST;

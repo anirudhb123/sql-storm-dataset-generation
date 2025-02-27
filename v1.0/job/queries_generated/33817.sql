@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        0 AS depth,
+        mt.production_year
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        mh.depth + 1,
+        at.production_year
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    AVG(CASE 
+        WHEN pi.info IS NOT NULL AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN CAST(pi.info AS DECIMAL)
+        ELSE NULL 
+    END) AS average_rating,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mt.production_year DESC) AS rank
+FROM
+    aka_name ak
+JOIN
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN
+    person_info pi ON ak.person_id = pi.person_id
+WHERE
+    ak.name IS NOT NULL
+    AND mt.production_year >= 2000
+    AND (pi.info_type_id IS NULL OR pi.info_type_id != (SELECT id FROM info_type WHERE info = 'private'))
+GROUP BY
+    ak.name,
+    mt.title,
+    mt.production_year
+HAVING
+    COUNT(DISTINCT mc.company_id) > 2
+ORDER BY
+    average_rating DESC,
+    ak.name ASC;

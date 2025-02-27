@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM m.production_year) ORDER BY COUNT(c.id) DESC) AS rank_by_cast
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+FilteredTitles AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 5
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    ft.movie_id,
+    ft.title,
+    ft.production_year,
+    COALESCE(cmc.company_count, 0) AS company_count,
+    COALESCE(cmc.company_names, 'No Companies') AS company_names,
+    (SELECT AVG(l.link_type_id) 
+     FROM movie_link l 
+     WHERE l.movie_id = ft.movie_id) AS avg_link_type_id,
+    CASE 
+        WHEN EXISTS (SELECT * 
+                     FROM movie_keyword mk 
+                     WHERE mk.movie_id = ft.movie_id AND mk.keyword_id IS NULL) 
+        THEN 'Contains NULL Keywords' 
+        ELSE 'Keywords OK' 
+    END AS keyword_status
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    CompanyMovieCounts cmc ON ft.movie_id = cmc.movie_id
+ORDER BY 
+    ft.production_year DESC, 
+    ft.title;

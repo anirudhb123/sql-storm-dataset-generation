@@ -1,0 +1,45 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.avg_profit,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM customer_sales cs
+    JOIN customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE cs.total_sales > 1000
+),
+sales_by_month AS (
+    SELECT 
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        EXTRACT(MONTH FROM d.d_date) AS sales_month,
+        SUM(ws.ws_net_paid) AS monthly_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY sales_year, sales_month
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    sm.sales_year,
+    sm.sales_month,
+    sm.monthly_sales
+FROM high_value_customers hvc
+JOIN sales_by_month sm ON EXTRACT(YEAR FROM CURRENT_DATE) = sm.sales_year
+ORDER BY sm.sales_month, hvc.total_sales DESC;

@@ -1,0 +1,69 @@
+WITH UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 9 -- BountyClose
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 100
+),
+RelevantPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.Score,
+        us.DisplayName,
+        us.Reputation
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserScores us ON pd.OwnerUserId = us.UserId
+    WHERE 
+        pd.rn <= 3 -- Top 3 recent posts
+)
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.DisplayName,
+    rp.Reputation,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = rp.PostId) AS CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL STRING_TO_ARRAY(rp.Tags, ',') AS tag ON t.TagName = TRIM(tag) 
+     GROUP BY t.Id) AS Tags
+FROM 
+    RelevantPosts rp
+LEFT JOIN 
+    PostHistory ph ON rp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 12) -- Closures and Deletions
+WHERE 
+    ph.Id IS NULL OR ph.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 50;

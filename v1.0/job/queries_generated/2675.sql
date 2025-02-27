@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+), FilteredMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_count > (
+            SELECT 
+                AVG(cast_count) 
+            FROM 
+                RankedMovies
+        )
+), MovieDetails AS (
+    SELECT 
+        f.movie_title,
+        f.production_year,
+        STRING_AGG(CONCAT(k.keyword, ' '), ', ') AS keywords,
+        STRING_AGG(CONCAT(cn.name, ' (', ct.kind, ')'), '; ') AS companies
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        movie_keyword mk ON f.movie_title = (SELECT title FROM titled WHERE id = mk.movie_id)
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON f.movie_title = (SELECT title FROM titled WHERE id = mc.movie_id)
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        f.movie_title, f.production_year
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.keywords,
+    md.companies,
+    CASE 
+        WHEN md.production_year IS NULL THEN 'Unknown Year'
+        ELSE md.production_year::TEXT 
+    END AS year_display
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count IS NOT NULL
+ORDER BY 
+    md.production_year DESC, md.movie_title;

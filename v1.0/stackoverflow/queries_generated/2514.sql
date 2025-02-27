@@ -1,0 +1,59 @@
+WITH RecentActivity AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+        AND p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ra.PostId, 
+        ra.Title, 
+        ra.Score, 
+        ra.CommentCount, 
+        ra.UpVotes, 
+        ra.DownVotes,
+        ra.RowNum,
+        CASE 
+            WHEN ra.UpVotes + ra.DownVotes > 0 THEN (ra.UpVotes::float / (ra.UpVotes + ra.DownVotes)) * 100 
+            ELSE NULL 
+        END AS VoteRatio
+    FROM 
+        RecentActivity ra
+    WHERE 
+        ra.RowNum = 1
+)
+SELECT 
+    u.DisplayName, 
+    tp.Title, 
+    tp.Score, 
+    tp.CommentCount, 
+    tp.UpVotes, 
+    tp.DownVotes, 
+    COALESCE(tp.VoteRatio, 0) AS VoteRatioPercent
+FROM 
+    Users u
+JOIN 
+    TopPosts tp ON u.Id = tp.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1 -- Gold badges
+WHERE 
+    tp.Score > 10
+ORDER BY 
+    tp.Score DESC
+LIMIT 10;

@@ -1,0 +1,40 @@
+WITH RECURSIVE supply_chain (s_suppkey, supply_level) AS (
+    SELECT ps_suppkey, 1
+    FROM partsupp
+    WHERE ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    
+    UNION ALL
+    
+    SELECT ps.s_suppkey, sc.supply_level + 1
+    FROM partsupp ps
+    JOIN supply_chain sc ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#1' LIMIT 1)
+    WHERE sc.s_suppkey = ps.ps_suppkey
+),
+aggregated_data AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           PERCENT_RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount))) AS revenue_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+final_selection AS (
+    SELECT n.n_nationkey, n.n_name,
+           COALESCE(ad.supplier_count, 0) AS supplier_count,
+           COALESCE(ad.total_revenue, 0) AS total_revenue
+    FROM nation n
+    LEFT JOIN aggregated_data ad ON n.n_nationkey = ad.n_nationkey
+)
+SELECT r.r_name,
+       SUM(fs.total_revenue) AS total_revenue_by_region,
+       COUNT(fs.supplier_count) FILTER (WHERE fs.supplier_count > 0) AS active_suppliers_count,
+       COUNT(fs.n_nationkey) AS total_nations,
+       STRING_AGG(DISTINCT fs.n_name || ' (' || fs.supplier_count || ')', ', ') AS supplier_details
+FROM final_selection fs
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = fs.n_nationkey)
+GROUP BY r.r_name
+HAVING COUNT(fs.n_nationkey) > 1
+ORDER BY total_revenue_by_region DESC, active_suppliers_count DESC
+LIMIT 10;

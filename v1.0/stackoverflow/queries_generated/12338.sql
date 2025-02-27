@@ -1,0 +1,67 @@
+-- Performance benchmarking SQL query to analyze posts and user interactions
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.Reputation AS OwnerReputation,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+),
+UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT b.Id) AS BadgesCount,
+        SUM(COALESCE(c.Score, 0)) AS CommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, Reputation
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerReputation,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    us.PostsCount,
+    us.BadgesCount,
+    us.CommentScore
+FROM 
+    PostStats ps
+JOIN 
+    UserStats us ON ps.OwnerReputation = us.Reputation
+ORDER BY 
+    ps.ViewCount DESC, ps.Score DESC;

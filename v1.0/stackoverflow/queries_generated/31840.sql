@@ -1,0 +1,54 @@
+WITH RecursivePostHierarchy AS (
+    -- CTE to create a hierarchy of posts based on accepted answers
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(v.BountyAmount) AS AverageBounty,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(v.CreationDate) AS LastVoteDate,
+    ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS PostRank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and Downvotes
+LEFT JOIN 
+    LATERAL (SELECT * FROM STRING_TO_ARRAY(p.Tags, ',') AS TagName) t ON TRUE
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+WHERE 
+    u.Reputation >= 1000 -- filter users with reputation greater than 1000
+GROUP BY 
+    u.Id
+ORDER BY 
+    TotalPosts DESC, u.Reputation DESC
+HAVING 
+    AVG(v.BountyAmount) > 0 OR COUNT(rph.PostId) > 3 -- condition for users who have received bounties or have more than 3 replies
+LIMIT 50; -- limiting results to show top 50 users

@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Consider recent movies
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        parent.movie_title || ' (linked to: ' || ml.link_type_id || ')' AS movie_title,
+        mt.production_year,
+        depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy parent ON ml.movie_id = parent.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    COUNT(DISTINCT cc.movie_id) AS total_movies,
+    MAX(CASE WHEN cc.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mi.info) AS info_types_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS movie_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mt.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mt.movie_id = mi.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mt.movie_title, mt.production_year, ak.person_id
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1 AND 
+    MAX(mt.production_year) > 2015
+ORDER BY 
+    total_movies DESC, 
+    movie_rank
+LIMIT 10;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE customer_purchases AS (
+    SELECT 
+        c.c_customer_sk,
+        V.i_item_id,
+        SUM(COALESCE(ws.ws_quantity, 0)) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        item V ON ws.ws_item_sk = V.i_item_sk
+    GROUP BY 
+        c.c_customer_sk, V.i_item_id
+), ranked_customers AS (
+    SELECT 
+        cp.c_customer_sk,
+        cp.i_item_id,
+        cp.total_quantity,
+        cp.total_net_profit,
+        cp.purchase_rank,
+        DENSE_RANK() OVER (ORDER BY cp.total_net_profit DESC) AS customer_rank
+    FROM 
+        customer_purchases cp
+    WHERE 
+        cp.purchase_rank = 1
+), high_value_customers AS (
+    SELECT 
+        rc.c_customer_sk, 
+        CASE WHEN rc.total_net_profit > 1000 THEN 'VIP'
+             WHEN rc.total_net_profit BETWEEN 500 AND 1000 THEN 'Regular' 
+             ELSE 'Low Value' END AS value_category
+    FROM 
+        ranked_customers rc
+)
+SELECT 
+    a.ca_city, 
+    a.ca_state,
+    COALESCE(hvc.value_category, 'Unknown') AS customer_category,
+    COUNT(DISTINCT hvc.c_customer_sk) AS number_of_customers,
+    AVG(hvc.total_net_profit) AS avg_profit
+FROM 
+    customer_address a
+LEFT JOIN 
+    high_value_customers hvc ON a.ca_address_sk = hvc.c_customer_sk
+LEFT JOIN 
+    DATE_DIM dd ON dd.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_dow = 5 AND d_month_seq = (SELECT MAX(d_month_seq) FROM date_dim WHERE d_year = 2023))
+WHERE 
+    dd.d_current_year = 1 -- This is a placeholder for the current year logic
+GROUP BY 
+    a.ca_city, a.ca_state, customer_category
+HAVING 
+    COUNT(DISTINCT hvc.c_customer_sk) > 0
+ORDER BY 
+    a.ca_city, a.ca_state, number_of_customers DESC
+LIMIT 10;

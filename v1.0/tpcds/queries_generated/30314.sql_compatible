@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        COUNT(DISTINCT ss_customer_sk) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_paid) DESC) AS store_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN (
+            SELECT MAX(d_date_sk) - 30 FROM date_dim
+        ) AND (
+            SELECT MAX(d_date_sk) FROM date_dim
+        )
+    GROUP BY 
+        s_store_sk
+), 
+demographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_credit_rating IS NOT NULL
+),
+high_income AS (
+    SELECT 
+        hd_demo_sk,
+        ib_income_band_sk
+    FROM 
+        household_demographics h
+    JOIN 
+        income_band i ON h.hd_income_band_sk = i.ib_income_band_sk
+    WHERE 
+        ib_upper_bound > 100000
+),
+avg_sales AS (
+    SELECT 
+        s_store_sk,
+        AVG(total_sales) AS avg_store_sales
+    FROM 
+        sales_data
+    GROUP BY 
+        s_store_sk
+)
+SELECT 
+    s.s_store_sk,
+    s.total_sales,
+    s.transaction_count,
+    d.cd_gender,
+    d.cd_marital_status,
+    CASE 
+        WHEN h.ib_income_band_sk IS NOT NULL THEN 'High Income'
+        ELSE 'Other'
+    END AS income_category,
+    a.avg_store_sales
+FROM 
+    sales_data s
+LEFT JOIN 
+    demographics d ON s.s_store_sk = d.cd_demo_sk
+LEFT JOIN 
+    high_income h ON d.cd_demo_sk = h.hd_demo_sk
+JOIN 
+    avg_sales a ON s.s_store_sk = a.s_store_sk
+WHERE 
+    s.total_sales > a.avg_store_sales * 1.5
+ORDER BY 
+    s.total_sales DESC
+LIMIT 10;

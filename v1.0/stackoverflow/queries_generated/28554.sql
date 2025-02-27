@@ -1,0 +1,66 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore,
+        SUM(Posts.AnswerCount) AS TotalAnswers,
+        COUNT(DISTINCT Users.Id) AS UniqueUsers
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalViews,
+        TotalScore,
+        TotalAnswers,
+        UniqueUsers,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank,
+        RANK() OVER (ORDER BY TotalAnswers DESC) AS AnswerRank
+    FROM 
+        TagStatistics
+),
+FinalStats AS (
+    SELECT 
+        TagName,
+        TotalViews,
+        TotalScore,
+        TotalAnswers,
+        UniqueUsers,
+        ScoreRank,
+        ViewRank,
+        AnswerRank
+    FROM 
+        TopTags
+    WHERE 
+        ScoreRank <= 10 OR ViewRank <= 10 OR AnswerRank <= 10
+)
+SELECT 
+    TagName,
+    TotalViews,
+    TotalScore,
+    TotalAnswers,
+    UniqueUsers,
+    ScoreRank,
+    ViewRank,
+    AnswerRank,
+    CASE
+        WHEN ScoreRank <= 10 THEN 'Top Score'
+        WHEN ViewRank <= 10 THEN 'Top Views'
+        WHEN AnswerRank <= 10 THEN 'Top Answers'
+        ELSE 'Not in Top 10'
+    END AS Category
+FROM 
+    FinalStats
+ORDER BY 
+    ScoreRank, ViewRank, AnswerRank;
+
+This SQL query evaluates and benchmarks string processing by analyzing tags within the Stack Overflow schema. It collects statistical data for each tag based on post activity, including views, scores, answer counts, and unique users. The results are ranked and filtered to include only the top-performing tags across multiple metrics, facilitating a comprehensive view of tag popularity and user engagement.

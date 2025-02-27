@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(GETDATE() - p.CreationDate, '0 days') AS Age
+    FROM
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE
+        p.CreationDate > DATEADD(year, -1, GETDATE())  -- Filter posts created in the last year
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+), 
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::INT = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Include only close/reopen changes
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.UserDisplayName
+), 
+
+VoteStats AS (
+    SELECT
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Rank,
+    rp.VoteCount,
+    cs.CloseDate,
+    cs.ClosedBy,
+    cs.CloseReasons,
+    vs.UpVotes,
+    vs.DownVotes
+FROM
+    RankedPosts rp
+LEFT OUTER JOIN 
+    ClosedPosts cs ON rp.PostId = cs.PostId
+LEFT OUTER JOIN 
+    VoteStats vs ON rp.PostId = vs.PostId
+WHERE
+    (rp.Rank <= 5 OR cs.CloseDate IS NOT NULL)  -- Return top 5 posts or closed posts
+ORDER BY 
+    COALESCE(rp.ViewCount, 0) DESC,
+    COALESCE(cs.CloseDate, '9999-12-31') DESC;  -- Closed posts should come last

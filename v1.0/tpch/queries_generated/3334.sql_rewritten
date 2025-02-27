@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price,
+        COUNT(*) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(SA.total_supply_cost, 0) AS total_supply_cost,
+    LA.total_line_price,
+    O.order_rank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAggregates SA ON p.p_partkey = SA.ps_partkey
+FULL OUTER JOIN 
+    FilteredLineItems LA ON LA.l_orderkey IN (
+        SELECT 
+            o.o_orderkey 
+        FROM 
+            RankedOrders o 
+        WHERE 
+            o.o_orderstatus = 'O' AND o.order_rank <= 5
+    )
+LEFT JOIN 
+    RankedOrders O ON LA.l_orderkey = O.o_orderkey
+WHERE 
+    p.p_retailprice > 50.00 
+    AND (p.p_comment IS NULL OR p.p_comment LIKE '%premium%')
+ORDER BY 
+    total_supply_cost DESC, total_line_price DESC;

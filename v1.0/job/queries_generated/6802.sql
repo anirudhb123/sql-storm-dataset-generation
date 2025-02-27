@@ -1,0 +1,51 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        i.info AS movie_info,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM title t
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN movie_info mi ON t.id = mi.movie_id
+    JOIN info_type it ON mi.info_type_id = it.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE it.info = 'Genres' AND t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year, c.name, i.info
+), ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.n as character_name,
+        ca.movie_id
+    FROM aka_name a
+    JOIN cast_info ca ON a.person_id = ca.person_id
+    JOIN char_name c ON ca.role_id = c.id
+    WHERE a.name IS NOT NULL
+), DetailedInfo AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.company_name,
+        md.movie_info,
+        md.keywords,
+        ad.actor_id,
+        ad.name AS actor_name,
+        ad.character_name
+    FROM MovieDetails md
+    JOIN ActorDetails ad ON md.movie_id = ad.movie_id
+)
+SELECT 
+    di.title,
+    di.production_year,
+    di.company_name,
+    di.movie_info,
+    di.keywords,
+    di.actor_name,
+    di.character_name
+FROM DetailedInfo di
+ORDER BY di.production_year DESC, di.title;

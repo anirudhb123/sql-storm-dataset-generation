@@ -1,0 +1,82 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM 
+        store_returns 
+    WHERE 
+        sr_return_quantity > 0
+),
+SalesSummary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_quantity) AS avg_quantity_sold
+    FROM 
+        web_sales 
+    WHERE 
+        ws_ship_date_sk BETWEEN 1 AND 100
+    GROUP BY 
+        ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        (CASE 
+            WHEN cd_purchase_estimate IS NULL THEN 0
+            ELSE cd_purchase_estimate
+         END) AS purchase_estimate
+    FROM 
+        customer_demographics 
+    WHERE 
+        cd_gender IS NOT NULL
+),
+WarehouseInfo AS (
+    SELECT 
+        w_warehouse_sk,
+        COUNT(DISTINCT ws_item_sk) AS stocked_items
+    FROM 
+        warehouse 
+    JOIN 
+        inventory ON w_warehouse_sk = inv_warehouse_sk
+    GROUP BY 
+        w_warehouse_sk
+    HAVING 
+        COUNT(DISTINCT inv_item_sk) > 5
+)
+SELECT 
+    C.c_customer_id,
+    SUM(R.sr_return_amt + COALESCE(S.total_sales, 0)) AS total_impact,
+    (CASE 
+        WHEN CD.purchase_estimate > 1000 THEN 'High Value'
+        WHEN CD.purchase_estimate IS NULL THEN 'Unknown Value'
+        ELSE 'Low Value'
+    END) AS customer_value_category,
+    W.stocked_items,
+    COUNT(DISTINCT R.sr_item_sk) AS total_returned_items,
+    (SELECT COUNT(*) FROM RankedReturns R2 WHERE R2.return_rank = 1 AND R2.sr_item_sk = R.sr_item_sk) AS rank_one_return_count
+FROM 
+    customer C
+LEFT JOIN 
+    RankedReturns R ON C.c_customer_sk = R.sr_customer_sk
+LEFT JOIN 
+    SalesSummary S ON R.sr_item_sk = S.ws_item_sk
+JOIN 
+    CustomerDemographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+JOIN 
+    WarehouseInfo W ON W.w_warehouse_sk = (SELECT TOP 1 w_warehouse_sk FROM inventory I WHERE I.inv_item_sk = R.sr_item_sk)
+WHERE 
+    C.c_birth_country IN ('USA', 'Canada')
+GROUP BY 
+    C.c_customer_id, CD.purchase_estimate, W.stocked_items
+HAVING 
+    SUM(R.sr_return_amt + COALESCE(S.total_sales, 0)) > 500
+ORDER BY 
+    total_impact DESC, customer_value_category;

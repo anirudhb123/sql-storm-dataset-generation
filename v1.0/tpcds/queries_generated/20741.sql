@@ -1,0 +1,55 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+), 
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_bill_customer_sk IS NOT NULL
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.order_count, 0) AS order_count,
+    rc.rnk,
+    CASE 
+        WHEN rc.rnk <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_tier,
+    NULLIF(NULLIF(CAST(ws.ws_sales_price AS DECIMAL(10,2)), 0), NULL), NULL) AS sales_price
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    sales_summary ss ON rc.c_customer_id = (SELECT c_customer_id FROM customer WHERE c_customer_sk = ss.ws_bill_customer_sk)
+JOIN 
+    web_sales ws ON rc.c_customer_id = ws.ws_bill_customer_sk
+WHERE 
+    (rc.cd_gender = 'F' OR rc.cd_marital_status = 'S')
+    AND (ss.total_sales > 1000 OR ss.order_count > 5)
+ORDER BY 
+    rc.cd_gender, total_sales DESC
+FETCH FIRST 50 ROWS ONLY;

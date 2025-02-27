@@ -1,0 +1,49 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id, t.title, ci.movie_id, 
+           ROW_NUMBER() OVER(PARTITION BY ci.person_id ORDER BY s.production_year DESC) AS rn
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    JOIN title t ON at.movie_id = t.id
+    JOIN movie_info mi ON t.id = mi.movie_id
+    JOIN (SELECT DISTINCT production_year FROM aka_title) s ON s.production_year = t.production_year
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+    AND an.name IS NOT NULL
+),
+top_actors AS (
+    SELECT ah.person_id, COUNT(*) AS role_count
+    FROM actor_hierarchy ah
+    WHERE ah.rn <= 5 
+    GROUP BY ah.person_id
+),
+movies_with_keywords AS (
+    SELECT m.id AS movie_id, k.keyword
+    FROM title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+),
+actor_with_keywords AS (
+    SELECT ah.person_id, mwk.movie_id, mwk.keyword
+    FROM actor_hierarchy ah
+    JOIN movies_with_keywords mwk ON ah.movie_id = mwk.movie_id
+),
+combined AS (
+    SELECT t.title, a.person_id, ak.keyword, 
+           COALESCE(NULLIF(an.name, ''), 'Unknown') AS actor_name, 
+           ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY a.movie_id) AS actor_rank
+    FROM actor_with_keywords a
+    JOIN aka_name an ON a.person_id = an.person_id
+    JOIN title t ON a.movie_id = t.id
+)
+SELECT c.title, 
+       c.actor_name, 
+       STRING_AGG(DISTINCT c.keyword, ', ') AS keywords,
+       COUNT(DISTINCT a.person_id) AS total_actors,
+       CASE WHEN COUNT(DISTINCT a.person_id) > 5 THEN 'Multiple Actors' ELSE 'Solo Actor' END AS actor_status
+FROM combined c
+LEFT JOIN top_actors a ON c.person_id = a.person_id
+WHERE c.actor_rank <= 3
+GROUP BY c.title, c.actor_name
+HAVING COUNT(DISTINCT c.keyword) > 1
+ORDER BY c.title, total_actors DESC;

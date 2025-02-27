@@ -1,0 +1,65 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Depth
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        r.Depth + 1
+    FROM
+        Posts a
+    INNER JOIN RecursivePostCTE r ON a.ParentId = r.PostId
+), 
+
+UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id, U.DisplayName, U.Reputation
+)
+
+SELECT
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.UpVotes,
+    U.DownVotes,
+    U.AverageScore,
+    R.PostId AS RelatedPostId,
+    R.Title AS RelatedPostTitle,
+    R.CreationDate AS RelatedPostCreationDate,
+    R.Depth
+FROM
+    UserStats U
+LEFT JOIN
+    RecursivePostCTE R ON U.UserId = R.OwnerUserId
+WHERE
+    U.Reputation > 1000 
+    AND R.Depth <= 2    
+ORDER BY
+    U.Reputation DESC,
+    R.Depth, U.DisplayName;

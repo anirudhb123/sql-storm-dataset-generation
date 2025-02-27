@@ -1,0 +1,77 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+),
+supplier_analysis AS (
+    SELECT 
+        DISTINCT s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+customer_spend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+region_nation AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    r.region_name,
+    rn.n_name AS nation_name,
+    COUNT(DISTINCT ca.c_custkey) AS customer_count,
+    SUM(sa.total_supply_value) AS total_supply_value,
+    AVG(c_total.total_spent) AS average_spent
+FROM 
+    region_nation rn
+LEFT JOIN 
+    customer_spend ca ON rn.n_nationkey = ca.c_custkey
+LEFT JOIN 
+    supplier_analysis sa ON rn.n_nationkey = sa.s_nationkey
+LEFT JOIN 
+    ranked_orders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = ca.c_custkey)
+GROUP BY 
+    r.region_name, rn.n_name
+HAVING 
+    COUNT(DISTINCT ca.c_custkey) > 10
+ORDER BY 
+    total_supply_value DESC, average_spent DESC;

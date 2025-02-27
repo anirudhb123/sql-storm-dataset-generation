@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Comments c 
+            WHERE c.PostId = p.Id
+        ), 0) AS CommentCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL 
+        AND p.OwnerUserId IS NOT NULL 
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(a.UpVotes) AS TotalUpVotes,
+        SUM(a.DownVotes) AS TotalDownVotes,
+        AVG(a.Reputation) AS AvgReputation,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes a ON a.UserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+CloseReasonCounts AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment = cr.Id::TEXT
+    WHERE 
+        ph.PostHistoryTypeId = 10 /* Post Closed */
+    GROUP BY 
+        ph.UserId
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.BadgeCount,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    up.AvgReputation,
+    up.Tags,
+    COALESCE(cr.CloseCount, 0) AS CloseCount,
+    COALESCE(cr.CloseReasons, 'No reasons available') AS CloseReasons,
+    r.PostId,
+    r.Title AS TopPostTitle,
+    r.Score AS TopPostScore,
+    r.ViewCount AS TopPostViewCount,
+    r.CommentCount AS TopPostCommentCount
+FROM 
+    UserActivity up
+LEFT JOIN 
+    CloseReasonCounts cr ON up.UserId = cr.UserId
+LEFT JOIN 
+    RankedPosts r ON r.Rank = 1 AND r.Rank <= 3 /* Top 3 Posts */
+WHERE 
+    up.BadgeCount > 0
+ORDER BY 
+    up.BadgeCount DESC, 
+    up.TotalUpVotes DESC;

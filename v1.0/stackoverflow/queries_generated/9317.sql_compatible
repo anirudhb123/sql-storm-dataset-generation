@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        AVG(COALESCE(p_view.ViewCount, 0)) AS AvgPostViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            PostId, SUM(ViewCount) AS ViewCount 
+         FROM 
+            Posts 
+         GROUP BY PostId) AS p_view ON p.Id = p_view.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        us.DisplayName AS TopAuthor,
+        us.Reputation AS AuthorReputation
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        Users us ON rp.OwnerUserId = us.Id
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    t.Title,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.AnswerCount,
+    t.TopAuthor,
+    t.AuthorReputation,
+    us.BadgeCount,
+    us.VoteCount,
+    us.AvgPostViews
+FROM 
+    TopPosts t
+JOIN 
+    UserStats us ON us.UserId = t.TopAuthor
+ORDER BY 
+    t.Score DESC, t.CreationDate DESC;

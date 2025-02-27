@@ -1,0 +1,51 @@
+
+WITH FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_container, p.p_retailprice, p.p_comment
+),
+AggregatedData AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT p.p_partkey) AS total_parts,
+        SUM(FP.supplier_count) AS total_suppliers,
+        AVG(FP.p_retailprice) AS avg_retail_price
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        FilteredParts FP ON n.n_nationkey IN (SELECT s.s_nationkey FROM supplier s WHERE s.s_name IN (SELECT supplier_names FROM FilteredParts))
+    GROUP BY 
+        r.r_name, n.n_name
+)
+SELECT 
+    region_name, 
+    nation_name, 
+    total_parts, 
+    total_suppliers, 
+    avg_retail_price
+FROM 
+    AggregatedData
+ORDER BY 
+    total_parts DESC, avg_retail_price ASC;

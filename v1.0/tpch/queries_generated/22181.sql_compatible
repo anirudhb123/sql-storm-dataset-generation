@@ -1,0 +1,45 @@
+
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+),
+OrderAnalysis AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(AVG(sp.total_available_qty), 0) AS avg_available_qty,
+    COUNT(DISTINCT h.c_custkey) AS high_value_customer_count,
+    SUM(CASE WHEN ra.total_lineitem_value > 1000 THEN 1 ELSE 0 END) AS high_value_orders,
+    COUNT(DISTINCT ns.s_suppkey) AS national_supplier_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN RecursiveSupplier ns ON n.n_nationkey = ns.s_nationkey AND ns.rn <= 5
+LEFT JOIN HighValueCustomers h ON n.n_nationkey = h.c_nationkey
+LEFT JOIN OrderAnalysis ra ON ra.total_lineitem_value > 2000
+LEFT JOIN SupplierPartInfo sp ON sp.ps_suppkey = ns.s_suppkey
+WHERE r.r_name IS NOT NULL AND (r.r_name LIKE '%East%' OR r.r_name REGEXP '[A-Z]{1,5}')
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT h.c_custkey) > 0 OR SUM(sp.average_supply_cost) IS NULL
+ORDER BY r.r_name DESC;

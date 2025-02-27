@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+HighRatedMovies AS (
+    SELECT 
+        mi.movie_id, 
+        mi.info 
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info = 'rating' AND CAST(mi.info AS FLOAT) > 8.0
+),
+FinalResult AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cd.total_cast,
+        cd.cast_names,
+        COALESCE(hm.info, 'No rating available') AS movie_rating
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastDetails cd ON rm.movie_id = cd.movie_id
+    LEFT JOIN 
+        HighRatedMovies hm ON rm.movie_id = hm.movie_id
+    WHERE
+        rm.title_rank <= 5
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.total_cast,
+    fr.cast_names,
+    fr.movie_rating
+FROM 
+    FinalResult fr
+ORDER BY 
+    fr.production_year DESC, fr.title;

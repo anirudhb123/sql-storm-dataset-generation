@@ -1,0 +1,68 @@
+
+WITH UserStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS Closer,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+PostLinksCount AS (
+    SELECT 
+        PostId,
+        COUNT(RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks
+    GROUP BY 
+        PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.UpVotes,
+    u.DownVotes,
+    u.PostCount,
+    COALESCE(cp.Title, 'No Closed Posts') AS ClosedPostTitle,
+    COALESCE(cp.CloseDate, 'N/A') AS CloseDate,
+    COALESCE(cp.Closer, 'N/A') AS Closer,
+    COALESCE(cp.CloseReason, 'N/A') AS CloseReason,
+    COALESCE(p.LinkCount, 0) AS LinkCount
+FROM 
+    UserStats u
+LEFT JOIN 
+    ClosedPosts cp ON u.UserId = cp.PostId 
+LEFT JOIN 
+    PostLinksCount p ON p.PostId = u.UserId 
+WHERE 
+    (u.PostCount > 0 OR p.LinkCount IS NOT NULL)
+ORDER BY 
+    u.BadgeCount DESC,
+    (u.UpVotes - u.DownVotes) DESC
+LIMIT 100;

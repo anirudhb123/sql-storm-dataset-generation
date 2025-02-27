@@ -1,0 +1,47 @@
+WITH movie_ratings AS (
+    SELECT 
+        mt.title, 
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_info mi ON mt.movie_id = mi.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            rating 
+        FROM 
+            movie_ratings 
+        WHERE 
+            rating IS NOT NULL) r ON mt.movie_id = r.movie_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.title
+),
+filtered_movies AS (
+    SELECT 
+        title, 
+        actor_count, 
+        avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY actor_count ORDER BY avg_rating DESC) AS rank
+    FROM 
+        movie_ratings
+    WHERE 
+        avg_rating IS NOT NULL
+)
+
+SELECT 
+    fm.title, 
+    fm.actor_count, 
+    fm.avg_rating
+FROM 
+    filtered_movies fm
+WHERE 
+    rank <= 10
+ORDER BY 
+    fm.actor_count DESC, 
+    fm.avg_rating DESC;

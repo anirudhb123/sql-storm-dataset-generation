@@ -1,0 +1,104 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.PostLevel + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        t.TagName
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id AND v.PostId = p.Id
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS EditCount,
+        COUNT(DISTINCT ph.PostId) AS EditedPostCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    us.UserId,
+    u.DisplayName,
+    us.Reputation,
+    us.QuestionCount,
+    us.TotalBountyAmount,
+    us.UpVotes,
+    us.DownVotes,
+    phs.EditCount,
+    phs.EditedPostCount,
+    phs.LastEditDate,
+    ts.TagName,
+    ts.PostCount AS TagPostCount,
+    ts.CommentCount AS TagCommentCount,
+    r.PostLevel AS HierarchyLevel
+FROM 
+    UserStats us
+JOIN 
+    PostHistoryStats phs ON us.UserId = phs.UserId
+JOIN 
+    Tags t ON us.QuestionCount > 0 
+JOIN 
+    TagStats ts ON ts.TagName = ANY (STRING_TO_ARRAY((
+        SELECT STRING_AGG(Tags, ', ') FROM Posts WHERE OwnerUserId = us.UserId 
+    ), ', '))
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.PostId IN (SELECT ParentId FROM Posts WHERE OwnerUserId = us.UserId)
+WHERE 
+    ts.PostCount > 0
+ORDER BY 
+    us.Reputation DESC, 
+    ts.PostCount DESC, 
+    ts.CommentCount DESC;

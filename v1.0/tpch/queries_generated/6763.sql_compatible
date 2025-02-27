@@ -1,0 +1,26 @@
+
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_nationkey, o.o_totalprice
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierPart AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+NationSummary AS (
+    SELECT n.n_nationkey, SUM(sp.total_avail_qty) AS total_available, COUNT(DISTINCT sp.ps_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN SupplierPart sp ON sp.ps_suppkey = s.s_suppkey
+    GROUP BY n.n_nationkey
+)
+SELECT r.r_name, n.total_available, n.supplier_count, AVG(ro.o_totalprice) AS average_order_value
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN NationSummary ns ON n.n_nationkey = ns.n_nationkey
+JOIN RecentOrders ro ON n.n_nationkey = ro.c_nationkey
+GROUP BY r.r_name, n.total_available, n.supplier_count
+ORDER BY r.r_name, n.total_available DESC;

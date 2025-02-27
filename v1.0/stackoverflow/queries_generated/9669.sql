@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS AuthorDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(v.Id) AS TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        AuthorDisplayName, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        TotalComments, 
+        TotalVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.AuthorDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.TotalComments,
+    tp.TotalVotes,
+    COALESCE(SUBSTRING(p.Body FROM 1 FOR 200), 'No content available') AS PostExcerpt,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    UNNEST(NULLIF(SUBSTRING(tp.Tags, 2, LENGTH(tp.Tags) - 2), ''))::text[]) AS t(TagName)
+GROUP BY 
+    tp.PostId
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

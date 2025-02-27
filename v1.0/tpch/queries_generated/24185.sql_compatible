@@ -1,0 +1,83 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        orders o
+), CustomerTotal AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_mktsegment = 'BUILDING')
+    GROUP BY 
+        c.c_custkey
+), PartSupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 2
+), LineItemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        SUM(l.l_tax) AS total_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    COALESCE(r.r_name, 'Unknown Region') AS region_name,
+    p.p_name AS part_name,
+    ps.supplier_count,
+    ROUND(la.net_revenue, 2) AS total_revenue,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    AVG(ct.total_spent) AS avg_spent_per_customer,
+    SUM(NULLIF(la.total_tax, 0)) AS total_nonzero_tax 
+FROM
+    RankedOrders ro
+LEFT JOIN 
+    CustomerTotal ct ON ro.o_custkey = ct.c_custkey
+LEFT JOIN 
+    customer c ON c.c_custkey = ro.o_custkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+JOIN 
+    LineItemAggregates la ON la.l_orderkey = ro.o_orderkey
+JOIN 
+    PartSupplierSummary ps ON ps.ps_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_orderkey = ro.o_orderkey
+    )
+WHERE 
+    ro.rn = 1
+    AND (ro.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-12-31' OR 
+        (ro.o_totalprice IS NULL OR ro.o_status IS NULL)) 
+GROUP BY 
+    c.c_name, r.r_name, p.p_name, ps.supplier_count, la.net_revenue
+ORDER BY 
+    total_orders DESC, total_revenue DESC
+LIMIT 50;

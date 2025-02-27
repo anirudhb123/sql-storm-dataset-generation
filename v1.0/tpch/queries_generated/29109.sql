@@ -1,0 +1,48 @@
+WITH ProcessedStrings AS (
+    SELECT 
+        p.p_partkey,
+        UPPER(p.p_name) AS upper_case_name,
+        LOWER(p.p_comment) AS lower_case_comment,
+        CONCAT('Part: ', p.p_name, ' - Comment: ', p.p_comment) AS combined_string,
+        LENGTH(p.p_name) AS length_name,
+        LENGTH(p.p_comment) AS length_comment
+    FROM 
+        part p
+),
+CalculatedValues AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(CAST(SUBSTR(p.lower_case_comment, INSTR(p.lower_case_comment, ' ') + 1) AS CHAR)) AS avg_substring_length
+    FROM 
+        partsupp ps
+    JOIN 
+        ProcessedStrings p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(cv.total_cost) AS max_total_cost,
+    AVG(cv.avg_substring_length) AS average_substring_length
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    CalculatedValues cv ON l.l_partkey = cv.ps_partkey
+GROUP BY 
+    r.r_name, n.n_name, c.c_name
+ORDER BY 
+    total_revenue DESC;

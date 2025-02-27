@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        1 AS level 
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year < 2000
+
+    UNION ALL
+
+    SELECT 
+        cm.linked_movie_id AS movie_id, 
+        lm.title AS movie_title, 
+        mh.level + 1 
+    FROM 
+        movie_link cm
+    JOIN 
+        aka_title lm ON cm.linked_movie_id = lm.movie_id 
+    JOIN 
+        MovieHierarchy mh ON cm.movie_id = mh.movie_id
+)
+SELECT 
+    a.id AS aka_id,
+    a.name AS actor_name,
+    mt.movie_title,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    SUM(CASE WHEN mt.production_year >= 2000 THEN 1 ELSE 0 END) AS post_2000_movies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS ranking,
+    CASE 
+        WHEN COUNT(DISTINCT c.movie_id) > 5 THEN 'Frequent Actor'
+        ELSE 'Occasional Actor' 
+    END AS actor_type
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN 
+    aka_title mt ON c.movie_id = mt.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND a.id IS NOT NULL
+    AND (mt.production_year < 2020 OR mt.production_year IS NULL)
+GROUP BY 
+    a.id, a.name, mt.movie_title
+HAVING 
+    COUNT(DISTINCT c.movie_id) IS NOT NULL
+ORDER BY 
+    total_movies DESC, actor_type, ranking;
+

@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.AcceptedAnswerId,
+        P.ViewCount,
+        P.Score,
+        P.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS TotalDownVotes
+    FROM
+        Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE
+        P.CreationDate >= DATEADD(year, -2, GETDATE())
+),
+
+UserPostStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN RP.PostRank = 1 THEN 1 ELSE 0 END) AS TotalLatestPosts,
+        SUM(RP.ViewCount) AS TotalViews,
+        SUM(RP.Score) AS TotalScore,
+        SUM(RP.TotalUpVotes) AS TotalUpVotes,
+        SUM(RP.TotalDownVotes) AS TotalDownVotes
+    FROM
+        Users U
+    LEFT JOIN RankedPosts RP ON U.Id = RP.OwnerUserId
+    WHERE
+        U.Reputation > 100
+    GROUP BY
+        U.Id, U.DisplayName
+),
+
+CloseReasonStats AS (
+    SELECT
+        PH.UserId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(CASE WHEN CRT.Name IS NOT NULL THEN CRT.Name ELSE 'Unknown' END, ', ') AS CloseReasons
+    FROM
+        PostHistory PH
+    LEFT JOIN CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY
+        PH.UserId
+)
+
+SELECT
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.TotalLatestPosts,
+    UPS.TotalViews,
+    UPS.TotalScore,
+    UPS.TotalUpVotes,
+    UPS.TotalDownVotes,
+    COALESCE(CRS.CloseReasonCount, 0) AS CloseReasonCount,
+    COALESCE(CRS.CloseReasons, 'None') AS CloseReasons
+FROM
+    UserPostStats UPS
+LEFT JOIN CloseReasonStats CRS ON UPS.UserId = CRS.UserId
+WHERE
+    UPS.TotalLatestPosts > 0
+ORDER BY
+    UPS.TotalScore DESC, UPS.TotalViews DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,4 @@
+SELECT min(mc.note) AS production_note, min(t.title) AS movie_title, min(t.production_year) AS movie_year
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t
+WHERE ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id
+AND mc.note < '(in association with) (as Studio A Entertainment, Inc.)' AND t.series_years IN ('1957-1980', '1973-1994', '1978-2008', '1979-1993', '1980-2007', '1983-1993', '1991-2002', '1992-1996', '2000-2001', '2003-2008') AND mc.id < 1972191;

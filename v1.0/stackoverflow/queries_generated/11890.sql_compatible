@@ -1,0 +1,77 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.AnswerCount, P.CommentCount, P.FavoriteCount
+),
+
+CommentStats AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COALESCE(SUM(B.Reputation), 0) AS TotalReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.PostCreationDate,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.FavoriteCount,
+    PS.TotalBountyAmount,
+    PS.UpVotes,
+    PS.DownVotes,
+    COALESCE(CS.TotalComments, 0) AS TotalPostComments,
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments AS UserTotalComments,
+    UA.TotalReputation
+FROM 
+    PostStats PS
+LEFT JOIN 
+    CommentStats CS ON PS.PostId = CS.PostId
+LEFT JOIN 
+    UserActivity UA ON PS.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId IS NOT NULL
+    )
+ORDER BY 
+    PS.ViewCount DESC;

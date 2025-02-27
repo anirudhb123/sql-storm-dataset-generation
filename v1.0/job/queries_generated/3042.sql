@@ -1,0 +1,61 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+),
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        a.title AS movie_title,
+        a.production_year
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title a ON ci.movie_id = a.id
+    WHERE 
+        ak.name IS NOT NULL
+    AND 
+        ci.role_id IN (SELECT id FROM role_type WHERE role LIKE '%actor%')
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.cast_count,
+    ak.actor_name,
+    mk.keywords
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorInfo ak ON rt.title = ak.movie_title AND rt.production_year = ak.production_year
+LEFT JOIN 
+    MovieKeywords mk ON rt.title = mk.movie_title
+WHERE 
+    rt.year_rank <= 3
+ORDER BY 
+    rt.production_year DESC, rt.cast_count DESC, ak.actor_name;

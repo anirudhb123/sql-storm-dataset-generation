@@ -1,0 +1,84 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(CASE 
+            WHEN p.CreationDate IS NOT NULL THEN 
+                EXTRACT(EPOCH FROM NOW() - p.CreationDate) / 60
+            ELSE NULL 
+        END) AS AvgPostAgeInMinutes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(ARRAY_AGG(DISTINCT t.TagName) FILTER (WHERE t.TagName IS NOT NULL), '{}') AS Tags,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rnk
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '>')) AS tagName(tag) ON tagName.tag IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tagName.tag
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.AcceptedAnswerId
+),
+VoteSummary AS (
+    SELECT 
+        p.Id AS PostId, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    us.DisplayName, 
+    us.TotalBountyAmount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.AvgPostAgeInMinutes,
+    pi.Title,
+    pi.Score,
+    pi.ViewCount,
+    pi.Tags,
+    COALESCE(vs.UpVotes, 0) AS PostUpVotes,
+    COALESCE(vs.DownVotes, 0) AS PostDownVotes
+FROM 
+    UserStats us
+JOIN 
+    PostInfo pi ON us.UserId = pi.AcceptedAnswerId
+LEFT JOIN 
+    VoteSummary vs ON pi.PostId = vs.PostId
+WHERE 
+    us.TotalBountyAmount > 0
+    OR (us.TotalUpVotes - us.TotalDownVotes) > 10 
+    AND pi.Rnk = 1 
+ORDER BY 
+    us.TotalBountyAmount DESC, 
+    pi.Score DESC
+LIMIT 50;

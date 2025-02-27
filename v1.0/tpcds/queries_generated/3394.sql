@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 15000 AND 15050
+), CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        AVG(wr.wr_return_amt_inc_tax) AS avg_return_amt
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_returned_date_sk BETWEEN 15001 AND 15011
+    GROUP BY 
+        wr.refunded_customer_sk
+    HAVING 
+        SUM(wr.wr_return_quantity) > 0
+), StoreSalesSummary AS (
+    SELECT 
+        ss.ss_store_sk,
+        COUNT(ss.ss_ticket_number) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 15000 AND 15050
+    GROUP BY 
+        ss.ss_store_sk
+), FinalSummary AS (
+    SELECT 
+        cca.c_customer_id,
+        SUM(sss.total_sales) AS total_store_sales,
+        COALESCE(CR.total_returns, 0) AS total_returns,
+        COALESCE(CR.avg_return_amt, 0) AS avg_return_amount,
+        AVG(RS.ws_sales_price) AS avg_web_sales_price
+    FROM 
+        customer cc
+    LEFT JOIN 
+        CustomerReturns CR ON cc.c_customer_sk = CR.refunded_customer_sk
+    LEFT JOIN 
+        StoreSalesSummary SSS ON cc.c_customer_sk = SSS.ss_store_sk
+    LEFT JOIN 
+        RankedSales RS ON cc.c_customer_sk = RS.ws_order_number
+    GROUP BY 
+        cc.c_customer_id
+)
+SELECT 
+    f.c_customer_id,
+    f.total_store_sales,
+    f.total_returns,
+    f.avg_return_amount,
+    f.avg_web_sales_price
+FROM 
+    FinalSummary f
+WHERE 
+    f.total_store_sales > 100
+ORDER BY 
+    f.total_store_sales DESC;

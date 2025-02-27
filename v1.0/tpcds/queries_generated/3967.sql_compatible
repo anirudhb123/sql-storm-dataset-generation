@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        SUM(wr_return_amt_inc_tax) AS total_returned
+    FROM web_returns wr
+    GROUP BY wr.refunded_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ca.city,
+        COUNT(DISTINCT cs_bill_customer_sk) AS total_customers,
+        SUM(cs_net_paid_inc_tax) AS total_sales,
+        SUM(cs_ext_discount_amt) AS total_discount
+    FROM catalog_sales cs
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cs_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                               AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ca.city
+)
+SELECT 
+    ss.city,
+    ss.total_customers,
+    ss.total_sales,
+    ss.total_discount,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    AVG(rws.ws_sales_price) AS avg_sales_price,
+    CASE 
+        WHEN ss.total_sales > 0 THEN ROUND((COALESCE(cr.total_returned, 0) / ss.total_sales) * 100, 2)
+        ELSE 0
+    END AS return_rate
+FROM SalesSummary ss
+LEFT JOIN CustomerReturns cr ON ss.total_customers = cr.refunded_customer_sk
+JOIN RankedSales rws ON rws.ws_item_sk = ss.total_customers
+GROUP BY ss.city, ss.total_customers, ss.total_sales, ss.total_discount, cr.total_returned
+HAVING COUNT(rws.ws_item_sk) > 5
+ORDER BY ss.total_sales DESC
+LIMIT 10;

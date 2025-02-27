@@ -1,0 +1,66 @@
+
+WITH movie_summary AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword kw ON kw.id = mk.keyword_id
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+),
+
+movie_details AS (
+    SELECT 
+        ms.movie_title,
+        ms.production_year,
+        k.kind AS movie_kind,
+        ms.cast_count,
+        ms.actors,
+        mi.info AS storyline,
+        COALESCE(mc.company_count, 0) AS company_count
+    FROM 
+        movie_summary ms
+    LEFT JOIN 
+        kind_type k ON k.id = ms.kind_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(company_id) AS company_count
+        FROM 
+            movie_companies
+        GROUP BY 
+            movie_id
+    ) mc ON mc.movie_id = ms.movie_title
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = ms.movie_title AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'story')
+    ORDER BY 
+        ms.production_year DESC, ms.cast_count DESC
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.movie_kind,
+    md.cast_count,
+    md.actors,
+    md.storyline,
+    md.company_count
+FROM 
+    movie_details md
+WHERE 
+    md.cast_count > 5
+    AND md.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    md.production_year DESC, md.company_count DESC;

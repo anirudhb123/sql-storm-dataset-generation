@@ -1,0 +1,55 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        CONCAT('
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ClosedDate,
+        MAX(ph.CreationDate) AS LastModifiedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id, p.Title, p.ClosedDate
+),
+
+AggregatedComments AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount,
+        STRING_AGG(Text, ';

@@ -1,0 +1,59 @@
+
+WITH ActorTitles AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT CAST(c.kind_id AS text), ', ') AS actor_roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL 
+    GROUP BY 
+        a.id, a.name, t.id, t.title, t.production_year
+),
+TitleKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title
+),
+ActorDetailedInfo AS (
+    SELECT 
+        at.actor_id,
+        at.actor_name,
+        at.movie_title,
+        at.production_year,
+        at.actor_roles,
+        tk.keywords
+    FROM 
+        ActorTitles at
+    LEFT JOIN 
+        TitleKeywords tk ON at.title_id = tk.title_id
+)
+SELECT 
+    adi.actor_name,
+    adi.movie_title,
+    adi.production_year,
+    adi.actor_roles,
+    adi.keywords
+FROM 
+    ActorDetailedInfo adi
+WHERE 
+    adi.production_year >= 2000
+ORDER BY 
+    adi.production_year DESC, adi.actor_name;

@@ -1,0 +1,47 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        AVG(NULLIF(rol.type_length, 0)) OVER (PARTITION BY at.id) AS avg_role_length,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN (
+        SELECT 
+            id,
+            LENGTH(role) AS type_length
+        FROM role_type
+    ) rol ON ci.role_id = rol.id
+    WHERE at.production_year IS NOT NULL
+    GROUP BY at.id, at.title, at.production_year
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM RankedMovies rm
+    LEFT JOIN movie_keyword mk ON rm.production_year = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY rm.movie_title, rm.production_year
+)
+
+SELECT 
+    mwk.movie_title,
+    mwk.production_year,
+    mwk.keywords,
+    CASE 
+        WHEN mwk.production_year IS NULL THEN 'Unknown Year'
+        WHEN mwk.production_year > 2000 THEN '21st Century'
+        WHEN mwk.production_year BETWEEN 1980 AND 2000 THEN 'Late 20th Century'
+        ELSE 'Early 20th Century'
+    END AS era,
+    COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note IS NOT NULL) AS cast_with_notes
+FROM MoviesWithKeywords mwk
+FULL OUTER JOIN cast_info ci ON mwk.movie_title = (SELECT title FROM aka_title WHERE movie_id = ci.movie_id)
+GROUP BY mwk.movie_title, mwk.production_year, mwk.keywords
+HAVING COUNT(DISTINCT ci.person_id) > 1
+ORDER BY mwk.production_year DESC, COUNT(DISTINCT ci.person_id) DESC;

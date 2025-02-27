@@ -1,0 +1,46 @@
+WITH RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.Reputation AS OwnerReputation
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+),
+PostWithTagCounts AS (
+    SELECT p.Id, p.Title, COUNT(t.Id) AS TagCount
+    FROM Posts p
+    LEFT JOIN LATERAL STRING_SPLIT(p.Tags, ',') AS t ON t.value IS NOT NULL
+    WHERE p.PostTypeId = 1 -- Only 'Questions'
+    GROUP BY p.Id, p.Title
+),
+UserBadges AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount,
+           MAX(b.Class) AS HighestBadgeClass,
+           STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+),
+RecentPostsWithBadges AS (
+    SELECT rp.Id, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.OwnerReputation,
+           ub.BadgeCount, ub.HighestBadgeClass, ub.BadgeNames
+    FROM RecentPosts rp
+    LEFT JOIN UserBadges ub ON rp.OwnerReputation IS NOT NULL AND ub.UserId = (SELECT u.Id FROM Users u WHERE u.Reputation = rp.OwnerReputation)
+)
+SELECT r.Id, r.Title, r.CreationDate, r.ViewCount, r.Score, r.OwnerReputation,
+       COALESCE(t.TagCount, 0) AS TagCount,
+       CASE 
+           WHEN r.HighestBadgeClass IS NOT NULL THEN CASE r.HighestBadgeClass
+               WHEN 1 THEN 'Gold'
+               WHEN 2 THEN 'Silver'
+               WHEN 3 THEN 'Bronze'
+               ELSE 'None'
+           END
+           ELSE 'None'
+       END AS HighestBadge,
+       r.BadgeNames
+FROM RecentPostsWithBadges r
+LEFT JOIN PostWithTagCounts t ON r.Id = t.Id
+ORDER BY r.Score DESC, r.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+
+-- Additional performance benchmarks could involve aggregate statistics
+-- on retrieval times, or examining execution plans to compare effectiveness
+-- of various JOIN strategies, indexing, and other query optimizations.

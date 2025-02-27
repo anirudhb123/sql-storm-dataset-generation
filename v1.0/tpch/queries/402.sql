@@ -1,0 +1,57 @@
+
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY ss.total_sales DESC) AS rnk
+    FROM 
+        SupplierSales ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_sales > (SELECT AVG(total_sales) FROM SupplierSales)
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    COALESCE(CONCAT(s.s_name, ' (', s.s_acctbal::text, ')'), 'No Supplier') AS supplier_info,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+LEFT JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+WHERE 
+    o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    p.p_name, p.p_brand, s.s_name, s.s_acctbal, ts.rnk
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS movie_rank,
+        COALESCE(STRING_AGG(DISTINCT na.name, ', '), 'No Cast') AS cast_names
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN
+        aka_name na ON c.person_id = na.person_id
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+HighRatedMovies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.cast_names,
+        COALESCE((
+            SELECT
+                COUNT(DISTINCT mk.keyword)
+            FROM
+                movie_keyword mk
+            WHERE
+                mk.movie_id = m.movie_id
+        ), 0) AS keyword_count
+    FROM
+        RankedMovies m
+    WHERE
+        m.movie_rank <= 5  -- Top 5 movies per production year
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT c.name || ' (' || ct.kind || ')') AS companies
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    hm.title,
+    hm.production_year,
+    COALESCE(hm.cast_names, 'No Cast') AS cast_names,
+    hm.keyword_count,
+    COALESCE(ci.companies, 'No Companies') AS companies
+FROM
+    HighRatedMovies hm
+LEFT JOIN
+    CompanyInfo ci ON hm.movie_id = ci.movie_id
+WHERE
+    hm.production_year = 2023
+ORDER BY
+    hm.keyword_count DESC NULLS LAST;
+
+This SQL query provides a comprehensive view of movies from the `aka_title` table, incorporating complex constructs including CTEs, string aggregation, SQL window functions, outer joins, and NULL handling. It highlights the top-ranked movies per year based on the number of cast members, counts the unique keywords associated with these movies, and lists the companies associated with them, all while handling possible null values in a coherent way.

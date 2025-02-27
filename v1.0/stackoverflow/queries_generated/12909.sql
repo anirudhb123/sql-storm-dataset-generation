@@ -1,0 +1,49 @@
+-- Performance Benchmarking SQL Query
+
+-- This query retrieves a summary of posts along with user information and their associated votes, 
+-- which can be useful for benchmarking performance across multiple tables.
+
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '><')) AS t(TagName) ON true
+    WHERE 
+        p.PostTypeId = 1 -- Focus on questions
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerDisplayName,
+    ps.OwnerReputation,
+    ps.VoteCount,
+    ps.Tags
+FROM 
+    PostSummary ps
+ORDER BY 
+    ps.ViewCount DESC
+LIMIT 100; -- Limit to the top 100 posts for performance benchmarking

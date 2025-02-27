@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2) 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(ph.Id) AS TotalHistory
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '2 year'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.TotalScore,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    COUNT(DISTINCT rp.PostId) AS RecentPosts,
+    SUM(COALESCE(phs.CloseCount, 0)) AS TotalCloseCount,
+    SUM(COALESCE(phs.ReopenCount, 0)) AS TotalReopenCount,
+    AVG(COALESCE(rp.ViewCount, 0)) AS AvgViewCount
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    us.PostCount > 10
+GROUP BY 
+    us.UserId, us.DisplayName, us.PostCount, us.TotalScore, us.GoldBadges, us.SilverBadges, us.BronzeBadges
+HAVING 
+    SUM(COALESCE(phs.TotalHistory, 0)) >= 5
+ORDER BY 
+    AvgViewCount DESC
+LIMIT 25;

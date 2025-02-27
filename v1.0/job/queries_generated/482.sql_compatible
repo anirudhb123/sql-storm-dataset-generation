@@ -1,0 +1,42 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM
+        aka_title at
+    JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY
+        at.title, at.production_year
+),
+MovieDetails AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        (SELECT STRING_AGG(DISTINCT ak.name, ', ') 
+         FROM aka_name ak 
+         JOIN cast_info ci ON ak.person_id = ci.person_id 
+         WHERE ci.movie_id = (SELECT movie_id FROM aka_title a WHERE a.title = rm.title AND a.production_year = rm.production_year)) AS cast_names
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.rank <= 10
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_names,
+    COALESCE((SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = (SELECT id FROM aka_title at WHERE at.title = md.title AND at.production_year = md.production_year) AND mi.info LIKE '%box office%'), 0) AS box_office_info_count,
+    CASE
+        WHEN EXISTS (SELECT 1 FROM movie_company mc WHERE mc.movie_id = (SELECT id FROM aka_title at WHERE at.title = md.title AND at.production_year = md.production_year) AND mc.note IS NOT NULL) 
+             THEN 'Has company info' 
+        ELSE 'No company info' 
+    END AS company_info_status
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

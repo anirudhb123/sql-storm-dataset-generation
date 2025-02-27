@@ -1,0 +1,122 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        1 AS Level
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.ExcerptPostId = P.Id
+    WHERE 
+        T.Count > 10
+    
+    UNION ALL
+    
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        Level + 1
+    FROM 
+        Tags T
+    JOIN 
+        PostLinks PL ON T.Id = PL.LinkTypeId
+    JOIN 
+        Posts P ON PL.RelatedPostId = P.Id
+    JOIN 
+        RecursiveTagHierarchy RTH ON T.Id = RTH.TagId
+    WHERE
+        Level < 3
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(B.Id) AS BadgeCount,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        AVG(P.Score) AS AverageScore,
+        SUM(P.ViewCount) AS TotalViews,
+        MAX(P.CreationDate) AS LastActivityDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title
+),
+PostHistoryAndVotes AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT V.UserId) AS VoteCount
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        Votes V ON PH.PostId = V.PostId
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    T.TagName,
+    T.Count AS TagUsage,
+    U.DisplayName AS UserName,
+    U.Reputation,
+    P.Title,
+    PA.CommentCount,
+    PA.AverageScore,
+    PHV.VoteCount,
+    CASE 
+        WHEN PA.TotalViews > 1000 THEN 'High' 
+        WHEN PA.TotalViews > 100 THEN 'Medium' 
+        ELSE 'Low' 
+    END AS Popularity,
+    RTH.Level
+FROM 
+    RecursiveTagHierarchy RTH
+JOIN 
+    UserStats U ON RTH.PostId IN (
+        SELECT PostId 
+        FROM Posts 
+        WHERE OwnerUserId = U.UserId
+    )
+JOIN 
+    PostActivity PA ON RTH.PostId = PA.PostId
+LEFT JOIN 
+    PostHistoryAndVotes PHV ON RTH.PostId = PHV.PostId
+WHERE 
+    U.Reputation > 1000 
+ORDER BY 
+    RTH.Level, U.Reputation DESC, T.TagUsage DESC
+LIMIT 
+    50;

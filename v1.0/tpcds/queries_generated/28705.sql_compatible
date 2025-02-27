@@ -1,0 +1,48 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_income_band_sk ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SelectedTopCustomers AS (
+    SELECT 
+        rc.full_name,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        rc.cd_purchase_estimate
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        income_band ib ON rc.cd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        rc.rank <= 5
+)
+SELECT 
+    st.c_city,
+    st.c_state,
+    COUNT(DISTINCT st.c_customer_sk) AS total_customers,
+    AVG(sc.cd_purchase_estimate) AS avg_purchase_estimate
+FROM 
+    customer_address ca
+JOIN 
+    customer st ON ca.ca_address_sk = st.c_current_addr_sk
+JOIN 
+    SelectedTopCustomers sc ON sc.full_name = st.full_name
+GROUP BY 
+    st.c_city,
+    st.c_state
+HAVING 
+    COUNT(DISTINCT st.c_customer_sk) > 5
+ORDER BY 
+    total_customers DESC;

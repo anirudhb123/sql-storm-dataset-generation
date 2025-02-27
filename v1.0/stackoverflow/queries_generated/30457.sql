@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed and reopened posts
+    GROUP BY 
+        ph.PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(cp.CloseCount, 0) AS CloseCount,
+        COALESCE(cp.FirstCloseDate, '9999-12-31') AS FirstCloseDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COALESCE(cp.CloseCount, 0) DESC, TotalReputation DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+    LEFT JOIN 
+        UserReputation ur ON p.OwnerUserId = ur.UserId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' -- Only consider recent posts
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CloseCount,
+    ur.TotalReputation,
+    p.Rank,
+    rh.Level AS CommentLevel,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    RecursivePostHierarchy rh ON p.Id = rh.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.Rank <= 10 -- Limiting the output to top 10 posts in each type
+GROUP BY 
+    p.PostId, p.Title, p.CloseCount, ur.TotalReputation, p.Rank, rh.Level
+ORDER BY 
+    p.Rank, p.CloseCount DESC;

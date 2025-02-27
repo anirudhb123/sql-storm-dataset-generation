@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserID,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.PostID,
+        p.Title,
+        u.DisplayName,
+        r.Reputation,
+        r.GoldBadges,
+        r.SilverBadges,
+        r.BronzeBadges
+    FROM 
+        RankedPosts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        UserReputation r ON u.Id = r.UserID
+    WHERE 
+        p.RN = 1
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalReport AS (
+    SELECT 
+        pp.PostID,
+        pp.Title,
+        pp.DisplayName,
+        pp.Reputation,
+        pp.GoldBadges,
+        pp.SilverBadges,
+        pp.BronzeBadges,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        pc.LastCommentDate,
+        CASE 
+            WHEN pp.Reputation IS NULL THEN 'Unknown User'
+            WHEN pp.Reputation < 100 THEN 'Novice'
+            WHEN pp.Reputation BETWEEN 100 AND 499 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserCategory
+    FROM 
+        PopularPosts pp
+    LEFT JOIN 
+        PostComments pc ON pp.PostID = pc.PostId
+)
+SELECT 
+    f.PostID,
+    f.Title,
+    f.DisplayName,
+    f.Reputation,
+    f.GoldBadges,
+    f.SilverBadges,
+    f.BronzeBadges,
+    f.CommentCount,
+    f.LastCommentDate,
+    f.UserCategory
+FROM 
+    FinalReport f
+WHERE 
+    (f.CommentCount > 5 OR f.Reputation > 200)
+    AND (f.LastCommentDate IS NULL OR f.LastCommentDate > cast('2024-10-01' as date) - INTERVAL '30 days')
+ORDER BY 
+    f.Reputation DESC, f.CommentCount DESC;

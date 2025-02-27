@@ -1,0 +1,72 @@
+WITH UserVotingStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(p.Score) AS AvgPostScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    WHERE u.Reputation > 100
+    GROUP BY u.Id, u.DisplayName
+), PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(pc.TotalComments, 0) AS CommentCount,
+        COALESCE(pl.LinkCount, 0) AS LinkCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalComments
+        FROM Comments
+        GROUP BY PostId
+    ) pc ON pc.PostId = p.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS LinkCount
+        FROM PostLinks
+        GROUP BY PostId
+    ) pl ON pl.PostId = p.Id
+    WHERE p.PostTypeId = 1 AND p.Score > 10
+), UserPostDetails AS (
+    SELECT 
+        u.UserId,
+        ups.PostId,
+        p.Title,
+        ups.UpVotes,
+        ups.DownVotes,
+        ups.TotalPosts,
+        ups.AvgPostScore,
+        ups.BadgeCount,
+        ps.Score AS PostScore,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.LinkCount,
+        ps.CreationDate
+    FROM UserVotingStats ups
+    JOIN (
+        SELECT DISTINCT OwnerUserId AS UserId, Id AS PostId
+        FROM Posts
+    ) u ON ups.UserId = u.UserId
+    JOIN PostStats ps ON ps.PostId = u.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    COUNT(PostId) AS PostsReviewed,
+    SUM(PostScore) AS TotalScore,
+    AVG(PostScore) AS AveragePostScore,
+    SUM(ViewCount) AS TotalViews,
+    SUM(CommentCount) AS TotalComments,
+    SUM(LinkCount) AS TotalLinks,
+    MAX(CreationDate) AS MostRecentPost
+FROM UserPostDetails
+GROUP BY UserId, DisplayName
+ORDER BY TotalScore DESC
+LIMIT 10;

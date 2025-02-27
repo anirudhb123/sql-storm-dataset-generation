@@ -1,0 +1,83 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal > 0)
+), SupplierParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_name
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+), OrderLineDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_lineitem) AS total_lineitems,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), FilteredOrders AS (
+    SELECT
+        ood.*,
+        CASE 
+            WHEN ood.total_sales > 50000 THEN 'High Value'
+            WHEN ood.total_sales BETWEEN 20000 AND 50000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM
+        OrderLineDetails ood
+    WHERE
+        ood.total_sales > 10000
+)
+SELECT
+    rp.p_partkey,
+    rp.p_name,
+    rp.ps_availqty,
+    rp.ps_supplycost,
+    fo.o_orderkey,
+    fo.total_sales,
+    fo.order_value_category,
+    r.r_name
+FROM
+    SupplierParts rp
+LEFT JOIN
+    FilteredOrders fo ON rp.p_partkey IN (
+        SELECT 
+            l.l_partkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_orderkey = fo.o_orderkey
+    )
+JOIN
+    nation n ON rp.s_name IN (
+        SELECT s.s_name FROM supplier s WHERE s.s_nationkey = n.n_nationkey
+    )
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    fo.order_rank <= 10
+    AND rp.ps_supplycost > (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2)
+ORDER BY
+    rp.p_partkey, fo.total_sales DESC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+),
+frequent_suppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        COUNT(*) AS total_parts
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        COUNT(*) > 5
+),
+order_stats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(l.l_linenumber) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    coalesce(o.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN coalesce(o.line_item_count, 0) > 5 THEN 'High Volume'
+        WHEN coalesce(o.line_item_count, 0) = 0 THEN 'No Orders'
+        ELSE 'Low Volume'
+    END AS order_volume_category,
+    ps.ps_partkey,
+    CASE 
+        WHEN ps.ps_suppkey IN (SELECT fs.ps_suppkey FROM frequent_suppliers fs) THEN 'Frequent Supplier'
+        ELSE 'Occasional Supplier'
+    END AS supplier_type,
+    RANK() OVER (PARTITION BY c.c_custkey ORDER BY coalesce(o.total_revenue, 0) DESC) AS revenue_rank
+FROM 
+    customer_orders co
+LEFT JOIN 
+    order_stats o ON co.o_orderkey = o.o_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_retailprice > 20)
+WHERE 
+    co.rn = 1
+ORDER BY 
+    revenue_rank, c.c_name DESC
+FETCH FIRST 10 ROWS ONLY;

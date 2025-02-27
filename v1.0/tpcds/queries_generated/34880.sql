@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY c_customer_sk ORDER BY cd_purchase_estimate DESC) as rn
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate
+    FROM
+        CustomerData 
+    WHERE 
+        rn <= 10
+),
+PromotionStats AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_name
+)
+SELECT 
+    COALESCE(cust.c_first_name, 'Unknown') AS Customer_First_Name,
+    COALESCE(cust.c_last_name, 'Unknown') AS Customer_Last_Name,
+    SUM(sales.total_quantity) AS Total_Quantity_Sold,
+    SUM(sales.total_net_paid) AS Total_Net_Paid,
+    promo.p_promo_name AS Promo_Name,
+    promo.total_sales AS Promo_Total_Sales,
+    promo.total_orders AS Promo_Total_Orders
+FROM 
+    SalesData sales
+FULL OUTER JOIN 
+    TopCustomers cust ON sales.ws_item_sk IN (SELECT DISTINCT i_item_sk FROM item) 
+LEFT JOIN 
+    PromotionStats promo ON promo.total_sales > 5000
+WHERE 
+    sales.total_quantity IS NOT NULL
+GROUP BY 
+    cust.c_first_name, cust.c_last_name, promo.p_promo_name, promo.total_sales, promo.total_orders
+ORDER BY 
+    Total_Net_Paid DESC
+LIMIT 50;

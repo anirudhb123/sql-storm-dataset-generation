@@ -1,0 +1,68 @@
+
+WITH RECURSIVE address_with_counts AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        COUNT(c_customer_sk) AS customer_count
+    FROM 
+        customer_address
+    LEFT JOIN 
+        customer ON ca_address_sk = c_current_addr_sk
+    GROUP BY 
+        ca_address_sk, ca_city
+),
+sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+highlighted_sales AS (
+    SELECT 
+        ws_item_sk, 
+        total_profit,
+        order_count,
+        CASE 
+            WHEN total_profit IS NULL THEN 'No Profit'
+            WHEN total_profit < 0 THEN 'Loss'
+            ELSE 'Profit'
+        END AS profit_status
+    FROM 
+        sales_data
+    WHERE 
+        order_count > 0
+)
+SELECT 
+    a.ca_city,
+    COALESCE(s.total_profit, 0) AS total_profit,
+    s.order_count,
+    a.customer_count,
+    s.profit_status
+FROM 
+    address_with_counts a
+LEFT JOIN 
+    highlighted_sales s ON a.ca_address_sk = (
+        SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = (
+            SELECT MIN(c_customer_sk) 
+            FROM customer 
+            WHERE c_current_addr_sk IS NOT NULL AND c_current_addr_sk = a.ca_address_sk
+        )
+    )
+WHERE 
+    a.customer_count > 5
+OR 
+    EXISTS (
+        SELECT 1 
+        FROM highlighted_sales h 
+        WHERE h.ws_item_sk = (
+            SELECT MIN(ws_item_sk) FROM web_sales WHERE ws_net_profit < 0
+        )
+    )
+ORDER BY 
+    a.ca_city, s.total_profit DESC
+LIMIT 100 OFFSET 0;

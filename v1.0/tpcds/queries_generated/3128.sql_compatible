@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2451545 AND 2451549 
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returned,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.wr_reason_sk IS NOT NULL
+    GROUP BY 
+        wr.wr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        rs.ws_net_paid,
+        (rs.ws_net_paid - COALESCE(cr.total_return_amt, 0)) AS net_after_returns
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.ws_item_sk = cr.wr_item_sk
+)
+SELECT 
+    s.ws_order_number,
+    s.ws_item_sk,
+    s.ws_sales_price,
+    s.total_returned,
+    s.total_return_amt,
+    s.net_after_returns,
+    CASE 
+        WHEN s.total_returned > 0 THEN 'Return'
+        ELSE 'No Return'
+    END AS return_status
+FROM 
+    SalesAndReturns s
+WHERE 
+    s.rn = 1
+ORDER BY 
+    s.net_after_returns DESC
+FETCH FIRST 10 ROWS ONLY;

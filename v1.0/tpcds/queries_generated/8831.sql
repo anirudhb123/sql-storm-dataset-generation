@@ -1,0 +1,64 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        s.s_store_id,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        AVG(ss.ss_quantity) AS average_quantity_sold,
+        SUM(ss.ss_ext_discount_amt) AS total_discount,
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM 
+        store s
+        JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        s.s_store_id
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesWithCustomer AS (
+    SELECT 
+        ss.ss_store_sk,
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        ss.ss_sales_price,
+        ss.ss_net_profit,
+        ss.ss_sold_date_sk
+    FROM 
+        store_sales ss
+        JOIN CustomerDetails cs ON ss.ss_customer_sk = cs.c_customer_sk
+)
+SELECT 
+    ss.s_store_id,
+    ss.total_sales,
+    ss.total_transactions,
+    ss.average_quantity_sold,
+    ss.total_discount,
+    ss.total_net_profit,
+    COUNT(DISTINCT sc.c_customer_id) AS unique_customers
+FROM 
+    SalesSummary ss
+    LEFT JOIN SalesWithCustomer sc ON ss.s_store_id = sc.ss_store_sk
+GROUP BY 
+    ss.s_store_id, 
+    ss.total_sales,
+    ss.total_transactions,
+    ss.average_quantity_sold,
+    ss.total_discount,
+    ss.total_net_profit
+ORDER BY 
+    unique_customers DESC, total_sales DESC;

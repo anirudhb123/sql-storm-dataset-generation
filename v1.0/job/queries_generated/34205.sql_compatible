@@ -1,0 +1,88 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT(m.title, ' (Sequel)') AS movie_title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+    WHERE 
+        h.level < 3  
+), ActorRoles AS (
+    SELECT 
+        ca.person_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY ca.nr_order) AS role_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        role_type r ON ca.role_id = r.id
+), TheaterStats AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT ac.person_id) AS total_actors,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        MAX(a.actor_name) AS featured_actor
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        ActorRoles ac ON ci.person_id = ac.person_id AND ac.role_rank = 1
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+), DirectionStats AS (
+    SELECT
+        m.id AS movie_id,
+        COUNT(DISTINCT d.person_id) AS distinct_directors
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        cast_info d ON m.id = d.movie_id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    ts.movie_title,
+    ts.production_year,
+    ts.total_actors,
+    ts.total_keywords,
+    COALESCE(ds.distinct_directors, 0) AS distinct_directors,
+    ts.featured_actor
+FROM 
+    TheaterStats ts
+LEFT JOIN 
+    DirectionStats ds ON ts.movie_id = ds.movie_id
+WHERE 
+    ts.total_actors > 5 AND 
+    ts.total_keywords < 10
+ORDER BY 
+    ts.production_year DESC, 
+    ts.total_actors DESC;

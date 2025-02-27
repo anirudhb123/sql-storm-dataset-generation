@@ -1,0 +1,63 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+)
+
+SELECT 
+    m.id AS main_movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    ARRAY_AGG(DISTINCT ka.name) AS aka_names,
+    COUNT(DISTINCT mc.company_id) AS number_of_companies,
+    SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) AS actor_count,
+    COUNT(DISTINCT kw.keyword) AS unique_keywords,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS movie_rank,
+    COALESCE(MAX(mi.info), 'No Info') AS additional_info
+FROM 
+    aka_title m
+LEFT JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+LEFT JOIN 
+    aka_name ka ON cc.subject_id = ka.person_id
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword kw ON m.id = kw.movie_id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON ka.person_id = pi.person_id
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    m.id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT ka.name) > 1
+ORDER BY 
+    m.production_year DESC, 
+    movie_rank
+LIMIT 100;

@@ -1,0 +1,48 @@
+WITH RecursiveCTE AS (
+    SELECT Id, ParentId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, Level + 1
+    FROM Posts p
+    INNER JOIN RecursiveCTE r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT u.Id AS UserId, 
+           u.Reputation,
+           RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+),
+PostsWithVoteCounts AS (
+    SELECT p.Id AS PostId, 
+           COUNT(v.Id) AS VoteCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT p.Id AS PostId, 
+       p.Title, 
+       p.CreationDate,
+       p.Body,
+       u.DisplayName AS OwnerDisplayName,
+       ur.Reputation,
+       pwc.VoteCount,
+       pwc.UpVotes,
+       pwc.DownVotes,
+       COUNT(DISTINCT c.Id) AS CommentCount,
+       COALESCE(b.Name, 'No Badge') AS BadgeName,
+       CASE WHEN ph.UserId IS NOT NULL THEN ph.Comment ELSE 'No Close reason' END AS CloseReason
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN PostsWithVoteCounts pwc ON pwc.PostId = p.Id
+LEFT JOIN Comments c ON c.PostId = p.Id
+LEFT JOIN Badges b ON b.UserId = u.Id
+LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+AND (p.Score > 0 OR p.ViewCount > 100)
+GROUP BY p.Id, u.DisplayName, ur.Reputation, pwc.VoteCount, pwc.UpVotes, pwc.DownVotes, b.Name, ph.Comment
+HAVING COUNT(DISTINCT c.Id) > 5
+ORDER BY p.CreationDate DESC, p.Title;

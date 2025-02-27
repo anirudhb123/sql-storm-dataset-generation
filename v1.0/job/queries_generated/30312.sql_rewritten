@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    akn.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS num_movies,
+    AVG(mh.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT kt.keyword, ', ') AS keywords,
+    FIRST_VALUE(mh.title) OVER (PARTITION BY akn.person_id ORDER BY mh.production_year) AS first_movie_title
+FROM 
+    aka_name akn
+JOIN 
+    cast_info ci ON akn.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+WHERE 
+    akn.name IS NOT NULL AND 
+    mh.production_year IS NOT NULL AND 
+    (EXISTS (
+        SELECT 1 
+        FROM person_info pi 
+        WHERE pi.person_id = akn.person_id 
+        AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthplace') 
+        AND pi.info IS NOT NULL
+    ) OR akn.gender = 'F')
+GROUP BY 
+    akn.name, akn.person_id
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 5
+ORDER BY 
+    num_movies DESC;

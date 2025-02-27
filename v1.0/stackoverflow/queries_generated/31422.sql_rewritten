@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS PostLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        rph.PostLevel + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostEditHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        CASE 
+            WHEN COUNT(DISTINCT p.Id) > 0 THEN 'Active'
+            ELSE 'Inactive'
+        END AS UserStatus
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    p.Title,
+    u.DisplayName AS Owner,
+    u.Reputation,
+    COALESCE(pes.EditCount, 0) AS TotalEdits,
+    COALESCE(pes.LastEditDate, 'Never') AS LastEdit,
+    uvs.TotalVotes,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    rph.PostLevel
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostEditHistory pes ON pes.PostId = p.Id
+JOIN 
+    UserVoteStatistics uvs ON uvs.UserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId = p.Id
+WHERE 
+    p.CreationDate >= '2023-01-01'
+    AND (p.Title ILIKE '%SQL%' OR p.Tags ILIKE '%SQL%')
+ORDER BY 
+    p.LastActivityDate DESC, 
+    uvs.TotalVotes DESC
+LIMIT 100;

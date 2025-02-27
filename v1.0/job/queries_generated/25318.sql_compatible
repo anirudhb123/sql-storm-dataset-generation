@@ -1,0 +1,68 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        k.phonetic_code AS keyword_phonetic,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, k.phonetic_code
+),
+company_data AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+complete_data AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.keyword_phonetic,
+        md.cast_names,
+        md.cast_count,
+        cd.company_names,
+        cd.company_types
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        company_data cd ON md.title_id = cd.movie_id
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    keyword,
+    keyword_phonetic,
+    cast_names,
+    cast_count,
+    company_names,
+    company_types
+FROM 
+    complete_data
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, 
+    title ASC;

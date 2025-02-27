@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER(PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales,
+        SUM(ws.ws_quantity) OVER(PARTITION BY ws.web_site_sk) AS total_quantity,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) OVER(PARTITION BY ws.web_site_sk) AS unique_customers,
+        CASE 
+            WHEN NULLIF(SUM(ws.ws_quantity), 0) IS NULL THEN 'Zero Quantity'
+            ELSE 'Non-Zero Quantity'
+        END AS quantity_status
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+        AND EXISTS (
+            SELECT 1 
+            FROM store s 
+            WHERE s.s_store_sk IN (
+                SELECT ss.s_store_sk 
+                FROM store_sales ss 
+                WHERE ss.ss_sales_price > 100.00
+                GROUP BY ss.s_store_sk
+            )
+            AND s.s_city LIKE 'San%'
+        )
+)
+SELECT 
+    rs.web_site_sk,
+    rs.ws_order_number,
+    rs.web_sales_price,
+    rs.total_quantity,
+    rs.unique_customers,
+    rs.quantity_status,
+    CASE 
+        WHEN rs.rank_sales = 1 THEN 'Top Sale'
+        WHEN rs.rank_sales BETWEEN 2 AND 5 THEN 'Top 5 Sale'
+        ELSE 'Non-Top Sale'
+    END AS sale_rank_category
+FROM 
+    RankedSales rs
+WHERE 
+    rs.total_quantity > 10
+ORDER BY 
+    rs.web_sales_price DESC, 
+    rs.unique_customers ASC
+LIMIT 50;

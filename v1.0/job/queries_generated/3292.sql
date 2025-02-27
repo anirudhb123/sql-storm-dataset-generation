@@ -1,0 +1,61 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS YearRank,
+        COUNT(*) OVER () AS TotalCount
+    FROM 
+        aka_title AS a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names
+    FROM 
+        title AS t
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name AS an ON ci.person_id = an.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+CompanyStats AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        complete_cast AS cc ON mc.movie_id = cc.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    md.cast_count,
+    md.actor_names,
+    COALESCE(cs.company_count, 0) AS company_count,
+    CASE 
+        WHEN r.YearRank = 1 THEN 'Latest'
+        WHEN r.YearRank > 1 AND r.YearRank <= 5 THEN 'Recent'
+        ELSE 'Older'
+    END AS TimeFrame
+FROM 
+    RankedTitles AS r
+LEFT JOIN 
+    MovieDetails AS md ON r.title = md.title AND r.production_year = md.production_year
+LEFT JOIN 
+    CompanyStats AS cs ON md.movie_id = cs.movie_id
+WHERE 
+    md.cast_count > 0
+ORDER BY 
+    r.production_year DESC, 
+    md.cast_count DESC;

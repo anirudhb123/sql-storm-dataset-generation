@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ship_date_sk DESC) AS sales_rank,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_sold
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+PaymentReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        COUNT(DISTINCT CASE 
+            WHEN sr_return_quantity IS NOT NULL THEN sr_return_quantity 
+            ELSE NULL 
+        END) AS returns_count,
+        SUM(sr_return_amount) AS total_returned
+    FROM 
+        store_returns sr 
+    GROUP BY 
+        sr.sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    ir.total_sold,
+    cr.returns_count,
+    cr.total_returned,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    (CASE 
+        WHEN ir.sales_rank = 1 THEN 'Best Seller' 
+        ELSE 'Regular' 
+    END) AS sales_category,
+    ROUND(IFNULL(ir.total_sold, 0) - IFNULL(cr.total_returned, 0), 2) AS net_sales,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        web_sales ws 
+     WHERE 
+        ws_item_sk = i.i_item_sk AND 
+        ws.bill_cdemo_sk IS NOT NULL
+    ) AS billable_count
+FROM 
+    RankedSales ir
+JOIN 
+    item i ON ir.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    PaymentReturns cr ON ir.ws_item_sk = cr.sr_item_sk
+JOIN 
+    CustomerInfo ci ON ci.customer_rank = 1
+WHERE 
+    (cr.returns_count IS NULL OR cr.total_returned IS NOT NULL)
+    AND coalesce(ci.cd_gender, 'U') <> 'U'
+ORDER BY 
+    net_sales DESC
+LIMIT 50;

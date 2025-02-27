@@ -1,0 +1,55 @@
+WITH RecursivePostLinks AS (
+    SELECT PostId, RelatedPostId, LinkTypeId, 
+           1 AS Depth
+    FROM PostLinks
+    WHERE LinkTypeId = 3 
+
+    UNION ALL
+
+    SELECT pl.PostId, pl.RelatedPostId, pl.LinkTypeId, 
+           rpl.Depth + 1
+    FROM PostLinks pl
+    INNER JOIN RecursivePostLinks rpl ON pl.PostId = rpl.RelatedPostId
+    WHERE rpl.Depth < 10 
+),
+PostMetrics AS (
+    SELECT p.Id AS PostId,
+           p.Score,
+           p.ViewCount,
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+           COALESCE(MAX(psc.CreationDate), p.CreationDate) AS MostRecentActivity
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Posts ps ON p.AcceptedAnswerId = ps.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11, 12) 
+                                  
+    LEFT JOIN (
+        SELECT pl.PostId, MAX(pl.CreationDate) AS CreationDate
+        FROM PostLinks pl
+        GROUP BY pl.PostId
+    ) psc ON p.Id = psc.PostId
+    GROUP BY p.Id
+),
+RankedPosts AS (
+    SELECT pm.*,
+           ROW_NUMBER() OVER (PARTITION BY pm.Score ORDER BY pm.ViewCount DESC) AS Rank
+    FROM PostMetrics pm
+)
+SELECT rp.PostId,
+       rp.Score,
+       rp.ViewCount,
+       rp.CommentCount,
+       rp.UpVoteCount,
+       rp.DownVoteCount,
+       rp.MostRecentActivity,
+       CASE 
+           WHEN rp.Rank <= 5 THEN 'Top Posts'
+           ELSE 'Other Posts'
+       END AS PostCategory
+FROM RankedPosts rp
+LEFT JOIN Users u ON rp.PostId = u.Id
+WHERE u.Reputation > 1000 
+ORDER BY rp.Score DESC, rp.ViewCount DESC;

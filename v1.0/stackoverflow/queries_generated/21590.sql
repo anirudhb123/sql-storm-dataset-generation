@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank,
+        COUNT(DISTINCT C.Id) OVER (PARTITION BY P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 4) AS OffensiveCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        H.PostId,
+        COUNT(*) AS ClosureReasonCount,
+        JSON_AGG(H.Comment) AS Reasons
+    FROM PostHistory H
+    WHERE H.PostHistoryTypeId IN (10, 11)  -- Closed and Reopened
+    GROUP BY H.PostId
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        RANK() OVER (ORDER BY SUM(UPVotes - DownVotes) DESC) AS UserRank
+    FROM UserActivity
+    GROUP BY UserId, DisplayName
+)
+SELECT 
+    A.UserId,
+    A.DisplayName,
+    A.TotalPosts,
+    A.TotalComments,
+    A.TotalBadges,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.CreationDate,
+    P.ViewCount,
+    P.Rank,
+    COALESCE(Cp.ClosureReasonCount, 0) AS ClosureReasonCount,
+    CASE 
+        WHEN Cp.Reasons IS NULL THEN 'No Closure Reasons'
+        ELSE Cp.Reasons::text
+    END AS ClosureReasons,
+    Tu.UserRank
+FROM UserActivity A
+JOIN PostAnalysis P ON A.UserId = P.OwnerUserId
+LEFT JOIN ClosedPosts Cp ON P.PostId = Cp.PostId
+JOIN TopUsers Tu ON A.UserId = Tu.UserId
+WHERE A.TotalPosts > 5
+  AND (P.Score > 0 OR P.ViewCount > 100)
+ORDER BY A.TotalBadges DESC, P.Rank;

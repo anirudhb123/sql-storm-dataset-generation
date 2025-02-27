@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+TopRevenueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderstatus,
+        r.total_revenue
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.rank_order <= 10
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice) AS avg_price_per_item
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' OR l.l_returnflag IS NULL
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    COALESCE(CAST(orders.o_orderkey AS VARCHAR), 'N/A') AS order_id,
+    COALESCE(orders.o_orderstatus, 'UNKNOWN') AS order_status,
+    COALESCE(revenue.total_revenue, 0) AS total_revenue,
+    COALESCE(supplier_cost.supplier_total_cost, 0) AS supplier_cost,
+    COALESCE(order_details.total_quantity, 0) AS total_quantity,
+    COALESCE(order_details.avg_price_per_item, 0) AS avg_price_per_item,
+    CASE 
+        WHEN revenue.total_revenue IS NULL THEN 'No Revenue'
+        WHEN revenue.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Moderate Revenue'
+    END AS revenue_category
+FROM 
+    TopRevenueOrders orders
+FULL OUTER JOIN 
+    SupplierRevenue supplier_cost ON orders.o_orderkey = supplier_cost.s_suppkey
+LEFT JOIN 
+    OrderDetails order_details ON orders.o_orderkey = order_details.o_orderkey
+WHERE 
+    (order_details.total_quantity > 5 OR order_details.avg_price_per_item < 20.00)
+ORDER BY 
+    revenue_category, total_revenue DESC, order_id;

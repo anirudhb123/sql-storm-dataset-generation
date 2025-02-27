@@ -1,0 +1,70 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+        AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    WHERE 
+        ps.ps_supplycost < (SELECT AVG(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = p.p_partkey)
+),
+CombinedResults AS (
+    SELECT 
+        o.o_orderkey, 
+        l.l_partkey, 
+        COALESCE(ss.s_name, 'Unknown Supplier') AS supplier_name,
+        p.p_name AS part_name,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'Discounted' 
+            ELSE 'Regular Price' 
+        END AS price_category,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    LEFT JOIN 
+        RankedSuppliers ss ON l.l_suppkey = ss.s_suppkey 
+    JOIN 
+        HighValueParts p ON l.l_partkey = p.p_partkey
+    GROUP BY 
+        o.o_orderkey, l.l_partkey, ss.s_name, p.p_name, l.l_discount
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT cr.o_orderkey) AS order_count,
+    SUM(CASE WHEN cr.price_category = 'Discounted' THEN cr.total_price ELSE 0 END) AS total_discounted_price,
+    SUM(CASE WHEN cr.price_category = 'Regular Price' THEN cr.total_price ELSE 0 END) AS total_regular_price
+FROM 
+    region r 
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey 
+JOIN 
+    supplier s ON n.n_nationkey = s.n_nationkey 
+LEFT JOIN 
+    CombinedResults cr ON s.s_suppkey = cr.supplier_name
+WHERE 
+    s.s_acctbal IS NOT NULL 
+    AND r.r_name LIKE 'A%' 
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT cr.o_orderkey) > 5 
+ORDER BY 
+    total_discounted_price DESC, 
+    total_regular_price ASC;

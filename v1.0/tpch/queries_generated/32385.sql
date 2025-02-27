@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, 1 AS level
+    FROM orders 
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, oh.level + 1
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'O' AND oh.level < 5
+),
+TotalRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+RevenueRanked AS (
+    SELECT tr.*, RANK() OVER (ORDER BY tr.total_revenue DESC) AS revenue_rank
+    FROM TotalRevenue tr
+)
+SELECT oh.o_orderkey, rr.c_name, sr.s_name AS supplier_name, sr.total_cost, rr.total_revenue
+FROM OrderHierarchy oh
+JOIN RevenueRanked rr ON oh.o_custkey = rr.c_custkey
+LEFT JOIN TopSuppliers sr ON sr.total_cost = (
+    SELECT MAX(ts.total_cost)
+    FROM TopSuppliers ts
+    WHERE ts.total_cost < rr.total_revenue
+)
+WHERE rr.revenue_rank <= 10
+ORDER BY rr.total_revenue DESC, sr.total_cost ASC;

@@ -1,0 +1,60 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(p.Score) AS TotalScore,
+        RANK() OVER (ORDER BY SUM(p.Score) DESC) AS ScoreRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        *
+    FROM 
+        UserPostStats
+    WHERE 
+        ScoreRank <= 10
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.QuestionsCount,
+    tu.AnswersCount,
+    tu.TotalScore,
+    COALESCE(ps.VotesCount, 0) AS PostVotes,
+    COALESCE(ps.UpVotes, 0) AS UpVoteCount,
+    COALESCE(ps.DownVotes, 0) AS DownVoteCount,
+    GROUP_CONCAT(DISTINCT t.TagName) AS TagList
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    Posts p ON tu.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostVoteStats ps ON p.Id = ps.PostId
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+                      WHERE p.PostTypeId = 1)
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.TotalPosts, tu.QuestionsCount, tu.AnswersCount, tu.TotalScore
+ORDER BY 
+    tu.TotalScore DESC;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE company_movies AS (
+    SELECT mc.movie_id,
+           c.name AS company_name,
+           ct.kind AS company_type,
+           ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_order
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+),
+movie_details AS (
+    SELECT t.title,
+           t.production_year,
+           ak.name AS actor_name,
+           ci.note AS role_note,
+           COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+           ARRAY_AGG(DISTINCT mk.keyword) AS keywords,
+           ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_order
+    FROM aka_title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    WHERE t.production_year IS NOT NULL
+    GROUP BY t.id, t.title, t.production_year, ak.name, ci.note
+),
+actor_movies AS (
+    SELECT md.title,
+           md.production_year,
+           md.actor_name,
+           md.role_note,
+           cm.company_name,
+           cm.company_type,
+           md.keywords,
+           md.keyword_count,
+           COUNT(*) OVER (PARTITION BY md.actor_name) AS total_movies_by_actor,
+           RANK() OVER (PARTITION BY md.actor_name ORDER BY md.production_year DESC) AS rank_by_year
+    FROM movie_details md
+    JOIN company_movies cm ON md.title = cm.company_name
+    WHERE (md.actor_name IS NOT NULL AND md.role_note IS NOT NULL) OR md.keyword_count > 5
+)
+SELECT am.title,
+       am.production_year,
+       am.actor_name,
+       am.role_note,
+       am.company_name,
+       am.company_type,
+       am.keyword_count,
+       am.keywords,
+       am.total_movies_by_actor,
+       CASE WHEN am.rank_by_year < 3 THEN 'Top Performers' ELSE 'Established Actors' END AS actor_category
+FROM actor_movies am
+WHERE am.production_year BETWEEN 1990 AND 2020
+  AND (am.company_name IS NOT NULL OR am.role_note LIKE '%lead%')
+ORDER BY am.production_year DESC,
+         am.total_movies_by_actor DESC,
+         am.actor_name;

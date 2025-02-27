@@ -1,0 +1,42 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, c.c_name, o.o_orderdate, o.o_totalprice, o.o_orderstatus, 1 AS Level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, c.c_name, o.o_orderdate, o.o_totalprice, o.o_orderstatus, oh.Level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_custkey = oh.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+           COUNT(*) AS item_count,
+           ROW_NUMBER() OVER(PARTITION BY l.l_orderkey ORDER BY l.l_receiptdate DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate > DATE '2023-01-01'
+    GROUP BY l.l_orderkey
+    HAVING COUNT(*) > 1
+)
+SELECT oh.o_orderkey, oh.c_name, oh.o_orderdate, 
+       CASE 
+           WHEN ss.total_available IS NULL THEN 'No Suppliers'
+           ELSE CAST(ss.total_available AS VARCHAR)
+       END AS total_available,
+       l.total_price_after_discount,
+       l.item_count,
+       (SELECT COUNT(*) FROM nation n WHERE n.n_regionkey = s.n_nationkey) AS nation_count
+FROM OrderHierarchy oh
+LEFT JOIN SupplierStats ss ON oh.o_orderkey = ss.s_suppkey
+LEFT JOIN LineItemDetails l ON oh.o_orderkey = l.l_orderkey
+JOIN nation n ON oh.o_orderkey = n.n_nationkey
+ORDER BY oh.o_orderdate DESC, total_available DESC;

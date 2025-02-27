@@ -1,0 +1,39 @@
+
+WITH RECURSIVE cust_order AS (
+    SELECT c.c_custkey, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+),
+part_supp AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+high_value_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           (CASE WHEN p.p_retailprice > 100 THEN 'High' ELSE 'Low' END) AS price_category
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 50
+)
+SELECT c.c_name, COALESCE(ho.high_order, 0) AS high_order_count,
+       COALESCE(hv.total_availqty, 0) AS total_avail_parts,
+       AVG(l.l_discount) AS avg_discount, 
+       STRING_AGG(p.p_name, ', ' ORDER BY p.p_name) AS part_names
+FROM customer c
+LEFT JOIN cust_order co ON c.c_custkey = co.c_custkey AND co.order_rank = 1
+LEFT JOIN (
+    SELECT co.c_custkey, COUNT(o.o_orderkey) AS high_order
+    FROM cust_order co
+    WHERE co.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+    GROUP BY co.c_custkey
+) ho ON c.c_custkey = ho.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = co.o_orderkey
+LEFT JOIN part_supp hv ON hv.ps_partkey = l.l_partkey
+LEFT JOIN high_value_parts p ON p.p_partkey = l.l_partkey
+WHERE l.l_returnflag = 'N' AND l.l_shipdate > DATE '1997-01-01'
+GROUP BY c.c_name, ho.high_order, hv.total_availqty
+HAVING AVG(l.l_quantity) > 10 OR COUNT(DISTINCT p.p_partkey) > 5
+ORDER BY high_order_count DESC, c.c_name;

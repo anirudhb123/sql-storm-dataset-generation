@@ -1,0 +1,70 @@
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        MAX(LENGTH(ca_street_name)) AS max_street_name_length
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        COUNT(c_demo_sk) AS num_customers,
+        SUM(cd_dep_count) AS total_dependencies
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, 
+        cd_marital_status
+),
+DateInfo AS (
+    SELECT 
+        d_year,
+        COUNT(d_date_id) AS num_days,
+        COUNT(DISTINCT d_month_seq) AS num_months
+    FROM 
+        date_dim
+    GROUP BY 
+        d_year
+),
+ItemStats AS (
+    SELECT 
+        i_category,
+        COUNT(i_item_sk) AS item_count,
+        AVG(i_current_price) AS avg_price,
+        STDDEV(i_current_price) AS price_stddev
+    FROM 
+        item
+    GROUP BY 
+        i_category
+)
+SELECT 
+    a.ca_state,
+    a.unique_addresses,
+    a.avg_street_name_length,
+    a.max_street_name_length,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.num_customers,
+    c.total_dependencies,
+    d.d_year,
+    d.num_days,
+    d.num_months,
+    i.i_category,
+    i.item_count,
+    i.avg_price,
+    i.price_stddev
+FROM 
+    AddressStats a
+JOIN 
+    CustomerDemographics c ON a.unique_addresses > 100
+JOIN 
+    DateInfo d ON d.d_year = YEAR(cast('2002-10-01' as date))
+JOIN 
+    ItemStats i ON i.avg_price < 50
+ORDER BY 
+    a.ca_state, c.cd_gender, i.avg_price DESC;

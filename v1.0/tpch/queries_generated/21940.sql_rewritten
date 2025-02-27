@@ -1,0 +1,54 @@
+WITH RECURSIVE region_order_counts AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE DATE_TRUNC('month', o.o_orderdate) BETWEEN '1996-01-01' AND '1997-01-01'
+    GROUP BY r.r_regionkey
+    UNION ALL
+    SELECT r.r_regionkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_discount IS NOT NULL AND l.l_discount > 0
+    GROUP BY r.r_regionkey
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(total) FROM (
+            SELECT SUM(o2.o_totalprice) AS total
+            FROM orders o2
+            GROUP BY o2.o_custkey
+        ) AS avg_total
+    )
+),
+supplier_part_overview AS (
+    SELECT s.s_suppkey, s.s_name, p.p_name, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT r.r_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       COALESCE((SELECT SUM(order_count) FROM region_order_counts), 0) AS recursive_order_count,
+       tc.c_name AS high_spender,
+       MAX(spo.ps_supplycost) AS max_supply_cost
+FROM region r
+LEFT JOIN orders o ON o.o_orderstatus = 'O'
+LEFT JOIN top_customers tc ON o.o_custkey = tc.c_custkey
+LEFT JOIN supplier_part_overview spo ON spo.rank = 1
+GROUP BY r.r_name, tc.c_name
+ORDER BY total_orders DESC, r.r_name;

@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_series AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.season_nr,
+        mt.episode_nr,
+        COALESCE(mt.episode_of_id, mt.id) AS series_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.season_nr,
+        mt.episode_nr,
+        COALESCE(mt.episode_of_id, mt.id) AS series_id,
+        level + 1
+    FROM aka_title mt
+    INNER JOIN movie_series ms ON ms.movie_id = mt.episode_of_id
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'episode')
+),
+ranked_movies AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        RANK() OVER (PARTITION BY ms.series_id ORDER BY mt.production_year DESC, mt.title ASC) AS rank
+    FROM movie_series ms
+    JOIN aka_title mt ON ms.movie_id = mt.id
+),
+total_movies AS (
+    SELECT 
+        ms.series_id,
+        COUNT(mt.movie_id) AS total_count
+    FROM movie_series ms
+    JOIN aka_title mt ON ms.movie_id = mt.id
+    GROUP BY ms.series_id
+)
+SELECT 
+    rm.series_id,
+    COUNT(rm.movie_id) AS released_movie_count,
+    SUM(CASE WHEN rm.rank <= 3 THEN 1 ELSE 0 END) AS top_three_released_movies,
+    tm.total_count,
+    STRING_AGG(rm.title, '; ') AS movie_titles,
+    CASE 
+        WHEN (tm.total_count IS NULL OR tm.total_count = 0) THEN 'No movies found'
+        ELSE 'Movies found'
+    END AS movies_status
+FROM ranked_movies rm
+LEFT JOIN total_movies tm ON rm.series_id = tm.series_id
+GROUP BY rm.series_id, tm.total_count
+HAVING SUM(CASE WHEN rm.rank <= 3 THEN 1 ELSE 0 END) > 0
+ORDER BY released_movie_count DESC, tm.total_count DESC;

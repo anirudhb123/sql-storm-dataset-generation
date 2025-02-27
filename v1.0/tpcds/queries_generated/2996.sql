@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(DISTINCT ws.ws_order_number) AS Total_Orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        sd.bill_customer_sk,
+        sd.Total_Sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.hd_income_band_sk
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerDemographics cd ON sd.bill_customer_sk = cd.cd_demo_sk
+    WHERE 
+        sd.Total_Sales > (
+            SELECT AVG(Total_Sales) 
+            FROM SalesData 
+        )
+)
+SELECT 
+    tc.bill_customer_sk,
+    tc.Total_Sales,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    income_band ib ON tc.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    (tc.cd_gender IS NOT NULL AND tc.cd_marital_status IS NOT NULL)
+    OR (tc.cd_gender IS NULL AND tc.cd_marital_status IS NULL)
+ORDER BY 
+    tc.Total_Sales DESC
+FETCH FIRST 10 ROWS ONLY;

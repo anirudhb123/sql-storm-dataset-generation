@@ -1,0 +1,49 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation,
+        COUNT(p.ps_partkey) AS total_parts,
+        SUM(p.ps_supplycost) AS total_supplycost,
+        STRING_AGG(DISTINCT p.p_brand, ', ') AS unique_brands
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name
+),
+ProcessedData AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.nation,
+        sd.total_parts,
+        sd.total_supplycost,
+        sd.unique_brands,
+        LENGTH(sd.unique_brands) AS brands_length,
+        UPPER(sd.nation) AS nation_uppercase,
+        CASE 
+            WHEN sd.total_supplycost > 10000 THEN 'High Supply Cost'
+            ELSE 'Low Supply Cost'
+        END AS supply_cost_category
+    FROM 
+        SupplierDetails sd
+)
+SELECT 
+    pd.s_suppkey,
+    pd.s_name,
+    pd.nation_uppercase,
+    pd.supply_cost_category,
+    pd.brands_length,
+    pd.total_parts,
+    TO_CHAR(pd.total_supplycost, 'FM$99999999990.00') AS formatted_supplycost
+FROM 
+    ProcessedData pd
+WHERE 
+    pd.brands_length > 30
+ORDER BY 
+    pd.total_parts DESC, pd.s_name;

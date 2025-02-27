@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        0 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mh.level + 1 AS level,
+        path || mt.title
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+),
+cast_summary AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS total_cast,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    GROUP BY 
+        ca.movie_id
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mt.info, '; ') AS info_details
+    FROM 
+        movie_info mi 
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info ILIKE '%Awards%'
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    cs.total_cast, 
+    cs.cast_names, 
+    ks.total_keywords, 
+    mk.info_details,
+    CASE 
+        WHEN ks.total_keywords > 0 THEN 'Has keywords'
+        ELSE 'No keywords'
+    END AS keyword_status,
+    CASE 
+        WHEN cs.total_cast IS NULL THEN 'No cast information'
+        ELSE 'Cast information available'
+    END AS cast_status,
+    COALESCE(mh.path[2], 'N/A') AS parent_series_title
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN 
+    movie_info_details mk ON mh.movie_id = mk.movie_id
+ORDER BY 
+    mh.level, mh.title
+LIMIT 100;

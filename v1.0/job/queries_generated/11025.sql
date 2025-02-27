@@ -1,0 +1,35 @@
+-- Performance Benchmarking SQL Query
+
+SELECT 
+    p.name AS person_name,
+    t.title AS movie_title,
+    r.role AS person_role,
+    c.note AS cast_note,
+    co.name AS company_name,
+    m.production_year,
+    k.keyword AS movie_keyword
+FROM 
+    cast_info c
+JOIN 
+    aka_name p ON c.person_id = p.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+JOIN 
+    role_type r ON c.role_id = r.id
+JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info m ON c.movie_id = m.movie_id
+WHERE 
+    m.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+AND 
+    m.note IS NOT NULL
+ORDER BY 
+    m.production_year DESC, 
+    p.name ASC;

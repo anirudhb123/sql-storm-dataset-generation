@@ -1,0 +1,50 @@
+
+WITH CustomerReturns AS (
+    SELECT sr_customer_sk,
+           SUM(sr_return_amt_inc_tax) AS total_return_amt,
+           COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT cd_demo_sk,
+           COUNT(DISTINCT c_customer_sk) AS customer_count,
+           AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+           SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+           SUM(CASE WHEN cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd_demo_sk
+),
+WarehouseInventory AS (
+    SELECT inv_w.warehouse_name,
+           SUM(inv_quantity_on_hand) AS total_quantity
+    FROM inventory inv
+    JOIN warehouse inv_w ON inv.inv_warehouse_sk = inv_w.w_warehouse_sk
+    GROUP BY inv_w.warehouse_name
+),
+HighValueReturns AS (
+    SELECT cr.screening_id AS recycled_report_id,
+           r.reason_desc,
+           SUM(cr_return_amount) AS total_return_amount,
+           COUNT(*) AS total_returns
+    FROM catalog_returns cr
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE cr_return_quantity > 1
+    GROUP BY cr.screening_id, r.reason_desc
+)
+SELECT cd.demo_sk,
+       cd.customer_count,
+       cd.avg_purchase_estimate,
+       wh.warehouse_name,
+       wh.total_quantity,
+       cr.total_return_amt,
+       cr.return_count,
+       COALESCE(hv.total_return_amount, 0) AS high_value_return_amt,
+       COALESCE(hv.total_returns, 0) AS high_value_return_count 
+FROM CustomerDemographics cd
+LEFT JOIN WarehouseInventory wh ON cd.customer_count > 50
+LEFT JOIN CustomerReturns cr ON cr.sr_customer_sk = cd.cd_demo_sk
+LEFT JOIN HighValueReturns hv ON hv.recycled_report_id = cd.cd_demo_sk
+WHERE cd.avg_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+ORDER BY cd.customer_count DESC, wh.total_quantity DESC;

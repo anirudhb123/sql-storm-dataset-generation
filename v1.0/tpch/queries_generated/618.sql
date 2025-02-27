@@ -1,0 +1,63 @@
+WITH RankedLineItems AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        l_quantity,
+        l_extendedprice,
+        l_discount,
+        l_tax,
+        DENSE_RANK() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) AS rank_price
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= '2023-01-01' AND l_shipdate < '2024-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 1000.00
+    GROUP BY 
+        ps.s_suppkey
+),
+AggregateOrders AS (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    c.c_name,
+    n.n_name AS nation_name,
+    SUM(rl.l_extendedprice * (1 - rl.l_discount)) AS total_revenue,
+    COUNT(DISTINCT rl.l_orderkey) AS order_count,
+    COALESCE(ss.total_available, 0) AS total_available_parts,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedLineItems rl ON c.c_custkey = rl.l_orderkey
+LEFT JOIN 
+    SupplierSummary ss ON rl.l_suppkey = ss.s_suppkey
+JOIN 
+    AggregateOrders ao ON c.c_custkey = ao.o_custkey
+WHERE 
+    n.r_regionkey = 1
+GROUP BY 
+    c.c_name, n.n_name, ss.total_available, ss.total_supply_cost
+HAVING 
+    SUM(rl.l_extendedprice * (1 - rl.l_discount)) > 50000
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,67 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT U.Id, U.Reputation, U.DisplayName, 1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT U.Id, U.Reputation * 1.1, U.DisplayName, UR.Level + 1
+    FROM Users U
+    INNER JOIN UserReputation UR ON U.Id = UR.Id
+    WHERE U.Reputation > 1000 AND UR.Level < 5
+),
+
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(CAST(P.AcceptedAnswerId AS VARCHAR), 'No Accepted Answer') AS AcceptedAnswer,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+VoteSummary AS (
+    SELECT 
+        V.PostId, 
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes V
+    GROUP BY V.PostId
+),
+
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(PS.Score * 1.0, 0)) AS TotalScore,
+        SUM(PD.CommentCount) AS TotalComments
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostDetails PD ON P.Id = PD.PostId
+    LEFT JOIN VoteSummary PS ON P.Id = PS.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.PostCount,
+    UPS.TotalScore,
+    UPS.TotalComments,
+    UR.Level AS ReputationLevel,
+    CASE 
+        WHEN UPS.TotalScore > 1000 THEN 'Expert User'
+        WHEN UPS.TotalScore > 500 THEN 'Intermediate User'
+        ELSE 'Novice User'
+    END AS UserCategory
+FROM UserPostStats UPS
+JOIN UserReputation UR ON UPS.UserId = UR.Id
+WHERE UPS.PostCount > 0
+ORDER BY UPS.TotalScore DESC, UPS.PostCount DESC
+LIMIT 10;

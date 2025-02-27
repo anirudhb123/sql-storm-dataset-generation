@@ -1,0 +1,56 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        sr_reason_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_date_sk >= (SELECT MAX(d_date_sk) - 90 FROM date_dim)
+    GROUP BY 
+        sr_customer_sk, sr_reason_sk
+),
+TopReturns AS (
+    SELECT 
+        rr.sr_reason_sk,
+        r.r_reason_desc,
+        rr.return_count,
+        rr.total_return_amount,
+        RANK() OVER (PARTITION BY rr.sr_reason_sk ORDER BY rr.return_count DESC) AS rank_count
+    FROM 
+        RankedReturns rr
+    JOIN 
+        reason r ON rr.sr_reason_sk = r.r_reason_sk
+    WHERE 
+        rr.return_count > 10
+),
+HighVolumeCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(COALESCE(sr.total_return_amount, 0)) AS total_return
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedReturns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(COALESCE(sr.total_return_amount, 0)) > 1000
+)
+SELECT 
+    hv.c_customer_sk,
+    hv.c_first_name,
+    hv.c_last_name,
+    tr.r_reason_desc,
+    tr.return_count,
+    tr.total_return_amount
+FROM 
+    HighVolumeCustomers hv
+JOIN 
+    TopReturns tr ON hv.c_customer_sk = tr.sr_customer_sk
+ORDER BY 
+    hv.total_return DESC, tr.return_count DESC;

@@ -1,0 +1,48 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           NULL AS parent_suppkey, 
+           ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) AS level 
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           sh.s_suppkey AS parent_suppkey, 
+           sh.level + 1 
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_acctbal < sh.s_acctbal
+    WHERE sh.level < 5
+),
+part_supplier AS (
+    SELECT p.*, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+customer_ordered AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_orders AS (
+    SELECT o.*, 
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+SELECT rh.s_suppkey, rh.s_name, rh.s_acctbal, rh.parent_suppkey, rh.level, 
+       c.c_name, ps.p_name, ps.ps_availqty, ps.ps_supplycost, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       CASE WHEN c.c_acctbal IS NULL THEN 'No Balance' ELSE 'Balance Available' END AS balance_status
+FROM supplier_hierarchy rh
+LEFT JOIN lineitem l ON l.l_suppkey = rh.s_suppkey
+LEFT JOIN ranked_orders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN customer_ordered c ON ro.o_custkey = c.c_custkey
+LEFT JOIN part_supplier ps ON ps.p_partkey = l.l_partkey
+WHERE rh.level IS NOT NULL
+  AND (ps.ps_availqty > 0 OR ps.ps_supplycost IS NOT NULL)
+GROUP BY rh.s_suppkey, rh.s_name, rh.s_acctbal, rh.parent_suppkey, rh.level,
+         c.c_name, ps.p_name, ps.ps_availqty, ps.ps_supplycost
+HAVING SUM(l.l_quantity) > 1000
+ORDER BY revenue DESC NULLS LAST;

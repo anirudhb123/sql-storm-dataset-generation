@@ -1,0 +1,46 @@
+WITH RECURSIVE nation_cte AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 0 AS level 
+    FROM nation
+    WHERE n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%Asia%')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, n.n_comment, c.level + 1
+    FROM nation_cte c
+    JOIN nation n ON c.n_nationkey = n.n_regionkey
+    WHERE c.level < 3
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           CASE WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+                WHEN s.s_acctbal < 1000 THEN 'Low Balance'
+                ELSE 'High Balance' END AS balance_status,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+total_part AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rev_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+supply_counts AS (
+    SELECT COUNT(*) AS supplier_count, ps.ps_partkey
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT n.n_name, s.s_name, si.balance_status, os.total_revenue, tc.total_cost, sc.supplier_count
+FROM nation_cte n
+LEFT JOIN supplier_info si ON n.n_nationkey = si.s_suppkey
+FULL OUTER JOIN order_summary os ON si.s_suppkey = os.o_orderkey
+INNER JOIN total_part tc ON os.o_orderkey = tc.ps_partkey
+LEFT JOIN supply_counts sc ON tc.ps_partkey = sc.ps_partkey
+WHERE (si.balance_status = 'High Balance' OR si.balance_status IS NULL)
+  AND os.total_revenue IS NULL
+  OR (os.total_revenue > 5000 AND sc.supplier_count > 5)
+ORDER BY n.n_name, os.total_revenue DESC NULLS LAST;

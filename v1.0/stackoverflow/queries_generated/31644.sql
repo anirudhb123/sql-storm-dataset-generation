@@ -1,0 +1,99 @@
+WITH RecursiveTagUsage AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+    
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        COUNT(DISTINCT p.Id) + rtu.PostCount
+    FROM 
+        RecursiveTagUsage rtu
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || rtu.TagName || '%'
+    JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        t.Id <> rtu.TagId
+    GROUP BY 
+        t.Id, t.TagName, rtu.PostCount
+),
+FrequentUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+HighReputationPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerName,
+        u.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY COUNT(v.UserId) DESC) AS VoteRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, u.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    t.TagName,
+    rtu.PostCount,
+    u.DisplayName AS UserName,
+    u.Reputation,
+    hpp.Title,
+    hpp.Body,
+    hpp.CommentCount,
+    hpp.VoteCount,
+    COALESCE(phs.CloseCount, 0) AS TotalCloses,
+    COALESCE(phs.ReopenCount, 0) AS TotalReopens
+FROM 
+    RecursiveTagUsage rtu
+JOIN 
+    FrequentUsers u ON rtu.PostCount > 10
+JOIN 
+    HighReputationPosts hpp ON u.Reputation > 5000 
+LEFT JOIN 
+    PostHistoryStats phs ON hpp.PostId = phs.PostId
+WHERE 
+    rtu.PostCount > 5
+ORDER BY 
+    rtu.PostCount DESC, u.Reputation DESC;

@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id,
+        i.i_item_id,
+        COALESCE(ws.ws_net_paid, cs.cs_net_paid, ss.ss_net_paid) AS total_net_paid,
+        d.d_year,
+        DENSE_RANK() OVER (PARTITION BY d.d_year ORDER BY COALESCE(ws.ws_net_paid, cs.cs_net_paid, ss.ss_net_paid) DESC) AS rank_per_year
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.warehouse_sk = ws.ws_warehouse_sk
+    LEFT JOIN catalog_sales cs ON w.warehouse_sk = cs.cs_warehouse_sk
+    LEFT JOIN store_sales ss ON w.warehouse_sk = ss.ss_store_sk
+    JOIN item i ON i.i_item_sk IN (ws.ws_item_sk, cs.cs_item_sk, ss.ss_item_sk)
+    JOIN date_dim d ON d.d_date_sk IN (ws.ws_sold_date_sk, cs.cs_sold_date_sk, ss.ss_sold_date_sk)
+    WHERE (ws.ws_net_paid IS NOT NULL OR cs.cs_net_paid IS NOT NULL OR ss.ss_net_paid IS NOT NULL)
+),
+TopSales AS (
+    SELECT 
+        warehouse_id,
+        i_item_id,
+        total_net_paid,
+        d_year
+    FROM SalesData
+    WHERE rank_per_year <= 5
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ts.total_net_paid) AS total_customer_spent,
+        COUNT(ts.i_item_id) AS item_count
+    FROM TopSales ts
+    JOIN customer c ON c.c_customer_sk = (
+        SELECT DISTINCT CASE 
+            WHEN ws.ws_bill_customer_sk IS NOT NULL THEN ws.ws_bill_customer_sk
+            WHEN cs.cs_bill_customer_sk IS NOT NULL THEN cs.cs_bill_customer_sk
+            ELSE ss.ss_customer_sk 
+        END
+        FROM web_sales ws 
+        FULL OUTER JOIN catalog_sales cs ON ws.ws_order_number = cs.cs_order_number 
+        FULL OUTER JOIN store_sales ss ON ws.ws_order_number = ss.ss_order_number
+        WHERE ts.i_item_id IN (ws.ws_item_sk, cs.cs_item_sk, ss.ss_item_sk)
+        LIMIT 1
+    )
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cs.total_customer_spent,
+    cs.item_count
+FROM CustomerSales cs
+JOIN customer c ON c.c_customer_id = cs.c_customer_id
+WHERE cs.total_customer_spent > (SELECT AVG(total_customer_spent) FROM CustomerSales)
+ORDER BY total_customer_spent DESC;

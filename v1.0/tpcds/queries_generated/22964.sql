@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_item_sk, ws_order_number, 
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS recent_sales,
+           SUM(ws_net_profit) OVER (PARTITION BY ws_item_sk) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01')
+                              AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+),
+item_info AS (
+    SELECT i.i_item_sk, i.i_item_desc, 
+           COALESCE(inv.inv_quantity_on_hand, 0) AS available_stock,
+           CASE 
+               WHEN i.i_current_price IS NULL THEN 'Price Unavailable'
+               ELSE CONCAT('$', FORMAT(i.i_current_price, 2))
+           END AS formatted_price
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+                        AND inv.inv_date_sk = (SELECT MAX(inv1.inv_date_sk) 
+                                                FROM inventory inv1 
+                                                WHERE inv1.inv_item_sk = i.i_item_sk)
+),
+customer_data AS (
+    SELECT c.c_customer_id, 
+           d.d_date_id, 
+           d.d_day_name,
+           CASE 
+               WHEN cd_demo_sk IS NULL THEN 'Unknown Demographics'
+               ELSE cd_marital_status
+           END AS marital_status,
+           COUNT(ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, d.d_date_id, d.d_day_name, cd.cd_demo_sk, cd_marital_status
+)
+SELECT 
+    s.ws_item_sk, 
+    ii.i_item_desc, 
+    ii.available_stock, 
+    ii.formatted_price, 
+    SUM(cd.order_count) FILTER (WHERE cd.marital_status = 'M') AS married_order_count,
+    SUM(cd.order_count) FILTER (WHERE cd.marital_status = 'S') AS single_order_count,
+    AVG(sc.total_profit) AS avg_profit,
+    CASE 
+        WHEN COUNT(DISTINCT cd.c_customer_id) > 5 THEN 'High Customer Engagement'
+        ELSE 'Low Customer Engagement'
+    END AS engagement_level
+FROM sales_cte sc
+JOIN item_info ii ON sc.ws_item_sk = ii.i_item_sk
+JOIN customer_data cd ON cd.d_date_id = (SELECT MAX(d.d_date_id) 
+                                           FROM date_dim d 
+                                           WHERE d.d_date_sk <= (SELECT MAX(ws.ws_sold_date_sk) 
+                                                                  FROM web_sales ws 
+                                                                  WHERE ws.ws_item_sk = sc.ws_item_sk))
+GROUP BY s.ws_item_sk, ii.i_item_desc, ii.available_stock, ii.formatted_price
+ORDER BY avg_profit DESC, ii.i_item_desc;

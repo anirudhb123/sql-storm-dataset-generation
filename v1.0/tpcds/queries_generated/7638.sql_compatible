@@ -1,0 +1,66 @@
+
+WITH TotalSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales_price,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        ts.total_sales_price,
+        ts.total_quantity,
+        DENSE_RANK() OVER (ORDER BY ts.total_sales_price DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+    JOIN 
+        item i ON ts.ws_item_sk = i.i_item_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        y.d_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim y ON c.c_first_sales_date_sk = y.d_date_sk
+    WHERE 
+        y.d_year >= 2021
+),
+SalesSummary AS (
+    SELECT 
+        ci.c_customer_id,
+        CHAR_LENGTH(ci.c_customer_id) AS customer_id_length,
+        COUNT(DISTINCT ti.i_item_id) AS distinct_items_purchased,
+        SUM(ts.total_sales_price) AS total_spent
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        web_sales ws ON ci.c_customer_id = ws.ws_bill_customer_sk
+    JOIN 
+        TopItems ti ON ws.ws_item_sk = ti.ws_item_sk
+    GROUP BY 
+        ci.c_customer_id, CHAR_LENGTH(ci.c_customer_id)
+)
+SELECT 
+    s.customer_id_length,
+    COUNT(*) AS total_customers,
+    AVG(s.total_spent) AS avg_spent,
+    MIN(s.total_spent) AS min_spent,
+    MAX(s.total_spent) AS max_spent
+FROM 
+    SalesSummary s
+GROUP BY 
+    s.customer_id_length
+ORDER BY 
+    s.customer_id_length;

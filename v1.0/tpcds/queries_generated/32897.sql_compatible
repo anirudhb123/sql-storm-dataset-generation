@@ -1,0 +1,44 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions,
+        1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    GROUP BY ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        sh.ss_store_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions,
+        sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN store_sales ON sh.ss_store_sk = store_sales.ss_store_sk
+    WHERE store_sales.ss_sold_date_sk < (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    GROUP BY sh.ss_store_sk, sh.level
+)
+
+SELECT 
+    s.s_store_name,
+    COALESCE(SUM(ws.ws_sales_price), 0) AS total_web_sales,
+    COALESCE(SUM(cs.cs_sales_price), 0) AS total_catalog_sales,
+    COALESCE(SUM(ss.ss_sales_price), 0) AS total_store_sales,
+    COUNT(DISTINCT cu.c_customer_sk) FILTER (WHERE cu.c_birth_year IS NOT NULL) AS active_customers,
+    CASE 
+        WHEN SUM(ws.ws_sales_price) > SUM(ss.ss_sales_price) THEN 'Web'
+        ELSE 'Store'
+    END AS dominant_channel,
+    COUNT(wp.wp_web_page_sk) AS total_web_pages
+FROM store s
+LEFT JOIN web_sales ws ON s.s_store_sk = ws.ws_store_sk 
+LEFT JOIN catalog_sales cs ON s.s_store_sk = cs.cs_ship_store_sk
+LEFT JOIN customer cu ON ws.ws_bill_customer_sk = cu.c_customer_sk
+LEFT JOIN web_page wp ON wp.wp_web_page_sk = ws.ws_web_page_sk
+LEFT JOIN sales_hierarchy sh ON sh.ss_store_sk = s.s_store_sk
+GROUP BY s.s_store_name
+ORDER BY total_store_sales DESC
+LIMIT 10;

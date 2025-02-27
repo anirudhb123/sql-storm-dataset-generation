@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        NULL AS parent_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.movie_id = mt.id
+)
+SELECT
+    a.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    COUNT(DISTINCT mc.company_id) AS num_companies,
+    AVG(mv.num_cast) AS avg_cast_per_year,
+    CASE
+        WHEN mt.production_year IS NULL THEN 'Unknown Year'
+        ELSE CAST(mt.production_year AS TEXT)
+    END AS production_year_str
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id 
+JOIN
+    MovieHierarchy mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_companies mc ON mt.movie_id = mc.movie_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, COUNT(*) AS num_cast 
+     FROM 
+         cast_info 
+     GROUP BY movie_id) mv ON mt.movie_id = mv.movie_id
+WHERE
+    a.name IS NOT NULL 
+    AND mt.movie_title IS NOT NULL
+GROUP BY
+    a.name, mt.movie_title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    avg_cast_per_year DESC, mt.production_year DESC;

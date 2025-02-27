@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number, 
+        ws.ws_sales_price,
+        ws.ws_ext_discount_amt,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        ir.i_item_id,
+        SUM(COALESCE(ns.ws_auth_amount, 0)) AS total_net_sales
+    FROM 
+        item ir
+    LEFT JOIN web_sales ns ON ir.i_item_sk = ns.ws_item_sk 
+    GROUP BY 
+        ir.i_item_id
+),
+CustomerAddressWithCount AS (
+    SELECT 
+        ca.ca_address_sk,
+        COUNT(DISTINCT c.c_customer_sk) as customer_count
+    FROM 
+        customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk
+)
+SELECT 
+    r.i_item_id,
+    r.sales_rank,
+    r.ws_sales_price,
+    r.ws_ext_discount_amt,
+    r.ws_net_profit,
+    t.total_net_sales,
+    ca.ca_city,
+    ca.ca_state,
+    cac.customer_count
+FROM 
+    RankedSales r
+JOIN 
+    TotalSales t ON r.ws_item_sk = t.i_item_id
+LEFT JOIN 
+    customer_address ca ON r.ws_bill_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerAddressWithCount cac ON ca.ca_address_sk = cac.ca_address_sk
+WHERE 
+    r.sales_rank = 1
+    AND r.ws_net_profit IS NOT NULL
+ORDER BY 
+    t.total_net_sales DESC
+```

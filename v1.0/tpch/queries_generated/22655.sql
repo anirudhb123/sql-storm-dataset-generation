@@ -1,0 +1,75 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 10
+),
+OrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value,
+        DENSE_RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey
+),
+FinalSelection AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        ts.s_name,
+        os.total_spent
+    FROM 
+        RankedParts rp
+    INNER JOIN 
+        TopSuppliers ts ON rp.p_brand IN (SELECT DISTINCT p_brand FROM part WHERE p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost > 100))
+    LEFT JOIN 
+        OrderStats os ON os.customer_rank < 10 AND rp.total_cost > os.total_spent
+)
+
+SELECT 
+    fs.p_partkey,
+    fs.p_name,
+    fs.s_name,
+    COALESCE(fs.total_spent, 0) AS total_spent
+FROM 
+    FinalSelection fs
+WHERE 
+    NOT EXISTS (
+        SELECT 1
+        FROM partsupp ps
+        WHERE ps.ps_partkey = fs.p_partkey
+        AND ps.ps_availqty < 5
+    )
+ORDER BY 
+    fs.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

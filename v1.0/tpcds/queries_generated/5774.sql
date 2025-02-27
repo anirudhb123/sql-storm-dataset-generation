@@ -1,0 +1,63 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        cd.cd_purchase_estimate, 
+        hd.hd_income_band_sk
+),
+TotalSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+ItemStats AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(ts.total_sales, 0) AS total_sales,
+        CASE 
+            WHEN COALESCE(ts.total_sales, 0) > 0 THEN 'Sold'
+            ELSE 'Unsold'
+        END AS sale_status
+    FROM item i
+    LEFT JOIN TotalSales ts ON i.i_item_sk = ts.ws_item_sk
+)
+SELECT 
+    cs.c_first_name || ' ' || cs.c_last_name AS customer_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_education_status,
+    cs.total_orders,
+    cs.total_spent,
+    is.i_item_desc,
+    is.i_current_price,
+    is.total_sales,
+    is.sale_status
+FROM CustomerStats cs
+JOIN ItemStats is ON cs.hd_income_band_sk = is.i_item_sk  -- Hypothetical join condition, adjust as needed
+WHERE cs.total_spent > 500
+ORDER BY cs.total_spent DESC, is.total_sales DESC
+LIMIT 100;

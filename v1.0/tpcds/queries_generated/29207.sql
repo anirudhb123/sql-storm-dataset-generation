@@ -1,0 +1,67 @@
+
+WITH Address_Stats AS (
+    SELECT 
+        ca_address_sk,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_city) AS city_uppercase,
+        LOWER(ca_state) AS state_lowercase,
+        CONCAT(ca_street_name, ' - ', ca_city) AS full_address,
+        REGEXP_REPLACE(ca_zip, '[^0-9]', '') AS cleaned_zip
+    FROM 
+        customer_address
+),
+Customer_Profiles AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        REPLACE(c.c_email_address, '@', ' [at] ') AS email_transformed,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+Sales_Stats AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS sales_count,
+        MIN(ws.ws_sold_date_sk) AS first_purchase_date,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cp.customer_full_name,
+    cp.cd_gender,
+    cp.cd_marital_status,
+    as.cleansed_zip,
+    s.total_sales,
+    s.sales_count,
+    s.first_purchase_date,
+    s.last_purchase_date
+FROM 
+    Customer_Profiles cp
+JOIN 
+    Sales_Stats s ON cp.c_customer_sk = s.ws_bill_customer_sk
+JOIN 
+    Address_Stats as ON cp.c_customer_sk = as.ca_address_sk
+WHERE 
+    cp.cd_gender = 'F' AND 
+    s.total_sales > 1000
+ORDER BY 
+    s.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,93 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalUpvotes,
+        TotalDownvotes,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStats
+),
+PopularTags AS (
+    SELECT 
+        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(Tags, ',', numbers.n), ',', -1)) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    JOIN (
+        SELECT 
+            ROW_NUMBER() OVER() AS n
+        FROM 
+            (SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL 
+             SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL 
+             SELECT 9 UNION ALL SELECT 10) numbers
+    ) numbers ON CHAR_LENGTH(Tags) - CHAR_LENGTH(REPLACE(Tags, ',', '')) >= numbers.n - 1
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.TotalQuestions,
+    tu.TotalAnswers,
+    tu.TotalUpvotes,
+    tu.TotalDownvotes,
+    pt.TagName,
+    pt.TagCount
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON pt.TagName IN (
+        SELECT 
+            TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, ',', numbers.n), ',', -1))
+        FROM 
+            Posts p 
+        JOIN (
+            SELECT 
+                ROW_NUMBER() OVER() AS n
+            FROM 
+                (SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL 
+                 SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL 
+                 SELECT 9 UNION ALL SELECT 10) numbers
+        ) numbers ON CHAR_LENGTH(p.Tags) - CHAR_LENGTH(REPLACE(p.Tags, ',', '')) >= numbers.n - 1
+        WHERE 
+            p.OwnerUserId = tu.UserId 
+            AND p.PostTypeId = 1
+    )
+WHERE 
+    tu.UserRank <= 10
+ORDER BY 
+    tu.Reputation DESC, pt.TagCount DESC;

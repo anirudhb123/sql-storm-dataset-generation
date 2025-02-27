@@ -1,0 +1,70 @@
+
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS alias_names,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id,
+        t.title,
+        t.production_year
+),
+
+company_summary AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS production_companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+final_summary AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        ms.alias_names,
+        cs.production_companies,
+        cs.company_types,
+        ms.total_cast,
+        ms.total_keywords
+    FROM 
+        movie_summary ms
+    LEFT JOIN 
+        company_summary cs ON ms.movie_id = cs.movie_id
+)
+
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    alias_names,
+    COALESCE(production_companies, 'No Companies') AS production_companies,
+    COALESCE(company_types, 'No Types') AS company_types,
+    total_cast,
+    total_keywords
+FROM 
+    final_summary
+ORDER BY 
+    production_year DESC, 
+    title;

@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        SUM(v.VoteTypeId = 2 OR v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS VoteCount,
+        COALESCE(b.Class, 0) AS UserBadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1 
+    WHERE 
+        p.ViewCount > 1000 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.LastActivityDate IS NOT NULL
+    GROUP BY 
+        p.Id
+),
+
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        COUNT(ph.Id) AS ClosureCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Id
+    HAVING 
+        COUNT(ph.Id) > 1 
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.UserPostRank,
+    rp.VoteCount,
+    ra.LastCommentDate,
+    cp.ClosureCount,
+    (CASE 
+        WHEN ra.LastCommentDate IS NULL THEN 'No comments yet'
+        WHEN ra.LastCommentDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Last commented over 30 days ago'
+        ELSE 'Recently active'
+    END) AS CommentActivity,
+    (CASE 
+        WHEN rp.UserBadgeClass = 1 THEN 'Gold Presence'
+        WHEN rp.UserBadgeClass = 0 AND rp.UserPostRank = 1 THEN 'Top Post Without Badge'
+        ELSE 'Regular Post'
+    END) AS PostClassification
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.Id
+WHERE 
+    rp.UserPostRank <= 3 
+ORDER BY 
+    rp.Score DESC,
+    rp.CreationDate ASC NULLS LAST
+LIMIT 100;

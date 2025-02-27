@@ -1,0 +1,54 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+MaxRevenue AS (
+    SELECT 
+        MAX(total_revenue) AS max_revenue
+    FROM 
+        OrderSummary
+)
+SELECT 
+    os.o_orderkey,
+    os.o_orderdate,
+    os.total_revenue,
+    os.supplier_count,
+    CASE 
+        WHEN os.total_revenue = mr.max_revenue THEN 'Highest Revenue'
+        ELSE 'Other Orders'
+    END AS revenue_status,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    r.r_name AS region_name
+FROM 
+    OrderSummary os
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_orderkey = os.o_orderkey
+    )
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    os.total_revenue > (SELECT AVG(total_revenue) FROM OrderSummary)
+ORDER BY 
+    os.total_revenue DESC;

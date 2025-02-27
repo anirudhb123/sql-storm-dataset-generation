@@ -1,0 +1,109 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.PostTypeId,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.VoteCount) AS TotalVotes,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.OwnerUserId
+),
+UserRanks AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ps.TotalPosts,
+        ps.TotalVotes,
+        ps.AverageScore,
+        RANK() OVER (ORDER BY ps.TotalVotes DESC) AS VotesRank,
+        RANK() OVER (ORDER BY ps.AverageScore DESC) AS ScoreRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, ph.Comment
+),
+FinalStats AS (
+    SELECT 
+        u.DisplayName AS User,
+        COUNT(DISTINCT p.PostId) AS TotalAnsweredQuestions,
+        SUM(COALESCE(cp.CloseReasonCount, 0)) AS TotalClosed,
+        SUM(cp.CloseReasonCount) / NULLIF(COUNT(DISTINCT p.PostId), 0) AS CloseRatio,
+        ur.VotesRank,
+        ur.ScoreRank
+    FROM 
+        RecursivePosts p
+    LEFT JOIN 
+        ClosedPosts cp ON p.PostId = cp.PostId
+    JOIN 
+        UserRanks ur ON p.OwnerUserId = ur.UserId
+    WHERE 
+        p.PostTypeId = 2  
+    GROUP BY 
+        u.DisplayName, ur.VotesRank, ur.ScoreRank
+)
+SELECT 
+    fs.User,
+    fs.TotalAnsweredQuestions,
+    fs.TotalClosed,
+    fs.CloseRatio,
+    fs.VotesRank,
+    fs.ScoreRank,
+    CASE 
+        WHEN fs.CloseRatio > 0.5 THEN 'High'
+        WHEN fs.CloseRatio BETWEEN 0.25 AND 0.5 THEN 'Moderate'
+        ELSE 'Low'
+    END AS ClosureImpact
+FROM 
+    FinalStats fs
+ORDER BY 
+    fs.CloseRatio DESC, fs.TotalAnsweredQuestions DESC;

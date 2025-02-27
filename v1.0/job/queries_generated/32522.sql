@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL  -- Starting point: non-episode titles only
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id  -- Recursive join to get episodes
+),
+
+actor_information AS (
+    SELECT 
+        ca.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        movie_hierarchy mh ON c.movie_id = mh.movie_id
+    GROUP BY 
+        ca.person_id, ak.name
+),
+
+ranked_actors AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        actor_information
+    WHERE 
+        movie_count > 1  -- Only actors in more than one movie
+),
+
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    ra.actor_name,
+    ra.movie_count,
+    ra.movies,
+    COUNT(DISTINCT mh.movie_id) AS episode_count,
+    ks.keyword_count
+FROM 
+    ranked_actors ra
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id IN (SELECT movie_id FROM movie_keyword)
+LEFT JOIN 
+    keyword_summary ks ON ks.movie_id IN (SELECT movie_id FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'genre'))
+LEFT JOIN 
+    movie_hierarchy mh ON ra.movie_count = mh.level
+WHERE 
+    ra.rank <= 10  -- Top 10 actors
+GROUP BY 
+    ra.actor_name, ra.movie_count, ra.movies, ks.keyword_count
+ORDER BY 
+    ra.movie_count DESC;

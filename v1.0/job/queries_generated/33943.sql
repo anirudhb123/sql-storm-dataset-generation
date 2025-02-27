@@ -1,0 +1,79 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title AS movie_title, 
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    WHERE 
+        c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title, 
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    WHERE 
+        ml.linked_movie_id NOT IN (SELECT movie_id FROM movie_hierarchy)
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+average_roles AS (
+    SELECT 
+        ci.movie_id, 
+        AVG(CASE 
+            WHEN ci.role_id IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS avg_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    ar.avg_roles,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    SUM(CASE 
+        WHEN ci.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS count_notes,
+    max(m.production_year) AS max_production_year,
+    COUNT(DISTINCT ci.role_id) AS unique_roles
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    average_roles ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_title m ON mh.movie_id = m.id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mk.keywords, ar.avg_roles
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 3 
+    AND ar.avg_roles > 1
+ORDER BY 
+    mh.depth, total_cast DESC, max_production_year DESC;

@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0) AS season_nr,
+        COALESCE(mt.episode_nr, 0) AS episode_nr,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0),
+        COALESCE(mt.episode_nr, 0),
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+actor_movie_info AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        mt.title AS movie_title,
+        mt.production_year,
+        RANK() OVER (PARTITION BY ak.id ORDER BY mt.production_year DESC) AS movie_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.season_nr,
+    mh.episode_nr,
+    aki.actor_name,
+    mki.keywords,
+    CASE 
+        WHEN mh.season_nr > 0 AND mh.episode_nr > 0 THEN 'Series'
+        WHEN mh.season_nr = 0 AND mh.episode_nr > 0 THEN 'Episode'
+        ELSE 'Feature Film'
+    END AS movie_type,
+    COUNT(DISTINCT ci.id) AS total_cast_members
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_movie_info aki ON mh.movie_id = aki.movie_id
+LEFT JOIN 
+    movie_keywords mki ON mh.movie_id = mki.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (mki.keywords IS NULL OR mki.keywords LIKE '%drama%')
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.season_nr, mh.episode_nr, aki.actor_name, mki.keywords
+HAVING 
+    COUNT(DISTINCT ci.id) > 5
+ORDER BY 
+    movie_type, mh.production_year DESC, mh.title;

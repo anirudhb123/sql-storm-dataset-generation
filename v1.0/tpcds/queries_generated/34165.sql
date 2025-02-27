@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss_store_sk, 
+        COUNT(DISTINCT ss_customer_sk) AS unique_customers, 
+        SUM(ss_ext_sales_price) AS total_sales,
+        SUM(CASE WHEN ss_ext_discount_amt > 0 THEN ss_ext_discount_amt ELSE 0 END) AS total_discounts,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_ext_sales_price) DESC) AS rank
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk BETWEEN 2458280 AND 2458620 -- Date range for 2022
+    GROUP BY 
+        ss_store_sk
+),
+top_stores AS (
+    SELECT 
+        ss_store_sk,
+        unique_customers,
+        total_sales,
+        total_discounts
+    FROM 
+        sales_summary
+    WHERE 
+        rank <= 5
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_marital_status, 
+        cd.cd_credit_rating,
+        COALESCE(AVG(ss.net_profit), 0) AS avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_credit_rating
+),
+inventory_details AS (
+    SELECT 
+        i.i_item_sk, 
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        ROW_NUMBER() OVER (ORDER BY SUM(inv.inv_quantity_on_hand) DESC) AS inv_rank
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    s.ss_store_sk,
+    s.unique_customers,
+    s.total_sales,
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    c.cd_marital_status,
+    c.cd_credit_rating,
+    c.avg_net_profit,
+    i.total_quantity
+FROM 
+    top_stores s
+JOIN 
+    customer_details c ON s.ss_store_sk = (SELECT ss_store_sk FROM store WHERE s_store_sk = ss_store_sk)
+LEFT JOIN 
+    inventory_details i ON i.inv_rank <= 5
+WHERE 
+    s.total_sales > (SELECT AVG(total_sales) FROM top_stores)
+ORDER BY 
+    s.total_sales DESC, c.avg_net_profit DESC;

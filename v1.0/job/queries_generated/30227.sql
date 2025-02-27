@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    INNER JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    INNER JOIN 
+        aka_title linked_title ON ml.linked_movie_id = linked_title.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT mh.movie_id) AS linked_movies_count,
+    AVG(ai.production_year) OVER (PARTITION BY a.name) AS avg_movie_year
+FROM 
+    cast_info ci
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    MovieHierarchy mh ON t.id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = 
+    (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+WHERE 
+    a.name IS NOT NULL
+    AND (mi.info IS NOT NULL AND mi.note IS NULL)
+GROUP BY 
+    a.name, t.title
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 0
+ORDER BY 
+    linked_movies_count DESC, avg_movie_year DESC;

@@ -1,0 +1,62 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        LEAD(ps.ps_availqty) OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_suppkey) AS next_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty IS NOT NULL
+),
+DiscountedRevenue AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FilteredNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        n.n_name NOT LIKE '%land%'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(dr.total_revenue), 0) AS aggregated_revenue,
+    COUNT(DISTINCT f.n_nationkey) AS unique_nations,
+    MAX(rn.rn) AS max_row_num,
+    STRING_AGG(p.p_name || ' (' || COALESCE(rn.next_availqty, 'N/A') || ')', ', ') AS part_details
+FROM 
+    region r
+LEFT JOIN 
+    FilteredNations f ON f.supplier_count > 0
+LEFT JOIN 
+    DiscountedRevenue dr ON f.n_nationkey = dr.l_orderkey 
+LEFT JOIN 
+    RecursiveCTE rn ON rn.p_partkey = dr.l_orderkey 
+WHERE 
+    r.r_name IS NOT NULL AND r.r_name <> ''
+GROUP BY 
+    r.r_name
+HAVING 
+    COALESCE(SUM(dr.total_revenue), 0) > 100000 AND 
+    unique_nations > (SELECT COUNT(n.n_nationkey) FROM nation n) / 5
+ORDER BY 
+    aggregated_revenue DESC, r.r_name;

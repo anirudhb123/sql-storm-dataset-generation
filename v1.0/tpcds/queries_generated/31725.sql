@@ -1,0 +1,52 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_current_price, i_brand, 0 AS level
+    FROM item
+    WHERE i_item_sk < 1000  -- Base case for recursive CTE
+
+    UNION ALL
+
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_current_price * 0.9 AS i_current_price, i.i_brand, ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_item_sk = ih.i_item_sk + 1 -- Simulating a relationship for recursion
+    WHERE ih.level < 10
+),
+SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_tax) AS total_tax,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+FilteredSales AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_sales,
+        sd.total_tax
+    FROM SalesData sd
+    WHERE sd.sales_rank <= 10
+)
+
+SELECT
+    ih.i_item_id,
+    ih.i_item_desc,
+    ih.i_current_price,
+    fs.total_quantity,
+    fs.total_sales,
+    fs.total_tax,
+    CASE
+        WHEN fs.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM ItemHierarchy ih
+LEFT JOIN FilteredSales fs ON ih.i_item_sk = fs.ws_item_sk
+WHERE ih.level < 5 OR ih.i_brand LIKE 'Brand%'
+ORDER BY ih.i_item_id ASC, fs.total_sales DESC
+LIMIT 50;
+

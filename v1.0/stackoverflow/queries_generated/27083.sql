@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS PostTags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><'))::int)
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS ActivityDate,
+        p.Title,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+),
+AggregatedVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostTags,
+    rp.OwnerDisplayName,
+    ra.UserDisplayName AS LastEditedBy,
+    ra.ActivityDate,
+    ra.Comment,
+    av.UpVotes,
+    av.DownVotes,
+    av.TotalVotes,
+    rp.OwnerPostRank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId
+LEFT JOIN 
+    AggregatedVotes av ON rp.PostId = av.PostId
+WHERE 
+    rp.OwnerPostRank = 1
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 10;

@@ -1,0 +1,91 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_birth_year,
+        CASE 
+            WHEN c.c_birth_month IS NULL THEN 'Unknown' 
+            ELSE TO_CHAR(DATE_TRUNC('month', DATE_PART('year', CURRENT_DATE) || '-' || c.c_birth_month || '-01'), 'Month')
+        END AS birth_month,
+        c.c_current_cdemo_sk
+    FROM
+        customer c
+    WHERE
+        c.c_birth_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ch.c_customer_sk,
+        ch.c_first_name,
+        ch.c_last_name,
+        ch.c_birth_year,
+        ch.birth_month,
+        ch.c_current_cdemo_sk
+    FROM
+        CustomerHierarchy ch
+    JOIN
+        customer c2 ON ch.c_current_cdemo_sk = c2.c_current_cdemo_sk
+    WHERE
+        c2.c_birth_year IS NOT NULL
+),
+AggregatedReturns AS (
+    SELECT 
+        sr_refunded_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(sr_returned_date_sk) AS return_count,
+        AVG(sr_return_amt) AS avg_return_amount
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr_refunded_customer_sk
+),
+SalesStats AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid) DESC) AS sale_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_bill_customer_sk IS NOT NULL 
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    ch.c_birth_year,
+    ch.birth_month,
+    COALESCE(ar.total_returned_quantity, 0) AS total_returned_quantity,
+    COALESCE(ar.return_count, 0) AS return_count,
+    ss.total_sales,
+    ss.order_count,
+    CASE 
+        WHEN ss.total_sales >= 1000 THEN 'High Value' 
+        ELSE 'Low Value' 
+    END AS customer_value_category
+FROM
+    CustomerHierarchy ch
+LEFT JOIN
+    AggregatedReturns ar ON ch.c_customer_sk = ar.sr_refunded_customer_sk
+LEFT JOIN 
+    SalesStats ss ON ch.c_customer_sk = ss.ws_bill_customer_sk
+WHERE
+    (ss.total_sales >= 500 OR ar.total_returned_quantity < 10)
+    AND EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = ch.c_current_cdemo_sk 
+        AND cd.cd_gender = 'F'
+    )
+ORDER BY
+    ch.c_birth_year DESC, 
+    total_sales DESC
+LIMIT 50;

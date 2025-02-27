@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        c.c_first_name,
+        c.c_last_name,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) as rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, c.c_first_name, c.c_last_name, ws.ws_sold_date_sk
+),
+TopProfitSales AS (
+    SELECT 
+        web_site_id,
+        c_first_name,
+        c_last_name,
+        total_quantity,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tp.web_site_id,
+    tp.c_first_name,
+    tp.c_last_name,
+    tp.total_quantity,
+    tp.total_net_profit,
+    d.d_month_seq
+FROM 
+    TopProfitSales tp
+JOIN 
+    date_dim d ON tp.ws_sold_date_sk = d.d_date_sk
+ORDER BY 
+    tp.web_site_id, tp.total_net_profit DESC;

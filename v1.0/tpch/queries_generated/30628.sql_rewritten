@@ -1,0 +1,42 @@
+WITH RECURSIVE CostlySuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment 
+    FROM supplier 
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment 
+    FROM supplier s
+    JOIN CostlySuppliers cs ON s.s_suppkey = cs.s_suppkey
+),
+SupplierPartCount AS (
+    SELECT ps.ps_partkey, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_retailprice,
+           COALESCE(spc.supplier_count, 0) AS supplier_count
+    FROM part p
+    LEFT JOIN SupplierPartCount spc ON p.p_partkey = spc.ps_partkey
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+)
+SELECT rd.region_name, 
+       SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS total_sales, 
+       AVG(p.p_retailprice) AS avg_part_price,
+       COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       ROW_NUMBER() OVER (PARTITION BY rd.region_name ORDER BY SUM(ld.l_extendedprice * (1 - ld.l_discount)) DESC) AS rank
+FROM lineitem ld 
+JOIN RecentOrders ro ON ld.l_orderkey = ro.o_orderkey
+JOIN PartDetails p ON ld.l_partkey = p.p_partkey
+JOIN nation n ON n.n_nationkey = ro.c_nationkey
+JOIN region rd ON n.n_regionkey = rd.r_regionkey
+WHERE p.supplier_count > 5
+  AND ld.l_returnflag = 'N'
+GROUP BY rd.region_name
+HAVING total_sales > 10000
+ORDER BY rank;

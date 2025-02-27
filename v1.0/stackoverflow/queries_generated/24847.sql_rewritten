@@ -1,0 +1,75 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    WHERE U.Reputation IS NOT NULL
+),
+ActivePosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(NULLIF(P.AcceptedAnswerId, -1), P.ParentId) AS AcceptedOrParentId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    GROUP BY P.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstEditDate,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(PH.Id) AS EditCount,
+        STRING_AGG(DISTINCT CASE WHEN PH.PostHistoryTypeId IN (4, 5, 6) THEN PH.Comment END, ', ') AS EditComments,
+        COUNT(DISTINCT CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.Id END) AS CloseVotes
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+PostSummary AS (
+    SELECT 
+        AP.PostId,
+        AP.Title,
+        AP.CreationDate,
+        AP.Score,
+        AP.ViewCount,
+        PH.FirstEditDate,
+        PH.LastEditDate,
+        PH.EditCount,
+        PH.EditComments,
+        U.DisplayName AS TopUserName,
+        U.Reputation AS TopUserReputation,
+        PH.CloseVotes
+    FROM ActivePosts AP
+    LEFT JOIN PostHistoryDetails PH ON AP.PostId = PH.PostId
+    LEFT JOIN RankedUsers U ON AP.CreatedByUserId = U.UserId
+    WHERE AP.ViewCount > 100 AND AP.Score IS NOT NULL
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    FirstEditDate,
+    LastEditDate,
+    EditCount,
+    EditComments,
+    CASE 
+        WHEN CloseVotes > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(TopUserName, 'Anonymous') AS TopUser,
+    COALESCE(TopUserReputation, 0) AS TopUserReputation
+FROM PostSummary
+WHERE PostStatus = 'Open'
+ORDER BY Score DESC, ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE price_changes AS (
+    SELECT ps_partkey, ps_supplycost, 1 AS level
+    FROM partsupp
+    WHERE ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+    UNION ALL
+    SELECT ps.ps_partkey, ps.ps_supplycost * 0.95 AS ps_supplycost, pc.level + 1
+    FROM partsupp ps
+    JOIN price_changes pc ON ps.ps_partkey = pc.ps_partkey
+    WHERE pc.level < 5
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+nation_supplier AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+part_supplier_summary AS (
+    SELECT 
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_name
+)
+SELECT 
+    pc.ps_partkey,
+    p.p_name,
+    ps.avg_cost,
+    cs.total_order_value,
+    cs.order_rank,
+    ns.n_name,
+    ns.supplier_count
+FROM price_changes pc
+JOIN part_supplier_summary ps ON pc.ps_partkey = ps.p_partkey
+JOIN customer_orders cs ON cs.total_order_value > ps.avg_cost
+LEFT JOIN nation_supplier ns ON ns.supplier_count > 0
+WHERE (cs.order_rank = 1 OR cs.order_rank IS NULL)
+ORDER BY pc.level DESC, cs.total_order_value DESC;

@@ -1,0 +1,89 @@
+
+WITH RECURSIVE PriceGrowth AS (
+    SELECT 
+        p_partkey, 
+        p_name, 
+        p_retailprice, 
+        ROW_NUMBER() OVER (PARTITION BY p_partkey ORDER BY p_retailprice DESC) AS price_rank
+    FROM 
+        part
+    WHERE 
+        p_retailprice IS NOT NULL
+),
+AvgSupplierCost AS (
+    SELECT 
+        ps_partkey,
+        AVG(ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+SupplierOrderCount AS (
+    SELECT 
+        l_suppkey,
+        COUNT(DISTINCT o_orderkey) AS total_orders
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey 
+    GROUP BY 
+        l_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey 
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+CustomerOrderMetrics AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    n.n_name AS nation_name, 
+    r.r_name AS region_name,
+    COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+    SUM(pc.p_retailprice) AS total_part_retail_price,
+    AVG(asc.avg_supply_cost) AS avg_supply_cost,
+    SUM(hvo.order_value) AS total_high_value_order
+FROM 
+    nation n 
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    part pc ON pc.p_partkey = s.s_suppkey
+LEFT JOIN 
+    AvgSupplierCost asc ON pc.p_partkey = asc.ps_partkey
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey IN (
+        SELECT o_orderkey 
+        FROM orders 
+        WHERE o_orderkey IS NOT NULL
+    )
+GROUP BY 
+    n.n_name, r.r_name
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 0
+ORDER BY 
+    total_suppliers DESC,
+    total_part_retail_price DESC;

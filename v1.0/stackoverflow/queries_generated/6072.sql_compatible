@@ -1,0 +1,68 @@
+
+WITH PostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        (SELECT DISTINCT value AS TagName FROM STRING_SPLIT(p.Tags, ',')) AS t ON t.TagName = t.TagName
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName, a.AcceptedAnswerId
+), UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+), UserBadgesCTE AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    p.OwnerDisplayName,
+    p.AcceptedAnswerId,
+    p.CommentCount,
+    p.VoteCount,
+    p.Tags,
+    ur.TotalReputation,
+    ub.BadgeCount
+FROM 
+    PostsCTE p
+LEFT JOIN 
+    UserReputationCTE ur ON ur.UserId = p.OwnerUserId
+LEFT JOIN 
+    UserBadgesCTE ub ON ub.UserId = p.OwnerUserId
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

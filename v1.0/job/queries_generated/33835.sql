@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+yearly_production AS (
+    SELECT 
+        mh.production_year,
+        COUNT(*) AS total_movies,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        AVG(mk.keyword_count) AS avg_keywords
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(*) AS keyword_count
+        FROM 
+            movie_keyword
+        GROUP BY 
+            movie_id
+    ) mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.production_year
+),
+actor_production AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT mc.actor_name, ', ') AS actors
+    FROM 
+        movie_cast mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    yp.production_year,
+    yp.total_movies,
+    yp.total_companies,
+    yp.avg_keywords,
+    ap.total_cast,
+    ap.actors,
+    CASE 
+        WHEN yp.total_movies >= 10 THEN 'High'
+        WHEN yp.total_movies < 10 AND yp.total_movies >= 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS production_category
+FROM 
+    yearly_production yp
+LEFT JOIN 
+    actor_production ap ON yp.production_year = (SELECT DISTINCT mh.production_year FROM movie_hierarchy mh WHERE mh.movie_id IN (SELECT movie_id FROM movie_cast))
+ORDER BY 
+    yp.production_year DESC;

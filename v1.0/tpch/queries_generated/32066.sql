@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_supply_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    SUM(os.total_revenue) AS total_order_revenue,
+    COALESCE(SUM(sr.total_supply_revenue), 0) AS total_supplier_revenue,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    COUNT(DISTINCT sh.s_suppkey) AS total_suppliers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+LEFT JOIN SupplierRevenue sr ON os.o_orderkey = sr.s_suppkey
+LEFT JOIN SupplierHierarchy sh ON sr.s_suppkey = sh.s_suppkey
+GROUP BY r.r_name
+HAVING total_order_revenue > 100000
+ORDER BY total_order_revenue DESC, r.r_name;

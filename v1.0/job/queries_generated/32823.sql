@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    SUM(CASE WHEN ci.note LIKE '%main%' THEN 1 ELSE 0 END) AS main_actors,
+    AVG(COALESCE(ri.actor_rating, 0)) AS avg_rating,
+    STRING_AGG(aka.name, ', ') AS actor_names
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name aka ON ci.person_id = aka.person_id
+LEFT JOIN 
+    (SELECT 
+         ci.movie_id, 
+         AVG(pi.rating) AS actor_rating
+     FROM 
+         cast_info ci
+     JOIN 
+         person_info pi ON ci.person_id = pi.person_id
+     WHERE 
+         pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+     GROUP BY 
+         ci.movie_id) ri ON mh.movie_id = ri.movie_id
+WHERE 
+    mh.production_year > 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, total_actors DESC;
+
+### Explanation of the Query:
+1. **CTE (Recursive)**: Creates a recursive hierarchy of movies linked through the `movie_link` table, starting from a base set of movies marked as 'movie'.
+2. **Joins**: The main query is joined with tables such as `complete_cast`, `cast_info`, `aka_name`, and a subquery to get average actor ratings to aggregate actor data for the retrieved movies.
+3. **Aggregations**: Counts total actors and the number of 'main' actors, computes average ratings, and aggregates actor names into a single string.
+4. **Conditions**: Filters movies produced after the year 2000 and retains only those with more than five distinct actors.
+5. **Ordering**: Orders results by the production year (newest first) and the total number of actors (highest first). 
+
+This query is complex and demonstrates various SQL constructs, such as CTEs, multiple joins, aggregations, and conditionals, which are essential for comprehensive performance benchmarking.

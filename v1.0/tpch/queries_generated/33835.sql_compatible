@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(50)) AS hierarchy_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT(sh.hierarchy_path, ' > ', s.s_name)
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+AggregateData AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM lineitem l 
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY l.l_orderkey
+),
+RegionSales AS (
+    SELECT r.r_name, SUM(ad.total_sales) AS region_total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN AggregateData ad ON ps.ps_partkey = ad.l_orderkey
+    GROUP BY r.r_name
+)
+SELECT rh.hierarchy_path, 
+       rs.r_name, 
+       rs.region_total_sales,
+       DENSE_RANK() OVER (PARTITION BY rs.r_name ORDER BY rs.region_total_sales DESC) AS sales_rank
+FROM RegionSales rs
+JOIN SupplierHierarchy rh ON rh.s_suppkey = (SELECT MIN(s_suppkey) 
+                                             FROM supplier 
+                                             WHERE s_acctbal = (SELECT MAX(s_acctbal) 
+                                                                 FROM supplier 
+                                                                 WHERE s_nationkey = (SELECT n.n_nationkey 
+                                                                                      FROM nation n 
+                                                                                      JOIN supplier s 
+                                                                                      ON n.n_nationkey = s.s_nationkey 
+                                                                                      LIMIT 1)))
+WHERE rs.region_total_sales IS NOT NULL
+ORDER BY rs.region_total_sales DESC;

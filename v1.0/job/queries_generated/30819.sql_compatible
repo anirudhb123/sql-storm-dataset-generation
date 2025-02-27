@@ -1,0 +1,85 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ARRAY[ci.person_id] AS path,
+        1 AS level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.path || ci.person_id,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ALL(ah.path)
+),
+avg_ratings AS (
+    SELECT 
+        mt.movie_id,
+        AVG(CAST(mi.info AS numeric)) AS avg_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        aka_title mt ON mi.movie_id = mt.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mt.movie_id
+),
+enhanced_cast AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ah.level AS actor_level,
+        ar.avg_rating
+    FROM 
+        actor_hierarchy ah
+    JOIN
+        aka_name ak ON ak.person_id = ah.person_id
+    JOIN 
+        aka_title at ON at.id = ah.movie_id
+    LEFT JOIN 
+        avg_ratings ar ON ar.movie_id = ah.movie_id
+    WHERE 
+        at.production_year > 2000
+        AND ar.avg_rating IS NOT NULL
+),
+ranked_cast AS (
+    SELECT 
+        actor_name, 
+        movie_title, 
+        production_year, 
+        actor_level,
+        avg_rating,
+        RANK() OVER (PARTITION BY production_year ORDER BY avg_rating DESC) AS rating_rank
+    FROM 
+        enhanced_cast
+    WHERE 
+        actor_level <= 3
+)
+
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    avg_rating,
+    rating_rank
+FROM 
+    ranked_cast
+WHERE 
+    rating_rank <= 5
+ORDER BY 
+    production_year DESC, 
+    avg_rating DESC;

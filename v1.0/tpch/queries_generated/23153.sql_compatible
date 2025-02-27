@@ -1,0 +1,49 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+monthly_avg_price AS (
+    SELECT l.l_orderkey,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATEADD(month, -12, '1998-10-01')
+    GROUP BY l.l_orderkey
+),
+subquery_orders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderpriority,
+           CASE WHEN o.o_orderstatus = 'F' THEN 'Finalized' ELSE 'Pending' END AS order_status
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1997-01-01'
+),
+final_selection AS (
+    SELECT n.n_name, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY p.p_retailprice DESC) AS price_rank,
+           COALESCE(sh.level, -1) AS supplier_level
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE p.p_retailprice BETWEEN 50 AND 500
+      AND (p.p_comment LIKE '%quality%' OR p.p_comment IS NULL)
+)
+
+SELECT fs.n_name,
+       fs.p_name,
+       fs.p_retailprice,
+       fs.price_rank,
+       ma.avg_price,
+       fs.supplier_level
+FROM final_selection fs
+JOIN monthly_avg_price ma ON fs.p_name = ma.l_orderkey
+WHERE fs.price_rank <= 10
+   OR fs.supplier_level > 0
+ORDER BY fs.n_name, fs.price_rank DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

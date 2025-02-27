@@ -1,0 +1,78 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Comments c ON u.Id = c.UserId
+        LEFT JOIN Votes v ON u.Id = v.UserId
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalUpVotes - TotalDownVotes DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT TRIM(SUBSTRING(t.TagName FROM 2 FOR LENGTH(t.TagName) - 2)), ', ') AS Tags
+    FROM 
+        Posts p
+        LEFT JOIN Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id
+),
+PopularQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pt.Tags,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PopularityRank
+    FROM 
+        Posts p
+        JOIN PostTags pt ON p.Id = pt.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+)
+SELECT 
+    tu.UserId,
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalComments,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.TotalBadges,
+    pq.PostId,
+    pq.Title AS PopularQuestionTitle,
+    pq.Score AS QuestionScore,
+    pq.CreationDate AS QuestionCreationDate,
+    pq.Tags AS QuestionTags,
+    tu.UserRank
+FROM 
+    TopUsers tu
+    JOIN PopularQuestions pq ON tu.TotalPosts > 0  -- Join to ensure users have posted questions
+WHERE 
+    tu.UserRank <= 10  -- We only want the top 10 users by upvotes
+ORDER BY 
+    tu.UserRank;

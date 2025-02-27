@@ -1,0 +1,79 @@
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m 
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m2.id AS movie_id,
+        m2.title,
+        mc.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    JOIN 
+        movie_chain mc ON ml.movie_id = mc.movie_id
+    WHERE 
+        mc.level < 5
+),
+
+movie_actors AS (
+    SELECT 
+        c.movie_id, 
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+final_summary AS (
+    SELECT 
+        mc.movie_id,
+        mc.title AS movie_title,
+        ma.actor_name,
+        ks.keywords,
+        mc.level
+    FROM 
+        movie_chain mc
+    LEFT JOIN 
+        movie_actors ma ON mc.movie_id = ma.movie_id
+    LEFT JOIN 
+        keyword_summary ks ON mc.movie_id = ks.movie_id
+)
+
+SELECT 
+    fs.movie_id,
+    fs.movie_title,
+    fs.actor_name,
+    COALESCE(fs.keywords, 'No Keywords') AS keywords,
+    fs.level
+FROM 
+    final_summary fs
+WHERE 
+    fs.level = 1
+ORDER BY 
+    fs.movie_title ASC, fs.actor_rank
+LIMIT 50;

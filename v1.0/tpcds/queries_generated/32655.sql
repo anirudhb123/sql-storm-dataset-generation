@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_item_desc, 
+        sales.total_sales,
+        sales.order_count
+    FROM 
+        SalesCTE AS sales
+    JOIN 
+        item ON sales.ws_item_sk = item.i_item_sk 
+    WHERE 
+        sales.sales_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    t.item_id AS ItemID,
+    t.item_desc AS ItemDescription,
+    t.total_sales AS TotalSales,
+    COALESCE(cr.return_count, 0) AS TotalReturns,
+    COALESCE(cr.total_return_amt, 0) AS TotalReturnAmount,
+    COALESCE(cr.total_return_quantity, 0) AS TotalReturnQuantity,
+    (t.total_sales - COALESCE(cr.total_return_amt, 0)) AS NetSales
+FROM 
+    TopItems AS t
+LEFT JOIN 
+    CustomerReturns AS cr ON t.ws_item_sk = cr.sr_item_sk
+ORDER BY 
+    NetSales DESC
+LIMIT 10;

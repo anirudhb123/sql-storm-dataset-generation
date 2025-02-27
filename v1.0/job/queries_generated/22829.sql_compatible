@@ -1,0 +1,61 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS acting_roles,
+        COUNT(DISTINCT kc.keyword_id) AS total_keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM title t
+    LEFT JOIN cast_info c ON c.movie_id = t.id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword kc ON kc.id = mk.keyword_id
+    LEFT JOIN complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN movie_info mi ON mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'duration' LIMIT 1)
+    LEFT JOIN aka_title at ON at.movie_id = t.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN company_name com ON com.id = mc.company_id 
+    GROUP BY t.id, t.title, t.production_year
+),
+nickname_aggregate AS (
+    SELECT 
+        ak.person_id,
+        STRING_AGG(ak.name, ', ') AS nicknames,
+        COUNT(DISTINCT ak.name) AS nickname_count
+    FROM aka_name ak
+    GROUP BY ak.person_id
+),
+bizarre_aggregate AS (
+    SELECT 
+        cm.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        MAX(CASE WHEN dt.kind = 'Director' THEN ci.role_id END) AS director_role,
+        SUM(CASE WHEN ak.name IS NULL THEN 1 ELSE 0 END) AS missing_nicknames
+    FROM complete_cast cm
+    LEFT JOIN cast_info ci ON ci.movie_id = cm.movie_id
+    LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN role_type rt ON rt.id = ci.role_id
+    JOIN movie_companies mc ON mc.movie_id = cm.movie_id
+    JOIN company_type ct ON ct.id = mc.company_type_id
+    JOIN kind_type dt ON dt.id = ct.kind_id
+    GROUP BY cm.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    rm.total_keywords,
+    na.nicknames,
+    na.nickname_count,
+    bz.cast_count,
+    bz.director_role
+FROM ranked_movies rm
+LEFT JOIN nickname_aggregate na ON na.person_id IN (
+        SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = rm.movie_id
+    )
+LEFT JOIN bizarre_aggregate bz ON bz.movie_id = rm.movie_id
+WHERE rm.rank <= 3
+ORDER BY rm.production_year, rm.total_cast DESC
+LIMIT 10;

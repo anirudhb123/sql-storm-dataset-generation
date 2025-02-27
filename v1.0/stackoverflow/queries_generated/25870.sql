@@ -1,0 +1,63 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(P.AnswerCount, 0) AS TotalAnswers,
+        COALESCE(P.CommentCount, 0) AS TotalComments,
+        COALESCE(P.Score, 0) AS TotalScore,
+        UB.BadgeCount,
+        UB.BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        (SELECT 
+             OwnerUserId, 
+             COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS AnswerCount,
+             COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS CommentCount,
+             SUM(Score) AS Score
+         FROM 
+             Posts 
+         GROUP BY 
+             OwnerUserId) P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+    WHERE 
+        U.Reputation > 0
+),
+RankedUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        TopUsers
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    BadgeCount,
+    BadgeNames,
+    TotalAnswers,
+    TotalComments,
+    TotalScore,
+    ReputationRank
+FROM 
+    RankedUsers
+WHERE 
+    ReputationRank <= 10;
+This SQL query constructs a benchmarking report of the top 10 users based on reputation. It first gathers badge information related to each user, then consolidates users' statistics from the posts they have authored (i.e., answers and comments). The final selection ranks the top users by their reputation and includes details like badge counts and names, answer and comment totals, and overall scores.

@@ -1,0 +1,46 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS genre,
+        c.name AS company_name,
+        p.name AS person_name,
+        r.role AS role
+    FROM 
+        aka_title t
+    JOIN movie_keyword mk ON t.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_companies mc ON t.id = mc.movie_id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN complete_cast cc ON t.id = cc.movie_id
+    JOIN role_type r ON cc.role_id = r.id
+    JOIN aka_name p ON cc.person_id = p.person_id
+    WHERE 
+        t.production_year >= 2000 
+        AND p.name ILIKE '%Smith%'
+),
+movie_summary AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        STRING_AGG(DISTINCT genre, ', ') AS genres,
+        STRING_AGG(DISTINCT company_name, ', ') AS production_companies,
+        STRING_AGG(DISTINCT person_name || ' (' || role || ')', ', ') AS cast_details
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_id, movie_title, production_year
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    genres,
+    production_companies,
+    cast_details
+FROM 
+    movie_summary
+ORDER BY 
+    production_year DESC, movie_title;

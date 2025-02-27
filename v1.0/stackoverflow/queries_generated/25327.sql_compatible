@@ -1,0 +1,65 @@
+
+WITH RecursiveTags AS (
+    SELECT DISTINCT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) ) AS Tag
+    FROM
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+TagStatistics AS (
+    SELECT 
+        RT.Tag,
+        COUNT(DISTINCT P.Id) AS TagUsageCount,
+        COUNT(DISTINCT P.OwnerUserId) AS UserCount,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        RecursiveTags RT
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || RT.Tag || '%'
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        RT.Tag
+    ORDER BY 
+        TagUsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.TotalBounty,
+    U.UpVotes,
+    U.DownVotes,
+    T.Tag,
+    T.TagUsageCount,
+    T.UserCount,
+    T.AvgScore
+FROM 
+    MostActiveUsers U
+JOIN 
+    TagStatistics T ON U.PostCount > T.TagUsageCount
+ORDER BY 
+    U.PostCount DESC, T.TagUsageCount DESC;

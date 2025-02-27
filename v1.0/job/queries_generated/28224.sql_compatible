@@ -1,0 +1,60 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.name AS company_name,
+        rt.role AS actor_role,
+        a.name AS actor_name
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id AND cc.movie_id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+        AND c.country_code = 'USA'
+),
+KeywordDetails AS (
+    SELECT 
+        md.movie_title,
+        k.keyword
+    FROM 
+        MovieDetails md
+    JOIN 
+        movie_keyword mk ON md.movie_title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+RankingDetails AS (
+    SELECT 
+        movie_title,
+        STRING_AGG(keyword, ', ') AS keywords_list
+    FROM 
+        KeywordDetails
+    GROUP BY 
+        movie_title
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.actor_name,
+    md.actor_role,
+    COALESCE(rk.keywords_list, '') AS keywords_list
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RankingDetails rk ON md.movie_title = rk.movie_title
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_name ASC;

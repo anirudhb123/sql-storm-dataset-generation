@@ -1,0 +1,47 @@
+WITH MovieStats AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN LENGTH(pi.info) ELSE NULL END) AS avg_person_info_length,
+        MAX(CASE WHEN pi.info_type_id = 2 THEN pi.info ELSE NULL END) AS max_person_bio
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id
+    LEFT JOIN 
+        cast_info ca ON at.movie_id = ca.movie_id
+    LEFT JOIN 
+        person_info pi ON ca.person_id = pi.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.title, at.production_year
+),
+KeywordStats AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.cast_count,
+    ms.avg_person_info_length,
+    ms.max_person_bio,
+    ks.keywords_list
+FROM 
+    MovieStats ms
+LEFT JOIN 
+    KeywordStats ks ON ms.title = (SELECT at.title FROM aka_title at WHERE at.movie_id = ks.movie_id)
+WHERE 
+    ms.cast_count > 0
+ORDER BY 
+    ms.production_year DESC, ms.cast_count DESC
+LIMIT 10;

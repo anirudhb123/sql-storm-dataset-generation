@@ -1,0 +1,77 @@
+WITH MovieStats AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.kind_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_role_presence,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies_involved
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN
+        company_name co ON co.id = mc.company_id
+    LEFT JOIN
+        role_type rt ON c.role_id = rt.id
+    LEFT JOIN
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN
+        info_type it ON mc.company_type_id = it.id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        cast_count,
+        avg_role_presence,
+        companies_involved,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rank,
+        COUNT(*) OVER (PARTITION BY production_year) AS total_movies
+    FROM
+        MovieStats
+),
+FilteredMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        cast_count,
+        avg_role_presence,
+        companies_involved,
+        rank,
+        total_movies,
+        CASE
+            WHEN avg_role_presence > 0.5 THEN 'High involvement'
+            WHEN avg_role_presence IS NULL THEN 'No roles assigned'
+            ELSE 'Low involvement'
+        END AS involvement_level
+    FROM
+        RankedMovies
+)
+SELECT
+    f.title_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.avg_role_presence,
+    f.companies_involved,
+    f.rank,
+    f.total_movies,
+    f.involvement_level
+FROM
+    FilteredMovies f
+WHERE
+    f.rank <= 5 
+    OR f.company_id IN (SELECT id FROM company_name WHERE country_code = 'USA')
+ORDER BY
+    f.production_year DESC,
+    f.cast_count DESC
+LIMIT 100;

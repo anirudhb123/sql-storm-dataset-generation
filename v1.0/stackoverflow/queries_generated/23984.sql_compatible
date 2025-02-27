@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId 
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.ViewCount, p.Score
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId, 
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosedDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 52 THEN ph.Id END) AS HotCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (50, 53) THEN ph.Id END) AS CommunityBumpCount
+    FROM PostHistory ph
+    WHERE ph.PostId IN (SELECT PostId FROM RankedPosts)
+    GROUP BY ph.PostId
+), 
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        AVG(u.Reputation) AS AverageReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    GROUP BY u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    phs.FirstClosedDate,
+    phs.LastClosedDate,
+    phs.HotCount,
+    phs.CommunityBumpCount,
+    ups.UserId,
+    ups.PostCount,
+    ups.TotalBounty,
+    ups.AverageReputation,
+    CASE 
+        WHEN phs.HotCount > 0 THEN 'Hot'
+        WHEN rp.Rank <= 5 THEN 'Top Recent'
+        ELSE 'Other'
+    END AS PostCategory
+FROM RankedPosts rp
+LEFT JOIN PostHistorySummary phs ON rp.PostId = phs.PostId
+LEFT JOIN UserPostStats ups ON rp.Title IN (SELECT p.Title FROM Posts p WHERE p.OwnerUserId = ups.UserId)
+WHERE rp.CommentCount > 0
+ORDER BY rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,52 @@
+WITH MovieTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        ak_name a ON cc.subject_id = a.person_id
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id AND ci.movie_id = t.id
+    LEFT JOIN 
+        name n ON a.person_id = n.imdb_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        mt.title_id,
+        mt.movie_title,
+        mt.production_year,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT mt.movie_keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT mt.cast_names, ', ') AS all_cast_names
+    FROM 
+        MovieTitles mt
+    GROUP BY 
+        mt.title_id, mt.movie_title, mt.production_year
+    ORDER BY 
+        keyword_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.keyword_count,
+    tm.keywords,
+    tm.all_cast_names
+FROM 
+    TopMovies tm;
+
+This SQL query performs a series of complex operations to benchmark string processing capabilities, aggregating movie titles with their corresponding years, keywords, and cast names while focusing on the top 10 movies based on the number of keywords associated. The query utilizes Common Table Expressions (CTEs) for better readability and performance, ensuring that the results are both comprehensive and analytically valuable.

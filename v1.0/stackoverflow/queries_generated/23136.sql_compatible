@@ -1,0 +1,76 @@
+
+WITH RecentVotes AS (
+    SELECT 
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE v.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY v.PostId, vt.Name
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteCount) FILTER (WHERE vt.Name = 'UpMod'), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteCount) FILTER (WHERE vt.Name = 'DownMod'), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN RecentVotes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(STRING_TO_ARRAY(p.Tags, '<>')) AS TagName
+    ) AS t ON TRUE
+    WHERE p.CreationDate >= DATE '2023-01-01' 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+),
+RankedPosts AS (
+    SELECT 
+        ps.*,
+        ROW_NUMBER() OVER (PARTITION BY CASE WHEN ps.Score >= 10 THEN 'High' ELSE 'Low' END ORDER BY ps.Score DESC) AS ScoreRank
+    FROM PostStats ps
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId = u.Id THEN 1 ELSE 0 END) AS PostsCreated,
+        SUM(CASE WHEN c.UserId = u.Id THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(CASE WHEN b.UserId = u.Id THEN 1 ELSE 0 END) AS BadgesAwarded
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+CombinedResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.UpVotes,
+        r.DownVotes,
+        r.CommentCount,
+        u.UserId AS OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        r.ScoreRank,
+        CASE 
+            WHEN r.ScoreRank = 1 THEN 'Top Performer'
+            ELSE 'Regular Performer'
+        END AS PerformanceStatus
+    FROM RankedPosts r
+    JOIN Users u ON r.OwnerUserId = u.Id
+)
+SELECT 
+    cr.*,
+    COALESCE(u.PostsCreated, 0) AS PostsCreated,
+    COALESCE(u.CommentsMade, 0) AS CommentsMade,
+    COALESCE(u.BadgesAwarded, 0) AS BadgesAwarded
+FROM CombinedResults cr
+LEFT JOIN UserActivity u ON cr.OwnerUserId = u.UserId
+WHERE cr.Score > 5 
+ORDER BY cr.Score DESC, cr.CommentCount DESC;

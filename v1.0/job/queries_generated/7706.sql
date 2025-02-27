@@ -1,0 +1,32 @@
+SELECT 
+    n.name AS actor_name, 
+    t.title AS movie_title, 
+    c.note AS cast_note, 
+    cc.kind AS company_type, 
+    ki.keyword AS movie_keyword
+FROM 
+    cast_info c 
+JOIN 
+    aka_name n ON c.person_id = n.person_id 
+JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id 
+JOIN 
+    title t ON cc.movie_id = t.id 
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id 
+JOIN 
+    keyword ki ON mk.keyword_id = ki.id 
+JOIN 
+    movie_companies mco ON t.id = mco.movie_id 
+JOIN 
+    company_name cn ON mco.company_id = cn.id 
+JOIN 
+    company_type ct ON mco.company_type_id = ct.id 
+WHERE 
+    t.production_year > 1990 
+AND 
+    cn.country_code = 'USA' 
+ORDER BY 
+    t.production_year DESC, 
+    n.name ASC
+LIMIT 100;

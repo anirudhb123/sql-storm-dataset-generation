@@ -1,0 +1,84 @@
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_ship_mode_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity
+    FROM 
+        web_sales ws
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Unknown'
+        END AS gender,
+        c.c_current_addr_sk,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY cd.cd_purchase_estimate DESC) AS demo_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+address_details AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_id, ca.ca_city, ca.ca_state
+),
+sales_summary AS (
+    SELECT 
+        d.d_year,
+        SUM(CASE WHEN r.r_reason_desc IS NULL THEN 0 ELSE 1 END) AS returns_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        MAX(ws.ws_list_price) AS highest_list_price
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        web_returns wr ON ws.ws_order_number = wr.wr_order_number
+    LEFT JOIN 
+        reason r ON wr.wr_reason_sk = r.r_reason_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    ci.c_customer_id,
+    ci.gender,
+    ad.ca_city,
+    ad.ca_state,
+    ss.d_year,
+    ss.total_sales,
+    ss.avg_profit,
+    ad.customer_count,
+    rs.ws_sales_price AS top_price,
+    rs.total_quantity
+FROM 
+    customer_info ci
+JOIN 
+    address_details ad ON ci.c_current_addr_sk = ad.ca_address_id
+JOIN 
+    sales_summary ss ON ss.d_year = EXTRACT(YEAR FROM cast('2002-10-01' as date))
+LEFT JOIN 
+    ranked_sales rs ON ci.c_current_cdemo_sk = rs.ws_item_sk AND rs.price_rank = 1
+WHERE 
+    (ci.cd_marital_status = 'M' OR ci.cd_purchase_estimate > 1000)
+    AND ad.customer_count IS NOT NULL
+ORDER BY 
+    ss.total_sales DESC,
+    ci.gender ASC NULLS LAST
+LIMIT 100 OFFSET 50;

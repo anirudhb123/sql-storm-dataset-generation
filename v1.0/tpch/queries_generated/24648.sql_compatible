@@ -1,0 +1,78 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+),
+supplier_nations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+),
+part_stats AS (
+    SELECT 
+        p.p_partkey,
+        SUM(CASE WHEN ps.ps_availqty < 100 THEN 1 ELSE 0 END) AS low_avail_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    COALESCE(pt.avg_supply_cost, 0) AS avg_supply_cost,
+    s.n_name AS supplier_nation,
+    n.region_name,
+    COUNT(DISTINCT li.l_suppkey) AS distinct_supp_count,
+    CASE 
+        WHEN SUM(li.l_quantity) > 1000 THEN 'High Volume'
+        WHEN SUM(li.l_quantity) BETWEEN 500 AND 1000 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS volume_category
+FROM 
+    ranked_orders o
+JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    part_stats pt ON li.l_partkey = pt.p_partkey
+LEFT JOIN 
+    supplier s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    supplier_nations n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.region_name = r.r_name
+WHERE 
+    o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    pt.avg_supply_cost, 
+    s.n_name, 
+    n.region_name
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+    AND COUNT(li.l_suppkey) > 0
+ORDER BY 
+    o.o_orderdate DESC, revenue DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

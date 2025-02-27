@@ -1,0 +1,58 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_quantity) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+TopReturningCustomers AS (
+    SELECT 
+        rr.sr_customer_sk,
+        rr.total_returned,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        RankedReturns rr
+    JOIN 
+        customer c ON rr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        rr.rnk <= 10
+    GROUP BY 
+        rr.sr_customer_sk, rr.total_returned, c.c_first_name, c.c_last_name, c.c_email_address
+),
+SalesSummary AS (
+    SELECT 
+        ws_ship_customer_sk, 
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        AVG(ws_net_paid_inc_tax) AS avg_order_value
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_customer_sk
+)
+SELECT 
+    cc.c_customer_id,
+    cc.c_first_name,
+    cc.c_last_name,
+    COALESCE(ts.total_orders, 0) AS order_count,
+    COALESCE(ts.total_spent, 0) AS total_spent,
+    (COALESCE(ts.total_spent, 0) / NULLIF(ts.total_orders, 0)) AS avg_spending_per_order,
+    rc.total_returned,
+    rc.return_count
+FROM 
+    customer cc
+LEFT JOIN 
+    SalesSummary ts ON cc.c_customer_sk = ts.ws_ship_customer_sk
+LEFT JOIN 
+    TopReturningCustomers rc ON cc.c_customer_sk = rc.sr_customer_sk
+WHERE 
+    (rc.total_returned > 0 OR ts.total_orders > 0)
+ORDER BY 
+    total_spent DESC, total_returned DESC;

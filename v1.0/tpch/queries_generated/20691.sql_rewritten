@@ -1,0 +1,56 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.n_nationkey,
+        s.s_comment,
+        1 AS level
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name = 'NATION_NAME' 
+    UNION ALL
+    SELECT 
+        s2.s_suppkey,
+        s2.s_name,
+        s2.s_acctbal,
+        s2.n_nationkey,
+        s2.s_comment,
+        sh.level + 1
+    FROM 
+        supplier s2
+    JOIN 
+        supplier_hierarchy sh ON s2.s_suppkey = sh.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END) AS avg_returned_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    STRING_AGG(CASE WHEN s.s_acctbal IS NULL THEN 'UNKNOWN' ELSE s.s_name END, ', ') AS supplier_names,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY total_revenue DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    (s.s_acctbal > 1000 OR s.s_acctbal IS NULL)
+    AND (p.p_type LIKE '%BRASS%' OR p.p_retailprice BETWEEN 20.00 AND 100.00)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC, p.p_partkey
+FETCH FIRST 10 ROWS ONLY;

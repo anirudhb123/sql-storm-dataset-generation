@@ -1,0 +1,85 @@
+WITH RECURSIVE MoviePaths AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id, 
+        t.title,
+        path || m.id
+    FROM 
+        MoviePaths mp
+    JOIN 
+        movie_link ml ON mp.movie_id = ml.movie_id
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    WHERE 
+        m.id != ANY(mp.path) 
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id, 
+        cn.name AS cast_name,
+        array_agg(DISTINCT ct.kind) AS roles,
+        COUNT(*) AS num_roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ci.movie_id, cn.name
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id, m.title, mi.info, m.production_year
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    cd.cast_name,
+    cd.num_roles,
+    mi.info AS plot_info,
+    mk.keyword_count,
+    CASE 
+        WHEN mk.keyword_count > 5 THEN 'Highly Keyworded' 
+        WHEN mk.keyword_count IS NULL THEN 'No Keywords' 
+        ELSE 'Moderate Keywords' 
+    END AS keyword_category,
+    COALESCE(mp.path, ARRAY[0]) AS linked_movies
+FROM 
+    MovieInfo mi
+JOIN 
+    CastDetails cd ON mi.movie_id = cd.movie_id
+LEFT JOIN 
+    MoviePaths mp ON mi.movie_id = mp.movie_id
+WHERE 
+    cd.num_roles > 2
+ORDER BY 
+    m.production_year DESC, mk.keyword_count DESC;

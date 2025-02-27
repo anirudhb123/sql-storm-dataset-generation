@@ -1,0 +1,70 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year >= 2020
+    GROUP BY 
+        ws.web_site_sk
+),
+customer_return_summary AS (
+    SELECT 
+        wr.wr_returning_customer_sk, 
+        COUNT(DISTINCT wr.wr_order_number) AS total_returns,
+        COALESCE(SUM(wr.wr_return_amt), 0) AS total_return_amount
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+warehouse_info AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT inv.inv_item_sk) AS total_items_in_stock
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    SUM(CASE 
+        WHEN cs.c_current_cdemo_sk IS NOT NULL THEN cd.cd_dep_count * 1.05
+        ELSE 0 
+    END) AS adjusted_dependent_count,
+    COALESCE(sums.total_quantity, 0) AS total_quantity_sold,
+    COALESCE(sums.total_profit, 0) AS total_profit,
+    wrs.total_returns,
+    wrs.total_return_amount,
+    whi.total_items_in_stock
+FROM 
+    customer cs
+LEFT JOIN 
+    customer_demographics cd ON cs.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    sales_summary sums ON cs.c_customer_sk = sums.web_site_sk
+LEFT JOIN 
+    customer_return_summary wrs ON cs.c_customer_sk = wrs.wr_returning_customer_sk
+JOIN 
+    warehouse_info whi ON whi.total_items_in_stock > 0
+WHERE 
+    (cs.c_birth_year IS NULL OR cs.c_birth_year > 1980)
+    AND (cd.cd_gender = 'F' OR cd.cd_marital_status <> 'S')
+GROUP BY 
+    cs.c_customer_id, cs.c_first_name, cs.c_last_name, sums.total_quantity, sums.total_profit, wrs.total_returns, wrs.total_return_amount, whi.total_items_in_stock
+ORDER BY 
+    total_profit DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

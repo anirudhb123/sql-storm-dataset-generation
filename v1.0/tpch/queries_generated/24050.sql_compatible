@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING AVG(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerTotal AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > 10000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(p.p_container, 'UNKNOWN') AS container_type,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Size unknown' 
+            ELSE CAST(p.p_size AS VARCHAR(255)) 
+        END AS size_description,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_container, p.p_size
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(SUM(lo.l_discount), 0) AS total_discount,
+    AVG(CASE WHEN rd.rn = 1 THEN o.o_totalprice END) AS avg_top_order_price,
+    p.p_name,
+    CONCAT('Supplier count: ', CAST(pd.supplier_count AS VARCHAR(255)), '; ', pd.container_type) AS supplier_info
+FROM customer c
+LEFT JOIN RankedOrders rd ON c.c_custkey = rd.o_orderkey
+LEFT JOIN lineitem lo ON rd.o_orderkey = lo.l_orderkey
+JOIN PartDetails pd ON lo.l_partkey = pd.p_partkey
+WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+GROUP BY c.c_name, p.p_name, pd.container_type, pd.supplier_count
+HAVING COUNT(DISTINCT rd.o_orderkey) > 5
+ORDER BY total_discount DESC, c.c_name;

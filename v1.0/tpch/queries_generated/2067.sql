@@ -1,0 +1,67 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+top_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(r.total_revenue), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        ranked_orders r ON c.c_custkey = r.o_custkey
+    WHERE 
+        c.c_acctbal > 0
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        total_spent > 100000
+),
+nation_details AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name, 
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS number_of_suppliers
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    n.n_name, 
+    n.region_name, 
+    tc.c_name, 
+    tc.total_spent,
+    nd.number_of_suppliers
+FROM 
+    nation_details nd
+JOIN 
+    top_customers tc ON nd.n_nationkey = tc.c_custkey
+WHERE 
+    nd.number_of_suppliers > 5
+UNION ALL
+SELECT 
+    'Total' AS national_name, 
+    NULL AS region_name, 
+    COUNT(tc.c_name) AS total_customers, 
+    SUM(tc.total_spent) AS total_expenditure,
+    NULL AS number_of_suppliers
+FROM 
+    top_customers tc
+ORDER BY 
+    national_name, total_spent DESC;

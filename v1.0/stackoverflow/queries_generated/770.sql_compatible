@@ -1,0 +1,67 @@
+
+WITH UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        RANK() OVER (ORDER BY (UpVotes - DownVotes) DESC) AS UserRank
+    FROM UserActivity
+),
+PostStatistics AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate
+)
+SELECT
+    T.UserId,
+    T.DisplayName,
+    T.UpVotes,
+    T.DownVotes,
+    T.TotalPosts,
+    T.TotalComments,
+    T.TotalBadges,
+    T.UserRank,
+    P.Title,
+    P.CommentCount,
+    P.UpVotes AS PostUpVotes,
+    P.DownVotes AS PostDownVotes,
+    CASE 
+        WHEN P.UpVotes > P.DownVotes THEN 'Positive'
+        ELSE 'Negative'
+    END AS PostSentiment,
+    CASE 
+        WHEN P.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months' THEN 'Old'
+        ELSE 'New'
+    END AS PostRecency
+FROM TopUsers T
+JOIN PostStatistics P ON T.TotalPosts > 0
+WHERE T.UserRank <= 10
+ORDER BY T.UserRank, P.UpVotes - P.DownVotes DESC;

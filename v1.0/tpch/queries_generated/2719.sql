@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey, 
+        o_custkey, 
+        o_totalprice, 
+        o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) as rank
+    FROM 
+        orders
+),
+SupplierCosts AS (
+    SELECT 
+        ps_partkey, 
+        AVG(ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' OR o.o_orderdate IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    rc.total_spent AS customer_total,
+    sc.avg_supplycost AS supplier_cost,
+    RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    CustomerPurchases rc ON rc.c_custkey IN (
+        SELECT DISTINCT o.o_custkey
+        FROM RankedOrders ro
+        JOIN orders o ON ro.o_orderkey = o.o_orderkey
+        WHERE ro.rank <= 3
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, rc.total_spent, sc.avg_supplycost
+HAVING 
+    (COALESCE(SUM(l.l_quantity), 0) > 100)
+    OR (sc.avg_supplycost IS NOT NULL AND sc.avg_supplycost < 20.00)
+ORDER BY 
+    revenue_rank ASC, total_revenue DESC;

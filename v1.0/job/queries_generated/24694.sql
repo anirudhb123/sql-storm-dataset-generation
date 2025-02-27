@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.title IS NOT NULL
+),
+CastCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT p.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        cc.total_cast,
+        cc.cast_names,
+        CASE 
+            WHEN cc.total_cast > 0 THEN 'Has Cast'
+            ELSE 'No Cast'
+        END AS cast_status,
+        CASE 
+            WHEN cc.total_cast IS NULL THEN NULL 
+            ELSE cc.total_cast::text 
+        END AS cast_count_text
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        CastCounts cc ON m.id = cc.movie_id
+)
+SELECT 
+    md.title AS movie_title,
+    md.production_year,
+    md.cast_status,
+    md.cast_count_text,
+    rt.title AS ranked_title
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RankedTitles rt ON md.movie_id = rt.title_id AND rt.rn = 1
+WHERE 
+    (md.cast_status = 'Has Cast' OR md.cast_status IS NULL)
+    AND (md.production_year BETWEEN 2000 AND 2023 OR md.production_year IS NULL)
+ORDER BY 
+    md.production_year DESC NULLS LAST,
+    md.title ASC;

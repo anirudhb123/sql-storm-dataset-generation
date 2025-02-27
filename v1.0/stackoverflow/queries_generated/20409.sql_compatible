@@ -1,0 +1,97 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS CreationRank,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerID_MarkedNull,
+        CASE 
+            WHEN p.Title IS NULL THEN 'Untitled Post'
+            ELSE p.Title 
+        END AS TitleOrDefault
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentClose
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+),
+AggregateVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotesCount
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        (SELECT COUNT(DISTINCT p.Id) 
+         FROM Posts p 
+         WHERE p.OwnerUserId = u.Id) AS UserPostCount,
+        (SELECT COUNT(*)
+         FROM Comments c 
+         WHERE c.UserId = u.Id) AS UserCommentCount,
+        COALESCE(a.UpVotesCount, 0) AS UserUpVotes,
+        COALESCE(a.DownVotesCount, 0) AS UserDownVotes
+    FROM 
+        Users u
+    LEFT JOIN AggregateVotes a ON u.Id = a.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostID,
+        rp.TitleOrDefault,
+        rp.Score,
+        rp.ScoreRank,
+        rp.CreationRank,
+        rp.ViewCount,
+        COALESCE(cp.RecentClose, 0) AS RecentCloseFlag,
+        ua.DisplayName AS UserDisplayName,
+        ua.UserPostCount,
+        ua.UserCommentCount,
+        ua.UserUpVotes,
+        ua.UserDownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN ClosedPosts cp ON rp.PostID = cp.PostId
+    JOIN UserActivity ua ON rp.OwnerUserId = ua.UserId
+    WHERE 
+        (ua.UserPostCount > 10 OR ua.UserCommentCount > 50) 
+        AND (rp.Score > 5 OR rp.ViewCount > 100) 
+)
+SELECT 
+    *,
+    CASE 
+        WHEN RecentCloseFlag > 0 THEN 'Post Closed'
+        ELSE 'Active Post'
+    END AS PostStatus,
+    CASE 
+        WHEN UserUpVotes > UserDownVotes THEN 'More UpVotes'
+        ELSE 'More DownVotes'
+    END AS VoteStatus
+FROM 
+    FinalResults
+ORDER BY 
+    CreationRank, Score DESC;

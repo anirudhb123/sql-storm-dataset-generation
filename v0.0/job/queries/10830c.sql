@@ -1,0 +1,4 @@
+SELECT min(k.keyword) AS movie_keyword, min(n.name) AS actor_name, min(t.title) AS hero_movie
+FROM cast_info AS ci, keyword AS k, movie_keyword AS mk, name AS n, title AS t
+WHERE k.id = mk.keyword_id AND t.id = mk.movie_id AND t.id = ci.movie_id AND ci.movie_id = mk.movie_id AND n.id = ci.person_id
+AND t.episode_nr IS NOT NULL AND n.md5sum IN ('133ccf90b46eb8083987b7337457d728', '18aca2e4146e2fdf510b4eae0408f90c', '198b04d7876378a366858462eebd1459', '25813db1dd24963c974e2c90bad08f9a', '3e879d734dbe0578ce56a5d61dcd77f1', '8a806b43a5a667f9e5e9aa736c826134', '8e8ed09b3b4048b3afaa5fb80b792aa7', 'dadaf6e14854ad8e983bcf2b2a8975ef', 'e268da0301a78c6e76f13ade1334bccd', 'f473fd095625df1dd4a734d2da05ead1');

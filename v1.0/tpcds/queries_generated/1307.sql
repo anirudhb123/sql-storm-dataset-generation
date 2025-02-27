@@ -1,0 +1,62 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+promotions_info AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT CASE WHEN ws.ws_order_number IS NOT NULL THEN ws.ws_order_number END) AS promo_sales
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    cs.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    SUM(ws.ws_sales_price) AS total_sales_value,
+    SUM(ws.ws_quantity * ws.ws_sales_price) AS total_revenue,
+    COALESCE(pi.promo_sales, 0) AS total_promo_sales,
+    RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+FROM 
+    web_sales ws
+JOIN 
+    customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+LEFT JOIN 
+    promotions_info pi ON ws.ws_promo_sk = pi.p_promo_id
+GROUP BY 
+    cs.c_customer_id, ci.cd_gender, ci.cd_marital_status
+HAVING 
+    total_revenue > 1000
+ORDER BY 
+    total_sales_value DESC
+LIMIT 100;

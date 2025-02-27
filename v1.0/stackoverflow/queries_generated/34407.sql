@@ -1,0 +1,90 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        0 AS RankLevel 
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        UR.RankLevel + 1 
+    FROM 
+        Users U
+    JOIN 
+        UserReputation UR ON U.Reputation < UR.Reputation
+    WHERE 
+        UR.RankLevel < 10
+), 
+
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3), 0) AS DownVoteCount,
+        COALESCE((SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId IN (10, 11)), 0) AS CloseCount
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        SUM(COALESCE(PM.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(PM.UpVoteCount, 0)) AS TotalUpVotes,
+        SUM(COALESCE(PM.DownVoteCount, 0)) AS TotalDownVotes,
+        SUM(COALESCE(PM.CloseCount, 0)) AS TotalClosures
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostMetrics PM ON U.Id = PM.OwnerUserId
+    GROUP BY 
+        U.Id
+), 
+
+RankedUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalComments,
+        U.TotalUpVotes,
+        U.TotalDownVotes,
+        U.TotalClosures,
+        R.RankLevel
+    FROM 
+        UserPostStats U
+    JOIN 
+        UserReputation R ON U.UserId = R.Id
+    WHERE 
+        U.TotalUpVotes > 10 OR U.TotalComments > 5
+)
+
+SELECT 
+    R.DisplayName,
+    R.TotalComments,
+    R.TotalUpVotes,
+    R.TotalDownVotes,
+    R.TotalClosures,
+    R.RankLevel,
+    CASE 
+        WHEN R.TotalClosures > 0 THEN 'This user has had posts closed.'
+        ELSE 'This user has not had posts closed.'
+    END AS ClosureStatus
+FROM 
+    RankedUsers R
+ORDER BY 
+    R.TotalUpVotes DESC, 
+    R.TotalComments DESC;

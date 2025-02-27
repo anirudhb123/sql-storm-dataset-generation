@@ -1,0 +1,70 @@
+WITH RecursiveTagInfo AS (
+    SELECT
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        ROW_NUMBER() OVER (PARTITION BY COUNT(P.Id) ORDER BY SUM(P.ViewCount) DESC) AS Rank
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY T.Id, T.TagName
+),
+RecentPostActivity AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        C.UserDisplayName AS Commenter,
+        C.CreationDate AS CommentDate,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY C.CreationDate DESC) AS RecentCommentRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+UserBadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS Score
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT
+    R.TagId,
+    R.TagName,
+    R.PostCount,
+    R.TotalViews,
+    R.Rank,
+    RPA.Title,
+    RPA.CreationDate AS RecentPostDate,
+    RPA.Score AS PostScore,
+    RPA.ViewCount AS PostViewCount,
+    RPA.Commenter,
+    RPA.CommentDate,
+    UBS.UserId,
+    UBS.DisplayName AS UserDisplay,
+    UBS.BadgeCount,
+    UBS.BadgeNames,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    PVS.Score AS PostOverallScore
+FROM RecursiveTagInfo R
+LEFT JOIN RecentPostActivity RPA ON RPA.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%', R.TagName, '%'))
+LEFT JOIN UserBadgeSummary UBS ON UBS.UserId = RPA.Commenter
+LEFT JOIN PostVoteSummary PVS ON PVS.PostId = RPA.PostId
+WHERE R.PostCount > 5
+ORDER BY R.TotalViews DESC, R.Rank, RPA.CreationDate DESC;

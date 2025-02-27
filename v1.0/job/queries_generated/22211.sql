@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title at ON t.id = at.movie_id
+    LEFT JOIN 
+        cast_info c ON at.movie_id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieDetails AS (
+    SELECT 
+        DISTINCT t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        c.id AS company_id,
+        co.name AS company_name,
+        mk.keyword
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title at ON at.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        company_name co ON co.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_name,
+    md.company_name,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword,
+    (SELECT COUNT(DISTINCT m.id)
+     FROM title m
+     WHERE m.id IN (SELECT linked_movie_id FROM movie_link WHERE movie_id = md.movie_id)) AS linked_movie_count,
+    CASE 
+        WHEN md.production_year >= 2000 THEN 'Modern Era'
+        WHEN md.production_year BETWEEN 1980 AND 1999 THEN 'Classic Era'
+        ELSE 'Golden Age'
+    END AS era_category
+FROM 
+    MovieDetails md
+JOIN 
+    RankedTitles rt ON md.title_id = rt.title_id
+WHERE 
+    rt.rank <= 5
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title ASC;
+

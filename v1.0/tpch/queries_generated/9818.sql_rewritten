@@ -1,0 +1,49 @@
+WITH regional_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        r.r_name
+), supplier_parts AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    r.region_name,
+    SUM(rs.total_sales) AS total_sales_per_region,
+    COUNT(DISTINCT sp.supplier_name) AS unique_suppliers,
+    AVG(sp.ps_supplycost) AS avg_supplycost
+FROM 
+    regional_sales rs
+JOIN 
+    region r ON r.r_name = rs.region_name
+JOIN 
+    supplier_parts sp ON sp.ps_availqty > 0
+GROUP BY 
+    r.region_name
+ORDER BY 
+    total_sales_per_region DESC;

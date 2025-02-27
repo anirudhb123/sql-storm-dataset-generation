@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '90 days' 
+        AND P.Score > 10
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        V.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND V.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        SUM(V.BountyAmount) > 0
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2) OVER (PARTITION BY P.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(V.VoteTypeId = 3) OVER (PARTITION BY P.Id), 0) AS DownVoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate < CURRENT_DATE
+    GROUP BY 
+        P.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 11 THEN PH.CreationDate END) AS ReopenedDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 12 THEN PH.CreationDate END) AS DeletedDate,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 13 THEN PH.CreationDate END) AS UndeletedDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Reputation,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    COALESCE(PHD.ClosedDate, 'Not Closed') AS Status,
+    TU.TotalBounties,
+    CASE 
+        WHEN TU.TotalBounties IS NULL THEN 'No Bounties'
+        ELSE 'Has Bounties'
+    END AS BountyStatus
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PostStats PS ON RP.PostId = PS.PostId
+LEFT JOIN 
+    PostHistoryDetails PHD ON RP.PostId = PHD.PostId
+LEFT JOIN 
+    TopUsers TU ON RP.OwnerUserId = TU.UserId
+WHERE 
+    RP.RN = 1
+ORDER BY 
+    RP.Reputation DESC NULLS LAST, 
+    PS.CommentCount DESC;

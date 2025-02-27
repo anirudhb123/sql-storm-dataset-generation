@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01' AND 
+        p.PostTypeId = 1 AND 
+        p.Score IS NOT NULL
+), 
+PostTags AS (
+    SELECT 
+        p.Id AS PostId, 
+        t.TagName,
+        COUNT(*) OVER (PARTITION BY t.TagName) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(substr(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName) ON true
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        MAX(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        MAX(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        MAX(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostsByCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT crt.Name, '; ') AS CloseReasons,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    ut.BadgeCount AS UserBadgeCount,
+    ut.GoldBadges,
+    ut.SilverBadges,
+    ut.BronzeBadges,
+    pt.TagName,
+    pt.TagCount,
+    pcr.CloseReasons,
+    pcr.CloseCount,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AcceptanceStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ut ON ut.UserId = u.Id
+LEFT JOIN 
+    PostTags pt ON pt.PostId = rp.PostId
+LEFT JOIN 
+    PostsByCloseReasons pcr ON pcr.PostId = rp.PostId
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC
+LIMIT 100;

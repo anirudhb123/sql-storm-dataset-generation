@@ -1,0 +1,36 @@
+WITH RankedSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+TotalOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_custkey
+),
+CustomerRegions AS (
+    SELECT c.c_custkey, n.n_regionkey, r.r_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartMetrics AS (
+    SELECT p.p_partkey, COUNT(DISTINCT l.l_orderkey) AS total_orders,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+)
+SELECT pr.p_name, pr.p_size, rs.s_name, rs.s_acctbal,
+       CASE WHEN cr.r_name IS NOT NULL THEN cr.r_name ELSE 'Unknown' END AS region_name,
+       tm.total_orders, tm.avg_price, 
+       COALESCE(to.total_spent, 0) AS total_customer_spent
+FROM RankedSuppliers rs
+JOIN part pr ON rs.ps_partkey = pr.p_partkey
+LEFT JOIN CustomerRegions cr ON rs.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey IN (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = rs.ps_suppkey))
+LEFT JOIN PartMetrics tm ON pr.p_partkey = tm.p_partkey
+LEFT JOIN TotalOrders to ON rs.ps_suppkey = to.o_custkey
+WHERE pr.p_retailprice > 100.00 AND (rs.rank = 1 OR rs.s_acctbal < 500.00)
+ORDER BY total_customer_spent DESC, avg_price DESC;

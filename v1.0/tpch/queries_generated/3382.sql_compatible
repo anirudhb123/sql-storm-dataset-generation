@@ -1,0 +1,63 @@
+
+WITH SupplierCosts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 500
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY sc.total_cost DESC) AS rank
+    FROM 
+        SupplierCosts sc
+    JOIN 
+        supplier s ON sc.s_suppkey = s.s_suppkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        c.total_spent,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrders c
+)
+SELECT 
+    tc.c_name, 
+    tc.total_spent, 
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    rs.rank AS supplier_rank
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    RankedSuppliers rs ON tc.order_count > 5 AND tc.total_spent > 1000
+WHERE 
+    tc.customer_rank <= 10
+ORDER BY 
+    tc.total_spent DESC, 
+    rs.rank ASC;

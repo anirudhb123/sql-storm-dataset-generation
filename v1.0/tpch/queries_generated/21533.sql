@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE()) 
+        AND o.o_orderstatus IN ('O', 'F', 'P')
+),
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS row_num
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= GETDATE() 
+        AND l.l_discount BETWEEN 0.05 AND 0.2
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(DISTINCT ps.ps_partkey) > 10
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        DENSE_RANK() OVER (ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_mktsegment = 'BUILDING'
+)
+SELECT 
+    r.o_orderkey,
+    COALESCE(l.total_value, 0) AS order_value,
+    s.part_count,
+    c.c_name,
+    c.customer_rank,
+    CASE 
+        WHEN s.avg_acct_balance IS NULL THEN 'No suppliers'
+        ELSE CONVERT(varchar, s.avg_acct_balance)
+    END AS avg_supplier_balance
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    HighValueLineItems l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierDetails s ON s.part_count > 10
+FULL OUTER JOIN 
+    FilteredCustomers c ON c.c_custkey = r.o_custkey
+WHERE 
+    r.order_rank <= 5
+    OR l.row_num IS NULL
+ORDER BY 
+    r.o_orderkey DESC, l.total_value DESC, c.customer_rank;

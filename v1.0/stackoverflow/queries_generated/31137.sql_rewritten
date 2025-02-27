@@ -1,0 +1,52 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, 
+           1 AS Depth
+    FROM Tags t
+    WHERE t.IsModeratorOnly = 0 
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, 
+           h.Depth + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy h ON t.WikiPostId = h.Id
+    WHERE t.IsModeratorOnly = 0
+),
+RecentPosts AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+),
+UserStatistics AS (
+    SELECT u.Id AS UserId, u.DisplayName,
+           COUNT(DISTINCT p.Id) AS PostsCount,
+           SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotesCount,
+           SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotesCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+)
+SELECT u.UserId, u.DisplayName, us.PostsCount, us.UpVotesCount, us.DownVotesCount,
+       COALESCE(rt.TagName, 'No Tags') AS TopTag,
+       COUNT(DISTINCT rp.PostId) AS RecentPostCount
+FROM UserStatistics us
+JOIN Users u ON u.Id = us.UserId
+LEFT JOIN (
+    SELECT t.TagName, COUNT(*) AS TagCount
+    FROM Posts p
+    JOIN Tags t ON t.ExcerptPostId = p.Id
+    WHERE p.LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY t.TagName
+    ORDER BY TagCount DESC
+    LIMIT 1
+) rt ON true
+LEFT JOIN RecentPosts rp ON rp.PostId IN (
+    SELECT DISTINCT RelatedPostId 
+    FROM PostLinks pl 
+    WHERE pl.PostId IN (SELECT p.Id FROM Posts p WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '60 days')
+)
+GROUP BY u.UserId, u.DisplayName, rt.TagName
+HAVING SUM(us.PostsCount) > 5 OR SUM(us.UpVotesCount) > 10
+ORDER BY u.Reputation DESC;

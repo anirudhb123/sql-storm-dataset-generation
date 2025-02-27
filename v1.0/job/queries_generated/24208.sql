@@ -1,0 +1,74 @@
+WITH RECURSIVE ranked_titles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+movie_keywords AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+), 
+complete_casts AS (
+    SELECT 
+        cc.movie_id, 
+        COUNT(DISTINCT cc.subject_id) AS total_cast
+    FROM 
+        complete_cast cc
+    GROUP BY 
+        cc.movie_id
+), 
+filtered_casts AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) FILTER (WHERE r.role ILIKE '%lead%') AS lead_cast,
+        COUNT(DISTINCT ci.person_id) FILTER (WHERE r.role ILIKE '%support%') AS supporting_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    t.title, 
+    t.production_year,
+    c.total_cast,
+    fk.lead_cast,
+    fk.supporting_cast,
+    mk.keywords,
+    COALESCE(k.kind, 'Unknown') AS kind
+FROM 
+    ranked_titles t
+LEFT JOIN 
+    complete_casts c ON t.id = c.movie_id
+LEFT JOIN 
+    filtered_casts fk ON t.id = fk.movie_id
+LEFT JOIN 
+    movie_keywords mk ON t.id = mk.movie_id
+LEFT JOIN 
+    kind_type k ON t.kind_id = k.id
+WHERE 
+    t.rank <= 10
+AND 
+    (t.production_year < 2000 OR mk.keywords LIKE '%drama%')
+ORDER BY 
+    t.production_year DESC, 
+    fk.lead_cast DESC;
+
+-- This query retrieves a list of the top 10 recent movies for each genre (if multiple genres exist),
+-- includes total casts statistics, indicates lead/supporting cast counts filtered by their role descriptions,
+-- joins keywords related to the movies and filters by production year and genre keywords,
+-- demonstrating the use of CTEs, window functions, and outer joins while also handling NULL values.

@@ -1,0 +1,87 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(m.production_year, 0) AS production_year,
+        1 AS level
+    FROM
+        title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        t.title AS movie_title,
+        COALESCE(t.production_year, 0) AS production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        title t ON t.id = ml.linked_movie_id
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE
+        mh.level < 5
+),
+MovieStats AS (
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS popularity_rank
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY
+        mh.movie_id, mh.movie_title, mh.production_year
+),
+TopMovies AS (
+    SELECT
+        ms.movie_id,
+        ms.movie_title,
+        ms.production_year,
+        ms.cast_count,
+        ms.keyword_count
+    FROM
+        MovieStats ms
+    WHERE
+        ms.popularity_rank <= 10
+),
+Actors AS (
+    SELECT
+        a.person_id,
+        a.name,
+        COUNT(DISTINCT cc.movie_id) AS movie_count
+    FROM
+        aka_name a
+    LEFT JOIN
+        cast_info cc ON a.person_id = cc.person_id
+    GROUP BY
+        a.person_id, a.name
+    HAVING
+        COUNT(DISTINCT cc.movie_id) > 5
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.cast_count,
+    tm.keyword_count,
+    a.name AS top_actor,
+    a.movie_count
+FROM 
+    TopMovies tm
+JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+JOIN 
+    Actors a ON ci.person_id = a.person_id
+ORDER BY 
+    tm.cast_count DESC, 
+    tm.movie_title;

@@ -1,0 +1,57 @@
+WITH UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostAggregated AS (
+    SELECT 
+        ps.PostId,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY ps.PostId ORDER BY ps.UpVotes - ps.DownVotes DESC) AS Rank
+    FROM PostStats ps
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pa.Title,
+    pa.CommentCount,
+    pa.UpVotes,
+    pa.DownVotes,
+    CASE 
+        WHEN pa.UpVotes > pa.DownVotes THEN 'Positive'
+        ELSE 'Negative'
+    END AS Sentiment,
+    COALESCE(p.ClosedDate, p.CreationDate) AS EffectiveDate,
+    COALESCE(p.Body, 'No body available') AS PostBody
+FROM Users u
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+JOIN (SELECT p.Id, p.Title, ps.CommentCount, ps.UpVotes, ps.DownVotes
+      FROM Posts p
+      JOIN PostAggregated ps ON p.Id = ps.PostId
+      WHERE ps.Rank = 1) pa ON pa.UserId = u.Id
+LEFT JOIN Posts p ON pa.PostId = p.Id
+WHERE u.Reputation >= 100
+AND EXISTS (
+    SELECT 1
+    FROM Votes v
+    WHERE v.PostId = p.Id AND v.UserId = u.Id
+)
+ORDER BY u.Reputation DESC, BadgeCount DESC;

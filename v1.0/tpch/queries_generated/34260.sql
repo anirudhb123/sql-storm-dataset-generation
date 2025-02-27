@@ -1,0 +1,65 @@
+WITH RECURSIVE price_analysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+top_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(total_cost) FROM (SELECT SUM(ps_supplycost * ps_availqty) AS total_cost FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey GROUP BY s.s_suppkey) AS avg_costs)
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS market_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_mktsegment
+)
+SELECT 
+    pa.p_name,
+    pa.ps_supplycost,
+    pa.ps_availqty,
+    ts.s_name AS supplier_name,
+    os.total_price,
+    os.market_rank
+FROM 
+    price_analysis pa
+LEFT JOIN 
+    top_suppliers ts ON pa.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey)
+LEFT JOIN 
+    order_summary os ON os.total_price < (SELECT AVG(total_price) FROM order_summary) 
+WHERE 
+    pa.rank = 1 
+    AND pa.ps_supplycost IS NOT NULL 
+ORDER BY 
+    pa.ps_supplycost DESC, 
+    ts.total_cost ASC;

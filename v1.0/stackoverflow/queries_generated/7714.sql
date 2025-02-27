@@ -1,0 +1,71 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+), RecentlyActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+), UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges
+    GROUP BY 
+        b.UserId
+), ActiveUserMetrics AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        ru.Reputation,
+        ub.BadgeCount,
+        COUNT(p.PostId) AS PostCount,
+        SUM(rp.VoteCount) AS TotalVotes,
+        SUM(rp.CommentCount) AS TotalComments
+    FROM 
+        RankedUsers u
+    JOIN 
+        UserBadgeCounts ub ON u.UserId = ub.UserId
+    JOIN 
+        RecentlyActivePosts rp ON u.UserId = rp.OwnerUserId
+    GROUP BY 
+        u.UserId, u.DisplayName, ru.Reputation, ub.BadgeCount
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.PostCount,
+    u.TotalVotes,
+    u.TotalComments
+FROM 
+    ActiveUserMetrics u
+ORDER BY 
+    u.Reputation DESC, u.PostCount DESC
+LIMIT 10;

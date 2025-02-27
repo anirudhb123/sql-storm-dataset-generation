@@ -1,0 +1,67 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.CreationDate
+    FROM
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT
+    u.DisplayName AS UserName,
+    u.Reputation,
+    p.Title AS QuestionTitle,
+    ph.Tags,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    ROW_NUMBER() OVER(PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS Rank,
+    COALESCE(ph.ClosureReason, 'Open') AS PostStatus,
+    MAX(b.Class) AS HighestBadgeClass
+FROM
+    Users u
+JOIN
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN
+    Comments c ON c.PostId = p.Id
+LEFT JOIN
+    Votes v ON v.PostId = p.Id
+LEFT JOIN
+    (SELECT p.Id, STRING_AGG(t.TagName, ', ') AS Tags,
+            CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END AS ClosureReason
+     FROM Posts p
+     LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+     LEFT JOIN CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+     LEFT JOIN Tags t ON t.WikiPostId = p.Id
+     GROUP BY p.Id, ph.PostHistoryTypeId) ph ON ph.Id = p.Id
+LEFT JOIN
+    Badges b ON b.UserId = u.Id
+WHERE
+    p.CreationDate >= '2020-01-01'  
+GROUP BY
+    u.DisplayName, u.Reputation, p.Title, ph.Tags, ph.ClosureReason
+HAVING
+    COUNT(DISTINCT v.Id) > 10 
+ORDER BY
+    UserName, Rank;

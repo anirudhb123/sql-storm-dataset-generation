@@ -1,0 +1,83 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    GROUP BY 
+        U.Id
+),
+PostClosureReasons AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        STRING_AGG(CRT.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CRT ON CRT.Id = CAST(PH.Comment AS int)
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+    GROUP BY 
+        PH.PostId
+),
+FinalReport AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalPosts,
+        U.TotalQuestions,
+        U.TotalAnswers,
+        U.TotalComments,
+        T.TagName,
+        T.PostCount,
+        T.QuestionCount,
+        T.AnswerCount,
+        COALESCE(PC.CloseCount, 0) AS ClosedPosts,
+        COALESCE(PC.CloseReasons, 'No reasons') AS CloseReasons
+    FROM 
+        UserActivity U
+    JOIN 
+        TagStatistics T ON U.TotalPosts > 0
+    LEFT JOIN 
+        PostClosureReasons PC ON U.UserId = PC.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalComments,
+    TagName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    ClosedPosts,
+    CloseReasons
+FROM 
+    FinalReport
+ORDER BY 
+    TotalPosts DESC, 
+    TagName ASC;

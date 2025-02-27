@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        g.cd_gender,
+        g.cd_income_band_sk,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY g.cd_income_band_sk ORDER BY COALESCE(SUM(ws.ws_ext_sales_price), 0) DESC) AS income_rank
+    FROM customer c
+    LEFT JOIN customer_demographics g ON c.c_current_cdemo_sk = g.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, g.cd_gender, g.cd_income_band_sk
+),
+promo_analysis AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS num_orders
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_sk
+)
+SELECT 
+    ca.ca_address_sk,
+    ca.ca_city,
+    ca.ca_state,
+    ci.c_customer_sk,
+    ci.total_quantity_sold,
+    ci.total_spent,
+    sa.total_quantity,
+    sa.total_sales,
+    COALESCE(pa.num_orders, 0) AS promo_orders
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_info ci ON c.c_customer_sk = ci.c_customer_sk
+LEFT JOIN sales_summary sa ON ci.total_quantity_sold > 0 AND sa.ws_item_sk = ci.total_quantity_sold
+LEFT JOIN promo_analysis pa ON pa.p_promo_sk = sa.ws_item_sk
+WHERE ci.total_spent > 100 AND (ci.cd_income_band_sk IS NULL OR ci.cd_income_band_sk > 1)
+ORDER BY ci.total_spent DESC, ca.ca_city;

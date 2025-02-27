@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title, 
+        a.production_year, 
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank_by_cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_cast_count <= 5
+), 
+MovieReviews AS (
+    SELECT 
+        m.movie_title, 
+        COUNT(mi.id) AS review_count
+    FROM 
+        TopMovies m
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = (SELECT id FROM aka_title WHERE title = m.movie_title LIMIT 1)
+    GROUP BY 
+        m.movie_title
+), 
+KeywordsCount AS (
+    SELECT 
+        a.title AS movie_title, 
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = a.id
+    GROUP BY 
+        a.title
+)
+SELECT 
+    mv.movie_title, 
+    mv.production_year, 
+    COALESCE(rv.review_count, 0) AS review_count,
+    COALESCE(kc.keyword_count, 0) AS keyword_count
+FROM 
+    TopMovies mv
+LEFT JOIN 
+    MovieReviews rv ON mv.movie_title = rv.movie_title
+LEFT JOIN 
+    KeywordsCount kc ON mv.movie_title = kc.movie_title
+WHERE 
+    mv.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mv.production_year DESC, 
+    mv.movie_title;

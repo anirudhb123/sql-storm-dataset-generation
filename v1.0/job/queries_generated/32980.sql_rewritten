@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = 1  
+    
+    UNION ALL
+    
+    SELECT
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON m.id = ml.linked_movie_id
+    WHERE
+        m.kind_id = 1
+),
+MovieKeywordStats AS (
+    SELECT
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.movie_id
+),
+ActorRoleCounts AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mk.keyword_count, 0) AS keyword_count,
+    COALESCE(ar.actor_count, 0) AS actor_count,
+    COALESCE(ar.role_count, 0) AS role_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    MovieKeywordStats mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    ActorRoleCounts ar ON mh.movie_id = ar.movie_id
+WHERE
+    mh.level <= 3  
+    AND mh.production_year >= 2000  
+ORDER BY
+    mh.production_year DESC,
+    mh.title ASC;

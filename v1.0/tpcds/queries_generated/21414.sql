@@ -1,0 +1,74 @@
+
+WITH sales_data AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS online_orders,
+        SUM(COALESCE(ss.ss_quantity, 0)) AS total_quantity,
+        AVG(ws.ws_net_paid_inc_tax) OVER (PARTITION BY w.w_warehouse_id) AS avg_web_net_paid
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    LEFT JOIN 
+        catalog_sales cs ON ss.ss_item_sk = cs.cs_item_sk 
+        AND cs.cs_ship_date_sk IS NOT NULL
+    JOIN 
+        warehouse w ON s.s_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        (ss.ss_sold_date_sk BETWEEN 2400 AND 2410 OR ss.ss_sold_date_sk IS NULL)
+        AND (s.s_state = 'CA' OR s.s_country IS NULL)
+    GROUP BY 
+        w.w_warehouse_id
+),
+return_data AS (
+    SELECT 
+        sr_w.w_warehouse_id,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns,
+        SUM(wr_return_amt_inc_tax) AS total_return_value,
+        AVG(wr_net_loss) OVER (PARTITION BY sr_w.w_warehouse_id) AS avg_return_loss
+    FROM 
+        web_returns wr
+    JOIN 
+        web_site ws ON wr.wr_web_page_sk = ws.web_site_sk
+    JOIN 
+        warehouse sr_w ON ws.web_warehouse_sk = sr_w.w_warehouse_sk
+    WHERE 
+        wr_returned_date_sk IN (SELECT DISTINCT sr_returned_date_sk FROM store_returns)
+    GROUP BY 
+        sr_w.w_warehouse_id
+),
+final_report AS (
+    SELECT 
+        sd.w_warehouse_id,
+        sd.total_net_profit,
+        sd.online_orders,
+        rd.total_web_returns,
+        rd.total_return_value,
+        sd.total_quantity,
+        sd.avg_web_net_paid,
+        SUM(sd.total_net_profit - COALESCE(rd.total_return_value, 0)) AS net_profit_after_returns
+    FROM 
+        sales_data sd
+    LEFT JOIN 
+        return_data rd ON sd.w_warehouse_id = rd.w_warehouse_id
+    GROUP BY 
+        sd.w_warehouse_id, sd.total_net_profit, sd.online_orders, rd.total_web_returns, rd.total_return_value, sd.total_quantity, sd.avg_web_net_paid
+    HAVING 
+        net_profit_after_returns > 0
+    ORDER BY 
+        net_profit_after_returns DESC LIMIT 10
+)
+SELECT 
+    CONCAT('Warehouse ID: ', w.w_warehouse_id, 
+           ', Profit: $', ROUND(net_profit_after_returns, 2),
+           ', Orders: ', online_orders,
+           ', Returns: ', COALESCE(total_web_returns, 0)) AS report_line
+FROM 
+    final_report fr
+JOIN 
+    warehouse w ON fr.w_warehouse_id = w.w_warehouse_id
+WHERE 
+    fr.total_quantity IS NOT NULL
+ORDER BY 
+    fr.net_profit_after_returns DESC;

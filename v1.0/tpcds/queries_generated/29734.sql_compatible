@@ -1,0 +1,66 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+), 
+CustomerDetails AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS FullName,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        customer.c_current_cdemo_sk AS cd_demo_sk
+    FROM 
+        customer
+    JOIN 
+        customer_demographics
+    ON 
+        customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+), 
+SalesSummary AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS TotalSales,
+        COUNT(DISTINCT ws_order_number) AS TotalOrders,
+        ws_bill_cdemo_sk
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_cdemo_sk
+)
+SELECT 
+    cd.FullName,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    cd.cd_credit_rating,
+    ad.FullAddress,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ad.ca_country,
+    ss.TotalSales,
+    ss.TotalOrders
+FROM 
+    CustomerDetails cd
+JOIN 
+    AddressDetails ad 
+ON 
+    cd.cd_purchase_estimate IS NOT NULL
+JOIN 
+    SalesSummary ss 
+ON 
+    cd.cd_demo_sk = ss.ws_bill_cdemo_sk
+WHERE 
+    cd.cd_gender = 'F' 
+    AND cd.cd_marital_status = 'M' 
+    AND ss.TotalSales > 1000
+ORDER BY 
+    ss.TotalSales DESC, 
+    cd.FullName;

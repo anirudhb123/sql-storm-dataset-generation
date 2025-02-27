@@ -1,0 +1,60 @@
+WITH RECURSIVE UserPostCTE AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        1 AS Depth
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        UP.Depth + 1
+    FROM 
+        Users U
+    JOIN 
+        UserPostCTE UP ON U.Id = P.OwnerUserId
+    JOIN 
+        Posts P ON P.ParentId = UP.PostId
+    WHERE 
+        U.Reputation > 1000
+)
+SELECT 
+    UP.UserId,
+    UP.DisplayName,
+    COUNT(DISTINCT UP.PostId) AS TotalPosts,
+    MAX(UP.CreationDate) AS LastPostDate,
+    SUM(CASE WHEN P.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewsCount,
+    AVG(P.Score) FILTER (WHERE P.Score IS NOT NULL) AS AverageScore,
+    STRING_AGG(DISTINCT PT.Name, ', ') AS PostTypes,
+    COALESCE(SUM(B.Id), 0) AS TotalBadges
+FROM 
+    UserPostCTE UP
+LEFT JOIN 
+    Posts P ON UP.PostId = P.Id
+LEFT JOIN 
+    Badges B ON B.UserId = UP.UserId
+LEFT JOIN 
+    PostTypes PT ON P.PostTypeId = PT.Id
+WHERE 
+    UP.Depth < 3
+GROUP BY 
+    UP.UserId, 
+    UP.DisplayName
+HAVING 
+    COUNT(DISTINCT UP.PostId) > 5
+ORDER BY 
+    TotalPosts DESC, 
+    LastPostDate DESC;

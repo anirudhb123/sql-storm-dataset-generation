@@ -1,0 +1,55 @@
+WITH RecursiveTags AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, rt.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTags rt ON t.Count > rt.Count
+    WHERE rt.Level < 5
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(COALESCE(p.Score, 0)) AS AveragePostScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS TotalClosures,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS ReasonNames
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE pht.Name = 'Post Closed'
+    GROUP BY ph.UserId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    us.PostCount,
+    us.AveragePostScore,
+    COALESCE(cr.TotalClosures, 0) AS TotalClosures,
+    COALESCE(cr.ReasonNames, 'No Closures') AS ClosureReasons,
+    rt.TagName AS PopularTag,
+    rt.Count AS TagCount
+FROM UserStats us
+LEFT JOIN CloseReasons cr ON us.UserId = cr.UserId
+LEFT JOIN (
+    SELECT TagName, Count
+    FROM RecursiveTags 
+    WHERE Level = 1 
+    ORDER BY Count DESC 
+    LIMIT 1
+) rt ON true
+WHERE us.PostCount > 0
+ORDER BY us.TotalUpVotes DESC, us.AveragePostScore DESC;

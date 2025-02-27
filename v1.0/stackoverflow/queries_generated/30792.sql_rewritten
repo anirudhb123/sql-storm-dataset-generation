@@ -1,0 +1,80 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+UserReputationSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(b.Class) AS TotalBadgePoints,
+        AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.DownVotes, 0) AS DownVotes,
+        COALESCE(pvs.TotalVotes, 0) AS TotalVotes,
+        u.Id AS OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        r.Level AS HierarchyLevel
+    FROM Posts p
+    LEFT JOIN PostVoteSummary pvs ON p.Id = pvs.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN RecursivePostHierarchy r ON p.Id = r.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 25) THEN 1 END) AS SuggestedEditSubmitted
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.TotalVotes,
+    pa.OwnerUserId,
+    pa.OwnerDisplayName,
+    COALESCE(pHS.CloseCount, 0) AS CloseCount,
+    COALESCE(pHS.ReopenCount, 0) AS ReopenCount,
+    COALESCE(pHS.SuggestedEditSubmitted, 0) AS SuggestedEditSubmitted,
+    ur.AvgReputation,
+    ur.TotalBadgePoints
+FROM PostActivity pa
+LEFT JOIN PostHistorySummary pHS ON pa.PostId = pHS.PostId
+LEFT JOIN UserReputationSummary ur ON pa.OwnerUserId = ur.UserId
+WHERE pa.TotalVotes > 0
+ORDER BY pa.TotalVotes DESC, pa.HierarchyLevel ASC;

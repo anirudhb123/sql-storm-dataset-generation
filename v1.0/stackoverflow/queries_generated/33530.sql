@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  -- Counting only upvotes
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0
+),
+RecentEditHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RN
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edits to title, body, or tags
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.QuestionCount,
+    u.TotalViews,
+    COALESCE(rp.Title, 'No recent posts') AS RecentPostTitle,
+    COALESCE(rp.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(rp.Score, 0) AS RecentPostScore,
+    COALESCE(rp.VoteCount, 0) AS RecentPostVoteCount,
+    COALESCE(re.EditDate, 'N/A') AS RecentEditDate,
+    COALESCE(re.Comment, 'No edits') AS RecentEditComment
+FROM 
+    TopUsers u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.RN = 1  -- Most recent post
+LEFT JOIN 
+    RecentEditHistory re ON rp.PostId = re.PostId AND re.RN = 1  -- Most recent edit for that post
+WHERE 
+    u.TotalViews > 10  -- Filtering only users with significant view counts
+ORDER BY 
+    u.QuestionCount DESC, 
+    u.TotalViews DESC;

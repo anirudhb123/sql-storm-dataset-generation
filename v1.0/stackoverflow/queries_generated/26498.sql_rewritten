@@ -1,0 +1,91 @@
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+UserReputationStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        COUNT(DISTINCT C.Id) AS CommentsMade
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    INNER JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        P.Title,
+        P.Body,
+        P.OwnerUserId,
+        P.LastEditDate,
+        (SELECT 
+            ARRAY_AGG(DISTINCT U.DisplayName ORDER BY U.Reputation DESC)
+         FROM 
+            Users U 
+         WHERE 
+            U.Id = PH.UserId) AS Editors
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON P.Id = PH.PostId
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    ORDER BY 
+        PH.CreationDate DESC
+    LIMIT 5
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionsAsked,
+    U.CommentsMade,
+    PTC.TagCount,
+    RPH.Title AS RecentTitle,
+    RPH.Body AS RecentBody,
+    RPH.CreationDate AS RecentEditDate,
+    RPH.Editors AS RecentEditors,
+    PT.TagName AS PopularTag,
+    PT.PostCount
+FROM 
+    UserReputationStats U
+JOIN 
+    PostTagCounts PTC ON U.QuestionsAsked > 0
+LEFT JOIN 
+    RecentPostHistory RPH ON RPH.OwnerUserId = U.UserId
+LEFT JOIN 
+    PopularTags PT ON PT.TagName IN (SELECT UNNEST(string_to_array(substring(RPH.Body, 2, length(RPH.Body) - 2), '><')))
+    ORDER BY 
+        U.Reputation DESC,
+        PTC.TagCount DESC,
+        RPH.RecentEditDate DESC
+LIMIT 20;

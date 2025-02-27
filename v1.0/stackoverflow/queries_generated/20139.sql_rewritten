@@ -1,0 +1,70 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        AVG(p.Score) AS AverageScore,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.TotalPosts,
+    ps.QuestionsCount,
+    ps.AnswersCount,
+    ps.AverageScore,
+    ps.TotalBounty,
+    CASE 
+        WHEN ub.TotalBadges IS NULL THEN 'No Badges'
+        WHEN ub.TotalBadges < 5 THEN 'Novice'
+        WHEN ub.TotalBadges BETWEEN 5 AND 15 THEN 'Intermediate'
+        ELSE 'Expert'
+    END AS BadgeLevel,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p
+     JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+     WHERE p.OwnerUserId = u.Id) AS PopularTags
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    OR EXISTS (
+        SELECT 1 
+        FROM Comments c 
+        WHERE c.UserId = u.Id 
+        AND c.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    )
+ORDER BY 
+    u.Reputation DESC, 
+    ub.TotalBadges DESC
+LIMIT 100
+This SQL query is designed to retrieve a list of users with specific performance metrics, while showcasing various advanced SQL constructs including CTEs, window functions, string aggregations, complex case logic, and correlated subqueries. It provides insights into user engagement (via posts and comments), badge accomplishments, and tag involvement, all contributing to individual user performance metrics.

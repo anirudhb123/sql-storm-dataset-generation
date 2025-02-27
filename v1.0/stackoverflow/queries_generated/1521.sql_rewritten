@@ -1,0 +1,52 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(B.Id) AS BadgeCount, 
+        MAX(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadge, 
+        MAX(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadge, 
+        MAX(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadge
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(*) AS PostCount, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount, 
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount, 
+        AVG(P.Score) AS AverageScore
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+),
+UserPerformance AS (
+    SELECT 
+        UB.UserId, 
+        UB.DisplayName, 
+        COALESCE(PS.PostCount, 0) AS PostCount, 
+        COALESCE(PS.QuestionCount, 0) AS QuestionCount, 
+        COALESCE(PS.AnswerCount, 0) AS AnswerCount,
+        COALESCE(AVG(UB.BadgeCount) FILTER (WHERE UB.BadgeCount > 0), 0) AS AvgBadges,
+        COALESCE(AVG(PS.AverageScore), 0) AS AvgScore
+    FROM UserBadges UB
+    LEFT JOIN PostStats PS ON UB.UserId = PS.OwnerUserId
+    GROUP BY UB.UserId, UB.DisplayName
+)
+SELECT 
+    U.DisplayName, 
+    U.PostCount, 
+    U.QuestionCount, 
+    U.AnswerCount,
+    U.AvgBadges, 
+    U.AvgScore,
+    CASE 
+        WHEN U.AvgScore > 20 THEN 'High Performer'
+        WHEN U.AvgScore BETWEEN 10 AND 20 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS PerformanceLevel
+FROM UserPerformance U
+WHERE U.PostCount > 5
+ORDER BY U.AvgScore DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+WITH CompanyMovieCount AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.company_id
+),
+TopCompanies AS (
+    SELECT 
+        cm.id,
+        cn.name,
+        cmc.movie_count
+    FROM 
+        company_name cn
+    JOIN 
+        CompanyMovieCount cmc ON cn.id = cmc.company_id
+    ORDER BY 
+        cmc.movie_count DESC
+    LIMIT 10
+),
+MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS cast_names,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    tc.name AS company_name,
+    md.title AS movie_title,
+    md.production_year,
+    md.cast_names,
+    CASE 
+        WHEN md.year_rank IS NULL THEN 'Not Ranked'
+        ELSE md.year_rank::text
+    END AS year_rank
+FROM 
+    TopCompanies tc
+JOIN 
+    movie_companies mco ON tc.id = mco.company_id
+JOIN 
+    MovieDetails md ON mco.movie_id = md.movie_id
+WHERE 
+    md.production_year IS NOT NULL
+ORDER BY 
+    tc.movie_count DESC, md.production_year DESC;

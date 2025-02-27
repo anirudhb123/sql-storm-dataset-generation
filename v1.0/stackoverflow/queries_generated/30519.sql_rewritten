@@ -1,0 +1,109 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COUNT(DISTINCT v.Id) AS VotesCast,
+        COUNT(DISTINCT b.Id) AS BadgesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ph.Level,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes, 
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, ph.Level
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersProvided,
+        CommentsMade,
+        VotesCast,
+        BadgesReceived,
+        RANK() OVER (ORDER BY QuestionsAsked DESC) AS RankByQuestions,
+        RANK() OVER (ORDER BY AnswersProvided DESC) AS RankByAnswers
+    FROM 
+        UserActivity
+)
+
+SELECT 
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.Level,
+    u.DisplayName AS OwnerDisplayName,
+    u.QuestionsAsked,
+    u.AnswersProvided,
+    u.CommentsMade,
+    u.VotesCast,
+    u.BadgesReceived
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+WHERE 
+    ps.TotalComments > 0 
+    AND ps.TotalUpvotes > ps.TotalDownvotes
+    AND ps.Score >= 10
+ORDER BY 
+    ps.Level, ps.Score DESC;

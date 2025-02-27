@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 0
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edited
+    GROUP BY 
+        ph.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Name AS BadgeName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Name
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ClosedCount,
+        ARRAY_AGG(DISTINCT cr.Name) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::jsonb ->> 'CloseReasonId'::text = cr.Id::text
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.LastActivityDate,
+    rp.ViewCount,
+    rp.Score,
+    re.LastEditDate,
+    re.EditCount,
+    COALESCE(cp.ClosedCount, 0) AS ClosedCount,
+    COALESCE(cp.CloseReasons, '{}'::varchar[]) AS CloseReasons,
+    COALESCE(ub.UserId, 0) AS UserId,
+    STRING_AGG(DISTINCT ub.BadgeName, ', ') AS UserBadges
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    (SELECT 
+         u.Id AS UserId, b.Name
+     FROM 
+         Users u
+     JOIN 
+         Badges b ON u.Id = b.UserId
+    ) ub ON ub.UserId = rp.PostId
+WHERE 
+    rp.Rank <= 5 -- Top 5 ranked posts per post type
+GROUP BY 
+    rp.PostId, re.LastEditDate, re.EditCount, cp.ClosedCount, cp.CloseReasons, ub.UserId
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

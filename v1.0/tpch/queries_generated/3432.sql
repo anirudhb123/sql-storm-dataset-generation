@@ -1,0 +1,43 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationSupplierRank AS (
+    SELECT 
+        n.n_name,
+        s.s_name,
+        s.total_avail_qty,
+        s.avg_supply_cost
+    FROM 
+        SupplierStats s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.rank <= 3
+)
+SELECT 
+    n.r_name AS region_name,
+    COALESCE(STRING_AGG(DISTINCT s.n_name, ', '), 'No suppliers') AS top_suppliers,
+    COUNT(s.s_name) AS supplier_count,
+    SUM(s.total_avail_qty) AS total_quantity,
+    AVG(s.avg_supply_cost) AS average_cost
+FROM 
+    NationSupplierRank s
+JOIN 
+    region n ON n.r_regionkey = (SELECT r_regionkey FROM nation WHERE n_name = s.n_name)
+GROUP BY 
+    n.r_name
+HAVING 
+    SUM(s.total_avail_qty) > 10000
+ORDER BY 
+    total_quantity DESC;

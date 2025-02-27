@@ -1,0 +1,73 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.store_sk,
+        sr.reason_sk,
+        SUM(sr.return_quantity) AS total_return_quantity,
+        SUM(sr.return_amt_inc_tax) AS total_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr.store_sk ORDER BY SUM(sr.return_quantity) DESC) AS rn
+    FROM 
+        store_returns sr
+    GROUP BY sr.store_sk, sr.reason_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        cd.education_status,
+        cd.marital_status,
+        hd.income_band_sk,
+        RANK() OVER (PARTITION BY cd.education_status ORDER BY cd.purchase_estimate DESC) AS education_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.current_hdemo_sk = hd.demo_sk
+), 
+IncomeDistribution AS (
+    SELECT 
+        ib.income_band_sk,
+        COUNT(c.customer_sk) AS customer_count
+    FROM 
+        income_band ib
+    LEFT JOIN 
+        CustomerDetails c ON ib.income_band_sk = c.income_band_sk
+    GROUP BY 
+        ib.income_band_sk
+), 
+WebSalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk >= (SELECT MAX(d.date_sk) FROM date_dim d 
+                             WHERE d.date = CURRENT_DATE - INTERVAL '30 DAY')
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    w.warehouse_name,
+    r.total_return_quantity,
+    r.total_return_amt,
+    SUM(ws.total_sales) AS web_sales_total,
+    COUNT(DISTINCT c.customer_sk) AS unique_customers,
+    COALESCE(SUM(id.customer_count), 0) AS income_distribution
+FROM 
+    RankedReturns r
+JOIN 
+    warehouse w ON r.store_sk = w.warehouse_sk
+LEFT JOIN 
+    WebSalesSummary ws ON w.warehouse_sk = ws.web_site_sk
+LEFT JOIN 
+    IncomeDistribution id ON w.warehouse_sk = id.income_band_sk
+WHERE 
+    r.rn <= 3
+GROUP BY 
+    w.warehouse_name, r.total_return_quantity, r.total_return_amt
+ORDER BY 
+    w.warehouse_name;

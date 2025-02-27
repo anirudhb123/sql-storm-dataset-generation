@@ -1,0 +1,76 @@
+
+WITH 
+    RankedTitles AS (
+        SELECT 
+            t.id AS title_id,
+            t.title,
+            t.production_year,
+            RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_per_year
+        FROM 
+            title t
+        LEFT JOIN 
+            movie_companies mc ON t.id = mc.movie_id
+        LEFT JOIN 
+            company_name cn ON mc.company_id = cn.id
+        LEFT JOIN 
+            movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+        LEFT JOIN 
+            complete_cast cc ON t.id = cc.movie_id
+        LEFT JOIN 
+            cast_info ci ON cc.subject_id = ci.person_id
+        LEFT JOIN 
+            aka_title at ON t.id = at.movie_id
+        LEFT JOIN 
+            aka_name an ON at.id = an.id
+        WHERE 
+            t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+          AND 
+            cn.country_code IS NOT NULL
+        GROUP BY 
+            t.id, t.title, t.production_year
+    ),
+    HighRatedMovies AS (
+        SELECT 
+            t.id,
+            t.title,
+            AVG(mi.rating) AS avg_rating
+        FROM 
+            title t
+        LEFT JOIN 
+            movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        GROUP BY 
+            t.id, t.title
+        HAVING 
+            AVG(mi.rating) > 8.0
+    )
+SELECT 
+    rt.title,
+    rt.production_year,
+    hr.avg_rating,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    STRING_AGG(DISTINCT an.name, ', ') AS aka_names,
+    COALESCE(MAX(cn.name), 'Unknown') AS company_name
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    HighRatedMovies hr ON rt.title_id = hr.id
+LEFT JOIN 
+    complete_cast cc ON rt.title_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_title at ON rt.title_id = at.movie_id
+LEFT JOIN 
+    aka_name an ON at.id = an.id
+LEFT JOIN 
+    movie_companies mc ON rt.title_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    rt.rank_per_year <= 5 
+GROUP BY 
+    rt.title, rt.production_year, hr.avg_rating
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 3 
+ORDER BY 
+    rt.production_year DESC, hr.avg_rating DESC;

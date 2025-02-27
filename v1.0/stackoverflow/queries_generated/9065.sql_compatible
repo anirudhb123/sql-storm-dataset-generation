@@ -1,0 +1,52 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        BadgeCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+)
+SELECT 
+    TU.DisplayName, 
+    TU.Reputation, 
+    TU.PostCount, 
+    TU.QuestionCount, 
+    TU.AnswerCount, 
+    TU.BadgeCount,
+    PH.CreationDate AS LastPostDate,
+    COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+    AVG(NULLIF(PH.Comment, '')::numeric) AS AvgCloseReopenReason
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostHistory PH ON TU.UserId = PH.UserId
+WHERE 
+    TU.ReputationRank <= 10
+GROUP BY 
+    TU.DisplayName, TU.Reputation, TU.PostCount, TU.QuestionCount, TU.AnswerCount, TU.BadgeCount, PH.CreationDate
+ORDER BY 
+    TU.Reputation DESC;

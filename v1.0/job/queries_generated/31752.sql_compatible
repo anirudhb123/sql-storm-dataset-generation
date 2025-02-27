@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level,
+        mt.title AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        mh.level + 1 AS level,
+        mh.path || ' -> ' || at.title AS path
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+)
+
+SELECT 
+    a.name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(m.projection_year) AS avg_production_year,
+    STRING_AGG(DISTINCT m.movie_title, ', ') AS linked_movies,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS cast_with_notes
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+JOIN 
+    MovieHierarchy m ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    aka_title at ON ci.movie_id = at.movie_id 
+WHERE 
+    a.md5sum IS NOT NULL 
+    AND m.level <= 3
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1 
+    AND AVG(m.projection_year) > 2000
+ORDER BY 
+    movie_count DESC, 
+    a.name;

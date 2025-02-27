@@ -1,0 +1,55 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level,
+        p.OwnerUserId,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting from Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1,
+        p.OwnerUserId,
+        p.CreationDate
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+SELECT 
+    u.DisplayName AS Author,
+    rph.PostId,
+    rph.Title,
+    rph.Level,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+    AVG(v.BountyAmount) AS AverageBounty,
+    MAX(rph.CreationDate) AS MostRecentDate,
+    CASE WHEN rph.Level > 1 THEN 'Yes' ELSE 'No' END AS IsChildPost
+FROM 
+    RecursivePostHierarchy rph
+LEFT JOIN 
+    Users u ON rph.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON rph.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON rph.PostId = v.PostId
+GROUP BY 
+    u.DisplayName, rph.PostId, rph.Title, rph.Level
+HAVING 
+    COUNT(DISTINCT c.Id) > 5  -- Filter for posts with more than 5 comments
+ORDER BY 
+    TotalUpvotes DESC, MostRecentDate DESC
+LIMIT 50;
+
+This query creates a recursive Common Table Expression (CTE) to build a hierarchy of questions and their associated answers, allowing for the counting of comments, upvotes, downvotes, and average bounty amounts related to each post. It involves outer joins to connect various tables and uses grouping and filtering constructs to derive meaningful insights into user interactions with questions and answers.

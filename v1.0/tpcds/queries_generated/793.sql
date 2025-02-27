@@ -1,0 +1,43 @@
+
+WITH 
+    ItemSales AS (
+        SELECT 
+            ws_item_sk,
+            SUM(ws_sales_price) AS total_sales,
+            SUM(ws_quantity) AS total_quantity,
+            COUNT(DISTINCT ws_order_number) AS order_count
+        FROM web_sales
+        GROUP BY ws_item_sk
+    ),
+    ReturnedItems AS (
+        SELECT 
+            wr_item_sk,
+            SUM(wr_return_quantity) AS total_returned,
+            SUM(wr_return_amt) AS total_return_amount
+        FROM web_returns
+        GROUP BY wr_item_sk
+    ),
+    RankedSales AS (
+        SELECT 
+            is.ws_item_sk,
+            is.total_sales,
+            is.total_quantity,
+            is.order_count,
+            COALESCE(ri.total_returned, 0) AS total_returned,
+            COALESCE(ri.total_return_amount, 0) AS total_return_amount,
+            RANK() OVER (ORDER BY is.total_sales DESC) AS sales_rank
+        FROM ItemSales is
+        LEFT JOIN ReturnedItems ri ON is.ws_item_sk = ri.wr_item_sk
+    )
+SELECT 
+    ips.ws_item_sk,
+    ips.total_sales,
+    ips.total_quantity,
+    ips.total_returned,
+    ips.total_return_amount,
+    ips.sales_rank,
+    CONCAT('Item SK: ', ips.ws_item_sk, ' - Rank: ', ips.sales_rank) AS sales_info
+FROM RankedSales ips
+WHERE ips.sales_rank <= 10 
+    AND (ips.total_sales - ips.total_returned > 5000 OR ips.total_returned = 0)
+ORDER BY ips.sales_rank;

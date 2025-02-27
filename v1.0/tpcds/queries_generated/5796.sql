@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY
+        ws_item_sk
+),
+HighSales AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.total_sales,
+        rs.order_count,
+        i.i_item_desc,
+        i.i_brand,
+        i.i_category
+    FROM
+        RankedSales rs
+    JOIN
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE
+        rs.rank <= 10
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        h.hd_income_band_sk,
+        h.hd_buy_potential
+    FROM
+        customer_demographics cd
+    JOIN
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+)
+SELECT
+    hs.i_item_desc,
+    hs.i_brand,
+    hs.i_category,
+    SUM(cd.cd_purchase_estimate) AS total_purchase_estimate,
+    AVG(hd.hd_dep_count) AS avg_dependents,
+    COUNT(DISTINCT cd.cd_demo_sk) AS unique_customers
+FROM
+    HighSales hs
+JOIN
+    CustomerDemographics cd ON cd.cd_demo_sk IN (SELECT cs_bill_cdemo_sk FROM catalog_sales WHERE cs_item_sk = hs.ws_item_sk)
+JOIN
+    household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+GROUP BY
+    hs.i_item_desc, hs.i_brand, hs.i_category
+ORDER BY
+    total_purchase_estimate DESC;

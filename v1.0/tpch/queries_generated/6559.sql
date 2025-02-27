@@ -1,0 +1,42 @@
+WITH SupplierAggregate AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.s_suppkey
+),
+TopSuppliers AS (
+    SELECT sa.s_suppkey, sa.total_supply_cost
+    FROM SupplierAggregate sa
+    ORDER BY sa.total_supply_cost DESC
+    LIMIT 10
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerTotalRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(od.total_revenue) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplierRevenue AS (
+    SELECT n.n_name, SUM(ct.customer_revenue) AS total_nation_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN TopSuppliers ts ON s.s_suppkey = ts.s_suppkey
+    JOIN customer c ON s.s_nationkey = c.c_nationkey
+    JOIN OrderDetails od ON c.c_custkey = od.o_orderkey
+    JOIN (SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+          FROM orders o
+          JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+          GROUP BY o.o_orderkey) AS od ON o.o_orderkey = od.o_orderkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, ntr.total_nation_revenue
+FROM NationSupplierRevenue ntr
+ORDER BY ntr.total_nation_revenue DESC;

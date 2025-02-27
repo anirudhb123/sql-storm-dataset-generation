@@ -1,0 +1,39 @@
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM movie_link ml
+    WHERE ml.link_type_id = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM movie_link ml
+    INNER JOIN movie_hierarchy mh ON mh.linked_movie_id = ml.movie_id
+    WHERE mh.depth < 5  
+)
+
+SELECT
+    m.title AS movie_title,
+    COUNT(DISTINCT mh.linked_movie_id) AS total_linked_movies,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS release_date,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS average_cast_order
+FROM title m
+LEFT JOIN movie_link ml ON m.id = ml.movie_id
+LEFT JOIN movie_hierarchy mh ON mh.movie_id = m.id
+LEFT JOIN cast_info ci ON ci.movie_id = m.id
+LEFT JOIN aka_name an ON an.person_id = ci.person_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+LEFT JOIN movie_info mi ON mi.movie_id = m.id 
+WHERE m.production_year BETWEEN 2000 AND 2023  
+GROUP BY m.id, m.title
+HAVING COUNT(DISTINCT mh.linked_movie_id) > 2  
+ORDER BY average_cast_order DESC, movie_title
+LIMIT 100;

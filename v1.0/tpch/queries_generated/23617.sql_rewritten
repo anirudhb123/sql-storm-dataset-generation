@@ -1,0 +1,83 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL 
+      AND p.p_size BETWEEN 1 AND 50
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost) as total_supply_cost
+    FROM supplier s 
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 1000.00
+    GROUP BY s.s_suppkey, s.s_name
+),
+MaxNations AS (
+    SELECT 
+        n.n_name, 
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+    HAVING COUNT(s.s_suppkey) > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_avg.total) FROM (SELECT SUM(o.o_totalprice) AS total FROM orders o GROUP BY o.o_custkey) o_avg)
+),
+AdvancedLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_quantity,
+        CASE 
+            WHEN li.l_discount > 0.2 THEN 'High Discount'
+            ELSE 'Standard Discount'
+        END AS discount_category,
+        NULLIF(li.l_tax, 0) AS effective_tax
+    FROM lineitem li
+    WHERE li.l_shipdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+Result AS (
+    SELECT 
+        fp.p_partkey, 
+        fp.p_name,
+        COALESCE(fs.total_supply_cost, 0) AS supplier_cost,
+        cn.total_orders,
+        cn.total_spent,
+        al.l_orderkey,
+        al.discount_category,
+        SUM(al.effective_tax) OVER (PARTITION BY al.l_orderkey) AS total_tax
+    FROM RankedParts fp
+    FULL OUTER JOIN FilteredSuppliers fs ON fs.total_supply_cost > 0
+    LEFT JOIN CustomerOrders cn ON cn.total_orders > 5
+    JOIN AdvancedLineItems al ON al.l_partkey = fp.p_partkey
+    WHERE fp.rn = 1
+)
+SELECT 
+    r.p_partkey, 
+    r.p_name, 
+    r.supplier_cost, 
+    r.total_orders, 
+    r.total_spent, 
+    r.discount_category, 
+    CASE 
+        WHEN r.total_tax IS NULL THEN 'No Tax'
+        ELSE TO_CHAR(r.total_tax, 'FM999999999.00')
+    END AS formatted_tax
+FROM Result r
+ORDER BY r.total_spent DESC NULLS LAST
+LIMIT 100 OFFSET 10;

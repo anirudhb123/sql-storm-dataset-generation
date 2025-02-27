@@ -1,0 +1,80 @@
+WITH RankedUsers AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+FilteredPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.Comment, 'No comments') AS LastHistoryComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS HistoryRow
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = (
+            SELECT MAX(creationDate) 
+            FROM PostHistory 
+            WHERE PostId = P.Id
+        )
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        AnswerCount,
+        OwnerDisplayName,
+        LastHistoryComment
+    FROM 
+        FilteredPosts
+    WHERE 
+        HistoryRow = 1 AND 
+        AnswerCount > 5
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+SELECT 
+    PU.UserId,
+    PU.DisplayName,
+    PU.Reputation,
+    PP.PostId,
+    PP.Title,
+    PP.Score,
+    PP.ViewCount,
+    PP.AnswerCount,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes
+FROM 
+    RankedUsers PU
+JOIN 
+    TopPosts PP ON PU.UserId = PP.OwnerDisplayName
+LEFT JOIN 
+    PostVoteSummary PVS ON PP.PostId = PVS.PostId
+WHERE 
+    PU.ReputationRank <= 10
+ORDER BY 
+    PU.Reputation DESC, PP.Score DESC;

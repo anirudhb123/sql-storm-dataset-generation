@@ -1,0 +1,56 @@
+
+WITH SplitParts AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        p_mfgr,
+        SPLIT_PART(p_name, ' ', 1) AS part_first_word,
+        SPLIT_PART(p_name, ' ', 2) AS part_second_word,
+        LENGTH(p_name) AS part_name_length,
+        CASE 
+            WHEN LENGTH(p_name) > 20 THEN 'Long'
+            WHEN LENGTH(p_name) BETWEEN 10 AND 20 THEN 'Medium'
+            ELSE 'Short'
+        END AS name_length_category
+    FROM part
+), SupplierInfo AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        s_address,
+        s_phone,
+        s_comment,
+        SUBSTR(s_name, 1, 5) AS name_prefix,
+        CHAR_LENGTH(s_comment) AS comment_length
+    FROM supplier
+), NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        n.n_comment,
+        UPPER(n.n_name) AS upper_nation_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    sp.part_first_word,
+    sp.part_second_word,
+    sp.name_length_category,
+    si.name_prefix,
+    si.comment_length,
+    nr.upper_nation_name,
+    COUNT(*) AS count_per_category
+FROM SplitParts sp
+JOIN SupplierInfo si ON SUBSTR(sp.p_name, 1, 5) = si.name_prefix
+JOIN NationRegion nr ON si.s_nationkey = nr.n_nationkey
+GROUP BY 
+    sp.part_first_word, 
+    sp.part_second_word, 
+    sp.name_length_category, 
+    si.name_prefix, 
+    si.comment_length, 
+    nr.upper_nation_name, 
+    sp.part_name_length
+HAVING COUNT(*) > 1
+ORDER BY count_per_category DESC, part_name_length DESC;

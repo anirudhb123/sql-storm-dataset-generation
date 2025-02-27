@@ -1,0 +1,46 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+filtered_actors AS (
+    SELECT 
+        ak.name, 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS role_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name, ci.movie_id
+    HAVING 
+        COUNT(DISTINCT ci.role_id) > 1
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    fa.name,
+    fa.role_count,
+    COALESCE(mm.info, 'No additional info') AS additional_info
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    filtered_actors fa ON rm.title = fa.movie_id
+LEFT JOIN 
+    movie_info mm ON rm.production_year = mm.movie_id AND mm.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget')
+WHERE 
+    rm.year_rank <= 5
+GROUP BY 
+    rm.title, rm.production_year, fa.name, fa.role_count, mm.info
+ORDER BY 
+    rm.production_year DESC, fa.role_count DESC
+LIMIT 100;

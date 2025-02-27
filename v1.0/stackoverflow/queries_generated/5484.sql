@@ -1,0 +1,42 @@
+WITH RankedPosts AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           u.DisplayName AS Owner,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+),
+TopQuestions AS (
+    SELECT PostId, Title, CreationDate, Score, ViewCount, Owner
+    FROM RankedPosts
+    WHERE Rank <= 10
+),
+PostVoteCount AS (
+    SELECT PostId, COUNT(*) AS VoteCount
+    FROM Votes
+    GROUP BY PostId
+),
+PostTagInfo AS (
+    SELECT p.Id AS PostId,
+           STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN LATERAL string_to_array(p.Tags, ', ') AS tag_name ON TRUE
+    JOIN Tags t ON t.TagName = tag_name
+    GROUP BY p.Id
+)
+SELECT tq.PostId,
+       tq.Title,
+       tq.CreationDate,
+       tq.Score,
+       tq.ViewCount,
+       tq.Owner,
+       COALESCE(pvc.VoteCount, 0) AS VoteCount,
+       pti.Tags
+FROM TopQuestions tq
+LEFT JOIN PostVoteCount pvc ON tq.PostId = pvc.PostId
+LEFT JOIN PostTagInfo pti ON tq.PostId = pti.PostId
+ORDER BY tq.Score DESC, tq.ViewCount DESC;

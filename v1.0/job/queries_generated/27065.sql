@@ -1,0 +1,63 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword) AS total_keywords,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        t.id
+    HAVING
+        COUNT(DISTINCT c.person_id) > 5 AND COUNT(DISTINCT mk.keyword) > 0
+),
+TopRankedMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.total_keywords
+    FROM
+        RankedMovies rm
+    WHERE
+        rm.rank <= 10
+),
+MovieCastDetails AS (
+    SELECT
+        t.movie_id,
+        t.title,
+        a.name AS actor_name,
+        p.gender
+    FROM
+        TopRankedMovies t
+    JOIN
+        cast_info ci ON t.movie_id = ci.movie_id
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        name p ON a.person_id = p.imdb_id
+)
+SELECT
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.total_cast,
+    m.total_keywords,
+    STRING_AGG(DISTINCT mc.actor_name || ' (' || p.gender || ')', ', ') AS cast_list
+FROM
+    TopRankedMovies m
+LEFT JOIN
+    MovieCastDetails mc ON m.movie_id = mc.movie_id
+GROUP BY
+    m.movie_id, m.title, m.production_year, m.total_cast, m.total_keywords
+ORDER BY
+    m.total_cast DESC, m.production_year DESC;

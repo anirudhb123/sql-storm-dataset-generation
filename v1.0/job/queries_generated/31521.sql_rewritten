@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        0 AS level
+    FROM title m
+    WHERE m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mh.level + 1
+    FROM movie_link ml
+    JOIN title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM movie_hierarchy mh
+    LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.actor_count
+    FROM ranked_movies rm
+    WHERE rm.rank <= 5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(name.name, ak.name) AS actor_name,
+    fm.actor_count
+FROM filtered_movies fm
+LEFT JOIN cast_info ci ON ci.movie_id = fm.movie_id
+LEFT JOIN aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN name ON name.imdb_id = ak.person_id
+WHERE fm.actor_count IS NOT NULL
+AND fm.production_year IS NOT NULL
+ORDER BY fm.production_year DESC, fm.actor_count DESC;

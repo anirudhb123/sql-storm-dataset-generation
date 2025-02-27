@@ -1,0 +1,31 @@
+-- Performance Benchmarking Query
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    U.DisplayName AS AuthorDisplayName,
+    U.Reputation AS AuthorReputation,
+    COUNT(C.ID) AS CommentCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    PH.CreationDate AS LastEditDate,
+    P.LastActivityDate
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId 
+WHERE 
+    P.PostTypeId IN (1, 2) -- Considering only Questions and Answers
+GROUP BY 
+    P.Id, U.Id, PH.CreationDate
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 100; -- Limit to top 100 recent posts for benchmarking

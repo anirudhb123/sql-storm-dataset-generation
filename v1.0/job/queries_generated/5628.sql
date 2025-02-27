@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    MAX(m.prod_year) AS latest_production_year
+FROM 
+    title t
+JOIN 
+    aka_title at ON at.movie_id = t.id
+JOIN 
+    cast_info ci ON ci.movie_id = at.movie_id
+JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword kw ON kw.id = mk.keyword_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name cn ON cn.id = mc.company_id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+JOIN 
+    info_type it ON it.id = mi.info_type_id
+WHERE 
+    t.production_year >= 2000 
+    AND it.info LIKE '%rating%'
+GROUP BY 
+    t.title, ak.name
+ORDER BY 
+    latest_production_year DESC, movie_title ASC;

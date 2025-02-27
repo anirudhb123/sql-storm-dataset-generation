@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        r.role AS actor_role,
+        ct.kind AS company_type,
+        m.company_id,
+        mk.keyword
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000
+),
+aggregated_info AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+        STRING_AGG(DISTINCT actor_role, ', ') AS roles,
+        STRING_AGG(DISTINCT company_type, ', ') AS companies,
+        STRING_AGG(DISTINCT keyword, ', ') AS keywords
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_id, title, production_year
+)
+SELECT 
+    movie_id, 
+    title, 
+    production_year, 
+    actors, 
+    roles, 
+    companies, 
+    keywords
+FROM 
+    aggregated_info
+ORDER BY 
+    production_year DESC, 
+    title;

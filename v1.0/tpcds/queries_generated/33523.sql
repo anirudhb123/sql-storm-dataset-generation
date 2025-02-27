@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_sold_date_sk
+    
+    UNION ALL
+
+    SELECT 
+        a.ws_sold_date_sk,
+        a.total_profit + b.total_profit AS total_profit,
+        level + 1
+    FROM 
+        sales_trend a
+    JOIN 
+        web_sales b ON a.ws_sold_date_sk = b.ws_sold_date_sk
+    WHERE 
+        a.level < 5  -- Limit levels for recursion
+)
+
+SELECT 
+    c.c_customer_id,
+    MAX(COALESCE(d.d_year, 0)) AS last_year,
+    COUNT(DISTINCT w.ws_order_number) AS total_orders,
+    ROUND(SUM(ws_net_profit) / NULLIF(COUNT(ws_order_number), 0), 2) AS avg_order_profit,
+    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY total_orders DESC) AS rnk,
+    STRING_AGG(DISTINCT CAST(cd.cd_marital_status AS VARCHAR), ', ') AS marital_statuses
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales w ON c.c_customer_sk = w.ws_bill_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    date_dim d ON w.ws_sold_date_sk = d.d_date_sk
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    total_orders > 0
+ORDER BY 
+    avg_order_profit DESC
+LIMIT 50
+OFFSET 10;

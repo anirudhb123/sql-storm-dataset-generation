@@ -1,0 +1,74 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ' '::text)::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+    ORDER BY 
+        P.CreationDate DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalBounty,
+    U.BadgeCount,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.ViewCount AS RecentPostViewCount,
+    RP.CreationDate AS RecentPostCreationDate
+FROM 
+    UserStats U
+CROSS JOIN 
+    PopularTags T
+LEFT JOIN 
+    RecentPosts RP ON RP.PostId IS NOT NULL
+ORDER BY 
+    U.Reputation DESC, T.PostCount DESC;

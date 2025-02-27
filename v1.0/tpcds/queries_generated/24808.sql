@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, ws_order_number
+),
+TopSellingItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        rs.total_sales,
+        COALESCE(NULLIF(cd.cd_gender, ''), 'U') AS gender_fallback
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        customer c ON c.c_customer_sk = (SELECT ws_ship_customer_sk FROM web_sales WHERE ws_order_number = rs.ws_order_number LIMIT 1)
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        rs.sales_rank = 1
+),
+SalesByRegion AS (
+    SELECT 
+        ca_state,
+        SUM(total_sales) AS region_sales
+    FROM 
+        TopSellingItems tsi
+    LEFT JOIN 
+        customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_id = tsi.ws_item_sk)
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    r.ca_state,
+    r.region_sales,
+    (SELECT AVG(region_sales) FROM SalesByRegion) AS avg_region_sales,
+    CASE 
+        WHEN r.region_sales > (SELECT AVG(region_sales) FROM SalesByRegion) 
+        THEN 'Above Average' 
+        ELSE 'Below Average' 
+    END AS performance_category
+FROM 
+    SalesByRegion r
+WHERE 
+    r.region_sales IS NOT NULL
+ORDER BY 
+    r.region_sales DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total Sales' AS ca_state,
+    SUM(region_sales) AS region_sales,
+    NULL AS avg_region_sales,
+    NULL AS performance_category 
+FROM 
+    SalesByRegion
+HAVING 
+    COUNT(*) > 0
+ORDER BY 
+    region_sales DESC;

@@ -1,0 +1,70 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_country
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c_customer_sk,
+        CONCAT(c_first_name, ' ', c_last_name) AS CustomerName,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesDetails AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS TotalSales,
+        COUNT(ws.ws_order_number) AS TotalOrders
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk
+),
+YearlySales AS (
+    SELECT
+        EXTRACT(YEAR FROM dd.d_date) AS SalesYear,
+        SUM(ws.ws_sales_price) AS YearTotalSales
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY EXTRACT(YEAR FROM dd.d_date)
+),
+PopularCities AS (
+    SELECT
+        ca_city,
+        COUNT(*) AS AddressCount
+    FROM AddressDetails
+    GROUP BY ca_city
+    ORDER BY AddressCount DESC
+    LIMIT 10
+)
+SELECT
+    cd.CustomerName,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ad.FullAddress,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_country,
+    ss.TotalSales,
+    ss.TotalOrders,
+    ys.SalesYear,
+    ys.YearTotalSales,
+    pc.AddressCount
+FROM CustomerDetails cd
+JOIN AddressDetails ad ON cd.c_customer_sk = ad.ca_address_sk
+JOIN SalesDetails ss ON cd.c_customer_sk = ss.web_site_sk
+JOIN YearlySales ys ON 1=1
+JOIN PopularCities pc ON pc.ca_city = ad.ca_city
+WHERE cd.cd_purchase_estimate > 1000
+ORDER BY cd.CustomerName, ss.TotalSales DESC;

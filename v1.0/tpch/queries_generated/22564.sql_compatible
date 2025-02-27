@@ -1,0 +1,71 @@
+
+WITH RegionalCosts AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey, r.r_name
+),
+FilteredCosts AS (
+    SELECT 
+        r.n_nationkey,
+        r.r_name,
+        r.total_cost
+    FROM 
+        RegionalCosts r
+    WHERE 
+        r.total_cost > (SELECT AVG(total_cost) FROM RegionalCosts)
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    f.r_name,
+    f.total_cost,
+    COUNT(DISTINCT co.c_custkey) AS customers_with_orders,
+    SUM(COALESCE(co.order_count, 0)) AS total_orders,
+    AVG(COALESCE(co.order_count, 0)) AS avg_orders_per_customer,
+    (SELECT COUNT(*) FROM partsupp ps2 WHERE ps2.ps_supplycost < (SELECT MIN(ps3.ps_supplycost) FROM partsupp ps3 WHERE ps3.ps_availqty > 100)) AS lowest_supplycost_below_threshold
+FROM 
+    FilteredCosts f
+LEFT JOIN 
+    CustomerOrderCounts co ON f.n_nationkey = co.c_custkey
+GROUP BY 
+    f.r_name, f.total_cost
+HAVING 
+    SUM(CASE WHEN f.total_cost IS NULL THEN 1 ELSE 0 END) = 0
+ORDER BY 
+    f.total_cost DESC, customers_with_orders ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'OVERALL_TOTAL' AS r_name,
+    SUM(fc.total_cost) AS total_cost,
+    COUNT(DISTINCT c.c_custkey) AS customers_with_orders,
+    SUM(COALESCE(co.order_count, 0)) AS total_orders,
+    AVG(COALESCE(co.order_count, 0)) AS avg_orders_per_customer,
+    NULL AS lowest_supplycost_below_threshold
+FROM 
+    FilteredCosts fc
+LEFT JOIN 
+    CustomerOrderCounts co ON fc.n_nationkey = co.c_custkey
+JOIN 
+    customer c ON c.c_nationkey = fc.n_nationkey;

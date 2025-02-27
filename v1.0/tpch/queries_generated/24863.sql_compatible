@@ -1,0 +1,44 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, 
+           COUNT(l.l_linenumber) AS line_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice
+    HAVING COUNT(l.l_linenumber) > 0
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1998-01-01'
+    GROUP BY s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT rs.s_suppkey, rs.s_name, fs.line_count, fs.total_sales,
+           COALESCE(ss.supplier_sales, 0) AS total_supplier_sales
+    FROM RankedSuppliers rs
+    JOIN FilteredOrders fs ON rs.s_suppkey = fs.o_orderkey
+    LEFT JOIN SupplierSales ss ON rs.s_suppkey = ss.s_suppkey
+    WHERE rs.rn = 1
+)
+SELECT ts.s_suppkey, ts.s_name, ts.line_count, 
+       (ts.total_sales - ts.total_supplier_sales) AS discrepancy,
+       CASE 
+           WHEN ts.total_sales > 0 THEN ROUND((ts.total_supplier_sales * 100.0 / ts.total_sales), 2)
+           ELSE NULL 
+       END AS sales_percentage
+FROM TopSuppliers ts
+WHERE ts.discrepancy IS NOT NULL OR ts.sales_percentage IS NULL
+ORDER BY ts.line_count DESC, ts.discrepancy ASC
+LIMIT 20;

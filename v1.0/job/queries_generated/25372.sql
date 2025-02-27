@@ -1,0 +1,45 @@
+WITH MovieDetails AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+        c.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        title t
+    JOIN
+        movie_info mi ON t.id = mi.movie_id
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year, ct.kind
+),
+TopMovies AS (
+    SELECT
+        md.movie_title,
+        md.production_year,
+        md.keywords,
+        md.company_type,
+        md.cast_count,
+        ROW_NUMBER() OVER (ORDER BY md.cast_count DESC) AS rank
+    FROM
+        MovieDetails md
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.keywords,
+    tm.company_type,
+    tm.cast_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10;

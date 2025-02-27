@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+WordCount AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS WordCount
+    FROM 
+        (SELECT 
+            PostId,
+            UNNEST(string_to_array(LOWER(REPLACE(Body, '<p>', '')), ' ')) AS Word
+         FROM 
+            Posts) AS Words
+    WHERE 
+        Word <> ''
+    GROUP BY 
+        PostId
+),
+TopRanked AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        wc.WordCount
+    FROM 
+        RankedPosts p
+    JOIN 
+        WordCount wc ON p.PostId = wc.PostId
+    WHERE 
+        p.TagRank <= 5
+)
+SELECT 
+    t.OwnerDisplayName,
+    t.Title,
+    t.Tags,
+    t.CreationDate,
+    t.Score,
+    t.ViewCount,
+    t.WordCount,
+    CONCAT('This question has ', CAST(t.WordCount AS VARCHAR), ' words.') AS WordCountComment
+FROM 
+    TopRanked t
+ORDER BY 
+    t.Score DESC, t.ViewCount DESC;

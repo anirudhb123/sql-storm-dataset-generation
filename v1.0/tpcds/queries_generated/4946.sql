@@ -1,0 +1,74 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+top_items AS (
+    SELECT
+        i.i_item_id,
+        rs.total_quantity,
+        rs.total_sales
+    FROM
+        item i
+    JOIN
+        ranked_sales rs ON i.i_item_sk = rs.ws_item_sk
+    WHERE
+        rs.sales_rank <= 10
+),
+customer_sales AS (
+    SELECT
+        c.c_customer_id,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sales_price IS NOT NULL
+    GROUP BY
+        c.c_customer_id
+),
+monthly_sales AS (
+    SELECT
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.ws_sales_price) AS monthly_total_sales
+    FROM
+        date_dim d
+    JOIN
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY
+        d.d_year, d.d_month_seq
+),
+final_report AS (
+    SELECT
+        ti.i_item_id,
+        cs.c_customer_id,
+        ms.monthly_total_sales,
+        cs.order_count,
+        cs.total_profit
+    FROM
+        top_items ti
+    LEFT JOIN
+        customer_sales cs ON cs.order_count > 0
+    JOIN
+        monthly_sales ms ON ms.monthly_total_sales > 1000
+)
+SELECT
+    fr.i_item_id,
+    fr.c_customer_id,
+    COALESCE(fr.monthly_total_sales, 0) AS total_sales,
+    COALESCE(fr.order_count, 0) AS order_count,
+    COALESCE(fr.total_profit, 0) AS total_profit
+FROM
+    final_report fr
+ORDER BY
+    fr.total_profit DESC, fr.total_sales DESC;

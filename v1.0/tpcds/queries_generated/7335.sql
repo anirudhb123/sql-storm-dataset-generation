@@ -1,0 +1,53 @@
+
+WITH SalesData AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY ws_bill_customer_sk
+),
+CustomerData AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AggregatedData AS (
+    SELECT
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(sd.total_quantity, 0) AS total_quantity,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        sd.order_count
+    FROM CustomerData cd
+    LEFT JOIN SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT
+    ad.c_customer_sk,
+    ad.c_first_name,
+    ad.c_last_name,
+    ad.cd_gender,
+    ad.cd_income_band_sk,
+    ad.cd_marital_status,
+    ad.cd_purchase_estimate,
+    ad.total_quantity,
+    ad.total_sales,
+    RANK() OVER (ORDER BY ad.total_sales DESC) AS sales_rank
+FROM AggregatedData ad
+WHERE ad.cd_income_band_sk IS NOT NULL
+ORDER BY ad.total_sales DESC
+LIMIT 100;

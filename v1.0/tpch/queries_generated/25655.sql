@@ -1,0 +1,35 @@
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, p.p_size
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 20
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+),
+LineItemAggregates AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue, 
+           COUNT(*) AS item_count
+    FROM lineitem li
+    GROUP BY li.l_orderkey
+)
+SELECT co.c_custkey, co.c_name, COALESCE(SUM(la.total_revenue), 0) AS total_revenue, 
+       COALESCE(SUM(la.item_count), 0) AS total_items,
+       pd.p_brand, pd.p_type
+FROM CustomerOrders co
+LEFT JOIN LineItemAggregates la ON co.o_orderkey = la.l_orderkey
+LEFT JOIN PartDetails pd ON EXISTS (
+    SELECT 1 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM PartDetails p)
+     AND ps.ps_suppkey IN (SELECT s.s_suppkey FROM SupplierDetails s)
+)
+GROUP BY co.c_custkey, co.c_name, pd.p_brand, pd.p_type
+HAVING SUM(la.total_revenue) > 1000
+ORDER BY total_revenue DESC;

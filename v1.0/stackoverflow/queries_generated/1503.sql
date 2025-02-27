@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostMetrics AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CreationDate,
+        COALESCE(rc.CommentCount, 0) AS CommentCount,
+        rc.LastCommentDate,
+        COALESCE(us.BadgeCount, 0) AS UserBadgeCount,
+        us.TotalBounties
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentComments rc ON rp.Id = rc.PostId
+    LEFT JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        UserStatistics us ON u.Id = us.UserId
+)
+SELECT 
+    pm.Id,
+    pm.Title,
+    pm.Score,
+    pm.ViewCount,
+    pm.AnswerCount,
+    pm.CommentCount,
+    pm.LastCommentDate,
+    pm.UserBadgeCount,
+    pm.TotalBounties
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.RankScore <= 10
+ORDER BY 
+    pm.Score DESC, pm.ViewCount DESC
+LIMIT 50;

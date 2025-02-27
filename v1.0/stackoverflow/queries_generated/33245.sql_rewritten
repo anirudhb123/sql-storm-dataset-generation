@@ -1,0 +1,85 @@
+WITH RECURSIVE PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::int[])
+    GROUP BY 
+        Tags.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        RANK() OVER (ORDER BY SUM(COALESCE(P.Score, 0)) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentClosePostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    AND 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 DAYS'
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(Cm.Id) AS CommentCount,
+        MAX(V.CreationDate) AS LastVoteDate,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments Cm ON P.Id = Cm.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.PostCount AS UserPostCount,
+    U.TotalScore,
+    T.TagName AS PopularTag,
+    P.Title AS RecentlyClosedPostTitle,
+    R.CloseReason,
+    S.CommentCount,
+    S.LastVoteDate,
+    S.UpVotes,
+    S.DownVotes
+FROM 
+    ActiveUsers U
+CROSS JOIN 
+    PopularTags T
+LEFT JOIN 
+    RecentClosePostHistory R ON R.PostId IN (SELECT PostId FROM PostStats WHERE UpVotes > 0 ORDER BY LastVoteDate DESC LIMIT 3)
+JOIN 
+    PostStats S ON R.PostId = S.PostId
+WHERE 
+    U.UserRank <= 10
+ORDER BY 
+    U.TotalScore DESC, T.PostCount DESC
+LIMIT 10;

@@ -1,0 +1,44 @@
+
+WITH RECURSIVE revenue_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+promotions_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        COUNT(DISTINCT ps.p_promo_id) AS promotion_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_ext_discount_amt) AS avg_discount
+    FROM web_sales ws
+    LEFT JOIN promotion ps ON ws.ws_promo_sk = ps.p_promo_sk
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        ps.ws_item_sk,
+        ps.total_sales,
+        ROW_NUMBER() OVER (ORDER BY ps.total_sales DESC) AS item_rank
+    FROM promotions_summary ps
+    WHERE ps.promotion_count > 0
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    t.total_sales,
+    coalesce(t.promotion_count, 0) AS promotion_count,
+    COALESCE(r.total_sales, 0) AS untracked_sales
+FROM item i
+LEFT JOIN top_items t ON i.i_item_sk = t.ws_item_sk
+LEFT JOIN (SELECT ws_item_sk, SUM(ws_ext_sales_price) AS total_sales
+            FROM web_sales 
+            WHERE ws_sold_date_sk < (SELECT MIN(d_date_sk) FROM date_dim WHERE d_holiday = 'Y')
+            GROUP BY ws_item_sk) r ON i.i_item_sk = r.ws_item_sk
+WHERE t.item_rank <= 10 OR t.ws_item_sk IS NULL
+ORDER BY total_sales DESC;
+

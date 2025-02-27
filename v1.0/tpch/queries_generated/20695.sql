@@ -1,0 +1,45 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS highest_price_rank
+    FROM part p
+),
+SupplierNation AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS balance_rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(sn.nation_name, 'Unknown') AS supplier_nation,
+    (SELECT SUM(l.l_extendedprice * (1 - l.l_discount))
+     FROM lineitem l 
+     WHERE l.l_partkey = p.p_partkey 
+     AND l.l_returnflag = 'N') AS total_sales,
+    CASE 
+        WHEN sp.highest_price_rank = 1 AND sn.balance_rank = 1 THEN 'High Revenue & High Balance'
+        WHEN sp.highest_price_rank = 1 THEN 'High Revenue'
+        WHEN sn.balance_rank = 1 THEN 'High Balance'
+        ELSE 'Standard'
+    END AS classification,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+FROM RankedParts p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierNation sn ON ps.ps_suppkey = sn.s_suppkey
+LEFT JOIN (
+    SELECT p_partkey, highest_price_rank
+    FROM RankedParts
+    WHERE highest_price_rank <= 10
+) sp ON p.p_partkey = sp.p_partkey
+WHERE (p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+       OR p.p_name LIKE '%special%')
+GROUP BY p.p_name, sn.nation_name, sp.highest_price_rank, sn.balance_rank
+HAVING total_sales IS NOT NULL 
+   AND COUNT(DISTINCT ps.ps_suppkey) > 1
+ORDER BY total_sales DESC, p.p_name;

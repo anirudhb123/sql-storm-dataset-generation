@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.name) AS rank_title
+    FROM 
+        aka_title t
+    JOIN 
+        aka_name a ON a.id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+          AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+FilteredMovies AS (
+    SELECT 
+        ct.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        SUM(CASE 
+                WHEN c.note IS NULL OR c.note = '' THEN 1 
+                ELSE 0 
+            END) AS null_notes_count,
+        AVG(COALESCE(t.production_year, 0)) AS avg_production_year
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        movie_info mi ON c.movie_id = mi.movie_id
+    LEFT JOIN 
+        title t ON t.id = mi.movie_id
+    WHERE 
+        c.nr_order IS NOT NULL
+          AND (c.note IS NULL OR c.note LIKE '%featured%')
+    GROUP BY 
+        ct.movie_id
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 5
+),
+
+CombinedData AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        m.total_cast,
+        m.null_notes_count,
+        ROW_NUMBER() OVER (ORDER BY m.total_cast DESC, r.production_year DESC) AS movie_rank
+    FROM 
+        RankedTitles r
+    JOIN 
+        FilteredMovies m ON r.production_year = m.avg_production_year
+    WHERE 
+        m.total_cast > 0
+)
+
+SELECT 
+    title,
+    production_year,
+    total_cast,
+    null_notes_count,
+    movie_rank
+FROM 
+    CombinedData
+WHERE 
+    movie_rank <= 10
+ORDER BY 
+    production_year DESC, total_cast DESC;
+

@@ -1,0 +1,42 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+regional_sales AS (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY n.n_name
+),
+high_sales AS (
+    SELECT n.n_name, r.total_sales
+    FROM nation n
+    LEFT JOIN regional_sales r ON n.n_name = r.n_name
+    WHERE r.total_sales IS NOT NULL
+),
+supplier_details AS (
+    SELECT sh.s_suppkey, sh.s_name, COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name
+)
+SELECT COALESCE(hs.n_name, 'Unknown Region') AS region,
+       COALESCE(hs.total_sales, 0) AS total_sales,
+       sd.s_name AS supplier_name,
+       sd.parts_supplied
+FROM high_sales hs
+FULL OUTER JOIN supplier_details sd ON hs.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = sd.s_nationkey)
+WHERE sd.parts_supplied IS NOT NULL
+AND (sd.parts_supplied > 1 OR hs.total_sales > 1000)
+ORDER BY total_sales DESC, parts_supplied DESC;

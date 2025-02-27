@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           c.c_first_name,
+           c.c_last_name,
+           0 AS Level
+    FROM customer c
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT ch.c_customer_sk,
+           ch.c_customer_id,
+           ch.c_first_name,
+           ch.c_last_name,
+           Level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+InventoryStatus AS (
+    SELECT i.i_item_sk,
+           COALESCE(SUM(CASE WHEN inv.inv_quantity_on_hand IS NULL OR inv.inv_quantity_on_hand < 0 THEN 0 ELSE inv.inv_quantity_on_hand END), 0) AS total_on_hand
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk
+),
+SalesDetails AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales,
+           COUNT(ws.ws_order_number) AS order_count,
+           AVG(ws.ws_net_profit) AS avg_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sale_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+Revenues AS (
+    SELECT iss.total_on_hand,
+           sd.total_sales,
+           sd.order_count,
+           sd.avg_net_profit
+    FROM InventoryStatus iss
+    JOIN SalesDetails sd ON iss.i_item_sk = sd.ws_item_sk
+    WHERE sd.total_sales > 50
+),
+FinalReport AS (
+    SELECT ch.c_customer_id,
+           ch.c_first_name,
+           ch.c_last_name,
+           COALESCE(r.total_sales, 0) AS customer_total_sales,
+           COALESCE(r.order_count, 0) AS order_count,
+           COALESCE(r.avg_net_profit, 0) AS avg_net_profit,
+           CASE 
+               WHEN r.customer_total_sales > 1000 THEN 'High Value'
+               WHEN r.customer_total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+               ELSE 'Low Value'
+           END AS customer_value_segment
+    FROM CustomerHierarchy ch
+    LEFT JOIN (
+        SELECT ws_bill_customer_sk,
+               SUM(ws_net_profit) AS total_sales,
+               COUNT(ws_order_number) AS order_count,
+               AVG(ws_net_profit) AS avg_net_profit
+        FROM web_sales
+        GROUP BY ws_bill_customer_sk
+    ) r ON ch.c_customer_sk = r.ws_bill_customer_sk
+)
+SELECT f.c_customer_id,
+       f.c_first_name,
+       f.c_last_name,
+       f.customer_value_segment,
+       CASE 
+           WHEN f.customer_total_sales IS NULL THEN 'No Sales'
+           ELSE 'Sales Recorded'
+       END as sales_record_status
+FROM FinalReport f
+WHERE f.order_count > 0
+ORDER BY f.customer_value_segment DESC, f.customer_total_sales DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM customer) / 10;

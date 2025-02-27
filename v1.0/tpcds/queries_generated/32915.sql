@@ -1,0 +1,89 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    
+    UNION ALL
+    
+    SELECT 
+        ch.c_customer_sk, 
+        ch.c_first_name, 
+        ch.c_last_name, 
+        sh.total_profit + SUM(ws.ws_net_profit)
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer ch ON ch.c_current_cdemo_sk = sh.c_customer_sk
+    JOIN 
+        web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        ch.c_customer_sk, ch.c_first_name, ch.c_last_name, sh.total_profit
+),
+paid_customers AS (
+    SELECT 
+        DISTINCT c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        coalesce(NULLIF(c.c_birth_month, 0), 12) AS birth_month,
+        ROW_NUMBER() OVER (PARTITION BY c.c_birth_month ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_net_paid > 0
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_birth_month
+),
+monthly_profit AS (
+    SELECT 
+        DATE_TRUNC('month', d.d_date) AS month, 
+        SUM(ws.ws_net_profit) AS total_monthly_profit
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        DATE_TRUNC('month', d.d_date)
+),
+summary AS (
+    SELECT 
+        ph.c_first_name, 
+        ph.c_last_name, 
+        ph.birth_month, 
+        mh.total_monthly_profit,
+        sh.total_profit AS cumulative_profit
+    FROM 
+        paid_customers ph
+    JOIN 
+        monthly_profit mh ON true
+    JOIN 
+        sales_hierarchy sh ON true
+    WHERE 
+        ph.rank <= 3 
+)
+SELECT 
+    sm.sm_type AS shipping_method,
+    s.s_store_name AS store_name,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    COALESCE(SUM(sp.total_monthly_profit), 0) AS overall_monthly_profit,
+    COALESCE(AVG(sp.cumulative_profit), 0) AS average_cumulative_profit
+FROM 
+    store s
+LEFT JOIN 
+    ship_mode sm ON s.s_store_sk = sm.sm_ship_mode_sk
+LEFT JOIN 
+    summary sp ON true
+GROUP BY 
+    sm.sm_type, s.s_store_name
+ORDER BY 
+    total_customers DESC, overall_monthly_profit DESC;

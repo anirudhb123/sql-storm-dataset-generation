@@ -1,0 +1,81 @@
+WITH PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score,
+        p.OwnerUserId, 
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE((SELECT COUNT(DISTINCT c.Id) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId IN (2, 10)), 0) AS Upvotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        OwnerUserId,
+        OwnerDisplayName,
+        CommentCount,
+        Upvotes,
+        Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY ViewCount DESC, Score DESC) AS OwnerRank
+    FROM 
+        PostInfo
+),
+PostHistoryData AS (
+    SELECT 
+        p.PostId,
+        p.OwnerDisplayName,
+        COUNT(ph.Id) AS HistoryCount,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS HistoryTypes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        p.PostId, p.OwnerDisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes,
+    phd.HistoryCount,
+    phd.HistoryTypes,
+    CASE 
+        WHEN rp.OwnerRank = 1 THEN 'Top Post for User'
+        WHEN rp.OwnerRank <= 5 THEN 'Top 5 Posts for User'
+        ELSE 'Other'
+    END AS RankCategory,
+    CASE
+        WHEN phd.HistoryTypes LIKE '%Close%' THEN 'Closed Post'
+        ELSE 'Active Post'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    PostHistoryData phd ON rp.PostId = phd.PostId
+ORDER BY 
+    rp.ViewCount DESC,
+    rp.Score DESC;
+
+-- Additional Benchmarking logic, such as handling potential NULL values and timing (TO_BE_IMPLEMENTED)
+

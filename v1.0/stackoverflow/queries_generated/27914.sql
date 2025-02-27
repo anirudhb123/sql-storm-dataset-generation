@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.Score > 0 -- Only positively scored questions
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TopUserPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 5
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT tp.PostId) AS TopPostCount,
+        SUM(tp.ViewCount) AS TotalViewCount,
+        SUM(tp.Score) AS TotalScore,
+        SUM(tp.CommentCount) AS TotalCommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        TopUserPosts tp ON u.Id = tp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TopPostCount,
+    us.TotalViewCount,
+    us.TotalScore,
+    us.TotalCommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    UserStatistics us
+LEFT JOIN 
+    Posts p ON us.UserId = p.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS TagName
+    ) t ON TRUE
+WHERE 
+    us.TopPostCount > 0
+GROUP BY 
+    us.UserId, us.DisplayName, us.Reputation, us.TopPostCount, us.TotalViewCount, us.TotalScore, us.TotalCommentCount
+ORDER BY 
+    us.TotalScore DESC;

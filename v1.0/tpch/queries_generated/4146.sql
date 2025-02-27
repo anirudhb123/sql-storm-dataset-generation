@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+), SupplierOrders AS (
+    SELECT 
+        r.region_name,
+        r.supplier_name,
+        od.total_revenue,
+        COALESCE(od.total_revenue, 0) AS revenue_or_none,
+        rs.rank
+    FROM RankedSuppliers rs
+    LEFT JOIN OrderDetails od ON rs.s_suppkey = od.o_orderkey
+    JOIN region r ON rs.n_name = r.r_name
+    WHERE rs.rank <= 5 -- Top 5 suppliers per nation
+)
+SELECT 
+    ro.region_name, 
+    ro.supplier_name, 
+    ro.total_revenue, 
+    ro.revenue_or_none,
+    CASE 
+        WHEN ro.revenue_or_none IS NULL THEN 'No Sales' 
+        ELSE 'Sales Exists' 
+    END AS sales_status
+FROM SupplierOrders ro
+WHERE ro.total_revenue > 10000
+ORDER BY ro.region_name, ro.total_revenue DESC;

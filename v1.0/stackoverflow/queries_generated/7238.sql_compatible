@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(DAY, -30, '2024-10-01')
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.OwnerRank <= 3 
+),
+PostDetail AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.OwnerDisplayName,
+        COALESCE(t.TagName, 'No Tag') AS TagName,
+        t.Count AS TagCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        (SELECT DISTINCT UNNEST(SPLIT_PARTS(t.Tags, '>')) AS TagName, p.Id
+         FROM Posts p
+         JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%') t ON tp.PostId = t.Id
+    LEFT JOIN 
+        Votes v ON tp.PostId = v.PostId AND v.VoteTypeId IN (2, 3) 
+    GROUP BY 
+        tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.OwnerDisplayName, t.TagName, t.Count
+)
+SELECT 
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.TagName,
+    pd.TagCount,
+    pd.VoteCount
+FROM 
+    PostDetail pd
+ORDER BY 
+    pd.Score DESC, pd.CreationDate DESC
+LIMIT 10;

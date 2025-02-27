@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(vb.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryChangeCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.Id END) AS CloseReopenCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes vb ON u.Id = vb.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    WHERE 
+        u.CreationDate < DATEADD(MONTH, -6, '2024-10-01') AND
+        (u.Reputation / NULLIF(u.Views, 0)) > 0.1
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserWithMaxPosts AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.TotalBounties,
+        ue.CommentCount,
+        ue.HistoryChangeCount,
+        p.Title,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        UserEngagement ue
+    JOIN 
+        RankedPosts p ON ue.UserId = p.OwnerUserId
+    WHERE 
+        p.rn = 1
+)
+SELECT 
+    uwp.UserId,
+    uwp.DisplayName,
+    uwp.TotalBounties,
+    uwp.CommentCount,
+    uwp.HistoryChangeCount,
+    COALESCE(sub.CloseReason, 'No Closure') AS CloseReason,
+    CASE 
+        WHEN uwp.TotalBounties > (SELECT AVG(TotalBounties) FROM UserEngagement) THEN 'Above Average'
+        WHEN uwp.TotalBounties < (SELECT AVG(TotalBounties) FROM UserEngagement) THEN 'Below Average'
+        ELSE 'Average'
+    END AS BountyStatus
+FROM 
+    UserWithMaxPosts uwp
+LEFT JOIN 
+    (SELECT 
+        ph.UserId, 
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)) sub ON uwp.UserId = sub.UserId
+WHERE 
+    uwp.PostRank = 1
+ORDER BY 
+    uwp.CommentCount DESC, 
+    uwp.TotalBounties DESC
+LIMIT 10;

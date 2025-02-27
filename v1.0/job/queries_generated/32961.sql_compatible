@@ -1,0 +1,77 @@
+
+WITH RECURSIVE hierarchy AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.nr_order = 1
+    
+    UNION ALL
+    
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        h.level + 1
+    FROM 
+        cast_info c
+    INNER JOIN 
+        hierarchy h ON c.movie_id = h.movie_id
+    WHERE 
+        c.nr_order = h.level + 1
+),
+movie_cast AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        a.name AS actor_name,
+        a.md5sum AS actor_md5,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS cast_order
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        t.production_year >= 2000
+),
+movie_details AS (
+    SELECT 
+        m.title_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        MAX(i.info) AS latest_info
+    FROM 
+        movie_cast m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.title_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.title_id
+    LEFT JOIN 
+        info_type i ON i.id = mi.info_type_id
+    GROUP BY 
+        m.title_id, m.title, m.production_year
+)
+SELECT 
+    d.title,
+    d.production_year,
+    d.keyword_count,
+    COALESCE(d.latest_info, 'No additional information') AS additional_info,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('actor', m.actor_name, 'order', m.cast_order)) AS cast_info
+FROM 
+    movie_details d
+LEFT JOIN 
+    movie_cast m ON m.title_id = d.title_id
+WHERE 
+    d.keyword_count > 0
+GROUP BY 
+    d.title, d.production_year, d.keyword_count
+ORDER BY 
+    d.production_year DESC, d.title;

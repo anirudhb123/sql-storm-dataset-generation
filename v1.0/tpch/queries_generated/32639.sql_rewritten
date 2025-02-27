@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CAST(s.s_name AS varchar(255)) AS full_name,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sp.s_acctbal,
+           CONCAT(sh.full_name, ' -> ', sp.s_name) AS full_name,
+           sh.level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal > sh.s_acctbal
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+)
+SELECT r.r_name, 
+       COALESCE(sr.total_revenue, 0) AS total_supplier_revenue,
+       COALESCE(os.revenue, 0) AS total_order_revenue,
+       sh.level,
+       STRING_AGG(sh.full_name, ' -> ') AS supplier_chain
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierRevenue sr ON n.n_nationkey = sr.s_suppkey
+LEFT JOIN OrderStats os ON sr.s_suppkey = os.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE r.r_name LIKE '%East%'
+GROUP BY r.r_name, sr.total_revenue, os.revenue, sh.level
+ORDER BY total_supplier_revenue DESC NULLS LAST, total_order_revenue DESC;

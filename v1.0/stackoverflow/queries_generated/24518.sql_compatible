@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND u.Reputation > 1000
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+CloseVotes AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseVotesCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(cv.CloseVotesCount, 0) AS TotalCloseVotes,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        CASE 
+            WHEN cv.CloseVotesCount > 0 THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVotes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        CloseVotes cv ON rp.PostId = cv.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerDisplayName = ub.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    OwnerDisplayName,
+    TotalUpVotes,
+    TotalDownVotes,
+    TotalCloseVotes,
+    BadgeCount,
+    BadgeNames,
+    PostStatus
+FROM 
+    FinalResults
+WHERE 
+    Rank <= 5
+ORDER BY 
+    CreationDate DESC
+LIMIT 10;

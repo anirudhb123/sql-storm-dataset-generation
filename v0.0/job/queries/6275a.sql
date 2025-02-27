@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mi.info > 'Ernie Turner is released from a mental hospital and evicted from his apartment. Alienated and indifferent to life, he meets Donna, a beautiful young woman while wandering down the street. Donna takes pity on Ernie despite him being in a terminal state of confusion and the two become involved with each other. Later at a party, Ernie meets a former girlfriend, Gail, and the two resume their previous relationship. For Ernie life is a game, but as he moves between the two women, his fragile mental state declines and his imagined rejections drive him to fantastic and dangerous schemes.';

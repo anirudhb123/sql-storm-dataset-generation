@@ -1,0 +1,58 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        COALESCE(SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedQuestions,
+        AVG(V.BountyAmount) FILTER (WHERE V.VoteTypeId = 8) AS AverageBounty,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionsAsked,
+        AnswersProvided,
+        ClosedQuestions,
+        AverageBounty,
+        UserRank
+    FROM UserActivity
+    WHERE UserRank <= 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.ViewCount DESC) AS RankByViews
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount
+)
+SELECT 
+    U.DisplayName,
+    U.QuestionsAsked,
+    U.AnswersProvided,
+    U.ClosedQuestions,
+    U.AverageBounty,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.CommentCount,
+    CASE 
+        WHEN U.AverageBounty IS NULL THEN 'No Bounties' 
+        ELSE CONCAT('Average Bounty: $', COALESCE(U.AverageBounty, 0)::TEXT) 
+    END AS BountyInfo,
+    COALESCE(P.RankByViews, 'No Views') AS PostViewRank
+FROM TopActiveUsers U
+LEFT JOIN PostStatistics P ON U.UserId = P.OwnerUserId
+WHERE P.RankByViews > 0 OR P.RankByViews IS NULL
+ORDER BY U.UserRank, P.ViewCount DESC
+LIMIT 20;

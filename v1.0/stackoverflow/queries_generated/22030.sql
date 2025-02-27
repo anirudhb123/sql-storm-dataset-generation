@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COALESCE(prv.Reputation, 0) AS PreviousReputation,
+        COALESCE(curr.Reputation, 0) AS CurrentReputation,
+        COALESCE(DATEDIFF('day', prv.CreationDate, curr.CreationDate), 0) AS DaysBetweenReputationUpdates
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users curr ON p.OwnerUserId = curr.Id
+    LEFT JOIN 
+        Users prv ON p.OwnerUserId = prv.Id AND prv.CreationDate < p.CreationDate
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.PostRank,
+        CASE 
+            WHEN rp.PostRank = 1 AND rp.CurrentReputation >= 100 THEN 'Hot User Post'
+            WHEN rp.PostRank = 1 AND rp.CurrentReputation < 100 THEN 'Newcomer Hot Post'
+            ELSE 'Standard Post'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score > (
+            SELECT AVG(Score) FROM Posts WHERE CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days'
+        )
+),
+
+PostActivitySummary AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.PostCategory,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount, -- Only counting upvotes
+        SUM(v.VoteTypeId = 3) AS DownVoteCount -- Only counting downvotes
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Comments c ON c.PostId = fp.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = fp.PostId
+    GROUP BY 
+        fp.PostId, fp.Title, fp.PostCategory
+)
+
+SELECT 
+    pas.PostId,
+    pas.Title,
+    pas.PostCategory,
+    pas.CommentCount,
+    pas.UpVoteCount,
+    pas.DownVoteCount,
+    CASE 
+        WHEN pas.UpVoteCount IS NULL THEN 0
+        ELSE pas.UpVoteCount - pas.DownVoteCount
+    END AS NetVotes,
+    CONCAT('Post classified as ', 
+           CASE 
+               WHEN pas.PostCategory = 'Hot User Post' THEN 'a popular post'
+               WHEN pas.PostCategory = 'Newcomer Hot Post' THEN 'a trending post by a newcomer'
+               ELSE 'a regular post'
+           END) AS ClassificationNote
+FROM 
+    PostActivitySummary pas
+WHERE 
+    pas.CommentCount > 0
+ORDER BY 
+    NetVotes DESC NULLS LAST;

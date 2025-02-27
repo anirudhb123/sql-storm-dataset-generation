@@ -1,0 +1,94 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TagViewCounts AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) ) AS TagName,
+        COUNT(*) AS ViewCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+CombinedData AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ubc.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ubc.HighestBadgeClass, 0) AS HighestBadgeClass,
+        pp.PostId,
+        pp.UpVoteCount,
+        pp.DownVoteCount,
+        pp.AcceptedVoteCount,
+        tvc.TagName,
+        tvc.ViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ubc ON u.Id = ubc.UserId
+    LEFT JOIN 
+        PostVoteCounts pp ON pp.PostId = (
+            SELECT 
+                p.Id 
+            FROM 
+                Posts p 
+            WHERE 
+                p.OwnerUserId = u.Id 
+            ORDER BY 
+                p.CreationDate DESC 
+            LIMIT 1) 
+    LEFT JOIN 
+        TagViewCounts tvc ON tvc.TagName = ANY(STRING_TO_ARRAY(
+            (SELECT p.Tags FROM Posts p WHERE p.OwnerUserId = u.Id ORDER BY p.CreationDate LIMIT 1), 
+            '><')) 
+) 
+SELECT 
+    c.UserId,
+    c.DisplayName,
+    c.Reputation,
+    c.BadgeCount,
+    c.HighestBadgeClass,
+    CASE 
+        WHEN c.UpVoteCount IS NULL THEN 'No Votes'
+        ELSE CAST(c.UpVoteCount AS TEXT) || ' Upvotes' 
+    END AS UpVotes,
+    CASE 
+        WHEN c.DownVoteCount IS NULL THEN 'No Votes'
+        ELSE CAST(c.DownVoteCount AS TEXT) || ' Downvotes' 
+    END AS DownVotes,
+    CASE 
+        WHEN c.AcceptedVoteCount > 0 THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AcceptanceStatus,
+    COALESCE(c.TagName, 'No Tags') AS TagName,
+    COALESCE(c.ViewCount, 0) AS TagViewCount
+FROM 
+    CombinedData c
+WHERE 
+    c.Reputation > 1000
+ORDER BY 
+    c.Reputation DESC, c.BadgeCount DESC;

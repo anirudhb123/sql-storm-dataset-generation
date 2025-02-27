@@ -1,0 +1,43 @@
+
+WITH movie_rating AS (
+    SELECT m.id AS movie_id, AVG(r.rating) AS avg_rating
+    FROM title m
+    LEFT JOIN ratings r ON m.id = r.movie_id
+    GROUP BY m.id
+),
+actor_movies AS (
+    SELECT a.person_id, COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.person_id
+),
+movies_with_keywords AS (
+    SELECT mt.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY mt.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    mm.title AS movie_title,
+    mm.production_year,
+    kr.keywords,
+    COALESCE(r.avg_rating, 0) AS average_rating,
+    ac.movie_count AS actor_movie_count,
+    CASE 
+        WHEN r.avg_rating IS NULL THEN 'Rating not available'
+        WHEN r.avg_rating > 8 THEN 'Highly rated'
+        WHEN r.avg_rating BETWEEN 6 AND 8 THEN 'Moderately rated'
+        ELSE 'Low rated'
+    END AS rating_label
+FROM aka_name a
+JOIN cast_info c ON a.person_id = c.person_id
+JOIN title mm ON c.movie_id = mm.id
+LEFT JOIN movie_rating r ON mm.id = r.movie_id
+JOIN movies_with_keywords kr ON mm.id = kr.movie_id
+JOIN actor_movies ac ON a.person_id = ac.person_id
+WHERE mm.production_year >= 2000
+AND (r.avg_rating IS NULL OR r.avg_rating > 5)
+ORDER BY a.name, mm.production_year DESC;

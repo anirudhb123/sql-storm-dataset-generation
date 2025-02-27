@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS SalesRank,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk, ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS RowNum
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price IS NOT NULL
+        AND ws_quantity > (
+            SELECT AVG(ws2.ws_quantity) 
+            FROM web_sales ws2 
+            WHERE ws2.ws_web_site_sk = ws.web_site_sk
+        )
+),
+StoreSalesAggregates AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_quantity) AS TotalQuantity,
+        COUNT(DISTINCT ss_ticket_number) AS OrderCount,
+        MAX(ss_sales_price) AS MaxSalePrice,
+        MIN(ss_sales_price) AS MinSalePrice,
+        AVG(ss_sales_price) AS AvgSalePrice
+    FROM 
+        store_sales
+    WHERE 
+        ss_sales_price > (
+            SELECT AVG(ss_sales_price) 
+            FROM store_sales
+        )
+    GROUP BY 
+        ss_store_sk
+),
+CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS TotalReturns,
+        SUM(COALESCE(sr_return_amt, 0)) AS TotalReturnedAmount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(rsa.TotalQuantity) AS TotalSoldQuantity,
+    SUM(ca_return.TotalReturns) AS TotalReturned,
+    AVG(ca_return.TotalReturnedAmount) AS AvgReturnAmount,
+    COUNT(DISTINCT cs.c_customer_sk) AS UniqueCustomers,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY SUM(rsa.TotalQuantity) DESC) AS StateRank
+FROM 
+    customer_address ca
+LEFT JOIN 
+    RankedSales rsa ON ca.ca_address_sk = rsa.web_site_sk
+LEFT JOIN 
+    CustomerReturns ca_return ON ca.ca_address_sk = ca_return.c_customer_sk
+WHERE 
+    ca.ca_state IS NOT NULL
+    AND (rsa.SalesRank BETWEEN 1 AND 5 OR rsa.RowNum = 1)
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    SUM(rsa.TotalQuantity) > 100
+ORDER BY 
+    StateRank, 
+    ca.ca_city;

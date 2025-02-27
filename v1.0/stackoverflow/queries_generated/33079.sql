@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    AND 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts from the last year
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' + t.TagName + '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10 -- Tags used in more than 10 posts
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS QuestionsCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        u.Reputation > 100 -- Users with reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.UpVotes,
+    up.DownVotes,
+    COUNT(DISTINCT r.PostId) AS TotalQuestions,
+    MAX(r.ViewCount) AS MaxViews,
+    t.TagName,
+    u.QuestionsCreated,
+    SUM(CASE WHEN r.LastEditDate IS NOT NULL THEN 1 ELSE 0 END) AS EditedQuestions
+FROM 
+    UserStats up
+JOIN 
+    RankedPosts r ON r.UserPostRank <= 3 -- Get the latest 3 questions for each user
+JOIN 
+    TagUsage t ON r.Tags LIKE '%' + t.TagName + '%'
+JOIN 
+    UserStats u ON u.UserId = up.UserId
+GROUP BY 
+    up.DisplayName, up.Reputation, up.UpVotes, up.DownVotes, t.TagName, u.QuestionsCreated
+ORDER BY 
+    TotalQuestions DESC, MaxViews DESC
+OPTION (RECOMPILE);
+

@@ -1,0 +1,64 @@
+
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            WHEN v.VoteTypeId = 3 THEN -1 
+            ELSE 0 
+        END) AS NetScore,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+), PostDetail AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+), RankedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        pd.TotalComments,
+        pd.HasAcceptedAnswer,
+        RANK() OVER (ORDER BY pd.Score DESC, pd.ViewCount DESC) AS PostRank
+    FROM PostDetail pd
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.NetScore,
+    us.BadgeCount,
+    us.TotalPosts,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    rp.TotalComments,
+    rp.HasAcceptedAnswer
+FROM UserScore us
+JOIN RankedPosts rp ON us.UserId IN (
+    SELECT OwnerUserId 
+    FROM Posts 
+    WHERE Score >= 10
+)
+WHERE us.NetScore > 0
+ORDER BY us.NetScore DESC, rp.Score DESC
+LIMIT 10;

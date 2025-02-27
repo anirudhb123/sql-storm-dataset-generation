@@ -1,0 +1,45 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, COUNT(l.l_linenumber) AS items_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_retailprice < 100.00
+),
+TopSuppliers AS (
+    SELECT ss.*
+    FROM SupplierStats ss
+    WHERE ss.total_supply_value > (
+        SELECT AVG(total_supply_value) FROM SupplierStats
+    )
+)
+SELECT co.c_name, co.total_orders, co.total_spent, 
+       tp.p_name AS top_part_name, tp.p_retailprice AS top_part_price,
+       os.items_count, os.total_price
+FROM CustomerOrders co
+LEFT JOIN OrderDetails os ON co.total_orders > 0
+LEFT JOIN FilteredParts tp ON tp.rank = 1
+JOIN TopSuppliers ts ON ts.s_suppkey = (SELECT ps.ps_suppkey 
+                                         FROM partsupp ps 
+                                         WHERE ps.ps_partkey = tp.p_partkey 
+                                         LIMIT 1)
+WHERE co.total_spent IS NOT NULL 
+  AND co.total_orders > 5
+ORDER BY co.total_spent DESC;

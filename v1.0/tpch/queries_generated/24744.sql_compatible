@@ -1,0 +1,64 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS depth
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, o.o_totalprice, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate > oh.o_orderdate
+),
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+CustomerInfo AS (
+    SELECT c.c_custkey, c.c_name, c.c_mktsegment,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(o.o_totalprice) DESC) AS segment_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment
+),
+ProductDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand,
+           CASE
+               WHEN p.p_container IS NULL THEN 'Unknown'
+               ELSE p.p_container
+           END AS container_info,
+           SUBSTRING(p.p_comment, 1, 10) AS short_comment
+    FROM part p
+    WHERE p.p_size >= 1 AND p.p_size < 10
+),
+HighValueOrders AS (
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_totalprice, cp.total_spent
+    FROM OrderHierarchy oh
+    JOIN CustomerInfo cp ON oh.o_custkey = cp.c_custkey
+    WHERE oh.o_totalprice > (SELECT AVG(o_totalprice) * 1.5 FROM orders)
+)
+SELECT DISTINCT p.p_partkey, p.p_name, p.p_size,
+       COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+       hvo.o_orderkey, hvo.total_spent,
+       CASE
+           WHEN hvo.total_spent IS NULL THEN 'No Spend'
+           ELSE 'Spent'
+       END AS spending_status
+FROM ProductDetails p
+LEFT JOIN PartSupplierInfo psi ON p.p_partkey = psi.ps_partkey
+LEFT JOIN supplier s ON psi.total_availqty > 0 AND s.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey 
+    ORDER BY ps.ps_supplycost ASC 
+    LIMIT 1)
+LEFT JOIN HighValueOrders hvo ON p.p_partkey IN (
+    SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = hvo.o_orderkey)
+WHERE p.p_brand NOT LIKE 'Brand%' 
+    OR (p.p_retailprice IS NULL AND psi.avg_supplycost < 100.00)
+ORDER BY p.p_partkey, hvo.o_totalprice DESC NULLS LAST;

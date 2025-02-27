@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = 2020
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year END) AS avg_production_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS character_instances,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info c ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON c.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title m ON c.movie_id = m.id
+WHERE 
+    a.name IS NOT NULL AND 
+    (SELECT COUNT(*) FROM comp_cast_type WHERE id = c.person_role_id) > 0
+GROUP BY 
+    a.id
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 3
+ORDER BY 
+    total_movies DESC, actor_rank;

@@ -1,0 +1,76 @@
+
+WITH TagCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><')::text[])
+    GROUP BY 
+        T.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        QuestionsCount,
+        AnswersCount
+    FROM 
+        TagStatistics
+    WHERE 
+        PostCount > 5
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+),
+UserTagInteractions AS (
+    SELECT 
+        U.DisplayName,
+        TG.TagName,
+        TC.PostCount AS UserPostCount,
+        TC.TotalViews AS UserTotalViews,
+        TG.QuestionsCount AS TagQuestionsCount,
+        TG.AnswersCount AS TagAnswersCount
+    FROM 
+        TagCounts TC
+    JOIN 
+        TagStatistics TG ON TC.PostCount > 0
+    JOIN 
+        Users U ON TC.UserId = U.Id
+    WHERE 
+        TG.TagName IN (SELECT TagName FROM PopularTags)
+)
+SELECT 
+    UTI.DisplayName,
+    UTI.TagName,
+    UTI.UserPostCount,
+    UTI.UserTotalViews,
+    UTI.TagQuestionsCount,
+    UTI.TagAnswersCount,
+    ROUND((UTI.UserTotalViews / NULLIF(UTI.UserPostCount, 0)), 2) AS AvgViewsPerPost
+FROM 
+    UserTagInteractions UTI
+ORDER BY 
+    UTI.UserTotalViews DESC, UTI.DisplayName;

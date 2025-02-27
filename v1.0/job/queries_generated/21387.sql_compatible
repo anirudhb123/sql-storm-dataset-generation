@@ -1,0 +1,76 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title AS movie_title, 
+        1 AS depth,
+        ARRAY[t.title] AS title_chain
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    JOIN 
+        company_name c ON c.id = mc.company_id
+    WHERE 
+        c.country_code = 'USA'
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id,
+        t.title, 
+        mc.depth + 1,
+        title_chain || t.title
+    FROM 
+        movie_link mc
+    JOIN 
+        aka_title t ON t.id = mc.linked_movie_id
+    JOIN 
+        movie_chain m ON m.movie_id = mc.movie_id
+    WHERE 
+        mc.depth < 5 
+        AND m.depth < 5
+),
+filtered_movies AS (
+    SELECT 
+        m.movie_id, 
+        m.movie_title,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM 
+        movie_chain m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name a ON a.person_id = ci.person_id
+    WHERE 
+        m.depth <= 3 
+        AND m.movie_id IS NOT NULL
+    GROUP BY 
+        m.movie_id, m.movie_title
+),
+ranked_movies AS (
+    SELECT 
+        movie_id, 
+        movie_title,
+        cast_count,
+        actors,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        filtered_movies
+)
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    COALESCE(m.cast_count, 0) AS total_cast,
+    COALESCE(m.actors, 'No Actors') AS actors,
+    CASE 
+        WHEN m.rank IS NOT NULL THEN m.rank 
+        ELSE (SELECT MAX(rank) FROM ranked_movies) + 1 
+    END AS rank 
+FROM 
+    ranked_movies m
+WHERE 
+    m.cast_count > (SELECT AVG(cast_count) FROM filtered_movies)
+ORDER BY 
+    rank;

@@ -1,0 +1,59 @@
+
+WITH RECURSIVE TagPairs AS (
+    SELECT
+        t1.Id AS Tag1Id,
+        t2.Id AS Tag2Id,
+        COUNT(p.Id) AS PostCount
+    FROM
+        Tags t1
+    JOIN
+        Posts p ON p.Tags LIKE CONCAT('%<', t1.TagName, '>%')
+    JOIN
+        Tags t2 ON p.Tags LIKE CONCAT('%<', t2.TagName, '>%')
+    WHERE
+        t1.Id < t2.Id
+    GROUP BY
+        t1.Id, t2.Id
+),
+MostCommonTagPairs AS (
+    SELECT
+        Tag1Id,
+        Tag2Id,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM
+        TagPairs
+),
+TopTagPairs AS (
+    SELECT
+        tc.Tag1Id,
+        tc.Tag2Id,
+        tc.PostCount,
+        t1.TagName AS Tag1Name,
+        t2.TagName AS Tag2Name
+    FROM
+        MostCommonTagPairs tc
+    JOIN
+        Tags t1 ON t1.Id = tc.Tag1Id
+    JOIN
+        Tags t2 ON t2.Id = tc.Tag2Id
+    WHERE
+        Rank <= 10
+)
+SELECT
+    tp.Tag1Name AS Tag1,
+    tp.Tag2Name AS Tag2,
+    COUNT(DISTINCT p.Id) AS SharedPostCount,
+    SUM(p.Score) AS TotalScore,
+    SUM(u.Reputation) AS TotalReputation,
+    COUNT(DISTINCT u.Id) AS UniqueUsers
+FROM
+    TopTagPairs tp
+JOIN
+    Posts p ON p.Tags LIKE CONCAT('%<', tp.Tag1Name, '>%') AND p.Tags LIKE CONCAT('%<', tp.Tag2Name, '>%')
+JOIN
+    Users u ON p.OwnerUserId = u.Id
+GROUP BY
+    tp.Tag1Id, tp.Tag2Id, tp.Tag1Name, tp.Tag2Name
+ORDER BY
+    SharedPostCount DESC;

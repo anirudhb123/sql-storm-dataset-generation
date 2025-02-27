@@ -1,0 +1,77 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        AVG(mvi.info_length) AS avg_info_length,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY AVG(mvi.info_length) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mvi ON mvi.movie_id = t.id 
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighInfoMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.avg_info_length,
+        rm.company_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.avg_info_length > (SELECT AVG(avg_info_length) FROM RankedMovies)
+),
+MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        rt.role,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type rt ON rt.id = c.role_id
+    GROUP BY 
+        c.movie_id, rt.role
+),
+CombinedData AS (
+    SELECT 
+        him.title,
+        him.production_year,
+        him.avg_info_length,
+        him.company_count,
+        mr.role,
+        mr.role_count
+    FROM 
+        HighInfoMovies him
+    LEFT JOIN 
+        MovieRoles mr ON mr.movie_id IN (
+            SELECT movie_id 
+            FROM complete_cast cc 
+            WHERE cc.movie_id = him.movie_id
+        )
+)
+SELECT 
+    cd.title,
+    cd.production_year,
+    COALESCE(cd.avg_info_length, 0) AS avg_info_length,
+    COALESCE(cd.company_count, 0) AS company_count,
+    COALESCE(cd.role, 'Unknown') AS role,
+    COALESCE(cd.role_count, 0) AS role_count,
+    CASE 
+        WHEN cd.company_count > 5 THEN 'Many Companies'
+        WHEN cd.company_count IS NULL THEN 'No Companies'
+        ELSE 'Few Companies'
+    END AS company_desc
+FROM 
+    CombinedData cd
+WHERE 
+    cd.production_year IS NOT NULL
+    AND cd.avg_info_length > 50
+ORDER BY 
+    cd.production_year, cd.avg_info_length DESC;
+
+This query incorporates several complex constructs, including Common Table Expressions (CTEs) for ranking movies, filtering based on average info length, and joining with roles of cast members. It utilizes window functions for ranking within production years, external set operators for aggregated data, NULL handling through COALESCE, and case statements for detailed categorization. The structure aims to explore data relationships and highlight performance aspects of the films based on various aggregated criteria.

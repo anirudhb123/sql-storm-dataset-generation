@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk, ss_item_sk
+),
+high_value_sales AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        total_sales,
+        total_transactions
+    FROM 
+        sales_summary
+    WHERE 
+        total_sales > (SELECT AVG(total_sales) FROM sales_summary)
+),
+item_info AS (
+    SELECT 
+        i_item_sk,
+        i_current_price,
+        i_item_desc,
+        i_brand,
+        COALESCE(NULLIF(i_size, ''), 'N/A') AS size_info
+    FROM 
+        item
+)
+SELECT 
+    hvs.s_store_sk,
+    hvs.ss_item_sk,
+    ii.i_item_desc,
+    ii.i_brand,
+    hvs.total_sales,
+    hvs.total_transactions,
+    (CASE 
+        WHEN hvs.total_transactions = 0 THEN NULL
+        ELSE hvs.total_sales / hvs.total_transactions 
+     END) AS avg_sale_per_transaction,
+    CASE 
+        WHEN (hvs.total_sales > 1000 AND ii.i_current_price < 20) THEN 'High Volume'
+        WHEN (hvs.total_sales <= 1000 AND ii.i_current_price >= 20) THEN 'Standard Value'
+        ELSE 'Average Value'
+    END AS sales_category,
+    d.d_day_name,
+    d.d_date
+FROM 
+    high_value_sales hvs
+JOIN 
+    item_info ii ON hvs.ss_item_sk = ii.i_item_sk
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+WHERE 
+    hvs.s_store_sk IN (SELECT DISTINCT s_store_sk FROM store WHERE s_closed_date_sk IS NULL)
+AND 
+    d.d_current_year = 'Y'
+ORDER BY 
+    hvs.total_sales DESC, hvs.total_transactions DESC
+LIMIT 50;
+
+```

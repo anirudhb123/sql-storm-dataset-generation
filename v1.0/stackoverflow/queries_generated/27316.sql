@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS TagArray
+    LEFT JOIN 
+        Tags t ON TagArray.tag_name = t.TagName
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        CommentCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5 -- Get top 5 recent questions per user
+)
+SELECT 
+    t.OwnerDisplayName,
+    COUNT(*) AS TotalPosts,
+    SUM(CASE WHEN tp.Score >= 10 THEN 1 ELSE 0 END) AS HighScorePosts,
+    STRING_AGG(tp.Tags, '; ') AS AllTags,
+    AVG(tp.CommentCount) AS AverageComments
+FROM 
+    Users t
+LEFT JOIN 
+    TopPosts tp ON t.Id = tp.OwnerDisplayName
+GROUP BY 
+    t.OwnerDisplayName
+ORDER BY 
+    TotalPosts DESC, AverageComments DESC;

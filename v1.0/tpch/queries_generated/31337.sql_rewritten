@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, ps.ps_partkey, ps.ps_supplycost, 
+           Row_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS SupplyRank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT sc.s_suppkey, sc.s_name, sc.s_nationkey, ps.ps_partkey, 
+           ps.ps_supplycost * 0.9 AS ps_supplycost, 
+           Row_NUMBER() OVER (PARTITION BY sc.s_suppkey ORDER BY ps.ps_supplycost DESC) AS SupplyRank
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.ps_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost < sc.ps_supplycost
+),
+
+AggSupply AS (
+    SELECT rs.n_name, SUM(ss.ps_supplycost) AS TotalSupplyCost
+    FROM SupplyChain ss
+    JOIN nation rs ON ss.s_nationkey = rs.n_nationkey
+    WHERE ss.SupplyRank <= 5
+    GROUP BY rs.n_name
+)
+
+SELECT a.n_name, a.TotalSupplyCost, 
+       COALESCE(b.TotalOrderAmount, 0) AS TotalOrderAmount
+FROM AggSupply a
+LEFT JOIN (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalOrderAmount
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE l.l_shipdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY n.n_name
+) b ON a.n_name = b.n_name
+ORDER BY a.TotalSupplyCost DESC
+LIMIT 10;

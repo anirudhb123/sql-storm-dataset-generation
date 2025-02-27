@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+),
+ForeignSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        COUNT(*) AS SupplyCount
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    HAVING COUNT(*) > 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineItemValue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY l.l_orderkey
+),
+FinalReport AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        COALESCE(SUM(hv.TotalLineItemValue), 0) AS TotalLineValue,
+        COALESCE(s.s_name, 'No Supplier') AS SupplierName
+    FROM RankedOrders o
+    JOIN CustomerOrders c ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey)
+    LEFT JOIN HighValueLineItems hv ON o.o_orderkey = hv.l_orderkey
+    LEFT JOIN (
+        SELECT ps.ps_partkey, s.s_name
+        FROM partsupp ps
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+        WHERE ps.ps_availqty > 20
+    ) AS s ON s.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = o.o_orderkey)
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name, s.s_name
+)
+SELECT 
+    fr.o_orderkey,
+    fr.o_orderdate,
+    fr.c_name,
+    fr.TotalLineValue,
+    fr.SupplierName,
+    RANK() OVER (ORDER BY fr.TotalLineValue DESC) AS OrderValueRank
+FROM FinalReport fr
+WHERE fr.TotalLineValue IS NOT NULL
+ORDER BY fr.TotalLineValue DESC;

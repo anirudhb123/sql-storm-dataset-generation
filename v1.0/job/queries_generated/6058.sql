@@ -1,0 +1,32 @@
+SELECT 
+    ak.name AS aka_name,
+    t.title AS movie_title,
+    ti.info AS movie_info,
+    c.name AS company_name,
+    r.role AS role_type,
+    COUNT(DISTINCT mc.movie_id) AS total_movies
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    info_type ti ON mi.info_type_id = ti.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND t.production_year >= 2000 
+    AND ti.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%award%')
+GROUP BY 
+    ak.name, t.title, ti.info, c.name, r.role
+ORDER BY 
+    total_movies DESC, t.production_year DESC
+LIMIT 10;

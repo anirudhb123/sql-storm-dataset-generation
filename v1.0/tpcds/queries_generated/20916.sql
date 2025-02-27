@@ -1,0 +1,89 @@
+
+WITH RecursiveCustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr.customer_sk ORDER BY sr.returned_date_sk) AS rn
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+),
+MaxReturns AS (
+    SELECT 
+        customer_sk,
+        MAX(return_quantity) AS max_return_quantity
+    FROM 
+        RecursiveCustomerReturns
+    GROUP BY 
+        customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        d.d_date,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS estimated_purchase,
+        r.max_return_quantity
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        date_dim d ON d.d_date_sk = (SELECT d_date_sk FROM date_dim WHERE d.date = CURRENT_DATE - INTERVAL '1 DAY')
+    LEFT JOIN 
+        MaxReturns r ON c.c_customer_sk = r.customer_sk
+),
+SalesAggregation AS (
+    SELECT 
+        CASE 
+            WHEN cs_quantity IS NOT NULL THEN 'Catalog Sales'
+            WHEN ws_quantity IS NOT NULL THEN 'Web Sales'
+            ELSE 'Store Sales'
+        END AS sale_type,
+        COALESCE(cs_quantity, 0) AS cs_quantity,
+        COALESCE(ws_quantity, 0) AS ws_quantity,
+        COALESCE(ss_quantity, 0) AS ss_quantity,
+        cd.cd_gender
+    FROM 
+        catalog_sales cs
+    FULL OUTER JOIN 
+        web_sales ws ON cs.customer_sk = ws.bill_customer_sk
+    FULL OUTER JOIN 
+        store_sales ss ON ss.customer_sk = ws.bill_customer_sk OR ss.customer_sk = cs.bill_customer_sk
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk IN (cs.bill_cdemo_sk, ws.bill_cdemo_sk)
+)
+SELECT 
+    cd.first_name, 
+    cd.last_name, 
+    cd.cd_gender,
+    SUM(s.cs_quantity) AS total_catalog_sales,
+    SUM(s.ws_quantity) AS total_web_sales,
+    SUM(s.ss_quantity) AS total_store_sales,
+    AVG(cd.estimated_purchase) AS avg_purchase_estimate,
+    COUNT(DISTINCT r.returned_date_sk) AS total_return_days,
+    COUNT(DISTINCT s.sale_type) AS unique_sale_types
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesAggregation s ON cd.customer_sk = s.customer_sk
+LEFT JOIN 
+    RecursiveCustomerReturns r ON cd.customer_sk = r.customer_sk
+WHERE 
+    cd.cd_gender IS NOT NULL 
+AND 
+    (cd.last_name LIKE 'A%' OR cd.last_name IS NULL) 
+GROUP BY 
+    cd.first_name, cd.last_name, cd.cd_gender
+HAVING 
+    SUM(s.cs_quantity) > 100 OR SUM(s.ws_quantity) > 100
+ORDER BY 
+    total_catalog_sales DESC, avg_purchase_estimate ASC
+LIMIT 50;

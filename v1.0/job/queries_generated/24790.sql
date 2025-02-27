@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS casts_count
+    FROM 
+        aka_title a
+        LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+        LEFT JOIN keyword k ON mk.keyword_id = k.id
+        LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+        LEFT JOIN cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+        AND a.production_year >= 2000
+),
+Genres AS (
+    SELECT 
+        a.id AS movie_id,
+        b.kind AS genre
+    FROM 
+        aka_title a
+        JOIN kind_type b ON a.kind_id = b.id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        SUM(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+    FROM 
+        movie_companies mc
+        JOIN company_name cn ON mc.company_id = cn.id
+        JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.keyword,
+    rm.title_rank,
+    COALESCE(cs.company_count, 0) AS company_count,
+    COALESCE(cs.distributor_count, 0) AS distributor_count,
+    rm.casts_count,
+    CASE 
+        WHEN rm.casts_count > 10 THEN 'Large Cast'
+        WHEN rm.casts_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size,
+    CASE 
+        WHEN rm.keyword IS NULL THEN 'No Keywords'
+        ELSE rm.keyword
+    END AS keyword_status
+FROM 
+    RankedMovies rm
+    LEFT JOIN CompanyStats cs ON rm.title_rank = cs.movie_id
+    JOIN Genres g ON rm.movie_title = g.genre
+WHERE 
+    rm.title_rank <= 5
+    AND (rm.keyword IS NOT NULL OR rm.casts_count > 5)
+ORDER BY 
+    rm.production_year DESC,
+    rm.title_rank;
+
+-- This query benchmarks performance by incorporating a variety of SQL constructs:
+-- Common Table Expressions (CTEs), aggregates, window functions, 
+-- outer joins, correlated subqueries, and complicated predicates.

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE price_history AS (
+    SELECT ps.partkey, SUM(ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.partkey
+    UNION ALL
+    SELECT p.p_partkey, ph.total_cost + p.p_retailprice
+    FROM part p
+    JOIN price_history ph ON p.p_partkey = ph.partkey
+    WHERE ph.total_cost < 1000
+),
+nation_summary AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name,
+    ns.total_suppliers,
+    ns.avg_account_balance,
+    cos.c_name,
+    cos.order_count,
+    cos.total_spent,
+    ph.total_cost AS part_cost
+FROM nation_summary ns
+JOIN customer_order_summary cos ON ns.total_suppliers > 0
+CROSS JOIN (SELECT DISTINCT partkey, MAX(total_cost) AS total_cost FROM price_history GROUP BY partkey) ph
+WHERE ns.avg_account_balance IS NOT NULL 
+ORDER BY ns.total_suppliers DESC, cos.total_spent DESC
+LIMIT 10;

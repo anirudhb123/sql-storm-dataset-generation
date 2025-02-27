@@ -1,0 +1,63 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        0 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        ur.Level + 1
+    FROM Users u 
+    JOIN UserReputationCTE ur ON u.Reputation < ur.Reputation
+    WHERE u.Reputation > 1000
+),
+RecentPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(v.CreationDate IS NOT NULL::int) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+    ORDER BY TotalBounty DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ph.PostId,
+    ph.PostHistoryTypeId,
+    ph.Comment,
+    ur.Level AS ReputationLevel,
+    COALESCE(tp.TotalBounty, 0) AS UserTotalBounty,
+    COALESCE(tp.TotalVotes, 0) AS UserTotalVotes
+FROM Users u
+LEFT JOIN RecentPostHistory ph ON u.Id = ph.OwnerUserId AND ph.rn = 1
+LEFT JOIN UserReputationCTE ur ON u.Id = ur.Id
+LEFT JOIN TopUsers tp ON u.Id = tp.Id
+WHERE u.Reputation IS NOT NULL
+ORDER BY ur.Level DESC, u.Reputation DESC;

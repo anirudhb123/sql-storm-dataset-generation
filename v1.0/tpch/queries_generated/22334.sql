@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (
+        SELECT n.n_nationkey
+        FROM nation n
+        WHERE n.n_name = 'USA'
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 2
+),
+aggregated_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+ranked_sales AS (
+    SELECT orderkey, total_revenue,
+           RANK() OVER (PARTITION BY s_h.s_suppkey ORDER BY total_revenue DESC) AS revenue_rank
+    FROM aggregated_orders a
+    JOIN partsupp ps ON a.orderkey = ps.ps_partkey
+    JOIN supplier_hierarchy s_h ON ps.ps_suppkey = s_h.s_suppkey
+),
+all_but_top_sales AS (
+    SELECT s_h.s_suppkey, s_h.s_name, rs.total_revenue
+    FROM ranked_sales rs
+    JOIN supplier_hierarchy s_h ON rs.orderkey = s_h.s_suppkey
+    WHERE rs.revenue_rank > 1
+)
+SELECT r.r_name AS region_name,
+       COUNT(DISTINCT a.s_suppkey) AS supplier_count,
+       AVG(a.total_revenue) AS avg_revenue
+FROM all_but_top_sales a
+JOIN nation n ON a.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT a.s_suppkey) > 1
+   AND AVG(a.total_revenue) IS NOT NULL
+ORDER BY region_name;

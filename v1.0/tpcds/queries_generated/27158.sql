@@ -1,0 +1,67 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_sales_price) AS total_revenue
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        COUNT(ws.ws_order_number) AS total_sales_quantity,
+        SUM(ws.ws_sales_price) AS total_sales_value
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_product_name
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ps.promo_id,
+    ps.total_sales,
+    ps.total_revenue,
+    is.item_name,
+    is.total_sales_quantity,
+    is.total_sales_value
+FROM 
+    customer_info ci
+JOIN 
+    promotion_summary ps ON ci.c_customer_sk = ps.promo_id
+JOIN 
+    item_summary is ON ci.c_customer_sk = is.i_item_sk
+WHERE 
+    ci.ca_state = 'NY' AND
+    ci.cd_gender = 'F' AND
+    is.total_sales_value > 1000
+ORDER BY 
+    ci.full_name;

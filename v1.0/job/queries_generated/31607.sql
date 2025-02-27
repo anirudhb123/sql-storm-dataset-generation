@@ -1,0 +1,100 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt2.title, 'N/A') AS linked_movie,
+        0 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt2.title, 'N/A') AS linked_movie,
+        level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+
+cast_statistics AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE NULL END) AS average_order
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+
+movie_info_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(ki.keyword, 'No Keywords') AS keywords,
+        CASE 
+            WHEN (m.production_year IS NULL OR m.production_year < 1990) THEN 'Classic'
+            WHEN (m.production_year >= 1990 AND m.production_year < 2000) THEN '90s Classic'
+            ELSE 'Modern Film'
+        END AS era,
+        si.actor_count,
+        si.average_order
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN 
+        cast_statistics si ON m.id = si.movie_id
+    WHERE 
+        (m.production_year IS NOT NULL) AND
+        (m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series')))
+),
+
+final_report AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keywords,
+        era,
+        actor_count,
+        average_order,
+        ROW_NUMBER() OVER (PARTITION BY era ORDER BY average_order DESC) AS rank
+    FROM 
+        movie_info_summary
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.keywords,
+    fr.era,
+    fr.actor_count,
+    fr.average_order,
+    fr.rank,
+    mh.linked_movie
+FROM 
+    final_report fr
+LEFT JOIN 
+    movie_hierarchy mh ON fr.movie_id = mh.movie_id
+WHERE 
+    fr.rank <= 5
+ORDER BY 
+    fr.era, fr.rank;

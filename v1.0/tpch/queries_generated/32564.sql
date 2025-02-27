@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartStatistics AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+)
+SELECT 
+    r.r_name AS region,
+    ph.p_name AS part_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(l.l_quantity) AS total_quantity_ordered,
+    AVG(ps.avg_supply_cost) AS average_supply_cost,
+    FIRST_VALUE(s.s_name) OVER (PARTITION BY r.r_name ORDER BY s.s_suppkey) AS first_supplier
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = l.l_orderkey
+LEFT JOIN PartStatistics ps ON ps.p_partkey = l.l_partkey
+JOIN HighValueCustomers hc ON hc.c_custkey = co.c_custkey
+GROUP BY r.r_name, ph.p_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY region, part_name;

@@ -1,0 +1,49 @@
+
+WITH NameAddress AS (
+    SELECT 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type || ', ' || ca.ca_city || ', ' || ca.ca_state || ' ' || ca.ca_zip AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), 
+DemographicCounts AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+), 
+StringProcessed AS (
+    SELECT 
+        nd.full_name,
+        nd.full_address,
+        CASE 
+            WHEN (CHAR_LENGTH(nd.full_name) > 50) AND (CD.cd_gender = 'M') THEN 'Long Male Name'
+            WHEN (CHAR_LENGTH(nd.full_name) > 50) AND (CD.cd_gender = 'F') THEN 'Long Female Name'
+            ELSE 'Short Name'
+        END AS name_category,
+        dem.customer_count
+    FROM 
+        NameAddress nd
+    JOIN 
+        DemographicCounts dem ON TRUE
+    LEFT JOIN 
+        customer_demographics CD ON nd.full_name LIKE '%' || CD.cd_gender || '%'
+)
+SELECT 
+    name_category,
+    COUNT(*) AS category_count,
+    STRING_AGG(full_address, '; ') AS concatenated_addresses
+FROM 
+    StringProcessed
+GROUP BY 
+    name_category
+ORDER BY 
+    category_count DESC;

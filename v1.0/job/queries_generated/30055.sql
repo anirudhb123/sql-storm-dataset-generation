@@ -1,0 +1,65 @@
+WITH RECURSIVE actor_movies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        c.nr_order = 1
+),
+
+yearly_actor_count AS (
+    SELECT 
+        am.person_id,
+        am.production_year,
+        COUNT(*) AS movie_count
+    FROM 
+        actor_movies am
+    GROUP BY 
+        am.person_id, am.production_year
+),
+
+actor_earnings AS (
+    SELECT 
+        p.person_id,
+        SUM(CASE 
+            WHEN c.note IS NULL THEN 0 
+            ELSE LENGTH(c.note) * 1000 -- Example earning calculation based on note length
+        END) AS total_earnings
+    FROM 
+        cast_info c
+    JOIN 
+        person_info p ON c.person_id = p.person_id
+    GROUP BY 
+        p.person_id
+),
+
+top_actors AS (
+    SELECT 
+        YEAR, 
+        person_id, 
+        movie_count,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        yearly_actor_count yac
+)
+
+SELECT 
+    a.name,
+    ta.movie_count,
+    ae.total_earnings,
+    COALESCE(ta.rank, 'N/A') AS ranking
+FROM 
+    top_actors ta
+JOIN 
+    aka_name a ON ta.person_id = a.person_id
+LEFT JOIN 
+    actor_earnings ae ON ta.person_id = ae.person_id
+WHERE 
+    ta.movie_count > 5
+ORDER BY 
+    ta.movie_count DESC, a.name;

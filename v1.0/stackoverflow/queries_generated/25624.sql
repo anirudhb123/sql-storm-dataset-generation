@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '> <')) AS TagName, 
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikiCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(ph.UserId IS NOT NULL) AS EditCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.WikiCount,
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount AS UserPostCount,
+    ur.QuestionCount AS UserQuestionCount,
+    ur.AnswerCount AS UserAnswerCount,
+    pa.PostId,
+    pa.Title AS PostTitle,
+    pa.CommentCount,
+    pa.EditCount,
+    pa.VoteCount
+FROM 
+    TagStatistics ts
+JOIN 
+    UserReputation ur ON ur.QuestionCount > 10  -- Users with more than 10 questions
+JOIN 
+    PostActivity pa ON pa.CommentCount > 5  -- Posts with more than 5 comments
+ORDER BY 
+    ts.PostCount DESC, ur.Reputation DESC, pa.VoteCount DESC
+LIMIT 100;

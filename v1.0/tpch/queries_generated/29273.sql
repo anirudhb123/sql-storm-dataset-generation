@@ -1,0 +1,34 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MIN(l.l_shipdate) AS first_ship_date,
+    MAX(l.l_shipdate) AS last_ship_date,
+    AVG(DATEDIFF(l.l_receiptdate, l.l_shipdate)) AS avg_delivery_time,
+    GROUP_CONCAT(DISTINCT s.s_comment SEPARATOR '; ') AS supplier_comments,
+    CONCAT(p.p_name, ' (', SUBSTRING_INDEX(p.p_comment, ' ', 3), '...)') AS short_comment,
+    LENGTH(p.p_name) AS name_length,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey 
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey 
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey 
+WHERE 
+    p.p_type LIKE '%steel%' 
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31' 
+GROUP BY 
+    p.p_partkey, s.s_suppkey 
+HAVING 
+    total_revenue > 1000 
+ORDER BY 
+    total_revenue DESC, name_length ASC 
+LIMIT 10;

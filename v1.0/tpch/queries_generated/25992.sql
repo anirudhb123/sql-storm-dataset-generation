@@ -1,0 +1,32 @@
+SELECT 
+    p.p_name,
+    r.r_name AS region,
+    n.n_name AS nation,
+    s.s_name AS supplier_name,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customers_names,
+    STRING_AGG(DISTINCT o.o_orderkey::text, ', ') AS order_keys,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 50.00
+GROUP BY 
+    p.p_partkey, r.r_name, n.n_name, s.s_name
+ORDER BY 
+    total_available_quantity DESC, avg_supply_cost ASC;

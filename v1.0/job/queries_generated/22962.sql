@@ -1,0 +1,70 @@
+WITH Recursive_Cast AS (
+    SELECT 
+        ci.movie_id, 
+        ci.person_id, 
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        COALESCE(t.title, 'Untitled') AS movie_title
+    FROM cast_info ci
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id AND ak.md5sum IS NOT NULL
+    LEFT JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE ci.nr_order IS NOT NULL
+    UNION ALL
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order,
+        COALESCE(ak.name, 'Unknown') AS actor_name,
+        COALESCE(t.title, 'Untitled') AS movie_title
+    FROM cast_info ci
+    JOIN Recursive_Cast r ON ci.movie_id = r.movie_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id AND ak.md5sum IS NULL
+    LEFT JOIN aka_title t ON ci.movie_id = t.movie_id
+    WHERE ci.nr_order IS NULL
+),
+Movie_Stats AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(c.id) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notable_cast,
+        AVG(ci.nr_order) AS avg_cast_order
+    FROM title m
+    LEFT JOIN cast_info ci ON m.id = ci.movie_id
+    GROUP BY m.id
+),
+High_Role_Movies AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.total_cast,
+        ms.notable_cast,
+        ms.avg_cast_order,
+        CASE 
+            WHEN ms.avg_cast_order < 5 THEN 'Excellent Cast'
+            WHEN ms.avg_cast_order BETWEEN 5 AND 10 THEN 'Average Cast'
+            ELSE 'Poor Cast'
+        END AS cast_quality
+    FROM Movie_Stats ms
+    WHERE ms.total_cast > 10
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.total_cast,
+    h.notable_cast,
+    h.cast_quality,
+    STRING_AGG(DISTINCT r.actor_name, ', ') AS actor_names,
+    NULLIF(MAX(r.role_order), 0) AS max_role_order,
+    CASE 
+        WHEN COUNT(DISTINCT r.actor_name) > 5 THEN 'Diverse Cast'
+        ELSE 'Less Diverse'
+    END AS diversity_indicator
+FROM High_Role_Movies h
+LEFT JOIN Recursive_Cast r ON h.movie_id = r.movie_id
+GROUP BY h.movie_id, h.title, h.total_cast, h.notable_cast, h.cast_quality
+HAVING NULLIF(h.total_cast, 0) IS NOT NULL
+ORDER BY h.total_cast DESC, h.movie_id
+LIMIT 25;

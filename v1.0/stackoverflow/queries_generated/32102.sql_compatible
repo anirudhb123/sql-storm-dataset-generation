@@ -1,0 +1,70 @@
+
+WITH RecursivePostStats AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        1 AS Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT ParentId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY ParentId) a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostStats r ON r.PostId = p.ParentId
+    WHERE 
+        p.PostTypeId = 2  
+),
+AggregatedStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.Score) AS TotalScore,
+        COUNT(DISTINCT ps.PostId) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        RecursivePostStats ps ON p.Id = ps.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(a.TotalViews, 0) AS TotalViews,
+    COALESCE(a.TotalScore, 0) AS TotalScore,
+    COALESCE(a.PostCount, 0) AS PostCount,
+    CASE 
+        WHEN COALESCE(a.PostCount, 0) > 0 THEN ROUND(COALESCE(a.TotalScore, 0) * 1.0 / a.PostCount, 2) 
+        ELSE 0 
+    END AS AverageScorePerPost,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(a.TotalScore, 0) DESC) AS Rank
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedStats a ON u.Id = a.UserId
+WHERE 
+    u.Reputation > 1000  
+ORDER BY 
+    Rank
+LIMIT 10;

@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) IS NOT NULL
+),
+TopLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_discount,
+        l.l_extendedprice,
+        SUM(l.l_quantity) OVER(PARTITION BY l.l_orderkey) AS TotalQuantity,
+        ROW_NUMBER() OVER(PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS LineRank
+    FROM 
+        lineitem l
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    COALESCE(f.s_name, 'Unknown Supplier') AS SupplierName,
+    COUNT(t.l_partkey) FILTER (WHERE t.LineRank = 1) AS TopLineItemCount,
+    SUM(t.l_extendedprice * (1 - t.l_discount)) AS TotalRevenue
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    TopLineItems t ON r.o_orderkey = t.l_orderkey
+FULL OUTER JOIN 
+    FilteredSuppliers f ON f.s_suppkey = (SELECT ps.ps_suppkey 
+                                           FROM partsupp ps 
+                                           WHERE ps.ps_partkey = t.l_partkey
+                                           ORDER BY ps.ps_supplycost ASC LIMIT 1)
+WHERE 
+    (r.OrderRank <= 10 OR r.o_orderstatus = 'F')
+GROUP BY 
+    r.o_orderkey, r.o_totalprice, SupplierName
+HAVING 
+    TotalRevenue IS NOT NULL AND 
+    COUNT(DISTINCT t.l_partkey) > 2
+ORDER BY 
+    r.o_totalprice DESC NULLS LAST;

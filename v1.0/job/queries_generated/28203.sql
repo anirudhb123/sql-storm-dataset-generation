@@ -1,0 +1,58 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords
+    FROM 
+        aka_title at
+    JOIN 
+        title t ON at.movie_id = t.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (
+            SELECT person_id FROM cast_info ci WHERE ci.movie_id = t.id
+        )
+    GROUP BY 
+        t.title, t.production_year, t.kind_id, c.name, ct.kind
+),
+RoleDetails AS (
+    SELECT 
+        ci.movie_id,
+        rt.role AS role,
+        COUNT(ci.person_id) AS number_of_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.company_type,
+    md.aka_names,
+    md.keywords,
+    rd.role,
+    rd.number_of_cast
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RoleDetails rd ON md.movie_title = (SELECT title FROM title WHERE id = rd.movie_id)
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

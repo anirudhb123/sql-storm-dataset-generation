@@ -1,0 +1,23 @@
+WITH RecursiveCast AS (
+    SELECT c.movie_id, a.name AS actor_name, r.role AS role_name
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+    WHERE c.nr_order = 1
+), MovieDetails AS (
+    SELECT t.title, t.production_year, COUNT(DISTINCT cc.movie_id) AS cast_count
+    FROM title t
+    JOIN complete_cast cc ON t.id = cc.movie_id
+    GROUP BY t.title, t.production_year
+), CompanyDetails AS (
+    SELECT mc.movie_id, co.name AS company_name, ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name co ON mc.company_id = co.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT md.title, md.production_year, md.cast_count, rc.actor_name, rc.role_name, cd.company_name, cd.company_type
+FROM MovieDetails md
+JOIN RecursiveCast rc ON md.production_year > 2000 AND rc.movie_id IN (SELECT movie_id FROM complete_cast WHERE status_id = 1)
+JOIN CompanyDetails cd ON md.cast_count > 5 AND cd.movie_id = md.movie_id
+WHERE md.cast_count > 10
+ORDER BY md.production_year DESC, md.cast_count DESC;

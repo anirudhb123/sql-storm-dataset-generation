@@ -1,0 +1,31 @@
+
+SELECT 
+    n.name AS actor_name,
+    a.title AS movie_title,
+    a.production_year,
+    STRING_AGG(DISTINCT t.kind, ', ') AS movie_genres,
+    c.kind AS company_type,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    aka_name n
+JOIN 
+    cast_info ci ON n.person_id = ci.person_id
+JOIN 
+    aka_title a ON ci.movie_id = a.id
+JOIN 
+    movie_companies mc ON a.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_keyword mk ON a.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    kind_type t ON a.kind_id = t.id
+WHERE 
+    a.production_year BETWEEN 2000 AND 2023
+    AND c.country_code = 'USA'
+GROUP BY 
+    n.name, a.title, a.production_year, c.kind
+ORDER BY 
+    a.production_year DESC, actor_name ASC;

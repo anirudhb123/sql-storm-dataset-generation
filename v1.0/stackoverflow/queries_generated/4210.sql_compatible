@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY EXTRACT(YEAR FROM p.CreationDate) ORDER BY p.Score DESC) AS YearRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        ub.TotalBadges,
+        ub.HighestBadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.PostId = ub.UserId
+    WHERE 
+        rp.YearRank <= 10
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LatestCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.TotalBadges,
+    CASE 
+        WHEN tp.HighestBadgeClass = 1 THEN 'Gold'
+        WHEN tp.HighestBadgeClass = 2 THEN 'Silver'
+        WHEN tp.HighestBadgeClass = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeRank,
+    COALESCE(pc.CommentCount, 0) AS TotalComments,
+    COALESCE(pc.LatestCommentDate, 'No Comments') AS LatestComment
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostComments pc ON tp.PostId = pc.PostId
+ORDER BY 
+    tp.Score DESC, 
+    tp.TotalBadges DESC;

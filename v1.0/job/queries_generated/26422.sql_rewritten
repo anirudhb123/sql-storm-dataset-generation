@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilmsWithTopGenres AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        GROUP_CONCAT(DISTINCT kt.kind) AS genres
+    FROM 
+        RankedMovies rm
+    JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type kt ON k.phonetic_code = kt.id  
+    WHERE 
+        rm.rank_by_cast_count <= 10  
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+PopularFilms AS (
+    SELECT 
+        f.movie_id,
+        f.title,
+        f.production_year,
+        f.genres,
+        COUNT(DISTINCT c.person_id) AS cast_size
+    FROM 
+        FilmsWithTopGenres f
+    JOIN 
+        complete_cast cc ON f.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        f.movie_id, f.title, f.production_year, f.genres
+    HAVING 
+        COUNT(DISTINCT c.person_id) >= 5  
+)
+SELECT 
+    p.name AS actor_name,
+    pf.title AS movie_title,
+    pf.production_year,
+    pf.genres,
+    pf.cast_size
+FROM 
+    PopularFilms pf
+JOIN 
+    cast_info ci ON pf.movie_id = ci.movie_id
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+WHERE 
+    pf.cast_size >= 5
+ORDER BY 
+    pf.production_year ASC, pf.cast_size DESC;

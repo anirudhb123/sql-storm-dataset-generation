@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2 OR NULL) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3 OR NULL) OVER (PARTITION BY p.Id) AS DownVoteCount,
+        COALESCE(p.ClosedDate, p.CreationDate) AS EffectiveDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+), 
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS HistoryTypes,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosureEvents,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId IN (12, 13)) AS DeletionEvents,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 52) AS HotQuestionEvents
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY 
+        ph.PostId
+), 
+CombinedPostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        pha.HistoryTypes,
+        pha.ClosureEvents,
+        pha.DeletionEvents,
+        pha.HotQuestionEvents,
+        CASE 
+            WHEN rp.Score < 0 AND rp.CommentCount = 0 THEN 'No Comments, Negative Score'
+            WHEN rp.CommentCount > 10 AND rp.Score > 0 THEN 'Popular with Comments'
+            ELSE 'Other'
+        END AS PostCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryAggregated pha ON rp.PostId = pha.PostId
+)
+SELECT 
+    CTE.PostId,
+    CTE.Title,
+    CTE.Score,
+    CTE.CommentCount,
+    CTE.UpVoteCount,
+    CTE.DownVoteCount,
+    CTE.HistoryTypes,
+    CTE.ClosureEvents,
+    CTE.DeletionEvents,
+    CTE.HotQuestionEvents,
+    CTE.PostCategory,
+    CASE 
+        WHEN CTE.ClosureEvents > 0 THEN 'Closed'
+        WHEN CTE.DeletionEvents > 0 THEN 'Deleted'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN CTE.ScoreRank <= 5 THEN 'Top 5 in Category'
+        ELSE NULL
+    END AS TopRankIndicator
+FROM 
+    (SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY Score DESC) AS ScoreRank
+    FROM 
+        CombinedPostData) AS CTE
+WHERE 
+    CTE.PostCategory = 'Popular with Comments' 
+    OR CTE.PostStatus = 'Closed'
+ORDER BY 
+    CTE.Score DESC, CTE.CommentCount DESC;

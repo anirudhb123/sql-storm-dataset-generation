@@ -1,0 +1,75 @@
+WITH UserStatistics AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount
+    FROM
+        Users U
+    LEFT JOIN
+        Badges B ON B.UserId = U.Id
+    LEFT JOIN
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN
+        Votes V ON V.UserId = U.Id AND V.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+    GROUP BY
+        U.Id, U.DisplayName, U.Reputation
+),
+PostRanking AS (
+    SELECT
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM
+        Posts P
+    WHERE
+        P.CreationDate >= DATEADD(year, -1, GETDATE()) 
+),
+ClosedPosts AS (
+    SELECT
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM
+        PostHistory PH
+    JOIN
+        CloseReasonTypes C ON C.Id = CAST(PH.Comment AS smallint)
+    WHERE
+        PH.PostHistoryTypeId IN (10, 11) 
+),
+FinalReport AS (
+    SELECT
+        US.DisplayName,
+        US.Reputation,
+        US.BadgeCount,
+        COALESCE(PR.PostRank, 0) AS PostRank,
+        COUNT(CP.PostId) AS ClosedPostCount,
+        AVG(US.AvgViewCount) AS OverallAvgViewCount
+    FROM
+        UserStatistics US
+    LEFT JOIN
+        PostRanking PR ON PR.OwnerUserId = US.UserId
+    LEFT JOIN
+        ClosedPosts CP ON CP.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = US.UserId)
+    GROUP BY
+        US.DisplayName, US.Reputation, US.BadgeCount, PR.PostRank
+)
+SELECT
+    *,
+    CASE 
+        WHEN ClosedPostCount > 5 THEN 'Prolific Contributor'
+        WHEN BadgeCount > 10 THEN 'Well-Decorated'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    FinalReport
+WHERE 
+    Reputation > 100 
+ORDER BY 
+    Reputation DESC, BadgeCount DESC NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

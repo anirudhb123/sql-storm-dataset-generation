@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM
+        title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT
+        title,
+        production_year,
+        actor_count
+    FROM
+        RankedMovies
+    WHERE
+        actor_count > 3
+),
+KeywordTitles AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword m
+    JOIN
+        keyword k ON m.keyword_id = k.id
+    GROUP BY
+        m.movie_id
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    kt.keywords,
+    ci.company_name,
+    ci.company_type
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    KeywordTitles kt ON fm.title = kt.movie_id
+LEFT JOIN
+    CompanyInfo ci ON fm.title = ci.movie_id
+WHERE
+    (ci.company_name IS NOT NULL OR ci.company_type IS NULL)
+    AND (fm.production_year BETWEEN 1990 AND 2020)
+ORDER BY
+    fm.actor_count DESC, fm.production_year DESC;

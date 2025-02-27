@@ -1,0 +1,50 @@
+
+WITH movie_title_info AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM aka_title a
+    LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.id
+    WHERE a.production_year IS NOT NULL
+    GROUP BY a.title, a.production_year, k.keyword
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rank
+    FROM movie_title_info
+),
+highest_rated_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        MAX(m.info_id) AS max_info_id
+    FROM (
+        SELECT 
+            t.id AS info_id,
+            t.title,
+            t.production_year
+        FROM title t
+        JOIN movie_info mi ON t.id = mi.movie_id
+        WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    ) m
+    GROUP BY m.title, m.production_year
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword,
+    COALESCE(c.cast_count, 0) AS number_of_cast,
+    h.max_info_id
+FROM top_movies t
+LEFT JOIN movie_keyword mk ON t.title = mk.movie_id
+LEFT JOIN movie_title_info c ON t.title = c.title AND t.production_year = c.production_year
+LEFT JOIN highest_rated_movies h ON t.title = h.title AND t.production_year = h.production_year
+WHERE t.rank <= 5
+ORDER BY t.production_year DESC, t.title ASC;

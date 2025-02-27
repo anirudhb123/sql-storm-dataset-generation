@@ -1,0 +1,39 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, oh.o_orderdate, oh.o_totalprice
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < oh.o_orderdate
+),
+SupplierRanking AS (
+    SELECT ps.ps_suppkey, AVG(ps.ps_supplycost) AS avg_supplycost,
+           RANK() OVER (ORDER BY AVG(ps.ps_supplycost) DESC) AS supp_rank
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+)
+SELECT n.n_name AS nation, 
+       COUNT(DISTINCT c.c_custkey) AS total_customers,
+       SUM(CASE 
+               WHEN lp.l_returnflag = 'R' THEN lp.l_extendedprice * (1 - lp.l_discount) 
+               ELSE 0 
+           END) AS total_returns,
+       AVG(oh.o_totalprice) AS average_order_value,
+       sr.avg_supplycost AS average_supplier_cost
+FROM customer c
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem lp ON o.o_orderkey = lp.l_orderkey
+LEFT JOIN SupplierRanking sr ON sr.ps_suppkey = lp.l_suppkey
+WHERE c.c_acctbal IS NOT NULL
+  AND n.n_name IS NOT NULL
+  AND lp.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY n.n_name, sr.avg_supplycost
+HAVING COUNT(o.o_orderkey) > 0
+ORDER BY total_customers DESC, average_order_value DESC
+LIMIT 10;

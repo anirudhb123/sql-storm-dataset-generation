@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC, p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        (SELECT COUNT(v.Id) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(v.Id) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL AND p.PostTypeId = 1 THEN 1
+            ELSE 0
+        END AS HasAcceptedAnswer
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPostsWithTags AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Rank,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        rp.HasAcceptedAnswer,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        Posts p ON p.Id = rp.PostId
+    LEFT JOIN
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '>'))::int)
+    WHERE
+        rp.Rank <= 10
+    GROUP BY
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.Rank, rp.CommentCount, rp.UpvoteCount, rp.DownvoteCount, rp.HasAcceptedAnswer
+),
+UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) as HighestBadgeClass
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+)
+SELECT
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.ViewCount,
+    up.Score,
+    up.Tags,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    CASE
+        WHEN ub.BadgeCount IS NULL THEN 'No Badges'
+        ELSE 'Has Badges'
+    END AS BadgeStatus,
+    COALESCE(NULLIF(up.CommentCount, 0), 'N/A') AS Comments,
+    CASE 
+        WHEN up.HasAcceptedAnswer = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS AcceptedAnswerStatus
+FROM
+    TopPostsWithTags up
+LEFT JOIN
+    Users u ON u.Id = (SELECT DISTINCT p.OwnerUserId FROM Posts p WHERE p.Id = up.PostId)
+LEFT JOIN
+    UserBadges ub ON ub.UserId = u.Id
+ORDER BY 
+    up.ViewCount DESC, 
+    up.CreationDate DESC;

@@ -1,0 +1,44 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+customer_details AS (
+    SELECT co.c_custkey,
+           co.c_name,
+           co.total_spent,
+           co.order_count,
+           CASE 
+               WHEN co.order_count > 5 THEN 'Frequent Customer'
+               WHEN co.total_spent > 1000 THEN 'High-Value Customer'
+               ELSE 'Casual Customer'
+           END AS customer_type
+    FROM customer_orders co
+)
+SELECT DISTINCT 
+    cd.c_name,
+    cd.total_spent,
+    cd.customer_type,
+    p.p_name,
+    ps.ps_supplycost,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_lineitem_price,
+    DENSE_RANK() OVER (PARTITION BY cd.customer_type ORDER BY cd.total_spent DESC) AS spending_rank,
+    CASE 
+        WHEN cd.total_spent IS NULL THEN 'No Spending Record'
+        ELSE 'Spending Recorded'
+    END AS spending_status
+FROM customer_details cd
+LEFT JOIN lineitem l ON cd.custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_totalprice > 500)
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size < 50)
+LEFT JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+WHERE cd.order_count > 0
+AND r.r_name IS NOT NULL
+GROUP BY cd.c_name, cd.total_spent, cd.customer_type, p.p_name, ps.ps_supplycost
+HAVING AVG(ps.ps_supplycost) > 100
+ORDER BY spending_rank, cd.total_spent DESC

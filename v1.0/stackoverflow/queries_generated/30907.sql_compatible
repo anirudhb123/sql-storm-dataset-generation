@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.CreationDate >= '2023-01-01'
+        AND p.PostTypeId = 1 
+),
+TopTags AS (
+    SELECT 
+        SUBSTR(p.Tags, 2, LENGTH(p.Tags) - 2) AS TagList,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagList
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        pt.Name AS PostHistoryType,
+        ph.Comment,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 DAY')
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Reputation,
+    rp.OwnerDisplayName,
+    tt.TagList,
+    ph.PostHistoryType,
+    ph.CreationDate AS HistoryDate,
+    ph.Comment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopTags tt ON tt.TagList LIKE CONCAT('%', rp.TagList, '%') 
+LEFT JOIN 
+    RecentPostHistory ph ON ph.PostId = rp.PostId AND ph.HistoryRank = 1
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

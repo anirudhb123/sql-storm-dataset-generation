@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownvoteCount,
+        AVG(v.BountyAmount) AS AvgBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TagSummary AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount,
+        SUM(pt.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = pt.Id
+    GROUP BY 
+        t.TagName
+),
+RecentUserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    ps.Title,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.AvgBounty,
+    t.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    u.DisplayName AS RecentUser,
+    u.PostsCount,
+    u.LastPostDate
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostLinks pl ON ps.Id = pl.PostId
+LEFT JOIN 
+    Tags t ON pl.RelatedPostId = t.Id
+LEFT JOIN 
+    TagSummary ts ON t.TagName = ts.TagName
+LEFT JOIN 
+    RecentUserActivity u ON ps.Id = u.PostsCount
+WHERE 
+    ps.CommentCount > 0
+ORDER BY 
+    ps.UpvoteCount DESC,
+    ps.CommentCount DESC
+LIMIT 100;

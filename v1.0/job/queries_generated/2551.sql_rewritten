@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keyword,
+        COUNT(DISTINCT c2.person_id) AS total_actors,
+        AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) * 100 AS female_percentage
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        cast_info c2 ON rm.movie_id = c2.movie_id
+    LEFT JOIN 
+        name p ON c2.person_id = p.id
+    WHERE 
+        rm.rank_by_cast_count <= 5  
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, mk.keyword
+),
+FinalSelection AS (
+    SELECT 
+        sm.title, 
+        sm.production_year, 
+        sm.movie_keyword, 
+        sm.total_actors, 
+        sm.female_percentage,
+        RANK() OVER (ORDER BY sm.total_actors DESC) AS rank_on_total_actors
+    FROM 
+        SelectedMovies sm
+)
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.movie_keyword,
+    fs.total_actors,
+    CASE 
+        WHEN fs.female_percentage IS NULL THEN 'No Data' 
+        ELSE fs.female_percentage || '%' 
+    END AS female_percentage
+FROM 
+    FinalSelection fs
+WHERE 
+    fs.total_actors > 0
+ORDER BY 
+    fs.rank_on_total_actors, fs.production_year DESC;

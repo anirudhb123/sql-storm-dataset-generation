@@ -1,0 +1,51 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, 0 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0  
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+),
+PostWithVoteCounts AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+           COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title
+),
+PopularTags AS (
+    SELECT TagName, SUM(Count) AS TotalCount
+    FROM RecursiveTagHierarchy
+    GROUP BY TagName
+    ORDER BY TotalCount DESC
+    LIMIT 10
+),
+UserReputationChanges AS (
+    SELECT UserId, 
+           SUM(CASE WHEN bh.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+           SUM(CASE WHEN bh.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+           SUM(CASE WHEN bh.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges bh
+    GROUP BY UserId
+)
+SELECT u.Id AS UserId, 
+       u.DisplayName,
+       u.Reputation,
+       COALESCE(rc.UpVotes, 0) AS UpVotesReceived,
+       COALESCE(rc.DownVotes, 0) AS DownVotesReceived,
+       COALESCE(ut.GoldBadges, 0) AS GoldBadges,
+       COALESCE(ut.SilverBadges, 0) AS SilverBadges,
+       COALESCE(ut.BronzeBadges, 0) AS BronzeBadges,
+       pt.TagName AS PopularTag
+FROM Users u
+LEFT JOIN PostWithVoteCounts rc ON u.Id = rc.PostId
+LEFT JOIN UserReputationChanges ut ON u.Id = ut.UserId
+CROSS JOIN PopularTags pt
+WHERE u.Reputation > 1000  
+ORDER BY u.Reputation DESC, pt.TotalCount DESC
+LIMIT 50;

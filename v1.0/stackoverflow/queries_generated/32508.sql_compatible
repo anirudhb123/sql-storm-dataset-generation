@@ -1,0 +1,82 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id, 
+        TagName, 
+        Count,
+        (SELECT COUNT(*) FROM Posts P WHERE P.Tags LIKE CONCAT('%', TagName, '%')) AS PostCount
+    FROM Tags
+    WHERE Count > 0
+    UNION ALL
+    SELECT 
+        T.Id, 
+        T.TagName, 
+        T.Count,
+        (SELECT COUNT(*) FROM Posts P WHERE P.Tags LIKE CONCAT('%', T.TagName, '%')) AS PostCount
+    FROM Tags T
+    INNER JOIN RecursiveTagHierarchy R ON T.Id = R.Id
+),
+UserScoreStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(P.Score) AS AverageScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostVotingStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN VT.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN VT.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    INNER JOIN VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY P.Id
+),
+EngagementMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.AnswerCount,
+        PS.TotalVotes,
+        PS.UpVotes,
+        PS.DownVotes,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN PostVotingStats PS ON P.Id = PS.PostId
+    WHERE P.LastActivityDate >= DATEADD(month, -6, CURRENT_TIMESTAMP)  
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    T.TagName,
+    T.PostCount,
+    E.PostId,
+    E.Title,
+    E.ViewCount,
+    E.AnswerCount,
+    E.CommentCount,
+    E.TotalVotes,
+    E.UpVotes,
+    E.DownVotes,
+    CASE 
+        WHEN E.CommentCount IS NULL THEN 'No comments'
+        ELSE CAST(E.CommentCount AS VARCHAR)
+    END AS CommentStatus,
+    CASE 
+        WHEN U.Reputation IS NULL THEN 'Unknown Reputation'
+        ELSE CAST(U.Reputation AS VARCHAR)
+    END AS ReputationStatus,
+    DENSE_RANK() OVER (PARTITION BY T.TagName ORDER BY E.ViewCount DESC) AS RankByViews
+FROM UserScoreStats U
+INNER JOIN RecursiveTagHierarchy T ON T.PostCount > 0
+INNER JOIN EngagementMetrics E ON E.PostId IN (SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%', T.TagName, '%'))
+ORDER BY T.TagName, E.ViewCount DESC;

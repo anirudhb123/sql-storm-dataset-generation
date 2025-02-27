@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'Unknown Reputation'
+            WHEN Reputation < 100 THEN 'Low Reputation'
+            WHEN Reputation BETWEEN 100 AND 1000 THEN 'Medium Reputation'
+            ELSE 'High Reputation'
+        END AS ReputationCategory
+    FROM Users
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(ph.ClosedDate, p.LastActivityDate) AS LastActionDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- closed or reopened
+    WHERE ph.CreationDate IS NULL OR ph.CreationDate > p.LastActivityDate -- considering only active posts
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+),
+FinalResults AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.ReputationCategory,
+        pp.PostId,
+        pp.Title,
+        pp.Score,
+        pp.LastActionDate,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM UserReputation ur
+    LEFT JOIN PopularPosts pp ON pp.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = ur.UserId 
+        AND pp.Rank <= 5 -- top 5 posts by score
+    )
+    LEFT JOIN UserBadges ub ON ub.UserId = ur.UserId
+    WHERE ur.ReputationCategory != 'Unknown Reputation'
+)
+
+SELECT 
+    fr.*, 
+    CASE 
+        WHEN fr.Score IS NULL THEN 'No Score'
+        WHEN fr.Score > 0 THEN 'Gaining Popularity'
+        ELSE 'Needs Improvement'
+    END AS ScoreStatus
+FROM FinalResults fr
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM Votes v 
+    WHERE v.PostId = fr.PostId 
+    AND v.CreationDate > NOW() - INTERVAL '30 days'
+    AND v.VoteTypeId = 2 -- UpMod
+)
+ORDER BY fr.Reputation DESC, fr.Score DESC;
+

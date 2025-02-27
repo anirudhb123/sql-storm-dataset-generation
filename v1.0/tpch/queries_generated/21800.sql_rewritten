@@ -1,0 +1,105 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT 
+                AVG(o2.o_totalprice)
+            FROM 
+                orders o2
+            WHERE 
+                o2.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+        )
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_brand LIKE 'Brand%Special%' THEN 'SPECIAL'
+            ELSE 'REGULAR'
+        END AS part_type
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+        AND p.p_size BETWEEN 10 AND 20
+),
+TotalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+DistinctParts AS (
+    SELECT DISTINCT
+        ps.ps_partkey
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty IS NOT NULL
+),
+FinalResult AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(t.total_revenue) AS total_revenue,
+        AVG(t.total_revenue) OVER (PARTITION BY r.r_name) AS avg_revenue,
+        MAX(s.s_acctbal) AS max_supplier_acctbal
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        TotalOrders t ON t.o_orderkey = c.c_custkey
+    LEFT JOIN 
+        RankedSuppliers s ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        EXISTS (SELECT 1 FROM FilteredParts fp WHERE fp.p_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = t.o_orderkey))
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r_name,
+    customer_count,
+    total_revenue,
+    avg_revenue,
+    max_supplier_acctbal,
+    CASE 
+        WHEN customer_count > 0 THEN 'ACTIVE'
+        ELSE 'INACTIVE'
+    END AS status
+FROM 
+    FinalResult
+WHERE 
+    total_revenue IS NOT NULL
+ORDER BY 
+    total_revenue DESC, customer_count ASC
+LIMIT 10;

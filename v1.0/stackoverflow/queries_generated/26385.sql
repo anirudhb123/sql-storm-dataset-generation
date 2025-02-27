@@ -1,0 +1,57 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(UPPER(SUBSTRING(p.Body FROM 1 FOR 100))) AS AvgBodySnippet -- Upper case snippet for benchmarking
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(p.Id) AS ContributionCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.DisplayName
+    ORDER BY 
+        ContributionCount DESC
+    LIMIT 10
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(ph.Id) AS EditHistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.PositivePosts,
+    ts.TotalViews,
+    ts.AvgBodySnippet,
+    mau.DisplayName AS ActiveUser,
+    phs.LastEditDate,
+    phs.EditHistoryCount
+FROM 
+    TagStatistics ts
+JOIN 
+    MostActiveUsers mau ON ts.PostCount > 5  -- Only tags with more than 5 posts
+LEFT JOIN 
+    PostHistorySummary phs ON ts.PostCount = phs.EditHistoryCount  -- Connecting tag stats to edit history
+ORDER BY 
+    ts.TotalViews DESC, mau.ContributionCount DESC;

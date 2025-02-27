@@ -1,0 +1,49 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+filtered_lineitems AS (
+    SELECT l.*, 
+           CASE 
+               WHEN l.l_discount > 0.1 THEN 'High Discount'
+               ELSE 'Standard Discount'
+           END AS discount_category
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' 
+          AND l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_shipdate < CURRENT_DATE)
+),
+aggregated_orders AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue, COUNT(DISTINCT li.l_orderkey) AS line_item_count
+    FROM orders o
+    LEFT JOIN filtered_lineitems li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+),
+nation_region AS (
+    SELECT n.n_name, r.r_name,
+           COUNT(DISTINCT s.s_suppkey) AS supply_count,
+           SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT ns.n_name, nr.r_name, ns.supply_count, ns.total_account_balance, 
+       coalesce(ao.total_revenue, 0) AS total_revenue, 
+       CASE 
+           WHEN ao.line_item_count > 0 THEN 'Revenue Present'
+           ELSE 'No Revenue'
+       END AS revenue_status
+FROM nation_region ns
+LEFT JOIN aggregated_orders ao ON ns.supply_count = ao.line_item_count
+JOIN supplier_hierarchy sh ON ns.supply_count > sh.level
+WHERE ns.total_account_balance IS NOT NULL
+ORDER BY ns.n_name, nr.r_name DESC, total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

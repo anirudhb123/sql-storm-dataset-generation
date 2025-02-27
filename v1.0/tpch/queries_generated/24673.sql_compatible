@@ -1,0 +1,75 @@
+
+WITH RECURSIVE PriceRanks AS (
+    SELECT 
+        ps.partkey AS ps_partkey,
+        ps.suppkey AS ps_suppkey,
+        ps.supplycost AS ps_supplycost,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.supplycost DESC) AS rank_order
+    FROM 
+        partsupp ps
+),
+AggregatedOrders AS (
+    SELECT 
+        o.orderkey AS o_orderkey,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_revenue,
+        COUNT(DISTINCT l.orderkey) AS item_count,
+        FIRST_VALUE(l.shipmode) OVER (PARTITION BY o.orderkey ORDER BY l.linenumber) AS shipping_method
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.orderkey = l.orderkey
+    GROUP BY 
+        o.orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.suppkey AS s_suppkey,
+        s.name AS s_name,
+        SUM(ps.supplycost * ps.availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.suppkey = ps.suppkey
+    GROUP BY 
+        s.suppkey, s.name
+),
+NullAndTotallyTrue AS (
+    SELECT 
+        p.partkey AS p_partkey,
+        COUNT(DISTINCT ps.suppkey) AS supplier_count,
+        COUNT(DISTINCT CASE WHEN ps.availqty = 0 THEN NULL END) AS zero_quantity_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.partkey = ps.partkey
+    GROUP BY 
+        p.partkey
+)
+SELECT 
+    r.name AS r_name,
+    a.total_revenue, 
+    s.s_name,
+    n.name AS n_name,
+    p.name AS p_name,
+    COALESCE(n.zero_quantity_count, 0) AS zero_suppliers,
+    CASE 
+        WHEN a.item_count > 10 THEN 'High Volume'
+        WHEN a.item_count BETWEEN 5 AND 10 THEN 'Medium Volume'
+        ELSE 'Low Volume' 
+    END AS order_volume_category
+FROM 
+    region r
+JOIN 
+    nation n ON r.regionkey = n.regionkey
+LEFT JOIN 
+    SupplierDetails s ON s.s_suppkey = (SELECT ps_suppkey FROM PriceRanks pr WHERE pr.rank_order = 1 AND pr.ps_partkey IN (SELECT partkey FROM part) ORDER BY pr.ps_supplycost DESC LIMIT 1)
+JOIN 
+    AggregatedOrders a ON a.o_orderkey IN (SELECT o.orderkey FROM orders o WHERE o.orderstatus = 'O')
+JOIN 
+    NullAndTotallyTrue p ON p.p_partkey = (SELECT partkey FROM part WHERE name LIKE '%rubber%' ORDER BY partkey DESC LIMIT 1)
+WHERE 
+    r.name IS NOT NULL
+ORDER BY 
+    total_revenue DESC, 
+    n.name ASC, 
+    zero_suppliers DESC;

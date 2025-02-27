@@ -1,0 +1,51 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           NTILE(5) OVER (ORDER BY c.c_acctbal DESC) AS income_bracket
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+      AND c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+LineItemAggregates AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+           COUNT(l.l_linenumber) AS item_count,
+           CASE WHEN SUM(l.l_quantity) > 0 THEN SUM(l.l_quantity) ELSE NULL END AS total_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT DISTINCT 
+    c.c_name, 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    o.o_totalprice, 
+    COALESCE(lia.net_sales, 0) AS net_sales,
+    COALESCE(ss.total_supply_value, 0) AS total_supply_value,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Open' 
+        WHEN o.o_orderstatus = 'F' THEN 'Finished' 
+        ELSE 'Other' 
+    END AS order_status_desc
+FROM RankedOrders AS o 
+JOIN HighValueCustomers AS c ON o.o_orderkey % 5 = c.c_custkey % 5
+LEFT JOIN LineItemAggregates AS lia ON o.o_orderkey = lia.l_orderkey
+LEFT JOIN SupplierStats AS ss ON o.o_orderkey % ss.s_suppkey = 0
+WHERE o.rnk = 1
+  AND (o.o_totalprice < 50000 OR c.c_acctbal IS NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM lineitem li
+      WHERE li.l_orderkey = o.o_orderkey 
+      AND li.l_returnflag = 'R'
+  )
+ORDER BY o.o_orderdate DESC, c.c_name ASC;

@@ -1,0 +1,64 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) as rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+),
+CombinedQuery AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+        COALESCE(SUM(l.l_extendedprice), 0) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(CASE WHEN o.o_orderstatus = 'F' THEN 'Completed' ELSE 'Pending' END) AS order_status
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cq.p_partkey,
+    cq.p_name,
+    cq.total_quantity,
+    cq.total_revenue,
+    hv.o_orderkey,
+    hv.o_totalprice,
+    hv.c_name,
+    hv.c_mktsegment,
+    rs.s_name,
+    rs.s_acctbal
+FROM 
+    CombinedQuery cq
+LEFT JOIN 
+    HighValueOrders hv ON cq.total_revenue > 1000 
+LEFT JOIN 
+    RankedSuppliers rs ON rs.ps_partkey = cq.p_partkey AND rs.rank = 1
+WHERE 
+    cq.total_quantity IS NOT NULL
+ORDER BY 
+    cq.total_revenue DESC, hv.o_totalprice ASC;

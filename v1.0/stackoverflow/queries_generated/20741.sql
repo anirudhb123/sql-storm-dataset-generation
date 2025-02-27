@@ -1,0 +1,72 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COUNT(C.Id) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- Only BountyStart and BountyClose
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalComments,
+    UA.TotalBounty,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    COALESCE(CP.CloseCount, 0) AS CloseCount
+FROM 
+    UserActivity UA
+JOIN 
+    RecentPosts RP ON UA.UserId = RP.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON RP.PostId = CP.PostId
+WHERE 
+    UA.ActivityRank <= 10 
+    AND RP.PostRank = 1
+ORDER BY 
+    UA.TotalComments DESC, 
+    UA.TotalBounty DESC;
+
+This SQL query performs a complex analysis of user activity in the Stack Overflow schema, focusing on users with a reputation greater than 1000. It includes CTEs (Common Table Expressions) to aggregate user activity metrics, categorize recent posts, and track closed posts. Both outer joins and window functions are employed for ranking and grouping, while the final selection filters on the top active users, showcasing their recent contributions along with the total counts of their activities, thus providing insight into user engagement on the platform.

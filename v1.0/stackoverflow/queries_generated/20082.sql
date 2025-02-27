@@ -1,0 +1,82 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.OwnerUserId,
+        COALESCE(U.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, U.DisplayName
+), 
+PostStatistics AS (
+    SELECT 
+        RP.*,
+        (UPVoteCount - DownVoteCount) AS NetVotes,
+        CASE 
+            WHEN Score > 10 THEN 'High'
+            WHEN Score BETWEEN 1 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS ScoreCategory
+    FROM 
+        RecentPosts RP
+), 
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT PH.Comment, ', ') AS CloseReasons
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+),
+TagsWithPostCount AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+)
+SELECT 
+    PS.Id AS PostId,
+    PS.Title,
+    PS.OwnerDisplayName,
+    PS.ViewCount,
+    PS.Score,
+    PS.NetVotes,
+    PS.ScoreCategory,
+    COALESCE(CP.CloseCount, 0) AS CloseCount,
+    COALESCE(CP.CloseReasons, 'No closures') AS CloseReasons,
+    TP.TagName,
+    TP.PostCount
+FROM 
+    PostStatistics PS
+OUTER JOIN 
+    ClosedPosts CP ON PS.Id = CP.PostId
+LEFT JOIN 
+    TagsWithPostCount TP ON PS.Id IN (SELECT UNNEST(string_to_array(PS.Tags, '><')))
+WHERE 
+    PS.OwnerPostRank <= 3 
+ORDER BY 
+    PS.NetVotes DESC, 
+    PS.CreationDate DESC
+LIMIT 100;

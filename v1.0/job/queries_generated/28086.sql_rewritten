@@ -1,0 +1,77 @@
+WITH RecursiveAka AS (
+    SELECT 
+        ak.person_id, 
+        ak.name, 
+        at.title, 
+        at.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+), 
+FilteredAka AS (
+    SELECT 
+        person_id, 
+        name, 
+        title, 
+        production_year
+    FROM 
+        RecursiveAka
+    WHERE 
+        rn <= 5  
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id, 
+        p.name AS person_name, 
+        GROUP_CONCAT(DISTINCT inf.info ORDER BY inf.info) AS info_details
+    FROM 
+        name p
+    LEFT JOIN 
+        person_info inf ON p.id = inf.person_id
+    GROUP BY 
+        p.id, p.name
+),
+MovieDetails AS (
+    SELECT 
+        DISTINCT mt.movie_id, 
+        mt.info_type_id, 
+        inf.info AS movie_info
+    FROM 
+        movie_info mt
+    JOIN 
+        info_type inf ON mt.info_type_id = inf.id
+    WHERE 
+        inf.info LIKE '%award%' OR inf.info LIKE '%nomination%'
+),
+FinalOutput AS (
+    SELECT 
+        fa.person_id, 
+        fa.name AS aka_name, 
+        fa.title AS movie_title, 
+        fa.production_year AS movie_year, 
+        pd.person_name, 
+        pd.info_details,
+        md.movie_info
+    FROM 
+        FilteredAka fa
+    JOIN 
+        PersonDetails pd ON fa.person_id = pd.person_id
+    LEFT JOIN 
+        MovieDetails md ON fa.title = md.movie_info
+)
+
+SELECT 
+    fo.aka_name, 
+    fo.movie_title, 
+    fo.movie_year, 
+    fo.person_name, 
+    fo.info_details
+FROM 
+    FinalOutput fo
+ORDER BY 
+    fo.movie_year DESC, 
+    fo.aka_name ASC;

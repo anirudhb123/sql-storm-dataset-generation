@@ -1,0 +1,65 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank,
+        ps.ps_supplycost,
+        PERCENT_RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS percent_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_partkey = p.p_partkey)
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS row_num
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate > '1996-01-01')
+),
+AggregateLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-10-31'
+        AND l.l_returnflag IS NULL
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    f.o_orderkey, 
+    f.o_totalprice,
+    COALESCE(r.s_name, 'No Supplier') AS supplier_name,
+    a.total_sales,
+    a.item_count,
+    CASE 
+        WHEN a.total_sales IS NULL THEN 0
+        ELSE a.total_sales / NULLIF(f.o_totalprice, 0)
+    END AS sales_ratio,
+    COUNT(DISTINCT f.o_custkey) OVER () AS total_customers,
+    COUNT(DISTINCT r.s_suppkey) AS total_suppliers
+FROM 
+    FilteredOrders f
+LEFT JOIN 
+    RankedSuppliers r ON f.o_orderkey = r.rank
+JOIN 
+    AggregateLineItems a ON f.o_orderkey = a.l_orderkey
+WHERE 
+    (f.row_num <= 10 AND r.rank = 1) OR (f.o_totalprice > 500.00 AND r.rank IS NULL)
+ORDER BY 
+    f.o_orderkey, 
+    sales_ratio DESC;

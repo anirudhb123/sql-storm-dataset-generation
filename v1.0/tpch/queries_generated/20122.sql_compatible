@@ -1,0 +1,52 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+), FilteredParts AS (
+    SELECT p.p_partkey, p.p_brand, p.p_retailprice, 
+           CASE 
+                WHEN p.p_size IS NULL THEN 'Unknown Size' 
+                WHEN p.p_size BETWEEN 1 AND 10 THEN 'Small' 
+                WHEN p.p_size BETWEEN 11 AND 20 THEN 'Medium' 
+                ELSE 'Large' 
+           END AS size_category
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), OrderSummaries AS (
+    SELECT o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' 
+      AND o.o_orderdate < '1997-01-01'
+    GROUP BY o.o_custkey
+), RegionAverages AS (
+    SELECT n.n_regionkey, AVG(o.total_spent) AS avg_spent
+    FROM OrderSummaries o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+)
+
+SELECT ps.ps_partkey, 
+       COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+       MAX(ps.ps_availqty) AS max_avail_qty, 
+       COALESCE(SUM(s.rnk) FILTER (WHERE s.rnk <= 5), 0) AS top_supplier_rank_sum,
+       CASE WHEN r.avg_spent IS NULL THEN 'No Orders' 
+            ELSE CONCAT('Average spent: ', CAST(r.avg_spent AS VARCHAR)) END AS region_avg_spent_info
+FROM partsupp ps
+LEFT JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN FilteredParts p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN RegionAverages r ON r.n_regionkey = 
+    (SELECT n.n_regionkey FROM nation n 
+     WHERE n.n_nationkey = 
+         (SELECT c.c_nationkey FROM customer c 
+          WHERE c.c_custkey = 
+              (SELECT o.o_custkey FROM orders o 
+               WHERE o.o_orderkey = ps.ps_orderkey)))
+WHERE p.p_brand IS NOT NULL
+GROUP BY ps.ps_partkey, r.avg_spent
+HAVING AVG(ps.ps_availqty) > (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+ORDER BY unique_suppliers DESC, max_avail_qty ASC;

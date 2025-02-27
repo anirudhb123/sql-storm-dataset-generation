@@ -1,0 +1,93 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        c.movie_id,
+        1 AS depth
+    FROM 
+        complete_cast c
+    JOIN 
+        title t ON t.id = c.movie_id
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5  -- Limit the depth of the hierarchy
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+PopularNames AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(c.movie_id) > 10  -- Popular actors with more than 10 movies
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    th.title AS movie_title,
+    th.production_year,
+    mh.depth AS hierarchy_level,
+    ci.company_name,
+    ci.company_type,
+    pn.actor_name,
+    pn.movie_count,
+    mk.keywords
+FROM 
+    title th
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = th.id
+LEFT JOIN 
+    CompanyInfo ci ON ci.movie_id = th.id
+LEFT JOIN 
+    PopularNames pn ON pn.movie_count > 0 AND pn.actor_name IN (
+        SELECT 
+            a.name
+        FROM 
+            aka_name a
+        WHERE 
+            a.name IS NOT NULL
+    )
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = th.id 
+WHERE 
+    th.production_year IS NOT NULL
+ORDER BY 
+    th.production_year DESC, 
+    mh.depth ASC;

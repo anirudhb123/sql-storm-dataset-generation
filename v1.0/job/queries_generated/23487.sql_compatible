@@ -1,0 +1,108 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+),
+ActorRoles AS (
+    SELECT 
+        ak.name AS actor_name,
+        c.movie_id,
+        r.role AS role_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+AggregateRoles AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT movie_id) AS movie_count,
+        STRING_AGG(role_name, ', ') AS roles
+    FROM 
+        ActorRoles
+    GROUP BY 
+        actor_name
+),
+HighestRoles AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        roles
+    FROM 
+        AggregateRoles
+    WHERE 
+        movie_count = (SELECT MAX(movie_count) FROM AggregateRoles)
+),
+KeywordMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+)
+SELECT 
+    mh.title AS linked_title,
+    mh.production_year,
+    hr.actor_name,
+    hr.roles,
+    km.keywords,
+    CASE 
+        WHEN hr.movie_count > 10 THEN 'Star'
+        WHEN hr.movie_count BETWEEN 5 AND 10 THEN 'Supporting'
+        ELSE 'Cameo' 
+    END AS prominence,
+    COALESCE(NULLIF(ContactInfo.notes, ''), 'No Notes') AS additional_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    HighestRoles hr ON mh.movie_id = hr.movie_id
+LEFT JOIN 
+    KeywordMovies km ON mh.movie_id = km.movie_id
+LEFT JOIN 
+    (SELECT 
+        pi.info AS notes, pi.person_id
+     FROM 
+        person_info pi 
+     WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Notes')
+    ) AS ContactInfo ON hr.actor_name = ContactInfo.person_id
+WHERE 
+    mh.production_year = COALESCE(
+        (SELECT MAX(production_year) FROM aka_title WHERE kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')),
+        2010
+    )
+ORDER BY 
+    mh.production_year DESC, 
+    hr.movie_count DESC;

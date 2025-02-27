@@ -1,0 +1,38 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        DATEDIFF(CURRENT_TIMESTAMP, u.CreationDate) AS AccountAgeDays
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedActivity AS (
+    SELECT 
+        UserId, DisplayName, QuestionCount, AnswerCount, TotalUpVotes, TotalDownVotes, TotalBadges, AccountAgeDays,
+        RANK() OVER (ORDER BY QuestionCount DESC, TotalUpVotes DESC, AnswerCount DESC) AS ActivityRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    UserId, DisplayName, QuestionCount, AnswerCount, TotalUpVotes, TotalDownVotes, TotalBadges, AccountAgeDays, ActivityRank
+FROM 
+    RankedActivity
+WHERE 
+    ActivityRank <= 10
+ORDER BY 
+    ActivityRank;

@@ -1,0 +1,68 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS titles_per_year
+    FROM 
+        aka_title AS at
+    WHERE
+        at.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info AS ci
+    LEFT JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id
+),
+TopPerformers AS (
+    SELECT 
+        an.name,
+        ar.total_movies,
+        ar.roles
+    FROM 
+        aka_name AS an
+    JOIN 
+        ActorRoles AS ar ON an.person_id = ar.person_id
+    WHERE 
+        ar.total_movies >= 5
+),
+NotableMovies AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        CASE 
+            WHEN rt.year_rank <= 3 THEN 'Recent Title'
+            ELSE 'Older Title'
+        END AS title_category
+    FROM 
+        RankedTitles AS rt
+)
+SELECT 
+    nm.title_id,
+    nm.title,
+    nm.title_category,
+    COALESCE(tp.name, 'Unknown Actor') AS actor_name,
+    tp.total_movies,
+    tp.roles,
+    COALESCE(SUM(mk.id), 0) AS keywords_count,
+    ARRAY_AGG(DISTINCT mk.keyword) AS keywords_list
+FROM 
+    NotableMovies AS nm
+LEFT JOIN 
+    movie_keyword AS mk ON nm.title_id = mk.movie_id
+LEFT JOIN 
+    TopPerformers AS tp ON nm.title_category = 'Recent Title' 
+    AND tp.roles LIKE '%Lead%' AND tp.total_movies > 10
+GROUP BY 
+    nm.title_id, nm.title, nm.title_category, tp.name, tp.total_movies, tp.roles
+ORDER BY 
+    nm.title_category, nm.title;

@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.CreationDate, ph.Comment
+)
+
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate AS PostCreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.TotalBounties,
+    tu.DisplayName AS TopUserDisplayName,
+    tu.Reputation AS TopUserReputation,
+    ph.UserId AS HistoryUserId,
+    ph.CreationDate AS HistoryCreationDate,
+    ph.Comment AS HistoryComment,
+    ph.HistoryTypes
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.PostRank = 1 AND rp.CommentCount > 5
+LEFT JOIN 
+    PostHistoryInfo ph ON rp.Id = ph.PostId
+WHERE 
+    rp.Score > 10 AND
+    EXISTS (
+        SELECT 1
+        FROM Posts sub
+        WHERE sub.OwnerUserId = rp.PostId
+        AND sub.CreatedAt < rp.CreationDate
+        HAVING COUNT(*) > 0
+    )
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC, 
+    tu.Reputation DESC,
+    COALESCE(ph.CreationDate, '1970-01-01'::timestamp) DESC
+LIMIT 100;

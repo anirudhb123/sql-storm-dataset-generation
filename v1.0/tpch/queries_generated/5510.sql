@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        COUNT(li.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE 
+        o.o_totalprice > 5000
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_mktsegment
+),
+TopParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 1000
+)
+SELECT 
+    r.r_name,
+    rs.s_name,
+    rs.s_acctbal,
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.o_totalprice,
+    hp.p_name,
+    hp.total_avail_qty,
+    hvo.item_count
+FROM 
+    RankedSuppliers rs
+JOIN 
+    region r ON rs.rank = 1 AND r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey = hvo.o_orderkey LIMIT 1))
+JOIN 
+    HighValueOrders hvo ON rs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem li ON ps.ps_partkey = li.l_partkey WHERE li.l_orderkey = hvo.o_orderkey LIMIT 1)
+JOIN 
+    TopParts hp ON hp.p_partkey = (SELECT li.l_partkey FROM lineitem li WHERE li.l_orderkey = hvo.o_orderkey LIMIT 1)
+ORDER BY 
+    r.r_name, hvo.o_totalprice DESC;

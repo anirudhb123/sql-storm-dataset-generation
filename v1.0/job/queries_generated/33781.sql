@@ -1,0 +1,59 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ca.person_id AS actor_id,
+        ca.movie_id,
+        ca.nr_order,
+        1 AS depth
+    FROM 
+        cast_info ca
+    WHERE 
+        ca.role_id = (SELECT id FROM role_type WHERE role = 'Lead Actor')
+    
+    UNION ALL
+    
+    SELECT 
+        ca.person_id,
+        ca.movie_id,
+        ca.nr_order,
+        ah.depth + 1
+    FROM 
+        cast_info ca
+    JOIN 
+        ActorHierarchy ah ON ca.movie_id = ah.movie_id
+    WHERE 
+        ca.nr_order > ah.nr_order
+)
+
+SELECT 
+    a.id AS actor_id,
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(*) OVER (PARTITION BY a.id) AS total_movies,
+    AVG(ah.depth) OVER (PARTITION BY a.id) AS avg_hierarchy_depth,
+    CASE 
+        WHEN mc.company_type_id IS NOT NULL THEN 'With Company'
+        ELSE 'No Company'
+    END AS company_status,
+    (SELECT STRING_AGG(keyword.keyword, ', ') 
+     FROM movie_keyword mk 
+     JOIN keyword keyword ON mk.keyword_id = keyword.id 
+     WHERE mk.movie_id = t.id) AS movie_keywords
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id AND mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+LEFT JOIN 
+    ActorHierarchy ah ON ci.movie_id = ah.movie_id AND ci.person_id = ah.actor_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND a.name IS NOT NULL
+    AND a.md5sum IS NOT NULL
+GROUP BY 
+    a.id, a.name, t.id, t.title, t.production_year, mc.company_type_id
+ORDER BY 
+    total_movies DESC, avg_hierarchy_depth ASC;

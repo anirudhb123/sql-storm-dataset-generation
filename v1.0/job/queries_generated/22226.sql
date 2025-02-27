@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        ac.actor_count,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCount ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+)
+SELECT 
+    mwa.title,
+    mwa.production_year,
+    mwa.actor_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    CASE 
+        WHEN mwa.actor_count IS NULL THEN 'Unknown'
+        WHEN mwa.actor_count > 5 THEN 'Blockbuster'
+        WHEN mwa.actor_count BETWEEN 3 AND 5 THEN 'Moderate'
+        ELSE 'Low Profile'
+    END AS movie_profile,
+    AVG(mvi.info_type_id::FLOAT) OVER (PARTITION BY mwa.actor_count) AS avg_info_type
+FROM 
+    MoviesWithActors mwa
+LEFT JOIN 
+    movie_info mvi ON mwa.movie_id = mvi.movie_id
+WHERE 
+    mwa.actor_count IS NOT NULL
+    AND (mwa.production_year BETWEEN 2000 AND 2023)
+    AND (mwa.keyword IS NULL OR mwa.keyword LIKE '%Drama%')
+GROUP BY 
+    mwa.title,
+    mwa.production_year,
+    mwa.actor_count
+HAVING 
+    COUNT(mvi.info_type_id) > 2
+ORDER BY 
+    mwa.production_year DESC, 
+    mwa.actor_count DESC;

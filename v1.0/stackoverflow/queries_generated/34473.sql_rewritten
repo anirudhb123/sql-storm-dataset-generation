@@ -1,0 +1,95 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(v.BountyAmount) AS TotalBountyUsed
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        u.CreationDate >= DATEADD(YEAR, -2, GETDATE())
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserId,
+        ph.UserDisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Badges b ON ph.UserId = b.UserId AND b.Date > p.CreationDate
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        p.Id, p.Title, ph.UserId, ph.UserDisplayName
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    rp.Level AS PostLevel,
+    r.UserId,
+    r.DisplayName AS UserDisplayName,
+    COALESCE(vc.TotalVotes, 0) AS TotalVotes,
+    COALESCE(vc.UpVotes, 0) AS UpVotes,
+    COALESCE(vc.DownVotes, 0) AS DownVotes,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount,
+    ua.PostsCreated,
+    ua.TotalBountyUsed
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePosts rp ON p.Id = rp.Id
+LEFT JOIN 
+    RecentUserActivity ua ON p.OwnerUserId = ua.UserId
+LEFT JOIN 
+    PostsVoteCounts vc ON p.Id = vc.PostId
+LEFT JOIN 
+    PostsWithBadges pb ON p.Id = pb.PostId
+WHERE 
+    (p.LastActivityDate >= DATEADD(MONTH, -6, GETDATE()) OR p.ViewCount > 100)
+ORDER BY 
+    TotalVotes DESC, p.CreationDate DESC;

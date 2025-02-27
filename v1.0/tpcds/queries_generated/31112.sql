@@ -1,0 +1,53 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        1 AS depth
+    FROM 
+        item i
+    WHERE 
+        i.i_item_sk IN (SELECT iv.i_item_sk FROM inventory iv WHERE iv.inv_quantity_on_hand > 0)
+    
+    UNION ALL
+    
+    SELECT 
+        ih.i_item_sk,
+        CONCAT(ih.i_item_desc, ' -> ', i.i_item_desc),
+        ih.i_current_price * i.i_current_price AS compounded_price,
+        ih.depth + 1
+    FROM 
+        ItemHierarchy ih
+    JOIN 
+        item i ON ih.i_item_sk = i.i_item_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(s.ws_sales_price) AS total_sales,
+    AVG(s.ws_ext_sales_price) AS average_item_price,
+    COUNT(DISTINCT s.ws_order_number) AS num_orders,
+    MAX(i.i_current_price) AS max_item_price,
+    MIN(i.i_current_price) AS min_item_price,
+    STRING_AGG(DISTINCT r.r_reason_desc) AS return_reasons
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales s ON c.c_customer_sk = s.ws_bill_customer_sk 
+LEFT JOIN 
+    web_returns wr ON s.ws_order_number = wr.wr_order_number 
+LEFT JOIN 
+    reason r ON wr.wr_reason_sk = r.r_reason_sk
+LEFT JOIN 
+    ItemHierarchy i ON i.i_item_sk = s.ws_item_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990 
+    AND c.c_current_cdemo_sk IS NOT NULL
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    SUM(s.ws_sales_price) > (SELECT AVG(ws_sales_price) FROM web_sales)
+    AND COUNT(DISTINCT s.ws_order_number) > 5
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

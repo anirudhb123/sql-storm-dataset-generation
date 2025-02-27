@@ -1,0 +1,43 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUBSTRING(c.c_first_name FROM 1 FOR 3) AS first_name_short,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(c.ca_street_number, ' ', c.ca_street_name, ' ', ca_street_type) AS full_address,
+        REPLACE(c.c_email_address, '@', '[at]') AS obfuscated_email
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    c.c_customer_id,
+    COUNT(*) AS order_count,
+    STRING_AGG(DISTINCT CASE WHEN cd.cd_gender = 'F' THEN 'Female' ELSE 'Male' END, ', ') AS gender_summary,
+    MIN(ss.ss_sold_date_sk) AS first_order_date,
+    MAX(ss.ss_sold_date_sk) AS last_order_date,
+    SUM(ss.ss_net_profit) AS total_net_profit,
+    AVG(ss.ss_sales_price) AS avg_sales_price,
+    STRING_AGG(DISTINCT CONCAT(i.i_product_name, ' (', i.i_item_id, ')'), '; ') AS purchased_items
+FROM 
+    CustomerDetails c
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    item i ON ss.ss_item_sk = i.i_item_sk
+GROUP BY 
+    c.c_customer_id
+HAVING 
+    COUNT(*) > 5
+ORDER BY 
+    total_net_profit DESC
+LIMIT 50;

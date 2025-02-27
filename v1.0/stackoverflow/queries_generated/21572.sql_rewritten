@@ -1,0 +1,49 @@
+WITH UserScoreCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 
+                         WHEN v.VoteTypeId = 3 THEN -1 
+                         ELSE 0 END), 0) AS TotalScore,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(AVG(COALESCE(p.Score, 0)), 0) AS AvgPostScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostActivityCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ph.CreationDate, p.CreationDate) AS LastActivityDate,
+        CASE 
+            WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 'Answered' 
+            WHEN p.PostTypeId = 1 THEN 'Unanswered' 
+            ELSE 'Non-Question' 
+        END AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(ph.CreationDate, p.CreationDate) DESC) AS ActivityRank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.TotalScore,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.AvgPostScore,
+    pa.PostId,
+    pa.Title,
+    pa.LastActivityDate,
+    pa.PostStatus,
+    pa.ActivityRank
+FROM UserScoreCTE us
+LEFT JOIN PostActivityCTE pa ON us.UserId = pa.PostId
+WHERE us.TotalScore > (SELECT AVG(TotalScore) FROM UserScoreCTE) 
+OR pa.PostStatus = 'Answered'
+ORDER BY us.TotalScore DESC, pa.LastActivityDate DESC
+LIMIT 50;

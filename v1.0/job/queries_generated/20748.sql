@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mf.name, 'Unknown') AS main_company,
+        (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = m.id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_per_year
+    FROM 
+        aka_title m
+        LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+        LEFT JOIN company_name mf ON mc.company_id = mf.id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+actor_details AS (
+    SELECT 
+        ka.person_id,
+        ka.name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movies
+    FROM 
+        aka_name ka
+        JOIN cast_info ci ON ka.person_id = ci.person_id
+        JOIN aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        ka.person_id, ka.name
+),
+latest_movie AS (
+    SELECT 
+        movie_id, 
+        MAX(production_year) AS latest_year
+    FROM 
+        movie_hierarchy
+    GROUP BY 
+        movie_id
+),
+final_output AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ad.name AS actor,
+        mh.main_company,
+        mh.company_count,
+        mh.rank_per_year,
+        CASE 
+            WHEN mh.company_count > 3 THEN 'Multiple Companies'
+            WHEN mh.company_count = 0 THEN 'Independent'
+            ELSE 'Single Company'
+        END AS company_status
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN actor_details ad ON mh.movie_id IN (
+        SELECT 
+            ci.movie_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.person_id IN (SELECT DISTINCT person_id FROM aka_name)
+    ) 
+    WHERE 
+        mh.movie_id IN (SELECT movie_id FROM latest_movie WHERE latest_year = mh.production_year)
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.actor,
+    f.main_company,
+    f.company_count,
+    f.rank_per_year,
+    COALESCE(f.company_status, 'No Data') AS company_status
+FROM 
+    final_output f
+ORDER BY 
+    f.production_year DESC, f.rank_per_year;

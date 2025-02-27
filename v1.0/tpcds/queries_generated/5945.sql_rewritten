@@ -1,0 +1,66 @@
+WITH CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_purchases,
+        SUM(ws.ws_net_paid) AS total_spent,
+        AVG(ws.ws_ext_sales_price) AS average_sale_value,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+), AverageSale AS (
+    SELECT 
+        total_purchases,
+        total_spent,
+        average_sale_value,
+        unique_customers,
+        (total_spent / NULLIF(unique_customers, 0)) AS avg_spent_per_customer
+    FROM 
+        CustomerStats
+), WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_revenue
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_purchases,
+    cs.total_spent,
+    cs.average_sale_value,
+    cs.unique_customers,
+    as.avg_spent_per_customer,
+    ws.w_warehouse_id,
+    ws.total_quantity_sold,
+    ws.total_revenue
+FROM 
+    CustomerStats cs
+JOIN 
+    AverageSale as ON as.total_purchases = cs.total_purchases 
+                     AND as.total_spent = cs.total_spent
+JOIN 
+    WarehouseSales ws ON cs.total_purchases > 1000 
+ORDER BY 
+    cs.cd_gender, cs.cd_marital_status;

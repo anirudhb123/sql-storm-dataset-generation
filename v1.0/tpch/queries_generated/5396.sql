@@ -1,0 +1,38 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1998-01-01'
+), OrderLineItems AS (
+    SELECT 
+        lo.l_orderkey, 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+        COUNT(*) AS line_item_count
+    FROM lineitem lo
+    JOIN RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+    WHERE lo.l_shipdate BETWEEN DATE '1998-01-01' AND DATE '1998-12-31'
+    GROUP BY lo.l_orderkey
+), Result as (
+    SELECT 
+        n.n_name AS nation,
+        SUM(oli.total_revenue) AS revenue,
+        COUNT(DISTINCT oli.l_orderkey) AS unique_orders,
+        AVG(oli.line_item_count) AS avg_line_items_per_order
+    FROM OrderLineItems oli
+    JOIN customer c ON oli.l_orderkey = c.c_custkey
+    JOIN supplier s ON s.s_suppkey = oli.l_suppkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    r.nation,
+    r.revenue,
+    r.unique_orders,
+    r.avg_line_items_per_order
+FROM Result r
+ORDER BY r.revenue DESC
+LIMIT 10;

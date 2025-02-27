@@ -1,0 +1,61 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS orders_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        ROW_NUMBER() OVER (ORDER BY ss.total_supply_cost DESC) AS rank
+    FROM 
+        SupplierStats ss
+)
+SELECT 
+    c.c_name AS customer_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(co.orders_count, 0) AS orders_count,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    ts.rank AS supplier_rank
+FROM 
+    CustomerOrders co
+FULL OUTER JOIN 
+    TopSuppliers ts ON co.orders_count > 0
+LEFT JOIN 
+    supplier s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_size > 20
+        )
+        LIMIT 1
+    )
+WHERE 
+    COALESCE(co.total_spent, 0) > 1000
+    OR ts.rank IS NOT NULL
+ORDER BY 
+    total_spent DESC, supplier_rank ASC;

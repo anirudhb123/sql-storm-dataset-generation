@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT s_store_sk, s_store_id, s_sales_price, 1 AS level
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    WHERE ss.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    UNION ALL
+    SELECT sh.s_store_sk, sh.s_store_id, SUM(ss.ss_sales_price) AS s_sales_price, sh.level + 1
+    FROM SalesHierarchy sh
+    JOIN store_sales ss ON sh.s_store_sk = ss.ss_store_sk
+    WHERE ss.sold_date_sk < (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY sh.s_store_sk, sh.s_store_id, sh.level
+),
+CustomerReturns AS (
+    SELECT sr_customer_sk, DATEDIFF('2002-10-01', d_date) AS days_since_return,
+           SUM(sr_return_quantity) AS total_return_quantity,
+           SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE sr_return_qty > 0
+    GROUP BY sr_customer_sk, d_date
+),
+SalesAnalysis AS (
+    SELECT c.c_customer_sk, COUNT(ws.ws_order_number) AS total_orders,
+           SUM(ws.ws_sales_price) AS total_spent,
+           COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+           SUM(COALESCE(cr.cr_return_quantity, 0)) AS total_catalog_returns
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY c.c_customer_sk
+),
+PerformanceBenchmark AS (
+    SELECT s.store_name, h.total_orders, h.total_spent,
+           CASE WHEN h.total_returns > 0 THEN h.total_returns ELSE NULL END AS returns_not_null,
+           LAG(h.total_spent) OVER (PARTITION BY s.s_store_id ORDER BY h.total_orders) AS lag_spent,
+           LEAD(h.total_spent) OVER (PARTITION BY s.s_store_id ORDER BY h.total_orders) AS lead_spent
+    FROM SalesAnalysis h
+    JOIN store s ON h.c_customer_sk = s.s_store_sk
+    WHERE h.total_spent IS NOT NULL
+)
+SELECT pb.store_name, pb.total_orders, pb.total_spent,
+       CASE WHEN pb.returns_not_null IS NULL THEN 'No Returns' ELSE 'Returns Present' END AS return_status,
+       pb.lag_spent, pb.lead_spent
+FROM PerformanceBenchmark pb
+ORDER BY pb.total_spent DESC;

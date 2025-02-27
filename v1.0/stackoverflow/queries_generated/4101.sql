@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > current_date - interval '30 days'
+),
+PopularPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.UpVotes + rp.DownVotes > 0 
+            THEN ROUND((CAST(rp.UpVotes AS float) / (rp.UpVotes + rp.DownVotes)) * 100, 2) 
+            ELSE NULL 
+        END AS UpvotePercentage
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    u.DisplayName,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    pp.AnswerCount,
+    pp.UpvotePercentage
+FROM 
+    PopularPosts pp
+JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1
+WHERE 
+    pp.UpvotePercentage IS NOT NULL
+    AND pp.UpvotePercentage > 75
+ORDER BY 
+    pp.Score DESC
+LIMIT 10;
+
+-- Additional note: this query retrieves top user posts from the last 30 days with high upvote percentages while joining user information and badges.

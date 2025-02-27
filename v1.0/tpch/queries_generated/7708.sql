@@ -1,0 +1,33 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+), TopOrders AS (
+    SELECT *
+    FROM RankedOrders
+    WHERE order_rank <= 5
+), SupplierDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, s.s_name, s.s_acctbal, 
+           SUM(l.l_quantity) AS total_quantity
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '2023-01-01' 
+    GROUP BY ps.ps_partkey, ps.ps_suppkey, s.s_name, s.s_acctbal
+), FinalReport AS (
+    SELECT to.o_orderkey, to.o_orderdate, to.o_totalprice, to.c_name, 
+           sd.s_name AS supplier_name, sd.total_quantity, 
+           pp.p_name AS part_name
+    FROM TopOrders to
+    JOIN lineitem l ON to.o_orderkey = l.l_orderkey
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN SupplierDetails sd ON ps.ps_partkey = sd.ps_partkey 
+                              AND ps.ps_suppkey = sd.ps_suppkey
+    JOIN part pp ON ps.ps_partkey = pp.p_partkey
+)
+SELECT f.o_orderkey, f.o_orderdate, f.o_totalprice, f.c_name, f.supplier_name, 
+       f.total_quantity, f.part_name
+FROM FinalReport f
+ORDER BY f.o_orderdate DESC, f.o_totalprice DESC;

@@ -1,0 +1,50 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        Rank() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation AS UserReputation,
+    pd.PostId,
+    pd.Title,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    cp.CloseCount,
+    COALESCE(cp.LastCloseDate, 'No Closures') AS LastCloseDate,
+    (u.Reputation * 0.1 + pd.UpVotes - pd.DownVotes) AS ScoreImpact
+FROM UserReputation u
+LEFT JOIN PostDetails pd ON u.Id = pd.OwnerUserId
+LEFT JOIN ClosedPosts cp ON pd.PostId = cp.PostId
+WHERE u.Reputation > 1000
+    AND (pd.RecentPostRank <= 5 OR pd.CommentCount > 10)
+ORDER BY ScoreImpact DESC
+LIMIT 50;

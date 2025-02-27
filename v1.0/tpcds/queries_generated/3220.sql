@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        COUNT(sr_ticket_number) AS total_returns,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_spent,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_sales_price) AS avg_order_value
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.ws_bill_customer_sk,
+        cs.total_spent,
+        cs.order_count,
+        cs.avg_order_value
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.total_spent > (
+            SELECT 
+                AVG(total_spent) 
+            FROM 
+                CustomerSales
+        )
+),
+ItemDemographics AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        ca.ca_city
+    FROM 
+        item i
+    LEFT JOIN 
+        customer_demographics cd ON i.i_item_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON cd.cd_demo_sk = ca.ca_address_sk
+)
+SELECT 
+    id.i_item_desc,
+    id.cd_gender,
+    id.cd_marital_status,
+    COUNT(DISTINCT tc.ws_bill_customer_sk) AS unique_customer_count,
+    COALESCE(SUM(r.total_returned_quantity), 0) AS total_returned,
+    COUNT(r.sr_item_sk) AS return_count,
+    CASE 
+        WHEN COUNT(r.sr_item_sk) > 0 THEN 'Has Returns' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    ItemDemographics id
+LEFT JOIN 
+    RankedReturns r ON id.i_item_id = r.sr_item_sk
+JOIN 
+    TopCustomers tc ON id.i_item_id = tc.ws_bill_customer_sk
+GROUP BY 
+    id.i_item_desc, id.cd_gender, id.cd_marital_status
+HAVING 
+    AVG(tc.avg_order_value) > 100
+ORDER BY 
+    unique_customer_count DESC;

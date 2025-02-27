@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY a.id) AS company_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+ActorPopularity AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+FilteredActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ap.movie_count,
+        ap.noted_roles
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorPopularity ap ON ak.person_id = ap.person_id
+    WHERE 
+        ap.movie_count > 5 AND ap.noted_roles > 2
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    fa.actor_name,
+    rm.company_count
+FROM 
+    RankedMovies rm
+JOIN 
+    movie_companies mc ON rm.id = mc.movie_id
+JOIN 
+    FilteredActors fa ON mc.company_id IN (
+        SELECT 
+            mc2.company_id 
+        FROM 
+            movie_companies mc2 
+        WHERE 
+            mc2.movie_id = rm.id
+        GROUP BY 
+            mc2.company_id
+        HAVING 
+            COUNT(*) > 1
+    )
+WHERE 
+    rm.year_rank <= 3
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

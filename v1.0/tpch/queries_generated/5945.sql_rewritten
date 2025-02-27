@@ -1,0 +1,28 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), FilteredRegions AS (
+    SELECT r.r_regionkey
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    WHERE n.n_name LIKE 'A%'
+), OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+), LineItemAggregation AS (
+    SELECT l.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalLineItemRevenue
+    FROM lineitem l
+    GROUP BY l.o_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT o.o_orderkey) AS OrderCount, AVG(ls.TotalLineItemRevenue) AS AvgLineItemRevenue, SUM(rs.TotalSupplyCost) AS TotalSupplierCost
+FROM FilteredRegions r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+JOIN OrderSummary o ON c.c_custkey = o.o_custkey
+JOIN LineItemAggregation ls ON o.o_orderkey = ls.o_orderkey
+JOIN RankedSuppliers rs ON c.c_nationkey = rs.s_suppkey
+GROUP BY r.r_name
+ORDER BY TotalSupplierCost DESC, AvgLineItemRevenue DESC;

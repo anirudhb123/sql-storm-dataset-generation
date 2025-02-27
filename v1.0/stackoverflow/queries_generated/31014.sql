@@ -1,0 +1,110 @@
+WITH RecursiveTags AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        IsModeratorOnly,
+        IsRequired,
+        1 AS Level
+    FROM Tags
+    WHERE Count > 1000
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rt.Level + 1
+    FROM Tags t
+    JOIN RecursiveTags rt ON t.ParentTagId = rt.Id -- Assuming there's a hypothetical ParentTagId for the recursion
+    WHERE rt.Level < 5
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate > NOW() - INTERVAL '90 days'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+
+PopularQuestions AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    JOIN PostsTags pt ON p.Id = pt.PostId
+    JOIN Tags t ON pt.TagId = t.Id
+    WHERE p.PostTypeId = 1 -- Questions only
+    AND p.Score > 5
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate
+),
+
+FinalReport AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        u.Reputation,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        rp.Title AS RecentPostTitle,
+        rp.CreationDate AS RecentPostDate,
+        rp.ViewCount AS RecentPostViews,
+        pq.Title AS PopularQuestionTitle,
+        pq.ViewCount AS PopularQuestionViews,
+        pq.Tags AS PopularQuestionTags
+    FROM UserStatistics us
+    JOIN Users u ON us.UserId = u.Id
+    LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+    LEFT JOIN PopularQuestions pq ON pq.LikedUserId = u.Id
+)
+
+SELECT 
+    fr.UserName,
+    fr.Reputation,
+    fr.GoldBadges,
+    fr.SilverBadges,
+    fr.BronzeBadges,
+    fr.RecentPostTitle,
+    fr.RecentPostDate,
+    fr.RecentPostViews,
+    fr.PopularQuestionTitle,
+    fr.PopularQuestionViews,
+    fr.PopularQuestionTags
+FROM FinalReport fr
+WHERE fr.Reputation >= 1000 OR fr.GoldBadges > 0
+ORDER BY fr.Reputation DESC, fr.RecentPostDate DESC;

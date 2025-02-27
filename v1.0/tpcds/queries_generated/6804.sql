@@ -1,0 +1,47 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sales_price,
+        cs.cs_sales_price,
+        ss.ss_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS ws_rank,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_order_number ORDER BY cs.cs_sales_price DESC) AS cs_rank,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_ticket_number ORDER BY ss.ss_sales_price DESC) AS ss_rank
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    FULL OUTER JOIN 
+        store_sales ss ON ws.ws_order_number = ss.ss_order_number
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231 
+        OR cs.cs_sold_date_sk BETWEEN 20220101 AND 20221231 
+        OR ss.ss_sold_date_sk BETWEEN 20220101 AND 20221231
+),
+aggregated_sales AS (
+    SELECT 
+        web_site_id,
+        MAX(ws_sales_price) AS max_web_price,
+        MAX(cs_sales_price) AS max_catalog_price,
+        MAX(ss_sales_price) AS max_store_price
+    FROM 
+        ranked_sales
+    GROUP BY 
+        web_site_id
+)
+SELECT 
+    asales.web_site_id,
+    asales.max_web_price,
+    asales.max_catalog_price,
+    asales.max_store_price,
+    (COALESCE(asales.max_web_price, 0) + COALESCE(asales.max_catalog_price, 0) + COALESCE(asales.max_store_price, 0)) AS total_max_price
+FROM 
+    aggregated_sales asales
+JOIN 
+    date_dim dd ON dd.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+WHERE 
+    dd.d_year = 2022
+ORDER BY 
+    total_max_price DESC
+LIMIT 10;

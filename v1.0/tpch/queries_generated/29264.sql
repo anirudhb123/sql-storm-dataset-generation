@@ -1,0 +1,33 @@
+SELECT 
+    p.p_partkey,
+    SUBSTRING(p.p_name FROM 1 FOR 15) AS short_name,
+    LENGTH(p.p_name) AS name_length,
+    REPLACE(p.p_comment, 'pieces', 'units') AS modified_comment,
+    s.s_name,
+    c.c_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    CONCAT('Total Price: $', FORMAT(o.o_totalprice, 2)) AS formatted_total_price,
+    COUNT(DISTINCT l.l_linenumber) AS number_of_lines,
+    (SELECT COUNT(*) FROM lineitem WHERE l_orderkey = o.o_orderkey) AS total_line_items
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    s.s_acctbal > 1000.00
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey, short_name, name_length, modified_comment, s.s_name, c.c_name, o.o_orderkey, o.o_orderdate, formatted_total_price
+HAVING 
+    number_of_lines > 5
+ORDER BY 
+    o.o_orderdate DESC, formatted_total_price DESC;

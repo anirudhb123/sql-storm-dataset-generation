@@ -1,0 +1,54 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        Id, 
+        DisplayName, 
+        Reputation, 
+        CreationDate, 
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY p.Id, u.DisplayName, pt.Name, p.Title, p.CreationDate, p.Score
+    HAVING COUNT(c.Id) > 0
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    ru.DisplayName AS TopUser,
+    ru.Reputation AS UserReputation,
+    tp.Title AS TopPostTitle,
+    tp.Score AS PostScore,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.CloseVotes,
+    tp.CreationDate AS PostCreationDate,
+    tp.OwnerDisplayName,
+    tp.PostType,
+    tp.CommentCount
+FROM RankedUsers ru
+JOIN TopPosts tp ON ru.Id = tp.OwnerDisplayName
+JOIN PostVoteStats pvs ON tp.PostId = pvs.PostId
+WHERE ru.Rank <= 10
+ORDER BY ru.Reputation DESC, tp.Score DESC;

@@ -1,0 +1,49 @@
+
+WITH top_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        aka_title ak
+    JOIN 
+        title m ON ak.movie_id = m.id
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.title, m.production_year
+    ORDER BY 
+        cast_count DESC
+    LIMIT 10
+),
+movie_details AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        tm.cast_count,
+        tm.actors,
+        STRING_AGG(DISTINCT mn.name ORDER BY mn.name) AS additional_names
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT id FROM title WHERE title = tm.title LIMIT 1)
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        char_name mn ON k.phonetic_code = mn.imdb_index
+    GROUP BY 
+        tm.title, tm.production_year, tm.cast_count, tm.actors
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_count,
+    md.actors,
+    md.additional_names
+FROM 
+    movie_details md
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

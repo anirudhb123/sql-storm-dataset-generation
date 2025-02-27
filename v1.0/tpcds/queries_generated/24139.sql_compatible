@@ -1,0 +1,55 @@
+
+WITH RECURSIVE CTE_Customer_Analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        DENSE_RANK() OVER(PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, ca.ca_city, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+CTE_Promotion_Analysis AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_order_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM promotion p
+    LEFT JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_id
+),
+CTE_Income_Band AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COALESCE(SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END), 0) AS married_count,
+        COALESCE(SUM(CASE WHEN cd.cd_marital_status = 'S' THEN 1 ELSE 0 END), 0) AS single_count
+    FROM customer c
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ib.ib_income_band_sk
+)
+SELECT 
+    cte.c_customer_sk,
+    cte.c_first_name,
+    cte.c_last_name,
+    cte.ca_city,
+    cte.cd_gender,
+    CTE_Promotion_Analysis.promo_order_count,
+    CTE_Income_Band.married_count,
+    CTE_Income_Band.single_count
+FROM CTE_Customer_Analysis cte
+LEFT JOIN CTE_Promotion_Analysis ON cte.gender_rank < 5 AND cte.order_count > 0
+LEFT JOIN CTE_Income_Band ON cte.hd_income_band_sk = CTE_Income_Band.ib_income_band_sk
+WHERE 
+    (cte.cd_gender = 'F' AND CTE_Income_Band.single_count > 0)
+    OR (cte.cd_gender = 'M' AND CTE_Income_Band.married_count > 0)
+ORDER BY CTE_Income_Band.married_count DESC, cte.c_last_name ASC;

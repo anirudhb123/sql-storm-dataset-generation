@@ -1,0 +1,53 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        r.r_name AS region_name,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, r.r_name
+), 
+CustomerTotalOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    si.s_name,
+    si.region_name,
+    si.part_count,
+    si.total_supplycost,
+    co.c_name,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN COALESCE(co.total_spent, 0) = 0 THEN 'No Orders'
+        WHEN si.total_supplycost > COALESCE(co.total_spent, 0) THEN 'Under Supply'
+        ELSE 'Well Supplied'
+    END AS supply_status
+FROM 
+    SupplierInfo si
+FULL OUTER JOIN 
+    CustomerTotalOrders co ON si.part_count > 0 AND (si.s_acctbal > 100 OR COALESCE(co.total_spent, 0) > 5000)
+WHERE 
+    si.total_supplycost IS NOT NULL OR COALESCE(co.total_spent, 0) IS NOT NULL
+ORDER BY 
+    si.region_name, si.s_name;

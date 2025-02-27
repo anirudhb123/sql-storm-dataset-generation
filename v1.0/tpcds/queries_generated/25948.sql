@@ -1,0 +1,68 @@
+
+WITH CustomerAddress AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerDemo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer_demographics
+),
+Customer AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        CustomerAddress ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        CustomerDemo cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN cd_gender = 'M' AND cd_marital_status = 'M' THEN 'Married Male'
+            WHEN cd_gender = 'M' AND cd_marital_status = 'S' THEN 'Single Male'
+            WHEN cd_gender = 'F' AND cd_marital_status = 'M' THEN 'Married Female'
+            WHEN cd_gender = 'F' AND cd_marital_status = 'S' THEN 'Single Female'
+            ELSE 'Other'
+        END AS demographic_category
+    FROM 
+        Customer
+)
+SELECT 
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    demographic_category,
+    COUNT(*) AS customer_count
+FROM 
+    FilteredCustomers
+GROUP BY 
+    full_address, ca_city, ca_state, ca_zip, demographic_category
+ORDER BY 
+    customer_count DESC
+LIMIT 10;

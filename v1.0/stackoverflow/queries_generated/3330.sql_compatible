@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount ELSE 0 END) AS QuestionsAnswered,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN P.Score ELSE 0 END) AS TotalAnswerScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        QuestionsAnswered, 
+        TotalAnswerScore,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserStats
+    WHERE 
+        Reputation > 1000
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS PostHistoryRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days'
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.QuestionsAnswered,
+    TU.TotalAnswerScore,
+    COALESCE(RPH.PostHistoryTypeId, 0) AS LastHistoryType,
+    COUNT(CASE WHEN RPH.PostHistoryRank = 1 THEN RPH.PostId END) AS RecentChangesCount
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPostHistory RPH ON TU.UserId = RPH.UserId
+GROUP BY 
+    TU.UserId, TU.DisplayName, TU.Reputation, TU.PostCount, TU.QuestionsAnswered, TU.TotalAnswerScore
+HAVING 
+    COUNT(RPH.PostHistoryRank) > 5
+ORDER BY 
+    TU.Reputation DESC, TU.QuestionsAnswered DESC;

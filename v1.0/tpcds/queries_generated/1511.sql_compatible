@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) as sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+MeanSales AS (
+    SELECT 
+        web_site_sk,
+        AVG(ws_net_paid) as avg_net_paid
+    FROM RankedSales
+    GROUP BY web_site_sk
+),
+HighPerformingSites AS (
+    SELECT 
+        a.w_warehouse_name,
+        b.web_name,
+        c.avg_net_paid
+    FROM warehouse a
+    JOIN web_site b ON a.w_warehouse_sk = b.web_company_id
+    JOIN MeanSales c ON b.web_site_sk = c.web_site_sk
+    WHERE c.avg_net_paid > 500
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    INNER JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+    AND (cd.cd_marital_status = 'M' OR cd.cd_purchase_estimate > 1000)
+),
+SalesCount AS (
+    SELECT 
+        s_store_sk,
+        COUNT(cs.cs_order_number) AS total_sales
+    FROM catalog_sales cs
+    GROUP BY s_store_sk
+)
+SELECT 
+    hp.web_name,
+    hp.w_warehouse_name,
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    sc.total_sales,
+    MAX(r.ws_net_paid) AS max_net_paid
+FROM HighPerformingSites hp
+LEFT JOIN CustomerInfo ci ON ci.cd_purchase_estimate > 1000
+LEFT JOIN SalesCount sc ON sc.s_store_sk = hp.w_warehouse_sk
+JOIN RankedSales r ON r.sales_rank = 1
+GROUP BY 
+    hp.web_name,
+    hp.w_warehouse_name,
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    sc.total_sales
+HAVING 
+    MAX(r.ws_net_paid) > 100
+ORDER BY 
+    hp.web_name,
+    hp.w_warehouse_name;

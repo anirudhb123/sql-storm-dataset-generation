@@ -1,0 +1,44 @@
+WITH RECURSIVE supply_chain (s_suppkey, s_name, s_address, level) AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, sc.level + 1
+    FROM supplier s
+    JOIN supply_chain sc ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+    WHERE sc.level < 5
+),
+ranked_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_mfgr, 
+           DENSE_RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_totalprice, c.c_mktsegment,
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS segment_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+supplier_availability AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availability
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT r.r_name, COUNT(DISTINCT o.o_orderkey) AS total_orders, AVG(o.o_totalprice) AS avg_order_value,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS available_parts,
+       SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS discounted_sales,
+       MAX(sc.level) AS max_supply_chain_level
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN ranked_parts p ON l.l_partkey = p.p_partkey AND p.price_rank <= 3
+LEFT JOIN supplier_availability sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN supply_chain sc ON s.s_suppkey = sc.s_suppkey
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10 AND AVG(o.o_totalprice) > 1000
+ORDER BY total_orders DESC, avg_order_value DESC
+LIMIT 10;

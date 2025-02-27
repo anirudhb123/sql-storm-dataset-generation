@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = p.Id) AS TotalComments
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT 
+        rp.OwnerDisplayName,
+        COUNT(*) AS PostCount,
+        AVG(rp.Score) AS AvgScore,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.TotalComments) AS TotalComments,
+        AVG(CASE WHEN rp.Score IS NULL THEN 0 ELSE rp.Score END) AS AdjustedAvgScore
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5
+    GROUP BY 
+        rp.OwnerDisplayName
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+FinalRankings AS (
+    SELECT 
+        ps.OwnerDisplayName,
+        ps.PostCount,
+        ps.AvgScore,
+        ps.TotalViews,
+        ps.TotalComments,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        DENSE_RANK() OVER (ORDER BY ps.TotalViews DESC) AS ViewRank
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        UsersWithBadges ub ON ps.OwnerDisplayName = ub.UserId
+)
+SELECT 
+    fr.OwnerDisplayName,
+    fr.PostCount,
+    fr.AvgScore,
+    fr.TotalViews,
+    fr.TotalComments,
+    COALESCE(fr.GoldBadges, 0) AS GoldBadges,
+    COALESCE(fr.SilverBadges, 0) AS SilverBadges,
+    COALESCE(fr.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    FinalRankings fr
+WHERE 
+    fr.ViewRank <= 10
+ORDER BY 
+    fr.ViewRank;

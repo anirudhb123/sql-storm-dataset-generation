@@ -1,0 +1,93 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(k.keyword) AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+CompanyMovieDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+TitleInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        COALESCE(mu.keywords, '{}') AS keywords,
+        COALESCE(cr.actor_name, 'Unknown') AS lead_actor,
+        COALESCE(cr.role_name, 'Unspecified') AS lead_role,
+        COUNT(DISTINCT co.company_name) AS company_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        MovieWithKeywords mu ON rt.title_id = mu.movie_id
+    LEFT JOIN 
+        ActorRoles cr ON rt.title_id = cr.movie_id AND cr.nr_order = 1
+    LEFT JOIN 
+        CompanyMovieDetails co ON rt.title_id = co.movie_id
+    GROUP BY 
+        rt.title_id, rt.title, mu.keywords, cr.actor_name, cr.role_name
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.keywords,
+    ti.lead_actor,
+    ti.lead_role,
+    ti.company_count,
+    CASE 
+        WHEN ti.company_count > 5 THEN 'Major Production'
+        WHEN ti.company_count BETWEEN 3 AND 5 THEN 'Moderate Production'
+        ELSE 'Independent Production'
+    END AS production_classification,
+    CASE
+        WHEN ti.lead_actor IS NULL THEN 'No Lead Actor'
+        ELSE 'Lead Actor Present'
+    END AS actor_status
+FROM 
+    TitleInfo ti
+WHERE 
+    ti.production_year > 2000 
+    AND ti.keywords @> ARRAY['Action']::text[] 
+ORDER BY 
+    ti.production_year DESC, 
+    ti.title;

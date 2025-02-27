@@ -1,0 +1,53 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+StoreSales AS (
+    SELECT
+        ss_store_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_tickets,
+        AVG(ss_quantity) AS avg_quantity_sold
+    FROM store_sales
+    GROUP BY ss_store_sk
+),
+WebSales AS (
+    SELECT
+        ws_web_site_sk,
+        SUM(ws_net_profit) AS total_web_sales,
+        COUNT(DISTINCT ws_order_number) AS total_web_orders
+    FROM web_sales
+    GROUP BY ws_web_site_sk
+),
+SalesSummary AS (
+    SELECT
+        customer.c_customer_sk,
+        COALESCE(cr.total_returns, 0) AS returns_count,
+        COALESCE(cr.total_return_amount, 0.00) AS return_amount,
+        COALESCE(wb.total_web_sales, 0.00) AS web_sales_total,
+        COALESCE(ss.total_sales, 0.00) AS store_sales_total,
+        COALESCE(ss.total_tickets, 0) AS store_tickets_count,
+        customer.c_birth_year,
+        EXTRACT(YEAR FROM CURRENT_DATE) - COALESCE(customer.c_birth_year, 0) AS age
+    FROM customer AS customer
+    LEFT JOIN CustomerReturns AS cr ON customer.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN StoreSales AS ss ON ss.ss_store_sk = COALESCE(customer.c_current_addr_sk, 0)
+    LEFT JOIN WebSales AS wb ON wb.ws_web_site_sk = COALESCE(customer.c_current_hdemo_sk, 0)
+),
+RankedSummary AS (
+    SELECT *,
+        RANK() OVER (PARTITION BY CASE WHEN returns_count > 0 THEN 1 ELSE 0 END ORDER BY total_web_sales DESC) AS sales_rank
+    FROM SalesSummary
+)
+SELECT * 
+FROM RankedSummary
+WHERE (age IS NOT NULL AND age > 18)
+OR (returns_count > 5 AND web_sales_total < 500)
+ORDER BY sales_rank, return_amount DESC, age ASC
+LIMIT 100;

@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM title m
+    WHERE m.episode_of_id IS NULL  -- Top-level movies
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM title e
+    JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id  -- Recursive step for episodes
+),
+
+cast_role_counts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT CONCAT(an.name, ' (', rt.role, ')'), ', ') AS cast_details
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id
+),
+
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(k.keywords, 'No Keywords') AS keywords
+    FROM title m
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(k.keyword, ', ') AS keywords
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        GROUP BY mk.movie_id
+    ) k ON m.id = k.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.level,
+    COALESCE(cast_info.total_cast, 0) AS total_cast_members,
+    COALESCE(cast_info.cast_details, 'No Cast') AS cast_details,
+    COALESCE(mw.keywords, 'No Keywords') AS associated_keywords
+FROM movie_hierarchy mh
+LEFT JOIN cast_role_counts cast_info ON mh.movie_id = cast_info.movie_id
+LEFT JOIN movies_with_keywords mw ON mh.movie_id = mw.movie_id
+ORDER BY mh.level, mh.production_year DESC, mh.movie_title;

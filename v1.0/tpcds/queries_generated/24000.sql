@@ -1,0 +1,55 @@
+
+WITH customer_info AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name,
+           cd.cd_gender, 
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           cd.cd_credit_rating,
+           ca.ca_city,
+           ca.ca_state,
+           ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL AND cd.cd_credit_rating IS NOT NULL
+),
+date_range AS (
+    SELECT MIN(d.d_date) AS min_date, MAX(d.d_date) AS max_date
+    FROM date_dim d
+)
+SELECT ci.c_customer_sk,
+       ci.c_first_name,
+       ci.c_last_name,
+       ci.cd_gender,
+       ci.cd_marital_status,
+       ci.cd_purchase_estimate,
+       CASE 
+           WHEN ci.cd_gender IS NULL THEN 'Unknown'
+           ELSE ci.cd_gender
+       END AS gender_display,
+       COALESCE(d.min_date, '2000-01-01') AS sales_period_start,
+       COALESCE(d.max_date, CURRENT_DATE) AS sales_period_end
+FROM customer_info ci
+LEFT JOIN date_range d ON 1=1
+WHERE ci.rn <= 10
+  AND (ci.cd_purchase_estimate > 100 OR (ci.cd_credit_rating LIKE 'B%' AND ci.cd_purchase_estimate IS NOT NULL))
+ORDER BY ci.cd_purchase_estimate DESC
+LIMIT 25
+UNION ALL
+SELECT DISTINCT
+       NULL AS c_customer_sk,
+       'Aggregate' AS c_first_name,
+       'Data' AS c_last_name,
+       NULL AS cd_gender,
+       NULL AS cd_marital_status,
+       SUM(cd.cd_purchase_estimate) AS cd_purchase_estimate,
+       NULL AS gender_display,
+       NULL AS sales_period_start,
+       NULL AS sales_period_end
+FROM customer_demographics cd
+WHERE cd.cd_purchase_estimate IS NOT NULL
+GROUP BY cd.cd_credit_rating
+HAVING COUNT(*) > 5
+ORDER BY cd_purchase_estimate DESC;

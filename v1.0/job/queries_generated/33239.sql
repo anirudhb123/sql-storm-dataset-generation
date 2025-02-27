@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS hierarchy_level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+    
+    UNION ALL
+    
+    SELECT
+        lm.linked_movie_id AS movie_id,
+        lt.title,
+        lt.production_year,
+        mh.hierarchy_level + 1
+    FROM
+        movie_link lm
+    JOIN 
+        movie_hierarchy mh ON lm.movie_id = mh.movie_id
+    JOIN 
+        aka_title lt ON lm.linked_movie_id = lt.id
+)
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    AVG(r.rank_point) AS avg_rank,
+    COALESCE(cct.kind, 'Unknown') AS company_type,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY r.rank_point DESC) AS rank_position
+FROM 
+    movie_hierarchy m
+JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        AVG(CASE WHEN status_id = 1 THEN 10 
+                 WHEN status_id = 2 THEN 5 
+                 ELSE 0 END) AS rank_point
+    FROM 
+        complete_cast
+    GROUP BY 
+        movie_id
+) r ON m.movie_id = r.movie_id
+WHERE 
+    m.production_year >= 2000
+    AND (m.title ILIKE '%action%' OR m.title ILIKE '%drama%')
+GROUP BY 
+    a.name, m.title, m.production_year, cct.kind
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 0
+ORDER BY 
+    movie_title ASC,
+    avg_rank DESC,
+    rank_position;

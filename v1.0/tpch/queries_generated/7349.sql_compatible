@@ -1,0 +1,57 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name AS customer_name,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        o_orderkey,
+        customer_name,
+        nation_name,
+        o_totalprice,
+        o_orderdate
+    FROM 
+        RankedOrders
+    WHERE 
+        order_rank <= 10
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    to.o_orderkey,
+    to.customer_name,
+    to.nation_name,
+    to.o_totalprice,
+    ss.total_available_quantity,
+    ss.average_supply_cost
+FROM 
+    TopOrders to
+JOIN 
+    lineitem l ON to.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    SupplierStats ss ON ps.ps_suppkey = ss.ps_suppkey
+ORDER BY 
+    to.o_totalprice DESC, to.o_orderdate ASC;

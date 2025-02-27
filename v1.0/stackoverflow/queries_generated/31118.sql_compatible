@@ -1,0 +1,66 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Depth
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        rph.Depth + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostsSummary AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(b.Class, 0)) AS BadgeClass,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(ps.UpVotes - ps.DownVotes) AS NetVotes,
+        RANK() OVER (ORDER BY SUM(ps.UpVotes - ps.DownVotes) DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN PostsSummary ps ON u.Id = ps.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+)
+
+SELECT 
+    u.Id,
+    u.DisplayName,
+    u.Reputation,
+    tu.NetVotes,
+    p.Title,
+    p.Depth,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.BadgeClass > 0 THEN 'Has Badge'
+        ELSE 'No Badge'
+    END AS BadgeStatus
+FROM TopUsers tu
+JOIN Users u ON u.Id = tu.UserId
+LEFT JOIN PostsSummary ps ON ps.OwnerUserId = u.Id
+LEFT JOIN RecursivePostHierarchy p ON p.PostId = ps.Id
+WHERE tu.UserRank <= 10
+ORDER BY tu.NetVotes DESC, u.Reputation DESC;

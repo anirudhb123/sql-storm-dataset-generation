@@ -1,0 +1,61 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 0 AS level
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+    
+    UNION ALL
+    
+    SELECT s.ss_customer_sk, c.c_first_name, c.c_last_name, sh.level + 1
+    FROM store_sales s
+    JOIN sales_hierarchy sh ON s.ss_customer_sk = sh.c_customer_sk
+    JOIN customer c ON c.c_customer_sk = s.ss_customer_sk
+),
+daily_sales AS (
+    SELECT d.d_date, 
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_date
+),
+top_customers AS (
+    SELECT c.c_customer_sk, 
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+           SUM(ws.ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+    ORDER BY total_profit DESC
+    LIMIT 10
+),
+customer_demographics AS (
+    SELECT cd.cd_demo_sk, 
+           hd.hd_income_band_sk, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY cd.cd_demo_sk, hd.hd_income_band_sk
+),
+shipping_stats AS (
+    SELECT sm.sm_ship_mode_id, 
+           COUNT(ws.ws_ship_mode_sk) AS shipment_count,
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY sm.sm_ship_mode_id
+)
+ SELECT 
+    sh.c_first_name AS "Customer First Name",
+    sh.c_last_name AS "Customer Last Name",
+    dhd.hd_income_band_sk AS "Income Band",
+    ds.total_sales AS "Daily Sales",
+    tc.full_name AS "Top Customer",
+    ss.shipment_count AS "Shipments",
+    ss.total_sales AS "Shipping Sales"
+FROM sales_hierarchy sh
+JOIN daily_sales ds ON ds.d_date = cast('2002-10-01' as date)
+JOIN customer_demographics dhd ON dhd.customer_count > 0
+LEFT JOIN top_customers tc ON tc.c_customer_sk = sh.c_customer_sk
+LEFT JOIN shipping_stats ss ON ss.shipment_count > 0
+WHERE dhd.hd_income_band_sk IS NOT NULL
+ORDER BY sh.level, ds.daily_sales DESC;

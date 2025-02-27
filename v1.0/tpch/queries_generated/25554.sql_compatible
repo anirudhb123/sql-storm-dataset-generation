@@ -1,0 +1,53 @@
+
+WITH PartSupplierSummary AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        LEFT(MAX(s.s_name), 15) AS sample_supplier_name,
+        'Total Quantity: ' || CAST(SUM(ps.ps_availqty) AS VARCHAR(20)) || 
+        ', Total Cost: ' || CAST(SUM(ps.ps_supplycost) AS DECIMAL(12, 2)) AS notes
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY
+        p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+RegionNationSummary AS (
+    SELECT
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+        STRING_AGG(s.s_name, ', ' ORDER BY s.s_name) AS supplier_names
+    FROM
+        region r
+    JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY
+        r.r_name, n.n_name
+)
+SELECT
+    p.p_name,
+    p.sample_supplier_name,
+    p.total_available_quantity,
+    p.total_supply_cost,
+    r.region_name,
+    r.nation_name,
+    r.unique_suppliers,
+    r.supplier_names,
+    p.notes
+FROM
+    PartSupplierSummary p
+JOIN
+    RegionNationSummary r ON p.supplier_count > 0
+ORDER BY
+    p.total_supply_cost DESC, r.region_name, r.nation_name;

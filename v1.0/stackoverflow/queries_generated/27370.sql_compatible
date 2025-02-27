@@ -1,0 +1,55 @@
+
+WITH ProcessedTags AS (
+    SELECT 
+        PostId,
+        UNNEST(string_to_array(SUBSTR(Tags, 2, LENGTH(Tags) - 2), '> <')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+),
+TagStatistics AS (
+    SELECT 
+        pt.TagName,
+        COUNT(DISTINCT ph.PostId) AS QuestionCount,
+        SUM((SELECT COUNT(*) FROM Posts p WHERE p.ParentId = ph.Id)) AS TotalAnswers,
+        AVG((SELECT COUNT(*) FROM Comments c WHERE c.PostId = ph.Id)) AS AvgComments,
+        AVG(ph.Score) AS AvgScore
+    FROM 
+        ProcessedTags pt
+    JOIN 
+        Posts ph ON pt.PostId = ph.Id
+    GROUP BY 
+        pt.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        QuestionCount,
+        TotalAnswers,
+        AvgComments,
+        AvgScore,
+        RANK() OVER (ORDER BY QuestionCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+    WHERE 
+        QuestionCount > 0
+)
+SELECT 
+    t.TagName,
+    t.QuestionCount,
+    t.TotalAnswers,
+    t.AvgComments,
+    t.AvgScore,
+    B.Name AS BadgeName, 
+    U.Reputation AS UserReputation
+FROM 
+    TopTags t
+LEFT JOIN 
+    Users U ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = (SELECT PostId FROM ProcessedTags WHERE TagName = t.TagName LIMIT 1)) 
+LEFT JOIN 
+    Badges B ON B.UserId = U.Id
+WHERE 
+    t.TagRank <= 10  
+ORDER BY 
+    t.TagRank;

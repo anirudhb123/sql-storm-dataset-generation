@@ -1,0 +1,66 @@
+
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.PostTypeId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON p.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::text[]) 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01' AS DATE) - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.OwnerUserId, p.PostTypeId
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        pd.*,
+        um.DisplayName AS Author,
+        ROW_NUMBER() OVER (ORDER BY pd.ViewCount DESC) AS PostRank
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserMetrics um ON pd.OwnerUserId = um.UserId
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Tags,
+    tp.CommentCount,
+    tp.Author,
+    tp.PostRank
+FROM 
+    TopPosts tp
+WHERE 
+    tp.PostRank <= 10  
+ORDER BY 
+    tp.ViewCount DESC;

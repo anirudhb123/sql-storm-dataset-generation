@@ -1,0 +1,94 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info c ON at.id = c.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+PopularMovies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10
+),
+MovieGenres AS (
+    SELECT 
+        m.title,
+        k.keyword
+    FROM 
+        PopularMovies m
+    JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = m.title AND production_year = m.production_year)
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorDetails AS (
+    SELECT 
+        a.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        a.name IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        at.title,
+        ARRAY_AGG(DISTINCT m.mi.info ORDER BY m.mi.info_type_id) AS info_details
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_info m ON at.id = m.movie_id
+    GROUP BY 
+        at.title
+),
+CompanyMovies AS (
+    SELECT 
+        company.name AS company_name,
+        at.title,
+        cp.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name company ON mc.company_id = company.id
+    JOIN 
+        company_type cp ON mc.company_type_id = cp.id
+    JOIN 
+        aka_title at ON mc.movie_id = at.id
+)
+SELECT 
+    pm.title,
+    pm.production_year,
+    COALESCE(mg.keyword, 'No Genre') AS genre,
+    ad.actor_name,
+    COALESCE(mi.info_details, '{}') AS info_details,
+    cm.company_name,
+    cm.company_type
+FROM 
+    PopularMovies pm
+LEFT JOIN 
+    MovieGenres mg ON pm.title = mg.title
+LEFT JOIN 
+    ActorDetails ad ON pm.title = ad.movie_title AND pm.production_year = ad.production_year
+LEFT JOIN 
+    MovieInfo mi ON pm.title = mi.title
+LEFT JOIN 
+    CompanyMovies cm ON pm.title = cm.title
+ORDER BY 
+    pm.production_year DESC, pm.title;

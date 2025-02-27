@@ -1,0 +1,110 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1 AS Level
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounty,
+        ua.TotalComments,
+        ua.TotalPosts,
+        ua.TotalBadges,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC) AS BountyRank,
+        RANK() OVER (ORDER BY ua.TotalComments DESC) AS CommentRank,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS PostRank
+    FROM
+        UserActivity ua
+),
+BestPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank
+    FROM
+        Posts p
+    WHERE
+        p.Score > 0
+),
+CombinedResults AS (
+    SELECT 
+        pu.UserId,
+        pu.DisplayName,
+        pu.TotalBounty,
+        pu.TotalComments,
+        pu.TotalPosts,
+        pu.TotalBadges,
+        COALESCE(bp.Title, 'No High-Scoring Posts') AS HighScoringPostTitle
+    FROM
+        TopUsers pu
+    LEFT JOIN
+        BestPosts bp ON pu.UserId = bp.OwnerUserId
+    WHERE
+        pu.TotalPosts > 0
+)
+
+SELECT
+    cr.UserId,
+    cr.DisplayName,
+    cr.TotalBounty,
+    cr.TotalComments,
+    cr.TotalPosts,
+    cr.TotalBadges,
+    cr.HighScoringPostTitle,
+    ph.PostId AS RelatedPostId,
+    ph.Title AS RelatedPostTitle,
+    ph.Level AS PostHierarchyLevel
+FROM
+    CombinedResults cr
+LEFT JOIN
+    RecursivePostHierarchy ph ON cr.UserId = ph.OwnerUserId
+WHERE
+    cr.TotalPosts >= 5
+ORDER BY
+    cr.TotalBounty DESC,
+    cr.TotalComments DESC,
+    cr.TotalPosts DESC,
+    ph.Level;

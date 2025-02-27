@@ -1,0 +1,48 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+          ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS account_rank,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Unknown'
+               WHEN s.s_acctbal < 1000 THEN 'Low'
+               WHEN s.s_acctbal BETWEEN 1000 AND 5000 THEN 'Medium'
+               ELSE 'High'
+           END AS account_category
+    FROM supplier s
+),
+price_stats AS (
+    SELECT ps.ps_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+order_analysis AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+           COUNT(DISTINCT l.l_partkey) AS num_distinct_parts,
+           MIN(l.l_shipdate) AS first_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+)
+SELECT n.n_name AS nation_name, 
+       COALESCE(SUM(s.s_acctbal), 0) AS total_account_balance,
+       ps.avg_supply_cost AS average_supply_cost,
+       o.total_order_value AS order_value,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY o.total_order_value DESC) AS order_rank
+FROM nation n
+LEFT JOIN supplier_info s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN price_stats ps ON ps.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 50)
+LEFT JOIN order_analysis o ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+GROUP BY n.n_name, ps.avg_supply_cost, o.total_order_value
+HAVING COALESCE(SUM(s.s_acctbal), 0) > 1000
+ORDER BY total_account_balance DESC, order_value DESC;

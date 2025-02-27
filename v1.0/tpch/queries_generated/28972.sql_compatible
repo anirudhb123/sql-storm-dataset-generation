@@ -1,0 +1,25 @@
+
+SELECT 
+    CONCAT('Part: ', p.p_name, ', Brand: ', p.p_brand, ', Supplier: ', s.s_name, 
+           ', Nation: ', n.n_name, ', Region: ', r.r_name, 
+           ', Price: $', FORMAT(p.p_retailprice, 2), 
+           '. Comment: ', p.p_comment) AS part_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 20
+    AND n.n_name LIKE 'A%'
+    AND r.r_name IN ('Asia', 'Europe')
+GROUP BY 
+    p.p_name, p.p_brand, s.s_name, n.n_name, r.r_name, p.p_retailprice, p.p_comment
+ORDER BY 
+    p.p_retailprice DESC
+LIMIT 10;

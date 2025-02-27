@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_container,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FinalBenchmarking AS (
+    SELECT 
+        r.r_name AS region,
+        n.n_name AS nation,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS supplier_balance,
+        COUNT(DISTINCT ro.o_orderkey) AS recent_orders,
+        AVG(spd.p_retailprice) AS avg_retail_price
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        SupplierPartDetails spd ON s.s_suppkey = spd.ps_suppkey
+    LEFT JOIN 
+        RecentOrders ro ON ro.o_orderkey = spd.ps_partkey
+    WHERE 
+        s.rank <= 5
+    GROUP BY 
+        r.r_name, n.n_name, s.s_name, s.s_acctbal
+)
+SELECT 
+    region,
+    nation,
+    supplier_name,
+    supplier_balance,
+    recent_orders,
+    avg_retail_price
+FROM 
+    FinalBenchmarking
+ORDER BY 
+    region, nation, supplier_balance DESC;

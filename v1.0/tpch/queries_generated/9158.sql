@@ -1,0 +1,31 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+           SUM(l.l_quantity) AS total_quantity
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+    HAVING SUM(l.l_quantity) > 100
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderpriority, 
+           COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, CURRENT_DATE)
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderpriority
+)
+SELECT r.rn, s.s_name, o.o_orderkey, p.p_name, p.total_quantity, o.item_count
+FROM RankedSuppliers r
+JOIN supplier s ON r.s_suppkey = s.s_suppkey
+JOIN RecentOrders o ON r.rn <= 5
+JOIN TopParts p ON o.item_count > 0
+WHERE s.s_name LIKE 'Supplier%'
+ORDER BY r.rn, o.o_orderkey, p.total_quantity DESC
+LIMIT 50;

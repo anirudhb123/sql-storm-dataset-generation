@@ -1,0 +1,79 @@
+WITH RecursiveFamilyTree AS (
+    SELECT 
+        akn.person_id,
+        akn.name AS ancestor_name,
+        0 AS generation
+    FROM 
+        aka_name akn
+    WHERE 
+        akn.name LIKE '%Smith%'
+    
+    UNION ALL
+    
+    SELECT 
+        ct.person_id,
+        ct.name,
+        rft.generation + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name akn ON ci.person_id = akn.person_id
+    JOIN 
+        RecursiveFamilyTree rft ON ci.movie_id = rft.person_id
+),
+MovieProductionYears AS (
+    SELECT 
+        mt.production_year,
+        COUNT(DISTINCT mt.id) AS title_count
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.production_year
+),
+KeywordStats AS (
+    SELECT 
+        kw.keyword,
+        COUNT(mk.movie_id) AS movie_count,
+        SUM(CASE WHEN kw.phonetic_code IS NOT NULL THEN 1 ELSE 0 END) AS phonetic_matches
+    FROM 
+        keyword kw
+    JOIN 
+        movie_keyword mk ON kw.id = mk.keyword_id
+    GROUP BY 
+        kw.keyword
+),
+FinalStatistics AS (
+    SELECT 
+        ft.person_id,
+        ft.ancestor_name,
+        COALESCE(mp.title_count, 0) AS movies_produced,
+        COALESCE(ks.movie_count, 0) AS keywords_used,
+        RANK() OVER (ORDER BY COALESCE(mp.title_count, 0) DESC, COALESCE(ks.movie_count, 0) DESC) AS rank
+    FROM 
+        RecursiveFamilyTree ft
+    LEFT JOIN 
+        MovieProductionYears mp ON 1=1 -- Cross join to attach every person to all movie production years
+    LEFT JOIN 
+        KeywordStats ks ON ft.person_id = ks.movie_count -- Indirect join to find keywords stats associated
+)
+SELECT 
+    fs.ancestor_name, 
+    fs.movies_produced, 
+    fs.keywords_used,
+    CASE 
+        WHEN fs.rank IS NULL THEN 'Unranked'
+        WHEN fs.rank = 1 THEN 'Gold'
+        WHEN fs.rank = 2 THEN 'Silver'
+        WHEN fs.rank = 3 THEN 'Bronze'
+        ELSE 'Honorable Mention'
+    END AS rank_category
+FROM 
+    FinalStatistics fs
+WHERE 
+    fs.movies_produced > 0
+ORDER BY 
+    fs.rank;
+
+This SQL query constructs an elaborate set of Common Table Expressions (CTEs) which calculate the family tree based on a specific name, aggregate statistics related to movie production years, and analyze keyword usage within the benchmark schema. The final SELECT statement constructs a ranking of individuals based on their contributions to movie production and keyword usage. It also categorizes the ranks in a more human-readable manner using CASE statements, providing insight into each individual's cinematic impact while cleverly utilizing outer joins, correlated subqueries, window functions, and NULL logic.

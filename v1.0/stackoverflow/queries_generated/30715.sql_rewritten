@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.Views
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        Views,
+        PostsCount,
+        QuestionsCount,
+        AnswersCount,
+        TotalBounty,
+        Rank
+    FROM UserActivity
+    WHERE Rank <= 10
+),
+QuestionStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalQuestions,
+        AVG(P.Score) AS AvgQuestionScore,
+        SUM(P.ViewCount) AS TotalViews,
+        (SELECT COUNT(*) FROM Posts PA WHERE PA.ParentId = P.Id) AS AnswerCount
+    FROM Posts P
+    WHERE P.PostTypeId = 1
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    U.Views,
+    U.PostsCount,
+    U.QuestionsCount,
+    U.AnswersCount,
+    U.TotalBounty,
+    Q.TotalQuestions,
+    Q.AvgQuestionScore,
+    Q.TotalViews,
+    Q.AnswerCount
+FROM TopUsers U
+LEFT JOIN QuestionStats Q ON U.UserId = Q.OwnerUserId
+ORDER BY U.Reputation DESC;

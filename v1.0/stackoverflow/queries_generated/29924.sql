@@ -1,0 +1,74 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.CommentCount, 
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(MAX(c.CreationDate), p.CreationDate) AS LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 -- Focus on questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+CommentStatistics AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS TotalComments,
+        AVG(Score) AS AverageCommentScore
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 6 THEN 1 END) AS CloseVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.LastActivityDate,
+    ps.Tags,
+    ps.OwnerDisplayName,
+    COALESCE(cs.TotalComments, 0) AS TotalComments,
+    COALESCE(cs.AverageCommentScore, 0) AS AverageCommentScore,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(vs.CloseVotes, 0) AS CloseVotes
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    CommentStatistics cs ON cs.PostId = ps.PostId
+LEFT JOIN 
+    VoteStatistics vs ON vs.PostId = ps.PostId
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.Score DESC
+LIMIT 50;

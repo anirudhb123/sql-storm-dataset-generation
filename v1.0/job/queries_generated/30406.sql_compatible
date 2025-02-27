@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    CASE 
+        WHEN ak.gender = 'F' THEN 'Female'
+        WHEN ak.gender = 'M' THEN 'Male'
+        ELSE 'Unknown'
+    END AS gender,
+    mh.level AS hierarchy_level,
+    COUNT(DISTINCT mc.company_id) AS num_production_companies,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS num_reviews,
+    AVG(CASE WHEN mi.info_type_id = 2 THEN CAST(mi.info AS FLOAT) END) AS average_rating
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, at.title, ak.gender, mh.level
+ORDER BY 
+    hierarchy_level, actor_name;

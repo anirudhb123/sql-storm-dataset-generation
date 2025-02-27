@@ -1,0 +1,53 @@
+
+WITH SalesCTE AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+),
+CustomerRank AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+    HAVING SUM(ws.ws_net_profit) IS NOT NULL
+),
+TopProfitableItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(sales.ws_net_profit) AS total_item_profit
+    FROM item
+    JOIN web_sales sales ON item.i_item_sk = sales.ws_item_sk
+    GROUP BY item.i_item_id, item.i_product_name
+    HAVING SUM(sales.ws_net_profit) > (SELECT AVG(ws_net_profit) FROM web_sales)
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(total_profit) AS average_profit,
+    MAX(total_item_profit) AS max_item_profit,
+    STRING_AGG(DISTINCT ti.i_product_name, ', ') AS top_items
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN CustomerRank cr ON c.c_customer_sk = cr.c_customer_sk
+LEFT JOIN TopProfitableItems ti ON ti.i_item_id IN (
+    SELECT DISTINCT item.i_item_id 
+    FROM SalesCTE 
+    WHERE SalesCTE.profit_rank <= 5
+)
+GROUP BY ca.ca_city, ca.ca_state
+HAVING COUNT(DISTINCT c.c_customer_sk) > 100
+ORDER BY total_customers DESC;

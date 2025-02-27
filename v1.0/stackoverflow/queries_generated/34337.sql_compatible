@@ -1,0 +1,96 @@
+
+WITH Recursive_Posts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        1 AS Level 
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        rp.Level + 1 
+    FROM 
+        Posts p
+    JOIN 
+        Recursive_Posts rp ON p.ParentId = rp.PostId
+    WHERE 
+        p.PostTypeId = 2 
+),
+
+Aggregated_Scores AS (
+    SELECT 
+        rp.PostId,
+        SUM(rp.Score) AS TotalScore,
+        COUNT(DISTINCT rp.PostId) AS AnswerCount,
+        MAX(rp.CreationDate) AS LatestActivity
+    FROM 
+        Recursive_Posts rp
+    GROUP BY 
+        rp.PostId
+),
+
+Popular_Users AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(v.BountyAmount) > 0
+    ORDER BY 
+        TotalBounty DESC
+    LIMIT 10
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    a.TotalScore AS Score,
+    a.AnswerCount,
+    u.DisplayName AS Owner,
+    u.Reputation,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    PERCENT_RANK() OVER (ORDER BY a.TotalScore DESC) AS ScoreRank
+FROM 
+    Posts p
+JOIN 
+    Aggregated_Scores a ON p.Id = a.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    WHERE 
+        Date > (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year')
+    GROUP BY 
+        UserId
+) b ON u.Id = b.UserId
+WHERE 
+    p.Score IS NOT NULL 
+    AND p.CreationDate < (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+ORDER BY 
+    ScoreRank, Score DESC;

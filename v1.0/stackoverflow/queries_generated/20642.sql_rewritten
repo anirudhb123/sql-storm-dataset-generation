@@ -1,0 +1,73 @@
+WITH UserActivities AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    WHERE 
+        U.Reputation > 0 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        Ph.UserId AS ModeratorId,
+        Ph.CreationDate AS ClosureDate,
+        Ph.Comment AS CloseReason
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory Ph ON P.Id = Ph.PostId 
+    WHERE 
+        Ph.PostHistoryTypeId = 10
+),
+TopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Ranking
+    FROM 
+        Posts P 
+    WHERE 
+        P.Score > 0
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.PostCount,
+    UA.TotalScore,
+    UA.UpVotes,
+    UA.DownVotes,
+    COUNT(DISTINCT CP.PostId) AS ClosedPostCount,
+    COUNT(DISTINCT TP.Id) AS TopRankedPosts,
+    (SELECT STRING_AGG(CT.Name, ', ') 
+     FROM CloseReasonTypes CT 
+     JOIN ClosedPosts CP ON CP.CloseReason = CT.Id 
+     WHERE CP.ModeratorId = UA.UserId) AS CloseReasonList,
+    SUM(CASE WHEN UA.LastPostDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 1 ELSE 0 END) AS InactiveUsers,
+    cast('2024-10-01 12:34:56' as timestamp) AS QueryGeneratedTime
+FROM 
+    UserActivities UA
+LEFT JOIN 
+    ClosedPosts CP ON UA.UserId = CP.ModeratorId
+LEFT JOIN 
+    TopPosts TP ON UA.UserId = TP.OwnerUserId AND TP.Ranking <= 3
+GROUP BY 
+    UA.UserId, UA.DisplayName, UA.PostCount, UA.TotalScore, UA.UpVotes, UA.DownVotes
+HAVING 
+    COUNT(DISTINCT CP.PostId) > 0 AND 
+    SUM(UA.UpVotes) > SUM(UA.DownVotes)
+ORDER BY 
+    UA.TotalScore DESC, UA.DisplayName ASC
+LIMIT 100;

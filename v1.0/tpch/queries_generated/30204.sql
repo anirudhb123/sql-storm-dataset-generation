@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 0 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_acctbal, sp.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier sp
+    JOIN SupplierHierarchy sh ON sp.s_nationkey = sh.s_nationkey
+    WHERE sp.s_acctbal < sh.s_acctbal
+),
+NationSummary AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           AVG(s.s_acctbal) AS avg_acctbal,
+           SUM(CASE WHEN s.s_acctbal IS NOT NULL THEN s.s_acctbal ELSE 0 END) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+OrderStats AS (
+    SELECT o.o_orderkey,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_by_price
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_tax) AS avg_tax,
+           COUNT(l.l_linenumber) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT ns.n_name,
+       ns.supplier_count,
+       ns.avg_acctbal,
+       ns.total_acctbal,
+       MAX(sha.supp_level) AS max_hierarchy_level,
+       SUM(la.total_revenue) AS total_order_revenue,
+       SUM(CASE WHEN la.item_count > 1 THEN 1 ELSE 0 END) AS multi_item_orders,
+       COUNT(DISTINCT os.o_orderkey) AS unique_order_count
+FROM NationSummary ns
+JOIN SupplierHierarchy sha ON ns.supplier_count > 0
+LEFT JOIN LineItemAnalysis la ON la.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal > 1000))
+LEFT JOIN OrderStats os ON os.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_quantity > 10)
+GROUP BY ns.n_name, ns.supplier_count, ns.avg_acctbal, ns.total_acctbal
+ORDER BY ns.supplier_count DESC, ns.avg_acctbal ASC;

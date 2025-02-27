@@ -1,0 +1,55 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        SUM(cd_purchase_estimate) AS total_purchase_estimate,
+        AVG(cd_dep_count) AS avg_dependents
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd_gender, cd_marital_status, cd_education_status
+),
+DateStats AS (
+    SELECT 
+        d.d_year,
+        MONTH(d.d_date) AS sales_month,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year, MONTH(d.d_date)
+),
+InventoryMetrics AS (
+    SELECT 
+        inv.warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.warehouse_sk
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    ds.sales_month,
+    ds.d_year,
+    cs.customer_count,
+    cs.total_purchase_estimate,
+    cs.avg_dependents,
+    ds.total_sales,
+    im.total_inventory
+FROM 
+    CustomerStats cs
+JOIN 
+    DateStats ds ON cs.customer_count > 100
+JOIN 
+    InventoryMetrics im ON im.total_inventory > 1000
+ORDER BY 
+    cs.cd_gender, cs.cd_marital_status, ds.d_year, ds.sales_month;

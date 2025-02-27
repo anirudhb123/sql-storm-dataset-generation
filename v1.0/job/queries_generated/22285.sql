@@ -1,0 +1,71 @@
+WITH recursive cast_hierarchy AS (
+    SELECT ci.movie_id, ci.person_id, ci.nr_order, 1 AS level
+    FROM cast_info ci
+    WHERE ci.nr_order = 1
+
+    UNION ALL
+
+    SELECT ci.movie_id, ci.person_id, ci.nr_order, ch.level + 1
+    FROM cast_info ci
+    JOIN cast_hierarchy ch ON ci.movie_id = ch.movie_id AND ci.nr_order = ch.nr_order + 1
+), 
+movie_details AS (
+    SELECT 
+        t.title AS movie_title, 
+        t.production_year,
+        ak.name AS actor_name,
+        mk.keyword AS main_keyword,
+        COUNT(DISTINCT c.company_id) AS company_count,
+        MAX(ch.level) AS max_role_level
+    FROM 
+        title t
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak_name ON ci.person_id = ak_name.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            mc.movie_id, 
+            mc.company_id 
+        FROM movie_companies mc
+        WHERE mc.note IS NULL) AS c ON t.id = c.movie_id
+    LEFT JOIN 
+        cast_hierarchy ch ON ci.movie_id = ch.movie_id 
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.title, t.production_year, ak.name, mk.keyword
+), 
+ranked_movies AS (
+    SELECT 
+        md.*, 
+        RANK() OVER (PARTITION BY md.production_year ORDER BY COUNT(md.actor_name) DESC) AS actor_rank
+    FROM 
+        movie_details md
+    WHERE
+        md.primary_keyword IS NOT NULL
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_name,
+    rm.main_keyword,
+    rm.company_count,
+    rm.max_role_level,
+    CASE 
+        WHEN rm.actor_rank <= 10 THEN 'Top 10'
+        WHEN rm.actor_rank > 10 AND rm.actor_rank <= 20 THEN 'Top 20'
+        ELSE 'Other'
+    END AS rank_category
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.company_count > 3
+ORDER BY 
+    rm.production_year, 
+    rm.actor_rank;

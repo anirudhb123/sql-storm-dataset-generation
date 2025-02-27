@@ -1,0 +1,63 @@
+
+WITH RECURSIVE Sales_Data AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_profit
+    FROM web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2400 AND 2460 -- Assuming some date range
+    GROUP BY ws_bill_customer_sk
+),
+Top_Customers AS (
+    SELECT 
+        ws_bill_customer_sk,
+        total_profit,
+        total_orders
+    FROM Sales_Data
+    WHERE rank_profit <= 10
+),
+Customer_Demographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ib.ib_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+),
+Customer_Stats AS (
+    SELECT 
+        tc.ws_bill_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.ib_income_band_sk,
+        tc.total_profit,
+        tc.total_orders
+    FROM Top_Customers tc
+    JOIN Customer_Demographics cd ON tc.ws_bill_customer_sk = cd.c_customer_sk
+)
+SELECT 
+    cs.ws_bill_customer_sk,
+    cs.total_profit,
+    cs.total_orders,
+    COALESCE(CASE WHEN cs.cd_gender = 'M' THEN 'Male' ELSE 'Female' END, 'Unknown') AS gender,
+    COALESCE(cs.cd_marital_status, 'Unknown') AS marital_status,
+    CASE 
+        WHEN cs.cd_purchase_estimate IS NULL THEN 'Unknown'
+        ELSE (CASE 
+                  WHEN cs.cd_purchase_estimate < 1000 THEN 'Low'
+                  WHEN cs.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+                  ELSE 'High' 
+              END)
+    END AS purchase_estimate,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM Customer_Stats cs
+LEFT JOIN income_band ib ON ib.ib_income_band_sk = cs.ib_income_band_sk
+ORDER BY cs.total_profit DESC;

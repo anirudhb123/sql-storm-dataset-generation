@@ -1,0 +1,45 @@
+
+WITH CustomerPurchases AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_purchases,
+        COUNT(ws.ws_order_number) AS purchase_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_paid) DESC) AS purchase_rank
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT
+    cp.c_customer_id,
+    cp.cd_gender,
+    cp.cd_marital_status,
+    cp.total_purchases,
+    cp.purchase_count,
+    CASE 
+        WHEN cp.purchase_count > 10 THEN 'Frequent Buyer'
+        WHEN cp.purchase_count BETWEEN 5 AND 10 THEN 'Occasional Buyer'
+        ELSE 'Rare Buyer'
+    END AS buyer_type,
+    COALESCE((SELECT SUM(ws_ext_sales_price) 
+              FROM web_sales 
+              WHERE ws_bill_customer_sk = cp.c_customer_id 
+                AND ws_sales_date BETWEEN (SELECT MAX(d_date) FROM date_dim WHERE d_year = 2023) - INTERVAL '30' DAY
+              ), 0) AS recent_purchase_amount
+FROM
+    CustomerPurchases cp
+WHERE
+    cp.purchase_rank = 1
+    AND cp.total_purchases > 100
+    AND cp.cd_gender IS NOT NULL
+    AND cp.cd_marital_status IN ('M', 'S')
+ORDER BY
+    cp.total_purchases DESC
+LIMIT 50;
+

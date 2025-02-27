@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year = 2023
+
+    UNION ALL
+
+    SELECT
+        mc.linked_movie_id,
+        m.title AS movie_title,
+        mh.level + 1
+    FROM
+        movie_link mc
+    JOIN
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON mc.linked_movie_id = m.id
+)
+SELECT
+    mk.movie_id,
+    a.name AS actor_name,
+    k.keyword AS movie_keyword,
+    COUNT(DISTINCT mh.movie_id) AS link_count,
+    ROW_NUMBER() OVER (PARTITION BY mk.movie_id ORDER BY mh.level DESC) AS hierarchy_level
+FROM
+    movie_keyword mk
+JOIN
+    keyword k ON mk.keyword_id = k.id
+JOIN
+    complete_cast cc ON cc.movie_id = mk.movie_id
+LEFT JOIN
+    aka_name a ON cc.subject_id = a.person_id
+LEFT JOIN
+    movie_hierarchy mh ON mk.movie_id = mh.movie_id
+WHERE
+    a.name IS NOT NULL
+    AND k.keyword IS NOT NULL
+    AND (cc.note IS NOT NULL OR cc.note LIKE '%main%')
+GROUP BY
+    mk.movie_id, a.name, k.keyword
+HAVING
+    COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY
+    COUNT(DISTINCT mh.movie_id) DESC,
+    a.name;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE TagHierarchy AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        T.ExcerptPostId,
+        T.WikiPostId,
+        1 AS Level
+    FROM 
+        Tags T
+    WHERE 
+        T.IsModeratorOnly = 0  
+
+    UNION ALL
+
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        T.ExcerptPostId,
+        T.WikiPostId,
+        TH.Level + 1
+    FROM 
+        Tags T
+    JOIN 
+        PostLinks PL ON PL.RelatedPostId = T.ExcerptPostId
+    JOIN 
+        TagHierarchy TH ON TH.TagId = T.WikiPostId
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(NULLIF(P.ViewCount, 0)) AS AvgViewCount 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalScore,
+    U.AvgViewCount,
+    T.TagName,
+    COUNT(DISTINCT PL.RelatedPostId) AS LinkedPostCount
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    PostLinks PL ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = PL.PostId) 
+LEFT JOIN 
+    TagHierarchy T ON T.TagId IN (SELECT CAST(UNNEST(STRING_TO_ARRAY(P.Tags, '><')) AS INT) FROM Posts P WHERE P.OwnerUserId = U.UserId) 
+WHERE 
+    U.TotalPosts > 10 AND 
+    U.TotalScore > 1000 
+GROUP BY 
+    U.UserId, U.DisplayName, T.TagName
+HAVING 
+    COUNT(DISTINCT PL.RelatedPostId) > 5 
+ORDER BY 
+    U.TotalScore DESC, 
+    U.DisplayName ASC;

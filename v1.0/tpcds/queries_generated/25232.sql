@@ -1,0 +1,55 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ca.ca_zip,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN 
+                (SELECT ib.ib_lower_bound || '-' || ib.ib_upper_bound 
+                 FROM income_band ib 
+                 WHERE ib.ib_income_band_sk = hd.hd_income_band_sk) 
+            ELSE 'No Income Band' 
+        END AS income_band,
+        DATE_FORMAT(d.d_date, '%Y-%m-%d') AS registration_date,
+        COUNT(DISTINCT ws.ws_order_number) AS total_purchases
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        ca.ca_state IN ('CA', 'TX', 'NY') 
+        AND cd.cd_gender IN ('M', 'F')
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+        ca.ca_city, ca.ca_state, ca.ca_country, ca.ca_zip, hd.hd_income_band_sk, d.d_date
+)
+SELECT 
+    full_name, 
+    cd_gender, 
+    cd_marital_status, 
+    ca_city, 
+    ca_state, 
+    ca_country, 
+    ca_zip, 
+    income_band, 
+    registration_date, 
+    total_purchases
+FROM 
+    customer_info
+ORDER BY 
+    total_purchases DESC
+LIMIT 50;

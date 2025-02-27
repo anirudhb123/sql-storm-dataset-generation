@@ -1,0 +1,48 @@
+
+WITH ranked_orders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' 
+      AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS supplied_parts_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_details AS (
+    SELECT lo.l_orderkey, 
+           SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+           COUNT(DISTINCT lo.l_partkey) AS total_items
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+)
+SELECT o.o_orderkey, 
+       o.o_orderdate, 
+       COALESCE(od.total_revenue, 0) AS total_revenue, 
+       ss.s_name, 
+       ss.total_supply_cost, 
+       ss.supplied_parts_count
+FROM ranked_orders o
+LEFT JOIN order_details od ON o.o_orderkey = od.l_orderkey
+LEFT JOIN supplier_summary ss ON ss.total_supply_cost > 50000
+WHERE EXISTS (
+    SELECT 1
+    FROM partsupp ps
+    WHERE ps.ps_partkey = (SELECT p.p_partkey
+                           FROM part p 
+                           WHERE p.p_retailprice = (SELECT MAX(p2.p_retailprice)
+                                                     FROM part p2
+                                                     WHERE p2.p_container IS NOT NULL))
+    )
+    AND ps.ps_availqty > (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+)
+ORDER BY o.o_orderkey DESC, ss.total_supply_cost DESC
+LIMIT 10 OFFSET (SELECT COUNT(*) FROM ranked_orders) / 5;

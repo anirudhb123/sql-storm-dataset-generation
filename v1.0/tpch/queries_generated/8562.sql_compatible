@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT rs.*, ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY rs.total_supply_cost DESC) AS rn
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderstatus, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+),
+FinalReport AS (
+    SELECT tn.r_name AS region, ts.s_name AS supplier_name, co.o_orderkey, co.o_totalprice, c.c_mktsegment
+    FROM TopSuppliers ts
+    JOIN nation n ON ts.s_nationkey = n.n_nationkey
+    JOIN region tn ON n.n_regionkey = tn.r_regionkey
+    JOIN CustomerOrders co ON ts.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT DISTINCT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_orderkey = co.o_orderkey
+        ) 
+        ORDER BY ps.ps_supplycost * ps.ps_availqty DESC 
+        LIMIT 1
+    )
+    WHERE ts.rn <= 5
+)
+SELECT region, supplier_name, COUNT(o_orderkey) AS order_count, SUM(o_totalprice) AS total_sales
+FROM FinalReport
+GROUP BY region, supplier_name
+ORDER BY region, total_sales DESC;

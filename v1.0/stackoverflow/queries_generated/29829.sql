@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY TRIM(REGEXP_REPLACE(p.Tags, '[<>]', '', 'g')) ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY PostId) a ON p.Id = a.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+
+LatestPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        OwnerDisplayName,
+        AcceptedAnswerId,
+        AnswerCount,
+        CommentCount,
+        CreationDate
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1
+),
+
+PostMetrics AS (
+    SELECT 
+        lp.PostId,
+        lp.Title,
+        lp.Body,
+        lp.OwnerDisplayName,
+        lp.AcceptedAnswerId,
+        lp.AnswerCount,
+        lp.CommentCount,
+        lp.CreationDate,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(rep.Reputation, 0) AS UserReputation
+    FROM 
+        LatestPosts lp
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount FROM Badges GROUP BY UserId) b ON lp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = b.UserId)
+    LEFT JOIN 
+        (SELECT Id, Reputation FROM Users) rep ON lp.OwnerDisplayName = rep.DisplayName
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Body,
+    p.OwnerDisplayName,
+    p.AcceptedAnswerId,
+    p.AnswerCount,
+    p.CommentCount,
+    p.CreationDate,
+    p.BadgeCount,
+    p.UserReputation,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostMetrics p
+LEFT JOIN 
+    Tags t ON POSITION(CONCAT('<', t.TagName, '>') IN p.Body) > 0
+GROUP BY 
+    p.PostId, p.Title, p.Body, p.OwnerDisplayName, p.AcceptedAnswerId, p.AnswerCount, p.CommentCount, p.CreationDate, p.BadgeCount, p.UserReputation
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,82 @@
+WITH RankedSales AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_suppkey, 
+        l.l_quantity, 
+        l.l_extendedprice, 
+        l.l_discount, 
+        l.l_tax, 
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank_by_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_quantity DESC) AS row_num_by_quantity
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') AND 
+        l.l_discount > 0.05
+)
+SELECT 
+    s.s_name, 
+    SUM(rs.l_extendedprice * (1 - rs.l_discount)) AS net_revenue,
+    COUNT(DISTINCT rs.l_orderkey) AS order_count,
+    AVG(rs.l_quantity) AS avg_quantity,
+    (SELECT COUNT(*) FROM supplier s2 
+     WHERE s2.s_nationkey = s.s_nationkey AND s2.s_acctbal IS NOT NULL) AS same_nation_supplier_count,
+    CASE 
+        WHEN SUM(rs.l_extendedprice) IS NULL THEN 'No Sales' 
+        WHEN SUM(rs.l_extendedprice) < 10000 THEN 'Low Sales' 
+        ELSE 'High Sales' 
+    END AS sales_category
+FROM 
+    RankedSales rs
+LEFT JOIN 
+    supplier s ON rs.l_suppkey = s.s_suppkey
+WHERE 
+    rs.rank_by_price = 1 AND 
+    rs.row_num_by_quantity <= 5
+GROUP BY 
+    s.s_name
+HAVING 
+    SUM(COALESCE(rs.l_extendedprice, 0)) > (SELECT AVG(l_extendedprice) FROM lineitem)
+ORDER BY 
+    net_revenue DESC
+LIMIT 10 OFFSET 5;
+
+WITH total_revenue AS (
+    SELECT 
+        p.p_name, 
+        SUM(lp.l_extendedprice * (1 - lp.l_discount)) AS total
+    FROM 
+        part p 
+    JOIN 
+        lineitem lp ON p.p_partkey = lp.l_partkey
+    GROUP BY 
+        p.p_name
+)
+SELECT 
+    TRIM(p_name) AS trimmed_part_name,
+    total,
+    CASE 
+        WHEN total >= 1000000 THEN 'Premium'
+        WHEN total < 500000 THEN 'Standard'
+        ELSE 'Economy' 
+    END AS price_category
+FROM 
+    total_revenue 
+WHERE 
+    price_category IS NOT NULL 
+INTERSECT 
+SELECT 
+    p_name, 
+    SUM(l_extendedprice), 
+    'Common'
+FROM 
+    lineitem 
+WHERE 
+    l_returnflag = 'R' 
+GROUP BY 
+    p_name
+HAVING 
+    SUM(l_extendedprice) > (SELECT AVG(l_extendedprice) FROM lineitem WHERE l_returnflag = 'R');

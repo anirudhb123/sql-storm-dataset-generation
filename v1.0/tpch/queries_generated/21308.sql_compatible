@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    WHERE o.o_orderstatus IN ('O', 'P')
+    GROUP BY c.c_custkey
+),
+ProductAvailability AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name, 
+    COALESCE(cs.total_spent, 0) AS total_spent, 
+    COALESCE(cs.order_count, 0) AS order_count, 
+    pa.p_name, 
+    COALESCE(pa.total_available, 0) AS total_available,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY pa.total_available DESC) AS availability_rank,
+    CASE 
+        WHEN pa.total_available IS NULL THEN 'Out of Stock' 
+        ELSE 'Available' 
+    END AS availability_status
+FROM 
+    CustomerOrderSummary cs 
+FULL OUTER JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    ProductAvailability pa ON pa.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = ANY(SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size = (SELECT MAX(p2.p_size) FROM part p2)))
+WHERE 
+    (cs.order_count > 2 OR cs.total_spent > 1000) 
+    AND (pa.total_available IS NOT NULL OR c.c_name IS NOT NULL)
+GROUP BY 
+    c.c_name, 
+    cs.total_spent, 
+    cs.order_count, 
+    pa.p_name, 
+    pa.total_available,
+    cs.c_custkey
+ORDER BY 
+    cs.total_spent DESC NULLS LAST, 
+    availability_rank;

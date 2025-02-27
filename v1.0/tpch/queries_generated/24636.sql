@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+JoinedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        AVG(l.l_tax) AS avg_tax_rate
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+    GROUP BY o.o_orderkey, c.c_custkey
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    COALESCE(ss.total_order_value, 0) AS total_order_value,
+    CASE 
+        WHEN ss.avg_tax_rate IS NULL THEN 'No Orders'
+        ELSE CONCAT('Avg Tax: ', ROUND(ss.avg_tax_rate, 2)::text)
+    END AS tax_info,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_shipdate = CURRENT_DATE) AS today_ship_count 
+FROM part p
+LEFT JOIN PartSupplies ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN (
+    SELECT o.o_orderkey, so.c_custkey, total_order_value, avg_tax_rate
+    FROM JoinedOrders so
+    JOIN RankedSuppliers rs ON so.c_custkey = rs.s_suppkey
+    WHERE rs.rnk = 1
+) ss ON ps.ps_partkey = ss.o_orderkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 10
+) 
+AND p.p_comment IS NOT NULL
+ORDER BY p.p_partkey DESC, total_order_value DESC;

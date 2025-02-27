@@ -1,0 +1,80 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk = (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_current_year = 'Y'
+        )
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.order_count > 1
+),
+product_sales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2001 AND d_moy IN (6, 7)  
+        )
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.order_count,
+    COALESCE(ps.total_quantity_sold, 0) AS total_product_quantity
+FROM 
+    top_customers tc
+LEFT JOIN 
+    product_sales ps ON tc.c_customer_id = (
+        SELECT 
+            ws.ws_bill_customer_sk 
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.ws_item_sk IN (
+                SELECT 
+                    i.i_item_sk 
+                FROM 
+                    item i
+                WHERE 
+                    i.i_current_price > (
+                        SELECT AVG(i2.i_current_price) FROM item i2
+                    )
+            )
+        LIMIT 1
+    )
+ORDER BY 
+    tc.sales_rank
+FETCH FIRST 10 ROWS ONLY;

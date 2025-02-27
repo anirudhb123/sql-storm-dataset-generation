@@ -1,0 +1,93 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        u.Views - u.DownVotes AS NetViews,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS RN
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+TopPostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Date DESC) AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN (
+                SELECT cr.Name
+                FROM CloseReasonTypes cr 
+                WHERE cr.Id = ph.Comment::int 
+            )
+            ELSE NULL 
+        END AS CloseReason,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    u.UpVotes,
+    COALESCE(b.BadgeNames, 'No Badges') as Badges,
+    ps.TotalPosts,
+    ps.TotalQuestions,
+    ps.TotalAnswers,
+    ps.AvgScore,
+    COALESCE(phd.CloseReason, 'No Recent Closures') AS CloseReason,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts
+FROM 
+    RecursiveUserStats u
+LEFT JOIN 
+    TopPostStats ps ON u.UserId = ps.OwnerUserId
+LEFT JOIN 
+    UserBadges b ON u.UserId = b.UserId
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON phd.UserId = u.UserId
+WHERE 
+    u.NetViews > 10 AND
+    u.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, u.Views, u.UpVotes, b.BadgeNames, 
+    ps.TotalPosts, ps.TotalQuestions, ps.TotalAnswers, ps.AvgScore, phd.CloseReason
+ORDER BY 
+    u.Reputation DESC, u.Views DESC 
+LIMIT 10;

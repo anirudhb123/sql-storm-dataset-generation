@@ -1,0 +1,66 @@
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        c.name AS company_name,
+        COUNT(ci.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS aliases
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    WHERE 
+        ak.kind_id = 1  -- Assuming 1 corresponds to "movie"
+    GROUP BY 
+        t.id, t.title, t.production_year, c.name
+),
+
+keyword_stats AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id
+),
+
+final_benchmark AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.company_name,
+        md.cast_count,
+        ks.keyword_count,
+        md.aliases
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        keyword_stats ks ON md.production_year = ks.movie_id
+    ORDER BY 
+        md.production_year DESC,
+        md.cast_count DESC
+)
+
+SELECT 
+    fb.movie_title,
+    fb.production_year,
+    fb.company_name,
+    fb.cast_count,
+    fb.keyword_count,
+    fb.aliases 
+FROM 
+    final_benchmark fb
+WHERE 
+    fb.cast_count > 0
+LIMIT 100;

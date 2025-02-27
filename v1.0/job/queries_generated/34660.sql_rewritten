@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Episode: ', m.title) AS title,
+        m.production_year,
+        mh.level + 1 AS level
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(ci.id) AS cast_count,
+    AVG(COALESCE(ri.age, 0)) AS average_age,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    case 
+        when mh.production_year = 2023 then 'Latest'
+        when mh.production_year < 2000 then 'Classic'
+        else 'Modern'
+    end as era
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    cast_info AS ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+LEFT JOIN 
+    (SELECT 
+        p.person_id,
+        EXTRACT(YEAR FROM cast('2024-10-01' as date)) - EXTRACT(YEAR FROM p.date_of_birth) AS age
+    FROM person_info AS p
+    WHERE p.info_type_id = (SELECT id FROM info_type WHERE info = 'date_of_birth')) AS ri ON ci.person_id = ri.person_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year
+ORDER BY 
+    mh.production_year DESC,
+    cast_count DESC;

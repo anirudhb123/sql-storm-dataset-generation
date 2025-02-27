@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.imdb_index AS movie_index,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COALESCE(m.comp_count, 0) DESC, t.title) AS rank_in_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        (SELECT 
+            movie_id, 
+            COUNT(company_id) AS comp_count
+        FROM 
+            movie_companies 
+        GROUP BY 
+            movie_id) m ON t.id = m.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+TopMovies AS (
+    SELECT 
+        rm.movie_index, 
+        rm.movie_title, 
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_in_year <= 5
+),
+
+MovieDetails AS (
+    SELECT 
+        tm.movie_index,
+        tm.movie_title,
+        ARRAY_AGG(DISTINCT CONCAT(c.name, ' (', rt.role, ')')) AS cast,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = (SELECT id FROM aka_title WHERE imdb_index = tm.movie_index)
+    LEFT JOIN 
+        char_name c ON c.imdb_id = ci.person_id
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE imdb_index = tm.movie_index)
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        tm.movie_index, tm.movie_title
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    COALESCE(md.cast, '{}') AS cast_list,
+    COALESCE(md.keywords, '{}') AS keyword_list,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = (SELECT id FROM aka_title WHERE imdb_index = md.movie_index) AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')) AS awards_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieDetails md ON md.movie_index = tm.movie_index
+ORDER BY 
+    tm.production_year DESC, 
+    md.movie_title ASC;

@@ -1,0 +1,69 @@
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(PH.CloseReasonId, P.AcceptedAnswerId) AS ReasonId
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes V
+    GROUP BY V.PostId
+),
+AggregatedPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.Score,
+        PD.ViewCount,
+        UV.UpVotes,
+        UV.DownVotes,
+        (COALESCE(UV.UpVotes, 0) - COALESCE(UV.DownVotes, 0)) AS NetScore
+    FROM PostDetails PD
+    LEFT JOIN UserVotes UV ON PD.PostId = UV.PostId
+)
+SELECT 
+    A.DisplayName,
+    AP.Title,
+    AP.CreationDate,
+    AP.Score,
+    AP.ViewCount,
+    AP.NetScore,
+    U.UserRank
+FROM AggregatedPosts AP
+JOIN TopUsers U ON AP.NetScore > 0
+ORDER BY U.UserRank, AP.NetScore DESC
+LIMIT 10;
+
+-- Union with an entry for posts with no votes
+UNION ALL
+SELECT 
+    'No Votes' AS DisplayName,
+    AP.Title,
+    AP.CreationDate,
+    AP.Score,
+    AP.ViewCount,
+    AP.NetScore,
+    NULL AS UserRank
+FROM AggregatedPosts AP
+WHERE AP.UpVotes IS NULL AND AP.DownVotes IS NULL
+ORDER BY AP.NetScore DESC
+LIMIT 5;

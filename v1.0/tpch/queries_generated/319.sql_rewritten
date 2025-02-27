@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT cs.c_custkey) AS number_of_customers,
+    COALESCE(SUM(r_s.total_supply_cost), 0) AS total_supplier_cost,
+    SUM(cs.total_order_value) AS total_customer_order_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers r_s ON s.s_suppkey = r_s.s_suppkey AND r_s.rank = 1
+LEFT JOIN 
+    CustomerOrderSummary cs ON cs.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'O' 
+          AND o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+    )
+WHERE 
+    (s.s_acctbal IS NULL OR s.s_acctbal > 1000) 
+    AND r.r_name NOT LIKE '%east%'
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+ORDER BY 
+    total_customer_order_value DESC, number_of_customers ASC;

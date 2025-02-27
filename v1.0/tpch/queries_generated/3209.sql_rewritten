@@ -1,0 +1,80 @@
+WITH SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(sc.total_supply_cost, 0) AS total_supply_cost,
+    cs.total_spent,
+    ns.total_account_balance
+FROM 
+    part p
+LEFT JOIN 
+    SupplierCost sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    CustomerOrders cs ON p.p_partkey IN (
+        SELECT 
+            l.l_partkey
+        FROM 
+            lineitem l
+        WHERE 
+            l.l_orderkey IN (
+                SELECT 
+                    o.o_orderkey
+                FROM 
+                    orders o
+                WHERE 
+                    o.o_orderstatus = 'F' AND o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+            )
+    )
+LEFT JOIN 
+    NationSupplier ns ON ns.n_nationkey IN (
+        SELECT 
+            s.s_nationkey
+        FROM 
+            supplier s
+        WHERE 
+            s.s_suppkey IN (
+                SELECT 
+                    ps.ps_suppkey
+                FROM 
+                    partsupp ps
+                WHERE 
+                    ps.ps_partkey = p.p_partkey
+            )
+    )
+WHERE 
+    (total_supply_cost > 1000 OR cs.total_spent IS NOT NULL)
+ORDER BY 
+    total_supply_cost DESC, total_spent DESC;

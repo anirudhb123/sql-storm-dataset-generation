@@ -1,0 +1,55 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        UserId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes, 
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes
+    FROM Votes
+    GROUP BY UserId
+),
+ClosedPostHistory AS (
+    SELECT 
+        PostId,
+        MIN(CreationDate) AS FirstClosedDate,
+        COUNT(*) AS CloseCount
+    FROM PostHistory
+    WHERE PostHistoryTypeId = 10
+    GROUP BY PostId
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Posts p
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(uvc.TotalVotes, 0) AS TotalVotes, 
+        COALESCE(cph.CloseCount, 0) AS ClosedPosts,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM Users u
+    LEFT JOIN UserVoteCounts uvc ON u.Id = uvc.UserId
+    LEFT JOIN ClosedPostHistory cph ON u.Id IN (SELECT OwnerUserId FROM Posts WHERE Id = cph.PostId)
+)
+SELECT 
+    ru.Rank,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.TotalVotes,
+    ru.ClosedPosts,
+    pb.PostId,
+    pb.BadgeCount,
+    pb.HighestBadgeClass
+FROM RankedUsers ru
+LEFT JOIN PostsWithBadges pb ON ru.UserId = pb.OwnerUserId
+WHERE ru.TotalVotes > 5 
+  AND ru.ClosedPosts > 0
+ORDER BY ru.Rank, pb.BadgeCount DESC NULLS LAST;

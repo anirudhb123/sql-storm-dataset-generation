@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        ct.Name AS CloseReason,
+        b.Name AS BadgeName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = rp.PostID AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        CloseReasonTypes ct ON ct.Id = CAST(ph.Comment AS INTEGER)
+    LEFT JOIN 
+        Users u ON u.Id = ph.UserId
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id AND b.Class = 1
+    WHERE 
+        rp.Rank <= 5
+),
+TotalVotes AS (
+    SELECT 
+        pt.Id AS PostID,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts pt
+    LEFT JOIN 
+        Votes v ON v.PostId = pt.Id
+    GROUP BY 
+        pt.Id
+)
+
+SELECT 
+    tp.PostID,
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    COALESCE(tv.VoteCount, 0) AS TotalVotes,
+    tp.CloseReason,
+    STRING_AGG(DISTINCT tp.BadgeName, ', ') AS BadgeNames
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    TotalVotes tv ON tv.PostID = tp.PostID
+GROUP BY 
+    tp.PostID, tp.Title, tp.ViewCount, tp.Score, tp.CloseReason
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

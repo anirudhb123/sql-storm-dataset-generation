@@ -1,0 +1,107 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level,
+        CAST(p.Title AS VARCHAR(300)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.Score,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        rp.Level + 1,
+        CAST(rp.Path + ' -> ' + p2.Title AS VARCHAR(300))
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostCTE rp ON p2.ParentId = rp.Id
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.Title AS PostTitle,
+    rp.Score AS PostScore,
+    up.ProfileImageUrl AS OwnerImageUrl,
+    up.DisplayName AS OwnerDisplayName,
+    COALESCE(pv.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pv.DownVotes, 0) AS TotalDownVotes,
+    ub.BadgeCount AS TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    rp.Level,
+    rp.Path AS FullPath
+FROM 
+    RecursivePostCTE rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    PostVotes pv ON rp.Id = pv.PostId
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+WHERE 
+    rp.Score > 0
+ORDER BY 
+    rp.Level, rp.Score DESC;
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    rp.OwnerUserId,
+    SUM(RP.Score) AS TotalScore,
+    COUNT(rp.Id) AS TotalPosts,
+    AVG(rp.Score) AS AvgPostScore,
+    MAX(rp.Score) AS MaxPostScore,
+    MIN(rp.Score) AS MinPostScore
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+GROUP BY 
+    rp.OwnerUserId
+HAVING 
+    COUNT(rp.Id) >= 3
+ORDER BY 
+    TotalScore DESC;

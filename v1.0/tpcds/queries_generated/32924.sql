@@ -1,0 +1,65 @@
+
+WITH RECURSIVE CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+SalesRanking AS (
+    SELECT
+        customer_sk,
+        c_first_name,
+        c_last_name,
+        total_sales,
+        order_count,
+        rank
+    FROM
+        CustomerSales
+    WHERE
+        rank <= 10
+),
+SalesStatistics AS (
+    SELECT
+        AVG(total_sales) AS avg_sales,
+        MAX(total_sales) AS max_sales,
+        MIN(total_sales) AS min_sales
+    FROM
+        SalesRanking
+),
+ReturnSummary AS (
+    SELECT
+        sr_returning_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM
+        store_returns sr
+    GROUP BY
+        sr_returning_customer_sk
+)
+SELECT
+    sr.sr_returning_customer_sk AS returning_customer_sk,
+    cr.c_first_name,
+    cr.c_last_name,
+    cr.total_sales,
+    sr.total_returns,
+    COALESCE(sr.total_returned_amount, 0) AS total_returned_amount,
+    s.avg_sales,
+    s.max_sales,
+    s.min_sales
+FROM
+    ReturnSummary sr
+LEFT JOIN
+    SalesRanking cr ON sr.returning_customer_sk = cr.customer_sk
+CROSS JOIN
+    SalesStatistics s
+ORDER BY
+    cr.total_sales DESC, sr.total_returned_amount DESC;

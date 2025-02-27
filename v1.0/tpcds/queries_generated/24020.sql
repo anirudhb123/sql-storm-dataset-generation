@@ -1,0 +1,86 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 20000
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(MAX(sales.ws_sales_price), 0) AS max_price,
+        COALESCE(SUM(sales.ws_net_profit), 0) AS total_net_profit
+    FROM 
+        item
+    LEFT JOIN 
+        web_sales sales ON item.i_item_sk = sales.ws_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+CustomerProfits AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+HighProfitCustomers AS (
+    SELECT 
+        cp.c_customer_id
+    FROM 
+        CustomerProfits cp
+    WHERE 
+        cp.total_profit > (
+            SELECT 
+                AVG(total_profit) FROM CustomerProfits
+        )
+),
+FinalResult AS (
+    SELECT 
+        ss.i_item_id,
+        ss.i_item_desc,
+        COALESCE(r.max_price, 0) AS max_price,
+        COALESCE(r.total_net_profit, 0) AS total_net_profit,
+        CASE 
+            WHEN cp.c_customer_id IS NOT NULL THEN 'High Profit'
+            ELSE 'Regular'
+        END AS customer_type
+    FROM 
+        SalesSummary ss
+    LEFT JOIN 
+        RankedSales r ON ss.i_item_sk = r.ws_item_sk
+    LEFT JOIN 
+        HighProfitCustomers cp ON cp.c_customer_id IN (
+            SELECT DISTINCT c.c_customer_id 
+            FROM customer c 
+            JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+            WHERE ws.ws_sales_price > 100
+        )
+)
+SELECT 
+    fr.i_item_id,
+    fr.i_item_desc,
+    fr.max_price,
+    fr.total_net_profit,
+    fr.customer_type
+FROM 
+    FinalResult fr
+WHERE 
+    fr.max_price > (
+        SELECT 
+            AVG(max_price) FROM SalesSummary
+    )
+ORDER BY 
+    fr.total_net_profit DESC, fr.customer_type ASC;

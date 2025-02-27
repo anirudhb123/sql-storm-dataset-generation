@@ -1,0 +1,78 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), TopUsers AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalAnswers,
+        ups.TotalQuestions,
+        ups.AverageScore,
+        COALESCE(bc.TotalBadges, 0) AS TotalBadges,
+        COALESCE(bc.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bc.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bc.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        BadgeCounts bc ON ups.UserId = bc.UserId
+    WHERE 
+        ups.TotalPosts > 0
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalAnswers,
+    TotalQuestions,
+    AverageScore,
+    TotalBadges,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    TopUsers
+WHERE 
+    TotalQuestions > 10
+ORDER BY 
+    AverageScore DESC, TotalBadges DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS UserId,
+    'Total Posts' AS DisplayName,
+    COUNT(*) AS TotalPosts,
+    NULL AS TotalAnswers,
+    NULL AS TotalQuestions,
+    NULL AS AverageScore,
+    NULL AS TotalBadges,
+    NULL AS GoldBadges,
+    NULL AS SilverBadges,
+    NULL AS BronzeBadges
+FROM 
+    Posts
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 year';

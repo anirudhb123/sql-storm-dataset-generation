@@ -1,0 +1,37 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 100000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 50000
+),
+total_parts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+supplier_stats AS (
+    SELECT sh.s_suppkey, sh.s_name, COUNT(DISTINCT p.p_partkey) AS part_count, AVG(sh.s_acctbal) AS avg_acctbal
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY sh.s_suppkey, sh.s_name
+)
+SELECT r.r_name, th.total_spent, ss.part_count, ss.avg_acctbal
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN top_customers th ON n.n_nationkey = th.c_custkey
+JOIN supplier_stats ss ON ss.s_nationkey = n.n_nationkey
+WHERE r.r_name IS NOT NULL
+ORDER BY th.total_spent DESC, ss.part_count DESC
+LIMIT 10;

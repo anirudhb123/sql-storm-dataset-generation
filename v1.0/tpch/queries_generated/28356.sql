@@ -1,0 +1,25 @@
+SELECT 
+    n.n_name AS nation_name, 
+    COUNT(DISTINCT c.c_custkey) AS customer_count, 
+    AVG(s.s_acctbal) AS average_supplier_balance,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ', Price: ', CAST(p.p_retailprice AS VARCHAR)) ORDER BY p.p_retailprice DESC) AS product_details
+FROM 
+    nation n
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    customer c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    n.n_name LIKE '%land%' AND 
+    l.l_shipdate BETWEEN '2022-01-01' AND '2023-12-31'
+GROUP BY 
+    n.n_name
+ORDER BY 
+    customer_count DESC;

@@ -1,0 +1,65 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS title_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+),
+filtered_titles AS (
+    SELECT 
+        actor_name, 
+        movie_title, 
+        title_rank
+    FROM 
+        ranked_titles
+    WHERE 
+        title_rank <= 5
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+movies_with_keywords AS (
+    SELECT 
+        f.actor_name,
+        f.movie_title,
+        k.keywords_list,
+        COUNT(DISTINCT f.actor_name) OVER (PARTITION BY f.movie_title) AS actor_count
+    FROM 
+        filtered_titles f
+    LEFT JOIN 
+        movie_keywords k ON f.movie_title = k.movie_id
+)
+SELECT 
+    mw.actor_name,
+    mw.movie_title,
+    COALESCE(mw.keywords_list, 'No keywords') AS keywords,
+    mw.actor_count
+FROM 
+    movies_with_keywords mw
+WHERE 
+    mw.actor_count > 1
+ORDER BY 
+    mw.actor_count DESC, 
+    mw.movie_title ASC 
+LIMIT 100;
+
+-- This query performs multiple layers of operations, utilizing CTEs to first rank titles associated with actors, 
+-- filter down to the top five titles per actor, aggregate keywords for the movies, and finally select 
+-- relevant data with a count of actors per movie while handling NULL values gracefully. 

@@ -1,0 +1,66 @@
+
+WITH TagOccurrences AS (
+    SELECT
+        LOWER(TRIM(unnest(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')))) AS TagName,
+        COUNT(*) AS OccurrenceCount
+    FROM
+        Posts
+    WHERE
+        PostTypeId = 1
+    GROUP BY
+        TagName
+),
+UserActivity AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT
+        TagName,
+        SUM(OccurrenceCount) AS TotalOccurrences
+    FROM
+        TagOccurrences
+    WHERE
+        OccurrenceCount > 5
+    GROUP BY
+        TagName
+)
+SELECT
+    U.UserId,
+    U.DisplayName,
+    U.QuestionCount,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    PT.TagName,
+    PT.TotalOccurrences
+FROM
+    UserActivity U
+JOIN
+    PopularTags PT ON PT.TagName IN (
+        SELECT
+            DISTINCT unnest(string_to_array(SUBSTRING(Posts.Tags, 2, LENGTH(Posts.Tags) - 2), '><'))
+        FROM
+            Posts
+        WHERE
+            Posts.OwnerUserId = U.UserId
+    )
+ORDER BY
+    U.TotalUpvotes DESC,
+    PT.TotalOccurrences DESC
+LIMIT 10;

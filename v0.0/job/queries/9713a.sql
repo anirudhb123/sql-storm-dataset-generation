@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS from_company, min(mc.note) AS production_note, min(t.title) AS movie_based_on_book
+FROM company_name AS cn, company_type AS ct, keyword AS k, link_type AS lt, movie_companies AS mc, movie_keyword AS mk, movie_link AS ml, title AS t
+WHERE lt.id = ml.link_type_id AND ml.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_type_id = ct.id AND mc.company_id = cn.id AND ml.movie_id = mk.movie_id AND ml.movie_id = mc.movie_id AND mk.movie_id = mc.movie_id
+AND mc.note IN ('(1919) (USA) (theatrical) (as A FirstNational Special)', '(1921) (Czechoslovakia) (theatrical)', '(1969-1976) (USA) (TV)', '(1988) (USA) (all media) (PlayChoice-10)', '(1998) (Japan) (all media) (Saturn version)', '(2000) (Czech Republic) (VHS)', '(2005) (USA) (DVD) (season two)', '(2010) (Canada) (DVD) (For ITV Global International)') AND lt.link IN ('features', 'remade as', 'spoofed in') AND ml.movie_id > 38616;

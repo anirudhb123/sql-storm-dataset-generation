@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        Users u
+), 
+PostHistoryAnalytics AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 33) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+), 
+PostInteraction AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(ph.CloseCount, 0) AS CloseCount,
+        COALESCE(ph.ReopenCount, 0) AS ReopenCount,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        u.DisplayName
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN PostHistoryAnalytics ph ON p.Id = ph.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.CreationDate,
+    u.DisplayName,
+    p.UpVoteCount,
+    p.DownVoteCount,
+    p.CloseCount,
+    p.ReopenCount,
+    p.EditCount
+FROM 
+    PostInteraction p
+JOIN 
+    UserReputation u ON p.DisplayName = u.DisplayName
+WHERE 
+    p.Score > 0
+    AND (p.ReopenCount > 0 OR p.CloseCount > 0)
+    AND u.Reputation BETWEEN 1000 AND 5000
+ORDER BY 
+    p.ViewCount DESC, 
+    p.Score DESC;

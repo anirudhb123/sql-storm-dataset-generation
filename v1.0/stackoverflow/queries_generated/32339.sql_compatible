@@ -1,0 +1,73 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.LastActivityDate
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        r.Level + 1 AS Level,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.LastActivityDate
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        r.PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount
+    FROM RecursivePostHierarchy r
+    LEFT JOIN Comments c ON r.PostId = c.PostId 
+    LEFT JOIN Votes v ON r.PostId = v.PostId 
+    LEFT JOIN Posts p ON r.PostId = p.Id
+    GROUP BY r.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    WHERE u.Reputation > 1000
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.TotalViewCount,
+        ROW_NUMBER() OVER (PARTITION BY r.Level ORDER BY ps.TotalViewCount DESC) AS PostRank
+    FROM PostStatistics ps
+    JOIN RecursivePostHierarchy r ON ps.PostId = r.PostId
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    p.Title AS TopPostTitle,
+    p.CommentCount,
+    p.VoteCount,
+    p.UpVoteCount,
+    p.DownVoteCount,
+    p.TotalViewCount,
+    r.Level
+FROM TopPosts p
+JOIN TopUsers u ON p.VoteCount > 10 
+JOIN RecursivePostHierarchy r ON p.PostId = r.PostId
+WHERE p.PostRank <= 5 
+ORDER BY r.Level, p.TotalViewCount DESC;

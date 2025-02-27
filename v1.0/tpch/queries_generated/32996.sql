@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty - 10 AS ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN SupplyChain sc ON s.s_suppkey = sc.s_suppkey
+    WHERE ps.ps_availqty > 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extendedprice
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, 
+       COALESCE(SUM(sc.ps_availqty), 0) AS total_available_quantity,
+       COALESCE(SUM(cl.total_extendedprice), 0) AS total_sales,
+       CASE 
+           WHEN COALESCE(SUM(sc.ps_availqty), 0) > 100 THEN 'High Availability'
+           WHEN COALESCE(SUM(sc.ps_availqty), 0) > 50 THEN 'Moderate Availability'
+           ELSE 'Low Availability' 
+       END AS availability_status
+FROM part p
+LEFT JOIN SupplyChain sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN AggregatedLineItems cl ON sc.ps_partkey = cl.l_orderkey
+GROUP BY p.p_partkey, p.p_name, p.p_brand
+HAVING AVG(sc.ps_supplycost) < 50
+ORDER BY availability_status DESC, total_sales DESC
+LIMIT 10;

@@ -1,0 +1,51 @@
+WITH Supplier_Summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        MAX(ps.ps_availqty) AS max_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+Customer_Orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+Lineitem_Analysis AS (
+    SELECT
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY l.l_partkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.p_mfgr,
+    cs.c_name AS customer_name,
+    COALESCE(o.total_spent, 0) AS customer_spent,
+    COALESCE(s.total_value, 0) AS supplier_value,
+    la.total_quantity,
+    la.total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY ps.p_partkey ORDER BY la.total_revenue DESC) AS revenue_rank
+FROM part ps
+LEFT JOIN Lineitem_Analysis la ON ps.p_partkey = la.l_partkey
+LEFT JOIN Customer_Orders o ON o.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'Customer1')
+LEFT JOIN Supplier_Summary s ON s.s_suppkey IN (
+    SELECT ps1.ps_suppkey 
+    FROM partsupp ps1
+    WHERE ps1.ps_partkey = ps.p_partkey
+)
+WHERE ps.p_retailprice > 100.00
+ORDER BY total_revenue DESC, supplier_value DESC;

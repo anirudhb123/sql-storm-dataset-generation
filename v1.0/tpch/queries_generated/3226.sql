@@ -1,0 +1,60 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_mfgr = 'Manufacturer#1')
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    SUM(CASE 
+            WHEN lp.l_discount > 0.05 THEN lp.l_extendedprice * (1 - lp.l_discount) 
+            ELSE 0 
+        END) AS total_discounted_sales
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    RankedParts rp ON ps.ps_partkey = rp.p_partkey AND rp.price_rank <= 5
+LEFT JOIN 
+    lineitem lp ON rp.p_partkey = lp.l_partkey
+WHERE 
+    lp.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_discounted_sales DESC
+UNION
+SELECT
+    'Total' AS r_name,
+    NULL AS nation_count,
+    SUM(lp.l_extendedprice * lp.l_discount) AS total_discounted_sales
+FROM 
+    lineitem lp
+WHERE 
+    lp.l_shipdate < '2023-01-01' AND lp.l_returnflag = 'R';

@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.PostCount,
+        ur.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC, ur.TotalScore DESC) AS rn
+    FROM 
+        UserReputation ur
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    tu.BadgeCount,
+    COALESCE(rp.Title, 'No Posts') AS RecentPostTitle,
+    COALESCE(rp.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(rp.Score, 0) AS RecentPostScore
+FROM 
+    TopUsers tu
+JOIN 
+    Users u ON tu.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.PostId
+WHERE 
+    tu.rn <= 10
+ORDER BY 
+    u.Reputation DESC, 
+    tu.BadgeCount DESC;

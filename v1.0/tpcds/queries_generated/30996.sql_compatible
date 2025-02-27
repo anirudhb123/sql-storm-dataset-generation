@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price * cs_quantity) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_sales_price * cs_quantity) DESC) AS rn
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        cs_item_sk
+), CombinedSales AS (
+    SELECT ws_item_sk, total_sales, order_count FROM SalesCTE WHERE rn = 1
+    UNION
+    SELECT cs_item_sk, total_sales, order_count FROM SalesCTE WHERE rn = 1
+), ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(cs.total_sales, 0) AS catalog_sales,
+        COALESCE(ws.total_sales, 0) AS web_sales,
+        (COALESCE(cs.total_sales, 0) + COALESCE(ws.total_sales, 0)) AS total_sales
+    FROM 
+        item i
+    LEFT JOIN CombinedSales cs ON cs.ws_item_sk = i.i_item_sk
+    LEFT JOIN CombinedSales ws ON ws.cs_item_sk = i.i_item_sk
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    id.i_current_price,
+    id.catalog_sales,
+    id.web_sales,
+    id.total_sales,
+    CASE 
+        WHEN id.total_sales > 0 THEN ROUND((id.web_sales / id.total_sales) * 100, 2)
+        ELSE NULL 
+    END AS web_sales_percentage,
+    CASE 
+        WHEN id.total_sales > 0 THEN ROUND((id.catalog_sales / id.total_sales) * 100, 2)
+        ELSE NULL 
+    END AS catalog_sales_percentage
+FROM 
+    ItemDetails id
+WHERE 
+    id.total_sales > 1000
+ORDER BY 
+    id.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

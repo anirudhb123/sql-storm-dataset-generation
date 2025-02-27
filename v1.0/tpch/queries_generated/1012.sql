@@ -1,0 +1,33 @@
+WITH avg_supply_cost AS (
+    SELECT ps_partkey, AVG(ps_supplycost) AS avg_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    p.p_name,
+    sd.s_name AS supplier_name,
+    sd.nation_name,
+    AVG(asc.avg_cost) AS avg_supply_cost,
+    COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count,
+    MAX(hvo.total_price) AS max_order_price,
+    p.p_retailprice - COALESCE(NULLIF(MAX(hvo.total_price), 0), p.p_retailprice) AS price_variation
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_details sd ON ps.ps_suppkey = sd.s_suppkey
+LEFT JOIN high_value_orders hvo ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = hvo.o_orderkey)
+JOIN avg_supply_cost asc ON p.p_partkey = asc.ps_partkey
+GROUP BY p.p_name, sd.s_name, sd.nation_name
+ORDER BY price_variation DESC, avg_supply_cost DESC;

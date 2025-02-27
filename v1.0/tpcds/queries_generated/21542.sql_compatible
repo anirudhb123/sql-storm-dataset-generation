@@ -1,0 +1,88 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.web_site_sk) AS total_quantity,
+        AVG(ws.ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS avg_sales_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status IS NOT NULL
+),
+ReturnDetails AS (
+    SELECT 
+        sr.returning_customer_sk AS customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.returning_customer_sk
+),
+SalesReturns AS (
+    SELECT 
+        cu.c_customer_sk,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_catalog_returns
+    FROM 
+        CustomerDetails cu 
+    LEFT JOIN 
+        catalog_returns cr ON cu.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        cu.c_customer_sk
+),
+FinalSales AS (
+    SELECT 
+        R.*,
+        CD.c_email_address,
+        COALESCE(RD.total_returns, 0) AS total_returns,
+        COALESCE(SR.total_catalog_returns, 0) AS total_catalog_returns
+    FROM 
+        RankedSales R
+    JOIN 
+        CustomerDetails CD ON R.web_site_sk = CD.cd_income_band_sk
+    LEFT JOIN 
+        ReturnDetails RD ON RD.customer_sk = CD.c_customer_sk
+    LEFT JOIN 
+        SalesReturns SR ON SR.customer_sk = CD.c_customer_sk
+)
+SELECT 
+    f.web_site_sk,
+    f.ws_item_sk,
+    f.ws_quantity,
+    f.ws_sales_price,
+    f.total_returns,
+    f.total_catalog_returns,
+    CASE 
+        WHEN f.total_returns > 100 THEN 'High Return'
+        WHEN f.total_returns BETWEEN 50 AND 100 THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category,
+    CONCAT('Customer: ', f.c_email_address, ' | Profit: ', 
+        ROUND(f.ws_sales_price * f.ws_quantity - 0.1 * f.ws_sales_price * f.ws_quantity, 2)) AS profit_info
+FROM 
+    FinalSales f
+WHERE 
+    f.rn = 1
+    AND (f.total_returns IS NULL OR f.total_returns < f.total_catalog_returns)
+    AND f.ws_quantity > (SELECT AVG(ws_quantity) FROM web_sales WHERE ws_item_sk = f.ws_item_sk)
+ORDER BY 
+    f.ws_sales_price * f.ws_quantity - 0.1 * f.ws_sales_price * f.ws_quantity DESC
+FETCH FIRST 100 ROWS ONLY;

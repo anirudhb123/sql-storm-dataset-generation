@@ -1,0 +1,86 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        title.title AS movie_title,
+        m.production_year,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_movie_title,
+        ml.link_type_id,
+        0 AS level
+    FROM
+        title AS m
+    LEFT JOIN
+        movie_link AS ml ON ml.movie_id = m.id
+    LEFT JOIN
+        title AS m2 ON m2.id = ml.linked_movie_id
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_movie_title,
+        ml.link_type_id,
+        level + 1
+    FROM
+        MovieHierarchy AS mh
+    JOIN
+        movie_link AS ml ON ml.movie_id = mh.linked_movie_title
+    JOIN
+        title AS m2 ON m2.id = ml.linked_movie_id
+)
+
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ml.linked_movie_id) AS total_links,
+    STRING_AGG(DISTINCT CONCAT_WS(' (', lm.link_title, lm.level || ')'), ', ') AS linked_movies,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE -1 END) AS avg_order,
+    SUM(CASE WHEN ci.person_id IS NULL THEN 1 ELSE 0 END) AS null_person_cast_count
+FROM
+    MovieHierarchy AS mh
+LEFT JOIN
+    movie_link AS ml ON ml.movie_id = mh.movie_id
+LEFT JOIN
+    cast_info AS ci ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    comp_cast_type AS cct ON cct.id = ci.person_role_id
+LEFT JOIN
+    (SELECT 
+        DISTINCT movie_id, 
+        level, 
+        link_type_id 
+    FROM 
+        MovieHierarchy 
+    WHERE 
+        level IN (SELECT DISTINCT level FROM MovieHierarchy)) AS lm ON lm.movie_id = mh.movie_id
+WHERE
+    mh.production_year IS NOT NULL
+GROUP BY
+    mh.movie_title, mh.production_year
+HAVING
+    COUNT(DISTINCT ml.linked_movie_id) > 0
+ORDER BY
+    NULLIF(mh.production_year, 0) DESC,
+    COUNT(*) DESC;
+
+### Explanation:
+1. **CTE**: A recursive Common Table Expression (`MovieHierarchy`) is used to build a hierarchy of movies based on links between them, tracking the levels of recursion.
+  
+2. **Outer Joins**: The outer joins are utilized in the main SELECT query to bring in data related to linked movies and cast information.
+
+3. **Aggregate Functions**: 
+   - `COUNT` to count distinct linked movies.
+   - `STRING_AGG` to concatenate linked movie titles with their respective levels.
+   - `AVG` to calculate the average `nr_order` value, with a case to handle NULLs by replacing them with -1.
+   - `SUM` to count cases of NULL for `person_id`.
+
+4. **Complex Predicates**: The query incorporates complex predicates and calculations to derive useful metrics for performance benchmarking.
+
+5. **HAVING Clause**: Utilizes a HAVING clause to filter out movies with no links, ensuring only movies with at least one link are included in the results.
+
+6. **NULL Logic**: Implemented through COALESCE and COUNT techniques, ensuring robust handling of potential missing data.
+
+7. **Obscure Semantics**: The use of `STRING_AGG` and `NULLIF` adds semantic complexity that can lead to interesting results when dealing with hierarchies and NULL values.
+
+This query presents a sophisticated example of SQL querying across multiple tables with intricate relationships, useful for performance benchmarking in a movie database context.

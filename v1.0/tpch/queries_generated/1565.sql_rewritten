@@ -1,0 +1,33 @@
+WITH SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM partsupp ps
+), CustomerOrders AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           MAX(l.l_shipdate) AS last_ship_date
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_container
+), TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cc.total_spent
+    FROM CustomerOrders cc
+    JOIN customer c ON cc.c_custkey = c.c_custkey
+    WHERE cc.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT pd.p_name, pd.p_brand, pd.p_container, pd.supplier_count, pd.last_ship_date,
+       sc.ps_supplycost AS lowest_cost,
+       tc.c_name AS top_customer_name, tc.total_spent
+FROM PartDetails pd
+LEFT JOIN SupplierCost sc ON pd.p_partkey = sc.ps_partkey AND sc.rn = 1
+LEFT JOIN TopCustomers tc ON pd.supplier_count > 2
+WHERE (pd.last_ship_date IS NULL OR pd.last_ship_date >= DATE '1997-01-01')
+ORDER BY pd.p_name, tc.total_spent DESC;

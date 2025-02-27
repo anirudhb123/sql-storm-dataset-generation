@@ -1,0 +1,88 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalScore DESC) AS RankByScore,
+        RANK() OVER (ORDER BY TotalBounty DESC) AS RankByBounty
+    FROM 
+        UserStats
+),
+FrequentTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+TopQuestions AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Views,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+    ORDER BY 
+        P.Views DESC
+    LIMIT 5
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.TotalQuestions,
+    TU.TotalAnswers,
+    TU.TotalScore,
+    TU.TotalBounty,
+    FT.TagName,
+    TQ.Title AS TopQuestionTitle,
+    TQ.Views AS TopQuestionViews,
+    TQ.Score AS TopQuestionScore
+FROM 
+    TopUsers TU
+CROSS JOIN 
+    FrequentTags FT
+CROSS JOIN 
+    TopQuestions TQ
+WHERE 
+    TU.RankByScore <= 10 
+ORDER BY 
+    TU.RankByScore, FT.PostCount DESC;

@@ -1,0 +1,64 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        MAX(a.production_year) AS last_movie_year
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    JOIN 
+        aka_title a ON c.movie_id = a.id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+movie_keywords AS (
+    SELECT 
+        a.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    mk.keywords,
+    ai.actor_name,
+    ai.movie_count,
+    ai.last_movie_year,
+    COALESCE(NULLIF(ai.last_movie_year, rm.production_year), -1) AS year_difference
+FROM 
+    ranked_movies rm
+JOIN 
+    actor_info ai ON rm.cast_count > 0
+LEFT JOIN 
+    movie_keywords mk ON rm.id = mk.movie_id
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC,
+    ai.movie_count DESC;

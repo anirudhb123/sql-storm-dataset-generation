@@ -1,0 +1,64 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        p.gender,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        c.kind AS company_type
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        name p ON a.person_id = p.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, p.gender, c.kind
+),
+average_movie_info AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS info_count,
+        AVG(LENGTH(info)) AS avg_info_length
+    FROM 
+        movie_info
+    GROUP BY 
+        movie_id
+),
+final_results AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actor_name,
+        md.gender,
+        md.keywords,
+        md.company_type,
+        ami.info_count,
+        ami.avg_info_length
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        average_movie_info ami ON md.movie_id = ami.movie_id
+)
+SELECT 
+    *
+FROM 
+    final_results
+ORDER BY 
+    production_year DESC, 
+    title ASC;

@@ -1,0 +1,96 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        rm.level + 1 AS level,
+        rm.movie_id AS parent_movie_id
+    FROM 
+        aka_title e
+    JOIN 
+        RecursiveMovieHierarchy rm ON rm.movie_id = e.episode_of_id
+),
+ActorRoleCount AS (
+    SELECT 
+        ci.person_id, 
+        COUNT(DISTINCT ci.movie_id) AS total_movies
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name IS NOT NULL
+    GROUP BY 
+        ci.person_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT ci.note) AS cast_notes
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COALESCE(ac.total_movies, 0) AS total_actors_movies,
+    COALESCE(cd.company_name, 'Independent') AS production_company,
+    COALESCE(cd.company_type, 'N/A') AS company_type,
+    mi.production_year,
+    mi.keywords,
+    mi.cast_notes
+FROM 
+    RecursiveMovieHierarchy mh
+LEFT JOIN 
+    ActorRoleCount ac ON ac.person_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci
+        WHERE 
+            ci.movie_id = mh.movie_id
+    )
+LEFT JOIN 
+    CompanyDetails cd ON cd.movie_id = mh.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mi.movie_id = mh.movie_id
+WHERE 
+    mh.level < 3
+ORDER BY 
+    mh.level, mi.production_year DESC;

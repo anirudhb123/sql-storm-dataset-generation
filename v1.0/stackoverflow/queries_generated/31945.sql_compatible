@@ -1,0 +1,98 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title, 
+        p.OwnerUserId, 
+        p.ParentId, 
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Level,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        CASE 
+            WHEN r.ParentId IS NOT NULL THEN 'Answer'
+            ELSE 'Question' 
+        END AS PostType,
+        r.OwnerUserId
+    FROM 
+        RecursivePostHierarchy r
+    JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON r.PostId = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) v ON r.PostId = v.PostId
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerName,
+    pd.OwnerReputation,
+    pd.CommentCount,
+    pd.VoteCount,
+    CASE 
+        WHEN pd.Level > 0 THEN CONCAT('This post is an answer to question: ', pd.Title)
+        ELSE 'This is a top-level question'
+    END AS Status,
+    u.ReputationRank
+FROM 
+    PostDetails pd
+JOIN 
+    UserReputation u ON pd.OwnerUserId = u.UserId
+WHERE 
+    pd.VoteCount > 5
+    AND pd.CommentCount > 0
+ORDER BY 
+    pd.Level, pd.VoteCount DESC;

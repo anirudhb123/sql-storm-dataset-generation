@@ -1,0 +1,27 @@
+
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    CONCAT('Manufactured by ', p.p_mfgr, ' in region ', r.r_name) AS detailed_info,
+    SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT s.s_name ORDER BY s.s_name), ', ', 5) AS top_suppliers,
+    REPLACE(p.p_comment, 'a', '@') AS modified_comment
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 1 AND 100
+GROUP BY 
+    p.p_name, p.p_mfgr, r.r_name, p.p_comment, p.p_partkey
+HAVING 
+    total_available_quantity > 50
+ORDER BY 
+    total_available_quantity DESC, average_supply_cost ASC;

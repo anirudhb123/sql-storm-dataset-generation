@@ -1,0 +1,41 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        c.name AS company_name,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        aka_name ak ON cc.subject_id = ak.id
+    GROUP BY 
+        a.id, a.title, a.production_year, k.keyword, c.name
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.movie_keyword,
+    rm.company_name,
+    STRING_AGG(DISTINCT rm.actor_names, ', ') AS actor_names
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank = 1 AND 
+    rm.production_year >= 2000
+GROUP BY 
+    rm.movie_title, rm.production_year, rm.movie_keyword, rm.company_name
+ORDER BY 
+    rm.production_year DESC;

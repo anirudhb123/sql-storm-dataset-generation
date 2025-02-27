@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           RANK() OVER (PARTITION BY ps_partkey ORDER BY s_acctbal DESC) as supplier_rank,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s_suppkey ASC) as supplier_row
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM RankedSuppliers s
+    WHERE s.supplier_rank <= 3
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+OrderStats AS (
+    SELECT l.l_orderkey, 
+           l.l_suppkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey, l.l_suppkey
+)
+SELECT ns.r_name, 
+       ns.n_name, 
+       COUNT(DISTINCT tc.c_custkey) AS customers_count,
+       SUM(os.revenue) AS total_revenue,
+       AVG(tc.total_spent) AS avg_customer_spent
+FROM nation ns
+LEFT JOIN region r ON ns.n_regionkey = r.r_regionkey
+LEFT JOIN TopSuppliers ts ON EXISTS (
+    SELECT 1 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey = ts.s_suppkey 
+          AND ps.ps_availqty > (SELECT AVG(ps_inner.ps_availqty) FROM partsupp ps_inner)
+)
+JOIN HighValueCustomers tc ON tc.total_spent > 5000
+JOIN OrderStats os ON os.l_suppkey = ts.s_suppkey
+WHERE EXISTS (
+    SELECT 1 
+    FROM lineitem li 
+    WHERE li.l_orderkey = os.l_orderkey
+          AND li.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+          AND li.l_tax IS NOT NULL 
+)
+GROUP BY ns.r_name, ns.n_name
+HAVING COUNT(DISTINCT tc.c_custkey) > 5
+ORDER BY total_revenue DESC, avg_customer_spent DESC;

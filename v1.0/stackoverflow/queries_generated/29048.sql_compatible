@@ -1,0 +1,71 @@
+
+WITH TagStats AS (
+    SELECT
+        TRIM(tag) AS CleanTag,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PT.Name = 'Question' THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PT.Name = 'Answer' THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Posts P
+    CROSS JOIN
+        LATERAL (SELECT unnest(string_to_array(substring(P.Tags, 2, LENGTH(P.Tags) - 2), '><'))) AS tag
+    ) AS tag
+    INNER JOIN
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY
+        TRIM(tag)
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserBadgeCounts AS (
+    SELECT 
+        B.UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    UE.UserId,
+    UE.DisplayName,
+    UE.TotalPosts,
+    UE.TotalComments,
+    UE.TotalVotes,
+    UBC.GoldBadges,
+    UBC.SilverBadges,
+    UBC.BronzeBadges,
+    TS.CleanTag,
+    TS.PostCount,
+    TS.QuestionCount,
+    TS.AnswerCount
+FROM 
+    UserEngagement UE
+LEFT JOIN 
+    UserBadgeCounts UBC ON UE.UserId = UBC.UserId
+LEFT JOIN 
+    TagStats TS ON TS.CleanTag IN (SELECT unnest(string_to_array(substring((SELECT STRING_AGG(Tags, '>') FROM Posts), 2, LENGTH((SELECT STRING_AGG(Tags, '>') FROM Posts)) - 2), '><')))
+ORDER BY
+    UE.TotalPosts DESC,
+    UE.TotalComments DESC,
+    UE.TotalVotes DESC;

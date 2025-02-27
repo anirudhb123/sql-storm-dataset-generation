@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= '2023-01-01' 
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        COALESCE(pvc.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(pvc.DownVotes, 0) AS TotalDownVotes,
+        (r.ViewCount - COALESCE(pvc.DownVotes, 0)) / NULLIF(r.ViewCount, 0) AS AdjustedViews,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId) AS CommentCount
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        PostVoteCounts pvc ON r.PostId = pvc.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.*,
+        NTILE(10) OVER (ORDER BY AdjustedViews DESC) AS ViewTier
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.CommentCount > 5 
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    tp.Title,
+    tp.CreationDate AS Created,
+    tp.ViewCount,
+    tp.TotalUpVotes,
+    tp.TotalDownVotes,
+    ub.TotalBadges,
+    tp.ViewTier
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ub.TotalBadges > 0 
+ORDER BY 
+    tp.ViewTier, tp.TotalUpVotes DESC;

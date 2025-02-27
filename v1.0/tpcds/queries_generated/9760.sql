@@ -1,0 +1,56 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_amount) AS total_returned_amount,
+        SUM(cr.return_tax) AS total_returned_tax
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+),
+WebSalesData AS (
+    SELECT 
+        ws_ship_customer_sk,
+        SUM(ws_quantity) AS total_web_sales_quantity,
+        SUM(ws_net_paid) AS total_web_sales_amount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws_ship_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+        COALESCE(cr.total_returned_tax, 0) AS total_returned_tax,
+        COALESCE(ws.total_web_sales_quantity, 0) AS total_web_sales_quantity,
+        COALESCE(ws.total_web_sales_amount, 0) AS total_web_sales_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+    LEFT JOIN 
+        WebSalesData ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+)
+SELECT 
+    f.c_customer_id,
+    f.c_first_name,
+    f.c_last_name,
+    f.total_returned_quantity,
+    f.total_returned_amount,
+    f.total_returned_tax,
+    f.total_web_sales_quantity,
+    f.total_web_sales_amount,
+    (f.total_web_sales_amount - f.total_returned_amount) AS net_sales
+FROM 
+    FinalReport f
+WHERE 
+    f.total_web_sales_quantity > 0
+ORDER BY 
+    net_sales DESC
+LIMIT 100;

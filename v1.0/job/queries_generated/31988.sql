@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    string_agg(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT c.id) OVER (PARTITION BY mt.id) AS cast_count,
+    AVG(CASE WHEN pi.info IS NOT NULL THEN LENGTH(pi.info) ELSE 0 END) AS avg_info_length,
+    case 
+        when count(c.iD) > 5 THEN 'Many'
+        else 'Few'
+    end as cast_size
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    aka_title mt ON c.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+WHERE 
+    mt.production_year >= 2000
+    AND (ak.name IS NOT NULL OR ak.surname_pcode IS NOT NULL)
+GROUP BY 
+    ak.name, mt.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 3
+ORDER BY 
+    mt.production_year DESC, cast_count DESC
+LIMIT 50;
+
+This SQL query demonstrates multiple features:
+- Recursive Common Table Expressions (CTEs) to create a hierarchy of movies based on links.
+- Aggregate functions with `STRING_AGG` to concatenate keywords for each movie.
+- Window functions to calculate the count of cast members per movie.
+- Conditional logic using `CASE` statements to categorize the number of cast members.
+- Rich predicates that include NULL checks and filtering based on production year.
+- Use of outer joins to collect related data from multiple tables while allowing missing relationships.

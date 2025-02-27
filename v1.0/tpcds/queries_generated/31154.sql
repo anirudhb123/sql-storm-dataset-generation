@@ -1,0 +1,53 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_order_number, 
+        ws_sales_price, 
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_sales_price DESC) AS rn
+    FROM web_sales
+    WHERE ws_sales_price > 0
+),
+top_sales AS (
+    SELECT 
+        ss.ticket_number,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_customer_sk) AS customer_count,
+        AVG(ss.ss_quantity) AS avg_quantity_sold
+    FROM store_sales ss
+    LEFT JOIN sales_cte s ON ss.ticket_number = s.ws_order_number
+    WHERE s.rn = 1
+    GROUP BY ss.ticket_number
+),
+address_sales AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        SUM(ts.total_net_profit) AS city_total_net_profit
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN top_sales ts ON c.c_customer_sk = ts.ticket_number
+    GROUP BY ca.ca_address_sk, ca.ca_city
+),
+final_analysis AS (
+    SELECT 
+        as.ca_city,
+        as.city_total_net_profit,
+        COALESCE(SUM(ts.total_net_profit) OVER (PARTITION BY as.ca_city), 0) AS city_profit_total,
+        CASE
+            WHEN as.city_total_net_profit IS NULL THEN 'No Sales'
+            ELSE 'Sales Present'
+        END AS sales_status
+    FROM address_sales as
+)
+SELECT 
+    fa.ca_city,
+    fa.city_total_net_profit,
+    fa.city_profit_total,
+    fa.sales_status,
+    LAG(fa.city_total_net_profit) OVER (ORDER BY fa.ca_city) AS prev_city_net_profit,
+    LEAD(fa.city_total_net_profit) OVER (ORDER BY fa.ca_city) AS next_city_net_profit
+FROM final_analysis fa
+WHERE fa.city_total_net_profit > 1000
+ORDER BY fa.city_total_net_profit DESC
+LIMIT 10;

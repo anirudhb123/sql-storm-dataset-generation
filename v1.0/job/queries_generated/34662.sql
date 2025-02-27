@@ -1,0 +1,91 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+),
+CastRanked AS (
+    SELECT 
+        ci.movie_id,
+        na.name,
+        c.kind AS role,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name na ON ci.person_id = na.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+),
+KeywordFilter AS (
+    SELECT 
+        mw.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mw
+    JOIN 
+        keyword k ON mw.keyword_id = k.id
+    GROUP BY 
+        mw.movie_id
+),
+CompanyStatistics AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(kr.keywords, 'No keywords') AS keywords,
+    COALESCE(cr.cast_rank, 0) AS cast_rank,
+    COALESCE(cs.total_companies, 0) AS total_companies,
+    COALESCE(cs.companies, 'No companies') AS companies
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    KeywordFilter kr ON mh.movie_id = kr.movie_id
+LEFT JOIN 
+    CastRanked cr ON mh.movie_id = cr.movie_id AND cr.cast_rank = 1
+LEFT JOIN 
+    CompanyStatistics cs ON mh.movie_id = cs.movie_id
+WHERE 
+    mh.level <= 2
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+
+This SQL query demonstrates various constructs including:
+1. **Recursive CTE (Common Table Expression)** to create a hierarchy of movies linked through `movie_link`.
+2. **Window function** (RANK) to rank the cast members for each movie.
+3. **Aggregate functions** to group keywords and company names linked to each movie.
+4. **Outer joins** to include movies that may not have associated keywords, rankings, or companies.
+5. **Complicated predicates** with COALESCE to manage NULL values.
+6. **Complex ordering** to prioritize recent productions and titles.

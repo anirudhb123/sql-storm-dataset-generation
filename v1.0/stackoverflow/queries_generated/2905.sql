@@ -1,0 +1,50 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    COUNT(rp.Id) AS QuestionCount,
+    MAX(rp.CreationDate) AS LatestQuestionDate,
+    COALESCE(SUM(up.TotalBounties), 0) AS TotalBounties,
+    COALESCE(MAX(up.BadgeCount), 0) AS TotalBadges
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+WHERE 
+    up.Reputation >= 1000 
+GROUP BY 
+    up.UserId, up.DisplayName, up.Reputation
+HAVING 
+    COUNT(rp.Id) > 5
+ORDER BY 
+    TotalBounties DESC, LatestQuestionDate DESC
+LIMIT 10;

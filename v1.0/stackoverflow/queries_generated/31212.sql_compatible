@@ -1,0 +1,50 @@
+
+WITH RECURSIVE TagHierarchy AS (
+    SELECT T.Id AS TagId, T.TagName, 0 AS Depth
+    FROM Tags T
+    WHERE T.IsModeratorOnly = 0 
+    UNION ALL
+    SELECT T.Id, T.TagName, TH.Depth + 1
+    FROM Tags T
+    JOIN PostLinks PL ON PL.RelatedPostId = T.Id
+    JOIN TagHierarchy TH ON PL.PostId = TH.TagId
+),
+UserActivity AS (
+    SELECT U.Id AS UserId, U.DisplayName, SUM(P.ViewCount) AS TotalViews, 
+           COUNT(DISTINCT C.Id) AS TotalComments, COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT P.Id AS PostId, P.Title, P.CreationDate,
+           COALESCE(PA.AvgScore, 0) AS AvgAnswerScore,
+           COALESCE(V.WeightedVotes, 0) AS WeightedVotes, P.OwnerUserId
+    FROM Posts P
+    LEFT JOIN (
+        SELECT ParentId, AVG(Score) AS AvgScore
+        FROM Posts
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) PA ON P.Id = PA.ParentId
+    LEFT JOIN (
+        SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1
+                                  WHEN VoteTypeId = 3 THEN -1
+                             END) AS WeightedVotes
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+)
+SELECT U.UserId, U.DisplayName, U.TotalViews,
+       U.TotalComments, U.TotalPosts, PS.PostId, PS.Title, PS.AvgAnswerScore,
+       PS.WeightedVotes, TH.TagName, TH.Depth
+FROM UserActivity U
+JOIN PostStatistics PS ON U.UserId = PS.OwnerUserId
+LEFT JOIN TagHierarchy TH ON PS.PostId IN (
+    SELECT PostId
+    FROM PostLinks
+    WHERE RelatedPostId = PS.PostId
+)
+WHERE U.TotalViews > 1000 AND (U.TotalComments > 0 OR U.TotalPosts > 5)
+ORDER BY U.TotalViews DESC, PS.AvgAnswerScore DESC;

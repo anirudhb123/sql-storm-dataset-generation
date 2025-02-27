@@ -1,0 +1,65 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        AnswerCount, 
+        UpVotes, 
+        DownVotes, 
+        (Reputation + PostCount * 10 + AnswerCount * 5 + UpVotes * 3 - DownVotes * 2) AS PerformanceScore
+    FROM 
+        UserReputation
+    ORDER BY 
+        PerformanceScore DESC
+    LIMIT 10
+)
+SELECT 
+    t.DisplayName, 
+    t.Reputation, 
+    t.PostCount, 
+    t.AnswerCount, 
+    t.UpVotes, 
+    t.DownVotes, 
+    th.CreationDate AS LastActivityDate,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    ARRAY_AGG(DISTINCT pt.Name) AS PostTypes
+FROM 
+    TopUsers t
+LEFT JOIN 
+    Posts p ON t.UserId = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    (SELECT OwnerUserId AS UserId, MAX(LastActivityDate) AS CreationDate
+     FROM 
+         Posts
+     WHERE 
+         LastActivityDate IS NOT NULL
+     GROUP BY 
+         OwnerUserId) th ON t.UserId = th.UserId
+GROUP BY 
+    t.UserId, t.DisplayName, t.Reputation, t.PostCount, t.AnswerCount, t.UpVotes, t.DownVotes, th.CreationDate
+ORDER BY 
+    t.PerformanceScore DESC;

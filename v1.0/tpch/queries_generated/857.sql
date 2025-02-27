@@ -1,0 +1,53 @@
+WITH AverageSupplierCosts AS (
+    SELECT 
+        ps_partkey,
+        AVG(ps_supplycost) AS avg_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o_orderkey, o_custkey
+    HAVING 
+        SUM(l_extendedprice * (1 - l_discount)) > 10000
+),
+SupplierCount AS (
+    SELECT 
+        ps_partkey,
+        COUNT(DISTINCT ps_suppkey) AS supplier_count
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(asc.avg_cost, 0) AS average_supply_cost,
+    COALESCE(sc.supplier_count, 0) AS total_suppliers,
+    nh.order_value,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY nh.order_value DESC) AS rank
+FROM 
+    part p
+LEFT JOIN 
+    AverageSupplierCosts asc ON p.p_partkey = asc.ps_partkey
+LEFT JOIN 
+    SupplierCount sc ON p.p_partkey = sc.ps_partkey
+LEFT JOIN 
+    HighValueOrders nh ON nh.o_custkey IN (SELECT cust.c_custkey FROM customer cust WHERE cust.c_acctbal > 5000)
+WHERE 
+    (p.p_retailprice > 20 OR asc.avg_cost IS NULL)
+ORDER BY 
+    total_suppliers DESC, average_supply_cost ASC, rank
+LIMIT 50;

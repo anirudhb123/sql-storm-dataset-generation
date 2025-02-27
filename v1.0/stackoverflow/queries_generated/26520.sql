@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        pt.Name AS PostType,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.WikiPostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.Body, pt.Name, u.DisplayName, p.CreationDate
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Tags,
+        rp.PostType,
+        rp.Owner,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Tags, rp.PostType, rp.Owner
+),
+TrendingTags AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS PostCount
+    FROM 
+        PopularPosts
+    WHERE 
+        PostCount > 5
+    GROUP BY 
+        Tags
+    ORDER BY 
+        PostCount DESC
+)
+SELECT 
+    pp.Title,
+    pp.Owner,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.CommentCount,
+    tt.Tags AS TrendingTags 
+FROM 
+    PopularPosts pp
+JOIN 
+    TrendingTags tt ON pp.Tags LIKE '%' + tt.Tags + '%'
+ORDER BY 
+    pp.UpVotes DESC, pp.CommentCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,70 @@
+WITH movie_ext_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(info.info, 'No Info') AS movie_info,
+        COALESCE(ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL), '{}') AS keywords,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info info ON m.id = info.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, info.info
+),
+ranked_movies AS (
+    SELECT 
+        me.movie_id,
+        me.title,
+        me.production_year,
+        me.movie_info,
+        me.keywords,
+        me.cast_count,
+        RANK() OVER (PARTITION BY me.production_year ORDER BY me.cast_count DESC) AS rank_within_year
+    FROM 
+        movie_ext_info me
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.movie_info,
+    rm.keywords,
+    rm.cast_count,
+    rm.rank_within_year,
+    CASE 
+        WHEN rm.rank_within_year <= 5 THEN 'Top 5'
+        ELSE 'Others'
+    END AS rank_category
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.production_year IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;
+
+-- Adding a NULL logic example: 
+SELECT 
+    DISTINCT m.title,
+    COALESCE(c.note, 'No Role Assigned') AS role_assigned,
+    CASE 
+        WHEN (mc.note IS NULL OR mc.note = '') THEN 'No Company Note'
+        ELSE mc.note
+    END AS company_note
+FROM 
+    title m
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+WHERE 
+    m.production_year > 2000
+    AND (mc.company_id IS NULL OR c.person_id IS NOT NULL);

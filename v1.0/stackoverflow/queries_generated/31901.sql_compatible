@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserVoteStats AS (
+    SELECT
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    COALESCE(userVotes.UpVotes, 0) AS UpVotes,
+    COALESCE(userVotes.DownVotes, 0) AS DownVotes,
+    COALESCE(editStats.EditCount, 0) AS TotalEdits,
+    RANK() OVER (ORDER BY p.ViewCount DESC) AS ViewRank,
+    COUNT(DISTINCT ph.PostId) AS ChildPosts,
+    STRING_AGG(DISTINCT u.DisplayName, ', ') AS VotedUsernames
+FROM 
+    Posts p
+LEFT JOIN 
+    UserVoteStats userVotes ON p.OwnerUserId = userVotes.UserId
+LEFT JOIN 
+    PostHistoryAggregated editStats ON p.Id = editStats.PostId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.ParentId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Users u ON c.UserId = u.Id
+WHERE 
+    p.CreationDate >= DATE '2023-01-01' 
+    AND (p.Score > 0 OR p.ViewCount > 100) 
+GROUP BY 
+    p.Id, p.Title, p.ViewCount, userVotes.UpVotes, userVotes.DownVotes, editStats.EditCount
+HAVING 
+    COUNT(c.Id) > 5
+ORDER BY 
+    ViewRank, p.Id DESC;

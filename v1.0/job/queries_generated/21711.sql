@@ -1,0 +1,92 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.movie_id,
+        0 AS level,
+        mt.id AS title_id,
+        COALESCE(t.title, 'Unknown') AS title,
+        COALESCE(y.production_year, 0) AS production_year,
+        NULL AS parent_id
+    FROM 
+        aka_title AS t
+    JOIN 
+        title AS y ON t.id = y.id
+    WHERE 
+        y.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mc.movie_id,
+        mh.level + 1,
+        mt.id AS title_id,
+        COALESCE(tt.title, 'Unknown') AS title,
+        COALESCE(y.production_year, 0) AS production_year,
+        mh.movie_id AS parent_id
+    FROM 
+        movie_link AS mc
+    JOIN 
+        movie_hierarchy AS mh ON mc.movie_id = mh.linked_movie_id
+    JOIN 
+        aka_title AS mt ON mc.movie_id = mt.movie_id
+    JOIN 
+        title AS tt ON mt.id = tt.id
+    LEFT JOIN 
+        aka_title AS y ON mh.title_id = y.id
+),
+cast_performance AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_cast
+    FROM 
+        cast_info AS ci
+    GROUP BY 
+        ci.movie_id
+),
+info_types AS (
+    SELECT 
+        it.id,
+        it.info AS info_type,
+        STRING_AGG(mi.info, '; ') AS all_info
+    FROM 
+        info_type AS it
+    JOIN 
+        movie_info AS mi ON it.id = mi.info_type_id
+    GROUP BY 
+        it.id
+),
+keyword_stats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cp.total_cast, 0) AS total_cast,
+    COALESCE(cp.noted_cast, 0) AS noted_cast,
+    COALESCE(its.all_info, 'No Info') AS info,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    CASE 
+        WHEN mh.level = 0 THEN 'Top Level'
+        ELSE 'Nested Level'
+    END AS hierarchy_level
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    cast_performance AS cp ON mh.movie_id = cp.movie_id
+LEFT JOIN 
+    info_types AS its ON mh.movie_id = its.id
+LEFT JOIN 
+    keyword_stats AS ks ON mh.movie_id = ks.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (cp.total_cast > 3 OR mh.level = 0)
+ORDER BY 
+    mh.production_year DESC,
+    mh.title ASC;

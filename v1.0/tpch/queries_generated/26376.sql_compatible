@@ -1,0 +1,29 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_phone, s.s_acctbal, 
+           CONCAT('Supplier: ', s.s_name, ', Phone: ', s.s_phone, ', Balance: $', FORMAT(s.s_acctbal, 2)) AS supplier_info
+    FROM supplier s
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           CONCAT('Part: ', p.p_name, ', Brand: ', p.p_brand, ', Price: $', FORMAT(p.p_retailprice, 2)) AS part_info
+    FROM part p
+),
+OrderLineDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           CONCAT('Order: ', o.o_orderkey, ', Total Price: $', FORMAT(o.o_totalprice, 2)) AS order_info, 
+           l.l_partkey, l.l_quantity, l.l_extendedprice, 
+           CONCAT('Line Item: ', l.l_linenumber, ', Quantity: ', l.l_quantity, ', Extended Price: $', FORMAT(l.l_extendedprice, 2)) AS line_item_info,
+           l.l_suppkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+FinalReport AS (
+    SELECT CONCAT_WS(' | ', sd.supplier_info, pd.part_info, old.order_info, old.line_item_info) AS report
+    FROM OrderLineDetails old
+    JOIN PartDetails pd ON old.l_partkey = pd.p_partkey
+    JOIN SupplierDetails sd ON old.l_suppkey = sd.s_suppkey
+)
+SELECT report
+FROM FinalReport
+ORDER BY report;

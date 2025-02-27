@@ -1,0 +1,85 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        m.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        r.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        RecursiveMovieHierarchy r ON m.movie_id = r.movie_id
+    JOIN 
+        aka_title lt ON m.linked_movie_id = lt.id
+    WHERE 
+        r.level < 5 -- Limiting depth for the recursive query
+),
+MovieRoleWithNames AS (
+    SELECT 
+        ci.movie_id,
+        GROUP_CONCAT(DISTINCT CONCAT(n.name, ' as ', rt.role)) AS cast_info,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        cast_info ci
+    JOIN 
+        name n ON ci.person_id = n.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfoWithKeywords AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT k.keyword) AS keywords,
+        COUNT(DISTINCT mi.info_type_id) AS info_type_count
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mi.movie_id
+),
+FinalMovieBenchmark AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        mcn.cast_info,
+        mwk.keywords,
+        mwk.info_type_count,
+        COALESCE(NULLIF(mcn.total_cast, 0), 'No cast available') AS total_cast
+    FROM 
+        RecursiveMovieHierarchy rm
+    LEFT JOIN 
+        MovieRoleWithNames mcn ON rm.movie_id = mcn.movie_id
+    LEFT JOIN 
+        MovieInfoWithKeywords mwk ON rm.movie_id = mwk.movie_id
+)
+SELECT 
+    *,
+    ROW_NUMBER() OVER (ORDER BY production_year DESC) AS row_num,
+    CASE 
+        WHEN production_year <= 2000 THEN 'Classic'
+        WHEN production_year BETWEEN 2001 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_classification
+FROM 
+    FinalMovieBenchmark
+WHERE 
+    (keywords IS NOT NULL OR total_cast IS NOT NULL)
+    AND movie_title NOT LIKE '%Untitled%'
+    AND (production_year BETWEEN 1990 AND 2023)
+ORDER BY 
+    era_classification, production_year DESC, movie_title;

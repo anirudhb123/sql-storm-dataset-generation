@@ -1,0 +1,51 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    INNER JOIN 
+        customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    INNER JOIN 
+        customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        ca.ca_state IN ('CA', 'NY') AND 
+        cd.cd_gender = 'F'
+    GROUP BY 
+        ws.web_site_sk
+),
+average_summary AS (
+    SELECT
+        web_site_sk,
+        total_quantity / NULLIF(total_orders, 0) AS average_quantity_per_order,
+        total_net_paid / NULLIF(total_orders, 0) AS average_net_paid_per_order
+    FROM 
+        sales_summary
+),
+final_summary AS (
+    SELECT 
+        ws.web_site_id,
+        ws.web_name,
+        COALESCE(ass.average_quantity_per_order, 0) AS avg_quantity,
+        COALESCE(ass.average_net_paid_per_order, 0) AS avg_net_paid
+    FROM 
+        web_site ws
+    LEFT JOIN 
+        average_summary ass ON ws.web_site_sk = ass.web_site_sk
+)
+SELECT 
+    f.web_site_id,
+    f.web_name,
+    f.avg_quantity,
+    f.avg_net_paid
+FROM 
+    final_summary f
+ORDER BY 
+    f.avg_net_paid DESC
+LIMIT 10;

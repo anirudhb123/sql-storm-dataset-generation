@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        P.CreationDate, 
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2023-01-01' AND 
+        P.Score > 0
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) >= 5
+),
+StringAggPostTitles AS (
+    SELECT
+        U.Id AS UserId,
+        STRING_AGG(P.Title, ', ') AS PostTitles
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    TU.DisplayName,
+    TU.PostCount,
+    TU.TotalScore,
+    COALESCE(SP.PostTitles, '') AS PostTitles,
+    RP.Title AS LatestPostTitle,
+    RP.CreationDate AS LatestPostDate
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    StringAggPostTitles SP ON TU.UserId = SP.UserId
+LEFT JOIN 
+    RankedPosts RP ON TU.UserId = RP.OwnerDisplayName AND RP.rn = 1
+WHERE 
+    TU.TotalScore > 100
+ORDER BY 
+    TU.TotalScore DESC, TU.PostCount DESC;

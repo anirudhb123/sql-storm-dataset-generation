@@ -1,0 +1,63 @@
+-- Performance benchmarking query to retrieve user activity and post engagement metrics
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPostsCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPostsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.DisplayName AS OwnerName,
+        COUNT(DISTINCT c.Id) AS CommentsPerPost
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount, u.DisplayName
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostsCount,
+    ua.CommentsCount,
+    ua.TotalBounty,
+    ua.UpvotedPostsCount,
+    ua.DownvotedPostsCount,
+    pe.PostId,
+    pe.Title,
+    pe.ViewCount,
+    pe.AnswerCount,
+    pe.CommentCount,
+    pe.FavoriteCount,
+    pe.CommentsPerPost
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostEngagement pe ON ua.UserId = pe.OwnerName
+ORDER BY 
+    ua.PostsCount DESC, ua.TotalBounty DESC;

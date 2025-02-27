@@ -1,0 +1,64 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        RANK() OVER (ORDER BY SUM(p.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        tu.UserRank
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerUserId = tu.UserId
+    WHERE 
+        rp.Score > 10
+)
+
+SELECT 
+    hsp.Title,
+    hsp.Score,
+    hsp.ViewCount,
+    hsp.CommentCount,
+    COALESCE(tu.DisplayName, 'Anonymous') AS Author,
+    CASE 
+        WHEN hsp.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributionLevel
+FROM 
+    HighScoringPosts hsp
+FULL OUTER JOIN 
+    TopUsers tu ON hsp.OwnerUserId = tu.UserId
+WHERE 
+    hsp.CommentCount > 5
+ORDER BY 
+    hsp.Score DESC NULLS LAST;

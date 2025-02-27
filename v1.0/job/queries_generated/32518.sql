@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieCTE c ON ml.movie_id = c.movie_id
+    WHERE 
+        depth < 3
+)
+SELECT 
+    m.title,
+    m.production_year,
+    c.name AS cast_name,
+    ct.kind AS company_type,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS short_plot_count,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'No Role Info' END) AS role_info
+FROM 
+    MovieCTE m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    company_name cn ON cn.imdb_id = m.kind_id
+JOIN 
+    movie_companies mc ON mc.movie_id = m.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+WHERE 
+    m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'Feature Film')
+    AND (ci.role_id IS NOT NULL OR ci.note IS NOT NULL OR ci.nr_order IS NOT NULL)
+GROUP BY 
+    m.title, m.production_year, c.name, ct.kind
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY 
+    m.production_year DESC, 
+    COUNT(DISTINCT mc.company_id) DESC
+LIMIT 100;
+
+This query establishes a recursive CTE to gather movie data based on certain conditions. It performs multiple joins across various tables, including outer joins and aggregates data on cast counts and company types, while involving conditional logic and dealing with potential NULL values. Additionally, the query ensures it captures a particular movie type while keeping group and sort orders applied to return the top results based on specified criteria.

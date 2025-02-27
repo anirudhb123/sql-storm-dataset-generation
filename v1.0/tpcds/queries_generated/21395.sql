@@ -1,0 +1,81 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS high_value_count
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        cd_purchase_estimate > 1000
+    GROUP BY 
+        cd_gender
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_customer_sk
+),
+ReturnStatistics AS (
+    SELECT 
+        COUNT(DISTINCT cr_returning_customer_sk) AS unique_returning_customers,
+        AVG(cr_return_quantity) AS avg_return_qty
+    FROM 
+        catalog_returns
+    HAVING 
+        AVG(cr_return_quantity) > 2
+),
+ShipStatistics AS (
+    SELECT 
+        sm_code,
+        COUNT(*) AS total_shipments,
+        MAX(ws_ship_date_sk) AS last_ship_date
+    FROM 
+        web_sales ws 
+    JOIN 
+        ship_mode sm ON ws_ship_mode_sk = sm_ship_mode_sk
+    GROUP BY 
+        sm_code
+    HAVING 
+        COUNT(*) > 50
+)
+SELECT 
+    hvc.cd_gender,
+    hvc.high_value_count,
+    cs.total_returns, 
+    cs.unique_returning_customers,
+    cs.avg_return_qty,
+    ss.total_shipments,
+    ss.last_ship_date
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    CustomerReturns cs ON hvc.high_value_count > 0 
+LEFT JOIN 
+    ReturnStatistics rs ON true
+LEFT JOIN 
+    ShipStatistics ss ON true
+WHERE 
+    (hvc.high_value_count > 10 AND hvc.cd_gender IS NOT NULL)
+    OR 
+    (hvc.high_value_count IS NULL AND cs.total_returns IS NOT NULL)
+ORDER BY 
+    hvc.high_value_count DESC, 
+    cs.total_returns DESC NULLS LAST
+LIMIT 
+    (SELECT COUNT(*) FROM RankedSales WHERE profit_rank <= 10);

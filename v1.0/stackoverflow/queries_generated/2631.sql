@@ -1,0 +1,60 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END), 0) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        AVG(P.Score) AS AvgPostScore,
+        COUNT(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 END) AS AcceptedAnswers
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    P.TotalPosts,
+    P.AvgPostScore,
+    UVS.UpVotes,
+    UVS.DownVotes,
+    P.AcceptedAnswers,
+    RP.Title AS MostRecentPostTitle,
+    RP.CreationDate AS MostRecentPostDate
+FROM 
+    Users U
+LEFT JOIN 
+    PostStats P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    UserVoteStats UVS ON U.Id = UVS.UserId
+LEFT JOIN 
+    RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.RecentPostRank = 1
+WHERE 
+    U.Reputation > 100
+ORDER BY 
+    U.Reputation DESC
+LIMIT 10;
+
+-- Making sure that only users with a reputation greater than 100 who have made posts are shown
+-- along with their most recent post titles and their vote stats for performance insights.

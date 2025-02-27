@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5  
+),
+MovieDetails AS (
+    SELECT 
+        f.title_id,
+        f.title,
+        f.production_year,
+        kc.keyword AS keyword,
+        ci.note AS cast_note,
+        ci.nr_order,
+        ARRAY_AGG(cn.name) AS company_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        movie_keyword mk ON f.title_id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        cast_info ci ON f.title_id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON f.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        f.title_id, f.title, f.production_year, kc.keyword, ci.note, ci.nr_order
+),
+FinalResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        COALESCE(md.company_names, '{}') AS company_names,
+        md.cast_count,
+        CASE 
+            WHEN md.cast_count > 0 THEN 'Has Cast'
+            ELSE 'No Cast Available'
+        END AS cast_availability
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.keyword,
+    STRING_AGG(DISTINCT fr.company_names) AS company_names,
+    fr.cast_count,
+    fr.cast_availability
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year BETWEEN 2000 AND 2020 
+    AND (fr.keyword IS NOT NULL OR fr.cast_availability = 'Has Cast') 
+GROUP BY 
+    fr.title, fr.production_year, fr.keyword, fr.cast_count, fr.cast_availability
+ORDER BY 
+    fr.production_year DESC, fr.cast_count DESC, fr.title
+LIMIT 100;

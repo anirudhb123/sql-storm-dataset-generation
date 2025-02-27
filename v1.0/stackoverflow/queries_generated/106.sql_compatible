@@ -1,0 +1,74 @@
+
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END), 0) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount,
+        RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        PT.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PT ON PH.PostHistoryTypeId = PT.Id
+    WHERE 
+        PT.Name = 'Post Closed'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    PA.Title,
+    PA.ViewCount,
+    PA.Score,
+    PA.CommentCount,
+    PA.RelatedPostsCount,
+    COALESCE(CP.ClosedDate, 'Not Closed') AS ClosedDate,
+    COALESCE(CP.CloseReason, 'No Reason') AS CloseReason
+FROM 
+    UserScores U
+JOIN 
+    Posts P ON U.UserId = P.OwnerUserId
+JOIN 
+    PostAnalytics PA ON P.Id = PA.PostId
+LEFT JOIN 
+    ClosedPosts CP ON P.Id = CP.PostId
+WHERE 
+    U.Reputation > 1000
+    AND (PA.Score > 5 OR PA.CommentCount > 10)
+ORDER BY 
+    U.Reputation DESC, PA.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY;

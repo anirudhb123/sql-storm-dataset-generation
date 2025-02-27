@@ -1,0 +1,74 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        pt.Name AS PostType,
+        u.DisplayName AS OwnerName,
+        COALESCE(c.CommentCount, 0) AS TotalComments,
+        COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT ParentId, COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2
+        GROUP BY ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag_arr ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_arr
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, pt.Name, u.DisplayName
+),
+
+PostHistoryAnalysis AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        pht.Name AS HistoryType,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.PostType,
+    ps.OwnerName,
+    ps.TotalComments,
+    ps.TotalAnswers,
+    ps.Tags,
+    COALESCE(ha.ChangeCount, 0) AS TotalChanges,
+    COALESCE(ha.Editors, 'No edits') AS EditorsInvolved
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryAnalysis ha ON ps.PostId = ha.PostId
+ORDER BY 
+    ps.CreationDate DESC;

@@ -1,0 +1,31 @@
+SELECT 
+    CONCAT(p.p_name, ' (', p.p_size, ' ', p.p_container, ')') AS part_description,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_id,
+    COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY p.p_partkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    TRIM(REGEXP_REPLACE(s.s_comment, '[^a-zA-Z0-9 ]', '')) AS sanitized_supplier_comment,
+    DATE_FORMAT(o.o_orderdate, '%Y-%m-%d') AS formatted_order_date
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 100.00 AND 
+    s.s_acctbal >= 500.00 AND 
+    c.c_mktsegment = 'BUILDING' 
+GROUP BY 
+    part_description, supplier_name, customer_name, order_id, formatted_order_date
+HAVING 
+    total_revenue > 1000.00
+ORDER BY 
+    total_revenue DESC, part_description ASC;

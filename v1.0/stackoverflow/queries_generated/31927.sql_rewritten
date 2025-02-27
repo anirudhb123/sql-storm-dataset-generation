@@ -1,0 +1,80 @@
+WITH RecursiveUserHierarchy AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        0 AS Level
+    FROM 
+        Users
+    WHERE 
+        Id IN (SELECT DISTINCT UserId FROM Badges)
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        uh.Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        RecursiveUserHierarchy uh ON u.Id = uh.Id 
+    WHERE 
+        u.Reputation > uh.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        COALESCE(COUNT(com.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments com ON p.Id = com.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId, p.AcceptedAnswerId
+),
+TopPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.Score,
+        pd.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY pd.Score DESC) AS Rank
+    FROM 
+        PostDetails pd
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    up.PostId,
+    up.Title,
+    up.ViewCount,
+    up.Score,
+    up.CommentCount
+FROM 
+    RecursiveUserHierarchy u
+JOIN 
+    TopPosts up ON u.Id = up.PostId
+WHERE 
+    up.Rank <= 10 
+ORDER BY 
+    u.Reputation DESC, up.Score DESC;

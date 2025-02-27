@@ -1,0 +1,47 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+), 
+OrderStats AS (
+    SELECT o.o_custkey, 
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spend
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, 
+           n.n_name AS nation_name,
+           r.r_name AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+LineItemAnalytics AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(l.l_linenumber) AS item_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' 
+      AND l.l_shipdate < DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+
+SELECT cr.region_name, 
+       cr.nation_name, 
+       COUNT(DISTINCT cs.c_custkey) AS total_customers,
+       AVG(os.total_spend) AS avg_customer_spend,
+       SUM(ss.total_supply_cost) AS total_supply_cost
+FROM CustomerRegion cr
+LEFT JOIN OrderStats os ON cr.c_custkey = os.o_custkey
+LEFT JOIN SupplierStats ss ON ss.unique_parts > 5
+WHERE cr.region_name IS NOT NULL
+GROUP BY cr.region_name, cr.nation_name
+HAVING COUNT(cs.c_custkey) > 0
+ORDER BY total_supply_cost DESC, avg_customer_spend DESC;

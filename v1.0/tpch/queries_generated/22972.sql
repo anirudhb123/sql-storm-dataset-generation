@@ -1,0 +1,45 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS supply_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC)
+    FROM supply_chain sc
+    JOIN supplier s ON sc.s_suppkey = s.s_suppkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey AND ps.ps_partkey <> sc.ps_partkey
+    WHERE sc.supply_rank <= 3
+),
+total_sales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY l.l_partkey
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, 
+           SUM(c.c_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+complex_query AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           COALESCE(ts.total_revenue, 0) AS total_revenue,
+           COALESCE(sc.ps_availqty, 0) AS available_quantity
+    FROM part p
+    LEFT JOIN total_sales ts ON p.p_partkey = ts.l_partkey
+    LEFT JOIN supply_chain sc ON p.p_partkey = sc.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND EXISTS (SELECT 1 FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey LIMIT 1)))) 
+)
+SELECT cs.n_name, cq.p_partkey, cq.p_name, cq.available_quantity,
+       CASE WHEN cq.total_revenue > 1000 THEN 'High Revenue'
+            WHEN cq.total_revenue BETWEEN 500 AND 1000 THEN 'Medium Revenue'
+            ELSE 'Low Revenue' END AS revenue_category
+FROM complex_query cq
+JOIN nation_summary cs ON cq.p_partkey % 5 = cs.n_nationkey % 5
+WHERE cs.customer_count > 10
+ORDER BY cs.n_name, cq.available_quantity DESC, cq.p_partkey;

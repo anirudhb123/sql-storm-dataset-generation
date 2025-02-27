@@ -1,0 +1,68 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt1.title, 'No Prequel') AS prequel_title,
+        COALESCE(mt2.title, 'No Sequel') AS sequel_title,
+        CASE 
+            WHEN mt.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CAST(mt.production_year AS VARCHAR) 
+        END AS year_label
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id 
+    LEFT JOIN 
+        aka_title mt1 ON ml.linked_movie_id = mt1.id AND ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Prequel')
+    LEFT JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id AND ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Sequel')
+),
+actor_info AS (
+    SELECT 
+        ak.name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count, 
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) * 100 AS acted_in_movies_pct,
+        STRING_AGG(DISTINCT m.title, ', ') AS movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+top_actors AS (
+    SELECT 
+        name, 
+        movie_count,
+        acted_in_movies_pct,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM 
+        actor_info
+    WHERE 
+        acted_in_movies_pct > 50
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.prequel_title,
+    mh.sequel_title,
+    ta.name AS top_actor,
+    ta.movie_count,
+    ta.acted_in_movies_pct,
+    COALESCE(ta.movies, 'No Movies') AS actor_movies
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    top_actors ta ON mh.movie_id IN (SELECT movie_id FROM cast_info WHERE role_id = (SELECT id FROM role_type WHERE role = 'Lead'))
+WHERE 
+    mh.year_label <> 'Unknown Year'
+ORDER BY 
+    mh.production_year DESC, 
+    ta.movie_count DESC
+LIMIT 10;

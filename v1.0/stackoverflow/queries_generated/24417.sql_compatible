@@ -1,0 +1,67 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+), 
+PostStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(P.Score) AS AvgScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PS.Questions, 0) AS Questions,
+        COALESCE(PS.Answers, 0) AS Answers,
+        COALESCE(PS.AvgScore, 0) AS AvgScore,
+        COALESCE(PS.TotalViews, 0) AS TotalViews,
+        CASE 
+            WHEN U.Reputation > 1000 THEN 'Active'
+            ELSE 'New'
+        END AS UserType,
+        U.CreationDate,
+        CASE 
+            WHEN U.Location IS NOT NULL THEN U.Location
+            ELSE 'Unknown'
+        END AS Location,
+        RANK() OVER (ORDER BY COALESCE(PS.TotalPosts, 0) DESC) AS PostRank,
+        DENSE_RANK() OVER (ORDER BY COALESCE(UB.BadgeCount, 0) DESC) AS BadgeRank
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    BadgeCount,
+    TotalPosts,
+    Questions,
+    Answers,
+    AvgScore,
+    TotalViews,
+    UserType,
+    CreationDate,
+    Location,
+    PostRank,
+    BadgeRank
+FROM UserEngagement
+WHERE UserType = 'Active'
+  AND (BadgeCount > 2 OR (TotalPosts > 5 AND AvgScore > 10))
+ORDER BY PostRank, BadgeRank
+LIMIT 10 OFFSET 5;

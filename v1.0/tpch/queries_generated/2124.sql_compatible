@@ -1,0 +1,83 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalValue,
+        COUNT(DISTINCT p.p_partkey) AS PartCount
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.TotalValue,
+        s.PartCount,
+        RANK() OVER (ORDER BY s.TotalValue DESC) AS Rank
+    FROM 
+        SupplierStats s
+),
+NationData AS (
+    SELECT 
+        n.n_name,
+        SUM(o.o_totalprice) AS NationTotal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.n_name AS Nation,
+    COALESCE(c.OrderCount, 0) AS TotalOrders,
+    COALESCE(c.TotalSpent, 0.00) AS TotalSpent,
+    ss.s_name AS Supplier,
+    ss.TotalValue AS SupplierValue,
+    RANK() OVER (PARTITION BY r.n_name ORDER BY ss.TotalValue DESC) AS SupplierRank,
+    CASE 
+        WHEN ss.PartCount > 5 THEN 'Diverse Supplier'
+        ELSE 'Limited Supplier'
+    END AS SupplierDiversity
+FROM 
+    NationData r
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_returnflag = 'N'
+    )
+LEFT JOIN 
+    RankedSuppliers ss ON ss.TotalValue IS NOT NULL
+WHERE 
+    ss.TotalValue > (
+        SELECT AVG(TotalValue) 
+        FROM RankedSuppliers
+    )
+ORDER BY 
+    r.n_name, SupplierRank;

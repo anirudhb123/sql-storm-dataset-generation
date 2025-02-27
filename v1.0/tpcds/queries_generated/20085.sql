@@ -1,0 +1,71 @@
+
+WITH RECURSIVE address_cte AS (
+    SELECT ca_address_sk, ca_city, ca_state 
+    FROM customer_address 
+    WHERE ca_state IN ('NY', 'CA') 
+    UNION ALL 
+    SELECT ca_address_sk, ca_city, ca_state 
+    FROM customer_address 
+    WHERE ca_city IN (SELECT ca_city FROM address_cte)
+), 
+
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT cb.inv_item_sk) AS total_items_bought,
+        SUM(CASE WHEN cb.warehouse_sk IS NULL THEN 0 ELSE cb.inv_quantity_on_hand END) AS total_quantity,
+        SUM(COALESCE(cb.inv_quantity_on_hand, 0)) AS total_quantity_handled
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN inventory cb ON cb.inv_item_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_month BETWEEN 1 AND 6 
+        AND cd.cd_gender IS NOT NULL 
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        total_items_bought > 0
+), 
+
+sales_summary AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_net_profit) AS net_profit,
+        COUNT(ws.ws_item_sk) AS items_sold 
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.ws_ship_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_order_number
+    HAVING 
+        net_profit > 0 
+        OR items_sold > 5
+)
+
+SELECT 
+    ci.c_first_name || ' ' || ci.c_last_name AS full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ss.net_profit,
+    ss.items_sold,
+    (SELECT COUNT(*) 
+     FROM address_cte ac 
+     WHERE ac.ca_city = ci.c_city AND ac.ca_state = ci.c_state) AS active_addresses
+FROM 
+    customer_info ci
+JOIN 
+    sales_summary ss ON ci.c_customer_id = ss.ws_order_number
+WHERE 
+    EXISTS (SELECT 1 FROM call_center cc 
+            WHERE cc.cc_city = ci.c_city 
+              AND cc.cc_state = 'NY') 
+    AND (ci.cd_marital_status = 'M' OR ci.cd_marital_status IS NULL)
+ORDER BY 
+    ci.c_last_name ASC,
+    total_quantity DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

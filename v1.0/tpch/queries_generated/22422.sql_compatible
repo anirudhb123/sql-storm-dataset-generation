@@ -1,0 +1,62 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100) 
+        AND p.p_mfgr LIKE 'Manufacturer%'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    COALESCE(SUM(sc.total_cost), 0) AS total_supplier_cost,
+    COUNT(DISTINCT p.p_partkey) AS part_count,
+    MAX(co.order_count) AS max_orders,
+    MIN(co.total_spent) AS min_spent
+FROM 
+    nation r
+LEFT JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierCosts sc ON s.s_suppkey = sc.ps_suppkey
+LEFT JOIN 
+    RankedParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey))
+WHERE 
+    r.r_regionkey IN (SELECT n.n_regionkey FROM nation n WHERE n.n_name NOT LIKE '%land%')
+GROUP BY 
+    r.n_name
+HAVING 
+    COUNT(p.p_partkey) > 0 
+    OR MAX(co.order_count) >= ALL (SELECT MAX(order_count) FROM CustomerOrders)
+ORDER BY 
+    total_supplier_cost DESC, 
+    nation_name ASC;

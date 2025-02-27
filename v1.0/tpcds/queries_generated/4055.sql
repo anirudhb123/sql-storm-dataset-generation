@@ -1,0 +1,70 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        IFNULL(hd.hd_vehicle_count, 0) AS vehicle_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, hd.hd_vehicle_count
+),
+most_profitable_items AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+    ORDER BY 
+        total_net_profit DESC
+    LIMIT 5
+),
+high_spending_customers AS (
+    SELECT 
+        customer_sk,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        (SELECT 
+            c_customer_sk AS customer_sk,
+            SUM(ws_ext_sales_price) AS total_sales
+         FROM 
+            web_sales
+         WHERE 
+            ws_sold_date_sk IN (SELECT d_date_sk 
+                                FROM date_dim 
+                                WHERE d_year = 2023)
+         GROUP BY 
+            c_customer_sk) AS monthly_totals
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.total_sales,
+    mpi.total_net_profit,
+    hs.customer_sk AS high_spending_customer,
+    hs.sales_rank
+FROM 
+    customer_info ci
+LEFT JOIN 
+    most_profitable_items mpi ON mpi.ws_item_sk = ci.c_customer_sk
+LEFT JOIN 
+    high_spending_customers hs ON hs.customer_sk = ci.c_customer_sk
+WHERE 
+    ci.total_sales > 0
+    AND ci.cd_gender = 'F'
+ORDER BY 
+    ci.total_sales DESC, mpi.total_net_profit DESC;

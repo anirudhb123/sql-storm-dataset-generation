@@ -1,0 +1,56 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns 
+    GROUP BY 
+        sr_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_income_band_sk,
+        cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer_demographics
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    COALESCE(cr.total_return_value, 0) AS total_return_value,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(sd.total_orders, 0) AS total_orders,
+    cd.cd_gender,
+    cd.cd_income_band_sk,
+    cd.cd_purchase_estimate
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    SalesData sd ON c.c_customer_sk = sd.customer_sk
+JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    cd.cd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound <= 50000)
+    AND (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+ORDER BY 
+    total_sales DESC, total_returns DESC
+LIMIT 100;

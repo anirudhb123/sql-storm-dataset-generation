@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND ci.nr_order < 4404 AND mc.note IN ('(2005) (Luxembourg) (all media) (PlayStation 2)', '(2008) (USA) (DVD) (Included in "Icons of Horror Collection: Hammer Films")', '(2010) (USA) (TV) (Video on Demand)', '(presents) (as New Image Films)') AND chn.md5sum < '5adc5bab275a4136ac7b7acc79a0a829';

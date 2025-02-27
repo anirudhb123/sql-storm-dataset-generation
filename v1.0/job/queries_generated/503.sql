@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a 
+    JOIN 
+        cast_info c ON a.id = c.movie_id 
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year, 
+        cast_count 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+DistinctKeywords AS (
+    SELECT DISTINCT 
+        kw.keyword 
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        tm.movie_title, 
+        tm.production_year, 
+        STRING_AGG(dk.keyword, ', ') AS keywords
+    FROM 
+        TopMovies tm 
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = tm.movie_title AND production_year = tm.production_year LIMIT 1)
+    LEFT JOIN 
+        keyword dk ON mk.keyword_id = dk.id
+    GROUP BY 
+        tm.movie_title, tm.production_year
+)
+SELECT 
+    mwk.movie_title,
+    mwk.production_year,
+    mwk.keywords,
+    CASE 
+        WHEN mwk.keywords IS NULL THEN 'No keywords available'
+        ELSE 'Keywords retrieved'
+    END AS keyword_status,
+    COALESCE(mk.info, 'No additional info') AS additional_info,
+    ak.name AS actor_name
+FROM 
+    MoviesWithKeywords mwk 
+LEFT JOIN 
+    movie_info mi ON (SELECT movie_id FROM aka_title WHERE title = mwk.movie_title AND production_year = mwk.production_year LIMIT 1) = mi.movie_id 
+LEFT JOIN 
+    person_info pi ON (SELECT id FROM aka_name WHERE name = 'John Doe' LIMIT 1) = pi.person_id 
+LEFT JOIN 
+    actor a ON pi.id = a.id -- assuming actor mapping
+LEFT JOIN 
+    name ak ON a.id = ak.id
+WHERE 
+    mwk.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mwk.production_year DESC, mwk.movie_title;

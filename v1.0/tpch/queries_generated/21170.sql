@@ -1,0 +1,55 @@
+WITH RankedSales AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS net_revenue,
+        ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS rank
+    FROM 
+        lineitem
+    GROUP BY 
+        l_orderkey, l_partkey
+),
+FrequentSuppliers AS (
+    SELECT 
+        ps_suppkey, 
+        COUNT(DISTINCT ps_partkey) AS part_count
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_suppkey
+    HAVING 
+        COUNT(DISTINCT ps_partkey) > 5
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    COALESCE(SUM(rs.net_revenue), 0) AS total_revenue,
+    STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE p.p_size IS NOT NULL) AS part_names,
+    MAX(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS has_returns
+FROM 
+    nation n
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSales rs ON rs.l_partkey = p.p_partkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    n.n_name LIKE 'A%' AND 
+    (p.p_container = 'SM BOX' OR p.p_container IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10 AND 
+    EXISTS (SELECT 1 FROM FrequentSuppliers fs WHERE fs.ps_suppkey = s.s_suppkey)
+ORDER BY 
+    total_revenue DESC NULLS LAST;

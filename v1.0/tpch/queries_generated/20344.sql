@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, NULL::integer AS parent_suppkey
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.s_suppkey
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey != sh.s_suppkey
+),
+order_stats AS (
+    SELECT o.o_orderkey, o.o_orderstatus,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1995-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+region_nation AS (
+    SELECT r.r_regionkey, r.r_name, n.n_nationkey, n.n_name
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+),
+part_supplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS row_num
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT ns.n_name, ns.r_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(o.total_revenue) AS total_sales,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns
+FROM order_stats o
+CROSS JOIN region_nation ns
+LEFT JOIN part_supplier ps ON ps.row_num = 1 AND ps.ps_availqty > 100
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = ns.n_nationkey
+WHERE ns.n_name IS NOT NULL
+GROUP BY ns.n_name, ns.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > (SELECT COUNT(*) FROM orders) / 10
+ORDER BY total_sales DESC, total_orders DESC
+LIMIT 20;

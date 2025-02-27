@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        AVG(ws.net_paid) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.web_site_id
+),
+store_summary AS (
+    SELECT 
+        s.store_id,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions,
+        SUM(ss.net_paid) AS total_revenue
+    FROM 
+        store s
+    JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        ss.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s.store_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.net_paid) AS total_spent,
+        COUNT(ws.order_number) AS orders_count,
+        RANK() OVER (ORDER BY SUM(ws.net_paid) DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_sales,
+    ss.total_orders,
+    ss.avg_order_value,
+    st.store_id,
+    st.total_revenue,
+    tc.c_customer_id,
+    tc.total_spent,
+    tc.orders_count
+FROM 
+    sales_summary ss
+FULL OUTER JOIN 
+    store_summary st ON ss.total_sales > 100000 OR st.total_revenue > 10000
+JOIN 
+    top_customers tc ON ss.total_orders > 50 OR tc.orders_count > 20
+WHERE 
+    ss.sales_rank <= 10 OR st.total_transactions >= 100
+ORDER BY 
+    ss.total_sales DESC, st.total_revenue DESC, tc.total_spent DESC;

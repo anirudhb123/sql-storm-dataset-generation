@@ -1,0 +1,36 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'ASIA')
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_performance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 100
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    n.n_name AS nation,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(sp.total_supply_cost) AS total_supplier_cost,
+    AVG(os.total_revenue) AS average_order_revenue
+FROM nation_hierarchy n
+LEFT JOIN supplier_performance sp ON n.n_nationkey = sp.s_suppkey
+LEFT JOIN order_summary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY total_supplier_cost DESC, average_order_revenue DESC;

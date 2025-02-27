@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Body,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(a.Id, 0) AS AcceptedAnswerId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON pl.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.Id = p.AcceptedAnswerId
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        unnest(string_to_array(p.Tags, '><')) AS tag_id ON tag_id IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.Id = tag_id::int
+    WHERE 
+        p.PostTypeId = 1 -- Considering only questions
+    GROUP BY 
+        p.Id, a.Id
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 12) AS DeleteCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.TagsList,
+    phs.CloseCount,
+    phs.DeleteCount,
+    phs.ReopenCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId = rp.Id
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,86 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownvotes,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score >= 10
+),
+LinkStatistics AS (
+    SELECT 
+        pl.PostId,
+        COUNT(*) AS TotalLinks,
+        COUNT(DISTINCT pl.RelatedPostId) AS UniqueLinkedPosts
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalUpvotes,
+    ue.TotalDownvotes,
+    ue.TotalComments,
+    ue.TotalBadges,
+    hsp.Score,
+    hsp.ViewCount AS HighScoreViewCount,
+    ls.TotalLinks,
+    ls.UniqueLinkedPosts
+FROM 
+    RecentPosts rp
+JOIN 
+    UserEngagement ue ON rp.OwnerUserId = ue.UserId
+LEFT JOIN 
+    HighScoringPosts hsp ON rp.PostId = hsp.PostId
+LEFT JOIN 
+    LinkStatistics ls ON rp.PostId = ls.PostId
+WHERE 
+    ue.TotalComments > 5 AND
+    (hsp.ScoreRank IS NULL OR hsp.ScoreRank <= 10)
+ORDER BY 
+    rp.ViewCount DESC, 
+    ue.TotalUpvotes DESC;

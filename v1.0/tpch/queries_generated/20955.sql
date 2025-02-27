@@ -1,0 +1,80 @@
+WITH RECURSIVE Part_Supplier AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost
+    FROM partsupp
+    WHERE ps_availqty > 0
+    UNION ALL
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost
+    FROM partsupp ps
+    JOIN Part_Supplier ps2 ON ps.ps_partkey = ps2.ps_partkey
+    WHERE ps.ps_supplycost < ps2.ps_supplycost
+),
+Customer_Order_Summary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_nationkey = c.c_nationkey
+    )
+    GROUP BY c.c_custkey, c.c_name
+),
+Active_Supplier_Stats AS (
+    SELECT s.s_suppkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+           COUNT(DISTINCT l.l_orderkey) AS active_orders
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND ps.ps_availqty IS NOT NULL
+    GROUP BY s.s_suppkey
+),
+Region_Summary AS (
+    SELECT r.r_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(CASE WHEN ns.total_value IS NOT NULL THEN ns.total_value ELSE 0 END) AS total_supply_value
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN (
+        SELECT n.n_nationkey,
+               SUM(ass.total_value) AS total_value
+        FROM Active_Supplier_Stats ass
+        JOIN supplier s ON ass.s_suppkey = s.s_suppkey
+        JOIN nation n ON s.s_nationkey = n.n_nationkey
+        GROUP BY n.n_nationkey
+    ) ns ON n.n_nationkey = ns.n_nationkey
+    GROUP BY r.r_name
+)
+SELECT DISTINCT p.p_name,
+                p.p_brand,
+                c.c_name AS customer_name,
+                rg.r_name AS region_name,
+                css.total_spent,
+                css.order_count,
+                css.last_order_date,
+                CASE 
+                    WHEN rg.total_supply_value > 50000 THEN 'High Supply'
+                    WHEN rg.total_supply_value BETWEEN 20000 AND 50000 THEN 'Moderate Supply'
+                    ELSE 'Low Supply'
+                END AS supply_status
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN Active_Supplier_Stats ass ON ps.ps_suppkey = ass.s_suppkey
+JOIN Customer_Order_Summary css ON css.order_count > 5
+JOIN region rg ON css.c_custkey = (
+    SELECT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' 
+    ORDER BY o.o_orderdate DESC
+    LIMIT 1)
+WHERE p.p_retailprice = (
+    SELECT MAX(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_container LIKE 'SM%'
+)
+AND p.p_comment IS NOT NULL
+ORDER BY css.total_spent DESC, supply_status, p.p_name;

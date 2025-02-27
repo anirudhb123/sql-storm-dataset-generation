@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        COALESCE(m.title, 'Unknown Title') AS title,
+        1 AS level
+    FROM title m
+    WHERE m.production_year = (
+        SELECT MAX(production_year) FROM title
+    )
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        COALESCE(mt.title, 'Unknown Link') AS title,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS role_rank
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN role_type r ON c.role_id = r.id
+),
+keyword_counts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+movies_info AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        COALESCE(cc.keyword_count, 0) AS keyword_count,
+        COALESCE(cr.info_count, 0) AS info_count,
+        COALESCE(cw.total_cast, 0) AS total_cast
+    FROM movie_hierarchy mh
+    LEFT JOIN keyword_counts cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN (
+        SELECT
+            m.movie_id,
+            COUNT(DISTINCT mi.id) AS info_count
+        FROM movie_info mi
+        JOIN title m ON mi.movie_id = m.id
+        GROUP BY m.movie_id
+    ) cr ON mh.movie_id = cr.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(DISTINCT actor_name) AS total_cast
+        FROM cast_with_roles
+        GROUP BY movie_id
+    ) cw ON mh.movie_id = cw.movie_id
+)
+SELECT 
+    mi.title, 
+    mi.keyword_count,
+    mi.info_count,
+    mi.total_cast,
+    COALESCE(t.kind, 'Unknown') AS movie_kind
+FROM movies_info mi
+LEFT JOIN kind_type t ON mi.movie_id = t.id
+WHERE 
+    (mi.keyword_count > 5 OR mi.info_count > 3)
+    AND (mi.total_cast IS NULL OR mi.total_cast < 10)
+ORDER BY 
+    mi.total_cast DESC, 
+    mi.keyword_count DESC
+LIMIT 10;

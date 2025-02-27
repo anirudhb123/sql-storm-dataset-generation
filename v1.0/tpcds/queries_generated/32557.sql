@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ws_bill_customer_sk, SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+    UNION ALL
+    SELECT ws_bill_customer_sk, SUM(cs_net_profit) AS total_profit
+    FROM catalog_sales
+    GROUP BY ws_bill_customer_sk
+    HAVING total_profit > 10000
+),
+AvgSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    LEFT JOIN store s ON ws.ws_store_sk = s.s_store_sk
+    WHERE s.s_number_employees IS NOT NULL
+    GROUP BY ws.bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+    FROM customer_demographics cd
+    INNER JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE c.c_birth_year < 1980 AND cd.cd_purchase_estimate > 5000
+)
+SELECT 
+    cha.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(coalesce(as.avg_net_profit, 0)) AS average_profit,
+    SUM(CASE WHEN hvc.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_customers
+FROM customer_address cha
+LEFT JOIN customer c ON cha.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN AvgSales as ON c.c_customer_sk = as.bill_customer_sk
+LEFT JOIN HighValueCustomers hvc ON c.c_current_cdemo_sk = hvc.cd_demo_sk
+WHERE cha.ca_state = 'CA'
+GROUP BY cha.ca_city
+HAVING total_customers > 10
+ORDER BY average_profit DESC
+LIMIT 5;

@@ -1,0 +1,60 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.ws_item_sk) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 10000 AND 20000
+),
+void_sales AS (
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        cs.cs_sales_price,
+        COALESCE(cs.cs_ext_tax, 0) AS ext_tax,
+        CASE 
+            WHEN cs.cs_sales_price IS NULL THEN 'No Price'
+            ELSE 'Has Price'
+        END AS price_status
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_net_paid = 0 AND cs.cs_order_number NOT IN (SELECT ws_order_number FROM web_sales WHERE ws_net_profit > 0)
+),
+total_sales AS (
+    SELECT 
+        item.i_item_id,
+        COALESCE(SUM(rs.total_profit), 0) AS total_web_profit,
+        COALESCE(SUM(vs.cs_sales_price), 0) AS total_catalog_sales,
+        COUNT(DISTINCT rs.ws_order_number) AS total_orders
+    FROM 
+        item item
+    LEFT JOIN ranked_sales rs ON item.i_item_sk = rs.ws_item_sk AND rs.rn = 1
+    LEFT JOIN void_sales vs ON item.i_item_sk = vs.cs_item_sk
+    GROUP BY 
+        item.i_item_id
+    HAVING 
+        total_web_profit > 1000 OR COUNT(DISTINCT rs.ws_order_number) > 10
+)
+SELECT 
+    ts.i_item_id,
+    CASE 
+        WHEN ts.total_web_profit = 0 THEN 'No profit generated'
+        WHEN ts.total_catalog_sales IS NULL THEN 'No catalog sales'
+        ELSE 'Sales data available'
+    END AS sales_status,
+    ts.total_web_profit,
+    ts.total_catalog_sales,
+    ts.total_orders,
+    MAX(NULLIF(ts.total_web_profit, 0)) OVER () AS max_profit_item,
+    COUNT(*) FILTER (WHERE ts.total_orders > 5) AS prolific_items
+FROM 
+    total_sales ts
+ORDER BY 
+    ts.total_web_profit DESC NULLS LAST;

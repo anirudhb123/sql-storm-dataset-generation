@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankView
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AverageScores AS (
+    SELECT 
+        PostTypeId,
+        AVG(Score) AS AvgScore,
+        AVG(ViewCount) AS AvgViews
+    FROM 
+        Posts 
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY COUNT(b.Id) DESC) AS RankBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.RankScore,
+    rp.RankView,
+    ascores.AvgScore,
+    ascores.AvgViews,
+    us.UserId,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalBounty,
+    us.RankBadges
+FROM 
+    RankedPosts rp
+INNER JOIN 
+    AverageScores ascores ON rp.PostTypeId = ascores.PostTypeId
+LEFT JOIN 
+    UserStats us ON rp.PostId = (CASE WHEN rp.RankScore <= 10 THEN
+        (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+        ELSE NULL END)
+WHERE 
+    rp.RankScore <= 10 OR rp.RankView <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

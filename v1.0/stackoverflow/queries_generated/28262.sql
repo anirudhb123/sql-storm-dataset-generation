@@ -1,0 +1,59 @@
+WITH ProcessedTags AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        Tags AS OriginalTags,
+        string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><') AS ParsedTags,
+        COUNT(*) OVER (PARTITION BY P.Id) AS TagCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Only considering questions for tagging
+),
+UserInteractions AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS VoteCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+TagPopularity AS (
+    SELECT 
+        unnest(ParsedTags) AS TagName,
+        COUNT(*) AS TagFrequency
+    FROM 
+        ProcessedTags
+    GROUP BY 
+        unnest(ParsedTags
+)
+SELECT 
+    U.DisplayName,
+    U.VoteCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    TP.TagName,
+    TP.TagFrequency,
+    PT.Title AS PostTitle,
+    PT.OriginalTags
+FROM 
+    UserInteractions U
+JOIN 
+    ProcessedTags PT ON U.UserId = PT.PostId
+JOIN 
+    TagPopularity TP ON TP.TagName = ANY(PT.ParsedTags)
+WHERE 
+    PT.TagCount > 3 -- Filtering for posts with more than 3 tags
+ORDER BY 
+    U.VoteCount DESC, 
+    TP.TagFrequency DESC;

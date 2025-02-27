@@ -1,0 +1,66 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostID,
+        COUNT(DISTINCT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))) AS TagCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        v.PostId AS PostID,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostAnswerCounts AS (
+    SELECT 
+        p.ParentId AS QuestionID,
+        COUNT(p.Id) AS AnswerCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2  -- Only answers
+    GROUP BY 
+        p.ParentId
+),
+PostAggregates AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ptc.TagCount, 0) AS TagCount,
+        COALESCE(pvc.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(pvc.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(pac.AnswerCount, 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTagCounts ptc ON p.Id = ptc.PostID
+    LEFT JOIN 
+        PostVoteCounts pvc ON p.Id = pvc.PostID
+    LEFT JOIN 
+        PostAnswerCounts pac ON p.Id = pac.QuestionID
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+)
+SELECT 
+    PostID,
+    Title,
+    CreationDate,
+    TagCount,
+    UpVoteCount,
+    DownVoteCount,
+    AnswerCount,
+    (UpVoteCount - DownVoteCount) AS NetScore
+FROM 
+    PostAggregates
+ORDER BY 
+    NetScore DESC
+LIMIT 10;

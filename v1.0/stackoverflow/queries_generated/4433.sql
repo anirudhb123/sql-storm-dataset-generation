@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        u.Reputation,
+        u.Location
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Location
+),
+PostSummary AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViews,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ps.PostCount,
+        ps.TotalScore,
+        ps.AvgViews,
+        ps.LastPostDate,
+        DENSE_RANK() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM UserReputation ur
+    JOIN PostSummary ps ON ur.UserId = ps.OwnerUserId
+    WHERE ur.Reputation > 0
+)
+SELECT *
+FROM TopUsers
+WHERE ReputationRank <= 10
+UNION ALL
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ps.PostCount,
+    ps.TotalScore,
+    ps.AvgViews,
+    ps.LastPostDate
+FROM UserReputation ur
+LEFT JOIN PostSummary ps ON ur.UserId = ps.OwnerUserId
+WHERE ps.PostCount IS NULL
+ORDER BY Reputation DESC, PostCount DESC;

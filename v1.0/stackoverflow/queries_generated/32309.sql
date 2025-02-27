@@ -1,0 +1,65 @@
+WITH RecursiveUserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        1 AS Depth
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        R.Depth + 1
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    JOIN RecursiveUserPosts R ON P.ParentId = R.PostId
+)
+, VoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+, RecentTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS UsageCount
+    FROM Posts P
+    CROSS JOIN LATERAL (
+        SELECT UNNEST(string_to_array(substr(P.Tags, 2, length(P.Tags)-2), '><')) AS TagName
+    ) T
+    WHERE P.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY T.TagName
+)
+SELECT 
+    U.DisplayName,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostDate,
+    COALESCE(VS.UpVoteCount, 0) AS UpVotes,
+    COALESCE(VS.DownVoteCount, 0) AS DownVotes,
+    RUP.Depth,
+    T.TagName,
+    T.UsageCount
+FROM Users U
+JOIN RecursiveUserPosts RUP ON U.Id = RUP.UserId
+JOIN Posts P ON RUP.PostId = P.Id
+LEFT JOIN VoteSummary VS ON P.Id = VS.PostId
+LEFT JOIN RecentTags T ON P.Tags ILIKE '%' || T.TagName || '%'
+WHERE P.Score > 0
+  AND RUP.Depth < 3
+ORDER BY U.DisplayName, P.CreationDate DESC, T.UsageCount DESC
+LIMIT 100;

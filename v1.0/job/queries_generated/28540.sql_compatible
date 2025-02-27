@@ -1,0 +1,57 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rn
+    FROM aka_title a
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN movie_companies mc ON a.id = mc.movie_id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        a.production_year >= 2000
+        AND a.title NOT LIKE '%Untitled%'
+),
+ActorMovies AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM cast_info c
+    GROUP BY c.movie_id
+),
+TopMovies AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        am.actor_count
+    FROM RankedTitles rt
+    JOIN ActorMovies am ON rt.id = am.movie_id
+    WHERE rt.rn = 1 
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        am.actor_count,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM TopMovies tm
+    JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    JOIN ActorMovies am ON tm.movie_id = am.movie_id
+    GROUP BY tm.title, tm.production_year, am.actor_count
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.company_types,
+    COALESCE(
+        (SELECT STRING_AGG(DISTINCT pi.info, ', ')
+         FROM person_info pi 
+         JOIN aka_name an ON pi.person_id = an.person_id
+         WHERE an.name ILIKE '%' || md.title || '%'), 'No Info') AS related_persons_info
+FROM MovieDetails md
+ORDER BY md.production_year DESC, md.actor_count DESC;

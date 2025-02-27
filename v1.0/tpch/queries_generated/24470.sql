@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+        AND ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(co.total_spent) AS total_spend
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(co.total_spend) > (SELECT AVG(total_spend) FROM (SELECT SUM(total_spent) as total_spend FROM CustomerOrders GROUP BY o_custkey) as avg_spend)
+),
+SupplierRegionData AS (
+    SELECT 
+        s.s_suppkey, 
+        r.r_name AS region_name, 
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        s.s_suppkey, r.r_name
+)
+SELECT 
+    p.p_name, 
+    p.p_mfgr, 
+    p.p_retailprice, 
+    COALESCE(ts.total_spend, 0) AS customer_spending,
+    COALESCE(sr.nation_count, 0) AS supplier_nation_count
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.ps_partkey AND rs.rnk = 1
+LEFT JOIN 
+    TopCustomers ts ON rs.ps_suppkey = ts.c_custkey
+LEFT JOIN 
+    SupplierRegionData sr ON rs.ps_suppkey = sr.s_suppkey
+WHERE 
+    p.p_size BETWEEN 1 AND 20
+    AND p.p_comment NOT LIKE '%defective%'
+ORDER BY 
+    p.p_retailprice DESC NULLS LAST, 
+    customer_spending DESC, 
+    supplier_nation_count
+FETCH FIRST 100 ROWS ONLY;

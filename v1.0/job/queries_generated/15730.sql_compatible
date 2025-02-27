@@ -1,0 +1,19 @@
+
+SELECT 
+    t.title, 
+    a.name AS actor_name, 
+    c.kind AS role_type
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    title AS t ON ci.movie_id = t.id
+JOIN 
+    role_type AS c ON ci.role_id = c.id
+WHERE 
+    t.production_year = 2020
+GROUP BY 
+    t.title, 
+    a.name, 
+    c.kind;

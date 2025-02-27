@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        lt.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mv.movie_title,
+    mv.production_year,
+    COUNT(DISTINCT ca.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(mi.info_type_id) AS avg_info_type_id,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count,
+    CASE 
+        WHEN mv.production_year IS NOT NULL THEN EXTRACT(YEAR FROM CURRENT_DATE) - mv.production_year
+        ELSE NULL 
+    END AS movie_age
+FROM 
+    MovieHierarchy mv
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    aka_name ak ON ca.person_id = ak.person_id
+LEFT JOIN 
+    movie_info_idx mi ON mv.movie_id = mi.movie_id
+GROUP BY 
+    mv.movie_title, mv.production_year
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 5 
+ORDER BY 
+    movie_age DESC NULLS LAST;

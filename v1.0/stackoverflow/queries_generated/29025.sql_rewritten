@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  
+),
+TopAnswers AS (
+    SELECT 
+        a.Id AS AnswerId,
+        a.ParentId AS QuestionId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts a
+    LEFT JOIN 
+        Comments c ON a.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON a.Id = v.PostId
+    WHERE 
+        a.PostTypeId = 2  
+    GROUP BY 
+        a.Id, a.ParentId
+),
+FinalMetrics AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Tags,
+        r.OwnerDisplayName,
+        r.CreationDate,
+        r.Score AS QuestionScore,
+        r.ViewCount AS QuestionViewCount,
+        COALESCE(a.CommentCount, 0) AS AnswerCommentCount,
+        COALESCE(a.UpVotes, 0) AS AnswerUpVotes,
+        COALESCE(a.DownVotes, 0) AS AnswerDownVotes,
+        r.UserRank
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        TopAnswers a ON r.PostId = a.QuestionId
+)
+SELECT 
+    Title,
+    Tags,
+    OwnerDisplayName,
+    CreationDate,
+    QuestionScore,
+    QuestionViewCount,
+    AnswerCommentCount,
+    AnswerUpVotes,
+    AnswerDownVotes,
+    UserRank
+FROM 
+    FinalMetrics
+WHERE 
+    UserRank <= 5  
+ORDER BY 
+    QuestionScore DESC,  
+    CreationDate DESC;

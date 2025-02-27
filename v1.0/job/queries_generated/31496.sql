@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2010
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+),
+CastCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rc.actor_count,
+        COALESCE(rc.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN CastCount rc ON rm.movie_id = rc.movie_id
+)
+SELECT 
+    m.movie_title,
+    m.production_year,
+    m.level,
+    m.actor_count,
+    CASE 
+        WHEN m.actor_count > 5 THEN 'Star-Studded'
+        WHEN m.actor_count = 0 THEN 'No Cast'
+        ELSE 'Moderate Cast'
+    END AS cast_description
+FROM 
+    MoviesWithActors m
+WHERE 
+    m.production_year BETWEEN 2015 AND 2020
+ORDER BY 
+    m.production_year, 
+    m.actor_count DESC;

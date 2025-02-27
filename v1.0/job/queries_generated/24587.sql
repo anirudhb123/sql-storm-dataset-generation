@@ -1,0 +1,88 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        RANK() OVER (PARTITION BY c.person_id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS movie_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+FilteredTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.production_year >= 2000
+    GROUP BY 
+        t.id
+    HAVING 
+        COUNT(DISTINCT mk.keyword_id) < 10
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name c ON mc.company_id = c.id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+MovieStatistics AS (
+    SELECT 
+        ft.title,
+        ft.production_year,
+        cd.company_name,
+        cd.company_type,
+        cd.cast_count,
+        ROW_NUMBER() OVER (PARTITION BY cd.company_type ORDER BY cd.cast_count DESC) AS company_rank
+    FROM 
+        FilteredTitles ft
+    JOIN 
+        CompanyDetails cd ON ft.title_id = cd.movie_id
+)
+SELECT 
+    ms.title,
+    ms.production_year,
+    ms.company_name,
+    ms.company_type,
+    ms.cast_count,
+    EXISTS (
+        SELECT 1 FROM RecursiveCTE rc 
+        WHERE rc.person_id IN (
+            SELECT ci.person_id FROM cast_info ci 
+            WHERE ci.movie_id = ms.company_id
+        )
+    ) AS has_frequent_cast,
+    CASE 
+        WHEN ms.cast_count IS NULL THEN 'No cast' 
+        ELSE 'Has cast' 
+    END AS cast_info
+FROM 
+    MovieStatistics ms
+WHERE 
+    ms.company_rank <= 5
+ORDER BY 
+    ms.production_year DESC, 
+    ms.cast_count DESC 
+OFFSET (SELECT COUNT(*) FROM MovieStatistics) / 2 ROWS 
+FETCH NEXT 10 ROWS ONLY;

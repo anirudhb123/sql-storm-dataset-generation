@@ -1,0 +1,80 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = 1  -- Assuming 1 corresponds to movies
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link m
+    JOIN 
+        aka_title mt ON m.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+),
+
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        t.title, 
+        t.production_year,
+        RANK() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS recent_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT mc.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ar.actor_name,
+    ar.role_name,
+    COALESCE(mci.companies, 'No companies') AS companies,
+    mci.company_count,
+    CASE 
+        WHEN ar.recent_rank = 1 THEN 'Most Recent'
+        WHEN ar.recent_rank <= 3 THEN 'Recent'
+        ELSE 'Older'
+    END AS actor_status
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles ar ON mh.movie_id = ar.movie_id AND ar.recent_rank <= 3  -- Last 3 roles of each actor
+LEFT JOIN 
+    MovieCompanyInfo mci ON mh.movie_id = mci.movie_id
+WHERE 
+    mh.level = 0  -- Only top-level movies
+ORDER BY 
+    mh.production_year DESC, mci.company_count DESC;

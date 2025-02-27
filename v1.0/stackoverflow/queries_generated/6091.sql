@@ -1,0 +1,63 @@
+WITH UserVoteDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount
+    FROM Posts p
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, pt.Name
+),
+RankedPosts AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Score,
+        pd.ViewCount,
+        pd.PostType,
+        pd.CommentCount,
+        ud.UserId,
+        ud.DisplayName,
+        ud.UpVotes,
+        ud.DownVotes,
+        ud.TotalVotes,
+        ROW_NUMBER() OVER (PARTITION BY pd.PostType ORDER BY pd.Score DESC, pd.ViewCount DESC) AS Rank
+    FROM PostDetails pd
+    JOIN Users u ON pd.OwnerUserId = u.Id
+    JOIN UserVoteDetails ud ON u.Id = ud.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostType,
+    rp.CommentCount,
+    rp.DisplayName AS OwnerDisplayName,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.TotalVotes,
+    rp.Rank
+FROM RankedPosts rp
+WHERE rp.Rank <= 10
+ORDER BY rp.PostType, rp.Rank;

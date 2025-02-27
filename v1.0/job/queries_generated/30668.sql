@@ -1,0 +1,100 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        ep.id AS movie_id,
+        ep.title,
+        ep.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title ep
+    INNER JOIN 
+        MovieHierarchy mh ON ep.episode_of_id = mh.movie_id
+),
+ActorScores AS (
+    SELECT 
+        ci.person_id,
+        SUM(CASE 
+            WHEN role.role = 'Actor' THEN 1 
+            ELSE 0 
+        END) AS total_actors,
+        COUNT(DISTINCT m.id) AS total_movies
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type role ON ci.role_id = role.id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        a.total_actors,
+        a.total_movies,
+        (a.total_actors::decimal / NULLIF(a.total_movies, 0)) AS actor_score
+    FROM 
+        ActorScores a
+    WHERE 
+        a.total_movies > 0
+),
+TotalMovies AS (
+    SELECT 
+        COUNT(DISTINCT mt.id) AS total_movies_count
+    FROM 
+        aka_title mt
+),
+PopularTitles AS (
+    SELECT 
+        a.id,
+        a.title,
+        a.production_year,
+        COUNT(ci.person_id) AS actor_count
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    GROUP BY 
+        a.id
+    HAVING 
+        COUNT(ci.person_id) > (SELECT total_movies_count / 20 FROM TotalMovies)
+    ORDER BY 
+        actor_count DESC
+    LIMIT 10
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ta.person_id,
+    ta.actor_score,
+    pt.actor_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    TopActors ta ON ta.person_id IN (
+        SELECT 
+            ci.person_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.movie_id = mh.movie_id
+    ) 
+LEFT JOIN 
+    PopularTitles pt ON pt.id = mh.movie_id
+ORDER BY 
+    mh.production_year DESC,
+    ta.actor_score DESC NULLS LAST;

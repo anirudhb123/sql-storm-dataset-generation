@@ -1,0 +1,36 @@
+-- Performance benchmarking query
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    ups.UserId,
+    ups.Reputation,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalScore,
+    ups.AvgViewCount,
+    b.Name AS BadgeName,
+    COUNT(b.Id) AS TotalBadges
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    Badges b ON ups.UserId = b.UserId
+GROUP BY 
+    ups.UserId, ups.Reputation, b.Name
+ORDER BY 
+    ups.Reputation DESC, ups.TotalScore DESC;

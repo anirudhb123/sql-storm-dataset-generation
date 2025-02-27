@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        CUME_DIST() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.web_site_sk) AS total_quantity,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_net_paid
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY
+        ws.web_site_sk, ws.ws_order_number
+),
+TopWebsites AS (
+    SELECT
+        DISTINCT web_site_sk
+    FROM
+        RankedSales
+    WHERE 
+        profit_rank <= 0.10
+),
+CustomerReturns AS (
+    SELECT
+        sr.returned_date_sk,
+        COUNT(sr.returned_quantity) AS total_returns,
+        SUM(COALESCE(sr.return_amt, 0)) AS total_return_amount,
+        SUM(COALESCE(sr.return_tax, 0)) AS total_return_tax
+    FROM
+        store_returns sr
+    WHERE
+        sr.returned_date_sk > (
+            SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = (SELECT MAX(d_year) FROM date_dim)
+        )
+    GROUP BY
+        sr.returned_date_sk
+),
+FinalReport AS (
+    SELECT
+        wa.warehouse_id,
+        wa.warehouse_name,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_profit,
+        COUNT(DISTINCT cs.customer_sk) AS unique_customers,
+        COUNT(DISTINCT sr.return_ticket_number) AS total_store_returns
+    FROM
+        warehouse wa
+    LEFT JOIN
+        web_sales ws ON wa.warehouse_sk = ws.ws_warehouse_sk
+    LEFT JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN
+        CustomerReturns sr ON sr.returned_date_sk = ws.ws_sold_date_sk
+    JOIN
+        TopWebsites tw ON tw.web_site_sk = ws.ws_web_site_sk
+    WHERE
+        (ws.ws_net_paid_inc_tax IS NOT NULL AND ws.ws_net_paid_inc_tax > 0)
+        OR (sr.total_returns IS NULL)
+    GROUP BY
+        wa.warehouse_id, wa.warehouse_name
+    HAVING
+        SUM(ws.ws_net_profit) > (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2 WHERE ws2.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim))
+    ORDER BY
+        total_profit DESC
+)
+SELECT * FROM FinalReport
+WHERE unique_customers > (SELECT COUNT(DISTINCT c_customer_sk) / 10 FROM customer)
+ORDER BY total_profit, unique_customers DESC;

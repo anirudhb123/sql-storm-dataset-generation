@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CategoryHierarchy AS (
+    SELECT i_category_id, i_category, 1 AS depth
+    FROM item
+    WHERE i_category_id IS NOT NULL
+    UNION ALL
+    SELECT ic.i_category_id, ic.i_category, ch.depth + 1
+    FROM item ic
+    JOIN CategoryHierarchy ch ON ic.i_category_id = ch.i_category_id
+    WHERE ch.depth < 5
+),
+SalesSummary AS (
+    SELECT 
+        coalesce(ws.sold_date_sk, cs.sold_date_sk, ss.sold_date_sk) AS sale_date,
+        COALESCE(ws.ws_net_profit, cs.cs_net_profit, ss.ss_net_profit) AS net_profit,
+        COUNT(DISTINCT CASE WHEN ws.ws_order_number IS NOT NULL THEN ws.ws_order_number END) AS web_sales_count,
+        COUNT(DISTINCT CASE WHEN cs.cs_order_number IS NOT NULL THEN cs.cs_order_number END) AS catalog_sales_count,
+        COUNT(DISTINCT CASE WHEN ss.ss_ticket_number IS NOT NULL THEN ss.ss_ticket_number END) AS store_sales_count
+    FROM web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    FULL OUTER JOIN store_sales ss ON cs.cs_order_number = ss.ss_ticket_number
+    GROUP BY sale_date
+),
+TopCategories AS (
+    SELECT 
+        ch.i_category_id,
+        ch.i_category,
+        SUM(s.net_profit) AS total_profit
+    FROM CategoryHierarchy ch
+    JOIN SalesSummary s ON ch.i_category_id = s.sale_date
+    GROUP BY ch.i_category_id, ch.i_category
+    ORDER BY total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    a.c_first_name || ' ' || a.c_last_name AS customer_name,
+    a.c_email_address,
+    a.c_birth_day,
+    a.c_birth_month,
+    a.c_birth_year,
+    b.total_profit
+FROM customer a
+LEFT JOIN TopCategories b ON a.c_customer_sk = b.i_category_id
+WHERE (a.c_birth_year IS NULL OR a.c_birth_year > 1990)
+   AND (b.total_profit > 0 OR b.total_profit IS NULL)
+ORDER BY b.total_profit DESC NULLS LAST;

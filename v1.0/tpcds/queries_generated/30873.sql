@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_quantity,
+        SUM(cr.return_net_loss) AS total_net_loss
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.returning_customer_sk
+    HAVING
+        SUM(cr.return_quantity) > 0
+),
+TopCustomers AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_returned_quantity,
+        cr.total_net_loss,
+        DENSE_RANK() OVER (ORDER BY cr.total_net_loss DESC) AS rank
+    FROM
+        customer c
+    JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+),
+SalesDetails AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ws.ws_sales_price,
+        ws.ws_ship_date_sk,
+        d.d_date AS sales_date,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS type_sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+)
+SELECT
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    COALESCE(SUM(sd.ws_net_profit), 0) AS total_sales_profit,
+    COUNT(sd.ws_order_number) AS total_orders,
+    STRING_AGG(DISTINCT CONCAT('Order:', sd.ws_order_number, ' | Date:', sd.sales_date), '; ') AS order_details
+FROM
+    TopCustomers tc
+LEFT JOIN
+    SalesDetails sd ON tc.c_customer_id = sd.ws_order_number
+WHERE
+    tc.rank <= 10
+GROUP BY
+    tc.c_customer_id, tc.c_first_name, tc.c_last_name
+ORDER BY
+    total_sales_profit DESC;

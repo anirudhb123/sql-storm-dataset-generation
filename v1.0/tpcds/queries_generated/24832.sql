@@ -1,0 +1,44 @@
+
+WITH RECURSIVE price_history AS (
+    SELECT i_item_sk, i_current_price, 
+           i_item_desc, 
+           ROW_NUMBER() OVER (PARTITION BY i_item_sk ORDER BY i_rec_start_date) AS rn
+    FROM item
+    WHERE i_rec_start_date < CURRENT_DATE
+), 
+sales_info AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+)
+SELECT a.ca_city, 
+       COALESCE(b.total_quantity, 0) AS total_quantity_sold,
+       COALESCE((SELECT MAX(i_current_price) FROM price_history ph WHERE ph.i_item_sk = a.i_item_sk), 0) AS max_price_history,
+       NESTED.VALUE AS nested_value
+FROM customer_address a
+LEFT JOIN sales_info b ON a.ca_address_sk = b.ws_item_sk 
+LEFT JOIN LATERAL (
+    SELECT CONCAT('Nested value for: ', a.ca_city) AS VALUE
+) AS NESTED ON TRUE   
+WHERE a.ca_state IS NOT NULL 
+  AND (b.total_quantity <> 0 OR a.ca_country IS NULL)
+UNION ALL
+SELECT d.d_year AS year,
+       SUM(ss_sales_price) AS total_store_sales,
+       AVG(ss_net_profit) AS avg_net_profit,
+       CASE 
+           WHEN SUM(ss_sales_price) OVER (PARTITION BY d.d_year) > 100000
+           THEN 'Profitable'
+           ELSE 'Loss'
+       END AS profitability_status
+FROM store_sales s
+JOIN date_dim d ON s.ss_sold_date_sk = d.d_date_sk
+WHERE d.d_month_seq IN (SELECT DISTINCT d_month_seq 
+                         FROM date_dim 
+                         WHERE d_year = 2023 AND d_dow = 1)
+GROUP BY d.d_year, d.d_month_seq
+HAVING SUM(ss_sales_price) > 0
+ORDER BY year DESC, total_store_sales DESC;

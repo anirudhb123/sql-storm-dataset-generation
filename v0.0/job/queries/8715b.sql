@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.season_nr < 33 AND mi.info > 'FACT: The film takes place in the early 1850s. Towards the end, in a scene set in a theater, the producer announces to the audience that "a new form of entertainment has come from the South," and he would like to be the first to present it in New York City. We then see a minstrel show. But by that time minstrel shows had been staged in New York for a decade, since the Virginia Minstrels performed at the New York Bowery Amphitheatre in 1843.' AND t.episode_nr < 4749;

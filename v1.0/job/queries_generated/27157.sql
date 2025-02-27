@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre') 
+        AND mi.info LIKE '%Drama%'
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.company_names,
+        rm.keywords,
+        ROW_NUMBER() OVER (ORDER BY rm.cast_count DESC, rm.production_year DESC) AS rank
+    FROM 
+        RankedMovies rm
+)
+
+SELECT 
+    tm.title AS Movie_Title,
+    tm.production_year AS Production_Year,
+    tm.cast_count AS Cast_Count,
+    tm.company_names AS Production_Companies,
+    tm.keywords AS Associated_Keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.cast_count DESC;
+
+This query benchmarks string processing by retrieving the top 10 movies that fall under the "Drama" genre, ranked by the number of unique cast members. Additionally, it aggregates the associated production companies and keywords into comma-separated strings for concise representation.

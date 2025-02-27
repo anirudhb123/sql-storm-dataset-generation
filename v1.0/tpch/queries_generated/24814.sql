@@ -1,0 +1,91 @@
+WITH RECURSIVE BlindSpot AS (
+    SELECT 
+        n_name, 
+        n_nationkey, 
+        COUNT(DISTINCT c_custkey) OVER(PARTITION BY n_nationkey ORDER BY n_name) AS cust_count,
+        ROW_NUMBER() OVER (PARTITION BY n_nationkey ORDER BY n_name DESC) AS rn
+    FROM 
+        nation 
+    JOIN 
+        customer ON n_nationkey = c_nationkey
+    WHERE 
+        n_name LIKE 'B%'
+    UNION ALL
+    SELECT 
+        n_name,
+        n_nationkey,
+        cust_count,
+        rn + 1
+    FROM 
+        BlindSpot
+    WHERE 
+        rn < 5
+), Prices AS (
+    SELECT 
+        p_partkey, 
+        p_name,
+        CASE 
+            WHEN p_size IS NULL THEN 0 
+            ELSE p_retailprice * p_size END AS adjusted_price
+    FROM 
+        part
+), SupplierAvailability AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Fulfilled'
+            ELSE 'Pending'
+        END AS order_status,
+        DENSE_RANK() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS status_rank
+    FROM 
+        orders o
+), LineItemAnalysis AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    bs.n_name AS nation,
+    p.p_name AS part_name,
+    pa.total_avail,
+    oa.total_extended_price,
+    CASE 
+        WHEN pa.adjusted_price > 100 THEN 'High Price'
+        WHEN pa.adjusted_price BETWEEN 50 AND 100 THEN 'Medium Price'
+        ELSE 'Low Price'
+    END AS price_category,
+    COUNT(DISTINCT c.c_custkey) AS customer_count
+FROM 
+    BlindSpot bs
+LEFT JOIN 
+    Prices pa ON pa.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty < 10)
+JOIN 
+    SupplierAvailability sa ON sa.s_suppkey = pa.p_partkey % 10
+LATERAL JOIN 
+    OrdersSummary oa ON oa.o_orderkey = pa.p_partkey + 1000
+JOIN 
+    customer c ON c.c_nationkey = bs.n_nationkey
+GROUP BY 
+    bs.n_name, p.p_name, pa.total_avail, oa.total_extended_price, pa.adjusted_price
+HAVING 
+    COUNT(DISTINCT c.c_custkey) < 50 OR MAX(pa.adjusted_price) IS NOT NULL
+ORDER BY 
+    price_category DESC, customer_count ASC;

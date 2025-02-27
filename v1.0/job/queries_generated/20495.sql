@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        COALESCE(CONCAT(a.name, ' (', a.md5sum, ')'), 'Unknown Actor') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_in_year
+    FROM
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE
+        t.production_year IS NOT NULL
+        AND t.production_year > 2000
+        AND a.name IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+KeywordRankedTitles AS (
+    SELECT 
+        r.title_id,
+        r.title,
+        r.actor_name,
+        mwk.keywords,
+        r.rank_in_year
+    FROM 
+        RankedTitles r
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON r.title_id = mwk.movie_id
+    WHERE 
+        (r.rank_in_year = 1 OR r.keywords IS NOT NULL)
+)
+SELECT 
+    t.title,
+    COALESCE(t.keywords, 'No keywords') AS associated_keywords,
+    t.actor_name,
+    COUNT(m.title_id) OVER (PARTITION BY t.actor_name) AS movies_with_actor,
+    AVG(LENGTH(t.title)) OVER () AS avg_title_length,
+    COUNT(t.title) FILTER (WHERE t.title ILIKE '%Mystery%') AS mystery_titles
+FROM 
+    KeywordRankedTitles t
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = t.title_id
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') 
+        AND mi.info IS NULL
+    )
+    AND (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = t.title_id) > 1
+ORDER BY 
+    t.title;

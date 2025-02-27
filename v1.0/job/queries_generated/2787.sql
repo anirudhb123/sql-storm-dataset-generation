@@ -1,0 +1,60 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_summary AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COALESCE(SUM(mi.info IS NOT NULL)::int, 0) AS info_count,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    LEFT JOIN 
+        movie_info mi ON pi.info_type_id = mi.info_type_id AND mi.info IS NOT NULL
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id, a.name
+),
+top_actors AS (
+    SELECT 
+        person_id,
+        name,
+        movie_count,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        actor_summary
+    WHERE 
+        movie_count > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ta.name AS top_actor,
+    ta.movie_count,
+    (SELECT COUNT(DISTINCT k.keyword) 
+     FROM movie_keyword mk 
+     JOIN keyword k ON mk.keyword_id = k.id 
+     WHERE mk.movie_id = rm.movie_id) AS keyword_count
+FROM 
+    ranked_movies rm
+JOIN 
+    top_actors ta ON rm.cast_count > 5 AND ta.movie_count > 5 
+WHERE 
+    rm.rank <= 10 
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

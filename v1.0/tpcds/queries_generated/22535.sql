@@ -1,0 +1,54 @@
+
+WITH RECURSIVE addr_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 1 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+
+    UNION ALL
+
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_zip, ah.level + 1
+    FROM customer_address ca
+    JOIN addr_hierarchy ah ON ca.ca_address_sk = ah.ca_address_sk
+    WHERE ca.ca_zip IS NOT NULL AND ah.level < 5
+),
+customer_sales AS (
+    SELECT c.c_customer_sk, 
+           SUM(ws.ws_net_profit) AS total_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           MAX(ws.ws_sales_price) AS max_sales_price,
+           MIN(ws.ws_sales_price) AS min_sales_price,
+           DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+),
+demographic_analysis AS (
+    SELECT cd.cd_gender,
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+           MAX(cd.cd_credit_rating) AS credit_rating,
+           LISTAGG(DISTINCT ws.ws_order_number) WITHIN GROUP (ORDER BY ws.ws_order_number) AS order_numbers
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY cd.cd_gender
+)
+SELECT ah.ca_city,
+       ah.ca_state,
+       ah.ca_zip,
+       da.customer_count,
+       da.avg_purchase_estimate,
+       SUM(cs.total_profit) AS total_profit,
+       MAX(cs.order_count) AS max_orders,
+       (SELECT COUNT(*)
+        FROM (SELECT DISTINCT c.c_customer_sk
+              FROM customer c
+              WHERE c.c_birth_year IS NOT NULL) sub) AS total_customers_with_birth_year,
+       COALESCE(MIN(CASE WHEN cs.profit_rank = 1 THEN cs.total_profit END), 0) AS top_profit
+FROM addr_hierarchy ah
+LEFT JOIN customer_sales cs ON ah.ca_address_sk = cs.c_customer_sk
+LEFT JOIN demographic_analysis da ON da.cd_gender IS NOT NULL
+GROUP BY ah.ca_city, ah.ca_state, ah.ca_zip
+HAVING SUM(cs.total_profit) > 1000 OR COUNT(DISTINCT cs.c_customer_sk) > 10
+ORDER BY total_profit DESC, ca_city
+LIMIT 10;

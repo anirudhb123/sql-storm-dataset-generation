@@ -1,0 +1,54 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation > 1000
+),
+PostAnalysis AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ph.Comment, 'No comments') AS LastEditComment,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedCount,
+        PARENT.PostId AS RelatedPostId
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5)  -- Edit Title or Body
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN Posts PARENT ON pl.RelatedPostId = PARENT.Id
+    WHERE p.PostTypeId IN (1, 2)  -- Questions and Answers
+    GROUP BY p.Id, p.Title, p.CreationDate, ph.Comment, PARENT.PostId
+),
+Combined AS (
+    SELECT
+        u.DisplayName,
+        u.Reputation,
+        pa.Title,
+        pa.CreationDate,
+        pa.CommentCount,
+        pa.UpVoteCount,
+        pa.DownVoteCount,
+        pa.AcceptedCount,
+        pa.LastEditComment
+    FROM UserReputation u
+    JOIN PostAnalysis pa ON u.UserId = pa.RelatedPostId
+)
+SELECT 
+    c.*,
+    COALESCE((SELECT COUNT(*) 
+              FROM PostHistory ph 
+              WHERE ph.PostId = c.PostId AND ph.PostHistoryTypeId = 12), 0) AS DeletionCount,
+    CASE 
+        WHEN c.UpVoteCount > c.DownVoteCount THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityLabel
+FROM Combined c
+ORDER BY c.Reputation DESC, c.CommentCount DESC;

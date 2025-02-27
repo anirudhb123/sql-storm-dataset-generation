@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+
+    UNION ALL
+
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_paid,
+        level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_cte s ON cs_item_sk = s.ws_item_sk AND cs_order_number = s.ws_order_number
+    WHERE 
+        cs_sold_date_sk = (SELECT MAX(cs_sold_date_sk) FROM catalog_sales)
+)
+
+SELECT 
+    ca.city,
+    SUM(COALESCE(ss_quantity, 0) + COALESCE(cs_quantity, 0)) AS total_quantity,
+    AVG(CASE 
+        WHEN ss_sales_price > 0 THEN ss_sales_price
+        ELSE cs_sales_price 
+    END) AS average_price,
+    COUNT(DISTINCT CASE 
+        WHEN ws_order_number IS NOT NULL THEN ws_order_number 
+        ELSE cs_order_number 
+    END) AS order_count,
+    MAX(sales_date) AS last_sales_date
+FROM 
+    customer_address ca
+LEFT JOIN 
+    store_sales ss ON ca.ca_address_sk = ss.ss_store_sk
+FULL OUTER JOIN 
+    catalog_sales cs ON ca.ca_address_sk = cs.cs_bill_addr_sk
+LEFT JOIN 
+    sales_cte sc ON sc.ws_item_sk = ss.ss_item_sk OR sc.ws_item_sk = cs.cs_item_sk
+WHERE 
+    ca.ca_city IS NOT NULL AND 
+    (ca.ca_country = 'USA' OR ca.ca_state = 'CA') AND 
+    (ss_sales_price IS NOT NULL OR cs_sales_price IS NOT NULL)
+GROUP BY 
+    ca.city
+HAVING 
+    COUNT(DISTINCT ss_order_number) > 5 OR 
+    SUM(COALESCE(ss_quantity, 0) + COALESCE(cs_quantity, 0)) > 1000
+ORDER BY 
+    total_quantity DESC 
+LIMIT 10;

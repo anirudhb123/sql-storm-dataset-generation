@@ -1,0 +1,69 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId OR U.Id = P.LastEditorUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        TotalBounty, 
+        PostsCount, 
+        CommentsCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+),
+PopularPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY P.Score DESC) AS PopularityRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.CreationDate, P.OwnerDisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBounty,
+    U.PostsCount,
+    U.CommentsCount,
+    P.Title AS TopPostTitle,
+    P.Score AS TopPostScore,
+    P.PopularityRank
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PopularPosts P ON U.UserId = P.OwnerDisplayName
+WHERE 
+    U.ReputationRank <= 10
+ORDER BY 
+    U.Reputation DESC,
+    P.PopularityRank ASC
+LIMIT 5;

@@ -1,0 +1,79 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(COALESCE(Posts.Score, 0)) AS TotalScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '>')::int[])
+    WHERE 
+        Posts.PostTypeId = 1 
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS QuestionsAsked,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvotesReceived,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvotesReceived
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON Votes.UserId = Users.Id AND Votes.PostId IN (SELECT Id FROM Posts WHERE PostTypeId = 1)
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        TagCounts
+),
+UserPostActivity AS (
+    SELECT 
+        UserActivity.DisplayName,
+        TagCounts.TagName,
+        UserActivity.QuestionsAsked,
+        UserActivity.CommentsMade,
+        UserActivity.UpvotesReceived,
+        UserActivity.DownvotesReceived,
+        COALESCE(TopTags.PostCount, 0) AS PostsRelatedToTag
+    FROM 
+        UserActivity
+    LEFT JOIN 
+        TopTags ON TRUE
+)
+SELECT 
+    UserActivity.DisplayName,
+    TagCounts.TagName,
+    UserActivity.QuestionsAsked,
+    UserActivity.CommentsMade,
+    UserActivity.UpvotesReceived,
+    UserActivity.DownvotesReceived,
+    COALESCE(TopTags.PostCount, 0) AS PostsRelatedToTag
+FROM 
+    UserPostActivity
+JOIN 
+    UserActivity ON UserActivity.UserId = UserActivity.UserId
+JOIN 
+    TagCounts ON TRUE
+WHERE 
+    UserActivity.CommentsMade > 5 
+    AND UserActivity.QuestionsAsked > 3
+ORDER BY 
+    UserActivity.UpvotesReceived DESC, TagCounts.TotalScore DESC
+LIMIT 10;

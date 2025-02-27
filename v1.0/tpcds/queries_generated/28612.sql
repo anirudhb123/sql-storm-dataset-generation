@@ -1,0 +1,65 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca.ca_suite_number) ELSE '' END) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country,
+        DENSE_RANK() OVER (PARTITION BY ca.ca_city ORDER BY ca.ca_address_sk) AS city_rank
+    FROM 
+        customer_address ca
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ad.full_address,
+        ad.city_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.full_address,
+    sd.total_sales,
+    sd.order_count,
+    CASE 
+        WHEN sd.total_sales IS NULL THEN 'NO SALES'
+        WHEN sd.total_sales < 1000 THEN 'LOW SPENDER'
+        WHEN sd.total_sales BETWEEN 1000 AND 5000 THEN 'MEDIUM SPENDER'
+        ELSE 'HIGH SPENDER'
+    END AS spending_category
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+WHERE 
+    cd.city_rank <= 5
+ORDER BY 
+    cd.c_city, cd.c_last_name, cd.c_first_name;

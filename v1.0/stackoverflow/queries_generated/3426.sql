@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore = 1
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    trp.Title,
+    trp.CreationDate,
+    trp.ViewCount,
+    trp.Score,
+    trp.CommentCount
+FROM 
+    Users u
+JOIN 
+    TopRankedPosts trp ON u.Id = trp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    u.Reputation >= 1000
+ORDER BY 
+    trp.Score DESC, 
+    u.Reputation DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;
+
+SELECT 
+    p.Id AS PostId,
+    pt.Name AS PostType,
+    COUNT(v.Id) AS VoteCount
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate < NOW() - INTERVAL '30 days'
+GROUP BY 
+    p.Id, pt.Name
+HAVING 
+    COUNT(v.Id) > 10
+ORDER BY 
+    VoteCount DESC;

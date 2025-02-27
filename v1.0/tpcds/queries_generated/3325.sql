@@ -1,0 +1,50 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_net_paid) AS avg_net_paid
+    FROM 
+        customer c
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+income_summary AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        household_demographics h
+        JOIN customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+        LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        h.hd_income_band_sk
+),
+date_filter AS (
+    SELECT 
+        d.d_date_sk
+    FROM 
+        date_dim d 
+    WHERE 
+        d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 6
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    COALESCE(cs.total_orders, 0) AS orders_count,
+    COALESCE(cs.total_profit, 0) AS total_profit,
+    COALESCE(is.customer_count, 0) AS customer_count,
+    COALESCE(is.total_return_amt, 0) AS total_return_amt,
+    ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY COALESCE(cs.total_profit, 0) DESC) AS profit_rank
+FROM 
+    item i
+    LEFT JOIN customer_stats cs ON i.i_item_sk = cs.c_customer_sk
+    LEFT JOIN income_summary is ON cs.c_customer_sk = is.customer_count
+WHERE 
+    EXISTS (SELECT 1 FROM date_filter df WHERE df.d_date_sk = ws.ws_sold_date_sk)
+ORDER BY 
+    total_profit DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

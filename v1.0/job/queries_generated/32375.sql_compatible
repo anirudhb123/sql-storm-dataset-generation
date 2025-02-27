@@ -1,0 +1,59 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        pt.id AS movie_id,
+        pt.title,
+        0 AS level,
+        CAST(pt.title AS VARCHAR(255)) AS path
+    FROM
+        aka_title pt
+    WHERE
+        pt.kind_id = 1  
+    UNION ALL
+    SELECT
+        mt.linked_movie_id,
+        mt.title,
+        mh.level + 1,
+        CONCAT(mh.path, ' -> ', mt.title)
+    FROM
+        movie_link ml
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3  
+),
+cast_and_info AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(CASE WHEN pi.info_type_id = 1 THEN LENGTH(pi.info) ELSE NULL END) AS avg_person_info_length  
+    FROM
+        cast_info ci
+    LEFT JOIN person_info pi ON ci.person_id = pi.person_id
+    GROUP BY
+        ci.movie_id
+),
+keyword_info AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    mh.movie_id,
+    mh.title,
+    COALESCE(cai.total_cast, 0) AS total_cast,
+    COALESCE(cai.avg_person_info_length, 0) AS avg_person_info_length,
+    COALESCE(ki.keywords, '') AS keywords,
+    mh.path
+FROM
+    movie_hierarchy mh
+LEFT JOIN cast_and_info cai ON mh.movie_id = cai.movie_id
+LEFT JOIN keyword_info ki ON mh.movie_id = ki.movie_id
+ORDER BY
+    mh.level,
+    mh.title;

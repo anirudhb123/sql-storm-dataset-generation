@@ -1,0 +1,83 @@
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount,
+        SUM(Posts.Score) AS TotalScore,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(Posts.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(Posts.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Reputation
+),
+PostStats AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Posts.Score,
+        Posts.CommentCount,
+        Posts.AnswerCount,
+        Posts.FavoriteCount,
+        COUNT(Votes.Id) AS VoteCount
+    FROM 
+        Posts
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Posts.Id, Posts.Title, Posts.CreationDate, Posts.ViewCount, Posts.Score, Posts.CommentCount, Posts.AnswerCount, Posts.FavoriteCount
+),
+AggregateStats AS (
+    SELECT 
+        UserStats.UserId,
+        UserStats.Reputation,
+        UserStats.PostCount,
+        UserStats.BadgeCount,
+        UserStats.TotalScore,
+        UserStats.TotalViews,
+        UserStats.TotalUpVotes,
+        UserStats.TotalDownVotes,
+        COUNT(PostStats.PostId) AS PostStatsCount,
+        AVG(PostStats.Score) AS AvgPostScore,
+        SUM(PostStats.ViewCount) AS TotalPostViews,
+        SUM(PostStats.VoteCount) AS TotalVotes
+    FROM 
+        UserStats
+    LEFT JOIN 
+        PostStats ON UserStats.UserId = PostStats.OwnerUserId
+    GROUP BY 
+        UserStats.UserId, 
+        UserStats.Reputation, 
+        UserStats.PostCount,
+        UserStats.BadgeCount,
+        UserStats.TotalScore,
+        UserStats.TotalViews,
+        UserStats.TotalUpVotes,
+        UserStats.TotalDownVotes
+)
+
+SELECT 
+    UserId,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    TotalScore,
+    TotalViews,
+    TotalUpVotes,
+    TotalDownVotes,
+    PostStatsCount,
+    AvgPostScore,
+    TotalPostViews,
+    TotalVotes
+FROM 
+    AggregateStats
+ORDER BY 
+    Reputation DESC;

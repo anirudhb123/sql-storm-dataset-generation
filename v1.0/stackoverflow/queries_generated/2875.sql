@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) as PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    CASE 
+        WHEN rp.Score > 100 THEN 'Highly Rated'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Moderately Rated'
+        ELSE 'Low Rated' 
+    END AS RatingCategory,
+    COALESCE(MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END), 'No Closures') AS LastClosedDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistory ph ON rp.Id = ph.PostId
+WHERE 
+    rp.PostRank <= 5
+GROUP BY 
+    rp.Id, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.CommentCount, rp.UpVoteCount, rp.DownVoteCount
+ORDER BY 
+    rp.Score DESC
+LIMIT 10
+UNION 
+SELECT 
+    'Total Posts' AS Title,
+    NULL AS CreationDate,
+    COUNT(*) AS ViewCount,
+    SUM(Score) AS Score,
+    (SELECT COUNT(*) FROM Comments) AS CommentCount,
+    (SELECT SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) FROM Votes) AS UpVoteCount,
+    (SELECT SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) FROM Votes) AS DownVoteCount,
+    NULL AS RatingCategory,
+    NULL AS LastClosedDate
+FROM 
+    Posts
+WHERE 
+    CreationDate >= NOW() - INTERVAL '1 year';

@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM Posts p
+    WHERE p.CreationDate >= (NOW() - INTERVAL '30 days')
+),
+PostHistoryAnalytics AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MIN(ph.CreationDate) AS FirstChange,
+        MAX(ph.CreationDate) AS LastChange,
+        STRING_AGG(DISTINCT ph.UserDisplayName, '; ') AS Editors
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+CombinedData AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        up.Reputation AS UserReputation,
+        rp.PostId,
+        rp.Title AS PostTitle,
+        rp.CreationDate AS PostCreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        pha.ChangeCount,
+        pha.FirstChange,
+        pha.LastChange,
+        pha.Editors,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId IN (2, 4)), 0) AS TotalVotes,
+        CASE 
+            WHEN COALESCE(rp.Score, 0) > 10 THEN 'Popular' 
+            WHEN COALESCE(rp.Score, 0) BETWEEN 1 AND 10 THEN 'Moderate' 
+            ELSE 'Unpopular' 
+        END AS PopularityCategory
+    FROM RecentPosts rp
+    LEFT JOIN UserReputation up ON up.Id = rp.OwnerUserId
+    LEFT JOIN PostHistoryAnalytics pha ON pha.PostId = rp.PostId
+    LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+)
+SELECT 
+    cd.UserName,
+    cd.UserReputation,
+    cd.PostTitle,
+    cd.PostCreationDate,
+    cd.ViewCount,
+    cd.CommentCount,
+    cd.ChangeCount,
+    cd.FirstChange,
+    cd.LastChange,
+    cd.Editors,
+    cd.TotalVotes,
+    cd.PopularityCategory
+FROM CombinedData cd
+WHERE cd.UserReputation >= (SELECT AVG(Reputation) FROM Users)
+ORDER BY cd.ViewCount DESC NULLS LAST, cd.CommentCount DESC, cd.PopularityCategory
+LIMIT 50;

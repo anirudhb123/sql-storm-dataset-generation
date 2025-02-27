@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR) 
+        AND p.ViewCount > COALESCE(NULLIF(p.Score, 0), 1) * 10
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        ARRAY_AGG(b.Name) AS BadgeNames,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT c.Name, ', ') AS CloseReasonNames,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON CAST(ph.Comment AS INT) = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        ub.BadgeNames,
+        cp.CloseReasonNames,
+        cp.LastClosedDate,
+        CASE 
+            WHEN rp.Score > 0 THEN 'Positive Score'
+            WHEN rp.Score < 0 THEN 'Negative Score'
+            ELSE 'Neutral Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.PostId = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RowNum <= 3 
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.CommentCount,
+    COALESCE(ps.BadgeNames, '{}') AS Badges,
+    COALESCE(ps.CloseReasonNames, 'Not Closed') AS CloseReasons,
+    ps.LastClosedDate,
+    ps.ScoreCategory,
+    COUNT(DISTINCT p.Id) OVER () AS TotalPostsCount
+FROM 
+    PostSummary ps
+LEFT JOIN 
+    Posts p ON ps.PostId = p.Id
+WHERE 
+    p.OwnerUserId IS NOT NULL 
+    AND EXISTS (SELECT 1 FROM Comments c WHERE c.PostId = ps.PostId)
+ORDER BY 
+    ps.CommentCount DESC, ps.CreationDate DESC;

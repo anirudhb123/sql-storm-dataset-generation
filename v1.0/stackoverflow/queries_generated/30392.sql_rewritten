@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        RP.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RP ON P.ParentId = RP.PostId
+), 
+
+UserActivities AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END), 0) AS ClosedPosts,
+        COALESCE(SUM(B.Class = 1), 0) AS GoldBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+RecentPostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        AVG(COALESCE(V.Score, 0)) AS AverageScore,
+        R.Level AS PostLevel
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy R ON P.Id = R.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, R.Level
+),
+
+RankedUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.CommentCount,
+        UA.UpVotes,
+        UA.DownVotes,
+        UA.ClosedPosts,
+        UA.GoldBadges,
+        RANK() OVER (ORDER BY UA.UpVotes DESC, UA.CommentCount DESC) AS UserRank
+    FROM 
+        UserActivities UA
+)
+
+SELECT 
+    P.Title AS PostTitle,
+    PS.ViewCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.AverageScore AS PostAverageScore,
+    U.DisplayName AS UserDisplayName,
+    U.UserRank,
+    R.PostLevel,
+    P.CreationDate
+FROM 
+    RecentPostStatistics PS
+JOIN 
+    Posts P ON PS.PostId = P.Id
+JOIN 
+    RankedUsers U ON P.OwnerUserId = U.UserId
+JOIN 
+    RecursivePostHierarchy R ON P.Id = R.PostId
+WHERE 
+    U.GoldBadges > 0 
+ORDER BY 
+    PS.ViewCount DESC, 
+    UserRank
+LIMIT 10;

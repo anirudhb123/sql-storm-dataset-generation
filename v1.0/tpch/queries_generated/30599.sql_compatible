@@ -1,0 +1,75 @@
+
+WITH RECURSIVE sales_totals AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+
+    UNION ALL
+    
+    SELECT 
+        st.c_custkey,
+        st.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        sales_totals st
+    JOIN 
+        orders o ON st.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1998-01-01' AND o.o_orderdate < '1999-01-01'
+    GROUP BY 
+        st.c_custkey, st.c_name
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ranked_sales AS (
+    SELECT 
+        st.c_name,
+        st.total_sales,
+        ROW_NUMBER() OVER (ORDER BY st.total_sales DESC) AS sales_rank
+    FROM 
+        sales_totals st
+    WHERE 
+        st.total_sales IS NOT NULL
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    s_info.s_name AS supplier_name,
+    COALESCE(rs.sales_rank, 0) AS customer_rank,
+    s_info.total_supply_cost,
+    rs.total_sales
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    supplier_info s_info ON ns.n_nationkey = s_info.s_suppkey
+LEFT JOIN 
+    ranked_sales rs ON s_info.s_name = rs.c_name
+WHERE 
+    s_info.total_supply_cost > (SELECT AVG(total_supply_cost) FROM supplier_info)
+ORDER BY 
+    region_name, nation_name, customer_rank;

@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Tags,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+        AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+),
+PostBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopContributors AS (
+    SELECT 
+        r.OwnerUserId,
+        r.OwnerDisplayName,
+        COUNT(r.PostId) AS QuestionCount,
+        SUM(r.Score) AS TotalScore,
+        COALESCE(pb.BadgeCount, 0) AS TotalBadges
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        PostBadges pb ON r.OwnerUserId = pb.UserId
+    GROUP BY 
+        r.OwnerUserId, r.OwnerDisplayName
+    ORDER BY 
+        QuestionCount DESC, TotalScore DESC
+),
+PostHistoryAggregate AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS PostHistoryTypes,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tc.OwnerDisplayName,
+    tc.QuestionCount,
+    tc.TotalScore,
+    tc.TotalBadges,
+    p.Title AS TopQuestionTitle,
+    p.Body AS TopQuestionBody,
+    ph.PostHistoryTypes,
+    ph.HistoryCount
+FROM 
+    TopContributors tc
+INNER JOIN 
+    RankedPosts p ON tc.OwnerUserId = p.OwnerUserId AND p.PostRank = 1
+LEFT JOIN 
+    PostHistoryAggregate ph ON p.PostId = ph.PostId
+WHERE 
+    tc.QuestionCount > 5 
+ORDER BY 
+    tc.TotalScore DESC;

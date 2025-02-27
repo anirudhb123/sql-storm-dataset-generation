@@ -1,0 +1,35 @@
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name AS supplier_name,
+    CONCAT(c.c_name, ' - ', c.c_address) AS customer_info,
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    r.r_name AS region_name
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON s.s_nationkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size >= 10 AND p.p_size <= 20
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, c.c_name, c.c_address, p.p_comment, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    avg_extended_price DESC
+LIMIT 100;

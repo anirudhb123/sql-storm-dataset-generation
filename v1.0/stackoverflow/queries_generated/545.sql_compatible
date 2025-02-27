@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY p.Score DESC) AS UserPostRank,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, U.DisplayName
+), UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts p ON U.Id = p.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), TopTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', Tags.TagName, '%')
+    WHERE 
+        p.CreationDate >= '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year'
+    GROUP BY 
+        Tags.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    UP.DisplayName AS TopUser,
+    UP.TotalViews,
+    UP.TotalScore,
+    UP.PostCount,
+    RP.Title AS TopPostTitle,
+    RP.Score AS TopPostScore,
+    TT.TagName AS PopularTag
+FROM 
+    UserStats UP
+JOIN 
+    (SELECT 
+        OwnerDisplayName,
+        Title,
+        Score
+    FROM 
+        RankedPosts
+    WHERE 
+        UserPostRank = 1) RP ON UP.DisplayName = RP.OwnerDisplayName
+CROSS JOIN 
+    TopTags TT
+ORDER BY 
+    UP.TotalScore DESC, UP.TotalViews DESC
+LIMIT 10;

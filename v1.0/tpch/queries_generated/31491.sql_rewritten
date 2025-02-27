@@ -1,0 +1,45 @@
+WITH RECURSIVE nation_sales(n_nationkey, sales) AS (
+    SELECT n.n_nationkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY n.n_nationkey
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, SUM(l.l_extendedprice * (1 - l.l_discount)) 
+    FROM nation_sales ns
+    JOIN supplier s ON s.s_nationkey = ns.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    WHERE ns.sales > 10000 
+    GROUP BY n.n_nationkey
+),
+
+customer_order_counts AS (
+    SELECT c.c_nationkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+
+ranked_sales AS (
+    SELECT n.n_name, ns.sales, RANK() OVER (ORDER BY ns.sales DESC) AS sales_rank
+    FROM nation n
+    JOIN nation_sales ns ON n.n_nationkey = ns.n_nationkey
+),
+
+final_summary AS (
+    SELECT n.n_name, COALESCE(c.order_count, 0) AS total_orders, ns.sales, rs.sales_rank
+    FROM ranked_sales rs
+    LEFT JOIN customer_order_counts c ON rs.n_name = (SELECT n_name FROM nation WHERE n_nationkey = c.c_nationkey)
+    JOIN nation_sales ns ON ns.n_nationkey = rs.n_name
+)
+
+SELECT *
+FROM final_summary
+WHERE total_orders > 5 OR sales > 10000
+ORDER BY sales_rank, total_orders DESC;

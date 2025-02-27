@@ -1,0 +1,91 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(pa.Id, -1) AS AcceptedAnswerId,
+        COALESCE(a.Score, 0) AS AcceptedAnswerScore,
+        COALESCE(SUM(v.Id * 1.0) / NULLIF(COUNT(v.Id), 0), 0) AS AverageVote,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        Posts p
+        LEFT JOIN Posts pa ON p.AcceptedAnswerId = pa.Id
+        LEFT JOIN Votes v ON v.PostId = p.Id
+        LEFT JOIN Comments c ON c.PostId = p.Id
+        LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, pa.Id
+),
+TopUsers AS (
+    SELECT 
+        urt.UserId,
+        urt.Reputation
+    FROM 
+        UserReputation urt
+    WHERE 
+        urt.Rank <= 100
+),
+PostDetails AS (
+    SELECT 
+        pi.PostId,
+        pi.Title,
+        pi.CreationDate,
+        pi.ViewCount,
+        pi.AcceptedAnswerId,
+        pi.AcceptedAnswerScore,
+        pi.AverageVote,
+        td.UserId,
+        COUNT(DISTINCT t.Tags) AS DistinctTagsCount
+    FROM 
+        PostInfo pi
+        LEFT JOIN Tags t ON t.ExcerptPostId = pi.PostId 
+        LEFT JOIN TopUsers td ON pi.AcceptedAnswerScore > 0
+    GROUP BY 
+        pi.PostId, pi.Title, pi.CreationDate, pi.ViewCount, pi.AcceptedAnswerId, pi.AcceptedAnswerScore, pi.AverageVote, td.UserId
+),
+FinalResults AS (
+    SELECT 
+        pd.Title,
+        pd.ViewCount,
+        pd.AcceptedAnswerScore,
+        COALESCE(AVG(pd.AverageVote), 0) AS OverallVote,
+        pd.UserId,
+        CASE 
+            WHEN pd.ViewCount > 1000 THEN 'Hot'
+            ELSE 'Normal'
+        END AS PostType,
+        COUNT(pd.PostId) AS RelatedPostsCount
+    FROM 
+        PostDetails pd
+    GROUP BY 
+        pd.Title, pd.ViewCount, pd.AcceptedAnswerScore, pd.UserId
+)
+SELECT 
+    fr.Title,
+    fr.ViewCount,
+    fr.AcceptedAnswerScore,
+    fr.OverallVote,
+    fr.PostType,
+    fr.RelatedPostsCount,
+    COALESCE(MAX(b.Name), 'No Badge') AS UserBadge
+FROM 
+    FinalResults fr
+    LEFT JOIN Badges b ON b.UserId = fr.UserId AND b.Class = 1 /* Gold badge */
+GROUP BY 
+    fr.Title, fr.ViewCount, fr.AcceptedAnswerScore, fr.OverallVote, fr.PostType, fr.RelatedPostsCount
+ORDER BY 
+    fr.ViewCount DESC, 
+    fr.AcceptedAnswerScore DESC, 
+    fr.OverallVote DESC;

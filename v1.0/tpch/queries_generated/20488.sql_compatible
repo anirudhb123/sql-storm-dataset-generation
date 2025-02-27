@@ -1,0 +1,73 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.p_type) AS total_parts
+    FROM part p
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        (SELECT COUNT(*) 
+         FROM partsupp ps 
+         WHERE ps.ps_suppkey = s.s_suppkey 
+         AND ps.ps_availqty > 0) AS available_parts
+    FROM supplier s
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date,
+        CASE 
+            WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders'
+            WHEN SUM(o.o_totalprice) > 1000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_segment
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ProductSuppliers AS (
+    SELECT 
+        lp.l_orderkey,
+        lp.l_partkey,
+        s.s_name AS supplier_name,
+        lp.l_quantity,
+        lp.l_discount,
+        CASE 
+            WHEN lp.l_returnflag = 'Y' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM lineitem lp
+    JOIN partsupp ps ON lp.l_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    c.c_name, 
+    cp.total_orders,
+    cp.total_spent, 
+    cp.last_order_date,
+    pp.p_name,
+    pp.p_retailprice,
+    sp.supplier_name,
+    sp.l_quantity,
+    sp.return_status
+FROM CustomerOrderSummary cp
+JOIN RankedParts pp ON pp.rn <= 10  
+LEFT JOIN ProductSuppliers sp ON cp.total_orders > 0 AND sp.l_orderkey IN (
+    SELECT l_orderkey 
+    FROM lineitem 
+    WHERE l_quantity > (
+        SELECT AVG(l_quantity) FROM lineitem
+    )
+)
+ORDER BY cp.total_spent DESC, pp.p_retailprice ASC
+LIMIT 20;

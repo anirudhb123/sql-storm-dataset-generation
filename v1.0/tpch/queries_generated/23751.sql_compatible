@@ -1,0 +1,102 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        s.s_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        LEAST(ps.ps_supplycost * ps.ps_availqty, 10000) AS capped_total_cost
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerByRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name,
+        r.r_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            ELSE CAST(c.c_acctbal AS VARCHAR)
+        END AS balance_status
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name IN ('ASIA', 'EUROPE')
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+EligibleOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.total_revenue,
+        CASE 
+            WHEN os.total_revenue > 5000 THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS revenue_category
+    FROM 
+        OrderSummary os
+    WHERE 
+        os.total_items > (SELECT AVG(total_items) FROM OrderSummary)
+)
+SELECT 
+    ps.ps_partkey,
+    rp.s_name,
+    rp.s_acctbal,
+    eb.total_revenue,
+    eb.revenue_category,
+    CASE 
+        WHEN eb.revenue_category = 'Above Average' 
+        AND rp.rn <= 3 THEN 'High Value Supplier' 
+        ELSE 'Standard Supplier' 
+    END AS supplier_status,
+    STRING_AGG(cbr.balance_status, ', ') AS customer_balance
+FROM 
+    SupplierParts ps
+LEFT JOIN 
+    RankedSuppliers rp ON ps.ps_suppkey = rp.s_suppkey
+LEFT JOIN 
+    EligibleOrders eb ON eb.o_orderkey IN (
+        SELECT DISTINCT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_partkey = ps.ps_partkey
+    )
+LEFT JOIN 
+    CustomerByRegion cbr ON cbr.c_custkey IN (
+        SELECT DISTINCT o.o_custkey 
+        FROM orders o 
+        WHERE o.o_orderkey = eb.o_orderkey
+    )
+WHERE 
+    (rp.s_acctbal IS NOT NULL OR ps.ps_supplycost > 500)
+GROUP BY 
+    ps.ps_partkey, rp.s_name, rp.s_acctbal, eb.total_revenue, eb.revenue_category, rp.rn
+ORDER BY 
+    ps.ps_partkey, rp.s_acctbal DESC;

@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        a.name AS director_name,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        RANK() OVER (ORDER BY m.production_year DESC, COUNT(DISTINCT kc.keyword) DESC) AS movie_rank
+    FROM 
+        title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id AND c.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Director')
+    JOIN 
+        aka_name a ON c.imdb_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    GROUP BY 
+        m.id, m.title, m.production_year, a.name
+), MovieInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.director_name,
+        rm.keyword_count,
+        COALESCE(mi.info, 'No Information') AS additional_info
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Summary')
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    director_name,
+    keyword_count,
+    additional_info
+FROM 
+    MovieInfo
+WHERE 
+    movie_rank <= 10
+ORDER BY 
+    production_year DESC, keyword_count DESC;

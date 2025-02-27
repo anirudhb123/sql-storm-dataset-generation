@@ -1,0 +1,64 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY u.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT p.Id) OVER (PARTITION BY u.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation IS NOT NULL AND 
+        u.Location IS NOT NULL
+),
+RecentComments AS (
+    SELECT 
+        c.UserId,
+        c.CreationDate,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days') 
+    GROUP BY 
+        c.UserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.ReputationRank,
+    ru.PostCount,
+    COALESCE(rc.TotalComments, 0) AS RecentCommentsCount,
+    ub.BadgeNames,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    RecentComments rc ON ru.UserId = rc.UserId
+LEFT JOIN 
+    UserBadges ub ON ru.UserId = ub.UserId
+WHERE 
+    (ru.Reputation > 1000 AND ru.ReputationRank <= 3) 
+    OR (ru.ReputationRank IS NULL AND ru.PostCount = 0)
+ORDER BY 
+    ru.Reputation DESC, ru.Location DESC NULLS LAST
+LIMIT 100;

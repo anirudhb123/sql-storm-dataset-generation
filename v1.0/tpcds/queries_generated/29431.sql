@@ -1,0 +1,69 @@
+
+WITH address_summary AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(ca_city, ', ' ORDER BY ca_city) AS cities,
+        STRING_AGG(DISTINCT ca_street_name || ' ' || ca_street_type, ', ' ORDER BY ca_street_name) AS street_names
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+customer_summary AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_credit_rating, ', ') AS credit_ratings
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+date_summary AS (
+    SELECT 
+        d_year,
+        STRING_AGG(DISTINCT d_day_name, ', ') AS weekdays,
+        COUNT(*) AS total_days
+    FROM 
+        date_dim
+    GROUP BY 
+        d_year
+),
+joined_summary AS (
+    SELECT 
+        a.ca_state,
+        a.address_count,
+        a.cities,
+        c.cd_gender,
+        c.cd_marital_status,
+        c.avg_purchase_estimate,
+        c.credit_ratings,
+        d.d_year,
+        d.weekdays,
+        d.total_days
+    FROM 
+        address_summary a
+    CROSS JOIN 
+        customer_summary c
+    CROSS JOIN 
+        date_summary d
+)
+SELECT 
+    js.ca_state,
+    js.address_count,
+    js.cities,
+    js.cd_gender,
+    js.cd_marital_status,
+    js.avg_purchase_estimate,
+    js.credit_ratings,
+    js.d_year,
+    js.weekdays,
+    js.total_days
+FROM 
+    joined_summary js
+WHERE 
+    js.avg_purchase_estimate > 1000
+ORDER BY 
+    js.ca_state, js.cd_gender;

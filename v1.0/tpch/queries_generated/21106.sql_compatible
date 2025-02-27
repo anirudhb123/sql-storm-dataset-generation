@@ -1,0 +1,48 @@
+
+WITH RecursiveCTE AS (
+    SELECT ps.partkey, ps.suppkey, ps.availqty,
+           ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM partsupp ps
+    WHERE ps.availqty > (
+        SELECT AVG(ps_inner.availqty)
+        FROM partsupp ps_inner
+        WHERE ps_inner.partkey = ps.partkey
+    )
+),
+AggregatedSums AS (
+    SELECT p.p_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN RecursiveCTE r ON p.p_partkey = r.partkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+          AND r.availqty > 0
+          AND p.p_retailprice IS NOT NULL
+    GROUP BY p.p_partkey
+),
+SuppliersData AS (
+    SELECT s.s_suppkey,
+           COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+           SUM(s.s_acctbal) AS total_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 5
+)
+SELECT a.p_partkey, 
+       a.total_sales,
+       COALESCE(s.supplied_parts, 0) AS supplier_count,
+       RANK() OVER (ORDER BY a.total_sales DESC) AS sales_rank,
+       CASE 
+           WHEN s.total_balance IS NULL THEN 'No Suppliers'
+           WHEN s.total_balance < 1000 THEN 'Low Balance'
+           ELSE 'Healthy Balance'
+       END AS balance_status
+FROM AggregatedSums a
+LEFT JOIN SuppliersData s ON a.p_partkey = s.s_suppkey
+WHERE (a.order_count > 10 AND a.return_count = 0)
+   OR (a.total_sales > 10000 AND s.total_balance IS NOT NULL)
+ORDER BY a.total_sales DESC, sales_rank;

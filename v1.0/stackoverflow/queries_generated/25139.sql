@@ -1,0 +1,51 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativeScoreCount,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews,
+        AVG(COALESCE(c.CommentCount, 0)) AS AvgComments,
+        AVG(COALESCE(a.AnswerCount, 0)) AS AvgAnswers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT ParentId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY ParentId) a ON p.Id = a.ParentId
+    WHERE 
+        t.TagName IS NOT NULL
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        PositiveScoreCount, 
+        NegativeScoreCount, 
+        AvgViews, 
+        AvgComments, 
+        AvgAnswers,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tt.PositiveScoreCount,
+    tt.NegativeScoreCount,
+    tt.AvgViews,
+    tt.AvgComments,
+    tt.AvgAnswers
+FROM 
+    TopTags tt
+WHERE 
+    tt.TagRank <= 10
+ORDER BY 
+    tt.PostCount DESC;
+
+This query calculates various statistics related to tags in the Stack Overflow schema, including the number of posts, the number of positive and negative scores, the average number of views, comments, and answers for each tag. It ranks the tags based on the number of associated posts and retrieves the top 10 tags for analysis.

@@ -1,0 +1,58 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+top_nations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    ORDER BY supplier_count DESC
+    LIMIT 5
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+),
+final_summary AS (
+    SELECT 
+        n.n_name AS nation_name,
+        p.p_name AS part_name,
+        SUM(l.net_revenue) AS total_net_revenue,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM lineitem_summary l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN partsupp ps ON ps.ps_partkey IN (SELECT p_partkey FROM part WHERE p_size < 20)
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name, p.p_name
+)
+SELECT fh.nation_name, fh.part_name, fh.total_net_revenue, fh.total_avail_qty, fh.unique_customers
+FROM final_summary fh
+JOIN top_nations tn ON fh.nation_name = tn.n_name
+ORDER BY fh.total_net_revenue DESC, fh.unique_customers DESC;

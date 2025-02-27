@@ -1,0 +1,59 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_order,
+        COUNT(*) OVER (PARTITION BY t.id) AS total_cast
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT production_year) AS appearance_years,
+        COUNT(DISTINCT title) AS unique_movies
+    FROM 
+        RankedMovies
+    WHERE 
+        role_order = 1  
+    GROUP BY 
+        actor_name
+),
+
+FilteredActors AS (
+    SELECT 
+        actor_name,
+        appearance_years,
+        unique_movies
+    FROM 
+        ActorCounts
+    WHERE 
+        unique_movies > 5 AND appearance_years >= 3
+)
+
+SELECT 
+    fa.actor_name,
+    fa.appearance_years,
+    fa.unique_movies,
+    COALESCE(array_agg(DISTINCT t.title ORDER BY t.production_year DESC), ARRAY[]::text[]) AS popular_titles,
+    MAX(t.production_year) AS latest_appearance
+FROM 
+    FilteredActors fa
+LEFT JOIN 
+    RankedMovies t ON fa.actor_name = t.actor_name
+GROUP BY 
+    fa.actor_name, fa.appearance_years, fa.unique_movies
+HAVING 
+    COUNT(DISTINCT t.production_year) > 2 AND 
+    MAX(t.production_year) < (EXTRACT(YEAR FROM DATE '2024-10-01') - 5)
+ORDER BY 
+    fa.unique_movies DESC, latest_appearance ASC;

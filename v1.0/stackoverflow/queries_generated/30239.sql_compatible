@@ -1,0 +1,91 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(COALESCE(v.BountyAmount, 0)) > 0 OR COUNT(DISTINCT p.Id) > 0
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+HighEngagementPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(s.TotalFaves, 0) AS TotalFavorites,
+        COALESCE(s.TotalComments, 0) AS CommentCount,
+        COALESCE(s.TotalVotes, 0) AS VoteCount,
+        COALESCE(phs.EditCount, 0) AS EditCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            post.Id AS PostId,
+            COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS TotalVotes,
+            COUNT(CASE WHEN c.Id IS NOT NULL THEN 1 END) AS TotalComments,
+            COUNT(CASE WHEN v.VoteTypeId = 5 THEN 1 END) AS TotalFaves
+        FROM 
+            Posts post
+        LEFT JOIN 
+            Votes v ON post.Id = v.PostId
+        LEFT JOIN 
+            Comments c ON post.Id = c.PostId
+        GROUP BY 
+            post.Id
+    ) s ON p.Id = s.PostId
+    LEFT JOIN 
+        PostHistorySummary phs ON p.Id = phs.PostId
+    WHERE 
+        p.ViewCount > 1000
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    COUNT(DISTINCT h.PostId) AS HighEngagementPostCount,
+    SUM(h.VoteCount) AS TotalVotesReceived,
+    SUM(h.EditCount) AS TotalEdits
+FROM 
+    TopUsers u
+JOIN 
+    HighEngagementPosts h ON u.UserId = h.OwnerUserId
+WHERE 
+    u.TotalBounties > 50 
+GROUP BY 
+    u.UserId, u.DisplayName
+ORDER BY 
+    HighEngagementPostCount DESC, TotalVotesReceived DESC
+LIMIT 10;

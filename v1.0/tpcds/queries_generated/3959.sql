@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 2451545 AND 2451545 + 30  -- arbitrary date range
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_quantity,
+        rs.total_sales             
+    FROM 
+        item i
+    JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.sales_rank <= 10
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders 
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+SalesSummary AS (
+    SELECT 
+        ci.gender,
+        SUM(ti.total_sales) AS total_sales_by_gender,
+        COUNT(DISTINCT ci.c_customer_sk) AS customer_count
+    FROM 
+        TopItems ti
+    JOIN 
+        web_sales ws ON ti.ws_item_sk = ws.ws_item_sk
+    JOIN 
+        CustomerInfo ci ON ws.ws_ship_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        ci.gender
+)
+SELECT 
+    ss.gender,
+    ss.total_sales_by_gender,
+    ss.customer_count,
+    COALESCE(ss.total_sales_by_gender / NULLIF(ss.customer_count, 0), 0) AS avg_sales_per_customer
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.total_sales_by_gender DESC;

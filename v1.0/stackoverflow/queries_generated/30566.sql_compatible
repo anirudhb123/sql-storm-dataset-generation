@@ -1,0 +1,68 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+RecentActiveUsers AS (
+    SELECT 
+        OwnerUserId AS UserId,
+        COUNT(Id) AS ActivePostCount
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= DATEADD(MONTH, -6, CAST('2024-10-01 12:34:56' AS TIMESTAMP))   
+    GROUP BY 
+        OwnerUserId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalCommentScore,
+    ua.TotalBountyGiven,
+    COALESCE(phed.EditCount, 0) AS TotalEdits,
+    phed.LastEditDate,
+    rau.ActivePostCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostHistoryDetails phed ON ua.TotalPosts = phed.PostId
+LEFT JOIN 
+    RecentActiveUsers rau ON ua.UserId = rau.UserId
+WHERE 
+    ua.TotalPosts > 0 AND
+    (ua.TotalQuestions > 5 OR ua.TotalAnswers > 5)
+ORDER BY 
+    ua.TotalPosts DESC, 
+    ua.TotalCommentScore DESC;

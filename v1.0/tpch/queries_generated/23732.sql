@@ -1,0 +1,71 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS nation_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31' 
+        AND o.o_orderstatus = 'O'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+SupplierComparison AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.total_supply_cost,
+        nd.n_nationkey,
+        nd.total_orders,
+        nd.total_revenue,
+        CASE 
+            WHEN nd.total_orders IS NULL THEN 0 
+            ELSE (sd.total_supply_cost / NULLIF(nd.total_orders, 0)) 
+        END AS supply_cost_per_order
+    FROM 
+        SupplierDetails sd
+    LEFT JOIN 
+        NationSales nd ON sd.s_nationkey = nd.n_nationkey
+)
+SELECT 
+    sc.s_suppkey,
+    sc.s_name,
+    sc.total_supply_cost,
+    sc.total_orders,
+    sc.total_revenue,
+    sc.supply_cost_per_order,
+    COUNT(DISTINCT CASE WHEN sc.total_orders IS NULL THEN 'NULL' ELSE sc.suppkey END) AS null_order_count
+FROM 
+    SupplierComparison sc
+WHERE 
+    sc.supply_cost_per_order > (SELECT AVG(supply_cost_per_order) FROM SupplierComparison)
+GROUP BY 
+    sc.s_suppkey, sc.s_name, sc.total_supply_cost, sc.total_orders, sc.total_revenue, sc.supply_cost_per_order
+HAVING 
+    SUM(CASE WHEN sc.total_orders IS NULL THEN 1 ELSE 0 END) <= 1 -- At most one NULL order
+ORDER BY 
+    sc.total_supply_cost DESC, sc.total_orders DESC
+LIMIT 50;

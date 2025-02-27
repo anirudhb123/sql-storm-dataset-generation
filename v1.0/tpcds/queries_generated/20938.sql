@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+),
+AverageProfit AS (
+    SELECT 
+        r.web_site_sk,
+        AVG(r.ws_net_profit) AS avg_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rank_profit <= 5
+    GROUP BY 
+        r.web_site_sk
+),
+TotalReturns AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_web_page_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        a.web_site_sk,
+        a.avg_net_profit,
+        COALESCE(b.total_returns, 0) AS total_returns
+    FROM 
+        AverageProfit a
+    LEFT JOIN 
+        TotalReturns b ON a.web_site_sk = b.wr_web_page_sk
+)
+SELECT 
+    s.web_site_sk,
+    s.avg_net_profit,
+    s.total_returns,
+    CASE 
+        WHEN s.total_returns > 0 THEN 'Return'
+        WHEN s.avg_net_profit IS NULL THEN 'No Sales'
+        ELSE 'Regular'
+    END AS sales_status,
+    ROW_NUMBER() OVER (ORDER BY s.avg_net_profit DESC) AS ranking
+FROM 
+    SalesAndReturns s
+WHERE 
+    s.avg_net_profit > (SELECT AVG(avg_net_profit) FROM AverageProfit)
+ORDER BY 
+    s.avg_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey + 1
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+    ORDER BY total_supply_cost DESC
+    LIMIT 10
+),
+CustomerOrderAnalysis AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, 
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+),
+SupplierDetails AS (
+    SELECT s.s_name, s.s_address, s.s_acctbal, COUNT(ps.ps_partkey) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_name, s.s_address, s.s_acctbal
+)
+SELECT rh.r_name AS region_name, 
+       cu.c_name AS customer_name, 
+       SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+       ts.total_supply_cost,
+       CASE 
+           WHEN cu.order_rank = 1 THEN 'Top Order'
+           ELSE 'Regular Order'
+       END AS order_priority
+FROM lineitem li
+JOIN orders o ON li.l_orderkey = o.o_orderkey
+JOIN CustomerOrderAnalysis cu ON o.o_custkey = cu.c_custkey
+JOIN TopSuppliers ts ON li.l_suppkey = ts.s_suppkey
+JOIN region r ON r.r_regionkey = 1
+LEFT JOIN SupplierDetails sd ON ts.s_suppkey = sd.s_suppkey
+WHERE li.l_shipdate >= '2021-01-01' AND li.l_shipdate < '2022-01-01'
+GROUP BY rh.r_name, cu.c_name, ts.total_supply_cost, cu.order_rank
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY revenue DESC;

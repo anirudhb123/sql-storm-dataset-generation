@@ -1,0 +1,92 @@
+
+WITH RecursiveTagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+), 
+
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN PH.PostId IS NOT NULL THEN 1 ELSE 0 END) AS PostEdits,
+        SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentsMade,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostHistory PH ON U.Id = PH.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+
+PopularPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerDisplayName,
+        P.ViewCount,
+        P.CreationDate,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    ORDER BY 
+        P.ViewCount DESC
+    LIMIT 10
+),
+
+CloseReasonStats AS (
+    SELECT 
+        PH.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+    GROUP BY 
+        PH.Comment
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostEdits,
+    U.CommentsMade,
+    U.TotalBounties,
+    T.TagId,
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.TotalScore,
+    PP.Title AS PopularPostTitle,
+    PP.ViewCount AS PopularPostViews,
+    CR.CloseReason,
+    CR.CloseCount
+FROM 
+    UserActivity U
+JOIN 
+    RecursiveTagStats T ON U.TagId = T.TagId 
+LEFT JOIN 
+    PopularPosts PP ON PP.OwnerDisplayName = U.DisplayName
+LEFT JOIN 
+    CloseReasonStats CR ON 1=1 
+WHERE 
+    U.PostEdits > 0 OR U.CommentsMade > 0
+ORDER BY 
+    U.DisplayName, T.PostCount DESC, PP.ViewRank;

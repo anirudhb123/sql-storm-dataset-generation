@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        title.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title ASC) AS year_rank
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        cast_info.movie_id,
+        COUNT(DISTINCT cast_info.person_id) AS actor_count
+    FROM 
+        cast_info
+    GROUP BY 
+        cast_info.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCount ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        aka_title ak ON rm.movie_id = ak.movie_id
+    WHERE 
+        rm.year_rank <= 5 
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, ac.actor_count
+),
+FinalOutput AS (
+    SELECT 
+        mwd.movie_id,
+        mwd.title,
+        mwd.production_year,
+        mwd.actor_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MoviesWithDetails mwd
+    LEFT JOIN 
+        movie_keyword mk ON mwd.movie_id = mk.movie_id
+    GROUP BY 
+        mwd.movie_id, mwd.title, mwd.production_year, mwd.actor_count
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.actor_count,
+    f.keyword_count,
+    CASE 
+        WHEN f.actor_count > 5 THEN 'Ensemble Cast'
+        WHEN f.actor_count BETWEEN 3 AND 5 THEN 'Small Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_category
+FROM 
+    FinalOutput f
+ORDER BY 
+    f.production_year DESC, f.title ASC;

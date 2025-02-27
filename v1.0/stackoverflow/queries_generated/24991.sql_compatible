@@ -1,0 +1,78 @@
+
+WITH UserRanks AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(p.PostCount, 0) AS PostCount
+    FROM Users u
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS BadgeCount
+        FROM Badges
+        GROUP BY UserId
+    ) b ON u.Id = b.UserId
+    LEFT JOIN (
+        SELECT OwnerUserId, COUNT(*) AS PostCount
+        FROM Posts
+        WHERE PostTypeId = 1 
+        GROUP BY OwnerUserId
+    ) p ON u.Id = p.OwnerUserId
+),
+PostsWithVoting AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.ViewCount
+),
+HistoricalPosts AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.CreationDate,
+        phim.UserId,
+        pt.Name AS HistoryType
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE pt.Id IN (10, 11, 12) 
+),
+RankedPosts AS (
+    SELECT 
+        pw.*,
+        RANK() OVER (ORDER BY UpVotes - DownVotes DESC, ViewCount DESC) AS VoteRank
+    FROM PostsWithVoting pw
+)
+SELECT
+    tu.DisplayName,
+    tu.Reputation,
+    ur.Rank AS UserRank,
+    rp.Title AS PostTitle,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    COUNT(DISTINCT hp.PostId) AS HistoryCount,
+    STRING_AGG(DISTINCT hp.HistoryType, ', ') AS PostHistoryTypes
+FROM TopUsers tu
+JOIN UserRanks ur ON tu.UserId = ur.UserId
+JOIN RankedPosts rp ON tu.UserId = rp.OwnerUserId
+LEFT JOIN HistoricalPosts hp ON rp.PostId = hp.PostId
+WHERE tu.BadgeCount > 5 AND rp.VoteRank <= 10
+GROUP BY tu.UserId, tu.DisplayName, tu.Reputation, ur.Rank, rp.Title, rp.ViewCount, rp.UpVotes, rp.DownVotes, rp.CommentCount
+ORDER BY tu.Reputation DESC, COUNT(DISTINCT hp.PostId) DESC;

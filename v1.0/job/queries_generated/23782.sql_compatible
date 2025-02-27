@@ -1,0 +1,75 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(mt.title, 'Unknown Title') AS title,
+        COALESCE(ka.name, 'Unknown Name') AS actor_name,
+        0 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = mt.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.movie_id
+    LEFT JOIN 
+        aka_name ka ON ka.person_id = ci.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_keyword mk ON mk.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5 
+),
+actor_movie_counts AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT cc.movie_id) AS movie_count
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        ka.name
+),
+movies_with_keyword AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY mt.movie_id ORDER BY mk.keyword) AS keyword_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.actor_name,
+    COUNT(DISTINCT mwk.movie_id) AS keyword_count,
+    act.movie_count,
+    SUM(CASE WHEN mwk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS non_null_keywords,
+    STRING_AGG(DISTINCT mwk.keyword, ', ') AS all_keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movies_with_keyword mwk ON mh.movie_id = mwk.movie_id
+LEFT JOIN 
+    actor_movie_counts act ON mh.actor_name = act.actor_name
+GROUP BY 
+    mh.movie_id, mh.title, mh.actor_name, act.movie_count
+HAVING 
+    COUNT(DISTINCT mwk.keyword) > 0
+ORDER BY 
+    keyword_count DESC, act.movie_count DESC
+LIMIT 50;

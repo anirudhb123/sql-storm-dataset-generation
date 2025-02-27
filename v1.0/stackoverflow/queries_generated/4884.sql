@@ -1,0 +1,33 @@
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.ViewCount, p.CreationDate,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+           COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS total_posts
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+UserReputations AS (
+    SELECT u.Id AS UserId, u.Reputation, u.DisplayName, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+)
+SELECT u.DisplayName, 
+       COUNT(DISTINCT rp.Id) AS QuestionsAnswered,
+       COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+       CASE 
+           WHEN AVG(rup.UpVotesCount - rup.DownVotesCount) IS NULL 
+           THEN 'No Votes' 
+           ELSE CASE 
+               WHEN AVG(rup.UpVotesCount - rup.DownVotesCount) > 0 THEN 'Positive' 
+               WHEN AVG(rup.UpVotesCount - rup.DownVotesCount) < 0 THEN 'Negative' 
+               ELSE 'Neutral' END 
+       END AS VoteSentiment,
+       MAX(rp.CreationDate) AS LastQuestionDate
+FROM Users u
+LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN UserReputations rup ON u.Id = rup.UserId
+GROUP BY u.DisplayName
+ORDER BY TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

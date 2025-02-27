@@ -1,0 +1,53 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        CONCAT('Supplier Name: ', s.s_name, ', Balance: ', FORMAT(s.s_acctbal, 2)) AS supplier_info,
+        SUBSTRING(s.s_address, 1, 10) AS short_address
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand,
+        CONCAT(p.p_brand, ' ', p.p_name) AS full_part_name, 
+        LENGTH(p.p_comment) AS comment_length
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 50.00
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    sd.supplier_info, 
+    pd.full_part_name, 
+    ls.total_revenue, 
+    ls.line_count, 
+    (SELECT COUNT(DISTINCT n.n_name)
+     FROM nation n
+     WHERE n.n_nationkey IN (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sd.s_suppkey)) AS distinct_nations
+FROM 
+    SupplierDetails sd
+JOIN 
+    PartDetails pd ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey)
+JOIN 
+    LineItemSummary ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = sd.s_suppkey)))
+ORDER BY 
+    ls.total_revenue DESC, 
+    sd.supplier_info ASC;

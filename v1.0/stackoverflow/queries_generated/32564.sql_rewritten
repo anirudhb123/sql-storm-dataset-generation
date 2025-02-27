@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= '2022-01-01' AND 
+        p.Score > 0
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedQuestions AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason,
+        p.Title,
+        u.DisplayName AS ClosedBy
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        t.Count
+    FROM 
+        Tags t
+    WHERE 
+        t.IsModeratorOnly = 0
+    ORDER BY 
+        t.Count DESC
+    LIMIT 10
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(cq.CloseReason, 'Not Closed') AS CloseReason,
+        COALESCE(cq.CloseDate, p.CreationDate) AS CloseDate,
+        pt.TagName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedQuestions cq ON rp.PostId = cq.PostId
+    LEFT JOIN 
+        PostLinks pl ON pl.PostId = rp.PostId
+    LEFT JOIN 
+        Tags pt ON pt.Id = pl.RelatedPostId
+    WHERE 
+        pt.TagName IN (SELECT TagName FROM PopularTags)
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.OwnerDisplayName,
+    ps.Score,
+    ps.CommentCount,
+    ps.CloseReason,
+    ps.CloseDate,
+    STRING_AGG(DISTINCT ps.TagName, ', ') AS RelatedTags
+FROM 
+    PostSummary ps
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.OwnerDisplayName, ps.Score, ps.CommentCount, ps.CloseReason, ps.CloseDate
+ORDER BY 
+    ps.Score DESC, ps.CommentCount DESC;

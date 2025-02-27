@@ -1,0 +1,52 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        U.CreationDate,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+
+PostStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.CloseDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+
+BadgeCounts AS (
+    SELECT 
+        B.UserId, 
+        COUNT(*) AS TotalBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+
+SELECT 
+    UR.DisplayName, 
+    UR.Reputation, 
+    PS.TotalPosts, 
+    PS.Questions, 
+    PS.Answers, 
+    PS.ClosedPosts,
+    COALESCE(BC.TotalBadges, 0) AS TotalBadges,
+    CASE 
+        WHEN PS.TotalPosts > 0 THEN ROUND(PS.Answers::decimal / PS.TotalPosts * 100, 2)
+        ELSE 0 
+    END AS AnswerRate
+FROM UserReputation UR
+LEFT JOIN PostStats PS ON UR.UserId = PS.OwnerUserId
+LEFT JOIN BadgeCounts BC ON UR.UserId = BC.UserId
+WHERE UR.Reputation > (
+    SELECT AVG(Reputation) FROM Users
+) 
+AND PS.TotalPosts IS NOT NULL
+ORDER BY UR.Reputation DESC, UR.DisplayName ASC
+LIMIT 10;
+
+-- Get users with high reputation, their post statistics, and badge counts

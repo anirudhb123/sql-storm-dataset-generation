@@ -1,0 +1,70 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COALESCE(GROUP_CONCAT(DISTINCT k.keyword), 'No Keywords') AS keywords,
+    COUNT(DISTINCT rc.id) AS roles_count,
+    AVG(ra.revenue) AS average_revenue_last_5_years,
+    ROW_NUMBER() OVER (PARTITION BY a.name ORDER BY t.production_year DESC) AS rank_within_actor
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    (SELECT 
+         movie_id, SUM(revenue) AS revenue
+     FROM 
+         movie_info
+     WHERE
+         info_type_id = (SELECT id FROM info_type WHERE info = 'Revenue')
+         AND YEAR > (CURRENT_YEAR - 5)
+     GROUP BY 
+         movie_id) ra ON t.id = ra.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = t.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+LEFT JOIN 
+    role_type rc ON cc.subject_id = rc.id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year >= 2000
+    AND (t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'short')))
+GROUP BY 
+    a.id, t.id
+HAVING 
+    COUNT(DISTINCT k.id) > 0
+ORDER BY 
+    average_revenue_last_5_years DESC,
+    rank_within_actor;
+

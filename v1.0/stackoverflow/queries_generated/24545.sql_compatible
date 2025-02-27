@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM Posts p
+    WHERE p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+BadgeCount AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+CommentScores AS (
+    SELECT 
+        c.PostId,
+        SUM(c.Score) AS TotalCommentScore
+    FROM Comments c
+    GROUP BY c.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title,
+        ph.Comment AS ClosureReason,
+        ph.CreationDate AS ClosureDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rc.TotalBadges,
+        cs.TotalCommentScore,
+        COALESCE(cp.ClosedPostId, -1) AS ClosedPostId,
+        cp.ClosureReason
+    FROM RankedPosts rp
+    LEFT JOIN BadgeCount rc ON rp.PostId = rc.UserId
+    LEFT JOIN CommentScores cs ON rp.PostId = cs.PostId
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.ClosedPostId
+    WHERE rp.ScoreRank < 6 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.TotalBadges,
+    fp.TotalCommentScore,
+    CASE 
+        WHEN fp.ClosedPostId = -1 THEN 'Not Closed'
+        ELSE CONCAT('Closed: ', fp.ClosureReason, ' on ', TO_CHAR(fp.ClosureDate, 'YYYY-MM-DD HH24:MI:SS'))
+    END AS ClosureStatus,
+    CASE 
+        WHEN fp.TotalBadges IS NULL THEN 'No Badges'
+        ELSE CONCAT(fp.TotalBadges, ' Badge(s)')
+    END AS BadgeStatus
+FROM FilteredPosts fp
+ORDER BY fp.Score DESC, fp.TotalCommentScore DESC
+LIMIT 100;

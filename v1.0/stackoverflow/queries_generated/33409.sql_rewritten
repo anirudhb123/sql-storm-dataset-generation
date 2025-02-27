@@ -1,0 +1,66 @@
+WITH RecursivePostCount AS (
+    SELECT 
+        P.Id AS PostId, 
+        COUNT(*) AS AnswerCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 2 
+    GROUP BY 
+        P.Id
+), RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(V.Id) AS VoteCount,
+        MAX(V.CreationDate) AS LastVoteDate 
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= DATEADD(MONTH, -1, GETDATE()) 
+    GROUP BY 
+        V.PostId
+), PostDetails AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.ViewCount, 
+        COALESCE(RP.AnswerCount, 0) AS AnswerCount,
+        COALESCE(RV.VoteCount, 0) AS TotalVotes,
+        RV.LastVoteDate,
+        PH.Comment AS LastEditComment,
+        PH.CreationDate AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecursivePostCount RP ON P.Id = RP.PostId
+    LEFT JOIN 
+        RecentVotes RV ON P.Id = RV.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    AND 
+        P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+), RankedPosts AS (
+    SELECT 
+        PD.*,
+        ROW_NUMBER() OVER (ORDER BY PD.ViewCount DESC, PD.TotalVotes DESC) AS Rank
+    FROM 
+        PostDetails PD
+)
+
+SELECT 
+    RP.PostId, 
+    RP.Title, 
+    RP.ViewCount, 
+    RP.AnswerCount, 
+    RP.TotalVotes, 
+    RP.LastVoteDate,
+    RP.LastEditComment,
+    RP.LastEditDate
+FROM 
+    RankedPosts RP
+WHERE 
+    RP.Rank <= 10 
+ORDER BY 
+    RP.Rank;

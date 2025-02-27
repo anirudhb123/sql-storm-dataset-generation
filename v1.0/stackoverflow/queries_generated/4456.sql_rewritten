@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.OwnerUserId, 
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(rh.MostRecentHistory, 'No changes') AS MostRecentHistory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            ph.PostId, 
+            MAX(ph.CreationDate) AS MostRecentHistory
+        FROM 
+            PostHistory ph
+        WHERE 
+            ph.PostHistoryTypeId IN (4, 5, 6)
+        GROUP BY 
+            ph.PostId
+    ) rh ON rp.PostId = rh.PostId
+    WHERE 
+        rp.ScoreRank <= 5
+    ORDER BY 
+        rp.Score DESC
+)
+SELECT 
+    tsp.PostId, 
+    tsp.Title, 
+    tsp.Score, 
+    tsp.OwnerDisplayName, 
+    tsp.MostRecentHistory,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tsp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tsp.PostId AND v.VoteTypeId = 3) AS DownVotes
+FROM 
+    TopScoringPosts tsp
+LEFT JOIN 
+    Badges b ON tsp.OwnerUserId = b.UserId AND b.Class = 1
+WHERE 
+    b.Id IS NULL
+ORDER BY 
+    tsp.Score DESC
+LIMIT 10;

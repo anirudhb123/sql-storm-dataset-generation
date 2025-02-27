@@ -1,0 +1,57 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DATE(d.d_date) AS sales_date
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, DATE(d.d_date)
+),
+customer_summary AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales AS ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+sales_by_gender AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(s.total_sales) AS gender_total_sales,
+        COUNT(DISTINCT s.web_site_id) AS site_count,
+        AVG(s.total_orders) AS avg_orders_per_site
+    FROM 
+        sales_data AS s
+    JOIN 
+        customer_summary AS cs ON cs.total_spent > 1000
+    JOIN 
+        customer_demographics AS cd ON cd.cd_demo_sk IN (cs.c_customer_id)
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    gb.cd_gender,
+    gb.gender_total_sales,
+    gb.site_count,
+    gb.avg_orders_per_site
+FROM 
+    sales_by_gender AS gb
+ORDER BY 
+    gb.gender_total_sales DESC;

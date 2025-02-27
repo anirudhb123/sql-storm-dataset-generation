@@ -1,0 +1,46 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS depth
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation)
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+ProductPerformance AS (
+    SELECT p.p_partkey, p.p_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+)
+SELECT nh.n_name, 
+       ss.s_name, 
+       COUNT(DISTINCT co.c_custkey) AS customer_count,
+       SUM(ss.total_supply_cost) AS total_supplier_cost,
+       p.p_name,
+       MAX(p.total_revenue) AS max_revenue,
+       AVG(COALESCE(co.order_count, 0)) AS avg_orders_per_customer
+FROM NationHierarchy nh
+LEFT JOIN supplier ss ON ss.s_nationkey = nh.n_nationkey
+LEFT JOIN CustomerOrderCounts co ON co.c_custkey = ss.s_suppkey
+LEFT JOIN ProductPerformance p ON p.total_revenue > 10000
+GROUP BY nh.n_name, ss.s_name, p.p_name
+HAVING COUNT(DISTINCT co.c_custkey) > 10
+ORDER BY nh.n_name, total_supplier_cost DESC, max_revenue DESC
+LIMIT 10;

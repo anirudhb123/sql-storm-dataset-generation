@@ -1,0 +1,52 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        array_agg(DISTINCT c.id) AS cast_ids,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_order
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieDetails AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        r.cast_ids,
+        COALESCE(ARRAY_AGG(DISTINCT c.name ORDER BY c.name), '{}') AS cast_names,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        RecursiveMovieCTE r
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = r.title_id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ANY(r.cast_ids)
+    GROUP BY 
+        r.title, r.production_year, r.cast_ids
+),
+FilteredMovies AS (
+    SELECT 
+        title, production_year, cast_names, keyword_count 
+    FROM 
+        MovieDetails 
+    WHERE 
+        keyword_count > 2
+)
+SELECT 
+    f.*, 
+    CASE 
+        WHEN f.production_year < 2000 THEN 'Classic'
+        WHEN f.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    FilteredMovies f
+ORDER BY 
+    f.production_year DESC, f.title;

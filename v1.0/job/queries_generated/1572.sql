@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+MovieActors AS (
+    SELECT 
+        mt.title,
+        ac.name AS actor_name,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name ac ON ci.person_id = ac.person_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.title, ac.name
+),
+ActorPerformance AS (
+    SELECT 
+        ma.title,
+        ma.actor_name,
+        ma.company_count,
+        COALESCE(SUM(mk.keyword IS NOT NULL), 0) AS keyword_count,
+        RANK() OVER (PARTITION BY ma.title ORDER BY ma.company_count DESC) AS actor_rank
+    FROM 
+        MovieActors ma
+    LEFT JOIN 
+        movie_keyword mk ON ma.title = (SELECT title FROM aka_title WHERE id = mk.movie_id)
+    GROUP BY 
+        ma.title, ma.actor_name, ma.company_count
+)
+SELECT 
+    ap.title,
+    ap.actor_name,
+    ap.company_count,
+    ap.keyword_count,
+    CASE 
+        WHEN ap.actor_rank = 1 THEN 'Top Actor'
+        WHEN ap.company_count > 5 THEN 'Frequent Collaborator'
+        ELSE 'Regular Actor'
+    END AS actor_category
+FROM 
+    ActorPerformance ap
+WHERE 
+    ap.company_count > 0
+ORDER BY 
+    ap.keyword_count DESC, ap.company_count DESC;

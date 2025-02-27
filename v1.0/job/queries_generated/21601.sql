@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS ranking
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+), 
+MoviesWithKeywords AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.title, m.production_year
+), 
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    JOIN 
+        company_type AS ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+FinalSelection AS (
+    SELECT 
+        mw.title,
+        mw.production_year,
+        mw.keywords,
+        ci.company_name,
+        ci.company_type
+    FROM 
+        MoviesWithKeywords AS mw
+    LEFT JOIN 
+        CompanyInfo AS ci ON mw.title = ci.movie_id
+    WHERE 
+        mw.ranking <= 5 AND mw.keywords IS NOT NULL
+        AND mw.production_year BETWEEN 2000 AND 2023
+)
+
+SELECT 
+    title,
+    production_year,
+    keywords,
+    COALESCE(company_name, 'Independent') AS production_company,
+    COALESCE(company_type, 'N/A') AS type_of_company
+FROM 
+    FinalSelection
+ORDER BY 
+    production_year DESC, title;

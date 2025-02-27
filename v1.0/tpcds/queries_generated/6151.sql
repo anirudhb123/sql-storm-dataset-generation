@@ -1,0 +1,68 @@
+
+WITH SalesData AS (
+    SELECT 
+        cs_customer_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        MAX(cs_sold_date_sk) AS last_purchase_date
+    FROM 
+        catalog_sales 
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31') 
+    GROUP BY 
+        cs_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        sd.total_sales,
+        sd.order_count,
+        dd.d_week_seq,
+        dd.d_month_seq,
+        dd.d_year
+    FROM 
+        SalesData sd
+    JOIN 
+        customer c ON sd.cs_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim dd ON sd.last_purchase_date = dd.d_date_sk
+    WHERE 
+        sd.total_sales > 1000
+    ORDER BY 
+        sd.total_sales DESC
+    LIMIT 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_buy_potential
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+)
+
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.order_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    TopCustomers tc
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = tc.cs_customer_sk
+WHERE 
+    cd.cd_marital_status = 'M' 
+    AND cd.cd_gender = 'F'
+ORDER BY 
+    tc.total_sales DESC;

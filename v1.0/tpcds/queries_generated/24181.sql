@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) as rn,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.ws_item_sk) AS total_profit
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_id,
+        COUNT(cr.cr_return_quantity) as total_returns,
+        AVG(cr.cr_return_amount) as avg_return_amount
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_id
+    HAVING COUNT(cr.cr_return_quantity) > 10
+),
+
+IncomeAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NULL THEN 'Unknown'
+            WHEN ib.ib_lower_bound IS NOT NULL AND ib.ib_upper_bound IS NOT NULL THEN CONCAT('Band: ', ib.ib_lower_bound, ' - ', ib.ib_upper_bound)
+            ELSE 'Other'
+        END AS income_band,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, hd.hd_income_band_sk
+),
+
+FinalOutput AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_order_number,
+        r.total_quantity,
+        r.total_profit,
+        ca.returning_customer_id,
+        ca.total_returns,
+        ca.avg_return_amount,
+        ia.total_spent,
+        ia.income_band
+    FROM RankedSales r
+    FULL OUTER JOIN CustomerReturns ca ON r.ws_order_number = ca.returning_customer_id
+    FULL OUTER JOIN IncomeAnalysis ia ON r.ws_item_sk = ia.c_customer_id
+    WHERE (total_profit > 1000 OR total_returns IS NOT NULL) 
+    AND (total_spent IS NOT NULL OR income_band = 'Unknown')
+)
+
+SELECT 
+    *
+FROM FinalOutput
+WHERE 
+    (total_spent > 5000 AND total_returns <= 5)
+    OR (total_profit < 100 AND total_quantity >= 10)
+ORDER BY total_profit DESC, total_spent ASC;

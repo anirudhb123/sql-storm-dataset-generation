@@ -1,0 +1,58 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F' -- Only consider completed orders
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        DENSE_RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(rs.sales_rank, 0) AS supplier_rank,
+    hvc.c_name AS high_value_customer,
+    hvc.total_spent
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey LIMIT 1)
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) FROM orders o2 WHERE o2.o_custkey = hvc.c_custkey))
+WHERE 
+    r.r_name LIKE 'E%' -- Regions starting with 'E'
+ORDER BY 
+    r.r_name, supplier_rank, hvc.total_spent DESC;

@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.id AS VARCHAR(255)) AS path
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' -> ', ml.linked_movie_id)
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    AVG(r.role_id) AS average_role_id,
+    SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count,
+    NULLIF(MAX(CAST(SUBSTRING(na.name FROM '^[A-Z]') AS INTEGER)), 0) AS first_letter_rank
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name AS a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    role_type AS r ON c.role_id = r.id
+LEFT JOIN 
+    name AS na ON a.id = na.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    actor_count > 0 AND production_year IS NOT NULL
+ORDER BY 
+    actor_count DESC, mh.production_year ASC
+LIMIT 100;
+
+-- Performance Benchmarking Explanation:
+-- 1. Recursive CTE (MovieHierarchy) to retrieve chained movies.
+-- 2. Multiple LEFT JOINs to gather data from related tables.
+-- 3. Use of aggregate functions: COUNT, AVG, STRING_AGG.
+-- 4. NULL and CASE statements for conditional calculations.
+-- 5. Grouping and ordering to optimize data presentation for benchmarking purposes.

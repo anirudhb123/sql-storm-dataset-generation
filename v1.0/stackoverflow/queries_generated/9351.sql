@@ -1,0 +1,58 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.LastActivityDate >= NOW() - INTERVAL '30 days'
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+SELECT 
+    ubc.DisplayName AS UserName,
+    ubc.BadgeCount,
+    ap.Title AS PostTitle,
+    ap.ViewCount,
+    ap.AnswerCount,
+    ap.CreationDate,
+    tt.TagName,
+    tt.TotalViews
+FROM 
+    UserBadgeCounts ubc
+JOIN 
+    ActivePosts ap ON ubc.UserId = ap.OwnerDisplayName
+JOIN 
+    TopTags tt ON ap.Tags LIKE '%' || tt.TagName || '%'
+ORDER BY 
+    ubc.BadgeCount DESC, ap.ViewCount DESC;

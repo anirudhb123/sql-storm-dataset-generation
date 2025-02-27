@@ -1,0 +1,67 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownvoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryLatest AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastEditedDate,
+        MAX(ph.PostHistoryTypeId) AS LastChangeType
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 11) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    u.DisplayName AS Owner,
+    up.UpvoteCount,
+    up.DownvoteCount,
+    CASE 
+        WHEN ph.LastChangeType = 10 THEN 'Closed'
+        WHEN ph.LastChangeType = 11 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    COALESCE(t.TagName, 'No Tags') AS Tag
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVotes up ON rp.Id = up.PostId
+LEFT JOIN 
+    PostHistoryLatest ph ON rp.Id = ph.PostId
+LEFT JOIN 
+    (SELECT DISTINCT UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) ) AS TagName FROM Posts) t ON t.TagName = ANY(string_to_array(rp.Tags, '><'))
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50;

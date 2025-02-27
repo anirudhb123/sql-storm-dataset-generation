@@ -1,0 +1,64 @@
+
+WITH AddressAggregate AS (
+    SELECT
+        ca_state,
+        ca_city,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        STRING_AGG(ca_street_number || ' ' || ca_street_name || ' ' || ca_street_type, ', ') AS full_address_list
+    FROM
+        customer_address
+    GROUP BY
+        ca_state,
+        ca_city
+),
+DemographicAnalysis AS (
+    SELECT
+        cd_gender,
+        COUNT(c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_marital_status, ', ') AS marital_status_list
+    FROM
+        customer_demographics
+    INNER JOIN
+        customer ON customer.c_current_cdemo_sk = cd_demo_sk
+    GROUP BY
+        cd_gender
+),
+SalesAndReturns AS (
+    SELECT
+        ws.web_site_id,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discounts,
+        SUM(CASE WHEN wr_order_number IS NOT NULL THEN 1 ELSE 0 END) AS total_returns
+    FROM
+        web_sales ws
+    LEFT JOIN
+        web_returns wr ON ws.ws_order_number = wr.wr_order_number
+    GROUP BY
+        ws.web_site_id
+)
+SELECT
+    aa.ca_state,
+    aa.ca_city,
+    aa.unique_addresses,
+    aa.full_address_list,
+    da.cd_gender,
+    da.customer_count,
+    da.avg_purchase_estimate,
+    da.marital_status_list,
+    sar.web_site_id,
+    sar.total_orders,
+    sar.total_sales,
+    sar.total_discounts,
+    sar.total_returns
+FROM
+    AddressAggregate aa
+JOIN
+    DemographicAnalysis da ON da.customer_count > 100 -- Just a filter for demonstration
+JOIN
+    SalesAndReturns sar ON sar.total_sales > 1000 -- Just a filter for demonstration
+ORDER BY
+    aa.ca_state,
+    aa.ca_city,
+    da.cd_gender;

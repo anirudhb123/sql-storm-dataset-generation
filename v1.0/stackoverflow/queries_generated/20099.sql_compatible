@@ -1,0 +1,90 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE
+        t.Count > 0
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+PostContributions AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS ContributionCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        ub.UserId,
+        ub.DisplayName,
+        ub.BadgeCount,
+        pt.ContributionCount,
+        pt.AvgScore,
+        COALESCE(ut.PostCount, 0) AS PopularTagCount,
+        CASE 
+            WHEN ub.BadgeCount IS NULL THEN 'No Badges'
+            WHEN ub.BadgeCount BETWEEN 0 AND 5 THEN 'Few Badges'
+            ELSE 'Many Badges'
+        END AS BadgeCategory
+    FROM 
+        UserBadges ub
+    LEFT JOIN 
+        PostContributions pt ON ub.UserId = pt.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            u.Id AS UserId,
+            COUNT(DISTINCT pg.TagName) AS PostCount
+        FROM 
+            Users u
+        LEFT JOIN 
+            Posts p ON p.OwnerUserId = u.Id
+        LEFT JOIN 
+            PopularTags pg ON p.Tags LIKE CONCAT('%', pg.TagName, '%')
+        GROUP BY 
+            u.Id) ut ON ub.UserId = ut.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.BadgeCount,
+    u.ContributionCount,
+    u.AvgScore,
+    CASE 
+        WHEN u.BadgeCategory = 'No Badges' THEN '[No Badge]'
+        ELSE CONCAT('Badges: ', u.BadgeCount)
+    END AS BadgeInfo,
+    COALESCE(u.PopularTagCount, 0) AS PopularTagCount
+FROM 
+    UserPostStats u
+WHERE 
+    u.AvgScore IS NOT NULL
+ORDER BY 
+    u.AvgScore DESC, u.BadgeCount DESC
+LIMIT 10 OFFSET 10;

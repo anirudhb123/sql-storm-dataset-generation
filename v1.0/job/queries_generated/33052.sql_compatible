@@ -1,0 +1,63 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        (SELECT COUNT(DISTINCT cc.movie_id) 
+         FROM complete_cast cc 
+         WHERE cc.subject_id = ci.person_id) AS complete_cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieInfo AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_names,
+        keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY keyword_count DESC) AS keyword_rank
+    FROM 
+        MovieInfo
+    WHERE 
+        production_year BETWEEN 2000 AND 2023
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_names,
+    fm.keyword_count,
+    ah.movie_count,
+    ah.complete_cast_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorHierarchy ah ON ah.person_id = ANY(STRING_TO_ARRAY(fm.actor_names, ', '))
+WHERE 
+    fm.keyword_count > 3
+ORDER BY 
+    fm.production_year DESC, 
+    fm.keyword_count DESC
+LIMIT 50;

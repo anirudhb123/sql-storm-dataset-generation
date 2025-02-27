@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    -- Base case, select all top-level questions and their details
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title AS QuestionTitle,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score AS QuestionScore,
+        CAST(NULL AS int) AS AnswerId,
+        CAST(NULL AS varchar(300) AS AnswerTitle,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Questions
+
+    UNION ALL
+
+    -- Recursive case, join answers to their respective questions
+    SELECT 
+        r.QuestionId,
+        r.QuestionTitle,
+        r.OwnerUserId,
+        r.CreationDate,
+        r.QuestionScore,
+        a.Id AS AnswerId,
+        a.Title AS AnswerTitle,
+        r.Level + 1
+    FROM RecursivePostHierarchy r
+    INNER JOIN Posts a ON r.QuestionId = a.ParentId
+    WHERE a.PostTypeId = 2  -- Answers
+),
+RankedPosts AS (
+    SELECT 
+        p.*,
+        ROW_NUMBER() OVER (PARTITION BY p.QuestionId ORDER BY p.CreationDate DESC) AS RecentAnswerRank,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM RecursivePostHierarchy p
+),
+PostHistoryWithBadges AS (
+    SELECT 
+        ph.*,
+        u.Reputation,
+        b.Name AS BadgeName
+    FROM PostHistory ph
+    LEFT JOIN Users u ON ph.UserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId AND b.Date = (SELECT MAX(b2.Date) FROM Badges b2 WHERE b2.UserId = u.Id)
+)
+SELECT 
+    rp.QuestionId,
+    rp.QuestionTitle,
+    rp.OwnerUserId,
+    rp.RecentAnswerRank,
+    rp.UserRank,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ph.BadgeName,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+    ABS(COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END END), 0)) AS ScoreDifference
+FROM RankedPosts rp
+LEFT JOIN Comments c ON c.PostId = rp.QuestionId
+LEFT JOIN Votes v ON v.PostId = rp.QuestionId
+LEFT JOIN Tags t ON t.WikiPostId = rp.QuestionId OR t.ExcerptPostId = rp.QuestionId
+LEFT JOIN PostHistoryWithBadges ph ON rp.QuestionId = ph.PostId
+WHERE rp.RecentAnswerRank = 1  -- Only consider posts with the most recent answers
+GROUP BY 
+    rp.QuestionId,
+    rp.QuestionTitle,
+    rp.OwnerUserId,
+    rp.RecentAnswerRank,
+    rp.UserRank,
+    ph.BadgeName
+ORDER BY 
+    ScoreDifference DESC, 
+    rp.QuestionScore DESC;

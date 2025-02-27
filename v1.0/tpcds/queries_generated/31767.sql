@@ -1,0 +1,61 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales_price,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+AggregateSales AS (
+    SELECT 
+        s.s_store_id,
+        i.i_item_id,
+        COALESCE(ss.total_quantity, 0) AS sold_quantity,
+        COALESCE(sr.total_return_quantity, 0) AS returned_quantity,
+        COALESCE(ss.total_sales_price, 0) AS total_sales,
+        COALESCE(sr.total_return_amount, 0) AS total_returns,
+        (COALESCE(ss.total_sales_price, 0) - COALESCE(sr.total_return_amount, 0)) AS net_sales
+    FROM 
+        store s
+    LEFT JOIN 
+        web_sales ss ON s.s_store_sk = ss.ws_ship_addr_sk
+    LEFT JOIN 
+        RankedReturns sr ON ss.ws_item_sk = sr.sr_item_sk
+    JOIN 
+        item i ON ss.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    a.s_store_id,
+    COUNT(*) AS item_count,
+    SUM(a.sold_quantity) AS total_sold_quantity,
+    SUM(a.returned_quantity) AS total_returned_quantity,
+    SUM(a.net_sales) AS total_net_sales,
+    AVG(a.net_sales) AS avg_net_sales_per_item,
+    (SELECT COUNT(DISTINCT w.ws_order_number) 
+     FROM web_sales w 
+     WHERE w.ws_item_sk IN (SELECT ws_item_sk FROM SalesCTE WHERE rank <= 10)) AS total_orders_top_items
+FROM 
+    AggregateSales a
+WHERE 
+    net_sales > 0
+GROUP BY 
+    a.s_store_id
+ORDER BY 
+    total_net_sales DESC
+LIMIT 10;

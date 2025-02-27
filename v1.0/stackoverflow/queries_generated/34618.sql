@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        AcceptedAnswerId, 
+        CreationDate, 
+        Score,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+  
+    UNION ALL
+  
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.AcceptedAnswerId, 
+        p.CreationDate, 
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputationRank AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(V.VoteTypeId) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    P.Title,
+    U.DisplayName,
+    P.Score,
+    P.ViewCount,
+    COALESCE(V.TotalVotes, 0) AS TotalVotes,
+    COALESCE(V.UpVotes, 0) AS UpVotes,
+    COALESCE(V.DownVotes, 0) AS DownVotes,
+    RP.Level AS AnswerLevel,
+    CP.LastClosedDate
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVoteStats V ON P.Id = V.PostId
+LEFT JOIN 
+    ClosedPosts CP ON CP.PostId = P.Id
+LEFT JOIN 
+    RecursivePostHierarchy RP ON RP.AcceptedAnswerId = P.Id
+WHERE 
+    P.PostTypeId = 1 -- Only questions
+    AND U.Reputation > 100 -- Users with reputation higher than 100
+    AND (CP.LastClosedDate IS NULL OR CP.LastClosedDate < NOW() - INTERVAL '30 days') -- Not closed in last 30 days
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 50;

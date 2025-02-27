@@ -1,0 +1,62 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        r.r_name IS NOT NULL AND
+        l.l_shipdate >= DATE '2023-01-01' AND 
+        l.l_shipdate < DATE '2023-12-31'
+    GROUP BY 
+        r.r_name
+),
+SalesRanked AS (
+    SELECT 
+        region_name,
+        total_sales,
+        unique_customers,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank,
+        RANK() OVER (ORDER BY unique_customers DESC) AS customer_rank
+    FROM 
+        RegionalSales
+)
+SELECT 
+    sr.region_name,
+    sr.total_sales,
+    sr.unique_customers,
+    COALESCE(NULLIF(sr.sales_rank, sr.customer_rank), 0) AS adjusted_rank,
+    CASE 
+        WHEN sr.total_sales > 1000000 THEN 'High Performer'
+        WHEN sr.total_sales BETWEEN 500000 AND 1000000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category,
+    STRING_AGG(DISTINCT p.p_name, ', ') FILTER (WHERE p.p_size < 20) AS small_parts
+FROM 
+    SalesRanked sr
+LEFT JOIN 
+    partsupp ps ON sr.region_name = (SELECT r.r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey LIMIT 1)))
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    sr.region_name, sr.total_sales, sr.unique_customers
+HAVING 
+    SUM(CASE WHEN p.p_container IS NULL THEN 1 ELSE 0 END) < 5 
+    OR EXISTS (SELECT 1 FROM lineitem l WHERE l.l_discount IS NULL AND l.l_returnflag = 'N')
+ORDER BY 
+    adjusted_rank DESC;

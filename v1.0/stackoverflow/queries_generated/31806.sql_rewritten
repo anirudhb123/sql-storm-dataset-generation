@@ -1,0 +1,104 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.PostTypeId,
+        p2.AcceptedAnswerId,
+        p2.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(a.Title, 'N/A') AS AcceptedAnswerTitle,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        p.Id, a.Title
+),
+BadgesWithCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        BadgesWithCounts b ON U.Id = b.UserId
+),
+TopPosts AS (
+    SELECT 
+        pd.Title,
+        pd.Score,
+        pd.CreationDate,
+        u.DisplayName,
+        u.Reputation,
+        pd.CommentCount
+    FROM 
+        PostDetails pd
+    JOIN 
+        UserReputation u ON pd.OwnerUserId = u.UserId
+    WHERE 
+        pd.UserPostRank = 1 AND
+        pd.Score > 5
+)
+SELECT 
+    p.PostId,
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionDate,
+    COUNT(l.RelatedPostId) AS RelatedPosts,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    b.BadgeCount AS OwnerBadgeCount
+FROM 
+    RecursivePostHierarchy p
+LEFT JOIN 
+    PostLinks l ON p.PostId = l.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    BadgesWithCounts b ON u.Id = b.UserId
+WHERE 
+    p.Level = 0 
+GROUP BY 
+    p.PostId, p.Title, p.CreationDate, u.DisplayName, u.Reputation, b.BadgeCount
+ORDER BY 
+    COUNT(l.RelatedPostId) DESC, p.CreationDate DESC
+LIMIT 10;

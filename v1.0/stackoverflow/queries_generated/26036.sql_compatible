@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+PopularBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(pb.BadgeCount, 0) AS GoldBadgeCount,
+        COALESCE(rp.OwnerPostRank, 0) AS QuestionsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        PopularBadges pb ON u.Id = pb.UserId
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000  
+),
+BenchmarkData AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.GoldBadgeCount,
+        COUNT(p.Id) AS PostsCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        TopUsers u
+    LEFT JOIN 
+        Posts p ON u.UserId = p.OwnerUserId
+    GROUP BY 
+        u.UserId, u.DisplayName, u.Reputation, u.GoldBadgeCount
+)
+SELECT 
+    b.*,
+    (b.AvgViewCount * 0.6 + b.AvgScore * 0.4) AS PerformanceScore
+FROM 
+    BenchmarkData b
+ORDER BY 
+    PerformanceScore DESC
+LIMIT 10;

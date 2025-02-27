@@ -1,0 +1,69 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.rank <= 3
+),
+PartInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(NULLIF(p.p_comment, ''), 'No comment') AS processed_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < (SELECT AVG(p_retailprice) FROM part))
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE) 
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    o.o_orderkey,
+    o.total_price,
+    p.processed_comment,
+    CASE 
+        WHEN o.total_items = 0 THEN 'No Items'
+        WHEN o.total_price > 1000 THEN 'High Value'
+        ELSE 'Standard'
+    END AS order_category
+FROM 
+    PartInfo p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    TopSuppliers s ON ps.ps_suppkey = s.s_suppkey
+RIGHT JOIN 
+    OrderDetails o ON o.o_orderkey = ps.ps_partkey -- Bizarre join logic here
+WHERE 
+    p.p_retailprice IS NOT NULL
+ORDER BY 
+    o.total_price DESC, 
+    p.p_name ASC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

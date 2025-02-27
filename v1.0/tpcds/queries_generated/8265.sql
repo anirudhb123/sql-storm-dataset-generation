@@ -1,0 +1,56 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+average_sales AS (
+    SELECT 
+        AVG(total_web_sales) AS avg_web_sales,
+        AVG(total_catalog_sales) AS avg_catalog_sales,
+        AVG(total_store_sales) AS avg_store_sales
+    FROM 
+        customer_sales
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_web_sales,
+        cs.total_catalog_sales,
+        cs.total_store_sales,
+        RANK() OVER (ORDER BY (cs.total_web_sales + cs.total_catalog_sales + cs.total_store_sales) DESC) AS sales_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+)
+SELECT 
+    tc.sales_rank,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_web_sales,
+    tc.total_catalog_sales,
+    tc.total_store_sales,
+    as.avg_web_sales,
+    as.avg_catalog_sales,
+    as.avg_store_sales
+FROM 
+    top_customers tc, average_sales as
+WHERE 
+    tc.sales_rank <= 10
+ORDER BY 
+    tc.sales_rank;

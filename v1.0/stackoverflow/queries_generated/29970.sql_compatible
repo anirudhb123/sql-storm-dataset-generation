@@ -1,0 +1,44 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(CASE WHEN Posts.Score IS NOT NULL THEN Posts.Score ELSE 0 END) AS TotalScore,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC, TotalViews DESC) AS Rank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    Pt.TagName,
+    Pt.PostCount,
+    Pt.TotalViews,
+    Pt.TotalScore,
+    Pt.AverageScore,
+    U.DisplayName AS TopUser,
+    U.Reputation AS UserReputation
+FROM 
+    PopularTags Pt
+JOIN 
+    Posts P ON Pt.TagName = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+WHERE 
+    Pt.Rank <= 10
+ORDER BY 
+    Pt.Rank;

@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title a
+    LEFT OUTER JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_per_year <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword,
+        CASE 
+            WHEN k.keyword ILIKE '%Sci-Fi%' THEN 'Science Fiction'
+            ELSE NULL
+        END AS genre_classification
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        a.title,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords,
+        COALESCE(dc.info, 'No Description') AS description
+    FROM 
+        topMovies m
+    LEFT JOIN 
+        MovieKeywords k ON m.movie_id = k.movie_id
+    LEFT JOIN 
+        movie_info dc ON m.movie_id = dc.movie_id AND dc.info_type_id = (SELECT id FROM info_type WHERE info = 'description' LIMIT 1)
+    GROUP BY 
+        a.title, dc.info
+)
+SELECT 
+    md.title,
+    md.keywords,
+    md.description,
+    CASE 
+        WHEN md.keywords LIKE '%Sci-Fi%' THEN 'Science Fiction Movie'
+        WHEN md.keywords IS NULL THEN 'Unclassified'
+        ELSE 'General Movie'
+    END AS classification,
+    ran.actor_count
+FROM 
+    MovieDetails md
+JOIN 
+    TopMovies ran ON md.title = ran.title
+ORDER BY 
+    ran.actor_count DESC NULLS LAST;

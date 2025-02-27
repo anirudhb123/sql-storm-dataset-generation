@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10
+),
+Directors AS (
+    SELECT 
+        pi.person_id,
+        a.name AS director_name,
+        COUNT(DISTINCT mc.movie_id) AS total_movies_directed
+    FROM 
+        company_name cn
+    JOIN 
+        movie_companies mc ON cn.id = mc.company_id
+    JOIN 
+        aka_name a ON a.person_id = mc.person_id
+    JOIN 
+        role_type rt ON rt.id = mc.company_type_id
+    JOIN 
+        cast_info ci ON ci.movie_id = mc.movie_id
+    JOIN 
+        person_info pi ON pi.person_id = ci.person_id
+    JOIN 
+        name n ON n.id = ci.person_id
+    WHERE 
+        rt.role = 'Director'
+        AND n.gender IS NOT NULL
+    GROUP BY 
+        pi.person_id, a.name
+),
+UniqueKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    d.director_name,
+    COALESCE(uk.keywords, 'No Keywords') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    Directors d ON d.total_movies_directed = (SELECT MAX(total_movies_directed) FROM Directors)
+LEFT JOIN 
+    UniqueKeywords uk ON tm.movie_id = uk.movie_id
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC;

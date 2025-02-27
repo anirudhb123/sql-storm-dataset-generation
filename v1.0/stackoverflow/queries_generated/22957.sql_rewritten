@@ -1,0 +1,63 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(DAY, -30, GETDATE())
+),
+UserPostStatistics AS (
+    SELECT 
+        ru.UserId,
+        ru.DisplayName,
+        COUNT(rp.PostId) AS TotalRecentPosts,
+        SUM(rp.Score) AS TotalScore,
+        CONCAT(COALESCE(MAX(rp.CreationDate), 'No Posts'), ' - ', COALESCE(MIN(rp.CreationDate), 'No Posts')) AS PostDateRange
+    FROM 
+        RankedUsers ru
+    LEFT JOIN 
+        RecentPosts rp ON ru.UserId = rp.OwnerUserId
+    GROUP BY 
+        ru.UserId, ru.DisplayName
+)
+SELECT 
+    ups.DisplayName,
+    ups.TotalRecentPosts,
+    ups.TotalScore, 
+    ups.PostDateRange,
+    RANK() OVER (ORDER BY ups.TotalScore DESC) AS ScoreRank,
+    CASE 
+        WHEN ups.TotalRecentPosts > 5 THEN 'Frequent Author'
+        WHEN ups.TotalRecentPosts BETWEEN 1 AND 5 THEN 'Occasional Author'
+        ELSE 'No Recent Activity'
+    END AS EngagementLevel
+FROM 
+    UserPostStatistics ups
+WHERE 
+    ups.TotalScore IS NOT NULL AND 
+    ups.TotalRecentPosts > 0
+ORDER BY 
+    ScoreRank;

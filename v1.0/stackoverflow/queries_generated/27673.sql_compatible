@@ -1,0 +1,67 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostsTags pt ON pt.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.CreationDate >= DATEADD(day, -30, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, u.DisplayName
+),
+Benchmark AS (
+    SELECT 
+        PostId,
+        Title,
+        PostType,
+        ViewCount,
+        Score,
+        CommentCount,
+        VoteCount,
+        CASE
+            WHEN ViewCount > 1000 THEN 'High'
+            WHEN ViewCount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewCategory
+    FROM 
+        PostStats
+)
+SELECT 
+    b.PostId,
+    b.Title,
+    b.PostType,
+    b.ViewCount,
+    b.Score,
+    b.CommentCount,
+    b.VoteCount,
+    b.ViewCategory,
+    CONCAT('This post ', b.ViewCategory, ' view count of ', b.ViewCount, ' indicates its popularity in the community.') AS Insights
+FROM 
+    Benchmark b
+ORDER BY 
+    b.Score DESC, 
+    b.ViewCount DESC;

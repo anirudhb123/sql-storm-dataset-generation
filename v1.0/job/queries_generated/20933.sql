@@ -1,0 +1,99 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_in_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+FilteredCast AS (
+    SELECT 
+        ci.movie_id, 
+        ci.person_id,
+        ct.kind AS role_kind,
+        ci.nr_order,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_cast_in_movie
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE 
+        ci.nr_order IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(a.name, 'Unknown') AS director_name,
+        m.production_year,
+        f.role_kind,
+        f.total_cast_in_movie
+    FROM 
+        RankedMovies m 
+    LEFT JOIN 
+        (SELECT 
+             ci.movie_id, 
+             a.name,
+             ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY f.nr_order) AS director_order
+         FROM 
+             filtered_cast f
+         JOIN 
+             aka_name a ON f.person_id = a.person_id
+         WHERE 
+             f.role_kind = 'director') a ON m.movie_id = a.movie_id AND a.director_order = 1
+    JOIN 
+        filtered_cast f ON m.movie_id = f.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.director_name,
+    md.role_kind,
+    md.total_cast_in_movie,
+    CASE 
+        WHEN md.production_year BETWEEN 2000 AND 2010 THEN '21st Century'
+        WHEN md.production_year < 2000 THEN '20th Century'
+        ELSE 'Future'
+    END AS production_period,
+    CASE 
+        WHEN md.total_cast_in_movie > 10 THEN 'Large Ensemble'
+        WHEN md.total_cast_in_movie BETWEEN 5 AND 10 THEN 'Moderate Size'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM 
+    MovieDetails md
+WHERE 
+    md.director_name IS NOT NULL
+    OR md.total_cast_in_movie > 5
+ORDER BY 
+    md.production_year DESC, md.title
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;
+
+-- correlate against title keywords
+WITH KeywordsPerMovie AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS all_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    kp.all_keywords,
+    COALESCE(NULLIF(kp.all_keywords, ''), 'No keywords') AS keywords_list
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordsPerMovie kp ON md.movie_id = kp.movie_id
+WHERE 
+    md.production_year = (SELECT MAX(production_year) FROM MovieDetails)
+ORDER BY 
+    md.title;

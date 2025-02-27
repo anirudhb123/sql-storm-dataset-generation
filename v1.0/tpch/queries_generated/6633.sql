@@ -1,0 +1,42 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        rc.s_suppkey,
+        rc.s_name,
+        rc.total_cost
+    FROM 
+        RankedSuppliers rc
+    WHERE 
+        rc.rank <= 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_price,
+    hs.total_cost AS supplier_cost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    HighCostSuppliers hs ON ps.ps_suppkey = hs.s_suppkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    hs.total_cost DESC, p.p_partkey ASC
+LIMIT 10;

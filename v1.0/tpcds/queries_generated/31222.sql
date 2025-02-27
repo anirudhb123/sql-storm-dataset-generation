@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SalesGrowth AS (
+    SELECT 
+        d_year,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY d_year) AS year_rank
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year
+    HAVING 
+        SUM(ws_net_profit) > 0
+),
+CustomerAddressData AS (
+    SELECT 
+        c.c_customer_sk,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        c.c_customer_sk, ca.ca_state
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws_net_profit) AS total_purchases
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    g.d_year,
+    g.total_profit,
+    CASE 
+        WHEN g.total_profit > LAG(g.total_profit) OVER (ORDER BY g.year_rank) THEN 'Growth'
+        WHEN g.total_profit < LAG(g.total_profit) OVER (ORDER BY g.year_rank) THEN 'Decline'
+        ELSE 'Stable'
+    END AS growth_trend,
+    ca.ca_state,
+    SUM(cad.customer_count) AS state_customer_count,
+    cd.cd_gender,
+    cd.marital_status,
+    cd.total_purchases
+FROM 
+    SalesGrowth g
+LEFT JOIN 
+    CustomerAddressData cad ON cad.customer_count > 0
+LEFT JOIN 
+    CustomerDemographics cd ON cd.total_purchases IS NOT NULL
+WHERE 
+    (g.total_profit IS NOT NULL OR cad.customer_count > 0)
+AND 
+    (cd.cd_gender IS NOT NULL OR cd.marital_status IS NOT NULL)
+GROUP BY 
+    g.d_year, g.total_profit, ca.ca_state, cd.cd_gender, cd.marital_status
+ORDER BY 
+    g.d_year DESC;

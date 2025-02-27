@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        COUNT(*) AS order_count,
+        SUM(ws_net_paid) AS total_net_paid,
+        SUM(ws_quantity) AS total_quantity
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cd.c_customer_sk, 
+        SUM(sd.total_net_paid) AS total_spend
+    FROM CustomerData cd
+    JOIN SalesData sd ON cd.c_customer_sk = sd.ws_item_sk
+    WHERE gender_rank <= 10
+    GROUP BY cd.c_customer_sk
+),
+InventoryInfo AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(inv_quantity_on_hand) AS total_stock
+    FROM item i
+    JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.total_quantity) AS total_sold,
+        DENSE_RANK() OVER (ORDER BY SUM(sd.total_quantity) DESC) AS sales_rank
+    FROM SalesData sd
+    GROUP BY sd.ws_item_sk
+    HAVING SUM(sd.total_quantity) > (SELECT AVG(total_quantity) FROM SalesData)
+)
+
+SELECT 
+    t.item_desc,
+    t.total_sold,
+    t.total_spend,
+    i.total_stock,
+    c.cd_gender,
+    c.cd_marital_status
+FROM TopSellingItems t
+JOIN HighValueCustomers hvc ON t.ws_item_sk = hvc.c_customer_sk
+JOIN InventoryInfo i ON t.ws_item_sk = i.i_item_sk
+JOIN CustomerData c ON hvc.c_customer_sk = c.c_customer_sk
+LEFT JOIN reason r ON hvc.c_customer_sk = r.r_reason_sk
+WHERE i.total_stock IS NOT NULL
+ORDER BY total_sold DESC;

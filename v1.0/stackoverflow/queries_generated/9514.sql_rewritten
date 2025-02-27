@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        u.DisplayName AS OwnerDisplayName, 
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        OwnerDisplayName, 
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        tp.*, 
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostsTags pt ON tp.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    GROUP BY 
+        tp.PostId
+)
+SELECT 
+    pd.PostId, 
+    pd.Title, 
+    pd.CreationDate, 
+    pd.Score, 
+    pd.ViewCount, 
+    pd.OwnerDisplayName, 
+    pd.CommentCount, 
+    pd.Tags
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

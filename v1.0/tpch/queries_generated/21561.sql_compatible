@@ -1,0 +1,85 @@
+
+WITH regional_suppliers AS (
+    SELECT 
+        r.r_name,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (
+            SELECT AVG(total_supply_value)
+            FROM (
+                SELECT 
+                    SUM(ps_supplycost * ps_availqty) AS total_supply_value
+                FROM 
+                    partsupp
+                GROUP BY 
+                    ps_suppkey
+            ) AS avg_supplies
+        )
+), order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, '1998-10-01')
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), string_concatenation AS (
+    SELECT 
+        CONCAT(s.s_name, ' - ', r.r_name, ' (', COUNT(DISTINCT p.p_partkey), ' parts offered)') AS supplier_info,
+        s.s_suppkey,
+        rs.total_supply_value
+    FROM 
+        regional_suppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    LEFT JOIN 
+        partsupp p ON p.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, rs.total_supply_value, supplier_info
+)
+SELECT 
+    sc.supplier_info,
+    os.o_orderkey,
+    os.order_total,
+    CASE 
+        WHEN os.order_rank = 1 THEN 'Top Order'
+        ELSE NULL
+    END AS order_ranking,
+    (SELECT COUNT(*) FROM lineitem WHERE l_shipdate IS NOT NULL) AS shipped_items_count
+FROM 
+    order_summary os
+JOIN 
+    string_concatenation sc ON os.o_orderkey = (
+        SELECT 
+            o.o_orderkey
+        FROM 
+            orders o
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_shipdate IS NOT NULL
+        ORDER BY 
+            o.o_orderdate DESC
+        LIMIT 1
+    )
+ORDER BY 
+    os.order_total DESC;

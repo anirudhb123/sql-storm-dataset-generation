@@ -1,0 +1,40 @@
+
+WITH RECURSIVE PriceHierarchy AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost) AS supply_rank
+    FROM partsupp
+    WHERE ps_availqty > 0
+), ExpensiveSupplies AS (
+    SELECT p.p_partkey, p.p_name, SUM(ph.ps_supplycost * ph.ps_availqty) AS total_cost
+    FROM part p
+    JOIN PriceHierarchy ph ON p.p_partkey = ph.ps_partkey
+    WHERE ph.supply_rank <= 5
+    GROUP BY p.p_partkey, p.p_name
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate > DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+), SupplierNations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+), FinalBenchmark AS (
+    SELECT c.c_custkey, c.c_name, s.n_name AS supplier_nation, 
+           COALESCE(ROUND(SUM(es.total_cost), 2), 0) AS total_supply_cost,
+           COALESCE(SUM(LENGTH(c.c_name) - LENGTH(REPLACE(c.c_name, 'e', ''))), 0) AS e_count,
+           RANK() OVER (ORDER BY COALESCE(SUM(es.total_cost), 0) DESC) AS ranking
+    FROM HighValueCustomers c
+    LEFT JOIN ExpensiveSupplies es ON c.c_custkey = es.p_partkey
+    LEFT JOIN supplier s ON c.c_custkey = s.s_nationkey
+    LEFT JOIN SupplierNations sn ON s.s_nationkey = sn.n_nationkey
+    GROUP BY c.c_custkey, c.c_name, s.n_name
+    HAVING COUNT(DISTINCT es.p_partkey) > 0 OR COUNT(DISTINCT s.s_nationkey) IS NULL
+)
+SELECT f.c_custkey, f.c_name, f.supplier_nation, f.total_supply_cost, f.e_count, f.ranking
+FROM FinalBenchmark f
+WHERE f.ranking <= 10
+ORDER BY f.total_supply_cost DESC, f.e_count ASC;

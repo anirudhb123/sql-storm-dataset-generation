@@ -1,0 +1,36 @@
+
+WITH BenchmarkData AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS HistoryCreationDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    COUNT(DISTINCT PH.PostHistoryTypeId) AS TotalHistoryTypes,
+    AVG(TIMESTAMPDIFF(MICROSECOND, CreationDate, PH.CreationDate)) AS AvgEditTime,
+    SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalCloseReasons,
+    SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS TotalReopenReasons
+FROM 
+    BenchmarkData
+LEFT JOIN 
+    PostHistory PH ON BenchmarkData.PostId = PH.PostId
+GROUP BY 
+    PostId, Title, OwnerDisplayName, CreationDate
+ORDER BY 
+    TotalHistoryTypes DESC, AvgEditTime ASC;

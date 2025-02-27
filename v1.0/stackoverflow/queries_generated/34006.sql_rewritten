@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.Score
+),
+TopPosts AS (
+    SELECT 
+        ps.PostId, 
+        ps.Title, 
+        ps.Score, 
+        ps.Upvotes, 
+        ps.Downvotes, 
+        ps.CommentCount, 
+        ps.BadgeCount,
+        CASE 
+            WHEN ps.Score > 100 THEN 'Hot'
+            WHEN ps.Score > 50 THEN 'Warm'
+            ELSE 'Cold' 
+        END AS Popularity
+    FROM 
+        PostStatistics ps
+    WHERE 
+        ps.CommentCount > 5
+)
+SELECT 
+    p.Title,
+    COUNT(DISTINCT ph.PostId) AS RelatedPostCount,
+    MAX(tp.Popularity) AS PeakPopularity,
+    MAX(tp.Upvotes) AS MaxUpvotes,
+    MAX(tp.BadgeCount) AS MaxBadges,
+    COUNT(DISTINCT CASE 
+        WHEN ps.CreationDate < p.CreationDate THEN ps.Id 
+        ELSE NULL 
+    END) AS PredecessorCount
+FROM 
+    Posts p
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON pl.RelatedPostId = rph.PostId
+LEFT JOIN 
+    TopPosts tp ON p.Id = tp.PostId
+LEFT JOIN 
+    Posts ps ON ps.ParentId = p.Id
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+GROUP BY 
+    p.Title
+ORDER BY 
+    RelatedPostCount DESC, MaxUpvotes DESC
+LIMIT 10;

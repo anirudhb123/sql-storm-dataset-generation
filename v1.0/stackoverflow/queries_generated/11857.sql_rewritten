@@ -1,0 +1,1 @@
+SELECT TOP 1000 1, GETDATE(), 0, 0, 'Sample Post Body', Id, 'Sample Title' FROM Users;

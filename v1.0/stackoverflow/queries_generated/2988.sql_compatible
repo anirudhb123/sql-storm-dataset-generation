@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+), UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestClass
+    FROM Badges b
+    GROUP BY b.UserId
+), RecentCloseReasons AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS Closed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS Reopened
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 YEAR'
+    GROUP BY ph.PostId
+), UserPostMetrics AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalPosts,
+        us.TotalScore,
+        us.AverageViewCount,
+        ub.BadgeCount,
+        ub.HighestClass,
+        COALESCE(rp.PostId, -1) AS LastPostId,
+        COALESCE(rp.Title, 'No Posts Yet') AS LastPostTitle,
+        COALESCE(rc.Closed, 0) AS IsClosedPost,
+        COALESCE(rc.Reopened, 0) AS IsReopenedPost
+    FROM UserStatistics us
+    LEFT JOIN UserBadges ub ON us.UserId = ub.UserId
+    LEFT JOIN RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.rn = 1
+    LEFT JOIN RecentCloseReasons rc ON rp.PostId = rc.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalScore,
+    AverageViewCount,
+    BadgeCount,
+    CASE 
+        WHEN HighestClass = 1 THEN 'Gold' 
+        WHEN HighestClass = 2 THEN 'Silver' 
+        WHEN HighestClass = 3 THEN 'Bronze' 
+        ELSE 'No Badge' 
+    END AS HighestBadge,
+    LastPostId,
+    LastPostTitle,
+    CASE 
+        WHEN IsClosedPost = 1 AND IsReopenedPost = 0 THEN 'Closed' 
+        WHEN IsReopenedPost = 1 THEN 'Reopened' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM UserPostMetrics
+ORDER BY TotalScore DESC, TotalPosts DESC
+LIMIT 10;

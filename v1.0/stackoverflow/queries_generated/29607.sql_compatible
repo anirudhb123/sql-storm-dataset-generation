@@ -1,0 +1,90 @@
+
+WITH TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS ActiveUsers
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+), BadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), CombinedStats AS (
+    SELECT 
+        TS.TagName,
+        TS.PostCount,
+        TS.TotalViews AS TagTotalViews,
+        TS.AverageScore,
+        US.UserId,
+        US.DisplayName AS UserName,
+        US.CommentCount,
+        US.VoteCount,
+        US.PostCount AS UserPostCount,
+        US.TotalViews AS UserTotalViews,
+        BS.BadgeCount,
+        BS.GoldBadges,
+        BS.SilverBadges,
+        BS.BronzeBadges
+    FROM 
+        TagStats TS
+    JOIN 
+        UserActivity US ON TS.PostCount > 0
+    LEFT JOIN 
+        BadgeStats BS ON US.UserId = BS.UserId
+)
+SELECT 
+    TagName,
+    PostCount,
+    TagTotalViews,
+    AverageScore,
+    UserName,
+    CommentCount,
+    VoteCount,
+    UserPostCount,
+    UserTotalViews,
+    BadgeCount,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges
+FROM 
+    CombinedStats
+WHERE 
+    UserName IS NOT NULL
+ORDER BY 
+    PostCount DESC, TagTotalViews DESC, UserTotalViews DESC;

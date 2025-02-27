@@ -1,0 +1,63 @@
+WITH Recursive_CTE AS (
+    -- Recursive CTE to find the maximum number of roles each person has played in various movies
+    SELECT ci.person_id, COUNT(DISTINCT ci.movie_id) AS role_count
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.person_id
+    HAVING COUNT(DISTINCT ci.movie_id) > 1
+), 
+
+Movie_Info_CTE AS (
+    -- Middle CTE to pull movie and company info for productions that have multiple keywords
+    SELECT mt.id AS movie_id, mt.title, mt.production_year,
+           mk.keyword, cn.name AS company_name, cn.country_code
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    JOIN movie_companies mc ON mt.id = mc.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mt.title, mc.company_id
+    HAVING COUNT(DISTINCT mk.keyword) > 1  -- Movies with more than one keyword
+)
+
+SELECT 
+    an.name AS actor_name,
+    mv.title AS movie_title,
+    mv.production_year,
+    COUNT(DISTINCT mk.id) AS keyword_count,
+    MIN(mv.production_year) AS earliest_year,
+    MAX(mv.production_year) AS latest_year,
+    ROW_NUMBER() OVER (PARTITION BY a.role_id ORDER BY mv.production_year DESC) AS role_rank,
+    CASE 
+        WHEN mv.production_year IS NULL THEN 'No Year'
+        ELSE TO_CHAR(mv.production_year, '9999')
+    END AS formatted_year,
+    CASE
+    	WHEN c.name IS NULL THEN 'Unknown Company'
+    	ELSE c.name
+    END AS company_name
+FROM 
+    cast_info ci
+JOIN 
+    aka_name an ON ci.person_id = an.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    Movie_Info_CTE mv ON ci.movie_id = mv.movie_id
+LEFT JOIN 
+    keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    Recursive_CTE a ON ci.person_id = a.person_id
+WHERE 
+    an.name IS NOT NULL
+AND 
+    mv.production_year BETWEEN 1980 AND 2020  -- Filter for movies within this year range
+GROUP BY 
+    actor_name, mv.title, mv.production_year, c.name, a.role_id
+HAVING 
+    COUNT(DISTINCT mk.id) > 2  -- Only include movies with more than 2 unique keywords
+ORDER BY 
+    earliest_year DESC, actor_name ASC, role_rank DESC
+LIMIT 100 OFFSET 0;  -- Limiting the results for benchmarking
+

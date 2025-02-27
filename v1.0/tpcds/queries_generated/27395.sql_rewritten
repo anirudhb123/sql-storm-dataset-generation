@@ -1,0 +1,39 @@
+WITH formatted_customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name,
+        CASE 
+            WHEN cd_demo_sk IS NOT NULL THEN cd_gender
+            ELSE 'N/A'
+        END AS gender,
+        COALESCE(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip), 'Address Not Available') AS full_address,
+        d.d_date AS first_purchase_date
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+),
+aggregated_data AS (
+    SELECT 
+        customer_name,
+        gender,
+        full_address,
+        COUNT(*) AS purchase_count,
+        MIN(first_purchase_date) AS earliest_purchase
+    FROM formatted_customer_info
+    GROUP BY customer_name, gender, full_address
+)
+SELECT 
+    customer_name,
+    gender,
+    full_address,
+    purchase_count,
+    earliest_purchase,
+    CASE 
+        WHEN purchase_count > 10 THEN 'High Value Customer'
+        WHEN purchase_count BETWEEN 5 AND 10 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_segment
+FROM aggregated_data
+WHERE earliest_purchase >= DATEADD(year, -5, cast('2002-10-01' as date))
+ORDER BY purchase_count DESC, customer_name ASC;

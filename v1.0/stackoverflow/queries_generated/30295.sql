@@ -1,0 +1,77 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        0 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  -- Starting from questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.DisplayName
+    ORDER BY TotalReputation DESC
+    LIMIT 10
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        Min(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (1, 2, 3, 12) THEN 1 END) AS EditCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+
+SELECT 
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionCreationDate,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    COALESCE(phr.Level, 0) AS HierarchyLevel,
+    CASE 
+        WHEN ph.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(ut.TotalReputation, 0) as UserReputation,
+    ph.EditCount AS NumberOfEdits
+FROM Posts p
+LEFT JOIN PostVotes pv ON p.Id = pv.PostId
+LEFT JOIN RecursivePostHierarchy phr ON p.AcceptedAnswerId = phr.Id
+LEFT JOIN PostHistoryDetails ph ON p.Id = ph.PostId
+LEFT JOIN TopUsers ut ON p.OwnerUserId = (SELECT Id FROM Users WHERE DisplayName = ut.DisplayName)
+
+WHERE p.PostTypeId = 1  -- Only questions
+AND p.CreationDate >= NOW() - INTERVAL '1 year'  -- Only questions from the last year
+AND (pv.TotalVotes IS NULL OR pv.TotalVotes >= 5)  -- Only questions with 5 or more total votes
+ORDER BY p.Score DESC;

@@ -1,0 +1,56 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.person_id, ci.movie_id, 1 AS level
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ak.name LIKE 'John%' 
+    
+    UNION ALL
+
+    SELECT ci.person_id, ci.movie_id, ah.level + 1
+    FROM cast_info ci
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ak.name NOT LIKE 'John%'
+),
+
+MovieDetails AS (
+    SELECT m.id AS movie_id, m.title, m.production_year,
+           (SELECT COUNT(DISTINCT ci.person_id)
+            FROM cast_info ci
+            WHERE ci.movie_id = m.id) AS total_cast,
+           (SELECT STRING_AGG(DISTINCT ak.name, ', ') 
+            FROM cast_info ci
+            JOIN aka_name ak ON ci.person_id = ak.person_id
+            WHERE ci.movie_id = m.id) AS cast_names
+    FROM aka_title m
+    WHERE m.production_year BETWEEN 2000 AND 2023
+),
+
+RankedMovies AS (
+    SELECT md.movies_id, md.title, md.production_year,
+           ROW_NUMBER() OVER (ORDER BY md.total_cast DESC) AS cast_rank
+    FROM MovieDetails md
+    WHERE md.total_cast > 3 
+),
+
+CompanyInfo AS (
+    SELECT mc.movie_id, c.name AS company_name, ct.kind AS company_type,
+           COUNT(mc.id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id 
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, c.name, ct.kind
+),
+
+FinalReport AS (
+    SELECT rm.title, rm.production_year, rm.cast_rank, ci.company_name, ci.company_type
+    FROM RankedMovies rm
+    LEFT JOIN CompanyInfo ci ON rm.movie_id = ci.movie_id
+)
+
+SELECT fr.title, fr.production_year, fr.cast_rank, 
+       COALESCE(fr.company_name, 'No Company') AS featured_company,
+       COALESCE(fr.company_type, 'N/A') AS company_type
+FROM FinalReport fr
+WHERE (fr.company_type IS NOT NULL OR fr.cast_rank <= 5)
+ORDER BY fr.cast_rank, fr.production_year DESC;

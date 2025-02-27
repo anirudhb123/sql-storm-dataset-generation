@@ -1,0 +1,75 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= '2023-12-31'
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SuspiciousLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate < l.l_commitdate
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_quantity) > 100 OR SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_revenue,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+FinalReport AS (
+    SELECT 
+        cs.c_custkey,
+        cs.total_orders,
+        cs.total_spent,
+        cs.last_order_date,
+        so.s_suppkey,
+        so.supplier_revenue,
+        ss.unique_parts_supplied,
+        wo.o_orderkey
+    FROM CustomerStats cs
+    LEFT JOIN SupplierSales so ON cs.c_custkey = so.s_suppkey
+    LEFT JOIN RankedOrders wo ON cs.total_orders > 5 AND wo.price_rank = 1
+)
+
+SELECT 
+    fr.c_custkey AS CustomerID,
+    fr.total_orders AS TotalOrders,
+    fr.total_spent AS TotalSpent,
+    fr.last_order_date AS LastOrderDate,
+    COALESCE(fr.supplier_revenue, 0) AS SupplierRevenue,
+    COALESCE(fr.unique_parts_supplied, 0) AS UniquePartsSupplied,
+    COUNT(DISTINCT ss.l_orderkey) AS SuspiciousOrderCount
+FROM FinalReport fr
+LEFT JOIN SuspiciousLineItems ss ON fr.o_orderkey = ss.l_orderkey
+WHERE fr.total_spent IS NOT NULL 
+AND fr.last_order_date IS NOT NULL
+GROUP BY 
+    fr.c_custkey,
+    fr.total_orders,
+    fr.total_spent,
+    fr.last_order_date,
+    fr.supplier_revenue,
+    fr.unique_parts_supplied
+HAVING AVG(fr.total_spent) > 1000 OR COUNT(ss.l_orderkey) > 0
+ORDER BY fr.total_spent DESC, fr.c_custkey;

@@ -1,0 +1,77 @@
+
+WITH RecursiveTags AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY T.Id ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+),
+PostScoreDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END), 0) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        U.Reputation
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (2, 3) 
+    LEFT JOIN 
+        Badges B ON B.UserId = P.OwnerUserId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY
+        P.Id, P.Title, P.ViewCount, P.Score, U.Reputation
+),
+RankedPosts AS (
+    SELECT
+        PSD.*,
+        RANK() OVER (ORDER BY PSD.Score DESC, PSD.ViewCount DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY PSD.BadgeCount DESC) AS BadgeRank,
+        ROW_NUMBER() OVER (ORDER BY PSD.Reputation DESC) AS ReputationRank
+    FROM 
+        PostScoreDetails PSD
+),
+FinalRankedPosts AS (
+    SELECT
+        RP.*,
+        COALESCE(GROUP_CONCAT(DISTINCT RT.TagName ORDER BY RT.TagName SEPARATOR ', '), 'No Tags') AS RelatedTags
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecursiveTags RT ON RP.PostId = RT.TagId
+    GROUP BY 
+        RP.PostId, RP.Title, RP.ViewCount, RP.Score, RP.CommentCount, RP.TotalBounty, RP.BadgeCount, RP.Reputation
+)
+SELECT 
+    FRP.PostId,
+    FRP.Title,
+    FRP.Score,
+    FRP.ViewCount,
+    FRP.CommentCount,
+    FRP.TotalBounty,
+    FRP.BadgeCount,
+    FRP.Reputation,
+    FRP.ScoreRank,
+    FRP.BadgeRank,
+    FRP.ReputationRank,
+    FRP.RelatedTags
+FROM 
+    FinalRankedPosts FRP
+WHERE 
+    FRP.ScoreRank <= 10 OR FRP.BadgeRank <= 10
+ORDER BY 
+    FRP.Score DESC, FRP.BadgeCount DESC;

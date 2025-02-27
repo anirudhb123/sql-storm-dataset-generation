@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_sold_date_sk, ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    HAVING SUM(ws_quantity) > 10
+    UNION ALL
+    SELECT cs_sold_date_sk, cs_item_sk, SUM(cs_quantity) AS total_quantity, SUM(cs_net_paid) AS total_sales
+    FROM catalog_sales
+    GROUP BY cs_sold_date_sk, cs_item_sk
+    HAVING SUM(cs_quantity) > 10
+),
+total_sales AS (
+    SELECT item.i_item_id, item.i_item_desc, COALESCE(w.total_sales, 0) + COALESCE(c.total_sales, 0) AS total_sales
+    FROM item
+    LEFT JOIN (
+        SELECT ws_item_sk, SUM(total_sales) AS total_sales
+        FROM sales_data
+        WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+        GROUP BY ws_item_sk
+    ) w ON item.i_item_sk = w.ws_item_sk
+    LEFT JOIN (
+        SELECT cs_item_sk, SUM(total_sales) AS total_sales
+        FROM sales_data
+        WHERE cs_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+        GROUP BY cs_item_sk
+    ) c ON item.i_item_sk = c.cs_item_sk
+),
+ranked_sales AS (
+    SELECT i_item_id, i_item_desc, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM total_sales
+)
+SELECT rs.i_item_id, rs.i_item_desc, rs.total_sales,
+       CASE 
+           WHEN rs.sales_rank <= 10 THEN 'Top Seller'
+           WHEN rs.sales_rank <= 20 THEN 'High Seller'
+           ELSE 'Average Seller'
+       END AS sales_category
+FROM ranked_sales rs
+WHERE rs.total_sales > (SELECT AVG(total_sales) FROM ranked_sales)
+ORDER BY rs.total_sales DESC
+LIMIT 15;

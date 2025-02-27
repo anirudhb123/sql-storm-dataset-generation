@@ -1,0 +1,55 @@
+WITH movie_avg_rating AS (
+    SELECT 
+        m.id AS movie_id,
+        AVG(r.rating) AS avg_rating
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        (SELECT 
+            movie_id,
+            CASE 
+                WHEN info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN CAST(info AS FLOAT)
+                END AS rating
+            FROM 
+                movie_info) r ON m.id = r.movie_id
+    GROUP BY 
+        m.id
+),
+actor_details AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(ci.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(ci.movie_id) DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.person_id, a.name
+),
+high_rated_movies AS (
+    SELECT 
+        m.id,
+        m.title,
+        av.avg_rating
+    FROM 
+        title m
+    JOIN 
+        movie_avg_rating av ON m.id = av.movie_id
+    WHERE 
+        av.avg_rating > 8.0
+)
+SELECT 
+    h.title,
+    a.name AS actor_name,
+    COALESCE(h.avg_rating, 0) AS average_rating,
+    ad.movie_count
+FROM 
+    high_rated_movies h
+FULL OUTER JOIN 
+    actor_details ad ON h.id IN (SELECT movie_id FROM cast_info WHERE person_id = ad.person_id)
+WHERE 
+    ad.rank <= 10;

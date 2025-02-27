@@ -1,0 +1,55 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.bill_customer_sk, 
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS order_count,
+        cd.gender AS customer_gender,
+        cd.marital_status,
+        cd.education_status,
+        hd.income_band_sk,
+        d.year AS sales_year,
+        sm.type AS ship_mode,
+        w.warehouse_name
+    FROM 
+        web_sales AS ws
+    JOIN 
+        customer AS c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics AS cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics AS hd ON c.current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        date_dim AS d ON ws.sold_date_sk = d.d_date_sk
+    JOIN 
+        ship_mode AS sm ON ws.ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN 
+        warehouse AS w ON ws.warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        ws.bill_customer_sk, cd.gender, cd.marital_status, 
+        cd.education_status, hd.income_band_sk, d.year, 
+        sm.type, w.warehouse_name
+),
+ranked_sales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY sales_year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_data
+)
+SELECT 
+    sales_year, 
+    customer_gender, 
+    marital_status, 
+    education_status, 
+    income_band_sk, 
+    ship_mode, 
+    warehouse_name, 
+    total_sales, 
+    order_count 
+FROM 
+    ranked_sales
+WHERE 
+    sales_rank <= 10 
+ORDER BY 
+    sales_year, total_sales DESC;

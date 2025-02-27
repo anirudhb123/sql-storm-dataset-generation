@@ -1,0 +1,47 @@
+
+WITH ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+    HAVING total_spent > 1000
+),
+SalesDetails AS (
+    SELECT 
+        c.c_customer_id,
+        ia.ca_address_id AS shipping_address,
+        it.i_item_desc,
+        is.total_quantity,
+        is.total_sales
+    FROM ItemSales is
+    JOIN item it ON it.i_item_sk = is.ws_item_sk
+    LEFT JOIN HighValueCustomers hv ON hv.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN customer c ON hv.c_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    s.c_customer_id,
+    s.shipping_address,
+    i.i_item_desc,
+    i.total_quantity,
+    i.total_sales,
+    CASE 
+        WHEN s.total_sales IS NULL THEN 0 
+        ELSE s.total_sales 
+    END AS sales_amount
+FROM SalesDetails s
+FULL OUTER JOIN ItemSales i ON s.ws_item_sk = i.ws_item_sk
+WHERE i.total_quantity > 10 OR s.total_spent IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 100;

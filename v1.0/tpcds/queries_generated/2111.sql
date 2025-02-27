@@ -1,0 +1,43 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        COALESCE(SUM(sr_return_amt_inc_tax), 0) AS total_return_amount
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopReturners AS (
+    SELECT 
+        cr.c_customer_sk,
+        cr.c_first_name,
+        cr.c_last_name,
+        cr.total_returns,
+        cr.total_return_amount,
+        DENSE_RANK() OVER (ORDER BY cr.total_return_amount DESC) AS return_rank
+    FROM CustomerReturns cr
+)
+SELECT 
+    tr.c_customer_sk,
+    tr.c_first_name,
+    tr.c_last_name,
+    tr.total_returns,
+    tr.total_return_amount,
+    CASE 
+        WHEN tr.total_return_amount > 1000 THEN 'High Value'
+        WHEN tr.total_return_amount BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS return_value_category,
+    (
+        SELECT COUNT(*) 
+        FROM store_returns sr 
+        WHERE sr.sr_customer_sk = tr.c_customer_sk 
+        AND sr.sr_return_quantity > 0
+    ) AS active_return_count,
+    CONCAT(tr.c_first_name, ' ', tr.c_last_name) AS full_name
+FROM TopReturners tr
+WHERE tr.return_rank <= 10
+ORDER BY tr.return_amount DESC;

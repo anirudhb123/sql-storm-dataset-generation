@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        MAX(v.BountyAmount) OVER (PARTITION BY p.Id) AS MaxBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 10
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    ub.BadgeNames,
+    CASE 
+        WHEN p.MaxBounty IS NOT NULL THEN 'Has Bounty'
+        ELSE 'No Bounty'
+    END AS BountyStatus
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+WHERE 
+    p.rn = 1 
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 50;
+
+

@@ -1,0 +1,102 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(ro.o_orderkey) AS total_orders,
+        SUM(CASE WHEN ro.order_rank = 1 THEN o.o_totalprice ELSE 0 END) AS latest_order_total
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    LEFT JOIN 
+        orders o ON ro.o_orderkey = o.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_orders,
+        co.latest_order_total,
+        ROW_NUMBER() OVER (ORDER BY co.latest_order_total DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_orders > 10
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    INNER JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > (
+            SELECT 
+                AVG(ps_inner.ps_availqty) 
+            FROM 
+                partsupp ps_inner 
+            GROUP BY 
+                ps_inner.ps_partkey
+        )
+)
+SELECT 
+    tc.c_name,
+    tp.p_name,
+    tc.latest_order_total,
+    tp.total_avail_qty,
+    CASE 
+        WHEN tc.latest_order_total > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer' 
+    END AS customer_category,
+    COALESCE(tp.supplier_count, 0) AS available_suppliers,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SupplierParts tp ON tp.ps_partkey IN (
+        SELECT ps_partkey 
+        FROM partsupp 
+        WHERE ps_suppkey = (
+            SELECT 
+                ps_inner.ps_suppkey 
+            FROM 
+                partsupp ps_inner
+            WHERE 
+                ps_inner.ps_partkey = tp.ps_partkey
+            ORDER BY 
+                ps_inner.ps_supplycost DESC 
+            LIMIT 1
+        )
+    )
+LEFT JOIN 
+    partsupp ps ON tp.ps_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    tc.rank <= 10
+GROUP BY 
+    tc.c_name, tp.p_name, tc.latest_order_total, tp.total_avail_qty
+ORDER BY 
+    tc.latest_order_total DESC, customer_category;

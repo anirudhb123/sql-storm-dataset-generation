@@ -1,0 +1,111 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::text AS parent_title,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        p.title AS parent_title,
+        level + 1
+    FROM
+        aka_title e
+    JOIN
+        aka_title p ON e.episode_of_id = p.id
+    WHERE
+        level < 10  -- limiting the recursion depth
+),
+
+HighlightedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.parent_title,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level, mh.title) AS rn
+    FROM
+        MovieHierarchy mh
+    WHERE
+        mh.level > 0  -- only considering episodes here
+),
+
+TopMovies AS (
+    SELECT
+        hmv.*
+    FROM
+        HighlightedMovies hmv
+    WHERE
+        hmv.rn = 1  -- getting top episode for each production year
+),
+
+CompanyMovieStats AS (
+    SELECT
+        c.name AS company_name,
+        COUNT(mc.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        aka_title t ON mc.movie_id = t.id
+    WHERE
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Distributor')
+    GROUP BY
+        c.name
+),
+
+MostProlificDirectors AS (
+    SELECT
+        ak.name AS director_name,
+        COUNT(DISTINCT ci.movie_id) AS directed_movies
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN
+        aka_title at ON ci.movie_id = at.id
+    WHERE
+        ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY
+        ak.name
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 2
+),
+
+FinalBenchmark AS (
+    SELECT
+        mm.title,
+        mm.production_year,
+        cm.company_name,
+        cm.movie_count,
+        md.director_name,
+        md.directed_movies
+    FROM
+        TopMovies mm
+    LEFT JOIN
+        CompanyMovieStats cm ON mm.movie_id = cm.movie_id
+    LEFT JOIN
+        MostProlificDirectors md ON mm.movie_id IN (
+            SELECT movie_id FROM cast_info ci WHERE ci.role_id = (SELECT id FROM role_type WHERE role = 'Director')
+        )
+)
+
+SELECT
+    *,
+    COALESCE(company_name, 'Independent') AS final_company,
+    CASE WHEN directed_movies IS NULL THEN 'N/A' ELSE directed_movies END AS director_count
+FROM
+    FinalBenchmark
+ORDER BY
+    production_year DESC, title;

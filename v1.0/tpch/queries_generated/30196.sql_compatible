@@ -1,0 +1,41 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > 0
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+    WHERE ch.level < 3
+),
+AvgOrderValue AS (
+    SELECT o_custkey, AVG(o_totalprice) AS avg_order_price
+    FROM orders
+    WHERE o_orderdate >= DATE '1997-01-01'
+    GROUP BY o_custkey
+),
+TotalLineItems AS (
+    SELECT l_orderkey, SUM(l_quantity) AS total_quantity
+    FROM lineitem
+    GROUP BY l_orderkey
+)
+SELECT 
+    cn.c_name,
+    COALESCE(av.avg_order_price, 0) AS avg_order_price,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS returned_value,
+    COUNT(DISTINCT CASE WHEN l.l_lineitemstatus = 'I' THEN l.l_orderkey END) AS in_progress_orders,
+    ROW_NUMBER() OVER (PARTITION BY cn.c_custkey ORDER BY COALESCE(av.avg_order_price, 0) DESC) AS order_rank,
+    (SELECT COUNT(*) FROM supplier s WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 5000) AS supplier_count
+FROM 
+    CustomerHierarchy cn
+LEFT JOIN AvgOrderValue av ON cn.c_custkey = av.o_custkey
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cn.c_custkey)
+LEFT JOIN TotalLineItems tl ON tl.l_orderkey = l.l_orderkey
+WHERE 
+    cn.level <= 2 
+GROUP BY 
+    cn.c_name, av.avg_order_price, cn.c_custkey
+ORDER BY 
+    returned_value DESC, cn.c_name
+LIMIT 100;

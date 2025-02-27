@@ -1,0 +1,63 @@
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.id AS movie_id,
+        ROW_NUMBER() OVER(PARTITION BY m.production_year ORDER BY m.title) AS title_order,
+        COUNT(DISTINCT k.keyword) OVER(PARTITION BY m.id) AS keyword_count,
+        MAX(co.name) AS company_name
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND m.title IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.title,
+        m.production_year,
+        m.id AS movie_id,
+        ROW_NUMBER() OVER(PARTITION BY m.production_year ORDER BY m.title) AS title_order,
+        COUNT(DISTINCT k.keyword) OVER(PARTITION BY m.id) AS keyword_count,
+        MAX(co.name) AS company_name
+    FROM 
+        aka_title m
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        m.production_year IS NULL
+)
+
+SELECT 
+    title, 
+    production_year, 
+    movie_id,
+    title_order,
+    keyword_count,
+    COALESCE(company_name, 'Independent') AS company_name,
+    CASE 
+        WHEN title_order <= 5 THEN 'Top Title' 
+        ELSE 'Other Title' 
+    END AS title_category
+FROM 
+    RecursiveMovieInfo
+WHERE 
+    keyword_count > 0 OR title_category = 'Top Title'
+ORDER BY 
+    production_year DESC, 
+    title_order ASC
+LIMIT 100;
+
+-- Ensure benchmarking reflects performance interactions of outer joins 
+-- with correlated subqueries, window functions, and CTEs handling edge cases

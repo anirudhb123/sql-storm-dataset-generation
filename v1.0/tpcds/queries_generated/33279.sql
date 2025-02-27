@@ -1,0 +1,87 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS total_returns,
+        SUM(cr_return_amount) AS total_return_value
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+    UNION ALL
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        SUM(wr_return_amt) AS total_return_value
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        cr.total_returns + wr.total_returns AS overall_returns,
+        cr.total_return_value + wr.total_return_value AS overall_return_value,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name
+    FROM 
+        CustomerReturns cr
+    LEFT JOIN 
+        (SELECT wr_returning_customer_sk, SUM(wr_return_amt) AS total_return_value, COUNT(DISTINCT wr_order_number) AS total_returns 
+         FROM web_returns 
+         GROUP BY wr_returning_customer_sk) wr ON cr.cr_returning_customer_sk = wr.wr_returning_customer_sk
+    JOIN 
+        customer c ON c.c_customer_sk = cr.cr_returning_customer_sk
+),
+SalesSummary AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        SUM(ss.ss_sales_price) AS total_sales,
+        SUM(ss.ss_quantity) AS total_quantity
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY 
+        ss.ss_sold_date_sk
+),
+DateSales AS (
+    SELECT 
+        dd.d_date,
+        ds.total_sales,
+        ds.total_quantity,
+        DENSE_RANK() OVER (ORDER BY total_sales DESC) AS rank_sales
+    FROM 
+        date_dim dd
+    LEFT JOIN 
+        SalesSummary ds ON dd.d_date_sk = ds.ss_sold_date_sk
+    WHERE 
+        dd.d_year = 2023
+),
+FinalReport AS (
+    SELECT 
+        tc.c_customer_id,
+        tc.c_first_name,
+        tc.c_last_name,
+        ds.total_sales,
+        ds.total_quantity,
+        ds.rank_sales
+    FROM 
+        TopCustomers tc
+    LEFT JOIN 
+        DateSales ds ON tc.c_customer_id = (SELECT c.c_customer_id 
+                                             FROM customer c 
+                                             WHERE c.c_customer_sk = tc.cr_returning_customer_sk)
+)
+SELECT 
+    fr.c_customer_id,
+    fr.c_first_name,
+    fr.c_last_name,
+    COALESCE(fr.total_sales, 0) AS total_sales,
+    COALESCE(fr.total_quantity, 0) AS total_quantity,
+    FR.rank_sales
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.rank_sales, fr.total_sales DESC;

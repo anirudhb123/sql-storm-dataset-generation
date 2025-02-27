@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS supplier_rank,
+        n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    ps.p_partkey,
+    p.p_name,
+    ps.avg_supply_cost,
+    ps.total_available_quantity,
+    os.o_orderkey,
+    od.total_price,
+    COALESCE(rs.nation_name, 'Unknown') AS supplier_nation,
+    CASE 
+        WHEN ps.supplier_count > 5 THEN 'Diverse'
+        ELSE 'Limited'
+    END AS supplier_diversity,
+    ROW_NUMBER() OVER (PARTITION BY ps.p_partkey ORDER BY od.total_price DESC) AS part_order_rank
+FROM PartStats ps
+LEFT JOIN OrderDetails od ON ps.p_partkey = od.o_orderkey
+LEFT JOIN RankedSuppliers rs ON rs.s_suppkey = (
+    SELECT ps_supkey 
+    FROM partsupp 
+    WHERE ps_partkey = ps.p_partkey ORDER BY ps_supplycost LIMIT 1
+)
+WHERE ps.avg_supply_cost IS NOT NULL
+AND (od.total_price IS NULL OR od.price_rank <= 10)
+ORDER BY ps.total_available_quantity DESC, rs.nation_name ASC NULLS LAST;

@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS Downvotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+        AND p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+MostVotedComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT CONCAT('Edited by ', ph.UserDisplayName, ': ', ph.Comment), '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Edited title, body or suggested edit applied
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Upvotes,
+    rp.Downvotes,
+    COALESCE(mvc.CommentCount, 0) AS CommentCount,
+    COALESCE(phd.LastEditDate, 'No edits') AS LastEditDate,
+    COALESCE(phd.EditComments, 'No edits made') AS EditComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    MostVotedComments mvc ON rp.PostId = mvc.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.rn <= 10 -- Limit to top 10 most recent questions
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

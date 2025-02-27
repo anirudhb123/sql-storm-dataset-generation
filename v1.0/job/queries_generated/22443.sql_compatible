@@ -1,0 +1,90 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+EnhancedCast AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id 
+    WHERE 
+        ci.nr_order IS NOT NULL
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(cn.name, '; ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+),
+
+DetailedMovieInfo AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(cs.companies, 'No Companies') AS companies,
+        COALESCE(cs.company_count, 0) AS company_count,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = m.movie_id) AS complete_cast_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        MovieKeywords mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        CompanyStats cs ON m.movie_id = cs.movie_id
+)
+
+SELECT 
+    dm.title,
+    dm.production_year,
+    dm.keywords AS formatted_keywords,
+    dm.companies,
+    dm.company_count,
+    ec.person_id AS top_actor,
+    ec.role,
+    ec.role_rank
+FROM 
+    DetailedMovieInfo dm
+LEFT JOIN 
+    EnhancedCast ec ON dm.movie_id = ec.movie_id 
+WHERE 
+    dm.company_count > 0 
+AND 
+    (dm.production_year < 2000 OR ec.role_rank = 1)
+ORDER BY 
+    dm.production_year DESC, 
+    dm.title;

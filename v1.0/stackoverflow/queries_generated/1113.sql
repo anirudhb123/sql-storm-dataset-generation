@@ -1,0 +1,70 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount,
+        SUM(COALESCE(P.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(P.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 10
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.TotalScore,
+    U.AvgViewCount,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    CASE 
+        WHEN U.TotalScore > 1000 THEN 'Expert'
+        WHEN U.TotalScore BETWEEN 500 AND 1000 THEN 'Intermediate'
+        ELSE 'Beginner'
+    END AS ExperienceLevel,
+    COALESCE(CloseReasons.ClosedPosts, 0) AS ClosedPosts,
+    COALESCE(ActivePosts.ActivePostCount, 0) AS ActivePostsCount
+FROM 
+    UserPostStats U
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS ClosedPosts
+    FROM 
+        Posts P
+    WHERE 
+        P.ClosedDate IS NOT NULL
+    GROUP BY 
+        P.OwnerUserId
+) CloseReasons ON U.UserId = CloseReasons.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS ActivePostCount
+    FROM 
+        Posts P
+    WHERE 
+        P.LastActivityDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.OwnerUserId
+) ActivePosts ON U.UserId = ActivePosts.OwnerUserId
+WHERE 
+    U.TotalScore > 0
+ORDER BY 
+    U.TotalScore DESC, U.PostCount DESC
+LIMIT 50;

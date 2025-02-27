@@ -1,0 +1,52 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CTE.rn,
+        CTE.missing_supplier_count
+    FROM 
+        orders o
+    INNER JOIN (
+        SELECT 
+            l.o_orderkey,
+            COUNT(DISTINCT ps.s_suppkey) as missing_supplier_count,
+            ROW_NUMBER() OVER (PARTITION BY l.o_orderkey ORDER BY COUNT(DISTINCT ps.s_suppkey) DESC) as rn
+        FROM 
+            lineitem l
+        LEFT JOIN 
+            partsupp ps ON l.l_partkey = ps.ps_partkey
+        GROUP BY 
+            l.o_orderkey
+    ) CTE ON o.o_orderkey = CTE.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+),
+TotalSupplierCount AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT ps.s_suppkey) AS total_suppliers
+    FROM 
+        nation n
+    JOIN 
+        supplier ps ON n.n_nationkey = ps.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name,
+    SUM(ro.o_totalprice) AS total_order_value,
+    SUM(ts.total_suppliers) AS total_unique_suppliers,
+    AVG(ro.missing_supplier_count) AS avg_missing_suppliers_per_order
+FROM 
+    RankedOrders ro
+JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = ro.o_orderkey LIMIT 1))
+JOIN 
+    TotalSupplierCount ts ON ts.total_suppliers > 0
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_order_value DESC
+LIMIT 10;

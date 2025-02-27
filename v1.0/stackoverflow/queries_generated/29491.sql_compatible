@@ -1,0 +1,67 @@
+
+WITH RankedUserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.LastActivityDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.OwnerUserId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY (STRING_TO_ARRAY(p.Tags, ',')::text[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    ru.ReputationRank,
+    ap.PostId,
+    ap.Title,
+    ap.Body,
+    ap.CommentCount,
+    ap.UpVotes,
+    ap.DownVotes,
+    STRING_AGG(pt.TagName, ', ') AS PopularTags
+FROM 
+    RankedUserReputation ru
+JOIN 
+    ActivePosts ap ON ru.UserId = ap.OwnerUserId
+JOIN 
+    PopularTags pt ON ap.Tags LIKE '%' || pt.TagName || '%'
+GROUP BY 
+    ru.DisplayName, ru.Reputation, ru.ReputationRank, ap.PostId, ap.Title, ap.Body, ap.CommentCount, ap.UpVotes, ap.DownVotes
+ORDER BY 
+    ru.Reputation DESC, ap.UpVotes DESC, ap.CommentCount DESC;

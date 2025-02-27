@@ -1,0 +1,50 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p 
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE))
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.QuestionCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score
+FROM 
+    UserStats u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.Rank <= 5
+ORDER BY 
+    u.QuestionCount DESC, 
+    rp.Score DESC;

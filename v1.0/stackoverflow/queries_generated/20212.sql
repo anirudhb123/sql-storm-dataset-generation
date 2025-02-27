@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT V.UserId) FILTER (WHERE V.VoteTypeId = 3) AS DownVoteCount,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(P.Tags, ',') AS TagArray(Tag) ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(BOTH ' ' FROM TagArray.Tag)
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) B ON U.Id = B.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.Id AS PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation AS OwnerReputation,
+    U.Views AS OwnerViews,
+    RP.CommentCount,
+    RP.UpVoteCount,
+    RP.DownVoteCount,
+    RP.Tags,
+    PHS.EditCount,
+    PHS.LastEditDate,
+    CASE 
+        WHEN RP.ScoreRank = 1 THEN 'Top Post'
+        WHEN RP.Score > 50 THEN 'Popular Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+LEFT JOIN 
+    PostHistorySummary PHS ON RP.Id = PHS.PostId
+WHERE 
+    RP.CommentCount > 0
+    AND RP.UpVoteCount > 0
+ORDER BY 
+    RP.Score DESC, 
+    RP.ViewCount DESC, 
+    RP.CreationDate DESC
+LIMIT 100;

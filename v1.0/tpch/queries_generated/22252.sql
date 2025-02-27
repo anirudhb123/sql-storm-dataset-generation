@@ -1,0 +1,64 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level, c_nationkey
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1, c.c_nationkey
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.custkey <> ch.c_custkey
+), 
+PartsWithHighSupplierCost AS (
+    SELECT ps.partkey, 
+           SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    INNER JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.partkey
+    HAVING SUM(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+TopRegions AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+    HAVING COUNT(DISTINCT n.n_nationkey) > 1
+),
+OrderStats AS (
+    SELECT o.o_orderkey, 
+           COUNT(l.l_orderkey) AS item_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    ch.c_name AS customer_name,
+    ch.c_acctbal AS account_balance,
+    p.p_name AS part_name,
+    p.p_retailprice AS retail_price,
+    r.r_name AS region_name,
+    os.item_count AS order_item_count,
+    os.total_revenue AS order_revenue,
+    CASE 
+        WHEN os.item_count IS NULL THEN 'No items'
+        ELSE CAST(os.total_revenue AS VARCHAR(30))
+    END AS revenue_display,
+    COALESCE(pwh.total_supply_cost, 0) AS high_supplier_cost
+FROM CustomerHierarchy ch
+JOIN orders o ON ch.c_custkey = o.o_custkey
+JOIN OrderStats os ON o.o_orderkey = os.o_orderkey
+JOIN lineitem l ON os.o_orderkey = l.l_orderkey
+JOIN part p ON l.l_partkey = p.p_partkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN PartsWithHighSupplierCost pwh ON p.p_partkey = pwh.partkey
+JOIN TopRegions r ON ch.c_nationkey IN (SELECT n.n_nationkey 
+                                         FROM nation n 
+                                         WHERE n.n_regionkey IN (SELECT r.r_regionkey 
+                                                                 FROM region r 
+                                                                 WHERE r.r_name = r.r_name))
+WHERE ch.level < 3
+ORDER BY ch.c_acctbal DESC, os.total_revenue DESC;

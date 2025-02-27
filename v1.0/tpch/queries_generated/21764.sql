@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_tree AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, st.level + 1
+    FROM supplier s
+    JOIN supplier_tree st ON st.s_suppkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+eligible_customer AS (
+    SELECT c.c_custkey, c.c_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderdate > '2022-01-01'
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment NOT LIKE 'F%'
+    GROUP BY c.c_custkey
+    HAVING total_spent > 5000
+),
+top_part AS (
+    SELECT p.p_partkey, p.p_name, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_size > 10 AND p.p_brand IS NOT NULL
+)
+SELECT 
+    nt.n_name, 
+    SUM(ps.ps_supplycost * li.l_quantity) AS total_cost, 
+    avg(c.c_acctbal) AS avg_acctbal,
+    STRING_AGG(DISTINCT s.s_name, '; ') AS supplier_names,
+    SUM(CASE 
+            WHEN li.l_returnflag = 'R' THEN li.l_extendedprice * (1 - li.l_discount)
+            ELSE 0 
+        END) AS returned_sales,
+    (SELECT COUNT(*)
+     FROM lineitem l 
+     WHERE l.l_shipdate IS NULL OR l.l_receiptdate IS NULL) AS unresolved_shipments
+FROM lineitem li
+JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation nt ON s.s_nationkey = nt.n_nationkey
+LEFT JOIN eligible_customer ec ON ec.c_custkey = li.l_orderkey
+JOIN top_part tp ON tp.p_partkey = ps.ps_partkey
+WHERE s.s_acctbal IS NOT NULL AND nt.n_name IN (SELECT DISTINCT r_name FROM region)
+GROUP BY nt.n_name
+HAVING SUM(ps.ps_supplycost * li.l_quantity) > 10000 AND avg_acctbal > 3000
+ORDER BY total_cost DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

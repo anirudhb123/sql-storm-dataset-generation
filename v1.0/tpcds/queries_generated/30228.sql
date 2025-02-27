@@ -1,0 +1,39 @@
+
+WITH RECURSIVE CustomerSalesCTE AS (
+    SELECT c.c_customer_sk, 
+           c.c_customer_id, 
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), 
+SalesSummary AS (
+    SELECT cs.c_customer_sk,
+           coalesce(cs.total_sales, 0) AS total_sales,
+           d.d_year,
+           CASE 
+               WHEN d.d_year < 2020 THEN 'Pre-2020'
+               WHEN d.d_year = 2020 THEN '2020'
+               ELSE 'Post-2020'
+           END AS period
+    FROM CustomerSalesCTE cs
+    JOIN date_dim d ON cs.c_customer_sk = d.d_date_sk
+), 
+ReturnSummary AS (
+    SELECT sr.sr_customer_sk, 
+           SUM(COALESCE(sr.sr_return_amt_inc_tax, 0)) AS total_returns
+    FROM store_returns sr
+    GROUP BY sr.sr_customer_sk
+)
+SELECT ss.c_customer_id,
+       ss.total_sales,
+       COALESCE(rs.total_returns, 0) AS total_returns,
+       ss.total_sales - COALESCE(rs.total_returns, 0) AS net_sales,
+       ss.period,
+       COUNT(DISTINCT cs.c_customer_sk) OVER () AS unique_customers
+FROM SalesSummary ss
+LEFT JOIN ReturnSummary rs ON ss.c_customer_sk = rs.sr_customer_sk
+WHERE ss.total_sales > 1000
+ORDER BY net_sales DESC
+LIMIT 100;

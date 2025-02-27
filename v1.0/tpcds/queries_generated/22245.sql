@@ -1,0 +1,44 @@
+
+WITH CustomerWithReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighReturnCustomers AS (
+    SELECT 
+        c.customer_id,
+        ROW_NUMBER() OVER (ORDER BY total_returned_amount DESC) AS rn
+    FROM 
+        CustomerWithReturns c
+    WHERE 
+        return_count > 0
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ws.ws_net_profit, 0) AS web_profit,
+    COALESCE(ss.ss_net_profit, 0) AS store_profit,
+    (CORR(ws.ws_net_profit, ss.ss_net_profit) OVER ()) AS profit_correlation
+FROM 
+    HighReturnCustomers hr
+LEFT JOIN 
+    web_sales ws ON hr.customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON hr.customer_id = ss.ss_customer_sk
+WHERE 
+    (ws.ws_net_profit IS NOT NULL OR ss.ss_net_profit IS NOT NULL)
+    AND (hr.rn BETWEEN 1 AND 10)
+ORDER BY 
+    web_profit DESC
+OFFSET 5 ROWS
+FETCH NEXT 5 ROWS ONLY;

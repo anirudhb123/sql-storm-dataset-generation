@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_tree AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  -- filter based on average account balance
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, st.level + 1
+    FROM supplier s
+    JOIN supplier_tree st ON s.s_nationkey = st.s_nationkey  -- join to find suppliers in the same nation
+    WHERE s.s_acctbal > st.s_acctbal  -- ensuring we maintain account balance hierarchy
+), part_supplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), customer_order AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    p.p_name, 
+    p.p_mfgr, 
+    p.p_type, 
+    SUM(l.l_quantity) AS total_quantity_sold,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+    MAX(l.l_shipdate) AS latest_shipdate,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM supplier_tree st 
+            WHERE st.level > 1 AND st.s_nationkey = n.n_nationkey
+        ) THEN 'Multiple Levels'
+        ELSE 'Single Level'
+    END AS supplier_hierarchy,
+    n.n_name AS nation_name
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN nation n ON ps.ps_suppkey = n.n_nationkey
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100.00)  -- filter based on nested query
+GROUP BY p.p_partkey, n.n_name
+HAVING SUM(l.l_quantity) > (SELECT AVG(l2.l_quantity) FROM lineitem l2)
+ORDER BY total_quantity_sold DESC
+LIMIT 10;

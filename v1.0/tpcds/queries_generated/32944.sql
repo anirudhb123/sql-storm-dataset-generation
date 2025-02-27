@@ -1,0 +1,80 @@
+
+WITH RecursiveCustomer AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_addr_sk,
+        c.c_birth_month,
+        c.c_birth_year,
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_birth_month IS NOT NULL AND c.c_birth_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.c_current_addr_sk,
+        cs.c_birth_month,
+        cs.c_birth_year,
+        r.level + 1
+    FROM 
+        customer cs
+    JOIN 
+        RecursiveCustomer r ON cs.c_current_addr_sk = r.c_current_addr_sk
+    WHERE 
+        cs.c_customer_sk <> r.c_customer_sk
+),
+QuantityAnalysis AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT rc.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        RecursiveCustomer rc ON cd.cd_demo_sk = rc.c_customer_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    qa.total_quantity,
+    qa.avg_net_profit,
+    cd.cd_gender,
+    cd.customer_count,
+    cd.avg_purchase_estimate
+FROM 
+    RecursiveCustomer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    QuantityAnalysis qa ON c.c_customer_sk = qa.w_warehouse_sk
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_customer_sk IN (SELECT cd.customer_count FROM CustomerDemographics)
+WHERE 
+    ca.ca_city IS NOT NULL
+    AND cd.customer_count > 5
+ORDER BY 
+    cd.customer_count DESC,
+    qa.total_quantity DESC
+LIMIT 100;

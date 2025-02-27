@@ -1,0 +1,67 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        ps.s_suppkey,
+        ps.s_name,
+        ps.total_available,
+        ps.avg_supply_cost,
+        ps.part_count,
+        RANK() OVER (ORDER BY ps.total_available DESC) AS supplier_rank
+    FROM 
+        SupplierStats ps
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.total_spent,
+    cs.order_count,
+    ts.s_name AS supplier_name,
+    ts.total_available,
+    ts.avg_supply_cost,
+    CASE 
+        WHEN ts.part_count > 5 THEN 'Diverse'
+        ELSE 'Limited'
+    END AS part_diversity,
+    COALESCE(n.n_name, 'Unknown') AS nation_name
+FROM 
+    CustomerOrderStats cs
+LEFT JOIN 
+    TopSuppliers ts ON cs.order_count > 0
+LEFT JOIN 
+    supplier s ON ts.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats)
+    AND ts.total_available IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, ts.avg_supply_cost ASC;

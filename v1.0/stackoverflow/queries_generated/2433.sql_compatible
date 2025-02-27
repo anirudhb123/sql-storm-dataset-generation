@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+HighScoredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.Rank,
+        COALESCE(rp.ViewCount, 0) AS EffectiveViewCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId AND v.VoteTypeId IN (2, 3) 
+    WHERE 
+        rp.Rank <= 5 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.Rank, rp.ViewCount
+),
+LatestBadges AS (
+    SELECT 
+        b.UserId,
+        MAX(b.Date) AS LatestBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        lb.LatestBadgeDate,
+        COALESCE(hp.PostId, 0) AS TopPostId,
+        hp.Title AS TopPostTitle,
+        hp.Score AS TopPostScore,
+        hp.EffectiveViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        LatestBadges lb ON u.Id = lb.UserId
+    LEFT JOIN 
+        HighScoredPosts hp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = hp.TopPostId)
+    WHERE 
+        u.Reputation >= 1000 
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.LatestBadgeDate,
+    us.TopPostTitle,
+    us.TopPostScore,
+    us.EffectiveViewCount
+FROM 
+    UserStats us
+WHERE 
+    us.TopPostId IS NOT NULL
+ORDER BY 
+    us.Reputation DESC, us.TopPostScore DESC;

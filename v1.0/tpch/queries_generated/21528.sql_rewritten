@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), 
+
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           CASE 
+               WHEN p.p_size IS NULL THEN 'UNKNOWN'
+               ELSE p.p_size::text
+           END AS part_size
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(ps.ps_supplycost) 
+                              FROM partsupp ps 
+                              WHERE ps.ps_availqty > 0)
+),
+
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales 
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31' 
+    GROUP BY l.l_orderkey
+), 
+
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, ol.total_sales, o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    LEFT JOIN AggregatedLineItems ol ON o.o_orderkey = ol.l_orderkey
+    WHERE o.o_totalprice IS NOT NULL
+)
+
+SELECT rh.r_name, COALESCE(SH.s_name, 'NOT AVAILABLE') AS supplier_name,
+       COALESCE(FP.part_size, 'NO SIZE') AS part_size,
+       COUNT(DISTINCT od.o_orderkey) AS order_count,
+       SUM(od.total_sales) AS total_sales_value,
+       COUNT(DISTINCT CASE WHEN od.order_rank <= 5 THEN od.o_orderkey END) AS top_orders_count
+FROM region rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy SH ON s.s_suppkey = SH.s_suppkey
+LEFT JOIN FilteredParts FP ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand LIKE 'Brand%'))
+LEFT JOIN OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+GROUP BY rh.r_name, SH.s_name, FP.part_size
+HAVING COUNT(DISTINCT od.o_orderkey) > 0 OR SUM(od.total_sales) IS NULL
+ORDER BY total_sales_value DESC NULLS LAST;

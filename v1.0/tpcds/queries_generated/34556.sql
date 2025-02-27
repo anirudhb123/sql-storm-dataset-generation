@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_customer_sk,
+        SUM(cs_ext_sales_price) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_customer_sk
+    UNION ALL
+    SELECT 
+        s.ss_customer_sk,
+        SUM(s.ss_ext_sales_price) AS total_sales
+    FROM 
+        store_sales s
+    JOIN 
+        sales_hierarchy sh ON sh.cs_customer_sk = s.ss_customer_sk
+    GROUP BY 
+        s.ss_customer_sk
+),
+daily_sales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_ext_sales_price), 0) AS total_store_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_date
+),
+customer_demo AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY 
+        cd_demo_sk
+)
+SELECT 
+    d.d_date,
+    ds.total_web_sales,
+    ds.total_catalog_sales,
+    ds.total_store_sales,
+    ch.cs_customer_sk,
+    ch.total_sales,
+    cd.num_customers,
+    cd.avg_purchase_estimate,
+    MP.total_sales AS matching_sales_check
+FROM 
+    daily_sales ds
+LEFT JOIN 
+    sales_hierarchy ch ON ds.total_web_sales = ch.total_sales
+LEFT JOIN 
+    customer_demo cd ON cd.num_customers > 1000
+LEFT JOIN (
+    SELECT 
+        ch.cs_customer_sk,
+        SUM(ch.total_sales) AS total_sales
+    FROM 
+        sales_hierarchy ch
+    GROUP BY 
+        ch.cs_customer_sk
+    HAVING 
+        SUM(ch.total_sales) > 50000
+) AS MP ON MP.cs_customer_sk = ch.cs_customer_sk
+WHERE 
+    ds.total_web_sales IS NOT NULL  
+ORDER BY 
+    d.d_date DESC, ds.total_web_sales DESC;

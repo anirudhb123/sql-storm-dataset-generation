@@ -1,0 +1,62 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, 
+           ca_address_id,
+           ca_street_number,
+           ca_street_name,
+           ca_street_type,
+           ca_suite_number,
+           ca_city,
+           ca_county,
+           ca_state,
+           ca_zip,
+           ca_country,
+           ca_gmt_offset,
+           CONCAT(ca_street_name, ' ', COALESCE(ca_suite_number, '')) AS full_address,
+           1 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+
+    UNION ALL
+
+    SELECT ca_address_sk, 
+           ca_address_id,
+           ca_street_number,
+           ca_street_name,
+           ca_street_type,
+           ca_suite_number,
+           ca_city,
+           ca_county,
+           ca_state,
+           ca_zip,
+           ca_country,
+           ca_gmt_offset,
+           CONCAT(ca_street_name, ' -> ', full_address) AS full_address,
+           level + 1
+    FROM AddressHierarchy
+    JOIN customer_address ON ca_city = 'Los Angeles' AND level < 5
+)
+
+SELECT 
+    cd_gender, 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(CASE 
+            WHEN cd_marital_status = 'M' THEN 1 
+            ELSE 0 
+        END) AS married_count,
+    SUM(CASE 
+            WHEN cd_marital_status = 'S' THEN 1 
+            ELSE 0 
+        END) AS single_count,
+    MAX(COALESCE(c.c_birth_year, 1970)) AS latest_birth_year,
+    STRING_AGG(DISTINCT CONCAT(ca_city, ' ', ca_state), ', ') AS locations
+FROM customer c
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN AddressHierarchy ah ON ah.ca_address_sk = ca.ca_address_sk
+WHERE 
+    cd_purchase_estimate IS NOT NULL 
+    AND ca_zip LIKE '9%' 
+    AND (cd_credit_rating IS NULL OR cd_credit_rating = 'Unknown')
+GROUP BY cd_gender
+ORDER BY customer_count DESC;

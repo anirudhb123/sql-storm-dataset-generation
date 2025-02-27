@@ -1,0 +1,47 @@
+
+WITH RecursiveMovieCast AS (
+    
+    SELECT ci.movie_id, ak.name AS actor_name, ci.nr_order,
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rnk
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    WHERE ci.nr_order IS NOT NULL
+
+    UNION ALL
+
+    SELECT mc.movie_id, 'Director' AS actor_name, NULL AS nr_order,
+           ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY mc.company_id) AS rnk
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE ct.kind = 'Director'
+),
+
+FilteredMovies AS (
+    
+    SELECT mt.movie_id, mt.title, mt.production_year,
+           COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM aka_title mt
+    JOIN movie_keyword mk ON mt.id = mk.movie_id
+    WHERE mk.keyword_id IS NOT NULL
+      AND mt.title NOT LIKE '%unknown%'
+    GROUP BY mt.movie_id, mt.title, mt.production_year
+    HAVING COUNT(DISTINCT mk.keyword_id) > 2 
+),
+
+NullCheck AS (
+    
+    SELECT movie_id, actor_name,
+           CASE WHEN actor_name IS NULL THEN 'Unknown Actor' ELSE actor_name END AS display_name
+    FROM RecursiveMovieCast
+)
+
+
+SELECT fm.title, fm.production_year, n.display_name,
+       COALESCE(mk.keyword_count, 0) AS keyword_count,
+       COUNT(n.display_name) OVER (PARTITION BY fm.movie_id) AS total_actors
+FROM FilteredMovies fm
+LEFT JOIN NullCheck n ON fm.movie_id = n.movie_id
+LEFT JOIN movie_info mi ON fm.movie_id = mi.movie_id AND mi.info_type_id = 1 
+WHERE fm.production_year IS NOT NULL
+  AND (n.display_name IS NOT NULL OR n.display_name = 'Unknown Actor') 
+ORDER BY fm.production_year DESC, keyword_count DESC, n.display_name;

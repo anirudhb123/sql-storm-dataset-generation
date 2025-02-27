@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.CreationDate, 
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0) AS DownVotes,
+        (COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0) - 
+         COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY P.Id), 0)) AS Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON P.OwnerUserId = B.UserId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+PostMetrics AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        UpVotes, 
+        DownVotes, 
+        Score, 
+        CommentCount,
+        RANK() OVER (ORDER BY Score DESC) AS RankScore
+    FROM 
+        RankedPosts
+)
+SELECT 
+    PM.Title, 
+    PM.CreationDate, 
+    PM.UpVotes, 
+    PM.DownVotes, 
+    PM.Score, 
+    PM.CommentCount,
+    CASE 
+        WHEN PM.RankScore <= 10 THEN 'Top 10 Posts'
+        WHEN PM.RankScore > 10 AND PM.RankScore <= 20 THEN 'Next 10 Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM 
+    PostMetrics PM
+WHERE 
+    PM.UpVotes IS NOT NULL OR PM.DownVotes IS NOT NULL
+ORDER BY 
+    PM.RankScore;

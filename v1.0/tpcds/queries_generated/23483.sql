@@ -1,0 +1,64 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING SUM(ws.ws_ext_sales_price) > (SELECT AVG(ws_ext_sales_price) 
+                                          FROM web_sales 
+                                          WHERE ws_bill_customer_sk IS NOT NULL)
+    ORDER BY total_sales DESC
+    LIMIT 10
+),
+customer_addresses AS (
+    SELECT ca.ca_address_sk, 
+           ca.ca_city, 
+           ca.ca_state, 
+           ca.ca_zip,
+           COUNT(distinct c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_zip
+    HAVING COUNT(DISTINCT c.c_customer_sk) > 0
+),
+sales_summary AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_quantity) AS total_quantity, 
+           SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+    HAVING SUM(ws.ws_net_profit) > 1000
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state,
+    ca.ca_zip,
+    COALESCE(cs.total_quantity, 0) AS total_quantity,
+    COALESCE(ss.total_net_profit, 0) AS total_net_profit,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cc.customer_count DESC) AS state_rank
+FROM top_customers c
+JOIN customer_addresses ca ON c.c_customer_sk IN (
+    SELECT c_current_addr_sk 
+    FROM customer 
+    WHERE c_customer_sk = c.c_customer_sk
+)
+LEFT JOIN sales_summary cs ON cs.ws_item_sk IN (
+    SELECT ws_item_sk 
+    FROM web_sales 
+    WHERE ws_bill_customer_sk = c.c_customer_sk
+)
+LEFT JOIN (
+    SELECT ca.ca_address_sk, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY ca.ca_address_sk
+) cc ON ca.ca_address_sk = cc.ca_address_sk
+WHERE c.c_current_cdemo_sk IS NOT NULL 
+AND (ca.ca_state IS NOT NULL OR ca.ca_state = '')
+ORDER BY total_net_profit DESC, c.c_last_name ASC NULLS LAST;

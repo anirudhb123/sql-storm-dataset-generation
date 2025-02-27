@@ -1,0 +1,52 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o_orderkey, c_custkey, o_orderdate, o_totalprice, 1 AS Level
+    FROM orders
+    WHERE o_orderdate >= '1996-01-01'
+    UNION ALL
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, Level + 1
+    FROM orders o
+    JOIN OrderCTE octe ON o.o_custkey = octe.c_custkey
+    WHERE o.o_orderdate >= octe.o_orderdate AND Level < 5
+), 
+CustomerBalances AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+), 
+SupplierPartPrices AS (
+    SELECT ps.ps_partkey, s.s_suppkey, s.s_acctbal, ps.ps_supplycost, 
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Unknown' 
+               ELSE 'Known' 
+           END AS AccountType
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+), 
+MaxPrices AS (
+    SELECT p.p_partkey, MAX(sp.ps_supplycost) AS MaxSupplyCost
+    FROM SupplierPartPrices sp
+    JOIN part p ON sp.ps_partkey = p.p_partkey
+    GROUP BY p.p_partkey
+)
+
+SELECT 
+    r.r_name, 
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS ReturnedRevenue,
+    COUNT(DISTINCT octe.o_orderkey) AS OrderCount,
+    AVG(c.TotalSpent) AS AverageSpent,
+    COUNT(CASE WHEN AccountType = 'Unknown' THEN 1 END) AS UnknownAccounts,
+    COUNT(*) FILTER (WHERE MaxSupplyCost > 150.00) AS PricierParts
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierPartPrices sp ON s.s_suppkey = sp.s_suppkey
+LEFT JOIN lineitem l ON sp.ps_partkey = l.l_partkey
+LEFT JOIN OrderCTE octe ON l.l_orderkey = octe.o_orderkey
+LEFT JOIN CustomerBalances c ON octe.c_custkey = c.c_custkey
+WHERE r.r_name LIKE 'N%' 
+  AND (c.TotalSpent > 500.00 OR s.s_acctbal < 100.00)
+GROUP BY r.r_name
+HAVING COUNT(*) > 10
+ORDER BY ReturnedRevenue DESC, AverageSpent ASC NULLS LAST;

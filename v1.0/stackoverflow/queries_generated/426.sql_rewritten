@@ -1,0 +1,65 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY (string_to_array(p.Tags, ',')::int[])
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.AverageScore,
+    pt.TagName,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.OwnerName
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PopularTags pt ON pt.TagUsageCount > 5
+LEFT JOIN 
+    RecentPosts r ON ups.UserId = r.OwnerUserId AND r.RecentPostRank = 1
+ORDER BY 
+    ups.TotalPosts DESC, ups.AverageScore DESC
+LIMIT 100;

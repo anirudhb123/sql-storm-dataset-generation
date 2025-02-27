@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.web_name, 
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales, 
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk, ws.web_name
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ReturnRate AS (
+    SELECT 
+        sr.sr_item_sk,
+        COALESCE(SUM(CASE WHEN cs.cs_item_sk IS NOT NULL THEN 1 ELSE 0 END), 0) AS successful_sales,
+        COALESCE(SUM(cr.total_returns), 0) AS total_returns,
+        CASE 
+            WHEN SUM(CASE WHEN cs.cs_item_sk IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 
+                100.0 * COALESCE(SUM(cr.total_returns), 0) / SUM(CASE WHEN cs.cs_item_sk IS NOT NULL THEN 1 ELSE 0 END)
+            ELSE 0 
+        END AS return_rate
+    FROM catalog_sales cs
+    LEFT JOIN CustomerReturns cr ON cs.cs_item_sk = cr.sr_item_sk
+    GROUP BY sr.sr_item_sk
+)
+SELECT 
+    s.store_sk, 
+    s.s_store_name,
+    SUM(ws.ws_net_paid) AS total_web_sales,
+    SUM(cs.cs_net_paid) AS total_catalog_sales,
+    SUM(ss.ss_net_paid) AS total_store_sales,
+    r.return_rate,
+    CASE 
+        WHEN r.return_rate > 10 THEN 'High Return' 
+        ELSE 'Normal Return' 
+    END AS return_status
+FROM store s
+JOIN web_sales ws ON ws.ws_ship_addr_sk = s.s_store_sk
+JOIN catalog_sales cs ON cs.cs_ship_addr_sk = s.s_store_sk
+JOIN store_sales ss ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN ReturnRate r ON r.sr_item_sk = ss.ss_item_sk
+GROUP BY s.store_sk, s.s_store_name, r.return_rate
+HAVING SUM(ws.ws_net_paid) > 100000
+ORDER BY total_web_sales DESC;

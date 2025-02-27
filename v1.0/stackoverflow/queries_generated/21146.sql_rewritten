@@ -1,0 +1,69 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId, 
+        Reputation, 
+        PostCount, 
+        TotalBounties, 
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS RankReputation, 
+        RANK() OVER (ORDER BY PostCount DESC, TotalBounties DESC) AS RankPostCount
+    FROM 
+        UserReputation
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+
+SELECT 
+    ru.UserId,
+    ru.Reputation AS UserReputation,
+    ru.PostCount AS UserPostCount,
+    COALESCE(cp.ClosedPostCount, 0) AS ClosedPostCount,
+    ru.TotalBounties AS UserTotalBounties,
+    CASE 
+        WHEN ru.Reputation >= 5000 THEN 'Expert'
+        WHEN ru.Reputation BETWEEN 2000 AND 4999 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserSkillLevel,
+    json_agg(json_build_object('PostId', cp.PostId, 'Title', cp.Title, 'CreationDate', cp.CreationDate, 'CloseReason', cp.CloseReason)) AS ClosedPosts
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS ClosedPostCount
+     FROM Posts p
+     JOIN PostHistory ph ON p.Id = ph.PostId
+     WHERE ph.PostHistoryTypeId = 10 
+     GROUP BY UserId) cp ON ru.UserId = cp.UserId
+GROUP BY 
+    ru.UserId, ru.Reputation, ru.PostCount, ru.TotalBounties
+HAVING 
+    SUM(CASE WHEN ru.Reputation < 3000 THEN 1 ELSE 0 END) = 0
+ORDER BY 
+    ru.RankReputation, ru.RankPostCount
+LIMIT 10;

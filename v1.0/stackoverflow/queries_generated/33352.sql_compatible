@@ -1,0 +1,92 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(v.BountyAmount) AS AvgBounty,  
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PopularTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagCount
+    FROM (
+        SELECT 
+            unnest(string_to_array(Tags, '>')) AS TagName
+        FROM 
+            Posts
+    ) AS TagList
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    p.Id,
+    p.Title,
+    COALESCE(r.Level, 0) AS HierarchyLevel,
+    u.DisplayName AS Owner,
+    ps.TotalQuestions,
+    ps.TotalAnswers,
+    t.TagName AS PopularTag,
+    ps.AvgBounty,
+    COUNT(c.Id) AS TotalComments
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+LEFT JOIN 
+    UserPostStats ps ON p.OwnerUserId = ps.UserId
+LEFT JOIN 
+    PopularTags t ON t.TagName = ANY(string_to_array(p.Tags, '>'))
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+AND 
+    (p.Title ILIKE '%help%' OR p.Body ILIKE '%help%')  
+GROUP BY 
+    p.Id, r.Level, u.DisplayName, ps.TotalQuestions, ps.TotalAnswers, t.TagName, ps.AvgBounty
+HAVING 
+    SUM(CASE WHEN c.PostId IS NOT NULL THEN 1 ELSE 0 END) > 5  
+ORDER BY 
+    SUM(p.Score) DESC,  
+    ps.TotalPosts DESC;

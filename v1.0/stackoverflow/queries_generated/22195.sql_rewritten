@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.Upvotes,
+        rp.Downvotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByUser = 1
+),
+UsersWithHighReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+),
+PostStats AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CommentCount,
+        p.Upvotes,
+        p.Downvotes,
+        u.DisplayName AS BestAnswerer,
+        (SELECT SUM(BountyAmount) 
+         FROM Votes v 
+         WHERE v.PostId = p.PostId AND v.VoteTypeId = 8) AS TotalBounty,
+        CASE 
+            WHEN p.Upvotes > p.Downvotes THEN 'Positive'
+            WHEN p.Upvotes < p.Downvotes THEN 'Negative'
+            ELSE 'Neutral' 
+        END AS PostSentiment
+    FROM 
+        TopRankedPosts p
+    LEFT JOIN 
+        Posts ans ON p.PostId = ans.AcceptedAnswerId
+    LEFT JOIN 
+        UsersWithHighReputation u ON ans.OwnerUserId = u.UserId
+)
+SELECT 
+    json_agg(
+        json_build_object(
+            'PostId', ps.PostId,
+            'Title', ps.Title,
+            'CommentCount', ps.CommentCount,
+            'Upvotes', ps.Upvotes,
+            'Downvotes', ps.Downvotes,
+            'BestAnswerer', COALESCE(ps.BestAnswerer, 'No accepted answer'),
+            'TotalBounty', COALESCE(ps.TotalBounty, 0),
+            'Sentiment', ps.PostSentiment
+        )
+    ) AS PostStatistics
+FROM 
+    PostStats ps
+WHERE 
+    ps.CommentCount > 5 
+    AND ps.TotalBounty IS NOT NULL 
+ORDER BY 
+    ps.TotalBounty DESC;

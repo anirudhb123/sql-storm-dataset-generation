@@ -1,0 +1,69 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returned_date_sk,
+        wr.returned_time_sk,
+        wr.return_item_sk,
+        wr.order_number,
+        wr.return_quantity,
+        wr.return_amt,
+        wr.return_tax,
+        wr.return_amt_inc_tax,
+        wr.return_ship_cost,
+        wr.refunded_cash,
+        wr.refunded_customer_sk,
+        ROW_NUMBER() OVER (PARTITION BY wr.return_item_sk ORDER BY wr.returned_date_sk DESC) AS rn
+    FROM 
+        web_returns wr
+), ReturnSummary AS (
+    SELECT 
+        r.return_item_sk,
+        SUM(r.return_quantity) AS total_returned_qty,
+        SUM(r.return_amt) AS total_returned_amt,
+        COUNT(r.order_number) AS total_returned_orders
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.rn = 1  
+    GROUP BY 
+        r.return_item_sk
+), ItemDetails AS (
+    SELECT 
+        i.item_sk,
+        i.item_desc,
+        i.current_price,
+        COALESCE(rs.total_returned_qty, 0) AS total_returned_qty,
+        COALESCE(rs.total_returned_amt, 0) AS total_returned_amt
+    FROM 
+        item i
+    LEFT JOIN 
+        ReturnSummary rs ON i.item_sk = rs.return_item_sk  -- corrected column reference
+), CustomerReturns AS (
+    SELECT 
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        ID.total_returned_qty,
+        ID.total_returned_amt,
+        DENSE_RANK() OVER (PARTITION BY c.customer_sk ORDER BY ID.total_returned_amt DESC) AS rank  -- qualified column reference
+    FROM 
+        customer c
+    JOIN 
+        web_returns wr ON c.customer_sk = wr.returning_customer_sk  -- corrected column reference
+    JOIN 
+        ItemDetails ID ON wr.return_item_sk = ID.item_sk
+)
+SELECT 
+    cr.customer_id,
+    cr.first_name,
+    cr.last_name,
+    SUM(cr.total_returned_qty) AS summ_returned_qty,
+    SUM(cr.total_returned_amt) AS summ_returned_amt
+FROM 
+    CustomerReturns cr
+WHERE 
+    cr.rank <= 5  
+GROUP BY 
+    cr.customer_id,
+    cr.first_name,
+    cr.last_name;

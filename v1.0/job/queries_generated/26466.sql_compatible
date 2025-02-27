@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mu.id AS movie_id,
+        mu.title AS movie_title,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ARRAY_AGG(DISTINCT a.name) AS cast_names,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        MIN(m.production_year) AS earliest_production_year,
+        MAX(m.production_year) AS latest_production_year
+    FROM 
+        aka_title AS mu
+    LEFT JOIN 
+        movie_keyword AS mk ON mu.id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info AS c ON mu.id = c.movie_id
+    LEFT JOIN 
+        aka_name AS a ON c.person_id = a.person_id
+    LEFT JOIN 
+        title AS m ON mu.id = m.id
+    WHERE 
+        mu.production_year IS NOT NULL
+    GROUP BY 
+        mu.id, mu.title, k.keyword
+    ORDER BY 
+        COUNT(DISTINCT c.person_id) DESC
+    LIMIT 10
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.keyword,
+    rm.cast_names,
+    rm.cast_count,
+    rm.earliest_production_year,
+    rm.latest_production_year,
+    ROUND(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - MIN(mi.created_at))) / 3600, 2) AS hours_since_created
+FROM 
+    RankedMovies AS rm
+LEFT JOIN 
+    movie_info AS mi ON rm.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type AS it ON mi.info_type_id = it.id
+WHERE 
+    it.info ILIKE '%genre%' AND mi.info IS NOT NULL
+GROUP BY 
+    rm.movie_id, rm.movie_title, rm.keyword, rm.cast_names, rm.cast_count, rm.earliest_production_year, rm.latest_production_year
+ORDER BY 
+    rm.cast_count DESC;

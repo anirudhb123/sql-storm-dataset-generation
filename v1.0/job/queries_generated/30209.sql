@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title et
+    INNER JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info || ': ' || mi.info, ', ') AS movie_info
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cm.company_name, 'Unknown Company') AS company_name,
+    COALESCE(cm.company_type, 'Unknown Type') AS company_type,
+    COALESCE(mi.movie_info, 'No Information Available') AS additional_info,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = mh.movie_id) AS total_cast_members,
+    (SELECT COUNT(DISTINCT mk.keyword) 
+     FROM movie_keyword mk 
+     WHERE mk.movie_id = mh.movie_id) AS total_keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CompanyMovies cm ON mh.movie_id = cm.movie_id AND cm.company_rank = 1
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.level <= 3
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

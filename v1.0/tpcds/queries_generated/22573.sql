@@ -1,0 +1,56 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT d_date_sk, d_date, d_year, d_month_seq
+    FROM date_dim
+    WHERE d_year = 2023
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year, d.d_month_seq
+    FROM date_dim d
+    JOIN date_series ds ON d.d_date_sk = ds.d_date_sk + 1
+    WHERE ds.d_year = d.d_year
+), sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_net_paid) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_series)
+    GROUP BY ws_bill_customer_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ca.ca_city,
+        SUM(ss_ext_sales_price) AS total_sales_price
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, ca.ca_city
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.ca_city,
+    CSS.total_orders,
+    CSS.total_profit,
+    CSS.total_revenue,
+    CASE 
+        WHEN CSS.total_profit IS NULL THEN 'No Profit'
+        WHEN CSS.total_orders = 0 THEN 'No Orders'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM customer_info ci
+LEFT JOIN sales_summary CSS ON ci.c_customer_id = CSS.ws_bill_customer_sk
+WHERE ci.total_sales_price IS NOT NULL
+ORDER BY
+    (CASE WHEN ci.cd_gender = 'F' THEN 1 ELSE 0 END) DESC,
+    ci.ca_city ASC,
+    customer_status DESC
+OFFSET (SELECT COUNT(*) FROM sales_summary WHERE total_orders > 10) ROWS
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,29 @@
+
+SELECT 
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_sales_price) AS total_spent,
+    STRING_AGG(DISTINCT p.p_promo_name) AS promotions_used,
+    CASE
+        WHEN c.c_birth_month = EXTRACT(MONTH FROM CURRENT_DATE) THEN 'Birthday this month'
+        ELSE 'No birthday this month'
+    END AS birthday_status
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    promotion p ON ws.ws_promo_sk = p.p_promo_sk
+WHERE 
+    ca.ca_state IN ('CA', 'TX', 'NY')
+    AND c.c_preferred_cust_flag = 'Y'
+    AND ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state, c.c_birth_month
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

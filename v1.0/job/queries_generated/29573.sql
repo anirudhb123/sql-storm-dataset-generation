@@ -1,0 +1,63 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year >= 2000  -- Filtering for movies produced after the year 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT ii.info, '; ') AS info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type ii ON mi.info_type_id = ii.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    cd.total_cast,
+    cd.cast_names,
+    is.info_summary
+FROM 
+    movie_details md
+LEFT JOIN 
+    cast_details cd ON md.movie_id = cd.movie_id
+LEFT JOIN 
+    info_summary is ON md.movie_id = is.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

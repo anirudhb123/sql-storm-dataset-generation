@@ -1,0 +1,39 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COUNT(CASE WHEN PH.PostId IS NOT NULL THEN 1 END) AS TotalHistoryEntries
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    U.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    U.Status AS UserStatus,
+    UB.TotalBadges,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    RANK() OVER (ORDER BY UPS.TotalPosts DESC) AS PostRank
+FROM UserPostStats UPS
+JOIN Users U ON UPS.UserId = U.Id
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+WHERE UPS.TotalPosts > 5
+ORDER BY PostRank, U.DisplayName;

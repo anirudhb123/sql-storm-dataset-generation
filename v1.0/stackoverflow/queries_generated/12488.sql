@@ -1,0 +1,59 @@
+-- Performance Benchmarking SQL Query
+
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(DATEDIFF(MINUTE, p.CreationDate, COALESCE(ph.CreationDate, p.LastActivityDate))) AS AvgEditDuration
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.PostTypeId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.PostTypeId,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.AvgEditDuration,
+    us.UserId,
+    us.PostCount,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.AvgReputation
+FROM 
+    PostStatistics ps
+JOIN 
+    UserStatistics us ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+ORDER BY 
+    ps.PostId;

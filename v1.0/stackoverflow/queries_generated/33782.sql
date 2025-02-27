@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(MAX(b.Class), 0) AS HighestBadge
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+)
+SELECT 
+    u.DisplayName AS User,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalBounties,
+    ph.PostId,
+    ph.Title AS PostTitle,
+    pm.Score AS PostScore,
+    pm.ViewCount,
+    pm.CommentCount,
+    pm.HighestBadge,
+    ph.Level AS PostLevel,
+    COUNT(DISTINCT ph2.PostId) AS ChildPostCount
+FROM 
+    UserReputationCTE u
+JOIN 
+    RecursivePostHierarchy ph ON u.UserId = ph.OwnerUserId
+JOIN 
+    PostMetrics pm ON ph.PostId = pm.PostId
+LEFT JOIN 
+    RecursivePostHierarchy ph2 ON ph.PostId = ph2.ParentId
+GROUP BY 
+    u.DisplayName, u.Reputation, u.TotalPosts, u.TotalComments, 
+    u.TotalBounties, ph.PostId, ph.Title, pm.Score, 
+    pm.ViewCount, pm.CommentCount, pm.HighestBadge, ph.Level
+ORDER BY 
+    u.Reputation DESC, pm.Score DESC;
+
+
+This SQL query constructs a performance benchmark that retrieves user reputation statistics along with the hierarchy of posts they own. It employs recursive common table expressions (CTEs) to build a parent-child relationship between posts, calculates metric aggregates using window functions, and applies outer joins to include all relevant data, including comments and badges. Additionally, it showcases a variety of SQL constructs such as groupings, correlated subqueries, and complicated joins, all within the context of the provided Stack Overflow schema.

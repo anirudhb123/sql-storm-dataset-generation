@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        GROUP_CONCAT(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostTags pt ON p.Id = pt.PostId
+    LEFT JOIN Tags t ON pt.TagId = t.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(ph.Id) AS ChangeCount
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= NOW() - INTERVAL '1 year' 
+      AND ph.PostHistoryTypeId IN (10, 11, 12)
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+UserBadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    WHERE b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY b.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.Tags,
+    COALESCE(phs.ChangeCount, 0) AS ChangeCount,
+    COALESCE(ubs.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ubs.BadgeNames, 'No Badges') AS UserBadges
+FROM RankedPosts rp
+LEFT JOIN PostHistoryStats phs ON rp.PostId = phs.PostId
+LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN UserBadgeStats ubs ON u.Id = ubs.UserId
+WHERE rp.ScoreRank = 1
+  AND rp.CommentCount > 5
+  AND (rp.UpVotes - rp.DownVotes) > 0
+ORDER BY rp.ViewCount DESC, rp.Score DESC;

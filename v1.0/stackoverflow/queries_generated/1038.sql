@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        DENSE_RANK() OVER (ORDER BY SUM(v.BountyAmount) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(v.BountyAmount) > 0
+)
+SELECT 
+    u.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    CASE 
+        WHEN ru.PostRank IS NOT NULL THEN ru.PostRank
+        ELSE 0
+    END AS UserPostRank,
+    CASE 
+        WHEN tu.TotalBounties IS NOT NULL THEN tu.TotalBounties 
+        ELSE 0 
+    END AS UserTotalBounties
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+LEFT JOIN 
+    (SELECT 
+         OwnerUserId, 
+         PostRank 
+     FROM 
+         RankedPosts) ru ON u.Id = ru.OwnerUserId
+WHERE 
+    (rp.CommentCount > 0 OR tu.TotalBounties > 0)
+ORDER BY 
+    UserTotalBounties DESC,
+    rp.CreationDate DESC
+LIMIT 50;

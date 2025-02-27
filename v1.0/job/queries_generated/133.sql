@@ -1,0 +1,55 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+DistinctKeywords AS (
+    SELECT 
+        DISTINCT mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    GROUP_CONCAT(DISTINCT dk.keyword ORDER BY dk.keyword) AS keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    COALESCE(SUM(mi.info LIKE '%Award%'::text)::integer, 0) AS awards_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+LEFT JOIN 
+    DistinctKeywords dk ON t.id = dk.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name <> ''
+    AND t.production_year >= 2000
+    AND EXISTS (
+        SELECT 1
+        FROM movie_companies mc
+        WHERE mc.movie_id = t.id
+        AND mc.company_id IS NOT NULL
+        GROUP BY mc.movie_id
+        HAVING COUNT(*) > 1
+    )
+GROUP BY 
+    a.name, t.title, t.production_year
+HAVING 
+    COUNT(DISTINCT c.id) > 1
+ORDER BY 
+    t.production_year DESC, a.name;

@@ -1,0 +1,75 @@
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        t.TagName,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(h.Comment, 'No comments') AS LastEditComment
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory h ON h.PostId = p.Id
+    JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.TotalViews,
+    tc.AcceptedAnswers,
+    tc.AverageScore,
+    ur.DisplayName AS TopUser,
+    ur.TotalBadges,
+    ur.TotalBounty,
+    pd.Title,
+    pd.CreationDate,
+    pd.LastEditComment
+FROM 
+    TagCounts tc
+JOIN 
+    (SELECT UserId, DisplayName, RANK() OVER (ORDER BY SUM(p.Score) DESC) as Rank
+     FROM Users u
+     JOIN Posts p ON u.Id = p.OwnerUserId
+     GROUP BY UserId, DisplayName) ur ON ur.Rank = 1
+JOIN 
+    PostDetails pd ON pd.TagName = tc.TagName
+ORDER BY 
+    tc.TotalViews DESC, 
+    tc.AverageScore DESC
+LIMIT 10;

@@ -1,0 +1,71 @@
+
+WITH Address_Comb AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_suite_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address,
+        LOWER(ca_country) AS country
+    FROM 
+        customer_address
+),
+Demographic_Agg AS (
+    SELECT 
+        cd_demo_sk,
+        COUNT(c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(cd_dep_count) AS total_dependents,
+        MAX(cd_credit_rating) AS highest_credit_rating
+    FROM 
+        customer_demographics
+    LEFT JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_demo_sk
+),
+Sales_Analysis AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales_value,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        ws.web_site_id
+),
+Catalog_Summary AS (
+    SELECT 
+        cp_catalog_page_id,
+        COUNT(DISTINCT cs_order_number) AS total_orders,
+        SUM(cs_net_profit) AS total_net_profit
+    FROM 
+        catalog_page cp
+    JOIN 
+        catalog_sales cs ON cp.cp_catalog_page_sk = cs.cs_catalog_page_sk
+    GROUP BY 
+        cp_catalog_page_id
+)
+SELECT 
+    ac.full_address,
+    da.customer_count,
+    da.avg_purchase_estimate,
+    da.total_dependents,
+    sa.total_quantity_sold,
+    sa.total_sales_value,
+    sa.avg_sales_price,
+    cs.total_orders,
+    cs.total_net_profit
+FROM 
+    Address_Comb ac
+LEFT JOIN 
+    Demographic_Agg da ON ac.ca_address_sk = da.cd_demo_sk
+LEFT JOIN 
+    Sales_Analysis sa ON ac.country = sa.web_site_id
+LEFT JOIN 
+    Catalog_Summary cs ON ac.ca_address_sk = cs.total_orders
+WHERE 
+    ac.country IN ('usa', 'canada')
+ORDER BY 
+    total_sales_value DESC
+LIMIT 100;

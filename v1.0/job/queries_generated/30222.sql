@@ -1,0 +1,44 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           1 AS hierarchy_level
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year, 
+           mh.hierarchy_level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    mn.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    co.name AS company_name,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    COUNT(DISTINCT cc.id) OVER (PARTITION BY mt.id) AS cast_count,
+    MAX(CASE WHEN pi.info_type_id = 1 THEN pi.info END) AS birth_date,
+    SUM(CASE WHEN mt.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_count,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies_count
+FROM aka_name mn
+JOIN cast_info ci ON mn.person_id = ci.person_id
+JOIN aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN company_name co ON mc.company_id = co.id
+LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN person_info pi ON mn.person_id = pi.person_id AND pi.note IS NULL
+LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+LEFT JOIN MovieHierarchy mh ON mt.id = mh.movie_id
+WHERE mt.kind_id IS NOT NULL
+AND mn.name IS NOT NULL
+AND mt.production_year BETWEEN 1980 AND 2023
+GROUP BY mn.name, mt.title, mt.production_year, co.name
+HAVING COUNT(DISTINCT kw.keyword) > 1
+ORDER BY COUNT(DISTINCT kw.keyword) DESC, mt.production_year DESC;

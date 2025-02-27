@@ -1,0 +1,61 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        c.total_sales,
+        c.order_count,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_sales c
+    JOIN 
+        customer_demographics cd ON c.c_customer_sk = cd.cd_demo_sk
+    WHERE 
+        c.total_sales > (SELECT AVG(total_sales) FROM customer_sales)
+),
+monthly_sales AS (
+    SELECT
+        DATE_TRUNC('month', d.d_date) AS sales_month,
+        SUM(ws.ws_ext_sales_price) AS total_monthly_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date BETWEEN '2020-01-01' AND '2020-12-31'
+    GROUP BY 
+        sales_month
+)
+SELECT 
+    hc.first_name,
+    hc.last_name,
+    hc.cd_gender,
+    hc.cd_marital_status,
+    hc.cd_education_status,
+    ms.total_monthly_sales
+FROM 
+    high_value_customers hc
+JOIN 
+    monthly_sales ms ON ms.sales_month = date_trunc('month', CURRENT_DATE)
+ORDER BY 
+    ms.total_monthly_sales DESC
+LIMIT 10;

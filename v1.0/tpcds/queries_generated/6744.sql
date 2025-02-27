@@ -1,0 +1,56 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.ws_web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.ws_web_site_sk, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        sd.ws_web_site_sk,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    WHERE
+        sd.sales_rank <= 5
+),
+CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        cs.total_sales,
+        cs.total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        TopSales ts ON ts.ws_web_site_sk = c.c_current_addr_sk
+    JOIN
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN
+        SalesData sd ON sd.ws_web_site_sk = ts.ws_web_site_sk AND sd.ws_sold_date_sk = ws.ws_sold_date_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(cs.total_sales) AS total_customer_sales,
+    SUM(cs.total_quantity) AS total_customer_quantity
+FROM 
+    CustomerSales cs
+JOIN 
+    customer c ON c.c_customer_sk = cs.c_customer_sk
+WHERE 
+    cs.sales_rank <= 3
+GROUP BY 
+    c.c_customer_id
+ORDER BY 
+    total_customer_sales DESC;

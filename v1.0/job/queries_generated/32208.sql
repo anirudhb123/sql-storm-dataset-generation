@@ -1,0 +1,74 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+AggregatedRatings AS (
+    SELECT 
+        ci.movie_id,
+        AVG(CASE WHEN p.info_type_id = 1 THEN CAST(p.info AS float) END) AS average_rating
+    FROM 
+        cast_info ci
+    JOIN 
+        person_info p ON ci.person_id = p.person_id
+    GROUP BY 
+        ci.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(ar.average_rating) AS average_rating
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        AggregatedRatings ar ON mh.movie_id = ar.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    ORDER BY 
+        average_rating DESC
+    LIMIT 10
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast,
+    COALESCE(tm.average_rating, 0) AS average_rating,
+    nk.keyword
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword nk ON mk.keyword_id = nk.id
+WHERE 
+    tm.average_rating IS NOT NULL 
+    AND nk.keyword IS NOT NULL
+ORDER BY 
+    tm.average_rating DESC, tm.total_cast DESC;
+
+
+This SQL query performs an elaborate performance benchmarking operation on the provided schema, utilizing recursive CTEs, outer joins, aggregated calculations, and more. It retrieves the top 10 movies produced since 2000 based on average ratings and the total cast, providing insights into their associated keywords.

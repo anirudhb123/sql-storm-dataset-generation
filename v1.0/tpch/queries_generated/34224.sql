@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level
+    FROM supplier s 
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           p.p_container, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 10
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, c.c_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_custkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT DISTINCT sh.s_suppkey) AS supplier_count, 
+       SUM(pd.ps_availqty) AS total_available_quantity,
+       SUM(os.total) AS total_ordered_revenue
+FROM region r 
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey 
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey 
+LEFT JOIN PartDetails pd ON pd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT os.o_orderkey FROM OrderSummary os))
+LEFT JOIN OrderSummary os ON os.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey LIMIT 1)
+WHERE (sh.level IS NOT NULL OR sh.s_nationkey IS NULL)
+AND r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING COUNT(sh.s_suppkey) > 5
+ORDER BY supplier_count DESC, total_ordered_revenue DESC;

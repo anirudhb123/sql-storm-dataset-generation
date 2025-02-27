@@ -1,0 +1,118 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Start with top-level questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+TopPerformingUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount
+    FROM 
+        UserStatistics
+    WHERE 
+        Rank <= 10
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ph.Tags, 'No Tags') AS Tags,
+        u.DisplayName AS Owner,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            p.Id, STRING_AGG(t.TagName, ', ') AS Tags
+         FROM 
+            Posts p
+         LEFT JOIN 
+            Tags t ON t.Id = ANY(string_to_array(p.Tags, '>').::int[]) -- Assuming tags are stored as comma-separated values
+         GROUP BY 
+            p.Id) ph ON ph.Id = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, ph.Tags, u.DisplayName, u.Reputation
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreated,
+    pa.Owner AS PostOwner,
+    pa.OwnerReputation AS OwnerReputation,
+    pa.CommentCount AS TotalComments,
+    pa.UniqueVoters AS TotalVoters,
+    pa.TotalUpVotes,
+    pa.TotalDownVotes,
+    ph.Id AS HierarchyPostId,
+    ph.Level AS HierarchyLevel,
+    CASE 
+        WHEN pa.PostStatus = 'Closed' THEN 'Post is Closed'
+        ELSE 'Post is Active'
+    END AS StatusMessage
+FROM 
+    PostAnalytics pa
+LEFT JOIN 
+    RecursivePostHierarchy ph ON pa.Id = ph.Id
+JOIN 
+    TopPerformingUsers u ON u.UserId = pa.OwnerUserId
+WHERE 
+    pa.TotalUpVotes - pa.TotalDownVotes > 10 -- Display posts with more upvotes than downvotes
+ORDER BY 
+    pa.TotalUpVotes DESC,
+    pa.CreationDate DESC;

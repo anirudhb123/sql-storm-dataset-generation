@@ -1,0 +1,74 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+TopExpensiveParts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_retailprice
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank <= 5
+),
+SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal < 0 THEN 'Negative Balance'
+            WHEN s.s_acctbal BETWEEN 0 AND 100 THEN 'Low Balance'
+            ELSE 'High Balance'
+        END AS balance_status,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    np.p_name,
+    sd.s_name,
+    sd.balance_status,
+    COALESCE(os.line_item_count, 0) AS total_line_items,
+    COALESCE(os.total_revenue, 0.00) AS total_revenue,
+    CASE 
+        WHEN COALESCE(os.total_revenue, 0.00) > 10000 THEN 'Premium Order'
+        ELSE 'Standard Order'
+    END AS order_type
+FROM 
+    TopExpensiveParts np
+LEFT JOIN 
+    SupplierDetails sd ON np.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey)
+LEFT JOIN 
+    OrderStats os ON np.p_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderkey = os.o_orderkey)
+WHERE 
+    sd.total_supply_cost IS NOT NULL
+ORDER BY 
+    np.p_retailprice DESC, sd.balance_status;

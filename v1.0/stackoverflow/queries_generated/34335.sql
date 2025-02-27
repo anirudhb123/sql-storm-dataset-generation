@@ -1,0 +1,61 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, ParentId, Title, Score, CreationDate, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.ParentId, p.Title, p.Score, p.CreationDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostScores AS (
+    SELECT ph.Id, ph.Title, ph.Score, ph.CreationDate, ph.Level,
+           LEAD(ph.Score) OVER (PARTITION BY ph.Level ORDER BY ph.CreationDate) AS NextScore
+    FROM RecursivePostHierarchy ph
+),
+UserDetails AS (
+    SELECT u.Id AS UserId, u.DisplayName, u.Reputation, 
+           (SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+           (SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM Users u
+),
+TopPosts AS (
+    SELECT p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, u.DisplayName, u.Reputation
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+    ORDER BY p.Score DESC
+    LIMIT 10
+),
+RecentComments AS (
+    SELECT c.Id, c.PostId, c.UserDisplayName, c.Text, c.CreationDate
+    FROM Comments c
+    WHERE c.CreationDate >= NOW() - INTERVAL '7 days'
+),
+PostHistoryAggregates AS (
+    SELECT ph.PostId, ph.PostHistoryTypeId, 
+           COUNT(*) AS ChangeCount,
+           MAX(ph.CreationDate) AS LastChangeDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+)
+SELECT p.Title AS PostTitle,
+       p.Score AS PostScore,
+       p.ViewCount,
+       u.DisplayName AS Author,
+       u.Reputation AS AuthorReputation,
+       phg.ChangeCount,
+       phg.LastChangeDate,
+       pc.UserDisplayName AS RecentCommenter,
+       pc.Text AS RecentComment,
+       ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY c.CreationDate DESC) AS CommentRank
+FROM TopPosts p
+JOIN UserDetails u ON p.OwnerUserId = u.UserId
+LEFT JOIN PostHistoryAggregates phg ON p.Id = phg.PostId
+LEFT JOIN RecentComments pc ON p.Id = pc.PostId
+WHERE p.Score > (
+    SELECT AVG(Score) FROM Posts
+    WHERE CreationDate >= NOW() - INTERVAL '30 days'
+)
+ORDER BY p.Score DESC, p.ViewCount DESC;

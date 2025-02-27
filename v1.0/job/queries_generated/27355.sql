@@ -1,0 +1,57 @@
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS comp_kind,
+        COUNT(DISTINCT ka.id) AS num_keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        comp_cast_type c ON ci.person_role_id = c.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, c.kind
+    HAVING 
+        COUNT(DISTINCT a.id) > 2
+),
+highest_rated_movies AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        RANK() OVER (ORDER BY COUNT(ci.person_role_id) DESC) AS movie_rank
+    FROM 
+        movie_data md
+    JOIN 
+        cast_info ci ON md.movie_title = ci.movie_id
+    GROUP BY 
+        md.movie_title, md.production_year
+)
+SELECT 
+    h.movie_title,
+    h.production_year,
+    md.actor_name,
+    md.comp_kind,
+    md.num_keywords
+FROM 
+    highest_rated_movies h
+JOIN 
+    movie_data md ON h.movie_title = md.movie_title
+WHERE 
+    h.movie_rank <= 10
+ORDER BY 
+    h.production_year DESC, h.movie_rank;

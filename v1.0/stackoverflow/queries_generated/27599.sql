@@ -1,0 +1,64 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        ARRAY_AGG(DISTINCT u.DisplayName) AS InfluentialUsers,
+        STRING_AGG(DISTINCT CONCAT(u.DisplayName, ' (Reputation: ', u.Reputation, ')'), '; ') AS UserDetails
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseOpenCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 24 THEN ph.CreationDate END) AS LastEditDate,
+        COUNT(DISTINCT ph.UserId) AS EditorCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+BenchmarkResult AS (
+    SELECT 
+        ts.TagId,
+        ts.TagName,
+        ts.PostCount,
+        ts.TotalViews,
+        ts.AverageScore,
+        phd.CloseOpenCount,
+        phd.LastEditDate,
+        phd.EditorCount,
+        ts.InfluentialUsers,
+        ts.UserDetails
+    FROM 
+        TagStatistics ts
+    JOIN 
+        PostHistoryDetails phd ON ts.TagId = phd.PostId
+    ORDER BY 
+        ts.PostCount DESC,
+        ts.TotalViews DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN PostCount > 10 THEN 'Active Tag'
+        WHEN PostCount BETWEEN 1 AND 10 THEN 'Moderate Tag'
+        ELSE 'Inactive Tag'
+    END AS TagActivityStatus
+FROM 
+    BenchmarkResult
+WHERE 
+    AverageScore > 0
+ORDER BY 
+    AverageScore DESC, 
+    TotalViews DESC;

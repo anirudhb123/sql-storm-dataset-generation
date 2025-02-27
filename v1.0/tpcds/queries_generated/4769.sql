@@ -1,0 +1,82 @@
+
+WITH top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2500 AND 3000
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_paid) > 1000
+),
+sales_summary AS (
+    SELECT 
+        date_dim.d_date AS sale_date,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ON ws.ws_sold_date_sk = date_dim.d_date_sk
+    GROUP BY 
+        date_dim.d_date
+),
+inventory_levels AS (
+    SELECT 
+        i.inv_item_sk,
+        SUM(i.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory i
+    GROUP BY 
+        i.inv_item_sk
+),
+customer_income AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_credit_rating,
+        ib.ib_income_band_sk,
+        CASE 
+            WHEN ib.ib_income_band_sk IS NOT NULL THEN
+                (SELECT COUNT(*) FROM household_demographics hd WHERE hd.hd_income_band_sk = ib.ib_income_band_sk)
+            ELSE 
+                0
+        END AS income_band_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    cu.c_first_name,
+    cu.c_last_name,
+    cu.total_spent,
+    ss.sale_date,
+    ss.total_quantity_sold,
+    ss.total_profit,
+    il.total_inventory,
+    ci.cd_credit_rating,
+    ci.income_band_count
+FROM 
+    top_customers cu
+JOIN 
+    sales_summary ss ON ss.sale_date >= '2023-01-01'
+JOIN 
+    inventory_levels il ON il.inv_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = cu.c_customer_id)
+LEFT JOIN 
+    customer_income ci ON cu.c_customer_id = ci.c_customer_id
+WHERE 
+    cu.total_spent > 1000
+ORDER BY 
+    cu.total_spent DESC, ss.total_profit DESC
+LIMIT 100;

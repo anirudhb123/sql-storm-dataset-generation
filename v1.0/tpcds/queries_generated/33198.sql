@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        c.login,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        customer c
+    WHERE 
+        c.c_birth_year > 1980
+        
+    UNION ALL
+    
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        c.login,
+        sh.level + 1,
+        sh.customer_sk AS parent_id
+    FROM 
+        customer c
+    JOIN 
+        sales_hierarchy sh ON c.c_current_cdemo_sk = sh.customer_sk
+    WHERE 
+        c.c_birth_year <= 1980
+),
+customer_sales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ch.total_sales,
+        ch.order_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer_sales ch ON cd.cd_demo_sk = ch.customer_id
+),
+ranked_customers AS (
+    SELECT 
+        ci.*,
+        RANK() OVER (PARTITION BY ci.cd_gender ORDER BY ci.total_sales DESC) AS sales_rank
+    FROM 
+        customer_info ci
+)
+SELECT 
+    ch.first_name,
+    ch.last_name,
+    ch.login,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.total_sales,
+    ci.order_count,
+    rh.level
+FROM 
+    ranked_customers ci
+JOIN 
+    sales_hierarchy ch ON ci.cd_demo_sk = ch.customer_sk
+WHERE 
+    (ci.cd_marital_status = 'M' AND ci.total_sales > 1000)
+    OR (ci.cd_marital_status IS NULL AND ci.total_sales IS NULL)
+ORDER BY 
+    ci.cd_gender, ci.total_sales DESC;

@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS PostCount,
+        COALESCE((SELECT SUM(Score) FROM Votes V WHERE V.UserId = U.Id), 0) AS TotalVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), 
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(STRING_TO_ARRAY(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 50
+), 
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+), 
+PostComments AS (
+    SELECT 
+        PC.PostId,
+        COUNT(PC.Id) AS CommentCount
+    FROM 
+        Comments PC
+    GROUP BY 
+        PC.PostId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalVotes,
+    U.ReputationRank,
+    PT.TagName,
+    COALESCE(PC.CommentCount, 0) AS CommentCount,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.Score AS RecentPostScore
+FROM 
+    UserStats U
+LEFT JOIN 
+    PopularTags PT ON U.Reputation > 1000
+LEFT JOIN 
+    RecentPosts RP ON U.UserId = RP.OwnerUserId AND RP.RecentPostRank = 1
+LEFT JOIN 
+    PostComments PC ON RP.Id = PC.PostId
+WHERE 
+    U.ReputationRank <= 100
+ORDER BY 
+    U.Reputation DESC, PT.TagName;

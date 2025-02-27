@@ -1,0 +1,53 @@
+
+WITH ActiveUsers AS (
+    SELECT 
+        Users.Id,
+        Users.Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN Posts.PostTypeId = 3 THEN 1 ELSE 0 END) AS Wikis,
+        SUM(CASE WHEN Posts.PostTypeId IN (4, 5) THEN 1 ELSE 0 END) AS TagWikis,
+        SUM(COALESCE(Posts.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(Posts.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.Reputation
+),
+UserBadges AS (
+    SELECT 
+        Badges.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN Badges.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Badges.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Badges.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        Badges.UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.Reputation,
+    COALESCE(au.PostCount, 0) AS PostCount,
+    COALESCE(au.Questions, 0) AS Questions,
+    COALESCE(au.Answers, 0) AS Answers,
+    COALESCE(au.Wikis, 0) AS Wikis,
+    COALESCE(au.TagWikis, 0) AS TagWikis,
+    COALESCE(au.TotalUpVotes, 0) AS TotalUpVotes,
+    COALESCE(au.TotalDownVotes, 0) AS TotalDownVotes,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    Users u
+LEFT JOIN 
+    ActiveUsers au ON u.Id = au.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    u.Reputation DESC, au.PostCount DESC;

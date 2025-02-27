@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+),
+CompanyMovieCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordFilteredMovies AS (
+    SELECT 
+        mk.movie_id
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE '%Action%' 
+    GROUP BY 
+        mk.movie_id
+),
+CompleteCastInfo AS (
+    SELECT 
+        cc.movie_id, 
+        STRING_AGG(DISTINCT an.name, ', ') AS actors 
+    FROM 
+        complete_cast cc
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        cc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cm.company_count,
+    cci.actors,
+    CASE 
+        WHEN cm.company_count IS NULL THEN 'No Companies'
+        ELSE CAST(cm.company_count AS text)
+    END AS company_count_str
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CompanyMovieCount cm ON rm.id = cm.movie_id
+LEFT JOIN 
+    CompleteCastInfo cci ON rm.id = cci.movie_id
+WHERE 
+    rm.rank = 1  
+    AND rm.production_year > 2000 
+    AND rm.id IN (SELECT movie_id FROM KeywordFilteredMovies)
+ORDER BY 
+    rm.production_year DESC;

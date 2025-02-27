@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COALESCE(t.title, 'No Episode Title') AS episode_title,
+        mt.season_nr,
+        mt.episode_nr,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        aka_title t ON mt.episode_of_id = t.id
+    WHERE 
+        mt.production_year >= 1990
+    UNION ALL
+    SELECT 
+        c.movie_id,
+        CONCAT('Chained: ', mh.movie_title) AS movie_title,
+        mh.production_year,
+        mh.episode_title,
+        mh.season_nr,
+        mh.episode_nr,
+        mh.level + 1
+    FROM 
+        complete_cast cc
+    INNER JOIN 
+        MovieHierarchy mh ON cc.movie_id = mh.movie_id
+    LEFT JOIN 
+        aka_title c ON cc.movie_id = c.id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.episode_title,
+        mh.season_nr,
+        mh.episode_nr,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.level > 1
+    AND 
+        mh.season_nr IS NOT NULL
+)
+SELECT 
+    fm.movie_title,
+    fm.production_year,
+    COUNT(cc.id) AS character_count,
+    MAX(mk.keyword) AS top_keyword,
+    STRING_AGG(DISTINCT cn.name, ', ') AS character_names
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.movie_id = cc.movie_id
+LEFT JOIN 
+    char_name cn ON cc.person_id = cn.imdb_id
+LEFT JOIN 
+    movie_keyword mk ON fm.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+GROUP BY 
+    fm.movie_title, fm.production_year
+HAVING 
+    COUNT(cc.id) > 5 
+    AND MAX(mk.keyword) IS NOT NULL
+ORDER BY 
+    fm.production_year DESC,
+    character_count DESC
+LIMIT 50;

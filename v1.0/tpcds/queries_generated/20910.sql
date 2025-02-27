@@ -1,0 +1,61 @@
+
+WITH RECURSIVE customer_details AS (
+    SELECT c_customer_sk,
+           c_first_name,
+           c_last_name,
+           c_birth_year,
+           c_current_addr_sk,
+           1 AS level
+    FROM customer
+    WHERE c_birth_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT cd.c_customer_sk,
+           cd.c_first_name,
+           cd.c_last_name,
+           cd.c_birth_year,
+           cd.c_current_addr_sk,
+           cd.level + 1
+    FROM customer cd
+    INNER JOIN customer_details cd_details ON cd.c_current_addr_sk = cd_details.c_current_addr_sk
+    WHERE cd.level < 5
+), 
+
+sales_summary AS (
+    SELECT ws.ws_ship_date_sk,
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+           AVG(ws.ws_net_profit) AS avg_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_date_sk
+),
+
+address_summary AS (
+    SELECT ca_state,
+           COUNT(DISTINCT ca_address_sk) AS total_addresses
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    GROUP BY ca_state
+)
+
+SELECT cd.c_first_name,
+       cd.c_last_name,
+       cd.c_birth_year,
+       ss.total_sales,
+       ss.total_orders,
+       COALESCE(ss.avg_profit, 0) AS average_profit,
+       COALESCE(as.total_addresses, 0) AS address_count,
+       (CASE 
+           WHEN cd.c_birth_year < 1980 THEN 'Baby Boomer' 
+           WHEN cd.c_birth_year BETWEEN 1980 AND 1995 THEN 'Millennial'
+           ELSE 'Gen Z' 
+        END) AS generational_category,
+       ROW_NUMBER() OVER (PARTITION BY cd.c_birth_year ORDER BY ss.total_sales DESC) AS sales_rank
+FROM customer_details cd
+LEFT JOIN sales_summary ss ON cd.c_current_addr_sk = ss.ws_ship_date_sk
+LEFT JOIN address_summary as ON as.ca_state = (SELECT ca_state FROM customer_address WHERE ca_address_sk = cd.c_current_addr_sk LIMIT 1)
+WHERE (cd.c_birth_year IS NOT NULL OR ss.total_sales IS NOT NULL)
+AND (cd.c_first_name IS NOT NULL AND cd.c_last_name IS NOT NULL)
+ORDER BY cd.c_birth_year DESC, total_sales DESC;
+

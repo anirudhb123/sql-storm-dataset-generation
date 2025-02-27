@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.ws_order_number, 
+        ws_quantity, 
+        ws_sales_price, 
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS price_rank,
+        ws.ws_ext_discount_amt, 
+        ws.ws_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price > (
+            SELECT AVG(ws2.ws_sales_price) 
+            FROM web_sales ws2 
+            WHERE ws2.ws_ship_date_sk IS NOT NULL
+        )
+    AND ws.ws_net_profit IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk, 
+        SUM(wr.return_quantity) AS total_returns, 
+        COUNT(DISTINCT wr.order_number) AS orders_returned
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        cs.cs_order_number, 
+        cs.cs_item_sk, 
+        cs.cs_sales_price, 
+        COALESCE(cr.orders_returned, 0) AS orders_returned, 
+        COALESCE(cr.total_returns, 0) AS total_returns
+    FROM 
+        catalog_sales cs
+    LEFT JOIN 
+        CustomerReturns cr ON cs.cs_item_sk = cr.returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        r.web_site_sk,
+        s.cs_item_sk,
+        SUM(s.cs_sales_price) AS total_sales,
+        SUM(s.total_returns) AS total_returned,
+        AVG(s.cs_sales_price) AS avg_sales_price,
+        COUNT(s.cs_order_number) AS total_orders,
+        MAX(r.price_rank) AS highest_rank
+    FROM 
+        SalesAndReturns s
+    INNER JOIN 
+        RankedSales r ON s.cs_order_number = r.ws_order_number
+    GROUP BY 
+        r.web_site_sk, s.cs_item_sk
+)
+SELECT 
+    f.web_site_sk,
+    f.cs_item_sk,
+    f.total_sales,
+    f.total_returned,
+    f.avg_sales_price,
+    f.total_orders,
+    CASE 
+        WHEN f.total_returned > 0 THEN 'High Return Rate'
+        ELSE 'Low Return Rate'
+    END AS return_rate_category,
+    CASE 
+        WHEN f.total_sales IS NULL OR f.total_sales = 0 THEN NULL
+        ELSE ROUND((f.total_returned::decimal / NULLIF(f.total_sales, 0)) * 100, 2) || '%' 
+    END AS return_percentage
+FROM 
+    FinalReport f
+WHERE 
+    (f.avg_sales_price IS NOT NULL AND f.avg_sales_price < (SELECT AVG(ws.ws_sales_price) FROM web_sales ws))
+ORDER BY 
+    f.total_sales DESC, f.return_percentage ASC NULLS LAST;

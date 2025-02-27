@@ -1,0 +1,70 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        CASE 
+            WHEN SUM(sr_return_amount) > 1000 THEN 'High Returner'
+            WHEN SUM(sr_return_amount) BETWEEN 500 AND 1000 THEN 'Medium Returner'
+            ELSE 'Low Returner'
+        END AS return_category
+    FROM
+        store_returns
+    WHERE
+        sr_return_date_sk IS NOT NULL
+    GROUP BY
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        DISTINCT cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        CASE 
+            WHEN cd_dep_count IS NULL THEN 'Unknown'
+            ELSE 'Known'
+        END AS dependency_status
+    FROM
+        customer_demographics
+    WHERE
+        cd_purchase_estimate > 0
+),
+HighestReturners AS (
+    SELECT
+        cr.sr_customer_sk,
+        cr.total_returns,
+        cr.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        cr.return_category
+    FROM
+        CustomerReturns cr
+    LEFT JOIN
+        CustomerDemographics cd ON cr.sr_customer_sk = cd.cd_demo_sk
+    WHERE
+        cr.total_returns > (SELECT AVG(total_returns) FROM CustomerReturns)
+),
+RankedReturners AS (
+    SELECT
+        *,
+        RANK() OVER (PARTITION BY return_category ORDER BY total_return_amount DESC) AS return_rank
+    FROM
+        HighestReturners
+)
+SELECT
+    hr.sr_customer_sk,
+    hr.total_returns,
+    hr.total_return_amount,
+    hr.cd_gender,
+    hr.cd_marital_status,
+    hr.purchase_estimate,
+    hr.return_category
+FROM
+    RankedReturners hr
+WHERE
+    hr.return_rank <= 5
+ORDER BY
+    hr.return_category, hr.total_return_amount DESC;

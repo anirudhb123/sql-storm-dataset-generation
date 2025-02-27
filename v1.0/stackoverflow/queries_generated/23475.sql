@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.Score
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        c.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON ph.Comment::int = c.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+        AND ph.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.RankScore,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        COALESCE(cp.CloseDate, NULL) AS CloseDate,
+        COALESCE(cp.CloseReason, 'Not Closed') AS CloseReason
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.RankScore,
+    ps.CommentCount,
+    ps.UpVoteCount,
+    ps.DownVoteCount,
+    ps.CloseDate,
+    ps.CloseReason,
+    CASE 
+        WHEN ps.UpVoteCount IS NULL THEN 'No Upvotes'
+        WHEN ps.UpVoteCount > ps.DownVoteCount THEN 'Popular Post'
+        WHEN ps.UpVoteCount < ps.DownVoteCount THEN 'Unpopular Post'
+        ELSE 'Equal Votes'
+    END AS VoteStatus,
+    CASE 
+        WHEN ps.CloseReason IS NOT NULL THEN 'Closed'
+        WHEN ps.CloseReason = 'Not Closed' AND ps.RankScore > 5 THEN 'Likely to be Popular'
+        ELSE 'Status Unknown'
+    END AS PostStatus,
+    CONCAT('This post has ', ps.CommentCount, ' comments and ', 
+           COALESCE(NULLIF(ps.UpVoteCount - ps.DownVoteCount, 0), 'no votes'), ' net votes.') AS Summary
+FROM 
+    PostStats ps
+WHERE 
+    ps.RankScore <= 10 
+ORDER BY 
+    ps.RankScore ASC,
+    ps.Score DESC;
+
+-- Additional considerations:
+-- Let's include a peculiar aspect: user posts that have been edited multiple times but have not gained any upvotes or changed their rank, crossing a bizarre corner case.
+

@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        STRING_AGG(ph.Comment, ', ') AS Comments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.UserId
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.PostCount,
+        us.TotalBadges,
+        us.TotalBounty,
+        RANK() OVER (ORDER BY us.Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics us
+)
+SELECT 
+    p.Title,
+    p.CreationDate AS PublicationDate,
+    p.Score,
+    p.ViewCount,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    bh.Comments,
+    CASE 
+        WHEN u.Reputation > 1000 THEN 'Expert'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistoryChanges bh ON p.PostId = bh.PostId
+JOIN 
+    TopUsers tu ON tu.UserId = u.Id
+WHERE 
+    p.PostRank = 1
+    AND (bh.PostHistoryTypeId IN (1, 2, 3) OR bh.Comments IS NOT NULL)
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

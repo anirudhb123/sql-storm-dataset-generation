@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.movie_id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 3 
+),
+FilteredMovies AS (
+    SELECT 
+        RM.*,
+        COALESCE(AI.movies_count, 0) AS top_actor_count,
+        AI.movies_titles
+    FROM 
+        RankedMovies RM
+    LEFT JOIN 
+        ActorInfo AI ON RM.movie_id = any(ARRAY(
+            SELECT ci.movie_id 
+            FROM cast_info ci 
+            WHERE ci.person_id IN (SELECT person_id FROM aka_name WHERE name LIKE '%Smith%')
+        ))
+    WHERE 
+        RM.cast_count >= 5 
+        AND RM production_year > 2000
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.top_actor_count,
+    f.movies_titles,
+    CASE 
+        WHEN f.top_actor_count > 0 THEN 'Has Major Actors'
+        ELSE 'No Notable Actors'
+    END AS actor_status,
+    CASE 
+        WHEN f.production_year IS NULL THEN 'Year Unknown'
+        ELSE 'Year Known'
+    END AS year_status
+FROM 
+    FilteredMovies f
+WHERE 
+    f.movie_id IN (
+        SELECT movie_id 
+        FROM movie_keyword 
+        WHERE keyword_id IN (
+            SELECT id FROM keyword WHERE keyword LIKE 'Drama%'
+        )
+        GROUP BY movie_id
+    )
+ORDER BY 
+    f.production_year DESC,
+    f.title;

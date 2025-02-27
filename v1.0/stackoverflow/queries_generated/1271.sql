@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.UpVotes,
+        u.DownVotes,
+        (u.UpVotes - u.DownVotes) AS NetVotes,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        NetVotes,
+        ReputationRank
+    FROM UserStats
+    WHERE ReputationRank <= 10
+),
+PostAggregate AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+JoinedData AS (
+    SELECT 
+        t.DisplayName AS TopUser,
+        pa.PostCount,
+        pa.TotalViews,
+        pa.AverageScore,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM TopUsers t
+    LEFT JOIN PostAggregate pa ON t.UserId = pa.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(*) AS BadgeCount
+        FROM Badges
+        GROUP BY UserId
+    ) b ON t.UserId = b.UserId
+)
+SELECT 
+    jd.TopUser,
+    jd.PostCount,
+    jd.TotalViews,
+    jd.AverageScore,
+    jd.BadgeCount,
+    CASE 
+        WHEN jd.BadgeCount > 5 THEN 'Expert'
+        WHEN jd.BadgeCount BETWEEN 1 AND 5 THEN 'Novice'
+        ELSE 'Newbie' 
+    END AS UserLevel
+FROM JoinedData jd
+ORDER BY jd.ReputationRank, jd.TotalViews DESC
+LIMIT 10;
+
+SELECT 
+    p.Title,
+    COUNT(c.Id) AS CommentCount,
+    SUM(v.BountyAmount) AS TotalBounties
+FROM Posts p
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY p.Id
+HAVING COUNT(c.Id) > 5
+ORDER BY TotalBounties DESC;

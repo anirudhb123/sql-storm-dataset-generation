@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        p.Score,
+        (SELECT STRING_AGG(DISTINCT T.TagName, ', ') 
+         FROM Tags T 
+         WHERE T.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]))) 
+        ) AS TagList,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+TopRankedPosts AS (
+    SELECT *
+    FROM RankedPosts
+    WHERE PostRank = 1
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT p.PostId) AS TotalPosts,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts p ON U.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON U.Id = b.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    TRP.PostId,
+    TRP.Title,
+    TRP.CreationDate,
+    TRP.OwnerDisplayName,
+    TRP.TagList,
+    US.TotalPosts,
+    US.GoldBadges,
+    US.SilverBadges,
+    US.BronzeBadges,
+    TRP.UpVotes - TRP.DownVotes AS NetVotes,
+    TRP.Score
+FROM 
+    TopRankedPosts TRP
+JOIN 
+    UserStatistics US ON TRP.OwnerUserId = US.UserId
+ORDER BY 
+    TRP.Score DESC, 
+    TRP.CreationDate DESC;

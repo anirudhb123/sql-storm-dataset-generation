@@ -1,0 +1,66 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY pc.name) AS actor_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        aka_name pc ON ci.person_id = pc.person_id
+    WHERE 
+        mt.production_year >= 2000
+),
+filtered_movies AS (
+    SELECT 
+        title AS movie_title,
+        production_year,
+        role,
+        actor_rank
+    FROM 
+        ranked_movies
+    WHERE 
+        actor_rank <= 3
+),
+movie_info_aggregated AS (
+    SELECT 
+        fm.movie_title,
+        fm.production_year,
+        STRING_AGG(fm.role, ', ') AS roles
+    FROM 
+        filtered_movies fm
+    GROUP BY 
+        fm.movie_title, fm.production_year
+)
+SELECT 
+    m.title,
+    COALESCE(mi.info, 'N/A') AS movie_info,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    mi.production_year
+FROM 
+    title m
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id AND mi.info_type_id IN (
+        SELECT id FROM info_type WHERE info = 'Plot'
+    )
+LEFT JOIN 
+    (SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+     FROM 
+        movie_keyword mk
+     JOIN 
+        keyword k ON mk.keyword_id = k.id
+     GROUP BY 
+        mk.movie_id
+    ) AS mk ON m.id = mk.movie_id
+WHERE 
+    m.production_year BETWEEN 2010 AND 2020
+ORDER BY 
+    m.production_year DESC, m.title
+LIMIT 10;

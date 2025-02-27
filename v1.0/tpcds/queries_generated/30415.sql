@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT s_store_sk, SUM(ss_net_profit) AS total_profit
+    FROM store_sales
+    GROUP BY s_store_sk
+    UNION ALL
+    SELECT s_store_sk, SUM(ss_net_profit)
+    FROM store_sales ss
+    JOIN SalesCTE sc ON ss.s_store_sk = sc.s_store_sk
+    WHERE ss_ss_ticket_number = (SELECT MAX(ss_ticket_number) FROM store_sales WHERE ss_store_sk = sc.s_store_sk)
+    GROUP BY ss.s_store_sk
+),
+CustomerCTE AS (
+    SELECT c.c_customer_sk, c.c_email_address, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 1000
+),
+ProductCTE AS (
+    SELECT DISTINCT i_item_id, i_class
+    FROM item
+    WHERE i_current_price BETWEEN 10 AND 100
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(sc.total_profit) AS total_store_profit,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT wp.wp_url, '; ') AS product_urls
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN CustomerCTE cd ON c.c_customer_sk = cd.c_customer_sk
+LEFT JOIN SalesCTE sc ON c.c_customer_sk = sc.s_store_sk
+LEFT JOIN web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.ca_city
+HAVING SUM(sc.total_profit) > 50000
+ORDER BY total_store_profit DESC
+LIMIT 10;

@@ -1,0 +1,92 @@
+WITH RECURSIVE SuppliersCTE AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        0 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 50000
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        cte.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SuppliersCTE cte ON s.s_nationkey = cte.s_nationkey
+    WHERE 
+        s.s_acctbal < cte.s_acctbal AND cte.level < 3
+), 
+PartSupplierCount AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(*) AS supplier_count
+    FROM 
+        partsupp ps
+    LEFT JOIN 
+        SuppliersCTE cte ON ps.ps_suppkey = cte.s_suppkey 
+    GROUP BY 
+        ps.ps_partkey
+), 
+DeliveryStats AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(DATE_PART('day', l_receiptdate - l_shipdate)) AS avg_delivery_delay
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' AND 
+        l.l_shipmode IN ('AIR', 'FOB')
+    GROUP BY 
+        l.l_orderkey
+), 
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.supplier_count,
+    ds.avg_delivery_delay,
+    CASE 
+        WHEN ps.supplier_count IS NULL THEN 'No suppliers'
+        WHEN ps.supplier_count > 5 THEN 'Many suppliers'
+        ELSE 'Few suppliers'
+    END AS supplier_status,
+    CONCAT(nr.region_name, ': ', nr.n_name) AS nation_region,
+    COALESCE(MAX(l.l_tax) FILTER (WHERE l.l_linestatus = 'O'), 0) AS max_order_tax
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierCount ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    DeliveryStats ds ON ds.l_orderkey IN (
+        SELECT 
+            l_orderkey 
+        FROM 
+            lineitem 
+        WHERE 
+            l_partkey = p.p_partkey
+    )
+JOIN 
+    NationRegion nr ON p.p_mfgr = (SELECT SUBSTRING(n_name FROM 1 FOR 3) FROM nation WHERE n_nationkey = nr.n_nationkey)
+GROUP BY 
+    p.p_partkey, p.p_name, ps.supplier_count, ds.avg_delivery_delay, nr.region_name, nr.n_name
+HAVING 
+    (ps.supplier_count IS NOT NULL AND ps.supplier_count > 0) OR
+    (ds.avg_delivery_delay > 5 AND COUNT(*) OVER (PARTITION BY p.p_partkey) > 1)
+ORDER BY 
+    p.p_partkey, supplier_status DESC;

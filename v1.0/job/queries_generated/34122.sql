@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+), actor_movie_info AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+), performance_benchmark AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.keyword,
+        COUNT(DISTINCT ami.actor_name) AS actor_count,
+        MAX(ami.role_order) AS max_role_order
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movie_info ami ON mh.movie_id = ami.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.keyword
+)
+SELECT 
+    pb.movie_id,
+    pb.title,
+    pb.production_year,
+    pb.keyword,
+    pb.actor_count,
+    pb.max_role_order,
+    CASE 
+        WHEN pb.actor_count > 10 THEN 'Ensemble Cast' 
+        ELSE 'Limited Cast' 
+    END AS cast_type,
+    CASE 
+        WHEN pb.keyword LIKE '%Action%' THEN 'Action Movie'
+        WHEN pb.keyword LIKE '%Drama%'  THEN 'Drama Movie'
+        ELSE 'Other Genre'
+    END AS movie_genre
+FROM 
+    performance_benchmark pb
+WHERE 
+    pb.actor_count IS NOT NULL
+ORDER BY 
+    pb.production_year DESC, pb.actor_count DESC
+LIMIT 100;

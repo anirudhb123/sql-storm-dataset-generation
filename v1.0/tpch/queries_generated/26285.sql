@@ -1,0 +1,50 @@
+WITH PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CONCAT(p.p_name, ' supplied by ', s.s_name, ' with availability ', ps.ps_availqty, ' and supply cost of ', ps.ps_supplycost) AS detailed_info
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        p.p_size BETWEEN 10 AND 20
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        CONCAT(c.c_name, ' has made ', COUNT(o.o_orderkey), ' orders totaling ', SUM(o.o_totalprice)) AS order_summary
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region_name,
+    pi.detailed_info,
+    co.order_summary
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    PartSupplierInfo pi ON s.s_suppkey = pi.s_suppkey
+JOIN 
+    CustomerOrderSummary co ON s.s_nationkey = co.c_custkey
+WHERE 
+    r.r_name LIKE '%west%'
+ORDER BY 
+    r_name, co.order_count DESC;

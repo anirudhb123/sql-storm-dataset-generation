@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.BadgeCount,
+    US.TotalBounty,
+    PS.PostId,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount AS PostCommentCount,
+    PS.FavoriteCount,
+    PS.CreationDate AS PostCreationDate,
+    PS.LastActivityDate,
+    PS.Rank
+FROM 
+    UserStats US
+JOIN 
+    PostStats PS ON US.UserId = PS.OwnerUserId
+WHERE 
+    US.Reputation > 1000
+ORDER BY 
+    US.Reputation DESC, PS.Score DESC
+LIMIT 100;

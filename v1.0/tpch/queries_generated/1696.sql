@@ -1,0 +1,66 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_name,
+        s.s_address,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, s.s_address
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    c.c_acctbal AS customer_account_balance,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(s.s_acctbal, 0) AS supplier_account_balance,
+    COALESCE(s.sub_total, 0) AS total_supplier_spent,
+    COALESCE(r.region_name, 'Unknown') AS region,
+    COALESCE(d.supplied_parts, 0) AS parts_supplied
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    RankedSuppliers s ON s.supplier_rank = 1 AND s.s_suppkey IN (
+        SELECT ps.ps_suppkey FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_brand = 'BrandX'
+    )
+LEFT JOIN 
+    region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN 
+    SupplierDetails d ON d.s_name = s.s_name
+WHERE 
+    c.total_spent IS NOT NULL
+ORDER BY 
+    customer_name DESC;

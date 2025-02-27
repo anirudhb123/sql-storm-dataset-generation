@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+AggregatedSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedCustomers AS (
+    SELECT 
+        cust.c_custkey,
+        cust.c_name,
+        cust.total_sales,
+        cust.order_count,
+        RANK() OVER (ORDER BY cust.total_sales DESC) AS sales_rank
+    FROM AggregatedSales cust
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CrossJoinDetails AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(li.l_extendedprice) AS region_sales
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN lineitem li ON li.l_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+    GROUP BY r.r_name, n.n_name
+)
+SELECT 
+    rc.c_name,
+    rc.total_sales,
+    rc.order_count,
+    pd.p_name,
+    pd.total_available,
+    rh.level AS supplier_level,
+    cd.region_name,
+    cd.nation_name,
+    cd.region_sales
+FROM RankedCustomers rc
+JOIN PartDetails pd ON pd.total_available > 0
+LEFT JOIN SupplierHierarchy rh ON rc.c_custkey = rh.s_suppkey
+FULL OUTER JOIN CrossJoinDetails cd ON cd.region_sales > 50
+WHERE rc.total_sales IS NOT NULL
+AND rc.sales_rank <= 10
+ORDER BY rc.total_sales DESC, pd.p_name;

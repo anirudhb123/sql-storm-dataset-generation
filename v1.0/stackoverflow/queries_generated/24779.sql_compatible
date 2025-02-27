@@ -1,0 +1,98 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(vote.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        WHERE 
+            CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+        GROUP BY 
+            PostId
+    ) vote ON p.Id = vote.PostId
+    WHERE 
+        p.Score IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.VoteCount,
+        CASE 
+            WHEN rp.Score >= 10 THEN 'High Score'
+            WHEN rp.Score IS NULL THEN 'Score Unknown'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 
+    AND 
+        (rp.VoteCount > 5 OR rp.Score IS NULL)
+    ORDER BY 
+        rp.CreationDate DESC
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId, 
+        pht.Name AS HistoryType,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ph.Text
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= (SELECT MIN(CreationDate) FROM Posts) 
+    AND 
+        (ph.Comment IS NOT NULL OR ph.Text IS NOT NULL)
+),
+FinalOutput AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate AS PostCreationDate,
+        fp.Score,
+        fp.VoteCount,
+        fp.ScoreCategory,
+        pH.HistoryType,
+        pH.HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY fp.PostId ORDER BY pH.HistoryDate DESC) AS HistoryOrder
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistoryData pH ON fp.PostId = pH.PostId
+)
+
+SELECT 
+    fo.PostId,
+    fo.Title,
+    fo.PostCreationDate,
+    fo.Score,
+    fo.VoteCount,
+    fo.ScoreCategory,
+    COALESCE(fo.HistoryType, 'No History') AS HistoryType,
+    COALESCE(fo.HistoryDate, 'N/A') AS HistoryDate,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = fo.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId IN (SELECT OwnerUserId FROM Posts WHERE Id = fo.PostId)) AS BadgeCount
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.HistoryOrder = 1
+OR 
+    fo.Score IS NULL 
+ORDER BY 
+    fo.Score DESC NULLS LAST, fo.PostCreationDate DESC;

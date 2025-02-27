@@ -1,0 +1,100 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS year_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ca ON mt.id = ca.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 10
+),
+MovieKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    INNER JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+MovieInfoCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        json_agg(mi.info) AS movie_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    DISTINCT tm.title,
+    tm.production_year,
+    COALESCE(mk.keyword, 'No Keywords') AS keywords,
+    mi.movie_info,
+    ci.company_name,
+    ci.company_type,
+    CASE 
+        WHEN ci.company_name IS NULL THEN 'Independent'
+        ELSE 'Produced'
+    END AS production_status,
+    COUNT(DISTINCT ca.person_id) OVER (PARTITION BY tm.production_year) AS total_cast_per_year,
+    SUM(CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM title t 
+                         WHERE t.imdb_id = mt.id 
+                         AND t.production_year < 2000)
+            THEN 1 
+            ELSE 0 
+        END) AS pre_2000_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.keyword
+LEFT JOIN 
+    MovieInfoCTE mi ON tm.title = mi.title
+LEFT JOIN 
+    CompanyInfo ci ON tm.title = (SELECT title 
+                                   FROM aka_title 
+                                   WHERE id = ci.movie_id 
+                                   LIMIT 1)
+LEFT JOIN 
+    cast_info ca ON tm.title = (SELECT title 
+                                 FROM aka_title 
+                                 WHERE id = ca.movie_id 
+                                 LIMIT 1)
+WHERE 
+    (tm.production_year > 2000 OR tm.production_year IS NULL)
+    AND (ci.company_type IS NULL OR ci.company_type NOT LIKE 'Distributor')
+ORDER BY 
+    tm.production_year DESC, 
+    upper(tm.title);

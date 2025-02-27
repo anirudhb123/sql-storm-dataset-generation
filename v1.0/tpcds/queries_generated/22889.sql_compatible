@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk, ws_sold_date_sk
+), ranked_sales AS (
+    SELECT 
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_net_paid,
+        dd.d_date,
+        COALESCE((
+            SELECT SUM(ss_total_net_paid)
+            FROM (
+                SELECT 
+                    ws_item_sk,
+                    SUM(ws_net_paid) AS ss_total_net_paid
+                FROM web_sales 
+                WHERE ws_sold_date_sk < ss.ws_sold_date_sk
+                GROUP BY ws_item_sk
+            ) AS subquery
+            WHERE subquery.ws_item_sk = ss.ws_item_sk
+        ), 0) AS cumulative_net_paid
+    FROM sales_summary ss
+    JOIN date_dim dd ON ss.ws_sold_date_sk = dd.d_date_sk
+    WHERE ss.rn = 1
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    rs.total_quantity,
+    rs.total_net_paid,
+    rs.cumulative_net_paid,
+    t.t_hour AS sales_hour,
+    CASE 
+        WHEN rs.total_net_paid > 1000 THEN 'High Sales'
+        WHEN rs.total_net_paid BETWEEN 500 AND 1000 THEN 'Medium Sales'
+        ELSE 'Low Sales' 
+    END AS sales_category
+FROM ranked_sales rs
+JOIN item i ON i.i_item_sk = rs.ws_item_sk
+JOIN time_dim t ON t.t_time_sk = (SELECT t_time_sk
+                                   FROM time_dim
+                                   WHERE t_time = CAST(EXTRACT(HOUR FROM rs.total_net_paid) AS TIME)
+                                   LIMIT 1)
+ORDER BY i.i_item_id, rs.ws_sold_date_sk DESC
+LIMIT 1000
+OFFSET (SELECT COUNT(*) FROM ranked_sales) / 2;

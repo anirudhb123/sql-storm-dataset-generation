@@ -1,0 +1,79 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT m.company_id) DESC) AS rank_count,
+        COUNT(DISTINCT m.company_id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies m ON t.id = m.movie_id
+    LEFT JOIN 
+        company_name c ON m.company_id = c.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, c.name
+),
+TopRankedMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        company_name
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_count = 1
+),
+ActorsWithNullRoles AS (
+    SELECT 
+        a.name,
+        a.id AS actor_id,
+        COALESCE(
+            (SELECT r.role FROM role_type r WHERE r.id = ci.role_id),
+            'Unknown Role') AS role
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    WHERE 
+        ci.movie_id IS NULL
+),
+MoviesWithKeyword AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+)
+SELECT 
+    TRIM(m.title) AS Movie_Title,
+    m.production_year AS Production_Year,
+    COALESCE(k.keyword, 'No Keyword') AS Keyword,
+    COALESCE(a.name, 'No Actor Available') AS Main_Actor,
+    COALESCE(c.company_name, 'No Company') AS Production_Company
+FROM 
+    TopRankedMovies m
+LEFT JOIN 
+    ActorsWithNullRoles a ON a.actor_id = (SELECT person_id FROM cast_info ci WHERE ci.movie_id = m.id LIMIT 1)
+LEFT JOIN 
+    MoviesWithKeyword k ON m.title = k.title AND m.production_year = k.production_year
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+WHERE 
+    (m.production_year > 2000 OR m.production_year IS NULL) 
+ORDER BY 
+    m.production_year DESC, m.title ASC;

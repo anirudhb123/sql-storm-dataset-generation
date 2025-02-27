@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SalesCTE (order_number, total_sales, store_id) AS (
+    SELECT ss_ticket_number, SUM(ss_net_paid) AS total_sales, s_store_id
+    FROM store_sales AS ss
+    JOIN store AS s ON ss.s_store_sk = s.s_store_sk
+    GROUP BY ss_ticket_number, s_store_id
+    UNION ALL
+    SELECT scte.order_number, scte.total_sales + ss2.ss_net_paid, s2.s_store_id
+    FROM SalesCTE AS scte
+    JOIN store_sales AS ss2 ON scte.order_number = ss2.ss_ticket_number
+    JOIN store AS s2 ON ss2.s_store_sk = s2.s_store_sk
+    WHERE scte.total_sales < 1000
+),
+RankedSales AS (
+    SELECT order_number, total_sales, store_id,
+           RANK() OVER (PARTITION BY store_id ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesCTE
+),
+CustomerDetails AS (
+    SELECT c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating,
+           COUNT(DISTINCT CASE WHEN wr.return_quantity IS NOT NULL THEN wr.return_quantity END) AS total_returns,
+           COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN web_returns AS wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+)
+SELECT cd.c_customer_id,
+       cd.cd_gender,
+       cd.cd_marital_status,
+       cd.cd_credit_rating,
+       COALESCE(SUM(s.total_sales), 0) AS total_sales,
+       COUNT(DISTINCT rs.order_number) AS total_orders,
+       AVG(cd.total_spent) OVER () AS avg_customer_spent,
+       CASE
+           WHEN COUNT(rs.order_number) > 10 THEN 'Frequent Buyer'
+           WHEN COUNT(rs.order_number) BETWEEN 5 AND 10 THEN 'Occasional Buyer'
+           ELSE 'Rare Buyer'
+       END AS purchase_frequency
+FROM CustomerDetails AS cd
+LEFT JOIN RankedSales AS rs ON cd.c_customer_id = rs.store_id
+GROUP BY cd.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+ORDER BY total_sales DESC, cd.c_customer_id
+LIMIT 100;

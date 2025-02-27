@@ -1,0 +1,65 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(ki.id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(ki.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        t.id
+),
+
+ActorRoles AS (
+    SELECT 
+        a.name AS actor_name,
+        rt.role AS role_name,
+        c.movie_id,
+        t.title AS movie_title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+    JOIN 
+        title t ON c.movie_id = t.id
+),
+
+TopKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title t ON mk.movie_id = t.id
+    GROUP BY 
+        t.id
+)
+
+SELECT 
+    at.actor_name,
+    at.role_name,
+    rt.title,
+    rt.production_year,
+    tk.keywords,
+    rt.keyword_count
+FROM 
+    ActorRoles at
+JOIN 
+    RankedTitles rt ON at.movie_id = rt.title_id
+JOIN 
+    TopKeywords tk ON rt.title_id = tk.title_id
+WHERE 
+    rt.rank = 1  -- Filtering for titles with the highest keyword count
+ORDER BY 
+    rt.production_year DESC, at.actor_name;

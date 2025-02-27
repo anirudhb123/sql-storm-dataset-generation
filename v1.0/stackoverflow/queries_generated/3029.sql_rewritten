@@ -1,0 +1,75 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        RANK() OVER (ORDER BY SUM(p.ViewCount) DESC) AS ViewRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostViews AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(MAX(ph.CreationDate), '1970-01-01') AS LastEditDate,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRankByType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '6 months'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+),
+
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        us.PostCount,
+        us.AnswerCount,
+        us.TotalViews,
+        us.ViewRank
+    FROM 
+        Users u
+    JOIN 
+        UserStats us ON u.Id = us.UserId
+    WHERE 
+        u.LastAccessDate >= cast('2024-10-01' as date) - INTERVAL '3 months'
+)
+
+SELECT 
+    au.DisplayName AS UserName,
+    au.Reputation,
+    au.PostCount,
+    au.AnswerCount,
+    COALESCE(SUM(pv.ViewCount), 0) AS TotalPostViews,
+    COUNT(DISTINCT pv.PostId) AS DistinctPostsReached,
+    AVG(pv.Score) AS AveragePostScore,
+    MAX(pv.LastEditDate) AS LastEdit,
+    STRING_AGG(DISTINCT CASE WHEN pv.ViewRankByType = 1 THEN pv.Title END, ', ') AS TopViewedPosts
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    PostViews pv ON au.UserId = pv.PostId
+GROUP BY 
+    au.UserId, au.DisplayName, au.Reputation
+HAVING 
+    COUNT(DISTINCT pv.PostId) > 5 AND 
+    AVG(pv.Score) > 2
+ORDER BY 
+    TotalPostViews DESC;

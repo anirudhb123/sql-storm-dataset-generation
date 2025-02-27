@@ -1,0 +1,54 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate < DATE '1997-01-01'
+),
+SupplierPartPrices AS (
+    SELECT ps.ps_partkey, p.p_name, s.s_suppkey, s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, p.p_name, s.s_suppkey, s.s_name
+),
+AggOrders AS (
+    SELECT co.c_custkey, COUNT(co.o_orderkey) AS order_count, 
+           SUM(co.o_totalprice) AS total_spent
+    FROM CustomerOrders co
+    GROUP BY co.c_custkey
+),
+HighValueCustomers AS (
+    SELECT a.c_custkey, a.order_count, a.total_spent
+    FROM AggOrders a
+    WHERE a.total_spent > (
+        SELECT AVG(a2.total_spent) FROM AggOrders a2
+    )
+)
+SELECT r.r_name, n.n_name, s.s_name, p.p_name, p.p_retailprice, sp.total_supply_cost, 
+       co.order_count, 
+       ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY co.total_spent DESC) AS rank_within_region
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN SupplierPartPrices sp ON s.s_suppkey = sp.s_suppkey
+JOIN HighValueCustomers co ON co.c_custkey IN (
+    SELECT DISTINCT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = n.n_nationkey
+)
+JOIN part p ON p.p_partkey = sp.ps_partkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_size IS NOT NULL
+) AND sp.total_supply_cost IS NOT NULL
+ORDER BY r.r_name, rank_within_region;

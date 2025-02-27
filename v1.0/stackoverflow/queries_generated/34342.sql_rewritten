@@ -1,0 +1,109 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%') AND p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+        AND ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+FinalBenchmark AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.TotalPosts,
+        ue.TotalComments,
+        ue.TotalBounties,
+        ts.TagName,
+        ts.PostCount,
+        ts.AverageScore,
+        ts.TotalViews,
+        r.Id AS RecursivePostId,
+        r.Title AS RecursivePostTitle,
+        r.Depth AS PostDepth,
+        closed.CloseReason
+    FROM 
+        UserEngagement ue
+    FULL OUTER JOIN 
+        TagStatistics ts ON ue.TotalPosts > 0
+    FULL OUTER JOIN 
+        RecursivePosts r ON ue.UserId = r.OwnerUserId
+    LEFT JOIN 
+        RecentClosedPosts closed ON r.Id = closed.Id
+    WHERE 
+        (ue.TotalPosts > 0 OR ts.PostCount > 0) 
+)
+SELECT 
+    *,
+    COALESCE(NULLIF(AverageScore, 0), 'No Score') AS AdjustedAverageScore,
+    CASE 
+        WHEN TotalBounties > 0 THEN 'Active Bounty User'
+        ELSE 'Regular User'
+    END AS UserCategory
+FROM 
+    FinalBenchmark
+ORDER BY 
+    TotalPosts DESC, TotalViews DESC;

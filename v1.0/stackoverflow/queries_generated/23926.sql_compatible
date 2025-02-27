@@ -1,0 +1,54 @@
+
+WITH UserMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank,
+        COUNT(B.Id) AS BadgeCount,
+        AVG(P.ViewCount) AS AvgViewCount,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.Views, U.UpVotes, U.DownVotes
+), 
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(T.Tags, '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM Posts T
+    WHERE T.Tags IS NOT NULL
+    GROUP BY TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+UserPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        P.Id AS PostId,
+        P.ViewCount,
+        P.TagCount,
+        COALESCE(P.ViewCount, 0) AS AdjustedViewCount
+    FROM Posts P
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    COALESCE(PopularTags.TagName, 'No Tags') AS Tag,
+    UserPosts.AdjustedViewCount,
+    UserMetrics.BadgeCount,
+    UserMetrics.AvgViewCount
+FROM UserMetrics U
+FULL OUTER JOIN UserPosts ON U.UserId = UserPosts.OwnerUserId
+LEFT JOIN (SELECT DISTINCT TagName FROM PopularTags) PopularTags ON PopularTags.TagName = ANY(string_to_array((SELECT STRING_AGG(DISTINCT Tags, '><') FROM Posts WHERE Id = UserPosts.PostId), '><'))
+WHERE U.Reputation >= (SELECT AVG(Reputation) FROM Users)
+AND (UserPosts.AdjustedViewCount > (SELECT AVG(ViewCount) FROM Posts) OR UserPosts.AdjustedViewCount IS NULL)
+ORDER BY U.Views DESC, UserMetrics.BadgeCount DESC
+LIMIT 20;

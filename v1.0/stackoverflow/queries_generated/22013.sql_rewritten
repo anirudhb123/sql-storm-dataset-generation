@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 100  
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseActions,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResults AS (
+    SELECT 
+        p.PostId,
+        p.Title,
+        p.CreationDate,
+        u.UserId,
+        u.Reputation,
+        ua.QuestionCount,
+        ua.CommentCount,
+        ua.TotalBounties,
+        ph.CloseActions,
+        ph.CloseReasons,
+        CASE 
+            WHEN ph.CloseActions > 0 THEN 'Closed'
+            WHEN p.AcceptedAnswerId IS NOT NULL AND p.AcceptedAnswerId != -1 THEN 'Answered'
+            ELSE 'Unanswered'
+        END AS PostStatus,
+        RANK() OVER (ORDER BY p.CreationDate DESC) AS LatestRank
+    FROM 
+        RankedPosts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserActivity ua ON u.Id = ua.UserId
+    LEFT JOIN 
+        PostHistorySummary ph ON p.PostId = ph.PostId
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.UserId,
+    f.Reputation,
+    f.QuestionCount,
+    f.CommentCount,
+    f.TotalBounties,
+    f.CloseActions,
+    f.CloseReasons,
+    f.PostStatus,
+    f.LatestRank
+FROM 
+    FinalResults f
+WHERE 
+    (f.CloseActions > 2 OR f.TotalBounties > 0)  
+    AND f.LatestRank <= 50  
+ORDER BY 
+    f.CreationDate DESC;

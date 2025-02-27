@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), RegionSummary AS (
+    SELECT n.n_regionkey, r.r_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_regionkey, r.r_name
+), OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           FIRST_VALUE(CASE WHEN l.l_returnflag = 'R' THEN 'Returned' ELSE 'Not Returned' END 
+           ) OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS return_status
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT rs.s_name, rs.s_acctbal, rs.rnk, 
+       rsum.supplier_count, rsum.total_supply_cost,
+       od.total_revenue, od.return_status
+FROM RankedSuppliers rs
+FULL OUTER JOIN RegionSummary rsum ON rs.rnk = 1
+LEFT JOIN OrderDetails od ON rs.s_suppkey = od.o_orderkey
+WHERE (rs.s_acctbal > 500.00 OR rs.s_acctbal IS NULL)
+  AND (rs.s_name LIKE 'Supplier%' AND rsum.total_supply_cost IS NOT NULL)
+ORDER BY rs.rnk DESC, od.total_revenue DESC NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

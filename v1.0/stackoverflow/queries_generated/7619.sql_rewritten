@@ -1,0 +1,41 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        RP.*,
+        (UpVotes - DownVotes) AS NetVotes
+    FROM 
+        RankedPosts RP
+    WHERE 
+        RP.Rank <= 5
+)
+SELECT 
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.ViewCount,
+    T.UpVotes,
+    T.DownVotes,
+    T.CommentCount,
+    T.NetVotes,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation
+FROM 
+    TopPosts T
+JOIN 
+    Users U ON T.OwnerUserId = U.Id
+ORDER BY 
+    T.NetVotes DESC, T.ViewCount DESC;

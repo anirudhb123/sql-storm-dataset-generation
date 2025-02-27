@@ -1,0 +1,69 @@
+
+WITH RECURSIVE income_summary AS (
+    SELECT 
+        hd_demo_sk,
+        ib_income_band_sk,
+        CASE 
+            WHEN ib_income_band_sk IS NULL THEN 'UNKNOWN'
+            ELSE (SELECT 
+                        CASE 
+                            WHEN ib_lower_bound < 20000 THEN 'Low'
+                            WHEN ib_lower_bound >= 20000 AND ib_upper_bound < 100000 THEN 'Medium'
+                            ELSE 'High'
+                        END
+                  FROM income_band 
+                  WHERE ib_income_band_sk = hd_income_band_sk)
+        END AS income_category,
+        COUNT(*) AS household_count
+    FROM household_demographics
+    GROUP BY hd_demo_sk, ib_income_band_sk
+),
+customer_preferences AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cp.cp_catalog_page_sk) AS pages_viewed,
+        SUM(CASE 
+            WHEN wp.wp_char_count > 500 THEN wp.wp_char_count 
+            ELSE 0 
+        END) AS total_char_count,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(wp.wp_char_count) DESC) AS rank_char_count
+    FROM customer c
+    LEFT JOIN web_page wp ON c.c_customer_sk = wp.wp_customer_sk
+    LEFT JOIN catalog_page cp ON wp.wp_web_page_sk = cp.cp_catalog_page_sk
+    GROUP BY c.c_customer_sk
+),
+order_statistics AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_items_ordered,
+        SUM(ws_net_profit) AS total_net_profit,
+        AVG(ws_net_paid) AS average_payment,
+        CASE 
+            WHEN AVG(ws_net_paid) > 1000 THEN 'High Roller'
+            ELSE 'Regular Customer'
+        END AS customer_type
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(i.income_category, 'Unknown') AS income_bracket,
+    cp.pages_viewed,
+    os.total_items_ordered,
+    os.total_net_profit,
+    os.average_payment,
+    os.customer_type
+FROM customer c
+LEFT JOIN income_summary i ON c.c_current_hdemo_sk = i.hd_demo_sk
+LEFT JOIN customer_preferences cp ON c.c_customer_sk = cp.c_customer_sk
+LEFT JOIN order_statistics os ON c.c_customer_sk = os.ws_bill_customer_sk
+WHERE cp.pages_viewed IS NOT NULL 
+    AND (os.total_net_profit IS NOT NULL OR cp.total_char_count IS NOT NULL)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM customer_address ca 
+        WHERE ca.ca_address_sk = c.c_current_addr_sk 
+        AND ca.ca_state = 'XX'
+    )
+ORDER BY os.total_net_profit DESC, c.c_customer_id
+LIMIT 100 OFFSET 10;

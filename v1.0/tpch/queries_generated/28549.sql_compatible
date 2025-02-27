@@ -1,0 +1,32 @@
+
+WITH StringBenchmark AS (
+    SELECT 
+        p.p_name, 
+        s.s_name,
+        c.c_name,
+        o.o_orderkey,
+        LENGTH(p.p_name) AS part_name_length,
+        UPPER(s.s_name) AS supplier_uppercase,
+        LOWER(c.c_name) AS customer_lowercase,
+        CONCAT(o.o_orderkey, ' - ', o.o_orderstatus) AS order_status,
+        REPLACE(p.p_comment, 'original', 'modified') AS modified_comment
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN orders o ON o.o_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = s.s_nationkey 
+        LIMIT 1
+    )
+    JOIN customer c ON c.c_custkey = o.o_custkey
+    WHERE p.p_size > 10
+)
+SELECT 
+    AVG(part_name_length) AS avg_part_name_length,
+    COUNT(DISTINCT supplier_uppercase) AS unique_supplier_names,
+    COUNT(DISTINCT customer_lowercase) AS unique_customer_names,
+    STRING_AGG(order_status, ', ') AS order_status_summary,
+    STRING_AGG(modified_comment, '; ') AS all_modified_comments
+FROM StringBenchmark
+GROUP BY part_name_length, supplier_uppercase, customer_lowercase, order_status, modified_comment;

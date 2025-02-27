@@ -1,0 +1,55 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.kind_id
+),
+top_titles AS (
+    SELECT 
+        *
+    FROM 
+        ranked_titles
+    WHERE 
+        rank <= 5
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info c ON ak.person_id = c.person_id
+    GROUP BY 
+        ak.name, ak.person_id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    kt.kind AS title_kind,
+    ai.actor_name,
+    ai.movie_count
+FROM 
+    top_titles tt
+JOIN 
+    kind_type kt ON tt.kind_id = kt.id
+JOIN 
+    movie_keyword mk ON tt.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    actor_info ai ON ai.movie_count > 0
+WHERE 
+    LOWER(k.keyword) LIKE '%adventure%'
+ORDER BY 
+    tt.production_year DESC, ai.movie_count DESC;

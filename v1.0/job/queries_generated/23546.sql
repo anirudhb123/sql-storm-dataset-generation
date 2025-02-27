@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS title,
+        m.production_year,
+        0 AS level,
+        ARRAY[m.title] AS title_path
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        kind_type kt ON mc.company_type_id = kt.id
+    WHERE 
+        kt.kind = 'Production' AND 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        linked_movie.movie_id,
+        lt.title,
+        linked_movie.production_year,
+        mh.level + 1,
+        mh.title_path || lt.title
+    FROM 
+        movie_link linked 
+    JOIN 
+        title lt ON linked.linked_movie_id = lt.id
+    JOIN 
+        movie_hierarchy mh ON linked.movie_id = mh.movie_id
+    WHERE 
+        lt.production_year IS NOT NULL
+)
+, cast_statistics AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        AVG(CASE WHEN c.note IS NULL THEN 0 ELSE 1 END) AS note_presence,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        movie_info mi ON c.movie_id = mi.movie_id 
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        ak.name IS NOT NULL
+        AND k.keyword LIKE '%Drama%'
+    GROUP BY 
+        ak.name
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cs.actor_name,
+    cs.total_movies,
+    cs.note_presence,
+    cs.movies, 
+    CASE 
+        WHEN mh.level > 1 THEN 'Sequel or Series'
+        WHEN mh.level = 1 THEN 'Direct Link'
+        ELSE 'Standalone'
+    END AS movie_category,
+    COALESCE(COUNTS, 0) AS extra_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         COUNT(*) AS COUNTS 
+     FROM 
+         complete_cast 
+     WHERE 
+         status_id IS NULL 
+     GROUP BY 
+         movie_id) cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_statistics cs ON mh.movie_id = cs.total_movies
+WHERE 
+    (mh.production_year BETWEEN 2000 AND 2023) 
+    AND (mh.title ILIKE '%adventure%')
+ORDER BY 
+    mh.production_year DESC, 
+    cs.total_movies DESC,
+    mh.movie_id;

@@ -1,0 +1,73 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        c.c_customer_id,
+        COUNT(sr.ticket_number) AS total_store_returns,
+        COUNT(wr.order_number) AS total_web_returns,
+        SUM(sr.return_amt) AS total_store_return_amount,
+        SUM(wr.return_amt) AS total_web_return_amount
+    FROM
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY
+        c.c_customer_id
+),
+RevenueDetails AS (
+    SELECT
+        ws.ws_bill_customer_sk AS customer_sk,
+        SUM(ws.net_profit) AS total_web_sales_profit,
+        SUM(cs.net_profit) AS total_catalog_sales_profit,
+        SUM(ss.net_profit) AS total_store_sales_profit
+    FROM
+        web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws.ws_bill_customer_sk = cs.cs_bill_customer_sk
+    FULL OUTER JOIN store_sales ss ON ws.ws_bill_customer_sk = ss.ss_customer_sk
+    GROUP BY
+        ws.ws_bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        cd.purchase_estimate,
+        cd.credit_rating,
+        cd.dep_count,
+        c.c_customer_id
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+IncomeBand AS (
+    SELECT
+        ib.ib_income_band_sk,
+        (ib.lower_bound + ib.upper_bound) / 2 AS average_income
+    FROM
+        income_band ib
+)
+SELECT
+    cd.gender,
+    cd.marital_status,
+    ib.average_income,
+    COUNT(DISTINCT c.c_customer_id) AS number_of_customers,
+    COALESCE(SUM(cr.total_store_return_amount), 0) AS total_store_return,
+    COALESCE(SUM(cr.total_web_return_amount), 0) AS total_web_return,
+    COALESCE(SUM(rd.total_web_sales_profit), 0) AS total_web_sales_profit,
+    COALESCE(SUM(rd.total_catalog_sales_profit), 0) AS total_catalog_sales_profit,
+    COALESCE(SUM(rd.total_store_sales_profit), 0) AS total_store_sales_profit
+FROM
+    CustomerDemographics cd
+LEFT JOIN CustomerReturns cr ON cd.c_customer_id = cr.c_customer_id
+LEFT JOIN RevenueDetails rd ON cd.c_customer_id = rd.customer_sk
+LEFT JOIN IncomeBand ib ON cd.purchase_estimate BETWEEN ib.lower_bound AND ib.upper_bound
+WHERE
+    cd.education_status IN ('PhD', 'Masters', 'Bachelors') AND
+    cd.marital_status IS NOT NULL
+GROUP BY
+    cd.gender, cd.marital_status, ib.average_income
+HAVING
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY
+    number_of_customers DESC, total_web_sales_profit DESC;

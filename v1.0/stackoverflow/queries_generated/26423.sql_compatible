@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.AnswerCount,
+        array_length(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+TagAnalytics AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS TotalQuestions,
+        SUM(rp.ViewCount) AS TotalViewCount,
+        AVG(rp.AnswerCount) AS AvgAnswerCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) 
+    JOIN 
+        RankedPosts rp ON rp.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+),
+
+HighEngagementUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighEngagementCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName 
+    HAVING 
+        SUM(p.ViewCount) > 1000 
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    ta.TagName,
+    ta.TotalQuestions,
+    ta.TotalViewCount,
+    ta.AvgAnswerCount,
+    heu.TotalViews AS UserTotalViews,
+    heu.HighEngagementCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TagAnalytics ta ON rp.TagCount > 0 
+JOIN 
+    HighEngagementUsers heu ON rp.OwnerUserId = heu.Id
+ORDER BY 
+    rp.CreationDate DESC, 
+    ta.TotalQuestions DESC;

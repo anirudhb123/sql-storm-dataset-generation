@@ -1,0 +1,58 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AddressDetails AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type, 
+               CASE WHEN ca.ca_suite_number IS NOT NULL THEN CONCAT(', Suite ', ca.ca_suite_number) ELSE '' END) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    cd.c_customer_id,
+    cd.full_name,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ss.total_sales,
+    ss.order_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status
+FROM 
+    CustomerDetails cd
+JOIN 
+    AddressDetails ad ON cd.c_customer_id = ad.ca_address_id
+LEFT JOIN 
+    SalesSummary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+WHERE 
+    cd.cd_gender = 'F' 
+    AND ss.total_sales > 1000
+ORDER BY 
+    ss.total_sales DESC, cd.full_name;

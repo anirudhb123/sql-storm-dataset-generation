@@ -1,0 +1,72 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        t.kind_id,
+        t.imdb_index
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000 
+    GROUP BY 
+        t.id, t.title, t.production_year, t.kind_id, t.imdb_index
+    ORDER BY 
+        total_cast_members DESC
+    LIMIT 10
+),
+KeywordMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        k.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        RankedMovies m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, k.keyword
+    ORDER BY 
+        m.production_year DESC
+),
+FinalResult AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast_members,
+        rm.cast_names,
+        COUNT(km.keyword) AS unique_keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        KeywordMovies km ON rm.movie_id = km.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.total_cast_members, rm.cast_names
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.total_cast_members,
+    fr.cast_names,
+    fr.unique_keywords,
+    ct.kind_id AS kind
+FROM 
+    FinalResult fr
+JOIN 
+    kind_type ct ON fr.kind_id = ct.id
+ORDER BY 
+    fr.unique_keywords DESC, fr.total_cast_members DESC;

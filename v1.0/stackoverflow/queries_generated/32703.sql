@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Consider only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+VoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) as TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.PostHistoryTypeId) AS LastHistoryType
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    up.UserId,
+    up.PostCount AS UserPostCount,
+    up.AvgScore,
+    vc.TotalVotes,
+    vc.UpVotes,
+    vc.DownVotes,
+    rph.Level AS AnswerDepth,
+    CASE 
+        WHEN rh.LastHistoryType IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS RecentlyModified
+FROM 
+    Posts p
+LEFT JOIN 
+    UserPostCounts up ON p.OwnerUserId = up.UserId
+LEFT JOIN 
+    VoteCounts vc ON p.Id = vc.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.AcceptedAnswerId = rph.PostId
+LEFT JOIN 
+    RecentPostHistory rh ON p.Id = rh.PostId
+WHERE 
+    p.PostTypeId = 1 -- Only including questions
+    AND p.CreationDate >= NOW() - INTERVAL '90 days' -- Filtering by recent questions
+ORDER BY 
+    p.ViewCount DESC, 
+    p.Score DESC
+LIMIT 100;

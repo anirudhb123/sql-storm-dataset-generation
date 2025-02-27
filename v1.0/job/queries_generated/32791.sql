@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(mp.company_name, 'Unknown') AS production_company,
+    mh.depth AS movie_depth,
+    COUNT(DISTINCT km.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY m.production_year DESC) AS latest_movie_rank,
+    AVG(CASE 
+            WHEN pi.info IS NULL THEN 0 
+            ELSE LENGTH(pi.info) 
+        END) AS avg_info_length
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name mp ON mc.company_id = mp.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword km ON mk.keyword_id = km.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id AND pi.info_type_id = 1 
+JOIN 
+    MovieHierarchy mh ON at.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND (ak.name LIKE '%Smith%' OR ak.name LIKE '%Jones%')
+GROUP BY 
+    ak.name, at.title, mp.company_name, mh.depth
+HAVING 
+    COUNT(DISTINCT km.keyword) > 5
+ORDER BY 
+    avg_info_length DESC, movie_depth ASC;

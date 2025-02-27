@@ -1,0 +1,57 @@
+WITH RecentTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mcc.company_id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mcc ON t.id = mcc.movie_id
+    WHERE 
+        t.production_year > 2010
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorInfo AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movies_played,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name
+),
+KeywordPopularity AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    ai.name AS actor_name,
+    ai.movies_played,
+    kp.keyword_count,
+    rt.company_count,
+    COALESCE(rt.company_count, 0) AS total_companies,
+    CASE WHEN ai.has_note > 0 THEN 'Has Notes' ELSE 'No Notes' END AS note_status
+FROM 
+    RecentTitles rt
+LEFT JOIN 
+    ActorInfo ai ON rt.production_year = ai.movies_played
+LEFT JOIN 
+    KeywordPopularity kp ON rt.title = (SELECT title FROM aka_title WHERE id = rt.id)
+ORDER BY 
+    rt.production_year DESC, 
+    total_companies DESC, 
+    ai.movies_played DESC
+LIMIT 100;

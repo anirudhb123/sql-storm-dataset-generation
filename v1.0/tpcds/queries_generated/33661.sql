@@ -1,0 +1,45 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.customer_sk, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+), 
+sales_summary AS (
+    SELECT ws.web_site_sk, 
+           SUM(ws.ws_quantity) AS total_quantity, 
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE w.web_class LIKE 'premium%'
+    GROUP BY ws.web_site_sk
+),
+customer_info AS (
+    SELECT c.c_customer_id, 
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_income_band_sk,
+           MAX(COALESCE(ws.ws_ext_sales_price, 0)) AS max_sales_price
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+)
+SELECT ci.c_customer_id,
+       ci.cd_gender,
+       ci.cd_marital_status,
+       ib.ib_lower_bound,
+       ib.ib_upper_bound,
+       SUM(ss.total_sales) AS total_sales_contributed,
+       SUM(ss.total_quantity) AS total_quantity_contributed,
+       ROW_NUMBER() OVER (PARTITION BY ci.cd_gender ORDER BY SUM(ss.total_sales) DESC) AS sales_rank
+FROM customer_info ci
+JOIN income_band ib ON ci.cd_income_band_sk = ib.ib_income_band_sk
+JOIN sales_summary ss ON (ss.web_site_sk IN (SELECT web_site_sk FROM web_site WHERE web_class ILIKE '%premium%'))
+GROUP BY ci.c_customer_id, ci.cd_gender, ci.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+HAVING SUM(ss.total_sales) > 10000
+ORDER BY ci.cd_gender, total_sales_contributed DESC;

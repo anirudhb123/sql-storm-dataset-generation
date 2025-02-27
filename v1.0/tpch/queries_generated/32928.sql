@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, NULL::integer AS parent_suppkey
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.s_suppkey
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.parent_suppkey IS NULL
+),
+AggregateData AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey
+),
+RankedProducts AS (
+    SELECT ad.p_partkey,
+           ad.p_name, 
+           ad.total_available, 
+           ad.avg_supply_cost,
+           RANK() OVER (ORDER BY ad.total_available DESC, ad.avg_supply_cost ASC) AS rank_val
+    FROM AggregateData ad
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT rp.p_name, 
+       rp.total_available, 
+       rp.avg_supply_cost,
+       cp.c_name,
+       cp.order_count,
+       cp.total_spent
+FROM RankedProducts rp
+FULL OUTER JOIN CustomerOrders cp ON rp.rank_val % 5 = cp.order_count % 5
+WHERE rp.total_available > 1000 OR cp.total_spent IS NULL
+ORDER BY rp.avg_supply_cost DESC, cp.total_spent DESC
+LIMIT 50;

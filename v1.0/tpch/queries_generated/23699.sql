@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), RegionalSales AS (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY n.n_name
+), MaxSales AS (
+    SELECT n_name, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS rnk
+    FROM RegionalSales
+), SupplierWithTotal AS (
+    SELECT sh.s_suppkey, sh.s_name,
+           SUM(COALESCE(l.l_extendedprice, 0) * (1 - COALESCE(l.l_discount, 0))) AS total_spent
+    FROM supplier s
+    LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name
+), CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count,
+           String_Agg(DISTINCT o.o_orderstatus ORDER BY o.o_orderkey) AS status_list
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY c.c_custkey
+)
+SELECT c.c_name, co.order_count, COALESCE(m.total_sales, 0) AS max_sales,
+       CASE WHEN s.total_spent IS NULL THEN 'No Spending' 
+            ELSE 'Spent: ' || CAST(s.total_spent AS varchar(20)) END AS spending_info,
+       STRING_AGG(DISTINCT status_list, ', ') AS all_statuses
+FROM CustomerOrders co
+JOIN customer c ON co.c_custkey = c.c_custkey
+LEFT JOIN MaxSales m ON co.order_count > 0
+LEFT JOIN SupplierWithTotal s ON c.c_nationkey = s.s_nationkey
+WHERE EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+    AND l.l_returnflag IS NULL
+)
+AND (co.order_count > (SELECT AVG(order_count) FROM CustomerOrders) OR 
+     EXISTS (SELECT 1 FROM lineitem l2 WHERE l2.l_suppkey IS NULL))
+GROUP BY c.c_name, co.order_count, s.total_spent, m.total_sales
+ORDER BY co.order_count DESC, max_sales DESC;

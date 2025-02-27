@@ -1,0 +1,67 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        Level + 1
+    FROM 
+        PostHistory ph
+    JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId 
+    WHERE 
+        rph.Level < 5 
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerName,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    MAX(CASE WHEN v.VoteTypeId = 2 THEN v.CreationDate END) AS LastUpvoteDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    SUM(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 1
+            WHEN ph.PostHistoryTypeId = 11 THEN -1 
+            ELSE 0 
+        END) AS NetCloseReopenCount,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Tags t ON POSITION(t.TagName IN p.Tags) > 0 
+LEFT JOIN 
+    RecursivePostHistory ph ON p.Id = ph.PostId
+WHERE 
+    p.CreationDate >= '2020-01-01'
+    AND p.Score > 0
+    AND (p.ClosedDate IS NULL OR p.ClosedDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+GROUP BY 
+    p.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT c.Id) > 5
+ORDER BY 
+    NetCloseReopenCount DESC, LastUpvoteDate DESC;

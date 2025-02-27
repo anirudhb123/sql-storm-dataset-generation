@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+
+SELECT 
+    rp.PostID,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.RankScore,
+    rp.CommentCount,
+    COALESCE(rp.TotalBounty, 0) AS TotalBounty,
+    COALESCE(ut.Name, 'Unknown') AS VoterType
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    VoteTypes ut ON ut.Id = (SELECT MAX(vt.Id) FROM Votes vj JOIN VoteTypes vt ON vj.VoteTypeId = vt.Id WHERE vj.PostId = rp.PostID)
+WHERE 
+    rp.RankScore <= 5
+ORDER BY 
+    rp.Score DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS PostID,
+    'TOTAL POSTS LAST YEAR' AS Title,
+    COUNT(*) AS Score,
+    NULL AS ViewCount,
+    NULL AS RankScore,
+    NULL AS CommentCount,
+    NULL AS TotalBounty,
+    NULL AS VoterType
+FROM 
+    Posts
+WHERE 
+    CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year';

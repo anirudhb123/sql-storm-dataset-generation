@@ -1,0 +1,50 @@
+
+WITH TagCount AS (
+    SELECT 
+        UNNEST(ARRAY(SELECT DISTINCT SUBSTRING(Tags FROM '\<([^\>]+)\>')) FROM Posts) AS TagName,
+        COUNT(*) AS TagFrequency
+    FROM Posts
+    GROUP BY TagName
+),
+
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+PostAgregado AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        MAX(P.CreationDate) AS LastPostDate,
+        STRING_AGG(TC.TagName, ', ') AS TagsList
+    FROM Posts P
+    JOIN TagCount TC ON P.Tags LIKE CONCAT('%', TC.TagName, '%')
+    GROUP BY P.OwnerUserId
+)
+
+SELECT 
+    U.Id,
+    U.DisplayName,
+    COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PA.PostCount, 0) AS TotalPosts,
+    COALESCE(PA.TotalScore, 0) AS TotalScore,
+    COALESCE(PA.LastPostDate, 'No Posts') AS LastPostDate,
+    COALESCE(PA.TagsList, 'No Tags') AS AssociatedTags
+FROM Users U
+LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN PostAgregado PA ON U.Id = PA.OwnerUserId
+WHERE U.Reputation > 1000
+ORDER BY U.DisplayName;

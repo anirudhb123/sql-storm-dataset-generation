@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10 
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    WHERE 
+        u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+BadgesSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+RecentActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment AS PostHistoryComment,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LastActivity
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    a.QuestionCount,
+    a.TotalViews,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+    rp.PostId,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.Score AS PostScore,
+    rp.ViewCount AS PostViewCount,
+    r.PostHistoryComment AS RecentComment,
+    r.LastActivity
+FROM 
+    ActiveUsers a
+JOIN 
+    Users u ON a.UserId = u.Id
+LEFT JOIN 
+    BadgesSummary b ON u.Id = b.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.Rank = 1
+LEFT JOIN 
+    RecentActivity r ON rp.PostId = r.PostId
+ORDER BY 
+    a.TotalViews DESC, a.QuestionCount DESC
+LIMIT 50;

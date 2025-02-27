@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_ship_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_ship_date_sk) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        COUNT(DISTINCT s.ws_order_number) AS total_orders,
+        SUM(s.ws_sales_price * s.ws_quantity) AS total_revenue,
+        AVG(s.ws_sales_price) AS avg_price,
+        MAX(s.ws_sales_price) AS max_price,
+        MIN(s.ws_sales_price) AS min_price,
+        COUNT(DISTINCT ws_item_sk) OVER () AS unique_items
+    FROM 
+        SalesCTE s
+    JOIN 
+        item ON s.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    s.i_item_id,
+    s.total_orders,
+    s.total_revenue,
+    s.avg_price,
+    s.max_price,
+    s.min_price,
+    CASE 
+        WHEN s.total_orders IS NULL THEN 'No Sales'
+        WHEN s.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Normal Revenue'
+    END AS revenue_category,
+    (SELECT COUNT(*) FROM warehouse) AS total_warehouses
+FROM 
+    SalesSummary s
+LEFT JOIN 
+    customer c ON c.c_customer_sk = (SELECT c_customer_sk FROM web_sales WHERE ws_item_sk = s.i_item_id LIMIT 1)
+WHERE 
+    c.c_current_cdemo_sk IS NOT NULL
+    AND (s.total_orders > 5 OR s.total_revenue < 5000)
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

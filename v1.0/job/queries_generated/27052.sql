@@ -1,0 +1,49 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(a.title) DESC) AS title_rank
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.movie_id = t.id
+),
+FilteredRankedTitles AS (
+    SELECT 
+        movie_title,
+        production_year,
+        kind_id
+    FROM 
+        RankedTitles
+    WHERE 
+        title_rank <= 10
+),
+ActorTitles AS (
+    SELECT 
+        ak.name AS actor_name,
+        rt.movie_title,
+        rt.production_year
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        FilteredRankedTitles rt ON ci.movie_id = rt.movie_id
+)
+SELECT 
+    at.actor_name,
+    COUNT(DISTINCT at.movie_title) AS movie_count,
+    STRING_AGG(DISTINCT at.movie_title ORDER BY at.movie_title) AS titles,
+    MIN(rt.production_year) AS earliest_year,
+    MAX(rt.production_year) AS latest_year,
+    AVG(rt.production_year) AS average_year
+FROM 
+    ActorTitles at
+JOIN 
+    FilteredRankedTitles rt ON at.movie_title = rt.movie_title
+GROUP BY 
+    at.actor_name
+ORDER BY 
+    movie_count DESC
+LIMIT 20;

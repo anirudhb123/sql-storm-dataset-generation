@@ -1,0 +1,85 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role AS role_name,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id 
+    GROUP BY 
+        c.movie_id, c.person_id, r.role
+),
+CharacterNames AS (
+    SELECT
+        cn.id AS char_id,
+        cn.name,
+        cn.imdb_index
+    FROM
+        char_name cn
+    WHERE
+        cn.name IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    COALESCE(cr.role_name, 'Unknown Role') AS actor_role,
+    COUNT(DISTINCT cr.person_id) AS number_of_actors,
+    mwk.keywords,
+    CASE 
+        WHEN rm.year_rank = 1 THEN 'First Released'
+        WHEN rm.year_rank = 2 THEN 'Second Released'
+        ELSE 'Other Released'
+    END AS release_status,
+    CN.name AS character_name,
+    COALESCE(pm.info, 'No Info') AS person_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoles cr ON rm.title_id = cr.movie_id
+LEFT JOIN 
+    CharacterNames cn ON cr.person_id = cn.id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rm.title_id = mwk.movie_id
+LEFT JOIN 
+    person_info pm ON cr.person_id = pm.person_id 
+                    AND pm.info_type_id = 1  -- Assuming '1' corresponds to a relevant info type
+WHERE 
+    rm.production_year >= 2000
+    AND (rm.title ILIKE '%Adventure%' OR rm.title ILIKE '%Fantasy%')
+GROUP BY 
+    rm.title, 
+    rm.production_year, 
+    cr.role_name, 
+    mwk.keywords, 
+    cn.name, 
+    pm.info
+ORDER BY 
+    rm.production_year DESC, 
+    movie_title ASC;

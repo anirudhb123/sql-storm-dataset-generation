@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        o.o_orderdate,
+        c.c_name AS customer_name,
+        r.r_name AS region_name
+    FROM 
+        lineitem l 
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey 
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+)
+SELECT 
+    od.customer_name,
+    od.region_name,
+    COUNT(DISTINCT od.l_orderkey) AS total_orders,
+    SUM(od.l_extendedprice) AS total_revenue,
+    AVG(od.l_discount) AS average_discount,
+    (SELECT COUNT(*) FROM RankedSuppliers rs WHERE rs.rnk <= 3 AND rs.s_suppkey = od.l_suppkey) AS top_supplier_count
+FROM 
+    OrderDetails od
+JOIN 
+    HighValueCustomers hvc ON od.customer_name = hvc.c_name
+GROUP BY 
+    od.customer_name, od.region_name
+ORDER BY 
+    total_revenue DESC, average_discount DESC
+LIMIT 10;

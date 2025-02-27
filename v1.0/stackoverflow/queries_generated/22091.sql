@@ -1,0 +1,68 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS TotalQuestions,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS TotalAnswers,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id, u.DisplayName
+), 
+RecentPostHistory AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= NOW() - INTERVAL '1 month'
+),
+FilteredPostHistory AS (
+    SELECT 
+        rph.*,
+        p.OwnerUserId,
+        p.Title,
+        p.Body,
+        p.Score
+    FROM RecentPostHistory rph
+    JOIN Posts p ON rph.PostId = p.Id
+    WHERE rph.rn = 1 AND rph.PostHistoryTypeId IN (10, 11, 12)
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalComments,
+    ua.UserRank,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.BadgeNames, 'None') AS Badges,
+    SUM(CASE WHEN fph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts,
+    SUM(CASE WHEN fph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenedPosts,
+    STRING_AGG(DISTINCT CASE 
+        WHEN fph.PostHistoryTypeId = 12 THEN fph.Comment 
+        ELSE NULL 
+    END, '; ') AS DeleteComments
+FROM UserActivity ua
+LEFT JOIN FilteredPostHistory fph ON ua.UserId = fph.UserId
+LEFT JOIN UserBadges ub ON ua.UserId = ub.UserId
+WHERE ua.TotalQuestions > 0
+GROUP BY ua.UserId, ua.DisplayName, ua.TotalQuestions, 
+         ua.TotalAnswers, ua.TotalComments, ua.UserRank, 
+         ub.BadgeCount, ub.BadgeNames
+HAVING SUM(COALESCE(fph.Score, 0)) > 10
+ORDER BY ua.TotalUpVotes DESC, ua.TotalDownVotes ASC, ua.UserRank;

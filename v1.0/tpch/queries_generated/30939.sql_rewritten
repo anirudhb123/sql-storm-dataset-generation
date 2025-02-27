@@ -1,0 +1,53 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+agg_data AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY n.n_name
+),
+ranked_revenue AS (
+    SELECT 
+        *, 
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM agg_data
+)
+SELECT 
+    r.region_name,
+    COALESCE(r.total_revenue, 0) AS revenue,
+    COALESCE(r.total_orders, 0) AS orders,
+    COALESCE(r.total_customers, 0) AS customers,
+    COALESCE(s.supp_level, -1) AS supplier_level
+FROM (
+    SELECT r.r_name AS region_name,
+           SUM(a.total_revenue) AS total_revenue,
+           SUM(a.total_orders) AS total_orders,
+           SUM(a.total_customers) AS total_customers
+    FROM region r
+    LEFT JOIN ranked_revenue a ON r.r_regionkey = a.n_nationkey
+    GROUP BY r.r_name
+) r
+LEFT JOIN (
+    SELECT sh.supp_level, sh.s_name
+    FROM supplier_hierarchy sh
+    WHERE sh.level > 0
+) s ON s.s_name = r.region_name
+ORDER BY revenue DESC
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

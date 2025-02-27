@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 0 AS lvl
+    FROM customer
+    WHERE c_acctbal > 1000
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.lvl + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal
+),
+OrderedLineItems AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+RankedSales AS (
+    SELECT o.o_orderkey, ol.TotalSales,
+           RANK() OVER (ORDER BY ol.TotalSales DESC) AS SalesRank
+    FROM OrderedLineItems ol
+),
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name,
+           COUNT(DISTINCT CASE WHEN o.o_orderstatus = 'F' THEN o.o_orderkey END) AS CompletedOrders
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT ch.c_custkey, ch.c_name, ch.c_acctbal, 
+       COALESCE(ol.TotalSales, 0) AS TotalSales,
+       COALESCE(sd.TotalSupplyCost, 0) AS TotalSupplyCost,
+       tn.CompletedOrders
+FROM CustomerHierarchy ch
+LEFT JOIN RankedSales ol ON ch.c_custkey = ol.o_orderkey
+LEFT JOIN SupplierDetails sd ON ol.o_orderkey = sd.s_suppkey
+LEFT JOIN TopNations tn ON ch.c_nationkey = tn.n_nationkey
+WHERE ch.lvl < 3
+AND (ch.c_acctbal > 500 OR tn.CompletedOrders > 5)
+ORDER BY ch.c_acctbal DESC, TotalSales DESC;

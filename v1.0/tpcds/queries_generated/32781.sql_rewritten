@@ -1,0 +1,49 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY ws_item_sk
+),
+TopSales AS (
+    SELECT
+        c_customer_sk,
+        SUM(total_sales) AS customer_total_sales,
+        COUNT(DISTINCT ws_item_sk) AS items_purchased
+    FROM SalesCTE
+    JOIN web_sales ON SalesCTE.ws_item_sk = web_sales.ws_item_sk
+    GROUP BY c_customer_sk
+),
+CustomerStats AS (
+    SELECT
+        cd_gender,
+        AVG(customer_total_sales) AS avg_sales_per_gender,
+        COUNT(DISTINCT c_customer_sk) AS total_customers
+    FROM TopSales
+    JOIN customer ON TopSales.c_customer_sk = customer.c_customer_sk
+    JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY cd_gender
+),
+FilteredStats AS (
+    SELECT
+        cd_gender,
+        avg_sales_per_gender,
+        total_customers,
+        CASE 
+            WHEN avg_sales_per_gender IS NULL THEN 'No Sales'
+            WHEN total_customers > 1000 THEN 'High'
+            ELSE 'Low'
+        END AS sales_category
+    FROM CustomerStats
+)
+SELECT
+    fs.cd_gender,
+    fs.avg_sales_per_gender,
+    fs.total_customers,
+    fs.sales_category,
+    COALESCE(CAST(SUM(ws_ext_ship_cost) OVER (PARTITION BY fs.cd_gender) / NULLIF(total_customers, 0) AS DECIMAL(10,2)), 0) AS avg_ship_cost_per_customer
+FROM FilteredStats fs
+LEFT JOIN web_sales ws ON fs.total_customers > 0
+WHERE fs.sales_category = 'High';

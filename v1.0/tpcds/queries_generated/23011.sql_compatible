@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_net_profit > 0
+),
+SalesSummary AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_date,
+        d.d_month_seq,
+        d.d_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c 
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    WHERE cd.cd_gender IS NOT NULL
+),
+
+SalesReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+
+SELECT 
+    cs.ws_item_sk,
+    CAST(d.d_date AS TIMESTAMP) AS sale_date,
+    cs.order_count,
+    cs.total_sales,
+    cs.total_net_profit,
+    COALESCE(sr.total_returns, 0) AS total_returns,
+    COALESCE(sr.return_count, 0) AS return_count,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM SalesSummary cs
+JOIN CustomerDetails cd ON cs.ws_item_sk = cd.c_customer_id
+LEFT JOIN SalesReturns sr ON sr.sr_item_sk = cs.ws_item_sk 
+LEFT JOIN date_dim d ON cs.ws_item_sk = d.d_date_sk
+WHERE 
+    (cs.total_net_profit > 500 OR (cs.order_count > 10 AND EXISTS (
+        SELECT 1 FROM RankedSales rs WHERE rs.ws_item_sk = cs.ws_item_sk AND rs.profit_rank = 1
+    )))
+AND cd.cd_purchase_estimate IS NOT NULL
+AND (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+ORDER BY cs.total_net_profit DESC, cd.d_month_seq, cd.cd_gender;

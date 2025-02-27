@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title AS movie_title,
+        title.production_year,
+        akn.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY title.id ORDER BY akn.name) AS actor_rank
+    FROM 
+        title
+    JOIN 
+        movie_companies mc ON title.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        complete_cast cc ON title.id = cc.movie_id
+    JOIN 
+        aka_name akn ON cc.subject_id = akn.person_id
+    WHERE 
+        cn.country_code = 'USA' 
+        AND title.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(keyword.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword keyword ON mk.keyword_id = keyword.id
+    GROUP BY 
+        mk.movie_id
+),
+ActorStats AS (
+    SELECT 
+        movie_id,
+        COUNT(*) AS actor_count,
+        MIN(actor_rank) AS first_actor_rank,
+        MAX(actor_rank) AS last_actor_rank
+    FROM 
+        RankedMovies
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_name,
+    mk.keywords,
+    as.actor_count,
+    as.first_actor_rank,
+    as.last_actor_rank
+FROM 
+    RankedMovies rm
+JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+JOIN 
+    ActorStats as ON rm.movie_id = as.movie_id
+WHERE 
+    rm.actor_rank = 1
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_title;

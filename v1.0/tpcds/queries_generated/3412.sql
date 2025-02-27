@@ -1,0 +1,64 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS num_orders,
+        COUNT(DISTINCT CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN ws.ws_order_number END) AS shipped_orders
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_web_sales,
+        cs.num_orders,
+        cs.shipped_orders,
+        DENSE_RANK() OVER (ORDER BY cs.total_web_sales DESC) AS sales_rank
+    FROM CustomerSales cs
+    WHERE cs.total_web_sales IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM customer_demographics cd
+    WHERE cd.cd_credit_rating IS NOT NULL
+),
+SalesWithDemographics AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.total_web_sales,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM TopCustomers tc
+    JOIN customer c ON tc.c_customer_sk = c.c_customer_sk
+    JOIN CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    swd.c_customer_sk,
+    swd.c_first_name,
+    swd.c_last_name,
+    swd.total_web_sales,
+    swd.cd_gender,
+    swd.cd_marital_status,
+    CASE
+        WHEN swd.total_web_sales > 1000 THEN 'High Value Customer'
+        WHEN swd.total_web_sales BETWEEN 500 AND 1000 THEN 'Moderate Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value,
+    COUNT(*) OVER () AS total_customers
+FROM SalesWithDemographics swd
+WHERE swd.shipped_orders > 0
+ORDER BY swd.total_web_sales DESC 
+LIMIT 10;

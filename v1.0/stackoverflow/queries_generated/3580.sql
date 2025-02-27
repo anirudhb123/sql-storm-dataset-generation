@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 OR b.Class = 2
+    GROUP BY 
+        b.UserId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(AVG(p.ViewCount), 0) AS AvgViews,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.BadgeNames, 'None') AS BadgeNames,
+        COUNT(DISTINCT rp.PostId) AS RecentPosts,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+        LEFT JOIN UserBadges b ON u.Id = b.UserId
+        LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, b.BadgeCount, b.BadgeNames
+    HAVING 
+        COUNT(DISTINCT rp.PostId) > 0
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.BadgeCount,
+    u.BadgeNames,
+    u.RecentPosts,
+    u.TotalScore,
+    m.UpVotes,
+    m.DownVotes,
+    m.AvgViews
+FROM 
+    UserPostStats u
+    JOIN MostActiveUsers m ON u.UserId = m.Id
+ORDER BY 
+    u.TotalScore DESC, u.RecentPosts DESC
+LIMIT 10
+

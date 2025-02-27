@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year = 2020
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        m.kind_id,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON m.id = ml.linked_movie_id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(ARRAY_AGG(DISTINCT ak.name) FILTER (WHERE ak.name IS NOT NULL), '{}'::text[]) AS aka_names,
+    COUNT(DISTINCT ci.id) AS total_cast,
+    SUM(CASE WHEN ci.nr_order IS NULL THEN 0 ELSE 1 END) AS cast_with_order,
+    AVG(mr.depth) AS avg_link_depth,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STUFF(STRING_AGG(DISTINCT mk.keyword, ', ' ORDER BY mk.keyword), 1, 2, '') AS keywords
+FROM
+    movie_hierarchy mr
+JOIN
+    aka_title m ON m.id = mr.movie_id
+LEFT JOIN
+    cast_info ci ON ci.movie_id = m.id
+LEFT JOIN
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = m.id
+WHERE
+    (m.production_year BETWEEN 2000 AND 2023 OR m.kind_id IS NOT NULL)
+    AND (m.title ILIKE '%action%' OR m.title ILIKE '%drama%')
+GROUP BY
+    m.id
+HAVING
+    COUNT(DISTINCT ak.name) > 1 -- At least two aka names
+ORDER BY
+    m.production_year DESC,
+    total_cast DESC;

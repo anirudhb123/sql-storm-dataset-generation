@@ -1,0 +1,67 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+DetailedStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PS.PostCount, 0) AS PostCount,
+        COALESCE(PS.TotalScore, 0) AS TotalScore,
+        COALESCE(PS.AvgViewCount, 0) AS AvgViewCount
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        BadgeCount,
+        PostCount,
+        TotalScore,
+        AvgViewCount,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM DetailedStats
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(H.Id) AS CloseCount,
+        MAX(H.CreationDate) AS LastClosedDate
+    FROM Posts P
+    LEFT JOIN PostHistory H ON P.Id = H.PostId AND H.PostHistoryTypeId = 10
+    GROUP BY P.Id
+    HAVING COUNT(H.Id) > 0
+)
+SELECT 
+    RU.DisplayName, 
+    RU.BadgeCount,
+    RU.PostCount,
+    RU.TotalScore,
+    RU.AvgViewCount,
+    RU.ScoreRank,
+    COALESCE(CP.CloseCount, 0) AS PostCloseCount,
+    COALESCE(CP.LastClosedDate, 'No closed posts') AS LastClosedPost
+FROM RankedUsers RU
+LEFT JOIN ClosedPosts CP ON RU.UserId = CP.PostId
+WHERE RU.PostCount > 0
+ORDER BY RU.ScoreRank, RU.TotalScore DESC;

@@ -1,0 +1,27 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT sd.s_suppkey, sd.s_name, n.n_name, sd.total_cost
+    FROM SupplierDetails sd
+    JOIN nation n ON sd.s_nationkey = n.n_nationkey
+    WHERE total_cost > 10000
+),
+RecentOrders AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY o.o_custkey
+)
+SELECT ts.s_suppkey, ts.s_name, ts.n_name, ro.order_revenue
+FROM TopSuppliers ts
+JOIN RecentOrders ro ON ts.s_nationkey IN (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_name IN ('USA', 'Canada', 'Mexico')
+)
+ORDER BY ts.total_cost DESC, ro.order_revenue DESC;

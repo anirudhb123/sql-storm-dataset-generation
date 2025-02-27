@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > DATEADD(day, -30, '2024-10-01')
+),
+MaxViewCounts AS (
+    SELECT 
+        pt.Id AS PostTypeId,
+        MAX(p.ViewCount) AS MaxViewCount
+    FROM 
+        Posts p
+    JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Id
+),
+PostRankings AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.RankScore,
+        mv.MaxViewCount,
+        CASE 
+            WHEN mv.MaxViewCount IS NULL THEN 'No other posts'
+            ELSE 'Competing'
+        END AS CompetitionStatus,
+        CASE 
+            WHEN rp.Score BETWEEN 0 AND 10 THEN 'Low Score'
+            WHEN rp.Score BETWEEN 11 AND 50 THEN 'Medium Score'
+            ELSE 'High Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        MaxViewCounts mv ON rp.PostTypeId = mv.PostTypeId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.RankScore,
+    p.MaxViewCount,
+    p.CompetitionStatus,
+    p.ScoreCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    PostRankings p
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tags_array ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(tags_array)
+WHERE 
+    p.RankScore <= 5
+GROUP BY 
+    p.PostId, p.Title, p.CreationDate, p.ViewCount, p.RankScore, p.MaxViewCount, p.CompetitionStatus, p.ScoreCategory
+HAVING 
+    COALESCE(p.MaxViewCount, 0) > 0 
+ORDER BY 
+    p.ViewCount DESC, 
+    p.RankScore ASC;

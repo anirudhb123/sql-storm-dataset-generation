@@ -1,0 +1,106 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 0) AS production_year,
+        ARRAY[m.title] AS hierarchy
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 0) AS production_year,
+        mh.hierarchy || m.title
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND mh.production_year < m.production_year
+),
+NameRoleCount AS (
+    SELECT 
+        c.person_id,
+        r.role,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id, r.role
+),
+PopularStars AS (
+    SELECT 
+        n.id AS person_id,
+        n.name,
+        ROW_NUMBER() OVER (PARTITION BY n.gender ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS popularity_rank
+    FROM 
+        name n
+    JOIN 
+        cast_info c ON c.person_id = n.id
+    GROUP BY 
+        n.id, n.name, n.gender
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5 
+),
+MovieKeywordCount AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(nrc.role_count, 0) AS role_count,
+        COALESCE(p.name, 'Unknown') AS star_name,
+        COALESCE(mkc.keyword_count, 0) AS keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        NameRoleCount nrc ON nrc.person_id = (SELECT person_id FROM cast_info ic WHERE ic.movie_id = mh.movie_id LIMIT 1)
+    LEFT JOIN 
+        PopularStars p ON p.person_id = nrc.person_id
+    LEFT JOIN 
+        MovieKeywordCount mkc ON mkc.movie_id = mh.movie_id
+    WHERE 
+        mh.production_year >= 2000 
+)
+SELECT 
+    fb.movie_id,
+    fb.title,
+    fb.production_year,
+    fb.role_count,
+    fb.star_name,
+    fb.keyword_count
+FROM 
+    FinalBenchmark fb
+WHERE 
+    (fb.role_count IS NOT NULL OR fb.star_name IS NOT NULL)
+AND 
+    fb.keyword_count = (
+        SELECT MAX(keyword_count) 
+        FROM FinalBenchmark
+        WHERE production_year = fb.production_year
+    )
+ORDER BY 
+    fb.production_year DESC, 
+    fb.keyword_count DESC;

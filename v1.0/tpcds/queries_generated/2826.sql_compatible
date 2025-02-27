@@ -1,0 +1,66 @@
+
+WITH yearly_sales AS (
+    SELECT 
+        d.d_year AS year,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+),
+top_years AS (
+    SELECT 
+        year,
+        total_sales,
+        total_orders
+    FROM 
+        yearly_sales
+    WHERE 
+        rank_sales <= 3
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+return_analysis AS (
+    SELECT 
+        sr.sr_returning_cdemo_sk AS customer_demo_sk,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(sr.sr_ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_returning_cdemo_sk
+)
+SELECT 
+    c.c_customer_id,
+    cs.orders_count,
+    cs.total_spent,
+    COALESCE(ra.total_returned_amount, 0) AS total_returned_amount,
+    COALESCE(ra.total_returns, 0) AS total_returns,
+    ty.total_sales AS top_yearly_sales
+FROM 
+    customer_summary cs
+JOIN 
+    customer c ON cs.c_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    return_analysis ra ON c.c_current_cdemo_sk = ra.customer_demo_sk
+CROSS JOIN 
+    (SELECT MAX(total_sales) AS total_sales FROM top_years) ty
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM customer_summary)
+ORDER BY 
+    cs.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

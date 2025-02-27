@@ -1,0 +1,77 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderstatus = 'F'
+), SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(COALESCE(p.ps_supplycost * l.l_quantity, 0)) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey 
+    JOIN 
+        lineitem l ON p.ps_partkey = l.l_partkey 
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_lineitem) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), RegionSummary AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    c.c_name AS Customer_Name,
+    c.o_orderkey AS Order_Key,
+    c.o_orderdate AS Order_Date,
+    od.line_count AS Number_of_Lines,
+    od.total_extended_price AS Total_Amount_Spent,
+    rp.r_name AS Region_Name,
+    rp.nation_count AS Number_of_Nations,
+    rp.total_acctbal AS Total_Supplier_Account_Balance,
+    COALESCE(s.total_supply_cost, 0) AS Total_Supply_Cost
+FROM 
+    CustomerOrders c
+JOIN 
+    OrderDetails od ON c.o_orderkey = od.o_orderkey
+JOIN 
+    RegionSummary rp ON c.c_custkey = rp.nation_count
+LEFT JOIN 
+    SupplierPerformance s ON od.total_extended_price = s.total_supply_cost
+WHERE 
+    od.line_count > 0
+AND 
+    (s.s_name IS NULL OR s.s_name LIKE '%Quality%')
+ORDER BY 
+    c.c_name, c.o_orderdate DESC;

@@ -1,0 +1,93 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 6) THEN 1 END) AS UpVotesReceived,
+        COUNT(CASE WHEN V.VoteTypeId IN (3, 10) THEN 1 END) AS DownVotesReceived,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount,
+        TotalBounty,
+        UpVotesReceived,
+        DownVotesReceived,
+        AvgPostScore,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC, TotalBounty DESC) AS Rank
+    FROM 
+        UserActivity
+    WHERE 
+        PostCount > 5 AND TotalBounty > 0
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalBounty,
+        UpVotesReceived - DownVotesReceived AS NetVotes,
+        AvgPostScore,
+        CASE 
+            WHEN AvgPostScore IS NULL THEN 'No Posts'
+            WHEN AvgPostScore > 10 THEN 'High Scorer'
+            WHEN AvgPostScore BETWEEN 1 AND 10 THEN 'Moderate Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory
+    FROM 
+        ActiveUsers
+    WHERE 
+        Rank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        COALESCE(P.ClosedDate, 'Not Closed') AS ClosedStatus,
+        COUNT(C) AS CommentCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPosts
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostLinks PL ON P.Id = PL.PostId
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, U.DisplayName, P.CreationDate, P.ClosedDate
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.PostCount AS NumberOfPosts,
+    TU.TotalBounty AS TotalBountyAmount,
+    TU.NetVotes AS UserNetVotes,
+    TU.ScoreCategory,
+    PD.Title AS RecentPostTitle,
+    PD.ClosedStatus,
+    PD.CommentCount,
+    PD.RelatedPosts
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PD ON PD.OwnerDisplayName = TU.DisplayName
+WHERE 
+    TU.NetVotes > 5
+ORDER BY 
+    TU.TotalBounty DESC, PD.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY;

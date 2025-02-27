@@ -1,0 +1,56 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.address_sk AS AddressSK,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS FullAddress,
+        CONCAT(ca.city, ', ', ca.state, ' ', ca.zip) AS CityStateZip
+    FROM 
+        customer_address ca
+),
+CustomerDetails AS (
+    SELECT 
+        c.customer_sk AS CustomerSK,
+        CONCAT(c.salutation, ' ', c.first_name, ' ', c.last_name) AS FullName,
+        cd.gender AS Gender,
+        cd.marital_status AS MaritalStatus,
+        cd.education_status AS EducationStatus,
+        cd.purchase_estimate AS PurchaseEstimate,
+        ad.FullAddress AS Address,
+        ad.CityStateZip AS CityStateZip
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.current_addr_sk = ad.AddressSK
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk AS CustomerSK, 
+        SUM(ws.ext_sales_price) AS TotalSales,
+        COUNT(ws.order_number) AS TotalOrders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    cd.FullName,
+    cd.Gender,
+    cd.MaritalStatus,
+    cd.EducationStatus,
+    cd.PurchaseEstimate,
+    sd.TotalSales,
+    sd.TotalOrders,
+    cd.Address,
+    cd.CityStateZip
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesData sd ON cd.CustomerSK = sd.CustomerSK
+WHERE 
+    cd.Gender = 'F' AND 
+    cd.PurchaseEstimate > 10000
+ORDER BY 
+    sd.TotalSales DESC
+LIMIT 100;

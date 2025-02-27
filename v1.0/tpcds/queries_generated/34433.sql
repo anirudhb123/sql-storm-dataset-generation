@@ -1,0 +1,73 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS transaction_count,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name
+),
+high_value_customers AS (
+    SELECT
+        customer_id,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        sales_hierarchy
+    WHERE 
+        total_sales > 1000
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ic.ib_lower_bound,
+        ic.ib_upper_bound,
+        ic.ib_income_band_sk
+    FROM 
+        customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN income_band ic ON hd.hd_income_band_sk = ic.ib_income_band_sk
+)
+SELECT 
+    d.customer_id,
+    d.c_first_name,
+    d.c_last_name,
+    d.ca_city,
+    d.ca_state,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_purchase_estimate,
+    hvc.total_sales,
+    hvc.rank AS customer_rank,
+    CASE 
+        WHEN d.ib_lower_bound IS NOT NULL AND d.ib_upper_bound IS NOT NULL THEN 
+            CONCAT('Income Band: ', d.ib_lower_bound, ' - ', d.ib_upper_bound)
+        ELSE
+            'Unknown Income Band'
+    END AS income_band_description
+FROM 
+    customer_details d
+JOIN 
+    high_value_customers hvc ON d.c_customer_id = hvc.customer_id
+WHERE 
+    (d.cd_marital_status IS NOT NULL OR d.cd_gender IS NULL)
+ORDER BY 
+    hvc.rank, d.c_last_name, d.c_first_name;

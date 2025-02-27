@@ -1,0 +1,61 @@
+
+WITH RECURSIVE RecentUsers AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate
+    FROM Users
+    WHERE CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.PostTypeId, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount,
+        MAX(B.Date) AS LastBadgeDate
+    FROM Badges B
+    GROUP BY B.UserId
+),
+RecentPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN PS.PostTypeId = 1 THEN PS.Score ELSE 0 END) AS QuestionScore,
+        SUM(CASE WHEN PS.PostTypeId = 2 THEN PS.Score ELSE 0 END) AS AnswerScore,
+        COUNT(PS.PostId) AS TotalPosts,
+        COALESCE(B.BadgeNames, 'No Badges') AS Badges,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount
+    FROM RecentUsers U
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+    LEFT JOIN UserBadges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.QuestionScore,
+    U.AnswerScore,
+    U.TotalPosts,
+    U.Badges,
+    U.BadgeCount,
+    RANK() OVER (ORDER BY U.QuestionScore DESC) AS QuestionRank,
+    RANK() OVER (ORDER BY U.AnswerScore DESC) AS AnswerRank,
+    CASE 
+        WHEN U.TotalPosts > 10 THEN 'Active'
+        WHEN U.TotalPosts BETWEEN 5 AND 10 THEN 'Moderately Active'
+        ELSE 'Inactive'
+    END AS ActivityLevel
+FROM RecentPostStats U
+ORDER BY U.QuestionScore DESC, U.AnswerScore DESC;

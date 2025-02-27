@@ -1,0 +1,44 @@
+-- Performance Benchmarking Query
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    p.ViewCount,
+    p.Score,
+    T.TagName,
+    COALESCE(TAG_COUNT.Count, 0) AS TagCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS Count 
+     FROM Votes 
+     GROUP BY PostId) TAG_COUNT ON p.Id = TAG_COUNT.PostId
+LEFT JOIN 
+    (SELECT 
+        pt.Id, 
+        STRING_AGG(t.TagName, ', ') AS TagName
+     FROM 
+        Posts p
+     JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+     JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+     GROUP BY 
+        pt.Id) AS T ON p.PostTypeId = T.Id
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year' -- Limit results to posts created in the last year
+GROUP BY 
+    p.Id, u.DisplayName, T.TagName, TAG_COUNT.Count
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100; -- Limit to the top 100 results

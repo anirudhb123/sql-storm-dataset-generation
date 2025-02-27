@@ -1,0 +1,96 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        SUM(COALESCE(v.Score, 0)) AS TotalVoteScore,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalAnswers,
+        TotalQuestions,
+        TotalVoteScore,
+        TotalComments,
+        LastPostDate,
+        RANK() OVER (ORDER BY TotalVoteScore DESC) AS VoteScoreRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostCountRank
+    FROM 
+        UserStatistics
+),
+
+MostActiveTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(c.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+
+UserTagMentions AS (
+    SELECT 
+        u.DisplayName,
+        t.TagName,
+        COUNT(p.Id) AS MentionCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        u.DisplayName, t.TagName
+)
+
+SELECT 
+    ru.DisplayName AS UserName,
+    ru.Reputation AS ReputationScore,
+    ru.TotalPosts AS TotalPostsCreated,
+    ru.TotalAnswers AS TotalAnswersCreated,
+    ru.TotalQuestions AS TotalQuestionsAsked,
+    ru.TotalVoteScore AS TotalVoteScore,
+    ru.TotalComments AS CommentsWritten,
+    ru.LastPostDate AS LastActivityDate,
+    mt.TagName AS ActiveTag,
+    mt.PostCount AS PostsForTag,
+    mt.TotalVotes AS VotesForTag,
+    COALESCE(utm.MentionCount, 0) AS UserMentionsCount
+FROM 
+    RankedUsers ru
+LEFT JOIN 
+    MostActiveTags mt ON mt.TagName IN (SELECT t.TagName FROM Tags t JOIN UserTagMentions utm ON u.DisplayName = utm.DisplayName)
+LEFT JOIN 
+    UserTagMentions utm ON ru.DisplayName = utm.DisplayName
+ORDER BY 
+    ru.TotalVoteScore DESC, ru.TotalPosts DESC;

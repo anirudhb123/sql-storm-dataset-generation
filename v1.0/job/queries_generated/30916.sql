@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title,
+           COALESCE(t.title, 'Unknown') AS episode_title,
+           0 AS level
+    FROM aka_title m
+    LEFT JOIN aka_title t ON m.episode_of_id = t.id
+    WHERE m.episode_of_id IS NOT NULL
+    
+    UNION ALL
+
+    SELECT m.id AS movie_id, 
+           m.title,
+           COALESCE(t.title, 'Unknown') AS episode_title,
+           mh.level + 1
+    FROM aka_title m
+    JOIN MovieHierarchy mh ON m.id = mh.movie_id
+)
+SELECT 
+    mk.keyword AS keyword,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    AVG(COALESCE(mi.info::numeric, 0)) AS avg_info_value,
+    MAX(mh.level) AS max_episode_level,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    CASE WHEN COUNT(DISTINCT mc.movie_id) > 0 THEN 'Movies Exist' ELSE 'No Movies' END AS presence_status
+FROM 
+    movie_keyword mk
+JOIN 
+    movie_info mi ON mk.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    complete_cast cc ON mk.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mk.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    MovieHierarchy mh ON mk.movie_id = mh.movie_id
+WHERE 
+    mk.keyword IS NOT NULL
+    AND mi.info IS NOT NULL
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 0
+ORDER BY 
+    movie_count DESC, avg_info_value DESC;

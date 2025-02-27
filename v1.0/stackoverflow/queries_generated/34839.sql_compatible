@@ -1,0 +1,110 @@
+
+WITH RecursiveTags AS (
+    SELECT
+        Id,
+        TagName,
+        Count,
+        1 AS Level
+    FROM
+        Tags
+    WHERE
+        IsRequired = 1
+
+    UNION ALL
+
+    SELECT
+        t.Id,
+        t.TagName,
+        t.Count,
+        rt.Level + 1
+    FROM
+        Tags t
+    INNER JOIN RecursiveTags rt ON rt.Count < t.Count
+),
+
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+TopUsers AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalViews,
+        ua.TotalPosts,
+        RANK() OVER (ORDER BY ua.TotalViews DESC) AS RankByViews,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS RankByPosts
+    FROM
+        UserActivity ua
+    WHERE
+        ua.TotalPosts > 0
+),
+
+PostChanges AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS ChangeDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS ChangeRank
+    FROM
+        Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+),
+
+FilteredPostChanges AS (
+    SELECT
+        pc.PostId,
+        pc.Title,
+        pc.CreationDate,
+        pc.ChangeDate,
+        ph.Name AS ChangeType,
+        pc.Comment
+    FROM
+        PostChanges pc
+    JOIN PostHistoryTypes ph ON pc.PostHistoryTypeId = ph.Id
+    WHERE
+        pc.ChangeRank = 1 OR pc.PostId IN (SELECT DISTINCT PostId FROM PostLinks)
+),
+
+FinalOutput AS (
+    SELECT
+        tu.DisplayName,
+        tu.TotalViews,
+        tu.TotalPosts,
+        ft.TagName,
+        ft.Count AS TagUsage,
+        fp.Title,
+        fp.ChangeDate,
+        fp.ChangeType
+    FROM
+        TopUsers tu
+    LEFT JOIN RecursiveTags ft ON ft.Count < tu.TotalPosts
+    LEFT JOIN FilteredPostChanges fp ON ft.Id = fp.PostId
+)
+
+SELECT
+    fo.*,
+    CASE 
+        WHEN fo.TotalViews > 1000 THEN 'High Activity'
+        WHEN fo.TotalViews BETWEEN 500 AND 1000 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel
+FROM
+    FinalOutput fo
+ORDER BY 
+    fo.TotalViews DESC, 
+    fo.TagUsage DESC
+LIMIT 50;

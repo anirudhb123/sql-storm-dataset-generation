@@ -1,0 +1,84 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.CreationDate AS PostCreationDate,
+        p.OwnerUserId AS CreatorId,
+        p.ParentId AS ParentPostId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title AS PostTitle,
+        a.CreationDate AS PostCreationDate,
+        a.OwnerUserId AS CreatorId,
+        a.ParentId AS ParentPostId,
+        ph.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        PostHierarchy ph ON a.ParentId = ph.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+VoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, ',')) AS TagName) AS Tags
+    GROUP BY 
+        Tags.TagName
+)
+SELECT 
+    ph.PostId,
+    ph.PostTitle,
+    U.DisplayName AS CreatorName,
+    ph.PostCreationDate,
+    ph.Level,
+    COALESCE(vc.UpVotes, 0) AS UpVotes,
+    COALESCE(vc.DownVotes, 0) AS DownVotes,
+    ts.PostCount,
+    ts.TotalViews,
+    CASE 
+        WHEN ph.Level > 0 THEN 'Answer'
+        ELSE 'Question'
+    END AS PostType,
+    COUNT(c.Id) AS CommentCount
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Users U ON ph.CreatorId = U.Id
+LEFT JOIN 
+    VoteCounts vc ON ph.PostId = vc.PostId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = ph.PostId
+LEFT JOIN 
+    TagStatistics ts ON t.TagName = ts.TagName
+LEFT JOIN 
+    Comments c ON c.PostId = ph.PostId
+GROUP BY 
+    ph.PostId, U.DisplayName, ph.Level, ts.PostCount, ts.TotalViews, ph.PostCreationDate
+ORDER BY 
+    ph.Level DESC, ph.PostCreationDate DESC
+LIMIT 100;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           ps.ps_partkey,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+
+    UNION ALL
+
+    SELECT s.s_suppkey,
+           s.s_name,
+           ps.ps_partkey,
+           (sc.ps_availqty + ps.ps_availqty) AS total_availqty,
+           (sc.ps_supplycost + ps.ps_supplycost) AS total_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY (sc.ps_supplycost + ps.ps_supplycost) DESC) AS rank
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.ps_partkey = ps.ps_partkey AND sc.s_suppkey <> ps.ps_suppkey
+)
+
+SELECT r.r_name,
+       n.n_name,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(o.o_totalprice) AS total_order_value,
+       AVG(l.l_extendedprice) AS avg_line_item_price,
+       MAX(l.l_discount) AS max_discount,
+       MIN(NULLIF(l.l_tax, 0)) AS min_non_zero_tax,
+       STRING_AGG(DISTINCT CONCAT(s.s_name, ' (', ps.ps_availqty, ')'), '; ') AS suppliers_info
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE o.o_orderstatus = 'F'
+  AND l.l_shipdate > DATE '1997-01-01'
+  AND (l.l_returnflag IS NULL OR l.l_returnflag <> 'R')
+  AND n.n_name LIKE 'A%'
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_order_value DESC;

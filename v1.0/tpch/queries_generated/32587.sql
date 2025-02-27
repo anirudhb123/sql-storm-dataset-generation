@@ -1,0 +1,49 @@
+WITH RECURSIVE order_history AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, o_orderstatus
+    FROM orders
+    WHERE o_orderdate >= DATE '2023-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus
+    FROM orders o
+    INNER JOIN order_history oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+supplier_part AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, s.s_name, ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+nation_region AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, oh.o_orderkey, oh.o_orderdate, oh.o_totalprice,
+           COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END), 0) AS total_returns,
+           COUNT(oh.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders oh ON c.c_custkey = oh.o_custkey
+    LEFT JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, oh.o_orderkey, oh.o_orderdate, oh.o_totalprice
+)
+SELECT c.c_name, n.n_name, r.r_name, AVG(oh.o_totalprice) AS avg_order_value,
+       SUM(sp.ps_supplycost * sp.ps_availqty) AS total_supplier_cost,
+       COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       STRING_AGG(DISTINCT sp.p_name, ', ') AS supplied_parts
+FROM customer_orders co
+JOIN customer c ON co.c_custkey = c.c_custkey
+JOIN nation_region n ON c.c_nationkey = n.n_nationkey
+JOIN supplier_part sp ON sp.ps_partkey IN (
+    SELECT DISTINCT l.l_partkey
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= CURRENT_DATE
+)
+JOIN order_history oh ON oh.o_orderkey = co.o_orderkey
+LEFT JOIN supplier s ON s.s_suppkey = sp.ps_suppkey
+WHERE COALESCE(co.total_returns, 0) < 100
+GROUP BY c.c_name, n.n_name, r.r_name
+HAVING AVG(oh.o_totalprice) > 500
+ORDER BY avg_order_value DESC;

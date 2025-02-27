@@ -1,0 +1,83 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        rpc.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rpc ON p.ParentId = rpc.PostId 
+    WHERE 
+        p.PostTypeId = 2  
+),
+UserScoreBO AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.Score > 0 THEN p.Id END) AS AnsweredCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 6  
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName AS UserName,
+    up.Reputation,
+    us.TotalBounty,
+    us.QuestionCount,
+    us.AnsweredCount,
+    rpc.PostId,
+    rpc.Title,
+    rpc.ViewCount,
+    rpc.CreationDate,
+    ph.CloseCount,
+    ph.DeleteCount,
+    DENSE_RANK() OVER (PARTITION BY rpc.Level ORDER BY rpc.Score DESC) AS RankByScore
+FROM 
+    Users up
+INNER JOIN 
+    UserScoreBO us ON up.Id = us.UserId
+LEFT JOIN 
+    RecursivePostCTE rpc ON up.Id = rpc.OwnerUserId
+LEFT JOIN 
+    PostHistoryStats ph ON rpc.PostId = ph.PostId
+WHERE 
+    us.Reputation > 100  
+    AND (ph.CloseCount > 0 OR ph.DeleteCount > 0)  
+ORDER BY 
+    up.Reputation DESC, 
+    rpc.Score DESC;

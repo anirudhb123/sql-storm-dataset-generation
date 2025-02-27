@@ -1,0 +1,77 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank,
+        SUM(CASE WHEN ps.ps_supplycost < 100 THEN 1 ELSE 0 END) OVER (PARTITION BY s.s_suppkey) AS cheap_parts_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_mktsegment
+),
+ActiveOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(DISTINCT l.l_partkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts_count,
+        SUM(CASE WHEN ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) THEN 1 ELSE 0 END) AS below_average_cost_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_regionkey,
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(o_avg.avg_order_price, 0)) AS total_avg_order_price,
+    SUM(supp_perf.supplied_parts_count) AS total_supplied_parts,
+    STRING_AGG(DISTINCT supp.s_name || ' (Rank: ' || rank || ' - Cheap Parts: ' || cheap_parts_count || ')', ', ') AS top_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    CustomerOrders o_avg ON c.c_custkey = o_avg.c_custkey
+LEFT JOIN 
+    RankedSuppliers supp ON supp.rank <= 3
+LEFT JOIN 
+    SupplierPerformance supp_perf ON supp.s_suppkey = supp_perf.s_suppkey
+GROUP BY 
+    r.r_regionkey, r.r_name
+ORDER BY 
+    r.r_regionkey NULLS LAST;

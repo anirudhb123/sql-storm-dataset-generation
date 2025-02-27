@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecencyRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -2, CURRENT_DATE)
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.ScoreRank,
+        rp.RecencyRank,
+        rp.CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        (CASE
+            WHEN COUNT(DISTINCT bc.UserId) > 0 THEN 'Yes'
+            ELSE 'No'
+         END) AS HasBounty
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId AND v.VoteTypeId = 8 
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT PostId, UserId FROM Votes WHERE VoteTypeId IN (1, 2)) bc ON bc.PostId = rp.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.ScoreRank, rp.RecencyRank, rp.CommentCount
+),
+FilteredPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.ScoreRank,
+        ps.RecencyRank,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.HasBounty
+    FROM 
+        PostSummary ps
+    WHERE 
+        ps.ScoreRank < 5 AND ((ps.CommentCount > 5 AND ps.HasBounty = 'Yes') OR ps.TotalBounty > 0)
+)
+SELECT 
+    p.PostId AS Id,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.PostId) AS TotalComments,
+    (SELECT STRING_AGG(b.Name, ', ') 
+     FROM Badges b 
+     WHERE b.UserId = p.PostId) AS UserBadges,
+    (SELECT STRING_AGG(pt.Name, ', ')
+     FROM PostTypes pt 
+     JOIN Posts p2 ON p2.PostTypeId = pt.Id 
+     WHERE p2.Id = p.PostId)
+FROM 
+    FilteredPosts p
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount ASC;

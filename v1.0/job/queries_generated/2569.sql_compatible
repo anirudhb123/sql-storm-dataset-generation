@@ -1,0 +1,59 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_filled
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        actor_count,
+        roles_filled,
+        ROW_NUMBER() OVER (ORDER BY actor_count DESC) AS rank
+    FROM 
+        MovieDetails
+    WHERE 
+        roles_filled > 0
+),
+KeywordInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    tm.title AS Movie_Title,
+    tm.production_year AS Year,
+    tm.actor_count AS Total_Actors,
+    tm.roles_filled AS Filled_Roles,
+    COALESCE(ki.keywords, 'No Keywords') AS Keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    KeywordInfo ki ON tm.title_id = ki.movie_id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.actor_count DESC;

@@ -1,0 +1,49 @@
+
+WITH CustomerSales AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           SUM(ws.ws_net_paid) AS total_spent,
+           COUNT(DISTINCT ws.ws_order_number) AS orders_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 2400 AND 2500 -- Filter for specific date range
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighSpendCustomers AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cs.total_spent
+    FROM CustomerSales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE cs.total_spent > (SELECT AVG(total_spent) FROM CustomerSales)
+),
+FrequentCause AS (
+    SELECT r.r_reason_desc,
+           COUNT(DISTINCT sr.ticket_number) AS returns_count
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY r.r_reason_sk
+    HAVING COUNT(sr.ticket_number) > 5 -- Considering frequent returns
+),
+ReturnSummary AS (
+    SELECT r.r_reason_desc, 
+           SUM(sr.sr_return_quantity) AS total_returns,
+           SUM(sr.sr_return_amt) AS total_amount
+    FROM store_returns sr
+    JOIN FrequentCause f ON sr.sr_reason_sk = f.r_reason_sk
+    GROUP BY r.r_reason_desc
+),
+FinalReport AS (
+    SELECT h.c_first_name, 
+           h.c_last_name, 
+           h.total_spent, 
+           r.r_reason_desc AS return_reason,
+           COALESCE(r.total_returns, 0) AS returns_quantity,
+           COALESCE(r.total_amount, 0) AS total_return_amount
+    FROM HighSpendCustomers h
+    LEFT JOIN ReturnSummary r ON h.c_customer_sk = r.r_reason_desc
+)
+SELECT * FROM FinalReport
+ORDER BY total_spent DESC, return_reason;

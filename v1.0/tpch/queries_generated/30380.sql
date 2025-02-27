@@ -1,0 +1,86 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        1 AS level
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_nationkey,
+        oh.level + 1
+    FROM 
+        orders o
+    JOIN 
+        order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        oh.level < 5
+),
+part_supplier AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey
+),
+high_value_parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        total_supply_value
+    FROM 
+        part p
+    JOIN 
+        part_supplier ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.total_supply_value > (SELECT AVG(total_supply_value) FROM part_supplier)
+),
+lineitem_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    ls.total_revenue,
+    p.p_name,
+    p.p_brand,
+    RANK() OVER (PARTITION BY oh.c_nationkey ORDER BY ls.total_revenue DESC) AS revenue_rank
+FROM 
+    order_hierarchy oh
+LEFT JOIN 
+    lineitem_summary ls ON oh.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    high_value_parts p ON ls.part_count > 1
+WHERE 
+    oh.o_orderdate >= '2023-01-01' AND oh.o_orderdate < '2024-01-01'
+ORDER BY 
+    oh.o_orderkey, revenue_rank;

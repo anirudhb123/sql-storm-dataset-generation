@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+SELECT 
+    ma.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movies_count,
+    AVG(title.production_year) AS average_production_year,
+    STRING_AGG(DISTINCT kh.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY ma.name ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS rn
+FROM 
+    cast_info c
+JOIN 
+    aka_name ma ON c.person_id = ma.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kh ON mk.keyword_id = kh.id
+WHERE 
+    ma.name IS NOT NULL 
+    AND ma.name <> ''
+    AND c.note IS NOT NULL
+GROUP BY 
+    ma.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    average_production_year DESC, 
+    movies_count DESC;
+
+This SQL query retrieves the names of actors who have appeared in more than five movies, the count of movies they have acted in, the average production year of those movies, and a list of distinct keywords associated with those movies. It employs a recursive CTE to build a hierarchy of movies while utilizing various JOINs, GROUP BY, and window functions for ranking.

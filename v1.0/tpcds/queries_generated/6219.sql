@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_sk ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales AS ss
+    JOIN 
+        store AS s ON ss.s_store_sk = s.s_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2450000 AND 2451000
+    GROUP BY 
+        s.s_store_sk
+),
+TopStores AS (
+    SELECT 
+        s.s_store_id,
+        r.total_sales,
+        r.total_transactions
+    FROM 
+        RankedSales AS r
+    JOIN 
+        store AS s ON r.s_store_sk = s.s_store_sk
+    WHERE 
+        r.sales_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(r.total_sales) AS total_sales_by_gender
+    FROM 
+        TopStores AS ts
+    JOIN 
+        customer AS c ON c.c_store_sk = ts.s_store_sk
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    cd.customer_count,
+    cd.total_sales_by_gender,
+    CASE 
+        WHEN cd.total_sales_by_gender >= 10000 THEN 'High Value'
+        WHEN cd.total_sales_by_gender BETWEEN 5000 AND 9999 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    CustomerDemographics AS cd
+ORDER BY 
+    cd.total_sales_by_gender DESC;

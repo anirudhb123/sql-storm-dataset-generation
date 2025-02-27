@@ -1,0 +1,96 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+),
+
+CastCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS num_cast
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+
+MovieInfoWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        k.keyword
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+
+FilteredActors AS (
+    SELECT 
+        ak.name,
+        ci.movie_id,
+        ci.nota AS actor_note
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+AggregatedMovieData AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(cc.num_cast, 0) AS total_cast,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastCounts cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        MovieInfoWithKeywords mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+)
+
+SELECT 
+    amd.movie_title,
+    amd.production_year,
+    amd.total_cast,
+    amd.keywords,
+    COALESCE(fa.name, 'No Actor Found') AS actor_name,
+    fa.actor_note
+FROM 
+    AggregatedMovieData amd
+LEFT JOIN 
+    FilteredActors fa ON amd.movie_id = fa.movie_id
+ORDER BY 
+    amd.production_year DESC, 
+    amd.total_cast DESC;
+
+
+This SQL query performs a complex performance benchmarking task by utilizing a recursive Common Table Expression (CTE) to create a movie hierarchy, aggregates cast counts, filters actors, and consolidates movie data along with keywords to produce a comprehensive result set. The result set provides insight into movies sorted by production year and total cast count, while also handling NULL logic to ensure completeness in the output.

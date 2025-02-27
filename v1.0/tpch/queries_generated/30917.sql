@@ -1,0 +1,34 @@
+WITH RECURSIVE CustomerBalance AS (
+    SELECT c_custkey, c_name, c_acctbal, c_mktsegment
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal + COALESCE(SUM(o.o_totalprice), 0), c.c_mktsegment
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal <= 1000
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal, c.c_mktsegment
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.pc_supplycost * ps.ps_availqty) AS total_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 5000
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_value > 20000
+),
+SupplierOrders AS (
+    SELECT s.s_name, COUNT(DISTINCT o.o_orderkey) AS order_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_name
+)
+SELECT cb.c_name, cb.c_acctbal, hvs.total_value, so.order_count, so.total_sales
+FROM CustomerBalance cb
+LEFT JOIN HighValueSuppliers hvs ON cb.c_mktsegment = hvs.s_name
+JOIN SupplierOrders so ON hvs.s_name = so.s_name
+WHERE cb.c_acctbal IS NOT NULL
+ORDER BY cb.c_acctbal DESC, hvs.total_value ASC
+LIMIT 10

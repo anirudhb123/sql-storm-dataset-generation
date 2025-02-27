@@ -1,0 +1,71 @@
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+HighSpendingCustomers AS (
+    SELECT
+        os.c_custkey,
+        os.c_name,
+        os.total_spent
+    FROM
+        OrderStats os
+    WHERE
+        os.total_spent > 10000
+),
+PartSupplierDetails AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        ps.ps_supplycost
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE
+        ps.ps_availqty > 0
+)
+SELECT
+    hsc.c_name AS high_spender_name,
+    hsc.total_spent AS total_spent_by_customer,
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    ps.ps_supplycost AS supply_cost
+FROM
+    HighSpendingCustomers hsc
+JOIN
+    orders o ON hsc.c_custkey = o.o_custkey
+JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN
+    PartSupplierDetails ps ON l.l_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE
+    o.o_orderstatus = 'F'
+ORDER BY
+    hsc.total_spent DESC, s.s_name ASC;

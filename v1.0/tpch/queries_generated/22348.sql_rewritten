@@ -1,0 +1,51 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_partkey = (SELECT p.p_partkey 
+                                         FROM part p 
+                                         WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) 
+                                                                   FROM part p2) 
+                                         ORDER BY p.p_partkey 
+                                         LIMIT 1)
+    WHERE sh.rank < 5
+),
+customer_spending AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey
+    HAVING total_spent >= 1000
+),
+nation_related_customers AS (
+    SELECT c.c_custkey, c.c_name, n.n_name, c.c_acctbal
+    FROM customer c
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'S%')
+),
+aggregated_info AS (
+    SELECT n.n_name, COUNT(DISTINCT ns.c_custkey) AS customer_count,
+           SUM(ns.c_acctbal) AS total_acct_balance
+    FROM nation_related_customers ns
+    JOIN nation n ON ns.n_name = n.n_name
+    GROUP BY n.n_name
+)
+SELECT a.n_name, 
+       a.customer_count, 
+       a.total_acct_balance,
+       (SELECT AVG(ls.l_extendedprice) 
+        FROM lineitem ls 
+        WHERE ls.l_returnflag = 'N' AND ls.l_shipdate IS NOT NULL) AS avg_extended_price,
+       COALESCE((SELECT MAX(sp.rank)::text 
+                 FROM supplier_hierarchy sp 
+                 WHERE sp.s_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = a.customer_count)), 'No Supplier') AS max_supplier_rank
+FROM aggregated_info a
+WHERE a.total_acct_balance IS NOT NULL AND a.customer_count > 0
+ORDER BY a.customer_count DESC
+LIMIT 10;

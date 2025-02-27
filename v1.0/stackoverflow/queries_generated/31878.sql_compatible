@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserVoteStats AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v 
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(ph.Level, -1) AS HierarchyLevel,
+    u.DisplayName AS UserDisplayName,
+    uvs.TotalVotes,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    bu.BadgeCount,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    (SELECT COUNT(c.Id) 
+     FROM Comments c 
+     WHERE c.PostId = p.Id) AS CommentCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT CAST(unnest(string_to_array(p.Tags, '<>')) AS INT))) AS AllTags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteStats uvs ON uvs.UserId = p.OwnerUserId
+LEFT JOIN 
+    BadgedUsers bu ON bu.UserId = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.ParentId
+WHERE 
+    (p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    AND (p.PostTypeId = 1 OR p.AnswerCount > 0)
+GROUP BY 
+    p.Id, p.Title, ph.Level, u.DisplayName, uvs.TotalVotes, uvs.UpVotes, uvs.DownVotes, bu.BadgeCount, p.ClosedDate
+ORDER BY 
+    p.CreationDate DESC;

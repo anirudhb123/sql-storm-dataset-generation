@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation >= 1000 THEN 'High'
+            WHEN u.Reputation BETWEEN 500 AND 999 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM 
+        Users u
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts p
+    JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag(t) ON TRUE
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(*) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+
+SELECT 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    COALESCE(u.ReputationLevel, 'N/A') AS ReputationLevel,
+    pp.UsageCount AS Popularity,
+    cp.CloseCount AS NumberOfClosures,
+    CASE 
+        WHEN pp.UsageCount IS NOT NULL THEN 
+            (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id AND c.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month')
+        ELSE 
+            0
+    END AS RecentComments
+FROM 
+    Posts p
+LEFT JOIN 
+    RankedPosts rp ON p.Id = rp.PostId AND rp.rn = 1
+LEFT JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PopularTags pp ON pp.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+LEFT JOIN 
+    ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    p.ViewCount > 100
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.ReputationLevel, pp.UsageCount, cp.CloseCount
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC
+LIMIT 100;

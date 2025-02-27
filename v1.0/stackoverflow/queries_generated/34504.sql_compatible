@@ -1,0 +1,71 @@
+
+WITH RecursiveBadges AS (
+    SELECT UserId, Name, Date, Class
+    FROM Badges
+    WHERE Class = 1  
+    UNION ALL
+    SELECT b.UserId, b.Name, b.Date, b.Class
+    FROM Badges b
+    INNER JOIN RecursiveBadges rb ON b.UserId = rb.UserId
+    WHERE b.Class < rb.Class  
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        MAX(b.Date) AS LastBadgeDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+RankedReputation AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.PostCount,
+        ur.TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM UserReputation ur
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.UserId AS CloseUserId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment AS CloseReason,
+        ph.PostHistoryTypeId
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+),
+VerboseMetrics AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        ur.PostCount,
+        ur.TotalBounty,
+        cr.CloseUserId,
+        cr.CloseDate,
+        cr.CloseReason
+    FROM RankedReputation ur
+    LEFT JOIN ClosedPosts cr ON ur.UserId = cr.CloseUserId 
+    WHERE ur.PostCount > 10  
+)
+SELECT 
+    vm.UserId,
+    vm.Reputation,
+    vm.PostCount,
+    vm.TotalBounty,
+    vm.CloseUserId,
+    vm.CloseDate,
+    vm.CloseReason,
+    rb.Name AS BadgeName
+FROM VerboseMetrics vm
+LEFT JOIN RecursiveBadges rb ON vm.UserId = rb.UserId
+WHERE (vm.CloseDate IS NOT NULL OR rb.Name IS NOT NULL)  
+ORDER BY vm.Reputation DESC, vm.TotalBounty DESC;

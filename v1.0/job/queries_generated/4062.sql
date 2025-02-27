@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY 
+        mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.company_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10
+),
+RelevantActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        title ti ON ci.movie_id = ti.id
+    WHERE 
+        ti.production_year > 2000
+    GROUP BY 
+        ak.name, ak.id
+),
+ActorRatings AS (
+    SELECT 
+        ra.actor_id,
+        ra.actor_name,
+        COALESCE(SUM(mr.rating), 0) AS total_rating
+    FROM 
+        RelevantActors ra
+    LEFT JOIN 
+        (SELECT 
+            movie_id, AVG(rating) AS rating
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating') 
+         GROUP BY 
+            movie_id) mr ON ra.movies_count = mr.movie_id
+    GROUP BY 
+        ra.actor_id, ra.actor_name
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    ta.actor_name,
+    ar.total_rating,
+    CASE 
+        WHEN ar.total_rating > 100 THEN 'High'
+        WHEN ar.total_rating BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS rating_category
+FROM 
+    TopMovies tm
+JOIN 
+    RelevantActors ra ON tm.title IN (SELECT DISTINCT title FROM aka_title WHERE id IN (SELECT movie_id FROM cast_info WHERE person_id = ra.actor_id))
+JOIN 
+    ActorRatings ar ON ra.actor_id = ar.actor_id
+ORDER BY 
+    tm.production_year DESC, ar.total_rating DESC;

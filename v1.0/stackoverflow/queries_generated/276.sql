@@ -1,0 +1,61 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        AVG(P.Score) AS AverageScore
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+),
+
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11, 12)
+    GROUP BY PH.PostId, PH.CreationDate
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UR.ReputationRank,
+    T.TagName,
+    PT.PostCount,
+    PT.AverageScore,
+    CP.CloseCount,
+    COALESCE(T1.ReputationSum, 0) AS TotalUserReputation
+FROM UserReputation UR
+JOIN Users U ON U.Id = UR.UserId
+LEFT JOIN PopularTags PT ON PT.TagName IN (
+    SELECT UNNEST(string_to_array(P.Tags, '><')) 
+    FROM Posts P WHERE P.OwnerUserId = U.Id
+)
+LEFT JOIN ClosedPosts CP ON CP.PostId IN (
+    SELECT Id 
+    FROM Posts 
+    WHERE OwnerUserId = U.Id
+)
+LEFT JOIN (
+    SELECT 
+        U.Id AS UserId,
+        SUM(U.Reputation) AS ReputationSum
+    FROM Users U
+    JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+) T1 ON T1.UserId = U.Id
+WHERE U.Reputation > 1000
+ORDER BY UR.ReputationRank, PT.PostCount DESC
+LIMIT 50;

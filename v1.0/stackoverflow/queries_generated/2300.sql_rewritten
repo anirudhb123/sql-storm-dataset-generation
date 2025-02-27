@@ -1,0 +1,58 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.TagName) AS TagUsage
+    FROM Tags t
+    LEFT JOIN (
+        SELECT unnest(string_to_array(Tags, '><')) AS TagName, p.Id
+        FROM Posts p
+    ) pt ON t.TagName = pt.TagName
+    GROUP BY t.TagName
+    ORDER BY TagUsage DESC
+    LIMIT 10
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+)
+
+SELECT 
+    ua.DisplayName,
+    ua.PostCount,
+    ua.Questions,
+    ua.Answers,
+    uu.AvgReputation,
+    tt.TagName,
+    ps.Title AS RecentPostTitle,
+    ps.ViewCount AS RecentPostViewCount
+FROM UserActivity ua
+JOIN TopTags tt ON tt.TagUsage > 0
+LEFT JOIN PostStatistics ps ON ps.PostRank = 1 AND ps.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = ua.UserId)
+JOIN (
+    SELECT 
+        u.Id,
+        AVG(b.Class) AS AvgBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+) uu ON uu.Id = ua.UserId
+WHERE ua.PostCount > 5
+ORDER BY ua.PostCount DESC, uu.AvgReputation DESC;

@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS chain_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000  
+    
+    UNION ALL
+    
+    SELECT 
+        l.linked_movie_id,
+        t.title,
+        t.production_year,
+        mc.chain_level + 1
+    FROM 
+        movie_link l
+    JOIN 
+        title t ON l.linked_movie_id = t.id
+    JOIN 
+        MovieChain mc ON mc.movie_id = l.movie_id
+    WHERE 
+        mc.chain_level < 5  
+),
+RankedMovies AS (
+    SELECT 
+        mc.movie_id,
+        mc.title,
+        mc.production_year,
+        COUNT(*) OVER (PARTITION BY mc.movie_id) AS link_count,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY mc.chain_level DESC) AS rn
+    FROM 
+        MovieChain mc
+),
+TotalMovies AS (
+    SELECT 
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        COUNT(m.id) AS total_count,
+        AVG(m.production_year) AS avg_year
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        k.keyword
+),
+ActorsInfo AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        ARRAY_AGG(DISTINCT mt.keyword) AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword mt ON mk.keyword_id = mt.id
+    GROUP BY 
+        a.name
+)
+SELECT 
+    tm.keyword,
+    tm.total_count,
+    tm.avg_year,
+    ai.name AS actor_name,
+    ai.movie_count,
+    ai.keywords,
+    CASE 
+        WHEN tm.total_count IS NULL THEN 'No Movies' 
+        ELSE 'Has Movies' 
+    END AS movie_status
+FROM 
+    TotalMovies tm
+FULL OUTER JOIN 
+    ActorsInfo ai ON ai.keywords @> ARRAY[tm.keyword]
+ORDER BY 
+    tm.total_count DESC NULLS LAST,
+    ai.movie_count DESC NULLS LAST;

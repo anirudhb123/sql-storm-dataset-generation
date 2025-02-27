@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+), 
+TopUsers AS (
+    SELECT 
+        DisplayName,
+        Reputation,
+        TotalViews,
+        UpVotes,
+        DownVotes,
+        ReputationRank
+    FROM UserStats
+    WHERE ReputationRank <= 10
+)
+SELECT 
+    T.DisplayName,
+    T.Reputation,
+    T.TotalViews,
+    T.UpVotes,
+    T.DownVotes,
+    CASE 
+        WHEN T.UpVotes IS NULL AND T.DownVotes IS NULL THEN 'No Votes'
+        ELSE 
+            CASE 
+                WHEN T.UpVotes > T.DownVotes THEN 'More Upvotes'
+                WHEN T.DownVotes > T.UpVotes THEN 'More Downvotes'
+                ELSE 'Equal Votes'
+            END
+    END AS VoteStatus,
+    P.Title,
+    P.CreationDate,
+    COALESCE(COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END), 0) AS CommentCount,
+    COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseReopenCount
+FROM TopUsers T
+LEFT JOIN Posts P ON T.UserId = P.OwnerUserId
+LEFT JOIN Comments C ON P.Id = C.PostId
+LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+GROUP BY 
+    T.DisplayName, 
+    T.Reputation, 
+    T.TotalViews, 
+    T.UpVotes, 
+    T.DownVotes, 
+    P.Title, 
+    P.CreationDate
+HAVING 
+    SUM(COALESCE(P.Score, 0)) > 0 
+    AND COUNT(P.Id) > 0
+ORDER BY 
+    T.Reputation DESC, 
+    T.TotalViews DESC;

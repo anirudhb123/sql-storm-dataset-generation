@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT cpi.info ORDER BY cpi.info) AS company_info,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        COUNT(DISTINCT ca.person_id) AS cast_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword AS mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ca ON cc.subject_id = ca.id
+    LEFT JOIN 
+        aka_name AS ak ON ca.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info AS mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        info_type AS it ON mi.info_type_id = it.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (ORDER BY md.cast_count DESC) AS rank_by_cast_size
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    movie_id, 
+    movie_title, 
+    production_year, 
+    aka_names, 
+    company_info, 
+    keywords, 
+    cast_count,
+    rank_by_cast_size
+FROM 
+    RankedMovies
+WHERE 
+    rank_by_cast_size <= 10
+ORDER BY 
+    rank_by_cast_size;

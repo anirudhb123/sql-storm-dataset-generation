@@ -1,0 +1,66 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(cc.id) AS cast_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieRatings AS (
+    SELECT 
+        m.movie_id,
+        AVG(r.rating) AS average_rating
+    FROM 
+        MovieDetails m
+    LEFT JOIN 
+        ratings r ON m.movie_id = r.movie_id  -- Assume a ratings table exists
+    GROUP BY 
+        m.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        m.average_rating,
+        CASE 
+            WHEN m.average_rating IS NULL THEN 'No Ratings'
+            WHEN m.average_rating >= 8 THEN 'High Rating'
+            WHEN m.average_rating >= 5 THEN 'Average Rating'
+            ELSE 'Low Rating'
+        END AS rating_category
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        MovieRatings m ON md.movie_id = m.movie_id
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    COALESCE(f.average_rating, 0) AS average_rating,
+    f.rating_category,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword  
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_keyword mk ON f.movie_id = mk.movie_id
+WHERE 
+    f.rating_category != 'Low Rating'
+ORDER BY 
+    f.average_rating DESC,
+    f.cast_count DESC;

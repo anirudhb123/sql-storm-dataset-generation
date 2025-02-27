@@ -1,0 +1,32 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, c_current_cdemo_sk,
+           1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, CONCAT(p.c_first_name, ' ', p.c_last_name), 
+           p.c_last_name, p.c_current_addr_sk, p.c_current_cdemo_sk,
+           ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer p ON p.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE p.c_customer_sk <> ch.c_customer_sk
+)
+SELECT ca.ca_city, 
+       COUNT(DISTINCT c.c_customer_id) AS num_customers,
+       SUM(ws_ext_sales_price) AS total_sales,
+       RANK() OVER (PARTITION BY ca.ca_city ORDER BY COUNT(DISTINCT c.c_customer_id) DESC) AS rank_city,
+       COALESCE(MAX(ca.ca_street_name || ' ' || ca.ca_street_type), 'Unknown Address') AS best_address,
+       STRING_AGG(DISTINCT cd.cd_gender || ' (' || cd.cd_marital_status || ')', '; ') AS demographics
+FROM customer_address ca
+LEFT JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN customer_hierarchy ch ON ch.c_customer_sk = c.c_customer_sk
+LEFT JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE c.c_birth_month = EXTRACT(MONTH FROM CURRENT_DATE)
+  AND ca.ca_state IN (SELECT w.w_state FROM warehouse w WHERE w.warehouse_sq_ft > 10000)
+  AND (c.c_preferred_cust_flag = 'Y' OR ch.level >= 2)
+GROUP BY ca.ca_city
+HAVING COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY total_sales DESC, rank_city
+LIMIT 5 OFFSET 2;

@@ -1,0 +1,70 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year > 1970
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+HighValueCustomers AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_orders > 5 THEN 'High Value'
+            ELSE 'Standard'
+        END AS customer_category
+    FROM 
+        CustomerStats
+    WHERE 
+        total_profit IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        ws.ws_quantity,
+        (ws.ws_net_paid_inc_tax - ws.ws_ext_discount_amt) AS effective_amount
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_ship_date_sk BETWEEN (SELECT MIN(d.d_date_sk) + 1 FROM date_dim d) AND (SELECT MAX(d.d_date_sk) FROM date_dim d)
+)
+SELECT 
+    hvc.*, 
+    od.ws_order_number,
+    od.ws_ship_date_sk,
+    od.i_item_desc,
+    od.i_current_price,
+    od.ws_quantity,
+    od.effective_amount
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    OrderDetails od ON hvc.c_customer_sk = od.ws_bill_customer_sk
+WHERE 
+    hvc.gender_rank <= 10
+  AND 
+    hvc.customer_category = 'High Value'
+ORDER BY 
+    hvc.total_profit DESC, 
+    hvc.c_last_name ASC;

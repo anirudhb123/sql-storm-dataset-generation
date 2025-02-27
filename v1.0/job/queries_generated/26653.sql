@@ -1,0 +1,44 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT a.name) AS actor_names,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT COALESCE(kw.keyword, '')) AS keyword_count
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword kw ON m.id = kw.movie_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+TopMovies AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY actor_count DESC, keyword_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.actor_names,
+    tm.actor_count,
+    tm.keyword_count
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.rank;
+
+This SQL query benchmarks string processing and provides insights into movie data from the `aka_title`, `cast_info`, and `aka_name` tables. It retrieves the top 10 movies produced between 2000 and 2020 by counting distinct actors and keywords associated with each movie.

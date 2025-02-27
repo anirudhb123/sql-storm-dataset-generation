@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_sales) FROM (
+        SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+        FROM supplier s
+        JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_shipdate >= '2023-01-01'
+        GROUP BY s.s_suppkey
+    ) AS avg_sales)
+), RankedSuppliers AS (
+    SELECT s_suppkey, s_name, total_sales,
+           ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM SupplierSales
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE(MAX(ps.ps_availqty), 0) AS max_avail_qty,
+           STRING_AGG(s.s_name, ', ') AS supplied_by
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT p.p_partkey, p.p_name, 
+       p.p_retailprice, 
+       pd.max_avail_qty, 
+       COALESCE(SUM(rs.total_sales), 0) AS total_sales_by_suppliers,
+       CASE WHEN pd.max_avail_qty IS NULL THEN 'No Supply' 
+            WHEN COALESCE(SUM(rs.total_sales), 0) > 10000 THEN 'High Sales' 
+            ELSE 'Low Sales' END AS sales_category,
+       CASE 
+            WHEN pd.max_avail_qty IS NOT NULL AND pd.max_avail_qty > 50 
+            THEN 'Abundant Supply' 
+            ELSE 'Limited Supply' 
+       END AS supply_status
+FROM part p
+LEFT JOIN PartDetails pd ON p.p_partkey = pd.p_partkey
+LEFT JOIN RankedSuppliers rs ON rs.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, pd.max_avail_qty
+ORDER BY p.p_retailprice DESC, total_sales_by_suppliers ASC
+LIMIT 50 OFFSET 10;

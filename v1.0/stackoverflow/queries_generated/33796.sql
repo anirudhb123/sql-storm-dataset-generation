@@ -1,0 +1,113 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL  -- Top-level questions
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM
+        Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COALESCE(NULLIF(SUM(v.BountyAmount), 0), 0) AS BountyTotal
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+PostMetrics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS TotalComments
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Id
+),
+LatestPostActivity AS (
+    SELECT
+        p.Id AS PostId,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS rn
+    FROM
+        Posts p
+),
+ActiveUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS ActivePostCount
+    FROM
+        Users u
+    INNER JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE
+        p.LastActivityDate >= NOW() - INTERVAL '30 days'
+    GROUP BY
+        u.Id
+)
+
+SELECT
+    ue.UserId,
+    ue.DisplayName,
+    ue.TotalPosts,
+    ue.TotalComments,
+    ue.Upvotes,
+    ue.Downvotes,
+    pg.Title AS MostEngagedPost,
+    pg.TotalComments AS PostCommentCount,
+    pg.TotalUpVotes,
+    pg.TotalDownVotes,
+    ah.ActivePostCount,
+    MAX(lp.LastActivityDate) AS LastPostActivity
+FROM
+    UserEngagement ue
+LEFT JOIN
+    PostMetrics pg ON ue.UserId = pg.OwnerUserId
+LEFT JOIN
+    LatestPostActivity lp ON pg.PostId = lp.PostId AND lp.rn = 1
+LEFT JOIN
+    ActiveUsers ah ON ue.UserId = ah.UserId
+GROUP BY
+    ue.UserId, ue.DisplayName, pg.Title, pg.TotalComments, pg.TotalUpVotes, pg.TotalDownVotes
+ORDER BY
+    ue.TotalPosts DESC, ue.Upvotes DESC, LastPostActivity DESC;

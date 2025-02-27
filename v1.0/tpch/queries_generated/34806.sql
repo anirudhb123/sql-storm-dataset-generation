@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.level < 5
+),
+PartSupplierRanked AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count, 
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplierCount AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    p.p_name,
+    ps.ps_supplycost,
+    sh.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    co.total_spent,
+    nsc.supplier_count,
+    CASE 
+        WHEN co.order_count > 0 THEN 'Active'
+        ELSE 'Inactive' 
+    END AS customer_status
+FROM part p
+JOIN PartSupplierRanked ps ON p.p_partkey = ps.ps_partkey AND ps.rank = 1
+JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN CustomerOrderStats co ON p.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    JOIN orders o ON l.l_orderkey = o.o_orderkey 
+    WHERE o.o_custkey = co.c_custkey
+)
+JOIN NationSupplierCount nsc ON sh.s_nationkey = nsc.n_name
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND co.total_spent IS NOT NULL
+ORDER BY co.total_spent DESC, nsc.supplier_count ASC;

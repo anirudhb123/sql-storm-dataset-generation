@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.movie_id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    mo.title AS movie_title,
+    mo.production_year,
+    COUNT(DISTINCT ci.subject_id) AS num_cast_members,
+    AVG(ci.nr_order) OVER (PARTITION BY mo.title) AS avg_order,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    MAX(mi.info) AS movie_info
+FROM
+    movie_hierarchy mo
+JOIN
+    cast_info ci ON mo.movie_id = ci.movie_id
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN
+    movie_companies mc ON mo.movie_id = mc.movie_id
+LEFT JOIN
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN
+    movie_info mi ON mo.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+WHERE
+    mo.level = 1
+    AND (mo.production_year BETWEEN 1990 AND 2023)
+    AND (ak.name IS NOT NULL AND ak.name <> '')
+GROUP BY
+    ak.name, mo.title, mo.production_year
+HAVING
+    COUNT(DISTINCT ci.person_id) > 3
+ORDER BY
+    mo.production_year DESC, num_cast_members DESC;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.ClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    us.BadgeCount,
+    us.UpVotes,
+    us.DownVotes,
+    COALESCE(rp.ClosedDate, 'No Closure') AS ClosureStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.Id)
+JOIN 
+    UserStatistics us ON up.Id = us.UserId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    us.Reputation DESC, 
+    rp.Score DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    DISTINCT u.DisplayName,
+    u.Reputation,
+    'N/A' AS Title,
+    0 AS Score,
+    0 AS ViewCount,
+    0 AS BadgeCount,
+    0 AS UpVotes,
+    0 AS DownVotes,
+    'N/A' AS ClosureStatus
+FROM 
+    Users u
+WHERE 
+    u.Reputation < 100
+ORDER BY 
+    u.Reputation DESC;

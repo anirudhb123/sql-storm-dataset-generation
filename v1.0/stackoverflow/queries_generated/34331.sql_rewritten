@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBountyAmount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS EditedRecently,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.AvgBountyAmount,
+    COUNT(r.Id) AS NumberOfChildPosts,
+    COALESCE(re.EditCount, 0) AS NumberOfEdits,
+    REPLACE(re.EditComments, '; ', ', ') AS RecentEditComments
+FROM 
+    UserActivity u
+LEFT JOIN 
+    RecursivePostHierarchy r ON u.TotalQuestions > 0 AND r.ParentId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    RecentEdits re ON r.Id = re.PostId
+WHERE 
+    u.TotalPosts > 0
+GROUP BY 
+    u.DisplayName, u.TotalPosts, u.TotalQuestions, u.TotalAnswers, u.AvgBountyAmount, re.EditCount, re.EditComments
+ORDER BY 
+    u.TotalPosts DESC;

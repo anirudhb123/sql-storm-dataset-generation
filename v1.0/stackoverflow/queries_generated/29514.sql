@@ -1,0 +1,97 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 1 THEN 1 
+                ELSE 0 
+            END
+        ) AS QuestionCount,
+        SUM(
+            CASE 
+                WHEN p.PostTypeId = 2 THEN 1 
+                ELSE 0 
+            END
+        ) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(c.Score) AS TotalCommentScore,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        SUM(
+            CASE 
+                WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 
+                ELSE 0 
+            END
+        ) AS Edits,
+        SUM(
+            CASE 
+                WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 
+                ELSE 0 
+            END
+        ) AS ClosureActions
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalViews,
+    ts.AverageScore,
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalQuestions,
+    ua.TotalAnswers,
+    ua.TotalCommentScore,
+    ua.AverageReputation,
+    phc.EditCount,
+    phc.Edits,
+    phc.ClosureActions
+FROM 
+    TagStatistics ts
+JOIN 
+    UserActivity ua ON ua.TotalPosts > 0
+JOIN 
+    PostHistoryCounts phc ON phc.PostId IN (
+        SELECT p.Id FROM Posts p 
+        WHERE p.Tags ILIKE '%' || ts.TagName || '%'
+    )
+ORDER BY 
+    ts.PostCount DESC, ua.TotalPosts DESC
+LIMIT 50;

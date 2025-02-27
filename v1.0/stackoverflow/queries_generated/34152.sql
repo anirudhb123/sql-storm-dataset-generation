@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL -- Top-level posts
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate < NOW() - INTERVAL '1 year' -- Users created more than a year ago
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ph.Level, 0) AS Depth,
+        COALESCE(ph.OwnerUserId, p.OwnerUserId) AS EffectiveOwnerId,
+        (SELECT COUNT(DISTINCT c.Id) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT AVG(v.BountyAmount) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 8) AS AvgBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.Id
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Depth,
+        ps.EffectiveOwnerId,
+        ps.CommentCount,
+        ps.AvgBounty,
+        RANK() OVER (PARTITION BY ps.Depth ORDER BY ps.CommentCount DESC, ps.AvgBounty DESC) AS Rank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    ua.PostCount,
+    ua.TotalBounty,
+    ua.UpVotes,
+    ua.DownVotes,
+    rp.PostId,
+    rp.Title,
+    rp.Depth,
+    rp.CommentCount,
+    rp.AvgBounty,
+    CASE 
+        WHEN rp.Rank IS NOT NULL AND rp.Rank <= 10 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    UserActivity ua
+JOIN 
+    Users u ON ua.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.EffectiveOwnerId
+WHERE 
+    ((ua.UpVotes - ua.DownVotes) > 0 OR u.Reputation > 1000) -- Only include users with positive votes or high reputation
+ORDER BY 
+    u.DisplayName, rp.Depth, rp.CommentCount DESC;

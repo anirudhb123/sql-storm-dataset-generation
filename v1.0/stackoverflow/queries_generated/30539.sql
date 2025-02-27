@@ -1,0 +1,77 @@
+WITH RecursivePosts AS (
+    -- CTE to recursively find all Answer posts based on ParentId and store maximum score of answers per question
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Score
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 -- Answer
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Score
+    FROM 
+        Posts p
+    INNER JOIN RecursivePosts rp ON p.Id = rp.ParentId
+),
+UserVoteCounts AS (
+    -- CTE to count votes for each user
+    SELECT 
+        u.Id AS UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+TopAnswerScore AS (
+    -- CTE to find the highest score answer per question
+    SELECT 
+        p.ParentId,
+        MAX(p.Score) AS MaxAnswerScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Question
+    GROUP BY 
+        p.ParentId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    COALESCE(uc.VoteCount, 0) AS UserVoteCount,
+    COALESCE(uc.UpVotes, 0) AS UpVoteCount,
+    COALESCE(uc.DownVotes, 0) AS DownVoteCount,
+    p.Title,
+    p.AnswerCount,
+    p.CommentCount,
+    p.Score AS QuestionScore,
+    t.MaxAnswerScore,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS QuestionStatus,
+    CONCAT('Created on: ', TO_CHAR(p.CreationDate, 'YYYY-MM-DD')) AS CreationInfo
+FROM 
+    Posts p
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserVoteCounts uc ON u.Id = uc.UserId
+LEFT JOIN 
+    TopAnswerScore t ON p.Id = t.ParentId
+WHERE 
+    p.PostTypeId = 1 -- Select only Questions
+    AND (p.Score >= 10 OR p.AnswerCount > 5) -- Complex predicate to filter questions
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 50;

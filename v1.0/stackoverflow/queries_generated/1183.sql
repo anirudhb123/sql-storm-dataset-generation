@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- filter posts created in the last year
+)
+
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN bh.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseReasonsCount,
+    CASE 
+        WHEN rp.Score > 100 THEN 'Hot'
+        WHEN rp.Score BETWEEN 50 AND 100 THEN 'Trending'
+        ELSE 'Normal'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON rp.Id = c.PostId
+LEFT JOIN 
+    PostHistory bh ON rp.Id = bh.PostId AND bh.CreationDate >= NOW() - INTERVAL '1 year'
+LEFT JOIN 
+    Posts p ON rp.Id = p.Id
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS tagId ON TRUE
+LEFT JOIN 
+    Tags t ON t.Id::text = TRIM(tagId)
+WHERE 
+    rp.Rank <= 5
+GROUP BY 
+    rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.UpvoteCount, rp.DownvoteCount
+ORDER BY 
+    rp.Score DESC
+LIMIT 10;

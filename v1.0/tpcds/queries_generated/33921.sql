@@ -1,0 +1,70 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_profit) > 1000
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        top_customers tc
+    JOIN 
+        web_sales ws ON tc.c_customer_sk = ws.ws_ship_customer_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+)
+
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    AVG(ws.ws_net_profit) AS avg_profit,
+    MAX(ws.ws_net_profit) AS max_profit,
+    MIN(ws.ws_net_profit) AS min_profit
+FROM 
+    top_customers tc
+JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT DISTINCT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = tc.c_customer_sk)
+JOIN 
+    web_sales ws ON ws.ws_ship_customer_sk = tc.c_customer_sk
+WHERE 
+    ca.ca_state = 'CA' OR ca.ca_state IS NULL
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    avg_profit DESC
+LIMIT 10;
+
+SELECT 
+    'Total Customers without Sales' AS Info, 
+    COUNT(c.c_customer_sk) 
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    ws.ws_bill_customer_sk IS NULL 
+UNION ALL 
+SELECT 
+    'Total Sales from California', 
+    SUM(ws.ws_net_profit) 
+FROM 
+    web_sales ws 
+JOIN 
+    customer_address ca ON ws.ws_ship_addr_sk = ca.ca_address_sk 
+WHERE 
+    ca.ca_state = 'CA';

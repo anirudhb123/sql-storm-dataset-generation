@@ -1,0 +1,60 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(p.DownVotes, 0)) AS TotalDownVotes,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM 
+        UserStats
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COALESCE(u.PostCount, 0) AS TotalPosts,
+    COALESCE(u.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(u.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(u.TotalUpVotes, 0) AS UpVotes,
+    COALESCE(u.TotalDownVotes, 0) AS DownVotes,
+    COALESCE(u.BadgeCount, 0) AS Badges,
+    CASE 
+        WHEN u.Rank IS NULL THEN 'Unranked'
+        ELSE CAST(u.Rank AS VARCHAR)
+    END AS UserRank
+FROM 
+    TopUsers u
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Posts p
+        WHERE p.OwnerUserId = u.UserId AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    )
+ORDER BY 
+    u.Rank
+LIMIT 10;

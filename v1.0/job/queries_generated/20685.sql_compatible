@@ -1,0 +1,70 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        mt.linked_movie_id,
+        t.phonetic_code,
+        1 AS level
+    FROM title t
+    LEFT JOIN movie_link ml ON t.id = ml.movie_id
+    LEFT JOIN title mt ON ml.linked_movie_id = mt.id
+    WHERE mt.link_type_id IN (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        mt.linked_movie_id,
+        t.phonetic_code,
+        mh.level + 1
+    FROM title t
+    JOIN movie_link ml ON t.id = ml.movie_id
+    JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE mh.level < 5 
+),
+movie_cast AS (
+    
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS character_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_order
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+),
+movie_info_extended AS (
+    
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT mi.info, '; ') AS additional_info
+    FROM movie_hierarchy m
+    LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN movie_info mi ON m.movie_id = mi.movie_id
+    GROUP BY m.movie_id, m.title, m.production_year
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mc.actor_name, 'Unknown Actor') AS main_actor,
+    COALESCE(mc.character_name, 'N/A') AS character_name,
+    mh.keywords,
+    mh.additional_info,
+    COUNT(mc.cast_order) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'No Production Year'
+        ELSE 'Produced in ' || CAST(mh.production_year AS VARCHAR) 
+    END AS production_note,
+    NULLIF(mh.additional_info, '') AS info_if_available
+FROM movie_info_extended mh
+LEFT JOIN movie_cast mc ON mh.movie_id = mc.movie_id
+ORDER BY mh.production_year DESC, mh.title;

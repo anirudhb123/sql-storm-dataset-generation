@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name,
+    s.s_name,
+    CONCAT('Supplier: ', s.s_name, ', Price: $', FORMAT(ps.ps_supplycost, 2), ', Part: ', p.p_name) AS detailed_info,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    MAX(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount) ELSE NULL END) AS max_discounted_price
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+    AND l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, p.p_name;

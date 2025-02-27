@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON tag IS NOT NULL
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, pt.Name
+),
+
+PopularUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(p.Id) >= 5 -- Users with at least 5 posts
+),
+
+TopPostData AS (
+    SELECT 
+        rp.*, 
+        pu.DisplayName AS OwnerName,
+        pu.Reputation AS OwnerReputation
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularUsers pu ON rp.OwnerUserId = pu.UserId
+    WHERE 
+        rp.PostRank <= 3 -- Top 3 posts per user
+)
+
+SELECT 
+    pd.Title, 
+    pd.Body, 
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.Tags,
+    pd.OwnerName,
+    pd.OwnerReputation,
+    pd.PostType
+FROM 
+    TopPostData pd
+ORDER BY 
+    pd.ViewCount DESC, pd.CreationDate DESC;

@@ -1,0 +1,113 @@
+WITH RecPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+), 
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score) AS TotalScore,
+        COUNT(rp.PostId) AS PostsCount,
+        RANK() OVER (ORDER BY SUM(rp.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        RecPostActivity rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), 
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        b.Date,
+        ROW_NUMBER() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges
+)
+
+SELECT 
+    u.DisplayName AS User,
+    u.TotalScore,
+    u.PostsCount,
+    rb.Name AS RecentBadge,
+    rb.Date AS BadgeDate
+FROM 
+    TopUsers u
+LEFT JOIN 
+    RecentBadges rb ON u.UserId = rb.UserId AND rb.BadgeRank = 1
+WHERE 
+    u.UserRank <= 10 -- Top 10 users by total score
+ORDER BY 
+    u.TotalScore DESC;
+
+--- Performance Benchmark Section ---
+EXPLAIN ANALYZE
+WITH RecPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+), 
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score) AS TotalScore,
+        COUNT(rp.PostId) AS PostsCount,
+        RANK() OVER (ORDER BY SUM(rp.Score) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        RecPostActivity rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), 
+RecentBadges AS (
+    SELECT 
+        b.UserId,
+        b.Name,
+        b.Date,
+        ROW_NUMBER() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges
+)
+
+SELECT 
+    u.DisplayName AS User,
+    u.TotalScore,
+    u.PostsCount,
+    rb.Name AS RecentBadge,
+    rb.Date AS BadgeDate
+FROM 
+    TopUsers u
+LEFT JOIN 
+    RecentBadges rb ON u.UserId = rb.UserId AND rb.BadgeRank = 1
+WHERE 
+    u.UserRank <= 10 -- Top 10 users by total score
+ORDER BY 
+    u.TotalScore DESC;

@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(NULLIF(p.Body, ''), 'No Body Content') AS BodyContent
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000 AND
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.BodyContent
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+), 
+
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotesCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.BodyContent,
+    pv.UpVotesCount,
+    pv.DownVotesCount,
+    CASE 
+        WHEN pv.UpVotesCount > pv.DownVotesCount THEN 'More Upvotes'
+        WHEN pv.UpVotesCount < pv.DownVotesCount THEN 'More Downvotes'
+        ELSE 'Equal Votes'
+    END AS VoteStatus,
+    COALESCE(pht.Comment, 'No close reason') AS CloseReason
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = tp.PostId AND ph.PostHistoryTypeId = 10
+LEFT JOIN 
+    PostVotes pv ON tp.PostId = pv.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

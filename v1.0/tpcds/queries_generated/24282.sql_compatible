@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_net_profit) AS total_profit,
+        MAX(ws.ws_sold_date_sk) AS last_order_date,
+        cd.cd_gender
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+TopSellingItems AS (
+    SELECT 
+        ri.ws_item_sk,
+        ri.total_quantity,
+        COALESCE(ROUND(AVG(CASE WHEN ri.total_quantity > 0 THEN ri.total_quantity END), 2), 0) AS avg_sold
+    FROM 
+        RankedSales ri
+    WHERE 
+        ri.sales_rank <= 10
+    GROUP BY 
+        ri.ws_item_sk, ri.total_quantity
+)
+SELECT 
+    ca.c_customer_sk,
+    ca.orders_count,
+    ca.total_profit,
+    ti.ws_item_sk,
+    ti.total_quantity,
+    CASE 
+        WHEN ca.total_profit IS NULL THEN 'No Profit' 
+        ELSE 'Profitable'
+    END AS profitability_status,
+    ti.avg_sold,
+    COALESCE(ca.orders_count / NULLIF(ti.avg_sold, 0), 0) AS orders_to_avg_ratio
+FROM 
+    CustomerAnalysis ca
+JOIN 
+    TopSellingItems ti ON ca.c_customer_sk IN (SELECT DISTINCT ws.ws_ship_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = ti.ws_item_sk)
+WHERE 
+    ca.last_order_date > (SELECT MAX(d.d_date) FROM date_dim d WHERE d.d_holiday = 'Y')
+UNION ALL 
+SELECT 
+    ca.c_customer_sk,
+    ca.orders_count,
+    ca.total_profit,
+    ti.ws_item_sk,
+    ti.total_quantity,
+    'Unprofitable' AS profitability_status,
+    ti.avg_sold,
+    COALESCE(ca.orders_count / NULLIF(ti.avg_sold, 0), 0) AS orders_to_avg_ratio
+FROM 
+    CustomerAnalysis ca
+JOIN 
+    TopSellingItems ti ON ca.c_customer_sk NOT IN (SELECT DISTINCT ws.ws_ship_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = ti.ws_item_sk)
+WHERE 
+    ca.orders_count < 1
+ORDER BY 
+    ca.total_profit DESC, 
+    ti.total_quantity DESC;

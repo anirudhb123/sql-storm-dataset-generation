@@ -1,0 +1,63 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        COUNT(DISTINCT ws.ws_ship_mode_sk) AS unique_ship_modes
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2400 AND 2600
+    GROUP BY
+        c.c_customer_id
+),
+Demographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM
+        customer_demographics cd
+),
+SalesWithDemo AS (
+    SELECT
+        cs.c_customer_id,
+        cs.total_net_profit,
+        cs.total_orders,
+        cs.avg_order_value,
+        cs.unique_ship_modes,
+        d.cd_gender,
+        d.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM
+        CustomerSales cs
+    LEFT JOIN
+        Demographics d ON cs.c_customer_id = (
+            SELECT c.c_customer_id
+            FROM customer c
+            WHERE c.c_current_cdemo_sk = d.cd_demo_sk
+            LIMIT 1
+        )
+    LEFT JOIN
+        income_band ib ON d.cd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT
+    sd.cd_gender,
+    sd.cd_marital_status,
+    COUNT(sd.c_customer_id) AS num_customers,
+    AVG(sd.total_net_profit) AS avg_net_profit,
+    AVG(sd.avg_order_value) AS avg_order_value,
+    AVG(sd.unique_ship_modes) AS avg_unique_ship_modes
+FROM
+    SalesWithDemo sd
+GROUP BY
+    sd.cd_gender,
+    sd.cd_marital_status
+ORDER BY
+    num_customers DESC;

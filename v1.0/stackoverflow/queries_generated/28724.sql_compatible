@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN A.Id IS NOT NULL THEN 1 END) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS TagRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId, P.PostTypeId, P.CreationDate, P.Tags
+),
+
+FeaturedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        RP.CreationDate,
+        RP.CommentCount,
+        RP.AnswerCount,
+        T.TagName, 
+        RANK() OVER (ORDER BY RP.CommentCount DESC, RP.AnswerCount DESC) AS PopularityRank
+    FROM 
+        RankedPosts RP
+    JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    JOIN 
+        LATERAL (SELECT unnest(string_to_array(RP.Tags, ',')) AS TagName) AS T ON TRUE
+    WHERE 
+        RP.TagRank = 1 
+)
+
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.OwnerDisplayName,
+    FP.CreationDate,
+    FP.CommentCount,
+    FP.AnswerCount,
+    FP.TagName,
+    FP.PopularityRank,
+    (SELECT COUNT(*) FROM PostHistory PH WHERE PH.PostId = FP.PostId AND PH.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = FP.PostId AND V.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes V WHERE V.PostId = FP.PostId AND V.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    FeaturedPosts FP
+WHERE 
+    FP.PopularityRank <= 10 
+ORDER BY 
+    FP.PopularityRank;

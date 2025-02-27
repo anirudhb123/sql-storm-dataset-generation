@@ -1,0 +1,58 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.ExcerptPostId = r.Id
+),
+UserReputationStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.VoteAmount, 0)) AS TotalVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation) OVER (PARTITION BY u.Id) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostDetails AS (
+    SELECT
+        p.Id AS ClosedPostId,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy,
+        ph.Comment AS CloseReason
+    FROM Posts p
+    INNER JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId = 10  
+),
+VoteAggregates AS (
+    SELECT
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+)
+SELECT
+    u.DisplayName AS UserName,
+    u.TotalPosts,
+    u.TotalVotes,
+    vt.PostId,
+    vt.UpVotes,
+    vt.DownVotes,
+    COALESCE(SUM(CASE WHEN ph.ClosedPostId IS NOT NULL THEN 1 ELSE 0 END), 0) AS ClosedPostCount,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    COALESCE(NULLIF(MAX(cp.CloseDate), '1900-01-01'), 'No Closure') AS LatestCloseDate
+FROM UserReputationStats u
+LEFT JOIN VoteAggregates vt ON u.UserId = vt.PostId
+LEFT JOIN ClosedPostDetails cp ON cp.ClosedPostId = vt.PostId
+LEFT JOIN RecursiveTagHierarchy t ON t.Id = vt.PostId
+GROUP BY u.UserId, u.DisplayName, u.TotalPosts, u.TotalVotes
+ORDER BY u.TotalVotes DESC, u.TotalPosts DESC
+FETCH FIRST 100 ROWS ONLY;

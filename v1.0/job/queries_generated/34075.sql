@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY[mt.title] AS title_path,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        mh.title_path || m.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    COALESCE(cast_member.name, 'Unknown') AS actor_name,
+    title.title,
+    title.production_year,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY title.id ORDER BY keyword_count DESC) AS rank
+FROM 
+    complete_cast cc
+JOIN 
+    title ON cc.movie_id = title.id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name cast_member ON ci.person_id = cast_member.person_id
+LEFT JOIN 
+    movie_keyword mk ON title.id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON title.id = mi.movie_id AND mi.info_type_id = 1 -- Assume 1 is some type of info
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = title.id
+WHERE 
+    ci.nr_order IS NOT NULL 
+    AND (mi.info IS NOT NULL OR mi.note IS NOT NULL) 
+    AND title.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    cast_member.name, title.id
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0
+ORDER BY 
+    title.production_year DESC, rank;

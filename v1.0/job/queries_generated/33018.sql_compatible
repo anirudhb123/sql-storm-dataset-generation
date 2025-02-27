@@ -1,0 +1,56 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mv.id AS movie_id,
+        mv.title AS movie_title,
+        mv.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS mv ON ml.linked_movie_id = mv.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.level,
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS all_cast_names,
+    AVG(CASE WHEN p.gender IS NULL THEN 0 ELSE 1 END) AS avg_gender_known,
+    MAX(CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END) AS has_male_cast,
+    MIN(COALESCE(mi.info, 'No Info')) AS first_movie_info
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.person_id
+LEFT JOIN 
+    aka_name AS ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    person_info AS p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_info AS mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.level, mh.movie_title, mh.production_year
+ORDER BY 
+    mh.production_year DESC, mh.level;

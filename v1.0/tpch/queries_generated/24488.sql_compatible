@@ -1,0 +1,83 @@
+
+WITH RECURSIVE SeaOfRecords AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ps.ps_supplycost, 
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rnk
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_partkey = p.p_partkey)
+    UNION ALL
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        ps.ps_supplycost, 
+        ps.ps_availqty
+    FROM 
+        SeaOfRecords sor
+    JOIN 
+        partsupp ps ON sor.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty < sor.ps_availqty
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL 
+        AND COUNT(o.o_orderkey) > 0
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+)
+SELECT 
+    sor.p_partkey,
+    sor.p_name,
+    sor.p_retailprice * 1.1 AS inflated_price,
+    ca.c_name AS customer_name,
+    ts.s_name AS supplier_name,
+    COALESCE(ts.total_supply_value, 0) AS supplier_spending,
+    CASE 
+        WHEN ca.order_count > 10 THEN 'Big Spender' 
+        ELSE 'Regular Customer' 
+    END AS customer_type
+FROM 
+    SeaOfRecords sor
+FULL OUTER JOIN 
+    CustomerAnalysis ca ON sor.p_partkey = ca.c_custkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.supplier_rank = ROW_NUMBER() OVER (PARTITION BY sor.p_partkey ORDER BY sor.p_retailprice * 1.1 DESC)
+WHERE 
+    sor.rnk = 1
+    AND (sor.p_retailprice IS NOT NULL OR ca.order_count IS NULL)
+ORDER BY 
+    inflated_price DESC, 
+    supplier_spending ASC;

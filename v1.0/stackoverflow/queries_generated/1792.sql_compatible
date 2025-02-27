@@ -1,0 +1,57 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(P.Score) AS AvgScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS TagRank
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS Author,
+        DATEDIFF(CAST('2024-10-01 12:34:56' AS TIMESTAMP), P.CreationDate) AS DaysAgo,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > DATEADD(MONTH, -6, CAST('2024-10-01 12:34:56' AS TIMESTAMP))
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalComments,
+    TS.TagName,
+    TS.PostCount,
+    TS.AvgScore,
+    RP.Title AS MostRecentPostTitle,
+    RP.DaysAgo AS DaysSincePost
+FROM UserStats US
+LEFT JOIN TagStats TS ON US.TotalPosts > 0
+LEFT JOIN RecentPosts RP ON US.UserId = RP.OwnerUserId AND RP.RecentPostRank = 1
+WHERE US.UserRank <= 10 AND (TS.TagRank IS NULL OR TS.TagRank <= 5)
+ORDER BY US.Reputation DESC, TS.PostCount DESC;

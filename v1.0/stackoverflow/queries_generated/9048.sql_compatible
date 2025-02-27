@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR) 
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    WHERE 
+        rp.Rank <= 5 
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pd.BadgeCount,
+    STRING_AGG(c.Text, '; ') AS CommentTexts
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Comments c ON pd.PostId = c.PostId
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Score, pd.ViewCount, pd.AnswerCount, pd.OwnerDisplayName, pd.OwnerReputation, pd.BadgeCount
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

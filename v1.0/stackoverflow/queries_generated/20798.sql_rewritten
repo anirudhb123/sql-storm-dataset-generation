@@ -1,0 +1,78 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsVotedOn
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON V.PostId = P.Id
+    GROUP BY U.Id, U.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank
+    FROM Posts P
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+TopRankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        U.DisplayName AS OwnerName
+    FROM RankedPosts RP
+    JOIN Posts P ON RP.PostId = P.Id
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE RP.Rank <= 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PHT.Name AS HistoryType,
+        PH.CreationDate,
+        (SELECT STRING_AGG(CONVERT(varchar, COALESCE(JSON_VALUE(PH.Text, '$.old'), 'null')), ', ')
+         FROM PostHistory PH2 
+         WHERE PH2.PostId = PH.PostId AND PH2.CreationDate < PH.CreationDate) AS PreviousValues
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE PH.PostHistoryTypeId IN (8, 4) 
+),
+FinalOutput AS (
+    SELECT 
+        UVote.UserId,
+        UVote.DisplayName,
+        T.PostId,
+        T.Title,
+        T.Score,
+        PH.HistoryType,
+        PH.CreationDate AS HistoryDate,
+        PH.PreviousValues,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY T.PostId) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY T.PostId) AS TotalDownVotes
+    FROM UserVoteCounts UVote
+    LEFT JOIN TopRankedPosts T ON UVote.UserId = T.OwnerName
+    LEFT JOIN PostHistoryDetails PH ON T.PostId = PH.PostId
+    LEFT JOIN Votes V ON T.PostId = V.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalDownVotes > TotalUpVotes THEN 'More DownVotes'
+        WHEN TotalUpVotes > TotalDownVotes THEN 'More UpVotes'
+        WHEN TotalUpVotes = TotalDownVotes THEN 'Neutral'
+        ELSE 'No Votes'
+    END AS VoteComparisonResult,
+    CASE 
+        WHEN PreviousValues IS NULL THEN 'No previous edits'
+        ELSE 'Previous value(s) existed'
+    END AS PreviousValueCheck
+FROM FinalOutput
+WHERE UserId IS NOT NULL OR HistoryType IS NOT NULL
+ORDER BY Score DESC, HistoryDate DESC;

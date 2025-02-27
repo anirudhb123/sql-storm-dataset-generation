@@ -1,0 +1,58 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        Ph.Id,
+        Ph.PostId,
+        Ph.UserDisplayName,
+        Ph.CreationDate,
+        Ph.Comment,
+        Ph.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.PostHistoryTypeId IN (10, 11) 
+    UNION ALL
+    SELECT 
+        Ph.Id,
+        Ph.PostId,
+        Ph.UserDisplayName,
+        Ph.CreationDate,
+        Ph.Comment,
+        Ph.PostHistoryTypeId,
+        Level + 1
+    FROM 
+        PostHistory Ph
+    INNER JOIN 
+        RecursivePostHistory RPh ON RPh.PostId = Ph.PostId
+    WHERE 
+        Ph.CreationDate < RPh.CreationDate 
+)
+SELECT 
+    P.Title,
+    COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+    COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+    AVG(U.Reputation) AS AvgReputation,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    PH.Comment AS LastCloseComment,
+    RPh.UserDisplayName AS CommentingUser,
+    RPh.CreationDate AS CommentDate,
+    RPh.Level
+FROM 
+    Posts P
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Tags T ON T.Id = ANY (string_to_array(P.Tags, ',')::int[])  
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10  
+LEFT JOIN 
+    RecursivePostHistory RPh ON P.Id = RPh.PostId
+WHERE 
+    P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+GROUP BY 
+    P.Title, PH.Comment, RPh.UserDisplayName, RPh.CreationDate, RPh.Level
+ORDER BY 
+    P.Title ASC, RPh.CreationDate DESC
+LIMIT 100;

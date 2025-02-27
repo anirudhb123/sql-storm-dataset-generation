@@ -1,0 +1,76 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON ah.person_id = ci.person_id
+    WHERE 
+        ci.movie_id IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+KeywordDetails AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    COALESCE(kd.keyword_count, 0) AS keyword_count,
+    ah.actor_name AS top_actor
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    KeywordDetails kd ON md.movie_id = kd.movie_id
+LEFT JOIN 
+    ActorHierarchy ah ON md.actor_count = (SELECT MAX(actor_count) FROM MovieDetails WHERE production_year = md.production_year)
+WHERE 
+    md.actor_count > 10
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC
+LIMIT 10;

@@ -1,0 +1,54 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        C.c_name,
+        C.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY C.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer C ON o.o_custkey = C.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.o_orderstatus,
+        ro.c_name,
+        ro.c_mktsegment
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+),
+LineItemsSummary AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+        COUNT(*) AS lineitem_count
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    to.c_mktsegment,
+    lis.total_revenue,
+    lis.lineitem_count
+FROM 
+    TopOrders to
+JOIN 
+    LineItemsSummary lis ON to.o_orderkey = lis.l_orderkey
+ORDER BY 
+    lis.total_revenue DESC, 
+    to.o_orderdate ASC
+FETCH FIRST 10 ROWS ONLY;

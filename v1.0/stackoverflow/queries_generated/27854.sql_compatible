@@ -1,0 +1,60 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalClosures,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS TotalDeletions,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosureReopenCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        (SELECT DISTINCT PostId, SUM(BountyAmount) AS BountyAmount FROM Bounties GROUP BY PostId) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalBounty,
+        TotalClosures,
+        TotalDeletions,
+        ClosureReopenCount,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY TotalComments DESC) AS CommentRank
+    FROM 
+        UserActivity
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalBadges,
+    TotalBounty,
+    TotalClosures,
+    TotalDeletions,
+    ClosureReopenCount,
+    GREATEST(PostRank, CommentRank) AS OverallRank
+FROM 
+    TopUsers
+WHERE 
+    TotalPosts > 5 OR TotalComments > 10
+ORDER BY 
+    OverallRank
+LIMIT 10;

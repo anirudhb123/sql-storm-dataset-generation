@@ -1,0 +1,90 @@
+
+WITH TagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.TagName) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS AllTags
+    FROM 
+        Posts p
+    JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS t(TagName)
+    GROUP BY 
+        p.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10, 11)  
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(c.Score), 0) AS TotalCommentScore,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalCloseVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.Questions,
+    u.Answers,
+    u.TotalScore,
+    tc.TagCount,
+    tc.AllTags,
+    pae.PostId,
+    pae.Title,
+    pae.TotalCommentScore,
+    pae.TotalUpvotes,
+    pae.TotalDownvotes,
+    COALESCE(SUM(CASE WHEN pha.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS CloseVoteCount
+FROM 
+    UserPostStats u
+INNER JOIN 
+    TagCounts tc ON u.UserId = tc.PostId
+INNER JOIN 
+    PostEngagement pae ON tc.PostId = pae.PostId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pae.PostId = pha.PostId
+WHERE 
+    u.TotalPosts > 10  
+GROUP BY 
+    u.DisplayName, u.TotalPosts, u.Questions, u.Answers, u.TotalScore, 
+    tc.TagCount, tc.AllTags, pae.PostId, pae.Title, 
+    pae.TotalCommentScore, pae.TotalUpvotes, pae.TotalDownvotes
+ORDER BY 
+    u.TotalScore DESC, tc.TagCount DESC;

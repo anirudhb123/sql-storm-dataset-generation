@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1
+),
+
+PopularPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        u.DisplayName AS EditorDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        pda.UserDisplayName AS ApprovingUserDisplayName,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+    LEFT JOIN 
+        (SELECT ph.PostId, ph.UserId FROM PostHistory ph WHERE ph.PostHistoryTypeId = 10) pda 
+        ON pda.PostId = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UpvoteCount,
+    tp.DownvoteCount,
+    COALESCE(ph.EditorDisplayName, 'No edits') AS LastEditor,
+    ph.CreationDate AS EditDate,
+    ph.Comment AS EditComment,
+    ph.ApprovingUserDisplayName
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PopularPostHistory ph ON tp.PostId = ph.PostId
+WHERE 
+    (tp.Score > 10 OR tp.CommentCount > 5) AND 
+    tp.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

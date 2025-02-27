@@ -1,0 +1,44 @@
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        s.s_name AS supplier_name,
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        p.p_comment LIKE '%fragile%' AND 
+        s.s_comment NOT LIKE '%bad customer service%'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COUNT(*) AS order_count,
+    STRING_AGG(CONCAT(c.c_name, '(', s.s_name, ')'), '; ') AS customer_supplier_details
+FROM 
+    RankedProducts p
+WHERE 
+    p.recent_order = 1
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+ORDER BY 
+    order_count DESC
+LIMIT 10;

@@ -1,0 +1,47 @@
+-- Performance Benchmarking Query
+WITH PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, U.DisplayName
+),
+PostHistoryMetrics AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    PM.PostId,
+    PM.Title,
+    PM.CreationDate,
+    PM.ViewCount,
+    PM.Score,
+    PM.AnswerCount,
+    PM.CommentCount,
+    PM.FavoriteCount,
+    PM.OwnerDisplayName,
+    PM.Upvotes,
+    PM.Downvotes,
+    PHM.CloseCount,
+    PHM.ReopenCount
+FROM PostMetrics PM
+LEFT JOIN PostHistoryMetrics PHM ON PM.PostId = PHM.PostId
+ORDER BY PM.Score DESC, PM.ViewCount DESC
+LIMIT 100;

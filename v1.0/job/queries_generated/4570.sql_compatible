@@ -1,0 +1,70 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        aka_title t 
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+), 
+voice_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        c.movie_id,
+        r.role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role LIKE '%voice%'
+), 
+movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        m.production_year
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+), 
+movie_company_info AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    va.name AS voice_actor,
+    md.keyword,
+    mci.company_names,
+    mci.company_count
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    voice_actors va ON rt.title_id = va.movie_id
+LEFT JOIN 
+    movie_details md ON rt.title_id = md.movie_id
+LEFT JOIN 
+    movie_company_info mci ON rt.title_id = mci.movie_id
+WHERE 
+    rt.rn <= 5
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title;

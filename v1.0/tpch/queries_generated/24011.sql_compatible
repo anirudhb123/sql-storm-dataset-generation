@@ -1,0 +1,66 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        o.o_totalprice,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS recent_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+suppliers_with_comments AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        CASE 
+            WHEN s.s_comment IS NULL THEN 'No Comment' 
+            ELSE s.s_comment
+        END AS supplier_comment
+    FROM supplier s
+    WHERE s.s_acctbal > 
+        (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+high_value_parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice,
+        p.p_comment, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 
+        (SELECT MAX(p2.p_retailprice) * 0.9 FROM part p2)
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, p.p_comment
+    HAVING COUNT(DISTINCT ps.ps_suppkey) >= 2
+),
+order_line_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS line_count,
+        MAX(l.l_discount) AS max_discount
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    p.p_name,
+    s.s_name,
+    ol.revenue,
+    CASE 
+        WHEN ol.max_discount IS NULL THEN 0 
+        ELSE ol.max_discount * 100 
+    END AS max_discount_percentage,
+    COALESCE(swc.supplier_comment, 'Not Available') AS supplier_comment
+FROM ranked_orders r
+JOIN order_line_summary ol ON r.o_orderkey = ol.l_orderkey
+JOIN high_value_parts p ON ol.l_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_partkey = p.p_partkey)
+LEFT JOIN suppliers_with_comments swc ON swc.s_suppkey IN (SELECT l_suppkey FROM lineitem WHERE l_orderkey = ol.l_orderkey)
+WHERE r.recent_rank <= 10 
+ORDER BY r.o_orderdate DESC, ol.revenue DESC;

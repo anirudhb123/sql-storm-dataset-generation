@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey AS supp_key, s_name AS supp_name, s_acctbal, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey AS supp_key, s.s_name AS supp_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+DistinctLineItemValues AS (
+    SELECT DISTINCT l_orderkey, l_partkey, l_extendedprice, l_discount, l_returnflag
+    FROM lineitem
+    WHERE l_shipdate > '1995-01-01' AND l_returnflag IS NOT NULL
+),
+AggregatedLineItems AS (
+    SELECT 
+        dliv.l_orderkey,
+        SUM(dliv.l_extendedprice * (1 - dliv.l_discount)) AS total_revenue,
+        COUNT(dliv.l_partkey) AS part_count
+    FROM DistinctLineItemValues dliv
+    GROUP BY dliv.l_orderkey
+),
+RegionCustomer AS (
+    SELECT c.c_custkey, c.c_name, r.r_regionkey, r.r_name
+    FROM customer c
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name IS NOT NULL AND c.c_acctbal IS NOT NULL
+),
+FinalOutput AS (
+    SELECT 
+        rh.supp_key,
+        rh.supp_name,
+        lc.l_orderkey AS t_orderkey,
+        lc.total_revenue AS t_revenue,
+        rc.r_regionkey,
+        rc.r_name,
+        rh.level AS supplier_level,
+        CASE
+            WHEN lc.part_count > 10 THEN 'High Volume'
+            WHEN lc.part_count BETWEEN 5 AND 10 THEN 'Medium Volume'
+            ELSE 'Low Volume'
+        END AS volume_category
+    FROM SupplierHierarchy rh
+    JOIN AggregatedLineItems lc ON lc.l_orderkey = rh.supp_key
+    JOIN RegionCustomer rc ON rc.c_custkey = rh.supp_key
+)
+SELECT 
+    f.supp_key,
+    f.supp_name,
+    f.t_orderkey,
+    f.t_revenue,
+    f.r_name,
+    f.supplier_level,
+    f.volume_category,
+    COALESCE(ROUND(AVG(f.t_revenue) OVER (PARTITION BY f.volume_category), 2), 0.00) AS avg_revenue_by_volume,
+    COUNT(*) OVER () AS total_rows
+FROM FinalOutput f
+WHERE f.supp_key IS NOT NULL
+ORDER BY f.t_revenue DESC, f.r_name ASC
+LIMIT 100;

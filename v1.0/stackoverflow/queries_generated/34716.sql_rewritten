@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        CAST(p.Title AS VARCHAR(400)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        p2.AcceptedAnswerId,
+        CAST(rph.Path || ' -> ' || p2.Title AS VARCHAR(400)) AS Path
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+, UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS QuestionCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+, PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 10 THEN 1 ELSE 0 END) AS DeleteVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.Path,
+    ua.DisplayName AS UserOwner,
+    ua.QuestionCount,
+    ua.TotalScore,
+    ua.AcceptedAnswers,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    pvs.DeleteVotes,
+    CASE 
+        WHEN pvs.DeleteVotes > 0 THEN 'Potentially Deleted' 
+        ELSE 'Active' 
+    END AS PostStatus
+FROM 
+    RecursivePostHierarchy rph
+JOIN 
+    UserActivity ua ON rph.OwnerUserId = ua.UserId
+JOIN 
+    PostVoteSummary pvs ON rph.PostId = pvs.PostId
+WHERE 
+    rph.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days' 
+ORDER BY 
+    ua.TotalScore DESC, rph.PostId
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

@@ -1,0 +1,76 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PendingOrders AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS pending_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate > cast('1998-10-01' as date)
+    GROUP BY 
+        l.l_orderkey
+),
+ComplexQuery AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * l.l_quantity) AS total_revenue,
+        SUM(CASE 
+                WHEN l.l_discount > 0 THEN l.l_extendedprice * (1 - l.l_discount)
+                ELSE l.l_extendedprice 
+            END) AS total_discounted_revenue
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipmode IN ('AIR', 'SEA')
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(ss.total_available_quantity, 0) AS supplier_total_available_qty,
+    COALESCE(co.total_orders, 0) AS customer_total_orders,
+    COALESCE(co.total_spent, 0) AS customer_total_spent,
+    cq.total_revenue,
+    cq.total_discounted_revenue,
+    (SELECT COUNT(*) FROM PendingOrders po WHERE po.l_orderkey = cq.l_orderkey) AS total_pending_items
+FROM 
+    region r
+LEFT JOIN 
+    SupplierStats ss ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = ss.s_suppkey)
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = co.total_orders)
+LEFT JOIN 
+    ComplexQuery cq ON cq.ps_partkey = ss.s_suppkey
+WHERE 
+    ss.total_available_quantity > 0 AND 
+    (co.total_spent IS NULL OR co.total_spent > 10000)
+ORDER BY 
+    r.r_name, ss.total_available_quantity DESC;

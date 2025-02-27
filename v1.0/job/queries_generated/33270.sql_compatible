@@ -1,0 +1,84 @@
+
+WITH RECURSIVE title_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        0 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        th.level + 1
+    FROM 
+        title t
+    INNER JOIN 
+        title_hierarchy th ON t.episode_of_id = th.title_id
+),
+most_active_cast AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+    ORDER BY 
+        movie_count DESC
+    LIMIT 10
+),
+movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+SELECT 
+    th.title,
+    th.production_year,
+    COALESCE(ac.name, 'Unknown') AS actor_name,
+    mk.keywords,
+    ROW_NUMBER() OVER (PARTITION BY th.title ORDER BY th.production_year ASC) AS episode_count,
+    CASE 
+        WHEN th.production_year IS NULL THEN 'No Year'
+        ELSE 
+            CASE 
+                WHEN th.production_year < 2000 THEN 'Before 2000'
+                ELSE '2000 and After'
+            END
+    END AS year_category,
+    CASE 
+        WHEN th.episode_of_id IS NOT NULL THEN 'Episode'
+        ELSE 'Movie'
+    END AS content_type
+FROM 
+    title_hierarchy th
+LEFT JOIN 
+    aka_name ac ON ac.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = th.title_id)
+LEFT JOIN 
+    most_active_cast mac ON ac.person_id = mac.person_id
+LEFT JOIN 
+    movie_info_with_keywords mk ON th.title_id = mk.movie_id
+WHERE 
+    th.level <= 1 
+GROUP BY 
+    th.title, th.production_year, ac.name, mk.keywords, th.episode_of_id
+ORDER BY 
+    th.production_year DESC,
+    episode_count;

@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        title.kind_id,
+        1 AS level
+    FROM 
+        title
+    WHERE 
+        title.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        t.title AS title,
+        t.production_year,
+        t.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link mt
+    JOIN 
+        title t ON mt.linked_movie_id = t.id
+    JOIN 
+        movie_hierarchy mh ON mt.movie_id = mh.movie_id
+)
+SELECT 
+    mk.movie_id,
+    t.title AS movie_title,
+    MAX(t.production_year) AS latest_production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(mk.keyword_id IS NOT NULL) AS total_keywords,
+    CASE 
+        WHEN AVG(mh.level) > 2 THEN 'Complex'
+        ELSE 'Simple'
+    END AS movie_complexity
+FROM 
+    movie_keyword mk
+JOIN 
+    title t ON mk.movie_id = t.id
+LEFT JOIN 
+    cast_info c ON t.id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = t.id
+GROUP BY 
+    mk.movie_id, t.title
+HAVING 
+    COUNT(c.person_id) > 5
+ORDER BY 
+    latest_production_year DESC, total_cast_members DESC
+LIMIT 50;

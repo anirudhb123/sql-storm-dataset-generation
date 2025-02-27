@@ -1,0 +1,31 @@
+-- Performance benchmarking query for Stack Overflow schema
+-- This query will aggregate post statistics' information and user activity.
+
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    U.Id AS UserId,
+    U.DisplayName AS Author,
+    COUNT(C.ID) AS CommentCount,
+    SUM(V.VoteTypeId = 2) AS UpVotes,
+    SUM(V.VoteTypeId = 3) AS DownVotes,
+    P.CreationDate,
+    P.LastActivityDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount
+FROM 
+    Posts P
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+WHERE 
+    P.PostTypeId = 1 -- Only questions
+GROUP BY 
+    P.Id, U.Id
+ORDER BY 
+    P.Score DESC, P.CreationDate DESC
+LIMIT 100;

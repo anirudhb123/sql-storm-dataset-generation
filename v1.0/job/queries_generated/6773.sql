@@ -1,0 +1,35 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS aliases,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        info_type it ON it.id = mi.info_type_id AND it.info = 'summary'
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.aliases
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

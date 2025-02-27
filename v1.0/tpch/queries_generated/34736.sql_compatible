@@ -1,0 +1,61 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        r.r_name
+    UNION ALL
+    SELECT 
+        rs.region_name,
+        rs.customer_count * 2 AS customer_count,
+        rs.total_sales * 1.5 AS total_sales
+    FROM 
+        regional_sales rs
+    WHERE 
+        rs.total_sales > 10000
+),
+final_sales AS (
+    SELECT 
+        region_name,
+        customer_count,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        regional_sales
+)
+SELECT 
+    f.region_name,
+    f.customer_count,
+    f.total_sales,
+    COALESCE(f.sales_rank, 'Not Ranked') AS sales_rank,
+    CASE 
+        WHEN f.total_sales > 50000 THEN 'High'
+        WHEN f.total_sales > 20000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS sales_category,
+    CONCAT('Region: ', f.region_name, ', Sales: $', CAST(ROUND(f.total_sales, 2) AS VARCHAR)) AS sales_info
+FROM 
+    final_sales f
+WHERE 
+    f.total_sales IS NOT NULL
+ORDER BY 
+    f.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

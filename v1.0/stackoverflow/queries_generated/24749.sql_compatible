@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownvoteCount,
+        (COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) - COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END)) AS NetVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostTitles AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS HistoryPostTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '30 days')
+    GROUP BY 
+        ph.PostId
+),
+TagWeights AS (
+    SELECT 
+        t.TagName,
+        SUM(t.Count) AS TotalTagUsage,
+        COUNT(DISTINCT t.WikiPostId) AS WikiPostCount
+    FROM 
+        Tags t
+    GROUP BY 
+        t.TagName
+    HAVING 
+        SUM(t.Count) > 100
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName AS UserName,
+    r.PostId,
+    r.Title,
+    r.CreationDate AS PostDate,
+    COALESCE(v.UpvoteCount, 0) AS UpvoteCount,
+    COALESCE(v.DownvoteCount, 0) AS DownvoteCount,
+    COALESCE(v.NetVotes, 0) AS NetVotes,
+    (COALESCE(r.PostId, 0) * 1.0 / NULLIF(ca.Count, 0)) AS PostToClosedRatio
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId AND r.RecentPostRank = 1
+LEFT JOIN 
+    UserVotes v ON u.Id = v.UserId
+LEFT JOIN 
+    (SELECT COUNT(*) AS Count FROM ClosedPosts) ca ON TRUE
+LEFT JOIN 
+    PostTitles pt ON r.PostId = pt.PostId
+WHERE 
+    u.Reputation >= 100
+    AND (pt.HistoryPostTypes IS NOT NULL OR r.Score > 10)
+ORDER BY 
+    PostToClosedRatio DESC, 
+    NetVotes DESC, 
+    r.CreationDate DESC
+LIMIT 50;

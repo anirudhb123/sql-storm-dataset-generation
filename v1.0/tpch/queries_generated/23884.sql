@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 500.00
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderstatus = 'F'
+        AND l.l_shipdate > DATE '2022-01-01'
+    GROUP BY
+        o.o_orderkey
+),
+TopPart AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ROW_NUMBER() OVER (ORDER BY AVG(l.l_extendedprice) DESC) AS part_rank
+    FROM
+        lineitem l
+    JOIN
+        part p ON l.l_partkey = p.p_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+    HAVING
+        COUNT(*) >= 100
+)
+SELECT
+    r.s_suppkey,
+    r.s_name,
+    r.s_acctbal,
+    o.o_orderkey,
+    o.net_revenue,
+    tp.p_name AS top_part_name,
+    tp.part_rank,
+    COUNT(DISTINCT n.n_nationkey) AS distinct_nations
+FROM
+    RankedSuppliers r
+LEFT JOIN
+    OrderSummary o ON r.s_suppkey = (SELECT ps.ps_suppkey
+                                       FROM partsupp ps
+                                       WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM top_part tp WHERE tp.part_rank = 1))
+LEFT JOIN
+    TopPart tp ON tp.part_rank = 1
+JOIN
+    nation n ON r.s_nationkey = n.n_nationkey
+WHERE
+    (r.s_acctbal > 1000 OR o.net_revenue IS NULL)
+GROUP BY
+    r.s_suppkey, r.s_name, r.s_acctbal, o.o_orderkey, o.net_revenue, tp.p_name, tp.part_rank
+HAVING
+    SUM(CASE WHEN o.net_revenue IS NOT NULL THEN o.net_revenue ELSE 0 END) > 50000
+ORDER BY
+    r.s_acctbal DESC, o.net_revenue DESC, tp.p_name;

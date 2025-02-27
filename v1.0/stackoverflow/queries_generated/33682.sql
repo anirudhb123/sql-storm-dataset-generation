@@ -1,0 +1,97 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        Score,
+        1 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1  -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+)
+, UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT v.PostId) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+, PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10 -- Only popular questions
+)
+, PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Focus on title and body edits
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score AS PostScore,
+    p.ViewCount,
+    COALESCE(pps.UpVotes, 0) AS UpVoteCount,
+    COALESCE(pps.DownVotes, 0) AS DownVoteCount,
+    COALESCE(h.EditCount, 0) AS TotalEdits,
+    h.LastEdited,
+    h.EditComments,
+    r.Level AS PostLevel
+FROM 
+    PopularPosts p
+LEFT JOIN 
+    UserVoteStats pps ON p.Id = pps.UserId -- Here we check votes from users who have interacted
+LEFT JOIN 
+    PostHistorySummary h ON p.Id = h.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+WHERE 
+    p.PostRank <= 10 -- Get top 10 popular questions
+ORDER BY 
+    p.Score DESC
+LIMIT 20; -- Limit to 20 results for performance benchmarking
+
+-- This query provides insights into the most popular questions with their scores, view counts,
+-- user voting statistics, edit histories, and hierarchy levels.
+

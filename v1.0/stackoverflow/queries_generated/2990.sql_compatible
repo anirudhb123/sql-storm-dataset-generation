@@ -1,0 +1,50 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(B.Class), 0) AS TotalBadges,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+)
+SELECT 
+    UR.UserId,
+    U.DisplayName,
+    UR.TotalBadges,
+    UR.TotalPosts,
+    UR.TotalBounty,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    CASE 
+        WHEN PS.PostRank = 1 THEN 'Latest Post'
+        ELSE 'Older Post'
+    END AS PostStatus
+FROM UserReputation UR
+JOIN Users U ON UR.UserId = U.Id
+LEFT JOIN PostStatistics PS ON U.Id = PS.OwnerUserId
+WHERE UR.TotalBadges > 0
+  AND UR.TotalPosts > 0
+  AND UR.TotalBounty IS NOT NULL
+ORDER BY UR.TotalBounty DESC, UR.TotalBadges DESC;

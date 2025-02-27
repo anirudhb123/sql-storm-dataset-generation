@@ -1,0 +1,68 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpvotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.TotalUpvotes,
+    us.TotalDownvotes,
+    COALESCE(rt.TagCount, 0) AS TagPostCount,
+    COALESCE(rph.UserId, 'No recent activity') AS RecentUserId,
+    COALESCE(rph.PostHistoryTypeId, 'None') AS RecentAction
+FROM 
+    UserStats us
+LEFT JOIN 
+    (SELECT TagName, SUM(PostCount) AS TagCount FROM PopularTags GROUP BY TagName) rt ON rt.TagName = ANY(STRING_TO_ARRAY(us.DisplayName, ' ')) -- Assumed to match tags with user display names for illustrative purposes
+LEFT JOIN 
+    RecentPostHistory rph ON rph.UserId = us.UserId AND rph.rn = 1
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.Reputation DESC,
+    us.TotalPosts DESC;

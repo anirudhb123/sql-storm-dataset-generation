@@ -1,0 +1,55 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorParticipation AS (
+    SELECT 
+        c.movie_id,
+        a.person_id,
+        a.name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(co.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    COALESCE(CAST(rt.production_year AS VARCHAR), 'N/A') AS production_year,
+    ap.name AS actor_name,
+    ci.company_names,
+    COUNT(DISTINCT ap.person_id) OVER (PARTITION BY rt.title_id) AS total_actors,
+    COUNT(DISTINCT ci.company_names) OVER (PARTITION BY rt.title_id) AS total_companies
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorParticipation ap ON rt.title_id = ap.movie_id AND ap.actor_rank <= 3
+LEFT JOIN 
+    CompanyInfo ci ON rt.title_id = ci.movie_id
+WHERE 
+    rt.title_rank = 1
+GROUP BY 
+    rt.title_id, rt.title, rt.production_year, ap.name, ci.company_names
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title ASC;

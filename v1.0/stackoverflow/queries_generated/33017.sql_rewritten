@@ -1,0 +1,104 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.AcceptedAnswerId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.Id = rp.AcceptedAnswerId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        cr.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(pb.BadgeCount, 0) AS TotalBadges,
+        COALESCE(pb.BadgeNames, 'None') AS BadgeNames,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges pb ON u.Id = pb.UserId
+    LEFT JOIN 
+        PostVotes v ON u.Id = v.PostId
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.TotalBadges,
+    us.BadgeNames,
+    SUM(cv.UpVotes) AS TotalUserVotes,
+    SUM(cv.DownVotes) AS TotalUserDownVotes,
+    COUNT(DISTINCT cp.PostId) AS ClosedPostCount,
+    STRING_AGG(DISTINCT cp.CloseReason, ', ') AS CloseReasons,
+    AVG(ph.Level) AS AvgPostHierarchyLevel
+FROM 
+    UserStatistics us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON u.Id = cp.PostId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON u.Id = ph.OwnerUserId
+WHERE 
+    u.Reputation > 1000  
+GROUP BY 
+    u.DisplayName, us.Reputation, us.TotalBadges, us.BadgeNames
+ORDER BY 
+    TotalUserVotes DESC, u.DisplayName;

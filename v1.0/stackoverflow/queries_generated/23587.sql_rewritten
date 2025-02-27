@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Ranking
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT
+        UNNEST(string_to_array(Tags, '>')) AS Tag,
+        COUNT(*) AS TagUsage
+    FROM Posts
+    WHERE Tags IS NOT NULL
+    GROUP BY Tag
+    HAVING COUNT(*) > 5
+),
+TopCloseReasons AS (
+    SELECT
+        ph.Comment AS CloseReason,
+        COUNT(*) AS CloseCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY ph.Comment
+    ORDER BY CloseCount DESC
+    LIMIT 5
+),
+PostComments AS (
+    SELECT
+        c.PostId,
+        COUNT(*) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+),
+PostsWithComments AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        COALESCE(pc.CommentCount, 0) AS TotalComments,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVotes
+    FROM RankedPosts rp
+    LEFT JOIN PostComments pc ON rp.PostId = pc.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        pwc.PostId,
+        pwc.Title,
+        pwc.Score,
+        pwc.ViewCount,
+        pwc.OwnerDisplayName,
+        pwc.TotalComments,
+        pwc.UpVotes,
+        pwc.DownVotes,
+        CASE 
+            WHEN pwc.Score IS NULL THEN 'No Score'
+            WHEN pwc.UpVotes > pwc.DownVotes THEN 'Popular'
+            WHEN pwc.UpVotes < pwc.DownVotes THEN 'Controversial'
+            ELSE 'Neutral'
+        END AS PostSentiment,
+        (SELECT STRING_AGG(Tag, ', ') FROM PopularTags pt WHERE pt.Tag IN (SELECT UNNEST(string_to_array(pw.Tags, '>'))) FROM Posts pw WHERE pw.Id = pwc.PostId) AS RelevantTags
+    FROM PostsWithComments pwc
+)
+SELECT 
+    fb.PostId,
+    fb.Title,
+    fb.Score,
+    fb.ViewCount,
+    fb.OwnerDisplayName,
+    fb.TotalComments,
+    fb.UpVotes,
+    fb.DownVotes,
+    fb.PostSentiment,
+    fb.RelevantTags,
+    tr.CloseReason,
+    tr.CloseCount
+FROM FinalBenchmark fb
+LEFT JOIN TopCloseReasons tr ON fb.PostId = (SELECT PostId FROM PostHistory WHERE Comment = tr.CloseReason ORDER BY CreationDate DESC LIMIT 1)
+WHERE fb.PostSentiment = 'Popular' OR fb.PostSentiment = 'Controversial'
+ORDER BY fb.Score DESC, fb.ViewCount DESC
+LIMIT 100;

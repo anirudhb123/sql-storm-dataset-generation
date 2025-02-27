@@ -1,0 +1,27 @@
+SELECT 
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+    AVG(CAST(SUBSTRING(r.r_name, 1, 10) AS VARCHAR)) AS short_region_name,
+    MAX(l.l_extendedprice) AS max_extended_price
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+WHERE 
+    p.p_retailprice > 50.00 
+    AND s.s_acctbal < 1000.00 
+    AND l.l_shipdate >= '2023-01-01' 
+GROUP BY 
+    short_name
+ORDER BY 
+    total_supply_value DESC
+LIMIT 10;

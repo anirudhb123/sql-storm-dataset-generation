@@ -1,0 +1,68 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword
+),
+
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        ARRAY_AGG(DISTINCT cn.name) AS company_names,
+        ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(CASE WHEN it.info = 'Genre' THEN mi.info END, ', ') AS genres,
+        STRING_AGG(CASE WHEN it.info = 'Director' THEN mi.info END, ', ') AS directors
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.movie_keyword,
+    COALESCE(cd.company_names, ARRAY[]::text[]) AS companies,
+    COALESCE(cd.company_types, ARRAY[]::text[]) AS company_types,
+    COALESCE(is.genres, 'N/A') AS genres,
+    COALESCE(is.directors, 'N/A') AS directors,
+    md.cast_names
+FROM 
+    movie_details md
+LEFT JOIN 
+    company_details cd ON md.movie_id = cd.movie_id
+LEFT JOIN 
+    info_summary is ON md.movie_id = is.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;

@@ -1,0 +1,75 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_quantity) AS total_returned,
+        RANK() OVER (PARTITION BY wr.returning_customer_sk ORDER BY SUM(wr.return_quantity) DESC) AS rnk
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_income_band_sk,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_sales,
+        COUNT(sr.sr_ticket_number) AS total_store_returns
+    FROM 
+        customer c
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+        LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    WHERE 
+        c.c_birth_year >= 1980
+    GROUP BY 
+        c.c_customer_id,
+        cd.cd_gender,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_income_band_sk
+),
+IncomeBand AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        (ib.ib_lower_bound + ib.ib_upper_bound) / 2 AS avg_income
+    FROM 
+        income_band ib
+),
+Destination AS (
+    SELECT 
+        cb.c_customer_id AS customer_id,
+        cb.total_sales,
+        cb.total_store_returns,
+        CASE 
+            WHEN cb.total_sales >= 1000 THEN 'High Value'
+            WHEN cb.total_sales BETWEEN 500 AND 999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS customer_value,
+        ib.avg_income,
+        rd.total_returned
+    FROM 
+        CustomerDetails cb
+        LEFT JOIN IncomeBand ib ON cb.cd_income_band_sk = ib.ib_income_band_sk
+        LEFT JOIN RankedReturns rd ON cb.c_customer_id = rd.returning_customer_sk
+)
+
+SELECT 
+    d.customer_id,
+    d.customer_value,
+    d.total_sales,
+    d.total_store_returns,
+    d.avg_income,
+    COALESCE(d.total_returned, 0) AS total_returned
+FROM 
+    Destination d
+WHERE 
+    d.customer_value = 'High Value' 
+    AND d.total_store_returns > 0
+ORDER BY 
+    d.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

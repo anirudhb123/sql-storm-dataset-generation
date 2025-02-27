@@ -1,0 +1,52 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        AVG(COALESCE(DATE_PART('epoch', p.LastActivityDate - p.CreationDate), 0)) AS AvgPostLifeInSeconds
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+
+TopUsers AS (
+    SELECT 
+        ue.UserId,
+        ue.DisplayName,
+        ue.Reputation,
+        ue.PostCount,
+        ue.CommentCount,
+        ue.BadgeCount,
+        ue.UpVotesReceived,
+        ue.DownVotesReceived,
+        RANK() OVER (ORDER BY ue.Reputation DESC) AS UserRank
+    FROM UserEngagement ue
+    WHERE ue.UpVotesReceived - ue.DownVotesReceived > 10
+)
+
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.CommentCount,
+    tu.BadgeCount,
+    tu.UserRank,
+    CASE 
+        WHEN tu.BadgeCount = 0 THEN 'No Badges'
+        WHEN tu.BadgeCount BETWEEN 1 AND 3 THEN 'Bronze Level'
+        WHEN tu.BadgeCount BETWEEN 4 AND 6 THEN 'Silver Level'
+        ELSE 'Gold Level' 
+    END AS BadgeLevel
+FROM TopUsers tu
+WHERE tu.UserRank <= 25
+ORDER BY tu.UserRank;

@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.n_nationkey
+    WHERE sh.level < 3
+), SalesSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+), PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_size >= 5
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+    ss.total_sales AS customer_sales,
+    rp.p_name AS part_name,
+    rp.rank AS part_rank,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Available'
+    END AS revenue_status
+FROM region r
+LEFT JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN SalesSummary ss ON ss.c_custkey = s.s_suppkey
+LEFT JOIN RankedParts rp ON rp.p_partkey = l.l_partkey
+WHERE l.l_shipdate BETWEEN '1997-10-01' AND cast('1998-10-01' as date)
+GROUP BY 
+    r.r_name, ns.n_name, s.s_name, ss.total_sales, 
+    rp.p_name, rp.rank
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000 
+    OR ss.total_sales IS NOT NULL
+ORDER BY net_revenue DESC, rp.rank ASC;

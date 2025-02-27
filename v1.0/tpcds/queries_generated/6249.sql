@@ -1,0 +1,60 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM
+        store_returns
+    GROUP BY
+        sr_customer_sk
+),
+WebReturns AS (
+    SELECT
+        wr_returning_customer_sk AS customer_sk,
+        SUM(wr_return_amt) AS total_web_return_amt,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns,
+        AVG(wr_return_quantity) AS avg_web_return_quantity
+    FROM
+        web_returns
+    GROUP BY
+        wr_returning_customer_sk
+),
+TotalReturns AS (
+    SELECT
+        c.c_customer_sk,
+        COALESCE(cr.total_return_amt, 0) AS total_store_return_amt,
+        COALESCE(wr.total_web_return_amt, 0) AS total_web_return_amt,
+        (COALESCE(cr.total_return_amt, 0) + COALESCE(wr.total_web_return_amt, 0)) AS total_return_amt,
+        (COALESCE(cr.total_returns, 0) + COALESCE(wr.total_web_returns, 0)) AS total_returns,
+        (COALESCE(cr.avg_return_quantity, 0) + COALESCE(wr.avg_web_return_quantity, 0)) / NULLIF((COALESCE(cr.total_returns, 0) + COALESCE(wr.total_web_returns, 0)), 0) AS avg_return_quantity
+    FROM
+        customer c
+    LEFT JOIN
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN
+        WebReturns wr ON c.c_customer_sk = wr.customer_sk
+)
+SELECT
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    TRIM(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name,
+    COALESCE(tr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(tr.total_returns, 0) AS total_number_of_returns,
+    COALESCE(tr.avg_return_quantity, 0) AS average_return_quantity,
+    CASE 
+        WHEN COALESCE(tr.total_return_amt, 0) > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS returned_items,
+    DATEADD(DAY, -30, CURRENT_DATE) AS last_30_days
+FROM
+    customer c
+LEFT JOIN
+    TotalReturns tr ON c.c_customer_sk = tr.c_customer_sk
+WHERE
+    COALESCE(tr.total_return_amt, 0) > 500
+ORDER BY
+    total_return_amt DESC
+LIMIT 100;

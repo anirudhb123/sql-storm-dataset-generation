@@ -1,0 +1,22 @@
+
+SELECT 
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT ps.ps_partkey) AS num_parts_supplied,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    JSON_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_type, ')')) AS supplied_parts
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    s.s_comment LIKE '%urgent%'
+GROUP BY 
+    s.s_name
+HAVING 
+    SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+ORDER BY 
+    total_supply_cost DESC
+LIMIT 10;

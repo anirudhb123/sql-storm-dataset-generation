@@ -1,0 +1,78 @@
+WITH recursive movie_actors AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ak.name) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY ca.movie_id) AS total_actors
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+recent_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mk.keyword
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year >= 2020 AND 
+        (mt.title LIKE '%Adventure%' OR 
+         mt.title LIKE '%Quest%')
+),
+movie_info_full AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COUNT(mi.info) AS info_count,
+        STRING_AGG(DISTINCT mi.info, ', ') AS info_details,
+        MAX(CASE WHEN mi.note IS NOT NULL THEN mi.note ELSE 'No Note' END) AS note_summary 
+    FROM 
+        recent_movies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title
+),
+final_movie_summary AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ma.actor_name,
+        m.info_count,
+        m.info_details,
+        m.note_summary,
+        ROW_NUMBER() OVER (ORDER BY ma.actor_rank) as rank_by_actor
+    FROM 
+        movie_info_full m
+    LEFT JOIN 
+        movie_actors ma ON m.movie_id = ma.movie_id
+)
+
+SELECT 
+    fms.movie_id,
+    fms.title,
+    fms.production_year,
+    fms.actor_name,
+    fms.info_count,
+    fms.info_details,
+    fms.note_summary,
+    CASE 
+        WHEN fms.rank_by_actor <= 5 THEN 'Top Actor'
+        ELSE 'Supporting Actor'
+    END AS actor_type,
+    COALESCE(fms.note_summary, 'No Notes Available') AS final_note
+FROM 
+    final_movie_summary fms
+WHERE 
+    fms.info_count > 0
+ORDER BY 
+    fms.production_year DESC, 
+    fms.title;

@@ -1,0 +1,71 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) as brand_rank
+    FROM 
+        part p
+    WHERE 
+        CHARINDEX('Steel', p.p_type) > 0
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_nationkey,
+        s.s_phone,
+        s.s_acctbal,
+        s.s_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal) 
+            FROM supplier s2 
+            WHERE s2.s_comment LIKE '%reliable%'
+        )
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        s.s_name AS supplier_name,
+        s.s_address AS supplier_address,
+        ps.ps_comment
+    FROM 
+        partsupp ps
+    JOIN RankedParts p ON ps.ps_partkey = p.p_partkey
+    JOIN FilteredSuppliers s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    COUNT(*) AS supplier_count,
+    STRING_AGG(DISTINCT s.s_address, ', ') AS supplier_addresses
+FROM 
+    PartSupplierDetails ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.brand_rank <= 3
+GROUP BY 
+    p.p_name, s.s_name
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    total_supply_cost DESC;

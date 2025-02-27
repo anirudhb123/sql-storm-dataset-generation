@@ -1,0 +1,69 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        0 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id = (SELECT id FROM aka_title WHERE title = 'Inception')
+    
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.person_id
+)
+, MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        mg.kind AS genre,
+        CASE 
+            WHEN mci.company_id IS NOT NULL THEN mco.name 
+            ELSE 'Independent' 
+        END AS production_company,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name mco ON mc.company_id = mco.id
+    LEFT JOIN 
+        kind_type mg ON t.kind_id = mg.id
+    WHERE 
+        t.production_year >= 2000
+)
+SELECT 
+    m.title,
+    m.production_year,
+    a.actor_name,
+    COALESCE(mm.info, 'No additional info') AS movie_info,
+    COUNT(DISTINCT c.movie_id) OVER (PARTITION BY a.actor_name) AS total_movies,
+    STRING_AGG(DISTINCT mco.name, ', ') AS production_companies
+FROM 
+    MovieDetails m
+LEFT JOIN 
+    ActorHierarchy a ON m.title LIKE '%' || a.actor_name || '%'
+LEFT JOIN 
+    movie_info mm ON m.title = mm.info
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name mco ON mc.company_id = mco.id
+WHERE 
+    a.level = 1  
+GROUP BY 
+    m.title, m.production_year, a.actor_name, mm.info
+ORDER BY 
+    m.production_year DESC, total_movies DESC, a.actor_name;

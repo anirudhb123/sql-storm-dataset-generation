@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+TotalOrderValue AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, t.total_value
+    FROM orders o
+    JOIN TotalOrderValue t ON o.o_orderkey = t.o_orderkey
+    WHERE t.total_value > 5000
+),
+SupplyDetails AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 10
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(o.o_orderdate) AS last_order_date,
+    CASE 
+        WHEN AVG(s.s_acctbal) IS NULL THEN 'No Account Balance' 
+        ELSE CAST(AVG(s.s_acctbal) AS TEXT)
+    END AS avg_account_balance,
+    COALESCE(r.r_name, 'Unknown Region') AS region
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN HighValueOrders o ON l.l_orderkey = o.o_orderkey
+JOIN SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplyDetails ps ON p.p_partkey = ps.ps_partkey
+WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY p.p_name, s.s_name, r.r_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY total_quantity DESC;

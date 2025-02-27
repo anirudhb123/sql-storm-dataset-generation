@@ -1,0 +1,43 @@
+WITH RECURSIVE customer_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer_orders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderdate > co.o_orderdate
+)
+, avg_order_value AS (
+    SELECT c.c_custkey, c.c_name, AVG(o.o_totalprice) as avg_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+, part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) as total_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    c.c_name AS customer_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    COALESCE(AVG(a.avg_value), 0) AS avg_order_value,
+    COALESCE(MAX(ps.total_avail_qty), 0) AS max_available_quantity,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY COUNT(DISTINCT co.o_orderkey) DESC) AS order_rank
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN customer_orders co ON co.o_orderkey IS NOT NULL 
+LEFT JOIN avg_order_value a ON co.c_custkey = a.c_custkey
+GROUP BY n.n_name, r.r_name, c.c_name
+HAVING COUNT(DISTINCT co.o_orderkey) > 5 AND MAX(ps.total_avail_qty) IS NOT NULL
+ORDER BY r.r_name, total_orders DESC;

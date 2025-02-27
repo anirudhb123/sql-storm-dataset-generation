@@ -1,0 +1,58 @@
+
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        JSON_OBJECT(
+            'manufacturer', p.p_mfgr,
+            'comments', p.p_comment,
+            'formatted_name', CONCAT(p.p_brand, ' ', REPLACE(p.p_name, ' ', '_')),
+            'retail_price', FORMAT(p.p_retailprice, 2)
+        ) AS part_info
+    FROM part p
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        CONCAT(LEFT(s.s_name, 3), '-', RIGHT(s.s_phone, 4)) AS supplier_identity
+    FROM supplier s
+), 
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    pd.part_info,
+    sd.supplier_identity,
+    os.line_count,
+    os.total_revenue
+FROM PartDetails pd
+JOIN SupplierDetails sd ON pd.p_partkey = (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_supplycost = (
+        SELECT MIN(ps1.ps_supplycost) 
+        FROM partsupp ps1 
+        WHERE ps1.ps_partkey = pd.p_partkey
+    )
+    LIMIT 1
+)
+JOIN OrderStats os ON os.line_count > 0
+ORDER BY os.total_revenue DESC, pd.p_retailprice ASC
+LIMIT 100;

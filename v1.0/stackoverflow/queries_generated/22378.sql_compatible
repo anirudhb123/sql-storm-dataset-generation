@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.PostTypeId, 
+        p.CreationDate, 
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    AND 
+        p.Score >= 0
+),
+CommentStats AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, '; ' ORDER BY c.CreationDate) AS Comments
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeList,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId = 10) AS FirstClosedDate,
+        MAX(ph.CreationDate) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS LastCloseSustainDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.PostTypeId,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    cs.CommentCount,
+    cs.Comments,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(ub.BadgeList, 'No Badges') AS UserBadges,
+    COALESCE(phs.FirstClosedDate, 'Open') AS FirstClosedStatus,
+    COALESCE(phs.LastCloseSustainDate, 'N/A') AS LastCloseSustainStatus
+FROM 
+    RankedPosts rp
+INNER JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    CommentStats cs ON p.Id = cs.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryStats phs ON p.Id = phs.PostId
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.PostRank, rp.Score DESC NULLS LAST;

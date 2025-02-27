@@ -1,0 +1,96 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(PT.Name, 'Unknown') AS PostType,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY 
+        P.Id, PT.Name
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        PH.PostId
+),
+UserPostActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(PA.Score, 0)) AS TotalScore,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS ClosedPostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostActivity PA ON P.Id = PA.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT
+    URA.UserId,
+    URA.Reputation,
+    URA.ReputationRank,
+    UPA.DisplayName,
+    UPA.TotalPosts,
+    UPA.TotalScore,
+    COALESCE(CP.CloseCount, 0) AS ClosedPostsCount,
+    CASE 
+        WHEN UPA.TotalScore = 0 THEN 'No Activity'
+        ELSE CASE 
+            WHEN UPA.TotalPosts > 10 THEN 'Active'
+            WHEN UPA.TotalPosts BETWEEN 1 AND 10 THEN 'Moderate'
+            ELSE 'Inactive'
+        END
+    END AS UserActivityLevel,
+    STRING_AGG(DISTINCT PA.Title, '; ') AS PostTitles,
+    STRING_AGG(DISTINCT CASE 
+        WHEN PT.Name IS NULL THEN 'Unknown'
+        ELSE PT.Name 
+    END, '; ') AS PostTypes
+FROM 
+    UserReputation URA
+JOIN 
+    UserPostActivity UPA ON UPA.UserId = URA.UserId
+LEFT JOIN 
+    ClosedPosts CP ON CP.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UPA.UserId)
+LEFT JOIN 
+    PostActivity PA ON PA.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UPA.UserId)
+LEFT JOIN 
+    PostTypes PT ON PT.Id IN (SELECT P.PostTypeId FROM Posts P WHERE P.OwnerUserId = UPA.UserId)
+WHERE 
+    URA.Reputation > 100
+GROUP BY 
+    URA.UserId, URA.Reputation, URA.ReputationRank, UPA.DisplayName, UPA.TotalPosts, UPA.TotalScore, CP.CloseCount
+ORDER BY 
+    URA.Reputation DESC, UPA.TotalPosts DESC;

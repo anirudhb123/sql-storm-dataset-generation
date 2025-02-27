@@ -1,0 +1,38 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT c.person_id,
+           a.name AS actor_name,
+           1 AS level
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT c.person_id,
+           a.name,
+           ah.level + 1
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id IN (
+        SELECT movie_id FROM cast_info WHERE person_id = ah.person_id
+    )
+    WHERE a.name IS NOT NULL
+)
+SELECT t.title,
+       t.production_year,
+       COUNT(DISTINCT ch.actor_name) AS unique_actors,
+       AVG(ch.level) AS avg_actor_level,
+       STRING_AGG(DISTINCT CASE WHEN ch.actor_name IS NOT NULL THEN ch.actor_name ELSE 'Unknown' END, ', ') AS actor_list,
+       COALESCE(minfo.info, 'No Additional Info') AS additional_info
+FROM title t
+LEFT OUTER JOIN movie_info minfo ON t.id = minfo.movie_id AND minfo.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+JOIN complete_cast cc ON t.id = cc.movie_id
+JOIN ActorHierarchy ch ON cc.subject_id = ch.person_id
+WHERE t.production_year >= 2000
+  AND t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+GROUP BY t.title, t.production_year, minfo.info
+HAVING COUNT(DISTINCT ch.actor_name) > 2
+ORDER BY t.production_year DESC, unique_actors DESC
+LIMIT 10;
+
+This query makes use of a recursive common table expression (CTE) to build an actor hierarchy based on their participation in movies. It counts unique actors based on their movie appearances, calculates their average levels, and retrieves additional movie information while handling NULL values and utilizing string aggregation. The results are filtered and ordered to focus on more recent and prominent films, showcasing a performance metric related to actor engagement.

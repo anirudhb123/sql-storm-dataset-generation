@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_name LIKE 'A%' OR n.n_name LIKE 'B%'
+),
+FinalReport AS (
+    SELECT ns.n_nationkey, ns.n_name, ns.r_name, 
+           COALESCE(SUM(os.total_revenue), 0) AS total_revenue,
+           COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+    FROM NationRegion ns
+    LEFT JOIN OrderSummary os ON ns.n_nationkey = os.o_orderkey
+    LEFT JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+    GROUP BY ns.n_nationkey, ns.n_name, ns.r_name
+)
+SELECT f.n_name, f.r_name,
+       f.total_revenue, 
+       f.supplier_count,
+       DENSE_RANK() OVER (ORDER BY f.total_revenue DESC) AS revenue_rank
+FROM FinalReport f
+WHERE f.total_revenue > 10000
+ORDER BY f.total_revenue DESC, f.supplier_count ASC;

@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS VoteNet
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND p.PostTypeId = 1
+),
+TopPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 3
+)
+SELECT 
+    up.DisplayName,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.CreationDate,
+    tp.VoteNet,
+    pt.Name AS PostType,
+    (SELECT COUNT(*) 
+     FROM PostHistory ph 
+     WHERE ph.PostId = tp.Id AND ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount
+FROM 
+    TopPosts tp
+JOIN 
+    Users up ON tp.OwnerUserId = up.Id
+JOIN 
+    PostTypes pt ON tp.PostTypeId = pt.Id
+WHERE 
+    up.Reputation > 1000
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC
+LIMIT 10;

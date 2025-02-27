@@ -1,0 +1,68 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadgeCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadgeCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+),
+UserPostDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        UPC.RecentPostId,
+        UPC.RecentPostTitle,
+        UPC.RecentPostBody,
+        B.GoldBadgeCount,
+        B.SilverBadgeCount,
+        B.BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            rp.OwnerUserId,
+            rp.PostId AS RecentPostId,
+            rp.Title AS RecentPostTitle,
+            rp.Body AS RecentPostBody
+        FROM 
+            RecentPosts rp
+        WHERE 
+            rp.RecentPostRank = 1
+    ) UPC ON u.Id = UPC.OwnerUserId
+    LEFT JOIN UserBadgeCounts B ON u.Id = B.UserId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(upd.RecentPostTitle, 'No Recent Posts') AS RecentPostTitle,
+    COALESCE(upd.RecentPostBody, 'N/A') AS RecentPostBody,
+    upd.GoldBadgeCount,
+    upd.SilverBadgeCount,
+    upd.BronzeBadgeCount
+FROM 
+    UserPostDetails upd
+RIGHT JOIN 
+    Users u ON upd.UserId = u.Id
+ORDER BY 
+    u.Reputation DESC,
+    upd.GoldBadgeCount DESC,
+    upd.SilverBadgeCount DESC;
+

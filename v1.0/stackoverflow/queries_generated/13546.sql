@@ -1,0 +1,53 @@
+-- Performance Benchmarking Query
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalScore,
+    ups.TotalViews,
+    ups.AverageScore,
+    ups.AverageViews,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews AS TagTotalViews,
+    ts.AverageViews AS TagAverageViews
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    TagStats ts ON ts.PostCount > 0
+ORDER BY 
+    ups.TotalScore DESC, ups.TotalPosts DESC, ts.PostCount DESC;

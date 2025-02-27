@@ -1,0 +1,56 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 100
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        total_value > 5000
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rn
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    HVS.s_name AS supplier_name,
+    SUM(OLI.net_revenue) AS total_revenue
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    OrderLineItems OLI ON co.c_custkey = OLI.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers HVS ON OLI.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 100)
+GROUP BY 
+    co.c_custkey, co.c_name, HVS.s_name
+ORDER BY 
+    total_spent DESC, total_revenue DESC;

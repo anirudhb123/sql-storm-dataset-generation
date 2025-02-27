@@ -1,0 +1,78 @@
+WITH RankedTitles AS (
+    SELECT 
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Title ORDER BY p.CreationDate DESC) AS TitleRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.Title IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopQuestionStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS QuestionCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViews,
+        MAX(p.CreationDate) AS MostRecentQuestion
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        u.DisplayName, 
+        u.Reputation, 
+        ubi.BadgeCount,
+        ubi.GoldBadges,
+        ubi.SilverBadges,
+        ubi.BronzeBadges,
+        tqs.QuestionCount,
+        tqs.TotalScore,
+        tqs.AverageViews,
+        tqs.MostRecentQuestion
+    FROM 
+        Users u 
+    JOIN 
+        UserBadges ubi ON u.Id = ubi.UserId
+    JOIN 
+        TopQuestionStats tqs ON u.Id = tqs.OwnerUserId
+)
+SELECT 
+    cs.DisplayName,
+    cs.Reputation,
+    cs.BadgeCount,
+    cs.GoldBadges,
+    cs.SilverBadges,
+    cs.BronzeBadges,
+    cs.QuestionCount,
+    cs.TotalScore,
+    cs.AverageViews,
+    cs.MostRecentQuestion,
+    rt.Title
+FROM 
+    CombinedStats cs 
+JOIN 
+    RankedTitles rt ON rt.TitleRank = 1 
+ORDER BY 
+    cs.QuestionCount DESC, 
+    cs.TotalScore DESC
+LIMIT 10;

@@ -1,0 +1,39 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id as movie_id,
+        mt.title,
+        mt.production_year,
+        1 as level,
+        NULL as parent_movie_id
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id as movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id as parent_movie_id
+    FROM movie_link ml
+    INNER JOIN aka_title at ON ml.linked_movie_id = at.id
+    INNER JOIN MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.level,
+    COUNT(DISTINCT ca.person_id) AS total_cast,
+    STRING_AGG(DISTINCT na.name, ', ') AS cast_names,
+    AVG(CASE WHEN ni.note IS NOT NULL THEN ni.info_type_id END) AS average_info_type
+FROM MovieHierarchy h
+LEFT JOIN complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN aka_name na ON ca.person_id = na.person_id
+LEFT JOIN movie_info ni ON h.movie_id = ni.movie_id
+WHERE h.production_year IS NOT NULL
+GROUP BY h.movie_id, h.title, h.production_year, h.level
+HAVING COUNT(DISTINCT ca.person_id) > 0
+ORDER BY h.production_year DESC, h.level ASC;

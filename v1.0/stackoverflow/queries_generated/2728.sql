@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PopularPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        ViewCount,
+        RankByScore,
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.ViewCount,
+    ub.BadgeCount,
+    CASE 
+        WHEN pp.CommentCount > 5 THEN 'High Engagement'
+        WHEN pp.CommentCount BETWEEN 1 AND 5 THEN 'Moderate Engagement'
+        ELSE 'No Engagement'
+    END AS EngagementLevel
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    UserBadges ub ON pp.PostId = ub.UserId
+WHERE 
+    ub.BadgeCount IS NOT NULL 
+ORDER BY 
+    pp.Score DESC
+LIMIT 100;

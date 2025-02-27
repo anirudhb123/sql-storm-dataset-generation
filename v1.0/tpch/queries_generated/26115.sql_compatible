@@ -1,0 +1,63 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+HighSupplierCountParts AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.p_brand,
+        rp.p_type,
+        rp.supplier_count,
+        rp.total_available_quantity,
+        rp.total_supply_cost
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    cp.p_name,
+    cp.p_brand,
+    cp.p_type,
+    c.c_name AS customer_name,
+    co.line_item_count,
+    co.total_revenue
+FROM 
+    HighSupplierCountParts cp
+JOIN 
+    CustomerOrders co ON cp.p_type = SUBSTRING(co.c_name, 1, 1) 
+ORDER BY 
+    cp.p_type, co.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

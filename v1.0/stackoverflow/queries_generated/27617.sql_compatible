@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId                     
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId                         
+    WHERE 
+        p.PostTypeId = 1                                   
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Body, p.Tags, p.OwnerUserId
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id = ANY(string_to_array(SUBSTR(rp.Tags, 2, LENGTH(rp.Tags) - 2), '><')::integer[])) AS TagList
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.PostRank = 1                                 
+        AND rp.AnswerCount > 5                         
+),
+
+DetailedPostInfo AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.OwnerDisplayName,
+        fp.OwnerReputation,
+        fp.AnswerCount,
+        fp.CommentCount,
+        fp.VoteCount,
+        fp.TagList,
+        ph.CreationDate AS LastEditDate,
+        ph.Comment AS EditComment
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistory ph ON fp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 24)  
+)
+
+SELECT 
+    d.Title,
+    d.OwnerDisplayName,
+    d.OwnerReputation,
+    d.AnswerCount,
+    d.CommentCount,
+    d.VoteCount,
+    d.TagList,
+    d.LastEditDate,
+    d.EditComment
+FROM 
+    DetailedPostInfo d
+ORDER BY 
+    d.OwnerReputation DESC,                              
+    d.AnswerCount DESC,                                  
+    d.CreationDate DESC;

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.n_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_address, sh.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+part_retail AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_costs
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT
+    s.s_suppkey,
+    s.s_name AS supplier_name,
+    s.s_address AS supplier_address,
+    c.c_name AS customer_name,
+    COALESCE(co.total_orders, 0) AS customer_orders,
+    pr.p_name AS part_name,
+    pr.total_costs,
+    ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY pr.total_costs DESC) AS rank
+FROM supplier_hierarchy s
+LEFT JOIN customer_orders co ON s.n_nationkey = co.c_custkey
+JOIN part_retail pr ON pr.total_costs > 1000 
+WHERE s.level < 3 AND (s.s_address IS NOT NULL AND s.s_address <> '')
+ORDER BY rank, supplier_name;

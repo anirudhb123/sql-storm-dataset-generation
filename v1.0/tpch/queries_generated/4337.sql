@@ -1,0 +1,75 @@
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM
+        supplier s
+    LEFT JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ss.total_available_qty,
+        ss.avg_supply_cost,
+        ss.total_orders,
+        ROW_NUMBER() OVER (ORDER BY ss.total_orders DESC) AS rn
+    FROM
+        SupplierStats ss
+)
+SELECT
+    ts.s_suppkey,
+    ts.s_name,
+    ts.total_available_qty,
+    ts.avg_supply_cost,
+    ts.total_orders,
+    od.o_orderkey,
+    od.total_price,
+    od.line_count,
+    od.return_count
+FROM
+    TopSuppliers ts
+LEFT JOIN
+    OrderDetails od ON ts.total_orders > 5
+WHERE
+    ts.rn <= 10
+ORDER BY
+    ts.total_orders DESC,
+    od.total_price DESC NULLS LAST
+UNION ALL
+SELECT
+    NULL AS s_suppkey,
+    'Total' AS s_name,
+    SUM(ts.total_available_qty) AS total_available_qty,
+    AVG(ts.avg_supply_cost) AS avg_supply_cost,
+    SUM(ts.total_orders) AS total_orders,
+    NULL AS o_orderkey,
+    NULL AS total_price,
+    NULL AS line_count,
+    NULL AS return_count
+FROM
+    TopSuppliers ts;

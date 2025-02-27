@@ -1,0 +1,47 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN vt.Name = 'Favorite' THEN 1 ELSE 0 END) AS Favorites,
+        COALESCE(SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) * 2 - SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END), 0) AS VoteScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(ch.Id) AS CloseCount,
+        MAX(p.CreationDate) AS LastClosedDate
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalVotes,
+        us.VoteScore,
+        ROW_NUMBER() OVER (ORDER BY us.VoteScore DESC) AS Rank
+    FROM UserVoteSummary us
+    WHERE us.TotalVotes > 0
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalVotes,
+    tu.VoteScore,
+    cp.Title AS ClosedPostTitle,
+    cp.CloseCount,
+    cp.LastClosedDate
+FROM TopUsers tu
+LEFT JOIN ClosedPosts cp ON tu.UserId = cp.PostId
+WHERE tu.Rank <= 10
+ORDER BY tu.VoteScore DESC, cp.LastClosedDate DESC;

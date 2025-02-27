@@ -1,0 +1,73 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM
+        orders o
+    WHERE
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        oh.order_level + 1
+    FROM
+        orders o
+    JOIN OrderHierarchy oh ON oh.o_custkey = o.o_custkey
+    WHERE
+        o.o_orderstatus IN ('O', 'P') AND
+        o.o_orderdate > DATEADD(year, -1, DATE '1998-10-01')
+),
+CustomerOrderCounts AS (
+    SELECT
+        c.c_custkey,
+        COUNT(oh.o_orderkey) AS order_count,
+        SUM(oh.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN OrderHierarchy oh ON c.c_custkey = oh.o_custkey
+    GROUP BY
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        coc.order_count,
+        coc.total_spent
+    FROM
+        customer c
+    JOIN CustomerOrderCounts coc ON c.c_custkey = coc.c_custkey
+    WHERE
+        coc.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderCounts)
+)
+SELECT
+    c.c_name,
+    COALESCE(coc.order_count, 0) AS order_count,
+    COALESCE(coc.total_spent, 0) AS total_spent,
+    COALESCE(NULLIF(coc.order_count, 0), 1) AS safe_order_count,
+    (CASE
+        WHEN coc.total_spent IS NULL THEN 'No Orders'
+        WHEN coc.total_spent > 1000 THEN 'High Roller'
+        ELSE 'Regular Customer'
+    END) AS customer_type,
+    ROW_NUMBER() OVER (ORDER BY coc.total_spent DESC) AS rank
+FROM
+    HighValueCustomers hv
+LEFT JOIN CustomerOrderCounts coc ON hv.c_custkey = coc.c_custkey
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM lineitem li
+        JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+        WHERE li.l_orderkey IN (SELECT oh.o_orderkey FROM OrderHierarchy oh WHERE oh.o_custkey = hv.c_custkey)
+        AND ps.ps_availqty < 100
+    )
+ORDER BY
+    total_spent DESC, order_count DESC;

@@ -1,0 +1,58 @@
+WITH RECURSIVE ActorMovies AS (
+    SELECT 
+        c.person_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(CASE WHEN r.role = 'lead' THEN 1 ELSE 0 END), 0) AS lead_role_count
+    FROM 
+        cast_info AS c
+    JOIN 
+        title AS t ON c.movie_id = t.id
+    LEFT JOIN 
+        role_type AS r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id, t.title, t.production_year
+),
+
+ActorInfo AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        COUNT(*) AS total_movies,
+        AVG(am.lead_role_count) AS avg_lead_roles
+    FROM 
+        aka_name AS ak
+    JOIN 
+        ActorMovies AS am ON ak.person_id = am.person_id
+    GROUP BY 
+        a.person_id, ak.name
+),
+
+PopularActors AS (
+    SELECT 
+        a.actor_name,
+        a.total_movies,
+        a.avg_lead_roles,
+        RANK() OVER (ORDER BY a.total_movies DESC) AS rank_total_movies,
+        RANK() OVER (ORDER BY a.avg_lead_roles DESC) AS rank_avg_lead_roles
+    FROM 
+        ActorInfo AS a
+    WHERE 
+        a.total_movies > 10
+) 
+
+SELECT 
+    pa.actor_name,
+    pa.total_movies,
+    pa.avg_lead_roles,
+    CASE 
+        WHEN pa.rank_total_movies = 1 THEN 'Top Actor'
+        ELSE 'Ranked Actor'
+    END AS actor_status,
+    COALESCE(cn.country_code, 'Unknown') AS country_code
+FROM 
+    PopularActors AS pa
+LEFT JOIN 
+    company_name AS cn ON pa.actor_name ILIKE '%' || cn.name || '%'
+ORDER BY 
+    pa.rank_total_movies, pa.avg_lead_roles DESC;

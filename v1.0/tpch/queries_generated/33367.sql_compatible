@@ -1,0 +1,30 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, c.c_name, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey 
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.c_name, oh.o_orderdate, oh.o_totalprice 
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_orderkey + 1 
+)
+SELECT p.p_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue,
+       AVG(s.s_acctbal) AS AverageSupplierBalance,
+       COUNT(DISTINCT c.c_custkey) AS UniqueCustomers,
+       r.r_name AS RegionName
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 10)
+  AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+  AND (l.l_returnflag IS NULL OR l.l_returnflag <> 'R')
+GROUP BY p.p_name, r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY Revenue DESC, RegionName;

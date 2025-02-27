@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS QuestionCount,
+        SUM(rp.ViewCount) AS TotalViews,
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM 
+        UserPostStats
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.QuestionCount,
+    ru.TotalViews,
+    ru.TotalScore,
+    ru.UserRank,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.TagList
+FROM 
+    RankedUsers ru
+JOIN 
+    RankedPosts rp ON ru.UserId = rp.OwnerUserId
+WHERE 
+    ru.UserRank <= 10  -- Show top 10 users
+ORDER BY 
+    ru.UserRank, rp.Score DESC, rp.CreationDate DESC;

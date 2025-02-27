@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(ki.keyword) AS keyword_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword ki ON mk.keyword_id = ki.id
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature')
+        AND t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+PopularMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        title_rank,
+        keyword_count,
+        DENSE_RANK() OVER (ORDER BY keyword_count DESC) AS popularity_rank
+    FROM
+        RankedMovies
+    WHERE
+        title_rank <= 5
+),
+ActorMovies AS (
+    SELECT
+        p.person_id,
+        STRING_AGG(DISTINCT m.title, ', ') AS movies,
+        COUNT(DISTINCT m.id) AS total_movies
+    FROM
+        cast_info ci
+    JOIN
+        aka_name p ON ci.person_id = p.person_id
+    JOIN
+        aka_title m ON ci.movie_id = m.id
+    GROUP BY
+        p.person_id
+)
+SELECT
+    pm.title,
+    pm.production_year,
+    pm.keyword_count,
+    COALESCE(am.total_movies, 0) AS actors_involved,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+FROM
+    PopularMovies pm
+LEFT JOIN
+    ActorMovies am ON pm.movie_id IN (SELECT movie_id FROM cast_info WHERE person_id = am.person_id)
+LEFT JOIN
+    aka_name a ON am.person_id = a.person_id
+GROUP BY
+    pm.movie_id, pm.title, pm.production_year, pm.keyword_count
+HAVING
+    pm.keyword_count >= 3
+ORDER BY
+    pm.production_year DESC,
+    pm.keyword_count DESC
+LIMIT 10;
+
+-- The above query retrieves popular movies based on keyword counts with title rankings by production year.
+-- It also aggregates actor names and their respective movie counts while filtering by several criteria.

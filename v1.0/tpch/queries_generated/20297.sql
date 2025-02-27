@@ -1,0 +1,40 @@
+WITH RECURSIVE supplier_tree AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, st.s_name, st.s_acctbal + s.s_acctbal, st.level + 1
+    FROM supplier s
+    JOIN supplier_tree st ON s.s_suppkey = st.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+)
+, part_supplier_data AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    n.n_name AS nation_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    ROW_NUMBER() OVER(PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    st.level AS supplier_level,
+    pt.total_supply_cost
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN supplier_tree st ON c.c_nationkey = st.s_suppkey
+JOIN part_supplier_data pt ON pt.ps_partkey = p.p_partkey
+WHERE o.o_orderstatus IN ('F', 'O')
+AND (EXISTS (SELECT 1 FROM customer c2 WHERE c2.c_custkey = o.o_custkey AND c2.c_acctbal < 5000)
+      OR NOT EXISTS (SELECT 1 FROM lineitem l2 WHERE l2.l_orderkey = o.o_orderkey AND l2.l_returnflag = 'R'))
+GROUP BY p.p_partkey, p.p_name, n.n_name, st.level, pt.total_supply_cost
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 
+    (SELECT AVG(l1.l_extendedprice) FROM lineitem l1 WHERE l1.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31')
+ORDER BY revenue_rank, revenue DESC
+LIMIT 100;

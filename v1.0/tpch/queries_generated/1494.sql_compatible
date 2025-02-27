@@ -1,0 +1,61 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS distinct_parts_supplied,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rn,
+        s.s_suppkey
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent
+    FROM 
+        customer c
+    JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+)
+SELECT 
+    ss.s_name AS supplier_name,
+    ss.total_available_quantity,
+    ss.avg_supply_cost,
+    hvc.c_name AS high_value_customer,
+    hvc.total_spent,
+    (SELECT COUNT(*) 
+     FROM lineitem l 
+     WHERE l.l_suppkey = ss.s_suppkey 
+       AND l.l_shipdate > DATE '1998-10-01' - INTERVAL '1 year') AS recent_shipments
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_spent > ss.avg_supply_cost
+WHERE 
+    ss.rn <= 5
+ORDER BY 
+    ss.total_available_quantity DESC, 
+    hvc.total_spent DESC NULLS LAST;

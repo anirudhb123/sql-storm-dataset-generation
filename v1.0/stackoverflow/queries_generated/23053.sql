@@ -1,0 +1,88 @@
+WITH PostScoreCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(
+            (SELECT SUM(V.BountyAmount) 
+             FROM Votes AS V 
+             WHERE V.PostId = P.Id AND V.VoteTypeId = 8), 0
+        ) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts AS P
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+UserReputationStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(B.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(B.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(B.Class = 3), 0) AS BronzeBadges
+    FROM 
+        Users AS U
+    LEFT JOIN 
+        Badges AS B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS CloseCount,
+        MAX(PH.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory AS PH
+    WHERE 
+        PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        PH.PostId
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(PS.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(PS.Score, 0)) AS AvgScore,
+        COALESCE(CP.CloseCount, 0) AS ClosedPostCount,
+        COALESCE(CP.LastCloseDate, NULL) AS LastClosedDate
+    FROM 
+        Users AS U
+    LEFT JOIN 
+        Posts AS P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PostScoreCTE AS PS ON P.Id = PS.PostId
+    LEFT JOIN 
+        ClosedPosts AS CP ON P.Id = CP.PostId
+    GROUP BY 
+        U.Id, CP.CloseCount, CP.LastCloseDate
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UPS.TotalPosts,
+    UPS.TotalViews,
+    UPS.AvgScore,
+    UPS.ClosedPostCount,
+    COALESCE(UPS.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    P.Title AS TopScoringPost,
+    P.Score AS TopPostScore,
+    P.TotalBounty AS TopPostBounty
+FROM 
+    UserPostStats AS UPS
+JOIN 
+    PostScoreCTE AS P ON UPS.UserId = P.OwnerUserId
+JOIN 
+    UserReputationStats AS URS ON UPS.UserId = URS.UserId
+WHERE 
+    P.Rank = 1
+    AND UPS.TotalPosts > 0
+ORDER BY 
+    UPS.TotalViews DESC, 
+    URS.Reputation DESC
+LIMIT 10;

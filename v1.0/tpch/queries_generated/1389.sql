@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT *
+    FROM RankedSuppliers
+    WHERE supplier_rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LitigationDetails AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS total_lines,
+        (SUM(l.l_extendedprice * (1 - l.l_discount)) * 1.0) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(Top.total_supply_cost), 0) AS supplier_cost,
+    COALESCE(cd.total_order_value, 0) AS customer_order_value,
+    COALESCE(ld.total_revenue, 0) AS order_line_revenue
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrders cd ON c.c_custkey = cd.c_custkey
+LEFT JOIN 
+    (SELECT DISTINCT ps.ps_partkey, ts.s_suppkey 
+     FROM partsupp ps 
+     JOIN TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey) AS Top ON c.c_custkey = Top.ps_partkey
+LEFT JOIN 
+    LitigationDetails ld ON ld.l_orderkey = c.c_custkey
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(COALESCE(Top.total_supply_cost, 0)) > 0 OR COALESCE(cd.total_order_value, 0) > 1000
+ORDER BY 
+    c.c_name;

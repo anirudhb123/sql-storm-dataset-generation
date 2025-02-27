@@ -1,0 +1,43 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, 
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_city) AS city_rank
+    FROM customer_address
+    WHERE ca_country = 'USA' AND ca_state IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, 
+           cd_purchase_estimate, LEAST(cd_dep_count, cd_dep_employed_count) AS min_dependent_count
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 1000
+),
+SalesSummary AS (
+    SELECT ws_bill_customer_sk, SUM(ws_net_profit) AS total_profit,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+OutlierReturn AS (
+    SELECT sr_customer_sk, SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    WHERE sr_return_quantity > 10
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 30
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    cd.min_dependent_count,
+    COALESCE(ss.total_profit, 0) AS total_profit,
+    CASE WHEN ss.order_count IS NULL THEN 'No Orders' ELSE 'Orders Exist' END AS order_status,
+    CASE 
+        WHEN or.total_returns > 0 THEN 'High Return User' 
+        ELSE 'Normal User' 
+    END AS user_type
+FROM AddressHierarchy ca
+LEFT JOIN CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer WHERE ca_address_sk = c_current_addr_sk LIMIT 1)
+LEFT JOIN SalesSummary ss ON ss.ws_bill_customer_sk = (SELECT c_customer_sk FROM customer WHERE ca_address_sk = c_current_addr_sk LIMIT 1)
+LEFT JOIN OutlierReturn or ON or.sr_customer_sk = (SELECT c_customer_sk FROM customer WHERE ca_address_sk = c_current_addr_sk LIMIT 1)
+WHERE ca.city_rank = 1 OR (cd.cd_marital_status = 'S' AND cd.cd_gender = 'F')
+ORDER BY ca.ca_state, total_profit DESC, cd.min_dependent_count;

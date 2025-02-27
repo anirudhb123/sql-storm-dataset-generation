@@ -1,0 +1,60 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        Ph.PostId,
+        Ph.CreationDate,
+        Ph.PostHistoryTypeId,
+        Ph.UserId,
+        1 AS RevisionLevel
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.PostHistoryTypeId IN (1, 4, 10) -- Initial titles, edits, and closes
+
+    UNION ALL
+
+    SELECT 
+        Ph.PostId, 
+        Ph.CreationDate,
+        Ph.PostHistoryTypeId,
+        Ph.UserId,
+        R.RevisionLevel + 1
+    FROM 
+        PostHistory Ph
+    INNER JOIN 
+        RecursivePostHistory R ON Ph.PostId = R.PostId
+    WHERE 
+        Ph.CreationDate > R.CreationDate
+)
+
+SELECT 
+    P.Title,
+    U.DisplayName AS OwnerDisplayName,
+    COUNT(C.Id) AS CommentCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    AVG(Ph.RevisionLevel) AS AverageRevisionLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    MAX(Ph.CreationDate) AS LastEditDate,
+    P.Score,
+    COALESCE(P.ClosedDate, 'Open') AS PostStatus
+FROM 
+    Posts P
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    RecursivePostHistory Ph ON P.Id = Ph.PostId
+LEFT JOIN 
+    (SELECT Id, TagName FROM Tags WHERE IsModeratorOnly = 0) T ON P.Tags LIKE '%' || T.TagName || '%'
+WHERE 
+    P.CreationDate >= '2023-01-01' AND
+    (U.Reputation >= 1000 OR U.Location IS NULL) -- Filtering based on reputation and location
+GROUP BY 
+    P.Id, U.DisplayName
+ORDER BY 
+    P.Score DESC,
+    LastEditDate DESC
+LIMIT 100;

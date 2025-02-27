@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS TagName
+        ) AS t ON TRUE
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, p.Tags, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, Title, Body, Rank, ViewCount, TagList, OwnerDisplayName
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.Body,
+    trp.ViewCount,
+    trp.TagList,
+    trp.OwnerDisplayName,
+    
+    (SELECT COUNT(DISTINCT h.Id) 
+     FROM PostHistory h 
+     WHERE h.PostId = trp.PostId AND h.PostHistoryTypeId IN (10, 11, 12, 13)) AS EditCount,
+    
+    (SELECT 
+        JSON_AGG(JSON_BUILD_OBJECT('Type', vt.Name, 'Count', COUNT(v.Id)) ORDER BY COUNT(v.Id) DESC)
+     FROM 
+        Votes v 
+     JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id 
+     WHERE 
+        v.PostId = trp.PostId 
+     GROUP BY 
+        vt.Name) AS VoteSummary
+    
+FROM 
+    TopRankedPosts trp
+ORDER BY 
+    trp.ViewCount DESC
+LIMIT 10;

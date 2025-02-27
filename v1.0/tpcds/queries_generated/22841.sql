@@ -1,0 +1,60 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.web_site_sk) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_profit IS NOT NULL
+), 
+item_count AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(wr.wr_return_quantity) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        CASE 
+            WHEN inv.inv_quantity_on_hand > 0 THEN 'In Stock'
+            WHEN inv.inv_quantity_on_hand IS NULL THEN 'Unknown'
+            ELSE 'Out of Stock'
+        END AS stock_status
+    FROM 
+        inventory inv
+)
+SELECT 
+    ca.ca_city,
+    COALESCE(i.i_product_name, 'Unknown Product') AS product_name,
+    SUM(COALESCE(rs.ws_net_profit, 0)) AS total_profit,
+    MAX(is.stock_status) AS current_stock_status,
+    COUNT(DISTINCT rs.profit_rank) AS number_of_profit_ranks,
+    AVG(ic.total_returns) AS avg_returns
+FROM 
+    customer_address ca
+LEFT JOIN 
+    ranked_sales rs ON ca.ca_address_sk = rs.web_site_sk
+LEFT JOIN 
+    item i ON rs.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    item_count ic ON i.i_item_sk = ic.wr_item_sk
+JOIN 
+    inventory_status is ON i.i_item_sk = is.inv_item_sk
+WHERE 
+    ca.ca_country = 'USA' 
+    AND (total_profit > (SELECT AVG(total_profit) FROM ranked_sales) 
+    OR total_profit < (SELECT AVG(total_profit) FROM ranked_sales WHERE total_profit IS NOT NULL))
+GROUP BY 
+    ca.ca_city, product_name
+HAVING 
+    SUM(COALESCE(rs.ws_net_profit, 0)) > 0
+ORDER BY 
+    total_profit DESC;

@@ -1,0 +1,87 @@
+WITH TagCounts AS (
+    SELECT 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE 
+            WHEN p.PoStTypeId = 1 THEN 1 
+            ELSE 0 
+        END) AS QuestionCount,
+        SUM(CASE 
+            WHEN p.PostTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS AnswerCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS Upvotes,
+        SUM(CASE 
+            WHEN v.VoteTypeId = 3 THEN 1 
+            ELSE 0 
+        END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        MIN(h.CreationDate) AS FirstEditDate,
+        MAX(h.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT h.PostHistoryTypeId) AS EditTypeCount,
+        STRING_AGG(DISTINCT CASE 
+            WHEN h.PostHistoryTypeId IN (4, 5, 6) THEN h.Comment 
+            END, '; ') AS EditComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory h ON p.Id = h.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    ue.UserId,
+    ue.DisplayName,
+    ue.CommentCount,
+    ue.VoteCount,
+    ue.Upvotes,
+    ue.Downvotes,
+    phs.FirstEditDate,
+    phs.LastEditDate,
+    phs.EditTypeCount,
+    phs.EditComments
+FROM 
+    TagCounts tc
+JOIN 
+    Posts p ON tc.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+JOIN 
+    UserEngagement ue ON ue.UserId = p.OwnerUserId
+JOIN 
+    PostHistoryStats phs ON phs.PostId = p.Id
+WHERE 
+    tc.PostCount > 10 
+    AND ue.CommentCount > 5 
+ORDER BY 
+    tc.PostCount DESC, 
+    ue.Upvotes DESC;

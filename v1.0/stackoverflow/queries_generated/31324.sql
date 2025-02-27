@@ -1,0 +1,89 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId AND c.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(ph.PostCount, 0) AS ChildCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS PostCount
+        FROM 
+            Posts
+        WHERE 
+            ParentId IS NOT NULL
+        GROUP BY 
+            ParentId
+    ) ph ON p.Id = ph.ParentId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '60 days'
+)
+SELECT 
+    u.DisplayName AS User,
+    r.PostId AS RecentPostId,
+    ps.Title AS PostTitle,
+    ps.CreationDate AS PostCreationDate,
+    ps.Score AS PostScore,
+    ps.ViewCount AS PostViewCount,
+    ra.ChildCount AS RelatedPostCount,
+    ru.PostsCreated,
+    ru.CommentsMade,
+    ru.TotalBounties
+FROM 
+    RecentUserActivity ru
+JOIN 
+    Posts r ON ru.UserId = r.OwnerUserId
+JOIN 
+    PostStats ps ON ps.PostId = r.Id
+LEFT JOIN 
+    RecursivePostHierarchy rp ON ps.PostId = rp.PostId
+WHERE 
+    ru.PostsCreated > 0
+    AND ru.CommentsMade > 0
+    AND ps.RowNum <= 5
+ORDER BY 
+    ru.TotalBounties DESC, 
+    ps.Score DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_mfgr, p_size, p_retailprice, NULL AS parent_partkey
+    FROM part
+    WHERE p_size <= 10
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_size, p.p_retailprice, ph.p_partkey
+    FROM part p
+    JOIN PartHierarchy ph ON ph.p_partkey = p.p_partkey
+    WHERE p.p_size > 10
+),
+SupplierPrices AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS total_orders, COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT ph.p_partkey, ph.p_name, COALESCE(sp.total_supplycost, 0) AS total_supplycost,
+       COALESCE(os.total_revenue, 0) AS total_revenue,
+       COALESCE(cos.total_orders, 0) AS total_orders, cos.total_spent
+FROM PartHierarchy ph
+LEFT JOIN SupplierPrices sp ON ph.p_partkey = sp.ps_partkey
+LEFT JOIN OrderStats os ON ph.p_partkey IN (SELECT l.l_partkey FROM lineitem l)
+LEFT JOIN CustomerOrderStats cos ON cos.total_orders > 0
+JOIN NationRegion nr ON nr.n_nationkey = (
+    SELECT s.s_nationkey
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = ph.p_partkey)
+    LIMIT 1
+)
+WHERE ph.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < ph.p_size
+)
+ORDER BY total_orders DESC, total_spent DESC;

@@ -1,0 +1,70 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN 
+        info_type it ON pi.info_type_id = it.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+        AND m.title IS NOT NULL
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword
+), RankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        keyword,
+        cast_count,
+        has_note,
+        RANK() OVER (PARTITION BY production_year ORDER BY cast_count DESC) AS rank_by_cast
+    FROM 
+        MovieDetails
+), FilteredRankedMovies AS (
+    SELECT 
+        movie_id, title, production_year, keyword, cast_count, rank_by_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 5
+    UNION ALL
+    SELECT 
+        movie_id, title, production_year, keyword, cast_count, rank_by_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        keyword IS NOT NULL
+        AND has_note > 0
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.keyword,
+    f.cast_count,
+    CASE 
+        WHEN f.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Cast Available'
+    END AS cast_availability
+FROM 
+    FilteredRankedMovies f
+ORDER BY 
+    f.production_year DESC, 
+    f.cast_count DESC;

@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS cast_member_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS has_note_avg,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_member_count,
+        CASE 
+            WHEN rm.has_note_avg > 0 THEN 'Yes'
+            ELSE 'No'
+        END AS has_note
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.cast_member_count > 5 AND rm.rn <= 20
+)
+SELECT 
+    fm.title_id,
+    fm.title,
+    fm.production_year,
+    COALESCE(MAX(mk.keyword), 'No Keywords') AS keywords,
+    COALESCE(COUNT(mk.keyword), 0) AS keyword_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_keyword mk ON fm.title_id = mk.movie_id
+GROUP BY 
+    fm.title_id, fm.title, fm.production_year
+HAVING 
+    COUNT(mk.keyword) > 0 OR fm.has_note = 'Yes'
+ORDER BY 
+    fm.production_year DESC, keyword_count DESC;
+

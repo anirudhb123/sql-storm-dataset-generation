@@ -1,0 +1,36 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword) AS total_keywords,
+        COUNT(DISTINCT mci.company_id) AS total_companies,
+        RANK() OVER (ORDER BY COUNT(DISTINCT c.person_id) DESC) AS movie_rank
+    FROM title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN movie_companies mci ON t.id = mci.movie_id
+    WHERE t.production_year > 2000
+    GROUP BY t.id
+), filtered_movies AS (
+    SELECT * FROM ranked_movies WHERE movie_rank <= 10
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    fm.total_keywords,
+    fm.total_companies,
+    ak.name AS aka_name,
+    co.name AS company_name,
+    rc.role AS cast_role
+FROM filtered_movies fm
+LEFT JOIN aka_title ak ON fm.movie_id = ak.movie_id
+LEFT JOIN movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN company_name co ON mc.company_id = co.id
+LEFT JOIN cast_info c ON fm.movie_id = c.movie_id
+LEFT JOIN role_type rc ON c.role_id = rc.id
+ORDER BY fm.movie_id;

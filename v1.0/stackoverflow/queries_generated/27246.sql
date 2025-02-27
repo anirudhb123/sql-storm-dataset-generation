@@ -1,0 +1,100 @@
+WITH TagCounts AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    GROUP BY 
+        u.Id
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id
+),
+EmphasizedData AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ts.TagName,
+        ts.PostCount,
+        ups.TotalPosts,
+        ups.QuestionCount,
+        ups.AnswerCount,
+        tb.BadgeCount,
+        tb.HighestBadgeClass,
+        pa.Title,
+        pa.ViewCount,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes
+    FROM 
+        Users u
+    JOIN 
+        UserPostStats ups ON u.Id = ups.UserId
+    JOIN 
+        TagCounts ts ON ts.PostCount > 5  -- Consider tags used in more than 5 posts
+    JOIN 
+        TopBadges tb ON u.Id = tb.UserId
+    JOIN 
+        PostActivity pa ON pa.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+    WHERE 
+        u.Reputation > 1000  -- Filter to only include high-reputation users
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    TagName,
+    PostCount,
+    TotalPosts,
+    QuestionCount,
+    AnswerCount,
+    BadgeCount,
+    HighestBadgeClass,
+    Title,
+    ViewCount,
+    CommentCount,
+    UpVotes,
+    DownVotes
+FROM 
+    EmphasizedData
+ORDER BY 
+    Reputation DESC, TagName;

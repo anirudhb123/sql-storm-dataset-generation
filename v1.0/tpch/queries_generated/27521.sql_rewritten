@@ -1,0 +1,32 @@
+SELECT 
+    CONCAT(s.s_name, ' ', s.s_address) AS supplier_info,
+    SUBSTRING(p.p_name, 1, 20) AS short_product_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    CUBE(CONCAT(n.n_name, '-', r.r_name)) AS region_nation_combo
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    AND p.p_retailprice > 50.00
+GROUP BY 
+    supplier_info, short_product_name WITH ROLLUP
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_quantity DESC, avg_extended_price ASC;

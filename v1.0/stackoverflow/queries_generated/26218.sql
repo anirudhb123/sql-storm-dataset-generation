@@ -1,0 +1,88 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        COUNT(DISTINCT PostId) AS PostCount
+    FROM 
+        Tags 
+    JOIN 
+        Posts ON Tags.Id = Posts.Id
+    GROUP BY 
+        Id, TagName
+), TagRankings AS (
+    SELECT 
+        TagId, 
+        TagName, 
+        PostCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        RecursiveTagCounts
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, b.Class
+), TopUsersWithBadges AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        SUM(CASE WHEN Class = 1 THEN BadgeCount ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN BadgeCount ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN BadgeCount ELSE 0 END) AS BronzeBadges
+    FROM 
+        UserBadges
+    GROUP BY 
+        UserId, DisplayName
+    ORDER BY 
+        GoldBadges DESC, SilverBadges DESC, BronzeBadges DESC
+    LIMIT 10
+), PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.Score
+    ORDER BY 
+        ViewCount DESC, Score DESC
+    LIMIT 5
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    u.DisplayName,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    p.Title AS PopularPostTitle,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.Score
+FROM 
+    TagRankings t
+JOIN 
+    TopUsersWithBadges u ON u.UserId = (
+        SELECT MIN(au.UserId) FROM TopUsersWithBadges au WHERE au.GoldBadges > 0
+    )
+LEFT JOIN 
+    PopularPosts p ON p.Tags LIKE '%' || t.TagName || '%'
+ORDER BY 
+    t.Rank, u.DisplayName;

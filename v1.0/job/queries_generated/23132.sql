@@ -1,0 +1,73 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        COALESCE(ak.imdb_index, 'N/A') AS actor_index,
+        cct.kind AS role_type,
+        COUNT(*) AS appearance_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        comp_cast_type cct ON ci.person_role_id = cct.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ci.movie_id, ak.name, ak.imdb_index, cct.kind
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    fc.actor_name,
+    fc.actor_index,
+    fc.role_type,
+    fc.appearance_count,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    rm.cast_count,
+    CASE 
+        WHEN rm.cast_count > 10 THEN 'Large Cast'
+        WHEN rm.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Regular Cast'
+    END AS cast_size,
+    CASE 
+        WHEN rm.title_rank = 1 AND rm.production_year = 2023 THEN 'Top Movie of 2023' 
+        ELSE 'Not a Top Movie' 
+    END AS special_flag
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    filtered_cast fc ON rm.movie_id = fc.movie_id
+LEFT JOIN 
+    movie_keywords mk ON rm.movie_id = mk.movie_id
+WHERE 
+    (rm.production_year BETWEEN 2000 AND 2023) 
+    AND (fc.appearance_count IS NULL OR fc.appearance_count > 2)
+ORDER BY 
+    rm.production_year DESC, rm.title;
+

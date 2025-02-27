@@ -1,0 +1,79 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        1 AS level
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    UNION ALL
+    SELECT 
+        p2.p_partkey,
+        p2.p_name,
+        sc.ps_suppkey,
+        sc.ps_availqty - COALESCE(l.total_quantity, 0) AS ps_availqty,
+        sc.ps_supplycost,
+        sc.level + 1
+    FROM 
+        SupplyChain sc
+    JOIN 
+        part p2 ON sc.ps_suppkey = (SELECT ps2.ps_suppkey FROM partsupp ps2 WHERE ps2.ps_partkey = p2.p_partkey LIMIT 1)
+    LEFT JOIN 
+        (SELECT l.l_partkey, SUM(l.l_quantity) AS total_quantity 
+         FROM lineitem l 
+         GROUP BY l.l_partkey) l ON p2.p_partkey = l.l_partkey
+    WHERE 
+        sc.ps_availqty > 0 
+        AND sc.level < 5
+), OrdersSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_custkey) AS cust_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey
+), TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_supply_cost DESC
+    LIMIT 5
+)
+SELECT 
+    sc.p_partkey,
+    sc.p_name,
+    ts.s_name AS supplier_name,
+    os.total_sales,
+    os.cust_count,
+    CASE 
+        WHEN os.cust_count IS NULL THEN 'NO ORDERS'
+        ELSE 'ORDERS EXIST'
+    END AS order_status
+FROM 
+    SupplyChain sc
+LEFT JOIN 
+    OrdersSummary os ON os.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = sc.p_partkey) LIMIT 1)
+JOIN 
+    TopSuppliers ts ON ts.s_suppkey = sc.ps_suppkey
+WHERE 
+    sc.ps_availqty > 0
+ORDER BY 
+    sc.p_partkey, ts.total_supply_cost DESC;

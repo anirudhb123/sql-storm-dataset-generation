@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           s.s_acctbal, s.s_comment, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, 
+           s.s_acctbal + ps.ps_supplycost AS s_acctbal, 
+           CONCAT(s.s_comment, ' | Extended with ', ps.ps_comment) AS s_comment, 
+           depth + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN SupplierChain sc ON ps.ps_partkey = ANY(ARRAY(SELECT l.l_partkey FROM lineitem l WHERE l.l_suppkey = sc.s_suppkey))
+    WHERE sc.depth < 10
+),
+
+NationStatistics AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS cust_count,
+           AVG(c.c_acctbal) AS avg_balance, SUM(c.c_acctbal) AS total_balance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+),
+
+TopPartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_avail,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+
+ComplexSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_orderkey) AS line_item_count,
+           RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY o.o_orderkey
+)
+
+SELECT n.n_name, ns.cust_count, ns.avg_balance, n.n_comment AS comment,
+       ps.ps_partkey, ps.total_avail, ps.total_supplycost,
+       sc.s_name, sc.depth, cs.total_sales, cs.line_item_count
+FROM NationStatistics ns
+JOIN nation n ON n.n_name = ns.n_name
+LEFT JOIN TopPartSuppliers ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_mfgr LIKE 'AM%' AND p.p_retailprice BETWEEN 1 AND 100)
+LEFT JOIN SupplierChain sc ON sc.s_nationkey = n.n_nationkey
+LEFT JOIN ComplexSales cs ON cs.o_orderkey = (SELECT o_orderkey FROM orders ORDER BY o_orderkey DESC LIMIT 1)
+WHERE (ps.total_avail IS NULL OR ps.total_supplycost IS NOT NULL)
+AND (sc.depth BETWEEN 0 AND 5 OR cs.line_item_count > 10)
+ORDER BY ns.total_balance DESC NULLS LAST;

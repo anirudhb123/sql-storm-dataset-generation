@@ -1,0 +1,86 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND 
+        o.o_orderdate < '2023-01-01'
+),
+
+supplier_part_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+
+customer_expenditure AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_expenditure
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+
+joined_data AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        s.s_name,
+        SUM(ps.total_available) AS total_available_parts,
+        ce.total_expenditure,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        supplier_part_stats ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        customer_expenditure ce ON s.s_nationkey = ce.c_custkey
+    LEFT JOIN 
+        orders o ON s.s_suppkey = o.o_custkey
+    GROUP BY 
+        r.r_name, n.n_name, s.s_name
+)
+
+SELECT 
+    jd.r_name,
+    jd.n_name,
+    jd.s_name,
+    COALESCE(jd.total_available_parts, 0) AS total_available_parts,
+    COALESCE(jd.total_expenditure, 0.00) AS total_expenditure,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY jd.r_name) AS region_order_count,
+    CASE 
+        WHEN jd.order_count > 5 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM 
+    joined_data jd
+JOIN 
+    orders o ON jd.s_name = o.o_custkey
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_orderkey = o.o_orderkey 
+        AND l.l_returnflag = 'R'
+    )
+ORDER BY 
+    jd.r_name, jd.n_name, jd.s_name;

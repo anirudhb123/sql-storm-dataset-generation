@@ -1,0 +1,85 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges,
+        COALESCE(SUM(CASE WHEN B.TagBased = 1 THEN 1 ELSE 0 END), 0) AS TagBasedBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostCounts AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(P.Score) AS TotalScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        UC.TotalPosts,
+        UC.Questions,
+        UC.Answers,
+        UC.TotalScore,
+        UBC.GoldBadges,
+        UBC.SilverBadges,
+        UBC.BronzeBadges,
+        UBC.TagBasedBadges
+    FROM Users U
+    LEFT JOIN PostCounts UC ON U.Id = UC.OwnerUserId
+    LEFT JOIN UserBadgeCounts UBC ON U.Id = UBC.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UA.CreationDate,
+        UA.LastAccessDate,
+        UA.TotalPosts,
+        UA.Questions,
+        UA.Answers,
+        UA.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY UA.TotalPosts DESC, UA.TotalScore DESC) AS Rank
+    FROM UserActivity UA
+    WHERE UA.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' AND UA.Reputation > 100
+)
+SELECT 
+    AU.DisplayName,
+    AU.Reputation,
+    AU.TotalPosts,
+    AU.Questions,
+    AU.Answers,
+    AU.TotalScore,
+    AU.Rank,
+    COALESCE(UB.CaseCount, 0) AS ClosePostCount,
+    SUM(V.BountyAmount) AS TotalBounty
+FROM ActiveUsers AU
+LEFT JOIN PostHistory PH ON PH.UserId = AU.UserId AND PH.PostHistoryTypeId IN (10, 11)
+LEFT JOIN (
+    SELECT 
+        V.UserId, 
+        SUM(V.BountyAmount) AS BountyAmount
+    FROM Votes V
+    WHERE V.VoteTypeId IN (8, 9)
+    GROUP BY V.UserId
+) AS V ON AU.UserId = V.UserId
+LEFT JOIN (
+    SELECT 
+        PH.UserId, 
+        COUNT(*) AS CaseCount
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY PH.UserId
+) AS UB ON AU.UserId = UB.UserId
+GROUP BY AU.DisplayName, AU.Reputation, AU.TotalPosts, AU.Questions, AU.Answers, AU.TotalScore, AU.Rank, UB.CaseCount
+ORDER BY AU.Rank;

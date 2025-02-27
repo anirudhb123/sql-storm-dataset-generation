@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        COUNT(cr.cr_return_quantity) AS TotalReturns,
+        COALESCE(SUM(cr.cr_return_amt), 0) AS TotalReturnAmount,
+        STRING_AGG(DISTINCT cr.cr_reason_sk::text, ',') AS ReturnReasons
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_desc,
+        item.i_current_price,
+        COALESCE(cs.TotalSales, 0) AS TotalSales,
+        COALESCE(cr.TotalReturns, 0) AS TotalReturns,
+        COALESCE(cr.TotalReturnAmount, 0) AS TotalReturnAmount
+    FROM 
+        item
+    LEFT JOIN (
+        SELECT 
+            cs.cs_item_sk,
+            SUM(cs.cs_ext_sales_price) AS TotalSales
+        FROM 
+            catalog_sales cs
+        GROUP BY 
+            cs.cs_item_sk
+    ) cs ON item.i_item_sk = cs.cs_item_sk
+    LEFT JOIN CustomerReturns cr ON item.i_item_sk = cr.cr_item_sk
+    WHERE 
+        item.i_current_price BETWEEN 1.00 AND 1000.00 
+        AND item.i_rec_start_date <= CURRENT_DATE 
+        AND (item.i_rec_end_date IS NULL OR item.i_rec_end_date > CURRENT_DATE)
+),
+FinalSelection AS (
+    SELECT 
+        ti.i_item_sk,
+        ti.i_item_desc,
+        ti.TotalSales,
+        ti.TotalReturns,
+        ti.TotalReturnAmount,
+        ROW_NUMBER() OVER (ORDER BY ti.TotalSales DESC, ti.TotalReturns ASC) AS FinalRank
+    FROM 
+        TopItems ti
+    WHERE 
+        ti.TotalReturns < COALESCE((SELECT AVG(TotalReturns) FROM TopItems), 10)
+)
+SELECT 
+    fs.i_item_sk,
+    fs.i_item_desc,
+    fs.TotalSales,
+    fs.TotalReturns,
+    fs.TotalReturnAmount,
+    COALESCE(r.SalesRank, 0) AS BestSalesRank
+FROM 
+    FinalSelection fs
+LEFT JOIN RankedSales r ON fs.i_item_sk = r.ws_item_sk AND r.SalesRank = 1
+WHERE 
+    fs.FinalRank <= 10
+ORDER BY 
+    fs.TotalSales DESC, fs.TotalReturnAmount DESC;

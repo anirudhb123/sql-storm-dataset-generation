@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent,
+           DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+RegionNation AS (
+    SELECT r.r_name, n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT rh.s_name AS supplier_name, 
+       os.total_orders,
+       pv.p_name AS part_name,
+       COUNT(DISTINCT os.c_custkey) OVER (PARTITION BY rh.s_nationkey) AS total_customers,
+       rn.r_name,
+       rn.customer_count
+FROM SupplierHierarchy rh
+JOIN CustomerOrderSummary os ON rh.s_nationkey = os.c_nationkey
+JOIN PartSupplier pv ON pv.rn = 1
+JOIN RegionNation rn ON rn.n_name = (SELECT n_name FROM nation WHERE n_nationkey = rh.s_nationkey)
+WHERE rh.s_name IS NOT NULL
+   AND os.total_spent > 1000
+ORDER BY os.total_spent DESC, supplier_name;

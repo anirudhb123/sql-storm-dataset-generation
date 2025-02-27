@@ -1,0 +1,74 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned_quantity,
+        SUM(cr_return_amt) AS total_return_amount,
+        cr_returned_date_sk
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk, cr_returned_date_sk
+),
+CustomerSales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_paid) AS total_sales_amount
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        cs.customer_sk,
+        COALESCE(cs.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(cs.total_sales_amount, 0) AS total_sales_amount,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount
+    FROM 
+        CustomerSales cs
+    FULL OUTER JOIN 
+        CustomerReturns cr ON cs.customer_sk = cr.cr_returning_customer_sk
+),
+AggregateData AS (
+    SELECT 
+        s.customer_sk,
+        s.total_sales_quantity,
+        s.total_sales_amount,
+        s.total_returned_quantity,
+        s.total_return_amount,
+        CASE 
+            WHEN s.total_sales_amount > 0 THEN (s.total_return_amount / s.total_sales_amount) 
+            ELSE NULL 
+        END AS return_rate
+    FROM 
+        SalesAndReturns s
+)
+SELECT 
+    ad.customer_sk,
+    ad.total_sales_quantity,
+    ad.total_sales_amount,
+    ad.total_returned_quantity,
+    ad.total_return_amount,
+    ad.return_rate,
+    d.d_date AS sales_date,
+    d.d_month,
+    d.d_year,
+    RANK() OVER (ORDER BY ad.total_sales_amount DESC) AS sales_rank
+FROM 
+    AggregateData ad
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = (
+        SELECT MAX(d_date_sk) 
+        FROM date_dim 
+        WHERE d_year = EXTRACT(YEAR FROM DATE '2002-10-01') 
+        AND d_current_month = '1'
+    )
+WHERE 
+    ad.return_rate IS NOT NULL 
+    AND ad.return_rate > 0.1
+ORDER BY 
+    ad.total_sales_amount DESC
+LIMIT 100;

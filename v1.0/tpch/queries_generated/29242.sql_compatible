@@ -1,0 +1,46 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_nationkey,
+           s.s_acctbal, 
+           SUBSTRING(s.s_comment, 1, 30) AS short_comment,
+           LENGTH(s.s_comment) AS comment_length
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+), 
+PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand,
+           p.p_retailprice,
+           p.p_comment,
+           REPLACE(UPPER(p.p_name), ' ', '_') AS formatted_name
+    FROM part p
+    WHERE p.p_retailprice < 500
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           c.c_address,
+           c.c_accountbal,
+           INITCAP(c.c_mktsegment) AS market_segment,
+           LENGTH(c.c_comment) AS comment_length
+    FROM customer c
+    WHERE c.c_accountbal > 5000
+)
+SELECT 
+    p.p_name, 
+    p.formatted_name, 
+    s.s_name AS supplier_name, 
+    c.c_name AS customer_name, 
+    LENGTH(CONCAT(p.p_comment, ' ', s.short_comment, ' ', c.c_comment)) AS combined_comment_length
+FROM PartDetails p
+JOIN SupplierDetails s ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey LIMIT 1)
+JOIN CustomerDetails c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey LIMIT 1) LIMIT 1)
+GROUP BY p.p_name, 
+         p.formatted_name, 
+         s.s_name, 
+         c.c_name
+ORDER BY combined_comment_length DESC
+LIMIT 50;

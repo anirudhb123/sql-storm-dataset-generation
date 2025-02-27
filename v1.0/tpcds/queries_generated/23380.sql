@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        COUNT(ws.ws_order_number) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL 
+        AND i.i_item_desc LIKE '%widget%'
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopProducts AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.total_sales,
+        rs.total_profit
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.profit_rank <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_order_number) AS returns_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        tp.ws_item_sk,
+        tp.total_sales,
+        tp.total_profit,
+        COALESCE(cr.returns_count, 0) AS returns_count,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        CASE 
+            WHEN COALESCE(cr.total_return_amt, 0) = 0 THEN NULL
+            WHEN COALESCE(cr.total_return_amt, 0) > tp.total_profit THEN 'High risk'
+            ELSE 'Low risk'
+        END AS risk_category
+    FROM 
+        TopProducts tp
+    LEFT JOIN 
+        CustomerReturns cr ON tp.ws_item_sk = cr.sr_item_sk
+)
+SELECT 
+    fa.ws_item_sk,
+    fa.total_sales,
+    fa.total_profit,
+    fa.returns_count,
+    fa.total_return_amt,
+    fa.risk_category
+FROM 
+    FinalAnalysis fa
+WHERE 
+    fa.total_sales > 100
+ORDER BY 
+    fa.total_profit DESC, 
+    fa.returns_count ASC;

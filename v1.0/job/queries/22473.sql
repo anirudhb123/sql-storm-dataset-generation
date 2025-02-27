@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_role_order,
+        COUNT(DISTINCT c.person_id) AS total_cast 
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        CASE 
+            WHEN rm.total_cast > 5 THEN 'Blockbuster'
+            WHEN rm.total_cast BETWEEN 3 AND 5 THEN 'Mid-range'
+            ELSE 'Small Indie'
+        END AS movie_category,
+        ROW_NUMBER() OVER (PARTITION BY 
+            CASE 
+                WHEN rm.total_cast > 5 THEN 'Blockbuster'
+                WHEN rm.total_cast BETWEEN 3 AND 5 THEN 'Mid-range'
+                ELSE 'Small Indie'
+            END 
+            ORDER BY rm.avg_role_order DESC) AS rn
+    FROM 
+        RankedMovies rm
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.movie_category,
+    COALESCE(m.keyword_count, 0) AS keyword_count,
+    COALESCE(ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL), ARRAY['No Keywords']) AS keywords
+FROM 
+    MovieDetails md
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        aka_title at ON mk.movie_id = at.id
+    WHERE 
+        at.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        mk.movie_id
+) m ON md.title_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON md.title_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    md.rn <= 5 
+GROUP BY 
+    md.title, md.production_year, md.movie_category, m.keyword_count
+ORDER BY 
+    md.movie_category, md.production_year DESC;

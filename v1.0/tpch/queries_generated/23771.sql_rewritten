@@ -1,0 +1,78 @@
+WITH RECURSIVE supplier_part AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_mfgr,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > 500 AND 
+        p.p_retailprice BETWEEN 10 AND 100
+),
+highest_price AS (
+    SELECT 
+        p.p_partkey,
+        MAX(p.p_retailprice) AS max_price
+    FROM 
+        part p
+    GROUP BY 
+        p.p_partkey
+),
+recent_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        o.o_orderkey
+),
+order_details AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(od.total_price) AS order_value
+    FROM 
+        recent_orders od
+    JOIN 
+        customer c ON c.c_custkey = od.o_orderkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    p.p_partkey,
+    COUNT(DISTINCT sp.s_suppkey) AS supplier_count,
+    SUM(COALESCE(sp.ps_availqty, 0)) AS total_avail_qty,
+    AVG(sp.ps_supplycost) AS avg_supply_cost,
+    MAX(sp.supplier_rank) AS highest_supplier_rank,
+    CASE WHEN SUM(od.order_value) IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status
+FROM 
+    supplier_part sp
+LEFT JOIN 
+    highest_price hp ON sp.ps_supplycost = hp.max_price
+LEFT JOIN 
+    order_details od ON od.order_count = sp.supplier_rank
+GROUP BY 
+    p.p_partkey
+HAVING 
+    SUM(sp.ps_availqty) > 10 AND 
+    MAX(sp.ps_supplycost) < 50
+ORDER BY 
+    p.p_partkey ASC
+LIMIT 50 OFFSET 10;

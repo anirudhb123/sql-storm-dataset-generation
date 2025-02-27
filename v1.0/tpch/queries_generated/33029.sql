@@ -1,0 +1,42 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 1 AS level
+    FROM region
+    WHERE r_name = 'ASIA'
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, rh.level + 1
+    FROM region r
+    JOIN region_hierarchy rh ON r.r_regionkey = rh.r_regionkey
+),
+supplier_summary AS (
+    SELECT s.n_nationkey, COUNT(s.s_suppkey) AS total_suppliers, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    GROUP BY s.n_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+lineitem_details AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_position
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT ps.ps_partkey) AS part_count,
+    SUM(COALESCE(l.total_line_value, 0)) AS total_line_value,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(cs.total_spent, 0)) AS total_customer_spent
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN lineitem_details l ON ps.ps_partkey = l.l_orderkey
+LEFT JOIN customer_orders cs ON n.n_nationkey = cs.c_custkey
+WHERE n.n_comment LIKE '%interesting%'
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT ps.ps_partkey) > 10
+ORDER BY total_line_value DESC
+LIMIT 10;

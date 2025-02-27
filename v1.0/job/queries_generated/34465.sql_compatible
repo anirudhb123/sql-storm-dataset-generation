@@ -1,0 +1,46 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    AVG(mh.level) AS avg_hierarchy_level
+FROM 
+    movie_keyword mk
+JOIN 
+    movie_companies mc ON mk.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mc.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON mc.movie_id = at.id
+WHERE 
+    mk.keyword IS NOT NULL
+    AND at.production_year >= 2000
+GROUP BY 
+    mk.keyword
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

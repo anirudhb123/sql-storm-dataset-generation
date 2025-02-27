@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.ViewCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag FROM Posts p) s ON t.TagName = s.tag
+    LEFT JOIN 
+        Tags t ON t.TagName = s.tag
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate, p.ViewCount
+), RecentVotes AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes
+    WHERE 
+        CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        PostId
+), Summary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Author,
+        rp.ViewCount,
+        rp.Tags,
+        rp.UpVotes,
+        rp.DownVotes,
+        COALESCE(rv.VoteCount, 0) AS RecentVoteCount,
+        rp.CreationDate,
+        rp.PostRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentVotes rv ON rp.PostId = rv.PostId
+)
+SELECT 
+    s.PostId,
+    s.Title,
+    s.Author,
+    s.ViewCount,
+    s.Tags,
+    s.UpVotes,
+    s.DownVotes,
+    s.RecentVoteCount,
+    s.PostRank,
+    CASE 
+        WHEN s.UpVotes - s.DownVotes > 10 THEN 'Hot'
+        WHEN s.RecentVoteCount > 5 THEN 'Trending'
+        ELSE 'Normal'
+    END AS PostStatus
+FROM 
+    Summary s
+WHERE 
+    s.PostRank <= 100
+ORDER BY 
+    s.RecentVoteCount DESC, s.CreationDate DESC;

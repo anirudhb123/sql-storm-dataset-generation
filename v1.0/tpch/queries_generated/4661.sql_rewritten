@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-12-31'
+),
+CustomerTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartCounts AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' 
+        AND l.l_shipdate < '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(ct.total_spent, 0) AS total_spent,
+    COALESCE(ct.order_count, 0) AS order_count,
+    sp.part_count,
+    COUNT(DISTINCT lo.l_orderkey) AS total_orders,
+    SUM(lo.net_sales) AS total_net_sales,
+    AVG(lo.avg_quantity) AS average_quantity,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(ct.total_spent, 0) DESC) AS customer_rank
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerTotals ct ON c.c_custkey = ct.c_custkey
+LEFT JOIN 
+    SupplierPartCounts sp ON c.c_nationkey = sp.s_suppkey
+JOIN 
+    FilteredLineItems lo ON lo.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+GROUP BY 
+    c.c_name, ct.total_spent, ct.order_count, sp.part_count
+HAVING 
+    (COALESCE(ct.total_spent, 0) > 1000 AND sp.part_count > 5)
+    OR (sp.part_count > 10)
+ORDER BY 
+    customer_rank;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        d.d_date AS sales_date,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date >= '2022-01-01' 
+    GROUP BY 
+        d.d_date
+    
+    UNION ALL
+
+    SELECT 
+        d.d_date,
+        SUM(ws_ext_sales_price) + st.total_sales
+    FROM 
+        date_dim d
+    JOIN 
+        sales_trend st ON d.d_date = DATE_ADD(st.sales_date, INTERVAL 1 DAY)
+    LEFT JOIN 
+        web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_date
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id, 
+        cs.total_profit,
+        DENSE_RANK() OVER (ORDER BY cs.total_profit DESC) AS dense_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.rank <= 5
+)
+SELECT 
+    st.sales_date,
+    st.total_sales,
+    COALESCE(tc.total_profit, 0) AS top_customer_profit
+FROM 
+    sales_trend st
+LEFT JOIN 
+    top_customers tc ON DATE(st.sales_date) = DATE(tc.total_profit)
+WHERE 
+    st.total_sales > (SELECT AVG(total_sales) FROM sales_trend)
+ORDER BY 
+    st.sales_date DESC;

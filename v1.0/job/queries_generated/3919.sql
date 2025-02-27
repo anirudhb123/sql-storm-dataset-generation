@@ -1,0 +1,45 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        SUM(mk.keyword IS NOT NULL) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), CastRoles AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT r.role ORDER BY r.role) AS roles,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        cast_info c
+    INNER JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(cr.roles, 'No Roles') AS roles,
+    COALESCE(cr.cast_count, 0) AS cast_count,
+    rm.keyword_count,
+    rm.year_rank,
+    CASE 
+        WHEN rm.keyword_count > 0 THEN 'Has Keywords'
+        ELSE 'No Keywords'
+    END AS keyword_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoles cr ON rm.movie_id = cr.movie_id
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.keyword_count DESC;

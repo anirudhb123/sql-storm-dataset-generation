@@ -1,0 +1,75 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        CASE 
+            WHEN U.Reputation IS NULL THEN 'No Reputation' 
+            WHEN U.Reputation > 1000 THEN 'High Reputation'
+            WHEN U.Reputation BETWEEN 500 AND 1000 THEN 'Moderate Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationCategory,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY PH.PostId
+),
+PostsWithAnswers AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.AcceptedAnswerId,
+        COUNT(A.Id) AS AnswerCount,
+        COALESCE(CLA.CloseCount, 0) AS CloseCount,
+        COALESCE(CLA.ReopenCount, 0) AS ReopenCount,
+        CLA.LastClosedDate,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY A.CreationDate DESC) AS LatestAnswerRank
+    FROM Posts P
+    LEFT JOIN Posts A ON P.Id = A.ParentId
+    LEFT JOIN ClosedPosts CLA ON P.Id = CLA.PostId
+    WHERE P.PostTypeId = 1
+    GROUP BY P.Id, P.Title, P.AcceptedAnswerId, CLA.CloseCount, CLA.ReopenCount, CLA.LastClosedDate
+),
+FinalReport AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        UR.ReputationCategory,
+        PWA.PostId,
+        PWA.Title,
+        PWA.AnswerCount,
+        (PWA.CloseCount - PWA.ReopenCount) AS NetClosure,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PWA.PostId AND V.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = PWA.PostId AND V.VoteTypeId = 3) AS DownVotes,
+        PWA.LastClosedDate,
+        PWA.LatestAnswerRank
+    FROM UserReputation UR
+    JOIN PostsWithAnswers PWA ON UR.UserId = PWA.OwnerUserId
+    WHERE UR.PostCount > 0
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    ReputationCategory,
+    Title,
+    AnswerCount,
+    NetClosure,
+    UpVotes,
+    DownVotes,
+    LastClosedDate,
+    LatestAnswerRank
+FROM FinalReport
+WHERE (NetClosure > 0 OR LastClosedDate IS NOT NULL)
+ORDER BY NetClosure DESC, Reputation DESC, UpVotes DESC;

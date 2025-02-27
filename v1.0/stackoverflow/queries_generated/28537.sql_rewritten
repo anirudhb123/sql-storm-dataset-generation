@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        U.DisplayName AS OwnerName,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS RankByTags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.Body IS NOT NULL
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(P.Tags, ',')) AS TagName,
+        COUNT(*) AS TotalPosts,
+        AVG(P.Score) AS AvgScore,
+        MAX(P.ViewCount) AS MaxViews
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        U.Id, U.DisplayName
+    ORDER BY 
+        PostsCount DESC
+    LIMIT 10
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.OwnerName,
+    TO_CHAR(RP.CreationDate, 'YYYY-MM-DD HH24:MI:SS') AS CreationDate,
+    RS.TotalPosts AS TagTotalPosts,
+    RS.AvgScore AS TagAverageScore,
+    RS.MaxViews AS TagMaxViews,
+    AU.DisplayName AS ActiveUserName,
+    AU.PostsCount AS ActiveUserPostsCount,
+    AU.TotalScore AS ActiveUserTotalScore
+FROM 
+    RankedPosts RP
+JOIN 
+    TagStatistics RS ON RP.Tags LIKE '%' || RS.TagName || '%'
+JOIN 
+    MostActiveUsers AU ON AU.UserId = RP.OwnerUserId
+WHERE 
+    RP.RankByTags <= 5 
+ORDER BY 
+    RP.CreationDate DESC;

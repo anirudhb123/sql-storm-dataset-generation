@@ -1,0 +1,86 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id, 
+        PostTypeId, 
+        ParentId, 
+        Score, 
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.PostTypeId, 
+        p.ParentId, 
+        p.Score, 
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.Id
+),
+PostScoreStats AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS PostCount,
+        AVG(Score) AS AvgScore,
+        MAX(Score) AS MaxScore,
+        MIN(Score) AS MinScore,
+        SUM(Score) AS TotalScore
+    FROM Posts
+    GROUP BY PostTypeId
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+),
+FinalResults AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ps.PostCount,
+        ps.AvgScore,
+        psc.ClosedDate,
+        psc.CloseReason,
+        pv.UpVotes,
+        pv.DownVotes
+    FROM Posts p
+    LEFT JOIN PostScoreStats ps ON p.PostTypeId = ps.PostTypeId
+    LEFT JOIN ClosedPosts psc ON p.Id = psc.Id
+    LEFT JOIN PostVoteCounts pv ON p.Id = pv.PostId
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.PostCount,
+    fr.AvgScore,
+    fr.ClosedDate,
+    COALESCE(fr.CloseReason, 'Not Closed') AS CloseReason,
+    COALESCE(fr.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(fr.DownVotes, 0) AS TotalDownVotes,
+    CASE 
+        WHEN fr.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS Status,
+    STRING_AGG(pt.Name, ', ') AS PostTypeNames
+FROM FinalResults fr
+LEFT JOIN PostTypes pt ON fr.PostCount > 0 AND pt.Id = fr.PostCount
+GROUP BY 
+    fr.PostId, fr.Title, fr.PostCount, fr.AvgScore, 
+    fr.ClosedDate, fr.CloseReason
+ORDER BY fr.AvgScore DESC, fr.PostId;

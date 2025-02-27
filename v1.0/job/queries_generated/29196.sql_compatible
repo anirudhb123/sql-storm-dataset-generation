@@ -1,0 +1,59 @@
+
+WITH ActorMovieCount AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.person_id
+),
+TopActors AS (
+    SELECT 
+        amc.person_id,
+        amc.movie_count,
+        amc.movie_titles,
+        ROW_NUMBER() OVER (ORDER BY amc.movie_count DESC) AS rank
+    FROM 
+        ActorMovieCount amc
+),
+ActorInfo AS (
+    SELECT 
+        a.person_id AS actor_id,
+        a.name,
+        COALESCE(co.info, '') AS country_info,
+        r.role AS primary_role
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    LEFT JOIN 
+        company_name co ON pi.info_type_id = co.imdb_id
+    GROUP BY 
+        a.person_id, a.name, co.info, r.role
+)
+SELECT 
+    ta.rank,
+    ai.actor_id,
+    ai.name AS actor_name,
+    ai.country_info,
+    ai.primary_role,
+    ta.movie_count,
+    ta.movie_titles
+FROM 
+    TopActors ta
+JOIN 
+    ActorInfo ai ON ta.person_id = ai.actor_id
+WHERE 
+    ta.rank <= 10
+ORDER BY 
+    ta.rank;

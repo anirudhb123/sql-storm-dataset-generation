@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        u.DisplayName AS Owner, 
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.Owner,
+        rp.Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostsTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        rp.Rank <= 10 -- Top 10 Questions
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.ViewCount, rp.Owner, rp.Rank
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.Owner,
+    tp.Rank,
+    tp.Tags,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM PostHistory ph WHERE ph.PostId = tp.PostId AND ph.PostHistoryTypeId = 10) THEN 'Closed'
+        ELSE 'Open'
+    END AS Status
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Rank;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.Title IS NOT NULL
+),
+CTE_PostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+CloseReasonPost AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN cr.Name 
+            ELSE NULL 
+        END) AS CloseReason,
+        MAX(ph.CreationDate) AS ClosedDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.TotalUpVotes,
+    rp.TotalDownVotes,
+    cph.HistoryCount,
+    cph.HistoryTypes,
+    crp.CloseReason,
+    crp.ClosedDate,
+    CASE 
+        WHEN crp.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CTE_PostHistory cph ON rp.PostId = cph.PostId
+LEFT JOIN 
+    CloseReasonPost crp ON rp.PostId = crp.PostId
+WHERE 
+    (rp.TotalUpVotes - rp.TotalDownVotes) > 5 -- example of a complicated predicate
+    AND rp.rn <= 5 -- only take the latest 5 from each post type
+ORDER BY 
+    rp.CreationDate DESC NULLS LAST;

@@ -1,0 +1,47 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS ActivityRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation >= 1000
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.TotalBounty,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        cp.CloseCount,
+        cp.FirstClosedDate
+    FROM UserActivity ua
+    LEFT JOIN ClosedPosts cp ON ua.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+    WHERE ua.ActivityRank <= 10
+)
+SELECT 
+    CONCAT(tu.DisplayName, ' (Posts: ', tu.PostCount, ', Upvotes: ', tu.TotalUpVotes, ', Downvotes: ', tu.TotalDownVotes, 
+           ', Total Bounty: ', COALESCE(tu.TotalBounty, 0), ')') AS UserSummary,
+    COALESCE(tu.CloseCount, 0) AS TotalClosedPosts,
+    DATEDIFF('2024-10-01 12:34:56', tu.FirstClosedDate) AS DaysSinceFirstClosed
+FROM TopUsers tu
+ORDER BY tu.PostCount DESC, tu.TotalBounty DESC
+LIMIT 10;

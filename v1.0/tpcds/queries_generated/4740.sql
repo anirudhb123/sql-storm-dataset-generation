@@ -1,0 +1,64 @@
+
+WITH sales_summary AS (
+    SELECT
+        s_store_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    JOIN store ON web_sales.ws_store_sk = store.s_store_sk
+    GROUP BY s_store_sk, ws_item_sk
+),
+top_sales AS (
+    SELECT
+        s.s_store_id,
+        s.s_store_name,
+        s.s_city,
+        s.s_state,
+        ss.ws_item_sk,
+        ss.total_quantity,
+        ss.total_profit
+    FROM sales_summary ss
+    JOIN store s ON ss.s_store_sk = s.s_store_sk
+    WHERE ss.profit_rank <= 10
+),
+customer_with_returns AS (
+    SELECT
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+customer_details AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_credit_rating,
+    cs.income_band,
+    ts.s_store_name,
+    ts.s_city,
+    ts.s_state,
+    ts.total_quantity,
+    ts.total_profit,
+    cr.total_returns,
+    cr.total_return_amt
+FROM customer_details cs
+LEFT JOIN top_sales ts ON cs.c_customer_id = ts.ws_item_sk
+LEFT JOIN customer_with_returns cr ON cs.c_customer_id = cr.wr_returning_customer_sk
+WHERE (cs.cd_gender = 'F' OR cs.cd_marital_status = 'M')
+  AND (ts.total_profit IS NOT NULL OR cr.total_returns IS NOT NULL)
+ORDER BY ts.total_profit DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

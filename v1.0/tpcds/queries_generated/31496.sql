@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss.sold_date_sk, 
+        ss.item_sk, 
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss.item_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM store_sales ss
+    INNER JOIN customer c ON ss.customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year > 1980
+    GROUP BY ss.sold_date_sk, ss.item_sk
+),
+DailySales AS (
+    SELECT 
+        d.d_date, 
+        SUM(ws.ws_ext_sales_price) AS web_sales,
+        SUM(cs.cs_ext_sales_price) AS catalog_sales,
+        SUM(ss.ss_ext_sales_price) AS store_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_date
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        item.i_current_price,
+        item.i_brand,
+        s.total_profit
+    FROM item
+    JOIN SalesCTE s ON item.i_item_sk = s.item_sk
+    WHERE s.profit_rank <= 10
+),
+FinalSummary AS (
+    SELECT 
+        d.d_date, 
+        di.item_id, 
+        di.product_name,
+        di.current_price,
+        di.brand,
+        COALESCE(ds.web_sales, 0) AS web_sales,
+        COALESCE(ds.catalog_sales, 0) AS catalog_sales,
+        COALESCE(ds.store_sales, 0) AS store_sales,
+        (COALESCE(ds.web_sales, 0) + COALESCE(ds.catalog_sales, 0) + COALESCE(ds.store_sales, 0)) AS total_sales
+    FROM DailySales ds
+    RIGHT JOIN TopItems di ON 1=1
+    LEFT JOIN date_dim d ON 1=1
+)
+SELECT 
+    f.d_date, 
+    f.product_name,
+    f.current_price,
+    f.brand,
+    f.total_sales
+FROM FinalSummary f
+WHERE f.total_sales > 10000
+ORDER BY f.d_date DESC, f.total_sales DESC;

@@ -1,0 +1,49 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastMemberRanks AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS company_count,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cr.rank, 0) AS actor_rank,
+    ci.company_count,
+    ci.companies
+FROM MovieHierarchy mh
+LEFT JOIN CastMemberRanks cr ON mh.movie_id = cr.movie_id AND cr.rank <= 5
+LEFT JOIN CompanyInfo ci ON mh.movie_id = ci.movie_id
+WHERE mh.level = 1
+ORDER BY mh.production_year DESC, mh.title;

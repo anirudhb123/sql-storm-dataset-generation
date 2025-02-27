@@ -1,0 +1,60 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore,
+        SUM(COALESCE(VoteCount, 0)) AS TotalVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+RecentPostChanges AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS ChangesCount,
+        MAX(PH.CreationDate) AS LastChangeDate
+    FROM PostHistory PH
+    WHERE PH.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY PH.UserId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalScore,
+    US.TotalVotes,
+    COALESCE(RP.ChangesCount, 0) AS RecentChanges,
+    COALESCE(RP.LastChangeDate, 'No recent changes') AS LastChange,
+    COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+FROM UserStatistics US
+LEFT JOIN RecentPostChanges RP ON US.UserId = RP.UserId
+LEFT JOIN UserBadges UB ON US.UserId = UB.UserId
+ORDER BY US.TotalScore DESC, US.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,63 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, DisplayName, UpVotes, DownVotes,
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+    WHERE Reputation > 0
+),
+RecentPosts AS (
+    SELECT P.Id AS PostId,
+           P.Title,
+           P.CreationDate AS PostCreationDate,
+           U.DisplayName AS OwnerDisplayName,
+           P.Score,
+           P.ViewCount,
+           COUNT(C.Id) AS CommentCount,
+           COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+           COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY P.Id, P.Title, P.CreationDate, U.DisplayName, P.Score, P.ViewCount
+),
+PostHistoryStats AS (
+    SELECT PH.PostId,
+           PH.PostHistoryTypeId,
+           COUNT(*) AS EditCount,
+           MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+),
+TopPosts AS (
+    SELECT RP.*, 
+           COALESCE(PH.EditCount, 0) AS EditCount,
+           PH.LastEditDate,
+           R.ReputationRank
+    FROM RecentPosts RP
+    LEFT JOIN PostHistoryStats PH ON RP.PostId = PH.PostId
+    LEFT JOIN UserReputationCTE R ON RP.OwnerDisplayName = R.DisplayName
+    WHERE RP.Score > 0
+)
+SELECT TP.Title, 
+       TP.OwnerDisplayName,
+       TP.PostCreationDate,
+       TP.ViewCount,
+       TP.CommentCount,
+       TP.Score,
+       TP.UpVotes,
+       TP.DownVotes,
+       TP.EditCount,
+       TP.LastEditDate,
+       CASE 
+           WHEN TP.ReputationRank IS NOT NULL THEN 
+             CONCAT('Ranked: ', TP.ReputationRank, ' with reputation ', R.Reputation) 
+           ELSE 
+             'No reputation data available'
+       END AS ReputationInfo
+FROM TopPosts TP
+LEFT JOIN Users R ON TP.OwnerDisplayName = R.DisplayName
+ORDER BY TP.Score DESC, TP.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+

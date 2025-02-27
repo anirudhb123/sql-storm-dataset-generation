@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    mk.keyword AS movie_keyword,
+    mt.title AS movie_title,
+    mh.production_year,
+    DENSE_RANK() OVER (PARTITION BY a.id ORDER BY mh.production_year DESC) AS recent_movies,
+    COALESCE(ci.note, 'No role noted') AS role_note,
+    COUNT(*) OVER (PARTITION BY a.id) AS total_movies
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+JOIN 
+    cast_info ci ON ci.id = cc.subject_id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+WHERE 
+    mh.depth <= 3 AND
+    (a.name ILIKE '%Smith%' OR a.name IS NULL)
+ORDER BY 
+    recent_movies ASC,
+    a.name ASC
+LIMIT 100;

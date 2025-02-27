@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        AVG(v.BountyAmount) AS AvgBountyAmount,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN (CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE -1 END) ELSE 0 END) AS NetVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score,
+        rp.CommentCount,
+        rp.AvgBountyAmount,
+        rp.NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 10 
+        AND rp.NetVotes > 0
+        AND rp.rn <= 5
+),
+
+PostHistories AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        pht.Name AS ChangeType,
+        ph.UserDisplayName,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS TotalHistory
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.AvgBountyAmount,
+    ph.TotalHistory,
+    MAX(ph.CreationDate) AS LastChangeDate,
+    STRING_AGG(ph.ChangeType, ', ') AS ChangeTypes
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistories ph ON fp.PostId = ph.PostId
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.CommentCount, fp.AvgBountyAmount
+ORDER BY 
+    fp.Score DESC, fp.PostId ASC;

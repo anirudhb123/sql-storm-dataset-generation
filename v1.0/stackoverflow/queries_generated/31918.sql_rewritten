@@ -1,0 +1,81 @@
+WITH RecursiveTagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(u.Reputation, 0)) AS AvgUserReputation
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    GROUP BY t.Id, t.TagName, p.OwnerUserId
+),
+
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(p.CommentCount, 0)) AS TotalComments,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+        UTL_IIF(SUM(COALESCE(p.ViewCount, 0)) > 1000, 'Popular User', 'Regular User') AS UserCategory
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN UserBadgeCounts b ON b.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, b.BadgeCount, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+),
+
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentEdit
+    FROM PostHistory ph
+),
+
+FinalStatistics AS (
+    SELECT 
+        p.Title,
+        p.Id AS PostId,
+        u.DisplayName AS Author,
+        p.Score,
+        SUM(phc.RecentEdit) AS EditCount,
+        rs.TagName,
+        rs.PostCount,
+        rs.TotalScore,
+        us.UserCategory,
+        us.BadgeCount,
+        us.GoldBadges
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    JOIN PostHistoryCTE phc ON phc.PostId = p.Id
+    JOIN RecursiveTagStats rs ON p.Tags LIKE '%' || rs.TagName || '%'
+    JOIN UserPostStats us ON u.Id = us.UserId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY p.Id, u.DisplayName, rs.TagName, us.UserCategory, us.BadgeCount, us.GoldBadges
+)
+
+SELECT *
+FROM FinalStatistics
+WHERE TagName IS NOT NULL
+ORDER BY PostCount DESC, TotalScore DESC, EditCount DESC;

@@ -1,0 +1,80 @@
+
+WITH RECURSIVE SalesTrends AS (
+    SELECT 
+        ds.d_year AS sales_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ds ON ws.ws_sold_date_sk = ds.d_date_sk
+    GROUP BY 
+        ds.d_year
+    UNION ALL
+    SELECT 
+        st.sales_year + 1,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ds ON ws.ws_sold_date_sk = ds.d_date_sk
+    JOIN 
+        SalesTrends st ON ds.d_year = st.sales_year + 1
+    GROUP BY 
+        st.sales_year + 1
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk AS customer_sk,
+        SUM(cr_return_amt) AS total_returned,
+        COUNT(DISTINCT cr_order_number) AS total_orders
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            ELSE 'Other'
+        END AS gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        COALESCE(cr.total_returned, 0) AS returned_amount,
+        COALESCE(cr.total_orders, 0) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.customer_sk
+),
+SalesRanking AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.returned_amount,
+        RANK() OVER (PARTITION BY cd.gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank,
+        ROW_NUMBER() OVER (PARTITION BY cd.gender ORDER BY cd.returned_amount DESC) AS return_rank
+    FROM 
+        CustomerDetails cd
+)
+SELECT 
+    sr.gender,
+    COUNT(*) AS customer_count,
+    AVG(sr.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(sr.returned_amount) AS total_returned,
+    MAX(CASE WHEN sr.purchase_rank <= 10 THEN sr.cd_purchase_estimate ELSE NULL END) AS top_purchase_estimate,
+    MAX(CASE WHEN sr.return_rank <= 10 THEN sr.returned_amount ELSE NULL END) AS top_returned_amount
+FROM 
+    SalesRanking sr
+GROUP BY 
+    sr.gender
+ORDER BY 
+    customer_count DESC;

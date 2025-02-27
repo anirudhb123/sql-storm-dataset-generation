@@ -1,0 +1,59 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_amount,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_totalprice,
+    o.o_orderdate,
+    COALESCE(l.total_line_amount, 0) AS total_line_amount,
+    COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost_per_supplier,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finalized'
+        ELSE 'Pending'
+    END AS order_status,
+    ROW_NUMBER() OVER (ORDER BY o.o_orderdate DESC) AS order_sequence
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemSummary l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierStats ss ON ss.total_available > 0
+WHERE 
+    o.order_rank <= 5 
+    AND (SELECT COUNT(*) FROM lineitem li WHERE li.l_orderkey = o.o_orderkey) > 3
+ORDER BY 
+    o.o_orderdate DESC;

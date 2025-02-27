@@ -1,0 +1,68 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation >= 1000 
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        UH.Level + 1
+    FROM Users U
+    INNER JOIN UserHierarchy UH ON U.Id = (SELECT UserId FROM Posts P WHERE P.OwnerUserId = UH.Id LIMIT 1)
+    WHERE UH.Level < 5
+),
+LatestPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY P.Id, P.Title, P.CreationDate, P.OwnerUserId, P.PostTypeId
+),
+BadgesSummary AS (
+    SELECT
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeList,
+        COUNT(B.Id) AS BadgeCount
+    FROM Badges B
+    WHERE B.Class IN (1, 2)
+    GROUP BY B.UserId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    UH.Level,
+    LP.Title,
+    LP.CreationDate,
+    LP.CommentCount,
+    LP.UpVotes,
+    LP.DownVotes,
+    BS.BadgeList,
+    COALESCE(BS.BadgeCount, 0) AS TotalBadges
+FROM UserHierarchy UH
+INNER JOIN Users U ON U.Id = UH.Id
+LEFT JOIN LatestPosts LP ON LP.OwnerUserId = U.Id
+LEFT JOIN BadgesSummary BS ON BS.UserId = U.Id
+WHERE U.Location IS NOT NULL 
+    AND LP.CreationDate BETWEEN '2022-01-01' AND '2023-01-01'
+    AND (LP.UpVotes - LP.DownVotes) > 5
+ORDER BY U.Reputation DESC, LP.CreationDate DESC;

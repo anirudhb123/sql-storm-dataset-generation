@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId, 
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        u.Reputation,
+        u.Views
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        ps.UpVotes,
+        ps.DownVotes,
+        us.UserId,
+        us.DisplayName,
+        us.Reputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVoteSummary ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        Users us ON p.OwnerUserId = us.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Level,
+    pw.UpVotes,
+    pw.DownVotes,
+    um.DisplayName AS OwnerDisplayName,
+    um.Reputation,
+    COALESCE(pw.UpVotes, 0) - COALESCE(pw.DownVotes, 0) AS VoteBalance,
+    CASE 
+        WHEN pw.Reputation IS NULL THEN 'Unknown User'
+        WHEN pw.Reputation > 1000 THEN 'Experienced User'
+        ELSE 'New User'
+    END AS UserLevel
+FROM 
+    RecursivePostHierarchy r
+LEFT JOIN 
+    PostWithVotes pw ON r.PostId = pw.PostId
+LEFT JOIN 
+    UserReputation um ON pw.UserId = um.UserId
+ORDER BY 
+    r.Level, 
+    r.CreationDate DESC;

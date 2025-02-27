@@ -1,0 +1,55 @@
+
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+        MAX(ws.ws_sales_price) AS max_item_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        c.c_customer_id
+),
+CustomerDemographicStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cp.total_sales) AS avg_sales,
+        COUNT(*) AS customer_count
+    FROM 
+        CustomerPurchases cp
+    JOIN 
+        customer_demographics cd ON cp.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+),
+TopDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        MAX(avg_sales) AS max_avg_sales
+    FROM 
+        CustomerDemographicStats cd
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+)
+SELECT 
+    t.cd_gender,
+    t.cd_marital_status,
+    t.max_avg_sales,
+    cd.customer_count,
+    (t.max_avg_sales / NULLIF(cd.customer_count, 0)) AS sales_per_customer
+FROM 
+    TopDemographics t
+JOIN 
+    CustomerDemographicStats cd ON t.cd_gender = cd.cd_gender AND t.cd_marital_status = cd.cd_marital_status
+ORDER BY 
+    sales_per_customer DESC
+LIMIT 10;

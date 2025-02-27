@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(rp.PostId) AS TotalPosts,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalScore,
+        ups.TotalViews,
+        RANK() OVER (ORDER BY ups.TotalScore DESC, ups.TotalViews DESC) AS UserRank
+    FROM 
+        UserPostStats ups
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.TotalScore,
+    tu.TotalViews,
+    ARRAY_AGG(dp.Title) AS TopPostTitles
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RankedPosts dp ON tu.UserId = dp.OwnerUserId AND dp.PostRank <= 3
+WHERE 
+    tu.UserRank <= 10
+GROUP BY 
+    tu.UserId, tu.DisplayName, tu.TotalPosts, tu.TotalScore, tu.TotalViews
+ORDER BY 
+    tu.UserRank;

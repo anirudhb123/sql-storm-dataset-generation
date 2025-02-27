@@ -1,0 +1,72 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY t.kind_id) AS title_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+MovieInfoWithKeywords AS (
+    SELECT
+        a.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id
+),
+PersonRoles AS (
+    SELECT
+        ci.movie_id,
+        n.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM
+        cast_info ci
+    JOIN 
+        name n ON ci.person_id = n.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        n.name IS NOT NULL
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    COUNT(DISTINCT pr.actor_name) AS total_actors,
+    CASE 
+        WHEN rt.title_count > 1 THEN 'Multiple Versions'
+        ELSE 'Single Version'
+    END AS version_info,
+    COALESCE(mk.keywords, 'No Keywords') AS associated_keywords,
+    COALESCE((
+        SELECT 
+            COUNT(*)
+        FROM 
+            complete_cast cc
+        WHERE 
+            cc.movie_id = rt.title_id AND
+            cc.status_id IS NOT NULL
+    ), 0) AS complete_cast_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonRoles pr ON rt.title_id = pr.movie_id
+LEFT JOIN 
+    MovieInfoWithKeywords mk ON rt.title_id = mk.movie_id
+WHERE 
+    rt.rn = 1 AND 
+    rt.production_year >= 2000
+GROUP BY 
+    rt.title, rt.production_year, rt.title_count, mk.keywords
+ORDER BY 
+    rt.production_year DESC, total_actors DESC, rt.title;

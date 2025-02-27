@@ -1,0 +1,47 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM Tags t
+    LEFT JOIN Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.Id, t.TagName
+    HAVING COUNT(pt.PostId) > 10
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    ua.UserId,
+    ua.TotalPosts,
+    ua.TotalAnswers,
+    ua.TotalScore,
+    ub.TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pt.TagName,
+    pt.PostCount
+FROM UserActivity ua
+LEFT JOIN UserBadges ub ON ua.UserId = ub.UserId
+JOIN PopularTags pt ON ua.TotalPosts > 0
+ORDER BY ua.TotalScore DESC, ub.TotalBadges DESC;

@@ -1,0 +1,78 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        CAST(NULL AS INTEGER) AS parent_movie_id,
+        1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year < 2000 
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        rm.movie_id AS parent_movie_id,
+        rm.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN RecursiveMovieHierarchy rm ON ml.movie_id = rm.movie_id
+),
+MovieWithKeywords AS (
+    SELECT 
+        rmh.movie_id, 
+        rmh.title, 
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        COUNT(mk.id) AS keyword_count
+    FROM RecursiveMovieHierarchy rmh
+    LEFT JOIN movie_keyword mk ON mk.movie_id = rmh.movie_id
+    GROUP BY rmh.movie_id, rmh.title
+),
+MovieExtendedInfo AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.keywords,
+        mwk.keyword_count,
+        CASE 
+            WHEN info.info IS NOT NULL THEN info.info
+            ELSE 'No additional info available' 
+        END AS additional_info
+    FROM MovieWithKeywords mwk
+    LEFT JOIN movie_info info ON mwk.movie_id = info.movie_id AND info.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+),
+TopMovies AS (
+    SELECT 
+        me.movie_id,
+        me.title,
+        me.keywords,
+        me.keyword_count,
+        me.additional_info,
+        RANK() OVER (ORDER BY me.keyword_count DESC) AS rank
+    FROM MovieExtendedInfo me
+)
+SELECT 
+    tm.title, 
+    tm.keywords,
+    tm.keyword_count,
+    COALESCE(cast_inf.note, 'No role note') AS role_note,
+    COALESCE(cast_inf.nr_order, 0) AS order_in_cast,
+    case 
+        when tm.keyword_count > 5 then 'Highly Tagged'
+        when tm.keyword_count = 0 then 'Uncategorized'
+        else 'Regular' 
+    end AS categorization,
+    COUNT(DISTINCT ci.id) AS unique_characters
+FROM TopMovies tm
+LEFT JOIN cast_info cast_inf ON cast_inf.movie_id = tm.movie_id
+LEFT JOIN char_name ci ON ci.id = cast_inf.person_id
+WHERE tm.rank <= 10 
+GROUP BY 
+    tm.title, 
+    tm.keywords,
+    tm.keyword_count,
+    cast_inf.note, 
+    cast_inf.nr_order
+ORDER BY tm.keyword_count DESC, tm.title;

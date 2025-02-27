@@ -1,0 +1,50 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount, 
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(p.Score) AS AvgScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPostMetrics AS (
+    SELECT 
+        ub.UserId,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+        ps.PostCount,
+        ps.Questions,
+        ps.Answers,
+        ps.AvgScore
+    FROM UserBadges ub
+    FULL OUTER JOIN PostStats ps ON ub.UserId = ps.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    upm.BadgeCount AS TotalBadges,
+    upm.PostCount AS TotalPosts,
+    upm.Questions AS TotalQuestions,
+    upm.Answers AS TotalAnswers,
+    upm.AvgScore AS AverageScore,
+    CASE WHEN upm.BadgeCount > 0 THEN upm.BadgeCount ELSE 'No badges' END AS BadgeInformation
+FROM Users u
+LEFT JOIN UserPostMetrics upm ON u.Id = upm.UserId
+WHERE 
+    (upm.PostCount > 10 OR upm.BadgeCount > 0)
+    AND u.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    TotalBadges DESC, 
+    TotalPosts DESC
+LIMIT 100;

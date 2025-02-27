@@ -1,0 +1,80 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COUNT(d.Id) AS Downvotes,
+        COUNT(v.Id) AS Upvotes,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN p.Score ELSE 0 END) AS TotalQuestionScore,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN p.Score ELSE 0 END) AS TotalAnswerScore,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        Votes d ON u.Id = d.UserId AND d.VoteTypeId = 3 
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), 
+FilteredUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.LastAccessDate,
+        ua.Downvotes,
+        ua.Upvotes,
+        ua.TotalQuestionScore,
+        ua.TotalAnswerScore,
+        ua.ReputationRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.Reputation > 1000 
+        AND ua.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+), 
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        p.PostTypeId,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+)
+
+SELECT 
+    fu.DisplayName,
+    fu.Reputation,
+    fu.Upvotes,
+    fu.Downvotes,
+    COUNT(rp.Id) AS PostCount,
+    SUM(rp.ViewCount) AS TotalViews,
+    MAX(rp.Score) AS HighestScore,
+    STRING_AGG(rp.Title || ' (' || rp.PostType || ')', ', ') AS RecentPostTitles
+FROM 
+    FilteredUsers fu
+LEFT JOIN 
+    RecentPosts rp ON fu.UserId = rp.OwnerUserId AND rp.rn <= 5 
+GROUP BY 
+    fu.UserId, fu.DisplayName, fu.Reputation, fu.Upvotes, fu.Downvotes
+ORDER BY 
+    fu.Reputation DESC;

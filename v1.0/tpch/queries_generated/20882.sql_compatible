@@ -1,0 +1,77 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' 
+        AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        MAX(s.s_acctbal) AS max_acctbal,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    p.p_name,
+    COALESCE(ts.total_sales, 0) AS sales_amount,
+    COALESCE(sd.total_parts, 0) AS supplier_part_count,
+    CASE 
+        WHEN rp.price_rank <= 10 THEN 'High'
+        WHEN rp.price_rank IS NULL THEN 'Unknown'
+        ELSE 'Normal'
+    END AS pricing_tier
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    RankedParts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey))
+LEFT JOIN 
+    TotalSales ts ON ts.l_partkey = rp.p_partkey
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = rp.p_partkey)
+WHERE 
+    (n.n_name LIKE '%land%' OR n.n_comment IS NULL)
+    AND (rp.p_retailprice < (SELECT AVG(rp2.p_retailprice) FROM RankedParts rp2) OR rp.p_retailprice IS NULL)
+UNION ALL
+SELECT 
+    'Total' AS n_name,
+    'All Regions' AS r_name,
+    NULL AS p_name,
+    SUM(ts.total_sales) AS sales_amount,
+    SUM(sd.total_parts) AS supplier_part_count,
+    'Aggregate' AS pricing_tier
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    TotalSales ts ON sd.total_parts > 0
+WHERE 
+    sd.max_acctbal > 1000
+GROUP BY 
+    'Total', 'All Regions'
+ORDER BY 
+    sales_amount DESC;

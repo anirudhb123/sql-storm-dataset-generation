@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_division_id, s_market_desc,
+           0 AS level
+    FROM store
+    WHERE s_division_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT s.s_store_sk, s.s_store_name, s.s_number_employees, s.s_division_id, 
+           s.s_market_desc, h.level + 1
+    FROM store s
+    JOIN SalesHierarchy h ON s.s_division_id = h.s_division_id
+)
+
+SELECT 
+    ca.c_city,
+    ca.ca_state,
+    SUM(ws.ws_quantity) AS total_sales_quantity,
+    AVG(ws.ws_ext_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    CASE 
+        WHEN AVG(ws.ws_sales_price) > 0 THEN SUM(ws.ws_net_profit) / AVG(ws.ws_sales_price) 
+        ELSE NULL
+    END AS profit_margin,
+    ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_quantity) DESC) AS rn
+FROM 
+    customer_address ca
+JOIN 
+    web_sales ws ON ca.ca_address_sk = ws.ws_bill_addr_sk
+LEFT JOIN 
+    SalesHierarchy sh ON ws.ws_store_sk = sh.s_store_sk
+WHERE 
+    ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    AND (sh.s_market_desc IS NOT NULL OR sh.s_number_employees > 0)
+GROUP BY 
+    ca.c_city, ca.ca_state, sh.s_store_sk, sh.s_store_name, sh.s_number_employees, sh.s_division_id, sh.s_market_desc
+HAVING 
+    SUM(ws.ws_quantity) > 1000 OR AVG(ws.ws_ext_sales_price) > 20
+ORDER BY 
+    total_sales_quantity DESC
+LIMIT 10;

@@ -1,0 +1,52 @@
+
+WITH SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate >= DATE '1996-01-01' 
+        AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_name,
+        so.revenue,
+        so.order_count,
+        RANK() OVER (ORDER BY so.revenue DESC) AS revenue_rank,
+        RANK() OVER (ORDER BY so.order_count DESC) AS order_count_rank
+    FROM 
+        SupplierOrders so
+    JOIN 
+        supplier s ON so.s_suppkey = s.s_suppkey
+)
+SELECT 
+    r.s_name,
+    r.revenue,
+    r.order_count,
+    CASE 
+        WHEN r.revenue_rank = r.order_count_rank THEN 'Equal Rank'
+        WHEN r.revenue_rank < r.order_count_rank THEN 'Revenue Leader'
+        ELSE 'Order Leader' 
+    END AS rank_category,
+    COALESCE(s.r_comment, 'No Comment') AS supplier_comment
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    supplier s ON r.s_name = s.s_name
+WHERE 
+    r.revenue > 10000 OR r.order_count > 5
+ORDER BY 
+    r.revenue DESC, r.order_count DESC;

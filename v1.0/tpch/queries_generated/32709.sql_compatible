@@ -1,0 +1,37 @@
+
+WITH RECURSIVE HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, o.o_comment,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, ps.ps_supplycost, ps.ps_availqty,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, r.r_name,
+           COALESCE(c.c_acctbal, 0) AS account_balance
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    r.r_name AS region_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS orders_count,
+    MAX(ho.o_totalprice) AS highest_order_price,
+    AVG(CASE WHEN ps.rank_cost <= 3 THEN ps.ps_supplycost END) AS avg_top3_supplycost
+FROM CustomerRegion c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN PartSupplier ps ON l.l_partkey = ps.p_partkey
+LEFT JOIN HighValueOrders ho ON o.o_orderkey = ho.o_orderkey
+WHERE r.r_name IS NOT NULL
+GROUP BY c.c_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_sales DESC, customer_name ASC
+LIMIT 10;

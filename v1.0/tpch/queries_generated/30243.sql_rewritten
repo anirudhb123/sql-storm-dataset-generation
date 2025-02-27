@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+), 
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus, c.c_mktsegment
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '30 days'
+), 
+SupplierPerformance AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_available_qty
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+RankedOrders AS (
+    SELECT r.custkey, r.orderkey, r.totalprice, RANK() OVER (PARTITION BY r.c_mktsegment ORDER BY r.totalprice DESC) AS price_rank
+    FROM (
+        SELECT o.o_orderkey, c.c_custkey AS custkey, o.o_totalprice, c.c_mktsegment
+        FROM RecentOrders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+    ) r
+)
+SELECT s.s_name AS supplier_name, 
+       s.s_acctbal AS supplier_balance, 
+       o.price_rank, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+       COALESCE(r.r_name, 'Unknown Region') AS region_name
+FROM supplier s
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+JOIN RankedOrders o ON l.l_orderkey = o.orderkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.price_rank <= 10
+GROUP BY s.s_name, s.s_acctbal, o.price_rank, r.r_name
+ORDER BY total_sales DESC, s.s_name;

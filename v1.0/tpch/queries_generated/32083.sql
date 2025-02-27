@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           o.o_custkey, 
+           1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           oh.o_custkey, 
+           oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey 
+    WHERE oh.level < 5
+),
+PartSupplierData AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           ps.ps_supplycost,
+           ps.ps_availqty,
+           s.s_name,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > 0
+),
+TotalLineItems AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price,
+           COUNT(*) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY o.o_orderkey
+)
+SELECT oh.o_orderkey,
+       oh.o_orderdate,
+       oh.o_totalprice,
+       COALESCE(tli.total_line_price, 0) AS total_line_price,
+       tli.item_count,
+       GROUP_CONCAT(DISTINCT CONCAT(p.p_name, ' (', ps.s_name, ')') ORDER BY p.p_name SEPARATOR ', ') AS part_supplier_info,
+       CASE 
+           WHEN oh.o_totalprice > 1000 THEN 'High Value'
+           ELSE 'Regular'
+       END AS order_value_category
+FROM OrderHierarchy oh
+LEFT JOIN TotalLineItems tli ON oh.o_orderkey = tli.o_orderkey
+LEFT JOIN PartSupplierData p ON p.rn = 1
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+GROUP BY oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, tli.total_line_price, tli.item_count
+ORDER BY oh.o_orderdate DESC, oh.o_totalprice DESC;

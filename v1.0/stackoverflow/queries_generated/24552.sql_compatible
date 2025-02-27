@@ -1,0 +1,65 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        MAX(B.Date) AS LastBadgeDate
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM Posts P
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        UB.BadgeCount,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+    JOIN UserBadges UB ON U.Id = UB.UserId
+    WHERE U.Reputation > (SELECT AVG(Reputation) FROM Users)
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.AnswerCount,
+        TU.DisplayName AS TopUser
+    FROM RecentPosts RP
+    LEFT JOIN TopUsers TU ON RP.OwnerUserId = TU.Id
+    WHERE RP.rn = 1
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.AnswerCount,
+    COALESCE(TU.DisplayName, 'Anonymous') AS Owner,
+    COALESCE(UB.BadgeNames, 'No Badges') AS OwnerBadges,
+    CASE 
+        WHEN PD.ViewCount > 1000 THEN 'High Interest'
+        WHEN PD.ViewCount IS NULL THEN 'No Views Recorded'
+        ELSE 'Moderate Interest'
+    END AS InterestLevel
+FROM PostDetails PD
+LEFT JOIN UserBadges UB ON PD.TopUser = UB.DisplayName
+ORDER BY PD.CreationDate DESC
+LIMIT 50;

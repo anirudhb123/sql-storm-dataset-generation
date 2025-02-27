@@ -1,0 +1,44 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, 
+           CAST(i_item_desc AS VARCHAR(200)) AS hierarchy_path
+    FROM item
+    WHERE i_item_sk IN (SELECT DISTINCT cs_item_sk FROM catalog_sales WHERE cs_quantity > 5)
+    
+    UNION ALL
+    
+    SELECT ih.i_item_sk, ih.i_item_desc, ih.i_current_price,
+           CONCAT(ih.hierarchy_path, ' > ', i.i_item_desc) AS hierarchy_path
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE ih.i_current_price < 100.00
+),
+sales_summary AS (
+    SELECT cs_bill_customer_sk, SUM(cs_ext_sales_price) AS total_sales,
+           COUNT(cs_order_number) AS total_orders,
+           AVG(cs_net_profit) AS avg_profit
+    FROM catalog_sales
+    GROUP BY cs_bill_customer_sk
+),
+customer_info AS (
+    SELECT c.c_customer_sk, ca.ca_city, cd.cd_gender, cd.cd_marital_status,
+           cd.cd_purchase_estimate, hd.hd_income_band_sk,
+           RANK() OVER (PARTITION BY ca.ca_city ORDER BY cd.cd_purchase_estimate DESC) AS city_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+)
+SELECT ci.ca_city, ci.cd_gender, ci.cd_marital_status,
+       ss.total_sales, ss.total_orders, ss.avg_profit,
+       COUNT(ih.i_item_sk) AS item_count, 
+       MAX(ih.hierarchy_path) AS max_hierarchy_path
+FROM customer_info ci
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.cs_bill_customer_sk
+LEFT JOIN item_hierarchy ih ON ih.i_item_desc ILIKE '%premium%'
+WHERE ci.city_rank <= 3 AND ci.cd_gender = 'F'
+GROUP BY ci.ca_city, ci.cd_gender, ci.cd_marital_status, 
+         ss.total_sales, ss.total_orders, ss.avg_profit
+HAVING COUNT(ss.total_orders) > 10
+ORDER BY ci.ca_city, ss.total_sales DESC
+LIMIT 100;

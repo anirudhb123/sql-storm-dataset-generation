@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS CustomerTotalSales,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(r.TotalAvailable, 0) AS TotalAvailable,
+    COALESCE(r.TotalSupplyCost, 0) AS TotalSupplyCost,
+    cs.CustomerTotalSales,
+    cs.OrderCount,
+    CASE 
+        WHEN cs.CustomerTotalSales IS NULL THEN 'No Sales'
+        WHEN cs.CustomerTotalSales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer' 
+    END AS CustomerType
+FROM 
+    part p
+LEFT JOIN 
+    SupplierSummary r ON p.p_partkey = r.ps_partkey
+LEFT JOIN 
+    CustomerSales cs ON cs.CustomerTotalSales > 500
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM lineitem l 
+        WHERE l.l_partkey = p.p_partkey 
+        AND l.l_shipdate < cast('1998-10-01' as date) - INTERVAL '30 days'
+    )
+ORDER BY 
+    TotalAvailable DESC,
+    CustomerTotalSales DESC;

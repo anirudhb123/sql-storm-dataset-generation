@@ -1,0 +1,69 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+AggregatedScores AS (
+    SELECT 
+        OwnerUserId,
+        SUM(Score) AS TotalScore,
+        COUNT(*) AS TotalPosts,
+        AVG(ViewCount) AS AvgViewCount
+    FROM Posts
+    WHERE CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        ARRAY_AGG(b.Name) AS Badges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT
+    u.DisplayName,
+    uh.TotalScore,
+    uh.TotalPosts,
+    uh.AvgViewCount,
+    ub.Badges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    MAX(ph.Title) AS MostRecentPostTitle,
+    STRING_AGG(tags.TagName, ', ') AS TagsUsed,
+    COUNT(DISTINCT ph.Id) AS PostHierarchyCount,
+    COALESCE(NULLIF(RANK() OVER (PARTITION BY uh.TotalScore ORDER BY uh.AvgViewCount DESC), 0), 'N/A') AS RankByAvgView
+FROM AggregatedScores uh
+JOIN Users u ON uh.OwnerUserId = u.Id
+JOIN Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id
+LEFT JOIN (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(p.Tags, '<>')) AS TagName
+    FROM Posts p
+) tags ON tags.PostId = p.Id
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE uh.TotalScore > 100
+GROUP BY u.DisplayName, uh.TotalScore, uh.TotalPosts, uh.AvgViewCount, ub.Badges, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges
+ORDER BY uh.TotalScore DESC, uh.TotalPosts ASC
+LIMIT 100;

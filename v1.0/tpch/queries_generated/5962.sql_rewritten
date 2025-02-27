@@ -1,0 +1,43 @@
+WITH RankedPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopPurchasers AS (
+    SELECT 
+        r.r_name,
+        rp.c_name,
+        rp.total_spent
+    FROM 
+        RankedPurchases rp
+    JOIN 
+        nation n ON rp.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rp.purchase_rank <= 5
+)
+SELECT 
+    r.r_name,
+    COUNT(tp.c_name) AS top_customer_count,
+    SUM(tp.total_spent) AS total_revenue
+FROM 
+    TopPurchasers tp
+JOIN 
+    region r ON tp.r_name = r.r_name
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC;

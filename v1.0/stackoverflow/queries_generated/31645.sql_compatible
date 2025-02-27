@@ -1,0 +1,80 @@
+
+WITH RecursivePostHistory AS (
+    
+    SELECT 
+        h.PostId,
+        h.PostHistoryTypeId,
+        COUNT(*) OVER (PARTITION BY h.PostId) AS TotalHistory,
+        1 AS Level
+    FROM PostHistory h
+    WHERE h.PostHistoryTypeId IN (1, 2, 4, 10) 
+    UNION ALL
+    SELECT 
+        h.PostId,
+        h.PostHistoryTypeId,
+        COUNT(*) OVER (PARTITION BY h.PostId) AS TotalHistory,
+        r.Level + 1
+    FROM PostHistory h
+    JOIN RecursivePostHistory r ON h.PostId = r.PostId
+    WHERE h.PostHistoryTypeId IN (1, 2, 4, 10) 
+),
+PostVoteSummary AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+UserBadgeCounts AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostAnalytics AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(ph.TotalHistory, 0) AS TotalHistory,
+        COALESCE(pvs.UpVotes, 0) AS UpVotes,
+        COALESCE(pvs.Down Votes, 0) AS DownVotes,
+        ubc.UserId,
+        COALESCE(ubc.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ubc.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ubc.BronzeBadges, 0) AS BronzeBadges,
+        
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS RecentActivityRank
+    FROM Posts p
+    LEFT JOIN RecursivePostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostVoteSummary pvs ON p.Id = pvs.PostId
+    LEFT JOIN UserBadgeCounts ubc ON p.OwnerUserId = ubc.UserId
+    WHERE p.AcceptedAnswerId IS NOT NULL
+)
+
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.TotalHistory,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.GoldBadges,
+    pa.SilverBadges,
+    pa.BronzeBadges,
+    CASE 
+        WHEN pa.RecentActivityRank IS NOT NULL THEN 'Active'
+        ELSE 'Inactive' 
+    END AS ActivityStatus
+FROM PostAnalytics pa
+ORDER BY pa.TotalHistory DESC, pa.UpVotes DESC;

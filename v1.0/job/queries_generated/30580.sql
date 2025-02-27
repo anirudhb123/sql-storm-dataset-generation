@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(COALESCE(mi.info::float, 0)) AS average_info_length,
+    MAX(mh.production_year) AS latest_movie_year,
+    STRING_AGG(DISTINCT substring(mh.title from '^[^ -]+'), ', ') AS movie_title_snippets,
+    COUNT(DISTINCT CASE WHEN c.role_id IS NOT NULL THEN c.movie_id END) AS roles_played,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info c ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON c.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Length')
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name NOT LIKE '%Test%'
+GROUP BY 
+    ak.id
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    actor_rank,
+    total_movies DESC;

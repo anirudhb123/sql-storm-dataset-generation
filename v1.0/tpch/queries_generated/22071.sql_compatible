@@ -1,0 +1,66 @@
+
+WITH RECURSIVE part_sizes AS (
+    SELECT 
+        p_partkey,
+        p_size,
+        CAST(p_name AS VARCHAR(255)) AS p_name_full,
+        NULLIF(p_size, 0) AS size_valid
+    FROM part
+    WHERE p_size > 0
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        p.p_size + ps.ps_availqty AS p_size,
+        CONCAT(ps.ps_comment, ' & ', p.p_name) AS p_name_full,
+        NULLIF(p.p_size + ps.ps_availqty, 0)
+    FROM part_sizes ps
+    JOIN part p ON p.p_partkey = ps.p_partkey
+    WHERE ps.size_valid IS NULL
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+supplier_metrics AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+order_line_stats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS line_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name_full,
+    COALESCE(cm.order_count, 0) AS customer_order_count,
+    COALESCE(sm.total_supply_cost, 0) AS supplier_total_supply_cost,
+    SUM(ols.total_value) AS total_order_value,
+    MAX(ols.last_order_date) AS last_order_date,
+    CASE 
+        WHEN ps.size_valid IS NOT NULL THEN 'Valid Size' 
+        ELSE 'Invalid or Zero Size' 
+    END AS size_status
+FROM part_sizes ps
+LEFT JOIN customer_orders cm ON ps.p_partkey = cm.c_custkey
+LEFT JOIN supplier_metrics sm ON ps.p_partkey = sm.s_suppkey
+LEFT JOIN order_line_stats ols ON ps.p_partkey = ols.o_orderkey
+GROUP BY ps.p_partkey, ps.p_name_full, cm.order_count, sm.total_supply_cost, ols.last_order_date
+HAVING SUM(ols.total_value) > 1000 OR MAX(ols.last_order_date) IS NULL
+ORDER BY size_status DESC, customer_order_count DESC
+LIMIT 10 OFFSET 5;

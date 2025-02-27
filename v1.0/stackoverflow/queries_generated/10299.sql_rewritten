@@ -1,0 +1,35 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    p.ViewCount,
+    p.Score,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    p.LastActivityDate,
+    pt.Name AS PostType,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Badges b ON p.OwnerUserId = b.UserId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    unnest(string_to_array(p.Tags, ',')) AS t(tag) ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = trim(both ' ' from t.tag)
+GROUP BY 
+    p.Id, u.Id, pt.Id
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 100;

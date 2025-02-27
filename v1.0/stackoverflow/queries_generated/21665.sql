@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        CASE 
+            WHEN rp.ViewCount IS NULL THEN 'No Views'
+            ELSE CASE 
+                WHEN rp.ViewCount > 1000 THEN 'High View'
+                WHEN rp.ViewCount BETWEEN 100 AND 1000 THEN 'Medium View'
+                ELSE 'Low View'
+            END
+        END AS ViewCategory,
+        COALESCE(up.UserId, -1) AS LastUpvotedUserId
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            v.PostId,
+            v.UserId,
+            RANK() OVER (PARTITION BY v.PostId ORDER BY v.CreationDate DESC) AS rnk
+        FROM 
+            Votes v
+        WHERE 
+            v.VoteTypeId = 2 -- Upvote
+    ) up ON rp.PostId = up.PostId AND up.rnk = 1
+)
+SELECT
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.ViewCategory,
+    CASE 
+        WHEN pa.LastUpvotedUserId = -1 THEN 'No Upvotes'
+        ELSE 'Upvoted'
+    END AS UpvoteStatus,
+    ARRAY_AGG(DISTINCT t.TagName) FILTER (WHERE t.TagName IS NOT NULL) AS Tags
+FROM
+    PostAnalytics pa
+LEFT JOIN
+    (SELECT DISTINCT UNNEST(string_to_array(Tags, '>')) AS TagName FROM Posts) t ON t.TagName IS NOT NULL
+WHERE
+    pa.rn <= 3 -- Top 3 latest posts for each user
+GROUP BY 
+    pa.PostId, pa.Title, pa.ViewCount, pa.ViewCategory, pa.LastUpvotedUserId
+ORDER BY
+    pa.ViewCount DESC NULLS LAST,
+    pa.Title ASC
+LIMIT 100;

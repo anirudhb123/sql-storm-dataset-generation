@@ -1,0 +1,70 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+    HAVING 
+        COUNT(DISTINCT ps.ps_suppkey) > 1
+)
+SELECT 
+    r.r_name,
+    c.c_custkey,
+    hc.total_order_value,
+    COALESCE(su.total_supply_value, 0) AS total_supply_value,
+    hp.p_name,
+    hp.p_retailprice
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+INNER JOIN (
+    SELECT 
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        RankedOrders o
+    WHERE 
+        o.order_rank <= 10
+    GROUP BY 
+        o.o_custkey
+) hc ON hc.o_custkey = c.c_custkey
+LEFT JOIN SupplierSummary su ON su.s_suppkey = c.c_custkey
+CROSS JOIN HighValueParts hp
+WHERE 
+    hc.total_order_value > 5000
+    AND hp.p_retailprice < 100
+ORDER BY 
+    r.r_name, hc.total_order_value DESC, hp.p_name;

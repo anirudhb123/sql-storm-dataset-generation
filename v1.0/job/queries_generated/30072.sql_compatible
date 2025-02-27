@@ -1,0 +1,71 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        'Start' AS recursion_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT(ms.movie_title, ' :: ', m.title),
+        'Next Level' AS recursion_level
+    FROM 
+        aka_title m
+    INNER JOIN 
+        RecursiveMovieCTE ms ON m.episode_of_id = ms.movie_id
+    WHERE 
+        m.production_year >= 2000
+), MovieCastCTE AS (
+    SELECT 
+        r.movie_id,
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        RecursiveMovieCTE r
+    LEFT JOIN 
+        cast_info c ON r.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        r.movie_id
+), TitleInfoCTE AS (
+    SELECT 
+        mt.movie_id,
+        mt.movie_title,
+        mci.info,
+        ROW_NUMBER() OVER (PARTITION BY mt.movie_id ORDER BY mt.movie_title) AS rn
+    FROM 
+        RecursiveMovieCTE mt
+    JOIN 
+        movie_info mci ON mt.movie_id = mci.movie_id
+    WHERE 
+        mci.info IS NOT NULL
+)
+SELECT 
+    m.movie_id,
+    m.movie_title,
+    COALESCE(m.total_cast, 0) AS total_cast,
+    mt.info AS additional_info,
+    STRING_AGG(DISTINCT cn.name) AS company_names,
+    'Movies produced after 2000' AS category
+FROM 
+    MovieCastCTE m
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    TitleInfoCTE mt ON m.movie_id = mt.movie_id AND mt.rn = 1
+WHERE 
+    m.total_cast > 2
+GROUP BY 
+    m.movie_id, m.movie_title, mt.info
+ORDER BY 
+    m.movie_title
+LIMIT 50;

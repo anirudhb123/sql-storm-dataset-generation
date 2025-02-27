@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        COUNT(DISTINCT ps_partkey) AS total_parts,
+        SUM(ps_availqty) AS total_available_quantity,
+        AVG(ps_supplycost) AS avg_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey
+    HAVING
+        total_spent > (SELECT AVG(o_totalprice) FROM orders)
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_retailprice,
+        CASE
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            ELSE CONCAT('Size: ', p.p_size)
+        END AS size_description
+    FROM
+        part p
+)
+SELECT
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    s.s_name,
+    ps.total_parts,
+    ps.total_available_quantity,
+    ps.avg_supply_cost,
+    c.c_name,
+    c.total_spent,
+    pd.p_name,
+    pd.size_description
+FROM
+    RankedOrders o
+LEFT JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN
+    HighValueCustomers c ON o.o_custkey = c.c_custkey
+INNER JOIN
+    PartDetails pd ON l.l_partkey = pd.p_partkey
+WHERE
+    o.o_orderstatus IN ('O', 'F')
+    AND l.l_returnflag = 'N'
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+ORDER BY
+    o.o_orderdate DESC,
+    s.total_parts DESC;

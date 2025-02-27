@@ -1,0 +1,53 @@
+WITH RecursiveTagUsage AS (
+    SELECT 
+        T.TagName,
+        T.Count,
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY T.TagName ORDER BY P.CreationDate DESC) AS TagUsageRank
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+), TagSummary AS (
+    SELECT 
+        TagName,
+        COUNT(PostId) AS PostCount,
+        SUM(CASE WHEN CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPostCount
+    FROM RecursiveTagUsage
+    GROUP BY TagName
+), UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentPosts,
+        AVG(U.Reputation) AS AverageReputation
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName
+), BadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    UA.TotalPosts,
+    UA.RecentPosts,
+    UA.AverageReputation,
+    BS.BadgeCount,
+    BS.BadgeNames,
+    TS.TagName,
+    TS.PostCount,
+    TS.RecentPostCount
+FROM UserActivity UA
+JOIN BadgeSummary BS ON UA.UserId = BS.UserId
+LEFT JOIN TagSummary TS ON UA.TotalPosts > TS.PostCount
+ORDER BY UA.RecentPosts DESC, UA.AverageReputation DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.CreationDate,
+        pt.Name AS PostType
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON pt.Id = (CASE 
+            WHEN rp.PostId IN (SELECT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL) 
+            THEN 2 
+            ELSE 1 
+        END)
+    WHERE 
+        rp.Rank = 1
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        SUM(pt.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+),
+TopBadges AS (
+    SELECT 
+        b.Name AS BadgeName,
+        COUNT(b.UserId) AS UserCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.Name
+    ORDER BY 
+        UserCount DESC
+    LIMIT 5
+)
+SELECT 
+    tp.Title AS RecentTopPostTitle,
+    tp.ViewCount AS RecentTopPostViews,
+    tp.Score AS RecentTopPostScore,
+    tt.TagName AS PopularTag,
+    tt.PostCount AS PopularTagPostCount,
+    tt.TotalViews AS PopularTagTotalViews,
+    tb.BadgeName AS TopBadge,
+    tb.UserCount AS TopBadgeUserCount
+FROM 
+    TopPosts tp
+CROSS JOIN 
+    PopularTags tt
+CROSS JOIN 
+    TopBadges tb
+ORDER BY 
+    tp.ViewCount DESC, 
+    tt.TotalViews DESC, 
+    tb.UserCount DESC
+LIMIT 10;

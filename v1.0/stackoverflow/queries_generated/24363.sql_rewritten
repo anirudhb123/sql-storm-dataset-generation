@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts,
+        COALESCE(u.Reputation, 0) AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+), 
+PostStats AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        TotalPosts,
+        UserReputation,
+        CASE 
+            WHEN UserReputation IS NULL THEN 'No Reputation'
+            WHEN UserReputation = 0 THEN 'New User'
+            WHEN UserReputation < 100 THEN 'Novice User'
+            ELSE 'Experienced User'
+        END AS ReputationCategory
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+), 
+SortedPosts AS (
+    SELECT 
+        ps.Title,
+        ps.CreationDate,
+        ps.ViewCount,
+        ps.ReputationCategory,
+        RANK() OVER (ORDER BY CASE WHEN ps.UserReputation IS NOT NULL THEN ps.UserReputation ELSE -1 END DESC) AS RankByReputation,
+        COUNT(*) AS HighViewCountPosts
+    FROM 
+        PostStats ps
+    WHERE 
+        ps.ViewCount > (
+            SELECT 
+                AVG(ViewCount)
+            FROM 
+                PostStats
+            WHERE 
+                ReputationCategory = 'Experienced User'
+        )
+    GROUP BY 
+        ps.Title, ps.CreationDate, ps.ViewCount, ps.ReputationCategory
+), 
+CommentsCount AS (
+    SELECT 
+        PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+), 
+FinalResults AS (
+    SELECT 
+        sp.Title,
+        sp.CreationDate,
+        sp.ViewCount,
+        sp.ReputationCategory,
+        cc.CommentCount,
+        COALESCE(sp.HighViewCountPosts, 0) AS HighViewCountPosts
+    FROM 
+        SortedPosts sp
+    LEFT JOIN 
+        CommentsCount cc ON cc.PostId = sp.PostId
+    WHERE 
+        sp.RankByReputation <= 10 
+)
+SELECT 
+    fr.Title,
+    fr.CreationDate,
+    fr.ViewCount,
+    fr.ReputationCategory,
+    fr.CommentCount,
+    CASE 
+        WHEN fr.CommentCount IS NULL THEN 'No Comments'
+        WHEN fr.CommentCount > 5 THEN 'Highly Discussed'
+        ELSE 'Moderately Discussed'
+    END AS DiscussionType
+FROM 
+    FinalResults fr
+WHERE 
+    fr.CreationDate BETWEEN '2022-01-01' AND cast('2024-10-01' as date)
+ORDER BY 
+    fr.ViewCount DESC, fr.ReputationCategory ASC;

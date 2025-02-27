@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.rn = 1
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.OwnerDisplayName,
+    COALESCE(b.Count, 0) AS TagUsageCount,
+    CASE 
+        WHEN tp.Score > 10 THEN 'High Score'
+        WHEN tp.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Tags t ON tp.Title LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    (SELECT 
+         TagName, COUNT(*) AS Count 
+     FROM 
+         Posts p 
+     JOIN 
+         Tags t ON p.Tags LIKE '%' || t.TagName || '%' 
+     GROUP BY 
+         TagName) b ON t.TagName = b.TagName
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC;

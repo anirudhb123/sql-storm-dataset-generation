@@ -1,0 +1,39 @@
+
+WITH RECURSIVE TotalOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedOrders AS (
+    SELECT c.custkey, c.c_name, t.total_spent,
+           RANK() OVER (PARTITION BY r.r_regionkey ORDER BY t.total_spent DESC) AS rank_within_region
+    FROM TotalOrders t
+    JOIN supplier s ON t.c_custkey = s.s_nationkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT r.r_name, ro.c_name, ro.total_spent, ps.total_supply_cost,
+       CASE 
+           WHEN ro.rank_within_region <= 5 THEN 'Top Customer'
+           ELSE 'Regular Customer'
+       END AS customer_category
+FROM RankedOrders ro
+LEFT JOIN region r ON ro.custkey = r.r_regionkey
+LEFT JOIN PartSupplier ps ON ro.custkey = ps.ps_partkey
+WHERE ro.total_spent IS NOT NULL AND r.r_name IS NOT NULL
+ORDER BY r.r_name, ro.total_spent DESC
+UNION ALL
+SELECT r.r_name, 'N/A' AS c_name, 0 AS total_spent, SUM(ps.ps_availqty) AS total_supply_cost,
+       'Supplier Only' AS customer_category
+FROM PartSupplier ps
+JOIN supplier s ON ps.ps_partkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING COUNT(s.s_suppkey) > 0;

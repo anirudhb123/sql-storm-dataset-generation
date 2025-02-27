@@ -1,0 +1,14 @@
+SELECT 
+    COUNT(*) AS total_orders,
+    SUM(o_totalprice) AS total_revenue,
+    AVG(o_totalprice) AS average_order_value,
+    MIN(o_orderdate) AS first_order_date,
+    MAX(o_orderdate) AS last_order_date
+FROM 
+    orders
+JOIN 
+    customers ON orders.o_custkey = customers.c_custkey
+WHERE 
+    customers.c_mktsegment = 'BUILDING'
+    AND o_orderdate >= DATE '1997-01-01'
+    AND o_orderdate < DATE '1998-01-01';

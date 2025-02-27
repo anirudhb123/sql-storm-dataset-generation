@@ -1,0 +1,87 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        CreationDate,
+        Score,
+        ViewCount,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+     WHERE 
+        p.PostTypeId = 2 
+),
+AggregatedUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(V.BountyAmount) AS TotalBountySpent,
+        COUNT(DISTINCT P.Id) AS QuestionsAsked,
+        SUM(COALESCE(P.Score, 0)) AS TotalPostScore,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS ChangeCount,
+        MAX(PH.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RP.Title AS QuestionTitle,
+    U.DisplayName AS QuestionOwner,
+    AU.TotalBountySpent,
+    AU.QuestionsAsked,
+    AU.TotalPostScore,
+    AU.TotalComments,
+    RPH.ChangeCount,
+    RPH.LastChangeDate
+FROM 
+    RecursivePosts RP
+JOIN 
+    Users U ON RP.OwnerUserId = U.Id
+JOIN 
+    AggregatedUserStats AU ON AU.UserId = U.Id
+LEFT JOIN 
+    RecentPostHistory RPH ON RP.Id = RPH.PostId
+WHERE 
+    RP.Level = 1
+AND 
+    AU.TotalPostScore > 10
+ORDER BY 
+    RPH.LastChangeDate DESC NULLS LAST;

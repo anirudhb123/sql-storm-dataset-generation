@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice,
+        COALESCE(MAX(l.l_quantity), 0) AS max_quantity_sold,
+        COALESCE(AVG(l.l_extendedprice * (1 - l.l_discount)), 0) AS avg_sales_price
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name,
+    c.c_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    p.p_name,
+    p.max_quantity_sold,
+    p.avg_sales_price,
+    co.total_spent
+FROM 
+    region r
+JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer_orders co ON co.total_spent > 10000
+LEFT JOIN 
+    RankedSuppliers s ON s.rank <= 5 AND s.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-10-01'
+        )
+    )
+JOIN 
+    PartDetails p ON p.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = s.s_suppkey
+    )
+WHERE 
+    n.n_name NOT LIKE 'A%'
+ORDER BY 
+    r.r_name, co.total_spent DESC, p.avg_sales_price DESC;

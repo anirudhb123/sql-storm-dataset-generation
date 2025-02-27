@@ -1,0 +1,66 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        SUM(CASE WHEN d.gender = 'F' THEN 1 ELSE 0 END) AS female_actors,
+        STRING_AGG(CASE WHEN e.kind IS NOT NULL THEN e.kind ELSE 'Unknown' END, ', ') AS company_kinds
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_companies b ON a.movie_id = b.movie_id
+    LEFT JOIN 
+        cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN 
+        name d ON c.person_id = d.id
+    LEFT JOIN 
+        company_type e ON b.company_type_id = e.id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2020 
+        AND a.title IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        year_rank,
+        num_actors,
+        female_actors,
+        company_kinds
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.num_actors,
+    tm.female_actors,
+    tm.company_kinds,
+    CASE 
+        WHEN tm.female_actors > (tm.num_actors / 2) THEN 'Majority Female'
+        WHEN tm.female_actors IS NULL THEN 'No Actors'
+        ELSE 'Diverse Cast'
+    END AS actor_diversity,
+    (
+        SELECT COUNT(*)
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        WHERE mk.movie_id = tm.movie_id
+        AND k.keyword LIKE 'Drama%'
+    ) AS drama_keyword_count
+FROM 
+    TopMovies tm
+RIGHT JOIN 
+    kind_type kt ON tm.movie_id = kt.id
+WHERE 
+    kt.kind NOT LIKE '%Horror%'
+ORDER BY 
+    tm.production_year DESC, tm.female_actors DESC NULLS LAST;

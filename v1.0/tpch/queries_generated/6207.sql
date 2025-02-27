@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(o.o_orderdate) ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -3, GETDATE())
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.OrderRank <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+OrderLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount
+    FROM 
+        lineitem li
+    JOIN 
+        TopOrders to ON li.l_orderkey = to.o_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    od.l_partkey,
+    SUM(od.l_extendedprice * (1 - od.l_discount)) AS TotalRevenue,
+    SUM(od.l_quantity) AS TotalQuantity,
+    sd.s_name,
+    sd.s_acctbal
+FROM 
+    TopOrders o
+JOIN 
+    OrderLineItems od ON o.o_orderkey = od.l_orderkey
+JOIN 
+    SupplierDetails sd ON od.l_partkey = sd.ps_partkey
+GROUP BY 
+    o.o_orderkey, 
+    o.o_orderdate, 
+    od.l_partkey, 
+    sd.s_name, 
+    sd.s_acctbal
+ORDER BY 
+    TotalRevenue DESC, 
+    o.o_orderdate ASC;

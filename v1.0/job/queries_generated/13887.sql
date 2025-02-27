@@ -1,0 +1,31 @@
+-- Benchmark query to test the performance of multiple joins across the schema
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    rt.role AS actor_role,
+    c.name AS company_name,
+    kt.keyword AS movie_keyword,
+    mi.info AS additional_movie_info
+FROM 
+    title t
+JOIN 
+    aka_title at ON t.id = at.movie_id
+JOIN 
+    cast_info ci ON at.id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    t.production_year > 2000
+ORDER BY 
+    t.production_year DESC, 
+    t.title;

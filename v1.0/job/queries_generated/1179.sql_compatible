@@ -1,0 +1,48 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM aka_title at
+    WHERE at.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie')
+),
+TopMovies AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        AVG(CAST(mi.rating AS FLOAT)) AS avg_rating
+    FROM RankedTitles rt
+    LEFT JOIN movie_info mi ON rt.title = mi.info
+    WHERE rt.year_rank <= 5
+    GROUP BY rt.title, rt.production_year
+),
+ActorMovieCount AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT mc.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN movie_companies mc ON ci.movie_id = mc.movie_id
+    GROUP BY a.name
+),
+HighPerformers AS (
+    SELECT 
+        am.name,
+        am.movie_count,
+        COALESCE(tm.avg_rating, 0) AS average_movie_rating
+    FROM ActorMovieCount am
+    LEFT JOIN TopMovies tm ON am.movie_count >= 3 AND tm.production_year = EXTRACT(YEAR FROM DATE '2024-10-01')
+    WHERE am.movie_count > 2
+)
+SELECT 
+    h.name,
+    h.movie_count,
+    h.average_movie_rating,
+    CASE 
+        WHEN h.average_movie_rating > 8 THEN 'High Performer'
+        WHEN h.average_movie_rating BETWEEN 5 AND 8 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM HighPerformers h
+ORDER BY h.movie_count DESC, h.average_movie_rating DESC;

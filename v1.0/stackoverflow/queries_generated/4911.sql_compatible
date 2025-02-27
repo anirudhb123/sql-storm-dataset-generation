@@ -1,0 +1,55 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(COALESCE(DATEDIFF(CAST('2024-10-01 12:34:56' AS TIMESTAMP), p.CreationDate), 0)) AS AvgPostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        TotalScore,
+        UpVoteCount,
+        DownVoteCount,
+        AvgPostAge,
+        RANK() OVER (ORDER BY TotalScore DESC, PostCount DESC) AS Rank
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation > 100
+)
+SELECT 
+    t.DisplayName,
+    t.Reputation,
+    t.PostCount,
+    t.TotalScore,
+    t.UpVoteCount,
+    t.DownVoteCount,
+    t.AvgPostAge,
+    CASE 
+        WHEN t.AvgPostAge < 30 THEN 'New Contributor'
+        WHEN t.AvgPostAge BETWEEN 30 AND 180 THEN 'Regular Contributor'
+        ELSE 'Veteran Contributor'
+    END AS ContributorType
+FROM 
+    TopUsers t
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.TotalScore DESC, t.PostCount DESC;

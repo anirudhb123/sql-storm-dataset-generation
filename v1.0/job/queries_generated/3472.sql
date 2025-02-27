@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+MoviesWithDetails AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        GROUP_CONCAT(DISTINCT an.name ORDER BY an.name) AS actor_names,
+        COALESCE(SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END), 0) AS has_award_info
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.movie_title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_info mi ON (mi.movie_id = (SELECT id FROM aka_title WHERE title = tm.movie_title) AND mi.info_type_id IS NOT NULL)
+    GROUP BY 
+        tm.movie_title, tm.production_year
+)
+SELECT 
+    mw.movie_title,
+    mw.production_year,
+    mw.actor_names,
+    mw.has_award_info,
+    CASE 
+        WHEN mw.has_award_info > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_award
+FROM 
+    MoviesWithDetails mw 
+WHERE 
+    mw.production_year BETWEEN 1990 AND 2020
+ORDER BY 
+    mw.production_year DESC, mw.has_award_info DESC;

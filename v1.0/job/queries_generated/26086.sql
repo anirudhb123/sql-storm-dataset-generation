@@ -1,0 +1,47 @@
+WITH MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ck.kind AS character_kind,
+        GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+        COALESCE(mn.name, 'Unknown Company') AS company_name
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = mt.id
+    LEFT JOIN 
+        company_name mn ON mn.id = mc.company_id
+    LEFT JOIN 
+        movie_keyword mw ON mw.movie_id = mt.id
+    LEFT JOIN 
+        keyword kw ON kw.id = mw.keyword_id
+    LEFT JOIN 
+        kind_type ck ON ck.id = mt.kind_id
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+        AND ak.name IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, ak.id, ak.name, ck.kind, mn.name
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    actor_name,
+    actor_id,
+    character_kind,
+    keywords,
+    company_name
+FROM 
+    MovieDetails
+WHERE 
+    keywords IS NOT NULL
+ORDER BY 
+    production_year DESC, movie_title ASC;

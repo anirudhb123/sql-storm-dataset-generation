@@ -1,0 +1,87 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(c.person_id) > 3
+),
+ActorAwards AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT a.movie_id) AS awards_count
+    FROM 
+        cast_info a
+    JOIN 
+        movie_info mi ON a.movie_id = mi.movie_id 
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    GROUP BY 
+        a.person_id
+),
+ActorsInTopMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name,
+        tm.title,
+        tm.production_year,
+        COALESCE(aa.awards_count, 0) AS awards_count
+    FROM 
+        TopMovies tm
+    JOIN 
+        cast_info a ON tm.movie_id = a.movie_id
+    JOIN 
+        aka_name ak ON a.person_id = ak.person_id
+    LEFT JOIN 
+        ActorAwards aa ON a.person_id = aa.person_id
+)
+SELECT 
+    actor_id,
+    name AS actor_name,
+    title,
+    production_year,
+    COALESCE(awards_count, 0) AS total_awards,
+    ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY total_awards DESC) AS rank
+FROM 
+    ActorsInTopMovies
+WHERE 
+    production_year IS NOT NULL
+ORDER BY 
+    production_year, rank;

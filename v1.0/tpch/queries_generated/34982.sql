@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           CAST(s_name AS varchar(255)) AS full_name, 
+           0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           CONCAT(sh.full_name, ' -> ', s.s_name), 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PartWithSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_availqty, 
+           ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+),
+NationRegionAvg AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name, 
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+)
+SELECT nh.full_name, 
+       MAX(c.total_spent) AS max_spent, 
+       AVG(n.avg_acctbal) AS avg_supplier_acctbal, 
+       COUNT(DISTINCT p.p_partkey) AS part_count
+FROM SupplierHierarchy nh
+LEFT JOIN CustomerOrders c ON nh.s_suppkey = c.c_custkey
+JOIN PartWithSupplierInfo p ON nh.s_suppkey = p.ps_suppkey
+JOIN NationRegionAvg n ON nh.s_nationkey = n.n_nationkey
+GROUP BY nh.full_name
+HAVING COUNT(DISTINCT c.o_orderkey) > 5
+ORDER BY max_spent DESC, avg_supplier_acctbal DESC;

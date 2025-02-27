@@ -1,0 +1,58 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.ParentId,
+        COALESCE(UP.PC, 0) AS ParentCount,
+        1 AS Level
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS PC
+        FROM 
+            Posts
+        WHERE 
+            ParentId IS NOT NULL
+        GROUP BY 
+            ParentId
+    ) UP ON P.Id = UP.ParentId
+    WHERE 
+        P.PostTypeId IN (1, 2) -- Filtering for Questions and Answers
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.PostTypeId,
+        P.ParentId,
+        COALESCE(UP.PC, 0),
+        RH.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN RecursivePostHierarchy RH ON P.ParentId = RH.PostId
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    PostsCount = COUNT(DISTINCT P.Id),
+    AnswerCount = SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END),
+    ViewsSum = SUM(COALESCE(P.ViewCount, 0)),
+    PostHierarchy = JSON_AGG(JSON_BUILD_OBJECT('PostId', RP.PostId, 'Title', RP.Title, 'Level', RP.Level)) FILTER (WHERE RP.PostId IS NOT NULL)
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    RecursivePostHierarchy RP ON P.Id = RP.PostId
+WHERE 
+    U.Reputation > 100
+GROUP BY 
+    U.DisplayName, U.Reputation
+HAVING 
+    COUNT(DISTINCT P.Id) > 5 AND 
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    U.Reputation DESC
+LIMIT 10;

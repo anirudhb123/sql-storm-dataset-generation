@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierRank AS (
+    SELECT s_suppkey, s_name, s_acctbal, 
+           RANK() OVER (ORDER BY s_acctbal DESC) AS rank
+    FROM supplier
+), 
+OrderSummary AS (
+    SELECT o_orderkey, 
+           COUNT(DISTINCT l.l_partkey) AS total_parts,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+), 
+CustomerRegion AS (
+    SELECT c.c_custkey, 
+           r.r_name AS region_name,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, r.r_name
+)
+SELECT cr.region_name,
+       sr.s_name,
+       SUM(os.total_revenue) AS total_revenue,
+       AVG(sr.s_acctbal) AS avg_supplier_acctbal,
+       COUNT(DISTINCT cr.c_custkey) AS distinct_customers
+FROM CustomerRegion cr
+LEFT JOIN OrderSummary os ON cr.order_count > 0 
+LEFT JOIN SupplierRank sr ON sr.rank <= 5 
+WHERE os.o_orderdate >= DATE '1997-01-01'
+  AND os.o_orderdate < DATE '1998-01-01'
+  AND cr.order_count IS NOT NULL
+GROUP BY cr.region_name, sr.s_name
+HAVING SUM(os.total_revenue) > 10000
+ORDER BY total_revenue DESC, cr.region_name ASC;

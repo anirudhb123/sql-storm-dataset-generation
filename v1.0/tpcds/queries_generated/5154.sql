@@ -1,0 +1,68 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+StoreSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_order_count
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+DemographicAnalysis AS (
+    SELECT 
+        cd.cd_demo_sk,
+        AVG(total_web_sales) AS avg_web_sales,
+        AVG(total_store_sales) AS avg_store_sales,
+        SUM(web_order_count) AS total_web_orders,
+        SUM(store_order_count) AS total_store_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    JOIN 
+        StoreSales ss ON cs.c_customer_sk = ss.c_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk
+),
+FinalAnalysis AS (
+    SELECT 
+        d.d_year,
+        COUNT(DISTINCT cd.cd_demo_sk) AS unique_demographics,
+        SUM(avg_web_sales) AS total_avg_web_sales,
+        SUM(avg_store_sales) AS total_avg_store_sales,
+        SUM(total_web_orders) AS total_web_orders,
+        SUM(total_store_orders) AS total_store_orders
+    FROM 
+        DemographicAnalysis cd
+    JOIN 
+        date_dim d ON d.d_date_sk = CURRENT_DATE
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    d_year, 
+    unique_demographics, 
+    total_avg_web_sales, 
+    total_avg_store_sales, 
+    total_web_orders,
+    total_store_orders
+FROM 
+    FinalAnalysis
+ORDER BY 
+    d_year DESC
+LIMIT 10;

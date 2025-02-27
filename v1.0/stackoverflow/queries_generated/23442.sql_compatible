@@ -1,0 +1,59 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        MAX(b.Reputation) AS MaxReputation,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.PostTypeId
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN CommentCount > 10 AND UpvoteCount > DownvoteCount THEN 'Popular'
+            ELSE 'Lesser Known'
+        END AS PopularityStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        PostRank <= 3
+), PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        AVG(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - ph.CreationDate)) / 60) AS AvgTimeSinceLastAction
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.Title, 
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.PopularityStatus,
+    COALESCE(pha.CloseReopenCount, 0) AS CloseReopenCount,
+    COALESCE(pha.AvgTimeSinceLastAction, 0) AS AvgTimeSinceLastAction
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistoryAggregates pha ON fp.PostId = pha.PostId
+ORDER BY 
+    fp.PopularityStatus DESC, 
+    fp.ViewCount DESC;

@@ -1,0 +1,27 @@
+
+SELECT 
+    ca.city AS customer_city,
+    cd.cd_gender AS customer_gender,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(ws.ws_sales_price) AS avg_sales_price,
+    d.d_year AS sales_year,
+    d.d_month_id AS sales_month
+FROM 
+    web_sales ws
+JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    cd.cd_gender = 'F' 
+    AND d.d_year BETWEEN 2020 AND 2023
+GROUP BY 
+    ca.city, cd.cd_gender, d.d_year, d.d_month_id
+ORDER BY 
+    sales_year, sales_month, total_net_profit DESC
+LIMIT 100;

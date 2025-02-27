@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        s.s_acctbal
+    FROM supplier s
+),
+PartSupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Unknown'
+            WHEN c.c_acctbal < 500 THEN 'Low Value'
+            ELSE 'High Value'
+        END AS account_category
+    FROM customer c
+    WHERE c.c_mktsegment IN ('BUILDING', 'CONSTRUCTION')
+),
+HistoricalOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey
+),
+SupplierPartStats AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(s.s_acctbal) as avg_supplier_balance
+    FROM partsupp ps
+    JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.rank <= 3 
+    GROUP BY ps.ps_partkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(fc.account_category, 'Not specified') AS customer_segment,
+    pps.total_cost,
+    pps.supplier_count,
+    h.total_revenue,
+    h.item_count,
+    sps.avg_supplier_balance
+FROM part p
+LEFT JOIN PartSupplierStats pps ON p.p_partkey = pps.ps_partkey
+LEFT JOIN HistoricalOrders h ON h.o_orderkey = ANY (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey IN (SELECT c.c_custkey FROM FilteredCustomers fc)
+)
+LEFT JOIN SupplierPartStats sps ON p.p_partkey = sps.ps_partkey
+LEFT JOIN FilteredCustomers fc ON fc.c_custkey IN (
+    SELECT o.o_custkey 
+    FROM orders o 
+    WHERE o.o_orderstatus = 'O' 
+)
+WHERE COALESCE(h.total_revenue, 0) > 100000
+AND (p.p_retailprice * 0.9) > (sps.avg_supplier_balance / NULLIF(pps.supplier_count, 0))
+ORDER BY p.p_partkey, h.total_revenue DESC;

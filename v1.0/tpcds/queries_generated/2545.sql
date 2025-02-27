@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim) -- Start from the earliest date
+        AND ws.ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim) -- Up to the latest date
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_country ORDER BY cd.cd_purchase_estimate DESC) AS country_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+total_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    ca.ca_country,
+    it.i_item_id,
+    it.i_item_desc,
+    ts.total_sales,
+    CASE 
+        WHEN c.cd_purchase_estimate IS NULL THEN 'Unknown'
+        ELSE CASE 
+            WHEN c.cd_purchase_estimate > 1000 THEN 'High'
+            WHEN c.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low' 
+        END 
+    END AS purchase_estimate_category
+FROM 
+    customer_info c
+JOIN 
+    ranked_sales rs ON c.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = rs.ws_item_sk LIMIT 1)
+JOIN 
+    item it ON rs.ws_item_sk = it.i_item_sk
+JOIN 
+    total_sales ts ON it.i_item_sk = ts.ws_item_sk
+WHERE 
+    c.country_rank <= 5 -- Top 5 customers per country
+    AND rs.sales_rank = 1 -- Top selling item for each customer
+ORDER BY 
+    ca_country, purchase_estimate_category DESC;

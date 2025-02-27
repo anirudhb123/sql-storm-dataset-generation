@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name IN ('GERMANY', 'FRANCE')
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+)
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    r.s_acctbal,
+    co.c_custkey,
+    co.total_spent,
+    co.order_count,
+    hp.p_partkey,
+    hp.p_name,
+    hp.total_revenue
+FROM 
+    RankedSuppliers r
+FULL OUTER JOIN 
+    CustomerOrders co ON r.s_suppkey = co.c_custkey
+JOIN 
+    HighValueParts hp ON hp.total_revenue > 75000 
+WHERE 
+    (co.order_count IS NOT NULL OR r.s_suppkey IS NOT NULL)
+ORDER BY 
+    r.s_suppkey, co.total_spent DESC, hp.total_revenue DESC;

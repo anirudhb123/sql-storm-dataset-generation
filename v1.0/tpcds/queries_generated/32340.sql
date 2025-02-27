@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT s.s_sold_date_sk, s.s_item_sk, s.ss_quantity, s.ss_sales_price
+    FROM store_sales s
+    WHERE s.s_sold_date_sk = (
+        SELECT MAX(ss2.s_sold_date_sk)
+        FROM store_sales ss2
+    )
+    UNION ALL
+    SELECT s2.s_sold_date_sk, s2.s_item_sk, s2.ss_quantity, s2.ss_sales_price
+    FROM store_sales s2
+    JOIN SalesCTE cte ON s2.s_item_sk = cte.s_item_sk
+    WHERE s2.s_sold_date_sk < cte.s_sold_date_sk
+)
+SELECT 
+    ca.ca_city,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(cd.cd_purchase_estimate) OVER (PARTITION BY ca.ca_state) AS avg_purchase_estimate,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    CASE 
+        WHEN SUM(ws.ws_net_profit) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM web_sales ws
+JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+GROUP BY ca.ca_city, ca.ca_state
+HAVING total_net_profit > (
+    SELECT AVG(sales_price)
+    FROM (
+        SELECT SUM(cs.cs_sales_price) AS sales_price
+        FROM catalog_sales cs
+        GROUP BY cs.cs_order_number
+    ) AS avg_sales
+)
+ORDER BY total_net_profit DESC
+LIMIT 10;

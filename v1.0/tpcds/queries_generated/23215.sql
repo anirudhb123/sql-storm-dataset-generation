@@ -1,0 +1,55 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS rank_sales
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (
+        SELECT d.d_date_sk
+        FROM date_dim d 
+        WHERE d.d_year = 2023 AND d.d_month_seq BETWEEN 1 AND 3
+    )
+),
+FilteredReturns AS (
+    SELECT 
+        wr.wr_order_number,
+        SUM(wr.wr_return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT wr.wr_refunded_customer_sk) AS unique_customers
+    FROM web_returns wr
+    JOIN RecursiveSales rs ON wr.wr_order_number = rs.ws_order_number
+    WHERE wr.wr_return_amt > 0
+    GROUP BY wr.wr_order_number
+),
+AggregatedData AS (
+    SELECT 
+        r.web_site_id,
+        SUM(r.total_return_quantity) AS total_refunds,
+        AVG(r.unique_customers) AS avg_customers
+    FROM FilteredReturns r
+    JOIN web_sales ws ON r.wr_order_number = ws.ws_order_number
+    GROUP BY r.web_site_id
+)
+SELECT 
+    ad.web_site_id,
+    ad.total_refunds,
+    ad.avg_customers,
+    CASE 
+        WHEN ad.total_refunds IS NULL THEN 'No Refunds'
+        WHEN ad.total_refunds > 1000 THEN 'High Refunds'
+        ELSE 'Normal Refunds'
+    END AS Refund_Category,
+    COALESCE(ad4.high_value_customers, 0) AS high_value_customers_count
+FROM AggregatedData ad
+LEFT JOIN (
+    SELECT 
+        wr.wr_web_page_sk,
+        COUNT(*) AS high_value_customers
+    FROM web_returns wr
+    WHERE wr.wr_return_amt > 500
+    GROUP BY wr.wr_web_page_sk
+) ad4 ON ad.web_site_id = ad4.wr_web_page_sk
+ORDER BY ad.total_refunds DESC, ad.avg_customers ASC
+FETCH FIRST 10 ROWS ONLY;

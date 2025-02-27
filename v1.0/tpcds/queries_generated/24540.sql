@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned_qty,
+        AVG(cr.return_amt_inc_tax) AS avg_return_value,
+        COUNT(DISTINCT cr.order_number) AS unique_returns
+    FROM catalog_returns cr
+    WHERE cr.returning_customer_sk IS NOT NULL
+    GROUP BY cr.returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other' END AS marital_status,
+        MAX(cs.cs_net_profit) AS max_profit
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+    HAVING MAX(cs.cs_net_profit) > (SELECT AVG(cs_net_profit) FROM catalog_sales)
+),
+FinalReport AS (
+    SELECT 
+        c.c_customer_id,
+        hvc.marital_status,
+        hvc.cd_gender,
+        COALESCE(cr.total_returned_qty, 0) AS total_returns,
+        COOLESCE(cr.avg_return_value, 0.00) AS avg_return_value,
+        SUM(CASE WHEN rs.rn <= 5 THEN rs.ws_quantity ELSE 0 END) AS top_sales_qty
+    FROM CustomerReturns cr
+    FULL OUTER JOIN HighValueCustomers hvc ON cr.returning_customer_sk = hvc.c_customer_id
+    LEFT JOIN RankedSales rs ON hvc.c_customer_id = rs.web_site_sk
+    GROUP BY c.c_customer_id, hvc.marital_status, hvc.cd_gender, cr.total_returned_qty, cr.avg_return_value
+)
+
+SELECT 
+    f.c_customer_id,
+    f.marital_status,
+    f.cd_gender,
+    CASE
+        WHEN f.total_returns > 2 THEN 'Frequent Returner'
+        WHEN f.avg_return_value > 100.00 THEN 'High Value Returner'
+        ELSE 'Standard Customer' 
+    END AS customer_category,
+    f.top_sales_qty
+FROM FinalReport f
+WHERE f.top_sales_qty NOT IN (SELECT DISTINCT TOP 5 rs.ws_quantity FROM RankedSales rs)
+ORDER BY f.top_sales_qty DESC, f.c_customer_id;

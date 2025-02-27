@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        k.keyword, 
+        GROUP_CONCAT(DISTINCT c.role_id) AS role_ids,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id AND cc.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        aka_names,
+        COUNT(role_ids) AS role_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        movie_id, title, production_year, aka_names
+    ORDER BY 
+        role_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    tm.title, 
+    tm.production_year, 
+    tm.aka_names, 
+    COUNT(DISTINCT c.id) AS cast_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.person_id
+GROUP BY 
+    tm.title, tm.production_year, tm.aka_names;

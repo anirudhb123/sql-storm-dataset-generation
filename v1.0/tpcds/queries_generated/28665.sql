@@ -1,0 +1,49 @@
+
+WITH processed_addr AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE 
+                   WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' THEN CONCAT(' Suite ', ca_suite_number)
+                   ELSE '' 
+               END) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+                      CASE 
+                          WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' THEN CONCAT(' Suite ', ca_suite_number)
+                          ELSE '' 
+                      END)) AS address_length
+    FROM 
+        customer_address
+),
+address_stats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        AVG(address_length) AS avg_address_length,
+        MIN(address_length) AS min_address_length,
+        MAX(address_length) AS max_address_length
+    FROM 
+        processed_addr
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.avg_address_length,
+    a.min_address_length,
+    a.max_address_length,
+    d.d_year,
+    d.d_month_seq,
+    CASE 
+        WHEN d.d_day_name IN ('Saturday', 'Sunday') THEN 'Weekend'
+        ELSE 'Weekday'
+    END AS day_type
+FROM 
+    address_stats a
+JOIN 
+    date_dim d ON d.d_date_sk = CURRENT_DATE
+ORDER BY 
+    a.ca_state, a.address_count DESC;

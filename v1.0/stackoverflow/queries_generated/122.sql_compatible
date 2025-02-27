@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+             UNNEST(string_to_array(p.Tags, '>')) AS TagName, 
+             p.Id 
+         FROM 
+             Posts p) AS t ON p.Id = t.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+    HAVING 
+        COUNT(DISTINCT b.Id) > 0
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.TotalBounties,
+    up.TotalBadges,
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.CommentCount,
+    rp.ScoreRank,
+    rp.TagsList
+FROM 
+    UserStats up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+WHERE 
+    up.Reputation > 1000
+    AND rp.ScoreRank <= 5
+    AND rp.CommentCount > (SELECT AVG(CommentCount) FROM RankedPosts)
+ORDER BY 
+    up.TotalBadges DESC, 
+    rp.Score DESC
+LIMIT 10;

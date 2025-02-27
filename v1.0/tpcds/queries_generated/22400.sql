@@ -1,0 +1,46 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ss.ss_customer_sk,
+        ss.ss_quantity,
+        ss.ss_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ss.ss_customer_sk ORDER BY ss.ss_sales_price DESC) AS rnk,
+        CASE 
+            WHEN ss.ss_sales_price > 100 THEN 'High Value'
+            WHEN ss.ss_sales_price BETWEEN 50 AND 100 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS value_category
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+),
+aggregated_sales AS (
+    SELECT 
+        cust.c_customer_id,
+        COALESCE(SUM(rs.ss_quantity), 0) AS total_quantity,
+        COALESCE(SUM(rs.ss_sales_price * rs.ss_quantity), 0) AS total_sales,
+        STRING_AGG(DISTINCT rs.value_category, ', ') AS value_categories
+    FROM customer cust
+    LEFT JOIN ranked_sales rs ON cust.c_customer_sk = rs.ss_customer_sk AND rs.rnk = 1
+    GROUP BY cust.c_customer_id
+)
+SELECT 
+    cust.c_customer_id,
+    total_quantity,
+    total_sales,
+    CASE 
+        WHEN total_sales IS NULL OR total_sales = 0 THEN 'No Sales'
+        WHEN total_sales > 10000 THEN 'High Sales'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Moderate Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    value_categories
+FROM aggregated_sales cust
+JOIN customer_demographics cd ON cust.c_customer_id = cd.cd_demo_sk
+WHERE cd.cd_marital_status = 'M' AND cd.cd_gender = 'F'
+AND total_quantity > (
+    SELECT AVG(total_quantity)
+    FROM aggregated_sales
+    WHERE value_categories LIKE '%High Value%'
+)
+ORDER BY total_sales DESC
+LIMIT 10;

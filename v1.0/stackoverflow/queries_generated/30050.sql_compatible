@@ -1,0 +1,67 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, CreationDate, LastAccessDate, 0 AS Level
+    FROM Users
+    WHERE Reputation > 1000  
+
+    UNION ALL
+
+    SELECT u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.LastAccessDate, uh.Level + 1
+    FROM Users u
+    JOIN UserHierarchy uh ON u.Reputation < uh.Reputation  
+    WHERE uh.Level < 5  
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(Answers.AnswerCount, 0) AS AnswerCount,
+        COALESCE(Votes.TotalVotes, 0) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN (
+        SELECT ParentId, COUNT(*) AS AnswerCount
+        FROM Posts
+        WHERE PostTypeId = 2  
+        GROUP BY ParentId
+    ) Answers ON p.Id = Answers.ParentId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS TotalVotes
+        FROM Votes
+        GROUP BY PostId
+    ) Votes ON p.Id = Votes.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+),
+RankedPosts AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.AnswerCount,
+        ps.TotalVotes,
+        RANK() OVER (PARTITION BY ps.AnswerCount ORDER BY ps.Score DESC) AS RankByScore
+    FROM PostStats ps
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.AnswerCount,
+    rp.TotalVotes,
+    CASE 
+        WHEN rp.TotalVotes > 100 THEN 'Highly Voted'
+        WHEN rp.TotalVotes BETWEEN 50 AND 100 THEN 'Moderately Voted'
+        ELSE 'Low Voted'
+    END AS VoteCategory,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM UserHierarchy u
+JOIN RankedPosts rp ON u.Id = rp.Id  
+LEFT JOIN Comments c ON c.PostId = rp.Id
+WHERE rp.RankByScore = 1  
+GROUP BY u.Id, u.DisplayName, u.Reputation, rp.Title, rp.CreationDate, rp.Score, rp.AnswerCount, rp.TotalVotes
+ORDER BY u.Reputation DESC, rp.Score DESC
+LIMIT 50;

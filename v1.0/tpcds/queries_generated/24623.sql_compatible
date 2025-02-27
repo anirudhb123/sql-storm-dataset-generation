@@ -1,0 +1,49 @@
+
+WITH RECURSIVE ReturnHierarchy AS (
+    SELECT sr.return_quantity AS quantity_returned, 
+           sr.return_amt AS amount_returned, 
+           sr.returned_date_sk,
+           ROW_NUMBER() OVER (PARTITION BY sr.returning_customer_sk ORDER BY sr.returned_date_sk DESC) AS rnum,
+           sr.returning_customer_sk
+    FROM store_returns sr
+    WHERE sr.return_quantity IS NOT NULL
+    UNION ALL
+    SELECT cr.return_quantity AS quantity_returned,
+           cr.return_amount AS amount_returned,
+           cr.returned_date_sk,
+           ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.returned_date_sk DESC),
+           cr.returning_customer_sk
+    FROM catalog_returns cr
+    WHERE cr.return_quantity IS NOT NULL
+    AND EXISTS (SELECT 1 FROM store_returns sr WHERE sr.returning_customer_sk = cr.returning_customer_sk)
+),
+CustomerStats AS (
+    SELECT c.c_customer_id, 
+           COUNT(DISTINCT rh.quantity_returned) AS total_return_count,
+           SUM(rh.amount_returned) AS total_amount_returned,
+           AVG(COALESCE(rh.quantity_returned, 0)) AS avg_return_per_order,
+           STRING_AGG(DISTINCT ca.ca_city || ', ' || ca.ca_state, '; ') AS customer_cities
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN ReturnHierarchy rh ON rh.returning_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+),
+PopularItems AS (
+    SELECT i.i_item_id, 
+           SUM(ws.ws_quantity) AS total_sold,
+           SUM(ws.ws_net_profit) AS total_profit,
+           DENSE_RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_id
+)
+SELECT cs.c_customer_id,
+       cs.total_return_count,
+       cs.total_amount_returned,
+       cs.avg_return_per_order,
+       ARRAY_AGG(pi.i_item_id) AS top_items
+FROM CustomerStats cs
+LEFT JOIN PopularItems pi ON cs.total_return_count > (SELECT AVG(total_return_count) FROM CustomerStats)
+GROUP BY cs.c_customer_id, cs.total_return_count, cs.total_amount_returned, cs.avg_return_per_order
+HAVING SUM(cs.total_amount_returned) IS NOT NULL AND COUNT(cs.customer_cities) > 0
+ORDER BY cs.total_return_count DESC, cs.total_amount_returned ASC;

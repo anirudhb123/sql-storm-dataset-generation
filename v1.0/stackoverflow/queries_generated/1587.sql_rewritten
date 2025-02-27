@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score > 5
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        RankedPosts rp ON v.PostId = rp.PostId
+    GROUP BY 
+        v.PostId
+),
+PostWithUserVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(uv.UpVotes, 0) AS UpVotes,
+        COALESCE(uv.DownVotes, 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserVotes uv ON rp.PostId = uv.PostId
+)
+SELECT 
+    pwuv.PostId,
+    pwuv.Title,
+    pwuv.CreationDate,
+    pwuv.Score,
+    pwuv.UpVotes,
+    pwuv.DownVotes,
+    CASE 
+        WHEN pwuv.UpVotes > pwuv.DownVotes THEN 'Positive'
+        WHEN pwuv.UpVotes < pwuv.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId = pwuv.PostId) AS CommentCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))::int[]) 
+     WHERE p.Id = pwuv.PostId) AS Tags
+FROM 
+    PostWithUserVotes pwuv
+WHERE 
+    pwuv.PostRank = 1
+ORDER BY 
+    pwuv.Score DESC
+LIMIT 10;

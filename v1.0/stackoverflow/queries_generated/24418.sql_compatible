@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate) AS Rank,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Badges b 
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LatestEdit,
+        STRING_AGG(DISTINCT pht.Name) AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    up.ViewCount,
+    up.CommentCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(phd.LatestEdit, 'Never') AS LastEdited,
+    CASE 
+        WHEN ub.GoldBadges > 0 THEN 'Elite Contributor'
+        WHEN ub.SilverBadges > 3 THEN 'Experienced Contributor'
+        WHEN ub.BronzeBadges > 5 THEN 'Novice Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel,
+    CASE 
+        WHEN up.Score IS NULL THEN 'No Score' 
+        ELSE 'Score Recorded' 
+    END AS ScoreStatus,
+    CASE 
+        WHEN up.OwnerUserId IS NULL THEN 'Anonymous Post'
+        ELSE 'Registered Post'
+    END AS UserStatus,
+    NULLIF(up.CommentCount, 0) AS CommentsOrNull,
+    CASE
+        WHEN up.ViewCount > 1000 THEN 'High Traffic'
+        WHEN up.ViewCount BETWEEN 100 AND 1000 THEN 'Moderate Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficCategory
+FROM 
+    RankedPosts up
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON up.PostId = phd.PostId
+WHERE 
+    up.Rank = 1 
+    AND up.Score > 0
+ORDER BY 
+    up.ViewCount DESC, up.CreationDate DESC;

@@ -1,0 +1,81 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_quantity, 
+        l.l_extendedprice, 
+        l.l_discount,
+        CASE 
+            WHEN l.l_discount IS NULL THEN 0
+            WHEN l.l_discount < 0.1 THEN l.l_extendedprice * l.l_discount
+            ELSE NULL 
+        END AS calculated_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND (
+            l.l_quantity > (SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_returnflag = 'N')
+            OR l.l_discount IS NOT NULL
+        )
+), TotalOrderPrices AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+), OuterJoinSupplierRegion AS (
+    SELECT 
+        n.n_name,
+        r.r_name,
+        s.s_name,
+        COALESCE(s.s_acctbal, 0) AS supplier_acctbal
+    FROM 
+        nation n 
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    o.o_orderkey, 
+    SUM(t.total_price) AS final_order_price,
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT CASE WHEN rs.rank_acctbal = 1 THEN rs.s_suppkey END) AS top_suppliers_count,
+    STRING_AGG(DISTINCT CAST(ls.calculated_discount AS text), ', ') AS discounts_used
+FROM 
+    TotalOrderPrices t
+JOIN 
+    orders o ON t.o_orderkey = o.o_orderkey
+JOIN 
+    FilteredLineItems ls ON o.o_orderkey = ls.l_orderkey
+JOIN 
+    OuterJoinSupplierRegion r ON r.s_name IS NOT NULL
+JOIN 
+    RankedSuppliers rs ON ls.l_orderkey = rs.s_suppkey
+LEFT JOIN 
+    nation n ON r.n_name = n.n_name 
+WHERE 
+    o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    o.o_orderkey, r.r_name, n.n_name
+HAVING 
+    SUM(t.total_price) > 1000 
+    AND COUNT(DISTINCT ls.l_orderkey) > 2
+ORDER BY 
+    final_order_price DESC;

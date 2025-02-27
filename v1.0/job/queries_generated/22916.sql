@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY t.kind_id ASC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS total_movies,
+        COALESCE(k.keyword, 'No Keyword') AS movie_keyword
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        kind_type t ON a.kind_id = t.id
+),
+ActorRoles AS (
+    SELECT 
+        p.name,
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.role_id) OVER (PARTITION BY p.id, ci.movie_id) AS role_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+MoviesWithActorRoles AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        ar.name AS actor_name,
+        ar.role,
+        ar.role_count,
+        rm.movie_keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.id = ar.movie_id
+    WHERE 
+        rm.year_rank <= 5
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(m.actor_name, 'Unknown Actor') AS actor_name,
+    m.role,
+    m.role_count,
+    m.movie_keyword,
+    CASE 
+        WHEN m.role_count IS NULL OR m.role_count = 0 THEN 'No Roles'
+        ELSE 'Has Roles'
+    END AS role_status
+FROM 
+    MoviesWithActorRoles m
+WHERE 
+    m.movie_keyword != 'No Keyword'
+ORDER BY 
+    m.production_year DESC,
+    m.title;
+
+-- Edge cases considered:
+-- 1. Handling roles where there are none and categorically marking as 'No Roles'.
+-- 2. Retrieving the top 5 movies by year and ensuring NULLs are managed effectively.
+-- 3. Using COALESCE to provide default values to missing data points to avoid null propagation.
+-- 4. Utilizing window functions for both ranking and counting aggregates within specific partitions.

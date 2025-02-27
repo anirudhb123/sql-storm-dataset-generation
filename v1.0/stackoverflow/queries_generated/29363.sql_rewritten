@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.ViewCount, p.Score, u.DisplayName
+),
+KeywordFiltered AS (
+    SELECT 
+        rp.*,
+        ARRAY_AGG(DISTINCT tag.TagName) AS Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        LATERAL unnest(string_to_array(substring(rp.Body, 2, length(rp.Body)-2), '><')) AS tag ON TRUE
+    WHERE 
+        tag.TagName ILIKE '%SQL%' OR tag.TagName ILIKE '%database%' 
+    GROUP BY 
+        rp.PostId
+)
+SELECT 
+    kf.PostId,
+    kf.Title,
+    kf.Body,
+    kf.CreationDate,
+    kf.LastActivityDate,
+    kf.ViewCount,
+    kf.Score,
+    kf.OwnerDisplayName,
+    kf.CommentCount,
+    kf.Tags,
+    CASE 
+        WHEN kf.ViewCount > 1000 THEN 'Highly Viewed'
+        WHEN kf.ViewCount BETWEEN 500 AND 1000 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed' 
+    END AS ViewCategory
+FROM 
+    KeywordFiltered kf
+WHERE 
+    kf.PostRank <= 10 
+ORDER BY 
+    kf.Score DESC, kf.CreationDate DESC;

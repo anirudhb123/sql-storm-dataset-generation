@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name,
+    SUBSTRING_INDEX(p.p_comment, ' ', 3) AS shortened_comment,
+    CONCAT(r.r_name, ' ', n.n_name) AS region_nation,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(o.o_totalprice) AS average_order_price
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size BETWEEN 1 AND 10
+    AND r.r_name LIKE '%East%'
+    AND o.o_orderdate > '2023-01-01'
+GROUP BY 
+    p.p_partkey, shortened_comment, region_nation
+HAVING 
+    total_available_quantity > 50
+ORDER BY 
+    average_order_price DESC;

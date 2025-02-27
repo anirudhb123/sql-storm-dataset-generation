@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_custkey,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS status_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_name, p.p_brand, p.p_type, COALESCE(S.total_supply_cost, 0) AS supply_cost,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       CASE WHEN MAX(f.status_rank) IS NOT NULL THEN 'Top Order' ELSE 'No Orders' END AS order_status,
+       CONCAT('Region ', r.r_name, ': ', r.r_comment) AS region_info
+FROM part p
+LEFT JOIN SupplierStats S ON p.p_partkey = S.ps_partkey
+LEFT JOIN FilteredOrders f ON f.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA'))
+JOIN nation n ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = p.p_partkey LIMIT 1)
+JOIN region r ON r.r_regionkey = n.n_regionkey
+GROUP BY p.p_partkey, r.r_name, r.r_comment
+ORDER BY supply_cost DESC, order_count DESC;

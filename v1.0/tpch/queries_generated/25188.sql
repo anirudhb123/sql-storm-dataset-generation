@@ -1,0 +1,28 @@
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.s_suppkey) AS num_suppliers, 
+    SUM(ps.ps_availqty) AS total_available_quantity, 
+    SUM(ps.ps_supplycost) AS total_supply_cost, 
+    AVG(ps.ps_supplycost) AS avg_supply_cost, 
+    SUM(CASE WHEN l_quantity > 0 THEN l_extendedprice ELSE 0 END) AS total_revenue,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(r.r_name, ' ', 1), ' ', -1) AS first_word_region,
+    CONCAT(n.n_name, ' - ', SUBSTRING(p.p_comment, 1, 20)) AS nation_comment_snippet
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+GROUP BY 
+    p.p_name, r.r_name, n.n_name
+HAVING 
+    SUM(l_quantity) > 0 
+ORDER BY 
+    total_revenue DESC, p.p_name ASC
+LIMIT 10;

@@ -1,0 +1,40 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        d.dense_rank AS supplier_rank,
+        p.p_name,
+        p.p_brand,
+        SUBSTRING(p.p_comment, 1, 15) AS short_comment,
+        CONCAT('Supplier ', s.s_name, ' offers ', p.p_name) AS offer_description
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN (
+        SELECT 
+            s_acctbal,
+            DENSE_RANK() OVER (ORDER BY s_acctbal DESC) AS dense_rank
+        FROM 
+            supplier
+    ) AS d ON s.s_acctbal = d.s_acctbal
+    WHERE 
+        p.p_size > 10
+)
+SELECT 
+    s.s_suppkey,
+    RANK() OVER (PARTITION BY s.p_brand ORDER BY s.s_acctbal DESC) AS brand_rank,
+    MAX(s.offer_description) AS best_offer,
+    COUNT(DISTINCT s.p_name) AS available_parts,
+    SUM(ps.ps_supplycost) AS total_supply_cost
+FROM 
+    RankedSuppliers s
+GROUP BY 
+    s.s_suppkey
+HAVING 
+    COUNT(DISTINCT s.p_name) > 3
+ORDER BY 
+    brand_rank, total_supply_cost DESC;

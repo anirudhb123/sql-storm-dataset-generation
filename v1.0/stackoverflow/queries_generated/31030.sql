@@ -1,0 +1,100 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.PostTypeId, p.CreationDate, p.Score
+),
+CommentAggregates AS (
+    SELECT 
+        PostId,
+        AVG(Score) AS AvgCommentScore,
+        COUNT(PostId) AS TotalComments
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            COUNT(Id) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserId AS EditorId,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Only interested in close and reopen actions
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        ur.DisplayName,
+        rp.PostTypeId,
+        rp.CreationDate,
+        rp.Score,
+        ra.CommentCount,
+        COALESCE(ca.AvgCommentScore, 0) AS AvgCommentScore,
+        ur.Reputation,
+        ur.BadgeCount,
+        phd.HistoryDate,
+        phd.Comment AS ClosureComment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        CommentAggregates ca ON rp.PostId = ca.PostId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    WHERE 
+        rp.PostRank = 1  -- Get only the latest post for each user
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.PostTypeId = 1 AND fr.Score > 10 THEN 'Popular Question'
+        WHEN fr.PostTypeId = 1 AND fr.Score <= 10 THEN 'Regular Question'
+        ELSE 'Other'
+    END AS PostTypeDescription,
+    CASE 
+        WHEN fr.ClosureComment IS NOT NULL THEN 'Post Closed: ' + fr.ClosureComment
+        ELSE 'Active Post'
+    END AS PostStatus
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Score DESC, fr.CreationDate DESC;

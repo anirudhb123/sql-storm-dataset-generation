@@ -1,0 +1,75 @@
+WITH CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rn
+    FROM 
+        CustomerOrders c
+    WHERE 
+        total_spent > 1000
+),
+PartSupp AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        pp.part_count,
+        CASE 
+            WHEN pp.total_supply_cost IS NULL THEN 0 
+            ELSE pp.total_supply_cost 
+        END AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierInfo pp ON p.p_partkey = pp.part_count
+)
+SELECT 
+    cust.c_name AS customer_name,
+    supp.s_name AS supplier_name,
+    part.p_name AS part_name,
+    COALESCE(hi.rn, 0) AS customer_rank,
+    ps.total_supply_cost AS part_supply_cost,
+    CASE 
+        WHEN l.l_returnflag = 'R' THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status
+FROM 
+    lineitem l
+JOIN 
+    CustomerOrders cust ON l.l_orderkey = cust.c_custkey
+JOIN 
+    PartSupp ps ON l.l_partkey = ps.p_partkey
+LEFT JOIN 
+    SupplierInfo supp ON supp.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    HighValueCustomers hi ON cust.c_custkey = hi.custkey
+WHERE 
+    ps.total_supply_cost > 50.00 OR cust.total_spent < (SELECT AVG(total_spent) FROM CustomerOrders)
+ORDER BY 
+    cust.c_name, supp.s_name;

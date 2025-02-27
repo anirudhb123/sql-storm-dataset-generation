@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COUNT(C.Id) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    WHERE U.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY U.Id, U.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(V.VoteTypeId = 3) AS TotalDownvotes
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalScore,
+    T.TagName,
+    T.PostCount,
+    A.CommentCount,
+    A.TotalBounty,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.TotalComments,
+    P.TotalUpvotes,
+    P.TotalDownvotes
+FROM UserReputation U
+CROSS JOIN PopularTags T
+JOIN ActiveUsers A ON U.UserId = A.Id
+JOIN PostSummary P ON P.TotalComments > 0
+ORDER BY U.Reputation DESC, P.Score DESC, T.PostCount DESC;

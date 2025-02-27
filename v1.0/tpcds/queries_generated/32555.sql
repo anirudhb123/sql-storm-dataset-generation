@@ -1,0 +1,37 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ws_sold_date_sk, ws_item_sk, ws_quantity, ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk FROM date_dim WHERE d_year = 2023
+    )
+), CustomerProduct AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           SUM(s.ws_net_profit) AS total_net_profit,
+           MAX(s.ws_quantity) AS max_quantity
+    FROM customer c
+    LEFT JOIN web_sales s ON c.c_customer_sk = s.ws_ship_customer_sk
+    WHERE s.ws_net_profit IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+), ProfitableCustomers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cp.total_net_profit, cp.max_quantity,
+           DENSE_RANK() OVER (ORDER BY cp.total_net_profit DESC) AS rank
+    FROM CustomerProduct cp
+    JOIN customer c ON cp.c_customer_sk = c.c_customer_sk
+    WHERE cp.total_net_profit > 1000
+), StoreInfo AS (
+    SELECT s.s_store_sk, s.s_store_name, AVG(ss.net_profit) AS avg_net_profit
+    FROM store s
+    LEFT JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk, s.s_store_name
+    HAVING AVG(ss.net_profit) > (SELECT AVG(ss.net_profit) FROM store_sales ss)
+)
+
+SELECT pc.c_first_name, pc.c_last_name, pc.total_net_profit, 
+       si.s_store_name, si.avg_net_profit
+FROM ProfitableCustomers pc
+JOIN StoreInfo si ON si.avg_net_profit < pc.total_net_profit
+WHERE pc.rank <= 10
+ORDER BY pc.total_net_profit DESC;
+

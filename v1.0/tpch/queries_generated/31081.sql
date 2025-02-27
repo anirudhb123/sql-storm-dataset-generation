@@ -1,0 +1,42 @@
+WITH RECURSIVE cte_supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, c.level + 1
+    FROM supplier s
+    JOIN cte_supplier c ON s.s_suppkey <> c.s_suppkey AND s.s_acctbal < c.s_acctbal
+    WHERE c.level < 5
+),
+cte_order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+cte_ranked_orders AS (
+    SELECT o.orderkey, o.total_revenue, RANK() OVER (ORDER BY o.total_revenue DESC) AS revenue_rank
+    FROM cte_order_summary o
+),
+cte_nation_regions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name,
+           ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY n.n_name) AS nation_rank
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT s.s_name, r.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+       AVG(l.l_tax) AS avg_tax, COUNT(DISTINCT o.o_orderkey) AS orders_count
+FROM cte_supplier s
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN cte_nation_regions r ON r.n_nationkey = s.s_nationkey
+WHERE p.p_size > 10 AND (p.p_brand = 'Brand#12' OR p.p_brand IS NULL)
+  AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY s.s_name, r.n_name
+HAVING SUM(l.l_extendedprice) > 100000
+ORDER BY total_amount DESC
+LIMIT 10;

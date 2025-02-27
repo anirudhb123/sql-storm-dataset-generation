@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+BadgesSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        COALESCE(bs.TotalBadges, 0) AS TotalBadges,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        BadgesSummary bs ON u.Id = bs.UserId
+    WHERE 
+        u.LastAccessDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PostInteractions AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Comments c
+    LEFT JOIN 
+        Votes v ON c.PostId = v.PostId
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    apr.PostId,
+    apr.Title,
+    apr.CreationDate,
+    apr.Score,
+    pi.CommentCount,
+    pi.UpVotes,
+    pi.DownVotes,
+    CASE 
+        WHEN au.Reputation > 1000 THEN 'Top Contributor'
+        WHEN au.Reputation BETWEEN 500 AND 1000 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel
+FROM 
+    ActiveUsers au
+JOIN 
+    RankedPosts apr ON au.UserId = apr.OwnerUserId AND apr.UserPostRank <= 5
+JOIN 
+    PostInteractions pi ON apr.PostId = pi.PostId
+ORDER BY 
+    au.Reputation DESC, apr.CreationDate DESC
+LIMIT 100;
+
+-- The above query achieves the following:
+-- 1. Creates a CTE 'RankedPosts' to rank posts by the owner user in the last year by creation date.
+-- 2. Aggregates badge counts in 'BadgesSummary' for users.
+-- 3. Filters active users who accessed their accounts in the last 30 days in 'ActiveUsers'.
+-- 4. Produces a summary of post interactions including comments and votes in 'PostInteractions'.
+-- 5. Combines this data to provide an insightful list of top user contributors and their activity metrics.

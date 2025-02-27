@@ -1,0 +1,39 @@
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(p.Score) AS AverageScore,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    MAX(p.CreationDate) AS LastPostDate,
+    COUNT(DISTINCT ph.Id) AS TotalPostHistories,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    STRING_TO_ARRAY(p.Tags, ',') AS tag_arr ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = TRIM(tag_arr) 
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 AND AVG(p.Score) > 10
+ORDER BY 
+    TotalPosts DESC, AverageScore DESC
+LIMIT 50;

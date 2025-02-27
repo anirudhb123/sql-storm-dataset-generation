@@ -1,0 +1,69 @@
+
+WITH RECURSIVE SaleTrends AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        DATE(d_date) AS sale_date
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        st.ws_sold_date_sk,
+        st.ws_item_sk,
+        {fn sum(total_sold)} AS total_sold,
+        st.sale_date + INTERVAL '1 day'
+    FROM 
+        SaleTrends st
+    WHERE 
+        st.sale_date < CURRENT_DATE
+),
+SalesAnalysis AS (
+    SELECT 
+        it.i_item_id,
+        it.i_item_desc,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY it.i_item_id ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        item it ON ws.ws_item_sk = it.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231
+    GROUP BY 
+        it.i_item_id, it.i_item_desc
+),
+TopItems AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        total_sales,
+        order_count
+    FROM 
+        SalesAnalysis
+    WHERE
+        sales_rank <= 10
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_sales,
+    ti.order_count,
+    COALESCE(SA.total_sold, 0) AS trend_quantity
+FROM 
+    TopItems ti
+LEFT JOIN 
+    (SELECT 
+        item_sk, 
+        SUM(total_sold) AS total_sold
+     FROM 
+        SaleTrends
+     GROUP BY 
+        item_sk) AS SA ON ti.i_item_id = SA.item_sk
+ORDER BY 
+    ti.total_sales DESC;

@@ -1,0 +1,98 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  -- Selecting only questions as root posts
+
+    UNION ALL
+
+    SELECT
+        a.Id,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM
+        Posts a
+    INNER JOIN
+        RecursivePostCTE rp ON a.ParentId = rp.Id
+    WHERE
+        a.PostTypeId = 2  -- Selecting answers as child posts
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+ScoreRankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Score,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '1 year')  -- Posts created in the last year
+)
+
+SELECT 
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalQuestions,
+    up.TotalAnswers,
+    up.TotalViews,
+    r.Id AS PostId,
+    r.Title AS QuestionTitle,
+    r.CreationDate AS QuestionDate,
+    r.Score AS QuestionScore,
+    pst.ChangeCount AS PostHistoryCount,
+    sr.ScoreRank
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    RecursivePostCTE r ON up.UserId = r.OwnerUserId
+LEFT JOIN 
+    PostHistoryStats pst ON r.Id = pst.PostId
+LEFT JOIN 
+    ScoreRankedPosts sr ON r.Id = sr.Id
+WHERE 
+    up.TotalPosts > 10  -- Filtering users with more than 10 posts
+    AND (r.Level < 2 OR r.Level IS NULL)  -- Limit to top-level or no answers
+ORDER BY 
+    up.Reputation DESC,  -- Ranking by user's reputation
+    r.Score DESC
+LIMIT 100;  -- Limiting to top 100 results

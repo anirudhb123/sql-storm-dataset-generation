@@ -1,0 +1,50 @@
+WITH regional_supplier_stats AS (
+    SELECT 
+        r.r_name AS region_name,
+        s.s_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(s.s_acctbal) AS average_account_balance
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_nationkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    rss.region_name,
+    rss.supplier_count,
+    rss.total_available_quantity,
+    rss.average_account_balance,
+    cos.c_custkey,
+    cos.c_name,
+    cos.total_spent,
+    cos.total_orders
+FROM 
+    regional_supplier_stats rss
+FULL OUTER JOIN 
+    customer_order_summary cos ON rss.s_nationkey = cos.c_nationkey
+WHERE 
+    (rss.total_available_quantity > 1000 OR cos.total_spent > 5000)
+    AND (cos.total_orders IS NULL OR cos.total_orders > 5)
+ORDER BY 
+    rss.region_name, cos.total_spent DESC, rss.average_account_balance DESC;

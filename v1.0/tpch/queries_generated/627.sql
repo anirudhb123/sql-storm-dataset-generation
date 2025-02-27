@@ -1,0 +1,44 @@
+WITH RankedSales AS (
+    SELECT 
+        ps.partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.partkey
+), MatchedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COALESCE(s.total_sales / NULLIF(m.total_avail_qty, 0), 0) AS sales_to_availability_ratio,
+    RANK() OVER (PARTITION BY n.n_name ORDER BY COALESCE(s.total_sales, 0) DESC) AS nation_sales_rank
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    (SELECT partkey, total_sales FROM RankedSales WHERE sales_rank = 1) s ON s.partkey = ps.ps_partkey
+LEFT JOIN 
+    MatchedSuppliers m ON m.s_suppkey = s.partkey
+WHERE 
+    n.n_name IS NOT NULL AND r.r_name LIKE 'N%'
+ORDER BY 
+    nation_sales_rank, total_sales DESC;

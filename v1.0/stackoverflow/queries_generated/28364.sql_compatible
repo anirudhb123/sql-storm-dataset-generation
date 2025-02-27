@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1  
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS HistoryCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY p.Id
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.BadgeCount,
+    ur.HighestBadgeClass,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(ps.HistoryCount, 0) AS HistoryCount,
+    ps.HistoryTypes,
+    rp.AnswerCount,
+    rp.UpVotes,
+    rp.DownVotes
+FROM RankedPosts rp
+JOIN Users u ON rp.OwnerUserId = u.Id
+JOIN UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN PostHistorySummary ps ON rp.PostId = ps.PostId
+WHERE rp.UserPostRank <= 5  
+ORDER BY ur.Reputation DESC, rp.CreationDate DESC;

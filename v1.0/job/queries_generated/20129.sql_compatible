@@ -1,0 +1,75 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_per_year,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY m.id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        keyword k ON k.id = mk.keyword_id
+    WHERE 
+        m.kind_id IN (1, 2) 
+),
+UniqueRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS unique_roles,
+        SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS null_note_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ur.unique_roles,
+        ur.null_note_count,
+        ci.companies,
+        ci.company_types,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        UniqueRoles ur ON rm.movie_id = ur.movie_id
+    LEFT JOIN 
+        CompanyInfo ci ON rm.movie_id = ci.movie_id
+    WHERE 
+        rm.rank_per_year = 1 AND  
+        (ur.unique_roles > 3 OR ur.null_note_count > 2) AND  
+        rm.keyword_count > 0  
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.unique_roles,
+    sm.null_note_count,
+    sm.companies,
+    sm.company_types,
+    sm.keyword_count
+FROM 
+    SelectedMovies sm
+ORDER BY 
+    sm.production_year DESC, 
+    sm.title ASC;

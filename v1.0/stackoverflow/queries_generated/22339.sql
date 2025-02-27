@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT( DISTINCT c.Id ) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Creatio 
+nDate, p.LastActivityDate, p.OwnerUserId, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Rank,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        COALESCE(b.Name, 'No Badges') AS BadgeName
+    FROM 
+        RankedPosts rp
+        LEFT JOIN Badges b ON rp.OwnerUserId = b.UserId AND b.Class = 1
+    WHERE 
+        rp.Rank <= 3
+),
+FinalResult AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.OwnerDisplayName,
+        pa.CommentCount,
+        pa.UpVotes,
+        pa.DownVotes,
+        CASE 
+            WHEN pa.BadgeName = 'No Badges' THEN 'No Badge'
+            ELSE pa.BadgeName
+        END AS BadgeStatus,
+        CASE 
+            WHEN pa.UpVotes > pa.DownVotes THEN 'Positive'
+            WHEN pa.UpVotes < pa.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteStatus,
+        DATEDIFF('day', pa.Rank, CURRENT_TIMESTAMP) AS DaysSinceCreation
+    FROM 
+        PostActivity pa
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CommentCount,
+    UpVotes,
+    DownVotes,
+    BadgeStatus,
+    VoteStatus,
+    DaysSinceCreation
+FROM 
+    FinalResult
+WHERE 
+    DaysSinceCreation > 7 AND 
+    (BadgeStatus IS NOT NULL OR VoteStatus = 'Positive')
+ORDER BY 
+    UpVotes DESC, 
+    CommentCount DESC
+LIMIT 50
+OFFSET 0;

@@ -1,0 +1,52 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = Users.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments WHERE UserId = Users.Id) AS CommentCount
+    FROM Users
+),
+TopRankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(c.Count, 0) AS TagCount
+    FROM Posts p
+    LEFT JOIN (SELECT PostId, COUNT(*) AS Count FROM PostLinks GROUP BY PostId) c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 AND p.Score IS NOT NULL
+),
+AggregatedVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    ur.CommentCount,
+    trp.Title,
+    trp.Rank,
+    av.UpVotes,
+    av.DownVotes,
+    trp.TagCount,
+    CASE 
+        WHEN trp.Score IS NULL THEN 'No Score'
+        WHEN trp.Score > 100 THEN 'High Score'
+        ELSE 'Moderate Score'
+    END AS ScoreCategory
+FROM UserReputation ur
+JOIN TopRankedPosts trp ON ur.UserId = trp.OwnerUserId
+JOIN AggregatedVotes av ON trp.PostId = av.PostId
+WHERE ur.Reputation > 500
+  AND (trp.Rank <= 5 OR trp.TagCount > 3)
+ORDER BY ur.Reputation DESC, trp.Score DESC
+LIMIT 10;

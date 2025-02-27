@@ -1,0 +1,83 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk, 
+        SUM(ws.ws_quantity) AS total_quantity, 
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS revenue_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        ci.c_customer_sk, 
+        ci.cd_gender, 
+        ci.cd_marital_status, 
+        ci.cd_purchase_estimate,
+        ROW_NUMBER() OVER (ORDER BY ci.cd_purchase_estimate DESC) AS customer_rank
+    FROM 
+        CustomerInfo ci
+    WHERE 
+        ci.cd_purchase_estimate IS NOT NULL
+),
+WebSalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS average_sales_price
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    w.w_warehouse_id, 
+    w.w_warehouse_name, 
+    COALESCE(r.total_quantity, 0) AS total_quantity,
+    COALESCE(s.total_orders, 0) AS total_orders,
+    r.total_revenue,
+    c.gender_count,
+    CASE 
+        WHEN r.total_revenue > 10000 THEN 'High'
+        WHEN r.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS revenue_category
+FROM 
+    warehouse w
+LEFT JOIN 
+    RankedSales r ON w.w_warehouse_sk = r.web_site_sk
+LEFT JOIN 
+    WebSalesSummary s ON w.w_warehouse_sk = s.web_site_sk
+CROSS JOIN (
+    SELECT 
+        ci.cd_gender, 
+        COUNT(*) AS gender_count
+    FROM 
+        HighValueCustomers ci 
+    WHERE 
+        ci.customer_rank <= 10
+    GROUP BY 
+        ci.cd_gender
+) c
+WHERE 
+    r.revenue_rank <= 5 OR r.revenue_rank IS NULL
+ORDER BY 
+    total_revenue DESC, 
+    w.w_warehouse_name;

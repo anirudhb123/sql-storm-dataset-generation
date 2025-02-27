@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_net_profit < 0
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returns_quantity,
+        COUNT(DISTINCT wr_order_number) AS total_return_orders,
+        AVG(wr_return_amt) AS avg_return_amount
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesComparison AS (
+    SELECT 
+        cs.cs_bill_customer_sk AS customer_id,
+        SUM(cs.cs_net_paid) AS total_net_sales,
+        AVG(cs.cs_net_paid_inc_tax) AS avg_net_sales_inc_tax,
+        MAX(cs.cs_list_price) AS max_item_price,
+        MIN(cs.cs_sales_price) AS min_item_price
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.cs_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cs.cs_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    COALESCE(r.total_returns_quantity, 0) AS returns_quantity,
+    COALESCE(r.total_return_orders, 0) AS return_orders,
+    COALESCE(s.total_net_sales, 0) AS total_net_sales,
+    COALESCE(s.avg_net_sales_inc_tax, 0) AS avg_net_sales_inc_tax,
+    COALESCE(s.max_item_price, 0) AS max_price,
+    COALESCE(s.min_item_price, 0) AS min_price,
+    COALESCE(rs.sales_rank, 0) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns r ON c.c_customer_sk = r.wr_returning_customer_sk
+LEFT JOIN 
+    SalesComparison s ON c.c_customer_sk = s.customer_id
+LEFT JOIN 
+    RankedSales rs ON c.c_customer_sk = rs.web_site_sk
+WHERE 
+    (COALESCE(s.total_net_sales, 0) > 1000 OR r.total_return_orders IS NULL)
+    AND c.c_birth_year IS NOT NULL
+ORDER BY 
+    returns_quantity DESC, total_net_sales DESC;

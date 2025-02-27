@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS RankByType,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, pt.Name
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text AS CloseReason,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+        AND ph.CreationDate >= CURRENT_DATE - INTERVAL '60 days'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(rp.UpVotes, 0) - COALESCE(rp.DownVotes, 0) AS NetVotes,
+    rp.CommentCount,
+    pt.Name AS PostType,
+    COALESCE(ct.CloseReason, 'Not Closed') AS LastCloseReason,
+    pt.Name,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+        FROM Tags t 
+        JOIN Posts p ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+        WHERE p.Id = rp.PostId) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostTypes pt ON rp.PostTypeId = pt.Id
+LEFT JOIN 
+    ClosedPostDetails ct ON ct.PostId = rp.PostId
+WHERE 
+    rp.RankByType <= 3
+    AND rp.Score > 0
+ORDER BY 
+    NetVotes DESC, rp.CreationDate ASC
+LIMIT 10;

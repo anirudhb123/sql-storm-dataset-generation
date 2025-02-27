@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2  -- Starting with Answers
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.ParentId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    GROUP BY 
+        u.Id
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedByOriginatorCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    p.Title,
+    p.Id AS PostId,
+    COALESCE(r.ParentId, 'No Parent') AS ParentId,
+    ph.ChangeTypes,
+    ph.ChangeCount,
+    u.TotalReputation,
+    pu.UpVotesCount,
+    pu.DownVotesCount,
+    pu.AcceptedByOriginatorCount,
+    CASE 
+        WHEN tu.Rank IS NOT NULL THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.PostId
+LEFT JOIN 
+    PostHistoryAggregated ph ON p.Id = ph.PostId
+LEFT JOIN 
+    UserReputation u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostVotes pu ON p.Id = pu.PostId
+LEFT JOIN 
+    TopUsers tu ON p.OwnerUserId = tu.Id
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'
+ORDER BY 
+    p.CreationDate DESC;

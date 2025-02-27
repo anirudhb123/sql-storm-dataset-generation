@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id,
+        0 AS depth,
+        ARRAY[mt.title] AS title_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.movie_id,
+        mh.depth + 1,
+        mh.title_path || lt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+, gender_info AS (
+    SELECT 
+        p.gender,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        name n ON ci.person_id = n.imdb_id
+    GROUP BY 
+        p.gender
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    ARRAY_AGG(distinct n.name) AS actor_names,
+    g.actor_count,
+    COALESCE((SELECT AVG(si.salary) 
+              FROM salary_info si 
+              WHERE si.movie_id = mh.movie_id), 0) AS avg_salary,
+    CASE 
+        WHEN mh.depth = 0 THEN 'Top Level'
+        WHEN mh.depth = 1 THEN 'Linked Movie'
+        ELSE 'Nested Movie'
+    END AS movie_level,
+    CASE 
+        WHEN g.actor_count IS NULL THEN 'No Actors'
+        ELSE g.actor_count || ' Actors'
+    END AS actor_summary
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    name n ON ci.person_id = n.imdb_id
+LEFT JOIN 
+    gender_info g ON n.gender = g.gender
+GROUP BY 
+    mh.movie_id, g.actor_count
+ORDER BY 
+    mh.production_year DESC, mh.title;
+
+This SQL query utilizes several advanced SQL concepts:
+- A recursive common table expression (CTE) to build a hierarchy of movies based on links.
+- A second CTE to aggregate actor counts by gender.
+- Multiple joined tables to collate actor names and demographic information with a grouping clause.
+- Use of COALESCE to handle NULL values for average salary calculations.
+- Complicated predicates to categorize movie levels.
+- Aggregation using `ARRAY_AGG` to create a list of actor names.
+- The final output is ordered by production year and title for readability.

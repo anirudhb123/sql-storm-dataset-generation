@@ -1,0 +1,63 @@
+
+WITH RECURSIVE price_analysis AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_current_price,
+        ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY i.i_current_price DESC) AS rn
+    FROM item i
+    WHERE i.i_rec_start_date <= CURRENT_DATE
+      AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CURRENT_DATE)) 
+                                    AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CURRENT_DATE))
+    GROUP BY ws.ws_item_sk
+),
+customer_returns AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    LEFT JOIN store_returns sr ON cr.cr_item_sk = sr.sr_item_sk
+    GROUP BY cr.cr_item_sk
+),
+ranked_sales AS (
+    SELECT 
+        s.ss_item_sk,
+        s.ss_net_paid,
+        RANK() OVER (PARTITION BY s.ss_item_sk ORDER BY s.ss_net_paid DESC) AS revenue_rank
+    FROM store_sales s
+    WHERE s.ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_current_year = 'Y')
+),
+final_analysis AS (
+    SELECT 
+        a.i_item_id,
+        a.i_current_price,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(s.total_orders, 0) AS total_orders,
+        CASE 
+            WHEN r.revenue_rank IS NOT NULL THEN 'High Revenue'
+            WHEN (a.i_current_price > (SELECT AVG(i_current_price) FROM item) AND COALESCE(s.total_sales, 0) = 0) THEN 'Premium No Sales'
+            ELSE 'Regular'
+        END AS category
+    FROM price_analysis a
+    LEFT JOIN sales_summary s ON a.i_item_sk = s.ws_item_sk
+    LEFT JOIN customer_returns r ON a.i_item_sk = r.cr_item_sk
+)
+SELECT 
+    fa.i_item_id,
+    fa.i_current_price,
+    fa.total_sales,
+    fa.total_returns,
+    fa.total_orders,
+    fa.category
+FROM final_analysis fa
+WHERE fa.category IN ('High Revenue', 'Premium No Sales')
+ORDER BY fa.total_sales DESC, fa.total_returns ASC;

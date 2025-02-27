@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000 
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year > 2000 
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title, 
+        mh.production_year, 
+        COALESCE(cd.total_cast, 0) AS total_cast, 
+        COALESCE(cd.cast_names, 'No Cast') AS cast_names
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastDetails cd ON mh.movie_id = cd.movie_id
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.total_cast,
+    mi.cast_names,
+    kt.kind AS movie_kind,
+    ci.note AS company_note,
+    ROW_NUMBER() OVER (PARTITION BY mi.production_year ORDER BY mi.total_cast DESC) AS cast_rank
+FROM 
+    MovieInfo mi
+JOIN 
+    aka_title at ON mi.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    kind_type kt ON at.kind_id = kt.id
+WHERE 
+    mi.total_cast > 2
+    AND (mi.production_year IS NOT NULL OR cn.country_code IS NOT NULL)
+ORDER BY 
+    mi.production_year DESC, mi.total_cast DESC;

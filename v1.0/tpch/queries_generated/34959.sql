@@ -1,0 +1,84 @@
+WITH RECURSIVE PriceAnalysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        0 AS Depth
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100
+    UNION ALL
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice * 0.9,
+        Depth + 1
+    FROM 
+        part p
+    JOIN 
+        PriceAnalysis pa ON pa.p_partkey = p.p_partkey
+    WHERE 
+        pa.Depth < 2
+), SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        AVG(s.s_acctbal) AS AvgAccountBalance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS TotalOrders,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), RankedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS RankByPrice
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+)
+SELECT 
+    pa.p_name,
+    s.s_name,
+    cs.TotalOrders,
+    cs.TotalSpent,
+    ROW_NUMBER() OVER (PARTITION BY pa.p_brand ORDER BY pa.p_retailprice DESC) AS BrandRank,
+    COUNT(*) FILTER (WHERE r.RankByPrice = 1) AS HighestPriceLineItems
+FROM 
+    PriceAnalysis pa
+JOIN 
+    SupplierSummary s ON pa.p_partkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders cs ON s.s_suppkey = cs.c_custkey
+JOIN 
+    RankedLineItems r ON r.l_partkey = pa.p_partkey
+WHERE 
+    cs.TotalOrders IS NOT NULL
+HAVING 
+    SUM(CASE WHEN cs.TotalSpent IS NULL THEN 0 ELSE cs.TotalSpent END) > 500
+ORDER BY 
+    pa.p_retailprice DESC, BrandRank
+LIMIT 10;

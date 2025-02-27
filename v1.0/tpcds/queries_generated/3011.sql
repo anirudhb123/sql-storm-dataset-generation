@@ -1,0 +1,75 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk AS customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        MAX(ws.ws_ship_date_sk) AS last_purchase,
+        RANK() OVER (PARTITION BY ws.ws_bill_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT s.s_store_sk) AS store_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        store s ON c.c_customer_sk = s.s_store_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate, ca.ca_city, ca.ca_state, ca.ca_country
+),
+return_data AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt_inc_tax) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    sd.total_sales,
+    sd.order_count,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    sd.last_purchase,
+    sd.sales_rank,
+    CASE 
+        WHEN sd.total_sales > 1000 THEN 'High Value'
+        WHEN sd.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_segment
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_data sd ON ci.c_customer_id = sd.customer_id
+LEFT JOIN 
+    return_data rd ON ci.c_customer_id = rd.sr_customer_sk
+WHERE 
+    (ci.cd_gender = 'F' AND sd.total_sales > 500) OR 
+    (ci.cd_gender = 'M' AND (rd.total_returns IS NULL OR rd.total_returns < 100))
+ORDER BY 
+    total_sales DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

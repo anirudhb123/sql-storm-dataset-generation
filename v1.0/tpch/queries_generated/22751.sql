@@ -1,0 +1,50 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > 500.00
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal
+    FROM customer c
+    JOIN CustomerCTE cc ON c.c_nationkey = cc.c_nationkey
+    WHERE cc.c_acctbal IS NOT NULL AND c.c_acctbal < cc.c_acctbal
+),
+OrderInfo AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SupplierTotal AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+PartRevenue AS (
+    SELECT p.p_partkey, p.p_name, COALESCE(SUM(l.l_extendedprice), 0) AS total_sales
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey AND l.l_shipdate >= '2022-01-01'
+    GROUP BY p.p_partkey, p.p_name
+),
+BestSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING SUM(ps.ps_supplycost) IS NOT NULL
+)
+SELECT DISTINCT
+    cc.c_name AS customer_name,
+    pt.p_name AS part_name,
+    pt.total_sales AS total_sales,
+    ot.total_revenue AS total_revenue,
+    st.total_cost AS supplier_total_cost,
+    bs.s_name AS best_supplier_name
+FROM CustomerCTE cc
+JOIN OrderInfo ot ON cc.c_custkey = ot.o_orderkey
+JOIN PartRevenue pt ON ot.o_orderkey = pt.p_partkey
+JOIN SupplierTotal st ON st.total_cost IS NOT NULL
+FULL OUTER JOIN BestSuppliers bs ON cc.c_nationkey = bs.s_suppkey
+WHERE (pt.total_sales > st.total_cost OR pt.total_sales IS NULL)
+AND (bs.rnk = 1 OR bs.rnk IS NULL)
+ORDER BY cc.c_name, pt.total_sales DESC NULLS LAST;

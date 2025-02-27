@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.o_orderkey,
+        co.o_totalprice,
+        co.o_orderdate
+    FROM CustomerOrders co
+    WHERE co.o_totalprice > 10000
+)
+SELECT 
+    r.r_name AS region_name,
+    [COALESCE](s.s_name, 'No Supplier') AS supplier_name,
+    SUM(co.total_lineitem_price) AS total_value,
+    COUNT(DISTINCT co.o_orderkey) AS order_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN HighValueOrders co ON s.s_suppkey = co.o_orderkey
+WHERE s.s_acctbal > 5000 OR s.s_nationkey IS NULL
+GROUP BY r.r_name, s.s_name
+HAVING SUM(co.total_lineitem_price) IS NOT NULL
+ORDER BY total_value DESC
+LIMIT 10;

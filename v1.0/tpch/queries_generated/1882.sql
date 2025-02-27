@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rank_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+), 
+CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No Purchases'
+        ELSE CONCAT('Spent: $', CAST(c.total_spent AS varchar))
+    END AS customer_spending_info,
+    r.region_info
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    supplier s ON sp.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerSpend c ON s.s_nationkey = c.c_custkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND (s.s_acctbal IS NULL OR s.s_acctbal >= 1000)
+ORDER BY 
+    p.p_name, total_available DESC;

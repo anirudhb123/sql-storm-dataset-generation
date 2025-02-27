@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1995-01-01'
+        AND o.o_orderdate < '1996-01-01'
+),
+HighValueSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 50000
+),
+SupplierNation AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name NOT LIKE 'A%'
+),
+CustomerValue AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spend,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.o_orderdate,
+    COALESCE(sn.n_name, 'Unknown') AS supplier_nation,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(CASE WHEN l.l_shipdate IS NULL THEN 0 ELSE l.l_tax END) AS avg_tax,
+    (SELECT MAX(total_spend) FROM CustomerValue) AS max_customer_spend
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    HighValueSuppliers hvs ON l.l_partkey = hvs.ps_partkey AND l.l_suppkey = hvs.ps_suppkey
+LEFT JOIN 
+    SupplierNation sn ON l.l_suppkey = sn.s_suppkey
+WHERE 
+    r.order_rank <= 10
+    AND r.o_totalprice IS NOT NULL
+GROUP BY 
+    r.o_orderdate, sn.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+ORDER BY 
+    r.o_orderdate, total_line_value DESC
+LIMIT 50;

@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, OwnerUserId, CreationDate, 
+           1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, 
+           p.CreationDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserStatistics AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           u.Reputation, 
+           COUNT(DISTINCT b.Id) AS BadgeCount,
+           SUM(p.ViewCount) AS TotalViews,
+           SUM(p.Score) AS TotalScore
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           COALESCE(ph.Title, 'No Parent') AS ParentTitle,
+           u.DisplayName AS OwnerDisplayName,
+           u.Reputation AS OwnerReputation
+    FROM Posts p
+    LEFT JOIN Posts ph ON p.ParentId = ph.Id
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+),
+TopUsers AS (
+    SELECT UserId,
+           RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank
+    FROM UserStatistics
+),
+FilteredPosts AS (
+    SELECT pd.PostId, 
+           pd.Title, 
+           pd.CreationDate,
+           pd.ParentTitle,
+           pd.OwnerDisplayName,
+           pd.OwnerReputation,
+           ROW_NUMBER() OVER (PARTITION BY pd.OwnerDisplayName ORDER BY pd.CreationDate DESC) AS PostRank
+    FROM PostDetails pd
+    WHERE pd.Title IS NOT NULL
+)
+SELECT fu.UserId, 
+       fu.ReputationRank, 
+       fu.ViewRank, 
+       fp.PostId, 
+       fp.Title AS PostTitle, 
+       fp.CreationDate, 
+       fp.ParentTitle,
+       fp.OwnerDisplayName, 
+       fp.OwnerReputation
+FROM TopUsers fu
+JOIN FilteredPosts fp ON fu.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+WHERE fu.ReputationRank <= 10 AND fp.PostRank <= 5
+ORDER BY fu.ReputationRank, fp.CreationDate DESC;

@@ -1,0 +1,43 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, Location, Views, UpVotes, DownVotes
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, u.Location, u.Views, u.UpVotes, u.DownVotes
+    FROM Users u
+    JOIN UserReputation ur ON u.Reputation < ur.Reputation
+    WHERE u.CreationDate > ur.CreationDate
+),
+RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName AS OwnerDisplayName, 
+           ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days' 
+    AND p.Score > 10
+),
+PostStatistics AS (
+    SELECT p.Id, COUNT(c.Id) AS CommentCount, SUM(v.VoteTypeId = 2) AS UpVoteCount,
+           SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+BadgesSummary AS (
+    SELECT u.Id, STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+)
+SELECT ur.Id AS UserId, ur.Reputation, ur.Location, ur.Views, 
+       COALESCE(bs.BadgeNames, 'No Badges') AS Badges,
+       rp.Id AS RecentPostId, rp.Title AS RecentPostTitle, rp.CreationDate AS RecentPostDate,
+       ps.CommentCount, ps.UpVoteCount, ps.DownVoteCount
+FROM UserReputation ur
+LEFT JOIN RecentPosts rp ON ur.Id = rp.OwnerUserId
+LEFT JOIN PostStatistics ps ON rp.Id = ps.Id
+LEFT JOIN BadgesSummary bs ON ur.Id = bs.Id
+WHERE ur.Reputation > 2000
+ORDER BY ur.Reputation DESC, rp.CreationDate DESC
+LIMIT 100;

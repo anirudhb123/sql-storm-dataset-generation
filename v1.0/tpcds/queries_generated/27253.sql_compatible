@@ -1,0 +1,37 @@
+
+WITH StringBenchmark AS (
+    SELECT 
+        LOWER(c_first_name) AS lower_first_name,
+        UPPER(c_last_name) AS upper_last_name,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        LENGTH(c_email_address) AS email_length,
+        SUBSTRING(c_email_address FROM POSITION('@' IN c_email_address) + 1 FOR LENGTH(c_email_address)) AS email_domain,
+        REPLACE(c_email_address, '.', '') AS sanitized_email,
+        TRIM(c_city) AS trimmed_city
+    FROM 
+        customer
+    WHERE 
+        c_first_name IS NOT NULL 
+        AND c_last_name IS NOT NULL 
+        AND c_email_address IS NOT NULL
+    LIMIT 1000
+),
+AggregatedResults AS (
+    SELECT 
+        COUNT(*) AS total_records,
+        AVG(email_length) AS avg_email_length,
+        COUNT(DISTINCT email_domain) AS unique_email_domains,
+        COUNT(DISTINCT lower_first_name) AS unique_first_names,
+        COUNT(DISTINCT upper_last_name) AS unique_last_names
+    FROM 
+        StringBenchmark
+)
+SELECT 
+    total_records,
+    avg_email_length,
+    unique_email_domains,
+    unique_first_names,
+    unique_last_names,
+    'String Benchmarking Completed' AS status_message
+FROM 
+    AggregatedResults;

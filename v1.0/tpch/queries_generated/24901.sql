@@ -1,0 +1,54 @@
+WITH RegionConsistent AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY COUNT(DISTINCT n.n_nationkey) DESC) AS rn
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+SupplierDetail AS (
+    SELECT s.s_suppkey, s.s_name, AVG(s.s_acctbal) AS avg_acctbal,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+           MAX(s.s_comment) AS latest_comment
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderMetrics AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           COUNT(l.l_orderkey) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+DataIntegrity AS (
+    SELECT l.l_orderkey, SUM(l.l_quantity) AS total_quantity
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+    GROUP BY l.l_orderkey
+),
+SupplierRegionStats AS (
+    SELECT rc.r_name, sd.s_name, sd.avg_acctbal, sd.part_count,
+           COALESCE(dim.total_quantity, 0) AS total_return_quantity,
+           RANK() OVER (PARTITION BY rc.r_regionkey ORDER BY sd.avg_acctbal DESC) AS region_rank
+    FROM RegionConsistent rc
+    JOIN SupplierDetail sd ON rc.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sd.s_nationkey LIMIT 1)
+    LEFT JOIN DataIntegrity dim ON sd.s_suppkey = (
+        SELECT ps.ps_suppkey FROM partsupp ps 
+        WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_returnflag = 'R')
+        LIMIT 1
+    )
+)
+SELECT r.r_name, s.s_name, s.avg_acctbal, s.part_count, s.total_return_quantity
+FROM SupplierRegionStats s
+JOIN RegionConsistent r ON s.r_name = r.r_name
+WHERE s.total_return_quantity IS NOT NULL 
+  AND s.region_rank <= 3
+UNION
+SELECT DISTINCT 'Total' AS r_name, s.s_name, SUM(s.avg_acctbal) AS total_avg_acctbal, 
+       SUM(s.part_count) AS total_part_count, SUM(s.total_return_quantity) AS total_return_quantity
+FROM SupplierRegionStats s
+GROUP BY s.s_name
+HAVING SUM(s.total_return_quantity) >= 100
+ORDER BY r_name, s_name;

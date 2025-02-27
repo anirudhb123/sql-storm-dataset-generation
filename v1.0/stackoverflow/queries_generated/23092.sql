@@ -1,0 +1,96 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER(PARTITION BY p.Id), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER(PARTITION BY p.Id), 0) AS Downvotes,
+        ROW_NUMBER() OVER(ORDER BY p.ViewCount DESC) AS PopularityRank,
+        CASE 
+            WHEN p.CreationDate < NOW() - INTERVAL '1 year' THEN 'legacy'
+            ELSE 'recent'
+        END AS PostAge,
+        PARENT.Id AS ParentPostId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Posts AS PARENT ON p.ParentId = PARENT.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only for Questions
+    GROUP BY 
+        p.Id
+), 
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        MIN(ph.CreationDate) AS FirstEdited,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, or Tags
+    GROUP BY 
+        ph.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), 
+PostMetrics AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.PopularityRank,
+        ph.EditCount,
+        ph.LastEdited,
+        au.UserId,
+        au.DisplayName
+    FROM 
+        RecursivePostStats ps
+    LEFT JOIN 
+        PostHistorySummary ph ON ps.PostId = ph.PostId
+    JOIN 
+        ActiveUsers au ON ps.PopularityRank <= 10
+    WHERE 
+        ps.PostAge = 'recent' AND
+        (ps.Upvotes - ps.Downvotes) > 0
+)
+SELECT 
+    DISTINCT pm.Title,
+    pm.ViewCount,
+    pm.Upvotes,
+    pm.Downvotes,
+    pm.PopularityRank,
+    pm.EditCount,
+    pm.LastEdited,
+    pm.DisplayName,
+    CASE 
+        WHEN pm.EditCount IS NULL THEN 'No edits made'
+        ELSE 'Edits made'
+    END AS EditStatus
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.PostId IS NOT NULL
+ORDER BY 
+    pm.PopularityRank;

@@ -1,0 +1,45 @@
+
+WITH RECURSIVE cte_sales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_sales, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) as rn
+    FROM web_sales
+    GROUP BY ws_item_sk
+), 
+cte_item AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(ws.total_sales, 0) as total_web_sales,
+        COALESCE(cs.total_catalog_sales, 0) as total_catalog_sales,
+        COALESCE(ss.total_store_sales, 0) as total_store_sales,
+        COALESCE((SELECT SUM(inv_quantity_on_hand) 
+                  FROM inventory 
+                  WHERE inv_item_sk = i.i_item_sk), 0) as total_inventory
+    FROM item i
+    LEFT JOIN (SELECT ws_item_sk, SUM(ws_quantity) AS total_sales FROM web_sales GROUP BY ws_item_sk) ws
+        ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN (SELECT cs_item_sk, SUM(cs_quantity) AS total_catalog_sales FROM catalog_sales GROUP BY cs_item_sk) cs
+        ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN (SELECT ss_item_sk, SUM(ss_quantity) AS total_store_sales FROM store_sales GROUP BY ss_item_sk) ss
+        ON i.i_item_sk = ss.ss_item_sk
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_product_name,
+    ci.total_web_sales, 
+    ci.total_catalog_sales,
+    ci.total_store_sales,
+    ci.total_inventory,
+    GREATEST(ci.total_web_sales, ci.total_catalog_sales, ci.total_store_sales) as highest_sales,
+    CASE 
+        WHEN ci.total_inventory < 50 THEN 'Low Stock'
+        WHEN ci.total_inventory BETWEEN 50 AND 150 THEN 'Medium Stock'
+        ELSE 'High Stock' 
+    END AS stock_status
+FROM cte_item ci
+WHERE ci.total_inventory IS NOT NULL
+ORDER BY highest_sales DESC
+LIMIT 10;

@@ -1,0 +1,46 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(MAX(b.Reputation), 0) AS HighestUserReputation
+    FROM Posts p
+    LEFT JOIN Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[]))
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Users b ON b.Id = p.OwnerUserId
+    WHERE p.CreationDate >= '2023-01-01' 
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score
+),
+PostScores AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Body,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        r.TagList,
+        r.CommentCount,
+        r.HighestUserReputation,
+        (r.ViewCount + r.Score * 2 + r.CommentCount * 5 + r.HighestUserReputation * 10) AS CompositeScore
+    FROM RankedPosts r
+)
+SELECT 
+    PostId,
+    Title,
+    Body,
+    CreationDate,
+    ViewCount,
+    Score,
+    TagList,
+    CommentCount,
+    HighestUserReputation,
+    CompositeScore
+FROM PostScores
+ORDER BY CompositeScore DESC
+LIMIT 10;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level,
+        CAST(NULL AS VARCHAR) AS parent_title
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.kind_id,
+        mh.level + 1,
+        mh.title AS parent_title
+    FROM 
+        title e
+    INNER JOIN 
+        title p ON e.episode_of_id = p.id
+    INNER JOIN 
+        MovieHierarchy mh ON p.id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    mh.level AS episode_level,
+    mh.parent_title,
+    COALESCE(ca.aka_count, 0) AS aka_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    (SELECT COUNT(DISTINCT cc.id) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = mh.movie_id) AS cast_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank_within_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    aka_title a ON mh.movie_id = a.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        COUNT(*) AS aka_count 
+     FROM 
+        aka_name 
+     GROUP BY 
+        movie_id) ca ON mh.movie_id = ca.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, mh.parent_title, ca.aka_count
+ORDER BY 
+    mh.level, mh.production_year DESC;

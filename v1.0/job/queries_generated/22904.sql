@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.movie_title,
+        rm.production_year,
+        rm.title_rank,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.title_rank = 1 AND 
+        rm.keyword_count > 2
+),
+ActorsWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        ro.role AS role_name,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    JOIN 
+        role_type ro ON ro.id = ci.role_id
+)
+SELECT 
+    fm.movie_id,
+    fm.movie_title,
+    fm.production_year,
+    STRING_AGG(DISTINCT awr.actor_name || ' as ' || awr.role_name ORDER BY awr.nr_order) AS actors_list
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    ActorsWithRoles awr ON fm.movie_id = awr.movie_id
+GROUP BY 
+    fm.movie_id, fm.movie_title, fm.production_year
+HAVING 
+    COUNT(DISTINCT awr.actor_name) >= 3 
+ORDER BY 
+    fm.production_year DESC, fm.movie_title;
+
+This query uses Common Table Expressions (CTEs) to rank movies, filter them based on title rank and keyword count, and aggregate actor information with their roles. It incorporates `LEFT JOIN`, `RANK()`, `STRING_AGG()`, and a variety of other SQL constructs, showcasing complex predicates and logic.

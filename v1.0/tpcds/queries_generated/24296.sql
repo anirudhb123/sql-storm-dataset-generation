@@ -1,0 +1,63 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        wr_item_sk,
+        wr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY wr_returned_date_sk DESC) AS rn
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity IS NOT NULL
+),
+CustomerSales AS (
+    SELECT 
+        w.web_site_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    GROUP BY 
+        w.web_site_id
+),
+MaxCustomerSales AS (
+    SELECT 
+        web_site_id,
+        MAX(total_sales) AS max_sales
+    FROM 
+        CustomerSales
+    GROUP BY 
+        web_site_id
+),
+NegativeReturns AS (
+    SELECT
+        r.wr_returning_customer_sk,
+        SUM(r.wr_return_quantity) AS total_negative_returns
+    FROM 
+        RankedReturns r
+    WHERE 
+        r.sc_int_value < 0 AND r.rn <= 10
+    GROUP BY 
+        r.wr_returning_customer_sk
+)
+SELECT 
+    cs.web_site_id,
+    cs.total_sales,
+    CASE 
+        WHEN cs.total_sales IS NULL THEN 'No Sales'
+        ELSE CASE 
+            WHEN MAX(cs.total_sales) IN (SELECT max_sales FROM MaxCustomerSales WHERE web_site_id = cs.web_site_id) THEN 'Top Performer'
+            ELSE 'Regular Performer'
+        END
+    END AS performance_label,
+    COALESCE(nr.total_negative_returns, 0) AS total_negative_returns
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    NegativeReturns nr ON cs.web_site_id = nr.wr_returning_customer_sk
+WHERE 
+    cs.total_sales > (SELECT AVG(total_sales) FROM CustomerSales)
+ORDER BY 
+    cs.total_sales DESC;

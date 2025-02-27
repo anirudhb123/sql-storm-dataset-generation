@@ -1,0 +1,77 @@
+WITH RecursivePostPaths AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        rp.Level + 1 AS Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostPaths rp ON p.ParentId = rp.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 5 THEN 1 ELSE 0 END), 0) AS Favorites,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) AS HistoryCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.Favorites,
+        ps.CommentCount,
+        CASE 
+            WHEN pp.Level IS NOT NULL THEN 'Has Answers'
+            ELSE 'No Answers'
+        END AS AnswerStatus,
+        COALESCE(pt.Name, 'Unknown') AS PostType
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostStatistics ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        RecursivePostPaths pp ON p.AcceptedAnswerId = pp.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR' -- Posts created in the last year
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Favorites,
+    pd.CommentCount,
+    pd.AnswerStatus,
+    pd.PostType
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.UpVotes DESC,
+    pd.DownVotes ASC,
+    pd.CommentCount DESC;

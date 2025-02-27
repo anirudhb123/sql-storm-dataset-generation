@@ -1,0 +1,66 @@
+WITH movie_cast AS (
+    SELECT
+        ci.movie_id,
+        COALESCE(aka.name, c.name) AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS total_actors,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY ci.movie_id) AS note_count
+    FROM cast_info ci
+    LEFT JOIN aka_name aka ON ci.person_id = aka.person_id
+    LEFT JOIN char_name c ON ci.person_id = c.imdb_id
+    WHERE ci.nr_order <= 5
+),
+movie_details AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+        COUNT(DISTINCT mc.id) AS company_count
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN movie_companies mc ON mt.id = mc.movie_id
+    GROUP BY mt.id
+),
+ranked_movies AS (
+    SELECT
+        md.*,
+        RANK() OVER (ORDER BY md.production_year DESC, md.title) AS movie_rank
+    FROM movie_details md
+),
+final_selection AS (
+    SELECT
+        mc.actor_name,
+        rm.title,
+        rm.production_year,
+        rm.keywords,
+        rm.movie_rank,
+        mc.total_actors,
+        mc.note_count
+    FROM movie_cast mc
+    JOIN ranked_movies rm ON mc.movie_id = rm.movie_id
+    WHERE mc.total_actors > 2 AND
+          (mc.note_count = 0 OR mc.actor_name IS NOT NULL)
+),
+distinct_actors AS (
+    SELECT DISTINCT
+        actor_name,
+        production_year
+    FROM final_selection
+)
+SELECT
+    actor_name,
+    COUNT(*) AS appearance_count,
+    MIN(production_year) AS first_appearance,
+    MAX(production_year) AS last_appearance,
+    STRING_AGG(DISTINCT title, '; ') AS titles
+FROM final_selection
+GROUP BY actor_name
+HAVING COUNT(*) > 1
+ORDER BY appearance_count DESC NULLS LAST;
+
+This query does the following:
+1. The `movie_cast` CTE retrieves the movie IDs and associated actor names, counting the distinct actors and the number of notes per movie.
+2. The `movie_details` CTE collects movie information including the title, production year, keywords, and the count of associated companies.
+3. The `ranked_movies` CTE ranks movies by production year (descending) and title.
+4. The `final_selection` CTE filters movies with more than two actors and conditions on notes and actor names.
+5. Finally, the query aggregates results from `final_selection`, counting appearances and providing a list of titles, showcasing usage of window functions, GROUP BY, HAVING, and string aggregation with `STRING_AGG`. It demonstrates handling of NULLs and includes a logical structure through multiple CTEs to maintain clarity in complex logic.

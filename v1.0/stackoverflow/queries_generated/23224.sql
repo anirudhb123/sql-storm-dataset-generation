@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(np.ViewCount), 0) AS TotalPostViews,
+        COALESCE(SUM(np.Score), 0) AS TotalPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts np ON u.Id = np.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+FinalResults AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        us.TotalUpvotes,
+        us.TotalDownvotes,
+        us.BadgeCount,
+        us.PostHistoryCount,
+        us.CommentCount,
+        ua.TotalPostViews,
+        ua.TotalPostScore,
+        CASE 
+            WHEN us.TotalDownvotes > us.TotalUpvotes THEN 'Negative'
+            WHEN us.TotalUpvotes > us.TotalDownvotes THEN 'Positive'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        STRING_AGG(DISTINCT CONCAT('Rank: ', rp.rn, ' Title: ', rp.Title), '; ') AS RecentPosts
+    FROM 
+        UserActivity ua
+    JOIN 
+        UserScores us ON ua.UserId = us.UserId
+    LEFT JOIN 
+        RankedPosts rp ON ua.UserId = rp.OwnerUserId
+    GROUP BY 
+        ua.UserId, ua.DisplayName, us.TotalUpvotes, us.TotalDownvotes, us.BadgeCount, us.PostHistoryCount, us.CommentCount, ua.TotalPostViews, ua.TotalPostScore
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalPostViews > 1000 THEN 'High Engagement'
+        WHEN TotalPostViews BETWEEN 500 AND 1000 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    (TotalPostScore::decimal / NULLIF(NULLIF(TotalPostViews, 0), 1)) AS ScorePerView
+FROM 
+    FinalResults
+WHERE 
+    (TotalPostScore > 0 OR CommentCount > 5) 
+    AND (BadgeCount = 0 OR TotalUpvotes > 10)
+ORDER BY 
+    EngagementLevel DESC, Sentiment ASC, TotalPostScore DESC;

@@ -1,0 +1,77 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS actor_count_rank,
+        COUNT(ci.person_id) AS total_actors
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mt.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year,
+        rm.total_actors
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.total_actors > 5 AND rm.actor_count_rank <= 3
+),
+ActorDetails AS (
+    SELECT 
+        an.name AS actor_name,
+        an.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movies_involved
+    FROM 
+        aka_name an
+    INNER JOIN 
+        cast_info ci ON ci.person_id = an.person_id
+    INNER JOIN 
+        FilteredMovies fm ON fm.movie_id = ci.movie_id
+    GROUP BY 
+        an.name, an.person_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies_involved
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+FinalReport AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        ad.actor_name,
+        ad.movie_count,
+        cd.companies_involved
+    FROM 
+        FilteredMovies fm
+    JOIN 
+        ActorDetails ad ON ad.movie_count > 2
+    LEFT JOIN 
+        CompanyDetails cd ON cd.movie_id = fm.movie_id
+)
+SELECT
+    fr.title,
+    fr.production_year,
+    fr.actor_name,
+    fr.movie_count,
+    COALESCE(fr.companies_involved, 'No Companies Listed') AS companies_involved
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.production_year DESC, 
+    fr.movie_count DESC;

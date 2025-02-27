@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        DENSE_RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey
+),
+HighCostParts AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(total_cost) AS avg_cost
+    FROM 
+        RankedSuppliers
+    WHERE 
+        rank = 1
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        AVG(total_cost) > 1000
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        o.o_orderstatus
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    p.p_name,
+    COALESCE(hc.avg_cost, 0) AS average_supply_cost,
+    COUNT(DISTINCT os.o_orderkey) AS order_count
+FROM 
+    part p
+LEFT JOIN 
+    HighCostParts hc ON p.p_partkey = hc.ps_partkey
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (
+        SELECT 
+            l.l_orderkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_retailprice BETWEEN 10.00 AND 200.00
+GROUP BY 
+    p.p_name, hc.avg_cost
+ORDER BY 
+    order_count DESC, average_supply_cost DESC;

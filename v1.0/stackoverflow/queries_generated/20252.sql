@@ -1,0 +1,90 @@
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalBounty,
+        PostCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, TotalBounty DESC) AS Rank 
+    FROM 
+        UserScores
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AcceptedAnswerId,
+        CASE 
+            WHEN P.AgreeingCount IS NULL THEN 0 
+            ELSE P.AgreeingCount 
+        END AS EffectiveViewCount 
+    FROM 
+        Posts P 
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(UserId) AS AgreeingCount 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2 -- Upvote
+        GROUP BY 
+            PostId 
+    ) V ON P.Id = V.PostId
+),
+TopPostDetails AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.Score,
+        PD.ViewCount,
+        PD.AcceptedAnswerId,
+        RANK() OVER (ORDER BY PD.Score DESC, PD.ViewCount DESC) AS PostRank 
+    FROM 
+        PostDetails PD 
+    WHERE 
+        PD.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+        AND PD.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TP.Title,
+    TP.Score,
+    TP.ViewCount,
+    TP.CreationDate,
+    CASE 
+        WHEN TP.AcceptedAnswerId IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer
+FROM 
+    TopUsers TU
+JOIN 
+    TopPostDetails TP ON TU.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = TP.PostId)
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Reputation DESC, TP.Score DESC, TP.ViewCount DESC;

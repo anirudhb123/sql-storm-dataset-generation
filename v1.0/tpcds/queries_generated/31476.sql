@@ -1,0 +1,41 @@
+
+WITH RECURSIVE CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_profit) AS Total_Profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS Rank
+    FROM
+        customer c
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING
+        SUM(ws.ws_net_profit) IS NOT NULL
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.Total_Profit,
+    (SELECT COUNT(DISTINCT ws.ws_order_number)
+     FROM web_sales ws
+     WHERE ws.ws_bill_customer_sk = cs.c_customer_sk
+     AND ws.ws_sold_date_sk > (
+         SELECT MAX(cs2.Total_Profit)
+         FROM CustomerSales cs2
+         WHERE cs2.c_customer_sk = cs.c_customer_sk
+     )
+    ) AS Order_Count,
+    nvl(sm.sm_coupon_amt, 0) AS Total_Coupons
+FROM
+    CustomerSales cs
+LEFT JOIN
+    ship_mode sm ON cs.Total_Profit > 1000
+WHERE
+    cs.Rank <= 10
+ORDER BY
+    cs.Total_Profit DESC;
+

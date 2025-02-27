@@ -1,0 +1,39 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           m.production_year,
+           1 AS level
+    FROM aka_title m
+    WHERE m.production_year BETWEEN 2000 AND 2020
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id,
+           m.title,
+           m.production_year,
+           mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+    WHERE mh.level < 3
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS num_cast,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    SUM(CASE WHEN mci.note IS NULL THEN 0 ELSE 1 END) AS has_note_count,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS role_rank
+FROM aka_name a
+JOIN cast_info c ON a.person_id = c.person_id
+JOIN movie_hierarchy mh ON c.movie_id = mh.movie_id
+JOIN aka_title t ON mh.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_companies mci ON t.id = mci.movie_id
+WHERE a.name IS NOT NULL
+  AND (t.production_year IS NOT NULL OR t.production_year > 2000)
+GROUP BY a.name, t.title, mh.production_year
+HAVING COUNT(DISTINCT c.person_id) > 5
+ORDER BY mh.production_year DESC, num_cast DESC;

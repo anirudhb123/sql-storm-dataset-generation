@@ -1,0 +1,53 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_orderdate, oh.o_totalprice, level + 1
+    FROM orders oh
+    JOIN OrderHierarchy ohh ON oh.o_custkey = ohh.o_custkey
+    WHERE oh.o_orderstatus = 'O' AND oh.o_orderdate > ohh.o_orderdate
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, cast('1998-10-01' as date))
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+PartSupplierCosts AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+RegionSales AS (
+    SELECT n.n_regionkey, SUM(o.o_totalprice) AS region_total
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE l.l_shipdate >= DATEADD(month, -6, cast('1998-10-01' as date))
+    GROUP BY n.n_regionkey
+),
+CustomerOrderRowNumbers AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT
+    c.c_name,
+    r.r_name,
+    COALESCE(s.total_supply_cost, 0) AS supplier_cost,
+    COALESCE(r.region_total, 0) AS total_region_sales,
+    COALESCE(o.total_spent, 0) AS total_spent_last_year
+FROM TopCustomers o
+JOIN customer c ON o.c_custkey = c.c_custkey
+LEFT JOIN region r ON c.c_nationkey = r.r_regionkey
+LEFT JOIN PartSupplierCosts s ON s.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = c.c_custkey)
+LEFT JOIN RegionSales rs ON r.r_regionkey = rs.n_regionkey
+WHERE o.total_spent IS NOT NULL OR r.r_regionkey IS NOT NULL
+ORDER BY total_spent_last_year DESC, supplier_cost DESC
+FETCH FIRST 10 ROWS ONLY;

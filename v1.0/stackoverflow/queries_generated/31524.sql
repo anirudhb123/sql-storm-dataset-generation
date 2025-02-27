@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ParentId,
+        PH.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy PH ON P.ParentId = PH.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(VoteTypeId) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+FirstPostEdit AS (
+    SELECT 
+        PostId,
+        MIN(CreationDate) AS FirstEditDate
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 6) -- Only Title, Body, Tags edits
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        B.Date > NOW() - INTERVAL '1 year' -- Badges earned in the last year
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PH.PostId,
+    PH.Title,
+    COALESCE(PVS.UpVotes, 0) AS UpVotes,
+    COALESCE(PVS.DownVotes, 0) AS DownVotes,
+    COALESCE(PVS.TotalVotes, 0) AS TotalVotes,
+    R.Level AS PostLevel,
+    FPE.FirstEditDate,
+    UB.BadgeCount AS UserBadges,
+    CASE
+        WHEN COALESCE(PVS.UpVotes, 0) > COALESCE(PVS.DownVotes, 0) THEN 'Positive'
+        WHEN COALESCE(PVS.UpVotes, 0) < COALESCE(PVS.DownVotes, 0) THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    RecursivePostHierarchy R
+LEFT JOIN 
+    PostVoteStats PVS ON R.PostId = PVS.PostId
+LEFT JOIN 
+    FirstPostEdit FPE ON R.PostId = FPE.PostId
+LEFT JOIN 
+    Users U ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = R.PostId)
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+ORDER BY 
+    R.Level, R.PostId;

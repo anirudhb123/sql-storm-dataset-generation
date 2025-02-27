@@ -1,0 +1,35 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_comment LIKE '%import%'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_type LIKE 'metal%'
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+),
+top_regions AS (
+    SELECT r.r_regionkey, r.r_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY r.r_regionkey, r.r_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+)
+SELECT sh.s_name AS supplier_name, cs.c_name AS customer_name, tr.r_name AS region_name, cs.order_count, cs.total_spent, sh.level
+FROM supplier_hierarchy sh
+CROSS JOIN customer_summary cs
+JOIN top_regions tr ON cs.total_spent > 10000
+WHERE sh.s_nationkey = cs.c_nationkey
+ORDER BY sh.level, cs.total_spent DESC;

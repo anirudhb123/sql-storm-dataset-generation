@@ -1,0 +1,76 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (
+            SELECT MIN(d_date_sk) 
+            FROM date_dim 
+            WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+        ) AND (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+        )
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+FinalReport AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_order_number,
+        is.total_quantity_sold,
+        is.total_net_profit,
+        COALESCE(tr.total_returned_quantity, 0) AS total_returned,
+        CASE 
+            WHEN tr.total_returned_quantity IS NULL THEN 'No Returns'
+            WHEN tr.total_returned_quantity > 0 THEN 'Returned'
+            ELSE 'Sold'
+        END AS return_status
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        ItemSales is ON rs.ws_order_number = is.i_item_id
+    LEFT JOIN 
+        TotalReturns tr ON rs.ws_order_number = tr.sr_item_sk
+    WHERE 
+        rs.profit_rank <= 10
+)
+SELECT 
+    fr.web_site_sk,
+    fr.ws_order_number,
+    fr.total_quantity_sold,
+    fr.total_net_profit,
+    fr.total_returned,
+    fr.return_status
+FROM 
+    FinalReport fr
+ORDER BY 
+    fr.total_net_profit DESC
+FETCH FIRST 100 ROWS ONLY OFFSET (SELECT COUNT(*) FROM FinalReport) / 2;

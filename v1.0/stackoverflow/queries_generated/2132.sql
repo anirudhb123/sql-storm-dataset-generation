@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.Reputation
+), 
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tags edited
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    up.Reputation,
+    up.TotalBounty,
+    COALESCE(phd.EditCount, 0) AS TotalEdits,
+    phd.LastEditDate,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.rn = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRank
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation up ON rp.Id = up.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    rp.CommentCount > 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 100;

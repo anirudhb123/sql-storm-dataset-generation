@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), ActorRoles AS (
+    SELECT 
+        c.person_id,
+        r.role AS actor_role,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id, r.role
+), ActorRanked AS (
+    SELECT 
+        ar.person_id,
+        ar.actor_role,
+        ar.movie_count,
+        RANK() OVER (ORDER BY ar.movie_count DESC) AS role_rank
+    FROM 
+        ActorRoles ar
+    WHERE 
+        ar.movie_count > 1
+), ComplexQueries AS (
+    SELECT
+        rk.movie_id,
+        rk.title,
+        rk.production_year,
+        COALESCE(a.name, 'Unknown Actor') AS lead_actor,
+        AVG(m_info.year) AS avg_rating,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        RankedMovies rk
+    LEFT JOIN 
+        complete_cast c ON rk.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.subject_id = a.person_id
+    LEFT JOIN 
+        movie_info m_info ON rk.movie_id = m_info.movie_id
+    LEFT JOIN 
+        movie_keyword k ON rk.movie_id = k.movie_id
+    GROUP BY 
+        rk.movie_id, rk.title, rk.production_year, a.name
+    HAVING 
+        COUNT(DISTINCT m_info.info_type_id) >= 2
+        AND AVG(m_info.year) IS NOT NULL
+)
+SELECT 
+    cq.title,
+    cq.production_year,
+    cq.lead_actor,
+    CASE 
+        WHEN cq.keyword_count > 0 THEN 'Has Keywords'
+        ELSE 'No Keywords'
+    END AS keyword_status,
+    CASE 
+        WHEN ar.actor_role IS NOT NULL THEN ar.actor_role
+        ELSE 'No Role Assigned' 
+    END AS actor_role
+FROM 
+    ComplexQueries cq
+LEFT JOIN 
+    ActorRanked ar ON cq.lead_actor = ar.actor_role
+WHERE 
+    cq.production_year > 2000
+ORDER BY 
+    cq.production_year DESC, cq.keyword_count DESC;

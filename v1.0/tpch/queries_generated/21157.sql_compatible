@@ -1,0 +1,62 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), FilteredOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        CUME_DIST() OVER (ORDER BY o.o_totalprice DESC) AS price_dist
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > 1000 AND 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+), NationalStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS num_customers,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(ns.num_customers, 0) AS customers,
+    COALESCE(ns.total_order_value, 0) AS order_value,
+    ss.total_supply_cost AS total_sup_cost
+FROM 
+    region r
+FULL OUTER JOIN 
+    NationalStats ns ON r.r_name = ns.n_name
+LEFT JOIN 
+    (SELECT s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost 
+     FROM supplier s 
+     JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+     WHERE s.s_acctbal IS NOT NULL 
+     GROUP BY s.s_nationkey) ss ON r.r_regionkey = ss.s_nationkey
+WHERE 
+    r.r_name LIKE '%East%'
+GROUP BY 
+    r.r_name, ns.num_customers, ns.total_order_value, ss.total_supply_cost
+HAVING 
+    SUM(COALESCE(ns.total_order_value, 0)) OVER () > 50000
+ORDER BY 
+    r.r_name, customers DESC, order_value DESC
+FETCH FIRST 10 ROWS ONLY;

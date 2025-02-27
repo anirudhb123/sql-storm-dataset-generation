@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments WHERE UserId = u.Id) AS CommentCount
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation >= 1000 AND 
+        u.AccountId IS NOT NULL
+),
+RecentActivity AS (
+    SELECT 
+        p.OwnerUserId,
+        MAX(p.LastActivityDate) AS LastActiveDate
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    COALESCE(rp.Title, 'No Posts') AS LatestPostTitle,
+    rp.CreationDate AS LatestPostDate,
+    ra.LastActiveDate,
+    CASE 
+        WHEN au.PostCount > 0 THEN 'Active Contribution'
+        ELSE 'Lurker'
+    END AS ContributionStatus,
+    COUNT(c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    RankedPosts rp ON au.UserId = rp.PostId
+LEFT JOIN 
+    Comments c ON c.UserId = au.UserId
+LEFT JOIN 
+    Votes v ON v.UserId = au.UserId
+JOIN 
+    RecentActivity ra ON ra.OwnerUserId = au.UserId
+WHERE 
+    ra.LastActiveDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+GROUP BY 
+    au.DisplayName, au.Reputation, rp.Title, rp.CreationDate, ra.LastActiveDate
+ORDER BY 
+    au.Reputation DESC, LatestPostDate DESC
+LIMIT 10;
+
+-- Explanation:
+-- This query generates a report of active users who have posts, their latest post title,
+-- and their engagement metrics within the last 30 days. The use of multiple CTEs
+-- (Common Table Expressions) and correlated subqueries, along with conditional aggregation,
+-- gives an elaborate structure. The SELECT clause includes window functions, COALESCE for NULLs,
+-- and categorization based on contribution status, weaving in complex logic.

@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 100.00
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        COALESCE(co.total_spent, 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.c_custkey
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+)
+SELECT 
+    hvc.c_name,
+    hvc.total_spent,
+    ROW_NUMBER() OVER (ORDER BY hvc.total_spent DESC) AS ranking,
+    COUNT(DISTINCT so.s_suppkey) AS supplier_count,
+    SUM(sd.total_supply_cost) AS total_supplier_cost
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    SupplierDetails sd ON hvc.total_spent > 0 
+LEFT JOIN 
+    (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps) AS so ON sd.s_suppkey = so.ps_suppkey
+WHERE 
+    hvc.total_spent IS NOT NULL
+GROUP BY 
+    hvc.c_name, hvc.total_spent
+HAVING 
+    SUM(sd.total_supply_cost) IS NOT NULL
+ORDER BY 
+    ranking
+FETCH FIRST 10 ROWS ONLY;

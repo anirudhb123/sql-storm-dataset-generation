@@ -1,0 +1,56 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        c_customer_id,
+        total_sales,
+        order_count,
+        total_net_profit,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        CustomerSales
+),
+BestCustomers AS (
+    SELECT 
+        c_customer_id,
+        total_sales,
+        order_count,
+        total_net_profit
+    FROM 
+        TopCustomers
+    WHERE 
+        sales_rank <= 10
+)
+
+SELECT 
+    b.c_customer_id,
+    b.total_sales,
+    b.order_count,
+    b.total_net_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ca.ca_state
+FROM 
+    BestCustomers b
+JOIN 
+    customer_demographics cd ON b.c_customer_id = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+ORDER BY 
+    b.total_net_profit DESC;

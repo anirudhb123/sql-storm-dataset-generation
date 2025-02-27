@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+TotalSupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(t.total_supply_cost, 0) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM part p
+    LEFT JOIN TotalSupplierCost t ON p.p_partkey = t.ps_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(CASE 
+            WHEN lo.l_returnflag = 'R' THEN lo.l_extendedprice * (1 - lo.l_discount) 
+            ELSE 0 
+        END) AS returned_sales,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(o.o_totalprice) AS avg_order_value,
+    pd.p_name AS product_name,
+    pd.p_retailprice,
+    pd.total_supply_cost,
+    pd.num_suppliers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part pd ON ps.ps_partkey = pd.p_partkey
+JOIN lineitem lo ON ps.ps_partkey = lo.l_partkey
+LEFT JOIN RankedOrders o ON lo.l_orderkey = o.o_orderkey AND o.rank_order <= 5
+WHERE pd.p_retailprice > (
+        SELECT AVG(p.p_retailprice) 
+        FROM part p 
+        WHERE p.p_size > 0
+    ) 
+    AND lo.l_shipdate BETWEEN DATE '1997-06-01' AND DATE '1997-09-30'
+GROUP BY r.r_name, pd.p_name, pd.p_retailprice, pd.total_supply_cost, pd.num_suppliers
+ORDER BY returned_sales DESC, total_orders DESC;

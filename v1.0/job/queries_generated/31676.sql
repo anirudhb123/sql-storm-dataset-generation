@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_path AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY[m.title] AS path,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        path || m.title,
+        depth + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_path mp ON mp.movie_id = ml.movie_id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    COUNT(DISTINCT c.person_id) AS total_cast_members,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+    MAX(mi.info) AS description,
+    ARRAY_AGG(DISTINCT kt.keyword) AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT a.name) = 0 THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_presence,
+    AVG(CASE WHEN co.country_code IS NOT NULL THEN 1 ELSE NULL END) AS foreign_company_ratio,
+    SUM(CASE WHEN r.role = 'Director' THEN 1 ELSE 0 END) AS director_count,
+    MAX(m.production_year) AS latest_production_year,
+    ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.id
+LEFT JOIN 
+    keyword kt ON kt.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.id
+LEFT JOIN 
+    company_name co ON co.id = mc.company_id
+LEFT JOIN 
+    role_type r ON r.id = c.role_id
+WHERE 
+    m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Film%')
+    AND (co.country_code IS NOT NULL OR co.country_code IS NULL)
+GROUP BY 
+    m.id, m.title
+HAVING 
+    COUNT(DISTINCT a.name) > 2 
+ORDER BY 
+    total_cast_members DESC, 
+    m.title
+LIMIT 100;

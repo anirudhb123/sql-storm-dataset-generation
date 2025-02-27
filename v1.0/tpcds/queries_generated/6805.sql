@@ -1,0 +1,35 @@
+
+WITH RankedSales AS (
+    SELECT
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        RANK() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2022-01-01') AND 
+                                 (SELECT d_date_sk FROM date_dim WHERE d_date = '2022-12-31')
+    GROUP BY ss_store_sk
+),
+TopStores AS (
+    SELECT
+        w.w_warehouse_id,
+        s.s_store_name,
+        rs.total_sales,
+        rs.transaction_count
+    FROM RankedSales rs
+    JOIN store s ON rs.ss_store_sk = s.s_store_sk
+    JOIN warehouse w ON s.s_company_id = w.w_warehouse_sk
+    WHERE rs.sales_rank <= 5
+)
+SELECT
+    ts.w_warehouse_id,
+    ts.s_store_name,
+    ts.total_sales,
+    ts.transaction_count,
+    cd.cd_gender,
+    cd.cd_marital_status
+FROM TopStores ts
+JOIN customer c ON ts.ss_store_sk = c.c_current_addr_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE cd.cd_marital_status = 'M'
+ORDER BY ts.total_sales DESC;

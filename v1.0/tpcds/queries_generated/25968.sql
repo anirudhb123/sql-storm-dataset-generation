@@ -1,0 +1,27 @@
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    cp.cp_description,
+    COUNT(DISTINCT wr.wr_order_number) AS total_returns,
+    SUM(wr.wr_return_amt) AS total_returned_amount,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    INITCAP(wp.wp_type) AS web_page_type,
+    SUBSTRING(wr.wr_return_amt_inc_tax::text, 1, 10) AS returned_amount_formatted,
+    REPLACE(wp.wp_url, 'http://', 'https://') AS secure_url,
+    TRIM(BOTH ' ' FROM wp.wp_manager) AS cleaned_manager_name
+FROM 
+    customer c
+JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+JOIN 
+    web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+JOIN 
+    catalog_page cp ON wp.wp_catalog_page_sk = cp.cp_catalog_page_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+    AND wr.wr_return_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022)
+GROUP BY 
+    c.c_first_name, c.c_last_name, cp.cp_description, wp.wp_type, wp.wp_url, wp.wp_manager
+ORDER BY 
+    total_returns DESC, full_name;

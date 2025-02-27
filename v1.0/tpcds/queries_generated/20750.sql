@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+),
+ItemStats AS (
+    SELECT
+        i.i_item_sk,
+        COUNT(DISTINCT CASE WHEN r.r_reason_sk IS NOT NULL THEN sr_ticket_number END) AS return_count,
+        AVG(ws.net_profit) AS avg_net_profit
+    FROM
+        item i
+    LEFT JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
+    LEFT JOIN reason r ON r.r_reason_sk = sr.sr_reason_sk
+    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY
+        i.i_item_sk
+),
+HighReturnItems AS (
+    SELECT
+        ir.i_item_sk,
+        ir.return_count,
+        ir.avg_net_profit
+    FROM
+        ItemStats ir
+    WHERE
+        ir.return_count > (SELECT AVG(return_count) FROM ItemStats)
+)
+SELECT
+    ca.ca_city,
+    SUM(ws.ws_quantity) AS total_web_sales,
+    MAX((SELECT t_time FROM time_dim tt WHERE tt.t_time_sk = ws.ws_sold_time_sk)) AS peak_time,
+    STRING_AGG(DISTINCT i.i_item_id) AS item_ids_on_sale
+FROM
+    web_sales ws
+JOIN
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN
+    HighReturnItems hri ON hri.i_item_sk = ws.ws_item_sk
+GROUP BY
+    ca.ca_city
+HAVING
+    SUM(ws.ws_quantity) > 1000 AND
+    COUNT(DISTINCT ws.ws_order_number) > 10
+ORDER BY
+    total_web_sales DESC
+LIMIT 50
+OFFSET (SELECT COUNT(DISTINCT ca_city) FROM customer_address) / 2;

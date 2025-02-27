@@ -1,0 +1,72 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(COALESCE(CMT.Score, 0)), 0) AS TotalCommentScore,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments CMT ON P.Id = CMT.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        QuestionCount,
+        AnswerCount,
+        TotalCommentScore,
+        Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        Rank <= 10
+),
+PostCounts AS (
+    SELECT 
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT OwnerUserId) AS UniqueUsers
+    FROM 
+        Posts
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        PH.CreationDate AS ClosedDate,
+        PH.Comment AS CloseReason
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+
+SELECT 
+    TU.DisplayName,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.TotalCommentScore,
+    PC.TotalPosts,
+    PC.UniqueUsers,
+    COALESCE(CP.Title, 'No Closed Posts') AS ClosedPostTitle,
+    COALESCE(CP.ClosedDate, 'N/A') AS ClosedDate,
+    COALESCE(CP.CloseReason, 'N/A') AS CloseReason
+FROM 
+    TopUsers TU
+CROSS JOIN 
+    PostCounts PC
+LEFT JOIN 
+    ClosedPosts CP ON TU.UserId = CP.OwnerDisplayName
+ORDER BY 
+    TU.Rank;

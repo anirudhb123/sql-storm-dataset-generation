@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, sup.s_suppkey, sup.s_name, sup.s_acctbal, sup.s_comment, sh.level + 1
+    FROM supplier AS sup
+    JOIN nation AS n ON sup.s_nationkey = n.n_nationkey
+    JOIN SupplierHierarchy AS sh ON n.n_regionkey = sh.s_nationkey
+    WHERE sup.s_acctbal < sh.s_acctbal
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size,
+           SUM(ps.ps_availqty) AS total_availability,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part AS p
+    JOIN partsupp AS ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_size
+    HAVING SUM(ps.ps_availqty) IS NOT NULL AND COUNT(DISTINCT ps.ps_suppkey) > 5
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders AS o
+    WHERE o.o_orderstatus IN ('O', 'F') AND o.o_totalprice > 1000
+),
+AggregateInfo AS (
+    SELECT r.r_name,
+           SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_extendedprice * (1 - li.l_discount) END) AS total_returned,
+           COUNT(DISTINCT c.c_custkey) AS total_customers,
+           COUNT(DISTINCT CASE WHEN o.o_orderdate = DATE '1998-10-01' THEN o.o_orderkey END) AS today_orders
+    FROM region AS r
+    LEFT JOIN nation AS n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier AS s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN lineitem AS li ON li.l_suppkey = s.s_suppkey
+    LEFT JOIN orders AS o ON li.l_orderkey = o.o_orderkey
+    GROUP BY r.r_name
+)
+SELECT DISTINCT 
+    p.p_name AS product_name,
+    p.total_availability,
+    COALESCE(SUM(sh.s_acctbal), 0) AS total_supplier_acctbal,
+    ai.total_returned,
+    ai.total_customers,
+    r.o_orderkey,
+    r.price_rank
+FROM FilteredParts AS p
+LEFT JOIN SupplierHierarchy AS sh ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp AS ps WHERE ps.ps_suppkey = sh.s_suppkey)
+LEFT JOIN RankedOrders AS r ON p.p_partkey = r.o_orderkey
+LEFT JOIN AggregateInfo AS ai ON ai.total_customers > 10
+WHERE p.p_size BETWEEN 1 AND 100 AND p.p_type LIKE 'LARGE%'
+  AND r.price_rank < 10
+GROUP BY p.p_name, p.total_availability, ai.total_returned, ai.total_customers, r.o_orderkey, r.price_rank
+ORDER BY total_supplier_acctbal DESC, total_returned DESC, ai.today_orders ASC, product_name;

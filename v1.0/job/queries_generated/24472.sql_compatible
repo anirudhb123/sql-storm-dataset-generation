@@ -1,0 +1,69 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.title IS NOT NULL
+),
+ActorMovieInfo AS (
+    SELECT 
+        a.person_id,
+        COALESCE(n.name, 'Unknown') AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles,
+        AVG(m.production_year - a.production_year) AS avg_year_difference
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        title m ON t.movie_id = m.id
+    LEFT JOIN 
+        name n ON a.person_id = n.imdb_id
+    GROUP BY 
+        a.person_id, n.name
+),
+FilteredActors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        titles,
+        avg_year_difference
+    FROM 
+        ActorMovieInfo
+    WHERE 
+        movie_count > 5 AND avg_year_difference IS NOT NULL
+),
+TitleStatistics AS (
+    SELECT 
+        rt.production_year,
+        COUNT(DISTINCT rt.title_id) AS total_titles,
+        AVG(rt.title_rank) AS average_title_rank
+    FROM 
+        RankedTitles rt
+    GROUP BY 
+        rt.production_year
+)
+SELECT 
+    fa.actor_name,
+    fa.movie_count,
+    fa.titles,
+    ts.total_titles,
+    ts.average_title_rank
+FROM 
+    FilteredActors fa
+LEFT JOIN 
+    TitleStatistics ts ON fa.avg_year_difference = ts.production_year
+WHERE 
+    ts.total_titles IS NOT NULL
+ORDER BY 
+    fa.movie_count DESC, 
+    fa.actor_name ASC
+LIMIT 50;

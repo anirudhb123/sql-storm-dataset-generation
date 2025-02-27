@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_nationkey
+),
+OrderTotals AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_custkey
+),
+RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COALESCE(ot.total_spent, 0) AS total_spent,
+           RANK() OVER (ORDER BY COALESCE(ot.total_spent, 0) DESC) AS rank
+    FROM customer c
+    LEFT JOIN OrderTotals ot ON c.c_custkey = ot.o_custkey
+),
+PriceStatistics AS (
+    SELECT p.p_partkey, p.p_name,
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SupplierAnalysis AS (
+    SELECT sh.s_name, COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM SupplierHierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_name
+)
+SELECT rc.c_name, rc.c_acctbal, rc.total_spent, pa.p_name, pa.avg_supplycost, sa.parts_supplied
+FROM RankedCustomers rc
+JOIN PriceStatistics pa ON pa.avg_supplycost > (
+    SELECT AVG(avg_supplycost) FROM PriceStatistics
+)
+LEFT JOIN SupplierAnalysis sa ON TRUE
+WHERE rc.total_spent > 1000
+ORDER BY rc.rank, rc.c_name;

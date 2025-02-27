@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM
+        web_sales
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_sales_price) AS average_order_value,
+        SUM(ws_sales_price) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        cd.cd_gender IS NOT NULL
+    GROUP BY
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+ItemReturns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_tickets
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+)
+SELECT
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_orders,
+    cs.average_order_value,
+    cs.total_spent,
+    ir.total_returns,
+    ir.return_amount,
+    COALESCE(ir.return_tickets, 0) AS return_tickets,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+FROM
+    CustomerStats cs
+LEFT JOIN ItemReturns ir ON cs.total_orders > 5 AND ir.sr_item_sk IN (SELECT i_item_sk FROM RankedSales WHERE rn = 1)
+WHERE
+    (cs.average_order_value > (SELECT AVG(average_order_value) FROM CustomerStats) OR cs.total_spent IS NULL)
+    AND (cs.c_last_name LIKE 'A%' OR cs.cd_gender = 'F')
+ORDER BY
+    cs.total_spent DESC,
+    cs.c_last_name ASC NULLS LAST
+LIMIT 100;

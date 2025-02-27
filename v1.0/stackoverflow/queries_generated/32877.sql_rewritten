@@ -1,0 +1,92 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+
+UserReputation As (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+
+PostStatistics AS (
+    SELECT 
+        p.ID,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS UpvoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownvoteCount,
+        SUM(CASE 
+            WHEN p.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' THEN 1 
+            ELSE 0 
+        END) AS IsOldPost,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+)
+
+SELECT 
+    ps.ID,
+    ps.Title,
+    ps.OwnerName,
+    ps.CommentCount,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.TotalViewCount,
+    rp.Level AS PostDepth,
+    CASE 
+        WHEN ur.ReputationRank IS NOT NULL THEN ur.ReputationRank 
+        ELSE 'Unranked' 
+    END AS OwnerReputationRank,
+    CASE 
+        WHEN ps.IsOldPost = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS IsOldPostFlag
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    RecursivePostCTE rp ON ps.ID = rp.Id
+LEFT JOIN 
+    UserReputation ur ON ps.OwnerName = ur.DisplayName
+ORDER BY 
+    ps.TotalViewCount DESC, 
+    ps.UpvoteCount DESC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+      AND 
+        p.ViewCount IS NOT NULL
+),
+PostWithMaxComments AS (
+    SELECT 
+        PostId, 
+        MAX(CommentCount) AS MaxComments
+    FROM 
+        RankedPosts
+    GROUP BY 
+        PostId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        p.MaxComments
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostWithMaxComments p ON rp.PostId = p.PostId
+    WHERE 
+        rp.PostRank <= 10
+      AND 
+        rp.ViewCount > 1000
+      AND 
+        (p.MaxComments IS NULL OR p.MaxComments > 5)
+)
+SELECT 
+    fp.Title,
+    COALESCE(u.DisplayName, 'Anonymous') AS Owner,
+    fp.Score,
+    fp.ViewCount,
+    CASE 
+        WHEN bp.Name IS NOT NULL THEN 'With Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus,
+    JSON_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+LEFT JOIN 
+    Badges bp ON bp.UserId = u.Id AND bp.Class = 1
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName
+              FROM Posts p WHERE p.Id = fp.PostId) AS t ON TRUE
+GROUP BY 
+    fp.Title, u.DisplayName, fp.Score, fp.ViewCount, bp.Name
+HAVING 
+    SUM(CASE WHEN u.Reputation IS NULL THEN 1 ELSE 0 END) < 5
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;
+

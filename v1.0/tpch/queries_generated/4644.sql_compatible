@@ -1,0 +1,71 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(DISTINCT c.c_custkey) AS UniqueCustomers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPart AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+TopSuppliers AS (
+    SELECT 
+        sp.p_name,
+        COUNT(sp.s_name) AS SupplierCount,
+        SUM(sp.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        SupplierPart sp
+    WHERE 
+        sp.rn = 1
+    GROUP BY 
+        sp.p_name
+),
+FinalOutput AS (
+    SELECT
+        o.o_orderkey AS OrderKey,
+        os.TotalRevenue,
+        ts.SupplierCount,
+        ts.TotalSupplyCost
+    FROM 
+        OrderSummary os
+    LEFT JOIN 
+        orders o ON os.o_orderkey = o.o_orderkey
+    LEFT JOIN 
+        TopSuppliers ts ON ts.p_name IN (SELECT p_name FROM part WHERE p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_supplycost < 1000))
+)
+SELECT 
+    fo.OrderKey,
+    fo.TotalRevenue,
+    COALESCE(fo.SupplierCount, 0) AS NumberOfSuppliers,
+    COALESCE(fo.TotalSupplyCost, 0.00) AS TotalCost
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.TotalRevenue > 5000
+ORDER BY 
+    fo.TotalRevenue DESC;

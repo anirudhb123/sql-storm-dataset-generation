@@ -1,0 +1,56 @@
+WITH Recursive ActorRoles AS (
+    SELECT a.id AS actor_id,
+           ak.name AS actor_name,
+           c.movie_id,
+           AVG(COALESCE(r.nr_order, 0)) OVER (PARTITION BY a.id) AS average_order,
+           COUNT(DISTINCT c.id) OVER (PARTITION BY a.id) AS role_count
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    JOIN name a ON ak.person_id = a.imdb_id
+    LEFT JOIN role_type r ON c.role_id = r.id
+    WHERE ak.name IS NOT NULL
+      AND c.note IS NULL -- filter out roles with notes
+),
+MoviesData AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           ARRAY_AGG(DISTINCT a.actor_name) FILTER (WHERE a.actor_name IS NOT NULL) AS actors,
+           COUNT(DISTINCT k.keyword) AS keyword_count,
+           MAX(mci.company_id) AS main_company -- Picking any company, for demo purpose
+    FROM aka_title mt
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN ActorRoles a ON cc.subject_id = a.actor_id
+    LEFT JOIN movie_companies mci ON mt.id = mci.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+FinalResults AS (
+    SELECT md.movie_id,
+           md.title,
+           md.production_year,
+           md.actors,
+           md.keyword_count,
+           CASE 
+               WHEN md.production_year < 2000 THEN 'Old'
+               WHEN md.production_year BETWEEN 2000 AND 2010 THEN 'Recent'
+               ELSE 'New'
+           END AS production_age,
+           ROW_NUMBER() OVER (PARTITION BY production_age ORDER BY md.production_year DESC) AS age_based_rank
+    FROM MoviesData md
+)
+SELECT fr.*,
+       (SELECT STRING_AGG(DISTINCT c.name, ', ') 
+        FROM company_name c 
+        JOIN movie_companies mc ON c.id = mc.company_id 
+        WHERE mc.movie_id = fr.movie_id) AS companies,
+       (SELECT COUNT(*)
+        FROM movie_info mi
+        WHERE mi.movie_id = fr.movie_id
+          AND mi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%action%')) AS action_related_info_count
+FROM FinalResults fr
+WHERE fr.keyword_count > 0
+  AND fr.actors IS NOT NULL
+  AND fr.production_year IS NOT NULL
+ORDER BY fr.production_age, fr.age_based_rank;

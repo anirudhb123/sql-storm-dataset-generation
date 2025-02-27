@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 2  -- Upvotes
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tag(tag) ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag.tag
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        SUM(rp.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId 
+    GROUP BY 
+        u.Id
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation, 
+    tp.PostId, 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.CommentCount, 
+    tp.VoteCount, 
+    tp.Tags
+FROM 
+    TopUsers u
+JOIN 
+    RankedPosts tp ON u.UserId = tp.OwnerUserId
+ORDER BY 
+    u.Reputation DESC, tp.Score DESC;

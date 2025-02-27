@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        row_number() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+AggregatedVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS Version
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (2, 4)  
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    p.Title,
+    COALESCE(rp.Rank, 0) AS Rank,
+    COALESCE(av.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(av.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(phd.Version, 0) AS HistoryVersion,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    CASE 
+        WHEN COALESCE(av.UpVotes, 0) > COALESCE(av.DownVotes, 0) THEN 'Positive'
+        WHEN COALESCE(av.UpVotes, 0) < COALESCE(av.DownVotes, 0) THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    STRING_AGG(DISTINCT CASE 
+        WHEN td.TagName IS NOT NULL THEN td.TagName 
+        END, ', ' ORDER BY td.TagName) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    AggregatedVotes av ON rp.PostId = av.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+LEFT JOIN 
+    RecentComments rc ON rp.PostId = rc.PostId
+LEFT JOIN 
+    Posts ps ON rp.PostId = ps.Id
+LEFT JOIN 
+    (SELECT 
+        p.Id,
+        unnest(string_to_array(p.Tags, '>'))::varchar AS TagName
+     FROM 
+        Posts p
+     WHERE 
+        p.Tags IS NOT NULL) td ON ps.Id = td.Id
+GROUP BY 
+    rp.PostId, rp.Title, rp.Rank, av.UpVotes, av.DownVotes, phd.Version, rc.CommentCount
+ORDER BY 
+    rp.Rank;

@@ -1,0 +1,60 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey 
+                                              FROM customer c 
+                                              WHERE c.c_acctbal < 100 AND c.c_nationkey = 
+                                                (SELECT n.n_nationkey 
+                                                 FROM nation n 
+                                                 WHERE n.n_name = 'USA'))
+    )
+    WHERE o.o_orderstatus = 'O' AND oh.level < 5
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS average_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           ps.total_available, ps.average_cost
+    FROM part p
+    JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice - ps.average_cost > 100 AND ps.total_available > 50
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT lh.o_orderkey) AS orders_made,
+    SUM(lh.o_totalprice) AS total_order_value,
+    hp.p_name,
+    hp.p_brand,
+    hp.total_available,
+    hp.average_cost
+FROM CustomerOrders c
+LEFT JOIN OrderHierarchy lh ON c.c_custkey = (SELECT o.o_custkey 
+                                               FROM orders o 
+                                               WHERE o.o_orderkey = lh.o_orderkey)
+JOIN HighValueParts hp ON hp.p_partkey IN 
+    (SELECT l.l_partkey 
+     FROM lineitem l 
+     WHERE l.l_orderkey IN 
+         (SELECT o.o_orderkey 
+          FROM orders o 
+          WHERE o.o_custkey = c.c_custkey))
+GROUP BY c.c_name, hp.p_name, hp.p_brand, hp.total_available, hp.average_cost
+HAVING total_order_value > 10000
+ORDER BY total_order_value DESC, orders_made DESC;

@@ -1,0 +1,113 @@
+WITH RankedUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM
+        Users U
+    WHERE
+        U.Reputation IS NOT NULL
+),
+RecentPostHistories AS (
+    SELECT
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        U.DisplayName AS EditorDisplayName,
+        PH.UserId
+    FROM
+        PostHistory PH
+    JOIN
+        Users U ON PH.UserId = U.Id
+    WHERE
+        PH.CreationDate > NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT
+        P.Id AS ClosedPostId,
+        P.Title,
+        PH.CreationDate AS ClosedDate,
+        PH.Comment AS CloseReason,
+        R.DisplayName AS CloserDisplayName
+    FROM
+        Posts P
+    JOIN
+        PostHistory PH ON P.Id = PH.PostId
+    JOIN
+        Users R ON PH.UserId = R.Id
+    WHERE
+        PH.PostHistoryTypeId = 10 -- Post Closed
+),
+TagsPopularity AS (
+    SELECT
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM
+        Tags T
+    LEFT JOIN
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN
+        Votes V ON V.PostId = P.Id
+    GROUP BY
+        T.TagName
+),
+ActiveUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS ActivePostCount
+    FROM
+        Users U
+    JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE
+        P.CreationDate > NOW() - INTERVAL '60 days'
+    GROUP BY
+        U.Id
+),
+Combined AS (
+    SELECT
+        R.UserId,
+        R.DisplayName,
+        R.Rank,
+        COALESCE(AP.ActivePostCount, 0) AS ActivePostCount,
+        COALESCE(TP.PostCount, 0) AS PostCount,
+        COALESCE(TP.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(TP.DownVotes, 0) AS TotalDownVotes,
+        COUNT(DISTINCT C.ClosedPostId) AS ClosedPostCount
+    FROM
+        RankedUsers R
+    LEFT JOIN
+        ActiveUsers AP ON R.UserId = AP.UserId
+    LEFT JOIN
+        TagsPopularity TP ON R.DisplayName LIKE '%' || TP.TagName || '%'
+    LEFT JOIN
+        ClosedPosts C ON C.ClosedPostId IN (
+            SELECT PH.PostId FROM RecentPostHistories PH WHERE PH.UserId = R.UserId
+        )
+    GROUP BY
+        R.UserId, R.DisplayName, R.Rank
+)
+SELECT
+    C.UserId,
+    C.DisplayName,
+    C.Rank,
+    C.ActivePostCount,
+    C.PostCount,
+    C.TotalUpVotes,
+    C.TotalDownVotes,
+    C.ClosedPostCount,
+    CASE
+        WHEN C.ActivePostCount > C.ClosedPostCount THEN 'Active'
+        ELSE 'Inactive'
+    END AS UserStatus
+FROM
+    Combined C
+WHERE
+    C.Rank <= 100 -- Top 100 users by Reputation
+ORDER BY
+    C.Rank, C.DisplayName;

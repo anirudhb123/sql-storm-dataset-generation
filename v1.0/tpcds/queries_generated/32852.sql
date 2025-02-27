@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_aggregation AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(*) AS num_transactions,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) as sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        total_sales > 1000
+), customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), customer_sales AS (
+    SELECT 
+        cd.full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        sa.total_sales,
+        sa.num_transactions,
+        sa.sales_rank,
+        CASE 
+            WHEN cd.cd_purchase_estimate BETWEEN 0 AND 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1001 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_category
+    FROM 
+        customer_details cd
+    JOIN 
+        sales_aggregation sa ON cd.c_customer_sk = sa.customer_sk
+)
+SELECT 
+    cs.full_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_sales,
+    cs.num_transactions,
+    cs.purchase_category,
+    RANK() OVER (ORDER BY cs.total_sales DESC) AS customer_rank,
+    COALESCE((SELECT 
+        MAX(ws_ext_sales_price) 
+     FROM 
+        web_sales 
+     WHERE 
+        ws_bill_customer_sk = cs.full_name), 0) AS max_transaction
+FROM 
+    customer_sales cs
+WHERE 
+    cs.num_transactions > 1 AND cs.total_sales IS NOT NULL
+ORDER BY 
+    cs.total_sales DESC
+LIMIT 10;

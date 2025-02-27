@@ -1,0 +1,66 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT u.Id AS UserId, COUNT(p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+PostScoreRankings AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        p.Score,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 month'
+),
+TopRankedPosts AS (
+    SELECT * FROM PostScoreRankings WHERE Rank <= 5
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        pht.Name AS HistoryType,
+        ph.Comment
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+    AND ph.PostHistoryTypeId IN (10, 11, 12)  
+),
+UserBadges AS (
+    SELECT b.UserId, COUNT(b.Id) AS BadgeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostCommentsStatistics AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount
+    FROM Comments pc
+    GROUP BY pc.PostId
+)
+SELECT 
+    p.Title,
+    p.Score,
+    p.OwnerDisplayName,
+    upc.PostCount AS UserPostCount,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ps.CommentCount, 0) AS TotalComments,
+    GROUP_CONCAT(DISTINCT pht.HistoryType ORDER BY pht.CreationDate DESC) AS RecentPostHistory
+FROM TopRankedPosts p
+JOIN UserPostCounts upc ON p.OwnerUserId = upc.UserId
+LEFT JOIN UserBadges b ON p.OwnerUserId = b.UserId
+LEFT JOIN PostCommentsStatistics ps ON p.PostId = ps.PostId
+LEFT JOIN PostHistoryDetails pht ON p.Id = pht.PostId
+GROUP BY 
+    p.Title, 
+    p.Score, 
+    p.OwnerDisplayName, 
+    upc.PostCount
+ORDER BY 
+    p.Score DESC, 
+    p.Title;

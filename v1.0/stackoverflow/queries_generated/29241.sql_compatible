@@ -1,0 +1,55 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount,
+        SUM(COALESCE(Posts.ViewCount, 0)) AS TotalViews,
+        AVG(Users.Reputation) AS AvgUserReputation,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS Contributors
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '>'))
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        PostHistory.PostId,
+        COUNT(CASE WHEN PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        COUNT(CASE WHEN PostHistoryTypeId IN (24, 25) THEN 1 END) AS EditSuggestionCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostHistory.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        TS.TagName,
+        TS.PostCount,
+        TS.CommentCount,
+        TS.TotalViews,
+        TS.AvgUserReputation,
+        TS.Contributors,
+        PHS.CloseReopenCount,
+        PHS.DeleteUndeleteCount,
+        PHS.EditSuggestionCount
+    FROM 
+        TagStats TS
+    LEFT JOIN 
+        PostHistorySummary PHS ON PHS.PostId = TS.PostCount 
+)
+SELECT 
+    *
+FROM 
+    FinalBenchmark
+WHERE 
+    PostCount > 0
+ORDER BY 
+    TotalViews DESC, AvgUserReputation DESC;

@@ -1,0 +1,60 @@
+WITH UserBadges AS (
+    SELECT UserId, COUNT(*) AS BadgeCount
+    FROM Badges
+    WHERE Class = 1 
+    GROUP BY UserId
+),
+PostInsights AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(voteType.VoteCount), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes WHERE VoteTypeId = 2 GROUP BY PostId) AS voteType ON p.Id = voteType.PostId
+    LEFT JOIN 
+        VoteTypes vt ON vt.Id IN (SELECT DISTINCT VoteTypeId FROM Votes WHERE PostId = p.Id)
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ub.BadgeCount,
+        pp.PostCount,
+        pi.*
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        (SELECT OwnerUserId, COUNT(*) AS PostCount FROM Posts GROUP BY OwnerUserId) pp ON u.Id = pp.OwnerUserId
+    LEFT JOIN 
+        PostInsights pi ON u.Id = pi.OwnerUserId
+)
+SELECT 
+    ups.DisplayName,
+    ups.BadgeCount,
+    ups.PostCount,
+    pi.Title,
+    pi.Score,
+    pi.ViewCount,
+    pi.CommentCount,
+    pi.Upvotes,
+    pi.Downvotes
+FROM 
+    UserPostStats ups
+JOIN 
+    PostInsights pi ON ups.UserId = pi.OwnerUserId
+ORDER BY 
+    ups.BadgeCount DESC, pi.Score DESC, pi.ViewCount DESC;

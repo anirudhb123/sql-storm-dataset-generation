@@ -1,0 +1,73 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i_item_sk, 
+        i_item_desc, 
+        i_current_price,
+        1 AS level
+    FROM item
+    WHERE i_item_sk = (SELECT MIN(i_item_sk) FROM item)
+    
+    UNION ALL
+    
+    SELECT 
+        i.item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_item_sk = i.item_sk + ih.level
+), 
+
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), 
+
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+), 
+
+CustomerDemographics AS (
+    SELECT 
+        cd_customer_sk AS customer_sk,
+        cd_gender,
+        MAX(cd_income_band_sk) AS income_band
+    FROM customer c 
+    JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY cd_customer_sk, cd_gender
+)
+
+SELECT 
+    cn.customer_sk,
+    cn.first_name,
+    cn.last_name,
+    COALESCE(CR.total_returns, 0) AS total_returns,
+    COALESCE(CR.total_return_amount, 0) AS total_return_amount,
+    COALESCE(CR.total_return_tax, 0) AS total_return_tax,
+    COALESCE(SS.total_sales, 0) AS total_sales,
+    COALESCE(SS.avg_sales_price, 0) AS avg_sales_price,
+    CASE 
+        WHEN DEMO.income_band IS NOT NULL THEN DEMO.income_band 
+        ELSE 'Unknown' 
+    END AS income_band,
+    ROW_NUMBER() OVER (PARTITION BY DEMO.income_band ORDER BY COALESCE(SS.total_sales, 0) DESC) AS rank
+FROM customer cn
+LEFT JOIN CustomerReturns CR ON cn.c_customer_sk = CR.sr_customer_sk
+LEFT JOIN SalesSummary SS ON cn.c_customer_sk = SS.customer_sk
+LEFT JOIN CustomerDemographics DEMO ON cn.c_customer_sk = DEMO.customer_sk
+WHERE 
+    (CR.total_returns IS NULL OR CR.total_returns > 5) 
+    AND (SS.total_sales IS NOT NULL AND SS.total_sales > 1000)
+ORDER BY income_band, rank;

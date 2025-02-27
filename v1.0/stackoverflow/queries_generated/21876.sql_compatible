@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        t.TagName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -5, '2024-10-01 12:34:56'::timestamp)
+    AND 
+        p.Score IS NOT NULL
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS MaxCreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 18, 19)
+),
+AggregateData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserDisplayName END) AS CloseCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (11, 12) THEN ph.UserDisplayName END) AS ReopenCount,
+        MAX(CASE WHEN ph.HistoryRank = 1 THEN ph.CreationDate END) AS LastEdited
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryInfo ph ON rp.PostId = ph.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Score, rp.CommentCount
+)
+SELECT 
+    ad.PostId,
+    ad.Title,
+    ad.Score,
+    ad.CommentCount,
+    ad.CloseCount,
+    ad.ReopenCount,
+    ad.LastEdited,
+    CASE 
+        WHEN ad.CloseCount > 0 THEN 'Closed'
+        WHEN ad.ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN ad.Score > 100 THEN 'High Score'
+        WHEN ad.Score BETWEEN 51 AND 100 THEN 'Moderate Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    AggregateData ad
+WHERE 
+    ad.CommentCount > 5
+ORDER BY 
+    ad.Score DESC,
+    ad.LastEdited DESC
+LIMIT 25;

@@ -1,0 +1,49 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        CONCAT(s.s_name, ' | ', s.s_address) AS supplier_info,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_within_nation
+    FROM 
+        supplier s 
+    WHERE 
+        s.s_acctbal > 1000
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        CONCAT(c.c_name, ' ordered on ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD')) AS order_description
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    sd.supplier_info,
+    co.order_description
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    SupplierDetails sd ON ps.ps_suppkey = sd.s_suppkey
+JOIN 
+    CustomerOrders co ON co.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_partkey = p.p_partkey
+    )
+WHERE 
+    sd.rank_within_nation <= 3
+ORDER BY 
+    p.p_partkey, sd.s_suppkey;

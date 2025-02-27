@@ -1,0 +1,41 @@
+-- Performance Benchmarking Query
+WITH PostCounts AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN AcceptAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM Posts
+    GROUP BY PostTypeId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(coalesce(p.ViewCount, 0)) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostsCount
+    FROM Tags T
+    LEFT JOIN Posts P ON T.Id = P.Id
+    GROUP BY T.TagName
+)
+SELECT 
+    PCT.PostTypeId,
+    PCT.TotalPosts,
+    PCT.AcceptedAnswers,
+    UA.UserId,
+    UA.Reputation,
+    UA.TotalPosts AS UserTotalPosts,
+    UA.TotalViews,
+    TS.TagName,
+    TS.PostsCount
+FROM PostCounts PCT
+JOIN UserActivity UA ON PCT.TotalPosts > 100 -- filtering for users with significant activity
+JOIN TagStats TS ON TS.PostsCount > 10 -- filtering for popular tags
+ORDER BY PCT.PostTypeId, UA.Reputation DESC;

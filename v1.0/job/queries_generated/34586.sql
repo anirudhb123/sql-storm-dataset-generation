@@ -1,0 +1,86 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        cte.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieCTE cte ON m.episode_of_id = cte.movie_id
+),
+
+ActorCounts AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+MovieDetails AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ac.actor_count,
+        mk.keywords,
+        COALESCE(cn.name, 'Unknown') AS company_name,
+        COALESCE(mi.info, 'No info available') AS movie_info
+    FROM 
+        MovieCTE m
+    LEFT JOIN 
+        ActorCounts ac ON m.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (
+            SELECT id FROM info_type WHERE info = 'Summary' LIMIT 1
+        )
+)
+
+SELECT
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.keywords,
+    md.company_name,
+    md.movie_info,
+    ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.actor_count DESC) AS rank_within_year
+FROM 
+    MovieDetails md
+WHERE
+    md.production_year IS NOT NULL
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_count DESC;

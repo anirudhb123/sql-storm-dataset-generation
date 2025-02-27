@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+cast_and_info AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order,
+        CASE 
+            WHEN ci.info IS NOT NULL THEN ci.info
+            ELSE 'No additional info'
+        END AS additional_info
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN 
+        movie_info mi ON c.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+    LEFT JOIN 
+        movie_info_idx ci ON c.movie_id = ci.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT ca.actor_name, ', ') AS actors,
+    COUNT(DISTINCT ca.actor_name) AS num_actors,
+    SUM(CASE WHEN ci.additional_info != 'No additional info' THEN 1 ELSE 0 END) AS info_count,
+    MAX(CASE WHEN ca.actor_order = 1 THEN ca.additional_info END) AS lead_actor_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_and_info ca ON mh.movie_id = ca.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ca.actor_name) > 1 AND 
+    MAX(mh.production_year) > 2000
+ORDER BY 
+    mh.production_year DESC;

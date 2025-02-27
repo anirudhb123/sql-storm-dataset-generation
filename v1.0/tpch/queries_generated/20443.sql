@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           CAST(s.s_name AS varchar(100)) AS hierarchy_path,
+           1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           CONCAT(h.hierarchy_path, ' -> ', s.s_name) AS hierarchy_path,
+           h.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy h ON s.s_nationkey = h.s_nationkey
+    WHERE h.level < 5
+),
+PartSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+        WHERE p2.p_container IS NOT NULL
+    )
+    GROUP BY ps.ps_partkey
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT COALESCE(n.n_name, 'Not Available') AS nation_name,
+       COUNT(DISTINCT l.l_orderkey) AS order_count,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+       MAX(ps.unique_suppliers) AS max_unique_suppliers,
+       ARRAY_AGG(sh.hierarchy_path) AS supplier_hierarchy
+FROM lineitem l
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN PartSummary ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE l.l_quantity IS NOT NULL AND l.l_discount < 0.5
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY total_revenue DESC
+LIMIT 10;

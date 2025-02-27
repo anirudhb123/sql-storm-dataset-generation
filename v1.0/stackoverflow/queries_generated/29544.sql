@@ -1,0 +1,64 @@
+WITH PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))::int)
+                           ) 
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.Tags, u.DisplayName
+), 
+TopPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Score DESC, CreationDate DESC) AS ScoreRank
+    FROM 
+        PostSummary
+    WHERE 
+        RowNum <= 100 -- Limit to the top 100 posts for evaluation
+)
+
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.TagList,
+    p.ScoreRank,
+    CASE 
+        WHEN p.ScoreRank <= 10 THEN 'Hot'
+        WHEN p.ScoreRank BETWEEN 11 AND 30 THEN 'Trending'
+        ELSE 'Regular'
+    END AS PostStatus,
+    MAX(b.Date) AS LastBadgeDate,
+    COUNT(DISTINCT v.UserId) AS TotalVotes
+FROM 
+    TopPosts p
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = p.PostId)
+LEFT JOIN 
+    Votes v ON v.PostId = p.PostId
+GROUP BY 
+    p.PostId, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount, p.TagList, p.ScoreRank
+ORDER BY 
+    p.ScoreRank;

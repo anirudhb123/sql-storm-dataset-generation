@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+customer_return_statistics AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_returns,
+        SUM(wr_return_amt_inc_tax) AS total_return_amount,
+        SUM(wr_return_quantity) AS total_return_quantity
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    COALESCE(SUM(d.total_sales), 0) AS total_sales,
+    COALESCE(SUM(r.total_return_amount), 0) AS total_returns,
+    AVG(i.i_current_price) AS avg_item_price,
+    COUNT(DISTINCT s.s_store_sk) AS total_stores
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    (SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_ext_sales_price) AS total_sales
+     FROM 
+        web_sales 
+     GROUP BY 
+        ws_bill_customer_sk) d ON c.c_customer_sk = d.ws_bill_customer_sk
+LEFT JOIN 
+    customer_return_statistics r ON c.c_customer_sk = r.wr_returning_customer_sk
+JOIN 
+    item i ON i.i_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+JOIN 
+    (SELECT 
+        DISTINCT s_store_sk 
+     FROM 
+        store) s ON TRUE
+GROUP BY 
+    ca_state
+HAVING 
+    COUNT(DISTINCT i.i_item_sk) > 5
+ORDER BY 
+    total_sales DESC NULLS LAST
+LIMIT 100;

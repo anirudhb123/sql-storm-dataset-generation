@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate BETWEEN '1996-01-01' AND '1998-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+        AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        lineitem l
+    LEFT JOIN 
+        RankedOrders r ON l.l_orderkey = r.o_orderkey
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    ROUND(COALESCE(MAX(a.total_line_value), 0), 2) AS max_line_value,
+    (SELECT COUNT(*) FROM SupplierDetails sd WHERE sd.rank = 1) AS top_supplier_count,
+    (SELECT COUNT(*) FROM CustomerOrders co WHERE co.order_count > 5) AS frequent_customer_count
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey AND s.s_acctbal < 5000
+LEFT JOIN 
+    AggregatedLineItems a ON a.l_orderkey = ps.ps_partkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    OR EXISTS (
+        SELECT 1 FROM region r 
+        WHERE r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey LIMIT 1)
+        AND r.r_name ILIKE '%south%'
+    )
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand
+HAVING 
+    NOT EXISTS (SELECT 1 FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey AND s.s_acctbal IS NULL)
+ORDER BY 
+    max_line_value DESC, p.p_name ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

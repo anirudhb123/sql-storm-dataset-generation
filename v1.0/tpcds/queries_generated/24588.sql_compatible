@@ -1,0 +1,64 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT sr.sr_return_quantity) OVER (PARTITION BY c.c_customer_sk) AS unique_returns,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY COALESCE(SUM(ws.ws_net_paid), 0) DESC) AS rank
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year > (SELECT MAX(d.d_year) FROM date_dim AS d WHERE d.d_month_seq = 12 AND d.d_dom = 25) 
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+NewYearSpenders AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_spent,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS spender_rank
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.rank = 1 
+)
+SELECT 
+    nys.c_first_name,
+    nys.c_last_name,
+    nys.total_spent,
+    CASE 
+        WHEN nys.total_spent > 1000 THEN 'High Spender'
+        WHEN nys.total_spent BETWEEN 500 AND 1000 THEN 'Medium Spender'
+        ELSE 'Low Spender'
+    END AS spending_category,
+    CASE 
+        WHEN COUNT(DISTINCT cr.cr_return_order_number) = 0 THEN 'No Returns'
+        ELSE 'Has Returns'
+    END AS return_status
+FROM 
+    NewYearSpenders nys
+LEFT JOIN 
+    catalog_returns cr ON nys.c_customer_sk = cr.cr_returning_customer_sk
+GROUP BY 
+    nys.c_first_name, nys.c_last_name, nys.total_spent
+HAVING 
+    SUM(CASE WHEN cr.cr_return_quantity IS NULL THEN 0 ELSE cr.cr_return_quantity END) BETWEEN 1 AND 10
+ORDER BY 
+    nys.total_spent DESC
+LIMIT 10;

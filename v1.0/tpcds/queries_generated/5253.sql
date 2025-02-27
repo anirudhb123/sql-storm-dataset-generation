@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_store_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_store_sk ORDER BY SUM(cs_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        cs_store_sk
+),
+TopStores AS (
+    SELECT 
+        cs_store_sk,
+        total_sales,
+        order_count
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+),
+CustomerPurchaseStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_country,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    WHERE 
+        cs.cs_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        c.c_customer_sk, c.c_country
+),
+CountryStats AS (
+    SELECT 
+        c.c_country,
+        COUNT(DISTINCT cps.c_customer_sk) AS unique_customers,
+        SUM(cps.total_spent) AS total_revenue
+    FROM 
+        CustomerPurchaseStats cps
+    JOIN 
+        customer c ON cps.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_country
+)
+SELECT 
+    ts.cs_store_sk,
+    ts.total_sales,
+    ts.order_count,
+    cs.c_country,
+    COUNT(cs.unique_customers) AS unique_customers,
+    SUM(cs.total_revenue) AS total_revenue
+FROM 
+    TopStores ts
+LEFT JOIN 
+    CountryStats cs ON ts.cs_store_sk = cs.c_country
+GROUP BY 
+    ts.cs_store_sk, ts.total_sales, ts.order_count, cs.c_country
+ORDER BY 
+    ts.total_sales DESC, cs.total_revenue DESC;

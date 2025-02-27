@@ -1,0 +1,56 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        ca_address_sk
+    FROM 
+        customer_address
+), 
+DateInfo AS (
+    SELECT 
+        d_date AS SaleDate,
+        d_year AS SaleYear,
+        d_date_sk
+    FROM 
+        date_dim
+    WHERE 
+        d_year >= 1998
+),
+SalesInfo AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS TotalSales,
+        COUNT(DISTINCT ws.ws_order_number) AS TotalOrders
+    FROM 
+        web_sales ws
+    JOIN 
+        DateInfo di ON ws.ws_sold_date_sk = di.d_date_sk 
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    ai.FullAddress,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_zip,
+    ai.ca_country,
+    di.SaleYear,
+    si.TotalSales,
+    si.TotalOrders
+FROM 
+    AddressInfo ai
+JOIN 
+    customer c ON c.c_current_addr_sk = ai.ca_address_sk
+JOIN 
+    DateInfo di ON di.SaleYear = EXTRACT(YEAR FROM DATE('2002-10-01'))
+JOIN 
+    SalesInfo si ON si.web_site_id = c.c_customer_id
+WHERE 
+    ai.ca_state IN ('CA', 'NY', 'TX')
+ORDER BY 
+    si.TotalSales DESC, 
+    ai.ca_city ASC;

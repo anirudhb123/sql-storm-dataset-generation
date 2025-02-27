@@ -1,0 +1,41 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_item_sk, SUM(ws_net_profit) AS total_profit, COUNT(ws_order_number) AS total_sales
+    FROM web_sales 
+    GROUP BY ws_item_sk
+    HAVING total_profit > 1000
+), Address_CTE AS (
+    SELECT ca_address_sk, ca_city, ca_state
+    FROM customer_address
+    WHERE ca_country IS NOT NULL
+), Customer_CTE AS (
+    SELECT c_first_name, c_last_name, c_email_address, c_current_addr_sk, c_current_cdemo_sk
+    FROM customer
+    WHERE c_birth_year >= 1980
+), Profitable_Products AS (
+    SELECT i_item_sk, i_product_name, i_current_price
+    FROM item
+    WHERE i_current_price > (
+        SELECT AVG(i_current_price) FROM item
+    )
+)
+SELECT 
+    cp.cp_catalog_page_id AS catalog_page_id,
+    aa.ca_city AS customer_city,
+    aa.ca_state AS customer_state,
+    c.c_first_name AS customer_first_name,
+    c.c_last_name AS customer_last_name,
+    s.total_profit,
+    s.total_sales,
+    i.i_product_name,
+    i.i_current_price
+FROM Profitable_Products i
+JOIN Sales_CTE s ON i.i_item_sk = s.ws_item_sk
+JOIN Customer_CTE c ON c.c_current_cdemo_sk IN (
+    SELECT cd_demo_sk FROM customer_demographics WHERE cd_dep_count > 2
+)
+JOIN Address_CTE aa ON aa.ca_address_sk = c.c_current_addr_sk
+LEFT OUTER JOIN store_sales ss ON ss.ss_item_sk = i.i_item_sk
+WHERE c.c_email_address LIKE '%@gmail.com'
+AND ss.ss_ext_sales_price > 200
+ORDER BY total_profit DESC, customer_city, customer_first_name;

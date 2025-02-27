@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as rn,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) as actor_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    WHERE 
+        a.production_year IS NOT NULL
+    AND 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id, 
+        COUNT(DISTINCT c.movie_id) as total_movies, 
+        STRING_AGG(DISTINCT r.role) as roles,
+        COALESCE(MAX(p.info), 'No Info') as person_info
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id 
+    GROUP BY 
+        c.person_id
+)
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    ar.total_movies, 
+    ar.roles, 
+    ar.person_info 
+FROM 
+    RankedMovies rm
+JOIN 
+    ActorRoles ar ON ar.total_movies > 0
+WHERE 
+    rm.actor_count >= 3 
+    OR ar.total_movies > 5
+ORDER BY 
+    rm.production_year DESC, 
+    ar.total_movies DESC 
+LIMIT 10;

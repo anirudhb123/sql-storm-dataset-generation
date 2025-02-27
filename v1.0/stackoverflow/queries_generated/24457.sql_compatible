@@ -1,0 +1,65 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(U.Reputation) OVER () AS AvgReputation
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+RecentPostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(C) AS CommentCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title, P.CreationDate
+),
+ClosedPostReasons AS (
+    SELECT 
+        PH.PostId,
+        ARRAY_AGG(CASE 
+            WHEN PH.PostHistoryTypeId = 10 THEN C.Name
+            WHEN PH.PostHistoryTypeId = 11 THEN 'Reopened' 
+            END) AS ReasonsClosed
+    FROM PostHistory PH
+    LEFT JOIN CloseReasonTypes C ON PH.Comment = CAST(C.Id AS INTEGER)
+    WHERE PH.PostHistoryTypeId IN (10, 11)
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.UpVotesCount,
+    U.DownVotesCount,
+    R.PostId,
+    R.Title,
+    R.CreationDate,
+    COALESCE(CR.ReasonsClosed, '{}') AS ReasonsClosed,
+    CONCAT('User: ', U.DisplayName, ', Post Title: ', R.Title) AS Summary,
+    CASE 
+        WHEN U.UpVotesCount > U.DownVotesCount THEN 'Positive'
+        WHEN U.UpVotesCount < U.DownVotesCount THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM UserVoteStats U
+JOIN RecentPostActivity R ON U.UserId = R.OwnerUserId
+LEFT JOIN ClosedPostReasons CR ON R.PostId = CR.PostId
+WHERE U.PostCount > 0
+AND U.Reputation > (SELECT AVG(Reputation) FROM Users) 
+AND EXISTS (
+    SELECT 1 FROM Posts P 
+    WHERE P.OwnerUserId = U.UserId 
+    AND P.LastActivityDate IS NOT NULL
+) 
+ORDER BY U.PostCount DESC, U.UpVotesCount - U.DownVotesCount DESC
+LIMIT 10;

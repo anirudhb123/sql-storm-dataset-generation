@@ -1,0 +1,64 @@
+
+WITH PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY t.Count DESC) AS TagRank
+    FROM
+        Posts p
+    JOIN Tags t ON t.Id IN (
+        SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::integer)
+    )
+), UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY
+        u.Id
+), PostAnalytics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ph.UserDisplayName AS LastEditor,
+        ph.CreationDate AS LastEditDate,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        (
+            SELECT STRING_AGG(DISTINCT pt.TagName, ', ')
+            FROM PostTags pt
+            WHERE pt.PostId = p.Id AND pt.TagRank <= 3
+        ) AS TopTags
+    FROM
+        Posts p
+    JOIN PostHistory ph ON p.LastEditorUserId = ph.UserId
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    GROUP BY
+        p.Id, p.Title, p.ViewCount, p.Score, ph.UserDisplayName, ph.CreationDate, pt.Name
+)
+SELECT
+    pa.PostId,
+    pa.Title,
+    pa.ViewCount,
+    pa.Score,
+    pa.CommentCount,
+    pa.LastEditor,
+    pa.LastEditDate,
+    pa.PostType,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    pa.TopTags
+FROM
+    PostAnalytics pa
+JOIN UserBadges ub ON pa.LastEditor = ub.UserId
+WHERE
+    pa.ViewCount > 100
+ORDER BY
+    pa.Score DESC, pa.ViewCount DESC
+LIMIT 10;

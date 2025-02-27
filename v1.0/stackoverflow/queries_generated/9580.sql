@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+), 
+PostStats AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        r.OwnerDisplayName,
+        r.CommentCount,
+        r.VoteCount,
+        pt.Name AS PostType
+    FROM 
+        RankedPosts r
+    JOIN 
+        PostTypes pt ON r.PostTypeId = pt.Id
+    WHERE 
+        r.Rank <= 5
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.OwnerDisplayName,
+    ps.CommentCount,
+    ps.VoteCount,
+    ps.PostType
+FROM 
+    PostStats ps
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

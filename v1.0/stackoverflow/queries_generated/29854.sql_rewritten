@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(TRIM(BOTH ' ' FROM p.Tags), ',')) AS tagName ON true
+    LEFT JOIN 
+        Tags t ON trim(both ' ' from tagName) = t.TagName
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.Rank <= 10 THEN 'Top 10'
+            WHEN rp.Rank <= 50 THEN 'Top 50'
+            ELSE 'Other'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.TagsArray,
+    fp.RankCategory,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = fp.PostId AND v.VoteTypeId IN (2, 3)) AS TotalVotes,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = fp.OwnerUserId) AS OwnerBadgeCount
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.RankCategory = 'Top 50' 
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC, 
+    fp.CreationDate ASC;

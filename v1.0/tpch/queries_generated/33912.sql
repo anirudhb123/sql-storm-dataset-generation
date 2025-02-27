@@ -1,0 +1,46 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+), SupplierMetrics AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+), PartSupplierDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_mfgr, 
+           COALESCE(sm.total_cost, 0) AS total_cost,
+           COALESCE(sm.part_count, 0) AS part_count
+    FROM part p
+    LEFT JOIN SupplierMetrics sm ON p.p_partkey = sm.ps_partkey
+), Summary AS (
+    SELECT ph.o_orderdate,
+           COUNT(DISTINCT ph.o_orderkey) AS total_orders,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(s.total_cost) AS avg_supplier_cost
+    FROM OrderHierarchy ph
+    JOIN lineitem l ON ph.o_orderkey = l.l_orderkey
+    LEFT JOIN PartSupplierDetails s ON l.l_partkey = s.p_partkey
+    GROUP BY ph.o_orderdate
+)
+SELECT r.r_name, 
+       SUM(s.total_cost) AS region_total_cost,
+       COUNT(DISTINCT c.c_custkey) AS total_customers,
+       MAX(sm.part_count) AS max_parts_supplied
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN SupplierMetrics sm ON s.s_suppkey = sm.s_suppkey
+GROUP BY r.r_name
+ORDER BY region_total_cost DESC, total_customers DESC
+FETCH FIRST 10 ROWS ONLY;

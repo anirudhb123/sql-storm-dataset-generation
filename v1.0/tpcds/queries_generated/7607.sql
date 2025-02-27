@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(*) AS sales_count,
+        RANK() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales
+    JOIN 
+        item ON cs_item_sk = i_item_sk
+    WHERE 
+        i_rec_start_date <= '2023-10-01' AND 
+        (i_rec_end_date IS NULL OR i_rec_end_date >= '2023-10-01')
+    GROUP BY 
+        cs_item_sk
+),
+TopItems AS (
+    SELECT 
+        cs_bill_customer_sk,
+        SUM(total_sales) AS customer_sales,
+        COUNT(sales_count) AS item_count
+    FROM 
+        RankedSales
+    JOIN 
+        web_sales ON RankedSales.cs_item_sk = web_sales.ws_item_sk
+    GROUP BY 
+        cs_bill_customer_sk
+    HAVING 
+        COUNT(sales_count) > 5
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_dep_count,
+        cd_credit_rating,
+        SUM(customer_sales) AS total_spent
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    JOIN 
+        TopItems ON c_customer_sk = cs_bill_customer_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_education_status, cd_dep_count, cd_credit_rating
+)
+SELECT 
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    AVG(total_spent) AS avg_spent,
+    COUNT(cd_demo_sk) AS customer_count
+FROM 
+    CustomerDemographics
+GROUP BY 
+    cd_gender, cd_marital_status, cd_education_status
+ORDER BY 
+    avg_spent DESC
+LIMIT 10;

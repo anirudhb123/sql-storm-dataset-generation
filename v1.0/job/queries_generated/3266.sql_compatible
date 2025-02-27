@@ -1,0 +1,43 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_rank
+    FROM title t
+    JOIN cast_info c ON t.id = c.movie_id
+    JOIN role_type rt ON c.role_id = rt.id
+    WHERE t.production_year >= 2000
+), 
+ActorCounts AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN RankedTitles rt ON ci.movie_id = rt.id
+    GROUP BY a.name
+    HAVING COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieYearKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id, m.production_year
+)
+SELECT 
+    ac.name AS actor_name,
+    myk.movie_id,
+    myk.production_year,
+    myk.keywords,
+    COUNT(DISTINCT ac.movie_count) AS count_of_movies
+FROM ActorCounts ac
+LEFT JOIN MovieYearKeywords myk ON myk.keywords LIKE '%' || ac.name || '%'
+GROUP BY ac.name, myk.movie_id, myk.production_year, myk.keywords
+ORDER BY count_of_movies DESC, actor_name ASC
+LIMIT 10;

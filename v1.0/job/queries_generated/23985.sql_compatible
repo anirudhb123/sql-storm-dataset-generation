@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_cast AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order ASC) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id 
+    WHERE 
+        ak.name IS NOT NULL
+),
+complex_title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies_names,
+        (SELECT COUNT(*) 
+         FROM movie_keyword mk 
+         WHERE mk.movie_id = t.id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT mc.id) > 2
+)
+SELECT 
+    ct.title,
+    ct.production_year,
+    MAX(mb.actor_order) AS max_actor_order,
+    COALESCE(ct.companies_names, 'No Companies') AS company_names,
+    ct.keyword_count,
+    CASE 
+        WHEN ct.keyword_count > 5 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS title_popularity
+FROM 
+    complex_title_info ct
+LEFT JOIN 
+    movie_cast mb ON ct.title_id = mb.movie_id
+GROUP BY 
+    ct.title, ct.production_year, ct.company_count, ct.keyword_count
+ORDER BY 
+    ct.production_year DESC, max_actor_order ASC
+LIMIT 
+    10;

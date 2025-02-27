@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'GERMANY') 
+                               AND sh.s_suppkey <> s.s_suppkey
+    WHERE sh.depth < 10
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, COUNT(l.l_orderkey) AS lineitem_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > 10000 AND o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+          AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container IS NOT NULL)
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    s.s_name, 
+    s.s_acctbal, 
+    p.p_name, 
+    ph.lineitem_count,
+    CASE 
+        WHEN ph.lineitem_count IS NULL THEN 'No Line Items' 
+        WHEN p.total_supply_cost IS NULL THEN 'No Supply Cost Data' 
+        ELSE 'Data Available' 
+    END AS data_status,
+    ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rank,
+    COALESCE(ph.o_orderdate, DATE '1998-10-01') AS order_date,
+    CONCAT('Supplier ', s.s_name, ' has a balance of ', s.s_acctbal) AS supplier_info
+FROM SupplierHierarchy s
+LEFT JOIN FilteredParts p ON p.total_supply_cost IS NOT NULL
+LEFT JOIN HighValueOrders ph ON p.p_partkey = ANY (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F'))
+WHERE s.depth < 5
+ORDER BY s.s_acctbal DESC, p.p_name;

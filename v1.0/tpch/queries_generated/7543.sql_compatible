@@ -1,0 +1,77 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1997-12-31'
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority
+    FROM 
+        RankedOrders o
+    WHERE 
+        o.rn <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS supplier_nation
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        pd.p_name,
+        pd.p_brand
+    FROM 
+        partsupp ps
+    JOIN 
+        part pd ON ps.ps_partkey = pd.p_partkey
+    WHERE 
+        ps.ps_availqty > 100
+)
+SELECT 
+    TO.o_orderkey,
+    TO.o_orderdate,
+    TO.o_totalprice,
+    TO.o_orderpriority,
+    SSD.s_name AS supplier_name,
+    SSD.s_acctbal AS supplier_account_balance,
+    PSD.p_name AS part_name,
+    PSD.p_brand AS part_brand,
+    PSD.ps_availqty,
+    PSD.ps_supplycost
+FROM 
+    TopOrders TO
+JOIN 
+    lineitem li ON TO.o_orderkey = li.l_orderkey
+JOIN 
+    PartSupplierDetails PSD ON li.l_partkey = PSD.ps_partkey
+JOIN 
+    SupplierDetails SSD ON PSD.ps_suppkey = SSD.s_suppkey
+WHERE 
+    li.l_shipdate >= DATE '1997-01-01' 
+    AND li.l_shipdate < DATE '1997-12-31'
+ORDER BY 
+    TO.o_orderdate DESC, 
+    TO.o_orderpriority, 
+    SSD.s_name;

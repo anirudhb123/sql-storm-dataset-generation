@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND t.series_years > '1982-1993' AND mc.note IN ('(1948) (USA) (theatrical) (as A Universal-International release)', '(1962-1975) (France) (TV) (original airing)', '(1978-1981)', '(2001) (Spain) (VHS)') AND rt.role IN ('actress', 'costume designer', 'director', 'editor', 'guest', 'writer');

@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date >= CURRENT_DATE)
+    GROUP BY 
+        ws.web_site_id
+),
+SalesWithPromo AS (
+    SELECT 
+        r.web_site_id,
+        r.total_sales,
+        r.order_count,
+        p.p_discount_active,
+        CASE 
+            WHEN p.p_discount_active = 'Y' AND r.order_count > 10 THEN 'High Impact'
+            WHEN p.p_discount_active = 'Y' THEN 'Moderate Impact'
+            ELSE 'No Impact'
+        END AS promo_impact
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        promotion p ON r.total_sales > p.p_cost
+    WHERE 
+        r.sales_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(sr_order_number) as return_count,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+    HAVING 
+        COUNT(sr_order_number) > 2 OR SUM(sr_return_amt_inc_tax) > 100.00
+),
+FinalReport AS (
+    SELECT 
+        s.web_site_id,
+        s.total_sales,
+        s.order_count,
+        s.promo_impact,
+        COALESCE(c.return_count, 0) AS high_return_count,
+        COALESCE(c.total_returned_amount, 0) AS high_return_value
+    FROM 
+        SalesWithPromo s
+    LEFT JOIN 
+        CustomerReturns c ON s.web_site_id = (SELECT hs.ws_web_site_sk FROM web_sales hs WHERE hs.ws_bill_customer_sk = c.sr_returning_customer_sk LIMIT 1)
+    ORDER BY 
+        s.total_sales DESC
+)
+SELECT 
+    *,
+    CASE 
+        WHEN high_return_count > 3 THEN 'Critical'
+        WHEN high_return_value > 1000 THEN 'Significant'
+        ELSE 'Normal'
+    END AS return_alert
+FROM 
+    FinalReport
+WHERE 
+    (total_sales IS NOT NULL AND total_sales > 5000) OR (promo_impact = 'High Impact')
+ORDER BY 
+    return_alert DESC, total_sales DESC;

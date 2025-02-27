@@ -1,0 +1,34 @@
+WITH RecentPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, p.CommentCount, p.FavoriteCount, 
+           u.DisplayName AS OwnerDisplayName, u.Reputation AS OwnerReputation
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PopularTags AS (
+    SELECT t.TagName, COUNT(pt.PostId) AS PostCount
+    FROM Tags t
+    JOIN PostsTags pt ON t.Id = pt.TagId
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+PostHistoryAggregates AS (
+    SELECT ph.PostId, COUNT(ph.Id) AS EditCount, 
+           MAX(ph.CreationDate) AS LastEditDate, 
+           STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, rp.CommentCount, rp.FavoriteCount, 
+       rp.OwnerDisplayName, rp.OwnerReputation, 
+       pa.EditCount, pa.LastEditDate, pa.EditTypes, 
+       array_agg(pt.TagName) AS RelatedTags
+FROM RecentPosts rp
+LEFT JOIN PostHistoryAggregates pa ON rp.Id = pa.PostId
+JOIN PostsTags pt ON rp.Id = pt.PostId
+JOIN PopularTags ptg ON ptg.TagName = pt.TagName
+GROUP BY rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.AnswerCount, rp.CommentCount, 
+         rp.FavoriteCount, rp.OwnerDisplayName, rp.OwnerReputation, pa.EditCount, pa.LastEditDate, pa.EditTypes
+ORDER BY rp.CreationDate DESC;

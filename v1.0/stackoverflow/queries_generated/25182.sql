@@ -1,0 +1,83 @@
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.Score) AS TotalScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS RankByPostCount,
+        RANK() OVER (ORDER BY TotalViews DESC) AS RankByViews,
+        RANK() OVER (ORDER BY TotalScore DESC) AS RankByScore
+    FROM 
+        TagCounts
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore
+    FROM 
+        TopTags
+    WHERE 
+        RankByPostCount <= 5 OR 
+        RankByViews <= 5 OR
+        RankByScore <= 5
+),
+UserTags AS (
+    SELECT 
+        U.DisplayName,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS UserPostCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    JOIN 
+        Tags T ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.DisplayName, T.TagName
+),
+FinalResult AS (
+    SELECT
+        PT.TagName,
+        PT.PostCount,
+        PT.TotalViews,
+        PT.TotalScore,
+        COUNT(UT.UserPostCount) AS ActiveUsers
+    FROM 
+        PopularTags PT
+    LEFT JOIN 
+        UserTags UT ON PT.TagName = UT.TagName
+    GROUP BY 
+        PT.TagName, PT.PostCount, PT.TotalViews, PT.TotalScore
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalViews,
+    TotalScore,
+    ActiveUsers,
+    CASE 
+        WHEN ActiveUsers > 10 THEN 'High'
+        WHEN ActiveUsers BETWEEN 5 AND 10 THEN 'Moderate'
+        ELSE 'Low'
+    END AS UserActivityLevel
+FROM 
+    FinalResult
+ORDER BY 
+    TotalScore DESC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        mt.linked_movie_id AS title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_link mt
+    JOIN 
+        movie_hierarchy mh ON mt.movie_id = mh.movie_id
+    JOIN 
+        aka_title t ON mt.linked_movie_id = t.id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    ci.note AS role_note,
+    GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+    window_rank.rnk AS role_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title t ON mh.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    (SELECT 
+        movie_id,
+        ROW_NUMBER() OVER(PARTITION BY movie_id ORDER BY nr_order) AS rnk
+     FROM 
+        cast_info) AS window_rank ON ci.movie_id = window_rank.movie_id 
+WHERE 
+    t.production_year BETWEEN 1990 AND 2020
+    AND (ci.note IS NOT NULL OR t.title IS NOT NULL)
+GROUP BY 
+    a.name, t.title, t.production_year, ci.note, window_rank.rnk
+ORDER BY 
+    t.production_year DESC, window_rank.rnk;

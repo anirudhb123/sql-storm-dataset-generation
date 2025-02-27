@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, U.DisplayName, p.Title, p.CreationDate, p.ViewCount, p.Score, p.Tags, U.Reputation
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.Reputation,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Get top 5 posts for each tag
+),
+PostDetails AS (
+    SELECT 
+        fp.*,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Badges b ON fp.OwnerDisplayName = b.UserId
+    GROUP BY 
+        fp.PostId, fp.Title, fp.CreationDate, fp.ViewCount, fp.Score, fp.Tags, fp.OwnerDisplayName, fp.Reputation, fp.CommentCount
+)
+SELECT 
+    pd.*,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = pd.PostId) AS TotalVotes,
+    (SELECT COUNT(*) 
+     FROM PostHistory ph
+     WHERE ph.PostId = pd.PostId 
+     AND ph.PostHistoryTypeId IN (10, 11, 12, 13)) AS TotalStatusChanges
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

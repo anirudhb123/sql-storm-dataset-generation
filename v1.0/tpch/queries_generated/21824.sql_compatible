@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ns.n_nationkey ORDER BY s.s_acctbal DESC) AS rank_desc
+    FROM 
+        supplier s
+    JOIN 
+        nation ns ON s.s_nationkey = ns.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        COUNT(ps.ps_partkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_size
+    HAVING 
+        COUNT(ps.ps_partkey) > (SELECT AVG(supplier_count) FROM (SELECT COUNT(ps_partkey) AS supplier_count FROM partsupp GROUP BY ps_partkey) AS avg_supplier_count)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderpriority,
+        o.o_orderstatus,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+JoinedData AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        COALESCE(FP.p_name, 'Unknown Part') AS part_name,
+        COALESCE(HSO.o_totalprice, 0) AS high_order_amount,
+        R.s_name AS supplier_name,
+        R.rank_desc
+    FROM 
+        lineitem l
+    LEFT JOIN 
+        FilteredParts FP ON l.l_partkey = FP.p_partkey
+    LEFT JOIN 
+        HighValueOrders HSO ON l.l_orderkey = HSO.o_orderkey
+    LEFT JOIN 
+        RankedSuppliers R ON R.s_suppkey = l.l_suppkey
+    WHERE 
+        l.l_discount < 0.05
+)
+SELECT 
+    j.part_name,
+    SUM(j.l_extendedprice * (1 - j.l_discount)) AS total_revenue,
+    COUNT(DISTINCT j.l_orderkey) AS order_count,
+    MAX(j.high_order_amount) AS max_order_value,
+    AVG(j.rank_desc) AS average_supplier_rank
+FROM 
+    JoinedData j
+WHERE 
+    j.supplier_name IS NOT NULL
+GROUP BY 
+    j.part_name
+HAVING 
+    COUNT(DISTINCT j.l_orderkey) > 10 OR AVG(j.high_order_amount) > 1000
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 20 ROWS ONLY;

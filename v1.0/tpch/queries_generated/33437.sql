@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_amount,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_totalprice
+),
+TopSuppliers AS (
+    SELECT sh.s_suppkey, sh.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM SupplierHierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (
+        SELECT AVG(total_supply_cost) FROM (
+            SELECT SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+            FROM partsupp ps
+            GROUP BY ps.ps_suppkey
+        ) AS avg_supply_cost
+    )
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT os.o_orderkey) AS order_count,
+    SUM(os.net_amount) AS total_net_amount,
+    COALESCE(avg(ts.total_supply_cost), 0) AS avg_supply_cost,
+    STRING_AGG(DISTINCT ts.s_name, ', ') AS top_suppliers
+FROM nation ns
+LEFT JOIN OrderSummary os ON ns.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey IN (SELECT s_suppkey FROM TopSuppliers))
+LEFT JOIN TopSuppliers ts ON ns.n_nationkey = ts.s_nationkey
+WHERE ns.r_regionkey IS NOT NULL
+GROUP BY ns.n_name
+ORDER BY total_net_amount DESC
+LIMIT 10;

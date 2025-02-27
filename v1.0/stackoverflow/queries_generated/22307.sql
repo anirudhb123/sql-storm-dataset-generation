@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        u.Reputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+AggregateStats AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS QuestionCount,
+        AVG(Score) AS AvgScore,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5)  -- Title or Body edits
+    ORDER BY 
+        ph.CreationDate DESC
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    u.Reputation,
+    a.QuestionCount,
+    a.AvgScore,
+    a.TotalViews,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN rp.rn = 1 THEN 'Top Question'
+        ELSE 'Other Question'
+    END AS RankCategory,
+    (SELECT STRING_AGG(CONCAT(r.UserDisplayName, ': ', r.Comment), '; ')
+     FROM RecentEdits r
+     WHERE r.PostId = rp.PostId) AS RecentEditComments
+FROM 
+    RankedPosts rp
+JOIN 
+    AggregateStats a ON rp.OwnerUserId = a.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.ViewCount > 100
+ORDER BY 
+    rp.Score DESC, rp.ViewCount ASC
+LIMIT 50;

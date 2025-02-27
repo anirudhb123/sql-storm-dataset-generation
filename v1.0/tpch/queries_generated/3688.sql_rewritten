@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_shippriority,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS item_count,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_shippriority,
+    ss.s_name,
+    ss.total_supply_value,
+    lis.revenue,
+    lis.item_count,
+    lis.avg_quantity
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierSummary ss ON r.o_orderkey = ss.s_suppkey
+LEFT JOIN 
+    LineItemStats lis ON r.o_orderkey = lis.l_orderkey
+WHERE 
+    r.order_rank <= 5 
+ORDER BY 
+    r.o_orderdate DESC, 
+    ss.total_supply_value DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    NULL AS o_orderkey,
+    NULL AS o_orderdate,
+    NULL AS o_shippriority,
+    NULL AS s_name,
+    SUM(total_supply_value) AS total_supply_value,
+    NULL AS revenue,
+    NULL AS item_count,
+    NULL AS avg_quantity
+FROM 
+    SupplierSummary
+WHERE 
+    total_supply_value IS NOT NULL
+GROUP BY 
+    s_name;

@@ -1,0 +1,30 @@
+SELECT 
+    akn.name AS aka_name, 
+    t.title AS movie_title, 
+    p.name AS person_name, 
+    ct.kind AS company_type,
+    COUNT(mk.keyword) AS keyword_count,
+    MIN(ci.nr_order) AS min_order
+FROM 
+    aka_name akn
+JOIN 
+    cast_info ci ON akn.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name c ON mc.company_id = c.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    name p ON akn.person_id = p.imdb_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020 
+    AND ct.kind = 'Production'
+GROUP BY 
+    akn.name, t.title, p.name, ct.kind
+ORDER BY 
+    keyword_count DESC, min_order ASC;

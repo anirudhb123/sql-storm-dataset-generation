@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.person_id, 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        aka_id, 
+        person_id, 
+        title_id, 
+        title, 
+        production_year 
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 3
+),
+MovieGenres AS (
+    SELECT 
+        m.id as movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS genres
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+FinalResults AS (
+    SELECT 
+        t.person_id, 
+        t.title, 
+        t.production_year, 
+        COALESCE(g.genres, 'No genres') AS genres,
+        CASE 
+            WHEN t.production_year IS NULL 
+            THEN 'Year Unknown' 
+            ELSE 'Year Known' 
+        END AS year_status
+    FROM 
+        TopMovies t
+    LEFT JOIN 
+        MovieGenres g ON t.title_id = g.movie_id
+)
+SELECT 
+    p.id AS person_id, 
+    p.name, 
+    fr.title, 
+    fr.production_year, 
+    fr.genres,
+    fr.year_status,
+    CAST(COUNT(*) OVER (PARTITION BY fr.person_id) AS INTEGER) AS total_movies
+FROM 
+    person_info p
+LEFT JOIN 
+    FinalResults fr ON p.person_id = fr.person_id
+WHERE 
+    p.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%actor%')
+    AND (fr.production_year < 2000 OR fr.production_year IS NULL)
+ORDER BY 
+    p.name, fr.production_year DESC NULLS LAST;
+

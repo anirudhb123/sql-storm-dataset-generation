@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId IN (4, 5) THEN 1 ELSE 0 END), 0) AS TagWikiCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+),
+RecentChanges AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        P.Title,
+        PH.Comment,
+        PH.Text AS NewValue
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.ReputationRank,
+    ARRAY_AGG(DISTINCT PT.Name) AS PopularPostTypes,
+    ARRAY_AGG(DISTINCT RCT.UserId) FILTER (WHERE RCT.UserId IS NOT NULL) AS RecentEditUsers,
+    COALESCE(RC.PostId, 0) AS RecentlyUpdatedPostId,
+    MAX(COALESCE(RC.NewValue, 'No recent changes')) AS LatestChange
+FROM UserStats U
+LEFT JOIN PostTypes PT ON PT.Id IN (1, 2, 3) 
+LEFT JOIN RecentChanges RC ON U.UserId = RC.UserId
+LEFT JOIN (
+    SELECT DISTINCT UserId 
+    FROM RecentChanges
+) RCT ON RCT.UserId = U.UserId
+GROUP BY U.UserId
+ORDER BY U.Reputation DESC
+LIMIT 10;

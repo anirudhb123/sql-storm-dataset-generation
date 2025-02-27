@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY[m.title] AS title_path
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.season_nr IS NULL
+  
+    UNION ALL
+  
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.title_path || m.title
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_hierarchy AS mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COALESCE(MAX(CASE WHEN ak.name LIKE '%John%' THEN 'John Type' ELSE NULL END), 'Unknown') AS john_type,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    ARRAY_AGG(DISTINCT mh.title_path) AS movie_hierarchy_paths,
+    SUM(mo.info_length) AS total_info_length,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS rank,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords
+FROM 
+    aka_name AS ak
+JOIN 
+    cast_info AS c ON ak.person_id = c.person_id
+JOIN 
+    aka_title AS at ON at.id = c.movie_id
+LEFT JOIN 
+    movie_info AS mo ON at.id = mo.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id = at.id
+LEFT JOIN 
+    keyword AS kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_hierarchy AS mh ON mh.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name_pcode_cf IS NOT NULL
+    AND mo.info IS NOT NULL
+GROUP BY 
+    ak.name, at.title, ak.person_id
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 1
+ORDER BY 
+    total_movies DESC
+LIMIT 10;
+

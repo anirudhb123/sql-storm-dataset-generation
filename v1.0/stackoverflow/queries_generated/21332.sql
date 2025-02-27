@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.ViewCount IS NULL THEN 0 ELSE P.ViewCount END), 0) AS TotalViews,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        MAX(COALESCE(P.CreationDate, '1970-01-01'::timestamp)) AS LastActivity
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TaggedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        ARRAY_AGG(DISTINCT TRIM(UNNEST(string_to_array(P.Tags, '>'))) ) AS TagArray,
+        P.LastActivityDate
+    FROM 
+        Posts P
+    WHERE 
+        P.Tags IS NOT NULL
+    GROUP BY 
+        P.Id, P.Title, P.LastActivityDate
+),
+RelevantPosts AS (
+    SELECT 
+        UP.UserId,
+        UP.DisplayName,
+        P.PostId,
+        P.Title,
+        T.TagArray,
+        RANK() OVER (PARTITION BY UP.UserId ORDER BY P.ViewCount DESC) AS RankByViewCount
+    FROM 
+        UserStats UP
+    JOIN 
+        TaggedPosts P ON P.LastActivityDate > UP.LastActivity
+    LEFT JOIN 
+        TaggedPosts T ON P.PostId = T.PostId
+)
+SELECT 
+    RP.UserId,
+    RP.DisplayName,
+    RP.Title,
+    RP.TagArray,
+    RP.RankByViewCount
+FROM 
+    RelevantPosts RP
+WHERE 
+    RP.RankByViewCount <= 5
+ORDER BY 
+    RP.UserId, RP.RankByViewCount DESC;
+
+-- The following logic handles corner cases
+-- 1. Includes users with NULL for user statistics
+-- 2. Add logic to filter out specific unwanted tags, if present.
+-- 3. Aggregate related posts and their tags for enhanced visibility
+-- 4. Outputs a list of users, their top 5 posts based on view count and associated tags

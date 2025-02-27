@@ -1,0 +1,88 @@
+WITH RecursiveBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS BadgeRank
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        p.OwnerUserId,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRowNum
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    AND 
+        p.PostTypeId = 1
+),
+TopContributors AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotesCount,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotesCount,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS ContributorRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1    
+    GROUP BY 
+        u.Id
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerName,
+        rb.BadgeCount,
+        tb.PostCount,
+        tb.UpVotesCount,
+        tb.DownVotesCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        RecursiveBadgeCounts rb ON rp.OwnerUserId = rb.UserId
+    LEFT JOIN 
+        TopContributors tb ON tb.UserId = rp.OwnerUserId
+    WHERE 
+        rb.BadgeCount > 0 -- Only showing users with badges
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.OwnerName,
+    COALESCE(rb.BadgeCount, 0) AS BadgeCount,
+    COALESCE(tb.PostCount, 0) AS PostCount,
+    COALESCE(tb.UpVotesCount, 0) AS UpVotesCount,
+    COALESCE(tb.DownVotesCount, 0) AS DownVotesCount
+FROM 
+    PostsWithBadges p
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC
+LIMIT 100;
+This SQL query brings together several advanced constructs like recursive CTEs to calculate badge counts, aggregates flags for posts, and ranks top contributors based on their posts and voting behavior, filtering down to the most significant contributors while handling NULL values effectively.

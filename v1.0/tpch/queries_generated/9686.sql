@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_size > 10
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 50000
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        SUM(o.o_totalprice) > 100000
+), PopularItems AS (
+    SELECT 
+        l.l_partkey, 
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+    HAVING 
+        SUM(l.l_quantity) > 100
+)
+SELECT 
+    rs.s_name, 
+    r.region_name, 
+    c.c_name, 
+    c.c_acctbal, 
+    hi.total_spent, 
+    pi.total_quantity
+FROM 
+    RankedSuppliers rs
+JOIN 
+    part p ON p.p_partkey = rs.s_suppkey
+JOIN 
+    nation n ON n.n_nationkey = p.p_partkey
+JOIN 
+    region r ON r.r_regionkey = n.n_regionkey
+JOIN 
+    HighValueCustomers hi ON hi.c_custkey = rs.s_suppkey
+JOIN 
+    PopularItems pi ON pi.l_partkey = p.p_partkey
+WHERE 
+    rs.rank = 1
+ORDER BY 
+    hi.total_spent DESC, pi.total_quantity DESC;

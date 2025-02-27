@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+        AND p.Score >= 5
+        AND u.Reputation > 50
+)
+, ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        MIN(ph.CreationDate) AS ClosedDate,
+        STRING_AGG(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+, UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 -- Gold badges
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS ClosedStatus,
+    COALESCE(cp.CloseReasons, 'N/A') AS ReasonsForClosure,
+    ub.BadgeCount AS GoldBadgeCount,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerDisplayName = ub.UserId 
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+WHERE 
+    p.Rank <= 10
+GROUP BY 
+    p.PostId, p.Title, p.OwnerDisplayName, p.CreationDate, p.Score, p.ViewCount, cp.ClosedDate, cp.CloseReasons, ub.BadgeCount
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;
+

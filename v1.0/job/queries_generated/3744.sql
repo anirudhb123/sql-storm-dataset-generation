@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        ARRAY_AGG(DISTINCT r.role ORDER BY r.role) AS roles,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cp.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type cp ON mc.company_type_id = cp.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(mr.actor_count, 0) AS actor_count,
+    COALESCE(cd.company_count, 0) AS company_count,
+    COALESCE(cd.company_types, 'N/A') AS company_types,
+    rm.keyword_count,
+    CASE 
+        WHEN rm.production_year >= 2000 THEN '21st Century'
+        ELSE '20th Century or Earlier'
+    END AS era,
+    CASE 
+        WHEN ARRAY_LENGTH(mr.roles, 1) > 0 THEN 
+            TRIM(BOTH '{}' FROM ARRAY_TO_STRING(mr.roles, ', ')) 
+        ELSE 
+            'No roles available'
+    END AS roles
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieRoles mr ON rm.movie_id = mr.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON rm.movie_id = cd.movie_id
+ORDER BY 
+    rm.production_year DESC, rm.title;

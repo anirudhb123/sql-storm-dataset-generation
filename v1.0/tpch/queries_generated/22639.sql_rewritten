@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+), 
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE(p.p_comment, 'No Comment') AS p_comment,
+           CASE 
+               WHEN p.p_size > 10 THEN 'Large' 
+               WHEN p.p_size BETWEEN 5 AND 10 THEN 'Medium' 
+               ELSE 'Small' 
+           END AS size_category
+    FROM part p 
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) 
+                              FROM part p2 
+                              WHERE p2.p_size IS NOT NULL)
+), 
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate <= '1997-12-31'
+    GROUP BY o.o_orderkey
+), 
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 
+           p.p_retailprice, s.s_name, s.s_acctbal
+    FROM partsupp ps
+    JOIN HighValueParts p ON ps.ps_partkey = p.p_partkey
+    JOIN RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.rnk <= 5
+)
+SELECT o_orderkey, total_revenue, unique_customers, 
+       CASE 
+           WHEN total_revenue IS NULL THEN 'No Revenue' 
+           ELSE 'Revenue Exists' 
+       END AS revenue_status,
+       ARRAY_AGG(DISTINCT CONCAT(p.p_name, ': ', sp.ps_availqty)) AS part_availability
+FROM OrderSummary os
+LEFT JOIN SupplierParts sp ON os.o_orderkey = sp.ps_partkey
+LEFT JOIN HighValueParts p ON sp.ps_partkey = p.p_partkey
+GROUP BY os.o_orderkey, total_revenue, unique_customers 
+HAVING total_revenue IS NOT NULL OR unique_customers > 1
+ORDER BY unique_customers DESC, total_revenue NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

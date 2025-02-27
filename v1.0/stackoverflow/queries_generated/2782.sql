@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) as rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        SUM(CASE WHEN rp.rn = 1 THEN 1 ELSE 0 END) AS BestQuestions
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        RankedPosts rp ON p.Id = rp.Id
+    WHERE 
+        u.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    au.TotalQuestions,
+    au.BestQuestions,
+    tb.BadgeNames,
+    COALESCE(au.TotalQuestions, 0) - COALESCE(au.BestQuestions, 0) AS NotBestQuestions
+FROM 
+    Users u
+LEFT JOIN 
+    ActiveUsers au ON u.Id = au.UserId
+LEFT JOIN 
+    TopBadges tb ON u.Id = tb.UserId
+WHERE 
+    (au.TotalQuestions IS NOT NULL AND au.TotalQuestions > 0) 
+    OR (tb.BadgeNames IS NOT NULL)
+ORDER BY 
+    u.Reputation DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

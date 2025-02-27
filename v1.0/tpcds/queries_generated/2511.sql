@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        SUM(cr_return_amt) AS total_return_amount
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        h.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+),
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand,
+        MAX(w.w_warehouse_name) AS warehouse_name
+    FROM 
+        inventory inv
+    JOIN 
+        warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cr.total_returned,
+    cr.total_return_amount,
+    COUNT(DISTINCT w.ws_item_sk) AS total_items_purchased,
+    AVG(COALESCE(ws.ws_net_profit, 0)) AS avg_net_profit,
+    CASE 
+        WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+        WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+        WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+        ELSE 'High'
+    END AS purchase_estimate_band
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    CustomerReturns cr ON cd.c_customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN 
+    web_sales ws ON cd.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    WarehouseInventory wi ON ws.ws_item_sk = wi.inv_item_sk
+WHERE 
+    (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M')
+    AND (cd.cd_income_band_sk IS NOT NULL AND cd.cd_income_band_sk < 5)
+GROUP BY 
+    cd.c_customer_sk, 
+    cd.cd_gender, 
+    cd.cd_marital_status, 
+    cr.total_returned, 
+    cr.total_return_amount, 
+    cd.cd_purchase_estimate
+ORDER BY 
+    avg_net_profit DESC
+LIMIT 100;

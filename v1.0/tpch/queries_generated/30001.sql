@@ -1,0 +1,38 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.nationkey, COUNT(*) AS total_suppliers, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    GROUP BY s.nationkey
+),
+order_summary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+ranked_summary AS (
+    SELECT cs.c_custkey, cs.c_name, cs.c_acctbal, COALESCE(os.total_spent, 0) AS total_spent,
+           RANK() OVER (PARTITION BY cs.c_nationkey ORDER BY COALESCE(os.total_spent, 0) DESC) AS rank
+    FROM customer cs
+    LEFT JOIN order_summary os ON cs.c_custkey = os.o_custkey
+),
+final_summary AS (
+    SELECT nh.n_name, ss.total_suppliers, ss.total_acctbal, rs.rank, rs.c_name, rs.total_spent
+    FROM nation_hierarchy nh
+    JOIN supplier_summary ss ON nh.n_nationkey = ss.nationkey
+    LEFT JOIN ranked_summary rs ON nh.n_nationkey = (SELECT c_nationkey FROM customer WHERE c_custkey = rs.c_custkey)
+)
+SELECT fs.n_name, fs.total_suppliers, fs.total_acctbal, fs.c_name, fs.total_spent
+FROM final_summary fs
+WHERE fs.rank <= 3
+ORDER BY fs.n_name, fs.rank;

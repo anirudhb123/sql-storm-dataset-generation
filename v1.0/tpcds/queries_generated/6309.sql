@@ -1,0 +1,54 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        c.c_preferred_cust_flag,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        d.d_dow,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_quantity) AS total_quantity
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        c.c_preferred_cust_flag = 'Y'
+    AND 
+        d.d_year = 2023
+    GROUP BY 
+        ws.ws_sold_date_sk, 
+        ws.ws_item_sk,
+        c.c_preferred_cust_flag,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        d.d_dow
+), ranked_sales AS (
+    SELECT 
+        sd.*,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM 
+        sales_data sd
+)
+SELECT 
+    rs.d_year,
+    rs.d_month_seq,
+    rs.d_week_seq,
+    rs.d_dow,
+    rs.ws_item_sk,
+    rs.total_sales,
+    rs.total_quantity
+FROM 
+    ranked_sales rs
+WHERE 
+    rs.sales_rank <= 5
+ORDER BY 
+    rs.d_year, rs.d_month_seq, rs.d_week_seq, rs.total_sales DESC;

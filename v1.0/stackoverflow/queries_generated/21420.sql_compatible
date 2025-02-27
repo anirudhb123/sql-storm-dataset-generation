@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        p.Tags,
+        ph.Comment AS CloseReason,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.Title IS NOT NULL AND
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '365 days')
+),
+FilteredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(b.Class, 0) AS BadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        (SELECT UserId, MIN(Class) AS Class
+         FROM Badges 
+         GROUP BY UserId 
+         HAVING MIN(Class) IS NOT NULL) b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+),
+UserPostStats AS (
+    SELECT 
+        fu.UserId, 
+        fu.DisplayName, 
+        COUNT(DISTINCT rp.PostId) AS PostCount, 
+        SUM(CASE WHEN rp.PostStatus = 'Closed' THEN 1 ELSE 0 END) AS ClosedPosts,
+        SUM(rp.CommentCount) AS TotalComments,
+        SUM(rp.TotalBounty) AS TotalBountyAwarded
+    FROM 
+        FilteredUsers fu
+    JOIN 
+        RankedPosts rp ON fu.UserId = rp.OwnerUserId
+    GROUP BY 
+        fu.UserId, fu.DisplayName
+)
+SELECT 
+    ups.UserId, 
+    ups.DisplayName, 
+    ups.PostCount, 
+    ups.ClosedPosts, 
+    ups.TotalComments, 
+    ups.TotalBountyAwarded,
+    CASE 
+        WHEN ups.PostCount > 0 THEN ROUND((CAST(ups.ClosedPosts AS DECIMAL) / ups.PostCount) * 100, 2)
+        ELSE 0 
+    END AS ClosedPostPercentage
+FROM 
+    UserPostStats ups
+WHERE 
+    ups.ClosedPosts > 0
+ORDER BY 
+    ups.TotalBountyAwarded DESC
+FETCH FIRST 10 ROWS ONLY;

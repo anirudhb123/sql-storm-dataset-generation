@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rn_view,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn_date
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.Views,
+        SUM(COALESCE(pa.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT pa.Id) AS TotalAcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2
+    LEFT JOIN 
+        Posts pa ON p.AcceptedAnswerId = pa.Id
+    GROUP BY 
+        u.Id, u.Reputation, u.Views
+),
+PopularTags AS (
+    SELECT 
+        TRIM(value) AS Tag
+    FROM 
+        Posts, UNNEST(string_to_array(Tags, '>')) AS value
+    WHERE 
+        Tags IS NOT NULL
+),
+TagStats AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS Occurrences
+    FROM 
+        PopularTags
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        RANK() OVER (ORDER BY Occurrences DESC) AS TagRank
+    FROM 
+        TagStats
+)
+
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.Views,
+    rp.Title AS MostViewedPost,
+    rp.ViewCount,
+    rp.AnswerCount,
+    tt.Tag,
+    tt.TagRank
+FROM 
+    Users u
+JOIN 
+    UserStats us ON u.Id = us.UserId
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn_view = 1
+JOIN 
+    TopTags tt ON tt.Tag IN (SELECT TRIM(value) FROM UNNEST(string_to_array(rp.Tags, '>')) AS value)
+WHERE 
+    us.Views > 1000 OR us.TotalAcceptedAnswers > 0
+ORDER BY 
+    us.Reputation DESC, 
+    us.Views DESC
+LIMIT 50;

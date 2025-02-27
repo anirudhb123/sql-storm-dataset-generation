@@ -1,0 +1,55 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AnswerCount,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.OwnerUserId IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AnswerCount,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostStats r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT ps.PostId) AS TotalPosts,
+    SUM(ps.AnswerCount) AS TotalAnswers,
+    SUM(p.ViewCount) AS TotalViews,
+    AVG(CASE WHEN ps.PostTypeId = 1 THEN ps.ViewCount ELSE NULL END) AS AvgQuestionViews,
+    AVG(CASE WHEN ps.PostTypeId = 2 THEN ps.AnswerCount ELSE NULL END) AS AvgAnswerCount,
+    MAX(ps.CreationDate) AS LastActivityDate,
+    COUNT(b.Id) AS TotalBadges
+FROM 
+    Users u
+LEFT JOIN 
+    RecursivePostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    u.Reputation > 100 AND
+    (u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL)
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT ps.PostId) > 5
+ORDER BY 
+    TotalViews DESC, TotalPosts DESC;

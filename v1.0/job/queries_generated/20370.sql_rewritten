@@ -1,0 +1,43 @@
+WITH RecursiveActor AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        COUNT(*) OVER (PARTITION BY c.person_id) AS total_movies,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY t.production_year DESC) AS latest_movie_row
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    WHERE a.name IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY t.id
+),
+FilteredActors AS (
+    SELECT 
+        ra.*,
+        md.movie_title,
+        md.production_year,
+        md.keywords
+    FROM RecursiveActor ra
+    LEFT JOIN MovieDetails md ON ra.latest_movie_row = 1 AND ra.total_movies > 2 
+)
+
+SELECT 
+    fa.actor_name,
+    fa.total_movies,
+    COALESCE(fa.movie_title, 'No Movies') AS latest_movie,
+    COALESCE(fa.production_year, 'N/A') AS latest_movie_year,
+    CASE 
+        WHEN fa.keywords IS NOT NULL THEN fa.keywords
+        ELSE 'No Keywords'
+    END AS movie_keywords
+FROM FilteredActors fa
+WHERE fa.total_movies > 1
+ORDER BY fa.total_movies DESC, fa.actor_name;

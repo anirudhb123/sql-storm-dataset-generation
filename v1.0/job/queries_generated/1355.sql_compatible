@@ -1,0 +1,55 @@
+
+WITH MovieRatings AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        COUNT(r.person_id) AS rating_count,
+        AVG(r.rating_value) AS average_rating
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        ratings r ON mt.id = r.movie_id
+    GROUP BY 
+        mt.id, mt.title
+),
+TopMovies AS (
+    SELECT 
+        title,
+        average_rating,
+        movie_id
+    FROM 
+        MovieRatings
+    WHERE 
+        rating_count > 10
+    ORDER BY 
+        average_rating DESC
+    LIMIT 5
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rt.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+)
+SELECT 
+    tm.title AS movie_title,
+    tm.average_rating,
+    ar.actor_name,
+    ar.actor_role,
+    ar.role_order
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorRoles ar ON tm.movie_id = ar.movie_id
+WHERE 
+    ar.actor_role IS NOT NULL
+ORDER BY 
+    tm.average_rating DESC, 
+    ar.role_order;

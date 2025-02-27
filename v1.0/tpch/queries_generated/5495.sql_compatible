@@ -1,0 +1,32 @@
+
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+), OrderDetails AS (
+    SELECT ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_name, 
+           SUM(li.l_quantity) AS total_quantity, 
+           SUM(li.l_extendedprice) AS total_extended_price
+    FROM RecentOrders ro
+    JOIN lineitem li ON ro.o_orderkey = li.l_orderkey
+    GROUP BY ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_name
+), SupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, s.s_name, s.s_nationkey
+    FROM partsupp ps 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN SupplierInfo si ON p.p_partkey = si.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+)
+SELECT r.r_name, od.o_orderdate, od.total_quantity, od.total_extended_price, 
+       pd.p_name, pd.p_brand, pd.supplier_count
+FROM OrderDetails od
+JOIN region r ON od.c_nationkey = r.r_regionkey
+JOIN PartDetails pd ON od.o_orderkey = pd.p_partkey
+WHERE pd.supplier_count > 5
+ORDER BY od.total_extended_price DESC, od.o_orderdate DESC
+LIMIT 100;

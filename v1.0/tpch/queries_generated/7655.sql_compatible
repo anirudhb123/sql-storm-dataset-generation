@@ -1,0 +1,39 @@
+
+WITH TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_value DESC
+    LIMIT 10
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 5000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, l.l_partkey, l.l_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate > DATE '1998-10-01' - INTERVAL '1 year'
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT ho.c_custkey) AS high_value_customers,
+    COUNT(DISTINCT ts.s_suppkey) AS top_suppliers_count
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN RecentOrders ho ON ho.o_orderkey = o.o_orderkey
+JOIN TopSuppliers ts ON ts.s_suppkey = l.l_suppkey
+WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title,
+        P.OwnerUserId,
+        1 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        P.Id, 
+        P.Title,
+        P.OwnerUserId,
+        R.Level + 1 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        COUNT(*) AS TotalHistoryRecords
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PH.PostId,
+    P.Title,
+    U.DisplayName AS OwnerDisplayName,
+    U.Reputation AS OwnerReputation,
+    COALESCE(PVS.Upvotes, 0) AS Upvotes,
+    COALESCE(PVS.Downvotes, 0) AS Downvotes,
+    PHS.CloseReopenCount,
+    PHS.DeleteUndeleteCount,
+    UBD.BadgeCount,
+    R.Level AS PostLevel,
+    R.CreationDate
+FROM 
+    RecursivePostHierarchy R
+JOIN 
+    Posts P ON R.PostId = P.Id
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostVoteSummary PVS ON P.Id = PVS.PostId
+LEFT JOIN 
+    PostHistoryDetails PHS ON P.Id = PHS.PostId
+LEFT JOIN 
+    UserBadges UBD ON U.Id = UBD.UserId
+WHERE 
+    (P.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' OR P.AnswerCount > 0)
+    AND (P.AcceptedAnswerId IS NOT NULL OR P.ViewCount > 100)
+ORDER BY 
+    R.Level, Upvotes DESC, P.CreationDate DESC
+LIMIT 100;

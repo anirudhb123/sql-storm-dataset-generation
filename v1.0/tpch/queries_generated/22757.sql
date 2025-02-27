@@ -1,0 +1,87 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS row_num
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size IS NULL THEN 0 
+            ELSE p.p_size 
+        END AS adjusted_size
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice BETWEEN 10 AND 100
+),
+CustOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(day, -30, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+TopRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_total
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+)
+SELECT 
+    p.p_name,
+    COUNT(distinct l.l_orderkey) AS order_count,
+    SUM(l.l_extendedprice) AS total_extended_price,
+    COALESCE(MAX(s.s_acctbal), 0) AS max_supplier_acct_balance,
+    SUM(CASE WHEN c.c_mktsegment = 'BUILDING' THEN 1 ELSE 0 END) AS building_orders
+FROM 
+    FilteredParts p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustOrders c ON l.l_orderkey = c.o_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON l.l_suppkey = s.s_suppkey
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM TopRegions tr 
+        WHERE tr.region_total > 200000
+        AND tr.r_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'AMERICA')
+    )
+GROUP BY 
+    p.p_name
+ORDER BY 
+    total_extended_price DESC, p.p_name
+LIMIT 10;

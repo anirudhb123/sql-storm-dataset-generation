@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    mh.level AS Link_Level,
+    COUNT(cc.actor_id) AS Actor_Count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Actor_Names,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mw ON mh.movie_id = mw.movie_id
+LEFT JOIN 
+    keyword kw ON mw.keyword_id = kw.id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(cc.actor_id) > 3
+ORDER BY 
+    mh.production_year DESC, mh.level ASC;
+
+This SQL query creates a recursive Common Table Expression (CTE) named `MovieHierarchy` to explore a hierarchy of movies linked through the `movie_link` table. It gathers information on movies produced between 2000 and 2020, counts the number of actors for each movie, and concatenates their names and keywords into string aggregates. The results are filtered to return only those movies with more than three actors, ordered by production year and link level.

@@ -1,0 +1,104 @@
+WITH RECURSIVE PostHierarchies AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL  -- Starting with top-level questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchies ph ON p.ParentId = ph.Id
+),
+PostViews AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RecentPostEdits AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edits involving title, body, tags
+    GROUP BY 
+        p.Id
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+VerbosePostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pv.VoteCount,
+        pv.UpVotes,
+        pv.DownVotes,
+        COALESCE(rpe.LastEditDate, 'No Edits') AS LastEditDate,
+        ph.Level
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostViews pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        RecentPostEdits rpe ON p.Id = rpe.PostId
+    LEFT JOIN 
+        PostHierarchies ph ON p.Id = ph.Id
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.VoteCount,
+    pp.UpVotes,
+    pp.DownVotes,
+    pp.LastEditDate,
+    COALESCE(u.DisplayName, 'Unknown User') AS OwnerDisplayName,
+    u.PostsCreated,
+    CONCAT(u.GoldBadges, '-', u.SilverBadges, '-', u.BronzeBadges) AS BadgeCount
+FROM 
+    VerbosePostDetails pp
+LEFT JOIN 
+    UserStatistics u ON pp.PostId = u.UserId
+WHERE 
+    pp.VoteCount > 0
+ORDER BY 
+    pp.CreationDate DESC;

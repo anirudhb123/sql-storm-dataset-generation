@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    AND 
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+), FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        RANK() OVER (ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+        AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), PartSupplierCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(*) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    r.o_orderkey,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    p.p_name,
+    COALESCE(p.supplier_count, 0) AS total_suppliers,
+    COALESCE(h.net_value, 0) AS high_value_net
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp p ON l.l_partkey = p.ps_partkey
+LEFT JOIN 
+    FilteredSuppliers s ON p.ps_suppkey = s.s_suppkey AND s.rank_acctbal <= 10
+LEFT JOIN 
+    HighValueLineItems h ON r.o_orderkey = h.l_orderkey
+WHERE 
+    (r.order_rank <= 5 OR h.net_value IS NOT NULL)
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 1000)
+ORDER BY 
+    r.o_orderdate DESC, r.o_orderkey
+FETCH FIRST 50 ROWS ONLY;

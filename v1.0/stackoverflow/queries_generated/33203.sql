@@ -1,0 +1,75 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT
+        Id,
+        TagName,
+        Count,
+        1 AS Depth
+    FROM Tags
+    WHERE IsModeratorOnly = 0  -- Get only non-moderator tags
+
+    UNION ALL
+
+    SELECT
+        t.Id,
+        t.TagName,
+        t.Count,
+        r.Depth + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy r ON t.WikiPostId = r.Id  -- Joining based on WikiPostId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AcceptedAnswers,
+        AVG(cp.Rank) AS AverageCommentRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9  -- Summing Bounty Amounts
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN LATERAL (
+        SELECT
+            p2.Score AS Rank
+        FROM Posts p2
+        WHERE p2.ParentId = p.Id
+        ORDER BY p2.Score DESC
+        LIMIT 3
+    ) cp ON true  -- Get rank for comments
+    LEFT JOIN Posts a ON p.Id = a.AcceptedAnswerId  -- Accepted Answers
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year'  -- Only consider posts from the last year
+    GROUP BY p.Id
+)
+SELECT
+    uth.UserId,
+    uth.DisplayName,
+    COUNT(DISTINCT pst.PostId) AS TotalPosts,
+    SUM(ps.TotalBounties) AS TotalBountiesAwarded,
+    SUM(ps.CommentCount) AS TotalComments,
+    SUM(ps.AcceptedAnswers) AS TotalAcceptedAnswers,
+    MAX(ut.BadgeCount) AS MaxBadges,
+    SUM(opt.Depth) AS TotalTagDepth
+FROM UserBadges uth
+LEFT JOIN PostStatistics ps ON uth.UserId = ps.PostId
+LEFT JOIN RecursiveTagHierarchy opt ON opt.Id IN (
+    SELECT unnest(string_to_array(p.Tags, ','))
+    FROM Posts p
+    WHERE p.OwnerUserId = uth.UserId
+)
+GROUP BY uth.UserId, uth.DisplayName
+ORDER BY TotalPosts DESC, MaxBadges DESC
+LIMIT 10;

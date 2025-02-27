@@ -1,0 +1,60 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_date,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_date BETWEEN '2021-01-01' AND '2023-12-31'
+        AND cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_id, d.d_date, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+warehouse_data AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+sales_summary AS (
+    SELECT 
+        w.warehouse_id,
+        c.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+        SUM(cd.total_sales) AS total_sales_value,
+        SUM(cd.order_count) AS total_orders
+    FROM 
+        customer_data cd
+    JOIN 
+        warehouse_data w ON cd.c_customer_id = (SELECT c_customer_id FROM customer WHERE c_current_addr_sk IS NOT NULL LIMIT 1)  -- This is a placeholder for mapping customers to warehouses
+    GROUP BY 
+        w.warehouse_id, c.cd_gender
+)
+SELECT 
+    warehouse_id,
+    cd_gender,
+    unique_customers,
+    total_sales_value,
+    total_orders,
+    RANK() OVER (PARTITION BY warehouse_id ORDER BY total_sales_value DESC) AS sales_rank
+FROM 
+    sales_summary
+ORDER BY 
+    warehouse_id, sales_rank;

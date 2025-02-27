@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1  -- Filtering for questions
+    GROUP BY 
+        p.Id, p.Title, p.Tags, u.DisplayName, u.Reputation, p.CreationDate, p.ViewCount
+), 
+TopPosts AS (
+    SELECT 
+        *
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5  -- Top 5 posts for each user
+),
+TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        TopPosts
+    GROUP BY 
+        TagName
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    SUM(tp.ViewCount) AS TotalViews,
+    AVG(tp.AnswerCount) AS AvgAnswers,
+    AVG(tp.CommentCount) AS AvgComments,
+    STRING_AGG(DISTINCT tp.Title, '; ') AS PostTitles
+FROM 
+    TagStats t
+JOIN 
+    TopPosts tp ON tp.Tags LIKE '%' || t.TagName || '%'
+GROUP BY 
+    t.TagName, t.PostCount
+ORDER BY 
+    TotalViews DESC
+LIMIT 10;  -- Top 10 tags based on views from top posts

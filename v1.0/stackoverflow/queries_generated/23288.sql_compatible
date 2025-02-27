@@ -1,0 +1,92 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > '2020-01-01' AND
+        (p.Score IS NOT NULL OR p.ViewCount > 100) AND
+        (u.Reputation > 1000 OR u.Location IS NOT NULL)
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        ph.PostId
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.Tag) AS PostCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                UNNEST(string_to_array(p.Tags, '><')) AS Tag
+            FROM 
+                Posts p
+            WHERE 
+                p.Tags IS NOT NULL
+        ) pt ON t.TagName = pt.Tag
+    LEFT JOIN 
+        Posts p ON pt.Tag IN (SELECT UNNEST(string_to_array(p.Tags, '><')))
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.Id, t.TagName
+    HAVING 
+        COUNT(pt.Tag) > 5 AND
+        AVG(u.Reputation) > 500
+)
+SELECT 
+    rp.Id AS PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    phs.EditCount,
+    phs.HistoryTypes,
+    ts.TagName,
+    ts.PostCount,
+    ts.AvgUserReputation,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top 5' 
+        ELSE 'Below Top 5' 
+    END AS PostRankGroup
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary phs ON rp.Id = phs.PostId
+LEFT JOIN 
+    TagStats ts ON ts.PostCount >= 5
+WHERE 
+    rp.CommentCount > 0 
+    OR EXISTS (
+        SELECT 1 
+        FROM Votes v 
+        WHERE v.PostId = rp.Id 
+        AND v.VoteTypeId = 2
+    )
+ORDER BY 
+    rp.Score DESC, rp.CreationDate ASC;

@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+  UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, s.s_comment, level + 1
+    FROM supplier s
+    JOIN SupplierCTE cte ON s.s_nationkey = cte.s_nationkey AND s.suppkey != cte.s_suppkey
+    WHERE cte.level < 5
+),
+PartOverview AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 20 AND p.p_brand LIKE 'Brand%'
+),
+CustomerStatus AS (
+    SELECT c.c_custkey,
+           COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+FilteredLineItems AS (
+    SELECT l.s_shipmode,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+      AND l.l_shipstatus = 'F'
+    GROUP BY l.s_shipmode
+)
+SELECT r.r_name AS region_name,
+       SUM(COALESCE(FilteredRevenue.revenue, 0)) AS total_revenue,
+       COUNT(DISTINCT CustomerStatus.c_custkey) AS customer_count,
+       MAX(PartOverview.p_retailprice) AS max_price,
+       COUNT(DISTINCT SuccessOrders.o_orderkey) AS successful_orders
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierCTE s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN PartOverview ON PartOverview.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+LEFT JOIN CustomerStatus ON s.s_suppkey = CustomerStatus.c_custkey
+LEFT JOIN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+      AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+) AS SuccessOrders ON CustomerStatus.order_count > 0
+LEFT JOIN FilteredLineItems ON FilteredLineItems.s_shipmode IN ('AIR', 'SHIP')
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+HAVING SUM(COALESCE(FilteredRevenue.revenue, 0)) > 1000000
+   OR MAX(PartOverview.p_retailprice) IS NOT NULL
+ORDER BY total_revenue DESC, region_name;

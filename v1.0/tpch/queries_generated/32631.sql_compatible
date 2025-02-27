@@ -1,0 +1,55 @@
+
+WITH RECURSIVE regional_sales AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        r.r_name, n.n_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+high_sales AS (
+    SELECT 
+        region_name,
+        SUM(total_sales) AS combined_sales
+    FROM 
+        regional_sales
+    WHERE 
+        sales_rank <= 3
+    GROUP BY 
+        region_name
+)
+SELECT 
+    rs.region_name,
+    rs.nation_name,
+    COALESCE(hs.combined_sales, 0) AS high_sales_total,
+    AVG(s.s_acctbal) AS average_supplier_balance
+FROM 
+    regional_sales rs
+LEFT JOIN 
+    high_sales hs ON rs.region_name = hs.region_name
+JOIN 
+    supplier s ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = rs.nation_name)
+GROUP BY 
+    rs.region_name, rs.nation_name, hs.combined_sales
+ORDER BY 
+    high_sales_total DESC, rs.nation_name ASC;

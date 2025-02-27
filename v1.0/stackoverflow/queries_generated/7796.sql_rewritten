@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.Reputation
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(bp.FavoriteCount, 0)) AS TotalFavorites
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        (SELECT DISTINCT p.Id, p.FavoriteCount FROM Posts p WHERE p.FavoriteCount > 0) AS bp ON p.Id = bp.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.OwnerReputation,
+    r.CommentCount,
+    r.VoteCount,
+    u.DisplayName AS PostOwner,
+    u.TotalPosts,
+    u.TotalBadges,
+    u.TotalFavorites
+FROM 
+    RankedPosts r
+JOIN 
+    UserStats u ON r.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+WHERE 
+    r.UserPostRank <= 3 
+ORDER BY 
+    r.Score DESC, 
+    r.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,93 @@
+WITH UserVoteSummary AS (
+    SELECT
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation * CASE WHEN u.CreationDate < NOW() - INTERVAL '3 years' THEN 1 ELSE 0 END) AS LegacyReputation
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN
+        Posts p ON v.PostId = p.Id
+    GROUP BY
+        u.Id
+),
+PostEnhanced AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(TagsExtracted.Tags, 'No Tags') AS Tags,
+        SUM(CASE WHEN c.Text IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN LATERAL (
+        SELECT
+            string_agg(t.TagName, ', ') AS Tags
+        FROM
+            unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag
+        JOIN
+            Tags t ON t.TagName = tag
+    ) AS TagsExtracted ON TRUE
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+FilteredPosts AS (
+    SELECT
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        Score,
+        Tags,
+        CommentCount,
+        RANK() OVER (PARTITION BY Tags ORDER BY Score DESC) AS RankScore
+    FROM
+        PostEnhanced
+    WHERE
+        ViewCount > (
+            SELECT
+                AVG(ViewCount) FROM Posts WHERE CloseReasonId IS NULL
+        )
+),
+FinalResult AS (
+    SELECT
+        ups.UserId,
+        ups.UpVotes,
+        ups.DownVotes,
+        fp.Title,
+        fp.CreationDate,
+        fp.ViewCount,
+        fp.Score,
+        fp.Tags,
+        fp.CommentCount,
+        ups.LegacyReputation
+    FROM
+        UserVoteSummary ups
+    JOIN
+        FilteredPosts fp ON ups.UpVotes > (SELECT COUNT(*) FROM Votes WHERE VoteTypeId = 3)
+    WHERE
+        ups.LegacyReputation IS NOT NULL
+    ORDER BY
+        ups.UpVotes DESC,
+        fp.Score DESC
+)
+SELECT
+    *,
+    CASE
+        WHEN ViewCount > 100 THEN 'Highly Viewed'
+        WHEN ViewCount BETWEEN 50 AND 100 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed'
+    END AS ViewCategory
+FROM
+    FinalResult
+WHERE
+    UpVotes - DownVotes > 0
+ORDER BY
+    LegacyReputation DESC, CreationDate DESC;

@@ -1,0 +1,93 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_sold_date_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_demo_sk,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_sales_price) AS lifetime_value
+    FROM 
+        customer c 
+    INNER JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_credit_rating IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_demo_sk, cd.cd_credit_rating
+    HAVING 
+        SUM(ws.ws_sales_price) > (SELECT AVG(ws2.ws_sales_price) 
+                                   FROM web_sales ws2 
+                                   WHERE ws2.ws_sold_date_sk >= 20210101)
+),
+SalesAndReturns AS (
+    SELECT 
+        COALESCE(sr.sr_store_sk, wr.wr_web_page_sk) AS source_sk,
+        COALESCE(SUM(md.net_paid), 0) AS total_net_paid,
+        COALESCE(SUM(md.return_quantity), 0) AS total_returns,
+        RANK() OVER (ORDER BY COALESCE(SUM(md.net_paid), 0) DESC) AS profitability_rank
+    FROM 
+        (SELECT 
+            ss.ss_store_sk,
+            ss.net_paid AS net_paid,
+            0 AS return_quantity
+         FROM store_sales ss
+         UNION ALL
+         SELECT 
+            NULL AS ss_store_sk,
+            0 AS net_paid,
+            sr.return_quantity
+         FROM store_returns sr) AS md
+    GROUP BY 
+        source_sk
+),
+FinalReport AS (
+    SELECT 
+        hvc.c_first_name,
+        hvc.c_last_name,
+        hvc.order_count,
+        hvc.lifetime_value,
+        CONVERT(VARCHAR, DATEADD(DAY, 7, d.d_date), 101) AS report_date,
+        nh.total_net_paid,
+        nh.total_returns,
+        CASE 
+            WHEN nh.total_net_paid IS NOT NULL AND nh.total_returns > 0 THEN 'Returns Observed'
+            ELSE 'No Returns'
+        END AS return_status
+    FROM 
+        HighValueCustomers hvc
+    LEFT JOIN 
+        SalesAndReturns nh ON nh.source_sk = hvc.c_customer_sk
+    JOIN 
+        date_dim d ON d.d_date_sk = hvc.lifetime_value
+    WHERE 
+        hvc.lifetime_value > (SELECT AVG(lifetime_value) FROM HighValueCustomers)
+)
+SELECT 
+    *,
+    CASE 
+        WHEN LAG(lifetime_value) OVER (ORDER BY lifetime_value DESC) IS NULL THEN 'First Profit'
+        ELSE 'Established Customer'
+    END AS customer_status
+FROM 
+    FinalReport
+WHERE 
+    report_date IS NOT NULL OR report_date IS DEFAULT
+ORDER BY 
+    customer_status, lifetime_value DESC;

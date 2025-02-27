@@ -1,0 +1,80 @@
+WITH MovieInfo AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        m.production_year,
+        k.keyword AS movie_keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+PersonInfo AS (
+    SELECT 
+        p.person_id,
+        a.name AS actor_name,
+        COUNT(c.movie_id) AS total_movies,
+        ROW_NUMBER() OVER (PARTITION BY p.person_id ORDER BY COUNT(c.movie_id) DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name_pcode_cf IS NOT NULL
+    GROUP BY 
+        p.person_id, a.name
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY cn.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastWithCondition AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS order_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.nr_order IS NOT NULL
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    p.actor_name,
+    p.total_movies,
+    p.movie_rank,
+    c.company_name,
+    c.company_type,
+    COALESCE(c.company_rank, 'N/A') AS company_rank,
+    ck.movie_keyword
+FROM 
+    MovieInfo m
+JOIN 
+    PersonInfo p ON p.total_movies > 5
+LEFT JOIN 
+    CompanyInfo c ON m.movie_id = c.movie_id AND c.company_rank = 1
+LEFT JOIN 
+    (SELECT DISTINCT movie_id, movie_keyword FROM MovieInfo) ck ON m.movie_id = ck.movie_id
+WHERE 
+    m.movie_keyword IS NOT NULL
+    AND m.rn = 1
+ORDER BY 
+    m.production_year DESC, p.total_movies DESC, order_rank
+LIMIT 100;

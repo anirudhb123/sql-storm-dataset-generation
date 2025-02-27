@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+sales_comparison AS (
+    SELECT 
+        cs_item_sk AS item_sk,
+        SUM(cs_quantity) AS total_cat_quantity,
+        SUM(cs_ext_sales_price) AS total_cat_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+), 
+shipping_modes AS (
+    SELECT 
+        sm_ship_mode_sk,
+        sm_type,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.sm_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm_ship_mode_sk, sm_type
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    cs.item_sk,
+    COALESCE(ss.total_quantity, 0) AS web_sales_quantity,
+    COALESCE(ss.total_sales, 0) AS web_sales_amount,
+    COALESCE(sc.total_cat_quantity, 0) AS cat_sales_quantity,
+    COALESCE(sc.total_cat_sales, 0) AS cat_sales_amount,
+    sm.order_count AS shipping_order_count
+FROM 
+    customer_address ca
+LEFT JOIN 
+    sales_summary ss ON ss.ws_item_sk = ca.ca_address_sk
+LEFT JOIN 
+    sales_comparison sc ON ss.ws_item_sk = sc.item_sk
+LEFT JOIN 
+    shipping_modes sm ON sm.sm_ship_mode_sk = ca.ca_address_sk
+WHERE 
+    (ss.total_sales IS NOT NULL OR sc.total_cat_sales IS NOT NULL) 
+    AND ca.ca_state IN ('CA', 'NY')
+    AND ca.ca_city LIKE '%City%'
+ORDER BY 
+    web_sales_amount DESC,
+    cat_sales_amount DESC;

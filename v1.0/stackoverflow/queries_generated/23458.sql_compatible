@@ -1,0 +1,96 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '2 years' 
+        AND p.ViewCount > 100
+), 
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) - SUM(u.DownVotes) AS NetVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserId AS EditorId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.UserId
+), 
+UserPostStats AS (
+    SELECT 
+        uId.UserId,
+        COUNT(DISTINCT lp.RelatedPostId) AS RelatedPostsCount,
+        COUNT(DISTINCT p.Id) AS PostsCount
+    FROM 
+        Users uId
+    LEFT JOIN 
+        Posts p ON uId.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostLinks lp ON p.Id = lp.PostId
+    GROUP BY 
+        uId.UserId
+), 
+AggregateData AS (
+    SELECT 
+        us.UserId,
+        us.NetVotes,
+        us.BadgeCount,
+        ups.PostsCount,
+        ups.RelatedPostsCount,
+        COALESCE(SUM(ph.EditCount), 0) AS TotalEdits,
+        COALESCE(MAX(ph.LastEditDate), '1900-01-01') AS LastEdit
+    FROM 
+        UserScores us
+    LEFT JOIN 
+        UserPostStats ups ON us.UserId = ups.UserId
+    LEFT JOIN 
+        PostHistoryData ph ON us.UserId = ph.EditorId
+    GROUP BY 
+        us.UserId, us.NetVotes, us.BadgeCount, ups.PostsCount, ups.RelatedPostsCount
+)
+SELECT 
+    ap.UserId,
+    ap.NetVotes,
+    ap.BadgeCount,
+    ap.PostsCount,
+    ap.RelatedPostsCount,
+    ap.TotalEdits,
+    ap.LastEdit,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score
+FROM 
+    AggregateData ap
+INNER JOIN 
+    RankedPosts rp ON ap.UserId = rp.OwnerUserId 
+WHERE 
+    ap.NetVotes > 0
+    AND ap.BadgeCount > 1
+ORDER BY 
+    ap.NetVotes DESC, 
+    rp.ViewCount DESC;

@@ -1,0 +1,81 @@
+
+WITH MovieActors AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    WHERE 
+        t.production_year >= 2000
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+GenreCount AS (
+    SELECT 
+        t.id AS title_id,
+        k.kind AS genre,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    JOIN 
+        kind_type k ON ct.kind = k.kind
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = 1
+    LEFT JOIN 
+        movie_info_idx mii ON t.id = mii.movie_id AND mii.info_type_id = 1
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    FULL OUTER JOIN 
+        complete_cast cc2 ON t.id = cc2.movie_id AND cc2.status_id IS NULL
+    GROUP BY 
+        t.id, k.kind
+),
+ActorsWithGenres AS (
+    SELECT 
+        ma.actor_name,
+        ma.movie_title,
+        ma.production_year,
+        gc.genre,
+        ma.actor_rank
+    FROM 
+        MovieActors ma
+    JOIN 
+        GenreCount gc ON ma.movie_title = gc.title_id
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    genre,
+    actor_rank,
+    CASE 
+        WHEN actor_rank = 1 THEN 'Lead Actor'
+        WHEN actor_rank <= 3 THEN 'Supporting Actor'
+        ELSE 'Minor Role'
+    END AS role_description
+FROM 
+    ActorsWithGenres
+WHERE 
+    genre IS NOT NULL
+ORDER BY 
+    production_year DESC, 
+    actor_rank;

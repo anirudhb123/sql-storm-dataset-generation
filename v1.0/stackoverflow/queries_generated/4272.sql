@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(p.Id) > 5
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    u.DisplayName,
+    tp.Title AS TopPostTitle,
+    tp.Score AS TopPostScore,
+    tp.CreationDate AS TopPostDate,
+    cp.Comment AS ClosedPostReason,
+    CASE 
+        WHEN cp.Comment IS NOT NULL THEN 'Closed Post'
+        ELSE 'Active Post'
+    END AS PostStatus
+FROM 
+    TopUsers u
+JOIN 
+    RankedPosts tp ON u.UserId = tp.Id
+LEFT JOIN 
+    ClosedPosts cp ON tp.Id = cp.PostId
+WHERE 
+    tp.UserPostRank <= 3
+ORDER BY 
+    u.TotalScore DESC, 
+    tp.Score DESC
+LIMIT 50
+UNION
+SELECT 
+    'NULL' AS DisplayName,
+    'N/A' AS TopPostTitle,
+    SUM(ph.Comment IS NOT NULL) AS TotalClosedPosts,
+    NULL AS TopPostDate,
+    NULL AS ClosedPostReason,
+    'Total Closed Posts' AS PostStatus
+FROM 
+    ClosedPosts ph
+WHERE 
+    ph.CreationDate < NOW() - INTERVAL '6 months'
+GROUP BY 
+    PostStatus;

@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit,
+        1 AS level
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_profit) + sh.total_net_profit AS total_net_profit,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        sh.level < 3  
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, sh.total_net_profit, sh.level
+),
+address_summary AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS num_customers
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.ca_address_sk, ca.ca_city, ca.ca_state
+),
+aggregated_sales AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    cus.c_first_name,
+    cus.c_last_name,
+    COALESCE(ads.num_customers, 0) AS num_customers,
+    SUM(sales.total_net_profit) AS total_net_profit,
+    aggr.total_orders,
+    aggr.total_sales
+FROM 
+    sales_hierarchy sales
+JOIN 
+    customer cus ON sales.c_customer_sk = cus.c_customer_sk
+LEFT JOIN 
+    address_summary ads ON ads.ca_address_sk = cus.c_current_addr_sk
+LEFT JOIN 
+    aggregated_sales aggr ON aggr.w_warehouse_id = (SELECT w.w_warehouse_id FROM warehouse w LIMIT 1)
+GROUP BY 
+    cus.c_first_name,
+    cus.c_last_name,
+    ads.num_customers,
+    aggr.total_orders,
+    aggr.total_sales
+HAVING 
+    SUM(sales.total_net_profit) > 1000
+ORDER BY 
+    total_net_profit DESC,
+    cus.c_last_name ASC;

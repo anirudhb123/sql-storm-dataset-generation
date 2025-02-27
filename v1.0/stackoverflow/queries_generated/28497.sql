@@ -1,0 +1,63 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.AnswerCount) AS TotalAnswers,
+        AVG(p.Score) AS AverageScore
+    FROM Tags t
+    LEFT JOIN Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY t.TagName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostsCount,
+        TotalViews,
+        TotalAnswers,
+        AverageScore,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewsRank
+    FROM TagStats
+    WHERE PostsCount > 5  -- Only consider tags with more than 5 posts
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        AVG(u.Reputation) AS AverageReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+UserStatistics AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        AnswersGiven,
+        QuestionsAsked,
+        AverageReputation,
+        RANK() OVER (ORDER BY PostsCreated DESC) AS PostsRank
+    FROM TopUsers
+)
+SELECT 
+    pt.TagName,
+    ps.PostsCount,
+    ps.TotalViews,
+    ps.TotalAnswers,
+    ps.AverageScore,
+    us.DisplayName AS TopUser,
+    us.PostsCreated AS UserPostCount,
+    us.AverageReputation AS UserAvgReputation
+FROM PopularTags pt
+JOIN UserStatistics us ON us.PostsRank = 1  -- Top user rank
+JOIN (
+    SELECT 
+        TagName, 
+        ROW_NUMBER() OVER (PARTITION BY TagName ORDER BY TotalViews DESC) AS Rank
+    FROM PopularTags
+) AS ps ON ps.TagName = pt.TagName AND ps.Rank = 1  -- Most viewed post for each tag
+ORDER BY pt.ViewsRank, us.AverageReputation DESC;

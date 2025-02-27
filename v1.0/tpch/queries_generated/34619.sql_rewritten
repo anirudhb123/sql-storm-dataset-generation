@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS Level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal) FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(MONTH, -6, cast('1998-10-01' as date))
+),
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS SupplierCount
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(s.s_suppkey) > 10
+    ORDER BY SupplierCount DESC
+    LIMIT 5
+)
+SELECT DISTINCT
+    p.p_name,
+    p.p_retailprice,
+    sh.s_name AS Supplier,
+    rn.o_orderkey,
+    rn.o_totalprice,
+    n.n_name AS Nation
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN RecentOrders rn ON rn.o_custkey IN (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = s.s_nationkey
+)
+JOIN TopNations n ON n.n_nationkey = s.s_nationkey
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2
+    WHERE p2.p_size <= p.p_size
+)
+ORDER BY p.p_retailprice DESC, rn.o_totalprice ASC;

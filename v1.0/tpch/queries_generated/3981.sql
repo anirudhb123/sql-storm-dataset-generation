@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_nationkey = n.n_nationkey)
+), 
+PartAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availability
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+)
+SELECT 
+    n.n_name,
+    r.r_name,
+    COALESCE(SUM(pa.total_availability), 0) AS total_available_parts,
+    COALESCE(SUM(co.total_spent), 0) AS total_spent_by_customers,
+    COUNT(DISTINCT rs.s_suppkey) AS active_suppliers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey AND rs.rank <= 3
+LEFT JOIN 
+    PartAvailability pa ON pa.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 100)
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'F')
+GROUP BY 
+    n.n_name, r.r_name
+ORDER BY 
+    total_available_parts DESC,
+    total_spent_by_customers DESC;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+ItemDemographics AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        cd.cd_gender,
+        hd.hd_income_band_sk
+    FROM 
+        item i 
+    LEFT JOIN customer_demographics cd ON i.i_item_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    id.i_item_id,
+    id.i_item_desc,
+    COALESCE(SUM(s.total_sales_price), 0) AS total_sales,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    COUNT(DISTINCT CASE WHEN c.cc_mkt_class IS NULL THEN c.cc_call_center_sk END) AS unique_call_centers,
+    RANK() OVER (ORDER BY COALESCE(SUM(s.total_sales_price), 0) DESC) AS sales_rank
+FROM 
+    ItemDemographics id
+LEFT JOIN 
+    SalesCTE s ON id.i_item_sk = s.ws_item_sk
+LEFT JOIN 
+    CustomerReturns cr ON id.i_item_sk = cr.sr_item_sk
+LEFT JOIN 
+    call_center c ON id.hd_income_band_sk = c.cc_mkt_class
+GROUP BY 
+    id.i_item_id, 
+    id.i_item_desc, 
+    cr.return_count, 
+    cr.total_return_amount
+HAVING 
+    total_sales > (SELECT AVG(total_sales) FROM SalesCTE) OR return_count > 5
+ORDER BY 
+    sales_rank
+LIMIT 10;

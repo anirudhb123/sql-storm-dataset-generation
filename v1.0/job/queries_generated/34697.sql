@@ -1,0 +1,35 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        0 AS generation
+    FROM aka_name p
+    WHERE p.name LIKE 'A%'
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        a.name,
+        ah.generation + 1 AS generation
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON c.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id)
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    AVG(CASE WHEN COALESCE(m.production_year, 0) = 0 THEN NULL ELSE m.production_year END) AS avg_production_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM ActorHierarchy a
+LEFT JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN aka_title m ON c.movie_id = m.id
+LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+WHERE a.generation < 2 
+GROUP BY a.name
+HAVING COUNT(DISTINCT c.movie_id) > 5
+ORDER BY movie_count DESC, avg_production_year DESC
+LIMIT 10;
+
+This SQL query begins with a recursive common table expression (CTE) that builds an "ActorHierarchy" by selecting actors whose names start with 'A' and their related cast members. It then aggregates data, counting movies and averaging their production years, while also collecting associated keywords. Filters are applied, and results are ordered by the number of movies, ensuring a sophisticated retrieval of actor information.

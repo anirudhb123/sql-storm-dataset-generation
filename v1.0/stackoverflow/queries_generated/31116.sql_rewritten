@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        AcceptedAnswerId,
+        ParentId,
+        OwnerUserId,
+        Score,
+        ViewCount,
+        1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+
+RankedPosts AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        ph.CreationDate,
+        ph.Score,
+        ph.ViewCount,
+        ph.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.OwnerUserId ORDER BY ph.Score DESC) AS Rank
+    FROM RecursivePostHierarchy ph
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(rp.Score), 0) AS TotalScore,
+        COALESCE(SUM(rp.ViewCount), 0) AS TotalViews,
+        COUNT(DISTINCT rp.Id) AS TotalPosts
+    FROM Users u
+    LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalScore,
+        TotalViews,
+        TotalPosts,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS UserRank
+    FROM UserStatistics
+),
+
+RecentComments AS (
+    SELECT 
+        c.PostId, 
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    WHERE c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY c.PostId
+)
+
+SELECT 
+    pu.UserId,
+    pu.DisplayName,
+    pu.TotalScore,
+    pu.TotalViews,
+    pu.TotalPosts,
+    rch.Id AS PostId,
+    rch.Title AS PostTitle,
+    rch.CreationDate AS PostCreationDate,
+    COALESCE(rc.CommentCount, 0) AS RecentCommentCount,
+    pu.UserRank 
+FROM MostActiveUsers pu
+JOIN RecursivePostHierarchy rch ON pu.UserId = rch.OwnerUserId
+LEFT JOIN RecentComments rc ON rch.Id = rc.PostId
+WHERE pu.TotalPosts > 5 
+ORDER BY pu.TotalPosts DESC, pu.TotalScore DESC;

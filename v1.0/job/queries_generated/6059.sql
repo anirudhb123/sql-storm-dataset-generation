@@ -1,0 +1,29 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS company_type,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    mi.info AS movie_info
+FROM 
+    aka_title AS t
+JOIN 
+    complete_cast AS cc ON t.id = cc.movie_id
+JOIN 
+    aka_name AS a ON cc.subject_id = a.person_id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_type AS c ON mc.company_type_id = c.id
+JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info AS mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1)
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND a.name IS NOT NULL
+GROUP BY 
+    t.title, a.name, c.kind, mi.info
+ORDER BY 
+    t.production_year DESC, movie_title;

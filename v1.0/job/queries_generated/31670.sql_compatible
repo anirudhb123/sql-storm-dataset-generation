@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mc.company_id,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY NULLIF(mc.company_id, -1)) AS company_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id 
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COUNT(ci.id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(CASE WHEN mp.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS movie_info_count,
+    MAX(CASE WHEN mc.kind = 'Distributor' THEN mc.name END) AS distributor_name
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mp ON rm.movie_id = mp.movie_id
+LEFT JOIN 
+    company_name mc ON rm.company_id = mc.id
+WHERE 
+    rm.production_year BETWEEN 2000 AND 2020
+    AND ci.nr_order IS NOT NULL
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, rm.company_id
+HAVING 
+    COUNT(ci.id) > 5
+ORDER BY 
+    rm.production_year DESC, 
+    COUNT(DISTINCT ak.name) DESC;

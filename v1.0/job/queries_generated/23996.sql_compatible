@@ -1,0 +1,74 @@
+
+WITH RECURSIVE MovieCast AS (
+    SELECT 
+        c.movie_id,
+        k.keyword,
+        COUNT(c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        c.movie_id, k.keyword
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        r.role,
+        COUNT(DISTINCT c.person_id) AS distinct_actors
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+),
+CompanyMovies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(a.actor_count, 0) AS actor_count,
+        COALESCE(cr.company_count, 0) AS company_count,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(a.actor_count, 0) DESC, COALESCE(cr.company_count, 0) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        MovieCast a ON t.id = a.movie_id
+    LEFT JOIN 
+        CompanyMovies cr ON t.id = cr.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.actor_count,
+    m.company_count,
+    CASE 
+        WHEN m.actor_count > 10 THEN 'Star-Studded'
+        WHEN m.actor_count BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Limited Cast'
+    END AS cast_descriptor,
+    COALESCE(p.info, 'No extra info') AS actor_info
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    person_info p ON p.person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = m.movie_id)
+WHERE 
+    m.rank <= 50 
+    AND (m.production_year IS NOT NULL OR m.actor_count > 0)
+ORDER BY 
+    m.rank;

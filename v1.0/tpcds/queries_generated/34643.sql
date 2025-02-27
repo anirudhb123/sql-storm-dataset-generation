@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_marital_status, cd.cd_gender, 
+           COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_gender
+    UNION ALL
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, 
+           ch.cd_marital_status, ch.cd_gender, 
+           COALESCE(SUM(ws.ws_net_profit), 0) AS total_profit
+    FROM customer ch
+    JOIN sales_hierarchy sh ON sh.c_customer_sk = ch.c_customer_sk
+    LEFT JOIN web_sales ws ON ch.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.cd_marital_status, ch.cd_gender
+),
+RankedSales AS (
+    SELECT customer.c_customer_sk, customer.c_first_name, customer.c_last_name,
+           customer.cd_gender, customer.cd_marital_status,
+           SalesHierarchy.total_profit,
+           RANK() OVER (PARTITION BY customer.cd_marital_status ORDER BY total_profit DESC) AS profit_rank
+    FROM customer
+    JOIN SalesHierarchy ON customer.c_customer_sk = SalesHierarchy.c_customer_sk
+),
+CombinedReturns AS (
+    SELECT SUM(sr_return_quantity) AS total_store_returns, sr_customer_sk
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL
+    GROUP BY sr_customer_sk
+),
+FinalReport AS (
+    SELECT r.c_customer_sk, r.c_first_name, r.c_last_name, 
+           r.cd_gender, r.cd_marital_status, 
+           r.total_profit, r.profit_rank,
+           COALESCE(cr.total_store_returns, 0) AS total_store_returns
+    FROM RankedSales r
+    LEFT JOIN CombinedReturns cr ON r.c_customer_sk = cr.sr_customer_sk
+    WHERE r.profit_rank <= 5
+)
+
+SELECT *
+FROM FinalReport
+WHERE total_profit > 1000
+ORDER BY total_profit DESC;

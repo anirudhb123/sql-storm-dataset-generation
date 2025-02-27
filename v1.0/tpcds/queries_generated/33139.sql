@@ -1,0 +1,85 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) as rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_net_profit) > 0
+    
+    UNION ALL
+    
+    SELECT 
+        cs_item_sk,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_net_profit) DESC) as rn
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+    HAVING 
+        SUM(cs_net_profit) > 0
+),
+top_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(w.total_profit, 0) AS web_profit,
+        COALESCE(c.total_profit, 0) AS catalog_profit,
+        (COALESCE(w.total_profit, 0) + COALESCE(c.total_profit, 0)) AS total_profit,
+        (COALESCE(w.order_count, 0) + COALESCE(c.order_count, 0)) AS total_orders
+    FROM 
+        item
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            total_profit,
+            order_count
+        FROM 
+            sales_cte
+        WHERE 
+            rn = 1
+    ) AS w ON item.i_item_sk = w.ws_item_sk
+    LEFT JOIN (
+        SELECT 
+            cs_item_sk,
+            total_profit,
+            order_count
+        FROM 
+            sales_cte
+        WHERE 
+            rn = 1
+    ) AS c ON item.i_item_sk = c.cs_item_sk
+),
+final_sales AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_profit DESC) AS rank_profit
+    FROM 
+        top_sales
+)
+SELECT 
+    f.i_item_id,
+    f.i_item_desc,
+    f.web_profit,
+    f.catalog_profit,
+    f.total_profit,
+    f.total_orders,
+    CASE 
+        WHEN f.total_profit IS NULL THEN 'No Profit'
+        WHEN f.total_profit > 1000 THEN 'High Profit'
+        WHEN f.total_profit BETWEEN 500 AND 1000 THEN 'Moderate Profit'
+        ELSE 'Low Profit' 
+    END AS profit_category
+FROM 
+    final_sales AS f
+WHERE 
+    f.rank_profit <= 10
+ORDER BY 
+    f.rank_profit;

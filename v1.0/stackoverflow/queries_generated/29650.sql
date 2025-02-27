@@ -1,0 +1,56 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        b.Class AS BadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE b.Date > NOW() - INTERVAL '1 year' -- Consider badges earned in the last year
+    GROUP BY u.Id, u.DisplayName, b.Class
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS PopularPostCount, -- Posts with more than 1000 views
+        AVG(p.Score) AS AveragePostScore
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserPostBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.PopularPostCount, 0) AS PopularPostCount,
+        COALESCE(ps.AveragePostScore, 0) AS AveragePostScore,
+        SUM(badge_count) AS TotalBadgeCount
+    FROM Users u
+    LEFT JOIN PostStatistics ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            SUM(BadgeCount) AS badge_count
+        FROM UserBadges
+        GROUP BY UserId
+    ) bs ON u.Id = bs.UserId
+    GROUP BY u.Id, u.DisplayName, bs.BadgeCount, ps.PostCount, ps.QuestionCount, ps.AnswerCount, ps.PopularPostCount, ps.AveragePostScore
+)
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    PopularPostCount,
+    AveragePostScore,
+    TotalBadgeCount
+FROM UserPostBadgeCounts
+ORDER BY TotalBadgeCount DESC, PostCount DESC
+LIMIT 10;

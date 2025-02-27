@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_by_acctbal
+    FROM 
+        supplier s
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+ValidRegions AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name
+    FROM 
+        region r
+    WHERE 
+        r.r_name LIKE 'A%' AND 
+        NOT EXISTS (
+            SELECT 
+                1 
+            FROM 
+                nation n 
+            WHERE 
+                n.n_regionkey = r.r_regionkey AND 
+                n.n_comment IS NOT NULL
+        )
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+    AVG(l.l_extendedprice) AS avg_line_price,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         PartsSupp ps2 
+     WHERE 
+         ps2.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+         AND ps2.ps_partkey = p.p_partkey) AS expensive_supplies_count,
+    r.r_name AS region_name,
+    ss.s_name AS top_supplier_name
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers ss ON ps.ps_suppkey = ss.s_suppkey AND ss.rank_by_acctbal = 1
+LEFT JOIN 
+    ValidRegions r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) FROM orders o2 WHERE o2.o_totalprice > 1000) LIMIT 1)))
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_name, ss.s_name
+HAVING 
+    AVG(l.l_extendedprice) > (SELECT AVG(l2.l_extendedprice) FROM lineitem l2) 
+    AND COUNT(DISTINCT ps.s_suppkey) < 5
+ORDER BY 
+    total_available DESC, p.p_partkey;

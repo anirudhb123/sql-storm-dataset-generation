@@ -1,0 +1,52 @@
+-- Performance Benchmarking Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Filter for posts created in the last year
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS ModificationsCount -- Title, Body, Tags edits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerReputation,
+    ps.OwnerDisplayName,
+    COALESCE(phs.EditCount, 0) AS TotalEdits,
+    COALESCE(phs.ModificationsCount, 0) AS ModificationsCount
+FROM 
+    PostStats ps
+LEFT JOIN 
+    PostHistoryStats phs ON ps.PostId = phs.PostId
+ORDER BY 
+    ps.Score DESC, ps.CreationDate DESC; -- Order by score and then by creation date

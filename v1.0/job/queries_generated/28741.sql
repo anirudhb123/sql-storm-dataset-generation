@@ -1,0 +1,57 @@
+WITH MovieData AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name SEPARATOR ', ') AS aka_names,
+        GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword SEPARATOR ', ') AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS companies,
+        GROUP_CONCAT(DISTINCT p.info ORDER BY p.info SEPARATOR ', ') AS person_info
+    FROM 
+        title t
+    JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        person_info p ON ci.person_id = p.person_id
+    GROUP BY 
+        t.id
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.aka_names,
+        md.keywords,
+        md.companies,
+        md.person_info,
+        ROW_NUMBER() OVER (ORDER BY md.production_year DESC, md.title ASC) AS rank
+    FROM 
+        MovieData md
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    aka_names,
+    keywords,
+    companies,
+    person_info,
+    rank
+FROM 
+    RankedMovies
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    rank
+LIMIT 50;

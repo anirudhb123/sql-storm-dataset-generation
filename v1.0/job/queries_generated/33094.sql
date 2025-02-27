@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COALESCE(aka.name, 'Unknown') AS actor_name,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mk.keyword, 'No Keywords'),
+        COALESCE(aka.name, 'Unknown'),
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name aka ON ci.person_id = aka.person_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    STRING_AGG(DISTINCT mh.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT mh.actor_name, ', ') AS actors,
+    COUNT(*) OVER (PARTITION BY mh.movie_id) AS actor_count,
+    RANK() OVER (ORDER BY mh.production_year DESC, mh.title) AS rank
+FROM 
+    MovieHierarchy mh
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mh.actor_name) > 1
+ORDER BY 
+    mh.production_year DESC, mh.title;
+
+This SQL query constructs a recursive common table expression (CTE) to create a hierarchy of movies along with their associated keywords and actors. It filters by movies produced after the year 2000 and ensures that each movie listed has more than one associated actor. It leverages aggregate functions, window functions for ranking, and conditional logic to provide a comprehensive overview of movie attributes.

@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        u.DisplayName,
+        us.BadgeCount,
+        us.Reputation,
+        COALESCE(us.Upvotes - us.Downvotes, 0) AS NetVotes
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserStats us ON u.Id = us.UserId
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.DisplayName,
+    tp.BadgeCount,
+    tp.Reputation,
+    tp.NetVotes,
+    COALESCE((SELECT COUNT(*) 
+               FROM Comments c 
+               WHERE c.PostId = tp.PostId), 0) AS CommentCount,
+    COALESCE((SELECT STRING_AGG(DISTINCT t.TagName, ', ')
+               FROM Posts p
+               JOIN UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON p.Id = tp.PostId), 'No Tags') AS Tags
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

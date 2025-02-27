@@ -1,0 +1,58 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        p.p_mfgr, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 20
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+    HAVING COUNT(ps.ps_partkey) > 10 AND SUM(ps.ps_supplycost) < 2000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name, 
+    s.s_name,
+    co.c_name AS customer_name,
+    COALESCE(co.order_count, 0) AS orders_placed,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN rp.rank <= 5 THEN 'Top 5 Part' 
+        ELSE 'Other Part' 
+    END AS part_rank,
+    (p.p_retailprice * (1 - l.l_discount)) AS adjusted_price,
+    CASE 
+        WHEN l.l_quantity IS NULL THEN 'No Quantity' 
+        ELSE 'Quantity Available' 
+    END AS quantity_status
+FROM RankedParts rp
+JOIN partsupp ps ON rp.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN CustomerOrders co ON s.s_nationkey = co.c_custkey
+LEFT JOIN lineitem l ON l.l_partkey = rp.p_partkey
+WHERE s.s_acctbal BETWEEN 100 AND (SELECT AVG(s_acctbal) FROM supplier)
+  AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+ORDER BY adjusted_price DESC, orders_placed ASC
+FETCH FIRST 50 ROWS ONLY;

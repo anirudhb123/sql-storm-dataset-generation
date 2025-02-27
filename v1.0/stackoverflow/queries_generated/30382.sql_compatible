@@ -1,0 +1,107 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        Posts parent ON p.ParentId = parent.Id
+    INNER JOIN
+        RecursivePostHierarchy r ON parent.Id = r.PostId
+),
+UserVoteStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+QuestionAnswerCounts AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount
+    FROM
+        Posts p
+    LEFT JOIN
+        Posts a ON p.Id = a.ParentId
+    WHERE
+        p.PostTypeId = 1  
+    GROUP BY
+        p.OwnerUserId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass  
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id
+),
+PostHistoryStats AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        STRING_AGG(DISTINCT ph.Comment, ', ') AS EditComments
+    FROM
+        Posts p
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY
+        p.Id
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(us.UpVotes, 0) AS UpVotes,
+    COALESCE(us.DownVotes, 0) AS DownVotes,
+    COALESCE(qa.AnswerCount, 0) AS AnswerCount,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    ub.HighestBadgeClass,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    phs.LastEdited,
+    phs.EditComments,
+    rph.Level AS PostHierarchyLevel,
+    rph.Title AS QuestionTitle
+FROM
+    Users u
+LEFT JOIN
+    UserVoteStats us ON u.Id = us.UserId
+LEFT JOIN
+    QuestionAnswerCounts qa ON u.Id = qa.OwnerUserId
+LEFT JOIN
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN
+    PostHistoryStats phs ON u.Id = phs.PostId
+LEFT JOIN
+    RecursivePostHierarchy rph ON u.Id = rph.OwnerUserId
+WHERE
+    (COALESCE(us.UpVotes, 0) > 10 OR COALESCE(us.DownVotes, 0) > 10)  
+ORDER BY
+    u.Reputation DESC;

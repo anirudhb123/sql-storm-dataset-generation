@@ -1,0 +1,59 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        COUNT(ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+        JOIN nation n ON s.s_nationkey = n.n_nationkey
+        LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+        AND l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    ss.nation_name,
+    ss.s_suppkey,
+    ss.s_name,
+    ss.part_count,
+    ss.total_supply_cost,
+    co.total_spent,
+    la.revenue,
+    la.order_count
+FROM 
+    SupplierStats ss
+    LEFT JOIN CustomerOrders co ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM LineItemAnalysis la INNER JOIN lineitem l ON la.l_partkey = l.l_partkey))
+    LEFT JOIN LineItemAnalysis la ON la.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey)
+WHERE 
+    ss.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+    AND co.total_spent IS NOT NULL
+ORDER BY 
+    ss.nation_name, 
+    ss.total_supply_cost DESC;

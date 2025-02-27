@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY(SELECT DISTINCT UNNEST(string_to_array(p.Tags, '><'))) AS UniqueTags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(MAX(v.VoteTypeId) FILTER (WHERE v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(MAX(v.VoteTypeId) FILTER (WHERE v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+
+FinalStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.ViewCount,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.UniqueTags,
+        rp.OwnerPostRank,
+        CASE 
+            WHEN rp.OwnerPostRank <= 5 THEN 'Active Contributor'
+            ELSE 'Regular User' 
+        END AS UserType
+    FROM 
+        RankedPosts rp
+)
+
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.CreationDate,
+    fs.CommentCount,
+    fs.AnswerCount,
+    fs.ViewCount,
+    fs.Score,
+    fs.UpVotes,
+    fs.DownVotes,
+    fs.UniqueTags,
+    fs.UserType,
+    LENGTH(fs.Title) AS TitleLength,
+    LENGTH(fs.Body) AS BodyLength,
+    DATE_PART('year', AGE(fs.CreationDate)) AS PostAgeInYears
+FROM 
+    FinalStats fs
+WHERE 
+    fs.Score > 5 
+ORDER BY 
+    fs.Score DESC, 
+    fs.ViewCount DESC
+LIMIT 50;

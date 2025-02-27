@@ -1,0 +1,36 @@
+
+WITH RankedItems AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        CONCAT('Supplier ', s.s_name, ' has delivered ', COUNT(l.l_orderkey), ' orders of ', p.p_name) AS delivery_summary,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM 
+        part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_name
+)
+SELECT 
+    r.r_name AS region_name,
+    STRING_AGG(ranked.delivery_summary, '; ') AS aggregated_deliveries
+FROM 
+    (
+        SELECT
+            r.r_name,
+            ranked.delivery_summary
+        FROM 
+            RankedItems ranked
+        JOIN supplier s ON ranked.supplier_name = s.s_name
+        JOIN nation n ON s.s_nationkey = n.n_nationkey
+        JOIN region r ON n.n_regionkey = r.r_regionkey
+        WHERE 
+            ranked.rank_order <= 3
+    ) AS subquery
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

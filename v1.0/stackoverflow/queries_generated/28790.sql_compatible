@@ -1,0 +1,71 @@
+
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN p.Score ELSE 0 END) AS TotalScore,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS Contributors
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+
+CloseReasonCounts AS (
+    SELECT 
+        phr.Comment AS CloseReason,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name = 'Post Closed'
+    GROUP BY 
+        phr.Comment
+),
+
+PopularUsers AS (
+    SELECT 
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewsPerPost
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.DisplayName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalScore,
+    ts.Contributors,
+    r.CloseReason,
+    r.CloseCount,
+    pu.DisplayName AS PopularUser,
+    pu.TotalViews,
+    pu.TotalScore,
+    pu.AvgViewsPerPost
+FROM 
+    TagStats ts
+FULL OUTER JOIN 
+    CloseReasonCounts r ON r.CloseReason IS NOT NULL
+FULL OUTER JOIN 
+    PopularUsers pu ON pu.DisplayName IS NOT NULL
+ORDER BY 
+    ts.PostCount DESC, r.CloseCount DESC, pu.TotalViews DESC;

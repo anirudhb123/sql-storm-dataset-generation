@@ -1,0 +1,67 @@
+
+WITH ProductInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_retailprice, p.p_comment
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        n.n_name AS nation_name,
+        c.c_acctbal,
+        c.c_mktsegment,
+        c.c_comment,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey, n.n_name, c.c_acctbal, c.c_mktsegment, c.c_comment
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderdate,
+        'Order Status: ' || o.o_orderstatus || ' | Total Price: ' || CAST(o.o_totalprice AS VARCHAR(255)) AS order_summary
+    FROM 
+        orders o
+)
+SELECT 
+    pi.p_name,
+    pi.p_mfgr,
+    pi.supplier_count,
+    ci.c_name,
+    ci.nation_name,
+    ci.order_count,
+    ot.order_summary
+FROM 
+    ProductInfo pi
+JOIN 
+    CustomerInfo ci ON ci.order_count > 0
+JOIN 
+    OrderTotals ot ON ci.order_count > 0
+WHERE 
+    pi.supplier_count > 2
+ORDER BY 
+    pi.p_name, ci.c_name
+LIMIT 100;

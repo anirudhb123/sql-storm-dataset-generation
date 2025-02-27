@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+      AND 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PostScores AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(V.UpVotes, 0) - COALESCE(V.DownVotes, 0) AS Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(An.Id) AS AnswerCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (2, 3) 
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Posts An ON P.Id = An.ParentId AND An.PostTypeId = 2 
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory
+    GROUP BY 
+        PostId
+),
+TagsInfo AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.Id, T.TagName
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.OwnerUserId,
+    RP.OwnerReputation,
+    PS.Score,
+    PS.CommentCount,
+    PS.AnswerCount,
+    COALESCE(PHS.CloseCount, 0) AS TotalCloseCount,
+    COALESCE(PHS.ReopenCount, 0) AS TotalReopenCount,
+    STRING_AGG(TI.TagName, ', ') AS Tags
+FROM 
+    RankedPosts RP
+JOIN 
+    PostScores PS ON RP.PostId = PS.PostId
+LEFT JOIN 
+    PostHistorySummary PHS ON RP.PostId = PHS.PostId
+LEFT JOIN 
+    TagsInfo TI ON RP.PostId = TI.TagId
+WHERE 
+    RP.RN = 1 
+GROUP BY 
+    RP.PostId, RP.Title, RP.CreationDate, RP.OwnerUserId, RP.OwnerReputation, PS.Score, PS.CommentCount, PS.AnswerCount, PHS.CloseCount, PHS.ReopenCount
+ORDER BY 
+    PS.Score DESC, RP.CreationDate DESC;

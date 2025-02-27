@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+),
+TopNationSuppliers AS (
+    SELECT 
+        ns.n_nationkey,
+        ns.n_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        nation ns
+    LEFT JOIN 
+        RankedSuppliers rs ON ns.n_nationkey = rs.s_suppkey
+    WHERE 
+        rs.rn <= 3 OR rs.rn IS NULL
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 'Unavailable'
+            WHEN ps.ps_availqty < 10 THEN 'Low Stock'
+            ELSE 'In Stock'
+        END AS availability
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT 
+    p.p_name,
+    psd.availability,
+    ts.n_name,
+    ts.s_name,
+    os.total_revenue,
+    os.lineitem_count
+FROM 
+    PartSupplierDetails psd
+JOIN 
+    TopNationSuppliers ts ON psd.p_partkey = ts.s_suppkey
+JOIN 
+    OrderSummary os ON os.lineitem_count = COALESCE(ts.s_suppkey, -1)
+WHERE 
+    (ts.s_acctbal IS NOT NULL AND ts.s_acctbal > 5000) 
+    OR (ts.s_acctbal IS NULL AND psd.ps_availqty < 5)
+ORDER BY 
+    total_revenue DESC, 
+    p.p_name ASC
+LIMIT 10 OFFSET 5;

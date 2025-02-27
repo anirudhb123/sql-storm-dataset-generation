@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserBadgeCount AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.ViewCount > 100
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    ph.Level AS PostLevel,
+    u.DisplayName AS AuthorDisplayName,
+    COALESCE(bc.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(vv.UpVotes, 0) AS UpVotes,
+    COALESCE(vv.DownVotes, 0) AS DownVotes
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.PostId
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCount bc ON u.Id = bc.UserId
+LEFT JOIN 
+    PostVoteSummary vv ON p.Id = vv.PostId
+WHERE 
+    (p.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days') OR ph.Level IS NOT NULL) 
+    AND (p.ClosedDate IS NULL OR p.PostTypeId = 1) 
+    AND (COALESCE(vv.UpVotes, 0) - COALESCE(vv.DownVotes, 0)) > 0 
+ORDER BY 
+    p.Score DESC,
+    p.ViewCount DESC;

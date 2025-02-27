@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, 0 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT ml.linked_movie_id, mh.level + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE mh.level < 5
+),
+TopMovies AS (
+    SELECT 
+        title.title, 
+        title.production_year, 
+        title.id AS title_id,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY COUNT(DISTINCT cast_info.person_id) DESC) AS rank
+    FROM movie_info mi
+    JOIN title ON mi.movie_id = title.id
+    JOIN cast_info ON cast_info.movie_id = title.id
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'genre') 
+    GROUP BY title.title, title.production_year, title.id
+),
+PopularActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY ak.name
+    HAVING COUNT(ci.movie_id) > 5
+),
+MovieCompanyCounts AS (
+    SELECT 
+        mt.movie_id,
+        COALESCE(COUNT(mc.company_id), 0) AS company_count
+    FROM movie_companies mc
+    JOIN aka_title mt ON mc.movie_id = mt.id
+    GROUP BY mt.movie_id
+)
+SELECT 
+    mh.movie_id, 
+    title.title,
+    title.production_year,
+    COALESCE(TOP.raw_count, 0) AS raw_count,
+    pa.actor_name,
+    COALESCE(cc.company_count, 0) AS company_count
+FROM MovieHierarchy mh
+LEFT JOIN title ON mh.movie_id = title.id
+LEFT JOIN (
+    SELECT 
+        title_id,
+        COUNT(1) AS raw_count
+    FROM TopMovies
+    GROUP BY title_id
+) AS TOP ON title.id = TOP.title_id
+JOIN PopularActors pa ON pa.movie_count >= (SELECT AVG(movie_count) FROM PopularActors)
+LEFT JOIN MovieCompanyCounts cc ON mh.movie_id = cc.movie_id
+WHERE title.production_year IS NOT NULL AND title.production_year >= 2000
+ORDER BY title.production_year DESC, mh.level;

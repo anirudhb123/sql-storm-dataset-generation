@@ -1,0 +1,87 @@
+
+WITH RECURSIVE total_purchases AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as rn
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, total_spent
+    FROM total_purchases 
+    WHERE rn <= 10
+),
+high_value_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+average_discount AS (
+    SELECT 
+        AVG(l.l_discount) AS avg_discount,
+        p.p_partkey
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+customer_order_stats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_order_value,
+        r.r_name AS region_name
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, r.r_name
+)
+SELECT 
+    cu.c_name,
+    cu.total_spent,
+    hp.p_name,
+    hp.total_supply_cost,
+    ad.avg_discount,
+    co.order_count,
+    co.total_order_value,
+    co.region_name
+FROM 
+    top_customers cu
+LEFT JOIN 
+    high_value_parts hp ON cu.c_custkey = hp.p_partkey
+LEFT JOIN 
+    average_discount ad ON hp.p_partkey = ad.p_partkey
+LEFT JOIN 
+    customer_order_stats co ON cu.c_custkey = co.c_custkey
+WHERE 
+    cu.total_spent IS NOT NULL AND 
+    (ad.avg_discount IS NULL OR ad.avg_discount < 0.1)
+ORDER BY 
+    cu.total_spent DESC, co.total_order_value ASC;

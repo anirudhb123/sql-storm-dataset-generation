@@ -1,0 +1,48 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nation_key, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nation_key, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.nation_key = sh.nation_key
+    WHERE s.s_acctbal < sh.level * 5000
+),
+part_ranked AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_part_summary AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty) AS total_availability, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    sh.s_name AS supplier_name,
+    p_r.p_name AS part_name,
+    CASE 
+        WHEN cps.total_spent IS NULL THEN 'No Orders'
+        ELSE CAST(cps.total_spent AS CHAR(20))  -- Standard SQL CHAR type
+    END AS customer_spending,
+    p_r.price_rank,
+    ss.total_availability,
+    ss.total_supply_cost
+FROM supplier_hierarchy sh
+LEFT JOIN supplier_part_summary ss ON sh.s_suppkey = ss.s_suppkey
+JOIN part_ranked p_r ON ss.total_supply_cost > 10000 AND p_r.price_rank <= 10
+LEFT JOIN customer_order_summary cps ON cps.total_spent IS NOT NULL
+WHERE ss.total_availability IS NOT NULL
+ORDER BY ss.total_supply_cost DESC, cps.order_count DESC;

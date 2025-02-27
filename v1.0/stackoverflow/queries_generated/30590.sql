@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY 
+            CASE 
+                WHEN p.PostTypeId = 1 THEN 'Questions'
+                WHEN p.PostTypeId = 2 THEN 'Answers'
+                ELSE 'Others'
+            END 
+            ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Consider only posts from the last year
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.Id,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    COALESCE(rc.CommentCount, 0) AS CommentCount,
+    COALESCE(rc.LastCommentDate, 'No Comments') AS LastCommentDate,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentComments rc ON rp.Id = rc.PostId
+LEFT JOIN 
+    PostsWithBadges pb ON rp.Id = pb.Id
+WHERE 
+    rp.rn <= 5  -- Limit to the top 5 recent posts per category
+ORDER BY 
+    rp.CreationDate DESC;

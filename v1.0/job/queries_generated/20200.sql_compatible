@@ -1,0 +1,85 @@
+
+WITH RecursiveCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order,
+        ka.name AS actor_name,
+        COALESCE(t.title, 'Unknown Title') AS movie_title
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name ka ON c.person_id = ka.person_id
+    LEFT JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+), 
+
+MovieSeason AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        COALESCE(m.title, 'No related movie') AS related_movie
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    LEFT JOIN 
+        title m ON ml.linked_movie_id = m.id 
+    WHERE 
+        t.season_nr IS NOT NULL 
+        AND t.episode_nr IS NOT NULL
+),
+
+HighlightedMovies AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT m.id) AS casting_count,
+        MAX(m.production_year) AS latest_year
+    FROM 
+        complete_cast m
+    GROUP BY 
+        m.movie_id
+    HAVING 
+        COUNT(DISTINCT m.id) > 5
+),
+
+ActorHighlights AS (
+    SELECT 
+        rc.actor_name,
+        rc.movie_id,
+        CASE 
+            WHEN rc.role_order = 1 THEN 'Lead Role' 
+            ELSE 'Supporting Role' 
+        END AS role_type,
+        COUNT(DISTINCT mh.title_id) AS total_movies_in_series
+    FROM 
+        RecursiveCast rc
+    LEFT JOIN 
+        MovieSeason mh ON rc.movie_id = mh.title_id
+    WHERE 
+        rc.movie_title IS NOT NULL
+    GROUP BY 
+        rc.actor_name, rc.movie_id, rc.role_order
+)
+
+SELECT 
+    ah.actor_name,
+    ah.movie_id,
+    ah.role_type,
+    ah.total_movies_in_series,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword,
+    CASE 
+        WHEN ah.total_movies_in_series > 2 THEN 'Frequent Contributor'
+        ELSE 'Less Frequent'
+    END AS contributor_status
+FROM 
+    ActorHighlights ah
+LEFT JOIN 
+    movie_keyword mk ON ah.movie_id = mk.movie_id
+ORDER BY 
+    ah.actor_name, 
+    ah.role_type DESC, 
+    ah.total_movies_in_series DESC;

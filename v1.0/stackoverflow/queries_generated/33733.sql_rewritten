@@ -1,0 +1,65 @@
+WITH RECURSIVE PostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.ViewCount,
+        a.Score,
+        a.CreationDate,
+        a.OwnerUserId,
+        Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        PostCTE q ON a.ParentId = q.Id
+)
+
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    SUM(p.Score) AS TotalScore,
+    SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+    AVG(p.ViewCount) AS AvgViewCount,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    MAX(p.CreationDate) AS LastActivity,
+    MAX(p.Depth) AS MaxDepth
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    (SELECT 
+         p.Id,
+         UNNEST(string_to_array(p.Tags, ',')) AS TagName
+     FROM 
+         Posts p
+     WHERE 
+         p.Tags IS NOT NULL) t ON p.Id = t.Id
+LEFT JOIN 
+    PostCTE pc ON pc.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 1000 
+GROUP BY 
+    u.Id
+HAVING 
+    SUM(p.ViewCount) > 100 
+ORDER BY 
+    TotalScore DESC, 
+    LastActivity DESC;

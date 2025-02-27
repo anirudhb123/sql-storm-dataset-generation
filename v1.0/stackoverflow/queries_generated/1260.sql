@@ -1,0 +1,58 @@
+WITH UserBadgeCount AS (
+    SELECT 
+        UserId, 
+        COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+),
+PopularPosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        OwnerUserId,
+        Score,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY Score DESC) AS PopularityRank
+    FROM Posts
+    WHERE Score > 0
+    AND CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostTypeCounts AS (
+    SELECT 
+        pOwner.UserId,
+        COUNT(CASE WHEN pt.Name = 'Question' THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN pt.Name = 'Answer' THEN 1 END) AS AnswerCount
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN Users pOwner ON p.OwnerUserId = pOwner.Id
+    GROUP BY pOwner.UserId
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN cr.Name END) AS CloseReason,
+        MAX(cr.Name) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenReason
+    FROM PostHistory ph
+    LEFT JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ubc.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ubc.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ubc.BronzeBadges, 0) AS BronzeBadges,
+    pp.Title AS PopularPostTitle,
+    pp.Score AS PopularPostScore,
+    pt.QuestionCount,
+    pt.AnswerCount,
+    cr.CloseReason,
+    cr.ReopenReason
+FROM Users u
+LEFT JOIN UserBadgeCount ubc ON u.Id = ubc.UserId
+LEFT JOIN PopularPosts pp ON u.Id = pp.OwnerUserId AND pp.PopularityRank = 1
+LEFT JOIN PostTypeCounts pt ON u.Id = pt.UserId
+LEFT JOIN CloseReasons cr ON cr.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+WHERE u.Reputation > 1000
+ORDER BY u.Reputation DESC, u.DisplayName ASC;

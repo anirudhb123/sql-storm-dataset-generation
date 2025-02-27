@@ -1,0 +1,57 @@
+WITH EnhancedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.Tags, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, ViewCount, Score, OwnerDisplayName, CommentCount, BadgeCount, TagNames
+    FROM 
+        EnhancedPosts
+    WHERE 
+        rn = 1
+    ORDER BY 
+        Score DESC
+    LIMIT 10
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    tp.BadgeCount,
+    tp.TagNames,
+    COUNT(DISTINCT v.UserId) AS UniqueVoters,
+    STRING_AGG(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN 'Upvote' ELSE 'Downvote' END, ', ') AS VoteTypes
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId
+GROUP BY 
+    tp.Title, tp.CreationDate, tp.ViewCount, tp.Score, tp.OwnerDisplayName, tp.CommentCount, tp.BadgeCount, tp.TagNames
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

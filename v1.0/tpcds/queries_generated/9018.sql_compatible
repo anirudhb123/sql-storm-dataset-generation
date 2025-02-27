@@ -1,0 +1,48 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+top_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    JOIN 
+        customer c ON i.i_item_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    ti.total_sales,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customer_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+FROM 
+    top_items ti
+JOIN 
+    customer c ON c.c_current_cdemo_sk = ti.cd_demo_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    ti.i_item_id, ti.i_item_desc, ti.total_sales, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+ORDER BY 
+    total_sales DESC;

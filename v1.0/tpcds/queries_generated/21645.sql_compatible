@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_sales_price DESC) AS rank_price,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_order_number) AS total_quantity,
+        DATE '2002-10-01' - (SELECT MIN(d.d_date) FROM date_dim d WHERE d.d_year = EXTRACT(YEAR FROM DATE '2002-10-01')) AS days_since_first_sale
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0 
+        AND ws.ws_quantity IS NOT NULL
+),
+ReturnStatistics AS (
+    SELECT 
+        wr.wr_order_number,
+        COUNT(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt_inc_tax) AS total_returned_amt
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_order_number
+),
+SalesWithReturns AS (
+    SELECT 
+        rs.ws_order_number,
+        rs.ws_item_sk,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        COALESCE(rt.total_returns, 0) AS total_returns,
+        COALESCE(rt.total_returned_amt, 0) AS total_returned_amt,
+        CASE WHEN COALESCE(rt.total_returned_amt, 0) > 0 THEN 'Returned' ELSE 'Stable' END AS status
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        ReturnStatistics rt ON rs.ws_order_number = rt.wr_order_number
+)
+SELECT 
+    swr.ws_order_number,
+    swr.ws_item_sk,
+    swr.ws_quantity,
+    swr.ws_sales_price,
+    swr.total_returns,
+    swr.total_returned_amt,
+    swr.days_since_first_sale,
+    CASE 
+        WHEN swr.total_returns > 0 THEN 
+            CASE 
+                WHEN swr.total_returned_amt < swr.ws_sales_price THEN 'High Return Rate'
+                ELSE 'Standard Return Rate'
+            END
+        ELSE 'No Returns'
+    END AS return_rate_category,
+    COUNT(c.c_customer_sk) OVER (PARTITION BY swr.ws_order_number) AS customer_count
+FROM 
+    SalesWithReturns swr
+LEFT OUTER JOIN 
+    customer c ON c.c_customer_sk = (SELECT MAX(cus.c_customer_sk) FROM customer cus WHERE cus.c_first_shipto_date_sk IN (SELECT ds.d_date_sk FROM date_dim ds WHERE ds.d_date = DATE '2002-10-01' - INTERVAL '30 days'))
+WHERE 
+    swr.status = 'Stable' AND 
+    swr.days_since_first_sale BETWEEN 0 AND 365
+ORDER BY 
+    swr.ws_order_number, swr.ws_item_sk;

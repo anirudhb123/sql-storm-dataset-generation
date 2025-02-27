@@ -1,0 +1,51 @@
+WITH movie_details AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        MAX(CASE WHEN ci.person_role_id IS NOT NULL THEN 'Has Cast Info' ELSE 'No Cast Info' END) AS cast_info_status
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.person_id = ak.person_id
+    LEFT JOIN 
+        complete_cast co ON mt.id = co.movie_id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    WHERE 
+        mt.production_year >= 2000 
+        AND (mi.note IS NULL OR mi.info_type_id IS NOT NULL)
+    GROUP BY 
+        mt.id
+),
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.total_cast,
+    COALESCE(ks.keyword_count, 0) AS keyword_count,
+    md.cast_names,
+    md.cast_info_status
+FROM 
+    movie_details md
+LEFT JOIN 
+    keyword_summary ks ON md.movie_title = (SELECT title FROM aka_title WHERE id = ks.movie_id)
+ORDER BY 
+    md.production_year DESC,
+    md.total_cast DESC
+LIMIT 100;
+

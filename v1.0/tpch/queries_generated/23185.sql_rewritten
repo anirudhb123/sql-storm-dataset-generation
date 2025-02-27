@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+), 
+
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > 1000.00
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 5
+),
+
+PartAvailability AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS available_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) IS NOT NULL
+),
+
+FinalBenchmark AS (
+    SELECT 
+        COALESCE(cd.c_custkey, 0) AS customer_id,
+        so.s_name AS supplier_name,
+        pa.p_name AS part_name,
+        pa.available_qty,
+        ro.o_totalprice AS highest_order_value,
+        cd.total_orders,
+        cd.total_spent
+    FROM SupplierDetails so
+    FULL OUTER JOIN PartAvailability pa ON so.total_supplycost > 15000
+    FULL OUTER JOIN CustomerOrders cd ON cd.total_spent > 5000
+    LEFT JOIN RankedOrders ro ON ro.o_orderkey = (SELECT MAX(o.o_orderkey)
+        FROM orders o WHERE o.o_totalprice IS NOT NULL 
+        AND o.o_orderstatus = 'O' AND ro.order_rank = 1)
+    WHERE pa.available_qty >= 10 * COALESCE(cd.total_orders, 1)
+)
+
+SELECT 
+    customer_id,
+    supplier_name,
+    part_name,
+    available_qty,
+    highest_order_value,
+    total_orders,
+    total_spent
+FROM FinalBenchmark
+WHERE (total_orders IS NULL OR total_orders BETWEEN 5 AND 20)
+AND (supplier_name LIKE '%Inc%' OR supplier_name IS NULL)
+ORDER BY total_spent DESC, available_qty DESC;

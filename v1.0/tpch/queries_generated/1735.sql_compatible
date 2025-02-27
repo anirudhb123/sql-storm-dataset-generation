@@ -1,0 +1,37 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           COALESCE(SUM(ps.ps_supplycost * ps.ps_availqty), 0) AS TotalSupplyCost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS Revenue,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    R.NationCount,
+    CASE 
+        WHEN sd.TotalSupplyCost > 10000 THEN 'High Supply'
+        ELSE 'Low Supply'
+    END AS SupplyCategory
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN RankedOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN (
+    SELECT n.n_nationkey, COUNT(DISTINCT c.c_custkey) AS NationCount
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey
+) R ON o.o_custkey = R.n_nationkey 
+LEFT JOIN SupplierDetails sd ON p.p_partkey = sd.s_suppkey
+WHERE l.l_shipdate BETWEEN o.o_orderdate AND DATEADD(DAY, 30, o.o_orderdate)
+GROUP BY p.p_name, sd.TotalSupplyCost, R.NationCount
+HAVING COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 50000
+ORDER BY Revenue DESC;

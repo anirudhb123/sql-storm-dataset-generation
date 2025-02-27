@@ -1,0 +1,89 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+top_sales AS (
+    SELECT 
+        web_site_sk,
+        total_sales
+    FROM 
+        sales_data
+    WHERE 
+        sales_rank <= 5
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        HOUR(TIME_FORMAT(STR_TO_DATE(t.t_time,'%H:%i:%s'), '%H:%i:%s')) AS buying_hour,
+        SUM(ws.ws_quantity) AS total_purchased
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        buying_hour
+),
+final_report AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_marital_status,
+        cs.buying_hour,
+        ts.total_sales
+    FROM 
+        customer_details cs
+    JOIN 
+        top_sales ts ON cs.c_customer_sk = ts.web_site_sk
+)
+SELECT 
+    fr.c_customer_id,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_marital_status,
+    fr.buying_hour,
+    COALESCE(fr.total_sales, 0) AS total_sales
+FROM 
+    final_report fr
+LEFT JOIN 
+    customer_address ca ON fr.c_customer_sk = ca.ca_address_sk
+WHERE 
+    (fr.total_sales > 100)
+
+UNION ALL
+
+SELECT 
+    NULL AS c_customer_id,
+    'Total' AS c_first_name,
+    NULL AS c_last_name,
+    NULL AS cd_marital_status,
+    NULL AS buying_hour,
+    SUM(total_sales) AS total_sales
+FROM 
+    final_report
+GROUP BY 
+    'Total'
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,45 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rnk
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 50000 OR cd.cd_marital_status = 'M'
+),
+sales_summary AS (
+    SELECT
+        item.i_item_id,
+        SUM(s.ws_sales_price * s.ws_quantity) AS total_sales,
+        AVG(s.ws_sales_price) AS avg_price,
+        COUNT(s.ws_order_number) AS total_orders
+    FROM ranked_sales s
+    JOIN item i ON s.ws_item_sk = i.i_item_sk
+    WHERE s.rnk = 1
+    GROUP BY item.i_item_id
+)
+SELECT
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ss.total_sales,
+    ss.avg_price,
+    ss.total_orders,
+    DENSE_RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+FROM customer_info ci
+JOIN sales_summary ss ON ci.c_customer_sk = ss.i_item_id
+WHERE ss.total_sales IS NOT NULL
+  AND ci.cd_gender IS NOT NULL
+ORDER BY sales_rank;

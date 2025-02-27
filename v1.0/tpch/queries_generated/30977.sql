@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nationkey, 
+           0 AS level
+    FROM supplier s
+    WHERE s.s_suppkey IN (SELECT ps_suppkey 
+                          FROM partsupp ps 
+                          WHERE ps.ps_availqty > 100)
+
+    UNION ALL
+
+    SELECT s2.s_suppkey, s2.s_name, s2.s_address, s2.nationkey,
+           sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.nationkey = sh.nationkey
+)
+
+SELECT
+    n.n_name AS nation,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(o.o_totalprice) AS avg_order_total,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    STRING_AGG(DISTINCT p.p_name) AS products,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l.l_quantity) OVER (PARTITION BY n.n_name) AS median_quantity,
+    CASE
+        WHEN AVG(s.s_acctbal) IS NULL THEN 'No Suppliers'
+        ELSE 'Average Balance: ' || ROUND(AVG(s.s_acctbal), 2)::varchar
+    END AS supplier_balance_info
+FROM
+    nation n
+LEFT JOIN
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN
+    customer c ON s.s_suppkey = c.c_nationkey
+LEFT JOIN
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN
+    part p ON l.l_partkey = p.p_partkey
+WHERE
+    l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+GROUP BY
+    n.n_name
+ORDER BY
+    customer_count DESC NULLS LAST;

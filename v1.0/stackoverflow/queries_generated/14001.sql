@@ -1,0 +1,52 @@
+-- Performance Benchmarking Query
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.VoteTypeId IN (2, 3)) AS VoteCount, -- upvotes and downvotes
+        SUM(B.Id IS NOT NULL) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(P.ClosedDate, 'Open') AS Status
+    FROM 
+        Posts P
+)
+SELECT 
+    U.DisplayName,
+    U.PostCount,
+    U.CommentCount,
+    U.VoteCount,
+    U.BadgeCount,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.Status
+FROM 
+    UserEngagement U
+JOIN 
+    PostStatistics P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.PostCount DESC, U.VoteCount DESC;

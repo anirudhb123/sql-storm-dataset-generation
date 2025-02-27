@@ -1,0 +1,95 @@
+WITH UserScoreSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        COALESCE(COUNT(C.ID), 0) AS CommentCount,
+        COALESCE(AVG(CAST(H.Comment AS varchar)), 'No Comments') AS LastComment,
+        P.ViewCount,
+        NTILE(3) OVER (ORDER BY P.CreationDate DESC) AS RecentPostCategory
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11, 12)
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '90 days' 
+        AND P.Score >= 0
+    GROUP BY 
+        P.Id
+),
+FilteredPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.Score,
+        PA.CommentCount,
+        PA.ViewCount,
+        RCT.ReasonType,
+        PA.RecentPostCategory
+    FROM 
+        PostAnalytics PA
+    LEFT JOIN (
+        SELECT 
+            PH.PostId, 
+            STRING_AGG(CASE WHEN PH.Comment IS NULL THEN 'No Comment' ELSE PH.Comment END, ', ') AS ReasonType
+        FROM 
+            PostHistory PH
+        WHERE 
+            PH.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+            AND PH.PostHistoryTypeId IN (10, 11)
+        GROUP BY 
+            PH.PostId
+    ) RCT ON PA.PostId = RCT.PostId
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation,
+    COUNT(FP.PostId) AS PostCount,
+    SUM(FP.ViewCount) AS TotalViews,
+    SUM(FP.CommentCount) AS TotalComments,
+    AVG(FP.Score) AS AverageScore,
+    STRING_AGG(DISTINCT FT.Name, ', ') AS TagNames,
+    CASE 
+        WHEN U.Reputation > 1000 THEN 'Expert'
+        ELSE 'Novice'
+    END AS UserType
+FROM 
+    UserScoreSummary U
+LEFT JOIN 
+    FilteredPosts FP ON FP.RecentPostCategory = UserRank
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            T.TagName 
+        FROM 
+            Tags T 
+        JOIN 
+            Posts P ON P.Tags ILIKE '%' || T.TagName || '%' 
+        WHERE 
+            P.Id = FP.PostId 
+        LIMIT 3
+    ) FT ON TRUE
+GROUP BY 
+    U.DisplayName, U.Reputation
+ORDER BY 
+    TotalViews DESC, AverageScore DESC
+LIMIT 100;

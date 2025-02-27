@@ -1,0 +1,32 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT id AS movie_id, title, production_year, NULL::integer AS parent_id
+    FROM aka_title
+    WHERE production_year >= 2000
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, mh.movie_id
+    FROM aka_title mt
+    JOIN MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COALESCE(SUM(mk.keyword_count), 0) AS total_keywords,
+    AVG(CASE 
+            WHEN ci.note IS NULL THEN 1 
+            ELSE 0 
+        END) AS null_notes_ratio,
+    COUNT(DISTINCT mh.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS company_types,
+    RANK() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT mh.movie_id) DESC) AS rank_by_movies
+FROM aka_name ak
+LEFT JOIN cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN company_type cct ON mc.company_type_id = cct.id
+WHERE ak.name IS NOT NULL
+GROUP BY ak.name, ak.id
+HAVING COUNT(DISTINCT mh.movie_id) > 1
+ORDER BY rank_by_movies;

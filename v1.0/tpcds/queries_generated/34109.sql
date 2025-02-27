@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROUND(ws.ws_sales_price * 0.1, 2) AS discount_amount,
+        ws.ws_sales_price - ROUND(ws.ws_sales_price * 0.1, 2) AS net_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROUND(ws.ws_sales_price * 0.2, 2),
+        ws.ws_sales_price - ROUND(ws.ws_sales_price * 0.2, 2),
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_order_number) + 1
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk < (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2024)
+)
+SELECT 
+    ca.ca_country,
+    SUM(COALESCE(sd.net_sales_price, 0)) AS total_sales,
+    AVG(sd.discount_amount) AS average_discount,
+    COUNT(DISTINCT sd.ws_order_number) AS total_orders,
+    CASE 
+        WHEN SUM(sd.net_sales_price) > 10000 THEN 'High Performer'
+        WHEN SUM(sd.net_sales_price) BETWEEN 5000 AND 10000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    sales_data sd
+LEFT JOIN 
+    customer c ON c.c_customer_sk = sd.web_site_sk
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+GROUP BY 
+    ca.ca_country
+HAVING 
+    COUNT(DISTINCT sd.ws_order_number) > 5
+ORDER BY 
+    total_sales DESC;

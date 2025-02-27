@@ -1,0 +1,57 @@
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostStatistics AS (
+    SELECT 
+        up.UserId,
+        up.TotalPosts,
+        up.TotalQuestions,
+        up.TotalAnswers,
+        COALESCE(SUM(pvc.TotalVotes), 0) AS TotalVotes,
+        COALESCE(SUM(pvc.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(pvc.DownVotes), 0) AS TotalDownVotes
+    FROM 
+        UserPostCounts up
+    LEFT JOIN 
+        PostVoteCounts pvc ON up.TotalPosts > 0
+    GROUP BY 
+        up.UserId, up.TotalPosts, up.TotalQuestions, up.TotalAnswers
+)
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalVotes,
+    ups.TotalUpVotes,
+    ups.TotalDownVotes
+FROM 
+    Users u
+JOIN 
+    UserPostStatistics ups ON u.Id = ups.UserId
+ORDER BY 
+    ups.TotalPosts DESC
+LIMIT 10;

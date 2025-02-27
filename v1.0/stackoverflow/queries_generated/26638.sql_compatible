@@ -1,0 +1,68 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts P
+    CROSS APPLY STRING_SPLIT(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><') AS Tags
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostActivity AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.ANSWER_COUNT, 0) AS AnswerCount,
+        COALESCE(P.CommentCount, 0) AS CommentCount,
+        PH.UserDisplayName,
+        PH.CreationDate AS LastEditDate,
+        PH.Comment AS EditComment
+    FROM
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5) 
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    TC.TagCount,
+    R.QuestionCount,
+    R.TotalBadges,
+    PA.Title,
+    PA.CreationDate AS PostCreationDate,
+    PA.LastEditDate,
+    PA.EditComment
+FROM 
+    Users U
+JOIN 
+    UserReputation R ON U.Id = R.UserId
+LEFT JOIN 
+    PostTagCounts TC ON R.QuestionCount > 0 
+LEFT JOIN 
+    PostActivity PA ON PA.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.Id)
+WHERE 
+    U.Reputation > 1000 
+ORDER BY 
+    R.Reputation DESC, 
+    TC.TagCount DESC,
+    PA.CreationDate DESC;

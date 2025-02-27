@@ -1,0 +1,60 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_web_return_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_web_return_amt
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        cd.cd_marital_status,
+        cd.cd_buy_potential,
+        COUNT(cs.cs_order_number) AS total_orders,
+        SUM(cs.cs_sales_price) AS total_spent
+    FROM 
+        customer c 
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, gender, cd.cd_marital_status, cd.cd_buy_potential
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.gender,
+    cd.cd_marital_status,
+    cd.cd_buy_potential,
+    cd.total_orders,
+    cd.total_spent,
+    COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    COALESCE(wr.total_web_return_quantity, 0) AS total_web_return_quantity,
+    COALESCE(wr.total_web_return_amt, 0) AS total_web_return_amt,
+    CASE 
+        WHEN cd.total_spent > 1000 THEN 'High Value'
+        WHEN cd.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    CustomerDemographics cd
+    LEFT JOIN CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN WebReturns wr ON cd.c_customer_sk = wr.wr_returning_customer_sk
+WHERE 
+    cd.total_orders > 0
+ORDER BY 
+    cd.total_spent DESC;

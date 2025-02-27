@@ -1,0 +1,105 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Select only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE cte ON p.ParentId = cte.PostId
+    WHERE 
+        p.PostTypeId = 2  -- Select only answers
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(cast(ROUND((EXTRACT(EPOCH FROM (NOW() - u.CreationDate)) / 86400), 2) AS decimal)) AS AccountAgeDays
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PostStatistics AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.CreationDate,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = r.PostId) AS TotalComments,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = r.PostId AND VoteTypeId = 2) AS Upvotes,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = r.PostId AND VoteTypeId = 3) AS Downvotes,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = r.PostId AND VoteTypeId = 10) AS Deletions
+    FROM 
+        RecursivePostCTE r
+),
+FinalStatistics AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        ps.PostId,
+        ps.Title,
+        ps.ViewCount,
+        ps.Score,
+        ps.TotalComments,
+        ps.Upvotes,
+        ps.Downvotes,
+        ps.Deletions,
+        up.TotalViews,
+        DATE_TRUNC('month', ps.CreationDate) AS MonthCreated,
+        ROW_NUMBER() OVER (PARTITION BY up.UserId ORDER BY ps.ViewCount DESC) AS PostRank
+    FROM 
+        UserPerformance up
+    JOIN 
+        PostStatistics ps ON up.UserId = ps.OwnerUserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    COUNT(PostId) AS TotalPosts,
+    SUM(ViewCount) AS TotalViews,
+    SUM(Score) AS TotalScore,
+    AVG(Score) AS AvgScorePerPost,
+    MAX(PostRank) AS HighestPostRank,
+    MIN(PostRank) AS LowestPostRank,
+    COUNT(DISTINCT MonthCreated) AS ActiveMonths
+FROM 
+    FinalStatistics
+GROUP BY 
+    UserId, DisplayName
+HAVING 
+    COUNT(PostId) > 5  -- Consider users with more than 5 posts
+ORDER BY 
+    TotalViews DESC
+LIMIT 10;

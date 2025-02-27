@@ -1,0 +1,60 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        a.title AS movie_title,
+        t.title AS original_title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS title_rank,
+        a.movie_id
+    FROM 
+        aka_title a
+    JOIN 
+        title t ON a.movie_id = t.id
+    WHERE 
+        a.production_year >= 2000
+),
+
+cast_aggregate AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(CASE WHEN r.role = 'Actor' THEN 1 END) AS total_actors,
+        COUNT(CASE WHEN r.role = 'Director' THEN 1 END) AS total_directors
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+),
+
+keyword_aggregate AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    rt.movie_title,
+    rt.original_title,
+    rt.production_year,
+    ca.total_cast,
+    ca.total_actors,
+    ca.total_directors,
+    ka.keywords
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    cast_aggregate ca ON rt.movie_id = ca.movie_id
+LEFT JOIN 
+    keyword_aggregate ka ON rt.movie_id = ka.movie_id
+WHERE 
+    rt.title_rank <= 10
+ORDER BY 
+    rt.production_year DESC, rt.movie_title;

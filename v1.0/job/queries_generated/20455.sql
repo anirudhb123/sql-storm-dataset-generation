@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        mt.id AS root_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5
+),
+ActorMovieDetails AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY at.production_year DESC) AS recent_role
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        ak.name IS NOT NULL
+        AND ak.name NOT LIKE '%Unknown%'
+),
+FilteredMovies AS (
+    SELECT 
+        mh.root_movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(AVG(amd.recent_role), 0) AS avg_recent_actor_role
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorMovieDetails amd ON mh.movie_id = amd.movie_title
+    GROUP BY 
+        mh.root_movie_id, mh.title, mh.production_year
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.avg_recent_actor_role,
+    CASE 
+        WHEN fm.avg_recent_actor_role <= 1 THEN 'Often Cast'
+        WHEN fm.avg_recent_actor_role BETWEEN 1 AND 3 THEN 'Moderately Cast'
+        ELSE 'Rarely Cast'
+    END AS cast_frequency
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.production_year >= 1980
+ORDER BY 
+    fm.production_year DESC,
+    cast_frequency DESC NULLS LAST
+LIMIT 50;

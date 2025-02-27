@@ -1,0 +1,39 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 2459582 AND 2459588  -- Example date range
+    GROUP BY
+        ws.web_site_id
+),
+top_web_sites AS (
+    SELECT
+        web_site_id,
+        total_net_profit,
+        total_orders
+    FROM
+        ranked_sales
+    WHERE
+        profit_rank <= 5
+)
+SELECT
+    tws.web_site_id,
+    tws.total_net_profit AS net_profit,
+    tws.total_orders AS order_count,
+    CONCAT('Web Site ', tws.web_site_id) AS summary
+FROM
+    top_web_sites tws
+JOIN
+    web_site w ON tws.web_site_id = w.web_site_id
+WHERE
+    w.web_country = 'USA'
+ORDER BY
+    tws.total_net_profit DESC, tws.total_orders DESC;

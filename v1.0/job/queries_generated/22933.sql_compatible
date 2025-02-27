@@ -1,0 +1,61 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS integer) AS parent_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT CONCAT(n.name, ' (', COALESCE(r.role, 'Unknown'), ')'), ', ') AS actors,
+    MAX(COALESCE(ci.note, 'No Note')) AS note,
+    CASE
+        WHEN mh.level = 0 THEN 'Main Movie'
+        WHEN mh.level > 0 THEN 'Related Movie'
+        ELSE 'Unknown Level'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    role_type r ON r.id = c.role_id
+LEFT JOIN 
+    aka_name n ON n.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+WHERE 
+    mi.info IS NOT NULL OR mi.note IS NULL
+GROUP BY 
+    mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT c.person_id) > 1
+ORDER BY 
+    mh.production_year DESC, actor_count DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM aka_title) / 2;

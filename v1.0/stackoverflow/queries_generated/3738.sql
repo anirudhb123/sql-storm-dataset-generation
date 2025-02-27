@@ -1,0 +1,54 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        AVG(NULLIF(P.Score, 0)) AS AvgScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN Votes V ON V.UserId = U.Id AND V.PostId = P.Id
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.PostTypeId = 1
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRow
+    FROM PostHistory PH
+    JOIN Posts P ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11)  -- Closed or Reopened posts
+)
+SELECT 
+    U.DisplayName,
+    US.UpVotesCount,
+    US.DownVotesCount,
+    US.QuestionCount,
+    US.CommentCount,
+    US.AvgScore,
+    P.Title AS RecentPostTitle,
+    R.PostRank,
+    COALESCE(RP.Comment, 'No recent changes') AS RecentComment,
+    COALESCE(RP.CreationDate, 'No recent changes') AS RecentChangeDate
+FROM UserStats US
+JOIN Users U ON US.UserId = U.Id
+LEFT JOIN RankedPosts R ON R.Id = (
+    SELECT Id FROM RankedPosts WHERE OwnerUserId = U.Id ORDER BY CreationDate DESC LIMIT 1
+)
+LEFT JOIN RecentPostHistory RP ON RP.PostId = R.Id AND RP.HistoryRow = 1
+WHERE US.QuestionCount > 0
+ORDER BY US.UpVotesCount DESC, US.AvgScore DESC;

@@ -1,0 +1,49 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+TagStatistics AS (
+    SELECT
+        UNNEST(string_to_array(Tags, '>')) AS Tag,
+        COUNT(*) AS TagUsage
+    FROM Posts
+    WHERE PostTypeId = 1
+    GROUP BY Tag
+),
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS PostTags,
+        p.OwnerUserId
+    FROM Posts p
+    JOIN Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE p.ViewCount > 1000
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.OwnerUserId
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBadges,
+    COUNT(DISTINCT ps.Id) AS PopularPostCount,
+    COUNT(DISTINCT ts.Tag) AS UniqueTags,
+    COALESCE(MAX(ts.TagUsage), 0) AS MaxTagUsage
+FROM UserActivity ua
+LEFT JOIN PopularPosts ps ON ua.UserId = ps.OwnerUserId
+LEFT JOIN TagStatistics ts ON ts.Tag = ANY(ps.PostTags)
+GROUP BY ua.UserId, ua.DisplayName
+ORDER BY ua.TotalPosts DESC, PopularPostCount DESC;

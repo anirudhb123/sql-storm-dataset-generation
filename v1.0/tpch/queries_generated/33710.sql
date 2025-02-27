@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.orderkey, o.custkey, 1 AS depth
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.orderkey, o.custkey, oh.depth + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.custkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierRanked AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY (ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+OrderTotal AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N' AND l.l_linestatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT ph.orderkey, ph.depth, sr.s_name, ps.p_name, ps.ps_availqty,
+       ps.total_cost, ot.total_price,
+       CASE 
+           WHEN ot.total_price > 10000 THEN 'High Value'
+           ELSE 'Normal Value'
+       END AS order_value_category
+FROM OrderHierarchy ph
+LEFT JOIN SupplierRanked sr ON sr.rank <= 3
+LEFT JOIN PartSupplierDetails ps ON ps.rn = 1
+LEFT JOIN OrderTotal ot ON ot.o_orderkey = ph.orderkey
+WHERE sr.s_acctbal IS NOT NULL AND ot.total_price IS NOT NULL
+ORDER BY ph.depth, ot.total_price DESC
+LIMIT 50;

@@ -1,0 +1,37 @@
+
+SELECT 
+    ak.name AS aka_name, 
+    ti.title AS movie_title, 
+    ci.nr_order AS cast_order, 
+    pt.role AS person_role, 
+    cn.name AS company_name, 
+    ki.keyword AS movie_keyword 
+FROM 
+    aka_name ak 
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id 
+JOIN 
+    title ti ON ci.movie_id = ti.id 
+JOIN 
+    role_type pt ON ci.role_id = pt.id 
+JOIN 
+    movie_companies mc ON ti.id = mc.movie_id 
+JOIN 
+    company_name cn ON mc.company_id = cn.id 
+JOIN 
+    movie_keyword mk ON ti.id = mk.movie_id 
+JOIN 
+    keyword ki ON mk.keyword_id = ki.id 
+WHERE 
+    ti.production_year BETWEEN 2000 AND 2020 
+    AND cn.country_code = 'USA' 
+GROUP BY 
+    ak.name, 
+    ti.title, 
+    ci.nr_order, 
+    pt.role, 
+    cn.name, 
+    ki.keyword 
+ORDER BY 
+    ti.production_year DESC, 
+    ak.name;

@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_sales_price) DESC) AS sales_rank
+    FROM store_sales
+    JOIN store ON store_sales.ss_store_sk = store.s_store_sk
+    GROUP BY s_store_sk, s_store_name, ss_sold_date_sk
+    HAVING SUM(ss_sales_price) > 1000
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS orders_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+date_range AS (
+    SELECT 
+        d_date_sk,
+        d_date,
+        CASE 
+            WHEN d_dow IN (1, 2, 3, 4, 5) THEN 'Weekday'
+            ELSE 'Weekend'
+        END AS day_type
+    FROM date_dim
+),
+sales_summary AS (
+    SELECT 
+        d.d_date,
+        s.s_store_name,
+        COALESCE(SUM(ws.ws_ext_sales_price), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_ext_sales_price), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_ext_sales_price), 0) AS total_store_sales
+    FROM date_range d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    LEFT JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY d.d_date, s.s_store_name
+),
+final_report AS (
+    SELECT 
+        sh.s_store_name,
+        sh.total_sales,
+        cs.orders_count,
+        cs.total_profit,
+        COALESCE(ss.total_web_sales, 0) AS total_web_sales,
+        COALESCE(ss.total_catalog_sales, 0) AS total_catalog_sales,
+        COALESCE(ss.total_store_sales, 0) AS total_store_sales,
+        DENSE_RANK() OVER (ORDER BY sh.total_sales DESC) AS store_rank
+    FROM sales_hierarchy sh
+    LEFT JOIN customer_stats cs ON 1=1  -- Cross join for statistical analysis
+    LEFT JOIN sales_summary ss ON sh.s_store_name = ss.s_store_name
+)
+SELECT 
+    store_name, 
+    total_sales,
+    orders_count,
+    total_profit,
+    total_web_sales,
+    total_catalog_sales,
+    total_store_sales,
+    store_rank
+FROM final_report
+WHERE store_rank <= 10
+ORDER BY total_sales DESC;

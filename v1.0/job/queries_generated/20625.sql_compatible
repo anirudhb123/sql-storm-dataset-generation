@@ -1,0 +1,63 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        ca.movie_id, 
+        COUNT(DISTINCT ca.person_id) AS total_cast,
+        SUM(CASE WHEN ca.note IS NULL THEN 1 ELSE 0 END) AS null_notes_count
+    FROM 
+        cast_info ca
+    JOIN 
+        title t ON ca.movie_id = t.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        ca.movie_id
+),
+ExtendedCTE AS (
+    SELECT 
+        r.movie_id,
+        r.total_cast,
+        r.null_notes_count,
+        (SELECT COUNT(*) 
+         FROM movie_info mi
+         WHERE mi.movie_id = r.movie_id AND mi.info_type_id = 1) AS info_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        RecursiveCTE r
+    LEFT JOIN 
+        movie_keyword mk ON r.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        r.movie_id, r.total_cast, r.null_notes_count
+),
+FinalCTE AS (
+    SELECT 
+        e.movie_id,
+        e.total_cast,
+        e.null_notes_count,
+        e.info_count,
+        e.keywords,
+        ROW_NUMBER() OVER (PARTITION BY e.info_count ORDER BY e.total_cast DESC) AS cast_rank
+    FROM 
+        ExtendedCTE e
+)
+SELECT 
+    t.title,
+    COALESCE(f.cast_rank, 'No Rank') AS cast_rank,
+    f.total_cast,
+    COALESCE(f.keywords, 'No Keywords') AS keywords,
+    (SELECT AVG(total_cast) FROM FinalCTE) AS avg_cast,
+    CASE 
+        WHEN f.total_cast > (SELECT AVG(total_cast) FROM FinalCTE) THEN 'Above Average'
+        WHEN f.total_cast < (SELECT AVG(total_cast) FROM FinalCTE) THEN 'Below Average'
+        ELSE 'Average'
+    END AS cast_performance
+FROM 
+    FinalCTE f
+JOIN 
+    title t ON f.movie_id = t.id
+WHERE 
+    f.null_notes_count > 0 OR f.total_cast >= (SELECT MAX(total_cast) FROM ExtendedCTE)
+ORDER BY 
+    f.total_cast DESC;

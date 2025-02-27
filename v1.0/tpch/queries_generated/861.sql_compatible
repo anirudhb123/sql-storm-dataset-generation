@@ -1,0 +1,74 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) as AccountRank
+    FROM 
+        customer c
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost) as CostRank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalPrice,
+        COUNT(DISTINCT l.l_linenumber) AS ItemCount,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+)
+SELECT 
+    r.r_name AS RegionName,
+    COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+    SUM(COALESCE(os.TotalPrice, 0)) AS TotalOrderValue,
+    AVG(COALESCE(sp.ps_supplycost, 0)) AS AvgSupplyCost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedCustomers rc ON c.c_custkey = rc.c_custkey AND rc.AccountRank <= 5
+LEFT JOIN 
+    OrderSummary os ON os.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey = c.c_custkey
+    )
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey IN (
+            SELECT s.s_suppkey 
+            FROM supplier s 
+            WHERE s.s_nationkey = n.n_nationkey
+        ) 
+        AND sp.CostRank = 1
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    TotalOrderValue DESC;

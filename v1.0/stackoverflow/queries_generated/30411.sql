@@ -1,0 +1,89 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.OwnerUserId, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount,
+        P.Tags, 
+        P.AcceptedAnswerId, 
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Selecting only questions
+    UNION ALL
+    SELECT 
+        A.Id, 
+        A.Title, 
+        A.OwnerUserId, 
+        A.CreationDate, 
+        A.Score, 
+        A.ViewCount,
+        A.Tags, 
+        A.AcceptedAnswerId, 
+        Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursiveCTE R ON A.ParentId = R.PostId
+    WHERE 
+        A.PostTypeId = 2  -- Selecting only answers
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 5
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    R.Score,
+    R.ViewCount,
+    R.CreationDate,
+    R.Tags,
+    U.DisplayName AS PostOwner,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    COALESCE(MAU.TotalPosts, 0) AS ActiveUserPosts,
+    COALESCE(MAU.TotalViews, 0) AS ActiveUserViews,
+    CASE 
+        WHEN R.AcceptedAnswerId IS NOT NULL THEN 'Yes'
+        ELSE 'No'
+    END AS HasAcceptedAnswer,
+    ROW_NUMBER() OVER (PARTITION BY R.OwnerUserId ORDER BY R.CreationDate DESC) AS UserPostRank
+FROM 
+    RecursiveCTE R
+JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    MostActiveUsers MAU ON MAU.OwnerUserId = U.Id
+WHERE 
+    R.ViewCount > (SELECT AVG(ViewCount) FROM Posts)
+ORDER BY 
+    R.Score DESC, R.ViewCount DESC;

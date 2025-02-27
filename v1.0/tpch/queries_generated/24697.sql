@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level, CAST(s.s_name AS VARCHAR(100)) AS path
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1, CAST(sh.path || ' -> ' || s.s_name AS VARCHAR(100))
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_nationkey = s.s_nationkey AND s.s_suppkey <> sh.s_suppkey
+    WHERE sh.level < 3
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name 
+    HAVING COUNT(o.o_orderkey) > 0
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    pss.p_name AS part_name,
+    pss.total_avail_qty,
+    pss.supplier_count,
+    COALESCE(cus.total_spent, 0) AS customer_spending,
+    shp.path AS supplier_tree,
+    COUNT(DISTINCT oi.o_orderkey) AS distinct_order_count
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN part_supplier_summary pss ON pss.p_partkey IN (
+    SELECT ps.p_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_availqty > AVG(ps.ps_availqty) OVER (PARTITION BY ps.ps_partkey)
+)
+LEFT JOIN customer_order_summary cus ON cus.c_custkey IN (
+    SELECT c.c_custkey 
+    FROM customer c 
+    WHERE c.c_nationkey = n.n_nationkey AND c.c_acctbal BETWEEN 0 AND 10000
+)
+LEFT JOIN supplier_hierarchy shp ON shp.s_nationkey = n.n_nationkey
+LEFT JOIN orders oi ON oi.o_custkey = cus.c_custkey
+GROUP BY r.r_name, n.n_name, pss.p_name, pss.total_avail_qty, pss.supplier_count, cus.total_spent, shp.path
+HAVING SUM(pss.total_avail_qty) IS NOT NULL AND COALESCE(cus.total_spent, 0) > 5000
+ORDER BY region, nation, part_name;

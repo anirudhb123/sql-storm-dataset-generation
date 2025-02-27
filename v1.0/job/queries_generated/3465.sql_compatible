@@ -1,0 +1,63 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_ratio,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.has_note_ratio
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 10 AND 
+        rm.has_note_ratio > 0.5
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    COALESCE(pi.info, 'No additional information') AS actor_info
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    (SELECT 
+        c.person_id, 
+        STRING_AGG(pi.info, ', ') AS info 
+     FROM 
+        cast_info c
+     JOIN 
+        person_info pi ON c.person_id = pi.person_id
+     WHERE 
+        pi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%award%')
+     GROUP BY 
+        c.person_id) pi ON pi.person_id IN (SELECT c.person_id FROM cast_info c WHERE c.movie_id = fm.movie_id)
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

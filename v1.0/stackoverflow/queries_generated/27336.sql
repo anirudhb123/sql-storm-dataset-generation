@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS LastVoteRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only considering questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, u.DisplayName, p.CreationDate
+), 
+RecentActivities AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ActivityDate,
+        pht.Name AS ActivityType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ActivityRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.Author,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    ra.ActivityDate,
+    ra.ActivityType
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentActivities ra ON rp.PostId = ra.PostId AND ra.ActivityRank = 1
+ORDER BY 
+    rp.CommentCount DESC, 
+    rp.UpVotes - rp.DownVotes DESC
+LIMIT 100;

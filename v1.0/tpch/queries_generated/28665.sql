@@ -1,0 +1,23 @@
+SELECT 
+    p.p_name, 
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Nation: ', n.n_name) AS detail_info, 
+    LENGTH(p.p_comment) AS comment_length, 
+    SUBSTRING_INDEX(s.s_address, ' ', 2) AS address_segment,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    LENGTH(p.p_name) > 10
+    AND n.n_name LIKE 'A%' 
+GROUP BY 
+    p.p_partkey, detail_info, comment_length, address_segment
+HAVING 
+    supplier_count > 1
+ORDER BY 
+    comment_length DESC, supplier_count ASC;

@@ -1,0 +1,73 @@
+WITH ranked_titles AS (
+    SELECT 
+        a.id AS aka_id, 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year, 
+        ROW_NUMBER() OVER(PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+),
+
+movie_actor_details AS (
+    SELECT 
+        rt.actor_name,
+        rt.movie_title,
+        rt.production_year,
+        CASE 
+            WHEN rt.production_year < 2000 THEN 'Classic'
+            WHEN rt.production_year BETWEEN 2000 AND 2010 THEN 'Early Modern'
+            ELSE 'Modern'
+        END AS era,
+        COALESCE(SUM(mk.keyword IS NOT NULL)::int, 0) AS keyword_count
+    FROM 
+        ranked_titles rt
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = c.movie_id
+    LEFT JOIN 
+        (SELECT DISTINCT movie_id FROM movie_info WHERE info_type_id IN (SELECT id FROM info_type WHERE info = 'Genre')) AS g ON g.movie_id = rt.movie_id
+    WHERE 
+        rt.rank = 1
+    GROUP BY 
+        rt.actor_name, rt.movie_title, rt.production_year
+),
+
+final_report AS (
+    SELECT 
+        mad.actor_name,
+        mad.movie_title,
+        mad.production_year,
+        mad.era,
+        mad.keyword_count,
+        CASE 
+            WHEN mad.keyword_count = 0 THEN NULL
+            ELSE mad.keyword_count
+        END AS adjusted_keyword_count,
+        RANK() OVER (ORDER BY mad.keyword_count DESC NULLS LAST) AS actor_rank
+    FROM 
+        movie_actor_details mad
+)
+
+SELECT 
+    fr.actor_name,
+    fr.movie_title,
+    fr.production_year,
+    fr.era,
+    fr.adjusted_keyword_count AS keyword_count_adj,
+    fr.actor_rank
+FROM 
+    final_report fr
+WHERE 
+    fr.era = 'Modern' OR (fr.era = 'Classic' AND fr.adjusted_keyword_count > 5)
+ORDER BY 
+    fr.actor_rank,
+    fr.production_year DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- The above SQL query selects modern films, or classic ones with high keyword counts, and ranks actors accordingly. 

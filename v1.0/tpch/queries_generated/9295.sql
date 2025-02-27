@@ -1,0 +1,51 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+HighCostSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.total_supply_cost,
+        n.n_name
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.rank = 1 AND n.n_nationkey = s.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(l.l_quantity) AS total_quantity_sold,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_sold,
+    hs.n_name AS supplier_nation,
+    hs.total_supply_cost
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    HighCostSuppliers hs ON ps.ps_suppkey = hs.s_suppkey
+WHERE 
+    o.o_orderstatus = 'F' 
+    AND l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY 
+    p.p_name, p.p_brand, hs.n_name, hs.total_supply_cost
+ORDER BY 
+    total_quantity_sold DESC
+LIMIT 10;

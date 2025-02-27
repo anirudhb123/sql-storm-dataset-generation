@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.path || mt.title
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON mt.id = ml.linked_movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path,
+    COALESCE(a.nums_cast, 0) AS num_cast_members,
+    COALESCE(cmp_names.company_count, 0) AS company_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2020 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    STRING_AGG(DISTINCT CASE WHEN cn.name IS NOT NULL THEN cn.name ELSE 'Unknown' END, ', ') AS companies_involved
+FROM 
+    MovieHierarchy mh
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        COUNT(*) AS nums_cast
+    FROM 
+        cast_info
+    GROUP BY movie_id
+) a ON mh.movie_id = a.movie_id
+LEFT JOIN (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+) cmp_names ON mh.movie_id = cmp_names.movie_id
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Tagline')
+LEFT JOIN company_name cn ON cn.imdb_id IN (SELECT DISTINCT imdb_id FROM movie_companies WHERE movie_id = mh.movie_id)
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    mh.path,
+    a.nums_cast,
+    cmp_names.company_count
+HAVING 
+    COALESCE(a.nums_cast, 0) >= 5 AND 
+    COALESCE(cmp_names.company_count, 0) > 0
+ORDER BY 
+    mh.production_year DESC, mh.level ASC;

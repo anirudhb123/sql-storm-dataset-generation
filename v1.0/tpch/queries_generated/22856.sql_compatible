@@ -1,0 +1,68 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+AvgOrderAmount AS (
+    SELECT 
+        c.c_custkey, 
+        AVG(o.o_totalprice) AS avg_total_price
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey
+    FROM 
+        AvgOrderAmount a
+    JOIN 
+        customer c ON a.c_custkey = c.c_custkey
+    WHERE 
+        a.avg_total_price > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    rs.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    COALESCE(l.l_discount, 0) AS discount,
+    CASE 
+        WHEN l.l_returnflag = 'R' THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY p.p_partkey) AS order_count,
+    SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = l.l_suppkey AND rs.supplier_rank = 1
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    HighValueCustomers hvc ON o.o_custkey = hvc.c_custkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_size IS NOT NULL 
+    AND (p.p_retailprice > 100 OR p.p_mfgr LIKE 'MFGR%')
+    AND (l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31')
+    AND (l.l_tax IS NULL OR l.l_tax < 0.05)
+GROUP BY 
+    p.p_partkey, p.p_name, rs.s_name, c.c_name, l.l_returnflag
+HAVING 
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - COALESCE(l.l_discount, 0))) > 5000
+ORDER BY 
+    total_revenue DESC, p.p_name ASC;

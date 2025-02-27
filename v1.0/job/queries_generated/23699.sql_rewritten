@@ -1,0 +1,73 @@
+WITH RecursiveMovieLinks AS (
+    SELECT ml.movie_id, ml.linked_movie_id, 1 AS link_depth
+    FROM movie_link ml
+    UNION ALL
+    SELECT ml.movie_id, ml.linked_movie_id, rml.link_depth + 1
+    FROM movie_link ml
+    JOIN RecursiveMovieLinks rml ON ml.movie_id = rml.linked_movie_id
+    WHERE rml.link_depth < 5    
+),
+
+TopKeywords AS (
+    SELECT mk.movie_id, k.keyword, COUNT(*) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id, k.keyword
+    HAVING COUNT(*) > 1           
+),
+
+AverageCompanyTypes AS (
+    SELECT mc.movie_id, ct.kind AS company_type, COUNT(*) AS type_count
+    FROM movie_companies mc
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, ct.kind
+    HAVING COUNT(*) >= (
+        SELECT AVG(type_count) FROM (
+            SELECT COUNT(*) AS type_count
+            FROM movie_companies
+            GROUP BY movie_id
+        ) AS avg_types
+    )
+),
+
+FinalMovies AS (
+    SELECT m.id AS movie_id, 
+           m.title,
+           m.production_year,
+           COALESCE(tk.keyword, 'No Keywords') AS top_keyword,
+           AVG(ct.type_count) AS avg_company_types,
+           ARRAY_AGG(DISTINCT c.name) AS companies
+    FROM aka_title m
+    LEFT JOIN TopKeywords tk ON m.id = tk.movie_id
+    LEFT JOIN AverageCompanyTypes ct ON m.id = ct.movie_id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name c ON mc.company_id = c.id 
+    GROUP BY m.id, m.title, m.production_year, tk.keyword
+),
+
+MovieStatistics AS (
+    SELECT fm.movie_id, 
+           fm.title, 
+           fm.production_year, 
+           fm.top_keyword, 
+           fm.avg_company_types,
+           fm.companies,
+           COUNT(*) OVER (PARTITION BY fm.production_year) AS movies_in_year
+    FROM FinalMovies fm
+)
+
+SELECT ms.movie_id, 
+       ms.title, 
+       ms.production_year, 
+       ms.top_keyword, 
+       ms.avg_company_types, 
+       ms.companies,
+       CASE 
+           WHEN ms.movies_in_year > 5 THEN 'Popular Year' 
+           ELSE 'Less Popular Year' 
+       END AS year_popularity
+FROM MovieStatistics ms
+WHERE ms.avg_company_types IS NOT NULL 
+  AND ms.top_keyword != 'No Keywords'
+ORDER BY ms.production_year DESC, 
+         ms.avg_company_types DESC;

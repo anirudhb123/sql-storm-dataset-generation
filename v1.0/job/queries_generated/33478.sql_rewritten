@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level,
+        CAST(mh.path || ' > ' || m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    MAX(mh.production_year) AS last_movie_year,
+    STRING_AGG(DISTINCT mh.path, ', ') AS movie_paths,
+    AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS average_order,
+    SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+FROM 
+    cast_info c
+INNER JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_hierarchy mh ON c.movie_id = mh.movie_id
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    total_movies DESC, last_movie_year DESC;

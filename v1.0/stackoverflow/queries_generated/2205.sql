@@ -1,0 +1,48 @@
+WITH UserReputation AS (
+    SELECT Id, Reputation
+    FROM Users
+    WHERE Reputation > 1000
+), 
+PostStatistics AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.CreationDate, 
+           p.Score, 
+           COUNT(c.Id) AS CommentCount, 
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY p.Id
+),
+ActivePosts AS (
+    SELECT ps.PostId, 
+           ps.Title, 
+           ps.CreationDate, 
+           ps.Score, 
+           ps.CommentCount,
+           ps.TotalBounty,
+           ur.Reputation
+    FROM PostStatistics ps
+    INNER JOIN UserReputation ur ON ps.PostId = ur.Id
+    WHERE ps.UserPostRank = 1 AND ps.CommentCount > 0
+), 
+ClosedPosts AS (
+    SELECT ph.PostId,
+           ph.CreationDate,
+           ph.PostHistoryTypeId,
+           pr.ReasonType
+    FROM PostHistory ph
+    JOIN CloseReasonTypes pr ON ph.Comment::int = pr.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+)
+
+SELECT ap.Title, 
+       ap.CreationDate, 
+       ap.Reputation, 
+       ap.CommentCount,
+       COALESCE(cp.ReasonType, 'Not Closed') AS ClosureReason
+FROM ActivePosts ap
+LEFT JOIN ClosedPosts cp ON ap.PostId = cp.PostId
+ORDER BY ap.Reputation DESC, ap.CommentCount DESC;

@@ -1,0 +1,84 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS row_num
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_quantity) > 0
+),
+TopSellingItems AS (
+    SELECT 
+        i_item_id, 
+        i_item_desc,
+        t.total_quantity,
+        t.total_profit
+    FROM 
+        SalesCTE s
+    JOIN item i ON s.ws_item_sk = i.i_item_sk
+    JOIN (
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY total_profit DESC) AS ranking,
+            total_quantity,
+            total_profit,
+            ws_item_sk
+        FROM 
+            SalesCTE
+        WHERE 
+            row_num = 1
+    ) t ON s.ws_item_sk = t.ws_item_sk
+    WHERE 
+        t.ranking <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerWithMoreReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_returns,
+        r.return_count
+    FROM 
+        customer c
+    JOIN CustomerReturns r ON c.c_customer_sk = r.sr_customer_sk
+    WHERE 
+        r.total_returns > (
+            SELECT 
+                AVG(total_returns) FROM CustomerReturns
+        )
+)
+SELECT 
+    cwr.c_first_name,
+    cwr.c_last_name,
+    tsi.i_item_id,
+    tsi.total_quantity,
+    tsi.total_profit,
+    COALESCE(cwr.return_count, 0) AS return_count,
+    CASE 
+        WHEN cwr.return_count IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END AS return_status
+FROM 
+    TopSellingItems tsi
+LEFT JOIN 
+    CustomerWithMoreReturns cwr ON tsi.i_item_id IN (
+        SELECT 
+            ws_item_sk FROM web_sales 
+            WHERE ws_bill_customer_sk = cwr.c_customer_sk
+    )
+ORDER BY 
+    tsi.total_profit DESC;

@@ -1,0 +1,54 @@
+
+WITH enriched_customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    ec.full_name,
+    ec.ca_city,
+    ec.ca_state,
+    ec.cd_gender,
+    ss.total_sales,
+    ss.order_count,
+    DATEDIFF(current_date, ss.last_purchase_date) AS days_since_last_purchase
+FROM 
+    enriched_customer_data ec
+LEFT JOIN 
+    sales_summary ss ON ec.c_customer_sk = ss.bill_customer_sk
+WHERE 
+    ec.cd_gender = 'F'
+AND 
+    ec.cd_marital_status = 'M'
+AND 
+    ec.cd_purchase_estimate > 5000
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

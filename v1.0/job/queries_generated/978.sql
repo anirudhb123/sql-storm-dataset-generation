@@ -1,0 +1,36 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT m.id) DESC) AS ranking
+    FROM aka_title a
+    LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_info mi ON a.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'mpaa_rating')
+    LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN aka_name an ON c.person_id = an.person_id
+    GROUP BY a.id, a.title, a.production_year, k.keyword
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.keyword,
+        COALESCE(mi.info, 'Not Rated') AS mpaa_rating
+    FROM ranked_movies rm
+    LEFT JOIN movie_info mi ON rm.production_year = mi.movie_id 
+    WHERE rm.ranking <= 5
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.keyword,
+    f.mpaa_rating,
+    COUNT(DISTINCT cc.subject_id) AS num_cast_members
+FROM filtered_movies f
+LEFT JOIN complete_cast cc ON f.movie_title = (SELECT title FROM aka_title WHERE id = f.movie_title)
+GROUP BY f.movie_title, f.production_year, f.keyword, f.mpaa_rating
+ORDER BY f.production_year DESC, num_cast_members DESC
+LIMIT 10;

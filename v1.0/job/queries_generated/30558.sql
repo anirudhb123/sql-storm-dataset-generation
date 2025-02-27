@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT mc.company_id) AS production_companies_count,
+    AVG(FEEDBACK.score) AS average_feedback_score,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY at.production_year DESC) AS movie_rank,
+    CASE 
+        WHEN mc.note IS NOT NULL THEN 'Noted'
+        ELSE 'Unnoted'
+    END AS company_note,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+LEFT JOIN 
+    (SELECT movie_id, AVG(score) AS score FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'feedback') GROUP BY movie_id) AS FEEDBACK
+ON
+    at.id = FEEDBACK.movie_id
+WHERE
+    ak.name IS NOT NULL
+AND
+    ak.name <> ''
+AND 
+    (at.production_year IS NOT NULL AND at.production_year > 2010)
+GROUP BY 
+    ak.name, at.title, at.production_year, mc.note
+ORDER BY 
+    movie_rank, actor_name;

@@ -1,0 +1,88 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_ranked
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actors_with_multiple_roles AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.role_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_id
+    HAVING 
+        COUNT(DISTINCT c.role_id) > 2
+),
+movie_info_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.info,
+        k.keyword
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id 
+    WHERE 
+        m.info LIKE '%Genre%'
+),
+outer_join_test AS (
+    SELECT 
+        leading.title AS movie_title,
+        leading.production_year,
+        COALESCE(person.name, 'Unknown Actor') AS actor_name,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        ranked_titles leading
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = leading.title_id
+    LEFT JOIN 
+        aka_name person ON ci.person_id = person.person_id
+    LEFT JOIN 
+        movie_info_with_keywords mk ON leading.title_id = mk.movie_id
+)
+SELECT 
+    ojt.movie_title,
+    ojt.production_year,
+    ojt.actor_name,
+    ojt.keyword,
+    CASE 
+        WHEN ojt.actor_name = 'Unknown Actor' THEN 'Cast not found'
+        ELSE 'Cast found'
+    END AS cast_status,
+    CASE 
+        WHEN leading.year_ranked = 1 THEN 'Top Title of Year'
+        ELSE 'Other Title'
+    END AS ranking_status
+FROM 
+    outer_join_test ojt
+JOIN 
+    actors_with_multiple_roles am ON ojt.actor_name = am.person_id 
+WHERE 
+    ojt.production_year BETWEEN 2000 AND 2020 
+    AND (o.actor_name IS NULL OR ojt.keyword IS NOT NULL)
+UNION ALL
+SELECT 
+    'Aggregated Result' AS movie_title,
+    NULL AS production_year,
+    NULL AS actor_name,
+    COUNT(*) AS total Movies,
+    NULL AS cast_status,
+    NULL AS ranking_status
+FROM 
+    outer_join_test 
+WHERE 
+    ojt.keyword IS NOT NULL
+GROUP BY 
+    ojt.keyword
+ORDER BY 
+    production_year DESC NULLS LAST,
+    movie_title;

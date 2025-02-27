@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COUNT(c.person_id) AS cast_count,
+    AVG(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_ratio,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COALESCE(SUM(mi.info LIKE '%award%'), 0) AS award_count,
+    FIRST_VALUE(c.actor_name) OVER (PARTITION BY mh.movie_id ORDER BY c.nr_order) AS first_actor_name
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name p ON c.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Awards')
+WHERE 
+    mh.production_year >= 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+HAVING 
+    COUNT(c.person_id) > 5
+ORDER BY 
+    mh.level DESC, award_count DESC;

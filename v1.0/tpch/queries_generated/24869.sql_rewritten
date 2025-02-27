@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier s
+), 
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), 
+OrdersWithStatus AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Finished'
+            WHEN o.o_orderstatus = 'O' THEN 'Open'
+            ELSE 'Other'
+        END AS order_status
+    FROM 
+        orders o
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    ps.total_availqty,
+    COUNT(DISTINCT lo.o_orderkey) AS total_orders,
+    AVG(lo.l_extendedprice * (1 - lo.l_discount)) AS avg_price_after_discount,
+    STRING_AGG(DISTINCT s.s_name) FILTER (WHERE rs.rank_acctbal <= 3) AS top_suppliers,
+    COUNT(DISTINCT CASE WHEN ows.order_status = 'Open' THEN ows.o_orderkey END) AS open_orders,
+    SUM(CASE WHEN ps.max_supplycost IS NULL THEN 0 ELSE ps.max_supplycost END) AS total_max_supplycost,
+    COALESCE(SUM(CASE WHEN co.order_count = 0 THEN 1 ELSE 0 END), 0) AS customers_with_no_orders
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplies ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN 
+    OrdersWithStatus ows ON lo.l_orderkey = ows.o_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = lo.l_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = ows.o_custkey
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(ps.total_availqty) > 100 AND 
+    COALESCE(MAX(lo.l_shipdate), '1900-01-01') < cast('1998-10-01' as date)
+ORDER BY 
+    p.p_name ASC;

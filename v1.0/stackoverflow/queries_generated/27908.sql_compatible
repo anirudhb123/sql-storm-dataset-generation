@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Body, 
+        P.Tags, 
+        P.CreationDate, 
+        P.Score, 
+        P.ViewCount, 
+        U.DisplayName AS OwnerDisplayName, 
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN V.Id IS NOT NULL THEN 1 END) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(DAY, -30, '2024-10-01') 
+        AND P.PostTypeId = 1  
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.Tags, P.CreationDate, P.Score, P.ViewCount, U.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        Tags, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        OwnerDisplayName, 
+        CommentCount, 
+        VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1
+    ORDER BY 
+        Score DESC 
+    LIMIT 10
+)
+SELECT 
+    TP.Title, 
+    TP.CreationDate, 
+    TP.OwnerDisplayName, 
+    TP.CommentCount,
+    TP.VoteCount,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS RelatedTags
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    (SELECT 
+        TRIM(BOTH '<>' FROM unnest(string_to_array(TP.Tags, '><'))) AS TagName
+    ) T ON TRUE
+GROUP BY 
+    TP.Title, TP.CreationDate, TP.OwnerDisplayName, TP.CommentCount, TP.VoteCount
+ORDER BY 
+    TP.Score DESC;

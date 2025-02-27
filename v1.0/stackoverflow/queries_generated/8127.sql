@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    GROUP BY 
+        p.Id, p.Title, p.PostTypeId, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        ROW_NUMBER() OVER (ORDER BY rp.Score DESC) AS RowNum
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    u.DisplayName AS OwnerName,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 8
+LEFT JOIN 
+    STRING_TO_ARRAY(tp.Tags, ', ') AS tag_names ON tp.Tags IS NOT NULL
+LEFT JOIN 
+    Tags t ON t.TagName = tag_names
+GROUP BY 
+    tp.Title, tp.Score, tp.ViewCount, tp.CommentCount, tp.AnswerCount, u.DisplayName
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

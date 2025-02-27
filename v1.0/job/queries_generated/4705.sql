@@ -1,0 +1,47 @@
+WITH MovieData AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS cast_names,
+        COUNT(DISTINCT kw.keyword) AS keyword_count,
+        MAX(mci.note) AS company_note
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mci ON m.id = mci.movie_id AND mci.info_type_id = (SELECT id FROM info_type WHERE info = 'Note')
+    GROUP BY 
+        m.id
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.keyword_count DESC) AS rank_per_year
+    FROM 
+        MovieData md
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_names,
+    rm.keyword_count,
+    COALESCE(rm.company_note, 'No note available') AS company_note
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank_per_year <= 5
+ORDER BY 
+    rm.production_year DESC, rm.keyword_count DESC;

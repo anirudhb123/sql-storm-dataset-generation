@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND ci.person_id < 352799 AND t.md5sum < 'a4badb3585cbb372649681df821e3c69' AND mc.note IN ('(1919) (Italy) (theatrical)', '(1959) (Finland) (theatrical) (re-release)', '(1981) (Austria) (TV)', '(1981) (Japan) (TV)', '(1999) (USA) (VHS) (subtitled)', '(2009) (Hungary) (TV) (as AXN Sci-Fi)', '(2009) (UK) (DVD) (as 4Digital Asia)', '(????) (Mexico) (VHS)', '(China) (video)');

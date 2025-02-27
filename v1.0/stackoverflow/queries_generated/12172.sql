@@ -1,0 +1,31 @@
+-- Performance benchmarking for retrieving posts with their associated users and tags
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    t.TagName AS PostTag,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Tags t ON t.Id IN (
+        SELECT unnest(string_to_array(p.Tags, '>'))::int
+    )
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate > '2023-01-01' 
+    AND p.PostTypeId = 1  -- Filtering for Questions only
+GROUP BY 
+    p.Id, u.DisplayName, u.Reputation, p.Title, p.CreationDate, t.TagName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,82 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        1 as level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        oh.level + 1
+    FROM 
+        orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        oh.level < 5
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_name,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) as total_revenue
+    FROM 
+        lineitem li
+    JOIN 
+        orders o ON li.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) as total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+    HAVING 
+        total_supply_cost > (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+)
+SELECT 
+    ns.n_name,
+    COALESCE(SUM(fo.total_revenue), 0) as total_revenue,
+    COALESCE(MAX(spd.ps_supplycost), 0) as max_supply_cost,
+    COUNT(DISTINCT oh.o_orderkey) as total_orders
+FROM 
+    nation ns
+LEFT JOIN 
+    FilteredOrders fo ON ns.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_name IN (SELECT s_name FROM TopSuppliers))
+LEFT JOIN 
+    SupplierPartDetails spd ON ns.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_name = spd.s_name)
+LEFT JOIN 
+    OrderHierarchy oh ON oh.o_orderkey = fo.o_orderkey
+GROUP BY 
+    ns.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

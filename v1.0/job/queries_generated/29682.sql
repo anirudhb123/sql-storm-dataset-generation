@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+),
+MovieDetails AS (
+    SELECT 
+        c.movie_id,
+        MAX(CASE WHEN ci.role_id IS NOT NULL THEN ci.role_id END) AS main_role_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        cast_info ci
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    GROUP BY 
+        c.movie_id
+),
+DetailedInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        md.total_actors,
+        md.production_companies,
+        GROUP_CONCAT(DISTINCT rt.keyword ORDER BY rt.rank) AS keywords
+    FROM 
+        RankedTitles rt
+    JOIN 
+        MovieDetails md ON rt.title_id = md.movie_id
+    GROUP BY 
+        rt.title_id, rt.title, rt.production_year, md.total_actors, md.production_companies
+)
+SELECT 
+    di.title,
+    di.production_year,
+    di.total_actors,
+    di.production_companies,
+    di.keywords
+FROM 
+    DetailedInfo di
+ORDER BY 
+    di.production_year DESC, di.total_actors DESC
+LIMIT 10;
+
+This SQL query performs a series of common table expressions (CTEs) to process and summarize string data related to movies made after 2000. It retrieves the titles, production years, total actors, number of production companies involved, and a list of keywords associated with each title, outputting the top 10 results ordered by production year and number of actors.

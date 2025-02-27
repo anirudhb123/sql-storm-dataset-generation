@@ -1,0 +1,87 @@
+
+WITH BasePosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(vote_counts.UpVotes, 0) AS UpVotes,
+        COALESCE(vote_counts.DownVotes, 0) AS DownVotes,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER(PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+        FROM
+            Votes
+        GROUP BY
+            PostId
+    ) AS vote_counts ON p.Id = vote_counts.PostId
+    LEFT JOIN LATERAL (
+        SELECT STRING_AGG(DISTINCT Tags, ', ') AS TagName
+        FROM UNNEST(STRING_TO_ARRAY(p.Tags, '>')) AS Tags
+    ) AS t ON true
+    WHERE
+        p.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostHistoryAggregated AS (
+    SELECT
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastHistory,
+        COUNT(DISTINCT ph.PostHistoryTypeId) AS HistoryCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewsPosts
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE
+        u.Reputation > 500
+    GROUP BY
+        u.Id
+)
+SELECT
+    bp.PostId,
+    bp.Title,
+    bp.CreationDate,
+    bp.Score,
+    bp.ViewCount,
+    bp.UpVotes,
+    bp.DownVotes,
+    COALESCE(ph.LastHistory, 'No history') AS LastPostHistory,
+    COALESCE(ph.HistoryCount, 0) AS TotalHistory,
+    COALESCE(ph.CloseReopenCount, 0) AS CloseReopenHistory,
+    ue.PostCount AS UserPostCount,
+    ue.HighViewsPosts AS UserHighViewsPosts,
+    CASE
+        WHEN bp.ViewCount > 1000 THEN 'Very Popular'
+        WHEN bp.ViewCount BETWEEN 500 AND 1000 THEN 'Popular'
+        ELSE 'Less Known'
+    END AS PopularityCategory
+FROM
+    BasePosts bp
+LEFT JOIN PostHistoryAggregated ph ON bp.PostId = ph.PostId
+LEFT JOIN UserEngagement ue ON bp.PostId = ue.UserId
+WHERE
+    bp.UpVotes IS NOT NULL
+    AND (bp.Tags IS NOT NULL AND 'SQL' = ANY(bp.Tags))
+    AND (bp.Score > (SELECT AVG(Score) FROM Posts) OR bp.ViewCount < 100)
+ORDER BY
+    bp.CreationDate DESC
+LIMIT 50
+OFFSET 0;

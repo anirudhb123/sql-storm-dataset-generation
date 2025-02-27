@@ -1,0 +1,52 @@
+-- Performance Benchmarking Query
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 6) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseVotes,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    P.CloseVotes,
+    P.ReopenVotes
+FROM 
+    UserVoteStats U
+JOIN 
+    PostStats P ON U.TotalVotes > 0  -- Example condition to filter users with votes
+ORDER BY 
+    U.UpVotes DESC, P.Score DESC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE SuppliersHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SuppliersHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') 
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING total_revenue > 100000
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    coalesce(sha.s_name, 'Unknown') AS Supplier_Name,
+    cs.c_name AS Customer_Name,
+    cs.order_count,
+    cs.total_spent,
+    cs.avg_spent,
+    hvo.total_revenue AS Revenue,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_name ORDER BY cs.total_spent DESC) AS rank
+FROM 
+    HighValueOrders hvo
+FULL OUTER JOIN CustomerStats cs ON hvo.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN SuppliersHierarchy sha ON sha.level = 1 AND sha.s_suppkey = (SELECT ps.ps_suppkey 
+                                                                        FROM partsupp ps 
+                                                                        WHERE ps.ps_availqty > (SELECT MAX(ps2.ps_availqty) 
+                                                                                                FROM partsupp ps2))
+WHERE 
+    cs.order_count > 5 AND coalesce(cs.total_spent, 0) > 5000
+ORDER BY 
+    cs.order_count DESC, Revenue DESC;

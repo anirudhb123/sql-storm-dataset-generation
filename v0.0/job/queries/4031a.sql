@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.note IN ('(1965) (USA) (theatrical) (Spanish language only)', '(1991) (Japan) (VHS) (as Mad Video)', '(2003) (Canada) (DVD) (The Streisand Collection)', '(2006) (USA) (DVD) (on 50th anniversary DVD of "Carousel")', '(co-production) (segment "Ratgeber Reise")', '(for ITV) (in association with) (as Acorn Media Group Inc.)') AND ct.id < 4;

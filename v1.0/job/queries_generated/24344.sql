@@ -1,0 +1,77 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(mk.keyword, ''), 'No Keyword') AS movie_keyword,
+        COALESCE(ca.name, 'Unknown Character') AS character_name,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank,
+        COUNT(DISTINCT ca.id) OVER (PARTITION BY m.id) AS character_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        char_name ca ON ca.id = ci.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+),
+
+movie_info_with_links AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.movie_keyword,
+        rm.character_name,
+        ml.linked_movie_id,
+        ml.link_type_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS link_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_link ml ON rm.movie_id = ml.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, rm.movie_keyword, rm.character_name, ml.linked_movie_id, ml.link_type_id
+),
+
+detailed_info AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        mi.production_year,
+        mi.movie_keyword,
+        mi.character_name,
+        COALESCE(mt.kind, 'Unknown') AS movie_type,
+        COALESCE(mt.kind, 'Unknown')||' ('||mi.link_count||' Links)' AS movie_with_links
+    FROM 
+        movie_info_with_links mi
+    LEFT JOIN 
+        kind_type mt ON mi.movie_keyword IS NOT NULL AND mi.movie_keyword = mt.kind
+)
+
+SELECT 
+    di.movie_id,
+    di.title,
+    di.production_year,
+    di.movie_keyword,
+    di.character_name,
+    di.movie_type,
+    di.movie_with_links,
+    COALESCE(NULLIF(p.info, ''), 'No Info') AS person_info,
+    COUNT(DISTINCT mk.keyword) AS distinct_keywords
+FROM 
+    detailed_info di
+LEFT JOIN 
+    person_info p ON p.person_id IN (SELECT id FROM aka_name WHERE name = di.character_name)
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = di.movie_id
+WHERE 
+    di.production_year >= 2000 
+    AND (di.movie_type LIKE '%Drama%' OR di.movie_keyword = 'Action')
+GROUP BY 
+    di.movie_id, di.title, di.production_year, di.movie_keyword, di.character_name, di.movie_type, di.movie_with_links, p.info
+ORDER BY 
+    di.production_year DESC, di.title ASC;

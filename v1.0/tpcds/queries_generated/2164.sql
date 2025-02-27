@@ -1,0 +1,74 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DATEDIFF(CURRENT_DATE, MIN(d.d_date)) AS days_since_first_order
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_web_sales,
+        cs.order_count,
+        cs.days_since_first_order,
+        RANK() OVER (ORDER BY cs.total_web_sales DESC) AS sale_rank
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_web_sales > 1000
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_web_sales,
+    hvc.order_count,
+    hvc.days_since_first_order,
+    CASE 
+        WHEN hvc.days_since_first_order < 30 THEN 'New Customer'
+        WHEN hvc.days_since_first_order BETWEEN 30 AND 90 THEN 'Returning Customer'
+        ELSE 'Loyal Customer'
+    END AS customer_status
+FROM 
+    HighValueCustomers hvc
+WHERE 
+    hvc.sale_rank <= 10
+ORDER BY 
+    hvc.total_web_sales DESC;
+
+-- A union query to combine web sales and catalog sales for the same customers
+UNION ALL
+
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    SUM(cs.total_web_sales) AS total_sales,
+    COUNT(DISTINCT cs.ws_order_number) AS order_count,
+    NULL AS days_since_first_order,
+    'Catalog Sales' AS source
+FROM 
+    catalog_sales cs
+JOIN 
+    customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+WHERE 
+    cs.cs_sold_date_sk > (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)
+GROUP BY 
+    cs.c_customer_sk, cs.c_first_name, cs.c_last_name;

@@ -1,0 +1,37 @@
+
+WITH TopTags AS (
+    SELECT Tags.TagName, COUNT(Posts.Id) AS PostCount
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ',')::text[])
+    GROUP BY Tags.TagName
+    HAVING COUNT(Posts.Id) > 10
+),
+TopUsers AS (
+    SELECT Users.Id AS UserId, Users.DisplayName, SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes
+    FROM Users
+    JOIN Posts ON Users.Id = Posts.OwnerUserId
+    JOIN Votes ON Posts.Id = Votes.PostId
+    WHERE Votes.VoteTypeId IN (2, 3)
+    GROUP BY Users.Id, Users.DisplayName
+    ORDER BY UpVotes DESC
+    LIMIT 5
+),
+PostMetrics AS (
+    SELECT Posts.Id AS PostId, Posts.Title, Posts.CreationDate, Posts.ViewCount, Posts.Score,
+           Posts.AnswerCount, Posts.CommentCount, 
+           COALESCE(TopTags.TagName, 'Uncategorized') AS MainTag,
+           (SELECT COUNT(*) FROM Comments WHERE Comments.PostId = Posts.Id) AS TotalComments
+    FROM Posts
+    LEFT JOIN TopTags ON Posts.Tags LIKE '%' || TopTags.TagName || '%'
+    WHERE Posts.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+)
+SELECT PM.PostId, PM.Title, PM.CreationDate, PM.ViewCount, PM.Score, PM.AnswerCount,
+       PM.CommentCount, PM.MainTag, TU.DisplayName AS TopUser
+FROM PostMetrics PM
+JOIN TopUsers TU ON PM.PostId IN (
+    SELECT Votes.PostId 
+    FROM Votes 
+    WHERE Votes.UserId = TU.UserId AND Votes.VoteTypeId = 2
+)
+ORDER BY PM.ViewCount DESC, PM.Score DESC
+LIMIT 10;

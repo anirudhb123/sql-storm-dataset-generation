@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        nation_name, 
+        s_name, 
+        total_supply_cost 
+    FROM 
+        RankedSuppliers 
+    WHERE 
+        rank <= 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+FinalReport AS (
+    SELECT 
+        ts.nation_name,
+        ts.s_name,
+        os.o_orderkey,
+        os.o_orderdate,
+        os.total_price,
+        os.total_items
+    FROM 
+        TopSuppliers ts
+    JOIN 
+        OrderSummary os ON ts.s_name = os.s_name 
+)
+SELECT 
+    nation_name,
+    s_name,
+    COUNT(DISTINCT o_orderkey) AS order_count,
+    SUM(total_price) AS total_revenue,
+    AVG(total_price) AS avg_order_value
+FROM 
+    FinalReport
+GROUP BY 
+    nation_name, s_name
+ORDER BY 
+    total_revenue DESC, order_count DESC;

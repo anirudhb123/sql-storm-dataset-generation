@@ -1,0 +1,75 @@
+
+WITH customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+sales_summary AS (
+    SELECT
+        CASE
+            WHEN ws_bill_cdemo_sk IS NOT NULL THEN 'Web'
+            ELSE 'Store'
+        END AS sale_channel,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN 
+        store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+    GROUP BY 
+        CASE
+            WHEN ws_bill_cdemo_sk IS NOT NULL THEN 'Web'
+            ELSE 'Store'
+        END
+),
+inventory_status AS (
+    SELECT
+        i.i_item_id,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    cd.cd_credit_rating,
+    ss.sale_channel,
+    ss.total_orders,
+    ss.total_sales,
+    inv.total_quantity
+FROM 
+    customer_details cd
+JOIN 
+    sales_summary ss ON cd.c_customer_sk = ss.sale_channel
+LEFT JOIN 
+    inventory_status inv ON cd.c_customer_sk = inv.i_item_id
+WHERE 
+    cd.cd_purchase_estimate > 1000
+ORDER BY 
+    ss.total_sales DESC, 
+    cd.c_last_name ASC
+LIMIT 100;

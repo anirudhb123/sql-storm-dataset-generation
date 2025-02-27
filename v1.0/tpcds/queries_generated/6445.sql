@@ -1,0 +1,46 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_sales,
+        r.order_count
+    FROM 
+        RankedSales r
+    JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        r.rank <= 10
+),
+SalesByGender AS (
+    SELECT 
+        cd_gender,
+        SUM(r.total_sales) AS gender_sales
+    FROM 
+        TopCustomers tc
+    JOIN 
+        customer_demographics cd ON tc.ws_bill_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd_gender
+)
+SELECT 
+    g.cd_gender,
+    g.gender_sales,
+    (SELECT SUM(gender_sales) FROM SalesByGender) AS total_sales,
+    ROUND((g.gender_sales / (SELECT SUM(gender_sales) FROM SalesByGender)) * 100, 2) AS percentage_of_total
+FROM 
+    SalesByGender g
+ORDER BY 
+    g.gender_sales DESC;

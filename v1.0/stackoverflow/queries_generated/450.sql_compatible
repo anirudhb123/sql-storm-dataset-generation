@@ -1,0 +1,52 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        COALESCE(SUM(DATEDIFF(DAY, p.CreationDate, CURRENT_DATE)), 0) AS ActiveDays,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS TotalCloseReasons,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::integer[])
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalUpvotes,
+        TotalDownvotes,
+        ActiveDays,
+        TotalCloseReasons,
+        TagsList,
+        RANK() OVER (ORDER BY ActiveDays DESC, TotalPosts DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    u.*,
+    CASE 
+        WHEN ActiveDays > 365 THEN 'Veteran'
+        WHEN ActiveDays BETWEEN 180 AND 365 THEN 'Intermediate'
+        ELSE 'Newcomer'
+    END AS UserStatus
+FROM 
+    RankedUsers u
+WHERE 
+    TotalPosts > 10 AND TotalQuestions > 5
+    AND (TotalUpvotes - TotalDownvotes) > 20
+ORDER BY 
+    Rank;

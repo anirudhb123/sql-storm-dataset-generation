@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL -- Base case for root posts
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputationStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        AVG(u.Reputation) OVER () AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(cr.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Close and Reopen actions
+    GROUP BY 
+        ph.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS Upvotes,
+        SUM(v.VoteTypeId = 3) AS Downvotes,
+        COALESCE(cr.CloseReasonNames, 'N/A') AS CloseReasonNames,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreatedDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        CloseReasons cr ON p.Id = cr.PostId
+    GROUP BY 
+        p.Id, p.Title, cr.CloseReasonNames
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.PostCount,
+    u.TotalBounty,
+    p.PostId,
+    p.Title,
+    p.CommentCount,
+    p.Upvotes,
+    p.Downvotes,
+    p.CloseReasonNames,
+    pah.Level AS PostLevel
+FROM 
+    UserReputationStats u
+JOIN 
+    PostStatistics p ON u.UserId = p.OwnerUserId
+JOIN 
+    RecursivePostHierarchy pah ON p.PostId = pah.PostId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) -- Users with above-average reputation
+ORDER BY 
+    u.Reputation DESC, 
+    p.Upvotes DESC;

@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.LastActivityDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Selecting only Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS RankByReputation
+    FROM 
+        Users u
+    JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 1000  -- Considering only users with significant reputation
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.Score,
+    rp.CreationDate AS PostCreationDate,
+    u.DisplayName AS UserDisplayName,
+    u.Reputation AS UserReputation,
+    u.BadgeCount AS UserBadgeCount,
+    CASE WHEN rp.RankByScore = 1 THEN 'Top' ELSE 'Regular' END AS PostRankCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers u ON rp.OwnerUserId = u.UserId
+WHERE 
+    u.RankByReputation <= 10  -- Focusing on the top 10 users
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

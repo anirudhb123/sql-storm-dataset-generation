@@ -1,0 +1,52 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title AS movie_title,
+        t.production_year,
+        rt.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY a.movie_id ORDER BY rt.role) AS role_rank
+    FROM 
+        aka_title AS a
+    JOIN 
+        cast_info AS ci ON a.movie_id = ci.movie_id
+    JOIN 
+        role_type AS rt ON ci.role_id = rt.id
+    WHERE 
+        a.kind_id IN (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        ) 
+        AND a.production_year BETWEEN 1990 AND 2023
+),
+AggregateResults AS (
+    SELECT 
+        movie_title,
+        MAX(production_year) AS max_year,
+        COUNT(role_type) AS total_roles
+    FROM 
+        RankedTitles
+    WHERE 
+        role_rank <= 3
+    GROUP BY 
+        movie_title
+)
+SELECT 
+    ar.movie_title,
+    ar.max_year,
+    ar.total_roles,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_names
+FROM 
+    AggregateResults AS ar
+JOIN 
+    cast_info AS ci ON ar.movie_title = (
+        SELECT a.title 
+        FROM aka_title a 
+        WHERE a.movie_id = ci.movie_id
+    )
+JOIN 
+    aka_name AS c ON ci.person_id = c.person_id
+WHERE 
+    ci.nr_order < 5
+GROUP BY 
+    ar.movie_title, ar.max_year, ar.total_roles
+ORDER BY 
+    ar.max_year DESC, ar.total_roles DESC;

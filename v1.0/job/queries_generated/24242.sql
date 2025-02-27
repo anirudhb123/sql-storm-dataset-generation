@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.level AS hierarchy_level,
+    COUNT(c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT it.info, ', ') AS info_types,
+    CASE 
+        WHEN COUNT(DISTINCT c.id) OVER (PARTITION BY at.id) > 3 THEN 'Ensemble'
+        ELSE 'Solo'
+    END AS cast_type,
+    COALESCE(NULLIF(info_count.info_type, ''), 'Unknown') AS info_type_category
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    aka_title at ON c.movie_id = at.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        STRING_AGG(info, ' | ') AS info_type
+    FROM 
+        movie_info
+    GROUP BY 
+        movie_id
+) info_count ON at.id = info_count.movie_id
+WHERE 
+    ak.name IS NOT NULL
+GROUP BY 
+    ak.name, at.title, mh.level, info_count.info_type
+HAVING 
+    hierarchy_level < 3 
+    AND COUNT(DISTINCT ak.id) > 1
+ORDER BY 
+    mh.level ASC, 
+    COUNT(c.person_id) DESC, 
+    ak.name ASC
+LIMIT 100;

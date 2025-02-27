@@ -1,0 +1,83 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON V.PostId IN (
+        SELECT 
+            Id 
+        FROM 
+            Posts 
+        WHERE 
+            OwnerUserId = U.Id
+    )
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    WHERE 
+        U.Reputation > 100
+    GROUP BY 
+        U.Id
+),
+
+PostHistoryAggregates AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        COUNT(H.Id) AS HistoryCount,
+        MAX(H.CreationDate) AS LastHistoryDate
+    FROM 
+        Posts P
+    LEFT JOIN PostHistory H ON H.PostId = P.Id
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+
+PopularQuestions AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS ViewsRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.ViewCount > 1000
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalVotes,
+    PHA.PostId,
+    P.Title AS PostTitle,
+    PHA.HistoryCount,
+    PHA.LastHistoryDate,
+    PQV.ViewCount AS PopularityScore
+FROM 
+    UserStats U
+JOIN PostHistoryAggregates PHA ON PHA.OwnerUserId = U.UserId
+JOIN PopularQuestions PQV ON PQV.Id = PHA.PostId
+WHERE 
+    U.ReputationRank <= 100
+    AND PHA.HistoryCount > 5
+ORDER BY 
+    U.PostCount DESC,
+    U.TotalVotes DESC,
+    PQV.ViewsRank;

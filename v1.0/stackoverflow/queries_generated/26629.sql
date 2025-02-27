@@ -1,0 +1,71 @@
+WITH PostsWithTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        COUNT(pl.RelatedPostId) AS RelatedLinks
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+), 
+TopPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Score DESC) AS RankByScore,
+        RANK() OVER (ORDER BY ViewCount DESC) AS RankByViews
+    FROM 
+        PostsWithTagCounts
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryCreationDate,
+        p.Title,
+        p.Body,
+        COALESCE(phh.Comment, '') AS EditorComment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        PostHistory phh ON phh.PostId = p.Id AND phh.PostHistoryTypeId IN (4, 5)
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Filtering for close, reopen, delete, undelete actions
+)
+SELECT 
+    tp.PostId,
+    tp.Title AS PostTitle,
+    tp.ViewCount,
+    tp.Score,
+    tp.Tags,
+    tp.RankByScore,
+    tp.RankByViews,
+    p.UserDisplayName AS Owner,
+    p.CreationDate AS PostCreationDate,
+    ph.HistoryCreationDate,
+    ph.EditorComment
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+LEFT JOIN 
+    PostHistoryDetails ph ON tp.PostId = ph.PostId
+WHERE 
+    tp.RankByScore <= 10 OR tp.RankByViews <= 10 -- Select top posts by score and view count
+ORDER BY 
+    tp.RankByScore, tp.RankByViews;

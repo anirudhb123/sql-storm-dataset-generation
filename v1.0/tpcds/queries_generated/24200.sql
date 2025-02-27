@@ -1,0 +1,56 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        DENSE_RANK() OVER(PARTITION BY sr.item_sk ORDER BY sr.return_quantity DESC) as rank
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+),
+TopItemsReturns AS (
+    SELECT 
+        item_sk,
+        SUM(return_quantity) as total_returned,
+        COUNT(customer_sk) as return_count
+    FROM RankedReturns
+    WHERE rank <= 3
+    GROUP BY item_sk
+),
+CustomerDemographicsWithIncome AS (
+    SELECT 
+        c.customer_sk,
+        cd.gender,
+        cd.marital_status,
+        ib.income_band_sk,
+        ib.lower_bound,
+        ib.upper_bound
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.current_hdemo_sk = hd.hd_demo_sk 
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+AggregateReturns AS (
+    SELECT 
+        cid.customer_sk,
+        SUM(CASE WHEN tr.item_sk IS NOT NULL THEN tr.total_returned ELSE 0 END) AS total_returns,
+        COUNT(DISTINCT cid.customer_sk) AS unique_customers
+    FROM CustomerDemographicsWithIncome cid
+    LEFT JOIN TopItemsReturns tr ON cid.customer_sk = tr.item_sk
+    GROUP BY cid.customer_sk
+)
+SELECT 
+    cd.gender,
+    cd.income_band_sk,
+    COUNT(*) AS number_of_customers,
+    AVG(ar.total_returns) AS average_returns,
+    SUM(CASE WHEN ar.total_returns > 100 THEN 1 ELSE 0 END) as high_return_customers
+FROM CustomerDemographicsWithIncome cd
+INNER JOIN AggregateReturns ar ON cd.customer_sk = ar.customer_sk
+WHERE (cd.gender IS NOT NULL OR cd.marital_status IS NOT NULL)
+AND (cd.income_band_sk IS NOT NULL OR cd.income_band_sk > 0)
+GROUP BY cd.gender, cd.income_band_sk
+HAVING AVG(ar.total_returns) > (SELECT AVG(total_returns) FROM AggregateReturns) 
+   OR COUNT(*) > 50
+ORDER BY cd.gender, cd.income_band_sk;

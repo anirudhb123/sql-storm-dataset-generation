@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY SUBSTRING(p.Tags, 2, CHARINDEX('>', p.Tags) - 2) ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagList,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '>'))::int)
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.Score, p.ViewCount, p.AnswerCount, p.CreationDate, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CreationDate,
+        rp.Rank,
+        rp.TagList,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 AND
+        rp.AnswerCount > 0 AND
+        rp.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostWithComments AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Body,
+        fp.Tags,
+        fp.Score,
+        fp.ViewCount,
+        fp.AnswerCount,
+        fp.CreationDate,
+        fp.TagList,
+        fp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Comments c ON c.PostId = fp.PostId
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Body, fp.Tags, fp.Score, fp.ViewCount, fp.AnswerCount, fp.CreationDate, fp.TagList, fp.OwnerDisplayName
+)
+SELECT 
+    pwc.PostId,
+    pwc.Title,
+    pwc.Body,
+    pwc.Tags,
+    pwc.Score,
+    pwc.ViewCount,
+    pwc.AnswerCount,
+    pwc.CreationDate,
+    pwc.TagList,
+    pwc.OwnerDisplayName,
+    pwc.CommentCount,
+    CASE 
+        WHEN pwc.CommentCount = 0 THEN 'No comments yet'
+        WHEN pwc.CommentCount BETWEEN 1 AND 5 THEN 'Few comments'
+        ELSE 'Many comments'
+    END AS CommentStatus
+FROM 
+    PostWithComments pwc
+ORDER BY 
+    pwc.Score DESC, 
+    pwc.ViewCount DESC, 
+    pwc.AnswerCount DESC;

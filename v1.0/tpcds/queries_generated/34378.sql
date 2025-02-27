@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ws_sold_date_sk
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk, ws_sold_date_sk
+),
+daily_sales AS (
+    SELECT
+        ds.d_date_id,
+        SUM(ss.total_quantity) AS daily_total_quantity,
+        SUM(ss.total_sales) AS daily_total_sales
+    FROM
+        sales_summary ss
+    JOIN date_dim ds ON ss.ws_sold_date_sk = ds.d_date_sk
+    GROUP BY
+        ds.d_date_id
+),
+top_sales AS (
+    SELECT
+        d.d_date_id,
+        ds.daily_total_quantity,
+        ds.daily_total_sales,
+        RANK() OVER (ORDER BY ds.daily_total_sales DESC) AS sales_rank
+    FROM
+        daily_sales ds
+    JOIN date_dim d ON ds.ws_sold_date_sk = d.d_date_sk
+)
+SELECT
+    t.d_date_id,
+    t.daily_total_quantity,
+    t.daily_total_sales,
+    COALESCE(ROUND((t.daily_total_sales - LAG(t.daily_total_sales) OVER (ORDER BY t.d_date_id)) / NULLIF(LAG(t.daily_total_sales) OVER (ORDER BY t.d_date_id), 0), 2), 2), 0) AS sales_growth_rate,
+    row_number() OVER (PARTITION BY t.sales_rank ORDER BY t.daily_total_sales DESC) AS rank_within_sales_group
+FROM
+    top_sales t
+JOIN
+    customer_demographics cd ON cd.cd_demo_sk = (
+        SELECT DISTINCT c.c_current_cdemo_sk
+        FROM customer c
+        WHERE c.c_customer_sk IN (
+            SELECT DISTINCT ws_bill_customer_sk FROM web_sales
+        )
+    )
+WHERE
+    cd.cd_marital_status = 'M'
+ORDER BY
+    t.d_date_id DESC
+LIMIT 100;

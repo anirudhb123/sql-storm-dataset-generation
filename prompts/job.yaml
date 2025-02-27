@@ -1,0 +1,23 @@
+schema: >-
+  Do not explain the query, only output one SQL query. Use the following Join Order Benchmark database schema:
+  create table aka_name (id integer primary key, person_id integer, name text, imdb_index varchar(12), name_pcode_cf varchar(5), name_pcode_nf varchar(5), surname_pcode varchar(5), md5sum varchar(32));
+  create table aka_title (id integer primary key, movie_id integer, title text, imdb_index varchar(12), kind_id integer, production_year integer, phonetic_code varchar(5), episode_of_id integer, season_nr integer, episode_nr integer, note text, md5sum varchar(32));
+  create table cast_info (id integer primary key, person_id integer, movie_id integer, person_role_id integer, note text, nr_order integer, role_id integer);
+  create table char_name (id integer primary key, name text, imdb_index varchar(12), imdb_id integer, name_pcode_nf varchar(5), surname_pcode varchar(5), md5sum varchar(32));
+  create table comp_cast_type (id integer primary key, kind varchar(32));
+  create table company_name (id integer primary key, name text, country_code varchar(255), imdb_id integer, name_pcode_nf varchar(5), name_pcode_sf varchar(5), md5sum varchar(32));
+  create table company_type (id integer primary key, kind varchar(32));
+  create table complete_cast (id integer primary key, movie_id integer, subject_id integer, status_id integer);
+  create table info_type (id integer primary key, info varchar(32));
+  create table keyword (id integer primary key, keyword text, phonetic_code varchar(5));
+  create table kind_type (id integer primary key, kind varchar(15));
+  create table link_type (id integer primary key, link varchar(32));
+  create table movie_companies (id integer primary key, movie_id integer, company_id integer, company_type_id integer, note text);
+  create table movie_info (id integer primary key, movie_id integer, info_type_id integer, info text, note text);
+  create table movie_info_idx (id integer primary key, movie_id integer, info_type_id integer, info text, note text);
+  create table movie_keyword (id integer primary key, movie_id integer, keyword_id integer);
+  create table movie_link (id integer primary key, movie_id integer, linked_movie_id integer, link_type_id integer);
+  create table name (id integer primary key, name text, imdb_index varchar(12), imdb_id integer, gender varchar(1), name_pcode_cf varchar(5), name_pcode_nf varchar(5), surname_pcode varchar(5), md5sum varchar(32));
+  create table person_info (id integer primary key, person_id integer, info_type_id integer, info text, note text);
+  create table role_type (id integer primary key, role varchar(32));
+  create table title (id integer primary key, title text, imdb_index varchar(12), kind_id integer, production_year integer, imdb_id integer, phonetic_code varchar(5), episode_of_id integer, season_nr integer, episode_nr integer, series_years varchar(49), md5sum varchar(32));

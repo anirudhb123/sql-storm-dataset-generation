@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        1 AS level
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND cd.cd_purchase_estimate > 5000
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        level + 1
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        SalesHierarchy sh ON c.c_customer_sk = sh.c_customer_sk
+    WHERE 
+        cd.cd_purchase_estimate > 3000
+)
+
+SELECT 
+    sh.c_customer_id,
+    sh.cd_gender,
+    sh.cd_marital_status,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(ws.ws_sales_price) AS avg_sales_price,
+    COUNT(ws.ws_order_number) AS total_orders,
+    CASE 
+        WHEN COUNT(ws.ws_order_number) > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status,
+    (SELECT COUNT(DISTINCT ws_order_number)
+     FROM web_sales ws2
+     WHERE ws2.ws_bill_customer_sk = sh.c_customer_sk) AS total_web_orders,
+    COALESCE(ws.total_sales, 0) AS daily_sales
+FROM 
+    SalesHierarchy sh
+LEFT JOIN 
+    web_sales ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    (SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_paid) AS total_sales 
+     FROM 
+        web_sales 
+     WHERE 
+        ws_sold_date_sk BETWEEN 2450000 AND 2450500 -- Random date range for testing
+     GROUP BY 
+        ws_bill_customer_sk) ws ON sh.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY 
+    sh.c_customer_id,
+    sh.cd_gender,
+    sh.cd_marital_status
+HAVING 
+    total_net_profit > 1000
+ORDER BY 
+    total_net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

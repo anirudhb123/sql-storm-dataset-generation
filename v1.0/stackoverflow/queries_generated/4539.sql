@@ -1,0 +1,78 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        U.Reputation,
+        U.CreationDate,
+        DENSE_RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+        LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+        LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- BountyStart, BountyClose
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.ReputationRank,
+        UA.QuestionCount,
+        UA.AnswerCount,
+        CASE 
+            WHEN UA.TotalBounties > 0 THEN 'Has Bounty'
+            ELSE 'No Bounty'
+        END AS BountyStatus
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.PostCount > 0
+        AND UA.ReputationRank <= 10
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostDate,
+        P.Score,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+        LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days' 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+    ORDER BY 
+        P.CreationDate DESC
+),
+AggregatedStats AS (
+    SELECT 
+        T.UserId,
+        AVG(R.Score) AS AvgPostScore,
+        SUM(case when R.CommentCount > 0 then 1 else 0 end) AS PostsWithComments
+    FROM 
+        TopUsers T
+    JOIN 
+        RecentPosts R ON T.UserId = R.PostId 
+    GROUP BY 
+        T.UserId
+)
+SELECT 
+    TU.DisplayName,
+    TU.ReputationRank,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    AS.AvgPostScore,
+    AS.PostsWithComments,
+    TU.BountyStatus
+FROM 
+    TopUsers TU
+JOIN 
+    AggregatedStats AS ON TU.UserId = AS.UserId
+ORDER BY 
+    TU.ReputationRank;

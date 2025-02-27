@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        n.n_name as nation_name, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS ranking
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT 
+        rs.nation_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(os.total_revenue) AS total_revenue,
+        AVG(s.s_acctbal) AS average_acctbalance
+    FROM 
+        RankedSuppliers rs
+    LEFT JOIN 
+        partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        OrderSummary os ON os.o_orderkey = ps.ps_partkey
+    GROUP BY 
+        rs.nation_name
+)
+SELECT 
+    sp.nation_name,
+    sp.supplier_count,
+    sp.total_revenue,
+    sp.average_acctbalance,
+    CASE 
+        WHEN sp.total_revenue > 1000000 THEN 'High Revenue' 
+        WHEN sp.total_revenue BETWEEN 500000 AND 1000000 THEN 'Medium Revenue' 
+        ELSE 'Low Revenue' 
+    END AS revenue_category
+FROM 
+    SupplierPerformance sp
+ORDER BY 
+    sp.total_revenue DESC
+LIMIT 10;

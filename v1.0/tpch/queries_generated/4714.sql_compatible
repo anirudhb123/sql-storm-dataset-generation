@@ -1,0 +1,64 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        co.total_spent, 
+        co.order_count,
+        MAX(CASE WHEN o.o_orderstatus = 'O' THEN o.o_totalprice ELSE 0 END) AS max_order_value
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, co.total_spent, co.order_count
+)
+SELECT 
+    r.r_name,
+    rs.s_name,
+    fo.c_name,
+    fo.total_spent,
+    fo.order_count,
+    RANK() OVER (PARTITION BY r.r_name ORDER BY fo.total_spent DESC) AS spending_rank
+FROM 
+    RankedSuppliers rs
+JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    FilteredOrders fo ON fo.total_spent > 1000
+WHERE 
+    fo.max_order_value IS NOT NULL
+ORDER BY 
+    r.r_name, spending_rank;

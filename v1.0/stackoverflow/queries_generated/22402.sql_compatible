@@ -1,0 +1,72 @@
+
+WITH UserStatistics AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        AVG(p.Score) AS AvgPostScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+PostHistoryData AS (
+    SELECT
+        ph.UserId,
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        p.Title,
+        p.CreationDate,
+        (CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN 'Closed/Reopened'
+            WHEN ph.PostHistoryTypeId IN (12, 13) THEN 'Deleted/Undeleted'
+            ELSE 'Other' 
+        END) AS EditType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate > DATE '2024-10-01' - INTERVAL '1 year'
+),
+RecentActivity AS (
+    SELECT 
+        ud.DisplayName,
+        COUNT(DISTINCT p.Id) AS RecentPostsCount,
+        SUM( CASE WHEN p.CreationDate > DATE '2024-10-01' - INTERVAL '30 days' THEN 1 ELSE 0 END ) AS RecentActivePosts,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users ud
+    JOIN Posts p ON ud.Id = p.OwnerUserId
+    WHERE p.CreationDate > DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY ud.DisplayName
+),
+AggregateData AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.TotalPosts,
+        u.TotalComments,
+        u.AvgPostScore,
+        COALESCE(r.RecentActivePosts, 0) AS RecentActivePosts,
+        COALESCE(r.LastPostDate, NULL) AS LastPostDate
+    FROM UserStatistics u
+    LEFT JOIN RecentActivity r ON u.DisplayName = r.DisplayName
+)
+SELECT 
+    ag.DisplayName,
+    ag.TotalPosts,
+    ag.TotalComments,
+    ag.AvgPostScore,
+    ag.RecentActivePosts,
+    ag.LastPostDate,
+    ph.Title AS RecentEditTitle,
+    ph.EditType,
+    ph.CreationDate AS EditCreationDate
+FROM AggregateData ag
+LEFT JOIN PostHistoryData ph ON ag.UserId = ph.UserId AND ph.rn = 1
+WHERE ag.RecentActivePosts > 0
+ORDER BY ag.TotalPosts DESC, ag.TotalComments ASC NULLS LAST;

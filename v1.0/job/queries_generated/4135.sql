@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv'))
+),
+FilteredCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        COALESCE(a.name, 'Unknown') AS actor_name,
+        ct.kind AS role_name
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        role_type ct ON c.role_id = ct.id
+    WHERE 
+        c.nr_order < 5
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    f.actor_name,
+    f.role_name,
+    COUNT(DISTINCT f.person_id) OVER (PARTITION BY m.movie_id) AS actor_count,
+    CASE 
+        WHEN m.year_rank <= 3 THEN 'Top 3 of Year'
+        ELSE 'Other'
+    END AS rank_category
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    FilteredCast f ON m.movie_id = f.movie_id
+WHERE 
+    m.production_year >= 2000 
+    AND (f.actor_name IS NULL OR f.role_name IS NOT NULL)
+ORDER BY 
+    m.production_year DESC, 
+    actor_count DESC;

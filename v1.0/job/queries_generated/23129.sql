@@ -1,0 +1,94 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+TitleKeywords AS (
+    SELECT 
+        t.id AS title_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        MIN(ct.kind) AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+
+CorrelatedSubquery AS (
+    SELECT 
+        c.movie_id,
+        (SELECT COUNT(*) 
+         FROM cast_info ci 
+         WHERE ci.movie_id = c.movie_id) AS cast_count
+    FROM 
+        complete_cast c
+),
+
+FinalSelection AS (
+    SELECT 
+        rt.actor_name,
+        rt.movie_title,
+        rt.production_year,
+        tk.keywords,
+        cm.company_names,
+        cm.company_type,
+        cs.cast_count
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        TitleKeywords tk ON rt.movie_title = tk.title
+    LEFT JOIN 
+        CompanyMovies cm ON rt.production_year IS NOT NULL AND rt.production_year = cm.movie_id
+    LEFT JOIN 
+        CorrelatedSubquery cs ON rt.production_year = cs.movie_id
+    WHERE 
+        rt.rank = 1
+        AND (cm.company_names IS NOT NULL OR cs.cast_count > 0)
+        AND rt.production_year BETWEEN 1980 AND 2023
+        AND rt.actor_name LIKE '%John%'
+)
+
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    COALESCE(keywords, 'No Keywords') AS keywords,
+    COALESCE(company_names, 'Independent') AS company_names,
+    COALESCE(company_type, 'Unknown') AS company_type,
+    CASE 
+        WHEN cast_count IS NULL THEN 'Unknown'
+        ELSE CAST(cast_count AS TEXT) || ' cast members'
+    END AS cast_details
+FROM 
+    FinalSelection
+ORDER BY 
+    production_year DESC;

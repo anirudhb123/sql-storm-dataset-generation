@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        0 AS level
+    FROM 
+        title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') -- Base case for movies
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COALESCE(p.name, 'Unknown') AS person_name,
+    r.role AS person's_role,
+    COUNT(DISTINCT cc.id) AS total_cast,
+    AVG(CASE WHEN rw.rank IS NOT NULL THEN rw.rank ELSE NULL END) AS avg_rank,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    (SELECT 
+         id, 
+         ROW_NUMBER() OVER (PARTITION BY movie_id ORDER BY id DESC) AS rank 
+     FROM 
+         complete_cast) rw ON rw.id = cc.id
+WHERE 
+    m.production_year >= 2000 -- Considering movies from the year 2000 onwards
+GROUP BY 
+    m.movie_id, m.title, m.production_year, p.name, r.role
+ORDER BY 
+    total_cast DESC, m.title;
+
+This SQL query utilizes advanced SQL concepts such as:
+
+- A recursive common table expression (CTE) to create a hierarchy of movies linked to each other through the `movie_link` table.
+- Various joins (including outer joins) to aggregate and combine information across numerous tables including `complete_cast`, `aka_name`, `role_type`, and `movie_keyword`.
+- A set of computations such as counting distinct cast members and averaging roles based on a subquery.
+- The use of `STRING_AGG()` to concatenate keywords associated with each movie.
+- Conditional handling of NULL values through `COALESCE` and case statements.
+- Grouping and ordering the results for a comprehensive benchmark on movie production since the year 2000.

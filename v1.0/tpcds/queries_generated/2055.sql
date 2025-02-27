@@ -1,0 +1,81 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.cd_purchase_estimate
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.rn <= 5
+),
+ProductRankings AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+),
+SalesWithFeedback AS (
+    SELECT 
+        w.web_site_id,
+        p.p_promo_name,
+        pr.total_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    LEFT JOIN 
+        ProductRankings pr ON ws.ws_item_sk = pr.i_item_sk
+    GROUP BY 
+        w.web_site_id, p.p_promo_name, pr.total_sales
+)
+SELECT 
+    cc.cc_name AS call_center_name,
+    SUM(sws.total_sales) AS total_sales,
+    AVG(sws.total_sales) AS average_sales,
+    COUNT(DISTINCT tc.c_customer_sk) AS unique_customers,
+    wc.w_warehouse_name,
+    wd.d_day_name,
+    CASE
+        WHEN COUNT(tc.c_customer_sk) > 100 THEN 'High Volume'
+        WHEN COUNT(tc.c_customer_sk) BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS customer_volume
+FROM 
+    call_center cc
+JOIN 
+    SalesWithFeedback sws ON cc.cc_call_center_sk = sws.ws_web_page_sk
+JOIN 
+    warehouse wc ON sws.ws_warehouse_sk = wc.w_warehouse_sk
+JOIN 
+    date_dim wd ON wd.d_date_sk = ws.ws_sold_date_sk
+JOIN 
+    TopCustomers tc ON tc.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY 
+    cc.cc_name, wc.w_warehouse_name, wd.d_day_name
+ORDER BY 
+    total_sales DESC;

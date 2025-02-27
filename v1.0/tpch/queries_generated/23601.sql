@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_ratings AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_availqty) > 100
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal BETWEEN 500.00 AND 1500.00
+    GROUP BY c.c_custkey, c.c_name
+),
+high_value_order_customers AS (
+    SELECT co.c_custkey, co.c_name
+    FROM customer_orders co
+    WHERE co.order_count > (
+        SELECT AVG(order_count)
+        FROM customer_orders
+    )
+),
+parts_with_name AS (
+    SELECT p.p_partkey, p.p_name, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_per_brand
+    FROM part p
+    WHERE p.p_container IS NOT NULL
+),
+outer_combination AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name
+    FROM supplier s
+    FULL OUTER JOIN parts_with_name p ON s.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 1
+    )
+    WHERE p.rank_per_brand < 3
+)
+SELECT o.o_orderkey, co.c_name, oc.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+       RANK() OVER (PARTITION BY co.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS customer_rank
+FROM orders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN high_value_order_customers co ON o.o_custkey = co.c_custkey
+JOIN outer_combination oc ON l.l_partkey = oc.p_partkey
+WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY o.o_orderkey, co.c_name, oc.s_name
+HAVING total_value > COALESCE((SELECT AVG(total_value) FROM (
+    SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_value
+    FROM lineitem
+    GROUP BY l_orderkey
+) subquery), 0)
+ORDER BY customer_rank, total_value DESC;

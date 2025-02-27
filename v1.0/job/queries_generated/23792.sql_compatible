@@ -1,0 +1,100 @@
+
+WITH RecursiveActorMovies AS (
+    SELECT 
+        ca.person_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY at.production_year DESC) AS movie_rank,
+        ca.movie_id
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_title at ON ca.movie_id = at.movie_id
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND at.production_year > 2000
+),
+MoviesWithTopKeyword AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mk.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, m.title, mk.keyword
+    HAVING 
+        COUNT(mk.id) > 5
+),
+ActorsNoMovies AS (
+    SELECT 
+        n.id AS actor_id,
+        n.name
+    FROM 
+        name n
+    LEFT JOIN 
+        cast_info ci ON n.id = ci.person_id
+    WHERE 
+        ci.movie_id IS NULL
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code <> 'USA'
+),
+FinalResults AS (
+    SELECT 
+        r.person_id,
+        r.title,
+        r.production_year,
+        am.keyword_count
+    FROM 
+        RecursiveActorMovies r
+    LEFT JOIN 
+        (SELECT 
+            keyword_count, 
+            movie_id
+        FROM 
+            MoviesWithTopKeyword 
+        WHERE 
+            keyword = 'Action') am ON r.movie_rank = 1 AND r.movie_id = am.movie_id
+    WHERE 
+        r.movie_rank <= 3
+)
+SELECT 
+    fr.person_id,
+    n.name AS actor_name,
+    fr.title,
+    fr.production_year,
+    (SELECT COUNT(*)
+     FROM complete_cast cc 
+     WHERE cc.movie_id = fr.movie_id) AS total_complete_cast,
+    (SELECT COUNT(*)
+     FROM ActorsNoMovies anm 
+     WHERE anm.actor_id = fr.person_id) AS actors_no_movies,
+    COALESCE(SUM(CASE WHEN m.company_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS company_count
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    movie_companies m ON fr.movie_id = m.movie_id
+JOIN 
+    name n ON n.id = fr.person_id
+LEFT JOIN 
+    MovieCompanyDetails mc ON mc.movie_id = fr.movie_id
+GROUP BY 
+    fr.person_id, n.name, fr.title, fr.production_year
+ORDER BY 
+    fr.production_year DESC
+LIMIT 50;

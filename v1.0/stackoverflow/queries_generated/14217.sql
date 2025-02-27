@@ -1,0 +1,49 @@
+-- Performance Benchmarking Query for Stack Overflow Schema
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalScore,
+    pvs.PostId,
+    pvs.Title,
+    pvs.VoteCount,
+    pvs.UpVotes,
+    pvs.DownVotes
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostVoteStats pvs ON ups.QuestionCount > 0 AND ups.UserId IN (SELECT OwnerUserId FROM Posts WHERE PostTypeId = 1)
+ORDER BY 
+    ups.TotalScore DESC, 
+    ups.PostCount DESC;

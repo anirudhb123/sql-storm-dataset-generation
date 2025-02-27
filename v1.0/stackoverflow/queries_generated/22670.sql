@@ -1,0 +1,107 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+), 
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvotesReceived,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), 
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, ','))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 10
+), 
+PostHistorySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5)
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    us.UserId,
+    us.Reputation,
+    us.UpvotesReceived,
+    us.DownvotesReceived,
+    pt.TagName,
+    phs.EditCount,
+    phs.LastEditDate
+FROM 
+    RankedPosts up
+JOIN 
+    Users us ON up.OwnerUserId = us.Id
+LEFT JOIN 
+    PostHistorySummary phs ON up.PostId = phs.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 5
+WHERE 
+    up.RankByScore <= 5
+    AND us.Reputation IS NOT NULL
+    AND (us.LastAccessDate IS NULL OR us.LastAccessDate > NOW() - INTERVAL '90 days')
+ORDER BY 
+    us.Reputation DESC, up.Score DESC;
+
+-- Lastly, ensure the output includes appropriate NULL checks:
+SELECT 
+    COALESCE(up.Title, 'Untitled') AS PostTitle,
+    COALESCE(pt.TagName, 'No Tags') AS Tags,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    CASE 
+        WHEN us.Reputation < 100 THEN 'Low Reputation' 
+        WHEN us.Reputation BETWEEN 100 AND 500 THEN 'Medium Reputation' 
+        ELSE 'High Reputation' 
+    END AS ReputationLevel
+FROM 
+    RankedPosts up
+LEFT JOIN 
+    Users us ON up.OwnerUserId = us.Id
+LEFT JOIN 
+    PostHistorySummary phs ON up.PostId = phs.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 5
+WHERE 
+    up.RankByScore <= 5
+ORDER BY 
+    up.Score DESC, ReputationLevel;
+
+This SQL query encompasses advanced elements such as Common Table Expressions (CTEs), window functions, outer joins, and nuanced predicates, demonstrating a variety of SQL constructs designed for performance benchmarking.

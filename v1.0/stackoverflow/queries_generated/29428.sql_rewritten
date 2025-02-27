@@ -1,0 +1,91 @@
+WITH RankedPostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerDisplayName,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY t.Count DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserContributions AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    WHERE 
+        u.LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostActivitySummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 6 THEN 1 ELSE 0 END) AS TagChangeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COALESCE(uc.PostCount, 0) AS TotalPosts,
+    COALESCE(uc.TotalBounty, 0) AS TotalBounty,
+    COALESCE(a.CommentCount, 0) AS TotalComments,
+    COALESCE(a.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(a.AnswerCount, 0) AS TotalAnswers,
+    p.Title,
+    pt.TagName,
+    p.PostId,
+    pas.CloseReopenCount,
+    pas.TagChangeCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserContributions uc ON u.Id = uc.UserId
+LEFT JOIN 
+    ActiveUsers a ON u.Id = a.UserId
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RankedPostTags pt ON p.Id = pt.PostId AND pt.TagRank = 1
+LEFT JOIN 
+    PostActivitySummary pas ON p.Id = pas.PostId
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, TotalPosts DESC;

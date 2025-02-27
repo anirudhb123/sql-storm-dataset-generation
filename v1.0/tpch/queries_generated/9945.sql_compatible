@@ -1,0 +1,33 @@
+
+WITH nation_supplier AS (
+    SELECT n.n_name, s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name, s.s_suppkey
+),
+region_order_summary AS (
+    SELECT n.n_regionkey, n.n_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey, n.n_name
+),
+supplier_region AS (
+    SELECT n.n_nationkey, r.r_regionkey, SUM(n.total_cost) AS region_supplier_cost
+    FROM nation_supplier n
+    JOIN nation n_detail ON n.n_name = n_detail.n_name
+    JOIN region r ON n_detail.n_regionkey = r.r_regionkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+)
+SELECT 
+    r.r_name,
+    rs.order_count,
+    rs.total_revenue,
+    s.region_supplier_cost,
+    (rs.total_revenue - s.region_supplier_cost) AS net_profit
+FROM region_order_summary rs
+JOIN region r ON rs.n_regionkey = r.r_regionkey
+JOIN supplier_region s ON r.r_regionkey = s.r_regionkey
+ORDER BY net_profit DESC
+FETCH FIRST 10 ROWS ONLY;

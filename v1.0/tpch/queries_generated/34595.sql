@@ -1,0 +1,48 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority, 1 AS OrderLevel
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority, oc.OrderLevel + 1
+    FROM orders o
+    JOIN OrderCTE oc ON o.o_orderkey = oc.o_orderkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+),
+SupplierAggregation AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_availqty) AS TotalAvailable, AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+LineItemStats AS (
+    SELECT l.l_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalNetRevenue,
+           SUM(l.l_quantity) AS TotalUnitsSold
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY l.l_suppkey
+),
+FinalReport AS (
+    SELECT rt.r_name, 
+           COALESCE(c.c_name, 'N/A') AS CustomerName,
+           SUM(l.TotalNetRevenue) AS SumNetRevenue,
+           COUNT(DISTINCT o.o_orderkey) AS OrdersCount,
+           AVG(s.AvgSupplyCost) AS AvgSupplyCostPerSupplier,
+           MAX(o.o_orderdate) AS LastOrderDate,
+           ROW_NUMBER() OVER (PARTITION BY rt.r_name ORDER BY SUM(l.TotalNetRevenue) DESC) AS RegionRank
+    FROM region rt
+    LEFT JOIN nation n ON n.n_regionkey = rt.r_regionkey
+    LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN LineItemStats l ON l.l_suppkey = s.s_suppkey
+    LEFT JOIN HighValueCustomers c ON c.c_custkey = l.l_suppkey
+    LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+    GROUP BY rt.r_name, c.c_name
+)
+SELECT *
+FROM FinalReport
+WHERE RegionRank <= 5
+ORDER BY r_name, SumNetRevenue DESC;

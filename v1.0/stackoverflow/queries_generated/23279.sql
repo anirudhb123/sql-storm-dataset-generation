@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2020-01-01' AND
+        p.Score > 0
+),
+PostRelatedData AS (
+    SELECT 
+        pr.PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseCount
+    FROM 
+        PostLinks pl
+    JOIN 
+        Posts pr ON pl.PostId = pr.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(pr.Tags, ',')::int[])
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = pr.Id
+    GROUP BY 
+        pr.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    pd.Tags,
+    pd.RelatedPostCount,
+    pd.CloseCount,
+    ua.UserId,
+    ua.DisplayName AS UserDisplayName,
+    ua.UpVotesReceived,
+    ua.DownVotesReceived,
+    ua.LastVoteDate,
+    COALESCE(NULLIF(pd.CloseCount, 0), 'No Closures') AS ClosureStatus,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        WHEN rp.Rank IS NULL THEN 'No Posts'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostRelatedData pd ON rp.PostId = pd.PostId
+LEFT JOIN 
+    Users u ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    UserActivity ua ON ua.UserId = u.Id
+WHERE 
+    (rp.AnswerCount > 5 OR rp.ViewCount > 100)
+    AND (rp.TotalPosts > 1 OR pd.RelatedPostCount > 1)
+ORDER BY 
+    rp.Score DESC, ua.UpVotesReceived DESC, pd.RelatedPostCount DESC;

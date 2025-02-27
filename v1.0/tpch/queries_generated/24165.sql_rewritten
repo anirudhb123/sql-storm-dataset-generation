@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY s.nationkey) AS total_suppliers
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) THEN 'Above Average' 
+            ELSE 'Below Average' 
+        END AS price_category
+    FROM part p
+),
+SupplierPartJoin AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        hp.price_category
+    FROM partsupp ps
+    JOIN HighValueParts hp ON ps.ps_partkey = hp.p_partkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date,
+        MIN(o.o_orderdate) AS first_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.total_spent,
+        co.order_count,
+        co.last_order_date,
+        CASE 
+            WHEN co.total_spent IS NULL THEN 'No Orders'
+            WHEN co.total_spent < 1000 THEN 'Low Spender'
+            ELSE 'High Spender' 
+        END AS spending_category
+    FROM CustomerOrderStats co
+)
+SELECT 
+    rs.s_name AS supplier_name,
+    hpp.p_name AS part_name,
+    COALESCE(NULLIF(f.total_spent, 0), (SELECT 'Unknown' FROM dual)) AS total_spent,
+    f.spending_category,
+    CASE 
+        WHEN f.last_order_date IS NOT NULL AND f.last_order_date < cast('1998-10-01' as date) - INTERVAL '30' DAY THEN 'Inactive'
+        ELSE 'Active' 
+    END AS customer_status,
+    COUNT(DISTINCT l.l_orderkey) AS total_orders_processed
+FROM RankedSuppliers rs
+LEFT JOIN SupplierPartJoin spj ON rs.s_suppkey = spj.ps_suppkey
+LEFT JOIN HighValueParts hpp ON spj.ps_partkey = hpp.p_partkey
+LEFT JOIN FilteredOrders f ON rs.nationkey = f.c_custkey
+LEFT JOIN lineitem l ON f.last_order_date = l.l_shipdate
+WHERE 
+    (hpp.price_category = 'Above Average' OR f.spending_category = 'High Spender')
+    AND (rs.rn <= 3 OR rs.total_suppliers < 5)
+GROUP BY 
+    rs.s_name, hpp.p_name, f.total_spent, f.spending_category, f.last_order_date
+ORDER BY total_orders_processed DESC, supplier_name;

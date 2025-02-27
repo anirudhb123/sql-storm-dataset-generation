@@ -1,0 +1,56 @@
+
+WITH SupplierSummary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(s.s_acctbal) AS avg_acct_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spending,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN l.l_linenumber END) AS return_count,
+        AVG(l.l_tax) AS avg_tax_rate
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+ComplexAnalysis AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(ss.total_supply_cost) AS total_supplier_cost,
+        SUM(COALESCE(cs.total_spending, 0)) AS total_customer_spending
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN SupplierSummary ss ON s.s_suppkey = ss.s_suppkey
+    LEFT JOIN CustomerOrderSummary cs ON n.n_nationkey = cs.c_custkey
+    GROUP BY n.n_name
+)
+SELECT 
+    c.n_name,
+    CASE 
+        WHEN SUM(c.total_supplier_cost) IS NULL THEN 'No suppliers available'
+        ELSE CONCAT('Total Cost: ', FORMAT(SUM(c.total_supplier_cost), 'FM$99999999.00'))
+    END AS supplier_cost_info,
+    STRING_AGG(DISTINCT CONCAT('Cust: ', cs.c_name, '; Spend: ', cs.total_spending), '; ') FILTER (WHERE cs.total_spending IS NOT NULL) AS customer_spending_details,
+    MAX(cs.last_order_date) AS last_customer_order_date
+FROM ComplexAnalysis c
+LEFT JOIN CustomerOrderSummary cs ON cs.c_custkey = (SELECT MIN(custkey) FROM customer WHERE c_nationkey = c.n_nationkey)
+GROUP BY c.n_name
+ORDER BY c.n_name ASC;

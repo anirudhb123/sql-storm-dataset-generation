@@ -1,0 +1,89 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+), 
+
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(ph1.CommentCount), 0) AS TotalComments,
+        COALESCE(SUM(ph2.VoteCount), 0) AS TotalVotes,
+        uvs.TotalVotes AS UserTotalVotes,
+        uvs.Upvotes,
+        uvs.Downvotes,
+        rph.Level AS HierarchyLevel
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) ph1 ON p.Id = ph1.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) ph2 ON p.Id = ph2.PostId
+    LEFT JOIN 
+        UserVoteSummary uvs ON p.OwnerUserId = uvs.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.PostId
+    GROUP BY 
+        p.Id, p.Title, uvs.TotalVotes, uvs.Upvotes, uvs.Downvotes, rph.Level
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.TotalComments,
+    pd.TotalVotes,
+    pd.UserTotalVotes,
+    pd.Upvotes,
+    pd.Downvotes,
+    pd.HierarchyLevel,
+    CASE 
+        WHEN pd.HierarchyLevel = 0 THEN 'Top-Level Post'
+        ELSE CONCAT('Nested Post Level ', pd.HierarchyLevel)
+    END AS PostHierarchyDescription
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.TotalVotes DESC, pd.HierarchyLevel ASC;

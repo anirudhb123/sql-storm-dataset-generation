@@ -1,0 +1,56 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.name) AS company_names,
+        COUNT(DISTINCT cas.person_id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        cast_info cas ON m.id = cas.movie_id
+    GROUP BY 
+        m.id
+),
+person_cast AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS actor_name,
+        GROUP_CONCAT(DISTINCT md.title) AS acted_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title md ON c.movie_id = md.id
+    GROUP BY 
+        p.id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.keywords,
+    md.company_names,
+    md.cast_count,
+    pc.actor_name,
+    pc.acted_movies
+FROM 
+    movie_details md
+LEFT JOIN 
+    person_cast pc ON pc.acted_movies LIKE '%' || md.movie_title || '%'
+WHERE 
+    md.production_year > 2000
+ORDER BY 
+    md.production_year DESC, 
+    md.movie_title;
+
+This query constructs a benchmarking table by joining multiple tables to extract movie and actor information to evaluate string processing capabilities. It combines data from `aka_title`, `movie_keyword`, `keyword`, `movie_companies`, `company_name`, and `cast_info`, ultimately filtering for movies produced after 2000 and returning details in an ordered format.

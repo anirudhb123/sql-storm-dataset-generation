@@ -1,0 +1,82 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_year,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT r.role_id) AS role_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(*) AS keyword_count
+    FROM movie_keyword mt
+    JOIN keyword k ON mt.keyword_id = k.id
+    GROUP BY mt.movie_id
+),
+
+TitleCompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        co.name AS company_name,
+        cmp.kind AS company_type,
+        m.production_year
+    FROM movie_companies m
+    JOIN company_name co ON m.company_id = co.id
+    JOIN company_type cmp ON m.company_type_id = cmp.id
+    WHERE co.country_code IS NOT NULL
+),
+
+FinalResults AS (
+    SELECT 
+        tt.title_id,
+        tt.title,
+        tt.production_year,
+        tr.role_count,
+        tr.roles,
+        kw.keywords,
+        tc.company_name,
+        tc.company_type,
+        tc.production_year AS company_year,
+        tt.total_titles,
+        NULLIF(tt.rank_year, 0) AS rank_year_adjusted
+    FROM RankedTitles tt
+    LEFT JOIN ActorRoles tr ON tr.person_id IN (
+        SELECT c.person_id 
+        FROM cast_info c 
+        WHERE c.movie_id = tt.title_id
+    )
+    LEFT JOIN MoviesWithKeywords kw ON kw.movie_id = tt.title_id
+    LEFT JOIN TitleCompanyInfo tc ON tc.movie_id = tt.title_id
+)
+
+SELECT 
+    title_id,
+    title,
+    production_year,
+    COALESCE(role_count, 0) AS role_count,
+    COALESCE(roles, 'No roles') AS roles,
+    COALESCE(keywords, 'No keywords') AS keywords,
+    COALESCE(company_name, 'No company') AS company_name,
+    COALESCE(company_type, 'No type') AS company_type,
+    COALESCE(company_year, production_year) AS company_or_movie_year,
+    total_titles,
+    COALESCE(rank_year_adjusted, 999) AS rank_year
+FROM FinalResults
+WHERE production_year BETWEEN 1990 AND 2000
+ORDER BY production_year, title;

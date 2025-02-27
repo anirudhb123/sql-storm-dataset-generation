@@ -1,0 +1,59 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        ds.d_year,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim ds ON ws.ws_sold_date_sk = ds.d_date_sk
+    GROUP BY 
+        ws.web_site_sk, ds.d_year
+), customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+), top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        RANK() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_spent DESC) AS spend_rank
+    FROM 
+        customer_summary cs
+    WHERE 
+        cs.total_spent > 0
+)
+SELECT 
+    ss.web_site_sk,
+    ss.d_year,
+    ss.total_sales,
+    ss.total_discount,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    tc.total_orders,
+    tc.total_spent
+FROM 
+    sales_summary ss
+JOIN 
+    top_customers tc ON ss.web_site_sk = (SELECT ws.web_site_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.c_customer_sk LIMIT 1)
+WHERE 
+    tc.spend_rank <= 10
+ORDER BY 
+    ss.d_year, ss.total_sales DESC;

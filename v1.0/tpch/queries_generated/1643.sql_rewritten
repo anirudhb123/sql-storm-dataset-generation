@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+SupplierRegions AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_regionkey,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, n.n_regionkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(TO_NUMBER(TO_CHAR(TO_DATE(o.o_orderdate, 'YYYY-MM-DD'), 'MM'))), 0) AS revenue_per_month,
+    COUNT(DISTINCT so.o_orderkey) AS unique_orders,
+    COUNT(DISTINCT ss.ps_suppkey) AS unique_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    SupplierRegions ss ON r.r_regionkey = ss.n_regionkey
+LEFT JOIN 
+    RankedOrders so ON so.o_orderkey = ss.ps_suppkey
+GROUP BY 
+    r.r_name
+HAVING 
+    SUM(TO_NUMBER(TO_CHAR(TO_DATE(o.o_orderdate, 'YYYY-MM-DD'), 'MM'))) > 0
+ORDER BY 
+    revenue_per_month DESC;

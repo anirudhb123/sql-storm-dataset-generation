@@ -1,0 +1,79 @@
+WITH RecursiveCTE AS (
+    SELECT
+        c.id AS cast_id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM
+        cast_info c
+),
+MoviesWithActors AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT r.person_id) AS actor_count,
+        MAX(r.actor_rank) AS max_actor_rank
+    FROM
+        aka_title t
+    LEFT JOIN
+        RecursiveCTE r ON t.id = r.movie_id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title
+),
+ImportantMovies AS (
+    SELECT
+        mw.movie_id,
+        mw.title,
+        mw.actor_count,
+        CASE
+            WHEN mw.actor_count > 5 THEN 'Ensemble'
+            ELSE 'Small Cast'
+        END AS cast_type,
+        mw.max_actor_rank,
+        COALESCE(json_agg(ak.name) FILTER (WHERE ak.name IS NOT NULL), '[]') AS actor_names
+    FROM
+        MoviesWithActors mw
+    LEFT JOIN
+        cast_info c ON mw.movie_id = c.movie_id
+    LEFT JOIN
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY
+        mw.movie_id, mw.title, mw.actor_count, mw.max_actor_rank
+    HAVING
+        mw.actor_count IS NOT NULL
+),
+HighlyRatedMovies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info') AS movie_info
+    FROM
+        title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+    WHERE
+        m.production_year >= 2010
+        AND m.id IN (SELECT movie_id FROM movie_keyword WHERE keyword_id IN (SELECT id FROM keyword WHERE keyword ILIKE '%Award%'))
+)
+SELECT
+    im.movie_id,
+    im.title,
+    im.actor_count,
+    im.cast_type,
+    h.movie_info,
+    CASE
+        WHEN im.max_actor_rank IS NULL THEN 'Unknown'
+        ELSE im.max_actor_rank::text
+    END AS max_rank,
+    h.movie_id IS NOT NULL AS is_highly_rated
+FROM
+    ImportantMovies im
+FULL OUTER JOIN
+    HighlyRatedMovies h ON im.movie_id = h.movie_id
+WHERE
+    (im.actor_count IS NOT NULL OR h.movie_info IS NOT NULL)
+ORDER BY
+    im.actor_count DESC NULLS LAST, h.movie_info DESC;

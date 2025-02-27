@@ -1,0 +1,42 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(ss.ss_ticket_number) AS total_sales,
+        SUM(ss.ss_sales_price) AS total_sales_amount,
+        AVG(ss.ss_sales_price) AS avg_sale_price
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+        AND cd.cd_gender = 'F'
+        AND ss.ss_sold_date_sk BETWEEN 2458594 AND 2458594 + 365  
+    GROUP BY 
+        c.c_first_name, c.c_last_name, cd.cd_gender
+),
+
+YearlySales AS (
+    SELECT 
+        DATE_TRUNC('year', d.d_date) AS sales_year,
+        SUM(total_sales_amount) AS yearly_sales_amount
+    FROM 
+        CustomerSales
+    JOIN 
+        date_dim d ON d.d_date_sk = cast('2002-10-01' as date)
+    GROUP BY 
+        sales_year
+)
+
+SELECT 
+    ys.sales_year,
+    ys.yearly_sales_amount,
+    RANK() OVER (ORDER BY ys.yearly_sales_amount DESC) AS sales_rank
+FROM 
+    YearlySales ys
+ORDER BY 
+    ys.sales_year DESC;

@@ -1,0 +1,57 @@
+WITH movie_characteristics AS (
+    SELECT 
+        t.title AS movie_title,
+        c.name AS character_name,
+        p.gender AS actor_gender,
+        k.keyword AS movie_keyword,
+        ci.note AS cast_note,
+        m.production_year AS production_year
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    JOIN 
+        aka_name an ON an.person_id = ci.person_id
+    JOIN 
+        name p ON p.id = an.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2022
+        AND (p.gender = 'M' OR p.gender = 'F')
+),
+keyword_summary AS (
+    SELECT 
+        movie_title,
+        COUNT(DISTINCT movie_keyword) AS keyword_count,
+        COUNT(*) FILTER (WHERE actor_gender = 'F') AS female_count,
+        COUNT(*) FILTER (WHERE actor_gender = 'M') AS male_count
+    FROM 
+        movie_characteristics
+    GROUP BY 
+        movie_title
+),
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        keyword_count,
+        female_count,
+        male_count,
+        RANK() OVER (ORDER BY keyword_count DESC) AS rank
+    FROM 
+        keyword_summary
+)
+SELECT 
+    movie_title,
+    keyword_count,
+    female_count,
+    male_count,
+    rank
+FROM 
+    ranked_movies
+WHERE 
+    rank <= 10;

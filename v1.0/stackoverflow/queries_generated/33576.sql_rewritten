@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score >= 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+LatestPostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        MAX(c.CreationDate) AS LastCommentDate,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.PostCount,
+    up.PositivePosts,
+    up.NegativePosts,
+    r.Title AS QuestionTitle,
+    lp.LastCommentDate,
+    lp.CommentCount,
+    CASE 
+        WHEN lp.LastCommentDate IS NULL THEN 'No comments yet'
+        ELSE 'Commented'
+    END AS CommentStatus,
+    COUNT(DISTINCT ph.Id) AS ChildPostCount,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes
+FROM 
+    UserStats up
+LEFT JOIN 
+    RecursivePostHierarchy ph ON up.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ph.Id)
+LEFT JOIN 
+    LatestPostActivity lp ON lp.PostId = ph.Id
+LEFT JOIN 
+    Votes v ON ph.Id = v.PostId
+GROUP BY 
+    up.UserId, up.DisplayName, up.Reputation, r.Title, lp.LastCommentDate, lp.CommentCount
+ORDER BY 
+    up.Reputation DESC, up.PostCount DESC;

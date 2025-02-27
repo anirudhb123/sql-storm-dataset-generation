@@ -1,0 +1,64 @@
+
+WITH RECURSIVE sales_ranking AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rnk
+    FROM 
+        web_sales
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_net_paid, 0)) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS customer_rank
+    FROM 
+        customer_sales cs
+    JOIN 
+        customer c ON c.c_customer_id = cs.c_customer_id
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales)
+                          FROM customer_sales)
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(ws.ws_net_profit, 0) AS profit,
+    inv.inv_quantity_on_hand,
+    d.d_year,
+    SUM(sr.sr_return_qty) AS total_returns,
+    CASE 
+        WHEN MONTH(d.d_date) = 12 THEN 'Holiday Season'
+        ELSE 'Regular Season'
+    END AS seasonality
+FROM 
+    top_customers tc
+JOIN 
+    web_sales ws ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    inventory inv ON ws.ws_item_sk = inv.inv_item_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    store_returns sr ON sr.sr_item_sk = ws.ws_item_sk
+GROUP BY 
+    c.c_customer_id, 
+    inv.inv_quantity_on_hand, 
+    d.d_year, 
+    ws.ws_net_profit
+ORDER BY 
+    total_returns DESC, 
+    profit DESC
+LIMIT 100;

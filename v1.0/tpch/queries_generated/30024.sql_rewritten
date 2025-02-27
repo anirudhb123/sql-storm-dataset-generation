@@ -1,0 +1,90 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        0 AS level
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost, 
+        level + 1
+    FROM 
+        SupplyChain sc
+    JOIN 
+        partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0 AND level < 5
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' 
+        AND o.o_orderdate < '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(os.revenue) AS total_revenue
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrderStats os ON c.c_custkey = os.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedCustomers AS (
+    SELECT 
+        cp.c_custkey, 
+        cp.c_name, 
+        cp.total_revenue, 
+        RANK() OVER (ORDER BY cp.total_revenue DESC) AS rnk
+    FROM 
+        CustomerPurchases cp
+)
+SELECT 
+    sc.s_name AS supplier_name, 
+    sc.p_name AS part_name, 
+    rc.c_name AS customer_name, 
+    rc.total_revenue AS customer_revenue, 
+    sc.ps_availqty AS available_quantity, 
+    rc.rnk AS customer_rank
+FROM 
+    SupplyChain sc
+LEFT JOIN 
+    RankedCustomers rc ON sc.p_partkey = rc.c_custkey
+WHERE 
+    rc.rnk <= 10
+ORDER BY 
+    sc.s_name, rc.total_revenue DESC;

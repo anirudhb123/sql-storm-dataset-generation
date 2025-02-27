@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT(c.c_name, ' from ', s.s_name, ' located at ', s.s_address) AS Supplier_Customer_Info,
+    p.p_name AS Product_Name,
+    COUNT(DISTINCT o.o_orderkey) AS Total_Orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Revenue,
+    AVG(DATEDIFF(l.l_receiptdate, l.l_shipdate)) AS Avg_Shipping_Days,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS Short_Comment
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    c.c_mktsegment = 'BUILDING'
+    AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    c.c_name, s.s_name, s.s_address, p.p_name
+HAVING 
+    Total_Revenue > 10000
+ORDER BY 
+    Total_Revenue DESC;

@@ -1,0 +1,42 @@
+WITH combined_data AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        n.n_name AS nation_name,
+        s.s_name AS supplier_name,
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        p.p_partkey, p.p_name, n.n_name, s.s_name, c.c_name
+)
+SELECT 
+    p_partkey,
+    p_name,
+    nation_name,
+    supplier_name,
+    customer_name,
+    total_revenue,
+    order_count,
+    customer_count,
+    CONCAT('Total Revenue for ', p_name, ' supplied by ', supplier_name, ' in ', nation_name, ' is: ', FORMAT(total_revenue, 2)) AS revenue_message
+FROM 
+    combined_data
+WHERE 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

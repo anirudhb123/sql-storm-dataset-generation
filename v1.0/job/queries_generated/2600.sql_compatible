@@ -1,0 +1,46 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.nr_order DESC) AS rn,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        COALESCE(cn.name, 'Unknown Company') AS production_company
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id 
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id 
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id 
+    LEFT JOIN 
+        cast_info b ON a.id = b.movie_id 
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND (a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%'))
+),
+production_stats AS (
+    SELECT 
+        production_year,
+        COUNT(DISTINCT title) AS total_movies,
+        AVG(rn) AS avg_cast_order
+    FROM 
+        ranked_movies 
+    GROUP BY 
+        production_year
+)
+SELECT 
+    ps.production_year,
+    ps.total_movies,
+    ps.avg_cast_order,
+    STRING_AGG(rm.movie_keyword, ', ') AS all_keywords
+FROM 
+    production_stats ps
+LEFT JOIN 
+    ranked_movies rm ON ps.production_year = rm.production_year
+GROUP BY 
+    ps.production_year, ps.total_movies, ps.avg_cast_order 
+ORDER BY 
+    ps.production_year DESC 
+LIMIT 10;

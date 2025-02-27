@@ -1,0 +1,74 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        CAST(NULL AS text) AS parent_title,
+        1 AS depth
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.linked_movie_id,
+        t.title,
+        t.production_year,
+        mh.title AS parent_title,
+        mh.depth + 1
+    FROM 
+        movie_link mt
+    JOIN 
+        MovieHierarchy mh ON mt.movie_id = mh.movie_id
+    JOIN 
+        title t ON t.id = mt.linked_movie_id
+    WHERE 
+        mh.depth < 5
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.parent_title,
+        mh.depth,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+)
+SELECT 
+    DISTINCT 
+    t.title AS child_movie_title,
+    t.production_year AS child_movie_year,
+    t.parent_title AS linked_movie_title,
+    (SELECT 
+        COUNT(DISTINCT ci.person_id) 
+     FROM 
+        cast_info ci 
+     WHERE 
+        ci.movie_id = t.movie_id) AS total_cast,
+    COALESCE(cn.name, 'Unknown') AS production_company,
+    CASE 
+        WHEN t.depth <= 2 THEN 'Top Tier'
+        ELSE 'Lower Tier'
+    END AS tier,
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    TopMovies t
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.movie_id
+WHERE 
+    t.rank <= 5
+GROUP BY 
+    t.title, t.production_year, t.parent_title, cn.name, t.depth
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    t.production_year DESC, t.depth, total_cast DESC;

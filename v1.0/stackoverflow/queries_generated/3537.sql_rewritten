@@ -1,0 +1,40 @@
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RecentVotes AS (
+    SELECT v.PostId, COUNT(v.Id) AS VoteCount
+    FROM Votes v
+    WHERE v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+    GROUP BY v.PostId
+),
+PostComments AS (
+    SELECT c.PostId, COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+SELECT u.DisplayName, 
+       rp.Title, 
+       rp.Score, 
+       rp.ViewCount, 
+       COALESCE(rv.VoteCount, 0) AS RecentVoteCount, 
+       COALESCE(pc.CommentCount, 0) AS TotalComments,
+       CASE 
+           WHEN u.Reputation IS NULL THEN 'Unknown Reputation'
+           ELSE CASE 
+               WHEN u.Reputation > 1000 THEN 'High Reputation'
+               WHEN u.Reputation BETWEEN 500 AND 1000 THEN 'Medium Reputation'
+               ELSE 'Low Reputation'
+           END 
+       END AS UserReputation
+FROM Users u
+JOIN RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN RecentVotes rv ON rp.Id = rv.PostId
+LEFT JOIN PostComments pc ON rp.Id = pc.PostId
+WHERE rp.PostRank = 1 
+  AND u.LastAccessDate IS NOT NULL
+  AND (u.Location IS NOT NULL OR u.AboutMe IS NOT NULL)
+ORDER BY rp.Score DESC, RecentVoteCount DESC
+LIMIT 10;

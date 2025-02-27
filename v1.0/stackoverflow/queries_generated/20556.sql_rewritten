@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount IS NOT NULL
+        AND p.PostTypeId IN (1, 2)  
+),
+AggregatedUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        h.PostId,
+        h.CreationDate,
+        h.Comment,
+        h.UserId,
+        pt.Name AS PostHistoryTypeName
+    FROM 
+        PostHistory h
+    JOIN 
+        PostHistoryTypes pt ON h.PostHistoryTypeId = pt.Id
+    WHERE 
+        pt.Name LIKE '%Closed%'
+),
+UserMetrics AS (
+    SELECT 
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS Views,
+        COUNT(DISTINCT ps.PostId) AS PostsClosed,
+        AVG(u.Reputation) AS AverageReputation,
+        AVG(ps.UserPostRank) AS AverageRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN 
+        ClosedPosts cp ON u.Id = cp.UserId
+    GROUP BY 
+        u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    u.PostCount,
+    u.TotalViews,
+    u.TotalUpVotes,
+    u.TotalBadgeClass,
+    u.BadgeCount,
+    um.Views AS UserViews,
+    um.PostsClosed,
+    um.AverageReputation,
+    um.AverageRank
+FROM 
+    AggregatedUserStats u
+JOIN 
+    UserMetrics um ON u.DisplayName = um.DisplayName
+WHERE 
+    u.PostCount > 5
+    AND um.AverageReputation > 100
+ORDER BY 
+    u.TotalViews DESC, 
+    u.TotalUpVotes DESC 
+LIMIT 100 OFFSET 0;

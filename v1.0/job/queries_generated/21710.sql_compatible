@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS year_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        am.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY am.nr_order) AS role_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info am ON a.person_id = am.person_id
+),
+ActorCounts AS (
+    SELECT 
+        actor_id,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        ActorMovies
+    GROUP BY 
+        actor_id
+),
+TopActors AS (
+    SELECT 
+        ac.actor_id,
+        am.name,
+        ac.movie_count,
+        RANK() OVER (ORDER BY ac.movie_count DESC) AS rank
+    FROM 
+        ActorCounts ac
+    JOIN 
+        ActorMovies am ON ac.actor_id = am.actor_id
+    WHERE 
+        ac.movie_count > 5
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ta.name AS top_actor,
+    tc.company_name,
+    COUNT(DISTINCT tc.company_name) AS company_count,
+    MAX(CASE WHEN rm.year_rank <= 3 THEN rm.title ELSE NULL END) AS top_movie_last_3_years,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorMovies am ON rm.movie_id = am.movie_id
+LEFT JOIN 
+    TopActors ta ON am.actor_id = ta.actor_id
+LEFT JOIN 
+    CompanyInfo tc ON rm.movie_id = tc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON rm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    rm.production_year > 2000 AND 
+    (tc.company_type IS NULL OR tc.company_type != 'Distributor')
+GROUP BY 
+    rm.title, rm.production_year, ta.name
+HAVING 
+    COUNT(DISTINCT tc.company_name) > 1
+ORDER BY 
+    rm.production_year DESC, company_count DESC;

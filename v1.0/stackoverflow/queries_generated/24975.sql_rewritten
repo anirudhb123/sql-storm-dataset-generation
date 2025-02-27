@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation = 0 THEN 'Newbie'
+            WHEN u.Reputation BETWEEN 1 AND 100 THEN 'Novice'
+            WHEN u.Reputation BETWEEN 101 AND 500 THEN 'Intermediate'
+            ELSE 'Expert' 
+        END AS ReputationLevel
+    FROM Users u
+),
+PostsWithComments AS (
+    SELECT 
+        r.PostId, 
+        r.Title, 
+        r.CreationDate, 
+        r.OwnerUserId, 
+        r.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM RankedPosts r
+    LEFT JOIN (SELECT PostId, COUNT(*) AS CommentCount 
+               FROM Comments 
+               GROUP BY PostId) c ON r.PostId = c.PostId
+),
+UserAndReputation AS (
+    SELECT 
+        pwc.PostId,
+        pwc.Title,
+        pwc.CreationDate,
+        ur.Reputation,
+        ur.ReputationLevel,
+        pwc.CommentCount
+    FROM PostsWithComments pwc
+    JOIN Users ON pwc.OwnerUserId = Users.Id
+    JOIN UserReputation ur ON Users.Id = ur.UserId
+)
+SELECT 
+    paris.UserId,
+    paris.ReputationLevel,
+    ARRAY_AGG(paris.Title) AS Titles,
+    SUM(CASE WHEN paris.ReputationLevel = 'Expert' THEN 1 ELSE 0 END) AS ExpertCount,
+    AVG(pwc.CommentCount) AS AverageComments,
+    MAX(pwc.Score) AS MaxScore
+FROM UserAndReputation paris
+JOIN PostsWithComments pwc ON paris.PostId = pwc.PostId
+GROUP BY paris.UserId, paris.ReputationLevel
+HAVING COUNT(pwc.PostId) > 0
+ORDER BY AVG(pwc.CommentCount) DESC, MAX(pwc.Score) DESC
+LIMIT 10;

@@ -1,0 +1,77 @@
+
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        MIN(ws.ws_ship_date_sk) AS first_purchase_date,
+        MAX(ws.ws_ship_date_sk) AS last_purchase_date
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cp.total_sales,
+        cp.total_orders,
+        cp.first_purchase_date,
+        cp.last_purchase_date,
+        DATEDIFF(CURDATE(), FROM_UNIXTIME(CAST(cp.last_purchase_date AS UNSIGNED))) AS days_since_last_purchase
+    FROM CustomerPurchases cp
+    JOIN customer c ON cp.c_customer_id = c.c_customer_id
+    WHERE cp.total_sales > (
+        SELECT AVG(total_sales)
+        FROM CustomerPurchases
+    )
+),
+SalesByWarehouse AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY w.w_warehouse_name
+),
+ReturningCustomers AS (
+    SELECT 
+        cr.returning_customer_sk,
+        COUNT(*) AS total_returns
+    FROM web_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        hvc.c_customer_id,
+        hvc.total_sales,
+        hvc.total_orders,
+        hvc.first_purchase_date,
+        hvc.last_purchase_date,
+        sbw.total_net_profit,
+        sbw.unique_customers,
+        rc.total_returns,
+        CASE 
+            WHEN hvc.days_since_last_purchase < 30 THEN 'Active'
+            WHEN hvc.days_since_last_purchase BETWEEN 30 AND 90 THEN 'Inactive'
+            ELSE 'Dormant'
+        END AS customer_status
+    FROM HighValueCustomers hvc
+    LEFT JOIN SalesByWarehouse sbw ON hvc.total_sales = sbw.total_net_profit
+    LEFT JOIN ReturningCustomers rc ON hvc.c_customer_id = rc.returning_customer_sk
+    WHERE rc.total_returns IS NULL OR rc.total_returns > 1
+)
+SELECT 
+    f.customer_status,
+    COUNT(*) AS number_of_customers,
+    AVG(f.total_sales) AS avg_total_sales,
+    SUM(f.total_net_profit) AS total_net_profit
+FROM FinalReport f
+GROUP BY f.customer_status
+ORDER BY CASE f.customer_status
+            WHEN 'Active' THEN 1
+            WHEN 'Inactive' THEN 2
+            ELSE 3
+         END;

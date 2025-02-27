@@ -1,0 +1,78 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+),
+BadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(CAST(c.CommentCount AS INT), 0) AS CommentCount,
+        COALESCE(CAST(ph.RevisionCount AS INT), 0) AS RevisionCount,
+        COALESCE(b.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS RevisionCount
+        FROM 
+            PostHistory
+        GROUP BY 
+            PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN BadgeStats b ON p.OwnerUserId = b.UserId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.ClosedPostCount,
+    SUM(pa.ViewCount) AS TotalViewCount,
+    SUM(pa.CommentCount) AS TotalCommentCount,
+    AVG(pa.RevisionCount) AS AverageRevisionCount,
+    AVG(pa.UserBadgeCount) AS AverageUserBadgeCount
+FROM 
+    TagStats ts
+JOIN 
+    PostActivity pa ON pa.PostId IN (
+        SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%<', ts.TagName, '>%')
+    )
+GROUP BY 
+    ts.TagName
+ORDER BY 
+    TotalViewCount DESC, ts.TagName;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_return_date_sk, 
+        COUNT(DISTINCT sr_customer_sk) as unique_customers,
+        SUM(sr_return_quantity) as total_returned_quantity,
+        SUM(sr_return_amt) as total_returned_amt,
+        ROW_NUMBER() OVER(PARTITION BY sr_return_date_sk ORDER BY SUM(sr_return_amt) DESC) as rnk
+    FROM store_returns
+    WHERE sr_return_date_sk IS NOT NULL
+    GROUP BY sr_return_date_sk
+), 
+MaxReturns AS (
+    SELECT 
+        cr.return_date, 
+        cr.unique_customers, 
+        cr.total_returned_quantity, 
+        cr.total_returned_amt
+    FROM CustomerReturns cr
+    JOIN date_dim dd ON cr.sr_return_date_sk = dd.d_date_sk
+    WHERE cr.rnk = 1
+), 
+TotalSales AS (
+    SELECT 
+        d.d_date_id, 
+        SUM(ws.net_paid) as total_net_sales
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_date < CURRENT_DATE - INTERVAL '30' DAY
+    GROUP BY d.d_date_id
+), 
+CombinedResults AS (
+    SELECT 
+        m.return_date, 
+        COALESCE(m.unique_customers, 0) as total_customers_returned, 
+        COALESCE(m.total_returned_quantity, 0) as total_returned_quantity,
+        COALESCE(m.total_returned_amt, 0) as total_returned_amt,
+        COALESCE(t.total_net_sales, 0) as total_net_sales
+    FROM MaxReturns m
+    FULL OUTER JOIN TotalSales t ON m.return_date = t.d_date_id
+)
+SELECT 
+    cr.return_date,
+    cr.total_customers_returned,
+    cr.total_returned_quantity,
+    cr.total_returned_amt,
+    cr.total_net_sales,
+    CASE 
+        WHEN cr.total_net_sales = 0 THEN NULL  -- Handling NULL logic
+        ELSE (cr.total_returned_amt / cr.total_net_sales) * 100 
+    END as return_rate_percentage
+FROM CombinedResults cr
+WHERE cr.total_customers_returned > 5 OR cr.total_net_sales < 1000
+ORDER BY cr.return_date ASC;

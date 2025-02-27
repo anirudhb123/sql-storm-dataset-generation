@@ -1,0 +1,61 @@
+WITH movie_details AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS actor_names,
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        GROUP_CONCAT(DISTINCT pi.info) AS person_info
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+    WHERE 
+        mt.production_year >= 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+)
+
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.actor_names,
+    md.keywords,
+    md.companies,
+    COUNT(DISTINCT ak.name) AS total_actors,
+    COUNT(DISTINCT kw.id) AS total_keywords,
+    COUNT(DISTINCT cn.id) AS total_companies,
+    CASE 
+        WHEN md.production_year < 2010 THEN 'Classic Era'
+        ELSE 'Modern Era'
+    END AS era
+FROM 
+    movie_details md
+LEFT JOIN 
+    aka_name ak ON md.actor_names LIKE '%' || ak.name || '%'
+LEFT JOIN 
+    movie_keyword mk ON md.keywords LIKE '%' || mk.keyword || '%'
+LEFT JOIN 
+    movie_companies mc ON md.companies LIKE '%' || mc.note || '%'
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    ak.gender = 'F'
+GROUP BY 
+    md.movie_id, md.movie_title, md.production_year
+ORDER BY 
+    md.production_year DESC, total_actors DESC;

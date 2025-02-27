@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_nationkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    ra.o_orderdate,
+    COALESCE(coc.total_orders, 0) AS customer_orders,
+    sa.total_supply_cost,
+    CASE 
+        WHEN ra.order_rank = 1 THEN 'Latest Order'
+        ELSE 'Previous Order'
+    END AS order_status
+FROM 
+    part p
+LEFT JOIN 
+    RankedOrders ra ON ra.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    SupplierAggregates sa ON sa.ps_partkey = p.p_partkey
+LEFT JOIN 
+    CustomerOrderCounts coc ON coc.c_custkey = (SELECT c.c_custkey FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey = ra.o_orderkey LIMIT 1)
+WHERE 
+    p.p_container LIKE '%BOX%'
+ORDER BY 
+    p.p_retailprice DESC, ra.o_orderdate;

@@ -1,0 +1,67 @@
+
+WITH movie_year_data AS (
+    SELECT
+        t.production_year,
+        COUNT(DISTINCT m.id) AS movie_count,
+        AVG(COALESCE(CAST(mi.info AS FLOAT), 0)) AS average_rating,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY
+        t.production_year
+),
+ranked_movies AS (
+    SELECT
+        production_year,
+        movie_count,
+        average_rating,
+        keywords,
+        RANK() OVER (ORDER BY average_rating DESC) AS rating_rank
+    FROM
+        movie_year_data
+),
+latest_movies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS cast_names
+    FROM
+        aka_title t
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN
+        aka_name an ON ci.person_id = an.person_id
+    WHERE
+        t.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY
+        t.title, t.production_year
+)
+SELECT
+    r.production_year,
+    r.movie_count,
+    r.average_rating,
+    r.keywords,
+    lm.title,
+    lm.cast_names
+FROM
+    ranked_movies r
+LEFT JOIN
+    latest_movies lm ON r.production_year = lm.production_year
+WHERE
+    r.movie_count > 10 AND r.average_rating IS NOT NULL
+ORDER BY
+    r.rating_rank, lm.title;

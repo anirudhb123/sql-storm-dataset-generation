@@ -1,0 +1,49 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.CreationDate,
+        P2.ParentId,
+        Level + 1
+    FROM 
+        Posts P2
+        INNER JOIN RecursivePostHierarchy R ON P2.ParentId = R.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    COUNT(P.Id) AS TotalPosts,
+    COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+    COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+    AVG(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS AvgScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    COALESCE(MAX(P.ClosedDate), 'No Closure') AS LatestClosureDate,
+    COUNT(b.Id) AS TotalBadges
+FROM 
+    Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN PostHistory PH ON PH.UserId = U.Id AND PH.PostId IN (SELECT PostId FROM RecursivePostHierarchy)
+    LEFT JOIN Tags T ON T.Id IN (SELECT UNNEST(string_to_array(P.Tags, ','))::int)
+    LEFT JOIN Badges B ON U.Id = B.UserId
+WHERE 
+    U.Reputation > 1000 
+GROUP BY 
+    U.DisplayName, U.Reputation
+HAVING 
+    COUNT(P.Id) > 10  
+ORDER BY 
+    AvgScore DESC;

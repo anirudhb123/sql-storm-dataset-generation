@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier sh
+    INNER JOIN SupplierHierarchy shier ON sh.s_nationkey = shier.s_nationkey
+    WHERE sh.level < 5
+),
+PartTotals AS (
+    SELECT ps.ps_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY ps.ps_partkey
+),
+CustomerStats AS (
+    SELECT c.c_custkey, 
+           SUM(o.o_totalprice) AS total_order_value, 
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+)
+SELECT p.p_partkey, p.p_name, 
+       COALESCE(pt.total_sales, 0) AS total_sales, 
+       cs.total_order_value, 
+       cs.avg_order_value,
+       CASE 
+           WHEN cs.total_order_value IS NULL THEN 'No Orders'
+           ELSE 'Ordered'
+       END AS order_status,
+       sh.s_name AS supplier_name
+FROM part p
+LEFT JOIN PartTotals pt ON p.p_partkey = pt.ps_partkey
+LEFT JOIN CustomerStats cs ON cs.total_order_value > 5000
+LEFT JOIN SupplierHierarchy sh ON sh.level = 1
+    AND sh.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 5
+    )
+ORDER BY p.p_partkey, sh.s_name, total_sales DESC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM part) / 10; 

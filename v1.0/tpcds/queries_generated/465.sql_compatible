@@ -1,0 +1,60 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        SUM(sr_return_quantity) AS total_return_qty
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        COUNT(c_customer_sk) AS customer_count
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_income_band_sk
+),
+ReturnAgg AS (
+    SELECT 
+        cr.sr_customer_sk AS customer_sk,
+        cr.total_returns,
+        cr.total_return_amt,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound, 
+        ib.ib_upper_bound
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer c ON cr.sr_customer_sk = c.c_customer_sk
+    JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT 
+    ra.cd_gender,
+    ra.cd_marital_status,
+    CASE 
+        WHEN ra.total_returns IS NULL THEN 'No Returns'
+        ELSE CONCAT('Returns: ', ra.total_returns)
+    END AS return_status,
+    COALESCE(ra.total_return_amt, 0) AS total_return_amt,
+    COALESCE(ra.total_return_qty, 0) AS total_return_qty,
+    ROW_NUMBER() OVER (PARTITION BY ra.cd_marital_status ORDER BY COALESCE(ra.total_return_qty, 0) DESC) AS rn
+FROM 
+    ReturnAgg ra
+WHERE 
+    (ra.total_return_amt > 100.00 OR ra.total_returns IS NULL)
+ORDER BY 
+    ra.cd_gender, ra.cd_marital_status, COALESCE(ra.total_return_qty, 0) DESC;

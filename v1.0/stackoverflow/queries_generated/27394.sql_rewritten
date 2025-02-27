@@ -1,0 +1,65 @@
+WITH TagCounts AS (
+    SELECT
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><')))::VARCHAR) AS Tag,
+        COUNT(*) AS PostCount
+    FROM
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        Tag
+),
+
+MostActiveUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalQuestions,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM
+        Users U
+    JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 1    
+    GROUP BY
+        U.Id
+    ORDER BY 
+        TotalQuestions DESC
+    LIMIT 10
+),
+
+RecentPostHistory AS (
+    SELECT
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.UserDisplayName,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistoryRow
+    FROM
+        PostHistory PH
+)
+
+SELECT 
+    TC.Tag,
+    TC.PostCount,
+    AU.TotalQuestions,
+    AU.AcceptedAnswers,
+    P.Title AS RecentPostTitle,
+    P.CreationDate AS RecentPostDate,
+    PH.UserDisplayName AS LastEditor,
+    PH.Comment AS EditComment
+FROM 
+    TagCounts TC
+JOIN 
+    Posts P ON P.Tags LIKE '%' || TC.Tag || '%'
+JOIN 
+    MostActiveUsers AU ON AU.TotalQuestions > 5  
+LEFT JOIN 
+    RecentPostHistory PH ON P.Id = PH.PostId AND PH.HistoryRow = 1  
+WHERE 
+    TC.PostCount > 5  
+ORDER BY 
+    TC.PostCount DESC,
+    AU.TotalQuestions DESC;

@@ -1,0 +1,52 @@
+WITH Recursive MovieStats AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title,
+        COALESCE(CAST(mk.keyword AS TEXT), 'No Keyword') AS keyword,
+        t.production_year,
+        COUNT(DISTINCT ca.person_id) AS total_cast,
+        SUM(CASE WHEN ca.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS acting_roles,
+        MAX(t.production_year) OVER (PARTITION BY t.id) AS max_year
+    FROM title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN cast_info ca ON t.id = ca.movie_id
+    GROUP BY t.id, t.title, mk.keyword, t.production_year
+),
+AggregatedCompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT c.name || ' (' || ct.kind || ')', ', ') AS companies
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+),
+TopMovies AS (
+    SELECT 
+        ms.movie_id,
+        ms.movie_title,
+        ms.total_cast,
+        ac.company_count,
+        ac.companies,
+        ROW_NUMBER() OVER (ORDER BY ms.total_cast DESC) AS rank
+    FROM MovieStats ms
+    LEFT JOIN AggregatedCompanyStats ac ON ms.movie_id = ac.movie_id
+    WHERE ms.production_year IS NOT NULL
+)
+SELECT 
+    tm.movie_title,
+    tm.total_cast,
+    COALESCE(tm.companies, 'No Companies') AS companies,
+    tm.rank,
+    CASE 
+        WHEN tm.rank <= 10 THEN 'Top 10'
+        WHEN tm.rank BETWEEN 11 AND 20 THEN 'Top 20'
+        ELSE 'Lower Ranked'
+    END AS ranking_group
+FROM TopMovies tm
+WHERE 
+    tm.keyword IS NOT NULL
+    AND (tm.production_year BETWEEN 2000 AND 2023)
+ORDER BY tm.rank
+LIMIT 50;

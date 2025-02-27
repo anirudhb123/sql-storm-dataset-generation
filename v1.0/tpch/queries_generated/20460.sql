@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate BETWEEN '2023-01-01' AND '2023-12-31')
+),
+RecentLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATEADD(month, -6, GETDATE())
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        DISTINCT s.s_suppkey, 
+        s.s_name, 
+        COALESCE(SUM(ps.ps_supplycost), 0) AS TotalCost, 
+        STRING_AGG(DISTINCT p.p_name, ', ') AS PartNames
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COALESCE(SUM(ps.ps_supplycost), 0) > 1000
+)
+SELECT 
+    r.r_name AS RegionName,
+    n.n_name AS NationName,
+    sd.s_name AS SupplierName,
+    l.TotalRevenue AS LineItemRevenue,
+    COUNT(DISTINCT l.l_orderkey) AS TotalOrders,
+    STRING_AGG(DISTINCT p.p_name, '; ') AS ProductList
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier sd ON n.n_nationkey = sd.s_nationkey
+JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RecentLineItems l ON l.l_orderkey = ps.ps_partkey
+WHERE 
+    sd.TotalCost IS NOT NULL 
+    AND sd.s_name NOT LIKE '%obsolete%'
+GROUP BY 
+    r.r_name, n.n_name, sd.s_name, l.TotalRevenue
+HAVING 
+    SUM(ps.ps_availqty) IS NULL OR COUNT(l.l_orderkey) > 2
+ORDER BY 
+    COUNT(DISTINCT l.l_orderkey) DESC, TotalRevenue DESC;

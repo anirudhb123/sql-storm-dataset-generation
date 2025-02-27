@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS title, 
+        mt.production_year, 
+        NULL::integer AS parent_id
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        e.id AS movie_id, 
+        e.title AS title, 
+        e.production_year, 
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title AS e
+    INNER JOIN 
+        movie_hierarchy AS mh ON e.episode_of_id = mh.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS num_movies,
+    AVG(YEAR(CURRENT_DATE) - mh.production_year) AS avg_movie_age,
+    STRING_AGG(DISTINCT mh.title, ', ') AS movie_titles,
+    MIN(mh.production_year) AS earliest_release,
+    MAX(mh.production_year) AS latest_release
+FROM 
+    cast_info AS ci
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    movie_hierarchy AS mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info AS mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') 
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    a.name IS NOT NULL
+    AND mh.production_year BETWEEN 2000 AND 2020
+    AND (k.keyword LIKE '%Action%' OR k.keyword IS NULL)
+GROUP BY 
+    actor_name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 3
+ORDER BY 
+    num_movies DESC
+FETCH FIRST 10 ROWS ONLY;
+

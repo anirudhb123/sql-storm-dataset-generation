@@ -1,0 +1,30 @@
+SELECT 
+    CONCAT('Part: ', p.p_name, ' | Manufacturer: ', p.p_mfgr, ' | Brand: ', p.p_brand) AS part_info,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+    SUBSTRING(o.o_orderdate, 1, 4) AS order_year,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Open'
+        WHEN o.o_orderstatus = 'F' THEN 'Finished'
+        ELSE 'Unknown'
+    END AS order_status
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    r.r_name LIKE 'Asia%'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, o.o_orderdate, o.o_orderstatus
+ORDER BY 
+    total_supply_value DESC, order_year ASC;

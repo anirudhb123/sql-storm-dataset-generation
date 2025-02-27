@@ -1,0 +1,82 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.title IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.person_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        c.person_id, r.role
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword,
+        COUNT(*) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id, k.keyword
+),
+MoviesWithCompany AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(ar.role_count, 0) AS total_actor_roles,
+    COALESCE(mk.keyword_count, 0) AS total_keywords,
+    COALESCE(mc.company_count, 0) AS total_companies,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year' 
+        WHEN m.production_year < 2000 THEN 'Classic Movie' 
+        ELSE 'Modern Movie' 
+    END AS movie_category,
+    ROW_NUMBER() OVER (ORDER BY m.production_year DESC) AS overall_rank
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    ActorRoles ar ON ar.person_id IN (
+        SELECT person_id 
+        FROM cast_info ci 
+        WHERE ci.movie_id = m.title_id
+    )
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = m.title_id
+LEFT JOIN 
+    MoviesWithCompany mc ON mc.movie_id = m.title_id
+WHERE 
+    m.rank <= 10 
+    AND (m.production_year IS NOT NULL OR m.title LIKE '%%') 
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = m.title_id 
+        AND mi.info_type_id IS NULL
+    )
+ORDER BY 
+    m.production_year, total_actor_roles DESC;

@@ -1,0 +1,76 @@
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ck.id) DESC) AS rank_by_cast
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        company_name cn ON cn.id = (SELECT company_id FROM movie_companies WHERE movie_id = t.id LIMIT 1)
+    LEFT JOIN
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        strdup(t.title) IS NOT NULL
+    GROUP BY
+        t.id
+),
+highly_rated AS (
+    SELECT
+        movie_id,
+        title,
+        production_year
+    FROM
+        ranked_movies
+    WHERE
+        rank_by_cast <= 5
+),
+missing_keywords AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        highly_rated m
+    LEFT JOIN
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    WHERE
+        mk.keyword_id IS NULL
+    GROUP BY
+        m.movie_id
+)
+SELECT
+    hr.title,
+    hr.production_year,
+    COALESCE(mk.keyword_count, 0) AS missing_keywords_count,
+    ci.note AS cast_note,
+    cn.name AS company_name
+FROM
+    highly_rated hr
+LEFT JOIN
+    missing_keywords mk ON hr.movie_id = mk.movie_id
+LEFT JOIN
+    cast_info ci ON hr.movie_id = ci.movie_id
+LEFT JOIN
+    movie_companies mc ON mc.movie_id = hr.movie_id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+WHERE
+    hr.production_year BETWEEN 2000 AND 2020
+    AND (ci.note IS NULL OR ci.note <> '')
+ORDER BY
+    hr.production_year DESC,
+    missing_keywords_count ASC,
+    hr.title;

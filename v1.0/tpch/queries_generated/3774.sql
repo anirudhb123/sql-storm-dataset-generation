@@ -1,0 +1,89 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderstatus = 'O'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+LineitemStatistics AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT
+    cd.c_name,
+    cd.nation_name,
+    COALESCE(SI.total_supply_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT RO.o_orderkey) AS order_count,
+    SUM(LS.total_value) AS total_lineitem_value
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    RankedOrders RO ON cd.c_custkey = RO.o_custkey
+LEFT JOIN 
+    SupplierInfo SI ON SI.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps 
+        JOIN 
+            lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE 
+            l.l_orderkey IN (
+                SELECT 
+                    o.o_orderkey 
+                FROM 
+                    orders o 
+                WHERE 
+                    o.o_orderdate >= '2023-01-01'
+            )
+    )
+LEFT JOIN 
+    LineitemStatistics LS ON LS.l_orderkey = RO.o_orderkey
+WHERE 
+    cd.c_acctbal IS NOT NULL
+GROUP BY 
+    cd.c_name, cd.nation_name, SI.total_supply_cost
+ORDER BY 
+    cd.c_name;

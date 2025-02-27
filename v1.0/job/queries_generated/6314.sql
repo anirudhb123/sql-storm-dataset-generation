@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword_count,
+        RANK() OVER (ORDER BY rm.keyword_count DESC) AS rank
+    FROM 
+        RankedMovies rm
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        c.name AS company_name,
+        ak.name AS actor_name,
+        pi.info AS actor_role
+    FROM 
+        TopMovies tm
+    JOIN 
+        complete_cast cc ON tm.title_id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_companies mc ON tm.title_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+    WHERE 
+        tm.rank <= 10
+)
+SELECT 
+    title,
+    production_year,
+    STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT company_name, ', ') AS companies,
+    STRING_AGG(DISTINCT actor_role, ', ') AS roles
+FROM 
+    MovieDetails
+GROUP BY 
+    title, production_year
+ORDER BY 
+    production_year DESC;

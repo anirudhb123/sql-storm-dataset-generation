@@ -1,0 +1,56 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS TotalUpVotes, -- Upvotes
+        SUM(V.VoteTypeId = 3) AS TotalDownVotes -- Downvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(P.ClosedDate, 'Not Closed') AS ClosureStatus,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.TotalPosts,
+    US.TotalComments,
+    US.TotalUpVotes,
+    US.TotalDownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.ViewCount,
+    PS.Score,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.ClosureStatus,
+    PS.OwnerDisplayName
+FROM 
+    UserStatistics US
+JOIN 
+    PostStats PS ON US.UserId = PS.OwnerDisplayName
+ORDER BY 
+    US.TotalPosts DESC, US.TotalUpVotes DESC;

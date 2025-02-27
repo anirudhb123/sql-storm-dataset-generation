@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TopProducts AS (
+    SELECT p_partkey, p_name, SUM(ps_supplycost * ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p_partkey, p_name
+    ORDER BY total_cost DESC
+    LIMIT 10
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, c.c_name, l.l_quantity, l.l_extendedprice, l.l_discount,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS rn,
+           CASE WHEN (l.l_returnflag = 'R') THEN 'Returned' ELSE 'Not Returned' END AS return_status
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+FinalReport AS (
+    SELECT sh.s_name, p.p_name, od.c_name, od.l_quantity, od.l_extendedprice,
+           od.l_discount, (od.l_extendedprice * (1 - od.l_discount)) AS net_price,
+           COALESCE(ROUND(SUM(od.l_extendedprice * (1 - od.l_discount)), 2), 0) AS total_net_sales
+    FROM SupplierHierarchy sh
+    CROSS JOIN TopProducts p
+    JOIN OrderDetails od ON p.p_partkey = od.l_orderkey
+    GROUP BY sh.s_name, p.p_name, od.c_name, od.l_quantity, od.l_extendedprice, od.l_discount
+)
+SELECT f.s_name, f.p_name, f.c_name, f.l_quantity, f.l_extendedprice, f.l_discount, 
+       f.net_price, f.total_net_sales
+FROM FinalReport f
+WHERE f.total_net_sales > 1000
+ORDER BY f.total_net_sales DESC;

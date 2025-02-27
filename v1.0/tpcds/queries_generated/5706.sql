@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        d.d_year,
+        SUM(ws.ws_sales_price) AS Total_Sales,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_sales_price) DESC) AS Sales_Rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2019 AND 2021
+    GROUP BY 
+        w.w_warehouse_name, d.d_year
+),
+TopSales AS (
+    SELECT 
+        w.w_warehouse_name,
+        d.d_year,
+        Total_Sales
+    FROM 
+        RankedSales
+    WHERE 
+        Sales_Rank <= 5
+)
+SELECT 
+    t.w_warehouse_name,
+    t.d_year,
+    t.Total_Sales,
+    c.cc_name AS Top_Call_Center,
+    AVG(rr.r_rank) AS Avg_Rank,
+    SUM(CASE WHEN rr.r_reason_desc LIKE 'Customer%Return%' THEN 1 ELSE 0 END) AS Return_Count
+FROM 
+    TopSales t
+JOIN 
+    call_center c ON SUBSTRING(t.w_warehouse_name, 1, 4) = SUBSTRING(c.cc_name, 1, 4)
+LEFT JOIN 
+    store_returns sr ON sr.sr_store_sk = c.cc_call_center_sk
+LEFT JOIN 
+    reason rr ON sr.sr_reason_sk = rr.r_reason_sk
+GROUP BY 
+    t.w_warehouse_name, t.d_year, c.cc_name
+ORDER BY 
+    t.d_year, Total_Sales DESC;

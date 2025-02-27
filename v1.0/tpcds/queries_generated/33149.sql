@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_manager,
+        1 as level
+    FROM 
+        store
+    WHERE 
+        s_manager IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_manager,
+        level + 1
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_manager = sh.s_store_name
+),
+sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS average_order_value,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+        d.d_year
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_id, d.d_year
+),
+returns_summary AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_returns,
+        COUNT(wr.wr_order_number) AS return_count
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_web_page_sk
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_sales,
+    ss.order_count,
+    ss.average_order_value,
+    ss.unique_customers,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.return_count, 0) AS return_count,
+    (ss.total_sales - COALESCE(rs.total_returns, 0)) AS net_sales
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    returns_summary rs ON ss.web_site_id = rs.wr_web_page_sk
+WHERE 
+    ss.d_year = (SELECT MAX(d_year) FROM date_dim)
+ORDER BY 
+    net_sales DESC;
+

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT d.d_date, SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_date >= '2023-01-01' -- Filter for sales starting this year
+    GROUP BY d.d_date
+    UNION ALL
+    SELECT d.d_date, SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    JOIN SalesTrend st ON d.d_date = DATE_ADD(st.d_date, INTERVAL 1 DAY)
+    WHERE d.d_date < CURDATE()
+    GROUP BY d.d_date
+),
+RankedSales AS (
+    SELECT d.d_date, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesTrend
+),
+TopSales AS (
+    SELECT d.d_date, total_sales, sales_rank
+    FROM RankedSales
+    WHERE sales_rank <= 10
+)
+SELECT 
+    d.d_date,
+    COALESCE(ts.total_sales, 0) AS total_sales,
+    IFNULL(c.c_first_name || ' ' || c.c_last_name, 'Anonymous') AS customer_name,
+    sm.sm_type AS shipping_method,
+    ca.ca_city,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    SUM(ws.ws_quantity) AS total_quantity_sold    
+FROM date_dim d
+LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+LEFT JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN TopSales ts ON d.d_date = ts.d_date
+GROUP BY d.d_date, customer_name, shipping_method, ca.ca_city
+HAVING total_sales > 1000
+ORDER BY d.d_date DESC;

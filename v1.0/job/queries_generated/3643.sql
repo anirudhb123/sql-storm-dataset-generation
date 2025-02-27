@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorInfo AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ra.name AS role_name,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type ra ON ra.id = c.role_id
+    GROUP BY 
+        c.movie_id, a.name, ra.name
+),
+MovieCompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ai.actor_name,
+    ai.role_name,
+    ai.role_count,
+    COALESCE(mcc.company_count, 0) AS company_count,
+    CASE 
+        WHEN mcc.company_count IS NULL THEN 'No Companies'
+        ELSE 'Has Companies'
+    END AS company_status
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorInfo ai ON rm.movie_id = ai.movie_id
+LEFT JOIN 
+    MovieCompanyCounts mcc ON rm.movie_id = mcc.movie_id
+WHERE 
+    rm.rank_by_year <= 5
+ORDER BY 
+    rm.production_year DESC, ai.role_count DESC, rm.title ASC;

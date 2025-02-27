@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS rank_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_quantity DESC) AS dense_rank_quantity,
+        SUM(ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS total_sales_by_site,
+        MAX(ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS max_sale_price,
+        MIN(ws_sales_price) OVER (PARTITION BY ws.web_site_sk) AS min_sale_price
+    FROM
+        web_sales ws
+)
+
+SELECT
+    ca.ca_city,
+    SUM(CASE 
+        WHEN rs.rank_sales <= 5 THEN rs.ws_sales_price 
+        ELSE 0 
+        END) AS top_5_sales,
+    COUNT(DISTINCT CASE 
+        WHEN rs.dense_rank_quantity < 3 THEN rs.ws_order_number 
+        END) AS count_top_3_quantity_orders,
+    AVG(CASE 
+        WHEN rs.max_sale_price > 100 THEN rs.ws_sales_price 
+        ELSE NULL 
+        END) AS avg_high_price_sales,
+    COUNT(DISTINCT CASE 
+        WHEN rs.max_sale_price IS NOT NULL AND rs.min_sale_price IS NULL THEN rs.ws_order_number 
+        END) AS null_min_price_orders
+FROM
+    RankedSales rs
+JOIN
+    customer_address ca ON rs.web_site_sk = ca.ca_address_sk
+LEFT JOIN
+    store s ON s.s_store_sk = rs.web_site_sk
+WHERE
+    ca.ca_state IN (SELECT DISTINCT ca_state FROM customer_address WHERE ca_country = 'USA') 
+    AND (rs.total_sales_by_site > 500 OR rs.total_sales_by_site IS NULL) 
+GROUP BY
+    ca.ca_city
+HAVING
+    COUNT(rs.ws_order_number) > 10
+ORDER BY
+    top_5_sales DESC,
+    count_top_3_quantity_orders ASC
+LIMIT 10;

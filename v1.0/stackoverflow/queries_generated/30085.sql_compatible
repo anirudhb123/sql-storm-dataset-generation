@@ -1,0 +1,94 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+), PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerPostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.OwnerUserId
+), PostActivitySummary AS (
+    SELECT 
+        u.DisplayName,
+        ps.Title,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.OwnerPostRank,
+        EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - ps.CreationDate)) AS AgeInSeconds,
+        CASE 
+            WHEN ps.Score >= 10 THEN 'High Scorer'
+            WHEN ps.Score BETWEEN 5 AND 9 THEN 'Moderate Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory
+    FROM 
+        PostStatistics ps
+    JOIN 
+        Users u ON ps.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+), RecentPostUpdates AS (
+    SELECT 
+        p.Id,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        COUNT(DISTINCT ph.UserId) AS EditCount
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, ph.PostHistoryTypeId, ph.CreationDate, ph.UserDisplayName
+)
+
+SELECT 
+    pas.DisplayName AS UserName,
+    pas.Title,
+    pas.Score,
+    pas.ViewCount,
+    pas.CommentCount,
+    pas.OwnerPostRank,
+    pas.AgeInSeconds,
+    pas.ScoreCategory,
+    COALESCE(rpu.EditCount, 0) AS RecentEditCount,
+    COALESCE(rpu.PostHistoryTypeId, -1) AS LastActionType
+FROM 
+    PostActivitySummary pas
+LEFT JOIN 
+    RecentPostUpdates rpu ON pas.Id = rpu.PostId
+ORDER BY 
+    pas.Score DESC, pas.ViewCount DESC;

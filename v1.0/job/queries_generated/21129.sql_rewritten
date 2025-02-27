@@ -1,0 +1,83 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        a.production_year <= 2005
+),
+
+ranked_cast AS (
+    SELECT 
+        c.id AS cast_id,
+        c.person_id,
+        c.movie_id,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS rank_within_movie
+    FROM 
+        cast_info c
+),
+
+top_actors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT rc.movie_id) AS movies_count,
+        AVG(mh.level) AS avg_hierarchy_level
+    FROM 
+        aka_name a 
+    JOIN 
+        ranked_cast rc ON rc.person_id = a.person_id
+    JOIN 
+        movie_hierarchy mh ON rc.movie_id = mh.movie_id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+    GROUP BY 
+        a.id
+)
+
+SELECT 
+    ta.actor_id,
+    ta.actor_name,
+    ta.movies_count,
+    ta.avg_hierarchy_level,
+    STRING_AGG(DISTINCT m.title, ', ' ORDER BY m.title) AS movie_titles,
+    CASE 
+        WHEN ta.avg_hierarchy_level IS NULL THEN 'No Data'
+        WHEN ta.avg_hierarchy_level < 1 THEN 'Newcomer'
+        WHEN ta.avg_hierarchy_level BETWEEN 1 AND 2 THEN 'Intermediate'
+        ELSE 'Veteran' 
+    END AS experience_level
+FROM 
+    top_actors ta
+LEFT JOIN 
+    ranked_cast rc ON rc.person_id = ta.actor_id
+LEFT JOIN 
+    aka_title m ON rc.movie_id = m.id
+GROUP BY 
+    ta.actor_id, ta.actor_name, ta.movies_count, ta.avg_hierarchy_level
+HAVING 
+    SUM(CASE WHEN rc.nr_order IS NOT NULL THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    ta.movies_count DESC, ta.avg_hierarchy_level ASC
+LIMIT 10
+OFFSET 5;

@@ -1,0 +1,76 @@
+WITH RECURSIVE random_movie_path AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ARRAY[mt.title] AS movie_path,
+        1 AS path_length
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt2.title,
+        mt2.production_year,
+        rmp.movie_path || mt2.title,
+        rmp.path_length + 1
+    FROM 
+        random_movie_path rmp
+    JOIN 
+        movie_link ml ON rmp.title = ml.movie_id
+    JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id
+    WHERE 
+        rmp.path_length < 5 
+        AND NOT mt2.title = ANY(rmp.movie_path)  
+)
+, movie_info_type AS (
+    SELECT 
+        mi.movie_id,
+        it.info AS info_type,
+        mi.info,
+        COALESCE(NULLIF(mi.note, ''), 'No Notes') AS note  
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+)
+, title_cast AS (
+    SELECT 
+        t.title,
+        c.person_id,
+        a.name,
+        RANK() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+)
+SELECT 
+    rmp.title,
+    rmp.production_year,
+    rmp.movie_path,
+    info.info_type,
+    info.info,
+    info.note,
+    COUNT(DISTINCT tc.person_id) AS total_cast,
+    STRING_AGG(DISTINCT tc.name, ', ') FILTER (WHERE tc.role_rank <= 3) AS top_cast_names,  
+    SUM(CASE WHEN tc.role_rank = 1 THEN 1 ELSE 0 END) AS lead_roles
+FROM 
+    random_movie_path rmp
+LEFT JOIN 
+    movie_info_type info ON rmp.production_year = (SELECT MAX(mi.production_year) FROM movie_info_type mi WHERE mi.movie_id IN (SELECT movie_id FROM aka_title WHERE title = rmp.title))
+LEFT JOIN 
+    title_cast tc ON rmp.title = tc.title
+WHERE 
+    rmp.path_length = 5
+GROUP BY 
+    rmp.title, rmp.production_year, rmp.movie_path, info.info_type, info.info, info.note
+HAVING 
+    COUNT(DISTINCT tc.person_id) >= 3  
+ORDER BY 
+    rmp.production_year DESC, COUNT(DISTINCT tc.person_id) DESC;

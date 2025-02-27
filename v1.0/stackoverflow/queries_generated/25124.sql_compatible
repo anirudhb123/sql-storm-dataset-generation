@@ -1,0 +1,95 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName 
+    FROM 
+        TagCounts 
+    WHERE 
+        PostCount > 0
+    ORDER BY 
+        PostCount DESC 
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.DisplayName, 
+        COUNT(DISTINCT Posts.Id) AS TotalPosts, 
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN Posts.PostTypeId IN (10, 12, 14) THEN 1 ELSE 0 END) AS TotalModerations
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+UserScore AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalPosts, 
+        TotalQuestions, 
+        TotalAnswers, 
+        TotalModerations,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+),
+PostComparisons AS (
+    SELECT 
+        Posts.Id AS PostId, 
+        Posts.Title, 
+        Posts.CreationDate, 
+        Posts.ViewCount, 
+        Posts.Score, 
+        COALESCE(CAST(PostHistory.UserId AS VARCHAR), 'N/A') AS LastEditorUserId,
+        COALESCE(PostHistory.UserDisplayName, 'N/A') AS LastEditorDisplayName,
+        PostHistory.CreationDate AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY Posts.Id ORDER BY PostHistory.CreationDate DESC) AS LatestEditRow
+    FROM 
+        Posts
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE 
+        Posts.Title IS NOT NULL
+)
+SELECT 
+    tt.TagName,
+    u.DisplayName AS TopUser,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    COUNT(DISTINCT pc.PostId) AS PostCount,
+    SUM(pc.ViewCount) AS TotalViews,
+    AVG(pc.Score) AS AverageScore,
+    COUNT(DISTINCT pc.LastEditorUserId) AS UniqueEditors,
+    MAX(pc.LastEditDate) AS LatestEditDate
+FROM 
+    TopTags tt
+JOIN 
+    Posts p ON p.Tags LIKE '%' || tt.TagName || '%' 
+JOIN 
+    UserScore u ON u.PostRank <= 10 
+LEFT JOIN 
+    PostComparisons pc ON p.Id = pc.PostId
+WHERE 
+    pc.LatestEditRow = 1
+GROUP BY 
+    tt.TagName, u.DisplayName, u.TotalPosts, u.TotalQuestions, u.TotalAnswers
+ORDER BY 
+    PostCount DESC;

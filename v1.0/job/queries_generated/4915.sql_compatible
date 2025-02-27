@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ak.name AS actor_name,
+        rt.title AS movie_title,
+        rt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        RankedTitles rt ON ci.movie_id = rt.title_id
+),
+MovieInfoDetails AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        t.production_year AS movie_year,
+        mk.id AS keyword_id
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        movie_keyword mk ON mc.movie_id = mk.movie_id
+    LEFT JOIN 
+        title t ON mc.movie_id = t.id
+)
+SELECT 
+    cd.movie_title,
+    cd.production_year,
+    cd.actor_name,
+    md.keyword,
+    COUNT(*) OVER (PARTITION BY cd.movie_id) AS keyword_count,
+    CASE 
+        WHEN cd.actor_rank = 1 THEN 'Lead Actor'
+        ELSE 'Supporting Actor'
+    END AS actor_role
+FROM 
+    CastDetails cd
+JOIN 
+    MovieInfoDetails md ON cd.movie_id = md.movie_id
+WHERE 
+    md.movie_year >= 2000
+ORDER BY 
+    cd.production_year DESC, 
+    cd.actor_rank;

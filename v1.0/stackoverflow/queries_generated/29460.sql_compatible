@@ -1,0 +1,77 @@
+
+WITH TagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[]) 
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostCount,
+        ua.UpvoteCount,
+        ua.DownvoteCount,
+        ua.BadgeCount,
+        RANK() OVER (ORDER BY ua.UpvoteCount DESC) AS UpvoteRank,
+        RANK() OVER (ORDER BY ua.PostCount DESC) AS PostRank
+    FROM 
+        UserActivity ua
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount AS TotalPosts,
+    tc.QuestionCount AS TotalQuestions,
+    tc.AnswerCount AS TotalAnswers,
+    tc.CloseCount AS TotalClosed,
+    tc.ReopenCount AS TotalReopened,
+    u.UserId,
+    u.DisplayName AS TopUser,
+    u.UpvoteCount,
+    u.DownvoteCount,
+    u.BadgeCount,
+    CASE 
+        WHEN u.UpvoteRank = 1 THEN 'Top Upvoter'
+        WHEN u.PostRank = 1 THEN 'Top Poster'
+        ELSE 'Regular Contributor'
+    END AS ContributorType
+FROM 
+    TagCounts tc
+JOIN 
+    PopularUsers u ON u.PostCount > 0
+WHERE 
+    tc.PostCount > 0 AND 
+    u.UpvoteCount > 10
+ORDER BY 
+    tc.TagName, u.UpvoteCount DESC;

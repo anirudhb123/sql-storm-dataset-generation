@@ -1,0 +1,81 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountySpent,
+        DENSE_RANK() OVER (ORDER BY COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) - COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) DESC) AS VoteRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        COUNT(PH.Id) AS CloseCount,
+        STRING_AGG(DISTINCT CT.Name, ', ') AS CloseReasons
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN 
+        CloseReasonTypes CT ON CT.Id IN (
+            SELECT DISTINCT 
+                (PH.Comment::jsonb ->> 'reason')::varchar 
+            FROM PostHistory PH 
+            WHERE PH.PostId = P.Id AND PH.PostHistoryTypeId = 10
+        )
+    GROUP BY P.Id, P.Title, P.OwnerUserId
+    HAVING COUNT(PH.Id) > 1 
+),
+
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        B.Class = 1 
+    GROUP BY U.Id
+)
+
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    UPS.VoteRank,
+    UPS.TotalUpVotes,
+    UPS.TotalDownVotes,
+    UPS.TotalBountySpent,
+    COALESCE(UB.BadgeCount, 0) AS GoldBadgeCount,
+    COALESCE(UB.BadgeNames, 'No Gold Badges') AS GoldBadgeNames,
+    CP.Title AS ClosedPostTitle,
+    CP.CloseCount AS NumberOfClosures,
+    CP.CloseReasons AS ClosureDetails,
+    ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY CP.LastClosedDate DESC) AS RecentClosureRank
+FROM 
+    UserVoteSummary UPS
+JOIN 
+    Users U ON UPS.UserId = U.Id
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    ClosedPosts CP ON U.Id = CP.OwnerUserId
+WHERE 
+    (UPS.TotalUpVotes - UPS.TotalDownVotes) > 0
+ORDER BY 
+    U.Reputation DESC,
+    (UPS.TotalUpVotes - UPS.TotalDownVotes) DESC,
+    RecentClosureRank
+FETCH FIRST 10 ROWS ONLY;

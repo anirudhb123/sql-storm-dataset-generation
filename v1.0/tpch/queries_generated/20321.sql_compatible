@@ -1,0 +1,53 @@
+
+WITH RECURSIVE ranked_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank
+    FROM orders
+    WHERE o_orderstatus = 'O'
+),
+supplier_costs AS (
+    SELECT ps_partkey, ps_suppkey, 
+           SUM(ps_supplycost) AS total_supply_cost,
+           AVG(ps_supplycost) AS avg_supply_cost,
+           COUNT(*) AS num_suppliers
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+product_details AS (
+    SELECT p.p_partkey, p.p_name, s.s_name AS supplier_name, s.s_acctbal,
+           CASE WHEN ps.total_supply_cost > 1000 THEN 'High' ELSE 'Low' END AS cost_rating
+    FROM part p
+    JOIN supplier s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost DESC 
+        LIMIT 1
+    )
+    LEFT JOIN supplier_costs ps ON p.p_partkey = ps.ps_partkey
+),
+filtered_nations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+    WHERE n.n_regionkey IN (
+        SELECT r.r_regionkey 
+        FROM region r 
+        WHERE r.r_name NOT LIKE '%Old%'
+    )
+)
+
+SELECT o.order_rank, pd.p_partkey, pd.p_name, pd.supplier_name, 
+       pd.s_acctbal, o.o_totalprice,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+       COUNT(CASE WHEN l.l_shipdate > DATE '1998-10-01' THEN 1 END) AS future_shipments,
+       COUNT(l.l_partkey) OVER (PARTITION BY pd.p_partkey) AS num_lineitems
+FROM ranked_orders o
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN product_details pd ON l.l_partkey = pd.p_partkey
+JOIN filtered_nations fn ON pd.supplier_name = COALESCE(fn.n_name, 'Unknown')
+WHERE o.o_totalprice BETWEEN 500 AND 5000
+  AND pd.cost_rating = 'High'
+  AND pd.s_acctbal IS NOT NULL
+GROUP BY o.order_rank, pd.p_partkey, pd.p_name, pd.supplier_name, pd.s_acctbal, o.o_totalprice
+HAVING COUNT(DISTINCT fn.n_nationkey) < 3
+ORDER BY o.o_totalprice DESC, num_lineitems ASC;

@@ -1,0 +1,52 @@
+
+WITH RecursiveCustomer AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS acctbal_rank
+    FROM customer
+    WHERE c_acctbal IS NOT NULL
+), RankedParts AS (
+    SELECT p_partkey, 
+           p_name, 
+           p_retailprice,
+           RANK() OVER (ORDER BY p_retailprice DESC) AS retail_rank
+    FROM part
+), SupplierRegion AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS supplier_nation,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Account Balance Not Available'
+               WHEN s.s_acctbal < 1000 THEN 'Low Balance Supplier'
+               ELSE 'Established Supplier'
+           END AS supplier_status
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           c.c_name AS customer_name, 
+           CASE 
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               WHEN o.o_orderstatus = 'F' THEN 'Finished'
+               ELSE 'Unknown Status'
+           END AS order_status
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+)
+SELECT rr.c_custkey AS cust_key, 
+       cr.customer_name,
+       sr.supplier_nation,
+       rp.p_name,
+       rp.p_retailprice,
+       COALESCE(l.l_orderkey, 'No Order') AS linked_order,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+       CASE 
+           WHEN rr.acctbal_rank IS NOT NULL AND rr.acctbal_rank <= 5 THEN 'Top 5 Customers'
+           ELSE 'Other Customers'
+       END AS customer_group,
+       COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY rr.c_custkey) AS order_count
+FROM RecursiveCustomer rr
+LEFT JOIN CustomerOrders cr ON rr.c_custkey = cr.o_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = cr.o_orderkey
+LEFT JOIN RankedParts rp ON rr.c_custkey = rp.p_partkey
+INNER JOIN SupplierRegion sr ON sr.s_suppkey = l.l_suppkey
+WHERE rp.retail_rank < 10
+GROUP BY rr.c_custkey, cr.customer_name, sr.supplier_nation, rp.p_name, rp.p_retailprice, l.l_orderkey, rr.acctbal_rank
+ORDER BY total_revenue DESC NULLS LAST;

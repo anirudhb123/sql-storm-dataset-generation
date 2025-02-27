@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+),
+TopSales AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.ws_quantity) AS total_quantity,
+        SUM(r.web_sales_price) AS total_sales
+    FROM RankedSales r
+    WHERE r.sales_rank <= 10
+    GROUP BY r.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity,
+        SUM(wr_return_amt_inc_tax) AS total_returned_amt
+    FROM web_returns wr
+    JOIN customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    GROUP BY wr.wr_returning_customer_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        ts.web_site_sk,
+        ts.total_quantity,
+        ts.total_sales,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_returned_amt, 0) AS total_returned_amt
+    FROM TopSales ts
+    LEFT JOIN CustomerReturns cr ON ts.web_site_sk = cr.wr_returning_customer_sk
+)
+SELECT 
+    s.web_site_sk,
+    s.total_quantity,
+    s.total_sales,
+    s.total_returned_quantity,
+    s.total_returned_amt,
+    (s.total_sales - s.total_returned_amt) AS net_sales
+FROM SalesAndReturns s
+ORDER BY net_sales DESC
+LIMIT 10;

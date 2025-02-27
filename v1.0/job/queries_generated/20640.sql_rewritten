@@ -1,0 +1,38 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as rn,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY a.id) as cast_count
+    FROM aka_title a
+    LEFT JOIN movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.person_id
+    WHERE a.production_year IS NOT NULL
+      AND a.title NOT LIKE '%[Aa]berration%'  
+      AND k.keyword IS NOT NULL
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    COALESCE(MAX(cast_count), 0) AS total_cast_count,
+    STRING_AGG(DISTINCT rm.keyword, ', ') AS keywords_used,
+    CASE 
+        WHEN total_cast_count > 10 THEN 'Large Ensemble'
+        WHEN total_cast_count BETWEEN 5 AND 10 THEN 'Medium Ensemble'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM RankedMovies rm
+LEFT JOIN (SELECT movie_id, COUNT(DISTINCT person_id) as cast_count 
+            FROM cast_info 
+            WHERE person_role_id IS NULL
+            GROUP BY movie_id) AS role_summary 
+ON rm.id = role_summary.movie_id
+WHERE rm.rn <= 10 
+GROUP BY rm.title, rm.production_year
+HAVING COUNT(DISTINCT rm.keyword) > 2 
+ORDER BY rm.production_year DESC, total_cast_count DESC
+LIMIT 50;

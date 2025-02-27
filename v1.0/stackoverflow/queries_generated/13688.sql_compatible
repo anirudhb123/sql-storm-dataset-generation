@@ -1,0 +1,59 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersSubmitted,
+        COUNT(CM.Id) AS CommentsMade,
+        COUNT(B.Id) AS BadgesEarned,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments CM ON U.Id = CM.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        PH.CreationDate AS LastRevisionDate,
+        ROW_NUMBER() OVER (ORDER BY PH.CreationDate DESC) AS RevisionRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.QuestionsAsked,
+    UA.AnswersSubmitted,
+    UA.CommentsMade,
+    UA.BadgesEarned,
+    UA.TotalBountyEarned,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.LastRevisionDate
+FROM 
+    UserActivity UA
+JOIN 
+    PostStatistics PS ON PS.RevisionRank <= 5 
+ORDER BY 
+    UA.TotalBountyEarned DESC;

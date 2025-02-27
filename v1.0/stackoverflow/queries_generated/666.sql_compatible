@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+UserRanks AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC, ua.CommentCount DESC) AS UserRank
+    FROM UserActivity ua
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(ph.ChangeCount, 0) AS HistoryChanges,
+    ur.UserRank,
+    ur.DisplayName AS ActiveUser
+FROM RankedPosts rp
+LEFT JOIN RecentPostHistory ph ON rp.PostId = ph.PostId
+JOIN UserRanks ur ON rp.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ur.UserId)
+WHERE rp.rn = 1
+ORDER BY rp.CreationDate DESC, ur.UserRank ASC
+LIMIT 10;

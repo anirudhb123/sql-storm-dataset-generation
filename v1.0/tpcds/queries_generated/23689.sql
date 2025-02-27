@@ -1,0 +1,78 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        COALESCE(sr_customer_sk, wr_returned_customer_sk) AS customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS total_store_returns,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns
+    FROM 
+        (SELECT sr_customer_sk, sr_ticket_number FROM store_returns
+         UNION ALL
+         SELECT wr_returning_customer_sk, wr_order_number FROM web_returns) AS combined_returns
+    GROUP BY 
+        customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk, 
+        cd_gender, 
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        SUM(ws_net_profit) AS net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+            AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        COALESCE(cr.total_store_returns, 0) AS store_returns_count,
+        COALESCE(cr.total_web_returns, 0) AS web_returns_count,
+        COALESCE(sd.total_sales, 0) AS total_sales,
+        COALESCE(sd.total_discount, 0) AS total_discount,
+        COALESCE(sd.net_profit, 0) AS net_profit
+    FROM 
+        CustomerDemographics cd
+    LEFT JOIN 
+        CustomerReturns cr ON cd.c_customer_sk = cr.customer_sk
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+    WHERE 
+        cd.cd_dep_count IS NOT NULL
+        AND (cd.cd_purchase_estimate > 1000 OR (cd.cd_gender = 'F' AND cd.cd_marital_status = 'S'))
+)
+SELECT 
+    f.cd_gender AS Gender,
+    f.cd_marital_status AS Marital_Status,
+    SUM(f.store_returns_count) AS Total_Store_Returns,
+    SUM(f.web_returns_count) AS Total_Web_Returns,
+    SUM(f.total_sales) AS Total_Sales,
+    SUM(f.total_discount) AS Total_Discount,
+    SUM(f.net_profit) AS Total_Profit
+FROM 
+    FinalReport f
+GROUP BY 
+    f.cd_gender, f.cd_marital_status
+HAVING 
+    SUM(f.total_sales) > 5000
+ORDER BY 
+    Total_Profit DESC;

@@ -1,0 +1,62 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        s.s_nationkey,
+        SUBSTRING(s.s_address, 1, 15) AS short_address,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        TRIM(REPLACE(p.p_comment, 'ed', '')) AS modified_comment
+    FROM 
+        part p
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        REPLACE(n.n_comment, 'Nation', 'Region') AS modified_nation_comment
+    FROM 
+        nation n
+),
+CombinedDetails AS (
+    SELECT 
+        s.s_name,
+        n.n_name,
+        p.p_name,
+        p.p_type,
+        COALESCE(s.s_acctbal, 0) AS account_balance,
+        DATEDIFF(CURRENT_DATE, o.o_orderdate) AS days_since_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        SupplierDetails s ON ps.ps_suppkey = s.s_nationkey
+    JOIN 
+        PartDetails p ON p.p_partkey = l.l_partkey
+    JOIN 
+        NationDetails n ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal > 1000
+        AND p.p_size > 10
+)
+SELECT 
+    COUNT(*) AS total_records,
+    AVG(account_balance) AS average_account_balance,
+    MAX(days_since_order) AS max_days_since_order,
+    MIN(days_since_order) AS min_days_since_order,
+    STRING_AGG(DISTINCT p_name, ', ') AS part_names
+FROM 
+    CombinedDetails;

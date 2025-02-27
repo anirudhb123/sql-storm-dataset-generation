@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+AggregateSales AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+),
+CustomerSales AS (
+    SELECT c.c_custkey, c.c_name, COALESCE(as.total_sales, 0) AS total_sales
+    FROM customer c
+    LEFT JOIN AggregateSales as ON c.c_custkey = as.o_custkey
+)
+SELECT 
+    n.n_name AS nation,
+    SUM(cs.total_sales) AS total_sales_by_nation,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    MAX(cs.total_sales) AS max_sales
+FROM CustomerSales cs
+JOIN nation n ON cs.c_nationkey = n.n_nationkey
+LEFT JOIN supplier s ON n.n_regionkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE n.n_name IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(cs.total_sales) > 10000
+ORDER BY total_sales_by_nation DESC
+LIMIT 10;

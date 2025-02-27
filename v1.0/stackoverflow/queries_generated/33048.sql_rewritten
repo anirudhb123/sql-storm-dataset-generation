@@ -1,0 +1,84 @@
+WITH RecursiveUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.CreationDate,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Posts P 
+            WHERE P.OwnerUserId = U.Id 
+            AND P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        ), 0) AS PostsLastYear,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Comments C 
+            WHERE C.UserId = U.Id 
+            AND C.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        ), 0) AS CommentsLastYear
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+    UNION ALL
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.CreationDate,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Posts P 
+            WHERE P.OwnerUserId = U.Id 
+            AND P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        ), 0) + R.PostsLastYear,
+        COALESCE((
+            SELECT COUNT(*) 
+            FROM Comments C 
+            WHERE C.UserId = U.Id 
+            AND C.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        ), 0) + R.CommentsLastYear
+    FROM 
+        Users U
+    JOIN 
+        RecursiveUserStats R ON U.Id < R.UserId
+)
+, UserActivity AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Views,
+        UpVotes,
+        DownVotes,
+        PostsLastYear,
+        CommentsLastYear,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        RecursiveUserStats
+)
+SELECT 
+    UA.DisplayName,
+    UA.Reputation,
+    UA.Views,
+    UA.UpVotes,
+    UA.DownVotes,
+    UA.PostsLastYear,
+    UA.CommentsLastYear,
+    CASE 
+        WHEN UA.PostsLastYear > 10 THEN 'Active Contributor'
+        WHEN UA.CommentsLastYear > 15 THEN 'Commenting Specialist'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    UserActivity UA
+WHERE 
+    UA.ReputationRank <= 50
+ORDER BY 
+    UA.Reputation DESC;

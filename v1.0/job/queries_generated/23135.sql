@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year = (SELECT MAX(production_year) FROM aka_title)
+
+    UNION ALL
+
+    SELECT mt.id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    INNER JOIN movie_link ml ON mt.id = ml.movie_id 
+    INNER JOIN movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+
+cast_statistics AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(CASE WHEN r.role = 'Lead' THEN 1 END) AS lead_cast,
+        COUNT(CASE WHEN r.role = 'Supporting' THEN 1 END) AS supporting_cast
+    FROM cast_info ci
+    LEFT JOIN role_type r ON ci.role_id = r.id
+    GROUP BY ci.movie_id
+),
+
+movie_info_summary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ci.total_cast, 0) AS total_cast,
+        COALESCE(ci.lead_cast, 0) AS lead_cast,
+        COALESCE(ci.supporting_cast, 0) AS supporting_cast,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM aka_title m
+    LEFT JOIN cast_statistics ci ON m.id = ci.movie_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    GROUP BY m.id, m.title, m.production_year
+),
+
+final_results AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.total_cast,
+        m.lead_cast,
+        m.supporting_cast,
+        COALESCE(STRING_AGG(DISTINCT mks.keyword, ', '), 'No keywords') AS keywords,
+        (SELECT COUNT(cm.id) FROM movie_companies cm WHERE cm.movie_id = m.movie_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.total_cast DESC) AS rank
+    FROM movie_info_summary m
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.movie_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.movie_id
+    LEFT JOIN keyword mks ON mk.keyword_id = mks.id
+    WHERE m.production_year IS NOT NULL
+    GROUP BY m.title, m.production_year, m.total_cast, m.lead_cast, m.supporting_cast
+)
+
+SELECT 
+    m.title,
+    m.production_year,
+    m.total_cast,
+    m.lead_cast,
+    m.supporting_cast,
+    m.keywords,
+    m.company_count,
+    mh.level AS movie_level
+FROM final_results m
+LEFT JOIN movie_hierarchy mh ON m.title = mh.title
+WHERE m.rank <= 10
+ORDER BY m.production_year DESC, m.total_cast DESC;

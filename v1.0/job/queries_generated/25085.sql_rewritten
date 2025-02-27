@@ -1,0 +1,65 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        comp.name AS company_name,
+        comp.kind AS company_type,
+        p.gender
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name comp ON mc.company_id = comp.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+        AND k.keyword IS NOT NULL
+        AND comp.country_code = 'USA'
+),
+
+GenderStatistics AS (
+    SELECT 
+        gender,
+        COUNT(*) AS total_movies,
+        AVG(EXTRACT(YEAR FROM cast('2024-10-01' as date)) - production_year) AS avg_years_since_release
+    FROM 
+        MovieDetails
+    GROUP BY 
+        gender
+),
+
+KeywordCounts AS (
+    SELECT 
+        title_id,
+        COUNT(keyword) AS keyword_count
+    FROM 
+        MovieDetails
+    GROUP BY 
+        title_id
+)
+
+SELECT 
+    md.title, 
+    md.production_year,
+    g.total_movies AS movies_with_cast_gender,
+    g.avg_years_since_release,
+    kc.keyword_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    GenderStatistics g ON md.gender = g.gender
+LEFT JOIN 
+    KeywordCounts kc ON md.title_id = kc.title_id
+ORDER BY 
+    md.production_year DESC, 
+    kc.keyword_count DESC;

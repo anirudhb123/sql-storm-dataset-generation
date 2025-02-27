@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal
+), HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 50000
+), LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+), PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ps.total_supplycost, 0) AS total_supplycost,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    AVG(CASE 
+        WHEN c.total_spent IS NOT NULL THEN c.total_spent 
+        ELSE 0 
+    END) AS avg_customer_spent,
+    (SELECT COUNT(*) FROM SupplierHierarchy) AS total_suppliers
+FROM part p
+LEFT JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN HighValueCustomers c ON li.l_orderkey = c.c_custkey
+GROUP BY p.p_partkey, p.p_name
+HAVING AVG(COALESCE(c.total_spent, 0)) > 20000
+ORDER BY total_supplycost DESC, order_count DESC;

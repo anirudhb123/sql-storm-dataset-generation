@@ -1,0 +1,103 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStat AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(NULLIF(ps.AnswerCount, 0), 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount
+         FROM Posts 
+         WHERE PostTypeId = 2
+         GROUP BY PostId) ps ON p.Id = ps.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+PostHistoryWithCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AnswerCount,
+    COALESCE(ph.EditCount, 0) AS TotalEdits,
+    ph.LastEditDate,
+    ub.BadgeCount,
+    CASE WHEN p.OwnerDisplayName IS NOT NULL THEN 
+        CONCAT('User: ', p.OwnerDisplayName)
+    ELSE 
+        'Community User' 
+    END AS PostOwner,
+    CASE WHEN p.ClosedDate IS NOT NULL THEN 
+        'Closed' 
+    ELSE 
+        'Open' 
+    END AS PostStatus,
+    ROW_NUMBER() OVER (PARTITION BY ps.Score ORDER BY ps.ViewCount DESC) AS Rank
+FROM 
+    PostStat ps
+LEFT JOIN 
+    PostHistoryWithCounts ph ON ps.PostId = ph.PostId
+LEFT JOIN 
+    Users p ON ps.PostId = p.Id
+LEFT JOIN 
+    UserBadges ub ON p.Id = ub.UserId
+WHERE 
+    ps.ViewCount > 50 
+    AND ps.Score >= 0 
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

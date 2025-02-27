@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(p.info, 'No Info') AS person_info,
+    COUNT(DISTINCT mc.company_id) AS companies_involved,
+    AVG(EXTRACT(YEAR FROM NOW()) - mt.production_year) OVER (PARTITION BY ak.person_id) AS avg_years_since_release
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+INNER JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    mt.production_year IN (SELECT DISTINCT production_year FROM aka_title WHERE kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie'))
+    AND ak.name IS NOT NULL 
+GROUP BY 
+    ak.name, mt.title, mt.production_year, p.info
+ORDER BY 
+    avg_years_since_release DESC,
+    COUNT(DISTINCT mc.company_id) DESC
+LIMIT 50;

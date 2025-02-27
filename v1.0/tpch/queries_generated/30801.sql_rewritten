@@ -1,0 +1,44 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, NULL AS parent_regionkey
+    FROM region
+    WHERE r_regionkey = 0  
+
+    UNION ALL
+
+    SELECT r.r_regionkey, r.r_name, rh.r_regionkey
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.parent_regionkey
+),
+SupplierStats AS (
+    SELECT s.s_nationkey, 
+           COUNT(DISTINCT ps.ps_suppkey) AS total_suppliers,
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_nationkey
+),
+NationPartCounts AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           COUNT(DISTINCT p.p_partkey) AS part_count,
+           SUM(ps.ps_availqty) AS total_available_quantity
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT rh.r_name, 
+       npc.n_name, 
+       npc.part_count, 
+       COALESCE(ss.total_suppliers, 0) AS suppliers,
+       COALESCE(ss.total_supply_cost, 0.00) AS supply_cost,
+       COALESCE(ss.avg_account_balance, 0.00) AS avg_balance,
+       ROW_NUMBER() OVER (PARTITION BY rh.r_name ORDER BY npc.part_count DESC) AS region_part_rank
+FROM RegionHierarchy rh
+LEFT JOIN NationPartCounts npc ON rh.r_regionkey = npc.n_nationkey
+LEFT JOIN SupplierStats ss ON npc.n_nationkey = ss.s_nationkey
+WHERE (npc.part_count > 10 OR ss.total_suppliers IS NOT NULL)
+  AND rh.r_name IS NOT NULL
+ORDER BY rh.r_name, npc.part_count DESC;

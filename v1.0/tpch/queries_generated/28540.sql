@@ -1,0 +1,31 @@
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    c.c_name, 
+    o.o_orderkey, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    REGEXP_REPLACE(p.p_comment, 'quality', 'superior') AS updated_comment,
+    CONCAT('Supplier: ', s.s_name, ', Product: ', p.p_name) AS supplier_product_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_brand LIKE 'Brand#%'
+    AND o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    AND s.s_acctbal > 1000
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey
+HAVING 
+    total_sales > 5000
+ORDER BY 
+    total_sales DESC;

@@ -1,0 +1,98 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        P.CreationDate,
+        PH.Level + 1
+    FROM 
+        Posts P
+        INNER JOIN RecursivePostHierarchy PH ON P.ParentId = PH.PostId
+),
+RecentPosts AS (
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.Title,
+        P.ViewCount,
+        LAG(P.CreationDate) OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate) AS PreviousCreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+MostActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserStats AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.TotalViews,
+        UB.BadgeCount,
+        CASE 
+            WHEN UB.HighestBadgeClass = 1 THEN 'Gold'
+            WHEN UB.HighestBadgeClass = 2 THEN 'Silver'
+            WHEN UB.HighestBadgeClass = 3 THEN 'Bronze'
+            ELSE 'None'
+        END AS HighestBadge
+    FROM 
+        MostActiveUsers UA
+    LEFT JOIN 
+        UserBadges UB ON UA.UserId = UB.UserId
+)
+SELECT 
+    U.DisplayName,
+    COUNT(RPH.PostId) AS NumberOfChildPosts,
+    U.BadgeCount,
+    U.HighestBadge,
+    AVG(PH.ViewCount) AS AvgChildPostViewCount,
+    SUM(       CASE WHEN PH.Level > 1 THEN 1 ELSE 0 END ) AS ChildPostsBeyondFirstLevel
+FROM 
+    UserStats U
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = RPH.PostId)
+LEFT JOIN 
+    Posts PH ON PH.ParentId = RPH.PostId
+WHERE 
+    U.PostCount > 5
+GROUP BY 
+    U.DisplayName, U.BadgeCount, U.HighestBadge
+HAVING 
+    COUNT(RPH.PostId) > 0
+ORDER BY 
+    U.BadgeCount DESC, NumberOfChildPosts DESC;

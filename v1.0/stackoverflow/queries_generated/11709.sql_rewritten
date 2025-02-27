@@ -1,0 +1,22 @@
+SELECT 
+    pt.Name AS PostType, 
+    COUNT(p.Id) AS TotalPosts,
+    SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+    SUM(COALESCE(v.VoteTypeId = 2, 0)) AS TotalUpVotes,  
+    SUM(COALESCE(v.VoteTypeId = 3, 0)) AS TotalDownVotes, 
+    COUNT(DISTINCT b.Id) AS TotalBadges, 
+    AVG(u.Reputation) AS AverageUserReputation 
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

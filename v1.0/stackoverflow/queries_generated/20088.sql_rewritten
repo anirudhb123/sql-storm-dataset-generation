@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.CreationDate ASC) AS RN
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+PostStats AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.ViewCount,
+        PT.Name AS PostType,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Votes V ON RP.PostId = V.PostId
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        PostTypes PT ON RP.PostTypeId = PT.Id
+    GROUP BY 
+        RP.PostId, PT.Name, RP.Title, RP.Score, RP.ViewCount
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) FILTER (WHERE PH.PostHistoryTypeId = 10) AS ClosureCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+FinalStats AS (
+    SELECT 
+        PS.*,
+        COALESCE(CP.ClosureCount, 0) AS ClosureCount
+    FROM 
+        PostStats PS
+    LEFT JOIN 
+        ClosedPosts CP ON PS.PostId = CP.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.PostType,
+    PS.Score,
+    PS.ViewCount,
+    PS.UpVotes - PS.DownVotes AS NetVotes,
+    PS.CommentCount,
+    PS.ClosureCount,
+    CASE 
+        WHEN PS.Score = 0 THEN 'Neutral'
+        WHEN PS.Score > 0 THEN 'Positive'
+        ELSE 'Negative'
+    END AS ScoreCategory
+FROM 
+    FinalStats PS
+WHERE 
+    PS.ClosureCount = 0
+    AND PS.RN <= 5
+    AND PS.ViewCount BETWEEN 100 AND 1000
+ORDER BY 
+    PS.Score DESC, 
+    PS.ViewCount ASC NULLS LAST;

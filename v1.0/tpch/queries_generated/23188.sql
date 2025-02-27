@@ -1,0 +1,90 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+SubqueryOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+    HAVING 
+        COUNT(l.l_orderkey) > 0
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FinalResults AS (
+    SELECT 
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COALESCE(MAX(s.s_name), 'Unknown Supplier') AS top_supplier,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN 
+        SupplierPartDetails s ON l.l_partkey IN (SELECT ps.p_partkey FROM HighValueParts ps)
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        c.c_name
+    HAVING 
+        total_revenue > (SELECT AVG(total_revenue) FROM (
+            SELECT 
+                SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+            FROM 
+                orders o
+            JOIN 
+                lineitem l ON o.o_orderkey = l.l_orderkey
+            GROUP BY 
+                o.o_orderkey
+        ) AS avg_revenue)
+)
+SELECT * 
+FROM 
+    FinalResults
+WHERE 
+    NULLIF(total_orders, 0) IS NOT NULL
+ORDER BY 
+    total_revenue DESC 
+LIMIT 10;

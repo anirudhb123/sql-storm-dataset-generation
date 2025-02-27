@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+HighValueSuppliers AS (
+    SELECT 
+        r.r_name,
+        n.n_name,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.rank = 1
+        AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_returnflag = 'N' 
+        AND l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+FinalResults AS (
+    SELECT 
+        h.r_name AS region,
+        h.n_name AS nation,
+        h.s_name AS supplier,
+        o.o_orderkey AS order_key,
+        o.total revenue,
+        o.avg_quantity,
+        o.unique_suppliers
+    FROM 
+        HighValueSuppliers h
+    JOIN 
+        OrderStats o ON h.s_name = o.unique_suppliers
+)
+SELECT 
+    region,
+    nation,
+    supplier,
+    SUM(total revenue) AS total_revenue,
+    COUNT(order_key) AS order_count,
+    AVG(avg_quantity) AS avg_order_quantity
+FROM 
+    FinalResults
+GROUP BY 
+    region, nation, supplier
+HAVING 
+    COUNT(order_key) > 5 
+    AND SUM(total revenue) IS NOT NULL
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,50 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_title t
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY ct.kind) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    r.title_id,
+    r.title,
+    r.production_year,
+    r.kind_id,
+    ci.company_name,
+    ci.company_type,
+    COALESCE(cast.person_role_id, 0) AS role_id,
+    COUNT(DISTINCT k.keyword) AS keyword_count
+FROM 
+    ranked_titles r
+LEFT JOIN 
+    complete_cast cast ON r.title_id = cast.movie_id
+LEFT JOIN 
+    company_info ci ON r.title_id = ci.movie_id AND ci.company_rank = 1
+LEFT JOIN 
+    movie_keyword mk ON r.title_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    r.rank_year <= 5 -- Include only recent 5 titles per kind
+GROUP BY 
+    r.title_id, r.title, r.production_year, r.kind_id, ci.company_name, ci.company_type, cast.person_role_id
+HAVING 
+    COUNT(DISTINCT k.keyword) > 0 OR ci.company_name IS NOT NULL
+ORDER BY 
+    r.production_year DESC, r.title;

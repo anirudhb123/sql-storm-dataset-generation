@@ -1,0 +1,71 @@
+
+WITH CustomerData AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        c.c_birth_year, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        hd.hd_income_band_sk,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1980
+),
+
+SalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk, 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_year = 2023) 
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+
+FinalData AS (
+    SELECT 
+        cd.c_customer_id, 
+        cd.c_first_name, 
+        cd.c_last_name, 
+        cd.c_birth_year, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.hd_income_band_sk,
+        cd.hd_dep_count,
+        cd.hd_vehicle_count,
+        sd.total_net_profit,
+        sd.total_orders
+    FROM 
+        CustomerData cd
+    LEFT JOIN 
+        SalesData sd ON cd.c_customer_id = sd.ws_bill_customer_sk
+)
+
+SELECT 
+    f.c_customer_id, 
+    f.c_first_name, 
+    f.c_last_name, 
+    f.c_birth_year, 
+    f.cd_gender, 
+    f.cd_marital_status, 
+    f.hd_income_band_sk,
+    f.hd_dep_count,
+    f.hd_vehicle_count,
+    COALESCE(f.total_net_profit, 0) AS total_net_profit,
+    COALESCE(f.total_orders, 0) AS total_orders
+FROM 
+    FinalData f
+ORDER BY 
+    total_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

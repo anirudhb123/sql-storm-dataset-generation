@@ -1,0 +1,64 @@
+WITH RECURSIVE UserVoteCTE AS (
+    SELECT 
+        U.Id AS UserID,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostID,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(P.LastActivityDate) AS LastActivity
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.Title, P.OwnerUserId
+),
+UserWithTopPosts AS (
+    SELECT 
+        U.Id AS UserID,
+        U.DisplayName,
+        PS.PostID,
+        PS.Title,
+        PS.UpVotes - PS.DownVotes AS NetVotes
+    FROM 
+        Users U
+    JOIN 
+        PostStatistics PS ON U.Id = PS.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UV.TotalVotes, 0) AS TotalVotes,
+    COALESCE(UV.UpVotes, 0) AS UpVotes,
+    COALESCE(UV.DownVotes, 0) AS DownVotes,
+    COUNT(DISTINCT UTP.PostID) AS TopPostsCount,
+    STRING_AGG(UTP.Title, ', ') AS TopPostTitles
+FROM 
+    Users U
+LEFT JOIN 
+    UserVoteCTE UV ON U.Id = UV.UserID
+LEFT JOIN 
+    UserWithTopPosts UTP ON U.Id = UTP.UserID
+GROUP BY 
+    U.Id, U.DisplayName
+ORDER BY 
+    TotalVotes DESC
+LIMIT 10;

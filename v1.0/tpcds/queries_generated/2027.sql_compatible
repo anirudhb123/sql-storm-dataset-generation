@@ -1,0 +1,73 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        w.w_warehouse_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        ws.web_site_sk, w.w_warehouse_id
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        ca.ca_city,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        AVG(ss.ss_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS num_transactions
+    FROM 
+        store_sales ss
+    INNER JOIN 
+        customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_city
+),
+return_analysis AS (
+    SELECT 
+        sr_reason_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amount) AS avg_return_amount
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr_reason_sk
+)
+SELECT 
+    ws.web_site_id,
+    cs.c_customer_id,
+    s.total_sales,
+    cs.gender_rank,
+    r.total_returns,
+    ss.avg_net_profit
+FROM 
+    ranked_sales s
+JOIN 
+    web_site ws ON s.web_site_sk = ws.web_site_sk
+JOIN 
+    customer_data cs ON cs.gender_rank <= 5
+LEFT JOIN 
+    return_analysis r ON r.total_returns > 0
+LEFT JOIN 
+    sales_summary ss ON ss.total_store_sales > 0
+WHERE 
+    ws.web_site_id IS NOT NULL 
+    AND s.total_sales > 10000 
+ORDER BY 
+    s.total_sales DESC, cs.c_customer_id;

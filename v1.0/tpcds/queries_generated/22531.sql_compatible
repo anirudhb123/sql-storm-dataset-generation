@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        COALESCE(NULLIF(CAST(ws.ws_sales_price AS DECIMAL(10, 2)), 0), NULL) AS price_adjusted,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+),
+ReturnData AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amt) AS total_refund
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_order_number IN (SELECT DISTINCT ws.ws_order_number FROM web_sales ws WHERE ws.ws_ship_date_sk > 0)
+    GROUP BY 
+        cr.cr_item_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.ws_order_number,
+        sd.ws_sales_price,
+        sd.price_adjusted,
+        rd.total_returned,
+        rd.total_refund,
+        CASE 
+            WHEN rd.total_returned IS NULL THEN 'No Returns' 
+            WHEN rd.total_returned > 5 THEN 'High Returns' 
+            ELSE 'Normal Return' 
+        END AS return_category
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        ReturnData rd ON sd.ws_item_sk = rd.cr_item_sk
+)
+SELECT 
+    sa.ws_item_sk,
+    sa.ws_order_number,
+    sa.ws_sales_price,
+    sa.price_adjusted,
+    COALESCE(sa.total_returned, 0) AS non_returned_quantity,
+    sa.total_refund AS total_refund_amount,
+    sa.return_category,
+    ROW_NUMBER() OVER (PARTITION BY sa.return_category ORDER BY sa.ws_sales_price DESC) AS row_num
+FROM 
+    SalesAnalysis sa
+WHERE 
+    sa.price_rank = 1 
+    AND (sa.total_refund IS NULL OR sa.total_refund < 100)
+    OR (sa.total_refund IS NOT NULL AND COALESCE(sa.total_returned, 0) < 3)
+ORDER BY 
+    sa.return_category, row_num
+FETCH FIRST 50 ROWS ONLY;

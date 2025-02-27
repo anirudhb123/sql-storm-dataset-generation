@@ -1,0 +1,51 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM m.production_year) ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+
+cast_with_roles AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(DISTINCT c.nr_order) OVER (PARTITION BY c.movie_id, r.role ORDER BY a.name) AS role_count
+    FROM 
+        cast_info AS c
+    JOIN 
+        aka_name AS a ON c.person_id = a.person_id
+    JOIN 
+        role_type AS r ON c.role_id = r.id
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    ca.actor_name,
+    ca.role_name,
+    CASE 
+        WHEN ca.role_count IS NOT NULL THEN ca.role_count
+        ELSE 0
+    END AS occurrence_count,
+    CASE 
+        WHEN m.year_rank <= 5 THEN 'Top 5 Recent'
+        ELSE 'Older'
+    END AS movie_rank_category
+
+FROM 
+    ranked_movies AS m
+LEFT JOIN 
+    cast_with_roles AS ca ON m.movie_id = ca.movie_id
+WHERE 
+    (m.production_year >= 2000 AND m.production_year <= 2023)
+    AND (ca.role_name IS NOT NULL OR ca.role_name IS NULL)  
+ORDER BY 
+    m.production_year DESC, 
+    ca.actor_name ASC;

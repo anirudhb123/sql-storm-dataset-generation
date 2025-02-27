@@ -1,0 +1,52 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS movie_rank
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    WHERE
+        a.production_year IS NOT NULL
+    GROUP BY
+        a.id, a.title, a.production_year
+),
+company_counts AS (
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    INNER JOIN
+        complete_cast m ON mc.movie_id = m.movie_id
+    GROUP BY
+        m.movie_id
+),
+movies_with_company AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        COALESCE(cc.company_count, 0) AS company_count
+    FROM
+        ranked_movies rm
+    LEFT JOIN
+        company_counts cc ON rm.id = cc.movie_id
+    WHERE
+        rm.movie_rank <= 5
+)
+SELECT
+    mwc.title,
+    mwc.production_year,
+    mwc.company_count,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = mwc.movie_id AND mi.info LIKE '%Award%') AS award_count
+FROM
+    movies_with_company mwc
+LEFT JOIN
+    movie_keyword mk ON mwc.movie_id = mk.movie_id
+WHERE
+    mwc.company_count > 1
+ORDER BY
+    mwc.production_year DESC, mwc.company_count DESC;

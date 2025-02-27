@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select all movies from the title table
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        t.season_nr,
+        t.episode_nr,
+        0 AS level
+    FROM title t
+
+    UNION ALL
+
+    -- Recursive case: Join movie_link to find linked movies
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        t.season_nr,
+        t.episode_nr,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN title t ON ml.linked_movie_id = t.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+movie_info_summary AS (
+    -- Aggregate movie information, including keywords and info types
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mi.info_type_id) AS info_type_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_hierarchy m
+    LEFT JOIN movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+notable_cast AS (
+    -- Select notable cast members with outer join to include movies with no cast
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        COALESCE(c.nr_order, 0) AS actor_order
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+),
+company_summary AS (
+    -- Summary of companies involved in productions
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.name) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY mc.movie_id
+)
+
+-- Final selection of interesting movie data
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.info_type_count,
+    m.keywords,
+    c.actor_name,
+    c.actor_order,
+    cs.company_count,
+    cs.company_names
+FROM movie_info_summary m
+LEFT JOIN notable_cast c ON m.movie_id = c.movie_id
+LEFT JOIN company_summary cs ON m.movie_id = cs.movie_id
+WHERE m.info_type_count > 0
+ORDER BY m.production_year DESC, m.title;

@@ -1,0 +1,51 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.episode_of_id,
+        0 AS hierarchy_level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.episode_of_id,
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mv.production_year,
+    COUNT(mv.movie_id) OVER (PARTITION BY ak.id ORDER BY mv.production_year DESC) AS movie_count,
+    CASE 
+        WHEN mv.production_year IS NULL THEN 'Unknown Year'
+        ELSE mv.production_year::text
+    END AS production_year_display
+FROM 
+    aka_name ak
+INNER JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+INNER JOIN 
+    movie_hierarchy mv ON ci.movie_id = mv.movie_id
+RIGHT JOIN 
+    aka_title at ON mv.movie_id = at.id
+WHERE 
+    ak.name IS NOT NULL
+    AND (
+        ak.name LIKE 'A%' OR ak.name LIKE 'B%'
+    )
+ORDER BY 
+    actor_name, production_year_display DESC;

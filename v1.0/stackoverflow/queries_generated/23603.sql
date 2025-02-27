@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        MAX(v.CreationDate) OVER (PARTITION BY p.Id) AS LastVoteDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = pl.RelatedPostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (CURRENT_TIMESTAMP - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate
+),
+ClosePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        cok.CloseReasonId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseEventRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cok ON ph.Comment::int = cok.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+ActivePostReports AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(cph.CloseDate, 'No Close Event') AS CloseEventDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosePostHistory cph ON rp.PostId = cph.PostId AND cph.CloseEventRank = 1
+    WHERE 
+        rp.CommentCount > 5 AND 
+        (rp.Score > 0 OR rp.CloseEventDate IS NOT NULL)
+)
+SELECT 
+    a.UserId,
+    a.DisplayName,
+    a.Reputation,
+    a.CreationDate AS UserSince,
+    apr.PostId,
+    apr.Title,
+    apr.Score,
+    apr.CloseEventDate
+FROM 
+    Users a
+JOIN 
+    ActivePostReports apr ON a.Id = apr.OwnerUserId
+INNER JOIN 
+    (
+        SELECT 
+            p.OwnerUserId, 
+            COUNT(*) AS ActivePostsCount
+        FROM 
+            Posts p 
+        WHERE 
+            p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days' 
+        GROUP BY 
+            p.OwnerUserId
+    ) activeCount ON a.Id = activeCount.OwnerUserId 
+WHERE 
+    activeCount.ActivePostsCount > 3
+ORDER BY 
+    apr.Score DESC, 
+    apr.CloseEventDate ASC NULLS LAST;

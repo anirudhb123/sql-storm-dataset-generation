@@ -1,0 +1,81 @@
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(LastAccessDate) AS LastActive,
+        SUM(COALESCE(Votes.BountyAmount, 0)) AS TotalBounties
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN Votes ON Users.Id = Votes.UserId
+    GROUP BY Users.Id, DisplayName, Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        LastActive,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Ranking
+    FROM UserStats
+),
+RecentPosts AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.ViewCount,
+        Users.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COUNT(Comments.Id) AS CommentCount
+    FROM Posts
+    LEFT JOIN Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN Votes ON Posts.Id = Votes.PostId
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    WHERE Posts.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY Posts.Id, Posts.Title, Posts.CreationDate, Users.DisplayName
+),
+HighScorePosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        ViewCount,
+        OwnerDisplayName,
+        UpVoteCount,
+        DownVoteCount,
+        CommentCount,
+        ROW_NUMBER() OVER (ORDER BY ViewCount DESC) AS ViewRank
+    FROM RecentPosts
+    WHERE UpVoteCount > DownVoteCount
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation AS UserReputation,
+    P.Title AS PostTitle,
+    P.ViewCount AS PostViews,
+    P.UpVoteCount,
+    P.DownVoteCount,
+    P.CommentCount
+FROM TopUsers U
+JOIN HighScorePosts P ON U.UserId = P.PostId 
+WHERE U.Ranking <= 10
+ORDER BY U.Reputation DESC, P.ViewCount DESC
+LIMIT 5
+UNION ALL
+SELECT 
+    'Total Bounties' AS UserName,
+    NULL AS UserReputation,
+    NULL AS PostTitle,
+    NULL AS PostViews,
+    NULL AS UpVoteCount,
+    NULL AS DownVoteCount,
+    SUM(TotalBounties) AS CommentCount
+FROM UserStats
+WHERE TotalBounties IS NOT NULL;

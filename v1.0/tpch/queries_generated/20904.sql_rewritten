@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk,
+        s.nationkey AS supplier_nation
+    FROM supplier s
+), HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+        COUNT(l.l_orderkey) AS total_lines,
+        FIRST_VALUE(o.o_orderstatus) OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS first_status
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+    GROUP BY o.o_orderkey
+), CustomerSegment AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_mktsegment
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+), SupplierPerformance AS (
+    SELECT 
+        n.n_name AS nation_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 0
+    GROUP BY n.n_name
+)
+
+SELECT 
+    r.r_name,
+    COALESCE(c.c_mktsegment, 'Unknown') AS customer_segment,
+    SUM(sp.total_acctbal) AS total_balance,
+    AVG(oh.net_value) AS average_order_value,
+    COUNT(DISTINCT hp.p_partkey) AS high_value_parts
+FROM region r
+LEFT JOIN SupplierPerformance sp ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = r.r_name)
+LEFT JOIN CustomerSegment c ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = r.r_name)
+LEFT JOIN OrderSummary oh ON c.order_count > 0
+LEFT JOIN HighValueParts hp ON hp.total_supply_value > 0
+WHERE r.r_comment IS NULL OR r.r_comment LIKE '%important%'
+GROUP BY r.r_name, c.c_mktsegment
+HAVING SUM(sp.total_balance) > 50000
+ORDER BY r.r_name DESC, customer_segment;

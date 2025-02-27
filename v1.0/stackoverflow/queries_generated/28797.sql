@@ -1,0 +1,58 @@
+WITH StringProcessing AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS UniqueTags,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames,
+        LAG(p.CreationDate) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS PreviousPostDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges b ON U.Id = b.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Only consider Questions and Answers
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'  -- Filter for the last year
+    GROUP BY 
+        p.Id, U.DisplayName
+),
+AggregatedData AS (
+    SELECT 
+        sp.PostId,
+        sp.Title,
+        sp.OwnerDisplayName,
+        sp.CommentCount,
+        sp.UniqueTags,
+        sp.BadgeNames,
+        sp.PreviousPostDate,
+        COALESCE(DATE_PART('epoch', sp.PreviousPostDate) * 1000, 0) AS PreviousPostMillis
+    FROM 
+        StringProcessing sp
+)
+SELECT 
+    PostId,
+    Title,
+    OwnerDisplayName,
+    CommentCount,
+    ARRAY_LENGTH(UniqueTags, 1) AS TagCount,
+    BadgeNames,
+    PreviousPostMillis,
+    CASE 
+        WHEN PreviousPostMillis > 0 THEN 
+            CONCAT('Time since last post: ', (EXTRACT(EPOCH FROM (NOW() - TO_TIMESTAMP(PreviousPostMillis / 1000)))::int), ' seconds')
+        ELSE 'No previous post found'
+    END AS LastPostTimeInfo
+FROM 
+    AggregatedData
+ORDER BY 
+    CommentCount DESC
+LIMIT 50;  -- Limit results to the top 50 most-commented Posts

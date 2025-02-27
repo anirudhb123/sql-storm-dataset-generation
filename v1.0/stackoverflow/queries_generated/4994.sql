@@ -1,0 +1,57 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        DENSE_RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title
+),
+MostCommentedPosts AS (
+    SELECT 
+        PostId, Title, CommentCount, UpVotes, DownVotes, CommentRank
+    FROM 
+        PostStats
+    WHERE 
+        CommentRank <= 10
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    mcp.Title,
+    mcp.CommentCount,
+    mcp.UpVotes,
+    mcp.DownVotes,
+    ub.BadgeCount,
+    CASE 
+        WHEN mcp.CommentCount = 0 THEN 'No Comments'
+        ELSE NULL
+    END AS CommentStatus
+FROM 
+    MostCommentedPosts mcp
+LEFT JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = mcp.PostId)
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    mcp.CommentCount DESC
+LIMIT 5;

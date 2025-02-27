@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk, ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        sd.ws_bill_customer_sk,
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        CASE 
+            WHEN sd.total_profit IS NULL THEN 'Unknown'
+            WHEN sd.total_profit = 0 THEN 'No Profit'
+            ELSE 'Profitable'
+        END AS profit_status
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.total_quantity > 5
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_demo_sk,
+        COUNT(DISTINCT cs.ws_bill_customer_sk) AS unique_customers,
+        AVG(cs.total_quantity) AS avg_quantity,
+        SUM(CASE WHEN cs.profit_status = 'Profitable' THEN 1 ELSE 0 END) AS profitable_sales_count,
+        MAX(cs.total_profit) AS max_profit
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        FilteredSales cs ON cd.cd_demo_sk = cs.ws_bill_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    ca.ca_country,
+    cs.unique_customers,
+    cs.avg_quantity,
+    cs.profitable_sales_count,
+    cs.max_profit,
+    COUNT(DISTINCT cs.ws_item_sk) AS distinct_items_sold
+FROM 
+    CustomerStats cs
+JOIN 
+    customer_address ca ON cs.cd_demo_sk = ca.ca_address_sk
+LEFT JOIN 
+    (SELECT DISTINCT ws_item_sk FROM web_sales) AS unique_items ON cs.ws_item_sk = unique_items.ws_item_sk
+GROUP BY 
+    ca.ca_country, cs.unique_customers, cs.avg_quantity, cs.profitable_sales_count, cs.max_profit
+HAVING 
+    cs.avg_quantity > 10 OR cs.profitable_sales_count > 5
+ORDER BY 
+    cs.max_profit DESC
+LIMIT 100 OFFSET 50;

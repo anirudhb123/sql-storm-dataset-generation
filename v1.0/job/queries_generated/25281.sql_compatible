@@ -1,0 +1,62 @@
+
+WITH actor_movies AS (
+    SELECT 
+        n.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        rt.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name n ON ci.person_id = n.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+),
+keyword_count AS (
+    SELECT 
+        am.actor_name,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        actor_movies am
+    JOIN 
+        movie_keyword mk ON am.movie_title = mk.movie_id
+    GROUP BY 
+        am.actor_name
+),
+published_movies AS (
+    SELECT 
+        ak.name AS actor_name,
+        STRING_AGG(DISTINCT title.title, ', ') AS movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title title ON ci.movie_id = title.movie_id
+    WHERE 
+        title.production_year IS NOT NULL
+    GROUP BY 
+        ak.name
+),
+final_result AS (
+    SELECT 
+        kc.actor_name,
+        kc.keyword_count,
+        pm.movies
+    FROM 
+        keyword_count kc
+    LEFT JOIN 
+        published_movies pm ON kc.actor_name = pm.actor_name
+)
+SELECT 
+    fr.actor_name,
+    fr.keyword_count,
+    fr.movies
+FROM 
+    final_result fr
+ORDER BY 
+    fr.keyword_count DESC, fr.actor_name;

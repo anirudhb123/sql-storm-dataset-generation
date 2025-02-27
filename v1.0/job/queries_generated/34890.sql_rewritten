@@ -1,0 +1,49 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        ma.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title ma ON ma.id = ml.linked_movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    COUNT(DISTINCT m.id) AS linked_movie_count,
+    ARRAY_AGG(DISTINCT rh.movie_title) AS related_movies,
+    AVG(CASE WHEN wi.role IS NULL THEN 0 ELSE 1 END) AS role_ratio
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ci.person_id = ak.person_id
+JOIN 
+    aka_title at ON at.id = ci.movie_id
+LEFT JOIN 
+    MovieHierarchy m ON m.movie_id = at.id
+LEFT JOIN 
+    role_type wi ON wi.id = ci.role_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND at.production_year IS NOT NULL
+    AND (wi.role IS NULL OR wi.role != 'Unknown')
+GROUP BY 
+    ak.name, at.title
+HAVING 
+    COUNT(DISTINCT m.movie_id) > 3
+ORDER BY 
+    actor_name,
+    movie_title DESC;

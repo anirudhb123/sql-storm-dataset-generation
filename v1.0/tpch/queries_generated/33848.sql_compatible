@@ -1,0 +1,62 @@
+
+WITH recursive_order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS item_count,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+filtered_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1 WHERE s1.s_acctbal IS NOT NULL)
+),
+part_supplier_summary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty IS NOT NULL
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_brand,
+    p.p_type,
+    COALESCE(ps.total_available_qty, 0) AS total_available_qty,
+    COALESCE(ps.unique_suppliers, 0) AS unique_suppliers,
+    COALESCE(os.total_revenue, 0) AS total_revenue,
+    COALESCE(os.item_count, 0) AS item_count,
+    fs.nation_name
+FROM 
+    part p
+LEFT JOIN 
+    part_supplier_summary ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    recursive_order_summary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    filtered_suppliers fs ON fs.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+WHERE 
+    p.p_size BETWEEN 20 AND 40
+ORDER BY 
+    total_revenue DESC, p.p_name;

@@ -1,0 +1,69 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(NULLIF(P.Score, 0), NULL) AS EffectiveScore,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, P.OwnerUserId
+),
+BannedUsers AS (
+    SELECT U.Id, U.DisplayName
+    FROM Users U
+    WHERE U.Reputation < 0
+),
+EffectivePostHistory AS (
+    SELECT 
+        PH.PostId,
+        ARRAY_AGG(DISTINCT PHT.Name) AS HistoryTypes,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM PostHistory PH
+    INNER JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    UVS.TotalVotes,
+    UVS.UpVotes,
+    UVS.DownVotes,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.UserPostRank,
+    PS.CommentCount,
+    COALESCE(EHP.HistoryTypes, ARRAY[]::TEXT[]) AS PostHistory,
+    PHT.Name AS MostRecentHistoryType
+FROM UserVoteStats UVS
+JOIN Posts P ON UVS.UserId = P.OwnerUserId
+JOIN PostStatistics PS ON P.Id = PS.PostId
+LEFT JOIN EffectivePostHistory EHP ON P.Id = EHP.PostId
+LEFT JOIN LATERAL (
+    SELECT DISTINCT PHT.Name
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id 
+    WHERE PH.PostId = P.Id
+    ORDER BY PH.CreationDate DESC LIMIT 1
+) AS PHT ON true
+WHERE UVS.TotalVotes > 10
+AND (UPPER(U.DisplayName) LIKE 'A%' OR U.Reputation > 10000)
+AND (P.ClosedDate IS NULL OR P.ClosedDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+ORDER BY U.Reputation DESC, PS.ViewCount ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

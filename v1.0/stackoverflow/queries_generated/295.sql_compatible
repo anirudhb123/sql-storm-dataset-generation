@@ -1,0 +1,66 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(DISTINCT P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation,
+        Upvotes, 
+        Downvotes, 
+        PostsCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+    WHERE 
+        Reputation > (SELECT AVG(Reputation) FROM Users)
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.UserDisplayName AS ClosedBy,
+        PH.CreationDate AS CloseDate,
+        CT.Name AS CloseType
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId 
+    INNER JOIN 
+        CloseReasonTypes CT ON PH.Comment = CT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    TU.Upvotes,
+    TU.Downvotes,
+    TU.PostsCount,
+    CP.Title,
+    CP.ClosedBy,
+    CP.CloseDate,
+    CP.CloseType
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    ClosedPosts CP ON TU.UserId = CP.ClosedBy
+WHERE 
+    TU.ReputationRank <= 10
+ORDER BY 
+    TU.Reputation DESC, CP.CloseDate DESC NULLS LAST;

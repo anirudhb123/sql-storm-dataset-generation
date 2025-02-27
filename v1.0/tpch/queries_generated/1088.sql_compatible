@@ -1,0 +1,73 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            WHEN p.p_size < 10 THEN 'Small'
+            WHEN p.p_size <= 20 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category
+    FROM 
+        part p
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(pd.p_retailprice) AS total_retail_price,
+    AVG(sd.total_supply_cost) AS avg_supply_cost,
+    COUNT(DISTINCT CASE WHEN ao.total_quantity > 100 THEN ao.l_partkey END) AS high_quantity_parts
+FROM 
+    RankedOrders o
+JOIN 
+    nation n ON o.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    AggregatedLineItems ao ON ao.l_partkey IN (SELECT p.p_partkey FROM PartDetails p WHERE p.size_category = 'Small')
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM PartDetails p WHERE p.p_retailprice > 100.00))
+WHERE 
+    o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_orders DESC, total_retail_price DESC;

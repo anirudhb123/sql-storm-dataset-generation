@@ -1,0 +1,50 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rank_by_segment
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_mktsegment
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rank_by_segment <= 10
+),
+OrderLineItems AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_sales,
+        COUNT(lo.l_orderkey) AS item_count
+    FROM 
+        lineitem lo
+    WHERE 
+        lo.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.c_name,
+    to.c_mktsegment,
+    ol.total_sales,
+    ol.item_count
+FROM 
+    TopOrders to
+LEFT JOIN 
+    OrderLineItems ol ON to.o_orderkey = ol.l_orderkey
+ORDER BY 
+    to.o_orderdate DESC, ol.total_sales DESC;

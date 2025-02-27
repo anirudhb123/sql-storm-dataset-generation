@@ -1,0 +1,54 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        d.d_date AS recent_purchase_date,
+        p.p_promo_name AS recent_promo
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        d.d_date > CURRENT_DATE - INTERVAL '1 year'
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_id,
+        TRIM(CONCAT_WS(' ', ca.ca_street_number, ca.ca_street_name, ca.ca_street_type)) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+warehouse_info AS (
+    SELECT 
+        w.w_warehouse_sk,
+        UPPER(w.w_warehouse_name) AS warehouse_name,
+        w.w_city,
+        w.w_state
+    FROM 
+        warehouse w
+)
+SELECT 
+    ci.full_name,
+    ci.recent_purchase_date,
+    ci.recent_promo,
+    ai.full_address,
+    wi.warehouse_name,
+    wi.w_city,
+    wi.w_state
+FROM 
+    customer_info ci
+JOIN 
+    address_info ai ON ai.ca_address_id IN (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_id = ci.c_customer_id)
+JOIN 
+    warehouse_info wi ON wi.w_warehouse_sk IN (SELECT ws.ws_warehouse_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = ci.c_customer_id)
+ORDER BY 
+    ci.recent_purchase_date DESC
+LIMIT 50;

@@ -1,0 +1,57 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(p.birth_year) AS avg_birth_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        total_cast,
+        avg_birth_year
+    FROM 
+        RankedMovies
+    WHERE 
+        total_cast > 5 AND avg_birth_year IS NOT NULL
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.total_cast,
+    CASE 
+        WHEN f.avg_birth_year < 1980 THEN 'Classic'
+        WHEN f.avg_birth_year BETWEEN 1980 AND 2000 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    COALESCE(k.keywords, 'No Keywords') AS movie_keywords
+FROM 
+    FilteredMovies f
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+) k ON f.movie_id = k.movie_id
+WHERE 
+    f.movie_id IN (SELECT DISTINCT movie_id FROM movie_info WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'Plot'))
+ORDER BY 
+    f.total_cast DESC, f.title;

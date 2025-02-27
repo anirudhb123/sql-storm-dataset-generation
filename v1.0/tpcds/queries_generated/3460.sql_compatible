@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.ws_item_sk
+),
+TopSales AS (
+    SELECT sd.ws_item_sk, sd.total_quantity, sd.total_net_profit
+    FROM SalesData sd
+    WHERE sd.rank_profit <= 10
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM store_returns sr
+    JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY sr.sr_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.total_quantity,
+        ts.total_net_profit,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        (ts.total_net_profit - COALESCE(cr.total_return_amount, 0)) AS net_profit_after_returns
+    FROM TopSales ts
+    LEFT JOIN CustomerReturns cr ON ts.ws_item_sk = cr.sr_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.c_email_address,
+    c.c_birth_country,
+    COALESCE(CONCAT(CAST(cd.c_birth_day AS VARCHAR), '-', CAST(cd.c_birth_month AS VARCHAR), '-', CAST(cd.c_birth_year AS VARCHAR)), 'N/A') AS birth_date,
+    cd.c_current_addr_sk,
+    cd.c_preferred_cust_flag,
+    cd.c_login,
+    cd.c_current_cdemo_sk,
+    cd.c_current_hdemo_sk,
+    SUM(cd.total_net_profit) AS total_spent,
+    AVG(CASE WHEN cd.total_returns > 0 THEN 1 ELSE 0 END) AS return_rate,
+    MAX(cd.net_profit_after_returns) AS max_net_profit_after_returns
+FROM CombinedData cd
+LEFT JOIN customer c ON cd.ws_item_sk = c.c_customer_sk
+WHERE cd.total_net_profit > 0
+GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, c.c_email_address, c.c_birth_country, cd.c_current_addr_sk, cd.c_preferred_cust_flag, cd.c_login, cd.c_current_cdemo_sk, cd.c_current_hdemo_sk
+ORDER BY total_spent DESC
+LIMIT 50;

@@ -1,0 +1,95 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '1 year'
+), RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(MAX(v.BountyAmount), 0) AS MaxBounty,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ph.UserDisplayName AS LastEditorName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        RecursivePostHistory ph ON p.LastEditorUserId = ph.UserId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, '>'))::int)
+    WHERE 
+        p.CreationDate BETWEEN NOW() - INTERVAL '30 days' AND NOW()
+    GROUP BY 
+        p.Id, ph.UserDisplayName
+), FilteredResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.MaxBounty,
+        rp.Tags,
+        rp.Upvotes,
+        rp.Downvotes,
+        rp.LastEditorName,
+        CASE 
+            WHEN rp.Upvotes = 0 AND rp.Downvotes = 0 THEN 'New'
+            WHEN rp.Upvotes / NULLIF(rp.Downvotes, 0) > 2 THEN 'Trending'
+            ELSE 'General'
+        END AS Category
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Score >= 10
+        AND (rp.Upvotes - rp.Downvotes) > 5
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Score,
+    fr.ViewCount,
+    fr.AnswerCount,
+    fr.CommentCount,
+    fr.MaxBounty,
+    fr.Tags,
+    fr.Upvotes,
+    fr.Downvotes,
+    fr.LastEditorName,
+    fr.Category,
+    CASE 
+        WHEN fr.CommentCount > 10 THEN 'Highly Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel,
+    COALESCE(ph.Comment, 'No comments on record') AS LastEditComment
+FROM 
+    FilteredResults fr
+LEFT JOIN 
+    PostHistory ph ON fr.PostId = ph.PostId AND ph.PostHistoryTypeId IN (4, 6, 10)
+WHERE 
+    ph.UserId IS NULL OR fr.LastEditorName IS NOT NULL
+ORDER BY 
+    fr.Score DESC,
+    fr.ViewCount DESC,
+    fr.CommentCount DESC
+LIMIT 100;

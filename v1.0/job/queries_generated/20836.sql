@@ -1,0 +1,101 @@
+WITH Recursive MovieCTE AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword AS keyword,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND
+        (t.title ILIKE '%Horror%' OR k.keyword IS NOT NULL)
+),
+ActorCTE AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        ROW_NUMBER() OVER (ORDER BY a.name) AS actor_rank,
+        COALESCE(pi.info, 'No Info Provided') AS personal_info
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.title_id,
+        m.title,
+        m.production_year,
+        m.keyword,
+        m.cast_count,
+        a.actor_id,
+        a.name AS actor_name
+    FROM 
+        MovieCTE m
+    JOIN 
+        cast_info ci ON m.title_id = ci.movie_id
+    JOIN 
+        ActorCTE a ON ci.person_id = a.actor_id
+    WHERE 
+        m.cast_count > 5
+),
+FinalOutput AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        keyword,
+        COUNT(DISTINCT actor_id) AS actor_count,
+        STRING_AGG(actor_name, ', ') AS actors
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        title_id, title, production_year, keyword
+    HAVING 
+        production_year < 2000 
+        AND keyword IS NOT NULL
+)
+SELECT 
+    *,
+    CASE 
+        WHEN actor_count > 10 THEN 'Highly Casted'
+        WHEN actor_count BETWEEN 5 AND 10 THEN 'Moderately Casted'
+        ELSE 'Low Casted'
+    END AS casting_category,
+    COALESCE(NULLIF(keyword, ''), 'No Keywords') AS validated_keyword
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, title ASC;
+
+This SQL query is designed to benchmark performance while utilizing a variety of advanced SQL constructs. Here's a breakdown of its components and complexities:
+
+1. **Common Table Expressions (CTEs)**: 
+   - `MovieCTE` focuses on gathering movie titles joined with keywords and the count of distinct cast members.
+   - `ActorCTE` retrieves actor names and any associated personal information, handling NULL values through `COALESCE`.
+   - `FilteredMovies` filters movies based on cast size and joins the previous CTEs.
+
+2. **Window Functions**:
+   - The `ROW_NUMBER()` and `COUNT()` functions are used for generating rankings and counts within particular partitions.
+
+3. **Complex Conditions**: 
+   - The `HAVING` clause incorporates complex predicates and logic to filter results based on specified conditions.
+
+4. **String Aggregation**:
+   - The `STRING_AGG` function is used to concatenate actor names into a single string.
+
+5. **NULL Handling**: 
+   - The use of `NULLIF` and `COALESCE` ensures that NULL values are converted and displayed meaningfully.
+
+6. **Ordering and Categorization**:
+   - The final output orders by production year and additional categorization based on the number of actors.
+
+This query could serve as a robust benchmark for analyzing performance while demonstrating various SQL features and semantics in action.

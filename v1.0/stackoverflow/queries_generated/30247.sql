@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        AVG(v.BountyAmount) OVER (PARTITION BY p.OwnerUserId) AS AverageBounty,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart votes
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        AnswerCount,
+        CommentCount,
+        OwnerDisplayName,
+        Rank,
+        AverageBounty,
+        TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1 AND 
+        (Score > 5 OR ViewCount > 100) AND  -- High scoring or high view count
+        OwnerDisplayName IS NOT NULL
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.OwnerDisplayName,
+    COALESCE(pHS.HistoryTypes, 'No history') AS PostHistoryTypes,
+    COALESCE(pHS.EditCount, 0) AS TotalEdits,
+    fp.AverageBounty,
+    fp.TotalComments
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistorySummary pHS ON fp.PostId = pHS.PostId
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;  -- Limit results for performance benchmarking
+

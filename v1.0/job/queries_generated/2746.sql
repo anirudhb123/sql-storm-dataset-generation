@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank_by_cast
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, title, production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast <= 10
+),
+MovieDetails AS (
+    SELECT
+        tm.title,
+        tm.production_year,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        ARRAY_AGG(COALESCE(cn.name, 'Unknown Character')) AS characters
+    FROM
+        TopMovies tm
+    LEFT JOIN 
+        movie_keyword mk ON tm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON tm.movie_id = cc.movie_id
+    LEFT JOIN 
+        char_name cn ON cc.subject_id = cn.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+)
+SELECT
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.characters,
+    CASE 
+        WHEN md.production_year > 2000 THEN 'Modern'
+        ELSE 'Classic'
+    END AS era,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = md.movie_id) AS info_count
+FROM
+    MovieDetails md
+ORDER BY
+    md.production_year DESC,
+    md.title ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_percentage,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'overview')
+    LEFT JOIN 
+        company_name cn ON t.id = cn.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        rm.has_note_percentage
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5  
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    CASE 
+        WHEN fm.has_note_percentage IS NULL THEN 'No notes available'
+        ELSE CONCAT(fm.has_note_percentage * 100, '% of actors have notes')
+    END AS note_info
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.actor_count DESC;

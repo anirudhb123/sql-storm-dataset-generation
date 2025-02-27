@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS RankScore,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Score, p.CreationDate
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.OwnerUserId,
+        rp.Score,
+        rp.CreationDate,
+        rp.RankScore,
+        rp.TotalComments,
+        rp.TotalBounty,
+        ur.Reputation,
+        ur.TotalBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        ur.Reputation > 1000 AND 
+        rp.Score > (SELECT AVG(Score) FROM Posts p WHERE p.OwnerUserId = rp.OwnerUserId)  
+),
+ClosedPostCounts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS CloseCount 
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Score,
+    fp.CreationDate,
+    fp.RankScore,
+    fp.TotalComments,
+    fp.TotalBounty,
+    COALESCE(cpcs.CloseCount, 0) AS CloseCount,
+    CASE 
+        WHEN fp.TotalComments > 10 THEN 'Hot Content'
+        WHEN fp.RankScore = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    CASE 
+        WHEN fp.Reputation IS NULL THEN 'Unknown User' 
+        ELSE 'Known User'
+    END AS UserStatus
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    ClosedPostCounts cpcs ON fp.PostId = cpcs.PostId
+WHERE 
+    fp.TotalBounty > 0 OR 
+    fp.TotalComments > 5  
+ORDER BY 
+    fp.Score DESC, 
+    fp.CreationDate DESC
+LIMIT 100;

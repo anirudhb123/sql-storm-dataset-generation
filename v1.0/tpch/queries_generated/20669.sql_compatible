@@ -1,0 +1,45 @@
+
+WITH ranked_orders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+supplier_part_counts AS (
+    SELECT ps.ps_suppkey,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+high_value_suppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+extended_quantity AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_quantity * (CASE WHEN l.l_discount > 0.1 THEN (1 - l.l_discount) ELSE 1 END)) AS adjusted_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       p.p_name AS part_name,
+       COALESCE(r.order_count, 0) AS total_orders,
+       COALESCE(hvc.part_count, 0) AS supplier_part_count,
+       eq.adjusted_quantity,
+       (CASE WHEN COALESCE(r.order_count, 0) > 5 THEN 'High Order Vol.' ELSE 'Low Order Vol.' END) AS order_volume_category
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN high_value_suppliers hvc ON ps.ps_suppkey = hvc.s_suppkey
+LEFT JOIN (
+    SELECT l.l_orderkey,
+           COUNT(DISTINCT l.l_lineitem) AS order_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+) r ON ps.ps_partkey = (SELECT ps_sub.ps_partkey FROM partsupp ps_sub WHERE ps_sub.ps_suppkey = hvc.s_suppkey LIMIT 1)
+JOIN extended_quantity eq ON eq.l_orderkey = r.l_orderkey
+WHERE (hvc.s_acctbal IS NULL OR hvc.s_acctbal > 5000) 
+ORDER BY supplier_name, part_name;

@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(P.CreationDate::timestamp) AS AvgCreationTime,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS TopContributors
+    FROM 
+        Tags AS T
+    LEFT JOIN 
+        Posts AS P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    LEFT JOIN 
+        Users AS U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId IN (1, 2) -- only interested in questions and answers
+    GROUP BY 
+        T.TagName
+),
+PostHistoryInsights AS (
+    SELECT 
+        PH.PostId, 
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PH.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory AS PH
+    JOIN 
+        Posts AS P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5) -- Edit Title, Edit Body
+    GROUP BY 
+        PH.PostId
+),
+TopPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        T.TagName,
+        P.ViewCount,
+        COALESCE(E.EditCount, 0) AS EditCount,
+        COALESCE(E.LastEditDate, P.CreationDate) AS LastEditDate,
+        COALESCE(E.Editors, 'None') AS Editors,
+        S.PostCount,
+        S.TotalViews,
+        S.TotalScore,
+        S.AvgCreationTime,
+        S.TopContributors
+    FROM 
+        Posts AS P
+    LEFT JOIN 
+        TagStatistics AS S ON P.Tags LIKE CONCAT('%<', S.TagName, '>%')
+    LEFT JOIN 
+        PostHistoryInsights AS E ON P.Id = E.PostId
+    WHERE 
+        P.PostTypeId = 1 -- only questions
+    ORDER BY 
+        P.ViewCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    TP.Title,
+    TP.ViewCount,
+    TP.EditCount, 
+    TP.LastEditDate,
+    TP.Editors,
+    TP.TopContributors,
+    TP.PostCount, 
+    TP.TotalViews, 
+    TP.TotalScore,
+    TO_CHAR(TP.AvgCreationTime, 'YYYY-MM-DD HH24:MI:SS') AS AverageCreationDate
+FROM 
+    TopPosts AS TP;

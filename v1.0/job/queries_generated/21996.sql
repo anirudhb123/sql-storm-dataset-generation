@@ -1,0 +1,89 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.movie_id AS root_movie_id,
+        mt.title AS root_movie_title,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS root_movie_id,
+        at.title AS root_movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.root_movie_id
+    WHERE 
+        mh.depth < 5  -- Limit depth of the recursion
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    AVG(mi.info::numeric) AS average_rating,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT cc.kind) AS company_count
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id 
+JOIN 
+    movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id IN 
+        (SELECT id FROM info_type WHERE info = 'rating')
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT OUTER JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT OUTER JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.root_movie_id = ci.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (cn.country_code IS NULL OR cn.country_code = 'USA')
+    AND (mt.production_year IS NOT NULL AND mt.production_year = (SELECT MAX(mt2.production_year) FROM aka_title mt2 WHERE mt2.kind_id = mt.kind_id))
+GROUP BY 
+    ak.name, mt.title
+HAVING 
+    AVG(mi.info::numeric) > 7
+ORDER BY 
+    average_rating DESC, actor_name
+LIMIT 10;
+
+-- Additional complexity and corner case
+SELECT 
+    *,
+    CASE 
+        WHEN movie_count > 2 THEN 'Famous Actor'
+        WHEN movie_count IS NULL THEN 'Unknown'
+        ELSE 'Regular Actor'
+    END AS actor_status
+FROM 
+    (
+        SELECT 
+            ak.name AS actor_name,
+            COUNT(DISTINCT ci.movie_id) AS movie_count
+        FROM 
+            cast_info ci
+        JOIN 
+            aka_name ak ON ci.person_id = ak.person_id
+        WHERE 
+            ak.name NOT LIKE '%Anonymous%'
+        GROUP BY 
+            ak.name
+    ) AS actor_count
+WHERE 
+    actor_status IS NOT NULL
+ORDER BY 
+    random(); -- Introduce randomness into the order

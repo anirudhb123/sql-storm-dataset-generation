@@ -1,0 +1,67 @@
+
+WITH Tags_CTE AS (
+    SELECT TagName, COUNT(*) AS TagCount
+    FROM Posts
+    WHERE Tags IS NOT NULL
+    GROUP BY TagName
+),
+Users_CTE AS (
+    SELECT u.Id AS UserId, u.DisplayName, COUNT(b.Id) AS BadgeCount, SUM(u.UpVotes) AS TotalUpVotes
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+Posts_CTE AS (
+    SELECT p.Id AS PostId, p.Title, pt.Name AS PostType, COUNT(c.Id) AS CommentCount,
+           COALESCE(SUM(CASE WHEN v.UserId IS NOT NULL AND v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount
+    FROM Posts p
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, pt.Name
+),
+RankedPosts AS (
+    SELECT 
+        p.PostId, 
+        p.Title, 
+        p.PostType, 
+        p.CommentCount, 
+        p.UpVotesCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostType ORDER BY p.UpVotesCount DESC) AS PostRank
+    FROM Posts_CTE p
+),
+FilteredTags AS (
+    SELECT TagName, TagCount
+    FROM Tags_CTE
+    WHERE TagCount > 10
+),
+PostSummary AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.PostType,
+        r.CommentCount,
+        r.UpVotesCount,
+        u.UserId,
+        u.DisplayName,
+        u.BadgeCount,
+        u.TotalUpVotes,
+        t.TagName
+    FROM RankedPosts r
+    JOIN Users_CTE u ON r.PostId IN (SELECT ParentId FROM Posts WHERE Id = r.PostId) 
+    LEFT JOIN FilteredTags t ON t.TagName IN (SELECT unnest(string_to_array((SELECT Tags FROM Posts WHERE Id = r.PostId), ',')))
+    WHERE r.PostRank <= 5
+)
+SELECT 
+    ps.Title,
+    ps.PostType,
+    ps.CommentCount,
+    ps.UpVotesCount,
+    ps.DisplayName AS UserDisplayName,
+    ps.BadgeCount,
+    ps.TotalUpVotes,
+    ARRAY_AGG(ps.TagName) AS AssociatedTags
+FROM PostSummary ps
+GROUP BY ps.PostId, ps.Title, ps.PostType, ps.CommentCount, 
+         ps.UpVotesCount, ps.DisplayName, ps.BadgeCount, ps.TotalUpVotes
+ORDER BY ps.UpVotesCount DESC, ps.CommentCount DESC;

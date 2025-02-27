@@ -1,0 +1,60 @@
+WITH Supp_Costs AS (
+    SELECT 
+        ps_partkey, 
+        SUM(ps_supplycost * ps_availqty) AS total_supplycost
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+),
+High_Selling_Lineitems AS (
+    SELECT 
+        l_partkey, 
+        SUM(l_quantity) AS total_quantity
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= '1996-01-01' AND 
+        l_shipdate <= '1996-12-31'
+    GROUP BY 
+        l_partkey
+    HAVING 
+        SUM(l_quantity) > 1000
+),
+Supplier_Names AS (
+    SELECT 
+        s.s_suppkey,
+        CONCAT(s.s_name, ' | ', s.s_address) AS detailed_info
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        LENGTH(s.s_comment) > 50
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_mfgr, 
+    p.p_brand, 
+    p.p_type,
+    COALESCE(SCC.total_supplycost, 0) AS computed_cost,
+    COALESCE(HSL.total_quantity, 0) AS sold_quantity,
+    SN.detailed_info AS supplier_info
+FROM 
+    part p
+LEFT JOIN 
+    Supp_Costs SCC ON p.p_partkey = SCC.ps_partkey
+LEFT JOIN 
+    High_Selling_Lineitems HSL ON p.p_partkey = HSL.l_partkey
+FULL OUTER JOIN 
+    Supplier_Names SN ON SN.s_suppkey IN (
+        SELECT ps_suppkey 
+        FROM partsupp 
+        WHERE ps_partkey = p.p_partkey
+    )
+WHERE 
+    (p.p_size BETWEEN 1 AND 5 OR p.p_brand = 'Brand#1')
+    AND (p.p_comment IS NULL OR p.p_comment LIKE '%special%')
+ORDER BY 
+    total_quantity DESC NULLS LAST, 
+    computed_cost DESC;

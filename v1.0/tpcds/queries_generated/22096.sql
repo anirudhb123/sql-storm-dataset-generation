@@ -1,0 +1,41 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ca.ca_country,
+           0 AS level
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ca.ca_country,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_hdemo_sk = ch.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.ca_country,
+       COUNT(DISTINCT r.r_reason_sk) AS return_reasons_count,
+       AVG(rn.rs_return_amt) AS average_return_amt,
+       SUM(rn.rs_return_qty) AS total_return_qty,
+       MAX(rn.rs_return_amt_inc_tax) AS max_return_amt_inc_tax,
+       MIN(rn.rs_return_amt) FILTER (WHERE rn.rs_return_amt IS NOT NULL) AS min_return_amt,
+       CASE 
+           WHEN COUNT(DISTINCT r.r_reason_sk) = 0 THEN 'No Returns'
+           ELSE 'Has Returns'
+       END AS return_status
+FROM customer_hierarchy ch
+LEFT JOIN (
+    SELECT sr_customer_sk, sr_reason_sk, SUM(sr_return_amt) AS rs_return_amt, SUM(sr_return_quantity) AS rs_return_qty,
+           SUM(sr_return_amt_inc_tax) AS rs_return_amt_inc_tax
+    FROM store_returns
+    GROUP BY sr_customer_sk, sr_reason_sk
+) rn ON ch.c_customer_sk = rn.sr_customer_sk
+LEFT JOIN reason r ON rn.sr_reason_sk = r.r_reason_sk
+GROUP BY ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.ca_country
+ORDER BY ch.c_last_name, ch.c_first_name
+HAVING AVG(rn.rs_return_amt) > (SELECT AVG(rs_return_amt) FROM (
+    SELECT sr_return_amt AS rs_return_amt 
+    FROM store_returns 
+    WHERE sr_return_amt IS NOT NULL) as subquery)
+OR return_status = 'No Returns';

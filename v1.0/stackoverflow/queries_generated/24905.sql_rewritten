@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.CreationDate) AS LastPostHistoryDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+)
+, PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.ViewCount,
+        rp.Rank,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.LastPostHistoryDate,
+        CASE 
+            WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+            WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        CASE 
+            WHEN rp.LastPostHistoryDate IS NULL THEN 'No Edits'
+            ELSE 'Edited'
+        END AS EditStatus
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    ps.OwnerUserId,
+    COUNT(ps.PostId) AS TotalPosts,
+    SUM(ps.ViewCount) AS TotalViews,
+    AVG(ps.UpVotes - ps.DownVotes) AS AverageScore,
+    STRING_AGG(ps.Title, '; ') AS PostTitles,
+    MAX(CASE WHEN ps.Sentiment = 'Positive' THEN ps.TotalPosts ELSE 0 END) AS PositivePostCount,
+    MAX(CASE WHEN ps.Sentiment = 'Negative' THEN ps.TotalPosts ELSE 0 END) AS NegativePostCount,
+    SUM(CASE 
+            WHEN ps.EditStatus = 'Edited' THEN 1 
+            ELSE 0 
+        END) AS EditedPostsCount
+FROM 
+    PostStatistics ps
+GROUP BY 
+    ps.OwnerUserId
+HAVING 
+    COUNT(ps.PostId) > 1
+ORDER BY 
+    TotalViews DESC;

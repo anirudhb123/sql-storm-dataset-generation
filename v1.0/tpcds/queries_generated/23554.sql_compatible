@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        SUM(sr_return_quantity) AS total_returns
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+RankedReturns AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.total_returns,
+        RANK() OVER (ORDER BY cr.total_returns DESC) AS return_rank
+    FROM CustomerReturns cr
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        rd.ib_income_band_sk,
+        CASE 
+            WHEN cd.cd_gender = 'M' AND cd.cd_marital_status = 'M' THEN 'Married Male'
+            WHEN cd.cd_gender = 'F' AND cd.cd_marital_status = 'M' THEN 'Married Female'
+            ELSE 'Others'
+        END AS demographic_group
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN income_band rd ON rd.ib_income_band_sk = hd.hd_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cr.total_returns,
+        rp.return_rank
+    FROM CustomerDetails cd
+    JOIN RankedReturns rp ON cd.c_customer_sk = rp.sr_customer_sk
+    JOIN CustomerReturns cr ON cd.c_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_returns,
+    CASE 
+        WHEN tc.total_returns IS NULL THEN 'No Returns'
+        ELSE CONCAT('Returns Count: ', CAST(tc.total_returns AS VARCHAR))
+    END AS return_info,
+    COALESCE(NULLIF(tc.return_rank, 0), 'Not Ranked') AS return_rank
+FROM TopCustomers tc
+WHERE (tc.total_returns BETWEEN 5 AND 50 AND tc.return_rank <= 10) 
+   OR (tc.return_rank IS NULL AND tc.total_returns > 0)
+ORDER BY tc.return_rank ASC, tc.total_returns DESC
+FETCH FIRST 100 ROWS ONLY;

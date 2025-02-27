@@ -1,0 +1,25 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(AVG(p.ViewCount), 0) AS AverageViewCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    TagName,
+    TotalQuestions,
+    TotalAnswers,
+    AverageViewCount
+FROM 
+    TagStats
+ORDER BY 
+    AverageViewCount DESC;

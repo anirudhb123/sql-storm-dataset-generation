@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+PostHistoryAnalysis AS (
+    
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS IsReopened,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS IsDeleted
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    ups.PostCount,
+    ups.TotalViews,
+    ups.TotalScore,
+    COUNT(DISTINCT ph.PostId) AS TotalPostHistory,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.PostTypeId = 1) AS TotalQuestions,
+    STRING_AGG(tt.TagName, ', ') AS TopTags,
+    MIN(rph.Level) AS MinPostLevel,
+    MAX(rph.Level) AS MaxPostLevel
+FROM 
+    Users u
+JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON ups.PostCount > 0
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId = ph.PostId
+CROSS JOIN 
+    TopTags tt
+WHERE 
+    u.Reputation > 100  
+GROUP BY 
+    u.Id, ups.PostCount, ups.TotalViews, ups.TotalScore
+ORDER BY 
+    ups.TotalScore DESC, ups.TotalViews DESC;

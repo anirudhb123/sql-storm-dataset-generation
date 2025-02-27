@@ -1,0 +1,78 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        RANK() OVER (ORDER BY COALESCE(SUM(V.VoteTypeId = 2) - SUM(V.VoteTypeId = 3), 0) DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PostClosedCount AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS ClosedPosts
+    FROM 
+        Posts P
+    WHERE 
+        P.Id IN (SELECT DISTINCT PostId FROM PostHistory WHERE PostHistoryTypeId = 10)
+    GROUP BY 
+        P.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.TotalUpVotes,
+        U.TotalDownVotes,
+        COALESCE(C.ClosedPosts, 0) AS ClosedPosts,
+        U.ReputationRank
+    FROM 
+        UserStats U
+    LEFT JOIN 
+        PostClosedCount C ON U.UserId = C.OwnerUserId
+    WHERE 
+        U.TotalPosts > 10
+    ORDER BY 
+        U.ReputationRank
+    LIMIT 5
+)
+SELECT 
+    T.DisplayName,
+    T.TotalUpVotes,
+    T.TotalDownVotes,
+    T.ClosedPosts,
+    CASE 
+        WHEN T.ClosedPosts > 5 THEN 'High Closure'
+        WHEN T.ClosedPosts BETWEEN 1 AND 5 THEN 'Moderate Closure'
+        ELSE 'No Closure'
+    END AS ClosureCategory,
+    JSON_AGG(
+        DISTINCT JSON_BUILD_OBJECT(
+            'PostId', P.Id,
+            'Title', P.Title,
+            'CreationDate', P.CreationDate,
+            'ViewCount', P.ViewCount,
+            'Score', P.Score
+        )
+    ) AS ClosedPostsDetails
+FROM 
+    TopUsers T
+LEFT JOIN 
+    Posts P ON T.UserId = P.OwnerUserId 
+WHERE 
+    P.Id IN (SELECT DISTINCT PostId FROM PostHistory WHERE PostHistoryTypeId = 10)
+GROUP BY 
+    T.UserId, T.DisplayName, T.TotalUpVotes, T.TotalDownVotes, T.ClosedPosts
+ORDER BY 
+    T.ReputationRank;

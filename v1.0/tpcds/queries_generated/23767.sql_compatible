@@ -1,0 +1,38 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.item_sk,
+        ws.sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ship_date_sk DESC) AS rn,
+        COUNT(ws.item_sk) OVER (PARTITION BY ws.bill_customer_sk) AS item_count
+    FROM web_sales ws
+    WHERE ws.sales_price > (SELECT AVG(ws2.sales_price) 
+                             FROM web_sales ws2 
+                             WHERE ws2.bill_customer_sk = ws.bill_customer_sk)
+)
+SELECT 
+    ca.city, 
+    COUNT(DISTINCT cs.bill_customer_sk) AS unique_customers,
+    SUM(CASE 
+        WHEN cs.item_sk IS NOT NULL THEN cs.sales_price 
+        ELSE 0 END) AS total_sales,
+    AVG(RANK() OVER (PARTITION BY ca.county ORDER BY COUNT(DISTINCT cs.bill_customer_sk) DESC)) AS avg_rank
+FROM customer_address ca
+LEFT JOIN (
+    SELECT 
+        rs.bill_customer_sk,
+        rs.item_sk,
+        rs.sales_price
+    FROM RankedSales rs 
+    WHERE rs.rn = 1
+) AS cs ON ca.ca_address_sk = (CASE 
+                                    WHEN cs.bill_customer_sk IS NULL THEN NULL 
+                                    ELSE (SELECT c_current_addr_sk FROM customer 
+                                           WHERE c_customer_sk = cs.bill_customer_sk)
+                                  END)
+GROUP BY ca.city, ca.county
+HAVING AVG(cs.sales_price) > 50 OR COUNT(cs.item_sk) > 10
+ORDER BY unique_customers DESC, total_sales ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

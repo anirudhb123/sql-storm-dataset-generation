@@ -1,0 +1,71 @@
+
+WITH RECURSIVE income_summary AS (
+    SELECT 
+        ib.income_band_sk,
+        SUM(CASE 
+            WHEN cs.net_paid IS NOT NULL THEN cs.net_paid 
+            ELSE 0 
+        END) AS total_sales,
+        COUNT(DISTINCT cs.customer_sk) AS customer_count,
+        MAX(cs.net_profit) AS max_profit
+    FROM 
+        income_band ib
+    LEFT JOIN (
+        SELECT 
+            ws.bill_customer_sk AS customer_sk,
+            ws.net_paid,
+            ws.net_profit,
+            ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.sold_date_sk DESC) AS rn
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.net_paid IS NOT NULL
+    ) cs ON ib.income_band_sk = cs.customer_sk
+    GROUP BY 
+        ib.income_band_sk
+),
+gender_demo AS (
+    SELECT 
+        cd.poster_age,
+        cd.gender,
+        COUNT(cd.c_demo_sk) AS demographic_count
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.dep_count IN (SELECT hd.dep_count FROM household_demographics hd WHERE hd.buy_potential = 'Likely')
+    GROUP BY 
+        cd.poster_age, cd.gender
+),
+store_sales_summary AS (
+    SELECT 
+        ss.store_sk,
+        SUM(ss.net_paid) AS total_store_sales,
+        AVG(ss.net_profit) AS avg_store_profit
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.store_sk
+)
+SELECT 
+    s.store_id,
+    s.store_name,
+    COALESCE(ss.total_store_sales, 0) AS total_sales,
+    COALESCE(ss.avg_store_profit, 0) AS avg_profit,
+    SUM(is.total_sales) FILTER (WHERE gd.gender = 'M') AS male_sales,
+    SUM(is.total_sales) FILTER (WHERE gd.gender = 'F') AS female_sales,
+    ROW_NUMBER() OVER (PARTITION BY s.store_sk ORDER BY COALESCE(ss.total_store_sales, 0) DESC) AS sales_rank
+FROM 
+    store s
+LEFT JOIN store_sales_summary ss ON s.store_sk = ss.store_sk
+LEFT JOIN income_summary is ON is.income_band_sk = (SELECT ib_income_band_sk FROM household_demographics hd WHERE hd.dep_count < 5 LIMIT 1) 
+LEFT JOIN gender_demo gd ON gd.demographic_count > 10
+GROUP BY 
+    s.store_id, 
+    s.store_name, 
+    ss.total_store_sales, 
+    ss.avg_store_profit, 
+    s.store_sk
+ORDER BY 
+    sales_rank;

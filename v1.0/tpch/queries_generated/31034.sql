@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_acctbal, sc.level + 1
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.s_suppkey = ps.ps_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sc.level < 5
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS total_parts,
+           MAX(l.l_shipdate) AS last_ship_date,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spending
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F' AND o.o_totalprice > 500
+    GROUP BY c.c_custkey
+),
+NationRegion AS (
+    SELECT n.n_name AS nation_name, 
+           r.r_name AS region_name,
+           COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    cs.cust_key,
+    cs.total_orders,
+    cs.total_spending,
+    ls.total_revenue,
+    ls.last_ship_date,
+    NR.region_name,
+    sc.level AS supply_chain_level
+FROM CustomerOrders cs
+LEFT JOIN LineItemSummary ls ON cs.c_custkey = ls.l_orderkey
+JOIN NationRegion NR ON cs.total_orders > 5
+LEFT JOIN SupplyChain sc ON cs.c_custkey = sc.s_suppkey
+WHERE cs.total_spending IS NOT NULL
+    AND NR.nation_count > 1
+ORDER BY cs.total_spending DESC, ls.total_revenue ASC 
+FETCH FIRST 10 ROWS ONLY;

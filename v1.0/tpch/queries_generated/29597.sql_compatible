@@ -1,0 +1,53 @@
+
+WITH processed_parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_size, 
+        p.p_retailprice,
+        UPPER(p.p_comment) AS upper_comment,
+        LENGTH(p.p_comment) AS comment_length,
+        CONCAT(p.p_name, ' - ', p.p_brand) AS name_brand_concat
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 50.00
+),
+supplier_summary AS (
+    SELECT 
+        s.s_nationkey, 
+        COUNT(*) AS total_suppliers, 
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        supplier s
+    GROUP BY 
+        s.s_nationkey
+)
+SELECT 
+    r.r_name, 
+    s.total_suppliers, 
+    s.avg_acctbal, 
+    AVG(pp.p_retailprice) AS avg_retail_price, 
+    SUM(pp.comment_length) AS total_comment_length,
+    COUNT(DISTINCT pp.name_brand_concat) AS distinct_name_brand_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier_summary s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    processed_parts pp ON s.s_nationkey IN (
+        SELECT s.n_nationkey 
+        FROM supplier s WHERE s.s_suppkey IN (
+            SELECT ps.ps_suppkey 
+            FROM partsupp ps WHERE ps.ps_partkey = pp.p_partkey
+        )
+    )
+GROUP BY 
+    r.r_name, s.total_suppliers, s.avg_acctbal
+ORDER BY 
+    r.r_name;

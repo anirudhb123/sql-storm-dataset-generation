@@ -1,0 +1,41 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    UNION ALL
+    SELECT co.c_custkey, co.c_name, co.total_spent + o.o_totalprice
+    FROM CustomerOrders co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate < cast('1998-10-01' as date)()
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_costs
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOrders co
+    WHERE co.total_spent > (
+        SELECT AVG(total_spent) FROM CustomerOrders
+    )
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    COUNT(DISTINCT li.l_orderkey) AS order_count,
+    COALESCE(sp.supplier_costs, 0) AS supplier_costs,
+    CASE WHEN c.c_custkey IS NOT NULL THEN 'High Value' ELSE 'Regular' END AS customer_type
+FROM part p
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN SupplierPerformance sp ON p.p_partkey = sp.s_suppkey
+LEFT JOIN HighValueCustomers c ON li.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey
+)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, sp.supplier_costs, c.c_custkey
+ORDER BY total_revenue DESC, p.p_name
+LIMIT 10;

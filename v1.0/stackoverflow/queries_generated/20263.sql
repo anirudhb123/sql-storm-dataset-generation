@@ -1,0 +1,118 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MIN(b.Date) AS FirstBadgeDate
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        ub.BadgeCount,
+        COALESCE(ub.FirstBadgeDate, u.CreationDate) AS FirstBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        u.LastAccessDate >= NOW() - INTERVAL '30 days' 
+        AND (u.Reputation > 100 OR ub.BadgeCount > 0)
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+PostsWithComments AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.LastActivityDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(pc.CommentCount, 0) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+),
+FilteredPosts AS (
+    SELECT 
+        pwc.PostId,
+        pwc.Title,
+        pwc.CreationDate,
+        pwc.LastActivityDate,
+        pwc.ViewCount,
+        pwc.Score,
+        pwc.CommentCount,
+        COUNT(DISTINCT v.UserId) AS VoteCount
+    FROM 
+        PostsWithComments pwc
+    LEFT JOIN 
+        Votes v ON pwc.PostId = v.PostId
+    GROUP BY 
+        pwc.PostId, pwc.Title, pwc.CreationDate, pwc.LastActivityDate, pwc.ViewCount, pwc.Score, pwc.CommentCount
+    HAVING 
+        COUNT(DISTINCT v.UserId) > 3
+),
+FinalResults AS (
+    SELECT 
+        au.UserId,
+        au.DisplayName,
+        au.Reputation,
+        fp.PostId,
+        fp.Title,
+        fp.ViewCount,
+        fp.Score,
+        fp.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY au.UserId ORDER BY fp.Score DESC, fp.ViewCount DESC) AS UserPostRank
+    FROM 
+        ActiveUsers au
+    JOIN 
+        FilteredPosts fp ON au.UserId = fp.OwnerUserId
+)
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.Reputation,
+    fr.PostId,
+    fr.Title,
+    fr.ViewCount,
+    fr.Score,
+    fr.CommentCount,
+    CASE 
+        WHEN fr.UserPostRank = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostRankCategory
+FROM 
+    FinalResults fr
+WHERE 
+    fr.PostId IS NOT NULL
+ORDER BY 
+    fr.UserId, fr.UserPostRank;

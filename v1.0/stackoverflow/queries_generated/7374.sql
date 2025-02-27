@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        PHT.Name AS HistoryType,
+        ph.UserDisplayName AS EditedBy,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, Tags
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.Rank,
+    COALESCE(ph.HistoryDate, 'No Edits') AS MostRecentEditDate,
+    COALESCE(ph.HistoryType, 'No Edits') AS MostRecentEditType,
+    COALESCE(ph.EditedBy, 'No Edits') AS LastEditedBy,
+    COALESCE(ph.Comment, 'No Comments') AS EditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+ORDER BY 
+    rp.Rank
+LIMIT 100;

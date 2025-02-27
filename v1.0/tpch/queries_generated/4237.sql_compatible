@@ -1,0 +1,55 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '12 months'
+),
+SupplierAvailability AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+OrderItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+
+SELECT 
+    COALESCE(s.s_name, 'Unknown') AS supplier_name,
+    p.p_name,
+    ra.o_orderdate,
+    ra.o_totalprice,
+    oa.item_count,
+    oa.total_price_after_discount,
+    av.total_available,
+    av.avg_supply_cost,
+    n.n_name AS nation_name,
+    r.r_name AS region_name
+FROM RankedOrders ra
+LEFT JOIN OrderItemDetails oa ON ra.o_orderkey = oa.l_orderkey
+LEFT JOIN lineitem l ON l.l_orderkey = ra.o_orderkey
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN SupplierAvailability av ON av.p_partkey = l.l_partkey
+WHERE ra.o_totalprice > (
+    SELECT AVG(o2.o_totalprice) 
+    FROM orders o2 
+    WHERE o2.o_orderstatus = 'O'
+)
+ORDER BY ra.o_orderdate DESC, total_price_after_discount DESC
+FETCH FIRST 100 ROWS ONLY;

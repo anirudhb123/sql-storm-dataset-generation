@@ -1,0 +1,39 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(P.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(P.FavoriteCount, 0)) AS TotalFavorites
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY T.TagName
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalUpvotes,
+    UA.TotalDownvotes,
+    PT.TagName,
+    PT.TotalViews,
+    PT.TotalAnswers,
+    PT.TotalFavorites
+FROM UserActivity UA
+JOIN PopularTags PT ON UA.TotalPosts > 0
+ORDER BY UA.TotalPosts DESC, PT.TotalViews DESC
+LIMIT 100;

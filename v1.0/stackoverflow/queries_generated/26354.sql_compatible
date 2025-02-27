@@ -1,0 +1,74 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, B.Name, B.Class
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        COALESCE(A.AnswerCount, 0) AS AnswerCount,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        COUNT(H.Id) AS EditCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags  
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM Posts 
+        WHERE PostTypeId = 2
+        GROUP BY ParentId
+    ) A ON P.Id = A.ParentId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) C ON P.Id = C.PostId
+    LEFT JOIN PostHistory H ON P.Id = H.PostId 
+    LEFT JOIN Tags T ON POSITION(T.TagName IN P.Tags) > 0 
+    WHERE P.PostTypeId = 1 
+    GROUP BY P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, A.AnswerCount, C.CommentCount
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        SUM(B.Class) AS TotalBadgeClass,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes,
+        RANK() OVER (ORDER BY SUM(U.UpVotes) - SUM(U.DownVotes) DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.Score,
+    PA.ViewCount,
+    PA.AnswerCount,
+    PA.CommentCount,
+    R.TotalBadgeClass,
+    R.UserRank,
+    PA.AssociatedTags
+FROM PostAnalytics PA
+JOIN Users U ON PA.OwnerUserId = U.Id
+JOIN TopUsers R ON U.Id = R.Id
+WHERE PA.EditCount > 10 
+  AND PA.ViewCount > 1000 
+ORDER BY PA.Score DESC, R.UserRank ASC;

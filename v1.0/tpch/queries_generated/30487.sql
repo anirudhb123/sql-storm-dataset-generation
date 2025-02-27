@@ -1,0 +1,39 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+SupplierRanks AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost, 
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT nh.n_name, sr.s_name, os.total_revenue, os.line_item_count,
+       CASE WHEN os.total_revenue IS NULL THEN 'No Revenue' ELSE CAST(os.total_revenue AS varchar) END AS revenue_status,
+       CASE 
+           WHEN sr.supply_rank <= 5 THEN 'Top Supplier' 
+           ELSE 'Regular Supplier'
+       END AS supplier_category
+FROM NationHierarchy nh
+LEFT JOIN SupplierRanks sr ON sr.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps 
+                                                JOIN part p ON ps.ps_partkey = p.p_partkey 
+                                                WHERE p.p_type LIKE '%Brass%')
+LEFT JOIN OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o 
+                                               JOIN customer c ON o.o_custkey = c.c_custkey 
+                                               WHERE c.c_nationkey = nh.n_nationkey)
+WHERE nh.level < 3
+ORDER BY nh.n_name, sr.total_supply_cost DESC, os.total_revenue DESC;

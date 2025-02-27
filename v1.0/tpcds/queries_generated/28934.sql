@@ -1,0 +1,56 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_state, 
+        ca_city, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS complete_address
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        cd_education_status
+    FROM 
+        customer_demographics
+),
+DateInfo AS (
+    SELECT 
+        d_date_id, 
+        d_year, 
+        d_month_seq
+    FROM 
+        date_dim
+),
+AggregatedData AS (
+    SELECT 
+        a.ca_state,
+        a.ca_city,
+        a.complete_address,
+        d.d_year,
+        COUNT(DISTINCT d.d_date_id) AS num_days,
+        COUNT(d.d_month_seq) AS num_months,
+        STRING_AGG(DISTINCT CONCAT(d.d_year, '-', LPAD(d.d_month_seq::text, 2, '0')), ', ') AS year_months
+    FROM 
+        AddressDetails a
+    JOIN 
+        web_sales ws ON a.ca_city = ws.ws_ship_addr_sk
+    JOIN 
+        DateInfo d ON ws.ws_sold_date_sk = d.d_date_id
+    GROUP BY 
+        a.ca_state, a.ca_city, a.complete_address, d.d_year
+)
+SELECT 
+    ca_state, 
+    ca_city, 
+    complete_address, 
+    num_days, 
+    num_months, 
+    year_months
+FROM 
+    AggregatedData
+WHERE 
+    num_days > 10
+ORDER BY 
+    ca_state, ca_city;

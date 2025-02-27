@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs.bill_customer_sk, 
+        SUM(cs.ext_sales_price) AS total_sales,
+        1 AS level
+    FROM 
+        catalog_sales cs
+    GROUP BY 
+        cs.bill_customer_sk
+    
+    UNION ALL
+
+    SELECT 
+        cs.bill_customer_sk, 
+        SUM(cs.ext_sales_price) AS total_sales,
+        sh.level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        sales_hierarchy sh ON cs.bill_customer_sk = sh.bill_customer_sk
+    WHERE 
+        sh.level < 5
+    GROUP BY 
+        cs.bill_customer_sk, sh.level
+),
+address_count AS (
+    SELECT 
+        ca.ca_country, 
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_country
+),
+demographics AS (
+    SELECT 
+        cd.cd_gender,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        CASE 
+            WHEN cd.cd_dep_count > 0 THEN 'With Dependents'
+            ELSE 'Without Dependents'
+        END AS dep_status
+    FROM 
+        customer_demographics cd
+    GROUP BY 
+        cd.cd_gender, 
+        CASE 
+            WHEN cd.cd_dep_count > 0 THEN 'With Dependents'
+            ELSE 'Without Dependents'
+        END
+)
+SELECT 
+    a.ca_country, 
+    ac.customer_count,
+    d.cd_gender, 
+    d.avg_purchase_estimate, 
+    d.dep_status,
+    sh.total_sales
+FROM 
+    address_count ac
+JOIN 
+    customer_address a ON ac.customer_count > 1000 
+LEFT JOIN 
+    demographics d ON ac.customer_count = d.cd_dep_count
+JOIN 
+    (SELECT bill_customer_sk, SUM(total_sales) AS total_sales
+     FROM sales_hierarchy
+     GROUP BY bill_customer_sk) sh ON sh.bill_customer_sk = ac.customer_count
+WHERE 
+    sh.total_sales > 10000
+ORDER BY 
+    a.ca_country, 
+    d.cd_gender, 
+    sh.total_sales DESC;

@@ -1,0 +1,92 @@
+WITH PostScoreCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) AS LastCloseDate,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+JoinedData AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        cp.LastCloseDate,
+        cp.CloseCount
+    FROM 
+        PostScoreCTE ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+)
+SELECT 
+    jd.PostId,
+    jd.Title,
+    jd.Score,
+    jd.ViewCount,
+    jd.CommentCount,
+    jd.UpVoteCount,
+    jd.DownVoteCount,
+    jk2.TagName AS MostUsedTag,
+    CASE WHEN jd.CloseCount IS NULL THEN 'Not Closed' ELSE 'Closed' END AS PostStatus
+FROM 
+    JoinedData jd
+LEFT JOIN (
+    SELECT 
+        t.Id,
+        t.TagName,
+        COUNT(pt.PostId) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        PostsTags pt ON t.Id = pt.TagId
+    GROUP BY 
+        t.Id, t.TagName
+) AS jk ON jd.PostId = jk.PostId
+LEFT JOIN 
+    (SELECT 
+        Tags.TagName, ROW_NUMBER() OVER (ORDER BY COUNT(Posts.Id) DESC) AS TagRank
+    FROM 
+        Tags
+    JOIN 
+        PostTags ON Tags.Id = PostTags.TagId
+    JOIN 
+        Posts ON PostTags.PostId = Posts.Id
+    GROUP BY 
+        Tags.TagName
+    ) AS jk2 ON jk.TagName = jk2.TagName
+WHERE 
+    jd.UserPostRank <= 5
+ORDER BY 
+    jd.Score DESC, jd.ViewCount DESC

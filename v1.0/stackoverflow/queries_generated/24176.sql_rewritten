@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes,
+        COALESCE(ut.Reputation, 0) AS UserReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users ut ON p.OwnerUserId = ut.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ARRAY_AGG(pt.Name) AS ClosureReasons,
+        COUNT(DISTINCT ph.UserId) AS UniqueVoterCount
+    FROM 
+        PostHistory ph 
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+
+PostInsights AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        cp.ClosureReasons,
+        cp.UniqueVoterCount,
+        (rp.UpVotes - rp.DownVotes) AS VoteDifference,
+        CASE 
+            WHEN rp.UserReputation IS NULL THEN 'Unknown'
+            ELSE CASE 
+                WHEN rp.UserReputation < 100 THEN 'Low Reputation'
+                WHEN rp.UserReputation BETWEEN 100 AND 500 THEN 'Moderate Reputation'
+                ELSE 'High Reputation'
+            END
+        END AS ReputationCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RN = 1
+    ORDER BY 
+        rp.Score DESC, rp.ViewCount DESC
+)
+
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.CreationDate,
+    pi.Score,
+    pi.ViewCount,
+    COALESCE(pi.ClosureReasons::text, 'No Closure'),
+    pi.UniqueVoterCount,
+    pi.VoteDifference,
+    pi.ReputationCategory,
+    ROW_NUMBER() OVER (ORDER BY pi.Score DESC) AS OverallRank
+FROM 
+    PostInsights pi
+WHERE 
+    (pi.ClosureReasons IS NULL OR ARRAY_LENGTH(pi.ClosureReasons, 1) < 2) 
+    AND (pi.VoteDifference > 10 OR pi.Score > 50)
+ORDER BY 
+    pi.Rank DESC
+LIMIT 100;

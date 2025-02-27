@@ -1,0 +1,60 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_mfgr LIKE 'Manufacturer%')
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 10000
+    GROUP BY c.c_custkey
+),
+nation_region AS (
+    SELECT 
+        n.n_name,
+        r.r_name AS region_name,
+        COUNT(n.n_nationkey) AS nation_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    a.p_partkey,
+    a.p_name,
+    b.total_parts,
+    c.total_spent,
+    d.nation_count,
+    CASE 
+        WHEN b.total_parts IS NULL THEN 'No parts'
+        ELSE 'Parts available'
+    END AS parts_availability,
+    COALESCE(e.total_supply_cost, 0) AS supply_cost,
+    CONCAT('Details of Order ID: ', o.o_orderkey) AS order_details
+FROM ranked_parts a
+FULL OUTER JOIN supplier_stats b ON a.p_partkey = b.s_suppkey
+JOIN customer_orders c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_totalprice > 1000 LIMIT 1)
+LEFT JOIN nation_region d ON d.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = c.c_custkey % 25)
+CROSS JOIN (SELECT SUM(ps_supplycost) AS total_supply_cost FROM partsupp) e
+ORDER BY 
+    CASE WHEN a.p_partkey IS NULL THEN 1 ELSE 0 END, 
+    b.total_parts DESC, 
+    c.total_spent DESC;

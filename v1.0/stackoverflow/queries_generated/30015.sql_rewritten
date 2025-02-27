@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStatistics AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+RecentPostHistory AS (
+    SELECT 
+        Ph.PostId,
+        Ph.UserId,
+        Ph.CreationDate,
+        P.Title,
+        P.Body,
+        Ph.Comment
+    FROM 
+        PostHistory Ph
+    INNER JOIN 
+        Posts P ON Ph.PostId = P.Id
+    WHERE 
+        Ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    pp.Title AS QuestionTitle,
+    COALESCE(ps.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(ps.DownVotes, 0) AS TotalDownVotes,
+    p.OwnerDisplayName AS Owner,
+    p.CreationDate AS QuestionDate,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    u.BadgeCount AS UserBadgeCount,
+    (SELECT STRING_AGG(Name, ', ' ORDER BY Name)
+     FROM PostHistoryTypes PHT
+     WHERE PHT.Id = (SELECT Ph.PostHistoryTypeId FROM PostHistory Ph WHERE Ph.PostId = pp.Id LIMIT 1)) AS LastActionType,
+    (SELECT COUNT(*) 
+     FROM RecursivePostHierarchy rph 
+     WHERE rph.PostId = pp.Id) AS AnswerLevels
+FROM 
+    Posts pp
+LEFT JOIN 
+    PostVoteStatistics ps ON pp.Id = ps.PostId
+LEFT JOIN 
+    Comments c ON pp.Id = c.PostId
+LEFT JOIN 
+    Users p ON pp.OwnerUserId = p.Id
+LEFT JOIN 
+    UserBadgeCounts u ON p.Id = u.UserId
+WHERE 
+    pp.PostTypeId = 1  
+    AND pp.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+GROUP BY 
+    pp.Title, ps.UpVotes, ps.DownVotes, p.OwnerDisplayName, p.CreationDate, u.BadgeCount
+ORDER BY 
+    pp.CreationDate DESC;

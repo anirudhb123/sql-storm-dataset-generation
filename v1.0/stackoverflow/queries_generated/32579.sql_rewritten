@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.LastActivityDate,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.LastActivityDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostHistoryCTE AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    u.DisplayName AS Author,
+    us.PostCount,
+    us.PositivePosts,
+    us.NegativePosts,
+    us.TotalBadges,
+    ra.CommentCount,
+    ra.UpvoteCount,
+    ph.ClosedDate,
+    ph.ReopenedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+JOIN 
+    RecentActivity ra ON ra.Id = rp.Id
+LEFT JOIN 
+    PostHistoryCTE ph ON rp.Id = ph.PostId
+WHERE 
+    rp.Rank <= 5
+AND 
+    (ph.ClosedDate IS NULL OR ph.ReopenedDate > ph.ClosedDate)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE()) 
+        AND p.PostTypeId = 1  -- Considering only questions
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseOrReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditSuggestionCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalResult AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        u.DisplayName,
+        u.TotalBadges,
+        phs.CloseOrReopenCount,
+        phs.EditSuggestionCount
+    FROM 
+        RankedPosts r
+    JOIN 
+        UsersWithBadges u ON r.PostId = u.UserId
+    LEFT JOIN 
+        PostHistorySummary phs ON r.PostId = phs.PostId
+    WHERE 
+        r.PostRank = 1 
+        AND (u.TotalBadges > 0 OR phs.CloseOrReopenCount > 0)
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.ViewCount IS NULL THEN 'No Views' 
+        WHEN f.ViewCount > 1000 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS Popularity
+FROM 
+    FinalResult f
+ORDER BY 
+    f.Score DESC, f.ViewCount DESC;

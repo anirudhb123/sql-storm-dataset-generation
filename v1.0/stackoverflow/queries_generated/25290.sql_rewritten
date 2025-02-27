@@ -1,0 +1,70 @@
+WITH TagStats AS (
+    SELECT
+        TRIM(REPLACE(tag.value, '<', '')) AS TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        SUM(CASE WHEN p.Announcement = 1 THEN v.Score ELSE 0 END) AS AnnouncedCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBountyAmount
+    FROM
+        Posts p
+    CROSS APPLY STRING_SPLIT(p.Tags, '>') AS tag
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        TRIM(REPLACE(tag.value, '<', ''))
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT b.Id) AS BadgesEarned,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotesReceived,
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS TotalCloseReopen,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS TotalDeleteUndelete,
+        COUNT(*) AS TotalEdits
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalVotes,
+    ts.AnnouncedCount,
+    ts.AcceptedAnswers,
+    ts.AvgBountyAmount,
+    us.UserId,
+    us.DisplayName,
+    us.QuestionsAsked,
+    us.BadgesEarned,
+    us.TotalVotesReceived,
+    us.TotalBounties,
+    phs.TotalCloseReopen,
+    phs.TotalDeleteUndelete,
+    phs.TotalEdits
+FROM
+    TagStats ts
+JOIN
+    UserStats us ON us.TotalVotesReceived > 100 
+LEFT JOIN
+    PostHistoryStats phs ON phs.PostId IN (SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' + ts.TagName + '%')
+ORDER BY
+    ts.PostCount DESC, us.QuestionsAsked DESC;

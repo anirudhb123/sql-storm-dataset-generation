@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        total_quantity + COALESCE(SUM(cs_quantity), 0) AS total_quantity,
+        total_net_profit + COALESCE(SUM(cs_net_profit), 0) AS total_net_profit
+    FROM 
+        catalog_sales
+    JOIN 
+        SalesSummary ON cs_sold_date_sk = ws_sold_date_sk AND cs_item_sk = ws_item_sk
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk, total_quantity, total_net_profit
+),
+ItemDetails AS (
+    SELECT 
+        i_item_sk,
+        i_product_name,
+        i_brand,
+        i_current_price,
+        i_wholesale_cost
+    FROM 
+        item
+)
+SELECT 
+    id.i_item_sk,
+    id.i_product_name,
+    id.i_brand,
+    ss.total_quantity,
+    ss.total_net_profit,
+    (ss.total_net_profit / NULLIF(ss.total_quantity, 0)) AS average_profit_per_item,
+    (id.i_current_price - id.i_wholesale_cost) AS profit_margin,
+    CASE 
+        WHEN ss.total_net_profit > 10000 THEN 'High Performer'
+        WHEN ss.total_net_profit BETWEEN 5000 AND 10000 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM 
+    SalesSummary ss
+JOIN 
+    ItemDetails id ON ss.ws_item_sk = id.i_item_sk
+WHERE 
+    ss.total_quantity > 100
+ORDER BY 
+    average_profit_per_item DESC
+FETCH FIRST 100 ROWS ONLY;

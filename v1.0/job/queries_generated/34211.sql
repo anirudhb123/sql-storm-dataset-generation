@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie' LIMIT 1)
+    
+    UNION ALL
+    
+    SELECT 
+        mc.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link AS mc
+    JOIN 
+        title AS lt ON mc.linked_movie_id = lt.id
+    JOIN 
+        MovieHierarchy AS mh ON mc.movie_id = mh.movie_id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT co.name, ', ') AS companies_involved,
+    MAX(pi.info) FILTER (WHERE it.info = 'Biography') AS biography
+FROM 
+    MovieHierarchy AS m
+LEFT JOIN 
+    cast_info AS c ON m.movie_id = c.movie_id
+LEFT JOIN 
+    movie_keyword AS mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies AS mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name AS co ON mc.company_id = co.id
+LEFT JOIN 
+    movie_info AS mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type AS it ON mi.info_type_id = it.id
+WHERE 
+    m.level = 1 
+AND 
+    (m.production_year >= 2000 OR m.title ILIKE '%Blockbuster%')
+GROUP BY 
+    m.id, m.title, m.production_year
+ORDER BY 
+    total_cast DESC, m.production_year DESC
+LIMIT 10;

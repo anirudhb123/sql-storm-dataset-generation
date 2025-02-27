@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        p.Title,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id 
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.CreationDate, p.Title
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    ue.DisplayName,
+    ue.TotalBounties,
+    ue.UpVotes,
+    ue.DownVotes,
+    rph.CloseReopenCount,
+    CASE 
+        WHEN COUNT(c.Id) > 0 THEN 'Has Comments'
+        ELSE 'No Comments' 
+    END AS CommentStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    UserEngagement ue ON rp.PostId = (
+        SELECT 
+            OwnerUserId 
+        FROM 
+            Posts 
+        WHERE 
+            Id = rp.PostId
+    )
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+LEFT JOIN 
+    RecentPostHistory rph ON rp.PostId = rph.PostId
+WHERE 
+    rp.rn = 1
+GROUP BY 
+    rp.Title, rp.CreationDate, ue.DisplayName, ue.TotalBounties, 
+    ue.UpVotes, ue.DownVotes, rph.CloseReopenCount
+ORDER BY 
+    rp.Score DESC, ue.TotalBounties DESC;

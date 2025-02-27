@@ -1,0 +1,91 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 -- Start with Answers
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.Id = ph.ParentId
+), 
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpVotesCount,
+        SUM(v.VoteTypeId = 3) AS DownVotesCount,
+        ROW_NUMBER() OVER (ORDER BY SUM(v.VoteTypeId = 2) DESC, SUM(v.VoteTypeId = 3) ASC) AS RN
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(v.VoteTypeId = 2) > 10
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COUNT(DISTINCT ph.PostId) AS TotalChildPosts
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.ParentId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+PostClosures AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ClosureCount,
+        STRING_AGG(DISTINCT pt.Name, ', ') AS ClosureReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name IN ('Post Closed', 'Post Reopened')
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.TotalComments,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    COALESCE(pc.ClosureCount, 0) AS ClosureCount,
+    COALESCE(pc.ClosureReasons, 'None') AS ClosureReasons,
+    tu.DisplayName AS TopUser,
+    tu.UpVotesCount,
+    tu.DownVotesCount
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    PostClosures pc ON ps.PostId = pc.PostId
+LEFT JOIN 
+    (SELECT DisplayName, UpVotesCount, DownVotesCount FROM TopUsers WHERE RN <= 5) tu ON ps.TotalUpVotes = tu.UpVotesCount
+ORDER BY 
+    ps.TotalComments DESC, ps.Title ASC;

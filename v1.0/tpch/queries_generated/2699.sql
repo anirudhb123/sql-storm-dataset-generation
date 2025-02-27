@@ -1,0 +1,56 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+HighVolumeOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_quantity) > 100
+),
+PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales,
+    COALESCE(ps.total_avail_qty, 0) AS total_available,
+    (SELECT COUNT(DISTINCT o.o_orderkey) FROM HighVolumeOrders hvo WHERE hvo.o_orderkey IN (SELECT o_orderkey FROM lineitem WHERE l_partkey = p.p_partkey)) AS order_count,
+    RANK() OVER (ORDER BY COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) DESC) AS sales_rank,
+    (SELECT COUNT(*) FROM RankedSuppliers rs WHERE rs.rn = 1) AS top_supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    PartSupplies ps ON ps.ps_partkey = p.p_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, ps.total_avail_qty
+HAVING 
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) > 10000
+ORDER BY 
+    sales_rank;

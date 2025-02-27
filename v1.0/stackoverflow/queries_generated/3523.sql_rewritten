@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        RANK() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.DisplayName,
+    up.UserId,
+    uv.BadgeCount,
+    uv.GoldBadges,
+    uv.SilverBadges,
+    uv.BronzeBadges,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(NULLIF(rp.Score, 0), 1) AS AdjustedScore,
+    CASE 
+        WHEN rp.PostRank <= 10 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    Users up
+JOIN 
+    UserBadges uv ON up.Id = uv.UserId
+JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+WHERE 
+    uv.BadgeCount > 0
+ORDER BY 
+    AdjustedScore DESC,
+    rp.CommentCount DESC
+LIMIT 50
+OFFSET 0;

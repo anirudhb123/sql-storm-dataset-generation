@@ -1,0 +1,50 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR(300)) AS Path
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        r.Level + 1,
+        CAST(r.Path || ' -> ' || p2.Title AS VARCHAR(300))
+    FROM Posts p2
+    INNER JOIN RecursivePostHierarchy r ON p2.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    AVG(COALESCE(p.Score, 0)) AS AvgScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    CASE 
+        WHEN AVG(p.Score) IS NULL THEN 'No Score'
+        WHEN AVG(p.Score) > 0 THEN 'Positive'
+        ELSE 'Negative'
+    END AS ScoreCategory,
+    COUNT(DISTINCT b.Id) AS BadgeCount,
+    CASE 
+        WHEN COUNT(DISTINCT b.Id) > 0 THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus
+FROM Users u
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN Tags t ON POSITION(t.TagName IN p.Tags) > 0  
+LEFT JOIN Badges b ON u.Id = b.UserId
+WHERE u.Reputation > 100  
+GROUP BY u.Id, u.DisplayName, u.Reputation
+HAVING COUNT(DISTINCT p.Id) > 5  
+ORDER BY TotalViews DESC, AvgScore DESC;

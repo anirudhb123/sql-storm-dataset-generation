@@ -1,0 +1,42 @@
+
+WITH UserBadges AS (
+    SELECT U.Id AS UserId, COUNT(B.Id) AS BadgeCount, 
+           SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+           SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount, 
+           SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT P.OwnerUserId, COUNT(P.Id) AS PostCount, 
+           SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+           SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+           SUM(P.ViewCount) AS TotalViews, 
+           SUM(P.Score) AS TotalScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserActivity AS (
+    SELECT U.Id AS UserId, U.DisplayName, U.Reputation, U.Badges, 
+           COALESCE(ABS(SUM(EXTRACT(EPOCH FROM (P.LastActivityDate - U.LastAccessDate)))), 0) AS LastActiveDuration,
+           COALESCE(SUM(UB.BadgeCount), 0) AS TotalBadges,
+           COALESCE(SUM(PS.PostCount), 0) AS TotalPosts,
+           COALESCE(SUM(PS.QuestionCount), 0) AS TotalQuestions,
+           COALESCE(SUM(PS.AnswerCount), 0) AS TotalAnswers,
+           COALESCE(SUM(PS.TotalViews), 0) AS TotalPostViews,
+           COALESCE(SUM(PS.TotalScore), 0) AS TotalPostScore,
+           COALESCE(UB.GoldCount, 0) AS GoldBadges, 
+           COALESCE(UB.SilverCount, 0) AS SilverBadges, 
+           COALESCE(UB.BronzeCount, 0) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.Badges, UB.GoldCount, UB.SilverCount, UB.BronzeCount
+)
+SELECT UserId, DisplayName, Reputation, TotalBadges, TotalPosts, TotalQuestions, TotalAnswers,
+       TotalPostViews, TotalPostScore, GoldBadges, SilverBadges, BronzeBadges,
+       LastActiveDuration 
+FROM UserActivity
+ORDER BY Reputation DESC, TotalPosts DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH RankedCustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+        MAX(l.l_shipdate) AS max_ship_date,
+        MIN(l.l_shipdate) AS min_ship_date,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    rc.c_name AS top_customer,
+    rc.order_count,
+    rc.total_spent,
+    s.s_suppkey,
+    s.total_available,
+    s.avg_supply_cost,
+    ol.total_revenue,
+    ol.supplier_count,
+    ol.returns,
+    CASE 
+        WHEN ol.max_ship_date IS NULL THEN 'No shipments'
+        ELSE DATEDIFF('1998-10-01 12:34:56', ol.max_ship_date) 
+    END AS days_since_last_shipment
+FROM 
+    RankedCustomerOrders rc
+JOIN 
+    nation r ON rc.c_nationkey = r.n_nationkey
+FULL OUTER JOIN 
+    SupplierPartStats s ON rc.cust_rank = 1
+LEFT JOIN 
+    OrderLineSummary ol ON rc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ol.l_orderkey LIMIT 1)
+WHERE 
+    s.total_available IS NOT NULL
+    AND (rc.total_spent > (SELECT AVG(total_spent) FROM RankedCustomerOrders) OR ol.supplier_count > 2)
+ORDER BY 
+    r.n_name, rc.total_spent DESC, s.avg_supply_cost ASC
+LIMIT 100;

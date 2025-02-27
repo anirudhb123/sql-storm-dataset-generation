@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_retailprice,
+    pd.supplier_count,
+    cus.c_name,
+    avg_cs.total_spent,
+    CASE 
+        WHEN avg_cs.total_spent IS NULL THEN 'No Orders'
+        ELSE 
+            CASE 
+                WHEN avg_cs.total_spent > 10000 THEN 'High Spender'
+                ELSE 'Regular Spender'
+            END
+    END AS spender_category,
+    COALESCE(rs.s_name, 'No Supplier') AS top_supplier
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    CustomerOrderSummary avg_cs ON pd.p_partkey = 
+        (SELECT ps.ps_partkey 
+         FROM partsupp ps 
+         JOIN orders o ON o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = pd.p_partkey)
+         JOIN customer c ON c.c_custkey = o.o_custkey)
+LEFT JOIN 
+    RankedSuppliers rs ON pd.p_partkey = (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps WHERE ps.ps_suppkey = rs.s_suppkey AND rs.Rank = 1
+    )
+ORDER BY 
+    pd.p_partkey;

@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_orders AS (
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE s.s_acctbal IS NOT NULL AND o.o_orderdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+ranked_orders AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_revenue,
+           MAX(o.o_totalprice) AS max_order_value 
+    FROM supplier s
+    LEFT JOIN supplier_orders o ON s.s_suppkey = o.s_suppkey
+    WHERE o.order_rank <= 5 OR o.order_rank IS NULL
+    GROUP BY s.s_suppkey, s.s_name
+),
+nations_revenue AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ro.total_revenue) AS nation_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN ranked_orders ro ON s.s_suppkey = ro.s_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+overall_summary AS (
+    SELECT n.n_name, 
+           COALESCE(n.nation_revenue, 0) AS nation_revenue,
+           CASE 
+               WHEN n.nation_revenue IS NULL THEN 'No Revenue'
+               ELSE 'Revenue Exists'
+           END AS revenue_status,
+           RANK() OVER (ORDER BY COALESCE(n.nation_revenue, 0) DESC) AS revenue_rank
+    FROM nation n
+    LEFT JOIN nations_revenue nr ON n.n_nationkey = nr.n_nationkey
+)
+SELECT o.n_name AS "Nation",
+       o.nation_revenue AS "Total Revenue",
+       o.revenue_status,
+       COUNT(DISTINCT so.o_orderkey) AS "Unique Orders"
+FROM overall_summary o
+LEFT JOIN supplier_orders so ON o.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = so.n_nationkey)
+WHERE o.revenue_status = 'Revenue Exists'
+GROUP BY o.n_name, o.nation_revenue, o.revenue_status
+ORDER BY o.nation_revenue DESC NULLS LAST;

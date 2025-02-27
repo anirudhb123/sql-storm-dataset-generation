@@ -1,0 +1,59 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(v.Id) AS TotalVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END) AS CloseVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+), 
+PostStats AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        COALESCE(ph.VoteCount, 0) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.ParentId ORDER BY p.CreationDate DESC) AS LatestAnswerRow,
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM Votes 
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM PostHistory ph
+    JOIN CloseReasonTypes cr ON CAST(ph.Comment AS INT) = cr.Id
+    WHERE ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.VoteCount,
+    ps.CommentCount,
+    uvs.UserId,
+    uvs.TotalVotes,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    cl.CloseDate,
+    cl.CloseReason
+FROM PostStats ps
+LEFT JOIN UserVoteStats uvs ON ps.OwnerDisplayName = uvs.DisplayName
+LEFT JOIN ClosedPosts cl ON ps.PostId = cl.PostId
+WHERE ps.LatestAnswerRow = 1
+  AND (ps.Score > 0 OR cl.CloseDate IS NOT NULL)
+ORDER BY ps.Score DESC, ps.VoteCount DESC;

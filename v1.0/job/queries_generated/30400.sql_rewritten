@@ -1,0 +1,56 @@
+WITH RECURSIVE CTE_MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        ch.level + 1,
+        CAST(ch.path || ' -> ' || lt.title AS VARCHAR(255))
+    FROM 
+        CTE_MovieHierarchy ch
+    JOIN 
+        movie_link ml ON ch.movie_id = ml.movie_id
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+    WHERE 
+        lt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+
+SELECT 
+    co.name AS company_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    AVG(DATEDIFF(cast('2024-10-01' as date), tp.production_year)) AS average_age_of_movies,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+    STRING_AGG(DISTINCT path, ' | ') AS related_movies_path,
+    MAX(tp.production_year) AS latest_movie_year
+FROM 
+    movie_companies mc
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    aka_title tp ON mc.movie_id = tp.id
+LEFT JOIN 
+    CTE_MovieHierarchy m_h ON tp.id = m_h.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+WHERE 
+    co.country_code IS NOT NULL
+    AND tp.production_year IS NOT NULL
+GROUP BY 
+    co.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 5
+ORDER BY 
+    total_movies DESC;

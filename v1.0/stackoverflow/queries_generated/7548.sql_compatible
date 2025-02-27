@@ -1,0 +1,58 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        UserActivity
+),
+PopularTags AS (
+    SELECT 
+        TRIM(BOTH '<>' FROM UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))) ) AS TagName,
+        COUNT(*) AS TagUsage
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        TagName
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.TotalViews,
+    tu.TotalScore,
+    pt.TagName,
+    pt.TagUsage
+FROM 
+    TopUsers tu
+JOIN 
+    PopularTags pt ON pt.TagUsage > 10
+WHERE 
+    tu.ScoreRank <= 10
+ORDER BY 
+    tu.TotalScore DESC, pt.TagUsage DESC;

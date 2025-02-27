@@ -1,0 +1,91 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS VARCHAR(255)) AS parent_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.title AS parent_title,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+ActorInfo AS (
+    SELECT 
+        ka.id AS actor_id,
+        ka.name AS actor_name,
+        kc.kind AS role_name,
+        COUNT(DISTINCT co.movie_id) AS movie_count,
+        ROW_NUMBER() OVER (PARTITION BY ka.id ORDER BY COUNT(DISTINCT co.movie_id) DESC) AS rn
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        comp_cast_type kc ON ci.role_id = kc.id
+    JOIN 
+        complete_cast co ON ci.movie_id = co.movie_id
+    GROUP BY 
+        ka.id, ka.name, kc.kind
+),
+MovieKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mt.id
+),
+ActorMovieCount AS (
+    SELECT 
+        ai.actor_id,
+        ai.actor_name,
+        SUM(ai.movie_count) AS total_movies
+    FROM 
+        ActorInfo ai
+    WHERE 
+        ai.rn = 1
+    GROUP BY 
+        ai.actor_id, ai.actor_name
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    COALESCE(ak.actor_name, 'Unknown Actor') AS lead_actor,
+    amc.total_movies,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    mh.level AS hierarchy_level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id AND ci.nr_order = 1
+LEFT JOIN 
+    ActorMovieCount amc ON ak.actor_id = amc.actor_id
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    mh.production_year DESC, mh.title;

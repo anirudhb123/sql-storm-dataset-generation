@@ -1,0 +1,74 @@
+WITH TagCounts AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Tags
+    JOIN
+        Posts ON ',' || Tags.TagName || ',' LIKE '%,' || substring(Posts.Tags FROM 2 FOR length(Posts.Tags) - 2) || ',%'
+    GROUP BY
+        Tags.TagName
+),
+MostActiveUsers AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionPosts,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerPosts
+    FROM
+        Users
+    JOIN
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY
+        Users.Id,
+        Users.DisplayName
+    HAVING
+        COUNT(DISTINCT Posts.Id) > 0
+),
+RecentPostEdits AS (
+    SELECT
+        PostHistory.PostId,
+        PostHistory.CreationDate,
+        PostHistory.UserDisplayName,
+        PostHistory.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PostHistory.PostId ORDER BY PostHistory.CreationDate DESC) AS EditRank
+    FROM
+        PostHistory
+    WHERE
+        PostHistory.PostHistoryTypeId IN (4, 5, 6) 
+),
+TopTags AS (
+    SELECT
+        TagCounts.TagName,
+        TagCounts.PostCount,
+        TagCounts.QuestionCount,
+        TagCounts.AnswerCount,
+        RANK() OVER (ORDER BY TagCounts.PostCount DESC) AS TagRank
+    FROM
+        TagCounts
+)
+SELECT
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    u.DisplayName AS ActiveUser,
+    u.TotalPosts,
+    u.QuestionPosts,
+    u.AnswerPosts,
+    e.CreationDate AS LastEditDate,
+    e.UserDisplayName AS LastEditor,
+    e.Comment AS LastEditComment
+FROM
+    TopTags t
+JOIN
+    MostActiveUsers u ON u.TotalPosts > 10
+LEFT JOIN
+    RecentPostEdits e ON e.EditRank = 1
+WHERE
+    t.TagRank <= 10
+ORDER BY
+    t.PostCount DESC, u.TotalPosts DESC;

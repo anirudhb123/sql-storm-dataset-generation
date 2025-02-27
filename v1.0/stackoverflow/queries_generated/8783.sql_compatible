@@ -1,0 +1,52 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT TRIM(value) AS value FROM STRING_SPLIT(p.Tags, ',')) AS tag_split ON TRUE
+    LEFT JOIN 
+        Tags t ON tag_split.value = t.TagName
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AnswerCount, u.DisplayName, u.Reputation
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId, Title, CreationDate, Score, ViewCount, AnswerCount, OwnerDisplayName, OwnerReputation, Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    tr.OwnerDisplayName,
+    tr.OwnerReputation,
+    COUNT(c.Id) AS CommentCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+    tr.PostId, tr.Title, tr.CreationDate, tr.Score, tr.ViewCount, tr.AnswerCount, tr.OwnerDisplayName, tr.OwnerReputation, tr.Tags
+FROM 
+    TopRankedPosts tr
+LEFT JOIN 
+    Comments c ON tr.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON tr.PostId = v.PostId
+GROUP BY 
+    tr.PostId, tr.Title, tr.CreationDate, tr.Score, tr.ViewCount, tr.AnswerCount, tr.OwnerDisplayName, tr.OwnerReputation, tr.Tags
+ORDER BY 
+    tr.Score DESC, tr.CreationDate DESC;

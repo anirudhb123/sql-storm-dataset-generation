@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DATEDIFF('2002-10-01 12:34:56', MAX(ws_sold_date_sk)) AS days_since_last_purchase
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk >= (
+            SELECT MIN(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2001
+        ) 
+    GROUP BY 
+        ws_bill_customer_sk
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+), SalesSummary AS (
+    SELECT 
+        sd.customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_lower_bound,
+        cd.ib_upper_bound,
+        sd.total_sales,
+        sd.total_discount,
+        sd.order_count,
+        sd.days_since_last_purchase
+    FROM 
+        SalesData sd
+    JOIN 
+        CustomerDemographics cd ON sd.customer_sk = cd.cd_demo_sk
+)
+SELECT 
+    COUNT(*) AS total_customers,
+    AVG(total_sales) AS avg_sales,
+    SUM(total_discount) AS total_discount,
+    COUNT(DISTINCT customer_sk) AS unique_customers,
+    COUNT(CASE WHEN days_since_last_purchase <= 30 THEN 1 END) AS recent_customers,
+    cd_gender,
+    cd_marital_status
+FROM 
+    SalesSummary
+GROUP BY 
+    cd_gender, cd_marital_status
+ORDER BY 
+    avg_sales DESC;

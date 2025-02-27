@@ -1,0 +1,53 @@
+
+WITH UserVoteStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation) OVER() AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        u.DisplayName AS EditorDisplayName,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasonNames
+    FROM PostHistory ph
+    JOIN CloseReasonTypes ctr ON CAST(ph.Comment AS int) = ctr.Id
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY ph.PostId, ph.CreationDate, u.DisplayName
+    HAVING COUNT(*) > 1
+),
+MostActiveUsers AS (
+    SELECT
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+
+SELECT
+    uvs.UserId,
+    uvs.DisplayName,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    COALESCE(cp.CloseReasonNames, 'No Closed Posts') AS CloseReasons,
+    cp.CreationDate AS LastClosedDate,
+    mau.PostCount AS ActiveUserPosts
+FROM UserVoteStats uvs
+LEFT JOIN ClosedPostHistory cp ON uvs.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+LEFT JOIN MostActiveUsers mau ON uvs.UserId = mau.Id
+WHERE uvs.Reputation > uvs.AvgReputation
+ORDER BY uvs.UpVotes DESC, uvs.DownVotes ASC
+LIMIT 50;

@@ -1,0 +1,54 @@
+
+WITH supplier_sales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' 
+        AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+nation_sales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(ss.total_sales) AS total_nation_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier_sales ss ON n.n_nationkey = (SELECT s.nationkey FROM supplier s WHERE s.s_suppkey = ss.s_suppkey)
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+ranked_nations AS (
+    SELECT 
+        ns.n_nationkey,
+        ns.n_name,
+        ns.total_nation_sales,
+        RANK() OVER (ORDER BY ns.total_nation_sales DESC) AS sales_rank
+    FROM 
+        nation_sales ns
+)
+SELECT 
+    r.r_name AS region_name,
+    rn.n_name AS nation_name,
+    rn.total_nation_sales,
+    rn.sales_rank
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    ranked_nations rn ON n.n_nationkey = rn.n_nationkey
+WHERE 
+    (rn.sales_rank <= 5 OR rn.sales_rank IS NULL)
+ORDER BY 
+    r.r_name, rn.sales_rank;

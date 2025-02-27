@@ -1,0 +1,74 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Score,
+        p.CreationDate,
+        tags.tag_array
+    FROM 
+        Posts p,
+        LATERAL (
+            SELECT STRING_AGG(t.TagName, ', ' ORDER BY t.TagName) AS tag_array
+            FROM 
+                Tags t
+            WHERE 
+                p.Tags LIKE '%' || t.TagName || '%'
+        ) tags
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    up.PostCount,
+    up.TotalViews,
+    up.TotalScore,
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.Score,
+    ps.CreationDate,
+    ps.tag_array
+FROM 
+    UserPostStats up
+LEFT JOIN 
+    UserBadges ub ON up.UserId = ub.UserId
+LEFT JOIN 
+    PostSummary ps ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = up.UserId)
+ORDER BY 
+    up.TotalViews DESC, 
+    up.TotalScore DESC;

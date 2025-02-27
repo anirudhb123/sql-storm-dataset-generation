@@ -1,0 +1,49 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_return_time_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        COALESCE(sr_return_quantity, 0) AS adjusted_return_quantity,
+        RANK() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+FilteredReturns AS (
+    SELECT 
+        cr.containing_month,
+        cr.sold_date,
+        cr.customer_id,
+        SUM(cr.adjusted_return_quantity) AS total_returned,
+        SUM(cr.sr_return_amt) AS total_amount_returned
+    FROM (
+        SELECT 
+            sr.sr_returned_date_sk,
+            dd.d_date AS sold_date,
+            s.ws_ship_customer_sk AS customer_id,
+            EXTRACT(MONTH FROM dd.d_date) AS containing_month
+        FROM CustomerReturns sr
+        JOIN date_dim dd ON sr_returned_date_sk = dd.d_date_sk
+        JOIN web_sales s ON sr_item_sk = s.ws_item_sk AND sr_customer_sk = s.ws_ship_customer_sk
+    ) cr
+    GROUP BY cr.containing_month, cr.customer_id
+)
+SELECT 
+    fr.containing_month,
+    COUNT(DISTINCT fr.customer_id) AS unique_customers,
+    AVG(fr.total_returned) AS avg_returned,
+    SUM(fr.total_amount_returned) AS total_value_returned,
+    STRING_AGG(DISTINCT CASE WHEN fr.total_returned > 0 THEN 'Active' ELSE 'Inactive' END) AS return_activity,
+    CASE 
+        WHEN COUNT(DISTINCT fr.customer_id) > 1000 THEN 'High Return Activity'
+        ELSE 'Low Return Activity'
+    END AS return_activity_level
+FROM FilteredReturns fr
+WHERE fr.total_returned IS NOT NULL
+GROUP BY fr.containing_month
+ORDER BY fr.containing_month
+FETCH FIRST 10 ROWS ONLY;

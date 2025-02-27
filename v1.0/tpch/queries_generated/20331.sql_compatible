@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(rv.total_supply_value, 0) AS total_supply_value
+    FROM 
+        supplier s
+    LEFT JOIN 
+        (SELECT 
+            s_nationkey, 
+            SUM(total_supply_value) AS total_supply_value 
+         FROM 
+            RankedSuppliers 
+         WHERE 
+            rank <= 5 
+         GROUP BY 
+            s_nationkey) rv ON s.s_nationkey = rv.s_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+TopPartComments AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_comment,
+        COUNT(l.l_orderkey) AS order_count
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_comment
+    HAVING 
+        COUNT(l.l_orderkey) > 10
+)
+SELECT 
+    r.r_name,
+    hs.s_name,
+    COALESCE(tp.order_count, 0) AS part_order_count,
+    STRING_AGG(tp.p_comment, '; ') AS part_comments,
+    AVG(hs.total_supply_value) AS average_supply_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    HighValueSuppliers hs ON s.s_suppkey = hs.s_suppkey
+LEFT JOIN 
+    TopPartComments tp ON tp.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey)
+WHERE 
+    hs.total_supply_value IS NOT NULL 
+    AND r.r_name LIKE '%East%' 
+    AND (hs.s_acctbal > 500 OR tp.p_comment IS NOT NULL)
+GROUP BY 
+    r.r_name, hs.s_name, hs.s_acctbal
+ORDER BY 
+    average_supply_value DESC, r.r_name ASC;

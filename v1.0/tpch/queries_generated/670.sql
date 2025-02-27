@@ -1,0 +1,48 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+      AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_availqty) AS total_availability,
+           SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT p.p_name,
+       p.p_retailprice,
+       COALESCE(so.total_availability, 0) AS total_availability,
+       COALESCE(so.total_supplycost, 0) AS total_supplycost,
+       SUM(CASE WHEN lo.l_returnflag = 'R' THEN lo.l_quantity ELSE 0 END) AS returned_quantity,
+       COUNT(DISTINCT ro.o_orderkey) AS processed_order_count,
+       ci.nation_name
+FROM part p
+LEFT JOIN PartSupplier so ON p.p_partkey = so.ps_partkey
+LEFT JOIN lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = lo.l_orderkey
+JOIN CustomerOrders co ON lo.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 100.00)
+JOIN SupplierInfo ci ON lo.l_suppkey = ci.s_suppkey
+GROUP BY p.p_name, p.p_retailprice, ci.nation_name
+ORDER BY total_supplycost DESC, returned_quantity DESC;

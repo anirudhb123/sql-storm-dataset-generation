@@ -1,0 +1,58 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.ViewCount,
+        p.Score,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        p.ViewCount,
+        p.Score,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.Id
+)
+
+SELECT 
+    u.DisplayName,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 END), 0) AS TotalQuestions,
+    COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 END), 0) AS TotalAnswers,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(CASE WHEN p.Score > 0 THEN p.Score END) AS AvgScoreOfAcceptedAnswers,
+    MAX(p.ViewCount) AS MaxViewCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY SUM(p.ViewCount) DESC) AS Ranking
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE '%' || t.TagName || '%'  
+WHERE 
+    u.Reputation IS NOT NULL  
+GROUP BY 
+    u.Id
+HAVING 
+    SUM(p.ViewCount) > 1000  
+ORDER BY 
+    Ranking, TotalQuestions DESC;

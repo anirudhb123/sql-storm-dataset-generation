@@ -1,0 +1,64 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(mci.note, 'No Note') AS company_note,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS prod_year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id 
+    LEFT JOIN 
+        company_name mci ON mc.company_id = mci.id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+KeywordCTE AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+PersonRoleCTE AS (
+    SELECT 
+        ci.movie_id,
+        ri.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type ri ON ci.role_id = ri.id
+    GROUP BY 
+        ci.movie_id, ri.role
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COALESCE(COUNT(DISTINCT p.person_id), 0) AS unique_actors,
+    MAX(CASE WHEN pr.role = 'lead' THEN pr.role_count ELSE 0 END) AS lead_actor_count,
+    STRING_AGG(DISTINCT p.name, ', ') AS actor_names
+FROM 
+    RecursiveMovieCTE m
+LEFT JOIN 
+    KeywordCTE k ON m.movie_id = k.movie_id
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    PersonRoleCTE pr ON m.movie_id = pr.movie_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year, k.keywords
+HAVING 
+    COUNT(DISTINCT p.person_id) > 1 AND MAX(m.prod_year_rank) <= 5
+ORDER BY 
+    m.production_year DESC, unique_actors DESC;

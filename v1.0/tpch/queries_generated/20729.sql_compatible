@@ -1,0 +1,68 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ComplexJoin AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        sa.total_avail_qty,
+        co.order_count,
+        COALESCE(co.total_spent, 0) AS total_spent,
+        (CASE 
+            WHEN co.order_count > 0 THEN 
+                ROUND((COALESCE(co.total_spent, 0) / co.order_count), 2)
+            ELSE 0 
+        END) AS avg_spent_per_order
+    FROM RankedParts p
+    LEFT JOIN SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+    LEFT JOIN CustomerOrders co ON p.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_supplycost = (
+            SELECT MIN(ps1.ps_supplycost)
+            FROM partsupp ps1
+            WHERE ps1.ps_partkey = p.p_partkey
+        )
+    )
+    WHERE p.rn = 1
+)
+SELECT 
+    c.r_name,
+    COUNT(DISTINCT p.p_partkey) AS part_count,
+    SUM(p.total_avail_qty) AS total_availability,
+    AVG(p.avg_spent_per_order) AS avg_spent,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM region c
+LEFT JOIN nation n ON n.n_regionkey = c.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN ComplexJoin p ON s.s_suppkey = p.ps_suppkey
+WHERE 
+    (p.total_avail_qty IS NULL OR p.total_avail_qty > 10) 
+    AND (p.avg_spent_per_order < 100 OR p.avg_spent_per_order IS NULL)
+GROUP BY c.r_name
+ORDER BY part_count DESC, total_availability ASC;

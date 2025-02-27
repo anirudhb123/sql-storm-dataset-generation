@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT ph.Id) AS TotalEdits,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS TotalCloseVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+), PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        CASE 
+            WHEN b.Class = 1 THEN 'Gold'
+            WHEN b.Class = 2 THEN 'Silver'
+            WHEN b.Class = 3 THEN 'Bronze'
+            ELSE 'None'
+        END AS BadgeClass
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId AND b.Date = (
+            SELECT MAX(b2.Date)
+            FROM Badges b2
+            WHERE b2.UserId = p.OwnerUserId
+        )
+    WHERE 
+        p.PostTypeId IN (1, 2)
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(rp.Score, 0) AS Score,
+    pwb.BadgeClass,
+    us.TotalEdits,
+    us.TotalCloseVotes
+FROM 
+    UserStats us
+JOIN 
+    RankedPosts rp ON us.UserId = rp.PostId
+LEFT JOIN 
+    PostsWithBadges pwb ON rp.OwnerUserId = pwb.PostId
+WHERE 
+    us.TotalEdits > 0 
+    AND (us.TotalCloseVotes IS NULL OR us.TotalCloseVotes > 0)
+ORDER BY 
+    us.Reputation DESC, 
+    rp.Score DESC
+LIMIT 100;

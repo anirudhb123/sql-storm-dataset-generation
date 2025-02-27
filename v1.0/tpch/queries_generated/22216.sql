@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey, 
+        COUNT(s.s_suppkey) AS supplier_count,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey
+    HAVING COUNT(s.s_suppkey) > 5
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_price
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    c.c_name,
+    COALESCE(dp.total_price, 0) AS total_price,
+    COALESCE(ns.supplier_count, 0) AS supplier_count,
+    COALESCE(ns.max_acctbal, 0) AS max_supplier_acctbal,
+    p.p_name,
+    CASE 
+        WHEN r.order_rank = 1 THEN 'Latest'
+        ELSE 'Older'
+    END AS order_timing,
+    CONCAT('Order#', r.o_orderkey, ' for ', c.c_name) AS order_description
+FROM RankedOrders r
+LEFT JOIN customer c ON r.o_custkey = c.c_custkey
+LEFT JOIN OrderDetails dp ON r.o_orderkey = dp.l_orderkey
+LEFT JOIN NationSupplier ns ON c.c_nationkey = ns.n_nationkey
+JOIN HighValueParts p ON p.ps_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = r.o_orderkey
+)
+WHERE (c.c_acctbal > 100 OR c.c_nationkey IS NULL) 
+AND (r.o_orderstatus IN ('O', 'F') OR r.o_orderkey % 2 = 0)
+ORDER BY r.o_orderkey DESC, total_price DESC;

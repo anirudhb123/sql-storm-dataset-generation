@@ -1,0 +1,77 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_quantity DESC) AS rn
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity > 0
+),
+HighValueReturns AS (
+    SELECT 
+        r.rn,
+        r.sr_item_sk,
+        COALESCE(SUM(ws.ws_sales_price * r.sr_return_quantity), 0) AS Total_Return_Value,
+        CASE 
+            WHEN SUM(ws.ws_sales_price * r.sr_return_quantity) IS NULL THEN 'No Returns'
+            ELSE 'High Value Return'
+        END AS Return_Status,
+        c.c_birth_country
+    FROM 
+        RankedReturns r
+    LEFT JOIN 
+        web_sales ws ON r.sr_item_sk = ws.ws_item_sk AND r.sr_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        customer c ON r.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        r.rn <= 5
+    GROUP BY 
+        r.rn, r.sr_item_sk, c.c_birth_country
+),
+FinalAnalysis AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COUNT(DISTINCT h.hd_demo_sk) AS Customer_Count,
+        AVG(Total_Return_Value) AS Avg_Return_Value,
+        MAX(Return_Status) AS Max_Return_Status
+    FROM 
+        HighValueReturns h
+    JOIN 
+        household_demographics hd ON h.sr_customer_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        h.Total_Return_Value > 0
+    GROUP BY 
+        ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT 
+    f.ib_income_band_sk,
+    f.ib_lower_bound,
+    f.ib_upper_bound,
+    f.Customer_Count,
+    CASE 
+        WHEN f.Customer_Count = 0 THEN 'No Customers'
+        ELSE CONCAT('Average Value: $', ROUND(f.Avg_Return_Value, 2)::text)
+    END AS Avg_Return_Description,
+    f.Max_Return_Status
+FROM 
+    FinalAnalysis f
+ORDER BY 
+    f.ib_income_band_sk DESC
+LIMIT 10 OFFSET 5
+UNION ALL
+SELECT 
+    NULL AS ib_income_band_sk,
+    NULL AS ib_lower_bound,
+    NULL AS ib_upper_bound,
+    0 AS Customer_Count,
+    'Total Zero' AS Avg_Return_Description,
+    NULL AS Max_Return_Status
+WHERE 
+    (SELECT COUNT(*) FROM FinalAnalysis) = 0;

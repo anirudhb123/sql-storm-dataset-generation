@@ -1,0 +1,52 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_addr_sk,
+        1 AS level
+    FROM 
+        customer c
+    WHERE 
+        c.c_customer_sk IS NOT NULL
+      
+    UNION ALL 
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_current_addr_sk,
+        ch.level + 1
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk AND c.c_customer_sk <> ch.c_customer_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(addr.ca_city, 'City Not Found') AS city,
+    SUM(ws.ws_net_paid) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    ROW_NUMBER() OVER (PARTITION BY addr.ca_state ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_within_state
+FROM 
+    CustomerHierarchy ch
+LEFT JOIN 
+    customer c ON ch.c_customer_sk = c.c_customer_sk 
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+LEFT JOIN 
+    customer_address addr ON c.c_current_addr_sk = addr.ca_address_sk
+WHERE 
+    addr.ca_state IN ('CA', 'NY') 
+    AND (c.c_birth_year IS NULL OR c.c_birth_year NOT BETWEEN 1980 AND 1990)
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name, addr.ca_city, addr.ca_state
+HAVING 
+    SUM(ws.ws_net_paid) > 1000
+    OR (COUNT(ws.ws_order_number) > 5 AND COUNT(sb.ss_ticket_number) = 0)
+ORDER BY 
+    total_sales DESC, rank_within_state;

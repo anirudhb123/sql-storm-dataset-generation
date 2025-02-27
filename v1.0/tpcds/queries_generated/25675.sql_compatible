@@ -1,0 +1,61 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+    WHERE 
+        ca_city LIKE '%town%' OR ca_state = 'CA'
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_city  -- Added cd_city to the select
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws 
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopAddresses AS (
+    SELECT 
+        ad.full_address, 
+        COUNT(DISTINCT cd.c_customer_id) AS customer_count
+    FROM 
+        AddressDetails ad 
+    JOIN 
+        CustomerDetails cd ON ad.ca_city = cd.cd_city
+    GROUP BY 
+        ad.full_address
+    ORDER BY 
+        customer_count DESC 
+    LIMIT 10
+)
+SELECT 
+    ta.full_address, 
+    ta.customer_count, 
+    sd.total_net_profit 
+FROM 
+    TopAddresses ta
+LEFT JOIN 
+    SalesData sd ON ta.customer_count = sd.total_net_profit
+ORDER BY 
+    ta.customer_count DESC;

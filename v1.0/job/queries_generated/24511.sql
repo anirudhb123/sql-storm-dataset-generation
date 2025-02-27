@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank,
+        COUNT(DISTINCT kc.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+    WHERE t.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        a.id AS person_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN role_type r ON ci.role_id = r.id
+    WHERE a.name IS NOT NULL
+    GROUP BY a.id, a.name
+),
+MoviesWithActorStats AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        fa.person_id, 
+        fa.name AS actor_name,
+        fa.movie_count,
+        fa.has_note,
+        fa.roles,
+        rm.keyword_count
+    FROM RankedMovies rm
+    LEFT JOIN FilteredActors fa ON rm.movie_id = fa.movie_id
+    WHERE rm.rank <= 5 OR fa.has_note = 1
+)
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.actor_name,
+    mw.movie_count,
+    mw.keyword_count,
+    CASE 
+        WHEN mw.has_note = 1 THEN 'Contains notes'
+        ELSE 'No notes available'
+    END AS note_status,
+    COALESCE(NULLIF(mw.roles, ''), 'No roles') AS display_roles
+FROM MoviesWithActorStats mw
+WHERE mw.keyword_count > 0
+ORDER BY mw.production_year DESC, mw.title
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_by_price
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -12, GETDATE())
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty * (1 - ps.ps_supplycost / NULLIF(s.s_acctbal, 0))) AS total_availability
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY 
+        c.c_custkey, c.c_mktsegment
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM 
+        RankedOrders
+    WHERE 
+        rank_by_price <= 10
+)
+SELECT 
+    c.c_name,
+    cs.c_mktsegment,
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.o_totalprice,
+    ss.total_availability,
+    COALESCE(HOVERALL.total_orders, 0) AS total_orders_last_year
+FROM 
+    CustomerSummary cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    HighValueOrders hvo ON HOVERALL.o_orderkey = hvo.o_orderkey
+LEFT JOIN (
+    SELECT 
+        COUNT(*) AS total_orders,
+        o.o_orderdate
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY 
+        o.o_orderdate
+) HOVERALL ON 1=1
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (SELECT TOP 1 ps.ps_suppkey FROM partsupp ps ORDER BY ps.ps_availqty DESC)
+WHERE 
+    cs.avg_order_value > (SELECT AVG(cs2.avg_order_value) FROM CustomerSummary cs2)
+ORDER BY 
+    hvo.o_totalprice DESC;

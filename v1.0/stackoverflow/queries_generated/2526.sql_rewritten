@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostComments AS (
+    SELECT 
+        pc.PostId,
+        COUNT(pc.Id) AS CommentCount
+    FROM 
+        Comments pc
+    GROUP BY 
+        pc.PostId
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ur.Reputation,
+        ur.TotalBadges,
+        pc.CommentCount,
+        COALESCE(rp.Score, 0) AS Score,
+        CASE 
+            WHEN rp.Rank = 1 THEN 'Latest Post'
+            ELSE 'Older Post'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        PostComments pc ON rp.PostId = pc.PostId
+)
+SELECT 
+    cd.PostId,
+    cd.Title,
+    cd.Reputation,
+    cd.TotalBadges,
+    cd.CommentCount,
+    cd.Score,
+    cd.PostStatus,
+    (SELECT COUNT(*) 
+     FROM Votes v 
+     WHERE v.PostId = cd.PostId AND v.VoteTypeId IN (2, 3)) AS UpDownVoteCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>'))::int) 
+                    FROM Posts p WHERE p.Id = cd.PostId) 
+     GROUP BY t.ExcerptPostId) AS Tags
+FROM 
+    CombinedData cd
+WHERE 
+    cd.Reputation > 100 AND 
+    cd.CommentCount IS NOT NULL
+ORDER BY 
+    cd.Score DESC, cd.Reputation DESC
+LIMIT 100;

@@ -1,0 +1,109 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Select only Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rpc ON p.ParentId = rpc.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(CASE WHEN b.Id IS NOT NULL THEN 1 END) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.AcceptedAnswerId,
+        ps.BadgeCount,
+        ps.Reputation,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        CASE 
+            WHEN r.OwnerUserId IS NOT NULL THEN 'Active User'
+            ELSE 'Community User'
+        END AS UserType,
+        COUNT(c.Id) AS CommentsCount
+    FROM 
+        RecursivePostCTE r
+    LEFT JOIN 
+        UserStats ps ON r.OwnerUserId = ps.UserId
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.AcceptedAnswerId, ps.BadgeCount, ps.Reputation, ps.TotalUpVotes, ps.TotalDownVotes, r.OwnerUserId
+),
+FlaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 OR ph.PostHistoryTypeId = 11
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.AcceptedAnswerId,
+    pd.Reputation,
+    pd.BadgeCount,
+    pd.TotalUpVotes,
+    pd.TotalDownVotes,
+    pd.UserType, 
+    pd.CommentsCount,
+    CASE 
+        WHEN fp.PostId IS NOT NULL THEN 'Flagged'
+        ELSE 'Not Flagged'
+    END AS FlagStatus,
+    CASE 
+        WHEN pd.CommentsCount > 5 THEN 'Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    FlaggedPosts fp ON pd.PostId = fp.PostId
+WHERE 
+    pd.Reputation > 100
+ORDER BY 
+    pd.CommentsCount DESC, pd.Reputation DESC;

@@ -1,0 +1,80 @@
+WITH TagArray AS (
+    SELECT 
+        P.Id AS PostId, 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+TagStats AS (
+    SELECT 
+        T.Tag, 
+        COUNT(DISTINCT PA.PostId) AS PostCount,
+        COUNT(DISTINCT UIS.UserId) AS UniqueUsers,
+        AVG(U.Reputation) AS AvgReputation
+    FROM 
+        TagArray T
+    JOIN 
+        PostInfo PA ON T.PostId = PA.PostId
+    JOIN 
+        Users U ON PA.OwnerUserId = U.Id
+    LEFT JOIN 
+        UserStats UIS ON PA.OwnerUserId = UIS.UserId
+    GROUP BY 
+        T.Tag
+)
+SELECT 
+    TS.Tag,
+    TS.PostCount,
+    TS.UniqueUsers,
+    TS.AvgReputation,
+    U.BadgeCount,
+    U.GoldBadgeCount,
+    U.SilverBadgeCount,
+    U.BronzeBadgeCount
+FROM 
+    TagStats TS
+LEFT JOIN 
+    UserStats U ON 1=1 
+WHERE 
+    TS.PostCount > 0
+ORDER BY 
+    TS.PostCount DESC, 
+    TS.UniqueUsers DESC;

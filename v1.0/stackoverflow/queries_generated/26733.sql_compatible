@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY 
+            (SELECT ARRAY_AGG(DISTINCT Name) 
+             FROM unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Name) 
+             ORDER BY p.Score DESC) 
+        ORDER BY p.Score DESC) AS Rank,
+        (SELECT ARRAY_AGG(Name) 
+         FROM PostHistoryTypes 
+         WHERE Id IN (
+             SELECT PostHistoryTypeId 
+             FROM PostHistory 
+             WHERE PostId = p.Id
+         )) AS RecentChanges
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND   
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Tags,
+        rp.ViewCount,
+        rp.Score,
+        rp.Rank,
+        rp.RecentChanges
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10  
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Tags,
+    fp.ViewCount,
+    fp.Score,
+    fp.RecentChanges,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC;

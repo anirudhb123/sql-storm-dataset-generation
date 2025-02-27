@@ -1,0 +1,29 @@
+WITH HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1996-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING order_total > 10000.00
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING total_supply_cost > 50000.00
+),
+CustomerNation AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(c.c_custkey) AS num_customers
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT c.n_name AS nation_name, COUNT(DISTINCT h.o_orderkey) AS high_value_order_count, 
+       SUM(s.total_supply_cost) AS total_supplier_cost
+FROM HighValueOrders h
+JOIN CustomerNation c ON h.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c2.c_custkey FROM customer c2 WHERE c2.c_nationkey = c.n_nationkey))
+JOIN SupplierDetails s ON h.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_brand = 'Brand#23')))
+GROUP BY c.n_name
+ORDER BY high_value_order_count DESC, total_supplier_cost DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS total_titles
+    FROM aka_title at
+    WHERE at.production_year IS NOT NULL
+),
+ActorsInMovies AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        ci.nr_order AS actor_order
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.movie_id
+    WHERE ak.name IS NOT NULL AND at.title IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.production_year,
+        COUNT(DISTINCT cm.company_id) AS num_production_companies,
+        COUNT(DISTINCT mw.keyword_id) AS num_keywords
+    FROM aka_title rm
+    LEFT JOIN movie_companies cm ON rm.id = cm.movie_id
+    LEFT JOIN movie_keyword mw ON rm.id = mw.movie_id
+    GROUP BY rm.production_year
+),
+CombinedResults AS (
+    SELECT 
+        a.movie_title,
+        a.production_year,
+        a.actor_name,
+        d.num_production_companies,
+        d.num_keywords,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY a.actor_order) AS actor_rank
+    FROM ActorsInMovies a
+    JOIN MovieDetails d ON a.production_year = d.production_year
+)
+SELECT 
+    cr.movie_title,
+    cr.production_year,
+    cr.actor_name,
+    cr.num_production_companies,
+    cr.num_keywords,
+    CASE 
+        WHEN cr.num_keywords IS NULL THEN 'No Keywords'
+        ELSE 'Has Keywords'
+    END AS keyword_status,
+    COUNT(*) OVER () AS total_movies_in_year,
+    (SELECT COUNT(*) FROM aka_title WHERE production_year = cr.production_year) AS title_count_in_year
+FROM CombinedResults cr
+WHERE cr.actor_rank <= 5
+ORDER BY cr.production_year, cr.actor_order
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

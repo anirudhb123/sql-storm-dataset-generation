@@ -1,0 +1,34 @@
+WITH RECURSIVE RegionSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, n.n_nationkey, r.r_regionkey, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+TotalLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+SupplierRevenue AS (
+    SELECT ps.ps_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_suppkey
+),
+QualifiedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, sr.supplier_revenue, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM supplier s
+    LEFT JOIN SupplierRevenue sr ON s.s_suppkey = sr.ps_suppkey
+    LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+    LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY s.s_suppkey, s.s_name, sr.supplier_revenue
+)
+SELECT r.region_name, qs.s_name, qs.supplier_revenue, qs.order_count
+FROM region r
+JOIN RegionSuppliers rs ON r.r_regionkey = rs.r_regionkey
+JOIN QualifiedSuppliers qs ON rs.s_suppkey = qs.s_suppkey
+WHERE rs.rn <= 5
+ORDER BY r.region_name, qs.supplier_revenue DESC;

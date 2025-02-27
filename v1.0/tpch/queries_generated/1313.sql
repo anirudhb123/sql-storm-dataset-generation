@@ -1,0 +1,63 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    sd.s_name,
+    sd.nation_name,
+    sd.region_name,
+    los.total_revenue,
+    los.avg_quantity,
+    co.order_count,
+    co.total_spent
+FROM 
+    SupplierDetails sd
+LEFT JOIN 
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    LineItemSummary los ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_size = 25 LIMIT 1)
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT o.o_custkey FROM orders o ORDER BY o.o_orderdate DESC LIMIT 1)
+WHERE 
+    sd.s_acctbal IS NOT NULL
+ORDER BY 
+    los.total_revenue DESC, 
+    co.total_spent ASC
+LIMIT 50;

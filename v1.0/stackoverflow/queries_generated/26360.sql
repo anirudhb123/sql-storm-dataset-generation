@@ -1,0 +1,58 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,  -- VoteTypeId = 2 corresponds to UpMod
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes  -- VoteTypeId = 3 corresponds to DownMod
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Filter for Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        AVG(ps.CommentCount) AS AvgComments,
+        AVG(ps.AnswerCount) AS AvgAnswers,
+        SUM(ps.UpVotes) AS TotalUpVotes,
+        SUM(ps.DownVotes) AS TotalDownVotes,
+        COUNT(ps.PostId) AS PostCount
+    FROM 
+        PostStatistics ps
+    JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag ON tag.TagName = t.TagName
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ts.TagName,
+    ts.AvgComments,
+    ts.AvgAnswers,
+    ts.TotalUpVotes,
+    ts.TotalDownVotes,
+    ts.PostCount,
+    CASE 
+        WHEN ts.PostCount > 50 THEN 'Highly Engaged'
+        WHEN ts.PostCount > 20 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    TagStatistics ts
+ORDER BY 
+    ts.TotalUpVotes DESC, 
+    ts.AvgComments DESC;

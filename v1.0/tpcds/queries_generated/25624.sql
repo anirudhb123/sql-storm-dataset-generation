@@ -1,0 +1,68 @@
+
+WITH CombinedCustomerAddress AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_street_number,
+        ca.ca_street_name,
+        ca.ca_street_type,
+        ca.ca_suite_number,
+        ca.ca_city,
+        ca.ca_zip,
+        ca.ca_country,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DetailedWebSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        DATE_FORMAT(TO_DATE(d.d_date), '%Y-%m-%d') AS order_date,
+        w.w_warehouse_name,
+        sm.sm_type AS ship_mode,
+        CONCAT(cp.cp_catalog_page_id, ' - ', cp.cp_description) AS catalog_info
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN 
+        catalog_page cp ON cp.cp_catalog_page_sk = ws.cs_catalog_page_sk
+    JOIN 
+        date_dim d ON d.d_date_sk = ws.ws_sold_date_sk
+)
+SELECT 
+    cca.ca_address_id,
+    cca.full_name,
+    cca.c_email_address,
+    cca.ca_city,
+    dws.order_date,
+    dws.ws_order_number,
+    dws.catalog_info,
+    dws.ws_sales_price,
+    dws.ws_quantity,
+    dws.ws_sales_price * dws.ws_quantity AS total_sales,
+    cca.cd_gender,
+    cca.cd_marital_status,
+    cca.cd_education_status,
+    dws.ship_mode
+FROM 
+    CombinedCustomerAddress cca
+JOIN 
+    DetailedWebSales dws ON cca.ca_address_id = dws.ws_bill_addr_sk
+WHERE
+    cca.cd_gender = 'F'
+    AND dws.order_date BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        ss_store_sk,
+        ss_item_sk,
+        ss_sold_date_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_paid) AS total_sales
+    FROM
+        store_sales
+    GROUP BY
+        ss_store_sk, ss_item_sk, ss_sold_date_sk
+    UNION ALL
+    SELECT
+        sh.ss_store_sk,
+        sh.ss_item_sk,
+        sh.ss_sold_date_sk,
+        sh.total_quantity + sh_next.total_quantity,
+        sh.total_sales + sh_next.total_sales
+    FROM
+        SalesHierarchy sh
+    JOIN
+        store_sales sh_next ON sh.ss_item_sk = sh_next.ss_item_sk AND sh.ss_store_sk = sh_next.ss_store_sk AND sh_next.ss_sold_date_sk > sh.ss_sold_date_sk
+),
+SalesData AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS web_sales_quantity,
+        SUM(ws.ws_net_profit) AS web_sales_profit,
+        SUM(ss.ss_quantity) AS store_sales_quantity,
+        SUM(ss.ss_net_profit) AS store_sales_profit
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+CustomerIncome AS (
+    SELECT
+        c.c_customer_id,
+        CASE
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN ib.ib_lower_bound || ' - ' || ib.ib_upper_bound
+            ELSE 'Unknown'
+        END AS income_band
+    FROM
+        customer c
+    LEFT JOIN
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+)
+SELECT
+    sd.c_customer_id,
+    sd.cd_gender,
+    sd.cd_marital_status,
+    COALESCE(sd.web_sales_quantity, 0) AS total_web_sales_quantity,
+    COALESCE(sd.web_sales_profit, 0) AS total_web_sales_profit,
+    COALESCE(sd.store_sales_quantity, 0) AS total_store_sales_quantity,
+    COALESCE(sd.store_sales_profit, 0) AS total_store_sales_profit,
+    ci.income_band
+FROM
+    SalesData sd
+LEFT JOIN
+    CustomerIncome ci ON sd.c_customer_id = ci.c_customer_id
+WHERE
+    (sd.web_sales_profit > 1000 OR sd.store_sales_profit > 1000)
+UNION ALL
+SELECT
+    c.c_customer_id,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    'No Sales'
+FROM
+    customer c
+WHERE
+    c.c_customer_id NOT IN (SELECT c_customer_id FROM SalesData)
+ORDER BY
+    total_web_sales_profit DESC, total_store_sales_profit DESC;

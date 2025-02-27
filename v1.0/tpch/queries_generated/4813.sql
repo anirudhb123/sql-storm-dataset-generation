@@ -1,0 +1,62 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2023-01-01'
+),
+SupplierData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        NULLIF(s.s_acctbal, 0) AS non_zero_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_revenue,
+    AVG(s.non_zero_acctbal) AS avg_supplier_acctbal,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT CASE WHEN o.o_orderstatus = 'O' THEN o.o_orderkey END) AS open_orders
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplierData s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    CustomerTotals c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 20.00 
+    AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_type LIKE '%metal%')
+GROUP BY 
+    p.p_name, p.p_brand 
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_spent) FROM CustomerTotals)
+ORDER BY 
+    total_revenue DESC, avg_supplier_acctbal ASC;

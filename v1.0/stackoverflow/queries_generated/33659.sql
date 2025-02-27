@@ -1,0 +1,57 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Users
+    WHERE 
+        Reputation > 1000  -- Getting users with reputation greater than 1000
+
+    UNION ALL
+
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE ur ON u.Reputation < ur.Reputation
+    WHERE 
+        ur.Level < 5  -- Limit the recursion depth
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount,
+    COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.PostTypeId = 1) AS QuestionsCount,
+    (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.PostTypeId = 2) AS AnswersCount,
+    AVG(p.ViewCount) OVER (PARTITION BY u.Id) AS AvgViewCount,  -- Window function to get average views per user
+    MAX(p.LastActivityDate) AS LastActivePostDate,
+    ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank  -- Ranking of users based on reputation
+FROM 
+    Users u
+LEFT JOIN 
+    Votes v ON u.Id = v.UserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+WHERE 
+    u.Reputation IS NOT NULL 
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    u.Reputation DESC
+LIMIT 10;
+
+-- Display users with their reputation, votes, badges, and post activity levels

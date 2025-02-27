@@ -1,0 +1,84 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes,
+        AVG(LENGTH(p.Body) - LENGTH(REPLACE(p.Body, ' ', '')) + 1) AS AvgWordCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPostChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentChangeOrder,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed' 
+            ELSE 'Not Closed' 
+        END AS ClosureStatus
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed/Reopened posts
+),
+UserVerifications AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    ups.TotalVotes AS UserTotalVotes,
+    ups.UpVotes AS UserUpVotes,
+    ups.DownVotes AS UserDownVotes,
+    ps.PostId,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    ps.AvgWordCount,
+    cpc.RecentChangeOrder,
+    cpc.Comment AS CloseComment,
+    uvs.BadgeCount,
+    uvs.BadgeNames
+FROM 
+    UserVoteStats us
+LEFT JOIN 
+    UserVerifications uvs ON us.UserId = uvs.UserId
+LEFT JOIN 
+    PostStatistics ps ON ps.TotalUpVotes > 0 OR ps.TotalDownVotes > 0
+LEFT JOIN 
+    ClosedPostChanges cpc ON cpc.PostId = ps.PostId AND cpc.RecentChangeOrder = 1
+WHERE 
+    us.Reputation > (SELECT AVG(Reputation) FROM Users) -- Users with above-average reputation
+ORDER BY 
+    us.Reputation DESC, ps.TotalUpVotes DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

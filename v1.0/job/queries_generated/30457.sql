@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000 -- Start with movies after 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.depth
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.depth,
+        fm.actor_count,
+        fm.actor_names,
+        COALESCE(ci.company_name, 'Unknown') AS production_company,
+        COALESCE(ci.company_type, 'Other') AS company_type
+    FROM 
+        FilteredMovies fm
+    LEFT JOIN 
+        CompanyInfo ci ON fm.movie_id = ci.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.depth,
+    md.actor_count,
+    md.actor_names,
+    md.production_company,
+    md.company_type,
+    NTILE(5) OVER (PARTITION BY md.production_year ORDER BY md.actor_count DESC) AS actor_count_rank,
+    CASE 
+        WHEN md.depth > 2 THEN 'Deep Link'
+        WHEN md.depth = 2 THEN 'Moderate Link'
+        ELSE 'Direct Link'
+    END AS link_depth_category
+FROM 
+    MovieDetails md
+WHERE 
+    md.actor_count > 5
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC;

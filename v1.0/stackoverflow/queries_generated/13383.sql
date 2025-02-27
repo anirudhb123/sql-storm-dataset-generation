@@ -1,0 +1,62 @@
+-- Performance Benchmarking SQL Query
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        pt.Name AS PostType,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+
+SELECT 
+    ur.UserId,
+    ur.Reputation,
+    ur.BadgeCount,
+    ur.PostCount,
+    ur.CommentCount,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.PostType,
+    pd.OwnerDisplayName
+FROM 
+    UserReputation ur
+JOIN 
+    PostDetails pd ON ur.UserId = pd.OwnerUserId
+ORDER BY 
+    ur.Reputation DESC, pd.ViewCount DESC
+LIMIT 100; -- Limit to top 100 results for performance

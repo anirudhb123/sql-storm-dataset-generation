@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_ranking AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+related_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+filtered_parts AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.supplier_count,
+        rp.avg_supply_cost,
+        CASE 
+            WHEN rp.avg_supply_cost IS NULL THEN 'No Suppliers'
+            WHEN rp.avg_supply_cost < 50 THEN 'Low Cost'
+            WHEN rp.avg_supply_cost BETWEEN 50 AND 100 THEN 'Moderate Cost'
+            ELSE 'High Cost'
+        END AS cost_category
+    FROM 
+        related_parts rp
+    WHERE 
+        rp.supplier_count > 0
+)
+SELECT 
+    sr.c_name,
+    fp.p_name,
+    fp.avg_supply_cost,
+    fp.cost_category,
+    CASE 
+        WHEN fp.cost_category = 'No Suppliers' THEN 'N/A'
+        ELSE ROUND(sr.total_spent / NULLIF(fp.avg_supply_cost, 0), 2)::VARCHAR
+    END AS spending_per_avg_cost
+FROM 
+    sales_ranking sr
+FULL OUTER JOIN 
+    filtered_parts fp ON sr.rank_within_nation <= 3
+ORDER BY 
+    sr.total_spent DESC, fp.avg_supply_cost ASC;

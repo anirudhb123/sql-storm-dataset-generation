@@ -1,0 +1,82 @@
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalPositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS TotalNegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+PostEditSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        u.DisplayName AS LastEditedBy,
+        MAX(rp.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecentPostEdits rp ON p.Id = rp.PostId
+    LEFT JOIN 
+        Users u ON rp.UserId = u.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+PostScoreSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(v.Id) AS VoteCount,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ps.UserId,
+    ps.DisplayName,
+    ps.TotalPosts,
+    ps.TotalAnswers,
+    ps.TotalQuestions,
+    ps.TotalPositivePosts,
+    ps.TotalNegativePosts,
+    pet.PostId,
+    pet.Title,
+    pet.PostCreationDate,
+    pet.LastEditedBy,
+    pet.LastEditDate,
+    pss.TotalBounty,
+    pss.VoteCount,
+    pss.AverageBounty
+FROM 
+    UserPostStatistics ps
+LEFT JOIN 
+    PostEditSummary pet ON ps.TotalQuestions > 0
+LEFT JOIN 
+    PostScoreSummary pss ON pss.PostId = pet.PostId
+WHERE 
+    ps.TotalPosts > 5
+ORDER BY 
+    ps.TotalPosts DESC, ps.TotalAnswers DESC;

@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+),
+TopProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) IS NOT NULL AND COUNT(o.o_orderkey) > 5
+),
+RankedProducts AS (
+    SELECT tp.p_partkey, tp.p_name, tp.total_sales,
+           RANK() OVER (ORDER BY tp.total_sales DESC) AS rank
+    FROM TopProducts tp
+)
+SELECT 
+    ch.s_name AS supplier_name,
+    np.p_name AS product_name,
+    np.total_sales,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Orders Found'
+    END AS order_status
+FROM SupplierHierarchy ch
+LEFT JOIN RankedProducts np ON np.rank <= 10
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (
+    SELECT DISTINCT c.c_custkey
+    FROM customer c
+    WHERE c.c_nationkey = ch.s_nationkey
+)
+WHERE ch.level <= 3
+ORDER BY ch.s_name, np.total_sales DESC, co.total_spent DESC;

@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplyCosts AS (
+    SELECT ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rn
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01' AND o.o_orderstatus IN ('O', 'F')
+),
+OrderLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate < '2023-01-01'
+    GROUP BY l.l_orderkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN SupplyCosts ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+)
+SELECT 
+    co.c_name,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    SUM(oli.total_revenue) AS total_revenue,
+    COALESCE(SUM(ts.total_supply_cost), 0) AS top_supplier_cost,
+    RANK() OVER (ORDER BY SUM(oli.total_revenue) DESC) AS revenue_rank
+FROM CustomerOrders co
+LEFT JOIN OrderLineItems oli ON co.o_orderkey = oli.l_orderkey
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (
+        SELECT l.l_partkey
+        FROM lineitem l
+        WHERE l.l_orderkey = co.o_orderkey
+    )
+    LIMIT 1
+)
+GROUP BY co.c_name
+HAVING total_revenue > 1000
+ORDER BY revenue_rank;

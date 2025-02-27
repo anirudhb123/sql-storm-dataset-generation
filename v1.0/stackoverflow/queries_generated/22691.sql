@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS RankScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotesCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotesCount,
+        COUNT(c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    WHERE 
+        u.CreationDate < NOW() - INTERVAL '1 month'
+    GROUP BY 
+        u.Id
+),
+PostDetailWithHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        p.Title,
+        p.Score,
+        p.CreationDate AS PostCreationDate,
+        ph.PostHistoryTypeId,
+        PHT.Name AS HistoryTypeName
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+)
+
+SELECT 
+    postDetails.PostId,
+    postDetails.Title,
+    postDetails.Score,
+    users.Reputation,
+    users.UpVotesCount,
+    users.DownVotesCount,
+    users.CommentsCount,
+    COUNT(ph.HistoryDate) AS HistoryCount,
+    MAX(postDetails.HistoryDate) AS LastHistoryDate,
+    ARRAY_AGG(DISTINCT postDetails.HistoryTypeName) AS HistoryTypes
+FROM 
+    RankedPosts postDetails
+JOIN 
+    UserActivity users ON postDetails.PostId = users.UserId
+LEFT JOIN 
+    PostDetailWithHistory ph ON postDetails.PostId = ph.PostId
+WHERE 
+    postDetails.RankScore <= 10
+GROUP BY 
+    postDetails.PostId, postDetails.Title, postDetails.Score, users.Reputation, users.UpVotesCount, users.DownVotesCount, users.CommentsCount
+ORDER BY 
+    postDetails.Score DESC, postDetails.Title ASC;

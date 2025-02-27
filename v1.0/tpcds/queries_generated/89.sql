@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        COALESCE(ws.customer_sk, ss.customer_sk) AS customer_sk,
+        COALESCE(ws.ws_net_profit, ss.ss_net_profit) AS net_profit,
+        COALESCE(ws.ws_sold_date_sk, ss.ss_sold_date_sk) AS sold_date_sk,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(ws.customer_sk, ss.customer_sk) ORDER BY COALESCE(ws.ws_net_profit, ss.ss_net_profit) DESC) AS rn
+    FROM 
+        web_sales ws
+    FULL OUTER JOIN store_sales ss ON ws.ws_order_number = ss.ss_order_number
+    WHERE 
+        COALESCE(ws.ws_net_profit, ss.ss_net_profit) IS NOT NULL
+),
+TopSales AS (
+    SELECT customer_sk, net_profit
+    FROM SalesData
+    WHERE rn <= 10
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        ca.ca_city
+    FROM 
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    TOP 10 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.ca_city,
+    ts.net_profit
+FROM 
+    TopSales ts
+JOIN 
+    CustomerDetails cd ON ts.customer_sk = cd.c_customer_sk
+WHERE 
+    cd.cd_credit_rating IN ('Excellent', 'Good')
+ORDER BY 
+    ts.net_profit DESC;
+
+SELECT 
+   COUNT(*) AS total_customers
+FROM 
+   TopSales ts
+WHERE 
+   ts.net_profit > 1000;
+
+SELECT 
+   CASE 
+       WHEN AVG(ts.net_profit) IS NULL THEN 'No Sales'
+       ELSE CAST(AVG(ts.net_profit) AS varchar(50))
+   END AS average_net_profit
+FROM 
+   TopSales ts;

@@ -1,0 +1,81 @@
+WITH RecursiveActors AS (
+    SELECT ak.id, ak.name, ak.person_id, 
+           ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.id) AS rn
+    FROM aka_name ak
+    WHERE ak.name IS NOT NULL
+),
+DistinctMovies AS (
+    SELECT DISTINCT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        COALESCE(ed.title, 'N/A') AS episode_title,
+        COALESCE(ed.season_nr, 0) AS season,
+        COALESCE(ed.episode_nr, 0) AS episode 
+    FROM aka_title t
+    LEFT JOIN aka_title ed ON t.id = ed.episode_of_id
+    WHERE t.production_year BETWEEN 2000 AND 2020
+),
+ActorRoles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM cast_info ci
+    JOIN role_type r ON ci.role_id = r.id
+),
+TopActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name, 
+        COUNT(DISTINCT ar.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ar.movie_id) DESC) AS actor_rank
+    FROM RecursiveActors a
+    JOIN ActorRoles ar ON a.person_id = ar.person_id
+    GROUP BY a.id, a.name
+),
+MovieCompanyCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM movie_companies mc
+    GROUP BY mc.movie_id
+),
+FinalResults AS (
+    SELECT 
+        dm.movie_id,
+        dm.title,
+        dm.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        COALESCE(mcc.company_count, 0) AS company_count,
+        COALESCE(ta.actor_rank, 0) AS top_actor_rank
+    FROM DistinctMovies dm
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(DISTINCT person_id) AS actor_count
+        FROM ActorRoles
+        GROUP BY movie_id
+    ) ac ON dm.movie_id = ac.movie_id
+    LEFT JOIN MovieCompanyCount mcc ON dm.movie_id = mcc.movie_id
+    LEFT JOIN TopActors ta ON ta.actor_rank <= 10 -- Top 10 actors
+    WHERE (dm.production_year IS NOT NULL AND dm.production_year > 0)
+      OR (dm.title LIKE '%Award%' AND dm.production_year IS NULL)
+)
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.company_count,
+    CASE 
+        WHEN fr.company_count > 5 THEN 'High Budget'
+        WHEN fr.actor_count > 10 THEN 'Star-studded'
+        ELSE 'Indie'
+    END AS movie_type,
+    CONVERT(VARCHAR, DATEADD(YEAR, -fr.production_year, GETDATE())) + ' years since release' AS age_of_movie_status
+FROM FinalResults fr
+WHERE fr.production_year IS NOT NULL
+ORDER BY fr.production_year DESC, fr.actor_count DESC
+LIMIT 50;

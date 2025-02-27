@@ -1,0 +1,70 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_returned_date_sk) AS unique_return_dates,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_quantity) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+MaxReturns AS (
+    SELECT 
+        rr1.sr_item_sk,
+        rr1.total_returns,
+        rr1.unique_return_dates
+    FROM 
+        RankedReturns rr1
+    JOIN 
+        (SELECT MAX(total_returns) AS max_returns FROM RankedReturns) rr2
+    ON 
+        rr1.total_returns = rr2.max_returns
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COUNT(DISTINCT sr.ticket_number) AS returned_items_count,
+        SUM(COALESCE(sr.sr_return_quantity, 0)) AS total_returned_quantity,
+        AVG(CASE 
+            WHEN sr.sr_return_quantity IS NOT NULL THEN sr.sr_return_quantity * 1.0 
+            ELSE NULL 
+        END) AS avg_returned_quantity
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+FinalStatistics AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        COALESCE(CONCAT('Total Returns: ', cs.total_returned_quantity), 'No Returns') AS return_summary,
+        COALESCE(mr.unique_return_dates, 0) AS max_unique_return_dates
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        MaxReturns mr ON cs.returned_items_count > 0
+)
+SELECT 
+    fs.c_customer_id,
+    fs.c_first_name,
+    fs.c_last_name,
+    fs.return_summary,
+    fs.max_unique_return_dates,
+    CASE 
+        WHEN fs.max_unique_return_dates > 1 THEN 'Multiple Return Dates'
+        ELSE 'Single Return Date or No Returns'
+    END AS return_date_summary
+FROM 
+    FinalStatistics fs
+WHERE 
+    fs.max_unique_return_dates IS NOT NULL
+ORDER BY 
+    fs.c_customer_id ASC;

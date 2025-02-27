@@ -1,0 +1,66 @@
+
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        ClosedPosts,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+)
+
+SELECT 
+    TU.Rank,
+    TU.DisplayName,
+    TU.TotalScore,
+    COALESCE(RP.Title, 'No recent posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(RP.Author, 'N/A') AS RecentPostAuthor,
+    CASE 
+        WHEN TU.ClosedPosts > 0 THEN 'Has Closed Posts'
+        ELSE 'Active User'
+    END AS UserStatus
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts RP ON TU.UserId = RP.PostId
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.TotalScore DESC, TU.DisplayName;

@@ -1,0 +1,79 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        CreationDate,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        COUNT(a.Id) AS AnswerCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(NULLIF(p.ClosedDate, NULL), p.LastActivityDate) AS LastActivity
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.ClosedDate, p.LastActivityDate
+),
+PostHistoryAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenedDate,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (4, 5, 6)) AS EditCount,
+        STRING_AGG(ph.Comment, '; ') AS HistoryComments
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+),
+TopTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Tags, '><')) AS Tag
+    FROM Posts
+    WHERE PostTypeId = 1 
+),
+TagPopularity AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS TagCount
+    FROM TopTags
+    GROUP BY Tag
+    ORDER BY TagCount DESC
+    LIMIT 5
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT 
+    qs.QuestionId,
+    qs.Title,
+    qs.AnswerCount,
+    UR.Reputation AS UserReputation,
+    UR.ReputationRank,
+    COALESCE(PHA.LastClosedDate, PHA.LastReopenedDate) AS MostRecentChange,
+    PHA.EditCount,
+    PHA.HistoryComments,
+    (SELECT ARRAY_AGG(tp.Tag)
+        FROM TagPopularity tp
+        WHERE tp.Tag IN (SELECT UNNEST(STRING_TO_ARRAY(qs.Tags, '><')))
+    ) AS PopularTags,
+    UB.BadgeCount,
+    UB.BadgeNames
+FROM QuestionStats qs
+JOIN UserReputation UR ON qs.OwnerUserId = UR.Id
+LEFT JOIN PostHistoryAggregates PHA ON qs.QuestionId = PHA.PostId
+LEFT JOIN UserBadges UB ON qs.OwnerUserId = UB.UserId
+WHERE (qs.LastActivity > (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '6 months') OR 
+       (qs.AnswerCount = 0 AND qs.CreationDate >= (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year')))
+ORDER BY UR.Reputation DESC, qs.AnswerCount DESC
+LIMIT 10;

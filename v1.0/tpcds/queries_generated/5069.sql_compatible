@@ -1,0 +1,30 @@
+
+WITH DateRange AS (
+    SELECT d.d_date_sk, d.d_date
+    FROM date_dim d
+    WHERE d.d_date BETWEEN '2001-01-01' AND '2001-12-31'
+),
+CustomerData AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating, hd.hd_income_band_sk
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_quantity, ws.ws_sales_price
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE w.web_rec_start_date <= DATE '2002-10-01' AND (w.web_rec_end_date IS NULL OR w.web_rec_end_date > DATE '2002-10-01')
+),
+AggregateSales AS (
+    SELECT dr.d_date_sk, cd.hd_income_band_sk, SUM(sd.ws_quantity) AS total_quantity, SUM(sd.ws_sales_price) AS total_sales
+    FROM DateRange dr
+    LEFT JOIN SalesData sd ON dr.d_date_sk = sd.ws_sold_date_sk
+    LEFT JOIN CustomerData cd ON sd.ws_bill_customer_sk = cd.c_customer_sk
+    GROUP BY dr.d_date_sk, cd.hd_income_band_sk
+)
+SELECT dr.d_date, cd.hd_income_band_sk, COALESCE(as.total_quantity, 0) AS total_quantity, COALESCE(as.total_sales, 0) AS total_sales
+FROM DateRange dr
+CROSS JOIN (SELECT DISTINCT hd_income_band_sk FROM household_demographics) cd
+LEFT JOIN AggregateSales as ON dr.d_date_sk = as.d_date_sk AND cd.hd_income_band_sk = as.hd_income_band_sk
+ORDER BY dr.d_date, cd.hd_income_band_sk;

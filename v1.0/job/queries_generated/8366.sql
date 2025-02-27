@@ -1,0 +1,61 @@
+WITH MovieRatings AS (
+    SELECT 
+        a.title AS movie_title,
+        AVG(r.rating) AS average_rating,
+        COUNT(r.user_id) AS rating_count
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_info m ON a.id = m.movie_id
+    JOIN 
+        movie_info_idx mi ON m.id = mi.movie_id
+    JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        person_info pi ON an.person_id = pi.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        info_type it ON m.info_type_id = it.id
+    LEFT JOIN 
+        link_type lt ON mc.company_type_id = lt.id
+    LEFT JOIN 
+        title t ON a.id = t.id
+    LEFT JOIN 
+        kind_type kt ON a.kind_id = kt.id
+    LEFT JOIN 
+        movie_link ml ON a.id = ml.movie_id
+    LEFT JOIN 
+        cast_info ci2 ON a.id = ci2.movie_id
+    LEFT JOIN 
+        aka_name an2 ON ci2.person_id = an2.person_id
+    LEFT JOIN 
+        person_info pi2 ON an2.person_id = pi2.person_id
+    GROUP BY 
+        a.title
+    HAVING 
+        average_rating IS NOT NULL AND rating_count > 10
+)
+SELECT 
+    movie_title, 
+    average_rating, 
+    rating_count 
+FROM 
+    MovieRatings 
+ORDER BY 
+    average_rating DESC
+LIMIT 50;

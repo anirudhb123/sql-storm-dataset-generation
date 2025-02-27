@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(ws.order_number) AS total_orders,
+        ROW_NUMBER() OVER(PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_first_name IS NOT NULL
+    GROUP BY 
+        ws.bill_customer_sk
+
+    UNION ALL 
+
+    SELECT 
+        ss.bill_customer_sk,
+        SUM(ss.net_profit) + cs.total_profit AS total_profit,
+        COUNT(ss.order_number) + cs.total_orders AS total_orders,
+        ROW_NUMBER() OVER(PARTITION BY ss.bill_customer_sk ORDER BY SUM(ss.net_profit) + cs.total_profit DESC) AS profit_rank
+    FROM 
+        store_sales ss
+    JOIN 
+        sales_summary cs ON ss.bill_customer_sk = cs.bill_customer_sk
+    WHERE 
+        ss.item_sk IN (SELECT i_item_sk FROM item WHERE i_current_price > 50)
+    GROUP BY 
+        ss.bill_customer_sk
+),
+valid_reasons AS (
+    SELECT 
+        sr_reason_sk,
+        r_reason_desc
+    FROM 
+        reason
+    WHERE 
+        r_reason_desc NOT LIKE '%damaged%' 
+    AND r_reason_desc NOT LIKE '%out of stock%'
+),
+sales_returns AS (
+    SELECT 
+        sr.refunded_customer_sk,
+        SUM(sr.return_amt) AS total_returns
+    FROM 
+        store_returns sr
+    LEFT JOIN 
+        valid_reasons r ON sr.reason_sk = r.sr_reason_sk
+    GROUP BY 
+        sr.refunded_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    COALESCE(ss.total_profit, 0) AS total_web_profit,
+    COALESCE(sr.total_returns, 0) AS total_store_returns
+FROM 
+    customer cs
+LEFT JOIN 
+    sales_summary ss ON cs.c_customer_sk = ss.bill_customer_sk
+LEFT JOIN 
+    sales_returns sr ON cs.c_customer_sk = sr.refunded_customer_sk
+WHERE 
+    COALESCE(ss.total_profit, 0) > 1000
+    OR COALESCE(sr.total_returns, 0) > 100
+ORDER BY 
+    total_web_profit DESC, total_store_returns DESC;

@@ -1,0 +1,56 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM UserReputation
+    WHERE Reputation > 0
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ','))::int[]
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 10
+),
+UserTagInteraction AS (
+    SELECT 
+        TU.UserId,
+        TU.DisplayName,
+        PT.TagName,
+        COUNT(DISTINCT P.Id) AS PostsInteracted
+    FROM TopUsers TU
+    JOIN Posts P ON TU.UserId = P.OwnerUserId
+    JOIN Tags PT ON PT.TagName = ANY(string_to_array(P.Tags, ','))
+    GROUP BY TU.UserId, TU.DisplayName, PT.TagName
+)
+SELECT 
+    TI.UserId,
+    TI.DisplayName,
+    AGG.TagCount,
+    TAGS.TagName,
+    COUNT(DISTINCT P.Id) AS PostsCount
+FROM UserTagInteraction TI
+JOIN (SELECT UserId, COUNT(DISTINCT TagName) AS TagCount FROM UserTagInteraction GROUP BY UserId) AGG ON TI.UserId = AGG.UserId
+JOIN PopularTags TAGS ON TI.TagName = TAGS.TagName
+JOIN Posts P ON TI.UserId = P.OwnerUserId
+GROUP BY TI.UserId, TI.DisplayName, AGG.TagCount, TAGS.TagName
+ORDER BY AGG.TagCount DESC, TI.UserId;

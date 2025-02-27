@@ -1,0 +1,66 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '1996-01-01'
+        AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    t.total_revenue,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    r.r_name AS region,
+    CASE 
+        WHEN t.total_revenue > 10000 THEN 'High'
+        WHEN t.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS revenue_category
+FROM 
+    part p
+LEFT JOIN 
+    TotalSales t ON p.p_partkey = t.l_partkey
+LEFT JOIN 
+    (SELECT s.s_suppkey, s.s_name, r.r_name, s.rn 
+     FROM RankedSuppliers s
+     JOIN nation n ON s.s_suppkey = n.n_nationkey
+     WHERE s.rn = 1) AS s ON s.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost 
+        LIMIT 1
+    )
+JOIN 
+    region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        JOIN supplier s ON s.s_nationkey = n.n_nationkey 
+        WHERE s.s_suppkey = COALESCE(s.s_suppkey, -1)
+        LIMIT 1
+    )
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    t.total_revenue,
+    s.s_name,
+    r.r_name
+ORDER BY 
+    t.total_revenue DESC NULLS LAST;

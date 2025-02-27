@@ -1,0 +1,63 @@
+WITH RECURSIVE top_suppliers AS (
+    SELECT 
+        ps.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+), 
+order_summary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(os.total_value, 0) AS total_order_value,
+        os.line_item_count
+    FROM customer c
+    LEFT JOIN order_summary os ON c.c_custkey = os.o_custkey
+), 
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY s.s_suppkey, s.s_name, r.r_name
+), 
+ranked_suppliers AS (
+    SELECT 
+        si.*, 
+        RANK() OVER (ORDER BY si.total_supply_cost DESC) AS supplier_rank
+    FROM supplier_info si
+)
+
+SELECT 
+    co.c_custkey, 
+    co.c_name, 
+    co.total_order_value, 
+    co.line_item_count, 
+    rs.s_suppkey AS top_supplier_key, 
+    rs.s_name AS top_supplier_name, 
+    rs.unique_parts,
+    rs.total_supply_cost
+FROM customer_orders co
+LEFT JOIN ranked_suppliers rs ON co.total_order_value > 1000 AND co.line_item_count >= 5
+WHERE co.total_order_value IS NOT NULL
+ORDER BY co.total_order_value DESC, rs.supplier_rank
+LIMIT 10;

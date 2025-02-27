@@ -1,0 +1,74 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        AVG(sr_return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cr.total_return_amt,
+        cr.return_count,
+        cr.avg_return_quantity,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cr.total_return_amt > 1000 
+    ORDER BY 
+        cr.total_return_amt DESC 
+    LIMIT 10
+),
+WarehouseSales AS (
+    SELECT 
+        ws.w_warehouse_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        ws.w_warehouse_sk
+),
+WarehouseReturns AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+)
+SELECT 
+    w.w_warehouse_id,
+    ws.total_sales,
+    ws.order_count,
+    ROUND((COALESCE(wr.total_return_amt, 0) / NULLIF(ws.total_sales, 0)) * 100, 2) AS return_percentage,
+    tc.c_customer_id,
+    tc.cd_gender,
+    tc.cd_marital_status
+FROM 
+    WarehouseSales ws
+JOIN 
+    warehouse w ON ws.w_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN 
+    WarehouseReturns wr ON wr.sr_store_sk = w.w_warehouse_sk
+JOIN 
+    TopCustomers tc ON tc.total_return_amt > 1000
+WHERE 
+    ws.total_sales > 5000
+ORDER BY 
+    return_percentage DESC;

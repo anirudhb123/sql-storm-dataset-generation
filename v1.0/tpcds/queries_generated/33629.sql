@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT
+        d.d_year,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM
+        date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE
+        d.d_year >= 2021
+    GROUP BY
+        d.d_year
+),
+TopYears AS (
+    SELECT
+        d.d_year,
+        total_profit
+    FROM
+        SalesTrend
+    WHERE
+        rank <= 5
+),
+CustomerReturns AS (
+    SELECT
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_amt), 0) AS total_returns,
+        COUNT(DISTINCT sr.store_sk) AS return_stores
+    FROM
+        customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT
+        c.c_customer_id,
+        total_returns,
+        return_stores,
+        RANK() OVER (ORDER BY total_returns DESC) AS customer_rank
+    FROM
+        CustomerReturns c
+)
+SELECT 
+    yt.d_year,
+    yt.total_profit,
+    tc.c_customer_id,
+    tc.total_returns,
+    tc.return_stores
+FROM
+    TopYears yt
+FULL OUTER JOIN TopCustomers tc ON yt.d_year = (SELECT MAX(d_year) FROM date_dim WHERE d_current_year = 'Y')
+WHERE
+    (yt.total_profit IS NOT NULL OR tc.total_returns IS NOT NULL)
+ORDER BY
+    yt.d_year DESC,
+    tc.total_returns DESC;

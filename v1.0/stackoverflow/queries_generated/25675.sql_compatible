@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Title IS NOT NULL
+),
+TopPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.PostId, 
+        rp.Title,
+        rp.Score, 
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        rp.rn <= 3 
+    GROUP BY 
+        rp.OwnerUserId, rp.PostId, rp.Title, rp.Score
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(tp.Score), 0) AS TotalScore,
+        COALESCE(SUM(tp.CommentCount), 0) AS TotalComments,
+        COALESCE(COUNT(DISTINCT tp.PostId), 0) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        TopPosts tp ON u.Id = tp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalScore,
+    us.TotalComments,
+    us.TotalPosts,
+    RANK() OVER (ORDER BY us.TotalScore DESC) AS RankByScore
+FROM 
+    UserStatistics us
+WHERE 
+    us.TotalPosts > 0 
+ORDER BY 
+    us.TotalScore DESC,
+    us.TotalComments DESC
+LIMIT 10;

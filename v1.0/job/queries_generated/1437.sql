@@ -1,0 +1,62 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id, 
+        COUNT(DISTINCT c.person_id) AS cast_count 
+    FROM 
+        cast_info c 
+    GROUP BY 
+        c.movie_id
+),
+company_stats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT co.id) AS company_count 
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id 
+    WHERE 
+        co.country_code IS NOT NULL 
+    GROUP BY 
+        mc.movie_id
+),
+movie_details AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year, 
+        mc.cast_count, 
+        cs.company_count 
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_cast mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_stats cs ON rm.movie_id = cs.movie_id
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    COALESCE(md.cast_count, 0) AS total_cast, 
+    COALESCE(md.company_count, 0) AS total_companies,
+    CASE 
+        WHEN md.cast_count IS NULL THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM 
+    movie_details md
+WHERE 
+    md.rank <= 10 
+ORDER BY 
+    md.production_year DESC, md.total_cast DESC;

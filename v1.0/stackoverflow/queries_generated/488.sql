@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), 
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u 
+    WHERE 
+        u.CreationDate < CURRENT_DATE - INTERVAL '6 months'
+),
+PostWithTopUser AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CommentCount,
+        ur.Reputation
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UserReputation ur ON rp.Rank = 1 AND ur.UserId = rp.OwnerUserId
+)
+SELECT 
+    pwt.Title, 
+    pwt.CommentCount, 
+    pwt.Reputation,
+    CASE 
+        WHEN pwt.Reputation IS NULL THEN 'No Reputation'
+        ELSE CONCAT('Reputation: ', pwt.Reputation)
+    END AS ReputationInfo,
+    COALESCE(pwt.CommentCount, 0) AS NonNullCommentCount
+FROM 
+    PostWithTopUser pwt
+WHERE 
+    pwt.CommentCount > 5
+ORDER BY 
+    pwt.Reputation DESC NULLS LAST;

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        0 AS level
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+
+    UNION ALL
+
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        sh.level + 1
+    FROM
+        web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN sales_hierarchy sh ON c.c_customer_sk = sh.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, sh.level
+),
+customer_income AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_credit_rating,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+),
+sales_over_time AS (
+    SELECT
+        d.d_year,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM
+        web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY
+        d.d_year
+),
+sales_trends AS (
+    SELECT
+        yr.d_year,
+        COALESCE(sot.total_sales, 0) AS sales,
+        LAG(COALESCE(sot.total_sales, 0), 1) OVER (ORDER BY yr.d_year) AS prev_year_sales,
+        CASE 
+            WHEN LAG(COALESCE(sot.total_sales, 0), 1) OVER (ORDER BY yr.d_year) IS NULL THEN NULL
+            ELSE (COALESCE(sot.total_sales, 0) - LAG(COALESCE(sot.total_sales, 0), 1) OVER (ORDER BY yr.d_year)) / LAG(COALESCE(sot.total_sales, 0), 1) OVER (ORDER BY yr.d_year) * 100
+        END AS growth_rate
+    FROM
+        (SELECT DISTINCT d_year FROM date_dim) yr
+    LEFT JOIN sales_over_time sot ON yr.d_year = sot.d_year
+)
+SELECT
+    ci.c_customer_sk,
+    ci.cd_credit_rating,
+    SUM(sh.total_sales) AS total_sales_current,
+    SUM(so.sales) AS total_sales_past_years,
+    MAX(st.growth_rate) AS max_growth_rate
+FROM
+    customer_income ci
+LEFT JOIN sales_hierarchy sh ON ci.c_customer_sk = sh.ws_bill_customer_sk
+LEFT JOIN sales_trends st ON EXTRACT(YEAR FROM CURRENT_DATE) - 1 = st.d_year
+GROUP BY
+    ci.c_customer_sk,
+    ci.cd_credit_rating
+ORDER BY
+    total_sales_current DESC
+LIMIT 100;

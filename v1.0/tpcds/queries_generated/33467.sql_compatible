@@ -1,0 +1,50 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_order_number, ws_item_sk, ws_quantity, ws_sales_price, 1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT ws.ws_order_number, ws.ws_item_sk, ws.ws_quantity, ws.ws_sales_price, cte.level + 1
+    FROM web_sales ws
+    JOIN Sales_CTE cte ON ws.ws_order_number = cte.ws_order_number
+    WHERE cte.level < 5
+),
+Customer_Sales AS (
+    SELECT c.c_customer_sk, SUM(ss.ss_net_paid) AS total_spent
+    FROM store_sales ss
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+    GROUP BY c.c_customer_sk
+),
+Item_Avg_Price AS (
+    SELECT i.i_item_sk, AVG(i.i_current_price) AS avg_price
+    FROM item i
+    GROUP BY i.i_item_sk
+),
+Store_Sales_Comparison AS (
+    SELECT ss.s_store_sk,
+           COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+           SUM(ss.ss_net_paid) AS total_revenue,
+           SUM(ss.ss_net_paid) / NULLIF(COUNT(DISTINCT ss.ss_ticket_number), 0) AS avg_transaction_value
+    FROM store_sales ss
+    GROUP BY ss.s_store_sk
+)
+SELECT 
+    cs.c_customer_sk, 
+    COALESCE(ssc.total_spent, 0) AS total_spent,
+    COALESCE(ssc.total_revenue, 0) AS store_revenue,
+    COALESCE(iap.avg_price, 0) AS item_avg_price,
+    sc.ws_order_number,
+    sc.ws_quantity,
+    sc.ws_sales_price,
+    RANK() OVER (PARTITION BY cs.c_customer_sk ORDER BY ssc.total_spent DESC) AS customer_rank
+FROM Customer_Sales ssc
+FULL OUTER JOIN Store_Sales_Comparison sc ON ssc.c_customer_sk = sc.s_store_sk
+FULL OUTER JOIN Item_Avg_Price iap ON iap.i_item_sk = (SELECT MIN(i_item_sk) FROM item) 
+LEFT JOIN Sales_CTE sc ON sc.ws_order_number = ssc.c_customer_sk
+WHERE (ssc.total_spent IS NOT NULL OR ssc.total_spent IS NULL) 
+  AND (sc.ws_order_number IS NOT NULL OR sc.ws_order_number IS NULL)
+GROUP BY cs.c_customer_sk, ssc.total_spent, ssc.total_revenue, iap.avg_price, sc.ws_order_number, sc.ws_quantity, sc.ws_sales_price
+ORDER BY customer_rank, total_spent DESC;

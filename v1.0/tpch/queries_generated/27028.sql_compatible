@@ -1,0 +1,71 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        REGEXP_REPLACE(REGEXP_REPLACE(s.s_address, '\\s+', ' '), '\\s$', '') AS clean_address,
+        SUBSTRING(s.s_comment FROM '([A-Z]+)') AS first_upper_comment
+    FROM 
+        supplier s
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        REPLACE(c.c_address, ',', '') AS address_without_commas,
+        TRIM(c.c_comment) AS trimmed_comment
+    FROM 
+        customer c
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        DATE_FORMAT(o.o_orderdate, '%Y-%m-%d') AS formatted_orderdate,
+        CASE WHEN o.o_orderpriority = 'HIGH' THEN 'Priority Order' ELSE 'Regular Order' END AS order_priority_type
+    FROM 
+        orders o
+),
+LineItemAggregate AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS total_lineitems,
+        SUM(l.l_extendedprice) AS total_extended_price,
+        AVG(l.l_discount) AS average_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    sd.s_name,
+    cd.c_name,
+    od.o_orderkey,
+    od.formatted_orderdate,
+    od.order_priority_type,
+    la.total_lineitems,
+    la.total_extended_price,
+    la.average_discount,
+    sd.clean_address,
+    cd.address_without_commas,
+    sd.first_upper_comment,
+    cd.trimmed_comment
+FROM 
+    SupplierDetails sd
+JOIN 
+    CustomerDetails cd ON sd.s_nationkey = cd.c_nationkey
+JOIN 
+    OrderDetails od ON cd.c_custkey = od.o_custkey
+JOIN 
+    LineItemAggregate la ON od.o_orderkey = la.l_orderkey
+WHERE 
+    sd.s_acctbal > 5000
+ORDER BY 
+    od.formatted_orderdate DESC, 
+    la.total_extended_price DESC
+LIMIT 100;

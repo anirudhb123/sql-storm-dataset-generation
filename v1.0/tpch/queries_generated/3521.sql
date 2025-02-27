@@ -1,0 +1,65 @@
+WITH part_supplier_info AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        s.s_name AS supplier_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+customer_order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+nation_supplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    p.p_name,
+    pi.supplier_name,
+    pi.ps_supplycost,
+    pi.ps_availqty,
+    c.total_spent,
+    n.n_name AS nation_name,
+    n.total_acctbal,
+    CASE 
+        WHEN c.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Customer Found'
+    END AS customer_status
+FROM 
+    part_supplier_info pi
+LEFT JOIN 
+    customer_order_summary c ON pi.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = c.c_custkey LIMIT 1)
+LEFT JOIN 
+    nation_supplier n ON n.n_nationkey = (SELECT n_nationkey FROM supplier s WHERE s.s_name = pi.supplier_name LIMIT 1)
+WHERE 
+    pi.rn = 1
+AND 
+    (pi.ps_availqty > 10 OR c.total_orders IS NOT NULL)
+ORDER BY 
+    pi.ps_supplycost DESC, 
+    c.total_spent ASC;

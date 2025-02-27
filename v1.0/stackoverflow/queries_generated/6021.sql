@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, pt.Name, u.DisplayName
+), 
+HighScoringPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        AnswerCount,
+        CommentCount,
+        TotalComments
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    p.*,
+    ph.Name AS PostHistoryTypeName,
+    COUNT(ph.Id) AS EditCount
+FROM 
+    HighScoringPosts p
+LEFT JOIN 
+    PostHistory ph ON p.PostId = ph.PostId
+GROUP BY 
+    p.PostId, ph.Name
+ORDER BY 
+    p.Score DESC, p.ViewCount DESC;

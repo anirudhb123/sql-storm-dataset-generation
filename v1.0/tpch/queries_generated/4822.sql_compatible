@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CustomerSummaries AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(r.economical_supplier, 'No Supplier') AS supplier_name,
+    os.total_order_value,
+    cs.order_count,
+    cs.order_count * COALESCE(RANKED.ranked_supplier_count, 0) AS adjusted_order_count
+FROM 
+    part p
+LEFT JOIN 
+    (SELECT 
+        ps.ps_partkey,
+        MAX(s.s_name) AS economical_supplier
+     FROM 
+        partsupp ps
+     JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey 
+     WHERE 
+        s.supplier_rank = 1
+     GROUP BY 
+        ps.ps_partkey) AS r ON p.p_partkey = r.ps_partkey
+LEFT JOIN 
+    OrderDetails os ON os.o_orderkey = (
+        SELECT MIN(o.o_orderkey)
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_partkey = p.p_partkey
+    )
+LEFT JOIN 
+    CustomerSummaries cs ON cs.c_custkey = (
+        SELECT c.c_custkey
+        FROM customer c
+        ORDER BY c.c_acctbal DESC
+        LIMIT 1
+    )
+ORDER BY 
+    p.p_partkey;

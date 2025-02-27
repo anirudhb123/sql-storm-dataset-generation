@@ -1,0 +1,36 @@
+WITH SuppliersWithComments AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_phone, 
+           SUBSTRING(s.s_comment, 1, 30) AS short_comment, 
+           CHAR_LENGTH(s.s_comment) AS full_comment_length
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+OrdersWithPriority AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           o.o_orderpriority, 
+           CASE 
+               WHEN o.o_orderstatus = 'F' THEN 'Filled'
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               ELSE 'Other'
+           END AS order_status,
+           cast('1998-10-01' as date) - o.o_orderdate AS days_since_order
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATEADD(MONTH, -6, cast('1998-10-01' as date)) AND cast('1998-10-01' as date)
+),
+LineItemsWithComments AS (
+    SELECT l.l_orderkey, l.l_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+           STRING_AGG(l.l_comment, '; ') AS combined_comments
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT s.s_name, s.short_comment, o.o_orderkey, o.order_status, 
+       o.total_price AS order_total, o.days_since_order, 
+       li.total_price_after_discount, li.combined_comments
+FROM SuppliersWithComments s
+JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN LineItemsWithComments li ON li.l_partkey = ps.ps_partkey
+JOIN OrdersWithPriority o ON o.o_orderkey = li.l_orderkey
+WHERE o.order_status = 'Filled' 
+AND s.full_comment_length > 50
+ORDER BY o.o_orderdate DESC, li.total_price_after_discount DESC;

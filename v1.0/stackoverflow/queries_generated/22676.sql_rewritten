@@ -1,0 +1,90 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        P.CreationDate,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        PT.Name AS PostTypeName,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        LATERAL string_to_array(P.Tags, '>') AS T(TagName) ON TRUE
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.AcceptedAnswerId, P.CreationDate, P.ViewCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(CONCAT(PH.UserDisplayName, ': ', PH.Comment), '; ') AS Comments
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+),
+TopPosts AS (
+    SELECT 
+        PD.*,
+        RANK() OVER (PARTITION BY PD.PostTypeId ORDER BY PD.ViewCount DESC) AS PostRank
+    FROM 
+        PostDetails PD
+    WHERE 
+        PD.PostTypeId IN (1, 2) 
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    PH.PostId,
+    PH.Title,
+    PH.PostTypeName,
+    PH.ViewCount,
+    PH.CommentCount,
+    CASE 
+        WHEN PH.AcceptedAnswerId > 0 THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasAcceptedAnswer,
+    COALESCE(PH.HistoryCount, 0) AS HistoryCount,
+    PH.Comments,
+    T.Tags
+FROM 
+    UserReputation U
+JOIN 
+    TopPosts PH ON U.Id = PH.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetails PHD ON PH.PostId = PHD.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            STRING_AGG(TagName, ', ') AS Tags
+        FROM 
+            UNNEST(string_to_array(PH.Tags, '>')) AS TagName
+    ) T ON TRUE
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Rank,
+    PH.ViewCount DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

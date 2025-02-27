@@ -1,0 +1,46 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, 
+           UpVotesCount - DownVotesCount AS NetVotes, 
+           PostsCount, CommentsCount,
+           RANK() OVER (ORDER BY UpVotesCount DESC) AS RankByUpVotes
+    FROM UserVoteStats
+    WHERE PostsCount > 0
+)
+SELECT 
+    U.UserId, 
+    U.DisplayName,
+    U.NetVotes,
+    U.PostsCount,
+    U.CommentsCount,
+    CASE 
+        WHEN U.RankByUpVotes <= 10 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserCategory,
+    COALESCE((
+        SELECT MAX(P.CreationDate) 
+        FROM Posts P 
+        WHERE P.OwnerUserId = U.UserId
+    ), 'No Posts') AS LastPostDate,
+    (SELECT COUNT(*) 
+     FROM Votes V 
+     WHERE V.UserId = U.UserId 
+       AND V.VoteTypeId = 2) AS TotalUpVotesGiven
+FROM TopUsers U
+WHERE U.NetVotes > 5
+  AND U.CommentsCount > 2
+ORDER BY U.NetVotes DESC, U.PostsCount DESC
+LIMIT 50;

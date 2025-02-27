@@ -1,0 +1,72 @@
+
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        rmh.level + 1
+    FROM movie_link ml
+    JOIN title t ON ml.linked_movie_id = t.id
+    JOIN RecursiveMovieHierarchy rmh ON ml.movie_id = rmh.movie_id
+),
+
+TopActors AS (
+    SELECT
+        ak.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ak.name
+    HAVING COUNT(ci.movie_id) > 10 
+),
+
+FilteredMovies AS (
+    SELECT 
+        rmh.movie_id,
+        rmh.title,
+        rmh.production_year,
+        th.actor_name,
+        ROW_NUMBER() OVER (PARTITION BY rmh.production_year ORDER BY th.movie_count DESC) AS actor_rank
+    FROM RecursiveMovieHierarchy rmh
+    JOIN TopActors th ON rmh.movie_id IN (
+        SELECT ci.movie_id
+        FROM cast_info ci
+        WHERE ci.person_id IN (
+            SELECT ak.person_id
+            FROM aka_name ak
+            WHERE ak.name ILIKE '%Smith%'  
+        )
+    )
+)
+
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.actor_name,
+    fm.actor_rank,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    AVG(mi.movie_info_value) AS average_info_value
+FROM FilteredMovies fm
+LEFT JOIN movie_keyword mk ON fm.movie_id = mk.movie_id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        COUNT(info) AS movie_info_value
+    FROM movie_info
+    WHERE info NOT LIKE '%NULL%' 
+    GROUP BY movie_id
+) mi ON fm.movie_id = mi.movie_id
+WHERE fm.actor_rank <= 5 
+GROUP BY fm.movie_id, fm.title, fm.production_year, fm.actor_name, fm.actor_rank
+ORDER BY fm.production_year DESC, keyword_count DESC;

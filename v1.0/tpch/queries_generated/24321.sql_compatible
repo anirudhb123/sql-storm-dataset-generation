@@ -1,0 +1,71 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name, c.c_nationkey
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS supplier_region,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, r.r_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.c_name,
+    COALESCE(si.supplied_parts, 0) AS total_supplied_parts,
+    CASE 
+        WHEN ro.revenue_rank = 1 THEN 'Highest Revenue'
+        WHEN ro.revenue_rank = 2 THEN 'Second Highest Revenue'
+        ELSE 'Other Revenue'
+    END AS revenue_category,
+    STRING_AGG(s.s_name, ', ') AS suppliers_list
+FROM 
+    ranked_orders ro
+LEFT JOIN 
+    supplier_info si ON si.supplied_parts = (
+        SELECT COUNT(*) 
+        FROM lineitem l 
+        WHERE l.l_orderkey = ro.o_orderkey
+    )
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT DISTINCT l.l_partkey 
+                                       FROM lineitem l 
+                                       WHERE l.l_orderkey = ro.o_orderkey)
+LEFT JOIN 
+    supplier s ON s.s_suppkey = ps.ps_suppkey
+WHERE 
+    ro.total_revenue IS NOT NULL 
+    AND EXISTS (SELECT 1 
+                FROM lineitem l 
+                WHERE l.l_orderkey = ro.o_orderkey 
+                AND l.l_discount > 0)
+GROUP BY 
+    ro.o_orderkey, ro.o_orderdate, ro.c_name, ro.revenue_rank, si.supplied_parts
+ORDER BY 
+    ro.total_revenue DESC, 
+    ro.o_orderdate ASC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

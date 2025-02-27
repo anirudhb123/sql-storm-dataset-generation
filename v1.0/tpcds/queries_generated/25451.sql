@@ -1,0 +1,49 @@
+
+WITH ProcessedCustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        ca.ca_city,
+        ca.ca_state,
+        SUBSTRING(c.c_email_address FROM 1 FOR 3) AS email_prefix,
+        CONCAT('USA ', ca.ca_zip) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+), CustomerOrderSummary AS (
+    SELECT 
+        p.customer_full_name,
+        p.gender,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        ProcessedCustomerData p
+    LEFT JOIN 
+        web_sales ws ON p.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY 
+        p.customer_full_name, p.gender
+)
+SELECT 
+    customer_full_name,
+    gender,
+    total_orders,
+    total_spent,
+    CASE 
+        WHEN total_spent < 100 THEN 'Low Value'
+        WHEN total_spent BETWEEN 100 AND 500 THEN 'Medium Value'
+        ELSE 'High Value'
+    END AS customer_value_segment
+FROM 
+    CustomerOrderSummary
+WHERE 
+    total_orders > 0
+ORDER BY 
+    total_spent DESC;

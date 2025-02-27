@@ -1,0 +1,97 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN P.Score ELSE 0 END) AS TotalScore,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        DENSE_RANK() OVER (ORDER BY SUM(P.Score) DESC) AS RankByScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        Us.UserId,
+        Us.DisplayName,
+        Us.TotalPosts,
+        Us.TotalScore
+    FROM 
+        UserStats Us
+    WHERE 
+        Us.RankByScore <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        TH.PostHistoryTypeId,
+        COALESCE(CT.Name, 'No Close Reason') AS CloseReason,
+        COUNT(CM.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        CloseReasonTypes CT ON PH.Comment::int = CT.Id AND PH.PostHistoryTypeId = 10
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        PostHistoryTypes TH ON PH.PostHistoryTypeId = TH.Id
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.OwnerUserId, TH.PostHistoryTypeId, CT.Name
+),
+UserPostInteractions AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT V.PostId) AS VotesCount,
+        COUNT(DISTINCT C.Id) AS CommentsCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.TotalPosts AS UserTotalPosts,
+    TU.TotalScore AS UserTotalScore,
+    PD.PostId,
+    PD.Title AS PostTitle,
+    PD.CreationDate AS PostCreationDate,
+    PD.Score AS PostScore,
+    PD.ViewCount AS PostViewCount,
+    UPI.VotesCount AS UserVotesCount,
+    UPI.CommentsCount AS UserCommentsCount,
+    UPI.UpVotes AS UserUpVotes,
+    UPI.DownVotes AS UserDownVotes,
+    CASE 
+        WHEN PD.Score IS NULL THEN 'Not Applicable'
+        ELSE CASE 
+            WHEN PD.Score < 0 THEN 'Negative Score'
+            WHEN PD.Score BETWEEN 0 AND 10 THEN 'Low Score'
+            ELSE 'High Score'
+        END
+    END AS PostScoreCategory
+FROM 
+    TopUsers TU
+JOIN 
+    PostDetails PD ON TU.UserId = PD.OwnerUserId
+LEFT JOIN 
+    UserPostInteractions UPI ON UPI.UserId = TU.UserId
+ORDER BY 
+    TU.TotalScore DESC, PD.CreationDate DESC;

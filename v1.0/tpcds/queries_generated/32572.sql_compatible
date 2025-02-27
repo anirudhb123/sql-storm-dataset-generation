@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Total_Orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS Sales_Rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_site_id
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returned_customer_sk,
+        SUM(cr_return_amount) AS Total_Returns
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returned_customer_sk
+),
+CombinedData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(s.Total_Sales, 0) AS Total_Sales,
+        COALESCE(r.Total_Returns, 0) AS Total_Returns,
+        (COALESCE(s.Total_Sales, 0) - COALESCE(r.Total_Returns, 0)) AS Net_Sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesCTE s ON c.c_customer_sk = s.web_site_sk
+    LEFT JOIN 
+        CustomerReturns r ON c.c_customer_sk = r.cr_returned_customer_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.Total_Sales,
+    cd.Total_Returns,
+    cd.Net_Sales
+FROM 
+    CombinedData cd
+WHERE 
+    cd.Net_Sales > 0
+ORDER BY 
+    cd.Net_Sales DESC
+LIMIT 100 OFFSET 0;

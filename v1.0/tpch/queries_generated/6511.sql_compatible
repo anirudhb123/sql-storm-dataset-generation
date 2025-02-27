@@ -1,0 +1,30 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name = 'ASIA'
+),
+HighValueParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS total_line_items,
+           SUM(l.l_extendedprice) AS total_price,
+           SUM(l.l_discount) AS total_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, rs.s_name, hp.total_supply_value, os.total_price, os.total_discount
+FROM RankedSuppliers rs
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = rs.s_nationkey) 
+JOIN HighValueParts hp ON rs.s_suppkey = hp.ps_partkey
+JOIN OrderStatistics os ON os.total_price BETWEEN 50000 AND 200000
+WHERE rs.rank = 1
+ORDER BY r.r_name, rs.s_name, hp.total_supply_value DESC;

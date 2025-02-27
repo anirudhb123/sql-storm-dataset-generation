@@ -1,0 +1,44 @@
+WITH MovieData AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT c.name, ', ') AS cast_names,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.keyword_count DESC) AS keyword_rank
+    FROM 
+        MovieData md
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.cast_names,
+    r.keyword_count,
+    COALESCE((SELECT AVG(info) FROM movie_info mi WHERE mi.movie_id = r.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')), 'N/A') AS average_rating
+FROM 
+    RankedMovies r
+WHERE 
+    r.keyword_rank <= 5 OR (r.production_year = 2020 AND r.keyword_count > 0)
+ORDER BY 
+    r.production_year DESC, r.keyword_count DESC;

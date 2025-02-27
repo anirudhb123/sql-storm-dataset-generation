@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+Demographics AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        c_customer_sk, cd_gender, cd_marital_status
+),
+AggregateReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+FinalSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_sales,
+        SUM(sd.ws_net_paid) AS total_net_paid,
+        COALESCE(ar.total_returned, 0) AS total_returned,
+        COALESCE(dg.avg_purchase_estimate, 0) AS avg_purchase_estimate,
+        CASE 
+            WHEN SUM(sd.ws_quantity) > 0 THEN SUM(sd.ws_net_paid) / SUM(sd.ws_quantity)
+            ELSE 0 
+        END AS avg_price_per_unit
+    FROM 
+        SalesData sd
+    LEFT JOIN 
+        AggregateReturns ar ON sd.ws_item_sk = ar.cr_item_sk
+    LEFT JOIN 
+        Demographics dg ON dg.c_customer_sk IN (
+            SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = sd.ws_item_sk
+        )
+    GROUP BY 
+        sd.ws_item_sk
+)
+SELECT 
+    fs.ws_item_sk,
+    fs.total_sales,
+    fs.total_net_paid,
+    fs.total_returned,
+    fs.avg_purchase_estimate,
+    fs.avg_price_per_unit,
+    (fs.total_sales - fs.total_returned) AS net_sales,
+    CASE 
+        WHEN fs.total_sales > 1000 THEN 'High Volume'
+        WHEN fs.total_sales BETWEEN 500 AND 1000 THEN 'Medium Volume'
+        ELSE 'Low Volume' 
+    END AS sales_volume_category
+FROM 
+    FinalSales fs
+WHERE 
+    fs.total_sales IS NOT NULL
+ORDER BY 
+    net_sales DESC
+LIMIT 100;

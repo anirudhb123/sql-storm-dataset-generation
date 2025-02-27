@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalUserPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostsWithVotes AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.Score,
+        r.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        RankedPosts r
+    LEFT JOIN 
+        Votes v ON r.PostId = v.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.Score, r.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Date DESC) AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+    HAVING 
+        COUNT(*) > 1
+)
+SELECT 
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreated,
+    u.DisplayName AS PostOwner,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+    bh.ChangeCount AS PostChangeCount,
+    pv.TotalUpvotes - pv.TotalDownvotes AS NetVotes,
+    pv.Score AS PostScore,
+    CASE 
+        WHEN pv.TotalUpvotes > pv.TotalDownvotes THEN 'Popular'
+        WHEN pv.TotalDownvotes > pv.TotalUpvotes THEN 'Unpopular'
+        ELSE 'Neutral'
+    END AS PopularityStatus
+FROM 
+    PostsWithVotes pv
+JOIN 
+    Users u ON pv.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostHistorySummary bh ON pv.PostId = bh.PostId
+WHERE 
+    pv.TotalUpvotes > 0
+ORDER BY 
+    PopularityStatus, PostScore DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

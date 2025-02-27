@@ -1,0 +1,74 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT P.Id AS PostId, 
+           P.Title, 
+           P.ViewCount, 
+           P.Score, 
+           U.DisplayName AS OwnerName, 
+           P.CreationDate, 
+           1 AS Level
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT P.Id AS PostId, 
+           P.Title, 
+           P.ViewCount, 
+           P.Score, 
+           U.DisplayName AS OwnerName, 
+           P.CreationDate, 
+           R.Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostCTE R ON P.ParentId = R.PostId
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 2  
+),
+PostVoteStats AS (
+    
+    SELECT PostId,
+           SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(*) AS TotalVotes
+    FROM Votes V
+    GROUP BY PostId
+),
+PostWithBadgeCounts AS (
+    
+    SELECT U.Id AS UserId,
+           COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostsWithComments AS (
+    
+    SELECT P.Id AS PostId, 
+           COUNT(C.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    GROUP BY P.Id
+)
+SELECT R.PostId,
+       R.Title,
+       R.ViewCount,
+       R.Score,
+       R.OwnerName,
+       R.CreationDate,
+       COALESCE(V.UpVotes, 0) AS UpVotes,
+       COALESCE(V.DownVotes, 0) AS DownVotes,
+       COALESCE(C.CommentCount, 0) AS CommentCount,
+       CASE 
+           WHEN B.BadgeCount > 0 THEN 'Yes' 
+           ELSE 'No' 
+       END AS HasBadges,
+       R.Level
+FROM RecursivePostCTE R
+LEFT JOIN PostVoteStats V ON R.PostId = V.PostId
+LEFT JOIN PostsWithComments C ON R.PostId = C.PostId
+LEFT JOIN PostWithBadgeCounts B ON R.OwnerName = (SELECT DisplayName FROM Users WHERE Id = B.UserId)
+WHERE R.ViewCount > 100  
+GROUP BY R.PostId, R.Title, R.ViewCount, R.Score, R.OwnerName, R.CreationDate, B.BadgeCount, R.Level
+ORDER BY R.Score DESC, R.CreationDate DESC;

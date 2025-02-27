@@ -1,0 +1,70 @@
+
+WITH RecursiveRoleCount AS (
+    SELECT 
+        ci.person_id,
+        COUNT(*) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id
+),
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(mk.keyword) AS keyword_count,
+        COALESCE(SUM(CASE WHEN mk.keyword ILIKE '%comedy%' THEN 1 ELSE 0 END), 0) AS comedy_keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.year_rank,
+        rm.keyword_count,
+        rm.comedy_keyword_count,
+        rc.movie_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        RecursiveRoleCount rc ON rc.movie_count > 5
+    WHERE 
+        rm.keyword_count > 2
+),
+MaxKeywords AS (
+    SELECT 
+        MAX(keyword_count) AS max_keywords 
+    FROM 
+        FilteredMovies
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.year_rank,
+    fm.keyword_count,
+    fm.comedy_keyword_count,
+    CASE 
+        WHEN fm.keyword_count = (SELECT max_keywords FROM MaxKeywords) THEN 'Most Keywords'
+        ELSE 'Regular'
+    END AS keyword_status,
+    CASE 
+        WHEN fm.comedy_keyword_count > 0 THEN 'Contains Comedy Keyword'
+        ELSE 'No Comedy Keyword'
+    END AS comedy_status
+FROM 
+    FilteredMovies fm
+WHERE 
+    (fm.year_rank <= 3 AND fm.comedy_keyword_count > 1) 
+    OR (fm.comedy_keyword_count > 0 AND fm.production_year IS NOT NULL)
+ORDER BY 
+    fm.production_year DESC, 
+    fm.year_rank;

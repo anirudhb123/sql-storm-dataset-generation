@@ -1,0 +1,63 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2022-01-01' AND 
+        o.o_orderdate < '2022-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+lowest_sales AS (
+    SELECT 
+        orderkey,
+        MIN(total_sales) AS min_sales
+    FROM 
+        sales_summary
+    GROUP BY 
+        orderkey
+),
+valid_nations AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name 
+    FROM 
+        nation n 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+    WHERE 
+        r.r_name = 'EUROPE'
+)
+SELECT 
+    COALESCE(s.o_orderkey, l.ps_partkey) AS order_or_part_key,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    COUNT(DISTINCT s.customer_count) OVER (PARTITION BY s.order_rank) AS unique_customers,
+    p.p_name, 
+    p.p_retailprice, 
+    p.p_comment,
+    CASE 
+        WHEN l.l_returnflag = 'R' THEN 'RETURNED'
+        ELSE 'NOT RETURNED'
+    END AS return_status,
+    NULLIF(SUM(l.l_quantity), 0) AS total_quantity_sold,
+    (SELECT COUNT(*) FROM valid_nations vn WHERE vn.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = s.o_custkey)) AS valid_nation_count
+FROM 
+    sales_summary s
+LEFT JOIN 
+    partsupp l ON s.o_orderkey = l.ps_partkey -- intentionally bizarre join
+LEFT JOIN 
+    part p ON l.ps_partkey = p.p_partkey 
+WHERE 
+    (p.p_retailprice IS NOT NULL AND p.p_retailprice > 100) OR 
+    (s.total_sales < 500 AND s.order_rank = 1)
+ORDER BY 
+    s.total_sales DESC NULLS LAST 
+FETCH FIRST 100 ROWS ONLY;

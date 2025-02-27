@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production' LIMIT 1)
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'Sequel' LIMIT 1)
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(c.id) AS cast_members
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(c.id) >= 5
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY production_year DESC, cast_members DESC) AS movie_rank
+    FROM 
+        TopMovies
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_members,
+    ak.name AS main_actor_name,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id AND ci.nr_order = 1
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON rm.movie_id = mk.movie_id
+WHERE 
+    rm.movie_rank <= 10
+    AND rm.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    rm.production_year DESC, rm.cast_members DESC;
+
+This SQL query performs a comprehensive performance benchmark on the movie production database schema while utilizing complex constructs. It includes recursive CTEs to build a hierarchy of sequence relationships between movies, aggregates to filter the movies based on their cast size, ranking for the top movies, and joins to fetch relevant actor names and associated keywords.

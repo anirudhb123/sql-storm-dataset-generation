@@ -1,0 +1,72 @@
+WITH RECURSIVE ActorMovies AS (
+    SELECT
+        ca.person_id,
+        a.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        1 AS level
+    FROM
+        cast_info ca
+    JOIN
+        aka_name a ON ca.person_id = a.person_id
+    JOIN
+        aka_title at ON ca.movie_id = at.movie_id
+    WHERE
+        a.name IS NOT NULL
+    UNION ALL
+    SELECT
+        ca.person_id,
+        a.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        level + 1 AS level
+    FROM
+        cast_info ca
+    JOIN
+        aka_name a ON ca.person_id = a.person_id
+    JOIN
+        aka_title at ON ca.movie_id = at.movie_id
+    JOIN
+        ActorMovies am ON ca.person_id != am.person_id AND at.production_year < am.production_year
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+ActorWithKeywords AS (
+    SELECT
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        mk.keywords
+    FROM
+        ActorMovies am
+    LEFT JOIN
+        MovieKeywords mk ON am.movie_title = mk.movie_id
+)
+SELECT 
+    awk.actor_name,
+    COUNT(DISTINCT awk.movie_title) AS movies_count,
+    MIN(awk.production_year) AS earliest_movie,
+    MAX(awk.production_year) AS latest_movie,
+    CASE 
+        WHEN COUNT(DISTINCT awk.movie_title) > 5 THEN 'Star'
+        ELSE 'Regular'
+    END AS actor_type,
+    COALESCE(awk.keywords, 'No keywords') AS keywords
+FROM 
+    ActorWithKeywords awk
+GROUP BY 
+    awk.actor_name
+HAVING 
+    COUNT(DISTINCT awk.movie_title) >= 2
+ORDER BY 
+    movies_count DESC, 
+    actor_name;

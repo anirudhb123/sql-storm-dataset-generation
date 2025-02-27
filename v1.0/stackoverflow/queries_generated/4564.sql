@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 0
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalQuestions,
+        COUNT(DISTINCT a.Id) AS TotalAnswers,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId IN (8, 9)
+    GROUP BY 
+        u.Id
+),
+AggregatedData AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalQuestions,
+        us.TotalAnswers,
+        us.TotalBounty,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        COALESCE(rp.Title, 'No Top Question') AS TopQuestion,
+        COALESCE(rp.Score, 0) AS TopQuestionScore
+    FROM 
+        UserStatistics us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.Id AND rp.rn = 1
+)
+SELECT 
+    ad.DisplayName,
+    ad.TotalQuestions,
+    ad.TotalAnswers,
+    ad.TotalBounty,
+    ad.GoldBadges,
+    ad.SilverBadges,
+    ad.BronzeBadges,
+    ad.TopQuestion,
+    ad.TopQuestionScore
+FROM 
+    AggregatedData ad
+WHERE 
+    ad.TotalQuestions > 0 AND ad.TotalAnswers > 0
+ORDER BY 
+    ad.TotalBounty DESC, ad.GoldBadges DESC, ad.SilverBadges DESC;

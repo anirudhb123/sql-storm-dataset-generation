@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER(PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > 50000
+)
+
+SELECT 
+    p.p_name,
+    NVL(r.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(c.total_spent, 0) AS total_spent,
+    hp.total_supply_value AS supply_value,
+    CASE 
+        WHEN hp.total_supply_value IS NOT NULL THEN 'Available'
+        ELSE 'Not Available'
+    END AS availability_status
+FROM 
+    HighValueParts hp
+LEFT JOIN 
+    RankedSuppliers r ON r.rank = 1 AND r.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = hp.p_partkey)
+LEFT JOIN 
+    CustomerOrders c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = hp.p_partkey))
+ORDER BY 
+    hp.total_supply_value DESC, total_spent ASC;

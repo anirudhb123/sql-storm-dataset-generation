@@ -1,0 +1,59 @@
+-- Performance Benchmarking Query
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(DISTINCT v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(ps.ViewCount) AS TotalViews,
+        AVG(ps.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN 
+        PostStatistics ps ON ps.PostId = p.Id
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerReputation,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    TagStatistics ts ON ps.PostId IN (SELECT p.Id FROM Posts p WHERE p.Tags LIKE CONCAT('%', ts.TagName, '%'))
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

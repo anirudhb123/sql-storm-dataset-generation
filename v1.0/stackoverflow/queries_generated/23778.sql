@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY U.Reputation >= 1000 ORDER BY P.Score DESC) AS PostRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownvoteCount,
+        MAX(CASE WHEN Ph.PostHistoryTypeId = 10 THEN Ph.CreationDate END) OVER (PARTITION BY P.Id) AS CloseDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory Ph ON P.Id = Ph.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+)
+
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.OwnerDisplayName,
+    RP.ViewCount,
+    RP.PostRank,
+    COALESCE(NULLIF(RP.UpvoteCount, 0), 'No Upvotes') AS Upvotes,
+    COALESCE(NULLIF(RP.DownvoteCount, 0), 'No Downvotes') AS Downvotes,
+    CASE 
+        WHEN RP.CloseDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN RP.PostRank IS NULL THEN 'Post ranking not available'
+        WHEN RP.PostRank <= 5 THEN 'Top Post!'
+        ELSE 'Regular Post'
+    END AS PostRankingComment
+FROM 
+    RankedPosts RP
+WHERE 
+    RP.PostRank <= 10
+ORDER BY 
+    RP.ViewCount DESC
+LIMIT 50;
+
+-- Studies over various hypotheses related to post popularity, activity in the last year and ranked influence based on score and votes,
+-- Including edge cases for posts with no votes or ones that are closed, highlighting their impact in a user-friendly format.

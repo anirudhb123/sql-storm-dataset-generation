@@ -1,0 +1,65 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM
+        web_sales
+    GROUP BY
+        ws_item_sk
+),
+Best_Sellers AS (
+    SELECT
+        s.ws_item_sk,
+        sm(sm_ship_mode_id) AS best_ship_mode,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM
+        web_sales s
+        JOIN ship_mode sm ON s.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE
+        s.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        s.ws_item_sk, sm.sm_ship_mode_id
+    HAVING
+        SUM(ws_net_profit) > 1000
+),
+Total_Returns AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM
+        store_returns
+    GROUP BY
+        sr_item_sk
+),
+Sales_Analysis AS (
+    SELECT
+        b.ws_item_sk,
+        b.total_quantity,
+        b.total_net_profit,
+        COALESCE(t.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(t.return_count, 0) AS return_count,
+        (b.total_net_profit - COALESCE(t.total_return_quantity, 0) * 20) AS adjusted_net_profit
+    FROM
+        Best_Sellers b
+        LEFT JOIN Total_Returns t ON b.ws_item_sk = t.sr_item_sk
+)
+SELECT
+    ca.city AS customer_city,
+    SUM(sa.adjusted_net_profit) AS city_net_profit,
+    COUNT(DISTINCT c.c_customer_sk) AS number_of_customers,
+    RANK() OVER (ORDER BY SUM(sa.adjusted_net_profit) DESC) AS city_rank
+FROM
+    Sales_Analysis sa
+    JOIN customer c ON c.c_current_addr_sk = sa.ws_item_sk
+    JOIN customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+GROUP BY
+    ca.city
+HAVING
+    SUM(sa.adjusted_net_profit) > 500
+ORDER BY
+    city_net_profit DESC;

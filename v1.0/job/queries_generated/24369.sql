@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(*) OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS cast_rank,
+        t.id AS movie_id
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+),
+TopCastMovies AS (
+    SELECT 
+        movie_id,
+        title, 
+        production_year 
+    FROM 
+        RankedMovies
+    WHERE 
+        cast_rank <= 5
+),
+MoviesWithKeyword AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        k.keyword
+    FROM 
+        TopCastMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS companies,
+        COUNT(DISTINCT cn.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id 
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+    GROUP BY 
+        mc.movie_id
+),
+FinalResults AS (
+    SELECT 
+        mwk.title,
+        mwk.production_year,
+        mwk.keyword, 
+        cd.companies,
+        COALESCE(cd.company_count, 0) AS total_companies
+    FROM 
+        MoviesWithKeyword mwk
+    LEFT JOIN 
+        CompanyDetails cd ON mwk.movie_id = cd.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    keyword, 
+    companies,
+    total_companies
+FROM 
+    FinalResults
+WHERE 
+    (keyword IS NOT NULL AND keyword <> '') 
+    OR (total_companies > 0)
+ORDER BY 
+    production_year DESC, 
+    title ASC;

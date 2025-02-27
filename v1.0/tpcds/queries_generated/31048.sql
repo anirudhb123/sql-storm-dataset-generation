@@ -1,0 +1,46 @@
+
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS number_of_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+    
+    UNION ALL
+    
+    SELECT 
+        d.d_year,
+        SUM(sh.sm_sales) AS total_sales,
+        COUNT(DISTINCT sh.ticket_number) AS number_of_sales
+    FROM 
+        store_sales sh
+    JOIN 
+        date_dim d ON sh.sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    d.d_year,
+    COALESCE(m.total_sales, 0) AS total_web_sales,
+    COALESCE(s.total_sales, 0) AS total_store_sales,
+    COALESCE(m.total_sales, 0) + COALESCE(s.total_sales, 0) AS grand_total_sales,
+    m.number_of_sales + s.number_of_sales AS total_orders,
+    ROUND(COALESCE(m.total_sales, 0) / NULLIF(m.number_of_sales, 0), 2) AS avg_web_order_value,
+    ROUND(COALESCE(s.total_sales, 0) / NULLIF(s.number_of_sales, 0), 2) AS avg_store_order_value
+FROM 
+    (SELECT DISTINCT d_year FROM date_dim) d
+LEFT JOIN 
+    (SELECT d_year, total_sales, number_of_sales FROM monthly_sales) m ON d.d_year = m.d_year
+LEFT JOIN 
+    (SELECT d_year, SUM(ss.net_paid) AS total_sales, COUNT(DISTINCT ss.ticket_number) AS number_of_sales FROM store_sales ss
+     JOIN date_dim dd ON ss.sold_date_sk = dd.d_date_sk
+     GROUP BY dd.d_year) s ON d.d_year = s.d_year
+WHERE 
+    d.d_year >= 2010
+ORDER BY 
+    d.d_year;

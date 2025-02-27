@@ -1,0 +1,50 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_counts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS num_movies
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+filtered_movies AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        FIRST_VALUE(mt.title) OVER (PARTITION BY mt.movie_id ORDER BY mt.production_year DESC) AS latest_title
+    FROM 
+        movie_companies mc
+        JOIN title mt ON mc.movie_id = mt.id
+        LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+        LEFT JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'production')
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    ft.latest_title,
+    ft.actors,
+    COUNT(DISTINCT ft.movie_id) AS total_movies,
+    rc.production_year,
+    COALESCE(ac.num_movies, 0) AS num_actors
+FROM 
+    filtered_movies ft
+    LEFT JOIN actor_counts ac ON ac.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = ft.movie_id)
+    JOIN ranked_titles rc ON ft.latest_title = rc.title
+WHERE 
+    rc.title_rank <= 5
+GROUP BY 
+    ft.latest_title, ft.actors, rc.production_year, ac.num_movies
+ORDER BY 
+    rc.production_year DESC, total_movies DESC;

@@ -1,0 +1,42 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, 1 AS depth
+    FROM aka_title AS mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id, m.title, mh.depth + 1
+    FROM movie_link AS ml
+    JOIN MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN title AS m ON ml.linked_movie_id = m.id
+    WHERE mh.depth < 5  -- Limits the recursion to avoid excessive depth
+),
+ActorRoles AS (
+    SELECT ai.person_id, ai.role_id, COUNT(ci.movie_id) AS movie_count
+    FROM cast_info AS ci
+    JOIN aka_name AS ai ON ci.person_id = ai.person_id
+    GROUP BY ai.person_id, ai.role_id
+),
+PopularActors AS (
+    SELECT ar.person_id, a.name, SUM(ar.movie_count) AS total_movies
+    FROM ActorRoles AS ar
+    JOIN aka_name AS a ON ar.person_id = a.person_id
+    WHERE ar.movie_count > 1  -- Filtering actors with more than one role
+    GROUP BY ar.person_id, a.name
+    HAVING SUM(ar.movie_count) > 10  -- Only considering actors with more than 10 appearances
+),
+MovieInfo AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM aka_title AS mt
+    LEFT JOIN movie_keyword AS mk ON mt.id = mk.movie_id
+    WHERE mt.production_year >= 2000
+    GROUP BY mt.id, mt.title, mt.production_year
+)
+SELECT mh.title AS movie_title, mh.depth, pa.name AS actor_name, mi.total_keywords
+FROM MovieHierarchy AS mh
+FULL OUTER JOIN PopularActors AS pa ON mh.movie_id = pa.person_id  -- Linking actors to movies they acted in
+JOIN MovieInfo AS mi ON mh.movie_id = mi.movie_id
+WHERE (mh.depth > 1 OR pa.name IS NOT NULL)  -- Filtering out irrelevant data
+AND (mi.total_keywords IS NOT NULL OR mh.title IS NOT NULL)
+ORDER BY mh.production_year DESC, mh.depth, total_keywords DESC
+LIMIT 100;

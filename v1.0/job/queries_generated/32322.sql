@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    JOIN
+        title t ON m.movie_id = t.id
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        mh.movie_id,
+        t.title,
+        mh.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.movie_id
+    JOIN
+        title t ON m.movie_id = t.id
+)
+SELECT
+    a.name AS actor_name,
+    COALESCE(tc.title, 'Unknown Title') AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT mh.movie_id) OVER (PARTITION BY a.id) AS movie_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY mh.production_year DESC) AS rank,
+    s.text AS role,
+    CASE
+        WHEN COUNT(DISTINCT mh.movie_id) IS NULL THEN 'No Movies'
+        ELSE 'Movies Found'
+    END AS status
+FROM
+    aka_name a
+LEFT JOIN
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    role_type s ON ci.role_id = s.id
+LEFT JOIN
+    aka_title tc ON mh.movie_id = tc.movie_id
+WHERE
+    a.name IS NOT NULL
+    AND (mh.production_year IS NOT NULL OR a.name LIKE '%John%')
+ORDER BY
+    movie_count DESC,
+    actor_name;

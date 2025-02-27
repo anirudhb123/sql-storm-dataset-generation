@@ -1,0 +1,58 @@
+WITH supplier_info AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name, 
+        SUBSTR(s.s_comment, 1, 30) AS short_comment,
+        REPLACE(s.s_address, 'Street', 'St') AS formatted_address
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+part_summary AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+order_details AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_supplykey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    si.s_name AS supplier_name,
+    si.nation_name,
+    ps.p_name AS part_name,
+    ps.supplier_count,
+    ps.total_available_qty,
+    od.total_price AS order_value
+FROM 
+    supplier_info si
+JOIN 
+    part_summary ps ON ps.supplier_count > 0
+JOIN 
+    order_details od ON od.lineitem_count > 0
+WHERE 
+    si.short_comment IS NOT NULL
+ORDER BY 
+    od.total_price DESC, ps.total_available_qty ASC
+LIMIT 100;

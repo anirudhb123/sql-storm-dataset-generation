@@ -1,0 +1,73 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ca.ca_zip
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+item_info AS (
+    SELECT 
+        i.i_item_id,
+        LOWER(i.i_item_desc) AS item_description,
+        i.i_brand,
+        i.i_category,
+        i.i_current_price
+    FROM 
+        item i
+),
+sales_info AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ws.ws_net_paid_inc_tax,
+        ws.ws_sold_date_sk,
+        i.i_item_id
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    ci.ca_zip,
+    ii.item_description,
+    ii.i_brand,
+    ii.i_category,
+    SUM(si.ws_quantity) AS total_quantity_sold,
+    SUM(si.ws_ext_sales_price) AS total_sales,
+    AVG(si.ws_net_paid_inc_tax) AS avg_net_payment
+FROM 
+    customer_info ci
+JOIN 
+    sales_info si ON ci.c_customer_id = si.ws_bill_customer_sk
+JOIN 
+    item_info ii ON si.ws_item_sk = ii.i_item_id
+WHERE 
+    ci.cd_gender = 'F'
+    AND ci.cd_marital_status = 'M'
+    AND (ii.item_description LIKE '%organic%' OR ii.i_brand LIKE '%nature%')
+GROUP BY 
+    ci.full_name, ci.ca_city, ci.ca_state, ci.ca_country, ci.ca_zip, 
+    ii.item_description, ii.i_brand, ii.i_category
+HAVING 
+    SUM(si.ws_quantity) > 10
+ORDER BY 
+    total_sales DESC
+LIMIT 100;

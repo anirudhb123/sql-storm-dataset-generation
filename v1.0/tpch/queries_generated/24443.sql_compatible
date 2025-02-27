@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(DISTINCT l.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COALESCE(co.total_order_value, 0) AS total_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrders co ON c.c_custkey = co.o_custkey
+    WHERE 
+        c.c_acctbal > 1000
+),
+FilteredSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        CASE 
+            WHEN rs.rank <= 3 THEN 'Top Supplier'
+            ELSE 'Other Supplier' 
+        END AS supplier_ranking
+    FROM 
+        RankedSuppliers rs
+)
+SELECT 
+    fc.c_custkey,
+    fc.c_name,
+    fs.s_name,
+    fs.supplier_ranking,
+    fs.s_acctbal,
+    (CASE 
+        WHEN fc.total_value > 10000 THEN 'High Value Customer'
+        ELSE 'Regular Customer' 
+    END) AS customer_category
+FROM 
+    FilteredSuppliers fs
+CROSS JOIN 
+    HighValueCustomers fc
+WHERE 
+    fs.supplier_ranking = 'Top Supplier'
+    AND (fc.total_value IS NULL OR fc.total_value < 5000)
+ORDER BY 
+    fc.c_acctbal DESC, fs.s_acctbal ASC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM HighValueCustomers) / 2;

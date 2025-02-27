@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVoteCount,  
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVoteCount  
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+
+ClosedAndEditedPosts AS (
+    SELECT 
+        pp.PostId,
+        pht.PostHistoryTypeId,
+        COUNT(pht.PostId) AS NumberOfEdits,
+        COUNT(CASE WHEN pht.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseStatus
+    FROM 
+        RankedPosts pp
+    JOIN 
+        PostHistory pht ON pp.PostId = pht.PostId
+    WHERE 
+        pp.RankByScore <= 5
+    GROUP BY 
+        pp.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    COALESCE(cn.NumberOfEdits, 0) AS EditCount,
+    cn.CloseStatus,
+    (rp.UpVoteCount - rp.DownVoteCount) AS NetVotes,
+    CASE WHEN cn.CloseStatus > 0 THEN 'Closed'
+         ELSE 'Open'
+    END AS Status
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedAndEditedPosts cn ON rp.PostId = cn.PostId
+WHERE 
+    rp.RankByScore <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

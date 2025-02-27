@@ -1,0 +1,40 @@
+
+WITH CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_brand, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY p.p_partkey, p.p_brand
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000
+),
+FinalReport AS (
+    SELECT co.c_custkey, co.c_name, p.p_brand, ts.s_name, p.total_sales, ts.total_supply_cost
+    FROM CustomerOrders co
+    FULL OUTER JOIN PartSales p ON co.order_count > 0
+    LEFT JOIN TopSuppliers ts ON ts.total_supply_cost > 10000
+    WHERE co.c_custkey IS NOT NULL OR p.p_partkey IS NOT NULL
+)
+SELECT 
+    fr.c_custkey,
+    fr.c_name,
+    COALESCE(fr.p_brand, 'No Sales') AS part_brand,
+    COALESCE(fr.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(fr.total_sales, 0) AS total_sales,
+    COALESCE(fr.total_supply_cost, 0) AS total_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY fr.c_custkey ORDER BY fr.total_sales DESC) AS sales_rank
+FROM FinalReport fr
+ORDER BY fr.total_sales DESC, fr.c_name;

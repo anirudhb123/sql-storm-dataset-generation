@@ -1,0 +1,65 @@
+
+WITH UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG((EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - u.CreationDate)) / 86400)) AS AvgAccountAgeDays
+    FROM
+        Users u
+    LEFT JOIN
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+), PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        COUNT(DISTINCT pt.OwnerUserId) AS UniqueUsers
+    FROM
+        Tags t
+    JOIN
+        Posts pt ON pt.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY
+        t.TagName
+    ORDER BY
+        PostCount DESC
+    LIMIT 10
+), TopUsers AS (
+    SELECT
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.TotalPosts,
+        us.Questions,
+        us.Answers,
+        us.AcceptedAnswers,
+        us.AvgAccountAgeDays
+    FROM
+        UserStats us
+    WHERE
+        us.Reputation > (SELECT AVG(Reputation) FROM Users)
+    ORDER BY
+        us.Reputation DESC
+    LIMIT 5
+)
+SELECT
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.Questions,
+    tu.Answers,
+    tu.AcceptedAnswers,
+    pt.TagName AS PopularTag,
+    pt.PostCount,
+    pt.UniqueUsers
+FROM
+    TopUsers tu
+JOIN
+    PopularTags pt ON pt.UniqueUsers > tu.Answers
+ORDER BY
+    tu.Reputation DESC, pt.PostCount DESC;

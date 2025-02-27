@@ -1,0 +1,76 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_brand,
+        p.p_retailprice,
+        (CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size' 
+            ELSE CONCAT('Size:', p.p_size) 
+         END) AS size_description
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container LIKE 'BOX%')
+),
+SuspiciousOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate < o.o_orderdate
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_discount) > 0.5
+),
+MarketSegmentSummary AS (
+    SELECT 
+        c.c_mktsegment,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(s.s_acctbal) AS total_supplier_balance
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        RankedSuppliers rs ON c.c_nationkey = rs.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON ps.ps_suppkey = rs.s_suppkey
+    GROUP BY 
+        c.c_mktsegment
+)
+SELECT 
+    f.p_partkey,
+    f.p_brand,
+    COALESCE(mss.total_orders, 0) AS orders_count,
+    COALESCE(mss.total_supplier_balance, 0) AS supplier_balance,
+    (SELECT COUNT(*) FROM SuspiciousOrders so WHERE so.total_price > 10000) AS suspicious_orders_count,
+    SUM(f.p_retailprice) AS total_market_value
+FROM 
+    FilteredParts f
+LEFT JOIN 
+    MarketSegmentSummary mss ON f.p_brand = mss.c_mktsegment
+GROUP BY 
+    f.p_partkey,
+    f.p_brand,
+    mss.total_orders,
+    mss.total_supplier_balance
+HAVING 
+    SUM(f.p_retailprice) > (SELECT AVG(f2.p_retailprice) FROM FilteredParts f2)
+ORDER BY 
+    total_market_value DESC
+LIMIT 10;

@@ -1,0 +1,53 @@
+
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_regionkey = 1  
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey + 1  
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+SupplierSupply AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS supply_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    COALESCE(ps.total_revenue, 0) AS part_revenue,
+    COALESCE(cs.total_spent, 0) AS customer_spending,
+    COALESCE(cs.order_count, 0) AS customer_orders,
+    ssc.total_supply_cost,
+    RANK() OVER (ORDER BY COALESCE(ps.total_revenue, 0) DESC) AS revenue_rank
+FROM SupplierSupply ssc
+FULL OUTER JOIN PartStats ps ON ssc.total_supply_cost > 10000
+LEFT JOIN CustomerStats cs ON cs.c_custkey = ssc.s_suppkey
+WHERE (cs.rank <= 5 OR cs.rank IS NULL) OR ps.order_count > 10
+ORDER BY revenue_rank;

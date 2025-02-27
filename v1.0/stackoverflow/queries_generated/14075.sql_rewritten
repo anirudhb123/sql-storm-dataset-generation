@@ -1,0 +1,60 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        STRING_SPLIT(P.Tags, ',') T ON T.Value IS NOT NULL
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, P.CreationDate, P.LastActivityDate
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionsAsked,
+    U.AnswersGiven,
+    U.UpVotesReceived,
+    U.DownVotesReceived,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.ViewCount,
+    P.AnswerCount,
+    P.CommentCount,
+    P.CreationDate,
+    P.LastActivityDate,
+    P.Tags
+FROM 
+    UserStats U
+JOIN 
+    PostSummary P ON U.UserId = (SELECT TOP 1 OwnerUserId FROM Posts WHERE Id = P.PostId)
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

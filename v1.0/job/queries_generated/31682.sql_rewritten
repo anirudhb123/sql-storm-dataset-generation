@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL AS parent_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    
+    SELECT 
+        e.id,
+        e.title,
+        e.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    mh.title AS "Title",
+    mh.production_year AS "Production Year",
+    mh.level AS "Hierarchy Level",
+    COALESCE(a.name, 'Unknown') AS "Lead Actor",
+    COUNT(k.keyword) AS "Keyword Count",
+    AVG(CASE WHEN mii.info IS NOT NULL THEN LENGTH(mii.info) ELSE 0 END) AS "Average Info Length",
+    CASE
+        WHEN mii.note IS NOT NULL AND mii.note <> '' THEN TRUE
+        ELSE FALSE
+    END AS "Has Note"
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name a ON a.person_id = cc.subject_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info_index mii ON mii.movie_id = mh.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, a.name
+HAVING 
+    COUNT(k.keyword) > 2 
+ORDER BY 
+    mh.production_year DESC, mh.title;

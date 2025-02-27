@@ -1,0 +1,65 @@
+
+WITH TagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(DISTINCT T.TagName) AS TagCount
+    FROM 
+        Posts P
+    JOIN 
+        LATERAL string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '>') AS T(TagName) ON TRUE
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    WHERE 
+        U.Reputation > 100 
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopQuestions AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        TC.TagCount,
+        US.DisplayName AS OwnerName,
+        US.Reputation,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        TagCounts TC ON P.Id = TC.PostId
+    JOIN 
+        UserStatistics US ON P.OwnerUserId = US.UserId
+    WHERE 
+        P.PostTypeId = 1 
+)
+SELECT 
+    Q.Rank,
+    Q.Title,
+    Q.CreationDate,
+    Q.TagCount,
+    Q.OwnerName,
+    Q.Reputation,
+    Q.Score,
+    Q.ViewCount
+FROM 
+    TopQuestions Q
+WHERE 
+    Q.Rank <= 10
+ORDER BY 
+    Q.Rank;

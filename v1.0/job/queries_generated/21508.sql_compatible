@@ -1,0 +1,70 @@
+
+WITH RecursiveCte AS (
+    SELECT 
+        ak.person_id,
+        ak.name,
+        ct.kind_id,
+        ct.title,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ct.production_year DESC) AS rn
+    FROM 
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title ct ON ci.movie_id = ct.movie_id
+    WHERE
+        ak.name IS NOT NULL
+        AND ct.production_year IS NOT NULL
+), FilteredMovies AS (
+    SELECT 
+        cte.person_id,
+        cte.name,
+        ct.title,
+        ct.production_year,
+        cte.rn
+    FROM 
+        RecursiveCte cte
+    JOIN 
+        aka_title ct ON cte.title = ct.title
+    WHERE 
+        ct.production_year > 2000
+        AND cte.rn <= 5
+), CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), FinalOutput AS (
+    SELECT 
+        f.person_id,
+        f.name,
+        f.title,
+        f.production_year,
+        COALESCE(cd.company_name, 'Independent') AS company_name,
+        COALESCE(cd.company_type, 'Unknown') AS company_type
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        CompanyDetails cd ON f.title = cd.movie_id
+)
+
+SELECT 
+    fo.person_id,
+    fo.name,
+    fo.title,
+    fo.production_year,
+    fo.company_name,
+    fo.company_type,
+    DENSE_RANK() OVER (PARTITION BY fo.company_type ORDER BY fo.production_year DESC) AS rank_by_company
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.production_year IS NOT NULL
+ORDER BY 
+    fo.company_type, rank_by_company;

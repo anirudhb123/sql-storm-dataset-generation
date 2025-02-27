@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        COALESCE(up.UserId, 0) AS UpVoteUser,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        (SELECT 
+            PostId, UserId FROM Votes WHERE VoteTypeId = 2) AS up 
+        ON p.Id = up.PostId
+    WHERE 
+        p.PostTypeId = 1 
+),
+CommentAnalysis AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        MAX(CreationDate) AS LastCommentDate
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(ca.CommentCount, 0) AS CommentCount,
+        COALESCE(ca.LastCommentDate, '1900-01-01') AS LastCommentDate,
+        COALESCE(cp.CloseReasons, 'Not Closed') AS CloseReasons,
+        CASE 
+            WHEN rp.Score < 0 THEN 'Low Score'
+            WHEN rp.ViewCount > 1000 AND rp.Score > 10 THEN 'Popular'
+            ELSE 'Average'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CommentAnalysis ca ON rp.PostId = ca.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    WHERE 
+        rp.RecentPostRank = 1 AND 
+        (rp.UpVoteUser IS NULL OR rp.UpVoteUser NOT IN (SELECT UserId FROM Users WHERE Reputation < 50))
+)
+
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.Score,
+    pd.CommentCount,
+    pd.CloseReasons,
+    pd.PostStatus,
+    CASE 
+        WHEN pd.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PostStatus = 'Popular'
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC
+LIMIT 100;

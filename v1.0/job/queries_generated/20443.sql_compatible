@@ -1,0 +1,90 @@
+
+WITH actor_movie_counts AS (
+    SELECT 
+        akn.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        aka_name akn
+    JOIN 
+        cast_info c ON akn.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    GROUP BY 
+        akn.person_id
+),
+movie_topics AS (
+    SELECT 
+        m.id AS movie_id,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS keyword_count
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, k.keyword
+),
+keyword_aggregated AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(keyword, ', ') AS keywords,
+        MAX(keyword_count) AS max_keyword_count
+    FROM 
+        movie_topics
+    GROUP BY 
+        movie_id
+),
+role_distribution AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS distinct_roles,
+        SUM(CASE WHEN r.role = 'Lead' THEN 1 ELSE 0 END) AS lead_roles,
+        SUM(CASE WHEN r.role = 'Supporting' THEN 1 ELSE 0 END) AS supporting_roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    akn.name,
+    akn.person_id AS actor_id,
+    COALESCE(ac.movie_count, 0) AS total_movies,
+    COALESCE(ka.keywords, 'No Keywords') AS keywords,
+    COALESCE(rd.distinct_roles, 0) AS role_count,
+    SUM(rd.lead_roles * 1.5 + rd.supporting_roles) AS role_weight_score,
+    CASE 
+        WHEN COALESCE(ac.movie_count, 0) = 0 THEN 'Inactive Actor'
+        ELSE 'Active Actor'
+    END AS activity_status
+FROM 
+    aka_name akn
+LEFT JOIN 
+    actor_movie_counts ac ON akn.person_id = ac.person_id
+LEFT JOIN 
+    keyword_aggregated ka ON ka.movie_id IN (
+        SELECT DISTINCT c.movie_id 
+        FROM cast_info c 
+        WHERE c.person_id = akn.person_id
+    )
+LEFT JOIN 
+    role_distribution rd ON rd.movie_id IN (
+        SELECT DISTINCT c.movie_id 
+        FROM cast_info c 
+        WHERE c.person_id = akn.person_id
+    )
+WHERE 
+    akn.name IS NOT NULL
+GROUP BY 
+    akn.person_id, akn.name, ac.movie_count, ka.keywords, rd.distinct_roles
+HAVING 
+    (COALESCE(ac.movie_count, 0) > 5 AND COALESCE(rd.distinct_roles, 0) < 3)
+    OR (COALESCE(ac.movie_count, 0) = 0 AND rd.distinct_roles IS NOT NULL)
+ORDER BY 
+    role_weight_score DESC, akn.name;

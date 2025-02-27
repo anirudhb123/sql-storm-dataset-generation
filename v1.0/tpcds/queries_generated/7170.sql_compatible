@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.customer_sk, 
+        c.first_name, 
+        c.last_name, 
+        SUM(ws.ext_sales_price) AS total_sales
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.customer_sk = ws.ship_customer_sk
+    GROUP BY 
+        c.customer_sk, c.first_name, c.last_name
+),
+TopSpenders AS (
+    SELECT 
+        c.customer_sk, 
+        c.first_name, 
+        c.last_name, 
+        cs.total_sales
+    FROM 
+        CustomerSales AS cs
+    JOIN 
+        customer AS c ON cs.customer_sk = c.customer_sk
+    ORDER BY 
+        cs.total_sales DESC
+    LIMIT 10
+),
+SalesSummary AS (
+    SELECT 
+        d.year AS sales_year, 
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        SUM(ws.ext_sales_price) AS total_revenue,
+        AVG(ws.ext_sales_price) AS avg_order_value
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.sold_date_sk = d.date_sk
+    GROUP BY 
+        d.year
+)
+SELECT 
+    ts.first_name, 
+    ts.last_name, 
+    ts.total_sales, 
+    ss.sales_year, 
+    ss.total_orders, 
+    ss.total_revenue, 
+    ss.avg_order_value
+FROM 
+    TopSpenders AS ts
+JOIN 
+    SalesSummary AS ss ON ts.total_sales > ss.total_revenue / 100
+ORDER BY 
+    ss.total_revenue DESC, ts.total_sales DESC;

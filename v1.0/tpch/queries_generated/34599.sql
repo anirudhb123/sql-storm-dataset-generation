@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE sh.level < 5
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), 
+RegionalSales AS (
+    SELECT r.r_regionkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY r.r_regionkey
+)
+SELECT 
+    r.r_name AS region_name, 
+    COALESCE(SUM(rs.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    MAX(COALESCE(s.s_name, 'No Supplier')) AS supplier_name,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM region r
+LEFT JOIN RegionalSales rs ON r.r_regionkey = rs.r_regionkey
+LEFT JOIN CustomerOrders co ON co.order_count > 0
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10))
+LEFT JOIN supplier s ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+GROUP BY r.r_name
+HAVING total_sales > 100000
+ORDER BY total_sales DESC;

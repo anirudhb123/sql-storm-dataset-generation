@@ -1,0 +1,79 @@
+WITH PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Posts a
+            WHERE a.ParentId = p.Id
+        ), 0) AS AnswerCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Comments c
+            WHERE c.PostId = p.Id
+        ), 0) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, '><')) AS tagName ON TRUE
+    LEFT JOIN 
+        Tags t ON tagName = t.TagName
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24)  
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        pd.*,
+        pa.EditCount,
+        pa.LastEditDate
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostActivity pa ON pd.PostId = pa.PostId
+    WHERE 
+        pd.ViewCount > 1000
+    ORDER BY 
+        pd.Score DESC, pd.ViewCount DESC 
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.EditCount,
+    tp.LastEditDate,
+    STRING_AGG(DISTINCT tp.Tags, ', ') AS AllTags
+FROM 
+    TopPosts tp
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.OwnerDisplayName, 
+    tp.CreationDate, tp.ViewCount, tp.Score, 
+    tp.AnswerCount, tp.CommentCount, tp.EditCount, tp.LastEditDate
+ORDER BY 
+    tp.Score DESC;

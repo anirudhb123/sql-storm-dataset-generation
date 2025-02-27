@@ -1,0 +1,54 @@
+
+WITH RankedCustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        sr_return_quantity,
+        DENSE_RANK() OVER (PARTITION BY sr_customer_sk ORDER BY sr_return_quantity DESC) AS rank_qty
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_quantity IS NOT NULL
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returned_quantity,
+    COUNT(DISTINCT sr.sr_customer_sk) AS unique_returning_customers,
+    STRING_AGG(DISTINCT c.c_email_address, ', ') AS customer_emails,
+    CASE 
+        WHEN COUNT(DISTINCT sr.sr_customer_sk) > 10 THEN 'High Volume'
+        WHEN COUNT(DISTINCT sr.sr_customer_sk) BETWEEN 5 AND 10 THEN 'Moderate Volume'
+        ELSE 'Low Volume'
+    END AS return_volume_category
+FROM 
+    warehouse w
+LEFT JOIN 
+    store_returns sr ON sr.sr_store_sk = w.w_warehouse_sk
+LEFT JOIN 
+    CustomerDetails cd ON cd.c_customer_id = sr.sr_customer_sk
+LEFT JOIN 
+    RankedCustomerReturns rcr ON rcr.sr_customer_sk = sr.sr_customer_sk
+WHERE 
+    rcr.rank_qty = 1
+GROUP BY 
+    w.w_warehouse_id, w.w_warehouse_name
+HAVING 
+    SUM(sr.sr_return_quantity) > 100 OR COUNT(DISTINCT sr.sr_customer_sk) > 1
+ORDER BY 
+    total_returned_quantity DESC, w.w_warehouse_id
+OFFSET 10 ROWS 
+FETCH NEXT 10 ROWS ONLY;

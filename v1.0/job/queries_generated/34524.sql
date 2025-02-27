@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        CONCAT('Sequel of ', mh.title),
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+
+FilteredRank AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.level,
+        rm.rank
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+)
+
+SELECT DISTINCT
+    ak.name AS actor_name,
+    rm.title AS movie_title,
+    rm.production_year,
+    cr.kind AS company_role
+FROM 
+    FilteredRank rm
+LEFT JOIN 
+    complete_cast cc ON rm.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type cr ON mc.company_type_id = cr.id
+WHERE 
+    rm.production_year IS NOT NULL
+    AND ak.name IS NOT NULL
+    AND (cn.country_code IS NULL OR cn.country_code != 'USA')
+ORDER BY 
+    rm.production_year DESC, 
+    rm.level, 
+    ak.name;

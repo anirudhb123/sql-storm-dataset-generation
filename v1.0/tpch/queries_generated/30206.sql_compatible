@@ -1,0 +1,62 @@
+
+WITH RECURSIVE CTE_Supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, cs.level + 1
+    FROM supplier s
+    JOIN CTE_Supplier cs ON s.s_acctbal > (cs.s_acctbal * 0.75)
+    WHERE cs.level < 5
+),
+TotalLineItem AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate < DATE '1997-01-01'
+    GROUP BY l.l_orderkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS part_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ExtendedResults AS (
+    SELECT 
+        ns.n_name,
+        COALESCE(cs.order_count, 0) AS total_orders,
+        COALESCE(ss.part_count, 0) AS total_parts,
+        CASE 
+            WHEN ns.n_regionkey IS NULL THEN 'Unknown Region'
+            ELSE r.r_name
+        END AS region_name
+    FROM nation ns
+    LEFT JOIN CustomerOrderStats cs ON cs.c_custkey = ns.n_nationkey
+    LEFT JOIN SupplierStats ss ON ss.s_suppkey = ns.n_nationkey
+    LEFT JOIN region r ON ns.n_regionkey = r.r_regionkey
+)
+SELECT 
+    er.region_name,
+    SUM(er.total_orders) AS sum_orders,
+    SUM(er.total_parts) AS sum_parts,
+    COUNT(DISTINCT er.n_name) AS nation_count
+FROM ExtendedResults er
+GROUP BY er.region_name
+HAVING SUM(er.total_orders) > 50
+ORDER BY sum_orders DESC
+UNION 
+SELECT 
+    'Overall Stats' AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS sum_orders,
+    COUNT(DISTINCT ps.ps_partkey) AS sum_parts,
+    NULL AS nation_count
+FROM orders o
+CROSS JOIN partsupp ps
+WHERE ps.ps_availqty > 10
+  AND o.o_totalprice > 5000.00;

@@ -1,0 +1,83 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mn.name) AS unique_companies,
+        SUM(CASE WHEN ct.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name mn ON mc.company_id = mn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+TitleStats AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        COALESCE(cs.unique_companies, 0) AS company_count,
+        COALESCE(cs.distributor_count, 0) AS distributor_count,
+        COUNT(DISTINCT ka.name) AS actor_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        CompanyStats cs ON at.id = cs.movie_id
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ka ON ci.person_id = ka.person_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.id, at.title
+),
+RankedTitles AS (
+    SELECT 
+        title,
+        company_count,
+        distributor_count,
+        actor_count,
+        ROW_NUMBER() OVER (ORDER BY company_count DESC, distributor_count DESC, actor_count DESC) AS rank
+    FROM 
+        TitleStats
+)
+SELECT 
+    rt.title,
+    rt.company_count,
+    rt.distributor_count,
+    rt.actor_count,
+    mh.level
+FROM 
+    RankedTitles rt
+JOIN 
+    MovieHierarchy mh ON rt.movie_id = mh.movie_id
+WHERE 
+    rt.rank <= 10
+ORDER BY 
+    rt.company_count DESC, 
+    rt.distributor_count DESC;

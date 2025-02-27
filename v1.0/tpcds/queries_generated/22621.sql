@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price AS sales_price,
+        ws_net_profit AS net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number DESC) AS order_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sales_price IS NOT NULL 
+        AND ws_net_profit IS NOT NULL
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(CHAR_LENGTH(cd.cd_credit_rating), 0) as credit_length,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > (SELECT AVG(cd_purchase_estimate) FROM customer_demographics) 
+        OR (cd.cd_marital_status = 'S' AND cd.cd_gender = 'F')
+),
+site_info AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_paid) AS total_net_paid,
+        SUM(ws_ext_discount_amt) AS total_discount,
+        RANK() OVER (ORDER BY SUM(ws_net_paid) DESC) as site_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    customer_info.c_customer_sk,
+    customer_info.c_first_name,
+    customer_info.c_last_name,
+    customer_info.cd_gender,
+    MAX(sales_data.sales_price) AS max_sales_price,
+    SUM(site_info.total_net_paid) AS total_net_spent,
+    COUNT(DISTINCT sales_data.ws_order_number) AS unique_orders,
+    SUM(site_info.total_discount) AS total_discount_received,
+    CASE 
+        WHEN MAX(sales_data.net_profit) > 100.00 THEN 'High Value' 
+        WHEN MAX(sales_data.net_profit) IS NULL THEN 'No Profit' 
+        ELSE 'Moderate Value' 
+    END AS customer_value_category
+FROM 
+    customer_info
+LEFT JOIN 
+    sales_data ON customer_info.c_customer_sk = sales_data.ws_order_number
+JOIN 
+    site_info ON sales_data.ws_item_sk = site_info.ws_item_sk
+WHERE 
+    customer_info.gender_rank < 5 
+    AND (customer_info.credit_length BETWEEN 1 AND 10)
+GROUP BY 
+    customer_info.c_customer_sk,
+    customer_info.c_first_name,
+    customer_info.c_last_name,
+    customer_info.cd_gender
+HAVING 
+    total_net_spent > (SELECT AVG(total_net_paid) FROM site_info)
+ORDER BY 
+    customer_info.c_last_name DESC,
+    customer_info.c_first_name ASC
+LIMIT 20;

@@ -1,0 +1,86 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+customer_return_stats AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS returns_count,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+combined_stats AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        cs.returns_count,
+        cs.total_return_amt,
+        COALESCE(is.total_sold, 0) AS total_item_sold,
+        COALESCE(is.total_profit, 0) AS total_profit
+    FROM 
+        ranked_customers rc
+    LEFT JOIN 
+        customer_return_stats cs ON rc.c_customer_sk = cs.sr_customer_sk
+    LEFT JOIN 
+        item_sales is ON rc.c_customer_sk = is.ws_item_sk
+    WHERE 
+        rc.gender_rank = 1
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    CASE 
+        WHEN cps.total_item_sold > 0 THEN 
+            (c.total_return_amt / cps.total_item_sold) * 100
+        ELSE 
+            NULL
+    END AS return_rate_percentage,
+    CASE 
+        WHEN total_profit = 0 THEN 
+            'No Profit'
+        WHEN total_profit BETWEEN 0 AND 100 THEN 
+            'Low Profit'
+        WHEN total_profit BETWEEN 100 AND 1000 THEN 
+            'Medium Profit'
+        ELSE 
+            'High Profit'
+    END AS profit_category
+FROM 
+    combined_stats c
+LEFT JOIN 
+    (SELECT 
+         ws_ship_customer_sk,
+         SUM(ws_quantity) AS total_item_sold
+     FROM 
+         web_sales
+     GROUP BY 
+         ws_ship_customer_sk) cps ON c.c_customer_sk = cps.ws_ship_customer_sk
+WHERE 
+    (c.total_return_amt IS NOT NULL OR c.total_profit > 100)
+    AND c.total_item_sold IS NOT NULL
+ORDER BY 
+    c.c_last_name, c.c_first_name;

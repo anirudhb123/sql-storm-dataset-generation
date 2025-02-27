@@ -1,0 +1,43 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           1 AS level 
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, 
+           sh.level + 1 
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN supplier_hierarchy sh ON ps.ps_partkey = sh.s_suppkey
+    WHERE sh.level < 10
+), sales_analysis AS (
+    SELECT c.c_nationkey, SUM(o.o_totalprice) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+), parts_supplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_availqty) > 100
+), detailed_analysis AS (
+    SELECT ps.p_partkey, ps.p_name, ps.total_available, ps.avg_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.p_partkey ORDER BY ps.avg_supply_cost DESC) AS rank
+    FROM parts_supplier ps
+    JOIN sales_analysis sa ON sa.c_nationkey = (SELECT n.n_nationkey 
+                                                 FROM nation n 
+                                                 JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+                                                 WHERE s.s_suppkey IN (SELECT s_h.s_suppkey 
+                                                                       FROM supplier_hierarchy s_h))
+)
+SELECT sh.s_suppkey, sh.s_name, da.p_partkey, da.p_name, da.total_available, da.avg_supply_cost
+FROM supplier_hierarchy sh
+LEFT JOIN detailed_analysis da ON sh.s_suppkey = da.p_partkey
+WHERE da.rank = 1 AND sh.level < 5
+ORDER BY sh.s_suppkey, da.avg_supply_cost DESC

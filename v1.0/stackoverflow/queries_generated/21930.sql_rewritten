@@ -1,0 +1,86 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CreationDate, 
+        LastAccessDate, 
+        CASE 
+            WHEN LastAccessDate IS NULL THEN 'Inactive'
+            WHEN DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), LastAccessDate) > 365 THEN 'Dormant'
+            ELSE 'Active'
+        END AS ActivityStatus
+    FROM Users
+), 
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        COALESCE(a.Id, -1) AS AcceptedAnswerId,
+        COALESCE(a.Body, '[No Body]') AS AnswerBody,
+        JSON_AGG( DISTINCT t.TagName ) AS Tags
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS TagList(tag)
+        ON TRUE
+    LEFT JOIN Tags t ON TagList.tag = t.TagName
+    WHERE p.CreationDate > (cast('2024-10-01' as date) - INTERVAL '1 YEAR')
+    GROUP BY p.Id
+), 
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.AcceptedAnswerId,
+        rp.AnswerBody,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM RecentPosts rp
+    LEFT JOIN Comments c ON rp.PostId = c.PostId
+    LEFT JOIN Votes v ON rp.PostId = v.PostId
+    GROUP BY rp.PostId, rp.Title, rp.CreationDate, rp.AcceptedAnswerId, rp.AnswerBody
+),
+FinalMetrics AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.AcceptedAnswerId,
+        pm.AnswerBody,
+        pm.CommentCount,
+        pm.UpVotes,
+        pm.DownVotes,
+        CASE 
+            WHEN pm.UpVotes > pm.DownVotes THEN 'Positive'
+            WHEN pm.UpVotes < pm.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS Sentiment,
+        U.Reputation AS UserReputation
+    FROM PostMetrics pm
+    JOIN Users U ON U.Id = (SELECT OwnerUserId FROM Posts WHERE Id = pm.PostId)
+)
+SELECT 
+    fm.PostId,
+    fm.Title,
+    fm.CreationDate,
+    fm.AcceptedAnswerId,
+    fm.AnswerBody,
+    fm.CommentCount,
+    fm.UpVotes,
+    fm.DownVotes,
+    fm.Sentiment,
+    ur.ActivityStatus,
+    fm.UserReputation,
+    CASE 
+        WHEN fm.UserReputation >= 1000 THEN 'Veteran'
+        WHEN fm.UserReputation BETWEEN 500 AND 999 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM FinalMetrics fm
+LEFT JOIN UserReputation ur ON ur.Id = (SELECT OwnerUserId FROM Posts WHERE Id = fm.PostId)
+WHERE ur.Reputation IS NOT NULL
+ORDER BY fm.CommentCount DESC, fm.CreationDate DESC
+LIMIT 100;

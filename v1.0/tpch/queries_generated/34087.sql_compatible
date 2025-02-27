@@ -1,0 +1,75 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        CAST(s.s_name AS VARCHAR) AS hierarchy_path,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        CONCAT(sh.hierarchy_path, ' > ', s.s_name),
+        sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE sh.level < 5
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice) AS total_line_price
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= CAST('1998-10-01' AS DATE) - INTERVAL '30 days'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice
+),
+CustomerAggregate AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_inventory_value
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+QualifiedSuppliers AS (
+    SELECT 
+        sh.s_suppkey, 
+        sh.s_name,
+        sm.total_inventory_value
+    FROM SupplierHierarchy sh
+    JOIN SupplierMetrics sm ON sh.s_suppkey = sm.s_suppkey
+    WHERE sm.total_inventory_value > 10000
+)
+SELECT 
+    c.c_name,
+    ra.total_spent,
+    ra.order_count,
+    qs.s_name AS supplier_name,
+    qs.total_inventory_value,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY ra.total_spent DESC) AS rank
+FROM CustomerAggregate ra
+JOIN QualifiedSuppliers qs ON ra.c_custkey = qs.s_suppkey
+JOIN nation n ON n.n_nationkey = ra.c_custkey
+WHERE n.n_comment IS NOT NULL
+ORDER BY ra.total_spent DESC, qs.total_inventory_value DESC;

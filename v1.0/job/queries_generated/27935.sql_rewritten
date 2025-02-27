@@ -1,0 +1,76 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        k.keyword, 
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY k.keyword) AS rank_keyword
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+filtered_cast AS (
+    SELECT 
+        ci.movie_id, 
+        ci.person_id, 
+        p.name AS person_name, 
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        ci.nr_order < 5  
+),
+company_details AS (
+    SELECT 
+        mc.movie_id, 
+        cn.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+movie_info_summary AS (
+    SELECT 
+        mi.movie_id, 
+        STRING_AGG(DISTINCT CONCAT(mi.info_type_id, ': ', mi.info) ORDER BY mi.info_type_id) AS info_summary
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    tt.title_id,
+    tt.title,
+    tt.production_year,
+    fc.person_name,
+    fc.nr_order,
+    cd.company_name,
+    cd.company_type,
+    mis.info_summary,
+    STRING_AGG(DISTINCT tt.keyword ORDER BY tt.rank_keyword) AS keywords
+FROM 
+    ranked_titles tt
+LEFT JOIN 
+    filtered_cast fc ON tt.title_id = fc.movie_id
+LEFT JOIN 
+    company_details cd ON tt.title_id = cd.movie_id
+LEFT JOIN 
+    movie_info_summary mis ON tt.title_id = mis.movie_id
+GROUP BY 
+    tt.title_id,
+    tt.title,
+    tt.production_year,
+    fc.person_name,
+    fc.nr_order,
+    cd.company_name,
+    cd.company_type
+ORDER BY 
+    tt.production_year DESC, tt.title;

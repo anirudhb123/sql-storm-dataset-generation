@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        (CASE 
+            WHEN p.p_retailprice IS NULL THEN 0 
+            ELSE ROUND(p.p_retailprice * 1.2, 2) 
+        END) AS adjusted_price
+    FROM part p
+),
+MaxSuppCost AS (
+    SELECT 
+        ps.ps_partkey,
+        MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS total_filled_price
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    pd.p_name,
+    COUNT(DISTINCT li.l_orderkey) AS total_line_items,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    COALESCE(rn.rank, 0) AS supplier_rank,
+    SUM(CASE WHEN li.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+    AVG(CASE 
+            WHEN c.to_order_count = 0 THEN NULL 
+            ELSE c.total_orders::decimal / NULLIF(c.total_filled_price, 0)
+        END) AS avg_order_value
+FROM PartDetails pd
+JOIN lineitem li ON pd.p_partkey = li.l_partkey
+LEFT JOIN MaxSuppCost msc ON pd.p_partkey = msc.ps_partkey
+LEFT JOIN RankedSuppliers rn ON rn.s_suppkey = li.l_suppkey
+LEFT JOIN CustomerOrders c ON c.c_custkey = li.l_orderkey
+GROUP BY pd.p_name, rn.rank
+HAVING SUM(li.l_extendedprice) > COALESCE(msc.max_supply_cost, 0)
+ORDER BY total_revenue DESC, supplier_rank ASC
+LIMIT 50;

@@ -1,0 +1,103 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        c.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE c ON p.ParentId = c.PostId
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT pc.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        AVG(p.ViewCount) OVER (PARTITION BY u.Id) AS AvgViewsPerPost
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+
+FinalReport AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.PostCount,
+        ups.TotalViews,
+        ups.TotalScore,
+        ups.CommentCount,
+        ups.BadgeCount,
+        ups.AvgViewsPerPost,
+        pt.TagName,
+        pt.PostCount AS PopularTagsCount
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        PopularTags pt ON ups.PostCount > 5
+    ORDER BY 
+        ups.TotalScore DESC, ups.TotalViews DESC
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    PostCount,
+    TotalViews,
+    TotalScore,
+    CommentCount,
+    BadgeCount,
+    AvgViewsPerPost,
+    STRING_AGG(TagName, ', ') AS PopularTags
+FROM 
+    FinalReport
+GROUP BY 
+    UserId, DisplayName, PostCount, TotalViews, TotalScore, CommentCount, BadgeCount, AvgViewsPerPost
+HAVING 
+    COUNT(TagName) >= 1
+ORDER BY 
+    TotalScore DESC;

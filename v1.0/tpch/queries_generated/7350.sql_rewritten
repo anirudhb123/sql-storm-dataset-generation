@@ -1,0 +1,65 @@
+WITH regional_summary AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(s.s_acctbal) AS total_supplier_balance,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY 
+        r.r_regionkey
+),
+part_supplier_summary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS total_suppliers_for_part,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    rs.region_name,
+    rs.total_supplier_balance,
+    rs.total_suppliers,
+    rs.total_customers,
+    ps.p_name,
+    ps.total_suppliers_for_part,
+    ps.total_supply_cost,
+    os.o_orderkey,
+    os.o_orderstatus,
+    os.total_order_value,
+    os.total_line_items
+FROM 
+    regional_summary rs
+JOIN 
+    part_supplier_summary ps ON rs.total_suppliers > 1
+JOIN 
+    order_summary os ON os.total_order_value > 1000
+ORDER BY 
+    rs.region_name, ps.total_supply_cost DESC, os.total_order_value DESC;

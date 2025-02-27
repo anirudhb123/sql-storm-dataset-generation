@@ -1,0 +1,75 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+sum_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+recent_returns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_ticket_number) AS total_returns
+    FROM 
+        store_returns
+    WHERE 
+        sr_return_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CAST('2002-10-01' AS DATE)) - 1)
+    GROUP BY 
+        sr_customer_sk
+),
+final_report AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.cd_gender,
+        rc.cd_marital_status,
+        COALESCE(ss.total_sales, 0) AS total_sales,
+        COALESCE(rr.total_returns, 0) AS total_returns,
+        (COALESCE(ss.total_sales, 0) - COALESCE(rr.total_returns, 0)) AS net_sales
+    FROM 
+        ranked_customers rc
+    LEFT JOIN 
+        sum_sales ss ON rc.c_customer_sk = ss.c_customer_sk
+    LEFT JOIN 
+        recent_returns rr ON rc.c_customer_sk = rr.sr_customer_sk
+    WHERE 
+        rc.rnk <= 10
+)
+SELECT 
+    fr.c_customer_id,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.total_sales,
+    fr.total_returns,
+    fr.net_sales,
+    CASE 
+        WHEN fr.net_sales = 0 THEN 'No Sales'
+        WHEN fr.net_sales < 0 THEN 'Negative Sales'
+        ELSE 'Positive Sales'
+    END AS sales_status
+FROM 
+    final_report fr
+WHERE 
+    fr.total_sales > (SELECT AVG(total_sales) FROM sum_sales)
+ORDER BY 
+    fr.net_sales DESC
+OFFSET 5 ROWS 
+FETCH NEXT 10 ROWS ONLY;

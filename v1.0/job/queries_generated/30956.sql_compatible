@@ -1,0 +1,71 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name,
+    mt.title,
+    COALESCE(NULLIF(ct.kind, ''), 'Unknown') AS company_type,
+    COUNT(DISTINCT ci.id) AS cast_count,
+    AVG(wp.age) AS average_actor_age,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    mh.depth AS movie_depth,
+    CASE 
+        WHEN mt.production_year > 2020 THEN 'Recent'
+        WHEN mt.production_year >= 2010 THEN 'Moderate'
+        ELSE 'Classic'
+    END AS era
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mt.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN (
+    SELECT 
+        pi.person_id,
+        DATE_PART('year', AGE(CAST('2024-10-01' AS DATE), CAST(pi.info AS DATE))) AS age
+    FROM 
+        person_info pi
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birth_date')
+) wp ON ak.person_id = wp.person_id
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = mt.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.title IS NOT NULL 
+    AND ak.name NOT LIKE '%unknown%'
+    AND wp.age IS NOT NULL
+GROUP BY 
+    ak.name, mt.title, ct.kind, mh.depth
+ORDER BY 
+    mh.depth, cast_count DESC, ak.name;

@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+RecentPostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(b.Name, 'No Badge') AS BadgeName,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.OwnerUserId = b.UserId AND b.Date = (
+            SELECT MAX(Date)
+            FROM Badges b2 
+            WHERE b2.UserId = rp.OwnerUserId
+        )
+    WHERE 
+        rp.RN = 1 
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        PHType.Name AS ChangeType,
+        ph.CreationDate AS ChangeDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHType ON ph.PostHistoryTypeId = PHType.Id
+    WHERE 
+        ph.Comment IS NOT NULL
+),
+
+PostLinkStats AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+
+SELECT 
+    rps.PostId,
+    rps.Title,
+    rps.OwnerDisplayName,
+    rps.CreationDate,
+    rps.Score,
+    rps.ViewCount,
+    rps.BadgeName,
+    rps.CommentCount,
+    COALESCE(pls.RelatedCount, 0) AS RelatedPostCount,
+    COUNT(DISTINCT phi.ChangeType) AS ChangeTypeCount,
+    STRING_AGG(phi.ChangeType || ' on ' || TO_CHAR(phi.ChangeDate, 'YYYY-MM-DD') || ': ' || phi.Comment, '; ') AS ChangeDetails
+FROM 
+    RecentPostStats rps
+LEFT JOIN 
+    PostLinkStats pls ON rps.PostId = pls.PostId
+LEFT JOIN 
+    PostHistoryInfo phi ON rps.PostId = phi.PostId
+GROUP BY 
+    rps.PostId, rps.Title, rps.OwnerDisplayName, rps.CreationDate, rps.Score, rps.ViewCount, rps.BadgeName, rps.CommentCount
+ORDER BY 
+    rps.CreationDate DESC
+LIMIT 100;

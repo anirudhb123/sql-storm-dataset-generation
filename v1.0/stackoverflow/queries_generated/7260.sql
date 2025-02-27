@@ -1,0 +1,51 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation,
+        SUM(PostCount) AS TotalPosts,
+        SUM(CommentCount) AS TotalComments,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes
+    FROM UserStats
+    GROUP BY UserId
+    ORDER BY TotalReputation DESC
+    LIMIT 5
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.TotalReputation,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    T.TagName AS PopularTag,
+    T.PostCount AS TagUsage
+FROM TopUsers U
+CROSS JOIN PopularTags T
+ORDER BY U.TotalReputation DESC, T.PostCount DESC;

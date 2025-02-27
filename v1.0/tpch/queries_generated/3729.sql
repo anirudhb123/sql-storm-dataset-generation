@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS RankPrice
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS TotalAvailable,
+        AVG(ps.ps_supplycost) AS AvgSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+ProductInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        SUM(l.l_quantity) AS TotalQuantity
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        p.p_retailprice > 100.00
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    INNER JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    di.n_name,
+    di.region_name,
+    COUNT(DISTINCT so.o_orderkey) AS TotalOrders,
+    SUM(pi.TotalQuantity) AS TotalQuantitySold,
+    SUM(CASE WHEN so.o_orderstatus = 'F' THEN so.o_totalprice ELSE 0 END) AS TotalFinishedPrice,
+    MAX(r.RankPrice) AS MaxRankPrice,
+    STRING_AGG(DISTINCT CONCAT('Supplier:', ss.s_suppkey, ' - Available:', ss.TotalAvailable), '; ') AS SupplierDetails
+FROM 
+    NationDetails di
+LEFT JOIN 
+    customer c ON c.c_nationkey = di.n_nationkey
+LEFT JOIN 
+    orders so ON so.o_custkey = c.c_custkey
+LEFT JOIN 
+    ProductInfo pi ON pi.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_acctbal > 500.00))
+LEFT JOIN 
+    SupplierSummary ss ON pi.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ss.s_suppkey)
+LEFT JOIN 
+    RankedOrders r ON r.o_orderkey = so.o_orderkey
+WHERE 
+    di.region_name IS NOT NULL
+GROUP BY 
+    di.n_name, di.region_name
+HAVING 
+    SUM(pi.TotalQuantity) > 100
+ORDER BY 
+    TotalOrders DESC, TotalQuantitySold DESC;

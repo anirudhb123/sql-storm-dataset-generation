@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+      AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+), TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.BadgeCount,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges
+    FROM RankedPosts rp
+    JOIN UserReputation ur ON rp.PostId IN (
+        SELECT AnswerId FROM Posts WHERE ParentId = rp.PostId
+    )
+    WHERE rp.UserPostRank = 1
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.DisplayName,
+    tp.Reputation,
+    COALESCE(tp.BadgeCount, 0) AS TotalBadges,
+    (CASE 
+        WHEN tp.GoldBadges > 0 THEN 'Gold'
+        WHEN tp.SilverBadges > 0 THEN 'Silver'
+        ELSE 'Bronze'
+     END) AS TopBadge,
+     ARRAY_AGG(DISTINCT SUBSTRING(t.TagName FROM 2 FOR LENGTH(t.TagName) - 2)) AS TagList
+FROM TopPosts tp
+LEFT JOIN UNNEST(string_to_array(tp.Tags, ',')) AS t(TagName) ON TRUE
+GROUP BY tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.AnswerCount, tp.DisplayName, tp.Reputation
+ORDER BY tp.Score DESC, tp.CreationDate ASC
+LIMIT 50;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT ps_partkey, 
+           SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS rn
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+           COUNT(DISTINCT l.l_suppkey) AS unique_suppliers
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' 
+      AND l.l_shipdate > CURRENT_DATE - INTERVAL '3 months'
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+EssentialData AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           n.n_name AS nation_name, 
+           r.r_name AS region_name, 
+           COALESCE(SUM(sc.total_supply_cost), 0) AS total_cost
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN SupplyCostCTE sc ON c.c_custkey = (
+        SELECT ps.s_suppkey
+        FROM partsupp ps 
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+        WHERE s.s_nationkey = c.c_nationkey
+        LIMIT 1
+    )
+    GROUP BY c.c_custkey, c.c_name, n.n_name, r.r_name
+),
+OrderAnalysis AS (
+    SELECT e.c_custkey,
+           e.c_name,
+           e.nation_name,
+           e.region_name,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders,
+           AVG(o.order_value) AS avg_order_value
+    FROM EssentialData e
+    LEFT JOIN HighValueOrders o ON e.c_custkey = o.o_orderkey
+    GROUP BY e.c_custkey, e.c_name, e.nation_name, e.region_name
+)
+SELECT a.c_custkey, 
+       a.c_name, 
+       a.nation_name, 
+       a.region_name, 
+       a.total_orders,
+       a.avg_order_value,
+       CASE 
+           WHEN a.avg_order_value IS NULL THEN 'No Orders'
+           WHEN a.avg_order_value > 50000 THEN 'High Value'
+           ELSE 'Regular'
+       END AS customer_category
+FROM OrderAnalysis a
+ORDER BY a.total_orders DESC, a.avg_order_value DESC
+LIMIT 10;

@@ -1,0 +1,72 @@
+WITH RankedUsers AS (
+    SELECT
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM Users
+    WHERE Reputation IS NOT NULL
+),
+
+RecentPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        COALESCE(pc.Description, 'No Close Reason') AS CloseReason,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT ph.PostId, ct.Name AS Description
+        FROM PostHistory ph
+        JOIN CloseReasonTypes ct ON ph.Comment::int = ct.Id
+        WHERE ph.PostHistoryTypeId = 10 
+    ) pc ON p.Id = pc.PostId
+    WHERE p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+TopBadges AS (
+    SELECT
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM Badges
+    WHERE Class = 1 
+    GROUP BY UserId
+    HAVING COUNT(*) > 5
+),
+
+CombinedData AS (
+    SELECT
+        u.DisplayName,
+        u.Reputation,
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.CommentCount,
+        tb.BadgeCount,
+        RANK() OVER (ORDER BY rp.Score DESC) AS PostScoreRank
+    FROM RankedUsers u
+    JOIN RecentPosts rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN TopBadges tb ON u.Id = tb.UserId
+)
+
+SELECT
+    cd.DisplayName,
+    cd.Reputation,
+    cd.Title,
+    cd.Score,
+    cd.CommentCount,
+    NVL(cd.BadgeCount, 0) AS GoldBadgeCount,
+    CASE
+        WHEN cd.PostScoreRank <= 5 THEN 'Top Post'
+        WHEN cd.PostScoreRank <= 20 THEN 'Popular Post'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM CombinedData cd
+WHERE cd.Reputation > 1000 
+ORDER BY cd.Reputation DESC, cd.Score DESC;

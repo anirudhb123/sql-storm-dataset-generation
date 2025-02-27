@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserVoteSummary AS (
+    SELECT
+        v.UserId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM
+        Votes v
+    JOIN
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY
+        v.UserId
+),
+PostComments AS (
+    SELECT
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM
+        Comments c
+    GROUP BY
+        c.PostId
+),
+FilteredTagPosts AS (
+    SELECT
+        substring(tags.TagName from 1 for 10) AS ShortTag,
+        COUNT(*) AS TotalPosts
+    FROM
+        Tags tags
+    JOIN
+        Posts p ON p.Tags LIKE '%' || tags.TagName || '%'
+    GROUP BY
+        tags.TagName
+    HAVING
+        COUNT(*) > 5
+)
+SELECT
+    p.Title,
+    p.ViewCount,
+    ps.CommentCount,
+    up.UpVotes,
+    up.DownVotes,
+    tt.ShortTag,
+    CASE 
+        WHEN p.Score IS NULL THEN NULL
+        WHEN p.Score < 0 THEN 'Negative'
+        ELSE 'Positive'
+    END AS ScoreStatus,
+    COALESCE(NULLIF(u.Reputation, 0), 0) AS EffectiveReputation
+FROM
+    RankedPosts p
+LEFT JOIN
+    PostComments ps ON p.PostId = ps.PostId
+LEFT JOIN
+    UserVoteSummary up ON up.UserId = p.OwnerUserId
+LEFT JOIN
+    FilteredTagPosts tt ON tt.ShortTag IN (SELECT unnest(string_to_array(p.Tags, ',')))
+WHERE
+    p.rn <= 5
+    AND (p.ViewCount > 100 OR up.TotalVotes > 10)
+ORDER BY
+    p.ViewCount DESC,
+    up.UpVotes DESC
+LIMIT 50;

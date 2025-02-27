@@ -1,0 +1,83 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.PostTypeId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+TopContributors AS (
+    SELECT 
+        r.UserId, 
+        ua.DisplayName,
+        r.Rank
+    FROM 
+        UserReputation ua
+    LEFT JOIN (
+        SELECT 
+            rp.OwnerUserId AS UserId,
+            COUNT(*) AS Rank
+        FROM 
+            RecentPosts rp
+        GROUP BY 
+            rp.OwnerUserId
+        HAVING 
+            COUNT(*) > 0
+    ) r ON ua.UserId = r.UserId
+)
+SELECT 
+    tp.UserId,
+    tp.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    CASE 
+        WHEN rp.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    CASE 
+        WHEN rp.PostTypeId = 1 THEN 'Question'
+        WHEN rp.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Others'
+    END AS PostType,
+    tp.ReputationRank,
+    CASE 
+        WHEN tp.ReputationRank <= 10 THEN 'Top Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorRole
+FROM 
+    RecentPosts rp
+JOIN 
+    TopContributors tp ON rp.OwnerUserId = tp.UserId
+WHERE 
+    rp.rn <= 5  
+ORDER BY 
+    tp.ReputationRank, rp.CreationDate DESC, rp.UpVotes DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (
+        SELECT r_regionkey FROM region WHERE r_name = 'EUROPE'
+    )
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS total_line_items, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+ranked_suppliers AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost) AS supply_cost, 
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS cost_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+)
+SELECT n.n_name, SUM(os.total_revenue) AS total_revenue_per_nation,
+       COALESCE(SUM(ss.total_cost), 0) AS total_supplier_cost,
+       COUNT(DISTINCT rs.s_name) AS supplier_count,
+       ROW_NUMBER() OVER (ORDER BY SUM(os.total_revenue) DESC) AS revenue_rank
+FROM nation_hierarchy n
+LEFT JOIN order_summary os ON os.o_orderkey IN (
+    SELECT o_orderkey FROM orders WHERE o_custkey IN (
+        SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey
+    )
+)
+LEFT JOIN supplier_summary ss ON ss.s_suppkey IN (
+    SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (
+        SELECT l_partkey FROM lineitem WHERE l_orderkey IN (
+            SELECT o_orderkey FROM orders WHERE o_custkey IN (
+                SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey
+            )
+        )
+    )
+)
+JOIN ranked_suppliers rs ON ss.total_cost = rs.supply_cost
+GROUP BY n.n_name
+ORDER BY total_revenue_per_nation DESC
+LIMIT 5;

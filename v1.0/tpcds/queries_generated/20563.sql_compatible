@@ -1,0 +1,60 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_birth_year,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+),
+
+sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_sold_date_sk, ws.ws_item_sk
+),
+
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(COALESCE(inv.inv_quantity_on_hand, 0)) AS total_on_hand,
+        COUNT(DISTINCT inv.inv_warehouse_sk) AS warehouse_count
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+)
+
+SELECT 
+    rc.c_customer_id,
+    rc.c_birth_year,
+    rc.cd_gender,
+    ss.ws_sold_date_sk,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.total_discount,
+    is.total_on_hand,
+    is.warehouse_count
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    sales_summary ss ON rc.rn <= 10 AND ss.ws_item_sk IN (SELECT i.i_item_sk FROM item i WHERE i.i_current_price > 50)
+JOIN 
+    inventory_status is ON ss.ws_item_sk = is.inv_item_sk
+WHERE 
+    rc.c_birth_year > (SELECT AVG(c.c_birth_year) FROM customer c)
+    AND (rc.cd_gender = 'F' OR rc.cd_gender IS NULL)
+ORDER BY 
+    rc.cd_gender, ss.total_sales DESC;

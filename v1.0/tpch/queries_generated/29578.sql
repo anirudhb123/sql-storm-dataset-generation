@@ -1,0 +1,26 @@
+SELECT 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS truncated_comment,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    CONCAT('Supplier: ', s.s_name, ' supplies ', p.p_name, ' with avg price ', ROUND(AVG(l.l_extendedprice), 2)) AS summary_info
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    s.s_comment LIKE '%excellent%'
+    AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    s.s_name, p.p_name, truncated_comment
+HAVING 
+    total_orders > 5
+ORDER BY 
+    avg_extended_price DESC;

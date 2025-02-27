@@ -1,0 +1,87 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+       aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.id = ml.movie_id
+), 
+cast_with_earnings AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS num_movies,
+        SUM(CASE 
+              WHEN ci.note IS NULL THEN 0 
+              ELSE LENGTH(ci.note)
+              END) AS earnings_estimate
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    GROUP BY 
+        ci.person_id
+), 
+keyword_summary AS (
+    SELECT 
+        mk.keyword,
+        COUNT(m.id) AS movie_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors 
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        mk.keyword
+)
+SELECT 
+    a.name AS actor_name,
+    h.title AS movie_title,
+    h.production_year,
+    ks.keyword,
+    ks.movie_count,
+    c.num_movies,
+    c.earnings_estimate,
+    CASE 
+        WHEN c.earnings_estimate < 1000 THEN 'Low'
+        WHEN c.earnings_estimate BETWEEN 1000 AND 10000 THEN 'Medium'
+        ELSE 'High'
+    END AS earnings_category
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_hierarchy h ON ci.movie_id = h.id
+LEFT JOIN 
+    cast_with_earnings c ON ci.person_id = c.person_id
+LEFT JOIN 
+    keyword_summary ks ON ks.actors LIKE '%' || a.name || '%'
+WHERE 
+    h.depth = 1
+    AND (ks.movie_count IS NULL OR ks.movie_count > 1)
+ORDER BY 
+    a.name,
+    h.production_year DESC,
+    earnings_category DESC
+LIMIT 100;

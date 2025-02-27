@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.bill_customer_sk,
+        ws.ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws 
+    WHERE 
+        ws.sold_date_sk BETWEEN 1001 AND 1005
+),
+
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        cb.hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics cb ON cd.cd_demo_sk = cb.hd_demo_sk
+),
+
+SalesStatistics AS (
+    SELECT
+        web_site_id,
+        AVG(ext_sales_price) AS avg_sales,
+        SUM(ext_sales_price) AS total_sales,
+        COUNT(DISTINCT bill_customer_sk) AS unique_customers
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+    GROUP BY 
+        web_site_id
+)
+
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    ss.web_site_id,
+    ss.avg_sales,
+    ss.total_sales,
+    ss.unique_customers,
+    COALESCE(ib.ib_lower_bound, 0) AS lower_bound,
+    COALESCE(ib.ib_upper_bound, 999999) AS upper_bound
+FROM 
+    CustomerDetails cs
+JOIN 
+    SalesStatistics ss ON cs.c_customer_sk = ss.web_site_id::integer
+LEFT JOIN 
+    income_band ib ON cs.cd_income_band_sk = ib.ib_income_band_sk
+ORDER BY 
+    ss.total_sales DESC, 
+    cs.c_last_name, 
+    cs.c_first_name
+LIMIT 100;
+

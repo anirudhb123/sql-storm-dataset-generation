@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+)
+, HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice,
+           o.o_orderdate,
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE li.l_discount > 0.05
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+    HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+)
+SELECT nh.n_name,
+       SUM(CASE WHEN pp.p_size BETWEEN 1 AND 10 THEN ps.ps_availqty ELSE 0 END) AS total_available_small,
+       AVG(CASE WHEN pp.p_size > 10 THEN ps.ps_supplycost END) AS avg_supplycost_large,
+       COUNT(DISTINCT ho.o_orderkey) AS high_value_order_count,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       RANK() OVER (PARTITION BY nh.n_nationkey ORDER BY SUM(li.l_quantity) DESC) AS rank_by_quantity
+FROM nation nh
+LEFT JOIN supplier s ON nh.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part pp ON ps.ps_partkey = pp.p_partkey
+FULL OUTER JOIN HighValueOrders ho ON pp.p_partkey = ho.o_orderkey
+LEFT JOIN lineitem li ON li.l_orderkey = ho.o_orderkey
+WHERE nh.n_name LIKE 'A%'
+  AND pp.p_comment IS NOT NULL
+GROUP BY nh.n_name
+HAVING COUNT(DISTINCT ps.ps_partkey) > 5 OR SUM(ps.ps_availqty) < 500
+ORDER BY rank_by_quantity DESC, total_available_small ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.PostTypeId IN (1, 2) -- Only questions and answers
+), 
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounty,
+        AVG(COALESCE(c.Score, 0)) AS AverageCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Upvotes and downvotes
+    WHERE 
+        u.Reputation > 100 -- Only users with a reputation greater than 100
+    GROUP BY 
+        u.Id
+), 
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (24, 2) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate > '2023-01-01 00:00:00' -- By year
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    COALESCE(ue.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ue.TotalBounty, 0) AS TotalBounty,
+    COALESCE(ue.AverageCommentScore, 0) AS AverageCommentScore,
+    rp.PostId, 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pha.CloseReopenCount,
+    pha.EditCount,
+    CASE 
+        WHEN rp.Tags IS NOT NULL THEN 
+            STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM UNNEST(string_to_array(rp.Tags, '><'))), ', ') 
+        ELSE 
+            'No Tags' 
+    END AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    UserEngagement ue ON u.Id = ue.UserId
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.PostId AND rp.RecentPostRank = 1 
+LEFT JOIN 
+    PostHistoryAnalysis pha ON rp.PostId = pha.PostId
+WHERE 
+    ue.TotalPosts > 5 -- Filter users with more than 5 posts
+ORDER BY 
+    TotalBounty DESC NULLS LAST, 
+    TotalPosts DESC 
+LIMIT 50;

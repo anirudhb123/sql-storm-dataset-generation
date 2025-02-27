@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price < (SELECT AVG(ws_sales_price) FROM web_sales)
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(s.ws_quantity * s.ws_sales_price) AS TotalSales,
+        COUNT(s.ws_order_number) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        RankedSales s ON c.c_customer_sk = s.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.TotalSales,
+    cs.OrderCount,
+    DENSE_RANK() OVER (ORDER BY cs.TotalSales DESC) AS SalesRank,
+    (
+        SELECT 
+            COUNT(DISTINCT c2.c_customer_sk)
+        FROM 
+            customer c2
+        WHERE 
+            c2.c_customer_sk <> cs.c_customer_sk AND
+            cs.TotalSales > (
+                SELECT 
+                    AVG(TotalSales)
+                FROM 
+                    CustomerSales
+            )
+    ) AS HigherSalesCount,
+    COALESCE(sm.sm_carrier, 'Unknown') AS ShipCarrier
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    ship_mode sm ON sm.sm_ship_mode_sk = (SELECT ws_ship_mode_sk FROM web_sales WHERE ws_bill_customer_sk = cs.c_customer_sk LIMIT 1)
+WHERE 
+    cs.OrderCount > 1
+ORDER BY 
+    cs.TotalSales DESC
+LIMIT 10;

@@ -1,0 +1,71 @@
+WITH TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.Id, t.TagName
+),
+PostInteraction AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVotes,
+        MAX(ph.CreationDate) AS LastModified
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    WHERE 
+        p.PostTypeId IN (1, 2)  -- Questions and Answers
+    GROUP BY 
+        p.Id, p.Title
+),
+RankedPosts AS (
+    SELECT 
+        pi.*,
+        RANK() OVER (ORDER BY pi.CommentCount DESC, pi.UpVotes - pi.DownVotes DESC) AS Rank
+    FROM 
+        PostInteraction pi
+)
+SELECT 
+    ts.TagId,
+    ts.TagName,
+    ts.PostCount,
+    ts.BadgeCount,
+    ts.TotalReputation,
+    rp.PostId,
+    rp.Title,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.LastModified,
+    rp.Rank
+FROM 
+    TagStats ts
+JOIN 
+    RankedPosts rp ON rp.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.Tags LIKE '%' || ts.TagName || '%'
+    )
+WHERE 
+    rp.Rank <= 10  -- Top 10 posts per tag
+ORDER BY 
+    ts.TagName, rp.Rank;

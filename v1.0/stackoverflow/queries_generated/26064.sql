@@ -1,0 +1,74 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgesCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalPostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score AS PostScore,
+        (SELECT STRING_AGG(T.TagName, ', ') FROM Tags T WHERE T.Id = ANY(STRING_TO_ARRAY(P.Tags, ',')::int[])) AS TagsList,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+),
+RecentActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        RIGHT(TO_CHAR(P.LastActivityDate, 'YYYY-MM-DD HH24:MI:ss'), 19) AS LastActivity,
+        P.Title,
+        P.Score
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.BadgesCount,
+    US.UpVotes,
+    US.DownVotes,
+    US.TotalPostScore,
+    PD.PostId,
+    PD.Title AS PostTitle,
+    PD.Body AS PostBody,
+    PD.CreationDate AS PostCreationDate,
+    PD.PostScore AS PostScore,
+    PD.TagsList,
+    PD.CommentCount,
+    RA.LastActivity
+FROM 
+    UserStats US
+JOIN 
+    PostDetails PD ON US.UserId = PD.OwnerUserId
+LEFT JOIN 
+    RecentActivity RA ON US.UserId = RA.UserId
+ORDER BY 
+    US.Reputation DESC, 
+    PD.PostScore DESC, 
+    RA.LastActivity DESC;

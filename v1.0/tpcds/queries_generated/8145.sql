@@ -1,0 +1,60 @@
+
+WITH SalesData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS average_profit,
+        d.d_year,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        COUNT(DISTINCT ws.ws_ship_mode_sk) AS distinct_shipping_methods
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2019 AND 2021
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year, cd.cd_gender
+),
+RankedSales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY year ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        (SELECT 
+            year,
+            SUM(total_sales) AS year_total_sales 
+         FROM 
+            SalesData
+         GROUP BY 
+            year) AS annual_sales_data
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.total_sales,
+    s.order_count,
+    s.average_profit,
+    s.gender,
+    s.distinct_shipping_methods,
+    r.year_total_sales,
+    r.sales_rank
+FROM 
+    SalesData s
+JOIN 
+    RankedSales r ON s.d_year = r.year
+WHERE 
+    s.sales_rank <= 10
+ORDER BY 
+    s.d_year, s.sales_rank;

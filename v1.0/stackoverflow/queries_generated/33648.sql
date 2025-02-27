@@ -1,0 +1,54 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting from questions only
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    MAX(b.Date) AS LatestBadgeDate
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    Comments c ON ph.PostId = c.PostId
+LEFT JOIN 
+    Votes v ON ph.PostId = v.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = ph.PostId  -- Assuming UserId matches with the post Id for badges received
+WHERE 
+    ph.CreationDate >= NOW() - INTERVAL '30 days'
+GROUP BY 
+    ph.PostId, ph.Title, ph.Level
+ORDER BY 
+    ph.Level, COUNT(DISTINCT c.Id) DESC, ph.Title
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 OR COUNT(DISTINCT v.Id) > 0
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

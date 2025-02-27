@@ -1,0 +1,54 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+InventoryStatus AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+SalesWithInventory AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        iv.total_inventory,
+        CASE 
+            WHEN iv.total_inventory IS NULL THEN 'No Inventory'
+            WHEN iv.total_inventory < rs.total_quantity THEN 'Low Stock'
+            ELSE 'In Stock'
+        END AS inventory_status
+    FROM RecursiveSales rs
+    LEFT OUTER JOIN InventoryStatus iv ON rs.ws_item_sk = iv.inv_item_sk
+),
+FinalReport AS (
+    SELECT 
+        s.ws_item_sk,
+        COALESCE(s.total_quantity, 0) AS quantity_sold,
+        COALESCE(s.total_sales, 0.00) AS total_sales_amount,
+        s.inventory_status,
+        SUBSTRING((SELECT s_group_id FROM store WHERE s_store_sk = (SELECT TOP 1 ss_store_sk FROM store_sales ss WHERE ss.ss_item_sk = s.ws_item_sk ORDER BY ss.ss_sales_price DESC)),1,5) AS store_group
+    FROM SalesWithInventory s
+)
+SELECT 
+    fr.ws_item_sk,
+    fr.quantity_sold,
+    fr.total_sales_amount,
+    fr.inventory_status,
+    CASE
+        WHEN fr.store_group IS NULL THEN 'Unset_Store'
+        ELSE fr.store_group
+    END AS final_store_group
+FROM FinalReport fr
+WHERE fr.inventory_status <> 'No Inventory'
+ORDER BY fr.total_sales_amount DESC, fr.quantity_sold ASC 
+LIMIT 100;

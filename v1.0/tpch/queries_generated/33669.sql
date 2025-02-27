@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate <= CURRENT_DATE
+    GROUP BY o.o_orderkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, SUM(os.total_revenue) AS total_spent
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    GROUP BY c.c_custkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cr.total_spent, ROW_NUMBER() OVER (ORDER BY cr.total_spent DESC) AS rnk
+    FROM customer c
+    JOIN CustomerRevenue cr ON c.c_custkey = cr.c_custkey
+    WHERE cr.total_spent IS NOT NULL
+)
+SELECT sh.level AS supplier_level,
+       sh.s_name AS supplier_name,
+       pd.p_name AS part_name,
+       tc.c_name AS customer_name,
+       COALESCE(tc.total_spent, 0) AS customer_spent
+FROM SupplierHierarchy sh
+LEFT JOIN PartDetails pd ON sh.s_nationkey = pd.p_partkey
+FULL OUTER JOIN TopCustomers tc ON sh.s_suppkey = tc.c_custkey
+WHERE (sh.level IS NOT NULL OR pd.p_partkey IS NOT NULL OR tc.total_spent IS NOT NULL)
+ORDER BY supplier_level, customer_spent DESC
+LIMIT 100;

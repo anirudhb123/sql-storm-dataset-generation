@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS UserPostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS EditCount,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) OR ph.Comment IS NOT NULL
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    u.Reputation AS UserReputation,
+    ua.TotalBounty,
+    ua.CommentCount,
+    ua.BadgeCount,
+    ua.BadgeNames,
+    COALESCE(phd.FirstEditDate, 'No edits') AS FirstEdit,
+    phd.EditCount,
+    phd.CloseReasons,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Top Post'
+        WHEN rp.UserPostCount >= 10 THEN 'Active User'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    u.Reputation > 50
+    AND (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.Id AND v.VoteTypeId = 2) > 5
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Comments c 
+        WHERE c.PostId = rp.Id AND c.Score < 0
+    )
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+FETCH FIRST 50 ROWS ONLY;

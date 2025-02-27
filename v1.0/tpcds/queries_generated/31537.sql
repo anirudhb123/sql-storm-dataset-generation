@@ -1,0 +1,59 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER(PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price > 20.00
+    GROUP BY ws.web_site_sk
+),
+top_sales AS (
+    SELECT 
+        web_site_sk,
+        total_quantity,
+        total_net_profit
+    FROM sales_summary
+    WHERE rank <= 5
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ROW_NUMBER() OVER(PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE (cd.cd_gender = 'F' AND cd.cd_purchase_estimate > 1000) OR (cd.cd_marital_status = 'M' AND cd.cd_purchase_estimate BETWEEN 500 AND 1000)
+),
+filtered_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023 AND d.d_month_seq IN (1, 2, 3))
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    c.cd_gender,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_orders,
+    SUM(cs.cs_net_profit) AS total_catalog_profit,
+    SUM(ws.ws_net_profit) AS total_web_profit,
+    COALESCE(fc.total_profit, 0) AS customer_total_profit
+FROM catalog_sales cs
+JOIN customer_data c ON cs.cs_bill_customer_sk = c.c_customer_sk
+JOIN filtered_customers fc ON fc.c_customer_sk = c.c_customer_sk
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY ca.ca_city, c.cd_gender
+HAVING SUM(ws.ws_net_profit) > 1000
+ORDER BY total_catalog_profit DESC, total_web_profit DESC
+LIMIT 10;

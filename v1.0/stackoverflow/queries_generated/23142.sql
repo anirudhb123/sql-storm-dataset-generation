@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.CommentCount,
+        (rp.UpVotes - rp.DownVotes) AS NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > (SELECT AVG(CommentCount) FROM RankedPosts) OR
+        rp.NetVotes > (SELECT AVG(NetVotes) FROM RankedPosts)
+),
+PostAdjacency AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        CASE 
+            WHEN lt.Name IS NULL THEN 'Unknown Link'
+            ELSE lt.Name 
+        END AS LinkDescription
+    FROM 
+        PostLinks pl
+        LEFT JOIN LinkTypes lt ON pl.LinkTypeId = lt.Id
+),
+FinalBenchmark AS (
+    SELECT 
+        pp.Title,
+        pp.CreationDate,
+        pp.CommentCount,
+        pa.RelatedPostId,
+        pa.LinkDescription,
+        CASE 
+            WHEN pp.NetVotes IS NULL THEN 'No Votes Yet'
+            WHEN pp.NetVotes > 0 THEN 'Popular Post'
+            ELSE 'Needs Improvement'
+        END AS PopularityStatus
+    FROM 
+        PopularPosts pp
+        LEFT JOIN PostAdjacency pa ON pp.PostId = pa.PostId
+)
+SELECT 
+    fb.Title,
+    fb.CreationDate,
+    fb.CommentCount,
+    fb.RelatedPostId,
+    fb.LinkDescription,
+    fb.PopularityStatus,
+    COALESCE(json_agg(DISTINCT CONCAT('Related to Post ID: ', fb.RelatedPostId, ' - Link Type: ', fb.LinkDescription)) FILTER (WHERE fb.RelatedPostId IS NOT NULL), '[]') AS RelatedPostsInfo
+FROM 
+    FinalBenchmark fb
+GROUP BY 
+    fb.Title, fb.CreationDate, fb.CommentCount, fb.RelatedPostId, fb.LinkDescription, fb.PopularityStatus
+ORDER BY 
+    fb.CreationDate DESC;

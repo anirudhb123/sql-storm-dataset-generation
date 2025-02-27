@@ -1,0 +1,59 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.depth,
+    COUNT(DISTINCT ca.person_id) AS actor_count,
+    AVG(CASE WHEN ai.note IS NOT NULL THEN 1 ELSE 0 END) AS has_notes_percentage,
+    STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+    SUM(CASE WHEN ki.keyword IS NOT NULL THEN 1 ELSE 0 END) AS total_keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type ai ON mi.info_type_id = ai.id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.depth
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 0 
+    AND AVG(CASE WHEN ai.note IS NOT NULL THEN 1 ELSE 0 END) > 0.5
+ORDER BY 
+    mh.production_year DESC, mh.depth, actor_count DESC;

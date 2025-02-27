@@ -1,0 +1,69 @@
+
+WITH SalesStats AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_paid) AS avg_order_value,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+), 
+TopWebsites AS (
+    SELECT 
+        web_site_sk, 
+        total_orders, 
+        total_profit, 
+        avg_order_value 
+    FROM 
+        SalesStats 
+    WHERE 
+        profit_rank <= 5
+), 
+UniqueCustomers AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        COUNT(DISTINCT ws_order_number) AS order_count 
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_bill_customer_sk
+), 
+CustomerAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        uc.order_count,
+        CASE 
+            WHEN uc.order_count > 10 THEN 'Frequent'
+            WHEN uc.order_count BETWEEN 5 AND 10 THEN 'Moderate'
+            ELSE 'Infrequent' 
+        END AS customer_segment
+    FROM 
+        customer c
+    LEFT JOIN 
+        UniqueCustomers uc ON c.c_customer_sk = uc.ws_bill_customer_sk
+)
+SELECT 
+    t.web_site_sk,
+    t.total_orders,
+    t.total_profit,
+    t.avg_order_value,
+    ca.c_customer_id,
+    ca.c_first_name,
+    ca.c_last_name,
+    ca.customer_segment
+FROM 
+    TopWebsites t
+LEFT JOIN 
+    CustomerAnalysis ca ON ca.order_count > 0
+ORDER BY 
+    t.total_profit DESC, 
+    t.total_orders DESC;

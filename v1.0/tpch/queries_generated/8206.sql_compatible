@@ -1,0 +1,43 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size > 15
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING COUNT(l.l_orderkey) > 5 AND SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+)
+SELECT 
+    rp.p_name, 
+    ts.s_name, 
+    hvo.o_orderkey, 
+    hvo.total_value
+FROM RankedParts rp
+JOIN TopSuppliers ts ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey)
+JOIN HighValueOrders hvo ON hvo.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = rp.p_partkey)
+ORDER BY rp.p_retailprice DESC, ts.total_supply_cost DESC, hvo.total_value DESC
+FETCH FIRST 50 ROWS ONLY;

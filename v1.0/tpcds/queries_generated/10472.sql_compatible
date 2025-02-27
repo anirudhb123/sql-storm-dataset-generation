@@ -1,0 +1,20 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_id
+)
+SELECT 
+    w.warehouse_id,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(ss.total_orders) AS total_orders
+FROM sales_summary ss
+JOIN inventory inv ON ss.web_site_id = inv.inv_item_sk
+JOIN warehouse w ON inv.inv_warehouse_sk = w.warehouse_id
+GROUP BY w.warehouse_id
+ORDER BY total_sales DESC;

@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        b.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS actor_rank,
+        COUNT(DISTINCT d.name) OVER (PARTITION BY a.id) AS unique_keywords
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name b ON c.person_id = b.person_id
+    LEFT JOIN 
+        movie_keyword d ON a.id = d.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+        AND b.name IS NOT NULL
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_name,
+        actor_rank,
+        unique_keywords
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_rank = 1
+        AND unique_keywords > 5
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_name,
+    CASE 
+        WHEN tm.unique_keywords IS NULL THEN 'No keywords'
+        ELSE CAST(tm.unique_keywords AS TEXT) || ' unique keywords'
+    END AS keywords_info,
+    COUNT(DISTINCT mc.company_id) AS company_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.title = (
+        SELECT t.title 
+        FROM aka_title t 
+        WHERE t.production_year = tm.production_year
+        LIMIT 1  
+    )
+GROUP BY 
+    tm.title,
+    tm.production_year,
+    tm.actor_name,
+    tm.unique_keywords
+ORDER BY 
+    tm.production_year DESC,
+    tm.actor_name
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 3  
+    OR BOOLEAN_AND(tm.unique_keywords IS NOT NULL)  
+LIMIT 10;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE RecursiveMovieChain AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        ml.linked_movie_id, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id, 
+        mt.title, 
+        mt.production_year,
+        ml.linked_movie_id, 
+        rmc.depth + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        RecursiveMovieChain rmc ON ml.linked_movie_id = rmc.movie_id
+)
+SELECT 
+    DISTINCT at.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    rmc.depth,
+    COALESCE(
+        (SELECT COUNT(DISTINCT mc.company_id) 
+         FROM movie_companies mc 
+         WHERE mc.movie_id = mt.id), 0) AS company_count,
+    CASE 
+        WHEN mt.production_year IS NULL THEN 'UNKNOWN'
+        ELSE CAST(mt.production_year AS CHAR) 
+    END AS production_year_str,
+    ROW_NUMBER() OVER(PARTITION BY mt.id ORDER BY rmc.depth DESC) AS rank
+FROM 
+    aka_name at
+JOIN 
+    cast_info ci ON at.person_id = ci.person_id
+JOIN 
+    RecursiveMovieChain rmc ON ci.movie_id = rmc.movie_id
+JOIN 
+    aka_title mt ON rmc.movie_id = mt.id
+WHERE 
+    at.name IS NOT NULL
+    AND COALESCE(mt.production_year, 0) > 2000
+    AND (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = mt.id) > 5
+GROUP BY 
+    at.name, mt.movie_title, mt.production_year, rmc.depth
+ORDER BY 
+    rank, 
+    mt.production_year DESC
+LIMIT 10
+OFFSET 5;

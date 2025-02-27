@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        LastAccessDate,
+        COALESCE(UPTIME(Rank()) OVER (ORDER BY Reputation DESC), 0) AS UserRank
+    FROM Users
+), RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        COALESCE(p.ViewCount, 0) AS ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY p.Id, u.DisplayName
+), DetailedPostInfo AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Author,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+            WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment,
+        CASE 
+            WHEN rp.CommentCount > 10 THEN 'Highly Discussed'
+            WHEN rp.CommentCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+            ELSE 'Less Discussed'
+        END AS DiscussionLevel
+    FROM RecentPosts rp
+), RankedPosts AS (
+    SELECT 
+        dpi.*,
+        ROW_NUMBER() OVER (ORDER BY dpi.ViewCount DESC) AS Rank
+    FROM DetailedPostInfo dpi
+)
+SELECT 
+    rp.*,
+    ur.DisplayName AS TopContributingUser,
+    ur.Reputation AS TopUserReputation
+FROM RankedPosts rp
+LEFT JOIN UserReputation ur ON ur.UserId = (
+    SELECT UserId 
+    FROM Badges 
+    WHERE Name LIKE '%Top%' 
+    ORDER BY Date DESC 
+    LIMIT 1
+)
+WHERE rp.VoteSentiment = 'Positive'
+ORDER BY rp.Rank, rp.ViewCount DESC
+LIMIT 50;

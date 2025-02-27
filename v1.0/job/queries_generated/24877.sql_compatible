@@ -1,0 +1,54 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.id DESC) AS rn,
+        keyword.keyword AS movie_keyword
+    FROM 
+        title
+    LEFT JOIN 
+        movie_keyword ON title.id = movie_keyword.movie_id
+    LEFT JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+    WHERE 
+        title.production_year IS NOT NULL
+),
+TitleInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        CASE 
+            WHEN LENGTH(STRING_AGG(DISTINCT c.name, ', ')) > 255 THEN 'Too many actors'
+            ELSE STRING_AGG(DISTINCT c.name, ', ') 
+        END AS actor_list
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        complete_cast cc ON rt.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON rt.title_id = mi.movie_id
+    GROUP BY 
+        rt.title_id, rt.title, rt.production_year
+)
+SELECT 
+    ti.title,
+    ti.production_year,
+    ti.movie_info,
+    ti.actor_list,
+    COUNT(*) OVER(PARTITION BY ti.production_year) AS total_titles,
+    NULLIF(MAX(ti.movie_info) FILTER (WHERE ti.movie_info != 'No Info'), 'No Info') AS latest_info
+FROM 
+    TitleInfo ti
+WHERE 
+    (ti.actor_list IS NOT NULL AND ti.actor_list != 'No actors')
+    AND ti.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    ti.production_year DESC, ti.title ASC;

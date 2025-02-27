@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.depth < 3
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('F', 'O')
+), OrderLineItems AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_line_value
+    FROM lineitem li
+    WHERE li.l_shipdate > '1996-01-01' AND li.l_returnflag = 'N'
+    GROUP BY li.l_orderkey
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT c.c_custkey) AS total_customers, 
+       SUM(COALESCE(oli.total_line_value, 0)) AS total_order_value,
+       AVG(CASE WHEN so.s_name IS NOT NULL THEN 1 ELSE 0 END) AS avg_with_high_balance_suppliers
+FROM region r
+LEFT OUTER JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT OUTER JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT OUTER JOIN RankedOrders ro ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+LEFT OUTER JOIN OrderLineItems oli ON ro.o_orderkey = oli.l_orderkey
+LEFT OUTER JOIN SupplierHierarchy so ON so.s_nationkey = n.n_nationkey
+WHERE r.r_comment IS NOT NULL 
+AND (n.n_comment IS NULL OR LENGTH(n.n_comment) > 50)
+GROUP BY r.r_name
+HAVING SUM(oli.total_line_value) > 100000.00
+ORDER BY total_order_value DESC;

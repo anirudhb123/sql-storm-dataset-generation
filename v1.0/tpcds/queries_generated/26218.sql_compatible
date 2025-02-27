@@ -1,0 +1,51 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city, 
+        ca_state,
+        COUNT(*) AS total_addresses,
+        MIN(ca_zip) AS min_zip,
+        MAX(ca_zip) AS max_zip,
+        STRING_AGG(DISTINCT ca_street_name, ', ') AS unique_streets
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT cd_credit_rating, ', ') AS unique_credit_ratings
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+SalesStats AS (
+    SELECT 
+        d_year,
+        SUM(ws_net_paid) AS total_sales,
+        AVG(ws_sales_price) AS avg_sales_price,
+        STRING_AGG(DISTINCT CAST(ws_ship_mode_sk AS VARCHAR), ', ') AS unique_shipping_modes
+    FROM 
+        web_sales
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    GROUP BY 
+        d_year
+)
+
+SELECT 
+    AS.address_stats,
+    CS.customer_stats,
+    SS.sales_stats
+FROM 
+    AddressStats AS AS
+JOIN 
+    CustomerStats AS CS ON AS.ca_state = CS.cd_gender
+JOIN 
+    SalesStats AS SS ON SS.d_year = EXTRACT(YEAR FROM CAST('2002-10-01' AS DATE))
+ORDER BY 
+    SS.total_sales DESC;

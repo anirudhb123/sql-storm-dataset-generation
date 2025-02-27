@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M' 
+        AND cd.cd_gender = 'F' 
+        AND cd.cd_purchase_estimate > 500
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+TopProfitWebsites AS (
+    SELECT 
+        web_site_sk, 
+        web_name, 
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank = 1
+),
+StoreSalesSummary AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_store_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.s_store_sk, s.s_store_name
+)
+SELECT 
+    t.web_name,
+    s.s_store_name,
+    s.total_store_profit,
+    t.total_net_profit
+FROM 
+    TopProfitWebsites t
+FULL OUTER JOIN 
+    StoreSalesSummary s ON t.web_site_sk = s.s_store_sk
+WHERE 
+    s.total_store_profit > 0 OR t.total_net_profit > 0
+ORDER BY 
+    t.total_net_profit DESC NULLS LAST, 
+    s.total_store_profit DESC NULLS LAST;

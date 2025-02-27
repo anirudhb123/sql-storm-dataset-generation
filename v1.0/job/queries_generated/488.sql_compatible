@@ -1,0 +1,50 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+),
+ActorCounts AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ac.actor_count,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCounts ac ON rm.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    COALESCE(NULLIF(md.keyword, 'No Keywords'), 'N/A') AS keyword_info,
+    CASE 
+        WHEN md.actor_count IS NULL THEN 'No cast info'
+        WHEN md.actor_count < 5 THEN 'Low cast'
+        ELSE 'High cast'
+    END AS cast_quality
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC, md.actor_count DESC
+LIMIT 10;

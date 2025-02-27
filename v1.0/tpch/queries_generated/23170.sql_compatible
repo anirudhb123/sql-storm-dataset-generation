@@ -1,0 +1,45 @@
+
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_nationkey, s2.s_acctbal, rs.level + 1
+    FROM supplier s2
+    JOIN RecursiveSupplier rs ON s2.s_nationkey = rs.s_nationkey AND rs.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS line_count,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' 
+    AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+TopCustomers AS (
+    SELECT DISTINCT c.c_custkey, c.c_name, os.total_revenue
+    FROM customer c
+    JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    WHERE os.line_count > 0
+    ORDER BY os.total_revenue DESC
+    FETCH FIRST 10 ROWS ONLY
+),
+SupplierDetails AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           MAX(ps.ps_supplycost) AS max_supply_cost,
+           STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT nc.n_name AS nation_name, ps.total_avail_qty, ps.max_supply_cost, 
+       tc.total_revenue
+FROM nation nc
+LEFT JOIN SupplierDetails ps ON nc.n_nationkey = (SELECT s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT DISTINCT ps.ps_suppkey FROM partsupp ps))
+FULL OUTER JOIN TopCustomers tc ON nc.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = tc.c_custkey)
+WHERE (ps.total_avail_qty IS NOT NULL OR tc.total_revenue IS NOT NULL)
+  AND (ps.total_avail_qty > 100 OR (tc.total_revenue IS NULL AND ps.max_supply_cost < 50.00))
+  AND NULLIF((SELECT COUNT(*) FROM orders o WHERE o.o_orderkey = tc.o_orderkey), 0) = 0
+ORDER BY ps.max_supply_cost DESC NULLS LAST;

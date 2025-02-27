@@ -1,0 +1,80 @@
+
+WITH SupplierCost AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.s_suppkey
+), 
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+PartSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS sales_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(ps.total_sales, 0) AS total_sales,
+    COALESCE(cs.total_spent, 0) AS customer_spent,
+    sc.total_supply_cost
+FROM 
+    part p
+LEFT JOIN 
+    PartSales ps ON p.p_partkey = ps.l_partkey
+LEFT JOIN 
+    CustomerOrderStats cs ON cs.c_custkey = (
+        SELECT 
+            o.o_custkey
+        FROM 
+            orders o
+        WHERE 
+            o.o_orderkey = (
+                SELECT 
+                    l.l_orderkey
+                FROM 
+                    lineitem l
+                WHERE 
+                    l.l_partkey = p.p_partkey
+                LIMIT 1
+            )
+    )
+LEFT JOIN 
+    SupplierCost sc ON sc.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey
+        FROM 
+            partsupp ps
+        WHERE 
+            ps.ps_partkey = p.p_partkey 
+        ORDER BY 
+            ps.ps_supplycost DESC
+        LIMIT 1
+    )
+WHERE 
+    p.p_size > 10
+ORDER BY 
+    total_sales DESC, 
+    customer_spent DESC;

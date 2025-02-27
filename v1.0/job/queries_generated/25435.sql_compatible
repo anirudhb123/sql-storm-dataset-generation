@@ -1,0 +1,69 @@
+
+WITH MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        m.imdb_index,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM title m
+    LEFT JOIN movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN cast_info ci ON m.id = ci.movie_id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id, m.title, m.production_year, m.imdb_index
+),
+ActorInfo AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS roles_count
+    FROM aka_name a
+    LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY a.id, a.name
+),
+TopActors AS (
+    SELECT 
+        actor_id,
+        name,
+        movie_count,
+        roles_count,
+        RANK() OVER (ORDER BY movie_count DESC) AS actor_rank
+    FROM ActorInfo
+    WHERE movie_count > 5
+),
+FinalReport AS (
+    SELECT 
+        mi.movie_id,
+        mi.title,
+        mi.production_year,
+        mi.imdb_index,
+        mi.keywords,
+        mi.companies,
+        mi.cast_count,
+        ta.name AS top_actor,
+        ta.movie_count AS top_actor_movies,
+        ta.roles_count AS top_actor_roles
+    FROM MovieInfo mi
+    LEFT JOIN TopActors ta ON ta.actor_rank = 1
+)
+
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    imdb_index,
+    keywords,
+    companies,
+    cast_count,
+    top_actor,
+    top_actor_movies,
+    top_actor_roles
+FROM FinalReport
+ORDER BY production_year DESC, cast_count DESC;

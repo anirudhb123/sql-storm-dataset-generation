@@ -1,0 +1,80 @@
+
+WITH RecursiveMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        COALESCE(mh.avg_rating, 0) AS avg_rating,
+        COALESCE(mc.company_names, '{}') AS company_names
+    FROM 
+        aka_title m
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            AVG(NULLIF(info, '0')) AS avg_rating
+        FROM 
+            movie_info 
+        WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        GROUP BY 
+            movie_id
+    ) mh ON m.id = mh.movie_id
+    LEFT JOIN (
+        SELECT 
+            mc.movie_id,
+            ARRAY_AGG(DISTINCT cn.name) AS company_names
+        FROM 
+            movie_companies mc
+        JOIN 
+            company_name cn ON mc.company_id = cn.id
+        GROUP BY 
+            mc.movie_id
+    ) mc ON m.id = mc.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, m.production_year, mh.avg_rating, mc.company_names
+    ORDER BY 
+        m.production_year DESC
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY avg_rating DESC) AS ranking
+    FROM 
+        RecursiveMovieInfo
+),
+FilteredMovies AS (
+    SELECT *
+    FROM RankedMovies
+    WHERE 
+        ranking <= 5
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.avg_rating,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    CASE 
+        WHEN COUNT(DISTINCT cc.role_id) > 3 THEN 'Diverse Cast'
+        ELSE 'Limited Cast'
+    END AS cast_diversity,
+    (
+        SELECT COUNT(DISTINCT ci.person_id)
+        FROM cast_info ci 
+        WHERE ci.movie_id = fm.movie_id
+    ) AS total_cast
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info cc ON fm.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name an ON cc.person_id = an.person_id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.avg_rating
+ORDER BY 
+    fm.avg_rating DESC NULLS LAST;

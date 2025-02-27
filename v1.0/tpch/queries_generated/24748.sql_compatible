@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk,
+        COUNT(DISTINCT ps.ps_partkey) OVER (PARTITION BY n.n_nationkey) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_brand
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS total_lines
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance' 
+            WHEN c.c_acctbal < 0 THEN 'Negative Balance' 
+            ELSE 'Positive Balance' 
+        END AS balance_status,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_acctbal
+)
+SELECT 
+    r.s_name, 
+    p.p_brand, 
+    cs.balance_status, 
+    COUNT(DISTINCT os.o_orderkey) AS order_count,
+    SUM(p.total_supplycost) AS total_supplycost,
+    MAX(r.s_acctbal) AS highest_acct_balance
+FROM RankedSuppliers r
+JOIN FilteredParts p ON r.s_suppkey = p.p_partkey
+JOIN CustomerStats cs ON cs.total_orders > 5
+LEFT JOIN OrderSummary os ON os.total_price > 1000
+GROUP BY r.s_name, p.p_brand, cs.balance_status
+HAVING COUNT(DISTINCT r.s_suppkey) > 1
+ORDER BY highest_acct_balance DESC, order_count ASC;

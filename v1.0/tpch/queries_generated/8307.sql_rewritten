@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        MAX(l.l_shipdate) AS max_shipdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS part_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    cust.c_name, 
+    order.o_orderkey, 
+    supplier.s_name, 
+    supplier.s_acctbal, 
+    SUM(line.l_extendedprice) AS total_sales,
+    MAX(line.l_shipdate) AS last_ship_date
+FROM 
+    RecentOrders order
+JOIN 
+    HighValueCustomers cust ON order.o_custkey = cust.c_custkey
+JOIN 
+    lineitem line ON order.o_orderkey = line.l_orderkey
+JOIN 
+    SupplierPartDetails supplier ON line.l_partkey = supplier.ps_partkey AND supplier.part_rank = 1
+WHERE 
+    order.max_shipdate > DATEADD(year, -1, cast('1998-10-01' as date)())
+    AND cust.total_spent > 20000
+GROUP BY 
+    cust.c_name, 
+    order.o_orderkey, 
+    supplier.s_name, 
+    supplier.s_acctbal
+ORDER BY 
+    total_sales DESC, 
+    cust.c_name;

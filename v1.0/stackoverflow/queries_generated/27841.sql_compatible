@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT a.Id) DESC, COUNT(DISTINCT c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+            Votes 
+         GROUP BY 
+            PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.Author,
+        rp.CommentCount,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Author,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    CASE 
+        WHEN fp.UpVotes - fp.DownVotes > 0 THEN 'Positive'
+        WHEN fp.UpVotes - fp.DownVotes < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Posts tagsPost ON fp.PostId = tagsPost.Id
+LEFT JOIN 
+    (SELECT 
+        UNNEST(string_to_array(SUBSTRING(tagsPost.Tags FROM 2 FOR LENGTH(tagsPost.Tags) - 2), '><')) AS TagName 
+     FROM 
+        Tags 
+     WHERE 
+        Tags.Id IN (SELECT UNNEST(string_to_array(tagsPost.Tags, '><'))::int)) t ON t.TagName IS NOT NULL
+GROUP BY 
+    fp.PostId, fp.Title, fp.Author, fp.CommentCount, fp.AnswerCount, fp.UpVotes, fp.DownVotes
+ORDER BY 
+    fp.UpVotes - fp.DownVotes DESC;

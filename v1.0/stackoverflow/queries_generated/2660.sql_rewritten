@@ -1,0 +1,88 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(COALESCE(vote.UpVotes, 0)) AS TotalUpVotes, 
+        SUM(COALESCE(vote.DownVotes, 0)) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+            v.UserId, 
+            v.PostId, 
+            SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes, 
+            SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes 
+         FROM 
+            Votes v 
+         JOIN 
+            VoteTypes vt ON v.VoteTypeId = vt.Id 
+         GROUP BY 
+            v.UserId, v.PostId) vote ON p.Id = vote.PostId
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        COUNT(c.Id) AS CommentCount, 
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS IsAccepted, 
+        AVG(p.Score) OVER (PARTITION BY p.PostTypeId) AS AvgScorePerType, 
+        PM.* 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            MIN(CreationDate) AS FirstCommentDate 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) pm ON p.Id = pm.PostId
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    ua.UserId, 
+    ua.DisplayName, 
+    ua.PostCount, 
+    ua.TotalUpVotes, 
+    ua.TotalDownVotes, 
+    ps.PostId, 
+    ps.Title, 
+    ps.CommentCount, 
+    ps.IsAccepted, 
+    ps.AvgScorePerType
+FROM 
+    UserActivity ua
+JOIN 
+    PostStats ps ON ua.UserId = ps.UserId
+WHERE 
+    ua.Rank <= 10 
+ORDER BY 
+    ua.TotalUpVotes DESC, 
+    ps.CommentCount DESC
+LIMIT 50
+UNION ALL
+SELECT 
+    NULL AS UserId, 
+    'Aggregated Posts' AS DisplayName, 
+    COUNT(ps.PostId) AS TotalPosts, 
+    SUM(ps.CommentCount) AS TotalComments, 
+    NULL AS TotalUpVotes, 
+    NULL AS TotalDownVotes, 
+    NULL AS PostId, 
+    NULL AS Title, 
+    NULL AS CommentCount, 
+    NULL AS IsAccepted, 
+    AVG(ps.AvgScorePerType) AS AvgScore
+FROM 
+    PostStats ps
+WHERE 
+    ps.CommentCount > 0;

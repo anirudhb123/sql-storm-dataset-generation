@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        rp.*, 
+        u.DisplayName AS OwnerDisplayName, 
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) b ON b.UserId = u.Id
+    GROUP BY 
+        rp.PostId, u.DisplayName, b.BadgeCount
+),
+FilteredTopPosts AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN ViewCount > 1000 THEN 'High'
+            WHEN ViewCount BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ViewCountCategory
+    FROM 
+        TopPosts
+    WHERE 
+        Rank <= 20 
+)
+SELECT 
+    PostId, 
+    Title, 
+    CreationDate, 
+    ViewCount, 
+    Score, 
+    TagCount, 
+    CommentCount,
+    OwnerDisplayName, 
+    BadgeCount, 
+    ViewCountCategory
+FROM 
+    FilteredTopPosts
+ORDER BY 
+    Score DESC, 
+    ViewCount DESC;

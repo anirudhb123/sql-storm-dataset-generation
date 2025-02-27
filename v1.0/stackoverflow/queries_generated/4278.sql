@@ -1,0 +1,64 @@
+WITH UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        RANK() OVER (ORDER BY COALESCE(SUM(v.BountyAmount), 0) DESC) AS RankByBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        RankByBounties
+    FROM UserStats
+    WHERE PostCount > 5
+    ORDER BY RankByBounties
+    LIMIT 10
+),
+PopularTags AS (
+    SELECT
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsageCount
+    FROM Tags t
+    INNER JOIN Posts p ON t.Id = p.Tags::int -- Assume Tags is stored as an integer representation for join
+    INNER JOIN PostLinks pl ON pl.RelatedPostId = p.Id
+    GROUP BY t.TagName
+    HAVING COUNT(pt.PostId) > 3
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerDisplayName,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName,
+    u.UpVotes,
+    u.DownVotes,
+    u.PostCount,
+    t.TagName,
+    rp.Title,
+    rp.CommentCount
+FROM TopUsers u
+CROSS JOIN PopularTags t
+JOIN RecentPosts rp ON rp.PostId IN (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = u.UserId
+)
+LEFT JOIN PostHistory ph ON rp.PostId = ph.PostId
+WHERE ph.CreationDate IS NOT NULL
+ORDER BY u.UpVotes DESC, rp.CommentCount DESC;

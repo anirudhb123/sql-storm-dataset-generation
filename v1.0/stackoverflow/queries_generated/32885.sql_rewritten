@@ -1,0 +1,107 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE
+        U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.Reputation,
+        UR.Level + 1
+    FROM 
+        UserReputation UR
+    JOIN 
+        Users U ON U.Id = UR.UserId
+    WHERE 
+        U.Reputation > UR.Reputation AND UR.Level < 5
+),
+TagPostCounts AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%' 
+    GROUP BY 
+        T.TagName
+),
+UserWithBadges AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Ranking
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserWithBadges B ON B.Id = U.Id
+    WHERE 
+        U.Reputation > 5000
+    ORDER BY 
+        U.Reputation DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Body,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswer,
+        COALESCE(C.Comment, 'No Comments') AS LatestComment,
+        COUNT(C.Id) AS TotalComments
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, C.Comment
+)
+SELECT 
+    T.TagName,
+    TC.PostCount,
+    CONCAT(U.DisplayName, ' (Reputation: ', U.Reputation, ', Badges: ', COALESCE(UB.BadgeCount, 0), ')') AS UserInfo,
+    PD.Title,
+    PD.Body,
+    PD.AcceptedAnswer,
+    PD.LatestComment,
+    PD.TotalComments,
+    UR.Level AS UserReputationLevel
+FROM 
+    TagPostCounts TC
+JOIN 
+    Posts P ON P.Tags LIKE '%' || TC.TagName || '%' 
+JOIN 
+    TopUsers U ON U.UserId = P.OwnerUserId
+JOIN 
+    PostDetails PD ON PD.Id = P.Id
+LEFT JOIN 
+    UserWithBadges UB ON UB.Id = U.Id
+LEFT JOIN 
+    UserReputation UR ON UR.UserId = U.Id
+WHERE 
+    TC.PostCount > 10
+ORDER BY 
+    TC.PostCount DESC,
+    U.Reputation DESC;

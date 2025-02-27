@@ -1,0 +1,55 @@
+
+WITH CustomerData AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           cd.cd_credit_rating,
+           cd.cd_dep_count,
+           cd.cd_dep_employed_count,
+           cd.cd_dep_college_count,
+           ca.ca_city,
+           ca.ca_state,
+           ca.ca_country,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_marital_status = 'M'
+      AND cd.cd_dep_count > 0
+),
+SalesData AS (
+    SELECT ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_quantity_sold,
+           SUM(ws.ws_net_profit) AS total_profit,
+           ws.ws_bill_customer_sk
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk, ws.ws_bill_customer_sk
+),
+TopItems AS (
+    SELECT si.*, 
+           DENSE_RANK() OVER (ORDER BY si.total_profit DESC) AS profitability_rank
+    FROM (
+        SELECT si.ws_item_sk,
+               SUM(ss.cs_net_profit) AS total_profit
+        FROM sales_data si
+        JOIN store_sales ss ON si.ws_item_sk = ss.ss_item_sk
+        GROUP BY si.ws_item_sk
+    ) AS si
+)
+SELECT c.c_first_name,
+       c.c_last_name,
+       sd.total_quantity_sold,
+       sd.total_profit,
+       ti.profitability_rank,
+       CASE 
+           WHEN c.c_birth_month IS NULL THEN 'Unknown Birth Month'
+           ELSE CONCAT('Born in: ', c.c_birth_month)
+       END AS birth_info
+FROM CustomerData c
+LEFT JOIN SalesData sd ON c.c_customer_sk = sd.ws_bill_customer_sk
+LEFT JOIN TopItems ti ON sd.ws_item_sk = ti.ws_item_sk
+WHERE ti.profitability_rank <= 5 OR ti.profitability_rank IS NULL
+ORDER BY c.c_last_name, c.c_first_name;

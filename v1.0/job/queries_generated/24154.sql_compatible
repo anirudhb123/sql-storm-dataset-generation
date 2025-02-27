@@ -1,0 +1,80 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY rt.actor_count DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        RecursiveCTE rt ON t.id = rt.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT
+        m.title,
+        m.production_year,
+        co.name AS company_name,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        m.season_nr,
+        m.episode_nr
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        co.country_code IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        dt.*,
+        (CASE 
+            WHEN dt.keyword IS NULL THEN 'Unknown'
+            ELSE dt.keyword 
+         END) AS adjusted_keyword
+    FROM 
+        MovieDetails dt
+    WHERE 
+        dt.production_year BETWEEN 1990 AND 2000 
+        AND (dt.season_nr IS NULL OR dt.season_nr = 0)
+),
+FinalOutput AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.company_name,
+        f.adjusted_keyword,
+        nt.rank
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        RankedTitles nt ON f.title = nt.title 
+    WHERE 
+        nt.rank <= 3
+)
+SELECT 
+    COUNT(*) AS top_rated_movies,
+    AVG(nt.rank) AS average_rank
+FROM 
+    FinalOutput
+WHERE 
+    company_name IS NOT NULL
+    AND adjusted_keyword LIKE '%Action%'
+GROUP BY 
+    f.company_name
+ORDER BY 
+    top_rated_movies DESC;

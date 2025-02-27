@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_name, 
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_name, 
+        ps.ps_supplycost
+    FROM 
+        RankedSuppliers s
+    WHERE 
+        s.Rank <= 5
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice 
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+), 
+TotalSpent AS (
+    SELECT 
+        co.c_custkey, 
+        co.c_name, 
+        SUM(co.o_totalprice) AS total_spent
+    FROM 
+        CustomerOrders co
+    GROUP BY 
+        co.c_custkey, co.c_name
+)
+SELECT 
+    ts.s_suppkey,
+    ts.s_name,
+    ts.s_acctbal,
+    ts.p_name,
+    ts.ps_supplycost,
+    ts.total_spent
+FROM 
+    TopSuppliers ts
+JOIN 
+    TotalSpent t ON ts.s_suppkey = t.c_custkey
+ORDER BY 
+    ts.ps_supplycost DESC, 
+    t.total_spent DESC;

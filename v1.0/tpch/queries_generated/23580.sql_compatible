@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal
+),
+MaxOrderTotal AS (
+    SELECT o.o_custkey, MAX(o.o_totalprice) AS max_total
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+CustomerOrders AS (
+    SELECT ch.c_custkey, ch.c_name, ch.c_acctbal, ch.level, mt.max_total
+    FROM CustomerHierarchy ch
+    LEFT JOIN MaxOrderTotal mt ON ch.c_custkey = mt.o_custkey
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, p.p_comment,
+           CASE 
+               WHEN p.p_size >= 100 THEN 'Large'
+               WHEN p.p_size BETWEEN 50 AND 99 THEN 'Medium'
+               ELSE 'Small'
+           END AS size_category
+    FROM part p
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+FinalAnalysis AS (
+    SELECT co.c_custkey, co.c_name, co.c_acctbal, co.level, os.order_revenue,
+           CASE 
+               WHEN os.order_revenue IS NULL THEN 'No Orders'
+               WHEN os.order_revenue > 10000 THEN 'High Value'
+               ELSE 'Standard Value'
+           END AS revenue_category,
+           SUM(sc.total_supply_cost) OVER (PARTITION BY co.c_custkey) AS total_supplier_cost
+    FROM CustomerOrders co
+    LEFT JOIN OrderSummary os ON co.c_custkey = os.o_orderkey
+    LEFT JOIN SupplierCosts sc ON sc.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey))
+)
+SELECT fa.c_custkey, fa.c_name, fa.level, fa.order_revenue, fa.revenue_category, fa.total_supplier_cost
+FROM FinalAnalysis fa
+WHERE fa.c_custkey IS NOT NULL
+  AND (fa.c_acctbal > 1000 OR fa.level > 1)
+ORDER BY fa.order_revenue DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        1 AS level 
+    FROM 
+        movie_link ml 
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id, 
+        ml.linked_movie_id, 
+        mh.level + 1 
+    FROM 
+        movie_link ml 
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id 
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+average_cast AS (
+    SELECT 
+        ci.movie_id, 
+        AVG(CASE WHEN ci.nr_order <= 5 THEN ci.nr_order ELSE NULL END) AS avg_lead_role_order 
+    FROM 
+        cast_info ci 
+    GROUP BY 
+        ci.movie_id
+),
+movie_details AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        bc.company_name, 
+        m.avg_lead_role_order 
+    FROM 
+        aka_title a 
+    LEFT JOIN 
+        (SELECT 
+             mc.movie_id, 
+             cn.name AS company_name 
+         FROM 
+             movie_companies mc 
+         JOIN 
+             company_name cn ON mc.company_id = cn.id 
+         WHERE 
+             mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+         GROUP BY 
+             mc.movie_id, cn.name) AS bc ON a.movie_id = bc.movie_id 
+    INNER JOIN 
+        average_cast m ON a.id = m.movie_id 
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2020 
+        AND m.avg_lead_role_order IS NOT NULL
+)
+SELECT 
+    md.title, 
+    md.production_year, 
+    md.company_name, 
+    COUNT(DISTINCT mhl.linked_movie_id) AS sequel_count,
+    COALESCE(ROUND(AVG(md.avg_lead_role_order), 2), 0) AS average_lead_role_order
+FROM 
+    movie_details md 
+LEFT JOIN 
+    movie_hierarchy mhl ON md.movie_id = mhl.movie_id 
+GROUP BY 
+    md.title, md.production_year, md.company_name 
+ORDER BY 
+    sequel_count DESC, md.production_year DESC;

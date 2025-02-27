@@ -1,0 +1,53 @@
+WITH RECURSIVE
+    SupplierRank AS (
+        SELECT s_suppkey, s_name, s_acctbal,
+               ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rank
+        FROM supplier
+    ),
+    HighValueCustomers AS (
+        SELECT c_custkey, c_name, c_acctbal,
+               CASE WHEN c_acctbal IS NULL OR c_acctbal < 1000 THEN 'Low Value'
+                    WHEN c_acctbal BETWEEN 1000 AND 5000 THEN 'Medium Value'
+                    ELSE 'High Value' END AS customer_value
+        FROM customer
+    ),
+    LineItemAnalysis AS (
+        SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS total_price,
+               AVG(l_quantity) AS avg_quantity
+        FROM lineitem
+        GROUP BY l_orderkey
+    ),
+    OrdersWithLineItems AS (
+        SELECT o.o_orderkey, o.o_orderdate, o.o_orderstatus, 
+               li.total_price,
+               RANK() OVER (PARTITION BY o.o_orderkey ORDER BY li.total_price DESC) as order_rank
+        FROM orders o
+        JOIN LineItemAnalysis li ON o.o_orderkey = li.l_orderkey
+    )
+SELECT DISTINCT
+    s.s_name AS supplier_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(OrdersWithLineItems.total_price, 0) AS total_order_price,
+    CASE 
+        WHEN c.c_acctbal IS NULL THEN 'No Balance'
+        ELSE 'Balance Available' END AS balance_status,
+    COUNT(DISTINCT li.l_orderkey) OVER (PARTITION BY s.s_suppkey ORDER BY o.o_orderdate) AS order_count,
+    CASE 
+        WHEN RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate) = 1 THEN 'First Order'
+        ELSE 'Not First' END AS order_sequence
+FROM supplier s
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN OrdersWithLineItems o ON c.c_custkey = o.o_orderkey
+LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+  AND EXISTS (
+      SELECT 1 
+      FROM HighValueCustomers hvc 
+      WHERE hvc.c_custkey = c.c_custkey 
+        AND hvc.customer_value = 'High Value'
+  )
+ORDER BY s.s_name, o.o_orderdate DESC, total_order_price DESC;

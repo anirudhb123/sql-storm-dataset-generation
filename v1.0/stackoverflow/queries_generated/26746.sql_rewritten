@@ -1,0 +1,50 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        p.PostTypeId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(p.CreationDate) AS LastPosted,
+        ARRAY_AGG(DISTINCT u.DisplayName ORDER BY u.Reputation DESC) AS TopUsers
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        t.TagName, p.PostTypeId
+),
+TagRanking AS (
+    SELECT 
+        TagName,
+        PostCount,
+        CommentCount,
+        VoteCount,
+        LastPosted,
+        TopUsers,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+)
+SELECT 
+    TagName,
+    PostCount,
+    CommentCount,
+    VoteCount,
+    LastPosted,
+    TopUsers,
+    TagRank
+FROM 
+    TagRanking
+WHERE 
+    TagRank <= 10 
+ORDER BY 
+    PostCount DESC;

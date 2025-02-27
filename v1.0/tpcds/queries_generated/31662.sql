@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_quantity, 
+        ws_sales_price, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buy_potential,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_buy_potential
+),
+total_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_quantity) AS total_quantity_sold,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_revenue
+    FROM 
+        sales_data sd
+    GROUP BY 
+        sd.ws_item_sk
+)
+
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.buy_potential,
+    ts.total_quantity_sold,
+    ts.total_revenue,
+    (SELECT AVG(total_spent) FROM customer_data) AS avg_spent_per_customer,
+    (SELECT COUNT(*) FROM customer_data WHERE total_spent > 1000) AS high_spending_customers
+FROM 
+    customer_data cd
+LEFT JOIN 
+    total_sales ts ON cd.c_customer_sk = (SELECT cs_bill_customer_sk FROM web_sales WHERE ws_item_sk = ts.ws_item_sk LIMIT 1)
+WHERE 
+    cd.total_spent IS NOT NULL
+    AND cd.buy_potential != 'UNKNOWN'
+ORDER BY 
+    ts.total_revenue DESC
+LIMIT 100;

@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 50000 AND sh.level < 3
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus = 'O'
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts, 
+           AVG(l.l_quantity) AS avg_quantity
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT c.c_name, COALESCE(SUM(lis.total_revenue), 0) AS total_revenue,
+       COUNT(DISTINCT ps.p_partkey) AS num_parts, s.s_name AS supplier_name
+FROM CustomerOrders co
+LEFT JOIN LineItemStats lis ON co.o_orderkey = lis.l_orderkey
+LEFT JOIN PartSupplier ps ON ps.rank_cost <= 5
+LEFT JOIN SupplierHierarchy s ON s.s_nationkey = co.o_orderkey
+GROUP BY c.c_name, s.s_name
+HAVING COUNT(DISTINCT ps.p_partkey) > 0
+AND SUM(lis.total_revenue) > 10000
+ORDER BY total_revenue DESC, c.c_name ASC;

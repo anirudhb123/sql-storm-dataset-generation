@@ -1,0 +1,62 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        c.c_name,
+        o.orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c.custkey ORDER BY o.orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.custkey = c.custkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        o.orderdate,
+        c.c_name,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_line_value
+    FROM 
+        RankedOrders o
+    JOIN 
+        lineitem l ON o.orderkey = l.orderkey
+    WHERE 
+        o.order_rank = 1
+    GROUP BY 
+        o.orderkey, o.totalprice, o.orderdate, c.c_name
+    HAVING 
+        SUM(l.extendedprice * (1 - l.discount)) > 10000
+),
+SupplierParts AS (
+    SELECT 
+        s.suppkey,
+        p.brand,
+        SUM(ps.availqty) AS total_available
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.suppkey = ps.suppkey
+    JOIN 
+        part p ON ps.partkey = p.partkey
+    GROUP BY 
+        s.suppkey, p.brand
+)
+SELECT 
+    h.orderkey,
+    h.totalprice,
+    h.orderdate,
+    h.c_name,
+    p.brand,
+    sp.total_available,
+    h.total_line_value,
+    (s.acctbal / NULLIF(sp.total_available, 0)) AS balance_per_available
+FROM 
+    HighValueOrders h
+JOIN 
+    SupplierParts sp ON h.orderkey = sp.suppkey
+JOIN 
+    supplier s ON sp.suppkey = s.suppkey
+ORDER BY 
+    h.total_line_value DESC, h.orderdate ASC;

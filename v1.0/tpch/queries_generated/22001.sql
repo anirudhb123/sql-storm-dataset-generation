@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'Undefined'
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) < 10000 THEN 'Low'
+            ELSE 'High'
+        END AS revenue_category
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), 
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_linenumber) AS distinct_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        (o.o_totalprice IS NOT NULL AND o.o_totalprice > 5000)
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    np.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(COALESCE(ps.ps_availqty, 0)) AS avg_supply_quantity,
+    SUM(CASE WHEN rnk = 1 AND revenue_category = 'High' THEN ps.ps_supplycost ELSE 0 END) AS total_high_value_supplier_cost
+FROM 
+    nation np
+LEFT JOIN 
+    customer c ON np.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rnk = 1
+LEFT JOIN 
+    partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+JOIN 
+    HighValueParts hvp ON ps.ps_partkey = hvp.p_partkey
+JOIN 
+    FilteredOrders fo ON c.c_custkey = o.o_custkey
+GROUP BY 
+    np.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > (SELECT AVG(customer_count) FROM (SELECT COUNT(DISTINCT c.c_custkey) AS customer_count FROM nation np JOIN customer c ON np.n_nationkey = c.c_nationkey GROUP BY np.n_name) AS subquery)
+ORDER BY 
+    total_high_value_supplier_cost DESC, np.n_name
+LIMIT 10;

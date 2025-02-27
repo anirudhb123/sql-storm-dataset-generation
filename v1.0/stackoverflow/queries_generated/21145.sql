@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Comments WHERE PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes WHERE PostId = P.Id AND VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.CommentCount,
+    RP.UpVoteCount,
+    RP.DownVoteCount,
+    CASE 
+        WHEN RP.Score IS NULL THEN 'No Score'
+        WHEN RP.Score > 0 THEN 'Positive'
+        WHEN RP.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS ScoreCategory,
+    CASE 
+        WHEN RP.CommentCount > 0 THEN 'This post has comments'
+        ELSE 'No comments on this post'
+    END AS CommentStatus,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = U.Id AND B.Class = 1) AS GoldBadges,
+    COALESCE((SELECT STRING_AGG(T.TagName, ', ') 
+              FROM Tags T 
+              WHERE T.Id IN (SELECT unnest(string_to_array(P.Tags, ','))::int) 
+              AND P.PostTypeId = 1), 'No tags') AS TagsUsed
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    Users U ON RP.PostId = U.Id
+WHERE 
+    RP.Rank <= 5 
+ORDER BY 
+    RP.Score DESC
+LIMIT 10
+OFFSET 0;
+
+-- A query that benchmarks various SQL features including CTEs, 
+-- window functions, correlated subqueries, aggregation functions, and string manipulations 
+-- additionally utilizing a mix of conditionals and performance hurdles to test execution speeds.

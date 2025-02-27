@@ -1,0 +1,50 @@
+WITH movie_details AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        a.kind_id, 
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS acting_roles,
+        MAX(cn.name) AS company_name
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        a.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        a.title, a.production_year, a.kind_id
+), ranked_movies AS (
+    SELECT 
+        title, 
+        production_year,
+        total_cast, 
+        acting_roles,
+        company_name,
+        RANK() OVER (PARTITION BY production_year ORDER BY total_cast DESC) AS rank_order
+    FROM 
+        movie_details
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    rm.acting_roles,
+    rm.company_name,
+    COALESCE(k.keyword, 'No Keywords') AS keyword_info
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movie_keyword mk ON rm.title = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    rm.rank_order <= 10
+ORDER BY 
+    rm.production_year, rm.rank_order;

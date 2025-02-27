@@ -1,0 +1,46 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DATE(DATEADD(DAY, ws.ws_sold_date_sk, '1970-01-01')) AS sale_date,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        h.hd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics h ON cd.cd_demo_sk = h.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON h.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ws.web_site_id, sale_date, cd.cd_gender, cd.cd_marital_status, h.hd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+), ranked_sales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY web_site_id ORDER BY total_net_profit DESC) AS profit_rank
+    FROM 
+        sales_data
+)
+SELECT 
+    web_site_id,
+    sale_date,
+    cd_gender,
+    cd_marital_status,
+    ib_lower_bound,
+    ib_upper_bound,
+    total_quantity,
+    total_net_profit
+FROM 
+    ranked_sales
+WHERE 
+    profit_rank <= 10
+ORDER BY 
+    web_site_id, total_net_profit DESC, sale_date DESC;

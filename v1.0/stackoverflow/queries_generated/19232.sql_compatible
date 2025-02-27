@@ -1,0 +1,21 @@
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    u.DisplayName AS OwnerDisplayName,
+    c.Comment,
+    c.CreationDate AS CommentDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+WHERE 
+    p.PostTypeId = 1  
+GROUP BY 
+    p.Id, p.Title, p.Score, u.DisplayName, c.Comment, c.CreationDate
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 10;

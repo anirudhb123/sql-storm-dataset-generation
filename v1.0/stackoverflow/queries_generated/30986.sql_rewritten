@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId, 
+        Title, 
+        PostTypeId, 
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.PostTypeId, 
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+PostMetrics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM RecursivePostHierarchy ph
+    LEFT JOIN Posts a ON ph.PostId = a.ParentId AND a.PostTypeId = 2  
+    LEFT JOIN Comments c ON ph.PostId = c.PostId  
+    LEFT JOIN Votes v ON ph.PostId = v.PostId
+    GROUP BY ph.PostId, ph.Title, ph.CreationDate
+),
+
+UserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(b.Class, 0)) AS BadgePoints,
+        COUNT(DISTINCT c.Id) AS CommentsMade
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    GROUP BY u.Id
+),
+
+FinalMetrics AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.CreationDate,
+        pm.AnswerCount,
+        pm.TotalBounty,
+        pm.CommentCount,
+        CASE 
+            WHEN u.PostsCreated IS NOT NULL THEN u.PostsCreated ELSE 0 END AS UserPostsCreated,
+        CASE 
+            WHEN u.BadgePoints IS NOT NULL THEN u.BadgePoints ELSE 0 END AS UserBadgePoints,
+        CASE 
+            WHEN u.CommentsMade IS NOT NULL THEN u.CommentsMade ELSE 0 END AS UserCommentsMade,
+        PM.SerializedTags
+    FROM PostMetrics pm
+    LEFT JOIN Users u ON pm.PostId IN (SELECT DISTINCT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+)
+
+SELECT 
+    fm.PostId,
+    fm.Title,
+    fm.CreationDate,
+    fm.AnswerCount,
+    fm.TotalBounty,
+    fm.CommentCount,
+    fm.UserPostsCreated,
+    fm.UserBadgePoints,
+    fm.UserCommentsMade,
+    DENSE_RANK() OVER (ORDER BY fm.AnswerCount DESC, fm.TotalBounty DESC) AS PostRank
+FROM FinalMetrics fm
+ORDER BY fm.CreationDate DESC;

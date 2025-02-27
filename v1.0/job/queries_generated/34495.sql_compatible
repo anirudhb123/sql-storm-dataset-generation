@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.id
+),
+RankedMovies AS (
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+IndustrySummary AS (
+    SELECT 
+        p.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        p.name IS NOT NULL AND 
+        p.name <> ''
+    GROUP BY 
+        p.person_id
+)
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year,
+    rm.title_rank,
+    is.movies_count,
+    COALESCE(is.keywords, 'No Keywords') AS keywords,
+    rm.company_count
+FROM 
+    MovieHierarchy mh
+JOIN 
+    RankedMovies rm ON mh.id = rm.id
+LEFT JOIN 
+    IndustrySummary is ON mh.id IN (
+        SELECT movie_id FROM cast_info WHERE movie_id = mh.id
+    )
+WHERE 
+    rm.company_count > 0
+ORDER BY 
+    mh.production_year DESC, rm.title_rank
+FETCH FIRST 100 ROWS ONLY;

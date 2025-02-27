@@ -1,0 +1,63 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(coalesce(ws.ws_net_profit, 0)) AS total_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+), 
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        warehouse w
+    JOIN 
+        inventory inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+), 
+PromotionStats AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    WHERE 
+        p.p_start_date_sk IS NOT NULL AND p.p_end_date_sk > CURRENT_DATE
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    cs.total_net_profit,
+    ws.w_warehouse_id,
+    ws.total_inventory,
+    ps.p_promo_id,
+    ps.total_orders,
+    ps.total_sales
+FROM 
+    CustomerStats cs
+JOIN 
+    WarehouseStats ws ON cs.customer_count > 1000
+JOIN 
+    PromotionStats ps ON cs.avg_purchase_estimate > 500
+ORDER BY 
+    cs.total_net_profit DESC, cs.customer_count DESC;

@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovieInfo AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        m.title,
+        m.production_year,
+        ci.note AS role_note,
+        COALESCE(mk.keyword, 'No Keyword') AS movie_keyword,
+        c.kind AS company_type,
+        COUNT(*) OVER (PARTITION BY a.person_id) AS total_movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        RankedMovies m ON ci.movie_id = m.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+)
+SELECT 
+    actor.name AS actor_name,
+    COUNT(DISTINCT actor.movie_id) AS number_of_movies,
+    STRING_AGG(DISTINCT actor.movie_keyword, ', ') AS keywords,
+    SUM(CASE WHEN actor.role_note IS NOT NULL THEN 1 ELSE 0 END) AS roles_assigned,
+    AVG(actor.total_movies) AS average_movies_per_actor
+FROM 
+    ActorMovieInfo actor
+WHERE 
+    actor.production_year >= 2000
+GROUP BY 
+    actor.name
+HAVING 
+    COUNT(DISTINCT actor.movie_id) > 2
+ORDER BY 
+    number_of_movies DESC;

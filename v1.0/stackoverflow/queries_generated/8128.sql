@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(NULLIF(p.AcceptedAnswerId, -1), p.Id) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.AcceptedAnswerId
+), PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        COALESCE(uph.UserId, -1) AS UpvoterId,
+        COALESCE(dph.UserId, -1) AS DownvoterId,
+        CASE 
+            WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Accepted Answer'
+            ELSE 'No Accepted Answer'
+        END AS AcceptStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes upv ON rp.PostId = upv.PostId AND upv.VoteTypeId = 2
+    LEFT JOIN 
+        Votes downv ON rp.PostId = downv.PostId AND downv.VoteTypeId = 3
+    LEFT JOIN 
+        Users uph ON upv.UserId = uph.Id
+    LEFT JOIN 
+        Users dph ON downv.UserId = dph.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.AcceptStatus
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Rank <= 5
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

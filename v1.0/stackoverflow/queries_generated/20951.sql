@@ -1,0 +1,70 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.ANSWER_COUNT, 0) AS AnswerCount,
+        P.ViewCount,
+        COUNT(CM.Id) AS CommentCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (12, 13) THEN 1 ELSE 0 END) AS DeletionCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount
+),
+PostScore AS (
+    SELECT 
+        P.PostId,
+        (COALESCE(U.UpVotes, 0) - COALESCE(U.DownVotes, 0)) AS VoteScore,
+        (P.AnswerCount - P.DeletionCount + P.ReopenCount - P.CloseCount) AS EngagementScore
+    FROM 
+        PostActivity P
+    JOIN 
+        UserVoteStats U ON P.PostId = U.UserId
+)
+
+SELECT 
+    PS.PostId,
+    P.Title,
+    PS.VoteScore + PS.EngagementScore AS TotalScore,
+    P.ViewCount,
+    P.CommentCount,
+    U.DisplayName AS TopVoter,
+    CASE 
+        WHEN P.CommentCount IS NULL THEN 'No Comments'
+        WHEN P.CommentCount = 0 THEN 'No Interaction'
+        ELSE CONCAT(P.CommentCount, ' Comments')
+    END AS CommentSummary
+FROM 
+    PostScore PS
+JOIN 
+    Posts P ON PS.PostId = P.Id
+JOIN 
+    (SELECT UserId, DisplayName FROM Users ORDER BY Reputation DESC LIMIT 1) U ON U.UserId = P.OwnerUserId
+WHERE 
+    PS.TotalScore > 10
+ORDER BY 
+    TotalScore DESC
+LIMIT 10;

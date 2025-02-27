@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT v.PostId) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '30 days'
+)
+SELECT 
+    p.Title AS PostTitle,
+    pstats.Upvotes,
+    pstats.Downvotes,
+    pstats.CloseVotes,
+    pstats.CommentCount,
+    COALESCE(ur.DisplayName, 'Anonymous') AS UserName,
+    ur.TotalBounties,
+    rph.PostId AS RootPostId,
+    rph.Level AS PostLevel,
+    rpe.CreationDate AS LastEditDate,
+    rpe.Comment AS LastEditComment,
+    ROW_NUMBER() OVER (PARTITION BY pstats.OwnerUserId ORDER BY pstats.Upvotes DESC) AS UserPostRank
+FROM 
+    PostStatistics pstats
+LEFT JOIN 
+    Users ur ON pstats.OwnerUserId = ur.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON pstats.PostId = rph.PostId
+LEFT JOIN 
+    RecentPostEdits rpe ON pstats.PostId = rpe.PostId
+ORDER BY 
+    pstats.Upvotes DESC, pstats.CloseVotes DESC, UserName;

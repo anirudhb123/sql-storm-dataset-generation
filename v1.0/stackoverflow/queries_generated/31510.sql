@@ -1,0 +1,68 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, ParentId, Title, CreationDate, OwnerUserId, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, p.CreationDate, p.OwnerUserId, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+TopPostEngagement AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoterCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= '2023-01-01'
+    GROUP BY p.Id, p.Title
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS RevisionCount,
+        MAX(ph.CreationDate) AS LastRevisionDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId, ph.PostHistoryTypeId
+),
+PostMetrics AS (
+    SELECT 
+        t.Title,
+        phs.RevisionCount,
+        te.CommentCount,
+        te.UniqueVoterCount,
+        te.UpVoteCount,
+        te.DownVoteCount,
+        te.LastVoteDate,
+        COALESCE(ROUND(EXTRACT(EPOCH FROM NOW() - t.CreationDate) / 3600), 0) AS AgeInHours
+    FROM TopPostEngagement te
+    INNER JOIN Posts t ON te.Id = t.Id
+    LEFT JOIN PostHistoryStats phs ON t.Id = phs.PostId
+)
+SELECT 
+    pm.Title,
+    pm.RevisionCount,
+    pm.CommentCount,
+    pm.UniqueVoterCount,
+    pm.UpVoteCount,
+    pm.DownVoteCount,
+    pm.LastVoteDate,
+    pm.AgeInHours,
+    CASE 
+        WHEN pm.CommentCount > 10 THEN 'Highly Engaged'
+        WHEN pm.UniqueVoterCount > 5 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    CASE 
+        WHEN pm.RevisionCount IS NULL THEN 'No Revisions' 
+        ELSE 'Revised'
+    END AS RevisionStatus
+FROM PostMetrics pm
+WHERE pm.AgeInHours > 24
+ORDER BY pm.CommentCount DESC, pm.RevisionCount DESC;

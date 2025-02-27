@@ -1,0 +1,59 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        TotalScore, 
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalScore DESC, PostCount DESC) as Rank
+    FROM 
+        UserStats
+),
+PostRanked AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    tu.Rank AS UserRank,
+    tu.DisplayName AS UserDisplayName,
+    tu.PostCount,
+    tu.TotalScore,
+    tu.TotalBadges,
+    pr.PostId,
+    pr.Title AS PostTitle,
+    pr.CreationDate AS PostCreationDate,
+    pr.OwnerDisplayName AS PostOwner,
+    pr.ScoreRank
+FROM 
+    TopUsers tu
+JOIN 
+    PostRanked pr ON tu.UserId = p.OwnerUserId
+WHERE 
+    tu.Rank <= 10 AND pr.ScoreRank <= 5
+ORDER BY 
+    tu.Rank, pr.ScoreRank;

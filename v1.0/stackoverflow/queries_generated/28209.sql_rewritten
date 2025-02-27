@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON tag = t.TagName
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+HighScorePosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Score,
+        OwnerDisplayName,
+        Reputation,
+        TagList
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 3  
+),
+TagUsage AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        MIN(p.CreationDate) AS FirstUsed,
+        MAX(p.CreationDate) AS LastUsed
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY 
+        t.TagName
+    HAVING 
+        PostCount > 1  
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.Body,
+    hsp.CreationDate,
+    hsp.Score,
+    hsp.OwnerDisplayName,
+    hsp.Reputation,
+    hsp.TagList,
+    tu.TagName,
+    tu.PostCount,
+    tu.FirstUsed,
+    tu.LastUsed
+FROM 
+    HighScorePosts hsp
+JOIN 
+    TagUsage tu ON hsp.TagList LIKE CONCAT('%', tu.TagName, '%')  
+ORDER BY 
+    hsp.Score DESC, 
+    tu.TagName;

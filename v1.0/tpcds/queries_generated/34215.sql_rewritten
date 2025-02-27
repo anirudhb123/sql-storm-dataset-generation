@@ -1,0 +1,44 @@
+WITH RECURSIVE SalesPath AS (
+    SELECT 
+        ws.order_number AS ws_order_number,
+        ws.sales_price AS total_sales_price,
+        1 AS depth
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ns_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+
+    UNION ALL
+
+    SELECT 
+        cs.order_number AS cs_order_number,
+        cs.sales_price AS total_sales_price,
+        sp.depth + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesPath sp ON sp.ws_order_number = cs.order_number
+    WHERE 
+        cs.sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND sp.depth < 5 
+)
+
+SELECT 
+    c.c_first_name || ' ' || c.c_last_name AS customer_name,
+    SUM(sp.total_sales_price) AS total_spent,
+    COUNT(DISTINCT sp.ws_order_number) AS web_orders,
+    COUNT(DISTINCT cs.order_number) AS catalog_orders
+FROM 
+    SalesPath sp
+JOIN 
+    customer c ON c.c_customer_sk = sp.ws_order_number
+LEFT JOIN 
+    catalog_sales cs ON cs.order_number = sp.ws_order_number
+WHERE 
+    c.c_birth_year BETWEEN 1970 AND 1980
+    AND c.c_preferred_cust_flag = 'Y'
+GROUP BY 
+    c.c_customer_sk, c.c_first_name, c.c_last_name
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

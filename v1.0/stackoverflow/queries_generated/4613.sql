@@ -1,0 +1,75 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostRank AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+),
+ClosedPostInfo AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS ClosedDate,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ua.TotalPosts,
+    ua.TotalAnswers,
+    ua.TotalQuestions,
+    ua.TotalCommentScore,
+    pr.PostId,
+    pr.Title,
+    pr.OwnerDisplayName,
+    pr.CreationDate,
+    pr.Score,
+    pr.Rank,
+    pr.ScoreRank,
+    cpi.ClosedDate,
+    cpi.CloseReasons
+FROM 
+    UserActivity ua
+JOIN 
+    PostRank pr ON ua.UserId = pr.OwnerDisplayName
+LEFT JOIN 
+    ClosedPostInfo cpi ON pr.PostId = cpi.PostId
+WHERE 
+    ua.Reputation > 1000
+    AND (ua.TotalQuestions > 0 OR ua.TotalAnswers > 0)
+ORDER BY 
+    ua.Reputation DESC, pr.Score DESC
+LIMIT 100;

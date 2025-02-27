@@ -1,0 +1,47 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey)
+),
+CriticalOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        o.o_orderdate,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 AND COUNT(DISTINCT l.l_partkey) >= 2
+),
+HighPriorityOrders AS (
+    SELECT 
+        co.o_orderkey, 
+        co.total_revenue, 
+        co.o_orderdate,
+        ROW_NUMBER() OVER (ORDER BY co.total_revenue DESC) AS rank
+    FROM CriticalOrders co
+    WHERE co.o_orderdate >= '1995-01-01'
+)
+SELECT 
+    rp.s_name,
+    rp.s_acctbal,
+    hpo.o_orderkey,
+    hpo.total_revenue,
+    CASE 
+        WHEN hpo.rank <= 10 THEN 'Top Revenue'
+        ELSE 'Regular Revenue'
+    END AS order_priority
+FROM RankedSuppliers rp
+FULL OUTER JOIN HighPriorityOrders hpo ON rp.rn = 1 
+WHERE rp.s_suppkey IS NOT NULL OR hpo.o_orderkey IS NOT NULL
+ORDER BY hpo.total_revenue DESC
+LIMIT 50;

@@ -1,0 +1,53 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, c.c_nationkey
+),
+TopOrders AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        o.o_orderkey,
+        o.total_price
+    FROM RankedOrders o
+    JOIN nation n ON o.o_orderkey IN (
+        SELECT nat.n_nationkey FROM nation nat WHERE nat.n_nationkey = n.n_nationkey
+    )
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE o.order_rank <= 5
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+)
+SELECT 
+    t.region_name,
+    t.nation_name,
+    t.o_orderkey,
+    COALESCE(s.supplier_name, 'No Supplier') AS supplier_name,
+    t.total_price,
+    sd.total_supply_cost,
+    CASE 
+        WHEN t.total_price > 10000 THEN 'High Value'
+        WHEN t.total_price BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS order_value_category
+FROM TopOrders t
+LEFT JOIN SupplierDetails sd ON sd.ps_partkey IN (
+    SELECT l.l_partkey
+    FROM lineitem l
+    WHERE l.l_orderkey = t.o_orderkey
+)
+ORDER BY t.region_name, t.nation_name, t.total_price DESC;

@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.id) AS rn,
+        COUNT(*) OVER (PARTITION BY m.production_year) AS movie_count
+    FROM title AS m
+),
+ActorRoles AS (
+    SELECT 
+        ka.name AS actor_name,
+        kt.title AS movie_title,
+        kt.production_year,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY kt.id ORDER BY ci.nr_order) AS actor_rank,
+        COALESCE(NULLIF(ci.note, ''), 'No note') AS performance_note
+    FROM cast_info AS ci
+    INNER JOIN aka_name AS ka ON ci.person_id = ka.person_id
+    INNER JOIN aka_title AS kt ON ci.movie_id = kt.movie_id
+    WHERE kt.production_year >= 2000
+),
+AggregatedData AS (
+    SELECT 
+        kt.id AS movie_id,
+        COUNT(DISTINCT ka.name) AS total_actors,
+        STRING_AGG(DISTINCT ka.name, ', ') AS actor_list
+    FROM ActorRoles AS ar
+    INNER JOIN aka_title AS kt ON ar.movie_title = kt.title AND ar.production_year = kt.production_year
+    GROUP BY kt.id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(NULLIF(ad.actor_list, ''), 'No actors') AS total_actors_list,
+    ad.total_actors,
+    CASE 
+        WHEN ad.total_actors IS NULL THEN 'Unknown'
+        WHEN ad.total_actors > 10 THEN 'Star-studded'
+        ELSE 'Indie film'
+    END AS film_type,
+    COALESCE((SELECT AVG(rating) 
+              FROM movie_info mi 
+              WHERE mi.movie_id = rm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')),
+              'No Ratings') AS avg_rating
+FROM RankedMovies AS rm
+LEFT JOIN AggregatedData AS ad ON rm.movie_id = ad.movie_id
+WHERE rm.rn = 1 OR rm.movie_count < 5
+ORDER BY rm.production_year DESC, ad.total_actors DESC;

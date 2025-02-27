@@ -1,0 +1,19 @@
+SELECT 
+    CONCAT(p.p_name, ' - ', s.s_name) AS part_supplier_info,
+    REPLACE(REPLACE(p.p_comment, 'excellent', 'superb'), 'fragile', 'delicate') AS modified_comment,
+    SUBSTRING_INDEX(s.s_address, ' ', 1) AS supplier_city,
+    LENGTH(p.p_name) AS name_length,
+    CHAR_LENGTH(p.p_comment) AS comment_length
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+ORDER BY 
+    name_length DESC, 
+    modified_comment ASC
+LIMIT 50;

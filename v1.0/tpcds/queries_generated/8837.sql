@@ -1,0 +1,49 @@
+
+WITH customer_activity AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_quantity) AS total_purchases,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 30500 AND 30530 -- Filtering for a specific date range
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+),
+demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    ca.city,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    AVG(ca.total_spent) AS avg_spent,
+    COUNT(DISTINCT ca.c_customer_id) AS customer_count,
+    COUNT(DISTINCT ca.order_count) AS unique_orders
+FROM 
+    customer_activity ca
+JOIN 
+    demographics d ON ca.c_customer_id = d.c_customer_id
+GROUP BY 
+    ca.city, d.cd_gender, d.cd_marital_status, d.cd_education_status
+ORDER BY 
+    avg_spent DESC
+LIMIT 10;

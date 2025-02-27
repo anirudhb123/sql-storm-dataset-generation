@@ -1,0 +1,48 @@
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS part_count,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+supplier_region AS (
+    SELECT 
+        s.s_suppkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, n.n_name, r.r_name
+),
+sales_analysis AS (
+    SELECT 
+        sr.region_name,
+        sr.nation_name,
+        SUM(sc.total_sales) AS total_sales_by_region,
+        AVG(sc.total_sales) AS avg_sales_per_order,
+        COUNT(DISTINCT sc.o_orderkey) AS order_count
+    FROM sales_cte sc
+    LEFT JOIN supplier_region sr ON sr.total_supply_cost > 1000
+    GROUP BY sr.region_name, sr.nation_name
+)
+SELECT 
+    sa.region_name,
+    sa.nation_name,
+    sa.total_sales_by_region,
+    COALESCE(sa.avg_sales_per_order, 0) AS avg_sales_per_order,
+    sa.order_count,
+    CASE 
+        WHEN sa.order_count > 100 THEN 'High Activity'
+        WHEN sa.order_count BETWEEN 50 AND 100 THEN 'Medium Activity'
+        ELSE 'Low Activity'
+    END AS activity_level
+FROM sales_analysis sa
+ORDER BY sa.total_sales_by_region DESC
+LIMIT 10;

@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           o.o_orderstatus
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+PromotionData AS (
+    SELECT c.c_nationkey, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY c.c_nationkey
+)
+SELECT r.r_name, 
+       COALESCE(pd.total_sales, 0) AS total_sales,
+       COALESCE(ps.avg_supplycost, 0) AS avg_supplycost,
+       SUM(ld.l_extendedprice * (1 - ld.l_discount)) AS total_revenue
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+LEFT JOIN PartDetails ps ON rs.s_suppkey = ps.p_partkey
+LEFT JOIN CustomerOrders co ON n.n_nationkey = co.c_nationkey
+LEFT JOIN lineitem ld ON co.o_orderkey = ld.l_orderkey
+LEFT JOIN PromotionData pd ON n.n_nationkey = pd.c_nationkey
+GROUP BY r.r_name, pd.total_sales, ps.avg_supplycost
+HAVING SUM(ld.l_discount) IS NOT NULL
+ORDER BY r.r_name ASC, total_revenue DESC;

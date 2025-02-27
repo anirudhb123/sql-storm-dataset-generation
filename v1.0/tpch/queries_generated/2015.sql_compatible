@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrdersSummary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS item_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        l.l_shipdate >= '1997-01-01'
+    GROUP BY
+        o.o_orderkey, o.o_orderdate
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS region_name
+    FROM
+        customer c
+    JOIN
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+
+SELECT
+    cr.region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(os.total_revenue) AS avg_revenue,
+    SUM(CASE WHEN rs.supplier_rank = 1 THEN rs.s_acctbal ELSE 0 END) AS top_supplier_balance,
+    STRING_AGG(DISTINCT rs.s_name) AS top_suppliers
+FROM
+    CustomerRegion cr
+LEFT JOIN
+    orders o ON cr.c_custkey = o.o_custkey
+LEFT JOIN
+    OrdersSummary os ON o.o_orderkey = os.o_orderkey
+LEFT JOIN
+    RankedSuppliers rs ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+        WHERE l.l_orderkey = o.o_orderkey
+        GROUP BY ps.ps_suppkey
+    )
+WHERE
+    cr.region_name IS NOT NULL
+GROUP BY
+    cr.region_name
+ORDER BY
+    total_orders DESC
+LIMIT 10;

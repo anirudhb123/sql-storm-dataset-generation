@@ -1,0 +1,76 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END), 0) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Upvotes,
+        Downvotes,
+        TotalViews,
+        PostCount
+    FROM 
+        UserStats
+    WHERE 
+        Rank <= 10
+),
+PostCategorizations AS (
+    SELECT 
+        p.Id AS PostId,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        COALESCE((
+            SELECT 
+                STRING_AGG(t.TagName, ', ') 
+            FROM 
+                Tags t 
+            WHERE 
+                t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(REPLACE(p.Tags, '<', ''), 2, LENGTH(REPLACE(p.Tags, '<', '')) - 2), '><')::int[]))
+        ), 'None') AS Tags,
+        LAG(p.ViewCount) OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate) AS PrevViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName,
+    tu.Upvotes,
+    tu.Downvotes,
+    pc.PostType,
+    pc.Tags,
+    pc.ViewCount,
+    pc.PrevViewCount,
+    (CASE 
+        WHEN pc.ViewCount IS NULL THEN 'No Views'
+        WHEN pc.PrevViewCount IS NULL THEN 'First Entry'
+        WHEN pc.ViewCount > pc.PrevViewCount THEN 'Increased Views'
+        WHEN pc.ViewCount < pc.PrevViewCount THEN 'Decreased Views'
+        ELSE 'Same Views'
+    END) AS ViewChange
+FROM 
+    TopUsers tu
+JOIN 
+    PostCategorizations pc ON tu.UserId = pc.OwnerUserId
+WHERE 
+    (tu.Upvotes - tu.Downvotes) > 10
+ORDER BY 
+    tu.Upvotes DESC;

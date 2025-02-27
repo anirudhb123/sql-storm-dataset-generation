@@ -1,0 +1,74 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostInformation AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        COALESCE(UPDATED.ViewCount, 0) AS UpdatedViewCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS LastPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON POSITION(T.TagName IN P.Tags) > 0 
+    LEFT JOIN 
+        (SELECT PostId, SUM(ViewCount) AS ViewCount FROM Posts GROUP BY PostId) AS UPDATED ON P.Id = UPDATED.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Score, P.CreationDate, P.ViewCount
+)
+SELECT 
+    U.DisplayName,
+    U.BadgeCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    P.PostId,
+    P.Score,
+    P.CreationDate,
+    COALESCE(P.Tags, ARRAY[]::VARCHAR[]) AS Tags,
+    P.ViewCount,
+    P.CommentCount,
+    CASE 
+        WHEN P.Score > 0 THEN 'Positive' 
+        WHEN P.Score < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS ScoreCategory,
+    CASE 
+        WHEN P.LastPostRank = 1 THEN 'Latest Post' 
+        ELSE 'Earlier Post' 
+    END AS PostStatus
+FROM 
+    UserBadges U
+JOIN 
+    PostInformation P ON U.UserId = P.OwnerUserId
+WHERE 
+    U.BadgeCount > 0 
+    AND (P.ViewCount < 100 OR P.CommentCount > 10)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Votes V 
+        WHERE V.PostId = P.PostId 
+        AND V.VoteTypeId = 3
+    )
+ORDER BY 
+    U.BadgeCount DESC,
+    P.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1953) (Sudan) (theatrical)', '(1983) (Canada) (subtitled)', '(1993) (Hungary) (theatrical)', '(1996-1997) (Switzerland) (theatrical)', '(2003) (theatrical) (Mexico)', '(2011) (Austria) (TV) (live)', '(2013) (Spain) (DVD)', '(Argentina) (VHS)', '(all episodes)', '(on behalf of: WDR)') AND t.production_year IS NOT NULL AND t.md5sum > '2e1bcf679f0b7fb3cde6f34439a8c34d';

@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(
+            (SELECT AVG(ViewCount) FROM Posts WHERE OwnerUserId = p.OwnerUserId), 
+            0
+        ) AS AvgViewCount
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.CommentCount,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.Rank,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    CASE 
+        WHEN p.ViewCount > us.AvgViewCount THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS ViewStatus
+FROM UserStats us
+JOIN RankedPosts p ON p.PostId = us.UserId
+WHERE p.Rank <= 3
+ORDER BY us.DisplayName, p.CreationDate DESC;

@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2400 AND 2450 -- date range for sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        r.total_quantity,
+        r.total_net_profit
+    FROM 
+        RankedSales r
+    JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        r.profit_rank <= 10
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    c.c_customer_id,
+    a.ca_city,
+    a.ca_state,
+    a.ca_country,
+    t.total_quantity,
+    t.total_net_profit
+FROM 
+    TopCustomers t
+JOIN 
+    customer_address a ON a.ca_address_sk = c.c_current_addr_sk
+ORDER BY 
+    t.total_net_profit DESC;

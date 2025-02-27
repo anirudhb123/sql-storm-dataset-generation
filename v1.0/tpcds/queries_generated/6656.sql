@@ -1,0 +1,73 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_purchases,
+        SUM(ss.ss_net_paid) AS total_spent,
+        AVG(ss.ss_net_paid) AS avg_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+SalesByDate AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN 
+        catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_date
+),
+PromotionalStats AS (
+    SELECT 
+        p.p_promo_id,
+        p.p_promo_name,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_used,
+        SUM(ws.ws_net_paid) AS revenue_generated
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id, p.p_promo_name
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.cd_education_status,
+    cs.total_purchases,
+    cs.total_spent,
+    cs.avg_spent,
+    sbd.total_web_sales,
+    sbd.total_catalog_sales,
+    sbd.total_store_sales,
+    ps.orders_used,
+    ps.revenue_generated
+FROM 
+    CustomerStats cs
+JOIN 
+    SalesByDate sbd ON 1=1  -- to get the same date for all customers
+JOIN 
+    PromotionalStats ps ON cs.c_customer_id = ps.promo_id  -- ensure some relation between customers and promotions (change as needed)
+WHERE 
+    cs.total_purchases > 5
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

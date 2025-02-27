@@ -1,0 +1,57 @@
+
+WITH AddressParts AS (
+    SELECT 
+        UPPER(TRIM(ca_street_number)) AS street_number,
+        UPPER(TRIM(ca_street_name)) AS street_name,
+        UPPER(TRIM(ca_street_type)) AS street_type,
+        CONCAT(UPPER(TRIM(ca_suite_number)), ' ', UPPER(TRIM(ca_city)), ', ', UPPER(TRIM(ca_state)), ' ', UPPER(TRIM(ca_zip))) AS full_address
+    FROM 
+        customer_address
+), 
+CustomerDetails AS (
+    SELECT 
+        UPPER(TRIM(c_first_name)) AS first_name,
+        UPPER(TRIM(c_last_name)) AS last_name,
+        LOWER(TRIM(c_email_address)) AS email,
+        cd_gender AS gender,
+        cd_marital_status AS marital_status,
+        cd_education_status AS education_status
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+ItemDetails AS (
+    SELECT 
+        UPPER(TRIM(i_product_name)) AS product_name,
+        UPPER(TRIM(i_item_desc)) AS item_description,
+        i_current_price
+    FROM 
+        item
+)
+SELECT 
+    a.street_number,
+    a.street_name,
+    a.street_type,
+    a.full_address,
+    c.first_name,
+    c.last_name,
+    c.email,
+    c.gender,
+    c.marital_status,
+    c.education_status,
+    i.product_name,
+    i.item_description,
+    i.i_current_price
+FROM 
+    AddressParts a
+JOIN 
+    CustomerDetails c ON /* logic to join customers to addresses, assuming possible relationships */
+JOIN 
+    ItemDetails i ON /* logic to associate items with sales or transactions, assuming the relations */
+WHERE 
+    a.street_type IN ('ST', 'BLVD', 'AVE') 
+    AND c.gender = 'F' 
+    AND i.i_current_price > 50 
+ORDER BY 
+    c.last_name, c.first_name;

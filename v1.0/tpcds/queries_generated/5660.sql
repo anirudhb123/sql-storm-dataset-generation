@@ -1,0 +1,49 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_item_sk) AS item_count,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year, d.d_month_seq
+),
+top_customers AS (
+    SELECT 
+        customer_id,
+        total_sales,
+        order_count,
+        item_count,
+        ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        sales_summary
+)
+SELECT 
+    tc.customer_id,
+    tc.total_sales,
+    tc.order_count,
+    tc.item_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    h.hd_income_band_sk,
+    h.hd_buy_potential
+FROM 
+    top_customers tc
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+LEFT JOIN 
+    household_demographics h ON h.hd_demo_sk = c.c_current_hdemo_sk
+WHERE 
+    tc.rank <= 10
+ORDER BY 
+    tc.total_sales DESC;

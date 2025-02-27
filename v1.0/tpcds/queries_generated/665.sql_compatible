@@ -1,0 +1,53 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1000 AND 2000 
+    GROUP BY ws.web_site_sk
+),
+ReturnData AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(wr.wr_order_number) AS total_returns
+    FROM web_returns wr
+    GROUP BY wr.wr_web_page_sk
+),
+CombinedData AS (
+    SELECT 
+        sd.web_site_sk,
+        sd.total_sales,
+        rd.total_return_amt,
+        COALESCE(rd.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN rd.total_return_amt IS NOT NULL 
+            THEN (sd.total_sales - rd.total_return_amt) 
+            ELSE sd.total_sales 
+        END AS net_sales
+    FROM SalesData sd
+    LEFT JOIN ReturnData rd ON sd.web_site_sk = rd.wr_web_page_sk
+),
+RankedSales AS (
+    SELECT 
+        cd.web_site_sk,
+        cd.total_sales,
+        cd.total_returns,
+        cd.net_sales,
+        RANK() OVER (ORDER BY cd.net_sales DESC) AS sales_rank
+    FROM CombinedData cd
+)
+SELECT 
+    r.web_site_sk,
+    r.total_sales,
+    r.total_returns,
+    r.net_sales,
+    r.sales_rank,
+    COALESCE(pa.promo_name, 'No Promotion') AS promotion_info
+FROM RankedSales r
+LEFT JOIN promotion pa ON r.total_sales > pa.p_response_target
+WHERE r.sales_rank <= 10
+ORDER BY r.sales_rank;

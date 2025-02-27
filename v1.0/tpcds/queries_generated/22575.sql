@@ -1,0 +1,81 @@
+
+WITH RECURSIVE customer_tree AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cd.cd_purchase_estimate DESC) as purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status IS NOT NULL
+    UNION ALL
+    SELECT 
+        ct.c_customer_sk,
+        ct.c_first_name,
+        ct.c_last_name,
+        ct.cd_marital_status,
+        ct.cd_credit_rating,
+        ct.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY ct.c_customer_sk ORDER BY ct.cd_purchase_estimate DESC) as purchase_rank
+    FROM 
+        customer_tree ct
+    JOIN 
+        customer c ON c.c_customer_sk = ct.c_customer_sk
+    WHERE 
+        ct.purchase_rank < 5
+),
+inventory_summary AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_quantity_on_hand IS NOT NULL
+    GROUP BY 
+        inv.inv_item_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold_quantity,
+        MAX(ws.ws_sales_price) AS max_sales_price,
+        MAX(ws.ws_net_profit) AS max_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    cust.c_first_name || ' ' || cust.c_last_name AS customer_name,
+    inv.inv_item_sk,
+    COALESCE(inv.total_quantity, 0) AS inventory_quantity,
+    COALESCE(sales.total_sold_quantity, 0) AS sales_quantity,
+    CASE 
+        WHEN sales.total_sold_quantity > 0 THEN (sales.total_sold_quantity * sales.max_sales_price) - inv.total_quantity
+        ELSE NULL
+    END AS sales_profit_margin,
+    CASE 
+        WHEN cust.cd_credit_rating IS NULL THEN 'UNKNOWN'
+        ELSE cust.cd_credit_rating
+    END AS customer_credit_status
+FROM 
+    customer_tree cust
+FULL OUTER JOIN 
+    inventory_summary inv ON cust.c_customer_sk = inv.inv_item_sk
+LEFT JOIN 
+    sales_summary sales ON inv.inv_item_sk = sales.ws_item_sk
+WHERE 
+    (sales_profit_margin IS NOT NULL AND sales_profit_margin > 1000) OR 
+    (cust.cd_marital_status = 'M' AND inv.total_quantity > 50)
+ORDER BY 
+    customer_name,
+    inventory_quantity DESC;

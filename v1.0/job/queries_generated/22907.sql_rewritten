@@ -1,0 +1,70 @@
+WITH Recursive MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.phonetic_code,
+        mt.episode_of_id,
+        COALESCE(mt.season_nr, 0) AS season_nr,
+        COALESCE(mt.episode_nr, 0) AS episode_nr,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        m.phonetic_code,
+        m.episode_of_id,
+        COALESCE(m.season_nr, 0) AS season_nr,
+        COALESCE(m.episode_nr, 0) AS episode_nr,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    akn.name AS actor_name,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mt.title, ', ') AS titles,
+    SUM(COALESCE(m.production_year, 0)) AS total_production_years,
+    AVG(mh.level) AS average_movie_level,
+    COUNT(DISTINCT mk.keyword) FILTER (WHERE mk.keyword IS NOT NULL) AS unique_keywords
+FROM 
+    cast_info c
+JOIN 
+    aka_name akn ON c.person_id = akn.person_id
+JOIN 
+    movie_companies mc ON c.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mc.movie_id = mk.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title mt ON mc.movie_id = mt.id
+WHERE 
+    c.nr_order IS NOT NULL 
+    AND akn.name IS NOT NULL
+    AND akn.name NOT IN ('Unknown', 'Anonymous')
+    AND EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = mc.movie_id 
+        AND mi.info ILIKE '%Award%'
+    )
+GROUP BY 
+    akn.name
+HAVING 
+    COUNT(mc.movie_id) > 1
+ORDER BY 
+    movie_count DESC
+LIMIT 10;

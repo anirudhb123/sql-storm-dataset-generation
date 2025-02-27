@@ -1,0 +1,66 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.ws_web_site_sk ORDER BY SUM(ws.ws_quantity) DESC) AS rank_site
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F'
+        AND (cd.cd_marital_status = 'M' OR cd.cd_dep_count IS NULL)
+    GROUP BY 
+        ws.ws_web_site_sk
+),
+overaverage_sales AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        ws.total_quantity,
+        ws.total_orders,
+        CASE 
+            WHEN ws.total_quantity > AVG(ws2.total_quantity) OVER () THEN 'Above Average'
+            ELSE 'Below Average'
+        END AS sales_category
+    FROM 
+        ranked_sales ws
+    WHERE 
+        ws.rank_site <= 5
+),
+external_promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_sk
+    HAVING 
+        SUM(ws.ws_net_profit) > 10000
+)
+SELECT 
+    e.ws_web_site_sk,
+    e.total_quantity,
+    e.total_orders,
+    e.sales_category,
+    COALESCE(p.total_profit, 0) AS total_promo_profit,
+    CASE 
+        WHEN e.sales_category = 'Above Average' AND p.total_profit IS NULL THEN 'Potential'
+        ELSE 'Active'
+    END AS sales_status
+FROM 
+    overaverage_sales e
+LEFT JOIN 
+    external_promotions p ON e.ws_web_site_sk = p.p_promo_sk
+WHERE 
+    e.total_orders > 10
+ORDER BY 
+    e.total_quantity DESC,
+    total_promo_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,62 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+), top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        ranked_orders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.order_rank <= 10
+), enriched_lineitems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_suppkey,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount,
+        li.l_tax,
+        to.o_totalprice
+    FROM 
+        lineitem li
+    JOIN 
+        top_orders to ON li.l_orderkey = to.o_orderkey
+)
+SELECT 
+    eo.l_orderkey,
+    eo.l_partkey,
+    SUM(eo.l_quantity) AS total_quantity,
+    SUM(eo.l_extendedprice) AS total_extended_price,
+    AVG(eo.l_discount) AS avg_discount,
+    SUM(eo.l_tax) AS total_tax,
+    to.o_totalprice,
+    to.nation_name,
+    to.region_name
+FROM 
+    enriched_lineitems eo
+JOIN 
+    top_orders to ON eo.l_orderkey = to.o_orderkey
+GROUP BY 
+    eo.l_orderkey, eo.l_partkey, to.o_totalprice, to.nation_name, to.region_name
+ORDER BY 
+    total_extended_price DESC
+LIMIT 50;

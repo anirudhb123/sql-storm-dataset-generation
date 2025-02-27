@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank_per_nation
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), 
+CustomerTotalOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+), 
+LineItemAggregates AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS order_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        l.l_partkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(LA.total_revenue, 0) AS total_revenue,
+    COALESCE(CO.total_orders, 0) AS total_orders,
+    COALESCE(RS.total_supply_cost, 0) AS total_supply_cost,
+    RS.rank_per_nation
+FROM 
+    part p
+LEFT JOIN 
+    LineItemAggregates LA ON p.p_partkey = LA.l_partkey
+LEFT JOIN 
+    CustomerTotalOrders CO ON CO.total_orders > (SELECT AVG(total_orders) FROM CustomerTotalOrders WHERE total_orders IS NOT NULL)
+LEFT JOIN 
+    RankedSuppliers RS ON RS.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        WHERE 
+            ps.ps_partkey = p.p_partkey
+    )
+WHERE 
+    (COALESCE(LA.total_revenue, 0) > 0 OR CO.total_orders IS NULL)
+    AND (p.p_size BETWEEN 1 AND 10 OR p.p_size IS NULL)
+ORDER BY 
+    total_revenue DESC, 
+    total_orders DESC
+LIMIT 100 OFFSET 50;

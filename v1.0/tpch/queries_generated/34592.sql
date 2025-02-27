@@ -1,0 +1,42 @@
+WITH RECURSIVE RegionHierarchy(r_regionkey, r_name, r_comment, level) AS (
+    SELECT r_regionkey, r_name, r_comment, 1
+    FROM region
+    WHERE r_regionkey = 1  -- Assuming region key 1 is the top-level region
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, level + 1
+    FROM region r
+    INNER JOIN nation n ON r.r_regionkey = n.n_regionkey
+    INNER JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+EligibleSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, p.p_partkey, p.p_name,
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, AVG(sp.s_supplycost) AS avg_supply_cost, SUM(sp.ps_availqty) AS total_available
+    FROM partsupp sp
+    JOIN EligibleSuppliers s ON sp.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT r.r_name, es.s_name, os.o_orderkey, os.total_revenue, 
+       sp.avg_supply_cost, sp.total_available,
+       CASE WHEN os.line_count > 0 THEN os.total_revenue / os.line_count ELSE NULL END AS revenue_per_line
+FROM RegionHierarchy r
+LEFT JOIN EligibleSuppliers es ON r.r_regionkey = es.s_nationkey
+LEFT JOIN OrderSummary os ON es.s_suppkey = os.o_orderkey
+LEFT JOIN SupplierPerformance sp ON es.s_suppkey = sp.s_suppkey
+WHERE (es.s_name IS NOT NULL OR sp.avg_supply_cost > 5000)
+ORDER BY r.r_name, total_revenue DESC
+LIMIT 100;

@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        cs.cs_item_sk,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        AVG(cs.cs_sales_price) AS avg_sales_price,
+        DENSE_RANK() OVER (PARTITION BY cs.cs_item_sk ORDER BY SUM(cs.cs_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales cs
+    JOIN 
+        item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE 
+        i.i_rec_start_date <= CURRENT_DATE AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    GROUP BY 
+        cs.cs_item_sk
+),
+top_sales AS (
+    SELECT 
+        s.cs_item_sk,
+        ss.total_sales,
+        ss.total_quantity,
+        ss.avg_sales_price
+    FROM 
+        sales_summary ss
+    JOIN 
+        (SELECT * FROM sales_summary WHERE sales_rank <= 3) s ON ss.cs_item_sk = s.cs_item_sk
+)
+SELECT 
+    COALESCE(i.i_product_name, 'Unknown Product') AS product_name,
+    COALESCE(c.c_first_name, 'Unknown') AS customer_first_name,
+    COALESCE(c.c_last_name, 'Unknown') AS customer_last_name,
+    ts.total_sales,
+    ts.total_quantity,
+    ts.avg_sales_price
+FROM 
+    top_sales ts
+LEFT JOIN 
+    web_sales ws ON ts.cs_item_sk = ws.ws_item_sk
+LEFT JOIN 
+    customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    store s ON ws.ws_ship_addr_sk = s.s_addr_sk
+WHERE 
+    ts.total_sales > 1000 
+    AND ts.total_quantity > 10
+ORDER BY 
+    ts.total_sales DESC
+LIMIT 100;

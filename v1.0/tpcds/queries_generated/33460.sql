@@ -1,0 +1,90 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        cs.bill_customer_sk AS customer_sk,
+        cs.order_number,
+        cs.quantity,
+        1 AS level,
+        cs.sold_date_sk
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.sold_date_sk BETWEEN 20210101 AND 20211231
+        
+    UNION ALL
+    
+    SELECT 
+        cs2.bill_customer_sk,
+        cs2.order_number,
+        cs2.quantity,
+        oh.level + 1,
+        cs2.sold_date_sk
+    FROM 
+        catalog_sales cs2
+    JOIN 
+        OrderHierarchy oh ON cs2.bill_customer_sk = oh.customer_sk
+    WHERE 
+        cs2.sold_date_sk = oh.sold_date_sk AND 
+        cs2.order_number > oh.order_number
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_preferred_cust_flag,
+        SUM(CASE WHEN oh.order_number IS NOT NULL THEN oh.quantity ELSE 0 END) AS total_orders,
+        COUNT(DISTINCT oh.order_number) AS unique_order_count,
+        MAX(oh.sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrderHierarchy oh ON c.c_customer_sk = oh.customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_preferred_cust_flag
+    HAVING 
+        total_orders > 0
+),
+NegativeReviews AS (
+    SELECT 
+        c.c_customer_sk, 
+        COUNT(*) AS negative_review_count
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.sr_customer_sk = c.c_customer_sk
+    WHERE 
+        sr.sr_return_quantity < 0
+    GROUP BY 
+        c.c_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_orders,
+        cs.unique_order_count,
+        cs.last_order_date,
+        COALESCE(nr.negative_review_count, 0) AS negative_review_count,
+        CASE 
+            WHEN COALESCE(nr.negative_review_count, 0) > 5 THEN 'High Risk'
+            WHEN cs.total_orders >= 50 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_segment
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        NegativeReviews nr ON cs.c_customer_sk = nr.c_customer_sk
+)
+SELECT 
+    fr.customer_segment,
+    COUNT(*) AS customer_count,
+    AVG(fr.total_orders) AS average_orders,
+    AVG(fr.unique_order_count) AS average_unique_orders
+FROM 
+    FinalReport fr
+GROUP BY 
+    fr.customer_segment
+ORDER BY 
+    customer_count DESC;

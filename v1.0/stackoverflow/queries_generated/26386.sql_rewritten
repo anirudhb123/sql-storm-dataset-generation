@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        ARRAY_AGG(DISTINCT c.Text) AS CommentTexts
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.Tags, rp.CreationDate, rp.ViewCount, rp.AnswerCount, rp.OwnerName, rp.Reputation
+    HAVING 
+        COUNT(c.Id) > 0  
+),
+FinalResults AS (
+    SELECT 
+        fp.*,
+        STRING_AGG(DISTINCT CASE WHEN LENGTH(fp.Body) > 100 THEN SUBSTRING(fp.Body, 1, 100) || '...' ELSE fp.Body END, ' ') AS ShortenedBody,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Badges b ON fp.OwnerUserId = b.UserId
+    WHERE 
+        fp.Rank <= 5  
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Body, fp.Tags, fp.CreationDate, fp.ViewCount, fp.AnswerCount, fp.OwnerName, fp.Reputation
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.ShortenedBody AS Body,
+    f.Tags,
+    f.CreationDate,
+    f.ViewCount,
+    f.AnswerCount,
+    f.OwnerName,
+    f.Reputation,
+    f.CommentTexts,
+    f.BadgeCount
+FROM 
+    FinalResults f
+ORDER BY 
+    f.Tags, f.ViewCount DESC;

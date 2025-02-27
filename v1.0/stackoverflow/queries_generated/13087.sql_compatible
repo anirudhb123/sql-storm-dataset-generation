@@ -1,0 +1,44 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.UserId,
+        COUNT(ph.Id) AS TotalPostHistory,
+        MAX(ph.CreationDate) AS LastActivity
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalViews,
+    ups.TotalScore,
+    COALESCE(pvs.TotalPostHistory, 0) AS TotalPostHistory,
+    COALESCE(pvs.LastActivity, 'N/A') AS LastActivity
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryStats pvs ON ups.UserId = pvs.UserId
+ORDER BY 
+    ups.TotalPosts DESC
+LIMIT 100;

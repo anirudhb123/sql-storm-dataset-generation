@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ARRAY[m.title] AS title_path,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  -- Considering movies from the year 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.title_path || m.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.depth < 3  -- Limiting depth to avoid too long hierarchies
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.depth,
+    mh.title_path,
+    COUNT(CAST(c.person_id AS INTEGER)) AS num_cast_members,
+    COALESCE(MAX(p.info), 'No info available') AS latest_person_info
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info p ON p.person_id = c.person_id
+WHERE 
+    mh.depth >= 1  -- Only considering linked movies with actual connections
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.depth, mh.title_path
+ORDER BY 
+    mh.depth DESC, 
+    COUNT(c.person_id) DESC, 
+    mh.production_year DESC
+LIMIT 100;  -- Limit the output to the top 100 results for benchmarking

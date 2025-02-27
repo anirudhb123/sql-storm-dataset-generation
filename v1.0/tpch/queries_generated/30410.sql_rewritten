@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+
+    UNION ALL
+
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+), 
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, s.s_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > 50.00 AND ps.ps_availqty > 100
+),
+CustomerOverview AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOverview c
+    WHERE total_spent > (SELECT AVG(total_spent) FROM CustomerOverview)
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT DISTINCT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+    p.p_name,
+    p.psi_supplycost,
+    l.total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY oh.o_orderkey ORDER BY p.p_name) AS part_rank
+FROM OrderHierarchy oh
+LEFT JOIN HighValueCustomers c ON oh.o_orderkey = c.c_custkey
+LEFT JOIN PartSupplierInfo p ON p.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = oh.o_orderkey)
+LEFT JOIN LineItemSummary l ON l.l_orderkey = oh.o_orderkey
+WHERE l.total_revenue > 1000 AND p.ps_supplycost IS NOT NULL
+ORDER BY oh.o_orderdate DESC, part_rank;

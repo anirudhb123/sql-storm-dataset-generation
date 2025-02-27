@@ -1,0 +1,93 @@
+WITH RecursivePostScores AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS TotalScore,
+        1 AS Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+    
+    UNION ALL
+    
+    SELECT 
+        pl.RelatedPostId AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END), 0) AS TotalScore,
+        Level + 1
+    FROM 
+        PostLinks pl
+    JOIN 
+        Votes v ON pl.RelatedPostId = v.PostId
+    JOIN 
+        RecursivePostScores rps ON pl.PostId = rps.PostId
+    WHERE 
+        Level < 5  
+    GROUP BY 
+        pl.RelatedPostId, Level
+), 
+RankedPosts AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        rps.TotalScore,
+        RANK() OVER (ORDER BY rps.TotalScore DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostScores rps ON p.Id = rps.PostId
+    WHERE 
+        p.PostTypeId = 1
+), 
+UserBadges AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.TotalScore,
+    rb.BadgeNames,
+    pha.CloseCount,
+    pha.ReopenCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.AcceptedAnswerId = rb.UserId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON rp.Id = pha.PostId
+WHERE 
+    rp.Rank <= 10  
+ORDER BY 
+    rp.TotalScore DESC, 
+    rp.ViewCount DESC;

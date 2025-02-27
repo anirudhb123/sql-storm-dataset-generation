@@ -1,0 +1,74 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        PH.CreationDate AS LastHistoryDate,
+        COALESCE(PH.Comment, 'No comments') AS LastEditComment
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1 
+)
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.LastHistoryDate,
+    PD.LastEditComment
+FROM 
+    UserReputation UR
+JOIN 
+    PostDetails PD ON UR.UserId = PD.OwnerUserId
+LEFT JOIN 
+    Badges B ON UR.UserId = B.UserId AND B.Class = 1 
+WHERE 
+    UR.Reputation > (
+        SELECT AVG(Reputation) 
+        FROM UserReputation
+    )
+    AND (PD.Score IS NULL OR PD.Score > 10) 
+ORDER BY 
+    UR.Reputation DESC, 
+    PD.ViewCount DESC
+LIMIT 50
+UNION ALL 
+SELECT 
+    0 AS UserId,
+    'Aggregate Data' AS DisplayName,
+    AVG(PD.Score) AS Reputation,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    AVG(PD.Score) AS Score,
+    SUM(PD.ViewCount) AS ViewCount,
+    NULL AS LastHistoryDate,
+    NULL AS LastEditComment
+FROM 
+    PostDetails PD
+GROUP BY 
+    PD.PostId, PD.Title, PD.CreationDate
+HAVING 
+    AVG(PD.Score) > 20
+ORDER BY 
+    Score DESC

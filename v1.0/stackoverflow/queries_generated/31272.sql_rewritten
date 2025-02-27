@@ -1,0 +1,82 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        p.ParentId,
+        rp.Depth + 1
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePosts rp ON p.ParentId = rp.PostId
+)
+, UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+, PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        uq.Reputation AS OwnerReputation,
+        uv.UpVotes,
+        uv.DownVotes,
+        CASE 
+            WHEN rp.Depth > 3 THEN 'Deep Thread'
+            ELSE 'Shallow Thread'
+        END AS ThreadDepth
+    FROM 
+        RecursivePosts rp
+    LEFT JOIN 
+        Users uq ON rp.OwnerUserId = uq.Id
+    LEFT JOIN 
+        UserVotes uv ON rp.PostId = uv.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.OwnerReputation,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.ThreadDepth,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    Posts p ON ps.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+WHERE 
+    ps.OwnerReputation > 1000  
+GROUP BY 
+    ps.PostId, ps.Title, ps.CreationDate, ps.ViewCount, ps.OwnerReputation, ps.UpVotes, ps.DownVotes, ps.ThreadDepth
+ORDER BY 
+    ps.ViewCount DESC, ps.CreationDate DESC
+LIMIT 10;

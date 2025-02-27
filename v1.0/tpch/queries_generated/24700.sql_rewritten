@@ -1,0 +1,89 @@
+WITH RegionalSales AS (
+    SELECT
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE
+        o.o_orderdate >= DATE '1994-01-01'
+        AND o.o_orderdate < DATE '1994-12-31'
+        AND l.l_returnflag = 'N'
+    GROUP BY
+        n.n_name
+),
+TopNations AS (
+    SELECT
+        nation_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM
+        RegionalSales
+),
+SupplierParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_brand,
+        p.p_type,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM
+        part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_brand, p.p_type
+),
+SalesPerPart AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+    FROM
+        part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+),
+FinalResults AS (
+    SELECT
+        tn.nation_name,
+        sp.p_name,
+        sp.total_sales,
+        CASE
+            WHEN sp.total_sales = 0 THEN 'No sales'
+            WHEN sp.total_sales > 10000 THEN 'High sales'
+            ELSE 'Low sales'
+        END AS sales_category,
+        sp.total_sales - COALESCE(sp.total_sales * 0.1, 0) AS adjusted_sales,
+        CASE 
+            WHEN sp.total_sales IS NULL THEN 'Data missing' 
+            ELSE 'Data available' 
+        END AS data_availability,
+        ROW_NUMBER() OVER (PARTITION BY tn.nation_name ORDER BY sp.total_sales DESC) AS part_rank
+    FROM
+        TopNations tn
+    LEFT JOIN SalesPerPart sp ON tn.nation_name = (SELECT n.n_name FROM nation n JOIN customer c ON n.n_nationkey = c.c_nationkey WHERE c.c_custkey = (SELECT MIN(custkey) FROM customer))
+)
+SELECT 
+    fr.nation_name,
+    fr.p_name,
+    fr.sales_category,
+    fr.adjusted_sales
+FROM 
+    FinalResults fr
+WHERE 
+    fr.part_rank <= 5
+    AND fr.adjusted_sales IS NOT NULL
+ORDER BY 
+    fr.nation_name, fr.adjusted_sales DESC
+UNION ALL
+SELECT 
+    'Overall' AS nation_name,
+    'Aggregate Sales' AS p_name,
+    'Total Sales' AS sales_category,
+    SUM(fr.adjusted_sales) AS adjusted_sales
+FROM 
+    FinalResults fr
+GROUP BY 
+    1, 2;

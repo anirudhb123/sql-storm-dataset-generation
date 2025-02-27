@@ -1,0 +1,84 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.Score, 0)) AS AvgScore,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS PostRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        AvgScore,
+        PostRank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+ActiveUserDetails AS (
+    SELECT 
+        T.UserId,
+        T.DisplayName,
+        T.PostCount,
+        T.TotalViews,
+        T.TotalScore,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        T.AvgScore,
+        T.PostRank
+    FROM 
+        TopActiveUsers T
+    LEFT JOIN 
+        UserBadges B ON T.UserId = B.UserId
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(P.TotalViews, 0) AS TotalViews,
+    COALESCE(B.BadgeCount, 0) AS BadgeCount,
+    P.PostCount,
+    P.AvgScore,
+    CASE 
+        WHEN P.PostRank <= 5 THEN 'Top Contributor'
+        WHEN P.PostRank BETWEEN 6 AND 10 THEN 'Active Contributor'
+        ELSE 'Contributor'
+    END AS ContributionTier,
+    (SELECT STRING_AGG(DISTINCT T.TagName, ', ') 
+     FROM Posts Po
+     JOIN UNNEST(string_to_array(P.Tags, ',')) AS T(TagName) ON Po.Id = P.Id
+     WHERE Po.Id = P.Id) AS RelatedTags,
+    (SELECT COUNT(DISTINCT V.PostId) 
+     FROM Votes V 
+     WHERE V.UserId = U.Id AND V.VoteTypeId = 2) AS UpVotesGiven
+FROM 
+    Users U
+LEFT JOIN 
+    ActiveUserDetails P ON U.Id = P.UserId
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+ORDER BY 
+    P.PostCount DESC, P.TotalScore DESC
+LIMIT 50;

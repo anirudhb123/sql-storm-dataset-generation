@@ -1,0 +1,34 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM SupplierParts s
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING total_value > 100000
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+),
+OrderLineItems AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    cs.c_name AS customer_name,
+    os.total_line_value AS order_total_value,
+    hs.s_name AS supplier_name,
+    hs.total_value AS supplier_total_value
+FROM CustomerOrders cs
+JOIN OrderLineItems os ON cs.o_orderkey = os.o_orderkey
+JOIN HighValueSuppliers hs ON os.o_orderkey = hs.s_suppkey
+WHERE os.total_line_value > 20000
+ORDER BY os.total_line_value DESC, cs.customer_name;

@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        COUNT(c.Id) AS CommentCount, 
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        COALESCE(b.Count, 0) AS BadgeCount,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), PostMetrics AS (
+    SELECT 
+        rp.Title,
+        ur.Reputation,
+        rp.CommentCount,
+        CASE 
+            WHEN ur.BadgeCount > 0 THEN 'Badge Holder'
+            ELSE 'No Badge'
+        END AS BadgeStatus
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+)
+SELECT 
+    pm.Title, 
+    pm.Reputation, 
+    pm.CommentCount, 
+    pm.BadgeStatus
+FROM 
+    PostMetrics pm
+WHERE 
+    pm.Reputation > 1000 AND pm.CommentCount >= 5
+ORDER BY 
+    pm.Reputation DESC, pm.CommentCount DESC
+LIMIT 10;

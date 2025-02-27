@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+UserPostStats AS (
+    SELECT 
+        up.UserId,
+        COALESCE(up.PostCount, 0) AS PostCount,
+        COALESCE(up.ScoreSum, 0) AS TotalScore,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM (
+        SELECT 
+            OwnerUserId AS UserId,
+            COUNT(*) AS PostCount,
+            SUM(Score) AS ScoreSum
+        FROM 
+            Posts
+        GROUP BY 
+            OwnerUserId
+    ) up
+    LEFT JOIN 
+        UserBadges ub ON up.UserId = ub.UserId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        v.VoteTypeId,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '14 days'
+    GROUP BY 
+        v.PostId, v.VoteTypeId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.Score,
+    ups.PostCount,
+    ups.TotalScore,
+    ups.BadgeCount,
+    ups.BadgeNames,
+    COALESCE(SUM(rv.VoteCount) FILTER (WHERE rv.VoteTypeId = 2), 0) AS UpvoteCount,
+    COALESCE(SUM(rv.VoteCount) FILTER (WHERE rv.VoteTypeId = 3), 0) AS DownvoteCount,
+    CASE WHEN MAX(rv.VoteCount) IS NULL THEN 'No votes yet'
+         ELSE 'Voted'
+    END AS VoteStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserPostStats ups ON rp.PostId = ups.UserId
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+WHERE 
+    (rp.UserPostRank <= 2 OR rp.ScoreRank < 10) 
+    AND rp.ViewCount > 50
+GROUP BY 
+    rp.PostId, rp.Title, rp.ViewCount, rp.CreationDate, rp.Score, 
+    ups.PostCount, ups.TotalScore, ups.BadgeCount, ups.BadgeNames
+ORDER BY 
+    rp.Score DESC, rv.PostId DESC
+OFFSET 0 LIMIT 100;

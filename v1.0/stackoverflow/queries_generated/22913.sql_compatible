@@ -1,0 +1,109 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(a.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.AcceptedAnswerId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, a.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId, p.Title, ph.Comment
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+),
+FinalRanking AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        cp.LastClosedDate,
+        ur.ReputationRank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    JOIN 
+        UserReputation ur ON rp.PostId IN (
+            SELECT 
+                p.Id 
+            FROM 
+                Posts p 
+            WHERE 
+                p.OwnerUserId = ur.UserId
+        )
+    WHERE 
+        rp.Rank <= 10
+    ORDER BY 
+        rp.Score DESC, 
+        COALESCE(cp.LastClosedDate, '9999-12-31') ASC
+)
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.CommentCount,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.LastClosedDate,
+    CASE 
+        WHEN fr.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    CASE 
+        WHEN fr.ReputationRank IS NULL THEN 'Unranked'
+        ELSE CAST(fr.ReputationRank AS VARCHAR)
+    END AS UserReputationRank
+FROM 
+    FinalRanking fr
+WHERE 
+    fr.Score > (
+        SELECT AVG(Score) 
+        FROM RankedPosts 
+        WHERE PostTypeId = 1
+    )
+ORDER BY 
+    fr.Score DESC, 
+    fr.LastClosedDate DESC;

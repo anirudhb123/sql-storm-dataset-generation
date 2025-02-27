@@ -1,0 +1,94 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk, 
+        sr_item_sk, 
+        sr_return_quantity,
+        sr_return_amt,
+        RANK() OVER (PARTITION BY sr_customer_sk ORDER BY sr_return_quantity DESC) AS return_rank
+    FROM store_returns
+    WHERE sr_return_quantity IS NOT NULL
+),
+TopReturns AS (
+    SELECT 
+        r.sr_customer_sk,
+        r.sr_item_sk,
+        r.sr_return_quantity,
+        r.sr_return_amt,
+        COALESCE(r2.total_return_amt, 0) AS total_return_amt
+    FROM RankedReturns r
+    LEFT JOIN (
+        SELECT 
+            sr_item_sk, 
+            SUM(sr_return_amt) AS total_return_amt
+        FROM store_returns
+        GROUP BY sr_item_sk
+    ) r2 ON r.sr_item_sk = r2.sr_item_sk
+    WHERE r.return_rank = 1
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_buy_potential, 'UNKNOWN') AS buy_potential,
+        COALESCE(w.ws_sales_price, 0) AS latest_sales_price
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            ws_bill_customer_sk,
+            MAX(ws_sales_price) AS ws_sales_price
+        FROM web_sales
+        GROUP BY ws_bill_customer_sk
+    ) w ON c.c_customer_sk = w.ws_bill_customer_sk
+),
+AggregatedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+FinalResults AS (
+    SELECT 
+        cd.c_customer_id,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(tr.sr_return_quantity) AS total_return_quantity,
+        SUM(tr.sr_return_amt) AS total_return_amt,
+        a.total_net_profit,
+        cd.buy_potential,
+        COUNT(DISTINCT tr.sr_item_sk) AS unique_returned_items
+    FROM CustomerData cd
+    LEFT JOIN TopReturns tr ON cd.c_customer_sk = tr.sr_customer_sk
+    LEFT JOIN AggregatedSales a ON cd.c_customer_sk = a.ws_bill_customer_sk
+    GROUP BY 
+        cd.c_customer_id, 
+        cd.c_first_name, 
+        cd.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status,
+        a.total_net_profit,
+        cd.buy_potential
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_net_profit IS NULL THEN 'No Profit Recorded'
+        ELSE 'Profit Exists'
+    END AS profit_status,
+    CASE
+        WHEN total_return_quantity > 10 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_frequency
+FROM FinalResults
+WHERE total_return_amt > (SELECT AVG(total_return_amt) FROM FinalResults)
+ORDER BY total_return_amt DESC
+FETCH FIRST 100 ROWS ONLY;

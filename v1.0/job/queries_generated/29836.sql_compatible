@@ -1,0 +1,35 @@
+
+SELECT 
+    ka.name AS actor_name,
+    ti.title AS movie_title,
+    ti.production_year,
+    STRING_AGG(DISTINCT ke.keyword ORDER BY ke.keyword ASC) AS movie_keywords,
+    STRING_AGG(DISTINCT co.name ORDER BY co.name ASC) AS production_companies,
+    ti.kind_id,
+    rt.role AS role_name
+FROM 
+    aka_name ka
+JOIN 
+    cast_info ci ON ka.person_id = ci.person_id
+JOIN 
+    title ti ON ci.movie_id = ti.id
+LEFT JOIN 
+    movie_keyword mk ON ti.id = mk.movie_id
+LEFT JOIN 
+    keyword ke ON mk.keyword_id = ke.id
+LEFT JOIN 
+    movie_companies mc ON ti.id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+WHERE 
+    ti.production_year >= 2000
+    AND ti.kind_id IN (
+        SELECT id FROM kind_type WHERE kind IN ('movie', 'feature')
+    )
+    AND ka.name IS NOT NULL
+GROUP BY 
+    ka.name, ti.title, ti.production_year, ti.kind_id, rt.role
+ORDER BY 
+    ti.production_year DESC, ka.name;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE price_ranks AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_availqty,
+        ps_supplycost,
+        DENSE_RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rank
+    FROM partsupp
+    WHERE ps_availqty > 0
+),
+top_suppliers AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        s.s_name, 
+        pr.rank
+    FROM part p
+    JOIN price_ranks pr ON p.p_partkey = pr.ps_partkey
+    JOIN supplier s ON pr.ps_suppkey = s.s_suppkey
+    WHERE pr.rank <= 3
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) 
+                                   FROM orders 
+                                   WHERE o_orderstatus = 'F')
+),
+region_nations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    rs.r_name,
+    cn.c_name,
+    ts.p_name,
+    ts.s_name,
+    COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT cn.c_custkey) AS unique_customers
+FROM lineitem li
+JOIN orders o ON li.l_orderkey = o.o_orderkey
+JOIN top_suppliers ts ON li.l_partkey = ts.p_partkey
+JOIN customer_orders cn ON o.o_custkey = cn.c_custkey
+JOIN region_nations rs ON cn.c_nationkey = rs.n_nationkey
+WHERE li.l_returnflag = 'N'
+  AND li.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+GROUP BY rs.r_name, cn.c_name, ts.p_name, ts.s_name
+HAVING COALESCE(SUM(li.l_extendedprice * (1 - li.l_discount)), 0) > (
+    SELECT AVG(total_revenue)
+    FROM (
+        SELECT 
+            SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+        FROM lineitem li
+        JOIN orders o ON li.l_orderkey = o.o_orderkey
+        WHERE li.l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+        GROUP BY o.o_orderkey
+    ) AS revenue_data
+)
+ORDER BY total_revenue DESC, order_count ASC;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2020
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        (SELECT title FROM aka_title WHERE id = ml.linked_movie_id) AS title,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5 
+),
+cast_roles AS (
+    SELECT 
+        ci.movie_id,
+        CR.role AS role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id, CR.role) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type CR ON ci.role_id = CR.id
+),
+actor_rankings AS (
+    SELECT 
+        ak.name AS actor_name,
+        ci.movie_id,
+        COUNT(DISTINCT ci.role_id) AS role_count,
+        AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) OVER (PARTITION BY ak.id) AS note_avg,
+        ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.id, ci.movie_id
+)
+SELECT 
+    mh.title,
+    ARRAY_AGG(DISTINCT ar.actor_name) AS actors,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    MIN(mh.level) AS hierarchy_level,
+    SUM(CASE 
+            WHEN ci.note IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS notes_present,
+    SUM(note_avg) / NULLIF(COUNT(note_avg), 0) AS avg_note_presence_ratio
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    actor_rankings ar ON ci.movie_id = ar.movie_id
+GROUP BY 
+    mh.title
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1
+ORDER BY 
+    total_movies DESC,
+    hierarchy_level ASC
+LIMIT 100;

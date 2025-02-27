@@ -1,0 +1,99 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.CreationDate, p.ViewCount, p.Score
+), RecentPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        ViewCount, 
+        Score, 
+        RankByScore, 
+        CommentCount, 
+        UpVoteCount, 
+        DownVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        CreationDate >= NOW() - INTERVAL '30 days'
+    AND 
+        (ViewCount > 100 OR Score > 10)
+), HighRankedPosts AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN RankByScore <= 5 THEN 'Top 5'
+            ELSE 'Not Top 5'
+        END AS RankCategory
+    FROM 
+        RankedPosts
+), CloseReasonStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 10) AS CloseCount,
+        COUNT(*) FILTER (WHERE ph.PostHistoryTypeId = 11) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    up.DisplayName AS TopUser,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    cr.CloseCount,
+    cr.ReopenCount,
+    hr.RankCategory
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    (SELECT UserId, DisplayName FROM Users WHERE Reputation > 1000) up ON rp.PostId IN (
+        SELECT PostId FROM Votes WHERE UserId = up.UserId
+    )
+JOIN 
+    UserStats us ON us.UserId = up.UserId
+LEFT JOIN 
+    CloseReasonStats cr ON cr.PostId = rp.PostId
+JOIN 
+    HighRankedPosts hr ON hr.PostId = rp.PostId
+WHERE 
+    (cr.CloseCount > 0 OR cr.ReopenCount > 0)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+FETCH FIRST 50 ROWS ONLY;

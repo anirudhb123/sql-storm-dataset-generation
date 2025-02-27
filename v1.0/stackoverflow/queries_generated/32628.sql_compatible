@@ -1,0 +1,90 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        c.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE c ON p.ParentId = c.PostId
+),
+
+LatestPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.ViewCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = r.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = r.PostId AND v.VoteTypeId = 3) AS DownVotes,
+    u.Reputation AS UserReputation,
+    u.BadgeCount,
+    pt.Name AS PostTypeName,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(pf.LastEditDate, p.CreationDate) AS LastModifiedDate
+FROM 
+    RecursiveCTE r
+JOIN 
+    LatestPosts lp ON r.PostId = lp.Id
+JOIN 
+    UserReputation u ON lp.OwnerUserId = u.UserId
+JOIN 
+    PostTypes pt ON lp.PostTypeId = pt.Id
+LEFT JOIN 
+    (SELECT PostId, MAX(LastEditDate) AS LastEditDate FROM Posts GROUP BY PostId) pf ON r.PostId = pf.PostId
+WHERE 
+    r.Level = (
+        SELECT MAX(c2.Level) 
+        FROM RecursiveCTE c2 
+        WHERE c2.PostId = r.PostId
+    )
+ORDER BY 
+    r.CreationDate DESC;

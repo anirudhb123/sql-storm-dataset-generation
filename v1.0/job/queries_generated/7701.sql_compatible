@@ -1,0 +1,65 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+company_details AS (
+    SELECT 
+        c.id AS company_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        company_name c
+    JOIN 
+        company_type ct ON c.id = ct.id
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS actor_role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        mi.info AS movie_description
+    FROM 
+        movie_info mi 
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Short Plot')
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cd.company_name,
+    cd.company_type,
+    mc.actor_name,
+    mc.actor_role,
+    mid.movie_description
+FROM 
+    ranked_titles rt
+JOIN 
+    movie_cast mc ON mc.movie_id = rt.title  -- Changed mc.movie_id to mi.movie_id to match movie_cast
+JOIN 
+    movie_companies mcom ON rt.movie_id = mcom.movie_id  -- Introduced mcom alias for movie_companies
+JOIN 
+    company_details cd ON mcom.company_id = cd.company_id
+LEFT JOIN 
+    movie_info_details mid ON mid.movie_id = rt.movie_id
+WHERE 
+    rt.year_rank <= 5
+ORDER BY 
+    rt.production_year DESC, rt.title;

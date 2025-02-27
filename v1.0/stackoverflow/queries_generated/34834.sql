@@ -1,0 +1,74 @@
+WITH RecursiveTagCount AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+    WITH ROLLUP
+),
+LatestPost AS (
+    SELECT 
+        Title, 
+        OwnerUserId, 
+        CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS rn
+    FROM 
+        Posts
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(LatestPosts.PostCount, 0) AS NumberOfPosts,
+        COALESCE(BadgeCount.BadgeCount, 0) AS NumberOfBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        (SELECT OwnerUserId, COUNT(*) AS PostCount 
+         FROM Posts 
+         GROUP BY OwnerUserId) LatestPosts ON U.Id = LatestPosts.OwnerUserId
+    LEFT JOIN 
+        (SELECT UserId, COUNT(*) AS BadgeCount 
+         FROM Badges 
+         GROUP BY UserId) BadgeCount ON U.Id = BadgeCount.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, LatestPosts.PostCount, BadgeCount.BadgeCount
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        NumberOfPosts,
+        NumberOfBadges,
+        UpVotes - DownVotes AS NetVotes,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+    WHERE 
+        NumberOfPosts > 0 AND Reputation > 100
+)
+SELECT 
+    AU.DisplayName,
+    AU.Reputation,
+    AU.NumberOfPosts,
+    AU.NumberOfBadges,
+    AU.NetVotes,
+    RR.TagId,
+    RR.TagName,
+    RR.PostCount
+FROM 
+    ActiveUsers AU
+LEFT JOIN 
+    RecursiveTagCount RR ON RR.PostCount > 10
+ORDER BY 
+    AU.NetVotes DESC, AU.ReputationRank;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(v.CreationDate IS NOT NULL), 0) AS UpVotes,
+        COALESCE(SUM(v.CreationDate IS NOT NULL AND vt.Name = 'DownMod'), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id 
+    LEFT JOIN 
+        (SELECT * FROM Tags) t ON p.Tags LIKE '%' || t.TagName || '%' 
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+Benchmark AS (
+    SELECT 
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        p.CommentCount,
+        p.UpVotes,
+        p.DownVotes,
+        p.UserPostRank
+    FROM 
+        RankedPosts p
+    WHERE 
+        p.UserPostRank <= 5
+)
+SELECT 
+    b.Title,
+    b.ViewCount,
+    b.Score,
+    b.Tags,
+    b.CommentCount,
+    b.UpVotes,
+    b.DownVotes,
+    u.DisplayName AS Author,
+    u.Reputation AS AuthorReputation,
+    u.CreationDate AS AuthorCreationDate,
+    CASE 
+        WHEN b.Score > 0 THEN ROUND(b.UpVotes::float / (b.UpVotes + b.DownVotes), 2)
+        ELSE 0 
+    END AS VoteRatio
+FROM 
+    Benchmark b
+JOIN 
+    Users u ON b.PostId = u.Id
+ORDER BY 
+    b.Score DESC;

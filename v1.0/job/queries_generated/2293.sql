@@ -1,0 +1,53 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+actor_movie_count AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    INNER JOIN 
+        ranked_movies rm ON c.movie_id = rm.movie_id
+    GROUP BY 
+        c.person_id
+), 
+unique_actor_names AS (
+    SELECT 
+        a.person_id,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_name a
+    INNER JOIN 
+        actor_movie_count amc ON a.person_id = amc.person_id
+    GROUP BY 
+        a.person_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    u.actor_names,
+    amc.movie_count,
+    COALESCE(SUM(mi.id IS NOT NULL), 0) AS info_count
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    actor_movie_count amc ON rm.movie_id = amc.movie_id
+LEFT JOIN 
+    unique_actor_names u ON amc.person_id = u.person_id
+LEFT JOIN 
+    movie_info mi ON rm.movie_id = mi.movie_id
+WHERE 
+    rm.rank_by_year <= 5
+GROUP BY 
+    rm.title, rm.production_year, u.actor_names, amc.movie_count
+ORDER BY 
+    rm.production_year DESC, amc.movie_count DESC;

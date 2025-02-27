@@ -1,0 +1,85 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        P.ParentId,
+        0 AS Depth
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ViewCount,
+        P2.CreationDate,
+        P2.Score,
+        P2.ParentId,
+        R.Depth + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursiveCTE R ON P2.ParentId = R.PostId
+    WHERE 
+        P2.PostTypeId = 2  -- only answers
+),
+UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostHistoryAggregates AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    R.PostId,
+    R.Title,
+    R.ViewCount,
+    R.Depth,
+    U.UserId,
+    U.DisplayName,
+    U.TotalScore,
+    U.AvgViewCount,
+    U.TotalPosts,
+    PH.EditCount,
+    PH.LastEditDate,
+    PH.EditTypes,
+    COALESCE(CAST(PH.EditCount AS INT), 0) AS EditCount
+FROM 
+    RecursiveCTE R
+JOIN 
+    Users U ON R.Score > 10 AND R.Score < 100  -- Filtering condition
+LEFT JOIN 
+    PostHistoryAggregates PH ON R.PostId = PH.PostId
+WHERE 
+    U.Reputation > 1000  -- Only high-reputation users
+ORDER BY 
+    R.Depth DESC,
+    U.TotalScore DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;  -- Pagination

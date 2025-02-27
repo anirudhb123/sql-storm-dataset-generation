@@ -1,0 +1,70 @@
+WITH recursive movie_rank AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+movie_stats AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        MAX(m.production_year) AS latest_year
+    FROM 
+        movie_keyword mk
+    JOIN 
+        complete_cast cc ON mk.movie_id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+highlighted_movies AS (
+    SELECT 
+        ms.movie_id,
+        ms.total_cast,
+        ms.total_keywords
+    FROM 
+        movie_stats ms
+    WHERE 
+        ms.total_cast > 5
+        AND ms.total_keywords > 3
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(ca.name, 'Unknown Actor') AS lead_actor,
+    COALESCE(kt.keyword, 'No Keywords') AS movie_keyword,
+    (SELECT COUNT(*) FROM highlighted_movies) AS highlighted_count,
+    RANK() OVER (ORDER BY m.production_year DESC) AS year_rank
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name ca ON ci.person_id = ca.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2020
+    AND (UCASE(m.title) LIKE '%ACTION%' OR m.title IS NULL) -- bizarre semantic corner case
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_link ml 
+        WHERE ml.movie_id = m.id AND ml.link_type_id IN (
+            SELECT id FROM link_type WHERE link ILIKE '%sequel%'
+        )
+    )
+    AND COALESCE(mk.keyword_id, -1) > 0 -- ensuring filtering with NULL logic
+ORDER BY 
+    year_rank, m.title DESC
+LIMIT 100;

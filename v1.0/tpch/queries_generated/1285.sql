@@ -1,0 +1,58 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    p.p_name,
+    COALESCE(SUM(od.total_quantity), 0) AS total_quantity,
+    COALESCE(SUM(od.o_totalprice), 0) AS total_revenue,
+    si.s_name AS top_supplier,
+    si.nation_name
+FROM 
+    RankedSales p
+LEFT JOIN 
+    OrderDetails od ON p.p_partkey = od.o_orderkey
+LEFT JOIN 
+    SupplierInfo si ON si.rn = 1
+WHERE 
+    p.sales_rank <= 5
+GROUP BY 
+    p.p_name, si.s_name, si.nation_name
+ORDER BY 
+    total_revenue DESC;

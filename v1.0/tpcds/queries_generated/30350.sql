@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d.d_date,
+        ws.ws_sales_price,
+        CTE.c_customer_sk,
+        ROW_NUMBER() OVER (PARTITION BY CTE.c_customer_sk ORDER BY d.d_date DESC) AS rn
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    JOIN customer CTE ON ws.ws_bill_customer_sk = CTE.c_customer_sk
+    WHERE d.d_date >= '2022-01-01' AND d.d_date < '2023-01-01'
+),
+CustomerDetails AS (
+    SELECT 
+        ca.ca_address_sk,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.ca_address_sk, cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+)
+SELECT 
+    ST.d_date,
+    SUM(ST.ws_sales_price) AS total_sales,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    CD.customer_count
+FROM SalesTrend ST
+LEFT JOIN CustomerDetails CD ON ST.c_customer_sk = CD.cd_demo_sk
+WHERE ST.rn <= 5
+GROUP BY ST.d_date, CD.cd_gender, CD.cd_marital_status, CD.customer_count
+ORDER BY ST.d_date, total_sales DESC
+UNION
+SELECT 
+    d.d_date,
+    COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales,
+    'Unknown' AS cd_gender,
+    'Unknown' AS cd_marital_status,
+    0 AS customer_count
+FROM date_dim d
+LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+WHERE d.d_date >= '2022-01-01' AND d.d_date < '2023-01-01'
+GROUP BY d.d_date
+ORDER BY d.d_date;

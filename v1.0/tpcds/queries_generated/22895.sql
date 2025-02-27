@@ -1,0 +1,79 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.ticket_number,
+        sr.returned_date_sk,
+        sr.return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr.ticket_number ORDER BY sr.returned_date_sk DESC) AS rn
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_quantity > 0
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        coalesce(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        CASE 
+            WHEN cd.cd_dep_count IS NULL THEN 'No dependents'
+            WHEN cd.cd_dep_count = 0 THEN 'No dependents'
+            ELSE CAST(cd.cd_dep_count AS VARCHAR) || ' dependents'
+        END AS dependent_info
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_quantity) AS total_units_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+IncomeBands AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ib.ib_lower_bound < 50000
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    cd.cd_gender,
+    cd.marital_status,
+    SUM(ss.total_sales) AS total_warehouse_sales,
+    COUNT(DISTINCT IFNULL(rr.ticket_number, -1)) AS total_returns,
+    ib.customer_count AS income_band_customers
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    SalesSummary ss ON cd.cd_demo_sk = ss.w_warehouse_sk
+LEFT JOIN 
+    RankedReturns rr ON rr.ticket_number IS NOT NULL
+LEFT JOIN 
+    IncomeBands ib ON ib.ib_income_band_sk = cd.cd_demo_sk
+GROUP BY 
+    cd.cd_gender, cd.marital_status, ib.customer_count
+HAVING 
+    total_warehouse_sales > 0
+    AND (
+        cd.marital_status = 'M' OR
+        (cd.gender = 'F' AND total_returns > 10)
+    )
+ORDER BY 
+    total_warehouse_sales DESC, cd.gender ASCNULLS LAST;

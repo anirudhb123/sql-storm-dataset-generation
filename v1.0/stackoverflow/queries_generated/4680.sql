@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER(PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        U.Reputation,
+        COALESCE(CAST(NULLIF(U.Location, '') AS varchar), 'Location not provided') AS UserLocation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= DATEADD(month, -6, GETDATE())
+        AND p.Score > 0
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryCreationDate,
+        pht.Name AS HistoryType,
+        COUNT(*) OVER(PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(year, -1, GETDATE())
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.Reputation,
+    rp.UserLocation,
+    COALESCE(ph.HistoryCount, 0) AS TotalHistoryEntries,
+    AVG(rp.ViewCount) OVER() AS AverageViewsLast6Months,
+    STRING_AGG(DISTINCT ph.HistoryType, ', ') AS HistoryTypes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    rp.rn = 1
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.AnswerCount, rp.Reputation, rp.UserLocation
+ORDER BY 
+    rp.Score DESC;

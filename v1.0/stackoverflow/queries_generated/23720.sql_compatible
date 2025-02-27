@@ -1,0 +1,93 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges,
+        SUM(CASE WHEN B.TagBased = 1 THEN 1 ELSE 0 END) AS TagBasedBadges,
+        SUM(CASE WHEN B.TagBased = 0 THEN 1 ELSE 0 END) AS NamedBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostVoteStatistics AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) FILTER (WHERE V.VoteTypeId IN (2, 4)) AS TotalLikes,
+        COUNT(*) FILTER (WHERE V.VoteTypeId = 3) AS TotalDislikes,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.OwnerUserId
+),
+RecentCommentStatistics AS (
+    SELECT
+        C.UserId,
+        COUNT(C.Id) AS RecentCommentsCount,
+        MAX(C.CreationDate) AS LastCommentDate,
+        COUNT(*) FILTER (WHERE C.CreationDate > CURRENT_TIMESTAMP - INTERVAL '30 days') AS Last30DaysCount
+    FROM
+        Comments C
+    GROUP BY
+        C.UserId
+),
+Summary AS (
+    SELECT 
+        UB.DisplayName,
+        COALESCE(PVS.TotalLikes, 0) AS TotalPostLikes,
+        COALESCE(PVS.TotalDislikes, 0) AS TotalPostDislikes,
+        COALESCE(PVS.AvgScore, 0) AS AverageScore,
+        COALESCE(RCS.RecentCommentsCount, 0) AS RecentCommentsCount,
+        COALESCE(RCS.LastCommentDate, '1970-01-01'::DATE) AS LastCommentDate,
+        UB.GoldBadges,
+        UB.SilverBadges,
+        UB.BronzeBadges,
+        UB.TagBasedBadges,
+        UB.NamedBadges
+    FROM 
+        UserBadges UB
+    LEFT JOIN 
+        PostVoteStatistics PVS ON UB.UserId = PVS.OwnerUserId
+    LEFT JOIN 
+        RecentCommentStatistics RCS ON UB.UserId = RCS.UserId
+)
+SELECT 
+    S.*,
+    CASE 
+        WHEN TotalPostLikes > TotalPostDislikes THEN 'Positive Contribution'
+        WHEN TotalPostLikes = TotalPostDislikes THEN 'Neutral Contribution'
+        ELSE 'Negative Contribution' 
+    END AS ContributionAssessment,
+    CASE 
+        WHEN GoldBadges + SilverBadges + BronzeBadges >= 5 THEN 'Veteran User'
+        ELSE 'Novice User'
+    END AS UserExperienceLevel,
+    ARRAY_AGG(DISTINCT T.TagName) AS AssociatedTags
+FROM 
+    Summary S
+LEFT JOIN 
+    Posts P ON S.UserId = P.OwnerUserId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            UNNEST(SPLIT_PART(P.Tags, '>', n)) AS TagName
+        FROM generate_series(1, array_length(string_to_array(P.Tags, '>'), 1)) AS n
+        WHERE 
+            P.Tags IS NOT NULL
+    ) AS T ON true
+GROUP BY 
+    S.DisplayName, S.TotalPostLikes, S.TotalPostDislikes, S.AverageScore, S.RecentCommentsCount, S.LastCommentDate,
+    S.GoldBadges, S.SilverBadges, S.BronzeBadges, S.TagBasedBadges, S.NamedBadges
+HAVING 
+    SUM(P.ViewCount) > 100 OR COUNT(P.Id) > 10
+ORDER BY 
+    TotalPostLikes DESC, RecentCommentsCount DESC
+LIMIT 50;

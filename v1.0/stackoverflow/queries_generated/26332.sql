@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_arr ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_arr
+    WHERE 
+        p.PostTypeId = 1  -- Get only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes c ON c.Id = CAST(JSONB_EXTRACT_PATH_TEXT(ph.Text, 'CloseReasonId') AS SMALLINT)
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Only considering close events
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Tags,
+        cph.LastClosedDate,
+        cph.UserDisplayName AS CloseBy,
+        cph.CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostHistory cph ON cph.PostId = rp.PostId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    DENSE_RANK() OVER (ORDER BY Score DESC) AS RankByScore
+FROM 
+    FinalResults
+ORDER BY 
+    RankByScore, CreationDate DESC
+LIMIT 50;

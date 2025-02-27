@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionCount,
+        CommentCount,
+        TotalBounty,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStats
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        P.Title,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RecentEditRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.CommentCount,
+    U.TotalBounty,
+    COUNT(DISTINCT RPH.PostId) AS RecentEditedPosts,
+    SUM(CASE WHEN RPH.RecentEditRank = 1 THEN 1 ELSE 0 END) AS LatestEditCount,
+    COALESCE(PHT.Name, 'No Close Reason') AS CloseReason
+FROM 
+    TopUsers U
+LEFT JOIN 
+    RecentPostHistory RPH ON U.UserId = RPH.UserId
+LEFT JOIN 
+    PostHistory PHT ON RPH.PostId = PHT.PostId AND PHT.PostHistoryTypeId IN (10, 11) -- Close or Reopen events
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.QuestionCount, U.CommentCount, U.TotalBounty, PHT.Name
+ORDER BY 
+    U.Reputation DESC, RecentEditedPosts DESC
+LIMIT 10;

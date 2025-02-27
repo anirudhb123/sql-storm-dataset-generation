@@ -1,0 +1,75 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Starting with Questions
+    
+    UNION ALL
+    
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.CreationDate,
+        A.Score,
+        A.ViewCount,
+        A.OwnerUserId,
+        R.Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursiveCTE R ON A.ParentId = R.PostId
+)
+
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COUNT(DISTINCT PH.Id) AS PostHistoryCount,
+    SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS ClosedPosts,
+    COALESCE(AVG(V.BountyAmount), 0) AS AverageBounty,
+    P.TagCount,
+    R.Level AS PostLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    (SELECT 
+        PostId,
+        COUNT(*) AS TagCount 
+     FROM 
+        (SELECT 
+            PostId, 
+            unnest(string_to_array(Tags, ',')) AS TagName 
+        FROM Posts) AS TagDetails
+     GROUP BY PostId) AS PTags ON P.Id = PTags.PostId
+LEFT JOIN 
+    RecursiveCTE R ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    (SELECT 
+        POST.Id,
+        string_agg(T.TagName, ', ') AS TagName
+     FROM 
+        Posts POST
+     INNER JOIN 
+        unnest(string_to_array(POST.Tags, ',')) AS T(TagName) ON TRUE
+     GROUP BY 
+        POST.Id) AS T ON P.Id = T.Id
+WHERE 
+    U.Reputation > 1000  -- Users with higher reputation
+GROUP BY 
+    U.Id, P.TagCount, R.Level
+ORDER BY 
+    PostHistoryCount DESC, AverageBounty DESC;

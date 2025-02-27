@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -2, GETDATE()) -- Posts created in the last 2 years
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        SUM(CASE WHEN b.Class = 1 THEN 3
+                 WHEN b.Class = 2 THEN 2
+                 WHEN b.Class = 3 THEN 1
+                 ELSE 0 END) AS BadgeScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose votes
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopContributors AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.BadgeScore,
+        us.TotalPosts,
+        us.TotalBounty,
+        RANK() OVER (ORDER BY us.Reputation DESC, us.BadgeScore DESC, us.TotalPosts DESC) AS Rank
+    FROM 
+        UserScores us
+    WHERE 
+        us.Reputation > 1000 AND us.TotalPosts > 5 -- Filtering only for significant contributors
+),
+RelevantPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.PostRank <= 3 -- Top 3 posts per user
+)
+SELECT 
+    t.UserId,
+    t.Reputation,
+    t.BadgeScore,
+    t.TotalPosts,
+    t.TotalBounty,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.CommentCount,
+    COALESCE(r.OwnerDisplayName, 'Unknown') AS OwnerDisplayName,
+    CASE 
+        WHEN r.Score IS NULL THEN 'No Score' 
+        WHEN r.Score > 100 THEN 'High Score'
+        WHEN r.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopContributors t
+LEFT JOIN 
+    RelevantPosts r ON t.UserId = r.OwnerUserId
+WHERE 
+    t.BadgeScore > 1 AND r.CreationDate < DATEADD(month, -6, GETDATE()) -- Contributions older than 6 months
+ORDER BY 
+    t.Rank, r.CreationDate DESC;

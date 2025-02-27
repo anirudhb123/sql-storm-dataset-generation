@@ -1,0 +1,97 @@
+WITH RecursiveUserReputation AS (
+    SELECT
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        CASE
+            WHEN U.Reputation > 1000 THEN 'High Reputation User'
+            WHEN U.Reputation BETWEEN 100 AND 1000 THEN 'Medium Reputation User'
+            ELSE 'Low Reputation User'
+        END AS ReputationCategory
+    FROM Users U
+    UNION ALL
+    SELECT
+        U.Id,
+        U.Reputation,
+        U.CreationDate,
+        'Crawled User' AS ReputationCategory
+    FROM Users U
+    INNER JOIN RecursiveUserReputation R ON U.Id = R.Id
+    WHERE U.Reputation < R.Reputation
+),
+UserBadgeCounts AS (
+    SELECT
+        B.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionsCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswersCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+CombinedStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(BadgeCount, 0) AS BadgeCount,
+        COALESCE(QuestionsCount, 0) AS QuestionsCount,
+        COALESCE(AnswersCount, 0) AS AnswersCount,
+        COALESCE(TotalScore, 0) AS TotalScore,
+        COALESCE(TotalViews, 0) AS TotalViews,
+        R.ReputationCategory
+    FROM Users U
+    LEFT JOIN UserBadgeCounts UB ON U.Id = UB.UserId
+    LEFT JOIN PostStats PS ON U.Id = PS.OwnerUserId
+    INNER JOIN RecursiveUserReputation R ON U.Id = R.Id
+),
+UserActivity AS (
+    SELECT
+        C.UserId,
+        COUNT(*) AS CommentCount,
+        SUM(CASE WHEN C.CreationDate > NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentComments
+    FROM Comments C
+    GROUP BY C.UserId
+)
+SELECT
+    CS.UserId,
+    CS.DisplayName,
+    CS.BadgeCount,
+    CS.QuestionsCount,
+    CS.AnswersCount,
+    CS.TotalScore,
+    CS.TotalViews,
+    UA.CommentCount,
+    UA.RecentComments,
+    CS.ReputationCategory 
+FROM CombinedStats CS
+LEFT JOIN UserActivity UA ON CS.UserId = UA.UserId
+WHERE CS.ReputationCategory = 'High Reputation User'
+ORDER BY CS.TotalScore DESC, CS.BadgeCount DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY
+UNION ALL
+SELECT
+    R.Id,
+    'Crawled User' AS DisplayName,
+    COUNT(*) AS BadgeCount,
+    NULL AS QuestionsCount,
+    NULL AS AnswersCount,
+    NULL AS TotalScore,
+    NULL AS TotalViews,
+    NULL AS CommentCount,
+    NULL AS RecentComments,
+    R.ReputationCategory 
+FROM RecursiveUserReputation R
+WHERE R.ReputationCategory = 'Crawled User'
+GROUP BY R.Id, R.ReputationCategory
+ORDER BY COUNT(*) DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;
+
+This SQL query performs an elaborate performance benchmarking task by leveraging Common Table Expressions (CTEs), recursive querying, and various aggregate functions. It produces a detailed view of users, their badge counts, activity on posts, and their reputation, while also incorporating corner cases with NULL logic and string aggregation. It combines data through `UNION ALL` and utilizes pagination to limit the number of result rows served, optimizing performance.

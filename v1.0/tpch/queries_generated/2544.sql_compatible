@@ -1,0 +1,72 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.s_suppkey, 
+        r.s_name, 
+        r.s_acctbal 
+    FROM 
+        RankedSuppliers r
+    WHERE 
+        r.rank = 1
+),
+CustomerNation AS (
+    SELECT 
+        n.n_name, 
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+)
+SELECT 
+    p.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    cn.n_name AS nation_name,
+    os.revenue,
+    ROUND((os.revenue - os.revenue * 0.1), 2) AS adjusted_revenue
+FROM 
+    part p
+LEFT OUTER JOIN 
+    TopSuppliers s ON p.p_partkey = s.s_suppkey
+JOIN 
+    CustomerNation cn ON cn.customer_count > 5
+LEFT JOIN 
+    OrderStats os ON p.p_partkey = os.o_orderkey
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2
+        WHERE 
+            p2.p_size IS NOT NULL
+    )
+ORDER BY 
+    adjusted_revenue DESC 
+LIMIT 10;

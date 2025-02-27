@@ -1,0 +1,91 @@
+WITH recursive movie_seasons AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.season_nr, t.episode_nr) AS episode_order
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'tv_series') AND 
+        t.season_nr IS NOT NULL
+    UNION ALL
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.season_nr, t.episode_nr) AS episode_order
+    FROM 
+        aka_title t
+    JOIN 
+        movie_seasons ms ON t.episode_of_id = ms.movie_id
+),
+title_info AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT m.id) AS total_movie_count,
+        COUNT(DISTINCT ci.id) AS total_cast_count,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_cast_with_notes
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title mt ON mc.movie_id = mt.id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind LIKE 'Distributor%')
+    GROUP BY 
+        mt.title, mt.production_year
+),
+filtered_titles AS (
+    SELECT 
+        ti.title,
+        ti.production_year,
+        ti.total_movie_count,
+        ti.total_cast_count,
+        ti.avg_cast_with_notes
+    FROM 
+        title_info ti
+    WHERE 
+        ti.total_movie_count > 0 AND 
+        ti.total_cast_count > 10 AND 
+        ti.production_year >= 1990
+),
+keyword_counts AS (
+    SELECT 
+        mt.title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.title
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.total_movie_count,
+    ft.total_cast_count,
+    ft.avg_cast_with_notes,
+    COALESCE(kc.keyword_count, 0) AS keywords_associated,
+    CASE 
+        WHEN ft.avg_cast_with_notes > 0.5 THEN 'High Note'
+        ELSE 'Low Note'
+    END AS note_category,
+    SUM(CASE 
+        WHEN ft.production_year < 2000 THEN 1 ELSE 0 
+    END) OVER () AS pre_2000_count
+FROM 
+    filtered_titles ft
+LEFT JOIN 
+    keyword_counts kc ON ft.title = kc.title
+ORDER BY 
+    ft.production_year DESC,
+    ft.total_movie_count DESC,
+    note_category;

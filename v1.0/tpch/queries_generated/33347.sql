@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500 AND sh.level < 5
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY l.l_orderkey
+),
+nation_summary AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE n.n_comment IS NOT NULL
+    GROUP BY n.n_name
+),
+final_summary AS (
+    SELECT p.p_name, SUM(l.l_extendedprice) AS total_revenue,
+           COUNT(DISTINCT co.c_custkey) AS customer_count,
+           MAX(ns.supplier_count) AS supplier_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN customer_orders co ON co.total_spent > 0
+    LEFT JOIN nation_summary ns ON ns.supplier_count > 0
+    GROUP BY p.p_name
+)
+SELECT *
+FROM final_summary
+WHERE total_revenue > (SELECT AVG(total_revenue) FROM final_summary) 
+  AND supplier_count IS NOT NULL
+ORDER BY total_revenue DESC
+LIMIT 10;

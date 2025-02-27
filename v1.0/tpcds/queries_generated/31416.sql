@@ -1,0 +1,36 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_number_employees, s_sales_price
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE ss.ss_sold_date_sk = (
+        SELECT MAX(ss2.ss_sold_date_sk)
+        FROM store_sales ss2
+    )
+    UNION ALL
+    SELECT sh.s_store_sk, sh.s_store_name, sh.s_number_employees, sh.s_sales_price
+    FROM store s
+    JOIN sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+    WHERE sh.s_sales_price > 100  -- Example of a predicate
+),
+ranked_sales AS (
+    SELECT 
+        sh.s_store_name,
+        SUM(ss.ss_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY sh.s_store_name ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank
+    FROM sales_hierarchy sh
+    JOIN store_sales ss ON sh.s_store_sk = ss.ss_store_sk
+    GROUP BY sh.s_store_name
+)
+SELECT 
+    s.s_store_name,
+    total_sales,
+    CASE 
+        WHEN total_sales IS NULL THEN 'No Sales'
+        ELSE 'Total Sales: ' || total_sales::text
+    END AS sales_info,
+    COALESCE(rank.sales_rank, -1) AS rank_position
+FROM ranked_sales rank
+FULL OUTER JOIN store s ON rank.s_store_name = s.s_store_name
+WHERE s.s_state = 'CA' OR s.s_state IS NULL  -- NULL logic example
+ORDER BY rank_position;

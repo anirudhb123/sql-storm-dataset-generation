@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+
+    UNION ALL
+
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, sh.level + 1
+    FROM supplier sh
+    JOIN SupplierHierarchy shier ON sh.s_nationkey = shier.s_nationkey
+    WHERE shier.level < 3
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_retailprice, p.p_size, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 10
+          AND p.p_retailprice > (SELECT AVG(ps.ps_supplycost) FROM partsupp ps)
+          AND p.p_comment IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('F', 'O') 
+          AND o.o_orderdate > '1996-01-01'
+    ORDER BY o.o_totalprice DESC
+),
+NationRegion AS (
+    SELECT r.r_name, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name, n.n_name
+)
+SELECT COALESCE(cr.c_name, 'Unknown Customer') AS customer_name,
+       COALESCE(SUM(lp.l_extendedprice), 0) AS total_extended_price,
+       COUNT(DISTINCT ph.p_partkey) AS part_count,
+       n.n_name AS nation_name,
+       rh.s_name AS supplier_name,
+       CASE 
+           WHEN SUM(lp.l_discount) IS NULL THEN 0
+           ELSE SUM(lp.l_discount)
+       END AS total_discount,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(lp.l_extendedprice) DESC) AS country_rank
+FROM CustomerOrders cr
+FULL OUTER JOIN lineitem lp ON cr.o_orderkey = lp.l_orderkey
+LEFT JOIN FilteredParts ph ON lp.l_partkey = ph.p_partkey
+LEFT JOIN SupplierHierarchy rh ON cr.o_custkey = rh.s_suppkey
+LEFT JOIN nation n ON rh.s_nationkey = n.n_nationkey
+WHERE (rh.s_name IS NOT NULL OR n.n_name IS NULL)
+GROUP BY cr.c_name, n.n_name, rh.s_name
+HAVING COUNT(DISTINCT lp.l_orderkey) > 0 AND SUM(lp.l_extendedprice) IS NOT NULL
+ORDER BY country_rank DESC, total_extended_price DESC
+LIMIT 100;

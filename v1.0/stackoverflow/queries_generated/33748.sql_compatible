@@ -1,0 +1,78 @@
+
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.OwnerUserId,
+        Posts.ParentId,
+        1 AS Level
+    FROM Posts
+    WHERE Posts.ParentId IS NULL  
+    
+    UNION ALL
+    
+    SELECT
+        Posts.Id,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.OwnerUserId,
+        Posts.ParentId,
+        RecursiveCTE.Level + 1
+    FROM Posts
+    INNER JOIN RecursiveCTE ON Posts.ParentId = RecursiveCTE.PostId
+),
+PostMetrics AS (
+    SELECT
+        Posts.Id AS PostId,
+        COUNT(Comments.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        COALESCE(SUM(CASE WHEN Votes.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeletionCount
+    FROM Posts
+    LEFT JOIN Comments ON Comments.PostId = Posts.Id
+    LEFT JOIN Votes ON Votes.PostId = Posts.Id
+    GROUP BY Posts.Id
+),
+UserActivity AS (
+    SELECT
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        COUNT(DISTINCT Comments.Id) AS TotalComments,
+        COUNT(DISTINCT Badges.Id) AS TotalBadges
+    FROM Users
+    LEFT JOIN Posts ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN Comments ON Comments.UserId = Users.Id
+    LEFT JOIN Badges ON Badges.UserId = Users.Id
+    GROUP BY Users.Id, Users.DisplayName
+),
+PostDetails AS (
+    SELECT
+        p.PostId,
+        p.Title,
+        p.CommentCount,
+        p.UpvoteCount,
+        p.DownvoteCount,
+        u.DisplayName AS OwnerDisplayName,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ua.TotalBadges,
+        ROW_NUMBER() OVER (ORDER BY p.UpvoteCount DESC) AS Rank
+    FROM PostMetrics p
+    JOIN Users u ON p.PostId = u.Id
+    JOIN UserActivity ua ON ua.UserId = u.Id
+)
+SELECT
+    r.Level,
+    pd.Title,
+    pd.CommentCount,
+    pd.UpvoteCount,
+    pd.DownvoteCount,
+    pd.OwnerDisplayName,
+    pd.TotalPosts,
+    pd.TotalComments,
+    pd.TotalBadges
+FROM RecursiveCTE r
+JOIN PostDetails pd ON r.PostId = pd.PostId
+ORDER BY r.Level, pd.UpvoteCount DESC;

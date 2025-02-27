@@ -1,0 +1,69 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.Reputation
+),
+RecentPostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.CreationDate,
+        COUNT(C) AS CommentCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.CreationDate
+),
+CombinedStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(UB.VoteCount, 0) AS TotalVotes,
+        COALESCE(UB.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(UB.DownVotes, 0) AS TotalDownVotes,
+        COALESCE(RPA.PostCount, 0) AS TotalPosts,
+        COALESCE(RPA.CommentCount, 0) AS RecentComments,
+        COALESCE(RPA.TotalViews, 0) AS RecentTotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserVoteStats UB ON U.Id = UB.UserId
+    LEFT JOIN 
+        (SELECT OwnerUserId, SUM(CommentCount) AS CommentCount, SUM(TotalViews) AS TotalViews FROM RecentPostActivity GROUP BY OwnerUserId) RPA ON U.Id = RPA.OwnerUserId
+)
+SELECT 
+    CS.UserId, 
+    CS.DisplayName, 
+    CS.TotalVotes, 
+    CS.TotalUpVotes, 
+    CS.TotalDownVotes, 
+    CS.TotalPosts, 
+    CS.RecentComments, 
+    CS.RecentTotalViews,
+    (SELECT STRING_AGG(CONCAT(T.TagName, ': ', T.Count), ', ' ORDER BY T.Count DESC)
+     FROM Tags T
+     WHERE T.WikiPostId IN (SELECT DISTINCT P.WikiPostId FROM Posts P WHERE P.OwnerUserId = CS.UserId)) AS UserTags
+FROM 
+    CombinedStats CS
+WHERE 
+    CS.TotalVotes > 0
+ORDER BY 
+    CS.TotalVotes DESC;

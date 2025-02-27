@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(CASE WHEN ci.company_type_id IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY t.id) AS avg_company_involvement,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ci ON mc.company_type_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count, 
+        avg_company_involvement
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_count > 5 AND avg_company_involvement > 0.5
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    STRING_AGG(DISTINCT co.name, ', ') AS companies_involved
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = fm.title LIMIT 1)
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+GROUP BY 
+    fm.title, fm.production_year, fm.actor_count
+ORDER BY 
+    fm.production_year DESC, fm.actor_count DESC;

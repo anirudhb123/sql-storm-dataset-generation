@@ -1,0 +1,55 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        mt.kind AS movie_kind
+    FROM title t
+    LEFT JOIN aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN cast_info cc ON t.id = cc.movie_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN kind_type mt ON t.kind_id = mt.id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year, mt.kind
+),
+company_usage AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.id) AS usage_count
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id, c.name, ct.kind
+),
+summary AS (
+    SELECT 
+        md.movie_id,
+        md.movie_title,
+        md.production_year,
+        md.aka_names,
+        md.cast_count,
+        md.keywords,
+        cu.company_name,
+        cu.company_type,
+        cu.usage_count
+    FROM movie_details md
+    LEFT JOIN company_usage cu ON md.movie_id = cu.movie_id
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    aka_names,
+    cast_count,
+    keywords,
+    company_name,
+    company_type,
+    usage_count
+FROM summary
+ORDER BY production_year DESC, cast_count DESC, movie_title ASC;

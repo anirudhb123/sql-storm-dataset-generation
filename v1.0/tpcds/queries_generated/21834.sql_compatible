@@ -1,0 +1,58 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT ws_item_sk, 
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+), 
+top_items AS (
+    SELECT i.i_item_id,
+           i.i_item_desc,
+           is.total_quantity,
+           is.total_profit,
+           RANK() OVER (ORDER BY is.total_profit DESC) AS item_rank
+    FROM item i
+    JOIN item_sales is ON i.i_item_sk = is.ws_item_sk
+    WHERE is.total_profit > 0
+), 
+holiday_dates AS (
+    SELECT d.d_date
+    FROM date_dim d
+    WHERE d.d_holiday = 'Y'
+), 
+store_sales_data AS (
+    SELECT ss.ss_sold_date_sk,
+           SUM(ss.ss_net_profit) AS store_net_profit
+    FROM store_sales ss
+    JOIN holiday_dates hd ON ss.ss_sold_date_sk = hd.d_date
+    GROUP BY ss.ss_sold_date_sk
+),
+combined_sales AS (
+    SELECT t.item_rank,
+           t.i_item_id,
+           t.i_item_desc,
+           COALESCE(ss.store_net_profit, 0) AS total_store_net_profit,
+           t.total_profit
+    FROM top_items t
+    LEFT JOIN store_sales_data ss ON ss.ss_sold_date_sk = (
+        SELECT MAX(ss_sold_date_sk) FROM store_sales WHERE ss_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_net_profit > 0)
+        AND ss.ss_net_profit > (
+            SELECT MAX(total_profit) FROM top_items WHERE item_rank = t.item_rank
+        )
+    )
+)
+SELECT item_rank, 
+       i_item_id, 
+       i_item_desc,
+       total_store_net_profit,
+       total_profit,
+       CASE 
+           WHEN total_profit IS NULL THEN 'Profit Not Recorded' 
+           WHEN total_profit > 1000 THEN 'High Profit'
+           ELSE 'Low Profit' 
+       END AS profit_category
+FROM combined_sales
+WHERE total_store_net_profit > 0 OR (total_profit IS NULL AND item_rank <= 10)
+ORDER BY item_rank
+FETCH FIRST 50 ROWS ONLY;

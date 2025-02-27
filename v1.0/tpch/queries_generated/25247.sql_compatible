@@ -1,0 +1,27 @@
+
+SELECT
+    CONCAT('Supplier Name: ', s.s_name, ' | Part Name: ', p.p_name, ' | Available Quantity: ', ps.ps_availqty, ' | Supply Cost: ', ps.ps_supplycost) AS SupplierPartInfo,
+    SUBSTRING(s.s_comment, 1, CHAR_LENGTH(s.s_comment) - CHAR_LENGTH(REPLACE(s.s_comment, ' ', '')) + 1) AS ShortComment,
+    CHAR_LENGTH(p.p_comment) AS CommentLength,
+    TRIM(UPPER(p.p_type)) AS FormattedPartType
+FROM
+    partsupp ps
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE
+    ps.ps_availqty > 10 
+    AND s.s_acctbal > 1000.00
+GROUP BY
+    s.s_name,
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    s.s_comment,
+    p.p_comment,
+    p.p_type
+ORDER BY
+    p.p_brand DESC,
+    CHAR_LENGTH(s.s_name) ASC
+LIMIT 50;

@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentTotal,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteTotal
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.CommentTotal,
+    rp.VoteTotal,
+    rp.Author,
+    pt.Name AS PostType,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top' 
+        ELSE 'Others' 
+    END AS RankCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    PostTypes pt ON rp.PostId = pt.Id
+WHERE 
+    rp.Rank <= 10 OR (rp.Rank > 10 AND rp.VoteTotal > 2)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

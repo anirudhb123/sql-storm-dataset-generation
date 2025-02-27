@@ -1,0 +1,60 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+), 
+QualifiedActors AS (
+    SELECT 
+        ak.name,
+        cm.name AS company_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cm ON mc.company_id = cm.id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name, cm.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+), 
+DescriptiveMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        GROUP_CONCAT(DISTINCT kw.keyword) AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        t.title, t.production_year
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    qa.name AS actor_name,
+    qa.company_name,
+    dm.keywords
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    QualifiedActors qa ON rt.rank_per_year <= 3
+LEFT JOIN 
+    DescriptiveMovies dm ON rt.title = dm.title
+WHERE 
+    qa.name IS NOT NULL
+ORDER BY 
+    rt.production_year DESC, rt.title;

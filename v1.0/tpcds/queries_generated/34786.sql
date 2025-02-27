@@ -1,0 +1,51 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY ss_sold_date_sk DESC) AS sales_rank
+    FROM store_sales
+    GROUP BY s_store_sk, ss_sold_date_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+recent_sales AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_web_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws_bill_customer_sk
+)
+SELECT
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    COALESCE(ss.total_sales, 0) AS total_store_sales,
+    COALESCE(rs.total_web_sales, 0) AS total_web_sales,
+    CASE
+        WHEN ci.cd_purchase_estimate > 5000 THEN 'High Value'
+        WHEN ci.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_segment,
+    DENSE_RANK() OVER (ORDER BY COALESCE(ss.total_sales, 0) DESC) AS sales_rank
+FROM customer_info ci
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.s_store_sk
+LEFT JOIN recent_sales rs ON ci.c_customer_sk = rs.ws_bill_customer_sk
+WHERE ci.income_band IS NOT NULL OR ci.cd_marital_status IS NOT NULL
+ORDER BY customer_segment, total_store_sales DESC;

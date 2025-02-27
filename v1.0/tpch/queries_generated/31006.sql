@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 
+           0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PriceSummary AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_available
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate > DATEADD(month, -3, GETDATE())
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+)
+SELECT r.r_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       COUNT(DISTINCT od.o_orderkey) AS order_count,
+       SUM(ps.avg_supplycost) AS total_avg_supplycost,
+       SUM(ps.total_available) AS total_part_available
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN OrderDetails od ON sh.s_nationkey = od.o_orderkey
+LEFT JOIN PriceSummary ps ON sh.s_suppkey = ps.p_partkey
+WHERE sh.level <= 2 AND r.r_comment IS NOT NULL
+GROUP BY r.r_name
+ORDER BY supplier_count DESC, order_count DESC;
+

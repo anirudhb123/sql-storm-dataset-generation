@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn,
+        ws_item_sk,
+        ws_sold_date_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL AND ws_sales_price > 0
+),
+HighestReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_return_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        cr_item_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        r.ws_item_sk,
+        r.ws_sales_price,
+        r.ws_quantity,
+        COALESCE(h.total_returns, 0) AS total_returns
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        HighestReturns h ON r.ws_item_sk = h.cr_item_sk
+    WHERE 
+        r.rn = 1
+),
+AggregatedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_revenue,
+        SUM(total_returns) AS total_returns
+    FROM 
+        SalesAndReturns
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    s.i_item_id,
+    a.total_revenue,
+    a.total_returns,
+    CASE 
+        WHEN a.total_returns > 0 THEN (a.total_revenue / NULLIF(a.total_returns, 0)) 
+        ELSE NULL 
+    END AS revenue_per_return,
+    CONCAT('Item ID: ', CAST(s.i_item_id AS VARCHAR), ' | Revenue: ', COALESCE(a.total_revenue, 0.00), ' | Returns: ', COALESCE(a.total_returns, 0)) AS detailed_report
+FROM 
+    item s
+LEFT JOIN 
+    AggregatedSales a ON s.i_item_sk = a.ws_item_sk
+WHERE 
+    s.i_current_price >= 10.00
+ORDER BY 
+    revenue_per_return DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,35 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+),
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY l.l_partkey
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, COALESCE(as.total_revenue, 0) AS total_revenue
+    FROM part p
+    LEFT JOIN AggregatedSales as ON p.p_partkey = as.l_partkey
+    WHERE p.p_size BETWEEN 10 AND 30
+),
+RankedParts AS (
+    SELECT tp.p_partkey, tp.p_name, tp.total_revenue,
+           RANK() OVER (ORDER BY tp.total_revenue DESC) AS revenue_rank
+    FROM TopParts tp
+    WHERE tp.total_revenue > 0
+)
+SELECT rh.s_name AS supplier_name, rp.p_name AS part_name, rp.total_revenue
+FROM RankedParts rp
+JOIN SupplierHierarchy sh ON sh.s_acctbal > 5000
+JOIN partsupp ps ON ps.ps_partkey = rp.p_partkey
+JOIN supplier rh ON ps.ps_suppkey = rh.s_suppkey
+WHERE rp.revenue_rank <= 10 OR rh.s_comment IS NOT NULL
+ORDER BY rp.total_revenue DESC, rh.s_name;

@@ -1,0 +1,37 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY ws.web_site_sk
+), CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(*) AS total_returns
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+), StoreSales AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_store_profit
+    FROM store_sales
+    WHERE ss_quantity > 1 -- Exclude single item sales
+    GROUP BY ss_store_sk
+)
+SELECT 
+    ca.ca_country,
+    ca.ca_state,
+    sa.total_sales,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+    ss.total_store_profit
+FROM customer_address ca
+LEFT JOIN RankedSales sa ON ca.ca_address_sk = sa.web_site_sk
+LEFT JOIN CustomerReturns cr ON ca.ca_address_sk = cr.wr_returning_customer_sk
+FULL OUTER JOIN StoreSales ss ON ca.ca_address_sk = ss.ss_store_sk
+WHERE (sa.total_sales IS NOT NULL OR cr.total_return_amt IS NOT NULL OR ss.total_store_profit IS NOT NULL)
+ORDER BY ca.ca_country, total_sales DESC, total_return_amt DESC, ss.total_store_profit DESC;

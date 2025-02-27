@@ -1,0 +1,33 @@
+WITH SupplierCosts AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+RegionStats AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT n.n_nationkey) AS num_nations, SUM(s.s_acctbal) AS total_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey
+    FROM SupplierCosts sc
+    WHERE sc.total_cost > (SELECT AVG(total_cost) FROM SupplierCosts)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT rs.r_regionkey, rs.num_nations, rs.total_acctbal, 
+       c.order_count, c.total_spent
+FROM RegionStats rs
+JOIN HighValueSuppliers hvs ON rs.r_regionkey = 
+    (SELECT n.n_regionkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = hvs.s_suppkey)
+JOIN CustomerOrders c ON c.c_custkey IN 
+    (SELECT o.o_custkey FROM orders o WHERE o.o_orderstatus = 'O')
+ORDER BY rs.r_regionkey, c.total_spent DESC
+LIMIT 100;

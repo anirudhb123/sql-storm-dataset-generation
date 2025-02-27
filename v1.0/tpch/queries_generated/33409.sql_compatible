@@ -1,0 +1,79 @@
+
+WITH RECURSIVE RecursiveCTE AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        1 AS level
+    FROM
+        nation n
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+
+    UNION ALL
+
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        r.r_name,
+        rcte.level + 1
+    FROM
+        nation n
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN
+        RecursiveCTE rcte ON n.n_nationkey = rcte.n_nationkey
+    WHERE
+        rcte.level < 3
+),
+AggregatedCosts AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * p.p_retailprice) AS total_cost
+    FROM
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        ps.ps_partkey
+),
+FilteredOrders AS (
+    SELECT
+        o.o_custkey,
+        SUM(o.o_totalprice) AS total_orders
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY
+        o.o_custkey
+)
+SELECT
+    c.c_custkey,
+    c.c_name,
+    COALESCE(fo.total_orders, 0) AS total_orders,
+    COALESCE(ac.total_cost, 0) AS total_cost,
+    rcte.region_name,
+    DENSE_RANK() OVER (PARTITION BY rcte.region_name ORDER BY COUNT(c.c_custkey) DESC) AS cust_rank
+FROM
+    customer c
+LEFT JOIN
+    FilteredOrders fo ON c.c_custkey = fo.o_custkey
+LEFT JOIN
+    AggregatedCosts ac ON c.c_nationkey = ac.ps_partkey
+FULL OUTER JOIN
+    RecursiveCTE rcte ON c.c_nationkey = rcte.n_nationkey
+WHERE
+    c.c_acctbal IS NOT NULL
+    AND (c.c_mktsegment = 'BUILDING' OR c.c_mktsegment IS NULL)
+GROUP BY
+    c.c_custkey,
+    c.c_name,
+    fo.total_orders,
+    ac.total_cost,
+    rcte.region_name
+ORDER BY
+    total_orders DESC,
+    total_cost ASC
+LIMIT 100;

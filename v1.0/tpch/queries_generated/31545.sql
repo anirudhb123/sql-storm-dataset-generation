@@ -1,0 +1,62 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        l_orderkey
+),
+TopNations AS (
+    SELECT 
+        n_name,
+        SUM(s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE '%Europe%')
+    GROUP BY 
+        n_name
+    HAVING 
+        SUM(s_acctbal) > 50000
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS part_sales
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        o.o_orderdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(ps.part_sales, 0) AS part_sales,
+    COALESCE(ts.total_acctbal, 0) AS supplier_total_acctbal,
+    ns.n_name
+FROM 
+    PartSales ps
+FULL OUTER JOIN 
+    TopNations ts ON ps.part_sales > ts.total_acctbal
+LEFT JOIN 
+    supplier s ON s.s_suppkey = (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = ps.p_partkey LIMIT 1)
+LEFT JOIN 
+    nation ns ON s.s_nationkey = ns.n_nationkey
+WHERE 
+    ps.part_sales IS NOT NULL OR ts.total_acctbal IS NOT NULL
+ORDER BY 
+    COALESCE(ps.part_sales, 0) DESC, ns.n_name;
+

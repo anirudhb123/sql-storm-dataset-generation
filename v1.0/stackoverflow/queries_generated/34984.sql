@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ParentId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostScores AS (
+    SELECT
+        Ph.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1
+                 WHEN V.VoteTypeId = 3 THEN -1 
+                 ELSE 0 END) AS NetScore,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Posts Ph
+    LEFT JOIN 
+        Votes V ON V.PostId = Ph.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = Ph.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = Ph.OwnerUserId
+    GROUP BY 
+        Ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.Score,
+        PS.NetScore,
+        PS.CommentCount,
+        R.Level
+    FROM 
+        RecursivePostHierarchy R
+    LEFT JOIN 
+        PostScores PS ON R.PostId = PS.PostId
+    WHERE 
+        R.Level = 0
+    ORDER BY 
+        PS.NetScore DESC, R.CreationDate DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName AS OwnerName,
+    T.Title,
+    T.NetScore,
+    T.CommentCount,
+    COALESCE(B.Name, 'No Badge') AS BadgeName
+FROM 
+    TopPosts T
+LEFT JOIN 
+    Users U ON T.PostId = U.Id
+LEFT JOIN 
+    Badges B ON B.UserId = U.Id AND B.Class = 1
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    T.NetScore DESC, T.CommentCount DESC;

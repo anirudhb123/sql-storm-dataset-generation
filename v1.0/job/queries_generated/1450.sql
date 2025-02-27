@@ -1,0 +1,75 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) AS rank_by_cast_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+PopularActors AS (
+    SELECT 
+        ak.name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+MovieDetails AS (
+    SELECT 
+        at.title,
+        COALESCE(GROUP_CONCAT(DISTINCT ak.name), 'No actors') AS actors,
+        COALESCE(GROUP_CONCAT(DISTINCT mk.keyword), 'No keywords') AS keywords,
+        at.production_year,
+        mci.note AS company_note
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON at.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON at.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+    LEFT JOIN 
+        movie_info_idx mci ON at.id = mci.movie_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.id, at.title, at.production_year, mci.note
+)
+SELECT 
+    md.title,
+    md.actors,
+    md.keywords,
+    md.production_year,
+    (SELECT AVG(movie_count) FROM PopularActors) AS avg_popular_actor_movies,
+    CASE 
+        WHEN r.rank_by_cast_count IS NOT NULL AND r.rank_by_cast_count <= 3 THEN 'Top Cast'
+        ELSE 'Other'
+    END AS cast_rank
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RankedMovies r ON md.movie_id = r.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

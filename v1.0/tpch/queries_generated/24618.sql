@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2021-01-01' AND DATE '2021-12-31'
+), AggregatedSupplier AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.s_suppkey
+), CustomerNation AS (
+    SELECT 
+        c.c_custkey, 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_nationkey, n.n_name
+), TotalSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate <= CURRENT_DATE
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    SUM(a.total_avail_qty) AS total_available_quantity,
+    AVG(a.avg_supply_cost) AS average_supply_cost,
+    SUM(ts.net_sales) AS total_sales_amount,
+    COUNT(ro.o_orderkey) AS total_order_count
+FROM 
+    CustomerNation cn
+LEFT JOIN 
+    AggregatedSupplier a ON cn.c_custkey = a.s_suppkey
+LEFT JOIN 
+    TotalSales ts ON cn.c_custkey = ts.l_orderkey
+LEFT JOIN 
+    RankedOrders ro ON cn.c_custkey = ro.o_orderkey
+WHERE 
+    cn.orders_count > 0 OR ro.o_orderkey IS NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(a.total_avail_qty) IS NOT NULL
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10 OFFSET 5;

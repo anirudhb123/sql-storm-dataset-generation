@@ -1,0 +1,44 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS RankedPrice
+    FROM orders o
+),
+HighValueLineitems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_extendedprice,
+           CASE 
+               WHEN l.l_discount > 0.15 THEN 'High Discount'
+               ELSE 'Regular'
+           END AS DiscountCategory
+    FROM lineitem l
+    WHERE l.l_shippingdate >= TIMESTAMP '1998-10-01 12:34:56' - INTERVAL '1 year'
+)
+SELECT 
+    n.n_name AS NationName,
+    COUNT(DISTINCT c.c_custkey) AS TotalCustomers,
+    SUM(CASE 
+            WHEN l.DiscountCategory = 'High Discount' THEN l.l_extendedprice 
+            ELSE 0 
+        END) AS HighDiscountSales,
+    AVG(s.s_acctbal) AS AvgSupplierBalance,
+    MAX(o.o_totalprice) AS MaxOrderValue,
+    MIN(o.o_orderdate) AS FirstOrderDate
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN HighValueLineitems l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+WHERE o.o_orderstatus IN ('O', 'P')
+AND n.n_name IS NOT NULL
+GROUP BY n.n_name
+ORDER BY TotalCustomers DESC;

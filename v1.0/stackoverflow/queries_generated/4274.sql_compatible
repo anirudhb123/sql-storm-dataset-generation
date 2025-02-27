@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS RankByScore,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (2, 3)
+    WHERE 
+        P.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+        AND P.Score > 0
+),
+RecentBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    WHERE 
+        B.Date >= DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)
+    GROUP BY 
+        B.UserId
+),
+PostsWithBadges AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CreationDate,
+        RP.Score,
+        RB.BadgeCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        RecentBadges RB ON RP.OwnerUserId = RB.UserId
+)
+SELECT 
+    P.Title,
+    P.OwnerDisplayName,
+    P.Score,
+    COALESCE(P.BadgeCount, 0) AS BadgeCount,
+    CASE 
+        WHEN P.Score > 100 THEN 'High Performer'
+        WHEN P.Score BETWEEN 50 AND 100 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS PerformanceCategory,
+    (SELECT STRING_AGG(TAG.TagName, ', ') 
+     FROM Tags TAG 
+     WHERE TAG.WikiPostId = P.PostId) AS Tags
+FROM 
+    PostsWithBadges P
+WHERE 
+    P.RankByScore = 1
+ORDER BY 
+    P.Score DESC
+LIMIT 10;

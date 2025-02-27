@@ -1,0 +1,64 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COALESCE(COUNT(DISTINCT P.Id), 0) AS TotalPosts,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS TotalComments,
+        COALESCE(MAX(P.CreationDate), '1900-01-01') AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    LEFT JOIN Comments C ON C.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+PostPopularity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS Author,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(MAX(Ph.CreationDate), '1900-01-01') AS LastEditDate
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN PostHistory Ph ON Ph.PostId = P.Id
+    GROUP BY P.Id, P.Title, U.DisplayName, P.Score, P.ViewCount
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM UserStats U
+    WHERE U.TotalPosts > 5
+),
+PopularPosts AS (
+    SELECT 
+        P.PostId,
+        P.Title,
+        RANK() OVER (ORDER BY P.Score DESC, P.ViewCount DESC) AS PopularityRank
+    FROM PostPopularity P
+    WHERE P.CommentCount > 3
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation AS UserReputation,
+    P.Title AS PopularPostTitle,
+    P.Score AS PostScore,
+    P.CommentCount AS MidPostCommentCount,
+    U.LastPostDate,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = U.UserId) AS BadgeCount
+FROM TopUsers U
+JOIN PopularPosts P ON U.UserId = P.PostId
+WHERE U.ReputationRank <= 10 AND P.PopularityRank <= 20
+ORDER BY U.Reputation DESC, P.Score DESC
+LIMIT 10;

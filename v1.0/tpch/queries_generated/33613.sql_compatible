@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_nationkey, s_suppkey, s_name, s_address, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.n_nationkey, s.s_suppkey, s.s_name, s.s_address, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate <= DATE '1997-12-31'
+),
+SupplierStats AS (
+    SELECT n.n_nationkey, n.n_name, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           SUM(ps.ps_availqty) AS total_availqty
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name,
+    ss.avg_supplycost, 
+    ss.total_availqty,
+    SUM(oo.o_totalprice) AS total_order_value,
+    COUNT(DISTINCT oo.o_orderkey) AS order_count,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', s.s_address), '; ') AS supplier_details
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN SupplierStats ss ON n.n_nationkey = ss.n_nationkey
+LEFT JOIN RankedOrders oo ON ss.n_nationkey = oo.o_orderkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+GROUP BY r.r_name, ss.avg_supplycost, ss.total_availqty
+HAVING AVG(ss.total_availqty) > 1000 OR ss.avg_supplycost IS NULL
+ORDER BY total_order_value DESC
+LIMIT 10;

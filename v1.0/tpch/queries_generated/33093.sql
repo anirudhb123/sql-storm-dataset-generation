@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PartStatistics AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+AggregatedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerRankings AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(ps.total_available) AS total_parts_available,
+    SUM(a.total_revenue) AS total_order_revenue,
+    COUNT(DISTINCT c.c_custkey) AS distinct_customers,
+    COUNT(DISTINCT sh.s_suppkey) AS distinct_suppliers,
+    COUNT(DISTINCT p.p_partkey) AS distinct_parts
+FROM nation n
+LEFT JOIN PartStatistics ps ON n.n_nationkey = (SELECT DISTINCT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT s.s_suppkey FROM SupplierHierarchy sh))
+LEFT JOIN AggregatedOrders a ON a.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey))
+LEFT JOIN CustomerRankings c ON c.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT a.o_orderkey FROM AggregatedOrders a))
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE n.n_regionkey = 1
+GROUP BY n.n_name
+ORDER BY total_parts_available DESC, total_order_revenue DESC;

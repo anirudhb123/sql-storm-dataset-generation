@@ -1,0 +1,107 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_totalprice,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o_orderstatus ORDER BY o_totalprice DESC) AS rank
+    FROM 
+        orders
+    WHERE 
+        o_orderdate >= DATE '2022-01-01'
+        AND o_orderdate < DATE '2023-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s_suppkey,
+        COUNT(DISTINCT ps_partkey) AS distinct_parts,
+        SUM(ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp
+    GROUP BY 
+        s_suppkey
+),
+PartRevenue AS (
+    SELECT 
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2023-01-01'
+    GROUP BY 
+        l_partkey
+),
+ColorfulParts AS (
+    SELECT 
+        p_partkey,
+        p_name,
+        CASE 
+            WHEN p_size < 10 THEN 'Small'
+            WHEN p_size BETWEEN 10 AND 20 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category
+    FROM 
+        part
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+),
+CrossJoinPartRevenue AS (
+    SELECT 
+        cp.c_custkey,
+        cp.c_name,
+        COALESCE(pr.total_revenue, 0) AS total_revenue,
+        COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+        cp.order_count
+    FROM 
+        CustomerOrders cp
+    LEFT JOIN 
+        PartRevenue pr ON cp.order_count = pr.l_partkey
+    LEFT JOIN 
+        SupplierStats ss ON cp.order_count = ss.distinct_parts
+)
+SELECT 
+    r.o_orderkey,
+    r.o_totalprice,
+    r.o_orderdate,
+    CASE 
+        WHEN c.customer_count IS NULL THEN 'No Orders'
+        ELSE 'Orders Present'
+    END AS order_status,
+    COALESCE(cp.total_revenue, 0) AS customer_revenue,
+    CASE 
+        WHEN cp.total_supply_cost > 100000 THEN 'High Supply Cost'
+        ELSE 'Normal Supply Cost'
+    END AS supply_cost_category,
+    p.p_name,
+    p.size_category
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    CrossJoinPartRevenue cp ON r.o_orderkey = cp.c_custkey
+LEFT JOIN 
+    ColorfulParts p ON r.o_orderkey = p.p_partkey
+LEFT JOIN 
+    (SELECT 
+         o.o_custkey,
+         COUNT(DISTINCT o.o_orderkey) AS customer_count
+     FROM 
+         orders o
+     GROUP BY 
+         o.o_custkey) c ON r.o_orderkey = c.o_custkey
+WHERE 
+    r.rank <= 10
+ORDER BY 
+    r.o_totalprice DESC, cp.total_revenue ASC;

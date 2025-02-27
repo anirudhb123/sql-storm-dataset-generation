@@ -1,0 +1,62 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) as rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        keyword
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ac.actor_count,
+        CASE 
+            WHEN ac.actor_count > 10 THEN 'High'
+            WHEN ac.actor_count BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS actor_density
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        ActorCounts ac ON tm.id = ac.movie_id
+)
+SELECT 
+    fb.title,
+    fb.production_year,
+    COALESCE(fb.actor_count, 0) AS actor_count,
+    fb.actor_density
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.actor_density = 'High' 
+    OR (fb.production_year = 2000 AND fb.actor_density = 'Medium')
+ORDER BY 
+    fb.production_year DESC, 
+    fb.title ASC;

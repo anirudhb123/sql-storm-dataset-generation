@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+),
+SupplierPartCounts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    co.o_orderkey,
+    co.total_line_item_value,
+    co.line_item_count,
+    r.s_name AS top_supplier,
+    sc.supplier_count
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    RankedSuppliers r ON r.rank = 1 AND r.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            part p ON ps.ps_partkey = p.p_partkey 
+        WHERE 
+            p.p_size > 10
+    )
+LEFT JOIN 
+    SupplierPartCounts sc ON sc.ps_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_shipdate < CURRENT_DATE - INTERVAL '30 days'
+    )
+WHERE 
+    co.line_item_count > 5
+ORDER BY 
+    co.total_line_item_value DESC;

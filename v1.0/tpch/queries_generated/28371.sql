@@ -1,0 +1,33 @@
+SELECT 
+    s.n_nationkey,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE 
+            WHEN o.o_orderstatus = 'F' THEN 1 
+            ELSE 0 
+        END) AS fulfilled_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(LENGTH(p.p_name)) AS avg_part_name_length,
+    GROUP_CONCAT(DISTINCT p.p_type ORDER BY p.p_type SEPARATOR ', ') AS unique_part_types
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    customer c ON s.s_suppkey = c.c_nationkey
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    s.s_acctbal > 0
+GROUP BY 
+    s.n_nationkey, n.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 
+    10;

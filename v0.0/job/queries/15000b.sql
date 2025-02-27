@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.phonetic_code < 'T6234' AND n.surname_pcode > 'Z235' AND mi_idx.info IN ('...12..412', '..0012.300', '.1..112.12', '0.0.110141', '00..210200', '1...2.112.', '211000.001', '310..00..3', '400..0.011', '5....1..22') AND n.name_pcode_nf IS NOT NULL;

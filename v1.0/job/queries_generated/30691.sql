@@ -1,0 +1,76 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 as level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+DirectorAndRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.role_id,
+        r.role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, ci.role_id, r.role
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(d.role, 'Unknown') AS director_role,
+        COALESCE(d.role_count, 0) AS role_count,
+        mh.level,
+        CASE 
+            WHEN mw.info IS NOT NULL THEN mw.info
+            ELSE 'No additional information'
+        END AS additional_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        DirectorAndRoles d ON m.id = d.movie_id
+    LEFT JOIN 
+        movie_info mw ON mw.movie_id = m.id AND mw.info_type_id = (SELECT id FROM info_type WHERE info = 'Duration')
+    LEFT JOIN 
+        MovieHierarchy mh ON m.id = mh.movie_id
+)
+SELECT 
+    mi.movie_id,
+    mi.title,
+    mi.production_year,
+    mi.director_role,
+    mi.role_count,
+    mh.level,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    MovieInfo mi
+JOIN 
+    movie_keyword mk ON mi.movie_id = mk.movie_id
+JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+GROUP BY 
+    mi.movie_id, mi.title, mi.director_role, mi.role_count, mh.level
+ORDER BY 
+    mi.production_year DESC, mi.title;

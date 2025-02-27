@@ -1,0 +1,45 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_id,
+        ca_street_name,
+        ca_city,
+        ca_state,
+        ca_zip,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address
+    FROM customer_address
+),
+Demographics AS (
+    SELECT
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count,
+        cd_dep_employed_count,
+        cd_dep_college_count,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS rnk
+    FROM customer_demographics
+),
+AggregatedData AS (
+    SELECT
+        ad.full_address,
+        d.cd_gender,
+        d.cd_purchase_estimate,
+        COUNT(DISTINCT d.cd_demo_sk) AS demographic_variation
+    FROM AddressDetails ad
+    JOIN customer c ON c.c_current_addr_sk = ad.ca_address_sk
+    JOIN Demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    GROUP BY ad.full_address, d.cd_gender, d.cd_purchase_estimate
+)
+SELECT
+    full_address,
+    cd_gender,
+    cd_purchase_estimate,
+    demographic_variation,
+    RANK() OVER (ORDER BY demographic_variation DESC) AS address_rank
+FROM AggregatedData
+WHERE demographic_variation > 1
+ORDER BY address_rank
+LIMIT 100;

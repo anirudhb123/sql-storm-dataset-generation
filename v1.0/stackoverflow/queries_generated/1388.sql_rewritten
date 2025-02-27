@@ -1,0 +1,68 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM
+        Posts p
+        LEFT JOIN (
+            SELECT 
+                PostId,
+                SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+            FROM 
+                Votes
+            GROUP BY 
+                PostId
+        ) pv ON p.Id = pv.PostId
+        LEFT JOIN (
+            SELECT 
+                PostId,
+                COUNT(*) AS CommentCount
+            FROM 
+                Comments
+            GROUP BY 
+                PostId
+        ) pc ON p.Id = pc.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS BadgeCount,
+        SUM(ps.UpVotes) AS TotalUpVotes,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.UpVotes) DESC) AS UserRank
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+        JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    t.BadgeCount,
+    CASE 
+        WHEN t.UserRank <= 10 THEN 'Top User'
+        ELSE 'Regular User'
+    END AS UserType,
+    COUNT(ps.PostId) AS PostsCreated,
+    SUM(ps.UpVotes) AS TotalUpVotes,
+    SUM(ps.CommentCount) AS TotalComments,
+    MAX(ps.RecentPostRank) AS HighestPostRank
+FROM 
+    TopUsers t
+    JOIN PostStats ps ON t.UserId = ps.OwnerUserId
+GROUP BY 
+    t.UserId, t.DisplayName, t.BadgeCount, t.UserRank
+HAVING 
+    COUNT(ps.PostId) > 5
+ORDER BY 
+    TotalUpVotes DESC, PostsCreated DESC;

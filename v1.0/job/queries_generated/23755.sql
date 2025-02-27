@@ -1,0 +1,77 @@
+WITH ranked_movies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast_size
+    FROM
+        aka_title t
+    LEFT JOIN cast_info ci ON t.id = ci.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+person_roles AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        rt.role,
+        COUNT(*) AS role_count
+    FROM
+        cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id, ci.person_id, rt.role
+),
+distinct_names AS (
+    SELECT DISTINCT
+        an.id AS aka_id,
+        an.name
+    FROM
+        aka_name an
+    WHERE
+        an.name IS NOT NULL AND an.name != ''
+),
+movies_with_keywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+companies_info AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM
+        movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(ci.company_names, 'No Companies') AS company_names,
+    COALESCE(pr.role_count, 0) AS total_roles,
+    dr.name AS distinct_aka_name
+FROM
+    ranked_movies rm
+LEFT JOIN movies_with_keywords mk ON rm.movie_id = mk.movie_id
+LEFT JOIN companies_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN person_roles pr ON rm.movie_id = pr.movie_id
+LEFT JOIN distinct_names dr ON rm.movie_id IN (
+    SELECT movie_id FROM cast_info WHERE person_id IN (
+        SELECT person_id FROM aka_name WHERE id = dr.aka_id
+    )
+)
+WHERE
+    rm.rank_by_cast_size <= 5 -- focusing on top 5 based on cast size per year
+ORDER BY
+    rm.production_year DESC,
+    rm.title;

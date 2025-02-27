@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_actors AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.surname_pcode) AS actor_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+movies_with_info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title, 
+        t.production_year,
+        COALESCE(mk.keyword, 'Unknown') AS main_keyword,
+        COUNT(DISTINCT ca.actor_name) AS num_actors
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_actors ca ON t.id = ca.movie_id
+    WHERE 
+        t.production_year >= 2000 
+        AND (mi.info IS NOT NULL OR mk.keyword IS NOT NULL)
+    GROUP BY 
+        t.id, t.title, t.production_year, mk.keyword
+),
+ranked_movies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY num_actors DESC, production_year DESC) AS actor_rank
+    FROM 
+        movies_with_info
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.main_keyword,
+    r.num_actors,
+    CASE 
+        WHEN r.num_actors > 10 THEN 'Ensemble Cast' 
+        WHEN r.num_actors IS NULL THEN 'No Actors'
+        ELSE 'Small Cast'
+    END AS cast_description,
+    CASE 
+        WHEN r.actor_rank <= 5 THEN 'Top Ranked Movie'
+        ELSE 'Lower Ranked Movie'
+    END AS ranking_description
+FROM 
+    ranked_movies r
+WHERE 
+    r.production_year IS NOT NULL
+    AND (r.production_year <= EXTRACT(YEAR FROM CURRENT_DATE) OR r.production_year IS NULL)
+ORDER BY 
+    r.actor_rank, r.production_year DESC 
+LIMIT 100;

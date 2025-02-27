@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    pc.kind AS production_company,
+    k.keyword AS movie_keyword,
+    COUNT(DISTINCT c.person_id) AS num_actors,
+    AVG(mi.info) AS average_rating
+FROM 
+    title t
+JOIN 
+    cast_info c ON t.id = c.movie_id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    ct.kind = 'Production'
+    AND t.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    t.id, a.name, pc.kind, k.keyword
+ORDER BY 
+    num_actors DESC, average_rating DESC
+LIMIT 10;

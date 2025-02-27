@@ -1,0 +1,57 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        c.kind AS company_type,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year, k.keyword, c.kind
+),
+
+GenreInfo AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(DISTINCT keyword, ', ') AS genres
+    FROM 
+        MovieDetails
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    gi.genres,
+    MAX(m.cast_names) AS cast_names,
+    COUNT(DISTINCT m.movie_id) AS total_movies,
+    COUNT(DISTINCT gm.company_type) AS total_company_types
+FROM 
+    MovieDetails m
+JOIN 
+    GenreInfo gi ON m.movie_id = gi.movie_id
+JOIN 
+    movie_companies gm ON m.movie_id = gm.movie_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year, gi.genres
+ORDER BY 
+    m.production_year DESC, total_movies DESC
+LIMIT 10;

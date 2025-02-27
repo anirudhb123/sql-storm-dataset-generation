@@ -1,0 +1,56 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+SELECT 
+    u.DisplayName, 
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS AnswerCount,
+    SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveAnswers,
+    AVG(v.BountyAmount) AS AverageBounty,
+    MAX(b.Name) AS HighestBadge,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2 
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id AND v.VoteTypeId = 8 
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    Posts pt ON pt.Id = p.ParentId 
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(pt.Tags, ','))) 
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT p.Id) > 5 
+ORDER BY 
+    u.Reputation DESC,
+    AnswerCount DESC
+LIMIT 10;

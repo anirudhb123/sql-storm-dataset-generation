@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.OwnerUserId,
+        PH.Level + 1 AS Level
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursivePostHierarchy PH ON A.ParentId = PH.PostId
+),
+PostVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+RecentPostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Comments C
+    WHERE 
+        C.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        C.PostId
+),
+PostHistoryChanges AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RPH.PostId,
+    RPH.Title,
+    U.DisplayName,
+    COALESCE(PV.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(PV.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(RPC.CommentCount, 0) AS RecentCommentCount,
+    COALESCE(PHC.CloseReopenCount, 0) AS CloseReopenActivity,
+    RPH.Level,
+    UR.ReputationRank,
+    UR.Reputation
+FROM 
+    RecursivePostHierarchy RPH
+LEFT JOIN 
+    PostVotes PV ON RPH.PostId = PV.PostId
+LEFT JOIN 
+    RecentPostComments RPC ON RPH.PostId = RPC.PostId
+LEFT JOIN 
+    PostHistoryChanges PHC ON RPH.PostId = PHC.PostId
+JOIN 
+    Users U ON RPH.OwnerUserId = U.Id
+JOIN 
+    UserReputation UR ON U.Id = UR.UserId
+WHERE 
+    (UR.Reputation > 1000 OR RPH.Level > 1)  -- Criteria for interesting posts
+ORDER BY 
+    UR.Reputation DESC,
+    RPH.Level ASC;

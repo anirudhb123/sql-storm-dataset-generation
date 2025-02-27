@@ -1,0 +1,66 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+), 
+CloseReasonSummary AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(CRT.Name, ', ') AS CloseReasons
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CRT ON PH.Comment::INT = CRT.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.UserId
+), 
+ActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        R.ReputationRank,
+        R.QuestionCount,
+        R.TotalUpVotes,
+        R.TotalDownVotes,
+        COALESCE(CS.CloseReasonCount, 0) AS CloseReasonCount,
+        COALESCE(CS.CloseReasons, 'None') AS CloseReasons
+    FROM UserReputation R
+    LEFT JOIN CloseReasonSummary CS ON R.UserId = CS.UserId
+    WHERE R.QuestionCount > 10 AND R.ReputationRank <= 100
+)
+SELECT 
+    AU.UserId,
+    AU.DisplayName,
+    AU.ReputationRank,
+    AU.QuestionCount,
+    AU.TotalUpVotes,
+    AU.TotalDownVotes,
+    AU.CloseReasonCount,
+    AU.CloseReasons,
+    AVG(DATEDIFF(day, P.CreationDate, GETDATE())) AS AvgPostAgeInDays
+FROM ActiveUsers AU
+JOIN Posts P ON AU.UserId = P.OwnerUserId
+WHERE P.PostTypeId = 1
+GROUP BY 
+    AU.UserId,
+    AU.DisplayName,
+    AU.ReputationRank,
+    AU.QuestionCount,
+    AU.TotalUpVotes,
+    AU.TotalDownVotes,
+    AU.CloseReasonCount,
+    AU.CloseReasons
+HAVING 
+    AVG(DATEDIFF(day, P.CreationDate, GETDATE())) < 30 AND 
+    AU.CloseReasonCount < 3
+ORDER BY 
+    AU.ReputationRank DESC, 
+    AU.TotalUpVotes DESC;

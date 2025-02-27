@@ -1,0 +1,69 @@
+
+WITH Customer_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+High_Value_Customers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_spent,
+        cs.order_count
+    FROM 
+        Customer_Sales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM Customer_Sales)
+),
+Item_Sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_sales_value
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+Promotion_Effectiveness AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.promo_id
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_spent,
+    hvc.order_count,
+    ie.total_quantity_sold,
+    ie.total_sales_value,
+    pe.p_promo_id,
+    pe.order_count AS promo_order_count,
+    pe.total_sales AS promo_sales_value
+FROM 
+    High_Value_Customers hvc
+CROSS JOIN 
+    Item_Sales ie
+CROSS JOIN 
+    Promotion_Effectiveness pe
+WHERE 
+    (hvc.order_count > 5 OR pe.order_count > 10)
+    AND (hvc.total_spent IS NOT NULL AND ie.total_sales_value IS NOT NULL)
+ORDER BY 
+    hvc.total_spent DESC, 
+    ie.total_quantity_sold DESC;

@@ -1,0 +1,98 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (6, 7) THEN 1 ELSE 0 END), 0) AS CloseReopenVotes,
+        COUNT(CASE WHEN P.Id IS NOT NULL THEN 1 END) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+ParentAnswers AS (
+    SELECT 
+        P.Id AS AnswerId,
+        P.ParentId,
+        P.Title,
+        (SELECT COUNT(*) 
+         FROM Comments C 
+         WHERE C.PostId = P.Id) AS CommentCount,
+        (SELECT COUNT(*) 
+         FROM Votes V 
+         WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpvoteCount
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 2
+        AND P.ParentId IS NOT NULL
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(H.EditCount, 0) AS EditCount,
+        PA.AnswerId,
+        PA.CommentCount,
+        PA.UpvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount 
+        FROM PostHistory 
+        WHERE PostHistoryTypeId IN (4, 5)
+        GROUP BY PostId
+    ) H ON P.Id = H.PostId
+    LEFT JOIN ParentAnswers PA ON P.Id = PA.ParentId
+    WHERE 
+        P.PostTypeId = 1 OR PA.ParentId IS NOT NULL
+),
+FinalBenchmark AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation, 
+        S.Upvotes - S.Downvotes AS NetVotes,
+        P.PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.EditCount,
+        P.CommentCount,
+        P.UpvoteCount,
+        CASE 
+            WHEN P.UpvoteCount > 10 THEN 'Highly Approved'
+            WHEN P.UpvoteCount BETWEEN 5 AND 10 THEN 'Moderately Approved'
+            ELSE 'Needs Improvement'
+        END AS ApprovalStatus
+    FROM 
+        UserEngagement S
+    JOIN 
+        Posts P ON P.OwnerUserId = S.UserId
+    WHERE 
+        P.LastActivityDate > now() - interval '1 month'
+)
+
+SELECT 
+    DisplayName,
+    Reputation, 
+    NetVotes,
+    ApprovalStatus,
+    COUNT(DISTINCT PostId) AS TotalPosts,
+    SUM(CASE WHEN ApprovalStatus = 'Highly Approved' THEN 1 ELSE 0 END) AS HighApprovalPosts,
+    AVG(ViewCount) AS AverageViews
+FROM 
+    FinalBenchmark
+GROUP BY 
+    DisplayName, Reputation, NetVotes, ApprovalStatus
+ORDER BY 
+    TotalPosts DESC, NetVotes DESC;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        py.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes py ON p.PostTypeId = py.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END), 0) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(p.Tags, '>'))) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 10
+),
+RecentChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        ARRAY_AGG(ph.Comment) AS Comments,
+        MIN(ph.CreationDate) AS FirstChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalScore,
+    u.TotalViews,
+    COUNT(DISTINCT p.PostId) AS PostsRanked,
+    COALESCE(rp.Title, 'No Top Post') AS TopPostTitle,
+    COALESCE(rp.Score, 0) AS TopPostScore,
+    COALESCE(rp.ViewCount, 0) AS TopPostViews,
+    ARRAY_AGG(DISTINCT tt.TagName) AS PopularTags,
+    SUM(COALESCE(rc.ChangeCount, 0)) AS RecentChangesCount
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.PostId AND rp.rn = 1
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = rp.PostId
+LEFT JOIN 
+    PopularTags tt ON TRUE
+LEFT JOIN 
+    RecentChanges rc ON rc.PostId = rp.PostId
+GROUP BY 
+    u.UserId, u.DisplayName
+HAVING 
+    SUM(u.TotalScore) > 0 OR COUNT(DISTINCT rp.PostId) > 0
+ORDER BY 
+    u.TotalScore DESC, u.TotalPosts DESC
+LIMIT 100;

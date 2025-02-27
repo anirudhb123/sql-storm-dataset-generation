@@ -1,0 +1,61 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        AVG(U.Reputation) AS AvgUserReputation
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%') 
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id AND V.VoteTypeId = 8 
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalBounty,
+        AvgUserReputation,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC, TotalBounty DESC) AS TagRank
+    FROM 
+        TagStatistics
+),
+RecentPostEdits AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS EditDate,
+        PH.UserDisplayName,
+        PH.Comment
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    ORDER BY 
+        PH.CreationDate DESC
+)
+SELECT 
+    TT.TagName,
+    TT.PostCount,
+    TT.TotalBounty,
+    TT.AvgUserReputation,
+    RPE.PostId,
+    RPE.Title,
+    RPE.CreationDate AS PostCreationDate,
+    RPE.EditDate,
+    RPE.UserDisplayName AS Editor,
+    RPE.Comment AS EditComment
+FROM 
+    TopTags TT
+LEFT JOIN 
+    RecentPostEdits RPE ON TT.TagRank <= 10 
+ORDER BY 
+    TT.TagRank;

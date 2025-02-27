@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        c.c_acctbal > 100 AND 
+        o.o_orderdate >= '2022-01-01'
+), 
+SupplierStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_suppkey
+), 
+CustomerPurchaseSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    ss.total_supply_cost,
+    cps.total_orders,
+    cps.total_spent,
+    COALESCE(cps.total_spent / NULLIF(cps.total_orders, 0), 0) AS avg_order_value
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierStats ss ON ss.ps_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+        WHERE l.l_orderkey = r.o_orderkey
+    )
+LEFT JOIN 
+    CustomerPurchaseSummary cps ON cps.c_custkey = r.o_orderkey
+WHERE 
+    r.rn = 1
+AND 
+    r.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2
+    )
+ORDER BY 
+    r.o_totalprice DESC
+LIMIT 100;

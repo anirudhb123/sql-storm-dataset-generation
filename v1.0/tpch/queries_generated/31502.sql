@@ -1,0 +1,41 @@
+WITH RECURSIVE NationwideSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, r.r_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name = 'AMERICA'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, r.r_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name <> 'AMERICA'
+    AND s.s_acctbal > 1000
+),
+SupplierParts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, 
+           p.p_name, p.p_brand, p.p_type, p.p_size, p.p_retailprice
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS customer_count,
+           ROW_NUMBER() OVER (PARTITION BY l.l_returnflag ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, s.s_name, SUM(os.total_revenue) AS total_revenue
+    FROM NationwideSupplier s
+    LEFT JOIN OrderSummary os ON s.s_suppkey = os.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT sp.p_name, sp.p_brand, sr.s_name, sr.total_revenue
+FROM SupplierParts sp
+JOIN SupplierRevenue sr ON sp.ps_suppkey = sr.s_suppkey
+WHERE sp.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+ORDER BY sr.total_revenue DESC
+LIMIT 10;

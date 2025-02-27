@@ -1,0 +1,83 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+), TagUsage AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS UsageCount
+    FROM 
+        Tags t
+        LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        t.Id, t.TagName
+), PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditSuggestions
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+), RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank,
+        JSON_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+        JOIN Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        p.Id, p.OwnerUserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.LastAccessDate,
+    COALESCE(us.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(us.DownVotes, 0) AS TotalDownVotes,
+    us.PostCount AS TotalPosts,
+    phs.CloseActions AS CloseActionCount,
+    phs.DeleteActions AS DeleteActionCount,
+    phs.EditSuggestions AS EditSuggestionCount,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.PostRank,
+    rp.Tags
+FROM 
+    Users u
+    LEFT JOIN UserVoteStats us ON u.Id = us.UserId
+    LEFT JOIN PostHistorySummary phs ON phs.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id
+    )
+    LEFT JOIN RankedPosts rp ON rp.PostRank = 1 AND rp.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id
+    )
+WHERE 
+    u.Reputation > 1000
+ORDER BY 
+    u.Reputation DESC, 
+    rp.Score DESC
+LIMIT 100;

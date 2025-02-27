@@ -1,0 +1,47 @@
+
+WITH RECURSIVE region_supplier AS (
+    SELECT r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.n_nationkey
+    WHERE s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.n_nationkey
+    INNER JOIN region_supplier rs ON rs.r_regionkey = r.r_regionkey
+    WHERE s.s_acctbal > 500.00 AND s.s_acctbal < 1500.00
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+combined_data AS (
+    SELECT rs.r_name, COUNT(DISTINCT rs.s_suppkey) AS supplier_count, SUM(os.total_revenue) AS region_revenue
+    FROM region_supplier rs
+    LEFT JOIN order_summary os ON rs.s_suppkey = os.o_orderkey
+    GROUP BY rs.r_name
+),
+ranked_data AS (
+    SELECT cd.r_name, cd.supplier_count, cd.region_revenue,
+           RANK() OVER (ORDER BY cd.region_revenue DESC) AS revenue_rank
+    FROM combined_data cd
+    WHERE cd.region_revenue IS NOT NULL
+)
+SELECT r.r_name,
+       COALESCE(rd.supplier_count, 0) AS supplier_count,
+       COALESCE(rd.region_revenue, 0) AS total_revenue,
+       CASE
+           WHEN rd.revenue_rank IS NULL THEN 'No revenue'
+           ELSE 'Ranked ' || CAST(rd.revenue_rank AS VARCHAR)
+       END AS revenue_rank
+FROM region r
+LEFT JOIN ranked_data rd ON r.r_name = rd.r_name
+WHERE r.r_name IS NOT NULL OR rd.region_revenue IS NOT NULL
+ORDER BY total_revenue DESC NULLS LAST;

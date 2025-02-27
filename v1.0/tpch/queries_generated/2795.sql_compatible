@@ -1,0 +1,46 @@
+
+WITH SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    spd.s_name,
+    spd.total_supply_cost,
+    spd.part_count,
+    cos.total_spent,
+    cos.order_count,
+    COALESCE(cos.customer_rank, 'N/A') AS customer_rank
+FROM 
+    SupplierPartDetails spd
+FULL OUTER JOIN 
+    CustomerOrderStats cos ON spd.s_suppkey = cos.c_custkey
+WHERE 
+    (spd.total_supply_cost IS NOT NULL AND spd.part_count > 5) OR 
+    (cos.order_count IS NOT NULL AND cos.total_spent > 10000)
+ORDER BY 
+    spd.total_supply_cost DESC, 
+    cos.total_spent DESC;

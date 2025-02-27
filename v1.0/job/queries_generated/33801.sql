@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        DISTINCT m.id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy h ON ml.movie_id = h.movie_id
+    WHERE 
+        h.level < 3
+),
+BaseCast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        AVG(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_role_presence
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type ci ON c.role_id = ci.id
+    GROUP BY 
+        c.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(bc.num_actors, 0) AS num_actors,
+        COALESCE(bc.avg_role_presence, 0) AS avg_role_presence,
+        (CASE 
+            WHEN mh.production_year BETWEEN 2000 AND 2010 THEN '2000s'
+            WHEN mh.production_year BETWEEN 2011 AND 2020 THEN '2010s'
+            ELSE 'Other'
+         END) AS decade
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        BaseCast bc ON mh.movie_id = bc.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (PARTITION BY md.decade ORDER BY md.num_actors DESC) AS actor_rank
+    FROM 
+        MovieDetails md
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.decade,
+    rm.num_actors,
+    rm.avg_role_presence,
+    rm.actor_rank
+FROM 
+    RankedMovies rm
+WHERE 
+    (rm.num_actors > 5 OR rm.avg_role_presence = 1)
+    AND rm.actor_rank <= 10
+ORDER BY 
+    rm.decade, 
+    rm.actor_rank;

@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        T.id AS movie_id,
+        T.title,
+        T.production_year,
+        C.kind AS cast_role,
+        COUNT(C.id) OVER (PARTITION BY T.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY T.id ORDER BY T.production_year DESC) AS rank
+    FROM 
+        aka_title AS T
+    LEFT JOIN 
+        cast_info AS C ON T.id = C.movie_id
+    WHERE 
+        T.production_year IS NOT NULL 
+        AND T.production_year >= 2000
+),
+FilteredMovies AS (
+    SELECT 
+        RM.movie_id,
+        RM.title,
+        RM.production_year,
+        RM.cast_count,
+        COALESCE(NULLIF(RM.cast_role, 'Unknown'), 'Supporting') AS role_category
+    FROM 
+        RankedMovies AS RM
+    WHERE 
+        RM.rank = 1
+        AND RM.cast_count > 0
+),
+MovieCompanies AS (
+    SELECT 
+        MC.movie_id,
+        CN.name AS company_name,
+        CT.kind AS company_type
+    FROM 
+        movie_companies AS MC
+    JOIN 
+        company_name AS CN ON MC.company_id = CN.id
+    JOIN 
+        company_type AS CT ON MC.company_type_id = CT.id
+    WHERE 
+        CN.name IS NOT NULL
+)
+
+SELECT 
+    FM.title,
+    FM.production_year,
+    FM.cast_count,
+    FM.role_category,
+    STRING_AGG(DISTINCT M.company_name, ', ') AS production_companies,
+    SUM(CASE WHEN MI.info_type_id = 1 THEN 1 ELSE 0 END) AS trivia_count,
+    ARRAY_AGG(DISTINCT K.keyword) AS keywords,
+    COUNT(DISTINCT CN.name) AS distinct_country_count
+FROM 
+    FilteredMovies AS FM
+LEFT JOIN 
+    MovieCompanies AS M ON FM.movie_id = M.movie_id
+LEFT JOIN 
+    movie_info AS MI ON FM.movie_id = MI.movie_id
+LEFT JOIN 
+    movie_keyword AS MK ON FM.movie_id = MK.movie_id
+LEFT JOIN 
+    keyword AS K ON MK.keyword_id = K.id
+LEFT JOIN 
+    company_name AS CN ON M.company_name = CN.name
+WHERE 
+    FM.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    FM.title, FM.production_year, FM.cast_count, FM.role_category
+HAVING 
+    COUNT(DISTINCT M.company_name) >= 2 
+ORDER BY 
+    FM.production_year DESC, FM.cast_count DESC;

@@ -1,0 +1,79 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_name,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_name,
+        s.s_acctbal,
+        sc.level + 1
+    FROM 
+        supply_chain sc
+    JOIN 
+        partsupp ps ON sc.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        sc.level < 3 AND ps.ps_availqty > 0
+), ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), order_details AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    sc.s_name,
+    sc.ps_supplycost,
+    COALESCE(od.total_revenue, 0) AS total_revenue,
+    od.lineitem_count,
+    r.r_name
+FROM 
+    supply_chain sc
+LEFT JOIN 
+    order_details od ON sc.p_partkey = od.o_orderkey
+JOIN 
+    nation n ON sc.n_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    sc.level <= 2
+  AND 
+    (sc.s_acctbal IS NOT NULL OR sc.s_acctbal < 1000)
+ORDER BY 
+    total_revenue DESC NULLS LAST
+LIMIT 100;

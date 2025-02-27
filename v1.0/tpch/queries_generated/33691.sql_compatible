@@ -1,0 +1,37 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, CAST(c_name AS VARCHAR(100)) AS full_path
+    FROM customer
+    WHERE c_acctbal > 1000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, CONCAT(CH.full_path, ' -> ', c.c_name)
+    FROM customer c
+    JOIN CustomerHierarchy CH ON c.c_nationkey = CH.c_custkey
+    WHERE c.c_acctbal > 500
+),
+TotalOrders AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS total_orders
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+),
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+RankedCustomers AS (
+    SELECT ch.c_custkey, ch.c_name, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_spent,
+           RANK() OVER (ORDER BY SUM(lo.l_extendedprice * (1 - lo.l_discount)) DESC) AS spend_rank
+    FROM CustomerHierarchy ch
+    JOIN lineitem lo ON ch.c_custkey = lo.l_orderkey
+    GROUP BY ch.c_custkey, ch.c_name
+)
+SELECT R.c_name, R.total_spent, COALESCE(T.total_orders, 0) AS total_orders,
+       COALESCE(S.total_cost, 0) AS supplier_cost
+FROM RankedCustomers R
+LEFT JOIN TotalOrders T ON R.c_custkey = T.o_custkey
+LEFT JOIN SupplierStats S ON R.c_custkey = S.ps_partkey
+WHERE R.spend_rank <= 10 AND R.total_spent > 100000
+ORDER BY R.total_spent DESC
+LIMIT 10;

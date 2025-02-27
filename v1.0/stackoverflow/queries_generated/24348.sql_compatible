@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL unnest(string_to_array(p.Tags, '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.ViewCount, p.CreationDate
+),
+PostVoting AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 
+                 WHEN vt.Name = 'DownMod' THEN -1 
+                 ELSE 0 END) AS VoteScore
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        pt.Name AS CloseReasonType
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        pt.Name LIKE '%closed%'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    COALESCE(rv.VoteScore, 0) AS VoteScore,
+    rp.CommentCount,
+    COUNT(DISTINCT cp.ClosedPostId) AS NumberOfCloseReasons,
+    STRING_AGG(DISTINCT cp.CloseReasonType, ', ') AS CloseReasonTypes,
+    CASE
+        WHEN rp.Rank <= 5 THEN 'Top Post'
+        WHEN rp.Rank <= 10 THEN 'Popular'
+        ELSE 'Other'
+    END AS PopularityCategory,
+    CASE 
+        WHEN COUNT(DISTINCT t.Id) > 5 THEN 'Diverse'
+        ELSE 'Focused'
+    END AS TagDiversity
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoting rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    Tags t ON t.TagName = ANY(rp.TagsList)
+WHERE 
+    rp.Rank <= 10 
+    AND (rp.ViewCount IS NOT NULL AND rp.ViewCount > 0)
+GROUP BY 
+    rp.PostId, rp.Title, rp.ViewCount, rp.OwnerDisplayName, 
+    rp.CreationDate, rv.VoteScore, rp.Rank, rp.TagsList
+ORDER BY 
+    rp.ViewCount DESC, PopularityCategory;

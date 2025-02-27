@@ -1,0 +1,49 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        COUNT(ws_item_sk) AS item_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM web_sales ws
+    WHERE ws_sold_date_sk BETWEEN 2450000 AND 2450050
+    GROUP BY ws.bill_customer_sk
+), 
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_ext_sales_price) AS warehouse_sales
+    FROM web_sales ws
+    JOIN inventory inv ON ws.ws_item_sk = inv.inv_item_sk
+    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    os.total_sales,
+    os.order_count,
+    os.item_count,
+    ws.warehouse_id,
+    ws.warehouse_sales
+FROM OrderSummary os
+JOIN CustomerDetails cd ON os.bill_customer_sk = cd.c_customer_sk
+LEFT JOIN WarehouseSales ws ON os.order_count > 5 AND os.total_sales > 1000  -- NULL logic inclusion
+WHERE cd.cd_credit_rating IS NOT NULL
+  AND (cd.cd_purchase_estimate BETWEEN 100 AND 10000 OR cd.cd_gender = 'F')  -- complicated predicate
+ORDER BY os.total_sales DESC
+LIMIT 100;
+

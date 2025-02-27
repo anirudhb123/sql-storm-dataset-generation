@@ -1,0 +1,53 @@
+
+WITH RECURSIVE demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_education_status, 
+           COALESCE(cd_purchase_estimate, 0) AS purchase_estimate,
+           case when cd_gender IS NULL then 'Unknown' else cd_gender end as gender_group
+    FROM customer_demographics
+    WHERE cd_gender IS NOT NULL
+    UNION ALL
+    SELECT cd_demo_sk, cd_gender, cd_marital_status, cd_education_status, 
+           COALESCE(cd_purchase_estimate, 0) * 1.1 AS purchase_estimate,
+           case when cd_gender IS NULL then 'Unknown' else cd_gender end as gender_group
+    FROM demographics
+    WHERE purchase_estimate < 1000
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_customer_id, c.c_first_name, c.c_last_name, 
+           COALESCE(c.c_birth_country, 'Not Specified') AS birth_country, 
+           d.purchase_estimate, d.gender_group
+    FROM customer c
+    LEFT JOIN demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+date_info AS (
+    SELECT d_date_sk, d_year, d_month_seq, d_day_name 
+    FROM date_dim
+    WHERE d_year = 2023
+),
+sales_info AS (
+    SELECT ws.ws_sold_date_sk, 
+           SUM(ws.ws_net_paid) AS total_sales
+    FROM web_sales ws
+    JOIN date_info di ON ws.ws_sold_date_sk = di.d_date_sk
+    GROUP BY ws.ws_sold_date_sk
+),
+numbered_sales AS (
+    SELECT total_sales, 
+           ROW_NUMBER() OVER (PARTITION BY total_sales ORDER BY total_sales DESC) AS rn
+    FROM sales_info
+),
+final_report AS (
+    SELECT ci.c_customer_id, ci.c_first_name, ci.c_last_name,
+           ci.birth_country, ci.purchase_estimate, ns.total_sales
+    FROM customer_info ci
+    LEFT JOIN numbered_sales ns ON ci.c_customer_id = CAST(ns.total_sales AS CHAR(16))
+    WHERE ci.purchase_estimate BETWEEN 100 AND 1000
+)
+SELECT fr.c_customer_id, fr.c_first_name, 
+       fr.c_last_name, fr.birth_country, 
+       SUM(fr.total_sales) OVER (PARTITION BY fr.birth_country) as country_sales,
+       CASE WHEN fr.total_sales IS NULL THEN 'No Sales' 
+            ELSE 'Customer Active' END AS status
+FROM final_report fr
+ORDER BY country_sales DESC, fr.c_last_name ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY

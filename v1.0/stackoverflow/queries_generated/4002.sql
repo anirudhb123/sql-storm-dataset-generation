@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+        AND p.ViewCount > 100
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY SUM(rp.UpVotes) DESC) AS UserRanking
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    tb.BadgeNames,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.UpVotes,
+    rp.DownVotes
+FROM 
+    TopUsers u
+LEFT JOIN 
+    UserBadges tb ON u.UserId = tb.UserId
+JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId
+WHERE 
+    u.UserRanking <= 10
+    AND rp.PostRank = 1
+ORDER BY 
+    rp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY;

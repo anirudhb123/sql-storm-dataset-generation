@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1,
+        CONCAT(mh.path, ' -> ', at.title) AS path
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5
+)
+
+SELECT 
+    ak.name,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT mt.title, ', ') AS titles,
+    SUM(CASE WHEN p.gender IS NULL THEN 1 ELSE 0 END) AS null_gender_count
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id AND p.info_type_id IN (SELECT id FROM info_type WHERE info = 'gender')
+LEFT JOIN 
+    movie_hierarchy mh ON mc.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mi.info_type_id IS NULL OR mi.note IS NOT NULL)
+    AND EXISTS (SELECT 1 FROM keyword k WHERE k.keyword = 'Drama' AND k.id IN (SELECT keyword_id FROM movie_keyword WHERE movie_id = mc.movie_id))
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 3
+ORDER BY 
+    movie_count DESC, ak.name ASC
+LIMIT 10;

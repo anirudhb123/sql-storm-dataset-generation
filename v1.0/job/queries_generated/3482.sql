@@ -1,0 +1,66 @@
+WITH MovieAggregate AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT c.person_id) AS num_cast_members,
+        COUNT(DISTINCT mk.keyword_id) AS num_keywords,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS num_cast_with_notes
+    FROM
+        aka_title mt
+    LEFT JOIN
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN
+        movie_info mi ON mt.id = mi.movie_id
+    GROUP BY
+        mt.id, mt.title, mt.production_year
+),
+ActorDetails AS (
+    SELECT
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ci.movie_id,
+        ci.note AS role_note,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+),
+TopMovies AS (
+    SELECT
+        ma.movie_id,
+        ma.title,
+        ma.production_year,
+        ma.num_cast_members,
+        ma.num_keywords,
+        ma.num_cast_with_notes,
+        RANK() OVER (ORDER BY ma.num_cast_members DESC, ma.production_year DESC) AS rank
+    FROM
+        MovieAggregate ma
+    WHERE
+        ma.production_year >= 2000
+    AND
+        ma.num_cast_members > 5
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    ARRAY_AGG(DISTINCT ad.actor_name ORDER BY ad.actor_rank) AS cast_list,
+    tm.num_cast_members,
+    tm.num_keywords,
+    tm.num_cast_with_notes
+FROM
+    TopMovies tm
+LEFT JOIN
+    ActorDetails ad ON tm.movie_id = ad.movie_id
+WHERE
+    tm.rank <= 10
+GROUP BY
+    tm.movie_id, tm.title, tm.production_year, tm.num_cast_members, tm.num_keywords, tm.num_cast_with_notes
+ORDER BY
+    tm.rank;

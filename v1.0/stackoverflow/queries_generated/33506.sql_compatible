@@ -1,0 +1,96 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostStatistics AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        ph.CreationDate,
+        ph.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY ph.OwnerUserId ORDER BY ph.CreationDate ASC) AS PostOrder
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.Id = v.PostId
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        ph.Id, ph.Title, ph.CreationDate, ph.Score, ph.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(b.Class, 0)) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.PostsCreated,
+        ua.TotalScore,
+        ua.BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY ua.TotalScore DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.PostsCreated > 0
+)
+SELECT 
+    ps.Title,
+    ps.CommentCount,
+    ps.VoteCount,
+    ua.DisplayName AS PostOwner,
+    CASE 
+        WHEN ps.Score > 10 THEN 'High Activity'
+        WHEN ps.Score BETWEEN 1 AND 10 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel,
+    COALESCE(au.UserRank, 'N/A') AS UserRank
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    ActiveUsers au ON ps.OwnerUserId = au.UserId
+WHERE 
+    ps.CommentCount > 5 
+ORDER BY 
+    ps.Score DESC, ps.CreationDate ASC;

@@ -1,0 +1,48 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+HighValueLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' 
+    GROUP BY l.l_orderkey
+    HAVING total_revenue > 10000
+),
+SupplierStatistics AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    n.n_name AS Nation_Name,
+    c.c_name AS Customer_Name,
+    o.o_orderkey AS Order_ID,
+    o.o_totalprice AS Order_Total,
+    COALESCE(l.total_revenue, 0) AS Total_Revenue,
+    COALESCE(s.total_supply_cost, 0) AS Supplier_Cost,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY o.o_totalprice DESC) AS Order_Rank
+FROM 
+    nation n
+JOIN 
+    CustomerOrders o ON n.n_nationkey = o.c_custkey
+LEFT JOIN 
+    HighValueLineItems l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierStatistics s ON o.o_orderkey = s.s_suppkey
+WHERE 
+    n.n_regionkey IN (SELECT DISTINCT n_regionkey FROM nation WHERE n_name LIKE '%land%')
+ORDER BY 
+    n.n_name, o.o_totalprice DESC;

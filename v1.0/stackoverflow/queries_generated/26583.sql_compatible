@@ -1,0 +1,54 @@
+
+WITH UserStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           u.Reputation,
+           u.Views,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           COUNT(DISTINCT c.Id) AS TotalComments,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Views
+), 
+TopPostTags AS (
+    SELECT p.Id AS PostId,
+           STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN LATERAL string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><') AS tag ON TRUE
+    LEFT JOIN Tags t ON t.TagName = tag
+    GROUP BY p.Id
+), 
+PostAnalytics AS (
+    SELECT ps.Id AS PostId,
+           ps.Title,
+           ps.ViewCount,
+           ps.AuditDate,
+           COALESCE(tt.Tags, 'No Tags') AS Tags,
+           COALESCE(SUM(pv.TotalUpvotes), 0) AS TotalPostUpvotes,
+           COALESCE(SUM(pv.TotalDownvotes), 0) AS TotalPostDownvotes
+    FROM Posts ps
+    LEFT JOIN TopPostTags tt ON ps.Id = tt.PostId
+    LEFT JOIN UserStats pv ON ps.OwnerUserId = pv.UserId
+    GROUP BY ps.Id, ps.Title, ps.ViewCount, ps.AuditDate, tt.Tags
+)
+
+SELECT us.DisplayName,
+       us.Reputation,
+       us.Views,
+       us.TotalPosts,
+       us.TotalComments,
+       us.TotalUpvotes,
+       us.TotalDownvotes,
+       pa.Title AS PostTitle,
+       pa.ViewCount AS PostViewCount,
+       pa.Tags AS PostTags,
+       pa.TotalPostUpvotes,
+       pa.TotalPostDownvotes
+FROM UserStats us
+JOIN PostAnalytics pa ON us.UserId = pa.OwnerUserId
+ORDER BY us.Reputation DESC, pa.TotalPostUpvotes DESC
+LIMIT 10;

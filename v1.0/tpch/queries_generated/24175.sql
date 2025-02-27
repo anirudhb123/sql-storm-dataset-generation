@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(CASE WHEN ps.ps_availqty IS NULL THEN 0 ELSE ps.ps_availqty END) AS total_availqty,
+        AVG(COALESCE(NULLIF(s.s_acctbal, 0), NULL)) AS avg_acctbal
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+nation_orders AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY n.n_nationkey, n.n_name
+),
+lineitem_stats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+        COUNT(*) FILTER (WHERE l.l_returnflag = 'R') AS returned_items_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    ns.n_name,
+    ss.s_name,
+    ss.total_availqty,
+    ns.total_orders,
+    ns.total_revenue,
+    ls.total_price_after_discount,
+    CASE WHEN ls.returned_items_count IS NULL THEN 'No Returns' ELSE 'Some Returns' END AS return_status
+FROM supplier_summary ss
+FULL OUTER JOIN nation_orders ns ON ss.total_availqty > 1000
+FULL OUTER JOIN lineitem_stats ls ON ns.total_orders > 5 AND ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+WHERE ss.avg_acctbal IS NOT NULL OR ns.total_revenue > 5000
+HAVING COALESCE(NULLIF(ss.total_availqty, 0), NULL) IS NULL
+ORDER BY ns.total_revenue DESC, ss.total_availqty ASC;

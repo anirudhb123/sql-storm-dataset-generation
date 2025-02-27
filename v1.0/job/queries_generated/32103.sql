@@ -1,0 +1,72 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.id] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        path || ml.linked_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        at.production_year IS NOT NULL AND
+        NOT ml.linked_movie_id = ANY(path)
+),
+MovieCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        ci.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mc.cast_count,
+        mc.actors,
+        ROW_NUMBER() OVER (ORDER BY mc.cast_count DESC, mh.production_year DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieCast mc ON mh.movie_id = mc.movie_id
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.cast_count,
+    r.actors,
+    r.rank,
+    CASE 
+        WHEN r.production_year IS NULL THEN 'Unknown Year'
+        WHEN r.production_year < 2010 THEN 'Pre-2010'
+        ELSE 'Post-2009'
+    END AS production_period
+FROM 
+    RankedMovies r
+WHERE 
+    r.rank <= 10 OR r.production_year IS NULL
+ORDER BY 
+    r.rank;

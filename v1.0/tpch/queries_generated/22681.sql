@@ -1,0 +1,49 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+HighPriceSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM partsupp ps
+    WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'N/A' 
+               ELSE CAST(s.s_acctbal AS VARCHAR(20)) 
+           END AS account_balance
+    FROM supplier s
+)
+SELECT 
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS return_quantity,
+    d.s_name AS supplier_name,
+    rp.p_name AS part_name,
+    rp.p_retailprice AS part_price,
+    CASE 
+        WHEN rh.price_rank = 1 THEN 'Most Expensive' 
+        ELSE 'Other' 
+    END AS price_status
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN HighPriceSuppliers hps ON l.l_partkey = hps.ps_partkey
+JOIN SupplierDetails d ON d.s_suppkey = hps.ps_suppkey
+JOIN RankedParts rp ON rp.p_partkey = l.l_partkey
+LEFT JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND l.l_discount NOT BETWEEN 0.05 AND 0.20
+    AND (SELECT COUNT(*) FROM lineitem l2 WHERE l2.l_orderkey = o.o_orderkey) > 1
+GROUP BY 
+    c.c_name, d.s_name, rp.p_name, rp.p_retailprice, rh.price_rank
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC, c.c_name ASC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

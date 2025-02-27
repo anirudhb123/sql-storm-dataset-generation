@@ -1,0 +1,64 @@
+WITH RecursiveMovieTitles AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+      AND (t.kind_id IN (1, 2) OR t.production_year >= 2000)
+    
+    UNION ALL
+    
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(mk.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rn
+    FROM
+        aka_title t
+    JOIN RecursiveMovieTitles rmt ON rmt.movie_id = t.id
+    WHERE
+        rmt.production_year < t.production_year
+)
+
+SELECT 
+    na.name AS actor_name,
+    rt.role AS role_name,
+    rt.kind AS role_kind,
+    m.title AS movie_title,
+    m.production_year,
+    CASE 
+        WHEN COUNT(k.keyword) > 0 THEN STRING_AGG(DISTINCT k.keyword, ', ')
+        ELSE 'No Keywords'
+    END AS keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    AVG(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS ratio_of_roles
+FROM 
+    cast_info c
+JOIN 
+    RecursiveMovieTitles m ON c.movie_id = m.movie_id
+JOIN 
+    aka_name na ON c.person_id = na.person_id
+JOIN 
+    role_type rt ON c.role_id = rt.id
+LEFT JOIN 
+    movie_keyword k ON m.movie_id = k.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = (SELECT MIN(mc.company_id) FROM movie_companies mc WHERE mc.movie_id = m.movie_id)
+WHERE 
+    na.name IS NOT NULL
+    AND m.production_year >= 1995
+GROUP BY 
+    na.name, rt.role, rt.kind, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT m.movie_id) > 1
+ORDER BY 
+    actor_name ASC, m.production_year DESC;

@@ -1,0 +1,40 @@
+WITH SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(NULLIF(i.i_color, ''), 'Unknown') AS item_color
+    FROM item i
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        id.i_item_desc,
+        id.item_color,
+        sd.total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY id.item_color ORDER BY sd.total_sales DESC) AS rank
+    FROM SalesData sd
+    JOIN ItemDetails id ON sd.ws_item_sk = id.i_item_sk
+)
+SELECT 
+    tsi.item_color,
+    tsi.i_item_desc,
+    tsi.total_quantity,
+    tsi.total_sales,
+    COALESCE(MAX(CASE WHEN cc.cc_class = 'Support' THEN cc.cc_employees END), 0) AS support_employees,
+    COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns
+FROM TopSellingItems tsi
+LEFT JOIN call_center cc ON cc.cc_call_center_sk = tsi.ws_item_sk  
+LEFT JOIN store_returns sr ON sr.sr_item_sk = tsi.ws_item_sk
+WHERE tsi.rank <= 5  
+GROUP BY tsi.item_color, tsi.i_item_desc, tsi.total_quantity, tsi.total_sales
+ORDER BY tsi.item_color, total_sales DESC;

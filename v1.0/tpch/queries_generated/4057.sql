@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_name,
+    rd.o_orderkey,
+    rd.o_totalprice,
+    sd.s_name,
+    sd.total_supply_cost,
+    COALESCE(NULLIF(ROUND(SUM(l.l_extendedprice * (1 - l.l_discount)), 2), 0), 'No Sales') AS net_sales
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders rd ON l.l_orderkey = rd.o_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON l.l_suppkey = sd.s_suppkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (rd.o_orderdate IS NULL OR rd.o_totalprice > 1000)
+GROUP BY 
+    p.p_name, rd.o_orderkey, rd.o_totalprice, sd.s_name, sd.total_supply_cost
+HAVING 
+    COUNT(l.l_orderkey) > 5 OR sd.total_supply_cost IS NOT NULL
+ORDER BY 
+    p.p_name, rd.o_orderdate DESC;

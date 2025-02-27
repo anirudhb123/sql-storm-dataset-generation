@@ -1,0 +1,31 @@
+WITH RecursiveSupplier AS (
+    SELECT s_suppkey, s_name, s_nationkey, CAST(s_name AS varchar(50)) AS s_fullname, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT ps.s_suppkey, s.s_name, s.n_nationkey, CONCAT(s.s_name, ' (', ps.ps_supplycost, ')') AS s_fullname, level + 1
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN RecursiveSupplier rs ON rs.s_suppkey = ps.ps_suppkey
+    WHERE s.acctbal IS NOT NULL AND ps.ps_availqty > 0
+), OrderStats AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue, 
+           COUNT(DISTINCT l.l_shipmentdate) OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate ASC) AS shipment_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT ps.ps_partkey, COUNT(DISTINCT rs.s_fullname) AS supplier_count, 
+       AVG(o.revenue) AS avg_revenue, MAX(shipment_count) AS max_shipments, 
+       CASE WHEN MAX(shipment_count) IS NULL THEN 'No Shipments' 
+            ELSE 'Max Shipments: ' || MAX(shipment_count) END AS shipment_status
+FROM partsupp ps
+LEFT JOIN RecursiveSupplier rs ON ps.ps_suppkey = rs.s_suppkey
+LEFT JOIN OrderStats o ON ps.ps_partkey = o.o_orderkey
+WHERE ps.ps_supplycost BETWEEN (SELECT AVG(ps_supplycost) FROM partsupp) * 0.9 
+      AND (SELECT AVG(ps_supplycost) FROM partsupp) * 1.1
+GROUP BY ps.ps_partkey
+HAVING COUNT(DISTINCT rs.s_fullname) > 2 OR MAX(shipment_count) IS NOT NULL
+ORDER BY supplier_count DESC, avg_revenue ASC
+LIMIT 10;

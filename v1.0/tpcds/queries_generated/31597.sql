@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesTotals AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS total_transactions,
+        RANK() OVER (ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(SUM(ws.ws_net_paid), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_net_paid), 0) AS total_catalog_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    WHERE 
+        cd.cd_marital_status IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_marital_status, cd.cd_credit_rating
+),
+SalesAnalysis AS (
+    SELECT 
+        ct.c_first_name,
+        ct.c_last_name,
+        ct.cd_marital_status,
+        st.total_sales,
+        st.total_transactions,
+        COALESCE(ct.total_web_sales, 0) AS total_web_sales,
+        COALESCE(ct.total_catalog_sales, 0) AS total_catalog_sales
+    FROM 
+        CustomerDetails ct
+    JOIN 
+        SalesTotals st ON ct.c_customer_sk = st.s_store_sk
+)
+SELECT 
+    sa.c_first_name,
+    sa.c_last_name,
+    sa.cd_marital_status,
+    sa.total_sales,
+    sa.total_transactions,
+    sa.total_web_sales + sa.total_catalog_sales AS total_combined_sales,
+    CASE 
+        WHEN sa.total_sales > 10000 THEN 'High'
+        WHEN sa.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    SalesAnalysis sa
+WHERE 
+    sa.total_combined_sales IS NOT NULL
+ORDER BY 
+    sa.total_sales DESC
+LIMIT 100
+OFFSET 0;

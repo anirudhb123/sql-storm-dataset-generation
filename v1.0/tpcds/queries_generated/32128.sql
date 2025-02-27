@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_product_name,
+        sd.total_quantity,
+        sd.total_sales
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.sales_rank <= 10
+),
+SalesInfo AS (
+    SELECT 
+        t.d_year, 
+        SUM(CASE WHEN sr.return_quantity IS NULL THEN 0 ELSE sr.return_quantity END) AS total_returns,
+        SUM(CASE WHEN sr.return_quantity IS NOT NULL THEN sr.return_amount ELSE 0 END) AS total_return_amount
+    FROM 
+        date_dim t
+    LEFT JOIN 
+        store_returns sr ON t.d_date_sk = sr.sr_returned_date_sk
+    GROUP BY 
+        t.d_year
+)
+SELECT 
+    tsi.i_item_id,
+    tsi.i_product_name,
+    tsi.total_quantity,
+    tsi.total_sales,
+    si.total_returns,
+    si.total_return_amount,
+    CAST(si.total_return_amount AS DECIMAL(10,2)) / NULLIF(tsi.total_sales, 0) AS return_ratio
+FROM 
+    TopSellingItems tsi
+JOIN 
+    SalesInfo si ON tsi.total_quantity > 1000
+ORDER BY 
+    return_ratio DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) AS rn,
+        c.c_nationkey
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ComparativeData AS (
+    SELECT 
+        r.r_name,
+        COALESCE(SUM(so.total_supply_cost), 0) AS regional_supply_cost,
+        COUNT(DISTINCT so.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        SupplierDetails so ON n.n_nationkey = so.n_nationkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    rd.r_name AS region_name,
+    cd.regional_supply_cost,
+    cd.supplier_count,
+    CASE 
+        WHEN ro.o_totalprice > cd.regional_supply_cost THEN 'Higher' 
+        ELSE 'Lower or Equal' 
+    END AS price_comparison,
+    ROW_NUMBER() OVER (PARTITION BY ro.c_nationkey ORDER BY ro.o_orderdate DESC) AS order_rank
+FROM 
+    RankedOrders ro
+JOIN 
+    ComparativeData cd ON ro.c_nationkey = cd.n_nationkey
+WHERE 
+    ro.rn <= 5
+AND 
+    cd.regional_supply_cost > 1000
+ORDER BY 
+    ro.o_orderdate DESC, region_name;

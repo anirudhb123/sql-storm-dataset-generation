@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(NULL AS text) AS parent_movie,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.title AS parent_movie,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.movie_id
+)
+SELECT 
+    ak.name AS aka_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.id) AS total_cast,
+    AVG(CASE WHEN ci.note LIKE '%lead%' THEN 1 ELSE 0 END) AS average_lead_roles,
+    STRING_AGG(DISTINCT d.name, ', ') AS co_star_names,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    MIN(CASE WHEN m.info IS NOT NULL THEN m.info ELSE 'No Info' END) AS movie_info_summary,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.id) DESC) AS cast_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN aka_title at ON at.id = mh.movie_id
+LEFT JOIN aka_name ak ON ak.person_id IN (
+    SELECT ci.person_id 
+    FROM cast_info ci 
+    WHERE ci.movie_id = mh.movie_id
+)
+LEFT JOIN cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN movie_info m ON m.movie_id = mh.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office' LIMIT 1)
+LEFT JOIN (
+    SELECT DISTINCT ci1.movie_id, cn.name
+    FROM cast_info ci1 
+    JOIN aka_name cn ON cn.person_id = ci1.person_id
+) d ON d.movie_id = mh.movie_id
+WHERE 
+    mh.depth <= 2
+GROUP BY 
+    ak.name, at.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.id) > 3 
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

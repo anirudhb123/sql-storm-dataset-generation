@@ -1,0 +1,72 @@
+
+WITH RECURSIVE price_agg AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+), ranked_customers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        DENSE_RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS row_num,
+        COUNT(*) OVER (PARTITION BY c.c_mktsegment) AS segment_count
+    FROM 
+        customer c
+), orders_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        MAX(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS has_returns
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    SUM(o.total_revenue) AS total_sales,
+    AVG(p.total_supply_cost) AS avg_supply_cost,
+    COUNT(DISTINCT c.c_custkey) FILTER (WHERE rc.rank <= 10) AS top_customers_count,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size'
+        ELSE CAST(p.p_size AS VARCHAR(255))
+    END AS part_size,
+    COALESCE(
+        (SELECT 
+            MAX(lineitem_count) 
+         FROM 
+            orders_summary 
+         WHERE 
+            has_returns = 1
+         AND 
+            lineitem_count > 0
+        ), 0) AS max_returned_items
+FROM 
+    nation r
+JOIN 
+    supplier s ON r.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    orders_summary o ON s.s_suppkey = o.o_custkey 
+JOIN 
+    ranked_customers rc ON o.o_custkey = rc.c_custkey
+GROUP BY 
+    r.n_name, p.p_size
+HAVING 
+    SUM(o.total_revenue) > 10000
+ORDER BY 
+    total_sales DESC, part_size
+LIMIT 50 OFFSET CAST((RANDOM() * (SELECT COUNT(*) FROM region)) AS INTEGER);

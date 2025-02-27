@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+        AND p.CreationDate > DATEADD(year, -1, GETDATE()) -- Posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, u.Location
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.AnswerCount,
+    pt.Tag,
+    pt.Count AS TagPopularity
+FROM 
+    RankedPosts rp
+JOIN 
+    PopularTags pt ON pt.Tag IN (
+        SELECT 
+            Tag
+        FROM 
+            PopularTags
+        GROUP BY 
+            Tag
+        ORDER BY 
+            COUNT(*) DESC
+        LIMIT 10
+    )
+WHERE 
+    rp.PostRank <= 5 -- Top 5 posts by each location  
+ORDER BY 
+    rp.OwnerDisplayName, rp.CreationDate DESC;

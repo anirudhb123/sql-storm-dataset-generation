@@ -1,0 +1,64 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS lineitem_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+
+RankedOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderdate,
+        os.lineitem_count,
+        os.total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY os.o_orderdate ORDER BY os.total_revenue DESC) AS order_rank
+    FROM 
+        OrderSummary os
+)
+
+SELECT 
+    ss.s_name AS supplier_name,
+    ss.nation_name,
+    ss.total_available,
+    ss.total_value,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.lineitem_count,
+    ro.total_revenue
+FROM 
+    SupplierStats ss
+LEFT JOIN 
+    RankedOrders ro ON ss.s_suppkey = ro.o_custkey
+WHERE 
+    ss.total_value > 10000.00
+    AND ro.order_rank <= 10
+ORDER BY 
+    ss.nation_name,
+    ro.total_revenue DESC;

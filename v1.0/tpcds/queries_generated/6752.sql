@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'M' AND 
+        cd.cd_marital_status = 'M' AND 
+        cd.cd_education_status IN ('Bachelors', 'Masters') AND 
+        ws.ws_sold_date_sk BETWEEN 2458498 AND 2459048  -- Date range: 2021
+    GROUP BY 
+        ws.web_site_sk
+), SalesSummary AS (
+    SELECT 
+        web_site_id,
+        total_sales,
+        order_count
+    FROM 
+        RankedSales rs
+    JOIN 
+        web_site w ON rs.web_site_sk = w.web_site_sk
+    WHERE 
+        rs.rank = 1
+)
+SELECT 
+    w.web_site_id,
+    ss.total_sales,
+    ss.order_count,
+    (SELECT COUNT(*) FROM customer WHERE c_birth_year > 1980) AS young_customers,
+    (SELECT AVG(cd.cd_purchase_estimate) FROM customer_demographics cd) AS avg_purchase_estimate
+FROM 
+    SalesSummary ss
+JOIN 
+    web_site w ON ss.web_site_id = w.web_site_id;

@@ -1,0 +1,66 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_items,
+        SUM(sr_return_amt) AS total_returned_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt) DESC) AS rn
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+TopReturningCustomers AS (
+    SELECT
+        r.*,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state
+    FROM RankedReturns r
+    JOIN customer c ON r.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE r.rn = 1
+),
+PopularItems AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold_items,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk
+    HAVING SUM(ws.ws_quantity) > 100
+),
+PromotedItemProfits AS (
+    SELECT
+        p.p_promo_id,
+        SUM(ws.ws_net_profit) AS total_profit_from_promotion
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY p.p_promo_id
+],
+FinalResults AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(ri.total_returned_items, 0) AS total_returned_items,
+        COALESCE(ri.total_returned_amount, 0) AS total_returned_amount,
+        pi.total_sold_items,
+        pi.total_net_profit AS item_net_profit,
+        pp.total_profit_from_promotion
+    FROM customer c
+    LEFT JOIN TopReturningCustomers ri ON c.c_customer_sk = ri.sr_customer_sk
+    JOIN PopularItems pi ON c.c_customer_sk = pi.ws_item_sk
+    LEFT JOIN PromotedItemProfits pp ON pp.p_promo_id = (SELECT p.p_promo_id FROM promotion p ORDER BY RANDOM() LIMIT 1)
+    WHERE c.c_birth_year < 1980
+)
+SELECT 
+    f.*,
+    CASE 
+        WHEN f.total_returned_amount > 1000 THEN 'High Return'
+        WHEN f.total_returned_amount BETWEEN 500 AND 1000 THEN 'Moderate Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM FinalResults f
+ORDER BY f.total_returned_amount DESC, f.item_net_profit DESC;

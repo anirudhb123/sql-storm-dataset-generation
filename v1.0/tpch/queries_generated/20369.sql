@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_suppkey IS NOT NULL)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+PopularParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_availqty) > (
+        SELECT AVG(ps2.ps_availqty) FROM partsupp ps2
+    )
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) IS NOT NULL AND COUNT(o.o_orderkey) > 5
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_linestatus = 'O'
+    GROUP BY l.l_orderkey
+    HAVING net_revenue > (
+        SELECT AVG(net_revenue) FROM (
+            SELECT SUM(l_extendedprice * (1 - l_discount)) AS net_revenue
+            FROM lineitem
+            WHERE l_returnflag = 'N'
+            GROUP BY l_orderkey
+        ) AS subquery
+    )
+)
+SELECT 
+    r.r_name, 
+    p.p_name, 
+    SUM(li.net_revenue) AS Total_Revenue, 
+    COUNT(DISTINCT c.c_custkey) AS Unique_Customers,
+    COUNT(DISTINCT sh.s_suppkey) AS Unique_Suppliers,
+    CASE WHEN COUNT(DISTINCT c.c_custkey) > 10 THEN 'High Volume' ELSE 'Low Volume' END AS Volume_Category
+FROM region r 
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN FilteredLineItems li ON p.p_partkey = li.l_orderkey
+JOIN CustomerOrders c ON c.c_custkey = s.s_nationkey
+JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE r.r_comment NOT LIKE '%obsolete%'
+  AND li.net_revenue IS NOT NULL
+GROUP BY r.r_name, p.p_name
+ORDER BY Total_Revenue DESC, Volume_Category;

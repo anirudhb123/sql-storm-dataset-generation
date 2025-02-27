@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND cn.country_code < '[jo]' AND n.imdb_index IS NOT NULL AND mc.note IN ('(1954-1961) (Denmark) (TV)', '(1990) (Canada) (all media)', '(1998-2002) (Estonia) (TV)', '(2000) (Japan) (TV) (subtitled)', '(2004-2005) (worldwide) (theatrical)', '(2009-) (worldwide) (TV) (as MGM Worldwide Television Distribution)', '(as PBC SpA - Roma)', '(as Sande Stewart Productions)') AND cn.id > 89555;

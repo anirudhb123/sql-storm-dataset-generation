@@ -1,0 +1,70 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        U.Views,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.Views
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id, 
+        P.Title, 
+        H.CreationDate AS ClosedDate, 
+        R.Name AS CloseReason
+    FROM Posts P 
+    JOIN PostHistory H ON P.Id = H.PostId 
+    JOIN CloseReasonTypes R ON CAST(H.Comment AS INTEGER) = R.Id
+    WHERE H.PostHistoryTypeId = 10
+),
+TotalVotes AS (
+    SELECT 
+        P.Id AS PostId, 
+        COUNT(V.Id) AS VoteCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    COALESCE(UP.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UP.PositivePosts, 0) AS PositivePosts,
+    COALESCE(UP.NegativePosts, 0) AS NegativePosts,
+    RP.PostId,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    RP.Score AS RecentPostScore,
+    CP.Title AS ClosedPostTitle,
+    CP.ClosedDate,
+    CP.CloseReason,
+    TV.VoteCount
+FROM UserStats U
+LEFT JOIN UserStats UP ON U.UserId = UP.UserId
+LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerDisplayName
+LEFT JOIN ClosedPosts CP ON CP.Id = RP.PostId
+LEFT JOIN TotalVotes TV ON TV.PostId = RP.PostId
+WHERE U.Reputation > 1000
+ORDER BY U.Reputation DESC, RP.CreationDate DESC
+LIMIT 100;

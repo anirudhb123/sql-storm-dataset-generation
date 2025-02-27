@@ -1,0 +1,35 @@
+-- Performance benchmarking SQL query
+
+WITH PostStats AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+        AVG(p.Score) AS AverageScore,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    GROUP BY 
+        pt.Name
+)
+
+SELECT 
+    PostType,
+    TotalPosts,
+    TotalComments,
+    TotalUpVotes,
+    TotalDownVotes,
+    AverageScore,
+    AverageViewCount
+FROM 
+    PostStats
+ORDER BY 
+    TotalPosts DESC;

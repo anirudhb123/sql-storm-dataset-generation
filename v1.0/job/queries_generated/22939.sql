@@ -1,0 +1,98 @@
+WITH RecursiveTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        0 AS depth
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        rt.depth + 1
+    FROM title t
+    JOIN RecursiveTitles rt ON t.episode_of_id = rt.title_id
+),
+NameCounts AS (
+    SELECT 
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name ak
+    LEFT JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY ak.name
+),
+CompanyStats AS (
+    SELECT 
+        cn.country_code,
+        COUNT(DISTINCT mc.id) AS total_movies,
+        AVG(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_movies_with_notes
+    FROM company_name cn
+    JOIN movie_companies mc ON cn.id = mc.company_id
+    GROUP BY cn.country_code
+),
+TitleKeywordCounts AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM movie_keyword mk
+    JOIN title mt ON mk.movie_id = mt.id
+    GROUP BY mt.movie_id
+),
+RankedTitles AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY rt.kind_id ORDER BY rt.production_year DESC) AS rn_within_kind
+    FROM RecursiveTitles rt
+    WHERE rt.depth = 0
+),
+TopRoles AS (
+    SELECT 
+        ci.role_id,
+        COUNT(DISTINCT ci.person_id) AS role_count
+    FROM cast_info ci
+    INNER JOIN role_type r ON ci.role_id = r.id
+    GROUP BY ci.role_id
+    HAVING COUNT(ci.id) > 5
+)
+
+SELECT 
+    nt.name,
+    rc.movie_count,
+    cs.country_code,
+    cs.total_movies,
+    cs.avg_movies_with_notes,
+    tkc.keyword_count,
+    rt.title,
+    rt.production_year,
+    rt.rn_within_kind,
+    tr.role_count
+FROM NameCounts rc
+JOIN CompanyStats cs ON cs.total_movies > 10
+LEFT JOIN TitleKeywordCounts tkc ON rc.movie_count > 5 AND tkc.movie_id IN (
+    SELECT ci.movie_id 
+    FROM cast_info ci 
+    GROUP BY ci.movie_id 
+    HAVING COUNT(DISTINCT ci.person_id) >= 3
+)
+JOIN RankedTitles rt ON rc.movie_count < 10 AND rt.production_year >= 2000
+LEFT JOIN TopRoles tr ON tr.role_id IN (
+    SELECT DISTINCT ci.role_id 
+    FROM cast_info ci 
+    WHERE ci.movie_id IN (
+        SELECT movie_id 
+        FROM aka_title 
+        WHERE production_year = rt.production_year
+    )
+)
+WHERE rc.name IS NOT NULL 
+  AND rt.kind_id IS NOT NULL 
+  AND cs.country_code IS NOT NULL 
+ORDER BY cs.total_movies DESC, rc.movie_count, rt.production_year DESC;
+
+

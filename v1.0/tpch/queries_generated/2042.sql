@@ -1,0 +1,68 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+          AND l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+RegionSupplier AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        s.s_name,
+        ss.total_available,
+        ss.total_cost
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+)
+SELECT 
+    rs.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(od.total_revenue) AS total_revenue,
+    AVG(s.total_available) AS avg_available_quantity,
+    MAX(s.total_cost) AS max_supplier_cost,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 
+            SUM(od.total_revenue) / COUNT(DISTINCT o.o_orderkey) 
+        ELSE 
+            NULL 
+    END AS avg_revenue_per_order
+FROM 
+    RegionSupplier rs
+LEFT JOIN 
+    OrderDetails od ON rs.s_name = od.line_count
+LEFT JOIN 
+    SupplierStats s ON s.s_name = rs.s_name
+LEFT JOIN 
+    orders o ON o.o_orderkey = od.o_orderkey
+GROUP BY 
+    rs.r_name
+ORDER BY 
+    total_revenue DESC;

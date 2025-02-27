@@ -1,0 +1,91 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL 
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        mh.level + 1
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieInfo AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank,
+        COUNT(mk.keyword) OVER (PARTITION BY m.id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+),
+DirectorAndCast AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        a.name AS director_name,
+        COUNT(DISTINCT ci.person_id) AS total_cast
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.role_id = (SELECT id FROM role_type WHERE role = 'Director') 
+    GROUP BY 
+        mt.id, mt.title, a.name
+),
+FinalResults AS (
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        me.production_year,
+        dc.director_name,
+        dc.total_cast,
+        me.year_rank,
+        me.keyword_count,
+        CASE 
+            WHEN dc.total_cast IS NULL THEN 'No Cast Info'
+            ELSE 'Has Cast'
+        END AS cast_info_status
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        MovieInfo me ON mh.movie_id = me.movie_id
+    LEFT JOIN 
+        DirectorAndCast dc ON mh.movie_id = dc.movie_id
+)
+
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.director_name,
+    fr.total_cast,
+    fr.keyword_count,
+    fr.year_rank,
+    fr.cast_info_status
+FROM 
+    FinalResults fr
+WHERE 
+    fr.year_rank <= 5 
+    AND fr.production_year IS NOT NULL
+ORDER BY 
+    fr.production_year DESC, 
+    fr.year_rank ASC;

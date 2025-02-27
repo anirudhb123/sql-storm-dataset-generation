@@ -1,0 +1,77 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AnswerCount, p.CommentCount, p.Score, p.CreationDate
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        u.Reputation > 1000  -- Only users with high reputation
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,  -- Post Closed
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount   -- Post Reopened
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.Score,
+    ps.CreationDate,
+    ps.Tags,
+    ua.UserId,
+    ua.DisplayName AS UserName,
+    ua.QuestionCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    phs.CloseCount,
+    phs.ReopenCount
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.PostId = u.Id
+JOIN 
+    UserActivity ua ON ua.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId = ps.PostId
+ORDER BY 
+    ps.ViewCount DESC
+LIMIT 10;

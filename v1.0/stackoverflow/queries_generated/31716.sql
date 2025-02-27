@@ -1,0 +1,108 @@
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        P.CreationDate,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000  -- Filter for more reputable users
+),
+UserPostCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN Score > 0 THEN 1 ELSE 0 END) AS PositivePosts
+    FROM 
+        UserActivity
+    GROUP BY 
+        UserId
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS TagPostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        TagPostCount > 50  -- Only considering tags with more than 50 posts
+),
+PostHistoryData AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId,
+        PH.CreationDate,
+        P.Title AS PostTitle,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6)  -- Only considering edit history
+    GROUP BY 
+        PH.UserId, PH.PostId, P.Title
+),
+UserEditStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        PHD.PostId,
+        PHD.EditCount,
+        PHD.LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY PHD.EditCount DESC) AS EditRank
+    FROM 
+        Users U
+    JOIN 
+        PostHistoryData PHD ON U.Id = PHD.UserId
+    WHERE 
+        PHD.EditCount > 5  -- Only users with more than 5 edits
+),
+FinalOutput AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        UPC.TotalPosts,
+        UPC.PositivePosts,
+        T.TagName,
+        UES.EditCount,
+        UES.LastEditDate
+    FROM 
+        UserActivity UA
+    JOIN 
+        UserPostCounts UPC ON UA.UserId = UPC.UserId
+    JOIN 
+        TopTags T ON T.TagPostCount > 0
+    LEFT JOIN 
+        UserEditStats UES ON UES.UserId = UA.UserId
+    WHERE 
+        UES.EditRank <= 10  -- Top 10 editors per user
+)
+SELECT 
+    UserId, 
+    DisplayName, 
+    Reputation, 
+    TotalPosts, 
+    PositivePosts, 
+    TagName,
+    EditCount,
+    LastEditDate
+FROM 
+    FinalOutput
+ORDER BY 
+    Reputation DESC, 
+    TotalPosts DESC;

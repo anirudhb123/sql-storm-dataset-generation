@@ -1,0 +1,37 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+)
+SELECT 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(l.l_receiptdate) AS last_receipt_date,
+    MIN(CASE WHEN l.l_returnflag = 'R' THEN l.l_receiptdate END) AS first_return_date,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN supplier_hierarchy sh ON l.l_suppkey = sh.s_suppkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN (
+    SELECT p.p_partkey, COUNT(*) AS part_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty < (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+    GROUP BY p.p_partkey
+) low_supply ON low_supply.p_partkey = l.l_partkey
+WHERE o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+GROUP BY c.c_name, n.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY revenue_rank, last_receipt_date DESC
+LIMIT 10;

@@ -1,0 +1,82 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        (ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty IS NOT NULL
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        EXTRACT(YEAR FROM o.o_orderdate) AS order_year
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '2 years'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+)
+SELECT 
+    r.c_name,
+    s.nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(l.l_tax) AS average_tax,
+    CASE 
+        WHEN SUM(l.l_extendedprice) IS NULL THEN 0 
+        ELSE SUM(l.l_extendedprice)
+    END AS total_extended_price,
+    MAX(r.rank) AS customer_rank
+FROM 
+    RankedCustomers r
+LEFT JOIN 
+    RecentOrders o ON r.c_custkey = o.o_orderkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    SupplierInfo s ON l.l_suppkey = s.s_suppkey
+GROUP BY 
+    r.c_name, s.nation_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 0 AND 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    total_orders DESC, 
+    revenue DESC 
+LIMIT 10
+UNION ALL
+SELECT 
+    'NO ORDERS' AS c_name,
+    'UNKNOWN' AS nation_name,
+    0 AS total_orders,
+    0 AS revenue,
+    NULL AS average_tax,
+    0 AS total_extended_price,
+    0 AS customer_rank
+WHERE 
+    NOT EXISTS (SELECT 1 FROM RecentOrders)
+ORDER BY 1;

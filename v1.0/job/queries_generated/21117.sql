@@ -1,0 +1,67 @@
+WITH MovieStatistics AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_actors
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.movie_id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN
+        movie_info mi ON t.movie_id = mi.movie_id
+    LEFT JOIN
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN
+        company_name cp ON mc.company_id = cp.id
+    LEFT JOIN
+        comp_cast_type ct ON c.person_role_id = ct.id
+    WHERE
+        t.production_year IS NOT NULL
+        AND (t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') OR t.kind_id IS NULL)
+        AND cp.country_code IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+
+FilteredMovies AS (
+    SELECT
+        ms.movie_id,
+        ms.title,
+        ms.production_year,
+        ms.actor_count,
+        ms.keyword_count,
+        ms.noted_roles
+    FROM
+        MovieStatistics ms
+    WHERE
+        ms.actor_count > 5 
+        AND ms.rank_by_actors <= 10
+)
+
+SELECT
+    fm.title,
+    CASE
+        WHEN fm.noted_roles IS NULL THEN 'No notable roles'
+        ELSE CONCAT('Noted roles: ', fm.noted_roles::text)
+    END AS role_info,
+    CONCAT_WS(', ', ARRAY(
+        SELECT DISTINCT cp.name
+        FROM movie_companies mc
+        JOIN company_name cp ON mc.company_id = cp.id
+        WHERE mc.movie_id = fm.movie_id
+    )) AS companies_involved,
+    ARRAY_AGG(DISTINCT mk.keyword) AS associated_keywords
+FROM
+    FilteredMovies fm
+LEFT JOIN
+    movie_keyword mk ON fm.movie_id = mk.movie_id
+GROUP BY
+    fm.title, fm.noted_roles
+ORDER BY
+    fm.production_year DESC, fm.actor_count DESC;

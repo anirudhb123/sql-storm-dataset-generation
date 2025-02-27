@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name AS supplier_name,
+        s.s_acctbal,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(spd.ps_supplycost) AS avg_supply_cost,
+    MAX(spd.ps_availqty) AS max_avail_qty
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierPartDetails spd ON s.s_suppkey = spd.s_suppkey
+LEFT JOIN 
+    lineitem l ON spd.ps_partkey = l.l_partkey
+INNER JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    AND n.n_name IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+UNION ALL
+SELECT 
+    'Total' AS nation_name,
+    COUNT(DISTINCT o.o_orderkey),
+    SUM(l.l_extendedprice * (1 - l.l_discount)),
+    AVG(spd.ps_supplycost),
+    MAX(spd.ps_availqty)
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    SupplierPartDetails spd ON s.s_suppkey = spd.s_suppkey
+LEFT JOIN 
+    lineitem l ON spd.ps_partkey = l.l_partkey
+INNER JOIN 
+    RankedOrders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+ORDER BY 
+    total_orders DESC;

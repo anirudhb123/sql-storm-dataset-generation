@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) 
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        r.UserDisplayName AS ClosedByUser,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Users r ON ph.UserId = r.Id
+    GROUP BY 
+        p.Id, p.Title, ph.CreationDate, r.UserDisplayName
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalScore,
+    up.QuestionCount,
+    COALESCE(rp.RankByViews, 'N/A') AS RankByViews,
+    COALESCE(rp.RankByScore, 'N/A') AS RankByScore,
+    COUNT(DISTINCT ep.EditDate) AS RecentEditCount,
+    COUNT(DISTINCT cp.ClosedDate) AS ClosedCount
+FROM 
+    UserScores up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND (rp.RankByViews <= 5 OR rp.RankByScore <= 5)
+LEFT JOIN 
+    RecentEdits ep ON up.UserId = ep.UserDisplayName
+LEFT JOIN 
+    ClosedPosts cp ON up.UserId = cp.ClosedByUser
+WHERE 
+    up.TotalScore > 50 
+GROUP BY 
+    up.UserId, up.DisplayName, rp.RankByViews, rp.RankByScore
+ORDER BY 
+    up.TotalScore DESC;

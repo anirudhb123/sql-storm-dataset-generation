@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        u.DisplayName AS PostOwner,
+        COALESCE(c.CommentCount, 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) AS CommentCount 
+         FROM 
+            Comments 
+         GROUP BY 
+            PostId) c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        COUNT(*) AS EditCount,
+        MAX(ph.UserDisplayName) AS LastEditor,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+PopularTags AS (
+    SELECT 
+        TAG.TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS TAG(TagName)
+    GROUP BY 
+        TAG.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.ViewCount,
+    rp.Score,
+    rp.CreationDate,
+    rp.PostOwner,
+    rp.CommentCount,
+    pinfo.EditCount,
+    pinfo.LastEditor,
+    pinfo.HistoryTypes,
+    (SELECT 
+         STRING_AGG(pt.TagName, ', ') 
+     FROM 
+         Tags pt 
+     JOIN 
+         Posts pp ON pp.Tags LIKE '%' || pt.TagName || '%' 
+     WHERE 
+         pp.Id = rp.PostId) AS RelatedTags,
+    (SELECT 
+         COALESCE((SELECT COUNT(*) 
+                   FROM Votes v 
+                   WHERE v.PostId = rp.PostId 
+                   AND v.VoteTypeId = 2), 0) - 
+         COALESCE((SELECT COUNT(*) 
+                   FROM Votes v 
+                   WHERE v.PostId = rp.PostId 
+                   AND v.VoteTypeId = 3), 0)) AS VoteBalance
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryInfo pinfo ON rp.PostId = pinfo.PostId
+WHERE 
+    rp.PostRank <= 5
+ORDER BY 
+    rp.ViewCount DESC;

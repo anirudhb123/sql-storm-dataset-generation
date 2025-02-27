@@ -1,0 +1,65 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN orders o ON o.o_custkey = ch.c_custkey
+    JOIN customer c ON c.c_custkey = o.o_custkey
+    WHERE ch.level < 3 AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_custkey != ch.c_custkey)
+),
+aggregated_data AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        MAX(l.l_returnflag) AS max_returnflag,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(l.l_extendedprice) DESC) AS rank
+    FROM part p
+    JOIN lineitem l ON l.l_partkey = p.p_partkey
+    LEFT JOIN partsupp ps ON ps.ps_partkey = p.p_partkey
+    GROUP BY p.p_partkey, p.p_type
+    HAVING MAX(CASE WHEN l.l_shipdate < l.l_commitdate THEN 1 ELSE 0 END) = 1
+       AND COUNT(*) FILTER (WHERE l.l_discount > 0.1) > 5
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice) AS order_value,
+        o.o_orderstatus
+    FROM orders o
+    JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+    HAVING COUNT(l.l_linenumber) > 3 AND AVG(l.l_discount) < 0.05
+),
+final_output AS (
+    SELECT
+        ch.c_custkey,
+        ch.c_name,
+        ad.total_revenue,
+        fo.order_value,
+        (CASE 
+            WHEN fo.o_orderstatus = 'F' AND fo.order_value IS NOT NULL THEN 'Finalized'
+            WHEN fo.o_orderstatus = 'O' AND fo.order_value IS NULL THEN 'Open'
+            ELSE 'Unknown'
+         END) AS order_status,
+        ad.max_returnflag
+    FROM customer_hierarchy ch
+    LEFT JOIN aggregated_data ad ON ad.supplier_count > 0
+    LEFT JOIN filtered_orders fo ON fo.o_orderkey = ad.p_partkey
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    COALESCE(f.total_revenue, 0) AS total_revenue,
+    COALESCE(f.order_value, 0) AS order_value,
+    f.order_status,
+    f.max_returnflag
+FROM final_output f
+WHERE f.total_revenue IS NOT NULL OR f.order_value IS NOT NULL
+ORDER BY f.total_revenue DESC, f.order_value ASC
+LIMIT 100;

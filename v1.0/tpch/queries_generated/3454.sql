@@ -1,0 +1,50 @@
+WITH RankedSales AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        r.r_name AS region_name,
+        ns.n_name AS nation_name,
+        SUM(CASE WHEN ls.rn = 1 THEN ls.net_sales ELSE 0 END) AS top_sales
+    FROM 
+        orders o
+    LEFT JOIN 
+        RankedSales ls ON o.o_orderkey = ls.l_orderkey
+    LEFT JOIN 
+        supplier s ON EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+    LEFT JOIN 
+        nation ns ON s.s_nationkey = ns.n_nationkey
+    LEFT JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, r.r_name, ns.n_name
+)
+SELECT 
+    t.o_orderkey,
+    t.o_orderdate,
+    t.o_totalprice,
+    COALESCE(t.top_sales, 0) AS top_sales,
+    ROUND(t.o_totalprice - COALESCE(t.top_sales, 0), 2) AS profit,
+    CASE 
+        WHEN t.o_totalprice IS NULL THEN 'No Sales'
+        WHEN t.top_sales IS NULL THEN 'Low Sales'
+        ELSE 'Sold Well'
+    END AS sales_evaluation
+FROM 
+    TopOrders t
+WHERE 
+    t.top_sales > 1000 OR t.top_sales IS NULL
+ORDER BY 
+    profit DESC, t.o_orderdate;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level,
+        ARRAY[m.id] AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        mh.level + 1,
+        mh.path || m.id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        m.production_year >= 2000 AND NOT m.id = ANY(mh.path)
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.level,
+    ARRAY_AGG(DISTINCT ci.person_id) AS cast_members,
+    COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+    AVG(mr.info) FILTER (WHERE mr.info IS NOT NULL) AS avg_rating,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mr ON mr.movie_id = mh.movie_id AND mr.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0 
+ORDER BY 
+    avg_rating DESC NULLS LAST, mh.production_year DESC;

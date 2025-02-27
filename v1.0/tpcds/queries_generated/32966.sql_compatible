@@ -1,0 +1,61 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_sales
+    FROM web_sales
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_quantity) > 100
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_quantity) AS total_sales
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY cs_item_sk
+    HAVING SUM(cs_quantity) > 100
+),
+Item_Summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        COALESCE(SUM(ws.total_sales), 0) AS online_sales,
+        COALESCE(SUM(cs.total_sales), 0) AS catalog_sales,
+        COALESCE(SUM(ss.ss_quantity), 0) AS store_sales,
+        (COALESCE(SUM(ws.total_sales), 0) + COALESCE(SUM(cs.total_sales), 0) + COALESCE(SUM(ss.ss_quantity), 0)) AS total_sales
+    FROM item i
+    LEFT JOIN Sales_CTE ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY i.i_item_id, i.i_product_name
+),
+Income_Ranges AS (
+    SELECT 
+        ib_income_band_sk,
+        CASE 
+            WHEN ib_lower_bound < 50000 THEN 'Low Income'
+            WHEN ib_lower_bound BETWEEN 50000 AND 100000 THEN 'Middle Income'
+            ELSE 'High Income'
+        END AS income_range
+    FROM income_band
+),
+Customer_Stats AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_id) AS num_customers,
+        COUNT(DISTINCT cd.cd_demo_sk) AS demographic_count,
+        SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+        SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY ca.ca_state
+)
+SELECT 
+    is_.i_product_name,
+    ic.income_range,
+    cs.num_customers,
+    cs.female_customers,
+    cs.male_customers,
+    is_.total_sales
+FROM Item_Summary is_
+CROSS JOIN Income_Ranges ic
+LEFT JOIN Customer_Stats cs ON cs.num_customers > 0
+ORDER BY is_.total_sales DESC, cs.num_customers DESC
+FETCH FIRST 100 ROWS ONLY;

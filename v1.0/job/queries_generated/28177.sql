@@ -1,0 +1,60 @@
+WITH movie_actor_stats AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(ci.id) AS role_count,
+        STRING_AGG(DISTINCT r.role ORDER BY r.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    JOIN 
+        role_type r ON ci.person_role_id = r.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        a.name, t.title, t.production_year
+), 
+keyword_summary AS (
+    SELECT 
+        t.title AS movie_title,
+        COUNT(mk.keyword_id) AS keyword_count,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title t ON mk.movie_id = t.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title
+), 
+final_benchmark AS (
+    SELECT 
+        mas.actor_name,
+        mas.movie_title,
+        mas.production_year,
+        mas.role_count,
+        mas.roles,
+        ks.keyword_count,
+        ks.keywords
+    FROM 
+        movie_actor_stats mas
+    LEFT JOIN 
+        keyword_summary ks ON mas.movie_title = ks.movie_title
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    role_count,
+    roles,
+    COALESCE(keyword_count, 0) AS keyword_count,
+    COALESCE(keywords, 'No keywords') AS keywords
+FROM 
+    final_benchmark
+ORDER BY 
+    production_year DESC, actor_name, movie_title;

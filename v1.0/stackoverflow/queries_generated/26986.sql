@@ -1,0 +1,69 @@
+-- This SQL query benchmarks string processing by analyzing posts with specific conditions 
+-- while aggregating associated user data, tags, and editing history to showcase the relationships between them.
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_name ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_name
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+),
+
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(DISTINCT CONCAT(ph.CreationDate::text, ' - ', pt.Name), '; ') AS ChangeSummary
+    FROM
+        PostHistory ph
+    JOIN
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    GROUP BY
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.AssociatedTags,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    COALESCE(phd.ChangeSummary, 'No Changes') AS EditHistory
+FROM
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE
+    rp.PostRank <= 5
+ORDER BY 
+    rp.CreationDate DESC;
+
+This query retrieves and processes posts created in the last month, capturing user details, vote counts, comments, and a summarized history of edits or changes to each post. It executes string processing to aggregate tags associated with those posts and demonstrates the relationships among various tables in the schema effectively.

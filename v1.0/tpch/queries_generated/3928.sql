@@ -1,0 +1,36 @@
+WITH SupplierCost AS (
+    SELECT ps_partkey, ps_suppkey, SUM(ps_supplycost * ps_availqty) AS total_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey, ps_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COALESCE(sc.total_supplycost, 0) AS total_supplycost
+    FROM part p
+    LEFT JOIN SupplierCost sc ON p.p_partkey = sc.ps_partkey
+),
+RankedSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+)
+SELECT pd.p_partkey, pd.p_name, pd.p_retailprice, pd.total_supplycost, 
+       COALESCE(c.total_spent, 0) AS customer_spending, 
+       ns.n_name AS nation_name,
+       CASE 
+           WHEN pd.total_supplycost > (SELECT AVG(total_supplycost) FROM SupplierCost) THEN 'Above Average'
+           ELSE 'Below Average'
+       END AS supply_cost_comparison
+FROM PartDetails pd
+LEFT JOIN RankedSuppliers rs ON pd.p_partkey = rs.ps_partkey AND rs.rank = 1
+LEFT JOIN supplier s ON rs.ps_suppkey = s.s_suppkey
+LEFT JOIN nation ns ON s.s_nationkey = ns.n_nationkey
+LEFT JOIN CustomerOrders c ON c.total_spent > 1000
+WHERE pd.p_retailprice > 50 
+  AND (pd.total_supplycost IS NOT NULL OR ns.n_name IS NOT NULL)
+ORDER BY pd.p_partkey;

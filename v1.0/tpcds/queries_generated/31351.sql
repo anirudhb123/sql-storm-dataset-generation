@@ -1,0 +1,48 @@
+
+WITH RECURSIVE Customer_Transactions AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_quantity, 0) + COALESCE(cs.cs_quantity, 0) + COALESCE(ss.ss_quantity, 0)) AS total_quantity,
+        SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(COALESCE(ws.ws_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ss.ss_net_paid, 0)) DESC) AS rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_customer_id
+),
+Top_Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        ct.total_quantity,
+        ct.total_sales
+    FROM Customer_Transactions ct
+    JOIN customer c ON ct.c_customer_sk = c.c_customer_sk
+    WHERE ct.rank <= 10
+),
+Address_Info AS (
+    SELECT
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT ct.c_customer_id) AS customer_count
+    FROM customer_address ca
+    JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN Top_Customers tc ON c.c_customer_sk = tc.c_customer_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country
+)
+SELECT 
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_country,
+    ai.customer_count,
+    AVG(ct.total_sales) AS avg_sales,
+    MAX(ct.total_sales) AS max_sales
+FROM Address_Info ai
+JOIN Top_Customers ct ON ai.customer_count > (SELECT AVG(customer_count) FROM Address_Info)
+GROUP BY ai.ca_city, ai.ca_state, ai.ca_country
+HAVING MAX(ct.total_sales) > 1000
+ORDER BY avg_sales DESC;

@@ -1,0 +1,50 @@
+WITH RecursiveSupplierCTE AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, r.level + 1
+    FROM supplier s
+    INNER JOIN RecursiveSupplierCTE r ON s.s_nationkey = r.s_nationkey
+    WHERE r.level < 10
+),
+TotalPriceCTE AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+PartSupplierCTE AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_quantity
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    rs.s_suppkey,
+    rs.s_name,
+    COALESCE(SUM(tp.total_price), 0) AS total_order_value,
+    COALESCE(MAX(ps.total_quantity), 0) AS max_avail_quantity,
+    fc.order_count
+FROM RecursiveSupplierCTE rs
+LEFT JOIN TotalPriceCTE tp ON rs.s_suppkey = tp.o_orderkey
+LEFT JOIN PartSupplierCTE ps ON rs.s_suppkey = ps.p_partkey
+LEFT JOIN FilteredCustomers fc ON rs.s_nationkey = fc.c_custkey
+WHERE 
+    rs.level <= 5 AND 
+    (rs.s_comment LIKE '%important%' OR rs.s_acctbal IS NULL)
+GROUP BY 
+    rs.s_suppkey, rs.s_name, fc.order_count
+ORDER BY 
+    total_order_value DESC;

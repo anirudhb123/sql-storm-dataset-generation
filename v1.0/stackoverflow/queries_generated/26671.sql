@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY p.Score DESC) AS RankByScore,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'), 1) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        OwnerDisplayName,
+        RankByScore,
+        TagCount,
+        Score
+    FROM 
+        RankedPosts
+    WHERE 
+        RankByScore <= 5
+),
+PostWithBadges AS (
+    SELECT 
+        trp.PostId,
+        trp.Title,
+        trp.Body,
+        trp.OwnerDisplayName,
+        trp.TagCount,
+        trp.Score,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        TopRankedPosts trp
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT Id FROM Users WHERE DisplayName = trp.OwnerDisplayName)
+    GROUP BY 
+        trp.PostId, trp.Title, trp.Body, trp.OwnerDisplayName, trp.TagCount, trp.Score
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    pwb.Body,
+    pwb.OwnerDisplayName,
+    pwb.TagCount,
+    pwb.Score,
+    pwb.BadgeCount,
+    (SELECT STRING_AGG(DISTINCT c.Text, '; ') 
+     FROM Comments c WHERE c.PostId = pwb.PostId) AS CommentSummary
+FROM 
+    PostWithBadges pwb
+ORDER BY 
+    pwb.Score DESC, 
+    pwb.BadgeCount DESC;

@@ -1,0 +1,61 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100.00
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_discount) AS total_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING SUM(l.l_discount) > 50
+), AggregateData AS (
+    SELECT
+        n.n_name AS nation_name,
+        COUNT(DISTINCT c.c_custkey) AS cust_count,
+        SUM(o.o_totalprice) AS total_order_value
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE n.n_name IS NOT NULL
+    GROUP BY n.n_name
+), ComplexJoin AS (
+    SELECT 
+        r.r_name,
+        COALESCE(f.cust_count, 0) AS customer_count,
+        COALESCE(f.total_order_value, 0.00) AS order_value,
+        COUNT(rs.s_name) AS supplier_count
+    FROM region r
+    LEFT JOIN AggregateData f ON r.r_regionkey = f.nation_name
+    LEFT JOIN RankedSuppliers rs ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_name = f.nation_name
+        LIMIT 1
+    )
+    GROUP BY r.r_name
+)
+SELECT 
+    c.region_name, 
+    c.customer_count,
+    c.order_value,
+    c.supplier_count,
+    CASE 
+        WHEN c.order_value = 0 THEN 'No Orders'
+        WHEN c.customer_count IS NULL THEN 'Missing Customer Data'
+        ELSE 'Active Region'
+    END AS region_status
+FROM ComplexJoin c
+WHERE c.supplier_count > 0 
+AND (c.customer_count IS NULL OR c.customer_count > 5)
+ORDER BY c.region_name DESC
+FETCH FIRST 50 ROWS ONLY;

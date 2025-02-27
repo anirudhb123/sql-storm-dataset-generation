@@ -1,0 +1,58 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+        COUNT(l.l_linenumber) AS item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COUNT(o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+),
+FilteredCustomers AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.c_acctbal,
+        cs.total_orders,
+        cs.last_order_date,
+        COALESCE(ss.total_available, 0) AS total_available_parts,
+        COALESCE(ss.total_supply_cost, 0) AS total_supply_cost
+    FROM CustomerSummary cs
+    LEFT JOIN SupplierStats ss ON cs.total_orders > 5
+)
+SELECT 
+    fc.c_name,
+    fc.total_orders,
+    fc.total_available_parts,
+    fc.total_supply_cost,
+    CASE 
+        WHEN fc.c_acctbal IS NULL THEN 'Account balance unavailable'
+        WHEN fc.c_acctbal < 100 THEN 'Low balance'
+        ELSE 'Healthy balance'
+    END AS balance_status,
+    RANK() OVER (ORDER BY fc.total_orders DESC) AS order_rank
+FROM FilteredCustomers fc
+WHERE fc.last_order_date IS NOT NULL
+ORDER BY order_rank, fc.c_name;

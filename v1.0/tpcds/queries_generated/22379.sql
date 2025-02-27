@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rank_sales,
+        CTE1.total_return_amt,
+        (CASE 
+            WHEN DATEDIFF(DAY, d.d_date, GETDATE()) < 30 THEN 'Recent' 
+            ELSE 'Old' 
+         END) AS sales_age
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN (
+        SELECT 
+            wr_returning_customer_sk,
+            SUM(wr_return_amt) AS total_return_amt
+        FROM 
+            web_returns
+        GROUP BY 
+            wr_returning_customer_sk
+    ) AS CTE1 ON ws.ws_ship_customer_sk = CTE1.wr_returning_customer_sk
+),
+TopReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr_return_amt) AS total_web_return 
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+    HAVING 
+        SUM(wr_return_amt) > 100
+    UNION ALL
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr_return_amt) AS total_web_return 
+    FROM 
+        web_returns wr
+    WHERE 
+        wr.return_quantity > 10
+    GROUP BY 
+        wr.returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    ra.web_site_id,
+    ra.rank_sales,
+    COALESCE(tr.total_web_return, 0) AS total_web_return_amt,
+    CASE 
+        WHEN ra.sales_age = 'Recent' AND tr.total_web_return > 0 THEN 'High Risk'
+        ELSE 'Low Risk' 
+    END AS risk_level
+FROM 
+    customer c
+JOIN 
+    RankedSales ra ON c.c_customer_sk = ra.web_site_sk
+LEFT JOIN 
+    TopReturns tr ON c.c_customer_sk = tr.returning_customer_sk
+WHERE 
+    ra.rank_sales <= 5 
+    AND (ra.total_return_amt IS NULL OR ra.total_return_amt > 0)
+ORDER BY 
+    c.c_customer_id, ra.rank_sales;

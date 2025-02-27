@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    p.p_name,
+    r.r_name,
+    n.n_name,
+    s.s_name,
+    COALESCE(s.s_acctbal, 0) AS supplier_account_balance,
+    COUNT(DISTINCT ho.o_orderkey) AS order_count,
+    SUM(ho.o_totalprice) AS total_order_value,
+    CASE 
+        WHEN COUNT(DISTINCT ho.o_orderkey) > 0 THEN 
+            AVG(ho.total_lineitem_value) 
+        ELSE 
+            NULL 
+    END AS avg_line_item_value,
+    CASE
+        WHEN s.rn = 1 THEN 'Top Supplier' 
+        ELSE 'Other Supplier' 
+    END AS supplier_rank
+FROM part p
+LEFT JOIN SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN RankedSuppliers s ON sp.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN HighValueOrders ho ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ho.o_orderkey)
+WHERE p.p_retailprice IS NOT NULL AND p.p_size BETWEEN 10 AND 100
+GROUP BY p.p_name, r.r_name, n.n_name, s.s_name, s.s_acctbal, s.rn
+ORDER BY total_order_value DESC, supplier_account_balance ASC
+LIMIT 50;

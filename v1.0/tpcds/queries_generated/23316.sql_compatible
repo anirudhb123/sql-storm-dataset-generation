@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_category
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(NULLIF(i.i_color, ''), 'Unknown') AS item_color,
+        COALESCE(NULLIF(i.i_brand, ''), 'Unnamed Brand') AS item_brand,
+        (SELECT AVG(i_current_price) FROM item) AS avg_price
+    FROM 
+        item i
+),
+SalesWithDetails AS (
+    SELECT 
+        r.ws_item_sk,
+        id.i_item_id,
+        id.i_item_desc,
+        id.item_color,
+        id.item_brand,
+        r.total_quantity,
+        r.total_net_profit,
+        CASE
+            WHEN r.total_net_profit > 0 THEN 'Profitable'
+            WHEN r.total_net_profit = 0 THEN 'Break-even'
+            ELSE 'Loss'
+        END AS profit_status
+    FROM 
+        RankedSales r
+    JOIN 
+        ItemDetails id ON r.ws_item_sk = id.i_item_id
+    WHERE 
+        r.rank_category = 1
+)
+SELECT 
+    s.ws_item_sk, 
+    s.i_item_id, 
+    s.i_item_desc,
+    s.item_color,
+    s.item_brand,
+    s.total_quantity,
+    s.total_net_profit,
+    s.profit_status,
+    (SELECT COUNT(DISTINCT wr_returning_customer_sk) 
+     FROM web_returns wr 
+     WHERE wr.wr_item_sk = s.ws_item_sk 
+     AND wr.wr_return_quantity > 0) AS return_customers,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM promotion p WHERE p.p_item_sk = s.ws_item_sk AND p.p_discount_active = 'Y') 
+        THEN 'Active Promo' 
+        ELSE 'No Promo' 
+    END AS promo_status
+FROM 
+    SalesWithDetails s
+LEFT JOIN 
+    store_sales ss ON ss.ss_item_sk = s.ws_item_sk 
+WHERE 
+    (s.total_quantity - COALESCE(ss.ss_quantity, 0)) > 0 
+    OR (s.total_net_profit < 0 AND EXISTS (SELECT NULL FROM store_returns sr WHERE sr.sr_item_sk = s.ws_item_sk))
+ORDER BY 
+    s.total_net_profit DESC, 
+    s.total_quantity ASC
+FETCH FIRST 50 ROWS ONLY;

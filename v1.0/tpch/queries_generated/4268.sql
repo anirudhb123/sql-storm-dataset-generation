@@ -1,0 +1,69 @@
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        orders o
+    LEFT JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_orderdate, o.o_totalprice
+),
+CustomerSales AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(od.total_sales) AS total_customer_sales
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_customer_sales,
+        RANK() OVER (ORDER BY cs.total_customer_sales DESC) AS sales_rank
+    FROM
+        CustomerSales cs
+)
+SELECT
+    pc.p_name,
+    pc.p_mfgr,
+    ss.total_available,
+    ss.avg_supply_cost,
+    tc.c_name,
+    tc.total_customer_sales,
+    tc.sales_rank
+FROM
+    part pc
+LEFT JOIN
+    SupplierStats ss ON pc.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < ss.avg_supply_cost)
+JOIN
+    TopCustomers tc ON tc.sales_rank <= 10
+WHERE
+    ss.total_available IS NOT NULL
+    AND (pc.p_retailprice > 100.00 OR pc.p_size < 10)
+ORDER BY
+    tc.total_customer_sales DESC, ss.avg_supply_cost ASC;

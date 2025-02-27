@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment available') AS s_comment,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_comment
+    HAVING 
+        total_cost > 100000
+),
+OrderLineSummary AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(*) AS total_lines,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(DISTINCT l.l_suppkey) AS distinct_suppliers
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderstatus,
+    ro.o_totalprice,
+    ro.c_name AS customer_name,
+    od.total_lines,
+    od.net_revenue,
+    od.avg_quantity,
+    s.s_name AS supplier_name,
+    sd.total_cost,
+    CASE 
+        WHEN od.distinct_suppliers = 0 THEN 'No suppliers'
+        ELSE 'Has suppliers'
+    END AS supplier_status
+FROM 
+    RankedOrders ro
+LEFT JOIN 
+    OrderLineSummary od ON ro.o_orderkey = od.l_orderkey
+FULL OUTER JOIN 
+    SupplierDetails sd ON (od.total_lines IS NOT NULL AND od.total_lines > 1)
+LEFT JOIN 
+    supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = ro.o_orderkey))
+WHERE 
+    ro.order_rank <= 10
+    AND (ro.o_orderstatus = 'O' OR ro.o_orderstatus IS NULL)
+ORDER BY 
+    ro.o_totalprice DESC NULLS LAST;

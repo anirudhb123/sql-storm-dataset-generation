@@ -1,0 +1,29 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, s.s_acctbal,
+           LENGTH(s.s_comment) AS comment_length, 
+           SUBSTRING(s.s_comment, 1, 20) AS comment_excerpt
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, 
+           REPLACE(LOWER(p.p_comment), 'a', '@') AS modified_comment,
+           CHAR_LENGTH(p.p_type) AS type_length
+    FROM part p
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, COUNT(l.l_orderkey) AS line_item_count,
+           STRING_AGG(DISTINCT l.l_comment, '; ') AS all_comments
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    sd.s_suppkey, sd.s_name, sd.nation_name, sd.s_acctbal,
+    pd.p_partkey, pd.p_name, pd.p_brand, pd.modified_comment, pd.type_length,
+    od.o_orderkey, od.o_orderstatus, od.line_item_count, od.all_comments
+FROM SupplierDetails sd
+JOIN PartDetails pd ON pd.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sd.s_suppkey LIMIT 1)
+JOIN OrderDetails od ON od.line_item_count > 5
+WHERE sd.comment_length > 50
+ORDER BY sd.s_acctbal DESC, pd.type_length ASC, od.o_orderdate DESC;

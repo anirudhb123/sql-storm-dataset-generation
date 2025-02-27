@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales_count,
+        SUM(ss.ss_ext_sales_price) AS total_sales_amount,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ss.ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        total_sales_count,
+        total_sales_amount,
+        total_net_profit
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    tc.customer_id,
+    tc.total_sales_count,
+    tc.total_sales_amount,
+    tc.total_net_profit,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    ca.ca_city,
+    ca.ca_state
+FROM 
+    TopCustomers tc
+JOIN 
+    customer_demographics cd ON tc.customer_id = c.c_customer_id
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+ORDER BY 
+    tc.total_sales_amount DESC;

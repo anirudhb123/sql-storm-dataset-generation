@@ -1,0 +1,60 @@
+WITH MovieCount AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        an.name,
+        mc.movie_count
+    FROM 
+        MovieCount mc
+    JOIN 
+        aka_name an ON mc.person_id = an.person_id
+    WHERE 
+        mc.movie_count >= 5
+),
+Credits AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        ci.nr_order,
+        rt.role
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    WHERE 
+        ci.nr_order IS NOT NULL
+)
+SELECT 
+    ta.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT c.title, ', ') AS movie_titles,
+    SUM(CASE WHEN at.production_year < 2010 THEN 1 ELSE 0 END) AS pre_2010_movies,
+    AVG(CASE WHEN c.nr_order = 1 THEN 1 ELSE 0 END) OVER (PARTITION BY ta.person_id) AS avg_lead_role
+FROM 
+    TopActors ta
+LEFT JOIN 
+    Credits c ON ta.person_id = c.person_id
+LEFT JOIN 
+    aka_title at ON c.movie_id = at.movie_id
+GROUP BY 
+    ta.name
+HAVING 
+    COUNT(DISTINCT c.movie_id) > 0
+ORDER BY 
+    total_movies DESC;

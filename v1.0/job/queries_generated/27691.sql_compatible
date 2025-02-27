@@ -1,0 +1,83 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        RANK() OVER (PARTITION BY at.kind_id ORDER BY at.production_year DESC) AS title_rank
+    FROM 
+        aka_title at
+),
+PersonFrequency AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS person_rank
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+PopularPersons AS (
+    SELECT 
+        pf.person_id,
+        ak.name AS person_name,
+        pf.movie_count
+    FROM 
+        PersonFrequency pf
+    JOIN 
+        aka_name ak ON pf.person_id = ak.person_id
+    WHERE 
+        pf.movie_count > 3
+),
+ReleasedTitles AS (
+    SELECT 
+        t.title,
+        t.imdb_index,
+        t.production_year,
+        ct.kind,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        kind_type ct ON t.kind_id = ct.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.imdb_index, t.production_year, ct.kind
+),
+FinalBenchmark AS (
+    SELECT 
+        pt.person_name,
+        rt.title,
+        rt.production_year,
+        rt.kind_id,
+        rt.title_rank,
+        rt.title_id,
+        r.company_count
+    FROM 
+        ReleasedTitles rt
+    JOIN 
+        PopularPersons pt ON rt.title_id = pt.person_id
+    JOIN 
+        RankedTitles rt2 ON rt2.title_id = rt.title_id
+    WHERE 
+        rt.title IS NOT NULL
+)
+SELECT 
+    fb.person_name,
+    fb.title,
+    fb.production_year,
+    fb.kind_id,
+    fb.title_rank,
+    fb.company_count
+FROM 
+    FinalBenchmark fb
+WHERE 
+    fb.title_rank <= 5
+ORDER BY 
+    fb.production_year DESC, 
+    fb.title_rank;

@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id
+),
+Directors AS (
+    SELECT 
+        m.id AS movie_id,
+        p.person_id,
+        p.name,
+        r.role
+    FROM 
+        movie_companies mc
+    JOIN 
+        role_type r ON mc.company_type_id = r.id
+    JOIN 
+        aka_name p ON mc.company_id = p.id
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    WHERE 
+        r.role = 'director'
+),
+KeywordMovies AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(d.name, 'Unknown Director') AS director_name,
+    km.keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    Directors d ON rm.id = d.movie_id
+LEFT JOIN 
+    KeywordMovies km ON rm.id = km.movie_id
+WHERE 
+    rm.cast_count > 5 AND 
+    rm.production_year BETWEEN 1990 AND 2020
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC;

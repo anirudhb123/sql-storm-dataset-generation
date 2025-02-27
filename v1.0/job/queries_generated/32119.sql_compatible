@@ -1,0 +1,62 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    cd.person_id,
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.production_year,
+    COUNT(cd.movie_id) AS total_movies,
+    AVG(cd.nr_order) AS average_order,
+    STRING_AGG(DISTINCT CAST(mt.production_year AS TEXT), ', ') AS production_years,
+    CASE 
+        WHEN COUNT(cd.movie_id) = 0 THEN 'No movies'
+        ELSE 'Movies available'
+    END AS movie_availability
+FROM 
+    cast_info cd
+JOIN 
+    aka_name ak ON cd.person_id = ak.person_id
+JOIN 
+    movie_hierarchy mh ON cd.movie_id = mh.movie_id
+JOIN 
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN 
+    (SELECT 
+        movie_id, 
+        COUNT(id) AS movie_count
+     FROM 
+        complete_cast
+     GROUP BY 
+        movie_id) AS cc ON cd.movie_id = cc.movie_id
+WHERE 
+    cd.nr_order IS NOT NULL
+GROUP BY 
+    cd.person_id, ak.name, mt.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT mt.id) > 1
+ORDER BY 
+    COUNT(cd.movie_id) DESC, ak.name;

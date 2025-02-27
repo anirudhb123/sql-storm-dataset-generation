@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id) AS DownVotesCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    ups.PostId,
+    ups.Title,
+    ups.Score,
+    ups.ViewCount,
+    ups.LastActivityDate,
+    us.TotalViews,
+    us.TotalPosts,
+    us.AvgScore,
+    ups.UpVotesCount,
+    ups.DownVotesCount,
+    ups.RankByScore
+FROM 
+    RankedPosts ups
+JOIN 
+    UserStats us ON ups.OwnerUserId = us.UserId
+WHERE 
+    ups.RankByScore <= 5
+ORDER BY 
+    us.TotalViews DESC, ups.Score DESC;

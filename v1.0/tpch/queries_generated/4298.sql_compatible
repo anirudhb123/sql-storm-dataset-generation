@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0 AND p.p_retailprice > 100
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 500
+),
+
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        COUNT(DISTINCT c.c_custkey) AS num_customers
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_regionkey
+    HAVING COUNT(DISTINCT c.c_custkey) > 100
+)
+
+SELECT 
+    p.p_name,
+    ps.ps_availqty,
+    ps.ps_supplycost,
+    cs.c_name,
+    cs.total_orders,
+    cs.total_spent,
+    r.r_name,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'Unknown Size' 
+        WHEN p.p_size < 10 THEN 'Small' 
+        ELSE 'Large' 
+    END AS part_size_category
+FROM FilteredParts ps
+JOIN part p ON ps.p_partkey = p.p_partkey
+LEFT JOIN CustomerOrders cs ON cs.total_spent > 1000
+JOIN TopRegions tr ON tr.n_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = cs.c_nationkey)
+LEFT JOIN RankedSuppliers rs ON rs.rn = 1
+ORDER BY p.p_name, supplier_name;

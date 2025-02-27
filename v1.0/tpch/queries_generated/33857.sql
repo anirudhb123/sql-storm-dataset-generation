@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, sh.s_name, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierDetail AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS average_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+)
+SELECT DISTINCT 
+    c.c_name AS customer_name,
+    cs.total_orders,
+    cs.total_spent,
+    p.p_name AS part_name,
+    ps.total_available,
+    ps.average_cost,
+    rs.s_name AS supplier_name,
+    rs.rank
+FROM CustomerOrderSummary cs
+JOIN customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN PartSupplierDetail ps ON ps.p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM RankedSuppliers WHERE rank <= 5))
+JOIN lineitem li ON li.l_partkey = ps.p_partkey
+LEFT JOIN supplier rs ON li.l_suppkey = rs.s_suppkey
+WHERE c.c_acctbal IS NOT NULL
+  AND rs.s_name IS NOT NULL
+  AND li.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY cs.total_spent DESC, ps.average_cost ASC;

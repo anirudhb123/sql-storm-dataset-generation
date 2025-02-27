@@ -1,0 +1,54 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderpriority,
+           RANK() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerPurchases AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredSuppliers AS (
+    SELECT sd.s_suppkey,
+           sd.s_name
+    FROM SupplierDetails sd
+    WHERE sd.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierDetails)
+)
+SELECT coalesce(c.c_name, 'Unknown Customer') AS customer_name,
+       COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount_spent,
+       f.s_name AS supplier_name,
+       COUNT(DISTINCT f.s_suppkey) AS number_of_suppliers
+FROM customer c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN FilteredSuppliers f ON EXISTS (
+    SELECT 1 
+    FROM partsupp ps
+    WHERE ps.ps_suppkey = f.s_suppkey
+    AND ps.ps_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_retailprice > 100.00
+    )
+)
+WHERE o.o_orderdate IS NOT NULL
+GROUP BY c.c_custkey, c.c_name, f.s_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+ORDER BY total_amount_spent DESC, customer_name ASC;

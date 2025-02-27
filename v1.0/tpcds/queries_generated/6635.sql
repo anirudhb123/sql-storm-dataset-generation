@@ -1,0 +1,48 @@
+
+WITH TotalSales AS (
+    SELECT 
+        ws.bill_cdemo_sk,
+        SUM(ws.net_paid_inc_tax) AS total_net_paid,
+        COUNT(ws.order_number) AS order_count
+    FROM web_sales ws
+    INNER JOIN date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.bill_cdemo_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ib.ib_income_band_sk
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+TopCustomers AS (
+    SELECT 
+        ts.bill_cdemo_sk,
+        ts.total_net_paid,
+        ts.order_count,
+        cd.gender,
+        cd.marital_status,
+        cd.education_status,
+        ib.income_band_sk
+    FROM TotalSales ts
+    JOIN CustomerDemographics cd ON ts.bill_cdemo_sk = cd.cd_demo_sk
+    WHERE ts.total_net_paid > 1000
+    ORDER BY ts.total_net_paid DESC
+    LIMIT 10
+)
+SELECT 
+    tc.bill_cdemo_sk,
+    tc.total_net_paid,
+    tc.order_count,
+    tc.gender,
+    tc.marital_status,
+    tc.education_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+FROM TopCustomers tc
+JOIN income_band ib ON tc.income_band_sk = ib.ib_income_band_sk;

@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS supply_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c_custkey,
+        c_name
+    FROM 
+        CustomerOrders
+    WHERE 
+        total_spent > (
+            SELECT AVG(total_spent) FROM CustomerOrders
+        )
+),
+Result AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(r.r_name, 'UNKNOWN') AS region_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT CASE WHEN cu.c_custkey IS NOT NULL THEN cu.c_custkey ELSE NULL END) AS cnt_customers
+    FROM 
+        part p
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        HighValueCustomers cu ON o.o_custkey = cu.c_custkey
+    LEFT JOIN 
+        nation n ON n.n_nationkey = (SELECT DISTINCT s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps_suppkey FROM RankedSuppliers rs WHERE rs.supply_rank = 1 AND rs.ps_partkey = p.p_partkey))
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, r.r_name
+    HAVING 
+        SUM(CASE WHEN l.l_tax IS NULL THEN 0 ELSE l.l_tax END) > AVG(l.l_extendedprice) OR COUNT(DISTINCT n.n_nationkey) > 2
+)
+SELECT 
+    p.*, 
+    COALESCE((SELECT MAX(rs.s_name) FROM RankedSuppliers rs WHERE rs.ps_partkey = p.p_partkey AND rs.supply_rank = 1), 'No Supplier') AS max_supplier_name 
+FROM 
+    Result p
+ORDER BY 
+    total_revenue DESC 
+LIMIT 10;

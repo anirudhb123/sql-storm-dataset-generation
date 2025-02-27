@@ -1,0 +1,77 @@
+WITH ranked_titles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS companies_count,
+        COUNT(DISTINCT mk.keyword_id) AS keywords_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.id, at.title, at.production_year
+    ORDER BY 
+        production_year DESC
+),
+actor_overview AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        SUM(CASE WHEN ct.kind = 'lead' THEN 1 ELSE 0 END) AS lead_roles_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        role_type ct ON ci.role_id = ct.id
+    GROUP BY 
+        ak.name
+),
+title_details AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year >= 2000
+    GROUP BY 
+        at.title, at.production_year
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.companies_count,
+    rt.keywords_count,
+    COALESCE(ov.movies_count, 0) AS actor_total_movies,
+    COALESCE(ov.lead_roles_count, 0) AS actor_lead_roles,
+    td.cast_count,
+    td.cast_names
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    actor_overview ov ON rt.title_id IN (
+        SELECT 
+            ci.movie_id 
+        FROM 
+            cast_info ci 
+        JOIN 
+            aka_name ak ON ci.person_id = ak.person_id 
+        WHERE 
+            ak.name LIKE '%Smith%' -- Example specific actor
+    )
+LEFT JOIN 
+    title_details td ON rt.title = td.movie_title AND rt.production_year = td.production_year
+ORDER BY 
+    rt.production_year DESC, rt.title;

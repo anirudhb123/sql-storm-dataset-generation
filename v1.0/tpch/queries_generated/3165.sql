@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_availqty) AS available_parts,
+        RANK() OVER (ORDER BY COUNT(ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TotalSales AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_custkey
+),
+NationCustomer AS (
+    SELECT 
+        n.n_name,
+        c.c_custkey,
+        c.c_acctbal,
+        COALESCE(ts.total_sales, 0) AS total_sales
+    FROM 
+        nation n
+    INNER JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        TotalSales ts ON c.c_custkey = ts.o_custkey
+)
+SELECT 
+    nc.n_name,
+    nc.c_custkey,
+    nc.c_acctbal,
+    nc.total_sales,
+    rs.s_name AS top_supplier,
+    rs.available_parts
+FROM 
+    NationCustomer nc
+LEFT JOIN 
+    RankedSuppliers rs ON nc.c_custkey IN (
+        SELECT 
+            o.o_custkey
+        FROM 
+            orders o
+        JOIN 
+            lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE 
+            l.l_returnflag = 'R' AND 
+            l.l_shipdate BETWEEN DATEADD(MONTH, -6, GETDATE()) AND GETDATE()
+        GROUP BY 
+            o.o_custkey
+        ORDER BY 
+            COUNT(l.l_linenumber) DESC
+        LIMIT 1
+    )
+WHERE 
+    (nc.total_sales > 50000 OR nc.c_acctbal IS NULL)
+ORDER BY 
+    nc.total_sales DESC, 
+    nc.c_acctbal ASC;

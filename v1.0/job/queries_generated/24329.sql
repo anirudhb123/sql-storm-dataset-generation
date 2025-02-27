@@ -1,0 +1,87 @@
+WITH RecursiveCasts AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+),
+MovieTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(NULLIF(t.title, ''), 'Untitled') AS safe_title
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_kind,
+        COUNT(mc.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS info_data
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mt.title AS movie_title,
+    mt.production_year,
+    rc.actor_name,
+    cm.company_name,
+    cm.company_kind,
+    mi.info_data,
+    RANK() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT rc.actor_name) DESC) AS actor_rank,
+    CASE 
+        WHEN COUNT(DISTINCT rc.actor_name) > 5 THEN 'Blockbuster'
+        ELSE 'Indie'
+    END AS movie_type,
+    (SELECT 
+        COUNT(*)
+     FROM 
+        movie_keyword mk
+     WHERE 
+        mk.movie_id = mt.id) AS keyword_count,
+    (SELECT 
+        STRING_AGG(DISTINCT k.keyword, ', ')
+     FROM 
+        movie_keyword mk
+     JOIN keyword k ON mk.keyword_id = k.id
+     WHERE 
+        mk.movie_id = mt.id) AS keywords
+FROM 
+    MovieTitles mt
+LEFT JOIN 
+    RecursiveCasts rc ON mt.id = rc.movie_id
+LEFT JOIN 
+    CompanyMovies cm ON mt.id = cm.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mt.id = mi.movie_id
+GROUP BY 
+    mt.title, 
+    mt.production_year, 
+    rc.actor_name, 
+    cm.company_name, 
+    cm.company_kind,
+    mi.info_data
+HAVING 
+    COUNT(DISTINCT rc.actor_name) > 2
+ORDER BY 
+    mt.production_year DESC, 
+    actor_rank;

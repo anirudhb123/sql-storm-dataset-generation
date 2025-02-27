@@ -1,0 +1,63 @@
+
+WITH RankedCustomers AS (
+    SELECT c_custkey, c_name, c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY c_acctbal DESC) AS rank
+    FROM customer
+    WHERE c_acctbal > (
+        SELECT AVG(c_acctbal) FROM customer
+        WHERE c_nationkey IS NOT NULL
+    )
+),
+FilteredSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal,
+           CASE
+               WHEN s_acctbal IS NULL THEN 'Unknown'
+               WHEN s_acctbal < 1000 THEN 'Low'
+               ELSE 'High'
+           END AS acctbal_category
+    FROM supplier
+    WHERE s_acctbal >= 200.00
+),
+TotalSales AS (
+    SELECT l_partkey, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l_partkey
+),
+NationsWithTopRevenue AS (
+    SELECT n.n_nationkey, n.n_name,
+           SUM(ts.total_revenue) AS nation_revenue
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN TotalSales ts ON ps.ps_partkey = ts.l_partkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+FinalResults AS (
+    SELECT rc.c_custkey, rc.c_name, rc.c_acctbal,
+           ns.nation_revenue,
+           fs.acctbal_category
+    FROM RankedCustomers rc
+    JOIN NationsWithTopRevenue ns ON rc.c_custkey IN (
+        SELECT c_custkey FROM customer WHERE c_nationkey IN (
+            SELECT n_nationkey FROM nation
+            WHERE r_regionkey IN (
+                SELECT r_regionkey FROM region
+                WHERE r_name LIKE 'A%'
+            )
+        )
+    )
+    LEFT JOIN FilteredSuppliers fs ON rc.c_custkey = fs.s_suppkey
+)
+SELECT *
+FROM FinalResults
+WHERE nation_revenue IS NOT NULL
+UNION ALL
+SELECT n.n_nationkey, n.n_name, NULL AS c_custkey, NULL AS c_name,
+       NULL AS c_acctbal, SUM(ts.total_revenue) AS nation_revenue,
+       'No Supplier Data' AS acctbal_category
+FROM nation n
+LEFT JOIN TotalSales ts ON n.n_nationkey = ts.l_partkey
+GROUP BY n.n_nationkey, n.n_name
+HAVING SUM(ts.total_revenue) IS NULL
+ORDER BY c_acctbal DESC, nation_revenue DESC NULLS LAST;

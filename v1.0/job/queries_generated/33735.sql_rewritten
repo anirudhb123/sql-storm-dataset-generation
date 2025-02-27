@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.episode_of_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.episode_of_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+movie_details AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        kt.kind AS genre,
+        COALESCE(ki.info, 'No Information') AS info,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        movie_info mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        info_type ki ON mi.info_type_id = ki.id
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN 
+        kind_type kt ON mh.kind_id = kt.id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, kt.kind, ki.info
+),
+ranked_movies AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY genre ORDER BY cast_count DESC) AS rank
+    FROM 
+        movie_details
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.genre,
+    rm.info,
+    rm.cast_count,
+    rnk.rank
+FROM 
+    ranked_movies rm
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.genre, rm.rank;

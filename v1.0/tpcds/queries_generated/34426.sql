@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_order_number) as rn
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+AddressDetails AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM
+        customer_address
+    WHERE
+        ca_country = 'USA'
+),
+CustomerInfo AS (
+    SELECT
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        COALESCE(hd_buy_potential, 'Unknown') AS buy_potential
+    FROM
+        customer
+    LEFT JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    LEFT JOIN household_demographics ON cd_demo_sk = hd_demo_sk
+    WHERE
+        c_birth_year BETWEEN 1980 AND 2000
+),
+SalesSummary AS (
+    SELECT
+        s.store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        SUM(ss_quantity) AS total_quantity,
+        COUNT(DISTINCT ss_customer_sk) AS unique_customers
+    FROM
+        store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY
+        s.store_sk
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    ca.full_address,
+    c.cd_gender,
+    s.total_profit,
+    s.total_quantity,
+    SUM(s.total_profit) OVER (PARTITION BY c.c_customer_sk ORDER BY s.total_profit DESC) AS running_total_profit
+FROM
+    CustomerInfo c
+LEFT JOIN AddressDetails ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN SalesSummary s ON c.c_customer_sk = s.store_sk
+WHERE
+    (c.cd_marital_status = 'M' AND c.cd_purchase_estimate > 1000)
+    OR (c.cd_marital_status IS NULL AND c.cd_purchase_estimate IS NULL)
+ORDER BY
+    running_total_profit DESC
+LIMIT 100;

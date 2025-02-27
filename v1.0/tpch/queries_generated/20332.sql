@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           c.c_acctbal,
+           CASE 
+               WHEN c.c_acctbal IS NULL THEN 'Unknown' 
+               WHEN c.c_acctbal < 10000 THEN 'Low Value' 
+               ELSE 'High Value' 
+           END AS value_segment
+    FROM customer c
+),
+OrderDetails AS (
+    SELECT o.o_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name,
+       COALESCE(SUM(od.total_revenue), 0) AS total_revenue,
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       MAX(CASE WHEN rnk = 1 THEN s.s_name END) AS top_supplier,
+       MAX(CASE WHEN od.avg_quantity IS NULL THEN 0 ELSE od.avg_quantity END) AS avg_order_quantity
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rnk = 1
+LEFT JOIN HighValueCustomers c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN OrderDetails od ON s.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size >= 10))
+GROUP BY r.r_name
+HAVING SUM(COALESCE(od.total_revenue, 0)) > 100000
+ORDER BY total_revenue DESC, r.r_name ASC
+LIMIT 10;

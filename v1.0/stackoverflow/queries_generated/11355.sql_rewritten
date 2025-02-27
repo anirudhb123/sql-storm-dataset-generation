@@ -1,0 +1,59 @@
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.LastActivityDate,
+        DATEDIFF(MINUTE, p.CreationDate, GETDATE()) AS PostAgeMinutes,
+        DATEDIFF(MINUTE, p.LastActivityDate, GETDATE()) AS LastActivityMinutes,
+        p.ViewCount,
+        p.Score
+    FROM 
+        Posts p
+),
+UserActivity AS (
+    SELECT 
+        upc.UserId,
+        AVG(pa.PostAgeMinutes) AS AvgPostAge,
+        AVG(pa.LastActivityMinutes) AS AvgLastActivity,
+        SUM(pa.ViewCount) AS TotalViews,
+        SUM(pa.Score) AS TotalScore
+    FROM 
+        UserPostCounts upc
+    JOIN 
+        PostActivity pa ON upc.PostCount > 0 
+    GROUP BY 
+        upc.UserId
+)
+
+SELECT 
+    u.DisplayName,
+    upc.PostCount,
+    upc.QuestionCount,
+    upc.AnswerCount,
+    ua.AvgPostAge,
+    ua.AvgLastActivity,
+    ua.TotalViews,
+    ua.TotalScore
+FROM 
+    UserPostCounts upc
+JOIN 
+    UserActivity ua ON upc.UserId = ua.UserId
+JOIN 
+    Users u ON upc.UserId = u.Id
+ORDER BY 
+    upc.PostCount DESC
+OPTION (MAXDOP 1);

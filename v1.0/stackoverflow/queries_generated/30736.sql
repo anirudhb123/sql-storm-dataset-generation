@@ -1,0 +1,87 @@
+WITH RECURSIVE PostViewCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ViewCount,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ViewCount + p2.ViewCount AS ViewCount,
+        pv.Level + 1
+    FROM 
+        PostViewCTE pv
+    JOIN 
+        Posts p ON p.ParentId = pv.Id -- Join with answers
+    WHERE 
+        p.PostTypeId = 2
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS NumberOfPosts,
+        COUNT(DISTINCT b.Id) AS NumberOfBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        ur.NumberOfPosts, 
+        ur.NumberOfBadges,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Id = ur.Id
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    vu.DisplayName,
+    vu.Reputation,
+    vu.NumberOfPosts,
+    vu.NumberOfBadges,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+    COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+    COALESCE(tv.TotalViewCount, 0) AS TotalPostViews
+FROM 
+    TopUsers vu
+LEFT JOIN 
+    Posts p ON vu.UserId = p.OwnerUserId 
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT 
+         OwnerUserId, 
+         SUM(ViewCount) AS TotalViewCount 
+     FROM 
+         Posts 
+     WHERE 
+         PostTypeId IN (1, 2) 
+     GROUP BY 
+         OwnerUserId) tv ON vu.UserId = tv.OwnerUserId
+WHERE 
+    vu.Rank <= 10 -- Top 10 users
+GROUP BY 
+    vu.DisplayName, vu.Reputation, vu.NumberOfPosts, vu.NumberOfBadges, tv.TotalViewCount
+ORDER BY 
+    vu.Reputation DESC;

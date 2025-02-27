@@ -1,0 +1,39 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2459803 AND 2459809 -- assuming dates correspond to real data
+    GROUP BY 
+        ws.web_site_id
+),
+TopWebSites AS (
+    SELECT 
+        web_site_id, 
+        total_net_profit, 
+        order_count
+    FROM 
+        RankedSales 
+    WHERE 
+        rank <= 10
+)
+SELECT 
+    w.web_name,
+    w.web_country,
+    t.total_net_profit,
+    t.order_count,
+    w.web_gmt_offset,
+    ROUND(t.total_net_profit / NULLIF(t.order_count, 0), 2) AS avg_profit_per_order
+FROM 
+    TopWebSites t
+JOIN 
+    web_site w ON t.web_site_id = w.web_site_id
+ORDER BY 
+    t.total_net_profit DESC;

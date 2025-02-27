@@ -1,0 +1,74 @@
+WITH RECURSIVE YearlyMovies AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count,
+        STRING_AGG(title, ', ') AS movie_titles
+    FROM 
+        aka_title
+    WHERE 
+        production_year IS NOT NULL
+    GROUP BY 
+        production_year
+), RankedMovies AS (
+    SELECT 
+        production_year,
+        movie_count,
+        movie_titles,
+        RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM 
+        YearlyMovies
+), ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+), MoviesWithInfo AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT CONCAT(c.name, ' (', ct.kind, ')')) AS companies
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        m.title, m.production_year
+)
+SELECT 
+    rm.production_year,
+    rm.movie_count,
+    rm.movie_titles,
+    am.actor_name,
+    mw.title AS movie_with_companies,
+    mw.companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorMovies am ON rm.production_year = am.production_year
+LEFT JOIN 
+    MoviesWithInfo mw ON mw.production_year = rm.production_year
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.movie_count DESC, rm.production_year DESC;
+
+This query produces a performance benchmark that encapsulates:
+
+- Recursive Common Table Expressions (CTEs) to derive yearly movie counts and titles.
+- Ranking the years based on the number of movies produced.
+- Joining actor names and movie titles via multiple joins.
+- Utilizing a Left Join to gather information on companies associated with each movie.
+- String aggregation to produce a list of companies for each movie.
+- Filtering to retrieve only the top 10 years with the highest movie output.

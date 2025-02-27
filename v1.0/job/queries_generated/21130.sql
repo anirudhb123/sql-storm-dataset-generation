@@ -1,0 +1,64 @@
+WITH RecursiveMovieChain AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        1 AS recursion_level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year = 2021 
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        r.recursion_level + 1
+    FROM 
+        RecursiveMovieChain r
+    JOIN 
+        movie_link ml ON r.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        r.recursion_level < 5
+)
+
+SELECT 
+    a.name AS actor_name,
+    m.movie_title,
+    COUNT(B.id) AS character_count,
+    CASE 
+        WHEN COUNT(mk.id) > 0 THEN 'Has Keywords' 
+        ELSE 'No Keywords' 
+    END AS keyword_status,
+    PCT_RANK() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT c.role_id) DESC) AS role_rank,
+    MIN(COALESCE(mi.info, 'Unknown')) AS info,
+    SUM(CASE 
+        WHEN comp.kind = 'Distributor' THEN 1 
+        ELSE 0 
+    END) AS distributor_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    RecursiveMovieChain m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON m.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name comp ON mc.company_id = comp.id  
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id 
+WHERE 
+    a.name IS NOT NULL 
+    AND a.name != ''
+    AND (m.movie_title LIKE '%Adventure%' OR m.movie_title LIKE '%Mystery%')
+GROUP BY 
+    a.name, m.movie_title, a.person_id
+HAVING 
+    COUNT(DISTINCT c.role_id) >= 3
+ORDER BY 
+    actor_name, movie_title;

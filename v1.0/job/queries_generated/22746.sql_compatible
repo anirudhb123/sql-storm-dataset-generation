@@ -1,0 +1,74 @@
+
+WITH RECURSIVE MovieTree AS (
+    SELECT 
+        mt.movie_id,
+        mt.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link mt
+    WHERE 
+        mt.link_type_id IN (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        mt.movie_id,
+        mt.linked_movie_id,
+        mtree.depth + 1
+    FROM 
+        movie_link mt
+    INNER JOIN 
+        MovieTree mtree ON mt.movie_id = mtree.linked_movie_id
+),
+CastWithRoles AS (
+    SELECT 
+        ai.person_id,
+        ai.movie_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ai.person_id, ai.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        aka_name ai
+    JOIN 
+        cast_info ci ON ai.person_id = ci.person_id
+),
+CompanyMovieInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    t.title AS Movie_Title,
+    t.production_year,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Actors,
+    cm.company_names,
+    cm.company_types,
+    COUNT(DISTINCT mt.linked_movie_id) AS NumberOfSequels,
+    AVG(ak.role_order) AS AvgRoleOrder
+FROM 
+    title t
+LEFT JOIN 
+    MovieTree mt ON t.id = mt.movie_id
+LEFT JOIN 
+    CastWithRoles ak ON t.id = ak.movie_id
+LEFT JOIN 
+    CompanyMovieInfo cm ON t.id = cm.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+    AND (t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tvseries')) OR t.id IS NULL)
+GROUP BY 
+    t.id, t.title, t.production_year, cm.company_names, cm.company_types
+HAVING 
+    COUNT(DISTINCT ak.person_id) > 2  
+    AND AVG(ak.role_order) > 1  
+ORDER BY 
+    t.production_year DESC, 
+    Movie_Title ASC;

@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND 
+        o.o_totalprice IS NOT NULL
+),
+NationSupplier AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        MAX(ps.ps_supplycost) AS max_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ns.total_acctbal, 0) AS total_acctbal,
+    ps.total_availqty,
+    ps.max_supplycost,
+    COUNT(DISTINCT lo.o_orderkey) AS number_of_orders,
+    STRING_AGG(DISTINCT lo.o_orderstatus) WITHIN GROUP (ORDER BY lo.o_orderstatus) AS order_statuses
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierInfo ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    partsupp ps2 ON p.p_partkey = ps2.ps_partkey
+LEFT JOIN 
+    RankedOrders lo ON lo.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+LEFT JOIN 
+    NationSupplier ns ON ns.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps2.ps_suppkey LIMIT 1)
+WHERE 
+    p.p_retailprice BETWEEN 50.00 AND 500.00 AND 
+    (p.p_comment LIKE '%quality%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, ns.total_acctbal, ps.total_availqty, ps.max_supplycost
+HAVING 
+    SUM(COALESCE(ps2.ps_availqty, 0)) > 10
+ORDER BY 
+    total_acctbal DESC, p.p_partkey ASC;

@@ -1,0 +1,50 @@
+WITH supplier_summary AS (
+    SELECT 
+        s_nationkey,
+        COUNT(DISTINCT s_suppkey) AS unique_suppliers,
+        SUM(s_acctbal) AS total_acctbal
+    FROM 
+        supplier
+    GROUP BY 
+        s_nationkey
+), order_summary AS (
+    SELECT 
+        o_custkey,
+        SUM(o_totalprice) AS total_order_value,
+        COUNT(o_orderkey) AS total_orders
+    FROM 
+        orders
+    GROUP BY 
+        o_custkey
+), lineitem_analysis AS (
+    SELECT 
+        l_orderkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+        COUNT(CASE WHEN l_returnflag = 'R' THEN 1 END) AS returns,
+        AVG(l_quantity) AS avg_quantity
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= '1997-01-01' AND l_shipdate < '1998-01-01'
+    GROUP BY 
+        l_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    ss.unique_suppliers,
+    ss.total_acctbal,
+    COALESCE(os.total_order_value, 0) AS total_order_value,
+    COALESCE(os.total_orders, 0) AS total_orders,
+    COALESCE(la.total_revenue, 0) AS total_revenue,
+    COALESCE(la.returns, 0) AS total_returns,
+    COALESCE(la.avg_quantity, 0) AS average_quantity
+FROM 
+    nation n
+LEFT JOIN 
+    supplier_summary ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    order_summary os ON os.o_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey)
+LEFT JOIN 
+    lineitem_analysis la ON la.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = n.n_nationkey))
+ORDER BY 
+    nation_name ASC, ss.unique_suppliers DESC;

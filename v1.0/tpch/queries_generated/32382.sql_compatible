@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SuppliersCTE AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        c.level + 1
+    FROM supplier s
+    JOIN SuppliersCTE c ON s.s_acctbal >= c.s_acctbal
+    WHERE c.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS total_line_items,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SupplierRegions AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    sr.nation_name,
+    sr.region_name,
+    sr.total_supply_cost,
+    os.total_revenue,
+    os.total_line_items,
+    COALESCE(sp.s_name, 'No Supplier') AS supplier_name,
+    COUNT(DISTINCT os.o_orderkey) AS order_count,
+    MAX(os.total_revenue) AS max_revenue,
+    CASE 
+        WHEN os.total_revenue > 100000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM SupplierRegions sr
+LEFT JOIN OrderSummary os ON sr.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = os.total_line_items))
+LEFT JOIN SuppliersCTE sp ON sp.level = 0 OR sp.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey) ORDER BY ps.ps_supplycost DESC LIMIT 1)
+WHERE sr.total_supply_cost IS NOT NULL
+GROUP BY 
+    sr.nation_name, 
+    sr.region_name, 
+    sr.total_supply_cost, 
+    os.total_revenue, 
+    os.total_line_items, 
+    sp.s_name
+HAVING SUM(sr.total_supply_cost) > 0
+ORDER BY sr.region_name, order_count DESC
+LIMIT 100;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostSummary AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(um.BadgeCount, 0) AS UserBadgeCount,
+        COALESCE(um.UpVotes, 0) AS UserUpVotes,
+        COALESCE(um.DownVotes, 0) AS UserDownVotes,
+        COALESCE(um.TotalViews, 0) AS UserTotalViews
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserMetrics um ON um.UserId = (
+            SELECT OwnerUserId 
+            FROM Posts 
+            WHERE Id = rp.PostId
+        )
+)
+SELECT 
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.UserBadgeCount,
+    ps.UserUpVotes,
+    ps.UserDownVotes,
+    ps.UserTotalViews,
+    ROW_NUMBER() OVER (ORDER BY ps.ViewCount DESC) AS Rank
+FROM 
+    PostSummary ps
+WHERE 
+    ps.UserBadgeCount > 0 
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

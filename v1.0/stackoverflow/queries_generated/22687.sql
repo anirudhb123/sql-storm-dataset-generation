@@ -1,0 +1,76 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        0 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- Starting from questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        ph.Level + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+ClosedQuestionStats AS (
+    SELECT 
+        p.Id AS ClosedPostId, 
+        COUNT(DISTINCT ph.PostId) AS RelatedPostCount,
+        STRING_AGG(DISTINCT ph.Title, '; ') AS RelatedPostTitles
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened history
+    WHERE p.PostTypeId = 1 AND p.ClosedDate IS NOT NULL
+    GROUP BY p.Id
+),
+RankedTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount,
+        RANK() OVER (ORDER BY COUNT(pt.PostId) DESC) AS TagRank
+    FROM Tags t
+    LEFT JOIN Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+),
+FinalStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        ups.TotalPosts,
+        ups.AnswerCount,
+        ups.AvgViewCount,
+        cqs.RelatedPostCount,
+        cqs.RelatedPostTitles,
+        rt.TagName,
+        rt.PostCount
+    FROM UserPostStats ups
+    JOIN Users u ON u.Id = ups.UserId
+    LEFT JOIN ClosedQuestionStats cqs ON cqs.ClosedPostId = (SELECT MIN(p.Id) FROM Posts p WHERE p.OwnerUserId = u.Id AND p.PostTypeId = 1 AND p.ClosedDate IS NOT NULL)
+    LEFT JOIN RankedTags rt ON rt.TagName IN (SELECT unnest(string_to_array(pt.Tags, '><')) FROM Posts pt WHERE pt.OwnerUserId = u.Id)
+    WHERE rt.TagRank <= 5 -- Top 5 tags
+)
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.TotalPosts,
+    f.AnswerCount,
+    f.AvgViewCount,
+    COALESCE(f.RelatedPostCount, 0) AS RelatedPostCount,
+    COALESCE(f.RelatedPostTitles, 'No Related Posts') AS RelatedPostTitles,
+    f.TagName,
+    f.PostCount
+FROM FinalStats f
+ORDER BY f.AnswerCount DESC, f.TotalPosts DESC;

@@ -1,0 +1,54 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS director_name,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        mp.company_name 
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id 
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name mp ON mc.company_id = mp.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year, a.name, mp.company_name
+),
+movie_info_details AS (
+    SELECT 
+        movie_id,
+        STRING_AGG(info, '; ') AS additional_info
+    FROM 
+        movie_info 
+    WHERE 
+        info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%trailer%')
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.director_name,
+    md.keywords,
+    mid.additional_info
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_info_details mid ON md.movie_id = mid.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

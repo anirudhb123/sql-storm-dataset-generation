@@ -1,0 +1,30 @@
+WITH supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, n.n_name AS nation_name, r.r_name AS region_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+), top_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.nation_name, s.region_name, s.s_acctbal
+    FROM supplier_details s
+    WHERE s.rank <= 5
+), product_summary AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand
+), order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT ts.s_name, ts.s_address, ts.nation_name, ts.region_name, ps.p_name, ps.supplier_count,
+       os.o_orderkey, os.total_revenue, os.o_orderstatus
+FROM top_suppliers ts
+JOIN product_summary ps ON ps.supplier_count > 0
+JOIN order_summary os ON os.total_revenue > 50000
+WHERE ts.s_acctbal > 1000
+ORDER BY ts.region_name, ps.total_supply_cost DESC;

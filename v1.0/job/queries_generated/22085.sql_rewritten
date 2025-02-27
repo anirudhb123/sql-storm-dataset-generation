@@ -1,0 +1,53 @@
+WITH popular_movies AS (
+    SELECT 
+        am.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        COALESCE(m.production_year, 0) AS production_year
+    FROM 
+        aka_title AS am
+    LEFT JOIN 
+        complete_cast AS cc ON am.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info AS mi ON am.movie_id = mi.movie_id AND mi.info_type_id = 1 
+    LEFT JOIN 
+        title AS m ON m.id = am.movie_id
+    WHERE 
+        am.production_year IS NOT NULL
+    GROUP BY 
+        am.title, production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 10
+)
+SELECT 
+    pm.movie_title,
+    pm.production_year,
+    COALESCE(
+        (SELECT COUNT(*)
+         FROM movie_keyword
+         WHERE movie_id IN 
+               (SELECT movie_id 
+                FROM aka_title 
+                WHERE title = pm.movie_title)
+         GROUP BY movie_id
+         HAVING COUNT(DISTINCT keyword_id) > 5), 
+        0) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY pm.production_year ORDER BY pm.cast_count DESC) AS rank
+FROM 
+    popular_movies AS pm
+JOIN 
+    aka_name AS an ON pm.movie_title = an.name
+LEFT JOIN 
+    movie_companies AS mc ON mc.movie_id = (
+        SELECT movie_id 
+        FROM aka_title 
+        WHERE title = pm.movie_title LIMIT 1
+    )
+WHERE 
+    an.name IS NOT NULL
+    AND (pm.production_year >= 2000 OR pm.cast_count > 20)
+ORDER BY 
+    pm.production_year DESC, 
+    pm.cast_count DESC
+LIMIT 50;

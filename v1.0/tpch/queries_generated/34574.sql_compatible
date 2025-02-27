@@ -1,0 +1,33 @@
+
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_container, p_retailprice
+    FROM part
+    WHERE p_size > 10
+    UNION ALL
+    SELECT p.p_partkey, CONCAT(p.p_name, ' (supplied by ', s.s_name, ')') AS p_name, p.p_size, p.p_container, p.p_retailprice * 1.1
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN PartHierarchy ph ON p.p_partkey = ph.p_partkey
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    PartHierarchy ph
+LEFT JOIN lineitem l ON ph.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' AND 
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+GROUP BY 
+    ph.p_partkey, ph.p_name, ph.p_size, ph.p_container, ph.p_retailprice
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

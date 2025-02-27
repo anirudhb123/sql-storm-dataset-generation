@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), OrderSummary AS (
+    SELECT o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_custkey
+), RegionSales AS (
+    SELECT n.n_regionkey, SUM(o.o_totalprice) AS region_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY n.n_regionkey
+), CustomerRanked AS (
+    SELECT c.c_custkey, c.c_name, cs.total_spent,
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM customer c
+    JOIN OrderSummary cs ON c.c_custkey = cs.o_custkey
+)
+SELECT rh.n_name, COUNT(DISTINCT cs.c_custkey) AS cust_count,
+       AVG(rs.region_sales) AS avg_region_sales,
+       MAX(cs.total_spent) AS max_spent,
+       MIN(cs.total_spent) AS min_spent
+FROM RegionSales rs
+JOIN nation rh ON rs.n_regionkey = rh.n_nationkey
+LEFT JOIN CustomerRanked cs ON cs.total_spent IS NOT NULL
+WHERE rh.r_comment IS NOT NULL
+GROUP BY rh.n_name
+HAVING COUNT(DISTINCT cs.c_custkey) > 5
+ORDER BY avg_region_sales DESC
+FETCH FIRST 10 ROWS ONLY;

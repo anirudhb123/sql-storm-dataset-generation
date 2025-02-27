@@ -1,0 +1,56 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt) AS total_returned_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_customer_sk
+), 
+IncomeRanges AS (
+    SELECT 
+        hd_demo_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        CASE 
+            WHEN ib_lower_bound IS NULL OR ib_upper_bound IS NULL THEN 'UNKNOWN'
+            ELSE CONCAT('$', ib_lower_bound, ' - $', ib_upper_bound)
+        END AS income_range
+    FROM household_demographics
+    JOIN income_band ON household_demographics.hd_income_band_sk = income_band.ib_income_band_sk
+), 
+HighReturnCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COALESCE(cr.total_returned_quantity, 0) AS total_returned_quantity,
+        COALESCE(cr.total_returned_amount, 0) AS total_returned_amount,
+        ir.income_range
+    FROM customer c
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN IncomeRanges ir ON c.c_current_hdemo_sk = ir.hd_demo_sk
+    WHERE (cr.total_returned_quantity IS NOT NULL AND cr.total_returned_quantity > 10)
+    OR  (cr.total_returned_amount IS NOT NULL AND cr.total_returned_amount > 500)
+), 
+RankedReturns AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY income_range ORDER BY total_returned_amount DESC) AS return_rank
+    FROM HighReturnCustomers
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(h.total_returned_quantity, 0) AS returns_quantity,
+    COALESCE(h.total_returned_amount, 0) AS returns_amount,
+    h.income_range,
+    r.return_rank
+FROM customer c
+LEFT JOIN HighReturnCustomers h ON c.c_customer_sk = h.c_customer_id
+JOIN RankedReturns r ON h.c_customer_id = r.c_customer_id
+WHERE r.return_rank <= 5
+AND (h.total_returned_quantity IS NOT NULL OR h.total_returned_amount IS NOT NULL)
+ORDER BY h.income_range, h.total_returned_amount DESC;

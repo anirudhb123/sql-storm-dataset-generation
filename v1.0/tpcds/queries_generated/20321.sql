@@ -1,0 +1,61 @@
+
+WITH RECURSIVE date_range AS (
+    SELECT MIN(d_date) as start_date, MAX(d_date) as end_date
+    FROM date_dim
+),
+sales_summary AS (
+    SELECT 
+        w.warehouse_name,
+        SUM(ws.net_profit) AS total_profit, 
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers,
+        AVG(ws_quantity) OVER (PARTITION BY w.warehouse_sk) AS avg_sales_per_order,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_sk ORDER BY SUM(ws.net_profit) DESC) AS rank
+    FROM web_sales ws
+    JOIN warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    WHERE ws.sold_date_sk BETWEEN (SELECT start_date FROM date_range) AND (SELECT end_date FROM date_range)
+    GROUP BY w.warehouse_sk, w.warehouse_name
+),
+customer_stats AS (
+    SELECT 
+        cd.gender,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        SUM(cd.dep_count) as total_dependents,
+        CASE 
+            WHEN AVG(cd.purchase_estimate) IS NULL THEN 'N/A'
+            ELSE CAST(AVG(cd.purchase_estimate) AS VARCHAR)
+        END AS avg_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.gender
+),
+promotional_analysis AS (
+    SELECT 
+        p.promo_id,
+        COUNT(DISTINCT ws.order_number) AS total_orders_used,
+        SUM(ws.net_paid) AS total_revenue,
+        MAX(ws.ext_sales_price) AS max_sales_price
+    FROM promotion p
+    JOIN web_sales ws ON p.promo_sk = ws.promo_sk
+    WHERE p.discount_active = 'Y'
+    GROUP BY p.promo_id
+)
+SELECT 
+    ss.warehouse_name,
+    ss.total_profit,
+    cs.gender,
+    cs.total_customers,
+    cs.total_dependents,
+    pa.promo_id,
+    pa.total_orders_used,
+    COALESCE(pa.total_revenue, 0) AS total_revenue,
+    ss.avg_sales_per_order,
+    ss.rank,
+    CASE 
+        WHEN ss.unique_customers > 0 THEN (ss.total_profit / NULLIF(ss.unique_customers, 0)) 
+        ELSE 0
+    END AS profit_per_customer
+FROM sales_summary ss
+LEFT JOIN customer_stats cs ON cs.total_customers > 100
+LEFT JOIN promotional_analysis pa ON ss.warehouse_name = 'Warehouse A'
+WHERE ss.total_profit > 1000
+ORDER BY ss.total_profit DESC, cs.gender;

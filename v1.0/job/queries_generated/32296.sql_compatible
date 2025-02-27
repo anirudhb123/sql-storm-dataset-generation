@@ -1,0 +1,53 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mt.production_year AS production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2020
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    AVG(CAST(mi.info AS INT)) AS avg_rating,
+    MAX(CAST(mi.info AS INT)) AS max_rating,
+    MIN(CAST(mi.info AS INT)) AS min_rating,
+    CASE 
+        WHEN MAX(CAST(mi.info AS INT)) IS NULL THEN 'No Ratings'
+        ELSE 'Rated'
+    END AS rating_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    mh.level <= 3
+GROUP BY 
+    mh.title, mh.production_year
+ORDER BY 
+    avg_rating DESC NULLS LAST
+LIMIT 10;

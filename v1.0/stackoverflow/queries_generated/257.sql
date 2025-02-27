@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        COALESCE(voteCounts.Upvotes, 0) AS Upvotes,
+        COALESCE(voteCounts.Downvotes, 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+        FROM Votes
+        GROUP BY PostId
+    ) AS voteCounts ON p.Id = voteCounts.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN PostsTags pt ON t.Id = pt.TagId
+    GROUP BY 
+        t.Id, t.TagName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Upvotes,
+    rp.Downvotes,
+    tc.TagName,
+    tc.PostCount,
+    CASE 
+        WHEN rp.Upvotes > 10 THEN 'Popular'
+        WHEN rp.Upvotes BETWEEN 5 AND 10 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagCounts tc ON rp.PostId = tc.TagId
+WHERE 
+    rp.UserPostRank = 1
+    AND (rp.Upvotes - rp.Downvotes) > 0
+ORDER BY 
+    rp.LastActivityDate DESC
+LIMIT 50;

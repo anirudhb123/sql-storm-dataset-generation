@@ -1,0 +1,51 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COALESCE(SUM(p.Score), 0) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+TopUsers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalScore DESC) AS Rank
+    FROM 
+        UserActivity
+)
+SELECT 
+    t.UserId,
+    t.DisplayName,
+    t.TotalPosts,
+    t.TotalComments,
+    t.TotalUpVotes,
+    t.TotalDownVotes,
+    t.TotalBadges,
+    t.TotalScore,
+    CASE 
+        WHEN t.Rank <= 10 THEN 'Top Contributor'
+        WHEN t.Rank <= 25 THEN 'Active Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorCategory
+FROM 
+    TopUsers t
+WHERE 
+    t.TotalPosts > 0
+ORDER BY 
+    t.Rank;

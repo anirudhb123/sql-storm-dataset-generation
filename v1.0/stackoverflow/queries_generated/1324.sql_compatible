@@ -1,0 +1,56 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        p.ClosedDate,
+        COALESCE(NULLIF(p.ClosedDate, '1970-01-01 00:00:00'), NULL) AS ActualCloseDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        (p.CreationDate >= '2020-01-01' OR p.Score > 100)
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+)
+SELECT 
+    u.DisplayName,
+    COALESCE(rp.Title, 'No Title') AS PostTitle,
+    rp.Score AS PostScore,
+    CASE 
+        WHEN uv.TotalVotes IS NULL THEN 'No Votes'
+        ELSE CAST(uv.TotalVotes AS VARCHAR(255)) || ' votes'
+    END AS VoteDetails,
+    CASE 
+        WHEN rp.PostRank IS NULL THEN 'Unranked'
+        ELSE CAST(rp.PostRank AS VARCHAR(255))
+    END AS PostRank,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    Comments c ON c.PostId = rp.Id
+LEFT JOIN 
+    UserVoteSummary uv ON u.Id = uv.UserId
+WHERE 
+    (rp.ActualCloseDate IS NULL OR rp.ActualCloseDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP))
+GROUP BY 
+    u.DisplayName, rp.Title, rp.Score, uv.TotalVotes, rp.PostRank
+ORDER BY 
+    rp.Score DESC, VoteDetails DESC
+LIMIT 100;

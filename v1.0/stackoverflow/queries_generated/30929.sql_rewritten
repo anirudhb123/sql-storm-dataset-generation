@@ -1,0 +1,48 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        0 AS Level,
+        NULL AS ParentUserId
+    FROM Users AS u
+    WHERE u.Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+    
+    UNION ALL
+
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        uh.Level + 1,
+        uh.UserId AS ParentUserId
+    FROM Users AS u
+    INNER JOIN UserHierarchy AS uh ON u.Id = uh.UserId 
+)
+SELECT 
+    uh.DisplayName,
+    uh.Reputation,
+    uh.Level,
+    COUNT(DISTINCT p.Id) AS PostCount,
+    SUM(COALESCE(v1.Score, 0)) AS TotalUpVotes,
+    SUM(COALESCE(v2.Score, 0)) AS TotalDownVotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed,
+    MAX(p.CreationDate) AS LastPostDate,
+    ARRAY_AGG(DISTINCT bp.Name) AS BadgesEarned
+FROM UserHierarchy uh
+LEFT JOIN Posts p ON p.OwnerUserId = uh.UserId
+LEFT JOIN Votes v1 ON v1.PostId = p.Id AND v1.VoteTypeId = 2 
+LEFT JOIN Votes v2 ON v2.PostId = p.Id AND v2.VoteTypeId = 3 
+LEFT JOIN PostTags pt ON pt.PostId = p.Id
+LEFT JOIN Tags t ON t.Id = pt.TagId
+LEFT JOIN Badges bp ON bp.UserId = uh.UserId
+WHERE uh.Reputation > 100 AND uh.Level = 0 
+GROUP BY 
+    uh.UserId, uh.DisplayName, uh.Reputation, uh.Level
+HAVING COUNT(p.Id) > 5 
+ORDER BY 
+    TotalUpVotes DESC,
+    uh.Reputation DESC
+LIMIT 10;

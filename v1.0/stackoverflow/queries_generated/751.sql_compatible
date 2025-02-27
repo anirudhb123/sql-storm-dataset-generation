@@ -1,0 +1,50 @@
+
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.CreationDate, '1970-01-01'::timestamp)) AS VotingActivity,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 0
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        VotingActivity,
+        ReputationRank,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS TopRank
+    FROM 
+        UserStatistics
+    WHERE 
+        PostCount > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation,
+    COALESCE((SELECT AVG(P.ViewCount) FROM Posts P WHERE P.OwnerUserId = TU.UserId), 0) AS AvgViewCount,
+    COUNT(DISTINCT PH.Id) AS EditCount,
+    STRING_AGG(DISTINCT PH.Comment, ', ') AS Comments
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostHistory PH ON TU.UserId = PH.UserId 
+WHERE 
+    TU.TopRank <= 10
+GROUP BY 
+    TU.DisplayName, TU.Reputation
+ORDER BY 
+    TU.Reputation DESC;

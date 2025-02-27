@@ -1,0 +1,40 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id, 
+           a.name AS actor_name, 
+           COUNT(ci.movie_id) AS movie_count,
+           ROW_NUMBER() OVER (ORDER BY COUNT(ci.movie_id) DESC) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY ci.person_id, a.name
+    HAVING COUNT(ci.movie_id) > 5
+
+    UNION ALL
+
+    SELECT ah.person_id, 
+           CONCAT(ah.actor_name, ' (Collaborator)') AS actor_name, 
+           ah.movie_count,
+           ROW_NUMBER() OVER (ORDER BY ah.movie_count DESC) AS actor_rank
+    FROM actor_hierarchy ah
+    JOIN cast_info ci ON ah.person_id = ci.person_id
+    WHERE ci.movie_id IN (
+        SELECT movie_id 
+        FROM cast_info 
+        WHERE person_id IN (SELECT person_id FROM actor_hierarchy)
+    )
+)
+
+SELECT a.actor_name, 
+       a.movie_count, 
+       COALESCE(t.title, 'No Title') AS title,
+       t.production_year,
+       CASE WHEN t.production_year IS NULL THEN 'Unknown Year' ELSE CAST(t.production_year AS TEXT) END AS production_year_str,
+       STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM actor_hierarchy a
+LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN aka_title t ON ci.movie_id = t.movie_id AND t.kind_id = 1  
+LEFT JOIN movie_keyword mk ON t.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+GROUP BY a.actor_name, a.movie_count, t.title, t.production_year
+HAVING a.movie_count > 10
+ORDER BY a.movie_count DESC, actor_rank;

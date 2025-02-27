@@ -1,0 +1,59 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY a.name) AS rank
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        aka_name a ON at.id = a.id
+    WHERE 
+        at.production_year >= 2000
+), 
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        MAX(r.role) AS lead_role
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+), 
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS infos
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    WHERE 
+        it.info LIKE '%award%'
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cd.cast_count,
+    cd.lead_role,
+    mi.infos
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CastDetails cd ON rt.title_id = cd.movie_id
+LEFT JOIN 
+    MovieInfo mi ON rt.title_id = mi.movie_id
+WHERE 
+    cd.cast_count IS NOT NULL
+ORDER BY 
+    rt.production_year DESC, 
+    cd.cast_count DESC
+LIMIT 10;

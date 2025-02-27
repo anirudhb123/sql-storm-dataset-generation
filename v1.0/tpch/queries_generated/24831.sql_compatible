@@ -1,0 +1,59 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(c.c_acctbal, 0) AS account_balance,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 5000 OR c.c_name LIKE 'A%'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS total_returned_quantity,
+    COUNT(DISTINCT l.l_orderkey) AS distinct_order_count,
+    MAX(rs.supplier_rank) AS max_supplier_rank,
+    COUNT(DISTINCT c.c_custkey) AS high_value_customers_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+JOIN 
+    HighValueCustomers c ON c.order_count > 0
+WHERE 
+    p.p_size BETWEEN 20 AND 50
+    AND (p.p_comment LIKE '%fragile%' OR p.p_comment IS NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice
+HAVING 
+    total_returned_quantity > 10
+    OR MAX(rs.supplier_rank) IS NULL
+ORDER BY 
+    p.p_retailprice DESC, 
+    high_value_customers_count
+LIMIT 100 OFFSET 0;

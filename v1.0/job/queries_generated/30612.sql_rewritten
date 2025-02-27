@@ -1,0 +1,57 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    WHERE 
+        a.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mh.depth,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(COALESCE(mi.info_length, 0)) AS avg_info_length,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mkw ON mh.movie_id = mkw.movie_id
+LEFT JOIN 
+    keyword kw ON mkw.keyword_id = kw.id
+WHERE 
+    mh.depth <= 3
+    AND ak.name IS NOT NULL
+    AND (mi.info IS NULL OR LENGTH(mi.info) > 10)
+GROUP BY 
+    ak.name, mt.title, mh.depth
+ORDER BY 
+    avg_info_length DESC, actor_name;

@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(vt.Reputation, 0)) AS TotalVoteReputation
+    FROM 
+        Users u 
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId 
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId AND vt.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        AVG(p.Score) AS AvgScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        ps.TotalPosts,
+        ps.AvgScore,
+        ps.TotalViews,
+        ps.QuestionCount,
+        ps.AnswerCount,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        UserReputation u
+    JOIN 
+        PostStats ps ON u.UserId = ps.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.TotalPosts,
+    tu.AvgScore,
+    tu.TotalViews,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    pt.Name AS PostType
+FROM 
+    TopUsers tu
+JOIN 
+    PostTypes pt ON pt.Id IN (SELECT DISTINCT p.PostTypeId FROM Posts p WHERE p.OwnerUserId = tu.UserId)
+WHERE 
+    tu.Rank <= 10
+ORDER BY 
+    tu.Rank, tu.Reputation DESC;

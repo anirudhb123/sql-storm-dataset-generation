@@ -1,0 +1,89 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        et.id AS movie_id,
+        et.title,
+        mh.depth + 1 AS depth,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title et
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+MovieWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY_AGG(kw.keyword) AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mt.id, mt.title
+),
+MovieCastInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors
+    FROM 
+        complete_cast mc
+    INNER JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    INNER JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        mc.movie_id
+),
+TopMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        mk.keywords,
+        mci.cast_count,
+        mci.actors,
+        mh.depth
+    FROM 
+        MovieWithKeywords mk
+    JOIN 
+        MovieCastInfo mci ON mk.movie_id = mci.movie_id
+    JOIN 
+        MovieHierarchy mh ON mk.movie_id = mh.movie_id
+    WHERE 
+        mci.cast_count > 5  
+),
+RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY depth ORDER BY cast_count DESC) AS rank
+    FROM 
+        TopMovies
+)
+SELECT 
+    rm.title,
+    rm.keywords,
+    rm.cast_count,
+    rm.actors,
+    rm.depth,
+    rm.rank
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10  
+ORDER BY 
+    rm.depth, rm.cast_count DESC;

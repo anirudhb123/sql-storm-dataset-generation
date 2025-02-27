@@ -1,0 +1,25 @@
+SELECT 
+    p.p_brand, 
+    p.p_name, 
+    COUNT(DISTINCT ps.ps_suppkey) AS total_suppliers, 
+    SUM(ps.ps_availqty) AS total_available_quantity, 
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    (SELECT COUNT(DISTINCT c.c_custkey)
+     FROM customer c
+     JOIN orders o ON c.c_custkey = o.o_custkey
+     JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+     WHERE l.l_partkey = p.p_partkey) AS total_customers_ordered
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+GROUP BY 
+    p.p_brand, p.p_name
+HAVING 
+    SUM(ps.ps_availqty) > 1000 AND 
+    (SELECT COUNT(DISTINCT n.n_name)
+     FROM nation n 
+     JOIN supplier s ON n.n_nationkey = s.s_nationkey
+     WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)) > 3
+ORDER BY 
+    total_suppliers DESC, average_supply_cost ASC;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        u.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(c.Id) > 0
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(mu.CommentCount, 0) AS UserCommentCount,
+        COALESCE(mu.UpVoteCount, 0) AS UserUpVoteCount,
+        COALESCE(mu.DownVoteCount, 0) AS UserDownVoteCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        MostActiveUsers mu ON rp.OwnerDisplayName = mu.DisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.Score,
+    pd.ViewCount,
+    pd.UserCommentCount,
+    pd.UserUpVoteCount,
+    pd.UserDownVoteCount
+FROM 
+    PostDetails pd
+WHERE 
+    pd.PostRank <= 5
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

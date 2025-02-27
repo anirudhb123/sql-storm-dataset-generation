@@ -1,0 +1,69 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 END) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS VoteScore,
+        DENSE_RANK() OVER (ORDER BY COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) DESC) AS UpvoteRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+ActiveQuestions AS (
+    SELECT 
+        P.Id AS QuestionId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.OwnerUserId,
+        p2.Id AS AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(P.ViewCount) AS TotalViewCount
+    FROM Posts P
+    LEFT JOIN Posts p2 ON P.Id = p2.ParentId AND p2.PostTypeId = 2
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.PostTypeId = 1
+    GROUP BY P.Id, P.Title, P.Score, P.CreationDate, P.OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(PHT.Name, ', ') AS ChangeTypes,
+        MAX(PH.CreationDate) AS LastChangeDate
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    WHERE PH.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+),
+VoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    SUM(COALESCE(VS.Upvotes, 0)) AS UpvotesReceived,
+    SUM(COALESCE(VS.Downvotes, 0)) AS DownvotesReceived,
+    COUNT(DISTINCT AQ.QuestionId) AS QuestionsAnswered,
+    COUNT(DISTINCT PHD.PostId) AS PostsEdited,
+    SUM(VS.VoteScore) AS UserVoteTotal,
+    COUNT(DISTINCT PS.PostId) FILTER (WHERE PS.UpVoteCount > 0) AS QuestionsWithUpvotes,
+    MAX(AQ.CreationDate) AS LastQuestionDate
+FROM Users U
+LEFT JOIN UserVoteStats VS ON U.Id = VS.UserId
+LEFT JOIN ActiveQuestions AQ ON U.Id = AQ.OwnerUserId
+LEFT JOIN PostHistoryDetails PHD ON U.Id = PHD.PostId
+LEFT JOIN VoteSummary PS ON AQ.QuestionId = PS.PostId
+WHERE U.Reputation > 1000
+GROUP BY U.Id, U.DisplayName
+HAVING COUNT(DISTINCT AQ.QuestionId) > 5
+ORDER BY UserVoteTotal DESC, LastQuestionDate DESC;

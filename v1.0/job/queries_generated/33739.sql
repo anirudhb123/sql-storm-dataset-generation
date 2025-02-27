@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COALESCE(ca.kind, 'Unknown Role') AS role_type,
+    COUNT(mg.movie_id) AS num_of_movies,
+    MAX(mg.level) AS max_link_level,
+    SUM(CASE WHEN ik.info_type_id = 1 THEN 1 ELSE 0 END) AS tagline_count,
+    STRING_AGG(DISTINCT ik.info, ', ') AS taglines,
+    RANK() OVER (PARTITION BY ak.person_id ORDER BY COUNT(mg.movie_id) DESC) AS ranking
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    comp_cast_type ca ON ci.person_role_id = ca.id
+LEFT JOIN 
+    MovieHierarchy mh ON mh.movie_id = at.id
+LEFT JOIN 
+    movie_info ik ON at.id = ik.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    at.production_year > 2000
+    AND ak.name IS NOT NULL
+    AND COALESCE(ca.kind, 'Unknown') NOT LIKE '%Guest%'
+GROUP BY 
+    ak.name, at.title, at.production_year, ca.kind 
+HAVING 
+    COUNT(mg.movie_id) > 2
+ORDER BY 
+    ranking, num_of_movies DESC;

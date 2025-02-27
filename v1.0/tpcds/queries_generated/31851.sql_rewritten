@@ -1,0 +1,28 @@
+WITH RECURSIVE ItemCTE AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, 
+           i_current_price, i_brand, 
+           ROW_NUMBER() OVER (PARTITION BY i_brand ORDER BY i_current_price DESC) AS PriceRank
+    FROM item
+    WHERE i_rec_start_date <= cast('2002-10-01' as date) AND (i_rec_end_date IS NULL OR i_rec_end_date > cast('2002-10-01' as date))
+),
+CustomerSales AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           SUM(ws.ws_ext_sales_price) AS TotalSales
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2001)
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT cs.c_customer_sk, cs.c_first_name, cs.c_last_name, 
+           cs.TotalSales,
+           CUME_DIST() OVER (ORDER BY cs.TotalSales DESC) AS CustomerDist
+    FROM CustomerSales cs
+)
+SELECT hvc.c_customer_sk, hvc.c_first_name, hvc.c_last_name,
+       i.ItemDesc, i.CurrentPrice
+FROM HighValueCustomers hvc
+LEFT JOIN ItemCTE i ON hvc.TotalSales > (SELECT AVG(TotalSales) FROM HighValueCustomers)
+WHERE hvc.CustomerDist <= 0.1
+ORDER BY hvc.TotalSales DESC, i.CurrentPrice ASC
+LIMIT 10;

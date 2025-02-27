@@ -1,0 +1,56 @@
+WITH TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+    GROUP BY 
+        Tag
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS QuestionCount,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Questions
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId 
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId AND V.VoteTypeId IN (8, 9)  -- Only BountyStart or BountyClose votes
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+MostActiveTags AS (
+    SELECT 
+        TS.Tag,
+        SUM(UA.QuestionCount) AS TotalQuestions,
+        SUM(UA.TotalBadges) AS TotalBadges
+    FROM 
+        TagStats TS
+    JOIN 
+        Posts P ON TS.Tag = ANY(string_to_array(P.Tags, '><'))  -- Matching tags
+    JOIN 
+        UserActivity UA ON P.OwnerUserId = UA.UserId
+    GROUP BY 
+        TS.Tag
+    ORDER BY 
+        TotalQuestions DESC, TotalBadges DESC
+)
+SELECT 
+    MAT.Tag,
+    MAT.TotalQuestions,
+    MAT.TotalBadges,
+    (SELECT COUNT(*) FROM Users) AS TotalUsers
+FROM 
+    MostActiveTags MAT
+WHERE 
+    MAT.TotalQuestions > 10  -- Filtering for tags with more than 10 questions
+ORDER BY 
+    MAT.TotalQuestions DESC;

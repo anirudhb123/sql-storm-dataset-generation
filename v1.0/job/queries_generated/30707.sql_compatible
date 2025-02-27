@@ -1,0 +1,54 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mt.kind_id, 
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        mt.kind_id, 
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id  
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    MAX(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS has_female_actor,
+    SUM(CASE WHEN mi.info_type_id = 1 AND mi.info IS NOT NULL THEN 1 ELSE 0 END) AS total_movie_info,
+    COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS production_year_rank
+FROM 
+    movie_hierarchy m
+LEFT JOIN 
+    complete_cast cc ON m.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+GROUP BY 
+    m.movie_id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2  
+ORDER BY 
+    m.production_year DESC, total_cast DESC;

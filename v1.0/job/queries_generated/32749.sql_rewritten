@@ -1,0 +1,50 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        p.id AS person_id,
+        0 AS level,
+        a.name AS actor_name
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN title t ON c.movie_id = t.id
+    WHERE t.production_year >= 2000 AND t.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        c2.person_id,
+        ah.level + 1,
+        a2.name
+    FROM ActorHierarchy ah
+    JOIN cast_info c2 ON ah.person_id = c2.person_id
+    JOIN aka_name a2 ON c2.person_id = a2.person_id
+    JOIN title t2 ON c2.movie_id = t2.id
+    WHERE t2.production_year < 2000 AND t2.kind_id = 1  
+),
+
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(u.person_id) AS num_actors,
+        MAX(mh.level) AS max_actor_level,
+        STRING_AGG(DISTINCT a.actor_name, ', ') AS actors_joined
+    FROM title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN ActorHierarchy mh ON mh.person_id = c.person_id
+    GROUP BY m.id, m.title, m.production_year
+)
+
+SELECT 
+    mi.movie_id,
+    mi.title,
+    mi.production_year,
+    COALESCE(mi.num_actors, 0) AS total_actors,
+    COALESCE(mi.max_actor_level, 0) AS max_level_reached,
+    mi.actors_joined
+FROM MovieInfo mi
+WHERE mi.production_year BETWEEN 1980 AND 2020
+ORDER BY
+    total_actors DESC,
+    production_year ASC
+FETCH FIRST 100 ROWS ONLY;

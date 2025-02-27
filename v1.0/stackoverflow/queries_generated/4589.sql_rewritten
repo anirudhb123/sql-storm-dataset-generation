@@ -1,0 +1,65 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TagCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+RecentPostActivity AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        DENSE_RANK() OVER (ORDER BY p.LastActivityDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.LastActivityDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.Questions,
+    u.Answers,
+    u.TotalBounties,
+    t.TagName,
+    COALESCE(MAX(rp.RecentRank), 0) AS RecentPostRank
+FROM 
+    UserPostStats u
+LEFT JOIN 
+    PopularTags t ON t.TagCount > 0
+LEFT JOIN 
+    RecentPostActivity rp ON u.UserId = rp.Id
+WHERE 
+    u.Rank <= 10
+GROUP BY 
+    u.UserId, u.DisplayName, t.TagName
+ORDER BY 
+    u.TotalPosts DESC, u.DisplayName;

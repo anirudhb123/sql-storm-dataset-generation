@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title AS movie_title, 
+        t.production_year, 
+        m.name AS company_name,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name m ON mc.company_id = m.id
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id, 
+        mh.movie_title, 
+        mh.production_year, 
+        m.name AS company_name,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name m ON mc.company_id = m.id
+    WHERE 
+        mh.level < 5  
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mh.company_name,
+        ROW_NUMBER() OVER (PARTITION BY mh.company_name ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+)
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    rm.company_name
+FROM 
+    RankedMovies rm
+WHERE 
+    rn <= 3  
+ORDER BY 
+    rm.company_name,
+    rm.production_year DESC;

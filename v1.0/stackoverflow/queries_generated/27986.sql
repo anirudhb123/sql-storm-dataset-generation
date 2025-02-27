@@ -1,0 +1,67 @@
+WITH TagCount AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only considering questions
+    GROUP BY 
+        TagName
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotesReceived,
+        SUM(v.VoteTypeId = 3) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS EditCount,
+        MIN(ph.CreationDate) AS FirstEdit,
+        MAX(ph.CreationDate) AS LastEdit
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Title, Body, Tags edits
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    ua.DisplayName AS UserName,
+    ua.TotalPosts,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.CommentCount,
+    ua.UpVotesReceived,
+    ua.DownVotesReceived,
+    re.EditCount,
+    re.FirstEdit,
+    re.LastEdit,
+    tc.TagName,
+    tc.PostCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RecentEdits re ON ua.UserId = re.UserId
+LEFT JOIN 
+    TagCount tc ON ua.QuestionCount > 0  -- Only showing tags for users with questions
+ORDER BY 
+    ua.TotalPosts DESC, 
+    re.EditCount DESC NULLS LAST;  -- Prioritize users with more posts and edits

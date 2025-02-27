@@ -1,0 +1,89 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS TotalComments,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'), 0) AS RecentBountyTotal
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        ARRAY_AGG(DISTINCT b.Name ORDER BY b.Date DESC) AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.TotalComments,
+        u.DisplayName AS OwnerDisplayName,
+        ur.Reputation AS OwnerReputation,
+        ur.Badges AS OwnerBadges,
+        rp.RecentBountyTotal
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserReputation ur ON ur.UserId = u.Id
+),
+FilteredPosts AS (
+    SELECT *
+    FROM PostStats
+    WHERE 
+        OwnerReputation > 1000 
+        AND RecentBountyTotal > 0
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.OwnerDisplayName,
+    fp.OwnerReputation,
+    STRING_AGG(DISTINCT fp.OwnerBadges, ', ') AS AllBadges,
+    (SELECT COUNT(*) 
+     FROM Posts sub 
+     WHERE sub.AuthorizedAnswerId = fp.PostId) AS AcceptedAnswersCount,
+    (SELECT COUNT(*) 
+     FROM PostHistory ph 
+     WHERE ph.PostId = fp.PostId 
+     AND ph.CreationDate = (
+           SELECT MAX(ph2.CreationDate)
+           FROM PostHistory ph2
+           WHERE ph2.PostId = ph.PostId
+       )) AS LastEditDate
+FROM 
+    FilteredPosts fp
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.OwnerDisplayName, fp.OwnerReputation
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

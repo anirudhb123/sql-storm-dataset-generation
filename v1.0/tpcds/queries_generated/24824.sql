@@ -1,0 +1,97 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS rank_by_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        rs.ws_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        rs.total_sold,
+        rs.order_count,
+        CASE 
+            WHEN i.i_current_price > 100 THEN 'High'
+            WHEN i.i_current_price BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS price_category
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.rank_by_sales <= 5
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
+        SUM(cs.cs_net_paid) AS total_consumption,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(DATEDIFF(CURRENT_DATE, c.c_first_sales_date_sk)) AS days_as_customer
+    FROM 
+        customer c
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+SalesAndDemographics AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.catalog_orders,
+        ci.total_consumption,
+        ti.total_sold,
+        ti.price_category
+    FROM 
+        CustomerStats ci
+    JOIN 
+        TopItems ti ON ci.c_customer_sk = (
+            SELECT 
+                ws_bill_customer_sk
+            FROM 
+                web_sales ws
+            WHERE 
+                ws.ws_item_sk IN (SELECT ws_item_sk FROM TopItems)
+            ORDER BY 
+                ws.ws_quantity DESC
+            LIMIT 1
+        )
+)
+SELECT 
+    s.c_customer_sk,
+    s.catalog_orders,
+    s.total_consumption,
+    CASE 
+        WHEN s.total_consumption IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END AS consumption_status,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        store s
+     WHERE 
+        s.s_market_desc = 'Urban' AND
+        s.s_country IS NOT NULL) AS urban_stores_count,
+    COALESCE(SUM(ti.total_sold) FILTER (WHERE ti.price_category = 'High'), 0) AS high_price_sales,
+    COALESCE(SUM(ti.total_sold) FILTER (WHERE ti.price_category = 'Medium'), 0) AS medium_price_sales,
+    COALESCE(SUM(ti.total_sold) FILTER (WHERE ti.price_category = 'Low'), 0) AS low_price_sales
+FROM 
+    SalesAndDemographics s
+LEFT JOIN 
+    TopItems ti ON s.total_sold = ti.total_sold
+GROUP BY 
+    s.c_customer_sk, s.catalog_orders, s.total_consumption
+HAVING 
+    (SUM(ti.total_sold) IS NULL OR SUM(ti.total_sold) > 1000)
+ORDER BY 
+    s.total_consumption DESC NULLS LAST;

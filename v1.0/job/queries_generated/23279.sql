@@ -1,0 +1,69 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.id AS movie_id,
+        ARRAY[mt.title] AS title_path
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mk.title AS movie_title,
+        mk.production_year,
+        mk.id AS movie_id,
+        mh.title_path || mk.title
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS mk ON ml.linked_movie_id = mk.id
+    JOIN 
+        movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mk.production_year >= 2000
+),
+actor_info AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movies
+    FROM 
+        aka_name AS a
+    LEFT JOIN 
+        cast_info AS ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title AS mt ON ci.movie_id = mt.id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+)
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    ai.actor_name,
+    ai.movie_count,
+    ai.movies,
+    CASE 
+        WHEN ai.movie_count IS NULL THEN 'No Movies' 
+        ELSE 'Active Actor' 
+    END AS actor_status,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY ai.movie_count DESC) AS rank_within_year,
+    COALESCE(mk.keyword, 'No Keyword') AS keyword
+FROM 
+    movie_hierarchy AS mh
+LEFT JOIN 
+    movie_keyword AS mk ON mh.movie_id = mk.movie_id
+JOIN 
+    actor_info AS ai ON mh.movie_id = ai.movie_count
+WHERE 
+    mh.production_year IS NOT NULL
+    AND (mh.movie_title ILIKE '%Action%' OR mh.movie_title ILIKE '%Drama%')
+ORDER BY 
+    mh.production_year DESC,
+    rank_within_year ASC
+FETCH FIRST 100 ROWS ONLY;

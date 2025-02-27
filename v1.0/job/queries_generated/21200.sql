@@ -1,0 +1,76 @@
+WITH movie_data AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS cast_names,
+        COUNT(DISTINCT cm.company_id) AS production_companies_count,
+        SUM(CASE 
+                WHEN m.production_year IS NOT NULL THEN 1 
+                ELSE 0 
+            END) AS valid_productions
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ci.person_id
+    LEFT JOIN 
+        movie_companies cm ON cm.movie_id = m.id
+    GROUP BY 
+        m.id
+), ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_names,
+        production_companies_count,
+        valid_productions,
+        ROW_NUMBER() OVER (ORDER BY production_companies_count DESC, valid_productions DESC) AS rank,
+        LEAD(title) OVER (ORDER BY production_companies_count DESC, valid_productions DESC) AS next_movie
+    FROM 
+        movie_data
+), outer_join_movies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        COALESCE(r.cast_names, 'No cast available') AS cast_names,
+        r.production_companies_count,
+        r.valid_productions,
+        r.rank,
+        p.info AS extra_info
+    FROM 
+        ranked_movies r
+    LEFT JOIN 
+        person_info p ON p.person_id = (SELECT person_id FROM cast_info ci WHERE ci.movie_id = r.movie_id LIMIT 1)
+    WHERE 
+        r.production_year < EXTRACT(YEAR FROM CURRENT_TIMESTAMP) 
+        OR r.rank IS NULL
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    CAST(cast_names AS TEXT) AS cast_names,
+    production_companies_count,
+    valid_productions,
+    rank,
+    COALESCE(next_movie, 'No subsequent movie') AS next_movie,
+    (SELECT 
+        STRING_AGG(DISTINCT k.keyword, ', ') 
+     FROM 
+        movie_keyword mk
+     JOIN 
+        keyword k ON k.id = mk.keyword_id 
+     WHERE 
+        mk.movie_id = outer_join_movies.movie_id) AS keywords
+FROM 
+    outer_join_movies
+WHERE 
+    production_companies_count > 1
+ORDER BY 
+    rank
+LIMIT 10;
+This SQL query structures a complex benchmarking scenario, leveraging CTEs, window functions, outer joins, and subqueries combined with advanced filtering and string aggregation. The aim is to analyze movie data while efficiently handling potential NULL values and unusual corner cases stemming from the production year or company counts.

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' -- Posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.ViewCount, pt.Name
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(c.Score) AS TotalCommentScore,
+        AVG(COALESCE(DATEDIFF(CURRENT_TIMESTAMP, p.CreationDate), 0)) AS AveragePostAge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.CreationDate > NOW() - INTERVAL '3 months' -- Recent changes
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostType,
+    ua.DisplayName AS OwnerName,
+    ua.PostsCount,
+    ua.TotalCommentScore,
+    ua.AveragePostAge,
+    rph.Comment AS LatestHistoryComment,
+    CASE 
+        WHEN rph.HistoryRank = 1 THEN 'Recently Modified'
+        ELSE 'Older Revision'
+    END AS ModificationStatus
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ua ON ua.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN 
+    RecentPostHistory rph ON rph.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 10 -- Top 10 posts by score in each type
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

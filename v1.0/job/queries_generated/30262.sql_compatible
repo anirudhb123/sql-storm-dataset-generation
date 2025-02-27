@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT cc.subject_id) AS cast_count,
+    AVG(COALESCE(mk.keyword_count, 0)) AS average_keywords,
+    JSON_AGG(DISTINCT mk.keyword) AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN (
+    SELECT 
+        mk.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+) mk ON mk.movie_id = t.id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = t.id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year IS NOT NULL
+    AND (mh.level IS NULL OR mh.level < 3) 
+GROUP BY 
+    a.id, a.name, t.id, t.title, t.production_year
+ORDER BY 
+    actor_name, 
+    movie_rank;

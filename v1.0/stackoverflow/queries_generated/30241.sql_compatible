@@ -1,0 +1,54 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired, 0 AS Level
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired, r.Level + 1
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy r ON t.Id = r.Id
+    WHERE r.Level < 10 
+), 
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount,
+        COUNT(DISTINCT v.Id) AS VotesCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), 
+
+PopularPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 YEAR')
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    th.TagName AS PopularTag,
+    pp.Title AS TopPost,
+    pp.Score AS TopPostScore
+FROM UserActivity u
+LEFT JOIN PopularPosts pp ON pp.PostRank = 1
+LEFT JOIN RecursiveTagHierarchy th ON th.Id = pp.Id
+WHERE u.Reputation > 1000
+  AND pp.Score IS NOT NULL
+  AND th.IsModeratorOnly = 0
+ORDER BY u.Reputation DESC, pp.Score DESC;

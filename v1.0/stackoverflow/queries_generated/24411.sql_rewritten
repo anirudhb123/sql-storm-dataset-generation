@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreateDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS rn,
+        COUNT(v.Id) OVER (PARTITION BY p.OwnerUserId) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+UserActivities AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopened
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT
+    ua.DisplayName,
+    ua.Reputation,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    COALESCE(rp.Title, 'No Title') AS PopularPostTitle,
+    rp.ViewCount AS PopularPostViewCount,
+    ph.LastClosed,
+    ph.LastReopened,
+    ua.BadgeCount,
+    ua.CommentCount
+FROM 
+    UserActivities ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN 
+    PostHistoryInfo ph ON rp.PostId = ph.PostId
+WHERE 
+    ua.Reputation IS NOT NULL
+    AND (ua.QuestionCount > 0 OR ua.AnswerCount > 0)
+    AND (ua.BadgeCount > 0 OR ua.CommentCount > 5)
+ORDER BY 
+    ua.Reputation DESC, ua.AnswerCount DESC;

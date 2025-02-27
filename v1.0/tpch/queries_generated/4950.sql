@@ -1,0 +1,59 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSupplyStatistics AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.total_spent,
+    cs.order_count,
+    po.o_orderdate,
+    po.o_totalprice,
+    ps.p_name AS part_name,
+    ps.supplier_count,
+    ps.avg_supply_cost
+FROM 
+    CustomerSummary cs
+JOIN 
+    RankedOrders po ON cs.order_count > 5 AND cs.total_spent > 1000
+LEFT JOIN 
+    lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderdate = po.o_orderdate)
+LEFT JOIN 
+    partsupp ps ON li.l_partkey = ps.ps_partkey
+WHERE 
+    ps.avg_supply_cost IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, po.o_totalprice DESC;

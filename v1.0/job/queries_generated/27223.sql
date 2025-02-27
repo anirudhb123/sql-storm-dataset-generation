@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        a.kind_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY 
+        a.id
+),
+AverageCasting AS (
+    SELECT 
+        kind_id,
+        AVG(total_cast) AS average_cast_size
+    FROM 
+        RankedMovies
+    GROUP BY 
+        kind_id
+),
+DistinctKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_aggregated
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    kt.kind AS kind_of_movie,
+    rm.total_cast,
+    ak.aka_names,
+    ak.avg_cast_size AS average_cast_size,
+    dk.keywords_aggregated
+FROM 
+    RankedMovies rm
+JOIN 
+    kind_type kt ON kt.id = rm.kind_id
+JOIN 
+    AverageCasting ak ON ak.kind_id = rm.kind_id
+LEFT JOIN 
+    DistinctKeywords dk ON dk.movie_id = rm.id
+WHERE 
+    rm.production_year > 2000
+ORDER BY 
+    rm.total_cast DESC, 
+    rm.production_year ASC;

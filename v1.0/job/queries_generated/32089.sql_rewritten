@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title AS m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy AS mh ON mh.movie_id = ml.movie_id
+),
+RankedActors AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) as actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+),
+ActorMovieCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count
+    FROM 
+        RankedActors
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(*) > 3  
+),
+TopMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT a.actor_name) AS actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        RankedActors a ON mh.movie_id = a.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+    HAVING 
+        COUNT(DISTINCT a.actor_name) > 5  
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(amc.actor_count, 0) AS actor_count,
+    COALESCE((SELECT GROUP_CONCAT(a.name, ', ') 
+               FROM aka_name a 
+               JOIN cast_info c ON a.person_id = c.person_id 
+               WHERE c.movie_id = tm.movie_id), 'No actors') AS actor_names,
+    (SELECT MIN(m.production_year) 
+     FROM aka_title m 
+     WHERE m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'feature'))
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    ActorMovieCounts amc ON tm.actor_count = amc.movie_count
+ORDER BY 
+    tm.production_year DESC, 
+    tm.actor_count DESC;

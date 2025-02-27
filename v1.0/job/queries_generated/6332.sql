@@ -1,0 +1,28 @@
+SELECT 
+    CONCAT(aka.name, ' (', title.title, ')') AS full_title,
+    COUNT(DISTINCT cast.person_id) AS num_actors,
+    ARRAY_AGG(DISTINCT company.name) AS production_companies,
+    ARRAY_AGG(DISTINCT keyword.keyword) AS movie_keywords
+FROM 
+    aka_title AS title
+JOIN 
+    complete_cast AS comp ON title.id = comp.movie_id
+JOIN 
+    cast_info AS cast ON comp.subject_id = cast.id
+JOIN 
+    aka_name AS aka ON cast.person_id = aka.person_id
+JOIN 
+    movie_companies AS mc ON title.id = mc.movie_id
+JOIN 
+    company_name AS company ON mc.company_id = company.id
+JOIN 
+    movie_keyword AS mk ON title.id = mk.movie_id
+JOIN 
+    keyword AS keyword ON mk.keyword_id = keyword.id
+WHERE 
+    title.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    title.id, aka.name
+ORDER BY 
+    num_actors DESC, title.title ASC
+LIMIT 10;

@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND t.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        p.id AS person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movies_count,
+        MAX(CASE WHEN ci.role_id = 1 THEN 'Lead' ELSE 'Supporting' END) AS role_type
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        RankedMovies r ON c.movie_id = r.movie_id
+    LEFT JOIN 
+        role_type ci ON c.role_id = ci.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        p.id, a.name
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    ad.actor_name,
+    COALESCE(ad.movies_count, 0) AS actor_movies_count,
+    ad.role_type,
+    COALESCE(mk.keywords, 'None') AS associated_keywords
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    ActorDetails ad ON r.movie_id IN (SELECT mk.movie_id FROM movie_keyword mk WHERE mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%action%'))
+LEFT JOIN 
+    MovieKeywords mk ON r.movie_id = mk.movie_id
+WHERE 
+    r.title_rank = 1
+    AND (COALESCE(ad.movies_count, 0) > 1 OR ad.role_type IS NULL)
+ORDER BY 
+    r.production_year DESC, r.title ASC
+LIMIT 50;

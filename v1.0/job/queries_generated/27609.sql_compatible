@@ -1,0 +1,60 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        k.keyword AS movie_keyword,
+        c.role AS casting_role,
+        p.name AS actor_name,
+        co.name AS company_name,
+        COUNT(DISTINCT cm.id) AS num_companies
+    FROM 
+        title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword, c.role, p.name, co.name
+),
+movie_ranking AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        movie_keyword,
+        casting_role,
+        actor_name,
+        company_name,
+        num_companies,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY num_companies DESC) AS company_rank
+    FROM 
+        movie_details
+)
+SELECT 
+    movie_id,
+    movie_title,
+    production_year,
+    movie_keyword,
+    casting_role,
+    actor_name,
+    company_name,
+    num_companies,
+    company_rank
+FROM 
+    movie_ranking
+WHERE 
+    num_companies > 1
+ORDER BY 
+    production_year DESC, company_rank ASC;

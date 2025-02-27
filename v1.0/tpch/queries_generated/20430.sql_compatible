@@ -1,0 +1,51 @@
+
+WITH RecursiveSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey, p.p_partkey,
+           ROW_NUMBER() OVER(PARTITION BY s.s_suppkey ORDER BY p.p_retailprice DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > 1000 AND p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p.p_retailprice < 100)
+), 
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F' AND l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_name
+    HAVING SUM(l.l_discount) > 0.2 * SUM(l.l_extendedprice)
+), 
+DistinctNations AS (
+    SELECT DISTINCT n.n_name
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+), 
+RankedSegments AS (
+    SELECT c.c_mktsegment, COUNT(DISTINCT c.c_custkey) AS cust_count,
+           RANK() OVER(ORDER BY COUNT(DISTINCT c.c_custkey) DESC) AS seg_rank
+    FROM customer c
+    GROUP BY c.c_mktsegment
+)
+
+SELECT
+    R.s_name AS Supplier_Name,
+    H.o_orderkey AS Order_ID,
+    H.total_line_value AS Line_Total_Value,
+    D.n_name AS Nation,
+    S.c_mktsegment AS Market_Segment,
+    CASE 
+        WHEN H.o_totalprice > 50000 THEN 'High Value'
+        WHEN H.o_totalprice BETWEEN 20000 AND 50000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS Order_Value_Category,
+    CONCAT('Order ', CAST(H.o_orderkey AS CHAR), ' from ', H.c_name) AS order_description
+FROM RecursiveSupplier R
+LEFT JOIN HighValueOrders H ON H.o_orderkey = R.s_suppkey 
+LEFT JOIN DistinctNations D ON D.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = R.n_nationkey)
+LEFT JOIN RankedSegments S ON R.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = D.n_name)
+WHERE R.rn <= 5 
+AND (R.s_acctbal > 0 OR R.s_acctbal IS NULL)
+ORDER BY Order_Value_Category, R.s_name DESC;

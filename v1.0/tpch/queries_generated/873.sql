@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS cost_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    r.r_name AS region_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue,
+    COALESCE(o.o_orderkey, 'No Orders') AS order_reference,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) = 1 THEN o.o_orderkey END) AS last_order_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN 
+    orders o ON li.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    supplier s ON li.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    (r.r_name LIKE '%east%' OR r.r_name IS NULL) AND 
+    (p.p_retailprice > 100 OR p.p_comment LIKE '%premium%')
+GROUP BY 
+    p.p_name, r.r_name, s.s_name, c.c_name, o.o_orderkey
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 1000
+ORDER BY 
+    revenue DESC, p.p_name;

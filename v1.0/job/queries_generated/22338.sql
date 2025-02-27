@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 0 AS level
+    FROM aka_title m
+    WHERE m.season_nr IS NULL
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, m.title, m.production_year, mh.level + 1
+    FROM aka_title m
+    INNER JOIN movie_hierarchy mh ON m.episode_of_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT ci.movie_id, 
+           ak.name AS actor_name, 
+           rt.role, 
+           DENSE_RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    WHERE ak.name IS NOT NULL
+),
+keyword_summary AS (
+    SELECT movie_id, 
+           STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+company_details AS (
+    SELECT mc.movie_id, 
+           cn.name AS company_name,
+           ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+)
+SELECT mh.movie_id,
+       mh.title,
+       mh.production_year,
+       a.actor_name,
+       a.role,
+       a.role_rank,
+       ks.keywords,
+       cd.company_name,
+       cd.company_type,
+       COALESCE(NULLIF(mh.production_year, 0), 'Unknown Year') AS production_year_display
+FROM movie_hierarchy mh
+LEFT JOIN actor_roles a ON mh.movie_id = a.movie_id
+LEFT JOIN keyword_summary ks ON mh.movie_id = ks.movie_id
+LEFT JOIN company_details cd ON mh.movie_id = cd.movie_id
+WHERE (mh.production_year IS NOT NULL OR mh.production_year != 0)
+  AND (a.role_rank IS NOT NULL OR a.role_rank > 0)
+  AND NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = mh.movie_id 
+          AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Banned' LIMIT 1)
+    )
+ORDER BY mh.production_year DESC, 
+         mh.title, 
+         a.role_rank ASC;

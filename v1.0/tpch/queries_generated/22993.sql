@@ -1,0 +1,90 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 1000)
+),
+
+SupplierCostAnalysis AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, s.s_suppkey, s.s_name, s.s_acctbal
+),
+
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_orderkey) AS total_items
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+
+NationStats AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+)
+
+SELECT 
+    rp.p_name,
+    rp.p_mfgr,
+    sc.total_supply_cost,
+    od.total_lineitem_value,
+    ns.n_name,
+    ns.total_suppliers,
+    ns.total_balance
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierCostAnalysis sc ON rp.p_partkey = sc.ps_partkey 
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey = (
+        SELECT o.o_orderkey
+        FROM orders o 
+        WHERE o.o_orderdate = (
+            SELECT MAX(o2.o_orderdate) 
+            FROM orders o2 
+            WHERE o2.o_orderkey = od.o_orderkey 
+              AND o2.o_orderstatus = 'F'
+        )
+        LIMIT 1
+    )
+CROSS JOIN 
+    (SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS total_suppliers 
+     FROM nation n 
+     LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey 
+     GROUP BY n.n_name 
+     HAVING total_suppliers > 10) ns
+WHERE 
+    rp.rank_by_price <= 5 
+    AND (rp.p_retailprice IS NULL OR rp.p_retailprice > 0)
+ORDER BY 
+    rp.p_retailprice DESC, ns.total_balance DESC;

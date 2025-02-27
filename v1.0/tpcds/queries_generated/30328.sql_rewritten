@@ -1,0 +1,37 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_sold_date_sk,
+        ss_item_sk,
+        ss_ticket_number,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_paid) DESC) AS rn
+    FROM store_sales
+    WHERE ss_sold_date_sk >= 2451000 
+    GROUP BY ss_sold_date_sk, ss_item_sk, ss_ticket_number
+),
+TopSales AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_id,
+        item.i_product_name,
+        sales.total_sales,
+        ROW_NUMBER() OVER (ORDER BY sales.total_sales DESC) AS sales_rank
+    FROM SalesCTE sales
+    JOIN item ON sales.ss_item_sk = item.i_item_sk
+    WHERE sales.rn = 1
+)
+SELECT 
+    ca.city,
+    SUM(ts.total_sales) AS sum_sales,
+    COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT c.c_customer_id) FILTER (WHERE c.c_birth_year IS NULL) AS no_birth_year_count
+FROM TopSales ts
+JOIN customer c ON ts.item.i_item_sk = c.c_current_cdemo_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+FULL OUTER JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.city
+HAVING SUM(ts.total_sales) > 10000
+ORDER BY sum_sales DESC;

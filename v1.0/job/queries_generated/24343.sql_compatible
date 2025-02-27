@@ -1,0 +1,95 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m2.id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+FilteredMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY COUNT(c.movie_id) DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info c ON mh.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        company_name cn ON a.id = cn.imdb_id 
+    WHERE 
+        cn.country_code IS NULL OR cn.country_code = 'USA'
+    GROUP BY 
+        movie_id, title, production_year
+),
+NotableTitles AS (
+    SELECT 
+        fm.*, 
+        CASE 
+            WHEN fm.production_year < 2000 THEN 'Classic' 
+            WHEN fm.production_year BETWEEN 2000 AND 2010 THEN 'Modern' 
+            ELSE 'Recent' 
+        END AS era,
+        COALESCE(SUBSTRING(fm.title, '^[^ ]+'), 'Unknown') AS first_word
+    FROM 
+        FilteredMovies fm
+    WHERE 
+        rank <= 5
+),
+FinalResults AS (
+    SELECT 
+        nt.title, 
+        nt.production_year, 
+        nt.era,
+        COUNT(DISTINCT c.id) AS actor_count,
+        COUNT(DISTINCT cn.id) AS production_company_count,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        NotableTitles nt
+    LEFT JOIN 
+        cast_info c ON nt.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON nt.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        nt.title, nt.production_year, nt.era
+)
+SELECT 
+    title, 
+    production_year, 
+    era,
+    actor_count,
+    production_company_count,
+    actor_names
+FROM 
+    FinalResults 
+WHERE 
+    (actor_count > 2 AND production_company_count > 1) 
+    OR (production_year IS NULL OR production_year > 2015)
+ORDER BY 
+    production_year DESC, 
+    actor_count DESC;

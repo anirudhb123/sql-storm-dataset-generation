@@ -1,0 +1,57 @@
+
+WITH RECURSIVE Date_Range AS (
+    SELECT MIN(d_date_sk) AS start_date, MAX(d_date_sk) AS end_date
+    FROM date_dim
+    UNION ALL
+    SELECT start_date + INTERVAL '1 DAY', end_date 
+    FROM Date_Range 
+    WHERE start_date + INTERVAL '1 DAY' <= end_date
+),
+Customer_Sales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid) AS avg_order_value,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Sales_Summary AS (
+    SELECT 
+        SUM(total_sales) AS total_sales,
+        COUNT(DISTINCT c_customer_sk) AS distinct_customers,
+        AVG(total_sales) AS avg_customer_sales
+    FROM Customer_Sales
+    WHERE sales_rank <= 10
+),
+Top_Selling_Items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS item_rank
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id, i.i_item_desc
+)
+SELECT 
+    COALESCE(c.c_first_name || ' ' || c.c_last_name, 'Unknown Customer') AS customer_name,
+    cs.total_sales,
+    cs.avg_order_value,
+    ts.total_quantity_sold,
+    DATE_PART('day', AGE(CAST('2002-10-01' AS DATE), d.d_date)) AS days_since_first_purchase,
+    CASE 
+        WHEN cs.total_sales IS NULL THEN 'No Sales'
+        WHEN cs.total_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM Customer_Sales cs
+LEFT JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+LEFT JOIN Top_Selling_Items ts ON ts.item_rank <= 10
+CROSS JOIN date_dim d
+WHERE d.d_date_sk IN (SELECT start_date FROM Date_Range)
+ORDER BY cs.total_sales DESC, customer_name;

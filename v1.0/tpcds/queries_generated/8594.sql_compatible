@@ -1,0 +1,42 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.net_profit) AS total_profit,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(ws.order_number) AS total_orders,
+        AVG(ws.net_paid) AS avg_order_value
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws.web_site_sk
+),
+top_sites AS (
+    SELECT 
+        ws.web_site_id,
+        ss.total_profit,
+        ss.total_sales,
+        ss.total_orders,
+        ss.avg_order_value,
+        DENSE_RANK() OVER (ORDER BY ss.total_profit DESC) AS rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        web_site ws ON ss.web_site_sk = ws.web_site_sk
+)
+SELECT 
+    ws.web_site_name,
+    ts.total_profit,
+    ts.total_sales,
+    ts.total_orders,
+    ts.avg_order_value
+FROM 
+    top_sites ts
+JOIN 
+    web_site ws ON ts.web_site_id = ws.web_site_id
+WHERE 
+    ts.rank <= 10
+ORDER BY 
+    ts.total_profit DESC;

@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+        AND p.Score > 0 -- Only consider questions with positive score
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        ts.TagName,
+        COUNT(*) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        TagStatistics ts
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || ts.TagName || '%'
+    GROUP BY 
+        ts.TagName
+    HAVING 
+        COUNT(*) > 5 -- Only include tags with more than 5 associated questions
+),
+RecentPostUpdates AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        p.Title,
+        ph.Comment,
+        pt.Name AS PostHistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tp.TagName,
+    tp.PostCount,
+    tp.TotalViews,
+    tp.AvgScore,
+    COALESCE(rp.Title, 'No Top Question') AS TopQuestionTitle,
+    COALESCE(rp.ViewCount, 0) AS TopQuestionViews,
+    COALESCE(rp.Score, 0) AS TopQuestionScore,
+    rpu.EditDate,
+    rpu.Comment,
+    rpu.PostHistoryType
+FROM 
+    TopTags tp
+LEFT JOIN 
+    RankedPosts rp ON tp.TagName IN (SELECT unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><')))
+                                      WHERE rp.Rank = 1)
+LEFT JOIN 
+    RecentPostUpdates rpu ON rpu.PostId = rp.PostId
+ORDER BY 
+    tp.TotalViews DESC, tp.PostCount DESC;

@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.note,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast m ON t.id = m.movie_id
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mc.linked_movie_id,
+        t.title,
+        t.production_year,
+        mc.note,
+        mh.level + 1
+    FROM 
+        movie_link mc
+    JOIN 
+        movie_hierarchy mh ON mc.movie_id = mh.movie_id
+    JOIN 
+        aka_title t ON mc.linked_movie_id = t.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+    SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_types_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mh.level DESC) AS movie_order,
+    COALESCE(NULLIF(ak.surname_pcode, ''), 'N/A') AS coded_surname,
+    RANK() OVER (ORDER BY mh.production_year DESC, mh.title) AS rank
+
+FROM 
+    movie_hierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+
+WHERE 
+    ak.name IS NOT NULL
+    AND mh.production_year BETWEEN 2000 AND 2023
+    AND mh.level = 1
+
+GROUP BY 
+    ak.name, mh.title, mh.production_year, ak.surname_pcode
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+
+ORDER BY 
+    mh.production_year DESC, 
+    ak.name;

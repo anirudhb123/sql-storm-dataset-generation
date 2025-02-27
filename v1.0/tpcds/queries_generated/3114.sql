@@ -1,0 +1,91 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id,
+        item.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.warehouse_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item ON ws.ws_item_sk = item.i_item_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.warehouse_id, item.i_item_id
+),
+TopProducts AS (
+    SELECT 
+        warehouse_id,
+        i_item_id,
+        total_quantity_sold,
+        total_net_profit
+    FROM 
+        SalesData
+    WHERE 
+        profit_rank <= 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerSpending AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+CustomerAnalysis AS (
+    SELECT 
+        cs.ws_bill_customer_sk,
+        COALESCE(spending.total_spent, 0) AS total_spent,
+        COALESCE(returns.total_returns, 0) AS total_returns,
+        COALESCE(returns.total_return_amount, 0) AS total_return_amount,
+        CASE WHEN COALESCE(spending.total_spent, 0) > 0 THEN 
+            (COALESCE(returns.total_return_amount, 0) / NULLIF(spending.total_spent, 0)) * 100 
+        ELSE 0 END AS return_percentage
+    FROM 
+        CustomerSpending cs
+    LEFT JOIN 
+        CustomerReturns returns ON cs.ws_bill_customer_sk = returns.sr_customer_sk
+),
+FinalResults AS (
+    SELECT 
+        p.warehouse_id,
+        p.i_item_id,
+        p.total_quantity_sold,
+        p.total_net_profit,
+        c.total_spent,
+        c.total_returns,
+        c.total_return_amount,
+        c.return_percentage
+    FROM 
+        TopProducts p
+    LEFT JOIN 
+        CustomerAnalysis c ON p.warehouse_id = (SELECT w.warehouse_id FROM warehouse w LIMIT 1) -- arbitrary warehouse selection
+)
+SELECT 
+    warehouse_id,
+    i_item_id,
+    total_quantity_sold,
+    total_net_profit,
+    total_spent,
+    total_returns,
+    total_return_amount,
+    return_percentage
+FROM 
+    FinalResults
+WHERE 
+    return_percentage > 5
+ORDER BY 
+    total_net_profit DESC, total_quantity_sold DESC;

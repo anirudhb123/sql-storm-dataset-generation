@@ -1,0 +1,45 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_selling_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_quantity_sold,
+        rs.total_sales
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.sales_rank <= 10
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    a.ca_city,
+    a.ca_state,
+    tsi.i_item_desc,
+    tsi.total_quantity_sold,
+    tsi.total_sales
+FROM 
+    top_selling_items tsi
+JOIN 
+    customer c ON c.c_customer_sk = (SELECT c_customer_sk FROM customers WHERE preferred_cust_flag='Y' LIMIT 1)
+JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+ORDER BY 
+    tsi.total_sales DESC;

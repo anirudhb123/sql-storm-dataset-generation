@@ -1,0 +1,55 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        c.kind AS movie_type,
+        p.name AS director_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        role_type r ON mc.company_type_id = r.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    WHERE 
+        r.role = 'director'
+),
+
+keyword_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        k.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, k.keyword
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.movie_type,
+    rm.director_name,
+    ks.keyword,
+    ks.keyword_count
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    keyword_summary ks ON rm.title = ks.movie_id
+WHERE 
+    rm.year_rank <= 5 
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

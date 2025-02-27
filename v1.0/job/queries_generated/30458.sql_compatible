@@ -1,0 +1,72 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS level
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.person_role_id IS NOT NULL  
+
+    UNION ALL
+
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ah.person_id  
+),
+title_info AS (
+    SELECT 
+        ak.name AS actor_name, 
+        at.title AS movie_title, 
+        at.production_year,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ranked_movies AS (
+    SELECT 
+        ti.actor_name,
+        ti.movie_title,
+        ti.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ti.actor_name ORDER BY ti.production_year DESC) AS rank
+    FROM 
+        title_info ti
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT m.movie_id) AS movie_count,
+    STRING_AGG(DISTINCT m.movie_title, ', ') AS movie_titles,
+    CASE 
+        WHEN SUM(CASE WHEN r.level > 1 THEN 1 ELSE 0 END) > 0 THEN 'Collaborative Actor'
+        ELSE 'Solo Actor'
+    END AS actor_type
+FROM 
+    ranked_movies r
+JOIN 
+    actor_hierarchy a ON a.person_id = r.actor_name
+LEFT JOIN 
+    movie_companies m ON r.movie_title = m.movie_id
+WHERE 
+    a.level < 5  
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT m.movie_id) > 1
+ORDER BY 
+    movie_count DESC, a.actor_name;

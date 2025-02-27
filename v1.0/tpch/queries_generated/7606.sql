@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+
+HighCostSuppliers AS (
+    SELECT 
+        rs.s_suppkey, 
+        rs.s_name, 
+        rs.nation_name,
+        rs.total_supply_cost
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank = 1
+),
+
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+
+SELECT 
+    hcs.s_name AS supplier_name, 
+    hcs.nation_name, 
+    ro.o_orderkey, 
+    ro.o_orderdate, 
+    ro.total_revenue
+FROM 
+    HighCostSuppliers hcs
+JOIN 
+    RecentOrders ro ON hcs.total_supply_cost > 1000000
+ORDER BY 
+    hcs.nation_name, 
+    ro.total_revenue DESC;

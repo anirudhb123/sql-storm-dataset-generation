@@ -1,0 +1,41 @@
+
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    ct.kind AS company_type,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT CONCAT(pi.info_type_id, ': ', pi.info), '; ') AS personal_info,
+    CAST(AVG(CASE WHEN mp.production_year IS NOT NULL THEN mp.production_year END) AS INTEGER) AS avg_production_year
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name cn ON cn.id = mc.company_id
+JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+JOIN 
+    aka_name a ON a.person_id = cc.subject_id
+JOIN 
+    cast_info ci ON ci.movie_id = t.id AND ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = a.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+LEFT JOIN 
+    aka_title at ON at.movie_id = t.id
+WHERE 
+    t.production_year >= 2000 
+    AND ct.kind ILIKE 'production%'
+GROUP BY 
+    t.title, a.name, ct.kind
+HAVING 
+    COUNT(DISTINCT cc.subject_id) >= 3
+ORDER BY 
+    avg_production_year DESC, movie_title;

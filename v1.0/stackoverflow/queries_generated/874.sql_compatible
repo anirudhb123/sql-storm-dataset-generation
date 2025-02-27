@@ -1,0 +1,68 @@
+
+WITH user_activity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+active_users AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.PostCount,
+        (ua.UpVotes - ua.DownVotes) AS NetVotes,
+        DENSE_RANK() OVER (ORDER BY ua.Reputation DESC) AS ReputationRank
+    FROM user_activity ua
+    WHERE ua.PostCount > 0
+),
+top_users AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        NetVotes,
+        ReputationRank
+    FROM active_users
+    WHERE ReputationRank <= 10
+),
+question_stats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalQuestions,
+        AVG(p.Score) AS AvgQuestionScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+    GROUP BY p.OwnerUserId
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.NetVotes,
+    qs.TotalQuestions,
+    qs.AvgQuestionScore,
+    qs.AcceptedAnswers
+FROM top_users tu
+LEFT JOIN question_stats qs ON tu.UserId = qs.OwnerUserId
+WHERE tu.Reputation IS NOT NULL
+ORDER BY tu.Reputation DESC, tu.NetVotes DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total' AS DisplayName,
+    SUM(tu.Reputation) AS Reputation,
+    SUM(tu.NetVotes) AS NetVotes,
+    SUM(qs.TotalQuestions) AS TotalQuestions,
+    AVG(qs.AvgQuestionScore) AS AvgQuestionScore,
+    SUM(qs.AcceptedAnswers) AS AcceptedAnswers
+FROM top_users tu
+LEFT JOIN question_stats qs ON tu.UserId = qs.OwnerUserId;

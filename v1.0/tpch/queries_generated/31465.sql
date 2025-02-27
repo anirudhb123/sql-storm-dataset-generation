@@ -1,0 +1,36 @@
+WITH RECURSIVE TopNations AS (
+    SELECT n_nationkey, n_name, n_regionkey, n_comment, 
+           ROW_NUMBER() OVER (PARTITION BY n_regionkey ORDER BY COUNT(s_suppkey) DESC) AS rank
+    FROM nation
+    JOIN supplier ON n_nationkey = s_nationkey
+    GROUP BY n_nationkey, n_name, n_regionkey, n_comment
+),
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartSupplierData AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS cheapest_supplier
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT r.r_name AS region_name, ns.n_name AS nation_name, 
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+       SUM(CASE WHEN l.l_returnflag = 'A' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_accepted,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       AVG(s.s_acctbal) AS avg_supplier_balance
+FROM region r
+JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+JOIN NationSales n_sales ON n_sales.n_nationkey = ns.n_nationkey
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey))
+LEFT JOIN PartSupplierData ps ON ps.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ns.n_nationkey))
+LEFT JOIN supplier s ON ps.p_partkey = s.s_suppkey
+WHERE n_sales.total_sales > 0
+  AND s.s_acctbal IS NOT NULL
+GROUP BY r.r_name, ns.n_name
+HAVING SUM(CASE WHEN l.l_returnflag = 'A' THEN l.l_extendedprice ELSE 0 END) > 1000
+ORDER BY region_name, nation_name;

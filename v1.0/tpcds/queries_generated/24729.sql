@@ -1,0 +1,46 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 1 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_zip, ah.level + 1
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ah.ca_zip = ca.ca_zip AND ah.level < 5
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_customer_id,
+    STRING_AGG(CONCAT(c.c_first_name, ' ', c.c_last_name), '; ') AS full_names,
+    COUNT(DISTINCT w.w_warehouse_id) AS warehouse_count,
+    SUM(COALESCE(ws.ws_net_profit, 0) + COALESCE(cs.cs_net_profit, 0) + COALESCE(ss.ss_net_profit, 0)) AS total_net_profit,
+    SUM(ws.ws_quantity + cs.cs_quantity + ss.ss_quantity) AS total_quantity,
+    MAX(NULLIF(sm.sm_type, 'Ground')) AS ship_mode_excluded,
+    AVG(NULLIF(deg(cd.cd_purchase_estimate), 0)) AS avg_purchase_estimate,
+    DENSE_RANK() OVER (PARTITION BY c.c_country ORDER BY total_net_profit DESC) AS country_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+FULL OUTER JOIN 
+    catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+JOIN 
+    warehouse w ON w.w_warehouse_sk IN (SELECT inv.inv_warehouse_sk FROM inventory inv WHERE inv.inv_quantity_on_hand > 0)
+LEFT JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk OR cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+    AND (c.c_preferred_cust_flag IS NULL OR c.c_preferred_cust_flag = 'Y')
+    AND EXISTS (SELECT 1 FROM address_hierarchy ah WHERE ah.ca_city = c.c_current_addr_sk)
+GROUP BY 
+    c.c_customer_sk, c.c_customer_id
+HAVING 
+    SUM(ws.ws_net_profit) > 1000
+ORDER BY 
+    country_rank, total_net_profit DESC;

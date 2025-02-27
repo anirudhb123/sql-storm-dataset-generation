@@ -1,0 +1,47 @@
+WITH RegionalSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        s.s_suppkey AS supplier_key,
+        s.s_name AS supplier_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name, s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    rs.region_name,
+    COUNT(DISTINCT rs.supplier_key) AS num_suppliers,
+    SUM(rs.total_supply_cost) AS total_cost_of_supplied_parts,
+    COUNT(os.o_orderkey) AS total_orders,
+    SUM(os.order_total) AS total_order_value,
+    AVG(os.order_total) AS avg_order_value
+FROM 
+    RegionalSuppliers rs
+LEFT JOIN 
+    OrderStats os ON rs.region_name = (SELECT r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey = rs.supplier_key LIMIT 1)
+GROUP BY 
+    rs.region_name
+ORDER BY 
+    total_order_value DESC;

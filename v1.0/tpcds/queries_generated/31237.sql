@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_info AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss_ticket_number,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_ext_discount_amt,
+        ss_net_profit,
+        CAST(ss.sold_date_sk AS VARCHAR) AS sales_date,
+        1 AS level
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    
+    UNION ALL
+    
+    SELECT 
+        si.sold_date_sk,
+        si.item_sk,
+        si.ss_ticket_number,
+        si.ss_quantity,
+        si.ss_sales_price,
+        si.ss_ext_sales_price,
+        si.ss_ext_discount_amt,
+        si.ss_net_profit,
+        CAST(si.sold_date_sk AS VARCHAR)
+    FROM 
+        sales_info si
+    JOIN 
+        store_sales ss ON si.item_sk = ss.item_sk AND ss.sold_date_sk = si.sold_date_sk + 1
+    WHERE 
+        si.level < 10
+),
+sales_summary AS (
+    SELECT 
+        si.item_sk,
+        SUM(si.ss_quantity) AS total_quantity,
+        SUM(si.ss_ext_sales_price) AS total_sales,
+        SUM(si.ss_net_profit) AS total_profit,
+        AVG(si.ss_sales_price) AS avg_price,
+        RANK() OVER (PARTITION BY si.item_sk ORDER BY SUM(si.ss_net_profit) DESC) AS rank_profit
+    FROM 
+        sales_info si
+    GROUP BY 
+        si.item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.total_profit,
+    ss.avg_price,
+    COALESCE(ss.rank_profit, 0) AS rank_profit
+FROM 
+    item i
+LEFT JOIN 
+    sales_summary ss ON i.i_item_sk = ss.item_sk
+WHERE 
+    ss.total_sales > (
+        SELECT AVG(total_sales) FROM sales_summary
+    )
+ORDER BY 
+    ss.total_profit DESC, 
+    ss.total_quantity ASC
+LIMIT 100;

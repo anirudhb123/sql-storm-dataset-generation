@@ -1,0 +1,53 @@
+
+WITH CustomerInfo AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+           cd.cd_gender,
+           CASE 
+               WHEN cd.cd_marital_status = 'M' THEN 'Married' 
+               ELSE 'Single' 
+           END AS marital_status,
+           cd.cd_purchase_estimate,
+           ca.ca_city,
+           CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk,
+           ws.ws_ship_date_sk,
+           ws.ws_item_sk,
+           ws.ws_order_number,
+           ws.ws_sales_price,
+           ws.ws_quantity,
+           DATE_FORMAT(dd.d_date, '%Y-%m') AS sales_month,
+           COUNT(ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY ws.ws_sold_date_sk, ws.ws_ship_date_sk, ws.ws_item_sk, ws.ws_order_number, ws.ws_sales_price, ws.ws_quantity
+),
+MonthlySales AS (
+    SELECT sales_month,
+           SUM(ws_sales_price * ws_quantity) AS total_revenue,
+           SUM(ws_quantity) AS total_units_sold,
+           COUNT(DISTINCT ws_order_number) AS unique_orders
+    FROM SalesData
+    GROUP BY sales_month
+)
+SELECT ci.full_name,
+       ci.cd_gender,
+       ci.marital_status,
+       ci.cd_purchase_estimate,
+       ci.ca_city,
+       ci.full_address,
+       ms.sales_month,
+       ms.total_revenue,
+       ms.total_units_sold,
+       ms.unique_orders
+FROM CustomerInfo ci
+JOIN MonthlySales ms ON ci.c_customer_sk = ms.sales_month
+ORDER BY ms.total_revenue DESC
+LIMIT 10;

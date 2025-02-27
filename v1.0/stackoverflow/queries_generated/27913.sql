@@ -1,0 +1,73 @@
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(c.Id), 0) AS CommentsCount,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        UpVotes, 
+        DownVotes, 
+        CommentsCount,
+        TotalViews,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges
+    FROM 
+        UserEngagement
+    WHERE 
+        TotalViews > 1000
+    ORDER BY 
+        UpVotes DESC, CommentsCount DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted' ELSE 'Non-Accepted' END AS AnswerStatus,
+        COUNT(c.Id) AS CommentsOnPost
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.UpVotes,
+    tu.CommentsCount,
+    ts.PostId,
+    ts.Title,
+    ts.ViewCount,
+    ts.AnswerStatus,
+    ts.CommentsOnPost
+FROM 
+    TopUsers tu
+JOIN 
+    PostStats ts ON ts.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = tu.UserId)
+ORDER BY 
+    tu.UpVotes DESC, ts.ViewCount DESC;

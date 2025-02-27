@@ -1,0 +1,73 @@
+
+WITH UserAggregates AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+RecentPostHistory AS (
+    SELECT
+        ph.UserId,
+        pt.Name AS PostHistoryType,
+        COUNT(ph.Id) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE ph.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY ph.UserId, pt.Name
+),
+AdjustedUserReputation AS (
+    SELECT
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation + (COALESCE(SUM(rp.HistoryCount), 0) * 10) AS AdjustedReputation,
+        ua.PostCount,
+        ua.TotalScore,
+        ua.AvgViewCount,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges
+    FROM UserAggregates ua
+    LEFT JOIN RecentPostHistory rp ON ua.UserId = rp.UserId
+    GROUP BY ua.UserId, ua.DisplayName, ua.Reputation, ua.PostCount, ua.TotalScore, ua.AvgViewCount, ua.GoldBadges, ua.SilverBadges, ua.BronzeBadges
+),
+RankedUsers AS (
+    SELECT *,
+           ROW_NUMBER() OVER (ORDER BY AdjustedReputation DESC) AS Rank
+    FROM AdjustedUserReputation
+),
+TopUsers AS (
+    SELECT *
+    FROM RankedUsers
+    WHERE Rank <= 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.AdjustedReputation,
+    u.PostCount,
+    u.TotalScore,
+    COALESCE(ROUND(u.AvgViewCount, 2), 0) AS AvgViewCount,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    CASE WHEN b.UserId IS NOT NULL THEN 'Yes' ELSE 'No' END AS HasRecentActivity
+FROM TopUsers u
+LEFT JOIN (
+    SELECT DISTINCT UserId
+    FROM Posts
+    WHERE CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '60 days'
+) b ON u.UserId = b.UserId
+ORDER BY u.AdjustedReputation DESC;

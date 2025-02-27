@@ -1,0 +1,88 @@
+WITH RecursiveUserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        1 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        Level + 1
+    FROM 
+        Users u
+    INNER JOIN 
+        Votes v ON u.Id = v.UserId
+    INNER JOIN 
+        Posts p ON v.PostId = p.Id
+    WHERE 
+        v.VoteTypeId IN (2, 3) 
+        AND p.OwnerUserId IN (SELECT UserId FROM RecursiveUserScores WHERE Level = 1)
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostMetrics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(pm.TotalPosts, 0) AS TotalPosts,
+    COALESCE(pm.TotalScore, 0) AS TotalScore,
+    COALESCE(pm.AverageViews, 0) AS AverageViews,
+    SUM(rus.Views) AS TotalImpactedViews,
+    CASE 
+        WHEN u.Reputation > 5000 THEN 'High Reputation'
+        WHEN u.Reputation BETWEEN 1000 AND 5000 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostMetrics pm ON u.Id = pm.OwnerUserId
+LEFT JOIN 
+    RecursiveUserScores rus ON u.Id = rus.UserId
+WHERE 
+    u.LastAccessDate >= NOW() - INTERVAL '3 months'
+GROUP BY 
+    u.Id, u.DisplayName, ub.GoldBadges, ub.SilverBadges, 
+    ub.BronzeBadges, pm.TotalPosts, pm.TotalScore, 
+    pm.AverageViews, u.Reputation
+ORDER BY 
+    TotalScore DESC, u.Reputation DESC;

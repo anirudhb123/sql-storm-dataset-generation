@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_acctbal < sh.s_acctbal AND s.s_acctbal > 0
+),
+OrderTotals AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+HighValueOrders AS (
+    SELECT ot.o_orderkey, ot.total_price
+    FROM OrderTotals ot
+    WHERE ot.total_price > 10000
+),
+TopSuppliers AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT
+    p.p_name,
+    COALESCE(TotalOrders.total_price, 0) AS total_order_value,
+    sh.level AS supplier_level,
+    ts.total_supply_cost
+FROM part p
+LEFT JOIN HighValueOrders TotalOrders ON p.p_partkey = TotalOrders.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)
+LEFT JOIN TopSuppliers ts ON ts.s_name = (SELECT s.s_name FROM supplier s WHERE s.s_suppkey = sh.s_suppkey LIMIT 1)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < p.p_size
+)
+ORDER BY total_order_value DESC, p.p_name ASC
+LIMIT 10;

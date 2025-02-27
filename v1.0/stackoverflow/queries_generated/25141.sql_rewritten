@@ -1,0 +1,70 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(t.Id) AS TagCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (
+            SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int)
+        )
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.UpVotes,
+        u.DownVotes,
+        u.Views
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 100
+),
+
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        pb.TagCount,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        -1 * (EXTRACT(EPOCH FROM cast('2024-10-01 12:34:56' as timestamp)) - EXTRACT(EPOCH FROM p.LastActivityDate)) AS ActivityDecay
+    FROM 
+        Posts p
+    JOIN 
+        PostTagCounts pb ON p.Id = pb.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+    ORDER BY 
+        (p.Score + pb.TagCount) + ActivityDecay DESC
+    LIMIT 10
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.Score,
+    pp.TagCount,
+    pp.OwnerName,
+    pp.CreationDate,
+    ur.DisplayName AS ActiveUserName,
+    ur.Reputation AS ActiveUserReputation
+FROM 
+    PopularPosts pp
+JOIN 
+    UserReputation ur ON pp.OwnerName = ur.DisplayName
+ORDER BY 
+    pp.Score DESC, pp.TagCount DESC;

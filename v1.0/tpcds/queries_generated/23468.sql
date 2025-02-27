@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+      AND ws.ws_quantity > 2
+), 
+TopSales AS (
+    SELECT 
+        rs.web_site_id,
+        SUM(rs.ws_ext_sales_price) AS total_sales,
+        COUNT(rs.ws_order_number) AS order_count
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.sales_rank <= 10
+    GROUP BY 
+        rs.web_site_id
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Mr. ' || c.c_first_name
+            ELSE 'Ms. ' || c.c_first_name
+        END AS salutation,
+        COALESCE(cd.cd_dep_count, 0) AS dependents
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year < (EXTRACT(YEAR FROM CURRENT_DATE) - 18)
+)
+SELECT 
+    cs.salutation,
+    cs.c_last_name,
+    cs.dependents,
+    ts.total_sales,
+    ts.order_count,
+    CASE 
+        WHEN ts.total_sales IS NULL THEN 'No sales'
+        WHEN ts.total_sales > 1000 THEN 'High roller'
+        ELSE 'Moderate spender'
+    END AS spending_category
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    TopSales ts ON ts.web_site_id = (SELECT MAX(web_site_id) FROM TopSales)
+WHERE 
+    cs.dependents IS NOT NULL
+ORDER BY 
+    ts.total_sales DESC NULLS LAST
+FETCH FIRST 20 ROWS ONLY;

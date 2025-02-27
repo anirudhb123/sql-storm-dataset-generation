@@ -1,0 +1,65 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.id] AS movie_path
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        lt.kind_id,
+        mh.movie_path || lt.id
+    FROM
+        movie_link ml
+    JOIN
+        aka_title lt ON ml.linked_movie_id = lt.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE
+        lt.production_year IS NOT NULL AND
+        NOT lt.id = ANY(mh.movie_path)  -- Ensuring no cycles in the hierarchy
+)
+SELECT
+    ak.name,
+    ac.movie_id,
+    mt.title,
+    COALESCE(PERCENT_RANK() OVER (PARTITION BY ac.movie_id ORDER BY COUNT(DISTINCT ak.id)), 0) AS actor_contribution_ratio,
+    SUM(mi.info IS NOT NULL) OVER (PARTITION BY ac.movie_id) AS info_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ' ORDER BY kw.keyword) AS keywords,
+    CASE WHEN mt.production_year < 2000 THEN 'Classic' ELSE 'Modern' END AS era,
+    (
+        SELECT COUNT(*)
+        FROM cast_info ci
+        WHERE ci.movie_id = ac.movie_id
+    ) AS total_cast_count,
+    MAX(NOTE) FILTER (WHERE LENGTH(NOTE) > 0) OVER (PARTITION BY mt.id) AS last_note
+FROM
+    aka_name ak
+JOIN
+    cast_info ac ON ac.person_id = ak.person_id
+JOIN
+    movie_hierarchy mh ON mh.movie_id = ac.movie_id
+JOIN
+    aka_title mt ON mt.id = ac.movie_id
+LEFT JOIN
+    movie_info mi ON mi.movie_id = mt.id
+LEFT JOIN
+    movie_keyword mk ON mk.movie_id = mt.id
+LEFT JOIN
+    keyword kw ON kw.id = mk.keyword_id
+GROUP BY
+    ak.name, ac.movie_id, mt.title, mt.production_year
+HAVING
+    COUNT(DISTINCT ak.id) > 1 OR SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) > 2
+ORDER BY 
+    era, actor_contribution_ratio DESC, mt.production_year DESC;
+

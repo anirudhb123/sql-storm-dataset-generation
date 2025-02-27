@@ -1,0 +1,43 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, r_name, n_regionkey, r_comment, 1 AS level
+    FROM nation
+    JOIN region ON n_regionkey = r_regionkey
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, r.r_name, n.n_regionkey, r.r_comment, nh.level + 1
+    FROM nation_hierarchy nh
+    JOIN nation n ON nh.n_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_name <> nh.n_name
+),
+supplier_stats AS (
+    SELECT s_suppkey, s_name, SUM(ps_supplycost * ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps_partkey) AS part_count,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY SUM(ps_supplycost * ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s_suppkey, s_name, s_nationkey
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' OR o.o_orderdate IS NULL
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT nh.n_name, ss.s_name, cs.c_name, ss.total_supply_cost, cs.total_order_value,
+       CASE WHEN cs.total_order_value IS NULL THEN 'No Orders'
+            ELSE 'Has Orders' END AS order_status
+FROM nation_hierarchy nh
+LEFT JOIN supplier_stats ss ON nh.n_nationkey = ss.s_nationkey AND ss.rn = 1
+LEFT JOIN customer_orders cs ON cs.c_custkey = (SELECT o.o_custkey
+                                                FROM orders o
+                                                WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey)
+                                                                      FROM orders o2
+                                                                      JOIN lineitem li ON o2.o_orderkey = li.l_orderkey
+                                                                      WHERE li.l_discount BETWEEN 0.05 AND 0.1
+                                                                      AND li.l_tax IS NOT NULL))
+WHERE nh.level <= 2
+ORDER BY nh.n_name, ss.total_supply_cost DESC;

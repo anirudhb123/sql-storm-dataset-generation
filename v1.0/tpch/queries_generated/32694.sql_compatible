@@ -1,0 +1,66 @@
+
+WITH RECURSIVE cte_region_sales AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COALESCE(SUM(oi.o_totalprice), 0) AS total_sales
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem li ON ps.ps_partkey = li.l_partkey
+    LEFT JOIN 
+        orders oi ON li.l_orderkey = oi.o_orderkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+
+    UNION ALL
+
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(COALESCE(oi.o_totalprice, 0))
+    FROM 
+        region r
+    JOIN 
+        cte_region_sales cr ON cr.r_regionkey = r.r_regionkey
+    WHERE 
+        EXISTS (SELECT 1 FROM nation n WHERE n.n_regionkey = r.r_regionkey)
+    GROUP BY 
+        r.r_regionkey, r.r_name
+),
+ranked_sales AS (
+    SELECT 
+        r.r_name,
+        rs.total_sales,
+        ROW_NUMBER() OVER (ORDER BY rs.total_sales DESC) AS sales_rank,
+        DENSE_RANK() OVER (ORDER BY NULLIF(rs.total_sales, 0)) AS dense_rank
+    FROM 
+        cte_region_sales rs
+    INNER JOIN 
+        region r ON rs.r_regionkey = r.r_regionkey
+)
+SELECT 
+    r.s_name,
+    r.r_name,
+    r.total_sales,
+    CASE 
+        WHEN r.total_sales > 10000 THEN 'High'
+        WHEN r.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category,
+    CASE 
+        WHEN r.total_sales = 0 THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM 
+    ranked_sales r
+WHERE 
+    r.sales_rank <= 5 OR r.dense_rank <= 5
+ORDER BY 
+    r.total_sales DESC;

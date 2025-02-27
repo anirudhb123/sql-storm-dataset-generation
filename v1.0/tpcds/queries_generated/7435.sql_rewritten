@@ -1,0 +1,78 @@
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458117 AND 2458127 
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), item_info AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        i.i_brand
+    FROM 
+        item i
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+), top_items AS (
+    SELECT 
+        item_info.i_item_sk,
+        item_info.i_item_desc,
+        item_info.i_current_price,
+        item_info.i_brand,
+        SUM(sales_summary.total_quantity) AS sold_quantity,
+        SUM(sales_summary.total_sales) AS total_sales,
+        SUM(sales_summary.total_profit) AS total_profit
+    FROM 
+        sales_summary
+    JOIN 
+        item_info ON sales_summary.ws_item_sk = item_info.i_item_sk
+    GROUP BY 
+        item_info.i_item_sk, item_info.i_item_desc, item_info.i_current_price, item_info.i_brand
+    ORDER BY 
+        total_sales DESC
+    LIMIT 10
+)
+SELECT 
+    top_items.i_item_sk,
+    top_items.i_item_desc,
+    top_items.i_current_price,
+    top_items.i_brand,
+    top_items.sold_quantity,
+    top_items.total_sales,
+    top_items.total_profit,
+    COUNT(distinct customer_info.c_customer_sk) AS unique_customers,
+    SUM(CASE WHEN customer_info.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_customers,
+    SUM(CASE WHEN customer_info.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customers,
+    AVG(CASE WHEN customer_info.ib_lower_bound IS NOT NULL THEN (customer_info.ib_lower_bound + customer_info.ib_upper_bound) / 2 ELSE NULL END) AS average_income
+FROM 
+    top_items
+JOIN 
+    sales_summary ON top_items.i_item_sk = sales_summary.ws_item_sk
+JOIN 
+    customer_info ON sales_summary.ws_bill_customer_sk = customer_info.c_customer_sk
+GROUP BY 
+    top_items.i_item_sk, top_items.i_item_desc, top_items.i_current_price, top_items.i_brand
+ORDER BY 
+    top_items.total_sales DESC;

@@ -1,0 +1,71 @@
+
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(EXTRACT(EPOCH FROM (COALESCE(p.LastActivityDate, p.CreationDate) - p.CreationDate)) / 3600.0) AS AvgPostAge 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 52 THEN 1 END) AS SelectedHotCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, p.Title
+),
+QualifiedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ps.HistoryTypes,
+        COALESCE(ps.CloseReopenCount, 0) AS CloseReopenCount,
+        COALESCE(ps.SelectedHotCount, 0) AS SelectedHotCount,
+        COALESCE(ps.DeleteCount, 0) AS DeleteCount,
+        COALESCE(vs.UpVotes, 0) - COALESCE(vs.DownVotes, 0) AS NetVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistoryDetails ps ON p.Id = ps.PostId
+    LEFT JOIN 
+        UserVoteSummary vs ON p.OwnerUserId = vs.UserId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')  
+)
+SELECT 
+    qp.Title,
+    qp.HistoryTypes,
+    qp.CloseReopenCount,
+    qp.SelectedHotCount,
+    qp.DeleteCount,
+    qp.NetVotes,
+    CASE 
+        WHEN qp.SelectedHotCount > 0 THEN 'Hot Topic' 
+        ELSE 'Regular Topic' 
+    END AS TopicType,
+    ROUND(COALESCE(AVG(vs.UpVotes) OVER (), 0), 2) AS AvgUserUpvotes,
+    ROUND(COALESCE(AVG(vs.DownVotes) OVER (), 0), 2) AS AvgUserDownvotes
+FROM 
+    QualifiedPosts qp
+ORDER BY 
+    qp.NetVotes DESC, qp.CloseReopenCount DESC, qp.DeleteCount ASC;

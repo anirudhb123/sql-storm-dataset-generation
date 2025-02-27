@@ -1,0 +1,36 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk, 0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE c.c_customer_sk != ch.c_customer_sk
+),
+avg_sale_per_customer AS (
+    SELECT ss_customer_sk, AVG(ss_net_paid) AS avg_net_paid
+    FROM store_sales 
+    GROUP BY ss_customer_sk
+),
+top_customers AS (
+    SELECT c.c_customer_sk, 
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+           COALESCE(avg_sale.avg_net_paid, 0) AS average_sale,
+           ROW_NUMBER() OVER (ORDER BY COALESCE(avg_sale.avg_net_paid, 0) DESC) AS rank
+    FROM customer c
+    LEFT JOIN avg_sale_per_customer avg_sale ON c.c_customer_sk = avg_sale.ss_customer_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+)
+SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.level,
+       CASE 
+           WHEN ch.level = 0 THEN 'Root Customer' 
+           WHEN ch.level BETWEEN 1 AND 3 THEN 'Intermediate Customer' 
+           ELSE 'Leaf Customer' 
+       END AS customer_type,
+       tc.average_sale
+FROM customer_hierarchy ch
+JOIN top_customers tc ON ch.c_customer_sk = tc.c_customer_sk
+WHERE tc.rank <= 10
+ORDER BY ch.level, tc.average_sale DESC;

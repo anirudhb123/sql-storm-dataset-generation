@@ -1,0 +1,74 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '30 days')
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePostCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.LastAccessDate >= (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '60 days')
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsage,
+        ROW_NUMBER() OVER (ORDER BY COUNT(pt.PostId) DESC) AS Rank
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName AS User,
+    p.Title AS PostTitle,
+    p.Score AS PostScore,
+    p.ViewCount AS PostViews,
+    phs.EditCount AS NumberOfEdits,
+    phs.LastEdited AS LastEdited,
+    rt.TagName AS TopTag,
+    act.PostCount AS TotalPosts,
+    act.PositivePostCount AS PositivePosts
+FROM 
+    RecentPosts p
+JOIN 
+    ActiveUsers act ON p.OwnerUserId = act.UserId
+JOIN 
+    PostHistorySummary phs ON p.PostId = phs.PostId
+JOIN 
+    TopTags rt ON rt.Rank = 1
+WHERE 
+    p.RowNum = 1
+ORDER BY 
+    p.ViewCount DESC
+LIMIT 10;

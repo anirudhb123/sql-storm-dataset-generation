@@ -1,0 +1,77 @@
+
+WITH RECURSIVE UserBadgeCount AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(c.LastClosedDate, 'No Closure') AS LastClosedDate,
+        ps.Upvotes - ps.Downvotes AS NetVotes,
+        u.DisplayName,
+        u.Reputation,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        ClosedPostHistory c ON p.Id = c.PostId
+    JOIN 
+        PostVoteStats ps ON p.Id = ps.PostId
+    WHERE 
+        p.ViewCount > 100 AND 
+        (p.LastActivityDate > (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')) AND
+        p.Score > 0
+)
+SELECT 
+    ap.PostId,
+    ap.LastClosedDate,
+    ap.NetVotes,
+    ap.DisplayName,
+    ap.Reputation,
+    ubc.BadgeCount,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    ActivePosts ap
+INNER JOIN 
+    UserBadgeCount ubc ON ap.OwnerUserId = ubc.UserId
+LEFT JOIN 
+    (SELECT Id, UNNEST(string_to_array(Tags, '<>')) AS TagName FROM Posts) t ON ap.PostId = t.Id
+GROUP BY 
+    ap.PostId, ap.LastClosedDate, ap.NetVotes, ap.DisplayName, ap.Reputation, ubc.BadgeCount
+ORDER BY 
+    ap.NetVotes DESC, 
+    ap.Reputation DESC
+LIMIT 50;

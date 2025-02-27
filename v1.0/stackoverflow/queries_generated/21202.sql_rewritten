@@ -1,0 +1,108 @@
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation IS NOT NULL
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.PostTypeId,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseReopenCount,
+        COUNT(DISTINCT PH.Id) AS HistoryCount,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Tags T ON P.Tags ILIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, P.CreationDate, P.PostTypeId
+),
+UserPostStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UserRank,
+        PAnalysis.PostId,
+        PAnalysis.Title,
+        PAnalysis.Score,
+        PAnalysis.ViewCount,
+        PAnalysis.CreationDate,
+        PAnalysis.Tags,
+        PAnalysis.CloseReopenCount,
+        PAnalysis.HistoryCount,
+        PAnalysis.TotalBounty
+    FROM 
+        UserStats U
+    JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    JOIN 
+        PostAnalysis PAnalysis ON P.Id = PAnalysis.PostId
+),
+UserActionStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        CASE 
+            WHEN COUNT(DISTINCT P.Id) < 5 THEN 'Newbie'
+            WHEN COUNT(DISTINCT P.Id) >= 5 AND COUNT(DISTINCT P.Id) < 15 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserType,
+        SUM(PA.TotalBounty) AS TotalBountyClaimed
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserPostStats PA ON U.Id = PA.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    UAS.UserId,
+    UAS.DisplayName,
+    UAS.UserType,
+    UAS.TotalBountyClaimed,
+    UPS.Title,
+    UPS.Score,
+    UPS.ViewCount,
+    UPS.CloseReopenCount,
+    UPS.HistoryCount,
+    UPS.Tags
+FROM 
+    UserActionStats UAS
+JOIN 
+    UserPostStats UPS ON UAS.UserId = UPS.UserId
+WHERE 
+    (UPGRADE_TYPE = 'Expert' AND UPS.CloseReopenCount > 2) 
+    OR 
+    (UPGRADE_TYPE <> 'Expert' AND UPS.TotalBounty > 0)
+ORDER BY 
+    UAS.TotalBountyClaimed DESC, UAS.UserId, UPS.PostId;

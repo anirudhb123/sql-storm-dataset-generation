@@ -1,0 +1,100 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.ViewCount,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL 
+    UNION ALL
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.ViewCount,
+        Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePostCTE CTE ON P.ParentId = CTE.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+),
+ReputationSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN B.Class = 1 THEN 1 WHEN B.Class = 2 THEN 0.5 WHEN B.Class = 3 THEN 0.25 END) AS TotalBadgeValue,
+        COUNT(DISTINCT P.Id) AS TotalPosts
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+FinalPostSummary AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerUserId,
+        RP.ViewCount,
+        Pv.UpVotes,
+        Pv.DownVotes,
+        Pv.TotalVotes,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(RP.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        R.TotalBadgeValue,
+        R.TotalPosts
+    FROM 
+        RecursivePostCTE RP
+    LEFT JOIN 
+        PostVoteSummary Pv ON RP.PostId = Pv.PostId
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        ReputationSummary R ON U.Id = R.UserId
+)
+SELECT 
+    FPS.Title,
+    FPS.ViewCount,
+    FPS.UpVotes,
+    FPS.DownVotes,
+    FPS.TotalVotes,
+    FPS.OwnerDisplayName,
+    FPS.TotalBadgeValue,
+    FPS.TotalPosts,
+    DENSE_RANK() OVER (ORDER BY FPS.ViewCount DESC) AS ViewRank,
+    CASE 
+        WHEN FPS.TotalVotes = 0 THEN 'No Votes'
+        WHEN FPS.UpVotes > FPS.DownVotes THEN 'Positive Feedback'
+        ELSE 'Negative Feedback'
+    END AS FeedbackStatus
+FROM 
+    FinalPostSummary FPS
+WHERE 
+    FPS.TotalPosts > 0
+ORDER BY 
+    FPS.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

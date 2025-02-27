@@ -1,0 +1,25 @@
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    U.DisplayName AS OwnerDisplayName,
+    P.CreationDate,
+    COUNT(C.Id) AS CommentCount,
+    COUNT(V.Id) AS VoteCount,
+    MAX(PH.CreationDate) AS LastEditDate
+FROM 
+    Posts P
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+WHERE 
+    P.CreationDate >= '2023-01-01'
+GROUP BY 
+    P.Id, P.Title, U.DisplayName, P.CreationDate
+ORDER BY 
+    Score DESC, CommentCount DESC, P.CreationDate ASC
+LIMIT 100;

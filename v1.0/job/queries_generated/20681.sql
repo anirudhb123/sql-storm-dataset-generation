@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        CAST(0 AS INTEGER) AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.depth < 5
+),
+actor_cast AS (
+    SELECT 
+        ak.name AS actor_name,
+        ac.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ac.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ac
+    JOIN 
+        aka_name ak ON ac.person_id = ak.person_id
+),
+movie_info_extended AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        COALESCE(SUM(mi.info_type_id = 1 AND LENGTH(mi.info) > 0), 0) AS num_highlights -- Counting highlights
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN 
+        actor_cast ac ON mt.id = ac.movie_id
+    GROUP BY 
+        mt.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    me.actor_names,
+    me.num_highlights,
+    COALESCE(ml.linked_movie_id, -1) AS linked_movie_id,
+    COUNT(ac.actor_name) FILTER (WHERE ac.actor_rank <= 3) AS top_3_actors_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info_extended me ON mh.movie_id = me.movie_id
+LEFT JOIN 
+    movie_link ml ON mh.movie_id = ml.movie_id
+LEFT JOIN 
+    actor_cast ac ON mh.movie_id = ac.movie_id
+WHERE 
+    mh.depth = 0 AND
+    (mh.production_year BETWEEN 2000 AND 2023) AND
+    (me.num_highlights > 2 OR me.actor_names IS NULL)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, me.actor_names, me.num_highlights, ml.linked_movie_id
+ORDER BY 
+    mh.production_year DESC, me.num_highlights DESC NULLS LAST;

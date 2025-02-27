@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY ak.name) AS actor_rank,
+        COUNT(*) OVER (PARTITION BY at.id) AS actor_count
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+), 
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_name,
+        rm.actor_rank,
+        rm.actor_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_rank <= 3 AND
+        rm.actor_count > 1
+), 
+MovieYearStats AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count,
+        STRING_AGG(title, '; ') AS titles
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        production_year
+), 
+YearlyAverage AS (
+    SELECT 
+        production_year,
+        movie_count,
+        AVG(movie_count) OVER () AS overall_average
+    FROM 
+        MovieYearStats
+), 
+EligibleYears AS (
+    SELECT 
+        production_year
+    FROM 
+        YearlyAverage
+    WHERE 
+        movie_count > overall_average
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+)
+SELECT 
+    my.production_year,
+    my.movie_count,
+    my.titles,
+    COALESCE(SUM(CASE WHEN mk.keyword IS NOT NULL THEN 1 END), 0) AS keyword_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    MovieYearStats my
+LEFT JOIN 
+    MovieKeywords mk ON my.titles LIKE '%' || (SELECT STRING_AGG(title, '%') FROM MovieYearStats WHERE production_year = my.production_year) || '%'
+JOIN 
+    keyword k ON k.keyword IN (SELECT keyword FROM MovieKeywords)
+WHERE 
+    my.production_year IN (SELECT production_year FROM EligibleYears)
+GROUP BY 
+    my.production_year, my.movie_count, my.titles
+HAVING 
+    COUNT(DISTINCT mk.movie_id) > 2
+ORDER BY 
+    my.production_year DESC;

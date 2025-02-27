@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.sold_date_sk,
+        ws.quantity,
+        ws.net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rnk
+    FROM
+        web_sales ws
+    WHERE
+        ws.net_profit IS NOT NULL AND ws.net_profit > 0
+),
+MaxProfit AS (
+    SELECT
+        web_site_sk,
+        MAX(net_profit) AS max_net_profit
+    FROM
+        RankedSales
+    GROUP BY
+        web_site_sk
+),
+DetailedSales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        CASE 
+            WHEN ws.ws_sales_price > 100 THEN 'Premium'
+            WHEN ws.ws_sales_price BETWEEN 50 AND 100 THEN 'Standard'
+            ELSE 'Budget'
+        END AS price_category
+    FROM
+        web_sales ws
+    JOIN
+        MaxProfit mp ON ws.web_site_sk = mp.web_site_sk
+    WHERE
+        ws.net_profit > (SELECT AVG(net_profit) FROM web_sales)
+)
+SELECT
+    ca.city,
+    COUNT(DISTINCT cs.cs_order_number) AS total_catalog_sales,
+    SUM(NVL(sr.return_quantity, 0)) AS total_returns,
+    AVG(ws.net_profit) AS avg_net_profit,
+    MAX(ws.ws_sales_price) AS max_sales_price,
+    SUM(CASE 
+            WHEN DATEDIFF(CURRENT_DATE, DATE(from_unixtime(ws.ws_sold_date_sk))) < 30 THEN ws.ws_net_profit 
+            ELSE 0 
+        END) AS recent_sales_profit
+FROM
+    customer_address ca
+LEFT JOIN
+    store_sales ss ON ca.ca_address_sk = ss.ss_store_sk
+LEFT JOIN
+    catalog_sales cs ON cs.cs_bill_customer_sk = ss.ss_customer_sk
+LEFT JOIN
+    store_returns sr ON sr.sr_store_sk = ss.ss_store_sk
+JOIN 
+    DetailedSales ds ON ds.ws_item_sk = ss.ss_item_sk
+JOIN 
+    date_dim dd ON dd.d_date_sk = ws_sold_date_sk
+JOIN 
+    web_sales ws ON ws.ws_item_sk = cs.cs_item_sk
+WHERE
+    ca.city IS NOT NULL
+    AND ca.ca_state = 'CA'
+GROUP BY
+    ca.city
+HAVING 
+    COUNT(DISTINCT cs.cs_order_number) > 5
+ORDER BY
+    total_catalog_sales DESC;

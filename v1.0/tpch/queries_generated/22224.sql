@@ -1,0 +1,88 @@
+WITH SupplierStats AS (
+    SELECT 
+        s_nationkey,
+        COUNT(DISTINCT s_suppkey) AS num_suppliers,
+        SUM(s_acctbal) AS total_acctbal,
+        AVG(s_acctbal) AS avg_acctbal
+    FROM 
+        supplier
+    GROUP BY 
+        s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        co.total_spent
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders) 
+        OR LEFT(c.c_name, 1) IN ('A', 'E', 'I', 'O', 'U')  
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey, 
+        p.p_name, 
+        SUM(ps.ps_supplycost) AS total_supplycost, 
+        MAX(p.p_retailprice) AS max_retailprice
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+),
+SupplierRegion AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        r.r_name,
+        s.num_suppliers,
+        CASE 
+            WHEN AVG(s.total_acctbal) IS NULL THEN 'No Data'
+            ELSE TO_CHAR(AVG(s.total_acctbal), 'FM$999,999.00') 
+        END AS avg_balance
+    FROM 
+        SupplierStats s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_nationkey, r.r_regionkey, r.r_name, s.num_suppliers
+)
+SELECT 
+    sr.r_name AS region_name,
+    sr.num_suppliers,
+    sr.avg_balance,
+    pvc.total_supplycost,
+    pvc.max_retailprice,
+    hvc.c_name,
+    hvc.total_spent
+FROM 
+    SupplierRegion sr
+LEFT JOIN 
+    PartSupplierDetails pvc ON sr.num_suppliers = (SELECT COUNT(*) FROM supplier WHERE s_nationkey = sr.n_nationkey)
+LEFT JOIN 
+    HighValueCustomers hvc ON sr.num_suppliers > (SELECT COUNT(*) FROM supplier WHERE s_nationkey = hvc.c_nationkey)
+WHERE 
+    (pvc.max_retailprice IS NOT NULL AND pvc.total_supplycost > 0)
+    OR (hvc.total_spent IS NOT NULL AND hvc.c_name IS NOT NULL)
+ORDER BY 
+    sr.r_name, hvc.total_spent DESC NULLS LAST;

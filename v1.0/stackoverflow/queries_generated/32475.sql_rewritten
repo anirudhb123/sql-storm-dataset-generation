@@ -1,0 +1,64 @@
+WITH RECURSIVE BadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(B.TotalBadges, 0) AS BadgeCount,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(B.TotalBadges, 0) DESC, U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        BadgeCounts B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 0
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(PC.PostId, 'N/A') AS RecentPostId,
+    COALESCE(PC.Title, 'No posts') AS RecentPostTitle,
+    COALESCE(PC.CreationDate, 'N/A') AS RecentPostCreationDate,
+    COALESCE(PC.Score, 0) AS RecentPostScore,
+    U.Reputation,
+    B.BadgeCount AS TotalBadges,
+    B.GoldBadges,
+    B.SilverBadges,
+    B.BronzeBadges
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PostDetails PC ON U.UserId = PC.OwnerUserId AND PC.PostRank = 1
+LEFT JOIN 
+    BadgeCounts B ON U.UserId = B.UserId
+WHERE 
+    U.Rank <= 100
+ORDER BY 
+    U.Rank;

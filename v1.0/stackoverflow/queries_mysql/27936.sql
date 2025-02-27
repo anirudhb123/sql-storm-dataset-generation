@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.AnswerCount,
+        DENSE_RANK() OVER (ORDER BY rp.ViewCount DESC) AS RankByViewCount
+    FROM 
+        RankedPosts rp
+),
+PopularTags AS (
+    SELECT 
+        TRIM(TRAILING '>' FROM TRIM(LEADING '<' FROM tag)) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p,
+        (SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, '><', numbers.n), '><', -1) AS tag
+         FROM 
+         (SELECT @rownum := @rownum + 1 AS n 
+          FROM 
+           (SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) t1,
+           (SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) t2,
+           (SELECT @rownum := 0) r) numbers
+         WHERE numbers.n <= CHAR_LENGTH(p.Tags) - CHAR_LENGTH(REPLACE(p.Tags, '><', '')) + 1) AS tag
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.AnswerCount,
+    pt.TagName
+FROM 
+    TopPosts tp
+JOIN 
+    Posts p ON tp.PostId = p.Id
+JOIN 
+    PopularTags pt ON pt.TagName IN (SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(p.Tags, '><', numbers.n), '><', -1)
+                                      FROM 
+                                      (SELECT @rownum := @rownum + 1 AS n 
+                                       FROM 
+                                        (SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) t1,
+                                        (SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) t2,
+                                        (SELECT @rownum := 0) r) numbers
+                                      WHERE numbers.n <= CHAR_LENGTH(p.Tags) - CHAR_LENGTH(REPLACE(p.Tags, '><', '')) + 1)
+WHERE 
+    tp.RankByViewCount <= 10 
+ORDER BY 
+    tp.RankByViewCount;

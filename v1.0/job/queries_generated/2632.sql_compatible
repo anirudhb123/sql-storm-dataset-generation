@@ -1,0 +1,45 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        COUNT(DISTINCT mk.keyword) AS keywords,
+        SUM(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END) AS cast_count
+    FROM RankedMovies rm
+    LEFT JOIN movie_companies mc ON rm.title_id = mc.movie_id
+    LEFT JOIN movie_keyword mk ON rm.title_id = mk.movie_id
+    LEFT JOIN cast_info ci ON rm.title_id = ci.movie_id
+    GROUP BY rm.title, rm.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN production_companies > 5 AND cast_count > 10 THEN 'Popular'
+            WHEN production_companies <= 5 AND cast_count <= 10 THEN 'Indie'
+            ELSE 'Moderate'
+        END AS movie_type
+    FROM MovieDetails
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.production_companies,
+    fm.keywords,
+    fm.cast_count,
+    fm.movie_type
+FROM FilteredMovies fm
+WHERE fm.production_year >= 2000
+  AND (fm.keywords > 2 OR fm.movie_type = 'Popular')
+ORDER BY fm.production_year DESC, fm.keywords DESC
+FETCH FIRST 50 ROWS ONLY;

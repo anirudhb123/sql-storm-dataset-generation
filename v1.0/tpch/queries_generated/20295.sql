@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) 
+                                FROM orders o2 
+                                WHERE o2.o_orderdate >= '2023-01-01')
+), 
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(HighValue.total_spent, 0) AS customer_spending,
+    COALESCE(HighValue.c_custkey, -1) AS high_value_custkey,
+    rnk,
+    psi.total_available,
+    psi.total_cost,
+    CASE 
+        WHEN psi.total_cost IS NULL THEN 'No Supply'
+        WHEN psi.total_cost > 1000 THEN 'Expensive Part'
+        ELSE 'Affordable Part'
+    END AS cost_category,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM lineitem l 
+                     WHERE l.l_discount > 0 AND l.l_partkey = p.p_partkey) 
+        THEN 'Discounted'
+        ELSE 'Regular Price'
+    END AS price_status
+FROM 
+    part p
+LEFT JOIN 
+    PartSupplierInfo psi ON p.p_partkey = psi.ps_partkey
+LEFT JOIN 
+    HighValueCustomers HighValue ON HighValue.total_spent = (SELECT MAX(total_spent) FROM HighValueCustomers)
+LEFT JOIN 
+    RankedSuppliers r ON psi.ps_suppkey = r.s_suppkey
+ORDER BY 
+    customer_spending DESC, 
+    p.p_retailprice ASC
+LIMIT 100;

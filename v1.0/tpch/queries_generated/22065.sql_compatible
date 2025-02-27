@@ -1,0 +1,61 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        ROW_NUMBER() OVER(PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM part p
+    WHERE p.p_size > 10
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+),
+SupplierPriceSummary AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supplier_total_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+)
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_brand,
+    c.c_name AS high_value_customer,
+    hvc.order_count,
+    hvc.total_spent,
+    COALESCE(sps.supplier_total_value, 0) AS supplier_total_value,
+    CASE 
+        WHEN rp.rank_price <= 5 THEN 'Top Tier'
+        WHEN rp.rank_price <= 10 THEN 'Mid Tier'
+        ELSE 'Other'
+    END AS part_tier,
+    r.r_name AS region_name
+FROM RankedParts rp
+JOIN supplier s ON s.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = rp.p_partkey 
+    ORDER BY ps.ps_supplycost 
+    FETCH FIRST 1 ROW ONLY)
+LEFT JOIN HighValueCustomers hvc ON hvc.c_custkey = s.s_suppkey
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = s.s_nationkey)
+FULL OUTER JOIN SupplierPriceSummary sps ON sps.ps_suppkey = s.s_suppkey
+WHERE rp.rank_price IS NOT NULL
+  AND rp.p_brand IS NOT NULL
+  AND (hvc.order_count IS NULL OR hvc.order_count > 0)
+ORDER BY rp.p_partkey;

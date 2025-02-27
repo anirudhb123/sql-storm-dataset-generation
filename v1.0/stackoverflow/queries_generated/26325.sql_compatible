@@ -1,0 +1,50 @@
+
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(CASE WHEN Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(Users.Reputation) AS AverageReputation
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><'))
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AcceptedAnswers,
+        AverageReputation,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank
+    FROM 
+        TagStats
+)
+SELECT 
+    TagName,
+    PostCount,
+    TotalViews,
+    AcceptedAnswers,
+    AverageReputation,
+    CASE 
+        WHEN AcceptedAnswers > PostCount / 2 THEN 'High'
+        WHEN AcceptedAnswers > PostCount / 4 THEN 'Medium'
+        ELSE 'Low'
+    END AS AcceptanceRate,
+    CONCAT('This tag is associated with ', PostCount, 
+           ' posts, accumulating ', TotalViews, 
+           ' views and ', AcceptedAnswers, 
+           ' accepted answers. Users with this tag have an average reputation of ', 
+           ROUND(AverageReputation, 2), '.') AS TagSummary
+FROM 
+    TopTags
+WHERE 
+    ViewRank <= 10
+ORDER BY 
+    ViewRank;

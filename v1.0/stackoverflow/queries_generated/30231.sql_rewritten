@@ -1,0 +1,59 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+SELECT 
+    u.DisplayName,
+    COUNT(DISTINCT p.PostId) AS QuestionCount,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+    AVG(COALESCE(p.Score, 0)) AS AverageScore,
+    MAX(v.CreationDate) AS LastVoteDate,
+    MAX(p.CreationDate) AS LastPostDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(UNNEST(string_to_array(p.Tags, ','))) AS TagName
+    ) t ON TRUE
+WHERE 
+    u.Reputation >= 1000
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    AverageScore DESC
+FETCH FIRST 10 ROWS ONLY;

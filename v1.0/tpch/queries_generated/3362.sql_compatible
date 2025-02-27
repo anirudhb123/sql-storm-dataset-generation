@@ -1,0 +1,61 @@
+
+WITH supplier_summary AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey, o.o_custkey
+),
+high_value_orders AS (
+    SELECT
+        os.o_orderkey,
+        os.o_custkey,
+        os.total_order_value
+    FROM
+        order_summary os
+    WHERE
+        os.total_order_value > (
+            SELECT
+                AVG(total_order_value)
+            FROM
+                order_summary
+        )
+)
+SELECT
+    su.s_name,
+    su.total_available,
+    su.avg_supply_cost,
+    COUNT(DISTINCT hvo.o_orderkey) AS high_value_order_count,
+    SUM(hvo.total_order_value) AS total_high_value
+FROM
+    supplier_summary su
+LEFT JOIN
+    partsupp ps ON su.s_suppkey = ps.ps_suppkey
+LEFT JOIN
+    high_value_orders hvo ON ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_mfgr = 'Manufacturer1' LIMIT 1)
+GROUP BY
+    su.s_name, su.total_available, su.avg_supply_cost
+HAVING
+    su.total_available > 100
+ORDER BY
+    total_high_value DESC;

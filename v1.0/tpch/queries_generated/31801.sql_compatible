@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+AggregatedSales AS (
+    SELECT 
+        cust.c_name AS customer_name,
+        COALESCE(supp.s_name, 'Various Suppliers') AS supplier_name,
+        COALESCE(cust.sales, 0) AS total_customer_sales,
+        COALESCE(supp.sales, 0) AS total_supplier_sales
+    FROM 
+        (SELECT c.c_name, SUM(s.total_sales) AS sales
+         FROM SalesCTE s
+         JOIN customer c ON s.c_custkey = c.c_custkey
+         GROUP BY c.c_name) cust
+    FULL OUTER JOIN 
+        (SELECT s.s_name, SUM(s.total_sales) AS sales
+         FROM SalesCTE s
+         JOIN supplier s ON s.s_suppkey = s.s_suppkey
+         GROUP BY s.s_name) supp
+    ON cust.customer_name = supp.supplier_name
+),
+RankedSales AS (
+    SELECT 
+        customer_name,
+        supplier_name,
+        total_customer_sales,
+        total_supplier_sales,
+        ROW_NUMBER() OVER (ORDER BY total_customer_sales DESC) AS customer_rank,
+        ROW_NUMBER() OVER (ORDER BY total_supplier_sales DESC) AS supplier_rank
+    FROM 
+        AggregatedSales
+)
+SELECT 
+    customer_name,
+    supplier_name,
+    total_customer_sales,
+    total_supplier_sales,
+    LEAST(customer_rank, supplier_rank) AS combined_rank
+FROM 
+    RankedSales
+WHERE 
+    (total_customer_sales IS NOT NULL AND total_supplier_sales IS NOT NULL)
+    OR (total_customer_sales IS NULL AND total_supplier_sales IS NOT NULL)
+ORDER BY 
+    combined_rank;

@@ -1,0 +1,40 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 5
+),
+RegionSuppliers AS (
+    SELECT r.r_name, s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY r.r_name, s.s_suppkey, s.s_name
+),
+CustomerTotals AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+)
+SELECT
+    r.r_name AS supplier_region,
+    s.s_name AS supplier_name,
+    COALESCE(ct.total_spent, 0) AS customer_total_spent,
+    AVG(ps.ps_availqty) OVER(PARTITION BY r.r_name) AS avg_avail_qty,
+    FIRST_VALUE(oh.o_orderdate) OVER(PARTITION BY s.s_suppkey ORDER BY oh.o_orderdate) AS first_order_date
+FROM RegionSuppliers r
+LEFT JOIN supplier s ON s.s_suppkey = r.s_suppkey
+LEFT JOIN CustomerTotals ct ON ct.total_spent > r.total_avail_qty
+LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey = l.l_orderkey
+WHERE r.total_avail_qty IS NOT NULL
+ORDER BY r.r_name, s.s_name;

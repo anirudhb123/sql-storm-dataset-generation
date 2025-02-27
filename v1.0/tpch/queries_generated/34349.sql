@@ -1,0 +1,52 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 10
+),
+OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+RegionNations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+SuppliersInRegion AS (
+    SELECT
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM region r
+    LEFT JOIN supplier s ON r.r_regionkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT
+    ps.p_partkey,
+    p.p_name,
+    COALESCE(sh.level, 0) AS supplier_level,
+    os.total_revenue,
+    rn.r_name AS region_name,
+    MAX(si.supplier_count) AS max_suppliers
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN OrderSummary os ON ps.ps_partkey = os.o_orderkey
+LEFT JOIN RegionNations rn ON rn.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ps.ps_suppkey)
+LEFT JOIN SuppliersInRegion si ON rn.r_name = si.r_name
+WHERE p.p_size IS NOT NULL
+GROUP BY ps.p_partkey, p.p_name, sh.level, os.total_revenue, rn.r_name
+HAVING MAX(si.supplier_count) > 5
+ORDER BY p.p_partkey, os.total_revenue DESC;

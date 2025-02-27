@@ -1,0 +1,49 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year, 
+        ARRAY[m.id] AS parent_movies
+    FROM aka_title AS m
+    WHERE m.production_year BETWEEN 2000 AND 2023
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.parent_movies || m.id
+    FROM movie_link AS ml
+    JOIN movie_hierarchy AS mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title AS m ON ml.linked_movie_id = m.id
+    WHERE m.production_year BETWEEN 2000 AND 2023 
+)
+
+SELECT 
+    mm.movie_id,
+    mm.title,
+    mm.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    ARRAY_AGG(DISTINCT a.name ORDER BY a.name) AS cast_names,
+    SUM(CASE WHEN i.info IS NOT NULL THEN LENGTH(i.info) END) AS total_info_length,
+    CASE WHEN AVG(CASE WHEN mpi.info IS NOT NULL THEN LENGTH(mpi.info) END) IS NULL THEN 'No Info' ELSE AVG(CASE WHEN mpi.info IS NOT NULL THEN LENGTH(mpi.info) END) END AS average_info_length_or_none
+FROM movie_hierarchy AS mm
+LEFT JOIN complete_cast AS cc ON mm.movie_id = cc.movie_id
+LEFT JOIN cast_info AS c ON cc.subject_id = c.person_id 
+LEFT JOIN aka_name AS a ON c.person_id = a.person_id
+LEFT JOIN movie_info AS mi ON mm.movie_id = mi.movie_id
+LEFT JOIN movie_info AS mpi ON mi.info_type_id = mpi.info_type_id AND mpi.note IS DISTINCT FROM 'NULL'
+GROUP BY mm.movie_id, mm.title, mm.production_year
+HAVING COUNT(DISTINCT c.person_id) > 5 
+AND EXISTS (
+    SELECT 1 FROM movie_keyword AS mk
+    WHERE mk.movie_id = mm.movie_id
+    AND EXISTS (
+        SELECT 1 FROM keyword AS k
+        WHERE mk.keyword_id = k.id AND k.keyword ILIKE '%Action%'
+    )
+)
+ORDER BY mm.production_year DESC, total_cast DESC
+LIMIT 10;

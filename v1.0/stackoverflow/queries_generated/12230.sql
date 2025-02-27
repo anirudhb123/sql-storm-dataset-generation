@@ -1,0 +1,60 @@
+-- Performance Benchmarking SQL Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        SUM(b.Id IS NOT NULL) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        COALESCE(SUM(cm.Id), 0) AS CommentCount,
+        COALESCE(SUM(ph.Id), 0) AS HistoryChangeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments cm ON p.Id = cm.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate
+)
+SELECT 
+    us.DisplayName,
+    us.PostCount,
+    us.QuestionCount,
+    us.AnswerCount,
+    us.UpVotes,
+    us.DownVotes,
+    us.BadgeCount,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.HistoryChangeCount
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON us.UserId = ps.OwnerUserId
+ORDER BY 
+    us.PostCount DESC, 
+    us.UpVotes DESC;

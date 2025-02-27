@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSellers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM RankedSuppliers s
+    WHERE s.rank = 1
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned,
+           COUNT(DISTINCT l.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    d.o_orderkey,
+    d.o_totalprice,
+    d.total_returned,
+    d.line_count,
+    CASE 
+        WHEN d.line_count > 10 THEN 'Bulk Order' 
+        ELSE 'Regular Order' 
+    END AS order_type,
+    SUBSTRING(p.p_comment, 1, 15) AS short_comment,
+    COUNT(DISTINCT o.o_orderkey) OVER (PARTITION BY p.p_partkey) AS order_count_per_part,
+    CASE 
+        WHEN d.total_returned IS NULL THEN 'No Returns'
+        ELSE CAST(d.total_returned AS varchar)
+    END AS return_status
+FROM part p
+LEFT JOIN HighValueSellers s ON p.p_partkey = (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey = s.s_suppkey 
+    ORDER BY ps.ps_supplycost DESC 
+    LIMIT 1
+)
+LEFT JOIN OrderDetails d ON p.p_partkey = (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = d.o_orderkey 
+    LIMIT 1
+)
+WHERE p.p_size > 10
+   OR (p.p_retailprice IS NULL AND p.p_type LIKE '%Gadget%')
+ORDER BY p.p_partkey, d.o_totalprice DESC
+LIMIT 100;

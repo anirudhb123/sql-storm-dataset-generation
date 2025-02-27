@@ -1,0 +1,37 @@
+WITH RecentOrders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    AND o_orderstatus = 'O'
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+SupplierNations AS (
+    SELECT DISTINCT s.s_suppkey, n.n_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name IN ('Europe', 'Asia'))
+)
+SELECT
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN lineitem l2 ON l.l_orderkey = l2.l_orderkey
+JOIN RecentOrders ro ON o.o_orderkey = ro.o_orderkey
+JOIN HighValueParts hvp ON l.l_partkey = hvp.p_partkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN SupplierNations sn ON s.s_suppkey = sn.s_suppkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE l.l_shipdate >= DATEADD(year, -1, CURRENT_DATE)
+GROUP BY r.r_name
+ORDER BY total_revenue DESC;

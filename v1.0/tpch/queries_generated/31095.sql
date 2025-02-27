@@ -1,0 +1,52 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)  -- higher than average balance
+    UNION ALL
+    SELECT ch.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM CustomerHierarchy ch
+    JOIN orders o ON o.o_custkey = ch.c_custkey
+    JOIN customer c ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'  -- only considering open orders
+),
+TopSuppliers AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_availqty) > 500  -- suppliers with more than 500 available quantity
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING SUM(o.o_totalprice) IS NOT NULL
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_sales
+    FROM supplier s
+    JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY s.s_suppkey
+    ORDER BY avg_sales DESC
+    LIMIT 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value, 
+           COUNT(l.l_linenumber) AS line_items,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) as rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT ch.c_custkey, ch.c_name, co.order_count, co.total_spent, sp.avg_sales AS supplier_avg_sales
+FROM CustomerHierarchy ch
+JOIN CustomerOrders co ON ch.c_custkey = co.c_custkey
+LEFT JOIN SupplierPerformance sp ON sp.s_suppkey IN (
+    SELECT DISTINCT l.l_suppkey
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_custkey = ch.c_custkey
+)
+WHERE co.order_count > 10
+ORDER BY supplier_avg_sales DESC, total_spent DESC;

@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        COUNT(l.l_orderkey) OVER (PARTITION BY s.s_suppkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+),
+
+PartStatistics AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        AVG(COALESCE(NULLIF(p.p_retailprice, 0), 1)) AS average_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        NTILE(4) OVER (ORDER BY SUM(o.o_totalprice) DESC) AS spending_quartile
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.region_name,
+    COALESCE(ps.supplier_count, 0) AS total_suppliers,
+    p.total_availqty,
+    p.total_supplycost,
+    SUM(CASE WHEN cs.spending_quartile = 1 THEN cs.total_spent ELSE 0 END) AS top_spenders,
+    SUM(CASE WHEN cs.spending_quartile = 4 THEN cs.total_spent ELSE 0 END) AS lowest_spenders
+FROM 
+    RankedSuppliers rs
+FULL OUTER JOIN 
+    PartStatistics p ON rs.s_suppkey = p.p_partkey
+JOIN 
+    region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT s.s_nationkey 
+            FROM supplier s 
+            WHERE s.s_suppkey = rs.s_suppkey
+        )
+    )
+LEFT JOIN 
+    CustomerOrders cs ON cs.c_custkey = rs.s_suppkey 
+GROUP BY 
+    r.region_name, ps.supplier_count, p.total_availqty, p.total_supplycost
+HAVING 
+    p.total_supplycost IS NOT NULL 
+    AND COALESCE(ps.supplier_count, 0) > 5
+ORDER BY 
+    total_suppliers DESC, r.region_name ASC;

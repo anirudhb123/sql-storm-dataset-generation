@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TotalSales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+SalesBySupplier AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY ps.ps_suppkey
+)
+SELECT 
+    s.s_name, 
+    n.n_name AS nation, 
+    COALESCE(SUM(ts.total_sales), 0) AS total_sales,
+    COALESCE(SUM(sbs.total_supply_cost), 0) AS total_supply_cost,
+    CASE 
+        WHEN SUM(ts.total_sales) > 10000 THEN 'High Performer'
+        WHEN SUM(ts.total_sales) BETWEEN 5000 AND 10000 THEN 'Moderate Performer'
+        ELSE 'Low Performer'
+    END AS performance_category,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count
+FROM supplier s
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN TotalSales ts ON s.s_suppkey = ts.o_orderkey
+LEFT JOIN SalesBySupplier sbs ON s.s_suppkey = sbs.ps_suppkey
+LEFT JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+GROUP BY s.s_name, n.n_name
+HAVING COALESCE(SUM(ts.total_sales), 0) > 5000
+ORDER BY performance_category, total_sales DESC;

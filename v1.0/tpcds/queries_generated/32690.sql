@@ -1,0 +1,45 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 1 AS level 
+    FROM customer 
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, ch.level + 1 
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_hdemo_sk = ch.c_customer_sk
+),
+SalesData AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_sales,
+           AVG(ws.ws_sales_price) AS avg_price,
+           RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT cr.cr_item_sk, SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    LEFT JOIN customer c ON cr.cr_returning_customer_sk = c.c_customer_sk
+    GROUP BY cr.cr_item_sk
+)
+SELECT 
+    ch.c_customer_sk,
+    ch.c_first_name,
+    ch.c_last_name,
+    sd.ws_item_sk,
+    sd.total_sales,
+    sd.avg_price,
+    COALESCE(cr.total_returns, 0) AS total_returns,
+    (sd.total_sales - COALESCE(cr.total_returns, 0)) AS net_sales
+FROM CustomerHierarchy ch
+JOIN SalesData sd ON sd.ws_item_sk = (
+    SELECT TOP 1 sd2.ws_item_sk 
+    FROM SalesData sd2 
+    WHERE sd2.sales_rank <= 10
+    ORDER BY sd2.total_sales DESC
+)
+LEFT JOIN CustomerReturns cr ON sd.ws_item_sk = cr.cr_item_sk
+WHERE ch.level <= 3 
+  AND ch.c_first_name NOT LIKE 'A%' 
+ORDER BY net_sales DESC
+LIMIT 50;

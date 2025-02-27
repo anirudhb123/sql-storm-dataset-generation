@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        DENSE_RANK() OVER (ORDER BY p.ViewCount DESC) AS RankByViews,
+        CASE 
+            WHEN p.Score IS NULL THEN -1
+            WHEN p.Score > 0 AND p.ViewCount < 100 THEN 'Low View'
+            WHEN p.Score > 0 AND p.ViewCount BETWEEN 100 AND 500 THEN 'Medium View'
+            WHEN p.Score > 0 AND p.ViewCount > 500 THEN 'High View'
+            ELSE 'No Score'
+        END AS ViewCategory
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '30 days')
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS TotalHistoryEntries
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '1 year')
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount, 
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+AggregatedResult AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.RankByScore,
+        rp.RankByViews,
+        rp.ViewCategory,
+        COALESCE(pdh.TotalHistoryEntries, 0) AS HistoryCount,
+        ub.BadgeCount,
+        ub.BadgeNames
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostHistoryDetails pdh ON rp.PostID = pdh.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    PostID,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    CommentCount,
+    RankByScore,
+    RankByViews,
+    ViewCategory,
+    HistoryCount,
+    BadgeCount,
+    BadgeNames
+FROM 
+    AggregatedResult
+WHERE 
+    (ViewCount >= 100 OR BadgeCount > 5) AND 
+    (BadgeCount IS NOT NULL OR HistoryCount > 0)
+ORDER BY 
+    Score DESC, 
+    ViewCount DESC, 
+    RankByScore
+LIMIT 100;

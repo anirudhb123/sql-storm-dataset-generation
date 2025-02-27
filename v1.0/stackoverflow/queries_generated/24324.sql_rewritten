@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(SUM(v.VoteTypeId = 2), 0) - COALESCE(SUM(v.VoteTypeId = 3), 0) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosed
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+FilteredUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation'
+            WHEN u.Reputation < 100 THEN 'New User'
+            ELSE 'Experienced User'
+        END AS UserType
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND (u.LastAccessDate IS NULL OR u.LastAccessDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months')
+)
+SELECT 
+    pu.DisplayName,
+    pu.Reputation,
+    pu.UserType,
+    rp.Title,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    COALESCE(cp.LastClosed, 'Never') AS LastClosed
+FROM 
+    RankedPosts rp
+JOIN 
+    FilteredUsers pu ON rp.OwnerUserId = pu.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Rank <= 5  
+ORDER BY 
+    pu.Reputation DESC, rp.UpVotes DESC;

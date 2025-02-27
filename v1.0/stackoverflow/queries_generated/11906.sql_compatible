@@ -1,0 +1,31 @@
+
+SELECT 
+    p.Title AS Post_Title,
+    p.CreationDate AS Post_CreationDate,
+    p.ViewCount AS Post_ViewCount,
+    p.Score AS Post_Score,
+    u.DisplayName AS Owner_DisplayName,
+    COUNT(v.Id) AS Vote_Count,
+    COUNT(c.Id) AS Comment_Count,
+    COUNT(b.Id) AS Badge_Count,
+    pt.Name AS Post_Type,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+GROUP BY 
+    p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName, pt.Name
+ORDER BY 
+    Post_ViewCount DESC
+LIMIT 100;

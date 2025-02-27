@@ -1,0 +1,53 @@
+WITH UserStats AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        COUNT(DISTINCT Posts.Id) AS TotalPosts,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(UpVotes) AS TotalUpVotes,
+        SUM(DownVotes) AS TotalDownVotes
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Id, Reputation
+),
+PostStats AS (
+    SELECT 
+        PostTypeId,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM Posts
+    GROUP BY PostTypeId
+),
+BadgeStats AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges,
+        SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+)
+
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalAnswers,
+    u.TotalQuestions,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    COALESCE(b.TotalBadges, 0) AS TotalBadges,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+    p.PostTypeId,
+    p.PostCount,
+    p.TotalViews,
+    p.AverageScore
+FROM UserStats u
+LEFT JOIN BadgeStats b ON u.UserId = b.UserId
+LEFT JOIN PostStats p ON p.PostTypeId IN (1, 2)
+ORDER BY u.Reputation DESC, p.PostCount DESC;

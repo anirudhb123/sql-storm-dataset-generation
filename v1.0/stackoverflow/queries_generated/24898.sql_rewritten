@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0 
+        AND p.PostTypeId = 1
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation >= 1000 THEN 'High'
+            WHEN u.Reputation BETWEEN 100 AND 999 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationTier
+    FROM 
+        Users u
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS EditTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+UserWithBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users ub ON ub.Id = b.UserId
+    GROUP BY 
+        ub.UserId
+)
+SELECT 
+    up.UserId,
+    up.Reputation,
+    u.ReputationTier,
+    COALESCE(rp.RecentPostRank, 0) AS RecentPostRank,
+    COALESCE(phd.EditCount, 0) AS TotalEdits,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    STRING_AGG(DISTINCT CONVERT(varchar, rp.PostId), ', ') AS RecentPostIds
+FROM 
+    UserReputation u
+JOIN 
+    Users up ON u.UserId = up.Id
+LEFT JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId AND rp.RecentPostRank = 1
+LEFT JOIN 
+    PostHistoryDetails phd ON up.Id = phd.UserId
+LEFT JOIN 
+    UserWithBadges ub ON up.Id = ub.UserId
+GROUP BY 
+    up.UserId, up.Reputation, u.ReputationTier
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 0 OR COUNT(DISTINCT ud.BadgeCount) > 0
+ORDER BY 
+    u.Reputation DESC, TotalEdits DESC, BadgeCount DESC;

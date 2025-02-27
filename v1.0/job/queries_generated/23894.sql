@@ -1,0 +1,55 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL 
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5  -- limiting levels to avoid infinite recursion
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ak.id AS actor_id,
+    mh.title AS movie_title,
+    mh.production_year,
+    r.role AS character_name,
+    COALESCE(CAST(STRING_AGG(DISTINCT c.note, ', ' ORDER BY c.nr_order) AS text), 'No notes available') AS notes,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    MAX(mh.level) AS hierarchy_level
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON c.movie_id = mh.movie_id
+JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    ak.id, ak.name, mh.title, mh.production_year, r.role
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    actor_name, movie_title;
+
+This query combines a number of SQL constructs including CTE for recursive movie hierarchy exploration, JOINs across related tables, and aggregation functions with conditions that filter out movies without keywords while still returning detailed information about actors and their roles in movies. The use of COALESCE, STRING_AGG, and complex HAVING clauses adds layers of complexity, showcasing corner cases in SQL semantics.

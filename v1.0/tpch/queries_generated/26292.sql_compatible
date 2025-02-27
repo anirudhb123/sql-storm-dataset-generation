@@ -1,0 +1,35 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_name, s.s_address, SUBSTRING(s.s_comment, 1, 20) AS short_comment 
+    FROM supplier s 
+    WHERE LENGTH(s.s_comment) > 0
+),
+CustomerDetails AS (
+    SELECT c.c_name, c.c_address, CONCAT(SUBSTRING(c.c_comment, 1, 20), '...') AS short_comment 
+    FROM customer c 
+    WHERE LENGTH(c.c_comment) > 0
+),
+PartDetails AS (
+    SELECT p.p_brand, p.p_name, p.p_retailprice, 
+           REPLACE(p.p_comment, 'excellent', 'superb') AS modified_comment 
+    FROM part p 
+    WHERE p.p_size > 10
+),
+SalesData AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    GROUP BY o.o_orderkey
+)
+SELECT pd.p_brand, pd.p_name, pd.p_retailprice, 
+       COALESCE(sd.total_sales, 0) AS total_sales, 
+       COALESCE(sd.total_sales, 0) / NULLIF(pd.p_retailprice, 0) AS sales_to_price_ratio,
+       sd.total_sales, 
+       sd.o_orderkey, 
+       CONCAT(sd.total_sales, ' in Sales!') AS sales_message,
+       CONCAT(sd.o_orderkey, ': ', sd.total_sales) AS order_sales_info,
+       CONCAT(sd.total_sales, ' units sold') AS units_sold_info,
+       CONCAT(sd.total_sales, ' - ', sd.total_sales * 0.1, ' estimated profit') AS profit_estimation
+FROM PartDetails pd 
+LEFT JOIN SalesData sd ON pd.p_brand = SUBSTRING(CAST(sd.o_orderkey AS TEXT), 1, LENGTH(pd.p_brand))
+ORDER BY pd.p_brand, total_sales DESC;

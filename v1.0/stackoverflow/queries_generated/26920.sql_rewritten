@@ -1,0 +1,81 @@
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Body IS NOT NULL
+    GROUP BY 
+        p.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years' 
+    GROUP BY 
+        u.Id
+),
+FinalMetrics AS (
+    SELECT 
+        f.PostId,
+        f.Title,
+        f.Body,
+        f.Tags,
+        f.CreationDate,
+        f.CommentCount,
+        f.BadgeCount,
+        f.TagList,
+        u.UserId,
+        u.DisplayName,
+        u.PostCount,
+        u.TotalUpVotes,
+        u.TotalDownVotes,
+        u.AvgReputation
+    FROM 
+        FilteredPosts f
+    JOIN 
+        Users u ON f.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+)
+SELECT 
+    fm.PostId,
+    fm.Title,
+    fm.Body,
+    fm.CreationDate,
+    fm.CommentCount,
+    fm.BadgeCount,
+    fm.TagList,
+    fm.DisplayName AS Owner,
+    fm.PostCount AS OwnerPostCount,
+    fm.TotalUpVotes - fm.TotalDownVotes AS OwnerVoteBalance,
+    fm.AvgReputation AS OwnerAvgReputation
+FROM 
+    FinalMetrics fm
+ORDER BY 
+    fm.CommentCount DESC, 
+    fm.BadgeCount DESC, 
+    fm.CreationDate DESC
+LIMIT 100;

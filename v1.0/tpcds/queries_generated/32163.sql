@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT ws_order_number,
+           ws_item_sk,
+           ws_sales_price,
+           ws_quantity,
+           1 AS level
+    FROM web_sales
+    WHERE ws_sales_price > 100
+
+    UNION ALL
+
+    SELECT ws.order_number,
+           ws.item_sk,
+           ws.sales_price * 0.9 AS discounted_price,
+           ws.quantity,
+           sh.level + 1
+    FROM web_sales ws
+    JOIN sales_hierarchy sh ON ws_order_number = sh.ws_order_number
+    WHERE sh.level < 3
+),
+customer_details AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_gender,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+sales_summary AS (
+    SELECT c.c_customer_sk,
+           cd.c_first_name,
+           cd.c_last_name,
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS orders,
+           MAX(ws_ext_sales_price) AS max_sale,
+           MIN(ws_ext_sales_price) AS min_sale,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_details cd ON c.c_customer_sk = cd.c_customer_sk
+    GROUP BY c.c_customer_sk, cd.c_first_name, cd.c_last_name, cd.cd_gender
+)
+SELECT cs.c_first_name,
+       cs.c_last_name,
+       cs.total_sales,
+       cs.orders,
+       cs.max_sale,
+       cs.min_sale,
+       CASE 
+           WHEN cs.max_sale > 500 THEN 'High Value'
+           WHEN cs.orders > 10 THEN 'Regular'
+           ELSE 'Occasional'
+       END AS customer_category,
+       sh.ws_sales_price AS hierarchy_price
+FROM sales_summary cs
+LEFT JOIN sales_hierarchy sh ON cs.c_customer_sk = sh.ws_item_sk
+WHERE cs.total_sales IS NOT NULL
+ORDER BY cs.total_sales DESC;

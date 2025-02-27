@@ -1,0 +1,89 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+        AND o.o_orderdate <= '1997-12-31'
+),
+SupplierRevenue AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate < '1998-10-01'
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        r.r_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_regionkey, r.r_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000 OR COUNT(o.o_orderkey) > 5
+),
+HighValueSuppliers AS (
+    SELECT 
+        sr.ps_suppkey
+    FROM 
+        SupplierRevenue sr
+    WHERE 
+        sr.total_revenue > (SELECT AVG(total_revenue) FROM SupplierRevenue)
+),
+FinalReport AS (
+    SELECT 
+        cr.r_name,
+        cr.c_custkey,
+        COALESCE(SR.total_revenue, 0) AS supplier_revenue,
+        COUNT(ro.o_orderkey) AS order_count,
+        SUM(ro.o_totalprice) AS total_order_value
+    FROM 
+        CustomerRegions cr
+    LEFT JOIN 
+        HighValueSuppliers hvs ON cr.c_custkey = hvs.ps_suppkey
+    LEFT JOIN 
+        RankedOrders ro ON cr.c_custkey = ro.o_orderkey
+    LEFT JOIN 
+        SupplierRevenue SR ON hvs.ps_suppkey = SR.ps_suppkey
+    GROUP BY 
+        cr.r_name, cr.c_custkey
+)
+SELECT 
+    r_name,
+    c_custkey,
+    supplier_revenue,
+    order_count,
+    total_order_value,
+    CASE 
+        WHEN order_count IS NULL THEN 'No Orders'
+        WHEN total_order_value > 50000 THEN 'High Spender'
+        ELSE 'Regular Customer'
+    END AS customer_classification
+FROM 
+    FinalReport 
+ORDER BY 
+    supplier_revenue DESC, total_order_value DESC
+LIMIT 50 OFFSET 10;

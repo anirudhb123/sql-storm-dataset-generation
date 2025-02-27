@@ -1,0 +1,41 @@
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F' AND o.o_totalprice > 
+          (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'F')
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_brand, p.p_retailprice,
+           CONCAT(p.p_name, ' ', p.p_container) AS full_description
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_size <> 0
+), 
+HighValueSuppliers AS (
+    SELECT s.s_suppkey
+    FROM SupplierStats s
+    WHERE s.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierStats)
+)
+SELECT r.r_name, COUNT(DISTINCT ro.o_orderkey) AS order_count,
+       SUM(CASE WHEN ld.l_returnflag = 'Y' THEN ld.l_extendedprice ELSE 0 END) AS total_returned_value,
+       AVG(CASE WHEN ld.l_discount > 0.15 THEN ld.l_discount ELSE NULL END) AS avg_high_discount,
+       STRING_AGG(pd.full_description, ', ') AS part_descriptions
+FROM RecentOrders ro
+LEFT JOIN lineitem ld ON ro.o_orderkey = ld.l_orderkey
+JOIN nation n ON n.n_nationkey = ro.c_nationkey
+JOIN region r ON r.r_regionkey = n.n_regionkey
+JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM PartDetails p WHERE p.p_brand LIKE '%ABC%')
+WHERE ld.l_shipdate >= '1996-01-01' OR ld.l_discount IS NULL
+AND EXISTS (SELECT 1 FROM HighValueSuppliers hvs WHERE hvs.s_suppkey = ld.l_suppkey)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 
+       (SELECT COUNT(DISTINCT o2.o_orderkey) / 2 FROM orders o2 WHERE o2.o_orderstatus = 'F')
+ORDER BY order_count DESC NULLS LAST;

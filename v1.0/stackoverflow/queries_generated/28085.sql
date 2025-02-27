@@ -1,0 +1,74 @@
+WITH PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        P.CreationDate,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        AVG(COALESCE(PH.UserId IS NOT NULL, 0)::int) AS HasBeenEdited
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId -- to get answers for questions
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%<%' || T.TagName || '%>%' -- assuming tags are wrapped in <>
+    GROUP BY 
+        T.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        SUM(COALESCE(B.Class, 0)) AS TotalBadges,
+        SUM(P.ViewCount) AS UserPostViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+    ORDER BY 
+        TotalBadges DESC
+    LIMIT 10
+)
+SELECT 
+    PI.Title,
+    PI.OwnerDisplayName,
+    PI.AnswerCount,
+    PI.ViewCount,
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TU.DisplayName AS TopUserDisplayName,
+    TU.TotalBadges,
+    TU.UserPostViews,
+    PI.HasBeenEdited
+FROM 
+    PostInfo PI
+JOIN 
+    TagStats TS ON TS.PostCount > 50 -- Tags associated with more than 50 posts
+JOIN 
+    TopUsers TU ON TU.UserPostViews > 1000 -- Users who have more than 1000 total views on their posts
+ORDER BY 
+    PI.ViewCount DESC;

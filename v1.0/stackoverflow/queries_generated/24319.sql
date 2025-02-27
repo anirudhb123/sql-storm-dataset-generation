@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.ParentId,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9  -- BountyClose
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    AND 
+        p.OwnerUserId IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        rp.CommentCount,
+        rp.TotalBounty,
+        CASE 
+            WHEN rp.RankScore < 5 THEN 'Low Ranking'
+            WHEN rp.RankScore BETWEEN 5 AND 10 THEN 'Moderate Ranking'
+            ELSE 'High Ranking'
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 5
+),
+PostDetails AS (
+    SELECT 
+        fp.Id,
+        fp.Title,
+        fp.Score,
+        fp.ViewCount,
+        fp.RankCategory,
+        COALESCE(b.Name, 'No Badge') AS UserBadge,
+        u.Reputation,
+        COALESCE(b.Date, 'No Badge Acquired') AS BadgeDate
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = fp.Id)
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id AND b.Class = 1  -- Only Gold badges
+)
+SELECT 
+    pd.Title,
+    pd.RankCategory,
+    COUNT(DISTINCT pd.UserBadge) AS UniqueBadges,
+    SUM(pd.ViewCount) AS TotalViews,
+    AVG(pd.Reputation) AS AverageReputation
+FROM 
+    PostDetails pd
+GROUP BY 
+    pd.Title, pd.RankCategory
+HAVING 
+    SUM(pd.ViewCount) > 100
+ORDER BY 
+    AverageReputation DESC, UniqueBadges DESC;
+
+WITH FinalMetrics AS (
+    SELECT 
+        pd.RankCategory,
+        COUNT(*) AS PostCount,
+        SUM(pd.ViewCount) AS TotalViews,
+        AVG(pd.Score) AS AverageScore
+    FROM 
+        PostDetails pd
+    GROUP BY 
+        pd.RankCategory
+)
+SELECT 
+    RankCategory,
+    PostCount,
+    TotalViews,
+    AverageScore,
+    CASE 
+        WHEN AverageScore > 50 THEN 'High Engagement'
+        WHEN AverageScore BETWEEN 20 AND 50 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    FinalMetrics;

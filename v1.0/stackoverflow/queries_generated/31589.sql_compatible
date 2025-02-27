@@ -1,0 +1,79 @@
+
+WITH RecursiveTagCounts AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    GROUP BY 
+        t.Id, t.TagName, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryWithReason AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        p.Title,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+RankingPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 5
+)
+
+SELECT 
+    t.TagId,
+    t.TagName,
+    t.PostCount,
+    u.UserId AS BadgeOwnerId,
+    u.DisplayName AS BadgeOwner,
+    u.BadgeCount,
+    u.BadgeNames,
+    pwr.PostId AS RankedPostId,
+    pwr.Title AS RankedPostTitle,
+    pwr.Score AS RankedPostScore,
+    pwr.PostRank,
+    phwr.HistoryDate,
+    phwr.UserDisplayName AS CloserUser,
+    phwr.CloseReason
+FROM 
+    RecursiveTagCounts t
+LEFT JOIN 
+    UserBadges u ON u.UserId = (SELECT OwnerUserId FROM Posts WHERE Tags LIKE CONCAT('%<', t.TagName, '>%') LIMIT 1)
+LEFT JOIN 
+    RankingPosts pwr ON pwr.PostRank = 1
+LEFT JOIN 
+    PostHistoryWithReason phwr ON phwr.PostId = pwr.Id
+ORDER BY 
+    t.TagId, u.BadgeCount DESC, pwr.Score DESC;

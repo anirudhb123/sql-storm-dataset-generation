@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ws.bill_customer_sk AS customer_sk,
+        SUM(ws.net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws 
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year > 1990 
+    GROUP BY 
+        ws.bill_customer_sk
+),
+RankedReturns AS (
+    SELECT 
+        wr.returning_customer_sk AS customer_sk,
+        COUNT(wr.return_quantity) AS total_returns,
+        SUM(wr.return_amt) AS total_return_amount
+    FROM 
+        web_returns wr 
+    GROUP BY 
+        wr.returning_customer_sk
+),
+LastPurchase AS (
+    SELECT 
+        c.c_customer_sk,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.city, 
+    ca.state,
+    COALESCE(sh.total_sales, 0) AS total_sales,
+    COALESCE(rr.total_returns, 0) AS total_returns,
+    COALESCE(lp.last_purchase_date, '1970-01-01') AS last_purchase_date,
+    CASE 
+        WHEN rr.total_return_amount IS NULL THEN 'No returns'
+        ELSE 'Returned items'
+    END AS return_status
+FROM 
+    customer_address ca
+LEFT JOIN 
+    SalesHierarchy sh ON sh.customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    RankedReturns rr ON rr.customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    LastPurchase lp ON lp.c_customer_sk = ca.ca_address_sk
+WHERE 
+    ca.city IS NOT NULL
+AND 
+    (sh.sales_rank <= 5 OR rr.total_returns >= 5)
+ORDER BY 
+    total_sales DESC, 
+    total_returns ASC 
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,36 @@
+
+SELECT 
+    p.id AS person_id,
+    p.name AS person_name,
+    a.title AS movie_title,
+    a.production_year AS movie_year,
+    STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+    COUNT(DISTINCT c.id) AS cast_count,
+    cn.name AS company_name,
+    ct.kind AS company_type
+FROM 
+    aka_name AS a_name
+JOIN 
+    aka_title AS a ON a_name.person_id = a.movie_id
+JOIN 
+    cast_info AS c ON a.movie_id = c.movie_id
+JOIN 
+    name AS p ON c.person_id = p.id
+JOIN 
+    movie_companies AS mc ON a.movie_id = mc.movie_id
+JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+JOIN 
+    company_type AS ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_keyword AS mk ON a.id = mk.movie_id
+JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    a.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    p.id, p.name, a.id, a.title, a.production_year, cn.id, cn.name, ct.id, ct.kind
+HAVING 
+    COUNT(DISTINCT k.id) > 5
+ORDER BY 
+    movie_year DESC, person_name ASC;

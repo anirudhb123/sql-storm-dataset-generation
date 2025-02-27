@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND cn.name_pcode_nf IN ('B3232', 'C3565', 'D5451', 'D5461', 'F6252', 'G412', 'L14', 'P6131', 'T5625', 'W6214') AND n.surname_pcode IS NOT NULL AND cn.md5sum > '186d4d00648a61d9e7518eb55a48722b' AND ci.note < '(senior counsel: New York Office)' AND ci.movie_id > 2161857 AND mc.company_type_id = 1 AND mc.note LIKE '%(USA)%' AND n.md5sum < '39011dd182532d6613e3d4f7964fa9f2';

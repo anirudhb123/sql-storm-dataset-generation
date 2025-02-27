@@ -1,0 +1,87 @@
+
+WITH RecursiveTopMovies AS (
+    SELECT
+        at.title,
+        at.production_year,
+        COUNT(ci.id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) AS rn
+    FROM
+        aka_title at
+    JOIN
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY
+        at.title, at.production_year
+),
+MoviesWithKeywords AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY at.id ORDER BY mk.keyword) AS keyword_rank
+    FROM
+        aka_title at
+    LEFT JOIN
+        movie_keyword mk ON at.id = mk.movie_id
+),
+CompanyInfo AS (
+    SELECT
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.id) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id, cn.name, ct.kind
+),
+AggregatedInfo AS (
+    SELECT
+        tm.title,
+        tm.production_year,
+        COUNT(DISTINCT c.id) AS total_actors,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS all_keywords,
+        COUNT(DISTINCT comp.company_name) AS total_companies
+    FROM
+        RecursiveTopMovies tm
+    LEFT JOIN
+        cast_info c ON tm.title = (SELECT title FROM aka_title WHERE id = c.movie_id)
+    LEFT JOIN
+        MoviesWithKeywords kw ON kw.movie_id = tm.title
+    LEFT JOIN
+        CompanyInfo comp ON comp.movie_id = (SELECT id FROM aka_title WHERE title = tm.title)
+    GROUP BY
+        tm.title, tm.production_year
+)
+SELECT
+    ai.title,
+    ai.production_year,
+    ai.total_actors,
+    ai.all_keywords,
+    COALESCE(ci.company_count, 0) AS total_company_types,
+    CASE 
+        WHEN ai.total_actors > 10 THEN 'Ensemble Cast'
+        ELSE 'Limited Cast'
+    END AS cast_size_category
+FROM
+    AggregatedInfo ai
+LEFT JOIN (
+    SELECT
+        movie_id,
+        COUNT(*) AS company_count
+    FROM
+        movie_companies
+    GROUP BY
+        movie_id
+) ci ON ai.title = (SELECT title FROM aka_title WHERE id = ci.movie_id)
+WHERE
+    ai.production_year BETWEEN 2000 AND 2020 
+    AND ai.all_keywords NOT LIKE '%documentary%' 
+    AND ai.total_actors IS NOT NULL
+ORDER BY
+    ai.production_year DESC,
+    ai.total_actors DESC
+LIMIT 100;

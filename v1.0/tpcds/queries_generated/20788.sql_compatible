@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name, 
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER(PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d.d_date_sk) FROM date_dim d) 
+        AND (SELECT MAX(d.d_date_sk) FROM date_dim d)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        r.r_reason_desc,
+        cs.total_sales,
+        cs.total_orders,
+        cs.sales_rank
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        store_returns sr ON cs.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE 
+        cs.sales_rank <= 10
+    AND 
+        (r.r_reason_desc IS NULL OR r.r_reason_desc NOT LIKE '%defective%')
+),
+AggregateData AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales,
+        MAX(total_sales) AS max_sales,
+        MIN(total_sales) AS min_sales
+    FROM 
+        TopCustomers
+)
+SELECT 
+    tc.customer_name, 
+    tc.total_sales,
+    CASE 
+        WHEN tc.total_sales > (SELECT avg_sales FROM AggregateData) THEN 'Above Average'
+        WHEN tc.total_sales < (SELECT avg_sales FROM AggregateData) THEN 'Below Average'
+        ELSE 'Average'
+    END AS sales_performance,
+    COALESCE(tc.r_reason_desc, 'N/A') AS reason_description
+FROM 
+    TopCustomers tc
+ORDER BY 
+    tc.total_sales DESC;

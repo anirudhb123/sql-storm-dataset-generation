@@ -1,0 +1,49 @@
+
+WITH NameKeywords AS (
+    SELECT
+        ak.name AS aka_name,
+        k.keyword AS keyword,
+        m.title AS movie_title,
+        COALESCE(ki.info, 'No Info') AS movie_info,
+        c.name AS company_name,
+        ci.kind AS company_type,
+        t.production_year
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ca ON ak.person_id = ca.person_id
+    JOIN
+        aka_title m ON ca.movie_id = m.movie_id
+    JOIN
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        movie_companies mc ON m.movie_id = mc.movie_id
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ci ON mc.company_type_id = ci.id
+    LEFT JOIN
+        movie_info mi ON m.movie_id = mi.movie_id 
+    LEFT JOIN 
+        info_type ki ON mi.info_type_id = ki.id
+    WHERE
+        ak.name IS NOT NULL
+        AND m.production_year BETWEEN 2000 AND 2023
+        AND k.keyword IS NOT NULL
+)
+SELECT
+    aka_name,
+    COUNT(DISTINCT movie_title) AS movie_count,
+    STRING_AGG(DISTINCT keyword, ', ') AS keywords_used,
+    COUNT(DISTINCT company_name) AS unique_companies,
+    STRING_AGG(DISTINCT company_type, ', ') AS types_of_company,
+    AVG(production_year) AS avg_production_year
+FROM
+    NameKeywords
+GROUP BY
+    aka_name
+ORDER BY
+    movie_count DESC
+LIMIT 10;

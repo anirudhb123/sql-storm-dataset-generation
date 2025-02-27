@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk, 
+        item.i_product_name,
+        rs.total_quantity,
+        rs.total_sales,
+        CASE 
+            WHEN rs.rank = 1 THEN 'Top Seller'
+            ELSE 'Other'
+        END AS sales_category
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON rs.ws_item_sk = item.i_item_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        f.ws_item_sk,
+        f.i_product_name,
+        f.total_quantity,
+        f.total_sales,
+        COALESCE(NULLIF(ROUND(f.total_sales * 0.1, 2), 0), ROUND(AVG(f.total_sales) OVER(), 2)) AS adjusted_sales,
+        CASE 
+            WHEN f.total_quantity > 100 THEN 'High Demand'
+            WHEN f.total_quantity BETWEEN 50 AND 100 THEN 'Moderate Demand'
+            ELSE 'Low Demand'
+        END AS demand_category
+    FROM 
+        FilteredSales f
+),
+ReturnAnalysis AS (
+    SELECT
+        sr.sr_item_sk,
+        SUM(sr.return_quantity) AS total_returns
+    FROM 
+        store_returns sr
+    JOIN 
+        date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        sr.sr_item_sk
+)
+SELECT 
+    sa.ws_item_sk,
+    sa.i_product_name,
+    sa.total_quantity,
+    sa.total_sales,
+    ra.total_returns,
+    sa.demand_category,
+    (sa.adjusted_sales - COALESCE(ra.total_returns, 0)) AS net_sales
+FROM 
+    SalesAnalysis sa
+LEFT JOIN 
+    ReturnAnalysis ra ON sa.ws_item_sk = ra.sr_item_sk
+WHERE 
+    sa.sales_category = 'Top Seller'
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

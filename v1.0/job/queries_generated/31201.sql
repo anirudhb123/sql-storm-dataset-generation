@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    AVG(CASE WHEN p.info IS NULL THEN 0 ELSE 1 END) AS cast_with_info_rate,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast,
+    CASE 
+        WHEN COUNT(DISTINCT c.person_id) > 10 THEN 'Large' 
+        WHEN COUNT(DISTINCT c.person_id) BETWEEN 5 AND 10 THEN 'Medium' 
+        ELSE 'Small' 
+    END AS cast_size_category
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    complete_cast AS cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info AS c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name AS ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    person_info AS p ON c.person_id = p.person_id AND p.info_type_id IN (SELECT id FROM info_type WHERE info = 'Bio')
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year
+HAVING 
+    mh.production_year >= 2000
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;
+
+This query achieves the following:
+1. Uses a recursive Common Table Expression (CTE) to build a hierarchy of movies based on links between them.
+2. Joins multiple tables such as `complete_cast`, `cast_info`, `aka_name`, and `person_info` to gather comprehensive data about each movie and its cast.
+3. Implements a variety of aggregates and calculations:
+   - Counts distinct actors.
+   - Calculates the rate of actors with additional information (based on the `person_info` table).
+   - Aggregates names from the `aka_name` table.
+   - Uses window functions to rank movies based on cast size.
+   - Classifies movies into different size categories based on the number of cast members.
+4. Filters the results for movies produced from the year 2000 onwards and orders the results by production year and total cast size. 
+
+This query serves as a sophisticated performance benchmark example, testing the complexity and efficiency of various SQL constructs.

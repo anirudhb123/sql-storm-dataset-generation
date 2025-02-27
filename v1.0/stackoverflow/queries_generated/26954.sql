@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        p.ViewCount,
+        COUNT(a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.ViewCount DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN 
+        STRING_SPLIT(p.Tags, ',') AS tagSplit ON tagSplit.value = t.Id
+    JOIN 
+        Tags t ON t.Id = tagSplit.value
+    WHERE 
+        p.PostTypeId = 1 -- only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName, p.ViewCount
+),
+TopPosts AS (
+    SELECT
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        OwnerName,
+        ViewCount,
+        AnswerCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank <= 3 -- Get top posts per tag
+      AND
+        AnswerCount > 0 -- Only include posts with answers
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.OwnerName,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.Tags,
+    pht.Comment AS LastEditComment,
+    COALESCE(MAX(v.CreationDate), 'Never') AS LastVoteDate
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory pht ON pht.PostId = tp.PostId AND pht.PostHistoryTypeId = 24 -- Suggested Edit Applied
+LEFT JOIN 
+    Votes v ON v.PostId = tp.PostId
+GROUP BY 
+    tp.PostId, tp.Title, tp.Body, tp.CreationDate, tp.OwnerName, tp.ViewCount, tp.AnswerCount, tp.Tags, pht.Comment
+ORDER BY 
+    tp.ViewCount DESC, tp.CreationDate DESC
+LIMIT 50; -- Limit to top 50 posts

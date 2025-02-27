@@ -1,0 +1,95 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY u.DisplayName ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN vote.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetUpvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        MIN(u.DisplayName) AS ClosedBy
+    FROM 
+        PostHistory ph
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+) 
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    COALESCE(clp.LastClosedDate, 'No Closure') AS LastClosedDate,
+    COALESCE(clp.ClosedBy, 'N/A') AS ClosedByUser,
+    tu.DisplayName AS TopUser,
+    tu.BadgeCount,
+    tu.TotalScore,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Newest Post by Owner'
+        WHEN rp.CommentCount > 5 THEN 'Highly Commented Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = tu.UserId AND b.Class = 1) 
+        THEN 'Gold Badge Holder' 
+        ELSE 'No Gold Badge' 
+    END AS BadgeStatus,
+    CASE 
+        WHEN rp.NetUpvotes IS NULL THEN 0 
+        WHEN rp.NetUpvotes >= 0 THEN 'Positive' 
+        ELSE 'Negative' 
+    END AS VotesStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TopUsers tu ON tu.UserId = (SELECT Id FROM Users ORDER BY Reputation DESC LIMIT 1)
+LEFT JOIN 
+    ClosedPosts clp ON rp.Id = clp.PostId
+WHERE 
+    (rp.PostRank <= 3 OR COALESCE(rp.CommentCount, 0) > 5)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate DESC
+LIMIT 50;

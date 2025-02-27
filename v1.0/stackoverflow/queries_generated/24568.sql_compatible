@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.CreationDate, 
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS Upvotes, 
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Upvotes,
+        rp.Downvotes,
+        CASE 
+            WHEN rp.Upvotes IS NULL AND rp.Downvotes IS NULL THEN 'No Votes'
+            ELSE 'Has Votes'
+        END AS VoteStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn <= 5
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteActions,
+        COUNT(CASE WHEN ph.UserDisplayName IS NULL THEN 1 END) AS AnonymousEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    f.Id AS PostId,
+    f.Title,
+    f.CreationDate,
+    f.Upvotes,
+    f.Downvotes,
+    f.VoteStatus,
+    u.BadgeCount,
+    phs.CloseActions,
+    phs.DeleteUndeleteActions,
+    phs.AnonymousEdits,
+    CASE 
+        WHEN f.VoteStatus = 'Has Votes' THEN 
+            CASE 
+                WHEN f.Upvotes > f.Downvotes THEN 'Positive Feedback' 
+                ELSE 'Negative Feedback'
+            END
+        ELSE 'No Feedback'
+    END AS FeedbackStatus
+FROM 
+    FilteredPosts f
+LEFT JOIN 
+    UserBadges u ON f.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistorySummary phs ON f.Id = phs.PostId
+WHERE 
+    f.CreationDate BETWEEN CURRENT_DATE - INTERVAL '3 months' AND CURRENT_DATE
+ORDER BY 
+    f.Upvotes DESC, f.CreationDate DESC;

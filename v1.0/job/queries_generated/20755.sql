@@ -1,0 +1,86 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        aka_title m ON mh.movie_id = m.episode_of_id
+    WHERE
+        m.production_year IS NOT NULL
+),
+
+UniqueActors AS (
+    SELECT
+        ak.person_id,
+        COUNT(DISTINCT ak.name) AS name_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS unique_names
+    FROM
+        aka_name ak
+    GROUP BY
+        ak.person_id
+),
+
+CastDetails AS (
+    SELECT
+        c.movie_id,
+        c.person_id,
+        COALESCE(ra.role, 'Unknown') AS role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY ra.role DESC) AS actor_rank
+    FROM
+        cast_info c
+    LEFT JOIN
+        role_type ra ON c.role_id = ra.id
+),
+
+MovieInfo AS (
+    SELECT
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT mi.info_type_id) AS info_count,
+        MAX(mi.info) AS last_info
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY
+        m.id, m.title, m.production_year
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ua.name_count, 0) AS unique_actor_count,
+    COALESCE(cd.role, 'No Role Assigned') AS actor_role,
+    mi.info_count,
+    mi.last_info,
+    SUM(CASE WHEN cd.actor_rank = 1 THEN 1 ELSE 0 END) OVER (PARTITION BY mh.movie_id) AS leading_actor
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    UniqueActors ua ON ua.person_id IN (SELECT DISTINCT person_id FROM CastDetails cd WHERE cd.movie_id = mh.movie_id)
+LEFT JOIN
+    CastDetails cd ON cd.movie_id = mh.movie_id
+LEFT JOIN
+    MovieInfo mi ON mh.movie_id = mi.title
+WHERE
+    mh.production_year >= 2000
+    AND (mi.info_count > 2 OR ua.name_count IS NULL)
+    AND (NULLIF(mi.last_info, '' IS NULL))
+ORDER BY
+    mh.production_year DESC, mh.title ASC;

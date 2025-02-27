@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey,
+        ps.ps_suppkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size'
+            WHEN p.p_size >= 10 THEN 'Large'
+            ELSE 'Small'
+        END AS part_size_category
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_price_after_discount,
+        AVG(lo.l_tax) AS avg_tax_rate,
+        COUNT(lo.l_orderkey) AS item_count
+    FROM 
+        lineitem lo
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    r_o.o_orderkey,
+    r_o.o_orderdate,
+    COALESCE(hvp.part_size_category, 'No Catalog') AS part_category,
+    COALESCE(sp.total_availqty, 0) AS available_quantity,
+    od.total_price_after_discount,
+    od.avg_tax_rate,
+    (SELECT COUNT(*) FROM supplier s WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')) AS usa_supplier_count
+FROM 
+    RankedOrders r_o
+LEFT JOIN 
+    OrderDetails od ON r_o.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_partkey IN (SELECT p.p_partkey FROM HighValueParts hvp WHERE hvp.p_name LIKE '%Steel%')
+WHERE 
+    (r_o.order_rank <= 5 OR r_o.o_orderdate > CURRENT_DATE - INTERVAL '30 days')
+ORDER BY 
+    r_o.o_orderdate DESC,
+    available_quantity DESC
+LIMIT 100;

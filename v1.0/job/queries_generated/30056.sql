@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 5
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    a.name AS actor_name,
+    c.kind AS cast_type,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY a.name) AS actor_rank,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        ELSE m.production_year::text
+    END AS production_year_display
+FROM 
+    movie_hierarchy mh
+JOIN 
+    aka_title m ON mh.movie_id = m.id
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    comp_cast_type c ON ci.role_id = c.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    c.kind IS NOT NULL
+GROUP BY 
+    m.id, a.name, c.kind, m.production_year
+ORDER BY 
+    m.production_year DESC, total_cast DESC;
+
+This query provides a comprehensive performance benchmark by utilizing:
+
+1. **Recursive CTE**: `movie_hierarchy` explores movie links recursively for up to 5 levels, allowing analysis of connected films from 2000 onwards. 
+   
+2. **Multiple Joins**: It joins several tables to gather actor names, roles, and keyword associations.
+
+3. **Aggregation**: `STRING_AGG` collects keywords into a single string, while `COUNT` aggregates the total number of cast members for each movie.
+
+4. **Window Functions**: `ROW_NUMBER()` assigns a rank to actors based on their name for each movie.
+
+5. **Complicated Predicate Logic**: The `CASE` statement provides a clean presentation of the production year.
+
+6. **NULL Logic Handling**: It ensures that movies with `NULL` production years are labeled appropriately.
+
+This ensures rich data retrieval and potential areas for performance benchmarking.

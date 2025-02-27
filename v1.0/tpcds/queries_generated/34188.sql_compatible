@@ -1,0 +1,77 @@
+
+WITH RECURSIVE SalesGrowth AS (
+    SELECT 
+        d_year,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (ORDER BY d_year) AS year_rank
+    FROM 
+        web_sales 
+    JOIN 
+        date_dim ON ws_sold_date_sk = d_date_sk
+    WHERE 
+        d_year BETWEEN 2015 AND 2023
+    GROUP BY 
+        d_year
+), YearlyChange AS (
+    SELECT 
+        a.d_year,
+        a.total_profit,
+        LAG(a.total_profit) OVER (ORDER BY a.year_rank) AS previous_year_profit,
+        CASE 
+            WHEN LAG(a.total_profit) OVER (ORDER BY a.year_rank) IS NULL THEN NULL
+            ELSE ROUND((a.total_profit - LAG(a.total_profit) OVER (ORDER BY a.year_rank)) 
+                        / NULLIF(LAG(a.total_profit) OVER (ORDER BY a.year_rank), 0) * 100, 2) -- Avoid division by zero
+        END AS percentage_change
+    FROM 
+        SalesGrowth a
+), CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+), ItemProfit AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS sales_count
+    FROM 
+        web_sales
+    JOIN 
+        item ON ws_item_sk = i_item_sk
+    GROUP BY 
+        i_item_sk, i_item_id
+), TopProfitableItems AS (
+    SELECT 
+        i_item_id,
+        total_net_profit,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS profit_rank
+    FROM 
+        ItemProfit
+)
+SELECT 
+    yc.d_year, 
+    yc.total_profit, 
+    yc.percentage_change, 
+    ti.i_item_id,
+    ti.total_net_profit,
+    cr.total_returns,
+    cr.total_return_amount,
+    cr.total_return_quantity
+FROM 
+    YearlyChange yc
+LEFT JOIN 
+    TopProfitableItems ti ON ti.profit_rank <= 5
+LEFT JOIN 
+    CustomerReturns cr ON ti.i_item_id = cr.sr_item_sk
+WHERE 
+    (yc.percentage_change IS NOT NULL AND yc.percentage_change > 10) OR 
+    (cr.total_returns IS NOT NULL AND cr.total_returns > 100)
+ORDER BY 
+    yc.d_year DESC, 
+    ti.total_net_profit DESC;

@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.Tags, p.OwnerUserId
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+RecentActivity AS (
+    SELECT 
+        ph.UserId,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS RecentComments,
+        COUNT(ph.Id) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+    GROUP BY 
+        ph.UserId
+)
+
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Body,
+    r.CreationDate,
+    r.ViewCount,
+    r.Score,
+    r.Tags,
+    r.AnswerCount,
+    u.DisplayName AS PostOwner,
+    b.BadgeCount,
+    b.Badges,
+    a.RecentComments,
+    a.EditCount
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.UserPostRank = 1 AND u.Id = r.OwnerUserId
+LEFT JOIN 
+    UserBadges b ON b.UserId = u.Id
+LEFT JOIN 
+    RecentActivity a ON a.UserId = u.Id
+WHERE 
+    r.ViewCount > 100 
+ORDER BY 
+    r.Score DESC, r.ViewCount DESC;

@@ -1,0 +1,98 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY title.title DESC) AS title_rank
+    FROM 
+        title
+),
+FilteringCTE AS (
+    SELECT 
+        aka_name.name,
+        aka_name.person_id,
+        COUNT(DISTINCT movie_companies.company_id) AS company_count
+    FROM 
+        aka_name
+    JOIN 
+        cast_info ON aka_name.person_id = cast_info.person_id
+    JOIN 
+        movie_companies ON cast_info.movie_id = movie_companies.movie_id
+    GROUP BY 
+        aka_name.name, aka_name.person_id
+    HAVING 
+        COUNT(DISTINCT movie_companies.company_id) > 2
+),
+YearlyStats AS (
+    SELECT 
+        movie_info.movie_id,
+        movie_info.info,
+        AVG(CASE WHEN info_type.info = 'rating' THEN CAST(movie_info.info AS FLOAT) ELSE NULL END) AS avg_rating,
+        SUM(CASE WHEN movie_info.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+    FROM 
+        movie_info
+    JOIN 
+        info_type ON movie_info.info_type_id = info_type.id
+    WHERE 
+        movie_info.info IS NOT NULL AND TRIM(movie_info.info) <> ''
+    GROUP BY 
+        movie_info.movie_id, movie_info.info
+    HAVING 
+        SUM(CASE WHEN movie_info.info_type_id = 1 THEN 1 ELSE 0 END) > 0 
+),
+CompanyMovieDetails AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS distinct_companies,
+        STRING_AGG(cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+CorrelatedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = title.id) AS keyword_count
+    FROM 
+        title
+    WHERE 
+        title.production_year IN (SELECT production_year FROM RankedMovies WHERE title_rank <= 5)
+)
+
+SELECT 
+    DISTINCT
+    f.name AS actor_name,
+    r.title AS movie_title,
+    r.production_year,
+    cs.company_names,
+    cs.distinct_companies,
+    ys.avg_rating,
+    ys.notes_count,
+    cm.keyword_count,
+    (CASE 
+        WHEN ys.avg_rating IS NULL THEN 'No rating'
+        ELSE CAST(ys.avg_rating AS TEXT) 
+    END) AS average_rating_info
+FROM 
+    FilteringCTE f
+JOIN 
+    cast_info ci ON f.person_id = ci.person_id
+JOIN 
+    RankedMovies r ON ci.movie_id = r.movie_id
+JOIN 
+    CompanyMovieDetails cs ON r.movie_id = cs.movie_id
+LEFT JOIN 
+    YearlyStats ys ON r.movie_id = ys.movie_id
+LEFT JOIN 
+    CorrelatedMovies cm ON r.movie_id = cm.movie_id
+WHERE 
+    (r.production_year BETWEEN 2000 AND 2023 OR ys.notes_count > 5 OR cm.keyword_count > 3)
+    AND cs.distinct_companies IS NOT NULL 
+    AND cs.distinct_companies > 0
+ORDER BY 
+    r.production_year DESC, f.name;

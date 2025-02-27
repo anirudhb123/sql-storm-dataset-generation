@@ -1,0 +1,30 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_type, CAST(p_name AS varchar(255)) AS full_name
+    FROM part
+    WHERE p_size < 10
+    UNION ALL
+    SELECT p.ps_partkey, p2.p_name, p2.p_type, CONCAT(ph.full_name, ' -> ', p2.p_name)
+    FROM partsupp p
+    JOIN PartHierarchy ph ON p.ps_partkey = ph.p_partkey
+    JOIN part p2 ON p.ps_partkey = p2.p_partkey
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, r.r_name AS region
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+)
+SELECT ph.full_name AS hierarchical_partname, COUNT(DISTINCT si.s_suppkey) AS supplier_count, SUM(od.total_revenue) AS total_revenue
+FROM PartHierarchy ph
+LEFT JOIN SupplierInfo si ON si.s_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_name LIKE '%region%')
+LEFT JOIN OrderDetails od ON od.o_orderkey = ph.p_partkey
+WHERE ph.p_type LIKE 'Type%' 
+GROUP BY ph.full_name
+ORDER BY total_revenue DESC;

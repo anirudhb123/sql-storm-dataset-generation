@@ -1,0 +1,54 @@
+WITH AddressAnalysis AS (
+    SELECT
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        LENGTH(ca_street_name) AS street_name_length,
+        UPPER(ca_city) AS city_uppercase,
+        LOWER(ca_state) AS state_lowercase
+    FROM
+        customer_address
+),
+DemoAnalysis AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        REPLACE(cd_education_status, ' ', '_') AS education_status,
+        CONCAT(cd_gender, '_', cd_marital_status) AS gender_marital_combo,
+        cd_purchase_estimate
+    FROM
+        customer_demographics
+),
+DateAnalysis AS (
+    SELECT
+        d_date_id,
+        TO_CHAR(d_date, 'Month YYYY') AS formatted_date,
+        EXTRACT(DOW FROM d_date) AS day_of_week,
+        CASE
+            WHEN d_holiday = 'Y' THEN 1
+            ELSE 0
+        END AS is_holiday
+    FROM
+        date_dim
+)
+SELECT
+    aa.full_address,
+    da.gender_marital_combo,
+    DATE_FORMAT(da.formatted_date, '%Y-%m') AS transaction_month,
+    COUNT(DISTINCT ca.ca_address_id) AS unique_addresses,
+    AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(da.is_holiday) AS total_holidays
+FROM
+    AddressAnalysis aa
+JOIN
+    DemoAnalysis da ON da.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_current_addr_sk = aa.ca_address_id LIMIT 1)
+JOIN
+    DateAnalysis da ON da.d_date_id = (SELECT DISTINCT d_date_id FROM date_dim WHERE d_date = cast('2002-10-01' as date) LIMIT 1)
+GROUP BY
+    aa.full_address,
+    da.gender_marital_combo,
+    transaction_month
+ORDER BY
+    unique_addresses DESC, avg_purchase_estimate DESC;

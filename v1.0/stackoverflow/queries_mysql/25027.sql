@@ -1,0 +1,88 @@
+
+WITH TagCounts AS (
+    SELECT 
+        SUBSTRING_INDEX(SUBSTRING_INDEX(Tags, '><', numbers.n), '><', -1) AS Tag,
+        Id AS PostId
+    FROM 
+        Posts
+    INNER JOIN (
+        SELECT 
+            a.N + b.N * 10 + 1 AS n
+        FROM 
+            (SELECT 0 AS N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS a,
+            (SELECT 0 AS N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS b
+        ORDER BY n
+    ) numbers ON CHAR_LENGTH(Tags) - CHAR_LENGTH(REPLACE(Tags, '><', '')) >= numbers.n - 1
+    WHERE 
+        PostTypeId = 1
+),
+TopTags AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS Count
+    FROM 
+        TagCounts
+    GROUP BY 
+        Tag
+    ORDER BY 
+        Count DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        B.UserId, 
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+UserSummary AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.TotalPosts,
+        UA.TotalAnswers,
+        UA.AcceptedAnswers,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        UserBadges UB ON UA.UserId = UB.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalAnswers,
+    U.AcceptedAnswers,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    T.Tag,
+    T.Count AS TagCount
+FROM 
+    UserSummary U
+JOIN 
+    TopTags T ON U.TotalAnswers > 0
+ORDER BY 
+    U.TotalPosts DESC, 
+    U.AcceptedAnswers DESC, 
+    T.Count DESC;

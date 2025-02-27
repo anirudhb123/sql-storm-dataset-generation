@@ -1,0 +1,26 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, 0 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal < (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal >= sh.s_acctbal
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       AVG(sh.s_acctbal) AS avg_acctbal,
+       SUM(CASE WHEN p.p_size IS NOT NULL THEN p.p_retailprice * ps.ps_availqty ELSE 0 END) AS total_inventory_value,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY AVG(sh.s_acctbal) DESC) AS row_num
+FROM nation n
+LEFT JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+WHERE (n.n_comment IS NOT NULL OR n.n_comment LIKE '%key%')
+  AND (sh.hierarchy_level % 2 = 0 OR sh.hierarchy_level IS NULL)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 1
+   OR SUM(CASE WHEN p.p_type LIKE '%widget%' THEN 1 ELSE 0 END) > 3
+ORDER BY NULLIF(supplier_count, 0), avg_acctbal DESC;

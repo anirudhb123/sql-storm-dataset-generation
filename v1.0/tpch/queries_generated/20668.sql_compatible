@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn,
+        STRING_AGG(o_comment, '; ') WITHIN GROUP (ORDER BY o_orderdate) AS all_comments
+    FROM orders
+    GROUP BY o_orderkey, o_custkey, o_totalprice, o_orderdate
+),
+ValidLineItems AS (
+    SELECT 
+        l_orderkey, 
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue,
+        COUNT(CASE WHEN l_returnflag = 'R' THEN 1 END) AS returns_count,
+        COUNT(*) AS total_lines
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+SupplierStats AS (
+    SELECT 
+        ps_suppkey,
+        SUM(ps_supplycost) AS total_supply_cost,
+        AVG(ps_availqty) AS avg_avail_qty
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+CustomerExpenditures AS (
+    SELECT 
+        c_custkey,
+        SUM(o_totalprice) AS total_spent
+    FROM customer 
+    JOIN orders ON c.custkey = o.o_custkey
+    GROUP BY c.custkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(v.total_revenue, 0) AS revenue,
+    COALESCE(v.returns_count, 0) AS returns,
+    COALESCE(ce.total_spent, 0) AS customer_spending,
+    COUNT(DISTINCT r.r_regionkey) AS region_count,
+    STRING_AGG(DISTINCT LEFT(p.p_name, 10), ', ') AS featured_parts
+FROM customer c
+LEFT JOIN ValidLineItems v ON c.c_custkey = v.l_orderkey
+LEFT JOIN RankedOrders o ON c.c_custkey = o.o_custkey AND o.rn = 1
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN partsupp ps ON v.l_orderkey = ps.ps_partkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN SupplierStats ss ON ps.ps_suppkey = ss.ps_suppkey
+WHERE 
+    COALESCE(c.c_acctbal, 0) > (SELECT AVG(c_acctbal) FROM customer) 
+    AND (o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' OR o.o_orderstatus IS NULL)
+GROUP BY 
+    c.c_custkey, 
+    c.c_name
+HAVING 
+    COUNT(DISTINCT v.l_orderkey) > 2
+ORDER BY 
+    revenue DESC NULLS LAST;

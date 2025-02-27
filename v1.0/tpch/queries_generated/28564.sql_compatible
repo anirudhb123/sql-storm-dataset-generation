@@ -1,0 +1,36 @@
+
+WITH RECURSIVE string_benchmark AS (
+    SELECT 
+        p_partkey,
+        CONCAT('PartKey: ', p_partkey, ', Name: ', p_name, ', Manufacturer: ', p_mfgr, ', Brand: ', p_brand) AS part_info,
+        LENGTH(CONCAT('PartKey: ', p_partkey, ', Name: ', p_name, ', Manufacturer: ', p_mfgr, ', Brand: ', p_brand)) AS char_length
+    FROM 
+        part
+),
+part_comments AS (
+    SELECT 
+        ps.ps_partkey,
+        STRING_AGG(c.c_comment, ' | ') AS combined_comments
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    sb.p_partkey,
+    sb.part_info,
+    sb.char_length,
+    pc.combined_comments,
+    LENGTH(pc.combined_comments) AS total_comment_length
+FROM 
+    string_benchmark sb
+LEFT JOIN 
+    part_comments pc ON sb.p_partkey = pc.ps_partkey
+WHERE 
+    sb.char_length > 100
+ORDER BY 
+    total_comment_length DESC;

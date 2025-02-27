@@ -1,0 +1,56 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.o_custkey, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerTotal AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+ProductSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name,
+    SUM(cs.total_orders) AS total_customer_orders,
+    SUM(ps.total_cost) AS total_supplier_cost,
+    AVG(ps.parts_supplied) AS avg_parts_per_supplier,
+    COUNT(DISTINCT ph.o_orderkey) AS total_orders_in_hierarchy,
+    AVG(ps.total_cost / NULLIF(cs.total_orders, 0)) AS avg_cost_per_order 
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierStats ps ON s.s_suppkey = ps.s_suppkey
+LEFT JOIN CustomerTotal cs ON s.s_nationkey = cs.c_custkey
+LEFT JOIN OrderHierarchy ph ON cs.c_custkey = ph.o_custkey
+GROUP BY r.r_name
+ORDER BY total_customer_orders DESC, total_supplier_cost DESC;

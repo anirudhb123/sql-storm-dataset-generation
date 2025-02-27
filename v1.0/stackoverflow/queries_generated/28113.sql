@@ -1,0 +1,60 @@
+WITH TagStats AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS Contributors
+    FROM 
+        Posts
+    JOIN 
+        Unnest(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')) AS Tag ON Tag = Tags.TagName
+    JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    JOIN 
+        Tags ON Tags.TagName = Tag
+    WHERE 
+        Posts.PostTypeId IN (1, 2)  -- Only Questions and Answers
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        TotalViews, 
+        AverageScore,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM 
+        TagStats
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.AverageScore,
+    P.AcceptedAnswerId,
+    P.Title,
+    P.CreationDate,
+    C.Text AS Comment,
+    C.UserDisplayName AS Commenter
+FROM 
+    TopTags T
+LEFT JOIN 
+    Posts P ON P.Id IN (
+        SELECT 
+            Posts.Id 
+        FROM 
+            Posts 
+        JOIN 
+            Tags ON Tags.TagName = T.TagName 
+        WHERE 
+            Posts.PostTypeId = 1 
+        LIMIT 1  -- Get only one Question per tag
+    )
+LEFT JOIN 
+    Comments C ON C.PostId = P.Id
+WHERE 
+    T.Rank <= 10  -- Top 10 tags by views
+ORDER BY 
+    T.Rank;

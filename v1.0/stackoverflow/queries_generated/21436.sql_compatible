@@ -1,0 +1,74 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(1000)) AS FullTitle,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        CAST(r.FullTitle || ' > ' || p.Title AS VARCHAR(1000)),
+        Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentVotes AS (
+    SELECT
+        v.PostId,
+        MAX(v.CreationDate) AS MostRecentVoteDate
+    FROM Votes v
+    GROUP BY v.PostId
+),
+PostsWithCombinedVotes AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes,
+        p.CreationDate,
+        RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) DESC) AS VoteRank,
+        r.FullTitle AS PostHierarchy
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN RecursivePostHierarchy r ON p.Id = r.PostId
+    WHERE p.Score >= 0
+    GROUP BY p.Id, p.Title, p.ViewCount, p.CreationDate, r.FullTitle
+),
+TopPosts AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY VoteRank) AS RowNum
+    FROM PostsWithCombinedVotes
+)
+SELECT
+    u.DisplayName AS Author,
+    p.Title,
+    COALESCE(p.UpVotes, 0) AS UpVotes,
+    COALESCE(p.DownVotes, 0) AS DownVotes,
+    COALESCE(p.ViewCount, 0) AS ViewCount,
+    (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.PostId) AS CommentCount,
+    p.PostHierarchy,
+    CASE
+        WHEN pht.Name = 'Post Closed' THEN 'Closed'
+        WHEN pht.Name = 'Post Reopened' THEN 'Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    COALESCE(r.MostRecentVoteDate, '1970-01-01') AS LastVoteDate
+FROM TopPosts p
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN PostHistory ph ON ph.PostId = p.PostId
+LEFT JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+LEFT JOIN RecentVotes r ON p.PostId = r.PostId
+WHERE p.RowNum = 1
+  AND (p.ViewCount > 10 OR p.TotalVotes > 5)
+ORDER BY p.VoteRank DESC, p.CreationDate ASC;

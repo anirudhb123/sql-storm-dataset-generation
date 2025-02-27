@@ -1,0 +1,59 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB('2024-10-01', INTERVAL 1 YEAR)
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalBounty,
+    ua.PostCount,
+    ua.CommentCount,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.OwnerName,
+    CASE 
+        WHEN pd.ActivityRank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostStatus
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostDetails pd ON ua.UserId = pd.OwnerUserId
+WHERE 
+    ua.PostCount > 0
+AND 
+    ua.TotalBounty > 0
+ORDER BY 
+    ua.TotalBounty DESC, ua.PostCount DESC, pd.CreationDate DESC
+LIMIT 10;

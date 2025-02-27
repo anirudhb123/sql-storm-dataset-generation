@@ -1,0 +1,108 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        U.Views,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveAnswerCount,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativeAnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes, U.Views
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.Body,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.Comment, 'No Comments') AS LastEditComment
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId 
+    WHERE 
+        P.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%'  )
+    GROUP BY 
+        T.TagName
+),
+FinalBenchmark AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views AS TotalViews,
+        U.PostCount,
+        U.CommentCount,
+        U.BadgeCount,
+        U.PositiveAnswerCount,
+        U.NegativeAnswerCount,
+        P.PostId,
+        P.Title,
+        P.ViewCount AS PostViews,
+        P.Score AS PostScore,
+        T.TagName,
+        TS.PostCount AS TagPostCount,
+        TS.TotalViews AS TagTotalViews,
+        TS.TotalScore AS TagTotalScore
+    FROM 
+        UserStats U
+    LEFT JOIN 
+        PostDetails P ON P.OwnerDisplayName = U.DisplayName
+    LEFT JOIN 
+        TagStatistics TS ON P.Tags LIKE CONCAT('%<', TS.TagName , '>%' )
+)
+SELECT 
+    UserId, 
+    DisplayName, 
+    Reputation, 
+    TotalViews, 
+    PostCount, 
+    CommentCount, 
+    BadgeCount,
+    PositiveAnswerCount, 
+    NegativeAnswerCount,
+    PostId, 
+    Title, 
+    PostViews, 
+    PostScore,
+    TagName, 
+    TagPostCount, 
+    TagTotalViews, 
+    TagTotalScore 
+FROM 
+    FinalBenchmark
+ORDER BY 
+    Reputation DESC, PostScore DESC, TotalViews DESC;

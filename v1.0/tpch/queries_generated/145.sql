@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS PartsSupplied,
+        SUM(ps.ps_supplycost) AS TotalSupplyCost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_brand,
+        CASE 
+            WHEN p.p_retailprice > 100.00 THEN 'High'
+            WHEN p.p_retailprice BETWEEN 50.00 AND 100.00 THEN 'Medium'
+            ELSE 'Low'
+        END AS PriceCategory
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue,
+        COUNT(l.l_linenumber) AS LineCount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderstatus,
+    o.o_totalprice,
+    o.o_orderdate,
+    COALESCE(SUM(CASE WHEN l.TotalRevenue IS NOT NULL THEN l.TotalRevenue ELSE 0 END), 0) AS TotalLineItemRevenue,
+    COALESCE(s.PartsSupplied, 0) AS TotalPartsSupplied,
+    r.RegionName
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemSummary l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    (SELECT n.n_nationkey, r.r_name AS RegionName
+     FROM nation n 
+     JOIN region r ON n.n_regionkey = r.r_regionkey) AS r ON r.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey) 
+LEFT JOIN 
+    SupplierDetails s ON EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM HighValueParts p WHERE p.PriceCategory = 'High') AND s.s_suppkey = ps.ps_suppkey)
+GROUP BY 
+    o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, r.RegionName
+ORDER BY 
+    o.o_orderdate DESC, o.o_totalprice DESC;

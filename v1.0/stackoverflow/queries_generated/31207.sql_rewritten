@@ -1,0 +1,56 @@
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+RecentPostEdits AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.CreationDate AS EditDate,
+        PH.UserId AS EditorId,
+        PH.Comment AS EditComment,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation AS UserReputation,
+    COALESCE(UVC.VoteCount, 0) AS TotalVotes,
+    P.Id AS PostId,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    MAX(REP.EditDate) AS LastEditDate,
+    STRING_AGG(REP.EditComment, '; ') AS EditComments
+FROM 
+    Users U
+LEFT JOIN 
+    UserVoteCounts UVC ON U.Id = UVC.UserId
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    RecentPostEdits REP ON P.Id = REP.PostId AND REP.EditRank = 1
+WHERE 
+    U.Reputation > 100 AND 
+    P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+GROUP BY 
+    U.DisplayName, U.Reputation, P.Id, P.Title, P.CreationDate
+ORDER BY 
+    TotalVotes DESC, UserReputation DESC;

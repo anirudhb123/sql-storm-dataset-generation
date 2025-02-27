@@ -1,0 +1,39 @@
+
+WITH processed_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        REPLACE(LOWER(c.c_email_address), '@example.com', '@test.com') AS modified_email,
+        CONCAT_WS(', ', ca_street_number, ca_street_name, ca_street_type, ca_suite_number, ca_city, ca_state, ca_zip, ca_country) AS full_address,
+        d.d_date AS purchase_date,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male' 
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender_description,
+        COALESCE(cd.education_status, 'Unknown') AS education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+)
+SELECT 
+    gender_description,
+    COUNT(*) AS customer_count,
+    AVG(LENGTH(full_name)) AS avg_name_length,
+    AVG(LENGTH(modified_email)) AS avg_email_length,
+    STRING_AGG(full_address, '; ') AS unique_addresses
+FROM 
+    processed_data
+GROUP BY 
+    gender_description
+ORDER BY 
+    customer_count DESC;

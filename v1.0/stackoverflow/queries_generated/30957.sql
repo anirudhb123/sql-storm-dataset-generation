@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, OwnerUserId, CreationDate, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL  -- Top-level questions
+
+    UNION ALL
+
+    SELECT p.Id, p.Title, p.ParentId, p.OwnerUserId, p.CreationDate, ph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.Level,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        COALESCE(uR.PostCount, 0) AS AuthorPostCount,
+        COALESCE(uR.CommentCount, 0) AS AuthorCommentCount,
+        COALESCE(uR.TotalBounty, 0) AS AuthorTotalBounty
+    FROM Posts p
+    LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.Id -- Join to the hierarchy
+    LEFT JOIN (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+                       SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+                FROM Votes 
+                GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN UserReputation uR ON p.OwnerUserId = uR.UserId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    GROUP BY ph.UserId, ph.PostId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.Level,
+    pha.EditCount,
+    pha.LastEditDate,
+    pha.EditTypes,
+    uR.DisplayName,
+    uR.Reputation,
+    uR.PostCount AS AuthorPostCount,
+    uR.CommentCount AS AuthorCommentCount,
+    uR.TotalBounty AS AuthorTotalBounty
+FROM PostDetails pd
+JOIN UserReputation uR ON pd.OwnerUserId = uR.UserId
+LEFT JOIN PostHistoryAnalysis pha ON pd.PostId = pha.PostId
+WHERE pd.UpVotes > pd.DownVotes
+ORDER BY pd.CreationDate DESC
+LIMIT 100;

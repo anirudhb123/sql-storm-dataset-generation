@@ -1,0 +1,68 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL  
+
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        rph.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+PostAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        U.DisplayName AS Owner,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Users U ON p.OwnerUserId = U.Id
+    GROUP BY p.Id, U.DisplayName
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.Owner,
+    pa.UpVotes,
+    pa.DownVotes,
+    pa.CommentCount,
+    pa.TotalViews,
+    pa.AvgCommentScore,
+    rph.Level,
+    ur.Reputation,
+    ur.Rank
+FROM PostAggregates pa
+JOIN RecursivePostHierarchy rph ON pa.PostId = rph.PostId
+JOIN UserReputation ur ON pa.Owner = ur.DisplayName
+WHERE pa.CommentCount > 5  
+  AND rph.Level <= 5  
+  AND ur.Reputation > 1000  
+ORDER BY pa.TotalViews DESC, pa.UpVotes DESC, pa.CommentCount DESC;

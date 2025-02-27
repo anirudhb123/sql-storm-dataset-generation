@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND t.md5sum LIKE '%5%' AND mi.info < 'Nick Stokes: You know when I was a kid we used to make these out of lunch trays and mower motors.::Greg Sanders: When I was a kid, I made bombs.::[Nick looks at Greg]::Greg Sanders: Little bombs.';

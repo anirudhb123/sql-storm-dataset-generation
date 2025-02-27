@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        p.Body,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 AND
+        CreationDate > CURRENT_DATE - INTERVAL '1 month'
+),
+TagCounts AS (
+    SELECT 
+        Tag, 
+        COUNT(*) AS TagFrequency
+    FROM 
+        PopularTags
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagFrequency DESC
+    LIMIT 5
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.CommentCount,
+        rp.Status,
+        COALESCE(tc.Tag, 'No Tags') AS Tag
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        TagCounts tc ON POSITION(tc.Tag IN rp.Tags) > 0
+    WHERE 
+        rp.Rank <= 3
+)
+SELECT 
+    pd.PostId, 
+    pd.Title, 
+    pd.CreationDate, 
+    pd.Score, 
+    pd.ViewCount, 
+    pd.CommentCount, 
+    pd.Status, 
+    STRING_AGG(pd.Tag, ', ') AS Tags
+FROM 
+    PostDetails pd
+GROUP BY 
+    pd.PostId, pd.Title, pd.CreationDate, pd.Score, pd.ViewCount, pd.CommentCount, pd.Status
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

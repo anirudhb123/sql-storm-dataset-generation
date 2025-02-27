@@ -1,0 +1,49 @@
+WITH supplier_part_info AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        CONCAT(s.s_name, ' - ', p.p_name) AS supplier_part_combination,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        MAX(ps.ps_supplycost) AS max_supply_cost,
+        MIN(ps.ps_availqty) AS min_avail_qty
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_name
+),
+customer_order_details AS (
+    SELECT 
+        c.c_name AS customer_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        o.o_orderdate,
+        o.o_orderstatus
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_name, o.o_orderkey, o.o_orderdate, o.o_orderstatus
+)
+SELECT 
+    spi.supplier_name,
+    spi.supplier_part_combination,
+    spi.part_count,
+    spi.max_supply_cost,
+    cod.customer_name,
+    cod.o_orderkey,
+    cod.order_total,
+    cod.o_orderdate,
+    cod.o_orderstatus
+FROM 
+    supplier_part_info spi
+JOIN 
+    customer_order_details cod ON SUBSTRING_INDEX(spi.supplier_part_combination, ' - ', -1) = (SELECT p_name FROM part WHERE p_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = spi.supplier_name LIMIT 1))
+ORDER BY 
+    spi.part_count DESC, cod.order_total DESC
+LIMIT 100;

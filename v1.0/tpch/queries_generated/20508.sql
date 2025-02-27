@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM
+        orders o
+    WHERE
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '1' YEAR)
+),
+FilteredOrders AS (
+    SELECT
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        (SELECT COUNT(*)
+         FROM lineitem li
+         WHERE li.l_orderkey = ro.o_orderkey
+         AND li.l_discount > 0.2) AS discount_count
+    FROM
+        RankedOrders ro
+    WHERE
+        ro.order_rank <= 10
+),
+SupplierPerformance AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT li.l_orderkey) AS orders_fulfilled
+    FROM
+        supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    WHERE
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_comment IS NOT NULL)
+    GROUP BY
+        s.s_suppkey, s.s_name
+    HAVING
+        COUNT(DISTINCT li.l_orderkey) > 5
+)
+SELECT
+    coalesce(fo.o_orderkey, 'No Orders') AS order_key,
+    coalesce(fo.o_orderdate, 'N/A') AS order_date,
+    coalesce(fo.o_totalprice, 0) AS total_price,
+    sp.s_suppkey,
+    sp.s_name,
+    sp.total_supply_value,
+    COALESCE(sp.orders_fulfilled, 0) AS fulfilled_orders,
+    CASE
+        WHEN sp.total_supply_value IS NULL THEN 'Unfulfilled'
+        ELSE 'Fulfilled'
+    END AS supply_status
+FROM
+    FilteredOrders fo
+FULL OUTER JOIN SupplierPerformance sp ON fo.discount_count > 3 AND sp.orders_fulfilled > 0
+WHERE
+    (fo.o_orderdate IS NOT NULL OR sp.s_name IS NULL)
+ORDER BY
+    total_price DESC NULLS LAST, fulfilled_orders DESC;

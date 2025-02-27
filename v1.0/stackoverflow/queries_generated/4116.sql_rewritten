@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND P.Score IS NOT NULL
+        AND U.Reputation > 1000
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Score,
+    RP.ViewCount,
+    RP.OwnerDisplayName,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    COALESCE(PC.CommentCount, 0) AS TotalComments,
+    PC.LastCommentDate,
+    CASE 
+        WHEN RP.Score > 50 THEN 'High Scorer'
+        WHEN RP.Score BETWEEN 20 AND 50 THEN 'Medium Scorer'
+        ELSE 'Low Scorer'
+    END AS ScoreCategory
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    UserBadges UB ON RP.OwnerDisplayName = UB.UserId
+LEFT JOIN 
+    PostComments PC ON RP.PostId = PC.PostId
+WHERE 
+    RP.PostRank = 1
+ORDER BY 
+    RP.Score DESC, 
+    RP.CreationDate ASC;

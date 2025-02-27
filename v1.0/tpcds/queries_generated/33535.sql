@@ -1,0 +1,88 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+    UNION ALL
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.net_profit) AS total_profit
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.ss_store_sk = s.s_store_sk
+    JOIN 
+        store_sales ss ON ss.ss_store_sk = s.s_store_sk
+    WHERE 
+        s.s_closed_date_sk IS NULL
+    GROUP BY 
+        s.s_store_sk
+),
+customer_returns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        COALESCE(SUM(sr_return_tax), 0) AS total_return_tax
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        item i
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_paid) DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    a.ca_city,
+    d.d_year,
+    COALESCE(sh.total_profit, 0) AS total_store_profit,
+    COALESCE(cr.total_returns, 0) AS total_customer_returns,
+    COALESCE(cr.total_return_amt, 0) AS total_return_amount,
+    COALESCE(cr.total_return_tax, 0) AS total_return_tax,
+    COALESCE(is.total_quantity_sold, 0) AS total_items_sold,
+    COALESCE(is.avg_sales_price, 0) AS average_sales_price,
+    SUM(ss.total_spent) AS customer_total_spent
+FROM 
+    customer_address a
+LEFT JOIN 
+    sales_hierarchy sh ON a.ca_address_sk = sh.ss_store_sk
+LEFT JOIN 
+    customer_returns cr ON cr.sr_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = a.ca_address_sk)
+LEFT JOIN 
+    item_sales is ON is.i_item_sk = (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_bill_customer_sk = cr.sr_customer_sk LIMIT 1)
+LEFT JOIN 
+    sales_summary ss ON ss.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_current_addr_sk = a.ca_address_sk)
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MIN(ws.ws_sold_date_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = cr.sr_customer_sk)
+WHERE 
+    d.d_year > 2020
+GROUP BY 
+    a.ca_city, d.d_year, sh.total_profit, cr.total_returns, cr.total_return_amt, cr.total_return_tax, is.total_quantity_sold, is.avg_sales_price
+ORDER BY 
+    total_store_profit DESC, total_customer_returns DESC;

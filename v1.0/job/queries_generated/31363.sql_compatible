@@ -1,0 +1,51 @@
+
+WITH RECURSIVE CastHierarchy AS (
+    SELECT ci.id, ci.person_id, ci.movie_id, ci.person_role_id, 
+           ci.nr_order, 1 AS level
+    FROM cast_info ci
+    WHERE ci.movie_id IN (SELECT m.id FROM aka_title m WHERE m.production_year >= 2000)
+    
+    UNION ALL
+
+    SELECT ci.id, ci.person_id, ci.movie_id, ci.person_role_id, 
+           ci.nr_order, ch.level + 1
+    FROM cast_info ci
+    INNER JOIN CastHierarchy ch ON ci.movie_id = ch.movie_id
+    WHERE ch.level < 5  
+),
+TopMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast_members
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.id = ci.movie_id
+    WHERE at.production_year BETWEEN 2010 AND 2020
+    GROUP BY at.title, at.production_year
+    ORDER BY total_cast_members DESC
+    LIMIT 10
+),
+MovieCompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM movie_companies mc
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.total_cast_members,
+    mcd.company_names,
+    mcd.company_types,
+    mcd.num_companies,
+    ch.level AS cast_hierarchy_level
+FROM TopMovies tm
+LEFT JOIN MovieCompanyDetails mcd ON tm.title = (SELECT title FROM aka_title WHERE id = mcd.movie_id)  
+LEFT JOIN CastHierarchy ch ON tm.title = (SELECT title FROM aka_title WHERE id = ch.movie_id)
+WHERE tm.total_cast_members > 5
+ORDER BY tm.production_year DESC, tm.total_cast_members DESC;

@@ -1,0 +1,66 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        title.title AS movie_title,
+        m.production_year,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_movie_title,
+        ml.link_type_id,
+        0 AS level
+    FROM
+        title AS m
+    LEFT JOIN
+        movie_link AS ml ON ml.movie_id = m.id
+    LEFT JOIN
+        title AS m2 ON m2.id = ml.linked_movie_id
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        COALESCE(m2.title, 'No Linked Movie') AS linked_movie_title,
+        ml.link_type_id,
+        level + 1
+    FROM
+        MovieHierarchy AS mh
+    JOIN
+        movie_link AS ml ON ml.movie_id = mh.movie_id
+    JOIN
+        title AS m2 ON m2.id = ml.linked_movie_id
+)
+
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ml.linked_movie_id) AS total_links,
+    STRING_AGG(DISTINCT CONCAT(lm.link_title, ' (', lm.level, ')'), ', ') AS linked_movies,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE -1 END) AS avg_order,
+    SUM(CASE WHEN ci.person_id IS NULL THEN 1 ELSE 0 END) AS null_person_cast_count
+FROM
+    MovieHierarchy AS mh
+LEFT JOIN
+    movie_link AS ml ON ml.movie_id = mh.movie_id
+LEFT JOIN
+    cast_info AS ci ON ci.movie_id = mh.movie_id
+LEFT JOIN
+    comp_cast_type AS cct ON cct.id = ci.person_role_id
+LEFT JOIN
+    (SELECT 
+        DISTINCT movie_id, 
+        level, 
+        link_type_id 
+    FROM 
+        MovieHierarchy 
+    WHERE 
+        level IN (SELECT DISTINCT level FROM MovieHierarchy)) AS lm ON lm.movie_id = mh.movie_id
+WHERE
+    mh.production_year IS NOT NULL
+GROUP BY
+    mh.movie_title, mh.production_year
+HAVING
+    COUNT(DISTINCT ml.linked_movie_id) > 0
+ORDER BY
+    COALESCE(mh.production_year, 0) DESC,
+    COUNT(*) DESC;

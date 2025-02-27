@@ -1,0 +1,64 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_profit,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ws.ws_net_paid) AS median_net_paid
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_profit,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_profit DESC) AS customer_rank
+    FROM 
+        customer_stats cs
+    WHERE 
+        cs.total_profit > 1000
+    AND cs.order_count > 5
+)
+
+SELECT 
+    w.w_warehouse_id,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    STRING_AGG(DISTINCT c.c_customer_id) AS top_customers,
+    MAX(rs.rank_profit) AS max_rank_profit
+FROM 
+    ranked_sales rs
+JOIN 
+    web_sales ws ON rs.ws_order_number = ws.ws_order_number
+JOIN 
+    warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN 
+    top_customers tc ON tc.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    customer c ON c.c_customer_sk = ws.ws_bill_customer_sk
+GROUP BY 
+    w.w_warehouse_id
+HAVING 
+    SUM(ws.ws_net_profit) IS NOT NULL 
+    AND COUNT(DISTINCT ws.ws_order_number) > 10
+ORDER BY 
+    total_net_profit DESC;

@@ -1,0 +1,58 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title ASC) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorTitles AS (
+    SELECT 
+        ka.person_id,
+        kt.title,
+        kt.production_year,
+        kt.id AS title_id,
+        COUNT(*) OVER (PARTITION BY ka.person_id) AS total_roles
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info c ON ka.person_id = c.person_id
+    JOIN 
+        aka_title kt ON c.movie_id = kt.movie_id
+    WHERE 
+        kt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+NullRatedTitles AS (
+    SELECT 
+        at.*,
+        COALESCE(NULLIF(at.title, ''), 'Untitled') AS title_filled
+    FROM 
+        ActorTitles at
+    WHERE 
+        at.production_year IS NOT NULL
+)
+SELECT 
+    n.name,
+    rt.title AS ranked_title,
+    rt.production_year,
+    rank() OVER (PARTITION BY rt.production_year ORDER BY rt.title ASC) AS title_rank,
+    COUNT(DISTINCT at.person_id) AS actor_count,
+    AVG(coalesce(at.total_roles, 0)) AS avg_roles_per_actor,
+    SUM(CASE WHEN nk.keyword IS NOT NULL THEN 1 ELSE 0 END) AS keyword_present_count
+FROM 
+    NullRatedTitles rt
+LEFT JOIN 
+    name n ON n.id = rt.title_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = rt.title_id
+LEFT JOIN 
+    keyword nk ON nk.id = mk.keyword_id
+GROUP BY 
+    n.name, rt.title, rt.production_year 
+HAVING 
+    COUNT(DISTINCT at.person_id) > 1 AND rt.production_year > 2000
+ORDER BY 
+    rt.production_year DESC, title_rank ASC;

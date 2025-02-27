@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::INTEGER AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title ILIKE '%Part%' -- considering parts of a franchise
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    AVG((SELECT COUNT(*) 
+         FROM movie_info mi 
+         WHERE mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')) 
+        ) AS avg_rating,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+    SUM(CASE WHEN ki.keyword IN ('Action', 'Adventure') THEN 1 ELSE 0 END) AS action_adventure_count,
+    MAX(CASE WHEN cp.kind = 'Director' THEN cp.id END) AS director_id
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    role_type cp ON ci.role_id = cp.id
+WHERE 
+    mh.production_year >= 2000
+    AND mh.production_year <= 2023
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, total_cast DESC;

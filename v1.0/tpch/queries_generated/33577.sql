@@ -1,0 +1,71 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        COALESCE(AVG(t.total_quantity), 0) AS avg_quantity,
+        COALESCE(MAX(t.distinct_parts), 0) AS max_distinct_parts
+    FROM orders o
+    LEFT JOIN TotalLineItems t ON o.o_orderkey = t.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus, o.o_totalprice
+),
+SupplierOrderStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_sales,
+        SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS completed_sales
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RegionStatistics AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_regionkey, r.r_name
+)
+SELECT 
+    rh.s_suppkey,
+    rh.s_name,
+    os.order_count,
+    os.total_sales,
+    os.completed_sales,
+    rs.supplier_count,
+    rs.total_acctbal,
+    rs.max_acctbal,
+    ROW_NUMBER() OVER (PARTITION BY rh.s_nationkey ORDER BY os.total_sales DESC) AS ranking
+FROM SupplierHierarchy rh
+JOIN SupplierOrderStats os ON rh.s_suppkey = os.s_suppkey
+JOIN RegionStatistics rs ON rh.s_nationkey = rs.s_regionkey
+WHERE rh.level = 1 AND os.total_sales > 1000
+ORDER BY rh.s_name;

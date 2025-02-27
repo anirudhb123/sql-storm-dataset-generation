@@ -1,0 +1,49 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_county, ca_state, ca_country,
+           CAST(ca_city AS varchar(100)) AS full_address,
+           1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT a.ca_address_sk, a.ca_city, a.ca_county, a.ca_state, a.ca_country,
+           CAST(CONCAT(ah.full_address, ', ', a.ca_city) AS varchar(100)),
+           ah.level + 1
+    FROM customer_address a
+    JOIN AddressHierarchy ah ON a.ca_county = ah.ca_county
+    WHERE a.ca_city IS NOT NULL AND ah.level < 5
+), AddressCounts AS (
+    SELECT ca_state,
+           COUNT(DISTINCT ca_address_sk) AS unique_addresses,
+           STRING_AGG(DISTINCT full_address, '; ') AS address_list
+    FROM AddressHierarchy
+    GROUP BY ca_state
+), SalesData AS (
+    SELECT ws_bill_addr_sk, SUM(ws_ext_sales_price) AS total_sales,
+           AVG(ws_sales_price) AS avg_sales_price,
+           SUM(ws_quantity) FILTER (WHERE ws_quantity > 0) AS total_quantity
+    FROM web_sales
+    GROUP BY ws_bill_addr_sk
+), CombinedData AS (
+    SELECT ac.ca_state, ac.unique_addresses, ac.address_list,
+           sd.total_sales, sd.avg_sales_price, sd.total_quantity
+    FROM AddressCounts ac
+    LEFT JOIN SalesData sd ON ac.unique_addresses = (SELECT COUNT(*) FROM customer_address WHERE ca_state = ac.ca_state)
+), FinalResults AS (
+    SELECT *,
+           CASE 
+               WHEN total_sales IS NULL THEN 'No Sales'
+               WHEN total_sales = 0 THEN 'No Sales in the State'
+               ELSE 'Sales Exist'
+           END AS sales_status,
+           ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY total_sales DESC) AS sales_rank
+    FROM CombinedData
+)
+SELECT *,
+       COALESCE(sales_status, 'Undefined') AS final_status,
+       CONCAT('State: ', ca_state, ' | Unique Addresses: ', unique_addresses) AS status_message
+FROM FinalResults
+WHERE sales_rank = 1 OR sales_rank IS NULL
+ORDER BY ca_state;

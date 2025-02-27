@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TopNProducts AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY p.p_partkey, p.p_name
+    ORDER BY revenue DESC
+    LIMIT 10
+),
+CustomerAccountBalance AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT
+    r.r_name AS region,
+    n.n_name AS nation,
+    th.p_name AS top_product,
+    SUM(ls.l_extendedprice * (1 - ls.l_discount)) AS total_revenue,
+    c.c_name AS customer_name,
+    c.c_acctbal AS customer_balance,
+    CASE 
+        WHEN c.c_acctbal IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status,
+    sh.level AS supplier_level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+JOIN CustomerAccountBalance c ON c.rank <= 10
+JOIN TopNProducts th ON th.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty >= 100
+) 
+JOIN lineitem ls ON ls.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+)
+GROUP BY r.r_name, n.n_name, th.p_name, c.c_name, c.c_acctbal, sh.level
+HAVING total_revenue > 10000
+ORDER BY total_revenue DESC;

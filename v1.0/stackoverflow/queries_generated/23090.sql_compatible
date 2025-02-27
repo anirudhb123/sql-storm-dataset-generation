@@ -1,0 +1,78 @@
+
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+TagStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.AnswerCount, 0)) AS TotalAnswers
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY t.Id, t.TagName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstCloseDate,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+TagPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        t.TagName,
+        COALESCE(cp.FirstCloseDate, DATE '2000-01-01') AS FirstClosedDate,
+        COALESCE(cp.LastCloseDate, DATE '2000-01-01') AS LastClosedDate
+    FROM Posts p
+    JOIN Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    LEFT JOIN ClosedPosts cp ON p.Id = cp.PostId
+)
+
+SELECT 
+    uvc.UserId,
+    uvc.DisplayName,
+    uvc.Upvotes,
+    uvc.Downvotes,
+    uvc.TotalVotes,
+    pvs.PostId,
+    pvs.VoteCount,
+    pvs.UpvoteCount,
+    pvs.DownvoteCount,
+    ts.TagId,
+    ts.TagName,
+    ts.PostsCount,
+    ts.TotalViews,
+    ts.TotalAnswers,
+    COALESCE(tpd.FirstClosedDate, 'Not Closed') AS FirstClose,
+    COALESCE(tpd.LastClosedDate, 'Not Closed') AS LastClose
+FROM UserVoteCounts uvc
+LEFT JOIN UserVoteCounts uv ON uvc.UserId = uv.UserId
+LEFT JOIN PostVoteStats pvs ON pvs.UpvoteCount > uvc.Upvotes OR pvs.DownvoteCount < uvc.Downvotes
+LEFT JOIN TagStats ts ON ts.PostsCount > (SELECT AVG(PostsCount) FROM TagStats WHERE PostsCount IS NOT NULL)
+LEFT JOIN TagPostDetails tpd ON tpd.PostId = pvs.PostId
+ORDER BY uvc.Reputation DESC, pvs.VoteCount DESC, ts.TotalViews DESC;

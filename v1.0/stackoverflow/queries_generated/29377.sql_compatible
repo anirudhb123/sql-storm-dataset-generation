@@ -1,0 +1,63 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 AND Posts.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::text[])
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.DisplayName,
+        COUNT(PostHistory.Id) AS EditCount,
+        COUNT(DISTINCT Posts.Id) AS EditedPostsCount,
+        COUNT(DISTINCT Comments.Id) AS CommentCount
+    FROM 
+        Users
+    JOIN 
+        PostHistory ON Users.Id = PostHistory.UserId
+    LEFT JOIN 
+        Posts ON PostHistory.PostId = Posts.Id 
+    LEFT JOIN 
+        Comments ON Posts.Id = Comments.PostId 
+    GROUP BY 
+        Users.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount
+    FROM 
+        TagStatistics
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName AS Editor,
+    U.EditCount,
+    U.EditedPostsCount,
+    U.CommentCount,
+    T.TagName,
+    T.PostCount,
+    T.QuestionCount,
+    T.AnswerCount,
+    T.AcceptedAnswerCount,
+    T.AverageScore
+FROM 
+    UserActivity U
+JOIN 
+    TagStatistics T ON T.QuestionCount > 0
+WHERE 
+    U.EditedPostsCount > 5
+    AND T.TagName IN (SELECT TagName FROM PopularTags)
+ORDER BY 
+    T.PostCount DESC, U.EditCount DESC;

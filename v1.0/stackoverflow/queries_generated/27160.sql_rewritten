@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ST_DistanceSpheroid(
+            POINT(t.LocationLat, t.LocationLong), 
+            POINT(u.LocationLat, u.LocationLong)
+        ) AS Distance,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RN,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserLocations t ON u.Id = t.UserId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, u.LocationLat, u.LocationLong, t.LocationLat, t.LocationLong
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.RN = 1
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Score, rp.Distance
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.Distance,
+    string_agg(DISTINCT t.TagName, ', ') AS AllTags
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    UNNEST(fp.Tags) AS t(TagName)
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.ViewCount, fp.Score, 
+    fp.CommentCount, fp.UpVotes, fp.DownVotes, fp.Distance
+ORDER BY 
+    fp.Score DESC, 
+    fp.ViewCount DESC;

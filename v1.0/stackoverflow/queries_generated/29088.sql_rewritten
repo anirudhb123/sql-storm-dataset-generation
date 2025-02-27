@@ -1,0 +1,70 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.Id) AS TagCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag ON true
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+), 
+
+PostAverages AS (
+    SELECT 
+        PostId,
+        TagCount,
+        AVG(AnswerCount) AS AvgAnswerCount,
+        AVG(CommentCount) AS AvgCommentCount,
+        AVG(ViewCount) AS AvgViewCount
+    FROM 
+        Posts p
+    JOIN 
+        PostTagCounts ptc ON p.Id = ptc.PostId
+    GROUP BY 
+        PostId, TagCount
+), 
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ptc.PostId,
+    ptc.TagCount,
+    pa.AvgAnswerCount,
+    pa.AvgCommentCount,
+    pa.AvgViewCount,
+    pht.EditCount,
+    pht.LastEditDate,
+    pd.CreationDate AS PostCreationDate,
+    pd.Title,
+    pd.Body
+FROM 
+    PostTagCounts ptc
+JOIN 
+    PostAverages pa ON ptc.PostId = pa.PostId
+JOIN 
+    PostHistoryDetails pht ON ptc.PostId = pht.PostId
+JOIN 
+    Posts pd ON ptc.PostId = pd.Id
+ORDER BY 
+    ptc.TagCount DESC, 
+    pa.AvgViewCount DESC
+LIMIT 50;

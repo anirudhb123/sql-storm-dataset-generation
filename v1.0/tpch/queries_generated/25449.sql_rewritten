@@ -1,0 +1,30 @@
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(SUBSTRING(s.s_comment, 1, 50)) AS avg_supplier_comment_excerpt,
+    MAX(LENGTH(p.p_comment)) AS max_part_comment_length,
+    MIN(CHAR_LENGTH(o.o_comment)) AS min_order_comment_length,
+    REGEXP_COUNT(n.n_name, '[aeiou]') AS vowel_count_nation_name
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON n.n_nationkey = s.s_nationkey
+WHERE 
+    p.p_name LIKE '%steel%'
+    AND o.o_orderdate >= DATE '1997-01-01'
+GROUP BY 
+    p.p_name
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 5
+ORDER BY 
+    total_available_quantity DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk
+),
+ReturnStats AS (
+    SELECT 
+        wr.web_site_sk,
+        COUNT(DISTINCT wr.wr_order_number) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        AVG(wr.wr_return_tax) AS avg_return_tax
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.web_site_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    w.w_web_site_id,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    rt.total_returns,
+    rt.total_return_amt,
+    rt.avg_return_tax,
+    cd.gender,
+    cd.marital_status,
+    cd.income_band,
+    cd.customer_count,
+    CASE 
+        WHEN COALESCE(rs.total_sales, 0) > 0 THEN (rt.total_return_amt / COALESCE(rs.total_sales, 1))
+        ELSE NULL
+    END AS return_ratio
+FROM 
+    web_site w
+LEFT JOIN 
+    RankedSales rs ON w.web_site_sk = rs.web_site_sk
+LEFT JOIN 
+    ReturnStats rt ON w.web_site_sk = rt.web_site_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IN (SELECT DISTINCT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IS NOT NULL)
+WHERE 
+    (rt.total_returns IS NULL OR rt.total_returns > 0)
+    AND (rs.total_sales IS NULL OR rs.total_sales > 100)
+ORDER BY 
+    return_ratio DESC NULLS LAST
+LIMIT 100;

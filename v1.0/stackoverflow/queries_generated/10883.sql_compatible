@@ -1,0 +1,57 @@
+
+WITH UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalScore,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    PA.CommentCount,
+    PA.VoteCount
+FROM 
+    UserPosts U
+JOIN 
+    TagUsage T ON U.PostCount > 0
+JOIN 
+    PostActivity PA ON U.UserId = PA.PostId
+ORDER BY 
+    U.TotalScore DESC, U.PostCount DESC;

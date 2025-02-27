@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) as PostRank,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) as UpvoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) as DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND p.Score IS NOT NULL
+),
+AggregatedUserVotes AS (
+    SELECT 
+        u.Id as UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) as TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) as TotalDownvotes,
+        COUNT(DISTINCT v.PostId) as UniqueVotedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+LatestUserPost AS (
+    SELECT 
+        p.OwnerUserId,
+        p.Id as PostId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) as LatestPostRank,
+        p.Title,
+        p.LastActivityDate
+    FROM 
+        Posts p
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(lup.PostId, -1) as LatestPostId,
+    COALESCE(lup.Title, 'No Posts') as LatestPostTitle,
+    COALESCE(rp.PostRank, 0) as UserPostRank,
+    au.TotalUpvotes,
+    au.TotalDownvotes,
+    au.UniqueVotedPosts,
+    CASE 
+        WHEN au.TotalUpvotes > au.TotalDownvotes THEN 'Positive Contributor'
+        WHEN au.TotalUpsvotes < au.TotalDownvotes THEN 'Negative Contributor'
+        ELSE 'Neutral Contributor'
+    END as ContributionType
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedUserVotes au ON u.Id = au.UserId
+LEFT JOIN 
+    LatestUserPost lup ON u.Id = lup.OwnerUserId AND lup.LatestPostRank = 1
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    OR EXISTS (
+        SELECT 1 FROM Badges b WHERE b.UserId = u.Id AND b.Class = 1
+    )
+ORDER BY 
+    u.Reputation DESC,
+    au.UniqueVotedPosts DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT m.id, m.title, m.production_year, mh.level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+), ranked_movies AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        COUNT(ca.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(ca.id) DESC) AS rn,
+        NULLIF(SUM(LENGTH(ca.note)), 0) AS total_note_length
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_info ca ON mh.movie_id = ca.movie_id
+    GROUP BY mh.title, mh.production_year
+), movie_keywords AS (
+    SELECT 
+        at.title,
+        k.keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM aka_title at 
+    JOIN movie_keyword mk ON mk.movie_id = at.id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY at.title, k.keyword
+), movie_companies AS (
+    SELECT 
+        at.title,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM aka_title at
+    JOIN movie_companies mc ON mc.movie_id = at.id
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+), final_results AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.actor_count,
+        mk.keyword,
+        mk.keyword_count,
+        mc.company_name,
+        mc.company_type,
+        rm.total_note_length,
+        COALESCE(NULLIF(rm.total_note_length, 0), 'No Notes') AS note_summary
+    FROM ranked_movies rm
+    LEFT JOIN movie_keywords mk ON mk.title = rm.title
+    LEFT JOIN movie_companies mc ON mc.title = rm.title
+    WHERE rm.rn <= 5
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.keyword,
+    fr.keyword_count,
+    fr.company_name,
+    fr.company_type,
+    COALESCE(fr.total_note_length, 0) AS total_note_length,
+    fr.note_summary
+FROM final_results fr
+ORDER BY fr.production_year DESC, fr.actor_count DESC;

@@ -1,0 +1,67 @@
+WITH MovieDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        title m ON mc.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+CombinedDetails AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.cast_count,
+        md.actors,
+        cd.company_count,
+        cd.company_names,
+        CASE 
+            WHEN cd.company_count IS NULL THEN 'No Companies'
+            ELSE 'Companies Present'
+        END AS company_info
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        CompanyDetails cd ON md.movie_title = cd.movie_id
+)
+SELECT 
+    movie_title,
+    production_year,
+    cast_count,
+    actors,
+    company_count,
+    company_names,
+    company_info
+FROM 
+    CombinedDetails
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC,
+    cast_count DESC
+LIMIT 50;

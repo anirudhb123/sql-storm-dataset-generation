@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId AND V.VoteTypeId IN (8, 9) -- Bounty Start, Bounty Close
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosingBenefits AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS TotalClosures,
+        SUM(CASE WHEN PH.Comment IS NOT NULL THEN 1 ELSE 0 END) AS CommentedClosures
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.UserId
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(V.Id) AS VoteCount,
+        MAX(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        MAX(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Tags T ON POSITION(T.TagName IN P.Tags) > 0
+    GROUP BY P.Id, P.Title, P.CreationDate
+),
+FinalReport AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        UR.TotalBountyAmount,
+        COALESCE(CB.TotalClosures, 0) AS TotalClosures,
+        COALESCE(CB.CommentedClosures, 0) AS CommentedClosures,
+        PS.PostId,
+        PS.Title,
+        PS.VoteCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.Tags
+    FROM UserReputation UR
+    LEFT JOIN ClosingBenefits CB ON UR.UserId = CB.UserId
+    LEFT JOIN PostStats PS ON PS.VoteCount = (SELECT MAX(VoteCount) FROM PostStats WHERE UserId = UR.UserId)
+)
+SELECT 
+    *,
+    CASE 
+        WHEN ReputationRank <= 10 THEN 'Top Contributor'
+        WHEN ReputationRank BETWEEN 11 AND 50 THEN 'Regular Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorLevel,
+    CASE 
+        WHEN TotalClosures > 0 THEN 'Engaged in Closure'
+        ELSE 'Inactive in Closure'
+    END AS ClosureEngagement,
+    (SELECT COUNT(*) FROM Posts WHERE LastActivityDate > NOW() - INTERVAL '1 year') AS ActivePostsCount,
+    (SELECT COUNT(*) FROM Users WHERE Reputation > 1000) AS VeteranCount
+FROM FinalReport
+WHERE COALESCE(TotalClosures, 0) > 0
+ORDER BY Reputation DESC, TotalBountyAmount DESC;

@@ -1,0 +1,29 @@
+SELECT 
+    p.p_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue, 
+    r.r_name AS region_name, 
+    s.s_name AS supplier_name, 
+    c.c_name AS customer_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' 
+    AND l.l_shipdate < DATE '1998-01-01'
+    AND r.r_name LIKE 'Central%'
+GROUP BY 
+    p.p_name, r.r_name, s.s_name, c.c_name
+ORDER BY 
+    revenue DESC, p.p_name;

@@ -1,0 +1,70 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        COUNT(DISTINCT CASE 
+            WHEN PostTypes.Name = 'Question' THEN Posts.Id 
+            END) AS QuestionCount,
+        COUNT(DISTINCT CASE 
+            WHEN PostTypes.Name = 'Answer' THEN Posts.Id 
+            END) AS AnswerCount
+    FROM 
+        Tags 
+    JOIN 
+        Posts ON Tags.Id = Posts.TagId
+    JOIN 
+        PostTypes ON Posts.PostTypeId = PostTypes.Id
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 1 THEN 1 
+            ELSE 0 
+        END) AS QuestionCount,
+        SUM(CASE 
+            WHEN Posts.PostTypeId = 2 THEN 1 
+            ELSE 0 
+        END) AS AnswerCount,
+        SUM(CASE 
+            WHEN Posts.Score > 0 THEN 1 
+            ELSE 0 
+        END) AS UpvotedPostCount
+    FROM 
+        Users 
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+)
+SELECT 
+    u.DisplayName AS UserName,
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    u.UpvotedPostCount,
+    t.Rank
+FROM 
+    UserActivity u
+JOIN 
+    PopularTags t ON u.QuestionCount > 0
+WHERE 
+    t.PostCount > 10
+ORDER BY 
+    t.Rank, u.UpvotedPostCount DESC;

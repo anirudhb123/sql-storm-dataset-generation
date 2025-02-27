@@ -1,0 +1,68 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges,
+        COALESCE(SUM(CASE WHEN B.TagBased = 1 THEN 1 ELSE 0 END), 0) AS TagBasedBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+), UserActivity AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        MAX(P.LastActivityDate) AS LastActivityDate
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+), UserVoteStats AS (
+    SELECT 
+        V.UserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+    FROM Votes V
+    GROUP BY V.UserId
+), CombinedUserStats AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(ABS(SB.GoldBadges - UAS.PostCount), 0) AS BadgePostDiff,
+        COALESCE(SB.TagBasedBadges, 0) AS TagBasedBadges,
+        COALESCE(UAS.TotalViews, 0) AS TotalViews,
+        COALESCE(UVS.TotalUpVotes - UVS.TotalDownVotes, 0) AS NetVote,
+        SB.GoldBadges,
+        SB.SilverBadges,
+        SB.BronzeBadges,
+        UAS.LastActivityDate
+    FROM UserBadgeStats SB
+    LEFT JOIN UserActivity UAS ON SB.UserId = UAS.OwnerUserId
+    LEFT JOIN UserVoteStats UVS ON SB.UserId = UVS.UserId
+), RankedUsers AS (
+    SELECT 
+        CU.DisplayName,
+        CU.BadgePostDiff,
+        CU.TotalViews,
+        CU.NetVote,
+        CU.GoldBadges,
+        CU.SilverBadges,
+        CU.BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY CU.BadgePostDiff DESC, CU.TotalViews DESC) AS UserRank
+    FROM CombinedUserStats CU
+)
+SELECT 
+    RU.DisplayName,
+    RU.BadgePostDiff,
+    RU.TotalViews,
+    COALESCE(NULLIF(RU.NetVote, 0), 'No votes') AS VoteStatus,
+    CASE 
+        WHEN RU.GoldBadges > 0 THEN 'Gold Badge Holder'
+        ELSE 'No Gold Badge'
+    END AS BadgeStatus,
+    CASE 
+        WHEN RU.LastActivityDate IS NULL OR RU.LastActivityDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 'Inactive'
+        ELSE 'Active'
+    END AS ActivityStatus
+FROM RankedUsers RU
+WHERE RU.UserRank <= 10
+ORDER BY RU.BadgePostDiff DESC, RU.TotalViews DESC;

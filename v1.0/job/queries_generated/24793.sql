@@ -1,0 +1,85 @@
+WITH RECURSIVE YearlyProduction AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS unique_actors,
+        AVG(CASE WHEN t.production_year IS NOT NULL THEN t.production_year ELSE 0 END) AS avg_year,
+        ROW_NUMBER() OVER (PARTITION BY t.title ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        c.nr_order <= 5  -- Taking top 5 roles per movie for simplicity
+    GROUP BY 
+        c.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        movie_id,
+        unique_actors,
+        avg_year,
+        ROW_NUMBER() OVER (ORDER BY unique_actors DESC) AS top_rn
+    FROM 
+        YearlyProduction
+    WHERE 
+        unique_actors > 1  -- Only consider movies with more than one unique actor
+),
+
+MostStarStuddedMovies AS (
+    SELECT 
+        tm.movie_id,
+        t.title,
+        t.production_year,
+        tm.unique_actors,
+        COALESCE(t.kind_id, 'Unknown') AS movie_kind,
+        COALESCE(cn.name, 'Independent') AS company_name
+    FROM 
+        TopMovies tm
+    INNER JOIN 
+        aka_title t ON tm.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        tm.top_rn <= 10  -- Limit to the top 10 movies with the most unique actors
+)
+
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.unique_actors,
+    m.movie_kind,
+    m.company_name,
+    CASE 
+        WHEN m.production_year IS NULL THEN 'Unknown Year'
+        WHEN m.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    COUNT(DISTINCT mk.keyword) AS number_of_keywords,
+    SUM(CASE WHEN mc.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+FROM 
+    MostStarStuddedMovies m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_info_idx mc ON mi.id = mc.id
+GROUP BY 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.unique_actors,
+    m.movie_kind,
+    m.company_name
+ORDER BY 
+    m.unique_actors DESC, 
+    m.production_year ASC;

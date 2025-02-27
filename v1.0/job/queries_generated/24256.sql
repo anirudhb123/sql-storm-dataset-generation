@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        (SELECT m.title FROM aka_title m WHERE m.id = ml.linked_movie_id) AS title,
+        (SELECT m.production_year FROM aka_title m WHERE m.id = ml.linked_movie_id) AS production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(cast_info.nr_order, 0) AS cast_order,
+    COUNT(DISTINCT mct.kind) AS company_count,
+    STRING_AGG(DISTINCT cn.name, ', ') FILTER (WHERE cn.name IS NOT NULL) AS company_names,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year' 
+        ELSE CAST(mh.production_year AS text) 
+    END AS production_year_display,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY mh.title) AS rank_within_year,
+    CASE 
+        WHEN mh.level = 0 THEN 'Root Movie'
+        WHEN mh.level = 1 THEN 'Sequel/Prequel'
+        ELSE 'Related Movie'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ON cast_info.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    role_type rt ON rt.id = cast_info.role_id
+LEFT JOIN 
+    aka_name an ON an.person_id = cast_info.person_id AND an.name IS NOT NULL
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating' LIMIT 1)
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, cast_info.nr_order
+HAVING 
+    COUNT(cn.name) > 0 OR COUNT(an.name) > 0
+ORDER BY 
+    mh.production_year, mh.title, rank_within_year DESC
+LIMIT 
+    1000 OFFSET 0;

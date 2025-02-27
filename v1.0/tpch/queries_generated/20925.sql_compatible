@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') OR o.o_orderstatus IS NULL
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+),
+SuzzieNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(s.s_acctbal) AS total_balance
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        n.n_name LIKE '%U%' AND s.s_acctbal IS NOT NULL
+    GROUP BY 
+        n.n_nationkey, n.n_name
+    HAVING 
+        SUM(s.s_acctbal) > 10000
+)
+SELECT 
+    rt.p_name,
+    COALESCE(cs.order_count, 0) AS customer_order_count,
+    sn.n_name AS nation_name,
+    rt.total_sales,
+    COUNT(DISTINCT sn.n_nationkey) OVER () AS unique_nations_count
+FROM 
+    RankedSales rt
+LEFT JOIN 
+    CustomerOrders cs ON rt.p_partkey = cs.c_custkey
+LEFT JOIN 
+    SuzzieNations sn ON rt.p_partkey = sn.n_nationkey
+WHERE 
+    rt.sales_rank = 1 AND rt.total_sales > (SELECT AVG(total_sales) FROM RankedSales)
+    OR rt.p_name LIKE '%Super%' 
+    OR EXISTS (
+        SELECT 
+            1 FROM part p2 
+        WHERE 
+            p2.p_partkey = rt.p_partkey AND p2.p_size < 10
+    )
+ORDER BY 
+    rt.total_sales DESC, cs.last_order_date DESC NULLS LAST;

@@ -1,0 +1,73 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        PostTypeId,
+        Score,
+        Title,
+        CreationDate,
+        1 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.PostTypeId,
+        p.Score,
+        p.Title,
+        p.CreationDate,
+        rph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostMetrics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.Level,
+        COALESCE(pv.UpVotes, 0) AS UpVotes,
+        COALESCE(pv.DownVotes, 0) AS DownVotes,
+        ph.Score,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = ph.PostId) AS CommentCount
+    FROM RecursivePostHierarchy ph
+    LEFT JOIN PostVotes pv ON ph.PostId = pv.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        pH.Comment AS CloseReason
+    FROM PostHistory pH
+    INNER JOIN Posts p ON p.Id = pH.PostId
+    WHERE pH.PostHistoryTypeId = 10 
+),
+FinalMetrics AS (
+    SELECT 
+        pm.*,
+        CASE 
+            WHEN cp.PostId IS NOT NULL THEN 1
+            ELSE 0
+        END AS IsClosed
+    FROM PostMetrics pm
+    LEFT JOIN ClosedPosts cp ON pm.PostId = cp.PostId
+)
+SELECT 
+    *,
+    (UpVotes - DownVotes) AS NetVotes,
+    RANK() OVER (PARTITION BY Level ORDER BY Score DESC) AS ScoreRank
+FROM FinalMetrics
+WHERE (CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')) 
+  AND (CommentCount > 0 OR IsClosed = 1) 
+ORDER BY Level, ScoreRank;

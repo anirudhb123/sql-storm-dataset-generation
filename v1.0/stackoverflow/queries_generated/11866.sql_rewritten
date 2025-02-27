@@ -1,0 +1,60 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId IN (1, 2) THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.PostTypeId = 2 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(STRING_AGG(p.Tags, ','), ',')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+TopVoteTypes AS (
+    SELECT 
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        vt.Name
+)
+
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.TotalViews,
+    ups.AcceptedAnswers,
+    pt.TagName,
+    pt.TagCount,
+    tvt.VoteType,
+    tvt.VoteCount
+FROM 
+    UserPostStats ups
+JOIN 
+    Users u ON ups.UserId = u.Id
+CROSS JOIN 
+    (SELECT TagName, TagCount FROM PopularTags ORDER BY TagCount DESC LIMIT 5) pt
+CROSS JOIN 
+    (SELECT VoteType, VoteCount FROM TopVoteTypes ORDER BY VoteCount DESC LIMIT 5) tvt
+ORDER BY 
+    ups.TotalPosts DESC, ups.TotalViews DESC;

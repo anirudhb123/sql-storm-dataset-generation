@@ -1,0 +1,45 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        d.d_year, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year
+), 
+TopCustomers AS (
+    SELECT 
+        c_customer_id, 
+        d_year,
+        total_sales 
+    FROM 
+        RankedCustomers 
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    tc.c_customer_id, 
+    tc.d_year, 
+    tc.total_sales, 
+    cd.cd_gender, 
+    cd.cd_marital_status, 
+    ca.ca_city, 
+    ca.ca_state
+FROM 
+    TopCustomers tc
+JOIN 
+    customer_demographics cd ON tc.c_customer_id = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+ORDER BY 
+    tc.d_year, 
+    tc.total_sales DESC;

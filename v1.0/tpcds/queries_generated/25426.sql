@@ -1,0 +1,76 @@
+
+WITH AddressComponents AS (
+    SELECT
+        ca.ca_address_sk,
+        CONCAT_WS(' ', ca.ca_street_number, ca.ca_street_name, ca.ca_street_type, COALESCE(ca.ca_suite_number, '')) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM
+        customer_address ca
+),
+DemographicAnalysis AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_gender, cd.cd_marital_status
+),
+SalesSummary AS (
+    SELECT
+        DATE(DATEADD(day, ws.ws_sold_date_sk, '1970-01-01')) AS sale_date,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM
+        web_sales ws
+    GROUP BY
+        sale_date
+),
+FullReport AS (
+    SELECT
+        ac.full_address,
+        ac.ca_city,
+        ac.ca_state,
+        ac.ca_zip,
+        ac.ca_country,
+        da.cd_gender,
+        da.cd_marital_status,
+        da.customer_count,
+        da.avg_purchase_estimate,
+        ss.sale_date,
+        ss.total_sales,
+        ss.total_orders
+    FROM
+        AddressComponents ac
+    JOIN
+        DemographicAnalysis da ON da.customer_count > 0
+    JOIN
+        SalesSummary ss ON ss.total_sales > 0
+)
+
+SELECT 
+    full_address, 
+    ca_city, 
+    ca_state, 
+    ca_zip, 
+    ca_country, 
+    cd_gender, 
+    cd_marital_status, 
+    customer_count, 
+    avg_purchase_estimate, 
+    sale_date, 
+    total_sales, 
+    total_orders
+FROM 
+    FullReport
+ORDER BY 
+    total_sales DESC, 
+    customer_count DESC
+LIMIT 100;

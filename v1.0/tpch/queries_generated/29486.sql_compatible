@@ -1,0 +1,85 @@
+
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderstatus
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        c.c_phone,
+        c.c_acctbal,
+        o.total_revenue,
+        o.total_items,
+        ROW_NUMBER() OVER(PARTITION BY c.c_custkey ORDER BY o.total_revenue DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        OrderStats o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    s.s_name,
+    CONCAT(s.s_address, ', ', s.nation_name, ', ', s.region_name) AS full_address,
+    s.s_phone,
+    s.s_acctbal,
+    SUM(pd.ps_availqty * p.p_retailprice) AS total_part_value,
+    STRING_AGG(DISTINCT CONCAT(pd.p_name, ' (', pd.p_container, ')'), ', ') AS part_names,
+    c.c_name,
+    c.total_revenue,
+    c.total_items
+FROM 
+    SupplierInfo s
+JOIN 
+    PartDetails pd ON s.s_suppkey = pd.p_partkey
+JOIN 
+    CustomerDetails c ON c.rn = 1
+GROUP BY 
+    s.s_name, s.s_address, s.s_phone, s.s_acctbal, c.c_name, c.total_revenue, c.total_items
+ORDER BY 
+    total_part_value DESC, s.s_name;

@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.hierarchy_level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.hierarchy_level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS item_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS customer_revenue
+    FROM customer c
+    JOIN order_summary os ON c.c_custkey = os.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY customer_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_container,
+    ps.ps_availqty,
+    CASE WHEN (ts.customer_revenue IS NULL) THEN 'NO REVENUE' ELSE TO_CHAR(ts.customer_revenue, 'FM$999,999,999.00') END AS customer_revenue,
+    rh.r_name AS supplier_region,
+    s.s_name AS supplier_name,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY ps.ps_supplycost DESC) AS rank_within_brand
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region rh ON n.n_regionkey = rh.r_regionkey
+LEFT JOIN top_customers ts ON ts.c_custkey = s.s_nationkey
+WHERE (p.p_size > 10 AND p.p_size < 50)
+    OR (p.p_container IS NULL OR p.p_container LIKE '%Box%')
+ORDER BY rank_within_brand, p.p_name
+FETCH FIRST 100 ROWS ONLY;

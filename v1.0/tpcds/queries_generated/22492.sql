@@ -1,0 +1,67 @@
+
+WITH RECURSIVE address_class AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state, ca_country
+    FROM customer_address ca
+    JOIN address_class ac ON ac.ca_city = ca.ca_city OR ac.ca_state = ca.ca_state
+    WHERE ca_address_sk > ac.ca_address_sk
+), 
+sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_net_profit) AS max_profit,
+        MIN(ws.ws_net_profit) AS min_profit,
+        AVG(ws.ws_net_profit) AS avg_profit
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk, ws.web_name
+), 
+demographics AS (
+    SELECT cd.cd_gender, 
+           COUNT(DISTINCT c.c_customer_sk) AS customer_count, 
+           SUM(cd.cd_purchase_estimate) AS total_estimate,
+           RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(cd.cd_purchase_estimate) DESC) AS rank_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT 
+    ac.ca_city,
+    ac.ca_state,
+    ac.ca_country,
+    sd.web_name,
+    sd.total_quantity,
+    sd.total_orders,
+    COALESCE(dg.customer_count, 0) AS num_customers,
+    COALESCE(dg.total_estimate, 0) AS total_estimate,
+    CASE 
+        WHEN COUNT(*) = 0 THEN 'No Sales'
+        WHEN AVG(sd.max_profit) IS NULL THEN 'No Profit Data'
+        ELSE 'Profitable'
+    END AS profit_status,
+    MAX(dg.rank_estimate) OVER () AS highest_rank
+FROM address_class ac
+LEFT JOIN sales_data sd ON sd.web_site_sk IN (
+    SELECT ws.web_site_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_ship_date_sk = (
+        SELECT MAX(ws2.ws_ship_date_sk)
+        FROM web_sales ws2 
+        WHERE ws2.ws_web_site_sk = sd.web_site_sk
+        AND (ws2.ws_net_paid IS NOT NULL OR ws2.ws_net_paid <> 0)
+    )
+)
+LEFT JOIN demographics dg ON dg.cd_gender = (
+    SELECT cd.cd_gender 
+    FROM customer c 
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_current_addr_sk = ac.ca_address_sk
+    LIMIT 1
+)
+GROUP BY ac.ca_city, ac.ca_state, ac.ca_country, sd.web_name
+ORDER BY ac.ca_city, num_customers DESC;

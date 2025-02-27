@@ -1,0 +1,65 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY tag
+                           ORDER BY p.Score DESC) AS RankScore,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames
+    FROM 
+        Posts p
+    CROSS JOIN 
+        (SELECT TRIM(SUBSTRING(tg, 2, LENGTH(tg) - 2)) AS tag
+         FROM Posts, 
+         UNNEST(string_to_array(Tags, '><')) AS tg
+         WHERE PostTypeId = 1) AS tag_list
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, p.Score, p.Tags
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS AnswerCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 2  
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.TagNames,
+    tu.DisplayName AS TopUser,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.AnswerCount AS UserAnswerCount,
+    tu.BadgeCount
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.RankScore = 1  
+WHERE 
+    rp.ViewCount > 100  
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

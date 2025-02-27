@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AnswerCount,
+        p.OwnerUserId,
+        0 AS Level,
+        CAST(NULL AS VARCHAR(100)) AS Path
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.AnswerCount,
+        a.OwnerUserId,
+        Level + 1,
+        CAST(r.Path || ' -> ' || a.Title AS VARCHAR(100))
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON a.ParentId = r.PostId
+    WHERE 
+        a.PostTypeId = 2 -- Only Answers
+), RankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.OwnerUserId,
+        rp.Level,
+        rp.Path,
+        RANK() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.CreationDate DESC) AS UserPostRank,
+        COUNT(*) OVER (PARTITION BY rp.OwnerUserId) AS TotalUserPosts
+    FROM 
+        RecursivePostHierarchy rp
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostViewCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(MAX(v.CreationDate), p.CreationDate) AS LastViewDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id AND v.VoteTypeId = 2 -- UpMod votes
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS QuestionDate,
+    rp.AnswerCount,
+    ub.BadgeNames AS UserBadges,
+    ub.TotalBadges AS BadgeCount,
+    COALESCE(pvc.LastViewDate, 'No Views') AS LastViewDate,
+    rp.Level,
+    rp.Path,
+    rp.UserPostRank,
+    rp.TotalUserPosts
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostViewCounts pvc ON rp.PostId = pvc.PostId
+WHERE 
+    rp.AnswerCount > 0
+    AND rp.UserPostRank <= 5
+ORDER BY 
+    rp.CreationDate DESC;

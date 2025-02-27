@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.Score, 
+        p.CreationDate,
+        @row_num := IF(@prev_owner = p.OwnerUserId, @row_num + 1, 1) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        @prev_owner := p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    CROSS JOIN (SELECT @row_num := 0, @prev_owner := NULL) AS vars
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL 1 YEAR
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.Score, p.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation >= 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+
+SELECT 
+    tu.DisplayName,
+    tu.TotalScore,
+    tu.TotalPosts,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    rp.Title,
+    rp.Score,
+    rp.CommentCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    UserBadges ub ON tu.UserId = ub.UserId
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    rp.PostRank = 1
+ORDER BY 
+    tu.TotalScore DESC, 
+    rp.Score DESC
+LIMIT 10;

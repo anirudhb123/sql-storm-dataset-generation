@@ -1,0 +1,68 @@
+
+WITH TagStats AS (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.Score) AS AverageScore,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Tags AS tag
+    JOIN 
+        Posts AS p ON p.Tags LIKE '%' || tag.TagName || '%'
+    LEFT JOIN 
+        Votes AS v ON v.PostId = p.Id AND v.VoteTypeId = 8  
+    WHERE 
+        tag.IsModeratorOnly = 0
+    GROUP BY 
+        tag.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        AverageScore,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalBounty DESC) AS BountyRank,
+        RANK() OVER (ORDER BY AverageScore DESC) AS ScoreRank
+    FROM 
+        TagStats
+),
+FilteredTags AS (
+    SELECT 
+        *
+    FROM 
+        TopTags
+    WHERE 
+        BountyRank <= 10 OR ScoreRank <= 10
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    t.AverageScore,
+    t.TotalBounty,
+    COALESCE(ud.UserCount, 0) AS UniqueUserCount
+FROM 
+    FilteredTags AS t
+LEFT JOIN (
+    SELECT 
+        tag.TagName,
+        COUNT(DISTINCT up.UserId) AS UserCount
+    FROM 
+        Tags AS tag
+    JOIN 
+        Posts AS p ON p.Tags LIKE '%' || tag.TagName || '%'
+    JOIN 
+        Votes AS v ON v.PostId = p.Id AND v.VoteTypeId = 2  
+    JOIN 
+        Users AS up ON up.Id = v.UserId
+    GROUP BY 
+        tag.TagName
+) AS ud ON t.TagName = ud.TagName
+ORDER BY 
+    t.TotalBounty DESC, t.AverageScore DESC;

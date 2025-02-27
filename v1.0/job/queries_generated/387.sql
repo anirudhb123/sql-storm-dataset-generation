@@ -1,0 +1,58 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+avg_cast AS (
+    SELECT 
+        production_year,
+        AVG(cast_count) AS average_cast
+    FROM 
+        ranked_movies
+    GROUP BY 
+        production_year
+),
+top_movies AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        ac.average_cast
+    FROM 
+        ranked_movies rm
+    JOIN 
+        avg_cast ac ON rm.production_year = ac.production_year
+    WHERE 
+        rm.cast_count >= ac.average_cast
+)
+SELECT 
+    tm.title AS Top_Movies,
+    tm.production_year,
+    tm.cast_count,
+    COALESCE(a.name, 'Unknown') AS Director,
+    COUNT(DISTINCT mk.keyword) AS Keyword_Count
+FROM 
+    top_movies tm
+LEFT JOIN 
+    movie_companies mc ON tm.title_id = mc.movie_id AND mc.company_type_id = 
+        (SELECT id FROM company_type WHERE kind = 'Director')
+LEFT JOIN 
+    company_name a ON mc.company_id = a.id
+LEFT JOIN 
+    movie_keyword mk ON tm.title_id = mk.movie_id
+GROUP BY 
+    tm.title_id, tm.title, tm.production_year, tm.cast_count, a.name
+HAVING 
+    COUNT(DISTINCT mk.keyword) >= 3
+ORDER BY 
+    tm.production_year DESC, tm.cast_count DESC;

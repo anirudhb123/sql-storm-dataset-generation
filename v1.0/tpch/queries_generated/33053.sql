@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+NationRegion AS (
+    SELECT n.n_nationkey, r.r_regionkey, COUNT(DISTINCT n.n_name) AS nation_count
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+),
+FinalResult AS (
+    SELECT p.p_partkey, p.p_name, 
+           COALESCE(ps.ps_availqty, 0) AS available_quantity, 
+           SUM(os.total_price) AS total_sales,
+           COUNT(DISTINCT cs.c_custkey) AS customer_count,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(os.total_price) DESC) AS rank
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN OrderSummary os ON p.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o))
+    LEFT JOIN CustomerOrderCounts cs ON cs.order_count > 0
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+    HAVING SUM(os.total_price) IS NOT NULL AND COUNT(cs.c_custkey) > 5
+)
+SELECT f.p_partkey, f.p_name, 
+       f.available_quantity, f.total_sales, f.customer_count
+FROM FinalResult f
+WHERE f.rank <= 10
+ORDER BY f.total_sales DESC;

@@ -1,0 +1,88 @@
+
+WITH sales_data AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid_inc_tax,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price IS NOT NULL
+),
+customers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL AND cd.cd_purchase_estimate > 500
+),
+return_summary AS (
+    SELECT
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+item_stats AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(r.total_returned, 0) AS total_returned,
+        COALESCE(r.total_return_amt, 0) AS total_return_amt,
+        COUNT(s.ws_order_number) AS total_orders,
+        SUM(s.ws_quantity) AS total_quantity_sold
+    FROM item i
+    LEFT JOIN sales_data s ON i.i_item_sk = s.ws_item_sk
+    LEFT JOIN return_summary r ON i.i_item_sk = r.sr_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc, r.total_returned, r.total_return_amt
+),
+ranked_items AS (
+    SELECT
+        is.i_item_sk,
+        is.i_item_desc,
+        is.total_returned,
+        is.total_return_amt,
+        is.total_orders,
+        is.total_quantity_sold,
+        RANK() OVER (ORDER BY is.total_quantity_sold DESC) AS sold_rank
+    FROM item_stats is
+),
+final_report AS (
+    SELECT
+        c.c_first_name,
+        c.c_last_name,
+        ri.i_item_desc,
+        ri.total_orders,
+        ri.total_quantity_sold,
+        ri.total_returned,
+        ri.total_return_amt
+    FROM customers c
+    JOIN ranked_items ri ON c.c_customer_sk = (SELECT c_customer_sk FROM web_sales WHERE ws_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_item_sk = ri.i_item_sk) LIMIT 1)
+    WHERE ri.sold_rank <= 10
+)
+SELECT 
+    COALESCE(c.c_first_name, 'Unknown') AS first_name,
+    COALESCE(c.c_last_name, 'Unknown') AS last_name,
+    ri.i_item_desc,
+    ri.total_orders,
+    ri.total_quantity_sold,
+    ri.total_returned,
+    ri.total_return_amt,
+    CASE 
+        WHEN ri.total_returned = 0 THEN 'No Returns' 
+        WHEN ri.total_returned < ri.total_quantity_sold / 2 THEN 'Low Return Rate'
+        ELSE 'High Return Rate'
+    END AS return_rate_category
+FROM final_report ri
+LEFT JOIN customers c ON c.c_customer_sk = (SELECT c_customer_sk FROM web_sales WHERE ws_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_item_sk = ri.i_item_sk) LIMIT 1)
+WHERE c.c_first_name IS NOT NULL
+OR c.c_last_name IS NOT NULL
+ORDER BY ri.total_quantity_sold DESC NULLS LAST;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotesCount,
+        SUM(v.VoteTypeId = 3) AS DownVotesCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.PostTypeId, p.Score, p.ClosedDate
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        AVG(COALESCE(p.Score, 0)) AS AveragePostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostComments AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(c.Text, '; ') AS CommentTexts
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    up.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS RecentPostCount,
+    SUM(up.QuestionCount) AS TotalQuestions,
+    SUM(up.AnswerCount) AS TotalAnswers,
+    SUM(CASE WHEN up.AveragePostScore > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+    COUNT(DISTINCT pc.PostId) AS CommentedPostCount,
+    STRING_AGG(DISTINCT pc.CommentTexts, ', ') AS AllComments,
+    rp.Status,
+    COALESCE(rp.RecentRank, 0) AS RecentPostRank
+FROM 
+    UserPerformance up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.RecentRank <= 5
+LEFT JOIN 
+    PostComments pc ON pc.PostId = rp.PostId
+GROUP BY 
+    up.DisplayName, rp.Status
+HAVING 
+    SUM(up.QuestionCount) > 0 OR SUM(up.AnswerCount) > 0
+ORDER BY 
+    RecentPostCount DESC, up.DisplayName;

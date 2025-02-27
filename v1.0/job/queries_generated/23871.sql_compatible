@@ -1,0 +1,76 @@
+
+WITH movie_performance AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(pi.info) FILTER (WHERE pi.info_type_id = 1) AS avg_age,
+        SUM(CASE 
+                WHEN pi.info_type_id = 2 THEN 1 
+                ELSE 0 
+            END) AS awards_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN 
+        company_name co ON co.id = mc.company_id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    LEFT JOIN 
+        person_info pi ON pi.person_id = c.person_id
+    GROUP BY 
+        m.id, m.title
+),
+ranked_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        actor_count,
+        avg_age,
+        awards_count,
+        RANK() OVER (ORDER BY actor_count DESC, avg_age ASC) AS actor_rank
+    FROM 
+        movie_performance
+),
+high_performance_movies AS (
+    SELECT 
+        r.*,
+        CASE 
+            WHEN r.awards_count > 5 AND r.actor_count > 10 THEN 'High Performer'
+            WHEN r.awards_count IS NULL THEN 'Unknown'
+            ELSE 'Regular'
+        END AS performance_category
+    FROM 
+        ranked_movies r
+),
+long_title_movies AS (
+    SELECT 
+        id AS movie_id,
+        title,
+        LENGTH(title) AS title_length
+    FROM 
+        aka_title
+    WHERE 
+        LENGTH(title) > 30
+)
+SELECT 
+    hp.movie_id,
+    hp.title,
+    hp.actor_count,
+    hp.avg_age,
+    hp.awards_count,
+    hp.performance_category,
+    CASE 
+        WHEN lt.movie_id IS NOT NULL THEN 'Long Title'
+        ELSE 'Regular Length'
+    END AS title_category,
+    COALESCE(NULLIF(hp.avg_age, (SELECT DISTINCT info FROM person_info WHERE info_type_id = 1 LIMIT 1)), 'N/A') AS adjusted_avg_age
+FROM 
+    high_performance_movies hp
+LEFT JOIN 
+    long_title_movies lt ON hp.movie_id = lt.movie_id
+WHERE 
+    (hp.performance_category = 'High Performer' OR lt.title IS NOT NULL)
+ORDER BY 
+    hp.actor_rank, hp.title;

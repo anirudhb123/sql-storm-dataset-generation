@@ -1,0 +1,112 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL 
+    UNION ALL
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+CastMemberData AS (
+    SELECT
+        ak.name AS actor_name,
+        c.nr_order,
+        mt.title AS movie_title,
+        CASE 
+            WHEN c.note IS NULL THEN 'No Note'
+            ELSE c.note
+        END AS actor_note,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY c.nr_order ASC) AS role_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title mt ON c.movie_id = mt.movie_id
+    WHERE 
+        mt.production_year > 2000
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY cn.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cn.country_code IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_info
+    FROM 
+        movie_info mi 
+    WHERE 
+        mi.note IS NOT NULL 
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cmd.actor_name, 'Unknown Actor') AS primary_actor,
+    COALESCE(cd.company_name, 'Independent') AS producing_company,
+    COALESCE(cd.company_type, 'N/A') AS type_of_company,
+    COALESCE(mov_info.movie_info, 'No Info Available') AS additional_info,
+    COUNT(DISTINCT cmd.actor_name) OVER (PARTITION BY mh.movie_id) AS total_cast,
+    CASE 
+        WHEN mh.depth > 1 THEN 'Sequel/Franchise'
+        ELSE 'Standalone Movie'
+    END AS movie_type,
+    CASE 
+        WHEN mh.production_year < 1980 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 1980 AND 2000 THEN 'Modern Classic'
+        ELSE 'Contemporary'
+    END AS era
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastMemberData cmd ON mh.movie_id = cmd.movie_title
+LEFT JOIN 
+    CompanyDetails cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieInfo mov_info ON mh.movie_id = mov_info.movie_id
+WHERE 
+    (mh.production_year IS NULL OR mh.production_year > 2000)
+    AND 
+    (mh.title LIKE '%Action%' OR mh.title LIKE '%Comedy%')
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    cmd.actor_name,
+    cd.company_name,
+    cd.company_type,
+    mov_info.movie_info,
+    mh.depth
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC;

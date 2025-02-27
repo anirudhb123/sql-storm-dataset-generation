@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > DATEADD(MONTH, -12, GETDATE())
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, r.r_name
+),
+SuppliersWithAvgCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    cr.c_name,
+    cr.region_name,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    sf.ps_partkey,
+    sf.avg_supplycost,
+    COALESCE(SUM(CASE WHEN li.l_discount > 0.1 THEN li.l_extendedprice * li.l_discount ELSE 0 END), 0) AS total_discounted_value,
+    CASE 
+        WHEN SUM(li.l_quantity) IS NULL THEN 'No Orders'
+        ELSE CAST(SUM(li.l_quantity) AS VARCHAR)
+    END AS total_quantity,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS product_names
+FROM 
+    RankedOrders ro
+JOIN 
+    CustomerRegion cr ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cr.c_custkey)
+LEFT OUTER JOIN 
+    lineitem li ON ro.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SuppliersWithAvgCosts sf ON li.l_partkey = sf.ps_partkey
+LEFT JOIN 
+    part p ON p.p_partkey = li.l_partkey
+WHERE 
+    cr.order_count > (
+        SELECT COUNT(*) FROM orders 
+        WHERE o_totalprice < (SELECT AVG(o_totalprice) FROM orders)
+    )
+    AND (ro.o_orderdate IS NOT NULL OR ro.o_orderstatus IS NULL)
+GROUP BY 
+    cr.c_name, cr.region_name, ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, sf.ps_partkey, sf.avg_supplycost
+HAVING 
+    COUNT(DISTINCT li.l_orderkey) > 2
+ORDER BY 
+    cr.region_name, ro.o_totalprice DESC
+OPTION (MAXRECURSION 0);

@@ -1,0 +1,35 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), 
+TopSuppliers AS (
+    SELECT s.s_nationkey, s.s_name, sp.total_cost, sp.part_count,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY sp.total_cost DESC) AS rn
+    FROM SupplierParts sp
+    JOIN supplier s ON sp.s_suppkey = s.s_suppkey
+),
+OrderedStats AS (
+    SELECT o.o_orderkey, o.o_orderstatus, 
+           COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_count,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_revenue
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+FinalSummary AS (
+    SELECT t.s_nationkey, t.s_name, t.total_cost, t.part_count,
+           o.line_count, o.total_revenue
+    FROM TopSuppliers t
+    LEFT JOIN OrderedStats o ON t.rn = 1
+)
+SELECT r.r_name, SUM(fs.total_cost) AS total_supplier_cost,
+       AVG(fs.line_count) AS avg_line_items,
+       COUNT(DISTINCT fs.o_orderkey) AS unique_orders
+FROM region r
+JOIN FinalSummary fs ON fs.s_nationkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING SUM(fs.total_cost) > 10000
+ORDER BY total_supplier_cost DESC, avg_line_items DESC;

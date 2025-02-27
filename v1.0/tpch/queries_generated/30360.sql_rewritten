@@ -1,0 +1,60 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal <= sh.s_acctbal
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(CASE WHEN l.l_discount > 0.05 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS discounted_revenue,
+    MAX(s.s_acctbal) AS max_supplier_balance,
+    AVG(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE NULL END) AS avg_return_quantity,
+    CONCAT(n.n_name, ' - ', r.r_name) AS nation_region,
+    cast('1998-10-01 12:34:56' as timestamp) AS query_executed,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY discounted_revenue DESC) AS brand_rank
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_container LIKE '%BOX%')
+    AND s.s_acctbal IS NOT NULL
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, n.n_name, r.r_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    discounted_revenue DESC, supplier_count ASC;

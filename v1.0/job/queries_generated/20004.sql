@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON t.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        aka_title m ON m.movie_id = t.id
+    WHERE 
+        mh.level < 5  -- limit hierarchy depth
+),
+
+actors_details AS (
+    SELECT 
+        a.person_id,
+        ak.name AS actor_name,
+        m.title AS movie_title,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY m.production_year DESC) AS role_ranking
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name ak ON a.person_id = ak.person_id
+    JOIN 
+        title m ON a.movie_id = m.id
+    WHERE 
+        a.person_role_id IS NOT NULL
+),
+
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'No Keywords') AS keywords
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    md.keywords,
+    ARRAY_AGG(DISTINCT ad.actor_name) FILTER (WHERE ad.role_ranking <= 3) AS top_actors,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = mh.movie_id) AS company_count,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'Unknown Year'
+        WHEN mh.production_year < 2005 THEN 'Early Movie'
+        ELSE 'Modern Movie'
+    END AS movie_era,
+    CASE 
+        WHEN COUNT(DISTINCT mk.keyword) = 0 THEN 'No Keywords Associated'
+        ELSE 'Keywords Present'
+    END AS keyword_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movies_with_keywords md ON mh.movie_id = md.movie_id
+LEFT JOIN 
+    actors_details ad ON mh.movie_id = ad.movie_title
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, md.keywords
+ORDER BY 
+    mh.production_year DESC, mh.title;
+
+This SQL query performs several advanced operations: it uses Common Table Expressions (CTEs) to build hierarchical relationships and extract detailed actor information while incorporating filtering and aggregates. It also applies window functions for ranking actors, uses string aggregation for keywords, and includes complex case statements for additional derived fields with NULL handling. The query aims to provide comprehensive data for performance benchmarking across a potentially large dataset.

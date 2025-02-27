@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title a
+        LEFT JOIN cast_info ci ON a.id = ci.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast = 1
+),
+MovieKeywords AS (
+    SELECT 
+        m.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        topmovies m
+        LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+        LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.production_year
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    CASE 
+        WHEN tm.cast_count <= 5 THEN 'Low'
+        WHEN tm.cast_count BETWEEN 6 AND 15 THEN 'Medium'
+        ELSE 'High'
+    END AS cast_size_category
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.production_year = mk.production_year
+ORDER BY 
+    tm.production_year DESC, tm.title;

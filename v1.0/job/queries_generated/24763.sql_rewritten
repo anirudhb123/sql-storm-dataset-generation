@@ -1,0 +1,91 @@
+WITH RECURSIVE title_hierarchy AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COALESCE(episode.season_nr, 0) AS season,
+        COALESCE(episode.episode_nr, 0) AS episode,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.title) AS rn
+    FROM
+        aka_title t
+    LEFT JOIN
+        aka_title episode ON episode.episode_of_id = t.id
+    WHERE
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        th.title_id,
+        th.title,
+        th.production_year,
+        th.kind_id,
+        th.season,
+        th.episode,
+        th.rn
+    FROM
+        title_hierarchy th
+    JOIN
+        movie_link ml ON ml.linked_movie_id = th.title_id
+)
+
+, movie_companies_summary AS (
+    SELECT
+        mc.movie_id,
+        COALESCE(JSON_AGG(DISTINCT cn.name) FILTER (WHERE cn.name IS NOT NULL), '[]') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        movie_companies mc
+    LEFT JOIN
+        company_name cn ON cn.id = mc.company_id
+    GROUP BY
+        mc.movie_id
+)
+
+, actors_with_role AS (
+    SELECT
+        ci.movie_id,
+        ka.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(DISTINCT ci.id) AS role_count
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ka ON ka.person_id = ci.person_id
+    JOIN
+        role_type rt ON rt.id = ci.role_id
+    GROUP BY
+        ci.movie_id, ka.name, rt.role
+)
+
+SELECT
+    th.title,
+    th.production_year,
+    th.season,
+    th.episode,
+    mcs.company_names,
+    mcs.company_count,
+    COALESCE(awr.actor_name, 'Unknown Actor') AS primary_actor,
+    COALESCE(awr.role_name, 'Unknown Role') AS primary_role,
+    CASE
+        WHEN mcs.company_count > 5 THEN 'Major Production'
+        WHEN mcs.company_count > 0 THEN 'Indie Production'
+        ELSE 'No Production Info'
+    END AS production_type
+FROM
+    title_hierarchy th
+LEFT JOIN
+    movie_companies_summary mcs ON mcs.movie_id = th.title_id
+LEFT JOIN
+    actors_with_role awr ON awr.movie_id = th.title_id AND awr.role_count = (
+        SELECT MAX(role_count)
+        FROM actors_with_role
+        WHERE movie_id = th.title_id
+    )
+WHERE
+    th.season = 0      
+    AND th.rn <= 3    
+ORDER BY
+    th.production_year DESC,
+    th.title;

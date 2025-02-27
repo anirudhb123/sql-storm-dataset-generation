@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal AND sh.level < 5
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+PartSupplierSummary AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_supplycost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    nh.n_name,
+    COUNT(DISTINCT sr.s_suppkey) AS supplier_count,
+    SUM(pr.total_available) AS total_inventory,
+    SUM(CASE WHEN roc.order_count > 5 THEN 1 ELSE 0 END) AS high_value_customers,
+    AVG(ro.o_totalprice) AS avg_order_price,
+    MAX(COALESCE(l.net_revenue, 0)) AS max_revenue_order
+FROM nation nh
+LEFT JOIN SupplierHierarchy sr ON nh.n_nationkey = sr.s_nationkey
+LEFT JOIN PartSupplierSummary pr ON sr.s_suppkey = pr.p_partkey
+LEFT JOIN CustomerOrderCounts roc ON nh.n_nationkey = roc.c_custkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = roc.c_custkey
+LEFT JOIN FilteredLineItems l ON l.l_orderkey = ro.o_orderkey
+WHERE nh.n_name IS NOT NULL
+GROUP BY nh.n_name
+HAVING COUNT(sr.s_suppkey) > 0
+ORDER BY total_inventory DESC;

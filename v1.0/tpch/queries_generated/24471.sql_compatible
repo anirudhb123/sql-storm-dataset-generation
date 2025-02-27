@@ -1,0 +1,66 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation) 
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey 
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_item_count,
+        COUNT(*) AS line_item_count_legacy
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+    GROUP BY o.o_orderkey
+),
+SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(l.l_quantity) AS total_quantity,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        STRING_AGG(DISTINCT n.n_name, ', ' ORDER BY n.n_name) FILTER (WHERE l.l_discount > 0) AS nations_with_discount,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.s_acctbal) OVER() AS median_acctbal
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_avail_qty,
+    ps.avg_supply_cost,
+    os.total_revenue,
+    sm.total_quantity,
+    CASE 
+        WHEN sm.order_count > 0 THEN sm.total_quantity / sm.order_count 
+        ELSE NULL 
+    END AS quantity_per_order,
+    ROW_NUMBER() OVER (PARTITION BY sm.order_count ORDER BY p.p_retailprice DESC) AS part_rank
+FROM PartStats ps
+JOIN OrderStats os ON ps.p_partkey = os.o_orderkey
+JOIN SupplierMetrics sm ON ps.p_partkey = sm.s_suppkey
+WHERE (ps.avg_supply_cost IS NOT NULL AND ps.avg_supply_cost > COALESCE(sm.median_acctbal, 0))
+  OR (os.total_revenue IS NOT NULL AND os.total_revenue > 100000)
+ORDER BY p.p_partkey, ps.total_avail_qty DESC, os.total_revenue DESC;

@@ -1,0 +1,65 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_shipdate >= DATEADD(month, -12, GETDATE())
+    GROUP BY 
+        l.l_suppkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 20.00
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(ts.total_revenue), 0) AS total_revenue,
+    COALESCE(MIN(fs.total_avail_qty), 0) AS min_avail_qty,
+    GROUP_CONCAT(DISTINCT s.s_name) AS top_suppliers
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rn <= 3 
+LEFT JOIN 
+    TotalSales ts ON s.s_suppkey = ts.l_suppkey
+LEFT JOIN 
+    FilteredParts fs ON fs.p_partkey IN (
+        SELECT 
+            l.l_partkey 
+        FROM 
+            lineitem l 
+        WHERE 
+            l.l_suppkey = s.s_suppkey
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC, region_name;

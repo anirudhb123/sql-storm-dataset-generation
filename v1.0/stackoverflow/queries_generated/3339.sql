@@ -1,0 +1,77 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS AvgScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT 
+             PostId,
+             SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+             SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+             Votes
+         GROUP BY 
+             PostId) v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+RecentActiveUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS RecentActivityCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= current_timestamp - interval '30 days'
+    GROUP BY 
+        UserId
+),
+PopularQuestions AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+             PostId,
+             SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+             SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+         FROM 
+             Votes
+         GROUP BY 
+             PostId) v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    ORDER BY 
+        Score DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.AvgScore,
+    rau.RecentActivityCount,
+    pq.Title AS PopularQuestionTitle,
+    pq.Score AS PopularQuestionScore
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentActiveUsers rau ON ups.UserId = rau.UserId
+LEFT JOIN 
+    PopularQuestions pq ON (SELECT COUNT(*) FROM PopularQuestions) > 0
+ORDER BY 
+    ups.AvgScore DESC, 
+    ups.TotalPosts DESC
+LIMIT 5;

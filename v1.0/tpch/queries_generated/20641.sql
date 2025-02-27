@@ -1,0 +1,71 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name
+),
+NationOrders AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders
+    FROM 
+        nation n 
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        customer c ON s.s_suppkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(ns.num_orders, 0) AS orders_count,
+    COALESCE(ss.total_available_quantity, 0) AS available_qty,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) IS NULL THEN 'No revenue'
+        ELSE 'Revenue Available'
+    END AS revenue_status,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY revenue DESC) as brand_rank
+FROM 
+    part p 
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = l.l_suppkey
+LEFT JOIN 
+    NationOrders ns ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = ss.s_suppkey)
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = l.l_orderkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (p.p_comment LIKE '%fragile%' OR p.p_retailprice IS NULL)
+GROUP BY 
+    p.p_name, 
+    p.p_brand, 
+    ns.num_orders, 
+    ss.total_available_quantity
+ORDER BY 
+    revenue DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

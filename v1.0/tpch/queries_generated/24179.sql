@@ -1,0 +1,59 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+   
+    UNION ALL
+   
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 2000
+),
+
+AggregateData AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey
+    HAVING total_supply_cost > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER(PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > 500
+    AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NOT NULL)
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name
+    HAVING total_orders > 100
+)
+
+SELECT 
+    c.c_name,
+    COALESCE(SUM(ad.total_supply_cost), 0) AS total_supply_cost,
+    COALESCE(r.order_rank, -1) AS order_rank,
+    SH.level
+FROM CustomerOrders c
+LEFT JOIN AggregateData ad ON ad.p_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size IS NOT NULL)
+LEFT JOIN RankedOrders r ON r.o_orderkey = (SELECT MAX(o.o_orderkey) FROM orders o WHERE o.o_orderdate < current_date)
+LEFT JOIN SupplierHierarchy SH ON SH.s_nationkey = c.c_nationkey
+WHERE EXISTS (SELECT 1 FROM region r WHERE r.r_name LIKE 'Asia%')
+GROUP BY c.c_name, r.order_rank, SH.level
+HAVING SUM(ad.total_supply_cost) > 1000 OR SH.level IS NULL
+ORDER BY c.c_name DESC, total_supply_cost ASC;

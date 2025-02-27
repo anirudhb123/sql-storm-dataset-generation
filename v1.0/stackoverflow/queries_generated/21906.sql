@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.PostTypeId
+),
+RecentHistory AS (
+    SELECT 
+        ph.PostId, 
+        MIN(ph.CreationDate) AS FirstEditDate,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (5, 6) THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        ph.PostId
+),
+EligiblePosts AS (
+    SELECT 
+        rp.PostId,
+        (rp.UpVotes - rp.DownVotes) AS Score,
+        (CASE 
+            WHEN r.FirstEditDate IS NOT NULL THEN 'Edited within last 30 days'
+            ELSE 'Not recently edited'
+        END) AS EditStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentHistory r ON rp.PostId = r.PostId
+    WHERE 
+        rp.ViewRank <= 10 -- Top 10 by view count per post type
+)
+SELECT 
+    ep.PostId,
+    ep.Score,
+    ep.EditStatus,
+    p.Body,
+    COALESCE(u.DisplayName, 'Anonymous') AS OwnerDisplayName,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     WHERE p.Tags LIKE '%' || t.TagName || '%') AS AssociatedTags
+FROM 
+    EligiblePosts ep
+JOIN 
+    Posts p ON ep.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    ep.Score >= 0 
+    AND ep.EditStatus = 'Edited within last 30 days'
+    AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+ORDER BY 
+    ep.Score DESC, 
+    p.CreationDate DESC;
+

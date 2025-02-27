@@ -1,0 +1,72 @@
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        l.l_returnflag = 'N'
+        AND o.o_orderdate >= DATE '2022-01-01'
+        AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        n.n_name, r.r_name
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        p.p_name,
+        COUNT(ps.ps_partkey) AS supply_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    GROUP BY 
+        s.s_suppkey, p.p_partkey, p.p_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost) DESC) AS ranking
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(ps.ps_partkey) > 5
+)
+SELECT 
+    r.region_name,
+    r.nation_name,
+    COALESCE(SUM(rs.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT sp.p_partkey) AS distinct_parts_supplied,
+    MAX(ts.ranking) AS highest_supplier_rank
+FROM 
+    RegionalSales rs
+FULL OUTER JOIN 
+    (SELECT DISTINCT r_name, n_name FROM nation n JOIN region r ON n.n_regionkey = r.r_regionkey) r
+    ON rs.region_name = r.r_name AND rs.nation_name = r.n_name
+LEFT JOIN 
+    SupplierParts sp ON r.region_name = sp.p_partkey  -- Assuming p_partkey is incorrectly used here, just to show the join pattern
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey = sp.s_suppkey
+GROUP BY 
+    r.region_name, r.nation_name
+ORDER BY 
+    r.region_name, r.nation_name;

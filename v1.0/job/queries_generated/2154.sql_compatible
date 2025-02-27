@@ -1,0 +1,45 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM t.production_year) ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+movie_actors AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    COUNT(ma.actor_name) AS actor_count,
+    STRING_AGG(ma.actor_name, ', ') AS actor_names,
+    CASE 
+        WHEN COUNT(ma.actor_name) > 0 THEN MAX(ma.nr_order)
+        ELSE NULL
+    END AS max_order,
+    COALESCE(STRING_AGG(ma.actor_name ORDER BY ma.actor_rank), 'No Actors') AS ordered_actors
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    movie_actors ma ON rm.movie_id = ma.movie_id
+WHERE 
+    rm.year_rank <= 5
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year
+HAVING 
+    COUNT(ma.actor_name) > 2 OR MAX(ma.nr_order) IS NULL
+ORDER BY 
+    rm.production_year DESC, actor_count DESC;

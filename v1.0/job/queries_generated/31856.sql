@@ -1,0 +1,72 @@
+WITH RECURSIVE RecursiveCast AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ci.nr_order,
+        1 AS depth
+    FROM
+        cast_info ci
+    WHERE
+        ci.nr_order = 1
+
+    UNION ALL
+
+    SELECT
+        c.movie_id,
+        c.person_id,
+        c.nr_order,
+        rc.depth + 1
+    FROM
+        cast_info c
+    JOIN
+        RecursiveCast rc ON c.movie_id = rc.movie_id AND c.nr_order = rc.nr_order + 1
+),
+MovieWithDetails AS (
+    SELECT
+        t.title,
+        t.production_year,
+        ak.name AS actor_name,
+        GROUP_CONCAT(DISTINCT kn.keyword) AS keywords,
+        ARRAY_AGG(cn.name) AS company_names,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC) AS rank
+    FROM
+        aka_title at
+    JOIN
+        title t ON at.movie_id = t.id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN
+        aka_name ak ON ak.person_id = ci.person_id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN
+        keyword kn ON kn.id = mk.keyword_id
+    LEFT JOIN
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN
+        company_name cn ON cn.id = mc.company_id
+    WHERE
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        t.id, t.title, t.production_year, ak.name
+)
+SELECT
+    m.title,
+    m.production_year,
+    m.actor_name,
+    m.keywords,
+    m.company_names,
+    CASE
+        WHEN m.rank = 1 THEN 'Latest'
+        ELSE 'Older'
+    END AS movie_age_category,
+    COUNT(DISTINCT rc.person_id) AS total_cast,
+    COUNT(DISTINCT mk.keyword_id) AS total_keywords
+FROM
+    MovieWithDetails m
+LEFT JOIN
+    RecursiveCast rc ON rc.movie_id = m.id
+GROUP BY
+    m.title, m.production_year, m.actor_name, m.keywords, m.company_names, m.rank
+ORDER BY
+    m.production_year DESC, m.title;

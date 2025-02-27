@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_order_number, 
+           ws_item_sk, 
+           ws_quantity, 
+           ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_net_profit DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+),
+top_sales AS (
+    SELECT order_num, SUM(ws_net_profit) AS total_profit
+    FROM sales_cte
+    WHERE sales_rank <= 5
+    GROUP BY order_num
+),
+customer_return_stats AS (
+    SELECT sr_customer_sk, 
+           COUNT(DISTINCT sr_ticket_number) AS total_returns,
+           SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+join_results AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name || ' ' || c.c_last_name AS customer_name, 
+           COALESCE(cr.total_returns, 0) AS total_returns,
+           COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+           ts.total_profit
+    FROM customer c
+    LEFT JOIN customer_return_stats cr ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN top_sales ts ON ts.order_num = (SELECT MAX(ws_order_number) 
+                                               FROM web_sales ws 
+                                               WHERE ws_bill_customer_sk = c.c_customer_sk)
+)
+SELECT w.w_warehouse_id, 
+       MAX(total_profit) AS max_profit, 
+       AVG(total_returns) AS avg_returns, 
+       SUM(total_return_amount) AS total_return_sum
+FROM warehouse w
+JOIN join_results j ON w.w_warehouse_sk = (SELECT inv_w.warehouse_sk 
+                                             FROM inventory inv_w 
+                                             JOIN item i ON inv_w.inv_item_sk = i.i_item_sk
+                                             GROUP BY inv_w.warehouse_sk
+                                             ORDER BY SUM(i.i_current_price) DESC LIMIT 1)
+GROUP BY w.w_warehouse_id
+ORDER BY max_profit DESC
+LIMIT 10;

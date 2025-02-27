@@ -1,0 +1,42 @@
+WITH string_benchmark AS (
+    SELECT 
+        p.p_partkey,
+        CONCAT('Part: ', p.p_name, ', Manufacturer: ', p.p_mfgr, ', Brand: ', p.p_brand) AS part_info,
+        CHAR_LENGTH(CONCAT('Part: ', p.p_name, ', Manufacturer: ', p.p_mfgr, ', Brand: ', p.p_brand)) AS length_of_part_info,
+        p.p_retailprice,
+        REPLACE(p.p_comment, 'good', 'excellent') AS modified_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_size = (SELECT MAX(p2.p_size) FROM part p2)
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    sb.p_partkey,
+    sb.part_info,
+    sb.length_of_part_info,
+    sb.p_retailprice,
+    sb.modified_comment,
+    os.line_item_count,
+    os.total_revenue,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 'No Orders'
+        ELSE 'Order Exists'
+    END AS order_status
+FROM 
+    string_benchmark sb
+LEFT JOIN 
+    order_summary os ON sb.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost = (SELECT MAX(ps2.ps_supplycost) FROM partsupp ps2 WHERE ps2.ps_partkey = sb.p_partkey) LIMIT 1)
+ORDER BY 
+    sb.length_of_part_info DESC;

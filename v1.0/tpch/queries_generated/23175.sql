@@ -1,0 +1,58 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    INNER JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    INNER JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        c.c_custkey
+),
+top_customers AS (
+    SELECT 
+        s.custkey,
+        ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS rn
+    FROM 
+        sales_summary s
+    WHERE 
+        s.total_sales IS NOT NULL
+),
+discounted_items AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(s.total_sales, 0) AS sales,
+    COALESCE(s.total_orders, 0) AS orders,
+    d.p_name AS discounted_item,
+    d.total_supply_cost
+FROM 
+    customer c
+LEFT JOIN 
+    sales_summary s ON c.c_custkey = s.c_custkey
+LEFT JOIN 
+    discounted_items d ON d.total_supply_cost > (SELECT AVG(total_supply_cost) FROM discounted_items) 
+WHERE 
+    (SELECT COUNT(*) FROM nation n WHERE n.n_nationkey = c.c_nationkey) > 0
+    OR c.c_acctbal IS NULL
+ORDER BY 
+    sales DESC, c.c_custkey
+FETCH FIRST 100 ROWS ONLY;

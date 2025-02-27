@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk, 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30 
+                                   AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY ws.web_site_sk, ws.ws_sold_date_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_current_addr_sk IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+total_returns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM store_returns
+    GROUP BY sr_customer_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.order_count,
+    cs.total_spent,
+    COALESCE(tr.total_returned, 0) AS total_returned,
+    COALESCE(tr.total_return_value, 0) AS total_return_value,
+    rs.total_sales,
+    rs.sales_rank
+FROM customer_stats cs
+LEFT JOIN total_returns tr ON cs.c_customer_sk = tr.sr_customer_sk
+JOIN ranked_sales rs ON rs.web_site_sk = (SELECT MIN(w.web_site_sk) 
+                                            FROM warehouse w 
+                                            WHERE w.warehouse_sq_ft > 10000)
+WHERE rs.sales_rank <= 10
+ORDER BY total_spent DESC, total_returned DESC;

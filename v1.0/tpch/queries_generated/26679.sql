@@ -1,0 +1,25 @@
+SELECT 
+    CONCAT('Part: ', p.p_name, ' | Size: ', p.p_size, ' | Price: ', FORMAT(p.p_retailprice, 2), ' | Supplier: ', s.s_name) AS part_details,
+    SUM(CASE WHEN l.l_returnflag = 'Y' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    p.p_size > 10 AND 
+    s.s_acctbal > 1000.00 AND 
+    l.l_shipmode IN ('AIR', 'RAIL')
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_size, p.p_retailprice, s.s_name
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    avg_price_after_discount DESC;

@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        CUME_DIST() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(month, -6, GETDATE())
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(rnk.rnk, 0) AS supplier_rank,
+    cus.c_name AS customer_name,
+    cos.total_orders,
+    cos.total_spent,
+    CASE 
+        WHEN hvo.order_rank <= 0.10 THEN 'High Value'
+        ELSE 'Regular'
+    END AS order_category
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers rnk ON p.p_partkey = rnk.ps_partkey
+LEFT JOIN 
+    CustomerOrderSummary cos ON cos.total_orders > 0
+LEFT JOIN 
+    HighValueOrders hvo ON hvo.o_orderkey = cos.total_orders + 1
+WHERE 
+    (p.p_retailprice > 15.00 AND p.p_type LIKE '%widget%')
+    OR (p.p_size IS NULL)
+ORDER BY 
+    p.p_partkey, supplier_rank DESC;

@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+        p.Score > 5
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY 
+        u.Id
+),
+AverageScores AS (
+    SELECT 
+        AVG(Score) AS AvgScore 
+    FROM 
+        Posts 
+    WHERE 
+        Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.PostCount,
+    us.TotalBounty,
+    rp.Title AS RecentPost,
+    rp.Score AS RecentPostScore,
+    CASE 
+        WHEN rp.PostId IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS UserStatus,
+    cs.Comment AS ClosureComment,
+    COALESCE(cs.CreationDate, 'No Closure') AS ClosureDate,
+    (SELECT AvgScore FROM AverageScores) AS GlobalAvgScore
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    ClosedPosts cs ON cs.PostId = rp.PostId
+WHERE 
+    us.TotalBounty > (SELECT AVG(TotalBounty) FROM UserStats) 
+ORDER BY 
+    us.PostCount DESC;

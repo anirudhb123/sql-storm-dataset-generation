@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5 AND s.s_acctbal < sh.s_acctbal -- limit to 5 levels and only connect lower acctbal suppliers
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_brand,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE p.p_retailprice IS NOT NULL AND p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice IS NOT NULL)
+    )
+),
+AggregateSupplierCosts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost,
+           AVG(CASE WHEN s.s_acctbal > 100 THEN ps.ps_supplycost END) AS avg_high_acctbal_supplier_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+       COALESCE(sh.s_name, 'No Supplier') AS supplier_name, 
+       COALESCE(asc.total_supply_cost, 0) AS total_cost,
+       (CASE 
+            WHEN p.p_retailprice IS NOT NULL THEN 
+                (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R') 
+            ELSE 0 
+        END) AS return_count,
+       (SELECT COUNT(*) 
+        FROM customer c 
+        WHERE c.c_acctbal > 0 AND c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE')
+        ) AS positive_balance_customers
+FROM HighValueParts p
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 1)
+LEFT JOIN AggregateSupplierCosts asc ON asc.ps_partkey = p.p_partkey
+WHERE p.rn <= 3 AND p.p_brand IS NOT NULL
+ORDER BY p.p_retailprice DESC, supplier_name NULLS LAST;

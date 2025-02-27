@@ -1,0 +1,70 @@
+WITH RecursiveTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year, 
+        COALESCE(ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL), ARRAY[]::text[]) AS keywords,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS year_row
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_keyword AS mk ON mk.movie_id = t.movie_id
+    LEFT JOIN 
+        keyword AS k ON k.id = mk.keyword_id
+    GROUP BY 
+        t.id, t.production_year
+),
+CompleteCastInfo AS (
+    SELECT 
+        cc.movie_id,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors,
+        SUM(CASE WHEN cc.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+    FROM 
+        complete_cast AS cc
+    INNER JOIN 
+        cast_info AS c ON c.movie_id = cc.movie_id 
+    INNER JOIN 
+        aka_name AS a ON a.person_id = c.person_id
+    GROUP BY 
+        cc.movie_id
+),
+TitlesWithNullHandling AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        COALESCE(c.total_cast, 0) AS total_cast,
+        COALESCE(c.actors, 'No Cast') AS actors,
+        rt.keywords
+    FROM 
+        RecursiveTitles AS rt
+    LEFT JOIN 
+        CompleteCastInfo AS c ON c.movie_id = rt.title_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.total_cast,
+    t.actors,
+    t.keywords,
+    CASE 
+        WHEN t.production_year IS NULL THEN 'Year Unknown'
+        ELSE 'Year Known'
+    END AS year_status,
+    CASE 
+        WHEN t.total_cast = 0 THEN 'No Actors Available'
+        WHEN t.total_cast < 5 THEN 'Limited Cast'
+        ELSE 'Full Cast'
+    END AS cast_status,
+    STRING_AGG(DISTINCT n.name, ', ') AS character_names
+FROM 
+    TitlesWithNullHandling AS t
+LEFT JOIN 
+    char_name AS n ON n.imdb_index = ANY(t.keywords)
+WHERE 
+    t.production_year BETWEEN 1970 AND 2023
+GROUP BY 
+    t.title, t.production_year, t.total_cast, t.actors, t.keywords
+ORDER BY 
+    t.production_year DESC, t.total_cast DESC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

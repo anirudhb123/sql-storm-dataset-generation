@@ -1,0 +1,69 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1997-12-31'
+),
+order_line_summary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS total_lines 
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+supplier_part_stats AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        MAX(ps.ps_supplycost) AS max_supplycost,
+        AVG(ps.ps_availqty) AS avg_availqty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+ranked_suppliers AS (
+    SELECT 
+        sp.ps_partkey,
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY sp.ps_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp sp ON s.s_suppkey = sp.ps_suppkey
+)
+SELECT 
+    r.o_orderkey,
+    COALESCE(ols.total_revenue, 0) AS total_revenue,
+    COUNT(DISTINCT rp.s_suppkey) AS distinct_suppliers,
+    CASE 
+        WHEN r.order_rank = 1 THEN 'Top Order'
+        ELSE 'Regular Order' 
+    END AS order_type,
+    STRING_AGG(DISTINCT CONCAT('Supplier: ', rp.s_name, ' | Account Balance: ', s.s_acctbal)) AS supplier_info
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    order_line_summary ols ON r.o_orderkey = ols.l_orderkey 
+LEFT JOIN 
+    ranked_suppliers rp ON rp.ps_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 50) 
+LEFT JOIN 
+    supplier s ON rp.s_suppkey = s.s_suppkey
+WHERE 
+    r.order_rank <= 10
+GROUP BY 
+    r.o_orderkey, r.order_rank
+HAVING 
+    SUM(CASE WHEN ols.total_revenue IS NULL THEN 1 ELSE 0 END) > 0 OR COUNT(DISTINCT rp.s_suppkey) > 2
+ORDER BY 
+    r.o_orderkey;

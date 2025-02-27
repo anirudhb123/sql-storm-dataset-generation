@@ -1,0 +1,106 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_brand, 
+        p.p_retailprice, 
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p 
+    WHERE 
+        p.p_size BETWEEN 5 AND 30
+),
+AggregatedSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+PartSupplierData AS (
+    SELECT 
+        p.p_partkey,
+        COALESCE(MAX(s.s_acctbal), 0) AS max_acctbal,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey
+),
+FinalSelection AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.p_brand, 
+        rp.p_retailprice,
+        asu.total_availqty,
+        asu.avg_supplycost,
+        cs.order_count,
+        cs.total_spending,
+        psd.max_acctbal,
+        psd.supplier_count
+    FROM 
+        RankedParts rp
+    JOIN AggregatedSupplies asu ON rp.p_partkey = asu.ps_partkey 
+    LEFT JOIN CustomerOrders cs ON cs.c_custkey = (SELECT c.c_custkey FROM customer c ORDER BY c.c_custkey LIMIT 1)
+    LEFT JOIN PartSupplierData psd ON psd.p_partkey = rp.p_partkey
+    WHERE 
+        rp.rnk = 1
+        AND (psd.supplier_count > 1 OR psd.max_acctbal IS NOT NULL)
+)
+SELECT 
+    f.p_partkey, 
+    f.p_name, 
+    f.p_brand, 
+    f.p_retailprice,
+    f.total_availqty,
+    f.avg_supplycost,
+    f.order_count,
+    f.total_spending,
+    CASE 
+        WHEN f.total_spending IS NULL THEN 'No orders'
+        WHEN f.total_spending > 5000 THEN 'High spender'
+        ELSE 'Regular spender'
+    END AS spending_category
+FROM 
+    FinalSelection f
+WHERE 
+    f.avg_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+UNION ALL 
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_brand, 
+    NULL AS p_retailprice, 
+    NULL AS total_availqty, 
+    NULL AS avg_supplycost,
+    NULL AS order_count,
+    NULL AS total_spending,
+    'Backup' AS spending_category
+FROM 
+    part p 
+WHERE 
+    p.p_partkey NOT IN (SELECT p_partkey FROM FinalSelection)
+ORDER BY 
+    p_brand, spending_category DESC;

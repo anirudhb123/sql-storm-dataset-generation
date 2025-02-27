@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER(PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws.web_site_sk, ws.ws_item_sk
+), 
+inventory_levels AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+), 
+aggregated_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(CASE 
+            WHEN s.ss_item_sk IS NOT NULL THEN s.ss_net_profit 
+            ELSE 0 
+        END) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    a.total_profit,
+    a.order_count,
+    i.total_inventory,
+    s.total_sales
+FROM 
+    customer_info ci
+JOIN 
+    aggregated_stats a ON ci.c_customer_sk = a.c_customer_sk
+JOIN 
+    inventory_levels i ON i.inv_item_sk IN (SELECT inv_item_sk FROM inventory WHERE inv_quantity_on_hand < 10)
+LEFT JOIN 
+    sales_cte s ON s.web_site_sk IN (SELECT web_site_sk FROM web_site WHERE web_name LIKE 'Example%')
+WHERE 
+    a.total_profit > 1000
+    AND (ci.cd_gender = 'F' OR ci.cd_marital_status = 'M')
+ORDER BY 
+    a.total_profit DESC
+LIMIT 10;

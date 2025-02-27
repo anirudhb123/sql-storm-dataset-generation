@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) OVER (PARTITION BY p.Id) AS UniqueVoters
+    FROM
+        Posts p
+    JOIN
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    WHERE
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT
+        rp.*,
+        COALESCE(ph.Comment, 'No history available') AS HistoryComment,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType
+    FROM
+        RankedPosts rp
+    LEFT JOIN
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE
+        rp.Rank <= 10
+),
+PostTags AS (
+    SELECT
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY
+        p.Id
+)
+SELECT
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UniqueVoters,
+    tp.HistoryComment,
+    tp.HistoryDate,
+    tp.HistoryType,
+    pt.Tags,
+    COALESCE(NULLIF(tp.UniqueVoters, 0), -1) AS VoterCountCheck
+FROM
+    TopPosts tp
+FULL OUTER JOIN
+    PostTags pt ON tp.PostId = pt.PostId
+WHERE
+    tp.Score IS NOT NULL
+    AND (tp.HistoryType IS NOT NULL OR pt.Tags IS NOT NULL)
+ORDER BY
+    tp.Score DESC NULLS LAST,
+    tp.CreationDate DESC;

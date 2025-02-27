@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY substring(p.Tags FROM 2 FOR length(p.Tags)-2) ORDER BY p.ViewCount DESC) AS TagRanking
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+TopTags AS (
+    SELECT 
+        TRIM(unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')))::varchar) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        RankedPosts
+    GROUP BY 
+        TagName
+    HAVING 
+        COUNT(*) > 5 -- Only consider tags used by more than 5 questions
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+),
+PostWithAnalytics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.ViewCount,
+        rp.CreationDate,
+        pv.VoteCount,
+        pv.UpVotes,
+        pv.DownVotes,
+        tt.TagName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostVotes pv ON rp.PostId = pv.PostId
+    JOIN 
+        TopTags tt ON tt.TagName = TRIM(unnest(string_to_array(rp.Tags, '><')))
+    WHERE 
+        rp.TagRanking <= 3 -- Get top 3 posts per tag
+)
+SELECT 
+    pwa.TagName,
+    COUNT(pwa.PostId) AS NumberOfPosts,
+    AVG(pwa.VoteCount) AS AverageVoteCount,
+    AVG(pwa.ViewCount) AS AverageViewCount,
+    SUM(pwa.UpVotes) AS TotalUpVotes,
+    SUM(pwa.DownVotes) AS TotalDownVotes
+FROM 
+    PostWithAnalytics pwa
+GROUP BY 
+    pwa.TagName
+ORDER BY 
+    NumberOfPosts DESC, AverageVoteCount DESC;

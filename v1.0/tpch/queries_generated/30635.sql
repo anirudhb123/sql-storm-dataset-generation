@@ -1,0 +1,42 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT
+        p.p_partkey,
+        MAX(sd.total_supply_cost) AS max_supply_cost
+    FROM part p
+    JOIN SupplierDetails sd ON p.p_partkey = sd.ps_partkey
+    WHERE sd.total_supply_cost > 10000
+    GROUP BY p.p_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(ss.total_sales) AS avg_sales,
+    MAX(ss.total_sales) AS max_sales,
+    COALESCE(HVS.max_supply_cost, 0) AS max_supply_cost_for_part
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN SalesCTE ss ON ss.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN HighValueSuppliers HVS ON HVS.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey))
+WHERE c.c_acctbal IS NOT NULL
+GROUP BY r.r_name
+ORDER BY region_name;

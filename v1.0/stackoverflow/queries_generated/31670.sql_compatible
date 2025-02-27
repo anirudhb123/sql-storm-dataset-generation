@@ -1,0 +1,109 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        0 AS Depth
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+        
+    UNION ALL
+    
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        ur.Depth + 1 AS Depth
+    FROM 
+        Users u
+    INNER JOIN 
+        UserReputationCTE ur ON ur.Id = u.Id
+    WHERE 
+        u.Reputation < ur.Reputation
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.Score, p.ViewCount, p.Tags
+),
+RankedPosts AS (
+    SELECT 
+        ap.PostId,
+        ap.Title,
+        ap.CreationDate,
+        ap.LastActivityDate,
+        ap.Score,
+        ap.ViewCount,
+        ap.Tags,
+        ap.CommentCount,
+        RANK() OVER (ORDER BY ap.Score DESC, ap.ViewCount DESC) AS PostRank
+    FROM 
+        ActivePosts ap
+),
+TopUsers AS (
+    SELECT 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    WHERE 
+        u.Id IN (SELECT Id FROM UserReputationCTE WHERE Depth = 0)
+    GROUP BY 
+        u.DisplayName, u.Reputation
+),
+UserPostStats AS (
+    SELECT 
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(tp.PostCount, 0) AS PostCount,
+        COALESCE(tp.TotalBounty, 0) AS TotalBounty,
+        RANK() OVER (ORDER BY COALESCE(tp.TotalBounty, 0) DESC, u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        TopUsers tp ON u.DisplayName = tp.DisplayName
+)
+SELECT 
+    ups.DisplayName,
+    ups.Reputation,
+    ups.PostCount,
+    ups.TotalBounty,
+    p.Title,
+    p.Score,
+    p.CommentCount,
+    p.ViewCount,
+    p.Tags,
+    p.PostRank
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RankedPosts p ON ups.PostCount > 0
+WHERE 
+    ups.UserRank <= 10 OR p.PostRank <= 10
+ORDER BY 
+    ups.UserRank, p.PostRank;

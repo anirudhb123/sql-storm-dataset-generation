@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        c.name AS company_name,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE
+        t.production_year IS NOT NULL AND c.name IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title,
+        company_name,
+        production_year,
+        rank,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+TopMovies AS (
+    SELECT
+        production_year,
+        STRING_AGG(title || ' (by: ' || company_name || ')') AS movie_titles,
+        SUM(cast_count) AS total_cast
+    FROM
+        FilteredMovies
+    GROUP BY
+        production_year
+)
+SELECT 
+    production_year,
+    movie_titles,
+    total_cast,
+    CASE 
+        WHEN total_cast IS NULL OR total_cast = 0 THEN 'No Cast Available' 
+        ELSE CAST(total_cast AS VARCHAR) 
+    END AS cast_info
+FROM 
+    TopMovies
+ORDER BY 
+    production_year DESC;

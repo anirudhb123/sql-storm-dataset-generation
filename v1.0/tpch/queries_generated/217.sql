@@ -1,0 +1,64 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS SupplierRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS TotalSpent,
+        RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS CustomerRank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_partkey) AS NumberOfParts,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS NetRevenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.n_name AS Nation,
+    SUM(od.NetRevenue) AS TotalNetRevenue,
+    COUNT(DISTINCT od.o_orderkey) AS UniqueOrders,
+    MAX(ts.TotalSpent) AS MaxCustomerSpend,
+    AVG(rs.TotalSupplyCost) AS AvgSupplierCost
+FROM 
+    OrderDetails od
+JOIN 
+    customer c ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+JOIN 
+    nation r ON c.c_nationkey = r.n_nationkey
+LEFT JOIN 
+    TopCustomers ts ON c.c_custkey = ts.c_custkey
+LEFT JOIN 
+    RankedSuppliers rs ON r.n_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = r.n_nationkey)
+GROUP BY 
+    r.n_name
+HAVING 
+    SUM(od.NetRevenue) > 1000000
+ORDER BY 
+    TotalNetRevenue DESC;

@@ -1,0 +1,55 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ct.kind AS company_type,
+        c.name AS company_name,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        COUNT(DISTINCT ki.keyword) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        t.id, t.title, t.production_year, ct.kind, c.name
+),
+ActorDetails AS (
+    SELECT 
+        p.name AS actor_name,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name p
+    JOIN 
+        cast_info ci ON p.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        p.id, p.name
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.company_name,
+    md.company_type,
+    md.aka_names,
+    md.keyword_count,
+    ad.actor_name,
+    ad.movies,
+    ad.movie_count
+FROM 
+    MovieDetails md
+JOIN 
+    ActorDetails ad ON md.movie_title LIKE '%' || ad.movies || '%'
+ORDER BY 
+    md.production_year DESC, ad.movie_count DESC;

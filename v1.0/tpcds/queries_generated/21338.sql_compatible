@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT
+        cs.customer_sk,
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY cs.customer_sk ORDER BY cs.cs_sold_date_sk DESC) AS rn,
+        cs.cs_net_profit,
+        CASE 
+            WHEN cs.cs_sales_price IS NULL THEN 0 
+            ELSE cs.cs_sales_price 
+        END AS adjusted_sales_price,
+        COALESCE((
+            SELECT SUM(ws.ws_ext_sales_price) 
+            FROM web_sales ws
+            WHERE ws.ws_bill_customer_sk = cs.customer_sk 
+            AND ws.ws_sold_date_sk >= cs.cs_sold_date_sk
+        ), 0) AS web_total_sales
+    FROM
+        catalog_sales cs
+    WHERE
+        cs.cs_sold_date_sk >= ((SELECT MAX(dd.d_date_sk) FROM date_dim dd WHERE dd.d_year = 2022) - 100)
+),
+FilteredReturns AS (
+    SELECT 
+        sr.sr_returning_customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returned
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_returned_date_sk >= (SELECT MIN(dd.d_date_sk) FROM date_dim dd WHERE dd.d_year = 2022)
+    GROUP BY sr.sr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name || ' ' || c.c_last_name AS full_name,
+    COALESCE(sales.rn, 0) AS sales_rank,
+    COALESCE(sales.cs_net_profit, 0) AS net_profit,
+    COALESCE(sales.adjusted_sales_price, 0) AS last_order_sales_price,
+    COALESCE(returns.total_returned, 0) AS total_returns,
+    CASE 
+        WHEN COALESCE(sales.web_total_sales, 0) = 0 THEN 'No web sales'
+        WHEN returns.total_returned IS NOT NULL THEN 'Has returns'
+        ELSE 'No returns' 
+    END AS return_status
+FROM 
+    customer c
+LEFT JOIN 
+    RankedSales sales ON c.c_customer_sk = sales.customer_sk
+LEFT JOIN 
+    FilteredReturns returns ON c.c_customer_sk = returns.sr_returning_customer_sk
+WHERE 
+    c.c_current_cdemo_sk IS NOT NULL 
+    AND c.c_birth_year IS NOT NULL 
+    AND (c.c_first_name ILIKE '%a%' OR c.c_last_name ILIKE '%a%')
+ORDER BY 
+    sales_rank ASC, 
+    net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year = (SELECT MAX(production_year) FROM aka_title)
+    GROUP BY 
+        title,
+        production_year
+    ORDER BY 
+        cast_count DESC
+    LIMIT 10
+),
+DetailedMovieInfo AS (
+    SELECT 
+        mv.movie_id,
+        mv.movie_title,
+        mv.production_year,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        AVG(mv.cast_count) OVER (PARTITION BY mv.production_year) AS avg_cast_count,
+        COALESCE(NULLIF(mv.production_year, 2000), 'N/A') AS adjusted_year
+    FROM 
+        MovieHierarchy mv
+    LEFT JOIN 
+        movie_companies mc ON mv.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.imdb_id
+    GROUP BY 
+        mv.movie_id, mv.movie_title, mv.production_year
+)
+SELECT 
+    dmi.movie_title,
+    dmi.production_year,
+    dmi.company_names,
+    dmi.avg_cast_count,
+    dmi.adjusted_year,
+    CASE 
+        WHEN dmi.avg_cast_count IS NULL THEN 'No Cast Available'
+        WHEN dmi.avg_cast_count < 5 THEN 'Small Cast'
+        ELSE 'Significant Cast'
+    END AS cast_size
+FROM 
+    DetailedMovieInfo dmi
+JOIN 
+    TopMovies tm ON dmi.movie_title = tm.title
+ORDER BY 
+    dmi.production_year DESC;

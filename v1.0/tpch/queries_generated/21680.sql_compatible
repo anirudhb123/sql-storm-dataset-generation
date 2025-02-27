@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o 
+    WHERE o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+), SupplierStats AS (
+    SELECT
+        ps.ps_partkey,
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_suppkey
+), PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(MAX(l.l_shipdate), DATE '2000-01-01') AS last_ship_date
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+), HighValueOrders AS (
+    SELECT
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM RankedOrders ro
+    WHERE ro.order_rank <= 10
+    UNION ALL
+    SELECT
+        NULL AS o_orderkey,
+        NULL AS o_orderdate,
+        SUM(ps.ps_supplycost) AS o_totalprice
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost) > 1000
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_retailprice,
+    ss.total_available,
+    ss.average_supply_cost,
+    hvo.o_orderkey,
+    hvo.o_orderdate,
+    hvo.o_totalprice,
+    CASE
+        WHEN hvo.o_orderkey IS NULL THEN 'Aggregate SupplyCost'
+        ELSE 'Individual Order'
+    END AS order_type,
+    pd.last_ship_date
+FROM PartDetails pd
+JOIN SupplierStats ss ON pd.p_partkey = ss.ps_partkey
+FULL OUTER JOIN HighValueOrders hvo ON ss.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = pd.p_partkey 
+    ORDER BY ps.ps_supplycost DESC 
+    LIMIT 1
+)
+WHERE pd.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2
+)
+AND (ss.average_supply_cost IS NOT NULL OR hvo.o_orderkey IS NOT NULL)
+ORDER BY pd.p_partkey, hvo.o_orderdate DESC NULLS LAST;

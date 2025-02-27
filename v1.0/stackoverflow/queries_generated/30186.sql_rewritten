@@ -1,0 +1,71 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Depth
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Depth + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+)
+SELECT
+    q.Id AS QuestionId,
+    q.Title AS QuestionTitle,
+    q.CreationDate AS QuestionDate,
+    u.DisplayName AS OwnerName,
+    u.TotalReputation,
+    u.BadgeCount,
+    ph.Depth AS RelatedPostsDepth,
+    COALESCE(ph.PostId, -1) AS RelatedPostId
+FROM
+    TopQuestions q
+JOIN
+    UserReputation u ON q.OwnerUserId = u.UserId
+LEFT JOIN
+    RecursivePostHierarchy ph ON q.Id = ph.ParentId
+WHERE
+    q.ScoreRank <= 10  
+ORDER BY
+    q.Score DESC,
+    u.TotalReputation DESC;

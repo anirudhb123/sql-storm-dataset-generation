@@ -1,0 +1,80 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        l.l_returnflag,
+        l.l_shipmode,
+        CASE 
+            WHEN l.l_discount > 0.1 THEN 'Discounted'
+            ELSE 'Regular'
+        END AS price_type
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(SUM(f.l_extendedprice) OVER (PARTITION BY f.l_partkey), 0) AS total_extended_price,
+    r.r_name AS region_name,
+    H.total_spent AS high_value_customer_spent,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(f.l_extendedprice) DESC) AS part_rank,
+    MAX(CASE WHEN hs.rn = 1 THEN hs.s_name ELSE NULL END) AS top_supplier,
+    MAX(CASE WHEN hs.rn IS NULL THEN 'No Supplier Available' ELSE NULL END) AS supplier_status
+FROM 
+    part p
+LEFT JOIN 
+    FilteredLineItems f ON p.p_partkey = f.l_partkey
+LEFT JOIN 
+    RankedSuppliers hs ON f.l_suppkey = hs.s_suppkey
+JOIN 
+    nation n ON hs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers H ON H.order_count > 5
+WHERE 
+    (p.p_size IS NOT NULL AND p.p_size > 10) OR (p.p_comment LIKE '%special%')
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, r.r_name, H.total_spent
+ORDER BY 
+    total_extended_price DESC, p.p_partkey ASC
+LIMIT 100;

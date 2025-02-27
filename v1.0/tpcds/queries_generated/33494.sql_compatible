@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM store_sales
+    GROUP BY ss_store_sk, ss_sold_date_sk
+),
+daily_totals AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.net_paid) AS total_web_sales,
+        SUM(cs.net_paid) AS total_catalog_sales,
+        SUM(ss.net_profit) AS total_store_sales,
+        COALESCE(dy.total_sales, 0) AS total_daily_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    LEFT JOIN (
+        SELECT 
+            ss_sold_date_sk, 
+            SUM(total_sales) AS total_sales
+        FROM sales_hierarchy
+        WHERE sales_rank <= 5
+        GROUP BY ss_sold_date_sk
+    ) dy ON d.d_date_sk = dy.ss_sold_date_sk
+    GROUP BY d.d_date
+),
+income_bracket AS (
+    SELECT 
+        CASE 
+            WHEN ib_lower_bound <= 20000 THEN 'Low'
+            WHEN ib_lower_bound > 20000 AND ib_upper_bound <= 50000 THEN 'Medium'
+            ELSE 'High' 
+        END AS income_category,
+        COUNT(hd_demo_sk) AS demo_count
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        CASE 
+            WHEN ib_lower_bound <= 20000 THEN 'Low'
+            WHEN ib_lower_bound > 20000 AND ib_upper_bound <= 50000 THEN 'Medium'
+            ELSE 'High' 
+        END
+)
+SELECT 
+    dt.d_date,
+    dt.total_web_sales,
+    dt.total_catalog_sales,
+    dt.total_store_sales,
+    ib.income_category,
+    ib.demo_count
+FROM daily_totals dt
+LEFT JOIN income_bracket ib ON dt.total_daily_sales > 0
+ORDER BY dt.d_date ASC, dt.total_web_sales DESC;

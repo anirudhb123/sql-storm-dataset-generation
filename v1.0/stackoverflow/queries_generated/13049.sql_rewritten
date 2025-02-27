@@ -1,0 +1,52 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM Posts P
+),
+TopPosts AS (
+    SELECT 
+        PS.UserId,
+        PS.PostId,
+        PS.Score,
+        PS.ViewCount,
+        PS.AnswerCount,
+        PS.CommentCount
+    FROM PostStats PS
+    WHERE PS.RowNum <= 5
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    US.PostCount,
+    US.CommentCount,
+    US.BadgeCount,
+    TP.PostId,
+    TP.Score,
+    TP.ViewCount,
+    TP.AnswerCount,
+    TP.CommentCount
+FROM UserStats US
+JOIN Users U ON US.UserId = U.Id
+LEFT JOIN TopPosts TP ON U.Id = TP.OwnerUserId
+ORDER BY U.Reputation DESC, TP.Score DESC;

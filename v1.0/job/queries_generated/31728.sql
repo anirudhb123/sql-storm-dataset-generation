@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    -- CTE to recursively find the hierarchy of movies
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.id IS NOT NULL  
+
+    UNION ALL
+
+    SELECT 
+        m2.id,
+        m2.title,
+        m2.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+),
+RankedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        DENSE_RANK() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_in_year
+    FROM 
+        MovieHierarchy m
+),
+FilteredMovies AS (
+    SELECT 
+        rm.*,
+        CASE 
+            WHEN rm.rank_in_year <= 5 THEN 'Top Rank'
+            ELSE 'Other Rank'
+        END AS rank_category
+    FROM 
+        RankedMovies rm
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cn.id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.rank_category,
+    ci.company_count,
+    ci.company_names
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    CompanyInfo ci ON fm.movie_id = ci.movie_id
+WHERE 
+    (ci.company_count IS NULL OR ci.company_count > 2) -- Conditions on companies
+    AND fm.production_year >= 2000 -- Filter movies produced from year 2000 onwards
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

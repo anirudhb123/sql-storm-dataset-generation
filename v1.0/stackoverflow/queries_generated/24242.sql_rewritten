@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days' 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(vt.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes vt ON u.Id = vt.UserId AND vt.VoteTypeId = 8 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        u.DisplayName,
+        us.TotalBounties,
+        us.BadgeCount,
+        us.CommentCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserStats us ON u.Id = us.UserId
+    WHERE 
+        rp.UserRank = 1
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    COALESCE(cp.CloseCount, 0) AS NumberOfClosures,
+    fp.Score,
+    fp.DisplayName,
+    fp.TotalBounties,
+    fp.BadgeCount,
+    fp.CommentCount,
+    CASE 
+        WHEN fp.Score IS NULL THEN 'No Score Recorded'
+        ELSE CASE 
+            WHEN fp.Score > 100 THEN 'Highly Rated'
+            WHEN fp.Score BETWEEN 50 AND 100 THEN 'Moderately Rated'
+            ELSE 'Low Rated'
+        END 
+    END AS RatingCategory
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    ClosedPosts cp ON fp.PostId = cp.PostId
+WHERE 
+    (fp.Score IS NOT NULL AND fp.Score > 0) OR 
+    (fp.TotalBounties > 0)
+ORDER BY 
+    fp.TotalBounties DESC, 
+    fp.Score DESC
+LIMIT 50;

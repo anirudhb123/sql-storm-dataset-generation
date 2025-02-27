@@ -1,0 +1,68 @@
+WITH TagsCTE AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.CreationDate >= '2023-01-01'  -- Considering posts created in 2023 for benchmarking
+    GROUP BY 
+        t.TagName
+),
+PostsCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.OwnerUserId,
+        p.Score,
+        ARRAY(SELECT DISTINCT tag.TagName FROM UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag) AS Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND  -- Only considering Questions
+        p.AnswerCount > 0  -- Questions that have at least one answer
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        SUM(u.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.TotalScore,
+    u.DisplayName AS TopUser,
+    u.TotalPosts,
+    u.AcceptedAnswers,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges
+FROM 
+    TagsCTE t
+JOIN 
+    PostsCTE p ON p.Tags && ARRAY[t.TagName]  -- Joining on tags intersection
+JOIN 
+    UserStats u ON u.TotalPosts = (SELECT MAX(TotalPosts) FROM UserStats)  -- Fetching the user with the maximum posts
+ORDER BY 
+    t.TotalScore DESC
+LIMIT 10;  -- Limit the results to top 10 tags

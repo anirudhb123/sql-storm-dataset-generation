@@ -1,0 +1,56 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(cc.id) AS cast_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC, mt.title) AS year_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+), 
+filtered_movies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.keyword_count
+    FROM 
+        movie_details md
+    WHERE 
+        md.cast_count > 5 AND 
+        md.keyword_count > 1 AND 
+        md.year_rank <= 10
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    COALESCE(gc.gender, 'Unknown') AS gender_ratio,
+    (SELECT COUNT(*) FROM movie_companies mc WHERE mc.movie_id = f.movie_id AND mc.company_type_id IS NOT NULL) AS company_count
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    (SELECT 
+         ci.person_id,
+         n.gender,
+         COUNT(*) AS gender_count
+     FROM 
+         cast_info ci
+     JOIN 
+         name n ON ci.person_id = n.id
+     GROUP BY 
+         ci.person_id, n.gender) gc ON f.cast_count = gc.gender_count
+ORDER BY 
+    f.production_year DESC, 
+    f.title ASC;

@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId, 
+        P.Title, 
+        P.Body, 
+        P.CreationDate, 
+        U.DisplayName AS Author, 
+        COUNT(C.Id) AS CommentCount, 
+        COUNT(V.Id) AS VoteCount,
+        RANK() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2 -- Upvotes only
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Author,
+        RP.CreationDate,
+        RP.CommentCount,
+        RP.VoteCount,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Badges B ON RP.Author = B.UserId
+    GROUP BY 
+        RP.PostId, RP.Title, RP.Author, RP.CreationDate, RP.CommentCount, RP.VoteCount
+),
+FinalResults AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.Author,
+        PS.CreationDate,
+        PS.CommentCount,
+        PS.VoteCount,
+        PS.BadgeCount,
+        PS.BadgeNames,
+        CASE 
+            WHEN PS.VoteCount > 50 THEN 'Highly Voted'
+            WHEN PS.VoteCount BETWEEN 20 AND 50 THEN 'Moderately Voted'
+            ELSE 'Few Votes'
+        END AS VoteCategory
+    FROM 
+        PostStatistics PS
+)
+SELECT 
+    FR.PostId,
+    FR.Title,
+    FR.Author,
+    FR.CreationDate,
+    FR.CommentCount,
+    FR.VoteCount,
+    FR.BadgeCount,
+    FR.BadgeNames,
+    FR.VoteCategory
+FROM 
+    FinalResults FR
+ORDER BY 
+    FR.VoteCount DESC,
+    FR.CommentCount DESC;

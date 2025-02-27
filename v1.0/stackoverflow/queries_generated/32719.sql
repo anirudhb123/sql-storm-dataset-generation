@@ -1,0 +1,53 @@
+WITH RECURSIVE RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Scores,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rnk
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    ue.UserId,
+    ue.DisplayName,
+    ue.PostCount,
+    ue.TotalBounty,
+    ue.TotalScore,
+    ue.AvgCommentScore,
+    COUNT(DISTINCT rp.Id) AS RecentPostCount,
+    AVG(rp.Scores) AS AvgRecentPostScore,
+    STRING_AGG(DISTINCT CASE WHEN rp.rnk = 1 THEN rp.Title END, ', ') AS MostRecentPostTitle
+FROM 
+    UserEngagement ue
+LEFT JOIN 
+    RecentPosts rp ON ue.UserId = rp.OwnerUserId
+GROUP BY 
+    ue.UserId, ue.DisplayName
+HAVING 
+    ue.PostCount > 5
+ORDER BY 
+    ue.TotalScore DESC, ue.TotalBounty DESC
+LIMIT 10;

@@ -1,0 +1,63 @@
+
+WITH RecentPosts AS (
+    SELECT Id, Title, CreationDate, OwnerUserId, ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS rn
+    FROM Posts
+    WHERE CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+           COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+           COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT UNNEST(string_to_array(Tags, '><')) AS Tag
+    FROM Posts
+    WHERE Tags IS NOT NULL
+),
+TagPopularity AS (
+    SELECT Tag, COUNT(*) AS TagCount 
+    FROM PopularTags 
+    GROUP BY Tag
+    ORDER BY TagCount DESC
+    LIMIT 10
+),
+PostLinksInfo AS (
+    SELECT pl.PostId, pl.RelatedPostId, lt.Name AS LinkType, COUNT(pl.Id) AS LinkCount
+    FROM PostLinks pl
+    JOIN LinkTypes lt ON pl.LinkTypeId = lt.Id
+    GROUP BY pl.PostId, pl.RelatedPostId, lt.Name
+),
+ClosedPosts AS (
+    SELECT p.Id, COUNT(ph.PostHistoryTypeId) AS CloseCount
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY p.Id
+)
+SELECT ua.UserId, ua.DisplayName, ua.PostCount, ua.UpVotes, ua.DownVotes, 
+       ua.GoldBadges, ua.SilverBadges, ua.BronzeBadges,
+       rp.Title, rp.CreationDate,
+       pp.Tag, tp.TagCount,
+       pl.LinkType, pl.LinkCount,
+       cp.CloseCount
+FROM UserActivity ua
+JOIN RecentPosts rp ON ua.UserId = rp.OwnerUserId
+JOIN TagPopularity tp ON tp.Tag IN (SELECT UNNEST(string_to_array(rp.Tags, '><')))
+LEFT JOIN PostLinksInfo pl ON rp.Id = pl.PostId
+LEFT JOIN ClosedPosts cp ON rp.Id = cp.Id
+WHERE ua.PostCount > 0
+  AND (ua.UpVotes - ua.DownVotes) > 10
+ORDER BY ua.PostCount DESC, ua.DisplayName ASC
+LIMIT 50
+OFFSET 10;

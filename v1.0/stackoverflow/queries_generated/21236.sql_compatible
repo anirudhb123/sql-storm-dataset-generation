@@ -1,0 +1,77 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 9 
+    GROUP BY U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS Rank
+    FROM UserPostStats
+),
+RecentPostHistory AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment AS CloseReason,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS RecentEdit
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11) 
+),
+DiverseTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS UsedCount,
+        (SELECT COUNT(*) FROM Tags) AS TotalTags
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY T.TagName
+    HAVING COUNT(DISTINCT P.Id) > TotalTags * 0.05 
+),
+PostLinkStats AS (
+    SELECT 
+        PL.PostId,
+        COUNT(PL.RelatedPostId) AS RelatedPostsCount,
+        STRING_AGG(PT.Name, ', ') AS RelatedPostTitles
+    FROM PostLinks PL
+    JOIN Posts P ON PL.PostId = P.Id
+    JOIN PostTypes PT ON PT.Id = P.PostTypeId
+    GROUP BY PL.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.TotalBounties,
+    r.PostId,
+    r.Title AS RecentPostTitle,
+    r.CloseReason,
+    d.TagName,
+    d.UsedCount,
+    pl.RelatedPostsCount,
+    pl.RelatedPostTitles
+FROM TopUsers u
+LEFT JOIN RecentPostHistory r ON u.UserId = r.UserId AND r.RecentEdit = 1
+LEFT JOIN DiverseTags d ON d.TagName = ANY(STRING_TO_ARRAY((SELECT STRING_AGG(Tags, ',') FROM Posts WHERE OwnerUserId = u.UserId), ','))
+LEFT JOIN PostLinkStats pl ON pl.PostId = r.PostId
+WHERE u.Rank <= 10
+ORDER BY u.TotalPosts DESC, r.CreationDate DESC;

@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(ans.Id) AS AnswerCount,
+        COUNT(cmt.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts ans ON p.Id = ans.ParentId
+    LEFT JOIN 
+        Comments cmt ON p.Id = cmt.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews,
+        AVG(rp.Score) AS AveragePostScore,
+        MAX(rp.UserPostRank) AS PostsCount
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalScore,
+    up.TotalViews,
+    up.AveragePostScore,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    UserPerformance up
+LEFT JOIN 
+    Badges b ON up.UserId = b.UserId
+WHERE 
+    up.TotalScore > 100 
+GROUP BY 
+    up.UserId, up.DisplayName
+HAVING 
+    COUNT(DISTINCT b.Id) > 0
+ORDER BY 
+    up.TotalScore DESC, up.DisplayName ASC
+LIMIT 10;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, 
+           c_first_name, 
+           c_last_name, 
+           1 AS level
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer) -- Starting point
+    UNION ALL
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name, 
+           ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+), 
+demographics_summary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(cd.cd_demo_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS average_purchase_estimate,
+        CASE
+            WHEN COUNT(cd.cd_demo_sk) = 0 THEN NULL
+            ELSE AVG(cd.cd_dep_count)
+        END AS average_dependents
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE c.c_birth_month IN (SELECT d_moy FROM date_dim WHERE d_year = 2023 AND d_holiday = 'Y') 
+    GROUP BY cd.cd_gender
+),
+sales_data AS (
+    SELECT
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_quantity) AS total_items_sold,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+),
+promotion_results AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(ws.ws_net_paid) AS total_sales_with_promo
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE ws.ws_net_paid > 0 
+    GROUP BY p.p_promo_name
+),
+combined_result AS (
+    SELECT 
+        ch.c_first_name,
+        ch.c_last_name,
+        ds.cd_gender,
+        ds.customer_count,
+        ds.average_purchase_estimate,
+        sd.total_net_profit,
+        sd.total_items_sold,
+        pd.total_sales_with_promo,
+        RANK() OVER (PARTITION BY ds.cd_gender ORDER BY ds.customer_count DESC) AS rank
+    FROM customer_hierarchy ch
+    LEFT JOIN demographics_summary ds ON ch.c_customer_sk = ds.cd_demo_sk
+    LEFT JOIN sales_data sd ON sd.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    LEFT JOIN promotion_results pd ON pd.total_sales_with_promo > 1000
+)
+SELECT * 
+FROM combined_result
+WHERE rank <= 5 OR total_items_sold IS NULL
+ORDER BY cd_gender, total_net_profit DESC NULLS LAST;

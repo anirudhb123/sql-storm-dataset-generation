@@ -1,0 +1,68 @@
+
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+    UNION ALL
+    SELECT 
+        ts.c_custkey,
+        ts.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount) + ts.total_sales) AS total_sales
+    FROM 
+        TotalSales ts
+    JOIN 
+        orders o ON ts.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY 
+        ts.c_custkey, ts.c_name, ts.total_sales
+),
+RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales_total,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    rc.c_name,
+    rc.sales_total,
+    COALESCE(ts.total_sales, 0) AS total_sales_subquery,
+    CASE 
+        WHEN rc.sales_total > 20000 THEN 'Top Customer'
+        WHEN rc.sales_total BETWEEN 10000 AND 20000 THEN 'Mid-tier Customer'
+        ELSE 'Regular Customer'
+    END AS customer_tier
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    TotalSales ts ON rc.c_custkey = ts.c_custkey
+WHERE 
+    rc.sales_rank <= 5
+ORDER BY 
+    rc.sales_total DESC;

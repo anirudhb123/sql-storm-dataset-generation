@@ -1,0 +1,30 @@
+WITH TagStats AS (
+    SELECT 
+        T.TagName, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS TopContributors
+    FROM Tags T
+    JOIN Posts P ON T.Id = ANY(string_to_array(P.Tags, '><')::int[])
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 1  
+    GROUP BY T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalViews,
+        TotalScore,
+        AverageScore,
+        TopContributors,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank
+    FROM TagStats
+)
+SELECT *
+FROM TopTags
+WHERE ScoreRank <= 10 OR ViewRank <= 10
+ORDER BY ScoreRank, ViewRank
+LIMIT 20;

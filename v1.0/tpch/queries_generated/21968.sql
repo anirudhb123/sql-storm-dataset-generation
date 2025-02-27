@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND 
+        LENGTH(s.s_name) - LENGTH(REPLACE(s.s_name, ' ', '')) < 3
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+)
+SELECT 
+    r.r_name AS region,
+    rs.s_name AS supplier_name,
+    rs.total_supplycost,
+    rs.part_count,
+    (SELECT AVG(l.l_discount) 
+     FROM lineitem l 
+     WHERE l.l_orderkey IN 
+     (SELECT o.o_orderkey 
+      FROM orders o 
+      WHERE o.o_custkey IN 
+      (SELECT c.c_custkey 
+       FROM customer c 
+       WHERE c.c_acctbal > 1000))) AS avg_discount
+FROM 
+    region r
+LEFT JOIN 
+    RankedSuppliers rs ON r.r_regionkey = rs.rank
+WHERE 
+    rs.rank <= 3 OR rs.rank IS NULL
+ORDER BY 
+    r.r_name, rs.total_supplycost DESC
+UNION
+SELECT 
+    r.r_name,
+    s.s_name,
+    SUM(ps.ps_supplycost),
+    COUNT(DISTINCT p.p_partkey),
+    NULL
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    s.s_acctbal < 0 OR (s.s_comment IS NULL AND p.p_comment LIKE '%discount%')
+GROUP BY 
+    r.r_name, s.s_name
+HAVING 
+    COUNT(DISTINCT p.p_partkey) > 1
+ORDER BY 
+    region, total_supplycost DESC;

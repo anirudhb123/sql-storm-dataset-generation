@@ -1,0 +1,81 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT web_sales.ws_order_number) AS total_orders,
+        SUM(web_sales.ws_sales_price) AS total_spent,
+        RANK() OVER (PARTITION BY cd.cd_marital_status ORDER BY SUM(web_sales.ws_sales_price) DESC) AS rank_spent
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ON c.c_customer_sk = web_sales.ws_bill_customer_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        cd.cd_income_band_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+), 
+HighSpenders AS (
+    SELECT 
+        cs.c_customer_sk, 
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_orders,
+        cs.total_spent
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.rank_spent <= 5
+), 
+StateCount AS (
+    SELECT 
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer AS c
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_state
+),
+SalesSummary AS (
+    SELECT 
+        ca.ca_state,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_quantity) AS total_items_sold
+    FROM 
+        web_sales AS ws
+    JOIN 
+        customer AS c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ws.ws_sales_price > 10
+    GROUP BY 
+        ca.ca_state
+)
+SELECT 
+    sc.ca_state,
+    COALESCE(ss.total_net_profit, 0) AS total_net_profit,
+    COALESCE(ss.total_items_sold, 0) AS total_items_sold,
+    (SELECT COUNT(*) FROM HighSpenders) AS total_high_spenders,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers
+FROM 
+    StateCount AS sc
+LEFT JOIN 
+    SalesSummary AS ss ON sc.ca_state = ss.ca_state
+LEFT JOIN 
+    customer AS c ON c.c_current_addr_sk IN (
+        SELECT ca_address_sk FROM customer_address WHERE ca_state = sc.ca_state
+    )
+GROUP BY 
+    sc.ca_state, ss.total_net_profit, ss.total_items_sold
+ORDER BY 
+    unique_customers DESC, total_net_profit DESC;

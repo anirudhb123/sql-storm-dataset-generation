@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS UserPostRank,
+        COUNT(pt.Id) OVER () AS TotalPostCount,
+        MAX(v.CreationDate) OVER (PARTITION BY p.Id) AS LastVoteDate
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '90 days'
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.UserPostRank = 1 THEN 'Top Post'
+            ELSE 'Regular Post'
+        END AS PostCategory,
+        COALESCE(
+            DATE_PART('epoch', CURRENT_TIMESTAMP - rp.LastVoteDate),
+            NULL) AS SecondsSinceLastVote
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TotalPostCount > 100
+),
+
+FrequentCommenters AS (
+    SELECT 
+        c.UserId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.UserId
+    HAVING 
+        COUNT(c.Id) > 5
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(fc.CommentCount, 0) AS FrequentComments,
+        u.CreationDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        FrequentCommenters fc ON u.Id = fc.UserId
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.ViewCount,
+    fp.CreationDate,
+    fp.PostCategory,
+    us.DisplayName AS Commenter,
+    us.Reputation,
+    us.FrequentComments,
+    ARRAY_AGG(DISTINCT t.TagName) FILTER (WHERE t.TagName IS NOT NULL) AS Tags,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Votes v 
+     WHERE 
+         v.PostId = fp.PostId 
+         AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT 
+        COUNT(*) 
+     FROM 
+        Votes v 
+     WHERE 
+         v.PostId = fp.PostId 
+         AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Tags t ON t.Id = ANY(string_to_array(substring(fp.Tags, 2, length(fp.Tags)-2), '><')::int[])
+LEFT JOIN 
+    UserStats us ON fp.ViewCount > us.FrequentComments * 10 -- Arbitrary performance threshold
+GROUP BY 
+    fp.PostId, fp.Title, fp.ViewCount, fp.CreationDate, fp.PostCategory, us.DisplayName, us.Reputation, us.FrequentComments
+ORDER BY 
+    fp.ViewCount DESC NULLS LAST, 
+    fp.CreationDate DESC
+LIMIT 100 OFFSET 0;

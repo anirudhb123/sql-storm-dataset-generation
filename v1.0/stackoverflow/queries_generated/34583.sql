@@ -1,0 +1,62 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId IN (1, 2) -- Questions and Answers
+    
+    UNION ALL
+    
+    SELECT 
+        PH.PostId,
+        PH.Title,
+        PH.ViewCount,
+        PH.Score,
+        U.DisplayName AS OwnerDisplayName,
+        PH.CreationDate,
+        Level + 1
+    FROM 
+        Posts PH
+    JOIN 
+        RecursivePostCTE RPC ON PH.ParentId = RPC.PostId
+    JOIN 
+        Users U ON PH.OwnerUserId = U.Id
+)
+
+SELECT
+    RPC.PostId,
+    RPC.Title,
+    RPC.ViewCount,
+    RPC.Score,
+    RPC.OwnerDisplayName,
+    RPC.CreationDate,
+    RPC.Level,
+    COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+    COUNT(PT.Id) AS TagCount,
+    SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+    ROW_NUMBER() OVER (PARTITION BY RPC.OwnerDisplayName ORDER BY RPC.Score DESC) AS UserRank
+FROM 
+    RecursivePostCTE RPC
+LEFT JOIN 
+    Comments C ON C.PostId = RPC.PostId
+LEFT JOIN 
+    PostTags PT ON PT.PostId = RPC.PostId
+LEFT JOIN 
+    Votes V ON V.PostId = RPC.PostId
+WHERE 
+    RPC.ViewCount > 100  -- Filtering posts with more than 100 views
+GROUP BY 
+    RPC.PostId, RPC.Title, RPC.ViewCount, RPC.Score, RPC.OwnerDisplayName, RPC.CreationDate, RPC.Level
+ORDER BY 
+    RPC.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY; -- Pagination

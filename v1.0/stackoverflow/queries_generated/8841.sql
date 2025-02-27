@@ -1,0 +1,73 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        UserReputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id as PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName,
+        PostType.Name AS PostType,
+        C.Text AS LastComment,
+        C.CreationDate AS LastCommentDate
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostTypes PostType ON P.PostTypeId = PostType.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    TU.UserId,
+    TU.Reputation,
+    TU.TotalPosts,
+    TU.QuestionCount,
+    TU.AnswerCount,
+    TU.TotalBounties,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate AS PostCreationDate,
+    RP.DisplayName AS OwnerDisplayName,
+    RP.PostType,
+    RP.LastComment,
+    RP.LastCommentDate
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    RecentPosts RP ON TU.UserId = RP.OwnerUserId
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank, RP.PostCreationDate DESC;

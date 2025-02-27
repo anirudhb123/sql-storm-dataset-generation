@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TitleKeywordCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'tagline') 
+    GROUP BY 
+        m.movie_id
+),
+MovieCast AS (
+    SELECT 
+        c.movie_id,
+        MIN(c.nr_order) AS min_order,
+        MAX(c.nr_order) AS max_order,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+Companies AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(GROUP_CONCAT(cn.name), 'No Company') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    COALESCE(tkc.keyword_count, 0) AS keyword_count,
+    COALESCE(mc.cast_count, 0) AS cast_count,
+    COALESCE(cmp.company_count, 0) AS company_count,
+    STRING_AGG(comp.company_names, ', ') AS registered_companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TitleKeywordCounts tkc ON rm.movie_id = tkc.movie_id
+LEFT JOIN 
+    MovieCast mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    Companies cmp ON rm.movie_id = cmp.movie_id
+CROSS JOIN LATERAL (
+    SELECT DISTINCT
+        CASE 
+            WHEN c.name IS NULL THEN 'Unknown Company'
+            ELSE c.name
+        END AS company_names
+    FROM 
+        company_name c 
+    WHERE 
+        LENGTH(c.name) > 5
+    LIMIT 3
+) AS comp
+WHERE 
+    rm.production_year >= (SELECT MIN(production_year) FROM aka_title)
+GROUP BY 
+    rm.movie_id, rm.title, rm.production_year, tkc.keyword_count, mc.cast_count, cmp.company_count
+ORDER BY 
+    rm.production_year DESC, rm.title;

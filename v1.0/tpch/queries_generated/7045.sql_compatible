@@ -1,0 +1,58 @@
+
+WITH SupplierPartStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) FILTER (WHERE o.o_orderstatus = 'O') AS completed_orders
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LineItemAggregates AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(l.l_linenumber) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT ns.n_nationkey) AS total_nations,
+    SUM(ps.distinct_parts) AS total_distinct_parts,
+    SUM(cs.total_orders) AS total_orders,
+    SUM(cs.total_spent) AS total_revenue,
+    COUNT(DISTINCT li.l_orderkey) AS total_line_items
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierPartStats ps ON ns.n_nationkey = (SELECT s.s_nationkey FROM supplier WHERE s.s_suppkey = ps.s_suppkey)
+LEFT JOIN 
+    CustomerOrderStats cs ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer WHERE c.custkey = cs.c_custkey)
+LEFT JOIN 
+    LineItemAggregates li ON li.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = cs.c_custkey)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC;

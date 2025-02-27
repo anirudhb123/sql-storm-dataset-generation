@@ -1,0 +1,53 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.ParentId,
+        p2.Title,
+        p2.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        PostHierarchy ph ON p2.ParentId = ph.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalQuestions,
+    COALESCE(SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END), 0) AS PositiveScoreCount,
+    COALESCE(SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END), 0) AS NegativeScoreCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(ph.Level) AS MaxPostLevel,
+    COUNT(DISTINCT ph.Id) AS AnswersReceived,
+    SUM(CASE WHEN ph.CreationDate < p.CreationDate THEN 1 ELSE 0 END) AS HierarchyAnswersBeforePost,
+    AVG(DATEDIFF(MINUTE, p.CreationDate, p.LastActivityDate)) AS AvgPostActiveMinutes
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHierarchy ph ON p.Id = ph.Id
+LEFT JOIN 
+    UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS t(TagName) ON TRUE
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+ORDER BY 
+    u.Reputation DESC
+FETCH FIRST 10 ROWS ONLY;

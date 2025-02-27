@@ -1,0 +1,53 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > 50
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal BETWEEN 100 AND 10000
+)
+SELECT 
+    co.c_name,
+    co.o_orderkey,
+    co.o_totalprice,
+    rs.s_name AS top_supplier,
+    rs.s_acctbal AS supplier_balance,
+    COALESCE(SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_quantity ELSE 0 END) OVER (PARTITION BY co.o_orderkey), 0) AS total_returned_quantity
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    lineitem li ON co.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON li.l_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_size > 20
+    ) AND rs.supp_rank = 1
+WHERE 
+    co.order_rank <= 5
+ORDER BY 
+    co.o_totalprice DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,61 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT co.name) AS companies,
+        GROUP_CONCAT(DISTINCT c.role_id) AS role_ids
+    FROM 
+        title m
+    LEFT JOIN 
+        aka_title ak ON m.id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+PersonDetails AS (
+    SELECT 
+        p.name AS person_name,
+        p.id AS person_id,
+        GROUP_CONCAT(DISTINCT pi.info) AS person_info,
+        GROUP_CONCAT(DISTINCT r.role) AS roles
+    FROM 
+        name p
+    LEFT JOIN 
+        cast_info ci ON p.id = ci.person_id
+    LEFT JOIN 
+        role_type r ON ci.role_id = r.id
+    LEFT JOIN 
+        person_info pi ON p.id = pi.person_id
+    GROUP BY 
+        p.id, p.name
+)
+SELECT 
+    md.movie_id,
+    md.movie_title,
+    md.production_year,
+    md.aka_names,
+    md.keywords,
+    md.companies,
+    pd.person_name,
+    pd.person_info,
+    pd.roles
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+LEFT JOIN 
+    PersonDetails pd ON ci.person_id = pd.person_id
+ORDER BY 
+    md.production_year DESC, md.movie_title;

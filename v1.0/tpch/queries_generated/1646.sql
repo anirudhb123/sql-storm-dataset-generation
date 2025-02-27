@@ -1,0 +1,43 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.o_orderdate,
+    COUNT(DISTINCT r.o_orderkey) AS total_orders,
+    COALESCE(SUM(cs.total_spent), 0) AS total_revenue,
+    COUNT(DISTINCT l.l_partkey) AS unique_parts_sold
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    CustomerSpending cs ON r.o_orderdate = (SELECT MAX(o_orderdate) FROM orders WHERE o_orderkey = r.o_orderkey)
+GROUP BY 
+    r.o_orderdate
+ORDER BY 
+    r.o_orderdate DESC
+LIMIT 10;

@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrdersWithDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, l.l_returnflag,
+           RANK() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_extendedprice DESC) AS price_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1994-01-01' AND '1994-12-31'
+),
+PartSupplierData AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           STRING_AGG(ps.ps_comment, '; ') AS comments
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT r.r_name AS region, 
+       COUNT(DISTINCT ns.n_nationkey) AS nations_count,
+       SUM(CASE WHEN od.l_returnflag = 'R' THEN od.o_totalprice ELSE 0 END) AS returned_total,
+       AVG(COALESCE(p.p_retailprice, 0)) AS avg_retail_price,
+       MAX(COALESCE(ssd.total_avail_qty, 0)) AS max_supply_qty,
+       STRING_AGG(DISTINCT CONCAT('Supplier: ', sh.s_name, ' at level ', sh.level), ', ') AS suppliers_info
+FROM region r
+JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN OrdersWithDetails od ON ns.n_nationkey = (SELECT n_custkey FROM customer WHERE c_nationkey = ns.n_nationkey)
+LEFT JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+LEFT JOIN PartSupplierData ssd ON ssd.ps_suppkey = sh.s_suppkey
+LEFT JOIN part p ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ssd.ps_suppkey LIMIT 1)
+WHERE r.r_name IS NOT NULL AND r.r_comment NOT LIKE '%bad%'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ns.n_nationkey) > 1 AND MAX(ssd.avg_supply_cost) IS NOT NULL
+ORDER BY returned_total DESC, avg_retail_price DESC;

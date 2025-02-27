@@ -1,0 +1,87 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_credit_rating,
+        CONCAT('Expecting ', CAST(cd_purchase_estimate AS CHAR) , ' in purchases') AS purchase_expectation
+    FROM 
+        customer_demographics
+),
+DateDetails AS (
+    SELECT 
+        d_date,
+        d_day_name,
+        d_weekend,
+        d_month_seq,
+        d_year
+    FROM 
+        date_dim
+    WHERE 
+        d_year = 2023
+),
+SalesData AS (
+    SELECT 
+        'web' AS sales_channel,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_net_paid,
+        ws_net_profit,
+        ws_ship_mode_sk
+    FROM 
+        web_sales
+    UNION ALL
+    SELECT 
+        'store' AS sales_channel,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ss_net_paid,
+        ss_net_profit,
+        ss_promo_sk
+    FROM 
+        store_sales
+),
+FinalBenchmark AS (
+    SELECT 
+        A.full_address,
+        D.d_day_name,
+        S.sales_channel,
+        S.ws_sales_price AS sales_price,
+        COALESCE(DM.cd_gender, 'Unknown') AS gender,
+        S.ws_net_profit AS net_profit,
+        COUNT(*) OVER(PARTITION BY A.ca_address_id) AS address_count
+    FROM 
+        AddressDetails A
+    JOIN 
+        SalesData S ON S.ws_net_paid > 0
+    LEFT JOIN 
+        DemographicDetails DM ON DM.cd_demo_sk IS NOT NULL
+    JOIN 
+        DateDetails D ON D.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+)
+SELECT 
+    full_address,
+    d_day_name,
+    sales_channel,
+    AVG(sales_price) AS avg_sales_price,
+    AVG(net_profit) AS avg_net_profit,
+    MAX(address_count) AS max_address_count
+FROM 
+    FinalBenchmark
+GROUP BY 
+    full_address, d_day_name, sales_channel
+ORDER BY 
+    avg_net_profit DESC, sales_channel;

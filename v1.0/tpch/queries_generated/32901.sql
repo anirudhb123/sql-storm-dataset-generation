@@ -1,0 +1,58 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS hierarchy_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, hierarchy_level + 1
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_orderkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' AND hierarchy_level < 5
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_value DESC
+    LIMIT 10
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 0
+    GROUP BY c.c_custkey, c.c_name
+),
+ProductSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY p.p_partkey, p.p_name
+),
+NationRegionSales AS (
+    SELECT n.n_name, r.r_name, SUM(ls.total_sales) as total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN ProductSales ls ON ls.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey))
+    GROUP BY n.n_name, r.r_name
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    COUNT(DISTINCT co.c_custkey) AS unique_customers,
+    ts.s_name AS top_supplier,
+    nrs.n_name AS nation,
+    nrs.r_name AS region,
+    nrs.total_sales AS regional_sales,
+    DENSE_RANK() OVER (PARTITION BY nrs.n_name ORDER BY nrs.total_sales DESC) AS sales_rank
+FROM OrderHierarchy oh
+LEFT JOIN CustomerOrders co ON oh.o_orderkey = co.c_custkey
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%widget%'))
+LEFT JOIN NationRegionSales nrs ON nrs.total_sales > 0
+WHERE nrs.total_sales IS NOT NULL
+GROUP BY oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, ts.s_name, nrs.n_name, nrs.r_name, nrs.total_sales
+ORDER BY nrs.region, sales_rank;

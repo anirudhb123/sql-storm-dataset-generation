@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+), HighProfitItems AS (
+    SELECT 
+        rs.ws_item_sk, 
+        rs.total_net_profit,
+        i.i_item_desc,
+        COALESCE(p.p_promo_name, 'No Promo') AS promo_name,
+        COALESCE(date_dim.d_month_seq, 'No Date') AS sales_month
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        promotion p ON i.i_item_sk = p.p_item_sk AND p.p_discount_active = 'Y'
+    LEFT JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN 
+        date_dim ON ws.ws_sold_date_sk = date_dim.d_date_sk
+    WHERE 
+        rs.profit_rank <= 10
+)
+SELECT 
+    hpi.ws_item_sk,
+    hpi.total_net_profit,
+    hpi.i_item_desc,
+    hpi.promo_name,
+    hpi.sales_month,
+    CASE 
+        WHEN hpi.total_net_profit IS NULL THEN 'No Profit'
+        ELSE 'Profitable'
+    END AS profit_status,
+    SUBSTRING(hpi.i_item_desc FROM 1 FOR 30) AS short_item_desc
+FROM 
+    HighProfitItems hpi
+JOIN 
+    (SELECT 
+        ws_item_sk, 
+        COUNT(DISTINCT ws_order_number) AS order_count 
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        COUNT(DISTINCT ws_order_number) >= 5
+    ) o ON hpi.ws_item_sk = o.ws_item_sk
+ORDER BY 
+    hpi.total_net_profit DESC
+LIMIT 20;

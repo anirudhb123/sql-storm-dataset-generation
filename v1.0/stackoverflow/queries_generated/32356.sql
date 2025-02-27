@@ -1,0 +1,88 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate,
+        p.OwnerUserId,
+        Level + 1 
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS TotalPosts, 
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(vote.Score) AS TotalVoteScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        MAX(vte.Name) AS LastVoteType 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        VoteTypes vte ON v.VoteTypeId = vte.Id
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    ups.TotalPosts,
+    ups.TotalAnswers,
+    ups.TotalVoteScore,
+    p.Title AS PostTitle,
+    r.Level AS PostLevel,
+    pv.UpVotes,
+    pv.DownVotes,
+    pv.CommentCount,
+    pv.LastVoteType
+FROM 
+    UserPostStats ups
+JOIN 
+    Posts p ON ups.UserId = p.OwnerUserId
+JOIN 
+    RecursivePostCTE r ON p.Id = r.Id
+JOIN 
+    PostVotes pv ON p.Id = pv.PostId
+WHERE 
+    ups.UserRank <= 10
+AND 
+    p.CreationDate >= (NOW() - INTERVAL '1 year')
+ORDER BY 
+    ups.TotalPosts DESC, pv.UpVotes DESC;

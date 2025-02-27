@@ -1,0 +1,45 @@
+WITH MovieStatistics AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COALESCE(MAX(mk.info), 'No Info') AS additional_info
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 5
+)
+
+SELECT
+    ms.movie_title,
+    ms.production_year,
+    ms.total_cast,
+    ms.cast_names,
+    ms.keywords,
+    COUNT(DISTINCT ci.info) AS info_count
+FROM 
+    MovieStatistics ms
+LEFT JOIN 
+    movie_info mi ON mi.movie_id IN (SELECT t.id FROM title t WHERE t.title = ms.movie_title AND t.production_year = ms.production_year)
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+LEFT JOIN 
+    person_info pi ON pi.person_id IN (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = (SELECT t.id FROM title t WHERE t.title = ms.movie_title AND t.production_year = ms.production_year))
+GROUP BY 
+    ms.movie_title, ms.production_year, ms.total_cast, ms.cast_names, ms.keywords
+ORDER BY 
+    ms.production_year DESC, ms.total_cast DESC;

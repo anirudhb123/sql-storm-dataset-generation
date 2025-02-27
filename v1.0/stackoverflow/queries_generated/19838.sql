@@ -1,0 +1,14 @@
+SELECT 
+    U.DisplayName, 
+    P.Title, 
+    P.CreationDate, 
+    P.Score 
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+WHERE 
+    P.PostTypeId = 1  -- Only questions
+ORDER BY 
+    P.CreationDate DESC
+LIMIT 10;  -- Fetch the most recent 10 questions

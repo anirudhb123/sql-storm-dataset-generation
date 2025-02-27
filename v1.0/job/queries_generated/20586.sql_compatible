@@ -1,0 +1,65 @@
+
+WITH Recursive_Person_Roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.nr_order IS NOT NULL
+),
+Movies_And_Cast AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ak.name AS actor_name,
+        rc.role_id,
+        COUNT(DISTINCT ak.id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        Recursive_Person_Roles rc ON ci.movie_id = rc.movie_id AND ci.person_id = rc.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.title, t.production_year, ak.name, rc.role_id
+),
+Role_Counts AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS role_count
+    FROM 
+        Movies_And_Cast
+    GROUP BY 
+        actor_name
+)
+SELECT 
+    mc.id AS movie_id,
+    mc.title,
+    mc.production_year,
+    rc.actor_name,
+    rc.role_count,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    aka_title mc
+LEFT JOIN 
+    movie_keyword mk ON mc.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    Movies_And_Cast ac ON mc.id = ac.movie_id
+LEFT JOIN 
+    Role_Counts rc ON ac.actor_name = rc.actor_name
+GROUP BY 
+    mc.id, mc.title, mc.production_year, rc.actor_name, rc.role_count
+HAVING 
+    SUM(CASE WHEN kw.keyword IS NULL THEN 1 ELSE 0 END) = 0
+ORDER BY 
+    mc.production_year DESC, rc.role_count DESC
+LIMIT 100;

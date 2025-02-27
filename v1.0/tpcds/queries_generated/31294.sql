@@ -1,0 +1,44 @@
+
+WITH RECURSIVE address_tree AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_name, ca_city, ca_state, ca_zip, 0 AS level
+    FROM customer_address
+    WHERE ca_state = 'CA'  -- Start with addresses in California
+    UNION ALL
+    SELECT a.ca_address_sk, a.ca_address_id, a.ca_street_name, a.ca_city, a.ca_state, a.ca_zip, at.level + 1
+    FROM customer_address a
+    JOIN address_tree at ON a.ca_address_sk = at.ca_address_sk + 1  -- hypothetical recursive condition
+),
+customer_info AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status,
+           ROW_NUMBER() OVER(PARTITION BY cd.cd_gender ORDER BY c.c_last_name) AS gender_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 1000
+),
+sales_info AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.ws_web_site_sk IN (SELECT web_site_sk FROM web_site WHERE web_class LIKE '%Premium%')
+    GROUP BY ws.ws_sold_date_sk
+)
+SELECT 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ca.ca_city, 
+    ca.ca_zip, 
+    s.total_net_profit,
+    s.total_orders,
+    CASE 
+        WHEN s.total_net_profit IS NULL THEN 'No sales'
+        ELSE 'Sales exist'
+    END AS sales_status
+FROM customer_info ci
+LEFT JOIN address_tree ca ON ci.c_customer_sk = ca.ca_address_sk
+LEFT JOIN sales_info s ON ca.ca_address_sk = s.ws_sold_date_sk
+WHERE (ci.gender_rank = 1 OR ci.gender_rank = 2)  -- Adjust ranks as needed
+  AND ca.ca_zip IS NOT NULL
+ORDER BY ca.ca_city, s.total_net_profit DESC
+LIMIT 100;

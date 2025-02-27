@@ -1,0 +1,53 @@
+WITH OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        os.o_orderkey,
+        os.o_orderdate,
+        os.total_revenue,
+        os.unique_customers,
+        os.unique_suppliers,
+        RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM 
+        OrderSummary os
+)
+SELECT 
+    r.r_name,
+    COUNT(to.o_orderkey) AS order_count,
+    AVG(to.total_revenue) AS average_revenue,
+    SUM(to.unique_customers) AS total_unique_customers,
+    SUM(to.unique_suppliers) AS total_unique_suppliers
+FROM 
+    TopOrders to
+JOIN 
+    customer c ON to.o_orderkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    to.revenue_rank <= 10
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_unique_customers DESC;

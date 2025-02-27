@@ -1,0 +1,70 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE U.Reputation > 1000 
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopPostTypes AS (
+    SELECT 
+        PT.Name AS PostTypeName,
+        COUNT(P.Id) AS TotalPosts
+    FROM Posts P
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    GROUP BY PT.Name
+    ORDER BY TotalPosts DESC
+    LIMIT 5
+),
+PostStatistics AS (
+    SELECT 
+        P.Title,
+        P.CreationDate,
+        PT.Name AS PostTypeName,
+        U.DisplayName AS Owner,
+        P.Score,
+        P.ViewCount,
+        PH.UserId AS LastEditorId,
+        PH.UserDisplayName AS LastEditorName,
+        PH.CreationDate AS LastEditDate,
+        PH.Comment AS EditComment
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    JOIN PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 4 
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    ORDER BY P.CreationDate DESC
+    LIMIT 10
+)
+SELECT 
+    UR.DisplayName AS UserName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.CommentCount,
+    UR.UpVotes,
+    UR.DownVotes,
+    PPS.PostTypeName,
+    PPS.Title,
+    PPS.CreationDate,
+    PPS.Owner,
+    PPS.Score,
+    PPS.ViewCount,
+    PPS.LastEditorName,
+    PPS.LastEditDate,
+    PPS.EditComment,
+    TPT.TotalPosts AS TopPostTypesCount
+FROM UserReputation UR
+JOIN PostStatistics PPS ON UR.UserId = PPS.Owner
+JOIN TopPostTypes TPT ON PPS.PostTypeName = TPT.PostTypeName
+WHERE UR.PostCount > 5
+ORDER BY UR.Reputation DESC, PPS.CreationDate DESC;

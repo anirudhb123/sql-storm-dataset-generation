@@ -1,0 +1,50 @@
+
+WITH MovieStats AS (
+    SELECT 
+        a.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(CASE WHEN p.gender = 'M' THEN 1.0 ELSE 0.0 END) AS avg_male_cast,
+        AVG(CASE WHEN p.gender = 'F' THEN 1.0 ELSE 0.0 END) AS avg_female_cast,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year >= 2000
+    GROUP BY 
+        a.title
+),
+RankedMovies AS (
+    SELECT 
+        movie_title,
+        total_cast,
+        avg_male_cast,
+        avg_female_cast,
+        keywords,
+        ROW_NUMBER() OVER (ORDER BY total_cast DESC) AS rank
+    FROM 
+        MovieStats
+)
+SELECT 
+    rm.movie_title,
+    rm.total_cast,
+    rm.avg_male_cast,
+    rm.avg_female_cast,
+    rm.keywords,
+    COALESCE(NULLIF(rm.avg_male_cast, 0), 1) AS adjusted_male_cast,
+    COALESCE(NULLIF(rm.avg_female_cast, 0), 1) AS adjusted_female_cast
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.rank;

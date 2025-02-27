@@ -1,0 +1,60 @@
+
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        r.role_id,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role_id
+),
+MaxRoleCounts AS (
+    SELECT 
+        movie_id, 
+        MAX(role_count) AS max_role_count
+    FROM 
+        MovieRoles
+    GROUP BY 
+        movie_id
+),
+TitleWithMaxRoles AS (
+    SELECT 
+        m.movie_id,
+        t.title,
+        m.max_role_count
+    FROM 
+        MaxRoleCounts m
+    JOIN 
+        aka_title t ON m.movie_id = t.movie_id
+)
+
+SELECT 
+    t.title,
+    p.name AS person_name,
+    COALESCE(ci.note, 'No note available') AS cast_note,
+    CASE 
+        WHEN m.max_role_count IS NULL THEN 'No roles'
+        ELSE CONCAT('Number of roles: ', m.max_role_count)
+    END AS role_info,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keyword_list
+FROM 
+    TitleWithMaxRoles m
+LEFT JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    m.max_role_count > 1
+AND 
+    (p.name IS NULL OR LOWER(p.name) LIKE '%smith%')
+GROUP BY 
+    t.title, p.name, ci.note, m.max_role_count
+ORDER BY 
+    t.title ASC;

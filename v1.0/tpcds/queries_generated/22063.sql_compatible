@@ -1,0 +1,71 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_customer_id, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        cd.cd_credit_rating,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+discounted_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        CASE 
+            WHEN p.p_discount_active = 'Y' THEN (i.i_current_price * 0.9)
+            ELSE i.i_current_price 
+        END AS effective_price
+    FROM 
+        item i
+    LEFT JOIN 
+        promotion p ON i.i_item_sk = p.p_item_sk AND (p.p_start_date_sk <= CAST('2002-10-01' AS INTEGER) AND p.p_end_date_sk >= CAST('2002-10-01' AS INTEGER))
+),
+high_value_customers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_customer_id,
+        SUM(sd.total_net_profit) AS total_net_profit
+    FROM 
+        ranked_customers rc
+    LEFT JOIN 
+        sales_data sd ON rc.c_customer_sk = sd.ws_item_sk
+    WHERE 
+        rc.purchase_rank <= 10
+    GROUP BY 
+        rc.c_customer_sk, rc.c_customer_id
+)
+
+SELECT 
+    hu.c_customer_id,
+    hu.cd_gender AS gender,
+    COALESCE(sd.total_quantity, 0) AS total_purchase_quantity,
+    COALESCE(sd.total_orders, 0) AS total_orders,
+    CASE 
+        WHEN hd.total_net_profit IS NULL THEN 0
+        WHEN hd.total_net_profit > 1000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_value_category
+FROM 
+    high_value_customers hd
+FULL OUTER JOIN ranked_customers hu ON hd.c_customer_sk = hu.c_customer_sk
+LEFT JOIN sales_data sd ON hu.c_customer_sk = sd.ws_item_sk
+ORDER BY 
+    hu.cd_gender, 
+    hu.c_customer_id;

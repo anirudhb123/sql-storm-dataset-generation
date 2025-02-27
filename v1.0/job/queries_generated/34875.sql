@@ -1,0 +1,60 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        ci.movie_id IN (SELECT id FROM aka_title WHERE kind_id = 1)  -- movies only
+    UNION ALL
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        actor_hierarchy ah ON ci.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id LIMIT 1)
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ci.movie_id) AS total_movies,
+    AVG(m.production_year) AS avg_year,
+    STRING_AGG(DISTINCT kc.keyword, ', ') FILTER (WHERE kc.keyword IS NOT NULL) AS keywords,
+    CASE 
+        WHEN AVG(m.production_year) IS NULL THEN 'No Productions'
+        WHEN AVG(m.production_year) < 2000 THEN 'Older'
+        ELSE 'Recent'
+    END AS production_category
+FROM 
+    actor_hierarchy ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) >= 5  -- at least 5 movies
+ORDER BY 
+    total_movies DESC, avg_year ASC
+LIMIT 
+    10;
+
+This SQL query achieves several objectives for performance benchmarking in a movie database context. It uses:
+- A recursive common table expression (CTE) to build a hierarchy of actors based on their movies.
+- Various joins including outer joins to gather keyword information.
+- Window functions to provide averages.
+- String aggregation with filtering to create a comma-separated list of keywords.
+- Conditional logic to categorize actors by production years.
+- Grouping and filtering to focus on actors with a significant filmography. 
+- Ordered results with a limit for efficient benchmarking.

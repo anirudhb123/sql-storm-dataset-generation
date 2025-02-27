@@ -1,0 +1,58 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.CreationDate IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId
+),
+
+AggregateStats AS (
+    SELECT 
+        COUNT(DISTINCT U.UserId) AS TotalUsers,
+        SUM(U.Reputation) AS TotalReputation,
+        SUM(U.PostCount) AS TotalPosts,
+        SUM(U.BadgeCount) AS TotalBadges,
+        SUM(U.VoteCount) AS TotalVotes,
+        COUNT(DISTINCT P.PostId) AS TotalPostsCount,
+        SUM(P.CommentCount) AS TotalComments,
+        SUM(P.UpvoteCount) AS TotalUpvotes,
+        SUM(P.DownvoteCount) AS TotalDownvotes
+    FROM 
+        UserStats U
+    JOIN 
+        PostStats P ON P.PostId IS NOT NULL
+)
+
+SELECT 
+    *
+FROM 
+    AggregateStats;

@@ -1,0 +1,45 @@
+
+WITH processed_strings AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        UPPER(c.c_email_address) AS uppercase_email,
+        LOWER(c.c_preferred_cust_flag) AS preferred_flag,
+        LENGTH(c.c_first_name) + LENGTH(c.c_last_name) AS name_length,
+        REPLACE(c.c_email_address, '@', '[at]') AS email_obfuscated,
+        TRIM(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS trimmed_full_name
+    FROM 
+        customer c
+),
+customer_stats AS (
+    SELECT 
+        ca.ca_city,
+        COUNT(DISTINCT p.p_promo_name) AS promo_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        MAX(cd.cd_dep_count) AS max_dependents,
+        MIN(cd.cd_dep_college_count) AS min_college_dependents,
+        c.c_customer_id  -- Added c_customer_id to allow for correct joining
+    FROM 
+        customer_demographics cd 
+        JOIN customer_address ca ON cd.cd_demo_sk = ca.ca_demo_sk  -- Corrected join condition
+        JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+        LEFT JOIN promotion p ON cd.cd_demo_sk = p.p_promo_sk
+    GROUP BY 
+        ca.ca_city, c.c_customer_id  -- Added c_customer_id to GROUP BY
+)
+SELECT 
+    ps.full_name,
+    ps.uppercase_email,
+    cs.ca_city,
+    cs.promo_count,
+    cs.avg_purchase_estimate,
+    cs.max_dependents,
+    cs.min_college_dependents
+FROM 
+    processed_strings ps
+JOIN 
+    customer_stats cs ON ps.c_customer_id = cs.c_customer_id  -- Changed to correct join reference
+WHERE 
+    ps.name_length > 20
+ORDER BY 
+    cs.avg_purchase_estimate DESC, ps.full_name ASC;

@@ -1,0 +1,44 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.movie_id ORDER BY a.production_year DESC) AS year_rank
+    FROM aka_title a
+    JOIN cast_info c ON a.id = c.movie_id
+    JOIN role_type r ON c.role_id = r.id
+    WHERE a.production_year IS NOT NULL
+),
+HighestRated AS (
+    SELECT 
+        m.movie_id,
+        AVG(m.rating) AS avg_rating
+    FROM movie_info m
+    WHERE m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY m.movie_id
+),
+FilteredCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT c.name) AS company_count
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    WHERE c.country_code IS NOT NULL
+    GROUP BY mc.movie_id
+    HAVING COUNT(DISTINCT c.name) > 1
+)
+
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.role,
+    h.avg_rating,
+    fc.company_count,
+    COALESCE(NULLIF(rm.production_year, 0), 'Unknown Year') AS safe_year
+FROM RankedMovies rm
+LEFT JOIN HighestRated h ON h.movie_id = rm.movie_id
+JOIN FilteredCompanies fc ON fc.movie_id = rm.movie_id
+WHERE rm.year_rank = 1
+  AND h.avg_rating IS NOT NULL
+  AND fc.company_count > 1
+ORDER BY h.avg_rating DESC, rm.production_year DESC;

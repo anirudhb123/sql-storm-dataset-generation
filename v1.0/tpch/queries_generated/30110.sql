@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, ps.ps_supplycost, 
+           p.p_name, p.p_brand,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), 
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE li.l_shipdate >= '2023-01-01' AND li.l_shipdate <= '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+NationSupplier AS (
+    SELECT n.n_name, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT psi.ps_partkey, p.p_name, p.p_brand, 
+       COALESCE(n.n_name, 'Unknown') AS nation_name,
+       SUM(CASE WHEN li.l_discount > 0 THEN li.l_extendedprice END) AS total_discounted_sales,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       MAX(sh.acctbal) AS max_supplier_acctbal,
+       CASE WHEN COUNT(o.o_orderkey) > 0 THEN AVG(o.o_totalprice) ELSE NULL END AS avg_total_price
+FROM PartSupplierInfo psi
+JOIN part p ON psi.ps_partkey = p.p_partkey
+LEFT JOIN `FilteredOrders` o ON o.o_orderkey = (SELECT l.l_orderkey 
+                                                  FROM lineitem l 
+                                                  WHERE l.l_partkey = psi.ps_partkey 
+                                                  LIMIT 1)
+LEFT JOIN SupplierHierarchy sh ON psi.ps_suppkey = sh.s_suppkey
+LEFT JOIN NationSupplier n ON n.n_name = (SELECT DISTINCT ns.n_name FROM nation ns WHERE ns.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = psi.ps_suppkey))
+GROUP BY psi.ps_partkey, p.p_name, p.p_brand, nation_name
+HAVING total_discounted_sales IS NOT NULL OR max_supplier_acctbal > 2000
+ORDER BY total_discounted_sales DESC, order_count DESC;

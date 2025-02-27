@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 500
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        CUME_DIST() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+),
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        COALESCE(SUM(od.total_revenue), 0) AS total_spent,
+        COUNT(od.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    r.r_name,
+    SUM(cr.total_spent) AS regional_spending,
+    GROUP_CONCAT(DISTINCT CONCAT(s.s_name, ' (Level ', sh.level, ')')) AS suppliers
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN CustomerRevenue cr ON c.c_custkey = cr.c_custkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = c.c_nationkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+WHERE cr.total_spent > 1000 OR cr.order_count > 5
+GROUP BY r.r_name
+HAVING regional_spending IS NOT NULL
+ORDER BY regional_spending DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+PartSuppliers AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS supply_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey AND o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.total_spent
+    FROM CustomerOrders c
+    WHERE c.total_spent > (
+        SELECT AVG(total_spent) FROM CustomerOrders
+    )
+),
+NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT p.p_name, ps.ps_availqty, ps.ps_supplycost, sh.s_name,
+       nc.n_name, tc.c_name, tc.total_spent,
+       CASE WHEN ps.ps_availqty < 100 THEN 'Low Stock' ELSE 'Sufficient Stock' END AS stock_status,
+       ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY ps.ps_supplycost DESC) AS rank_within_nation
+FROM PartSuppliers ps
+JOIN SupplierHierarchy sh ON ps.ps_partkey IN (
+    SELECT l.l_partkey
+    FROM lineitem l
+    WHERE l.l_returnflag = 'R'
+)
+JOIN NationSummary nc ON sh.s_nationkey = nc.n_nationkey
+JOIN TopCustomers tc ON tc.c_custkey = (
+    SELECT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderkey = (SELECT MIN(o_orderkey) FROM orders)
+)
+WHERE ps.supply_rank <= 5
+ORDER BY nc.n_name, ps.ps_supplycost DESC;

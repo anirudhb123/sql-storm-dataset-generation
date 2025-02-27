@@ -1,0 +1,37 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CAST(s.s_name AS VARCHAR(100)) AS full_name, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000.00
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           CONCAT(sh.full_name, ' -> ', s.s_name) AS full_name, 
+           sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE sh.level < 3
+),
+sales_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+    HAVING SUM(o.o_totalprice) > 1000.00
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+       AVG(s.s_acctbal) AS avg_account_balance, 
+       COALESCE(MAX(ss.total_spent), 0) AS max_customer_spending,
+       COALESCE(AVG(ss.order_count), 0) AS avg_orders_per_customer
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN sales_summary ss ON ss.c_nationkey = n.n_nationkey
+WHERE EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey AND ps.ps_availqty > 0)
+GROUP BY n.n_name
+HAVING AVG(s.s_acctbal) > 3000.00 OR COUNT(DISTINCT ss.c_custkey) > 10
+ORDER BY n.n_name ASC;

@@ -1,0 +1,42 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+)
+SELECT
+    c.c_name AS customer_name,
+    SUM(oi.line_total) AS total_order_value,
+    r.r_name AS region_name,
+    COUNT(DISTINCT oi.s_suppkey) AS supplier_count,
+    MAX(sub.total_acctbal) AS max_supplier_acctbal
+FROM customer c
+JOIN orders o ON c.c_custkey = o.o_custkey
+JOIN (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        (l.l_extendedprice * (1 - l.l_discount)) AS line_total
+    FROM lineitem l
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '30' DAY
+) oi ON o.o_orderkey = oi.l_orderkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier_hierarchy sh ON c.c_nationkey = sh.s_nationkey
+LEFT JOIN (
+    SELECT s_nationkey, SUM(s_acctbal) AS total_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+) sub ON n.n_nationkey = sub.s_nationkey
+WHERE o.o_orderstatus = 'O'
+GROUP BY c.c_name, r.r_name
+HAVING COUNT(DISTINCT oi.l_partkey) > 5
+ORDER BY total_order_value DESC
+LIMIT 10;

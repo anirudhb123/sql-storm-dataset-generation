@@ -1,0 +1,63 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        CASE 
+            WHEN u.Reputation IS NULL OR u.Reputation <= 0 THEN 'New User'
+            ELSE 'Veteran User'
+        END AS UserType
+    FROM Users u
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastChangeDate,
+        STRING_AGG(DISTINCT pht.Name, ', ') FILTER (WHERE pht.Name IS NOT NULL) AS ChangedFields
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.ReputationRank,
+    ru.UserType,
+    rp.PostId,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS PostCreationDate,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(ph.LastChangeDate, 'No changes') AS LastPostChange,
+    COALESCE(ph.ChangedFields, 'No changes') AS FieldsChanged
+FROM RankedUsers ru
+LEFT JOIN RecentPosts rp ON ru.UserId = rp.OwnerUserId AND rp.RecentPostRank = 1
+LEFT JOIN PostStats ps ON rp.PostId = ps.PostId
+LEFT JOIN PostHistories ph ON rp.PostId = ph.PostId
+WHERE ru.UserType = 'Veteran User'
+  AND (ps.UpVotes - ps.DownVotes) > 10
+ORDER BY ru.Reputation DESC, rp.PostCreationDate DESC
+LIMIT 100;

@@ -1,0 +1,46 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        c.c_email_address,
+        c.c_birth_month,
+        c.c_birth_year,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+AggregateStats AS (
+    SELECT 
+        cd.cd_gender,
+        SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_count,
+        SUM(CASE WHEN cd.cd_marital_status = 'S' THEN 1 ELSE 0 END) AS single_count,
+        COUNT(*) AS total_customers,
+        AVG(EXTRACT(YEAR FROM CURRENT_DATE) - cd.c_birth_year) AS average_age
+    FROM 
+        CustomerDetails cd
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    a.cd_gender,
+    a.married_count,
+    a.single_count,
+    a.total_customers,
+    a.average_age,
+    COALESCE(ROUND((a.married_count::decimal / a.total_customers) * 100, 2), 0) AS married_percentage,
+    COALESCE(ROUND((a.single_count::decimal / a.total_customers) * 100, 2), 0) AS single_percentage
+FROM 
+    AggregateStats a
+ORDER BY 
+    a.cd_gender;

@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        AVG(v.BountyAmount) OVER (PARTITION BY p.OwnerUserId) AS AvgBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9  -- BountyClose
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+), FilteredPosts AS (
+    SELECT 
+        rp.Id, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.CommentCount,
+        rp.UserRank,
+        rp.AvgBounty,
+        u.DisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        COALESCE(rp.AvgBounty, 0) > 0 OR rp.CommentCount > 10
+)
+SELECT 
+    fp.Id AS PostId, 
+    fp.Title, 
+    fp.CreationDate, 
+    fp.Score, 
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.UserRank,
+    fp.DisplayName,
+    CASE 
+        WHEN fp.Score > 100 THEN 'Hot'
+        WHEN fp.Score BETWEEN 50 AND 100 THEN 'Warm'
+        ELSE 'Cold'
+    END AS PostStatus
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.UserRank ASC, 
+    fp.CreationDate DESC;

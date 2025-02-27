@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TotalSales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+AggregateData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    a.p_partkey,
+    a.p_name,
+    a.total_available,
+    a.avg_supply_cost,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(ts.total_sales, 0) AS total_sales
+FROM 
+    AggregateData a
+LEFT JOIN 
+    RankedSuppliers rs ON a.p_partkey = rs.ps_partkey AND rs.rnk = 1
+LEFT JOIN 
+    TotalSales ts ON a.p_partkey = ts.o_orderkey
+WHERE 
+    a.total_available > 0
+    AND (a.avg_supply_cost IS NOT NULL OR ts.total_sales IS NOT NULL)
+ORDER BY 
+    a.avg_supply_cost DESC, 
+    total_sales DESC;

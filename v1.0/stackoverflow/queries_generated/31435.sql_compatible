@@ -1,0 +1,73 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, DisplayName, Reputation, 0 AS Level
+    FROM Users
+    WHERE Id IN (SELECT DISTINCT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT u.Id, u.DisplayName, u.Reputation, uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Id = uh.Id
+    WHERE u.Reputation < uh.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        pb.BadgeCount,
+        COALESCE(ut.DisplayName, 'Unknown') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM Posts p
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS BadgeCount 
+        FROM Badges 
+        GROUP BY UserId
+    ) pb ON p.OwnerUserId = pb.UserId
+    LEFT JOIN Users ut ON p.OwnerUserId = ut.Id
+    WHERE p.CreationDate >= '2022-01-01'
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY ph.CreationDate DESC) AS ClosedRank
+    FROM Posts p 
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+),
+PopularTags AS (
+    SELECT
+        SUBSTRING(Tags, 2, LENGTH(Tags) - 2) AS Tag,
+        COUNT(*) AS UsageCount
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY SUBSTRING(Tags, 2, LENGTH(Tags) - 2)
+    ORDER BY UsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.BadgeCount,
+    cp.ClosedDate,
+    cp.UserDisplayName AS ClosedBy,
+    cp.Comment AS CloseReason,
+    uh.Level AS UserLevel,
+    (SELECT STRING_AGG(Tag, ', ') FROM PopularTags) AS TopTags
+FROM PostStatistics ps
+LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+LEFT JOIN UserHierarchy uh ON ps.OwnerUserId = uh.Id
+WHERE ps.RN = 1 
+ORDER BY ps.Score DESC, ps.ViewCount DESC
+LIMIT 50;

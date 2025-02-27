@@ -1,0 +1,80 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COALESCE(ol.total_revenue, 0) AS total_revenue,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    COALESCE(rs.s_name, 'Unknown Supplier') AS top_supplier,
+    CASE 
+        WHEN cs.order_count > 0 THEN 'Frequent Buyer' 
+        ELSE 'Occasional Buyer' 
+    END AS customer_segment
+FROM 
+    CustomerOrders cs
+JOIN 
+    customer c ON cs.c_custkey = c.c_custkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1 AND n.n_nationkey = (SELECT n2.n_nationkey FROM nation n2 WHERE n2.n_name = n.n_name)
+LEFT JOIN 
+    LineItemStats ol ON ol.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    PartSupplierDetails psd ON psd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = (SELECT ps2.ps_suppkey FROM partsupp ps2 WHERE ps2.ps_partkey = psd.p_partkey LIMIT 1))
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    c.c_acctbal IS NOT NULL
+ORDER BY 
+    total_revenue DESC, 
+    total_spent DESC;

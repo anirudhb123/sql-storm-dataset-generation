@@ -1,0 +1,90 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.title IS NOT NULL AND mt.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        me.linked_movie_id,
+        at.title,
+        mh.depth + 1,
+        path || at.title
+    FROM 
+        movie_link me
+    JOIN 
+        aka_title at ON at.id = me.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = me.movie_id
+    WHERE 
+        mh.depth < 3 
+),
+PersonCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    JOIN 
+        role_type rt ON rt.id = ci.role_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.depth,
+        mk.keywords,
+        COALESCE(p.actor_name, 'Unknown') AS lead_actor,
+        COALESCE(rt.role, 'Unknown Role') AS role,
+        COUNT(DISTINCT p.movie_id) OVER (PARTITION BY mh.movie_id) AS unique_actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        PersonCast p ON p.movie_id = mh.movie_id AND p.actor_rank = 1
+    LEFT JOIN 
+        MovieKeywords mk ON mk.movie_id = mh.movie_id
+    LEFT JOIN 
+        role_type rt ON rt.id = p.role_id 
+    WHERE 
+        mh.depth IN (1, 2)
+)
+SELECT 
+    fm.title,
+    fm.keywords,
+    fm.lead_actor,
+    fm.role,
+    fm.unique_actor_count,
+    CASE 
+        WHEN fm.unique_actor_count > 5 THEN 'Large Cast'
+        WHEN fm.unique_actor_count BETWEEN 3 AND 5 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    'Debug info: ' || COALESCE(fm.lead_actor, 'No Actor') || ' in ' || fm.title AS debug_info
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.keywords IS NOT NULL AND 
+    LOWER(fm.keywords) LIKE '%action%' 
+ORDER BY 
+    fm.unique_actor_count DESC,
+    fm.title;

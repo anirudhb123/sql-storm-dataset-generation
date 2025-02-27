@@ -1,0 +1,65 @@
+WITH SupplierDetails AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS supplier_nation,
+        s.s_address,
+        s.s_phone,
+        s.s_acctbal,
+        TRIM(CONCAT(s.s_comment, ' ', n.n_comment)) AS combined_comment
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+PartDetails AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        LPAD(CAST(p.p_partkey AS VARCHAR), 5, '0') AS padded_partkey
+    FROM
+        part p
+),
+OrderInfo AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name AS customer_name,
+        c.c_acctbal AS customer_acctbal,
+        CONCAT(SUBSTRING(c.c_name FROM 1 FOR 3), '-', SUBSTRING(c.c_address FROM 1 FOR 5)) AS customer_id
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+)
+SELECT
+    sd.s_name,
+    sd.supplier_nation,
+    pd.p_name,
+    pd.p_type,
+    oi.o_orderkey,
+    oi.o_totalprice,
+    oi.o_orderdate,
+    oi.customer_name,
+    oi.customer_acctbal,
+    sd.combined_comment
+FROM
+    SupplierDetails sd
+JOIN
+    partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN
+    lineitem li ON ps.ps_partkey = li.l_partkey
+JOIN
+    OrderInfo oi ON li.l_orderkey = oi.o_orderkey
+WHERE
+    oi.o_orderdate >= DATE '1997-01-01' AND oi.o_orderdate < DATE '1997-12-31'
+ORDER BY
+    sd.s_name, oi.o_orderdate DESC;

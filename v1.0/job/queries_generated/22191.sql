@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_ranking AS (
+    -- CTE to recursively find movie connections via linked_movie_id
+    SELECT 
+        ml.movie_id, 
+        COUNT(DISTINCT ml.linked_movie_id) AS link_count
+    FROM 
+        movie_link ml
+    GROUP BY 
+        ml.movie_id
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id, 
+        mr.link_count + COUNT(DISTINCT ml.linked_movie_id)
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_ranking mr ON ml.linked_movie_id = mr.movie_id
+    GROUP BY 
+        ml.movie_id, mr.link_count
+),
+-- CTE to extract detailed movie information
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COALESCE(i.info, 'No Info') AS additional_info,
+        m.link_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info m ON t.id = m.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, STRING_AGG(info, ', ') AS info
+         FROM movie_info
+         GROUP BY movie_id) i ON t.id = i.movie_id
+    JOIN 
+        (SELECT movie_id, SUM(link_count) AS link_count 
+         FROM movie_ranking 
+         GROUP BY movie_id) r ON t.id = r.movie_id
+)
+-- Main query to retrieve titles with complex conditions
+SELECT 
+    md.title,
+    md.production_year,
+    md.additional_info,
+    CASE 
+        WHEN md.link_count IS NULL THEN 'No Links'
+        WHEN md.link_count > 10 THEN 'Highly Linked'
+        ELSE 'Moderately Linked'
+    END AS link_category,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    MAX(CASE WHEN ca.role_id IS NOT NULL THEN ca.note ELSE 'Unassigned' END) AS role_notes
+FROM 
+    movie_details md
+LEFT JOIN 
+    complete_cast cc ON md.title = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    role_type ca ON ci.role_id = ca.id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023 
+    AND (md.additional_info LIKE '%blockbuster%' OR md.additional_info IS NULL)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM aka_title ak
+        WHERE ak.title = md.title
+        AND ak.production_year < 2010
+    )
+GROUP BY 
+    md.title, 
+    md.production_year, 
+    md.additional_info,
+    md.link_count
+ORDER BY 
+    md.link_count DESC, 
+    md.production_year DESC
+LIMIT 50;

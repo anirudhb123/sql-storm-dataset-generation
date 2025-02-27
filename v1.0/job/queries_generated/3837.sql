@@ -1,0 +1,54 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) as rn
+    FROM 
+        aka_title at
+    WHERE 
+        at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieDetails AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        string_agg(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mi.info_type_id) AS info_count,
+        SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS has_production_note
+    FROM 
+        title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    GROUP BY 
+        mt.id
+),
+TopMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.company_names,
+        m.info_count,
+        m.has_production_note,
+        rt.rn
+    FROM 
+        MovieDetails m
+    JOIN 
+        RankedTitles rt ON m.title = rt.title
+    WHERE 
+        rt.rn <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.company_names,
+    tm.info_count,
+    COALESCE(tm.has_production_note, 0) AS has_production_note
+FROM 
+    TopMovies tm
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title;

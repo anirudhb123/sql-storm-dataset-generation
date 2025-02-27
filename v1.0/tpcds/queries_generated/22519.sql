@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+), 
+ItemSummary AS (
+    SELECT 
+        i_item_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_sales_price) AS total_sales,
+        AVG(ws_sales_price) AS average_price
+    FROM 
+        web_sales
+    INNER JOIN 
+        item ON web_sales.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        i_item_sk
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics
+    INNER JOIN 
+        customer ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status
+)
+SELECT 
+    is.ItemID,
+    ISNULL(rs.highest_price, 0) AS highest_sale_price,
+    ISNULL(is.total_sales, 0) AS total_sales,
+    ISNULL(cd.customer_count, 0) AS total_customers,
+    CASE 
+        WHEN cd.customer_count > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status,
+    COALESCE(ROUND(100.0 * is.total_sales / NULLIF(NULLIF(is.order_count, 0), 0), 2), 0) AS sales_per_order
+FROM 
+    ItemSummary is
+LEFT JOIN (
+    SELECT 
+        ws_item_sk AS ItemID,
+        MAX(ws_sales_price) AS highest_price
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+) rs ON is.i_item_sk = rs.ItemID
+LEFT JOIN CustomerDemographics cd ON is.i_item_sk = cd.cd_demo_sk
+ORDER BY 
+    sales_per_order DESC, total_sales DESC 
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey, 0 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s2.s_suppkey, s2.s_name, s2.s_acctbal, s2.nationkey, sh.depth + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.nationkey = sh.nationkey
+    WHERE s2.s_acctbal > sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+),
+SupplierMaxPrice AS (
+    SELECT ps.s_suppkey, MAX(l.l_extendedprice * (1 - l.l_discount)) AS max_price
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY ps.s_suppkey
+)
+SELECT r.r_name, 
+       COALESCE(SUM(so.max_price), 0) AS total_max_price,
+       AVG(ch.c_acctbal) AS avg_acctbal,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       ROW_NUMBER() OVER (ORDER BY SUM(so.max_price) DESC) AS rank_region
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN RankedOrders o ON sh.nationkey = o.o_orderstatus
+LEFT JOIN SupplierMaxPrice so ON s.s_suppkey = so.s_suppkey
+LEFT JOIN customer ch ON s.s_nationkey = ch.c_nationkey
+WHERE r.r_name IS NOT NULL
+  AND sh.depth < 5
+  AND o.o_orderdate >= (SELECT MAX(o2.o_orderdate) - INTERVAL '30 days' FROM orders o2)
+GROUP BY r.r_name
+HAVING AVG(ch.c_acctbal) IS NOT NULL
+ORDER BY total_max_price DESC, avg_acctbal DESC;

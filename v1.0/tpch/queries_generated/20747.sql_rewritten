@@ -1,0 +1,52 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= (SELECT MIN(o2.o_orderdate) FROM orders o2 WHERE o2.o_orderstatus = 'F')
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN CustomerOrders co ON co.o_orderkey < o.o_orderkey
+    WHERE o.o_orderdate < (SELECT MIN(o2.o_orderdate) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+TopRegions AS (
+    SELECT r.r_regionkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_regionkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(total_sales) FROM (
+            SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+            FROM lineitem l
+            JOIN orders o ON l.l_orderkey = o.o_orderkey
+            GROUP BY o.o_orderkey
+        ) AS avg_sales
+    )
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal != 0
+    ORDER BY s.s_acctbal DESC
+    LIMIT 5
+)
+SELECT 
+    co.c_name,
+    SUM(co.o_totalprice) AS total_spent,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returned_orders,
+    COALESCE(TotalSales.total_sales, 0) AS total_sales_by_region
+FROM CustomerOrders co
+LEFT JOIN lineitem l ON co.o_orderkey = l.l_orderkey
+LEFT JOIN TopRegions tr ON l.l_suppkey = tr.r_regionkey
+LEFT JOIN FilteredSuppliers fs ON co.c_custkey = fs.s_suppkey
+WHERE co.o_orderdate BETWEEN '1996-01-01' AND cast('1998-10-01' as date)
+GROUP BY co.c_name
+HAVING total_spent > 10000 AND COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY total_spent DESC, co.c_name;

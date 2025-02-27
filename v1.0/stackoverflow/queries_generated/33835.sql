@@ -1,0 +1,67 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, ParentId, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(ac.AcceptedAnswerId, 'No accepted answer') AS AcceptedAnswerStatus,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        MAX(b.Date) AS LastBadgeDate,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Posts p
+    LEFT JOIN Posts ac ON ac.Id = p.AcceptedAnswerId
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN Badges b ON b.UserId = p.OwnerUserId
+    GROUP BY p.Id, p.Title, p.ViewCount, p.Score, ac.AcceptedAnswerId
+),
+PostRanked AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.ViewCount,
+        pm.Score,
+        pm.AcceptedAnswerStatus,
+        pm.CommentCount,
+        pm.VoteCount,
+        pm.LastBadgeDate,
+        pm.HighestBadgeClass,
+        RANK() OVER (PARTITION BY pm.HighestBadgeClass ORDER BY pm.Score DESC) AS ScoreRank
+    FROM PostMetrics pm
+),
+FinalResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.Score,
+        r.AcceptedAnswerStatus,
+        r.CommentCount,
+        r.VoteCount,
+        r.LastBadgeDate,
+        r.HighestBadgeClass,
+        CASE 
+            WHEN r.ScoreRank <= 10 THEN 'Top 10'
+            WHEN r.ScoreRank BETWEEN 11 AND 50 THEN 'Top 50'
+            ELSE 'Other'
+        END AS ScoreCategory
+    FROM PostRanked r
+)
+SELECT 
+    f.*,
+    ph.Level AS PostHierarchyLevel
+FROM FinalResults f
+LEFT JOIN RecursivePostHierarchy ph ON f.PostId = ph.Id
+WHERE f.Score > 5
+ORDER BY f.HighestBadgeClass, f.Score DESC, ph.Level
+OPTION (MAXRECURSION 100);

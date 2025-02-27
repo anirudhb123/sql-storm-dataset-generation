@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(DISTINCT m.company_id) OVER (PARTITION BY t.id) AS total_companies
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_companies m ON t.movie_id = m.movie_id
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT
+        a.person_id,
+        n.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN ci.person_role_id = 1 THEN 1 ELSE 0 END) AS lead_roles
+    FROM
+        cast_info ci
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    JOIN
+        name n ON a.person_id = n.imdb_id
+    GROUP BY
+        a.person_id, n.name
+)
+SELECT
+    m.movie_id,
+    m.title,
+    m.production_year,
+    ad.actor_name,
+    ad.total_movies,
+    ad.lead_roles,
+    COALESCE(m.total_companies, 0) AS total_companies,
+    CASE
+        WHEN ad.total_movies > 10 THEN 'Veteran'
+        WHEN ad.total_movies BETWEEN 5 AND 10 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS actor_experience,
+    CONCAT('Movie: ', m.title, ', Year: ', m.production_year) AS description
+FROM
+    RankedMovies m
+LEFT JOIN
+    ActorDetails ad ON m.movie_id = ad.person_id
+WHERE
+    m.title_rank <= 5 -- considering top 5 movies per year
+    AND m.production_year BETWEEN 2000 AND 2023
+ORDER BY
+    m.production_year DESC, ad.lead_roles DESC, m.title;

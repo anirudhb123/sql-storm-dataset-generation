@@ -1,0 +1,60 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 5000 AND sh.hierarchy_level < 5
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+PartSupply AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TopNations AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        AVG(c.c_acctbal) AS avg_account_balance
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT c.c_custkey) > 10
+)
+SELECT 
+    sh.s_name AS Supplier_Name,
+    cos.c_name AS Customer_Name,
+    pes.p_name AS Part_Name,
+    pes.total_available AS Available_Stock,
+    pes.total_supply_cost AS Supply_Cost,
+    tn.n_name AS Nation_Name,
+    cos.order_count AS Total_Orders,
+    cos.total_spent AS Total_Spent,
+    tn.customer_count AS Customers_In_Nation,
+    tn.avg_account_balance AS Avg_Balance
+FROM SupplierHierarchy sh
+JOIN CustomerOrderStats cos ON sh.s_nationkey = cos.c_nationkey
+JOIN PartSupply pes ON pes.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sh.s_suppkey)
+JOIN TopNations tn ON tn.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = sh.s_nationkey)
+WHERE cos.spending_rank <= 5
+ORDER BY tn.customer_count DESC, cos.total_spent DESC;

@@ -1,0 +1,73 @@
+
+WITH RecursiveCustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_gender
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+BaseSalesData AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+),
+SalesInfo AS (
+    SELECT 
+        rci.c_customer_sk,
+        rci.c_first_name,
+        rci.c_last_name,
+        bsd.total_profit,
+        bsd.order_count,
+        bsd.profit_rank,
+        CASE 
+            WHEN bsd.total_profit > (SELECT AVG(total_profit) FROM BaseSalesData) THEN 'Above Average'
+            WHEN bsd.total_profit < (SELECT AVG(total_profit) FROM BaseSalesData) THEN 'Below Average'
+            ELSE 'Average'
+        END AS profit_category
+    FROM 
+        RecursiveCustomerInfo rci
+    LEFT JOIN 
+        BaseSalesData bsd ON rci.c_customer_sk = bsd.ws_bill_customer_sk
+)
+SELECT 
+    s.c_first_name,
+    s.c_last_name,
+    s.cd_gender,
+    s.profit_category,
+    COALESCE(s.total_profit, 0) AS total_profit,
+    COALESCE(s.order_count, 0) AS order_count,
+    CASE 
+        WHEN s.rank_by_gender IS NULL THEN 'No Orders'
+        ELSE 'Has Orders'
+    END AS order_status
+FROM 
+    SalesInfo s
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = s.c_customer_sk)
+WHERE 
+    s.order_count > 0 OR s.total_profit IS NULL
+ORDER BY 
+    CASE 
+        WHEN s.profit_category = 'Above Average' THEN 1
+        WHEN s.profit_category = 'Average' THEN 2
+        ELSE 3
+    END,
+    s.c_last_name ASC,
+    s.c_first_name ASC
+LIMIT 100
+OFFSET 0;

@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ship_date_sk,
+        ws.item_sk,
+        SUM(ws.quantity) AS total_quantity,
+        SUM(ws.net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ship_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+        AND dd.d_week_seq IS NOT NULL
+    GROUP BY
+        ws.web_site_sk, ws.ship_date_sk, ws.item_sk
+),
+HighValueItems AS (
+    SELECT
+        rg.web_site_sk,
+        rg.item_sk,
+        rg.total_quantity,
+        rg.total_sales
+    FROM
+        RankedSales rg
+    WHERE
+        rg.sales_rank <= 10
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    cv.web_site_id,
+    HV.total_quantity,
+    HV.total_sales,
+    COALESCE(SUM(cr.return_quantity), 0) AS total_returns,
+    (SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_demo_sk = c.c_current_cdemo_sk) AS demo_count,
+    CASE 
+        WHEN HV.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_site cv ON cv.web_site_sk IN (SELECT DISTINCT web_site_sk FROM HighValueItems)
+LEFT JOIN 
+    HighValueItems HV ON HV.item_sk = (SELECT i.item_sk FROM item i WHERE i.i_item_id = 'ITEM123456')
+LEFT JOIN 
+    store_returns cr ON c.c_customer_sk = cr.sr_customer_sk AND cr.sr_returned_date_sk = dd.d_date_sk
+CROSS JOIN 
+    date_dim dd
+WHERE 
+    (c.c_birth_year < 1980 OR c.c_birth_year IS NULL)
+    AND (ca.ca_state IN ('NY', 'CA') OR ca.ca_state IS NULL)
+GROUP BY 
+    c.c_customer_id, ca.ca_city, cv.web_site_id, HV.total_quantity, HV.total_sales
+HAVING 
+    SUM(cr.return_quantity) < 5
+ORDER BY 
+    total_sales DESC NULLS LAST;

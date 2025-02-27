@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY m_info.info_type_id DESC) AS rank_year,
+        COUNT(ci.id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_info m_info ON t.id = m_info.movie_id
+    WHERE 
+        m_info.info_type_id IN (SELECT id FROM info_type WHERE info LIKE 'Plot' OR info LIKE 'Summary')
+    AND 
+        t.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        rank_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_year <= 5 
+),
+MovieCast AS (
+    SELECT 
+        cm.movie_id,
+        COUNT(cc.person_id) AS total_cast,
+        MAX(CASE WHEN r.role = 'Lead' THEN cc.person_id ELSE NULL END) AS lead_actor,
+        COUNT(DISTINCT c.person_id) FILTER (WHERE c.person_role_id IS NOT NULL) AS non_zero_roles
+    FROM 
+        complete_cast cm 
+    JOIN 
+        cast_info cc ON cm.movie_id = cc.movie_id
+    LEFT JOIN 
+        role_type r ON cc.role_id = r.id
+    GROUP BY 
+        cm.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    mc.total_cast,
+    mc.lead_actor,
+    COALESCE(NULLIF(mc.non_zero_roles, 0), 'No Roles') AS non_zero_roles,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    CASE
+        WHEN mc.lead_actor IS NOT NULL THEN 'Lead Actor Present'
+        ELSE 'No Lead Actor'
+    END AS lead_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieCast mc ON tm.title_id = mc.movie_id
+LEFT JOIN 
+    cast_info cc ON mc.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+GROUP BY 
+    tm.title, tm.production_year, mc.total_cast, mc.lead_actor, mc.non_zero_roles
+ORDER BY 
+    tm.production_year DESC, tm.title ASC;

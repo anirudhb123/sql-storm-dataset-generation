@@ -1,0 +1,83 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+TopPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 0 AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseReasonCount
+    FROM 
+        Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id
+),
+TopClosedPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.Score,
+        cp.CloseReasonCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN ClosedPosts cp ON tp.PostId = cp.PostId
+    WHERE 
+        tp.PostRank <= 5
+),
+FinalResult AS (
+    SELECT 
+        tr.UserId,
+        tr.DisplayName,
+        tr.Reputation,
+        tcp.Title,
+        tcp.Score,
+        tcp.OwnerDisplayName,
+        COALESCE(tcp.CloseReasonCount, 0) AS CloseReasonCount
+    FROM 
+        UserReputation tr
+    LEFT JOIN TopClosedPosts tcp ON tr.UserId = tcp.OwnerDisplayName
+    WHERE 
+        tr.ReputationRank <= 10
+)
+SELECT 
+    COALESCE(fr.UserId, -1) AS UserId,
+    COALESCE(fr.DisplayName, 'Unknown') AS DisplayName,
+    COALESCE(fr.Reputation, 0) AS Reputation,
+    COALESCE(fr.Title, 'No Title') AS Title,
+    COALESCE(fr.Score, 0) AS Score,
+    COALESCE(fr.OwnerDisplayName, 'Anonymous') AS OwnerDisplayName,
+    CASE 
+        WHEN fr.CloseReasonCount IS NULL THEN 'Not Closed'
+        ELSE 'Closed with Reasons: ' || fr.CloseReasonCount::text
+    END AS PostStatus
+FROM 
+    FinalResult fr
+ORDER BY 
+    fr.Reputation DESC, fr.Score DESC;

@@ -1,0 +1,62 @@
+
+WITH OrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSpenders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        os.total_spent,
+        os.order_count,
+        os.last_order_date
+    FROM 
+        (SELECT * FROM OrderSummary ORDER BY total_spent DESC LIMIT 10) os
+    JOIN 
+        customer c ON os.c_custkey = c.c_custkey
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        lineitem l ON ps.ps_suppkey = l.l_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty
+)
+SELECT 
+    ts.c_name,
+    ts.total_spent,
+    ts.order_count,
+    ts.last_order_date,
+    pd.p_name,
+    pd.total_quantity_sold,
+    pd.ps_supplycost,
+    pd.ps_availqty
+FROM 
+    TopSpenders ts
+JOIN 
+    ProductDetails pd ON ts.c_custkey IN (
+        SELECT o.o_custkey FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_shipdate > DATE '1998-10-01' - INTERVAL '1 year'
+    )
+ORDER BY 
+    ts.total_spent DESC, pd.total_quantity_sold DESC;

@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY P.Tags ORDER BY P.CreationDate DESC) AS RankPerTag
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 
+),
+TopRankedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Body,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.AnswerCount,
+        RP.OwnerDisplayName,
+        RP.OwnerReputation,
+        STRING_AGG(T.TagName, ', ') AS RelatedTags
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Tags T ON RP.Tags LIKE '%' || T.TagName || '%'
+    WHERE 
+        RP.RankPerTag <= 3 
+    GROUP BY 
+        RP.PostId, RP.Title, RP.Body, RP.CreationDate, RP.Score, RP.ViewCount, RP.AnswerCount, RP.OwnerDisplayName, RP.OwnerReputation
+),
+UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        (SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END)) AS NetScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    TRP.PostId,
+    TRP.Title,
+    TRP.Body,
+    TRP.CreationDate,
+    TRP.Score,
+    TRP.ViewCount,
+    TRP.AnswerCount,
+    TRP.OwnerDisplayName,
+    TRP.OwnerReputation,
+    TRP.RelatedTags,
+    US.UpVotesCount,
+    US.DownVotesCount,
+    US.NetScore
+FROM 
+    TopRankedPosts TRP
+JOIN 
+    UserScores US ON TRP.OwnerDisplayName = US.DisplayName
+ORDER BY 
+    TRP.CreationDate DESC
+LIMIT 
+    10;

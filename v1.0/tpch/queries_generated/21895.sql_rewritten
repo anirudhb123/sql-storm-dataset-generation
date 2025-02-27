@@ -1,0 +1,92 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rn
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > 100
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING 
+        total_cost > 1000.00
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        COUNT(l.l_orderkey) AS lineitem_count, 
+        MIN(l.l_extendedprice) AS min_price,
+        MAX(l.l_extendedprice) AS max_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderstatus IN ('O', 'F') 
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        rc.c_custkey,
+        COUNT(DISTINCT fo.o_orderkey) AS order_count,
+        SUM(fo.lineitem_count) AS total_lineitems,
+        AVG(fo.min_price) AS average_min_price,
+        AVG(fo.max_price) AS average_max_price
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        FilteredOrders fo ON rc.c_custkey = fo.o_custkey
+    GROUP BY 
+        rc.c_custkey
+),
+NationSupplierStats AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(sd.total_cost) AS average_supplier_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.order_count,
+    cs.total_lineitems,
+    ns.n_name,
+    ns.supplier_count,
+    ns.average_supplier_cost,
+    CASE 
+        WHEN cs.order_count > 5 THEN 'Frequent Customer'
+        WHEN cs.order_count IS NULL THEN 'No Orders'
+        ELSE 'Occasional Customer'
+    END AS customer_type
+FROM 
+    CustomerOrderStats cs
+FULL OUTER JOIN 
+    NationSupplierStats ns ON cs.c_custkey IS NULL OR ns.supplier_count IS NULL
+WHERE 
+    COALESCE(cs.total_lineitems, 0) > 0
+    OR COALESCE(ns.supplier_count, 0) > 0
+ORDER BY 
+    customer_type DESC, total_lineitems DESC, average_supplier_cost DESC;

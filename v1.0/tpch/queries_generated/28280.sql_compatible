@@ -1,0 +1,27 @@
+
+WITH RegionCustomer AS (
+    SELECT r.r_name, c.c_name, c.c_acctbal, c.c_mktsegment
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE p.p_type LIKE '%brass%'
+),
+AggregateData AS (
+    SELECT r_name, 
+           COUNT(DISTINCT c_name) AS customer_count, 
+           SUM(c_acctbal) AS total_acctbal,
+           AVG(c_acctbal) AS avg_acctbal,
+           ARRAY_AGG(DISTINCT c_mktsegment) AS segment_types
+    FROM RegionCustomer
+    GROUP BY r_name
+)
+SELECT r_name, customer_count, total_acctbal, avg_acctbal, 
+       STRING_AGG(DISTINCT segment_types, ', ') AS market_segments
+FROM AggregateData
+GROUP BY r_name, customer_count, total_acctbal, avg_acctbal
+ORDER BY total_acctbal DESC;

@@ -1,0 +1,89 @@
+
+WITH TagFrequency AS (
+    SELECT 
+        UNNEST(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+
+TopTags AS (
+    SELECT 
+        Tag, 
+        TagCount, 
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM 
+        TagFrequency
+),
+
+UsersWithBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, B.Name
+    HAVING 
+        COUNT(B.Id) > 0
+),
+
+PostsWithComments AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        COUNT(C.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT C.UserDisplayName) AS CommentAuthors
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.Body
+),
+
+ActiveUsers AS (
+    SELECT DISTINCT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.LastAccessDate
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    B.BadgeName,
+    COUNT(DISTINCT P.PostId) AS TotalPosts,
+    SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+    STRING_AGG(DISTINCT T.Tag, ', ') AS AssociatedTags,
+    RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+FROM 
+    ActiveUsers U
+LEFT JOIN 
+    UsersWithBadges B ON U.UserId = B.UserId
+LEFT JOIN 
+    PostsWithComments P ON U.UserId = P.PostId
+LEFT JOIN 
+    TagFrequency T ON P.Tags ILIKE '%' || T.Tag || '%'
+GROUP BY 
+    U.UserId, U.DisplayName, B.BadgeName
+ORDER BY 
+    UserRank, U.DisplayName;

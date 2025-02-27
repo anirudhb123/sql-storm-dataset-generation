@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT 
+        l.partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY l_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        l.partkey
+),
+TopSales AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_partkey
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ps.ps_availqty > 0 AND
+        p.p_retailprice > 100
+),
+SalesSummary AS (
+    SELECT 
+        ts.r_name,
+        SUM(ts.ps_supplycost) AS total_supply_cost,
+        COUNT(ts.ps_partkey) AS total_parts,
+        COUNT(DISTINCT ts.s_name) AS supplier_count
+    FROM 
+        TopSales ts
+    GROUP BY 
+        ts.r_name
+)
+
+SELECT 
+    ss.r_name,
+    ss.total_supply_cost,
+    ss.total_parts,
+    ss.supplier_count,
+    COALESCE(r.total_sales, 0) AS top_sales
+FROM 
+    SalesSummary ss
+LEFT JOIN 
+    (SELECT partkey, total_sales FROM RankedSales WHERE rank = 1) r ON ss.r_name = (SELECT r.r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey WHERE n.n_nationkey = (SELECT MIN(s.s_nationkey) FROM supplier s)) 
+GROUP BY 
+    ss.r_name, ss.total_supply_cost, ss.total_parts, ss.supplier_count
+ORDER BY 
+    ss.total_supply_cost DESC, top_sales DESC;

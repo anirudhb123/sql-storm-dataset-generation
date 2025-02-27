@@ -1,0 +1,66 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        o_orderdate,
+        RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS price_rank
+    FROM orders
+    WHERE o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN RankedOrders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice > 1000
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_partkey) AS parts_supplied,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        STRING_AGG(DISTINCT p.p_name, ', ') AS parts_list
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+),
+TotalOrders AS (
+    SELECT 
+        COUNT(DISTINCT o_orderkey) AS total_orders
+    FROM orders
+),
+FinalChoices AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(s.parts_supplied, 0) AS parts_supplied,
+        COALESCE(s.avg_supply_cost, 0) AS avg_supply_cost,
+        COALESCE(s.parts_list, 'None') AS parts_list,
+        o.order_count,
+        o.total_spent
+    FROM HighValueCustomers o
+    LEFT JOIN SupplierStats s ON o.c_custkey % 10 = s.s_suppkey % 10
+    WHERE o.order_count > (SELECT total_orders FROM TotalOrders) / 10
+)
+SELECT 
+    c.c_name,
+    SUM(CASE 
+        WHEN l_discount > 0 THEN l_extendedprice * (1 - l_discount) 
+        ELSE 0 
+    END) AS total_discounted_sales,
+    COUNT(DISTINCT l_orderkey) AS distinct_orders
+FROM lineitem l
+JOIN FinalChoices c ON l.l_orderkey = (SELECT o_orderkey FROM orders WHERE o_custkey = c.c_custkey LIMIT 1)
+WHERE l_returnflag = 'N' 
+AND (l_linestatus = 'O' OR l_quantity > 10)
+GROUP BY c.c_name
+HAVING SUM(COALESCE(l_tax, 0)) > 100
+ORDER BY total_discounted_sales DESC, c.c_name;

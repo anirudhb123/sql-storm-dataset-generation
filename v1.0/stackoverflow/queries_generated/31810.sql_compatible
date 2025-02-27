@@ -1,0 +1,61 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id, Reputation, CreationDate, 1 AS Level
+    FROM Users
+    WHERE Reputation > 1000
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation, u.CreationDate, cte.Level + 1
+    FROM Users u
+    INNER JOIN UserReputationCTE cte ON u.Id = cte.Id
+    WHERE u.Reputation > cte.Reputation
+),
+PostVotesSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpVotes,  
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownVotes  
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        PH.UserDisplayName AS ClosedBy,
+        PH.CreationDate AS ClosedDate
+    FROM Posts p
+    JOIN PostHistory PH ON PH.PostId = p.Id
+    WHERE PH.PostHistoryTypeId = 10  
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(ps.UpVotes, 0) AS UpVotes,
+        COALESCE(ps.DownVotes, 0) AS DownVotes,
+        COALESCE(cp.ClosedBy, 'Open') AS ClosedBy,
+        COALESCE(cp.ClosedDate, 'Not Closed') AS ClosedDate
+    FROM Posts p
+    LEFT JOIN PostVotesSummary ps ON ps.PostId = p.Id
+    LEFT JOIN ClosedPosts cp ON cp.Id = p.Id
+)
+SELECT 
+    ud.Id AS UserId, 
+    ud.Reputation,
+    pd.Title,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.ClosedBy,
+    pd.ClosedDate
+FROM UserReputationCTE ud
+INNER JOIN PostDetails pd ON pd.Id IN (
+    SELECT DISTINCT PostId
+    FROM Posts
+    WHERE OwnerUserId = ud.Id
+)
+WHERE ud.Level > 1
+ORDER BY ud.Reputation DESC;

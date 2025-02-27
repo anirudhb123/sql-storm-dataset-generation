@@ -1,0 +1,69 @@
+
+WITH RECURSIVE Customer_Aggregates AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(s.ws_quantity) AS total_quantity,
+        SUM(s.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(s.ws_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales s ON c.c_customer_sk = s.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+High_Profit_Customers AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUM(a.total_profit) AS aggregate_profit
+    FROM 
+        Customer_Aggregates a
+    JOIN 
+        customer c ON a.c_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        a.rank <= 10
+    GROUP BY 
+        c.c_customer_id, ca.ca_city, ca.ca_state, ca.ca_country
+),
+Date_Filters AS (
+    SELECT 
+        d.d_date,
+        d.d_week_seq,
+        d.d_year
+    FROM 
+        date_dim d
+    WHERE 
+        d.d_date BETWEEN '2020-01-01' AND '2021-12-31'
+)
+SELECT 
+    h.c_customer_id,
+    h.ca_city,
+    h.ca_state,
+    h.ca_country,
+    CASE 
+        WHEN h.aggregate_profit IS NULL THEN 'No Profit Yet' 
+        ELSE CAST(h.aggregate_profit AS VARCHAR(50)) 
+    END AS profit_status,
+    d.d_year,
+    d.d_week_seq,
+    COUNT(sm.sm_ship_mode_id) AS shipping_modes_used
+FROM 
+    High_Profit_Customers h
+LEFT JOIN 
+    web_sales ws ON h.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN 
+    Date_Filters d ON ws.ws_sold_date_sk = d.d_date_sk
+GROUP BY 
+    h.c_customer_id, h.ca_city, h.ca_state, h.ca_country, 
+    d.d_year, d.d_week_seq, h.aggregate_profit
+HAVING 
+    COUNT(sm.sm_ship_mode_id) > 2
+ORDER BY 
+    h.aggregate_profit DESC NULLS LAST;

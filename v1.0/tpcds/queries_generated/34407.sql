@@ -1,0 +1,47 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_current_cdemo_sk, c_first_name, c_last_name, 0 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_current_cdemo_sk, c.c_first_name, c.c_last_name, ch.level + 1
+    FROM customer c
+    INNER JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+SalesSummary AS (
+    SELECT
+        w.w_warehouse_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(ss.ss_ticket_number) AS num_sales,
+        RANK() OVER (PARTITION BY w.w_warehouse_name ORDER BY SUM(ss.ss_net_profit) DESC) AS profit_rank
+    FROM store_sales ss
+    JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_name
+), 
+QualifiedCustomers AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics cd
+    JOIN CustomerHierarchy ch ON cd.cd_demo_sk = ch.c_current_cdemo_sk
+    WHERE cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+    HAVING AVG(cd.cd_purchase_estimate) > 5000
+)
+
+SELECT
+    wc.web_site_name,
+    SUM(ws.ws_net_paid) AS total_sales,
+    wc.web_class AS website_class,
+    COUNT(DISTINCT CASE WHEN net_profit > 0 THEN ss.ss_ticket_number END) as successful_sales,
+    (SELECT COUNT(DISTINCT sr_ticket_number) 
+     FROM store_returns sr 
+     WHERE sr.sr_returned_date_sk > 0 AND sr.sr_item_sk IN (SELECT i_item_sk FROM item WHERE i_manager_id IS NOT NULL)) AS total_returns,
+    SUM(ss.ss_ext_tax) / NULLIF(SUM(ss.ss_ext_sales_price), 0) AS tax_ratio,
+    ROW_NUMBER() OVER (ORDER BY SUM(ss.ss_net_profit) DESC) AS row_num
+FROM web_sales ws
+JOIN web_site wc ON ws.ws_web_site_sk = wc.web_site_sk
+JOIN store_sales ss ON ws.ws_order_number = ss.ss_ticket_number
+JOIN QualifiedCustomers q on ws.ws_bill_cdemo_sk = q.cd_demo_sk
+WHERE ws.ws_sales_price BETWEEN 10 AND 100
+GROUP BY wc.web_site_name, wc.web_class
+HAVING SUM(ws.ws_net_paid) > (SELECT AVG(total_net_profit) FROM SalesSummary)
+ORDER BY total_sales DESC;

@@ -1,0 +1,41 @@
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    U.UserId,
+    U.TotalPosts,
+    U.Questions,
+    U.Answers,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    PD.ViewCount,
+    PD.OwnerDisplayName,
+    PD.AnswerCount,
+    PD.CommentCount,
+    PD.FavoriteCount
+FROM UserPostCounts U
+JOIN PostDetails PD ON U.UserId = PD.OwnerDisplayName
+ORDER BY U.TotalPosts DESC, PD.Score DESC;

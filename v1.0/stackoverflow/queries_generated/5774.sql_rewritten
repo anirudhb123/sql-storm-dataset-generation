@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS TotalUpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS TotalDownVotes,
+        COALESCE(SUM(B.Id), 0) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(T.Id) AS TagCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        unnest(string_to_array(P.Tags, ',')) AS TagName ON TRUE
+    JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagName)
+    GROUP BY 
+        P.Id
+),
+TopUsers AS (
+    SELECT 
+        UA.*,
+        PT.TagCount,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC, UA.TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostTagCounts PT ON UA.TotalPosts > 0 
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalUpVotes,
+    TotalDownVotes,
+    TotalBadges,
+    TagCount,
+    UserRank
+FROM 
+    TopUsers
+WHERE 
+    UserRank <= 10 
+ORDER BY 
+    UserRank;

@@ -1,0 +1,59 @@
+WITH RECURSIVE OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_linenumber) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    od.o_orderkey,
+    od.total_revenue,
+    sp.total_available_qty,
+    sp.total_supply_cost,
+    COALESCE(sp.total_available_qty, 0) AS adjusted_qty,
+    CASE 
+        WHEN od.total_revenue > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+JOIN 
+    OrderDetails od ON od.o_orderkey IN (
+        SELECT 
+            o.o_orderkey
+        FROM 
+            orders o
+        WHERE 
+            o.o_orderstatus = 'F' AND 
+            o.o_totalprice BETWEEN 500 AND 15000
+    )
+WHERE 
+    p.p_size IS NOT NULL
+ORDER BY 
+    p.p_brand, od.total_revenue DESC
+FETCH FIRST 100 ROWS ONLY;

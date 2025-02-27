@@ -1,0 +1,96 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        CreationDate,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+TopComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER(PARTITION BY c.PostId ORDER BY COUNT(c.Id) DESC) AS rn
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        ph.CreationDate AS HistoryCreationDate,
+        p.OwnerUserId,
+        p.Score AS PostScore,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        RANK() OVER(PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS Ranking
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Considering post close and reopen history
+)
+
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalScore,
+    ups.AvgViews,
+    COALESCE(tp.CommentCount, 0) AS TotalComments,
+    COALESCE(MAX(phd.HistoryCreationDate), '1970-01-01') AS LastPostUpdate,
+    RANK() OVER(ORDER BY SUM(COALESCE(p.Score, 0)) DESC) AS UserRank,
+    STRING_AGG(DISTINCT rph.Title, ', ') AS TopParentTitles
+FROM 
+    Users u
+JOIN 
+    UserPostStats ups ON u.Id = ups.UserId
+LEFT JOIN 
+    TopComments tp ON tp.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.Id)
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistoryDetails phd ON phd.PostId = p.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.Id = p.Id
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, ups.TotalPosts, ups.TotalScore, ups.AvgViews, tp.CommentCount
+ORDER BY 
+    UserRank, TotalComments DESC;

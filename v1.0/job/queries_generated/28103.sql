@@ -1,0 +1,59 @@
+WITH MovieRoles AS (
+    SELECT
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        r.role AS actor_role
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    JOIN
+        title t ON c.movie_id = t.id
+    JOIN
+        role_type r ON c.role_id = r.id
+),
+TopGenres AS (
+    SELECT
+        t.kind_id,
+        COUNT(DISTINCT m.movie_id) AS movie_count,
+        k.keyword AS genre_keyword
+    FROM
+        title t
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        t.kind_id, k.keyword
+    ORDER BY
+        movie_count DESC
+    LIMIT 5
+),
+ActorInfo AS (
+    SELECT
+        m.actor_name,
+        m.movie_title,
+        m.production_year,
+        t.kind_id,
+        g.genre_keyword
+    FROM
+        MovieRoles m
+    JOIN
+        title t ON m.movie_title = t.title AND m.production_year = t.production_year
+    JOIN
+        TopGenres g ON t.kind_id = g.kind_id
+)
+
+SELECT
+    ai.actor_name,
+    ai.movie_title,
+    ai.production_year,
+    COUNT(*) AS genre_count,
+    STRING_AGG(DISTINCT ai.genre_keyword) AS genres
+FROM
+    ActorInfo ai
+GROUP BY
+    ai.actor_name, ai.movie_title, ai.production_year
+ORDER BY
+    COUNT(*) DESC, ai.actor_name;

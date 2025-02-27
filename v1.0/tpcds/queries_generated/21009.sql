@@ -1,0 +1,61 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(*) AS total_transactions
+    FROM 
+        store_sales
+    GROUP BY 
+        s_store_sk, ss_sold_date_sk
+),
+ranked_sales AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        total_sales,
+        total_transactions,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+),
+stores_with_sales AS (
+    SELECT 
+        s.s_store_id,
+        s.s_store_name,
+        COALESCE(r.total_sales, 0) AS total_sales,
+        COALESCE(r.total_transactions, 0) AS total_transactions,
+        CASE 
+            WHEN COALESCE(r.total_sales, 0) = 0 THEN 'No Sales'
+            ELSE 'Has Sales'
+        END AS sales_status
+    FROM 
+        store s
+    LEFT JOIN 
+        ranked_sales r ON s.s_store_sk = r.s_store_sk AND r.ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+)
+SELECT 
+    ws.web_site_id,
+    w.w_warehouse_id,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS total_web_profit,
+    SUM(CASE WHEN r.sales_rank IS NOT NULL THEN r.total_sales ELSE 0 END) AS sales_from_stores,
+    COUNT(DISTINCT s.s_store_sk) AS unique_stores,
+    STRING_AGG(DISTINCT CONCAT(s.s_store_name, ': ', r.sales_status), '; ') AS store_sales_status
+FROM 
+    web_sales ws
+JOIN 
+    warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN 
+    stores_with_sales s ON s.total_sales > 1000
+LEFT JOIN 
+    ranked_sales r ON r.s_store_sk = s.s_store_sk
+WHERE 
+    ws.ws_net_paid >= (SELECT AVG(ws_net_paid) FROM web_sales) OR (ws.ws_net_paid IS NULL AND EXISTS(SELECT 1 FROM store_returns sr WHERE sr.sr_net_loss < 0))
+GROUP BY 
+    ws.web_site_id, w.w_warehouse_id
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 5 OR 
+    SUM(ws.ws_net_sales) < (SELECT AVG(ws_net_sales) FROM web_sales WHERE ws_net_paid IS NOT NULL)
+ORDER BY 
+    total_web_profit DESC NULLS LAST;

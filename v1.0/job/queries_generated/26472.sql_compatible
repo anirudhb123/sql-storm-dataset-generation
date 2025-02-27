@@ -1,0 +1,38 @@
+
+SELECT 
+    akn.name AS aka_name,
+    m.title AS movie_title,
+    c.name AS company_name,
+    STRING_AGG(DISTINCT CONCAT(p.first_name, ' ', p.last_name) ORDER BY p.last_name) AS cast_names,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    COUNT(DISTINCT pi.info) AS info_count,
+    EXTRACT(YEAR FROM m.production_year) AS production_year
+FROM
+    aka_name akn
+JOIN
+    cast_info ci ON akn.person_id = ci.person_id
+JOIN
+    title m ON ci.movie_id = m.id
+JOIN
+    movie_companies mc ON m.id = mc.movie_id
+JOIN
+    company_name c ON mc.company_id = c.id
+LEFT JOIN
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN
+    person_info pi ON akn.person_id = pi.person_id
+LEFT JOIN
+    (SELECT 
+         id,
+         name AS first_name,
+         SUBSTRING(name FROM POSITION(' ' IN name) + 1) AS last_name
+     FROM
+         name) p ON akn.person_id = p.id
+WHERE
+    m.production_year >= 2000
+GROUP BY
+    akn.name, m.title, c.name, m.production_year
+ORDER BY
+    production_year DESC, aka_name;

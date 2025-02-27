@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_related AS (
+    
+    SELECT ml.movie_id, ml.linked_movie_id, 1 AS depth
+    FROM movie_link ml
+    UNION ALL
+    SELECT ml.movie_id, ml.linked_movie_id, mrt.depth + 1
+    FROM movie_link ml
+    INNER JOIN movie_related mrt ON ml.movie_id = mrt.linked_movie_id
+    WHERE mrt.depth < 3 
+),
+cast_stats AS (
+    
+    SELECT ci.movie_id, ci.person_id, COUNT(DISTINCT ci.role_id) AS distinct_roles
+    FROM cast_info ci
+    GROUP BY ci.movie_id, ci.person_id
+),
+movie_info_rich AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mki.info, 'No info') AS movie_info,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM aka_title mt
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN movie_info mi ON mt.id = mi.movie_id
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+person_top_roles AS (
+    
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.role_id) AS total_roles,
+        RANK() OVER (ORDER BY COUNT(DISTINCT ci.role_id) DESC) AS role_rank
+    FROM cast_info ci
+    GROUP BY ci.person_id
+    HAVING COUNT(DISTINCT ci.role_id) > 0
+),
+flagged_movies AS (
+    
+    SELECT movie_id
+    FROM movie_info
+    WHERE note IS NOT NULL
+    GROUP BY movie_id
+    HAVING COUNT(*) > 2 
+)
+
+SELECT 
+    mr.movie_id,
+    mi.title,
+    mi.production_year,
+    mr.linked_movie_id,
+    COALESCE(ps.total_roles, 0) AS total_distinct_roles,
+    (CASE WHEN fi.movie_id IS NOT NULL THEN 'Has Flags' ELSE 'No Flags' END) AS flag_status,
+    nk.keyword AS top_keyword
+FROM movie_related mr
+JOIN movie_info_rich mi ON mr.movie_id = mi.movie_id
+LEFT JOIN cast_stats cs ON mr.movie_id = cs.movie_id
+LEFT JOIN person_top_roles ps ON cs.person_id = ps.person_id
+LEFT JOIN flagged_movies fi ON mr.movie_id = fi.movie_id
+LEFT JOIN (
+    SELECT mk.movie_id, mk.keyword 
+    FROM movie_keyword mk 
+    GROUP BY mk.movie_id, mk.keyword 
+    HAVING COUNT(*) > 1 
+) nk ON mi.movie_id = nk.movie_id
+WHERE 
+    (mi.production_year >= 2000 OR mi.title LIKE '%The%') 
+    AND (mi.title IS NOT NULL)
+    AND (mr.depth <= 2) 
+ORDER BY total_distinct_roles DESC, mi.production_year DESC, mi.title;

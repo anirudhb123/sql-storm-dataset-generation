@@ -1,0 +1,74 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        AVG(COALESCE(CASE WHEN ci.role_id IS NOT NULL THEN 1 ELSE 0 END, 0)) AS avg_roles,
+        SUM(CASE WHEN mt.production_year < 2000 THEN 1 ELSE 0 END) AS pre_2000_movies
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        mt.title,
+        mt.production_year
+), RankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        total_cast,
+        avg_roles,
+        pre_2000_movies,
+        RANK() OVER (ORDER BY total_cast DESC) AS rank_by_cast
+    FROM 
+        MovieDetails
+), CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        mc.note AS company_note
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+), FinalOutput AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.avg_roles,
+        cd.company_name,
+        cd.company_type,
+        cd.company_note,
+        rm.rank_by_cast
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyDetails cd ON rm.rank_by_cast <= 5 AND cd.movie_id = rm.title
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.total_cast,
+    fo.avg_roles,
+    COALESCE(fo.company_name, 'Independent') AS company_name,
+    fo.company_type,
+    fo.company_note,
+    CASE 
+        WHEN fo.rank_by_cast IS NULL THEN 'Not Ranked' 
+        ELSE 'Ranked' 
+    END AS ranking_status
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.production_year BETWEEN 1990 AND 2020
+ORDER BY 
+    fo.rank_by_cast, fo.production_year DESC;

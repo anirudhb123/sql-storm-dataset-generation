@@ -1,0 +1,69 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS average_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (
+            SELECT MAX(d_date_sk)
+            FROM date_dim
+            WHERE d_date = cast('2002-10-01' as date)
+        )
+    GROUP BY 
+        ws.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_return_quantity) AS total_returns,
+        AVG(sr_return_amt) AS average_return_amount,
+        MAX(sr_return_ship_cost) AS max_return_ship_cost,
+        MIN(sr_return_quantity) AS min_return_quantity
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = (SELECT MAX(d_year) FROM date_dim) 
+        )
+    GROUP BY 
+        sr_item_sk
+),
+FinalSales AS (
+    SELECT 
+        is.item_desc,
+        rs.total_quantity,
+        rs.average_sales_price,
+        cr.total_returns,
+        cr.average_return_amount,
+        CR.max_return_ship_cost,
+        cr.min_return_quantity
+    FROM 
+        RankedSales rs
+    JOIN 
+        item is ON rs.ws_item_sk = is.i_item_sk
+    LEFT JOIN 
+        CustomerReturns cr ON rs.ws_item_sk = cr.sr_item_sk
+    WHERE 
+        rs.sales_rank <= 10 AND (
+            cr.total_returns IS NULL OR cr.total_returns < 5
+        )
+)
+SELECT 
+    COALESCE(f.item_desc || ' - Sales: ' || f.total_quantity, 'No Sales') AS sales_info,
+    COALESCE(f.average_sales_price::text, 'No Price Info') AS price_info,
+    COALESCE(f.total_returns::text, 'No Returns') AS return_info,
+    CASE 
+        WHEN f.total_returns IS NULL THEN 'No Returns Initiated'
+        WHEN f.total_returns >= 5 THEN 'High Return Rate'
+        ELSE 'Healthy Returns'
+    END AS return_health
+FROM 
+    FinalSales f
+ORDER BY 
+    f.total_quantity DESC NULLS LAST
+FETCH FIRST 20 ROWS ONLY;

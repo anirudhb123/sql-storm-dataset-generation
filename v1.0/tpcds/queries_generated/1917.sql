@@ -1,0 +1,49 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+),
+TotalSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_paid) AS total_sales_amount
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr.order_number) AS total_returns,
+        COUNT(DISTINCT ws.order_number) AS total_sales
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+)
+SELECT 
+    ca.ca_address_id,
+    c.c_customer_id,
+    cs.total_returns,
+    cs.total_sales,
+    COALESCE(tr.returned_items, 0) AS returned_items,
+    COALESCE(ts.total_sales_quantity, 0) AS total_quantity_sold,
+    COALESCE(ts.total_sales_amount, 0) AS total_sales_amount,
+    CASE 
+        WHEN cs.total_sales > 0 THEN ROUND(COALESCE(tr.returned_items, 0) * 100.0 / cs.total_sales, 2)
+        ELSE NULL
+    END AS return_rate
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN CustomerStats cs ON c.c_customer_sk = cs.c_customer_sk
+LEFT JOIN RankedReturns tr ON c.c_customer_sk = tr.sr_customer_sk AND tr.rn = 1
+LEFT JOIN TotalSales ts ON ts.ws_item_sk IN (SELECT sr_item_sk FROM store_returns WHERE sr_customer_sk = c.c_customer_sk)
+WHERE 
+    ca.ca_state = 'CA'
+    AND (cs.total_returns > 1 OR cs.total_sales > 10)
+ORDER BY return_rate DESC
+LIMIT 100;

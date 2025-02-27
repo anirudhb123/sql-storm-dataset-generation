@@ -1,0 +1,51 @@
+WITH RECURSIVE CustomerOrderCTE AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+SupplierPartStats AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * p.p_retailprice) AS supply_value,
+        COUNT(DISTINCT p.p_partkey) AS part_count,
+        RANK() OVER (ORDER BY SUM(ps.ps_availqty * p.p_retailprice) DESC) AS supplier_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+) 
+SELECT 
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    co.total_spent,
+    co.order_count,
+    s.s_name AS supplier_name,
+    sps.supply_value,
+    sps.part_count
+FROM 
+    nation n
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    SupplierPartStats sps ON s.s_suppkey = sps.ps_suppkey
+LEFT JOIN 
+    CustomerOrderCTE co ON sps.part_count > 5 AND co.c_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    )
+WHERE 
+    co.rank <= 10 OR sps.supplier_rank <= 10
+ORDER BY 
+    n.n_name, co.total_spent DESC, sps.supply_value DESC;
+

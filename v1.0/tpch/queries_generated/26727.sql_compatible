@@ -1,0 +1,57 @@
+
+WITH parsed_parts AS (
+    SELECT 
+        p.partkey AS part_key,
+        p.name AS part_name,
+        p.mfgr,
+        p.brand,
+        p.type,
+        p.size,
+        CASE 
+            WHEN POSITION('special' IN p.comment) > 0 THEN 'Special'
+            ELSE 'Regular'
+        END AS part_category,
+        p.retailprice,
+        COUNT(DISTINCT ps.suppkey) AS unique_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.partkey = ps.partkey
+    GROUP BY 
+        p.partkey, 
+        p.name, 
+        p.mfgr, 
+        p.brand, 
+        p.type, 
+        p.size, 
+        p.comment, 
+        p.retailprice
+),
+customer_orders AS (
+    SELECT 
+        c.custkey AS customer_key,
+        c.name AS customer_name,
+        o.orderkey AS order_key,
+        SUM(l.extendedprice * (1 - l.discount)) AS total_order_value,
+        COUNT(DISTINCT l.linenumber) AS line_item_count
+    FROM customer c
+    JOIN orders o ON c.custkey = o.custkey
+    JOIN lineitem l ON o.orderkey = l.orderkey
+    GROUP BY 
+        c.custkey, 
+        c.name, 
+        o.orderkey
+)
+SELECT 
+    rp.part_key,
+    rp.part_name,
+    rp.part_category,
+    rp.retailprice,
+    co.customer_key,
+    co.customer_name,
+    co.order_key,
+    co.total_order_value,
+    co.line_item_count
+FROM parsed_parts rp
+JOIN customer_orders co ON rp.unique_suppliers > 5 AND rp.part_category = 'Special'
+WHERE rp.retailprice > (SELECT AVG(retailprice) FROM part)
+ORDER BY co.total_order_value DESC, rp.retailprice ASC
+FETCH FIRST 100 ROWS ONLY;

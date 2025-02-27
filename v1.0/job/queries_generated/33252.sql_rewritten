@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        lm.linked_movie_id AS movie_id,
+        at.title,
+        mh.level + 1
+    FROM 
+        movie_link lm
+    JOIN 
+        aka_title at ON lm.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON lm.movie_id = mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.title) AS rank
+    FROM 
+        MovieHierarchy mh
+),
+
+InfoAggregation AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info, '; ') AS all_info
+    FROM 
+        movie_info mi
+    JOIN 
+        aka_title m ON mi.movie_id = m.id
+    WHERE 
+        mi.note IS NULL
+    GROUP BY 
+        m.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.level,
+    rm.rank,
+    COALESCE(ia.all_info, 'No Info Available') AS movie_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    InfoAggregation ia ON rm.movie_id = ia.movie_id
+WHERE 
+    rm.level <= 3
+ORDER BY 
+    rm.level, rm.rank;

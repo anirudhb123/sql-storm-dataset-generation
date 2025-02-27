@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.TotalBounty,
+        us.BadgeCount,
+        us.QuestionCount,
+        us.AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY us.TotalBounty DESC, us.BadgeCount DESC) AS UserRank
+    FROM 
+        UserStats us
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        COUNT(*) AS CloseVoteCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.Comment
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (2, 4)) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    us.DisplayName AS OwnerName,
+    us.TotalBounty,
+    us.BadgeCount,
+    us.QuestionCount,
+    us.AnswerCount,
+    COALESCE(cp.CloseVoteCount, 0) AS CloseVoteCount,
+    COALESCE(pvs.UpVotes, 0) - COALESCE(pvs.DownVotes, 0) AS NetVotes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users us ON rp.OwnerUserId = us.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    PostVoteStats pvs ON rp.PostId = pvs.PostId
+WHERE 
+    rp.PostRank = 1 
+    AND us.Reputation > 1000
+ORDER BY 
+    rp.CreationDate DESC;

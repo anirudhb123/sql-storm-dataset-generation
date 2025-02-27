@@ -1,0 +1,34 @@
+
+WITH processed_strings AS (
+    SELECT 
+        c.c_customer_id,
+        LOWER(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name,
+        SUBSTRING(c.c_email_address, 1, 10) AS email_prefix,
+        REPLACE(c.c_first_name, 'a', '@') AS modified_first_name,
+        TRIM(ca.city) AS trimmed_city
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_birth_month = 5
+),
+statistics AS (
+    SELECT 
+        LENGTH(full_name) AS name_length,
+        LENGTH(email_prefix) AS email_length,
+        LENGTH(modified_first_name) AS modified_name_length
+    FROM 
+        processed_strings
+)
+SELECT 
+    AVG(name_length) AS avg_name_length,
+    AVG(email_length) AS avg_email_length,
+    AVG(modified_name_length) AS avg_modified_name_length,
+    COUNT(*) AS total_records
+FROM 
+    statistics
+WHERE 
+    name_length > 10
+GROUP BY 
+    name_length, email_length, modified_name_length;

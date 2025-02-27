@@ -1,0 +1,60 @@
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount IS NULL THEN 0 ELSE p.ViewCount END) AS TotalViews,
+        AVG(CASE WHEN p.Score IS NULL THEN 0 ELSE p.Score END) AS AverageScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryRecordCount,
+        MAX(ph.CreationDate) AS LastHistoryEntry
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS ClosedDate,
+        COUNT(*) AS CloseReasonCount
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY p.Id
+),
+FinalUserStats AS (
+    SELECT 
+        upc.UserId,
+        upc.PostCount,
+        upc.TotalViews,
+        upc.AverageScore,
+        COALESCE(cp.CloseReasonCount, 0) AS ClosedPostsCount,
+        COALESCE(hd.HistoryRecordCount, 0) AS PostHistoryCount,
+        COALESCE(hd.LastHistoryEntry, '1970-01-01 00:00:00') AS LastPostHistory
+    FROM UserPostCounts upc
+    LEFT JOIN ClosedPosts cp ON upc.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = cp.PostId)
+    LEFT JOIN PostHistoryDetails hd ON hd.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = upc.UserId)
+)
+SELECT 
+    u.DisplayName,
+    fs.*,
+    CASE 
+        WHEN fs.AverageScore > 50 THEN 'High'
+        WHEN fs.AverageScore BETWEEN 20 AND 50 THEN 'Medium'
+        ELSE 'Low' 
+    END AS ReputationCategory,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM FinalUserStats fs
+JOIN Users u ON fs.UserId = u.Id
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN LATERAL (
+    SELECT 
+        unnest(string_to_array(p.Tags, ',')) AS TagName
+) t ON t.TagName IS NOT NULL
+GROUP BY u.Id, fs.UserId, fs.PostCount, fs.TotalViews, fs.AverageScore, fs.ClosedPostsCount, fs.PostHistoryCount, fs.LastPostHistory
+ORDER BY fs.PostCount DESC, TotalViews DESC
+LIMIT 100;

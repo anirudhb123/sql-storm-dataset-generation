@@ -1,0 +1,78 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_quantity,
+        ss.ss_net_profit,
+        1 AS level
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_net_profit > 100
+    UNION ALL
+    SELECT 
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_quantity * 2 AS ss_quantity,
+        ss.ss_net_profit * 2 AS ss_net_profit,
+        level + 1
+    FROM 
+        store_sales ss
+    INNER JOIN Sales_CTE cte ON ss.ss_item_sk = cte.ss_item_sk
+    WHERE 
+        cte.level < 5
+),
+Total_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sc.ss_quantity) AS total_quantity,
+        SUM(sc.ss_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        store_sales sc ON c.c_customer_sk = sc.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+Filtered_Sales AS (
+    SELECT 
+        c.c_customer_id,
+        ts.total_quantity,
+        ts.total_profit,
+        CASE 
+            WHEN ts.total_profit > 1000 THEN 'High'
+            WHEN ts.total_profit BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS profitability_category
+    FROM 
+        Total_Sales ts
+    JOIN 
+        customer c ON c.c_customer_id IS NOT NULL
+),
+Final_Sales AS (
+    SELECT 
+        fs.c_customer_id,
+        fs.total_quantity,
+        fs.total_profit,
+        fs.profitability_category,
+        ROW_NUMBER() OVER (PARTITION BY fs.profitability_category ORDER BY fs.total_profit DESC) AS rank
+    FROM 
+        Filtered_Sales fs
+)
+SELECT 
+    nac.ca_state,
+    fs.profitability_category,
+    COUNT(*) AS customer_count,
+    AVG(fs.total_quantity) AS avg_quantity,
+    SUM(fs.total_profit) AS total_profit
+FROM 
+    Final_Sales fs
+LEFT JOIN 
+    customer_address nac ON nac.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_id = fs.c_customer_id)
+GROUP BY 
+    nac.ca_state, fs.profitability_category
+HAVING 
+    COUNT(*) > 1
+ORDER BY 
+    nac.ca_state, fs.profitability_category;

@@ -1,0 +1,85 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01'
+        AND o.o_orderdate < DATE '2022-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.nationkey,
+        r.r_name AS region_name
+    FROM 
+        supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartStatistics AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_brand, 
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        MAX(ps.ps_supplycost) AS max_supply_cost,
+        COUNT(*) AS num_suppliers
+    FROM 
+        part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_brand
+    HAVING 
+        COUNT(*) > 1
+),
+TopPartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        pd.s_name,
+        pd.average_supply_cost,
+        pd.total_available
+    FROM 
+        partsupp ps
+    JOIN (
+        SELECT 
+            ps_partkey, 
+            MIN(ps_supplycost) AS min_supply_cost
+        FROM 
+            partsupp
+        GROUP BY 
+            ps_partkey
+    ) min_costs ON ps.ps_partkey = min_costs.ps_partkey AND ps.ps_supplycost = min_costs.min_supply_cost
+    JOIN SupplierDetails pd ON ps.ps_suppkey = pd.s_suppkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    s.s_name,
+    p.p_name,
+    s.region_name,
+    CASE 
+        WHEN r.price_rank < 5 THEN 'Top Tier'
+        WHEN r.price_rank >= 5 AND r.price_rank <= 10 THEN 'Mid Tier'
+        ELSE 'Lower Tier'
+    END AS price_category,
+    ps.total_available,
+    COALESCE(ps.average_supply_cost, 0) AS avg_supply_cost,
+    NULLIF(ps.num_suppliers, 0) AS supplier_count
+FROM 
+    RankedOrders r
+LEFT JOIN TopPartSuppliers ps ON r.o_orderkey = ps.ps_partkey
+JOIN SupplierDetails s ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON p.p_partkey = ps.ps_partkey
+WHERE 
+    r.o_totalprice BETWEEN 10000 AND 50000
+    AND s.s_acctbal IS NOT NULL
+ORDER BY 
+    r.o_totalprice DESC, s.region_name ASC;

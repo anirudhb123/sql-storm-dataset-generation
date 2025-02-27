@@ -1,0 +1,64 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS SalesRank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TotalSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        SUM(rs.ws_quantity) AS TotalQuantity,
+        SUM(rs.ws_sales_price * rs.ws_quantity) AS TotalRevenue
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.SalesRank <= 5
+    GROUP BY 
+        rs.ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        COUNT(DISTINCT sr_order_number) AS TotalReturns,
+        SUM(sr_return_amt) AS TotalReturnedAmount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+)
+SELECT 
+    ca.ca_address_id,
+    cd.cd_gender,
+    ts.TotalQuantity,
+    ts.TotalRevenue,
+    cr.TotalReturns,
+    COALESCE(cr.TotalReturnedAmount, 0) AS TotalReturnedAmount,
+    CASE 
+        WHEN cr.TotalReturns IS NULL THEN 'No Returns'
+        WHEN cr.TotalReturns > 5 THEN 'High Return Customer'
+        ELSE 'Regular Customer'
+    END AS CustomerReturnStatus
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    TotalSales ts ON ts.ws_item_sk = c.c_customer_sk
+LEFT JOIN 
+    CustomerReturns cr ON cr.sr_returning_customer_sk = c.c_customer_sk
+WHERE 
+    (cd.cd_marital_status = 'M' OR cd.cd_gender = 'F')
+    AND (cd.cd_purchase_estimate > 1000 OR ts.TotalRevenue > 5000)
+    AND (ca.ca_city IS NOT NULL OR ca.ca_country IS NOT NULL)
+ORDER BY 
+    ts.TotalRevenue DESC
+LIMIT 100;

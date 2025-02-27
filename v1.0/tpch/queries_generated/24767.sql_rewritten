@@ -1,0 +1,35 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+), 
+HighValueItems AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+AggregateLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND cast('1998-10-01' as date) 
+    GROUP BY l.l_orderkey
+)
+SELECT co.c_name, co.total_spent, rs.s_name AS top_supplier, 
+       hvi.p_name AS high_value_item,
+       COALESCE(SUM(al.total_line_price), 0) AS total_order_value
+FROM CustomerOrders co
+LEFT JOIN RankedSuppliers rs ON co.c_custkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = rs.s_suppkey LIMIT 1)
+LEFT JOIN HighValueItems hvi ON hvi.p_partkey IN (SELECT ps.ps_partkey 
+                                                  FROM partsupp ps 
+                                                  WHERE ps.ps_availqty > 0) 
+LEFT JOIN AggregateLineItems al ON al.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus IN ('O', 'F')) 
+GROUP BY co.c_name, co.total_spent, rs.s_name, hvi.p_name
+HAVING SUM(co.total_spent) >= (SELECT AVG(total_spent) FROM CustomerOrders) 
+ORDER BY co.total_spent DESC, rs.rank_acctbal ASC;

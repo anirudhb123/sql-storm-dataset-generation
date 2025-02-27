@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    JOIN 
+        role_type rt ON rt.id = ci.role_id
+    GROUP BY 
+        ci.movie_id, ak.name, rt.role
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    RM.movie_id,
+    RM.title,
+    RM.production_year,
+    COALESCE(AR.actor_name, 'No Actors') AS actor_name,
+    COALESCE(AR.role_name, 'Unknown Role') AS role_name,
+    COALESCE(MK.keywords, 'No Keywords') AS movie_keywords,
+    CASE 
+        WHEN RM.title_rank = 1 AND RM.production_year < 2000 THEN 'Classic Film'
+        WHEN RM.production_year IS NULL THEN 'Year Not Specified'
+        ELSE 'Modern Film'
+    END AS film_category,
+    (SELECT COUNT(DISTINCT ci2.person_id) 
+     FROM cast_info ci2 
+     WHERE ci2.movie_id = RM.movie_id) AS total_cast_count,
+    (SELECT AVG(year(now()) - t.production_year::integer) 
+     FROM aka_title t 
+     WHERE t.production_year IS NOT NULL) AS average_movie_age
+FROM 
+    RankedMovies RM
+LEFT JOIN 
+    ActorRoles AR ON AR.movie_id = RM.movie_id
+LEFT JOIN 
+    MoviesWithKeywords MK ON MK.movie_id = RM.movie_id
+ORDER BY 
+    RM.production_year DESC, 
+    RM.title ASC;

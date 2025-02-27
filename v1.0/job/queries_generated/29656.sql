@@ -1,0 +1,61 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    WHERE 
+        kt.kind IN ('Movie', 'TV Show')
+),
+ActorMovieCounts AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        RankedTitles rt ON c.movie_id = rt.title_id
+    GROUP BY 
+        c.person_id
+),
+TopActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        amc.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorMovieCounts amc ON ak.person_id = amc.person_id
+    ORDER BY 
+        amc.movie_count DESC
+    LIMIT 10
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.title,
+        mk.keyword,
+        t.production_year
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title mt ON mk.movie_id = mt.id
+    WHERE 
+        mk.keyword IS NOT NULL
+)
+SELECT 
+    ta.actor_name,
+    mwk.title,
+    mwk.keyword,
+    mwk.production_year
+FROM 
+    TopActors ta
+JOIN 
+    MoviesWithKeywords mwk ON ta.movie_count > 2
+ORDER BY 
+    ta.actor_name, mwk.production_year DESC;
+This SQL query performs several interesting operations, including ranking titles based on their production year, counting the number of movies each actor has participated in, and dynamically joining this information to find the top actors along with movies that have associated keywords. It's intended for benchmarking string processing and demonstrating the potential complexity of queries using the provided schema.

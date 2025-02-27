@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+CustomerReturns AS (
+    SELECT 
+        wr_refunded_customer_sk,
+        SUM(wr_return_amt) AS total_refund,
+        COUNT(wr_order_number) AS return_count
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk IN (
+            SELECT DISTINCT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023
+        )
+    GROUP BY 
+        wr_refunded_customer_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    SUM(RS.total_profit) AS web_total_profit,
+    SUM(CR.total_refund) AS total_refunds,
+    (SUM(RS.total_profit) - SUM(CR.total_refund)) AS net_profit
+FROM 
+    customer_address ca
+LEFT JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN 
+    RankedSales RS ON c.c_customer_sk = RS.web_site_sk
+LEFT JOIN 
+    CustomerReturns CR ON c.c_customer_sk = CR.wr_refunded_customer_sk
+GROUP BY 
+    ca.ca_city, ca.ca_state
+HAVING 
+    net_profit > 0
+ORDER BY 
+    net_profit DESC
+LIMIT 10;

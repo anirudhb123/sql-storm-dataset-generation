@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        RANK() OVER (ORDER BY p.Score DESC, COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 AND p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Score, 
+        CommentCount, 
+        UpVoteCount, 
+        DownVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    REGEXP_SPLIT_TO_TABLE((SELECT Tags FROM Posts WHERE Id = tp.PostId), ',') AS t(TagName) ON TRUE
+GROUP BY 
+    tp.PostId
+ORDER BY 
+    tp.Score DESC;

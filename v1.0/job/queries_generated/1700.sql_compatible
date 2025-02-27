@@ -1,0 +1,64 @@
+
+WITH MovieStatistics AS (
+    SELECT 
+        a.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(m.production_year) AS average_production_year,
+        MIN(m.production_year) AS earliest_year,
+        MAX(m.production_year) AS latest_year,
+        ROW_NUMBER() OVER (ORDER BY AVG(m.production_year) DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.movie_id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    JOIN 
+        title m ON a.id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        a.title
+),
+TopMovies AS (
+    SELECT 
+        movie_title,
+        total_cast,
+        average_production_year,
+        earliest_year,
+        latest_year,
+        rank
+    FROM 
+        MovieStatistics
+    WHERE 
+        rank <= 10
+),
+MovieGenres AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ',') AS genres
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    tm.movie_title,
+    tm.total_cast,
+    tm.average_production_year,
+    mg.genres,
+    CASE 
+        WHEN tm.latest_year < 2000 THEN 'Classic'
+        WHEN tm.average_production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieGenres mg ON tm.movie_title = mg.movie_id
+ORDER BY 
+    tm.average_production_year DESC;

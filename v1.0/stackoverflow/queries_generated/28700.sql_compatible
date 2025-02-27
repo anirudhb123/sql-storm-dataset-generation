@@ -1,0 +1,70 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        T.TagName,
+        T.Count AS TagCount
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Tags T ON T.ExcerptPostId = P.Id
+    WHERE 
+        P.PostTypeId = 1 
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.PostHistoryTypeId,
+        PH.UserDisplayName,
+        PH.Comment
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    UBC.UserId,
+    UBC.DisplayName,
+    UBC.GoldBadgeCount,
+    UBC.SilverBadgeCount,
+    UBC.BronzeBadgeCount,
+    COUNT(DISTINCT PD.PostId) AS QuestionCount,
+    COUNT(DISTINCT RE.PostId) AS EditCount,
+    STRING_AGG(DISTINCT PD.TagName, ', ') AS AssociatedTags,
+    AVG(PD.Score) AS AverageScore,
+    MAX(PD.CreationDate) AS LatestPostDate
+FROM 
+    UserBadgeCounts UBC
+LEFT JOIN 
+    PostDetails PD ON UBC.UserId = PD.OwnerDisplayName
+LEFT JOIN 
+    RecentEdits RE ON PD.PostId = RE.PostId
+GROUP BY 
+    UBC.UserId, UBC.DisplayName, UBC.GoldBadgeCount, UBC.SilverBadgeCount, UBC.BronzeBadgeCount
+ORDER BY 
+    UBC.GoldBadgeCount DESC, 
+    QuestionCount DESC,
+    LatestPostDate DESC;

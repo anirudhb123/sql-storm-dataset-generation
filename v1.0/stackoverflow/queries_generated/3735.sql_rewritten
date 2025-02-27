@@ -1,0 +1,44 @@
+WITH UserTagCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(t.Id) AS TagCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS t ON t IS NOT NULL
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        TagCount,
+        RANK() OVER (ORDER BY TagCount DESC) AS Ranking
+    FROM UserTagCounts
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY p.Id
+)
+SELECT 
+    tu.UserId, 
+    tu.TagCount, 
+    pa.CommentCount, 
+    pa.UpvoteCount,
+    pa.DownvoteCount,
+    CASE 
+        WHEN pa.LastPostDate IS NOT NULL AND pa.LastPostDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+        THEN 'Inactive' 
+        ELSE 'Active' 
+    END AS PostActivityStatus
+FROM TopUsers tu
+JOIN PostActivity pa ON tu.UserId = pa.PostId
+WHERE tu.Ranking <= 10
+ORDER BY tu.Ranking;

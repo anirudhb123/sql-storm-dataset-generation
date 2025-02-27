@@ -1,0 +1,87 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Tags t
+    INNER JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        t.IsModeratorOnly = 0
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount,
+        AvgUserReputation,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagStatistics
+),
+FrequentCloseReasons AS (
+    SELECT 
+        ph.Comment AS CloseReason,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.Comment
+    ORDER BY 
+        CloseReasonCount DESC
+),
+TagWithCloseReasons AS (
+    SELECT 
+        tt.TagName,
+        tt.PostCount,
+        tt.QuestionCount,
+        tt.AnswerCount,
+        tt.AvgUserReputation,
+        fcr.CloseReason,
+        fcr.CloseReasonCount
+    FROM 
+        TopTags tt
+    LEFT JOIN 
+        (SELECT 
+             CloseReason, 
+             CloseReasonCount 
+         FROM 
+             FrequentCloseReasons 
+         LIMIT 5) fcr ON tt.TagName = ANY(SELECT 
+                                              unnest(string_to_array(tt.TagName, ' ')) 
+                                          INTERSECT 
+                                              SELECT TagName 
+                                              FROM Tags) 
+)
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.QuestionCount,
+    t.AnswerCount,
+    t.AvgUserReputation,
+    COALESCE(MAX(c.CloseReason), 'No close reasons') AS CommonCloseReason,
+    COALESCE(MAX(c.CloseReasonCount), 0) AS ReasonCount
+FROM 
+    TagWithCloseReasons t
+LEFT JOIN 
+    FrequentCloseReasons c ON t.TagName = ANY(SELECT 
+                                                unnest(string_to_array(t.TagName, ' ')) 
+                                              INTERSECT 
+                                                SELECT TagName 
+                                                FROM Tags) 
+GROUP BY 
+    t.TagName, t.PostCount, t.QuestionCount, t.AnswerCount, t.AvgUserReputation
+ORDER BY 
+    t.PostCount DESC
+LIMIT 10;

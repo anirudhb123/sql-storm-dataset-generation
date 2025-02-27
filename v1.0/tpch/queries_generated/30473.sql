@@ -1,0 +1,62 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_value DESC
+    LIMIT 5
+),
+RegionStats AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(CASE WHEN c.c_mktsegment = 'BUILDING' THEN 1 ELSE 0 END) AS building_customers
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_spent,
+    cs.total_orders,
+    cs.avg_order_value,
+    rh.level AS order_hierarchy_level,
+    ts.s_name AS top_supplier_name,
+    rs.nation_count,
+    rs.building_customers
+FROM CustomerStats cs
+LEFT JOIN OrderHierarchy rh ON cs.c_custkey = rh.o_custkey
+LEFT JOIN TopSuppliers ts ON cs.total_spent > (SELECT AVG(total_spent) FROM CustomerStats)
+LEFT JOIN RegionStats rs ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r LIMIT 1)))
+WHERE cs.total_orders > 0
+ORDER BY cs.total_spent DESC, cs.total_orders ASC;

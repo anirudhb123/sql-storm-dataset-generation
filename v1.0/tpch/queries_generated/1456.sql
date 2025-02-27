@@ -1,0 +1,61 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS sold_parts
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_cost,
+        ss.part_count,
+        RANK() OVER (ORDER BY ss.total_cost DESC) AS supplier_rank
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    rs.supplier_rank,
+    COUNT(DISTINCT od.o_orderkey) AS order_count,
+    SUM(od.total_sales) AS total_revenue
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    OrderDetails od ON od.o_orderkey = (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE s.s_suppkey = c.c_nationkey) LIMIT 1)
+GROUP BY 
+    r.r_name, rs.supplier_rank
+HAVING 
+    SUM(od.total_sales) IS NOT NULL AND COUNT(DISTINCT od.o_orderkey) > 0
+ORDER BY 
+    r.r_name, rs.supplier_rank;

@@ -1,0 +1,63 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) as rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) as total_spent,
+        COUNT(DISTINCT o.o_orderkey) as order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) as total_sales,
+        COUNT(DISTINCT o.o_orderkey) as order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    p.p_name,
+    p.total_sales,
+    p.order_count,
+    COALESCE(rs.s_name, 'No Supplier') as supplier_name,
+    CASE 
+        WHEN p.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END as sales_status
+FROM 
+    CustomerOrderSummary c
+LEFT JOIN 
+    PartSales p ON c.order_count = p.order_count
+LEFT JOIN 
+    RankedSuppliers rs ON p.p_partkey = rs.s_suppkey AND rs.rn = 1
+WHERE 
+    p.total_sales > 0 OR p.total_sales IS NULL
+ORDER BY 
+    c.c_name, p.total_sales DESC;

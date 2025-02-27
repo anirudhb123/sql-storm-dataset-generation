@@ -1,0 +1,58 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_per_year
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.id = ci.movie_id
+    GROUP BY at.id, at.title, at.production_year
+),
+filtered_movies AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        CASE 
+            WHEN rm.cast_count > 10 THEN 'Blockbuster'
+            WHEN rm.cast_count BETWEEN 5 AND 10 THEN 'Mid-tier'
+            ELSE 'Indie'
+        END AS movie_category
+    FROM ranked_movies rm
+    WHERE rm.rank_per_year <= 5 
+),
+movie_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_keyword mt
+    JOIN keyword k ON mt.keyword_id = k.id
+    GROUP BY mt.movie_id
+),
+final_report AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_count,
+        fm.movie_category,
+        mk.keywords,
+        CASE 
+            WHEN mk.keywords IS NOT NULL THEN 'Keywords available'
+            ELSE 'No keywords'
+        END AS keyword_status
+    FROM filtered_movies fm
+    LEFT JOIN movie_keywords mk ON fm.title = mk.movie_id
+)
+
+SELECT 
+    fr.title, 
+    fr.production_year, 
+    fr.cast_count, 
+    fr.movie_category, 
+    fr.keywords,
+    COALESCE(fr.keyword_status, 'No status available') AS keyword_status
+FROM final_report fr
+WHERE fr.production_year >= 2000
+AND (fr.cast_count > 5 OR fr.keywords IS NOT NULL)
+ORDER BY fr.production_year DESC, fr.cast_count DESC;

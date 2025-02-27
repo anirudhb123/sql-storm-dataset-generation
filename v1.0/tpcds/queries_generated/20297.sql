@@ -1,0 +1,62 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           CAST(NULL AS integer) AS parent_customer_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate,
+           ch.c_customer_sk AS parent_customer_sk
+    FROM customer c
+    JOIN customer_hierarchy ch ON ch.c_customer_sk = c.c_current_addr_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(*) AS total_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451752 AND 2451822
+    GROUP BY ws_bill_customer_sk
+),
+item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_product_name,
+        SUM(ws.ws_net_profit) AS total_item_profit,
+        COUNT(ws.ws_order_number) AS item_sales_count
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_product_name
+    HAVING total_item_profit > 1000
+),
+demographic_sales AS (
+    SELECT 
+        h.hd_income_band_sk,
+        SUM(ws.ws_net_profit) AS demographic_profit
+    FROM household_demographics h
+    JOIN web_sales ws ON h.hd_demo_sk = ws.ws_bill_cdemo_sk
+    GROUP BY h.hd_income_band_sk
+)
+SELECT 
+    ch.c_first_name, 
+    ch.c_last_name, 
+    ch.cd_gender, 
+    ss.total_profit, 
+    ss.total_sales, 
+    COUNT(DISTINCT is.i_item_sk) AS distinct_item_count,
+    ds.demographic_profit,
+    RANK() OVER (PARTITION BY ch.cd_gender ORDER BY ss.total_profit DESC) AS gender_profit_rank
+FROM customer_hierarchy ch
+LEFT JOIN sales_summary ss ON ch.c_customer_sk = ss.ws_bill_customer_sk
+LEFT JOIN item_sales is ON is.total_item_profit > 1000
+LEFT JOIN demographic_sales ds ON ds.hd_income_band_sk = ch.c_current_addr_sk
+WHERE ch.cd_marital_status IS NOT NULL
+AND COALESCE(ss.total_profit, 0) > 5000
+GROUP BY ch.c_first_name, ch.c_last_name, ch.cd_gender, ss.total_profit, ss.total_sales, ds.demographic_profit
+HAVING SUM(COALESCE(is.total_item_profit, 0)) >= 2000
+ORDER BY ch.cd_gender, ss.total_profit DESC;

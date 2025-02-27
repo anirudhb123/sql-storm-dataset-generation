@@ -1,0 +1,57 @@
+WITH movie_cast AS (
+    SELECT 
+        a.title AS movie_title,
+        p.name AS actor_name,
+        p.gender AS actor_gender,
+        c.nr_order AS cast_order,
+        ti.kind AS movie_type,
+        ti.production_year AS year_of_release
+    FROM 
+        aka_title a
+    JOIN 
+        cast_info c ON a.id = c.movie_id
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        kind_type ti ON a.kind_id = ti.id
+    WHERE 
+        ti.kind LIKE 'Feature%'
+),
+actor_age_info AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS total_movies,
+        AVG(EXTRACT(YEAR FROM age(cast('2024-10-01' as date), p.info::date))) AS average_age
+    FROM 
+        person_info p
+    JOIN 
+        movie_cast mc ON p.person_id = mc.actor_name
+    WHERE 
+        p.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate')
+    GROUP BY 
+        actor_name
+),
+top_actors AS (
+    SELECT 
+        actor_name,
+        total_movies,
+        average_age
+    FROM 
+        actor_age_info
+    ORDER BY 
+        total_movies DESC
+    LIMIT 10
+)
+SELECT 
+    ma.movie_title, 
+    ta.actor_name, 
+    ma.year_of_release, 
+    ma.cast_order, 
+    ta.average_age
+FROM 
+    movie_cast ma
+JOIN 
+    top_actors ta ON ma.actor_name = ta.actor_name
+ORDER BY 
+    ma.year_of_release DESC, 
+    ma.cast_order;

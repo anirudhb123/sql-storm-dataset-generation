@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, CAST(s_name AS VARCHAR(255)) AS hierarchy
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL AND s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, CONCAT(sh.hierarchy, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_totalprice, SUM(l.l_quantity) AS total_quantity, 
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_custkey
+),
+FilteredCustomers AS (
+    SELECT c.c_custkey, c.c_name, AVG(o.total_quantity) AS avg_order_quantity
+    FROM customer c
+    LEFT JOIN OrderStats o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name AS region, 
+    SUM(CASE WHEN ps.ps_availqty > 0 THEN ps.ps_supplycost END) AS total_supply_cost,
+    COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+    COUNT(DISTINCT CASE WHEN f.avg_order_quantity > 10 THEN f.c_custkey END) AS high_volume_customers
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN FilteredCustomers f ON s.s_nationkey = f.c_nationkey
+WHERE r.r_name IS NOT NULL 
+  AND (s.s_comment LIKE '%reliable%' OR s.s_comment IS NULL) 
+GROUP BY r.r_name
+HAVING SUM(ps.ps_supplycost) > 1000000
+ORDER BY region DESC, unique_suppliers DESC;

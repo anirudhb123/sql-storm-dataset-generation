@@ -1,0 +1,52 @@
+
+WITH CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN CONCAT(ib.ib_lower_bound, '-', ib.ib_upper_bound)
+            ELSE 'Unknown'
+        END AS income_band,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1995 
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_purchase_estimate, 
+        ib.ib_lower_bound, 
+        ib.ib_upper_bound
+),
+TopCustomers AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_spent DESC) AS spending_rank
+    FROM 
+        CustomerStatistics
+)
+SELECT 
+    * 
+FROM 
+    TopCustomers
+WHERE 
+    spending_rank <= 10
+ORDER BY 
+    total_spent DESC;

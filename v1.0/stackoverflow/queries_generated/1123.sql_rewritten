@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        (SELECT COUNT(DISTINCT p.Id) 
+         FROM Posts p 
+         WHERE p.OwnerUserId = u.Id) AS PostCount
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation IS NOT NULL
+)
+SELECT 
+    tp.Title,
+    tp.Score,
+    tp.CommentCount,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    CASE 
+        WHEN ur.Reputation >= 1000 THEN 'High Reputation'
+        WHEN ur.Reputation BETWEEN 500 AND 999 THEN 'Medium Reputation'
+        ELSE 'Low Reputation' 
+    END AS ReputationCategory
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON u.Id = tp.OwnerUserId
+JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN 
+    Votes v ON v.PostId = tp.Id
+WHERE 
+    v.VoteTypeId = 2 
+GROUP BY 
+    tp.Id, ur.Id
+ORDER BY 
+    tp.Score DESC, ur.Reputation DESC;

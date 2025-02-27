@@ -1,0 +1,94 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+),
+ActorMovies AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        a.role_id,
+        n.name AS actor_name,
+        COALESCE(MAX(o.note), 'No Info') AS actor_note
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name n ON a.person_id = n.person_id
+    LEFT JOIN 
+        complete_cast o ON a.movie_id = o.movie_id
+    GROUP BY 
+        a.person_id, a.movie_id, a.role_id, n.name
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT a.person_id) AS actor_count
+    FROM
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        ActorMovies a ON m.movie_id = a.movie_id
+    WHERE
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+),
+RoleCount AS (
+    SELECT 
+        a.movie_id,
+        COUNT(a.role_id) AS role_count
+    FROM 
+        cast_info a
+    GROUP BY 
+        a.movie_id
+),
+FinalStats AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.actor_count,
+        rc.role_count,
+        CASE 
+            WHEN rc.role_count > 5 THEN 'Ensemble Cast'
+            WHEN rc.role_count IS NULL THEN 'Unknown Role Count'
+            ELSE 'Standard Cast'
+        END AS cast_size,
+        CASE 
+            WHEN md.production_year < 2000 THEN 'Classic'
+            ELSE 'Contemporary'
+        END AS movie_era
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        RoleCount rc ON md.movie_id = rc.movie_id
+)
+
+SELECT
+    f.title,
+    f.production_year,
+    f.keywords,
+    f.actor_count,
+    f.role_count,
+    f.cast_size,
+    f.movie_era
+FROM 
+    FinalStats f
+WHERE 
+    f.actor_count > 10
+ORDER BY 
+    f.production_year DESC, f.actor_count DESC
+LIMIT 100;

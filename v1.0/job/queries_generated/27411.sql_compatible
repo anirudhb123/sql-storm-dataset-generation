@@ -1,0 +1,59 @@
+
+WITH movie_title_info AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ARRAY_AGG(DISTINCT c.person_id) AS cast_ids,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM
+        aka_title t
+    JOIN
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN
+        keyword k ON k.id = mk.keyword_id
+    JOIN
+        cast_info c ON c.movie_id = t.id
+    JOIN
+        aka_name a ON a.person_id = c.person_id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id, t.title, t.production_year, k.keyword
+),
+movies_with_companies AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COUNT(mc.company_id) AS company_count
+    FROM
+        movie_title_info m
+    JOIN
+        movie_companies mc ON mc.movie_id = m.movie_id
+    GROUP BY
+        m.movie_id, m.title, m.production_year
+),
+final_benchmark AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        m.company_count,
+        COALESCE(NULLIF(SUM(LENGTH(m.cast_names)), 0), 1) AS total_cast_length
+    FROM
+        movies_with_companies m
+    LEFT JOIN
+        movie_title_info t ON t.movie_id = m.movie_id
+    GROUP BY
+        m.movie_id, m.title, m.production_year, m.company_count
+)
+SELECT
+    *,
+    ROUND((total_cast_length::decimal / company_count), 2) AS average_cast_name_length_per_company
+FROM
+    final_benchmark
+ORDER BY
+    average_cast_name_length_per_company DESC
+LIMIT 10;

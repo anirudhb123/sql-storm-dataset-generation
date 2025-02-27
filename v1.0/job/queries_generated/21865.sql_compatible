@@ -1,0 +1,73 @@
+
+WITH RECURSIVE RecursiveMovieChains AS (
+    SELECT 
+        mt.movie_id,
+        mt.linked_movie_id,
+        ml.link_type_id,
+        1 AS chain_length
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_companies mc ON mc.movie_id = ml.movie_id
+    WHERE 
+        ml.link_type_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        ml.linked_movie_id,
+        ml.link_type_id,
+        rm.chain_length + 1
+    FROM 
+        RecursiveMovieChains rm
+    JOIN 
+        movie_link ml ON rm.linked_movie_id = ml.movie_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = ml.linked_movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    COUNT(DISTINCT mc.company_id) AS total_companies,
+    SUM(CASE 
+            WHEN mi.info_type_id IS NULL THEN 1 
+            ELSE 0 
+        END) AS null_info_count,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS ranking,
+    MAX(CASE 
+            WHEN a.surname_pcode IS NOT NULL THEN a.surname_pcode
+            ELSE 'UNKNOWN'
+        END) AS surname_code,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    EXISTS (SELECT 1 FROM movie_info WHERE movie_id = t.id AND info_type_id = 1 AND info IS NOT NULL) AS has_summary
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title att ON ci.movie_id = att.movie_id
+JOIN 
+    title t ON att.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    RecursiveMovieChains rm ON t.id = rm.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.id, a.name, t.id
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+    AND SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) > 0
+    AND MAX(t.production_year) IS NOT NULL
+ORDER BY 
+    ranking, total_companies DESC
+LIMIT 50;

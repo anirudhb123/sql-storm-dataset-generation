@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+CustomerSpend AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spend
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_name,
+        ps.ps_supplycost,
+        s.s_nationkey
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    COALESCE(cs.c_name, 'Unknown Customer') AS customer_name,
+    COUNT(o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    MAX(sp.p_name) AS most_expensive_part,
+    sp.ps_supplycost,
+    r.r_name AS supplier_region
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    CustomerSpend cs ON o.o_orderkey = (SELECT MIN(o_sub.o_orderkey) FROM RankedOrders o_sub WHERE o_sub.order_rank = o.order_rank)
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierPartDetails sp ON l.l_suppkey = sp.s_suppkey
+LEFT JOIN 
+    nation n ON sp.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate <= DATE '1997-12-31'
+GROUP BY 
+    cs.c_custkey, cs.c_name, sp.ps_supplycost, r.r_name
+ORDER BY 
+    total_revenue DESC;

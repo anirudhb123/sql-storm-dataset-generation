@@ -1,0 +1,55 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(ss_ticket_number) AS transaction_count,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rn
+    FROM store_sales
+    GROUP BY ss_store_sk
+
+    UNION ALL
+
+    SELECT 
+        sc.ss_store_sk,
+        sc.total_sales + ss.ss_net_paid,
+        sc.transaction_count + 1,
+        ROW_NUMBER() OVER (PARTITION BY sc.ss_store_sk ORDER BY (sc.total_sales + ss.ss_net_paid) DESC) AS rn
+    FROM Sales_CTE sc
+    JOIN store_sales ss ON sc.ss_store_sk = ss.ss_store_sk 
+    WHERE sc.transaction_count < 5
+),
+Filtered_Sales AS (
+    SELECT 
+        s.rn,
+        s.ss_store_sk,
+        s.total_sales,
+        s.transaction_count,
+        RANK() OVER (ORDER BY s.total_sales DESC) AS sales_rank
+    FROM Sales_CTE s 
+    WHERE s.rn = 1
+),
+Top_Stores AS (
+    SELECT 
+        fa.total_sales,
+        fa.transaction_count,
+        fa.sales_rank,
+        st.s_store_name,
+        ca.ca_city
+    FROM Filtered_Sales fa
+    JOIN store st ON fa.ss_store_sk = st.s_store_sk
+    LEFT JOIN customer_address ca ON st.s_zip = ca.ca_zip
+    WHERE fa.sales_rank <= 10
+)
+SELECT 
+    ts.s_store_name,
+    ts.total_sales,
+    ts.transaction_count,
+    COALESCE(ca.ca_city, 'Unknown City') AS city,
+    CASE 
+        WHEN ts.total_sales >= 10000 THEN 'High'
+        WHEN ts.total_sales >= 5000 THEN 'Medium'
+        ELSE 'Low' 
+    END AS sales_category
+FROM Top_Stores ts
+ORDER BY ts.total_sales DESC;

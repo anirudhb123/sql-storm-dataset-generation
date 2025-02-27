@@ -1,0 +1,98 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2) 
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier s
+    INNER JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > sh.s_acctbal
+), HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+), RegionView AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+), OrdersDetail AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN CURRENT_DATE - INTERVAL '1 year' AND CURRENT_DATE
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), FinalResult AS (
+    SELECT 
+        sh.s_name,
+        hp.p_name,
+        r.r_name,
+        od.total_sales,
+        COALESCE(od.total_sales, 0) AS sales_in_null,
+        CASE 
+            WHEN od.total_sales IS NULL THEN 'No Sales'
+            ELSE 'Sales Recorded'
+        END AS sales_status
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN 
+        HighValueParts hp ON ps.ps_partkey = hp.p_partkey AND hp.price_rank <= 5
+    JOIN 
+        RegionView r ON sh.s_nationkey = r.nation_count
+    LEFT JOIN 
+        OrdersDetail od ON od.o_orderkey = ps.ps_partkey
+)
+
+SELECT 
+    s_name, 
+    p_name, 
+    r_name, 
+    SUM(total_sales) AS total_sales_amount,
+    COUNT(*) AS sales_count
+FROM 
+    FinalResult
+WHERE 
+    sales_status = 'Sales Recorded'
+GROUP BY 
+    s_name, p_name, r_name
+HAVING 
+    SUM(total_sales) > (SELECT AVG(total_sales) FROM OrdersDetail)
+ORDER BY 
+    total_sales_amount DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+        AND p.Score >= 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.Reputation,
+        us.BadgeCount,
+        us.TotalBounties,
+        RANK() OVER (ORDER BY us.Reputation DESC, us.BadgeCount DESC, us.TotalBounties DESC) AS UserRank
+    FROM 
+        UserStats us
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    u.DisplayName,
+    u.Reputation,
+    u.BadgeCount,
+    u.TotalBounties
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers u ON rp.OwnerUserId = u.UserId
+WHERE 
+    u.UserRank <= 10
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

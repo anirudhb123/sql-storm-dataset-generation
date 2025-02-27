@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+),
+TopParts AS (
+    SELECT p.partkey, p.name, p.total_revenue,
+           RANK() OVER (ORDER BY p.total_revenue DESC) AS revenue_rank
+    FROM PartSales p
+),
+RegionSupplier AS (
+    SELECT r.r_name, s.s_name, s.s_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+)
+SELECT rs.r_name,
+       COALESCE(MAX(sh.s_acctbal), 0) AS max_acct_balance,
+       SUM(CASE WHEN tp.revenue_rank <= 10 THEN tp.total_revenue ELSE 0 END) AS top_part_sales
+FROM RegionSupplier rs
+LEFT JOIN SupplierHierarchy sh ON rs.s_name = sh.s_name
+LEFT JOIN TopParts tp ON tp.partkey = (SELECT ps.ps_partkey
+                                         FROM partsupp ps
+                                         WHERE ps.ps_suppkey = sh.s_suppkey
+                                         ORDER BY ps.ps_supplycost DESC
+                                         LIMIT 1)
+GROUP BY rs.r_name
+HAVING MAX(sh.s_acctbal) > 0
+ORDER BY rs.r_name;

@@ -1,0 +1,79 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1998-10-01' - INTERVAL '90 days'
+), 
+supplier_info AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY s.s_acctbal DESC) AS accts_rank
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal < 5000.00
+    GROUP BY 
+        c.c_custkey
+), 
+lineitem_details AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(ci.order_count, 0) AS customer_order_count,
+    (SELECT COUNT(*) FROM supplier_info si WHERE si.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)) AS supplier_count,
+    COALESCE(ld.total_lineitem_price, 0) AS total_lineitem_price,
+    RANK() OVER (ORDER BY o.o_totalprice DESC) AS price_rank,
+    COUNT(DISTINCT s.s_name) AS distinct_suppliers,
+    STRING_AGG(DISTINCT n.n_name) AS nation_names
+FROM 
+    ranked_orders o
+LEFT JOIN 
+    customer_orders ci ON o.o_orderkey = ci.c_custkey
+LEFT JOIN 
+    lineitem_details ld ON o.o_orderkey = ld.l_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN 
+    supplier_info s ON ps.ps_suppkey = s.ps_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    o.order_rank <= 5 OR (o.o_totalprice IS NOT NULL AND o.o_totalprice > 10000)
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, ld.total_lineitem_price, ci.order_count
+HAVING 
+    COALESCE(SUM(ld.total_lineitem_price), 0) > 500.00 
+ORDER BY 
+    total_lineitem_price DESC, o.o_orderdate DESC
+LIMIT 50;

@@ -1,0 +1,47 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(CAST(mk.keyword AS text), 'Unknown') AS keyword,
+        0 AS level
+    FROM 
+        aka_title m
+        LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(CAST(mk.keyword AS text), 'Unknown') AS keyword,
+        level + 1
+    FROM 
+        movie_link ml
+        JOIN title t ON ml.linked_movie_id = t.id
+        JOIN movie_hierarchy h ON ml.movie_id = h.movie_id
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.keyword,
+    COUNT(DISTINCT ci.person_id) AS number_of_actors,
+    AVG(CASE WHEN c.role_id IS NOT NULL THEN ci.nr_order END) AS avg_actor_order
+FROM 
+    movie_hierarchy h
+    LEFT JOIN complete_cast cc ON h.movie_id = cc.movie_id
+    LEFT JOIN cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN role_type c ON ci.role_id = c.id
+GROUP BY 
+    h.movie_id, h.title, h.production_year, h.keyword
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    h.production_year DESC, number_of_actors DESC
+FETCH FIRST 10 ROWS ONLY;
+
+This SQL query constructs a recursive common table expression (CTE) to build a hierarchy of movies linked through `movie_link`, filtering to only include movies produced after 2000. It then joins with `complete_cast` and `cast_info` to aggregate the number of unique actors and calculate the average order in which they appear in the cast list for the movies. The results are filtered to show only movies that have more than five actors, ordered by production year and number of actors, and limited to the top ten results. 

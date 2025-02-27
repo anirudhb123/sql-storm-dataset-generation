@@ -1,0 +1,47 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_name = 'ASIA'
+    
+    UNION ALL
+    
+    SELECT r.regionkey, r.name, rh.level + 1
+    FROM region r
+    JOIN RegionHierarchy rh ON r.regionkey = rh.regionkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts,
+           SUM(ps.ps_availqty) AS total_available, 
+           SUM(ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineitemStats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           COUNT(DISTINCT l.l_partkey) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name, ss.s_name, os.total_spent, ls.revenue,
+       COALESCE(ss.total_parts, 0) AS total_parts_handled,
+       COALESCE(ss.total_available, 0) AS parts_in_stock,
+       CASE WHEN os.total_spent > 10000 THEN 'VIP' ELSE 'Regular' END AS customer_type
+FROM RegionHierarchy r
+LEFT JOIN SupplierStats ss ON ss.s_suppkey IN (SELECT ps.ps_suppkey
+                                               FROM partsupp ps
+                                               WHERE ps.ps_availqty > 100)
+INNER JOIN OrderSummary os ON os.c_custkey IN (SELECT c.c_custkey
+                                                FROM customer c WHERE c.c_nationkey = r.r_regionkey)
+FULL OUTER JOIN LineitemStats ls ON ls.l_orderkey = os.c_custkey
+WHERE r.level = 0 
+  AND (os.total_spent IS NOT NULL OR ls.revenue IS NOT NULL)
+ORDER BY r.r_name, os.total_spent DESC;

@@ -1,0 +1,80 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title ASC) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        COUNT(DISTINCT c.role_id) AS role_count,
+        COALESCE(MAX(CASE WHEN ct.kind LIKE '%lead%' THEN 1 ELSE 0 END), 0) AS has_lead_role
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name an ON an.person_id = c.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    GROUP BY 
+        c.movie_id
+),
+movies_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info AS movie_info
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'plot')
+),
+distinct_movies AS (
+    SELECT DISTINCT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mc.actor_names,
+        m.movie_info,
+        mt.kind AS genre
+    FROM 
+        movies_info m
+    LEFT JOIN 
+        movie_cast mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        aka_title mt ON m.movie_id = mt.movie_id
+)
+SELECT 
+    dm.movie_id,
+    dm.title,
+    dm.production_year,
+    dm.actor_names,
+    dm.movie_info,
+    CASE 
+        WHEN dm.genre IS NULL THEN 'Unknown Genre' 
+        ELSE dm.genre 
+    END AS genre,
+    r.title_rank,
+    CASE 
+        WHEN mc.role_count > 3 THEN 'Ensemble Cast' 
+        ELSE 'Less Prominent Cast' 
+    END AS cast_evaluation
+FROM 
+    distinct_movies dm
+LEFT JOIN 
+    ranked_titles r ON dm.production_year = r.production_year
+LEFT JOIN 
+    movie_cast mc ON dm.movie_id = mc.movie_id
+WHERE 
+    (dm.production_year > 2000 OR dm.actor_names NOT LIKE '%John Doe%') 
+    AND (dm.movie_info IS NOT NULL OR dm.production_year IS NULL)  
+ORDER BY 
+    dm.production_year DESC, 
+    dm.title ASC;

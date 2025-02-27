@@ -1,0 +1,46 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice,
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+), 
+SupplierInfo AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           COALESCE(NULLIF(s.s_comment, ''), 'No Comment') AS supplier_comment
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+), 
+PartAvailability AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), 
+LineItemWithDiscount AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_discounted_price,
+           l.l_returnflag,
+           l.l_linestatus
+    FROM lineitem l
+    WHERE l.l_shipdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+    GROUP BY l.l_orderkey, l.l_returnflag, l.l_linestatus
+)
+
+SELECT DISTINCT p.p_partkey, 
+                p.p_name, 
+                MAX(lo.total_discounted_price) AS max_discounted_price,
+                SUM(pa.total_avail_qty) AS total_avail_qty,
+                COUNT(DISTINCT si.s_suppkey) AS supplier_count,
+                RANK() OVER (PARTITION BY MAX(lo.l_returnflag) ORDER BY SUM(pa.total_avail_qty) DESC) AS rank_availability
+FROM part p
+LEFT JOIN PartAvailability pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN LineItemWithDiscount lo ON lo.l_orderkey IN (SELECT o_orderkey FROM RankedOrders WHERE order_rank <= 5)
+LEFT JOIN SupplierInfo si ON si.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+GROUP BY p.p_partkey, p.p_name
+HAVING SUM(pa.total_avail_qty) IS NOT NULL 
+   AND MAX(lo.total_discounted_price) > (SELECT AVG(total_discounted_price) FROM LineItemWithDiscount)
+ORDER BY rank_availability, total_avail_qty DESC NULLS LAST;

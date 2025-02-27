@@ -1,0 +1,78 @@
+
+WITH RecursiveActorMovieCTE AS (
+    SELECT 
+        ka.person_id, 
+        ka.name AS actor_name, 
+        kt.title AS movie_title,
+        kt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ka.person_id ORDER BY kt.production_year DESC) AS movie_rank
+    FROM 
+        aka_name ka
+    JOIN 
+        cast_info ci ON ka.person_id = ci.person_id
+    JOIN 
+        aka_title kt ON ci.movie_id = kt.movie_id
+    WHERE 
+        kt.production_year IS NOT NULL
+),
+ActorAwardsCTE AS (
+    SELECT 
+        person_id,
+        COUNT(*) AS award_count
+    FROM 
+        person_info pi
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Award')
+    GROUP BY 
+        person_id
+),
+TopActorsTitles AS (
+    SELECT 
+        r.person_id,
+        r.actor_name,
+        r.movie_title,
+        r.production_year,
+        COALESCE(aw.award_count, 0) AS award_count
+    FROM 
+        RecursiveActorMovieCTE r
+    LEFT JOIN 
+        ActorAwardsCTE aw ON r.person_id = aw.person_id
+    WHERE 
+        r.movie_rank = 1  
+),
+
+LatestMovieInfo AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        COALESCE(mi.info, 'No Info Available') AS movie_note,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword kw ON kw.id = mk.keyword_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, mi.info
+)
+
+SELECT 
+    a.actor_name, 
+    a.movie_title, 
+    a.production_year, 
+    a.award_count,
+    l.movie_note,
+    l.keywords
+FROM 
+    TopActorsTitles a
+JOIN 
+    LatestMovieInfo l ON a.movie_title = l.title
+WHERE 
+    a.award_count > 0
+ORDER BY 
+    a.production_year DESC, a.actor_name;

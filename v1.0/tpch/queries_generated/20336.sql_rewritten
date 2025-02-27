@@ -1,0 +1,65 @@
+WITH 
+  RankedOrders AS (
+    SELECT
+      o.o_orderkey,
+      o.o_orderdate,
+      o.o_totalprice,
+      RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as price_rank
+    FROM 
+      orders o
+    WHERE 
+      o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+  ),
+  SupplierProductData AS (
+    SELECT 
+      ps.ps_partkey,
+      SUM(ps.ps_availqty) AS total_avail_qty,
+      SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+      partsupp ps
+    LEFT JOIN 
+      supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+      s.s_acctbal IS NOT NULL
+    GROUP BY 
+      ps.ps_partkey
+  ),
+  OrderDetail AS (
+    SELECT 
+      l.l_orderkey,
+      SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price_after_discount,
+      COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM 
+      lineitem l
+    WHERE 
+      l.l_shipdate BETWEEN '1996-06-01' AND '1996-12-31'
+    GROUP BY 
+      l.l_orderkey
+  )
+SELECT 
+  r.o_orderkey,
+  r.o_orderdate,
+  COALESCE(od.total_price_after_discount, 0) AS price_after_discount,
+  COALESCE(sp.total_avail_qty, 0) AS total_supplier_availability,
+  (CASE 
+     WHEN sp.total_avail_qty > 100 THEN 'Highly Available'
+     WHEN sp.total_avail_qty BETWEEN 50 AND 100 THEN 'Moderately Available'
+     ELSE 'Low Availability' 
+   END) AS availability_status
+FROM 
+  RankedOrders r
+LEFT JOIN 
+  OrderDetail od ON r.o_orderkey = od.l_orderkey
+LEFT JOIN 
+  SupplierProductData sp ON sp.ps_partkey = ANY(
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = r.o_orderkey
+  )
+WHERE 
+  r.price_rank <= 10 
+  AND (r.o_totalprice IS NOT NULL OR r.o_orderstatus = 'F')
+ORDER BY 
+  r.o_orderdate DESC, 
+  r.o_totalprice DESC
+LIMIT 100;

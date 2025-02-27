@@ -1,0 +1,82 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        1 AS depth
+    FROM 
+        aka_title AS m 
+    WHERE 
+        m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        mh.depth + 1
+    FROM 
+        aka_title AS m
+    JOIN 
+        movie_link AS ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title AS mh ON mh.id = ml.linked_movie_id
+    WHERE 
+        mh.production_year > 2000
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info AS ci
+    WHERE 
+        ci.note IS NULL
+    GROUP BY 
+        ci.movie_id
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(k.id) AS keyword_count
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+movie_overview AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        m.production_year, 
+        COALESCE(cd.cast_count, 0) AS cast_count,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        mh.depth AS hierarchy_depth
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_details AS cd ON m.id = cd.movie_id
+    LEFT JOIN 
+        keyword_count AS kc ON m.id = kc.movie_id
+    LEFT JOIN 
+        movie_hierarchy AS mh ON m.id = mh.movie_id
+)
+SELECT 
+    mo.title, 
+    mo.production_year, 
+    mo.cast_count, 
+    mo.keyword_count,
+    RANK() OVER (PARTITION BY mo.hierarchy_depth ORDER BY mo.cast_count DESC) AS rank_by_cast_count,
+    DENSE_RANK() OVER (ORDER BY mo.keyword_count DESC) AS rank_by_keyword_count
+FROM 
+    movie_overview AS mo
+WHERE 
+    mo.production_year BETWEEN 2000 AND 2023
+AND 
+    (mo.cast_count > 5 OR mo.keyword_count > 3)
+ORDER BY 
+    mo.hierarchy_depth, 
+    mo.cast_count DESC, 
+    mo.keyword_count DESC;

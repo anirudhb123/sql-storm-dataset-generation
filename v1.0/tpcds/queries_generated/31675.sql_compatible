@@ -1,0 +1,74 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c_customer_sk,
+        c_customer_id,
+        0 AS level,
+        CAST(c_customer_id AS VARCHAR(100)) AS hierarchy_path
+    FROM 
+        customer
+    WHERE 
+        c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        ch.level + 1,
+        CONCAT(ch.hierarchy_path, ' > ', c.c_customer_id)
+    FROM 
+        customer c
+    JOIN 
+        CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        EXTRACT(YEAR FROM d.d_date) AS sale_year,
+        i.i_item_desc
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+),
+AggregatedSales AS (
+    SELECT 
+        sale_year,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        COUNT(DISTINCT i_item_desc) AS unique_items_sold
+    FROM 
+        SalesData
+    GROUP BY 
+        sale_year
+),
+TopProfitableYears AS (
+    SELECT 
+        sale_year,
+        total_net_profit,
+        order_count,
+        unique_items_sold,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS year_rank
+    FROM 
+        AggregatedSales
+    WHERE 
+        total_net_profit > 100000
+)
+SELECT 
+    ch.level,
+    ch.hierarchy_path,
+    tp.sale_year,
+    tp.total_net_profit,
+    tp.order_count,
+    tp.unique_items_sold
+FROM 
+    CustomerHierarchy ch
+JOIN 
+    TopProfitableYears tp ON tp.sale_year = EXTRACT(YEAR FROM DATE '2002-10-01') - ch.level
+WHERE 
+    ch.level < 5
+ORDER BY 
+    tp.total_net_profit DESC, ch.level;

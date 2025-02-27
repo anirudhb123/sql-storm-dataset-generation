@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS production_companies,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN aka_title at ON mc.movie_id = at.movie_id
+    LEFT JOIN movie_keyword mk ON at.movie_id = mk.movie_id
+    GROUP BY 
+        mt.movie_id
+),
+FullCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+Combined AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        md.production_companies,
+        fc.total_cast,
+        fc.note_count,
+        rt.year_rank,
+        CASE 
+            WHEN fc.total_cast IS NULL OR fc.total_cast = 0 THEN 'No Cast Information' 
+            ELSE 'Has Cast Information' 
+        END AS cast_info_status
+    FROM 
+        RankedTitles rt
+    LEFT JOIN MovieDetails md ON rt.title_id = md.movie_id
+    LEFT JOIN FullCast fc ON rt.title_id = fc.movie_id
+)
+SELECT 
+    *,
+    CASE
+        WHEN production_year IS NOT NULL AND year_rank IS NOT NULL THEN 
+            CONCAT('Year: ', production_year, ', Rank: ', year_rank)
+        ELSE 
+            'Year or Rank Information Missing'
+    END AS rank_and_year_info
+FROM 
+    Combined
+WHERE 
+    (cast_info_status = 'Has Cast Information' OR 
+     (production_companies IS NOT NULL AND keyword_count > 5))
+ORDER BY 
+    production_year DESC, 
+    total_cast DESC NULLS LAST
+LIMIT 50 OFFSET 10;

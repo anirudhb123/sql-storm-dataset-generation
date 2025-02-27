@@ -1,0 +1,76 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+),
+supplier_part AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(CASE WHEN ps.ps_comment LIKE '%urgent%' THEN 1 END) AS urgent_supply_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+customer_info AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+lineitem_summary AS (
+    SELECT
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS item_count,
+        MAX(l.l_shipdate) AS last_ship_date,
+        MIN(l.l_returnflag) AS first_return_flag
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_custkey,
+    co.c_name,
+    r.total_price,
+    r.item_count,
+    s.total_availqty,
+    s.avg_supplycost,
+    r.first_return_flag,
+    (CASE 
+        WHEN co.c_acctbal IS NULL THEN 'No Account' 
+        ELSE (CASE 
+            WHEN co.c_acctbal < 1000 THEN 'Low Balance' 
+            ELSE 'Sufficient Balance' 
+        END) 
+    END) AS balance_status
+FROM 
+    customer_info co
+LEFT JOIN 
+    lineitem_summary r ON co.c_custkey = r.l_orderkey
+JOIN 
+    supplier_part s ON s.ps_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = (SELECT s.s_suppkey FROM supplier s WHERE s.s_name = 'SupplierA') LIMIT 1)
+WHERE 
+    co.cust_rank <= 10
+    AND (co.nation_name IS NOT NULL OR r.last_ship_date IS NULL)
+    AND r.item_count > (SELECT AVG(item_count) FROM lineitem_summary)
+ORDER BY 
+    co.c_name, 
+    r.total_price DESC;

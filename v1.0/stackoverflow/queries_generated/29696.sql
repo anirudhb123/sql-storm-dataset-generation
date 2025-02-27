@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT  
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagList,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(c.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON p.Tags ILIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id
+), 
+TopPosts AS (
+    SELECT *
+    FROM RankedPosts
+    WHERE Rank <= 10
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    tp.Title,
+    tp.Body,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.EditCount,
+    STRING_AGG(DISTINCT tp.TagList::TEXT, ', ') AS Tags,
+    um.DisplayName AS TopUser,
+    um.TotalPosts,
+    um.QuestionsCount,
+    um.AnswersCount,
+    um.AverageReputation
+FROM 
+    TopPosts tp
+JOIN 
+    UserMetrics um ON um.UserId = (
+        SELECT p.OwnerUserId 
+        FROM Posts p 
+        WHERE p.Id = tp.PostId
+    )
+GROUP BY 
+    tp.Title, tp.Body, tp.CommentCount, 
+    tp.UpVotes, tp.DownVotes, 
+    tp.EditCount, um.DisplayName, 
+    um.TotalPosts, um.QuestionsCount, 
+    um.AnswersCount, um.AverageReputation
+ORDER BY 
+    tp.CommentCount DESC, tp.UpVotes DESC;

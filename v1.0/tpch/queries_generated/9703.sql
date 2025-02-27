@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1995-01-01' AND o.o_orderdate < '1996-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.revenue_rank <= 10
+), SupplierDetails AS (
+    SELECT 
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name, n.n_name
+), CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spending
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.total_revenue,
+    sd.s_name,
+    sd.nation_name,
+    cs.total_orders,
+    cs.total_spending
+FROM 
+    TopOrders to
+JOIN 
+    SupplierDetails sd ON sd.total_supply_cost > 50000
+JOIN 
+    CustomerSummary cs ON cs.total_spending > 1000
+ORDER BY 
+    to.total_revenue DESC,
+    cs.total_orders DESC;

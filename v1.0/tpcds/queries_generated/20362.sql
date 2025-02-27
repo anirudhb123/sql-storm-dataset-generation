@@ -1,0 +1,70 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown' 
+            WHEN cd.cd_purchase_estimate < 100 THEN 'Low Spender'
+            WHEN cd.cd_purchase_estimate BETWEEN 100 AND 500 THEN 'Mid Spender'
+            ELSE 'High Spender' 
+        END AS spending_category,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), promotional_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_net_profit) AS total_profit,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        ws.ws_order_number
+), detailed_returns AS (
+    SELECT 
+        cr.cr_item_sk, 
+        COUNT(DISTINCT cr.cr_order_number) AS total_returns, 
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        AVG(cr.cr_return_quantity) AS avg_quantity_returned
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+)
+SELECT 
+    ci.c_customer_id, 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ci.cd_gender,
+    ps.total_profit,
+    dr.total_returns,
+    dr.total_return_amount,
+    dr.avg_quantity_returned,
+    CASE 
+        WHEN dr.total_return_amount IS NULL THEN 'No Returns'
+        WHEN dr.total_return_amount > 500 THEN 'Significant Returns'
+        ELSE 'Minor Returns'
+    END AS return_category
+FROM 
+    customer_info ci
+LEFT JOIN 
+    promotional_sales ps ON ci.c_customer_id = ps.ws_order_number
+LEFT JOIN 
+    detailed_returns dr ON ci.c_customer_id = dr.cr_item_sk
+WHERE 
+    (ci.spending_category = 'High Spender' OR ci.rank <= 5)
+    AND (dr.total_returns IS NOT NULL OR ps.total_profit IS NOT NULL)
+ORDER BY 
+    ci.c_last_name, ci.c_first_name DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) as rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    UNION ALL
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        rank
+    FROM 
+        web_sales ws
+    INNER JOIN SalesCTE s ON ws.web_site_sk = s.web_site_sk AND ws.ws_order_number <> s.ws_order_number
+    WHERE 
+        ws.ws_net_profit > s.ws_net_profit
+),
+MaxProfit AS (
+    SELECT 
+        sales.web_site_sk,
+        MAX(sales.ws_net_profit) AS max_profit
+    FROM 
+        SalesCTE sales
+    GROUP BY 
+        sales.web_site_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    HAVING 
+        SUM(ws.ws_net_paid_inc_tax) IS NOT NULL
+)
+SELECT 
+    ca.ca_city,
+    cd.cd_gender,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+    coalesce(ms.max_profit, 0) AS maximum_profit
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    MaxProfit ms ON ms.web_site_sk = ws.ws_web_site_sk
+WHERE 
+    cd.cd_marital_status = 'M'
+    AND ca.ca_state = 'CA'
+    AND ws.ws_sales_price > (SELECT AVG(ws2.ws_sales_price) FROM web_sales ws2)
+GROUP BY 
+    ca.ca_city, cd.cd_gender, ms.max_profit
+ORDER BY 
+    total_profit DESC, num_customers DESC;

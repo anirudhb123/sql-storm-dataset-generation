@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS net_sales,
+        DENSE_RANK() OVER (PARTITION BY l_orderkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate >= DATE '2022-01-01'
+    GROUP BY 
+        l_orderkey, l_partkey
+),
+TopSales AS (
+    SELECT 
+        r.n_name AS nation_name,
+        p.p_name AS part_name,
+        ps.ps_supplycost AS supplier_cost,
+        COALESCE(rs.net_sales, 0) AS total_sales,
+        RANK() OVER (PARTITION BY r.n_name ORDER BY COALESCE(rs.net_sales, 0) DESC) AS rank_within_nation
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        RankedSales rs ON rs.l_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)  -- Filter parts based on average price
+    AND 
+        (s.s_acctbal IS NULL OR s.s_acctbal > 2000)  -- Account balance constraints that reflect NULL logic
+)
+SELECT 
+    t.nation_name,
+    t.part_name,
+    t.supplier_cost,
+    t.total_sales
+FROM 
+    TopSales t
+WHERE 
+    t.rank_within_nation <= 3  -- Top 3 in each nation
+UNION ALL
+SELECT 
+    'UNKNOWN' AS nation_name,
+    'DEFAULT_PART' AS part_name,
+    0 AS supplier_cost,
+    SUM(l_extendedprice * (1 - l_discount)) AS total_sales
+FROM 
+    lineitem
+WHERE 
+    l_orderkey NOT IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'F') -- Excluded finished orders
+GROUP BY 
+    l_orderkey
+HAVING 
+    SUM(l_extendedprice) > 10000  -- Unusual condition for poorly defined parts
+ORDER BY 
+    nation_name, total_sales DESC;

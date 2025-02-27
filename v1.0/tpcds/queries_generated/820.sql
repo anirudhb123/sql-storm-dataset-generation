@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 1 LIMIT 1)
+        AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 12 LIMIT 1)
+    GROUP BY
+        c.c_customer_id, c.c_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+),
+SalesSummary AS (
+    SELECT 
+        r.c_customer_id,
+        r.total_sales,
+        cd.cd_gender,
+        cd.customer_count,
+        CASE 
+            WHEN r.total_sales > 1000 THEN 'High spender' 
+            ELSE 'Low spender' 
+        END AS spender_category
+    FROM
+        RankedSales r
+    LEFT JOIN
+        CustomerDemographics cd ON r.c_customer_id = cd.cd_demo_sk
+    WHERE
+        r.sales_rank = 1
+)
+SELECT 
+    s.spender_category,
+    COUNT(s.c_customer_id) AS number_of_customers,
+    AVG(s.total_sales) AS average_sales
+FROM 
+    SalesSummary s
+GROUP BY 
+    s.spender_category
+UNION ALL
+SELECT 
+    'Total',
+    COUNT(s.c_customer_id),
+    SUM(s.total_sales)
+FROM 
+    SalesSummary s
+ORDER BY 
+    CASE 
+        WHEN spender_category = 'High spender' THEN 1
+        ELSE 2
+    END;

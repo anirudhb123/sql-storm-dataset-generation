@@ -1,0 +1,101 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.CommentCount,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.CommentCount,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        Ph.Level + 1
+    FROM 
+        Posts P
+    JOIN 
+        RecursivePostHierarchy Ph ON P.ParentId = Ph.PostId
+    WHERE 
+        P.PostTypeId = 2 
+),
+AggregatedPostData AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= '2023-01-01'
+    GROUP BY P.OwnerUserId
+),
+RecentPostHistory AS (
+    SELECT 
+        Ph.PostId,
+        Ph.PostHistoryTypeId,
+        PH.CreationDate,
+        Ph.UserId,
+        Ph.UserDisplayName
+    FROM 
+        PostHistory Ph
+    WHERE 
+        Ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.Reputation,
+        U.DisplayName,
+        A.TotalPosts,
+        A.TotalScore,
+        A.AverageScore,
+        A.TotalViews
+    FROM 
+        Users U
+    JOIN 
+        AggregatedPostData A ON U.Id = A.OwnerUserId
+    WHERE 
+        U.Reputation > 1000
+    ORDER BY 
+        A.TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    PU.DisplayName AS UserDisplayName,
+    PU.Reputation,
+    COUNT(DISTINCT P.Id) AS NumberOfPosts,
+    SUM(P.Score) AS SumOfScores,
+    SUM(P.ViewCount) AS SumOfViews,
+    COALESCE(MAX(PH.CreationDate), 'No Activity') AS LastActivityDate,
+    STRING_AGG(distinct PH.UserDisplayName, ', ') AS RecentEditors
+FROM 
+    Posts P
+JOIN 
+    Users PU ON P.OwnerUserId = PU.Id
+LEFT JOIN 
+    RecentPostHistory PH ON P.Id = PH.PostId
+JOIN 
+    TopUsers TU ON PU.Id = TU.Id
+WHERE 
+    P.CreationDate >= '2023-01-01'
+GROUP BY 
+    PU.DisplayName, PU.Reputation
+ORDER BY 
+    SumOfScores DESC, NumberOfPosts DESC;

@@ -1,0 +1,81 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link m
+    JOIN movie_hierarchy mh ON m.movie_id = mh.movie_id
+),
+actor_performance AS (
+    SELECT
+        a.person_id,
+        a.movie_id,
+        COUNT(DISTINCT a.id) AS total_roles,
+        AVG(a.nr_order) AS avg_order,
+        COUNT(DISTINCT c.role_id) AS distinct_roles
+    FROM
+        cast_info a
+    LEFT JOIN role_type c ON a.role_id = c.id
+    GROUP BY
+        a.person_id, a.movie_id
+),
+top_actors AS (
+    SELECT
+        p.id AS person_id,
+        COALESCE(n.name, 'Unknown') AS actor_name,
+        COALESCE(SUM(ap.total_roles * ap.avg_order), 0) AS performance_score
+    FROM
+        person_info p
+    LEFT JOIN aka_name n ON p.person_id = n.person_id
+    LEFT JOIN actor_performance ap ON ap.person_id = p.person_id
+    GROUP BY
+        p.id, n.name
+    HAVING
+        performance_score > (SELECT AVG(performance_score) FROM (
+            SELECT
+                COALESCE(SUM(ap.total_roles * ap.avg_order), 0) AS performance_score
+            FROM
+                person_info p
+            LEFT JOIN actor_performance ap ON ap.person_id = p.person_id
+            GROUP BY p.id
+        ) AS avg_score)
+),
+movie_summary AS (
+    SELECT
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM
+        aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        m.id, m.title, m.production_year
+)
+SELECT
+    ms.title,
+    ms.production_year,
+    ms.total_actors,
+    ms.total_keywords,
+    COALESCE(ta.performance_score, 0) AS top_actor_score
+FROM
+    movie_summary ms
+LEFT JOIN top_actors ta ON ms.total_actors >= 1
+ORDER BY
+    ms.production_year DESC,
+    top_actor_score DESC;

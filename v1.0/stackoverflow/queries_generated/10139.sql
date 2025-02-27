@@ -1,0 +1,36 @@
+-- Performance Benchmarking Query
+-- This query benchmarks the average response time for posts with varying score ranges and their associated user reputation
+
+WITH ScoreCategories AS (
+    SELECT 
+        CASE 
+            WHEN Score < 1 THEN 'Low Score'
+            WHEN Score BETWEEN 1 AND 10 THEN 'Medium Score'
+            WHEN Score > 10 THEN 'High Score'
+        END AS ScoreCategory,
+        COUNT(*) AS PostCount,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(COALESCE(Users.Reputation, 0)) AS AvgUserReputation,
+        AVG(EXTRACT(EPOCH FROM (LastActivityDate - CreationDate))) AS AvgResponseTimeInSeconds
+    FROM 
+        Posts
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY 
+        ScoreCategory
+)
+
+SELECT 
+    ScoreCategory,
+    PostCount,
+    AvgViewCount,
+    AvgUserReputation,
+    AvgResponseTimeInSeconds
+FROM 
+    ScoreCategories
+ORDER BY 
+    CASE ScoreCategory
+        WHEN 'Low Score' THEN 1
+        WHEN 'Medium Score' THEN 2
+        WHEN 'High Score' THEN 3
+    END;

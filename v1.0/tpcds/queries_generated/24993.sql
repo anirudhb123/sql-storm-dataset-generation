@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+ProfitCalculation AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(COALESCE(str.total_returns, 0)) AS total_returned,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT wr.returning_customer_sk) AS total_returning_customers
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN TotalReturns str ON i.i_item_sk = str.sr_item_sk
+    LEFT JOIN web_returns wr ON ws.ws_item_sk = wr.wr_item_sk AND ws.ws_order_number = wr.wr_order_number
+    WHERE i.i_current_price > 0 
+      AND (ws.ws_ship_date_sk IS NULL OR ws.ws_ship_date_sk >= 1000)
+    GROUP BY i.i_item_sk
+),
+FinalReport AS (
+    SELECT 
+        p.i_item_sk, 
+        p.total_net_profit, 
+        p.total_returned,
+        p.total_orders,
+        p.total_returning_customers,
+        CASE 
+            WHEN p.total_orders = 0 THEN 'No Sales' 
+            ELSE CAST((p.total_net_profit / p.total_orders) AS DECIMAL(10, 2)) 
+        END AS avg_profit_per_order,
+        CASE 
+            WHEN p.total_returned > 100 THEN 'High Returns'
+            ELSE NULL
+        END AS return_category
+    FROM ProfitCalculation p
+)
+SELECT 
+    f.i_item_sk, 
+    f.total_net_profit,
+    f.total_returned,
+    f.total_orders,
+    f.total_returning_customers,
+    f.avg_profit_per_order, 
+    CASE 
+        WHEN f.avg_profit_per_order < 10 THEN 'Underperforming Item'
+        WHEN f.avg_profit_per_order BETWEEN 10 AND 50 THEN 'Average Item'
+        ELSE 'Top Performer'
+    END AS performance_category
+FROM FinalReport f
+LEFT JOIN customer c ON f.total_returning_customers = c.c_customer_sk
+WHERE c.c_customer_id IS NOT NULL AND 
+      (c.c_birth_year IS NULL OR c.c_birth_year > 1980)
+ORDER BY f.total_net_profit DESC, f.total_orders DESC
+LIMIT 100;

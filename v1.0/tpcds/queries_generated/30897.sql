@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+HighSpenders AS (
+    SELECT 
+        customer_id, 
+        total_sales, 
+        order_count
+    FROM SalesData
+    WHERE sales_rank <= 100
+),
+CustomerAddress AS (
+    SELECT 
+        ca_address_id, 
+        ca_city, 
+        ca_state, 
+        ca_country
+    FROM customer_address
+    WHERE ca_country = 'USA'
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        cd_education_status, 
+        cd_dep_count
+    FROM customer_demographics
+),
+FinalData AS (
+    SELECT 
+        hs.customer_id,
+        CONVERT(varchar, ca.ca_address_id) AS address,
+        ca.ca_city,
+        ca.ca_state,
+        hs.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM HighSpenders hs
+    LEFT JOIN CustomerAddress ca ON hs.customer_id = ca.ca_address_sk
+    LEFT JOIN CustomerDemographics cd ON hs.customer_id = cd.cd_demo_sk
+)
+SELECT 
+    fd.customer_id, 
+    fd.address, 
+    fd.ca_city, 
+    fd.ca_state, 
+    fd.total_sales,
+    CASE 
+        WHEN fd.total_sales > 1000 THEN 'High Roller'
+        WHEN fd.total_sales BETWEEN 500 AND 1000 THEN 'Mid Tier'
+        ELSE 'Low Tier'
+    END AS spending_category,
+    ROW_NUMBER() OVER (PARTITION BY fd.ca_state ORDER BY fd.total_sales DESC) AS state_rank
+FROM FinalData fd
+WHERE fd.total_sales IS NOT NULL
+ORDER BY fd.total_sales DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

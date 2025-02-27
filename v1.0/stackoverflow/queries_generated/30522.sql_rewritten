@@ -1,0 +1,65 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS HistoryDate,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        V.VoteTypeId IN (8, 9)  
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        SUM(V.BountyAmount) > 0
+),
+TagPopularity AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    TP.TagName AS PopularTag,
+    COUNT(DISTINCT PH.PostId) AS TotalPostsEdited,
+    SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS TotalCloseReopenActivities,
+    MAX(PH.HistoryDate) AS LastEditDate
+FROM 
+    TopUsers U
+JOIN 
+    RecursivePostHistory PH ON U.UserId = PH.UserId
+CROSS JOIN 
+    TagPopularity TP
+WHERE 
+    PH.rn = 1 
+GROUP BY 
+    U.DisplayName, TP.TagName
+HAVING 
+    COUNT(DISTINCT PH.PostId) > 5
+ORDER BY 
+    TotalPostsEdited DESC, TotalBounty DESC;

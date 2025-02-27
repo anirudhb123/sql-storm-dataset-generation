@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        P.Score,
+        P.ViewCount,
+        P.Tags,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 -- Filter for only questions
+),
+TagCount AS (
+    SELECT 
+        T.TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts P
+    CROSS JOIN 
+        LATERAL string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><') AS T(TagName)
+    WHERE 
+        P.PostTypeId = 1 -- Filter for only questions
+    GROUP BY 
+        T.TagName
+),
+PopularTags AS (
+    SELECT 
+        TC.TagName,
+        TC.PostCount,
+        RANK() OVER (ORDER BY TC.PostCount DESC) AS TagRank
+    FROM 
+        TagCount TC
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Body,
+    RP.CreationDate,
+    RP.Author,
+    RP.Score,
+    RP.ViewCount,
+    RP.Tags,
+    PT.TagName AS MostPopularTag
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    PopularTags PT ON PT.TagRank = 1 -- Join with the most popular tag for each post
+WHERE 
+    RP.PostRank = 1 -- Get only the latest post from each author
+ORDER BY 
+    RP.CreationDate DESC 
+LIMIT 10; -- Limit the results to 10 recent questions

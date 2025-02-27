@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice)
+            FROM orders o2
+            WHERE o2.o_orderstatus = 'O'
+        )
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (ORDER BY s.s_acctbal DESC) as supplier_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+)
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COALESCE(TotalByPart.total_available, 0) AS available_qty,
+    s.s_name AS supplier_name,
+    r.r_name AS region_name
+FROM 
+    lineitem l
+JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+JOIN 
+    SupplierParts sp ON l.l_partkey = sp.ps_partkey
+JOIN 
+    TopSuppliers s ON sp.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    (SELECT 
+         ps.ps_partkey, 
+         SUM(ps.ps_availqty) AS total_available 
+     FROM 
+         partsupp ps 
+     GROUP BY 
+         ps.ps_partkey
+    ) TotalByPart ON l.l_partkey = TotalByPart.ps_partkey
+WHERE 
+    l.l_shipdate >= DATE '1996-01-01'
+    AND l.l_shipdate < DATE '1997-01-01'
+GROUP BY 
+    p.p_name, s.s_name, r.r_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY 
+    revenue DESC;

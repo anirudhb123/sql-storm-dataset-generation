@@ -1,0 +1,68 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 0
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+        AND s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal)
+            FROM supplier s2
+        )
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    np.n_name,
+    np.r_name,
+    rp.p_name,
+    rp.p_retailprice,
+    sp.total_available,
+    sp.total_cost,
+    s.s_name AS supplier_name,
+    RANK() OVER (PARTITION BY n.n_nationkey ORDER BY rp.p_retailprice DESC) AS price_rank
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierParts sp ON rp.p_partkey = sp.ps_partkey
+JOIN 
+    HighValueSuppliers s ON s.s_suppkey = sp.ps_suppkey
+JOIN 
+    NationRegion np ON np.n_nationkey = s.s_nationkey
+WHERE 
+    rp.rank <= 5 
+    AND (sp.total_available IS NULL OR sp.total_available > 100)
+ORDER BY 
+    np.n_name, rp.p_retailprice DESC;

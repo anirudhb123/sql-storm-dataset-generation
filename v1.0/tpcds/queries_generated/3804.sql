@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) as rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2400 AND 2405
+),
+CustomerReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+SalesExcludingReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        COALESCE(cr.total_returns, 0) AS total_returns
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        CustomerReturns cr ON ws.ws_item_sk = cr.cr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+),
+FinalSales AS (
+    SELECT 
+        ss_item_sk,
+        total_sold,
+        total_returns,
+        CASE 
+            WHEN total_sold > total_returns THEN 'Profitable'
+            ELSE 'Unprofitable'
+        END AS profitability
+    FROM 
+        SalesExcludingReturns
+)
+SELECT 
+    fs.ss_item_sk,
+    fs.total_sold,
+    fs.total_returns,
+    fs.profitability,
+    (SELECT 
+        AVG(ws_sales_price) 
+     FROM 
+        web_sales 
+     WHERE 
+        ws_item_sk = fs.ss_item_sk
+    ) AS avg_sales_price,
+    (SELECT 
+        COUNT(DISTINCT c_customer_id) 
+     FROM 
+        customer 
+     WHERE 
+        c_current_cdemo_sk IN (SELECT DISTINCT cd_demo_sk FROM customer_demographics WHERE cd_gender = 'F' AND cd_marital_status = 'M')
+    ) AS female_married_customers
+FROM 
+    FinalSales fs
+WHERE 
+    fs.total_sold > (SELECT AVG(total_sold) FROM FinalSales);

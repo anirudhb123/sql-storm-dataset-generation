@@ -1,0 +1,89 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq = 1 LIMIT 1)
+        AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq = 1 ORDER BY d_date_sk DESC LIMIT 1)
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    HAVING 
+        total_sales > 500
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        COUNT(cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq = 1 LIMIT 1)
+        AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq = 1 ORDER BY d_date_sk DESC LIMIT 1)
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+    HAVING 
+        total_sales > 500
+),
+ranked_sales AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        COALESCE(web.total_sales, 0) AS web_sales,
+        COALESCE(catalog.total_sales, 0) AS catalog_sales,
+        COALESCE(web.order_count, 0) + COALESCE(catalog.order_count, 0) AS total_orders,
+        CASE 
+            WHEN COALESCE(web.total_sales, 0) > COALESCE(catalog.total_sales, 0) THEN 'Web'
+            WHEN COALESCE(web.total_sales, 0) < COALESCE(catalog.total_sales, 0) THEN 'Catalog'
+            ELSE 'Equal'
+        END AS dominant_channel
+    FROM 
+        item
+    LEFT JOIN 
+        (SELECT 
+            ws_item_sk,
+            SUM(total_sales) AS total_sales,
+            COUNT(order_count) AS order_count
+        FROM 
+            sales_cte
+        WHERE 
+            sales_rank = 1
+        GROUP BY 
+            ws_item_sk) AS web ON item.i_item_sk = web.ws_item_sk
+    LEFT JOIN 
+        (SELECT 
+            cs_item_sk,
+            SUM(total_sales) AS total_sales,
+            COUNT(order_count) AS order_count
+        FROM 
+            sales_cte
+        WHERE 
+            sales_rank = 1
+        GROUP BY 
+            cs_item_sk) AS catalog ON item.i_item_sk = catalog.cs_item_sk
+)
+SELECT 
+    s.i_item_id,
+    s.i_item_desc,
+    s.web_sales,
+    s.catalog_sales,
+    s.total_orders,
+    s.dominant_channel,
+    CASE 
+        WHEN s.total_orders > 100 THEN 'High Volume'
+        WHEN s.total_orders BETWEEN 50 AND 100 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS order_volume_category
+FROM 
+    ranked_sales s
+WHERE 
+    s.web_sales > 0 OR s.catalog_sales > 0
+ORDER BY 
+    s.total_orders DESC, s.dominant_channel;

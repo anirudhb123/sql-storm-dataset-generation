@@ -1,0 +1,63 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Questions only
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.Id
+)
+
+SELECT 
+    q.Id AS QuestionId,
+    q.Title AS QuestionTitle,
+    q.CreationDate AS QuestionCreationDate,
+    COUNT(a.Id) AS AnswerCount,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+    COALESCE(DATEDIFF(CURDATE(), q.CreationDate), 0) AS DaysSincePosted,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(rp.Level) AS MaxAnswerLevel
+FROM 
+    Posts q
+LEFT JOIN 
+    Posts a ON a.ParentId = q.Id -- Left join to get all related answers to questions
+LEFT JOIN 
+    Votes v ON v.PostId = a.Id -- Votes for answers
+LEFT JOIN 
+    Tags t ON t.Id IN (SELECT unnest(string_to_array(q.Tags, '>'))::int) -- Tag association
+LEFT JOIN 
+    RecursivePostCTE rp ON rp.Id = a.Id -- Answers context level count
+WHERE 
+    q.PostTypeId = 1 AND 
+    q.CreationDate >= DATE_SUB(NOW(), INTERVAL 1 YEAR) -- Questions created within the last year
+GROUP BY 
+    q.Id, q.Title, q.CreationDate
+HAVING 
+    COUNT(a.Id) > 0 OR MAX(rp.Level) > 0 -- Having clause to filter only those questions with answers or existing levels
+ORDER BY 
+    DaysSincePosted DESC, 
+    UpVoteCount DESC;
+

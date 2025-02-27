@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        LastAccessDate, 
+        CreationDate, 
+        DisplayName, 
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationCategory
+    FROM Users
+),
+PostCounts AS (
+    SELECT 
+        OwnerUserId, 
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+PostHistoryDetails AS (
+    SELECT
+        PH.UserId,
+        COUNT(*) AS TotalHistoryCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(PHT.Name, ', ') AS ChangeTypes
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.UserId
+),
+UserEngagement AS (
+    SELECT 
+        UR.Id AS UserId, 
+        UR.DisplayName,
+        COALESCE(PC.TotalPosts, 0) AS TotalPosts,
+        COALESCE(PH.TotalHistoryCount, 0) AS TotalHistoryCount,
+        COALESCE(PH.LastEditDate, '1970-01-01') AS LastEditDate,
+        UR.ReputationCategory
+    FROM UserReputation UR
+    LEFT JOIN PostCounts PC ON UR.Id = PC.OwnerUserId
+    LEFT JOIN PostHistoryDetails PH ON UR.Id = PH.UserId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.ReputationCategory,
+    U.TotalPosts,
+    U.TotalHistoryCount,
+    U.LastEditDate,
+    RANK() OVER (PARTITION BY U.ReputationCategory ORDER BY U.TotalPosts DESC) AS PostsRank
+FROM UserEngagement U
+WHERE U.TotalPosts > 10
+  AND U.ReputationCategory = 'High'
+  AND U.LastEditDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM Posts PO
+      WHERE PO.OwnerUserId = U.UserId 
+      AND PO.Deleted = TRUE
+  )
+ORDER BY U.TotalPosts DESC;

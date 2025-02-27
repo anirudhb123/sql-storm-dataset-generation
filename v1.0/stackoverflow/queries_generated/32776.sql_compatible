@@ -1,0 +1,56 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostActivity AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           COUNT(c.Id) AS CommentCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           AVG(POW(EXTRACT(EPOCH FROM (TIMESTAMP '2024-10-01 12:34:56' - p.CreationDate)), 1.0 / 86400)) OVER() AS DaysOld,
+           NULLIF(COUNT(DISTINCT ph.Id), 0) AS EditHistoryCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title
+),
+TopPosts AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY CASE 
+                                              WHEN DaysOld < 1 THEN 'Recent' 
+                                              WHEN DaysOld < 30 THEN 'This Month' 
+                                              ELSE 'Older' 
+                                           END 
+                              ORDER BY Score DESC) AS RN
+    FROM PostActivity
+)
+SELECT t.Title,
+       t.CommentCount,
+       t.UpVotes,
+       t.DownVotes,
+       CASE 
+            WHEN t.EditHistoryCount IS NOT NULL THEN 
+                'Edited ' || t.EditHistoryCount || ' times'
+            ELSE 
+                'Never edited'
+       END AS EditStatus,
+       COALESCE(r.Level, 0) AS HierarchyLevel
+FROM TopPosts t
+LEFT JOIN RecursivePostHierarchy r ON t.PostId = r.Id
+WHERE t.RN <= 5 
+ORDER BY 
+    CASE 
+        WHEN t.DaysOld < 1 THEN 1
+        WHEN t.DaysOld < 30 THEN 2
+        ELSE 3
+    END,
+    t.Score DESC;

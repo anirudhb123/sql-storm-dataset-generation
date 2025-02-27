@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.n_name AS region,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.nation = n.n_name
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        s.rank <= 5
+    GROUP BY 
+        r.n_name
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ts.avg_acctbal
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        TopSuppliers ts ON ps.ps_suppkey = ts.avg_acctbal
+)
+SELECT 
+    pd.p_partkey,
+    pd.p_name,
+    pd.p_retailprice,
+    pd.ps_supplycost,
+    pd.ps_availqty,
+    ts.region,
+    ts.avg_acctbal,
+    SUM(l.l_quantity * l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+FROM 
+    PartDetails pd
+JOIN 
+    lineitem l ON pd.p_partkey = l.l_partkey
+GROUP BY 
+    pd.p_partkey, 
+    pd.p_name, 
+    pd.p_retailprice, 
+    pd.ps_supplycost, 
+    pd.ps_availqty, 
+    ts.region, 
+    ts.avg_acctbal
+HAVING 
+    total_sales > 10000
+ORDER BY 
+    total_sales DESC;

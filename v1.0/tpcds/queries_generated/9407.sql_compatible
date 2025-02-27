@@ -1,0 +1,48 @@
+
+WITH sales_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        MAX(ws.ws_sales_price) AS max_price,
+        MIN(ws.ws_sales_price) AS min_price,
+        AVG(ws.ws_sales_price) AS avg_price
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 AND 
+        dd.d_month_seq BETWEEN 1 AND 6
+    GROUP BY 
+        c.c_customer_id
+),
+customer_demographics_summary AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(ss.total_quantity) AS avg_quantity,
+        AVG(ss.total_net_paid) AS avg_net_paid,
+        SUM(ss.order_count) AS total_orders
+    FROM 
+        sales_summary ss
+    JOIN 
+        customer_demographics cd ON ss.c_customer_id = cd.c_customer_id
+    GROUP BY 
+        cd.cd_gender, 
+        cd.cd_marital_status
+)
+SELECT 
+    cd_gender AS gender,
+    cd_marital_status AS marital_status,
+    avg_quantity,
+    avg_net_paid,
+    total_orders
+FROM 
+    customer_demographics_summary
+ORDER BY 
+    total_orders DESC, avg_net_paid DESC
+LIMIT 10;

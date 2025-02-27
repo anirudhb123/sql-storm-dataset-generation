@@ -1,0 +1,69 @@
+WITH RecursiveActorList AS (
+    SELECT 
+        ca.person_id,
+        tk.title,
+        tk.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY tk.production_year DESC) AS recency_rank
+    FROM
+        cast_info ca
+    JOIN
+        aka_title tk ON ca.movie_id = tk.id
+    WHERE
+        tk.production_year IS NOT NULL
+), 
+GoldenActors AS (
+    SELECT 
+        r.person_id,
+        r.title,
+        r.production_year,
+        COUNT(ca.movie_id) AS total_movies,
+        AVG(CASE WHEN ca.note IS NULL THEN 1 ELSE 0 END) AS null_note_movies_ratio
+    FROM 
+        RecursiveActorList r
+    JOIN 
+        cast_info ca ON r.person_id = ca.person_id
+    GROUP BY 
+        r.person_id, r.title, r.production_year
+    HAVING 
+        COUNT(ca.movie_id) > 5 
+        AND AVG(CASE WHEN ca.note IS NULL THEN 1 ELSE NULL END) < 0.5
+), 
+SpecialAwards AS (
+    SELECT 
+        ga.person_id,
+        STRING_AGG(ga.title || ' (' || ga.production_year || ')', ', ') AS awards_winning_titles
+    FROM 
+        GoldenActors ga
+    JOIN 
+        movie_info mi ON ga.title = mi.info
+    WHERE 
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Award')
+    GROUP BY 
+        ga.person_id
+)
+SELECT 
+    n.name,
+    COUNT(DISTINCT ca.movie_id) AS total_movies,
+    COALESCE(sa.awards_winning_titles, 'No Awards') AS awards,
+    STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+FROM 
+    aka_name n
+LEFT JOIN 
+    cast_info ca ON n.person_id = ca.person_id
+LEFT JOIN 
+    movie_companies mc ON ca.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    SpecialAwards sa ON n.person_id = sa.person_id
+WHERE 
+    EXISTS (SELECT 1 FROM title t WHERE t.id = ca.movie_id AND t.production_year > 2000)
+GROUP BY 
+    n.name, sa.awards_winning_titles
+HAVING 
+    COUNT(DISTINCT ca.movie_id) > 10 
+    AND BOOL_OR(ca.note IS NOT NULL) = TRUE
+ORDER BY 
+    total_movies DESC, n.name;
+
+This query performs a detailed analysis of actors who have notable careers based on specific criteria. It uses recursive common table expressions (CTEs) for actor movie lists, aggregates data to find those with a significant number of roles yet a low count of null notes, and links those results to award-winning titles. Outer joins ensure that actors without awards don't get excluded, while the final selection filters for actors with enough movies to warrant recognition, along with company types for further context.

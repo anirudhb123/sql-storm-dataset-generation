@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS num_cast,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.num_cast
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rn <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.title,
+        k.keyword
+    FROM 
+        TopMovies m
+    LEFT JOIN 
+        movie_keyword mk ON m.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorInfo AS (
+    SELECT 
+        p.id AS person_id,
+        p.name,
+        COUNT(DISTINCT c.movie_id) AS movies_participated
+    FROM 
+        aka_name p
+    JOIN 
+        cast_info c ON p.person_id = c.person_id
+    GROUP BY 
+        p.id, p.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+),
+SelectedActors AS (
+    SELECT 
+        ai.name,
+        ai.movies_participated,
+        ROW_NUMBER() OVER (ORDER BY ai.movies_participated DESC) AS actor_rank
+    FROM 
+        ActorInfo ai
+    WHERE 
+        ai.movies_participated > 0
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    sa.name AS top_actor,
+    sa.movies_participated
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON tm.title = mk.title
+LEFT JOIN 
+    SelectedActors sa ON sa.actor_rank = 1
+GROUP BY 
+    tm.title, tm.production_year, sa.name, sa.movies_participated
+ORDER BY 
+    tm.production_year DESC, tm.title;

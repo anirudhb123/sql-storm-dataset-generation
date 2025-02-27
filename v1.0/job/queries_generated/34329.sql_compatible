@@ -1,0 +1,89 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel: ', m.title) AS title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy h ON m.episode_of_id = h.movie_id
+    WHERE 
+        m.production_year >= 2000
+),
+MovieWithCast AS (
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ci.person_id,
+        COALESCE(r.role, 'Unknown') AS role,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY ci.nr_order) AS cast_order
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mh.movie_id
+    LEFT JOIN 
+        role_type r ON r.id = ci.role_id
+),
+TopMovies AS (
+    
+    SELECT 
+        mh.title,
+        mh.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        DENSE_RANK() OVER (ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        MovieWithCast mh
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = mh.movie_id
+    GROUP BY 
+        mh.title, mh.production_year
+),
+MoviesWithKeywords AS (
+    
+    SELECT 
+        m.title,
+        m.production_year,
+        mk.keyword,
+        RANK() OVER (PARTITION BY m.title ORDER BY mk.keyword) AS keyword_rank
+    FROM 
+        TopMovies m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.title  
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.cast_count,
+    k.keyword,
+    CASE 
+        WHEN m.cast_count IS NULL THEN 'No Cast'
+        WHEN m.cast_count < 5 THEN 'Low Cast'
+        ELSE 'High Cast'
+    END AS cast_size_category,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.title) AS info_count
+FROM 
+    TopMovies m
+LEFT JOIN 
+    MoviesWithKeywords k ON k.title = m.title AND k.production_year = m.production_year
+WHERE 
+    m.rank <= 10  
+ORDER BY 
+    m.cast_count DESC, 
+    m.title;

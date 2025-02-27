@@ -1,0 +1,61 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId, 
+        ph.CreationDate, 
+        ph.Comment, 
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RevisionRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Only focusing on closed/opened/deleted posts
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        COUNT(DISTINCT rph.UserId) AS CloseVotes, 
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHistory rph ON p.Id = rph.PostId AND rph.RevisionRank = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (6, 7) -- close votes and reopen votes
+    WHERE 
+        rph.PostId IS NOT NULL -- Only consider posts with history
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopClosedPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        CloseVotes, 
+        TotalBounty,
+        RANK() OVER (ORDER BY CloseVotes DESC) AS Ranking
+    FROM 
+        ClosedPosts
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    p.PostId,
+    p.Title,
+    p.CloseVotes,
+    p.TotalBounty,
+    CASE 
+        WHEN p.TotalBounty IS NULL THEN 'No Bounty'
+        WHEN p.TotalBounty >= 100 THEN 'High Bounty'
+        ELSE 'Standard Bounty'
+    END AS BountyStatus
+FROM 
+    TopClosedPosts p
+INNER JOIN 
+    Users u ON u.Id IN (SELECT DISTINCT UserId FROM PostHistory WHERE PostId = p.PostId)
+WHERE 
+    Ranking <= 10
+ORDER BY 
+    p.CloseVotes DESC, u.Reputation DESC;

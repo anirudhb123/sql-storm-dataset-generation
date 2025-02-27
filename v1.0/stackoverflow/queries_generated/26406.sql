@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.Body,
+        p.Tags,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        Score,
+        OwnerDisplayName,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10 AND 
+        EXISTS (
+            SELECT 1 
+            FROM Votes v 
+            WHERE v.PostId = RankedPosts.PostId 
+            AND v.VoteTypeId = 2  -- Upvote
+        )
+),
+TopAnswers AS (
+    SELECT 
+        a.Id AS AnswerId,
+        a.Body,
+        a.CreationDate,
+        a.OwnerDisplayName,
+        q.Title AS QuestionTitle,
+        q.Score AS QuestionScore,
+        a.Score AS AnswerScore
+    FROM 
+        Posts a
+    JOIN 
+        Posts q ON a.ParentId = q.Id
+    WHERE 
+        a.PostTypeId = 2 AND 
+        q.PostTypeId = 1 AND 
+        q.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+PostStatistics AS (
+    SELECT 
+        q.Title AS QuestionTitle,
+        COUNT(DISTINCT a.AnswerId) AS AnswerCount,
+        AVG(a.AnswerScore) AS AvgAnswerScore,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        TopQuestions q
+    LEFT JOIN 
+        TopAnswers a ON q.PostId = a.ParentId
+    LEFT JOIN 
+        Comments c ON q.PostId = c.PostId
+    GROUP BY 
+        q.Title
+)
+SELECT 
+    qs.QuestionTitle,
+    qs.AnswerCount,
+    qs.AvgAnswerScore,
+    COALESCE(cs.CommentCount, 0) AS TotalComments,
+    STRING_AGG(DISTINCT q.Tags, ', ') AS Tags
+FROM 
+    PostStatistics qs
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) cs ON cs.PostId = qs.QuestionTitle
+JOIN 
+    TopQuestions q ON qs.QuestionTitle = q.Title
+GROUP BY 
+    qs.QuestionTitle, qs.AnswerCount, qs.AvgAnswerScore, cs.CommentCount
+ORDER BY 
+    qs.AvgAnswerScore DESC, qs.AnswerCount DESC;

@@ -1,0 +1,79 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE 
+        s.s_acctbal > sh.level * 1000
+),
+NationRevenue AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        n.n_nationkey
+),
+SalesRanking AS (
+    SELECT 
+        n.n_name,
+        nr.total_revenue,
+        RANK() OVER (ORDER BY nr.total_revenue DESC) AS revenue_rank
+    FROM 
+        nation n
+    JOIN 
+        NationRevenue nr ON n.n_nationkey = nr.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        sh.s_name,
+        sh.level,
+        ns.n_name,
+        ns.total_revenue
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        SalesRanking ns ON sh.s_nationkey = ns.n_nationkey
+    WHERE 
+        ns.revenue_rank <= 5
+)
+SELECT 
+    ts.s_name,
+    ts.n_name,
+    COALESCE(ts.total_revenue, 0) AS revenue,
+    CASE 
+        WHEN ts.level IS NULL THEN 'No Hierarchy Level'
+        ELSE 'Level ' || ts.level::text
+    END AS supplier_level
+FROM 
+    TopSuppliers ts
+ORDER BY 
+    revenue DESC, ts.s_name;

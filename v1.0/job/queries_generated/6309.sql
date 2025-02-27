@@ -1,0 +1,32 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.nr_order AS cast_order,
+    cc.kind AS cast_type,
+    co.name AS company_name,
+    m.info AS movie_info,
+    k.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+JOIN 
+    complete_cast cc ON cc.movie_id = t.id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_info m ON m.movie_id = t.id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND m.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')
+    AND k.keyword LIKE '%action%'
+ORDER BY 
+    t.production_year DESC, a.name;

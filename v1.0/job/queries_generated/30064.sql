@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    coalesce(avg(pr.rating), 0) AS avg_rating,
+    COUNT(c.person_id) AS total_cast_members,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         AVG(rating) AS rating 
+     FROM 
+         movie_info m
+     JOIN 
+         info_type it ON m.info_type_id = it.id
+     WHERE 
+         it.info = 'rating'
+     GROUP BY 
+         movie_id) pr ON mh.movie_id = pr.movie_id
+WHERE 
+    mh.level <= 3 
+    AND mh.production_year >= 2000
+GROUP BY 
+    mh.title, mh.production_year
+ORDER BY 
+    avg_rating DESC, total_cast_members DESC;

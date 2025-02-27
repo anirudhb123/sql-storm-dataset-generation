@@ -1,0 +1,62 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        DATE_PART('year', CURRENT_DATE) - c.c_birth_year AS age,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+return_summary AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(sr_ticket_number) AS total_returns_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.age,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ss.total_profit,
+    ss.total_orders,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_returns_count, 0) AS total_returns_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+LEFT JOIN 
+    return_summary rs ON ci.c_customer_id = rs.sr_customer_sk
+WHERE 
+    ci.gender_rank <= 10 AND 
+    (ci.cd_marital_status = 'M' OR ci.cd_credit_rating = 'Excellent')
+ORDER BY 
+    total_profit DESC NULLS LAST
+LIMIT 100;

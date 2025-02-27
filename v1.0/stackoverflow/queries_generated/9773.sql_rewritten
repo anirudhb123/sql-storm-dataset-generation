@@ -1,0 +1,81 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId IN (6, 7) THEN 1 END) AS CloseVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes - DownVotes AS NetVotes,
+        ROW_NUMBER() OVER (ORDER BY UpVotes DESC) AS Rank
+    FROM 
+        UserVoteStats
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COUNT(C) AS CommentCount,
+        COALESCE(PH.LastEditDate, P.CreationDate) AS LastActiveDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+    GROUP BY 
+        P.Id, P.Title, P.Score, P.ViewCount, PH.LastEditDate, P.CreationDate
+),
+FinalReport AS (
+    SELECT 
+        TU.UserId,
+        TU.DisplayName,
+        TU.NetVotes,
+        TP.PostId,
+        TP.Title,
+        TP.Score,
+        TP.ViewCount,
+        TP.CommentCount,
+        TP.LastActiveDate 
+    FROM 
+        TopUsers TU
+    JOIN 
+        TopPosts TP ON TU.UserId IN (
+            SELECT 
+                OwnerUserId 
+            FROM 
+                Posts 
+            WHERE 
+                AcceptedAnswerId IS NOT NULL
+        )
+    WHERE 
+        TU.Rank <= 10 
+)
+SELECT 
+    UserId,
+    DisplayName,
+    NetVotes,
+    PostId,
+    Title,
+    Score,
+    ViewCount,
+    CommentCount,
+    LastActiveDate
+FROM 
+    FinalReport
+ORDER BY 
+    NetVotes DESC, LastActiveDate DESC;

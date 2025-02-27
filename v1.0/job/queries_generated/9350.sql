@@ -1,0 +1,31 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS character_name,
+    p.info AS person_info,
+    GROUP_CONCAT(DISTINCT kw.keyword) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    COUNT(DISTINCT mci.info_id) AS movie_info_count
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+JOIN 
+    char_name c ON c.imdb_index = t.imdb_index
+JOIN 
+    person_info p ON a.person_id = p.person_id
+JOIN 
+    movie_keyword kw ON t.id = kw.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    movie_info_idx mci ON t.id = mci.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+    AND p.info_type_id IN (SELECT id FROM info_type WHERE info = 'Biography')
+GROUP BY 
+    a.name, t.title, c.kind, p.info
+ORDER BY 
+    actor_name ASC, movie_title ASC;

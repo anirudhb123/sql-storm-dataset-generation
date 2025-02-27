@@ -1,0 +1,60 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        1 AS Level
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+    
+    UNION ALL
+    
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        PH.UserId,
+        PH.Comment,
+        PH.PostHistoryTypeId,
+        Level + 1
+    FROM 
+        PostHistory PH
+    JOIN 
+        RecursivePostHistory RPH ON PH.PostId = RPH.PostId 
+    WHERE 
+        PH.CreationDate < RPH.CreationDate
+)
+
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    U.DisplayName AS OwnerName,
+    MAX(CASE WHEN PD.PostHistoryTypeId = 10 THEN 'Closed' ELSE 'Open' END) AS PostStatus,
+    COUNT(CASE WHEN PD.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+    COUNT(CASE WHEN PD.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+    SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+    string_agg(DISTINCT T.TagName, ', ') AS Tags,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    AVG(U.Reputation) AS AverageReputation
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostHistory PD ON P.Id = PD.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+LEFT JOIN 
+    Tags T ON T.Id IN (SELECT UNNEST(string_to_array(P.Tags, '<>'))) 
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+GROUP BY 
+    P.Id, P.Title, U.DisplayName
+HAVING 
+    AVG(U.Reputation) > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    AverageReputation DESC
+LIMIT 100;

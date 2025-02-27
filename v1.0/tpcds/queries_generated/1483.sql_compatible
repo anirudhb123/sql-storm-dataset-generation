@@ -1,0 +1,74 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_by_spending
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+HighSpenders AS (
+    SELECT 
+        c_customer_id,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate
+    FROM 
+        CustomerStats
+    WHERE 
+        rank_by_spending <= 5
+),
+SalesInfo AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(ws_order_number) AS total_orders,
+        AVG(ws_net_paid) AS avg_order_value
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CombinedStats AS (
+    SELECT 
+        hs.c_customer_id,
+        hs.c_first_name,
+        hs.c_last_name,
+        hs.cd_gender,
+        hs.cd_marital_status,
+        si.total_spent,
+        si.total_orders,
+        si.avg_order_value
+    FROM 
+        HighSpenders hs
+    LEFT JOIN 
+        SalesInfo si ON hs.c_customer_id = si.ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    COALESCE(cs.total_spent, 0) AS total_spent,
+    COALESCE(cs.total_orders, 0) AS total_orders,
+    COALESCE(cs.avg_order_value, 0) AS avg_order_value,
+    (CASE 
+        WHEN COALESCE(cs.total_spent, 0) > 1000 THEN 'High Value'
+        WHEN COALESCE(cs.total_spent, 0) BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END) AS customer_value_category
+FROM 
+    CombinedStats cs
+WHERE 
+    cs.cd_gender IS NOT NULL
+ORDER BY 
+    total_spent DESC;

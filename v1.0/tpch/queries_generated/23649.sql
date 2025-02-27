@@ -1,0 +1,73 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+),
+supplier_details AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+highest_cost_supplier AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name
+    FROM 
+        supplier_details sd
+    WHERE 
+        sd.total_cost = (SELECT MAX(total_cost) FROM supplier_details)
+),
+lineitem_summary AS (
+    SELECT 
+        li.l_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price,
+        MAX(CASE WHEN li.l_returnflag = 'R' THEN li.l_shipdate END) AS latest_return_date
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.c_name,
+    COALESCE(lis.total_price, 0) AS total_lineitem_price,
+    CASE 
+        WHEN hcs.s_suppkey IS NULL THEN 'No supplier'
+        ELSE hcs.s_name 
+    END AS supplier_name,
+    COUNT(DISTINCT lis.latest_return_date) AS return_count
+FROM 
+    ranked_orders ro
+LEFT JOIN 
+    lineitem_summary lis ON ro.o_orderkey = lis.l_orderkey
+LEFT JOIN 
+    highest_cost_supplier hcs ON hcs.s_suppkey = (
+        SELECT ps.ps_suppkey
+        FROM partsupp ps
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey
+            FROM part p
+            WHERE p.p_retailprice >= (SELECT AVG(p2.p_retailprice) FROM part p2)
+        )
+        LIMIT 1
+    )
+WHERE 
+    ro.rn <= 5
+ORDER BY 
+    ro.o_orderdate DESC, total_lineitem_price DESC;

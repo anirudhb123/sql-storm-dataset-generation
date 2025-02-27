@@ -1,0 +1,41 @@
+WITH RECURSIVE Supplier_Orders AS (
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_returnflag = 'N'
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM supplier_orders so
+    JOIN lineitem l ON so.o_orderkey = l.l_orderkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    WHERE o.o_orderdate < DATE_SUB(so.o_orderdate, INTERVAL 1 DAY)
+),
+Aggregated_Supplier_Sales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(o.o_totalprice) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM supplier s
+    LEFT JOIN Supplier_Orders so ON s.s_suppkey = so.s_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+Filtered_Suppliers AS (
+    SELECT s.s_name, a.total_sales, a.order_count
+    FROM Aggregated_Supplier_Sales a
+    JOIN supplier s ON a.s_suppkey = s.s_suppkey
+    WHERE a.total_sales IS NOT NULL AND a.order_count > 5
+)
+SELECT f.s_name, COALESCE(f.total_sales, 0) AS adjusted_total_sales,
+       CASE 
+           WHEN f.total_sales IS NULL THEN 'No Sales'
+           WHEN f.order_count > 10 THEN 'High Volume'
+           ELSE 'Moderate Volume' 
+       END AS volume_category
+FROM Filtered_Suppliers f
+FULL OUTER JOIN nation n ON f.s_name = n.n_name
+WHERE n.n_regionkey IS NULL OR n.n_name LIKE 'A%'
+ORDER BY adjusted_total_sales DESC, f.s_name;

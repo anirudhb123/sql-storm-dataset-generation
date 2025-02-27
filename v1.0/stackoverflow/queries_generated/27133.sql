@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(COUNT(c.Id) FILTER (WHERE c.Id IS NOT NULL), 0) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) FILTER (WHERE v.VoteTypeId IS NOT NULL), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) FILTER (WHERE v.VoteTypeId IS NOT NULL), 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        OwnerDisplayName, 
+        CommentCount, 
+        UpVoteCount, 
+        DownVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rn = 1
+    ORDER BY 
+        UpVoteCount DESC, 
+        CommentCount DESC 
+    LIMIT 10
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.Body,
+    t.OwnerDisplayName,
+    t.CreationDate,
+    CONCAT('Total Comments: ', t.CommentCount) AS CommentSummary,
+    CONCAT('Upvotes: ', t.UpVoteCount, ', Downvotes: ', t.DownVoteCount) AS VoteSummary,
+    COALESCE(
+      (SELECT STRING_AGG(DISTINCT TAGNAME, ', ')
+       FROM (
+          SELECT TRIM(UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')))::varchar(35)) AS TAGNAME
+          FROM Posts p WHERE p.Id = t.PostId) AS t_tags), 
+      'No Tags') AS Tags,
+    (SELECT STRING_AGG(CONCAT(u.DisplayName, ' (', b.Name, ')'), ', ')
+     FROM Badges b 
+     JOIN Users u ON b.UserId = u.Id 
+     WHERE b.UserId IN (SELECT DISTINCT c.UserId FROM Comments c WHERE c.PostId = t.PostId)) AS BadgeHolders
+FROM 
+    TopPosts t;

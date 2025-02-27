@@ -1,0 +1,41 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws_item_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk 
+    WHERE 
+        dd.d_year = 2022
+    GROUP BY 
+        ws.sold_date_sk, ws_item_sk
+), 
+top_items AS (
+    SELECT 
+        ws_item_sk,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        sales_summary
+    WHERE 
+        total_sales > 1000
+)
+SELECT 
+    i.item_id,
+    i.item_desc,
+    ss.total_sales,
+    ss.total_profit,
+    ss.total_orders
+FROM 
+    sales_summary ss
+JOIN 
+    top_items ti ON ss.ws_item_sk = ti.ws_item_sk
+JOIN 
+    item i ON ti.ws_item_sk = i.i_item_sk
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

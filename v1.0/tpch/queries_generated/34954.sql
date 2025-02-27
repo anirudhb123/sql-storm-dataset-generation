@@ -1,0 +1,36 @@
+WITH RECURSIVE part_supplier AS (
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps_supplycost
+    FROM partsupp ps
+    WHERE ps.availqty > (SELECT AVG(availqty) FROM partsupp)
+    UNION ALL
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps.supplycost
+    FROM partsupp ps
+    JOIN part_supplier ps2 ON ps.suppkey = ps2.suppkey
+    WHERE ps.availqty < ps2.availqty
+),
+ranked_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+total_sales AS (
+    SELECT l_partkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY l_partkey
+)
+SELECT p.p_partkey, p.p_name, ps.ps_supplycost, 
+       COALESCE(s_total.total_revenue, 0) AS total_revenue, 
+       CASE 
+           WHEN r.rank_acctbal IS NOT NULL THEN 'Valid Supplier'
+           ELSE 'No Valid Supplier'
+       END AS supplier_status
+FROM part p
+LEFT JOIN part_supplier ps ON p.p_partkey = ps.partkey
+LEFT JOIN ranked_suppliers r ON ps.suppkey = r.s_suppkey
+LEFT JOIN total_sales s_total ON p.p_partkey = s_total.l_partkey
+WHERE (p.p_retailprice > 50 OR ps.ps_availqty < 100)
+AND (r.rank_acctbal <= 3 OR r.rank_acctbal IS NULL)
+ORDER BY total_revenue DESC, p.p_name;

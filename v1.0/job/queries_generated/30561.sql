@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'N/A') AS keyword,
+        1 AS level
+    FROM
+        title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mk.keyword, 'N/A'),
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN title mt ON ml.linked_movie_id = mt.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.keyword,
+    COUNT(c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors_list,
+    AVG(pi.info) FILTER (WHERE pi.info IS NOT NULL) AS average_info_length,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_within_year
+FROM
+    movie_hierarchy mh
+LEFT JOIN cast_info c ON mh.movie_id = c.movie_id
+LEFT JOIN aka_name a ON c.person_id = a.person_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN person_info pi ON c.person_id = pi.person_id
+WHERE
+    mh.keyword LIKE '%action%' OR mh.keyword LIKE '%drama%'
+GROUP BY
+    mh.movie_id, mh.title, mh.production_year, mh.keyword
+HAVING
+    COUNT(c.person_id) > 3
+ORDER BY
+    mh.production_year DESC,
+    cast_count DESC;

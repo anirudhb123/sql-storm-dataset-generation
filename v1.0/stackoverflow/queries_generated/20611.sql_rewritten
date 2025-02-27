@@ -1,0 +1,101 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) as ReputationRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation IS NOT NULL
+), 
+UserPostCount AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+), 
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges B 
+    GROUP BY 
+        B.UserId
+), 
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS HistOrder
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13)
+), 
+UserVotes AS (
+    SELECT 
+        V.UserId, 
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE NULL END) AS TotalUpvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE NULL END) AS TotalDownvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        V.UserId
+), 
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(UP.TotalPosts, 0) AS UserPostCount,
+        COALESCE(UP.TotalQuestions, 0) AS UserQuestionCount,
+        COALESCE(UP.TotalAnswers, 0) AS UserAnswerCount,
+        COALESCE(UB.BadgeNames, 'No Badges') AS UserBadges,
+        PHD.HistOrder AS HistoryCount,
+        U.DisplayName AS OwnerDisplayName,
+        U.LastAccessDate,
+        UH.UserId AS HighestVoterId,
+        UH.TotalUpvotes,
+        UH.TotalDownvotes
+    FROM 
+        Posts P
+    LEFT JOIN UserPostCount UP ON P.OwnerUserId = UP.OwnerUserId
+    LEFT JOIN UserBadges UB ON P.OwnerUserId = UB.UserId
+    LEFT JOIN PostHistoryDetails PHD ON PHD.PostId = P.Id AND PHD.HistOrder = 1
+    LEFT JOIN UserVotes UH ON P.OwnerUserId = UH.UserId
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.UserPostCount,
+    PS.UserQuestionCount,
+    PS.UserAnswerCount,
+    PS.UserBadges,
+    PS.HistoryCount,
+    PS.OwnerDisplayName,
+    DENSE_RANK() OVER (ORDER BY PS.UserPostCount DESC) AS PostRank,
+    CASE 
+        WHEN PS.TotalVotes > 50 THEN 'High Activity'
+        WHEN PS.TotalVotes BETWEEN 20 AND 50 THEN 'Moderate Activity'
+        ELSE 'Low Activity'
+    END AS ActivityLevel
+FROM 
+    PostSummary PS
+ORDER BY 
+    PS.UserPostCount DESC, 
+    PS.Title
+FETCH FIRST 100 ROWS ONLY;

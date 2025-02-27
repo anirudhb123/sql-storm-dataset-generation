@@ -1,0 +1,30 @@
+SELECT 
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    U.DisplayName AS OwnerDisplayName,
+    COUNT(C.Id) AS CommentCount,
+    COUNT(V.Id) AS VoteCount,
+    MAX(PH.CreationDate) AS LastEditDate,
+    STRING_AGG(T.TagName, ', ') AS Tags
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    PostLinks PL ON P.Id = PL.PostId
+LEFT JOIN 
+    Tags T ON T.Id = ANY (STRING_TO_ARRAY(P.Tags, ',')::int[])
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+WHERE 
+    P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+GROUP BY 
+    P.Id, U.DisplayName
+ORDER BY 
+    P.Score DESC, P.ViewCount DESC
+LIMIT 100;

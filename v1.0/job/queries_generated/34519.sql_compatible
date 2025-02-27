@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.linked_movie_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        RANK() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rank_within_level,
+        COUNT(*) OVER (PARTITION BY mh.level) AS total_movies_at_level
+    FROM 
+        MovieHierarchy mh
+),
+CastInfoWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ARRAY_AGG(DISTINCT rt.role ORDER BY rt.role) AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.level,
+    rm.rank_within_level,
+    rm.total_movies_at_level,
+    COALESCE(ciwr.total_cast, 0) AS total_cast,
+    COALESCE(ciwr.roles, ARRAY[]::VARCHAR[]) AS roles
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastInfoWithRoles ciwr ON rm.movie_id = ciwr.movie_id
+WHERE 
+    rm.rank_within_level <= 5 
+    AND rm.total_movies_at_level > 10
+ORDER BY 
+    rm.level, rm.rank_within_level;

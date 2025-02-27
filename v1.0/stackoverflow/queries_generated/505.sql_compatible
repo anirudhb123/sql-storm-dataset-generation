@@ -1,0 +1,76 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostScoreStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AvgScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        P.OwnerUserId
+),
+AssociatedPosts AS (
+    SELECT 
+        PL.PostId,
+        PL.RelatedPostId,
+        LT.Name AS LinkType,
+        P.Title AS RelatedPostTitle
+    FROM 
+        PostLinks PL
+    JOIN 
+        LinkTypes LT ON PL.LinkTypeId = LT.Id
+    JOIN 
+        Posts P ON PL.RelatedPostId = P.Id
+),
+RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UBS.BadgeCount,
+        PSS.PostCount,
+        PSS.TotalScore,
+        PSS.AvgScore,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(PSS.TotalScore, 0) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        UserBadgeStats UBS ON U.Id = UBS.UserId
+    LEFT JOIN 
+        PostScoreStats PSS ON U.Id = PSS.OwnerUserId
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    COALESCE(RU.BadgeCount, 0) AS BadgeCount,
+    COALESCE(RU.PostCount, 0) AS PostCount,
+    COALESCE(RU.TotalScore, 0) AS TotalScore,
+    COALESCE(RU.AvgScore, 0) AS AvgScore,
+    A.RelatedPostId,
+    A.RelatedPostTitle,
+    A.LinkType
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    AssociatedPosts A ON RU.UserId = A.OwnerUserId
+WHERE 
+    RU.UserRank <= 10
+ORDER BY 
+    RU.TotalScore DESC, RU.BadgeCount DESC;

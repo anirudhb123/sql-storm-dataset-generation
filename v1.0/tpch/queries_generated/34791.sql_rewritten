@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)  
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < (SELECT MAX(s_acctbal) FROM supplier)  
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplierCounts AS (
+    SELECT n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(sh.level, -1) AS supplier_hierarchy_level,
+    co.total_spent,
+    nsc.supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    CustomerOrders co ON co.total_spent > p.p_retailprice
+LEFT JOIN 
+    SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+LEFT JOIN 
+    NationSupplierCounts nsc ON nsc.supplier_count > 10
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND (l.l_returnflag = 'N' OR l.l_discount > 0.05)
+ORDER BY 
+    p.p_retailprice DESC, 
+    co.total_spent DESC
+LIMIT 100;

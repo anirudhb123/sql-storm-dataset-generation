@@ -1,0 +1,44 @@
+WITH movie_actors AS (
+    SELECT 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ca.nr_order) AS actor_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    JOIN 
+        aka_title t ON ca.movie_id = t.movie_id
+    WHERE 
+        t.production_year >= 2000 AND t.production_year <= 2023
+), 
+filtered_movies AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title, 
+        m.production_year,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON m.id = ca.movie_id
+    GROUP BY 
+        m.id
+    HAVING 
+        COUNT(DISTINCT ca.person_id) > 5
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    COALESCE(ma.actor_count, 0) AS total_actors,
+    STRING_AGG(ma.actor_name || ' (Order: ' || ma.actor_order || ')', ', ') AS actor_names
+FROM 
+    filtered_movies f
+LEFT JOIN 
+    movie_actors ma ON f.movie_id = ma.movie_title::INTEGER
+GROUP BY 
+    f.movie_id, f.title, f.production_year
+ORDER BY 
+    f.production_year DESC, total_actors DESC;

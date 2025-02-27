@@ -1,0 +1,44 @@
+WITH SupplierParts AS (
+    SELECT 
+        s.s_name AS supplier_name,
+        p.p_name AS part_name,
+        CONCAT(s.s_name, ' supplies ', p.p_name) AS supply_description,
+        p.p_container AS container_type,
+        p.p_retailprice AS retail_price,
+        SUBSTRING(s.s_comment, 1, 20) AS short_comment,
+        LENGTH(p.p_comment) AS comment_length
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > 50.00
+),
+GroupedSupplierParts AS (
+    SELECT 
+        supplier_name,
+        COUNT(part_name) AS part_count,
+        SUM(retail_price) AS total_value,
+        AVG(comment_length) AS avg_comment_length
+    FROM 
+        SupplierParts
+    GROUP BY 
+        supplier_name
+    HAVING 
+        part_count > 1
+)
+SELECT 
+    supplier_name,
+    part_count,
+    total_value,
+    avg_comment_length,
+    CONCAT('The supplier ', supplier_name, ' provides ', part_count, 
+           ' kinds of parts with a total value of ', FORMAT(total_value, 2), 
+           ' and an average comment length of ', CAST(avg_comment_length AS CHAR), 
+           ' characters.') AS summary_statement
+FROM 
+    GroupedSupplierParts
+ORDER BY 
+    total_value DESC;

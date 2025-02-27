@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS actor_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS ci ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        actor_count <= 10
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        TopMovies AS m
+    LEFT JOIN 
+        movie_keyword AS mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies AS mc ON m.movie_id = mc.movie_id
+    GROUP BY 
+        m.movie_id, m.title, mk.keyword
+),
+FinalOutput AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.company_count,
+        CASE 
+            WHEN md.company_count > 3 THEN 'Popular'
+            WHEN md.company_count IS NULL THEN 'No Companies'
+            ELSE 'Less Popular'
+        END AS popularity
+    FROM 
+        MovieDetails AS md
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.keyword,
+    fo.company_count,
+    fo.popularity
+FROM 
+    FinalOutput AS fo
+WHERE 
+    fo.keyword LIKE '%Action%' OR fo.popularity = 'Popular'
+ORDER BY 
+    fo.production_year DESC, fo.company_count DESC;

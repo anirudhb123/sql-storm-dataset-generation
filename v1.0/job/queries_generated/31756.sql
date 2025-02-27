@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  -- Assuming 1 represents 'movie'
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+ActorCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        complete_cast c ON ci.movie_id = c.movie_id
+    GROUP BY 
+        c.movie_id
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS genres
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    GROUP BY 
+        mt.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        COALESCE(mg.genres, 'No Genres') AS genres,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorCount ac ON mh.movie_id = ac.movie_id
+    LEFT JOIN 
+        MovieGenres mg ON mh.movie_id = mg.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.genres,
+    md.level,
+    CASE 
+        WHEN md.actor_count > 5 THEN 'Ensemble Cast'
+        WHEN md.actor_count BETWEEN 3 AND 5 THEN 'Small Cast'
+        ELSE 'Minimal Cast'
+    END AS cast_size_description,
+    COALESCE(pi.info, 'No Information Available') AS additional_info
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_info pi ON md.movie_id = pi.movie_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.actor_count DESC,
+    md.production_year ASC;

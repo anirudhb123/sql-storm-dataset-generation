@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        AVG(INFO.count) AS avg_info_length,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(*) AS count
+        FROM 
+            movie_info 
+        GROUP BY 
+            movie_id
+    ) INFO ON t.id = INFO.movie_id
+    LEFT JOIN 
+        movie_keyword mw ON t.id = mw.movie_id
+    LEFT JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopRatedActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(ci.movie_id) > 10
+),
+ActorMovieDetails AS (
+    SELECT 
+        ra.name AS actor_name,
+        rm.title,
+        rm.production_year,
+        rm.company_count,
+        rm.avg_info_length,
+        rm.keywords
+    FROM 
+        RankedMovies rm
+    JOIN 
+        TopRatedActors ra ON EXISTS (
+            SELECT 1
+            FROM cast_info ci
+            WHERE ci.movie_id = rm.title_id 
+              AND ci.person_id IN (SELECT person_id FROM aka_name WHERE name = ra.actor_name)
+        )
+)
+SELECT 
+    amd.actor_name,
+    amd.title,
+    amd.production_year,
+    amd.company_count,
+    amd.avg_info_length,
+    amd.keywords
+FROM 
+    ActorMovieDetails amd
+ORDER BY 
+    amd.production_year DESC, 
+    amd.actor_name;

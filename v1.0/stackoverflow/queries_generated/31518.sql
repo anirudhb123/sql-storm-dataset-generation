@@ -1,0 +1,58 @@
+WITH RECURSIVE UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+PostVoteCounts AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY
+        PostId
+),
+PostHistoryAggregated AS (
+    SELECT 
+        PH.PostId,
+        ARRAY_AGG(DISTINCT PH.Comment) AS Comments,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Body, or Tags
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    UPC.PostCount,
+    UPC.TotalViews,
+    UPC.TotalScore,
+    COALESCE(PV.UpVotes, 0) AS PostUpVotes,
+    COALESCE(PV.DownVotes, 0) AS PostDownVotes,
+    COALESCE(PHA.EditCount, 0) AS TotalEdits,
+    COALESCE(HAC.LastEditDate, '1970-01-01') AS LastPostEditDate
+FROM 
+    UserPostCounts UPC
+JOIN 
+    Users U ON U.Id = UPC.UserId
+LEFT JOIN 
+    PostVoteCounts PV ON PV.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+LEFT JOIN 
+    PostHistoryAggregated HAA ON HAA.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+WHERE 
+    U.Reputation > (SELECT AVG(Reputation) FROM Users) -- Users with above average reputation
+ORDER BY 
+    UPC.PostCount DESC;

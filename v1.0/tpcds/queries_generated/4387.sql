@@ -1,0 +1,55 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_store_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_store_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returned_date_sk,
+        wr_web_page_sk,
+        COUNT(wr_order_number) AS total_web_returns,
+        SUM(wr_return_amt_inc_tax) AS total_web_return_amt,
+        SUM(wr_return_quantity) AS total_web_return_quantity
+    FROM web_returns
+    GROUP BY wr_returned_date_sk, wr_web_page_sk
+),
+SalesData AS (
+    SELECT 
+        d.d_date,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_web_sales,
+        COALESCE(SUM(cs.cs_sales_price), 0) AS total_catalog_sales,
+        COALESCE(SUM(ss.ss_sales_price), 0) AS total_store_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    LEFT JOIN store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY d.d_date
+)
+
+SELECT 
+    d.d_date,
+    s.total_web_sales,
+    s.total_catalog_sales,
+    s.total_store_sales,
+    COALESCE(cr.total_returns, 0) AS total_store_returns,
+    COALESCE(wr.total_web_returns, 0) AS total_web_returns,
+    s.total_web_sales - COALESCE(cr.total_returns, 0) AS net_web_sales,
+    s.total_store_sales - COALESCE(cr.total_returns, 0) AS net_store_sales,
+    CASE 
+        WHEN s.total_web_sales > 0 THEN (COALESCE(cr.total_returns, 0) * 100.0 / s.total_web_sales)
+        ELSE NULL 
+    END AS web_return_rate,
+    CASE 
+        WHEN s.total_store_sales > 0 THEN (COALESCE(cr.total_returns, 0) * 100.0 / s.total_store_sales)
+        ELSE NULL 
+    END AS store_return_rate
+FROM SalesData s
+LEFT JOIN CustomerReturns cr ON s.d_date = (SELECT d_date FROM date_dim WHERE d_date_sk = cr.sr_returned_date_sk)
+LEFT JOIN WebReturns wr ON s.d_date = (SELECT wr_returned_date_sk FROM web_returns WHERE wr_returned_date_sk = wr_returned_date_sk)
+ORDER BY d.d_date DESC;

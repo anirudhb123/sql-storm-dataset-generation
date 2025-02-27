@@ -1,0 +1,82 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        AVG(p.Score) AS AvgPostScore,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostRankings AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        RANK() OVER (ORDER BY COUNT(c.Id) DESC, p.Score DESC) AS PopularityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+FilteredLinks AS (
+    SELECT 
+        pl.PostId,
+        pl.RelatedPostId,
+        l.Name AS LinkTypeName
+    FROM 
+        PostLinks pl
+    JOIN 
+        LinkTypes l ON pl.LinkTypeId = l.Id
+    WHERE 
+        l.Name IN ('Duplicate', 'Related')
+)
+SELECT 
+    us.DisplayName,
+    us.UpVotes,
+    us.DownVotes,
+    us.PostCount,
+    us.AvgPostScore,
+    us.BadgeCount,
+    pr.Title,
+    pr.CreationDate,
+    pr.CommentCount,
+    pr.UpvoteCount,
+    pr.PopularityRank,
+    COALESCE(f.RelatedPostId, 'No related post') AS RelatedPost
+FROM 
+    UserStats us
+JOIN 
+    PostRankings pr ON us.UserId = pr.OwnerDisplayName
+LEFT JOIN 
+    FilteredLinks f ON pr.PostId = f.PostId
+WHERE 
+    us.Reputation > 1000
+    AND (pr.CommentCount > 0 OR pr.UpvoteCount > 0)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM Posts p
+        WHERE p.OwnerUserId = us.UserId AND p.ViewCount < 10
+    )
+ORDER BY 
+    us.AvgPostScore DESC, pr.PopularityRank
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

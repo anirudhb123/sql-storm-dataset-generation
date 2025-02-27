@@ -1,0 +1,86 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.UserId,
+        ph.PostId,
+        ph.CreationDate AS EditDate,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 50 
+),
+UserBadgeCount AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+FinalStats AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.QuestionCount,
+        ups.AnswerCount,
+        ups.TotalScore,
+        rp.EditDate,
+        pt.TagName,
+        ub.BadgeCount
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        RecentPostEdits rp ON ups.UserId = rp.UserId AND rp.EditRank = 1 
+    LEFT JOIN 
+        PopularTags pt ON pt.PostCount IS NOT NULL
+    LEFT JOIN 
+        UserBadgeCount ub ON ub.UserId = ups.UserId
+)
+SELECT 
+    fs.DisplayName,
+    fs.TotalPosts,
+    fs.QuestionCount,
+    fs.AnswerCount,
+    fs.TotalScore,
+    fs.EditDate,
+    fs.TagName,
+    COALESCE(fs.BadgeCount, 0) AS GoldBadgeCount
+FROM 
+    FinalStats fs
+WHERE 
+    fs.TotalScore > 100
+ORDER BY 
+    fs.TotalScore DESC, 
+    fs.DisplayName ASC;

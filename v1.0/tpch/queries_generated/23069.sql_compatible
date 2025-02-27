@@ -1,0 +1,76 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank,
+        o.o_custkey
+    FROM orders o
+),
+PartAggregates AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        COALESCE(s.s_acctbal, 0) AS acct_balance,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown Account'
+            ELSE 'Known Account'
+        END AS account_status
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        SUM(o.o_totalprice * (1 - AVG(l.l_discount) OVER (PARTITION BY o.o_orderkey))) AS adjusted_total
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    COALESCE(pr.avg_supply_cost, 0) AS average_supply_cost,
+    COALESCE(pr.total_avail_qty, 0) AS available_quantity,
+    COALESCE(co.adjusted_total, 0) AS customer_order_total,
+    n.n_name AS nation_name,
+    CASE 
+        WHEN pr.avg_supply_cost > 100 THEN 'Expensive'
+        WHEN pr.avg_supply_cost BETWEEN 50 AND 100 THEN 'Moderate'
+        ELSE 'Cheap'
+    END AS cost_category
+FROM part p
+LEFT JOIN PartAggregates pr ON p.p_partkey = pr.ps_partkey
+LEFT JOIN CustomerOrders co ON co.c_custkey = (
+    SELECT c.c_custkey
+    FROM customer c
+    WHERE c.c_acctbal = (
+        SELECT MAX(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_nationkey = n.n_nationkey
+    )
+    ORDER BY c.c_custkey
+    FETCH FIRST 1 ROW ONLY
+)
+LEFT JOIN nation n ON n.n_nationkey = (
+    SELECT s.n_nationkey 
+    FROM supplier s 
+    JOIN SupplierDetails sd ON s.s_suppkey = sd.s_suppkey
+    WHERE sd.acct_balance > 0
+    ORDER BY sd.acct_balance DESC
+    FETCH FIRST 1 ROW ONLY
+)
+RIGHT JOIN region r ON r.r_regionkey = n.n_regionkey
+WHERE p.p_size >= 10 AND p.p_size <= 50
+AND (r.r_comment IS NULL OR r.r_comment LIKE '%filter%')
+ORDER BY p.p_name, cost_category, customer_order_total DESC
+FETCH FIRST 100 ROWS ONLY;

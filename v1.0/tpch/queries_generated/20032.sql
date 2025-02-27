@@ -1,0 +1,62 @@
+WITH RECURSIVE supply_chain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty,
+           CASE 
+               WHEN ps.ps_availqty IS NULL THEN 0 
+               ELSE ps.ps_availqty 
+           END AS adjusted_availqty
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty >= 0
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty,
+           CASE 
+               WHEN ps.ps_availqty IS NULL THEN 0 
+               ELSE ps.ps_availqty 
+           END AS adjusted_availqty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN supply_chain sc ON sc.ps_partkey = ps.ps_partkey
+    WHERE sc.adjusted_availqty > 100
+),
+
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+),
+
+product_analysis AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_orderkey) AS order_count,
+           AVG(l.l_discount) AS average_discount
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY p.p_partkey, p.p_name
+)
+
+SELECT 
+    region.r_name,
+    na.n_name AS nation_name,
+    sp.s_name AS supplier_name,
+    p.p_name AS part_name,
+    CASE 
+        WHEN hp.order_rank = 1 THEN 'Top Order'
+        ELSE 'Other Order'
+    END AS order_status,
+    COALESCE(pa.total_sales, 0) AS total_sales,
+    ss.adjusted_availqty AS available_quantity
+FROM region
+JOIN nation na ON na.n_regionkey = region.r_regionkey
+LEFT JOIN supplier sp ON sp.s_nationkey = na.n_nationkey
+LEFT JOIN supply_chain ss ON ss.s_suppkey = sp.s_suppkey
+LEFT JOIN high_value_orders hp ON hp.o_orderkey = ss.ps_partkey
+LEFT JOIN product_analysis pa ON pa.p_partkey = ss.ps_partkey
+WHERE 
+    (region.r_name LIKE '%East%' OR region.r_name IS NULL)
+    AND (ss.adjusted_availqty IS NULL OR ss.adjusted_availqty > 50)
+ORDER BY total_sales DESC, available_quantity DESC, region.r_name;

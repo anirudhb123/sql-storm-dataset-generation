@@ -1,0 +1,73 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,  
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes  
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.OwnerUserId
+), TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        P.CommentCount,
+        P.UpVotes,
+        P.DownVotes,
+        NTILE(10) OVER (ORDER BY UR.Reputation DESC) AS ReputationDecile
+    FROM 
+        UserReputation UR
+    JOIN 
+        PostStats P ON UR.UserId = P.OwnerUserId
+    WHERE 
+        UR.Reputation > 1000  
+), ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.CreationDate,
+        PH.Comment
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+)
+SELECT 
+    TU.DisplayName,
+    TU.Reputation AS UserReputation,
+    COUNT(DISTINCT PS.PostId) AS TotalPosts,
+    SUM(CASE WHEN PS.CommentCount > 0 THEN 1 ELSE 0 END) AS PostsWithComments,
+    SUM(CASE WHEN PS.UpVotes > PS.DownVotes THEN 1 ELSE 0 END) AS PopularPosts,
+    COALESCE(CP.Title, 'No Closed Posts') AS ClosedPostTitle,
+    COALESCE(CP.CreationDate, 'N/A') AS ClosedPostDate,
+    COALESCE(CP.Comment, 'No Comment') AS CloseReason
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostStats PS ON TU.UserId = PS.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON PS.PostId = CP.PostId
+WHERE 
+    TU.ReputationDecile <= 3  
+GROUP BY 
+    TU.DisplayName, TU.Reputation, CP.Title, CP.CreationDate, CP.Comment
+ORDER BY 
+    TU.Reputation DESC;

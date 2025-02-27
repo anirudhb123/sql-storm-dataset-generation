@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        0 AS Level,
+        p.CreationDate,
+        CAST(p.Title AS VARCHAR(255)) AS FullPath
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        p2.Id,
+        p2.ParentId,
+        p2.Title,
+        rph.Level + 1,
+        p2.CreationDate,
+        CAST(rph.FullPath || ' -> ' || p2.Title AS VARCHAR(255))
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.Id
+), RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentRank,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+), PostVoteAggregates AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+), CombinedPostData AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(pva.UpVotes, 0) AS UpVotes,
+        COALESCE(pva.DownVotes, 0) AS DownVotes,
+        rp.CommentCount,
+        rph.FullPath
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostVoteAggregates pva ON rp.Id = pva.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON rp.Id = rph.Id
+)
+SELECT 
+    cp.PostId, 
+    cp.Title,
+    cp.CreationDate,
+    cp.Score,
+    cp.UpVotes,
+    cp.DownVotes,
+    cp.CommentCount,
+    cp.FullPath,
+    CASE 
+        WHEN cp.UpVotes > cp.DownVotes THEN 'Popular'
+        WHEN cp.DownVotes <> 0 AND cp.UpVotes = 0 THEN 'Controversial'
+        ELSE 'New' 
+    END AS PostType
+FROM 
+    CombinedPostData cp
+WHERE 
+    cp.CommentCount > 5
+ORDER BY 
+    cp.Score DESC, cp.CreationDate ASC
+LIMIT 50 OFFSET 0;

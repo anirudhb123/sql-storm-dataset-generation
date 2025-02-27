@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        kt.kind AS kind_type,
+        ROW_NUMBER() OVER (PARTITION BY kt.kind ORDER BY at.production_year DESC) AS rn
+    FROM 
+        aka_title at
+    JOIN 
+        kind_type kt ON at.kind_id = kt.id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+
+DirectorMovies AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS number_of_actors,
+        SUM(CASE 
+                WHEN ci.note IS NULL THEN 1 
+                ELSE 0 
+            END) AS missing_notes,
+        MAX(CAST(SUBSTR(at.title, 1, POSITION(' ' IN at.title) - 1) AS INTEGER)) AS max_word_length
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(CASE WHEN mi.info IS NULL THEN 'Unknown Info' ELSE mi.info END, '; ') AS movie_infos
+    FROM 
+        movie_info mi
+    JOIN 
+        (SELECT DISTINCT movie_id FROM complete_cast) cc ON mi.movie_id = cc.movie_id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.kind_type,
+    dm.number_of_actors,
+    dm.missing_notes,
+    mi.movie_infos,
+    COALESCE(NULLIF(DISTINCT dm.max_word_length, 0), 'N/A') AS max_title_length
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    DirectorMovies dm ON rm.title_id = dm.movie_id
+FULL OUTER JOIN 
+    MovieInfo mi ON rm.title_id = mi.movie_id
+WHERE 
+    (rm.rn = 1 OR rm.production_year < 2000) 
+    AND (dm.number_of_actors > 3 OR dm.missing_notes > 0)
+ORDER BY 
+    rm.production_year DESC NULLS LAST, 
+    rm.title ASC;
+
+In this query:
+
+1. **Common Table Expressions (CTEs)** are used to break down the query into manageable parts.
+    - **RankedMovies**: Ranks movies based on their production year segregated by kind.
+    - **DirectorMovies**: Aggregates actor counts for movies directed, along with conditions on notes.
+    - **MovieInfo**: Collects movie information while handling NULLs with a string aggregate.
+
+2. **Row Numbering**: Utilizes `ROW_NUMBER()` to filter the latest movies.
+
+3. **Correlated Subqueries and Aggregated Functions**: From the `DirectorMovies` CTE, it counts unique directors and computes maximum title length, showcasing advanced aggregation.
+
+4. **NULL and String Handling**: The query includes `COALESCE`, `NULLIF`, and `STRING_AGG` to ensure the output handles NULL values elegantly.
+
+5. **Join Types**: Demonstrates the use of LEFT JOIN and FULL OUTER JOIN to combine and preserve data for different conditions.
+
+6. **Complicated Predicates**: The filtering predicates show complexity via combined conditions and NULL logic.
+
+7. **Ordering with NULL Logic**: The final ORDER BY clause exhibits advanced handling by placing NULLs at the end. 
+
+This elaborate query accomplishes a sophisticated performance benchmark by utilizing various SQL constructs and ensuring its nuances are captured correctly.

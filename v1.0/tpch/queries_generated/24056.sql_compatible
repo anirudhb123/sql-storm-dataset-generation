@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+      AND n.n_name LIKE '%' || 'land' || '%'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN SupplierCTE cte ON cte.n_regionkey = n.n_regionkey
+    WHERE s.s_acctbal < cte.s_acctbal
+),
+AggregateData AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus IN ('F', 'O')
+      AND l.l_tax BETWEEN 0.05 AND 0.07 
+      AND l.l_discount IS NOT NULL
+    GROUP BY l.l_orderkey
+),
+FinalOutput AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           COALESCE(SUM(ads.total_revenue), 0) AS revenue_sum, 
+           COALESCE(SUM(ad.unique_parts), 0) AS part_count
+    FROM part p
+    LEFT JOIN AggregateData ads ON p.p_partkey = ANY(SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F'))
+    LEFT JOIN AggregateData ad ON p.p_partkey = ANY(SELECT l.l_partkey FROM lineitem l INNER JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderstatus IS NULL)
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT f.p_partkey, f.p_name, f.revenue_sum, f.part_count
+FROM FinalOutput f
+WHERE (f.revenue_sum, f.part_count) IN (
+    SELECT MAX(revenue_sum), COUNT(part_count) 
+    FROM FinalOutput 
+    GROUP BY revenue_sum
+)
+ORDER BY f.revenue_sum DESC, f.part_count ASC
+LIMIT 10;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreatedDate,
+        rp.TotalBounty,
+        COALESCE((SELECT COUNT(*) FROM Posts WHERE ParentId = rp.PostId), 0) AS AnswerCount,
+        CASE 
+            WHEN rp.AcceptedAnswerId IS NOT NULL THEN (SELECT Title FROM Posts WHERE Id = rp.AcceptedAnswerId)
+            ELSE 'No Accepted Answer'
+        END AS AcceptedAnswerTitle
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title and Edit Body
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+CombinedData AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Score,
+        tp.ViewCount,
+        tp.CommentCount,
+        tp.TotalBounty,
+        php.EditCount AS TitleEditCount,
+        COALESCE(phb.EditCount, 0) AS BodyEditCount,
+        tp.AcceptedAnswerTitle
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostHistoryAggregates php ON tp.PostId = php.PostId AND php.PostHistoryTypeId = 4
+    LEFT JOIN 
+        PostHistoryAggregates phb ON tp.PostId = phb.PostId AND phb.PostHistoryTypeId = 5
+)
+SELECT 
+    cd.*,
+    U.DisplayName AS OwnerDisplayName,
+    CASE 
+        WHEN cd.Score > 10 THEN 'High Score'
+        WHEN cd.Score BETWEEN 5 AND 10 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    CombinedData cd
+JOIN 
+    Posts p ON cd.PostId = p.Id
+JOIN 
+    Users U ON p.OwnerUserId = U.Id
+ORDER BY 
+    cd.ViewCount DESC, cd.Score DESC;

@@ -1,0 +1,78 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostsAndUsers AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        ph.UpVotes,
+        ph.DownVotes,
+        ph.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostVotes ph ON p.Id = ph.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'  
+),
+TopPosts AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY UpVotes DESC) AS PostRank
+    FROM 
+        PostsAndUsers
+)
+
+SELECT 
+    COALESCE(r.PostId, t.PostId) AS PostId,
+    COALESCE(r.Title, t.Title) AS Title,
+    COALESCE(r.OwnerDisplayName, t.OwnerDisplayName) AS OwnerDisplayName,
+    COALESCE(r.Level, 0) AS HierarchyLevel,
+    COALESCE(t.UpVotes, 0) AS UpVotes,
+    COALESCE(t.DownVotes, 0) AS DownVotes
+FROM 
+    RecursivePostHierarchy r
+FULL OUTER JOIN 
+    TopPosts t ON r.PostId = t.Id
+WHERE 
+    COALESCE(r.PostId, t.PostId) IS NOT NULL
+ORDER BY 
+    HierarchyLevel, UpVotes DESC
+LIMIT 100;

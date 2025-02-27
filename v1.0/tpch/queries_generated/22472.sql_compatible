@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal = (SELECT MAX(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 5
+),
+PartOrders AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY p.p_partkey, p.p_name
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, ROW_NUMBER() OVER (ORDER BY ps.ps_availqty DESC) AS Rank
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > (SELECT AVG(ps2.ps_availqty) FROM partsupp ps2)
+),
+NationStats AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS SupplierCount, 
+           SUM(o.o_totalprice) AS TotalOrderValue
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN orders o ON s.s_suppkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT DISTINCT n.n_name, 
+       CASE 
+           WHEN sh.Level IS NOT NULL THEN 'Top Supplier: ' || sh.s_name
+           ELSE 'No Top Supplier'
+       END AS TopSupplier,
+       pp.p_name AS PopularPart
+FROM NationStats n
+FULL OUTER JOIN SupplierHierarchy sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN TopParts pp ON pp.p_partkey = (SELECT p_partkey FROM PartOrders ORDER BY TotalSales DESC LIMIT 1)
+WHERE 
+    (n.SupplierCount > 1 OR n.TotalOrderValue IS NULL)
+    AND COALESCE(sh.s_suppkey, 0) BETWEEN 1 AND 100
+ORDER BY n.n_name, PopularPart DESC;

@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    co.name AS company_name,
+    ct.kind AS company_type,
+    STRING_AGG(DISTINCT an.name ORDER BY an.name) AS actor_names,
+    MIN(kt.keyword) AS primary_keyword,
+    AVG(m.production_year) AS avg_production_year,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    CASE 
+        WHEN COUNT(DISTINCT ci.person_id) > 0 
+        THEN AVG(COALESCE(CAST(ci.nr_order AS FLOAT), 0)) 
+        ELSE 0 
+    END AS avg_actor_order
+FROM 
+    movie_companies mc
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    complete_cast cc ON mc.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mc.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    MovieHierarchy mh ON mc.movie_id = mh.movie_id
+JOIN 
+    aka_title m ON mc.movie_id = m.id
+WHERE 
+    m.production_year >= 2000 
+    AND m.production_year <= 2023 
+    AND co.country_code IS NOT NULL
+GROUP BY 
+    co.name, ct.kind
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 3
+ORDER BY 
+    avg_production_year DESC;

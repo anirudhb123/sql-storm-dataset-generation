@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        title m
+    INNER JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    INNER JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON mt.id = c.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+MovieInfoWithDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mi.keyword_count,
+        mi.cast_count,
+        COALESCE((SELECT AVG(production_year) FROM title WHERE kind_id = 1 AND production_year < mh.production_year), 'N/A') AS avg_prev_prod_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY mh.level ASC) AS rn
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieInfo mi ON mh.movie_id = mi.movie_id
+)
+SELECT 
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.keyword_count,
+    mw.cast_count,
+    mw.avg_prev_prod_year
+FROM 
+    MovieInfoWithDetails mw
+WHERE 
+    mw.rn = 1 
+ORDER BY 
+    mw.production_year DESC, 
+    mw.keyword_count DESC, 
+    mw.cast_count DESC;

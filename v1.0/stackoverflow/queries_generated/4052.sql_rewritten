@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        STRING_AGG(crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    p.Title,
+    p.Score,
+    us.DisplayName,
+    us.NetVotes,
+    p.ViewCount,
+    CASE 
+        WHEN cpd.CloseReasons IS NOT NULL THEN 'Closed (' || cpd.CloseReasons || ')'
+        ELSE 'Open'
+    END AS PostStatus,
+    DATE_PART('day', cast('2024-10-01 12:34:56' as timestamp) - p.CreationDate) AS AgeInDays
+FROM 
+    RankedPosts p
+JOIN 
+    UserStats us ON p.OwnerUserId = us.UserId
+LEFT JOIN 
+    ClosedPostDetails cpd ON p.PostId = cpd.PostId
+WHERE 
+    p.ScoreRank = 1
+AND 
+    p.ViewCount > 100
+ORDER BY 
+    p.Score DESC, us.Reputation DESC
+LIMIT 50;

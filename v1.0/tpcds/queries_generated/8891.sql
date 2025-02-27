@@ -1,0 +1,41 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY cd.education_status ORDER BY SUM(ws.ws_net_paid) DESC) AS spending_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2450818 AND 2450878 -- Example date range
+    GROUP BY 
+        c.c_customer_id, cd.education_status
+),
+top_spenders AS (
+    SELECT 
+        customer_id,
+        total_spent,
+        total_orders,
+        education_status
+    FROM 
+        ranked_sales
+    WHERE 
+        spending_rank <= 10
+)
+SELECT 
+    t.education_status,
+    AVG(t.total_spent) AS average_spent,
+    COUNT(t.customer_id) AS number_of_top_customers
+FROM 
+    top_spenders t
+JOIN 
+    customer_demographics cd ON t.education_status = cd.cd_education_status
+GROUP BY 
+    t.education_status
+ORDER BY 
+    average_spent DESC;

@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Start with Questions
+    UNION ALL
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title AS PostTitle,
+        p2.OwnerUserId,
+        p2.ParentId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+    AVG(COALESCE(v.Score, 0)) AS AveragePostScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelevantTags,
+    MAX(CASE 
+        WHEN p.CreationDate >= NOW() - INTERVAL '30 days' THEN 'Recent Activity'
+        ELSE 'No Recent Activity' 
+    END) AS ActivityStatus
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS Score
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+) v ON p.Id = v.PostId
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            DISTINCT t.*
+        FROM 
+            UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS tag
+        JOIN 
+            Tags t ON t.TagName = TRIM(tag)
+    ) t ON TRUE
+WHERE 
+    u.Reputation > 0
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC,
+    SUM(TotalUpVotes - TotalDownVotes) DESC
+LIMIT 50;
+
+-- Performance benchmarking variables are involved with COUNT, AVG, and STRING_AGG function calculations,
+-- along with recursive hierarchy and outer join mechanisms to enrich user activities based on post actions.

@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY ws.ws_item_sk) AS total_net_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk > (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d WHERE d.d_current_month = 'Y')
+),
+ItemSummary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_category,
+        MAX(rs.ws_sales_price) AS max_price,
+        MIN(rs.ws_sales_price) AS min_price,
+        COUNT(*) FILTER (WHERE rs.price_rank = 1) AS highest_sales_count,
+        AVG(rs.total_net_profit) AS avg_net_profit
+    FROM 
+        item i
+    JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc, i.i_category
+)
+SELECT 
+    isum.i_item_id,
+    isum.i_item_desc,
+    isum.i_category,
+    isum.max_price AS highest_price,
+    isum.min_price AS lowest_price,
+    isum.highest_sales_count,
+    isum.avg_net_profit,
+    COALESCE(NULLIF(TRIM(SUBSTR(isum.i_item_desc, 1, 20)), ''), 'No description') AS item_short_desc
+FROM 
+    ItemSummary isum
+LEFT JOIN 
+    promotion p ON p.p_item_sk = isum.i_item_id AND p.p_discount_active = 'Y'
+WHERE 
+    (isum.avg_net_profit IS NOT NULL AND isum.avg_net_profit > 0)
+ORDER BY 
+    isum.avg_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

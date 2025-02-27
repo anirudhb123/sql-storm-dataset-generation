@@ -1,0 +1,73 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rn,
+        SUM(ws.ws_sales_price) OVER (PARTITION BY ws.ws_item_sk) AS total_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND ws.ws_sales_price IS NOT NULL
+),
+TopSales AS (
+    SELECT 
+        a.ca_country,
+        COUNT(DISTINCT a.ca_address_sk) AS address_count,
+        AVG(rs.total_sales) AS avg_sales_per_item,
+        STRING_AGG(DISTINCT i.i_product_name, ', ') AS top_products
+    FROM 
+        customer_address a
+    JOIN 
+        customer c ON a.ca_address_sk = c.c_current_addr_sk
+    JOIN 
+        (SELECT 
+            r.ws_item_sk, 
+            r.total_sales 
+         FROM 
+            RankedSales r 
+         WHERE 
+            r.rn = 1) AS top_sales ON top_sales.ws_item_sk = a.ca_address_sk 
+    JOIN 
+        item i ON i.i_item_sk = top_sales.ws_item_sk
+    GROUP BY 
+        a.ca_country
+),
+FinalStats AS (
+    SELECT 
+        ts.ca_country,
+        ts.address_count,
+        ts.avg_sales_per_item,
+        CASE 
+            WHEN ts.avg_sales_per_item > 1000 THEN 'High Sales'
+            WHEN ts.avg_sales_per_item BETWEEN 500 AND 1000 THEN 'Moderate Sales'
+            ELSE 'Low Sales'
+        END AS sales_category
+    FROM 
+        TopSales ts
+)
+SELECT 
+    f.ca_country,
+    f.address_count,
+    f.avg_sales_per_item,
+    f.sales_category
+FROM 
+    FinalStats f
+LEFT JOIN 
+    (SELECT 
+        ca_country, 
+        COUNT(c.c_customer_sk) AS customer_count
+     FROM 
+        customer_address a
+     JOIN 
+        customer c ON a.ca_address_sk = c.c_current_addr_sk
+     GROUP BY 
+        ca_country) c ON f.ca_country = c.ca_country
+WHERE 
+    f.avg_sales_per_item IS NOT NULL
+    AND c.customer_count > 0
+ORDER BY 
+    f.avg_sales_per_item DESC, 
+    f.address_count DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

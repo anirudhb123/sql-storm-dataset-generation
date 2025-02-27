@@ -1,0 +1,90 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (11, 13) THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    upvotes.UpVotes,
+    upvotes.DownVotes,
+    COALESCE(phAgg.CloseCount, 0) AS CloseCount,
+    COALESCE(phAgg.ReopenCount, 0) AS ReopenCount,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation,
+    br.BadgeCount,
+    br.GoldBadges,
+    br.SilverBadges,
+    br.BronzeBadges,
+    DATE_TRUNC('day', p.CreationDate) AS PostDate,
+    COALESCE(rp.Level, 0) AS HierarchyLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteStats upvotes ON p.Id = upvotes.PostId
+LEFT JOIN 
+    PostHistoryAggregates phAgg ON p.Id = phAgg.PostId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadgeCounts br ON u.Id = br.UserId
+LEFT JOIN 
+    RecursivePostHierarchy rp ON p.Id = rp.PostId
+WHERE 
+    p.CreationDate > NOW() - INTERVAL '1 year'
+    AND (p.ViewCount IS NULL OR p.ViewCount > 100)
+ORDER BY 
+    upvotes.UpVotes DESC, 
+    p.CreationDate DESC
+LIMIT 100;

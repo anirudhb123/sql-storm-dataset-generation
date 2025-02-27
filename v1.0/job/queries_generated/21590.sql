@@ -1,0 +1,63 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    mt.title,
+    mh.production_year,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    CASE
+        WHEN AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN mi.info::numeric ELSE NULL END) IS NULL
+        THEN 'Budget data not available'
+        ELSE CONCAT('Avg. Budget: $', ROUND(AVG(mi.info::numeric), 2))
+    END AS average_budget,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS movie_rank,
+    CASE
+        WHEN ak.name IS NULL THEN 'Unknown Actor'
+        ELSE ak.name
+    END AS safe_actor_name
+FROM
+    movie_hierarchy mh
+JOIN
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN
+    keyword k ON mk.keyword_id = k.id
+JOIN
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+GROUP BY
+    ak.name, mh.movie_id, mt.title, mh.production_year
+HAVING
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY
+    movie_rank,
+    mh.production_year DESC;

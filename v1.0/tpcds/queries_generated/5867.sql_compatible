@@ -1,0 +1,46 @@
+
+WITH RankedWebSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk
+),
+TopWebsites AS (
+    SELECT 
+        rw.web_site_sk,
+        rw.total_sales
+    FROM 
+        RankedWebSales rw
+    WHERE 
+        rw.sales_rank <= 5
+),
+SalesByItem AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS item_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        TopWebsites tw ON ws.ws_web_site_sk = tw.web_site_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    sbi.item_sales
+FROM 
+    SalesByItem sbi
+JOIN 
+    item i ON sbi.ws_item_sk = i.i_item_sk
+ORDER BY 
+    sbi.item_sales DESC
+FETCH FIRST 10 ROWS ONLY;

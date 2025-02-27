@@ -1,0 +1,74 @@
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        d.d_year,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY COALESCE(SUM(ws.ws_sales_price), 0) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        c.c_customer_id, d.d_year
+),
+IncomeBands AS (
+    SELECT 
+        h.hd_income_band_sk,
+        h.hd_buy_potential,
+        b.ib_lower_bound,
+        b.ib_upper_bound,
+        HINT('Parallel 4')
+    FROM 
+        household_demographics h
+    JOIN income_band b ON h.hd_income_band_sk = b.ib_income_band_sk
+    WHERE 
+        h.hd_dep_count IS NOT NULL
+        AND h.hd_dep_count > 0
+),
+AggregateReturns AS (
+    SELECT 
+        sr.returned_date
+        , COUNT(sr.return_quantity) AS return_count
+        , SUM(sr.return_amt) AS total_return_amt
+    FROM 
+        store_returns sr 
+    WHERE 
+        sr.returned_date IS NOT NULL
+    GROUP BY 
+        sr.returned_date
+    HAVING 
+        COUNT(sr.return_quantity) > 0
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_profit
+    FROM 
+        CustomerStats cs
+    WHERE 
+        cs.rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    tc.order_count,
+    tc.avg_profit,
+    ib.hd_buy_potential,
+    COALESCE(ar.total_return_amt, 0) AS total_returns,
+    ar.return_count
+FROM 
+    TopCustomers tc
+LEFT JOIN IncomeBands ib ON tc.c_customer_id = ib.hd_buy_potential
+LEFT JOIN AggregateReturns ar ON ar.returned_date = cast('2002-10-01' as date)
+WHERE 
+    tc.total_sales BETWEEN 100 AND 10000
+    AND tc.order_count > 1
+    AND (ar.total_return_amt IS NULL OR ar.return_count > 0)
+    OR (ib.ib_lower_bound > 5000 AND ib.ib_upper_bound < 15000)
+ORDER BY 
+    tc.total_sales DESC, 
+    tc.order_count ASC;

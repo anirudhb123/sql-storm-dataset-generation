@@ -1,0 +1,81 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+),
+actor_movie_count AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id
+),
+top_actors AS (
+    SELECT 
+        a.id,
+        a.name,
+        ac.movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        actor_movie_count ac ON a.person_id = ac.person_id
+    WHERE 
+        ac.movie_count > 5
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        k.keyword
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.phonetic_code IS NOT NULL
+),
+movie_details AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        ARRAY_AGG(DISTINCT a.name ORDER BY a.name) AS actors
+    FROM 
+        movies_with_keywords m
+    JOIN 
+        cast_info c ON m.movie_id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+)
+SELECT 
+    rd.movie_id,
+    rd.title,
+    rd.production_year,
+    rd.keywords,
+    rd.actors,
+    ra.name AS top_actor_name,
+    ra.movie_count AS top_actor_movie_count
+FROM 
+    movie_details rd
+LEFT JOIN 
+    top_actors ra ON rd.actors @> ARRAY[ra.name] -- Check if actor is in the list of actors for the movie
+WHERE 
+    rd.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    rd.production_year DESC, rd.title;

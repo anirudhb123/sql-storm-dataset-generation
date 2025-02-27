@@ -1,0 +1,76 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.bill_cdemo_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_paid,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_sales_price DESC) AS rank_based_on_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price IS NOT NULL
+        AND ws_quantity > 0
+), 
+AggregateData AS (
+    SELECT 
+        sd.bill_customer_sk,
+        COUNT(*) AS total_transactions,
+        SUM(sd.ws_net_paid) AS total_spent,
+        AVG(sd.ws_sales_price) AS average_sales_price
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.rank_based_on_price <= 5
+    GROUP BY 
+        sd.bill_customer_sk
+), 
+JoinedCustomerData AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        ad.total_transactions,
+        ad.total_spent,
+        ad.average_sales_price,
+        CASE 
+            WHEN ad.total_spent IS NULL THEN 'NO SPENDING' 
+            WHEN ad.total_spent < 100 THEN 'LOW SPENDER'
+            WHEN ad.total_spent BETWEEN 100 AND 500 THEN 'MEDIUM SPENDER'
+            ELSE 'HIGH SPENDER' 
+        END AS spending_category
+    FROM 
+        customer cd
+    LEFT JOIN 
+        AggregateData ad ON cd.c_customer_sk = ad.bill_customer_sk
+), 
+FinalResults AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(c.total_transactions, 0) AS transaction_count,
+        COALESCE(c.total_spent, 0.00) AS total_spent,
+        COALESCE(c.average_sales_price, 0.00) AS average_sales_price,
+        c.spending_category,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(c.total_spent, 0) DESC) AS customer_rank
+    FROM 
+        JoinedCustomerData c
+)
+
+SELECT 
+    f.c_first_name,
+    f.c_last_name,
+    f.transaction_count,
+    f.total_spent,
+    f.average_sales_price,
+    f.spending_category
+FROM 
+    FinalResults f
+WHERE 
+    f.transaction_count > 0
+ORDER BY 
+    f.spending_category ASC,
+    f.customer_rank ASC
+LIMIT 10;

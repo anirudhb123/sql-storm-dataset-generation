@@ -1,0 +1,65 @@
+WITH User_Reputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount, 
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id AND V.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    GROUP BY 
+        U.Id
+),
+Recent_Posts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerName,
+        COALESCE(PH.Comment, 'N/A') AS LastEditComment,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.LastActivityDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON PH.PostId = P.Id AND PH.PostHistoryTypeId IN (4, 5, 6) 
+    WHERE 
+        P.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+)
+SELECT 
+    UR.DisplayName AS UserName,
+    UR.Reputation,
+    UR.TotalBountyAmount,
+    RP.Title,
+    RP.ViewCount,
+    RP.CreationDate,
+    RP.Score,
+    RP.LastEditComment
+FROM 
+    User_Reputation UR
+LEFT JOIN 
+    Recent_Posts RP ON UR.UserId = RP.OwnerName
+WHERE 
+    UR.TotalPosts > 5  
+    AND UR.Reputation > (SELECT AVG(Reputation) FROM Users)  
+    AND EXISTS (
+        SELECT 1 
+        FROM Comments C 
+        WHERE C.UserId = UR.UserId 
+        AND C.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month')
+    )
+ORDER BY 
+    UR.Reputation DESC, 
+    RP.ViewCount DESC
+LIMIT 10;

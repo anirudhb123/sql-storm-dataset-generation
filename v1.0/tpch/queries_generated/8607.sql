@@ -1,0 +1,38 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        n.n_name AS nation_name,
+        DENSE_RANK() OVER (PARTITION BY n.n_name ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.nation_name,
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+)
+SELECT 
+    to.nation_name,
+    COUNT(to.o_orderkey) AS total_orders,
+    SUM(to.o_totalprice) AS total_revenue,
+    AVG(to.o_totalprice) AS avg_order_value
+FROM 
+    TopOrders to
+GROUP BY 
+    to.nation_name
+ORDER BY 
+    total_revenue DESC;

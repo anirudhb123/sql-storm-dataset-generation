@@ -1,0 +1,87 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        NULL AS ParentId,
+        1 AS Level
+    FROM Posts
+    WHERE PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ph.Id AS ParentId,
+        ph.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy ph ON p.ParentId = ph.Id
+    WHERE p.PostTypeId = 2  -- Only Answers
+),
+PostStats AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        ph.Level,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph2.Id) AS ChildPosts
+    FROM RecursivePostHierarchy ph
+    LEFT JOIN Users U ON ph.OwnerUserId = U.Id
+    LEFT JOIN Votes v ON ph.Id = v.PostId
+    LEFT JOIN Comments c ON ph.Id = c.PostId
+    LEFT JOIN Posts ph2 ON ph.Id = ph2.ParentId  -- Child Posts
+    GROUP BY ph.Id, ph.Title, ph.Level, U.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.Id,
+        ph.Title,
+        COUNT(DISTINCT phs.PostHistoryTypeId) AS EditCount,
+        MAX(phs.CreationDate) AS LastEditDate
+    FROM Posts p
+    JOIN PostHistory phs ON p.Id = phs.PostId
+    WHERE phs.PostHistoryTypeId IN (4, 5, 6) -- Title, Body, Tag Edits
+    GROUP BY ph.Id, ph.Title
+),
+FinalStats AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.OwnerDisplayName,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        ps.ChildPosts,
+        COALESCE(phs.EditCount, 0) AS EditCount,
+        phs.LastEditDate,
+        RANK() OVER (ORDER BY ps.UpVotes DESC) AS Rank,
+        COUNT(*) OVER () AS TotalPosts
+    FROM PostStats ps
+    LEFT JOIN PostHistoryStats phs ON ps.Id = phs.Id
+)
+SELECT 
+    Id,
+    Title,
+    OwnerDisplayName,
+    UpVotes,
+    DownVotes,
+    CommentCount,
+    ChildPosts,
+    EditCount,
+    LastEditDate,
+    Rank,
+    TotalPosts,
+    CASE 
+        WHEN UpVotes - DownVotes >= 10 THEN 'High Engagement'
+        WHEN UpVotes - DownVotes BETWEEN 1 AND 9 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM FinalStats
+ORDER BY Rank, UpVotes DESC;

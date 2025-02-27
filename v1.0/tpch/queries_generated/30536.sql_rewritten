@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.hierarchy_level < 5
+),
+OrderSummary AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01'
+    GROUP BY c.c_custkey
+),
+PartSales AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey
+),
+FilteredNation AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE n.n_comment IS NOT NULL
+)
+SELECT ns.n_nationkey, ns.n_name, ns.r_name, 
+       COALESCE(SUM(ps.total_revenue), 0) AS nation_revenue,
+       COALESCE(AVG(sh.s_acctbal), 0) AS avg_supplier_balance,
+       os.total_spent, os.order_count
+FROM FilteredNation ns
+LEFT JOIN PartSales ps ON ns.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ps.ps_suppkey)
+LEFT JOIN SupplierHierarchy sh ON ns.n_nationkey = sh.s_nationkey
+LEFT JOIN OrderSummary os ON ns.n_nationkey = (SELECT DISTINCT c_nationkey FROM customer WHERE c_custkey IN (SELECT o_custkey FROM orders))
+GROUP BY ns.n_nationkey, ns.n_name, ns.r_name, os.total_spent, os.order_count
+HAVING nation_revenue > 10000 OR avg_supplier_balance > 3000
+ORDER BY nation_revenue DESC, avg_supplier_balance DESC;

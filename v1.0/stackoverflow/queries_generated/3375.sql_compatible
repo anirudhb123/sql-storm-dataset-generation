@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Community') AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+), 
+PostStats AS (
+    SELECT 
+        PostId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        PostId
+), 
+FinalStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        rp.OwnerDisplayName,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostStats ps ON rp.PostId = ps.PostId
+)
+SELECT 
+    fs.*,
+    (CASE 
+         WHEN fs.UpVotes > fs.DownVotes THEN 'Positive'
+         WHEN fs.UpVotes < fs.DownVotes THEN 'Negative'
+         ELSE 'Neutral'
+     END) AS VoteSentiment,
+    ROUND((fs.UpVotes * 1.0 / NULLIF(fs.CommentCount, 0)), 2) AS UpVotePerComment
+FROM 
+    FinalStats fs
+WHERE 
+    fs.Rank <= 5
+ORDER BY 
+    fs.Score DESC;

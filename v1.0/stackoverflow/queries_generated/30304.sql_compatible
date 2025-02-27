@@ -1,0 +1,67 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+PostVoteStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Level,
+        COALESCE(vs.VoteCount, 0) AS TotalVoteCount,
+        COALESCE(vs.UpVotes, 0) AS UpVoteCount,
+        COALESCE(vs.DownVotes, 0) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY ph.Level ORDER BY COALESCE(vs.VoteCount, 0) DESC) AS Rank
+    FROM 
+        RecursivePostHierarchy ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    LEFT JOIN 
+        PostVoteStatistics vs ON p.Id = vs.PostId
+)
+SELECT 
+    pp.Title,
+    pp.Level,
+    pp.TotalVoteCount,
+    pp.UpVoteCount,
+    pp.DownVoteCount
+FROM 
+    PopularPosts pp
+WHERE 
+    pp.Rank <= 10  
+ORDER BY 
+    pp.Level, pp.TotalVoteCount DESC;

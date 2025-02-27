@@ -1,0 +1,66 @@
+WITH movie_actors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id
+),
+popular_movies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.movie_id = ci.movie_id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5
+),
+keyword_counts AS (
+    SELECT 
+        k.keyword AS keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        keyword k
+    JOIN 
+        movie_keyword mk ON k.id = mk.keyword_id
+    GROUP BY 
+        k.id, k.keyword
+),
+actor_keywords AS (
+    SELECT 
+        a.name AS actor_name,
+        k.keyword AS keyword,
+        COUNT(mk.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.name, k.id, k.keyword
+)
+SELECT 
+    ma.actor_name,
+    ma.movie_count AS total_movies,
+    (SELECT COUNT(*) FROM popular_movies pm WHERE pm.actor_count >= 5) AS popular_movies_count,
+    ak.keyword,
+    ak.movie_count AS actor_keyword_movie_count
+FROM 
+    movie_actors ma
+LEFT JOIN 
+    actor_keywords ak ON ma.actor_name = ak.actor_name
+ORDER BY 
+    ma.movie_count DESC, ak.keyword;

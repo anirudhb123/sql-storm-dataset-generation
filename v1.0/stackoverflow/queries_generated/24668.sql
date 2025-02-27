@@ -1,0 +1,82 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation, 
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        COUNT(DISTINCT PH.Id) AS PostHistories
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CreationDate,
+        U.DisplayName AS OwnerName,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RN,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.UpVotes,
+    U.DownVotes,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalBadges,
+    U.PostHistories,
+    PA.PostId,
+    PA.Title,
+    PA.ViewCount,
+    PA.Score,
+    PA.AnswerCount,
+    PA.CreationDate,
+    PA.OwnerName,
+    PA.CommentCount,
+    PA.PopularityRank,
+    CASE 
+        WHEN PA.RN = 1 THEN 'Latest Post'
+        ELSE NULL 
+    END AS IsLatestPost,
+    CASE 
+        WHEN PA.ViewCount > 1000 THEN 'Popular'
+        ELSE 'Not Popular'
+    END AS PopularityStatus
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostAnalysis PA ON U.UserId = PA.OwnerName
+WHERE 
+    U.Reputation > 100
+    AND PA.PopularityRank <= 10
+ORDER BY 
+    U.Reputation DESC,
+    PA.ViewCount DESC
+OFFSET 10 ROWS
+FETCH NEXT 10 ROWS ONLY;

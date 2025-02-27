@@ -1,0 +1,55 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        1 AS depth
+    FROM 
+        aka_title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code = 'USA'
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        mh.depth + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+)
+
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    COUNT(ci.id) AS Cast_Count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Cast_Names,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mh.depth) AS Median_Depth
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.production_year >= 2000 
+    AND mh.production_year < 2023 
+    AND ak.name IS NOT NULL
+GROUP BY 
+    mh.title, mh.production_year
+HAVING 
+    COUNT(ci.id) > 1
+ORDER BY 
+    Production_Year DESC, 
+    Cast_Count DESC;

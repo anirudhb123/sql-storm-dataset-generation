@@ -1,0 +1,14 @@
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(p.Score) AS AverageScore,
+    MAX(p.LastActivityDate) AS MostRecentActivity
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name, p.Score, p.LastActivityDate
+ORDER BY 
+    TotalPosts DESC;

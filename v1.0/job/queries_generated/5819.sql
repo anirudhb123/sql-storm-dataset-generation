@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS Movie_Title,
+    n.name AS Actor_Name,
+    c.kind AS Role_Kind,
+    p.info AS Director_Info,
+    COUNT(DISTINCT mk.keyword) AS Keyword_Count,
+    AVG(m.production_year) AS Avg_Prod_Year
+FROM 
+    aka_title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name n ON ci.person_id = n.person_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+JOIN 
+    person_info p ON p.person_id = ci.person_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+WHERE 
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND n.name IS NOT NULL
+    AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+GROUP BY 
+    t.title, n.name, c.kind, p.info
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    Avg_Prod_Year DESC, Movie_Title;

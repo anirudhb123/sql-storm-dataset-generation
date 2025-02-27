@@ -1,0 +1,72 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_by_cast,
+        MAX(CASE WHEN ci.note IS NULL THEN 'No Notes' ELSE ci.note END) AS casting_notes
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+PopularGenres AS (
+    SELECT 
+        k.keyword AS genre,
+        COUNT(m.title) AS genre_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY 
+        k.keyword
+    HAVING 
+        COUNT(m.title) > 10
+),
+ActorDetails AS (
+    SELECT 
+        an.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        AVG(ws.rating) AS avg_rating,
+        SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS awards_count
+    FROM 
+        aka_name an 
+    JOIN 
+        cast_info ci ON an.person_id = ci.person_id
+    LEFT JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, AVG(rating) AS rating FROM movie_info WHERE info_type_id = 2 GROUP BY movie_id) ws ON ci.movie_id = ws.movie_id
+    GROUP BY 
+        an.id, an.name
+)
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.total_cast,
+    pg.genre AS common_genre,
+    ad.actor_name,
+    ad.total_movies,
+    ad.avg_rating,
+    ad.awards_count,
+    CASE 
+        WHEN pg.genre IS NOT NULL THEN 'Popular Genre Present' 
+        ELSE 'No Popular Genre' 
+    END AS genre_status,
+    (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = rm.movie_id) AS complete_cast_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    PopularGenres pg ON rm.movie_title = pg.genre
+JOIN 
+    ActorDetails ad ON ad.total_movies > 5
+WHERE 
+    rm.rank_by_cast <= 5 AND 
+    (rm.total_cast IS NOT NULL OR rm.casting_notes IS NOT NULL) 
+ORDER BY 
+    rm.production_year DESC, 
+    rm.total_cast DESC;

@@ -1,0 +1,70 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        AVG(i.info::numeric) FILTER (WHERE it.info = 'rating') AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_info i ON t.id = i.movie_id
+    LEFT JOIN 
+        info_type it ON i.info_type_id = it.id
+    WHERE 
+        t.production_year >= 2000
+        AND (i.info IS NULL OR it.info != 'budget') 
+    GROUP BY 
+        t.id
+),
+high_rated_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY avg_rating DESC) AS rank
+    FROM 
+        movie_details md
+    WHERE 
+        avg_rating IS NOT NULL
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.total_cast,
+    h.cast_names,
+    h.avg_rating
+FROM 
+    high_rated_movies h
+WHERE 
+    h.rank <= 3
+ORDER BY 
+    h.production_year, h.avg_rating DESC;
+
+-- Union with Movies that have No Cast Information
+UNION ALL
+
+SELECT 
+    t.id AS movie_id,
+    t.title,
+    t.production_year,
+    0 AS total_cast,
+    'No cast available' AS cast_names,
+    NULL AS avg_rating
+FROM 
+    aka_title t
+WHERE 
+    t.production_year >= 2000
+    AND NOT EXISTS (
+        SELECT 1
+        FROM complete_cast cc
+        WHERE cc.movie_id = t.id
+    )
+ORDER BY 
+    production_year, title;

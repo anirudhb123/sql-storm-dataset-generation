@@ -1,0 +1,77 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+),
+company_contributions AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name ASC) AS companies,
+        COUNT(DISTINCT mc.company_id) AS num_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+ranked_info AS (
+    SELECT 
+        mi.movie_id,
+        mi.info AS movie_info,
+        ROW_NUMBER() OVER (PARTITION BY mi.movie_id ORDER BY it.info) AS info_rank
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info LIKE '%budget%' OR it.info LIKE '%box office%'
+),
+final_results AS (
+    SELECT 
+        mh.movie_title,
+        mh.depth,
+        co.num_companies,
+        CASE 
+            WHEN co.num_companies IS NULL THEN 'UNKNOWN' 
+            ELSE co.companies 
+        END AS companies_list,
+        STRING_AGG(DISTINCT ri.movie_info, '; ') FILTER (WHERE ri.info_rank <= 3) AS top_movie_info
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        company_contributions co ON mh.movie_id = co.movie_id
+    LEFT JOIN 
+        ranked_info ri ON mh.movie_id = ri.movie_id
+    GROUP BY 
+        mh.movie_title, mh.depth, co.num_companies
+)
+SELECT 
+    movie_title,
+    depth,
+    COALESCE(num_companies, 0) AS total_companies,
+    TRIM(BOTH ';' FROM top_movie_info) AS concise_info
+FROM 
+    final_results
+WHERE 
+    depth = 1
+ORDER BY 
+    total_companies DESC, movie_title ASC
+LIMIT 50
+OFFSET 10;

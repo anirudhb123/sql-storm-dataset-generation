@@ -1,0 +1,65 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+OrderItemDetails AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(*) AS line_count,
+        MAX(l.l_tax) AS highest_tax,
+        MIN(l.l_discount) AS lowest_discount
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    co.o_totalprice,
+    COALESCE(sap.s_name, 'No Supplier') AS supplier_name,
+    o.revenue,
+    CASE WHEN o.line_count > 5 THEN 'High Volume' ELSE 'Normal Volume' END AS volume_category,
+    CASE WHEN sap.ps_availqty IS NULL THEN 'Not Available' ELSE 'Available' END AS availability_status
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    OrderItemDetails o ON co.o_orderkey = o.l_orderkey
+LEFT JOIN 
+    SupplierParts sap ON (o.line_count IS NOT NULL AND sap.supply_rank = o.line_count) 
+WHERE 
+    (co.o_orderdate >= DATE '1996-01-01' AND co.o_orderdate < DATE '1997-01-01')
+AND 
+    DATEDIFF(CURRENT_DATE, co.o_orderdate) <= 365
+AND 
+    co.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+ORDER BY 
+    co.o_orderdate DESC, 
+    revenue DESC
+FETCH FIRST 100 ROWS ONLY;

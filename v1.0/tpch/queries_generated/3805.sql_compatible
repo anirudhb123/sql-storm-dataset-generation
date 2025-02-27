@@ -1,0 +1,43 @@
+
+WITH SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        RANK() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(SO.total_revenue, 0) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    MAX(SO.total_orders) AS max_orders_per_supplier
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierOrders SO ON n.n_nationkey = SO.s_suppkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    r.r_name LIKE 'N%' 
+    AND (SO.total_revenue IS NULL OR SO.total_revenue < 1000.00) 
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_revenue DESC, n.n_name ASC
+LIMIT 10;

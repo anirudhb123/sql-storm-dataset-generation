@@ -1,0 +1,80 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.p_mfgr) AS mfgr_count
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+        AND p.p_size >= 10
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comments available') AS sanitized_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, o.o_orderkey, o.o_orderstatus
+),
+RelevantSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey
+    FROM 
+        partsupp ps
+    JOIN 
+        RankedParts rp ON ps.ps_partkey = rp.p_partkey
+    WHERE 
+        rp.rn <= 3
+)
+SELECT 
+    c.c_name,
+    SUM(co.total_returned) AS total_returned,
+    COUNT(DISTINCT co.o_orderkey) AS unique_orders,
+    AVG(NULLIF(sd.s_acctbal, 0)) AS avg_supplier_balance
+FROM 
+    CustomerOrders co
+JOIN 
+    RelevantSuppliers rs ON co.o_orderkey IN (SELECT o.o_orderkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_partkey IN (SELECT rp.p_partkey FROM RankedParts rp))
+JOIN 
+    SupplierDetails sd ON rs.ps_suppkey = sd.s_suppkey
+JOIN 
+    customer c ON co.c_custkey = c.c_custkey
+WHERE 
+    co.line_count > 2 
+    AND c.c_mktsegment IN ('AUTOMOBILE', 'FURNITURE')
+    AND EXISTS (
+        SELECT 1
+        FROM series_table
+        WHERE series_number = MOD(co.unique_orders, 5)
+    )
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(co.total_returned) IS NOT NULL
+ORDER BY 
+    total_returned DESC
+LIMIT 10;

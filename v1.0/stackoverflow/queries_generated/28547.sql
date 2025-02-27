@@ -1,0 +1,106 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER(PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS LatestRevision
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions Only
+),
+
+TagStats AS (
+    SELECT 
+        UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        TagName
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS CloseDate,
+        cr.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Post Closed or Reopened
+),
+
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    es.CommentCount,
+    es.UpVoteCount,
+    es.DownVoteCount,
+    COALESCE(cl.CloseDate, 'No Closure') AS CloseDate,
+    COALESCE(cl.CloseReason, 'Not Applicable') AS CloseReason,
+    ts.TagName,
+    ts.TagCount,
+    ub.BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostEngagement es ON rp.PostId = es.PostId
+LEFT JOIN 
+    ClosedPosts cl ON rp.PostId = cl.PostId
+LEFT JOIN 
+    TagStats ts ON ts.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><'))
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.OwnerDisplayName
+WHERE 
+    rp.LatestRevision = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 50; 

@@ -1,0 +1,36 @@
+-- Performance Benchmarking Query for StackOverflow Schema
+
+-- This query retrieves the count of posts along with their types, 
+-- number of comments, average score, and total vote counts for each post type.
+
+WITH PostStats AS (
+    SELECT
+        p.PostTypeId,
+        COUNT(p.Id) AS TotalPosts,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        COALESCE(AVG(p.Score), 0) AS AvgScore,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS TotalUpVotes,  -- Upvotes
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS TotalDownVotes  -- Downvotes
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.PostTypeId
+)
+
+SELECT 
+    pt.Name AS PostTypeName,
+    ps.TotalPosts,
+    ps.TotalComments,
+    ps.AvgScore,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes
+FROM 
+    PostTypes pt
+LEFT JOIN 
+    PostStats ps ON pt.Id = ps.PostTypeId
+ORDER BY 
+    ps.TotalPosts DESC;

@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+), MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        mt.year AS production_year,
+        kw.keyword AS movie_keyword,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM movie_info mi
+    JOIN movie_keyword mw ON mi.movie_id = mw.movie_id
+    JOIN keyword kw ON mw.keyword_id = kw.id
+    JOIN complete_cast cc ON mi.movie_id = cc.movie_id
+    JOIN (SELECT 
+            id AS movie_id, 
+            production_year AS year 
+          FROM title 
+          WHERE kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')) mt ON cc.movie_id = mt.movie_id
+    GROUP BY mt.movie_id, mt.year, kw.keyword
+), ActorDetails AS (
+    SELECT 
+        ka.name AS actor_name,
+        COUNT(DISTINCT ca.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT mt.production_year::text, ', ' ORDER BY mt.production_year) AS production_years
+    FROM cast_info ca
+    JOIN aka_name ka ON ca.person_id = ka.person_id
+    JOIN MovieDetails mt ON ca.movie_id = mt.movie_id
+    WHERE ka.name IS NOT NULL
+    GROUP BY ka.id, ka.name
+), FinalBenchmark AS (
+    SELECT 
+        ad.actor_name,
+        ad.movies_count,
+        mt.movie_keyword,
+        rd.title,
+        rd.production_year
+    FROM ActorDetails ad
+    JOIN MovieDetails mt ON ad.movies_count >= 1
+    JOIN RankedTitles rd ON rd.title_rank <= 10
+    ORDER BY ad.movies_count DESC, rd.production_year DESC
+)
+SELECT 
+    *
+FROM FinalBenchmark
+WHERE actor_name LIKE 'A%'
+LIMIT 50;

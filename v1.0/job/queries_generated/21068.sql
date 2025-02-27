@@ -1,0 +1,84 @@
+WITH Recursive Movie_CTE AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        cp.kind AS company_kind,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM
+        aka_title mt
+    JOIN movie_companies mc ON mc.movie_id = mt.id
+    JOIN company_name cp ON cp.id = mc.company_id
+    LEFT JOIN cast_info ci ON ci.movie_id = mt.id
+    WHERE
+        mt.production_year IS NOT NULL
+    GROUP BY
+        mt.id, mt.title, mt.production_year, cp.kind
+),
+Roles AS (
+    SELECT
+        ci.movie_id,
+        rt.role,
+        COUNT(DISTINCT ci.person_id) AS num_roles
+    FROM
+        cast_info ci
+    JOIN role_type rt ON rt.id = ci.role_id
+    GROUP BY
+        ci.movie_id, rt.role
+),
+Movie_With_Roles AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        SUM(CASE WHEN r.num_roles > 1 THEN r.num_roles ELSE 0 END) AS multiple_roles_count
+    FROM
+        Movie_CTE m
+    LEFT JOIN Roles r ON r.movie_id = m.movie_id
+    GROUP BY
+        m.movie_id, m.title, m.production_year
+),
+Top_Movies AS (
+    SELECT
+        mw.title,
+        mw.production_year,
+        mw.cast_count,
+        mw.multiple_roles_count,
+        RANK() OVER (PARTITION BY mw.production_year ORDER BY mw.multiple_roles_count DESC) AS rank
+    FROM
+        Movie_With_Roles mw
+    WHERE
+        mw.production_year = (
+            SELECT MAX(production_year) FROM Movie_With_Roles
+        )
+    AND mw.cast_count IS NOT NULL
+    HAVING
+        COUNT(mw.cast_count) > 3
+)
+SELECT
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.multiple_roles_count,
+    CASE 
+        WHEN tm.rank <= 3 THEN 'Top Movie'
+        ELSE 'Other Movie'
+    END AS classification
+FROM
+    Top_Movies tm
+WHERE
+    (tm.multiple_roles_count IS NULL OR tm.multiple_roles_count > 0)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM aka_name an
+        WHERE an.person_id IN (
+            SELECT ci.person_id
+            FROM cast_info ci
+            WHERE ci.movie_id = tm.movie_id
+        )
+        AND an.name ILIKE '%unknown%'
+    )
+ORDER BY
+    tm.rank;
+
+This query constructs a series of common table expressions (CTEs) to deal with various aspects of the movie data, focusing on movies produced in recent years and their associated casts. It handles potential NULL values, incorporates window functions for ranking, and uses a nested query to filter out movies associated with unknown names. The result provides a classification of movies based on their cast count and the variety of roles played.

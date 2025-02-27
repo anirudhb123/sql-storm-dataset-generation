@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostStatistics AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.ViewCount,
+        r.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts r
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON r.PostId = c.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId AS PostId, COUNT(*) AS AnswerCount 
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) a ON r.PostId = a.PostId
+    LEFT JOIN Votes v ON r.PostId = v.PostId
+    WHERE 
+        r.PostRank = 1 
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.ViewCount, r.Score
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Score,
+    ps.CommentCount,
+    ps.AnswerCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    tu.DisplayName AS TopUserName,
+    tu.TotalScore
+FROM 
+    PostStatistics ps
+JOIN 
+    TopUsers tu ON ps.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = tu.UserId
+    )
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+        COALESCE(mi.info, 'No Info') AS movie_info
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (
+            SELECT id FROM aka_title WHERE title = tm.movie_title AND production_year = tm.production_year LIMIT 1
+        )
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = (
+            SELECT id FROM aka_title WHERE title = tm.movie_title AND production_year = tm.production_year LIMIT 1
+        )
+    GROUP BY 
+        tm.movie_title, tm.production_year
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    tm.cast_count,
+    md.company_names,
+    md.company_types,
+    md.movie_info,
+    COUNT(DISTINCT mw.keyword) AS keyword_count
+FROM 
+    TopMovies tm
+JOIN 
+    MovieDetails md ON tm.movie_title = md.movie_title AND tm.production_year = md.production_year
+LEFT JOIN 
+    movie_keyword mw ON mw.movie_id = (
+        SELECT id FROM aka_title WHERE title = md.movie_title AND production_year = md.production_year LIMIT 1
+    )
+GROUP BY 
+    md.movie_title, md.production_year, tm.cast_count, md.company_names, md.company_types, md.movie_info
+HAVING 
+    COUNT(DISTINCT mw.keyword) > 0
+ORDER BY 
+    md.production_year DESC, tm.cast_count DESC;

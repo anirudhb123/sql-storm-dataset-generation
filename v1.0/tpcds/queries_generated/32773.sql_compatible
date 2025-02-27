@@ -1,0 +1,59 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_id,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        COUNT(ws_order_number) > 5
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    INNER JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        r.customer_id,
+        ci.c_customer_id,
+        ci.cd_gender,
+        ci.cd_education_status,
+        r.total_net_profit,
+        ci.ca_city
+    FROM 
+        RecursiveSales r
+    LEFT JOIN 
+        CustomerInfo ci ON r.customer_id = ci.c_customer_id
+    WHERE 
+        r.rank <= 100
+)
+SELECT 
+    hvc.ca_city,
+    hvc.cd_gender,
+    COUNT(hvc.customer_id) AS total_customers,
+    AVG(hvc.total_net_profit) AS avg_net_profit
+FROM 
+    HighValueCustomers hvc
+GROUP BY 
+    hvc.ca_city, 
+    hvc.cd_gender
+ORDER BY 
+    hvc.ca_city ASC, 
+    total_customers DESC;

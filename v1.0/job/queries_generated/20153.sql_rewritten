@@ -1,0 +1,74 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS rank
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.person_id
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+
+MoviesWithKeywords AS (
+    SELECT
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY
+        mt.movie_id
+),
+
+CombinedInfo AS (
+    SELECT
+        a.name,
+        mt.title AS movie_title,
+        mt.production_year,
+        kw.keywords,
+        ci.nr_order,
+        CASE 
+            WHEN a.name IS NULL THEN 'Unknown Actor'
+            ELSE a.name
+        END AS safe_actor_name
+    FROM
+        aka_name a
+    LEFT JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN
+        aka_title mt ON ci.movie_id = mt.movie_id
+    LEFT JOIN
+        MoviesWithKeywords kw ON mt.movie_id = kw.movie_id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND (ci.nr_order IS NULL OR ci.nr_order < 5) 
+),
+
+FinalOutput AS (
+    SELECT
+        ci.safe_actor_name,
+        ci.movie_title,
+        ci.production_year,
+        ci.keywords,
+        RANK() OVER (PARTITION BY ci.safe_actor_name ORDER BY ci.production_year DESC) AS movie_ranking,
+        ROW_NUMBER() OVER (ORDER BY ci.production_year DESC) AS overall_rank
+    FROM
+        CombinedInfo ci
+)
+
+SELECT
+    fo.safe_actor_name,
+    fo.movie_title,
+    fo.production_year,
+    fo.keywords,
+    fo.movie_ranking,
+    COALESCE((SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = (SELECT id FROM aka_title WHERE title = fo.movie_title LIMIT 1)), 0) AS total_cast
+FROM
+    FinalOutput fo
+WHERE
+    fo.movie_ranking = 1 OR fo.production_year = (SELECT MAX(production_year) FROM FinalOutput)
+ORDER BY
+    fo.safe_actor_name, fo.production_year DESC;

@@ -1,0 +1,91 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2452230 AND 2453000
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_returned,
+        AVG(cr.return_amt_inc_tax) AS avg_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.returned_date_sk BETWEEN 2452230 AND 2453000
+    GROUP BY 
+        cr.returning_customer_sk
+),
+WarehouseInventory AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    WHERE 
+        inv.inv_date_sk = 2453000
+    GROUP BY 
+        inv.inv_warehouse_sk
+),
+BestSellingItems AS (
+    SELECT 
+        ri.ws_item_sk,
+        SUM(ri.ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ri
+    WHERE 
+        ri.ws_sold_date_sk BETWEEN 2452230 AND 2453000
+    GROUP BY 
+        ri.ws_item_sk
+    HAVING 
+        SUM(ri.ws_quantity) > 100
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(cr.total_returned, 0) AS total_returned,
+    COALESCE(cr.avg_return_amount, 0) AS avg_return_amount,
+    wh.inv_warehouse_sk,
+    wh.total_inventory,
+    bsi.total_quantity_sold
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+LEFT JOIN 
+    WarehouseInventory wh ON wh.inv_warehouse_sk IN (
+        SELECT inv_w.warehouse_sk 
+        FROM warehouse inv_w
+        WHERE inv_w.warehouse_sq_ft >= 1000
+    )
+LEFT JOIN 
+    BestSellingItems bsi ON bsi.ws_item_sk IN (
+        SELECT it.i_item_sk 
+        FROM item it 
+        WHERE it.i_current_price IS NOT NULL
+    )
+WHERE 
+    (c.c_birth_year BETWEEN 1970 AND 1990 OR 
+     c.c_preferred_cust_flag = 'Y') 
+    AND (c.c_last_name LIKE 'S%' OR 
+         (c.c_email_address IS NULL AND c.c_salutation IS NOT NULL))
+GROUP BY 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cr.total_returned,
+    cr.avg_return_amount,
+    wh.inv_warehouse_sk,
+    wh.total_inventory,
+    bsi.total_quantity_sold
+ORDER BY 
+    total_returned DESC,
+    avg_return_amount DESC;

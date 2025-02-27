@@ -1,0 +1,53 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_accountbal, 
+           s.s_comment, 0 AS level
+    FROM supplier s
+    WHERE s.s_accountbal > (SELECT AVG(s1.s_accountbal) FROM supplier s1)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_accountbal, 
+           s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+CustomerStats AS (
+    SELECT c.c_nationkey, COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_nationkey
+),
+PartAverage AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+ComplexQuery AS (
+    SELECT n.n_name, ph.level, 
+           COALESCE(cs.order_count, 0) AS order_count,
+           COALESCE(cs.total_spent, 0) AS total_spent,
+           pa.avg_supply_cost,
+           CASE 
+               WHEN cs.total_spent IS NULL THEN 'NO ORDER'
+               WHEN cs.total_spent < 5000 THEN 'LOW SPENDER'
+               ELSE 'HIGH SPENDER'
+           END AS customer_classification
+    FROM nation n
+    LEFT JOIN CustomerStats cs ON n.n_nationkey = cs.c_nationkey
+    LEFT JOIN SupplierHierarchy ph ON n.n_regionkey = ph.s_nationkey
+    JOIN PartAverage pa ON pa.avg_supply_cost < (SELECT AVG(avg_supply_cost) FROM PartAverage)
+)
+SELECT 
+    n.r_name AS region_name, 
+    COALESCE(COUNT(DISTINCT cq.customer_classification), 0) AS classification_count,
+    SUM(cq.total_spent) AS total_region_spending,
+    MAX(cq.avg_supply_cost) AS max_avg_supply_cost,
+    STRING_AGG(DISTINCT cq.customer_classification || ' (' || cq.order_count || ' orders)', ', ') AS classifications
+FROM region n
+LEFT JOIN ComplexQuery cq ON n.r_regionkey = cq.level
+GROUP BY n.r_name
+HAVING MAX(cq.avg_supply_cost) IS NOT NULL AND
+       COUNT(DISTINCT cq.customer_classification) > 1
+ORDER BY total_region_spending DESC, region_name ASC;

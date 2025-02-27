@@ -1,0 +1,56 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+), 
+top_customers AS (
+    SELECT 
+        c_customer_id,
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rank
+    FROM 
+        customer_sales
+    WHERE 
+        total_orders > 5
+), 
+returns_summary AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_returned,
+        COUNT(wr_order_number) AS return_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    tc.c_customer_id,
+    cs.total_spent,
+    COALESCE(rs.total_returned, 0) AS total_returned,
+    (cs.total_spent - COALESCE(rs.total_returned, 0)) AS net_spent,
+    CASE 
+        WHEN (cs.total_spent - COALESCE(rs.total_returned, 0)) > 1000 THEN 'High Value'
+        ELSE 'Average Value'
+    END AS customer_value_category
+FROM 
+    top_customers tc
+JOIN 
+    customer_sales cs ON tc.c_customer_id = cs.c_customer_id
+LEFT JOIN 
+    returns_summary rs ON rs.wr_returning_customer_sk = tc.c_customer_id
+WHERE 
+    COALESCE(rs.return_count, 0) < 3
+ORDER BY 
+    net_spent DESC
+LIMIT 20;

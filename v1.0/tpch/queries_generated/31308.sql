@@ -1,0 +1,46 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = (
+        SELECT n.n_nationkey
+        FROM nation n
+        WHERE n.n_name = 'FRANCE'
+    )
+    WHERE c.c_acctbal > (5 * (SELECT AVG(c_acctbal) FROM customer))
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    c.c_name AS customer_name,
+    r.r_name AS region,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+JOIN region r ON s.s_nationkey = (
+    SELECT n.n_nationkey
+    FROM nation n
+    WHERE n.n_regionkey = r.r_regionkey
+)
+WHERE p.p_size > (
+    SELECT AVG(p1.p_size) 
+    FROM part p1 
+    WHERE p1.p_mfgr = p.p_mfgr
+)
+AND l.l_shipdate BETWEEN '2022-01-01' AND CURRENT_DATE
+GROUP BY p.p_partkey, c.c_name, r.r_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY total_sales DESC
+LIMIT 10;

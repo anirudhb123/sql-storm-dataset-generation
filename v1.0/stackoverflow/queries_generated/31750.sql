@@ -1,0 +1,99 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(Reputation) AS TotalReputation,
+        COUNT(DISTINCT Id) AS PostCount
+    FROM 
+        Users
+    JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        UserId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+ClosedPostComments AS (
+    SELECT 
+        c.*,
+        p.CreationDate AS PostCreationDate
+    FROM 
+        Comments c
+    JOIN 
+        Posts p ON c.PostId = p.Id
+    WHERE 
+        p.ClosedDate IS NOT NULL
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(ph.Comment, '; ') AS Comments,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(phs.Comments, 'No Comments') AS PostComments,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    COALESCE(stats.UpVotes, 0) AS UpVotes,
+    COALESCE(stats.DownVotes, 0) AS DownVotes,
+    COALESCE(user.TotalReputation, 0) AS UserReputation,
+    jsonb_build_object(
+        'Id', u.Id,
+        'DisplayName', u.DisplayName,
+        'ProfileImage', u.ProfileImageUrl
+    ) AS UserDetails,
+    CASE 
+        WHEN ph.Level > 0 THEN 'This post is a child post'
+        ELSE 'This post is a root post'
+    END AS HierarchyType
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostHierarchy ph ON p.Id = ph.Id
+LEFT JOIN 
+    PostVoteStats stats ON p.Id = stats.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON p.Id = phs.PostId
+LEFT JOIN 
+    UserReputation user ON p.OwnerUserId = user.UserId
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+ORDER BY 
+    p.ViewCount DESC, 
+    p.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,6 @@
+
+SELECT ca.city, COUNT(c.customer_id) AS customer_count
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+GROUP BY ca.city
+ORDER BY COUNT(c.customer_id) DESC;

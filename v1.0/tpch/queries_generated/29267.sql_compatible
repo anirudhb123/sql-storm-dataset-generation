@@ -1,0 +1,47 @@
+
+WITH StringMetrics AS (
+    SELECT 
+        p.p_partkey,
+        LENGTH(p.p_name) AS name_length,
+        UPPER(SUBSTRING(p.p_comment, 1, 10)) AS comment_snippet,
+        REGEXP_REPLACE(p.p_name, '[^A-Za-z0-9 ]', '') AS sanitized_name,
+        COUNT(*) OVER(PARTITION BY p.p_mfgr) AS mfgr_count
+    FROM 
+        part p
+),
+SupplierNames AS (
+    SELECT 
+        s.s_suppkey,
+        TRIM(s.s_name) AS trimmed_name,
+        LOWER(s.s_address) AS lower_address,
+        CHAR_LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+)
+SELECT 
+    sm.p_partkey,
+    sm.name_length,
+    sm.comment_snippet,
+    sm.sanitized_name,
+    sn.trimmed_name,
+    sn.lower_address,
+    sn.comment_length,
+    sm.mfgr_count
+FROM 
+    StringMetrics sm
+JOIN 
+    SupplierNames sn ON sm.name_length = sn.comment_length
+WHERE 
+    sm.mfgr_count > 5
+GROUP BY 
+    sm.p_partkey,
+    sm.name_length,
+    sm.comment_snippet,
+    sm.sanitized_name,
+    sn.trimmed_name,
+    sn.lower_address,
+    sn.comment_length,
+    sm.mfgr_count
+ORDER BY 
+    sm.p_partkey DESC, sn.trimmed_name ASC
+LIMIT 100;

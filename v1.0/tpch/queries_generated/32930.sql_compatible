@@ -1,0 +1,36 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS depth
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_availqty, (ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size IN ('small', 'medium', 'large') AND ps.ps_availqty > 0
+),
+customer_order_info AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, ROW_NUMBER() OVER(PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS latest_order
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 1000 AND c.c_mktsegment = 'BUILDING'
+),
+aggregate_supplier AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+)
+SELECT DISTINCT nh.n_name, pci.p_name, oi.c_name, oi.o_totalprice, NULLIF(as.s_suppkey, 0) AS supplier_key
+FROM nation_hierarchy nh
+FULL OUTER JOIN part_supplier_info pci ON nh.n_nationkey = pci.p_partkey
+LEFT JOIN customer_order_info oi ON pci.p_name = oi.o_orderkey
+FULL JOIN aggregate_supplier as ON as.total_cost > 10000
+WHERE (oi.latest_order = 1 AND oi.o_totalprice > 5000) OR (pci.total_supply_cost IS NOT NULL)
+ORDER BY nh.depth, oi.o_totalprice DESC
+LIMIT 100;

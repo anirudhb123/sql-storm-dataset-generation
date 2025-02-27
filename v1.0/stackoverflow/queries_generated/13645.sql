@@ -1,0 +1,27 @@
+-- Performance benchmarking query to analyze post statistics and user engagement
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    p.CreationDate,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    AVG(DATEDIFF(second, p.CreationDate, COALESCE(v.CreationDate, GETDATE()))) AS AverageVoteTime
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate >= DATEADD(year, -1, GETDATE())  -- Consider posts created in the last year
+GROUP BY 
+    p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, u.DisplayName, u.Reputation
+ORDER BY 
+    p.ViewCount DESC; -- Ordering by the number of views

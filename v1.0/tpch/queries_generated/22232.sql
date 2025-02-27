@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+), 
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice * (1 - COALESCE(MAX(ps.ps_supplycost) / NULLIF(SUM(ps.ps_availqty), 0), 1)) 
+            END AS adjusted_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+), 
+NationMetrics AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name
+), 
+CrazyOrders AS (
+    SELECT 
+        r.r_name,
+        nm.n_name,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS return_amount,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count,
+        COUNT(DISTINCT CASE WHEN o.o_orderpriority LIKE '%HIGH%' THEN o.o_orderkey END) AS high_priority_orders
+    FROM 
+        RankedOrders ro
+    JOIN 
+        lineitem l ON ro.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON ro.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name, nm.n_name
+)
+SELECT 
+    cp.p_name,
+    cp.adjusted_price,
+    co.r_name,
+    co.return_amount,
+    co.orders_count,
+    co.high_priority_orders,
+    nm.supplier_count,
+    nm.avg_acctbal
+FROM 
+    FilteredParts cp
+JOIN 
+    CrazyOrders co ON cp.p_brand = 'Brand#45'
+LEFT JOIN 
+    NationMetrics nm ON co.n_name = nm.n_name
+WHERE 
+    (co.return_amount IS NOT NULL OR nm.avg_acctbal > 5000)
+    AND cp.adjusted_price > (SELECT AVG(adjusted_price * 1.2) FROM FilteredParts)
+ORDER BY 
+    co.orders_count DESC, 
+    cp.adjusted_price ASC
+FETCH FIRST 100 ROWS ONLY;

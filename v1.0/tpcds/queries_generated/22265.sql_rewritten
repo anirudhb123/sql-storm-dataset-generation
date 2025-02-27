@@ -1,0 +1,58 @@
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        COALESCE(NULLIF(ws.ws_ext_discount_amt, 0), NULL) AS discount_amt,
+        (ws.ws_sales_price * ws.ws_quantity - COALESCE(ws.ws_ext_discount_amt, 0)) AS net_sales
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 1 AND 365
+    
+    UNION ALL
+    
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        COALESCE(NULLIF(cs.cs_ext_discount_amt, 0), NULL) AS discount_amt,
+        (cs.cs_sales_price * cs.cs_quantity - COALESCE(cs.cs_ext_discount_amt, 0)) AS net_sales
+    FROM catalog_sales cs
+    JOIN sales_data sd ON cs.cs_order_number = sd.ws_order_number
+    WHERE cs.cs_sold_date_sk BETWEEN 1 AND 365
+), ranked_sales AS (
+    SELECT 
+        sd.*, 
+        RANK() OVER (PARTITION BY sd.ws_order_number ORDER BY sd.net_sales DESC) AS sales_rank
+    FROM sales_data sd
+), aggregated_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.net_sales) AS total_net_sales,
+        MAX(ws.discount_amt) AS max_discount
+    FROM ranked_sales ws
+    WHERE ws.sales_rank = 1
+    GROUP BY ws.ws_order_number
+)
+SELECT 
+    ca.ca_city || ', ' || ca.ca_state AS full_address,
+    cs.c_first_name || ' ' || cs.c_last_name AS customer_name,
+    ag.total_quantity,
+    ag.total_net_sales,
+    CASE 
+        WHEN ag.max_discount IS NULL THEN 'No Discounts Applied' 
+        ELSE CAST(ag.max_discount AS varchar) 
+    END AS max_discount_info,
+    COUNT(DISTINCT item.i_item_sk) AS items_count
+FROM aggregated_sales ag
+JOIN customer c ON ag.ws_order_number = c.c_customer_id
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN item ON ag.ws_order_number = item.i_item_id
+WHERE c.c_birth_month = EXTRACT(MONTH FROM cast('2002-10-01' as date)) 
+AND (ag.total_net_sales > 100 OR ag.total_net_sales IS NULL)
+GROUP BY full_address, customer_name, ag.total_quantity, ag.total_net_sales, ag.max_discount
+HAVING SUM(NULLIF(ag.total_net_sales, 0)) > 0 AND COUNT(DISTINCT item.i_item_sk) < 100
+ORDER BY ag.total_net_sales DESC
+LIMIT 10 OFFSET 5;

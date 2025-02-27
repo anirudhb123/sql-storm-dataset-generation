@@ -1,0 +1,75 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        pt.Name AS PostType,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(COALESCE(vs.Score, 0)) AS AvgScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT c.Id) DESC) AS PostRank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes vs ON p.Id = vs.PostId
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))::int) 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, p.OwnerUserId, p.Title, p.CreationDate
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        AVG(2.0 + COALESCE(v.BountyAmount, 0)) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+
+SELECT 
+    ua.DisplayName,
+    ua.Reputation,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    COALESCE(rp.CommentCount, 0) AS TotalComments,
+    COALESCE(rp.AvgScore, 0) AS AveragePostScore,
+    CASE 
+        WHEN ua.Reputation >= 1000 THEN 'High Reputation'
+        WHEN ua.Reputation >= 500 THEN 'Medium Reputation'
+        ELSE 'Low Reputation'
+    END AS ReputationCategory,
+    CASE 
+        WHEN rp.PostRank = 1 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostCategory,
+    rp.Tags
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId
+WHERE 
+    ua.Reputation IS NOT NULL
+ORDER BY 
+    ua.Reputation DESC, rp.CommentCount DESC;
+
+-- Note: This query utilizes CTEs to segment user activity and ranking posts,
+-- incorporates CORRELATED subqueries through tagging, aggregates user actions,
+-- deals with NULL values using COALESCE, and applies CASE statements
+-- for reputation classification and post categorization.

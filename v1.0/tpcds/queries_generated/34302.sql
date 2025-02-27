@@ -1,0 +1,81 @@
+
+WITH RECURSIVE CTE_SALES AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451545 AND 2451580 -- Date range for sales analysis
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HIGH_VALUE_CUSTOMERS AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name, 
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cm.total_sales
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        CTE_SALES cm ON c.c_customer_sk = cm.customer_sk
+    WHERE 
+        cm.sales_rank <= 50 
+        AND cd.cd_purchase_estimate > 3000
+),
+OUT_OF_STOCK_ITEMS AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        COUNT(inv.inv_quantity_on_hand) AS inventory_count
+    FROM 
+        item i
+    LEFT JOIN 
+        inventory inv ON i.i_item_sk = inv.inv_item_sk 
+    GROUP BY 
+        i.i_item_sk, i.i_item_id, i.i_product_name
+    HAVING 
+        COUNT(inv.inv_quantity_on_hand) = 0
+),
+RETURN_ANALYSIS AS (
+    SELECT 
+        sr.rs_customer_sk AS customer_sk,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(*) AS number_of_returns
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_returned_date_sk BETWEEN 2451545 AND 2451580
+    GROUP BY 
+        sr.rs_customer_sk
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    hvc.total_sales,
+    ooi.i_item_id,
+    ooi.i_product_name,
+    oa.total_returns,
+    oa.number_of_returns
+FROM 
+    HIGH_VALUE_CUSTOMERS hvc
+JOIN 
+    OUT_OF_STOCK_ITEMS ooi ON ooi.i_item_sk IN (SELECT UNNEST(ARRAY[1, 2, 3, 4, 5])) -- Example for matching high-value customers with specific items
+LEFT JOIN 
+    RETURN_ANALYSIS oa ON hvc.c_customer_sk = oa.customer_sk
+WHERE 
+    CASE 
+        WHEN oa.total_returns IS NULL THEN 'No Returns'
+        ELSE 'Returned'
+    END = 'No Returns'
+ORDER BY 
+    hvc.total_sales DESC;

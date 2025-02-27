@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT max(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_quantity_sold,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+        item.i_current_price AS current_price,
+        item.i_brand AS brand_name
+    FROM 
+        item 
+    LEFT JOIN 
+        web_sales ws ON ws.ws_item_sk = item.i_item_sk
+    GROUP BY 
+        item.i_item_id, item.i_product_name, item.i_current_price, item.i_brand
+),
+CustomerStats AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+),
+ReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+FinalResults AS (
+    SELECT 
+        ss.i_item_id,
+        ss.i_product_name,
+        ss.total_quantity_sold,
+        ss.total_net_profit,
+        cs.total_customers,
+        cs.avg_purchase_estimate,
+        COALESCE(rs.total_returned, 0) AS total_returned,
+        COALESCE(rs.total_return_amount, 0) AS total_return_amount
+    FROM 
+        SalesSummary ss
+    LEFT JOIN 
+        CustomerStats cs ON cs.cd_gender = 'M' -- Example for male customers
+    LEFT JOIN 
+        ReturnStats rs ON rs.sr_item_sk = ss.i_item_sk
+    WHERE 
+        ss.total_quantity_sold > 100 -- Filtering based on sales quantity
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_net_profit > 1000 THEN 'High Profit'
+        ELSE 'Low Profit'
+    END AS profit_category,
+    CONCAT(i_product_name, ' - ', brand_name) AS product_full_desc
+FROM 
+    FinalResults
+ORDER BY 
+    total_net_profit DESC;

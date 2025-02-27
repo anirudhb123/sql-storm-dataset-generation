@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount IS NOT NULL
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        CASE 
+            WHEN COUNT(DISTINCT c.Id) OVER (PARTITION BY rp.PostId) > 0 THEN 'Has Comments'
+            ELSE 'No Comments'
+        END AS CommentStatus,
+        COALESCE((SELECT SUM(v.BountyAmount) 
+                  FROM Votes v 
+                  WHERE v.PostId = rp.PostId AND v.VoteTypeId = 8), 0) AS TotalBounty,
+        COALESCE((SELECT COUNT(DISTINCT b.Id) 
+                  FROM Badges b 
+                  WHERE b.UserId = p.OwnerUserId), 0) AS UserBadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Posts p ON p.Id = rp.PostId
+    WHERE 
+        rp.Rank <= 5
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 12 THEN ph.CreationDate END) AS DeletedDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+AggregatedPostStats AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.CommentStatus,
+        pd.TotalBounty,
+        pd.UserBadgeCount,
+        COALESCE(phi.ClosedDate, 'No Closure') AS ClosedDate,
+        COALESCE(phi.ReopenedDate, 'Never Reopened') AS ReopenedDate,
+        COALESCE(phi.DeletedDate, 'Not Deleted') AS DeletedDate
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        PostHistoryInfo phi ON pd.PostId = phi.PostId
+)
+SELECT 
+    aps.Title,
+    aps.ViewCount,
+    aps.CommentStatus,
+    aps.TotalBounty,
+    aps.UserBadgeCount,
+    aps.ClosedDate,
+    aps.ReopenedDate,
+    aps.DeletedDate,
+    CASE 
+        WHEN aps.TotalBounty > 0 THEN CONCAT('Total Bounty: $', aps.TotalBounty)
+        ELSE 'No Bounties'
+    END AS Bounty_Info,
+    CASE 
+        WHEN aps.CommentStatus = 'Has Comments' THEN 'Engaged'
+        ELSE 'Unengaged'
+    END AS Engagement_Level
+FROM 
+    AggregatedPostStats aps
+ORDER BY 
+    aps.ViewCount DESC;

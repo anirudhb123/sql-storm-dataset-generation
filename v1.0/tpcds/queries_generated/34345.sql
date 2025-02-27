@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesDateCTE AS (
+    SELECT d_date_sk, d_date, d_year
+    FROM date_dim
+    WHERE d_year > 2020
+    UNION ALL
+    SELECT d.d_date_sk, d.d_date, d.d_year
+    FROM date_dim d
+    JOIN SalesDateCTE sd ON d.d_date_sk = sd.d_date_sk + 1
+    WHERE d.d_year > 2020
+),
+CustomerInfo AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name, 
+           c.c_last_name,
+           cd.cd_gender, 
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           ROW_NUMBER() OVER(PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+SalesSummary AS (
+    SELECT ws.warehouse_sk,
+           SUM(ws.ws_net_profit) AS total_profit,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count,
+           AVG(ws.ws_net_paid_inc_tax) AS avg_cart_value
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM SalesDateCTE)
+    GROUP BY ws.warehouse_sk
+),
+HighValueCust AS (
+    SELECT ci.c_customer_sk,
+           ci.c_first_name,
+           ci.c_last_name,
+           ss.total_profit,
+           ss.order_count,
+           ss.avg_cart_value
+    FROM CustomerInfo ci
+    JOIN SalesSummary ss ON ci.c_customer_sk IN (SELECT DISTINCT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_net_profit > 1000)
+)
+SELECT hv.c_first_name,
+       hv.c_last_name, 
+       hv.total_profit, 
+       hv.order_count, 
+       hv.avg_cart_value,
+       COALESCE(ca.ca_city, 'Unknown') AS city,
+       COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns
+FROM HighValueCust hv
+LEFT JOIN customer_address ca ON hv.c_customer_sk = ca.ca_address_sk
+LEFT JOIN store_returns sr ON hv.c_customer_sk = sr.sr_customer_sk
+GROUP BY hv.c_first_name, 
+         hv.c_last_name, 
+         hv.total_profit, 
+         hv.order_count, 
+         hv.avg_cart_value, 
+         ca.ca_city
+ORDER BY hv.total_profit DESC
+LIMIT 100;

@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorPerformance AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count,
+        AVG(COALESCE(NULLIF(c.nr_order, 0), 1)) AS avg_order
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MovieGenres AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(kw.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mk.movie_id
+),
+DetailedMovieInfo AS (
+    SELECT 
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        ap.actor_count,
+        ap.note_count,
+        ap.avg_order,
+        mg.keywords,
+        COALESCE(NULLIF(at.kind_id, 0), 'Unspecified') AS genre
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorPerformance ap ON rm.title_id = ap.movie_id
+    LEFT JOIN 
+        MovieGenres mg ON rm.title_id = mg.movie_id
+    LEFT JOIN 
+        aka_title at ON rm.title_id = at.id
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.actor_count,
+    dmi.note_count,
+    dmi.avg_order,
+    dmi.keywords,
+    CASE 
+        WHEN dmi.actor_count IS NULL THEN 'No Cast'
+        WHEN dmi.actor_count = 0 THEN 'Unknown'
+        ELSE dmi.genre
+    END AS adjusted_genre
+FROM 
+    DetailedMovieInfo dmi
+WHERE 
+    dmi.production_year = (
+        SELECT MAX(production_year) FROM DetailedMovieInfo
+    ) 
+    AND dmi.actor_count > 0
+ORDER BY 
+    dmi.production_year DESC, 
+    dmi.note_count DESC, 
+    dmi.actor_count ASC;

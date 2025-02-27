@@ -1,0 +1,40 @@
+
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n.nationkey AS n_nationkey, n.name AS n_name, n.regionkey AS n_regionkey, 0 AS level
+    FROM nation n
+    WHERE n.regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.nationkey, n.name, n.regionkey, nh.level + 1 
+    FROM nation n
+    INNER JOIN nation_hierarchy nh ON n.regionkey = nh.n_nationkey
+),
+customer_summary AS (
+    SELECT c.custkey AS c_custkey, c.name AS c_name, SUM(o.totalprice) AS total_spent,
+           COUNT(o.orderkey) OVER (PARTITION BY c.custkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.custkey = o.custkey
+    GROUP BY c.custkey, c.name
+),
+supplier_avg_cost AS (
+    SELECT ps.partkey AS ps_partkey, AVG(ps.supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.partkey
+)
+SELECT 
+    p.partkey AS p_partkey,
+    p.name AS p_name,
+    p.retailprice AS p_retailprice,
+    COALESCE(sa.avg_supplycost, 0) AS avg_supplycost,
+    cs.total_spent,
+    nh.level AS nation_level,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No Orders'
+        ELSE 'Active Customer'
+    END AS customer_status
+FROM part p
+LEFT JOIN supplier_avg_cost sa ON p.partkey = sa.ps_partkey
+LEFT JOIN customer_summary cs ON cs.c_custkey = (SELECT c.custkey FROM customer c WHERE c.nationkey = (
+    SELECT n.nationkey FROM nation n WHERE n.name = 'Germany' LIMIT 1) LIMIT 1)
+LEFT JOIN nation_hierarchy nh ON nh.n_nationkey = (SELECT c.nationkey FROM customer c WHERE c.custkey = cs.c_custkey)
+WHERE p.retailprice > (SELECT AVG(p2.retailprice) FROM part p2 WHERE p2.size > 10)
+ORDER BY p.partkey;

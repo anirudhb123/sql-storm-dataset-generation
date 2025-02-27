@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_sales_price) AS avg_sales_price,
+        RANK() OVER(PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+HighVolumeSales AS (
+    SELECT 
+        r.ws_item_sk,
+        r.total_quantity,
+        r.avg_sales_price,
+        i.i_item_desc,
+        WAREHOUSE_INFO.w_warehouse_name,
+        DENSE_RANK() OVER(ORDER BY r.total_quantity DESC) as dense_rank
+    FROM 
+        RankedSales r
+    JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        (SELECT 
+            inv.inv_item_sk, 
+            w.w_warehouse_name 
+         FROM 
+            inventory inv 
+         JOIN 
+            warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk 
+         WHERE 
+            inv.inv_quantity_on_hand > 0) AS WAREHOUSE_INFO ON WAREHOUSE_INFO.inv_item_sk = r.ws_item_sk
+    WHERE 
+        r.sales_rank < 6
+), 
+AggregateReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        AVG(cr_return_amt_inc_tax) AS avg_return_amt_inc_tax
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+)
+
+SELECT 
+    h.item_desc,
+    h.total_quantity,
+    h.avg_sales_price,
+    CASE 
+        WHEN ar.total_returned IS NULL THEN 0 
+        ELSE ar.total_returned 
+    END AS total_returns,
+    COALESCE(ar.avg_return_amt_inc_tax, 0) AS avg_return_inc_tax,
+    CASE 
+        WHEN h.total_quantity = 0 THEN NULL 
+        ELSE (h.total_quantity - COALESCE(ar.total_returned, 0)) / NULLIF(h.total_quantity, 0) 
+    END AS net_sales_ratio
+FROM 
+    HighVolumeSales h
+LEFT JOIN 
+    AggregateReturns ar ON h.ws_item_sk = ar.cr_item_sk
+WHERE 
+    (h.total_quantity - COALESCE(ar.total_returned, 0)) / NULLIF(h.total_quantity, 0) > 0.5
+ORDER BY 
+    h.dense_rank, h.total_quantity DESC
+LIMIT 10

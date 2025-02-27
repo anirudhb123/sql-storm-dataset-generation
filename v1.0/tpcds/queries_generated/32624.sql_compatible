@@ -1,0 +1,73 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_customer_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, sr_customer_sk, sr_item_sk
+    HAVING 
+        SUM(sr_return_quantity) > 10
+    UNION ALL
+    SELECT 
+        sr.returned_date_sk,
+        sr.customer_sk,
+        sr.item_sk,
+        SUM(sr.return_quantity) + cr.total_returns AS total_returns
+    FROM 
+        store_returns sr
+    JOIN 
+        CustomerReturns cr ON sr.customer_sk = cr.sr_customer_sk
+    WHERE 
+        sr.returned_date_sk > cr.sr_returned_date_sk
+    GROUP BY 
+        sr.returned_date_sk, sr.customer_sk, sr.item_sk, cr.total_returns
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        inventory.inv_item_sk,
+        (COALESCE(SUM(sr.total_returns), 0) - COALESCE(SUM(sd.total_sales), 0)) AS net_change
+    FROM 
+        inventory
+    LEFT JOIN 
+        CustomerReturns sr ON inventory.inv_item_sk = sr.sr_item_sk
+    LEFT JOIN 
+        SalesData sd ON inventory.inv_item_sk = sd.ws_item_sk
+    GROUP BY 
+        inventory.inv_item_sk
+)
+SELECT 
+    inv.inv_item_sk,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(sr.total_returns, 0) AS total_returns,
+    ti.net_change,
+    CASE 
+        WHEN ti.net_change > 0 THEN 'Restock' 
+        WHEN ti.net_change < 0 THEN 'Sell' 
+        ELSE 'Stable' 
+    END AS action
+FROM 
+    inventory inv
+LEFT JOIN 
+    SalesData sd ON inv.inv_item_sk = sd.ws_item_sk
+LEFT JOIN 
+    CustomerReturns sr ON inv.inv_item_sk = sr.sr_item_sk
+JOIN 
+    TopItems ti ON inv.inv_item_sk = ti.inv_item_sk
+WHERE 
+    inv.inv_quantity_on_hand < 20
+ORDER BY 
+    ti.net_change DESC;

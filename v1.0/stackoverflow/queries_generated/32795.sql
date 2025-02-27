@@ -1,0 +1,94 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.PostTypeId,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.PostTypeId,
+        P.ParentId,
+        R.Level + 1
+    FROM 
+        Posts P
+    INNER JOIN RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostStats AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(UP.CreatedCount, 0) AS UserCreatedCount,
+        COALESCE(UP.UpVoteCount, 0) AS UserUpVoteCount,
+        COALESCE(C.Username, 'Unknown') AS Author,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN C.Score IS NOT NULL THEN C.Score ELSE 0 END) AS TotalCommentScore
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CreatedCount,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) UP ON P.Id = UP.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Users C ON P.OwnerUserId = C.Id
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score, C.Username, UP.CreatedCount, UP.UpVoteCount
+),
+PopularPosts AS (
+    SELECT 
+        PS.*,
+        R.Level AS HierarchyLevel
+    FROM 
+        PostStats PS
+    LEFT JOIN RecursivePostHierarchy R ON PS.Id = R.PostId
+    WHERE 
+        PS.Score > 0
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId, 
+        PH.UserId,
+        PH.CreationDate AS CloseDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+)
+SELECT 
+    PP.Title,
+    PP.ViewCount,
+    PP.Score,
+    PP.UserCreatedCount,
+    PP.UserUpVoteCount,
+    PP.CommentCount,
+    PP.TotalCommentScore,
+    CASE 
+        WHEN CP.PostId IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    PP.HierarchyLevel
+FROM 
+    PopularPosts PP
+LEFT JOIN ClosedPosts CP ON PP.Id = CP.PostId
+WHERE 
+    PP.HierarchyLevel = 1
+ORDER BY 
+    PP.Score DESC, 
+    PP.ViewCount DESC
+LIMIT 100;

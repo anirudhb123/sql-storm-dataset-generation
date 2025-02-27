@@ -1,0 +1,53 @@
+
+WITH RECURSIVE demographic_analysis AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_dependents_count,
+        COALESCE(NULLIF(cd.cd_credit_rating, 'S'), 'UNKNOWN') AS adjusted_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE (cd.cd_purchase_estimate IS NOT NULL 
+           OR cd.cd_credit_rating IS NULL)
+          AND COALESCE(c.c_first_name, '') != 'John'
+    ORDER BY c.c_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE ws.ws_sold_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim) 
+    GROUP BY w.w_warehouse_sk
+),
+combined_results AS (
+    SELECT 
+        da.c_customer_sk,
+        da.adjusted_credit_rating,
+        sa.total_quantity,
+        sa.avg_sales_price,
+        sa.max_profit
+    FROM demographic_analysis da
+    LEFT JOIN sales_summary sa ON da.c_customer_sk = sa.w_warehouse_sk 
+    WHERE da.rn <= 5 
+    OR da.adjusted_credit_rating = 'UNKNOWN'
+)
+SELECT 
+    cr.c_customer_sk,
+    COALESCE(c.total_quantity, 0) AS total_ordered_quantity,
+    COALESCE(c.avg_sales_price, 0.00) AS average_price,
+    COALESCE(c.max_profit, 0.00) AS peak_profit,
+    CASE 
+        WHEN c.total_quantity > 100 THEN 'High'
+        WHEN c.total_quantity BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM combined_results c
+FULL OUTER JOIN customer cr ON c.c_customer_sk = cr.c_customer_sk
+WHERE cr.c_birth_year IS NOT NULL AND (cr.c_birth_month = 12 OR cr.c_birth_day IS NULL)
+ORDER BY c.c_customer_sk DESC NULLS LAST;

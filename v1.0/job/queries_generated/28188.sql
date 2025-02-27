@@ -1,0 +1,36 @@
+WITH movie_summary AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') AS actors,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword SEPARATOR ', ') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_company_count
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN aka_name a ON c.person_id = a.person_id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    GROUP BY t.id, t.title, t.production_year
+),
+info_summary AS (
+    SELECT 
+        m.movie_id,
+        string_agg(i.info, '; ' ORDER BY i.info) AS additional_info
+    FROM movie_info m
+    JOIN movie_info_idx ii ON m.movie_id = ii.movie_id
+    JOIN info_type i ON ii.info_type_id = i.id
+    GROUP BY m.movie_id
+)
+SELECT 
+    ms.movie_id,
+    ms.movie_title,
+    ms.production_year,
+    COALESCE(ms.actors, 'No actors listed') AS actors,
+    COALESCE(ms.keywords, 'No keywords available') AS keywords,
+    ms.production_company_count,
+    COALESCE(is.additional_info, 'No additional info') AS additional_info
+FROM movie_summary ms
+LEFT JOIN info_summary is ON ms.movie_id = is.movie_id
+ORDER BY ms.production_year DESC, ms.movie_title;

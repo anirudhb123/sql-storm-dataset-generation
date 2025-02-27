@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year >= 2000
+    UNION ALL
+    SELECT m.id, m.title, m.production_year, mh.depth + 1
+    FROM aka_title m
+    JOIN MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedMovieInfo AS (
+    SELECT 
+        mt.title, 
+        mt.production_year, 
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_within_year
+    FROM aka_title mt
+    JOIN cast_info ci ON mt.id = ci.movie_id 
+    GROUP BY mt.id, mt.title, mt.production_year
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year, 
+    rmi.total_cast,
+    ci.company_names,
+    ci.company_types,
+    COALESCE(rmi.total_cast, 0) AS num_cast,
+    CASE 
+        WHEN rmi.total_cast IS NULL THEN 'No Cast'
+        WHEN rmi.total_cast > 5 THEN 'Large Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM MovieHierarchy mh
+LEFT JOIN RankedMovieInfo rmi ON mh.movie_id = rmi.id
+LEFT JOIN CompanyInfo ci ON mh.movie_id = ci.movie_id
+WHERE mh.depth <= 2 -- Fetch only top-level movies and their episodes
+ORDER BY mh.production_year DESC, rmi.rank_within_year;
+
+This SQL query performs an elaborate analysis on movies, their cast, and associated companies, demonstrating the use of recursive CTEs, ranking with window functions, string aggregation for company names and types, handling of NULL values, and a final classification of cast sizes. The data is filtered and organized to provide a comprehensive view of movies produced since 2000 with a hierarchy of episodes and their companies.

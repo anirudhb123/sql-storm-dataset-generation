@@ -1,0 +1,78 @@
+WITH UserReputation AS (
+    SELECT 
+        Id,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(COUNT(c.Id), 0) AS TotalComments,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(AVG((EXTRACT(EPOCH FROM cast('2024-10-01 12:34:56' as timestamp)) - EXTRACT(EPOCH FROM p.CreationDate)) / 3600), NULL) AS AgeHours
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate < cast('2024-10-01 12:34:56' as timestamp)
+    GROUP BY p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS TotalEdits,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS WasEdited,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS WasClosed
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10
+),
+FinalStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.TotalComments,
+        ps.UpVotes,
+        ps.DownVotes,
+        prs.TotalEdits,
+        prs.WasEdited,
+        prs.WasClosed,
+        (u.Rank <= 10) AS HighRepUserPost
+    FROM PostStats ps
+    LEFT JOIN PostHistoryStats prs ON ps.PostId = prs.PostId
+    LEFT JOIN UserReputation u ON ps.PostId = u.Id
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.TotalComments,
+    fs.UpVotes,
+    fs.DownVotes,
+    fs.TotalEdits,
+    fs.WasEdited,
+    fs.WasClosed,
+    (CASE 
+        WHEN fs.WasClosed = 1 THEN 'Closed'
+        ELSE 'Open'
+     END) AS PostStatus,
+    (ELT(1 + ROUND(RAND() * 3), 'Low', 'Medium', 'High')) AS RandomPostQuality,
+    COALESCE(cp.ClosedDate, 'No Closed Date') AS ClosedDate,
+    COALESCE(cp.ClosedBy, 'Not Closed') AS ClosedBy,
+    (ARRAY_TO_STRING(STRING_TO_ARRAY(ps.Title, ' '), ' -> ')) AS TitleWords
+FROM FinalStats fs
+LEFT JOIN ClosedPosts cp ON fs.PostId = cp.PostId
+WHERE fs.UpVotes > fs.DownVotes OR fs.TotalComments > 0
+ORDER BY fs.TotalComments DESC, fs.UpVotes DESC
+LIMIT 100;

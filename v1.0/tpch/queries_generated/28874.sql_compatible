@@ -1,0 +1,23 @@
+
+SELECT
+    SUBSTRING(p.p_name, 1, 10) AS short_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(ps.ps_supplycost) AS total_supply_cost,
+    AVG(c.c_acctbal) AS avg_account_balance,
+    CONCAT(n.n_name, ' - ', r.r_name) AS region_info
+FROM
+    part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN customer c ON s.s_nationkey = c.c_nationkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE
+    LENGTH(p.p_comment) > 5 AND
+    s.s_acctbal > 1000.00
+GROUP BY
+    p.p_name, n.n_name, r.r_name
+HAVING
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY
+    total_supply_cost DESC, avg_account_balance ASC;

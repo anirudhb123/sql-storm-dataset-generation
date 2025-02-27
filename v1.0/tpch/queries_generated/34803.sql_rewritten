@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_suppliers AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+
+    UNION ALL
+
+    SELECT ns.n_nationkey, ns.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_suppliers ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+),
+supplier_counts AS (
+    SELECT s.s_nationkey, COUNT(DISTINCT s.s_suppkey) AS total_suppliers
+    FROM supplier s
+    GROUP BY s.s_nationkey
+),
+part_supply AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+lineitem_summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate <= '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    ps.total_available,
+    ls.total_price,
+    COALESCE(SUM(c.c_acctbal), 0) AS total_cust_balance,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY total_price DESC) AS price_rank
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_counts sc ON n.n_nationkey = sc.s_nationkey
+LEFT JOIN nation_suppliers ns ON n.n_nationkey = ns.n_nationkey
+LEFT JOIN part_supply ps ON ns.s_suppkey = ps.ps_partkey
+LEFT JOIN orders o ON o.o_custkey = ns.s_suppkey
+LEFT JOIN lineitem_summary ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+WHERE (sc.total_suppliers > 10 OR ns.s_suppkey IS NOT NULL)
+  AND ps.total_available > 500
+GROUP BY r.r_name, p.p_name, ps.total_available, ls.total_price
+HAVING SUM(c.c_acctbal) IS NOT NULL
+ORDER BY r.r_name, total_price DESC;

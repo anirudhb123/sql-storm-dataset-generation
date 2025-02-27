@@ -1,0 +1,73 @@
+
+WITH RecursiveMovieActors AS (
+    SELECT 
+        c.movie_id, 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY a.id) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m 
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+MoviesWithInfo AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COUNT(DISTINCT ca.actor_id) AS actor_count
+    FROM 
+        title t
+    LEFT JOIN 
+        MovieKeywords mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        RecursiveMovieActors ca ON t.id = ca.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, mk.keywords
+),
+BizarreCasting AS (
+    SELECT 
+        m.movie_id, 
+        m.title, 
+        m.production_year,
+        CASE 
+            WHEN m.actor_count > 5 THEN 'Large Cast'
+            WHEN m.actor_count BETWEEN 2 AND 5 THEN 'Moderate Cast'
+            WHEN m.actor_count = 1 THEN 'Solo Performance'
+            ELSE 'No Cast'
+        END AS cast_size_description
+    FROM 
+        MoviesWithInfo m
+)
+SELECT 
+    b.movie_id, 
+    b.title, 
+    b.production_year, 
+    b.cast_size_description,
+    COALESCE(mci.info, 'No Additional Info') AS additional_info,
+    (SELECT COUNT(*) 
+     FROM movie_link ml 
+     WHERE ml.movie_id = b.movie_id 
+       AND EXISTS (SELECT 1 FROM title t2 WHERE t2.id = ml.linked_movie_id AND t2.production_year < b.production_year)) AS linked_movies_before
+FROM 
+    BizarreCasting b
+LEFT JOIN 
+    movie_info mci ON b.movie_id = mci.movie_id AND mci.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot' LIMIT 1)
+WHERE 
+    b.cast_size_description = 'Large Cast'
+    OR (b.cast_size_description = 'Moderate Cast' AND b.production_year >= 2000)
+ORDER BY 
+    b.production_year DESC, 
+    b.title ASC;

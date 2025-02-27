@@ -1,0 +1,77 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.UserId AS ClosedByUserId,
+        ph.CreationDate AS ClosedDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.OwnerUserId,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        COALESCE(cp.ClosedDate, 'No Closure') AS ClosureStatus,
+        CASE 
+            WHEN cp.ClosedPostId IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus,
+        ur.ReputationRank
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.ClosedPostId
+    JOIN 
+        UserReputation ur ON ps.OwnerUserId = ur.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.OwnerUserId,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.ClosureStatus,
+    rp.PostStatus,
+    ur.DisplayName,
+    CASE 
+        WHEN rp.ReputationRank <= 10 THEN 'Top Users'
+        ELSE 'Regular Users'
+    END AS UserCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Users ur ON rp.OwnerUserId = ur.Id
+WHERE 
+    rp.ReputationRank IS NOT NULL
+ORDER BY 
+    rp.ReputationRank, rp.PostStatus DESC, rp.UpVotes DESC;

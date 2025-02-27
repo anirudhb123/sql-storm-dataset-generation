@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.title] AS hierarchy_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.hierarchy_path || mt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind_id,
+    ARRAY_TO_STRING(mh.hierarchy_path, ' -> ') AS full_hierarchy,
+    COUNT(DISTINCT ci.person_id) AS num_cast_members,
+    AVG(pi.info LIKE '%award%') AS avg_award_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+WHERE 
+    mh.production_year > 2000
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.kind_id
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 5
+ORDER BY 
+    mh.production_year DESC, num_cast_members DESC
+LIMIT 50;
+
+-- This query recursively fetches movie titles and linked movies, 
+-- builds a hierarchy of titles, counts the number of cast members 
+-- while averaging out whether their information includes 
+-- the word 'award.' It also filters for movies released after 
+-- the year 2000, requiring at least five cast members in the final output.

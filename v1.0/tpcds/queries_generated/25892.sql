@@ -1,0 +1,31 @@
+
+WITH String_Processing AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        REPLACE(REPLACE(LOWER(c.c_email_address), '.', ''), '@', '') AS sanitized_email,
+        LENGTH(c.c_last_name) AS last_name_length,
+        SUBSTRING(c.c_last_name, 1, 1) AS last_name_initial,
+        c.c_birth_country,
+        COUNT(DISTINCT ca.ca_city) OVER (PARTITION BY c.c_birth_country) AS num_cities
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_email_address IS NOT NULL
+)
+SELECT 
+    full_name,
+    sanitized_email,
+    last_name_length,
+    last_name_initial,
+    c_birth_country,
+    num_cities
+FROM 
+    String_Processing
+WHERE 
+    last_name_length > 5
+ORDER BY 
+    last_name_initial ASC, full_name DESC
+LIMIT 100;

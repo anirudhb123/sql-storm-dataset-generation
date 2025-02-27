@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.depth < 5
+),
+part_summary AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           SUM(ps.ps_availqty) AS total_available,
+           AVG(ps.ps_supplycost) AS avg_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+high_value_orders AS (
+    SELECT DISTINCT o.o_orderkey, 
+                    o.o_totalprice, 
+                    o.o_orderdate,
+                    COUNT(l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_items_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > 10000
+),
+nation_stats AS (
+    SELECT n.n_nationkey, 
+           n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT r.r_name, 
+       COALESCE(pa.p_partkey, 0) AS part_id,
+       ph.s_name AS supplier_name,
+       ns.supplier_count,
+       ns.total_acctbal,
+       o.o_orderkey,
+       o.o_totalprice,
+       o.line_items_count,
+       (CASE WHEN o.o_totalprice IS NULL THEN 'Order Not Found' ELSE 'Order Found' END) AS order_status
+FROM region r
+LEFT JOIN nation_stats ns ON r.r_regionkey = ns.n_nationkey
+LEFT JOIN part_summary pa ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'FRANCE' LIMIT 1)
+LEFT JOIN high_value_orders o ON o.o_orderkey = (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_orderkey = o.o_orderkey LIMIT 1)
+LEFT JOIN supplier_hierarchy ph ON ph.s_nationkey = ns.n_nationkey
+ORDER BY r.r_name, o.o_totalprice DESC
+LIMIT 100;

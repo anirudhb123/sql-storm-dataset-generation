@@ -1,0 +1,28 @@
+WITH RECURSIVE CustomerPurchases AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, SUM(s.s_acctbal) AS total_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartSupplierStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS average_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT c.c_name, cp.total_spent, ns.total_balance, ps.supplier_count, ps.average_supply_cost
+FROM CustomerPurchases cp
+JOIN NationSuppliers ns ON cp.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)
+LEFT JOIN PartSupplierStats ps ON cp.total_spent > (SELECT AVG(total_spent) FROM CustomerPurchases) AND ps.supplier_count > 0
+WHERE ns.total_balance IS NOT NULL
+ORDER BY cp.total_spent DESC, ns.total_balance ASC
+LIMIT 10;

@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+),
+TotalSpent AS (
+    SELECT c.c_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey
+),
+SupplierInfo AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+ProjectDetails AS (
+    SELECT p.p_partkey, p.p_name, s.s_name AS supplier_name, 
+           (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey) AS order_count,
+           COALESCE(s.total_supplycost, 0) AS supplier_cost
+    FROM part p
+    LEFT JOIN SupplierInfo s ON p.p_partkey = s.ps_partkey
+)
+SELECT ph.level, pd.p_partkey, pd.p_name, pd.supplier_name, 
+       pd.order_count, 
+       CASE 
+           WHEN td.total_spent IS NULL THEN 0 
+           ELSE td.total_spent 
+       END AS total_spent
+FROM ProjectDetails pd
+LEFT JOIN TotalSpent td ON pd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN 
+                                             (SELECT o.o_orderkey FROM orders o 
+                                              JOIN customer c ON o.o_custkey = c.c_custkey 
+                                              WHERE c.c_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = 'USA')))
+)
+LEFT JOIN SupplierHierarchy ph ON pd.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT sh.s_suppkey FROM SupplierHierarchy sh))
+WHERE pd.supplier_name IS NOT NULL
+ORDER BY total_spent DESC, pd.p_name;

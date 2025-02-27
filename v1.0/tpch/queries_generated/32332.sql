@@ -1,0 +1,48 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate < '2023-12-31'
+),
+TotalLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           COUNT(ps.ps_partkey) AS parts_supplied, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueSuppliers AS (
+    SELECT sd.*, n.n_name
+    FROM SupplierDetails sd
+    JOIN nation n ON sd.s_nationkey = n.n_nationkey
+    WHERE sd.part_supplied > 10 AND sd.avg_supply_cost < 50
+),
+FinalReport AS (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice,
+           COALESCE(tl.total_revenue, 0) AS total_revenue,
+           COALESCE(hs.s_name, 'Unknown') AS supplier_name,
+           ROW_NUMBER() OVER (PARTITION BY oh.o_orderkey ORDER BY oh.o_orderdate DESC) AS order_rank
+    FROM OrderHierarchy oh
+    LEFT JOIN TotalLineItems tl ON oh.o_orderkey = tl.l_orderkey
+    LEFT JOIN HighValueSuppliers hs ON hs.s_suppkey = (SELECT MIN(s.s_suppkey) 
+                                                       FROM supplier s 
+                                                       JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+                                                       WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p))
+)
+SELECT f.o_orderkey, f.o_orderdate, f.o_totalprice, f.total_revenue, f.supplier_name
+FROM FinalReport f
+WHERE f.total_revenue > 1000
+ORDER BY f.o_orderdate DESC, f.o_totalprice ASC
+LIMIT 50;

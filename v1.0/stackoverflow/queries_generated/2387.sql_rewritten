@@ -1,0 +1,65 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT c.Id) DESC) AS RankByComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(ps.Upvotes - ps.Downvotes) AS NetVotes,
+        RANK() OVER (ORDER BY SUM(ps.Upvotes - ps.Downvotes) DESC) AS VoteRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    JOIN 
+        PostStats ps ON p.Id = ps.PostId
+    GROUP BY 
+        u.Id
+),
+HighActivityPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CommentCount,
+        ps.Upvotes - ps.Downvotes AS Score,
+        u.DisplayName AS OwnerName
+    FROM 
+        PostStats ps
+    JOIN 
+        Users u ON ps.PostId = u.Id
+    WHERE 
+        ps.RankByComments <= 5
+)
+SELECT 
+    hap.PostId,
+    hap.Title,
+    hap.CommentCount,
+    hap.Score,
+    hap.OwnerName,
+    tu.NetVotes AS OwnerNetVotes,
+    COALESCE(NULLIF(tu.VoteRank, 0), 'Unranked') AS OwnerVoteRank
+FROM 
+    HighActivityPosts hap
+LEFT JOIN 
+    TopUsers tu ON hap.OwnerName = tu.DisplayName
+WHERE 
+    hap.Score > 0
+ORDER BY 
+    hap.Score DESC, 
+    hap.CommentCount DESC;

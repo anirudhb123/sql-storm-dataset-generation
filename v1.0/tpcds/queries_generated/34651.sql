@@ -1,0 +1,45 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_qty) AS total_sales
+    FROM (
+        SELECT ws_item_sk, ws_quantity AS ws_qty
+        FROM web_sales
+        UNION ALL
+        SELECT cs_item_sk, cs_quantity AS cs_qty
+        FROM catalog_sales
+        UNION ALL
+        SELECT ss_item_sk, ss_quantity AS ss_qty
+        FROM store_sales
+    ) AS all_sales
+    GROUP BY ws_item_sk
+),
+top_selling_items AS (
+    SELECT
+        is.ws_item_sk,
+        i.i_product_name,
+        is.total_sales,
+        RANK() OVER (ORDER BY is.total_sales DESC) AS sales_rank
+    FROM item_sales is
+    JOIN item i ON is.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    t.si_item_name,
+    t.total_sales,
+    s.store_name,
+    c.c_customer_id,
+    CASE 
+        WHEN c.c_birth_year IS NOT NULL THEN EXTRACT(YEAR FROM CURRENT_DATE) - c.c_birth_year
+        ELSE NULL
+    END AS customer_age,
+    w.w_warehouse_name,
+    sm.sm_carrier
+FROM top_selling_items t
+LEFT JOIN store_sales ss ON t.ws_item_sk = ss.ss_item_sk
+LEFT JOIN store s ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+LEFT JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+LEFT JOIN ship_mode sm ON ss.ss_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE t.sales_rank <= 10
+ORDER BY t.total_sales DESC, customer_age ASC NULLS LAST;

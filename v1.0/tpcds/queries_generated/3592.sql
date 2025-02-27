@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr.store_sk,
+        sr.returned_date_sk,
+        SUM(sr.return_quantity) AS total_return_quantity,
+        SUM(sr.return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.customer_sk = c.customer_sk
+    WHERE 
+        c.current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        sr.store_sk, sr.returned_date_sk
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.sold_date_sk,
+        SUM(ws.quantity) AS total_sales_quantity,
+        SUM(ws.net_paid_inc_tax) AS total_sales_amt
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.customer_sk
+    WHERE 
+        c.current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_sk, ws.sold_date_sk
+),
+CombinedData AS (
+    SELECT 
+        COALESCE(cr.store_sk, sd.web_site_sk) AS entity_sk,
+        COALESCE(cr.returned_date_sk, sd.sold_date_sk) AS date_key,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(sd.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        COALESCE(sd.total_sales_amt, 0) AS total_sales_amt
+    FROM 
+        CustomerReturns cr
+    FULL OUTER JOIN 
+        SalesData sd ON cr.store_sk = sd.web_site_sk AND cr.returned_date_sk = sd.sold_date_sk
+)
+SELECT 
+    entity_sk,
+    date_key,
+    total_return_quantity,
+    total_sales_quantity,
+    CASE 
+        WHEN total_sales_quantity > 0 THEN (total_return_amt / total_sales_quantity)
+        ELSE NULL 
+    END AS return_to_sales_ratio,
+    (total_sales_amt - total_return_amt) AS net_sales
+FROM 
+    CombinedData
+WHERE 
+    net_sales > 1000
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

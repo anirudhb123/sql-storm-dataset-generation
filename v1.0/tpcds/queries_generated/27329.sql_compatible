@@ -1,0 +1,66 @@
+
+WITH AddressData AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM customer_address
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressData ad ON c.c_current_addr_sk = ad.ca_address_id
+),
+Benchmark AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.full_address,
+        ci.ca_city,
+        ci.ca_state,
+        ci.ca_zip,
+        ci.ca_country,
+        LEAST(CHAR_LENGTH(ci.c_first_name), CHAR_LENGTH(ci.c_last_name)) AS min_name_length,
+        CHAR_LENGTH(ci.c_first_name) + CHAR_LENGTH(ci.c_last_name) AS total_name_length,
+        LENGTH(CONCAT(ci.c_first_name, ' ', ci.c_last_name)) AS total_name_length_comp
+    FROM CustomerInfo ci
+)
+SELECT 
+    c_customer_id,
+    c_first_name,
+    c_last_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    full_address,
+    ca_city,
+    ca_state,
+    ca_zip,
+    ca_country,
+    min_name_length,
+    total_name_length,
+    ROUND((address_length + min_name_length + total_name_length) / 3.0, 2) AS avg_string_length
+FROM Benchmark
+WHERE cd_gender = 'M' AND cd_marital_status = 'M' AND address_length > 50
+ORDER BY avg_string_length DESC
+LIMIT 100;

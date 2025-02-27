@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 ELSE 0 END) AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ur.DisplayName AS Owner,
+    ur.Reputation,
+    ps.CommentCount,
+    ps.Score,
+    COALESCE(rp.Title, 'No Parent') AS ParentTitle,
+    rp.Level AS ParentLevel
+FROM 
+    PostStatistics ps
+INNER JOIN 
+    UserReputation ur ON ps.OwnerUserId = ur.UserId
+LEFT JOIN 
+    RecursivePostHierarchy rp ON ps.PostId = rp.PostId
+WHERE 
+    ur.Rank <= 10
+ORDER BY 
+    ps.Score DESC, 
+    ps.CommentCount DESC;

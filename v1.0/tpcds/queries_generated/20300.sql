@@ -1,0 +1,53 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country,
+           CASE
+               WHEN ca_street_name IS NULL THEN 'UNKNOWN'
+               ELSE ca_street_name
+           END AS ca_street_name_cleansed
+    FROM customer_address
+    WHERE ca_city IS NOT NULL OR ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca_address_sk, ca_city, ca_state, ca_country,
+           'REFINED ' || ca_street_name
+    FROM customer_address
+    WHERE ca_country IS NOT NULL AND ca_country <> 'USA'
+), CustomerInfo AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name || ' ' || c.c_last_name AS full_name,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), ReturnAnalysis AS (
+    SELECT wr_returning_customer_sk, COUNT(*) AS total_returns,
+           SUM(wr_return_amt_inc_tax) AS total_returned_amt,
+           AVG(wr_return_qty) AS avg_return_qty
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+), SalesData AS (
+    SELECT ws_bill_customer_sk AS customer_sk, 
+           SUM(ws_net_profit) AS total_profit,
+           SUM(ws_net_paid) AS total_sales,
+           DENSE_RANK() OVER (ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    GROUP BY ws_bill_customer_sk
+)
+SELECT ci.c_customer_sk, ci.full_name, ci.cd_gender,
+       COALESCE(ra.total_returns, 0) AS returns_count,
+       ra.total_returned_amt, 
+       sd.total_profit,
+       ROW_NUMBER() OVER (ORDER BY sd.total_profit DESC) AS overall_rank,
+       a.ca_city, a.ca_street_name_cleansed
+FROM CustomerInfo ci
+LEFT JOIN ReturnAnalysis ra ON ci.c_customer_sk = ra.wr_returning_customer_sk
+LEFT JOIN SalesData sd ON ci.c_customer_sk = sd.customer_sk
+JOIN AddressCTE a ON ci.c_current_addr_sk = a.ca_address_sk
+WHERE ci.gender_rank = 1
+  AND (ci.cd_marital_status = 'M' OR ci.cd_gender = 'F')
+  AND (ci.cd_purchase_estimate > 1000 OR sd.total_profit IS NOT NULL)
+ORDER BY overall_rank, ci.full_name ASC
+FETCH FIRST 100 ROWS ONLY;

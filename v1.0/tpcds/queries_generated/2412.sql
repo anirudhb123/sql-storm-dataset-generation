@@ -1,0 +1,79 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws 
+    INNER JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_items AS (
+    SELECT 
+        si.i_item_id,
+        si.i_product_name,
+        si.i_category,
+        sd.total_quantity,
+        sd.total_net_profit,
+        RANK() OVER (ORDER BY sd.total_net_profit DESC) AS rank
+    FROM 
+        sales_data sd
+    JOIN 
+        item si ON sd.ws_item_sk = si.i_item_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_net_profit,
+    CASE 
+        WHEN ci.hd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE ib.ib_income_band_sk
+    END AS income_band,
+    ROW_NUMBER() OVER (PARTITION BY ci.c_customer_sk ORDER BY ti.total_net_profit DESC) AS customer_rank
+FROM 
+    customer_info ci
+LEFT JOIN 
+    top_items ti ON ci.c_customer_sk = (SELECT 
+                                               sr_customer_sk 
+                                           FROM 
+                                               store_returns 
+                                           WHERE 
+                                               sr_returned_date_sk IS NOT NULL 
+                                           AND 
+                                               sr_customer_sk = ci.c_customer_sk
+                                           LIMIT 1)
+LEFT JOIN 
+    income_band ib ON ci.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    ci.cd_purchase_estimate > 1000
+    AND (ci.cd_gender = 'M' OR ci.cd_marital_status = 'S')
+ORDER BY 
+    income_band, total_net_profit DESC;

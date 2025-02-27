@@ -1,0 +1,47 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.Score,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        LAG(p.Score) OVER (ORDER BY p.CreationDate DESC) AS PreviousScore,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.Score, p.CreationDate
+),
+FilteredRankedPosts AS (
+    SELECT 
+        rp.*
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.AnswerCount > 5 AND rp.Score > COALESCE(rp.PreviousScore, 0)
+)
+SELECT 
+    frp.Id,
+    frp.Title,
+    frp.OwnerDisplayName,
+    frp.Score,
+    frp.CreationDate,
+    frp.AnswerCount,
+    u.Reputation,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = frp.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = frp.Id AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    FilteredRankedPosts frp
+JOIN 
+    Users u ON frp.OwnerDisplayName = u.DisplayName
+ORDER BY 
+    frp.Score DESC, frp.CreationDate DESC
+LIMIT 10;

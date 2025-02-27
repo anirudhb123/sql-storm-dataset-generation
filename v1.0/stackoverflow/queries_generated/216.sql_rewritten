@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+TopCloseReasons AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(DISTINCT CONCAT(CAST(crt.Name AS VARCHAR), ': ', COUNT(*)) ORDER BY COUNT(*) DESC) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment::jsonb->>'CloseReasonId'::int = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    u.DisplayName,
+    us.TotalPosts,
+    us.PositivePosts,
+    us.NegativePosts,
+    tc.CloseReasonCount,
+    tc.CloseReasons,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount
+FROM 
+    UserStats us
+JOIN 
+    Users u ON us.UserId = u.Id
+LEFT JOIN 
+    TopCloseReasons tc ON tc.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON rp.PostRank = 1 AND rp.PostId IN (SELECT PostId FROM Posts WHERE OwnerUserId = u.Id)
+WHERE 
+    us.TotalPosts > 5 
+ORDER BY 
+    us.TotalPosts DESC, us.PositivePosts DESC;

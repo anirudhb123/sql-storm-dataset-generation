@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+), 
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(ph.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (
+            SELECT 
+                MAX(CreationDate) 
+            FROM 
+                PostHistory 
+            WHERE 
+                PostId = p.Id
+        )
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    ups.UserId,
+    ups.Reputation,
+    ups.BadgeCount,
+    COALESCE(RP.PostCount, 0) AS PostCount,
+    COALESCE(RP.TopPostTitle, 'No Posts') AS TopPostTitle,
+    COALESCE(RP.TopPostScore, 0) AS TopPostScore,
+    (ups.Reputation / NULLIF(RP.PostCount, 0)) AS ReputationPerPost
+FROM 
+    UserStats ups
+LEFT JOIN (
+    SELECT 
+        rp.OwnerUserId,
+        COUNT(rp.PostId) AS PostCount,
+        MAX(rp.Score) AS TopPostScore,
+        MAX(CASE WHEN rp.PostRank = 1 THEN rp.Title END) AS TopPostTitle
+    FROM 
+        RankedPosts rp
+    GROUP BY 
+        rp.OwnerUserId
+) RP ON ups.UserId = RP.OwnerUserId
+WHERE 
+    ups.Reputation IS NOT NULL
+    AND (ups.LastPostDate IS NULL OR ups.LastPostDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months')
+ORDER BY 
+    ReputationPerPost DESC
+LIMIT 10;

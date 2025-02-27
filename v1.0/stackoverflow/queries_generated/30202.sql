@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        c.UserDisplayName,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    WHERE 
+        c.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        c.PostId, c.UserDisplayName
+),
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph 
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) -- Filter for title, body edits, or suggested edits
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    COALESCE(rp.CommentCount, 0) AS RecentCommentCount,
+    COALESCE(pvs.UpVotes, 0) AS UpVotes,
+    COALESCE(pvs.DownVotes, 0) AS DownVotes,
+    COALESCE(phs.EditCount, 0) AS TotalEditCount,
+    COALESCE(DATEDIFF(NOW(), phs.LastEditDate), -1) AS DaysSinceLastEdit,
+    CASE 
+        WHEN rp.Rank <= 10 THEN 'Top Ranking Post'
+        ELSE 'Regular Post'
+    END AS PostClassification
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentComments rc ON rp.PostId = rc.PostId
+LEFT JOIN 
+    PostVoteSummary pvs ON rp.PostId = pvs.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.Rank <= 50
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;
+

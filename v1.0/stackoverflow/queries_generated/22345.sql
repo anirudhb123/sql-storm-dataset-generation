@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId IN (8, 9)), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '6 months'
+        AND p.PostTypeId IN (1, 2) -- Questions and Answers
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.RankScore,
+        rp.CommentCount,
+        rp.TotalBounty,
+        CASE 
+            WHEN rp.TotalBounty > 0 THEN 'Has Bounty'
+            ELSE 'No Bounty'
+        END AS BountyStatus,
+        RANK() OVER (ORDER BY rp.Score DESC, rp.CommentCount DESC) AS OverallRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5 -- Top 5 in each type
+),
+ExtendedPosts AS (
+    SELECT 
+        tp.*,
+        pt.Name AS PostTypeName,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY tp.PostId) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) OVER (PARTITION BY tp.PostId) AS ReopenCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostHistory ph ON tp.PostId = ph.PostId
+    LEFT JOIN 
+        PostTypes pt ON tp.PostTypeId = pt.Id
+)
+SELECT 
+    ep.PostId,
+    ep.Title,
+    ep.CreationDate,
+    ep.Score,
+    ep.CommentCount,
+    ep.BountyStatus,
+    ep.CloseCount,
+    ep.ReopenCount,
+    ep.OverallRank,
+    CASE 
+        WHEN ep.CloseCount > ep.ReopenCount THEN 'More Closed'
+        WHEN ep.ReopenCount > ep.CloseCount THEN 'More Reopened'
+        ELSE 'Equal Closure'
+    END AS ClosureStatus,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     JOIN LATERAL (
+         SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+     ) AS t1 ON t.TagName = t1.Tag
+     WHERE p.Id = ep.PostId
+    ) AS TagsUsed
+FROM 
+    ExtendedPosts ep
+WHERE 
+    ep.OverallRank <= 10
+ORDER BY 
+    ep.OverallRank, ep.Score DESC;

@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.CommentCount,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE
+        P.PostTypeId IN (1, 2) 
+),
+RecentActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS ActivePosts,
+        SUM(P.AnswerCount) AS TotalAnswers,
+        SUM(P.CommentCount) AS TotalComments
+    FROM 
+        Users U
+    JOIN 
+        RankedPosts RP ON U.Id = RP.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        MAX(RP.LastActivityDate) >= '2024-10-01 12:34:56'::timestamp - INTERVAL '30 days' 
+),
+AnswerStats AS (
+    SELECT 
+        RP.OwnerUserId,
+        AVG(RP.AnswerCount) AS AvgAnswerCount,
+        AVG(RP.CommentCount) AS AvgCommentCount,
+        COUNT(DISTINCT RP.PostId) AS TotalPosts
+    FROM 
+        RankedPosts RP
+    GROUP BY 
+        RP.OwnerUserId
+),
+FinalReport AS (
+    SELECT 
+        RU.UserId,
+        RU.DisplayName,
+        RU.ActivePosts,
+        RU.TotalAnswers,
+        RU.TotalComments,
+        ASs.AvgAnswerCount,
+        ASs.AvgCommentCount,
+        ASs.TotalPosts
+    FROM 
+        RecentActiveUsers RU
+    JOIN 
+        AnswerStats ASs ON RU.UserId = ASs.OwnerUserId
+)
+SELECT 
+    FR.DisplayName,
+    FR.ActivePosts,
+    FR.TotalAnswers,
+    FR.TotalComments,
+    FR.AvgAnswerCount,
+    FR.AvgCommentCount,
+    FR.TotalPosts
+FROM 
+    FinalReport FR
+ORDER BY 
+    FR.ActivePosts DESC;

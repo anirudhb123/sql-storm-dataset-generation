@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        d.d_year,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+),
+daily_aggregate AS (
+    SELECT 
+        d.d_date,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_net_profit) AS total_profit
+    FROM 
+        sales_data sd
+    JOIN 
+        date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_date
+),
+customer_returns AS (
+    SELECT 
+        sr.store_sk,
+        SUM(sr.return_quantity) AS total_returned,
+        SUM(sr.return_amt) AS total_return_amt,
+        SUM(sr.net_loss) AS total_net_loss
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+),
+final_report AS (
+    SELECT 
+        ca.ca_state,
+        da.total_quantity,
+        da.total_profit,
+        cr.total_returned,
+        cr.total_return_amt,
+        cr.total_net_loss
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        daily_aggregate da ON ca.ca_address_sk = da.ws_item_sk  -- Assumption for demo purposes
+    LEFT JOIN 
+        customer_returns cr ON ca.ca_address_sk = cr.store_sk
+)
+SELECT 
+    fr.ca_state,
+    COALESCE(fr.total_quantity, 0) AS total_sales_quantity,
+    COALESCE(fr.total_profit, 0.0) AS total_sales_profit,
+    COALESCE(fr.total_returned, 0) AS total_returned_quantity,
+    COALESCE(fr.total_return_amt, 0.0) AS total_return_amount,
+    COALESCE(fr.total_net_loss, 0.0) AS total_net_loss
+FROM 
+    final_report fr
+WHERE 
+    fr.total_profit > (SELECT AVG(total_profit) FROM daily_aggregate)
+ORDER BY 
+    fr.total_profit DESC;

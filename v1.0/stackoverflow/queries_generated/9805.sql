@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        pt.Name AS PostTypeName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PostTypes pt ON rp.PostRank <= 5 AND pt.Id = (SELECT MAX(Id) FROM PostTypes)
+)
+SELECT 
+    pp.Title,
+    pp.CreationDate,
+    pp.OwnerDisplayName,
+    pp.CommentCount,
+    pp.UpVoteCount,
+    pp.DownVoteCount,
+    COUNT(DISTINCT ph.Id) AS EditCount,
+    STRING_AGG(DISTINCT CONCAT(bt.Name, ' (', bt.Class, ')'), ', ') AS BadgesEarned
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    PostHistory ph ON pp.PostId = ph.PostId
+LEFT JOIN 
+    Badges bt ON pp.OwnerDisplayName = bt.UserId
+GROUP BY 
+    pp.PostId, pp.Title, pp.CreationDate, pp.OwnerDisplayName, pp.CommentCount, pp.UpVoteCount, pp.DownVoteCount
+ORDER BY 
+    pp.UpVoteCount DESC, pp.CommentCount DESC
+LIMIT 10;

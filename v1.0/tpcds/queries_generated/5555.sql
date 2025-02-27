@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    INNER JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE 
+        dd.d_year = 2023
+    AND 
+        dd.d_moy IN (11, 12) -- Last two months of the year
+    GROUP BY 
+        ws.web_site_sk, ws.web_site_id
+),
+TopWebSites AS (
+    SELECT 
+        web_site_sk, 
+        web_site_id, 
+        total_net_profit,
+        total_orders
+    FROM 
+        RankedSales
+    WHERE 
+        rank_profit <= 5
+)
+SELECT 
+    w.web_warehouse_id, 
+    w.w_warehouse_name, 
+    SUM(ws.ws_net_profit) AS overall_net_profit,
+    SUM(ws.ws_quantity) AS overall_quantity_sold,
+    tw.total_orders AS web_total_orders
+FROM 
+    warehouse w
+INNER JOIN
+    web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+INNER JOIN 
+    TopWebSites tw ON ws.ws_web_site_sk = tw.web_site_sk 
+GROUP BY 
+    w.web_warehouse_id, 
+    w.w_warehouse_name,
+    tw.total_orders
+ORDER BY 
+    overall_net_profit DESC
+LIMIT 10;

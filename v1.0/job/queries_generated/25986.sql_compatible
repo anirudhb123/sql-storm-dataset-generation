@@ -1,0 +1,68 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        a.name AS actor_name,
+        c.role_id,
+        COUNT(k.id) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+        AND a.name IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, t.kind_id, a.name, c.role_id
+), actor_roles AS (
+    SELECT 
+        actor_name,
+        role_id,
+        COUNT(movie_title) AS movies_featured
+    FROM 
+        movie_details
+    GROUP BY 
+        actor_name, role_id
+), top_actors AS (
+    SELECT 
+        actor_name,
+        role_id,
+        movies_featured,
+        RANK() OVER (PARTITION BY role_id ORDER BY movies_featured DESC) AS actor_rank
+    FROM 
+        actor_roles
+)
+SELECT 
+    t.movie_title,
+    t.production_year,
+    ct.kind AS company_type,
+    ka.keyword AS movie_keyword,
+    ta.actor_name,
+    ta.movies_featured
+FROM 
+    movie_details t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword ka ON mk.keyword_id = ka.id
+JOIN 
+    top_actors ta ON t.actor_name = ta.actor_name
+WHERE 
+    ta.actor_rank <= 10
+ORDER BY 
+    t.production_year DESC, 
+    ta.movies_featured DESC;

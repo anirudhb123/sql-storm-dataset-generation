@@ -1,0 +1,65 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (
+        SELECT AVG(c_acctbal) 
+        FROM customer
+        WHERE c_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal IS NOT NULL AND ch.level < 5
+),
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_supply_cost DESC
+    LIMIT 5
+),
+AverageAndMaxSales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales, 
+        MAX(total_sales) AS max_sales
+    FROM NationSales
+),
+PartSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ch.c_name,
+    n.n_name,
+    ps.p_name,
+    ps.supplier_count,
+    ps.total_available_qty,
+    ns.total_sales,
+    ROUND(AVG(ch.c_acctbal), 2) AS avg_acctbal_level,
+    CASE 
+        WHEN ns.total_sales > avg.max_sales THEN 'Above Max Sales'
+        WHEN ns.total_sales = avg.avg_sales THEN 'Equal to Average Sales'
+        ELSE 'Below Average Sales' 
+    END AS sales_comparison
+FROM CustomerHierarchy ch
+JOIN NationSales ns ON ch.c_nationkey = ns.n_nationkey
+JOIN PartSummary ps ON ch.c_custkey % ps.supplier_count = 0 -- Complicated Predicate
+CROSS JOIN AverageAndMaxSales avg
+JOIN TopSuppliers ts ON ts.total_supply_cost > avg.avg_sales 
+WHERE ns.total_sales IS NOT NULL
+ORDER BY ch.c_name, ns.total_sales DESC;

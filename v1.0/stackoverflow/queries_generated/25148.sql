@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        STUFF((
+            SELECT ', ' + t.TagName 
+            FROM Tags t 
+            WHERE p.Tags LIKE '%' + t.TagName + '%'
+            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS FormattedTags,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags
+),
+TopPosts AS (
+    SELECT 
+        rp.PostID,
+        rp.Title, 
+        rp.Body,
+        rp.CommentCount,
+        rp.FormattedTags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10  -- Get top 10 most recent questions
+)
+SELECT 
+    tp.PostID,
+    tp.Title,
+    tp.Body,
+    tp.CommentCount,
+    tp.FormattedTags,
+    COUNT(DISTINCT bh.UserId) AS EditorCount,
+    SUM(CASE WHEN bh.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReopenCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostID AND v.VoteTypeId = 2) AS UpVoteCount,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostID AND v.VoteTypeId = 3) AS DownVoteCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory bh ON tp.PostID = bh.PostId 
+GROUP BY 
+    tp.PostID, tp.Title, tp.Body, tp.CommentCount, tp.FormattedTags
+ORDER BY 
+    tp.CommentCount DESC, tp.Title;

@@ -1,0 +1,47 @@
+
+WITH RecursiveCustomerCTE AS (
+    SELECT c_customer_sk, c_customer_id, c_first_name, c_last_name, 
+           ROW_NUMBER() OVER (PARTITION BY c_gender ORDER BY c_purchase_estimate DESC) AS rank_by_gender
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE c_birth_year = (SELECT MAX(c_birth_year) FROM customer)
+),
+AddressInfo AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country,
+           COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM customer_address
+    LEFT JOIN customer ON ca_address_sk = c_current_addr_sk
+    GROUP BY ca_address_sk, ca_city, ca_state, ca_country
+),
+SalesData AS (
+    SELECT 
+        CASE 
+            WHEN ws_sales_price < cs_sales_price THEN 'Web' 
+            ELSE 'Catalog' 
+        END AS sale_type,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    FULL OUTER JOIN catalog_sales ON ws_item_sk = cs_item_sk
+    GROUP BY sale_type
+),
+GenderStatistics AS (
+    SELECT cd_gender, AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    WHERE cd_marital_status IS NOT NULL
+    GROUP BY cd_gender
+)
+SELECT ca.ca_city, ca.ca_state, ca.ca_country, 
+       ci.rank_by_gender, 
+       (CASE WHEN cf.customer_count > 0 THEN 'Has Customers' ELSE 'No Customers' END) AS customer_status,
+       sd.sale_type,
+       (SELECT COUNT(*) FROM RecursiveCustomerCTE AS rcc WHERE rc.rank_by_gender <= 10) AS top_customers_count,
+       gs.cd_gender, gs.avg_purchase_estimate
+FROM AddressInfo AS ca
+LEFT JOIN RecursiveCustomerCTE AS ci ON ca.customer_count > 0
+LEFT JOIN SalesData AS sd ON sd.total_profit IS NOT NULL
+LEFT JOIN GenderStatistics AS gs ON gs.cd_gender IN ('M', 'F')
+WHERE (ca.ca_country IS NOT NULL AND ca.ca_country <> '') 
+  AND (SELECT COUNT(*) FROM customer WHERE c_birth_month = 12) > 1000
+ORDER BY ca.ca_country, ci.rank_by_gender DESC, sd.total_profit DESC
+LIMIT 50
+OFFSET 100;

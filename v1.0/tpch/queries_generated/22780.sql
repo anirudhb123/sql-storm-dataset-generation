@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        DISTINCT r.r_regionkey, 
+        SUM(CASE WHEN rs.rank <= 5 THEN rs.total_cost ELSE 0 END) AS high_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_regionkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    r.r_name, 
+    COALESCE(hc.high_cost, 0) AS total_high_cost, 
+    COALESCE(ro.total_revenue, 0) AS total_recent_revenue
+FROM 
+    region r
+LEFT JOIN 
+    HighCostSuppliers hc ON r.r_regionkey = hc.r_regionkey
+FULL OUTER JOIN 
+    RecentOrders ro ON ro.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment = 'BUILDING')
+ORDER BY 
+    r.r_name ASC, total_high_cost DESC, total_recent_revenue DESC;

@@ -1,0 +1,59 @@
+
+WITH RecentSales AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sale_rank
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        ws_item_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+ItemDetails AS (
+    SELECT
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        ROW_NUMBER() OVER (ORDER BY i.i_current_price DESC) AS price_rank
+    FROM
+        item i
+    WHERE
+        i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+)
+SELECT 
+    i.i_item_desc,
+    r.total_quantity,
+    r.total_sales,
+    cd.cd_gender,
+    cd.customer_count
+FROM 
+    RecentSales r
+JOIN 
+    ItemDetails i ON r.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk IN 
+        (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = r.ws_item_sk) 
+        LIMIT 1)
+WHERE 
+    r.sale_rank = 1
+ORDER BY 
+    r.total_sales DESC,
+    i.price_rank ASC
+LIMIT 100;

@@ -1,0 +1,97 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+), 
+TopMovies AS (
+    SELECT 
+        title,
+        total_cast,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year <= 5
+), 
+KeywordStats AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_info mi
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    GROUP BY 
+        mi.movie_id
+), 
+CompanyCount AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        aka_title m ON mc.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+), 
+CombinedInfo AS (
+    SELECT 
+        tm.title,
+        tm.total_cast,
+        tm.production_year,
+        COALESCE(kd.keyword_count, 0) AS keyword_count,
+        COALESCE(cc.company_count, 0) AS company_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        KeywordStats kd ON tm.production_year = (SELECT DISTINCT production_year FROM TopMovies WHERE title = tm.title)
+    LEFT JOIN 
+        CompanyCount cc ON tm.production_year = (SELECT DISTINCT production_year FROM TopMovies WHERE title = tm.title)
+), 
+FinalSelection AS (
+    SELECT 
+        ci.title,
+        ci.production_year,
+        ci.total_cast,
+        ci.keyword_count,
+        ci.company_count,
+        (CASE 
+            WHEN ci.keyword_count < 5 THEN 'Fewer Keywords' 
+            ELSE 'Many Keywords' 
+        END) AS keyword_category,
+        (CASE 
+            WHEN ci.company_count IS NULL THEN 'No Companies'
+            WHEN ci.company_count = 0 THEN 'Zero Companies'
+            ELSE 'Companies Present'
+        END) AS company_status
+    FROM 
+        CombinedInfo ci
+    WHERE 
+        ci.production_year BETWEEN 2000 AND 2023
+        AND (ci.keyword_count > 2 OR ci.company_count > 3)
+)
+SELECT 
+    title,
+    production_year,
+    total_cast,
+    keyword_count,
+    company_count,
+    keyword_category,
+    company_status
+FROM 
+    FinalSelection
+ORDER BY 
+    production_year DESC, total_cast DESC;

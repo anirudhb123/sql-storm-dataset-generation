@@ -1,0 +1,66 @@
+
+WITH StringAggregates AS (
+    SELECT 
+        p.p_partkey,
+        SUBSTRING(p.p_name, 1, 10) AS short_name,
+        LENGTH(p.p_name) AS name_length,
+        LOWER(p.p_comment) AS lower_comment,
+        CONCAT(p.p_mfgr, ' - ', p.p_brand) AS manufacturer_brand,
+        COUNT(DISTINCT ps.ps_supplycost) AS unique_supply_costs
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_comment, 
+        p.p_mfgr, 
+        p.p_brand
+),
+RegionDetails AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        LENGTH(r.r_comment) AS comment_length
+    FROM 
+        region r
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    JSON_OBJECT(
+        'short_name', sa.short_name,
+        'name_length', sa.name_length,
+        'lower_comment', sa.lower_comment,
+        'manufacturer_brand', sa.manufacturer_brand,
+        'unique_supply_costs', sa.unique_supply_costs,
+        'region', rd.r_name,
+        'region_comment_length', rd.comment_length
+    ) AS supplier_details
+FROM 
+    supplier s
+JOIN 
+    StringAggregates sa ON sa.p_partkey IN (
+        SELECT ps.ps_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_suppkey = s.s_suppkey
+    )
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    RegionDetails rd ON n.n_regionkey = rd.r_regionkey
+WHERE 
+    LENGTH(s.s_comment) > 50
+GROUP BY 
+    s.s_suppkey,
+    s.s_name,
+    sa.short_name,
+    sa.name_length,
+    sa.lower_comment,
+    sa.manufacturer_brand,
+    sa.unique_supply_costs,
+    rd.r_name,
+    rd.comment_length
+ORDER BY 
+    s.s_suppkey;

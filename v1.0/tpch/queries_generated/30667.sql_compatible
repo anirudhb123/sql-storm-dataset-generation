@@ -1,0 +1,44 @@
+
+WITH RECURSIVE part_suppliers AS (
+    SELECT ps.partkey, ps.suppkey, ps.availqty, ps.supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.supplycost ASC) AS rn
+    FROM partsupp ps
+    WHERE ps.availqty > 0
+),
+top_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+),
+supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey,
+           (SELECT COUNT(DISTINCT p.p_partkey) 
+            FROM part p 
+            JOIN partsupp ps ON p.p_partkey = ps.partkey
+            WHERE ps.suppkey = s.s_suppkey) AS part_count,
+           COALESCE((SELECT AVG(balance) 
+                     FROM (SELECT s_acctbal AS balance 
+                           FROM supplier 
+                           WHERE s_nationkey = s.s_nationkey) AS balances), 0) AS avg_nation_balance
+    FROM supplier s
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+       MAX(sd.part_count) AS max_parts_per_supplier,
+       SUM(sd.avg_nation_balance) AS total_avg_balance,
+       ARRAY_AGG(p.p_name) FILTER (WHERE tp.sales_rank <= 5) AS top_parts
+FROM region r 
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_details sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN top_parts tp ON sd.s_suppkey IN (
+    SELECT ps.suppkey 
+    FROM part_suppliers 
+    WHERE rn <= 3
+) 
+WHERE sd.avg_nation_balance IS NOT NULL
+GROUP BY r.r_name
+ORDER BY customer_count DESC
+LIMIT 10;

@@ -1,0 +1,61 @@
+WITH PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS supplier_balance,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        p.p_retailprice > 100.00
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        o.o_clerk,
+        o.o_shippriority,
+        o.o_comment
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders WHERE o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year')
+)
+SELECT 
+    pd.supplier_name,
+    pd.nation_name,
+    pd.region_name,
+    COUNT(DISTINCT fo.o_orderkey) AS total_orders,
+    SUM(fo.o_totalprice) AS total_revenue,
+    STRING_AGG(DISTINCT pd.p_name || ' (' || pd.p_brand || ')', ', ') AS products_handled
+FROM 
+    PartDetails pd
+LEFT JOIN 
+    FilteredOrders fo ON pd.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = fo.o_orderkey)
+GROUP BY 
+    pd.supplier_name, 
+    pd.nation_name, 
+    pd.region_name
+ORDER BY 
+    total_revenue DESC;

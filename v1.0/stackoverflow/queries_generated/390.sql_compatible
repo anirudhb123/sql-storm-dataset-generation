@@ -1,0 +1,41 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+)
+
+SELECT 
+    u.Id AS UserId, 
+    u.DisplayName, 
+    COUNT(DISTINCT rp.Id) AS TotalPosts,
+    SUM(rp.Score) AS TotalScore,
+    AVG(rp.ViewCount) AS AvgViewCount,
+    SUM(rp.UpVoteCount) AS TotalUpVotes,
+    SUM(rp.DownVoteCount) AS TotalDownVotes,
+    CASE 
+        WHEN SUM(rp.Score) > 100 THEN 'High Performer'
+        WHEN SUM(rp.Score) BETWEEN 50 AND 100 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS PerformanceCategory
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.Id) > 10 
+ORDER BY 
+    TotalScore DESC;

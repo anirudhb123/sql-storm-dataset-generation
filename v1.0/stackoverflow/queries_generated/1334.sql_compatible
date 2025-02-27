@@ -1,0 +1,56 @@
+
+WITH UserVoteStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 15 THEN 1 END) AS ModeratorReviews,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 9 THEN v.BountyAmount ELSE 0 END), 0) AS TotalBountyReceived
+    FROM 
+        Users u
+        LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Posts p
+        JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 3
+    GROUP BY 
+        p.Id, p.Title
+),
+Ranking AS (
+    SELECT 
+        uq.UserId,
+        uq.DisplayName,
+        RANK() OVER (ORDER BY uvs.UpVotes - uvs.DownVotes DESC) AS UserRank
+    FROM 
+        UserVoteStatistics uvs
+        JOIN Users uq ON uvs.UserId = uq.Id
+)
+SELECT 
+    cq.PostId,
+    cq.Title,
+    cq.CommentCount,
+    cq.UniqueVoters,
+    r.UserRank,
+    uvs.UpVotes AS UserUpVotes,
+    uvs.DownVotes AS UserDownVotes,
+    uvs.TotalBountyReceived AS UserTotalBounty
+FROM 
+    ClosedQuestions cq
+    FULL OUTER JOIN Ranking r ON cq.UniqueVoters = r.UserRank
+    JOIN UserVoteStatistics uvs ON r.UserId = uvs.UserId
+WHERE 
+    cq.CommentCount > 5
+    AND (uvs.TotalBountyReceived IS NOT NULL OR uvs.TotalBountyReceived > 0)
+ORDER BY 
+    cq.UniqueVoters DESC, r.UserRank;

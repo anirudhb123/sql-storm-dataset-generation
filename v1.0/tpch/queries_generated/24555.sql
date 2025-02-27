@@ -1,0 +1,50 @@
+WITH RecursivePart AS (
+    SELECT p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, 
+           p_retailprice, p_comment, ROW_NUMBER() OVER (PARTITION BY p_mfgr ORDER BY p_retailprice DESC) AS rn
+    FROM part
+    WHERE p_size NOT IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice < 10)
+), 
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply,
+           COUNT(DISTINCT p.ps_partkey) AS part_count
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS finalized_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+), 
+DiscountedSales AS (
+    SELECT l.l_orderkey, l.l_discount, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS sales_after_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey, l.l_discount
+),
+FinalResult AS (
+    SELECT 
+        ps.partkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        MAX(ps.total_supply) AS max_supply,
+        SUM(cs.total_spent) AS total_spent_per_customer,
+        AVG(d.sales_after_discount) AS avg_discounted_sales
+    FROM RecursivePart ps
+    LEFT JOIN SupplierStats ps ON ps.ps_partkey = ps.p_partkey
+    LEFT JOIN CustomerOrders cs ON ps.ps_partkey = cs.c_custkey
+    LEFT JOIN DiscountedSales d ON o.o_orderkey = d.l_orderkey  
+    GROUP BY ps.p_partkey
+)
+SELECT fr.p_partkey, fr.order_count, fr.max_supply, fr.total_spent_per_customer,
+       CASE 
+           WHEN fr.avg_discounted_sales IS NULL THEN 'No Sales'
+           ELSE CAST(fr.avg_discounted_sales AS varchar)
+       END AS avg_discounted_sales
+FROM FinalResult fr
+ORDER BY fr.total_spent_per_customer DESC NULLS LAST
+LIMIT 50;

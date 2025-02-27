@@ -1,0 +1,84 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(c.id) OVER (PARTITION BY t.production_year) AS cast_count
+    FROM 
+        aka_title AS t
+    LEFT JOIN 
+        movie_companies AS mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name AS cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info AS mi ON t.id = mi.movie_id 
+    LEFT JOIN 
+        cast_info AS c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.production_year BETWEEN 1990 AND 2020
+        AND (mi.info_type_id IS NULL OR mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis'))
+),
+FilteredMovies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        CASE 
+            WHEN rm.title_rank <= 3 THEN 'Top 3 Movie'
+            ELSE 'Other Movie'
+        END AS title_category
+    FROM 
+        RankedMovies AS rm
+    WHERE 
+        rm.cast_count > 0
+),
+AggregatedResults AS (
+    SELECT 
+        fm.production_year,
+        COUNT(*) AS total_movies,
+        SUM(CASE WHEN fm.title_category = 'Top 3 Movie' THEN 1 ELSE 0 END) AS top_movies_count,
+        AVG(fm.cast_count) AS avg_cast_count
+    FROM 
+        FilteredMovies AS fm
+    GROUP BY 
+        fm.production_year
+)
+SELECT 
+    ar.production_year,
+    ar.total_movies,
+    ar.top_movies_count,
+    ar.avg_cast_count,
+    COALESCE(SUM(CASE WHEN k.keyword = 'Action' THEN 1 ELSE 0 END), 0) AS action_movies_count
+FROM 
+    AggregatedResults AS ar
+LEFT JOIN 
+    movie_keyword AS mk ON mk.movie_id IN (SELECT movie_id FROM FilteredMovies)
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+GROUP BY 
+    ar.production_year
+ORDER BY 
+    ar.production_year DESC;
+
+-- Additionally, to demonstrate a NULL logic scenario:
+SELECT 
+    DISTINCT 
+    k.keyword,
+    COUNT(mk.movie_id) AS movie_keyword_count
+FROM 
+    keyword AS k
+LEFT JOIN 
+    movie_keyword AS mk ON k.id = mk.keyword_id
+RIGHT JOIN 
+    aka_title AS t ON mk.movie_id = t.id
+WHERE 
+    mk.movie_id IS NULL OR k.keyword IS NULL
+GROUP BY 
+    k.keyword
+HAVING 
+    COUNT(mk.movie_id) > 1
+ORDER BY 
+    keyword;

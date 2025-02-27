@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 500
+), OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS daily_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    GROUP BY o.o_orderkey, o.o_orderdate
+), CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS customer_total
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+), TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, cp.customer_total
+    FROM customer c
+    JOIN CustomerPurchases cp ON c.c_custkey = cp.c_custkey
+    ORDER BY cp.customer_total DESC
+    LIMIT 10
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    CASE 
+        WHEN MAX(o.o_orderstatus) IS NULL THEN 'No Orders' 
+        ELSE 'Has Orders' 
+    END AS order_status,
+    STRING_AGG(DISTINCT CONCAT(DISTINCT c.c_name, ' (', c.c_custkey, ')')) AS customers
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN TopCustomers tc ON o.o_custkey = tc.c_custkey
+JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+GROUP BY p.p_name
+HAVING AVG(ps.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+AND COUNT(DISTINCT l.l_orderkey) > 0;

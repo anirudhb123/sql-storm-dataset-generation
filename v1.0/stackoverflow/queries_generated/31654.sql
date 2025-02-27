@@ -1,0 +1,76 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        rps.Level + 1
+    FROM Posts p
+    JOIN RecursivePostStats rps ON p.ParentId = rps.PostId
+),
+BadgeStats AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(Date) AS LastEarnedBadgeDate,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+),
+VoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        PostId,
+        MAX(CASE WHEN PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN PostHistoryTypeId = 12 THEN 1 ELSE 0 END) AS IsDeleted
+    FROM PostHistory
+    GROUP BY PostId
+)
+SELECT 
+    rps.PostId,
+    rps.Title,
+    rps.CreationDate,
+    rps.Score,
+    rps.ViewCount,
+    rps.AnswerCount,
+    rps.CommentCount,
+    COALESCE(bs.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(bs.LastEarnedBadgeDate, 'No Badges') AS LastEarnedBadgeDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(ph.IsClosed, 0) AS IsClosed,
+    COALESCE(ph.IsDeleted, 0) AS IsDeleted
+FROM RecursivePostStats rps
+LEFT JOIN BadgeStats bs ON rps.OwnerUserId = bs.UserId
+LEFT JOIN VoteStats vs ON rps.PostId = vs.PostId
+LEFT JOIN PostHistoryStats ph ON rps.PostId = ph.PostId
+WHERE 
+    rps.Score > 10 -- Only show posts with a score greater than 10
+ORDER BY 
+    rps.ViewCount DESC, 
+    rps.CreationDate ASC
+LIMIT 100;

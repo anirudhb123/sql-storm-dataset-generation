@@ -1,0 +1,45 @@
+WITH TagStatistics AS (
+    SELECT
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopUsers,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM
+        Tags t
+    LEFT JOIN
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    GROUP BY
+        t.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageScore,
+        TopUsers,
+        BadgeCount,
+        DENSE_RANK() OVER (ORDER BY PostCount DESC) AS RankByPostCount
+    FROM
+        TagStatistics
+)
+
+SELECT
+    tt.TagName,
+    tt.PostCount,
+    tt.TotalViews,
+    tt.AverageScore,
+    tt.TopUsers,
+    tt.BadgeCount
+FROM
+    TopTags tt
+WHERE
+    tt.RankByPostCount <= 10
+ORDER BY
+    tt.RankByPostCount;

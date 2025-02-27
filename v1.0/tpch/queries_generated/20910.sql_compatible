@@ -1,0 +1,50 @@
+
+WITH RECURSIVE CTE_NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name IS NOT NULL)
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, ch.level + 1
+    FROM nation n
+    JOIN CTE_NationHierarchy ch ON n.n_regionkey = ch.n_nationkey
+), 
+CTE_SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        AVG(s.s_acctbal) OVER (PARTITION BY s.s_nationkey) AS avg_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CTE_CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+)
+SELECT 
+    n.n_name AS Nation,
+    COALESCE(sd.total_supplycost, 0) AS TotalSupplyCost,
+    COALESCE(cd.total_orders, 0) AS TotalOrders,
+    sd.unique_parts AS UniqueParts,
+    sd.avg_acctbal AS AverageAccountBalance,
+    COALESCE(cd.total_spent, 0) AS TotalSpent,
+    EXTRACT(YEAR FROM DATE '1998-10-01') - EXTRACT(YEAR FROM COALESCE(cd.last_order_date, DATE '1900-01-01')) AS YearsSinceLastOrder
+FROM CTE_NationHierarchy n
+LEFT JOIN CTE_SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+FULL OUTER JOIN CTE_CustomerOrders cd ON n.n_nationkey = cd.c_custkey
+WHERE COALESCE(sd.total_supplycost, 0) > (SELECT AVG(total_supplycost) FROM CTE_SupplierDetails)
+  OR cd.total_orders IS NULL
+ORDER BY Nation DESC, TotalSpent DESC
+LIMIT 100;

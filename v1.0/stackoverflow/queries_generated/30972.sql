@@ -1,0 +1,47 @@
+WITH RecursiveTagCount AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(t.Id) AS TagCount
+    FROM Posts p
+    JOIN Tags t ON t.ExcerptPostId = p.Id OR t.WikiPostId = p.Id
+    GROUP BY p.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(u.CreationDate) AS FirstActiveDate
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id
+),
+PostAggregates AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        MAX(p.LastActivityDate) AS LatestActivity,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY p.Id, p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    tc.TagCount,
+    pa.LatestActivity,
+    pa.UpVotes,
+    pa.DownVotes,
+    ROW_NUMBER() OVER (PARTITION BY pa.OwnerUserId ORDER BY pa.LatestActivity DESC) AS Rank
+FROM UserReputation u
+JOIN PostAggregates pa ON u.UserId = pa.OwnerUserId
+LEFT JOIN RecursiveTagCount tc ON pa.PostId = tc.PostId
+WHERE u.Reputation > 1000
+  AND pa.UpVotes > pa.DownVotes
+  AND (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = u.Id AND CreationDate > NOW() - INTERVAL '1 year') > 5
+ORDER BY u.Reputation DESC
+LIMIT 100;

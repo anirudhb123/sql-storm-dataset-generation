@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.movie_id AS parent_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    COALESCE(title.title, 'Unknown Title') AS MovieTitle,
+    COUNT(DISTINCT ci.person_id) AS TotalCast,
+    COUNT(DISTINCT mc.company_id) AS TotalCompanies,
+    AVG(CASE 
+            WHEN mi.info IS NULL THEN 0 
+            ELSE LENGTH(mi.info)
+        END) AS AvgInfoLength,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS Keywords
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Plot')
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    aka_name an ON an.person_id = ci.person_id
+WHERE 
+    (mh.production_year >= 2000 OR mh.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie'))
+    AND (an.name IS NOT NULL OR an.name <> '') 
+GROUP BY 
+    mh.movie_id, mh.title
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    TotalCast DESC, MovieTitle ASC;
+
+This SQL query uses a Common Table Expression (CTE) to create a recursive hierarchy of movies based on their links. It calculates aggregate values, handles potential NULL situations using the COALESCE function, and incorporates various joins to gather comprehensive data from the schema. The use of `STRING_AGG` creates a list of keywords that are associated with each movie, while the `HAVING` clause filters out movies without any cast members.

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 
+           ca_country, 0 AS Level
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    
+    UNION ALL
+    
+    SELECT ca_address_sk, ca_city, ca_state, ca_zip, 
+           ca_country, Level + 1
+    FROM customer_address
+    JOIN AddressHierarchy ON AddressHierarchy.ca_address_sk = customer.c_current_addr_sk
+    WHERE customer.c_current_addr_sk IS NOT NULL
+),
+SalesSummary AS (
+    SELECT ws_bill_cdemo_sk,
+           SUM(ws_ext_sales_price) AS Total_Sales,
+           COUNT(ws_order_number) AS Order_Count
+    FROM web_sales
+    WHERE ws_sold_date_sk = (
+        SELECT d_date_sk FROM date_dim 
+        WHERE d_date = CURRENT_DATE
+    )
+    GROUP BY ws_bill_cdemo_sk
+),
+Demographics AS (
+    SELECT cd_demo_sk, cd_gender, cd_marital_status,
+           cd_purchase_estimate, cd_credit_rating
+    FROM customer_demographics
+),
+FinalSummary AS (
+    SELECT a.ca_city, a.ca_state, d.cd_gender, d.cd_marital_status, 
+           SUM(s.Total_Sales) AS Total_Sales,
+           COUNT(s.Order_Count) AS Total_Orders
+    FROM AddressHierarchy a
+    LEFT JOIN SalesSummary s ON s.ws_bill_cdemo_sk = a.ca_address_sk
+    JOIN Demographics d ON d.cd_demo_sk = s.ws_bill_cdemo_sk
+    GROUP BY a.ca_city, a.ca_state, d.cd_gender, d.cd_marital_status
+    HAVING SUM(s.Total_Sales) > 1000
+)
+SELECT f.ca_city, f.ca_state, f.cd_gender, f.cd_marital_status, 
+       f.Total_Sales, f.Total_Orders,
+       ROW_NUMBER() OVER (PARTITION BY f.ca_state ORDER BY Total_Sales DESC) AS Sales_Rank
+FROM FinalSummary f
+ORDER BY f.ca_state, f.Total_Sales DESC;

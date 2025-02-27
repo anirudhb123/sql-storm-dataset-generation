@@ -1,0 +1,43 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        (ws_sales_price * ws_quantity) AS total_sales,
+        1 AS level
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_quantity,
+        (cs_sales_price * cs_quantity) AS total_sales,
+        level + 1
+    FROM catalog_sales
+    WHERE cs_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+      AND level < 5  -- Limiting the recursion depth for benchmarking
+),
+ranked_sales AS (
+    SELECT
+        ss.ws_item_sk,
+        SUM(ss.total_sales) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ss.total_sales) DESC) AS sales_rank
+    FROM sales_summary ss
+    GROUP BY ss.ws_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    r.sales_rank,
+    COALESCE(r.total_sales, 0) AS total_sales
+FROM item i
+LEFT JOIN ranked_sales r ON i.i_item_sk = r.ws_item_sk
+WHERE r.sales_rank <= 10 OR r.sales_rank IS NULL
+ORDER BY total_sales DESC, i.i_item_id
+LIMIT 20;

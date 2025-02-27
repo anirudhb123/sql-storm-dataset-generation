@@ -1,0 +1,32 @@
+
+SELECT 
+    n.name AS person_name,
+    a.title AS movie_title,
+    c.note AS role_note,
+    ci.kind AS cast_type,
+    t.production_year,
+    k.keyword AS keyword
+FROM 
+    name n
+JOIN 
+    aka_name a_n ON n.id = a_n.person_id
+JOIN 
+    cast_info c ON n.id = c.person_id
+JOIN 
+    aka_title a ON c.movie_id = a.id
+JOIN 
+    complete_cast cc ON a.id = cc.movie_id
+JOIN 
+    movie_info mi ON a.id = mi.movie_id
+JOIN 
+    keyword k ON mi.info_type_id = k.id
+JOIN 
+    kind_type t ON a.kind_id = t.id
+JOIN 
+    comp_cast_type ci ON c.role_id = ci.id
+WHERE 
+    t.kind = 'movie'
+GROUP BY 
+    n.name, a.title, c.note, ci.kind, t.production_year, k.keyword
+ORDER BY 
+    t.production_year DESC, person_name;

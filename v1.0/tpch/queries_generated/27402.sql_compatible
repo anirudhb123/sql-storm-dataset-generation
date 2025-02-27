@@ -1,0 +1,49 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn,
+        p.p_name
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+AggregatePurchases AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        STRING_AGG(DISTINCT s.s_name, ', ') AS top_suppliers
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        RankedSuppliers rs ON rs.s_suppkey = ps.ps_suppkey AND rs.rn = 1
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    a.total_revenue,
+    a.order_count,
+    a.top_suppliers
+FROM 
+    AggregatePurchases a
+JOIN 
+    part p ON a.p_partkey = p.p_partkey
+WHERE 
+    a.total_revenue > 10000
+ORDER BY 
+    a.total_revenue DESC;

@@ -1,0 +1,79 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 -- Starting with Answers
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.ParentId
+    WHERE 
+        p.PostTypeId = 2 -- Joining Back to Answers
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.PostCount,
+    up.QuestionCount,
+    up.AnswerCount,
+    ph.Level,
+    ph.Title AS AnswerTitle,
+    pvs.UpVotes,
+    pvs.DownVotes
+FROM 
+    UserReputation up
+JOIN 
+    RecursivePostHierarchy ph ON up.UserId = ph.OwnerUserId
+JOIN 
+    PostVoteSummary pvs ON ph.PostId = pvs.PostId
+WHERE 
+    up.Reputation > 1000 -- Filter users by reputation
+ORDER BY 
+    up.Reputation DESC,
+    ph.Level,
+    ph.AnswerTitle;
+
+-- Calculate the highest reputation users with answers, along with the hierarchy of answers, filtering to those with significant user reputation. 

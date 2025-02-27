@@ -1,0 +1,57 @@
+WITH RankedTitles AS (
+    SELECT
+        title.id AS title_id,
+        title.title,
+        title.production_year,
+        title.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.title) AS title_rank
+    FROM title
+    WHERE title.production_year IS NOT NULL
+),
+CorrelatedActors AS (
+    SELECT
+        aka_name.person_id,
+        aka_name.name,
+        COUNT(DISTINCT cast_info.movie_id) AS movie_count
+    FROM aka_name
+    JOIN cast_info ON aka_name.person_id = cast_info.person_id
+    GROUP BY aka_name.person_id, aka_name.name
+),
+CompanyTitles AS (
+    SELECT
+        movie_companies.movie_id,
+        company_name.name AS company_name,
+        company_type.kind AS company_type
+    FROM movie_companies
+    JOIN company_name ON movie_companies.company_id = company_name.id
+    JOIN company_type ON movie_companies.company_type_id = company_type.id
+),
+MovieInfo AS (
+    SELECT
+        movie_info.movie_id,
+        STRING_AGG(movie_info.info, '; ') AS all_info
+    FROM movie_info
+    GROUP BY movie_info.movie_id
+)
+SELECT
+    t.title AS Movie_Title,
+    ct.company_name AS Production_Company,
+    r.movie_count AS Actor_Count,
+    mi.all_info AS Movie_Information,
+    t.production_year AS Release_Year,
+    COALESCE(t.kind_id, 0) AS Kind_ID, 
+    CASE 
+        WHEN r.movie_count > 5 THEN 'Prolific Actor'
+        WHEN r.movie_count IS NULL THEN 'No Movies Found'
+        ELSE 'Occasional Actor'
+    END AS Actor_Classification
+FROM RankedTitles t
+LEFT JOIN CompanyTitles ct ON t.title_id = ct.movie_id
+LEFT JOIN CorrelatedActors r ON r.movie_count > 0 AND EXISTS (
+    SELECT 1
+    FROM cast_info ci
+    WHERE ci.movie_id = t.title_id AND ci.person_id = r.person_id
+)
+LEFT JOIN MovieInfo mi ON t.title_id = mi.movie_id
+ORDER BY t.production_year DESC, t.title
+LIMIT 100 OFFSET 50;

@@ -1,0 +1,111 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA' AND
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        c.country_code = 'USA'
+),
+
+ActorRoles AS (
+    SELECT 
+        a.person_id,
+        a.id AS actor_id,
+        n.name AS actor_name,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles_played,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    JOIN 
+        name n ON a.person_id = n.imdb_id
+    WHERE 
+        n.gender = 'M'
+    GROUP BY 
+        a.person_id, n.name, a.id
+),
+
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id, m.title
+),
+
+FinalBenchmark AS (
+    SELECT 
+        mh.movie_title,
+        mh.production_year,
+        ar.actor_name,
+        ar.roles_played,
+        mwk.keyword_count,
+        COALESCE(mw.movie_count, 0) AS total_movies 
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        ActorRoles ar ON mh.movie_id = ar.movie_id
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON mh.movie_id = mwk.movie_id
+    LEFT JOIN 
+        (SELECT 
+            ci.person_id,
+            COUNT(DISTINCT ci.movie_id) AS movie_count
+         FROM 
+            cast_info ci
+         GROUP BY 
+            ci.person_id) mw ON ar.actor_id = mw.person_id
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN total_movies > 10 THEN 'Popular Actor'
+        WHEN total_movies BETWEEN 5 AND 10 THEN 'Moderately Known'
+        ELSE 'Less Known'
+    END AS actor_popularity
+FROM 
+    FinalBenchmark
+WHERE 
+    mh.production_year IS NOT NULL
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC, 
+    total_movies DESC
+LIMIT 100;

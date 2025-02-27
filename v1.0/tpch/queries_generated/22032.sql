@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) -- Only suppliers with above-average account balance
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 -- Limiting recursion depth for performance
+), 
+
+AggregatedSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+)
+
+SELECT 
+    n.n_name,
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    AVG(COALESCE(ps.total_supply_cost, 0)) AS avg_supply_cost,
+    MAX(CASE WHEN so.lookup_key IS NOT NULL THEN 'Yes' ELSE 'No' END) AS is_supplier_related,
+    SUM(CASE WHEN so.lookup_key IS NOT NULL THEN so.total_sales ELSE 0 END) AS total_related_sales
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN (
+    SELECT ps.ps_partkey, ss.total_sales, ss.lookup_key
+    FROM PartSupplierInfo ps
+    LEFT JOIN (SELECT l_orderkey AS lookup_key, total_sales FROM AggregatedSales) ss ON ps.ps_partkey = ss.lookup_key
+) so ON so.lookup_key = c.c_custkey
+-- Cross join to include all regions regardless of nation correlation
+FULL OUTER JOIN supplier s ON s.s_nationkey = n.n_nationkey
+WHERE r.r_name IS NOT NULL OR n.n_name IS NULL -- Including some obscure NULL logic
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5 -- Selecting only nations with more than 5 customers
+ORDER BY 1, 2;

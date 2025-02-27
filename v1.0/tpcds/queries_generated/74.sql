@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.bill_customer_sk,
+        ws.item_sk,
+        ws_net_paid,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_net_paid DESC) AS sales_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') AND (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31')
+),
+TotalReturns AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_return_amt,
+        COUNT(*) AS return_count
+    FROM
+        web_returns wr
+    GROUP BY
+        wr.returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        ca.ca_state
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        ca.ca_state IN ('CA', 'NY')
+)
+
+SELECT
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_credit_rating,
+    COALESCE(SUM(rs.ws_net_paid), 0) AS total_sales,
+    COALESCE(SUM(tr.total_return_amt), 0) AS total_returns,
+    COUNT(DISTINCT rs.item_sk) AS unique_items_sold,
+    CASE
+        WHEN COUNT(DISTINCT rs.item_sk) = 0 THEN 'No purchases'
+        WHEN COUNT(DISTINCT rs.item_sk) > 5 THEN 'Frequent buyer'
+        ELSE 'Occasional buyer'
+    END AS customer_type
+FROM
+    CustomerDemographics cd
+LEFT JOIN
+    RankedSales rs ON cd.cd_demo_sk = rs.bill_customer_sk AND rs.sales_rank <= 5
+LEFT JOIN
+    TotalReturns tr ON cd.cd_demo_sk = tr.returning_customer_sk
+GROUP BY
+    cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+HAVING
+    SUM(rs.ws_net_paid) > 1000 OR SUM(tr.total_return_amt) > 500
+ORDER BY
+    total_sales DESC, total_returns DESC;

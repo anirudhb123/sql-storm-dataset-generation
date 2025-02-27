@@ -1,0 +1,64 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(ci.person_id) AS total_cast,
+        DENSE_RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        ranked_movies
+    WHERE 
+        rank = 1
+)
+SELECT 
+    tm.title, 
+    tm.production_year,
+    (SELECT 
+         GROUP_CONCAT(a.name ORDER BY ac.nr_order) 
+     FROM 
+         cast_info ac 
+     JOIN 
+         aka_name a ON ac.person_id = a.person_id 
+     WHERE 
+         ac.movie_id IN (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year)
+     GROUP BY 
+         ac.movie_id) AS cast_names,
+    (SELECT 
+         COUNT(DISTINCT mk.keyword) 
+     FROM 
+         movie_keyword mk 
+     JOIN 
+         aka_title at ON mk.movie_id = at.id 
+     WHERE 
+         at.title = tm.title AND at.production_year = tm.production_year) AS keyword_count,
+    COALESCE(
+        (SELECT 
+             AVG(m.info::INTEGER) 
+         FROM 
+             movie_info m 
+         JOIN 
+             info_type it ON m.info_type_id = it.id 
+         WHERE 
+             m.movie_id IN (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year)
+             AND it.info ILIKE '%budget%'
+        ), 0) AS average_budget
+FROM 
+    top_movies tm
+WHERE 
+    tm.production_year > 2000 
+ORDER BY 
+    tm.production_year DESC;

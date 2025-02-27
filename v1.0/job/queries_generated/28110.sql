@@ -1,0 +1,40 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank
+    FROM aka_title a
+    JOIN movie_keyword mk ON a.id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    WHERE LOWER(k.keyword) LIKE '%drama%'
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        r.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    JOIN role_type r ON c.role_id = r.id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ar.actor_name,
+        ar.role_type
+    FROM RankedMovies rm
+    LEFT JOIN ActorRoles ar ON rm.movie_id = ar.movie_id
+)
+SELECT 
+    mwa.title,
+    mwa.production_year,
+    STRING_AGG(DISTINCT mwa.actor_name || ' as ' || mwa.role_type, ', ' ORDER BY mwa.actor_rank) AS cast_list
+FROM MoviesWithActors mwa
+GROUP BY mwa.title, mwa.production_year
+HAVING COUNT(mwa.actor_name) >= 3
+ORDER BY mwa.production_year DESC, mwa.title;

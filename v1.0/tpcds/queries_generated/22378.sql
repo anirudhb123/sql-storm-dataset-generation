@@ -1,0 +1,54 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+TopItems AS (
+    SELECT
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.total_quantity
+    FROM RankedSales rs
+    WHERE rs.price_rank = 1 AND rs.total_quantity > 10
+),
+CustomerReturns AS (
+    SELECT
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returns
+    FROM catalog_returns cr
+    WHERE cr.cr_returned_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                                      AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY cr.cr_item_sk
+),
+FinalSales AS (
+    SELECT
+        ti.ws_item_sk,
+        ti.ws_order_number,
+        ti.ws_sales_price,
+        COALESCE(cr.total_returns, 0) AS return_count,
+        CASE 
+            WHEN COALESCE(cr.total_returns, 0) > 0 THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status
+    FROM TopItems ti
+    LEFT JOIN CustomerReturns cr ON ti.ws_item_sk = cr.cr_item_sk
+)
+SELECT
+    f.ws_item_sk,
+    COUNT(DISTINCT f.ws_order_number) AS order_count,
+    SUM(f.ws_sales_price * f.total_quantity) AS total_sales,
+    AVG(f.ws_sales_price) AS avg_sales_price,
+    STRING_AGG(f.return_status, ', ') AS return_statuses
+FROM FinalSales f
+GROUP BY f.ws_item_sk
+HAVING SUM(f.ws_sales_price * f.total_quantity) > 1000
+ORDER BY total_sales DESC
+LIMIT 10;

@@ -1,0 +1,26 @@
+
+SELECT 
+    ca.city AS customer_city, 
+    cd.edu_status AS customer_education,
+    SUM(ws.ws_sales_price) AS total_sales,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    d.d_year AS sales_year
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    ca.ca_state = 'CA'
+    AND cd.cd_gender = 'M'
+    AND d.d_year BETWEEN 2020 AND 2023
+GROUP BY 
+    ca.city, cd.edu_status, d.d_year
+ORDER BY 
+    total_sales DESC, order_count DESC
+LIMIT 100;

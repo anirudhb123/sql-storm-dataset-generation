@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank_per_region
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartWithPrice AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           (SELECT AVG(l.l_quantity) 
+            FROM lineitem l 
+            WHERE l.l_partkey = p.p_partkey 
+              AND l.l_shipdate BETWEEN DATE '1997-10-01' AND DATE '1998-10-01') AS avg_quantity_last_year
+    FROM part p
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, 
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+    HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(r.rank_per_region, 0) AS supplier_rank,
+    pt.avg_quantity_last_year,
+    tc.c_name AS top_customer_name,
+    tc.total_spent AS total_customer_spent
+FROM partsupp ps
+JOIN PartWithPrice p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN RankedSuppliers r ON ps.ps_suppkey = r.s_suppkey
+LEFT JOIN TopCustomers tc ON tc.total_spent = (SELECT MAX(total_spent) FROM TopCustomers)
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+  AND (ps.ps_availqty IS NULL OR ps.ps_availqty > 10)
+  AND EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = ps.ps_partkey AND l.l_discount > 0.1)
+ORDER BY p.p_name, supplier_rank DESC
+LIMIT 100;

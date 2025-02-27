@@ -1,0 +1,73 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM title m
+    WHERE m.episode_of_id IS NULL
+
+    UNION ALL 
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.depth + 1
+    FROM title e
+    JOIN movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+actor_career AS (
+    SELECT 
+        c.person_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movies_appeared,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ak.person_id
+    JOIN title t ON c.movie_id = t.id
+    GROUP BY c.person_id, ak.name
+),
+awards_info AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT pi.info_type_id) AS award_count
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    WHERE it.info LIKE '%Award%'
+    GROUP BY mi.movie_id
+),
+movies_with_awards AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ai.award_count, 0) AS award_count
+    FROM movie_hierarchy mh
+    LEFT JOIN awards_info ai ON mh.movie_id = ai.movie_id
+),
+top_actors AS (
+    SELECT 
+        ac.actor_name,
+        ac.movies_appeared,
+        ROW_NUMBER() OVER (ORDER BY ac.movies_appeared DESC) AS rank
+    FROM actor_career ac
+)
+SELECT 
+    m.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    m.award_count AS Awards,
+    ta.actor_name AS Top_Actor,
+    ta.movies_appeared AS Actor_Movie_Count
+FROM movies_with_awards m
+JOIN top_actors ta ON m.movie_id = (
+    SELECT c.movie_id
+    FROM cast_info c
+    JOIN aka_name ak ON c.person_id = ta.person_id
+    WHERE ak.name = ta.actor_name
+    ORDER BY c.nr_order
+    LIMIT 1
+)
+WHERE m.award_count > 0
+ORDER BY m.award_count DESC, m.production_year DESC;

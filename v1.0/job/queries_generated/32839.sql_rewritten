@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT
+    eh.movie_id,
+    eh.title,
+    eh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    MAX(CASE WHEN pi.info_type_id = 1 THEN pi.info ELSE NULL END) AS birth_dates,
+    MIN(CASE WHEN pi.info_type_id = 2 THEN pi.info ELSE NULL END) AS death_dates
+FROM
+    MovieHierarchy eh
+LEFT JOIN
+    complete_cast cc ON eh.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info c ON cc.subject_id = c.person_id
+LEFT JOIN
+    aka_name a ON c.person_id = a.person_id
+LEFT JOIN
+    person_info pi ON a.person_id = pi.person_id
+GROUP BY
+    eh.movie_id, eh.title, eh.production_year
+HAVING
+    AVG(CASE WHEN pi.info_type_id = 1 THEN EXTRACT(YEAR FROM cast('2024-10-01' as date)) - EXTRACT(YEAR FROM pi.info::date) END) > 30
+ORDER BY
+    total_cast DESC, eh.production_year ASC
+LIMIT 10;

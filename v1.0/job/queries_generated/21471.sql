@@ -1,0 +1,73 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id) AS year_rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        rt.role,
+        COUNT(CASE WHEN ci.role_id IS NULL THEN 1 END) AS null_role_count
+    FROM 
+        cast_info ci
+    LEFT JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, ci.person_id, rt.role
+),
+CompanyMovieCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        cn.country_code IS NOT NULL
+    GROUP BY 
+        mc.movie_id
+),
+KeywordMovies AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    COALESCE(km.keywords, 'No Keywords') AS keywords,
+    COALESCE(cmc.company_count, 0) AS company_count,
+    CAST(NULLIF(cr.null_role_count, 0) AS BOOLEAN) AS has_null_roles,
+    ROW_NUMBER() OVER (ORDER BY rm.production_year DESC, rm.title) AS overall_rank
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoles cr ON rm.movie_id = cr.movie_id
+LEFT JOIN 
+    CompanyMovieCounts cmc ON rm.movie_id = cmc.movie_id
+LEFT JOIN 
+    KeywordMovies km ON rm.movie_id = km.movie_id
+WHERE 
+    rm.production_year >= 2000 
+    AND (rm.title ILIKE '%action%' OR rm.title ILIKE '%drama%')
+    AND NOT EXISTS (
+        SELECT 1 FROM movie_info mi
+        WHERE mi.movie_id = rm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Unreleased')
+    )
+ORDER BY 
+    overall_rank;

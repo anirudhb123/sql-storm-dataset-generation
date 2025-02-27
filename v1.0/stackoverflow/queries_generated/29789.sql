@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- We're only interested in Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.Score, p.ViewCount
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        COUNT(*) AS PostCount,
+        SUM(Score) AS TotalScore,
+        SUM(ViewCount) AS TotalViews
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        UserId
+    HAVING 
+        COUNT(*) >= 5  -- Only consider users with at least 5 posts
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    p.Title,
+    p.Body,
+    p.CreationDate,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    pt.Name AS PostType,
+    rt.Tag AS PopularTag,
+    u.Reputation AS OwnerReputation,
+    r.PostCount AS UserPostCount,
+    r.TotalScore AS UserTotalScore,
+    r.TotalViews AS UserTotalViews,
+    tc.CommentCount
+FROM 
+    RankedPosts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    PopularTags rt ON p.Tags LIKE '%' || rt.Tag || '%'
+LEFT JOIN 
+    TopUsers r ON u.Id = r.UserId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) tc ON p.PostId = tc.PostId
+WHERE 
+    p.UserPostRank <= 3  -- Get the latest three posts per user
+ORDER BY 
+    p.CreationDate DESC;

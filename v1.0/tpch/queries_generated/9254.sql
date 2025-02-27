@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+CustomerGroup AS (
+    SELECT 
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_mktsegment
+)
+SELECT 
+    rg.n_name AS nation_name,
+    rg.region_count,
+    SUM(cg.total_orders) AS total_orders_from_customers,
+    AVG(cg.total_spent) AS average_spent_per_customer,
+    AVG(sp.total_available_quantity) AS average_available_quantity,
+    AVG(sp.total_supply_cost) AS average_supply_cost
+FROM 
+    nation rg
+JOIN 
+    region r ON rg.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerGroup cg ON rg.n_nationkey = cg.c_custkey
+LEFT JOIN 
+    SupplierParts sp ON sp.ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = rg.n_nationkey)
+GROUP BY 
+    rg.n_name, rg.n_nationkey
+ORDER BY 
+    total_orders_from_customers DESC
+LIMIT 100;

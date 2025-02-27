@@ -1,0 +1,70 @@
+
+WITH Address_City_St AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+Demographics_Stats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demographics_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+Sales_Summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+City_Demographics AS (
+    SELECT 
+        a.ca_city,
+        a.ca_state,
+        d.cd_gender,
+        d.demographics_count,
+        d.avg_purchase_estimate
+    FROM 
+        Address_City_St a
+    JOIN 
+        Demographics_Stats d ON (a.address_count > 100 AND d.demographics_count > 10)
+),
+Final_Stats AS (
+    SELECT 
+        c.city,
+        c.state,
+        SUM(s.total_sales) AS total_sales,
+        SUM(s.order_count) AS total_orders,
+        AVG(d.avg_purchase_estimate) AS average_purchase_estimate
+    FROM 
+        City_Demographics c
+    LEFT JOIN 
+        Sales_Summary s ON (s.ws_bill_customer_sk = c.ca_city)
+    GROUP BY 
+        c.city, c.state
+)
+SELECT 
+    city,
+    state,
+    total_sales,
+    total_orders,
+    average_purchase_estimate,
+    CONCAT(city, ', ', state, ' - ', FORMAT(total_sales, 2)) AS sales_info
+FROM 
+    Final_Stats
+WHERE 
+    total_sales > 10000
+ORDER BY 
+    total_sales DESC;

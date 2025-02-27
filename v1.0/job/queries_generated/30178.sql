@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000  -- Filter for movies from 2000 onwards
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    mh.level,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COUNT(DISTINCT cc.id) AS cast_count,
+    SUM(CASE WHEN cc.note IS NOT NULL THEN 1 ELSE 0 END) AS additional_roles,
+    AVG(CASE 
+        WHEN cc.nr_order IS NOT NULL THEN cc.nr_order 
+        ELSE NULL 
+      END) AS avg_order
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    aka_name ak ON cc.subject_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    mh.kind_id IN (1, 2)  -- Assuming 1 and 2 represent specific kinds (e.g., 'feature', 'documentary')
+    AND mh.production_year IS NOT NULL
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mh.movie_title, mh.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT cc.id) > 1  -- Only consider actors with more than one role in the results
+ORDER BY 
+    mh.production_year DESC, 
+    actor_name;

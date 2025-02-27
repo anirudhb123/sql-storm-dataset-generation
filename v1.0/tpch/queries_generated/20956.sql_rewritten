@@ -1,0 +1,65 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_price
+    FROM 
+        part AS p
+    WHERE 
+        p.p_retailprice IS NOT NULL AND 
+        p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 50)
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders AS o
+    JOIN 
+        lineitem AS l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -3, cast('1998-10-01' as date))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+SuppliersWithHighAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp AS ps 
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey 
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+)
+SELECT 
+    r.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(p.p_retailprice) AS total_part_value,
+    MAX(ro.total_sales) AS max_recent_sales
+FROM 
+    nation AS r
+LEFT JOIN 
+    supplier AS s ON r.r_regionkey = s.s_nationkey
+LEFT JOIN 
+    customer AS c ON s.s_suppkey = c.c_custkey
+LEFT JOIN 
+    RankedParts AS p ON p.p_partkey IN (SELECT ps.ps_partkey FROM SuppliersWithHighAvailability ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN 
+    RecentOrders AS ro ON c.c_custkey = ro.o_custkey
+WHERE 
+    (r.r_name LIKE '%land%' OR r.r_comment IS NULL)
+GROUP BY 
+    r.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5 AND 
+    SUM(p.p_retailprice) IS NOT NULL
+ORDER BY 
+    total_part_value DESC, 
+    customer_count ASC, 
+    r.n_name;

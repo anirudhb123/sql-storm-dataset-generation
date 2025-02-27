@@ -1,0 +1,67 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+               CASE 
+                   WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' THEN CONCAT(' Suite ', TRIM(ca_suite_number)) 
+                   ELSE '' 
+               END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(TRIM(c.c_first_name), ' ', TRIM(c.c_last_name)) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ad.full_address,
+        ad.ca_city,
+        ad.ca_state,
+        ad.ca_zip,
+        ad.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressDetails ad ON c.c_current_addr_sk = ad.ca_address_id
+),
+SalesSummaries AS (
+    SELECT 
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ws.ws_bill_customer_sk AS customer_sk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cd.full_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.order_count, 0) AS order_count,
+    cd.full_address,
+    cd.ca_city,
+    cd.ca_state,
+    cd.ca_zip,
+    cd.ca_country
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesSummaries ss ON cd.c_customer_id = ss.customer_sk
+ORDER BY 
+    total_sales DESC, order_count DESC
+LIMIT 100;

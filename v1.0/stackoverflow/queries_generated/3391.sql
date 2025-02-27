@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositiveScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(p.Id) > 5
+),
+
+PostComments AS (
+    SELECT 
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS CommentRank
+    FROM 
+        Comments c
+)
+
+SELECT 
+    p.Title,
+    p.CreationDate,
+    u.DisplayName AS PostOwner,
+    COALESCE(c.Text, 'No Comments') AS LatestComment,
+    COALESCE(c.CreationDate, 'N/A') AS LatestCommentDate,
+    u.TotalPosts,
+    u.PositiveScore,
+    CASE 
+        WHEN p.Score > 10 THEN 'High Engagement'
+        WHEN p.Score BETWEEN 1 AND 10 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    RankedPosts rp
+JOIN 
+    MostActiveUsers u ON rp.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostComments c ON rp.PostId = c.PostId AND c.CommentRank = 1
+WHERE 
+    rp.UserPostRank <= 3
+ORDER BY 
+    u.TotalPosts DESC, rp.CreationDate DESC
+LIMIT 100;

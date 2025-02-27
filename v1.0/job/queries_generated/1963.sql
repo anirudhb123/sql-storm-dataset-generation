@@ -1,0 +1,55 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+CompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(cn.name) AS company_names,
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name cn ON m.company_id = cn.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, ct.kind
+),
+DetailedMovieInfo AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        ci.company_names,
+        ci.company_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyInfo ci ON rm.title = ci.movie_id
+    WHERE 
+        rm.year_rank <= 5 -- Top 5 movies per year
+)
+
+SELECT 
+    d.title,
+    d.production_year,
+    d.cast_count,
+    d.company_names,
+    d.company_type,
+    COALESCE(d.cast_count, 0) AS adjusted_cast_count
+FROM 
+    DetailedMovieInfo d
+WHERE 
+    d.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    d.production_year DESC, d.cast_count DESC;

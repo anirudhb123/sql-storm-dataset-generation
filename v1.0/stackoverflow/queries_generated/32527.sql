@@ -1,0 +1,66 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        p.Tags,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostCTE cte ON p.ParentId = cte.PostId
+), 
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5) THEN 1 END) AS EditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT
+    r.PostId,
+    r.Title,
+    r.ViewCount,
+    r.AnswerCount,
+    r.Tags,
+    pvs.UpVotes,
+    pvs.DownVotes,
+    phd.LastEditDate,
+    phd.EditCount,
+    phd.CloseCount,
+    CASE 
+        WHEN phd.CloseCount > 0 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus
+FROM RecursivePostCTE r
+LEFT JOIN PostVoteSummary pvs ON r.PostId = pvs.PostId
+LEFT JOIN PostHistoryDetail phd ON r.PostId = phd.PostId
+WHERE 
+    r.Level = 0 AND -- taking only the root posts
+    r.ViewCount > 50 AND -- posts with more than 50 views
+    (pvs.UpVotes IS NULL OR pvs.UpVotes - pvs.DownVotes > 10) -- net positive votes
+ORDER BY 
+    r.AnswerCount DESC, 
+    r.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

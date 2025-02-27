@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS year_order
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), 
+ActorMovies AS (
+    SELECT 
+        a.person_id, 
+        a.movie_id, 
+        ak.name AS actor_name,
+        COUNT(*) OVER (PARTITION BY a.person_id) AS movie_count
+    FROM 
+        cast_info a
+    JOIN 
+        aka_name ak ON a.person_id = ak.person_id
+), 
+TopActors AS (
+    SELECT 
+        am.person_id, 
+        am.actor_name,
+        am.movie_count
+    FROM 
+        ActorMovies am
+    WHERE 
+        am.movie_count > 5
+), 
+MovieCompanies AS (
+    SELECT 
+        m.movie_id, 
+        c.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    WHERE 
+        ct.kind IN ('Production', 'Distributor')
+), 
+TopMovies AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT m.id) AS company_count
+    FROM 
+        complete_cast c
+    JOIN 
+        MovieCompanies m ON c.movie_id = m.movie_id
+    GROUP BY 
+        c.movie_id
+    HAVING 
+        COUNT(DISTINCT m.id) > 2
+)
+
+SELECT 
+    m.movie_title,
+    m.production_year,
+    ta.actor_name,
+    ta.movie_count,
+    mc.company_count
+FROM 
+    MovieCTE m
+JOIN 
+    TopMovies mc ON m.movie_id = mc.movie_id
+JOIN 
+    TopActors ta ON ta.person_id = (SELECT person_id FROM cast_info WHERE movie_id = mc.movie_id LIMIT 1)
+ORDER BY 
+    m.production_year DESC, 
+    mc.company_count DESC, 
+    ta.movie_count DESC;
+
+This SQL query uses a combination of Common Table Expressions (CTEs), including recursive CTEs, window functions, and various joins to retrieve information on movies, actors, and companies. It includes multiple levels of filtering to present an interesting analysis of top actors in movies that involved specific types of companies. The query also incorporates NULL checks, complex predicates, and set operations for better clarity in results.

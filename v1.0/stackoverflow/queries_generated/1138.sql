@@ -1,0 +1,72 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(COALESCE(CAST(v.BountyAmount AS FLOAT), 0)) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        PositivePosts,
+        NegativePosts,
+        AvgBounty,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStats
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerName,
+        COALESCE(c.CommentText, 'No comments yet') AS LatestComment,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY c.CreationDate DESC) AS CommentRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    tu.ReputationRank,
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.PositivePosts,
+    tu.NegativePosts,
+    tu.AvgBounty,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate AS PostDate,
+    rp.Score,
+    rp.OwnerName,
+    rp.LatestComment
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    RecentPosts rp ON tu.UserId = rp.OwnerName
+WHERE 
+    tu.Reputation > 1000
+ORDER BY 
+    tu.ReputationRank, rp.Score DESC;

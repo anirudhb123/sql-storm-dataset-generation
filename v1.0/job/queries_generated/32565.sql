@@ -1,0 +1,68 @@
+WITH RECURSIVE ActorHierarchy AS (
+    -- Anchor member: Find all leads (top-level actors) in movies and their roles
+    SELECT 
+        ca.person_id AS actor_id,
+        ca.movie_id,
+        ct.kind AS role_type,
+        1 AS level
+    FROM 
+        cast_info ca
+    JOIN 
+        comp_cast_type ct ON ca.person_role_id = ct.id
+    WHERE 
+        ct.kind LIKE 'lead%'
+    
+    UNION ALL
+    
+    -- Recursive member: Join movies with their sequels (if applicable)
+    SELECT 
+        ca.person_id,
+        ml.linked_movie_id AS movie_id,
+        AH.role_type,
+        AH.level + 1
+    FROM 
+        ActorHierarchy AH
+    JOIN 
+        movie_link ml ON AH.movie_id = ml.movie_id
+    WHERE 
+        ml.link_type_id IN (SELECT id FROM link_type WHERE link = 'sequel')
+)
+
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    ct.kind AS role_type,
+    COUNT(DISTINCT ah.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COALESCE(mci.note, 'No Note') AS company_note,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS recent_movie_rank
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title t ON ci.movie_id = t.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+LEFT JOIN 
+    movie_info_idx mii ON t.id = mii.movie_id
+LEFT JOIN 
+    (SELECT movie_id, note FROM movie_companies WHERE company_type_id = (SELECT id FROM company_type WHERE kind = 'production')) mci ON mc.movie_id = mci.movie_id
+LEFT JOIN 
+    ActorHierarchy ah ON ci.movie_id = ah.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+    AND a.name IS NOT NULL
+GROUP BY 
+    a.id, t.id, a.md5sum, mci.note, ct.kind
+ORDER BY 
+    recent_movie_rank, total_movies DESC;

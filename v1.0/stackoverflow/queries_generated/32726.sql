@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        1 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS HierarchyPath
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.ParentId,
+        RPH.Level + 1,
+        CAST(RPH.HierarchyPath + ' > ' + P2.Title AS VARCHAR(MAX))
+    FROM Posts P2
+    INNER JOIN RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+    WHERE P2.PostTypeId = 2 -- Answers
+),
+
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeleteVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 7 THEN 1 ELSE 0 END), 0) AS ReopenVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+
+ClosedPostHistory AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY PH.PostId
+)
+
+SELECT 
+    RPH.PostId,
+    RPH.Title,
+    RPH.ParentId,
+    RPH.Level,
+    RPH.HierarchyPath,
+    PVS.UpVotes,
+    PVS.DownVotes,
+    PVS.DeleteVotes,
+    PVS.ReopenVotes,
+    COALESCE(CPH.LastClosedDate, 'N/A') AS LastClosedDate,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    SELECT COUNT(*) FROM Badges B WHERE B.UserId = P.OwnerUserId AS BadgeCount
+FROM RecursivePostHierarchy RPH
+LEFT JOIN PostVoteStats PVS ON RPH.PostId = PVS.PostId
+LEFT JOIN ClosedPostHistory CPH ON RPH.PostId = CPH.PostId
+LEFT JOIN Comments C ON RPH.PostId = C.PostId
+WHERE RPH.Level <= 3 -- Limit to root questions and two levels of answers
+GROUP BY 
+    RPH.PostId, 
+    RPH.Title, 
+    RPH.ParentId, 
+    RPH.Level, 
+    RPH.HierarchyPath, 
+    PVS.UpVotes, 
+    PVS.DownVotes, 
+    PVS.DeleteVotes, 
+    PVS.ReopenVotes, 
+    CPH.LastClosedDate
+ORDER BY 
+    RPH.Level, 
+    RPH.Title;

@@ -1,0 +1,54 @@
+WITH MovieInfo AS (
+    SELECT
+        a.title AS MovieTitle,
+        c.name AS ActorName,
+        c.nr_order AS Role Order,
+        r.role AS RoleType,
+        m.production_year AS ProductionYear,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS Keywords
+    FROM
+        aka_title a
+    JOIN
+        cast_info ci ON a.movie_id = ci.movie_id
+    JOIN
+        aka_name c ON ci.person_id = c.person_id
+    JOIN
+        role_type r ON ci.role_id = r.id
+    JOIN
+        movie_keyword mk ON a.movie_id = mk.movie_id
+    JOIN
+        keyword kw ON mk.keyword_id = kw.id
+    JOIN
+        title m ON a.movie_id = m.id
+    WHERE
+        a.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+        AND m.production_year BETWEEN 2000 AND 2023
+    GROUP BY
+        a.title, c.name, ci.nr_order, r.role, m.production_year
+),
+RankedMovies AS (
+    SELECT
+        MovieTitle,
+        ActorName,
+        RoleOrder,
+        RoleType,
+        ProductionYear,
+        Keywords,
+        ROW_NUMBER() OVER (PARTITION BY ProductionYear ORDER BY RoleOrder) AS Rank
+    FROM
+        MovieInfo
+)
+
+SELECT
+    MovieTitle,
+    ActorName,
+    RoleOrder,
+    RoleType,
+    ProductionYear,
+    Keywords
+FROM
+    RankedMovies
+WHERE
+    Rank <= 5
+ORDER BY
+    ProductionYear DESC, Rank;

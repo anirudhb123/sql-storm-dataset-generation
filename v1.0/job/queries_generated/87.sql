@@ -1,0 +1,60 @@
+WITH MovieTitle AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.title) AS rn
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+), ActorDetails AS (
+    SELECT 
+        ci.movie_id,
+        na.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS total_actors,
+        SUM(CASE WHEN na.gender = 'F' THEN 1 ELSE 0 END) OVER (PARTITION BY ci.movie_id) AS female_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        name na ON ci.person_id = na.imdb_id
+), FilteredMovies AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        ad.actor_name,
+        ad.total_actors,
+        ad.female_actors
+    FROM 
+        MovieTitle mt
+    JOIN 
+        ActorDetails ad ON mt.movie_id = ad.movie_id
+    WHERE 
+        mt.production_year > 2000
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.total_actors,
+    fm.female_actors,
+    CASE 
+        WHEN fm.female_actors > 0 THEN ROUND((fm.female_actors::numeric / fm.total_actors) * 100, 2)
+        ELSE NULL 
+    END AS female_percentage,
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM movie_info mi 
+            WHERE mi.movie_id = fm.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info='Box Office')
+        ) THEN 'Available'
+        ELSE 'Not Available' 
+    END AS box_office_info
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.title;

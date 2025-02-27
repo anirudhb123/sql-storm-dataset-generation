@@ -1,0 +1,71 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM Comments C
+    GROUP BY C.PostId
+),
+CombinedStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        UB.BadgeCount,
+        PS.PostCount,
+        COALESCE(PC.CommentCount, 0) AS CommentCount,
+        PS.TotalViews,
+        PS.AverageScore
+    FROM UserBadges UB
+    JOIN PostStats PS ON UB.UserId = PS.OwnerUserId
+    JOIN Users U ON U.Id = UB.UserId
+    LEFT JOIN PostComments PC ON PC.PostId = PS.OwnerUserId
+),
+KeywordSearch AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Tags,
+        PL.RelatedPostId
+    FROM Posts P
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    WHERE P.Title LIKE '%SQL%'
+      OR P.Body LIKE '%SQL%'
+)
+
+SELECT 
+    CS.DisplayName,
+    CS.BadgeCount,
+    CS.PostCount,
+    CS.CommentCount,
+    CS.TotalViews,
+    CS.AverageScore,
+    KS.PostId,
+    KS.Title,
+    KS.Body,
+    KS.Tags
+FROM CombinedStats CS
+LEFT JOIN KeywordSearch KS ON CS.UserId = KS.RelatedPostId
+WHERE CS.BadgeCount > 0
+    AND CS.AverageScore > 0
+ORDER BY CS.TotalViews DESC
+LIMIT 100;

@@ -1,0 +1,65 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_total_price,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS balance_rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+
+PartSupplyAnalysis AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    r.r_name,
+    COALESCE(fo.o_orderkey, 'No Orders') AS last_ordered,
+    psa.total_avail_qty,
+    psa.avg_supplycost
+FROM 
+    region r
+LEFT JOIN (
+    SELECT 
+        n.n_name, 
+        oo.o_orderkey
+    FROM 
+        nation n
+    LEFT JOIN RankedOrders oo ON n.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = oo.o_orderkey)
+) fo ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = fo.n_name)
+JOIN PartSupplyAnalysis psa ON EXISTS (SELECT 1 FROM partsupp ps WHERE ps.ps_partkey = psa.p_partkey AND ps.ps_suppkey IN (SELECT s.s_suppkey FROM FilteredSuppliers s WHERE s.balance_rank = 1))
+WHERE 
+    psa.avg_supplycost / NULLIF(psa.total_avail_qty, 0) > 100.00
+ORDER BY 
+    r.r_regionkey, 
+    psa.avg_supplycost DESC
+LIMIT 50
+OFFSET 10;

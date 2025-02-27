@@ -1,0 +1,76 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        b.UserId, 
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation,
+        u.CreationDate,
+        u.DisplayName,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation'
+            WHEN u.Reputation < 100 THEN 'Novice'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationLevel
+    FROM 
+        Users u
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPostInfo AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COALESCE(pc.TotalPosts, 0) AS TotalPosts,
+        COALESCE(pc.TotalScore, 0) AS TotalScore,
+        COALESCE(pc.AcceptedAnswers, 0) AS AcceptedAnswers,
+        COALESCE(ub.BadgeCount, 0) AS GoldBadges
+    FROM 
+        UserReputation u
+    LEFT JOIN 
+        PostStatistics pc ON u.UserId = pc.OwnerUserId
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.UserId = ub.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.ReputationLevel,
+    u.TotalPosts,
+    u.TotalScore,
+    u.AcceptedAnswers,
+    u.GoldBadges,
+    CASE 
+        WHEN u.TotalPosts > 10 AND u.GoldBadges > 3 THEN 'Super Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorType,
+    CONCAT('User: ', u.DisplayName, ', Reputation Level: ', u.ReputationLevel) AS UserDescription,
+    CASE 
+        WHEN u.Reputation IS NOT NULL THEN 'Active User'
+        ELSE 'Inactive User'
+    END AS UserStatus
+FROM 
+    UserPostInfo u
+WHERE 
+    (u.GoldBadges > 0 OR u.TotalPosts > 5)
+ORDER BY 
+    u.TotalScore DESC
+FETCH FIRST 10 ROWS ONLY;

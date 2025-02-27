@@ -1,0 +1,46 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'EUROPE')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+    WHERE nh.level < 2
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierStats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+TotalSales AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY p.p_partkey
+)
+SELECT rh.n_name, co.order_count, co.total_spent, ps.total_available, ps.avg_supply_cost, ts.total_sales
+FROM NationHierarchy rh
+LEFT JOIN CustomerOrderSummary co ON co.c_custkey IN (SELECT DISTINCT c.c_custkey 
+                                                      FROM customer c 
+                                                      WHERE c.c_nationkey = rh.n_nationkey)
+LEFT JOIN PartSupplierStats ps ON ps.p_partkey IN (SELECT DISTINCT ps.ps_partkey 
+                                                    FROM partsupp ps 
+                                                    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+                                                    WHERE s.s_nationkey = rh.n_nationkey)
+LEFT JOIN TotalSales ts ON ts.p_partkey IN (SELECT DISTINCT ps.ps_partkey 
+                                             FROM partsupp ps 
+                                             JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+                                             WHERE s.s_nationkey = rh.n_nationkey)
+WHERE co.order_count IS NOT NULL OR ps.total_available IS NOT NULL
+ORDER BY rh.n_name, co.total_spent DESC, ts.total_sales ASC;

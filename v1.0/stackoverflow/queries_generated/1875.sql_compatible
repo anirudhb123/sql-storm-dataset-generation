@@ -1,0 +1,72 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedQuestions,
+        AVG(v.Score) AS AverageVoteScore,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(p.Id) DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        AcceptedQuestions,
+        AverageVoteScore,
+        TotalBadgeClass
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 10
+    ORDER BY 
+        TotalPosts DESC
+    LIMIT 5
+)
+SELECT 
+    pu.DisplayName,
+    pu.TotalPosts,
+    pu.TotalQuestions,
+    pu.TotalAnswers,
+    pu.AcceptedQuestions,
+    pu.AverageVoteScore,
+    CASE 
+        WHEN pu.TotalBadgeClass >= 10 THEN 'Gold'
+        WHEN pu.TotalBadgeClass >= 5 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS BadgeLevel,
+    COALESCE(CLOSE.Reason, 'Not Closed') AS CloseReason
+FROM 
+    PopularUsers pu
+LEFT JOIN 
+    (SELECT 
+         p.Id, 
+         cr.Name AS Reason 
+     FROM 
+         Posts p 
+     JOIN 
+         PostHistory ph ON p.Id = ph.PostId 
+     JOIN 
+         CloseReasonTypes cr ON CAST(ph.Comment AS int) = cr.Id 
+     WHERE 
+         ph.PostHistoryTypeId = 10) AS CLOSE 
+ON 
+    pu.UserId = CLOSE.Id
+ORDER BY 
+    pu.AverageVoteScore DESC;

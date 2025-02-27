@@ -1,0 +1,70 @@
+
+WITH RECURSIVE TopCustomers AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_country, SUM(ws_net_profit) AS total_profit
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c_customer_sk, c_first_name, c_last_name, c_country
+    HAVING SUM(ws_net_profit) > 1000
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_country, tc.total_profit + SUM(ws.ws_net_profit)
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN TopCustomers tc ON tc.c_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_country, tc.total_profit
+),
+CustomerDemographics AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+    FROM customer_demographics cd
+    WHERE cd.cd_marital_status = 'M' AND cd.cd_gender = 'F'
+),
+SalesSummary AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_net_profit) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid_inc_ship) AS avg_order_value
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_date_sk
+),
+ReturnReasons AS (
+    SELECT
+        r.r_reason_desc,
+        COUNT(cr.cr_order_number) AS return_count,
+        SUM(cr.cr_return_amount) AS total_returned_value
+    FROM reason r
+    LEFT JOIN catalog_returns cr ON r.r_reason_sk = cr.cr_reason_sk
+    GROUP BY r.r_reason_desc
+),
+BestSellingItems AS (
+    SELECT 
+        i.i_item_sk, 
+        i.i_product_name, 
+        SUM(ws.ws_quantity) AS total_sold
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_product_name
+    ORDER BY total_sold DESC
+    LIMIT 5
+)
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.c_country,
+    cd.cd_gender,
+    cd.cd_education_status,
+    ss.total_sales,
+    ss.order_count,
+    ss.avg_order_value,
+    rr.r_reason_desc,
+    rr.return_count,
+    rr.total_returned_value,
+    bsi.i_product_name,
+    bsi.total_sold
+FROM TopCustomers tc
+JOIN CustomerDemographics cd ON cd.cd_demo_sk = tc.c_customer_sk
+JOIN SalesSummary ss ON ss.ws_ship_date_sk = (SELECT MAX(d.d_date_sk) 
+                                               FROM date_dim d 
+                                               WHERE d.d_year = 2023)
+LEFT JOIN ReturnReasons rr ON rr.return_count > 0
+JOIN BestSellingItems bsi ON bsi.total_sold > 100
+ORDER BY tc.total_profit DESC, ss.total_sales DESC;

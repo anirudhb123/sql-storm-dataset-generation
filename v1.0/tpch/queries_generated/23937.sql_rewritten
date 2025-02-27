@@ -1,0 +1,48 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > 5000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, ch.level + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON ch.c_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal < ch.acctbal
+),
+aggregated_suppliers AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_availqty) > 1000
+),
+region_summary AS (
+    SELECT r.r_regionkey, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey
+    HAVING COUNT(n.n_nationkey) > 3
+),
+lineitem_summary AS (
+    SELECT
+        l_orderkey,
+        COUNT(*) AS item_count,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        AVG(l_quantity) AS avg_quantity
+    FROM lineitem
+    GROUP BY l_orderkey
+    HAVING COUNT(*) > 5
+)
+SELECT
+    ch.c_name,
+    SUM(ls.total_sales) AS total_spent,
+    r.nation_count,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    DENSE_RANK() OVER (PARTITION BY ch.level ORDER BY SUM(ls.total_sales) DESC) AS rank
+FROM customer_hierarchy ch
+LEFT JOIN lineitem_summary ls ON ch.c_custkey = ls.l_orderkey
+LEFT JOIN region_summary r ON r.r_regionkey = ch.c_custkey % 5 + 1  
+LEFT JOIN aggregated_suppliers s ON s.s_suppkey = ch.c_custkey % (SELECT COUNT(*) FROM supplier WHERE s_acctbal IS NOT NULL) + 1
+WHERE ch.level < 10 
+GROUP BY ch.c_name, r.nation_count, s.total_supply_cost
+ORDER BY total_spent DESC, ch.c_name
+LIMIT 50 OFFSET 10;

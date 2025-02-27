@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderstatus,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, 
+           SUM(CASE WHEN s.s_acctbal IS NOT NULL THEN ps.ps_supplycost ELSE 0 END) AS total_supplycost,
+           COUNT(DISTINCT s.s_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+LineItemStats AS (
+    SELECT l.l_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count,
+           COUNT(CASE WHEN l.l_shipdate IS NULL THEN 1 END) AS missing_ship_dates
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+TopSuppliers AS (
+    SELECT s.s_nationkey, 
+           COUNT(*) AS supplier_count 
+    FROM supplier s
+    JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_nationkey
+    HAVING COUNT(*) > (SELECT AVG(supplier_count) FROM (SELECT COUNT(*) AS supplier_count FROM supplier GROUP BY s_nationkey) AS subquery)
+)
+SELECT p.p_partkey, 
+       p.p_name, 
+       p.p_brand, 
+       COALESCE(l.total_revenue, 0) AS total_revenue,
+       COALESCE(s.total_supplycost, 0) AS total_supplycost,
+       (SELECT COUNT(DISTINCT c.c_custkey)
+        FROM customer c
+        WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = 1)) AS distinct_custs,
+       (SELECT MAX(price_rank) 
+        FROM RankedOrders ro
+        WHERE ro.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)) AS highest_price_rank,
+       CASE WHEN p.p_size > 20 THEN 'Large' ELSE 'Small/Medium' END AS size_category,
+       CASE WHEN l.return_count > 0 THEN 'Returned' ELSE 'Not Returned' END AS return_status,
+       CASE WHEN rl.unique_suppliers IS NULL THEN 'No Suppliers' ELSE 'Has Suppliers' END AS supplier_status
+FROM part p
+LEFT JOIN LineItemStats l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierCost s ON p.p_partkey = s.ps_partkey
+LEFT JOIN TopSuppliers ts ON ts.s_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = (SELECT MIN(suppkey) FROM supplier))
+FULL OUTER JOIN (
+    SELECT DISTINCT n.n_nationkey
+    FROM nation n
+    WHERE n.n_comment LIKE '%important%'
+) AS important_nations ON 1=1
+WHERE p.p_mfgr = 'Manufacturer1'
+AND (p.p_comment IS NOT NULL OR p.p_container = 'Box')
+ORDER BY total_revenue DESC, total_supplycost ASC
+LIMIT 100;

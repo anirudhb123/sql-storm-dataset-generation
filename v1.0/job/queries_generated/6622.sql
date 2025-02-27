@@ -1,0 +1,30 @@
+SELECT 
+    t.title AS movie_title, 
+    a.name AS actor_name, 
+    c.kind AS cast_type, 
+    COALESCE(mi.info, 'No info available') AS movie_info, 
+    COUNT(DISTINCT mk.keyword) AS keyword_count
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+WHERE 
+    t.production_year >= 2000
+AND 
+    a.name IS NOT NULL
+GROUP BY 
+    t.title, a.name, c.kind, mi.info
+ORDER BY 
+    keyword_count DESC, movie_title ASC, actor_name ASC;

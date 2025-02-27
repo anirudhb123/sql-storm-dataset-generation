@@ -1,0 +1,88 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        AVG(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') THEN CAST(pi.info AS numeric) ELSE NULL END) AS average_rating,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS ranking
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+
+high_cast_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        rm.average_rating
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.ranking <= 10  
+),
+
+movie_details AS (
+    SELECT 
+        hcm.movie_id,
+        hcm.title,
+        hcm.production_year,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        COALESCE(mc.company_names, 'No companies') AS companies
+    FROM 
+        high_cast_movies hcm
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(mk.keyword, ', ') AS keywords
+        FROM 
+            movie_keyword mk
+        GROUP BY 
+            mk.movie_id
+    ) mk ON hcm.movie_id = mk.movie_id
+    LEFT JOIN (
+        SELECT 
+            mc.movie_id,
+            STRING_AGG(cn.name, ', ') AS company_names
+        FROM 
+            movie_companies mc
+        JOIN 
+            company_name cn ON mc.company_id = cn.id
+        GROUP BY 
+            mc.movie_id
+    ) mc ON hcm.movie_id = mc.movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    hm.total_cast,
+    hm.average_rating,
+    md.keywords,
+    md.companies
+FROM 
+    high_cast_movies hm
+LEFT JOIN movie_details md ON hm.movie_id = md.movie_id
+WHERE 
+    hm.average_rating IS NULL OR hm.average_rating >= (
+        SELECT 
+            AVG(average_rating) 
+        FROM 
+            high_cast_movies 
+        WHERE 
+            average_rating IS NOT NULL
+    )
+ORDER BY 
+    md.production_year DESC, hm.total_cast DESC
+FETCH FIRST 10 ROWS ONLY;

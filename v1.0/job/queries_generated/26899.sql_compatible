@@ -1,0 +1,75 @@
+
+WITH Recursive_Aka_Title AS (
+    SELECT
+        a.id AS aka_title_id,
+        a.title AS aka_title,
+        a.production_year,
+        a.kind_id,
+        a.imdb_index AS aka_imdb_index,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.title IS NOT NULL
+),
+Filtered_Movie_Info AS (
+    SELECT
+        m.id AS movie_id,
+        m.info AS movie_description,
+        mt.kind AS movie_type
+    FROM 
+        movie_info m
+    JOIN 
+        info_type it ON m.info_type_id = it.id
+    JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        it.info LIKE '%summary%'
+),
+Actor_Role_Stats AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        COUNT(DISTINCT c.role_id) AS lead_roles
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+Keyword_Tagging AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    a.aka_title_id,
+    a.aka_title,
+    a.production_year,
+    f.movie_description,
+    f.movie_type,
+    ats.total_actors,
+    ats.lead_roles,
+    kt.keywords
+FROM 
+    Recursive_Aka_Title a
+LEFT JOIN 
+    Filtered_Movie_Info f ON f.movie_id = a.id
+LEFT JOIN 
+    Actor_Role_Stats ats ON ats.movie_id = a.id
+LEFT JOIN 
+    Keyword_Tagging kt ON kt.movie_id = a.id
+WHERE 
+    a.rn <= 10
+ORDER BY 
+    a.production_year DESC, 
+    a.aka_title;

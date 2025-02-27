@@ -1,0 +1,84 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score <= 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(a.OwnerDisplayName, 'Unanswered') AS Author,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, a.OwnerDisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId, ph.UserDisplayName
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.PositivePosts,
+    us.NegativePosts,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate AS PostCreationDate,
+    pd.ViewCount,
+    pd.Author,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.CommentCount,
+    cp.LastClosedDate
+FROM 
+    UserStatistics us
+JOIN 
+    PostDetails pd ON us.UserId = pd.Author
+LEFT JOIN 
+    ClosedPosts cp ON pd.PostId = cp.PostId
+WHERE 
+    us.TotalPosts > 0
+    AND EXISTS (SELECT 1 FROM Votes v WHERE v.UserId = us.UserId AND v.PostId = pd.PostId AND v.VoteTypeId IN (2, 3)) 
+ORDER BY 
+    us.Reputation DESC, pd.CreationDate DESC
+LIMIT 100;

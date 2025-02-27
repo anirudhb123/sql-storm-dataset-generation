@@ -1,0 +1,81 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_paid DESC) AS rn,
+        SUM(ws_quantity) OVER (PARTITION BY ws_item_sk) AS total_quantity
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid IS NOT NULL
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_net_paid,
+        rs.total_quantity,
+        CASE 
+            WHEN rs.total_quantity = 0 THEN 0
+            ELSE rs.ws_net_paid / rs.total_quantity
+        END AS avg_sales_price
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rn = 1
+),
+TopStores AS (
+    SELECT 
+        ss_store_sk,
+        COUNT(DISTINCT ss_coupon_amt) AS distinct_coupons,
+        AVG(ss_sales_price) AS avg_store_sales
+    FROM 
+        store_sales
+    WHERE 
+        ss_coupon_amt IS NOT NULL
+    GROUP BY 
+        ss_store_sk
+),
+ReturnAnalysis AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+CombinedResults AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.avg_sales_price,
+        ts.distinct_coupons,
+        ra.total_returns,
+        ra.return_count
+    FROM 
+        FilteredSales fs
+    LEFT JOIN 
+        TopStores ts ON ts.ss_store_sk = (
+            SELECT s_store_sk 
+            FROM store 
+            WHERE s_store_sk = (SELECT TOP 1 s_store_sk FROM store_sales WHERE ss_item_sk = fs.ws_item_sk ORDER BY ss_net_profit DESC)
+        )
+    LEFT JOIN 
+        ReturnAnalysis ra ON ra.sr_item_sk = fs.ws_item_sk
+)
+SELECT 
+    CONCAT('Item: ', cr_i_i.item_id, ' | Avg Price: ', COALESCE(cbr.avg_sales_price, 0), 
+           ' | Distinct Coupons: ', COALESCE(cbr.distinct_coupons, 0), 
+           ' | Total Returns: ', COALESCE(cbr.total_returns, 0)) AS sales_report,
+    REGEXP_MATCH('(?i)^[a-z]{3}\\s\\d{4}$', 'Jan 2024') AS pattern_match_check
+FROM 
+    CombinedResults cbr
+JOIN 
+    item cr_i_i ON cr_i_i.i_item_sk = cbr.ws_item_sk
+WHERE 
+    cbr.avg_sales_price IS NOT NULL 
+    AND cbr.distinct_coupons > 0
+ORDER BY 
+    cbr.avg_sales_price DESC
+LIMIT 100; 

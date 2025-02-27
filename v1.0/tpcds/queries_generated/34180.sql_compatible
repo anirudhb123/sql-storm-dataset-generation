@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_rank AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rnk
+    FROM
+        web_sales
+    GROUP BY
+        ws_bill_customer_sk
+),
+address_info AS (
+    SELECT
+        ca.city,
+        ca.state,
+        ca.country,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk,
+        COUNT(*) AS customer_count
+    FROM
+        customer_address ca
+    LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY
+        ca.city, ca.state, ca.country, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+),
+top_customers AS (
+    SELECT
+        sr.ws_bill_customer_sk,
+        sr.total_profit,
+        ai.city,
+        ai.state,
+        ai.country,
+        ai.customer_count
+    FROM
+        sales_rank sr
+    JOIN address_info ai ON sr.ws_bill_customer_sk = ai.ca_address_sk
+    WHERE
+        sr.rnk <= 10
+),
+summary AS (
+    SELECT
+        city,
+        state,
+        country,
+        SUM(total_profit) AS total_profit,
+        SUM(customer_count) AS total_customers
+    FROM
+        top_customers
+    GROUP BY
+        city, state, country
+)
+SELECT
+    summary.*,
+    CASE 
+        WHEN total_customers > 0 THEN ROUND(total_profit / total_customers, 2)
+        ELSE NULL
+    END AS avg_profit_per_customer
+FROM 
+    summary
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 25 ROWS ONLY;

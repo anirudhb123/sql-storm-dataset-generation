@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND k.phonetic_code > 'C5452' AND t.production_year > 1938 AND t.md5sum IN ('039991e7500273d9d0d6aa09c8f048ae', '0fe71eef3c55e9689212b08ee5f1612a', '15aafdf6c3b7eada1e33bab8b63cd32f', '1f28ded81c216fa29ab0867e89359047', '1f80840a9f61b44f03872e3b91b3f36f', '466427ca2667771dc253563f1b84699d', '5a9bed8c044ccf18bc497e5340fdff0c', 'aabca67b0dd84957d7621e60009e64e1', 'd205359f1dc1a2e58e296031585bb09e', 'e2dec8dd6ba4a2ddc119ee75d3fc198b');

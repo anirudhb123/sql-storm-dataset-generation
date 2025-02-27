@@ -1,0 +1,61 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+SalesData AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws_item_sk) AS total_unique_items
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerAnalysis AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cs.total_sales,
+        cs.total_orders,
+        cs.total_unique_items,
+        cr.total_return_quantity,
+        cr.total_return_amount,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN cd.cd_credit_rating = 'Good' AND COALESCE(cr.total_returns, 0) = 0 THEN 'High Potential'
+            WHEN cd.cd_gender = 'F' AND cs.total_sales > 1000 THEN 'Frequent Buyer'
+            ELSE 'Occasional Buyer'
+        END AS customer_segment
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        SalesData cs ON c.c_customer_sk = cs.customer_sk
+    LEFT JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    customer_id,
+    COUNT(*) OVER (PARTITION BY customer_segment) AS segment_count,
+    AVG(total_sales) OVER () AS avg_sales,
+    MAX(total_return_amount) OVER (PARTITION BY customer_segment) AS max_return_amount
+FROM 
+    CustomerAnalysis 
+WHERE 
+    customer_segment <> 'Occasional Buyer'
+ORDER BY 
+    segment_count DESC, total_sales DESC;

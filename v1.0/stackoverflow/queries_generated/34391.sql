@@ -1,0 +1,86 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        r.Depth + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVoteCount
+    FROM 
+        Votes v
+    INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(uh.UpVoteCount, 0) AS UpVotes,
+        COALESCE(uh.DownVoteCount, 0) AS DownVotes,
+        rh.Depth,
+        STRING_AGG(DISTINCT tg.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UserVoteCounts uh ON p.OwnerUserId = uh.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy rh ON p.Id = rh.PostId
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                t.TagName
+            FROM 
+                UNNEST(string_to_array(p.Tags, ',')) AS t(TagName)
+            WHERE 
+                t.TagName IS NOT NULL
+        ) tg ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.Score, rh.Depth, uh.UpVoteCount, uh.DownVoteCount
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.Depth,
+    CASE 
+        WHEN ps.Depth = 1 THEN 'Root Post'
+        WHEN ps.Depth > 1 THEN 'Child Post'
+        ELSE 'Unknown'
+    END AS PostTypeDescription,
+    CASE 
+        WHEN ps.Score IS NULL OR ps.Score = 0 THEN 'No Score'
+        WHEN ps.Score > 0 THEN 'Positive Score'
+        ELSE 'Negative Score'
+    END AS ScoreDescription,
+    ps.Tags
+FROM 
+    PostSummary ps
+WHERE 
+    ps.UpVotes > ps.DownVotes
+ORDER BY 
+    ps.Score DESC, 
+    ps.Depth ASC
+LIMIT 100;

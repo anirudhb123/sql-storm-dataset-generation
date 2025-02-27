@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.PostTypeId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS Popularity
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+),
+PostsWithBadges AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+    GROUP BY 
+        p.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CommentCount,
+    CASE 
+        WHEN rb.BadgeCount > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS HasBadges,
+    pt.TagName,
+    pt.Popularity
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostsWithBadges rb ON rp.PostId = rb.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.TagName LIKE '%' || rp.Title || '%'  
+WHERE 
+    rp.PostRank <= 5  
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC;

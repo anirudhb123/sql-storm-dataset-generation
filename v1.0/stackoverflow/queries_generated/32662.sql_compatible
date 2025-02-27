@@ -1,0 +1,57 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId, 
+        a.Title, 
+        a.Score, 
+        a.CreationDate, 
+        a.OwnerUserId, 
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy rp ON a.ParentId = rp.PostId
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    MAX(p.CreationDate) AS LastPostDate,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    AVG(COALESCE(v.CreationDate, TIMESTAMP '2024-10-01 12:34:56') - p.CreationDate) AS AvgResponseTime,
+    SUM(b.Class) AS TotalBadgeClass,
+    (SELECT COUNT(*) 
+     FROM Comments c 
+     WHERE c.PostId IN (SELECT PostId FROM RecursivePostHierarchy rp WHERE rp.OwnerUserId = u.Id)) AS TotalComments,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY MAX(p.CreationDate) DESC) AS RecencyRank
+FROM 
+    Users u
+INNER JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%,', t.TagName, ',%')
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+GROUP BY 
+    u.Id, u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5
+ORDER BY 
+    TotalPosts DESC, TotalAnswers DESC;

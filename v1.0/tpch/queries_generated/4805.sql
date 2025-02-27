@@ -1,0 +1,64 @@
+WITH Supplier_Summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        AVG(s.s_acctbal) AS average_account_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+Customer_Orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+Lineitem_Stats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    cs.c_name,
+    cs.order_count,
+    cs.total_spent,
+    ss.s_name,
+    ss.total_supply_cost,
+    ls.total_quantity,
+    ls.total_revenue,
+    CASE 
+        WHEN cs.order_count > 0 THEN (cs.total_spent / cs.order_count)
+        ELSE 0 
+    END AS average_order_value,
+    CASE 
+        WHEN ss.total_supply_cost IS NULL THEN 'No Supply Cost'
+        ELSE 'Supplied' 
+    END AS supply_status
+FROM 
+    Customer_Orders cs
+LEFT JOIN 
+    Supplier_Summary ss ON ss.total_supply_cost > 1000
+LEFT JOIN 
+    Lineitem_Stats ls ON ls.l_orderkey = cs.c_custkey
+WHERE 
+    cs.total_spent > 5000 OR cs.order_count IS NULL
+ORDER BY 
+    cs.total_spent DESC NULLS LAST;

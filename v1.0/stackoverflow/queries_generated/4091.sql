@@ -1,0 +1,74 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName, 
+        SUM(v.VoteTypeId = 2) AS UpVotes, 
+        SUM(v.VoteTypeId = 3) AS DownVotes, 
+        COUNT(DISTINCT p.Id) AS PostCount,
+        RANK() OVER (ORDER BY SUM(v.VoteTypeId = 2) DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- closed and reopened
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId, 
+    rp.Title, 
+    rp.CreationDate, 
+    rp.Score, 
+    rp.ViewCount, 
+    rp.OwnerName, 
+    tu.DisplayName AS TopUser,
+    tu.UpVotes, 
+    tu.DownVotes, 
+    tu.PostCount,
+    cp.CloseCount,
+    cp.CloseReasons
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    TopUsers tu ON rp.OwnerName = tu.DisplayName
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.PostRank = 1 
+    AND (cp.CloseCount IS NULL OR cp.CloseCount < 2)
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100;

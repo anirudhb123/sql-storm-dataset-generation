@@ -1,0 +1,77 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.ViewCount > 100 
+),
+PostsWithVotes AS (
+    SELECT 
+        rp.Id AS PostId, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.Id
+    GROUP BY 
+        rp.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE
+            WHEN u.Reputation < 100 THEN 'Newbie'
+            WHEN u.Reputation BETWEEN 100 AND 999 THEN 'Intermediate'
+            ELSE 'Experienced'
+        END AS ReputationCategory
+    FROM 
+        Users u
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        CASE
+            WHEN ph.PostHistoryTypeId IN (10, 11) AND ph.Comment IS NOT NULL THEN 
+                'Closed Reason: ' || (SELECT Name FROM CloseReasonTypes WHERE Id = CAST(ph.Comment AS VARCHAR))
+            ELSE 
+                NULL
+        END AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+SELECT 
+    p.Title,
+    p.UpVotes,
+    p.DownVotes,
+    u.DisplayName,
+    u.Reputation,
+    ur.ReputationCategory,
+    COUNT(DISTINCT ph.UserId) AS ClosureActions,
+    STRING_AGG(DISTINCT ph.CloseReason, '; ') AS ClosedReasons
+FROM 
+    PostsWithVotes p
+JOIN 
+    Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = p.PostId)
+JOIN 
+    UserReputation ur ON ur.UserId = u.Id
+LEFT JOIN 
+    PostHistoryAnalysis ph ON ph.PostId = p.PostId
+WHERE 
+    p.UpVotes - p.DownVotes > 10 
+GROUP BY 
+    p.Title, p.UpVotes, p.DownVotes, u.DisplayName, u.Reputation, ur.ReputationCategory
+ORDER BY 
+    p.UpVotes DESC, ClosureActions DESC;

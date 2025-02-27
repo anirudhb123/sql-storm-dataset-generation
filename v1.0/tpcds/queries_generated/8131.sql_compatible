@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sold_date_sk BETWEEN (
+            SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01'
+        ) AND (
+            SELECT d_date_sk FROM date_dim WHERE d_date = '2023-12-31'
+        )
+    GROUP BY 
+        ws_item_sk
+),
+TopCustomers AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid) AS total_spent,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        SUM(ws_net_paid) > 1000
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_buy_potential
+    FROM 
+        customer AS c
+    JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_customer_sk IN (SELECT ws_bill_customer_sk FROM TopCustomers)
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ts.total_sales AS top_sales,
+    ts.total_sold AS total_quantity_sold,
+    ts.sales_rank
+FROM 
+    CustomerDetails AS cd
+JOIN 
+    RankedSales AS ts ON cd.c_customer_sk = ts.ws_item_sk
+ORDER BY 
+    ts.sales_rank
+FETCH FIRST 10 ROWS ONLY;

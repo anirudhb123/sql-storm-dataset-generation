@@ -1,0 +1,59 @@
+WITH RankedUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+),
+PopularPosts AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.OwnerUserId,
+        RANK() OVER (ORDER BY P.ViewCount DESC) AS PostRank
+    FROM Posts P
+    WHERE P.PostTypeId = 1
+),
+UserBadges AS (
+    SELECT
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+AnswerStats AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(P.Id) AS AnswerCount,
+        SUM(P.Score) AS TotalScore
+    FROM Posts P
+    WHERE P.PostTypeId = 2
+    GROUP BY P.OwnerUserId
+)
+SELECT
+    RU.DisplayName,
+    RU.Reputation,
+    RU.CreationDate,
+    RU.LastAccessDate,
+    RU.Views,
+    COALESCE(UB.BadgeCount, 0) AS TotalBadges,
+    COALESCE(UB.BadgeNames, 'No Badges') AS BadgeList,
+    COALESCE(AS.AnswerCount, 0) AS TotalAnswers,
+    COALESCE(AS.TotalScore, 0) AS TotalAnswerScore,
+    PP.PostId,
+    PP.Title AS PopularPostTitle,
+    PP.Score AS PopularPostScore,
+    PP.ViewCount AS PopularPostViewCount
+FROM RankedUsers RU
+LEFT JOIN UserBadges UB ON RU.UserId = UB.UserId
+LEFT JOIN AnswerStats AS ON RU.UserId = AS.OwnerUserId
+JOIN PopularPosts PP ON RU.UserRank = 1 AND PP.PostRank <= 5
+ORDER BY RU.Reputation DESC, PP.ViewCount DESC;

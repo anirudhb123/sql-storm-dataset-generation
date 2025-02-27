@@ -1,0 +1,48 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS ActiveUsers,
+        COUNT(DISTINCT Badges.UserId) AS UsersWithBadges
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    WHERE 
+        Posts.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageScore,
+        ActiveUsers,
+        UsersWithBadges,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    Rank,
+    TagName,
+    PostCount,
+    TotalViews,
+    AverageScore,
+    ActiveUsers,
+    UsersWithBadges
+FROM 
+    TopTags
+WHERE 
+    Rank <= 10
+ORDER BY 
+    Rank;
+

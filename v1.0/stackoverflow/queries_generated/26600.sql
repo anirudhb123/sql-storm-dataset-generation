@@ -1,0 +1,63 @@
+WITH PostTagCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT T.TagName) AS TagCount,
+        SUM(CASE WHEN PV.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN PV.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS CommentCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes PV ON P.Id = PV.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(P.Tags, ',') AS TagNames ON true
+    LEFT JOIN 
+        Tags T ON T.TagName = TRIM(BOTH '"' FROM TagNames)
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.OwnerUserId, U.DisplayName
+),
+AggregateStats AS (
+    SELECT 
+        AVG(TagCount) AS AvgTagCount,
+        SUM(UpVoteCount) AS TotalUpVotes,
+        SUM(DownVoteCount) AS TotalDownVotes,
+        COUNT(*) AS TotalPosts,
+        COUNT(DISTINCT OwnerUserId) AS UniqueOwners
+    FROM 
+        PostTagCounts
+),
+TopPosts AS (
+    SELECT 
+        PTC.*,
+        (UpVoteCount - DownVoteCount) AS NetVoteCount,
+        RANK() OVER (ORDER BY (UpVoteCount - DownVoteCount) DESC) AS Rank
+    FROM 
+        PostTagCounts PTC
+)
+SELECT 
+    P.*,
+    AS.AvgTagCount,
+    AS.TotalUpVotes,
+    AS.TotalDownVotes,
+    AS.TotalPosts,
+    AS.UniqueOwners
+FROM 
+    TopPosts P
+CROSS JOIN 
+    AggregateStats AS
+WHERE 
+    Rank <= 10  -- Top 10 posts by net vote count
+ORDER BY 
+    Rank;
+

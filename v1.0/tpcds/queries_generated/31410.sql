@@ -1,0 +1,50 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 
+           c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           c.c_current_cdemo_sk, h.level + 1
+    FROM customer c
+    JOIN customer_hierarchy h ON c.c_current_cdemo_sk = h.c_customer_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.c_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY ws.c_customer_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.c_customer_sk
+),
+inventory_status AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_on_hand,
+        ROW_NUMBER() OVER (ORDER BY SUM(inv.inv_quantity_on_hand) DESC) AS item_rank
+    FROM inventory inv
+    GROUP BY inv.inv_item_sk
+)
+SELECT 
+    ch.c_customer_sk, 
+    ch.c_first_name, 
+    ch.c_last_name, 
+    ss.total_quantity_sold, 
+    ss.total_sales,
+    CASE 
+        WHEN ss.sales_rank = 1 THEN 'Top Buyer'
+        ELSE 'Regular Buyer'
+    END AS buyer_category,
+    COALESCE(i.total_on_hand, 0) AS total_inventory,
+    CASE 
+        WHEN i.total_on_hand IS NULL THEN 'No Inventory'
+        ELSE 'Available'
+    END AS inventory_status
+FROM customer_hierarchy ch
+LEFT JOIN sales_summary ss ON ch.c_customer_sk = ss.c_customer_sk
+LEFT JOIN inventory_status i ON ss.c_customer_sk = i.inv_item_sk
+WHERE ch.level <= 3 AND 
+      (ss.total_sales > 1000 OR i.total_on_hand < 10)
+ORDER BY ss.total_sales DESC, ch.c_last_name;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COALESCE(a.Score, 0) AS AnswerScore,
+        COALESCE(ac.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN 
+        Posts ac ON p.AcceptedAnswerId = ac.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, a.Score, ac.AcceptedAnswerId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.AnswerScore,
+        rp.AcceptedAnswerId,
+        rp.CommentCount,
+        rp.VoteCount,
+        rp.PostRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.CommentCount > 0  
+        AND rp.VoteCount > 5  
+        AND rp.PostRank = 1  
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    fp.Title,
+    fp.Body,
+    fp.Tags,
+    u.DisplayName AS Author,
+    u.Reputation,
+    ub.BadgeCount,
+    ub.BadgeNames
+FROM 
+    FilteredPosts fp
+JOIN 
+    Users u ON fp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+ORDER BY 
+    u.Reputation DESC, 
+    fp.VoteCount DESC
+LIMIT 10;

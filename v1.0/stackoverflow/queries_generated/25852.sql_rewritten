@@ -1,0 +1,82 @@
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+),
+UserBadges AS (
+    SELECT 
+        UserId, 
+        COUNT(*) FILTER (WHERE Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE Class = 3) AS BronzeBadges
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+QuestionStats AS (
+    SELECT
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        ts.Tag,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(ubs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ubs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ubs.BronzeBadges, 0) AS BronzeBadges,
+        pvs.UpVoteCount,
+        pvs.DownVoteCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount 
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        TagStats ts ON ts.PostCount > 0 
+    LEFT JOIN 
+        UserBadges ubs ON ubs.UserId = u.Id
+    LEFT JOIN 
+        PostVoteStats pvs ON pvs.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, ts.Tag, u.DisplayName, u.Reputation, ubs.GoldBadges, ubs.SilverBadges, ubs.BronzeBadges, pvs.UpVoteCount, pvs.DownVoteCount
+)
+SELECT 
+    qs.QuestionId,
+    qs.Title,
+    qs.CreationDate,
+    qs.Tag,
+    qs.OwnerDisplayName,
+    qs.OwnerReputation,
+    qs.GoldBadges,
+    qs.SilverBadges,
+    qs.BronzeBadges,
+    qs.UpVoteCount,
+    qs.DownVoteCount,
+    qs.CommentCount,
+    (SELECT COUNT(*) FROM Posts WHERE AcceptedAnswerId = qs.QuestionId) AS AnswerCount
+FROM 
+    QuestionStats qs
+ORDER BY 
+    qs.UpVoteCount DESC, qs.CreationDate DESC
+LIMIT 50;

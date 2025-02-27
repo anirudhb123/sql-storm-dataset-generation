@@ -1,0 +1,76 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(v.Id) DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CommentCount,
+    p.VoteCount,
+    p.TotalBounty,
+    rph.Level AS QuestionLevel,
+    ub.BadgeCount,
+    ub.HighestBadgeClass
+FROM 
+    PostStatistics p
+JOIN 
+    RecursivePostHierarchy rph ON p.PostId = rph.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId
+WHERE 
+    p.VoteCount > 0
+ORDER BY 
+    p.VoteCount DESC, 
+    p.TotalBounty DESC
+LIMIT 50;
+
+-- Additional benchmark tests can be performed by measuring execution time,
+-- memory usage, and performance under variable loads using different 
+-- filtering criteria or date ranges.

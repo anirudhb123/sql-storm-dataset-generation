@@ -1,0 +1,59 @@
+WITH MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS actors,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS companies
+    FROM 
+        title m
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        m.production_year >= 2000 
+        AND m.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+InfoAggregates AS (
+    SELECT 
+        md.movie_id,
+        COUNT(DISTINCT pi.info_type_id) AS distinct_info_types,
+        AVG(LENGTH(pi.info)) AS avg_info_length
+    FROM 
+        MovieDetails md
+    JOIN 
+        complete_cast cc ON md.movie_id = cc.movie_id
+    JOIN 
+        person_info pi ON cc.subject_id = pi.person_id
+    GROUP BY 
+        md.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actors,
+    md.keywords,
+    md.companies,
+    ia.distinct_info_types,
+    ia.avg_info_length
+FROM 
+    MovieDetails md
+JOIN 
+    InfoAggregates ia ON md.movie_id = ia.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        CAST(NULL AS VARCHAR(50)) AS ParentTitle
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Start from Questions
+    
+    UNION ALL
+    
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.Score,
+        P2.ViewCount,
+        P2.CreationDate,
+        P2.AcceptedAnswerId,
+        P2.OwnerUserId,
+        P.Title AS ParentTitle
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy P ON P2.ParentId = P.PostId
+)
+
+, UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    RPH.PostId,
+    RPH.Title,
+    RPH.Score,
+    RPH.ViewCount,
+    RPH.CreationDate,
+    RPH.ParentTitle,
+    U.UserId,
+    U.DisplayName,
+    U.VoteCount,
+    U.UpVotes,
+    U.DownVotes,
+    COALESCE(PH.CloseReasonType, 'Not Closed') AS CloseReason
+FROM 
+    RecursivePostHierarchy RPH
+LEFT JOIN 
+    UserStats U ON RPH.OwnerUserId = U.UserId
+LEFT JOIN (
+    SELECT 
+        PH.PostId,
+        string_agg(CRT.Name, ', ') AS CloseReasonType
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        PH.PostId
+) PH ON RPH.PostId = PH.PostId
+WHERE 
+    RPH.Score > 0 
+    AND RPH.ViewCount > (SELECT AVG(ViewCount) FROM Posts) -- Interesting predicates
+ORDER BY 
+    RPH.Score DESC, RPH.ViewCount DESC
+LIMIT 50;

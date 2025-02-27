@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank,
+        COUNT(co.Id) AS TotalComments,
+        SUM(vt.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(vt.VoteTypeId = 3) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments co ON p.Id = co.PostId
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate
+),
+PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Only concerned with post close and reopen events
+),
+FilteredHistories AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        ph.UserId AS LastUpdatedUserId,
+        ph.CreationDate AS LastUpdateDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS FilteredHistoryRank
+    FROM 
+        RankedPosts p
+    LEFT JOIN 
+        PostHistories ph ON p.PostId = ph.PostId
+    WHERE 
+        p.OwnerPostRank = 1 -- Most recent post for each user
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 100
+)
+
+SELECT 
+    up.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(fh.LastUpdatedUserId, 'N/A') AS LastUpdatedBy,
+    fh.LastUpdateDate,
+    ur.Reputation AS UserReputation,
+    rp.TotalComments,
+    rp.TotalUpVotes,
+    rp.TotalDownVotes,
+    (CASE 
+         WHEN fh.LastUpdateDate IS NOT NULL AND fh.LastUpdateDate < NOW() - INTERVAL '1 day' THEN 'Stale'
+         WHEN fh.LastUpdateDate IS NULL THEN 'Never Updated'
+         ELSE 'Fresh'
+     END) AS UpdateStatus,
+    STRING_AGG(DISTINCT CONCAT('HistoryType: ', CASE ph.PostHistoryTypeId 
+                                                     WHEN 10 THEN 'Closed' 
+                                                     WHEN 11 THEN 'Reopened' 
+                                                  END), ', ') AS ChangeHistory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    FilteredHistories fh ON rp.PostId = fh.PostId
+LEFT JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    UserReputation ur ON up.Id = ur.UserId
+LEFT JOIN 
+    PostHistories ph ON rp.PostId = ph.PostId
+GROUP BY 
+    up.DisplayName, rp.Title, rp.CreationDate, fh.LastUpdatedUserId, fh.LastUpdateDate, ur.Reputation
+ORDER BY 
+    rp.CreationDate DESC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

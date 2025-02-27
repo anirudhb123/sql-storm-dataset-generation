@@ -1,0 +1,91 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rank_by_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+), ActorFilms AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(c.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.person_id, a.name
+), CompanyStats AS (
+    SELECT 
+        mc.movie_id,
+        cmp.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cmp ON mc.company_id = cmp.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cmp.name, ct.kind
+), FilteredTitles AS (
+    SELECT 
+        title.id AS title_id,
+        title.title,
+        title.production_year,
+        COUNT(DISTINCT mt.keyword_id) AS keyword_count
+    FROM 
+        title
+    LEFT JOIN 
+        movie_keyword mt ON title.id = mt.movie_id
+    WHERE 
+        title.production_year >= 2000
+    GROUP BY 
+        title.id
+), FinalResults AS (
+    SELECT 
+        r.movie_id,
+        r.movie_title,
+        r.production_year,
+        a.name AS actor_name,
+        a.movie_count,
+        c.company_name,
+        ct.company_type,
+        f.keyword_count,
+        RANK() OVER (ORDER BY r.production_year DESC, r.movie_title) AS movie_rank
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        ActorFilms a ON r.movie_id = a.person_id  -- Correlated join here for demo purposes
+    LEFT JOIN 
+        CompanyStats c ON r.movie_id = c.movie_id
+    LEFT JOIN 
+        FilteredTitles f ON r.movie_id = f.title_id
+    WHERE 
+        a.movie_count > 5 OR c.company_count > 1
+)
+SELECT 
+    movie_rank,
+    movie_title,
+    production_year,
+    actor_name,
+    movie_count,
+    company_name,
+    company_type,
+    keyword_count
+FROM 
+    FinalResults
+WHERE 
+    company_name IS NOT NULL
+ORDER BY 
+    production_year DESC, movie_title;

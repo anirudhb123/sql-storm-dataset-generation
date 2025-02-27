@@ -1,0 +1,58 @@
+WITH movie_ratings AS (
+    SELECT 
+        t.title AS movie_title,
+        AVG(CASE WHEN r.rating IS NOT NULL THEN r.rating ELSE 0 END) AS average_rating,
+        COUNT(DISTINCT r.user_id) AS user_count
+    FROM title t
+    LEFT JOIN ratings r ON t.id = r.movie_id
+    GROUP BY t.title
+),
+
+actor_movie_counts AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY ak.name
+),
+
+keyword_usage AS (
+    SELECT 
+        mk.keyword AS keyword,
+        COUNT(DISTINCT mk.movie_id) AS usage_count
+    FROM movie_keyword mk
+    GROUP BY mk.keyword
+),
+
+company_movies AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS movies_produced
+    FROM company_name cn
+    JOIN movie_companies mc ON cn.id = mc.company_id
+    GROUP BY cn.name
+)
+
+SELECT 
+    mr.movie_title,
+    mr.average_rating,
+    ac.actor_name,
+    ac.movie_count,
+    ku.keyword,
+    ku.usage_count,
+    cm.company_name,
+    cm.movies_produced
+FROM movie_ratings mr
+JOIN actor_movie_counts ac ON mr.movie_title = (
+    SELECT t.title 
+    FROM title t 
+    JOIN cast_info ci ON t.id = ci.movie_id 
+    JOIN aka_name ak ON ci.person_id = ak.person_id 
+    WHERE ak.name = ac.actor_name
+    LIMIT 1
+)
+JOIN keyword_usage ku ON ku.usage_count > 10
+JOIN company_movies cm ON cm.movies_produced > 5
+WHERE mr.average_rating > 7.0
+ORDER BY mr.average_rating DESC, ac.movie_count DESC, ku.usage_count DESC;

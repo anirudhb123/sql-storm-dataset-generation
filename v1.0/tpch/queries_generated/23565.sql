@@ -1,0 +1,46 @@
+WITH RankedParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_type,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        NTILE(4) OVER(ORDER BY p.p_retailprice DESC) AS price_quartile
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_type
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_type,
+    rp.supplier_count,
+    co.c_custkey,
+    co.c_name,
+    co.total_spent,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent < 100 THEN 'Low Spender'
+        WHEN co.total_spent BETWEEN 100 AND 500 THEN 'Medium Spender'
+        ELSE 'High Spender'
+    END AS spending_category,
+    MAX(rp.price_quartile) OVER() AS max_price_quartile,
+    STRING_AGG(DISTINCT co.c_name || ' - ' || co.total_spent, '; ') AS customer_spending_summary
+FROM RankedParts rp
+FULL OUTER JOIN CustomerOrders co ON rp.price_quartile = (CASE 
+                                                               WHEN co.total_spent IS NULL THEN 0 
+                                                               ELSE NTILE(4) OVER(ORDER BY co.total_spent DESC) 
+                                                           END)
+WHERE rp.supplier_count IS NULL OR co.order_count > 0
+ORDER BY rp.p_partkey, co.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

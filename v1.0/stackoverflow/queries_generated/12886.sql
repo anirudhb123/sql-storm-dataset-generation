@@ -1,0 +1,77 @@
+-- Performance Benchmarking SQL Query
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(AVG(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(AVG(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(p.Tags, ',')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags t ON tag = t.TagName
+    GROUP BY 
+        p.Id
+), UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+), BadgeStats AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.Tags,
+    us.UserId,
+    us.DisplayName AS AuthorDisplayName,
+    us.PostsCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    bs.BadgeCount
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.OwnerUserId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+LEFT JOIN 
+    BadgeStats bs ON u.Id = bs.UserId
+ORDER BY 
+    ps.Score DESC;

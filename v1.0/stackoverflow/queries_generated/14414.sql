@@ -1,0 +1,64 @@
+-- Performance benchmarking query to analyze post activity, user reputation, and post interaction
+WITH PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'  -- Analyzing posts created in the last 30 days
+    GROUP BY 
+        p.Id, u.Reputation
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.Score,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.OwnerReputation,
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation AS UserReputation,
+    ua.PostCount AS UserPostCount,
+    ua.CommentCount AS UserCommentCount,
+    ua.VoteCount AS UserVoteCount
+FROM 
+    PostActivity pa
+JOIN 
+    UserActivity ua ON pa.OwnerReputation = ua.Reputation
+ORDER BY 
+    pa.ViewCount DESC, pa.Score DESC;  -- Ordering by post popularity and engagement

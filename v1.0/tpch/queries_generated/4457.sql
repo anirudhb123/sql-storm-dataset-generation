@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+FilteredLineItems AS (
+    SELECT 
+        l.*,
+        CASE 
+            WHEN l.l_shipdate < l.l_commitdate 
+            THEN 'Delayed'
+            ELSE 'On Time'
+        END AS delivery_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.1 AND l.l_returnflag = 'N'
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrderStats
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    ps.ps_partkey,
+    p.p_name,
+    s.s_name,
+    COUNT(DISTINCT li.l_orderkey) AS orders_count,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+    STRING_AGG(CONCAT('(Delivery: ', li.delivery_status, ', Ship Mode: ', li.l_shipmode, ')'), '; ') AS delivery_info
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    FilteredLineItems li ON ps.ps_partkey = li.l_partkey
+WHERE 
+    li.l_shipdate >= '2023-01-01' AND li.l_shipdate <= '2023-12-31'
+GROUP BY 
+    r.r_name, n.n_name, ps.ps_partkey, p.p_name, s.s_name
+HAVING 
+    COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY 
+    total_revenue DESC;

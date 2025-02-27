@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mc.company_type_id = 2 AND t.kind_id = 1 AND mi.info < 'A poignant comedy about a mute who befriends Nicole, the little daughter of a prostitute. Gleason shows his considerable talents as an actor without uttering a sound as he plays the bumbling, kind-hearted janitor, Gigot. Gleason wrote the original story and music for this film.';

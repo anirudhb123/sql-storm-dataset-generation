@@ -1,0 +1,51 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.PostTypeId = 1 
+),
+TopRatedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.VoteTypeId = 2) AS UpvotesReceived, 
+        COUNT(DISTINCT p.Id) AS QuestionsAnswered,
+        DENSE_RANK() OVER (ORDER BY SUM(v.VoteTypeId = 2) DESC) AS UserRank
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 2 
+    GROUP BY u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        MIN(ph.CreationDate) AS ClosedDate
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10 
+    GROUP BY p.Id
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    u.DisplayName AS Author,
+    ph.UserDisplayName AS LastEditor,
+    ph.HistoryDate AS LastEditDate,
+    COALESCE(cp.ClosedDate, 'Not Closed') AS ClosureStatus,
+    tu.UpvotesReceived,
+    tu.QuestionsAnswered
+FROM Posts p
+LEFT JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN RecursivePostHistory ph ON p.Id = ph.PostId AND ph.HistoryRank = 1
+LEFT JOIN ClosedPosts cp ON p.Id = cp.ClosedPostId
+LEFT JOIN TopRatedUsers tu ON u.Id = tu.UserId
+WHERE p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) 
+ORDER BY tu.UpvotesReceived DESC, p.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

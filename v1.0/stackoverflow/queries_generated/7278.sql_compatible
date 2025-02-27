@@ -1,0 +1,58 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalUpVotes DESC) AS RankByUpVotes,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts
+    FROM UserStats
+),
+PostInteraction AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2  
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= '2023-01-01'  
+    GROUP BY p.Id, p.Title
+)
+SELECT 
+    tu.UserId,
+    tu.TotalUpVotes,
+    tu.TotalDownVotes,
+    tu.TotalPosts,
+    tu.TotalComments,
+    tu.TotalBadges,
+    pi.Title AS TopPostTitle,
+    pi.TotalVotes AS PostVotes,
+    pi.TotalComments AS PostComments
+FROM TopUsers tu
+JOIN (
+    SELECT 
+        PostId,
+        Title,
+        ROW_NUMBER() OVER (ORDER BY TotalVotes DESC) AS PostRank
+    FROM PostInteraction
+) pi ON pi.PostRank = 1  
+ORDER BY tu.RankByUpVotes, tu.RankByPosts;

@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey
+    WHERE sh.level < 5
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container, ts.total_sales
+    FROM part p
+    JOIN TotalSales ts ON p.p_partkey = ts.l_partkey
+    WHERE ts.total_sales > 50000
+    ORDER BY ts.total_sales DESC
+    LIMIT 10
+),
+SupplierDetails AS (
+    SELECT s.s_name, s.s_acctbal, p.p_name, p.p_brand, p.p_container
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+)
+SELECT 
+    th.s_name,
+    th.level,
+    th.s_acctbal,
+    tp.p_name,
+    tp.total_sales,
+    COALESCE((SELECT COUNT(*) FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = th.s_nationkey)), 0) AS order_count,
+    CASE WHEN th.level > 2 THEN 'Senior' ELSE 'Junior' END AS supplier_level
+FROM SupplierHierarchy th
+LEFT JOIN TopParts tp ON th.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = th.s_nationkey)
+ORDER BY th.s_acctbal DESC, tp.total_sales DESC;

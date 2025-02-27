@@ -1,0 +1,86 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000  -- Starting point for well-regarded users
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        UR.Level + 1
+    FROM 
+        Users U
+    JOIN 
+        UserReputation UR ON U.Reputation > UR.Reputation
+    WHERE 
+        U.Id != UR.Id
+),
+
+MostActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(Score, 0)) AS TotalScore,
+        AVG(U.Reputation) OVER () AS AvgReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+    HAVING 
+        COUNT(P.Id) > 10 -- More than 10 posts
+),
+
+RecentActivePosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate > (CURRENT_TIMESTAMP - INTERVAL '30 days')
+)
+
+SELECT 
+    UR.DisplayName AS ReputationLevelUser,
+    MAU.DisplayName AS ActiveUser,
+    RAP.Title AS RecentPostTitle,
+    RAP.CreationDate AS RecentPostDate,
+    CASE 
+        WHEN MAU.TotalScore > (SELECT AVG(TotalScore) FROM MostActiveUsers) 
+        THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS PerformanceComparison,
+    CASE 
+        WHEN U.Id IS NOT NULL THEN 'Has Badges'
+        ELSE 'No Badges'
+    END AS BadgeStatus
+FROM 
+    UserReputation UR
+FULL OUTER JOIN 
+    MostActiveUsers MAU ON UR.Id = MAU.Id
+FULL OUTER JOIN 
+    RecentActivePosts RAP ON MAU.Id = RAP.Author
+LEFT JOIN 
+    Badges B ON MAU.Id = B.UserId AND B.Date > (CURRENT_TIMESTAMP - INTERVAL '1 year')
+WHERE 
+    UR.Level = 2 -- Filter for users at a certain reputation level
+ORDER BY 
+    UR.Reputation DESC NULLS LAST, MAU.PostCount DESC, RAP.RecentPostDate DESC;

@@ -1,0 +1,86 @@
+WITH ranked_movies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY RANDOM()) AS rn,
+        COUNT(*) OVER (PARTITION BY title.production_year) AS total_movies
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+),
+selected_movies AS (
+    SELECT 
+        rm.*
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rn <= 5
+),
+actor_movies AS (
+    SELECT 
+        ka.name AS actor_name,
+        st.title AS movie_title,
+        st.production_year,
+        COUNT(DISTINCT ci.id) AS role_count,
+        SUM(coalesce(ci.nr_order, 0)) AS total_order
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name ka ON ka.person_id = ci.person_id
+    INNER JOIN 
+        selected_movies sm ON sm.movie_id = ci.movie_id
+    INNER JOIN 
+        aka_title st ON st.id = ci.movie_id
+    GROUP BY 
+        ka.name, st.title, st.production_year
+),
+actor_info AS (
+    SELECT 
+        ai.person_id,
+        ai.info,
+        ROW_NUMBER() OVER (PARTITION BY ai.person_id ORDER BY ai.info) AS info_rank
+    FROM 
+        person_info ai
+    WHERE 
+        ai.info IS NOT NULL
+),
+actor_with_info AS (
+    SELECT 
+        am.actor_name,
+        am.movie_title,
+        am.production_year,
+        ai.info
+    FROM 
+        actor_movies am
+    LEFT JOIN 
+        actor_info ai ON ai.person_id = am.actor_id
+)
+SELECT 
+    awi.actor_name,
+    awi.movie_title,
+    awi.production_year,
+    COALESCE(awi.info, 'No Info') AS actor_info,
+    COUNT(DISTINCT mw.movie_id) AS co_starring_movies,
+    SUM(CASE WHEN awi.info_rank = 1 THEN 1 ELSE 0 END) AS first_info_count
+FROM 
+    actor_with_info awi
+LEFT JOIN 
+    cast_info ci ON ci.movie_id IN (
+        SELECT movie_id 
+        FROM movie_keyword 
+        WHERE keyword_id IN (
+            SELECT id 
+            FROM keyword WHERE keyword.text LIKE '%action%'
+        )
+    )
+LEFT JOIN 
+    title mw ON mw.id = ci.movie_id
+GROUP BY 
+    awi.actor_name, awi.movie_title, awi.production_year, awi.info
+HAVING 
+    COUNT(DISTINCT mw.movie_id) > 2
+ORDER BY 
+    awi.production_year DESC, 
+    awi.actor_name ASC;

@@ -1,0 +1,72 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT
+        ca.person_id,
+        ca.movie_id,
+        ca.nr_order,
+        1 AS depth
+    FROM 
+        cast_info ca
+    WHERE 
+        ca.nr_order = 1
+    
+    UNION ALL
+    
+    SELECT
+        ca.person_id,
+        ca.movie_id,
+        ca.nr_order,
+        ah.depth + 1
+    FROM 
+        cast_info ca
+    INNER JOIN actor_hierarchy ah ON ca.person_id = ah.person_id AND ca.movie_id <> ah.movie_id
+)
+
+, ranked_movies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON c.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+
+SELECT 
+    ak.person_id,
+    a.name AS actor_name,
+    r.prod_year,
+    COUNT(DISTINCT r.movie_id) AS num_movies,
+    MAX(CASE WHEN r.rank = 1 THEN r.title END) AS top_movie_title,
+    COUNT(DISTINCT kh.keyword) AS num_keywords,
+    MAX(m.status_id) AS max_status, 
+    COALESCE(NULLIF(MAX(m.note), ''), 'No notes') AS last_note
+FROM 
+    actor_hierarchy ah
+JOIN 
+    aka_name ak ON ak.person_id = ah.person_id
+JOIN 
+    ranked_movies r ON r.movie_id = ah.movie_id
+LEFT JOIN 
+    movie_info m ON m.movie_id = r.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = r.movie_id
+LEFT JOIN 
+    keyword kh ON kh.id = mk.keyword_id
+WHERE 
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND r.production_year BETWEEN 2000 AND 2020
+    AND EXISTS (
+        SELECT 1
+        FROM complete_cast cc
+        WHERE cc.movie_id = ah.movie_id AND cc.subject_id = ak.person_id
+    )
+GROUP BY 
+    ak.person_id, a.name, r.prod_year
+HAVING 
+    COUNT(DISTINCT r.movie_id) > 5
+ORDER BY 
+    num_movies DESC, actor_name;

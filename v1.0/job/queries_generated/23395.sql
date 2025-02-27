@@ -1,0 +1,73 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year BETWEEN 1990 AND 2020
+),
+cast_details AS (
+    SELECT
+        c.movie_id,
+        c.person_id,
+        p.name AS actor_name,
+        rt.title AS movie_title,
+        rt.production_year,
+        COALESCE(STRING_AGG(DISTINCT ct.kind, ', '), 'No Roles') AS roles
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON p.person_id = c.person_id
+    JOIN 
+        ranked_titles rt ON rt.title_id = c.movie_id
+    LEFT JOIN 
+        comp_cast_type ct ON ct.id = c.person_role_id
+    GROUP BY 
+        c.movie_id, c.person_id, rt.title, rt.production_year
+),
+keyword_count AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(DISTINCT k.keyword) AS keyword_total
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+movie_info_collected AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'Budget' THEN mi.info END) AS budget,
+        MAX(CASE WHEN it.info = 'Box Office' THEN mi.info END) AS box_office
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON it.id = mi.info_type_id
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    cd.movie_title,
+    cd.production_year,
+    cd.actor_name,
+    cd.roles,
+    COALESCE(kc.keyword_total, 0) AS keyword_count,
+    COALESCE(mic.budget, 'Not Available') AS budget,
+    COALESCE(mic.box_office, 'Not Available') AS box_office
+FROM 
+    cast_details cd
+LEFT JOIN 
+    keyword_count kc ON kc.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_info_collected mic ON mic.movie_id = cd.movie_id
+WHERE 
+    cd.roles IS NOT NULL
+    AND cd.roles NOT LIKE '%Cameo%'
+ORDER BY 
+    cd.production_year DESC, 
+    cd.movie_title ASC;

@@ -1,0 +1,35 @@
+WITH RECURSIVE string_benchmark AS (
+    SELECT 
+        p.p_partkey,
+        CONCAT(p.p_name, ' - ', p.p_mfgr, ' [', p.p_type, ']') AS detailed_info,
+        p.p_retailprice,
+        LENGTH(CONCAT(p.p_name, ' - ', p.p_mfgr, ' [', p.p_type, ']')) AS info_length
+    FROM 
+        part p
+    UNION ALL
+    SELECT 
+        ps.ps_partkey,
+        CONCAT(s.s_name, ': Supplies ', p.p_name) AS detailed_info,
+        p.p_retailprice,
+        LENGTH(CONCAT(s.s_name, ': Supplies ', p.p_name)) AS info_length
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE
+        ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT 
+    detailed_info, 
+    SUM(p.p_retailprice) AS total_retailprice, 
+    SUM(info_length) AS total_length, 
+    COUNT(*) AS record_count
+FROM 
+    string_benchmark
+GROUP BY 
+    detailed_info
+ORDER BY 
+    total_length DESC
+LIMIT 10;

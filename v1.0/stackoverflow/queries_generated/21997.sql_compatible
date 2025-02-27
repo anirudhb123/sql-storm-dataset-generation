@@ -1,0 +1,82 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(B.Id) AS TotalBadges, 
+        MAX(B.Class) AS HighestBadgeClass
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId IN (2, 4)) AS UpVotes,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY P.Id ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= '2022-01-01' AND 
+        P.Score > 5
+),
+
+FilteredPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.ViewCount,
+        PD.CommentCount,
+        PD.Score,
+        (UD.TotalBadges - 5) AS BadgeShortfall 
+    FROM 
+        PostDetails PD
+    JOIN 
+        UserBadges UD ON PD.ViewCount > (SELECT AVG(ViewCount) FROM Posts) 
+    WHERE 
+        UD.TotalBadges IS NOT NULL 
+),
+
+FinalResults AS (
+    SELECT 
+        FP.PostId,
+        FP.Title,
+        FP.ViewCount,
+        FP.CommentCount,
+        FP.Score,
+        CASE 
+            WHEN FP.BadgeShortfall < 0 THEN 'Sufficient Badges'
+            WHEN FP.BadgeShortfall >= 0 AND FP.BadgeShortfall <= 3 THEN 'Considerable Badge Struggle'
+            ELSE 'Badge Desperation'
+        END AS BadgeStatus
+    FROM 
+        FilteredPosts FP
+)
+
+SELECT 
+    FR.*,
+    CASE WHEN FR.Score IS NULL OR FR.Score = 0 THEN 'No Votes Yet' ELSE 'Has Votes' END AS VoteStatus,
+    COALESCE(MAX(PHT.Comment), 'No Close Reason') AS CloseReason
+FROM 
+    FinalResults FR
+LEFT JOIN 
+    PostHistory PH ON FR.PostId = PH.PostId AND PH.PostHistoryTypeId = 10 
+LEFT JOIN 
+    CloseReasonTypes CRT ON PH.Comment = CRT.Id 
+GROUP BY 
+    FR.PostId, FR.Title, FR.ViewCount, FR.CommentCount, FR.Score
+HAVING 
+    FR.ViewCount > 50 OR (FR.ViewCount <= 50 AND FR.CommentCount > 2) 
+ORDER BY 
+    FR.Score DESC, FR.ViewCount ASC
+LIMIT 100;

@@ -1,0 +1,68 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss.customer_sk,
+        SUM(ss.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY ss.customer_sk ORDER BY SUM(ss.net_profit) DESC) AS rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        c.c_customer_id, 
+        cs.total_net_profit,
+        cs.total_transactions
+    FROM 
+        customer c
+    JOIN 
+        sales_summary cs ON c.c_customer_sk = cs.customer_sk
+    WHERE 
+        cs.total_net_profit > 1000
+),
+inventory_data AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    JOIN 
+        item i ON inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+top_items AS (
+    SELECT 
+        i.i_item_id,
+        ROW_NUMBER() OVER (ORDER BY SUM(ds.net_profit) DESC) AS item_rank
+    FROM 
+        store_sales ds
+    JOIN 
+        item i ON ds.ss_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+    HAVING 
+        COUNT(ds.ticket_number) > 10
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_net_profit,
+    hvc.total_transactions,
+    ti.i_item_id,
+    inv.total_quantity,
+    COALESCE(ti.item_rank, 0) AS item_rank
+FROM 
+    high_value_customers hvc
+LEFT JOIN 
+    top_items ti ON hvc.total_net_profit >= (SELECT AVG(total_net_profit) FROM high_value_customers)
+LEFT JOIN 
+    inventory_data inv ON inv.total_quantity < 50
+WHERE 
+    hvc.total_transactions >= 5
+ORDER BY 
+    hvc.total_net_profit DESC, 
+    item_rank ASC;

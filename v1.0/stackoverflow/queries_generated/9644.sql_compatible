@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, ',')::text[])
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+),
+RecentActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.DisplayName
+)
+
+SELECT 
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CreationDate,
+    ur.Reputation,
+    ur.BadgeCount,
+    pt.TagName,
+    ra.CommentCount,
+    ra.VoteCount,
+    ra.LastCommentDate
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+JOIN 
+    PopularTags pt ON TRUE
+JOIN 
+    RecentActivity ra ON ra.DisplayName = rp.OwnerDisplayName
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.CreationDate DESC, ur.Reputation DESC
+LIMIT 10;

@@ -1,0 +1,57 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        hd.hd_buy_potential,
+        hd.hd_vehicle_count,
+        hd.hd_dep_count
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_net_paid_inc_tax
+    FROM web_sales ws
+    GROUP BY ws.ws_order_number
+),
+customer_sales AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_education_status,
+        ci.hd_buy_potential,
+        ci.hd_vehicle_count,
+        ci.hd_dep_count,
+        sd.total_net_profit,
+        sd.total_quantity,
+        sd.avg_net_paid_inc_tax
+    FROM customer_info ci
+    JOIN sales_data sd ON ci.c_customer_id = 
+        (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_order_number = sd.ws_order_number)
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    cd_gender,
+    hd_buy_potential,
+    total_net_profit,
+    total_quantity,
+    avg_net_paid_inc_tax
+FROM customer_sales
+WHERE total_net_profit > 3000 
+ORDER BY total_net_profit DESC;

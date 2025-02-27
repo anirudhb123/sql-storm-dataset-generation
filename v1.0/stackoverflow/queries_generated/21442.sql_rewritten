@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        MAX(b.Date) OVER (PARTITION BY p.OwnerUserId) AS LatestBadgeDate,
+        COALESCE(SUM(v.VoteTypeId = 2)::int - SUM(v.VoteTypeId = 3)::int, 0) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR' AND 
+        p.ViewCount > 0
+),
+InvalidUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.Id IS NULL
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.Comment,
+        STRING_AGG(DISTINCT CONCAT_WS(' - ', pht.Name, ph.UserDisplayName), '; ') AS ActionDetails
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.Comment
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp ViewRank,
+    rp.CommentCount,
+    COALESCE(u.DisplayName, 'Unknown User') AS OwnerDisplayName,
+    pd.ActionDetails,
+    CASE 
+        WHEN rp.TotalVotes > 0 THEN 'Popular'
+        WHEN rp.ViewCount < 10 AND rp.CommentCount = 0 THEN 'Neglected'
+        WHEN rp.CommentCount > 100 THEN 'Highly Discussed'
+        ELSE 'Moderate'
+    END AS PostCategory,
+    CASE 
+        WHEN u.Id IS NOT NULL THEN 'Valid User'
+        ELSE 'Invalid User' 
+    END AS UserStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    InvalidUsers iu ON u.Id = iu.Id
+LEFT JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+WHERE 
+    (rp.ViewRank <= 10 OR rp.CommentCount > 5)
+ORDER BY 
+    CASE 
+        WHEN PostCategory = 'Popular' THEN 1
+        WHEN PostCategory = 'Highly Discussed' THEN 2
+        ELSE 3
+    END,
+    rp.ViewCount DESC
+LIMIT 50;

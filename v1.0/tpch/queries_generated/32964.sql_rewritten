@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           0 AS hierarchy_level 
+    FROM supplier s
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           sh.hierarchy_level + 1 
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_customerkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1996-01-01' AND l.l_shipdate < DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+), CustomerSpend AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(SUM(od.order_total), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN OrderDetails od ON c.c_custkey = od.o_customerkey
+    GROUP BY c.c_custkey, c.c_name
+), SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply_cost 
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey
+), RankedCustomers AS (
+    SELECT cs.c_custkey, cs.c_name, cs.total_spent, 
+           RANK() OVER (ORDER BY cs.total_spent DESC) AS spend_rank
+    FROM CustomerSpend cs
+), NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT n.n_name, ns.supplier_count, rc.c_name, rc.total_spent, sh.hierarchy_level
+FROM NationSummary ns
+JOIN RankedCustomers rc ON rc.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)
+LEFT JOIN SupplierHierarchy sh ON rc.c_custkey = sh.s_nationkey
+WHERE sh.hierarchy_level >= 0
+ORDER BY ns.n_name, rc.total_spent DESC;

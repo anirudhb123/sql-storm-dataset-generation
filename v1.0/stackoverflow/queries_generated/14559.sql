@@ -1,0 +1,27 @@
+-- Performance Benchmarking Query
+SELECT 
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(p.Score) AS AverageScore,
+    COUNT(DISTINCT u.Id) AS TotalUsers,
+    COUNT(DISTINCT t.Id) AS TotalTags,
+    COUNT(c.Id) AS TotalComments,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    MAX(p.CreationDate) AS LatestPostDate,
+    MIN(p.CreationDate) AS EarliestPostDate
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- last year
+GROUP BY 
+    u.Reputation
+ORDER BY 
+    TotalQuestions DESC;

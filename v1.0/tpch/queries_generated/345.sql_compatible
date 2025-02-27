@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+CustomerPerformance AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(os.total_sales) AS total_spent,
+        COUNT(os.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        OrderSummary os ON c.c_custkey = os.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cp.c_custkey,
+    cp.c_name,
+    cp.total_spent,
+    cp.order_count,
+    COALESCE(rs.s_name, 'No Supplier') AS supplier_name,
+    CASE 
+        WHEN cp.total_spent > 10000 THEN 'High Value'
+        WHEN cp.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_segment
+FROM 
+    CustomerPerformance cp
+LEFT JOIN 
+    RankedSuppliers rs ON cp.order_count = rs.rn
+WHERE 
+    cp.total_spent IS NOT NULL
+ORDER BY 
+    cp.total_spent DESC;

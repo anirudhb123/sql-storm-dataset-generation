@@ -1,0 +1,50 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 0
+    GROUP BY c.c_custkey
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(ss.total_available, 0) AS total_available,
+        RANK() OVER (ORDER BY COALESCE(ss.total_available, 0) DESC) AS rank_total_available
+    FROM supplier s
+    LEFT JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        cu.c_custkey,
+        cu.c_name,
+        cu.total_spent,
+        ROW_NUMBER() OVER (ORDER BY cu.total_spent DESC) AS rn
+    FROM CustomerOrders cu
+    WHERE cu.total_spent > 1000
+)
+SELECT 
+    rs.s_suppkey,
+    rs.s_name,
+    rs.total_available,
+    hvc.c_custkey,
+    hvc.c_name,
+    hvc.total_spent
+FROM RankedSuppliers rs
+FULL OUTER JOIN HighValueCustomers hvc ON rs.rank_total_available = hvc.rn
+WHERE hvc.c_custkey IS NOT NULL OR rs.s_suppkey IS NOT NULL
+ORDER BY rs.total_available DESC NULLS LAST, hvc.total_spent DESC NULLS LAST;

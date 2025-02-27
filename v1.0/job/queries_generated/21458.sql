@@ -1,0 +1,97 @@
+WITH RankedMovies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_in_year,
+        COUNT(DISTINCT ci.person_id) AS num_cast_members
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY
+        at.id, at.title, at.production_year
+),
+PopularMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year
+    FROM
+        RankedMovies
+    WHERE
+        rank_in_year <= 5
+),
+MovieDetails AS (
+    SELECT
+        pm.title,
+        pm.production_year,
+        GROUP_CONCAT(DISTINCT cn.name SEPARATOR ', ') AS company_names,
+        SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS has_box_office,
+        AVG(CASE WHEN mi.info_type_id IN (2, 3) THEN CAST(mi.info AS DECIMAL) ELSE NULL END) AS average_rating
+    FROM
+        PopularMovies pm
+    LEFT JOIN
+        movie_companies mc ON pm.title_id = mc.movie_id
+    LEFT JOIN
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        movie_info mi ON pm.title_id = mi.movie_id
+    GROUP BY
+        pm.title, pm.production_year
+)
+SELECT
+    md.title,
+    md.production_year,
+    COALESCE(md.company_names, 'No companies') AS company_names,
+    CASE WHEN md.has_box_office > 0 THEN 'Yes' ELSE 'No' END AS box_office_data,
+    CASE 
+        WHEN md.average_rating IS NULL THEN 'No rating'
+        ELSE CONCAT('Rating: ', ROUND(md.average_rating, 2))
+    END AS rating_info
+FROM
+    MovieDetails md
+WHERE
+    md.production_year IS NOT NULL
+ORDER BY
+    md.production_year DESC, md.title;
+
+WITH RecursiveMovieGraph AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM
+        aka_title m
+    JOIN
+        movie_link ml ON m.id = ml.movie_id 
+    WHERE
+        m.production_year > 2000
+    UNION ALL
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        rmg.linked_movie_id,
+        rmg.depth + 1
+    FROM
+        RecursiveMovieGraph rmg
+    JOIN
+        movie_link ml ON rmg.linked_movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        rmg.depth < 3  -- Limit depth to prevent excessive recursion
+)
+SELECT
+    mg.title,
+    COUNT(DISTINCT mg.linked_movie_id) AS related_movies,
+    MAX(rmg.depth) AS max_depth
+FROM
+    RecursiveMovieGraph mg
+GROUP BY
+    mg.title
+HAVING
+    related_movies > 5
+ORDER BY
+    max_depth DESC;

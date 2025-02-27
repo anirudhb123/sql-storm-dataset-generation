@@ -1,0 +1,76 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS TotalComments,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::text[]) 
+    GROUP BY 
+        T.Id, T.TagName
+)
+SELECT 
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalQuestions,
+    UA.TotalAnswers,
+    UA.TotalBounty,
+    UA.TotalComments,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.TotalComments AS PostComments,
+    PS.LastEditDate,
+    TS.TagId,
+    TS.TagName,
+    TS.PostCount
+FROM 
+    UserActivity UA
+LEFT JOIN 
+    PostStats PS ON UA.UserId = PS.PostId 
+LEFT JOIN 
+    TagStats TS ON PS.PostId = TS.PostId 
+ORDER BY 
+    UA.TotalPosts DESC, PS.Score DESC;

@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 5
+),
+MovieKeywords AS (
+    SELECT 
+        m.movie_id,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY k.keyword) AS keyword_rank
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+)
+
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword,
+    t.actor_count
+FROM 
+    TopMovies t
+LEFT JOIN 
+    MovieKeywords mk ON t.title = mk.movie_id
+WHERE 
+    t.actor_count > 10
+ORDER BY 
+    t.production_year DESC, 
+    t.actor_count DESC, 
+    mk.keyword_rank ASC
+LIMIT 20;

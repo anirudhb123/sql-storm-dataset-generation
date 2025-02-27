@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, level + 1
+    FROM supplier s
+    INNER JOIN SupplierCTE cte ON s.s_nationkey = cte.s_nationkey
+    WHERE s.s_acctbal > 1000 AND level < 2
+),
+
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+
+SupplierRanked AS (
+    SELECT scte.s_suppkey, scte.s_name, nr.r_name,
+           ROW_NUMBER() OVER (PARTITION BY nr.r_name ORDER BY scte.s_acctbal DESC) AS rank,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM SupplierCTE scte
+    JOIN partsupp ps ON scte.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN NationRegion nr ON scte.s_nationkey = nr.n_nationkey
+    WHERE l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY scte.s_suppkey, scte.s_name, nr.r_name
+)
+
+SELECT sr.r_name,
+       COUNT(DISTINCT sr.s_suppkey) AS supplier_count,
+       AVG(sr.total_sales) AS avg_sales,
+       MAX(sr.total_sales) AS max_sales,
+       COALESCE(MIN(sr.total_sales), 0) AS min_sales
+FROM SupplierRanked sr
+WHERE sr.rank <= 5
+GROUP BY sr.r_name
+ORDER BY supplier_count DESC, avg_sales DESC;

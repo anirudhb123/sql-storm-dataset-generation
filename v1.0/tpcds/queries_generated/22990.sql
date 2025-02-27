@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rank_per_order
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        CASE 
+            WHEN cd.cd_gender IS NULL THEN 'Unknown'
+            ELSE cd.cd_gender
+        END AS gender,
+        cd.cd_marital_status,
+        COALESCE(cd_cd_purchase_estimate, 0) AS purchase_estimate,
+        (SELECT MAX(ib_upper_bound)
+         FROM household_demographics hd
+         JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+         WHERE hd.hd_demo_sk = cd.cd_demo_sk) AS max_income_band
+    FROM 
+        customer_demographics cd
+),
+FinalReport AS (
+    SELECT 
+        cd.gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS total_customers,
+        SUM(COALESCE(rs.ws_quantity, 0)) as total_quantity,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(cr.total_returned_quantity) AS total_returned_quantity,
+        SUM(cr.total_returned_amount) AS total_returned_amount
+    FROM 
+        CustomerDemographics cd
+    LEFT JOIN 
+        RankedSales rs ON rs.ws_order_number IN (SELECT ws_order_number FROM web_sales ws WHERE ws.ws_bill_customer_sk = cd.cd_demo_sk)
+    LEFT JOIN 
+        CustomerReturns cr ON cr.sr_customer_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.gender, cd.cd_marital_status
+)
+SELECT 
+    gender,
+    cd_marital_status,
+    total_customers,
+    total_quantity,
+    total_net_paid,
+    total_returned_quantity,
+    total_returned_amount,
+    100.0 * total_returned_quantity / NULLIF(total_quantity, 0) AS return_rate
+FROM 
+    FinalReport
+WHERE 
+    (total_net_paid > 1000 OR total_quantity > 100) AND 
+    NOT EXISTS (SELECT 1 FROM customer c WHERE c.c_current_cdemo_sk = cd.cd_demo_sk AND c.c_first_shipto_date_sk IS NULL)
+ORDER BY 
+    return_rate DESC, total_net_paid DESC
+LIMIT 50;

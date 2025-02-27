@@ -1,0 +1,59 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate,
+        p.OwnerUserId,
+        0 AS Level,
+        CAST(p.Title AS VARCHAR) AS Hierarchy
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.Body,
+        a.CreationDate,
+        a.OwnerUserId,
+        Level + 1,
+        CONCAT(r.Hierarchy, ' -> ', a.Title) AS Hierarchy
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostHierarchy r ON a.ParentId = r.PostId
+)
+SELECT 
+    u.DisplayName AS Author,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    COALESCE(ph.Comment, 'No comments') AS LastActionComment,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS LatestActionRank,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy p
+INNER JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON p.PostId = ph.PostId 
+    AND ph.CreationDate = (SELECT MAX(CreationDate) FROM PostHistory WHERE PostId = p.PostId)
+LEFT JOIN 
+    Posts ps ON p.PostId = ps.Id 
+LEFT JOIN 
+    LATERAL STRING_SPLIT(ps.Tags, ', ') AS t ON t.TagName IS NOT NULL
+WHERE 
+    p.CreationDate >= '2022-01-01' 
+    AND p.Score > 0 
+    AND EXISTS (SELECT 1 FROM Posts a WHERE a.AcceptedAnswerId = p.PostId) 
+GROUP BY 
+    u.DisplayName, p.Title, p.CreationDate, p.Score, p.ViewCount, ph.Comment
+HAVING 
+    COUNT(DISTINCT t.TagName) >= 3 
+ORDER BY 
+    p.Score DESC, LatestActionRank
+OPTION (MAXRECURSION 100);

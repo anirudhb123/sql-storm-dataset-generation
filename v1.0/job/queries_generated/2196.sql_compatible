@@ -1,0 +1,56 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) as total_cast,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) as rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year,
+        total_cast
+    FROM 
+        ranked_movies
+    WHERE 
+        rn <= 5
+),
+movie_details AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+        COALESCE(MAX(mi.info), 'No Info') AS additional_info
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        cast_info ci ON tm.title = (SELECT title FROM aka_title WHERE id = ci.movie_id LIMIT 1)
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON ci.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary' LIMIT 1)
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actors,
+    md.additional_info,
+    CASE 
+        WHEN md.additional_info = 'No Info' THEN 'No details available'
+        ELSE 'Details found'
+    END AS info_status
+FROM 
+    movie_details md
+ORDER BY 
+    md.production_year DESC, md.total_cast DESC;

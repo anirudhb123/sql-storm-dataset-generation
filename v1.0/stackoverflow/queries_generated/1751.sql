@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+RecentActivity AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS CommentCount,
+        SUM(CASE WHEN c.CreationDate > NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS RecentComments
+    FROM 
+        Comments c
+    GROUP BY 
+        PostId
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        ra.CommentCount,
+        ra.RecentComments,
+        rp.OwnerName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentActivity ra ON rp.PostId = ra.PostId
+    WHERE 
+        rp.Rank <= 5 -- Top 5 posts per user
+)
+SELECT 
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.ViewCount,
+    pm.CommentCount,
+    pm.RecentComments,
+    CASE 
+        WHEN pm.RecentComments > 5 THEN 'Active'
+        ELSE 'Less Active'
+    END AS ActivityStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    LATERAL (
+        SELECT TAGS(TagName) 
+        FROM unnest(string_to_array(pm.Tags, '><')) AS TagName
+    ) t ON TRUE
+GROUP BY 
+    pm.PostId, pm.Title, pm.CreationDate, pm.Score, pm.ViewCount, pm.CommentCount, pm.RecentComments
+ORDER BY 
+    pm.Score DESC, pm.RecentComments DESC
+LIMIT 10;

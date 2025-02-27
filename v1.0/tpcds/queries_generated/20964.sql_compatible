@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY ws.ws_sales_price) AS price_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_web_site_sk) AS total_quantity,
+        (SELECT COUNT(DISTINCT c.c_customer_id) 
+         FROM customer c 
+         WHERE EXTRACT(MONTH FROM c.c_birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)) AS current_birth_month_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_inner.ws_sales_price) 
+                             FROM web_sales ws_inner
+                             WHERE ws_inner.ws_sold_date_sk BETWEEN 20230101 AND 20231231)
+)
+SELECT 
+    r.web_site_id,
+    COUNT(r.ws_order_number) AS order_count,
+    MAX(r.ws_sales_price) AS max_sales_price,
+    MIN(r.ws_sales_price) AS min_sales_price,
+    AVG(r.ws_sales_price) AS avg_sales_price,
+    SUM(CASE WHEN r.rn = 1 THEN r.ws_sales_price ELSE 0 END) AS top_sales,
+    CASE 
+        WHEN r.total_quantity IS NULL THEN 'No sales'
+        WHEN DATE '2002-10-01' < DATE '2002-01-01' THEN 'Year still active'
+        ELSE 'End of year'
+    END AS sales_period,
+    NULLIF(SUM(CASE WHEN r.price_rank <= 10 THEN r.ws_sales_price ELSE 0 END), 0) AS top_10_sales_total,
+    COUNT(*) FILTER (WHERE r.total_quantity = (SELECT MAX(total_quantity) FROM RankedSales)) AS highest_sales_site_count
+FROM 
+    RankedSales r
+GROUP BY 
+    r.web_site_id, r.total_quantity
+HAVING 
+    AVG(r.ws_sales_price) BETWEEN 10 AND 100
+ORDER BY 
+    order_count DESC, avg_sales_price DESC
+LIMIT 5;

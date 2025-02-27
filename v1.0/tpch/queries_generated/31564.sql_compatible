@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+), 
+
+OrderAmounts AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey
+), 
+
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice 
+    FROM part p
+    WHERE p.p_brand LIKE 'Brand%'
+
+    EXCEPT 
+
+    SELECT 
+        p.p_partkey 
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty < 100
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    SUM(oa.total_revenue) AS total_order_revenue,
+    COUNT(DISTINCT fp.p_partkey) AS unique_parts_count,
+    AVG(fp.p_retailprice) AS avg_part_price
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN OrderAmounts oa ON oa.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey IN (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = n.n_nationkey 
+        AND c.c_acctbal IS NOT NULL
+    )
+)
+LEFT JOIN FilteredParts fp ON fp.p_partkey IN (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps 
+    WHERE ps.ps_suppkey = s.s_suppkey
+)
+GROUP BY r.r_name, n.n_name, s.s_name
+HAVING SUM(oa.total_revenue) > 100000
+ORDER BY total_order_revenue DESC;

@@ -1,0 +1,107 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        CreationDate,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserRanks AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM 
+        Users
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPostReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        p.Id, p.Title, ph.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Level,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE(cr.CloseReason, 'Not Closed') AS LastCloseReason,
+        COALESCE(cr.CloseCount, 0) AS NumberOfCloses,
+        uau.TotalUpVotes,
+        uau.TotalDownVotes
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        Posts p ON ph.Id = p.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        ClosedPostReasons cr ON p.Id = cr.PostId
+    LEFT JOIN 
+        MostActiveUsers uau ON u.Id = uau.Id
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.Level,
+    fr.OwnerDisplayName,
+    fr.OwnerReputation,
+    fr.LastCloseReason,
+    fr.NumberOfCloses,
+    fr.TotalUpVotes,
+    fr.TotalDownVotes
+FROM 
+    FinalResults fr
+WHERE 
+    fr.OwnerReputation > 1000
+AND 
+    fr.NumberOfCloses >= 1
+ORDER BY 
+    fr.TotalUpVotes DESC,
+    fr.NumberOfCloses DESC
+LIMIT 50;

@@ -1,0 +1,35 @@
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS company_type,
+    COUNT(DISTINCT m.movie_id) AS movie_count,
+    AVG(CASE WHEN ti.info LIKE '%awards%' THEN 1 ELSE 0 END) AS awards_avg,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    aka_name AS a
+JOIN 
+    cast_info AS ci ON a.person_id = ci.person_id
+JOIN 
+    title AS t ON ci.movie_id = t.id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_name AS cn ON mc.company_id = cn.id
+JOIN 
+    company_type AS ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    movie_info AS mi ON t.id = mi.movie_id
+LEFT JOIN 
+    info_type AS ti ON mi.info_type_id = ti.id
+LEFT JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    c.kind IS NOT NULL AND 
+    t.production_year >= 2000
+GROUP BY 
+    a.name, t.title, c.kind
+ORDER BY 
+    movie_count DESC, a.name ASC
+LIMIT 100;

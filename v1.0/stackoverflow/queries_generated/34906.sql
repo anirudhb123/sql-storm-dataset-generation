@@ -1,0 +1,93 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        UR.Level + 1
+    FROM Users U
+    JOIN UserReputationCTE UR ON U.Reputation > UR.Reputation AND UR.Level < 5
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS Rank
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+TopVotes AS (
+    SELECT 
+        V.PostId,
+        V.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM Votes V
+    GROUP BY V.PostId, V.VoteTypeId
+),
+PostHistoryClosed AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        U.DisplayName AS UserDisplayName,
+        COUNT(PH.Id) AS CloseCount
+    FROM PostHistory PH
+    JOIN Users U ON PH.UserId = U.Id
+    WHERE PH.PostHistoryTypeId = 10 -- Filter for closed posts
+    GROUP BY PH.PostId, U.DisplayName
+)
+
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation,
+    COALESCE(RP.PostId, 0) AS RecentPostId,
+    COALESCE(RP.Title, 'No recent posts') AS RecentPostTitle,
+    COALESCE(RP.CreationDate, 'N/A') AS RecentPostDate,
+    COALESCE(RP.Score, 0) AS RecentPostScore,
+    COALESCE(RP.ViewCount, 0) AS RecentPostViews,
+    COALESCE(PC.CloseCount, 0) AS TotalClosures
+FROM Users U
+JOIN UserReputationCTE UR ON U.Id = UR.Id
+LEFT JOIN RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.Rank = 1
+LEFT JOIN PostHistoryClosed PC ON RP.PostId = PC.PostId
+WHERE U.Reputation BETWEEN 1000 AND 5000
+ORDER BY U.Reputation DESC, RP.CreationDate DESC;
+
+-- Additional analysis based on window functions and analytical capabilities
+
+SELECT 
+    P.Title,
+    P.ViewCount,
+    SUM(V.VoteTypeId = 2) OVER (PARTITION BY P.Id) AS UpvoteCount,   -- Counting upvotes
+    SUM(V.VoteTypeId = 3) OVER (PARTITION BY P.Id) AS DownvoteCount, -- Counting downvotes
+    CASE 
+        WHEN P.ViewCount >= 100 THEN 'High view count'
+        WHEN P.ViewCount BETWEEN 50 AND 99 THEN 'Medium view count'
+        ELSE 'Low view count'
+    END AS ViewCountCategory
+FROM Posts P
+LEFT JOIN Votes V ON P.Id = V.PostId
+WHERE P.CreationDate >= NOW() - INTERVAL '90 days' -- Recent posts
+ORDER BY P.ViewCount DESC;
+
+-- Write an example that combines set operators (UNION) to fetch distinct owners
+SELECT DISTINCT OwnerUserId
+FROM Posts
+WHERE CreationDate >= NOW() - INTERVAL '60 days'
+UNION
+SELECT DISTINCT OwnerUserId
+FROM Comments
+WHERE CreationDate >= NOW() - INTERVAL '60 days';

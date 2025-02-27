@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        r.role AS role_name,
+        COUNT(*) AS actor_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id, r.role
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name) AS companies
+    FROM 
+        movie_companies mc 
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cr.role_name,
+    COALESCE(cr.actor_count, 0) AS actor_count,
+    COALESCE(mkw.keywords, 'No keywords') AS keywords,
+    COALESCE(ci.companies, 'No companies') AS companies
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastRoles cr ON rm.title = (SELECT a.title FROM aka_title a WHERE a.id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.movie_id = rm.title LIMIT 1) LIMIT 1)
+LEFT JOIN 
+    MoviesWithKeywords mkw ON rm.title = (SELECT a.title FROM aka_title a WHERE a.id = mkw.movie_id LIMIT 1)
+LEFT JOIN 
+    CompanyInfo ci ON rm.production_year = (SELECT a.production_year FROM aka_title a WHERE a.id IN (SELECT mc.movie_id FROM movie_companies mc WHERE mc.movie_id = ci.movie_id LIMIT 1) LIMIT 1)
+WHERE 
+    rm.year_rank <= 5
+ORDER BY 
+    rm.production_year DESC, 
+    actor_count DESC, 
+    rm.title;

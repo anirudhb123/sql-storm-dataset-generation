@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND mc.note < '(present) (as British Screen)' AND rt.id < 10 AND t.phonetic_code LIKE '%5%' AND chn.md5sum IN ('3f95fbc12fb4c1ca0e410a967ed7c616', 'bb42171d809979d26d71226fa209ff15', 'd1cc6f0f4bb266b4bd0f5b578ae14eb3') AND rt.role LIKE '%t%' AND chn.surname_pcode < 'U4512' AND cn.country_code < '[bf]';

@@ -1,0 +1,57 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+SalesReasons AS (
+    SELECT 
+        sr.store_sk,
+        r.r_reason_desc,
+        SUM(ws.ws_sales_price) AS reason_sales
+    FROM 
+        store_returns sr 
+    JOIN 
+        reason r ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN 
+        web_sales ws ON sr.sr_item_sk = ws.ws_item_sk 
+    GROUP BY 
+        sr.store_sk, r.r_reason_desc
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_profit
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.rank <= 10
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_sales,
+    sr.r_reason_desc,
+    COALESCE(sr.reason_sales, 0) AS sales_due_to_reason,
+    CASE 
+        WHEN tc.order_count > 0 THEN (COALESCE(sr.reason_sales, 0) / tc.total_sales) * 100
+        ELSE 0
+    END AS reason_sales_percentage
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    SalesReasons sr ON tc.c_customer_id = sr.store_sk
+ORDER BY 
+    tc.total_sales DESC;

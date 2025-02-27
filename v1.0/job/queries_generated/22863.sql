@@ -1,0 +1,66 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorCast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        c.role AS role_name,
+        ci.nr_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    WHERE 
+        ak.name IS NOT NULL
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    MAX(ac.actor_name) AS lead_actor,
+    COUNT(DISTINCT ac.role_name) AS distinct_roles,
+    STRING_AGG(DISTINCT ac.role_name, ', ') AS roles_list,
+    CASE
+        WHEN rt.production_year > 2000 THEN 'Modern Era'
+        WHEN rt.production_year BETWEEN 1990 AND 2000 THEN '90s Classic'
+        ELSE 'Oldies'
+    END AS era_category
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorCast ac ON rt.title_id = ac.movie_id
+GROUP BY 
+    rt.title, rt.production_year
+HAVING 
+    COUNT(ac.actor_name) > 2
+ORDER BY 
+    rt.production_year DESC, rt.title_rank;
+
+### Explanation:
+1. **Common Table Expressions (CTEs)**: Two CTEs are used here. The first (`RankedTitles`) ranks titles by production year. The second (`ActorCast`) collects actor information along with their roles.
+
+2. **Aggregate Functions**: Various aggregate functions such as `MAX`, `COUNT`, and `STRING_AGG` are used to derive meaningful results from the aggregated data.
+
+3. **CASE Statements**: The query contains a `CASE` statement to categorize films based on their released years into different eras.
+
+4. **Outer Joins**: An outer join is employed to gather all titles even when there are no casts associated with them.
+
+5. **HAVING Clause**: This is applied to filter out titles without sufficient actors, enhancing the query's specificity.
+
+6. **DISTINCT Operations**: Used to ensure unique counts and lists of roles, showcasing the flexibility of SQL.
+
+7. **Complex Aggregation**: `STRING_AGG` produces a concatenated string of roles for each movie, demonstrating string expression capabilities in SQL.
+
+8. **Order Specification**: The results are ordered by production year and title rank, adding layers of organization to the output.
+
+The combination of CTEs, window functions, and various SQL constructs makes this query an interesting benchmark for performance testing in SQL databases.

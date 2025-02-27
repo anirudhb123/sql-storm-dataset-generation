@@ -1,0 +1,59 @@
+
+WITH RecursiveCustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        1 AS level
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+
+    UNION ALL
+
+    SELECT 
+        cr_returned_date_sk,
+        cr_item_sk,
+        cr_returning_customer_sk,
+        cr_return_quantity,
+        cr_return_amount,
+        level + 1
+    FROM catalog_returns
+    WHERE cr_return_quantity > 0 AND cr_returning_customer_sk IN (SELECT sr_customer_sk FROM RecursiveCustomerReturns)
+),
+AggregateResults AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(COALESCE(rr.return_amt, 0)) AS total_return_amt,
+        COUNT(DISTINCT rr.sr_item_sk) AS distinct_returned_items,
+        AVG(rr.return_quantity) AS avg_return_quantity,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(COALESCE(rr.return_amt, 0)) DESC) AS return_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            returned.sk AS return_id,
+            returned.return_amt,
+            returned.item_sk,
+            returned.customer_sk
+        FROM RecursiveCustomerReturns returned
+    ) rr ON c.c_customer_sk = rr.sr_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender
+)
+SELECT 
+    ar.c_customer_id,
+    ar.cd_gender,
+    ar.total_return_amt,
+    ar.distinct_returned_items,
+    ar.avg_return_quantity,
+    CASE 
+        WHEN ar.return_rank = 1 THEN 'High Return'
+        WHEN ar.return_rank = 2 THEN 'Medium Return'
+        ELSE 'Low Return'
+    END AS return_category
+FROM AggregateResults ar
+WHERE ar.total_return_amt > (SELECT AVG(total_return_amt) FROM AggregateResults)
+ORDER BY ar.total_return_amt DESC
+LIMIT 100;

@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- CTE to traverse movie links for a specific movie
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.movie_id = (SELECT id FROM title WHERE title = 'Inception')
+
+    UNION ALL
+
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.linked_movie_id
+),
+cast_with_roles AS (
+    -- CTE to get cast members and their roles for movies in the hierarchy
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        ci.movie_id IN (SELECT linked_movie_id FROM movie_hierarchy)
+    ORDER BY 
+        ci.movie_id, role_rank
+),
+movies_info AS (
+    -- CTE to gather information about those movies and their production year
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(m.keyword_list, 'None') AS keywords
+    FROM 
+        title t
+    LEFT JOIN (
+        SELECT 
+            mk.movie_id,
+            STRING_AGG(k.keyword, ', ') AS keyword_list
+        FROM 
+            movie_keyword mk
+        JOIN 
+            keyword k ON mk.keyword_id = k.id
+        GROUP BY 
+            mk.movie_id
+    ) m ON t.id = m.movie_id
+    WHERE 
+        t.id IN (SELECT linked_movie_id FROM movie_hierarchy)
+)
+SELECT 
+    mi.title,
+    mi.production_year,
+    cwr.actor_name,
+    cwr.role_name,
+    COUNT(cwr.role_name) OVER (PARTITION BY mi.movie_id) AS total_roles,
+    mi.keywords
+FROM 
+    movies_info mi
+LEFT JOIN 
+    cast_with_roles cwr ON mi.movie_id = cwr.movie_id
+WHERE 
+    (mi.production_year > 2010 OR mi.keywords IS NOT NULL)
+ORDER BY 
+    mi.production_year DESC, cwr.role_rank ASC;

@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostClosureDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName AS ClosedBy,
+        ph.CreationDate AS ClosureDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ct ON ph.Comment::int = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+),
+UserPostLinks AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS LinkCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    SUM(CASE WHEN rp.RankByScore = 1 THEN 1 ELSE 0 END) AS AcceptedAnswers,
+    COALESCE(SUM(DISTINCT pc.CloseReason IS NOT NULL), 0) AS TotalClosures,
+    SUM(DISTINCT upl.LinkCount) AS TotalLinks,
+    SUM(TotalBadgeClass) AS UserBadges,
+    STRING_AGG(DISTINCT pc.CloseReason, ', ') AS CloseReasons
+FROM 
+    TopUsers up
+JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostClosureDetails pc ON pc.PostId = rp.PostId
+LEFT JOIN 
+    UserPostLinks upl ON upl.PostId = rp.PostId
+GROUP BY 
+    up.UserId, up.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5
+ORDER BY 
+    UserBadges DESC, TotalPosts DESC
+LIMIT 20;
+
+This SQL query uses various constructs, such as CTEs (Common Table Expressions) for logical separation of different parts of the query, window functions to rank posts, outer joins to capture badge and closure details, and a variety of aggregate functions and conditions to filter and summarize the data. Additionally, it incorporates some nuanced logic with COALESCE and string aggregation to create an interesting output reflecting user contributions and interactions in the Post and Comment system.

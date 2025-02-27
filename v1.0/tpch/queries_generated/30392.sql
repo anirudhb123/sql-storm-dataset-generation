@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'F'
+    UNION ALL
+    SELECT o.o_orderkey, oh.o_custkey, o.o_orderdate, 
+           oh.o_totalprice + o.o_totalprice AS cumulative_total,
+           level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate AND level < 5
+),
+CustomerStats AS (
+    SELECT c.c_custkey, c.c_name, 
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) DESC) AS order_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+SubQueryResults AS (
+    SELECT 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand,
+        p.p_retailprice, AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_retailprice
+)
+SELECT cus.c_name, cus.total_spent, ord.o_orderkey, ord.cumulative_total,
+       part.p_name, part.avg_supply_cost, part.supplier_count
+FROM CustomerStats cus
+INNER JOIN OrderHierarchy ord ON cus.c_custkey = ord.o_custkey
+LEFT JOIN SubQueryResults part ON part.p_partkey = (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey IN (SELECT l.l_suppkey FROM lineitem l WHERE l.l_orderkey = ord.o_orderkey)
+    ORDER BY ps.ps_supplycost ASC
+    LIMIT 1
+)
+WHERE cus.order_count > 5 AND ord.level <= 3
+ORDER BY cus.total_spent DESC, ord.o_orderdate;

@@ -1,0 +1,4 @@
+SELECT min(an.name) AS alternative_name, min(chn.name) AS voiced_character, min(n.name) AS voicing_actress, min(t.title) AS american_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n, role_type AS rt, title AS t
+WHERE ci.movie_id = t.id AND t.id = mc.movie_id AND ci.movie_id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND n.id = ci.person_id AND chn.id = ci.person_role_id AND an.person_id = n.id AND an.person_id = ci.person_id
+AND mc.movie_id < 1942777 AND cn.name_pcode_sf IS NOT NULL AND t.phonetic_code IN ('A4326', 'F2642', 'J3134', 'J3452', 'R5164', 'S6462', 'U2152', 'V4516', 'X1634', 'Y5321') AND n.gender LIKE '%f%' AND ci.movie_id < 2040270;

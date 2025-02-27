@@ -1,0 +1,38 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, o.o_totalprice, 0 AS depth
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.c_name, oh.o_totalprice, oh.depth + 1
+    FROM OrderHierarchy oh
+    JOIN lineitem li ON oh.o_orderkey = li.l_orderkey
+    WHERE li.l_returnflag = 'R'
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+SalesData AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS revenue
+    FROM lineitem li
+    WHERE li.l_shipdate >= DATE '1996-01-01' 
+      AND li.l_shipdate < DATE '1997-01-01'
+    GROUP BY li.l_orderkey
+)
+SELECT oh.o_orderkey, oh.o_orderdate, oh.c_name, oh.o_totalprice,
+       COALESCE(sd.revenue, 0) AS order_revenue, 
+       rs.s_name AS top_supplier,
+       CASE 
+           WHEN oh.depth > 0 THEN 'Returned Order'
+           ELSE 'Normal Order'
+       END AS order_type
+FROM OrderHierarchy oh
+LEFT JOIN SalesData sd ON oh.o_orderkey = sd.l_orderkey
+LEFT JOIN RankedSuppliers rs ON rs.rank = 1
+WHERE (oh.o_totalprice IS NOT NULL AND oh.o_totalprice > 1000) 
+   OR (rs.s_name IS NOT NULL AND rs.total_supply_cost < 5000)
+ORDER BY oh.o_orderdate DESC, order_revenue DESC;

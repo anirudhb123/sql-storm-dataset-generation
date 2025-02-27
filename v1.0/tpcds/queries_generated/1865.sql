@@ -1,0 +1,60 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) as rank_gender
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS total_spent,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+CustomerSales AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        ss.total_spent,
+        ss.order_count,
+        CASE 
+            WHEN ss.total_spent IS NULL THEN 'No orders'
+            ELSE FORMAT(ss.total_spent, 'C')
+        END AS formatted_spent
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        SalesSummary ss ON rc.c_customer_sk = ss.ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.formatted_spent,
+    cs.order_count,
+    CASE 
+        WHEN cs.rank_gender = 1 THEN 'Top Spending ' || cs.cd_gender
+        ELSE 'Regular ' || cs.cd_gender
+    END AS customer_category
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    (cs.total_spent IS NOT NULL AND cs.order_count > 1) 
+    OR (cd.cd_marital_status = 'M' AND cs.order_count = 1)
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

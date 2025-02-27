@@ -1,0 +1,62 @@
+WITH SupplierData AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, n.n_name, r.r_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    sd.nation_name,
+    sd.region_name,
+    COUNT(DISTINCT co.c_custkey) AS number_of_customers,
+    SUM(co.total_spent) AS total_customers_spent,
+    COUNT(DISTINCT l.l_orderkey) AS count_of_orders,
+    SUM(ls.order_total) AS total_revenue,
+    AVG(sd.total_cost) AS average_supplier_cost
+FROM 
+    SupplierData sd
+JOIN 
+    CustomerOrders co ON sd.nation_name = co.order_count
+JOIN 
+    LineItemSummary ls ON co.order_count = ls.l_orderkey
+GROUP BY 
+    sd.nation_name, sd.region_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

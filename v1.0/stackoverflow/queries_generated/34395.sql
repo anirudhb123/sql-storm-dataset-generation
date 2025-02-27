@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  -- Starting with Questions
+    UNION ALL
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+), UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.UserId
+), PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        ph.OwnerUserId AS CreatorId,
+        ph.CreationDate
+    FROM Posts p
+    LEFT JOIN UserVotes v ON p.OwnerUserId = v.UserId
+    LEFT JOIN RecursivePostHierarchy ph ON p.Id = ph.PostId
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.CreationDate,
+        ph.UpVotes,
+        ph.DownVotes,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    JOIN CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE pht.Name = 'Post Closed'
+    GROUP BY ph.PostId, ph.Title, ph.CreationDate, ph.UpVotes, ph.DownVotes
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    COALESCE(cl.CloseCount, 0) AS CloseCount,
+    COALESCE(cl.CloseReasons, 'None') AS CloseReasons
+FROM PostDetails pd
+LEFT JOIN ClosedPosts cl ON pd.PostId = cl.PostId
+WHERE pd.ViewCount > 100
+ORDER BY pd.ViewCount DESC, pd.CreationDate DESC;

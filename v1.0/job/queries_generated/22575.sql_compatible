@@ -1,0 +1,80 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+    GROUP BY 
+        t.title, t.production_year, t.id
+),
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year, 
+        num_actors 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank <= 5
+),
+ActorStats AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        STRING_AGG(DISTINCT m.title, ', ' ORDER BY m.title) AS movie_titles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        m.production_year = (SELECT MAX(production_year) FROM RankedMovies)
+    GROUP BY 
+        a.name
+),
+FilteredActors AS (
+    SELECT 
+        actor_name,
+        movies_count,
+        movie_titles
+    FROM 
+        ActorStats
+    WHERE 
+        movies_count > (SELECT AVG(movies_count) FROM ActorStats)
+),
+ActorTitles AS (
+    SELECT DISTINCT 
+        fa.actor_name,
+        fa.movie_titles,
+        fa.movies_count,
+        CASE 
+            WHEN fa.movie_titles IS NULL THEN 'No Movies' 
+            ELSE fa.movie_titles 
+        END AS titles_or_placeholder
+    FROM 
+        FilteredActors fa
+)
+
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    COALESCE(at.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(at.titles_or_placeholder, 'N/A') AS titles_or_placeholder,
+    CASE 
+        WHEN tm.num_actors IS NULL THEN 'No Actors'
+        ELSE CAST(tm.num_actors AS VARCHAR)
+    END AS num_actors
+FROM 
+    TopMovies tm
+FULL OUTER JOIN 
+    ActorTitles at ON tm.movie_title LIKE '%' || at.movie_titles || '%'
+ORDER BY 
+    tm.production_year DESC, tm.num_actors DESC, at.actor_name;

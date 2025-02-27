@@ -1,0 +1,42 @@
+WITH RecursivePostTree AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        0 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1 AND P.CreationDate >= '2023-01-01'  
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        R.Level + 1
+    FROM Posts P
+    INNER JOIN Posts Q ON P.ParentId = Q.Id
+    INNER JOIN RecursivePostTree R ON R.PostId = Q.Id  
+)
+
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation,
+    COUNT(DISTINCT Q.Id) AS TotalQuestions,
+    COUNT(DISTINCT A.PostId) AS TotalAnswers,
+    AVG(A.Score) AS AverageAnswerScore,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+FROM Users U
+LEFT JOIN Posts Q ON U.Id = Q.OwnerUserId AND Q.PostTypeId = 1  
+LEFT JOIN RecursivePostTree A ON A.PostId = Q.AcceptedAnswerId  
+LEFT JOIN PostLinks PL ON PL.PostId = Q.Id
+LEFT JOIN Tags T ON T.Id = PL.RelatedPostId
+LEFT JOIN Votes V ON V.PostId = Q.Id AND V.VoteTypeId = 8  
+WHERE U.Reputation > 100  
+GROUP BY U.Id, U.DisplayName, U.Reputation
+HAVING COUNT(DISTINCT Q.Id) > 0  
+ORDER BY TotalQuestions DESC, AverageAnswerScore DESC;

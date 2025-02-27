@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.Title,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotesCount,
+        COALESCE(Badges.Gold, 0) AS GoldBadges,
+        COALESCE(Badges.Silver, 0) AS SilverBadges,
+        COALESCE(Badges.Bronze, 0) AS BronzeBadges
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            SUM(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS Gold,
+            SUM(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS Silver,
+            SUM(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS Bronze
+        FROM Badges
+        GROUP BY UserId
+    ) AS Badges ON p.OwnerUserId = Badges.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        postId,
+        COUNT(CASE WHEN PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        MAX(CreationDate) AS LastEditDate
+    FROM PostHistory
+    GROUP BY postId
+),
+CombinedResults AS (
+    SELECT 
+        r.PostId,
+        r.OwnerUserId,
+        r.PostTypeId,
+        r.CreationDate,
+        r.Score,
+        r.Title,
+        r.ViewCount,
+        r.ScoreRank,
+        r.UpVotesCount,
+        ph.CloseCount,
+        ph.ReopenCount,
+        ph.LastEditDate,
+        r.GoldBadges,
+        r.SilverBadges,
+        r.BronzeBadges
+    FROM RankedPosts r
+    LEFT JOIN PostHistoryAnalysis ph ON r.PostId = ph.postId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotesCount > 10 THEN 'Very Popular'
+        WHEN UpVotesCount BETWEEN 1 AND 10 THEN 'Moderately Popular'
+        ELSE 'Not Popular'
+    END AS PopularityStatus,
+    CASE 
+        WHEN CloseCount > 0 AND ReopenCount = 0 THEN 'Closed Without Reopening'
+        WHEN ReopenCount > 0 THEN 'Reopened'
+        ELSE 'Never Closed'
+    END AS ClosureStatus,
+    COALESCE(ROUND(100.0 * (GoldBadges + SilverBadges + BronzeBadges) / NULLIF(CASE 
+        WHEN (GoldBadges + SilverBadges + BronzeBadges) > 0 THEN 1 ELSE 0 END, 0), 0), 2), 0) AS BadgePercentage
+FROM CombinedResults
+WHERE PostTypeId = 1 -- Only questions
+  AND (ViewCount > 100 OR (Title LIKE '%SQL%' AND CloseCount = 0)) 
+ORDER BY Score DESC, UpVotesCount DESC
+LIMIT 50;

@@ -1,0 +1,77 @@
+WITH RankedQuestions AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+        AND p.CreationDate >= '2023-01-01' -- Only questions from 2023
+),
+
+TagCloud AS (
+    SELECT 
+        TRIM(REGEXP_REPLACE(tags.TagName, '<[^>]*>', '', 'g')) AS TagName,
+        SUM(t.Count) AS TotalCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '>'))::int)
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TotalCount DESC
+    LIMIT 10
+),
+
+PopularUsers AS (
+    SELECT 
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 -- Active users with significant reputation
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    RQ.QuestionId,
+    RQ.Title,
+    RQ.Body,
+    RQ.CreationDate,
+    RQ.Author,
+    RQ.Score,
+    RQ.ViewCount,
+    RQ.AnswerCount,
+    RQ.CommentCount,
+    TC.TagName,
+    PU.DisplayName AS PopularAuthor,
+    PU.TotalBadges,
+    PU.TotalPosts
+FROM 
+    RankedQuestions RQ
+LEFT JOIN 
+    TagCloud TC ON TC.TotalCount > 0
+LEFT JOIN 
+    PopularUsers PU ON PU.TotalPosts > 5
+WHERE 
+    RQ.Rank <= 10 -- Top 10 questions
+ORDER BY 
+    RQ.Score DESC;

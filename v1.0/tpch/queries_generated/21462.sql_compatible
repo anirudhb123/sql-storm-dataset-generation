@@ -1,0 +1,64 @@
+
+WITH RECURSIVE dubious_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate
+    FROM orders
+    WHERE o_orderstatus IN ('F', 'O')
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus, o.o_totalprice * 0.9, o.o_orderdate
+    FROM orders o
+    JOIN dubious_orders d ON o.o_custkey = d.o_custkey AND o.o_orderdate > d.o_orderdate
+    WHERE o.o_orderstatus = 'O'
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+           COUNT(DISTINCT p.p_partkey) AS parts_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_availqty) > 100
+),
+high_value_customers AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) FROM customer c2
+    )
+),
+total_lineitem AS (
+    SELECT l_orderkey, 
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    GROUP BY l_orderkey
+),
+final_report AS (
+    SELECT n.n_name, SUM(ls.total_revenue) AS total_revenue, 
+           COUNT(DISTINCT co.o_orderkey) AS order_count, 
+           SUM(ss.total_supplycost) AS total_supply,
+           MAX(hc.rank) AS top_customer_rank
+    FROM nation n
+    LEFT JOIN supplier_stats ss ON ss.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        WHERE p.p_brand LIKE 'Brand#%')
+    LEFT JOIN total_lineitem ls ON ls.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM dubious_orders o 
+        JOIN customer c ON o.o_custkey = c.c_custkey 
+        WHERE c.c_nationkey = n.n_nationkey)
+    LEFT JOIN high_value_customers hc ON hc.c_custkey = co.o_custkey
+    GROUP BY n.n_name
+    HAVING SUM(ls.total_revenue) > 5000 AND MAX(hc.rank) < 10
+    ORDER BY total_revenue DESC, n.n_name
+)
+SELECT *
+FROM final_report
+WHERE EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM dubious_orders o)
+    AND l.l_shipdate IS NOT NULL
+    AND l.l_returnflag IS NULL
+)
+ORDER BY n_name DESC;

@@ -1,0 +1,67 @@
+
+WITH RecentPostEditHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ph.CreationDate AS EditDate,
+        ph.UserDisplayName AS EditedBy,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ph.Text AS RawValue,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+),
+
+RecentPostEdits AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        EditDate,
+        EditedBy,
+        Comment,
+        PostHistoryTypeId,
+        RawValue,
+        EditRank
+    FROM 
+        RecentPostEditHistory
+    WHERE 
+        EditRank = 1 
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10 
+)
+
+SELECT 
+    rpe.PostId,
+    rpe.Title AS PostTitle,
+    rpe.CreationDate AS PostCreationDate,
+    rpe.EditDate AS MostRecentEditDate,
+    rpe.EditedBy,
+    rpe.Comment AS EditComment,
+    rpe.RawValue AS EditedContent,
+    pt.TagName AS PopularTag
+FROM 
+    RecentPostEdits rpe
+CROSS JOIN 
+    PopularTags pt
+ORDER BY 
+    rpe.EditDate DESC, pt.PostCount DESC;

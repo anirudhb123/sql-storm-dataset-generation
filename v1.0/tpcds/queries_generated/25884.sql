@@ -1,0 +1,27 @@
+
+WITH AddressWords AS (
+    SELECT ca_address_sk, 
+           ca_street_name,
+           REGEXP_COUNT(ca_street_name, '[[:space:]]+') + 1 AS word_count,
+           TRIM(SUBSTR(ca_street_name, INSTR(ca_street_name, ' ') + 1, LENGTH(ca_street_name))) AS remaining_street_name
+    FROM customer_address
+),
+CustomerDetails AS (
+    SELECT c.c_customer_sk, 
+           c.c_first_name,
+           c.c_last_name,
+           CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+           aw.word_count,
+           aw.remaining_street_name
+    FROM customer c
+    JOIN AddressWords aw ON c.c_current_addr_sk = aw.ca_address_sk
+)
+SELECT cd.c_customer_sk,
+       cd.full_name,
+       cd.word_count,
+       LOWER(cd.remaining_street_name) AS remaining_street_name_lower,
+       UPPER(cd.remaining_street_name) AS remaining_street_name_upper,
+       LENGTH(cd.remaining_street_name) AS remaining_street_name_length
+FROM CustomerDetails cd
+WHERE cd.word_count > 3
+ORDER BY cd.remaining_street_name_length DESC;

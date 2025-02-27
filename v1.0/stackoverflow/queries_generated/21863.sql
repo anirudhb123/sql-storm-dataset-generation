@@ -1,0 +1,94 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        COUNT(CASE WHEN v.VoteTypeId IN (1, 4, 5, 6) THEN 1 END) AS SpecialVoteCount,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        UpvoteCount,
+        DownvoteCount,
+        PostCount,
+        LAG(UpvoteCount) OVER (ORDER BY UpvoteCount DESC) AS PrevUpvoteCount,
+        ROW_NUMBER() OVER (ORDER BY UpvoteCount DESC) AS Rank
+    FROM 
+        UserVoteStats
+    WHERE 
+        PostCount > 0 AND UpvoteCount IS NOT NULL
+),
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS HistoryEntryCount,
+        MAX(ph.CreationDate) AS LastHistoryDate,
+        MIN(ph.CreationDate) AS FirstHistoryDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    u.LastAccessDate,
+    u.Location,
+    COALESCE(tu.UpvoteCount, 0) AS TotalUpvotes,
+    COALESCE(tu.DownvoteCount, 0) AS TotalDownvotes,
+    COALESCE(tu.SpecialVoteCount, 0) AS TotalSpecialVotes,
+    COALESCE(tu.PostCount, 0) AS TotalPosts,
+    ph.LastHistoryDate,
+    ph.FirstHistoryDate,
+    ph.HistoryEntryCount,
+    CASE 
+        WHEN tu.UpvoteCount > 0 THEN 
+            CONCAT('User was active, with ', tu.UpvoteCount, ' upvotes.')
+        WHEN tu.DownvoteCount > 0 THEN 
+            CONCAT('User was less favorable, with ', tu.DownvoteCount, ' downvotes.')
+        ELSE 
+            'User has not been involved in voting.'
+    END AS UserActivity,
+    (
+        SELECT COUNT(*) 
+        FROM Badges b 
+        WHERE b.UserId = u.Id AND b.Class = 1
+    ) AS GoldBadges
+FROM 
+    Users u
+LEFT JOIN 
+    TopUsers tu ON u.Id = tu.UserId
+LEFT JOIN 
+    PostHistoryAggregates ph ON ph.PostId IN (
+        SELECT p.Id 
+        FROM Posts p 
+        WHERE p.OwnerUserId = u.Id
+    )
+WHERE 
+    u.Reputation > 100 
+    AND (
+        EXISTS (
+            SELECT 1 FROM Votes v WHERE v.UserId = u.Id AND v.VoteTypeId IN (2, 3)
+        ) OR 
+        EXISTS (
+            SELECT 1 FROM Badges b WHERE b.UserId = u.Id AND b.Class <= 2
+        )
+    )
+ORDER BY 
+    tu.Rank ASC NULLS LAST, 
+    u.Reputation DESC
+FETCH FIRST 100 ROWS ONLY;

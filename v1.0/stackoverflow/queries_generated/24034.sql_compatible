@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankViewCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        MAX(CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.Comment 
+            ELSE NULL END) AS CloseReason
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Comments AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory AS ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.ViewCount, p.PostTypeId
+),
+MostCommentedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.ViewCount,
+        rp.CommentCount, 
+        rp.RankViewCount,
+        COALESCE(rp.UpVoteCount - rp.DownVoteCount, 0) AS NetVotes
+    FROM 
+        RankedPosts AS rp
+    WHERE 
+        rp.CommentCount > 5
+        AND rp.RankViewCount <= 10
+),
+PostLinkStats AS (
+    SELECT 
+        pl.PostId,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        PostLinks AS pl
+    GROUP BY 
+        pl.PostId
+)
+SELECT 
+    mp.PostId,
+    mp.Title,
+    mp.CreationDate,
+    mp.ViewCount,
+    mp.CommentCount,
+    mp.NetVotes,
+    COALESCE(pl.RelatedPostCount, 0) AS RelatedPosts,
+    CASE 
+        WHEN mp.CloseReason IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    MostCommentedPosts AS mp
+LEFT JOIN 
+    PostLinkStats AS pl ON mp.PostId = pl.PostId
+ORDER BY 
+    mp.CommentCount DESC, 
+    mp.NetVotes DESC,
+    mp.ViewCount DESC;

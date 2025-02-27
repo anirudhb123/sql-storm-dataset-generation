@@ -1,0 +1,47 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           ARRAY[mt.id] AS path
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mh.path || mt.id
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_with_roles AS (
+    SELECT ci.movie_id, 
+           ak.name AS actor_name, 
+           rt.role AS role_name
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+),
+company_summary AS (
+    SELECT mc.movie_id, 
+           ARRAY_AGG(DISTINCT cn.name) AS companies, 
+           ARRAY_AGG(DISTINCT ct.kind) AS company_types
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT mh.title AS movie_title,
+       mh.movie_id,
+       ARRAY_AGG(DISTINCT CONCAT(cwr.actor_name, ' (', cwr.role_name, ')')) AS cast_actors,
+       cs.companies,
+       COALESCE(cs.company_types, ARRAY[]::TEXT[]) AS company_types,
+       COUNT(DISTINCT mi.info) AS info_count,
+       AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - mt.production_year) AS average_year_difference
+FROM movie_hierarchy mh
+LEFT JOIN cast_with_roles cwr ON mh.movie_id = cwr.movie_id
+LEFT JOIN company_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+WHERE mh.movie_id IS NOT NULL
+GROUP BY mh.movie_id, mh.title, cs.companies, cs.company_types
+ORDER BY average_year_difference DESC, mh.title;

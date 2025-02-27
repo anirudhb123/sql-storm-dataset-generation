@@ -1,0 +1,51 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        c.linked_movie_id AS movie_id,
+        mk.title,
+        mk.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link c
+    JOIN 
+        MovieHierarchy mh ON c.movie_id = mh.movie_id
+    JOIN 
+        aka_title mk ON mk.id = c.linked_movie_id
+)
+
+SELECT 
+    mh.title AS parent_movie_title,
+    mh.production_year AS parent_year,
+    child.title AS child_movie_title,
+    child.production_year AS child_year,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = mh.movie_id) AS parent_cast_count,
+    (SELECT COUNT(*) 
+     FROM cast_info ci 
+     WHERE ci.movie_id = child.movie_id) AS child_cast_count,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY child.year DESC) AS child_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    aka_title child ON mh.movie_id = child.episode_of_id
+WHERE 
+    mh.level = 1 AND 
+    child.title IS NOT NULL
+ORDER BY 
+    mh.production_year DESC, 
+    child.production_year DESC;
+This query creates a recursive common table expression (CTE) called `MovieHierarchy` to build a hierarchy of movies and their related episodes. It fetches the title and production year of parent movies, retrieves child episodes, counts the number of cast members for both parent and child movies, and ranks the child movies by year. The final result will list parent movies alongside their episodes in descending order of production year.

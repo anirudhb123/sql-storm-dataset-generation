@@ -1,0 +1,92 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        mt.id AS root_id
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.root_id
+    FROM 
+        aka_title AS e
+    JOIN 
+        movie_hierarchy AS mh ON e.episode_of_id = mh.movie_id
+    WHERE 
+        mh.level < 3  -- limit depth of query for sub-series
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(*) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        ci.movie_id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY cn.name) AS company_order
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+keyword_details AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    cs.total_cast,
+    cs.cast_names,
+    cd.company_name,
+    cd.company_type,
+    kd.keywords,
+    CASE 
+        WHEN mh.production_year IS NULL THEN 'No Year'
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    COUNT(*) FILTER (WHERE mh.level = 0) OVER () AS root_movies_count,
+    COALESCE(cd.company_order, 'No Companies') AS company_position
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_summary cs ON mh.movie_id = cs.movie_id
+LEFT JOIN 
+    company_details cd ON mh.movie_id = cd.movie_id AND cd.company_order = 1
+LEFT JOIN 
+    keyword_details kd ON mh.movie_id = kd.movie_id
+WHERE 
+    mh.production_year IS NOT NULL
+    AND mh.production_year >= 1990
+ORDER BY 
+    mh.production_year DESC,
+    mh.title ASC;

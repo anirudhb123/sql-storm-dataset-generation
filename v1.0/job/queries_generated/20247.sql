@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) OVER (PARTITION BY at.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.title) AS rank_by_year
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    WHERE
+        at.production_year IS NOT NULL
+),
+
+FilteredActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.md5sum AS actor_md5,
+        CAST(COALESCE(SUBSTRING(ak.name FROM '[^\s]+'), 'Unknown') AS VARCHAR) AS first_word
+    FROM
+        aka_name ak
+    WHERE 
+        ak.name IS NOT NULL 
+        AND ak.name NOT LIKE '%[0-9]%'
+),
+
+MoviesInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ra.actor_name,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        RankedMovies rm
+    JOIN 
+        FilteredActors ra ON rm.actor_count > 0 
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = rm.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, ra.actor_name
+)
+
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.actor_name,
+    mi.keyword_count,
+    CASE 
+        WHEN mi.actor_name IS NULL THEN 'No Actor Information'
+        ELSE 'Has Actor'
+    END AS actor_info,
+    RANK() OVER (PARTITION BY mi.production_year ORDER BY mi.keyword_count DESC) AS rank_by_keywords
+FROM 
+    MoviesInfo mi
+WHERE 
+    mi.production_year > 2000 -- Focus on 21st-century movies
+ORDER BY 
+    actor_info DESC, 
+    mi.keyword_count DESC;

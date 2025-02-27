@@ -1,0 +1,56 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2022 AND 2023
+    GROUP BY 
+        c.c_customer_id, d.d_year, d.d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+FinalReport AS (
+    SELECT 
+        ss.c_customer_id,
+        ss.total_sales,
+        ss.total_orders,
+        ss.avg_order_value,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.ib_lower_bound,
+        cd.ib_upper_bound
+    FROM 
+        SalesSummary ss
+    JOIN 
+        CustomerDemographics cd ON cd.cd_demo_sk = ss.c_customer_id
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    FinalReport
+WHERE 
+    total_sales > 1000;

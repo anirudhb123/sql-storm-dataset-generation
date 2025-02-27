@@ -1,0 +1,49 @@
+WITH PartSummary AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS average_supply_cost,
+        SUBSTRING(p.p_comment, 1, 10) AS short_comment
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+SupplierInfo AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        COUNT(ps.ps_partkey) AS total_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+RegionWiseSupplier AS (
+    SELECT
+        r.r_name AS region_name,
+        si.s_nationkey,
+        SUM(si.total_parts_supplied) AS total_parts_supplied_by_region
+    FROM SupplierInfo si
+    JOIN nation na ON si.s_nationkey = na.n_nationkey
+    JOIN region r ON na.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name, si.s_nationkey
+)
+SELECT 
+    ps.p_name,
+    ps.p_brand,
+    ps.p_type,
+    ps.total_available_quantity,
+    ps.average_supply_cost,
+    rws.region_name,
+    rws.total_parts_supplied_by_region,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM PartSummary ps
+JOIN lineitem l ON ps.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN RegionWiseSupplier rws ON rws.total_parts_supplied_by_region > 0
+WHERE ps.total_available_quantity > 100
+GROUP BY ps.p_name, ps.p_brand, ps.p_type, ps.total_available_quantity, ps.average_supply_cost, rws.region_name, rws.total_parts_supplied_by_region
+ORDER BY ps.p_name, rws.region_name;

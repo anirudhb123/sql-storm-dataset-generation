@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ViewCount,
+        U.UserId,
+        U.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS HighScoreRank
+    FROM 
+        Posts P 
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.TotalBounties,
+    COUNT(DISTINCT PA.PostId) AS UniquePosts,
+    MAX(PA.Score) AS MaxPostScore,
+    AVG(PA.ViewCount) AS AvgPostViews,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    COUNT(PA.PostId) FILTER (WHERE PA.PostRank <= 5) AS TopRecentPosts,
+    SUM(CASE WHEN PA.HighScoreRank = 1 THEN 1 ELSE 0 END) AS HighestScoringPosts
+FROM 
+    UserStats U
+LEFT JOIN 
+    PostActivity PA ON U.UserId = PA.UserId
+LEFT JOIN 
+    Comments C ON PA.PostId = C.PostId
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.TotalBounties
+HAVING 
+    COUNT(DISTINCT PA.PostId) > 10 
+ORDER BY 
+    U.Reputation DESC, MaxPostScore DESC;

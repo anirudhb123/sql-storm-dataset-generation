@@ -1,0 +1,66 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS title_rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+CastCTE AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(c.id) OVER (PARTITION BY c.movie_id) AS actor_count,
+        MAX(p.gender) AS predominant_gender
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        name p ON a.person_id = p.imdb_id
+),
+FilteredMovies AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        c.actor_count,
+        c.predominant_gender
+    FROM 
+        MovieCTE m
+    JOIN 
+        CastCTE c ON m.movie_id = c.movie_id
+    WHERE 
+        c.actor_count > 2 
+    ORDER BY 
+        m.production_year DESC
+),
+Keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    f.movie_title,
+    f.production_year,
+    f.actor_count,
+    f.predominant_gender,
+    k.keywords
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    Keywords k ON f.movie_id = k.movie_id
+WHERE 
+    f.predominant_gender IS NOT NULL
+ORDER BY 
+    f.production_year DESC, f.actor_count DESC;

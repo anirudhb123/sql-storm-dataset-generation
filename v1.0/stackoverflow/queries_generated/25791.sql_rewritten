@@ -1,0 +1,49 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT TagName, COUNT(*) AS TagCount, 1 AS Level
+    FROM Tags
+    GROUP BY TagName
+    HAVING COUNT(*) > 1
+    UNION ALL
+    SELECT t.TagName, (COUNT(*) + rth.TagCount) AS TagCount, rth.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy rth ON t.TagName LIKE '%' || rth.TagName || '%'
+    GROUP BY t.TagName, rth.TagCount, rth.Level
+),
+TopUsers AS (
+    SELECT u.Id AS UserId, u.Reputation, u.DisplayName, 
+           COUNT(DISTINCT p.Id) AS PostCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.Reputation, u.DisplayName
+    ORDER BY UpvoteCount DESC
+    LIMIT 10
+),
+PostsWithRecentComments AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate,
+           COUNT(c.Id) AS CommentCount,
+           MAX(c.CreationDate) AS LastCommentDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate
+    HAVING MAX(c.CreationDate) > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostActions AS (
+    SELECT ph.PostId, ph.PostHistoryTypeId, ph.CreationDate,
+           PHT.Name AS ActionType, u.DisplayName AS Actor
+    FROM PostHistory ph
+    JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    LEFT JOIN Users u ON ph.UserId = u.Id
+)
+SELECT u.DisplayName AS UserName, u.Reputation, u.PostCount, u.UpvoteCount, u.DownvoteCount,
+       pwc.PostId, pwc.Title, pwc.CommentCount, pwc.LastCommentDate,
+       rth.TagName AS RelatedTag, rth.TagCount
+FROM TopUsers u
+JOIN PostsWithRecentComments pwc ON u.UserId = pwc.PostId
+LEFT JOIN RecursiveTagHierarchy rth ON pwc.Title LIKE '%' || rth.TagName || '%'
+GROUP BY u.UserId, u.DisplayName, u.Reputation, u.PostCount, 
+         u.UpvoteCount, u.DownvoteCount, pwc.PostId, pwc.Title, 
+         pwc.CommentCount, pwc.LastCommentDate, rth.TagName, rth.TagCount
+ORDER BY u.Reputation DESC, pwc.CommentCount DESC;

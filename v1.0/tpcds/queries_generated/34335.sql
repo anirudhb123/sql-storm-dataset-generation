@@ -1,0 +1,89 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        1 AS level
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        cs.cs_sales_price,
+        cs.cs_quantity,
+        level + 1
+    FROM 
+        catalog_sales cs
+    INNER JOIN SalesCTE s ON cs.cs_item_sk = s.ws_item_sk
+    WHERE 
+        cs.cs_sales_price > 0
+),
+TotalSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+RankedSales AS (
+    SELECT 
+        ts.ws_item_sk,
+        ts.total_sales,
+        ts.order_count,
+        DENSE_RANK() OVER (ORDER BY ts.total_sales DESC) AS sales_rank
+    FROM 
+        TotalSales ts
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    s.ws_item_sk,
+    s.total_sales,
+    s.order_count,
+    r.sales_rank
+FROM 
+    CustomerData cs
+JOIN 
+    RankedSales r ON cs.c_customer_sk = r.ws_item_sk
+JOIN 
+    SalesCTE s ON s.ws_item_sk = r.ws_item_sk
+WHERE 
+    (cs.cd_marital_status = 'M' OR cs.cd_marital_status IS NULL)
+    AND r.sales_rank <= 10
+    AND cs.cd_purchase_estimate > 5000
+    AND (s.ws_quantity IS NOT NULL OR s.ws_quantity <> 0)
+    AND s.ws_order_number IN (
+        SELECT ws_order_number FROM web_sales 
+        WHERE ws_item_sk = s.ws_item_sk 
+        AND ws_sales_price > (
+            SELECT AVG(ws_sales_price) FROM web_sales 
+            WHERE ws_item_sk = s.ws_item_sk
+        )
+    )
+ORDER BY 
+    total_sales DESC;

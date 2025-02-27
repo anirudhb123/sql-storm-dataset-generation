@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= CURRENT_DATE
+), SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+), HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS brand_rank
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+), CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+), FinalSummary AS (
+    SELECT 
+        R.o_orderkey,
+        D.s_name AS supplier_name,
+        P.p_name AS part_name,
+        O.total_orders,
+        O.total_spent,
+        R.order_rank
+    FROM RankedOrders R
+    JOIN lineitem L ON R.o_orderkey = L.l_orderkey
+    JOIN HighValueParts P ON L.l_partkey = P.p_partkey
+    JOIN SupplierDetails D ON L.l_suppkey = D.s_suppkey
+    JOIN CustomerOrderSummary O ON O.total_orders > 5
+)
+SELECT 
+    F.o_orderkey,
+    F.supplier_name,
+    F.part_name,
+    F.total_orders,
+    F.total_spent,
+    CASE 
+        WHEN F.order_rank IS NULL THEN 'No Rank' 
+        ELSE CAST(F.order_rank AS CHAR) 
+    END AS order_rank_display
+FROM FinalSummary F
+WHERE 
+    F.total_spent > 1000.00 
+    AND F.supplier_name IS NOT NULL
+ORDER BY F.total_spent DESC 
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL,
+    'Total',
+    NULL,
+    SUM(F.total_orders),
+    SUM(F.total_spent),
+    NULL
+FROM FinalSummary F
+WHERE F.supplier_name IS NOT NULL;

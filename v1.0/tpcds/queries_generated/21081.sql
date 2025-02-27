@@ -1,0 +1,81 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(sr_item_sk) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt,
+        DENSE_RANK() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+CustomerWithMarital AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_gender, 'N') AS gender,
+        COALESCE(cd.cd_dep_count, 0) AS dep_count,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' AND cd.cd_dep_employed_count > 0 
+                THEN 'Married with Dependents'
+            WHEN cd.cd_marital_status = 'S' THEN 'Single'
+            ELSE 'Other'
+        END AS marital_category
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_net_paid_inc_tax) / NULLIF(SUM(ws_quantity), 0) AS avg_price_item
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_id
+),
+ReturnComparison AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_cr_quantity,
+        SUM(cr.refunded_cash) AS total_cr_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.returning_customer_sk
+)
+SELECT 
+    mw.c_customer_sk,
+    mw.gender,
+    mw.marital_category,
+    sr.total_returns,
+    sr.total_return_amt,
+    sd.avg_price_item,
+    wc.total_sales,
+    wc.total_profit 
+FROM 
+    CustomerWithMarital mw
+LEFT JOIN 
+    RankedReturns sr ON mw.c_customer_sk = sr.sr_customer_sk AND sr.rn = 1
+LEFT JOIN 
+    SalesData sd ON sd.total_sales > 100
+LEFT JOIN 
+    ReturnComparison rc ON mw.c_customer_sk = rc.returning_customer_sk
+LEFT JOIN 
+    (
+        SELECT 
+            w.w_warehouse_id,
+            DENSE_RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+        FROM 
+            SalesData 
+    ) AS ranked_sales ON sd.total_sales > ranked_sales.sales_rank
+WHERE 
+    mw.dep_count IS NOT NULL OR mw.dep_count < 2
+ORDER BY 
+    COALESCE(sr.total_return_amt, 0) DESC, sd.total_profit DESC;

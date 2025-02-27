@@ -1,0 +1,86 @@
+WITH RecursiveMovieGrowth AS (
+    SELECT 
+        mt.production_year,
+        COUNT(DISTINCT mt.id) AS movie_count,
+        SUM(CASE WHEN mt.production_year IS NOT NULL THEN 1 ELSE 0 END) AS valid_years
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        mt.production_year
+),
+
+CTE_CastInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        a.name AS actor_name,
+        a.person_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    INNER JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000
+),
+
+CTE_MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        GREATEST(COALESCE(i.info, '0'), '0')::integer AS info_value,
+        COUNT(DISTINCT mk.keyword_id) AS keywords_count,
+        COALESCE(MAX(mk.keyword), 'No Keywords') AS top_keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id 
+),
+
+FinalReport AS (
+    SELECT 
+        c.movie_id,
+        c.actor_name,
+        c.nr_order,
+        m.production_year,
+        m.title,
+        COALESCE(m.info_value, 0) AS rating,
+        GREATEST(0, m.keywords_count) AS keyword_count,
+        CASE 
+            WHEN m.keywords_count = 0 THEN 'No Keywords Available' 
+            ELSE m.top_keyword 
+        END AS keywords_summary
+    FROM 
+        CTE_CastInfo c
+    LEFT JOIN 
+        CTE_MovieDetails m ON c.movie_id = m.movie_id
+    WHERE 
+        c.role_rank = 1
+)
+
+SELECT 
+    f.movie_id,
+    f.actor_name,
+    f.production_year,
+    f.title,
+    f.rating,
+    f.keyword_count,
+    f.keywords_summary,
+    RANK() OVER (ORDER BY f.rating DESC NULLS LAST) AS rank_performance,
+    (SELECT COUNT(*) FROM RecursiveMovieGrowth g WHERE g.valid_years > 5) AS movies_with_growth
+FROM 
+    FinalReport f
+WHERE 
+    f.rating IS NOT NULL OR f.keyword_count >= 3
+ORDER BY 
+    f.production_year DESC, f.rating DESC;

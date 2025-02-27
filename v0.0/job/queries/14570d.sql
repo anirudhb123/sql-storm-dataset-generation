@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND t.kind_id IN (2, 3, 7) AND n.name_pcode_nf LIKE '%6%' AND t.title LIKE '%of%' AND ci.person_id IN (1209350, 1526553, 258646, 3024430, 3650910, 3682349, 3998711, 4007948, 4038832) AND n.name > 'Boyd-Ritari, Junko';

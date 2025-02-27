@@ -1,0 +1,61 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(U.Reputation) OVER() AS AvgReputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+BadgeStats AS (
+    SELECT
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+CombinedStats AS (
+    SELECT
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.PostCount,
+        U.QuestionCount,
+        U.AnswerCount,
+        U.UpVoteCount,
+        U.DownVoteCount,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        COALESCE(B.GoldCount, 0) AS GoldCount,
+        COALESCE(B.SilverCount, 0) AS SilverCount,
+        COALESCE(B.BronzeCount, 0) AS BronzeCount
+    FROM 
+        UserStats U
+    LEFT JOIN 
+        BadgeStats B ON U.UserId = B.UserId
+)
+SELECT 
+    C.*,
+    (C.Reputation - C.AvgReputation) AS ReputationDifference
+FROM 
+    CombinedStats C
+WHERE 
+    C.Reputation > C.AvgReputation
+ORDER BY 
+    C.Reputation DESC, 
+    C.BadgeCount DESC;

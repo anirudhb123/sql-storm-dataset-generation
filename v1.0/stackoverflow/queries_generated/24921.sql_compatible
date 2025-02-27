@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER(PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        DENSE_RANK() OVER (ORDER BY p.CreationDate DESC) AS RecencyRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 month')
+    AND 
+        p.Score IS NOT NULL
+),
+EnhancedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId IN (8, 9)), 0) AS TotalBounty,
+        COALESCE(NULLIF(MAX(b.Class), 0), 0) AS HighestBadgeClass,
+        COUNT(DISTINCT b.Id) FILTER (WHERE b.TagBased = 0) AS NamedBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentActivity AS (
+    SELECT 
+        c.UserId AS CommentUserId,
+        COUNT(*) AS CommentsCount, 
+        MAX(c.CreationDate) AS LastCommentDate,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Comments c
+    JOIN 
+        Posts p ON c.PostId = p.Id
+    JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, ',')) AS t(TagName) ON TRUE
+    WHERE 
+        c.CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 month')
+    GROUP BY 
+        c.UserId
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    ru.UserId,
+    ru.DisplayName,
+    ru.Reputation,
+    ru.TotalBounty,
+    ru.HighestBadgeClass,
+    ra.CommentsCount,
+    ra.LastCommentDate,
+    ra.TagList,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.AnswerCount,
+    CASE 
+        WHEN ra.TagList IS NOT NULL THEN 
+            CONCAT('Engaging with tags: ', ra.TagList)
+        ELSE 
+            'No recent tag interaction'
+    END AS EngagementRemark,
+    LEAD(rp.Score) OVER (PARTITION BY rp.PostTypeId ORDER BY rp.Score DESC) AS NextScore
+FROM 
+    EnhancedUsers ru
+LEFT JOIN 
+    RecentActivity ra ON ru.UserId = ra.CommentUserId
+LEFT JOIN 
+    RankedPosts rp ON ra.CommentsCount IS NOT NULL
+WHERE 
+    ru.Reputation > 100
+AND 
+    (ru.HighestBadgeClass IS NULL OR ru.HighestBadgeClass = 1)
+ORDER BY 
+    ru.Reputation DESC, rp.Score DESC
+LIMIT 10;

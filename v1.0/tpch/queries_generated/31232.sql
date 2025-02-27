@@ -1,0 +1,62 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS item_count,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT 
+    ph.p_partkey,
+    ph.p_name,
+    ph.p_retailprice,
+    COALESCE(su.total_supplier_acctbal, 0) AS total_supplier_acctbal,
+    os.total_revenue,
+    os.item_count,
+    CASE 
+        WHEN os.revenue_rank <= 5 THEN 'Top Revenue'
+        ELSE 'Other'
+    END AS revenue_category
+FROM part ph
+LEFT JOIN (
+    SELECT 
+        ps.ps_partkey,
+        SUM(s.s_acctbal) AS total_supplier_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey
+) su ON su.ps_partkey = ph.p_partkey
+LEFT JOIN order_summary os ON os.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = ph.p_partkey
+)
+WHERE ph.p_retailprice > (SELECT AVG(p.p_retailprice) FROM part p)
+ORDER BY total_supplier_acctbal DESC, ph.p_name;

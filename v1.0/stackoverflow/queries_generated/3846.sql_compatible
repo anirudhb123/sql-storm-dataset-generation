@@ -1,0 +1,76 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+),
+PopularPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ua.DisplayName AS OwnerDisplayName,
+        ua.TotalUpvotes,
+        ua.TotalDownvotes
+    FROM 
+        PostStats ps
+    JOIN 
+        UserActivity ua ON ps.OwnerUserId = ua.UserId
+    WHERE 
+        ps.PostRank <= 5
+)
+SELECT 
+    pp.Title,
+    pp.Score,
+    pp.OwnerDisplayName,
+    pp.TotalUpvotes,
+    pp.TotalDownvotes,
+    CASE 
+        WHEN pp.TotalUpvotes > pp.TotalDownvotes THEN 'Positive' 
+        WHEN pp.TotalDownvotes > pp.TotalUpvotes THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS Sentiment,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    PostLinks pl ON pp.PostId = pl.PostId
+LEFT JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+LEFT JOIN 
+    Tags t ON t.Id = rp.WikiPostId
+LEFT JOIN 
+    Comments c ON c.PostId = pp.PostId
+GROUP BY 
+    pp.Title, pp.Score, pp.OwnerDisplayName, pp.TotalUpvotes, pp.TotalDownvotes
+ORDER BY 
+    pp.Score DESC;

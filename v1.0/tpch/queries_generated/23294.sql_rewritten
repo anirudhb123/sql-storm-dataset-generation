@@ -1,0 +1,70 @@
+WITH RECURSIVE SupplierOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(lo.l_extendedprice * (1 - lo.l_discount)) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem lo ON ps.ps_partkey = lo.l_partkey
+    JOIN 
+        orders o ON lo.l_orderkey = o.o_orderkey
+    WHERE 
+        lo.l_shipdate >= DATE '1996-01-01' AND lo.l_shipdate < DATE '1997-01-01'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem lo ON o.o_orderkey = lo.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) > 10000
+),
+RegionalSales AS (
+    SELECT 
+        r.r_name,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS region_revenue
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem lo ON ps.ps_partkey = lo.l_partkey
+    GROUP BY 
+        r.r_name
+)
+
+SELECT 
+    r.r_name AS region,
+    COALESCE(rs.region_revenue, 0) AS total_sales,
+    COALESCE(SO.total_revenue, 0) AS supplier_sales,
+    (SELECT COUNT(*) FROM HighValueOrders h WHERE h.o_orderkey IN (SELECT o.o_orderkey FROM orders o)) AS high_value_orders_count,
+    CASE 
+        WHEN RO.total_revenue IS NULL THEN 'No orders'
+        ELSE 'Orders present'
+    END AS order_status
+FROM 
+    RegionalSales rs
+FULL OUTER JOIN 
+    SupplierOrders SO ON rs.total_revenue = SO.total_revenue
+LEFT JOIN 
+    (SELECT r_name, SUM(total_revenue) AS total_revenue
+     FROM RegionalSales
+     GROUP BY r_name) RO ON rs.r_name = RO.r_name
+ORDER BY 
+    region_sales DESC NULLS LAST, supplier_sales DESC;

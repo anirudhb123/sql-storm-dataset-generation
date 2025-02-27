@@ -1,0 +1,64 @@
+-- Performance benchmarking query to analyze post activity and user reputation
+
+WITH PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        pt.Name AS PostType,
+        u.Reputation AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- Filter for posts created in the last year
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, pt.Name, u.Reputation
+), UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.ViewCount,
+    pa.Score,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.PostType,
+    pa.OwnerReputation,
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation AS UserReputation,
+    ua.PostsCount,
+    ua.TotalViews,
+    ua.TotalScore
+FROM 
+    PostActivity pa
+JOIN 
+    UserActivity ua ON pa.OwnerReputation = ua.Reputation
+ORDER BY 
+    pa.ViewCount DESC, pa.Score DESC;

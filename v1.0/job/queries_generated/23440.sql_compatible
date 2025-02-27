@@ -1,0 +1,70 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        0 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        lm.id AS movie_id,
+        lm.title AS movie_title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title lm ON ml.linked_movie_id = lm.id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS rn
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+actor_details AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        ak.surname_pcode,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY ak.name) AS actor_rn
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL AND ak.name <> ''
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    COALESCE(cd.company_name, 'Unknown Company') AS company_name,
+    STRING_AGG(ad.actor_name, ', ' ORDER BY ad.actor_rn) AS actors,
+    mh.depth,
+    COUNT(DISTINCT cd.company_name) AS total_companies,
+    SUM(CASE WHEN cd.company_type = 'Production' THEN 1 ELSE 0 END) AS production_count,
+    COUNT(*) FILTER (WHERE ad.surname_pcode IS NOT NULL) AS total_actors_with_code,
+    STRING_AGG(DISTINCT ad.surname_pcode, ', ') AS unique_surnames_pcode
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    company_details cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    actor_details ad ON mh.movie_id = ad.movie_id
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.depth
+HAVING 
+    COUNT(DISTINCT cd.company_name) > 1 OR COUNT(*) > 5
+ORDER BY 
+    mh.depth ASC, mh.movie_title ASC;

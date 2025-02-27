@@ -1,0 +1,52 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(P.ViewCount) AS AvgViews
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        RU.DisplayName,
+        P.OwnerUserId,
+        PS.TotalPosts,
+        PS.Questions,
+        PS.Answers,
+        PS.AvgViews
+    FROM RankedUsers RU
+    JOIN PostStats PS ON RU.UserId = PS.OwnerUserId
+    WHERE RU.ReputationRank <= 100
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM Tags T
+    JOIN Posts P ON T.Id IN (SELECT UNNEST(string_to_array(substring(P.Tags, 2, LENGTH(P.Tags)-2), '><'))::int)
+    GROUP BY T.TagName
+    ORDER BY PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    AU.DisplayName,
+    AU.TotalPosts,
+    AU.Questions,
+    AU.Answers,
+    AU.AvgViews,
+    TT.TagName,
+    TT.PostCount
+FROM ActiveUsers AU
+CROSS JOIN TopTags TT
+ORDER BY AU.TotalPosts DESC, TT.PostCount DESC;

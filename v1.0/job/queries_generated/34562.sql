@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        aka_title mt ON mh.movie_id = mt.episode_of_id
+)
+
+SELECT
+    a.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    p.gender,
+    COUNT(DISTINCT cc.subject_id) OVER (PARTITION BY a.id) AS total_roles,
+    AVG(mk.movie_year) OVER (PARTITION BY a.id) AS average_movie_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    CASE 
+        WHEN p.gender IS NULL THEN 'Unknown'
+        ELSE p.gender 
+    END AS gender_status
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    complete_cast cc ON ci.movie_id = cc.movie_id
+JOIN
+    title mt ON cc.movie_id = mt.id
+LEFT JOIN
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN
+    keyword kw ON mk.keyword_id = kw.id
+JOIN
+    person_info p ON p.person_id = a.person_id
+WHERE
+    mt.production_year >= 2000
+    AND a.name IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = mt.id
+        AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'synopsis')
+        AND mi.info IS NOT NULL
+    )
+GROUP BY
+    a.id, mt.id, p.gender
+HAVING
+    COUNT(DISTINCT ci.role_id) > 1
+ORDER BY
+    average_movie_year DESC,
+    total_roles DESC;

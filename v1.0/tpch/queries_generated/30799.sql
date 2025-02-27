@@ -1,0 +1,73 @@
+WITH RECURSIVE NationalSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+
+    UNION ALL
+
+    SELECT 
+        ns.n_nationkey,
+        ns.n_name,
+        ns.total_sales + SUM(o.o_totalprice) AS total_sales
+    FROM 
+        NationalSales ns
+    JOIN 
+        customer c ON ns.n_nationkey = c.c_nationkey
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        ns.n_nationkey, ns.n_name
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        MAX(ps.ps_supplycost) AS highest_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+)
+SELECT 
+    ns.n_name,
+    rp.p_name,
+    rp.p_brand,
+    COALESCE(ps.total_available_qty, 0) AS available_quantity,
+    rp.p_retailprice,
+    ns.total_sales,
+    (ns.total_sales / NULLIF(ps.total_available_qty, 0)) AS sales_per_avail_qty
+FROM 
+    NationalSales ns
+LEFT JOIN 
+    RankedParts rp ON ns.n_nationkey = rp.p_partkey
+LEFT JOIN 
+    PartSupplier ps ON rp.p_partkey = ps.p_partkey
+WHERE 
+    rp.price_rank <= 5
+ORDER BY 
+    ns.total_sales DESC, rp.p_retailprice DESC;

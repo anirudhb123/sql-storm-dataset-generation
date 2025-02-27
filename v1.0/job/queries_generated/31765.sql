@@ -1,0 +1,77 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.id AS actor_id,
+        a.name AS actor_name,
+        1 AS level
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id IN (SELECT id FROM aka_title WHERE production_year >= 2000)
+
+    UNION ALL
+
+    SELECT 
+        c.id AS actor_id,
+        a.name AS actor_name,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        actor_hierarchy ah ON c.movie_id = (SELECT episode_of_id FROM aka_title WHERE id = ah.actor_id)
+    WHERE 
+        ah.level < 5
+),
+
+movie_info_extended AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id
+),
+
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    me.movie_id,
+    me.title,
+    me.production_year,
+    me.total_actors,
+    me.actor_names,
+    COALESCE(ks.keywords, 'No keywords') AS keywords,
+    ah.actor_name AS actor_from_hierarchy
+FROM 
+    movie_info_extended me
+LEFT JOIN 
+    keyword_summary ks ON me.movie_id = ks.movie_id
+LEFT JOIN 
+    actor_hierarchy ah ON ah.actor_id IN (SELECT id FROM cast_info WHERE movie_id = me.movie_id)
+ORDER BY 
+    me.production_year DESC, 
+    me.total_actors DESC nulls last
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,83 @@
+WITH RecursiveBadges AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class AS BadgeClass,
+        B.Date AS BadgeDate,
+        1 AS Level
+    FROM Users U
+    JOIN Badges B ON U.Id = B.UserId
+    WHERE B.Class = 1 -- Gold badges only
+
+    UNION ALL
+
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class AS BadgeClass,
+        B.Date AS BadgeDate,
+        RB.Level + 1
+    FROM Users U
+    JOIN Badges B ON U.Id = B.UserId
+    JOIN RecursiveBadges RB ON U.Id = RB.UserId
+    WHERE RB.Level < 3 -- Limit the recursion level
+),
+PostStatistics AS (
+    SELECT
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AvgViewCount,
+        MAX(P.LastActivityDate) AS LastActive
+    FROM Posts P
+    WHERE P.CreationDate >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY P.OwnerUserId
+),
+UserScores AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(S.QuestionCount, 0) AS QuestionCount,
+        COALESCE(S.AnswerCount, 0) AS AnswerCount,
+        COALESCE(S.TotalScore, 0) AS TotalScore,
+        COALESCE(S.AvgViewCount, 0) AS AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM Users U
+    LEFT JOIN PostStatistics S ON U.Id = S.OwnerUserId
+),
+TopUsersWithBadges AS (
+    SELECT 
+        UB.UserId,
+        UB.DisplayName,
+        UB.Reputation,
+        RB.BadgeName,
+        RB.BadgeClass,
+        RB.BadgeDate
+    FROM UserScores UB
+    JOIN RecursiveBadges RB ON UB.UserId = RB.UserId
+    WHERE UB.UserRank <= 50 -- Top 50 users
+)
+SELECT
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT P.Id) AS TotalPosts,
+    SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+    SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+    COALESCE(BadgeInfo.BadgeName, 'No Badge') AS BadgeName,
+    COALESCE(BadgeInfo.BadgeClass, '0') AS BadgeClass
+FROM Users U
+LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN (
+    SELECT 
+        UserId,
+        STRING_AGG(DISTINCT BadgeName, ', ') AS BadgeName,
+        MAX(BadgeClass) AS BadgeClass
+    FROM TopUsersWithBadges
+    GROUP BY UserId
+) AS BadgeInfo ON U.Id = BadgeInfo.UserId
+GROUP BY U.DisplayName, U.Reputation, BadgeInfo.BadgeName, BadgeInfo.BadgeClass
+ORDER BY U.Reputation DESC, TotalPosts DESC;

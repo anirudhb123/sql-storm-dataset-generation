@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tagArr ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tagArr
+    GROUP BY 
+        p.Id, pt.Name, p.Title, p.CreationDate, p.ViewCount, p.Score, p.Body
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Body,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Top 5 posts per Post Type
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ' | ') AS CommentTexts
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.Body,
+    fp.Tags,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pc.CommentTexts, 'No comments') AS CommentTexts
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostComments pc ON fp.PostId = pc.PostId
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

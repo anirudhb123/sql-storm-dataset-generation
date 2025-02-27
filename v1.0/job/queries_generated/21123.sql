@@ -1,0 +1,86 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(ct.kind, 'Unknown') AS kind,
+        0 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        kind_type ct ON mt.kind_id = ct.id
+    WHERE 
+        mt.production_year > 2000  -- Only movies produced after 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(kt.kind, 'Unknown') AS kind,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    LEFT JOIN 
+        kind_type kt ON at.kind_id = kt.id
+    WHERE 
+        mh.level < 5  -- Limit to 5 levels deep
+)
+
+, CastInfoWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT r.role ORDER BY r.role) AS roles_list,
+        MAX(ci.nr_order) AS max_order
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.kind,
+    cwr.total_cast,
+    cwr.roles_list,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    SUM(CASE WHEN pi.info_type_id = 1 THEN 1 ELSE 0 END) AS info_count,  -- Assuming 1 denotes a specific info type
+    CASE 
+        WHEN mh.production_year < 2010 THEN 'Old'
+        WHEN mh.production_year BETWEEN 2010 AND 2020 THEN 'Recent'
+        ELSE 'New'
+    END AS age_category
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastInfoWithRoles cwr ON mh.movie_id = cwr.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON mh.movie_id = pi.person_id -- Assuming there’s a relationship
+GROUP BY 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year, 
+    mh.kind, 
+    cwr.total_cast, 
+    cwr.roles_list
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 5  -- Return only those with more than 5 unique keywords
+ORDER BY 
+    mh.production_year DESC, 
+    cwr.total_cast DESC;

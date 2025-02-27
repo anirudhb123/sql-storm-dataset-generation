@@ -1,0 +1,55 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, r_comment, 1 AS level
+    FROM region
+    WHERE r_regionkey = 1
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, r.r_comment, level + 1
+    FROM region r
+    INNER JOIN RegionHierarchy rh ON r.r_regionkey = rh.r_regionkey + 1
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    INNER JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 500
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS supply_rank
+    FROM SupplierStats ss
+    JOIN supplier s ON ss.s_suppkey = s.s_suppkey
+)
+SELECT 
+    rh.r_name AS region_name,
+    cs.c_name AS customer_name,
+    ss.s_name AS supplier_name,
+    cs.total_order_value,
+    ss.total_supply_cost,
+    RANK() OVER (PARTITION BY rh.r_name ORDER BY cs.total_order_value DESC) AS customer_rank
+FROM RegionHierarchy rh
+JOIN CustomerOrderStats cs ON cs.total_order_value IS NOT NULL
+LEFT JOIN RankedSuppliers ss ON ss.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_returnflag = 'R'
+)
+WHERE ss.s_name IS NOT NULL
+ORDER BY rh.region_name, customer_rank, ss.s_name;

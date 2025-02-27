@@ -1,0 +1,68 @@
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+HighValueSuppliers AS (
+    SELECT 
+        s_nationkey,
+        SUM(total_supply_value) AS total_value
+    FROM 
+        PartSupplierDetails
+    GROUP BY 
+        s_nationkey
+    HAVING 
+        SUM(total_supply_value) > 50000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(co.total_spent) AS total_spent,
+    COUNT(DISTINCT p.p_partkey) AS part_count,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    HighValueSuppliers hvs ON n.n_nationkey = hvs.s_nationkey
+JOIN 
+    CustomerOrders co ON n.n_nationkey = co.c_nationkey
+JOIN 
+    PartSupplierDetails p ON p.s_nationkey = n.n_nationkey
+JOIN 
+    supplier s ON p.s_suppkey = s.s_suppkey
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    total_spent DESC, customer_count DESC;

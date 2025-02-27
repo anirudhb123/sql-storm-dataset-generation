@@ -1,0 +1,57 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.rank <= 5
+), 
+movie_details AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(ARRAY_AGG(DISTINCT ak.name), '{}') AS aka_names,
+        COALESCE(ARRAY_AGG(DISTINCT kw.keyword), '{}') AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        aka_title ak ON tm.movie_id = ak.movie_id
+    LEFT JOIN 
+        movie_keyword mw ON tm.movie_id = mw.movie_id
+    LEFT JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+) 
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.aka_names,
+    md.keywords,
+    md.production_companies
+FROM 
+    movie_details md
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

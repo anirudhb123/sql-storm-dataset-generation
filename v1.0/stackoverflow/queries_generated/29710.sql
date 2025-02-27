@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount,
+        ARRAY_AGG(DISTINCT pt.Name) AS PostTypeNames
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND
+        p.Score > 10
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(p.Tags, ','))) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY 
+        TRIM(UNNEST(STRING_TO_ARRAY(p.Tags, ',')))
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        b.UserId
+    ORDER BY 
+        BadgeCount DESC
+    LIMIT 5
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.Tags,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.OwnerDisplayName,
+    rp.Rank,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    pt.PostTypeNames,
+    (SELECT ARRAY_AGG(t.Tag) FROM PopularTags t) AS PopularTags,
+    (SELECT b.BadgeCount FROM TopBadges b WHERE b.UserId = rp.OwnerUserId) AS OwnerBadgeCount
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

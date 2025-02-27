@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        LISTAGG(a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS cast_names
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+UserFavorites AS (
+    SELECT 
+        person_id,
+        LISTAGG(m.movie_id, ', ') AS favorite_movie_ids
+    FROM 
+        cast_info c
+    JOIN 
+        title m ON c.movie_id = m.id
+    WHERE 
+        c.role_id IN (SELECT id FROM role_type WHERE role IN ('Lead', 'Supporting'))
+    GROUP BY 
+        c.person_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.cast_names,
+    uf.favorite_movie_ids
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    UserFavorites uf ON uf.person_id IN (
+        SELECT 
+            DISTINCT person_id 
+        FROM 
+            cast_info 
+        WHERE 
+            movie_id = rm.movie_id
+    )
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC;

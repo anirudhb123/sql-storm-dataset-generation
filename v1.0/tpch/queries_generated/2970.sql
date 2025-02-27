@@ -1,0 +1,65 @@
+WITH RankedSales AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATE '2023-01-01'
+        AND o.o_orderstatus IN ('O', 'F')
+    GROUP BY
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+TopSellingCustomers AS (
+    SELECT
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        rs.c_custkey,
+        rs.c_name,
+        rs.total_sales
+    FROM
+        RankedSales rs
+    JOIN
+        nation n ON rs.c_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE
+        rs.sales_rank <= 5
+),
+SupplierSales AS (
+    SELECT
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM
+        partsupp ps
+    JOIN
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE
+        l.l_shipdate >= DATE '2023-01-01'
+    GROUP BY
+        ps.ps_suppkey
+)
+SELECT
+    t.region_name,
+    t.nation_name,
+    t.c_name AS top_customer,
+    t.total_sales AS customer_sales,
+    s.supplier_total_sales,
+    s.total_orders
+FROM
+    TopSellingCustomers t
+LEFT JOIN
+    SupplierSales s ON t.c_custkey = s.ps_suppkey
+WHERE
+    s.supplier_total_sales IS NOT NULL
+ORDER BY
+    t.region_name, t.total_sales DESC, t.nation_name;

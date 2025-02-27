@@ -1,0 +1,44 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Focus on Questions
+)
+
+SELECT 
+    rp.OwnerDisplayName,
+    COUNT(*) AS TotalQuestions,
+    AVG(rp.ViewCount) AS AvgViews,
+    AVG(rp.Score) AS AvgScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(rp.CreationDate) AS LastQuestionDate
+FROM 
+    RankedPosts rp
+JOIN 
+    (SELECT 
+        PostId, 
+        STRING_AGG(substring(tag.TagName, 2, length(tag.TagName) - 2), ', ') AS TagName
+     FROM 
+        Posts p
+     CROSS JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS tag
+     GROUP BY 
+        p.Id) t ON rp.PostId = t.PostId
+WHERE 
+    rp.Rank = 1  -- Taking the latest question per user
+GROUP BY 
+    rp.OwnerDisplayName
+ORDER BY 
+    TotalQuestions DESC
+LIMIT 10;

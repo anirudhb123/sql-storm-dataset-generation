@@ -1,0 +1,68 @@
+
+WITH UserScores AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Upvotes,
+        Downvotes,
+        AcceptedAnswers,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        RANK() OVER (ORDER BY (Upvotes - Downvotes) DESC, AcceptedAnswers DESC) AS UserRank
+    FROM 
+        UserScores
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        (Upvotes - Downvotes) AS NetVotes,
+        AcceptedAnswers,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        UserRank
+    FROM 
+        RankedUsers
+    WHERE 
+        UserRank <= 10
+)
+SELECT 
+    U.DisplayName,
+    U.NetVotes,
+    U.AcceptedAnswers,
+    U.TotalPosts,
+    U.TotalComments,
+    U.TotalBadges,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Posts P
+     JOIN UNNEST(STRING_TO_ARRAY(P.Tags, '<>')) AS T(TagName) ON P.Id = P.Id
+     WHERE P.OwnerUserId = U.UserId) AS AssociatedTags
+FROM 
+    TopUsers U
+ORDER BY 
+    U.NetVotes DESC;

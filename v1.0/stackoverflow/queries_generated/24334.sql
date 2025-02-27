@@ -1,0 +1,86 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(CASE WHEN V.UserId IS NOT NULL THEN 1 END) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(SUM(V.VoteTypeId = 2) OVER (PARTITION BY P.Id), 0) AS TotalUpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3) OVER (PARTITION BY P.Id), 0) AS TotalDownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) OVER (PARTITION BY P.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+),
+HighActivityPosts AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.CreationDate,
+        PD.Score,
+        PD.ViewCount,
+        PD.TotalUpVotes,
+        PD.TotalDownVotes,
+        PD.CommentCount,
+        ROW_NUMBER() OVER (ORDER BY PD.ViewCount DESC, PD.Score DESC) AS ActivityRank
+    FROM 
+        PostDetails PD
+    WHERE 
+        PD.CreationDate >= NOW() - INTERVAL '30 days' 
+        AND PD.Score > (SELECT AVG(Score) FROM Posts) 
+    HAVING
+        COUNT(PD.PostId) FILTER (WHERE PD.Score > 0) > 0
+),
+RankedUserVotes AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.UpVotesCount,
+        U.DownVotesCount,
+        CASE WHEN U.TotalVotes > 0 THEN CAST(U.UpVotesCount AS FLOAT) / U.TotalVotes ELSE 0 END AS UpVoteRatio
+    FROM 
+        UserVoteSummary U
+    WHERE 
+        U.UpVotesCount IS NOT NULL 
+        AND U.DownVotesCount IS NOT NULL
+)
+SELECT 
+    H.Title AS HighActivityPostTitle,
+    H.Score AS PostScore,
+    U.DisplayName AS UserDisplayName,
+    U.UpVoteRatio AS UserUpVoteRatio,
+    H.TotalUpVotes AS PostTotalUpVotes,
+    H.TotalDownVotes AS PostTotalDownVotes,
+    H.CommentCount AS PostCommentCount,
+    CASE 
+        WHEN U.UpVoteRatio >= 0.5 THEN 'Positive' 
+        ELSE 'Negative' 
+    END AS UserSentiment
+FROM 
+    HighActivityPosts H
+JOIN 
+    RankedUserVotes U ON H.PostId = (SELECT P.Id FROM Posts P WHERE P.Id = H.PostId AND P.OwnerUserId IS NOT NULL LIMIT 1)
+WHERE 
+    H.ActivityRank <= 10
+ORDER BY 
+    H.Score DESC, 
+    H.ViewCount DESC;

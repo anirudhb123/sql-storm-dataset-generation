@@ -1,0 +1,71 @@
+
+WITH CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COUNT(DISTINCT CASE 
+            WHEN ss.ss_sold_date_sk IS NOT NULL THEN ss.ss_ticket_number 
+            ELSE NULL 
+        END) AS purchase_count,
+        AVG(ss.ss_net_profit) AS avg_net_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+SalesSummary AS (
+    SELECT
+        s.s_store_sk,
+        SUM(ss.ss_net_sales) AS total_net_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE ss.ss_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date >= '2023-01-01')
+    GROUP BY s.s_store_sk
+),
+TopStores AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        ss.total_net_sales,
+        RANK() OVER (ORDER BY ss.total_net_sales DESC) as sales_rank
+    FROM store s
+    JOIN SalesSummary ss ON s.s_store_sk = ss.s_store_sk
+),
+
+FinalReport AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        ts.s_store_name,
+        ts.total_net_sales,
+        cs.avg_net_profit,
+        CASE 
+            WHEN cs.avg_net_profit > 0 THEN 'Profitable'
+            WHEN cs.avg_net_profit IS NULL THEN 'No Purchases'
+            ELSE 'Loss'
+        END AS profitability_status
+    FROM CustomerStats cs
+    LEFT JOIN TopStores ts ON cs.purchase_count > 0 
+    WHERE ts.sales_rank <= 10 OR cs.avg_net_profit IS NOT NULL
+)
+
+SELECT
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.cd_gender,
+    fr.cd_marital_status,
+    fr.s_store_name,
+    fr.total_net_sales,
+    fr.avg_net_profit,
+    fr.profitability_status
+FROM FinalReport fr
+ORDER BY fr.s_store_name, fr.avg_net_profit DESC;

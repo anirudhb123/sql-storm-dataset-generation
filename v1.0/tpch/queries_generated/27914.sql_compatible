@@ -1,0 +1,22 @@
+
+SELECT 
+    CONCAT('Supplier: ', s.s_name, ' from nation: ', n.n_name, 
+           ' provides part: ', p.p_name, ' of type: ', p.p_type, 
+           ' which costs: $', FORMAT(ps.ps_supplycost, 2), 
+           ' and is available in quantity: ', ps.ps_availqty, 
+           ' (Comment: ', ps.ps_comment, ')') AS supplier_part_info
+FROM 
+    supplier s
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    p.p_retailprice > 100.00 AND 
+    ps.ps_availqty < 50
+GROUP BY 
+    s.s_name, n.n_name, p.p_name, p.p_type, ps.ps_supplycost, ps.ps_availqty, ps.ps_comment
+ORDER BY 
+    p.p_name, n.n_name;

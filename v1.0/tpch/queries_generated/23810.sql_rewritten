@@ -1,0 +1,39 @@
+WITH recursive suppliers_ranked AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate < cast('1998-10-01' as date) AND o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice
+),
+top_part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    JOIN suppliers_ranked sr ON ps.ps_suppkey = sr.s_suppkey
+    WHERE sr.rank = 1
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+combined_datas AS (
+    SELECT p.p_partkey, p.p_name, tp.total_supply_cost, hvo.total_line_price
+    FROM part p
+    LEFT JOIN top_part_supplier tp ON p.p_partkey = tp.ps_partkey
+    FULL OUTER JOIN high_value_orders hvo ON hvo.o_orderkey = tp.ps_partkey
+    WHERE p.p_size IS NOT NULL AND (tp.total_supply_cost IS NOT NULL OR hvo.total_line_price IS NULL)
+)
+SELECT DISTINCT cd.p_name,
+       COALESCE(cd.total_supply_cost, 0) AS supply_cost,
+       COALESCE(cd.total_line_price, 0) AS line_price,
+       CASE 
+           WHEN cd.total_supply_cost > cd.total_line_price THEN 'Cost exceeds price'
+           WHEN cd.total_line_price IS NULL AND cd.total_supply_cost IS NULL THEN 'No data available'
+           ELSE 'Normal relation'
+       END AS status
+FROM combined_datas cd
+WHERE (cd.supply_cost + cd.line_price) <> (cd.supply_cost - cd.line_price)
+ORDER BY cd.p_name ASC NULLS LAST
+LIMIT 100 OFFSET 10;

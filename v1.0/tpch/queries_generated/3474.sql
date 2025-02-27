@@ -1,0 +1,66 @@
+WITH CTE_Supplier_Sales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CTE_Customer_Spending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+CTE_Nation_Stats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    ns.n_name,
+    ns.supplier_count,
+    ns.total_account_balance,
+    cs.total_spent,
+    cs.avg_order_value,
+    ss.total_sales,
+    ss.order_count
+FROM 
+    CTE_Nation_Stats ns
+LEFT JOIN 
+    CTE_Customer_Spending cs ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = cs.c_custkey)
+LEFT JOIN 
+    CTE_Supplier_Sales ss ON ns.supplier_count = (SELECT COUNT(*) FROM supplier WHERE s_nationkey = ns.n_nationkey)
+WHERE 
+    ns.supplier_count > 0
+ORDER BY 
+    total_sales DESC NULLS LAST;

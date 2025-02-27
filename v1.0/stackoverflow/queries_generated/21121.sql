@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVoteCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) OVER (PARTITION BY P.Id) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+PostDetails AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        RP.Score,
+        RP.UpVoteCount,
+        RP.DownVoteCount,
+        RP.CommentCount,
+        (SELECT count(*) FROM Badges B WHERE B.UserId = RP.OwnerUserId AND B.Class = 1) AS GoldBadges,
+        PHT.Comment AS LastEditComment,
+        CASE 
+            WHEN RP.CommentCount > 0 THEN 'Comments Available'
+            ELSE 'No Comments'
+        END AS CommentStatus,
+        COALESCE(NULLIF(PHT.PostHistoryTypeId, 11), 'Not Reopened') AS ReopenStatus
+    FROM RankedPosts RP
+    JOIN Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT PostId, Comment, PostHistoryTypeId 
+        FROM PostHistory 
+        WHERE PostHistoryTypeId IN (10, 11) 
+        ORDER BY CreationDate DESC 
+        LIMIT 1
+    ) PHT ON RP.PostId = PHT.PostId
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.OwnerDisplayName,
+    PD.Score,
+    PD.UpVoteCount,
+    PD.DownVoteCount,
+    PD.CommentCount,
+    PD.GoldBadges,
+    PD.LastEditComment,
+    PD.CommentStatus,
+    PD.ReopenStatus,
+    CASE 
+        WHEN PD.CommentStatus = 'Comments Available' AND PD.CommentCount > 5 THEN 
+            'Engaging Post!' 
+        ELSE 
+            'Standard Post'
+    END AS EngagementLevel,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+FROM PostDetails PD
+LEFT JOIN (
+    SELECT Id, UNNEST(string_to_array(Tags, '>')) AS TagName
+    FROM Posts
+) T ON PD.PostId = T.Id
+GROUP BY 
+    PD.PostId, PD.Title, PD.CreationDate, PD.OwnerDisplayName, PD.Score, 
+    PD.UpVoteCount, PD.DownVoteCount, PD.CommentCount, PD.GoldBadges, 
+    PD.LastEditComment, PD.CommentStatus, PD.ReopenStatus
+ORDER BY PD.Score DESC, PD.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,30 @@
+
+SELECT 
+    ca.city, 
+    ca.state, 
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers, 
+    AVG(cd.purchase_estimate) AS average_purchase_estimate,
+    COUNT(DISTINCT wr.wr_order_number) AS web_returns,
+    COUNT(DISTINCT sr.sr_ticket_number) AS store_returns,
+    SUM(CASE WHEN wr.wr_return_amt > 0 THEN wr.wr_return_amt ELSE 0 END) AS total_web_return_amount,
+    SUM(CASE WHEN sr.sr_return_amt > 0 THEN sr.sr_return_amt ELSE 0 END) AS total_store_return_amount
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+LEFT JOIN 
+    store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+WHERE 
+    ca.city IS NOT NULL
+    AND ca.state IS NOT NULL
+GROUP BY 
+    ca.city, 
+    ca.state
+ORDER BY 
+    unique_customers DESC, 
+    average_purchase_estimate DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,18 @@
+
+SELECT 
+    ca.city, 
+    COUNT(DISTINCT c.c_customer_id) AS total_customers, 
+    SUM(ss.net_profit) AS total_profit 
+FROM 
+    customer c 
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk 
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+WHERE 
+    ca.ca_state = 'CA' 
+GROUP BY 
+    ca.city 
+ORDER BY 
+    total_profit DESC 
+LIMIT 10;

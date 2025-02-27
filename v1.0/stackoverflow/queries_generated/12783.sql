@@ -1,0 +1,33 @@
+-- Performance Benchmarking Query
+SELECT 
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    U.Reputation AS OwnerReputation,
+    COUNT(C.ID) AS CommentCount,
+    COUNT(V.Id) AS VoteCount,
+    PT.Name AS PostTypeName,
+    P.LastActivityDate,
+    PH.CreationDate AS LastEditDate,
+    PH.Comment AS LastEditComment
+FROM 
+    Posts P
+JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+JOIN 
+    PostTypes PT ON P.PostTypeId = PT.Id
+WHERE 
+    P.CreationDate >= NOW() - INTERVAL '30 days' -- filter for recent posts
+GROUP BY 
+    P.Id, U.Reputation, PT.Name, PH.CreationDate, PH.Comment
+ORDER BY 
+    P.LastActivityDate DESC
+LIMIT 100; -- Limit result set for performance

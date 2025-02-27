@@ -1,0 +1,68 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ci.id) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.movie_id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.movie_id = ci.movie_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 10
+),
+ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT mt.title, ', ') AS movie_titles
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.movie_id
+    WHERE 
+        ak.name IS NOT NULL 
+    GROUP BY 
+        ak.id
+)
+SELECT 
+    tm.title AS movie_title,
+    tm.production_year,
+    a.actor_name,
+    a.total_movies,
+    CASE 
+        WHEN a.total_movies > 5 THEN 'Prolific Actor'
+        WHEN a.total_movies IS NULL THEN 'No Movies'
+        ELSE 'Emerging Actor'
+    END AS actor_status,
+    COALESCE(a.movie_titles, 'No titles listed') AS titles_listed
+FROM 
+    TopMovies tm
+JOIN 
+    ActorInfo a ON a.total_movies > 0
+LEFT JOIN 
+    movie_info mi ON tm.title = mi.info
+WHERE 
+    (mi.info IS NULL OR mi.note = 'Special Edition')
+    AND NOT EXISTS ( 
+        SELECT 1
+        FROM movie_keyword mk
+        WHERE mk.movie_id = tm.id 
+        AND mk.keyword_id IN (SELECT id FROM keyword WHERE keyword LIKE '%oscar%') 
+    )
+ORDER BY 
+    tm.production_year DESC, 
+    a.total_movies DESC
+LIMIT 50;

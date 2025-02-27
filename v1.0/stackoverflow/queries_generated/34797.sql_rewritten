@@ -1,0 +1,76 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation AS Reputation,
+        1 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+
+    UNION ALL
+
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation AS Reputation,
+        UR.Level + 1
+    FROM Users U
+    JOIN UserReputation UR ON U.Reputation BETWEEN UR.Reputation AND UR.Reputation + 500
+    WHERE UR.Level < 5
+),
+PostCount AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostHistoryCounts AS (
+    SELECT 
+        PH.UserId,
+        COUNT(PH.Id) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastHistoryDate
+    FROM PostHistory PH
+    GROUP BY PH.UserId
+),
+FinalMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(UC.TotalPosts, 0) AS TotalPosts,
+        COALESCE(UC.QuestionCount, 0) AS QuestionCount,
+        COALESCE(UC.AnswerCount, 0) AS AnswerCount,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UB.BadgeNames, 'None') AS BadgeNames,
+        COALESCE(PHC.HistoryCount, 0) AS PostHistoryCount,
+        COALESCE(PHC.LastHistoryDate, 'N/A') AS LastHistoryDate
+    FROM Users U
+    LEFT JOIN PostCount UC ON U.Id = UC.OwnerUserId
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN PostHistoryCounts PHC ON U.Id = PHC.UserId
+    WHERE U.Reputation > 1000
+)
+SELECT 
+    FM.UserId,
+    FM.DisplayName,
+    FM.Reputation,
+    FM.TotalPosts,
+    FM.QuestionCount,
+    FM.AnswerCount,
+    FM.BadgeCount,
+    FM.BadgeNames,
+    FM.PostHistoryCount,
+    FM.LastHistoryDate,
+    UR.Level AS ReputationLevel
+FROM FinalMetrics FM
+JOIN UserReputation UR ON FM.UserId = UR.UserId
+ORDER BY FM.Reputation DESC, FM.BadgeCount DESC;

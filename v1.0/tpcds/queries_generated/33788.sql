@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss.s_store_sk,
+        SUM(ss.ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss.s_store_sk ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN 2458849 AND 2458859
+    GROUP BY 
+        ss.s_store_sk
+), 
+tops AS (
+    SELECT 
+        s.s_store_id,
+        sh.total_sales,
+        sh.sales_rank
+    FROM 
+        store s
+    JOIN 
+        sales_hierarchy sh ON s.s_store_sk = sh.s_store_sk
+    WHERE 
+        sh.sales_rank <= 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+sales_summary AS (
+    SELECT 
+        t.total_sales,
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM 
+        tops t
+    LEFT JOIN 
+        web_sales ws ON ws.ws_ship_mode_sk IN (SELECT sm_ship_mode_sk FROM ship_mode WHERE sm_type = 'Air')
+    JOIN 
+        customer_info ci ON ws.ws_bill_customer_sk = ci.c_customer_sk
+    GROUP BY 
+        t.total_sales, ci.c_customer_id, ci.c_first_name, ci.c_last_name
+)
+SELECT 
+    ss.total_sales AS top_store_sales,
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cs.order_count,
+    cs.total_spent
+FROM 
+    sales_summary cs
+JOIN 
+    tops ss ON cs.total_sales = ss.total_sales
+WHERE 
+    cs.total_spent > (SELECT AVG(total_spent) FROM sales_summary)
+ORDER BY 
+    ss.total_sales DESC,
+    cs.total_spent DESC;

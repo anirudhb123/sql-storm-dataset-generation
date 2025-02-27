@@ -1,0 +1,72 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN P.PostTypeId = 2 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswersCount,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        U.Id, 
+        U.DisplayName, 
+        U.Reputation, 
+        UPS.TotalPosts, 
+        UPS.TotalScore, 
+        UPS.QuestionsCount, 
+        UPS.AnswersCount, 
+        UPS.AcceptedAnswersCount
+    FROM 
+        Users U
+    JOIN 
+        UserPostStats UPS ON U.Id = UPS.UserId
+    WHERE 
+        UPS.TotalPosts > 0
+    ORDER BY 
+        UPS.TotalScore DESC
+    LIMIT 10
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.PostId, 
+        PH.CreationDate AS EditDate, 
+        P.Title,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6, 10, 11) 
+)
+SELECT 
+    U.DisplayName,
+    P.Title AS PostTitle,
+    COALESCE(RPHT.EditDate, 'No Edits') AS LastEditDate,
+    U.Reputation,
+    UPS.TotalScore,
+    UPS.QuestionsCount,
+    UPS.AnswersCount,
+    UPS.AcceptedAnswersCount
+FROM 
+    TopUsers U
+LEFT JOIN 
+    Posts P ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    RecentPostHistory RPHT ON P.Id = RPHT.PostId AND RPHT.EditRank = 1
+JOIN 
+    UserPostStats UPS ON U.Id = UPS.UserId
+WHERE 
+    UPS.TotalPosts > 0
+ORDER BY 
+    UPS.TotalScore DESC, U.Reputation DESC;

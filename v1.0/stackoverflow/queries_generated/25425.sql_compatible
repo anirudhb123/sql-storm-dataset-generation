@@ -1,0 +1,93 @@
+
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), 
+PostDetails AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UNNEST(SPLIT(TRIM(BOTH '<>' FROM P.Tags), '>')) AS T(TagName)
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, P.ViewCount, P.AnswerCount, P.CommentCount
+),
+
+RecentActivity AS (
+    SELECT
+        P.Id AS PostId,
+        COALESCE(MAX(H.CreationDate), P.CreationDate) AS LastActivityDate
+    FROM 
+        PostHistory H
+    RIGHT JOIN 
+        Posts P ON H.PostId = P.Id
+    GROUP BY 
+        P.Id
+),
+
+UserEngagement AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        PostLinks PL ON U.Id = PL.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+SELECT 
+    U.DisplayName,
+    UB.BadgeCount,
+    UB.BadgeNames,
+    PD.Title,
+    PD.Body,
+    PD.CreationDate,
+    PD.ViewCount,
+    PD.AnswerCount,
+    PD.CommentCount,
+    PD.Tags,
+    RA.LastActivityDate,
+    UE.CommentCount AS UserCommentCount,
+    UE.VoteCount AS UserVoteCount,
+    UE.RelatedPostsCount
+FROM 
+    UserBadges UB
+JOIN 
+    Users U ON UB.UserId = U.Id
+JOIN 
+    PostDetails PD ON U.Id = PD.OwnerUserId
+JOIN 
+    RecentActivity RA ON PD.PostId = RA.PostId
+JOIN 
+    UserEngagement UE ON U.Id = UE.UserId
+ORDER BY 
+    UB.BadgeCount DESC, PD.AnswerCount DESC, RA.LastActivityDate DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM
+        store_returns
+    GROUP BY
+        sr_returning_customer_sk
+),
+CustomerSales AS (
+    SELECT
+        ws_ship_customer_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM
+        web_sales
+    GROUP BY
+        ws_ship_customer_sk
+),
+Combined AS (
+    SELECT
+        COALESCE(cr.returning_customer_sk, cs.ship_customer_sk) AS customer_id,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+        COALESCE(cs.total_sales, 0) AS total_sales,
+        COALESCE(cs.total_sales_amount, 0) AS total_sales_amount
+    FROM
+        CustomerReturns cr
+    FULL OUTER JOIN
+        CustomerSales cs ON cr.returning_customer_sk = cs.ship_customer_sk
+)
+SELECT
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    cb.total_returns,
+    cb.total_return_amount,
+    cb.total_sales,
+    cb.total_sales_amount,
+    (CASE 
+        WHEN cb.total_sales > 0 THEN (cb.total_return_amount / cb.total_sales_amount) * 100
+        ELSE 0 END) AS return_rate
+FROM
+    Combined cb
+JOIN
+    customer c ON cb.customer_id = c.c_customer_sk
+WHERE
+    cb.total_returns > 0 OR cb.total_sales > 0
+ORDER BY
+    return_rate DESC
+LIMIT 100;

@@ -1,0 +1,74 @@
+WITH TagsInfo AS (
+    SELECT 
+        Id,
+        TagName,
+        COUNT(PostId) AS PostCount,
+        SUM(CASE WHEN IsModeratorOnly = 1 THEN 1 ELSE 0 END) AS ModeratorOnlyCount,
+        SUM(CASE WHEN IsRequired = 1 THEN 1 ELSE 0 END) AS RequiredCount
+    FROM Tags
+    LEFT JOIN Posts ON Posts.Tags ILIKE '%' || TagName || '%'
+    GROUP BY Id, TagName
+),
+UserAnalytics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId, 0) = 2) AS TotalUpVotes,
+        SUM(COALESCE(V.VoteTypeId, 0) = 3) AS TotalDownVotes,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON V.UserId = U.Id
+    LEFT JOIN Badges B ON B.UserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.LastActivityDate,
+        U.DisplayName AS Author,
+        COALESCE(COUNT(C.ID), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.Id, U.DisplayName
+),
+FinalBenchmark AS (
+    SELECT 
+        TI.TagName,
+        UA.DisplayName AS UserName,
+        PD.Title,
+        PD.CommentCount,
+        PD.UpVotes,
+        PD.DownVotes,
+        RA.Rank
+    FROM TagsInfo TI
+    JOIN UserAnalytics UA ON UA.TotalPosts > 10
+    JOIN PostDetails PD ON PD.CommentCount > 5
+    JOIN LATERAL (
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY PD.UpVotes DESC) AS Rank 
+        FROM PostDetails
+    ) RA ON TRUE
+)
+SELECT 
+    FB.TagName,
+    FB.UserName,
+    FB.Title,
+    FB.CommentCount,
+    FB.UpVotes,
+    FB.DownVotes,
+    FB.Rank
+FROM FinalBenchmark FB
+ORDER BY FB.TagName, FB.UpVotes DESC;

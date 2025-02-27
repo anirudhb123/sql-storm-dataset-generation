@@ -1,0 +1,69 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_orderstatus,
+        o_totalprice,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn
+    FROM 
+        orders
+    WHERE 
+        o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    AND 
+        o_orderstatus IN ('O', 'P')
+), 
+SupplierInfo AS (
+    SELECT 
+        s_suppkey,
+        s_name,
+        s_acctbal,
+        s_nationkey,
+        RANK() OVER (ORDER BY s_acctbal DESC) AS rank_acctbal
+    FROM 
+        supplier
+    WHERE 
+        s_acctbal IS NOT NULL
+), 
+PartAvailability AS (
+    SELECT 
+        ps_partkey,
+        SUM(ps_availqty) AS total_avail
+    FROM 
+        partsupp
+    GROUP BY 
+        ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(n.n_name, 'Unknown') AS nation_name,
+    o.total_price AS highest_order_value,
+    ps.total_avail AS available_quantity,
+    CASE 
+        WHEN o.total_price IS NOT NULL THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_high_order
+FROM 
+    part p
+LEFT JOIN 
+    PartAvailability ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedOrders o ON o.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal BETWEEN 1000 AND 5000 LIMIT 1)
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT n2.n_nationkey FROM nation n2 WHERE n2.n_nationkey = (SELECT s.n_nationkey FROM SupplierInfo s WHERE s.rank_acctbal = 1) LIMIT 1)
+WHERE 
+    p.p_retailprice > (
+        SELECT 
+            AVG(p2.p_retailprice) 
+        FROM 
+            part p2 
+        WHERE 
+            p2.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_type LIKE '%strange%')
+    )
+AND 
+    (ps.total_avail IS NULL OR ps.total_avail < 100)
+ORDER BY 
+    p.p_partkey DESC
+FETCH FIRST 10 ROWS ONLY;

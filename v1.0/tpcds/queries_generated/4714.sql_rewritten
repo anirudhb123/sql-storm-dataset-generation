@@ -1,0 +1,70 @@
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Order_Count
+    FROM 
+        customer c
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_sk,
+        cs.Total_Sales,
+        DENSE_RANK() OVER (ORDER BY cs.Total_Sales DESC) AS Sales_Rank
+    FROM 
+        customer c
+    JOIN CustomerSales cs ON c.c_customer_sk = cs.c_customer_sk
+    WHERE 
+        cs.Total_Sales > 1000
+),
+PromotionalItems AS (
+    SELECT 
+        i.i_item_sk,
+        p.p_promo_id,
+        p.p_discount_active,
+        i.i_product_name
+    FROM 
+        item i
+    JOIN promotion p ON i.i_item_sk = p.p_item_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+),
+SalesRanking AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_ext_sales_price) AS Total_Sales,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS Sales_Rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    cvc.c_first_name,
+    cvc.c_last_name,
+    ph.Product_Name,
+    COALESCE(sr.Total_Sales, 0) AS Sales_Amount,
+    d.d_date AS Return_Date,
+    SUM(cr.cr_return_quantity) AS Total_Returns
+FROM 
+    HighValueCustomers cvc
+    LEFT JOIN PromotionalItems ph ON ph.i_item_sk IN (
+        SELECT i.i_item_sk 
+        FROM inventory i 
+        WHERE i.inv_quantity_on_hand > 0
+    )
+    LEFT JOIN store_returns sr ON sr.sr_customer_sk = cvc.c_customer_sk
+    LEFT JOIN date_dim d ON d.d_date_sk = sr.sr_returned_date_sk
+    LEFT JOIN SalesRanking sr ON sr.ws_item_sk = ph.i_item_sk
+WHERE 
+    d.d_month_seq = EXTRACT(MONTH FROM cast('2002-10-01' as date))
+    AND cvc.Sales_Rank <= 10
+GROUP BY 
+    cvc.c_first_name, cvc.c_last_name, ph.i_product_name, d.d_date
+ORDER BY 
+    Total_Returns DESC;

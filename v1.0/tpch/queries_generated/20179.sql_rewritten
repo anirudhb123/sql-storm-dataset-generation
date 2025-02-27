@@ -1,0 +1,50 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 5000
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE c.c_acctbal < ch.c_acctbal AND ch.level < 5
+),
+PartAggregate AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty * ps.ps_supplycost) AS total_revenue
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, COUNT(l.l_orderkey) AS lineitem_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipmode IN ('AIR', 'TRUCK')
+    GROUP BY o.o_orderkey
+)
+SELECT
+    ch.c_name AS customer_name,
+    r.r_name AS region_name,
+    pa.p_name AS part_name,
+    COALESCE(os.total_order_value, 0) AS order_value,
+    pa.total_revenue AS part_revenue,
+    CASE
+        WHEN pa.total_revenue > 10000 THEN 'High Revenue Part'
+        ELSE 'Regular Revenue Part'
+    END AS revenue_category,
+    ROW_NUMBER() OVER (PARTITION BY ch.c_nationkey ORDER BY os.total_order_value DESC) AS rank_within_nation
+FROM
+    CustomerHierarchy ch
+JOIN
+    nation n ON ch.c_nationkey = n.n_nationkey
+JOIN
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN
+    PartAggregate pa ON ch.c_custkey = pa.p_partkey 
+FULL OUTER JOIN
+    OrderSummary os ON ch.c_custkey = os.o_orderkey
+WHERE
+    (pa.total_revenue IS NOT NULL OR os.order_value > 500) 
+    AND (pa.total_revenue BETWEEN 100 AND 10000 OR os.total_order_value IS NULL)
+    AND r.r_name NOT LIKE 'A%'
+ORDER BY
+    customer_name, part_name;

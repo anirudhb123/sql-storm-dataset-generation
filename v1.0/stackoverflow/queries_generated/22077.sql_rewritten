@@ -1,0 +1,65 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE 
+            WHEN p.PostTypeId = 1 THEN p.Id 
+            ELSE NULL 
+        END) AS TotalQuestions,
+        COUNT(DISTINCT CASE 
+            WHEN p.PostTypeId = 2 THEN p.Id 
+            ELSE NULL 
+        END) AS TotalAnswers
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        p.Title,
+        PHT.Name AS HistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph 
+    INNER JOIN PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE ph.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+ClosedPosts AS (
+    SELECT p.Id, 
+           COALESCE(CAST(ph.Comment AS INT), 0) AS CloseReasonId
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id AND ph.PostHistoryTypeId = 10
+    WHERE ph.CreationDate IS NOT NULL
+),
+NewBadges AS (
+    SELECT UserId, 
+           STRING_AGG(Name, ', ') AS BadgeNames,
+           COUNT(*) AS BadgeCount
+    FROM Badges b
+    WHERE b.Date >= (cast('2024-10-01' as date) - INTERVAL '30 days')
+    GROUP BY UserId
+)
+SELECT 
+    u.DisplayName AS UserName,
+    us.TotalPosts,
+    us.TotalQuestions,
+    us.TotalAnswers,
+    us.TotalUpvotes - us.TotalDownvotes AS NetVotes,
+    ARRAY_AGG(DISTINCT phd.Title || ' (Closed Reason ID: ' || COALESCE(cp.CloseReasonId, -1) || ')') AS ClosedPostTitles,
+    nb.BadgeNames AS NewBadges,
+    nb.BadgeCount
+FROM Users u
+JOIN UserVoteStats us ON u.Id = us.UserId
+LEFT JOIN PostHistoryDetails phd ON u.Id = phd.UserId
+LEFT JOIN ClosedPosts cp ON phd.PostId = cp.Id
+LEFT JOIN NewBadges nb ON u.Id = nb.UserId
+WHERE us.TotalUpvotes - us.TotalDownvotes < -5
+GROUP BY u.DisplayName, us.TotalPosts, us.TotalQuestions, us.TotalAnswers, us.TotalUpvotes, us.TotalDownvotes, nb.BadgeNames, nb.BadgeCount
+HAVING COUNT(phd.PostId) > 0
+ORDER BY NetVotes DESC, us.TotalPosts DESC;

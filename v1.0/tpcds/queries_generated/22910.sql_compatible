@@ -1,0 +1,70 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        dd.sold_date,
+        ss.ws_item_sk AS item_sk,
+        ss.total_quantity,
+        ss.total_sales,
+        i.i_product_name,
+        (COALESCE(i.i_current_price, 0) * ss.total_quantity) AS total_price_estimate
+    FROM 
+        (SELECT 
+            d_date.date AS sold_date, 
+            d_date.d_year AS year 
+         FROM 
+            date_dim d_date 
+         WHERE 
+            d_date.d_current_year = 'Y') AS dd 
+    JOIN SalesSummary ss ON ss.ws_sold_date_sk = dd.sold_date 
+    JOIN item i ON i.i_item_sk = ss.ws_item_sk
+    WHERE 
+        ss.sales_rank <= 10
+    ORDER BY 
+        ss.total_sales DESC
+)
+SELECT 
+    ti.sold_date,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_sales,
+    ti.total_price_estimate,
+    COALESCE((SELECT SUM(cr_return_quantity) 
+              FROM catalog_returns cr 
+              WHERE cr.cr_item_sk = ti.item_sk 
+              AND cr.cr_returned_date_sk = ti.sold_date), 0) AS total_returns,
+    CASE 
+        WHEN ti.total_sales > 10000 THEN 'High'
+        WHEN ti.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    TopItems ti
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = (
+        SELECT c.c_current_cdemo_sk 
+        FROM customer c 
+        WHERE c.c_first_name IS NOT NULL 
+        LIMIT 1
+    )
+WHERE 
+    cd.cd_gender = 'F' 
+    AND ti.total_sales IS NOT NULL
+    AND ti.total_sales != 0 
+ORDER BY 
+    ti.total_sales DESC
+LIMIT 
+    50
+OFFSET 
+    (SELECT COUNT(*) FROM TopItems) * RANDOM();

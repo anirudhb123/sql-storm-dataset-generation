@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_orderkey) AS total_items,
+        o.o_orderstatus,
+        o.o_orderdate
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(o.total_revenue, 0) AS total_revenue,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN OrderSummary o ON c.c_custkey = o.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedCustomers AS (
+    SELECT 
+        c.*, 
+        RANK() OVER (ORDER BY c.total_revenue DESC) AS rank
+    FROM CustomerOrders c
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    SUM(ps.ps_availqty) AS total_available_qty,
+    COALESCE(rn.rank, 0) AS customer_rank,
+    rn.total_revenue AS customer_revenue
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN RankedCustomers rn ON ps.ps_suppkey = rn.c_custkey
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+GROUP BY p.p_partkey, p.p_name, p.p_brand, rn.rank, rn.total_revenue
+HAVING SUM(ps.ps_availqty) > 100
+ORDER BY total_available_qty DESC, customer_revenue DESC
+LIMIT 10;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss.s_sold_date_sk, ss.ss_item_sk, ss.ss_store_sk, ss.ss_quantity, ss.ss_net_profit, 1 as level
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2)
+    
+    UNION ALL
+    
+    SELECT ss.s_sold_date_sk, ss.ss_item_sk, ss.ss_store_sk, ss.ss_quantity, ss.ss_net_profit, cte.level + 1 
+    FROM store_sales ss
+    JOIN SalesCTE cte ON ss.ss_item_sk = cte.ss_item_sk AND cte.level < 5
+),
+TopItems AS (
+    SELECT cte.ss_item_sk, SUM(cte.ss_quantity) AS total_quantity, SUM(cte.ss_net_profit) AS total_profit
+    FROM SalesCTE cte
+    GROUP BY cte.ss_item_sk
+),
+PopularItems AS (
+    SELECT i.i_item_id, i.i_item_desc, ti.total_quantity, ti.total_profit
+    FROM item i
+    JOIN TopItems ti ON i.i_item_sk = ti.ss_item_sk
+    ORDER BY ti.total_profit DESC
+    LIMIT 10
+),
+CustomerReturns AS (
+    SELECT sr.sr_return_quantity, sr.sr_return_amt, sr.sr_item_sk
+    FROM store_returns sr
+    WHERE sr.sr_return_quantity > 0
+),
+ActiveWebSales AS (
+    SELECT ws.ws_item_sk, COUNT(*) AS total_web_sales
+    FROM web_sales ws
+    WHERE ws.ws_sales_price > 0
+    GROUP BY ws.ws_item_sk
+),
+FinalReport AS (
+    SELECT pi.i_item_id, pi.i_item_desc, pi.total_quantity, pi.total_profit,
+           COALESCE(cr.sr_return_quantity, 0) AS return_qty,
+           COALESCE(cr.sr_return_amt, 0) AS return_amt,
+           COALESCE(wss.total_web_sales, 0) AS web_sales_count
+    FROM PopularItems pi
+    LEFT JOIN CustomerReturns cr ON pi.total_quantity = cr.sr_item_sk
+    LEFT JOIN ActiveWebSales wss ON pi.i_item_sk = wss.ws_item_sk
+)
+SELECT fr.i_item_id, fr.i_item_desc, fr.total_quantity, fr.total_profit,
+       fr.return_qty, fr.return_amt, fr.web_sales_count,
+       CASE
+           WHEN fr.total_profit > 1000 THEN 'High Performer'
+           WHEN fr.total_profit BETWEEN 500 AND 1000 THEN 'Mid Performer'
+           ELSE 'Low Performer'
+       END AS performance_category
+FROM FinalReport fr
+WHERE fr.return_qty < 5
+ORDER BY fr.total_profit DESC, fr.web_sales_count DESC;

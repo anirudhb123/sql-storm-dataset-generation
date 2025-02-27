@@ -1,0 +1,57 @@
+WITH SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_custkey, 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY 
+        o.o_custkey, o.o_orderkey
+), 
+CustomerPerformance AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(os.total_revenue) AS total_order_value
+    FROM 
+        customer c
+    JOIN 
+        OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+) 
+SELECT 
+    sp.s_name AS supplier_name,
+    cp.c_name AS customer_name,
+    cp.total_order_value,
+    sp.total_supply_cost,
+    CASE 
+        WHEN cp.total_order_value > sp.total_supply_cost THEN 'Profitable'
+        ELSE 'Unprofitable'
+    END AS profitability_status
+FROM 
+    SupplierPerformance sp
+JOIN 
+    CustomerPerformance cp ON sp.total_parts_supplied > 5
+ORDER BY 
+    cp.total_order_value DESC, 
+    sp.total_supply_cost ASC;

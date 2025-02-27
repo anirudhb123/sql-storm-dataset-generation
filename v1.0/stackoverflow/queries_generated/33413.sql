@@ -1,0 +1,83 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+), 
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        AverageScore, 
+        TotalViews,
+        RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserActivity
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        P.Agree =1 as IsAccepted,
+        COUNT(C.Comments) AS CommentCount, 
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8
+    GROUP BY 
+        P.Id
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate,
+        Score, 
+        ViewCount,
+        OwnerUserId,
+        CommentCount,
+        TotalBounties,
+        RANK() OVER (ORDER BY Score DESC) AS PostRank
+    FROM 
+        PostStats
+    WHERE 
+        CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    TU.DisplayName,
+    TU.PostCount,
+    TP.Title,
+    TP.Score,
+    TP.ViewCount,
+    TP.CommentCount,
+    TP.TotalBounties
+FROM 
+    TopUsers TU
+JOIN 
+    TopPosts TP ON TU.UserId = TP.OwnerUserId
+WHERE 
+    TU.UserRank <= 10 AND 
+    (TP.CommentCount > 5 OR TP.TotalBounties > 0)
+ORDER BY 
+    TU.PostCount DESC, TP.Score DESC;
+

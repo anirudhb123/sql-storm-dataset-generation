@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, NULL AS parent_suppkey
+    FROM supplier s
+    WHERE s.s_name ILIKE '%Inc%'
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sh.s_suppkey
+    FROM partsupp ps
+    JOIN SupplierHierarchy sh ON ps.ps_partkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE sh.s_suppkey IS NOT NULL
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+           o.o_orderdate,
+           n.n_name as nation_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE c.c_acctbal IS NOT NULL
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FinalOutput AS (
+    SELECT ROW_NUMBER() OVER (PARTITION BY ni.nation_name ORDER BY pi.total_supply_cost DESC) AS rank,
+           pi.p_name, 
+           pi.total_supply_cost,
+           ro.order_rank,
+           ro.o_orderdate
+    FROM PartSupplierInfo pi
+    JOIN RankedOrders ro ON ro.o_totalprice >= pi.total_supply_cost
+    JOIN nation ni ON ni.n_nationkey = ro.nation_name
+),
+OuterJoinDetail AS (
+    SELECT fo.*, 
+           COALESCE(sh.s_name, 'No Supplier') AS supplier_name, 
+           COUNT(fo.o_orderkey) OVER (PARTITION BY fo.p_name) AS order_count
+    FROM FinalOutput fo
+    LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = fo.rank
+)
+SELECT *
+FROM OuterJoinDetail
+WHERE order_count > 1 
+  AND (total_supply_cost IS NULL OR total_supply_cost > 5000)
+ORDER BY total_supply_cost DESC, rank ASC;

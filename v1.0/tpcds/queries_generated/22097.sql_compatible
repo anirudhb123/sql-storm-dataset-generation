@@ -1,0 +1,79 @@
+
+WITH RecursiveReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_items,
+        COUNT(DISTINCT wr_order_number) AS total_returns
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+PromotionsInfo AS (
+    SELECT 
+        p.promo_name,
+        p.p_promo_sk,
+        CASE 
+            WHEN p.p_discount_active = 'Y' THEN 'Active'
+            ELSE 'Inactive'
+        END AS promo_status,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.promo_name, p.p_promo_sk, CASE 
+            WHEN p.p_discount_active = 'Y' THEN 'Active'
+            ELSE 'Inactive'
+        END
+),
+ProfitAnalysis AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        RANK() OVER (ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY 
+        s_store_sk
+),
+HighInvestCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        hd.hd_income_band_sk IS NOT NULL AND 10000 <= ib_lower_bound AND ib_upper_bound <= 50000
+)
+SELECT 
+    CIA.c_customer_id,
+    CIA.cd_gender,
+    CIA.cd_marital_status,
+    RR.total_returned_items,
+    PI.promo_name,
+    PA.total_profit,
+    COALESCE(PA.total_profit, 0) AS net_profit_last_30_days,
+    CASE 
+        WHEN RR.total_returned_items IS NULL THEN 'No Returns'
+        ELSE 'Returns Present'
+    END AS return_status
+FROM 
+    HighInvestCustomers CIA
+LEFT JOIN 
+    RecursiveReturns RR ON CIA.c_customer_id = RR.wr_returning_customer_sk
+LEFT JOIN 
+    PromotionsInfo PI ON RR.total_returns = PI.total_orders
+LEFT JOIN 
+    ProfitAnalysis PA ON CIA.c_customer_id = PA.s_store_sk
+WHERE 
+    CIA.cd_gender IS NOT NULL AND CIA.cd_marital_status IS NOT NULL
+ORDER BY 
+    RR.total_returned_items DESC NULLS LAST, PA.total_profit DESC;

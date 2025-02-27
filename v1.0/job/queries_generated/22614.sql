@@ -1,0 +1,101 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(MAX)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(MAX))
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 3
+),
+TopActors AS (
+    SELECT
+        ci.person_id,
+        COUNT(ci.movie_id) AS total_movies,
+        STRING_AGG(a.name, ', ') AS actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(ci.movie_id) >= 10
+),
+PopularKeywords AS (
+    SELECT 
+        mk.keyword_id,
+        k.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.keyword_id
+    HAVING 
+        COUNT(mk.movie_id) > 5
+),
+MoviesWithDetails AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        a.id AS movie_id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.title, a.production_year, a.id
+)
+SELECT 
+    mw.movie_title,
+    mw.production_year,
+    mw.actor_count,
+    mw.keyword_count,
+    COALESCE(th.actor_names, 'No prominent actors') AS prominent_actors,
+    COALESCE(mv.path, 'No link') AS movie_path
+FROM 
+    MoviesWithDetails mw
+LEFT JOIN 
+    (SELECT 
+        TOP 5 * 
+     FROM 
+        TopActors 
+     ORDER BY 
+        total_movies DESC
+    ) th ON mw.actor_count > 3
+LEFT JOIN 
+    (SELECT 
+        m.movie_id, 
+        mh.path
+     FROM 
+        MovieHierarchy mh 
+     JOIN 
+        aka_title m ON mh.movie_id = m.id
+    ) mv ON mw.movie_id = mv.movie_id
+WHERE 
+    mw.production_year IS NOT NULL
+ORDER BY 
+    mw.production_year DESC, mw.keyword_count DESC;

@@ -1,0 +1,113 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT
+        p.Id,
+        p.Title,
+        COUNT(a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(ph.CreationDate) AS LastPostEdit
+    FROM
+        Posts p
+    LEFT JOIN
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE
+        p.PostTypeId = 1 AND
+        p.CreationDate >= CURRENT_DATE - INTERVAL '12 months'
+    GROUP BY
+        p.Id, p.Title
+),
+TopTags AS (
+    SELECT
+        tag.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM
+        Tags tag
+    LEFT JOIN
+        Posts pt ON tag.Id = ANY(pt.Tags)
+    WHERE
+        pt.CreationDate >= CURRENT_DATE - INTERVAL '12 months'
+    GROUP BY
+        tag.TagName
+    HAVING
+        COUNT(pt.Id) > 20
+    ORDER BY
+        PostCount DESC
+),
+PopularPosts AS (
+    SELECT 
+        ps.Id,
+        ps.Title,
+        ps.AnswerCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        th.TagName
+    FROM
+        PostStats ps
+    JOIN
+        (
+            SELECT
+                pt.Id,
+                STRING_AGG(tag.TagName, ', ') AS TagName
+            FROM
+                Tags tag
+            INNER JOIN
+                Posts pt ON tag.Id = ANY(pt.Tags)
+            GROUP BY
+                pt.Id
+        ) th ON ps.Id = th.Id
+    WHERE
+        ps.UpVotes > ps.DownVotes
+    ORDER BY
+        ps.UpVotes DESC
+    LIMIT 10
+)
+SELECT
+    pp.PostId,
+    pp.Title,
+    pp.AnswerCount,
+    pp.UpVotes,
+    pp.DownVotes,
+    th.TagName, 
+    RANK() OVER (PARTITION BY th.TagName ORDER BY pp.UpVotes DESC) AS TagRank,
+    (SELECT COUNT(*) FROM Voice v WHERE v.PostId = pp.PostId) AS VoiceCount,
+    COALESCE(MAX(rph.Level), 0) AS ChildPostLevel
+FROM
+    PopularPosts pp
+LEFT JOIN
+    RecursivePostHierarchy rph ON pp.PostId = rph.PostId
+LEFT JOIN
+    TopTags th ON th.TagName = ANY(STRING_TO_ARRAY(pp.TagName, ', '))
+WHERE
+    pp.AnswerCount > 5
+GROUP BY
+    pp.PostId, pp.Title, pp.AnswerCount, pp.UpVotes, pp.DownVotes, th.TagName
+ORDER BY
+    pp.UpVotes DESC;

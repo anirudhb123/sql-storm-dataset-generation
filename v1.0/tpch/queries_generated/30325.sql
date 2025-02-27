@@ -1,0 +1,40 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    
+    UNION ALL
+    
+    SELECT c2.c_custkey, c2.c_name, c2.c_acctbal, c2.c_nationkey, ch.level + 1
+    FROM customer c2
+    JOIN CustomerHierarchy ch ON c2.c_nationkey = ch.c_nationkey
+    WHERE c2.c_acctbal > 0
+)
+SELECT
+    r.r_name,
+    n.n_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS avg_supplier_account_balance,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    MAX(l.l_shipdate) AS last_ship_date,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_list
+FROM
+    lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN CustomerHierarchy ch ON c.c_custkey = ch.c_custkey
+WHERE
+    l.l_shipdate >= '2023-01-01'
+    AND (s.s_acctbal IS NOT NULL AND s.s_acctbal < 5000)
+GROUP BY
+    r.r_name, n.n_name
+HAVING
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+ORDER BY
+    total_revenue DESC;

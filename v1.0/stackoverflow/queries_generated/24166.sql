@@ -1,0 +1,91 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(user_badges.GoldCount, 0) AS GoldBadges,
+        COALESCE(user_badges.SilverCount, 0) AS SilverBadges,
+        COALESCE(user_badges.BronzeCount, 0) AS BronzeBadges,
+        u.Reputation,
+        u.Views,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges user_badges ON u.Id = user_badges.UserId
+    WHERE 
+        u.Reputation >= 1000
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.Score,
+        au.DisplayName,
+        au.Reputation,
+        au.GoldBadges,
+        au.SilverBadges,
+        au.BronzeBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Posts ps ON rp.PostId = ps.Id
+    JOIN 
+        ActiveUsers au ON ps.OwnerUserId = au.UserId
+    WHERE 
+        rp.ScoreRank <= 3
+)
+SELECT 
+    tp.Title AS PostTitle,
+    tp.ViewCount,
+    tp.Score,
+    tp.CreationDate,
+    tp.DisplayName AS Author,
+    tp.Reputation,
+    (tp.GoldBadges * 3 + tp.SilverBadges * 2 + tp.BronzeBadges) AS TotalBadgeScore,
+    CASE 
+        WHEN tp.ViewCount IS NULL THEN 'No views recorded'
+        WHEN tp.ViewCount < 100 THEN 'Low views'
+        ELSE 'Popular post'
+    END AS ViewStatus,
+    COALESCE(NULLIF(CONCAT_WS(', ', tp.DisplayName, 'has', tp.GoldBadges || ' Gold, ' || tp.SilverBadges || ' Silver, ' || tp.BronzeBadges || ' Bronze'), ''), ''), 'No badges') AS BadgeInfo
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- Explain Query: 
+-- This elaborate SQL query retrieves the top 3 posts for each post type based on score, 
+-- along with the user details of authors who have a reputation of at least 1000, 
+-- and incorporates ranks and badge counts showing both the total calculated badge score. 
+-- It provides insights into the view status of posts and badge information while 
+-- efficiently utilizing Common Table Expressions, correlated subqueries, string expressions, 
+-- and incorporates conditional logic for enhanced readability.

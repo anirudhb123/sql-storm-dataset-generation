@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, v.UpVotes, v.DownVotes
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        CASE 
+            WHEN rp.CommentCount > 5 THEN 'High Engagement'
+            WHEN rp.CommentCount = 0 THEN 'No Comments' 
+            ELSE 'Some Comments' 
+        END AS EngagementStatus
+    FROM 
+        RankedPosts rp
+    WHERE 
+        (rp.UpVotes - rp.DownVotes) > 5
+        AND rp.PostRank <= 10
+),
+FinalResults AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.CreationDate,
+        fp.EngagementStatus,
+        CONCAT('Score: ', fp.UpVotes - fp.DownVotes, ', Comments: ', fp.CommentCount) AS EngagementDetails,
+        CASE WHEN fp.GoldBadges > 0 THEN 'Notable Contributor' ELSE 'Regular User' END AS UserStatus
+    FROM 
+        FilteredPosts fp
+    WHERE 
+        EXISTS (
+            SELECT 1 
+            FROM Posts p 
+            WHERE p.OwnerUserId = fp.OwnerUserId 
+            AND p.PostTypeId = 1 
+            AND p.CreationDate <= fp.CreationDate
+        )
+)
+SELECT 
+    DISTINCT fr.PostId,
+    fr.Title AS PostTitle,
+    TO_CHAR(fr.CreationDate, 'Month DD, YYYY') AS FormattedDate,
+    fr.EngagementStatus,
+    fr.EngagementDetails,
+    fr.UserStatus,
+    COALESCE((SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = fr.PostId AND ph.PostHistoryTypeId IN (10, 11)), 0) AS CloseReopenCount,
+    array_agg(DISTINCT t.TagName) AS AssociatedTags
+FROM 
+    FinalResults fr
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(string_to_array(rp.Tags, ',')) AS TagName) t ON TRUE
+LEFT JOIN 
+    PostLinks pl ON fr.PostId = pl.PostId
+GROUP BY 
+    fr.PostId, fr.Title, fr.CreationDate, fr.EngagementStatus, fr.EngagementDetails, fr.UserStatus
+HAVING 
+    COUNT(DISTINCT pl.RelatedPostId) > 2
+ORDER BY 
+    fr.CreationDate DESC NULLS LAST;

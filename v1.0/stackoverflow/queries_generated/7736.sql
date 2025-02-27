@@ -1,0 +1,70 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+),
+PopularPosts AS (
+    SELECT 
+        P.OwnerUserId,
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P 
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments C
+    WHERE 
+        C.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        C.PostId
+),
+AggregatedData AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        PP.PostId,
+        PP.Title,
+        PP.Score,
+        PP.ViewCount,
+        COALESCE(RC.CommentCount, 0) AS CommentCount,
+        R.ReputationRank,
+        PP.PostRank
+    FROM 
+        UserReputation U
+    JOIN 
+        PopularPosts PP ON U.UserId = PP.OwnerUserId AND PP.PostRank = 1
+    LEFT JOIN 
+        RecentComments RC ON PP.PostId = RC.PostId
+)
+SELECT 
+    AD.DisplayName,
+    AD.Reputation,
+    AD.CommentCount,
+    AD.Score,
+    AD.ViewCount,
+    CASE 
+        WHEN AD.ReputationRank <= 10 THEN 'Top Contributor'
+        WHEN AD.ReputationRank BETWEEN 11 AND 50 THEN 'Moderate Contributor'
+        ELSE 'New Contributor'
+    END AS ContributorType
+FROM 
+    AggregatedData AD
+WHERE 
+    AD.CommentCount > 0
+ORDER BY 
+    AD.Reputation DESC, 
+    AD.Score DESC;

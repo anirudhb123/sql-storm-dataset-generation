@@ -1,0 +1,59 @@
+WITH RegionalSupplierStats AS (
+    SELECT 
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_name, r.r_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date,
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.nation_name,
+    r.region_name,
+    c.total_spent,
+    c.order_count,
+    COALESCE(c.last_order_date, 'No Orders') AS last_order_date,
+    r.supplier_count,
+    r.total_acctbal,
+    CASE 
+        WHEN c.spending_rank IS NOT NULL AND c.total_spent > 10000 THEN 'High Roller'
+        WHEN c.spending_rank IS NULL THEN 'No Orders'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    RegionalSupplierStats r
+LEFT JOIN 
+    CustomerOrderStats c ON r.nation_name = (
+        SELECT n.n_name 
+        FROM nation n 
+        WHERE n.n_nationkey = (
+            SELECT c.c_nationkey 
+            FROM customer c 
+            WHERE c.c_name = c.c_name
+        )
+    )
+WHERE 
+    r.total_acctbal > (SELECT AVG(total_acctbal) FROM RegionalSupplierStats)
+ORDER BY 
+    r.region_name, c.total_spent DESC;

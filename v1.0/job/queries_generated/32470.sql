@@ -1,0 +1,68 @@
+WITH RECURSIVE ActorHierarchy AS (
+    -- CTE to retrieve actors and their respective movie titles recursively
+    SELECT 
+        ci.person_id, 
+        a.name AS actor_name, 
+        at.title AS movie_title,
+        1 AS level
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        ci.note IS NULL -- Only include entries without notes
+
+    UNION ALL
+
+    SELECT 
+        ah.person_id, 
+        ah.actor_name,
+        at.title AS movie_title,
+        ah.level + 1
+    FROM 
+        ActorHierarchy ah
+    JOIN 
+        cast_info ci ON ah.movie_id = ci.movie_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.movie_id
+    WHERE 
+        ah.level < 3 -- Limit recursion to a certain depth
+)
+
+SELECT 
+    ah.actor_name, 
+    STRING_AGG(DISTINCT ah.movie_title, ', ') AS movies,
+    COUNT(DISTINCT ah.movie_title) AS movie_count,
+    MAX(CASE 
+        WHEN at.production_year IS NOT NULL THEN at.production_year 
+        ELSE 1900 END) AS latest_movie_year,
+    COUNT(DISTINCT mi.info) AS info_count,
+    SUM(CASE 
+        WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS non_null_info_count
+FROM 
+    ActorHierarchy ah
+LEFT JOIN 
+    aka_title at ON ah.movie_title = at.title
+LEFT JOIN 
+    movie_info mi ON at.movie_id = mi.movie_id
+GROUP BY 
+    ah.actor_name
+HAVING 
+    COUNT(DISTINCT ah.movie_title) > 2 -- Only include actors with more than 2 movies
+ORDER BY 
+    movie_count DESC
+LIMIT 10;
+
+-- Additional benchmarking for performance
+EXPLAIN ANALYZE
+SELECT 
+    ah.actor_name, 
+    ah.movie_title
+FROM 
+    ActorHierarchy ah
+WHERE 
+    ah.actor_name ILIKE 'A%' -- Check for actors whose names start with 'A'
+ORDER BY 
+    ah.actor_name;

@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 50
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id, cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+ItemReturns AS (
+    SELECT 
+        wr.wr_item_sk,
+        SUM(wr.wr_return_quantity) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    SUM(rp.ws_quantity) AS total_sales,
+    COALESCE(ir.total_returns, 0) AS total_returns,
+    COALESCE(ir.total_return_amount, 0) AS total_return_amount,
+    SUM(rp.ws_sales_price * rp.ws_quantity) AS total_revenue,
+    (SUM(rp.ws_sales_price * rp.ws_quantity) - COALESCE(ir.total_return_amount, 0)) AS net_revenue,
+    COUNT(DISTINCT hvc.c_customer_id) AS high_value_customer_count
+FROM 
+    RankedSales rp
+JOIN 
+    item i ON rp.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    ItemReturns ir ON rp.ws_item_sk = ir.wr_item_sk
+LEFT JOIN 
+    HighValueCustomers hvc ON hvc.total_profit > 1000
+WHERE 
+    rp.price_rank = 1
+GROUP BY 
+    i.i_item_id
+HAVING 
+    net_revenue > 5000
+ORDER BY 
+    total_revenue DESC;

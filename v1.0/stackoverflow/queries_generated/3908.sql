@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.PostsCount,
+    us.TotalBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes
+FROM 
+    UserStats us
+LEFT JOIN 
+    RankedPosts rp ON us.UserId = rp.OwnerUserId AND rp.PostRank = 1
+WHERE 
+    rp.PostId IS NOT NULL
+ORDER BY 
+    us.Reputation DESC, rp.Score DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'No posts' AS DisplayName,
+    NULL AS Reputation,
+    0 AS PostsCount,
+    0 AS TotalBadges,
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.Upvotes,
+    rp.Downvotes
+FROM 
+    RankedPosts rp
+WHERE 
+    NOT EXISTS (SELECT 1 FROM UserStats us WHERE us.UserId = rp.OwnerUserId)
+ORDER BY 
+    rp.Score DESC
+LIMIT 5;

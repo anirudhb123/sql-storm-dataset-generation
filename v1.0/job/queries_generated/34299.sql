@@ -1,0 +1,83 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(m.title, 'N/A') AS linked_movie,
+        lt.link AS link_type,
+        1 AS level
+    FROM
+        title t
+    LEFT JOIN
+        movie_link ml ON t.id = ml.movie_id
+    LEFT JOIN
+        title m ON ml.linked_movie_id = m.id
+    LEFT JOIN
+        link_type lt ON ml.link_type_id = lt.id
+    WHERE
+        t.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(m.title, 'N/A') AS linked_movie,
+        lt.link AS link_type,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    LEFT JOIN
+        title m ON ml.linked_movie_id = m.id
+    LEFT JOIN
+        link_type lt ON ml.link_type_id = lt.id
+),
+MovieKeywordCounts AS (
+    SELECT
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.movie_id
+),
+MovieInfo AS (
+    SELECT
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS info_summary
+    FROM
+        movie_info mi
+    GROUP BY
+        mi.movie_id
+)
+SELECT
+    mv.movie_id,
+    mv.title,
+    mv.production_year,
+    mv.linked_movie,
+    mv.link_type,
+    COALESCE(mkc.keyword_count, 0) AS keyword_count,
+    COALESCE(mi.info_summary, 'No Info Available') AS info_summary,
+    COUNT(DISTINCT c.person_id) AS num_cast_members,
+    ARRAY_AGG(DISTINCT a.name) AS actor_names
+FROM
+    MovieHierarchy mv
+LEFT JOIN
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN
+    MovieKeywordCounts mkc ON mv.movie_id = mkc.movie_id
+LEFT JOIN
+    movie_info mi ON mv.movie_id = mi.movie_id
+LEFT JOIN
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN
+    cast_info c ON cc.subject_id = c.id
+LEFT JOIN
+    aka_name a ON c.person_id = a.person_id
+GROUP BY
+    mv.movie_id, mv.title, mv.production_year, mv.linked_movie, mv.link_type, mkc.keyword_count, mi.info_summary
+ORDER BY
+    mv.production_year DESC, mv.title;

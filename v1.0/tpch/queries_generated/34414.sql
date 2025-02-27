@@ -1,0 +1,42 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+)
+SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+       TotalCost, 
+       COALESCE(SUM(qty.l_quantity), 0) AS TotalQuantitySold,
+       NULLIF(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS ReturnedQuantity,
+       CASE WHEN TotalSpent > 10000 THEN 'High Value' ELSE 'Regular' END AS CustomerType
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN (
+    SELECT so.o_orderkey, SUM(l.l_quantity) AS l_quantity
+    FROM RankedOrders so
+    JOIN lineitem l ON so.o_orderkey = l.l_orderkey
+    GROUP BY so.o_orderkey
+) AS qty ON l.l_orderkey = qty.o_orderkey
+LEFT JOIN TopSuppliers ts ON ts.s_suppkey = l.l_suppkey
+LEFT JOIN CustomerOrderSummary cos ON cos.c_custkey IN (
+    SELECT DISTINCT c.c_custkey 
+    FROM customer c 
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderkey = l.l_orderkey
+)
+GROUP BY p.p_partkey, p.p_name, p.p_retailprice, TotalCost, TotalSpent
+ORDER BY p.p_partkey;

@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.o_orderstatus,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rank <= 5
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(sc.total_supply_cost) AS total_cost
+    FROM 
+        SupplierCosts sc
+    JOIN 
+        supplier s ON sc.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(sc.total_supply_cost) > 10000
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_name,
+    hcs.s_name AS high_cost_supplier,
+    hcs.total_cost
+FROM 
+    TopOrders to
+LEFT JOIN 
+    HighCostSuppliers hcs ON to.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = hcs.s_suppkey))
+ORDER BY 
+    to.o_orderdate DESC, to.o_totalprice DESC;

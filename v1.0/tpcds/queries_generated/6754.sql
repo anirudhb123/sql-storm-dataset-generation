@@ -1,0 +1,42 @@
+
+WITH aggregated_sales AS (
+    SELECT 
+        w.w_warehouse_id,
+        i.i_item_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_customer_sk) AS unique_customers
+    FROM 
+        store_sales ss
+    JOIN 
+        item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN 
+        warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.w_warehouse_id, i.i_item_id
+),
+top_items AS (
+    SELECT 
+        warehouse_id,
+        i_item_id,
+        total_quantity,
+        total_sales,
+        unique_customers,
+        RANK() OVER (PARTITION BY warehouse_id ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        aggregated_sales
+)
+SELECT 
+    t.warehouse_id,
+    t.i_item_id,
+    t.total_quantity,
+    t.total_sales,
+    t.unique_customers
+FROM 
+    top_items t
+WHERE 
+    t.sales_rank <= 5
+ORDER BY 
+    t.warehouse_id, t.sales_rank;

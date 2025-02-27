@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '2 years' 
+        AND p.Score IS NOT NULL
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.RankScore,
+        u.DisplayName AS OwnerName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.RankScore <= 5
+),
+CloseReasonCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    tsp.PostId,
+    tsp.Title,
+    tsp.Score,
+    tsp.ViewCount,
+    COALESCE(crc.CloseReasonCount, 0) AS TotalCloseReasons,
+    COALESCE(crc.CloseReasons, 'No Close Reasons') AS CloseReasonDetails,
+    ub.BadgeCount AS TotalBadges,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM 
+    TopScoringPosts tsp
+LEFT JOIN 
+    CloseReasonCounts crc ON tsp.PostId = crc.PostId
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = tsp.OwnerUserId
+WHERE 
+    tsp.ViewCount > 1000 
+    AND tsp.Score > 10
+ORDER BY 
+    tsp.Score DESC, tsp.ViewCount DESC
+LIMIT 50 OFFSET 0;
+

@@ -1,0 +1,87 @@
+WITH TagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%<', T.TagName, '>%')
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostCountRank,
+        RANK() OVER (ORDER BY TotalScore DESC) AS TotalScoreRank
+    FROM 
+        TagUsage
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(PH.EditCount, 0) AS EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON V.PostId = P.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS EditCount
+        FROM 
+            PostHistory
+        WHERE 
+            PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+        GROUP BY 
+            PostId
+    ) PH ON PH.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.TotalScore,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.OwnerDisplayName,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.EditCount
+FROM 
+    TopTags TS
+JOIN 
+    PostStatistics PS ON PS.Title LIKE CONCAT('%<', TS.TagName, '>%')
+WHERE 
+    TS.PostCountRank <= 10 OR TS.TotalScoreRank <= 10
+ORDER BY 
+    TS.PostCount DESC, TS.TotalScore DESC;

@@ -1,0 +1,63 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    akn.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords,
+    COUNT(DISTINCT ci.person_id) OVER (PARTITION BY at.id) AS num_actors,
+    MAX(ranks.cast_rank) AS highest_role_rank,
+    COALESCE(COUNT(DISTINCT ci.id) FILTER (WHERE ci.note IS NOT NULL), 0) AS num_with_notes,
+    mh.level AS movie_level
+FROM 
+    aka_name akn
+JOIN 
+    cast_info ci ON akn.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    (SELECT 
+        ci.movie_id, 
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY rt.id) AS cast_rank 
+     FROM 
+        cast_info ci
+     JOIN 
+        role_type rt ON ci.role_id = rt.id) ranks ON ci.movie_id = ranks.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+WHERE 
+    at.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    akn.name, at.title, at.production_year, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1
+ORDER BY 
+    num_actors DESC, movie_title;

@@ -1,0 +1,54 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        COUNT(DISTINCT c.Id) AS TotalComments, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+), PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(com.Score), 0) AS TotalCommentScore,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueAnswerers,
+        COUNT(DISTINCT ph.UserId) AS UniqueEditors
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments com ON p.Id = com.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ua.DisplayName AS UserName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.UpVotes,
+    ua.DownVotes,
+    pa.Title AS PostTitle,
+    pa.TotalCommentScore,
+    pa.UniqueAnswerers,
+    pa.UniqueEditors,
+    pa.CreationDate
+FROM 
+    UserActivity ua
+JOIN 
+    PostAnalytics pa ON ua.UserId IN (SELECT p.OwnerUserId FROM Posts p WHERE p.Id = pa.PostId)
+ORDER BY 
+    ua.UpVotes DESC, 
+    pa.TotalCommentScore DESC
+LIMIT 10;

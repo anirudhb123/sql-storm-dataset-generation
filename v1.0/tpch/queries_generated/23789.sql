@@ -1,0 +1,50 @@
+WITH RECURSIVE region_supplier AS (
+    SELECT r.r_regionkey, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region r
+    JOIN nation n ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT rs.r_regionkey, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region_supplier rs
+    JOIN supplier s ON s.s_nationkey IN (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_nationkey = rs.r_regionkey
+    ) WHERE rs.s_acctbal < 1000.00
+),
+frequent_orders AS (
+    SELECT o.o_orderkey, COUNT(o.o_orderkey) AS order_count
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey
+    HAVING COUNT(o.o_orderkey) > (
+        SELECT AVG(order_count)
+        FROM (
+            SELECT COUNT(o2.o_orderkey) AS order_count
+            FROM orders o2
+            GROUP BY o2.o_orderkey
+        ) avg_orders
+    )
+)
+SELECT p.p_name, 
+       SUM(CASE 
+           WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount)
+           ELSE l.l_extendedprice 
+       END) AS total_revenue,
+       COALESCE(MAX(s.s_acctbal), 0) AS max_supplier_acctbal,
+       COUNT(DISTINCT o.o_orderkey) AS unique_orders,
+       RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_quantity) DESC) AS quantity_rank,
+       ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS extended_price_rank
+FROM part p
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN frequent_orders fo ON l.l_orderkey = fo.o_orderkey
+LEFT OUTER JOIN region_supplier rs ON p.p_partkey = rs.s_suppkey
+LEFT JOIN supplier s ON s.s_suppkey = rs.s_suppkey
+WHERE p.p_size BETWEEN 10 AND 50 
+  AND (p.p_comment IS NULL OR p.p_comment <> '')
+  AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY p.p_name
+HAVING SUM(l.l_extendedprice) > 1000
+   OR (SUM(l.l_extendedprice) < 1000 AND COUNT(DISTINCT l.l_orderkey) > 10)
+ORDER BY total_revenue DESC, unique_orders DESC;

@@ -1,0 +1,44 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+), SupplierParts AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           p.p_name,
+           s.s_name,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_size BETWEEN 10 AND 20
+)
+SELECT o.o_orderkey,
+       o.o_orderdate,
+       o.o_totalprice,
+       o.o_orderstatus,
+       sp.p_name,
+       sp.s_name,
+       sp.total_cost,
+       COALESCE(sp.ps_availqty, 0) AS available_quantity,
+       CASE WHEN o.o_orderstatus = 'O' THEN 'Order is Open' 
+            WHEN o.o_orderstatus = 'F' THEN 'Order is Finished' 
+            ELSE 'Order Status Unknown' END AS order_status_message
+FROM RankedOrders o
+LEFT JOIN SupplierParts sp ON o.o_orderkey = (SELECT l.l_orderkey 
+                                                FROM lineitem l 
+                                                WHERE l.l_orderkey = o.o_orderkey
+                                                ORDER BY l.l_linenumber 
+                                                LIMIT 1)
+WHERE EXISTS (SELECT 1 
+              FROM customer c 
+              WHERE c.c_custkey = o.o_custkey 
+              AND c.c_acctbal > 100.00)
+ORDER BY o.o_orderdate DESC, o.o_totalprice ASC
+LIMIT 100;

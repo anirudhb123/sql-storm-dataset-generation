@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS total_transactions
+    FROM store_sales
+    WHERE ss_sold_date_sk = (
+        SELECT MAX(ss_sold_date_sk) 
+        FROM store_sales
+    )
+    GROUP BY s_store_sk
+
+    UNION ALL
+
+    SELECT 
+        s_store_sk,
+        total_sales * 0.9 AS total_sales,  -- assume a reduced sale due to off-peak
+        total_transactions
+    FROM sales_cte
+    WHERE total_sales > 1000  -- just an example predicate to recurse
+),
+ranked_sales AS (
+    SELECT 
+        s_store_sk,
+        total_sales,
+        total_transactions,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM sales_cte
+    WHERE total_sales IS NOT NULL
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COALESCE(cd.cd_marital_status, 'Not Specified') AS marital_status  -- handling NULL
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        COUNT(ss.ss_ticket_number) AS purchase_count,
+        SUM(ss.ss_sales_price) AS total_spent
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE ss.ss_sold_date_sk >= (
+        SELECT MAX(ss_sold_date_sk) - 30 
+        FROM store_sales
+    )  -- last 30 days
+    GROUP BY c.c_customer_sk, c.c_email_address
+    HAVING SUM(ss.ss_sales_price) > 500  -- filter for top customers
+),
+final_report AS (
+    SELECT 
+        r.store_name, 
+        r.total_sales,
+        c.c_email_address,
+        c.purchase_count,
+        c.total_spent,
+        CASE WHEN c.total_spent IS NOT NULL THEN 'Active' ELSE 'Inactive' END AS customer_status
+    FROM ranked_sales r
+    LEFT JOIN top_customers c ON r.s_store_sk = c.c_customer_sk  -- join on store
+    WHERE r.sales_rank <= 10  -- only top 10 stores
+)
+SELECT 
+    fr.store_name,
+    fr.total_sales,
+    COUNT(DISTINCT fr.c_email_address) AS total_customers,
+    AVG(fr.total_spent) AS avg_spent
+FROM final_report fr
+GROUP BY fr.store_name, fr.total_sales
+ORDER BY fr.total_sales DESC;

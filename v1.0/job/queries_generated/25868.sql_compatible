@@ -1,0 +1,60 @@
+
+WITH movie_ratings AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COALESCE(SUM(CASE WHEN r.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS leading_roles,
+        STRING_AGG(DISTINCT n.name, ', ') AS all_actors
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        role_type r ON c.person_role_id = r.id
+    LEFT JOIN 
+        aka_name n ON c.person_id = n.person_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+keyword_summary AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+complete_summary AS (
+    SELECT 
+        mr.movie_id,
+        mr.movie_title,
+        mr.production_year,
+        mr.total_cast,
+        mr.leading_roles,
+        ks.keyword_count,
+        ks.keywords,
+        mr.all_actors
+    FROM 
+        movie_ratings mr
+    LEFT JOIN 
+        keyword_summary ks ON mr.movie_id = ks.movie_id
+)
+SELECT 
+    cs.movie_title,
+    cs.production_year,
+    cs.total_cast,
+    cs.leading_roles,
+    cs.keyword_count,
+    cs.keywords,
+    actor_name
+FROM 
+    complete_summary cs,
+    UNNEST(string_to_array(cs.all_actors, ', ')) AS actor_name
+ORDER BY 
+    cs.production_year DESC, cs.total_cast DESC;

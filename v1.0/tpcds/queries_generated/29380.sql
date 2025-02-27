@@ -1,0 +1,64 @@
+
+WITH Address AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+Demographics AS (
+    SELECT 
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other' 
+        END AS gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+),
+Sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        web_sales AS ws
+    INNER JOIN 
+        Address AS a ON ws.ws_bill_addr_sk = a.ca_address_sk
+    GROUP BY 
+        ws.web_site_id
+),
+Final AS (
+    SELECT 
+        d.gender,
+        d.cd_marital_status,
+        d.cd_education_status,
+        d.cd_purchase_estimate,
+        s.web_site_id,
+        s.total_sales,
+        s.order_count,
+        CONCAT(d.gender, ' ', d.cd_marital_status, ' ', d.cd_education_status) AS demographic_profile
+    FROM 
+        Demographics AS d
+    INNER JOIN 
+        Sales AS s ON d.cd_demo_sk = s.web_site_id
+)
+SELECT 
+    demographic_profile,
+    SUM(total_sales) AS total_sales_sum,
+    AVG(order_count) AS average_orders_count,
+    COUNT(*) AS number_of_profiles
+FROM 
+    Final
+GROUP BY 
+    demographic_profile
+HAVING 
+    total_sales_sum > 10000
+ORDER BY 
+    total_sales_sum DESC;

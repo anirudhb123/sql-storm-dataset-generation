@@ -1,0 +1,39 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal)
+        FROM supplier s2
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate
+    HAVING total_revenue > 10000
+),
+NationRevenue AS (
+    SELECT n.n_nationkey, SUM(os.total_revenue) AS nation_revenue
+    FROM nation n
+    LEFT JOIN OrderSummary os ON n.n_nationkey = os.o_orderkey % 10
+    GROUP BY n.n_nationkey
+),
+SupplierSummary AS (
+    SELECT sh.level, n.n_name AS nation_name, COUNT(sh.s_suppkey) AS supplier_count
+    FROM SupplierHierarchy sh
+    JOIN nation n ON sh.s_nationkey = n.n_nationkey
+    GROUP BY sh.level, n.n_name
+)
+SELECT sr.level, sr.nation_name, sr.supplier_count, nr.nation_revenue
+FROM SupplierSummary sr
+FULL OUTER JOIN NationRevenue nr ON sr.nation_name = nr.n_nationkey
+WHERE COALESCE(sr.supplier_count, 0) > 0 OR COALESCE(nr.nation_revenue, 0) > 20000
+ORDER BY sr.level DESC, nr.nation_revenue ASC;

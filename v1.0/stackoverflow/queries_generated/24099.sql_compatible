@@ -1,0 +1,77 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+), 
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgScore,
+        MAX(p.CreationDate) AS LastPostDate,
+        COUNT(DISTINCT p.Tags) AS UniqueTagCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        CASE 
+            WHEN p.ViewCount IS NULL THEN 'No Views'
+            WHEN p.ViewCount = 0 THEN 'Unseen'
+            ELSE 'Popular'
+        END AS ViewStatus,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN
+    FROM Posts p 
+    WHERE p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+UserPostLink AS (
+    SELECT 
+        p.OwnerUserId AS UserId,
+        COUNT(pl.Id) AS RelatedPosts,
+        STRING_AGG(CAST(pl.RelatedPostId AS TEXT), ', ') AS RelatedPostIds
+    FROM PostLinks pl
+    JOIN Posts p ON p.Id = pl.PostId
+    GROUP BY p.OwnerUserId
+)
+
+SELECT 
+    ub.UserId,
+    ub.DisplayName,
+    COALESCE(fs.RN, 0) AS RecentPostRank,
+    COALESCE(ps.PostCount, 0) AS TotalPosts,
+    COALESCE(ps.TotalViews, 0) AS TotalViews,
+    COALESCE(PERF.GoldBadges, 0) AS GoldBadges,
+    COALESCE(PERF.SilverBadges, 0) AS SilverBadges,
+    COALESCE(PERF.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(up.RelatedPosts, 0) AS RelatedPostsCount,
+    MAX(home.CreatedDate) AS LastActiveHomePostDate,
+    COUNT(DISTINCT CASE WHEN fs.ViewStatus = 'Popular' THEN fs.Id END) AS PopularPosts,
+    STRING_AGG(DISTINCT fs.Title, ', ') AS PopularPostTitles
+FROM UserBadges ub
+LEFT JOIN PostStats ps ON ub.UserId = ps.OwnerUserId
+LEFT JOIN FilteredPosts fs ON ub.UserId = fs.OwnerUserId AND fs.RN = 1
+LEFT JOIN UserPostLink up ON ub.UserId = up.UserId
+LEFT JOIN Posts home ON home.OwnerUserId = ub.UserId AND home.PostTypeId = 1
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM Users u
+    WHERE u.Id = ub.UserId AND u.Reputation < 100
+)
+GROUP BY ub.UserId, ub.DisplayName, fs.RN, ps.PostCount,
+         PERF.GoldBadges, PERF.SilverBadges, PERF.BronzeBadges, up.RelatedPosts
+ORDER BY ub.DisplayName;

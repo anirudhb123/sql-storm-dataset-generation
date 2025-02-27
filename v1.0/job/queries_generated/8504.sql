@@ -1,0 +1,34 @@
+SELECT
+    a.name AS actor_name,
+    t.title AS movie_title,
+    c.kind AS cast_type,
+    co.name AS company_name,
+    k.keyword AS movie_keyword,
+    ti.info AS movie_info,
+    COUNT(DISTINCT CASE WHEN ti.info_type_id = 1 THEN ti.info END) AS num_of_info_type1,
+    SUM(CASE WHEN k.phonetic_code IS NOT NULL THEN 1 ELSE 0 END) AS keyword_count
+FROM
+    aka_name a
+JOIN
+    cast_info ci ON a.person_id = ci.person_id
+JOIN
+    title t ON ci.movie_id = t.id
+JOIN
+    movie_companies mc ON t.id = mc.movie_id
+JOIN
+    company_name co ON mc.company_id = co.id
+JOIN
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN
+    keyword k ON mk.keyword_id = k.id
+JOIN
+    movie_info ti ON t.id = ti.movie_id
+WHERE
+    t.production_year > 2000
+    AND co.country_code = 'USA'
+GROUP BY
+    a.name, t.title, c.kind, co.name, k.keyword, ti.info
+HAVING
+    COUNT(DISTINCT a.id) > 5
+ORDER BY
+    movie_title ASC, actor_name DESC;

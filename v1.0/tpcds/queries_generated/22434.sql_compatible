@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM web_sales ws
+    WHERE ws.ws_net_paid_inc_tax > 0
+),
+SelectedProducts AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM item i
+    JOIN RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    JOIN web_sales ws ON rs.ws_order_number = ws.ws_order_number
+    WHERE rs.profit_rank <= 5
+    GROUP BY i.i_item_id, i.i_item_desc
+),
+CustomerAgeStats AS (
+    SELECT 
+        c.c_customer_id,
+        EXTRACT(YEAR FROM '2002-10-01 12:34:56'::timestamp) - c.c_birth_year AS customer_age,
+        CASE 
+            WHEN (EXTRACT(YEAR FROM '2002-10-01 12:34:56'::timestamp) - c.c_birth_year) < 18 THEN 'Underage'
+            WHEN (EXTRACT(YEAR FROM '2002-10-01 12:34:56'::timestamp) - c.c_birth_year) BETWEEN 18 AND 35 THEN 'Young Adult'
+            WHEN (EXTRACT(YEAR FROM '2002-10-01 12:34:56'::timestamp) - c.c_birth_year) BETWEEN 36 AND 50 THEN 'Middle Aged'
+            ELSE 'Senior'
+        END AS age_group
+    FROM customer c
+),
+SalesByAgeGroup AS (
+    SELECT 
+        cas.age_group,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS customer_count,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM CustomerAgeStats cas
+    JOIN web_sales ws ON cas.c_customer_id = ws.ws_bill_customer_sk
+    GROUP BY cas.age_group
+    HAVING SUM(ws.ws_net_profit) IS NOT NULL
+)
+SELECT 
+    sp.i_item_id,
+    sp.i_item_desc,
+    sp.total_quantity,
+    sp.avg_sales_price,
+    sabg.age_group,
+    sabg.customer_count,
+    sabg.total_profit
+FROM SelectedProducts sp
+LEFT JOIN SalesByAgeGroup sabg ON sp.total_quantity > 100 AND sabg.customer_count > 0
+WHERE COALESCE(sp.total_quantity, 0) > 0
+ORDER BY sp.avg_sales_price DESC, sabg.total_profit DESC
+LIMIT 10;

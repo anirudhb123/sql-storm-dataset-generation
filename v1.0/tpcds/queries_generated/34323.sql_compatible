@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (
+            SELECT MAX(ws_sold_date_sk) 
+            FROM web_sales 
+            WHERE ws_ship_date_sk IS NULL
+        )
+    
+    UNION ALL
+    
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        cs_quantity,
+        cs_ext_sales_price,
+        level + 1
+    FROM 
+        catalog_sales 
+    WHERE 
+        cs_item_sk IN (SELECT ws_item_sk FROM SalesCTE)
+        AND level < 5
+),
+CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, sr_item_sk
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        SUM(ws_quantity) AS total_web_sales,
+        SUM(ws_ext_sales_price) AS total_web_sales_value,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20200101 AND 20201231
+    GROUP BY 
+        i.i_item_sk, i.i_item_desc
+)
+SELECT 
+    cs.i_item_desc AS item_desc,
+    COALESCE(is.total_web_sales, 0) AS web_sales,
+    COALESCE(is.total_web_sales_value, 0) AS web_sales_value,
+    COALESCE(cr.total_returned, 0) AS total_returns,
+    COALESCE(cr.total_return_amt, 0) AS return_value,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(is.total_web_sales_value, 0) DESC) AS rank
+FROM 
+    ItemSales is
+FULL OUTER JOIN 
+    CustomerReturns cr ON is.i_item_sk = cr.sr_item_sk
+JOIN 
+    (SELECT 
+         i.i_item_sk, i.i_item_desc 
+     FROM 
+         item i 
+     WHERE 
+         i.i_current_price > (SELECT AVG(i_current_price) FROM item)) cs ON cs.i_item_sk = COALESCE(is.i_item_sk, cr.sr_item_sk)
+ORDER BY 
+    rank;

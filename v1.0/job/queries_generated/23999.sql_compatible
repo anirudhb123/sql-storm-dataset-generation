@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role AS actor_role,
+        COUNT(*) OVER (PARTITION BY c.movie_id, r.role) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.person_role_id = r.id
+),
+MovieCompaniesInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+ActorsWithMultipleRoles AS (
+    SELECT 
+        ar.movie_id,
+        ar.person_id,
+        COUNT(DISTINCT ar.actor_role) AS unique_roles
+    FROM 
+        ActorRoles ar
+    GROUP BY 
+        ar.movie_id, ar.person_id
+    HAVING 
+        COUNT(DISTINCT ar.actor_role) > 1
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    mc.companies,
+    COALESCE(a.name, 'Unknown Actor') AS actor_name,
+    ar.actor_role,
+    AR.unique_roles,
+    CASE 
+        WHEN ar.role_count > 1 THEN 'Multiple Roles'
+        ELSE 'Single Role'
+    END AS role_summary
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieCompaniesInfo mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    ActorRoles ar ON rm.movie_id = ar.movie_id
+LEFT JOIN 
+    aka_name a ON ar.person_id = a.person_id
+LEFT JOIN 
+    ActorsWithMultipleRoles AR ON ar.movie_id = AR.movie_id AND ar.person_id = AR.person_id
+WHERE 
+    rm.rank_within_year <= 3 
+    AND (ar.actor_role IS NOT NULL OR AR.unique_roles IS NULL)
+GROUP BY 
+    rm.title,
+    rm.production_year,
+    mc.companies,
+    a.name,
+    ar.actor_role,
+    AR.unique_roles,
+    ar.role_count
+ORDER BY 
+    rm.production_year DESC,
+    rm.title ASC;

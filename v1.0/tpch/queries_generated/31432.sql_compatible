@@ -1,0 +1,40 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+PartSuppDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+    HAVING ps.ps_availqty > 0
+)
+SELECT nh.n_name, SUM(psd.revenue) AS total_revenue, AVG(sh.s_acctbal) AS avg_acct_bal
+FROM PartSuppDetails psd
+JOIN supplier s ON psd.p_partkey = s.s_suppkey
+JOIN nation nh ON s.s_nationkey = nh.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+WHERE psd.revenue > 1000
+GROUP BY nh.n_name
+HAVING COUNT(DISTINCT s.s_suppkey) > 1
+ORDER BY total_revenue DESC
+LIMIT 10
+UNION
+SELECT 'Global AVG' AS region_name, AVG(sh.s_acctbal) AS total_revenue, NULL AS avg_acct_bal
+FROM SupplierHierarchy sh
+WHERE sh.level > 1;

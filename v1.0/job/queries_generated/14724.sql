@@ -1,0 +1,29 @@
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    rc.role AS role_name,
+    co.name AS company_name,
+    y.year AS production_year,
+    k.keyword AS movie_keyword
+FROM 
+    title t
+JOIN 
+    aka_title at ON t.id = at.movie_id
+JOIN 
+    cast_info ci ON at.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    company_name co ON t.id = co.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info mi ON t.id = mi.movie_id
+JOIN 
+    kind_type kt ON t.kind_id = kt.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    t.production_year DESC, ak.name;

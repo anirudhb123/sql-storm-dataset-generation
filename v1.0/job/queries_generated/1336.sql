@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(pi.info) AS average_rating
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON rm.movie_id = c.movie_id
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id 
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id AND it.id = 1 -- assuming id=1 corresponds to rating
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+FinalResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.cast_count,
+        md.average_rating,
+        ROW_NUMBER() OVER (ORDER BY md.average_rating DESC) AS rating_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.average_rating IS NOT NULL
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    fr.keyword,
+    fr.cast_count,
+    fr.average_rating
+FROM 
+    FinalResults fr
+WHERE 
+    fr.rating_rank <= 10
+ORDER BY 
+    fr.average_rating DESC;

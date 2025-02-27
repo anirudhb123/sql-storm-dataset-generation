@@ -1,0 +1,62 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        AVG(u.Reputation) AS AverageReputation,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS HistoryCount,
+        MAX(p.LastActivityDate) AS LastActivity
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.PositivePosts,
+        us.NegativePosts,
+        us.AverageReputation,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        us.TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY us.PostCount DESC, us.AverageReputation DESC) AS Rank
+    FROM UserStatistics us
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.PositivePosts,
+    tu.NegativePosts,
+    tu.AverageReputation,
+    tu.GoldBadges,
+    tu.SilverBadges,
+    tu.BronzeBadges,
+    tu.TotalBounties,
+    pe.CommentCount,
+    pe.HistoryCount,
+    pe.LastActivity
+FROM TopUsers tu
+JOIN PostEngagement pe ON tu.UserId = (SELECT OwnerUserId FROM Posts WHERE OwnerUserId IS NOT NULL ORDER BY LastActivityDate DESC LIMIT 1)
+WHERE tu.Rank <= 10
+ORDER BY tu.Rank;

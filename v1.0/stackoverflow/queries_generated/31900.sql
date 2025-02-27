@@ -1,0 +1,90 @@
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        1 AS Level
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.Reputation,
+        u.CreationDate,
+        Level + 1
+    FROM 
+        Users u
+    INNER JOIN UserReputationCTE ur ON u.Reputation > ur.Reputation AND ur.Level < 5
+),
+VoteCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostMetrics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(vc.TotalVotes, 0) AS TotalVotes,
+        COALESCE(vc.UpVotes, 0) AS UpVotes,
+        COALESCE(vc.DownVotes, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        VoteCounts vc ON p.Id = vc.PostId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MIN(ph.CreationDate) AS FirstCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    pm.Title,
+    pm.CreationDate,
+    pm.Score,
+    pm.TotalVotes,
+    pm.UpVotes,
+    pm.DownVotes,
+    COALESCE(cp.CloseCount, 0) AS CloseCount,
+    cp.FirstCloseDate,
+    ur.Level AS ReputationLevel,
+    CASE 
+        WHEN pm.UserPostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Other Posts'
+    END AS PostStatus
+FROM 
+    Users u
+JOIN 
+    PostMetrics pm ON u.Id = pm.OwnerUserId
+LEFT JOIN 
+    ClosedPosts cp ON pm.Id = cp.PostId
+JOIN 
+    UserReputationCTE ur ON ur.UserId = u.Id
+WHERE 
+    u.Reputation IS NOT NULL
+    AND (cp.CloseCount > 0 OR pm.Score > 0)
+ORDER BY 
+    u.Reputation DESC, 
+    pm.CreationDate DESC;

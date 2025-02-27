@@ -1,0 +1,61 @@
+WITH RECURSIVE CTE_MovieHierarchy AS (
+    SELECT 
+        m.movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        0 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.movie_id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        cn.country_code = 'USA'
+
+    UNION ALL
+
+    SELECT 
+        mc.movie_id,
+        COALESCE(t.title, 'Unknown Title') AS title,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON t.id = ml.linked_movie_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = ml.movie_id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    JOIN 
+        CTE_MovieHierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        cn.country_code IS NOT NULL 
+        AND ml.link_type_id = 1
+)
+
+SELECT 
+    mh.title,
+    COUNT(DISTINCT ci.person_id) AS num_cast,
+    AVG(pi.info) FILTER (WHERE pi.info IS NOT NULL) AS avg_person_info_length,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+FROM 
+    CTE_MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword kc ON kc.id = mk.keyword_id
+WHERE 
+    mh.level <= 5 
+    AND (mh.title LIKE 'A%' OR mh.title LIKE 'B%')
+GROUP BY 
+    mh.title, mh.level
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 0
+ORDER BY 
+    mh.level, rank
+LIMIT 100;

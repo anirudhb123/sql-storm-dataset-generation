@@ -1,0 +1,95 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FrequentCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+),
+MonthlySales AS (
+    SELECT 
+        DATE_TRUNC('month', o.o_orderdate) AS OrderMonth,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalSales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        DATE_TRUNC('month', o.o_orderdate)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        CASE 
+            WHEN o.o_totalprice > 10000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS OrderType
+    FROM 
+        orders o
+),
+NationSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS NationSalesTotal
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS RegionName,
+    COUNT(DISTINCT fs.c_custkey) AS UniqueCustomerCount,
+    AVG(ms.TotalSales) AS AverageMonthlySales,
+    SUM(nts.NationSalesTotal) AS TotalNationSales,
+    ARRAY_AGG(DISTINCT sup.s_name) FILTER (WHERE sup.Rank = 1) AS TopSuppliers,
+    CASE 
+        WHEN SUM(hvo.o_totalprice) > 500000 THEN 'High Investment'
+        ELSE 'Low Investment'
+    END AS InvestmentCategory
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    FrequentCustomers fs ON n.n_nationkey = fs.c_nationkey
+LEFT JOIN 
+    MonthlySales ms ON true
+LEFT JOIN 
+    HighValueOrders hvo ON fs.c_custkey = hvo.o_orderkey
+LEFT JOIN 
+    RankedSuppliers sup ON n.n_nationkey = sup.s_nationkey
+JOIN 
+    NationSales nts ON n.n_nationkey = nts.n_nationkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT fs.c_custkey) > 5
+ORDER BY 
+    UniqueCustomerCount DESC NULLS LAST;

@@ -1,0 +1,91 @@
+WITH RecursivePostHierarchy AS (
+    -- Recursive CTE to find all Answers and their corresponding Questions
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title AS PostTitle,
+        p2.OwnerUserId,
+        p2.PostTypeId,
+        p2.ParentId,
+        Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+    WHERE 
+        p2.PostTypeId = 2 -- Only Answers
+),
+UserReputation AS (
+    -- CTE to calculate user reputation and the count of their posts
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostVoteSummary AS (
+    -- CTE for summarizing votes on posts and calculating average score
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 4) THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        COUNT(DISTINCT v.UserId) AS VoterCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rph.PostId,
+    rph.PostTitle,
+    u.DisplayName AS Author,
+    u.Reputation AS AuthorReputation,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    vs.AvgScore,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    (SELECT 
+        COUNT(*) FROM Posts p 
+     WHERE 
+        p.OwnerUserId = u.Id AND p.PostTypeId = 1 AND p.ViewCount > 100
+    ) AS PopularQuestions,
+    CASE 
+        WHEN rph.Level = 0 THEN 'Question'
+        WHEN rph.Level = 1 THEN 'Answer to a Question'
+        ELSE 'N/A'
+    END AS PostType
+FROM 
+    RecursivePostHierarchy rph
+JOIN 
+    UserReputation u ON rph.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostVoteSummary vs ON rph.PostId = vs.PostId
+LEFT JOIN 
+    Comments c ON rph.PostId = c.PostId
+WHERE 
+    rph.PostTypeId IN (1, 2) -- We are interested in Questions and Answers
+GROUP BY 
+    rph.PostId, rph.PostTitle, u.DisplayName, u.Reputation, vs.UpVotes, vs.DownVotes, vs.AvgScore, rph.Level
+ORDER BY 
+    rph.PostId;

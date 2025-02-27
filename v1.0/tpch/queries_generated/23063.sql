@@ -1,0 +1,49 @@
+WITH RECURSIVE CustCTE AS (
+    SELECT c_custkey, c_name, c_acctbal, 0 AS level
+    FROM customer
+    WHERE c_acctbal IS NOT NULL AND c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, cc.level + 1
+    FROM customer c
+    JOIN CustCTE cc ON c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') 
+    WHERE cc.level < 3 AND c.c_acctbal IS NOT NULL
+),
+PartSupp AS (
+    SELECT ps_partkey, SUM(ps_supplycost) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+LineItemAnalysis AS (
+    SELECT l.*, 
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS rn,
+           SUM(l.l_discount) OVER (PARTITION BY l.l_orderkey) AS total_discount_per_order,
+           COALESCE(l.l_tax / NULLIF(l.l_extendedprice, 0), 0) AS tax_ratio
+    FROM lineitem l
+),
+CustomerOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_name, COUNT(DISTINCT li.l_orderkey) AS total_lineitems
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate >= '2020-01-01' AND o.o_orderstatus = 'O'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+)
+SELECT r.r_name,
+       SUM(lia.l_extendedprice) AS total_extended_price,
+       COUNT(DISTINCT co.o_orderkey) AS distinct_order_count,
+       AVG(COALESCE(ps.total_supply_cost, 0)) AS avg_supply_cost,
+       STRING_AGG(DISTINCT ccte.c_name, ', ') FILTER (WHERE ccte.c_acctbal > 1000) AS customers_with_high_balance
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN LineItemAnalysis lia ON ps.ps_partkey = lia.l_partkey
+LEFT JOIN CustomerOrders co ON co.o_orderkey = lia.l_orderkey
+LEFT JOIN CustCTE ccte ON co.c_name = ccte.c_name
+WHERE (r.r_name LIKE 'N%' OR r.r_name IS NULL)
+AND (COALESCE(lia.tax_ratio, 0) < 0.2 OR lia.l_discount > 0)
+GROUP BY r.r_name
+HAVING SUM(lia.l_extendedprice) > 50000
+ORDER BY total_extended_price DESC;

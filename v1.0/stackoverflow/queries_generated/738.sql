@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  -- considering only BountyStart and BountyClose
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        CASE 
+            WHEN COUNT(b.Id) > 0 THEN MAX(b.Class) 
+            ELSE NULL 
+        END AS HighestBadge
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+)
+SELECT 
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.ScoreRank,
+    ur.DisplayName AS OwnerName,
+    ur.Reputation,
+    ur.HighestBadge,
+    rp.CommentCount,
+    rp.TotalBounty
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+WHERE 
+    rp.ScoreRank = 1  -- Select only the top scoring post for each user
+ORDER BY 
+    rp.Score DESC
+LIMIT 50;

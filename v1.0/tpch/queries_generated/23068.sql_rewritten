@@ -1,0 +1,46 @@
+WITH RECURSIVE EmployeeHierarchy AS (
+    SELECT 
+        s.s_suppkey AS suppkey,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS supplier_balance,
+        ARRAY[]::varchar[] AS hierarchy_path,
+        1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT 
+        ps.ps_suppkey AS suppkey,
+        s.s_name AS supplier_name,
+        s.s_acctbal AS supplier_balance,
+        ARRAY_APPEND(eh.hierarchy_path, s.s_name) AS hierarchy_path,
+        eh.level + 1
+    FROM partsupp ps 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+    JOIN EmployeeHierarchy eh ON ps.ps_partkey = 1 
+    WHERE s.s_acctbal < eh.supplier_balance
+),
+FilteredNations AS (
+    SELECT 
+        n.n_name, 
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n 
+    JOIN customer c ON c.c_nationkey = n.n_nationkey
+    WHERE n.n_comment IS NULL OR n.n_name LIKE '%land%'
+    GROUP BY n.n_name
+)
+SELECT 
+    eh.supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY eh.supplier_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    fn.n_name AS nation_name,
+    coalesce(fn.customer_count, 0) AS associated_customers
+FROM EmployeeHierarchy eh
+LEFT JOIN lineitem l ON l.l_suppkey = eh.suppkey
+LEFT JOIN FilteredNations fn ON fn.customer_count > (SELECT AVG(customer_count) FROM FilteredNations)
+WHERE eh.level < 4 
+GROUP BY eh.supplier_name, fn.n_name
+HAVING SUM(l.l_extendedprice) IS NOT NULL AND eh.supplier_balance IS NOT NULL
+ORDER BY total_revenue DESC, associated_customers DESC
+FETCH FIRST 10 ROWS ONLY;

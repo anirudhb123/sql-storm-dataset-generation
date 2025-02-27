@@ -1,0 +1,43 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        cast_info cc ON cc.movie_id = t.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopRatedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id 
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    WHERE 
+        it.info = 'rating'
+        AND CAST(mi.info AS NUMERIC) > 8.0
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year AS year,
+    t.cast_count AS number_of_cast,
+    t.aka_names AS alternate_names
+FROM 
+    TopRatedMovies t
+ORDER BY 
+    t.production_year DESC, 
+    t.cast_count DESC
+LIMIT 10;

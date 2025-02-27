@@ -1,0 +1,72 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        c.c_acctbal, 
+        DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+RecentOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.rn <= 5
+),
+PartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_availqty
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+OrderLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount
+    FROM 
+        lineitem li
+    JOIN 
+        RecentOrders ro ON li.l_orderkey = ro.o_orderkey
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ro.c_name,
+    SUM(oli.l_extendedprice * (1 - oli.l_discount)) AS total_revenue,
+    COUNT(DISTINCT oli.l_partkey) AS unique_parts,
+    COUNT(oli.l_linenumber) AS total_lineitems,
+    MAX(pd.p_retailprice) AS max_part_retail_price
+FROM 
+    RecentOrders ro
+LEFT JOIN 
+    OrderLineItems oli ON ro.o_orderkey = oli.l_orderkey
+LEFT JOIN 
+    PartDetails pd ON oli.l_partkey = pd.ps_partkey
+GROUP BY 
+    ro.o_orderkey, ro.o_orderdate, ro.o_totalprice, ro.c_name
+ORDER BY 
+    total_revenue DESC;

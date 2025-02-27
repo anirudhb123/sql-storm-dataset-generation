@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+TotalSales AS (
+    SELECT 
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY l.l_suppkey
+),
+SupplierWithSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(ts.total_revenue, 0) AS total_revenue,
+        s.s_acctbal
+    FROM RankedSuppliers s
+    LEFT JOIN TotalSales ts ON s.s_suppkey = ts.l_suppkey
+    WHERE s.rn = 1
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_name,
+        s.total_revenue,
+        CASE 
+            WHEN s.s_acctbal > 10000 THEN 'High Balance'
+            ELSE 'Low Balance'
+        END AS balance_category
+    FROM SupplierWithSales s
+    WHERE s.total_revenue > 10000
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT s.s_name) AS supplier_count,
+    AVG(s.total_revenue) AS avg_revenue,
+    MAX(CASE WHEN s.balance_category = 'High Balance' THEN s.total_revenue END) AS max_high_balance_revenue
+FROM highvaluesuppliers s
+JOIN nation n ON s.s_suppkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT s.s_name) > 5
+ORDER BY avg_revenue DESC;

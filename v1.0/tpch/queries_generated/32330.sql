@@ -1,0 +1,65 @@
+WITH RECURSIVE part_supplier_hierarchy AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_name AS supplier_name,
+        s.s_acctbal,
+        0 AS level
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 1000 -- Filtering suppliers with account balance greater than 1000
+
+    UNION ALL
+
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.supply_chain_supplier_name,
+        ps.s_acctbal,
+        level + 1
+    FROM 
+        part_supplier_hierarchy h
+    JOIN 
+        partsupp ps ON h.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL  -- Include only suppliers with available balance
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_sales,
+    AVG(l.l_discount) AS average_discount,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ': ', ps.ps_availqty), '; ') AS part_details
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    part_supplier_hierarchy psh ON psh.p_partkey = l.l_partkey
+LEFT JOIN 
+    part p ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+WHERE 
+    o.o_orderstatus = 'O'
+    AND l.l_shipdate BETWEEN CURRENT_DATE - INTERVAL '1 year' AND CURRENT_DATE
+    AND (l.l_discount IS NULL OR l.l_discount > 0.1) -- Discount logic
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    total_sales DESC;

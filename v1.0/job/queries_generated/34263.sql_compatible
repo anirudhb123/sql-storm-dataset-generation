@@ -1,0 +1,82 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(k.keyword, 'No Keyword') AS keyword,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        ROW_NUMBER() OVER (PARTITION BY m.movie_id ORDER BY m.production_year DESC) AS rnk
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    WHERE
+        m.production_year >= 2000
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, k.keyword
+),
+TopMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.actors,
+        md.production_companies
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.actors IS NOT NULL
+        AND md.production_companies > 0
+)
+SELECT 
+    mvh.level,
+    tm.title,
+    tm.production_year,
+    tm.keyword,
+    CASE 
+        WHEN tm.actors IS NULL THEN 'No Cast Found' 
+        ELSE STRING_AGG(tm.actors, ', ') 
+    END AS actor_list,
+    tm.production_companies
+FROM 
+    MovieHierarchy mvh
+JOIN 
+    TopMovies tm ON mvh.movie_id = tm.movie_id
+GROUP BY 
+    mvh.level, tm.title, tm.production_year, tm.keyword, tm.production_companies
+ORDER BY 
+    mvh.level, tm.production_year DESC;

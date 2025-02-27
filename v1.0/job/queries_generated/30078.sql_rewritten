@@ -1,0 +1,50 @@
+WITH RECURSIVE film_hierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY[t.title] AS title_path
+    FROM 
+        aka_title t
+
+    UNION ALL
+
+    
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        fh.title_path || lt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        film_hierarchy fh ON ml.movie_id = fh.movie_id
+)
+SELECT 
+    fh.movie_id,
+    fh.title,
+    fh.production_year,
+    fh.title_path,
+    count(DISTINCT cc.person_id) AS total_cast,
+    avg(CASE WHEN cc.note IS NULL THEN 0 ELSE 1 END) AS cast_availability,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS has_premiere_info,
+    SUM(CASE WHEN mi.info_type_id IS NOT NULL THEN 1 ELSE 0 END) AS info_count
+FROM 
+    film_hierarchy fh
+LEFT JOIN 
+    cast_info cc ON fh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON fh.movie_id = mi.movie_id
+GROUP BY 
+    fh.movie_id, fh.title, fh.production_year, fh.title_path
+HAVING 
+    count(DISTINCT cc.person_id) > 2  
+ORDER BY 
+    fh.production_year DESC,
+    total_cast DESC;

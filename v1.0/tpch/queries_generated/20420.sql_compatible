@@ -1,0 +1,45 @@
+
+WITH RECURSIVE order_tree AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'P')
+),
+supplier_stats AS (
+    SELECT ps.ps_partkey, s.s_name, SUM(ps.ps_availqty) AS total_availqty,
+           AVG(s.s_acctbal) AS avg_acctbal
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+),
+part_region AS (
+    SELECT p.p_partkey, p.p_brand, n.n_name, r.r_name,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'No Price'
+               ELSE 'Price Exists'
+           END AS price_status
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey 
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+discounted_sales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS discounted_total
+    FROM lineitem l
+    WHERE l.l_discount BETWEEN 0.05 AND 0.10
+    GROUP BY l.l_orderkey
+)
+SELECT pr.p_brand, COUNT(DISTINCT pr.p_partkey) AS unique_parts, 
+       ds.discounted_total, ss.avg_acctbal,
+       EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NULL) AS null_account_exists
+FROM part_region pr
+LEFT JOIN discounted_sales ds ON pr.p_partkey = ds.l_orderkey
+JOIN supplier_stats ss ON pr.p_partkey = ss.ps_partkey
+LEFT JOIN order_tree o ON ds.l_orderkey = o.o_orderkey AND o.order_rank = 1
+WHERE pr.price_status = 'Price Exists' 
+  AND ss.total_availqty IS NOT NULL
+  AND (ss.avg_acctbal > 1000 OR pr.r_name IS NULL)
+GROUP BY pr.p_brand, ds.discounted_total, ss.avg_acctbal
+HAVING COUNT(DISTINCT pr.p_partkey) > 2
+ORDER BY unique_parts DESC, ss.avg_acctbal ASC;

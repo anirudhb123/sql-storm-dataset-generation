@@ -1,0 +1,69 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr.store_sk, 
+        SUM(sr.return_quantity) as total_returned, 
+        COUNT(DISTINCT sr.ticket_number) as return_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.store_sk
+), 
+SalesData AS (
+    SELECT 
+        ws.store_sk, 
+        SUM(ws.quantity) as total_sales, 
+        SUM(ws.net_profit) as total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.store_sk
+), 
+AggregateReturns AS (
+    SELECT 
+        cr.store_sk, 
+        cr.total_returned,
+        sd.total_sales,
+        sd.total_profit,
+        CASE 
+            WHEN sd.total_sales > 0 THEN (cr.total_returned * 1.0 / sd.total_sales) 
+            ELSE NULL 
+        END AS return_rate
+    FROM 
+        CustomerReturns cr 
+    LEFT JOIN 
+        SalesData sd ON cr.store_sk = sd.store_sk
+), 
+RankedReturns AS (
+    SELECT 
+        ar.store_sk, 
+        ar.total_returned, 
+        ar.total_sales,
+        ar.total_profit, 
+        ar.return_rate,
+        RANK() OVER (ORDER BY ar.return_rate DESC) as return_rank
+    FROM 
+        AggregateReturns ar
+)
+SELECT 
+    d.d_date_id,
+    ca.city,
+    ar.return_rank,
+    COALESCE(ar.total_returned, 0) AS total_returned,
+    COALESCE(ar.total_sales, 0) AS total_sales,
+    COALESCE(ar.total_profit, 0) AS total_profit
+FROM 
+    RankedReturns ar
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT d_date_sk FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CURRENT_DATE) - 1 AND d_moy = 12 LIMIT 1)
+JOIN 
+    store s ON s.s_store_sk = ar.store_sk
+JOIN 
+    customer_address ca ON ca.ca_address_sk = s.s_closed_date_sk
+WHERE 
+    ar.return_rank <= 10 AND 
+    (ar.return_rate IS NOT NULL OR ar.total_profit < 0) 
+ORDER BY 
+    ar.return_rank ASC, 
+    ar.total_profit DESC
+LIMIT 20;

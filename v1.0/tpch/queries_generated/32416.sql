@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.level + 1
+    FROM orders oh
+    INNER JOIN OrderHierarchy ohParent ON oh.o_orderkey = ohParent.o_orderkey
+),
+SupplierRevenue AS (
+    SELECT s.s_suppkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+NationSupplier AS (
+    SELECT n.n_name, ns.total_revenue
+    FROM nation n
+    LEFT JOIN SupplierRevenue ns ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ns.s_suppkey)
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT p.p_name, COUNT(DISTINCT li.l_orderkey) AS total_orders,
+       AVG(order_count) AS avg_orders_per_customer,
+       MAX(CASE WHEN ns.total_revenue IS NOT NULL THEN ns.total_revenue ELSE 0 END) AS max_supplier_revenue
+FROM part p
+LEFT JOIN lineitem li ON p.p_partkey = li.l_partkey
+LEFT JOIN CustomerOrders co ON co.order_count > 0
+LEFT JOIN NationSupplier ns ON ns.total_revenue > 0
+WHERE p.p_retailprice > 
+      (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 10)
+GROUP BY p.p_name
+HAVING COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY max_supplier_revenue DESC;

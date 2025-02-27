@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+CastWithRoles AS (
+    SELECT
+        ci.movie_id,
+        a.name AS actor_name,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(mi.id) AS info_count,
+        STRING_AGG(DISTINCT mt.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword mt ON mk.keyword_id = mt.id
+    GROUP BY 
+        m.id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(cwr.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(cwr.role, 'Unknown Role') AS role,
+    mi.info_count,
+    mi.keywords,
+    mh.level
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastWithRoles cwr ON mh.movie_id = cwr.movie_id AND cwr.actor_rank = 1
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+WHERE 
+    mh.level < 2  -- Fetch only top-level movies and their immediate links
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;
+

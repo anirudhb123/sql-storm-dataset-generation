@@ -1,0 +1,57 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sales_price,
+        ws.ws_sold_date_sk,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS price_rank,
+        COUNT(DISTINCT cs.cs_order_number) OVER (PARTITION BY ws.web_site_sk) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.web_sales_price DESC) AS rn
+    FROM web_sales ws
+    JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+      AND ws.ws_sales_price IS NOT NULL
+      AND cs.cs_sales_price IS NOT NULL
+),
+TotalReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_return_quantity,
+        SUM(cr.return_amount) AS total_return_amount,
+        SUM(cr.return_tax) AS total_return_tax
+    FROM catalog_returns cr
+    GROUP BY cr.returning_customer_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CAST(cd.cd_purchase_estimate AS varchar)
+        END AS purchase_estimate_string,
+        COALESCE(hd.hd_income_band_sk, NULL) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+    WHERE (cd.cd_gender = 'F' AND cd.cd_marital_status = 'M')
+      OR (cd.cd_gender IS NULL AND hd.hd_vehicle_count > 0)
+)
+SELECT 
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(DISTINCT ra.total_return_quantity) AS return_count,
+    SUM(t.total_return_amount - t.total_return_tax) AS net_return_amount,
+    SUM(CASE WHEN ra.price_rank = 1 THEN ra.web_sales_price END) AS highest_price,
+    ROW_NUMBER() OVER (PARTITION BY cd.c_last_name ORDER BY SUM(t.total_return_amount) DESC) AS rank
+FROM CustomerDetails cd
+LEFT JOIN TotalReturns t ON cd.c_customer_sk = t.returning_customer_sk
+LEFT JOIN RankedSales ra ON ra.web_site_sk = cd.c_customer_sk
+WHERE cd.income_band IS NOT NULL
+GROUP BY cd.c_last_name, cd.cd_gender, cd.cd_marital_status
+HAVING SUM(t.total_return_amount) > 1000 OR AVG(ra.web_sales_price) IS NULL
+ORDER BY return_count DESC NULLS LAST, net_return_amount DESC;

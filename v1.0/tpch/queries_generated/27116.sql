@@ -1,0 +1,27 @@
+SELECT 
+    s_name,
+    SUM(ps_supplycost * ps_availqty) AS total_revenue,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(p_name, ' ', 1), ' ', -1 AS first_word,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    GROUP_CONCAT(DISTINCT r_name ORDER BY r_name SEPARATOR ', ') AS regions_supplied
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size > 10
+    AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+GROUP BY 
+    s.s_name
+HAVING 
+    total_revenue > 10000
+ORDER BY 
+    total_revenue DESC;

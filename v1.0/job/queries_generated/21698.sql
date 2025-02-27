@@ -1,0 +1,71 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS movie_count
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+cast_details AS (
+    SELECT 
+        ca.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ca.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name a ON ca.person_id = a.person_id
+    JOIN 
+        role_type r ON ca.role_id = r.id
+),
+
+movies_with_cast AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        cd.actor_name,
+        cd.role_name,
+        md.company_count
+    FROM 
+        ranked_movies m
+    LEFT JOIN 
+        cast_details cd ON m.movie_id = cd.movie_id
+    LEFT JOIN (
+        SELECT 
+            mc.movie_id,
+            COUNT(DISTINCT mc.company_id) AS company_count
+        FROM 
+            movie_companies mc
+        GROUP BY 
+            mc.movie_id
+    ) md ON m.movie_id = md.movie_id
+)
+
+SELECT 
+    mwc.title,
+    mwc.production_year,
+    COALESCE(mwc.actor_name, 'Unknown Actor') AS primary_actor,
+    mwc.role_name,
+    mwc.company_count,
+    CASE 
+        WHEN mwc.company_count IS NULL THEN 'No production companies'
+        ELSE CONCAT('Produced by ', mwc.company_count, ' companies')
+    END AS company_info,
+    CONCAT(REPLACE(mwc.title, ' ', '_'), '_', mwc.production_year) AS seo_title
+FROM 
+    movies_with_cast mwc
+WHERE 
+    mwc.title_rank <= 3 -- Only top 3 titles per year
+    AND (mwc.production_year IS NULL OR mwc.production_year <= 2000) -- Edge case for NULL or before 2000
+ORDER BY 
+    mwc.production_year DESC,
+    mwc.title ASC;
+
+This SQL script incorporates multiple constructs such as CTEs, outer joins, window functions, and string manipulations. It also handles NULL values cleverly and presents some unusual SQL semantics regarding string concatenation and NULL logic to produce a dataset on movies and their associated cast details.

@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY t.id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+), 
+ActorTitles AS (
+    SELECT 
+        a.name AS actor_name,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY at.production_year DESC) AS actor_rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        a.name IS NOT NULL
+    AND 
+        a.name <> ''
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.company_count,
+    at.actor_name,
+    CASE 
+        WHEN at.actor_rn = 1 THEN 'Lead Actor'
+        ELSE 'Supporting Actor' 
+    END AS role_description
+FROM 
+    RankedMovies rt
+LEFT JOIN 
+    ActorTitles at ON rt.title = at.title AND rt.production_year = at.production_year
+WHERE 
+    rt.company_count > 0
+ORDER BY 
+    rt.production_year DESC,
+    rt.company_count DESC,
+    at.actor_name ASC NULLS LAST;

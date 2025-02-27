@@ -1,0 +1,45 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AnswerCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.ViewCount > 100
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CreationDate,
+    rp.AnswerCount,
+    rp.Tags,
+    u.DisplayName AS OwnerDisplay,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS RelatedTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users u ON rp.OwnerUserId = u.Id 
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId 
+LEFT JOIN 
+    Votes v ON rp.PostId = v.PostId AND v.VoteTypeId IN (8, 9) 
+LEFT JOIN 
+    LATERAL (SELECT TagName FROM Tags WHERE TagName = ANY(string_to_array(rp.Tags, ','))) t ON true
+WHERE 
+    rp.Rank <= 5 
+GROUP BY 
+    rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.CreationDate, rp.AnswerCount, u.DisplayName
+ORDER BY 
+    rp.Score DESC;

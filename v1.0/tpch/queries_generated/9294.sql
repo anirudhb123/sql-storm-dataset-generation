@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+OrderStats AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+),
+FinalReport AS (
+    SELECT 
+        cus.c_name AS customer_name,
+        COUNT(DISTINCT ord.o_orderkey) AS total_orders,
+        SUM(ord.total_spent) AS total_spent,
+        sup.s_name AS top_supplier,
+        sup.total_cost
+    FROM 
+        HighValueCustomers cus
+    LEFT JOIN 
+        OrderStats ord ON cus.c_custkey = ord.o_custkey
+    LEFT JOIN 
+        RankedSuppliers sup ON sup.supplier_rank = 1
+    GROUP BY 
+        cus.c_name, sup.s_name, sup.total_cost
+    HAVING 
+        SUM(ord.total_spent) > 10000
+)
+SELECT 
+    * 
+FROM 
+    FinalReport
+ORDER BY 
+    total_spent DESC;

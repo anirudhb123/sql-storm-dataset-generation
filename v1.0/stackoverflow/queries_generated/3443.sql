@@ -1,0 +1,80 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(ph.Comment, 'No comments') AS LastActionComment,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.CreationDate = (
+            SELECT MAX(CreationDate)
+            FROM PostHistory
+            WHERE PostId = p.Id
+        )
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.AnswerCount,
+    us.TotalScore,
+    pd.PostId,
+    pd.Title,
+    pd.ViewCount,
+    pd.LastActionComment
+FROM 
+    UserStats us
+JOIN 
+    PostDetails pd ON us.UserId = pd.OwnerUserId
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.TotalScore DESC,
+    pd.ViewCount DESC
+LIMIT 50
+
+UNION ALL
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    0 AS PostCount,
+    0 AS AnswerCount,
+    SUM(COALESCE(v.BountyAmount, 0)) AS TotalScore,
+    NULL AS PostId,
+    NULL AS Title,
+    NULL AS ViewCount,
+    'No posts yet' AS LastActionComment
+FROM 
+    Users u
+LEFT JOIN 
+    Votes v ON u.Id = v.UserId
+WHERE 
+    NOT EXISTS (SELECT 1 FROM Posts p WHERE p.OwnerUserId = u.Id)
+    AND u.Reputation <= 1000
+GROUP BY 
+    u.Id
+ORDER BY 
+    TotalScore DESC
+LIMIT 50;

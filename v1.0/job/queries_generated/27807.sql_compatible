@@ -1,0 +1,67 @@
+
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        t.title AS movie_title,
+        t.production_year
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+),
+keyword_details AS (
+    SELECT 
+        mk.movie_id, 
+        k.keyword AS movie_keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        ARRAY_AGG(DISTINCT mi.info) AS additional_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mc.movie_id,
+    mc.movie_title,
+    mc.production_year,
+    STRING_AGG(DISTINCT mc.actor_name || ' as ' || mc.role_name, ', ') AS cast,
+    COALESCE(STRING_AGG(DISTINCT kd.movie_keyword, ', '), 'No Keywords') AS keywords,
+    COALESCE(STRING_AGG(DISTINCT cd.company_name || ' (' || cd.company_type || ')', ', '), 'No Companies') AS production_companies,
+    COALESCE(minfo.additional_info, 'No additional info') AS additional_information
+FROM 
+    movie_cast mc
+LEFT JOIN 
+    keyword_details kd ON mc.movie_id = kd.movie_id
+LEFT JOIN 
+    company_details cd ON mc.movie_id = cd.movie_id
+LEFT JOIN 
+    movie_info_details minfo ON mc.movie_id = minfo.movie_id
+GROUP BY 
+    mc.movie_id, mc.movie_title, mc.production_year, additional_information
+ORDER BY 
+    mc.production_year DESC, mc.movie_title;

@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer)
+),
+OrderLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax,
+        RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM 
+        lineitem l
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    c.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    s.total_available,
+    s.avg_supply_cost,
+    CASE 
+        WHEN o.o_orderstatus = 'F' THEN 'Finished'
+        ELSE 'Pending'
+    END AS order_status,
+    COUNT(DISTINCT l.l_partkey) AS unique_parts
+FROM 
+    RankedOrders o
+JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN 
+    OrderLineItems oli ON l.l_orderkey = oli.l_orderkey AND oli.item_rank = 1
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+INNER JOIN 
+    HighValueCustomers c ON o.o_custkey = c.c_custkey
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, c.c_name, s.s_name, order_status, s.total_available, s.avg_supply_cost
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    revenue DESC;

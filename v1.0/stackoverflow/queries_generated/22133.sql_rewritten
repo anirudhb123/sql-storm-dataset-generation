@@ -1,0 +1,88 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(v.BountyAmount, 0)) AS BountyTotal,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpvoteCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 3 THEN v.Id END) AS DownvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        STRING_AGG(ph.Comment) AS AllComments,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 6, 10) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+AggregatedDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        ue.PostCount,
+        ue.TotalViews,
+        ue.BountyTotal,
+        ue.UpvoteCount,
+        ue.DownvoteCount,
+        COALESCE(phd.AllComments, 'No comments') AS LatestComments,
+        MAX(phd.LastEditDate) AS LastEditTimestamp
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserEngagement ue ON rp.PostId = ue.UserId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, ue.PostCount, ue.TotalViews, ue.BountyTotal, ue.UpvoteCount, ue.DownvoteCount
+)
+SELECT 
+    ad.PostId,
+    ad.Title,
+    ad.PostCount,
+    ad.TotalViews,
+    ad.BountyTotal,
+    ad.UpvoteCount,
+    ad.DownvoteCount,
+    ad.LatestComments,
+    CASE 
+        WHEN ad.LastEditTimestamp IS NULL THEN 'Never Edited'
+        ELSE TO_CHAR(ad.LastEditTimestamp, 'YYYY-MM-DD HH24:MI:SS')
+    END AS LastEditStatus,
+    ROW_NUMBER() OVER (ORDER BY ad.TotalViews DESC, ad.BountyTotal DESC) AS Rank 
+FROM 
+    AggregatedDetails ad
+WHERE 
+    ad.PostCount > 2
+    AND 
+    (ad.UpvoteCount IS NOT NULL OR ad.DownvoteCount IS NULL)
+ORDER BY 
+    Rank;

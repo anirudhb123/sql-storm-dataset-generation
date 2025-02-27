@@ -1,0 +1,45 @@
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        AVG(ws.ws_net_profit) AS average_profit,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_rec_start_date IS NOT NULL 
+        AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2451000  
+    GROUP BY 
+        ws.ws_web_site_sk
+),
+top_sites AS (
+    SELECT 
+        web_site_id, 
+        RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM 
+        sales_summary ss
+    JOIN 
+        web_site w ON ss.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        ss.total_orders > 0
+)
+SELECT 
+    w.web_site_id,
+    ss.total_orders,
+    ss.total_revenue,
+    ss.average_profit,
+    ss.total_quantity_sold,
+    t.revenue_rank
+FROM 
+    sales_summary ss
+JOIN 
+    top_sites t ON ss.ws_web_site_sk = w.web_site_sk
+JOIN 
+    web_site w ON ss.ws_web_site_sk = w.web_site_sk
+WHERE 
+    t.revenue_rank <= 10  
+ORDER BY 
+    ss.total_revenue DESC;

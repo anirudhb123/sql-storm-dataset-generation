@@ -1,0 +1,78 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        at.production_year >= 2000
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        SUM(m_info.info IS NOT NULL) AS video_info_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        movie_info m_info ON mh.movie_id = m_info.movie_id
+    WHERE 
+        m_info.info_type_id IN (SELECT id FROM info_type WHERE info = 'Video')
+    GROUP BY 
+        mh.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        fm.cast_count,
+        fm.video_info_count,
+        RANK() OVER (PARTITION BY fm.production_year ORDER BY fm.cast_count DESC) AS rank_per_year
+    FROM 
+        FilteredMovies fm
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.video_info_count,
+    rt.role AS primary_role
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+WHERE 
+    rm.rank_per_year <= 5 
+ORDER BY 
+    rm.production_year ASC, 
+    rm.cast_count DESC;

@@ -1,0 +1,60 @@
+-- Performance Benchmarking Query for Stack Overflow Schema
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COALESCE(SUM(v.Id) FILTER (WHERE vt.Name = 'UpMod'), 0) AS TotalUpVotes,
+        COALESCE(SUM(v.Id) FILTER (WHERE vt.Name = 'DownMod'), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        u.Id, u.Reputation, u.CreationDate
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.Id) FILTER (WHERE vt.Name = 'UpMod'), 0) AS UpVotes,
+        COALESCE(SUM(v.Id) FILTER (WHERE vt.Name = 'DownMod'), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.CreationDate,
+    us.PostCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate AS PostCreationDate,
+    ps.CommentCount,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes
+FROM 
+    UserStats us
+JOIN 
+    PostStats ps ON ps.UpVotes > 0 OR ps.DownVotes > 0
+ORDER BY 
+    us.Reputation DESC, 
+    ps.UpVotes DESC;

@@ -1,0 +1,41 @@
+
+WITH String_Benchmark AS (
+    SELECT 
+        COALESCE(a.name, c.name) AS actor_or_char_name,
+        a.imdb_index AS actor_imdb_index,
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword,
+        COUNT(DISTINCT m.id) AS total_movies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_agg
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON ci.person_id = a.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        char_name c ON a.imdb_index = c.imdb_index 
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = t.id
+    WHERE 
+        a.name IS NOT NULL 
+        AND t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        COALESCE(a.name, c.name), a.imdb_index, t.title, t.production_year, k.keyword
+)
+SELECT 
+    actor_or_char_name,
+    actor_imdb_index,
+    movie_title,
+    production_year,
+    total_movies,
+    keywords_agg
+FROM 
+    String_Benchmark
+ORDER BY 
+    production_year DESC, total_movies DESC, actor_or_char_name;

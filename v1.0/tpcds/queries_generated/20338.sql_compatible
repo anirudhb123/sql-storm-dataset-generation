@@ -1,0 +1,83 @@
+
+WITH RECURSIVE customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_purchases,
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk
+),
+date_summary AS (
+    SELECT 
+        d.d_date,
+        COUNT(DISTINCT ws.ws_order_number) AS web_sales_count,
+        SUM(ws.ws_net_paid) AS total_web_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+),
+return_summary AS (
+    SELECT 
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_catalog_returns,
+        COALESCE(SUM(wr.wr_return_quantity), 0) AS total_web_returns
+    FROM 
+        store_returns sr
+    FULL OUTER JOIN 
+        catalog_returns cr ON sr.sr_item_sk = cr.cr_item_sk
+    FULL OUTER JOIN 
+        web_returns wr ON cr.cr_item_sk = wr.wr_item_sk
+),
+income_band_summary AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cs.cs_net_profit) AS average_sales_profit
+    FROM 
+        income_band ib
+    LEFT JOIN 
+        household_demographics hd ON ib.ib_income_band_sk = hd.hd_income_band_sk
+    LEFT JOIN 
+        catalog_sales cs ON hd.hd_demo_sk = cs.cs_bill_cdemo_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    cs.full_name,
+    cs.cd_gender,
+    ds.d_date AS sales_date,
+    ds.web_sales_count,
+    ds.total_web_sales,
+    rs.total_store_returns,
+    rs.total_catalog_returns,
+    rs.total_web_returns,
+    ibs.customer_count,
+    ibs.average_sales_profit
+FROM 
+    customer_summary cs
+LEFT JOIN 
+    date_summary ds ON ds.web_sales_count > 0
+CROSS JOIN 
+    return_summary rs
+CROSS JOIN 
+    income_band_summary ibs
+WHERE 
+    cs.total_purchases IS NOT NULL
+    AND (ds.total_web_sales > 1000 OR cs.total_net_profit > 500)
+    AND cs.income_band IN (SELECT ib.ib_income_band_sk FROM income_band ib WHERE ib.ib_upper_bound >= 50000)
+ORDER BY 
+    cs.total_net_profit DESC, ds.web_sales_count ASC NULLS LAST;

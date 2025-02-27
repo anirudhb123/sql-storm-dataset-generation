@@ -1,0 +1,67 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 100.00
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartOrderDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(l.l_extendedprice) AS avg_price
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    COALESCE(ss.total_parts, 0) AS supplier_part_count,
+    cs.total_orders,
+    cs.total_spent,
+    CASE 
+        WHEN ss.supply_rank < 5 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_category,
+    pd.total_quantity,
+    pd.avg_price
+FROM 
+    CustomerOrders cs
+LEFT JOIN 
+    SupplierStats ss ON cs.c_custkey = ss.s_suppkey
+LEFT JOIN 
+    PartOrderDetails pd ON cs.total_orders > 10 AND pd.total_sales > 1000
+WHERE 
+    cs.total_spent IS NOT NULL
+ORDER BY 
+    cs.total_spent DESC, cs.c_name ASC;

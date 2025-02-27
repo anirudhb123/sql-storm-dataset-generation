@@ -1,0 +1,78 @@
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        m.id AS movie_id, 
+        m.title AS movie_title, 
+        COALESCE(m.production_year, 0) AS production_year,
+        COALESCE(aka.name, 'Unknown') AS alias_name, 
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY aka.name) AS alias_rank
+    FROM 
+        aka_title AS aka
+    JOIN 
+        title AS m ON m.id = aka.movie_id
+    LEFT JOIN 
+        cast_info AS c ON c.movie_id = m.id
+    LEFT JOIN 
+        aka_name AS aka_name ON aka_name.person_id = c.person_id
+    WHERE 
+        aka.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        movie_title, 
+        production_year, 
+        alias_name
+    FROM 
+        RecursiveMovieCTE
+    WHERE 
+        alias_rank <= 3 AND production_year > 2000
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name,
+        COUNT(*) AS num_movies
+    FROM 
+        movie_companies AS mc
+    JOIN 
+        company_name AS c ON c.id = mc.company_id
+    GROUP BY 
+        mc.movie_id, c.name
+),
+MovieSummary AS (
+    SELECT 
+        f.movie_id,
+        f.movie_title,
+        f.production_year,
+        f.alias_name,
+        COALESCE(c.num_movies, 0) AS company_count
+    FROM 
+        FilteredMovies AS f
+    LEFT JOIN 
+        CompanyInfo AS c ON f.movie_id = c.movie_id
+)
+SELECT 
+    ms.movie_id,
+    ms.movie_title,
+    ms.production_year,
+    ms.alias_name,
+    ms.company_count,
+    CASE 
+        WHEN ms.company_count > 1 THEN 'Produced by multiple companies'
+        WHEN ms.company_count = 0 THEN 'No company data'
+        ELSE 'Single company production'
+    END AS company_status,
+    (SELECT COUNT(*) 
+     FROM movie_keyword AS mk 
+     WHERE mk.movie_id = ms.movie_id) AS keyword_count,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ')
+     FROM movie_keyword AS mk
+     JOIN keyword AS k ON k.id = mk.keyword_id
+     WHERE mk.movie_id = ms.movie_id) AS keyword_list
+FROM 
+    MovieSummary AS ms
+WHERE 
+    ms.production_year BETWEEN 2001 AND 2023
+ORDER BY 
+    ms.production_year DESC, 
+    ms.movie_title ASC;

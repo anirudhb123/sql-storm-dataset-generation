@@ -1,0 +1,91 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+TopOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_orderdate,
+        r.o_totalprice,
+        r.order_rank,
+        c.c_name,
+        r.o_orderstatus
+    FROM 
+        RankedOrders r
+    JOIN 
+        customer c ON c.c_custkey = (
+            SELECT 
+                o.o_custkey 
+            FROM 
+                orders o 
+            WHERE 
+                o.o_orderkey = r.o_orderkey
+        )
+    WHERE 
+        r.order_rank <= 3
+),
+SuppliersWithLowStock AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    GROUP BY 
+        ps.ps_suppkey
+    HAVING 
+        SUM(ps.ps_availqty) < 100
+),
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        s.s_name AS supplier_name,
+        l.l_discount
+    FROM 
+        lineitem l 
+    LEFT JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    WHERE 
+        l.l_returnflag = 'N'
+)
+SELECT 
+    TopOrders.o_orderkey,
+    SUM(OrderDetails.l_extendedprice * (1 - OrderDetails.l_discount)) AS total_revenue,
+    COUNT(DISTINCT OrderDetails.l_partkey) AS unique_parts,
+    AVG(TopOrders.o_totalprice) AS avg_total_price,
+    r.r_name AS region
+FROM 
+    TopOrders
+JOIN 
+    OrderDetails ON TopOrders.o_orderkey = OrderDetails.l_orderkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (
+        SELECT 
+            c.c_nationkey 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_custkey = TopOrders.c_name
+    )
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    TopOrders.o_orderstatus IN ('O', 'F')
+GROUP BY 
+    TopOrders.o_orderkey, r.r_name
+ORDER BY 
+    total_revenue DESC, avg_total_price ASC;

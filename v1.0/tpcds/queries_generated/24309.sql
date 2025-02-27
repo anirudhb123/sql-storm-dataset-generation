@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date >= '2023-01-01')
+        AND ws.ws_net_profit > 0
+),
+AggregateSales AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.ws_quantity) AS total_quantity,
+        AVG(r.ws_net_profit) AS avg_net_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rank_profit <= 10
+    GROUP BY 
+        r.web_site_sk
+),
+ItemMetrics AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+)
+SELECT 
+    a.web_site_sk,
+    a.total_quantity,
+    a.avg_net_profit,
+    COALESCE(i.order_count, 0) AS order_count,
+    COALESCE(i.total_quantity_sold, 0) AS total_quantity_sold,
+    COALESCE(i.total_net_profit, 0) AS total_net_profit,
+    CASE
+        WHEN a.avg_net_profit > 1000 THEN 'High Profit'
+        WHEN a.avg_net_profit BETWEEN 500 AND 1000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    AggregateSales a
+LEFT JOIN 
+    ItemMetrics i ON a.web_site_sk = (SELECT web_site_sk FROM web_site WHERE web_site_sk = a.web_site_sk)
+WHERE 
+    (i.total_quantity_sold IS NULL OR i.total_quantity_sold > 50)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM store_sales ss 
+        WHERE ss.ss_item_sk IN (SELECT i_item_sk FROM item WHERE i_class_id = 1)
+        AND ss.ss_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    )
+ORDER BY 
+    a.total_quantity DESC, a.avg_net_profit DESC
+FETCH FIRST 100 ROWS ONLY;

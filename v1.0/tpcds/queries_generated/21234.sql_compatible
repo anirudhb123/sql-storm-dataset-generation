@@ -1,0 +1,73 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_net_profit) DESC) AS profit_rank
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (
+            SELECT MAX(d_date_sk) 
+            FROM date_dim 
+            WHERE d_year = 2022
+        )
+    GROUP BY 
+        cs_item_sk
+),
+TopItems AS (
+    SELECT 
+        rs.cs_item_sk,
+        rs.total_net_profit,
+        rs.profit_rank,
+        COALESCE(i.i_item_desc, 'Unknown Item') AS item_description,
+        COALESCE(i.i_brand, 'No Brand') AS item_brand,
+        CASE 
+            WHEN i.i_current_price IS NULL THEN 'Price Not Available'
+            ELSE TO_CHAR(i.i_current_price, 'FM$999G999D00')
+        END AS formatted_price
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.cs_item_sk = i.i_item_sk
+    JOIN 
+        (
+            SELECT 
+                cs_item_sk,
+                COUNT(*) AS total_sales_count
+            FROM 
+                catalog_sales
+            GROUP BY 
+                cs_item_sk
+            HAVING 
+                COUNT(*) > 10
+        ) AS sales_counts ON rs.cs_item_sk = sales_counts.cs_item_sk
+    WHERE 
+        rs.profit_rank <= 10
+)
+SELECT 
+    ti.cs_item_sk,
+    ti.item_description,
+    ti.item_brand,
+    ti.total_net_profit,
+    ti.formatted_price 
+FROM 
+    TopItems ti
+JOIN 
+    customer c ON c.c_customer_sk IN (
+        SELECT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_item_sk = ti.cs_item_sk
+    )
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+WHERE 
+    (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL) 
+    AND cd.cd_gender = 'F'
+ORDER BY 
+    ti.total_net_profit DESC, 
+    ti.cs_item_sk ASC
+FETCH FIRST 15 ROWS ONLY;

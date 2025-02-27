@@ -1,0 +1,57 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+CombinedCast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        SUM(CASE WHEN ci.note IS NOT NULL AND ci.note <> '' THEN 1 ELSE 0 END) AS actors_with_notes
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(CASE WHEN mi.info IS NOT NULL THEN mi.info ELSE NULL END ORDER BY it.id) AS movie_info_concatenated
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY mi.movie_id
+),
+TitlesWithInfo AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        COALESCE(mk.total_actors, 0) AS total_actors,
+        COALESCE(mk.actors_with_notes, 0) AS actors_with_notes,
+        mi.movie_info_concatenated
+    FROM RankedTitles rt
+    LEFT JOIN CombinedCast mk ON rt.title_id = mk.movie_id
+    LEFT JOIN MovieInfo mi ON rt.title_id = mi.movie_id
+)
+SELECT 
+    twi.title,
+    twi.production_year,
+    twi.total_actors,
+    twi.actors_with_notes,
+    twi.movie_info_concatenated,
+    (CASE 
+         WHEN twi.total_actors > 10 THEN 'Popular Cast'
+         ELSE 'Less Popular Cast' 
+     END) AS cast_fame,
+    (SELECT COUNT(*) 
+     FROM aka_name an 
+     WHERE an.person_id IN (SELECT ci.person_id FROM cast_info ci WHERE ci.movie_id = twi.title_id)
+     AND an.name ILIKE '%John%') AS john_actor_count
+FROM TitlesWithInfo twi
+WHERE twi.production_year BETWEEN 2000 AND 2023
+AND twi.total_actors > 5
+ORDER BY twi.production_year DESC, twi.total_actors DESC
+LIMIT 10;

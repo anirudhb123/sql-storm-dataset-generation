@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        Score,
+        CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ParentId ORDER BY Score DESC) AS Rank
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only Questions
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+        COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+        COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 -- Filtering users based on a ridiculously high reputation threshold
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+PostLinkStatistics AS (
+    SELECT 
+        pl.PostId,
+        COUNT(*) AS RelatedPostCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.PostId
+),
+FinalResults AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pa.Rank AS ParentPostRank,
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.GoldBadges,
+        ua.SilverBadges,
+        ua.BronzeBadges,
+        COALESCE(pl.RelatedPostCount, 0) AS NumberOfRelatedPosts
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy pa ON p.ParentId = pa.Id
+    JOIN 
+        UserActivity ua ON p.OwnerUserId = ua.UserId
+    LEFT JOIN 
+        PostLinkStatistics pl ON p.Id = pl.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '3 months' -- Only consider recent posts
+        AND (p.Score IS NOT NULL AND p.Score > 0) -- Ensure the post has a positive score
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.GoldBadges > 0 THEN 'Gold'
+        WHEN fr.SilverBadges > 0 THEN 'Silver'
+        WHEN fr.BronzeBadges > 0 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeStatus
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Reputation DESC, fr.NumberOfRelatedPosts DESC, fr.ParentPostRank ASC;

@@ -1,0 +1,75 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSales AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        COALESCE(ss.total_sales, 0) AS total_sales
+    FROM 
+        supplier s
+    LEFT JOIN 
+        SupplierSales ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE 
+        ss.total_sales IS NOT NULL OR ss.total_sales > 10000
+),
+CombinedStats AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_spent,
+        ts.s_suppkey,
+        ts.total_sales
+    FROM 
+        CustomerStats cs
+    JOIN 
+        TopSuppliers ts ON cs.order_count > 5
+)
+SELECT 
+    c.c_name, 
+    c.total_spent,
+    c.total_sales,
+    o.order_rank
+FROM 
+    CombinedStats c
+LEFT JOIN 
+    RankedOrders o ON c.total_spent > 5000
+WHERE 
+    c.total_sales IS NOT NULL
+ORDER BY 
+    c.total_spent DESC, o.order_rank
+LIMIT 20;

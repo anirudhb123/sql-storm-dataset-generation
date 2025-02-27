@@ -1,0 +1,80 @@
+
+WITH RECURSIVE adjusted_parts AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice,
+           p.p_size,
+           CASE 
+               WHEN p.p_size = 0 THEN NULL 
+               ELSE p.p_retailprice / CAST(p.p_size AS DECIMAL(10, 2)) 
+           END AS size_adjusted_price
+    FROM part p
+    WHERE p.p_size IS NOT NULL
+    UNION ALL
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_retailprice,
+           p.p_size,
+           CASE 
+               WHEN p.p_size = 0 THEN NULL 
+               ELSE p.p_retailprice / CAST(p.p_size AS DECIMAL(10, 2))
+           END
+    FROM part p
+    JOIN adjusted_parts ap ON p.p_partkey = ap.p_partkey
+    WHERE p.p_retailprice > ap.size_adjusted_price
+),
+supplier_info AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2
+        WHERE s2.s_nationkey IN (SELECT DISTINCT n.n_nationkey
+                                  FROM nation n 
+                                  WHERE n.n_name LIKE 'A%')
+    )
+    GROUP BY s.s_suppkey, s.s_name
+),
+ranked_orders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+final_report AS (
+    SELECT r.r_name, 
+           si.s_name, 
+           ri.o_orderkey, 
+           CASE 
+               WHEN r.r_name IS NULL THEN 'Unknown Region' 
+               ELSE r.r_name 
+           END AS region_description,
+           SUM(oi.total_supply_cost) AS total_cost,
+           COUNT(DISTINCT ri.o_orderkey) FILTER (WHERE ri.order_rank < 5) AS top_orders
+    FROM region r
+    LEFT JOIN supplier_info si ON si.total_supply_cost > (SELECT AVG(total_supply_cost) FROM supplier_info)
+    LEFT JOIN ranked_orders ri ON ri.total_revenue > 1000
+    CROSS JOIN (
+        SELECT s.s_suppkey,
+               SUM(ps.ps_supplycost) AS total_supply_cost
+        FROM partsupp ps
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+        GROUP BY s.s_suppkey
+    ) oi ON oi.s_suppkey = si.s_suppkey
+    GROUP BY r.r_name, si.s_name, ri.o_orderkey
+)
+
+SELECT fr.region_description, 
+       fr.s_name, 
+       COALESCE(fr.total_cost, 0) AS total_cost,
+       fr.top_orders 
+FROM final_report fr
+WHERE fr.total_cost IS NOT NULL OR fr.top_orders IS NULL
+ORDER BY fr.region_description, total_cost DESC;

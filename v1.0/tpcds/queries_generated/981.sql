@@ -1,0 +1,41 @@
+
+WITH HighValueCustomers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk, 
+           SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_first_shipto_date_sk IS NOT NULL
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_income_band_sk
+    HAVING SUM(ws.ws_net_paid_inc_tax) > 1000
+),
+RecentReturns AS (
+    SELECT cr.returning_customer_sk, SUM(cr.return_quantity) AS total_returns
+    FROM catalog_returns cr
+    WHERE cr_returned_date_sk IN (
+        SELECT d_date_sk FROM date_dim 
+        WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    )
+    GROUP BY cr.returning_customer_sk
+),
+CustomerStats AS (
+    SELECT hvc.c_customer_sk, hvc.c_first_name, hvc.c_last_name, hvc.cd_gender, 
+           hvc.total_spent, COALESCE(rr.total_returns, 0) AS total_returns
+    FROM HighValueCustomers hvc
+    LEFT JOIN RecentReturns rr ON hvc.c_customer_sk = rr.returning_customer_sk
+),
+RankedCustomers AS (
+    SELECT cs.*, 
+           RANK() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_spent DESC) AS gender_rank,
+           DENSE_RANK() OVER (ORDER BY cs.total_returns DESC) AS return_rank
+    FROM CustomerStats cs
+)
+SELECT rc.c_first_name, rc.c_last_name, rc.cd_gender, rc.total_spent, rc.total_returns,
+       CASE 
+           WHEN rc.total_returns = 0 THEN 'No Returns'
+           WHEN rc.total_returns < 5 THEN 'Few Returns'
+           ELSE 'Frequent Returns'
+       END AS return_category
+FROM RankedCustomers rc
+WHERE rc.gender_rank <= 10 AND rc.return_rank <= 5
+ORDER BY rc.cd_gender, rc.total_spent DESC;

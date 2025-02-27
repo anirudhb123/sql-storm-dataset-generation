@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rank_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+LastYearMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank_year = 1
+),
+CastRoles AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    lm.title,
+    lm.production_year,
+    COALESCE(cr.roles, 'No cast available') AS roles,
+    (SELECT COUNT(DISTINCT c.movie_id) 
+     FROM cast_info c 
+     WHERE c.movie_id = lm.movie_id AND c.note IS NOT NULL) AS noted_roles_count
+FROM 
+    LastYearMovies lm
+LEFT JOIN 
+    CastRoles cr ON lm.movie_id = cr.movie_id
+LEFT JOIN 
+    movie_info mi ON lm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget' LIMIT 1)
+WHERE 
+    (mi.info IS NULL OR mi.info::numeric > 10000000) 
+ORDER BY 
+    lm.production_year DESC, lm.title;

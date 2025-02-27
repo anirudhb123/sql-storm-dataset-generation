@@ -1,0 +1,53 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.VoteTypeId IN (2, 3)) AS VoteCount, 
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostSummary AS (
+    SELECT
+        P.PostTypeId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        COUNT(DISTINCT P.OwnerUserId) AS UniqueAuthors
+    FROM Posts P
+    GROUP BY P.PostTypeId
+),
+CloseReasonSummary AS (
+    SELECT 
+        PH.Comment AS CloseReason,
+        COUNT(PH.Id) AS TotalCloseReasons
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) 
+    GROUP BY PH.Comment
+)
+
+SELECT 
+    UA.DisplayName,
+    UA.PostCount AS TotalPostsByUser,
+    UA.CommentCount AS TotalCommentsByUser,
+    UA.VoteCount AS TotalVotesByUser,
+    UA.BadgeCount AS TotalBadgesByUser,
+    UA.LastPostDate,
+    PS.PostTypeId,
+    PS.TotalPosts AS TotalPostsByType,
+    PS.TotalViews AS TotalViewsByType,
+    PS.AverageScore AS AverageScoreByType,
+    PS.UniqueAuthors AS UniqueAuthorsByType,
+    CRS.CloseReason,
+    CRS.TotalCloseReasons
+FROM UserActivity UA
+CROSS JOIN PostSummary PS
+LEFT JOIN CloseReasonSummary CRS ON 1=1 
+ORDER BY UA.PostCount DESC, PS.TotalViews DESC;

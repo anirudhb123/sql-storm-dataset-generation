@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_retailprice,
+        ps.total_supply_cost,
+        ps.supplier_count
+    FROM part p
+    LEFT JOIN SupplierStats ps ON p.p_partkey = ps.ps_partkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_nationkey,
+        COALESCE(r.r_name, 'UNKNOWN') AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    DENSE_RANK() OVER (ORDER BY pd.p_retailprice DESC) AS price_rank,
+    cr.region_name,
+    cr.c_custkey,
+    cr.n_nationkey,
+    STRING_AGG(DISTINCT pd.p_name, ', ') AS part_names,
+    SUM(COALESCE(RA.o_totalprice, 0)) AS total_spent,
+    AVG(NULLIF(pd.p_retailprice, 0)) AS avg_part_price
+FROM PartDetails pd
+JOIN RankedOrders RA ON pd.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = RA.o_orderkey
+)
+JOIN CustomerRegion cr ON RA.o_orderkey = cr.c_custkey
+WHERE pd.total_supply_cost > 10000 
+GROUP BY cr.region_name, cr.c_custkey, cr.n_nationkey
+HAVING AVG(pd.p_retailprice) > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_brand = 'BrandX'
+)
+ORDER BY price_rank;

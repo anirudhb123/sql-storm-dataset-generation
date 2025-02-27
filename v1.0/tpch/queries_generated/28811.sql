@@ -1,0 +1,29 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, p.p_name, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT co.o_orderkey) AS order_count, 
+       SUM(co.total_revenue) AS total_revenue, 
+       GROUP_CONCAT(DISTINCT CONCAT(s.s_name, ': ', p.p_name) ORDER BY s.s_name SEPARATOR ', ') AS supplier_part_list
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey AND rs.rn = 1
+JOIN partsupp ps ON rs.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN CustomerOrders co ON co.o_orderkey = ps.ps_partkey -- assuming a relation here for demonstration
+WHERE p.p_size > 10
+GROUP BY r.r_name
+HAVING order_count > 5
+ORDER BY total_revenue DESC;

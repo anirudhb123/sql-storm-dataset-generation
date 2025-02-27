@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        COALESCE(SUM(ws_ext_sales_price), 0) AS total_sales,
+        1 AS level
+    FROM 
+        store
+    LEFT OUTER JOIN web_sales ON store.s_store_sk = web_sales.ws_warehouse_sk
+    GROUP BY 
+        s_store_sk, s_store_name
+    UNION ALL
+    SELECT 
+        sh.s_store_sk,
+        sh.s_store_name,
+        COALESCE(SUM(ws.net_profit), 0) + sh.total_sales AS total_sales,
+        sh.level + 1
+    FROM 
+        SalesHierarchy sh
+    LEFT JOIN store_sales ws ON sh.s_store_sk = ws.ss_store_sk
+    WHERE 
+        sh.level < 5
+    GROUP BY 
+        sh.s_store_sk, sh.s_store_name, sh.total_sales, sh.level
+), 
+FilteredResults AS (
+    SELECT 
+        sh.s_store_name,
+        sh.total_sales,
+        RANK() OVER (ORDER BY sh.total_sales DESC) as sales_rank
+    FROM 
+        SalesHierarchy sh
+    WHERE 
+        sh.total_sales > (SELECT AVG(total_sales) FROM SalesHierarchy)
+)
+SELECT 
+    fr.s_store_name,
+    fr.total_sales,
+    CASE 
+        WHEN fr.sales_rank <= 10 THEN 'Top Performer'
+        ELSE 'Average Performer'
+    END AS performance_category,
+    CASE
+        WHEN fr.total_sales = 0 THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS sales_status
+FROM 
+    FilteredResults fr
+ORDER BY 
+    fr.total_sales DESC;

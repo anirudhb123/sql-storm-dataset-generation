@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+),
+
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(MIN(mi.info), 'No Info Available') AS info,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY 
+        m.id
+),
+
+CastStats AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS distinct_cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+
+FinalOutput AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COALESCE(ci.distinct_cast_count, 0) AS total_cast,
+        COALESCE(mi.info, 'No Info') AS info,
+        mh.level
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        MovieInfo mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        CastStats ci ON mh.movie_id = ci.movie_id
+    WHERE 
+        mh.level <= 2
+    ORDER BY 
+        mh.level, m.production_year DESC
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN total_cast > 10 THEN 'Large Cast'
+        WHEN total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size
+FROM 
+    FinalOutput
+WHERE 
+    info IS NOT NULL AND 
+    production_year = (SELECT MAX(production_year) FROM aka_title)
+ORDER BY 
+    title;

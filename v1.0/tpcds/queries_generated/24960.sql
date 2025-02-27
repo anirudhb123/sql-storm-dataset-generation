@@ -1,0 +1,88 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name || ' ' || c.c_last_name AS customer_name,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk >= 2450000 -- Example cutoff for orders (arbitrary date)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ws.ws_net_paid) > 1000
+),
+customer_details AS (
+    SELECT
+        tc.customer_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN ws.ws_quantity ELSE 0 END) AS total_items_shipped,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        top_customers tc
+    JOIN 
+        customer_demographics cd ON tc.c_customer_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON tc.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        tc.customer_name, cd.cd_gender, cd.cd_marital_status
+),
+sales_summary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(ws.ws_quantity) AS total_sold,
+        AVG(ws.ws_net_paid) AS avg_sales_price,
+        MAX(ws.ws_net_paid) AS peak_sales_price
+    FROM 
+        item item
+    JOIN 
+        web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_month_seq IN (1, 2) ) -- First two months of 2023
+    GROUP BY 
+        item.i_item_id, item.i_product_name
+),
+return_analysis AS (
+    SELECT 
+        cr.cr_item_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amount) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk >= 2445000 -- Arbitrary return cutoff
+    GROUP BY 
+        cr.cr_item_sk
+)
+SELECT 
+    cd.customer_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ss.i_item_id,
+    ss.i_product_name,
+    ss.total_sold,
+    ss.avg_sales_price,
+    ra.total_returned,
+    ra.total_return_amount,
+    CASE 
+        WHEN ra.total_returned IS NULL THEN 'No Returns'
+        WHEN ra.total_returned > 0 THEN 'Some Returns' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    customer_details cd
+JOIN 
+    sales_summary ss ON cd.total_orders > 10 -- Only select customers with more than 10 orders
+LEFT JOIN 
+    return_analysis ra ON ss.i_item_id = ra.cr_item_sk
+WHERE 
+    cd.cd_gender = 'F' -- Focusing on female customers for this analysis
+ORDER BY 
+    cd.total_orders DESC,
+    ss.total_sold DESC
+FETCH FIRST 100 ROWS ONLY;

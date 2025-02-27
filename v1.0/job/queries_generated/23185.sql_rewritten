@@ -1,0 +1,76 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS distinct_actors
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year BETWEEN 2000 AND 2023
+),
+Characters AS (
+    SELECT 
+        ch.id AS character_id,
+        ch.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_appearances
+    FROM 
+        char_name ch
+    LEFT JOIN 
+        cast_info ci ON ci.role_id = ch.id
+    GROUP BY 
+        ch.id, ch.name
+),
+KeywordInfo AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+CelebInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT r.movie_id) AS movies_with_role,
+        SUM(CASE WHEN r.note IS NOT NULL THEN 1 ELSE 0 END) AS roles_with_notes
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info r ON r.person_id = ak.person_id
+    GROUP BY 
+        ak.name
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.year_rank,
+    rm.distinct_actors,
+    c.name AS character_name,
+    ci.actor_name,
+    STRING_AGG(DISTINCT ki.keywords, ', ') AS associated_keywords,
+    COUNT(DISTINCT ki.keywords) OVER () AS total_keyword_count,
+    COUNT(DISTINCT ci.actor_name) FILTER (WHERE ci.movies_with_role > 0) AS active_actors
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    Characters c ON rm.movie_id = c.movie_appearances
+LEFT JOIN 
+    KeywordInfo ki ON rm.movie_id = ki.movie_id
+LEFT JOIN 
+    CelebInfo ci ON ci.movies_with_role > 0
+WHERE 
+    rm.distinct_actors > 5 
+    AND (c.movie_appearances IS NULL OR c.movie_appearances > 1)
+ORDER BY 
+    rm.production_year DESC, rm.year_rank
+LIMIT 100 OFFSET 0;

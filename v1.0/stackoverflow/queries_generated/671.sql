@@ -1,0 +1,50 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year' 
+    GROUP BY P.OwnerUserId
+),
+TopContributors AS (
+    SELECT 
+        UserId,
+        TotalPosts,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalScore DESC) AS RankByScore
+    FROM PostStats
+)
+SELECT 
+    UB.DisplayName,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    TC.TotalPosts,
+    TC.TotalScore,
+    TC.RankByPosts,
+    TC.RankByScore,
+    CASE 
+        WHEN TC.TotalPosts IS NULL THEN 'No posts'
+        WHEN UB.BadgeCount > 0 THEN 'Active Contributor'
+        ELSE 'Inactive User'
+    END AS UserStatus
+FROM UserBadges UB
+FULL OUTER JOIN TopContributors TC ON UB.UserId = TC.UserId
+WHERE COALESCE(TC.TotalPosts, 0) > 0 OR UB.BadgeCount > 0
+ORDER BY UB.DisplayName;

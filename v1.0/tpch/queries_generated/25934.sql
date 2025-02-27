@@ -1,0 +1,26 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    CONCAT('Supplier ', s.s_name, ' provides part ', p.p_name) AS supplier_part_info,
+    COUNT(*) AS total_supply,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    AVG(ps.ps_supplycost) AS average_supply_cost,
+    MAX(ps.ps_supplycost) AS max_supply_cost,
+    MIN(ps.ps_supplycost) AS min_supply_cost,
+    GROUP_CONCAT(DISTINCT CONCAT('Region: ', r.r_name, ' - Comment: ', r.r_comment) ORDER BY r.r_name ASC SEPARATOR '; ') AS regions_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice > 50.00
+GROUP BY 
+    p.p_partkey, s.s_suppkey
+ORDER BY 
+    total_supply DESC, total_available_quantity DESC;

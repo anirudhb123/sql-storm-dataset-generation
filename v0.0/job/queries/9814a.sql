@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS release_date, min(miidx.info) AS rating, min(t.title) AS german_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it, info_type AS it2, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS miidx, title AS t
+WHERE mi.movie_id = t.id AND it2.id = mi.info_type_id AND kt.id = t.kind_id AND mc.movie_id = t.id AND cn.id = mc.company_id AND ct.id = mc.company_type_id AND miidx.movie_id = t.id AND it.id = miidx.info_type_id AND mi.movie_id = miidx.movie_id AND mi.movie_id = mc.movie_id AND miidx.movie_id = mc.movie_id
+AND cn.md5sum IN ('1d11767f1821ce52081b1c429f028353', '551a65319bd84a67b327a07a3af2f5de', '62b9847898053a343cda8907622036b6', '6ade1bdc69f2ae930f639f39a0f0d580', '6f6c1cc05d99a0d940790a1d0b5d8813', '81aa45e05a10889b8e4bced9a5abe176', '87edc3399f5975d4343b3dd5eb0c514c', '9bb3ff8c04f0cdac59979ecca0ef377b', 'c4d1926a72da760a34b930d182414e9d');

@@ -1,0 +1,67 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT 
+        i_item_sk, 
+        i_item_desc, 
+        i_brand, 
+        1 AS level
+    FROM item
+    WHERE i_item_sk IN (
+        SELECT i_item_sk 
+        FROM store_sales 
+        WHERE ss_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = DATE '2002-10-01')
+    )
+    UNION ALL
+    SELECT 
+        i.i_item_sk,
+        CONCAT('Child of ', ih.i_item_desc) AS i_item_desc,
+        i.i_brand,
+        ih.level + 1
+    FROM item i
+    JOIN ItemHierarchy ih ON i.i_item_sk = ih.i_item_sk + 1 
+),
+AggregateSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank
+    FROM web_sales ws
+    JOIN ItemHierarchy ih ON ws.ws_item_sk = ih.i_item_sk
+    GROUP BY ws.web_site_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+MergedSalesData AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        as.total_profit,
+        as.order_count,
+        cs.total_spent,  -- Added total_spent to group by in MergedSalesData
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM CustomerSales cs
+    JOIN AggregateSales as ON cs.c_customer_sk = as.web_site_sk
+)
+SELECT 
+    m.c_first_name,
+    m.c_last_name,
+    m.total_spent,
+    m.total_profit,
+    m.order_count,
+    CASE 
+        WHEN m.customer_rank <= 10 THEN 'Top 10 Customers'
+        ELSE 'Other Customers'
+    END AS customer_category
+FROM MergedSalesData m
+WHERE m.total_spent IS NOT NULL
+ORDER BY m.customer_rank;

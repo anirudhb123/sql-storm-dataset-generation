@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND p.PostTypeId IN (1, 2)
+),
+PostAggregates AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.PostId) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.AnswerCount) AS TotalAnswers
+    FROM 
+        RankedPosts p
+    JOIN 
+        PostTypes pt ON p.Rank <= 10
+    GROUP BY 
+        pt.Name
+)
+SELECT 
+    pa.PostType,
+    pa.PostCount,
+    pa.TotalViews,
+    pa.AverageScore,
+    pa.TotalAnswers,
+    COALESCE(b.BadgeCount, 0) AS ActiveBadges
+FROM 
+    PostAggregates pa
+LEFT JOIN (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        Users u ON b.UserId = u.Id
+    WHERE 
+        u.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        u.Id
+) b ON b.UserId = pa.PostId
+ORDER BY 
+    pa.PostCount DESC, pa.PostType;

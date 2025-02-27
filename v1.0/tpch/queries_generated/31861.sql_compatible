@@ -1,0 +1,69 @@
+
+WITH RECURSIVE CategorySales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_supplycost) AS total_supplies,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderPriorities AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderpriority,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderpriority
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name
+    FROM 
+        CustomerOrderPriorities cop
+    WHERE 
+        cop.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderPriorities)
+)
+SELECT 
+    cs.p_partkey,
+    cs.p_name,
+    cs.total_sales,
+    ss.s_name,
+    ss.total_supplies,
+    ss.avg_supply_cost,
+    hvc.c_name AS high_value_customer
+FROM 
+    CategorySales cs
+JOIN 
+    SupplierStats ss ON cs.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s))
+LEFT JOIN 
+    HighValueCustomers hvc ON cs.total_sales > 10000
+WHERE 
+    cs.sales_rank = 1
+ORDER BY 
+    cs.total_sales DESC, ss.avg_supply_cost ASC;

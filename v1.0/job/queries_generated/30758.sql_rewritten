@@ -1,0 +1,31 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT mt.id AS movie_id,
+           mt.title,
+           mt.production_year,
+           0 AS depth
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000 
+    UNION ALL
+    SELECT ml.linked_movie_id,
+           mt.title,
+           mt.production_year,
+           mh.depth + 1
+    FROM MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT a.name AS actor_name,
+       count(DISTINCT c.movie_id) AS movies_count,
+       AVG(mh.depth) AS avg_link_depth,
+       string_agg(DISTINCT k.keyword, ', ') AS keywords,
+       ARRAY_AGG(DISTINCT c.note) AS role_notes
+FROM aka_name a
+JOIN cast_info c ON a.person_id = c.person_id
+JOIN MovieHierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN movie_keyword mk ON c.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+WHERE a.name IS NOT NULL
+GROUP BY a.name
+HAVING COUNT(DISTINCT c.movie_id) > 5
+ORDER BY movies_count DESC
+LIMIT 10;

@@ -1,0 +1,61 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        1 AS level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+
+    UNION ALL
+
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    GROUP BY s.s_suppkey, s.s_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(*) AS line_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    no.n_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    SUM(ls.total_revenue) AS total_revenue,
+    SUM(ss.total_avail_qty) AS total_avail_qty,
+    MAX(ss.avg_supply_cost) AS max_supply_cost,
+    COUNT(DISTINCT oh.o_orderkey) AS order_count
+FROM nation no
+LEFT JOIN supplier s ON no.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+LEFT JOIN LineItemStats ls ON ls.l_orderkey IN (
+    SELECT l_orderkey FROM lineitem l WHERE l.l_suppkey = s.s_suppkey
+)
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey = ls.l_orderkey
+GROUP BY no.n_name, s.s_name
+HAVING SUM(ls.total_revenue) > 50000
+ORDER BY total_revenue DESC, no.n_name;

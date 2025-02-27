@@ -1,0 +1,74 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopPostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ur.TotalReputation,
+        ur.BadgeCount
+    FROM 
+        RecentPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    WHERE 
+        rp.Score > 10
+)
+
+SELECT 
+    t.SubjectTag,
+    COUNT(dp.DuplicateCount) AS TotalDuplicates,
+    SUM(CASE 
+        WHEN t.IsRequired = 1 THEN 1 ELSE 0 END) AS RequiredTags,
+    MAX(COALESCE(tp.TotalReputation, 0)) AS MaxReputation,
+    STRING_AGG(DISTINCT up.UserDisplayName, ', ') AS UsersWithTopPosts
+FROM 
+    Tags t
+LEFT JOIN (
+    SELECT 
+        pl.RelatedPostId,
+        COUNT(pl.Id) AS DuplicateCount
+    FROM 
+        PostLinks pl
+    GROUP BY 
+        pl.RelatedPostId
+) AS dp ON t.ExcerptPostId = dp.RelatedPostId
+LEFT JOIN 
+    TopPostStats tp ON t.WikiPostId = tp.PostId
+LEFT JOIN 
+    Users up ON tp.OwnerUserId = up.Id
+WHERE 
+    t.Count > 5
+GROUP BY 
+    t.SubjectTag
+HAVING 
+    COUNT(dp.DuplicateCount) > 0
+    OR MAX(tp.TotalReputation) IS NOT NULL
+ORDER BY 
+    TotalDuplicates DESC, MaxReputation DESC
+LIMIT 25;

@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS rank
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorsCount AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+),
+MoviesWithActors AS (
+    SELECT
+        m.title,
+        m.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count
+    FROM
+        RankedMovies m
+    LEFT JOIN
+        ActorsCount ac ON m.id = ac.movie_id
+)
+SELECT
+    MIN(m.title) AS least_title,
+    MAX(m.production_year) AS latest_year,
+    AVG(m.actor_count) AS avg_actors
+FROM
+    MoviesWithActors m
+WHERE
+    m.actor_count > (
+        SELECT
+            AVG(actor_count) 
+        FROM
+            ActorsCount
+    )
+GROUP BY
+    m.actor_count
+HAVING
+    COUNT(*) > 1
+ORDER BY
+    latest_year DESC
+LIMIT 5;

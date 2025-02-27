@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS actor_count
+    FROM 
+        aka_title a
+    JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    GROUP BY 
+        a.id
+    HAVING 
+        COUNT(c.person_id) > 5
+), 
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        mk.keyword
+    FROM 
+        RankedMovies m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+), 
+FinalReport AS (
+    SELECT 
+        d.title,
+        d.production_year,
+        k.keyword,
+        COUNT(DISTINCT a.name) AS unique_actors
+    FROM 
+        MovieDetails d
+    JOIN 
+        cast_info c ON d.movie_id = c.movie_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        d.title, d.production_year, k.keyword
+)
+SELECT 
+    title,
+    production_year,
+    STRING_AGG(keyword, ', ') AS keywords,
+    unique_actors
+FROM 
+    FinalReport
+GROUP BY 
+    title, production_year, unique_actors
+ORDER BY 
+    unique_actors DESC, production_year DESC;

@@ -1,0 +1,86 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId, 
+        SUM(CASE 
+            WHEN v.VoteTypeId = 2 THEN 1 
+            WHEN v.VoteTypeId = 3 THEN -1 
+            ELSE 0 
+        END) AS Score,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Level,
+        pv.Score,
+        pv.TotalVotes
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        PostVotes pv ON ph.PostId = pv.PostId
+    WHERE 
+        pv.Score IS NOT NULL
+)
+SELECT 
+    u.DisplayName AS UserName,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    tp.Title AS PostTitle,
+    tp.Score AS PostScore,
+    tp.TotalVotes AS PostVoteCount,
+    tp.Level AS PostLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    TopPosts tp ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostId)
+WHERE 
+    tp.Score > 10
+ORDER BY 
+    ub.BadgeCount DESC, 
+    tp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

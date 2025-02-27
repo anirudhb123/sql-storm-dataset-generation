@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(V.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(V.VoteTypeId = 3, 0)) AS DownVotes,
+        AVG(COALESCE(P.Score, 0)) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+),
+TopPostHistory AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) -- Only title, body, and tag edits
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    UA.PostCount,
+    UA.TotalViews,
+    UA.UpVotes,
+    UA.DownVotes,
+    UA.AverageScore,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    COALESCE(PH.EditCount, 0) AS EditCount
+FROM 
+    UserActivity UA
+JOIN 
+    Users U ON UA.UserId = U.Id
+LEFT JOIN 
+    RecentPosts RP ON U.Id = RP.OwnerUserId AND RP.rn <= 5
+LEFT JOIN 
+    TopPostHistory PH ON RP.PostId = PH.PostId
+WHERE 
+    UA.PostCount > 10
+ORDER BY 
+    UA.TotalViews DESC, UA.AverageScore DESC
+LIMIT 100;

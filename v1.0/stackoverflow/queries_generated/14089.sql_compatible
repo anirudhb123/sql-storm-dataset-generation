@@ -1,0 +1,66 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        COUNT(C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN V.VoteTypeId = 8 THEN 1 ELSE 0 END) AS BountyStarts
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.CreationDate >= '2023-01-01' 
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        COALESCE(SUM(P.Score), 0) AS TotalScore,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        SUM(CASE WHEN P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostUserStats AS (
+    SELECT 
+        PS.PostId,
+        U.Id AS UserId,
+        U.DisplayName,
+        PS.CommentCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.BountyStarts,
+        US.BadgeCount,
+        US.TotalScore,
+        US.TotalViews,
+        US.AcceptedAnswers
+    FROM 
+        PostStats PS
+    JOIN 
+        Users U ON PS.PostTypeId IN (1, 2) AND PS.PostId IN (
+            SELECT Id FROM Posts WHERE OwnerUserId = U.Id
+        )
+    JOIN 
+        UserStats US ON U.Id = US.UserId
+)
+SELECT 
+    * 
+FROM 
+    PostUserStats
+ORDER BY 
+    UpVotes DESC, TotalViews DESC;

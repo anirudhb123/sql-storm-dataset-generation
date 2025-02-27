@@ -1,0 +1,54 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+EnhancedActivity AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ya.UpVoteCount,
+        ya.DownVoteCount,
+        ua.CommentCount,
+        ua.BadgeCount,
+        RANK() OVER (ORDER BY (ua.QuestionCount + ua.AnswerCount + ua.CommentCount) DESC) AS ActivityRank
+    FROM UserActivity ua
+    JOIN (
+        SELECT 
+            UserId, 
+            SUM(UpVoteCount) AS UpVoteCount, 
+            SUM(DownVoteCount) AS DownVoteCount 
+        FROM UserActivity 
+        GROUP BY UserId
+    ) ya ON ua.UserId = ya.UserId
+)
+
+SELECT 
+    e.UserId,
+    e.DisplayName,
+    e.QuestionCount,
+    e.AnswerCount,
+    e.UpVoteCount,
+    e.DownVoteCount,
+    e.CommentCount,
+    e.BadgeCount,
+    e.ActivityRank
+FROM EnhancedActivity e
+WHERE e.BadgeCount > 0
+ORDER BY e.ActivityRank
+FETCH FIRST 10 ROWS ONLY;

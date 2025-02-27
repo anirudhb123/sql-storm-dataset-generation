@@ -1,0 +1,64 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr.customer_sk ORDER BY sr.returned_date_sk DESC) AS return_rank
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.return_quantity > 0
+),
+HighValueCustomers AS (
+    SELECT 
+        c.customer_sk,
+        SUM(ws.net_paid) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.customer_sk = ws.ship_customer_sk
+    GROUP BY 
+        c.customer_sk
+    HAVING 
+        SUM(ws.net_paid) > 1000
+),
+RecentPurchases AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS purchase_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(hvc.total_spent, 0) AS total_spent,
+    COALESCE(r.return_rank, 0) AS return_rank,
+    rp.purchase_count,
+    CASE 
+        WHEN hvc.total_spent IS NOT NULL AND rp.purchase_count > 5 THEN 'High Value & Active'
+        WHEN hvc.total_spent IS NOT NULL THEN 'High Value'
+        WHEN rp.purchase_count > 5 THEN 'Active'
+        ELSE 'Inactive' 
+    END AS customer_status
+FROM 
+    customer c
+LEFT JOIN 
+    HighValueCustomers hvc ON c.c_customer_sk = hvc.customer_sk
+LEFT JOIN 
+    RankedReturns r ON c.c_customer_sk = r.customer_sk AND r.return_rank = 1
+LEFT JOIN 
+    RecentPurchases rp ON c.c_customer_sk = rp.bill_customer_sk
+ORDER BY 
+    total_spent DESC, return_rank ASC
+LIMIT 100
+OFFSET 10;

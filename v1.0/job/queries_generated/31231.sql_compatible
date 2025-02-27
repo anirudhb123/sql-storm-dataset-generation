@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        t.title AS parent_title,
+        1 AS level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        aka_title t ON m.episode_of_id = t.id
+    WHERE 
+        m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        t.title AS parent_title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+
+SELECT 
+    movie.movie_id,
+    movie.movie_title,
+    movie.production_year,
+    COALESCE(parent.title, 'N/A') AS parent_title,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    MAX(CASE WHEN pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Birth Year') THEN pi.info END) AS birth_year,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+FROM 
+    MovieHierarchy movie
+LEFT JOIN 
+    complete_cast cc ON movie.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    person_info pi ON ci.person_id = pi.person_id
+LEFT JOIN 
+    movie_keyword mk ON movie.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    aka_title parent ON movie.parent_title = parent.title
+WHERE 
+    movie.production_year IS NOT NULL
+GROUP BY 
+    movie.movie_id, movie.movie_title, movie.production_year, parent.title
+ORDER BY 
+    movie.production_year DESC,
+    total_cast DESC
+LIMIT 100;

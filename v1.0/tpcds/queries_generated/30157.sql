@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_net_sales,
+        COUNT(ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank,
+        1 AS level
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+
+    UNION ALL
+
+    SELECT 
+        s_new.ws_item_sk,
+        s_new.total_net_sales + ss.total_net_sales,
+        s_new.total_orders + ss.total_orders,
+        RANK() OVER (PARTITION BY s_new.ws_item_sk ORDER BY (s_new.total_net_sales + ss.total_net_sales) DESC) AS sales_rank,
+        level + 1
+    FROM 
+        sales_summary ss
+    JOIN 
+        web_sales s_new ON ss.ws_item_sk = s_new.ws_item_sk
+    WHERE 
+        level < 5
+)
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ss.total_net_sales,
+    ss.total_orders,
+    (SELECT AVG(ws_net_paid_inc_tax) 
+     FROM web_sales 
+     WHERE ws_item_sk = ss.ws_item_sk AND ws_sold_date_sk = (
+         SELECT MAX(ws_sold_date_sk)
+         FROM web_sales
+         WHERE ws_item_sk = ss.ws_item_sk)) AS avg_sales_last_day
+FROM 
+    customer c
+JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    sales_summary s_summary ON s_summary.ws_item_sk = ss.ss_item_sk
+WHERE 
+    c.c_birth_year <= (YEAR(CURDATE()) - 30)
+    AND ca.ca_state IN ('NY', 'CA')
+    AND s_summary.sales_rank <= 10
+ORDER BY 
+    ss.total_net_sales DESC
+LIMIT 100;

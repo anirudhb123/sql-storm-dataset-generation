@@ -1,0 +1,55 @@
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(Posts.ViewCount) AS TotalViews
+    FROM Tags
+    LEFT JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY Tags.TagName
+),
+UserReputation AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        SUM(CASE WHEN Posts.OwnerUserId = Users.Id THEN Posts.ViewCount ELSE 0 END) AS UserTotalViews,
+        COUNT(DISTINCT Posts.Id) AS UserPostCount
+    FROM Users
+    LEFT JOIN Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY Users.Id, Users.DisplayName
+),
+PostHistoryMetrics AS (
+    SELECT
+        Posts.Id AS PostId,
+        Posts.Title,
+        COUNT(PostHistory.Id) AS EditCount,
+        MAX(PostHistory.CreationDate) AS LastEditDate
+    FROM Posts
+    LEFT JOIN PostHistory ON Posts.Id = PostHistory.PostId
+    WHERE PostHistory.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY Posts.Id, Posts.Title
+)
+SELECT
+    ts.TagName,
+    ts.PostCount,
+    ts.QuestionCount,
+    ts.AnswerCount,
+    ts.TotalViews,
+    ROUND(AVG(ur.UserTotalViews), 2) AS AvgUserViews,
+    COUNT(DISTINCT ur.UserId) AS UserCount,
+    AVG(ph.EditCount) AS AvgEditsPerPost,
+    COUNT(DISTINCT ph.PostId) AS TotalEditedPosts
+FROM TagStatistics ts
+JOIN UserReputation ur ON ts.TagName IN (
+    SELECT unnest(string_to_array(Posts.Tags, '><'))::varchar
+    FROM Posts
+)
+JOIN PostHistoryMetrics ph ON ph.PostId IN (
+    SELECT DISTINCT Posts.Id 
+    FROM Posts
+    WHERE Posts.Tags LIKE '%' || ts.TagName || '%'
+)
+GROUP BY ts.TagName, ts.PostCount, ts.QuestionCount, ts.AnswerCount, ts.TotalViews
+ORDER BY ts.TotalViews DESC
+LIMIT 10;

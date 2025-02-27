@@ -1,0 +1,46 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+),
+top_customers AS (
+    SELECT 
+        r.r_name,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        ranked_orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.order_rank <= 5
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.r_name AS region,
+    COUNT(tc.o_orderkey) AS total_top_orders,
+    AVG(tc.total_spent) AS avg_spent_per_customer
+FROM 
+    top_customers tc
+JOIN 
+    region r ON tc.r_name = r.r_name
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_top_orders DESC;

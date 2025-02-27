@@ -1,0 +1,69 @@
+WITH SupplierAnalytics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS distinct_parts_supplied,
+        CASE 
+            WHEN AVG(ps.ps_supplycost) > 50 THEN 'High Cost Supplier'
+            WHEN AVG(ps.ps_supplycost) IS NULL THEN 'Cost Unavailable'
+            ELSE 'Regular Supplier'
+        END AS supplier_category
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredLineItems AS (
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_extendedprice,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS seq_num
+    FROM lineitem l
+    WHERE l.l_discount > 0.05 OR l.l_discount IS NULL
+),
+RegionPriceAnalysis AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS region_total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders_in_region
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_regionkey, r.r_name
+)
+SELECT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    ca.c_name AS customer_name,
+    r.r_name AS region_name,
+    sa.total_available_qty,
+    ca.total_spent,
+    ra.region_total_revenue,
+    ra.total_orders_in_region,
+    sa.supplier_category
+FROM SupplierAnalytics sa
+FULL OUTER JOIN CustomerOrders ca ON sa.s_suppkey = ca.c_custkey
+LEFT JOIN RegionPriceAnalysis ra ON ra.region_total_revenue IS NOT NULL
+LEFT JOIN region r ON r.r_regionkey = COALESCE(ca.c_custkey, 0) % 5
+ORDER BY ra.region_total_revenue DESC NULLS LAST
+LIMIT 100 OFFSET 10;

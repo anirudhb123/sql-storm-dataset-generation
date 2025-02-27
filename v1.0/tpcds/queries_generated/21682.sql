@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        RANK() OVER (PARTITION BY cr_returning_customer_sk ORDER BY SUM(cr_return_quantity) DESC) AS return_rank
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk,
+        cr_item_sk
+),
+CustomerMetrics AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, hd.hd_income_band_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr_returning_customer_sk,
+        SUM(total_returned) AS lifetime_returns
+    FROM 
+        RankedReturns
+    WHERE 
+        return_rank = 1
+    GROUP BY 
+        cr_returning_customer_sk
+)
+SELECT 
+    cm.c_customer_sk,
+    cm.c_first_name,
+    cm.c_last_name,
+    cm.cd_gender,
+    cm.hd_income_band_sk,
+    cm.total_orders,
+    cm.total_spent,
+    CASE 
+        WHEN hr.lifetime_returns IS NOT NULL THEN 'High Returner' 
+        ELSE 'Normal Customer' 
+    END AS return_status,
+    CASE 
+        WHEN cm.last_order_date IS NULL THEN 'No Orders' 
+        ELSE 
+            CASE 
+                WHEN DATEDIFF(CURRENT_DATE, cm.last_order_date) < 30 THEN 'Recent Customer' 
+                ELSE 'Inactive Customer' 
+            END 
+    END AS activity_status
+FROM 
+    CustomerMetrics cm
+LEFT JOIN 
+    HighReturnCustomers hr ON cm.c_customer_sk = hr.cr_returning_customer_sk
+WHERE 
+    cm.total_spent > (SELECT AVG(total_spent) FROM CustomerMetrics) 
+    OR cm.hd_income_band_sk IS NULL
+ORDER BY 
+    cm.total_spent DESC, 
+    cm.c_last_name ASC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

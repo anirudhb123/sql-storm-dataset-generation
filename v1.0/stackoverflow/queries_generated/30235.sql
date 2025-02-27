@@ -1,0 +1,82 @@
+WITH RecursiveCTE AS (
+    -- Step 1: Get all posts and their accepted answers
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.AcceptedAnswerId, 
+        COALESCE((
+            SELECT a.Title 
+            FROM Posts a 
+            WHERE a.Id = p.AcceptedAnswerId
+        ), 'No Accepted Answer') AS AcceptedAnswerTitle,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Questions only
+
+    UNION ALL
+
+    -- Step 2: Join with each post's comments
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        NULL AS AcceptedAnswerId, 
+        NULL AS AcceptedAnswerTitle,
+        Level + 1
+    FROM 
+        RecursiveCTE r 
+    JOIN 
+        Posts p ON p.ParentId = r.PostId
+),
+PostVoteStats AS (
+    -- Step 3: Aggregate votes and posts statistics
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        MAX(p.CreationDate) AS LastActivity,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Questions and Answers
+    GROUP BY 
+        p.Id
+),
+FinalOutput AS (
+    -- Step 4: Final compilation of desired data
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.AcceptedAnswerTitle,
+        u.DisplayName AS OwnerName,
+        v.UpVotes,
+        v.DownVotes,
+        v.CommentCount,
+        CASE 
+            WHEN v.UpVotes > v.DownVotes THEN 'Positive'
+            WHEN v.UpVotes < v.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        RecursiveCTE r
+        JOIN Users u ON r.OwnerUserId = u.Id
+        JOIN PostVoteStats v ON r.PostId = v.PostId
+)
+-- Step 5: Final Output
+SELECT 
+    *,
+    RANK() OVER (ORDER BY LastActivity DESC) AS ActivityRank
+FROM 
+    FinalOutput
+WHERE 
+    VoteSentiment = 'Positive'
+ORDER BY 
+    ActivityRank;

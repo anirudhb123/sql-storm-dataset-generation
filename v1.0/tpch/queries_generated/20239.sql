@@ -1,0 +1,81 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_depth
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        (o.o_totalprice + co.o_totalprice) AS o_totalprice,
+        co.order_depth + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+        AND o.o_orderdate > CURRENT_DATE - INTERVAL '90 days'
+),
+AggregatedOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        COUNT(DISTINCT co.o_orderkey) AS order_count,
+        SUM(co.o_totalprice) AS total_spend,
+        RANK() OVER (PARTITION BY co.c_custkey ORDER BY SUM(co.o_totalprice) DESC) AS spend_rank
+    FROM 
+        CustomerOrders co
+    GROUP BY 
+        co.c_custkey, co.c_name
+),
+SupplierPartStats AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS total_availcost,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.s_suppkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(co.order_count, 0) AS total_orders,
+    COALESCE(co.total_spend, 0) AS total_spend,
+    CASE 
+        WHEN co.spend_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category,
+    sp.total_availcost,
+    sp.distinct_parts
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    AggregatedOrders co ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierPartStats sp ON sp.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size = (SELECT MAX(p_size) FROM part) AND p.p_retailprice > 100) LIMIT 1)
+)
+WHERE 
+    (co.total_orders IS NOT NULL OR co.total_spend > 0)
+    AND (sp.total_availcost IS NOT NULL OR co.c_custkey IS NULL OR co.c_name IS NULL)
+ORDER BY 
+    total_spend DESC, 
+    r.r_name ASC;

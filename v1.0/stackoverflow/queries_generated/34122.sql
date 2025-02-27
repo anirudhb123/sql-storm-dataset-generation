@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.ParentId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL  -- Starting from top-level posts (Questions)
+    
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.ParentId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostWithStats AS (
+    SELECT 
+        RPH.PostId,
+        RPH.Title,
+        RPH.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS HistoryEntryCount,
+        ROW_NUMBER() OVER (ORDER BY RPH.CreationDate DESC) AS RowIdx
+    FROM 
+        RecursivePostHierarchy RPH
+    LEFT JOIN 
+        Users U ON RPH.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON RPH.PostId = V.PostId
+    LEFT JOIN 
+        Comments C ON RPH.PostId = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON RPH.PostId = PH.PostId
+    GROUP BY 
+        RPH.PostId, RPH.Title, RPH.CreationDate, U.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        P.*,
+        COALESCE(P.UpVotes - P.DownVotes, 0) AS NetVotes
+    FROM 
+        PostWithStats P
+    WHERE 
+        P.CommentCount > 0  -- Only include posts with comments
+)
+
+SELECT 
+    FP.PostId,
+    FP.Title,
+    FP.CreationDate,
+    FP.OwnerDisplayName,
+    FP.UpVotes,
+    FP.DownVotes,
+    FP.NetVotes,
+    CASE 
+        WHEN FP.NetVotes > 10 THEN 'Hot Post'
+        WHEN FP.NetVotes BETWEEN 1 AND 10 THEN 'Trending'
+        ELSE 'Under Radar' 
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = FP.OwnerUserId AND B.Class = 1) AS GoldBadges,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = FP.OwnerUserId AND B.Class = 2) AS SilverBadges,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = FP.OwnerUserId AND B.Class = 3) AS BronzeBadges
+FROM 
+    FilteredPosts FP
+ORDER BY 
+    FP.NetVotes DESC, 
+    FP.CreationDate DESC
+LIMIT 50;
+

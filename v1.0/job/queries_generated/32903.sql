@@ -1,0 +1,43 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title, 
+           m.production_year, 
+           1 AS level
+    FROM title m
+    WHERE m.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT m.id, 
+           m.title, 
+           m.production_year, 
+           mh.level + 1
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    a.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    ROW_NUMBER() OVER(PARTITION BY a.name ORDER BY t.production_year DESC) AS movie_rank,
+    COUNT(DISTINCT k.keyword) OVER(PARTITION BY a.name) AS unique_keywords_count,
+    COALESCE(ci.kind, 'Unknown') AS company_kind,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = t.id AND mi.info_type_id = 1) AS info_count,
+    CASE 
+        WHEN p.info IS NULL THEN 'No Info'
+        ELSE p.info
+    END AS person_info
+FROM aka_name a
+JOIN cast_info c ON c.person_id = a.person_id
+JOIN title t ON t.id = c.movie_id
+LEFT JOIN movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN company_name cn ON cn.id = mc.company_id
+LEFT JOIN company_type ci ON ci.id = mc.company_type_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN keyword k ON k.id = mk.keyword_id
+LEFT JOIN person_info p ON p.person_id = a.person_id
+WHERE t.production_year BETWEEN 2000 AND 2022
+AND (ci.kind IS NOT NULL OR ci.kind IS NULL)
+ORDER BY movie_rank, actor_name, t.production_year DESC
+LIMIT 100;

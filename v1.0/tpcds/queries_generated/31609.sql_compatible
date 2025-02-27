@@ -1,0 +1,70 @@
+
+WITH RECURSIVE Inventory_CTE AS (
+    SELECT
+        inv_date_sk,
+        inv_item_sk,
+        inv_warehouse_sk,
+        inv_quantity_on_hand,
+        1 AS level
+    FROM inventory
+    WHERE inv_quantity_on_hand > 0
+    UNION ALL
+    SELECT
+        i.inv_date_sk,
+        i.inv_item_sk,
+        i.inv_warehouse_sk,
+        i.inv_quantity_on_hand - 5 * i.level AS inv_quantity_on_hand,
+        i.level + 1
+    FROM Inventory_CTE i
+    WHERE i.inv_quantity_on_hand - 5 * i.level > 0
+),
+Sales_Summary AS (
+    SELECT
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_ext_discount_amt) AS total_discount
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+Customer_Analysis AS (
+    SELECT
+        c.customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Warehouse_Stats AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ws.web_site_sk) AS total_websites,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    inv.item,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(ss.total_orders, 0) AS total_orders,
+    COALESCE(ss.total_discount, 0) AS total_discount,
+    COALESCE(ws.total_net_profit, 0) AS total_net_profit,
+    ca.cd_gender,
+    ca.cd_marital_status
+FROM (
+    SELECT 
+        DISTINCT i.i_item_id AS item,
+        i.i_item_sk 
+    FROM item i
+    JOIN Inventory_CTE inv ON i.i_item_sk = inv.inv_item_sk
+) inv
+LEFT JOIN Sales_Summary ss ON inv.i_item_sk = ss.ws_item_sk
+LEFT JOIN Warehouse_Stats ws ON ws.total_websites > 0
+LEFT JOIN Customer_Analysis ca ON ca.customer_sk = ss.ws_bill_customer_sk
+WHERE 
+    (ca.rank <= 10 OR ca.rank IS NULL)
+    AND COALESCE(ws.total_net_profit, 0) > 10000
+ORDER BY total_sales DESC, total_orders DESC;

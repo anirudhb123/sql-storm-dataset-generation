@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerUserId,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND P.Score > 0
+),
+UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyGiven,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+        LEFT JOIN Comments C ON U.Id = C.UserId
+        LEFT JOIN Votes V ON U.Id = V.UserId AND V.PostId IN (SELECT PostId FROM RankedPosts)
+        LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+ClosedPostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.UserDisplayName AS CloserName,
+        PH.CreationDate AS ClosedDate,
+        C.Comment AS CloseReason
+    FROM 
+        Posts P
+        JOIN PostHistory PH ON PH.PostId = P.Id AND PH.PostHistoryTypeId = 10
+        LEFT JOIN CloseReasonTypes CR ON CR.Id = PH.Comment
+)
+SELECT 
+    UE.DisplayName AS UserName,
+    RP.Title,
+    RP.CreationDate AS PostCreatedDate,
+    RP.Score AS PostScore,
+    UE.CommentCount,
+    UE.TotalBountyGiven,
+    UE.BadgeCount,
+    CPD.ClosedDate,
+    CPD.CloseReason
+FROM 
+    RankedPosts RP
+JOIN 
+    UserEngagement UE ON RP.OwnerUserId = UE.UserId
+LEFT JOIN 
+    ClosedPostDetails CPD ON RP.PostId = CPD.PostId
+WHERE 
+    UE.BadgeCount > 0 
+ORDER BY 
+    RP.Score DESC, 
+    UE.TotalBountyGiven DESC
+LIMIT 100;

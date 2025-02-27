@@ -1,0 +1,73 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.UserId, 
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12)  -- Consider only close, reopen, and delete actions
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Id) AS TotalPosts, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagSummary AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.QuestionCount,
+    u.AnswerCount,
+    COALESCE(rp.LastAction, 'No actions') AS LastAction,
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.AverageScore
+FROM 
+    UserActivity u 
+LEFT JOIN (
+    SELECT 
+        PostId,
+        CASE 
+            WHEN PostHistoryTypeId = 10 THEN 'Closed' 
+            WHEN PostHistoryTypeId = 11 THEN 'Reopened' 
+            WHEN PostHistoryTypeId = 12 THEN 'Deleted' 
+        END AS LastAction
+    FROM 
+        RecursivePostHistory
+    WHERE 
+        rn = 1  -- Get only the most recent action per post
+) rp ON u.TotalPosts > 0
+LEFT JOIN 
+    TagSummary ts ON ts.PostCount > 0
+WHERE 
+    u.Reputation > 50 AND 
+    ts.PostCount > 10  -- Users with significant activity
+ORDER BY 
+    u.TotalPosts DESC, ts.PostCount DESC;

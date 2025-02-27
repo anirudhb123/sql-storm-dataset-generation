@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_net_profit) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING 
+        SUM(ss.ss_net_profit) > 1000
+    UNION ALL
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.total_net_profit * 1.1 AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY sh.total_net_profit DESC) AS rank
+    FROM 
+        SalesHierarchy sh
+    JOIN 
+        customer c ON sh.c_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ci.cb_income_band_sk, 0) AS income_band,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_sales,
+    SUM(ss.ss_net_profit) AS total_profit,
+    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank,
+    CASE 
+        WHEN SUM(ss.ss_net_profit) > 5000 THEN 'High'
+        WHEN SUM(ss.ss_net_profit) BETWEEN 1000 AND 5000 THEN 'Medium'
+        ELSE 'Low'
+    END AS profitability_category
+FROM 
+    customer c
+LEFT JOIN 
+    store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN 
+    household_demographics ci ON c.c_current_hdemo_sk = ci.hd_demo_sk
+WHERE 
+    c.c_preferred_cust_flag = 'Y'
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name, ci.cb_income_band_sk
+HAVING 
+    total_profit IS NOT NULL
+ORDER BY 
+    profit_rank, full_name DESC
+LIMIT 10;

@@ -1,0 +1,40 @@
+
+WITH customer_interaction AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS online_orders,
+        COUNT(DISTINCT sr.ticket_number) AS store_returns,
+        SUM(ws.ws_net_profit) AS total_online_profit,
+        SUM(sr.sr_net_loss) AS total_store_return_loss
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+demographic_distribution AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT ci.c_customer_id) AS total_customers,
+        AVG(ci.total_online_profit) AS avg_online_profit,
+        AVG(ci.total_store_return_loss) AS avg_store_return_loss
+    FROM 
+        customer_interaction ci
+    JOIN 
+        customer_demographics cd ON cd.cd_demo_sk = ci.c_current_cdemo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    dd.cd_gender,
+    dd.total_customers,
+    dd.avg_online_profit,
+    dd.avg_store_return_loss,
+    RANK() OVER (ORDER BY dd.avg_online_profit DESC) AS profitability_rank
+FROM 
+    demographic_distribution dd
+ORDER BY 
+    profitability_rank;

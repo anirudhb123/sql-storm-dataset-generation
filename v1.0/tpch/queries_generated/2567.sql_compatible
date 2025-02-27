@@ -1,0 +1,57 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), PartSupplies AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    rg.r_name,
+    cs.cust_count,
+    ps.total_avail_qty,
+    ps.total_supply_cost,
+    COALESCE(rs.rank, 0) AS supplier_rank
+FROM 
+    part p
+JOIN 
+    PartSupplies ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    (SELECT n.r_regionkey, COUNT(c.c_custkey) AS cust_count
+     FROM customer c
+     JOIN nation n ON c.c_nationkey = n.n_nationkey 
+     GROUP BY n.r_regionkey) AS cs ON cs.r_regionkey = (SELECT n.r_regionkey FROM nation n WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey LIMIT 1))
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_suppkey = (SELECT ps_s_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey LIMIT 1)
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    p.p_name,
+    rg.r_name DESC;

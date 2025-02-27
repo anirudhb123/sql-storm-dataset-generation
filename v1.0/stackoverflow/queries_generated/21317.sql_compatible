@@ -1,0 +1,79 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(ph.Id) FILTER (WHERE ph.PostHistoryTypeId IN (10, 11)) AS ClosureCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        p.CreationDate,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+TopPosts AS (
+    SELECT 
+        tp.*,
+        CASE 
+            WHEN UpVotes - DownVotes < 0 THEN 'Negative Interaction'
+            WHEN UpVotes - DownVotes = 0 THEN 'Neutral Interaction'
+            ELSE 'Positive Interaction'
+        END AS InteractionStatus
+    FROM 
+        PostMetrics tp
+    WHERE 
+        ScoreRank <= 10 
+),
+DetailedPostAnalysis AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.UpVotes,
+        tp.DownVotes,
+        tp.CommentCount,
+        tp.ClosureCount,
+        tp.BadgeCount,
+        tp.InteractionStatus,
+        COALESCE((SELECT COUNT(*) FROM Posts sub WHERE sub.ParentId = tp.PostId), 0) AS AnswerCount,
+        COALESCE((SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+                   FROM Tags t 
+                   JOIN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag) AS tag
+                   ON t.TagName = tag.tag
+                   WHERE p.Id = tp.PostId), 'No Tags') AS Tags
+    FROM 
+        TopPosts tp
+)
+SELECT 
+    dpa.PostId,
+    dpa.Title,
+    dpa.UpVotes,
+    dpa.DownVotes,
+    dpa.CommentCount,
+    dpa.ClosureCount,
+    dpa.BadgeCount,
+    dpa.InteractionStatus,
+    dpa.AnswerCount,
+    dpa.Tags,
+    CASE 
+        WHEN dpa.BadgeCount > 5 THEN 'Highly Recognized'
+        WHEN dpa.BadgeCount BETWEEN 3 AND 5 THEN 'Moderately Recognized'
+        ELSE 'New User'
+    END AS RecognitionLevel
+FROM 
+    DetailedPostAnalysis dpa 
+ORDER BY 
+    dpa.ScoreRank;

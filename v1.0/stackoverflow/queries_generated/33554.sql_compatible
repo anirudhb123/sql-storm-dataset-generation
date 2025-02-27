@@ -1,0 +1,87 @@
+
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        1 AS Depth
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (1, 2, 4)  
+    
+    UNION ALL
+    
+    SELECT
+        ph.Id,
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        r.Depth + 1
+    FROM
+        PostHistory ph
+    INNER JOIN RecursivePostHistory r ON ph.PostId = r.PostId
+    WHERE
+        r.Depth < 5  
+    
+), PostVoteSummary AS (
+    SELECT
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM
+        Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY
+        p.Id
+), UserBadges AS (
+    SELECT
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM
+        Badges b
+    GROUP BY
+        b.UserId
+)
+
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.TotalBounty,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    rph.Depth,
+    CASE 
+        WHEN rph.Depth IS NULL THEN 'Initial'
+        ELSE 'Edited'
+    END AS PostHistoryStatus
+FROM
+    Posts p
+INNER JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN (
+    SELECT PostId, MAX(Depth) AS MaxDepth
+    FROM RecursivePostHistory
+    GROUP BY PostId
+) r ON p.Id = r.PostId
+LEFT JOIN RecursivePostHistory rph ON rph.PostId = p.Id AND rph.Depth = r.MaxDepth
+WHERE
+    COALESCE(ps.UpVotes, 0) - COALESCE(ps.DownVotes, 0) > 10  
+ORDER BY
+    ps.TotalBounty DESC,
+    ps.UpVotes DESC
+LIMIT 100;

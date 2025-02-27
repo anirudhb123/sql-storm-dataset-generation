@@ -1,0 +1,22 @@
+
+SELECT 
+    p.p_name,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    MIN(l.l_discount) AS min_discount,
+    CONCAT('Supplier: ', s.s_name, ', City: ', SUBSTRING_INDEX(s.s_address, ' ', 1)) AS supplier_info,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_quantity) DESC) AS quantity_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, s.s_address
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    total_quantity DESC, avg_extended_price ASC;

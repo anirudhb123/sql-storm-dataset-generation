@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+        AND p.p_size BETWEEN 10 AND 20
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        CASE 
+            WHEN l.l_returnflag = 'Y' THEN 'Returned'
+            ELSE 'Not Returned' 
+        END AS return_status
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipmode IN ('AIR', 'GROUND')
+        AND l.l_shipdate >= DATE '1998-10-01' - INTERVAL '90 DAY'
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    SUM(fp.l_extendedprice * fp.l_quantity * (1 - fp.l_discount)) AS total_revenue,
+    COUNT(fp.l_orderkey) AS line_items_count,
+    STRING_AGG(DISTINCT CONCAT(sp.p_name, ' (', sp.s_name, ')') ORDER BY sp.p_name) AS supplied_parts
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    FilteredLineItems fp ON r.o_orderkey = fp.l_orderkey
+LEFT JOIN 
+    SupplierParts sp ON fp.l_partkey = sp.p_partkey AND sp.rank = 1
+WHERE 
+    r.o_orderstatus = 'O'
+GROUP BY 
+    r.o_orderkey, r.o_orderdate, r.o_totalprice
+HAVING 
+    SUM(fp.l_extendedprice * fp.l_quantity * (1 - fp.l_discount)) > 5000
+ORDER BY 
+    r.o_orderdate ASC, total_revenue DESC;

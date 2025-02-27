@@ -1,0 +1,56 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_marital_status,
+        cd.cd_gender,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        d.d_date,
+        w.w_warehouse_name,
+        sm.sm_carrier,
+        sm.sm_type
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+),
+returns_data AS (
+    SELECT 
+        cr.cr_order_number,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amount) AS total_returned_amount
+    FROM catalog_returns cr
+    GROUP BY cr.cr_order_number
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+    SUM(sd.ws_net_profit) AS total_net_profit,
+    COALESCE(rd.total_returned, 0) AS total_returned,
+    COALESCE(rd.total_returned_amount, 0) AS total_returned_amount
+FROM customer_info ci
+JOIN sales_data sd ON ci.c_customer_id = sd.ws_order_number
+LEFT JOIN returns_data rd ON sd.ws_order_number = rd.cr_order_number
+GROUP BY 
+    ci.c_customer_id, 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    rd.total_returned, 
+    rd.total_returned_amount
+ORDER BY total_sales DESC
+LIMIT 100;

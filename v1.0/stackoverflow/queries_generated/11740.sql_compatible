@@ -1,0 +1,68 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation, U.Views, U.UpVotes, U.DownVotes
+),
+TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(P.CreationDate) AS LastActivityDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id
+)
+
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.Views,
+    U.UpVotes,
+    U.DownVotes,
+    U.PostCount,
+    U.BadgeCount,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    T.TotalViews,
+    T.TotalScore,
+    PA.CommentCount,
+    PA.LastActivityDate
+FROM 
+    UserStats U
+JOIN 
+    TagStats T ON U.PostCount > 0
+JOIN 
+    PostActivity PA ON PA.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.UserId)
+ORDER BY 
+    U.Reputation DESC, T.TotalScore DESC
+LIMIT 100;

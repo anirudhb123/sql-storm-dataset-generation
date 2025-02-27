@@ -1,0 +1,60 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+RankedCustomerOrders AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        co.o_orderkey,
+        co.o_orderdate,
+        co.o_totalprice,
+        co.o_orderstatus,
+        co.order_rank,
+        SUM(co2.o_totalprice) OVER (PARTITION BY co.c_custkey ORDER BY co.o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_total
+    FROM 
+        CustomerOrders co
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_revenue,
+    AVG(co.cumulative_total) AS avg_cumulative_revenue,
+    MAX(co.o_orderdate) AS last_order_date
+FROM 
+    RankedCustomerOrders co
+JOIN 
+    supplier s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_retailprice > 100.00 
+          AND p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost < 200.00)
+    ))
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    co.o_orderstatus IN ('F', 'O') 
+    AND co.order_rank <= 5
+GROUP BY 
+    r.r_name, n.n_name, s.s_name
+HAVING 
+    SUM(co.o_totalprice) > 10000.00
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

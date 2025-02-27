@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, u.DisplayName
+),
+ClosedPostHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS CloseDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment = CAST(ctr.Id AS VARCHAR)
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        p.Id, ph.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        COALESCE(cph.CloseDate, 'No Close Record') AS CloseDate,
+        COALESCE(cph.CloseReasons, 'N/A') AS CloseReasons
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostHistory cph ON rp.PostId = cph.PostId
+    WHERE 
+        rp.ActivityRank = 1
+)
+
+SELECT 
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.OwnerDisplayName,
+    fr.CommentCount,
+    fr.CloseDate,
+    fr.CloseReasons
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.Score DESC,
+    fr.CommentCount DESC;

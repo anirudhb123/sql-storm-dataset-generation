@@ -1,0 +1,37 @@
+
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, '1998-10-01')
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT
+    n.n_name AS Nation,
+    r.r_name AS Region,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS TotalRevenue,
+    COUNT(DISTINCT o.o_orderkey) AS NumberOfOrders,
+    COUNT(DISTINCT ps.ps_partkey) AS DistinctPartsSupplied
+FROM lineitem li
+JOIN RecentOrders o ON li.l_orderkey = o.o_orderkey
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN TopSuppliers ts ON li.l_suppkey = ts.s_suppkey
+JOIN NationRegion n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.r_regionkey = r.r_regionkey
+WHERE li.l_shipdate BETWEEN DATEADD(day, -30, '1998-10-01') AND '1998-10-01'
+    AND li.l_returnflag = 'N'
+GROUP BY n.n_name, r.r_name
+HAVING SUM(li.l_extendedprice * (1 - li.l_discount)) > 5000
+ORDER BY TotalRevenue DESC, NumberOfOrders DESC
+LIMIT 10;

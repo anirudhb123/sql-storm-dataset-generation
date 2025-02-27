@@ -1,0 +1,23 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM partsupp ps
+    JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+    JOIN supplier_hierarchy sh ON sh.s_suppkey = ps.ps_partkey
+)
+SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM lineitem l
+JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN customer c ON c.c_custkey = o.o_custkey
+JOIN supplier_hierarchy sh ON sh.s_nationkey = c.c_nationkey
+JOIN nation n ON n.n_nationkey = sh.s_nationkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31' 
+  AND o.o_orderstatus = 'O'
+GROUP BY n.n_name
+ORDER BY total_revenue DESC
+LIMIT 10;

@@ -1,0 +1,33 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS cast_type,
+    k.keyword AS movie_keyword,
+    p.info AS personal_info,
+    m.production_year AS year_of_release
+FROM 
+    aka_title AS t
+JOIN 
+    complete_cast AS cc ON t.id = cc.movie_id
+JOIN 
+    cast_info AS ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+JOIN 
+    person_info AS p ON a.person_id = p.person_id
+JOIN 
+    role_type AS c ON ci.role_id = c.id
+JOIN 
+    movie_info AS m ON t.id = m.movie_id
+WHERE 
+    m.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    AND t.production_year >= 2000
+    AND p.note IS NULL
+ORDER BY 
+    m.production_year DESC, 
+    t.title ASC
+LIMIT 100;

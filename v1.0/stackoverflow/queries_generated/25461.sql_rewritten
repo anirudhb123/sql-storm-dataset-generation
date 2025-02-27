@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag_id ON t.Id = tag_id
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_id
+    WHERE 
+        p.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, pt.Name
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.TagsList
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId, 
+    tp.Title, 
+    tp.CreationDate, 
+    tp.Score, 
+    tp.ViewCount, 
+    tp.TagsList, 
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON c.PostId = tp.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = tp.PostId AND v.VoteTypeId = 8 
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, tp.Score, tp.ViewCount, tp.TagsList
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

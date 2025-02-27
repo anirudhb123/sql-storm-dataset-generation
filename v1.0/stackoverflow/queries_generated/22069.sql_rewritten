@@ -1,0 +1,67 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) - COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) DESC) AS VoteRank 
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        UpVotes, 
+        DownVotes, 
+        TotalVotes 
+    FROM UserVoteStats 
+    WHERE VoteRank <= 10
+),
+PostWithTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY t.TagName) AS TagRank
+    FROM Posts p
+    JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate AS CloseDate,
+        ph.Comment,
+        COALESCE(ph2.CreationDate, ph.CreationDate) AS ReopenDate
+    FROM PostHistory ph
+    LEFT JOIN PostHistory ph2 ON ph.PostId = ph2.PostId 
+        AND ph2.PostHistoryTypeId = 11 
+    WHERE ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    p.Title,
+    u.DisplayName,
+    pt.TagName,
+    cp.CloseDate,
+    cp.ReopenDate,
+    DATEDIFF(COALESCE(cp.ReopenDate, cast('2024-10-01 12:34:56' as timestamp)), cp.CloseDate) AS DaysClosed,
+    COUNT(c.Id) AS CommentsCount,
+    SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+FROM Posts p
+JOIN PostWithTags pt ON p.Id = pt.PostId
+JOIN TopUsers u ON p.OwnerUserId = u.UserId
+LEFT JOIN Comments c ON p.Id = c.PostId
+LEFT JOIN Badges b ON b.UserId = u.UserId
+JOIN ClosedPosts cp ON p.Id = cp.PostId
+WHERE 
+    pt.TagRank <= 5 
+    AND (DATEDIFF(COALESCE(cp.ReopenDate, cast('2024-10-01 12:34:56' as timestamp)), cp.CloseDate) > 10 OR cp.ReopenDate IS NULL)
+GROUP BY 
+    p.Title, u.DisplayName, pt.TagName, cp.CloseDate, cp.ReopenDate
+ORDER BY 
+    GoldBadges DESC, DaysClosed DESC;

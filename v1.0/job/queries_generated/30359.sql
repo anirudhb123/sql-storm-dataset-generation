@@ -1,0 +1,66 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        0 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        l.linked_movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        h.depth + 1
+    FROM
+        movie_link l
+    JOIN
+        aka_title m ON l.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy h ON l.movie_id = h.movie_id
+),
+CastCount AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast
+    FROM
+        cast_info c
+    JOIN
+        aka_title m ON c.movie_id = m.id
+    GROUP BY
+        c.movie_id
+),
+TopMovies AS (
+    SELECT
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        cc.total_cast,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY cc.total_cast DESC) AS rank
+    FROM
+        MovieHierarchy m
+    LEFT JOIN
+        CastCount cc ON m.movie_id = cc.movie_id
+    WHERE
+        m.depth < 3
+)
+SELECT
+    t.movie_title,
+    t.production_year,
+    COALESCE(t.total_cast, 0) AS cast_count,
+    (SELECT STRING_AGG(n.name, ', ') 
+     FROM cast_info ci 
+     JOIN aka_name n ON ci.person_id = n.person_id
+     WHERE ci.movie_id = t.movie_id) AS cast_names
+FROM
+    TopMovies t
+WHERE
+    t.rank <= 5
+ORDER BY
+    t.production_year DESC, t.total_cast DESC;
+
+This query creates an elaborate structure to benchmark movie production data focusing on cast count and links between movies using CTEs and various SQL constructs, yielding top movies with specific metrics.

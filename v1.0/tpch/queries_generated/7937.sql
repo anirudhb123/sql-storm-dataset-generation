@@ -1,0 +1,62 @@
+WITH PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name, s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate <= '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    psp.p_partkey,
+    psp.p_name,
+    psp.s_suppkey,
+    psp.s_name,
+    co.c_custkey,
+    co.c_name,
+    co.total_orders,
+    co.total_spent,
+    oli.total_lineitem_revenue
+FROM 
+    PartSupplier psp
+LEFT JOIN 
+    CustomerOrders co ON co.total_orders > 0
+LEFT JOIN 
+    OrderLineItems oli ON oli.total_lineitem_revenue > 0
+ORDER BY 
+    psp.total_supplycost DESC, co.total_spent DESC
+LIMIT 100;

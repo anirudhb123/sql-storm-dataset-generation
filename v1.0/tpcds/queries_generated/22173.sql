@@ -1,0 +1,80 @@
+
+WITH RECURSIVE sales_history AS (
+    SELECT
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk BETWEEN 1 AND 1000
+    GROUP BY
+        ws_sold_date_sk
+    UNION ALL
+    SELECT
+        ws_sold_date_sk + 1,
+        total_quantity,
+        total_sales
+    FROM
+        sales_history
+    WHERE
+        ws_sold_date_sk < 1000
+),
+max_sales AS (
+    SELECT
+        d.d_year,
+        MAX(sh.total_sales) AS max_sales
+    FROM
+        sales_history sh
+    JOIN
+        date_dim d ON sh.ws_sold_date_sk = d.d_date_sk
+    GROUP BY
+        d.d_year
+),
+customer_data AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, cd.cd_gender
+),
+customer_ranked AS (
+    SELECT
+        cd.c_customer_sk,
+        cd.cd_gender,
+        cd.order_count,
+        cd.total_spent,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.total_spent DESC) AS rank_within_gender
+    FROM
+        customer_data cd
+)
+SELECT
+    ca.ca_city,
+    CASE
+        WHEN MAX(cr.total_spent) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status,
+    COUNT(DISTINCT cr.c_customer_sk) AS customer_count,
+    SUM(cr.total_spent) AS total_spent,
+    STRING_AGG(DISTINCT cr.cd_gender) AS genders_in_city
+FROM
+    customer_ranked cr
+JOIN
+    customer_address ca ON cr.c_customer_sk = ca.ca_address_sk
+LEFT JOIN
+    max_sales ms ON cr.total_spent > ms.max_sales
+WHERE
+    ca.ca_city IS NOT NULL
+GROUP BY
+    ca.ca_city
+HAVING
+    COUNT(DISTINCT cr.c_customer_sk) > 1
+OPTION (MAXRECURSION 0);

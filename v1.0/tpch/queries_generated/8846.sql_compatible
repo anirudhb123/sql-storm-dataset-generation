@@ -1,0 +1,37 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+TopSuppliers AS (
+    SELECT sd.s_name, sd.total_supply_value
+    FROM SupplierDetails sd
+    ORDER BY sd.total_supply_value DESC
+    LIMIT 10
+),
+TopCustomers AS (
+    SELECT co.c_name, co.total_order_value
+    FROM CustomerOrders co
+    ORDER BY co.total_order_value DESC
+    LIMIT 10
+),
+RegionStats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count, SUM(sd.total_supply_value) AS total_supply_by_region
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT r.r_name, rs.nation_count, rs.total_supply_by_region, ts.s_name AS top_supplier, tc.c_name AS top_customer
+FROM RegionStats rs
+CROSS JOIN (SELECT s_name FROM TopSuppliers) ts
+CROSS JOIN (SELECT c_name FROM TopCustomers) tc
+ORDER BY rs.total_supply_by_region DESC;

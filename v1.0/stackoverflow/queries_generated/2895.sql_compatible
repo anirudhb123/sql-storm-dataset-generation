@@ -1,0 +1,59 @@
+
+WITH UserReputation AS (
+    SELECT Id, Reputation, 
+           CASE 
+               WHEN Reputation < 100 THEN 'New User' 
+               WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate User' 
+               ELSE 'Experienced User' 
+           END AS UserType
+    FROM Users
+),
+PostAnalytics AS (
+    SELECT p.Id AS PostId, 
+           p.Title, 
+           p.Score, 
+           COALESCE(c.CommentCount, 0) AS CommentCount,
+           p.ViewCount,
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+           COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+    FROM Posts p
+    LEFT JOIN (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount
+),
+ClosedPosts AS (
+    SELECT ph.PostId, ph.CreationDate, 
+           MIN(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS FirstClosedDate,
+           DATEDIFF(day, MIN(ph.CreationDate) OVER (PARTITION BY ph.PostId), CURRENT_DATE) AS DaysClosed
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+),
+FinalPostMetrics AS (
+    SELECT pa.PostId, pa.Title, 
+           pa.Score, pa.CommentCount, pa.ViewCount, 
+           pa.UpVotes, pa.DownVotes,
+           COALESCE(cp.FirstClosedDate, 'N/A') AS FirstClosedDate,
+           CASE 
+               WHEN cp.DaysClosed < 30 THEN 'Active'
+               WHEN cp.DaysClosed BETWEEN 30 AND 90 THEN 'Moderately Active'
+               ELSE 'Inactive'
+           END AS ActivityStatus
+    FROM PostAnalytics pa
+    LEFT JOIN ClosedPosts cp ON pa.PostId = cp.PostId
+)
+SELECT u.DisplayName, 
+       ur.UserType, 
+       fpm.Title, 
+       fpm.Score, 
+       fpm.CommentCount, 
+       fpm.ViewCount, 
+       fpm.UpVotes, 
+       fpm.DownVotes, 
+       fpm.FirstClosedDate, 
+       fpm.ActivityStatus
+FROM Users u
+JOIN UserReputation ur ON u.Id = ur.Id
+JOIN FinalPostMetrics fpm ON u.Id = fpm.OwnerUserId
+WHERE ur.UserType = 'Experienced User'
+ORDER BY fpm.Score DESC, fpm.ViewCount DESC
+LIMIT 100;

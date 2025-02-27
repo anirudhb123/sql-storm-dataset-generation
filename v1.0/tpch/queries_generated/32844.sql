@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 2
+),
+PartSales AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY p.p_partkey, p.p_name
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+MaxSales AS (
+    SELECT p.p_partkey, p.p_name, MAX(ps.total_sales) AS max_sales
+    FROM PartSales ps
+    JOIN part p ON p.p_partkey = ps.p_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    n.n_name AS nation_name, 
+    SUM(COALESCE(ps.total_sales, 0)) AS total_nation_sales,
+    COUNT(DISTINCT sh.s_suppkey) AS number_of_suppliers,
+    AVG(c.c_acctbal) AS average_customer_balance
+FROM Nations n
+LEFT JOIN PartSales ps ON n.n_nationkey = ps.p_partkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+GROUP BY n.n_nationkey, n.n_name
+HAVING SUM(COALESCE(ps.total_sales, 0)) > (
+    SELECT AVG(max_sales) FROM MaxSales
+) OR COUNT(DISTINCT sh.s_suppkey) > 10
+ORDER BY total_nation_sales DESC;

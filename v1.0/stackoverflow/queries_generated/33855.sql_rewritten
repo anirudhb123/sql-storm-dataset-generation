@@ -1,0 +1,65 @@
+WITH RECURSIVE UserHierarchy AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        CAST(NULL AS INT) AS ParentId
+    FROM Users u
+    WHERE u.Reputation > 1000 
+
+    UNION ALL
+
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        uh.UserId AS ParentId
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Reputation < uh.Reputation 
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(CASE WHEN ub.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN ub.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN ub.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges ub
+    GROUP BY ub.UserId
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS QuestionCount,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+)
+SELECT 
+    uh.UserId,
+    uh.DisplayName,
+    uh.Reputation,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.QuestionCount,
+    ps.AnswerCount,
+    ps.TotalScore,
+    ps.TotalViews,
+    CASE 
+        WHEN ps.TotalViews IS NULL THEN 'No Views' 
+        ELSE CAST(ps.TotalViews AS VARCHAR)
+    END AS ViewsDisplay,
+    CASE 
+        WHEN ps.QuestionCount > 0 THEN 'Answer Ratio: ' || ROUND((ps.AnswerCount::DECIMAL / ps.QuestionCount) * 100, 2) || '%'
+        ELSE 'No Questions'
+    END AS AnswerRatio
+FROM UserHierarchy uh
+LEFT JOIN UserBadges ub ON uh.UserId = ub.UserId
+LEFT JOIN PostStats ps ON uh.UserId = ps.OwnerUserId
+WHERE uh.Reputation > 1000
+ORDER BY uh.Reputation DESC, uh.DisplayName
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

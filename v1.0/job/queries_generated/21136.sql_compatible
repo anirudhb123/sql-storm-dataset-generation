@@ -1,0 +1,93 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' > ', mt.title)
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.level < 5 
+),
+
+actor_details AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ci.movie_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_order
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+),
+
+keyword_info AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ad.actor_name,
+    ad.actor_order,
+    ki.keywords_list,
+    COUNT(DISTINCT ci.role_id) OVER (PARTITION BY mh.movie_id) AS total_actor_roles,
+    CASE 
+        WHEN COUNT(DISTINCT ci.role_id) OVER (PARTITION BY mh.movie_id) > 5 THEN 'Major Cast'
+        ELSE 'Supporting Cast'
+    END AS cast_type
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_details ad ON mh.movie_id = ad.movie_id
+LEFT JOIN 
+    keyword_info ki ON mh.movie_id = ki.movie_id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (mh.path LIKE '%> Comedy%' OR mh.path LIKE '%> Drama%') 
+    AND (ad.actor_name IS NOT NULL OR ad.actor_name IS NULL) 
+
+GROUP BY 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    ad.actor_name,
+    ad.actor_order,
+    ki.keywords_list
+
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title ASC, 
+    ad.actor_order; 

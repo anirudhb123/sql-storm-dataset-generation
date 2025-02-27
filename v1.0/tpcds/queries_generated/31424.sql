@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ss_sold_date_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        ss_store_sk,
+        1 AS level
+    FROM store_sales
+    WHERE ss_net_paid > 100
+    UNION ALL
+    SELECT
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss.quantity,
+        ss.net_paid,
+        ss.store_sk,
+        cte.level + 1
+    FROM store_sales ss
+    JOIN SalesCTE cte ON ss.item_sk = cte.ss_item_sk
+    WHERE ss.net_paid > cte.ss_net_paid * 0.9 AND cte.level < 5
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ss.ss_quantity) AS total_sales_quantity,
+        SUM(ss.ss_net_paid_inc_tax) AS total_sales_amount,
+        AVG(ss.ss_net_paid) AS avg_sale_amount,
+        MAX(ss.ss_sales_price) AS max_sale_price,
+        AVG(CASE WHEN ss.ss_quantity > 5 THEN 1 ELSE 0 END) * 100 AS percentage_large_sales
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk
+),
+RecentReturns AS (
+    SELECT
+        cr.returning_customer_sk,
+        SUM(cr.return_quantity) AS total_return_quantity,
+        SUM(cr.return_amt_inc_tax) AS total_return_amount
+    FROM catalog_returns cr
+    WHERE cr.returned_date_sk >= (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY cr.returning_customer_sk
+)
+SELECT
+    cs.c_customer_sk,
+    COALESCE(cs.total_sales_quantity, 0) AS total_sales_quantity,
+    COALESCE(cs.total_sales_amount, 0) AS total_sales_amount,
+    COALESCE(cs.avg_sale_amount, 0) AS avg_sale_amount,
+    COALESCE(cs.max_sale_price, 0) AS max_sale_price,
+    COALESCE(rr.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(rr.total_return_amount, 0) AS total_return_amount,
+    ROW_NUMBER() OVER (ORDER BY cs.total_sales_amount DESC) AS sales_rank
+FROM CustomerStats cs
+LEFT JOIN RecentReturns rr ON cs.c_customer_sk = rr.returning_customer_sk
+WHERE cs.total_sales_amount > 1000 OR rr.total_return_quantity > 0
+ORDER BY sales_rank
+LIMIT 100;

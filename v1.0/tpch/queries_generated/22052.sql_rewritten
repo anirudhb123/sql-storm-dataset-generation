@@ -1,0 +1,60 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r.r_regionkey, r.r_name, 0 AS hierarchy_level
+    FROM region r
+    WHERE r.r_name LIKE '%East%'
+    UNION ALL
+    SELECT n.n_regionkey, r.r_name, rh.hierarchy_level + 1
+    FROM nation n
+    JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+FilteredCustomer AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey 
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2 
+        WHERE c2.c_nationkey = c.c_nationkey
+    )
+),
+SupplierPartInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+LastOrderInfo AS (
+    SELECT o.o_orderkey, o.o_custkey, MAX(o.o_orderdate) AS last_order_date
+    FROM orders o
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+RankedLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, 
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS item_rank
+    FROM lineitem l
+),
+OuterJoinResults AS (
+    SELECT c.c_name, s.s_name, SUM(l.l_extendedprice) AS total_spent, 
+           COUNT(DISTINCT l.l_orderkey) AS order_count
+    FROM FilteredCustomer c
+    LEFT OUTER JOIN LastOrderInfo loi ON c.c_custkey = loi.o_custkey
+    LEFT JOIN supplier s ON EXISTS (
+        SELECT 1 
+        FROM SupplierPartInfo spi 
+        WHERE spi.ps_supplycost < 100 AND spi.total_avail_qty IS NOT NULL
+        AND spi.ps_partkey IN (SELECT l.l_partkey
+                               FROM RankedLineItems l
+                               WHERE l.item_rank = 1)
+    )
+    LEFT JOIN lineitem l ON l.l_orderkey = loi.o_orderkey
+    GROUP BY c.c_name, s.s_name
+)
+SELECT r.r_name, o.c_name, o.total_spent, o.order_count
+FROM RegionHierarchy r
+JOIN OuterJoinResults o ON r.r_regionkey = o.s_suppkey
+WHERE o.total_spent IS NOT NULL
+AND o.order_count > (
+    SELECT COUNT(*)
+    FROM orders o2
+    WHERE o2.o_orderdate < (cast('1998-10-01' as date) - INTERVAL '1 year')
+)
+ORDER BY r.hierarchy_level DESC, o.total_spent DESC;

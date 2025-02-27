@@ -1,0 +1,76 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(V.BountyAmount) AS TotalBountyAmount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.AcceptedAnswerId,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        PostCount, 
+        CommentCount, 
+        TotalBountyAmount, 
+        UpVoteCount, 
+        DownVoteCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS UserRank
+    FROM 
+        UserStatistics
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.PostCount,
+    U.CommentCount,
+    U.TotalBountyAmount,
+    U.UpVoteCount,
+    U.DownVoteCount,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.AnswerCount AS PostAnswerCount,
+    P.CommentCount AS PostCommentCount,
+    P.FavoriteCount AS PostFavoriteCount
+FROM 
+    TopUsers U
+LEFT JOIN 
+    PostStatistics P ON U.UserId = P.OwnerDisplayName
+WHERE 
+    U.UserRank <= 10  -- Change this to filter for top users as needed
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

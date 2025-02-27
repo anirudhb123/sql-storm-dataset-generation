@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.bill_cdemo_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_profit) DESC) AS rank_by_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        ws.bill_customer_sk, ws.bill_cdemo_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.edu as education,
+        cd.gender,
+        cd.marital_status,
+        (CASE 
+            WHEN cd.purchase_estimate > 20000 THEN 'High'
+            WHEN cd.purchase_estimate BETWEEN 10000 AND 20000 THEN 'Medium'
+            ELSE 'Low'
+         END) AS purchase_level
+    FROM 
+        customer_demographics cd
+),
+StoreSalesSummary AS (
+    SELECT 
+        ss.store_sk,
+        SUM(ss.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.customer_sk) AS unique_customers,
+        AVG(ss.quantity) AS avg_quantity_sold
+    FROM 
+        store_sales ss
+    JOIN 
+        customer c ON ss.customer_sk = c.c_customer_sk
+    WHERE 
+        ss.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ss.store_sk
+)
+SELECT 
+    s.s_store_id,
+    s.s_store_name,
+    COALESCE(ss.total_net_profit, 0) AS store_total_net_profit,
+    COALESCE(ss.unique_customers, 0) AS unique_customers_count,
+    COALESCE(rp.total_net_profit, 0) AS customer_total_net_profit,
+    cd.education,
+    cd.gender,
+    cd.marital_status,
+    cd.purchase_level
+FROM 
+    store s
+LEFT JOIN 
+    StoreSalesSummary ss ON s.s_store_sk = ss.store_sk
+LEFT JOIN 
+    RankedSales rp ON ss.unique_customers = rp.bill_customer_sk
+JOIN 
+    CustomerDemographics cd ON rp.bill_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    (rp.rank_by_profit <= 5 OR rp.rank_by_profit IS NULL)
+ORDER BY 
+    store_total_net_profit DESC,
+    unique_customers_count DESC;

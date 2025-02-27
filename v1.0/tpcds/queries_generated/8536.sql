@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) as total_web_sales,
+        SUM(cs.cs_ext_sales_price) as total_catalog_sales,
+        SUM(ss.ss_ext_sales_price) as total_store_sales
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        total_web_sales,
+        total_catalog_sales,
+        total_store_sales,
+        (total_web_sales + total_catalog_sales + total_store_sales) as total_sales
+    FROM 
+        CustomerSales
+),
+IncomeRanges AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        SUM(CASE WHEN ss.total_sales > 0 THEN 1 ELSE 0 END) AS customer_count,
+        AVG(ss.total_sales) AS avg_sales_per_customer
+    FROM 
+        SalesSummary ss
+    JOIN 
+        household_demographics hd ON ss.c_customer_id = hd.hd_demo_sk  -- Assuming a link between customer and household demographics
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY 
+        ib.ib_income_band_sk
+)
+SELECT 
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ir.customer_count,
+    ir.avg_sales_per_customer
+FROM 
+    IncomeRanges ir
+JOIN 
+    income_band ib ON ir.ib_income_band_sk = ib.ib_income_band_sk
+ORDER BY 
+    ib.ib_lower_bound;

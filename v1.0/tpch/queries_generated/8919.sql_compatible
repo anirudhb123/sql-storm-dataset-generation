@@ -1,0 +1,58 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.nation_name = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rank <= 5
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    to.region_name,
+    co.c_name,
+    COUNT(co.o_orderkey) AS total_orders,
+    SUM(co.o_totalprice) AS total_revenue
+FROM 
+    TopSuppliers to
+JOIN 
+    CustomerOrders co ON co.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_suppkey = to.s_suppkey
+    )
+GROUP BY 
+    to.region_name, co.c_name
+ORDER BY 
+    total_revenue DESC, total_orders DESC
+LIMIT 10;

@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p.ParentId = rp.PostId
+),
+UserVoteStatistics AS (
+    SELECT 
+        v.UserId,
+        COUNT(*) AS TotalVotes,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotesCount
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosuredDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ups.UpVotesCount, 0) AS UpVotes,
+    COALESCE(dns.DownVotesCount, 0) AS DownVotes,
+    COALESCE(Closed.Count, 0) AS ClosedPostCount,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.Level
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteStatistics ups ON u.Id = ups.UserId
+LEFT JOIN 
+    UserVoteStatistics dns ON u.Id = dns.UserId
+LEFT JOIN 
+    ClosedPosts Closed ON u.Id = Closed.UserId
+RIGHT JOIN 
+    RecursivePostHierarchy rp ON rp.AcceptedAnswerId = u.Id
+WHERE 
+    rp.Score > 0
+    AND rp.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC
+LIMIT 100;

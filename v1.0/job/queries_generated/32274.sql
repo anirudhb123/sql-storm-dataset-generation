@@ -1,0 +1,61 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(500)) AS hierarchy
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1,
+        CAST(mh.hierarchy || ' -> ' || lt.title AS VARCHAR(500))
+    FROM 
+        movie_link ml
+    JOIN 
+        title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.hierarchy,
+    mh.title AS main_movie,
+    COALESCE(ka.surname_pcode, ak.name_pcode_nf) AS surname_pcode,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    SUM(CASE WHEN ci.nr_order IS NULL THEN 1 ELSE 0 END) AS cast_with_null_order,
+    MAX(CASE WHEN ki.keyword IS NOT NULL THEN ki.keyword ELSE 'N/A' END) AS example_keyword,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    keyword ki ON ki.id IN (
+        SELECT 
+            mk.keyword_id 
+        FROM 
+            movie_keyword mk 
+        WHERE 
+            mk.movie_id = mh.movie_id
+    )
+LEFT JOIN 
+    char_name ka ON ak.name_pcode_nf = ka.name_pcode_nf
+WHERE 
+    mh.level = 0 -- Getting only the top-level movies
+GROUP BY 
+    mh.hierarchy, mh.title, surname_pcode
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, rank;

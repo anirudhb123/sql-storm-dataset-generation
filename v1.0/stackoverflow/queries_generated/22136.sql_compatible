@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankPerUser,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN v.Id END) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN v.Id END) OVER (PARTITION BY p.Id) AS DownvoteCount,
+        COALESCE(p.ClosedDate, p.CreationDate) AS EffectiveDate,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><') AS tag ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.CreationDate > DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId, p.ClosedDate
+),
+AggregatedData AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(PostId) AS PostCount,
+        SUM(Score) AS TotalScore,
+        MAX(EffectiveDate) AS LatestPostDate,
+        AVG(UpvoteCount - DownvoteCount) AS AverageScoreDiff
+    FROM 
+        RankedPosts
+    GROUP BY 
+        OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeList,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    ad.PostCount,
+    ad.TotalScore,
+    ad.LatestPostDate,
+    ad.AverageScoreDiff,
+    ub.BadgeList
+FROM 
+    AggregatedData ad
+JOIN 
+    Users u ON ad.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ad.PostCount > 0 
+    AND ad.TotalScore > 50 
+    AND (ub.BadgeCount > 3 OR ub.BadgeList IS NOT NULL)
+    AND EXISTS (
+        SELECT 
+            1 
+        FROM 
+            PostHistory ph 
+        WHERE 
+            ph.UserId = u.Id 
+            AND ph.PostHistoryTypeId IN (10, 11) 
+            AND ph.CreationDate > DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 6 MONTH)
+    )
+ORDER BY 
+    ad.TotalScore DESC, u.Reputation DESC;

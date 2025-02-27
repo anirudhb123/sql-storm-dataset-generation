@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title AS movie_title,
+        at.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 5
+), 
+
+RankedMovies AS (
+    SELECT 
+        mv.movie_id,
+        mv.movie_title,
+        mv.production_year,
+        RANK() OVER (PARTITION BY mv.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        MovieHierarchy mv
+    LEFT JOIN 
+        complete_cast cc ON mv.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    GROUP BY 
+        mv.movie_id, mv.movie_title, mv.production_year
+), 
+
+TopMovies AS (
+    SELECT * 
+    FROM RankedMovies 
+    WHERE rank <= 3
+)
+
+SELECT 
+    tm.movie_id,
+    tm.movie_title,
+    tm.production_year,
+    a.name AS main_actor,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    CASE 
+        WHEN tm.cast_count IS NULL THEN 'No cast available'
+        ELSE 'Cast present'
+    END AS cast_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tm.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    tm.movie_id, tm.movie_title, tm.production_year, a.name
+ORDER BY 
+    tm.production_year DESC, tm.movie_title;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+Summary AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        us.GoldBadges,
+        us.SilverBadges,
+        us.BronzeBadges,
+        COUNT(rp.PostId) AS TotalPosts,
+        COALESCE(SUM(rp.UpVotes - rp.DownVotes), 0) AS TotalVoteDifference,
+        MAX(rp.PostRank) AS MaxPostRank
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        RankedPosts rp ON us.UserId = rp.PostId
+    GROUP BY 
+        us.UserId
+)
+SELECT 
+    s.UserId,
+    s.DisplayName,
+    s.Reputation,
+    s.GoldBadges,
+    s.SilverBadges,
+    s.BronzeBadges,
+    s.TotalPosts,
+    s.TotalVoteDifference,
+    CASE 
+        WHEN s.MaxPostRank = 1 THEN 'Most Recent Post'
+        ELSE 'Not Most Recent'
+    END AS PostStatus,
+    (SELECT CASE 
+        WHEN AVG(UpVotes) IS NULL THEN 'No Votes Available'
+        WHEN AVG(UpVotes) < 10 THEN 'Low Engagement'
+        WHEN AVG(UpVotes) BETWEEN 10 AND 100 THEN 'Moderate Engagement'
+        ELSE 'High Engagement'
+    END FROM RankedPosts WHERE PostRank = 1 AND OwnerUserId = s.UserId) AS EngagementLevel
+FROM 
+    Summary s
+WHERE 
+    s.Reputation >= 100
+ORDER BY 
+    s.TotalVoteDifference DESC, 
+    s.Reputation DESC
+LIMIT 50;

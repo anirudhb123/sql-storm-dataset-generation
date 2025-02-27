@@ -1,0 +1,80 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year BETWEEN 2000 AND 2023
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+favorite_actors AS (
+    SELECT 
+        ak.name AS actor_name, 
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title at ON ci.movie_id = at.id
+    WHERE 
+        ak.name ILIKE 'John%' 
+        AND at.production_year IS NOT NULL 
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_title, 
+        mh.level, 
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.movie_title) AS rank
+    FROM 
+        movie_hierarchy mh
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.movie_title, 
+    COALESCE(fa.actor_name, 'No actor found') AS main_actor, 
+    rm.level AS movie_level, 
+    rm.rank, 
+    COALESCE(mk.keywords, 'No keywords') AS keywords_used
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    favorite_actors fa ON rm.movie_title LIKE '%' || fa.actor_name || '%'
+LEFT JOIN 
+    movie_keywords mk ON rm.movie_title ILIKE '%' || mk.movie_id || '%'
+WHERE 
+    rm.level <= 3 
+    AND (rm.movie_title LIKE '%fantasy%' OR rm.movie_title LIKE '%adventure%')
+ORDER BY 
+    rm.level, 
+    rm.rank
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

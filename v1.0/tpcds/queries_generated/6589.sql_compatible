@@ -1,0 +1,55 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.sold_date_sk,
+        ws.item_sk,
+        SUM(ws.net_paid) AS total_sales,
+        RANK() OVER (PARTITION BY ws.item_sk ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year BETWEEN 2021 AND 2023
+    GROUP BY 
+        ws.sold_date_sk, ws.item_sk
+),
+TopItems AS (
+    SELECT 
+        item_sk,
+        total_sales
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank = 1
+),
+SalesDetails AS (
+    SELECT 
+        ti.item_sk,
+        ti.total_sales,
+        i.i_product_name,
+        COUNT(ws.order_number) AS order_count,
+        AVG(ws.net_paid) AS avg_net_paid
+    FROM 
+        TopItems ti
+    JOIN 
+        item i ON ti.item_sk = i.i_item_sk
+    JOIN 
+        web_sales ws ON ti.item_sk = ws.item_sk
+    GROUP BY 
+        ti.item_sk, ti.total_sales, i.i_product_name
+)
+SELECT 
+    sd.item_sk,
+    sd.i_product_name,
+    sd.total_sales,
+    sd.order_count,
+    sd.avg_net_paid,
+    ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS item_rank
+FROM 
+    SalesDetails sd
+WHERE 
+    sd.total_sales > (SELECT AVG(total_sales) FROM SalesDetails)
+ORDER BY 
+    sd.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

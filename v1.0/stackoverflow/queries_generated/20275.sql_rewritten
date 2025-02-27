@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.OwnerUserId, 
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostVoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    pvs.UpVotes, 
+    pvs.DownVotes,
+    rp.CommentCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(cp.FirstClosedDate, 'Post is open') AS ClosureStatus,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Post of its Type'
+        WHEN rp.ScoreRank < 5 THEN 'Highly Rated Post'
+        ELSE 'Regular Post'
+    END AS PostQuality
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteSummary pvs ON pvs.PostId = rp.PostId
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.OwnerUserId
+LEFT JOIN 
+    ClosedPosts cp ON cp.PostId = rp.PostId
+WHERE 
+    rp.Score >= 10
+    AND (pvs.UpVotes - pvs.DownVotes) > 5 
+ORDER BY 
+    rp.CreationDate DESC;

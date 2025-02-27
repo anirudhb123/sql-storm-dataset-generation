@@ -1,0 +1,60 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+), 
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name 
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+supplier_stats AS (
+    SELECT 
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+order_summary AS (
+    SELECT 
+        to.c_name,
+        SUM(to.o_totalprice) AS total_order_value,
+        ss.total_supply_cost
+    FROM 
+        top_orders to
+    JOIN 
+        customer c ON to.c_name = c.c_name
+    JOIN 
+        supplier_stats ss ON c.c_nationkey = ss.s_nationkey
+    GROUP BY 
+        to.c_name, ss.total_supply_cost
+)
+SELECT 
+    os.c_name,
+    os.total_order_value,
+    os.total_supply_cost,
+    (os.total_order_value - os.total_supply_cost) AS profit_margin
+FROM 
+    order_summary os
+ORDER BY 
+    profit_margin DESC
+LIMIT 10;

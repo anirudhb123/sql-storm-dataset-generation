@@ -1,0 +1,49 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE 
+        ro.order_rank = 1
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    c.c_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+    COUNT(DISTINCT l.l_orderkey) AS lineitem_count,
+    COALESCE(SUM(CASE WHEN l.l_shipdate < l.l_commitdate THEN l.l_extendedprice ELSE 0 END), 0) AS lost_sales,
+    MAX(s.s_acctbal) AS max_supplier_balance
+FROM 
+    TopCustomers c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY 
+    c.c_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+ORDER BY 
+    total_spent DESC;

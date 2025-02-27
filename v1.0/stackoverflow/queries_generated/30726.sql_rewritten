@@ -1,0 +1,63 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.PostTypeId, 
+        p.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    WHERE p.PostTypeId IN (1, 2)  
+    GROUP BY p.Id, p.Title, p.CreationDate, p.PostTypeId, p.OwnerUserId
+
+    UNION ALL
+
+    SELECT 
+        ph.PostId, 
+        ph.Title, 
+        ph.CreationDate, 
+        ph.PostTypeId, 
+        ph.OwnerUserId,
+        COUNT(a.Id) AS AnswerCount,
+        (SELECT COUNT(c.Id) FROM Comments c WHERE c.PostId = ph.PostId) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY ph.PostId, ph.Title, ph.CreationDate, ph.PostTypeId, ph.OwnerUserId
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        OwnerUserId,
+        AnswerCount,
+        CommentCount,
+        TotalBounty,
+        DENSE_RANK() OVER (PARTITION BY OwnerUserId ORDER BY TotalBounty DESC) AS BountyRank
+    FROM RecursivePostCTE
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    p.Title,
+    p.CreationDate,
+    p.AnswerCount,
+    p.CommentCount,
+    p.TotalBounty,
+    CASE 
+        WHEN p.BountyRank = 1 THEN 'Gold'
+        WHEN p.BountyRank <= 3 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS BountyAward
+FROM RankedPosts p
+JOIN Users u ON p.OwnerUserId = u.Id
+WHERE u.Reputation > 1000
+  AND p.TotalBounty > 0
+ORDER BY p.TotalBounty DESC, p.CreationDate ASC;

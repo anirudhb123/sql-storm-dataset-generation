@@ -1,0 +1,87 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_actors
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        aka_name n ON c.person_id = n.person_id
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'feature%')
+    GROUP BY 
+        a.id, a.title, a.production_year
+), HighestRatedMovies AS (
+    SELECT 
+        m.movie_id,
+        MAX(rating) as highest_rating
+    FROM 
+        (SELECT 
+            movie_id,
+            info AS rating
+        FROM 
+            movie_info
+        WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'rating')) AS m
+    GROUP BY 
+        m.movie_id
+), MovieDetails AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.actor_count,
+        hr.highest_rating
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        HighestRatedMovies hr ON hr.movie_id = rm.id
+    WHERE 
+        rm.rank_by_actors <= 5
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_count,
+    COALESCE(md.highest_rating, 'No rating available') AS highest_rating
+FROM 
+    MovieDetails md
+WHERE 
+    md.actor_count >= (
+        SELECT 
+            AVG(actor_count)
+        FROM 
+            RankedMovies)
+    AND md.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_count DESC;
+    
+-- Additional complex logic involving obscure semantics.
+// For example, filtering on NULL checks and leveraging string aggregation to handle actors' names.
+SELECT 
+    md.movie_title,
+    STRING_AGG(DISTINCT n.name, ', ') AS actor_names
+FROM 
+    MovieDetails md
+JOIN 
+    cast_info ci ON ci.movie_id = md.movie_id
+JOIN 
+    aka_name n ON n.person_id = ci.person_id
+WHERE 
+    n.name IS NOT NULL
+GROUP BY 
+    md.movie_title
+HAVING 
+    COUNT(DISTINCT n.person_id) > 3
+ORDER BY 
+    md.movie_title;
+
+This query does the following:
+- It first ranks movies based on the number of actors.
+- It retrieves the highest rating for each movie from another subquery.
+- The final selection filters movies that have a higher than average actor count and are produced between 2000 and 2023, ensuring to replace any NULL ratings with a meaningful message.
+- Additionally, it aggregates unique actor names for movies that have more than three distinct actors.

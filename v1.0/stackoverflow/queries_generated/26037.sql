@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+        AND p.Score > 0   -- Only considering Questions with a positive score
+),
+
+TagsStats AS (
+    SELECT 
+        unnest(string_to_array(Trim(both '<>' FROM p.Tags), '> <')) AS TagName, 
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+    GROUP BY 
+        TagName
+),
+
+CloseReasons AS (
+    SELECT 
+        p.Id,
+        ph.CreationDate,
+        ph.Comment AS Reason,
+        ph.UserDisplayName,
+        ph.Text AS CloseReasonDetails
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.ViewCount,
+    ts.TagName,
+    ts.PostCount AS TotalPostsWithTag,
+    ts.AvgScore AS AverageScoreForTag,
+    cr.Reason,
+    cr.CreationDate AS CloseDate,
+    cr.UserDisplayName AS ClosedBy,
+    cr.CloseReasonDetails
+FROM 
+    RankedPosts rp
+JOIN 
+    TagsStats ts ON rp.Tags LIKE '%' || ts.TagName || '%'
+LEFT JOIN 
+    CloseReasons cr ON rp.PostId = cr.Id
+WHERE 
+    rp.Rank <= 5  -- Top 5 posts per tag
+ORDER BY 
+    ts.TagName, rp.Score DESC;

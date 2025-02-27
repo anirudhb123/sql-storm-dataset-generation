@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        rs.rank
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        part p ON rs.p_partkey = p.p_partkey
+    WHERE 
+        rs.rank <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND
+        o.o_orderdate < DATE '1997-10-01'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey
+),
+RevenueRanking AS (
+    SELECT 
+        co.c_custkey, 
+        co.c_name, 
+        co.o_orderkey, 
+        co.total_revenue, 
+        RANK() OVER (ORDER BY co.total_revenue DESC) AS revenue_rank
+    FROM 
+        CustomerOrders co
+)
+SELECT 
+    fr.s_name AS supplier_name, 
+    fr.p_name AS part_name, 
+    fr.p_retailprice AS retail_price, 
+    rr.c_name AS customer_name, 
+    rr.total_revenue AS customer_revenue
+FROM 
+    FilteredSuppliers fr
+JOIN 
+    RevenueRanking rr ON fr.p_partkey IN (SELECT ps.p_partkey FROM partsupp ps WHERE ps.ps_suppkey = rr.c_custkey)
+WHERE 
+    rr.revenue_rank <= 10
+ORDER BY 
+    fr.s_name, rr.total_revenue DESC;

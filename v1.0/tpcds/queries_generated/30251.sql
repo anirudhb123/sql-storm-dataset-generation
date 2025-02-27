@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        cs_bill_customer_sk AS customer_sk,
+        SUM(cs_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_bill_customer_sk ORDER BY SUM(cs_net_profit) DESC) AS rank
+    FROM 
+        catalog_sales 
+    GROUP BY 
+        cs_bill_customer_sk
+),
+top_customers AS (
+    SELECT 
+        ch.customer_sk,
+        cd_cd.gender,
+        cd_cd.marital_status,
+        cd_cd.education_status,
+        cd_cd.purchase_estimate,
+        ca.ca_city,
+        ca.ca_state,
+        SUM(ws.web_sales_price) AS total_web_sales
+    FROM 
+        sales_hierarchy ch
+    JOIN 
+        customer c ON ch.customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd_cd ON c.c_current_cdemo_sk = cd_cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ch.rank <= 10 
+    GROUP BY 
+        ch.customer_sk, cd_cd.gender, cd_cd.marital_status, cd_cd.education_status, cd_cd.purchase_estimate, ca.ca_city, ca.ca_state
+),
+popular_items AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        DENSE_RANK() OVER (ORDER BY SUM(ws.ws_quantity) DESC) AS item_rank
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+    HAVING 
+        SUM(ws.ws_quantity) > 100
+)
+SELECT 
+    tc.customer_sk,
+    tc.gender,
+    tc.marital_status,
+    tc.education_status,
+    tc.purchase_estimate,
+    tc.ca_city,
+    tc.ca_state,
+    pi.ws_item_sk,
+    pi.total_quantity_sold
+FROM 
+    top_customers tc
+JOIN 
+    popular_items pi ON tc.customer_sk IN (
+        SELECT ws_bill_customer_sk 
+        FROM web_sales 
+        GROUP BY ws_bill_customer_sk 
+        HAVING SUM(ws_quantity) > 50
+    )
+ORDER BY 
+    tc.total_web_sales DESC, 
+    pi.total_quantity_sold DESC;

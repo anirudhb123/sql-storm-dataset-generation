@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeletionCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.Score,
+    p.CreationDate,
+    COALESCE(vs.UpVotes, 0) AS UpVotes,
+    COALESCE(vs.DownVotes, 0) AS DownVotes,
+    COALESCE(vs.TotalVotes, 0) AS TotalVotes,
+    COALESCE(phs.CloseReopenCount, 0) AS CloseReopenCount,
+    COALESCE(phs.DeletionCount, 0) AS DeletionCount,
+    COALESCE(phs.EditCount, 0) AS EditCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    ROW_NUMBER() OVER (PARTITION BY r.Level ORDER BY p.CreationDate DESC) AS PostRank
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary vs ON p.Id = vs.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON p.Id = phs.PostId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostHierarchy r ON p.Id = r.Id
+WHERE 
+    p.CreationDate >= DATEADD(YEAR, -1, CURRENT_TIMESTAMP)
+GROUP BY 
+    p.Id, p.Title, p.Score, p.CreationDate, r.Level, vs.UpVotes, vs.DownVotes, vs.TotalVotes, phs.CloseReopenCount, phs.DeletionCount, phs.EditCount
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

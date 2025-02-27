@@ -1,0 +1,70 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title AS PostTitle, 
+        p.Score, 
+        p.CreationDate, 
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId, 
+        a.Title AS PostTitle, 
+        a.Score, 
+        a.CreationDate, 
+        a.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE r ON r.PostId = a.ParentId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.CreationDate,
+    COUNT(DISTINCT p.Id) AS QuestionCount,
+    COUNT(DISTINCT CASE WHEN rp.Level > 0 THEN rp.PostId END) AS AnswerCount,
+    SUM(COALESCE(p.Score, 0)) AS TotalScore,
+    AVG(NULLIF(p.Score, 0)) AS AverageScore,
+    MAX(b.Date) AS LastBadgeDate,
+    STRING_AGG(DISTINCT pt.Name, ', ') AS PostTypes,
+    COUNT(DISTINCT ph.Id) AS HistoryActions,
+
+    (SELECT STRING_AGG(Description, '; ' ORDER BY CreationDate DESC) 
+     FROM (SELECT ph.Comment AS Description 
+           FROM PostHistory ph 
+           WHERE ph.UserId = u.Id 
+           ORDER BY ph.CreationDate DESC 
+           LIMIT 5) AS RecentEdits) AS RecentEdits
+
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    RecursivePostCTE rp ON p.Id = rp.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+
+WHERE 
+    u.Reputation > 100 
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation, u.CreationDate
+HAVING 
+    COUNT(DISTINCT p.Id) > 1 
+ORDER BY 
+    LastBadgeDate DESC NULLS LAST, TotalScore DESC;

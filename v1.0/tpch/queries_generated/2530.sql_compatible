@@ -1,0 +1,35 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+SubOrderSummary AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_revenue
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY o.o_custkey
+),
+PartSupplierInfo AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+)
+SELECT n.n_name, 
+       COALESCE(SUM(psi.total_available), 0) AS total_available_parts,
+       COALESCE(SUM(oss.order_count), 0) AS total_orders,
+       COALESCE(SUM(oss.total_revenue), 0) AS total_revenue
+FROM nation n
+LEFT JOIN RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+LEFT JOIN PartSupplierInfo psi ON rs.s_suppkey = psi.ps_suppkey
+LEFT JOIN SubOrderSummary oss ON n.n_nationkey = (
+    SELECT c.c_nationkey
+    FROM customer c
+    WHERE c.c_custkey = oss.o_custkey
+    LIMIT 1
+)
+WHERE rs.rn <= 5 OR rs.rn IS NULL
+GROUP BY n.n_name
+ORDER BY n.n_name;

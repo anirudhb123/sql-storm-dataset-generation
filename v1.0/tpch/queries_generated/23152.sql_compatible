@@ -1,0 +1,68 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F') 
+        AND o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice)
+            FROM orders o2
+            WHERE o2.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+        )
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(ro.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(ro.o_totalprice) > 100000
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_partkey,
+        COALESCE(SUM(ps.ps_availqty), 0) AS TotalAvailable
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+)
+SELECT 
+    hc.c_name,
+    s.s_name,
+    sp.TotalAvailable,
+    ROW_NUMBER() OVER (PARTITION BY hc.c_name ORDER BY sp.TotalAvailable DESC) AS PartRank,
+    CASE 
+        WHEN sp.TotalAvailable IS NULL THEN 'No Parts Available'
+        ELSE 'Parts Available'
+    END AS AvailabilityStatus
+FROM 
+    HighValueCustomers hc
+JOIN 
+    SupplierParts sp ON hc.TotalSpent > sp.TotalAvailable
+LEFT JOIN 
+    nation n ON hc.c_custkey = n.n_nationkey
+WHERE 
+    n.n_name IS NOT NULL
+    AND sp.TotalAvailable > (SELECT AVG(TotalAvailable) FROM SupplierParts)
+ORDER BY 
+    hc.c_name, PartRank
+LIMIT 10;

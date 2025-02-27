@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(NULLIF(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity END), 0), 0) AS total_return_qty,
+    COUNT(DISTINCT so.s_suppkey) AS number_of_suppliers,
+    AVG(cs.avg_order_value) AS avg_customer_order_value,
+    COUNT(DISTINCT ro.o_orderkey) AS number_of_orders
+FROM 
+    part p
+JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    supplier so ON sp.ps_suppkey = so.s_suppkey
+JOIN 
+    CustomerStats cs ON cs.total_orders > 0
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey = l.l_orderkey AND ro.order_rank <= 5)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_retailprice, cs.avg_order_value
+HAVING 
+    SUM(sp.total_available_qty) > 100
+ORDER BY 
+    p.p_retailprice DESC;

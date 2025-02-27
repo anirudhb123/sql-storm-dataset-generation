@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        RANK() OVER (ORDER BY COUNT(p.Id) DESC) AS ActivityRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionCreationDate,
+    u.DisplayName AS OwnerName,
+    COALESCE(REPLACE(Tags, '<', ''), 'No Tags') AS QuestionTags,
+    ph.UserDisplayName AS ClosedBy,
+    ph.CreationDate AS ClosedDate,
+    ph.Comment AS CloseReason,
+    rph.Level AS HierarchyLevel,
+    u2.DisplayName AS MostActiveUser,
+    u2.PostCount AS TotalPosts,
+    u2.QuestionCount,
+    u2.AnswerCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecentClosedPosts ph ON p.Id = ph.Id AND ph.rn = 1
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+LEFT JOIN 
+    MostActiveUsers u2 ON u2.ActivityRank <= 10 
+WHERE 
+    p.PostTypeId = 1 
+    AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '6 months' 
+ORDER BY 
+    p.CreationDate DESC,
+    u2.PostCount DESC;

@@ -1,0 +1,55 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        1 AS order_level
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT 
+        o.o_orderkey,
+        oh.o_totalprice,
+        oh.o_orderdate,
+        oh.order_level + 1
+    FROM 
+        orders o
+    JOIN 
+        order_hierarchy oh ON o.o_orderkey = oh.o_orderkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(ps.ps_supplycost * l.l_quantity) AS total_cost,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(l.l_shipdate) AS last_ship_date,
+    STRING_AGG(DISTINCT l.l_shipmode, ', ') AS shipping_modes,
+    CASE 
+        WHEN SUM(ps.ps_availqty) IS NULL THEN 'No available parts'
+        ELSE 'Available parts present'
+    END AS availability_status
+FROM 
+    lineitem l
+JOIN 
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    order_hierarchy oh ON oh.o_orderkey = l.l_orderkey
+GROUP BY 
+    n.n_name, SUM(ps.ps_supplycost * l.l_quantity), AVG(l.l_extendedprice), COUNT(DISTINCT o.o_orderkey), MAX(l.l_shipdate), CASE 
+        WHEN SUM(ps.ps_availqty) IS NULL THEN 'No available parts'
+        ELSE 'Available parts present'
+    END
+HAVING 
+    SUM(l.l_discount) > 0.1
+ORDER BY 
+    total_cost DESC
+FETCH FIRST 10 ROWS ONLY;

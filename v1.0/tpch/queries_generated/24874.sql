@@ -1,0 +1,38 @@
+WITH RecursiveSupplier AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment,
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS RN
+    FROM supplier
+),
+TopRegionSuppliers AS (
+    SELECT r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN RecursiveSupplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice
+),
+HighValueOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT DISTINCT r.r_name, COUNT(s.s_suppkey) AS total_suppliers,
+       COALESCE(AVG(c.total_order_value), 0) AS avg_order_value,
+       MAX(c.revenue_rank) AS highest_revenue_rank
+FROM TopRegionSuppliers r
+FULL OUTER JOIN HighValueOrders c ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_custkey)
+LEFT JOIN RecursiveSupplier s ON r.s_suppkey = s.s_suppkey
+WHERE r.s_acctbal > 5000
+GROUP BY r.r_name
+HAVING SUM(CASE WHEN s.s_acctbal IS NULL THEN 1 ELSE 0 END) > COUNT(s.s_suppkey) / 2
+ORDER BY r.r_name;

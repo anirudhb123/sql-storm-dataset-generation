@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1
+    FROM 
+        aka_title e
+    INNER JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+MovieCast AS (
+    
+    SELECT 
+        c.movie_id, 
+        a.name AS actor_name, 
+        r.role AS role_name, 
+        COUNT(DISTINCT c.person_id) OVER(PARTITION BY c.movie_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+FilteredMovies AS (
+    
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mc.actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieCast mc ON mh.movie_id = mc.movie_id
+    WHERE 
+        mc.actor_count > 3 AND mh.production_year > 1990
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(SUM(mt.info::int), 0) AS total_info,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    COUNT(DISTINCT c.movie_id) AS episode_count
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    movie_info mt ON f.movie_id = mt.movie_id 
+LEFT JOIN 
+    cast_info c ON f.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+WHERE 
+    mt.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%Awards%') 
+GROUP BY 
+    f.movie_id, f.title, f.production_year
+ORDER BY 
+    f.production_year DESC;

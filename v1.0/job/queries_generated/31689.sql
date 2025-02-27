@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_movie_id
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        movie_link AS ml
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy AS mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS Movie_Title,
+    mh.production_year AS Production_Year,
+    mh.level AS Hierarchy_Level,
+    COALESCE(cg.kind, 'Unknown') AS Genre,
+    COUNT(cast.person_id) AS Cast_Count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Cast_Names,
+    AVG(mr.rating) AS Average_Rating
+FROM 
+    MovieHierarchy AS mh
+LEFT JOIN 
+    movie_companies AS mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type AS cg ON mc.company_type_id = cg.id
+LEFT JOIN 
+    cast_info AS cast ON mh.movie_id = cast.movie_id
+LEFT JOIN 
+    aka_name AS ak ON cast.person_id = ak.person_id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        AVG(rating) AS rating
+    FROM 
+        movie_info
+    WHERE 
+        info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+    GROUP BY 
+        movie_id
+) AS mr ON mh.movie_id = mr.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level, cg.kind
+HAVING 
+    COUNT(cast.person_id) > 0
+ORDER BY 
+    hierarchy_level DESC, Average_Rating DESC;

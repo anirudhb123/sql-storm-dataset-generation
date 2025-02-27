@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS Ranking
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopQuestions AS (
+    SELECT 
+        rp.PostID,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.Author,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Ranking = 1
+    ORDER BY 
+        rp.Score DESC
+    LIMIT 10
+),
+TagProcessing AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS RelatedPostTitles
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(STRING_TO_ARRAY(p.Tags, ',')::int[])
+    JOIN 
+        Posts pt ON p.Id = pt.Id
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    tq.PostID,
+    tq.Title,
+    tq.CreationDate,
+    tq.ViewCount,
+    tq.Score,
+    tq.Author,
+    tq.CommentCount,
+    tp.TagName,
+    tp.PostCount,
+    tp.RelatedPostTitles
+FROM 
+    TopQuestions tq
+LEFT JOIN 
+    TagProcessing tp ON tp.PostCount > 0
+ORDER BY 
+    tq.Score DESC, tq.ViewCount DESC;

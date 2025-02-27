@@ -1,0 +1,54 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        LENGTH(s.s_comment) AS comment_length,
+        TRIM(REPLACE(s.s_comment, 'supplier', '')) AS sanitized_comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+), FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        CONCAT('Size: ', CAST(p.p_size AS VARCHAR), ', Type: ', p.p_type) AS part_detail
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > 100.00 AND 
+        p.p_name LIKE 'Special%'
+), CombinedData AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        fp.p_partkey,
+        fp.part_detail,
+        sd.comment_length,
+        sd.sanitized_comment
+    FROM 
+        SupplierDetails sd
+    LEFT JOIN 
+        FilteredParts fp ON sd.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = fp.p_partkey LIMIT 1)
+)
+SELECT 
+    s.s_suppkey,
+    s.s_name,
+    p.p_partkey,
+    p.part_detail,
+    s.comment_length,
+    s.sanitized_comment
+FROM 
+    CombinedData 
+ORDER BY 
+    comment_length DESC, s.s_name;

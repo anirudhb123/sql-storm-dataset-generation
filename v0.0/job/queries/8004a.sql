@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND mi.movie_id > 233689 AND t.production_year > 1911 AND t.md5sum IN ('0501c29c4b8b1117ffde28a8eec06f8e', '0eb41188cef523eff9e9735951a6b557', '7791bbe10d13c0bbd9af9f5fed449748', '85490db64cc73ea718d568c20652f337', '862281de6fa43634f3d03180126c473e', '95a4a7d6d479d6bf9b717a17d459f82b', 'b6d972c693268edc2755ad08f337578a', 'c5cf7b15731559211a50267793feef08', 'ec669f9aca74deac1995e5c7868f3ea8', 'f065af4573d74f6eb35f7251c3ad1c8e');

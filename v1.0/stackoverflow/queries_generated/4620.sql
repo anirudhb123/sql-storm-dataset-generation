@@ -1,0 +1,57 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+)
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.QuestionCount,
+    us.AnswerCount,
+    COALESCE(rp.Title, 'No recent posts') AS RecentPostTitle,
+    COALESCE(rp.CreationDate, 'N/A') AS RecentPostDate,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges
+FROM 
+    UserStats us
+LEFT JOIN 
+    RecentPosts rp ON us.UserId = rp.OwnerUserId AND rp.RecentRank = 1
+ORDER BY 
+    us.Reputation DESC, 
+    us.UserId
+LIMIT 10;
+
+-- This query combines user statistics with their recent posts over the past year, 
+-- excluding users with low reputation, and includes badge counts for each user.

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+keyword_usage AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ct.kind AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+),
+movie_ratings AS (
+    SELECT 
+        mi.movie_id,
+        AVG(CAST(info.info AS DECIMAL)) AS average_rating
+    FROM 
+        movie_info mi
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(ku.keyword_count, 0) AS keyword_count,
+    cr.role_name,
+    mr.average_rating
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    keyword_usage ku ON mh.movie_id = ku.movie_id
+LEFT JOIN 
+    cast_with_roles cr ON mh.movie_id = cr.movie_id AND cr.role_order = 1
+LEFT JOIN 
+    movie_ratings mr ON mh.movie_id = mr.movie_id
+WHERE 
+    mh.level <= 2 AND 
+    (COALESCE(ku.keyword_count, 0) > 3 OR mr.average_rating IS NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

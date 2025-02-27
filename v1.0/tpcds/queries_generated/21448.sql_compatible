@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.returned_quantity,
+        sr.return_amt,
+        sr.return_tax,
+        sr.return_amt_inc_tax,
+        sr.return_ship_cost,
+        sr.net_loss,
+        c.customer_id,
+        c.birth_year
+    FROM 
+        store_returns sr
+    JOIN 
+        customer c ON sr.customer_sk = c.customer_sk
+),
+ItemSales AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.net_paid_inc_tax) AS total_net_paid,
+        COUNT(*) AS sale_count
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 1 AND 30
+    GROUP BY 
+        ws.item_sk
+),
+SalesAnalytics AS (
+    SELECT 
+        ir.item_sk,
+        COALESCE(cr.returned_quantity, 0) AS total_returned,
+        COALESCE(ia.total_net_paid, 0) AS total_net_paid,
+        COALESCE(ia.sale_count, 0) AS sale_count,
+        CASE 
+            WHEN COALESCE(ia.sale_count, 0) = 0 THEN 0 
+            ELSE COALESCE(cr.returned_quantity, 0) * 1.0 / COALESCE(ia.sale_count, 1)
+        END AS return_rate,
+        CASE 
+            WHEN ir.item_desc LIKE '%discount%' THEN 'discounted'
+            ELSE 'regular'
+        END AS price_category
+    FROM 
+        (SELECT DISTINCT item_sk, item_desc FROM item) ir
+    LEFT JOIN 
+        CustomerReturns cr ON ir.item_sk = cr.item_sk
+    LEFT JOIN 
+        ItemSales ia ON ir.item_sk = ia.item_sk
+)
+SELECT 
+    sa.item_sk,
+    sa.total_returned,
+    sa.total_net_paid,
+    sa.sale_count,
+    sa.return_rate,
+    sa.price_category,
+    ROW_NUMBER() OVER (PARTITION BY sa.price_category ORDER BY sa.return_rate DESC) AS rank_within_category
+FROM 
+    SalesAnalytics sa
+WHERE 
+    sa.return_rate IS NOT NULL
+ORDER BY 
+    sa.return_rate DESC, 
+    sa.total_net_paid DESC
+LIMIT 10 OFFSET 0;

@@ -1,0 +1,99 @@
+
+WITH RECURSIVE sales_analysis AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS item_rank
+    FROM 
+        web_sales 
+    GROUP BY 
+        ws_item_sk
+),
+item_info AS (
+    SELECT 
+        i_item_sk,
+        i_item_id,
+        i_current_price,
+        i_brand
+    FROM 
+        item
+),
+address_info AS (
+    SELECT 
+        ca_address_sk,
+        ca_city,
+        ca_state,
+        ca_country
+    FROM 
+        customer_address
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        COALESCE(hd_demo_sk, cd_demo_sk) AS demographics_sk
+    FROM 
+        customer 
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    LEFT JOIN 
+        household_demographics ON c_current_hdemo_sk = hd_demo_sk
+),
+store_info AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        s_country
+    FROM 
+        store
+),
+aggregated_sales AS (
+    SELECT 
+        si.s_store_sk,
+        SUM(ws.total_quantity) AS total_web_sales_quantity,
+        SUM(ws.total_sales) AS total_web_sales_value
+    FROM 
+        sales_analysis ws
+    JOIN 
+        item_info ii ON ws.ws_item_sk = ii.i_item_sk
+    JOIN 
+        store_info si ON si.s_store_sk = (SELECT s_store_sk FROM store_sales WHERE ss_item_sk = ws.ws_item_sk LIMIT 1)
+    GROUP BY 
+        si.s_store_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    sa.total_quantity,
+    sa.total_sales,
+    i.i_item_id,
+    i.i_current_price,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_country,
+    CASE 
+        WHEN sa.item_rank = 1 THEN 'Top Selling'
+        ELSE 'Regular'
+    END AS sales_category
+FROM 
+    sales_analysis sa
+JOIN 
+    customer_info ci ON ci.demographics_sk = (SELECT cd_demo_sk FROM store_returns WHERE sr_item_sk = sa.ws_item_sk LIMIT 1)
+JOIN 
+    item_info i ON sa.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    address_info ai ON ai.ca_address_sk = ci.c_current_addr_sk
+JOIN 
+    aggregated_sales ag ON ag.s_store_sk = (SELECT s_store_sk FROM store_sales WHERE ss_item_sk = sa.ws_item_sk LIMIT 1)
+WHERE 
+    (ag.total_web_sales_quantity > 0 OR ag.total_web_sales_value > 0)
+ORDER BY 
+    sa.total_sales DESC 
+LIMIT 100;

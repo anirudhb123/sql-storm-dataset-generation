@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(c.Id) DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Questions only
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.CommentCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    WHERE 
+        rp.UserPostRank <= 5 -- Top 5 posts per user
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ARRAY_AGG(DISTINCT pht.Name ORDER BY ph.CreationDate) AS HistoryTypes,
+        COUNT(DISTINCT ph.Id) AS HistoryCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tp.Title,
+    tp.CreationDate,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.CommentCount,
+    phs.HistoryTypes,
+    phs.HistoryCount,
+    COALESCE((SELECT AVG(Reputation) FROM Users WHERE CreationDate < tp.CreationDate), 0) AS AvgReputationBeforePost
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistoryStats phs ON tp.PostId = phs.PostId
+ORDER BY 
+    tp.UpVotes DESC, tp.CommentCount DESC;

@@ -1,0 +1,68 @@
+
+WITH RecursiveCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+            ELSE 'Open' 
+        END AS PostStatus,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN r.PostId IS NOT NULL THEN 1 ELSE 0 END) AS TotalPosts,
+        AVG(r.Score) AS AvgPostScore,
+        MAX(r.CreationDate) AS LastPostDate,
+        STRING_AGG(r.Title, ', ') AS RecentPostTitles
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecursiveCTE r ON u.Id = r.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 13 THEN 1 END) AS UndeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.AvgPostScore,
+    ups.LastPostDate,
+    ups.RecentPostTitles,
+    COALESCE(pcs.CloseCount, 0) AS CloseCount,
+    COALESCE(pcs.ReopenCount, 0) AS ReopenCount,
+    COALESCE(pcs.DeleteCount, 0) AS DeleteCount,
+    COALESCE(pcs.UndeleteCount, 0) AS UndeleteCount,
+    ROW_NUMBER() OVER (ORDER BY ups.AvgPostScore DESC) AS UserRank
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryStats pcs ON pcs.PostId IN (SELECT r.PostId FROM RecursiveCTE r WHERE r.OwnerUserId = ups.UserId)
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.AvgPostScore DESC;

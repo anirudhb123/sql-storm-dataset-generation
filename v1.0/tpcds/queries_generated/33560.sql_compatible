@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_quantity) DESC) AS item_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+BestSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        i.i_item_desc,
+        SUM(sd.total_sales) AS cumulative_sales
+    FROM SalesData sd
+    JOIN item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE sd.item_rank <= 10
+    GROUP BY sd.ws_item_sk, i.i_item_desc
+),
+NotReturnedItems AS (
+    SELECT 
+        bs.ws_item_sk,
+        bs.i_item_desc,
+        COALESCE(SUM(SR.sr_return_quantity), 0) AS total_returns
+    FROM BestSellingItems bs
+    LEFT JOIN store_returns SR ON bs.ws_item_sk = SR.sr_item_sk
+    GROUP BY bs.ws_item_sk, bs.i_item_desc
+)
+SELECT 
+    n.ws_item_sk,
+    n.i_item_desc,
+    n.cumulative_sales,
+    n.total_returns,
+    CASE 
+        WHEN n.total_returns > 0 THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    ROUND((n.cumulative_sales / NULLIF(n.total_returns, 0)::DECIMAL), 2) AS sales_per_return
+FROM NotReturnedItems n
+ORDER BY n.cumulative_sales DESC
+LIMIT 50;

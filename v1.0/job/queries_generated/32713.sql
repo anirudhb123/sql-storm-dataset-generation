@@ -1,0 +1,60 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+, MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.depth,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        cast_info cc ON mc.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name cn ON cc.person_id = cn.person_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.depth, mk.keyword
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.depth,
+    md.keyword,
+    md.cast_count,
+    md.cast_names,
+    DENSE_RANK() OVER (PARTITION BY md.depth ORDER BY md.cast_count DESC) AS rank_within_depth
+FROM 
+    MovieDetails md
+WHERE 
+    md.cast_count > 0
+ORDER BY 
+    md.depth, md.cast_count DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplyvalue,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrderSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spending
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+PotentialHighSpenders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        cos.order_count,
+        cos.total_spending,
+        COALESCE(RS.total_supplyvalue, 0) AS total_supplyvalue,
+        CASE
+            WHEN cos.total_spending > 10000 THEN 'High'
+            ELSE 'Low'
+        END AS spending_category
+    FROM
+        CustomerOrderSummary cos
+    LEFT JOIN
+        RankedSuppliers RS ON cos.order_count > 5
+    WHERE
+        cos.total_spending IS NOT NULL
+)
+SELECT
+    phs.c_custkey,
+    phs.c_name,
+    phs.order_count,
+    phs.total_spending,
+    phs.total_supplyvalue,
+    phs.spending_category,
+    RANK() OVER (ORDER BY phs.total_spending DESC) AS spending_rank
+FROM
+    PotentialHighSpenders phs
+WHERE
+    phs.spending_category = 'High'
+ORDER BY
+    phs.total_spending DESC
+FETCH FIRST 10 ROWS ONLY;

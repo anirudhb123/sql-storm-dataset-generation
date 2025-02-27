@@ -1,0 +1,64 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        a.production_year,
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title a ON ml.linked_movie_id = a.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.depth < 3
+),
+MovieData AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT c.id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+        MAX(mk.keyword) AS primary_keyword
+    FROM MovieHierarchy mh
+    LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+),
+RankedMovies AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.actor_names,
+        md.primary_keyword,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rank
+    FROM MovieData md
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.actor_names,
+    rm.primary_keyword,
+    COALESCE((SELECT AVG(cast_count) FROM RankedMovies), 0) AS avg_cast_count,
+    CASE 
+        WHEN rm.cast_count IS NULL THEN 'No Cast'
+        WHEN rm.cast_count > 10 THEN 'Blockbuster'
+        ELSE 'Indie'
+    END AS movie_type
+FROM RankedMovies rm
+WHERE rm.rank <= 10
+ORDER BY rm.production_year DESC, rm.rank;

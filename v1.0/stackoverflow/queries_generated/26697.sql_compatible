@@ -1,0 +1,77 @@
+
+WITH RankedPostTitles AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS TitleRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+),
+FilteredTitles AS (
+    SELECT 
+        rt.PostId,
+        rt.Title,
+        rt.CreationDate,
+        rt.ViewCount
+    FROM 
+        RankedPostTitles rt
+    WHERE 
+        rt.TitleRank = 1
+),
+TagDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(TRIM(unnest(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))), ', ') AS Tags
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id
+),
+PostStatistics AS (
+    SELECT 
+        ft.PostId,
+        ft.Title,
+        ft.CreationDate,
+        ft.ViewCount,
+        td.Tags,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        FilteredTitles ft
+    LEFT JOIN 
+        Comments c ON ft.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON ft.PostId = v.PostId
+    LEFT JOIN 
+        TagDetails td ON ft.PostId = td.PostId
+    GROUP BY 
+        ft.PostId, ft.Title, ft.CreationDate, ft.ViewCount, td.Tags
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.ViewCount,
+    ps.Tags,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    (ps.UpVotes - ps.DownVotes) AS NetVotes,
+    CASE 
+        WHEN ps.ViewCount > 100 THEN 'Highly Viewed'
+        WHEN ps.ViewCount BETWEEN 50 AND 100 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed'
+    END AS ViewCategory
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.CommentCount > 10  
+ORDER BY 
+    ps.ViewCount DESC, ps.NetVotes DESC;

@@ -1,0 +1,46 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalVotes,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM UserActivity
+),
+PostCloseReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CONCAT(CAST(PH.CreationDate AS DATE), ' - ', CR.Name), '; ') AS CloseReasonDetails
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CR ON PH.Comment::int = CR.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    T.TotalPosts,
+    T.TotalQuestions,
+    T.TotalAnswers,
+    T.TotalVotes,
+    COALESCE(PCR.CloseReasonDetails, 'No close reasons') AS CloseReasons
+FROM TopUsers T
+LEFT JOIN PostCloseReasons PCR ON T.UserId = PCR.PostId
+WHERE T.Rank <= 10
+ORDER BY T.TotalScore DESC;

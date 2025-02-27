@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserRank,
+        COUNT(c.Id) OVER (PARTITION BY p.OwnerUserId) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+
+AggregateVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+SelectedClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS CloseReasonCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+    HAVING 
+        COUNT(*) > 1
+)
+
+SELECT 
+    up.DisplayName,
+    p.Title,
+    rp.UserRank,
+    p.CreationDate,
+    COALESCE(av.Upvotes, 0) AS Upvotes,
+    COALESCE(av.Downvotes, 0) AS Downvotes,
+    COALESCE(sc.CloseReasonCount, 0) AS ClosedReasonCount,
+    COALESCE(sc.CloseReasons, 'None') AS CloseReasons,
+    rp.CommentCount,
+    (CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.Score > 0 THEN 'Positive Score'
+        ELSE 'Negative Score'
+    END) AS ScoreStatus,
+    (CASE 
+        WHEN rp.ViewCount = 0 THEN 'No Views'
+        WHEN rp.ViewCount <= 100 THEN 'Low Views'
+        WHEN rp.ViewCount <= 1000 THEN 'Moderate Views'
+        ELSE 'High Views'
+    END) AS ViewCountCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Users up ON rp.OwnerUserId = up.Id
+LEFT JOIN 
+    AggregateVotes av ON rp.PostId = av.PostId
+LEFT JOIN 
+    SelectedClosedPosts sc ON rp.PostId = sc.PostId
+WHERE 
+    rp.UserRank = 1
+ORDER BY 
+    up.Reputation DESC,
+    p.CreationDate DESC
+LIMIT 50;

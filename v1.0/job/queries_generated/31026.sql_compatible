@@ -1,0 +1,85 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS level,
+        mt.id AS root_movie_id,
+        ARRAY[mt.id] AS movie_path
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL 
+        
+    UNION ALL
+
+    SELECT
+        e.id AS movie_id,
+        e.title AS movie_title,
+        e.production_year,
+        mh.level + 1,
+        mh.root_movie_id,
+        mh.movie_path || e.id
+    FROM
+        aka_title e
+    JOIN
+        MovieHierarchy mh ON mh.movie_id = e.episode_of_id 
+),
+AverageRatings AS (
+    SELECT
+        m.id AS movie_id,
+        AVG(CASE WHEN r.rating IS NOT NULL THEN r.rating ELSE 0 END) AS average_rating
+    FROM
+        aka_title m
+    LEFT JOIN
+        (SELECT movie_id, rating FROM movie_info WHERE info_type_id = 
+            (SELECT id FROM info_type WHERE info = 'rating')) r ON m.id = r.movie_id
+    GROUP BY
+        m.id
+),
+ActorInfo AS (
+    SELECT
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+)
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    ar.average_rating,
+    ai.actor_name,
+    mk.keywords,
+    mh.level,
+    CASE 
+        WHEN mh.level > 1 THEN 'Episode'
+        ELSE 'Feature'
+    END AS movie_type
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    AverageRatings ar ON mh.movie_id = ar.movie_id
+LEFT JOIN
+    ActorInfo ai ON mh.movie_id = ai.movie_id
+LEFT JOIN
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+WHERE
+    ar.average_rating > 7
+ORDER BY
+    mh.production_year DESC,
+    mh.movie_title;

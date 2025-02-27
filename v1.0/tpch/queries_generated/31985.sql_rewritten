@@ -1,0 +1,49 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 0 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE oh.level < 10
+),
+SupplierStats AS (
+    SELECT supplier.s_suppkey, 
+           supplier.s_name,
+           SUM(partsupp.ps_supplycost * partsupp.ps_availqty) AS total_cost,
+           COUNT(DISTINCT partsupp.ps_partkey) AS part_count
+    FROM supplier
+    JOIN partsupp ON supplier.s_suppkey = partsupp.ps_suppkey
+    GROUP BY supplier.s_suppkey, supplier.s_name
+),
+LineStats AS (
+    SELECT l.l_partkey,
+           COUNT(*) AS line_count,
+           AVG(l.l_discount) AS avg_discount,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+BestSuppliers AS (
+    SELECT ss.s_suppkey, ss.s_name, ss.total_cost, ss.part_count
+    FROM SupplierStats ss
+    WHERE ss.total_cost = (SELECT MAX(total_cost) FROM SupplierStats)
+),
+RelevantParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.total_sales
+    FROM part p
+    LEFT JOIN LineStats ps ON p.p_partkey = ps.l_partkey
+)
+SELECT rh.o_orderkey, 
+       rh.o_orderdate, 
+       rh.o_totalprice, 
+       rp.p_name, 
+       rp.p_retailprice, 
+       bs.s_name,
+       bs.total_cost
+FROM OrderHierarchy rh
+INNER JOIN RelevantParts rp ON rp.total_sales IS NOT NULL
+LEFT JOIN BestSuppliers bs ON bs.part_count > 5
+WHERE rh.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+ORDER BY rh.o_orderdate DESC, rp.p_retailprice DESC;

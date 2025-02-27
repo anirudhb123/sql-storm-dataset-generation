@@ -1,0 +1,75 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0
+    UNION ALL
+    SELECT t.Id, t.TagName, t.Count, rt.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagHierarchy rt ON t.ExcerptPostId = rt.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounties,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS PostRank
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.UserDisplayName,
+        p.Title,
+        ht.Name AS ChangeType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    JOIN PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(c.Count, 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN (SELECT PostId, COUNT(*) AS Count FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation > 1000
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS HighViewCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags,
+    bh.RecentHistoryCount,
+    t.UserRank,
+    COALESCE(rth.HistoryDate, 'No Changes') AS LastHistoryChange,
+    COALESCE(rth.ChangeType, 'No Changes') AS ChangeType
+FROM Users u
+JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN RecentPostHistory rth ON p.Id = rth.PostId AND rth.HistoryRank = 1
+LEFT JOIN UserActivity t ON u.Id = t.UserId
+LEFT JOIN (SELECT PostId, COUNT(*) AS RecentHistoryCount FROM RecentPostHistory GROUP BY PostId) bh ON bh.PostId = p.Id
+LEFT JOIN RecursiveTagHierarchy t ON p.Tags::text LIKE '%' || t.TagName || '%'
+GROUP BY u.Id, u.DisplayName, u.Reputation, bh.RecentHistoryCount, t.UserRank, rth.HistoryDate, rth.ChangeType
+HAVING COUNT(DISTINCT p.Id) > 5
+ORDER BY u.Reputation DESC;

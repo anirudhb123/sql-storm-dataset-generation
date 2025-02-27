@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        date_dim d
+        LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_date
+    UNION ALL
+    SELECT
+        d.d_date,
+        SUM(cs.cs_ext_sales_price)
+    FROM 
+        date_dim d
+        LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    GROUP BY 
+        d.d_date
+), CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+ReturnStats AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr_returning_customer_sk
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    COALESCE(rt.total_return_amt, 0) AS total_return_amt,
+    COALESCE(rt.total_returns, 0) AS total_returns,
+    st.total_sales AS overall_sales,
+    st.total_sales - COALESCE(rt.total_return_amt, 0) AS net_sales
+FROM 
+    CustomerStats cs
+LEFT JOIN ReturnStats rt ON cs.c_customer_id = rt.sr_returning_customer_sk
+LEFT JOIN (SELECT 
+                d.d_date, 
+                SUM(s.total_sales) OVER (ORDER BY d.d_date) AS total_sales 
+            FROM 
+                SalesTrend s
+            JOIN date_dim d ON s.d_date = d.d_date) st ON st.d_date = DATE '2002-10-01'
+WHERE 
+    (cs.cd_marital_status = 'M' OR cs.cd_gender = 'F') 
+    AND (st.total_sales > 1000 OR rt.total_returns = 0)
+ORDER BY 
+    net_sales DESC
+FETCH FIRST 100 ROWS ONLY;

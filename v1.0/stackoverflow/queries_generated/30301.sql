@@ -1,0 +1,87 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1) AS AnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, -1),
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId -- Recursive join to get answers
+)
+,
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2 -- Answers
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts from the last year
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+,
+SelectedPosts AS (
+    SELECT 
+        pd.Id,
+        pd.Title,
+        pd.CreationDate,
+        pd.AnswerCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        CASE 
+            WHEN pd.UpVotes - pd.DownVotes >= 10 THEN 'High'
+            WHEN pd.UpVotes - pd.DownVotes BETWEEN 1 AND 9 THEN 'Medium'
+            ELSE 'Low'
+        END AS Popularity,
+        ROW_NUMBER() OVER (ORDER BY (pd.UpVotes - pd.DownVotes) DESC) AS Rank
+    FROM 
+        PostDetails pd
+    WHERE 
+        pd.AnswerCount > 0 -- Only consider posts with answers
+)
+SELECT 
+    sp.Title,
+    sp.CreationDate,
+    sp.AnswerCount,
+    sp.UpVotes,
+    sp.DownVotes,
+    sp.Popularity,
+    rp.PostId AS RelatedPost,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+FROM 
+    SelectedPosts sp
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = sp.Id
+LEFT JOIN 
+    RecursivePostCTE rp ON rp.PostId = sp.Id
+WHERE 
+    sp.Rank <= 50 -- Top 50 popular posts
+GROUP BY 
+    sp.Title, sp.CreationDate, sp.AnswerCount, sp.UpVotes, sp.DownVotes, sp.Popularity, rp.PostId
+ORDER BY 
+    sp.UpVotes - sp.DownVotes DESC;

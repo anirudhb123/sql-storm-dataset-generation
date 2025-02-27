@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit,
+        RANK() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_net_profit DESC) AS sales_rank
+    FROM
+        catalog_sales cs
+    JOIN 
+        date_dim dd ON cs.cs_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023
+),
+TopItems AS (
+    SELECT 
+        rcs.cs_item_sk,
+        SUM(rcs.cs_quantity) AS total_quantity,
+        SUM(rcs.cs_ext_sales_price) AS total_sales
+    FROM 
+        RankedSales rcs
+    WHERE 
+        rcs.sales_rank <= 10
+    GROUP BY 
+        rcs.cs_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ci.ca_city,
+    COUNT(DISTINCT cs.ss_customer_sk) AS unique_customers,
+    SUM(cs.ss_net_profit) AS total_profit,
+    AVG(cs.ss_sales_price) AS avg_sales_price,
+    COUNT(*) AS total_sales_count
+FROM 
+    store_sales cs
+JOIN 
+    store s ON cs.ss_store_sk = s.s_store_sk
+JOIN 
+    customer c ON cs.ss_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    TopItems ti ON cs.ss_item_sk = ti.cs_item_sk
+WHERE 
+    ca.ca_state = 'NY'
+GROUP BY 
+    ci.ca_city
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

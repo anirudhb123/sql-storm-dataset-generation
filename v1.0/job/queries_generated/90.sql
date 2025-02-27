@@ -1,0 +1,60 @@
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        COUNT(DISTINCT cc.person_id) OVER (PARTITION BY mt.id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        aka_name ak ON cc.person_id = ak.person_id
+    WHERE 
+        mt.production_year > 2000
+    GROUP BY 
+        mt.id
+), 
+high_cast_movies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        cast_count, 
+        actor_names 
+    FROM 
+        ranked_movies 
+    WHERE 
+        cast_count > 5
+), 
+movie_keywords AS (
+    SELECT 
+        m.id AS movie_id, 
+        k.keyword 
+    FROM 
+        title m 
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id 
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    hcm.movie_id, 
+    hcm.title, 
+    hcm.production_year, 
+    hcm.cast_count, 
+    COALESCE(mk.keyword, 'No Keyword') AS keyword,
+    CASE 
+        WHEN hcm.production_year < 2010 THEN 'Classic'
+        ELSE 'Modern'
+    END AS era,
+    STRING_AGG(DISTINCT hcm.actor_names::text, ', ') AS actors
+FROM 
+    high_cast_movies hcm
+LEFT JOIN 
+    movie_keywords mk ON hcm.movie_id = mk.movie_id
+GROUP BY 
+    hcm.movie_id, hcm.title, hcm.production_year, hcm.cast_count, mk.keyword
+ORDER BY 
+    hcm.production_year DESC, hcm.cast_count DESC;

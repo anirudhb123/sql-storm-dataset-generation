@@ -1,0 +1,62 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_sold_date_sk DESC) AS rn
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+),
+AggregatedSales AS (
+    SELECT 
+        item.i_item_id,
+        SUM(sales.ws_net_profit) AS total_web_profit,
+        SUM(sales.cs_net_profit) AS total_catalog_profit,
+        COUNT(sales.ws_order_number) AS web_sales_count,
+        COUNT(sales.cs_order_number) AS catalog_sales_count
+    FROM 
+        SalesCTE sales
+    JOIN 
+        item ON item.i_item_sk = sales.ws_item_sk OR item.i_item_sk = sales.cs_item_sk
+    WHERE 
+        sales.rn = 1
+    GROUP BY 
+        item.i_item_id
+)
+SELECT 
+    tmp.i_item_id,
+    tmp.total_web_profit,
+    tmp.total_catalog_profit,
+    COALESCE((SELECT SUM(sr_return_amt) FROM store_returns sr WHERE sr_item_sk = tmp.i_item_id), 0) AS total_store_returns,
+    CASE 
+        WHEN tmp.total_web_profit > 0 
+        THEN (tmp.total_web_profit + tmp.total_catalog_profit) / NULLIF(tmp.total_web_profit, 0)
+        ELSE NULL 
+    END AS profit_margin_ratio
+FROM 
+    AggregatedSales tmp
+LEFT JOIN 
+    warehouse w ON tmp.total_web_profit > w.w_warehouse_sq_ft 
+WHERE 
+    tmp.total_catalog_profit > 0 
+ORDER BY 
+    tmp.total_web_profit DESC
+LIMIT 100;

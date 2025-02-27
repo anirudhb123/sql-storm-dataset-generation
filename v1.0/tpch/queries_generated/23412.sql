@@ -1,0 +1,56 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, 0 AS level
+    FROM customer
+    WHERE c_custkey IN (SELECT DISTINCT o_custkey FROM orders WHERE o_orderstatus = 'O')
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_custkey
+    WHERE ch.level < 3
+),
+part_summary AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+total_sales AS (
+    SELECT l.l_partkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_partkey
+),
+customer_revenue AS (
+    SELECT c.c_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS cust_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (
+        SELECT AVG(c2.c_acctbal) 
+        FROM customer c2
+    )
+    GROUP BY c.c_custkey
+)
+SELECT p.p_partkey, 
+       p.p_name, 
+       ps.total_avail_qty, 
+       ps.supplier_count,
+       ts.total_revenue,
+       COALESCE(cr.cust_revenue, 0) AS significant_revenue,
+       ch.level
+FROM part_summary ps
+LEFT OUTER JOIN total_sales ts ON ps.p_partkey = ts.l_partkey
+LEFT JOIN customer_revenue cr ON cr.cust_revenue > 10000
+FULL OUTER JOIN customer_hierarchy ch ON ch.c_custkey = ps.p_partkey
+WHERE (ps.total_avail_qty > 100 AND ts.total_revenue IS NOT NULL)
+   OR (ps.supplier_count > 5 AND cr.cust_revenue IS NOT NULL)
+ORDER BY p.p_partkey, significant_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

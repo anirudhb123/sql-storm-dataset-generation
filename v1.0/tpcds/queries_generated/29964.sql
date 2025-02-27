@@ -1,0 +1,73 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS AddressCity,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type, 
+               CASE WHEN ca.suite_number IS NOT NULL THEN CONCAT(' Suite ', ca.suite_number) ELSE '' END) AS FullAddress
+    FROM 
+        customer_address ca
+),
+CustomerFullNames AS (
+    SELECT 
+        CONCAT(c.first_name, ' ', c.last_name) AS FullName,
+        c.c_customer_sk AS CustomerID
+    FROM 
+        customer c
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk AS DemographicID,
+        cd.cd_gender AS Gender,
+        cd.cd_marital_status AS MaritalStatus,
+        cd.cd_education_status AS EducationStatus,
+        cd.cd_purchase_estimate AS PurchaseEstimate
+    FROM 
+        customer_demographics cd
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number AS OrderNumber,
+        ws.ws_sales_price AS SalesPrice,
+        cs.cs_sales_price AS CatalogSalesPrice,
+        ss.ss_sales_price AS StoreSalesPrice,
+        ws.ws_ship_date_sk AS ShipDate
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk AND ws.ws_order_number = cs.cs_order_number
+    LEFT JOIN 
+        store_sales ss ON ws.ws_item_sk = ss.ss_item_sk AND ws.ws_order_number = ss.ss_ticket_number
+),
+AggregateSales AS (
+    SELECT 
+        OrderNumber,
+        SUM(SalesPrice) AS TotalWebSales,
+        SUM(CatalogSalesPrice) AS TotalCatalogSales,
+        SUM(StoreSalesPrice) AS TotalStoreSales,
+        COUNT(DISTINCT ShipDate) AS DistinctShipDates
+    FROM 
+        SalesData
+    GROUP BY 
+        OrderNumber
+)
+
+SELECT 
+    cfn.FullName,
+    ad.AddressCity,
+    cd.Gender,
+    cd.MaritalStatus,
+    cd.EducationStatus,
+    asales.TotalWebSales,
+    asales.TotalCatalogSales,
+    asales.TotalStoreSales,
+    asales.DistinctShipDates
+FROM 
+    CustomerFullNames cfn
+JOIN 
+    CustomerDemographics cd ON cfn.CustomerID = cd.cd_demo_sk
+JOIN 
+    AddressDetails ad ON ad.AddressCity LIKE '%New York%'  -- filtering by city
+JOIN 
+    AggregateSales asales ON asales.OrderNumber = (SELECT MAX(OrderNumber) FROM SalesData)
+ORDER BY 
+    asales.TotalWebSales DESC;

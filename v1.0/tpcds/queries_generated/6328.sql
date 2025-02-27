@@ -1,0 +1,62 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesInfo AS (
+    SELECT
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_coupon_amt) AS total_coupons,
+        SUM(ws_ext_discount_amt) AS total_discounts
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        si.total_sales,
+        si.order_count,
+        si.total_coupons,
+        si.total_discounts,
+        RANK() OVER (ORDER BY si.total_sales DESC) AS sales_rank
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesInfo si ON ci.c_customer_id = si.ws_bill_customer_sk
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+WHERE 
+    total_sales >= 1000
+ORDER BY 
+    sales_rank
+LIMIT 100;

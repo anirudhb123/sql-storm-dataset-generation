@@ -1,0 +1,38 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.level * 10000
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+           COUNT(DISTINCT l.l_suppkey) AS supplier_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+AverageOrderValue AS (
+    SELECT AVG(total_revenue) AS avg_revenue
+    FROM OrderSummary
+),
+NationSupplier AS (
+    SELECT n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_name
+)
+SELECT n.n_name, ns.total_supply_cost, 
+       CASE WHEN ns.total_supply_cost > (SELECT avg_revenue FROM AverageOrderValue) 
+            THEN 'Above Average' 
+            ELSE 'Below Average' END AS cost_status,
+       sh.level
+FROM NationSupplier ns
+LEFT JOIN SupplierHierarchy sh ON ns.total_supply_cost < 200000
+JOIN region r ON ns.total_supply_cost > 10000
+WHERE r.r_name LIKE '%West%'
+ORDER BY ns.total_supply_cost DESC, n.n_name;

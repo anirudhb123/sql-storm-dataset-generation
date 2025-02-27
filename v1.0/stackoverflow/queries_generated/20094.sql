@@ -1,0 +1,67 @@
+WITH UserBadgeCounts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS TotalBadges,
+        MAX(CASE WHEN Class = 1 THEN 1 ELSE 0 END) AS HasGoldBadge,
+        MAX(CASE WHEN Class = 2 THEN 1 ELSE 0 END) AS HasSilverBadge,
+        MAX(CASE WHEN Class = 3 THEN 1 ELSE 0 END) AS HasBronzeBadge
+    FROM Badges
+    GROUP BY UserId
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason
+    FROM PostHistory PH
+    JOIN CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE PH.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+),
+UserWithPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(P.ViewCount), 0) AS TotalViews,
+        COUNT(P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN RecentPosts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.TotalViews,
+    U.TotalPosts,
+    UB.TotalBadges,
+    UB.HasGoldBadge,
+    UB.HasSilverBadge,
+    UB.HasBronzeBadge,
+    COALESCE(CP.CloseReason, 'No closed posts') AS CloseReason,
+    RP.Title AS RecentPostTitle,
+    RP.Score AS RecentPostScore,
+    RP.CreationDate AS RecentPostCreationDate,
+    (CASE 
+        WHEN U.TotalPosts > 0 THEN (U.TotalViews * 1.0 / U.TotalPosts) 
+        ELSE NULL 
+    END) AS AvgViewsPerPost
+FROM UserWithPosts U
+LEFT JOIN UserBadgeCounts UB ON U.UserId = UB.UserId
+LEFT JOIN ClosedPosts CP ON U.UserId = CP.PostId 
+LEFT JOIN RecentPosts RP ON U.UserId = RP.OwnerUserId AND RP.PostRank = 1
+WHERE (UB.HasGoldBadge = 1 OR U.TotalPosts > 10)
+  AND (U.TotalViews > 10 OR UB.TotalBadges IS NULL)
+ORDER BY U.TotalViews DESC
+LIMIT 100;
+

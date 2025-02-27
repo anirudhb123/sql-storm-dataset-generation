@@ -1,0 +1,44 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS company_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COALESCE(AVG(CASE WHEN pi.info_type_id = 1 THEN pi.info END)::numeric, 0) AS average_rating
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        person_info pi ON ci.person_id = pi.person_id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    md.title_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.company_names,
+    md.cast_count,
+    md.average_rating
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year >= 2000
+ORDER BY 
+    md.average_rating DESC,
+    md.cast_count DESC
+LIMIT 10;

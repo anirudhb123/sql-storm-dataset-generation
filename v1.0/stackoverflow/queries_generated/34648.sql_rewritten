@@ -1,0 +1,104 @@
+WITH RecursivePostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.OwnerUserId,
+        P.AnswerCount,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+    HAVING 
+        COUNT(*) > 1
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        P.Id
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+CombinedStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        RB.PostId,
+        RB.Title,
+        RB.ViewCount,
+        UB.BadgeCount,
+        RB.TotalBounty,
+        PS.AnswerCount,
+        PS.Score
+    FROM 
+        TopUsers U
+    JOIN 
+        RecursivePostStats PS ON U.UserId = PS.OwnerUserId
+    JOIN 
+        RecentPosts RB ON PS.PostId = RB.PostId
+    LEFT JOIN 
+        UserBadges UB ON U.Id = UB.UserId
+)
+SELECT 
+    C.UserId,
+    C.DisplayName,
+    COALESCE(SUM(C.Score), 0) AS TotalScore,
+    COUNT(DISTINCT C.PostId) AS PostCount,
+    COALESCE(STRING_AGG(DISTINCT C.Title, '; '), 'No Posts') AS Titles,
+    COALESCE(MAX(C.BadgeCount), 0) AS BadgeCount,
+    COALESCE(SUM(C.TotalBounty), 0) AS TotalBounty
+FROM 
+    CombinedStats C
+LEFT JOIN 
+    PostHistorySummary PH ON C.PostId = PH.PostId
+WHERE 
+    C.BadgeCount > 0
+GROUP BY 
+    C.UserId, C.DisplayName
+ORDER BY 
+    TotalScore DESC;

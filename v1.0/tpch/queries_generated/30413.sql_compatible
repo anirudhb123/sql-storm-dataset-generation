@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_name,
+        (s.total_sales + SUM(l.l_extendedprice * (1 - l.l_discount))) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY (s.total_sales + SUM(l.l_extendedprice * (1 - l.discount))) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        SalesCTE s ON c.c_nationkey = s.c_nationkey
+    WHERE 
+        o.o_orderdate < DATE '1995-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_name, s.total_sales
+)
+
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(SUM(CASE WHEN s.sales_rank <= 3 THEN s.total_sales ELSE 0 END), 0) AS top_sales,
+    COUNT(DISTINCT s.o_orderkey) AS total_orders,
+    AVG(s.total_sales) AS avg_sales_per_order
+FROM 
+    SalesCTE s
+JOIN 
+    customer c ON s.c_name = c.c_name
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    top_sales DESC;

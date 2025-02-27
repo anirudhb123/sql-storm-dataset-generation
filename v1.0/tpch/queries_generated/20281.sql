@@ -1,0 +1,95 @@
+WITH RECURSIVE purchase_history AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_acctbal,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_acctbal
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_acctbal,
+        ph.total_spent + SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        purchase_history ph ON c.c_custkey = ph.c_custkey
+    WHERE 
+        l.l_returnflag = 'N' AND o.o_orderdate > ph.o_orderdate
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_acctbal, ph.total_spent
+), 
+avg_purchase AS (
+    SELECT 
+        ph.c_custkey,
+        AVG(ph.total_spent) AS avg_total_spent
+    FROM 
+        purchase_history ph
+    GROUP BY 
+        ph.c_custkey
+),
+supplier_summary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+top_n_suppliers AS (
+    SELECT 
+        ss.*,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS rank
+    FROM 
+        supplier_summary ss
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE WHEN p.p_size IS NOT NULL THEN p.p_size ELSE 0 END) AS total_part_size,
+    COALESCE(SUM(tp.total_supply_cost), 0) AS total_cost_suppliers,
+    AVG(ap.avg_total_spent) AS average_spent_per_customer
+FROM 
+    nation n
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    part p ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        AND ps.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    )
+LEFT JOIN 
+    top_n_suppliers tp ON n.n_nationkey = (SELECT DISTINCT n.n_regionkey FROM nation n)
+LEFT JOIN 
+    avg_purchase ap ON c.c_custkey = ap.c_custkey
+WHERE 
+    n.n_nationkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10
+ORDER BY 
+    total_customers DESC;

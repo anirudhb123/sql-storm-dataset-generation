@@ -1,0 +1,77 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate > '1997-01-01'
+), SupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        sc.total_supply_cost
+    FROM 
+        part p 
+    JOIN 
+        SupplierCosts sc ON p.p_partkey = sc.ps_partkey
+    JOIN 
+        supplier s ON s.s_suppkey = sc.ps_suppkey
+), OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(*) AS total_items
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+), CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation,
+        r.r_name AS region
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cr.nation,
+    cr.region,
+    COUNT(DISTINCT od.l_orderkey) AS total_orders,
+    COALESCE(SUM(sc.total_supply_cost), 0) AS total_supply_costs,
+    AVG(od.total_price) AS avg_order_value,
+    MAX(wo.order_rank) AS max_order_rank
+FROM 
+    CustomerRegion cr
+LEFT JOIN 
+    OrderDetails od ON cr.c_custkey = od.l_orderkey
+LEFT JOIN 
+    RankedOrders wo ON od.l_orderkey = wo.o_orderkey
+LEFT JOIN 
+    PartSupplier sc ON sc.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = od.l_orderkey)
+GROUP BY 
+    cr.nation, cr.region
+HAVING 
+    COUNT(DISTINCT od.l_orderkey) > 5
+ORDER BY 
+    total_supply_costs DESC, avg_order_value DESC;

@@ -1,0 +1,39 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id, 
+           COUNT(DISTINCT ci.movie_id) AS movie_count,
+           NULL AS parent_actor
+    FROM cast_info ci
+    GROUP BY ci.person_id
+    HAVING COUNT(DISTINCT ci.movie_id) > 5
+
+    UNION ALL
+
+    SELECT ci.person_id,
+           COUNT(DISTINCT ci.movie_id) + ah.movie_count AS movie_count,
+           ah.person_id AS parent_actor
+    FROM cast_info ci
+    JOIN actor_hierarchy ah ON ci.movie_id IN (
+        SELECT movie_id FROM cast_info WHERE person_id = ah.person_id
+    )
+    GROUP BY ci.person_id, ah.movie_count
+)
+
+SELECT a.name AS actor_name,
+       COUNT(DISTINCT c.movie_id) AS total_movies,
+       AVG(EXTRACT(YEAR FROM (SELECT min(production_year) 
+                              FROM aka_title at 
+                              WHERE at.id = c.movie_id))) AS avg_year_first_movie,
+       STRING_AGG(DISTINCT at.title, ', ') AS movie_titles,
+       COALESCE(NULLIF(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 END), 0), 0) AS notes_count,
+       ARRAY_AGG(DISTINCT cn.name) AS company_names,
+       ah.parent_actor
+FROM aka_name a
+JOIN cast_info ci ON a.person_id = ci.person_id
+JOIN aka_title at ON ci.movie_id = at.movie_id
+JOIN movie_companies mc ON mc.movie_id = ci.movie_id
+JOIN company_name cn ON mc.company_id = cn.id
+LEFT JOIN actor_hierarchy ah ON a.person_id = ah.person_id
+WHERE at.production_year > 2000
+GROUP BY a.name, ah.parent_actor
+HAVING COUNT(DISTINCT ci.movie_id) > 10
+ORDER BY total_movies DESC;

@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        ParentId,
+        Title,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+        MAX(ph.CreationDate) AS CloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    COALESCE(SUM(v.UpVotes), 0) AS TotalUpVotes,
+    COALESCE(SUM(v.DownVotes), 0) AS TotalDownVotes,
+    COUNT(DISTINCT ph.Id) AS TotalPostHierarchyLevels,
+    STRING_AGG(DISTINCT CONCAT_WS(': ', ph.Title, ph.Level), '; ') AS PostTitlesByLevel,
+    rpr.CloseReason,
+    rpr.CloseDate
+FROM 
+    UserStats u
+LEFT JOIN 
+    PostVotes v ON u.UserId = v.PostId
+LEFT JOIN 
+    RecursivePostHierarchy ph ON u.TotalQuestions > 0
+LEFT JOIN 
+    ClosedPostReasons rpr ON rpr.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = u.UserId)
+GROUP BY 
+    u.UserId, u.DisplayName, u.Reputation, rpr.CloseReason, rpr.CloseDate
+ORDER BY 
+    u.Reputation DESC, u.TotalPosts DESC
+LIMIT 100;

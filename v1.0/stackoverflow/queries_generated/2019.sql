@@ -1,0 +1,58 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 12 THEN 1 END) AS SpamVotes,
+        SUM(CASE WHEN V.VoteTypeId IN (1, 6) THEN 1 ELSE 0 END) AS AcceptedOrCloseVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(BadgeCount.Class, 0) AS BadgeLevel,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS UserPostRank
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            UserId,
+            MAX(Class) AS Class
+        FROM Badges
+        GROUP BY UserId
+    ) AS BadgeCount ON P.OwnerUserId = BadgeCount.UserId
+),
+RecentEdits AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(PH.Comment, '; ') AS EditComments
+    FROM PostHistory PH
+    WHERE PH.CreationDate >= NOW() - INTERVAL '7 days'
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    PS.Title,
+    PS.Score,
+    PS.ViewCount,
+    US.UpVotes,
+    US.DownVotes,
+    US.SpamVotes,
+    PS.BadgeLevel,
+    RE.EditCount,
+    RE.LastEditDate,
+    RE.EditComments
+FROM UserVoteStats US
+JOIN PostStats PS ON US.UserId = PS.OwnerUserId
+LEFT JOIN RecentEdits RE ON PS.PostId = RE.PostId
+WHERE US.UpVotes > US.DownVotes
+ORDER BY PS.Score DESC, US.Reputation DESC
+LIMIT 100;

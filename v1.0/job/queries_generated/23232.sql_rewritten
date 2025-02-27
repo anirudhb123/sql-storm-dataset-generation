@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(ka.name, 'Unknown') AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ca.nr_order) AS actor_rank,
+        m.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ca ON ca.movie_id = m.id
+    LEFT JOIN 
+        aka_name ka ON ca.person_id = ka.person_id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, ka.name
+),
+
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        actor_name,
+        actor_rank,
+        production_year,
+        keyword_count
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year BETWEEN 1990 AND 2020 
+        AND actor_rank <= 3
+),
+
+MovieStatistics AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count,
+        AVG(keyword_count) AS avg_keywords
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        production_year
+)
+
+SELECT 
+    f.production_year,
+    m.movie_title,
+    CAST(f.actor_name AS text) as actor_name,
+    COALESCE(s.movie_count, 0) AS movie_count,
+    COALESCE(s.avg_keywords, 0) AS average_keywords
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    MovieStatistics s ON f.production_year = s.production_year
+JOIN 
+    title m ON m.id = f.movie_id
+WHERE 
+    f.actor_name LIKE 'J%' 
+    OR f.actor_name IS NULL
+ORDER BY 
+    f.production_year DESC, 
+    m.movie_title,
+    f.actor_rank;

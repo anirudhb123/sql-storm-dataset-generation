@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+SalesSummary AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND 
+        o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    r.r_name, 
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(rs.total_cost, 0) AS total_cost,
+    (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_cost, 0)) AS profit,
+    rs.s_name AS top_supplier
+FROM 
+    region r
+LEFT JOIN 
+    SalesSummary ss ON r.r_regionkey = ss.c_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON r.r_regionkey = rs.n_nationkey AND rs.rank = 1
+WHERE 
+    (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_cost, 0)) > 0
+ORDER BY 
+    profit DESC, total_sales DESC;

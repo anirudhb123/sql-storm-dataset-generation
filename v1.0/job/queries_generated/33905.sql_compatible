@@ -1,0 +1,84 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT
+        m.linked_movie_id,
+        lm.title,
+        lm.production_year,
+        mh.level + 1
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title lm ON ml.linked_movie_id = lm.id
+    WHERE
+        mh.level < 3 
+),
+GenreCounts AS (
+    SELECT
+        m.movie_id,
+        COUNT(DISTINCT kg.keyword) AS genre_count
+    FROM
+        MovieHierarchy m
+    LEFT JOIN
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN
+        keyword kg ON mk.keyword_id = kg.id
+    GROUP BY
+        m.movie_id
+),
+ActorStats AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY
+        ci.movie_id
+),
+FullMovieStats AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(gc.genre_count, 0) AS genre_count,
+        COALESCE(as.actor_count, 0) AS actor_count,
+        COALESCE(as.actor_names, '') AS actor_names
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        GenreCounts gc ON mh.movie_id = gc.movie_id
+    LEFT JOIN
+        ActorStats as ON mh.movie_id = as.movie_id
+)
+SELECT
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.genre_count,
+    f.actor_count,
+    f.actor_names,
+    RANK() OVER (ORDER BY f.actor_count DESC, f.genre_count ASC) AS rank
+FROM
+    FullMovieStats f
+WHERE
+    f.actor_count > 0
+ORDER BY
+    f.actor_count DESC,
+    f.genre_count ASC
+LIMIT 10;

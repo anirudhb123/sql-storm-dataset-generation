@@ -1,0 +1,37 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000  
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT ch.person_id) AS actor_count,
+    AVG(mh.production_year) AS average_production_year,
+    ARRAY_AGG(DISTINCT mh.title) AS related_movies
+FROM movie_keyword mk
+LEFT JOIN movie_info mi ON mk.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')  
+LEFT JOIN complete_cast cc ON mk.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON ci.movie_id = cc.movie_id
+LEFT JOIN aka_name ch ON ci.person_id = ch.person_id
+LEFT JOIN MovieHierarchy mh ON mk.movie_id = mh.movie_id
+WHERE mk.keyword IS NOT NULL
+  AND mk.keyword NOT LIKE '%incomplete%'  
+  AND mh.level = 0  
+GROUP BY mk.keyword
+ORDER BY actor_count DESC 
+FETCH FIRST 10 ROWS ONLY;

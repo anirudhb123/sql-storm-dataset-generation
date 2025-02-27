@@ -1,0 +1,52 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount, 
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), TopUsers AS (
+    SELECT 
+        us.*, 
+        RANK() OVER (ORDER BY us.Reputation DESC) AS ReputationRank
+    FROM UserStats us
+    WHERE us.PostCount > 0
+), ActivePosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.LastActivityDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.OwnerUserId,
+        t.TagName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM Posts p
+    JOIN Tags t ON t.Id IN (SELECT CAST(unnest(string_to_array(p.Tags, '>')) AS INTEGER))
+    WHERE p.CreationDate >= CAST('2024-10-01' AS DATE) - INTERVAL '30 days'
+), UserActivity AS (
+    SELECT 
+        tu.UserId, 
+        tu.DisplayName, 
+        COUNT(ap.PostId) AS ActivePostCount, 
+        MAX(ap.LastActivityDate) AS LastActivity
+    FROM TopUsers tu
+    LEFT JOIN ActivePosts ap ON tu.UserId = ap.OwnerUserId
+    GROUP BY tu.UserId, tu.DisplayName
+)
+SELECT 
+    ua.DisplayName, 
+    ua.ActivePostCount, 
+    RANK() OVER (ORDER BY ua.ActivePostCount DESC) AS ActivityRank,
+    ts.ReputationRank
+FROM UserActivity ua
+JOIN TopUsers ts ON ua.UserId = ts.UserId
+ORDER BY ua.ActivePostCount DESC, ts.ReputationRank;

@@ -1,0 +1,27 @@
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment, 
+    SUBSTRING(p.p_comment, CHARINDEX(' ', p.p_comment, 20) + 1, 20) AS second_part_comment, 
+    COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count, 
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_name LIKE '%Widget%' 
+    AND r.r_name = 'ASIA'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_comment
+HAVING 
+    COUNT(DISTINCT s.s_suppkey) > 5
+ORDER BY 
+    total_supply_cost DESC
+LIMIT 10;

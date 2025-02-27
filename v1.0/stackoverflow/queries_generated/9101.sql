@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 AND p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.AcceptedAnswers,
+        pv.UpVotes,
+        pv.DownVotes,
+        p.LastActivityDate
+    FROM 
+        Posts p
+    JOIN 
+        UserStats ps ON p.OwnerUserId = ps.UserId
+    LEFT JOIN 
+        PostVotes pv ON p.Id = pv.PostId
+)
+SELECT 
+    pwv.PostId,
+    pwv.Title,
+    pwv.TotalQuestions,
+    pwv.TotalAnswers,
+    pwv.AcceptedAnswers,
+    pv.UpVotes,
+    pv.DownVotes,
+    pwv.LastActivityDate,
+    DATEDIFF(CURRENT_TIMESTAMP, pwv.LastActivityDate) AS DaysSinceLastActivity
+FROM 
+    PostWithVotes pwv
+JOIN 
+    UserStats us ON pwv.TotalAnswers > 0
+WHERE 
+    us.Reputation > 100
+ORDER BY 
+    pwv.LastActivityDate DESC
+LIMIT 10;

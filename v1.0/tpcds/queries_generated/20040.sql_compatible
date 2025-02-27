@@ -1,0 +1,78 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.order_number,
+        ws.sold_date_sk,
+        ws.ext_sales_price,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ext_sales_price DESC) AS rank_sales,
+        COALESCE(NULLIF(ws.ext_discount_amt, 0), ws.ext_tax) AS adjusted_price,
+        CASE 
+            WHEN ws.quantity = 0 THEN NULL 
+            ELSE (ws.ext_sales_price / ws.quantity)
+        END AS price_per_unit
+    FROM 
+        web_sales ws 
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        ws.sold_date_sk BETWEEN 2450001 AND 2450601 
+        AND (ws.ext_sales_price IS NOT NULL OR ws.ext_discount_amt IS NOT NULL)
+),
+AddressAggregation AS (
+    SELECT 
+        ca.city,
+        COUNT(DISTINCT c.customer_sk) AS customer_count,
+        AVG(COALESCE(ca.gmt_offset, 0)) AS average_offset
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.city
+),
+CombinedResults AS (
+    SELECT 
+        rsa.web_site_sk,
+        rsa.order_number,
+        rsa.rank_sales,
+        aa.city,
+        aa.customer_count,
+        SUM(rsa.adjusted_price) AS total_adjusted_price,
+        COUNT(DISTINCT CASE WHEN rsa.price_per_unit IS NOT NULL THEN rsa.order_number END) AS unit_price_count
+    FROM 
+        RankedSales rsa
+    JOIN 
+        AddressAggregation aa ON rsa.web_site_sk = aa.customer_count
+    GROUP BY 
+        rsa.web_site_sk, rsa.order_number, aa.city, aa.customer_count
+)
+SELECT 
+    c.customer_id,
+    SUM(CASE 
+            WHEN cr.returned_date_sk IS NOT NULL THEN cr.return_quantity 
+            ELSE 0 
+        END) AS total_returns,
+    SUM(ws.ext_sales_price) AS total_sales,
+    COALESCE(NULLIF(c.email_address, ''), 'N/A') AS email,
+    CASE 
+        WHEN COUNT(DISTINCT cr.returned_date_sk) > 0 THEN 'Returns Exist' 
+        ELSE 'No Returns' 
+    END AS return_status
+FROM 
+    customer c
+LEFT JOIN 
+    store_returns cr ON cr.returning_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CombinedResults res ON res.order_number = cr.order_number
+LEFT JOIN 
+    web_sales ws ON ws.order_number = res.order_number 
+WHERE 
+    c.current_cdemo_sk IS NOT NULL
+    AND (c.birth_month = (EXTRACT(MONTH FROM DATE '2002-10-01') - 1) OR c.birth_month IS NULL)
+GROUP BY 
+    c.customer_id
+HAVING 
+    SUM(ws.ext_sales_price) > 100 AND COUNT(res.order_number) < 10
+ORDER BY 
+    total_returns DESC, total_sales DESC;

@@ -1,0 +1,67 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS cost_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ProductSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey 
+    WHERE 
+        o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+    GROUP BY 
+        l.l_partkey
+),
+NationalSales AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS nation_supply_cost,
+        SUM(COALESCE(ps.ps_supplycost * ps.ps_availqty, 0)) AS total_nation_sales
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    ps.l_partkey,
+    p.p_name,
+    p.p_retailprice,
+    IFNULL(ss.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(s.total_cost, 0) AS supplier_total_cost,
+    COALESCE(ps.total_sales, 0) AS part_total_sales,
+    ns.nation_supply_cost,
+    ns.total_nation_sales
+FROM 
+    part p
+LEFT JOIN 
+    lineitem ps ON p.p_partkey = ps.l_partkey
+LEFT JOIN 
+    SupplierStats s ON ps.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    NationalSales ns ON s.s_nationkey = ns.n_nationkey
+WHERE 
+    p.p_size > 10 AND 
+    (s.total_cost IS NOT NULL OR ns.total_nation_sales > 10000)
+    AND (p.p_comment LIKE '%fragile%' OR p.p_comment IS NULL)
+ORDER BY 
+    ps.total_sales DESC,
+    ns.nation_supply_cost ASC
+LIMIT 100;

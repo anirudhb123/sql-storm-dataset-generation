@@ -1,0 +1,48 @@
+
+WITH RECURSIVE UserHierarchy AS (
+    SELECT Id, Reputation, DisplayName, CreationDate, 1 AS Level
+    FROM Users
+    WHERE Reputation > 1000 
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.DisplayName, u.CreationDate, uh.Level + 1
+    FROM Users u
+    INNER JOIN UserHierarchy uh ON u.Reputation > uh.Reputation 
+    WHERE u.Id <> uh.Id
+), 
+PostStatistics AS (
+    SELECT p.Id AS PostId, 
+           COUNT(c.Id) AS CommentCount, 
+           COUNT(DISTINCT v.Id) AS VoteCount, 
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           AVG(COALESCE(p.Score, 0)) AS AverageScore
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year' 
+    GROUP BY p.Id
+), 
+UserPostStats AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName,
+           COALESCE(SUM(ps.CommentCount), 0) AS TotalComments,
+           COALESCE(SUM(ps.VoteCount), 0) AS TotalVotes,
+           COALESCE(SUM(ps.UpVotes), 0) AS TotalUpVotes,
+           COALESCE(SUM(ps.DownVotes), 0) AS TotalDownVotes,
+           AVG(ps.AverageScore) AS AvgScore
+    FROM Users u
+    LEFT JOIN PostStatistics ps ON u.Id = ps.PostId
+    WHERE u.Location IS NOT NULL 
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT uh.DisplayName,
+       uh.Reputation,
+       ups.TotalComments,
+       ups.TotalVotes,
+       ups.TotalUpVotes,
+       ups.TotalDownVotes,
+       ups.AvgScore
+FROM UserHierarchy uh
+LEFT JOIN UserPostStats ups ON uh.Id = ups.UserId
+ORDER BY uh.Reputation DESC, ups.TotalVotes DESC
+LIMIT 10;

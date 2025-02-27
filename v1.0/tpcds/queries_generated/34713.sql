@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_profit) AS total_profit
+    FROM catalog_sales
+    GROUP BY cs_sold_date_sk, cs_item_sk
+),
+sales_with_ranks AS (
+    SELECT 
+        sd.ws_sold_date_sk,
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.total_profit DESC) AS profit_rank
+    FROM sales_data sd
+),
+top_sales AS (
+    SELECT 
+        sa.ws_sold_date_sk,
+        sa.ws_item_sk,
+        sa.total_quantity,
+        sa.total_profit
+    FROM sales_with_ranks sa
+    WHERE sa.profit_rank <= 10
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+date_details AS (
+    SELECT 
+        d.d_date_sk,
+        d.d_month_seq,
+        d.d_year,
+        d.d_day_name
+    FROM date_dim d
+),
+final_query AS (
+    SELECT 
+        td.d_day_name,
+        dd.d_year,
+        cs.c_first_name,
+        cs.c_last_name,
+        s.item_desc,
+        ts.total_quantity,
+        ts.total_profit
+    FROM top_sales ts
+    JOIN item s ON ts.ws_item_sk = s.i_item_sk
+    JOIN customer_details cs ON cs.c_customer_sk = (SELECT MIN(c.c_customer_sk) 
+                                                    FROM customer c
+                                                    WHERE c.c_current_addr_sk = ts.ws_item_sk)
+    JOIN date_details td ON td.d_date_sk = ts.ws_sold_date_sk
+)
+SELECT 
+    f.d_day_name,
+    f.d_year,
+    f.c_first_name,
+    f.c_last_name,
+    f.item_desc,
+    f.total_quantity,
+    f.total_profit,
+    COALESCE(f.total_profit / NULLIF(SUM(f.total_profit) OVER (PARTITION BY f.d_year), 0), 0) AS profit_ratio
+FROM final_query f
+ORDER BY f.d_year, f.total_profit DESC;

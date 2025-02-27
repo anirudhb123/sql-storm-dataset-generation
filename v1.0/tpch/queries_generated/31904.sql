@@ -1,0 +1,40 @@
+WITH RECURSIVE CTE_Supplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_availqty, p.p_name
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_availqty, p.p_name
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NULL
+        OR (ps.ps_availqty > (SELECT AVG(ps.ps_availqty) FROM partsupp ps2 WHERE ps2.ps_partkey = ps.ps_partkey))
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+    GROUP BY o.o_orderkey
+),
+CustomerRank AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING'
+)
+SELECT DISTINCT c.c_name, c.c_acctbal, COALESCE(ss.s_name, 'No Supplier') AS supplier_name, 
+       os.total_sales, cr.cust_rank
+FROM CustomerRank cr
+LEFT OUTER JOIN CTE_Supplier ss ON cr.c_custkey = ss.s_suppkey
+JOIN OrderSummary os ON os.o_orderkey IN (SELECT l.l_orderkey 
+                                           FROM lineitem l 
+                                           WHERE l.l_partkey IN (SELECT p.p_partkey 
+                                                                 FROM part p 
+                                                                 WHERE p.p_retailprice < 100.00))
+WHERE cr.cust_rank <= 10 
+ORDER BY os.total_sales DESC, c.c_acctbal DESC;

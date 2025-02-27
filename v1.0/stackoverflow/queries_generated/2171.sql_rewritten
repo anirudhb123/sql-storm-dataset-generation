@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 10
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1 
+    GROUP BY 
+        b.UserId
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN ph.CreationDate END) AS LastClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.CreationDate END) AS LastDeleted
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.AnswerCount,
+    COALESCE(pb.LastClosed, NULL) AS LastClosedDate,
+    COALESCE(pb.LastDeleted, NULL) AS LastDeletedDate,
+    COALESCE(bs.BadgeNames, 'No Gold Badges') AS GoldBadges,
+    us.UpVotes,
+    us.DownVotes,
+    us.TotalPosts
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+LEFT JOIN 
+    PostActivity pb ON r.PostId = pb.PostId
+LEFT JOIN 
+    TopBadges bs ON u.Id = bs.UserId
+JOIN 
+    UserStats us ON u.Id = us.UserId
+WHERE 
+    r.Rank <= 5 
+ORDER BY 
+    u.DisplayName, r.Score DESC;

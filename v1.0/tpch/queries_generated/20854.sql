@@ -1,0 +1,54 @@
+WITH RECURSIVE region_sales AS (
+    SELECT
+        r.r_regionkey,
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY r.r_regionkey, r.r_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+), 
+customer_sales AS (
+    SELECT
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_customer_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey
+), 
+ranked_customers AS (
+    SELECT
+        cs.c_custkey,
+        cs.total_customer_sales,
+        cs.order_count,
+        ROW_NUMBER() OVER (ORDER BY cs.total_customer_sales DESC) AS customer_rank
+    FROM customer_sales cs
+    WHERE cs.total_customer_sales > (SELECT AVG(total_customer_sales) FROM customer_sales)
+)
+SELECT 
+    r.r_name AS region_name,
+    rs.total_sales AS region_total_sales,
+    COALESCE(rc.total_customer_sales, 0) AS customer_sales,
+    rc.order_count,
+    CASE
+        WHEN rc.customer_rank IS NOT NULL THEN 'Top Customer'
+        ELSE 'Other Customer'
+    END AS customer_category
+FROM region_sales rs
+LEFT JOIN ranked_customers rc ON rs.r_regionkey = (SELECT n.n_regionkey FROM nation n 
+                                                  JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+                                                  JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+                                                  WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p 
+                                                                         WHERE p.p_size = (SELECT MAX(p_size) FROM part WHERE p_retailprice IS NOT NULL) 
+                                                                         LIMIT 1) 
+                                                  LIMIT 1)
+ORDER BY region_total_sales DESC, customer_sales DESC
+LIMIT 20;

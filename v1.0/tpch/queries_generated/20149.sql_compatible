@@ -1,0 +1,38 @@
+
+WITH RecursiveCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(line.l_extendedprice * (1 - line.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem line ON o.o_orderkey = line.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+FilteredOrders AS (
+    SELECT o.c_custkey AS custkey, od.total_price, 
+           CASE 
+              WHEN od.total_price > 1000 THEN 'High'
+              WHEN od.total_price BETWEEN 500 AND 1000 THEN 'Medium'
+              ELSE 'Low' 
+           END AS price_category
+    FROM customer o
+    JOIN OrderDetails od ON o.c_custkey = od.o_custkey
+)
+SELECT r.r_name, COUNT(DISTINCT fo.custkey) AS customer_count,
+       AVG(fo.total_price) AS avg_order_value,
+       MAX(fo.total_price) AS max_order_value,
+       MIN(fo.total_price) AS min_order_value,
+       JSON_AGG(fo.price_category) AS price_categories
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN FilteredOrders fo ON c.c_custkey = fo.custkey
+LEFT JOIN RecursiveCTE rc ON rc.s_suppkey = c.c_custkey
+WHERE fo.total_price IS NOT NULL OR (rc.s_acctbal IS NULL AND rc.rn = 1)
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT fo.custkey) > 5
+ORDER BY r.r_name DESC
+LIMIT 10;

@@ -1,0 +1,86 @@
+
+WITH posts_with_tags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.LastActivityDate, p.Score, p.ViewCount, p.Tags
+),
+active_users AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 500
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+post_details AS (
+    SELECT 
+        pwt.PostId,
+        pwt.Title,
+        pwt.Body,
+        pwt.CreationDate,
+        pwt.LastActivityDate,
+        pwt.Score,
+        pwt.ViewCount,
+        pwt.TagList,
+        au.DisplayName AS TopUser,
+        au.Reputation AS UserReputation,
+        au.BadgeCount AS UserBadgeCount,
+        au.CommentCount AS UserCommentCount,
+        au.UpvoteCount AS UserUpvoteCount
+    FROM 
+        posts_with_tags pwt
+    JOIN 
+        active_users au ON pwt.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = au.UserId) 
+    ORDER BY 
+        pwt.Score DESC, pwt.ViewCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Body,
+    pd.CreationDate,
+    pd.LastActivityDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.TagList,
+    pd.TopUser,
+    pd.UserReputation,
+    pd.UserBadgeCount,
+    pd.UserCommentCount,
+    pd.UserUpvoteCount
+FROM 
+    post_details pd
+WHERE 
+    pd.LastActivityDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

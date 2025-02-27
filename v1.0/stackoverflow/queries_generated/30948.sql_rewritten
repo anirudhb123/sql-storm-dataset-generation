@@ -1,0 +1,69 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.CreationDate,
+        A.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts A
+    INNER JOIN 
+        RecursiveCTE R ON A.ParentId = R.PostId
+)
+, RecentVotes AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 4 THEN 1 END) AS OffensiveVotes
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        V.PostId
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    R.CreationDate,
+    R.AcceptedAnswerId,
+    COALESCE(V.Upvotes, 0) AS Upvotes,
+    COALESCE(V.Downvotes, 0) AS Downvotes,
+    COALESCE(V.OffensiveVotes, 0) AS OffensiveVotes,
+    COUNT(CM.Id) AS CommentCount,
+    SUM(B.Class) AS TotalBadgeClass,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    CASE 
+        WHEN R.Level > 1 THEN 'Sub-Question'
+        ELSE 'Main-Question'
+    END AS QuestionType
+FROM 
+    RecursiveCTE R
+LEFT JOIN 
+    RecentVotes V ON R.PostId = V.PostId
+LEFT JOIN 
+    Comments CM ON R.PostId = CM.PostId
+LEFT JOIN 
+    Badges B ON B.UserId = R.PostId  
+LEFT JOIN 
+    Posts P ON P.Id = R.PostId
+LEFT JOIN 
+    Tags T ON T.Id = P.TagId  
+WHERE 
+    R.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    R.PostId, R.Title, R.CreationDate, R.AcceptedAnswerId, R.Level
+ORDER BY 
+    R.CreationDate DESC, Upvotes DESC;

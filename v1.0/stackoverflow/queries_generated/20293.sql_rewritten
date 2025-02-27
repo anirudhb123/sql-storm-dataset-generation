@@ -1,0 +1,94 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+),
+
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.CreationDate,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+
+PostCloseReasons AS (
+    SELECT 
+        p.Id AS PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment ELSE NULL END) AS CloseReason
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    COALESCE(pcr.CloseReason, 'N/A') AS CloseReason,
+    uvs.UpVotes,
+    uvs.DownVotes,
+    CASE 
+        WHEN uvs.UpVotes > uvs.DownVotes THEN 'Positive'
+        WHEN uvs.DownVotes > uvs.UpVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS UserVoteSentiment,
+    CASE 
+        WHEN rp.CommentCount > 0 THEN 'Engaged'
+        ELSE 'Quiet'
+    END AS EngagementStatus,
+    STRING_AGG(pht.Name, ', ') FILTER (WHERE pht.Id IS NOT NULL) AS HistoryTypes
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    PostCloseReasons pcr ON rp.PostId = pcr.PostId
+LEFT JOIN 
+    UserVoteStats uvs ON rp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = uvs.UserId)
+LEFT JOIN 
+    RecursivePostHistory rph ON rp.PostId = rph.PostId AND rph.rn = 1
+LEFT JOIN 
+    PostHistoryTypes pht ON rph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    rp.PostId, rp.Title, rp.OwnerDisplayName, rp.CommentCount, rp.UpVoteCount, pcr.CloseReason, uvs.UpVotes, uvs.DownVotes
+ORDER BY 
+    rp.CreationDate DESC, rp.UpVoteCount DESC;

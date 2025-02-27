@@ -1,0 +1,85 @@
+
+WITH RecursiveSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_quantity, 
+        ws.ws_net_profit,
+        (SELECT 
+            SUM(ws_quantity) 
+         FROM 
+            web_sales 
+         WHERE 
+            ws_item_sk = web_sales.ws_item_sk
+            AND ws_order_number <= web_sales.ws_order_number) AS cumulative_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_order_number) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+SalesSummary AS (
+    SELECT 
+        ws_item_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        AVG(ws_net_profit) AS avg_profit 
+    FROM 
+        RecursiveSales 
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        item.i_item_id, 
+        item.i_product_name, 
+        ss.total_quantity, 
+        ss.total_profit, 
+        ss.avg_profit,
+        RANK() OVER (ORDER BY ss.total_profit DESC) AS item_rank
+    FROM 
+        SalesSummary ss
+    JOIN 
+        item ON ss.ws_item_sk = item.i_item_sk
+    WHERE 
+        ss.total_quantity > 100
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.total_quantity,
+    ti.total_profit,
+    ti.avg_profit,
+    (SELECT 
+        COUNT(DISTINCT c_customer_id)
+     FROM 
+        customer 
+     WHERE 
+        c_current_cdemo_sk IN (SELECT 
+                                    cd_demo_sk 
+                                 FROM 
+                                    customer_demographics 
+                                 WHERE 
+                                    cd_marital_status = 'M' 
+                                    AND cd_gender = 'F')) AS female_married_customers,
+    (SELECT 
+        AVG(c_birth_year)
+     FROM 
+        customer 
+     WHERE 
+        c_birth_month IS NOT NULL) AS avg_birth_year,
+    (SELECT 
+        MAX(p.p_discount_active = 'Y') 
+     FROM 
+        promotion p 
+     WHERE 
+        p.p_item_sk = ti.ws_item_sk
+        AND p.p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    ) AS is_promotion_active
+FROM 
+    TopItems ti
+WHERE 
+    ti.item_rank <= 10
+ORDER BY 
+    ti.total_profit DESC;

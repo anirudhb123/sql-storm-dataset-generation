@@ -1,0 +1,55 @@
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        c.kind AS role_type,
+        k.keyword AS movie_keyword,
+        co.name AS company_name
+    FROM 
+        aka_title t
+    INNER JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    INNER JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    INNER JOIN 
+        role_type c ON ci.role_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND a.name IS NOT NULL
+        AND k.keyword IS NOT NULL
+),
+
+summary AS (
+    SELECT
+        movie_title,
+        production_year,
+        STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+        STRING_AGG(DISTINCT role_type, ', ') AS roles,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT company_name, ', ') AS production_companies
+    FROM 
+        movie_data
+    GROUP BY 
+        movie_title, production_year
+)
+
+SELECT
+    movie_title,
+    production_year,
+    actors,
+    roles,
+    keywords,
+    production_companies
+FROM 
+    summary
+ORDER BY 
+    production_year DESC, movie_title;

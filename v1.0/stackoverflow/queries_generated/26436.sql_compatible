@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(rc.ClosedReason, 'Open') AS ClosureStatus,
+        ROW_NUMBER() OVER (PARTITION BY u.Location ORDER BY p.Score DESC) AS RankByLocation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN (
+        SELECT 
+            ph.PostId,
+            cr.Name AS ClosedReason
+        FROM 
+            PostHistory ph
+        JOIN 
+            CloseReasonTypes cr ON CAST(ph.Comment AS INTEGER) = cr.Id
+        WHERE 
+            ph.PostHistoryTypeId IN (10, 11) 
+    ) rc ON p.Id = rc.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, p.CreationDate, p.ViewCount, p.Score, 
+        u.DisplayName, rc.ClosedReason
+),
+
+TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostsCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        t.TagName
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.ClosureStatus,
+    ts.TagName AS PopularTag,
+    ts.PostsCount AS TagPostsCount,
+    ts.AverageScore AS TagAverageScore
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStats ts ON rp.Tags LIKE '%' || ts.TagName || '%'
+WHERE 
+    rp.RankByLocation <= 3 
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.Score DESC;

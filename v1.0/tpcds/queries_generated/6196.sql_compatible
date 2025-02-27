@@ -1,0 +1,53 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_id,
+        s.s_store_id,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sale_price,
+        SUM(ws.ws_ext_discount_amt) AS total_discounts
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    LEFT JOIN 
+        catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND 
+                                   (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        w.w_warehouse_id, s.s_store_id
+),
+Demographics AS (
+    SELECT 
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS total_customers
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY 
+        cd.cd_gender, hd.hd_income_band_sk
+)
+SELECT 
+    sd.w_warehouse_id,
+    sd.s_store_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_sale_price,
+    sd.total_discounts,
+    d.cd_gender,
+    d.hd_income_band_sk,
+    d.total_customers
+FROM 
+    SalesData sd
+JOIN 
+    Demographics d ON sd.w_warehouse_id IN (SELECT DISTINCT w_warehouse_id FROM warehouse WHERE w_warehouse_sk % 2 = 0)
+ORDER BY 
+    sd.total_sales DESC, sd.total_orders DESC;

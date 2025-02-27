@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ss.store_sk,
+        ss.sold_date_sk,
+        SUM(ss.ext_sales_price) AS total_sales,
+        COUNT(ss.ticket_number) AS total_transactions,
+        ROW_NUMBER() OVER (PARTITION BY ss.store_sk ORDER BY SUM(ss.ext_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales ss
+    WHERE 
+        ss.sold_date_sk >= (SELECT MAX(d.date_sk) FROM date_dim d WHERE d.year = 2023) - 30
+    GROUP BY 
+        ss.store_sk, ss.sold_date_sk
+), customer_info AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        cd.gender,
+        hd.income_band_sk,
+        ROW_NUMBER() OVER (PARTITION BY c.customer_sk ORDER BY c.birth_year DESC) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.customer_sk = hd.demo_sk
+    WHERE 
+        cd.marital_status = 'M'
+        AND (hd.income_band_sk IS NULL OR hd.income_band_sk IN (SELECT ib.income_band_sk FROM income_band ib WHERE ib.lower_bound < 50000))
+),
+promotion_stats AS (
+    SELECT 
+        p.promo_name,
+        COUNT(ps.order_number) AS total_promo_sales,
+        SUM(ps.ext_sales_price) AS promo_sales_amount
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ps ON p.promo_sk = ps.promo_sk
+    GROUP BY 
+        p.promo_name
+),
+date_range AS (
+    SELECT 
+        d.date_sk,
+        d.date,
+        ROW_NUMBER() OVER (ORDER BY d.date DESC) AS day_rank
+    FROM 
+        date_dim d
+    WHERE 
+        d.date BETWEEN '2023-01-01' AND '2023-12-31'
+)
+
+SELECT 
+    s.store_sk,
+    s.total_sales,
+    ci.first_name,
+    ci.last_name,
+    ci.gender,
+    ci.income_band_sk,
+    ps.promo_sales_amount,
+    dr.date
+FROM 
+    sales_cte s
+LEFT JOIN 
+    customer_info ci ON s.store_sk = ci.customer_sk
+LEFT JOIN 
+    promotion_stats ps ON ps.total_promo_sales > 50
+INNER JOIN 
+    date_range dr ON dr.day_rank <= 30
+WHERE 
+    s.sales_rank = 1
+    AND (ci.gender IS NULL OR ci.gender = 'F')
+ORDER BY 
+    s.total_sales DESC, 
+    ci.last_name ASC;

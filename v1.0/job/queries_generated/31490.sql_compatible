@@ -1,0 +1,73 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS hierarchy_level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.hierarchy_level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+),
+actor_performance AS (
+    SELECT 
+        a.person_id,
+        a.movie_id,
+        COUNT(DISTINCT a.id) AS role_count,
+        SUM(CASE WHEN c.note IS NOT NULL THEN 1 ELSE 0 END) AS notable_roles
+    FROM 
+        cast_info a
+    LEFT JOIN 
+        comp_cast_type c ON a.person_role_id = c.id
+    GROUP BY 
+        a.person_id, a.movie_id
+),
+ranked_actors AS (
+    SELECT 
+        ap.person_id,
+        ap.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY ap.movie_id ORDER BY ap.role_count DESC, ap.notable_roles DESC) AS role_rank
+    FROM 
+        actor_performance ap
+),
+final_selection AS (
+    SELECT 
+        m.movie_id,
+        m.title, 
+        m.production_year,
+        n.name AS actor_name,
+        ra.role_rank
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        ranked_actors ra ON ra.movie_id = m.movie_id
+    LEFT JOIN 
+        aka_name n ON n.person_id = ra.person_id
+    WHERE 
+        ra.role_rank <= 3 
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    STRING_AGG(DISTINCT fs.actor_name, ', ') AS top_actors
+FROM 
+    final_selection fs
+GROUP BY 
+    fs.movie_id, fs.title, fs.production_year
+ORDER BY 
+    fs.production_year DESC, 
+    fs.movie_id;

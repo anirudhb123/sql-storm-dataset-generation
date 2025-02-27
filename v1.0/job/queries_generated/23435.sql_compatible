@@ -1,0 +1,76 @@
+
+WITH RecursiveMovieTitles AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY mt.kind_id ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), 
+CharacterCount AS (
+    SELECT 
+        c.movie_id,
+        SUM(LENGTH(c.name) - LENGTH(REPLACE(c.name, ' ', '')) + 1) AS character_count
+    FROM 
+        char_name c
+    GROUP BY 
+        c.movie_id
+),
+CompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT co.id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+KeywordUsage AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MaxProductionYear AS (
+    SELECT 
+        a.kind_id,
+        MAX(a.production_year) AS max_year
+    FROM 
+        RecursiveMovieTitles a
+    GROUP BY 
+        a.kind_id
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    cc.character_count,
+    co.company_count,
+    ku.keyword_count,
+    CASE 
+        WHEN mt.production_year IS NOT NULL THEN 'Known Year'
+        WHEN mt.production_year IS NULL AND mt.kind_id IN (SELECT kind_id FROM MaxProductionYear WHERE max_year < 1990) THEN 'Old Movie'
+        ELSE 'Unknown Year' 
+    END AS year_status
+FROM 
+    RecursiveMovieTitles mt
+LEFT JOIN 
+    CharacterCount cc ON mt.movie_id = cc.movie_id
+LEFT JOIN 
+    CompanyCounts co ON mt.movie_id = co.movie_id
+LEFT JOIN 
+    KeywordUsage ku ON mt.movie_id = ku.movie_id
+WHERE 
+    mt.rn = 1
+ORDER BY 
+    mt.production_year DESC,
+    cc.character_count DESC NULLS LAST,
+    co.company_count DESC;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price > 100
+
+    UNION ALL
+
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_profit,
+        level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+        AND (cs_item_sk, cs_order_number) IN (SELECT ws_item_sk, ws_order_number FROM web_sales WHERE ws_sales_price > 100)
+),
+
+Sales_Summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+
+Returns_Summary AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_value,
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+
+SELECT 
+    s.ws_item_sk,
+    COALESCE(ss.total_net_profit, 0) AS total_sales_profit,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_value, 0) AS total_return_value,
+    COALESCE(rs.total_return_quantity, 0) AS total_return_quantity,
+    CASE 
+        WHEN COALESCE(rs.total_returns, 0) > 0 THEN (COALESCE(ss.total_net_profit, 0) / rs.total_returns) 
+        ELSE NULL 
+    END AS profit_per_return,
+    DENSE_RANK() OVER (ORDER BY COALESCE(ss.total_net_profit, 0) DESC) AS sales_rank
+FROM 
+    Sales_Summary ss
+FULL OUTER JOIN 
+    Returns_Summary rs ON ss.ws_item_sk = rs.sr_item_sk
+JOIN 
+    Sales_CTE s ON ss.ws_item_sk = s.ws_item_sk
+WHERE 
+    COALESCE(ss.total_net_profit, 0) > 0
+    OR COALESCE(rs.total_returns, 0) > 0
+ORDER BY 
+    sales_rank;

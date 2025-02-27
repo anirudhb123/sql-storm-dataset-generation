@@ -1,0 +1,48 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id, 
+        at.title AS movie_title, 
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+SELECT 
+    ah.name AS actor_name,
+    at.movie_title,
+    COALESCE(mk.keyword, 'No keyword') AS keyword,
+    COUNT(DISTINCT mc.company_id) AS production_company_count,
+    ROW_NUMBER() OVER (PARTITION BY ah.person_id ORDER BY at.production_year DESC) AS rn
+FROM 
+    aka_name ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    MovieHierarchy at ON ci.movie_id = at.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.movie_id = mk.movie_id
+LEFT JOIN 
+    movie_companies mc ON at.movie_id = mc.movie_id
+WHERE 
+    ci.note IS NULL 
+    AND (at.production_year <= 2023 OR at.production_year IS NULL)
+GROUP BY 
+    ah.name, at.movie_title, mk.keyword
+HAVING 
+    COUNT(DISTINCT mc.company_id) > 1
+ORDER BY 
+    actor_name, movie_title;

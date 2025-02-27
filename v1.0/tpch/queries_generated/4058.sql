@@ -1,0 +1,61 @@
+WITH RegionSummary AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        r.r_name
+),
+CustomerStats AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price,
+        COUNT(DISTINCT l.l_partkey) AS parts_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    rs.region_name,
+    cs.order_count,
+    cs.avg_order_value,
+    lid.total_extended_price,
+    lid.parts_count,
+    CASE 
+        WHEN cs.order_count > 10 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_type
+FROM 
+    RegionSummary rs
+LEFT JOIN 
+    CustomerStats cs ON cs.c_nationkey IN (SELECT DISTINCT n.n_nationkey FROM nation n WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = rs.region_name))
+LEFT JOIN 
+    LineItemDetails lid ON lid.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = cs.c_nationkey))
+WHERE 
+    rs.total_supply_cost > (
+        SELECT AVG(total_supply_cost) FROM RegionSummary
+    )
+ORDER BY 
+    rs.region_name, cs.order_count DESC;

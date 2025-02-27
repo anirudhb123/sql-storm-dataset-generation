@@ -1,0 +1,53 @@
+WITH RecursiveTagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+UserBadgeCounts AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(DISTINCT Badges.Id) AS BadgeCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+UserVoteCounts AS (
+    SELECT 
+        Users.Id AS UserId,
+        COUNT(Votes.Id) AS VoteCount
+    FROM 
+        Users
+    LEFT JOIN 
+        Votes ON Users.Id = Votes.UserId
+    GROUP BY 
+        Users.Id
+)
+SELECT 
+    u.DisplayName,
+    r.TagName,
+    r.PostCount AS TotalPostsWithTag,
+    COALESCE(b.BadgeCount, 0) AS TotalBadges,
+    COALESCE(v.VoteCount, 0) AS TotalVotes
+FROM 
+    Users u
+JOIN 
+    UserBadgeCounts b ON u.Id = b.UserId
+JOIN 
+    UserVoteCounts v ON u.Id = v.UserId
+JOIN 
+    RecursiveTagCounts r ON r.PostCount > 10  -- Filter for tags with more than 10 posts
+WHERE 
+    u.Reputation > 1000  -- Only include users with a Reputation over 1000
+ORDER BY 
+    r.PostCount DESC, 
+    b.BadgeCount DESC;

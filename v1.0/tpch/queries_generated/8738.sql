@@ -1,0 +1,52 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(wo.total_revenue) AS customer_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        RankedOrders wo ON o.o_orderkey = wo.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cr.c_custkey,
+    cr.c_name,
+    cr.customer_revenue,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    CustomerRevenue cr
+JOIN 
+    nation n ON cr.c_custkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    orders o ON cr.c_custkey = o.o_custkey
+WHERE 
+    cr.customer_revenue > (
+        SELECT AVG(customer_revenue) 
+        FROM CustomerRevenue
+    )
+GROUP BY 
+    cr.c_custkey, cr.c_name, r.r_name
+ORDER BY 
+    cr.customer_revenue DESC
+LIMIT 10;

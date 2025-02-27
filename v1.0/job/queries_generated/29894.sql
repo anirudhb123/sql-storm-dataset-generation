@@ -1,0 +1,53 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name) AS companies,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aka_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        aka_name ak ON t.movie_id = ak.person_id
+    GROUP BY 
+        t.id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.companies,
+    md.aka_names,
+    COUNT(DISTINCT ci.person_id) AS cast_count,
+    GROUP_CONCAT(DISTINCT p.info ORDER BY p.info) AS person_info
+FROM 
+    movie_details md
+LEFT JOIN 
+    complete_cast cc ON md.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    person_info p ON ci.person_id = p.person_id
+WHERE 
+    md.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    md.movie_id, 
+    md.title, 
+    md.production_year,
+    md.keywords,
+    md.companies,
+    md.aka_names
+ORDER BY 
+    md.production_year DESC, 
+    md.title;

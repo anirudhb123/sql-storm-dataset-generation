@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes only
+    WHERE p.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CommentCount,
+        rp.VoteCount
+    FROM RankedPosts rp
+    WHERE rp.rn <= 5 -- Top 5 per PostType
+)
+SELECT 
+    tp.Title,
+    tp.CommentCount,
+    tp.VoteCount,
+    STRING_AGG(t.TagName, ', ') AS RelatedTags,
+    u.DisplayName AS OwnerDisplayName,
+    p.CreationDate,
+    PH.LastEditDate
+FROM TopPosts tp
+JOIN Posts p ON tp.PostId = p.Id
+JOIN Users u ON p.OwnerUserId = u.Id
+JOIN (
+    SELECT 
+        PostId,
+        STRING_AGG(TagName, ', ') AS TagName
+    FROM Tags 
+    WHERE TagName IS NOT NULL
+    GROUP BY PostId
+) t ON tp.PostId = t.PostId
+LEFT JOIN PostHistory PH ON p.Id = PH.PostId
+WHERE PH.PostHistoryTypeId IN (4, 5) -- Edited Title or Body
+GROUP BY 
+    tp.Title, 
+    tp.CommentCount, 
+    tp.VoteCount, 
+    OwnerDisplayName, 
+    p.CreationDate,
+    PH.LastEditDate
+ORDER BY tp.VoteCount DESC, tp.CommentCount DESC;

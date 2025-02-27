@@ -1,0 +1,67 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rank
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk, ss_item_sk
+),
+top_sales AS (
+    SELECT 
+        sh.ss_store_sk,
+        sh.ss_item_sk,
+        sh.total_sales,
+        COALESCE(i.i_item_desc, 'Unknown Item') AS item_description,
+        COUNT(DISTINCT s.s_store_name) FILTER (WHERE sh.total_sales > 10000) AS store_count
+    FROM 
+        sales_hierarchy sh
+    LEFT JOIN 
+        item i ON sh.ss_item_sk = i.i_item_sk
+    JOIN 
+        store s ON sh.ss_store_sk = s.s_store_sk
+    WHERE 
+        sh.rank <= 5
+    GROUP BY 
+        sh.ss_store_sk, sh.ss_item_sk, i.i_item_desc
+),
+return_analysis AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS total_return_amount,
+        COUNT(wr_order_number) AS returns_count
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    ts.total_sales,
+    COALESCE(ra.total_return_amount, 0) AS total_return_amount,
+    ra.returns_count,
+    (CASE 
+        WHEN ra.total_return_amount IS NULL THEN 'No Returns'
+        WHEN ra.total_return_amount > 0 THEN 'Returned'
+        ELSE 'Not Returned' 
+     END) AS return_status
+FROM 
+    customer c
+JOIN 
+    top_sales ts ON c.c_customer_sk = ts.ss_store_sk
+LEFT JOIN 
+    return_analysis ra ON c.c_customer_sk = ra.wr_returning_customer_sk
+WHERE 
+    c.c_current_cdemo_sk IN (
+        SELECT cd_demo_sk 
+        FROM customer_demographics 
+        WHERE cd_gender = 'F' AND cd_marital_status = 'M'
+    )
+ORDER BY 
+    ts.total_sales DESC, c.c_last_name, c.c_first_name
+LIMIT 100;

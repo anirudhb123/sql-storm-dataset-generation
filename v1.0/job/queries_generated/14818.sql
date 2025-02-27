@@ -1,0 +1,30 @@
+SELECT 
+    t.title,
+    a.name AS actor_name,
+    ct.kind AS cast_type,
+    c.name AS company_name,
+    m.production_year,
+    k.keyword
+FROM 
+    title AS t
+JOIN 
+    complete_cast AS cc ON t.id = cc.movie_id
+JOIN 
+    cast_info AS ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name AS a ON ci.person_id = a.person_id
+JOIN 
+    movie_companies AS mc ON t.id = mc.movie_id
+JOIN 
+    company_name AS c ON mc.company_id = c.id
+JOIN 
+    comp_cast_type AS ct ON ci.role_id = ct.id
+JOIN 
+    movie_keyword AS mk ON t.id = mk.movie_id
+JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    t.production_year DESC, 
+    a.name;

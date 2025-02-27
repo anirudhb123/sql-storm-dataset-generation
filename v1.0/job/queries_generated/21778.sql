@@ -1,0 +1,63 @@
+WITH RecursiveActorRoles AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS role_rank
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.person_id, a.name
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT co.name) AS company_names
+    FROM aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name co ON mc.company_id = co.id
+    GROUP BY t.id, t.title, t.production_year
+),
+FullData AS (
+    SELECT 
+        a.actor_name,
+        md.title,
+        md.production_year,
+        md.keywords,
+        md.company_names,
+        ra.total_movies
+    FROM RecursiveActorRoles ra
+    JOIN MovieDetails md ON ra.total_movies > 1 AND ra.role_rank = 1
+    WHERE ra.total_movies BETWEEN 2 AND 10
+)
+SELECT 
+    actor_name,
+    title,
+    production_year,
+    unnest(keywords) AS keyword,
+    unnest(company_names) AS company_name,
+    total_movies
+FROM FullData
+WHERE ARRAY_LENGTH(company_names, 1) > 0 -- Only movies associated with companies
+ORDER BY production_year DESC, total_movies DESC, actor_name
+LIMIT 100;
+
+-- Additionally, the following query checks for obscure semantics by handling NULLs
+SELECT 
+    a.actor_name,
+    COALESCE(md.title, 'Untitled') AS movie_title,
+    md.production_year,
+    COALESCE(md.keywords, ARRAY[NULL]) AS keywords,
+    CASE 
+        WHEN md.production_year IS NULL THEN 'Year Unknown'
+        ELSE 'Year Known' 
+    END AS year_status
+FROM RecursiveActorRoles ra
+FULL OUTER JOIN MovieDetails md ON ra.total_movies > 0
+WHERE (ra.actor_name IS NOT NULL OR md.title IS NOT NULL)
+  AND COALESCE(md.keywords, ARRAY[NULL]) IS NOT NULL
+ORDER BY actor_name, movie_title;

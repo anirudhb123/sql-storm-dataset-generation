@@ -1,0 +1,123 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.OwnerUserId,
+        CAST(1 AS int) AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.AcceptedAnswerId,
+        a.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON a.ParentId = rp.PostId
+    WHERE 
+        a.PostTypeId = 2  
+),
+
+LastActivityCTE AS (
+    SELECT 
+        PostId,
+        MAX(LastActivityDate) AS MostRecentActivity
+    FROM 
+        Posts
+    GROUP BY 
+        PostId
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS QuestionCount,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+ActiveUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.QuestionCount,
+        us.AnswerCount,
+        COALESCE(la.MostRecentActivity, '1900-01-01') AS LastActivity
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        LastActivityCTE la ON us.UserId = la.PostId
+    WHERE 
+        us.TotalViews > 0 
+        AND us.QuestionCount > 0 
+    ORDER BY 
+        LastActivity DESC
+),
+
+PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts p ON p.Tags ILIKE '%' || Tags.TagName || '%'
+    GROUP BY 
+        Tags.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName AS Owner,
+    u.Reputation AS OwnerReputation,
+    rp.Score AS PostScore,
+    rp.ViewCount,
+    la.MostRecentActivity,
+    tt.TagName,
+    pp.PostCount AS PopularityRank
+FROM 
+    RecursivePostCTE rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+JOIN 
+    LastActivityCTE la ON la.PostId = rp.PostId
+LEFT JOIN 
+    PopularTags tt ON tt.TagName = ANY (string_to_array(rp.Tags, ','))
+LEFT JOIN 
+    (SELECT 
+         Tags.TagName,
+         COUNT(p.Id) AS PostCount
+     FROM 
+         Tags
+     JOIN 
+         Posts p ON p.Tags ILIKE '%' || Tags.TagName || '%'
+     GROUP BY 
+         Tags.TagName) pp ON pp.TagName = tt.TagName
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

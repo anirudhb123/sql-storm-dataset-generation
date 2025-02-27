@@ -1,0 +1,66 @@
+WITH TotalSales AS (
+    SELECT 
+        l_partkey, 
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        COUNT(l_orderkey) AS order_count
+    FROM lineitem
+    WHERE l_shipdate >= '2023-01-01' AND l_shipdate < '2024-01-01'
+    GROUP BY l_partkey
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+FilteredSuppliers AS (
+    SELECT 
+        p.partkey,
+        p.p_name,
+        p.p_brand,
+        p.supplier,
+        p.ps_availqty,
+        p.ps_supplycost,
+        p.total_sales,
+        CASE 
+            WHEN p.total_sales IS NULL THEN 0 
+            ELSE p.total_sales 
+        END AS adjusted_sales
+    FROM PartSupplierInfo p
+    JOIN TotalSales t ON p.p_partkey = t.l_partkey
+    WHERE p.rn = 1
+)
+SELECT 
+    fs.p_name AS part_name,
+    fs.p_brand AS part_brand,
+    fs.s_name AS supplier_name,
+    fs.ps_availqty AS available_quantity,
+    fs.ps_supplycost AS supply_cost,
+    fs.total_sales AS total_sales,
+    fs.adjusted_sales AS adjusted_total_sales
+FROM FilteredSuppliers fs
+LEFT JOIN region r ON r.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = (
+        SELECT c.c_nationkey 
+        FROM customer c 
+        WHERE c.c_custkey IN (
+            SELECT o.o_custkey 
+            FROM orders o 
+            WHERE o.o_orderstatus = 'F'
+        )
+        LIMIT 1
+    )
+)
+WHERE r.r_name IS NOT NULL
+ORDER BY fs.adjusted_sales DESC
+LIMIT 10;

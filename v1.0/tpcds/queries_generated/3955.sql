@@ -1,0 +1,71 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.web_site_id,
+        d.d_year,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        ws.web_site_id, d.d_year
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = cd.cd_demo_sk
+),
+ReturnStats AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns 
+    GROUP BY 
+        wr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.income_band,
+        COALESCE(rs.total_returns, 0) AS total_returns,
+        COALESCE(rs.total_return_amount, 0) AS total_return_amount
+    FROM 
+        SalesSummary cs
+    JOIN 
+        CustomerInfo ci ON cs.web_site_id = ci.c_customer_id
+    LEFT JOIN 
+        ReturnStats rs ON ci.c_customer_id = rs.wr_returning_customer_sk
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.total_sales > 10000 THEN 'High'
+        WHEN fr.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_category
+FROM 
+    FinalReport fr
+WHERE 
+    fr.total_sales IS NOT NULL
+    AND fr.total_orders > 5
+ORDER BY 
+    fr.total_sales DESC
+LIMIT 100;

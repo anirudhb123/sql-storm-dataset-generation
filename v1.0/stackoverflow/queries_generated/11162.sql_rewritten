@@ -1,0 +1,51 @@
+WITH PostSummary AS (
+    SELECT 
+        p.PostTypeId,
+        COUNT(*) AS TotalPosts,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.AnswerCount) AS AverageAnswers
+    FROM Posts p
+    GROUP BY p.PostTypeId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS TotalPostsByUser,
+        SUM(b.Class) AS TotalBadges,
+        SUM(v.CreationDate IS NOT NULL) AS TotalVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+
+VotingSummary AS (
+    SELECT 
+        vt.Id AS VoteTypeId,
+        COUNT(v.Id) AS TotalVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY vt.Id
+)
+
+SELECT 
+    pts.Name AS PostType,
+    ps.TotalPosts,
+    ps.AverageScore,
+    ps.TotalViews,
+    ps.AverageAnswers,
+    ua.UserId,
+    ua.TotalPostsByUser,
+    ua.TotalBadges,
+    ua.TotalVotes,
+    vt.Name AS VoteType,
+    vs.TotalVotes AS VoteCount
+FROM PostSummary ps
+JOIN PostTypes pts ON ps.PostTypeId = pts.Id
+JOIN UserActivity ua ON 1=1 
+JOIN VotingSummary vs ON 1=1 
+LEFT JOIN VoteTypes vt ON vs.VoteTypeId = vt.Id
+ORDER BY pts.Name, ua.UserId, vt.Name;

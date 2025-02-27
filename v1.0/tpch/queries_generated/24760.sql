@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_recursive AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS depth
+    FROM nation
+    WHERE n_name LIKE 'A%'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nr.depth + 1
+    FROM nation n
+    JOIN nation_recursive nr ON n.n_regionkey = nr.n_nationkey
+    WHERE nr.depth < 5
+),
+supplier_costs AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > (
+        SELECT AVG(ps_supplycost) FROM partsupp
+        WHERE ps_availqty > 0
+    )
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+customer_ranked AS (
+    SELECT c.c_custkey, c.c_name, ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+)
+SELECT n.n_name,
+       s.s_name,
+       o.o_orderdate,
+       od.total_revenue,
+       COALESCE(c.c_name, 'Unknown') AS top_customer,
+       CASE 
+           WHEN od.total_revenue IS NULL THEN 'No Orders'
+           ELSE 'Orders Placed'
+       END AS order_status
+FROM nation_recursive n
+LEFT JOIN supplier_costs s ON n.n_nationkey = s.s_suppkey
+FULL OUTER JOIN order_details od ON s.s_suppkey = od.o_orderkey
+LEFT JOIN customer_ranked c ON c.rank = 1 
+WHERE n.n_regionkey IS NOT NULL
+  AND (s.total_cost - (SELECT SUM(pc.ps_supplycost) FROM partsupp pc WHERE pc.ps_partkey IS NULL)) < 10000
+ORDER BY n.n_name, s.s_name DESC, od.total_revenue IS NULL, od.total_revenue;

@@ -1,0 +1,43 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(u.Reputation, 0)) AS AvgUserReputation
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        TotalViews,
+        AvgUserReputation,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC, AvgUserReputation DESC) AS Rank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    tt.TagName,
+    tt.TotalViews,
+    tt.AvgUserReputation,
+    ph.PostHistoryTypeId,
+    COUNT(ph.Id) AS HistoryCount,
+    MAX(ph.CreationDate) AS LastModified
+FROM 
+    TopTags tt
+JOIN 
+    Posts p ON p.Tags LIKE '%' || tt.TagName || '%'
+JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+WHERE 
+    tt.Rank <= 10
+GROUP BY 
+    tt.TagName, tt.TotalViews, tt.AvgUserReputation, ph.PostHistoryTypeId
+ORDER BY 
+    tt.Rank;

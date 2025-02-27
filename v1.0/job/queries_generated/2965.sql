@@ -1,0 +1,50 @@
+WITH MovieDetails AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_count,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM
+        aka_title AS t
+    LEFT JOIN
+        complete_cast AS cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info AS c ON cc.subject_id = c.id
+    LEFT JOIN
+        aka_name AS a ON c.person_id = a.person_id
+    LEFT JOIN
+        movie_keyword AS mk ON t.id = mk.movie_id
+    WHERE
+        t.production_year >= 2000
+    GROUP BY
+        t.id
+),
+RankedMovies AS (
+    SELECT
+        md.*,
+        RANK() OVER (ORDER BY cast_count DESC, production_year ASC) AS rank
+    FROM
+        MovieDetails AS md
+)
+SELECT
+    rm.title_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.actors,
+    rm.keyword_count,
+    CASE
+        WHEN rm.cast_count > 5 THEN 'Ensemble Cast'
+        WHEN rm.cast_count = 0 THEN 'No Cast'
+        ELSE 'Small Cast'
+    END AS cast_description
+FROM
+    RankedMovies AS rm
+WHERE
+    rm.rank <= 10
+OR
+    rm.keyword_count > 5
+ORDER BY
+    rm.rank, rm.title;

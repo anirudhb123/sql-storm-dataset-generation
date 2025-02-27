@@ -1,0 +1,49 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        SUM(sr_return_tax) AS total_return_tax
+    FROM store_returns
+    GROUP BY sr_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.cd_income_band_sk,
+        d.cd_purchase_estimate,
+        CASE 
+            WHEN d.cd_credit_rating IS NULL THEN 'Unknown'
+            ELSE d.cd_credit_rating 
+        END AS credit_rating
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.return_count,
+        cr.total_return_amount,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.credit_rating
+    FROM CustomerReturns cr
+    JOIN CustomerDemographics cd ON cr.sr_customer_sk = cd.c_customer_sk
+    WHERE cr.return_count > 1
+)
+SELECT 
+    t.cc_call_center_id,
+    COALESCE(SUM(tc.total_return_amount), 0) AS total_returns,
+    COUNT(DISTINCT tc.sr_customer_sk) AS unique_customers,
+    AVG(tc.return_count) AS avg_return_per_customer,
+    MIN(tc.total_return_amount) AS min_return,
+    MAX(tc.total_return_amount) AS max_return,
+    STRING_AGG(DISTINCT CONCAT(tc.cd_gender, ' (', tc.cd_marital_status, ')'), ', ') AS customer_profiles
+FROM call_center t
+LEFT JOIN TopCustomers tc ON tc.sr_customer_sk = t.cc_call_center_sk
+GROUP BY t.cc_call_center_id
+ORDER BY total_returns DESC
+FETCH FIRST 10 ROWS ONLY;

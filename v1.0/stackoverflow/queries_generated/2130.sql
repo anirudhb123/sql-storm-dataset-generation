@@ -1,0 +1,77 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount, 
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN p.Score > 0 THEN p.Score ELSE 0 END) AS PositiveScore,
+        SUM(CASE WHEN p.Score < 0 THEN ABS(p.Score) ELSE 0 END) AS NegativeScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+),
+
+TopBadgeHolders AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS TopBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+),
+
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM Comments c
+    GROUP BY c.PostId
+)
+
+SELECT 
+    ups.UserId, 
+    ups.DisplayName, 
+    ups.PostCount,
+    ups.QuestionsCount,
+    ups.AnswersCount,
+    ups.PositiveScore,
+    ups.NegativeScore,
+    COALESCE(tbh.BadgeCount, 0) AS BadgeCount,
+    tbh.TopBadgeClass,
+    COALESCE(pc.CommentCount, 0) AS TotalComments
+FROM UserPostStats ups
+LEFT JOIN TopBadgeHolders tbh ON ups.UserId = tbh.UserId
+LEFT JOIN PostComments pc ON pc.PostId IN (
+    SELECT Id FROM Posts WHERE OwnerUserId = ups.UserId
+)
+ORDER BY ups.PostCount DESC, ups.PositiveScore DESC
+LIMIT 100;
+
+WITH RECURSIVE ParentQuestions AS (
+    SELECT 
+        p.Id,
+        p.ParentId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 2
+   
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN ParentQuestions pq ON p.Id = pq.ParentId
+)
+SELECT 
+    pq.Id,
+    pq.Level,
+    COUNT(DISTINCT p.Id) AS AnswerCount
+FROM ParentQuestions pq
+LEFT JOIN Posts p ON pq.Id = p.ParentId
+GROUP BY pq.Id, pq.Level
+HAVING COUNT(DISTINCT p.Id) > 0
+ORDER BY pq.Level;
+

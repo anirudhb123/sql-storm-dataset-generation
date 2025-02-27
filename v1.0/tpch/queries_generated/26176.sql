@@ -1,0 +1,22 @@
+SELECT 
+    p.p_name,
+    SUBSTR(p.p_comment, 1, 20) AS short_comment,
+    CONCAT('Brand: ', p.p_brand, ', Type: ', p.p_type) AS combined_info,
+    (SELECT COUNT(DISTINCT ps.s_suppkey) 
+     FROM partsupp ps 
+     WHERE ps.ps_partkey = p.p_partkey) AS supplier_count,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    MAX(l.l_shipdate) AS last_ship_date,
+    AVG(l.l_extendedprice) AS avg_extended_price
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+WHERE 
+    p.p_size BETWEEN 1 AND 20
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_comment, p.p_brand, p.p_type
+HAVING 
+    AVG(l.l_extendedprice) > 1000
+ORDER BY 
+    short_comment DESC, order_count ASC;

@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        c.c_mktsegment,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS customer_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+),
+Profitability AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS profit,
+        COUNT(DISTINCT l.l_linenumber) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND l.l_shipdate >= '2023-01-01' 
+        AND l.l_shipdate < '2023-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    c.c_name,
+    c.c_mktsegment,
+    SUM(p.profit) AS total_profit,
+    MAX(s.total_supplycost) AS max_supplycost,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    HighValueCustomers c
+LEFT JOIN 
+    Profitability p ON c.c_custkey = p.o_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON s.supplier_rank = 1
+WHERE 
+    (c.c_mktsegment LIKE '%Retail%' OR c.c_mktsegment LIKE '%Wholesale%')
+GROUP BY 
+    c.c_name, c.c_mktsegment
+HAVING 
+    total_profit > (SELECT AVG(total_profit) FROM Profitability)
+ORDER BY 
+    total_profit DESC
+LIMIT 10;

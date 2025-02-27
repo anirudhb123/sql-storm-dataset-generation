@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN r.rn = 1 THEN 1 ELSE 0 END) AS RecentPostCount,
+        SUM(r.CommentCount) AS TotalComments,
+        SUM(r.UpVoteCount) AS TotalUpVotes,
+        SUM(r.DownVoteCount) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts r ON u.Id = r.OwnerUserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    us.DisplayName,
+    us.RecentPostCount,
+    us.TotalComments,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    nt.Name AS NotableType,
+    CASE 
+        WHEN us.TotalUpVotes - us.TotalDownVotes > 10 THEN 'Active Contributor'
+        ELSE 'User'
+    END AS UserType,
+    CASE 
+        WHEN nt.Name IS NULL THEN 'No Notable Posts'
+        ELSE nt.Name
+    END AS NotablePostType
+FROM 
+    UserStats us
+LEFT JOIN 
+    (SELECT 
+        p.OwnerUserId,
+        CASE 
+            WHEN COUNT(*) > 0 THEN 'Notable Post'
+            ELSE NULL 
+        END AS Name
+     FROM 
+        Posts p
+     WHERE 
+        p.Score >= 100
+     GROUP BY 
+        p.OwnerUserId) nt ON us.UserId = nt.OwnerUserId
+WHERE 
+    us.TotalComments > 20
+ORDER BY 
+    us.TotalUpVotes DESC, us.DisplayName ASC;

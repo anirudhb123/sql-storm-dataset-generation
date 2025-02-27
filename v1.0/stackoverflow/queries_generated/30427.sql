@@ -1,0 +1,86 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE r ON p.ParentId = r.PostId 
+    WHERE 
+        p.PostTypeId = 2 -- Answers
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostDetails AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.CreationDate,
+        r.AcceptedAnswerId,
+        COALESCE(v.Upvotes, 0) AS Upvotes,
+        COALESCE(v.Downvotes, 0) AS Downvotes,
+        CHAR_LENGTH(r.Title) AS TitleLength,
+        r.Level,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        RecursivePostCTE r
+    LEFT JOIN 
+        PostVotes v ON r.PostId = v.PostId
+    LEFT JOIN 
+        Comments c ON r.PostId = c.PostId
+    GROUP BY 
+        r.PostId, r.Title, r.CreationDate, r.AcceptedAnswerId, v.Upvotes, v.Downvotes, r.Level
+),
+FinalMetrics AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.CreationDate,
+        pd.Upvotes - pd.Downvotes AS NetScore,
+        pd.TitleLength,
+        pd.Level,
+        pd.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pd.Level ORDER BY pd.NetScore DESC) AS RankWithinLevel
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    f.PostId,
+    f.Title,
+    f.CreationDate,
+    f.NetScore,
+    f.TitleLength,
+    f.Level,
+    f.RankWithinLevel
+FROM 
+    FinalMetrics f
+WHERE 
+    f.RankWithinLevel <= 5 -- Top 5 per level
+ORDER BY 
+    f.Level, f.NetScore DESC;
+

@@ -1,0 +1,58 @@
+
+WITH movie_summary AS (
+    SELECT
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        MAX(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_cast_exists,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aliases
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info c ON at.movie_id = c.movie_id
+    LEFT JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    LEFT JOIN 
+        name n ON ak.person_id = n.imdb_id
+    LEFT JOIN 
+        person_info pi ON c.person_id = pi.person_id 
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND at.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        at.title, at.production_year
+),
+
+company_summary AS (
+    SELECT
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    ms.movie_title,
+    ms.production_year,
+    ms.cast_count,
+    CASE WHEN ms.female_cast_exists = 1 THEN 'Yes' ELSE 'No' END AS female_cast,
+    cs.company_names,
+    cs.company_count
+FROM 
+    movie_summary ms
+LEFT JOIN 
+    company_summary cs ON ms.movie_title = (
+        SELECT title FROM aka_title 
+        WHERE movie_id = cs.movie_id 
+        LIMIT 1
+    )
+ORDER BY 
+    ms.production_year DESC, 
+    ms.cast_count DESC;

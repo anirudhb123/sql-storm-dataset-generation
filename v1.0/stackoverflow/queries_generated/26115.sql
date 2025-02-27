@@ -1,0 +1,79 @@
+WITH PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(A.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON A.ParentId = P.Id AND A.PostTypeId = 2
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(P.Tags, 2, LENGTH(P.Tags)-2), '><')) AS TagName ON TRUE 
+    LEFT JOIN 
+        Tags T ON T.TagName = TagName
+    WHERE 
+        P.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        P.Id, P.Title, P.Body, P.CreationDate, U.DisplayName
+),
+VoteDetails AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+),
+BadgeDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        B.Class,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    JOIN 
+        Users U ON B.UserId = U.Id
+    WHERE 
+        B.Class IN (1, 2) -- Gold and Silver badges
+    GROUP BY 
+        U.Id, B.Class
+),
+FinalDetails AS (
+    SELECT 
+        PD.PostId,
+        PD.Title,
+        PD.Body,
+        PD.CreationDate,
+        PD.OwnerDisplayName,
+        COALESCE(VD.UpVotes, 0) AS UpVotes,
+        COALESCE(VD.DownVotes, 0) AS DownVotes,
+        COALESCE(VD.TotalVotes, 0) AS TotalVotes,
+        PD.Tags,
+        COALESCE(BD.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        PostDetails PD
+    LEFT JOIN 
+        VoteDetails VD ON PD.PostId = VD.PostId
+    LEFT JOIN 
+        (SELECT UserId, SUM(BadgeCount) AS BadgeCount FROM BadgeDetails GROUP BY UserId) BD ON PD.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = BD.UserId)
+)
+SELECT 
+    *,
+    CASE 
+        WHEN UpVotes > DownVotes THEN 'Positive Engagement' 
+        ELSE 'Negative Engagement'
+    END AS EngagementType
+FROM
+    FinalDetails
+ORDER BY 
+    CreationDate DESC
+LIMIT 10;

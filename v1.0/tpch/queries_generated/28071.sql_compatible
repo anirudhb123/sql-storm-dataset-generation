@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_name AS nation_name
+    FROM
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        value.total_value
+    FROM 
+        part p
+    JOIN 
+        HighValueParts value ON p.p_partkey = value.ps_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    STRING_AGG(DISTINCT pd.p_name, ', ') AS part_names
+FROM 
+    RankedSuppliers ps
+JOIN 
+    PartDetails pd ON ps.s_suppkey = pd.p_partkey
+JOIN 
+    nation n ON ps.nation_name = n.n_name
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    ps.rank <= 5
+GROUP BY 
+    r.r_name, p.p_retailprice
+ORDER BY 
+    r.r_name;

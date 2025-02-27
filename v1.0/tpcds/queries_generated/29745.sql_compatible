@@ -1,0 +1,42 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(CONCAT(ca_street_name, ' ', ca_street_number, ' ', ca_street_type), ', ') AS full_address_list
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+CustomerDemographic AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(cd.cd_purchase_estimate) AS total_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    as.ca_city,
+    as.ca_state,
+    as.address_count,
+    as.full_address_list,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.total_purchase_estimate,
+    cd.customer_count
+FROM 
+    AddressStats as
+JOIN 
+    CustomerDemographic cd ON TRUE
+WHERE 
+    as.address_count > 100
+ORDER BY 
+    as.ca_state ASC, as.ca_city ASC, cd.total_purchase_estimate DESC;

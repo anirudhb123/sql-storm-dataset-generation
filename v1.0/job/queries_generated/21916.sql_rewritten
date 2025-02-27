@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ca.name, 'Unknown') AS cast_name,
+        COALESCE(ci.kind, 'Unknown Role') AS role,
+        1 AS level
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN
+        aka_name ca ON ci.person_id = ca.person_id
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(pb.name, 'Unknown') AS cast_name,
+        COALESCE(ct.kind, 'Unknown Role') AS role,
+        mh.level + 1
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN
+        aka_name pb ON ci.person_id = pb.person_id
+    LEFT JOIN
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE
+        mh.level < 5 
+)
+
+SELECT
+    mv.title,
+    mv.production_year,
+    mv.cast_name,
+    mv.role,
+    DENSE_RANK() OVER (PARTITION BY mv.production_year ORDER BY mv.title ASC) AS rank_within_year,
+    COUNT(*) OVER (PARTITION BY mv.production_year) AS total_movies_in_year,
+    SUM(CASE WHEN mv.role IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY mv.production_year) AS total_cast_roles
+FROM
+    movie_hierarchy mv
+WHERE
+    mv.production_year >= 2000
+    AND (mv.role LIKE '%Actor%' OR mv.role LIKE '%Actress%')
+ORDER BY
+    mv.production_year, mv.title;

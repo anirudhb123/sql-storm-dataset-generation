@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, ub.BadgeCount
+    HAVING 
+        COUNT(p.Id) > 10
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags,
+        rp.OwnerUserId,
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+    WHERE 
+        rp.ViewRank <= 5 OR rp.ScoreRank <= 5
+)
+
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.Score,
+    tp.Tags,
+    mu.DisplayName AS OwnerDisplayName,
+    mu.Reputation AS OwnerReputation,
+    mu.BadgeCount AS OwnerBadgeCount
+FROM 
+    TopPosts tp
+JOIN 
+    MostActiveUsers mu ON tp.OwnerUserId = mu.UserId
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

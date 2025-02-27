@@ -1,0 +1,82 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.LastActivityDate,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(3000)) AS Path 
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        P2.Id AS PostId,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.PostTypeId,
+        P2.AcceptedAnswerId,
+        P2.LastActivityDate,
+        Level + 1,
+        CAST(Path + ' -> ' + P2.Title AS VARCHAR(3000))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostCTE RPC ON P2.ParentId = RPC.PostId
+),
+PostMetrics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        U.DisplayName AS OwnerName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        DATEDIFF(DAY, RP.LastActivityDate, GETDATE()) AS DaysSinceLastActivity
+    FROM 
+        RecursivePostCTE RP
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    LEFT JOIN 
+        Votes V ON RP.PostId = V.PostId AND V.VoteTypeId = 2  
+    GROUP BY 
+        RP.PostId, RP.Title, U.DisplayName, RP.LastActivityDate
+),
+ClosedPostVoteSummary AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        MAX(PH.CreationDate) AS LastClosedDate,
+        COUNT(*) AS CloseReasonCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10  
+    GROUP BY 
+        PH.PostId, PH.CreationDate
+)
+SELECT 
+    P.PostId,
+    P.Title,
+    P.OwnerName,
+    P.TotalBounty,
+    P.CommentCount,
+    P.VoteCount,
+    COALESCE(CP.CloseReasonCount, 0) AS CloseReasonCount,
+    CP.LastClosedDate,
+    P.DaysSinceLastActivity
+FROM 
+    PostMetrics P
+LEFT JOIN 
+    ClosedPostVoteSummary CP ON P.PostId = CP.PostId
+WHERE 
+    P.DaysSinceLastActivity <= 30  
+ORDER BY 
+    P.VoteCount DESC,
+    P.TotalBounty DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

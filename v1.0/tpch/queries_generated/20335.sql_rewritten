@@ -1,0 +1,31 @@
+WITH RECURSIVE Supplier_CTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+Critical_Nations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE '%East%')
+),
+Price_Summary AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM lineitem l
+        JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1997-12-31'
+    GROUP BY l.l_partkey
+)
+SELECT s.s_suppkey, s.s_name, n.n_name,
+       COALESCE(ps.total_revenue, 0) AS revenue,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(CASE WHEN o.o_orderstatus = 'F' THEN 1 ELSE 0 END) AS finished_orders
+FROM Supplier_CTE s
+LEFT JOIN Critical_Nations n ON s.n_nationkey = n.n_nationkey
+LEFT JOIN orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN Price_Summary ps ON s.s_suppkey = ps.l_partkey
+WHERE s.rn <= 3
+GROUP BY s.s_suppkey, s.s_name, n.n_name, ps.total_revenue
+HAVING SUM(o.o_totalprice) > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus <> 'O' OR o2.o_orderstatus IS NULL)
+ORDER BY revenue DESC, s.s_name NULLS LAST;

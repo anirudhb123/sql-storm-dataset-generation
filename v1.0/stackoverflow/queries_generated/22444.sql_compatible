@@ -1,0 +1,64 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0), 0) AS UpVotesCount,
+        COALESCE(NULLIF(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0), 0) AS DownVotesCount,
+        COUNT(DISTINCT P.Id) FILTER (WHERE P.PostTypeId = 1) AS QuestionsCount,
+        COUNT(DISTINCT P.Id) FILTER (WHERE P.PostTypeId = 2) AS AnswersCount
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Posts P ON V.PostId = P.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS PopularityRank
+    FROM Tags T
+    JOIN Posts P ON T.Id = P.TagId
+    GROUP BY T.TagName
+    HAVING COUNT(P.Id) > 5
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        MAX(PH.CreationDate) AS LastActionDate,
+        MIN(PH.CreationDate) AS FirstActionDate,
+        AVG(EXTRACT(EPOCH FROM PH.CreationDate) - EXTRACT(EPOCH FROM LAG(PH.CreationDate) OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate))) / 60 AS AvgTimeBetweenActions
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+FinalUserStats AS (
+    SELECT 
+        Uvs.UserId,
+        Uvs.DisplayName,
+        Uvs.Reputation,
+        Uvs.UpVotesCount,
+        Uvs.DownVotesCount,
+        COALESCE(Phs.CloseReopenCount, 0) AS PostCloseReopenCount,
+        COALESCE(Phs.AvgTimeBetweenActions, 0) AS AvgTimeBetweenActions,
+        PT.TagName
+    FROM UserVoteStats Uvs
+    LEFT JOIN PostHistorySummary Phs ON Uvs.UserId = Phs.PostId
+    LEFT JOIN PopularTags PT ON PT.PostCount > Uvs.QuestionsCount
+)
+SELECT 
+    FS.UserId,
+    FS.DisplayName,
+    FS.Reputation,
+    FS.UpVotesCount,
+    FS.DownVotesCount,
+    FS.PostCloseReopenCount,
+    FS.AvgTimeBetweenActions,
+    STRING_AGG(DISTINCT FS.TagName, ', ') AS PopularTags
+FROM FinalUserStats FS
+GROUP BY 
+    FS.UserId, FS.DisplayName, FS.Reputation,
+    FS.UpVotesCount, FS.DownVotesCount,
+    FS.PostCloseReopenCount, FS.AvgTimeBetweenActions
+ORDER BY FS.Reputation DESC, FS.UpVotesCount DESC, FS.PostCloseReopenCount DESC;

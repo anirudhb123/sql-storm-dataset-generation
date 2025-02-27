@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(rel.RelatedPostId) AS RelatedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks rel ON p.Id = rel.PostId
+    WHERE 
+        p.ViewCount > 100
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostsCreated
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    post.PostId,
+    post.Title,
+    post.CreationDate,
+    post.PostRank,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges,
+    us.PostsCreated,
+    COALESCE(pha.ChangeCount, 0) AS HistoricalChanges,
+    post.RelatedPostCount
+FROM 
+    UserStatistics us
+JOIN 
+    RankedPosts post ON us.UserId = post.OwnerUserId
+LEFT JOIN 
+    PostHistoryAnalysis pha ON post.PostId = pha.PostId
+WHERE 
+    (us.GoldBadges + us.SilverBadges + us.BronzeBadges) > 0
+ORDER BY 
+    us.GoldBadges DESC, post.Score DESC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 5
+),
+SalesData AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        COUNT(l.l_orderkey) as total_lines,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+TopSales AS (
+    SELECT *
+    FROM SalesData
+    WHERE sales_rank <= 10
+)
+SELECT 
+    t.o_orderkey,
+    COALESCE(ROUND(t.total_sales, 2), 0) AS rounded_sales,
+    t.unique_customers,
+    t.total_lines,
+    p.p_name,
+    s.s_name,
+    s.s_acctbal
+FROM TopSales t
+LEFT JOIN lineitem l ON t.o_orderkey = l.l_orderkey
+LEFT JOIN part p ON l.l_partkey = p.p_partkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+WHERE s.s_acctbal IS NOT NULL
+AND t.total_sales > (
+    SELECT AVG(total_sales)
+    FROM TopSales
+    WHERE total_lines > 1
+)
+ORDER BY rounded_sales DESC, t.unique_customers DESC;

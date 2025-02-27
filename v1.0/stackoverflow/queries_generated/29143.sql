@@ -1,0 +1,48 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY STRING_AGG(t.TagName, ',') ORDER BY p.ViewCount DESC) AS Rank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    JOIN Tags t ON POSITION(t.TagName IN p.Tags) > 0
+    WHERE p.PostTypeId = 1 -- Filter to only questions
+),
+PostTagStats AS (
+    SELECT 
+        pp.PostId,
+        COUNT(*) AS TagCount,
+        SUM(pp.ViewCount) AS TotalViews,
+        AVG(pp.Score) AS AvgScore
+    FROM RankedPosts pp
+    GROUP BY pp.PostId
+),
+TopQuestions AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        ps.TagCount,
+        ps.TotalViews,
+        ps.AvgScore
+    FROM RankedPosts rp
+    JOIN PostTagStats ps ON rp.PostId = ps.PostId
+    WHERE rp.Rank <= 10 -- Top 10 ranked questions by Tag
+)
+SELECT 
+    tq.Title,
+    tq.OwnerDisplayName,
+    tq.ViewCount,
+    tq.TotalViews,
+    tq.AvgScore,
+    ARRAY_AGG(DISTINCT t.TagName) AS Tags
+FROM TopQuestions tq
+JOIN Tags t ON POSITION(t.TagName IN (SELECT Tags FROM Posts WHERE Id = tq.PostId)) > 0
+GROUP BY tq.Title, tq.OwnerDisplayName, tq.ViewCount, tq.TotalViews, tq.AvgScore
+ORDER BY tq.TotalViews DESC;

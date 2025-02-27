@@ -1,0 +1,85 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- UpMod votes
+    WHERE 
+        p.CreationDate >= DATEADD(month, -6, GETDATE()) -- Posts created in the last 6 months
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.VoteCount,
+        RANK() OVER (ORDER BY rp.Score DESC) as ScoreRank,
+        RANK() OVER (ORDER BY rp.ViewCount DESC) as ViewRank
+    FROM 
+        RecentPosts rp
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserDisplayName,
+        ph.PostHistoryTypeId
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed and Reopened statuses
+),
+FinalResults AS (
+    SELECT 
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.CommentCount,
+        tp.VoteCount,
+        COALESCE(c.Comment, 'No comments recorded') AS LastCloseReason,
+        CASE WHEN cl.PostId IS NOT NULL THEN 'Closed' ELSE 'Active' END AS PostStatus
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        ClosedPosts c ON tp.Id = c.PostId
+    LEFT JOIN 
+        ClosedPosts cl ON cl.PostId = tp.Id AND cl.PostHistoryTypeId = 10 -- Only last closed status
+)
+SELECT 
+    Title,
+    OwnerDisplayName,
+    CreationDate,
+    Score,
+    ViewCount,
+    CommentCount,
+    VoteCount,
+    LastCloseReason,
+    PostStatus
+FROM 
+    FinalResults
+WHERE 
+    Score > 10 -- Filter for popular posts
+ORDER BY 
+    Score DESC, ViewCount DESC;

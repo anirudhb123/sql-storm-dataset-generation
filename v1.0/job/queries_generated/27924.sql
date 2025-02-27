@@ -1,0 +1,51 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM aka_title a
+    LEFT JOIN cast_info c ON a.movie_id = c.movie_id
+    LEFT JOIN aka_name ak ON ak.person_id = c.person_id
+    GROUP BY a.id, a.title, a.production_year, a.kind_id
+),
+HighCastMovies AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.cast_count,
+        k.keyword,
+        rt.aka_names
+    FROM RankedTitles rt
+    JOIN movie_keyword mk ON mk.movie_id = rt.title_id
+    JOIN keyword k ON k.id = mk.keyword_id
+    WHERE rt.cast_count > 5 AND rt.rank <= 10
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name c ON c.id = mc.company_id
+    JOIN company_type ct ON ct.id = mc.company_type_id
+)
+SELECT 
+    h.title,
+    h.production_year,
+    h.cast_count,
+    h.keyword,
+    h.aka_names,
+    ci.company_name,
+    ci.company_type
+FROM HighCastMovies h
+LEFT JOIN CompanyInfo ci ON ci.movie_id = (
+    SELECT movie_id 
+    FROM movie_companies 
+    WHERE movie_id = h.title_id 
+    LIMIT 1
+)
+ORDER BY h.production_year DESC, h.cast_count DESC;

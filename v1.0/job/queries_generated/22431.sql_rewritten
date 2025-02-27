@@ -1,0 +1,85 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.person_id
+),
+MovieCompanyCounts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+KeywordsPerMovie AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        a.person_id,
+        a.movie_count,
+        mcc.company_count,
+        k.keywords
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        ActorMovies a ON a.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = rt.title_id)
+    LEFT JOIN 
+        MovieCompanyCounts mcc ON mcc.movie_id = rt.title_id
+    LEFT JOIN 
+        KeywordsPerMovie k ON k.movie_id = rt.title_id
+    WHERE 
+        mcc.company_count IS NOT NULL 
+        OR k.keywords IS NOT NULL
+),
+FilteredResults AS (
+    SELECT
+        *,
+        CASE 
+            WHEN movie_count IS NULL THEN 'Unknown Actor'
+            WHEN movie_count > 5 THEN 'Veteran Actor'
+            ELSE 'New Actor'
+        END AS actor_experience
+    FROM 
+        FinalResults
+)
+SELECT 
+    fr.title,
+    fr.production_year,
+    COALESCE(fr.actor_experience, 'N/A') AS actor_experience,
+    COALESCE(fr.keywords, 'No Keywords') AS keywords
+FROM 
+    FilteredResults fr
+WHERE 
+    fr.production_year >= 2000 
+ORDER BY 
+    fr.production_year DESC, 
+    fr.title;

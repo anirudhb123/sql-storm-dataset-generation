@@ -1,0 +1,57 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier s ON sh.s_nationkey = s.s_nationkey AND sh.s_suppkey <> s.s_suppkey
+    WHERE sh.level < 5 AND s.s_acctbal IS NOT NULL
+),
+part_supplier_summary AS (
+    SELECT p.p_partkey, p.p_name, 
+           SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, 
+           p.p_type, p.p_size, p.p_retailprice, p.p_comment,
+           CASE 
+               WHEN p.p_retailprice > 500 AND p.p_size IN (10, 20, 30) THEN 'High Value'
+               WHEN p.p_retailprice < 100 AND p.p_size < 10 THEN 'Bargain'
+               ELSE 'Regular'
+           END AS value_category
+    FROM part p
+    WHERE NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_discount > 0.1)
+),
+high_value_parts AS (
+    SELECT f.p_partkey, f.p_name, f.value_category, ps.total_available, ps.avg_supply_cost, 
+           ROW_NUMBER() OVER (PARTITION BY f.value_category ORDER BY ps.total_available DESC) AS rn
+    FROM filtered_parts f
+    JOIN part_supplier_summary ps ON f.p_partkey = ps.p_partkey
+    WHERE f.value_category = 'High Value'
+),
+backorders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_quantity * (1 - l.l_discount)) AS backorder_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT r.r_name, sh.s_name, SUM(hv.total_available) AS total_avail_high_value,
+       AVG(hv.avg_supply_cost) AS avg_supply_cost_high_value,
+       COALESCE(SUM(b.backorder_total), 0) AS total_backorders
+FROM region r
+LEFT JOIN supplier_hierarchy sh ON r.r_regionkey = sh.s_nationkey
+LEFT JOIN high_value_parts hv ON sh.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = hv.p_partkey LIMIT 1)
+LEFT JOIN backorders b ON b.o_custkey IN (SELECT c.c_custkey 
+                                            FROM customer c 
+                                            WHERE c.c_nationkey = sh.s_nationkey)
+GROUP BY r.r_name, sh.s_name
+HAVING SUM(hv.total_available) > 1000 AND AVG(hv.avg_supply_cost) IS NOT NULL
+ORDER BY r.r_name, sh.s_name, total_avail_high_value DESC;

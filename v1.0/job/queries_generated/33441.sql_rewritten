@@ -1,0 +1,82 @@
+WITH RECURSIVE Movie_Rankings AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        COUNT(cast_info.id) AS cast_count,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY COUNT(cast_info.id) DESC) AS rank
+    FROM 
+        title
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.id, title.title, title.production_year
+),
+Actor_Performance AS (
+    SELECT 
+        aka_name.name AS actor_name,
+        COUNT(DISTINCT movie_companies.movie_id) AS movies_produced,
+        SUM(CASE WHEN movie_info.info_type_id IN (1, 2) THEN 1 ELSE 0 END) AS notable_movies
+    FROM 
+        aka_name
+    JOIN 
+        cast_info ON aka_name.person_id = cast_info.person_id
+    JOIN 
+        complete_cast ON cast_info.movie_id = complete_cast.movie_id
+    LEFT JOIN 
+        movie_companies ON complete_cast.movie_id = movie_companies.movie_id
+    LEFT JOIN 
+        movie_info ON movie_companies.movie_id = movie_info.movie_id
+    WHERE 
+        aka_name.name IS NOT NULL
+    GROUP BY 
+        aka_name.name
+),
+Company_Contribution AS (
+    SELECT 
+        company_name.name AS company_name,
+        COUNT(movie_companies.movie_id) AS movies_count,
+        ARRAY_AGG(DISTINCT title.title) AS movie_titles
+    FROM 
+        company_name
+    JOIN 
+        movie_companies ON company_name.id = movie_companies.company_id
+    JOIN 
+        title ON movie_companies.movie_id = title.id
+    GROUP BY 
+        company_name.name
+),
+Top_Movies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year,
+        rank
+    FROM 
+        Movie_Rankings
+    WHERE 
+        rank <= 5
+)
+SELECT 
+    tm.title AS Top_Movie_Title,
+    tm.production_year AS Production_Year,
+    ap.actor_name AS Notable_Actor,
+    cc.company_name AS Movie_Company,
+    cc.movies_count AS Total_Movies_By_Company,
+    ARRAY_LENGTH(cc.movie_titles, 1) AS Unique_Titles
+FROM 
+    Top_Movies tm
+JOIN 
+    Actor_Performance ap ON ap.notable_movies > 0
+JOIN 
+    Company_Contribution cc ON cc.movies_count > 5
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM cast_info ci
+        WHERE ci.movie_id = tm.movie_id 
+        AND ci.person_id IN (SELECT person_id FROM aka_name WHERE name = ap.actor_name)
+    )
+ORDER BY 
+    tm.production_year DESC, 
+    cc.movies_count DESC;

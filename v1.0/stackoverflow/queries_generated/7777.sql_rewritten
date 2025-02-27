@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.CreationDate, p.Score, p.PostTypeId
+),
+MostCommented AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        Score,
+        ROW_NUMBER() OVER (ORDER BY CommentCount DESC) AS CommentRank
+    FROM 
+        RankedPosts
+),
+TopQuestions AS (
+    SELECT 
+        PostId,
+        Title,
+        OwnerDisplayName,
+        CreationDate,
+        Score
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10 AND PostTypeId = 1
+)
+SELECT 
+    mq.PostId,
+    mq.Title,
+    mq.OwnerDisplayName,
+    mq.CreationDate,
+    mq.Score,
+    tq.Score AS QuestionScore,
+    tq.OwnerDisplayName AS QuestionOwner
+FROM 
+    MostCommented mq
+JOIN 
+    TopQuestions tq ON mq.PostId = tq.PostId
+WHERE 
+    mq.CommentRank <= 5
+ORDER BY 
+    mq.CommentCount DESC, tq.Score DESC;

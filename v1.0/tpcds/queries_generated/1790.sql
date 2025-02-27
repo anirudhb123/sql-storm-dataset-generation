@@ -1,0 +1,54 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS sales_rank,
+        COALESCE((SELECT AVG(ws_ext_sales_price) FROM web_sales WHERE ws_item_sk = ws.ws_item_sk), 0) AS avg_sales_price
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = '2023-01-01') 
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = CURRENT_DATE)
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        dcd.cd_gender,
+        SUM(RD.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT RD.ws_order_number) AS total_orders,
+        MAX(RD.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN customer_demographics dcd ON c.c_current_cdemo_sk = dcd.cd_demo_sk
+    LEFT JOIN ranked_sales RD ON c.c_customer_sk = RD.ws_billed_customer_sk
+    GROUP BY c.c_customer_sk, dcd.cd_gender
+),
+high_value_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.cd_gender,
+        cs.total_sales,
+        cs.total_orders
+    FROM 
+        customer_summary cs
+    WHERE 
+        cs.total_sales > (SELECT AVG(total_sales) FROM customer_summary)
+)
+
+SELECT 
+    a.ca_city,
+    COUNT(DISTINCT hvc.c_customer_sk) AS high_value_count,
+    SUM(hvc.total_sales) AS total_sales_contributed
+FROM 
+    customer_address a
+JOIN 
+    customer c ON c.c_current_addr_sk = a.ca_address_sk
+JOIN 
+    high_value_customers hvc ON c.c_customer_sk = hvc.c_customer_sk
+GROUP BY 
+    a.ca_city
+ORDER BY 
+    total_sales_contributed DESC
+LIMIT 10;

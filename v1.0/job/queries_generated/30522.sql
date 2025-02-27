@@ -1,0 +1,74 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt1.id AS movie_id,
+        mt1.title,
+        mt1.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt1
+    WHERE 
+        mt1.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        mt2.id AS movie_id,
+        mt2.title,
+        mt2.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title mt2 ON ml.linked_movie_id = mt2.id
+    WHERE 
+        mh.depth < 5
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(mr.subject_id) AS total_roles,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    AVG(CASE WHEN p.info IS NOT NULL THEN LENGTH(p.info) ELSE 0 END) AS avg_info_length,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY at.production_year DESC) AS role_sequence
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+LEFT JOIN 
+    movie_info mi ON at.id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id AND p.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+LEFT JOIN 
+    complete_cast cc ON at.id = cc.movie_id 
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id 
+WHERE 
+    at.production_year > 2000
+    AND (ak.name IS NOT NULL AND ak.name <> '')
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(mr.subject_id) > 1
+ORDER BY 
+    role_sequence, ak.name, at.production_year;
+
+This query performs several advanced SQL techniques, including:
+
+1. **Recursive Common Table Expressions (CTEs)**: To build a movie hierarchy with a depth limit.
+2. **Outer Joins**: Leveraging `LEFT JOIN` to include optional information without losing rows.
+3. **Aggregations**: Using `COUNT`, `STRING_AGG`, and `AVG` for generating statistics for each actor and movie combination.
+4. **Window Functions**: Implementing `ROW_NUMBER()` to produce a sequence of roles per actor based on movie production years.
+5. **Complicated Predicate**: Filters for movies produced after 2000 and checks for non-empty names.
+6. **NULL Handling**: Coalescing lengths of information while considering possible `NULL` values to avoid skewed averages.
+
+This creates a robust benchmarking performance scenario involving various SQL constructs and strategies.

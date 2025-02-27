@@ -1,0 +1,93 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(c.Id), 0) AS CommentCount,
+        COALESCE(pt.Name, 'Unknown') AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, pt.Name
+),
+UserBadgeSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalAnalysis AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        ur.Reputation,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.UpVotes,
+        pa.DownVotes,
+        pa.CommentCount,
+        pa.PostType,
+        pa.RecentPostRank
+    FROM 
+        Users u
+    JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    LEFT JOIN 
+        UserBadgeSummary ub ON u.Id = ub.UserId
+    LEFT JOIN 
+        PostAnalytics pa ON u.Id = pa.OwnerUserId
+    WHERE 
+        ur.Reputation > 1000 -- Consider users with reputation greater than 1000
+    ORDER BY 
+        ur.Reputation DESC,
+        pa.RecentPostRank
+)
+SELECT 
+    CONCAT(FinalAnalysis.DisplayName, ' (ID: ', FinalAnalysis.UserId, ')') AS User,
+    FinalAnalysis.Reputation,
+    COALESCE(FinalAnalysis.BadgeCount, 0) AS TotalBadges,
+    COALESCE(FinalAnalysis.BadgeNames, 'No Badges') AS BadgeNames,
+    COUNT(DISTINCT FinalAnalysis.PostId) AS TotalPosts,
+    SUM(FinalAnalysis.UpVotes) AS TotalUpVotes,
+    SUM(FinalAnalysis.DownVotes) AS TotalDownVotes,
+    SUM(FinalAnalysis.CommentCount) AS TotalComments
+FROM 
+    FinalAnalysis
+GROUP BY 
+    FinalAnalysis.DisplayName,
+    FinalAnalysis.UserId,
+    FinalAnalysis.Reputation,
+    FinalAnalysis.BadgeCount,
+    FinalAnalysis.BadgeNames
+HAVING 
+    COUNT(DISTINCT FinalAnalysis.PostId) > 5 -- Only include users with more than 5 posts
+ORDER BY 
+    TotalUpVotes DESC, TotalDownVotes ASC;

@@ -1,0 +1,52 @@
+
+WITH actor_movie_count AS (
+    SELECT
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        alias_name a
+    JOIN
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY
+        a.name
+),
+recent_movies AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(k.keyword, 'No Keyword') AS keyword
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        m.production_year >= 2020
+),
+ranked_movies AS (
+    SELECT
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.keyword,
+        RANK() OVER (PARTITION BY rm.keyword ORDER BY rm.production_year DESC) AS rank_by_year
+    FROM
+        recent_movies rm
+)
+SELECT
+    amc.actor_name,
+    COUNT(rm.movie_id) AS recent_movie_count,
+    STRING_AGG(rm.title, ', ') AS recent_movies,
+    MAX(rm.production_year) AS latest_movie_year
+FROM
+    actor_movie_count amc
+LEFT JOIN
+    ranked_movies rm ON amc.movie_count > 0
+GROUP BY
+    amc.actor_name
+HAVING 
+    COUNT(rm.movie_id) > 0 OR MAX(rm.production_year) IS NULL
+ORDER BY
+    recent_movie_count DESC;

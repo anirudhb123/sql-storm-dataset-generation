@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+),
+ActorMovies AS (
+    SELECT 
+        ci.person_id,
+        a.name AS actor_name,
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    JOIN aka_title m ON ci.movie_id = m.id
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorPerformance AS (
+    SELECT 
+        am.person_id,
+        am.actor_name,
+        mh.title,
+        mh.production_year,
+        mh.depth,
+        COUNT(DISTINCT am.movie_id) OVER (PARTITION BY am.person_id) AS movies_count,
+        SUM(mh.production_year) OVER (PARTITION BY am.person_id) AS total_years
+    FROM 
+        ActorMovies am
+    JOIN MovieHierarchy mh ON am.movie_id = mh.movie_id
+    WHERE 
+        am.rn <= 5 -- top 5 recent movies per actor
+)
+SELECT 
+    ap.actor_name,
+    ap.movies_count,
+    ap.total_years,
+    ARRAY_AGG(DISTINCT ap.title) AS titles,
+    MAX(ap.production_year) AS last_movie_year
+FROM 
+    ActorPerformance ap
+GROUP BY 
+    ap.actor_name, ap.movies_count, ap.total_years
+HAVING 
+    movies_count > 0 AND total_years IS NOT NULL
+ORDER BY 
+    total_years DESC;
+
+This query is designed to benchmark performance through the use of recursive common table expressions (CTEs) to create a movie hierarchy, alongside detailed actor movie associations and various analytic functions to aggregate and analyze actor performances across a selection of titles. The final result couples this with summarization to allow insights into actor profiles and their association with movies from the 2000s onward.

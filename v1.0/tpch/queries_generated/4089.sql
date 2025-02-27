@@ -1,0 +1,30 @@
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+discounted_lineitems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_extendedprice * (1 - l.l_discount) AS net_price
+    FROM lineitem l
+    WHERE l.l_discount > 0.05
+),
+order_line_summary AS (
+    SELECT o.o_orderkey, SUM(d.net_price) AS total_order_value
+    FROM orders o
+    JOIN discounted_lineitems d ON o.o_orderkey = d.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT ss.s_name, ss.nation, ss.total_cost, co.total_orders, co.total_spent, ol.total_order_value
+FROM supplier_summary ss
+JOIN customer_orders co ON ss.total_cost > co.total_spent
+FULL OUTER JOIN order_line_summary ol ON ol.total_order_value IS NOT NULL
+WHERE ss.total_cost IS NOT NULL OR co.total_orders > 0
+ORDER BY ss.total_cost DESC, co.total_spent ASC;

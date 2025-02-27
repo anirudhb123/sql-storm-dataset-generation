@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+CustomerReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_qty) AS total_returns,
+        SUM(wr.wr_return_amt) AS total_return_amount
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returning_customer_sk
+),
+HighestReturns AS (
+    SELECT 
+        cr.wr_returning_customer_sk,
+        cr.total_returns,
+        cr.total_return_amount,
+        CTE.sales,
+        CTE.rank_sales
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        (SELECT 
+            r.returning_customer_sk,
+            SUM(ws.ws_net_paid) AS sales,
+            RANK() OVER (ORDER BY SUM(ws.ws_net_paid) DESC) AS rank_sales
+        FROM 
+            web_sales ws
+        LEFT JOIN 
+            web_returns wr ON ws.ws_order_number = wr.wr_order_number
+        GROUP BY 
+            r.returning_customer_sk) AS CTE 
+    ON cr.wr_returning_customer_sk = CTE.returning_customer_sk
+    WHERE 
+        (cr.total_returns > 5 AND cr.total_return_amount > 100) OR
+        CTE.rank_sales <= 10
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    h.total_returns,
+    h.total_return_amount,
+    COALESCE(h.sales, 0) AS total_sales
+FROM 
+    customer c
+LEFT JOIN 
+    HighestReturns h ON c.c_customer_sk = h.wr_returning_customer_sk
+WHERE 
+    c.c_birth_year < 1980
+    AND (c.c_gender = 'F' OR c.c_gender IS NULL)
+ORDER BY 
+    h.total_return_amount DESC,
+    h.total_sales
+LIMIT 100;

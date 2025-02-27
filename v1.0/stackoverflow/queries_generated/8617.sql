@@ -1,0 +1,50 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.DisplayName, 
+        ur.Reputation, 
+        ur.PostCount,
+        (ur.UpVotes - ur.DownVotes) AS NetVotes
+    FROM UserReputation ur
+    WHERE ur.PostCount > 0
+    ORDER BY ur.Reputation DESC
+    LIMIT 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.PostCount,
+    tu.NetVotes,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.CommentCount,
+    pd.Score
+FROM TopUsers tu
+JOIN PostDetails pd ON tu.UserId = pd.PostId
+ORDER BY tu.Reputation DESC, pd.Score DESC

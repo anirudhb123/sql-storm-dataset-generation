@@ -1,0 +1,118 @@
+WITH RecursivePosts AS (
+    SELECT
+        Id,
+        PostTypeId,
+        ParentId,
+        Title,
+        Score,
+        CreationDate,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.PostTypeId,
+        p.ParentId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        rp.Level + 1
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostScores AS (
+    SELECT
+        PostId,
+        SUM(COALESCE(Score, 0)) AS TotalScore
+    FROM
+        Posts
+    GROUP BY
+        PostId
+),
+BadgeUsers AS (
+    SELECT
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM
+        Badges
+    GROUP BY
+        UserId
+),
+FilteredUsers AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM
+        Users u
+    LEFT JOIN
+        BadgeUsers b ON u.Id = b.UserId
+    WHERE
+        u.Reputation > 100 AND (u.LastAccessDate >= NOW() - INTERVAL '1 year' OR u.BadgeCount > 5)
+),
+QuestionStats AS (
+    SELECT
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT pf.Id) AS FavoriteCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate
+    FROM
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN
+        PostLinks pl ON pl.PostId = p.Id
+    LEFT JOIN
+        Posts pf ON pl.RelatedPostId = pf.Id AND pf.PostTypeId = 5 -- Only tag wiki posts
+    WHERE
+        p.PostTypeId = 1
+    GROUP BY
+        p.Id
+)
+SELECT
+    fps.UserId,
+    fps.DisplayName,
+    q.Title AS QuestionTitle,
+    q.CommentCount,
+    q.FavoriteCount,
+    q.ClosedDate,
+    ROUND(AVG(COALESCE(ps.TotalScore, 0)), 2) AS AverageScore,
+    CASE
+        WHEN fps.BadgeCount >= 10 THEN 'Legendary'
+        WHEN fps.BadgeCount >= 5 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS UserTier,
+    COUNT(DISTINCT r.Id) AS RelatedPostsCount
+FROM
+    FilteredUsers fps
+JOIN
+    QuestionStats q ON q.QuestionId = (
+        SELECT p.Id
+        FROM Posts p
+        WHERE p.OwnerUserId = fps.UserId AND p.PostTypeId = 1
+        ORDER BY p.CreationDate DESC
+        LIMIT 1
+    )
+LEFT JOIN
+    RecursivePosts r ON r.Id = q.QuestionId
+LEFT JOIN
+    PostScores ps ON ps.PostId = q.QuestionId
+GROUP BY
+    fps.UserId, fps.DisplayName, q.Title, q.CommentCount, q.FavoriteCount, q.ClosedDate
+HAVING
+    COUNT(DISTINCT r.Id) > 3
+ORDER BY
+    q.CommentCount DESC, fps.Reputation DESC;

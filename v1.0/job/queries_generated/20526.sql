@@ -1,0 +1,91 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        COALESCE(cb.role, 'Unknown') AS main_cast_role,
+        CAST(t.production_year AS VARCHAR) || ' - ' || COALESCE(t.title, 'Untitled') AS description
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        (SELECT 
+            c.movie_id, 
+            r.role, 
+            ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+        FROM 
+            cast_info c
+        JOIN 
+            role_type r ON c.role_id = r.id
+        WHERE 
+            r.role IS NOT NULL
+        ) cb ON t.id = cb.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        t.production_year,
+        t.imdb_id,
+        COALESCE(cb.role, 'Unknown') AS main_cast_role,
+        CAST(t.production_year AS VARCHAR) || ' - ' || COALESCE(t.title, 'Untitled') AS description 
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        aka_title t ON mh.movie_id = t.id
+    LEFT JOIN 
+        (SELECT 
+            c.movie_id, 
+            r.role, 
+            ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_order
+        FROM 
+            cast_info c
+        JOIN 
+            role_type r ON c.role_id = r.id
+        WHERE 
+            r.role IS NOT NULL
+        ) cb ON t.id = cb.movie_id
+    WHERE 
+        mh.movie_id <> t.id 
+        AND mh.title IS NOT NULL
+        AND t.production_year > mh.production_year
+),
+movie_info_extras AS (
+    SELECT 
+        m.movie_id,
+        MAX(mi.info) AS max_info,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        STRING_AGG(DISTINCT ci.note, ', ') AS notes
+    FROM 
+        movie_hierarchy m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        (SELECT DISTINCT c.movie_id, c.note FROM cast_info c) ci ON m.movie_id = ci.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.main_cast_role,
+    me.max_info,
+    me.keyword_count,
+    me.notes
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info_extras me ON mh.movie_id = me.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+    AND (mh.title LIKE '%Epic%' OR me.keyword_count > 5)
+ORDER BY 
+    mh.production_year DESC,
+    me.keyword_count DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

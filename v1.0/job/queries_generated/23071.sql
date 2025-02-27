@@ -1,0 +1,85 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year >= 2000
+        AND t.title IS NOT NULL
+),
+
+CoActors AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT a.name ORDER BY a.name) AS co_actor_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        ci.movie_id
+),
+
+MovieDetails AS (
+    SELECT 
+        t.title,
+        kt.keyword,
+        ct.kind AS company_type,
+        c.name AS company_name,
+        COALESCE(mi.info, 'No additional info') AS movie_info
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id 
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    WHERE 
+        t.production_year > 1990
+),
+
+FinalOutput AS (
+    SELECT 
+        rt.title AS ranked_title,
+        rt.production_year,
+        ca.co_actor_names,
+        md.keyword,
+        md.company_type,
+        md.company_name,
+        md.movie_info
+    FROM 
+        RankedTitles rt
+    JOIN 
+        CoActors ca ON rt.title_id = ca.movie_id
+    JOIN 
+        MovieDetails md ON md.title = rt.title
+    WHERE 
+        rt.title_rank <= 5 
+)
+
+SELECT 
+    ranked_title,
+    production_year,
+    co_actor_names,
+    keyword,
+    company_type,
+    COALESCE(company_name, 'Independent') AS company_name,
+    movie_info
+FROM 
+    FinalOutput
+ORDER BY 
+    production_year DESC, 
+    ranked_title ASC
+LIMIT 100;
+
+This SQL query performs a complex benchmarking operation across multiple tables in the join order benchmark schema. It includes common table expressions (CTEs) to rank titles, gather co-actor names, and detail movie information, incorporating outer joins, correlated subqueries, and advanced filtering criteria. It also leverages string manipulation and NULL logic while presenting the results in a structured format.

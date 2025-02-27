@@ -1,0 +1,59 @@
+WITH AddressDetails AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+GenderStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics 
+    JOIN 
+        customer ON cd_demo_sk = c_current_cdemo_sk
+    GROUP BY 
+        cd_gender
+),
+SalesStats AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_date_sk
+),
+CombinedStats AS (
+    SELECT 
+        gd.cd_gender, 
+        gd.customer_count, 
+        gd.avg_purchase_estimate, 
+        ss.total_profit, 
+        ss.total_quantity,
+        dd.d_date
+    FROM 
+        GenderStats gd
+    JOIN 
+        SalesStats ss ON ss.ws_ship_date_sk = cast('2002-10-01' as date)
+    JOIN 
+        date_dim dd ON dd.d_date_sk = ss.ws_ship_date_sk
+)
+SELECT 
+    ca.full_address,
+    cs.cd_gender,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    cs.total_profit,
+    cs.total_quantity
+FROM 
+    AddressDetails ca
+JOIN 
+    CombinedStats cs ON ca.ca_city = 'San Francisco' AND ca.ca_state = 'CA'
+ORDER BY 
+    cs.total_profit DESC;

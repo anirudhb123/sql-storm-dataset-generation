@@ -1,0 +1,31 @@
+WITH SupplierInfo AS (
+    SELECT s.s_name, s.s_acctbal, s.s_nationkey, n.n_name AS nation_name 
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+), 
+
+PartInfo AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, ps.ps_availqty, ps.ps_supplycost 
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+
+CustomerOrders AS (
+    SELECT c.c_name, SUM(o.o_totalprice) AS total_spent 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name
+    HAVING total_spent > 10000
+), 
+
+FinalReport AS (
+    SELECT si.s_name, si.nation_name, pi.p_name, pi.p_brand, co.c_name, co.total_spent 
+    FROM SupplierInfo si
+    CROSS JOIN PartInfo pi
+    JOIN CustomerOrders co ON co.total_spent > 10000
+)
+SELECT * 
+FROM FinalReport
+ORDER BY si.nation_name, co.total_spent DESC;

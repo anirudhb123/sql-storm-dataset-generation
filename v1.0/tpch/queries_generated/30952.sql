@@ -1,0 +1,43 @@
+WITH RECURSIVE nation_hierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 as level
+    FROM nation
+    WHERE n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN nation_hierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+supplier_agg AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus <> 'C'
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+SELECT p.p_name, p.p_size, p.p_retailprice, COALESCE(cus_order.order_count, 0) AS order_count,
+       COALESCE(cus_order.total_spent, 0) AS total_spent,
+       s.s_name AS supplier_name, 
+       CASE 
+           WHEN p.p_retailprice > AVG(p2.p_retailprice) OVER (PARTITION BY p.p_type) THEN 'Above Average'
+           ELSE 'Below Average' 
+       END AS price_comparison,
+       nh.level AS nation_level
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN nation_hierarchy nh ON c.c_nationkey = nh.n_nationkey
+LEFT JOIN supplier_agg s ON p.p_partkey = s.s_suppkey
+LEFT JOIN customer_order_summary cus_order ON c.c_custkey = cus_order.c_custkey
+WHERE (p.p_size IS NULL OR p.p_size > 10)
+  AND (s.s_name IS NOT NULL OR s.s_name != 'Generic')
+  AND nh.level <= 2
+ORDER BY total_spent DESC, p.p_retailprice ASC;

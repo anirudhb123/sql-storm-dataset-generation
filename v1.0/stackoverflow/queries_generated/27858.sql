@@ -1,0 +1,84 @@
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikiPosts,
+        SUM(p.Score) AS TotalScore,
+        SUM(coalesce(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopTags AS (
+    SELECT 
+        tags.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Posts p
+    CROSS JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>') AS tags(TagName)
+    GROUP BY 
+        tags.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserTagEngagement AS (
+    SELECT 
+        up.UserId,
+        tt.TagName,
+        SUM(p.ViewCount) AS TotalViewsForTag,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestionsForTag,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswersForTag
+    FROM 
+        UserPosts up
+    JOIN 
+        Posts p ON up.UserId = p.OwnerUserId
+    CROSS JOIN 
+        TopTags tt ON tt.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'))
+    GROUP BY 
+        up.UserId, tt.TagName
+)
+
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.Questions,
+    up.Answers,
+    ubc.BadgeCount,
+    ubc.GoldBadges,
+    ubc.SilverBadges,
+    ubc.BronzeBadges,
+    SUM(ute.TotalViewsForTag) AS TotalViewsPerTag,
+    SUM(ute.TotalQuestionsForTag) AS QuestionsPerTag,
+    SUM(ute.TotalAnswersForTag) AS AnswersPerTag
+FROM 
+    UserPosts up
+LEFT JOIN 
+    UserBadgeCounts ubc ON up.UserId = ubc.UserId
+LEFT JOIN 
+    UserTagEngagement ute ON up.UserId = ute.UserId
+GROUP BY 
+    up.UserId, up.DisplayName, ubc.BadgeCount, ubc.GoldBadges, ubc.SilverBadges, ubc.BronzeBadges
+ORDER BY 
+    up.TotalPosts DESC, TotalViewsPerTag DESC
+LIMIT 50;

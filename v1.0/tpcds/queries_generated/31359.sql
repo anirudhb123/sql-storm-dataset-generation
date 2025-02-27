@@ -1,0 +1,78 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_within_year
+    FROM 
+        date_dim d 
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        d.d_year >= 2020
+    GROUP BY 
+        d.d_date
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS customer_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.customer_profit,
+        ROW_NUMBER() OVER (ORDER BY cs.customer_profit DESC) AS customer_rank
+    FROM 
+        customer_sales cs
+),
+item_statistics AS (
+    SELECT 
+        i.i_item_id,
+        COUNT(ws.ws_item_sk) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_price,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+returns_info AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        COUNT(sr.sr_item_sk) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+)
+SELECT 
+    i.i_item_id, 
+    is.total_sales,
+    is.avg_price,
+    is.total_profit,
+    COALESCE(ri.total_return_amount, 0) AS total_returns,
+    COALESCE(ri.total_returns, 0) AS return_count,
+    ct.customer_rank,
+    st.total_profit AS total_sales_profit
+FROM 
+    item_statistics is
+LEFT JOIN 
+    returns_info ri ON is.i_item_id = ri.sr_item_sk
+JOIN 
+    sales_trend st ON st.total_profit > 1000
+JOIN 
+    top_customers ct ON ct.customer_rank <= 10
+WHERE 
+    is.total_sales > 100
+ORDER BY 
+    total_profit DESC;

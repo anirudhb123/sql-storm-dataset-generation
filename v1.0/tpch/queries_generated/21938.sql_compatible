@@ -1,0 +1,53 @@
+
+WITH RECURSIVE CustOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, co.o_custkey, co.o_totalprice + o.o_totalprice, o.o_orderdate, co.order_level + 1
+    FROM orders o
+    INNER JOIN CustOrders co ON o.o_custkey = co.o_custkey
+    WHERE o.o_orderdate < co.o_orderdate
+),
+AggregateOrders AS (
+    SELECT co.o_custkey, COUNT(co.o_orderkey) AS total_orders,
+           SUM(co.o_totalprice) AS total_spent,
+           AVG(co.o_totalprice) AS avg_spent,
+           MAX(co.o_orderdate) AS last_order_date
+    FROM CustOrders co
+    GROUP BY co.o_custkey
+),
+TopRegions AS (
+    SELECT n.n_regionkey, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_regionkey
+    HAVING COUNT(DISTINCT c.c_custkey) > 5
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost, 
+           ps.ps_availqty, CAST(ps.ps_supplycost * ps.ps_availqty AS DECIMAL(12, 2)) AS price_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL
+),
+FinalOutput AS (
+    SELECT r.r_name, ao.total_orders, ao.total_spent, ao.avg_spent, 
+           psd.p_name, psd.price_qty
+    FROM AggregateOrders ao
+    LEFT JOIN customer c ON c.c_custkey = ao.o_custkey
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN PartSupplierDetails psd ON r.r_regionkey = (SELECT MAX(rg.r_regionkey) FROM region rg)
+    WHERE ao.total_spent > (SELECT AVG(ao2.total_spent) FROM AggregateOrders ao2)
+    ORDER BY r.r_name, ao.total_spent DESC
+)
+SELECT DISTINCT r.r_name, COALESCE(SUM(f.total_orders) OVER (PARTITION BY r.r_name), 0) AS region_total_orders,
+                STRING_AGG(f.p_name || ' - ' || f.price_qty, ', ' ORDER BY f.p_name) AS part_supplier_info
+FROM FinalOutput f
+JOIN region r ON f.r_name = r.r_name
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT f.p_name) > 1
+ORDER BY region_total_orders DESC;

@@ -1,0 +1,27 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, SUM(ps.ps_availqty) AS total_available_qty,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT r.r_name, rs.s_name, rs.total_available_qty
+    FROM RankedSuppliers rs
+    JOIN nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE rs.rank <= 3
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    WHERE o.o_totalprice > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2
+    )
+)
+SELECT t.s_name, t.r_name, h.o_orderkey, h.o_totalprice, h.o_orderdate
+FROM TopSuppliers t
+JOIN HighValueOrders h ON t.total_available_qty > 1000
+ORDER BY t.r_name, h.o_orderdate DESC;

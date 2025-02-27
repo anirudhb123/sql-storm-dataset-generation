@@ -1,0 +1,50 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_sales_price DESC) AS rn,
+        (CASE 
+            WHEN ws.ws_sales_price IS NULL THEN 'Unknown Price'
+            WHEN ws.ws_sales_price > 1000 THEN 'Expensive'
+            ELSE 'Affordable'
+        END) AS price_category
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date = cast('2002-10-01' as date))
+),
+FilteredReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        COUNT(wr.wr_return_quantity) AS return_count,
+        SUM(COALESCE(wr.wr_return_amt, 0)) AS total_return_amt
+    FROM web_returns wr
+    WHERE wr.wr_returned_date_sk IN (
+        SELECT d.d_date_sk 
+        FROM date_dim d 
+        WHERE d.d_week_seq = (SELECT d2.d_week_seq FROM date_dim d2 WHERE d2.d_date = cast('2002-10-01' as date)) 
+        AND d.d_year = (SELECT EXTRACT(YEAR FROM cast('2002-10-01' as date)))
+    )
+    GROUP BY wr.returning_customer_sk
+),
+SalesReturnSummary AS (
+    SELECT 
+        rs.web_site_id,
+        rs.ws_order_number,
+        rs.price_category,
+        fr.return_count,
+        fr.total_return_amt
+    FROM RankedSales rs
+    LEFT JOIN FilteredReturns fr ON fr.returning_customer_sk = rs.ws_order_number
+    WHERE (fr.return_count > 5 OR fr.return_count IS NULL)
+)
+SELECT 
+    srs.web_site_id,
+    COUNT(srs.ws_order_number) AS order_count,
+    AVG(srs.total_return_amt) AS avg_return_amt,
+    MAX(srs.return_count) AS max_returns,
+    STRING_AGG(srs.price_category, ', ') AS price_categories
+FROM SalesReturnSummary srs
+GROUP BY srs.web_site_id
+HAVING AVG(srs.total_return_amt) > 100 OR MAX(srs.return_count) > 10
+ORDER BY order_count DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,53 @@
+WITH recursive movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        1 AS level
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        mh.level + 1
+    FROM title t
+    JOIN movie_link ml ON ml.movie_id = t.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+    WHERE mh.level < 5
+)
+
+SELECT 
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    t.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS average_info_present,
+    STRING_AGG(DISTINCT cn.name, ', ') AS production_companies,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY t.production_year DESC) AS rank,
+    CASE
+        WHEN COUNT(DISTINCT kc.keyword) > 5 THEN 'High'
+        WHEN COUNT(DISTINCT kc.keyword) BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_engagement
+FROM aka_name ak
+JOIN cast_info ci ON ak.person_id = ci.person_id
+JOIN movie_companies mc ON mc.movie_id = ci.movie_id
+JOIN company_name cn ON cn.id = mc.company_id
+JOIN title t ON t.id = ci.movie_id
+LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN keyword kc ON kc.id = mk.keyword_id
+LEFT JOIN movie_info mi ON mi.movie_id = t.id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%box office%')
+LEFT JOIN movie_hierarchy mh ON mh.movie_id = t.id
+WHERE ak.name IS NOT NULL
+  AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%')
+  AND (t.production_year BETWEEN 2000 AND EXTRACT(YEAR FROM CURRENT_DATE))
+  AND mh.level <= 3
+GROUP BY ak.name, t.title, t.production_year
+HAVING AVG(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) > 0.5
+ORDER BY keyword_count DESC, rank;

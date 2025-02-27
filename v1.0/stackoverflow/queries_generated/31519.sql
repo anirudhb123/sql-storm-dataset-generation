@@ -1,0 +1,57 @@
+WITH RecursivePostHistory AS (
+    -- CTE to get hierarchy of post edits and closures
+    SELECT p.Id AS PostId, 
+           0 AS Level, 
+           ph.CreationDate, 
+           ph.UserId,
+           ph.Comment,
+           ph.PostHistoryTypeId,
+           ph.Text
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 20) -- Closure events
+
+    UNION ALL
+
+    SELECT p.Id AS PostId, 
+           Level + 1, 
+           ph.CreationDate, 
+           ph.UserId,
+           ph.Comment,
+           ph.PostHistoryTypeId,
+           ph.Text
+    FROM Posts p
+    JOIN PostHistory ph ON p.AcceptedAnswerId = ph.PostId
+    JOIN RecursivePostHistory rph ON rph.PostId = p.Id
+)
+SELECT 
+    u.DisplayName AS UserName,
+    p.Title,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+    t.TagName,
+    ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS PostEditLevel,
+    MAX(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+    MAX(DISTINCT CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.Comment END) AS ReopenReason
+FROM 
+    Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%' -- Match tags
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' -- Posts created in the last year
+    AND (ph.PostHistoryTypeId IS NULL OR ph.PostHistoryTypeId IN (10, 11, 12, 20)) -- Only relevant history
+GROUP BY 
+    u.DisplayName, 
+    p.Id, 
+    p.Title, 
+    t.TagName
+HAVING 
+    COUNT(DISTINCT c.Id) > 0 -- Only posts with comments
+ORDER BY 
+    TotalUpvotes DESC, 
+    TotalComments DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY; -- Pagination

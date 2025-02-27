@@ -1,0 +1,55 @@
+WITH PostDetails AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.Body,
+           p.Tags,
+           u.DisplayName AS OwnerDisplayName,
+           p.CreationDate,
+           COUNT(DISTINCT c.Id) AS CommentCount,
+           COUNT(DISTINCT a.Id) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, u.DisplayName, p.CreationDate
+),
+
+TagStats AS (
+    SELECT UNNEST(string_to_array(Tags, '><')) AS TagName,
+           COUNT(*) AS PostCount
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY TagName
+),
+
+BadgeStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+
+SELECT pd.PostId,
+       pd.Title,
+       pd.Body,
+       pd.Tags,
+       pd.OwnerDisplayName,
+       pd.CreationDate,
+       pd.CommentCount,
+       pd.AnswerCount,
+       ts.TagName,
+       ts.PostCount,
+       bs.DisplayName AS UserWithMostBadges,
+       bs.BadgeCount
+FROM PostDetails pd
+LEFT JOIN TagStats ts ON pd.Tags ILIKE '%' || ts.TagName || '%'
+LEFT JOIN (SELECT UserId, 
+                  DisplayName, 
+                  BadgeCount 
+           FROM BadgeStats 
+           ORDER BY BadgeCount DESC 
+           LIMIT 1) bs ON TRUE
+ORDER BY pd.CreationDate DESC, pd.CommentCount DESC;

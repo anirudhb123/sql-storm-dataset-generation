@@ -1,0 +1,57 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, ss_item_sk, ss_ticket_number, ss_quantity, ss_sales_price, 1 AS level
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+    
+    UNION ALL
+    
+    SELECT ss.s_store_sk, ss.ss_item_sk, ss.ss_ticket_number, ss.ss_quantity, ss.ss_sales_price, sh.level + 1
+    FROM store_sales ss
+    JOIN sales_hierarchy sh ON ss.ss_ticket_number = sh.ss_ticket_number
+    WHERE sh.level < 5  
+),
+customer_stats AS (
+    SELECT 
+        ca.state AS customer_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+    GROUP BY ca.state
+),
+item_revenue AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(COALESCE(ws.ws_sales_price, cs.cs_sales_price, ss.ss_sales_price, 0)) AS total_revenue
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+    LEFT JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY i.i_item_sk
+),
+top_items AS (
+    SELECT i_item_sk, total_revenue,
+           ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+    FROM item_revenue
+)
+SELECT 
+    sh.s_store_sk,
+    ti.i_item_sk,
+    c.customer_state,
+    c.customer_count,
+    SUM(sh.ss_quantity) AS total_quantity_sold,
+    SUM(sh.ss_sales_price * sh.ss_quantity) AS total_sales_value,
+    CASE 
+        WHEN SUM(sh.ss_quantity) > 50 THEN 'High Demand'
+        WHEN SUM(sh.ss_quantity) BETWEEN 20 AND 50 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM sales_hierarchy sh
+JOIN top_items ti ON sh.ss_item_sk = ti.i_item_sk
+JOIN customer_stats c ON 1=1 
+WHERE ti.revenue_rank <= 10
+GROUP BY sh.s_store_sk, ti.i_item_sk, c.customer_state, c.customer_count
+HAVING total_sales_value > 1000
+ORDER BY total_sales_value DESC;

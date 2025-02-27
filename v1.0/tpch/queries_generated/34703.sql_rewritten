@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+quantity_summary AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1996-01-01' 
+      AND l.l_shipdate <= DATE '1996-12-31'
+    GROUP BY l.l_partkey
+),
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_supplycost,
+        s.s_name,
+        s.s_nationkey
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+region_summary AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(n.n_nationkey) AS nation_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(su.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(qs.total_quantity, 0) AS total_quantity,
+    COALESCE(qs.avg_price, 0) AS avg_price,
+    rs.nation_count,
+    sh.level
+FROM part p
+LEFT JOIN supplier_parts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN quantity_summary qs ON p.p_partkey = qs.l_partkey
+LEFT JOIN supplier_hierarchy sh ON sp.s_suppkey = sh.s_suppkey
+LEFT JOIN region_summary rs ON sp.s_nationkey = rs.r_regionkey
+ORDER BY p.p_retailprice DESC, total_quantity DESC, avg_price DESC;

@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+        AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 5000 OR c.c_mktsegment = 'AUTOMOBILE'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(ot.total_sales), 0) AS total_sales,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    AVG(rs.s_acctbal) AS avg_supplier_balance,
+    RANK() OVER (ORDER BY COALESCE(SUM(ot.total_sales), 0) DESC) AS sales_rank
+FROM 
+    FilteredCustomers c
+LEFT JOIN 
+    OrderTotals ot ON c.c_custkey = ot.o_orderkey
+LEFT JOIN 
+    RankedSuppliers rs ON rs.rank = 1
+GROUP BY 
+    c.c_name, rs.s_acctbal
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 0
+ORDER BY 
+    sales_rank
+LIMIT 10;

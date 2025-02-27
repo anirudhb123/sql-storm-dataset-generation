@@ -1,0 +1,88 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score, p.PostTypeId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesGiven,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesGiven
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.ViewCount) AS AverageViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+PostClosureDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosureDate,
+        cr.Name AS CloseReason,
+        DENSE_RANK() OVER (ORDER BY ph.CreationDate DESC) AS CloseRanking
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::INT = cr.Id
+    JOIN 
+        Posts p ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    us.Reputation AS UserReputation,
+    us.UpVotesGiven,
+    us.DownVotesGiven,
+    ts.TagName,
+    ts.PostCount,
+    ts.AverageViews,
+    pcd.ClosureDate,
+    pcd.CloseReason,
+    pcd.CloseRanking
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.PostId = u.Id
+JOIN 
+    UserStats us ON u.Id = us.UserId
+JOIN 
+    TagStatistics ts ON rp.Tags LIKE '%' || ts.TagName || '%'
+LEFT JOIN 
+    PostClosureDetails pcd ON rp.PostId = pcd.PostId
+WHERE 
+    (rp.Score > 0 OR rp.ViewCount > 100) 
+    AND (u.Reputation BETWEEN 100 AND 1000 OR ts.PostCount > 5)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC
+LIMIT 50;

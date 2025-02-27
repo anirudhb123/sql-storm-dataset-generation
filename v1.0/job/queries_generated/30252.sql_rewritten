@@ -1,0 +1,53 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.level < 5 
+)
+
+SELECT 
+    ma.id AS movie_id,
+    ma.title,
+    ma.production_year,
+    COUNT(DISTINCT CAST.id) AS number_of_casts,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN CAST(mi.info AS INTEGER) END) AS avg_rating,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS best_plot_summary
+FROM 
+    MovieHierarchy ma
+LEFT JOIN 
+    complete_cast cc ON ma.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info CAST ON cc.subject_id = CAST.person_id
+LEFT JOIN 
+    aka_name ak ON CAST.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON ma.movie_id = mi.movie_id 
+GROUP BY 
+    ma.id 
+HAVING 
+    COUNT(DISTINCT ak.name) > 2 
+ORDER BY 
+    avg_rating DESC NULLS LAST, 
+    number_of_casts DESC;

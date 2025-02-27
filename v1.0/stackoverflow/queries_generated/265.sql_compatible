@@ -1,0 +1,79 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (2, 3)
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUserActivity AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        AnswerCount,
+        QuestionCount,
+        CommentCount,
+        TotalBounty,
+        BadgeCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserActivity
+),
+HighActivityUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        AnswerCount,
+        QuestionCount,
+        CommentCount,
+        TotalBounty,
+        BadgeCount,
+        ReputationRank
+    FROM 
+        RankedUserActivity
+    WHERE 
+        AnswerCount > 5 OR QuestionCount > 3
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    CASE 
+        WHEN U.TotalBounty > 0 THEN 'Active Contributor' 
+        ELSE 'Regular User' 
+    END AS UserStatus,
+    COALESCE(TagsList.Tags, 'No Tags') AS TagsUsed
+FROM 
+    HighActivityUsers U
+LEFT JOIN (
+    SELECT 
+        P.OwnerUserId,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        UNNEST(SPLIT(P.Tags, '><')) AS TagName ON TagName IS NOT NULL
+    JOIN 
+        Tags T ON T.TagName = TagName
+    GROUP BY 
+        P.OwnerUserId
+) AS TagsList ON TagsList.OwnerUserId = U.UserId
+ORDER BY 
+    U.Reputation DESC, U.DisplayName;

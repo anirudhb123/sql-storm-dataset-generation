@@ -1,0 +1,34 @@
+WITH SupplierMax AS (
+    SELECT ps_partkey, MAX(ps_supplycost) AS max_supplycost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+CustomerOrders AS (
+    SELECT o.orderdate, SUM(o.totalprice) AS total_sales, c.c_name, c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.c_custkey = c.c_custkey
+    WHERE o.orderstatus = 'O'
+    GROUP BY o.orderdate, c.c_name, c.c_nationkey
+),
+RankedOrders AS (
+    SELECT c_name, total_sales, RANK() OVER (PARTITION BY c_nationkey ORDER BY total_sales DESC) AS sales_rank
+    FROM CustomerOrders
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, s.s_name, s.s_suppkey
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT
+    p.p_partkey,
+    p.p_name,
+    p.p_size,
+    COALESCE(s.max_supplycost, 0) AS max_supplycost,
+    COALESCE(ro.sales_rank, 'No sales') AS sales_rank,
+    COALESCE(ro.total_sales, 0) AS total_sales
+FROM PartSupplier p
+LEFT JOIN SupplierMax s ON p.p_partkey = s.ps_partkey
+LEFT JOIN RankedOrders ro ON p.s_suppkey = ro.c_nationkey  -- Assuming there's a meaningful join condition
+WHERE p.p_retailprice > 100.00
+ORDER BY p.p_partkey, sales_rank;

@@ -1,0 +1,68 @@
+
+WITH movie_data AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(MAX(cast.nr_order), 0) AS max_order,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info cast ON t.id = cast.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year IS NOT NULL AND 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ranked_movies AS (
+    SELECT 
+        md.*,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.max_order DESC, md.keyword_count DESC) AS rank_by_order_and_keywords
+    FROM 
+        movie_data md
+),
+actors_data AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movies_played,
+        SUM(CASE WHEN c.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS valid_roles
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    WHERE 
+        a.name IS NOT NULL
+    GROUP BY 
+        a.id, a.name
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.max_order,
+    rm.keyword_count,
+    rm.keywords,
+    ad.name AS actor_name,
+    ad.movies_played,
+    ad.valid_roles,
+    CASE WHEN ad.valid_roles > 0 THEN 'Active' ELSE 'Inactive' END AS actor_status,
+    CASE 
+        WHEN rm.rank_by_order_and_keywords <= 10 THEN 'Top Movie'
+        ELSE 'Regular'
+    END AS movie_rank_category
+FROM 
+    ranked_movies rm
+FULL OUTER JOIN 
+    actors_data ad ON ad.movies_played > 0
+WHERE 
+    (rm.production_year = 2020 OR rm.production_year IS NULL) AND
+    (ad.movies_played BETWEEN 5 AND 20 OR ad.movies_played IS NULL)
+ORDER BY 
+    rm.production_year DESC, 
+    rm.max_order DESC, 
+    ad.movies_played DESC;

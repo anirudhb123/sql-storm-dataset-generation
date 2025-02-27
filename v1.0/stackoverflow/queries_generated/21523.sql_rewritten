@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS PostRank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostsTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate, 
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostMetrics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.Tags,
+        cp.ClosedDate,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        CASE 
+            WHEN rp.Score > 10 THEN 'Highly Scored'
+            WHEN rp.Score BETWEEN 5 AND 10 THEN 'Moderate Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.Score,
+    pm.UpVotes,
+    pm.DownVotes,
+    pm.Tags,
+    COALESCE(pm.ClosedDate, 'Not Closed'::timestamp) AS PostClosureStatus,
+    pm.ScoreCategory,
+    COALESCE(ub.DisplayName, 'Unknown User') AS OwnerDisplayName,
+    COALESCE(uc.Reputation, 0) AS UserReputation,
+    CASE 
+        WHEN pm.ClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus
+FROM 
+    PostMetrics pm
+LEFT JOIN 
+    Users uc ON pm.OwnerUserId = uc.Id
+WHERE 
+    pm.PostRank <= 5 
+ORDER BY 
+    pm.Score DESC,
+    pm.ClosedDate DESC NULLS LAST;

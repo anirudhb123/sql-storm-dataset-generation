@@ -1,0 +1,45 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM Users AS U
+    LEFT JOIN Posts AS P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments AS C ON U.Id = C.UserId
+    LEFT JOIN Badges AS B ON U.Id = B.UserId
+    LEFT JOIN Votes AS V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes 
+    FROM Posts AS P
+    LEFT JOIN Comments AS C ON P.Id = C.PostId
+    LEFT JOIN Votes AS V ON P.Id = V.PostId
+    GROUP BY P.Id, P.Title, P.CreationDate
+)
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.TotalComments,
+    UA.TotalBadges,
+    UA.TotalBounty,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.CommentCount,
+    PS.UpVotes,
+    PS.DownVotes
+FROM UserActivity AS UA
+JOIN PostStatistics AS PS ON UA.UserId = PS.PostId 
+ORDER BY UA.TotalPosts DESC, UA.TotalBounty DESC;

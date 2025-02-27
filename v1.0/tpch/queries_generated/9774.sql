@@ -1,0 +1,64 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS parts_count
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, r.r_name
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_orders_value,
+        COUNT(o.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+), OrderLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(DISTINCT l.l_partkey) AS lineitem_parts_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2024-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    si.s_name, 
+    si.nation_name, 
+    si.region_name, 
+    si.total_supply_cost, 
+    si.parts_count,
+    co.c_name AS customer_name,
+    co.total_orders_value,
+    co.orders_count,
+    oli.total_lineitem_value,
+    oli.lineitem_parts_count
+FROM 
+    SupplierInfo si
+LEFT JOIN 
+    CustomerOrders co ON si.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l))
+LEFT JOIN 
+    OrderLineItems oli ON oli.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+ORDER BY 
+    si.total_supply_cost DESC, 
+    co.total_orders_value DESC;

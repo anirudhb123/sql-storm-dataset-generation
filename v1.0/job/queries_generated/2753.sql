@@ -1,0 +1,43 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names,
+        MAX(mci.note) AS company_note
+    FROM aka_title t
+    LEFT JOIN complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN cast_info c ON cc.subject_id = c.id
+    LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN movie_info_idx mii ON mi.movie_id = mii.movie_id AND mi.info_type_id = mii.info_type_id
+    LEFT JOIN movie_info mci ON mii.id = mci.id
+    WHERE t.production_year BETWEEN 2000 AND 2023
+    GROUP BY t.id, t.title, t.production_year
+),
+RankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast,
+        cast_names,
+        company_note,
+        ROW_NUMBER() OVER (ORDER BY production_year DESC, total_cast DESC) AS rank
+    FROM MovieDetails
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.total_cast,
+    rm.cast_names,
+    COALESCE(rm.company_note, 'No Company Info') AS company_info
+FROM RankedMovies rm
+WHERE rm.total_cast > (
+      SELECT AVG(total_cast) 
+      FROM RankedMovies
+      WHERE production_year = rm.production_year
+)
+ORDER BY rm.rank;

@@ -1,0 +1,32 @@
+
+SELECT 
+    p.p_name, 
+    s.s_name, 
+    CONCAT('Supplier: ', s.s_name, 
+           ', Part: ', p.p_name, 
+           ', Price: $', FORMAT(ps.ps_supplycost, 2), 
+           ', Quantity Available: ', ps.ps_availqty, 
+           ', Manufactured by: ', p.p_mfgr) AS details
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_size BETWEEN 10 AND 20
+    AND n.n_name LIKE 'A%'
+    AND r.r_name IN ('Europe', 'Asia')
+GROUP BY 
+    p.p_name, 
+    s.s_name, 
+    ps.ps_supplycost, 
+    ps.ps_availqty, 
+    p.p_mfgr
+ORDER BY 
+    ps.ps_availqty DESC, 
+    s.s_name ASC;

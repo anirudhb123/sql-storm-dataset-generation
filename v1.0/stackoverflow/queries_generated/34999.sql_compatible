@@ -1,0 +1,76 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        COUNT(a.Id) AS AnswerCount,
+        MAX(p.CreationDate) AS CreationDate,
+        UPPER(TRIM(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2))) AS Tags 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId 
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    qs.QuestionId,
+    qs.Title,
+    qs.AnswerCount,
+    CONCAT(u.DisplayName, ' (Reput: ', u.Reputation, ', Bounties: ', u.TotalBounties, ')') AS UserInfo,
+    ph.Level,
+    qs.Tags
+FROM 
+    QuestionStats qs
+JOIN 
+    Posts p ON p.Id = qs.QuestionId
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostHierarchy ph ON ph.PostId = qs.QuestionId
+WHERE 
+    qs.AnswerCount > 0 
+    AND u.Reputation > 1000 
+ORDER BY 
+    qs.AnswerCount DESC, 
+    ph.Level ASC, 
+    qs.CreationDate DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

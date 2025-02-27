@@ -1,0 +1,71 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20
+),
+SuppliersWithRegions AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name,
+        COALESCE(s.s_acctbal, 0) AS acct_balance
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_lineitem_cost
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cr.c_custkey,
+    cr.c_name,
+    COALESCE(SUM(hv.total_lineitem_cost), 0) AS total_high_value_order_cost,
+    rp.p_name,
+    rp.p_retailprice
+FROM 
+    CustomerOrders cr
+LEFT JOIN 
+    HighValueOrders hv ON cr.c_custkey = hv.o_orderkey
+LEFT JOIN 
+    RankedParts rp ON rp.rn <= 5
+WHERE 
+    cr.total_order_value > 1000
+GROUP BY 
+    cr.c_custkey, cr.c_name, rp.p_name, rp.p_retailprice
+HAVING 
+    COUNT(DISTINCT rp.p_partkey) > 3
+ORDER BY 
+    total_high_value_order_cost DESC, cr.c_name ASC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

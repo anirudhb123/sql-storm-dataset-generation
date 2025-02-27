@@ -1,0 +1,65 @@
+
+WITH SalesData AS (
+    SELECT 
+        s_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_ext_sales_price) AS total_sales,
+        SUM(ss_ext_discount_amt) AS total_discount,
+        AVG(ss_net_paid) AS avg_net_paid,
+        RANK() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2458849 AND 2458915  -- Example date range
+    GROUP BY 
+        s_store_sk, ss_item_sk
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(sd.total_sales) AS total_customer_sales,
+        COUNT(sd.ss_item_sk) AS items_bought
+    FROM 
+        customer c
+    LEFT JOIN 
+        SalesData sd ON c.c_customer_sk = sd.s_store_sk  -- Example join based on store key
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn,
+        SUM(ws_sales_price) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458840 AND 2458915
+    GROUP BY 
+        ws_item_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_customer_sales,
+    cs.items_bought,
+    CASE 
+        WHEN cs.total_customer_sales > 1000 THEN 'High Value Customer' 
+        ELSE 'Regular Customer' 
+    END AS customer_segment,
+    rs.total_sales AS recent_item_sales
+FROM 
+    CustomerSales cs
+LEFT JOIN 
+    RecentSales rs ON cs.c_customer_sk = rs.ws_item_sk
+WHERE 
+    cs.items_bought > 5
+ORDER BY 
+    cs.total_customer_sales DESC, 
+    recent_item_sales DESC
+LIMIT 50;

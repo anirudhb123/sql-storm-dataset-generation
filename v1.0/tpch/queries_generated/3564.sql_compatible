@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS average_line_price,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1996-01-01'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name,
+    co.order_count,
+    co.total_spent,
+    so.s_name,
+    so.total_available_quantity,
+    so.total_supply_cost,
+    los.average_line_price,
+    los.part_count
+FROM 
+    CustomerOrders co
+LEFT JOIN 
+    SupplierDetails so ON co.order_count > 0
+LEFT JOIN 
+    LineItemSummary los ON los.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+WHERE 
+    so.unique_parts > 5
+ORDER BY 
+    co.total_spent DESC, co.order_count DESC
+LIMIT 10 OFFSET 0;

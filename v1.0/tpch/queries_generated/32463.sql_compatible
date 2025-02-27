@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000
+),
+PriceSummary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderStats AS (
+    SELECT c.c_custkey, 
+           COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    p.p_name AS part_name,
+    p.p_brand AS part_brand,
+    wh.supp_name,
+    wh.level AS supplier_level,
+    ps.total_supply_cost,
+    os.total_orders,
+    os.total_spent,
+    os.avg_order_value
+FROM part p
+JOIN PriceSummary ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN (
+    SELECT sh.s_suppkey, sh.s_name AS supp_name, sh.level
+    FROM SupplierHierarchy sh
+    WHERE sh.level <= 3
+) wh ON wh.s_nationkey = (SELECT p2.p_nationkey FROM part p2 WHERE p2.p_partkey = p.p_partkey) 
+JOIN OrderStats os ON os.total_orders > 10
+WHERE p.p_retailprice > 
+      (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_container IS NOT NULL)
+ORDER BY p.p_name ASC, os.total_spent DESC;

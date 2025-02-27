@@ -1,0 +1,80 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+
+    SELECT 
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        sc.level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        Sales_CTE sc ON ws.ws_item_sk = sc.ws_item_sk
+    WHERE 
+        ws.ws_sold_date_sk < sc.ws_sold_date_sk
+),
+Customer_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ss.ss_net_profit) AS total_spent,
+        COUNT(DISTINCT ss.ss_ticket_number) AS purchase_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+Sales_Analysis AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_spent,
+        cs.purchase_count,
+        ROW_NUMBER() OVER (PARTITION BY cs.cd_gender ORDER BY cs.total_spent DESC) AS rnk,
+        SUM(cs.total_spent) OVER (PARTITION BY cs.cd_gender) AS total_gender_spent,
+        MAX(cs.total_spent) OVER (PARTITION BY cs.cd_gender) AS max_spent,
+        STRING_AGG(DISTINCT CONCAT(CAST(ssc.ws_quantity AS VARCHAR), ' of ', ssc.ws_item_sk), ', ') AS items_purchased
+    FROM 
+        Customer_Summary cs
+    JOIN 
+        web_sales ssc ON cs.total_spent > (SELECT AVG(total_spent) FROM Customer_Summary)
+)
+SELECT 
+    a.c_first_name,
+    a.c_last_name,
+    a.total_spent,
+    a.purchase_count,
+    a.rnk,
+    a.total_gender_spent,
+    a.max_spent,
+    COALESCE(a.items_purchased, 'No purchases') AS items_purchased
+FROM 
+    Sales_Analysis a
+WHERE 
+    a.rnk <= 10
+ORDER BY 
+    a.total_spent DESC;

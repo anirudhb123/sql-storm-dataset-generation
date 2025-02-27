@@ -1,0 +1,70 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+), 
+UserPostStats AS (
+    SELECT 
+        P.OwnerUserId, 
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS WikiPosts
+    FROM Posts P
+    GROUP BY P.OwnerUserId
+),
+VotesAggregated AS (
+    SELECT 
+        V.UserId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT V.PostId) AS UniquePostsVoted
+    FROM Votes V
+    GROUP BY V.UserId
+),
+TopUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COALESCE(UB.BadgeCount, 0) AS BadgeCount,
+        COALESCE(UPS.TotalPosts, 0) AS TotalPosts,
+        COALESCE(VA.TotalUpVotes, 0) AS TotalUpVotes,
+        COALESCE(VA.TotalDownVotes, 0) AS TotalDownVotes
+    FROM Users U
+    LEFT JOIN UserBadges UB ON U.Id = UB.UserId
+    LEFT JOIN UserPostStats UPS ON U.Id = UPS.OwnerUserId
+    LEFT JOIN VotesAggregated VA ON U.Id = VA.UserId
+    WHERE U.Reputation > 1000 OR COALESCE(UB.BadgeCount, 0) > 5
+)
+SELECT 
+    TU.DisplayName,
+    TU.BadgeCount,
+    TU.TotalPosts,
+    TU.TotalUpVotes,
+    TU.TotalDownVotes,
+    ROUND(COALESCE((TU.TotalUpVotes::float / NULLIF(TU.TotalPosts, 0)) * 100, 0), 2) AS UpvotePercentage,
+    (
+        SELECT STRING_AGG(DISTINCT P.Title, ', ') 
+        FROM Posts P 
+        WHERE P.OwnerUserId = TU.Id 
+        AND P.CreationDate >= NOW() - INTERVAL '1 year'
+    ) AS RecentPostTitles,
+    (
+        SELECT COUNT(*) 
+        FROM Comments C 
+        WHERE C.UserId = TU.Id
+    ) AS TotalComments
+FROM TopUsers TU
+WHERE TU.TotalPosts > 0
+ORDER BY TU.Reputation DESC, TU.BadgeCount DESC
+FETCH FIRST 10 ROWS ONLY;
+
+
+This SQL query is designed to benchmark the performance of complex SQL queries that utilize various constructs, including CTEs (Common Table Expressions), outer joins, aggregate functions with CASE statements, correlated subqueries, and string aggregation. It collects and showcases information about users with more than 1000 reputation or more than 5 badges, aggregates their post and voting activity, and even pulls in recent post titles from the past year to increase complexity. It also incorporates NULL handling to prevent division by zero errors and to ensure robustness against absent data.

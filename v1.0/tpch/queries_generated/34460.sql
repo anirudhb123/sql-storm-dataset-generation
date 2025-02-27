@@ -1,0 +1,41 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_nationkey, 1 AS lvl
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY c.c_custkey, c.c_name
+), 
+PartStatistics AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_name,
+    ps.avg_supply_cost,
+    COALESCE(c.total_spent, 0) AS total_spent_by_customer,
+    COUNT(DISTINCT sh.s_suppkey) AS num_suppliers_in_hierarchy
+FROM part p
+LEFT JOIN PartStatistics ps ON p.p_partkey = ps.p_partkey
+LEFT JOIN CustomerOrders c ON c.total_spent > ps.avg_supply_cost
+LEFT JOIN SupplierHierarchy sh ON sh.lvl <= 3
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice)
+    FROM part p2
+    WHERE p2.p_size IS NOT NULL
+)
+GROUP BY p.p_name, ps.avg_supply_cost, c.total_spent
+ORDER BY total_spent_by_customer DESC, ps.avg_supply_cost ASC
+LIMIT 50;

@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS Author,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        NTILE(10) OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON u.Id = b.UserId
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.AnswerCount, 
+        rp.CommentCount, 
+        rp.Author, 
+        rp.BadgeCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 3
+)
+SELECT 
+    tp.Title AS PostTitle,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.Author,
+    tp.BadgeCount,
+    ph.Type AS PostHistoryType,
+    ph.CreationDate AS HistoryDate,
+    ph.Comment AS HistoryComment
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId
+WHERE 
+    ph.CreationDate >= tp.CreationDate
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

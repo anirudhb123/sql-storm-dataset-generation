@@ -1,0 +1,74 @@
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_address,
+        c.c_phone,
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        LEFT(c.c_comment, 40) AS short_comment
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    ORDER BY 
+        total_supply_cost DESC
+    LIMIT 10
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+FinalReport AS (
+    SELECT 
+        cd.c_name,
+        cd.region_name,
+        os.o_orderkey,
+        os.total_price,
+        ts.s_name AS top_supplier_name,
+        os.line_item_count
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        OrderSummary os ON cd.c_custkey IN (
+            SELECT o.o_custkey 
+            FROM orders o 
+            WHERE o.o_orderkey = os.o_orderkey
+        )
+    JOIN 
+        TopSuppliers ts ON ts.total_supply_cost = (
+            SELECT MAX(total_supply_cost) 
+            FROM TopSuppliers
+        )
+)
+SELECT 
+    *
+FROM 
+    FinalReport
+ORDER BY 
+    total_price DESC, line_item_count DESC;

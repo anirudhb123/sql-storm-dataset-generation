@@ -1,0 +1,54 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.s_nationkey
+    WHERE 
+        rs.rn <= 3
+),
+OrderSummary AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        orders o
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(ts.s_name, 'No Supplier') AS supplier_name,
+    os.total_orders,
+    os.total_spent,
+    DATEDIFF(CAST('1998-10-01' AS DATE), os.last_order_date) AS days_since_last_order
+FROM 
+    customer c
+LEFT JOIN 
+    OrderSummary os ON c.c_custkey = os.o_custkey
+LEFT JOIN 
+    TopSuppliers ts ON c.c_nationkey = ts.s_suppkey
+WHERE 
+    (os.total_spent IS NULL OR os.total_spent > 1000)
+    AND (c.c_acctbal < 1000 OR c.c_mktsegment = 'BUILD')
+ORDER BY 
+    c.c_name, os.total_spent DESC;

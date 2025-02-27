@@ -1,0 +1,87 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedPosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownvotedPosts,
+        COALESCE(SUM(b.Class), 0) AS BadgeCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS ViewRank,
+        NTILE(5) OVER (ORDER BY p.Score DESC) AS ScoreCategory,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.ViewCount, p.Score
+),
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS ActivityCount
+    FROM UserActivity
+    WHERE PostCount > 0 
+    GROUP BY UserId
+    HAVING COUNT(*) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RevisionOrder
+    FROM PostHistory ph
+),
+PostWithHistory AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostDate,
+        ph.UserId AS LastUserId,
+        ph.RevisionOrder,
+        ph.CreationDate AS LastEditDate,
+        CASE 
+            WHEN ph.RevisionOrder = 1 THEN 'Initial'
+            ELSE 'Edited'
+        END AS EditStatus
+    FROM Posts p
+    LEFT JOIN RecentPostHistory ph ON p.Id = ph.PostId
+)
+SELECT 
+    u.DisplayName,
+    pa.Title,
+    pa.PostDate,
+    MAX(pa.LastEditDate) AS LatestEdit,
+    ps.ViewCount,
+    ps.CommentCount,
+    ua.BadgeCount,
+    ps.ViewRank,
+    CASE 
+        WHEN ps.ScoreCategory = 1 THEN 'Top Rated'
+        WHEN ps.ScoreCategory = 2 THEN 'High Rated'
+        WHEN ps.ScoreCategory = 3 THEN 'Mid Rated'
+        ELSE 'Low Rated'
+    END AS ScoreClassification,
+    COALESCE(ps.CommentCount, 0) AS TotalComments,
+    CASE 
+        WHEN pa.LastEditDate IS NULL THEN 'Not Edited'
+        WHEN pa.LastEditDate > pa.PostDate THEN 'Edited'
+        ELSE 'Unmodified'
+    END AS PostStatus
+FROM UserActivity ua
+JOIN PostWithHistory pa ON ua.UserId = pa.LastUserId
+JOIN PostStats ps ON pa.PostId = ps.PostId
+WHERE ua.PostCount > 0
+  AND pa.PostDate >= CURRENT_DATE - INTERVAL '30 days'
+  AND ps.ViewRank IS NOT NULL
+ORDER BY ua.Reputation DESC, ps.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    INNER JOIN
+        movie_link ml ON ml.movie_id = mh.movie_id
+    INNER JOIN
+        aka_title mh ON mh.id = ml.linked_movie_id
+    WHERE
+        mh.production_year < 2000
+)
+
+SELECT
+    ka.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    AVG(mr.level) AS average_level,
+    STRING_AGG(DISTINCT co.name, ', ') AS companies
+FROM
+    aka_name ka
+INNER JOIN
+    cast_info ci ON ka.person_id = ci.person_id
+INNER JOIN
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+INNER JOIN
+    aka_title mt ON mh.movie_id = mt.id
+LEFT JOIN
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN
+    company_name co ON mc.company_id = co.id
+WHERE
+    mt.production_year BETWEEN 1990 AND 2023
+    AND (ci.role_id IS NULL OR ci.role_id IN (1, 2, 3)) -- Assumed role_id conditions
+GROUP BY
+    ka.name,
+    mt.title,
+    mt.production_year
+HAVING
+    COUNT(DISTINCT kc.keyword) > 0
+ORDER BY
+    average_level DESC, 
+    keyword_count DESC;

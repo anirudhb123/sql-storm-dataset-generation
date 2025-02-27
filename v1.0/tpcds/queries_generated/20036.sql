@@ -1,0 +1,69 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_quantity,
+        cs_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_order_number DESC) AS rn
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 20200101 AND 20221231
+),
+FilteredReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(CASE WHEN cr_return_quantity IS NOT NULL THEN cr_return_quantity ELSE 0 END) AS total_return_quantity,
+        COUNT(DISTINCT cr_order_number) AS unique_returns
+    FROM 
+        catalog_returns
+    WHERE 
+        cr_returned_date_sk BETWEEN 20200101 AND 20221231
+    GROUP BY 
+        cr_item_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        rs.cs_item_sk,
+        SUM(rs.cs_quantity) AS total_sales,
+        COALESCE(fr.total_return_quantity, 0) AS total_returns,
+        COUNT(DISTINCT rs.cs_order_number) AS order_count
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        FilteredReturns fr ON rs.cs_item_sk = fr.cr_item_sk
+    GROUP BY 
+        rs.cs_item_sk
+),
+ItemDetails AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        i.i_current_price
+    FROM 
+        item i
+)
+SELECT 
+    id.i_item_id,
+    id.i_product_name,
+    ss.total_sales,
+    ss.total_returns,
+    ss.order_count,
+    ss.total_sales - ss.total_returns * 1.00 AS net_sales,
+    CASE 
+        WHEN ss.total_sales > 0 THEN (ss.total_returns / NULLIF(ss.total_sales, 0)) * 100
+        ELSE NULL 
+    END AS return_percentage,
+    ROW_NUMBER() OVER (ORDER BY net_sales DESC) AS rank
+FROM 
+    ItemDetails id
+JOIN 
+    SalesWithReturns ss ON id.i_item_sk = ss.cs_item_sk
+WHERE 
+    id.i_current_price IS NOT NULL
+    AND id.i_item_sk > 0
+ORDER BY 
+    return_percentage DESC, net_sales DESC
+LIMIT 10;

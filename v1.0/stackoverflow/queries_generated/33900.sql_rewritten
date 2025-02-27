@@ -1,0 +1,60 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        a.Id AS PostId,
+        a.ParentId,
+        a.Title,
+        a.CreationDate,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN RecursivePostCTE r ON a.ParentId = r.PostId
+)
+
+SELECT 
+    p.Id AS QuestionId,
+    p.Title AS QuestionTitle,
+    p.CreationDate AS QuestionDate,
+    COALESCE(au.UpVotes, 0) AS QuestionsUpVotes,
+    COALESCE(au.DownVotes, 0) AS QuestionsDownVotes,
+    COUNT(DISTINCT a.Id) AS AnswerCount,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    NULLIF(SUM(v.BountyAmount), 0) AS TotalBountyAmount
+FROM 
+    Posts p
+LEFT JOIN 
+    RecursivePostCTE r ON p.Id = r.PostId
+LEFT JOIN 
+    Users au ON p.OwnerUserId = au.Id
+LEFT JOIN 
+    Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2  
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id  
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = p.Id  
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (8, 10)  
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id  
+WHERE 
+    p.PostTypeId = 1  
+    AND p.CreationDate > DATEADD(YEAR, -2, GETDATE())  
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, au.UpVotes, au.DownVotes
+ORDER BY 
+    TotalBountyAmount DESC NULLS LAST, 
+    QuestionsUpVotes DESC, 
+    AnswerCount DESC;

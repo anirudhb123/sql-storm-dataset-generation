@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+TopRankedPosts AS (
+    SELECT 
+        RP.*,
+        U.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = RP.PostId AND V.VoteTypeId = 2) AS UpVotesCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = RP.PostId AND V.VoteTypeId = 3) AS DownVotesCount,
+        COALESCE((
+            SELECT 
+                STRING_AGG(DISTINCT T.TagName, ', ') 
+            FROM 
+                Tags T 
+            INNER JOIN 
+                UNNEST(STRING_TO_ARRAY(P.Tags, '<>')) AS TagName ON T.TagName = TagName
+            WHERE 
+                P.Id = RP.PostId), 'No Tags') AS TagList
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    WHERE 
+        RP.RankScore <= 5
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(*) AS CommentCount
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+)
+SELECT 
+    TRP.PostId,
+    TRP.Title,
+    TRP.CreationDate,
+    TRP.OwnerDisplayName,
+    TRP.Score,
+    TRP.ViewCount,
+    TRP.UpVotesCount,
+    TRP.DownVotesCount,
+    COALESCE(PH.EditCount, 0) AS TotalEdits,
+    PH.LastEditDate,
+    COALESCE(PC.CommentCount, 0) AS TotalComments,
+    TRP.TagList
+FROM 
+    TopRankedPosts TRP
+LEFT JOIN 
+    PostHistorySummary PH ON TRP.PostId = PH.PostId
+LEFT JOIN 
+    PostComments PC ON TRP.PostId = PC.PostId
+ORDER BY 
+    TRP.Score DESC, TRP.CreationDate DESC;

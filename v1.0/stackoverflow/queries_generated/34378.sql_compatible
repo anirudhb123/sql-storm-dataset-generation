@@ -1,0 +1,64 @@
+
+WITH RecursiveUserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(P.Id) AS TotalPosts
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+RecentActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.LastActivityDate DESC) AS ActivityRank
+    FROM Posts P
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+UserReputationBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        SUM(CASE WHEN B.Class = 1 THEN 3 WHEN B.Class = 2 THEN 2 WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BadgeScore,
+        MAX(B.Date) AS LastBadgeDate
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostVoteCounts AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+)
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COALESCE(RP.TotalPosts, 0) AS TotalPosts,
+    COALESCE(RA.ActivityRank, 0) AS RecentActivityRank,
+    COALESCE(UR.BadgeScore, 0) AS TotalBadgeScore,
+    COALESCE(PV.Upvotes, 0) AS TotalUpvotes,
+    COALESCE(PV.Downvotes, 0) AS TotalDownvotes,
+    COALESCE(PV.OffensiveVotes, 0) AS TotalOffensiveVotes
+FROM Users U
+LEFT JOIN RecursiveUserPostCounts RP ON U.Id = RP.UserId
+LEFT JOIN RecentActivity RA ON U.Id = RA.OwnerUserId AND RA.ActivityRank = 1
+LEFT JOIN UserReputationBadges UR ON U.Id = UR.UserId
+LEFT JOIN PostVoteCounts PV ON PV.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+WHERE U.Reputation > 100
+GROUP BY 
+    U.Id, 
+    U.DisplayName, 
+    RP.TotalPosts, 
+    RA.ActivityRank, 
+    UR.BadgeScore, 
+    PV.Upvotes, 
+    PV.Downvotes, 
+    PV.OffensiveVotes
+ORDER BY TotalPosts DESC, TotalBadgeScore DESC, TotalUpvotes DESC;

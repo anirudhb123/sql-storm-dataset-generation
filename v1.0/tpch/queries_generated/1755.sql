@@ -1,0 +1,62 @@
+WITH RankedSales AS (
+    SELECT 
+        l_orderkey,
+        l_partkey,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY l_partkey ORDER BY SUM(l_extendedprice * (1 - l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem
+    WHERE 
+        l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        l_orderkey, l_partkey
+),
+LatestOrders AS (
+    SELECT 
+        o_orderkey,
+        o_orderdate,
+        c_custkey,
+        o_totalprice
+    FROM 
+        orders
+    WHERE 
+        o_orderdate = (SELECT MAX(o_orderdate) FROM orders)
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(ps.ps_partkey) AS available_parts
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(ls.total_sales) AS total_revenue,
+    si.available_parts,
+    ROUND(AVG(o.o_totalprice), 2) AS avg_order_value
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    LatestOrders o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    RankedSales ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON ls.l_partkey = si.s_suppkey
+WHERE 
+    r.r_name LIKE '%West%'
+GROUP BY 
+    r.r_name, si.available_parts
+HAVING 
+    SUM(ls.total_sales) > 10000 OR si.available_parts IS NULL
+ORDER BY 
+    total_revenue DESC;

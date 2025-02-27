@@ -1,0 +1,67 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Consider only Questions
+    GROUP BY 
+        TagName
+), 
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagCounts
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.Score, 0)) AS TotalVotes,
+        RANK() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000 -- Only consider users with reputation over a certain threshold
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserTagStatistics AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        tt.TagName,
+        tt.PostCount AS TagPostCount,
+        COUNT(DISTINCT p.Id) AS UserPostCount
+    FROM 
+        TopUsers u
+    JOIN 
+        Posts p ON u.UserId = p.OwnerUserId
+    JOIN 
+        TagCounts tt ON tt.TagName = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))
+    GROUP BY 
+        u.UserId, u.DisplayName, tt.TagName, tt.PostCount
+)
+SELECT 
+    ut.DisplayName AS UserName,
+    ut.UserPostCount AS NumberOfPosts,
+    ut.TagName AS MostActiveTag,
+    ut.TagPostCount AS TagPostCount,
+    ROW_NUMBER() OVER (PARTITION BY ut.UserId ORDER BY ut.TagPostCount DESC) AS TagActivityRanking
+FROM 
+    UserTagStatistics ut
+JOIN 
+    TopTags tt ON ut.TagPostCount = tt.PostCount
+WHERE 
+    tt.TagRank <= 10 -- Get only the top 10 tags
+ORDER BY 
+    ut.UserId, TagActivityRanking;

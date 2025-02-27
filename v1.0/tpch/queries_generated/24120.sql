@@ -1,0 +1,76 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size BETWEEN 1 AND 25)
+), 
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance'
+            WHEN s.s_acctbal > 1000 THEN 'High Balance'
+            ELSE 'Low Balance' 
+        END AS balance_status
+    FROM 
+        supplier s
+    WHERE 
+        s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+),
+CustomerRanked AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment = 'BUILDING'
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    cp.c_name AS customer_name,
+    cp.c_acctbal AS customer_balance,
+    sp.s_name AS supplier_name,
+    rp.p_name AS part_name,
+    od.total_revenue,
+    CASE 
+        WHEN od.total_revenue IS NULL THEN 'No Orders'
+        WHEN od.total_revenue > 10000 THEN 'Considerable Revenue'
+        ELSE 'Minimal Revenue'
+    END AS revenue_status,
+    COUNT(DISTINCT od.o_orderkey) AS order_count
+FROM 
+    CustomerRanked cp 
+LEFT JOIN 
+    OrderDetails od ON cp.c_custkey = od.o_custkey
+LEFT JOIN 
+    RankedParts rp ON rp.price_rank = 1 -- most expensive part per brand
+LEFT JOIN 
+    SupplierDetails sp ON sp.balance_status = 'High Balance' AND od.total_items < 5
+GROUP BY 
+    cp.c_name, cp.c_acctbal, sp.s_name, rp.p_name, od.total_revenue
+HAVING 
+    cp.c_acctbal IS NOT NULL AND sp.s_suppkey IS NOT NULL
+ORDER BY 
+    od.total_revenue DESC, cp.c_name ASC;

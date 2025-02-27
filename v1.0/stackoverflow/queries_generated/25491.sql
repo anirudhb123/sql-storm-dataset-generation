@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(DISTINCT v.Id) DESC) AS VoteRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>'))::int)
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 -- Upvotes
+    WHERE
+        p.PostTypeId IN (1, 2) -- Only Questions and Answers
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.Tags,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.VoteRank <= 10 -- Top 10 posts by votes
+)
+SELECT
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Tags,
+    fp.OwnerDisplayName,
+    fp.CommentCount,
+    fp.AnswerCount,
+    ph.Comment AS PostEditComment,
+    ph.CreationDate AS EditDate,
+    pt.Name AS PostHistoryType
+FROM
+    FilteredPosts fp
+LEFT JOIN
+    PostHistory ph ON fp.PostId = ph.PostId
+LEFT JOIN
+    PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+WHERE
+    ph.CreationDate IS NOT NULL
+ORDER BY
+    fp.CreationDate DESC;

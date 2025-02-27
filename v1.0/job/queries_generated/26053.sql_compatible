@@ -1,0 +1,65 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS alternate_names,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT c.name, ', ') AS companies
+    FROM 
+        title t
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PersonDetails AS (
+    SELECT 
+        p.id AS person_id,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+        STRING_AGG(DISTINCT CAST(ci.movie_id AS TEXT), ', ') AS movies
+    FROM 
+        name p
+    LEFT JOIN 
+        aka_name ak ON p.id = ak.person_id
+    LEFT JOIN 
+        cast_info ci ON p.id = ci.person_id
+    GROUP BY 
+        p.id
+),
+CompleteBenchmark AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.alternate_names,
+        md.cast_count,
+        md.keywords,
+        pd.person_id,
+        pd.aliases,
+        pd.movies
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = md.title_id
+    LEFT JOIN 
+        PersonDetails pd ON pd.person_id = ci.person_id
+)
+SELECT 
+    *
+FROM 
+    CompleteBenchmark
+ORDER BY 
+    production_year DESC, 
+    title;

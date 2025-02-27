@@ -1,0 +1,58 @@
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM part p
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+supplier_region AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+eligible_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+    HAVING COUNT(l.l_orderkey) > 1
+)
+SELECT 
+    r.region_name,
+    COUNT(DISTINCT e.o_orderkey) AS total_orders,
+    SUM(CASE 
+        WHEN e.total_revenue > 50000 THEN 1 
+        ELSE 0 
+    END) AS high_value_orders,
+    AVG(sp.s_acctbal) AS avg_supplier_balance,
+    STRING_AGG(DISTINCT rp.p_name, ', ') AS expensive_parts
+FROM supplier_region sp
+LEFT JOIN eligible_orders e ON sp.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    WHERE ps.ps_partkey IN (SELECT rp.p_partkey FROM ranked_parts rp WHERE rp.rank_by_price <= 5)
+)
+JOIN ranked_parts rp ON rp.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey = sp.s_suppkey
+)
+LEFT JOIN region r ON sp.region_name = r.r_name
+GROUP BY r.region_name
+HAVING SUM(e.total_revenue) IS NOT NULL AND COUNT(DISTINCT e.o_orderkey) > 0
+ORDER BY total_orders DESC, avg_supplier_balance DESC;

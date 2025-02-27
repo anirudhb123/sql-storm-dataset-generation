@@ -1,0 +1,43 @@
+WITH RECURSIVE high_value_suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    INNER JOIN high_value_suppliers hvs ON s.s_suppkey = hvs.s_suppkey + 1
+)
+, parsed_comments AS (
+    SELECT DISTINCT p.p_partkey, 
+        CASE 
+            WHEN p.p_comment IS NULL THEN 'No Comment'
+            ELSE SUBSTRING(p.p_comment FROM '^[^ ]+') 
+        END AS comment_prefix
+    FROM part p
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    SUM(CASE 
+            WHEN l.l_returnflag = 'R' AND l.l_linestatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount)
+            ELSE 0 
+        END) AS total_returned_sales,
+    MAX(CASE 
+            WHEN ps.ps_availqty IS NULL THEN 'Unavailable' 
+            ELSE ps.ps_availqty 
+        END) AS max_avail_qty,
+    STRING_AGG(DISTINCT hvs.s_name, ', ') AS high_value_supplier_names
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN partsupp ps ON ps.ps_partkey = l.l_partkey
+LEFT JOIN high_value_suppliers hvs ON hvs.s_suppkey = ps.ps_suppkey
+JOIN parsed_comments pc ON pc.p_partkey = l.l_partkey
+WHERE n.n_name NOT IN ('NATION_NAME_1', 'NATION_NAME_2')
+    AND o.o_orderdate BETWEEN '2022-01-01' AND '2023-01-01'
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_customers DESC
+LIMIT 10 OFFSET 0
+;

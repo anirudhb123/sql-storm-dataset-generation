@@ -1,0 +1,53 @@
+
+WITH RECURSIVE CustomerCounts AS (
+    SELECT c.c_customer_sk, 
+           COUNT(sr.sr_return_quantity) AS return_count,
+           SUM(COALESCE(sr.sr_return_amount, 0)) AS total_return_amount
+    FROM customer AS c
+    LEFT JOIN store_returns AS sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+),
+IncomeBandCounts AS (
+    SELECT h.hd_income_band_sk,
+           COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM household_demographics AS h
+    JOIN customer AS c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY h.hd_income_band_sk
+),
+DateReturns AS (
+    SELECT d.d_date, 
+           COUNT(DISTINCT sr.sr_ticket_number) AS return_tickets,
+           SUM(sr.sr_return_amount) AS total_return
+    FROM date_dim AS d
+    LEFT JOIN store_returns AS sr ON d.d_date_sk = sr.sr_returned_date_sk
+    GROUP BY d.d_date
+),
+SalesSummary AS (
+    SELECT COALESCE(ws.ws_web_site_sk, 'N/A') AS website,
+           SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+           COUNT(*) AS total_orders
+    FROM web_sales AS ws
+    GROUP BY ws.ws_web_site_sk
+)
+SELECT cc.c_customer_sk,
+       (CASE 
+            WHEN cc.return_count > 10 THEN 'Frequent Returner'
+            WHEN cc.return_count BETWEEN 1 AND 10 THEN 'Occasional Returner'
+            ELSE 'Rare Returner'
+        END) AS return_category,
+       ib.ib_lower_bound, 
+       ib.ib_upper_bound,
+       ib.customer_count,
+       dr.return_tickets,
+       dr.total_return,
+       ss.website,
+       ss.total_sales,
+       ss.total_orders,
+       ROW_NUMBER() OVER (PARTITION BY cc.c_customer_sk ORDER BY dr.total_return DESC) AS row_num
+FROM CustomerCounts AS cc
+JOIN IncomeBandCounts AS ib ON (cc.c_customer_sk IN (SELECT c_current_hdemo_sk FROM customer WHERE c_customer_sk = cc.c_customer_sk))
+LEFT JOIN DateReturns AS dr ON dr.return_tickets > 5
+JOIN SalesSummary AS ss ON ss.total_sales > 100
+WHERE cc.total_return_amount IS NOT NULL 
+  AND (ib.customer_count IS NOT NULL OR cc.return_count IS NULL)
+ORDER BY cc.c_customer_sk, row_num;

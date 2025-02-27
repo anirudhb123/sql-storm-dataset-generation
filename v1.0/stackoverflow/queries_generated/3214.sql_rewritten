@@ -1,0 +1,64 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation, 
+        CASE 
+            WHEN Reputation >= 1000 THEN 'High Reputation'
+            WHEN Reputation >= 100 THEN 'Medium Reputation'
+            ELSE 'Low Reputation'
+        END AS ReputationLevel
+    FROM Users
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstClosed
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+),
+AggregatedData AS (
+    SELECT 
+        us.Id AS UserId,
+        us.DisplayName,
+        us.Reputation,
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        coalesce(cp.FirstClosed, 'Never Closed') AS ClosureStatus
+    FROM UserReputation us
+    LEFT JOIN PostSummary ps ON us.Id = ps.OwnerUserId
+    LEFT JOIN ClosedPosts cp ON ps.PostId = cp.PostId
+    WHERE us.Reputation > 0
+)
+SELECT 
+    Ad.UserId,
+    Ad.DisplayName,
+    Ad.Reputation,
+    Ad.Title,
+    Ad.CreationDate,
+    Ad.Score,
+    Ad.ViewCount,
+    Ad.ClosureStatus,
+    CASE 
+        WHEN Ad.Reputation >= 1000 THEN 'Prominent Contributor'
+        ELSE 'Regular Contributor'
+    END AS ContributorStatus
+FROM AggregatedData Ad
+WHERE (Ad.ViewCount > 50 OR Ad.Score >= 20)
+ORDER BY Ad.Reputation DESC, Ad.CreationDate DESC
+LIMIT 50;

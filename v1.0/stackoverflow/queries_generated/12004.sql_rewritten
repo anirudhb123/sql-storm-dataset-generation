@@ -1,0 +1,54 @@
+WITH PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        AVG(v.VoteTypeId = 2) AS AvgUpvotes,
+        AVG(v.VoteTypeId = 3) AS AvgDownvotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, u.DisplayName
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(b.Class = 1::smallint) AS GoldBadges,
+        SUM(b.Class = 2::smallint) AS SilverBadges,
+        SUM(b.Class = 3::smallint) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    GROUP BY u.Id
+)
+
+SELECT
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.OwnerDisplayName,
+    ps.TotalComments,
+    ps.AvgUpvotes,
+    ps.AvgDownvotes,
+    ue.TotalPosts AS OwnerTotalPosts,
+    ue.TotalViews AS OwnerTotalViews,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges
+FROM PostStats ps
+JOIN UserEngagement ue ON ps.OwnerDisplayName = ue.DisplayName
+ORDER BY ps.ViewCount DESC;

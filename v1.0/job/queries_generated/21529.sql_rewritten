@@ -1,0 +1,67 @@
+WITH ranked_movies AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS year_rank,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY mt.id) AS company_count,
+        STRING_AGG(DISTINCT ak.name, ', ') FILTER (WHERE ak.name IS NOT NULL) AS aka_names
+    FROM
+        aka_title mt
+        LEFT JOIN movie_companies mc ON mc.movie_id = mt.movie_id
+        LEFT JOIN aka_name ak ON ak.person_id = mc.company_id
+    WHERE
+        mt.production_year IS NOT NULL
+        AND mt.title IS NOT NULL
+),
+rich_cast_info AS (
+    SELECT
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS actor_role,
+        COUNT(DISTINCT ci.id) AS role_count
+    FROM
+        cast_info ci
+        JOIN aka_name ak ON ci.person_id = ak.person_id
+        JOIN role_type rt ON ci.role_id = rt.id
+    WHERE
+        ak.name IS NOT NULL
+    GROUP BY
+        ci.movie_id,
+        ak.name,
+        rt.role
+),
+deep_movie_info AS (
+    SELECT
+        mi.movie_id,
+        info_type.info AS info_type_name,
+        mi.info
+    FROM
+        movie_info mi
+        JOIN info_type ON mi.info_type_id = info_type.id
+    WHERE
+        mi.info IS NOT NULL
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.year_rank,
+    rm.company_count,
+    rm.aka_names,
+    rci.actor_name,
+    rci.actor_role,
+    rci.role_count,
+    dmi.info_type_name,
+    dmi.info
+FROM 
+    ranked_movies rm
+    LEFT JOIN rich_cast_info rci ON rm.movie_id = rci.movie_id
+    LEFT JOIN deep_movie_info dmi ON rm.movie_id = dmi.movie_id
+WHERE 
+    rm.year_rank < 5 
+    AND (rci.role_count IS NULL OR rci.role_count < 3)
+ORDER BY
+    rm.production_year DESC,
+    rci.role_count DESC NULLS LAST;

@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(v.Id) AS VoteCount,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Votes v
+    WHERE 
+        v.VoteTypeId IN (2, 3) -- Considering only upvotes and downvotes
+    GROUP BY 
+        v.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseHistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- close and reopen
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.Tags,
+    rv.VoteCount,
+    rv.LastVoteDate,
+    ub.BadgeCount,
+    cb.CloseHistoryCount,
+    CASE 
+        WHEN cb.CloseHistoryCount IS NULL THEN 'Not Closed'
+        ELSE 'Closed'
+    END AS ClosureStatus
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    RecentVotes rv ON p.PostId = rv.PostId
+LEFT JOIN 
+    UserBadges ub ON p.OwnerUserId = ub.UserId 
+LEFT JOIN 
+    ClosedPosts cb ON p.PostId = cb.PostId
+WHERE 
+    p.Rank = 1
+ORDER BY 
+    p.Score DESC, 
+    p.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

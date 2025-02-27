@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS RankSales,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS TotalQuantity
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_month = 5
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        CASE 
+            WHEN rs.RankSales = 1 THEN 'Latest Sale'
+            WHEN rs.TotalQuantity > 100 THEN 'High Volume'
+            ELSE 'Standard Sale'
+        END AS SaleCategory
+    FROM RankedSales rs
+    WHERE rs.TotalQuantity IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS CustomerCount,
+        AVG(cd.cd_purchase_estimate) AS AvgPurchaseEstimate
+    FROM customer_demographics cd
+    LEFT JOIN customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status
+),
+FinalSales AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.ws_sales_price,
+        fs.SaleCategory,
+        cd.avgPurchaseEstimate,
+        cd.CustomerCount
+    FROM FilteredSales fs
+    LEFT JOIN CustomerDemographics cd ON fs.ws_item_sk = cd.cd_demo_sk
+)
+SELECT 
+    fs.ws_item_sk,
+    SUM(CASE 
+        WHEN fs.SaleCategory = 'Latest Sale' AND fs.avgPurchaseEstimate > 2000
+        THEN fs.ws_sales_price * 1.1 
+        WHEN fs.SaleCategory = 'High Volume' 
+        THEN fs.ws_sales_price * 0.9
+        ELSE fs.ws_sales_price 
+    END) AS AdjustedSales
+FROM FinalSales fs
+GROUP BY fs.ws_item_sk
+HAVING COUNT(fs.CustomerCount) > 0
+ORDER BY AdjustedSales DESC
+LIMIT 10
+UNION
+SELECT 
+    NULL AS ws_item_sk,
+    AVG(nullif(cd.avgPurchaseEstimate, 0)) AS AdjustedSales
+FROM CustomerDemographics cd
+WHERE cd.cd_marital_status IS NULL
+  OR cd.cd_gender IS NULL;

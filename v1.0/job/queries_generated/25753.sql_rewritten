@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CharacterCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT CHAR_LENGTH(c.name)) AS unique_character_lengths,
+        AVG(CHAR_LENGTH(c.name)) AS avg_character_length
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        m.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    cc.unique_character_lengths,
+    cc.avg_character_length,
+    mwk.keywords,
+    mco.company_names
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    CharacterCounts cc ON rt.title_id = cc.movie_id
+LEFT JOIN 
+    MoviesWithKeywords mwk ON rt.title_id = mwk.movie_id
+LEFT JOIN 
+    MovieCompanies mco ON rt.title_id = mco.movie_id
+WHERE 
+    rt.title_rank <= 5
+ORDER BY 
+    rt.production_year DESC, 
+    cc.avg_character_length DESC;

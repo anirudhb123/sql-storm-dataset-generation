@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+        AND p.Score > 0   
+),
+AggregatedUserData AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT ph.Id) AS ActionCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseActions,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenActions
+    FROM 
+        Users u
+    LEFT JOIN 
+        PostHistory ph ON u.Id = ph.UserId
+    GROUP BY 
+        u.Id
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    CROSS JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    p.TagsList,
+    a.ActionCount,
+    a.CloseActions,
+    a.ReopenActions,
+    COALESCE(NULLIF(a.ClosenessCoefficient, 0), 1) AS AdjustedCloseRate 
+FROM 
+    Users u
+INNER JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    AggregatedUserData a ON u.Id = a.UserId
+LEFT OUTER JOIN 
+    PostTags p ON r.PostId = p.PostId
+WHERE 
+    r.PostRank = 1
+    AND a.ActionCount IS NOT NULL
+ORDER BY 
+    a.ActionCount DESC, 
+    r.Score DESC
+LIMIT 10
+OFFSET (SELECT COUNT(*) FROM Users) / 2;

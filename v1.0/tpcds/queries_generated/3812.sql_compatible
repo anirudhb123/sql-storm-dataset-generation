@@ -1,0 +1,56 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr.returned_date_sk, 
+        wr.return_time_sk, 
+        wr.item_sk, 
+        wr.returning_customer_sk, 
+        wr.return_quantity, 
+        wr.return_amt_inc_tax, 
+        RANK() OVER (PARTITION BY wr.returning_customer_sk ORDER BY wr.returned_date_sk DESC) AS rn
+    FROM web_returns wr
+), SalesSummary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        SUM(ws.quantity) AS total_quantity,
+        COUNT(DISTINCT ws.order_number) AS total_orders
+    FROM web_sales ws
+    WHERE ws.sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY ws.bill_customer_sk
+), PromotedItems AS (
+    SELECT 
+        p.promo_id,
+        i.item_id,
+        i.item_desc,
+        p.promo_name,
+        i.current_price * (1 - CAST(p.discount_active AS integer) * 0.1) AS discounted_price
+    FROM promotion p
+    JOIN item i ON p.item_sk = i.item_sk
+    WHERE p.discount_active = 'Y'
+), ReturnDetails AS (
+    SELECT 
+        rr.returning_customer_sk, 
+        rr.return_quantity, 
+        COALESCE(ss.total_net_profit, 0) AS total_net_profit,
+        COALESCE(ss.total_quantity, 0) AS total_quantity,
+        COALESCE(ss.total_orders, 0) AS total_orders
+    FROM RankedReturns rr
+    LEFT JOIN SalesSummary ss ON rr.returning_customer_sk = ss.bill_customer_sk
+)
+SELECT 
+    rd.returning_customer_sk, 
+    COUNT(rd.return_quantity) AS total_returns,
+    SUM(rd.return_quantity) AS total_return_quantity,
+    AVG(rd.total_net_profit) AS avg_net_profit,
+    MAX(rd.total_quantity) AS max_quantity_sold,
+    MIN(rd.total_orders) AS min_orders,
+    CASE 
+        WHEN AVG(rd.total_net_profit) > 100 THEN 'High Value'
+        WHEN AVG(rd.total_net_profit) BETWEEN 50 AND 100 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM ReturnDetails rd
+GROUP BY rd.returning_customer_sk
+HAVING COUNT(rd.return_quantity) > 5
+ORDER BY total_returns DESC;

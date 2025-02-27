@@ -1,0 +1,58 @@
+
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name
+    FROM
+        SupplierStats s
+    WHERE
+        s.total_value > (SELECT AVG(total_value) FROM SupplierStats)
+)
+SELECT
+    co.c_name AS customer_name,
+    co.order_count,
+    co.total_spent,
+    sv.s_name AS supplier_name,
+    sv.total_value,
+    CASE
+        WHEN co.total_spent IS NULL THEN 'No Orders'
+        WHEN co.total_spent > 10000 THEN 'High Spender'
+        ELSE 'Regular Customer'
+    END AS spending_category
+FROM
+    CustomerOrders co
+FULL OUTER JOIN
+    HighValueSuppliers sv ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name LIKE '%customer%')
+WHERE
+    (sv.total_value IS NOT NULL OR co.order_count IS NOT NULL)
+ORDER BY
+    co.total_spent DESC,
+    sv.total_value DESC;

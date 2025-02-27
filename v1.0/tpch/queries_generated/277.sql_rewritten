@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal)
+            FROM supplier s2
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderstatus = 'O' 
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    s.s_acctbal,
+    o.o_orderkey,
+    o.order_value
+FROM 
+    part p
+LEFT JOIN 
+    RankedSuppliers s ON p.p_partkey = s.p_partkey AND s.rn = 1
+FULL OUTER JOIN 
+    HighValueOrders o ON o.o_orderkey IN (
+        SELECT o2.o_orderkey 
+        FROM orders o2 
+        JOIN lineitem l ON o2.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey = p.p_partkey
+    )
+WHERE 
+    p.p_size BETWEEN 10 AND 20 
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 5000)
+ORDER BY 
+    p.p_partkey, 
+    o.order_value DESC NULLS LAST;

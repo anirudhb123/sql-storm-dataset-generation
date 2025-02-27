@@ -1,0 +1,60 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 0 AS level
+    FROM nation
+    WHERE n_nationkey = 1  
+
+    UNION ALL
+
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    INNER JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+),
+
+SupplierCost AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+
+PartMetrics AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(sc.total_cost) AS total_supply_cost
+    FROM part p
+    LEFT JOIN SupplierCost sc ON p.p_partkey = sc.ps_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+
+FinalSummary AS (
+    SELECT nm.n_name AS nation, 
+           pm.p_name AS part_name, 
+           pm.p_retailprice, 
+           pm.supplier_count, 
+           cm.total_spent,
+           cm.order_count,
+           cm.spending_rank
+    FROM PartMetrics pm
+    LEFT JOIN supplier s ON pm.supplier_count > 0
+    LEFT JOIN nation nm ON s.s_nationkey = nm.n_nationkey
+    LEFT JOIN CustomerOrderSummary cm ON cm.order_count > 0
+    WHERE pm.total_supply_cost IS NOT NULL 
+    AND pm.p_retailprice > 100.00
+)
+
+SELECT * FROM FinalSummary 
+WHERE spending_rank <= 5 
+ORDER BY nation, part_name;

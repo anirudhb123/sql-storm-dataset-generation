@@ -1,0 +1,53 @@
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        1 AS Level,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.AcceptedAnswerId,
+        rp.Level + 1,
+        a.OwnerUserId
+    FROM 
+        Posts a
+    INNER JOIN RecursivePostCTE rp ON a.ParentId = rp.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT rp.PostId) AS TotalPosts,
+    SUM(CASE WHEN rp.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+    AVG(COALESCE(a.Score, 0)) AS AverageAnswerScore,
+    STRING_AGG(DISTINCT tag.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Ranking
+FROM 
+    Users u
+LEFT JOIN 
+    RecursivePostCTE rp ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    Posts a ON rp.PostId = a.ParentId 
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(rp.Tags, ',')) AS TagName) tag ON TRUE
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND (u.Location IS NOT NULL OR u.WebsiteUrl IS NOT NULL) 
+GROUP BY 
+    u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT rp.PostId) > 5 
+ORDER BY 
+    TotalPosts DESC, u.Reputation DESC;

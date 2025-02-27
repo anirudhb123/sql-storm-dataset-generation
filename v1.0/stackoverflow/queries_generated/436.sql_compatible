@@ -1,0 +1,55 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.Score > 0 AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.Score, p.ViewCount
+),
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts
+    WHERE 
+        CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        Tag
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    pt.Tag,
+    (CASE 
+        WHEN rp.ViewCount IS NULL THEN 'No Views' 
+        ELSE CAST(rp.ViewCount AS VARCHAR) 
+    END) AS ViewCountText
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PopularTags pt ON rp.Tags ILIKE CONCAT('%', pt.Tag, '%')
+WHERE 
+    rp.UserPostRank = 1
+ORDER BY 
+    rp.Score DESC, u.Reputation DESC
+LIMIT 50;

@@ -1,0 +1,58 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        CAST(0 AS INT) AS Level,
+        p.ParentId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        Level + 1,
+        p2.ParentId
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.Id
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT q.Id) AS TotalQuestions,
+    COUNT(DISTINCT a.Id) AS TotalAnswers,
+    SUM(COALESCE(v.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(v.DownVotes, 0)) AS TotalDownVotes,
+    AVG(Score) AS AverageScore,
+    STRING_AGG(DISTINCT CONCAT('[', t.TagName, ']'), ', ') AS Tags
+FROM 
+    Users u
+LEFT JOIN 
+    Posts q ON u.Id = q.OwnerUserId AND q.PostTypeId = 1 
+LEFT JOIN 
+    Posts a ON a.AcceptedAnswerId = q.Id 
+LEFT JOIN 
+    Votes v ON v.PostId IN (SELECT Id FROM RecursivePostHierarchy WHERE Level = 0)
+LEFT JOIN 
+    LATERAL (SELECT 
+                  t.TagName 
+              FROM 
+                  Tags t 
+              WHERE 
+                  t.ExcerptPostId = q.Id) t ON TRUE
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(DISTINCT q.Id) > 0
+ORDER BY 
+    TotalQuestions DESC,
+    TotalUpVotes DESC;

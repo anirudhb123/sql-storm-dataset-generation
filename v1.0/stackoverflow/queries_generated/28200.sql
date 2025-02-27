@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COALESCE(a.Count, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM
+        Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT
+            ParentId,
+            COUNT(*) AS Count
+        FROM
+            Posts
+        WHERE
+            PostTypeId = 2
+        GROUP BY
+            ParentId
+    ) a ON p.Id = a.ParentId
+    LEFT JOIN (
+        SELECT
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM
+            Comments
+        GROUP BY
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT
+            pg.PostId,
+            unnest(string_to_array(pg.Tags, '>')) AS TagName
+        FROM
+            Posts pg
+        WHERE
+            pg.PostTypeId = 1
+    ) t ON p.Id = t.PostId
+    WHERE
+        p.PostTypeId = 1
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, u.DisplayName, a.Count, c.CommentCount
+    ORDER BY
+        p.Score DESC, p.CreationDate DESC
+),
+TopPosts AS (
+    SELECT
+        *,
+        RANK() OVER (ORDER BY Score DESC) AS OverallRank
+    FROM
+        RankedPosts
+)
+SELECT
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.OwnerDisplayName,
+    tp.Tags,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.OverallRank
+FROM
+    TopPosts tp
+WHERE
+    tp.Rank <= 5
+ORDER BY
+    tp.OwnerDisplayName, tp.Score DESC;

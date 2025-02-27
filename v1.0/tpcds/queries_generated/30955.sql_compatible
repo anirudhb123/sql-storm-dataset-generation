@@ -1,0 +1,63 @@
+
+WITH RECURSIVE ItemSalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_sales_price) > 1000
+    UNION ALL
+    SELECT 
+        is.ws_item_sk,
+        is.total_sales + ws.ws_ext_sales_price, 
+        is.order_count + 1
+    FROM 
+        ItemSalesCTE is
+    JOIN 
+        web_sales ws ON is.ws_item_sk = ws.ws_item_sk
+    WHERE 
+        ws.ws_net_profit > 50
+),
+CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT o.ws_order_number) AS total_orders,
+        SUM(o.ws_ext_sales_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales o ON c.c_customer_sk = o.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    ca.ca_state,
+    COUNT(DISTINCT cs.c_customer_sk) AS customer_count,
+    AVG(cs.total_spent) AS avg_spent,
+    MAX(cs.total_orders) AS max_orders,
+    SUM(COALESCE(is.total_sales, 0)) AS total_item_sales
+FROM 
+    customer_address ca
+LEFT JOIN 
+    CustomerStatistics cs ON cs.c_customer_sk = ca.ca_address_sk
+LEFT JOIN 
+    ItemSalesCTE is ON is.ws_item_sk IN (
+        SELECT 
+            i.i_item_sk 
+        FROM 
+            item i 
+        WHERE 
+            i.i_current_price > 20 AND 
+            i.i_brand = 'BrandX'
+    )
+WHERE 
+    ca.ca_country = 'USA'
+GROUP BY 
+    ca.ca_state
+ORDER BY 
+    avg_spent DESC 
+LIMIT 10;

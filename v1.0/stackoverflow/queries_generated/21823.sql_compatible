@@ -1,0 +1,81 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN vote.VoteTypeId = 10 THEN 1 ELSE 0 END), 0) AS DeletionVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '90 days' 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS HasEdit,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.UpVotes - up.DownVotes AS NetVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    phs.EditCount,
+    phs.HasEdit,
+    phs.IsClosed,
+    CASE 
+        WHEN phs.IsClosed = 1 THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN up.CommentCount > 5 THEN 'Highly Commented'
+        WHEN up.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Commented'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecentPosts up
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = u.Id
+LEFT JOIN 
+    PostHistorySummary phs ON up.PostId = phs.PostId
+LEFT JOIN 
+    LATERAL (SELECT unnest(string_to_array(substring(up.Tags, 2, length(up.Tags) - 2), '><')) AS TagName) t ON TRUE
+WHERE 
+    up.RowNum = 1
+GROUP BY 
+    up.PostId, up.Title, up.CreationDate, ub.GoldBadges, ub.SilverBadges, ub.BronzeBadges, phs.EditCount, phs.HasEdit, phs.IsClosed
+ORDER BY 
+    NetVotes DESC, up.CreationDate;

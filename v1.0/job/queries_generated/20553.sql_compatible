@@ -1,0 +1,91 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rank_year,
+        COUNT(DISTINCT mc.company_id) OVER (PARTITION BY at.id) AS company_count,
+        SUM(CASE WHEN ci.role_id IS NULL THEN 1 ELSE 0 END) AS null_roles
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = at.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = at.movie_id
+    WHERE 
+        at.production_year IS NOT NULL 
+        AND at.kind_id IN (
+            SELECT id FROM kind_type 
+            WHERE kind NOT IN (
+                SELECT kind FROM company_type WHERE id < 3
+            )
+        )
+),
+FilteredMovies AS (
+    SELECT 
+        title_id,
+        title,
+        production_year,
+        rank_year,
+        company_count,
+        null_roles
+    FROM 
+        RankedMovies
+    WHERE 
+        company_count > 2 AND rank_year <= 5
+),
+NullRoleSummary AS (
+    SELECT 
+        COUNT(*) AS total_movies,
+        AVG(null_roles) AS avg_null_roles_per_movie
+    FROM 
+        FilteredMovies
+),
+CastingInfo AS (
+    SELECT 
+        p.name AS person_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        AVG(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) AS avg_null_notes
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name p ON ci.person_id = p.person_id
+    GROUP BY 
+        p.name
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 1
+),
+FinalOutput AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        c.person_name,
+        c.movies_count,
+        ns.total_movies,
+        ns.avg_null_roles_per_movie,
+        COALESCE(c.avg_null_notes, 0) AS avg_null_notes_per_person
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        CastingInfo c ON c.movies_count > 2
+    CROSS JOIN 
+        NullRoleSummary ns
+)
+SELECT 
+    fo.title,
+    fo.production_year,
+    fo.person_name,
+    fo.movies_count,
+    fo.total_movies,
+    fo.avg_null_roles_per_movie,
+    CASE 
+        WHEN fo.avg_null_notes_per_person > 0 THEN 'Notable absence of notes' 
+        ELSE 'Well documented'
+    END AS documentation_status
+FROM 
+    FinalOutput fo
+WHERE 
+    fo.production_year < 2000
+ORDER BY 
+    fo.production_year DESC, fo.movies_count DESC;

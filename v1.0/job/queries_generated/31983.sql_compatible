@@ -1,0 +1,53 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title m ON mh.movie_id = m.episode_of_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    title.title AS movie_title,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END) AS valid_order_count,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY COUNT(DISTINCT mk.keyword) DESC) AS ranking,
+    NULLIF(COALESCE(title.production_year, 0), 0) AS safe_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title title ON ci.movie_id = title.id
+LEFT JOIN 
+    movie_keyword mk ON title.id = mk.movie_id
+LEFT JOIN 
+    MovieHierarchy mh ON title.id = mh.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND title.production_year > 2000
+    AND title.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'episode'))
+GROUP BY 
+    a.name, title.title, title.production_year
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 5
+ORDER BY 
+    safe_year DESC, actor_count DESC;

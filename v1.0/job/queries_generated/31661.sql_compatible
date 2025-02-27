@@ -1,0 +1,90 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        0 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.kind_id,
+        mh.level + 1
+    FROM 
+        title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+),
+RelevantCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    WHERE 
+        mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')
+    GROUP BY 
+        mc.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        rc.companies,
+        tm.level
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        RelevantCompanies rc ON tm.movie_id = rc.movie_id
+    WHERE 
+        tm.rn <= 10 AND (tm.level = 0 OR tm.production_year > 2000)
+)
+SELECT 
+    fm.title AS "Movie Title",
+    fm.production_year AS "Production Year",
+    COALESCE(fm.companies, 'No companies available') AS "Companies",
+    COUNT(ci.person_id) AS "Cast Count",
+    MAX(COALESCE(ak.name, 'Unknown')) AS "First Cast Name",
+    AVG(CAST(ji.info AS numeric)) AS "Avg Info Length"
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    complete_cast cc ON fm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id
+LEFT JOIN 
+    info_type it ON mi.info_type_id = it.id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, fm.companies
+ORDER BY 
+    fm.production_year DESC,
+    "Cast Count" DESC
+LIMIT 50;

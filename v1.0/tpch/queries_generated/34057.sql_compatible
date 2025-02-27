@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS lvl
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.lvl + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+),
+AvgOrderPrices AS (
+    SELECT o.o_custkey, AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' AND l.l_shipdate > DATE '1996-01-01'
+    GROUP BY o.o_custkey
+),
+TotalParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name, 
+    r.r_name AS region, 
+    n.n_name AS nation,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    SUM(l.l_quantity) AS total_quantity,
+    ROUND(AVG(ol.avg_price), 2) AS avg_order_price,
+    STRING_AGG(DISTINCT n.n_comment) AS nation_comments
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN AvgOrderPrices ol ON ol.o_custkey = s.s_nationkey
+WHERE p.p_size > 10 AND (s.s_acctbal > 500 OR s.s_acctbal IS NULL)
+GROUP BY p.p_name, r.r_name, n.n_name, s.s_name
+ORDER BY total_quantity DESC, avg_order_price DESC
+LIMIT 100 OFFSET 0;

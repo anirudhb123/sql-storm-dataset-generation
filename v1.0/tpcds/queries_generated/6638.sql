@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2022 
+        AND dd.d_month_seq BETWEEN 1 AND 12
+    GROUP BY 
+        ws.web_site_sk, ws_item_sk
+),
+TopSellingItems AS (
+    SELECT 
+        r.web_site_sk,
+        r.ws_item_sk,
+        r.total_sales,
+        r.order_count
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+)
+SELECT 
+    w.web_site_id,
+    w.web_name,
+    tsi.ws_item_sk,
+    i.i_item_desc,
+    tsi.total_sales,
+    tsi.order_count
+FROM 
+    TopSellingItems tsi
+JOIN 
+    web_site w ON tsi.web_site_sk = w.web_site_sk
+JOIN 
+    item i ON tsi.ws_item_sk = i.i_item_sk
+ORDER BY 
+    w.web_site_id, tsi.total_sales DESC;

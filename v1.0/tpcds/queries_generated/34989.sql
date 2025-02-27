@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+top_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM 
+        sales_cte
+    WHERE 
+        rn <= 5
+    GROUP BY 
+        ws_item_sk
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        c_email_address,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        CASE 
+            WHEN hd_income_band_sk IS NULL THEN 'Unknown'
+            ELSE ib_income_band_sk
+        END AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+joined_data AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.c_email_address,
+        ts.total_quantity,
+        ts.total_net_paid,
+        ci.income_band
+    FROM 
+        top_sales ts
+    JOIN 
+        customer_info ci ON ci.c_customer_sk = (SELECT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = ts.ws_item_sk LIMIT 1)
+)
+SELECT 
+    COUNT(*) AS total_customers,
+    AVG(total_net_paid) AS avg_net_paid,
+    MIN(total_quantity) AS min_quantity,
+    MAX(total_quantity) AS max_quantity,
+    income_band
+FROM 
+    joined_data
+GROUP BY 
+    income_band
+HAVING 
+    avg_net_paid > (SELECT AVG(ws_net_paid) FROM web_sales)
+ORDER BY 
+    total_customers DESC
+LIMIT 10;

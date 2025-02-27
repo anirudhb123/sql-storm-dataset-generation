@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId IN (1, 2) 
+),
+PostVotes AS (
+    SELECT 
+        PV.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 
+                 WHEN V.VoteTypeId = 3 THEN -1 
+                 ELSE 0 END) AS NetVotes
+    FROM 
+        Votes V
+    JOIN 
+        Posts PV ON V.PostId = PV.Id
+    GROUP BY 
+        PV.PostId
+),
+PostBadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+TopPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        PV.NetVotes,
+        COALESCE(PBC.BadgeCount, 0) AS UserBadgeCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostVotes PV ON RP.PostId = PV.PostId
+    LEFT JOIN 
+        PostBadgeCounts PBC ON RP.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = PBC.UserId)
+    WHERE 
+        RP.Rank <= 10 
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    OwnerDisplayName,
+    NetVotes,
+    UserBadgeCount
+FROM 
+    TopPosts
+ORDER BY 
+    NetVotes DESC, CreationDate DESC;

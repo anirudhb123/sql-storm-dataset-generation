@@ -1,0 +1,45 @@
+WITH RECURSIVE recent_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice
+    FROM orders
+    WHERE o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+    FROM orders o
+    JOIN recent_orders ro ON o.o_orderkey > ro.o_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+),
+supplier_costs AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+order_details AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate BETWEEN DATEADD(month, -3, CURRENT_DATE) AND CURRENT_DATE
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    SUM(od.order_value) AS total_revenue,
+    AVG(COALESCE(s.total_supply_cost, 0)) AS avg_supply_cost,
+    STRING_AGG(DISTINCT pd.p_name, ', ') AS product_names
+FROM nation n
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN recent_orders ro ON ro.o_orderkey = o.o_orderkey
+LEFT JOIN order_details od ON od.o_orderkey = o.o_orderkey
+LEFT JOIN supplier_costs s ON s.ps_partkey = od.o_orderkey
+LEFT JOIN part_details pd ON pd.p_partkey = s.ps_partkey
+WHERE n.n_nationkey IS NOT NULL
+GROUP BY n.n_name
+HAVING SUM(od.order_value) > 100000
+ORDER BY total_revenue DESC;

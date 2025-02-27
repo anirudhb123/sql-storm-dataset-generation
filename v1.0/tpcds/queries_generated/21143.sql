@@ -1,0 +1,43 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS sale_rank
+    FROM web_sales AS ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2451545 AND 2451560  -- Filter for a specific date range
+),
+HighSales AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(CASE WHEN r.sale_rank <= 5 THEN r.ws_ext_sales_price ELSE 0 END) AS top_sales,
+        COUNT(DISTINCT r.ws_order_number) AS total_orders
+    FROM RankedSales AS r
+    GROUP BY r.web_site_sk
+),
+SalesAndDemographics AS (
+    SELECT 
+        h.web_site_sk,
+        h.top_sales,
+        h.total_orders,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        RANK() OVER (ORDER BY h.top_sales DESC) AS rank_sales
+    FROM HighSales AS h
+    LEFT JOIN customer AS c ON c.c_current_addr_sk IN (SELECT ca.ca_address_sk FROM customer_address AS ca WHERE ca.ca_country = 'USA')
+    LEFT JOIN customer_demographics AS cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN household_demographics AS hd ON hd.hd_demo_sk = cd.cd_demo_sk
+)
+SELECT 
+    s.web_site_sk,
+    s.top_sales,
+    s.total_orders,
+    s.cd_gender,
+    s.hd_buy_potential,
+    COALESCE(s.rank_sales, 999) AS sales_rank -- Assign a default rank for those without sales
+FROM SalesAndDemographics AS s
+WHERE s.rank_sales <= 10 OR s.top_sales > (SELECT AVG(top_sales) FROM HighSales)  -- Top sales or above average
+ORDER BY s.top_sales DESC, s.web_site_sk ASC
+LIMIT 50;

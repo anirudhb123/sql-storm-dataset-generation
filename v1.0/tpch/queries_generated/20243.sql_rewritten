@@ -1,0 +1,62 @@
+WITH RECURSIVE nation_paths AS (
+    SELECT n_nationkey, n_name, r_name,
+           CAST(n_name AS VARCHAR(255)) AS path,
+           0 AS depth
+    FROM nation
+    JOIN region ON n_regionkey = r_regionkey
+    WHERE n_name LIKE '%a%'
+    
+    UNION ALL
+    
+    SELECT n.n_nationkey, n.n_name, r.r_name,
+           CONCAT(np.path, ' -> ', n.n_name) AS path,
+           np.depth + 1
+    FROM nation_paths np
+    JOIN nation n ON np.n_nationkey <> n.n_nationkey AND n.n_name LIKE '%a%'
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE np.depth < 5
+),
+supplier_stats AS (
+    SELECT s_nationkey,
+           COUNT(DISTINCT s_suppkey) AS supplier_count,
+           SUM(s_acctbal) AS total_acctbal
+    FROM supplier
+    GROUP BY s_nationkey
+),
+lineitem_summary AS (
+    SELECT l_orderkey,
+           SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    WHERE l_shipdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY l_orderkey
+),
+customer_totals AS (
+    SELECT c_nationkey,
+           SUM(c_acctbal) AS total_balances,
+           COUNT(c_custkey) AS customer_count
+    FROM customer
+    WHERE c_mktsegment = 'BUILDING'
+    GROUP BY c_nationkey
+),
+order_details AS (
+    SELECT o.o_orderkey, 
+           o.o_orderstatus,
+           SUM( CASE WHEN li.l_discount > 0.1 THEN li.l_extendedprice * (1 - li.l_discount) ELSE 0 END ) AS discounted_revenue
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT np.path,
+       ns.supplier_count,
+       cs.total_balances,
+       ns.total_acctbal AS supplier_total_acctbal,
+       ot.o_orderstatus,
+       SUM(COALESCE(ot.discounted_revenue, 0)) AS total_discounted_revenue,
+       ROW_NUMBER() OVER (PARTITION BY np.n_name ORDER BY ns.total_acctbal DESC) AS rank
+FROM nation_paths np
+JOIN supplier_stats ns ON np.n_nationkey = ns.s_nationkey
+JOIN customer_totals cs ON np.n_nationkey = cs.c_nationkey
+LEFT JOIN order_details ot ON np.n_nationkey IN (SELECT n RegionKey FROM region WHERE n_nationkey = np.n_nationkey)
+GROUP BY np.path, ns.supplier_count, cs.total_balances, ns.total_acctbal, ot.o_orderstatus
+HAVING SUM(COALESCE(ot.discounted_revenue, 0)) > 1000
+ORDER BY rank, ns.total_acctbal DESC;

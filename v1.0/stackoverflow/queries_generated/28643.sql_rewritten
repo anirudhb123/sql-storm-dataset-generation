@@ -1,0 +1,89 @@
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore,
+        STRING_AGG(DISTINCT Users.DisplayName, ', ') AS Contributors,
+        STRING_AGG(DISTINCT CASE 
+            WHEN Badges.Class = 1 THEN Badges.Name
+            ELSE NULL 
+        END, ', ') AS GoldBadges,
+        STRING_AGG(DISTINCT CASE 
+            WHEN Badges.Class = 2 THEN Badges.Name
+            ELSE NULL 
+        END, ', ') AS SilverBadges,
+        STRING_AGG(DISTINCT CASE 
+            WHEN Badges.Class = 3 THEN Badges.Name
+            ELSE NULL 
+        END, ', ') AS BronzeBadges
+    FROM 
+        Posts
+    JOIN 
+        Tags ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    LEFT JOIN 
+        Users ON Posts.OwnerUserId = Users.Id
+    LEFT JOIN 
+        Badges ON Badges.UserId = Users.Id
+    WHERE 
+        Posts.PostTypeId = 1  
+    GROUP BY 
+        Tags.TagName
+),
+# Calculate the longest tag name
+LongestTag AS (
+    SELECT 
+        TagName,
+        LENGTH(TagName) AS TagLength
+    FROM 
+        Tags
+    ORDER BY 
+        TagLength DESC
+    LIMIT 1
+),
+# Aggregate information about closed posts
+ClosedPosts AS (
+    SELECT 
+        COUNT(*) AS ClosedCount,
+        EXTRACT(YEAR FROM ClosedDate) AS CloseYear
+    FROM 
+        Posts
+    WHERE 
+        ClosedDate IS NOT NULL
+    GROUP BY 
+        CloseYear
+),
+# Retrieve top contributors based on reputation
+TopContributors AS (
+    SELECT 
+        Users.DisplayName,
+        Users.Reputation,
+        RANK() OVER (ORDER BY Users.Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+    WHERE 
+        Users.Reputation > 1000  
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    T.TotalViews,
+    T.AverageScore,
+    T.Contributors,
+    T.GoldBadges,
+    T.SilverBadges,
+    T.BronzeBadges,
+    L.TagName AS LongestTagName,
+    C.ClosedCount,
+    C.CloseYear,
+    TC.DisplayName AS TopContributor,
+    TC.Reputation AS ContributorReputation,
+    TC.ReputationRank
+FROM 
+    TagStatistics T,
+    LongestTag L,
+    ClosedPosts C,
+    TopContributors TC
+ORDER BY 
+    T.PostCount DESC
+LIMIT 10;

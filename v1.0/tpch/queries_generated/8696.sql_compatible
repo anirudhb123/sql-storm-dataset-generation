@@ -1,0 +1,42 @@
+
+WITH RankedCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+),
+MostValuableCustomers AS (
+    SELECT c.c_custkey, c.c_name, rc.total_spent
+    FROM RankedCustomers rc
+    JOIN customer c ON rc.c_custkey = c.c_custkey
+    WHERE rc.total_spent > (
+        SELECT AVG(total_spent) FROM RankedCustomers
+    )
+),
+SupplierPartPricing AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_supplycost, p.p_brand
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100.00
+),
+CustomerOrdersWithDetails AS (
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, l.l_extendedprice, l.l_discount
+    FROM MostValuableCustomers co
+    JOIN orders o ON co.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT co.c_name, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+       AVG(spp.ps_supplycost) AS avg_supply_cost, 
+       COUNT(DISTINCT co.o_orderkey) AS order_count
+FROM CustomerOrdersWithDetails co
+JOIN SupplierPartPricing spp ON co.o_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_partkey = spp.ps_partkey
+)
+GROUP BY co.c_custkey, co.c_name
+ORDER BY total_revenue DESC
+LIMIT 10;

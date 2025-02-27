@@ -1,0 +1,52 @@
+WITH RECURSIVE NationCTE AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_nationkey = (SELECT MIN(n_nationkey) FROM nation)
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, cte.level + 1
+    FROM nation n
+    JOIN NationCTE cte ON n.n_regionkey = cte.n_nationkey
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1996-01-01'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+CustomerOrderCount AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+CombinedData AS (
+    SELECT 
+        ns.n_name AS nation_name,
+        ss.s_name AS supplier_name,
+        cs.order_count,
+        os.total_price,
+        ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY os.total_price DESC) AS rank_within_nation,
+        COALESCE(ss.total_available, 0) AS total_available
+    FROM NationCTE ns
+    LEFT JOIN SupplierStats ss ON ns.n_nationkey = (SELECT s_nationkey FROM supplier WHERE s_suppkey = ss.s_suppkey LIMIT 1)
+    LEFT JOIN CustomerOrderCount cs ON cs.order_count > 0
+    LEFT JOIN OrderSummary os ON cs.order_count > 0
+)
+SELECT 
+    nation_name,
+    supplier_name,
+    total_available,
+    order_count,
+    total_price,
+    CASE WHEN total_price IS NULL THEN 'No Orders' ELSE 'Orders Present' END AS order_status,
+    COUNT(*) OVER (PARTITION BY nation_name) AS total_suppliers_in_nation
+FROM CombinedData
+WHERE (total_price IS NOT NULL AND total_available > 0) OR order_count > 5
+ORDER BY nation_name, total_price DESC;

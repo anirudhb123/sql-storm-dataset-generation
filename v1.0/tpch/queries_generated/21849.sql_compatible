@@ -1,0 +1,72 @@
+
+WITH RECURSIVE nation_orders AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS revenue_rank
+    FROM 
+        nation n
+    LEFT JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+price_summary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+),
+max_price AS (
+    SELECT 
+        p.p_partkey,
+        COALESCE(MAX(p.p_retailprice), 0) AS max_retailprice
+    FROM 
+        part p
+    GROUP BY 
+        p.p_partkey
+),
+final_summary AS (
+    SELECT 
+        n.n_name,
+        no.total_revenue,
+        mp.max_retailprice,
+        ps.total_supplycost,
+        CASE 
+            WHEN no.total_revenue IS NULL THEN 'No Sales'
+            WHEN no.total_revenue > mp.max_retailprice THEN 'Overpriced'
+            ELSE 'Balanced'
+        END AS price_status
+    FROM 
+        nation_orders no
+    JOIN 
+        nation n ON no.n_nationkey = n.n_nationkey
+    LEFT JOIN 
+        max_price mp ON mp.p_partkey = no.n_nationkey
+    LEFT JOIN 
+        price_summary ps ON ps.p_partkey = no.n_nationkey
+)
+SELECT 
+    n.n_name,
+    COALESCE(f.total_revenue, 0) AS revenue,
+    f.max_retailprice,
+    f.total_supplycost,
+    f.price_status
+FROM 
+    nation n
+LEFT JOIN 
+    final_summary f ON n.n_name = f.n_name
+WHERE 
+    (f.total_supplycost IS NOT NULL OR f.revenue IS NOT NULL)
+    AND (f.price_status IS NULL OR f.price_status <> 'Overpriced')
+ORDER BY 
+    COALESCE(f.total_revenue, 0) DESC,
+    n.n_name;

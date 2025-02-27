@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim) - 30
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        s.ws_sold_date_sk,
+        s.ws_item_sk,
+        SUM(s.ws_quantity) + c.total_quantity,
+        SUM(s.ws_net_profit) + c.total_profit,
+        c.level + 1
+    FROM 
+        web_sales s
+    JOIN 
+        Sales_CTE c ON s.ws_sold_date_sk = c.ws_sold_date_sk + 1
+    GROUP BY 
+        s.ws_sold_date_sk, s.ws_item_sk, c.total_quantity, c.total_profit, c.level
+),
+Top_Products AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        s.total_quantity,
+        s.total_profit,
+        ROW_NUMBER() OVER (PARTITION BY s.ws_item_sk ORDER BY s.total_profit DESC) AS rnk
+    FROM 
+        Sales_CTE s
+    JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+)
+SELECT 
+    t.i_item_id,
+    t.i_item_desc,
+    t.total_quantity,
+    t.total_profit,
+    d.d_date AS month,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count
+FROM 
+    Top_Products t
+JOIN 
+    web_sales ws ON t.ws_item_sk = ws.ws_item_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    t.rnk <= 10 AND 
+    d.d_month_seq BETWEEN (SELECT d_month_seq FROM date_dim WHERE d_date = DATE '2002-10-01' - INTERVAL '1 MONTH') AND 
+    (SELECT d_month_seq FROM date_dim WHERE d_date = DATE '2002-10-01')
+GROUP BY 
+    t.i_item_id, t.i_item_desc, t.total_quantity, t.total_profit, d.d_date
+ORDER BY 
+    t.total_profit DESC, d.d_date DESC
+LIMIT 50;

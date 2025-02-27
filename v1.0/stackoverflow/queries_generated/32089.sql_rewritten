@@ -1,0 +1,69 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        T.Id AS TagId, 
+        T.TagName, 
+        T.Count, 
+        1 AS Level
+    FROM Tags T
+    WHERE T.IsRequired = 1
+    
+    UNION ALL
+    
+    SELECT 
+        T.Id, 
+        T.TagName, 
+        T.Count, 
+        Level + 1
+    FROM Tags T
+    INNER JOIN RecursiveTagHierarchy RTH ON T.ExcerptPostId = RTH.TagId
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(DISTINCT P.Id) AS TotalPosts, 
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsPosted,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersPosted,
+        SUM(V.BountyAmount) AS TotalBounty,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY SUM(V.BountyAmount) DESC) AS Rank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostsWithTag
+    FROM Tags T
+    LEFT JOIN Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY T.TagName
+    ORDER BY PostsWithTag DESC
+),
+UserBadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS Badges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+
+SELECT 
+    UA.UserId,
+    UA.DisplayName,
+    UA.TotalPosts,
+    UA.QuestionsPosted,
+    UA.AnswersPosted,
+    UBS.BadgeCount,
+    UBS.Badges,
+    (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = UA.UserId AND P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year') AS PostsLastYear,
+    (SELECT SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) FROM PostHistory PH WHERE PH.UserId = UA.UserId) AS TimesClosed,
+    PBT.TagName AS PopularTag,
+    PBT.PostsWithTag AS PopularTagCount
+FROM UserActivity UA
+LEFT JOIN UserBadgeSummary UBS ON UA.UserId = UBS.UserId
+LEFT JOIN PopularTags PBT ON PBT.PostsWithTag = (SELECT MAX(PostsWithTag) FROM PopularTags)
+WHERE UA.Rank <= 10
+ORDER BY UA.TotalPosts DESC;

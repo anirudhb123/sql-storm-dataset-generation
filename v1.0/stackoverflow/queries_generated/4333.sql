@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        p.Score, 
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS QuestionCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.Reputation, 
+        ur.QuestionCount,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC) AS UserRank
+    FROM 
+        UserReputation ur
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ur.QuestionCount,
+    rp.Title AS RecentQuestionTitle,
+    rp.CreationDate AS RecentQuestionDate,
+    rp.ViewCount AS RecentQuestionViews,
+    rp.Score AS RecentQuestionScore,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount
+FROM 
+    TopUsers tur
+JOIN 
+    Users u ON tur.UserId = u.Id
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank = 1
+LEFT JOIN 
+    (SELECT 
+         PostId, COUNT(*) AS CommentCount 
+     FROM 
+         Comments 
+     GROUP BY 
+         PostId) c ON rp.Id = c.PostId
+LEFT JOIN 
+    (SELECT 
+         UserId, COUNT(*) AS BadgeCount 
+     FROM 
+         Badges 
+     GROUP BY 
+         UserId) b ON u.Id = b.UserId
+WHERE 
+    tur.UserRank <= 10
+ORDER BY 
+    ur.Reputation DESC; 

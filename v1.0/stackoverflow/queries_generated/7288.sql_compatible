@@ -1,0 +1,50 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.ViewCount, 
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1
+), UserBadges AS (
+    SELECT 
+        ub.UserId, 
+        COUNT(*) AS BadgeCount
+    FROM Badges ub
+    GROUP BY ub.UserId
+), PostActivity AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(DISTINCT c.Id) AS CommentCount, 
+        COUNT(DISTINCT c.UserId) AS UniqueCommenters
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.OwnerUserId
+), ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS ClosureCount
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10
+    GROUP BY ph.PostId
+)
+SELECT 
+    u.Id AS UserID, 
+    u.DisplayName, 
+    COALESCE(rb.BadgeCount, 0) AS TotalBadges,
+    COALESCE(pa.CommentCount, 0) AS TotalComments,
+    COALESCE(pa.UniqueCommenters, 0) AS UniqueCommenters,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    COALESCE(cp.ClosureCount, 0) AS ClosureCount
+FROM Users u
+LEFT JOIN UserBadges rb ON u.Id = rb.UserId
+LEFT JOIN PostActivity pa ON u.Id = pa.OwnerUserId
+LEFT JOIN RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.ViewRank = 1
+LEFT JOIN ClosedPosts cp ON rp.Id = cp.PostId
+WHERE u.Reputation > 500
+ORDER BY u.Reputation DESC, 
+         rp.ViewCount DESC;

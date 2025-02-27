@@ -1,0 +1,81 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+MaxYearMovies AS (
+    SELECT 
+        production_year,
+        MAX(cast_count) AS max_cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        year_rank <= 5 
+    GROUP BY 
+        production_year
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        MaxYearMovies my ON rm.production_year = my.production_year
+        AND rm.cast_count = my.max_cast_count
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keyword_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    COALESCE(mk.keyword_list, 'No keywords available') AS keywords,
+    STRING_AGG(DISTINCT (cm.company_name || ' (' || cm.company_type || ')')) AS production_companies
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+LEFT JOIN 
+    CompanyMovies cm ON cm.movie_id = (SELECT id FROM aka_title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+GROUP BY 
+    tm.title, tm.production_year, tm.cast_count
+HAVING 
+    COUNT(DISTINCT cm.company_name) > 1 
+ORDER BY 
+    tm.production_year DESC, 
+    tm.cast_count DESC
+LIMIT 50;

@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreatedDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) as PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS NetVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreatedDate, p.Score
+), AcceptedAnswers AS (
+    SELECT 
+        p.Id AS PostId,
+        p.AcceptedAnswerId,
+        a.Score AS AcceptedAnswerScore
+    FROM Posts p
+    LEFT JOIN Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE p.PostTypeId = 1 -- Questions only
+), ClosePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS CloseRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId = 10 -- Post Closed
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreatedDate,
+    rp.Score AS OriginalScore,
+    rp.CommentCount,
+    rp.NetVotes,
+    CASE 
+        WHEN aa.AcceptedAnswerId IS NOT NULL THEN aa.AcceptedAnswerScore 
+        ELSE 0 
+    END AS AcceptedAnswerScore,
+    COALESCE(cp.CloseRank, 0) AS CloseCount
+FROM RankedPosts rp
+LEFT JOIN AcceptedAnswers aa ON rp.PostId = aa.PostId
+LEFT JOIN ClosePostHistory cp ON rp.PostId = cp.PostId AND cp.CloseRank = 1
+WHERE 
+    (rp.Score > 10 OR rp.CommentCount > 5) 
+    AND rp.PostRank <= 5 -- Top 5 posts per PostTypeId
+ORDER BY rp.CreatedDate DESC, rp.Score DESC
+LIMIT 1000;

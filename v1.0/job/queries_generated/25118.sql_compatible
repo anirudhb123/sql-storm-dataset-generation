@@ -1,0 +1,72 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ak.name) AS actor_rank,
+        t.id
+    FROM
+        aka_title t
+    JOIN
+        cast_info ci ON t.id = ci.movie_id
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE
+        t.production_year >= 2000
+        AND ak.name IS NOT NULL
+),
+
+KeywordCount AS (
+    SELECT
+        mi.movie_id,
+        COUNT(mk.keyword_id) AS total_keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        movie_info mi ON mk.movie_id = mi.movie_id
+    GROUP BY
+        mi.movie_id
+),
+
+TopKeywords AS (
+    SELECT
+        mk.keyword,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM
+        movie_keyword mk
+    GROUP BY
+        mk.keyword
+    ORDER BY
+        keyword_count DESC
+    LIMIT 5
+),
+
+FinalResults AS (
+    SELECT
+        rt.movie_title,
+        rt.production_year,
+        rt.actor_name,
+        kc.total_keywords,
+        tk.keyword AS top_keyword,
+        rt.actor_rank
+    FROM
+        RankedTitles rt
+    JOIN
+        KeywordCount kc ON rt.id = kc.movie_id
+    JOIN
+        TopKeywords tk ON tk.keyword IN (SELECT mk.keyword FROM movie_keyword mk WHERE mk.movie_id = rt.id)
+)
+
+SELECT
+    movie_title,
+    production_year,
+    actor_name,
+    total_keywords,
+    top_keyword
+FROM
+    FinalResults
+WHERE
+    actor_rank <= 3
+ORDER BY
+    production_year DESC, actor_name;

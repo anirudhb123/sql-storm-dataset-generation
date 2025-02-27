@@ -1,0 +1,91 @@
+WITH RECURSIVE regional_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal,
+        r.r_name AS region_name,
+        CASE WHEN s.s_acctbal IS NULL THEN 0 ELSE s.s_acctbal END AS adjusted_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal,
+        r.r_name AS region_name,
+        CASE WHEN s.s_acctbal IS NULL THEN 0 ELSE s.s_acctbal END AS adjusted_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        regional_suppliers rs ON s.s_nationkey = rs.s_nationkey
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r.r_name IS NOT NULL
+    AND 
+        s.s_acctbal < 1000
+),
+supplier_orders AS (
+    SELECT 
+        count(*) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_price,
+        s.s_suppkey
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey
+),
+final_summary AS (
+    SELECT 
+        rs.region_name,
+        so.s_suppkey,
+        so.order_count,
+        so.avg_order_price,
+        rs.adjusted_acctbal
+    FROM 
+        regional_suppliers rs
+    JOIN 
+        supplier_orders so ON rs.s_suppkey = so.s_suppkey
+)
+SELECT 
+    fs.region_name,
+    fs.s_suppkey,
+    COALESCE(fs.order_count, 0) AS total_orders,
+    CASE 
+        WHEN fs.order_count > 0 THEN fs.avg_order_price * 1.1 
+        ELSE 0 
+    END AS adjusted_avg_order_price,
+    IFNULL(fs.adjusted_acctbal, -1) AS account_balance
+FROM 
+    final_summary fs
+WHERE 
+    fs.adjusted_acctbal IS NOT NULL
+    AND fs.order_count >= (
+        SELECT 
+            MAX(order_count) 
+        FROM 
+            supplier_orders 
+        WHERE 
+            order_count IS NOT NULL)
+ORDER BY 
+    fs.region_name, fs.s_suppkey
+LIMIT 100
+OFFSET 50;

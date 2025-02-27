@@ -1,0 +1,57 @@
+-- Performance Benchmarking Query
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpvoteCount,
+        SUM(v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(p.Score) AS TotalScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        AVG(p.AnswerCount) AS AvgAnswerCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ur.Reputation,
+    ur.PostCount,
+    ur.CommentCount,
+    ur.UpvoteCount,
+    ur.DownvoteCount,
+    ps.TotalPosts,
+    ps.TotalScore,
+    ps.AvgViewCount,
+    ps.AvgAnswerCount
+FROM 
+    Users u
+LEFT JOIN 
+    UserReputation ur ON u.Id = ur.UserId
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+WHERE 
+    ur.PostCount > 0
+ORDER BY 
+    ur.Reputation DESC;
+
+-- This query benchmarks user performance by aggregating their posts, comments,
+-- votes, and other activity metrics, providing insights on user engagement and effectiveness.

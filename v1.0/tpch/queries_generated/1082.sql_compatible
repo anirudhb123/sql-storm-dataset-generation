@@ -1,0 +1,53 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_name
+),
+LineItemStats AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue,
+        COUNT(CASE WHEN li.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(cs.order_count, 0) AS total_orders,
+    COALESCE(cs.avg_order_value, 0) AS average_order_value,
+    COALESCE(ss.part_count, 0) AS supplier_part_count,
+    COALESCE(ss.total_value, 0) AS supplier_total_value,
+    COALESCE(ls.net_revenue, 0) AS net_revenue,
+    COALESCE(ls.return_count, 0) AS return_count
+FROM 
+    CustomerOrderStats cs
+FULL OUTER JOIN 
+    SupplierStats ss ON cs.c_name = ss.s_name
+FULL OUTER JOIN 
+    LineItemStats ls ON cs.order_count = ls.l_orderkey
+WHERE 
+    (cs.order_count IS NOT NULL OR ss.part_count IS NOT NULL OR ls.return_count IS NOT NULL)
+ORDER BY 
+    total_orders DESC;

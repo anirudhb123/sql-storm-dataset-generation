@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT p.Id,
+           p.Title,
+           p.CreationDate,
+           p.Score,
+           p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+           ARRAY_AGG(t.TagName) AS TagsArray
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(p.Tags, '>')) AS TagName
+    ) t ON true
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.PostTypeId
+),
+RecentClosedPosts AS (
+    SELECT p.Id,
+           p.Title,
+           ph.CreationDate,
+           ph.Comment AS CloseReason,
+           RANK() OVER (ORDER BY ph.CreationDate DESC) AS rnk
+    FROM Posts p
+    JOIN PostHistory ph ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId = 10
+      AND ph.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostVoteSummary AS (
+    SELECT p.Id AS PostId,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+),
+UserBadgeCounts AS (
+    SELECT b.UserId,
+           COUNT(b.Id) AS BadgeCount,
+           MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+)
+SELECT rp.Title,
+       rp.CreationDate,
+       rp.Score,
+       rp.ViewCount,
+       COALESCE(rp.TagsArray, '{}') AS Tags,
+       COALESCE(vs.UpVotes, 0) AS UpVoteCount,
+       COALESCE(vs.DownVotes, 0) AS DownVoteCount,
+       COALESCE(cs.CloseReason, 'Not Closed') AS LatestCloseReason,
+       ub.BadgeCount AS UserBadgeCount,
+       CASE 
+           WHEN ub.HighestBadgeClass = 1 THEN 'Gold'
+           WHEN ub.HighestBadgeClass = 2 THEN 'Silver'
+           WHEN ub.HighestBadgeClass = 3 THEN 'Bronze'
+           ELSE 'No Badges'
+       END AS HighestBadge
+FROM RankedPosts rp
+LEFT JOIN PostVoteSummary vs ON rp.Id = vs.PostId
+LEFT JOIN RecentClosedPosts cs ON rp.Id = cs.Id
+LEFT JOIN UserBadgeCounts ub ON rp.OwnerUserId = ub.UserId
+WHERE rp.rn = 1 -- Only considering the most recent post by type
+  AND (rp.Score > 0 OR (rp.Score IS NULL AND rp.ViewCount < 10))
+ORDER BY rp.CreationDate DESC, rp.Score DESC
+LIMIT 50;

@@ -1,0 +1,52 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.person_id, 
+        ak.name AS actor_name, 
+        1 AS depth 
+    FROM 
+        aka_name ak 
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id 
+    WHERE 
+        ak.name IS NOT NULL 
+
+    UNION ALL 
+
+    SELECT 
+        ah.actor_id, 
+        ah.person_id, 
+        ak.name, 
+        ah.depth + 1 
+    FROM 
+        actor_hierarchy ah 
+    JOIN 
+        cast_info ci ON ah.actor_id = ci.movie_id 
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id 
+)
+
+SELECT 
+    a.actor_name, 
+    COUNT(DISTINCT m.id) AS movie_count, 
+    STRING_AGG(DISTINCT m.title, ', ') AS movies, 
+    MAX(m.production_year) AS last_movie_year,
+    CASE 
+        WHEN MAX(m.production_year) IS NULL THEN 'No Movies'
+        ELSE 'Active'
+    END AS activity_status,
+    ROW_NUMBER() OVER (PARTITION BY ah.actor_name ORDER BY MAX(m.production_year) DESC) AS row_num,
+    RANK() OVER (ORDER BY COUNT(DISTINCT m.id) DESC) AS rank_by_movie_count
+FROM 
+    actor_hierarchy ah 
+LEFT JOIN 
+    cast_info ci ON ah.person_id = ci.person_id 
+LEFT JOIN 
+    aka_title m ON ci.movie_id = m.id 
+GROUP BY 
+    a.actor_name 
+HAVING 
+    COUNT(DISTINCT m.id) > 0 
+ORDER BY 
+    rank_by_movie_count
+LIMIT 10;

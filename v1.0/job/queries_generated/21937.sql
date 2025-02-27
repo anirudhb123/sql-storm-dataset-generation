@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_titles
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CrewMembers AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        cnt.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_companies mc ON ci.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_type cnt ON mc.company_type_id = cnt.id
+    WHERE 
+        ak.name IS NOT NULL AND 
+        cnt.kind IS NOT NULL
+),
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ca.actor_count, 0) AS actor_count,
+        COALESCE(mc.company_count, 0) AS company_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(DISTINCT actor_name) AS actor_count 
+        FROM 
+            CrewMembers 
+        GROUP BY 
+            movie_id
+    ) ca ON rm.movie_id = ca.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(DISTINCT company_type) AS company_count 
+        FROM 
+            movie_companies 
+        GROUP BY 
+            movie_id
+    ) mc ON rm.movie_id = mc.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.company_count,
+    CASE 
+        WHEN md.actor_count > 0 AND md.company_count > 0 THEN 'Has Cast and Companies'
+        WHEN md.actor_count > 0 THEN 'Has Cast Only'
+        WHEN md.company_count > 0 THEN 'Has Companies Only'
+        ELSE 'No Cast or Companies'
+    END AS movie_status,
+    (SELECT STRING_AGG(CONCAT(name, ' (Rank: ', actor_rank, ')'), ', ') 
+     FROM CrewMembers 
+     WHERE movie_id = md.movie_id) AS actor_names
+FROM 
+    MovieDetails md
+WHERE 
+    (md.actor_count > 2 OR md.company_count > 1)
+ORDER BY 
+    md.production_year DESC, 
+    md.title ASC
+LIMIT 50;

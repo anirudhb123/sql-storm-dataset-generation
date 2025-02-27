@@ -1,0 +1,100 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+
+HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        coop.total_profit,
+        SUM(CASE WHEN COALESCE(ranked.ws_net_profit, 0) > 100 THEN 1 ELSE 0 END) AS high_profit_count
+    FROM 
+        item
+    LEFT JOIN 
+        (SELECT 
+            ws_item_sk,
+            SUM(ws_net_profit) AS total_profit
+         FROM 
+            web_sales
+         GROUP BY 
+            ws_item_sk) AS coop
+    ON item.i_item_sk = coop.ws_item_sk
+    LEFT JOIN 
+        RankedSales ranked
+    ON item.i_item_sk = ranked.ws_item_sk AND ranked.rn <= 3
+    GROUP BY 
+        item.i_item_id, item.i_item_desc, coop.total_profit
+    HAVING 
+        SUM(CASE WHEN COALESCE(ranked.ws_net_profit, 0) > 0 THEN 1 ELSE 0 END) > 0
+        OR COALESCE(coop.total_profit, 0) = 0
+),
+
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state = 'CA'
+    AND 
+        cd.cd_purchase_estimate IS NOT NULL
+),
+
+WebSalesSummary AS (
+    SELECT 
+        ws.ws_order_number,
+        COUNT(DISTINCT ws.ws_item_sk) AS total_items,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_order_number
+)
+
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    hd.total_profit AS total_customer_profit,
+    ws_summary.total_items,
+    ws_summary.total_sales,
+    ws_summary.avg_net_profit,
+    CASE 
+        WHEN high.high_profit_count > 0 THEN 'High Profit Item'
+        ELSE 'Regular Item'
+    END AS profit_category
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    HighProfitItems high ON high.i_item_id IN (SELECT DISTINCT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cd.c_customer_id)
+LEFT JOIN 
+    WebSalesSummary ws_summary ON ws_summary.ws_order_number IN (SELECT ws_order_number FROM web_sales WHERE ws_bill_customer_sk = cd.c_customer_id)
+WHERE 
+    (ws_summary.total_sales > 1000 
+      OR ws_summary.total_items > 5 OR high.total_profit IS NOT NULL)
+ORDER BY 
+    cd.c_last_name, cd.c_first_name;

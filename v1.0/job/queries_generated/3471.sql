@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        DENSE_RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        cc.kind AS company_type,
+        COUNT(mc.company_id) AS company_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.title = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON rm.title = mc.movie_id
+    LEFT JOIN 
+        company_type cc ON mc.company_type_id = cc.id
+    GROUP BY 
+        rm.title, rm.production_year, mk.keyword, cc.kind
+),
+FilteredMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        md.company_type,
+        md.company_count,
+        ROW_NUMBER() OVER (PARTITION BY md.year ORDER BY md.company_count DESC) AS company_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year > 2000 
+        AND md.company_count > 0
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.keyword,
+    fm.company_type,
+    fm.company_count,
+    CASE 
+        WHEN fm.company_count IS NULL THEN 'No Companies Associated' 
+        ELSE NULL 
+    END AS company_association
+FROM 
+    FilteredMovies fm
+WHERE 
+    fm.company_rank <= 5
+ORDER BY 
+    fm.production_year DESC, 
+    fm.company_count DESC;

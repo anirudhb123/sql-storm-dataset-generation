@@ -1,0 +1,42 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        ARRAY[T.TagName] AS Path
+    FROM 
+        Tags T
+    WHERE 
+        T.IsModeratorOnly = 0 AND T.Count > 0
+    
+    UNION ALL
+    
+    SELECT 
+        TL.RelatedPostId AS TagId,
+        T.TagName,
+        T.Count,
+        TH.Path || T.TagName
+    FROM 
+        PostLinks PL
+    JOIN 
+        Tags T ON T.Id = PL.RelatedPostId
+    JOIN 
+        TagHierarchy TH ON PL.PostId = TH.TagId
+    WHERE 
+        T.IsModeratorOnly = 0 AND T.Count > 0
+)
+SELECT 
+    TH.Path,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    SUM(COALESCE(P.Score, 0)) AS TotalScore,
+    MIN(P.CreationDate) AS FirstPostDate,
+    MAX(P.LastActivityDate) AS LastPostDate
+FROM 
+    TagHierarchy TH
+LEFT JOIN 
+    Posts P ON P.Tags LIKE '%' || TH.TagName || '%'
+GROUP BY 
+    TH.Path
+ORDER BY 
+    PostCount DESC, TotalScore DESC
+LIMIT 10;

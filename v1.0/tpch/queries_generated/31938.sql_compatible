@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartPrice AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS unique_customers,
+           ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+SupplierCosts AS (
+    SELECT s.s_suppkey, 
+           COALESCE(NULLIF(SUM(ps.ps_supplycost), 0), 0) AS total_cost,
+           STRING_AGG(DISTINCT p.p_name, ', ') AS supplied_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey
+)
+SELECT rh.level,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       pp.total_supply_cost,
+       os.total_revenue,
+       CASE 
+           WHEN pp.total_supply_cost > os.total_revenue THEN 'Costly'
+           WHEN pp.total_supply_cost < os.total_revenue THEN 'Profitable'
+           ELSE 'Break Even'
+       END AS profitability,
+       sc.total_cost,
+       sc.supplied_parts
+FROM SupplierHierarchy rh
+LEFT JOIN SupplierCosts sc ON rh.s_suppkey = sc.s_suppkey
+LEFT JOIN PartPrice pp ON pp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = rh.s_suppkey)
+LEFT JOIN OrderStatistics os ON os.unique_customers = (
+    SELECT COUNT(DISTINCT c.c_custkey)
+    FROM customer c
+    WHERE c.c_nationkey = rh.s_nationkey
+)
+WHERE pp.total_supply_cost IS NOT NULL AND os.total_revenue IS NOT NULL
+ORDER BY rh.level, profitability DESC;

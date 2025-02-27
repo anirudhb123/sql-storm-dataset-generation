@@ -1,0 +1,45 @@
+
+WITH CTE_Customer_Sales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+CTE_Supplier_Income AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_income
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+Ranked_Parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+)
+SELECT 
+    cs.c_name,
+    COALESCE(cs.total_sales, 0) AS total_sales,
+    COALESCE(si.total_income, 0) AS total_income,
+    p.p_name,
+    p.p_retailprice,
+    CASE 
+        WHEN si.total_income IS NULL THEN 'No Income' 
+        ELSE 'Income Available' 
+    END AS income_status
+FROM CTE_Customer_Sales cs
+FULL OUTER JOIN CTE_Supplier_Income si ON cs.c_custkey = si.s_suppkey
+JOIN Ranked_Parts p ON p.price_rank = 1
+WHERE (COALESCE(cs.total_sales, 0) > 1000 OR COALESCE(si.total_income, 0) > 5000) 
+AND (p.p_brand LIKE 'BrandA%' OR p.p_name LIKE '%Special%')
+ORDER BY total_sales DESC, total_income DESC;

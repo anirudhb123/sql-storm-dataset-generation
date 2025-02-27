@@ -1,0 +1,104 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.role_id = (SELECT id FROM role_type WHERE role = 'actor') 
+
+    UNION ALL
+
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info c
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = ah.movie_id
+    WHERE 
+        c.person_id != ah.person_id
+),
+
+MoviesWithScores AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(SUM(CASE WHEN r.role = 'actor' THEN 1 ELSE 0 END), 0) AS actor_count,
+        COALESCE(SUM(CASE WHEN r.role = 'director' THEN 1 ELSE 0 END), 0) AS director_count,
+        ROUND(COALESCE(AVG(r.rating), 0), 2) AS average_rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id
+    WHERE 
+        m.production_year > 2000
+    GROUP BY 
+        m.id
+),
+
+RankedMovies AS (
+    SELECT
+        mw.*,
+        ROW_NUMBER() OVER (PARTITION BY mw.producer_id ORDER BY mw.average_rating DESC) AS rank
+    FROM 
+        (SELECT 
+            m.id AS movie_id,
+            m.title,
+            m.production_year,
+            mi.info AS producer_info,
+            ms.average_rating
+        FROM 
+            MoviesWithScores ms
+        JOIN 
+            movie_companies mc ON ms.movie_id = mc.movie_id
+        JOIN 
+            company_name cn ON mc.company_id = cn.id
+        JOIN 
+            movie_info mi ON mi.movie_id = ms.movie_id 
+        WHERE 
+            cn.country_code = 'USA' 
+            AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'producers')) mw
+),
+
+FilteredRankedMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN average_rating > 7.5 THEN 'Highly Rated' 
+            WHEN average_rating BETWEEN 5 AND 7.5 THEN 'Moderately Rated' 
+            ELSE 'Low Rated' 
+        END AS rating_category
+    FROM 
+        RankedMovies
+)
+
+SELECT 
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.producer_info,
+    fr.average_rating,
+    fr.rating_category,
+    COUNT(*) OVER (PARTITION BY fr.rating_category) AS category_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS co_actors
+FROM 
+    FilteredRankedMovies fr
+LEFT JOIN 
+    cast_info c ON c.movie_id = fr.movie_id
+LEFT JOIN 
+    aka_name a ON c.person_id = a.person_id
+WHERE 
+    fr.rank <= 5
+GROUP BY 
+    fr.movie_id, fr.title, fr.production_year, fr.producer_info, fr.average_rating, fr.rating_category
+ORDER BY 
+    fr.average_rating DESC, fr.title ASC;

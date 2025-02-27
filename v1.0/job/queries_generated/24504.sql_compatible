@@ -1,0 +1,67 @@
+
+WITH movie_details AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        SUM(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) END) AS total_length_info,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY mt.production_year DESC) AS rn
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL 
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Feature%')
+        AND ak.name IS NOT NULL
+        AND ak.name <> ''
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+    HAVING 
+        COUNT(DISTINCT ak.name) > 3
+),
+filtered_movies AS (
+    SELECT *
+    FROM movie_details
+    WHERE rn = 1
+    ORDER BY production_year DESC
+),
+actor_statistics AS (
+    SELECT 
+        ak.person_id,
+        COUNT(DISTINCT mt.id) AS movie_count,
+        MIN(mt.production_year) AS first_appearance,
+        MAX(mt.production_year) AS last_appearance
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title mt ON ci.movie_id = mt.id
+    GROUP BY 
+        ak.person_id
+    HAVING 
+        COUNT(DISTINCT mt.id) > 5
+)
+SELECT 
+    fm.title AS "Movie Title",
+    fm.production_year AS "Year of Production",
+    fm.actor_names AS "Actors",
+    fm.company_count AS "Number of Companies",
+    COALESCE(as.person_id, 0) AS "Actor ID",
+    COALESCE(as.movie_count, 0) AS "Number of Movies for Actor",
+    COALESCE(as.first_appearance, 'N/A') AS "First Appearance",
+    COALESCE(as.last_appearance, 'N/A') AS "Last Appearance"
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    actor_statistics as ON as.person_id IS NOT NULL AND fm.actor_names ILIKE '%' || CAST(as.person_id AS TEXT) || '%'
+ORDER BY 
+    fm.production_year DESC, fm.title;

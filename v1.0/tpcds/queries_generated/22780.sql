@@ -1,0 +1,50 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_net_paid,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_paid DESC) AS sales_rank,
+        CASE 
+            WHEN ws.ws_net_paid IS NULL THEN 0 
+            ELSE ws.ws_net_paid
+        END AS valid_net_paid
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk < (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_birth_year) AS unique_birth_years,
+        COUNT(DISTINCT ca.ca_state) AS unique_states
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_marital_status IN ('M', 'S')
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+sales_summary AS (
+    SELECT 
+        r.web_site_id,
+        SUM(r.valid_net_paid) AS total_net_paid,
+        COUNT(DISTINCT c.c_customer_id) AS num_customers,
+        AVG(COALESCE(c.unique_birth_years, 0)) AS avg_unique_birth_years
+    FROM ranked_sales r
+    LEFT JOIN customer_info c ON r.web_site_id = (SELECT MAX(ws.web_site_sk) FROM web_site ws WHERE CHAR_LENGTH(ws.web_site_id) = 16)
+    GROUP BY r.web_site_id
+)
+SELECT 
+    ss.web_site_id,
+    ss.total_net_paid,
+    ss.num_customers,
+    ROUND(ss.avg_unique_birth_years, 2) AS avg_unique_birth_years,
+    CASE 
+        WHEN ss.total_net_paid > 10000 THEN 'High Sales'
+        WHEN ss.total_net_paid IS NULL OR ss.total_net_paid = 0 THEN 'No Sales'
+        ELSE 'Moderate Sales'
+    END AS sales_category
+FROM sales_summary ss
+WHERE ss.num_customers > 5 OR ss.total_net_paid IS NOT NULL
+ORDER BY ss.total_net_paid DESC
+LIMIT 10;

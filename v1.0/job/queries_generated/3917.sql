@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieGenres AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(kt.keyword, ', ') AS genres
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword kt ON mt.keyword_id = kt.id
+    GROUP BY 
+        mt.movie_id
+),
+CastDetails AS (
+    SELECT 
+        c.id AS cast_id,
+        c.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    COALESCE(rm.genres, 'Unknown') AS genre_list,
+    COUNT(cd.cast_id) AS total_cast,
+    STRING_AGG(cd.actor_name, ', ' ORDER BY cd.actor_rank) AS actor_list
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieGenres mg ON rm.movie_id = mg.movie_id
+LEFT JOIN 
+    CastDetails cd ON rm.movie_id = cd.movie_id
+WHERE 
+    rm.rank <= 5
+GROUP BY 
+    rm.movie_id, rm.title
+ORDER BY 
+    rm.production_year DESC, total_cast DESC;

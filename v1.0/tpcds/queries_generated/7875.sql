@@ -1,0 +1,73 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+),
+RecentReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
+        SUM(sr.sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.sr_returned_date_sk >= (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)
+    GROUP BY 
+        sr.sr_customer_sk
+),
+MergingStats AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_marital_status,
+        cs.cd_purchase_estimate,
+        cs.total_quantity,
+        cs.total_sales,
+        cs.order_count,
+        COALESCE(rr.return_count, 0) AS return_count,
+        COALESCE(rr.total_return_amount, 0) AS total_return_amount
+    FROM 
+        CustomerStats cs
+    LEFT JOIN 
+        RecentReturns rr ON cs.c_customer_sk = rr.sr_customer_sk
+)
+SELECT 
+    ms.c_customer_id,
+    ms.c_first_name,
+    ms.c_last_name,
+    ms.cd_gender,
+    ms.cd_marital_status,
+    ms.cd_purchase_estimate,
+    ms.total_quantity,
+    ms.total_sales,
+    ms.order_count,
+    ms.return_count,
+    ms.total_return_amount,
+    CASE 
+        WHEN ms.total_sales > 1000 THEN 'High Value Customer'
+        WHEN ms.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_category
+FROM 
+    MergingStats ms
+ORDER BY 
+    ms.total_sales DESC
+LIMIT 100;

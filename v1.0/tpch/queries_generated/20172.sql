@@ -1,0 +1,95 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+      AND o.o_orderdate < DATE '2024-01-01'
+), 
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+), 
+customer_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name 
+), 
+discounted_lineitems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey, 
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice * (1 - l.l_discount) AS final_price
+    FROM lineitem l
+    WHERE l.l_discount > 0.05
+      AND l.l_returnflag = 'N'
+), 
+nation_suppliers AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name
+),
+region_nation AS (
+    SELECT 
+        r.r_name,
+        COUNT(n.n_nationkey) AS nation_count,
+        AVG(s.s_acctbal) AS avg_supplier_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name
+)
+SELECT 
+    coalesce(date_part('year', o.o_orderdate)::text, 'Unknown Year') AS year,
+    cs.c_name,
+    ns.supplier_count,
+    r.r_name,
+    SUM(dl.final_price) AS total_discounted_sales,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    ROUND(AVG(cs.total_spent), 2) AS avg_spent_per_customer,
+    COUNT(DISTINCT ro.order_rank) AS unique_order_status
+FROM ranked_orders ro
+JOIN customer_summary cs ON ro.o_custkey = cs.c_custkey
+LEFT JOIN nation_suppliers ns ON cs.c_nationkey = ns.n_nationkey
+JOIN region_nation r ON ns.n_nationkey = r.nation_count
+JOIN discounted_lineitems dl ON ro.o_orderkey = dl.l_orderkey
+WHERE r.nation_count IS NOT NULL
+  AND cs.order_count > 5
+  AND COALESCE(cs.total_spent, 0) > 1000
+GROUP BY year, cs.c_name, ns.supplier_count, r.r_name
+ORDER BY total_discounted_sales DESC
+LIMIT 50 OFFSET 10
+UNION ALL
+SELECT 
+    'N/A' AS year,
+    'Total' AS c_name,
+    SUM(ns.supplier_count) AS supplier_count,
+    r.r_name,
+    SUM(dl.final_price) AS total_discounted_sales,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    ROUND(AVG(cs.total_spent), 2) AS avg_spent_per_customer,
+    COUNT(DISTINCT ro.order_rank) AS unique_order_status
+FROM ranked_orders ro
+JOIN customer_summary cs ON ro.o_custkey = cs.c_custkey
+LEFT JOIN nation_suppliers ns ON cs.c_nationkey = ns.n_nationkey
+JOIN region_nation r ON ns.n_nationkey = r.nation_count
+JOIN discounted_lineitems dl ON ro.o_orderkey = dl.l_orderkey
+WHERE r.nation_count IS NOT NULL
+GROUP BY r.r_name
+ORDER BY total_discounted_sales DESC;

@@ -1,0 +1,58 @@
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458849 AND 2458880  
+    GROUP BY 
+        ws_item_sk
+),
+high_profit_items AS (
+    SELECT 
+        ss.ws_item_sk, 
+        ss.total_quantity, 
+        ss.total_profit, 
+        ss.total_orders,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_brand
+    FROM 
+        sales_summary ss
+    JOIN 
+        item i ON ss.ws_item_sk = i.i_item_sk
+    WHERE 
+        ss.total_profit > (SELECT AVG(total_profit) FROM sales_summary)
+),
+top_items AS (
+    SELECT 
+        hpi.*,
+        RANK() OVER (ORDER BY hpi.total_profit DESC) AS profit_rank
+    FROM 
+        high_profit_items hpi
+)
+SELECT 
+    t.profit_rank,
+    t.i_item_id,
+    t.i_item_desc,
+    t.i_brand,
+    t.total_quantity,
+    t.total_profit,
+    COALESCE(AVG(ed.cd_income_band_sk), 'Not Available') AS avg_income_band
+FROM 
+    top_items t
+LEFT JOIN 
+    household_demographics hd ON t.ws_item_sk = hd.hd_demo_sk
+LEFT JOIN 
+    income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = hd.hd_demo_sk
+WHERE 
+    t.profit_rank <= 10  
+GROUP BY 
+    t.profit_rank, t.i_item_id, t.i_item_desc, t.i_brand, t.total_quantity, t.total_profit
+ORDER BY 
+    t.profit_rank;

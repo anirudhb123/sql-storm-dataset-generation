@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        DisplayName,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(COALESCE(p.ViewCount, 0)) AS AverageViewCount
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+RecentPostEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY ph.PostId
+),
+UserWithEditStats AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ps.TotalPosts,
+        ps.PositivePosts,
+        ps.NegativePosts,
+        ps.AcceptedAnswers,
+        ps.AverageViewCount,
+        COALESCE(re.EditCount, 0) AS EditCount,
+        re.LastEditDate
+    FROM UserReputation ur
+    LEFT JOIN PostStatistics ps ON ur.UserId = ps.OwnerUserId
+    LEFT JOIN RecentPostEdits re ON ps.OwnerUserId = re.PostId
+)
+SELECT 
+    uwes.DisplayName,
+    uwes.Reputation,
+    ush.ReputationRank,
+    uwes.TotalPosts,
+    uwes.PositivePosts,
+    uwes.NegativePosts,
+    uwes.AcceptedAnswers,
+    uwes.AverageViewCount,
+    uwes.EditCount,
+    COALESCE(uwes.LastEditDate, 'Never Edited') AS LastEditDate
+FROM UserWithEditStats uwes
+JOIN UserReputation ush ON uwes.UserId = ush.UserId
+WHERE uwes.Reputation > 1000
+ORDER BY uwes.Reputation DESC, uwes.TotalPosts DESC
+LIMIT 50;

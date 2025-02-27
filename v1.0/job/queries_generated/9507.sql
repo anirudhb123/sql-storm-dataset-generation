@@ -1,0 +1,41 @@
+WITH movie_summary AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+)
+SELECT 
+    ms.movie_title,
+    ms.production_year,
+    ms.actor_count,
+    ms.cast_names,
+    ms.keywords,
+    ROUND(AVG(LENGTH(ms.cast_names)), 2) AS avg_cast_name_length
+FROM 
+    movie_summary ms
+WHERE 
+    ms.production_year >= 2000
+ORDER BY 
+    ms.production_year DESC,
+    ms.actor_count DESC
+LIMIT 10;

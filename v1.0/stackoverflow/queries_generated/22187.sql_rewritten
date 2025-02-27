@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(v.Id) OVER (PARTITION BY p.Id) AS VoteCount,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month'
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    COALESCE(vt.Name, 'Unknown Vote Type') AS VoteType,
+    rp.VoteCount,
+    rp.CommentCount,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        WHEN rp.VoteCount > 5 THEN 'Popular Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    ARRAY(
+        SELECT 
+            DISTINCT t.TagName 
+        FROM 
+            Posts pp
+        CROSS JOIN 
+            unnest(string_to_array(pp.Tags, '><')) AS t(TagName)
+        WHERE 
+            pp.Id = rp.PostId
+    ) AS AssociatedTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    VoteTypes vt ON vt.Id = (
+        SELECT 
+            v.VoteTypeId 
+        FROM 
+            Votes v 
+        WHERE 
+            v.PostId = rp.PostId 
+        ORDER BY 
+            v.CreationDate DESC 
+        LIMIT 1
+    )
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.Rank, rp.Score DESC
+OFFSET (SELECT COUNT(*) FROM RankedPosts) / 2 ROWS
+FETCH NEXT 5 ROWS ONLY;

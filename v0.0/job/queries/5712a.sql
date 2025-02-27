@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mk.keyword_id = 2600 AND mi.id > 10616635 AND t.episode_nr < 785 AND t.production_year IS NOT NULL AND k.phonetic_code IS NOT NULL;

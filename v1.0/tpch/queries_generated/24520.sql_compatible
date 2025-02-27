@@ -1,0 +1,70 @@
+
+WITH RECURSIVE PriceComparison AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ps.ps_supplycost,
+        (p.p_retailprice - ps.ps_supplycost) AS price_difference,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY (p.p_retailprice - ps.ps_supplycost) DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+),
+TopPricedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_container,
+        p.p_comment,
+        COALESCE(pc.price_difference, 0) AS price_difference,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(pc.price_difference, 0) DESC) AS rank
+    FROM part p
+    LEFT JOIN PriceComparison pc ON p.p_partkey = pc.p_partkey AND pc.rn = 1
+    WHERE LENGTH(p.p_name) LIKE '%t%' OR p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_size < 50)
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 1000
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 5000
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+    HAVING COUNT(DISTINCT ps.ps_partkey) >= (
+        SELECT AVG(part_count) FROM (
+            SELECT COUNT(DISTINCT ps_inner.ps_partkey) AS part_count
+            FROM supplier s_inner
+            JOIN partsupp ps_inner ON s_inner.s_suppkey = ps_inner.ps_suppkey
+            GROUP BY s_inner.s_suppkey
+        ) AS avg_parts
+    )
+)
+SELECT 
+    tpp.p_partkey,
+    tpp.p_name,
+    tpp.p_mfgr,
+    tpp.p_container,
+    tpp.price_difference,
+    hvc.c_name AS high_value_customer,
+    sd.s_name AS supplier_name,
+    sd.n_name AS nation,
+    sd.supplied_parts
+FROM TopPricedParts tpp
+FULL OUTER JOIN HighValueCustomers hvc ON tpp.rank <= 10
+LEFT JOIN SupplierDetails sd ON sd.supplied_parts > 5
+ORDER BY tpp.price_difference DESC, hvc.total_spend DESC NULLS LAST;

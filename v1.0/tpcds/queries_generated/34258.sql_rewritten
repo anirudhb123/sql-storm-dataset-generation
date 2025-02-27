@@ -1,0 +1,49 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_number_employees,
+        s_sales AS store_sales,
+        1 AS level
+    FROM (
+        SELECT 
+            ss_store_sk,
+            SUM(ss_net_paid) AS s_sales,
+            s_store_name
+        FROM store
+        JOIN store_sales ON store.s_store_sk = store_sales.ss_store_sk
+        GROUP BY ss_store_sk, s_store_name
+    ) AS sales_data
+    WHERE s_sales > 10000
+    
+    UNION ALL
+
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_number_employees,
+        (sh.store_sales + COALESCE(t.total_sales, 0)) AS store_sales,
+        sh.level + 1
+    FROM sales_hierarchy sh
+    JOIN store s ON sh.s_store_sk = s.s_store_sk
+    LEFT JOIN (
+        SELECT 
+            ss_store_sk,
+            SUM(ss_net_paid) AS total_sales
+        FROM store_sales
+        GROUP BY ss_store_sk
+    ) t ON t.ss_store_sk = s.s_store_sk
+    WHERE sh.level < 5
+)
+
+SELECT 
+    sh.s_store_name,
+    sh.level,
+    sh.store_sales,
+    ROW_NUMBER() OVER (PARTITION BY sh.level ORDER BY sh.store_sales DESC) AS rank,
+    CASE 
+        WHEN sh.store_sales IS NULL THEN 'No sales'
+        ELSE CONCAT('Sales: $', CAST(sh.store_sales AS VARCHAR))
+    END AS sales_info
+FROM sales_hierarchy sh
+ORDER BY sh.level, sh.store_sales DESC;

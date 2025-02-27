@@ -1,0 +1,67 @@
+
+WITH RECURSIVE date_series AS (
+    SELECT MIN(d_date_sk) AS date_sk
+    FROM date_dim
+    UNION ALL
+    SELECT date_sk + 1
+    FROM date_series
+    WHERE date_sk < (SELECT MAX(d_date_sk) FROM date_dim)
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        COUNT(ss.ss_ticket_number) AS total_purchases,
+        SUM(ss.ss_sales_price) AS total_spent,
+        AVG(ss.ss_sales_price) AS avg_spent,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ss.ss_sales_price) DESC) AS sales_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+return_stats AS (
+    SELECT 
+        sr.returning_customer_sk,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr.ticket_number) AS unique_returns
+    FROM store_returns sr
+    GROUP BY sr.returning_customer_sk
+),
+sales_product AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT date_sk FROM date_series)
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.total_purchases,
+    cs.total_spent,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    pp.total_sold,
+    CASE 
+        WHEN cs.total_spent > 1000 THEN 'High Spender'
+        WHEN cs.total_spent BETWEEN 500 AND 1000 THEN 'Medium Spender'
+        ELSE 'Low Spender'
+    END AS spending_category,
+    (SELECT COUNT(*) FROM customer WHERE c_current_cdemo_sk IS NULL) AS customers_without_demo,
+    (SELECT COUNT(DISTINCT r.r_reason_sk) 
+     FROM reason r 
+     WHERE r.r_reason_sk NOT IN (SELECT sr_reason_sk FROM store_returns)) AS unutilized_reasons
+FROM customer_stats cs
+LEFT JOIN return_stats rs ON cs.c_customer_sk = rs.returning_customer_sk
+LEFT JOIN sales_product pp ON pp.ws_item_sk IN (
+    SELECT sr_item_sk FROM store_returns WHERE sr_customer_sk = cs.c_customer_sk
+)
+WHERE cs.total_purchases > 0 
+  AND (NOT EXISTS (SELECT 1 FROM web_sales WHERE ws_bill_customer_sk = cs.c_customer_sk))
+ORDER BY spending_category, cs.total_spent DESC
+LIMIT 50;

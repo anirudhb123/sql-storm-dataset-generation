@@ -1,0 +1,99 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostCTE rp ON p.ParentId = rp.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT TRIM(REGEXP_SPLIT_TO_TABLE(p.Tags, '><')), ', ') AS Tags
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+),
+HighScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        p.OwnerUserId,
+        pt.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        CASE
+            WHEN rp.Score >= 100 THEN 'High Scorer'
+            WHEN rp.Score BETWEEN 50 AND 99 THEN 'Moderate Scorer'
+            ELSE 'Low Scorer'
+        END AS ScoreCategory
+    FROM 
+        RecursivePostCTE rp
+    LEFT JOIN 
+        Posts p ON rp.PostId = p.Id
+    LEFT JOIN 
+        PostTags pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    hsp.PostId,
+    hsp.Title,
+    hsp.CreationDate,
+    hsp.ViewCount,
+    hsp.Score,
+    hsp.ScoreCategory,
+    hsp.Tags,
+    u.Name AS ReputationLabel,
+    COALESCE(u.Reputation, 0) AS UserReputation,
+    COALESCE(COUNT(c.Id), 0) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+FROM 
+    HighScoringPosts hsp
+LEFT JOIN 
+    Comments c ON hsp.PostId = c.PostId
+LEFT JOIN 
+    UserReputation u ON hsp.OwnerUserId = u.UserId
+LEFT JOIN 
+    Votes v ON hsp.PostId = v.PostId AND v.VoteTypeId IN (8, 9) 
+GROUP BY 
+    hsp.PostId, hsp.Title, hsp.CreationDate, hsp.ViewCount, hsp.Score, hsp.ScoreCategory, hsp.Tags, u.Name, u.Reputation
+HAVING 
+    hsp.Score > 0
+ORDER BY 
+    hsp.Score DESC, hsp.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_net_paid) > 1000
+),
+FrequentPromotions AS (
+    SELECT 
+        p.p_promo_name,
+        COUNT(p.p_promo_sk) AS promotion_count
+    FROM 
+        promotion p
+    JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_name
+    HAVING 
+        COUNT(p.p_promo_sk) > 5
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential,
+        ROW_NUMBER() OVER (ORDER BY c.c_birth_year) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+),
+ReturnsWithDetails AS (
+    SELECT 
+        sr_returned_date_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk
+    HAVING 
+        SUM(sr_return_amt_inc_tax) > 500
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.buy_potential,
+    s.total_sales,
+    fp.promotion_count,
+    r.return_count,
+    r.total_return_amount
+FROM 
+    CustomerInfo ci
+JOIN 
+    SalesCTE s ON ci.c_customer_sk = s.ws_item_sk
+JOIN 
+    FrequentPromotions fp ON s.ws_item_sk = fp.p_promo_name
+LEFT JOIN 
+    ReturnsWithDetails r ON ci.c_customer_sk = r.sr_returned_date_sk
+WHERE 
+    ci.customer_rank <= 100
+ORDER BY 
+    s.total_sales DESC, fp.promotion_count DESC;

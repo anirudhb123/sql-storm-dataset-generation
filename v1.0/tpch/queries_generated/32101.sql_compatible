@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+NationRanking AS (
+    SELECT n.n_name, 
+           RANK() OVER (ORDER BY SUM(p.ps_supplycost * p.ps_availqty) DESC) AS region_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY n.n_name
+),
+OrderMetrics AS (
+    SELECT o.o_orderkey, 
+           o.o_totalprice, 
+           SUM(l.l_quantity) OVER (PARTITION BY o.o_orderkey) AS total_quantity,
+           COUNT(DISTINCT l.l_suppkey) OVER (PARTITION BY o.o_orderkey) AS supplier_count,
+           MAX(l.l_extendedprice) OVER (PARTITION BY o.o_orderkey) AS max_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT sh.s_suppkey) AS active_suppliers,
+       AVG(o.o_totalprice) AS avg_order_price,
+       SUM(o.total_quantity) AS total_order_quantity,
+       SUM(o.supplier_count) AS total_unique_suppliers,
+       CASE 
+           WHEN AVG(sh.s_acctbal) IS NULL THEN 'No data'
+           ELSE CAST(AVG(sh.s_acctbal) AS CHAR) 
+       END AS avg_supplier_account_balance
+FROM NationRanking n
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n_nationkey FROM nation WHERE n_name = n.n_name)
+LEFT JOIN OrderMetrics o ON o.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O')
+GROUP BY n.n_name, n.region_rank
+HAVING COUNT(DISTINCT sh.s_suppkey) > 5
+ORDER BY n.region_rank DESC, active_suppliers DESC;

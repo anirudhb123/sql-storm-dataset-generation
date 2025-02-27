@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY o.o_orderkey
+),
+SuppliersWithOrders AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        os.total_revenue,
+        os.line_item_count,
+        CASE 
+            WHEN os.total_revenue IS NULL THEN 0 
+            ELSE os.total_revenue * 0.1 
+        END AS calculated_tax
+    FROM RankedSuppliers rs
+    LEFT JOIN OrderSummary os ON rs.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderkey % 2 = 0)) LIMIT 1)
+    )
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(COALESCE(s.calculated_tax, 0)) AS total_calculated_tax,
+    AVG(COALESCE(s.line_item_count, 0)) AS avg_line_items,
+    MAX(s.total_revenue) AS max_revenue,
+    STRING_AGG(s.s_name, ', ') AS suppliers
+FROM SuppliersWithOrders s
+JOIN region r ON r.r_regionkey = (SELECT DISTINCT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_suppkey % (SELECT COUNT(*) FROM nation) + 1)
+WHERE s.s_suppkey IS NOT NULL
+GROUP BY r.r_name
+HAVING SUM(s.total_revenue) IS NOT NULL
+ORDER BY r.r_name DESC;

@@ -1,0 +1,52 @@
+WITH UserReputationStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+UserBadgeStats AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostTagStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(DISTINCT T.TagName) AS UniqueTags
+    FROM Posts P
+    CROSS JOIN LATERAL STRING_TO_ARRAY(P.Tags, '<>') AS TagName(T)
+    JOIN Tags T ON T.TagName = TRIM(BOTH '<>' FROM TagName.T)
+    WHERE P.PostTypeId = 1
+    GROUP BY P.OwnerUserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(UR.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UR.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(UR.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(UR.TotalScore, 0) AS TotalScore,
+    COALESCE(UR.TotalBounty, 0) AS TotalBounty,
+    COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+    COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+    COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+    COALESCE(PT.UniqueTags, 0) AS UniqueTags
+FROM Users U
+LEFT JOIN UserReputationStats UR ON U.Id = UR.UserId
+LEFT JOIN UserBadgeStats UB ON U.Id = UB.UserId
+LEFT JOIN PostTagStats PT ON U.Id = PT.OwnerUserId
+ORDER BY U.Reputation DESC
+LIMIT 50;

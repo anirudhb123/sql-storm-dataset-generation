@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_brand,
+        ps.ps_availqty,
+        CASE 
+            WHEN ps.ps_availqty IS NULL THEN 'Out of Stock'
+            ELSE 'In Stock'
+        END AS availability
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 50.00
+)
+SELECT 
+    f.p_name,
+    f.availability,
+    r.s_name,
+    r.s_acctbal,
+    c.c_name,
+    c.o_orderkey,
+    o.revenue
+FROM 
+    FilteredParts f
+LEFT JOIN 
+    RankedSuppliers r ON f.p_partkey = r.ps_partkey AND r.rank = 1
+LEFT JOIN 
+    CustomerOrders c ON c.o_orderkey = o.o_orderkey
+LEFT JOIN 
+    OrderLineItems o ON o.o_orderkey = c.o_orderkey
+WHERE 
+    r.s_acctbal IS NOT NULL 
+    AND (o.revenue IS NULL OR o.revenue > 1000)
+ORDER BY 
+    f.p_retailprice DESC, 
+    r.s_acctbal DESC;

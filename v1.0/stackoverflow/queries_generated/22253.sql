@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.TagBased = 1 THEN 1 ELSE 0 END), 0) AS TagBasedBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6) -- Title/Body/Tags edits
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.Score,
+    pp.ViewCount,
+    ub.DisplayName AS OwnerDisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.LastEditDate,
+    CASE 
+        WHEN pp.Score > 100 THEN 'Highly Voted'
+        WHEN pp.Score BETWEEN 50 AND 100 THEN 'Moderately Voted'
+        ELSE 'Low Votes'
+    END AS VoteDescription,
+    CASE 
+        WHEN pp.Rank = 1 THEN 'Top Post in Category'
+        ELSE 'Regular Post'
+    END AS PostTypeDescription
+FROM 
+    RankedPosts pp
+JOIN 
+    Users ub ON pp.PostId = ub.Id -- Assuming OwnerUserId matches User Id for this join
+JOIN 
+    UserBadges ub ON ub.UserId = pp.OwnerUserId
+JOIN 
+    PostActivity pa ON pp.PostId = pa.PostId
+WHERE 
+    (pp.ViewCount IS NOT NULL OR pa.VoteCount > 0)
+    AND pp.Rank <= 5 
+    AND EXISTS (
+        SELECT 1 
+        FROM Tags t 
+        WHERE t.Id = pp.Id AND t.IsModeratorOnly = 0
+    )
+ORDER BY 
+    pp.Score DESC, pp.CreationDate DESC;
+

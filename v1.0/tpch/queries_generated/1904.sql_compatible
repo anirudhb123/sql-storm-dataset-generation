@@ -1,0 +1,33 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM CustomerOrderStats c
+    WHERE c.total_spent > (SELECT AVG(total_spent) FROM CustomerOrderStats)
+)
+SELECT p.p_name, p.p_retailprice, COALESCE(s.s_name, 'No Supplier') AS supplier_name, 
+       cs.total_orders, cs.total_spent,
+       CASE WHEN l.l_discount > 0.1 THEN 'High Discount' 
+            WHEN l.l_discount BETWEEN 0.05 AND 0.1 THEN 'Moderate Discount' 
+            ELSE 'No Discount' END AS discount_category,
+       DATE_SUB(l.l_shipdate, INTERVAL l.l_orderkey DAY) AS days_to_ship
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN RankedSuppliers s ON l.l_suppkey = s.s_suppkey AND s.rnk = 1
+LEFT JOIN TopCustomers cs ON l.l_orderkey = cs.c_custkey
+WHERE p.p_retailprice > 
+      (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size > 0)
+  AND l.l_shipmode IN ('AIR', 'TRUCK')
+ORDER BY p.p_name, discount_category;

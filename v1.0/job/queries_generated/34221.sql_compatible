@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+      
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        kind_type kt ON ml.link_type_id = kt.id
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE
+        kt.kind IN ('sequel', 'prequel') AND
+        at.production_year >= 2000
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(DATE('2024-10-01 12:34:56')) - mh.production_year ORDER BY mh.depth) AS rank
+    FROM
+        movie_hierarchy mh
+),
+movie_keywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    JOIN
+        aka_title m ON mk.movie_id = m.id
+    GROUP BY
+        m.movie_id
+)
+SELECT
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.rank,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    ARRAY_AGG(DISTINCT cn.name) AS company_names,
+    SUM(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS cast_count,
+    CASE
+        WHEN rm.rank = 1 THEN 'Most Recent Sequel/Prequel'
+        ELSE 'Other'
+    END AS movie_category
+FROM
+    ranked_movies rm
+LEFT JOIN
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN
+    movie_keywords mk ON rm.movie_id = mk.movie_id
+GROUP BY
+    rm.movie_id, rm.title, rm.production_year, rm.rank
+ORDER BY
+    rm.production_year DESC, rm.rank;

@@ -1,0 +1,54 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankByViews,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS LatestPost,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(r.ViewCount, 0) AS TotalViewCount,
+    COALESCE(r.CommentCount, 0) AS TotalCommentCount,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+    SUM(CASE WHEN r.LatestPost = 1 THEN r.ViewCount ELSE 0 END) AS LatestPostViewCount
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts r ON u.Id = r.OwnerUserId
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+GROUP BY 
+    u.Id, u.DisplayName, b.GoldBadges, b.SilverBadges, b.BronzeBadges
+HAVING 
+    COUNT(r.PostId) > 0 OR COALESCE(b.GoldBadges, 0) > 0
+ORDER BY 
+    TotalViewCount DESC;

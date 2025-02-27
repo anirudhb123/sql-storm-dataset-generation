@@ -1,0 +1,65 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 
+           CASE 
+               WHEN ca_city IS NULL THEN 'Unknown City' 
+               ELSE ca_city 
+           END AS resolved_city,
+           0 AS level
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    
+    UNION ALL
+    
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 
+           COALESCE(NULLIF(ca_city, ''), 'Anonymous') AS resolved_city,
+           level + 1
+    FROM customer_address
+    INNER JOIN address_hierarchy ON address_hierarchy.ca_address_sk = customer_address.ca_address_sk
+    WHERE level < 3
+),
+  
+customer_profiles AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           d.cd_gender, d.cd_marital_status, 
+           COALESCE(d.cd_location_type, 'Not Specified') AS location_type,
+           CASE 
+               WHEN d.cd_purchase_estimate > 1000 THEN 'High Value' 
+               ELSE 'Low Value' 
+           END AS customer_value,
+           ROW_NUMBER() OVER (PARTITION BY d.cd_gender ORDER BY d.cd_purchase_estimate DESC) AS gender_rank
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+),
+  
+sales_with_info AS (
+    SELECT ws.ws_ship_customer_sk, ws.ws_sales_price, ws.ws_quantity, 
+           s.s_store_name, DATE(d.d_date) AS sale_date,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_ship_customer_sk ORDER BY ws.ws_sales_price DESC) as sale_rank
+    FROM web_sales ws
+    JOIN store s ON ws.ws_ship_addr_sk = s.s_store_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2023
+),
+  
+total_sales AS (
+    SELECT ws_ship_customer_sk, SUM(ws_sales_price) AS total_amount
+    FROM sales_with_info
+    GROUP BY ws_ship_customer_sk
+)
+
+SELECT cp.c_first_name, cp.c_last_name, cp.location_type,
+       COALESCE(ts.total_amount, 0) AS total_spent,
+       (SELECT COUNT(*) FROM sales_with_info s WHERE s.ws_ship_customer_sk = cp.c_customer_sk) AS total_purchases,
+       COALESCE(ah.resolved_city, 'No Address') AS customer_city,
+       CASE 
+           WHEN total_purchases > 10 OR total_spent > 5000 THEN 'Premium'
+           WHEN total_purchases BETWEEN 5 AND 10 OR total_spent BETWEEN 2000 AND 5000 THEN 'Standard'
+           ELSE 'Basic' 
+       END AS customer_tier
+FROM customer_profiles cp
+LEFT JOIN total_sales ts ON cp.c_customer_sk = ts.ws_ship_customer_sk
+LEFT JOIN address_hierarchy ah ON cp.c_customer_sk = ah.ca_address_sk
+WHERE cp.gender_rank = 1 
+AND (cp.location_type IS NULL OR cp.location_type != 'Ghost Town')
+ORDER BY total_spent DESC;

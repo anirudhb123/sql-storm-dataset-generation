@@ -1,0 +1,60 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs.bill_customer_sk,
+        cs.item_sk,
+        cs_ext_sales_price,
+        RANK() OVER (PARTITION BY cs.bill_customer_sk ORDER BY cs_ext_sales_price DESC) AS sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY cs.bill_customer_sk ORDER BY cs_ext_sales_price DESC) AS row_num
+    FROM 
+        catalog_sales cs
+    WHERE 
+        cs.bill_customer_sk IS NOT NULL
+),
+MaxSales AS (
+    SELECT 
+        bill_customer_sk,
+        MAX(cs_ext_sales_price) AS max_sale
+    FROM 
+        RankedSales
+    GROUP BY 
+        bill_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        SUM(1) AS demographics_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender
+)
+SELECT 
+    c.c_customer_id,
+    COALESCE(cd.cd_gender, 'N/A') AS gender,
+    SUM(CASE WHEN rs.sales_rank = 1 THEN rs.cs_ext_sales_price ELSE 0 END) AS top_sales,
+    AVG(m.max_sale) AS avg_max_sale,
+    COUNT(DISTINCT rs.item_sk) AS unique_items_sold,
+    STRING_AGG(DISTINCT cd.customer_count::text, ', ') AS demographic_info
+FROM 
+    RankedSales rs
+JOIN 
+    customer c ON rs.bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    MaxSales m ON rs.bill_customer_sk = m.bill_customer_sk
+WHERE 
+    (m.max_sale IS NOT NULL AND m.max_sale > 100) 
+    OR (cd.d_employed_count IS NULL AND cd.age BETWEEN 25 AND 35)
+GROUP BY 
+    c.c_customer_id, cd.cd_gender 
+HAVING 
+    COUNT(DISTINCT rs.item_sk) > 5
+ORDER BY 
+    top_sales DESC
+LIMIT 50 OFFSET 10;

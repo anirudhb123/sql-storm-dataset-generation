@@ -1,0 +1,38 @@
+WITH RECURSIVE category_tree AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, 0 AS level
+    FROM part
+    WHERE p_size < 20
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, ct.level + 1
+    FROM part p
+    INNER JOIN category_tree ct ON p.p_size = ct.p_size + 1
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_totalprice > 1000
+),
+supplier_part AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty,
+           (ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+),
+nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey,
+           SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, s.s_suppkey
+)
+SELECT ct.p_name, ct.p_retailprice, ct.level,
+       n.n_name AS supplier_nation, ns.total_account_balance,
+       ro.o_orderkey, ro.o_orderdate
+FROM category_tree ct
+LEFT JOIN nation_supplier ns ON ct.p_partkey = ns.s_suppkey
+JOIN ranked_orders ro ON ns.s_suppkey = ro.o_orderkey
+WHERE ct.p_retailprice BETWEEN 50 AND 500
+  AND (ns.total_account_balance IS NOT NULL OR ns.total_account_balance > 1000)
+ORDER BY ct.level, ro.o_orderdate DESC
+LIMIT 10;

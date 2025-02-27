@@ -1,0 +1,55 @@
+WITH FilteredPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+RankedPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY Score DESC, UpVotes DESC) AS ScoreRank
+    FROM 
+        FilteredPosts
+),
+PostDetails AS (
+    SELECT 
+        rp.*, 
+        u.DisplayName AS OwnerDisplayName,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Badges b WHERE b.UserId = u.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.OwnerDisplayName,
+    pd.CommentCount,
+    pd.BadgeCount,
+    CASE 
+        WHEN pd.Score > 10 THEN 'High Scoring Post'
+        WHEN pd.Score BETWEEN 5 AND 10 THEN 'Moderate Scoring Post'
+        ELSE 'Low Scoring Post'
+    END AS PostCategory
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ScoreRank <= 100
+ORDER BY 
+    pd.ScoreRank
+LIMIT 50;

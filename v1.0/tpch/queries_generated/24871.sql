@@ -1,0 +1,59 @@
+WITH RankedCustoms AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal, 
+        c.c_mktsegment,
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY c.c_acctbal DESC) AS rn
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_mktsegment IS NOT NULL
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(ps.ps_availqty, 0) AS available_quantity,
+        ps.ps_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON p.p_partkey = ps.ps_partkey
+),
+EnhancedSalesData AS (
+    SELECT 
+        lo.o_orderkey,
+        SUM(CASE WHEN lo.l_discount > 0.05 THEN lo.l_extendedprice * (1 - lo.l_discount) ELSE 0 END) AS discounted_sales,
+        COUNT(*) FILTER (WHERE lo.l_returnflag = 'R') AS return_count
+    FROM HighValueOrders lo
+    JOIN lineitem li ON lo.o_orderkey = li.l_orderkey
+    GROUP BY lo.o_orderkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT cc.c_custkey) AS active_customers,
+    AVG(e.discounted_sales) AS avg_discounted_sales,
+    SUM(s.available_quantity) AS total_available_quantity
+FROM RankedCustoms cc
+LEFT JOIN region r ON cc.c_custkey IN (
+    SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (
+        SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = r.r_regionkey
+    )
+)
+JOIN EnhancedSalesData e ON cc.c_custkey = e.o_orderkey
+JOIN SupplierPartDetails s ON cc.c_custkey = s.s_suppkey
+WHERE cc.rn <= 10 AND cc.c_acctbal > 0
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT cc.c_custkey) > 5
+ORDER BY r.r_name ASC
+LIMIT 20;

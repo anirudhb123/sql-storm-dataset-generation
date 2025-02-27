@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_quantity,
+        i.i_item_desc,
+        i.i_brand
+    FROM 
+        RankedSales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.rank_sales = 1
+    AND 
+        i.i_current_price IS NOT NULL 
+    AND 
+        (i.i_brand LIKE 'Brand A%' OR i.i_brand LIKE 'Brand B%')
+),
+CustomerCount AS (
+    SELECT 
+        ca.ca_country,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    WHERE 
+        ca.ca_country IS NOT NULL
+    GROUP BY 
+        ca.ca_country
+),
+SalesData AS (
+    SELECT 
+        ca.ca_country,
+        fs.ws_item_sk,
+        fs.total_quantity,
+        cc.customer_count
+    FROM 
+        FilteredSales fs
+    LEFT JOIN 
+        customer_address ca ON fs.ws_item_sk IN (SELECT sr.sr_item_sk FROM store_returns sr)
+    JOIN 
+        CustomerCount cc ON cc.ca_country = ca.ca_country
+)
+SELECT 
+    sd.ca_country,
+    SUM(sd.total_quantity * 0.1) AS estimated_revenue,
+    MAX(sd.customer_count) AS unique_customers
+FROM 
+    SalesData sd
+WHERE 
+    sd.total_quantity > 50
+GROUP BY 
+    sd.ca_country
+HAVING 
+    SUM(sd.total_quantity) > 2000 
+    OR sd.ca_country IS NULL
+ORDER BY 
+    estimated_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

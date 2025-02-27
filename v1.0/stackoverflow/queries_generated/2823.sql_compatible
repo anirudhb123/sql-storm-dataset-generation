@@ -1,0 +1,59 @@
+
+WITH UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViews,
+        SUM(COALESCE(p.CommentCount, 0)) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(STRING_AGG(DISTINCT p.Tags, ','), ',')) AS TagName,
+        COUNT(DISTINCT p.Id) AS TagCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        UNNEST(string_to_array(STRING_AGG(DISTINCT p.Tags, ','), ','))
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        us.PostCount,
+        us.TotalScore,
+        us.AvgViews,
+        us.TotalComments,
+        RANK() OVER (ORDER BY us.TotalScore DESC) AS RankScore,
+        RANK() OVER (ORDER BY us.PostCount DESC) AS RankPosts
+    FROM 
+        UserPostStatistics us
+    JOIN 
+        Users u ON us.UserId = u.Id
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.TotalScore,
+    tu.AvgViews,
+    tu.TotalComments,
+    COALESCE(pt.TagName, 'No Tags') AS PopularTag,
+    COALESCE(pt.TagCount, 0) AS TagCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    PopularTags pt ON pt.TagName IS NOT NULL 
+WHERE 
+    tu.RankScore <= 10 OR tu.RankPosts <= 10
+ORDER BY 
+    tu.TotalScore DESC, 
+    tu.PostCount DESC;

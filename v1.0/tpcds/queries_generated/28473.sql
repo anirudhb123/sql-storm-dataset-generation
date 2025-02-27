@@ -1,0 +1,62 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca_state,
+        ca_city,
+        COUNT(DISTINCT ca_address_sk) AS unique_address_count,
+        STRING_AGG(ca_street_number || ' ' || ca_street_name || ' ' || ca_street_type, '; ') AS full_address_list
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state, ca_city
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        COUNT(*) AS demographic_count, 
+        STRING_AGG(CONCAT(cd_gender, ' ', cd_marital_status), ', ') AS gender_marital_list
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender, cd_marital_status
+),
+SalesData AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_date_sk
+),
+FinalResults AS (
+    SELECT 
+        d.d_date AS sales_date,
+        ad.ca_state,
+        ad.ca_city,
+        ad.unique_address_count,
+        cd.gender_marital_list,
+        sd.total_sales,
+        sd.order_count
+    FROM 
+        date_dim d
+    LEFT JOIN AddressDetails ad ON d.d_date_sk = sd.ws_ship_date_sk
+    LEFT JOIN CustomerDemographics cd ON 1=1
+    LEFT JOIN SalesData sd ON d.d_date_sk = sd.ws_ship_date_sk
+    WHERE 
+        d.d_year = 2023
+)
+SELECT 
+    sales_date,
+    ca_state,
+    ca_city,
+    unique_address_count,
+    gender_marital_list,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(order_count, 0) AS order_count
+FROM 
+    FinalResults
+ORDER BY 
+    sales_date, ca_state, ca_city;

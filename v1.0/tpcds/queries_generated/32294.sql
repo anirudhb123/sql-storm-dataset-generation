@@ -1,0 +1,40 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_addr_sk,
+           0 AS level
+    FROM customer
+    WHERE c_customer_sk = (SELECT MIN(c_customer_sk) FROM customer)
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk,
+           ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+    WHERE ch.level < 5
+), AddressDetails AS (
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country,
+           COALESCE(SUM(ws.ws_total_sales), 0) AS total_sales,
+           (SELECT COUNT(DISTINCT c.c_customer_sk) FROM customer c WHERE c.c_current_addr_sk = ca.ca_address_sk) AS customer_count
+    FROM customer_address ca
+    LEFT JOIN web_sales ws ON ca.ca_address_sk = ws.ws_bill_addr_sk
+    GROUP BY ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country
+), DemographicStats AS (
+    SELECT cd.cd_gender, COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+           AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender
+)
+SELECT ch.c_first_name, ch.c_last_name, ad.ca_city, ad.ca_state,
+       ad.total_sales, ds.cd_gender, ds.total_customers, ds.avg_purchase_estimate
+FROM CustomerHierarchy ch
+JOIN AddressDetails ad ON ch.c_current_addr_sk = ad.ca_address_sk
+LEFT JOIN DemographicStats ds ON ds.cd_gender = (
+    SELECT cd.cd_gender
+    FROM customer_demographics cd
+    WHERE cd.cd_demo_sk = ch.c_current_cdemo_sk
+)
+WHERE ad.total_sales > 1000 AND ds.total_customers > 0
+ORDER BY ad.total_sales DESC, ch.c_last_name ASC
+LIMIT 100;

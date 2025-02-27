@@ -1,0 +1,57 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actors
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        complete_cast AS cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info AS c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name AS ak ON c.person_id = ak.person_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id
+),
+keyword_details AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+role_count AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT role_id) AS total_roles
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    COALESCE(md.production_year, 'Unknown') AS production_year,
+    COALESCE(md.cast_count, 0) AS total_cast,
+    COALESCE(kd.keywords, 'None') AS movie_keywords,
+    COALESCE(rc.total_roles, 0) AS role_types
+FROM 
+    movie_details AS md
+FULL OUTER JOIN 
+    keyword_details AS kd ON md.movie_id = kd.movie_id
+FULL OUTER JOIN 
+    role_count AS rc ON md.movie_id = rc.movie_id
+WHERE 
+    md.cast_count IS NOT NULL OR kd.keywords IS NOT NULL OR rc.total_roles IS NOT NULL
+ORDER BY 
+    md.production_year DESC NULLS LAST;

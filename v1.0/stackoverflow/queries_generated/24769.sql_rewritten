@@ -1,0 +1,92 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties,
+        SUM(COALESCE(VoteScore.Score, 0)) AS TotalVoteScore
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS Score
+        FROM Votes
+        GROUP BY PostId
+    ) AS VoteScore ON VoteScore.PostId = P.Id
+    GROUP BY U.Id, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes
+),
+CloseReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CRT.Name, ', ' ORDER BY PH.CreationDate DESC) AS CloseReasons
+    FROM PostHistory PH
+    JOIN CloseReasonTypes CRT ON PH.Comment::INT = CRT.Id
+    WHERE PH.PostHistoryTypeId = 10 
+    GROUP BY PH.PostId
+),
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(CR.CloseReasons, 'No Close Reasons') AS CloseReasons,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN CloseReasons CR ON P.Id = CR.PostId
+    WHERE P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.CreationDate, CR.CloseReasons
+),
+PostAnalytics AS (
+    SELECT 
+        TS,
+        U.Id AS UserId,
+        UserName,
+        PostId,
+        COUNT(*) AS InteractionCount,
+        AVG(UserRating) AS AvgUserRating
+    FROM (
+        SELECT 
+            'User' AS TS,
+            U.Id,
+            U.DisplayName AS UserName,
+            NULL::INT AS PostId,
+            U.Reputation AS UserRating
+        FROM Users U
+        UNION ALL
+        SELECT 
+            'Post' AS TS,
+            U.Id, 
+            U.DisplayName AS UserName,
+            P.Id AS PostId,
+            P.Score AS UserRating
+        FROM Posts P
+        JOIN Users U ON P.OwnerUserId = U.Id
+    ) AS UserPostInteraction
+    GROUP BY TS, UserId, UserName, PostId
+)
+
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalBounties,
+    T.PostId,
+    T.Title,
+    T.CreationDate,
+    T.CommentCount,
+    P.TotalVoteScore,
+    P.AvgUserRating
+FROM UserStats U
+JOIN TopPosts T ON U.Id = T.UserId
+LEFT JOIN PostAnalytics P ON T.PostId = P.PostId
+WHERE U.ReputationRank <= 10 
+  AND T.CommentCount > 0 
+  AND (T.CloseReasons != 'No Close Reasons' OR T.CloseReasons IS NOT NULL)
+ORDER BY U.Reputation DESC, T.CommentCount DESC;

@@ -1,0 +1,70 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_container IN (SELECT DISTINCT p_container FROM part WHERE p_retailprice NULLIF(p_retailprice, 0) IS NOT NULL)
+),
+SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(o.o_orderkey) AS order_count,
+        c.c_mktsegment
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_mktsegment
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(CASE 
+                WHEN l.l_returnflag = 'R' AND l.l_discount > 0 
+                THEN l.l_extendedprice * (1 - l.l_discount) 
+                ELSE 0 END) AS return_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+
+SELECT 
+    p.p_name,
+    s.total_supplycost,
+    c.total_orders,
+    f.return_value,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.total_supplycost DESC) AS supply_rank
+FROM 
+    RankedParts p
+LEFT JOIN 
+    SupplierAggregates s ON s.part_count > 3 AND s.total_supplycost IS NOT NULL
+LEFT JOIN 
+    CustomerOrders c ON c.total_orders > 100
+FULL OUTER JOIN 
+    FilteredLineItems f ON f.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+WHERE 
+    (s.total_supplycost IS NOT NULL OR c.total_orders IS NOT NULL)
+    AND (p.price_rank BETWEEN 1 AND 5 OR p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < 10))
+ORDER BY 
+    supply_rank DESC, c.total_orders ASC NULLS LAST;

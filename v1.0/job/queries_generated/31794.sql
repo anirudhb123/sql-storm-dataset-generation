@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mh.parent_movie_id, 0) AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    LEFT JOIN 
+        aka_title mh ON ml.linked_movie_id = mh.id
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mh.parent_movie_id, 0),
+        level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.linked_movie_id = mh.movie_id
+    WHERE 
+        mt.production_year >= 2000
+),
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.parent_movie_id,
+        RANK() OVER (PARTITION BY mh.parent_movie_id ORDER BY mh.production_year DESC) AS year_rank
+    FROM 
+        movie_hierarchy mh
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+actor_roles AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+)
+SELECT 
+    m.title,
+    m.production_year,
+    m.parent_movie_id,
+    m.year_rank,
+    coalesce(mk.keywords, 'No Keywords') AS keywords,
+    coalesce(ar.actor_count, 0) AS actor_count,
+    coalesce(ar.roles, 'No Roles') AS roles
+FROM 
+    ranked_movies m
+LEFT JOIN 
+    movie_keywords mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    actor_roles ar ON m.movie_id = ar.movie_id
+WHERE 
+    m.year_rank <= 3
+ORDER BY 
+    m.production_year DESC, m.year_rank;
+
+This SQL query creates a recursive common table expression (CTE) for `movie_hierarchy` to establish parent-child relationships among movies linked together. It calculates ranks for movies based on release year using window functions and gathers relevant keywords for each movie, counting actors and their roles. The final selection returns only the top three ranked movies for each year, ordered by production year, producing a rich dataset for performance benchmarking.

@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ship_date_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_sk, ws_item_sk
+),
+SalesDetails AS (
+    SELECT 
+        ws.web_site_id,
+        i.item_desc,
+        rs.total_sales,
+        COALESCE(SUM(sr.return_quantity), 0) AS total_returns,
+        COUNT(DISTINCT wr.wr_order_number) FILTER (WHERE wr.return_quantity IS NOT NULL) AS total_web_returns
+    FROM 
+        RankedSales rs
+    JOIN 
+        web_site ws ON rs.web_site_sk = ws.web_site_sk
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        store_returns sr ON sr.sr_item_sk = rs.ws_item_sk
+    LEFT JOIN 
+        web_returns wr ON wr.wr_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.rank <= 10 AND 
+        i.i_current_price IS NOT NULL
+    GROUP BY 
+        ws.web_site_id, i.item_desc, rs.total_sales
+)
+SELECT 
+    web_site_id,
+    item_desc,
+    total_sales,
+    total_returns,
+    (total_sales / NULLIF(total_returns, 0)) AS sales_to_returns_ratio,
+    ROUND(CAST(total_sales AS DECIMAL(10,2)) * 0.1, 2) AS ten_percent_of_sales
+FROM 
+    SalesDetails
+WHERE 
+    total_sales > 1000 OR 
+    (total_returns > 10 AND total_sales < 5000)
+ORDER BY 
+    sales_to_returns_ratio DESC,
+    total_sales DESC
+FETCH FIRST 5 ROWS ONLY;

@@ -1,0 +1,59 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.id) AS title_rank
+    FROM aka_title at
+    WHERE at.production_year IS NOT NULL
+),
+MovieRoles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(DISTINCT ci.person_id) AS role_count
+    FROM cast_info ci
+    JOIN role_type rt ON ci.role_id = rt.id
+    GROUP BY ci.movie_id, rt.role
+),
+CompanyKeywords AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM movie_companies mc
+    JOIN movie_keyword mk ON mc.movie_id = mk.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mc.movie_id
+),
+MovieInformation AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'box office' THEN mi.info ELSE NULL END) AS box_office,
+        COUNT(mi.id) AS info_count
+    FROM movie_info mi
+    JOIN info_type it ON mi.info_type_id = it.id
+    GROUP BY mi.movie_id
+),
+OuterJoinExample AS (
+    SELECT
+        title.title,
+        title.production_year,
+        coalesce(keywords, 'No keywords') AS keywords,
+        COALESCE(box_office, 'N/A') AS box_office,
+        (SELECT COUNT(*) FROM complete_cast cc WHERE cc.movie_id = title.id) AS complete_cast_count
+    FROM title
+    LEFT JOIN CompanyKeywords ck ON title.id = ck.movie_id
+    LEFT JOIN MovieInformation mi ON title.id = mi.movie_id
+)
+
+SELECT 
+    r.production_year,
+    COUNT(DISTINCT CASE WHEN r.title_rank <= 5 THEN r.title END) AS top_5_titles,
+    SUM(mr.role_count) AS total_roles,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('title', ot.title, 'box_office', ot.box_office, 'keywords', ot.keywords)) AS title_details
+FROM RankedTitles r
+JOIN MovieRoles mr ON r.id = mr.movie_id
+JOIN OuterJoinExample ot ON r.title = ot.title
+WHERE r.operation_year = 2021 AND mr.role_count > 2
+GROUP BY r.production_year
+ORDER BY r.production_year DESC
+LIMIT 10;

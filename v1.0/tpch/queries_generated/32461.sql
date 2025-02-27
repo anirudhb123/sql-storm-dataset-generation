@@ -1,0 +1,40 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT ps_suppkey FROM partsupp)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    COALESCE(sp.s_name, 'Unknown Supplier') AS supplier_name,
+    CASE 
+        WHEN p.p_size > 50 THEN 'Large'
+        WHEN p.p_size BETWEEN 20 AND 50 THEN 'Medium'
+        ELSE 'Small'
+    END AS size_category,
+    r.r_name AS region_name
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier sp ON ps.ps_suppkey = sp.s_suppkey
+LEFT JOIN nation n ON sp.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE l.l_shipdate >= '2022-01-01' 
+AND l.l_shipdate < '2023-01-01'
+GROUP BY p.p_partkey, p.p_name, sp.s_name, r.r_name
+HAVING total_revenue > (SELECT AVG(total_revenue) 
+                         FROM (SELECT SUM(l_extendedprice * (1 - l_discount)) AS total_revenue 
+                               FROM lineitem l 
+                               WHERE l.l_shipdate >= '2022-01-01' 
+                               AND l.l_shipdate < '2023-01-01' 
+                               GROUP BY l.l_partkey) AS avg_revenue)
+ORDER BY total_revenue DESC
+LIMIT 10;

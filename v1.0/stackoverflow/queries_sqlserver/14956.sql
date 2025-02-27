@@ -1,0 +1,41 @@
+
+SELECT TOP 100
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    P.Id AS PostId,
+    P.Title,
+    P.CreationDate AS PostCreationDate,
+    P.Score,
+    P.ViewCount,
+    C.Id AS CommentId,
+    C.Text AS CommentText,
+    C.CreationDate AS CommentCreationDate,
+    PH.CreationDate AS PostHistoryDate,
+    PHT.Name AS PostHistoryType
+FROM 
+    Users U
+JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Comments C ON P.Id = C.PostId
+LEFT JOIN 
+    PostHistory PH ON P.Id = PH.PostId
+LEFT JOIN 
+    PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+GROUP BY 
+    U.Id,
+    U.DisplayName,
+    U.Reputation,
+    P.Id,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    C.Id,
+    C.Text,
+    C.CreationDate,
+    PH.CreationDate,
+    PHT.Name
+ORDER BY 
+    P.CreationDate DESC;

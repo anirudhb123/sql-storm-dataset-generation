@@ -1,0 +1,88 @@
+WITH RECURSIVE PriorOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_custkey,
+        c.c_name,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+),
+SuppliersWithDiscount AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty * ps.ps_supplycost) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS SupplierRank
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey
+    FROM 
+        supplier s
+    JOIN 
+        SuppliersWithDiscount sd ON s.s_suppkey = sd.ps_suppkey
+    WHERE 
+        sd.SupplierRank <= 5
+),
+QuantityDiscounts AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_quantity * (1 - l.l_discount)) AS NetQuantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2024-01-01' AND l.l_shipdate < '2024-12-31'
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT po.o_orderkey) AS TotalOrders,
+    SUM(qd.NetQuantity) AS TotalNetQuantity,
+    AVG(s.s_acctbal) AS AverageAccountBalance,
+    MAX(p.p_retailprice) AS MaxRetailPrice
+FROM 
+    PriorOrders po
+JOIN 
+    customer c ON po.c_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    QuantityDiscounts qd ON po.o_orderkey = qd.l_orderkey
+LEFT JOIN 
+    TopSuppliers s ON po.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey IN (
+            SELECT ps.ps_partkey 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey
+        )
+    )
+JOIN 
+    part p ON p.p_partkey IN (
+        SELECT l.l_partkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = po.o_orderkey
+    )
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(qd.NetQuantity) > 1000 OR COUNT(DISTINCT po.o_orderkey) > 50
+ORDER BY 
+    TotalOrders DESC, TotalNetQuantity DESC;

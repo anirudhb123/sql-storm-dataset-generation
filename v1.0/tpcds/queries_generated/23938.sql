@@ -1,0 +1,71 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.return_time_sk,
+        sr.item_sk,
+        sr.customer_sk,
+        sr.return_quantity,
+        sr.return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr.item_sk ORDER BY sr.return_amt DESC) AS rnk
+    FROM store_returns sr
+    WHERE sr.return_quantity > 0
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.customer_sk,
+        cd.gender,
+        cd.marital_status,
+        SUM(CASE WHEN cd.purchase_estimate IS NULL THEN 0 ELSE cd.purchase_estimate END) AS total_purchase_estimate
+    FROM customer_demographics cd
+    GROUP BY cd.customer_sk, cd.gender, cd.marital_status
+),
+CustomerInfo AS (
+    SELECT 
+        c.customer_sk,
+        c.first_name,
+        c.last_name,
+        ca.city,
+        ca.state,
+        cd.total_purchase_estimate
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.current_addr_sk = ca.ca_address_sk
+    JOIN CustomerDemographics cd ON c.c_customer_sk = cd.customer_sk
+    WHERE (cd.total_purchase_estimate IS NULL OR cd.total_purchase_estimate > 100)
+),
+SalesData AS (
+    SELECT 
+        ws.item_sk,
+        SUM(ws.net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.item_sk
+),
+ReturnsSummary AS (
+    SELECT 
+        rr.item_sk,
+        SUM(rr.return_quantity) AS total_return_quantity,
+        SUM(rr.return_amt) AS total_return_amount
+    FROM RankedReturns rr
+    WHERE rr.rnk = 1
+    GROUP BY rr.item_sk
+)
+SELECT 
+    ci.first_name,
+    ci.last_name,
+    ci.city,
+    ci.state,
+    COALESCE(sd.total_net_profit, 0) AS total_net_profit,
+    COALESCE(rs.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amount,
+    (COALESCE(sd.total_net_profit, 0) - COALESCE(rs.total_return_amount, 0)) AS net_profit_after_returns
+FROM CustomerInfo ci
+LEFT JOIN SalesData sd ON ci.customer_sk = sd.item_sk
+LEFT JOIN ReturnsSummary rs ON sd.item_sk = rs.item_sk
+WHERE ci.city IS NOT NULL 
+  AND ci.state IS NOT NULL 
+  AND (LOWER(ci.first_name) LIKE '%a%' OR ci.last_name IS NULL)
+ORDER BY net_profit_after_returns DESC
+LIMIT 50
+OFFSET 10;

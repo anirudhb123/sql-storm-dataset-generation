@@ -1,0 +1,89 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        a.name IS NOT NULL
+),
+CompanyMovies AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        co.name IS NOT NULL AND ct.kind IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, ', ') AS info_summary
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        am.actor_name,
+        cm.company_name,
+        cm.company_type,
+        mi.info_summary,
+        COALESCE(CAST(am.actor_rank AS VARCHAR), 'No Actor') AS actor_rank,
+        CASE 
+            WHEN YEAR(rm.production_year) % 2 = 0 THEN 'Even Year'
+            ELSE 'Odd Year'
+        END AS year_type
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorMovies am ON rm.movie_id = am.movie_id
+    LEFT JOIN 
+        CompanyMovies cm ON rm.movie_id = cm.movie_id
+    LEFT JOIN 
+        MovieInfo mi ON rm.movie_id = mi.movie_id
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    STRING_AGG(DISTINCT actor_name, ', ') AS actors,
+    STRING_AGG(DISTINCT company_name || ' (' || company_type || ')', ', ') AS companies,
+    info_summary,
+    actor_rank,
+    year_type
+FROM 
+    FinalResults
+GROUP BY 
+    movie_id, title, production_year, actor_rank, year_type
+HAVING 
+    COUNT(DISTINCT actor_name) > 1 OR COUNT(DISTINCT company_name) > 1
+ORDER BY 
+    production_year DESC, movie_id ASC
+LIMIT 100;

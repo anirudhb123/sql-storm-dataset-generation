@@ -1,0 +1,76 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s_stats.total_supplycost,
+        RANK() OVER (ORDER BY s_stats.total_supplycost DESC) AS rank
+    FROM 
+        SupplierStats s_stats
+    JOIN 
+        supplier s ON s_stats.s_suppkey = s.s_suppkey
+    WHERE 
+        s_stats.part_count > 5
+),
+OrderLineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS line_item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(ol.total_revenue) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderLineItemStats ol ON ol.l_orderkey = o.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    r.r_name,
+    SUM(co.order_count) AS total_orders,
+    AVG(co.total_spent) AS avg_spent,
+    STRING_AGG(DISTINCT ts.s_name, ', ') AS top_suppliers
+FROM 
+    region r
+JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+JOIN 
+    CustomerOrders co ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.s_suppkey = ANY (SELECT ps.ps_suppkey FROM partsupp ps 
+                                            JOIN lineitem l ON ps.ps_partkey = l.l_partkey 
+                                            WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey))
+WHERE 
+    co.total_spent IS NOT NULL
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(co.c_custkey) > 10
+ORDER BY 
+    avg_spent DESC;

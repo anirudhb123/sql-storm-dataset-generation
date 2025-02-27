@@ -1,0 +1,78 @@
+WITH RecursiveActors AS (
+    SELECT 
+        ak.name AS actor_name, 
+        ak.person_id, 
+        ct.kind AS role_type,
+        ct.id AS role_id,
+        ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        comp_cast_type ct ON ci.role_id = ct.id
+),
+MoviesWithActors AS (
+    SELECT 
+        at.title AS movie_title,
+        at.production_year,
+        ra.actor_name,
+        ra.role_type,
+        DENSE_RANK() OVER (PARTITION BY at.id ORDER BY ra.actor_rank) AS actor_position
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN 
+        RecursiveActors ra ON ci.person_id = ra.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mw.movie_id,
+        mw.movie_title,
+        mw.production_year,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mwk
+    JOIN 
+        aka_title mw ON mwk.movie_id = mw.movie_id
+    JOIN 
+        keyword kw ON mwk.keyword_id = kw.id
+    GROUP BY 
+        mw.movie_id, mw.movie_title, mw.production_year
+),
+SelectedMovies AS (
+    SELECT 
+        m.movie_title,
+        m.production_year,
+        COUNT(DISTINCT ra.actor_name) AS total_actors,
+        m.keywords
+    FROM 
+        MoviesWithActors m
+    JOIN 
+        MoviesWithKeywords mk ON m.movie_title = mk.movie_title
+    WHERE 
+        (m.role_type = 'main' OR m.role_type IS NULL)
+    GROUP BY 
+        m.movie_title, m.production_year, m.keywords
+    HAVING 
+        COUNT(DISTINCT ra.actor_name) > 3
+)
+SELECT 
+    movie_title,
+    production_year,
+    keywords,
+    total_actors,
+    CASE 
+        WHEN production_year < 2000 THEN 'Classic'
+        ELSE 'Modern' 
+    END AS era,
+    COALESCE(NULLIF(total_actors, 0), 1) AS adjusted_actor_count
+FROM 
+    SelectedMovies
+ORDER BY 
+    production_year DESC, total_actors DESC;
+
+This query involves recursive CTEs to gather actors' details and their roles, joins with movie keywords, filtering conditions with `HAVING`, and demonstrates various SQL constructs while including corner cases like handling NULL values. Subqueries with aggregations and string concatenation showcase broader capabilities in manipulating relational data.

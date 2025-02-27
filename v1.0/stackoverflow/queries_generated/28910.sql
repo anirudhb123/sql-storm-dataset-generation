@@ -1,0 +1,76 @@
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TagName
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstCloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.QuestionCount,
+    tc.AnswerCount,
+    ur.UserId,
+    ur.Reputation,
+    ur.PostCount AS UserPostCount,
+    ur.QuestionCount AS UserQuestionCount,
+    ur.AnswerCount AS UserAnswerCount,
+    phs.FirstCloseDate,
+    phs.ReopenCount,
+    phs.DeleteCount
+FROM 
+    TagCounts tc
+JOIN 
+    PostLinks pl ON EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.Id = pl.PostId AND pl.RelatedPostId IN (
+            SELECT Id FROM Posts WHERE Tags LIKE '%' || tc.TagName || '%' 
+        )
+    )
+JOIN 
+    UserReputation ur ON EXISTS (
+        SELECT 1 
+        FROM Posts p 
+        WHERE p.OwnerUserId = ur.UserId AND p.Tags LIKE '%' || tc.TagName || '%'
+    )
+LEFT JOIN 
+    PostHistorySummary phs ON phs.PostId = pl.PostId
+WHERE 
+    tc.PostCount > 5
+ORDER BY 
+    tc.PostCount DESC, ur.Reputation DESC;

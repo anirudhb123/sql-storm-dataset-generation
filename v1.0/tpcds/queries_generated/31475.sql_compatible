@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_net_profit) DESC) AS rn
+    FROM store_sales
+    WHERE ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY s_store_sk
+),
+ReturnCTE AS (
+    SELECT 
+        sr_store_sk,
+        SUM(sr_return_amt) AS total_returns,
+        COUNT(sr_return_ticket_number) AS total_return_count
+    FROM store_returns
+    GROUP BY sr_store_sk
+),
+ProfitLoss AS (
+    SELECT 
+        s.s_store_sk,
+        COALESCE(c.total_profit, 0) AS total_profit,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        (COALESCE(c.total_profit, 0) - COALESCE(r.total_returns, 0)) AS net_profit_loss
+    FROM store s
+    LEFT JOIN SalesCTE c ON s.s_store_sk = c.s_store_sk
+    LEFT JOIN ReturnCTE r ON s.s_store_sk = r.sr_store_sk
+)
+SELECT 
+    w.w_warehouse_id,
+    s.s_store_name,
+    p.total_profit,
+    p.total_returns,
+    p.net_profit_loss,
+    CASE 
+        WHEN p.net_profit_loss > 0 THEN 'Profit'
+        WHEN p.net_profit_loss < 0 THEN 'Loss'
+        ELSE 'Break-Even'
+    END AS financial_state
+FROM ProfitLoss p
+JOIN warehouse w ON p.s_store_sk = w.w_warehouse_sk
+JOIN store s ON p.s_store_sk = s.s_store_sk
+WHERE p.net_profit_loss != 0
+ORDER BY p.net_profit_loss DESC
+LIMIT 10;

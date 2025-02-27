@@ -1,0 +1,79 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+KeywordCounts AS (
+    SELECT 
+        m.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithKeywords AS (
+    SELECT 
+        r.title,
+        r.production_year,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        COALESCE(cr.roles, 'No roles') AS roles
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        KeywordCounts kc ON r.movie_id = kc.movie_id
+    LEFT JOIN 
+        CastRoles cr ON r.movie_id = cr.movie_id
+    WHERE 
+        r.year_rank <= 10
+),
+FinalResults AS (
+    SELECT 
+        mwk.title,
+        mwk.production_year,
+        mwk.keyword_count,
+        mwk.roles,
+        CASE 
+            WHEN mwk.keyword_count > 5 THEN 'Popular'
+            WHEN mwk.keyword_count <= 5 AND mwk.keyword_count > 0 THEN 'Moderate'
+            ELSE 'Not Popular' 
+        END AS popularity,
+        CASE 
+            WHEN mwk.roles LIKE '%Lead%' THEN 'Lead Cast'
+            ELSE 'Supporting Cast' 
+        END AS cast_type
+    FROM 
+        MoviesWithKeywords mwk
+)
+SELECT 
+    fr.production_year,
+    COUNT(CASE WHEN fr.popularity = 'Popular' THEN 1 END) AS popular_count,
+    COUNT(CASE WHEN fr.popularity = 'Moderate' THEN 1 END) AS moderate_count,
+    COUNT(CASE WHEN fr.popularity = 'Not Popular' THEN 1 END) AS not_popular_count,
+    STRING_AGG(fr.title, '; ') AS movie_titles
+FROM 
+    FinalResults fr
+GROUP BY 
+    fr.production_year
+ORDER BY 
+    fr.production_year DESC;

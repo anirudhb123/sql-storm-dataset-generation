@@ -1,0 +1,66 @@
+WITH UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+    FROM Votes v
+    GROUP BY v.UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Score,
+        p.Title,
+        COALESCE(ph.Comment, 'No comments') AS PostHistoryComment,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 4 -- Tracking title edits
+),
+BadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+UserPerformance AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        uc.TotalUpVotes,
+        uc.TotalDownVotes,
+        COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+        SUM(CASE WHEN pd.Score > 10 THEN 1 ELSE 0 END) AS PopularPostsCount,
+        COUNT(pd.PostId) AS TotalPosts
+    FROM Users u
+    LEFT JOIN UserVotes uc ON u.Id = uc.UserId
+    LEFT JOIN BadgeCounts bc ON u.Id = bc.UserId
+    LEFT JOIN PostDetails pd ON u.Id = pd.OwnerUserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, uc.TotalUpVotes, uc.TotalDownVotes
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.Reputation,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    up.BadgeCount,
+    up.PopularPostsCount,
+    up.TotalPosts,
+    CASE 
+        WHEN up.TotalPosts = 0 THEN 'No Posts'
+        WHEN up.PopularPostsCount > 5 THEN 'Highly Active'
+        ELSE 'Moderate Activity'
+    END AS ActivityLevel
+FROM UserPerformance up
+WHERE up.Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY up.Reputation DESC, up.TotalUpVotes DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

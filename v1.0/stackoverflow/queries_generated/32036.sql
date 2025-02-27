@@ -1,0 +1,100 @@
+WITH RecursivePostHierarchy AS (
+    -- Recursively fetch all posts, starting from the questions
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Select questions
+    
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.ViewCount,
+        p2.CreationDate,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        rh.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rh ON p2.ParentId = rh.PostId -- Get answers to the questions
+),
+PostStats AS (
+    -- Collect statistics about posts and their authors
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- Only bounty votes
+    GROUP BY 
+        p.OwnerUserId
+),
+TopUsers AS (
+    -- Rank users based on their contributions
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        ps.TotalPosts,
+        ps.QuestionsCount,
+        ps.AnswersCount,
+        ps.AvgViewCount,
+        ps.TotalBounty,
+        RANK() OVER (ORDER BY ps.TotalPosts DESC) AS UserRank
+    FROM 
+        Users u
+    JOIN 
+        PostStats ps ON u.Id = ps.OwnerUserId
+)
+SELECT 
+    pu.DisplayName AS UserName,
+    pu.TotalPosts,
+    pu.QuestionsCount,
+    pu.AnswersCount,
+    pu.AvgViewCount,
+    pu.TotalBounty,
+    p.Title AS PostTitle,
+    p.ViewCount AS PostViewCount,
+    COALESCE(ch.CommentCount, 0) AS CommentCount,
+    ph.UserDisplayName AS LastEditedBy,
+    ph.CreationDate AS LastEditDate
+FROM 
+    TopUsers pu
+LEFT JOIN 
+    Posts p ON pu.Id = p.OwnerUserId AND p.PostTypeId = 1  -- Only questions
+LEFT JOIN (
+    -- Get the comment counts for the posts
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+) AS ch ON p.Id = ch.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId 
+    WHERE ph.CreationDate = (
+        SELECT MAX(CreationDate) 
+        FROM PostHistory 
+        WHERE PostId = p.Id
+    )
+WHERE 
+    pu.UserRank <= 10  -- Limit to top 10 users
+ORDER BY 
+    pu.TotalPosts DESC, 
+    p.ViewCount DESC;

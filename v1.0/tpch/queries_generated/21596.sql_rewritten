@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, s.s_comment,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_avail_qty
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL)
+    GROUP BY p.p_partkey, p.p_name
+),
+MaxOrderPrices AS (
+    SELECT o.custkey, MAX(o.o_totalprice) AS max_price
+    FROM orders o
+    WHERE o.o_orderdate > '1996-01-01'
+    GROUP BY o.o_custkey
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COALESCE(m.max_price, 0) AS max_order_price
+    FROM customer c
+    LEFT JOIN MaxOrderPrices m ON c.c_custkey = m.custkey
+    WHERE c.c_acctbal > 1000
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM SupplierCTE s
+    WHERE s.rank <= 5
+)
+SELECT DISTINCT c.c_name, c.max_order_price, p.p_name, p.total_avail_qty, s.s_name,
+       CASE 
+           WHEN c.max_order_price > 5000 THEN 'High Roller' 
+           WHEN c.max_order_price BETWEEN 2000 AND 5000 THEN 'Moderate Spender' 
+           ELSE 'Frugal Shopper' 
+       END AS order_category,
+       CONCAT('Customer ', c.c_name, ' ordered ', p.total_avail_qty, ' of ', p.p_name) AS order_summary
+FROM CustomerDetails c
+JOIN FilteredParts p ON p.total_avail_qty > (
+    SELECT AVG(total_avail_qty) FROM FilteredParts
+)
+JOIN lineitem l ON l.l_orderkey IN (
+    SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey
+)
+LEFT JOIN TopSuppliers s ON l.l_suppkey = s.s_suppkey
+WHERE l.l_returnflag = 'N'
+ORDER BY c.c_name, p.total_avail_qty DESC;

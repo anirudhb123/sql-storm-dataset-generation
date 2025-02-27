@@ -1,0 +1,60 @@
+
+WITH UserScore AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        COUNT(DISTINCT p.Id) AS AnswerCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        STRING_AGG(DISTINCT p.Tags, ',') AS AllTags
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+
+CombinedStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalViews, 0) AS TotalViews,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(us.BadgeCount, 0) AS BadgeCount
+    FROM UserScore us
+    LEFT JOIN PostStats ps ON us.UserId = ps.OwnerUserId
+    LEFT JOIN Users u ON us.UserId = u.Id
+)
+
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    TotalViews,
+    TotalScore,
+    BadgeCount,
+    ROUND((CAST(UpVotes AS numeric) / NULLIF(PostCount, 0)) * 100, 2) AS UpVotePercentage,
+    ROUND((CAST(DownVotes AS numeric) / NULLIF(PostCount, 0)) * 100, 2) AS DownVotePercentage
+FROM CombinedStats
+WHERE PostCount > 0
+ORDER BY Reputation DESC, UpVotePercentage DESC
+LIMIT 10;

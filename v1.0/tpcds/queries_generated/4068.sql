@@ -1,0 +1,84 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.net_profit IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_id
+),
+customers_with_address AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_sales AS (
+    SELECT 
+        r.web_site_id,
+        r.net_profit,
+        r.sales_rank,
+        ts.total_net_profit
+    FROM 
+        ranked_sales r
+    JOIN 
+        total_sales ts ON r.web_site_id = ts.web_site_id
+    WHERE 
+        r.sales_rank <= 10
+),
+customer_demographics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ts.total_net_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders
+FROM 
+    customers_with_address ca
+JOIN 
+    customer_demographics cd ON ca.c_customer_id = cd.c_customer_id
+LEFT JOIN 
+    web_sales ws ON ca.c_customer_id = ws.ws_bill_customer_sk
+LEFT JOIN 
+    top_sales ts ON ts.web_site_id = ws.ws_web_site_sk
+WHERE 
+    (cd.cd_gender = 'M' OR cd.cd_marital_status = 'S') 
+    AND (ca.ca_state IS NOT NULL OR ca.ca_city IS NOT NULL)
+GROUP BY 
+    c.c_customer_id, 
+    ca.ca_city, 
+    ca.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status, 
+    ts.total_net_profit
+HAVING 
+    total_orders > 5
+ORDER BY 
+    total_net_profit DESC;

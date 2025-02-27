@@ -1,0 +1,71 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM
+        aka_title at
+    LEFT JOIN
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY
+        at.id, at.title, at.production_year
+),
+FilteredMovies AS (
+    SELECT
+        title_id,
+        title,
+        production_year,
+        cast_count
+    FROM
+        RankedMovies
+    WHERE
+        rank <= 5 
+),
+MovieDetails AS (
+    SELECT
+        fm.title,
+        fm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM
+        FilteredMovies fm
+    LEFT JOIN
+        movie_keyword mk ON fm.title_id = mk.movie_id
+    LEFT JOIN
+        movie_companies mc ON fm.title_id = mc.movie_id
+    GROUP BY
+        fm.title, fm.production_year, mk.keyword
+),
+FinalOutput AS (
+    SELECT
+        movie.title,
+        movie.production_year,
+        movie.keyword,
+        movie.company_count,
+        CASE 
+            WHEN movie.company_count > 3 THEN 'High'
+            WHEN movie.company_count BETWEEN 1 AND 3 THEN 'Medium'
+            ELSE 'Low' 
+        END AS company_rating
+    FROM
+        MovieDetails movie
+)
+SELECT
+    f.title,
+    f.production_year,
+    f.keyword,
+    f.company_count,
+    f.company_rating,
+    ak.name AS actor_name
+FROM
+    FinalOutput f
+LEFT JOIN 
+    cast_info c ON f.title = (SELECT at.title FROM aka_title at WHERE at.id = c.movie_id)
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+ORDER BY
+    f.production_year DESC, f.company_count DESC
+LIMIT 50;

@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.ParentId,
+        P.Title,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        P2.Id AS PostId,
+        P2.ParentId,
+        P2.Title,
+        Level + 1
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+)
+
+, UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        MAX(B.Date) AS LatestBadgeDate
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+
+, UserMetrics AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.PostCount,
+        UA.TotalViews,
+        UA.TotalScore,
+        UA.CommentCount,
+        COALESCE(B.Name, 'No Badge') AS Badge,
+        ROW_NUMBER() OVER (ORDER BY UA.TotalScore DESC) AS Rank
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        (SELECT 
+            UserId,
+            MIN(Date) AS BadgeDate
+        FROM 
+            Badges
+        GROUP BY 
+            UserId) AS UserBadges ON UA.UserId = UserBadges.UserId
+    LEFT JOIN 
+        Badges B ON UserBadges.UserId = B.UserId AND UserBadges.BadgeDate = B.Date
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalViews,
+    U.TotalScore,
+    U.CommentCount,
+    COALESCE(U.Badge, 'No Badge') AS Badge,
+    HP.PostId AS ChildPostId,
+    HP.Title AS ChildPostTitle,
+    HP.Level AS HierarchyLevel
+FROM 
+    UserMetrics U
+LEFT JOIN 
+    RecursivePostHierarchy HP ON U.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = HP.PostId) 
+WHERE 
+    U.PostCount > 0
+ORDER BY 
+    U.TotalScore DESC, HP.Level ASC;

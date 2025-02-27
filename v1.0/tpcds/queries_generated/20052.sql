@@ -1,0 +1,78 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT
+        ss_date.sold_date_sk,
+        ss_item.item_id,
+        ss_ticket_number,
+        ss_quantity,
+        ss_sales_price,
+        ss_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ss_ticket_number ORDER BY ss_ext_sales_price DESC) AS rn
+    FROM
+        store_sales
+    JOIN
+        date_dim AS ss_date ON ss_date.d_date_sk = store_sales.ss_sold_date_sk
+    JOIN
+        item AS ss_item ON ss_item.i_item_sk = store_sales.ss_item_sk
+    WHERE
+        ss_date.d_year = 2023
+        AND ss_date.d_moy BETWEEN 1 AND 6
+    UNION ALL
+    SELECT
+        sh.sold_date_sk,
+        sh.item_id,
+        sh.ss_ticket_number,
+        (sh.ss_quantity * 2) AS ss_quantity,
+        (sh.ss_sales_price * 0.9) AS ss_sales_price,
+        (sh.ss_ext_sales_price * 1.1) AS ss_ext_sales_price
+    FROM
+        SalesHierarchy sh
+    WHERE
+        sh.rn <= 3
+),
+FilteredSales AS (
+    SELECT
+        sh.sold_date_sk,
+        sh.item_id,
+        SUM(sh.ss_quantity) as total_quantity,
+        SUM(sh.ss_sales_price) as total_sales_price,
+        COUNT(CASE WHEN sh.ss_quantity IS NULL THEN 1 END) AS null_quantities
+    FROM
+        SalesHierarchy sh
+    GROUP BY
+        sh.item_id, sh.sold_date_sk
+),
+FinalResults AS (
+    SELECT
+        fd.item_id,
+        fs.total_quantity,
+        fs.total_sales_price,
+        COALESCE(fs.null_quantities, 0) AS null_count,
+        CASE 
+            WHEN fs.total_sales_price > 1000 THEN 'High'
+            WHEN fs.total_sales_price BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category
+    FROM
+        FilteredSales fs
+    JOIN
+        item fd ON fd.i_item_sk = fs.item_id
+    WHERE 
+        fd.i_current_price IS NOT NULL
+        AND (fd.i_category = 'Electronics' OR fd.i_category IS NULL)
+)
+SELECT
+    fr.item_id,
+    fr.total_quantity,
+    fr.total_sales_price,
+    fr.null_count,
+    fr.sales_category,
+    CASE
+        WHEN fr.null_count > 0 THEN 'Contains NULLs'
+        ELSE 'No NULLs'
+    END AS null_status
+FROM
+    FinalResults fr
+ORDER BY
+    fr.total_sales_price DESC
+FETCH FIRST 50 ROWS ONLY;

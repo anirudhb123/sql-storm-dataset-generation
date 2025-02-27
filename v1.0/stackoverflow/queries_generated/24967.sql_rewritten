@@ -1,0 +1,95 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        SUM(COALESCE(ph.PostId, 0)) AS PostCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    GROUP BY 
+        u.Id
+),
+
+QuestionInsights AS (
+    SELECT
+        pp.PostId,
+        pp.Title,
+        pp.CreationDate,
+        pp.Score,
+        pp.ViewCount,
+        p.AcceptedAnswerId IS NOT NULL AS HasAcceptedAnswer,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.ClosedDate, NULL) AS ClosedDate
+    FROM 
+        RankedPosts pp
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON pp.PostId = c.PostId
+    LEFT JOIN 
+        Posts p ON pp.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON pp.PostId = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    WHERE 
+        pp.rn = 1
+),
+
+FinalReport AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        us.TotalBadges,
+        qi.PostId,
+        qi.Title,
+        qi.CreationDate,
+        qi.Score,
+        qi.ViewCount,
+        qi.HasAcceptedAnswer,
+        qi.CommentCount,
+        qi.ClosedDate,
+        CASE 
+            WHEN qi.HasAcceptedAnswer THEN 'Yes'
+            ELSE 'No'
+        END AS AcceptedStatus,
+        qi.ViewCount / NULLIF(us.PostCount, 0) AS AvgViewCountPerPost
+    FROM 
+        UserStatistics us
+    JOIN 
+        QuestionInsights qi ON us.UserId = qi.PostId
+    JOIN 
+        Users u ON us.UserId = u.Id
+)
+
+SELECT 
+    *
+FROM 
+    FinalReport
+ORDER BY 
+    Reputation DESC, Score DESC
+LIMIT 100;

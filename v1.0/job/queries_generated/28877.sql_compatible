@@ -1,0 +1,46 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names
+    FROM title t
+    JOIN cast_info c ON t.id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year
+),
+popular_movies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        num_actors,
+        actor_names,
+        RANK() OVER (ORDER BY num_actors DESC) AS rank
+    FROM ranked_movies
+),
+highly_rated_movies AS (
+    SELECT 
+        m.movie_id,
+        m.movie_title,
+        m.production_year,
+        m.num_actors,
+        m.actor_names,
+        mi.info AS popularity
+    FROM popular_movies m
+    JOIN movie_info mi ON m.movie_id = mi.movie_id 
+    WHERE mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+      AND CAST(mi.info AS FLOAT) >= 8.0
+)
+SELECT 
+    h.movie_id,
+    h.movie_title,
+    h.production_year,
+    h.num_actors,
+    h.actor_names
+FROM highly_rated_movies h
+WHERE h.rank <= 10
+ORDER BY h.num_actors DESC, h.movie_title;

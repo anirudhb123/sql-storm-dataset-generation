@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        AVG(v.CreationDate) AS AvgVoteDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS HistoryDate,
+        ph.PostHistoryTypeId,
+        STRING_AGG(pt.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, ph.CreationDate, ph.PostHistoryTypeId
+),
+TopUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    WHERE 
+        rp.PostRank <= 5
+)
+SELECT 
+    u.DisplayName,
+    us.Reputation,
+    us.BadgeCount,
+    us.TotalBounties,
+    COUNT(DISTINCT p.PostId) AS TotalPosts,
+    COUNT(DISTINCT pa.HistoryDate) AS ActivityCount
+FROM 
+    TopUsers u
+JOIN 
+    UserStatistics us ON u.Id = us.UserId
+LEFT JOIN 
+    RankedPosts p ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PostActivity pa ON pa.PostId = p.PostId
+GROUP BY 
+    u.DisplayName, us.Reputation, us.BadgeCount, us.TotalBounties
+HAVING 
+    COUNT(DISTINCT p.PostId) > 3
+ORDER BY 
+    us.Reputation DESC, TotalPosts DESC;

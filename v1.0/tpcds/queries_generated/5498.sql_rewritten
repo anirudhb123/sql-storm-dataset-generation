@@ -1,0 +1,64 @@
+WITH ItemSales AS (
+    SELECT 
+        i.i_item_id, 
+        i.i_item_desc, 
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales_amount,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    INNER JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 
+        AND d.d_moy IN (6, 7, 8) 
+    GROUP BY 
+        i.i_item_id, 
+        i.i_item_desc
+),
+
+TopSellingItems AS (
+    SELECT 
+        i_item_id, 
+        i_item_desc, 
+        total_quantity_sold, 
+        total_sales_amount, 
+        total_orders,
+        RANK() OVER (ORDER BY total_quantity_sold DESC) AS sales_rank
+    FROM 
+        ItemSales
+)
+
+SELECT 
+    tsi.i_item_id, 
+    tsi.i_item_desc, 
+    tsi.total_quantity_sold,
+    tsi.total_sales_amount,
+    tsi.total_orders,
+    cd.cd_gender, 
+    cd.cd_marital_status,
+    hd.hd_income_band_sk,
+    ca.ca_city,
+    ca.ca_state,
+    w.w_warehouse_name,
+    sm.sm_type
+FROM 
+    TopSellingItems tsi
+JOIN 
+    web_sales ws ON tsi.i_item_id = ws.ws_item_sk
+JOIN 
+    customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE 
+    tsi.sales_rank <= 10;

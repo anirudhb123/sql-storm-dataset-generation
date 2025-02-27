@@ -1,0 +1,69 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_sold_date_sk,
+        ws.ws_item_sk,
+        ws_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(cd.cd_purchase_estimate, 0) AS purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_marital_status ORDER BY c.c_birth_year) AS marital_order
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+address_info AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_country,
+        CASE 
+            WHEN ca.ca_state IN ('CA', 'NY', 'TX') THEN 'High Pop'
+            ELSE 'Low Pop'
+        END AS population_category
+    FROM customer_address ca
+),
+sales_summary AS (
+    SELECT 
+        r.web_site_sk,
+        COUNT(*) AS total_sales,
+        SUM(ws_ext_sales_price) AS total_revenue,
+        AVG(ws_ext_sales_price) AS average_sale_price
+    FROM ranked_sales r
+    JOIN web_sales ws ON r.ws_item_sk = ws.ws_item_sk AND r.web_site_sk = ws.ws_web_site_sk
+    GROUP BY r.web_site_sk
+),
+final_report AS (
+    SELECT 
+        cs.c_first_name,
+        cs.c_last_name,
+        SUM(ss.total_revenue) AS total_spent,
+        SUM(ss.total_sales) AS items_purchased,
+        ai.population_category,
+        RANK() OVER (ORDER BY SUM(ss.total_revenue) DESC) AS customer_rank
+    FROM customer_data cs
+    JOIN sales_summary ss ON cs.c_customer_sk = ss.web_site_sk
+    JOIN address_info ai ON cs.c_current_addr_sk = ai.ca_address_sk
+    WHERE (cs.purchase_estimate > 1000 OR cs.marital_order <= 3)
+    GROUP BY cs.c_first_name, cs.c_last_name, ai.population_category
+)
+SELECT 
+    fr.*, 
+    CASE 
+        WHEN fr.items_purchased IS NULL THEN 'No Purchases'
+        ELSE 'Purchases Made'
+    END AS purchase_status
+FROM final_report fr
+LEFT JOIN warehouse w ON w.w_warehouse_sk = (SELECT MIN(w_warehouse_sk) FROM warehouse)
+WHERE (fr.total_spent > 500 OR fr.customer_rank <= 10)
+ORDER BY fr.customer_rank, fr.total_spent DESC;

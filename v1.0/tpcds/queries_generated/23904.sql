@@ -1,0 +1,44 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_customer_sk AS customer_sk, 
+           c.c_first_name AS first_name, 
+           c.c_last_name AS last_name, 
+           cd.cd_marital_status, 
+           cd.cd_gender, 
+           cd.cd_purchase_estimate, 
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL
+    UNION ALL
+    SELECT ch.customer_sk, 
+           ch.first_name, 
+           ch.last_name, 
+           cd2.cd_marital_status, 
+           cd2.cd_gender, 
+           cd2.cd_purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY cd2.cd_gender ORDER BY cd2.cd_purchase_estimate DESC) + 1 AS rank
+    FROM customer_hierarchy ch
+    JOIN customer c2 ON c2.c_customer_sk = ch.customer_sk + 1  -- Recursive condition that might lead to odd results
+    JOIN customer_demographics cd2 ON c2.c_current_cdemo_sk = cd2.cd_demo_sk
+)
+SELECT c.c_customer_id, 
+       SUM(COALESCE(ws.ws_net_profit, 0)) AS total_profit,
+       COUNT(DISTINCT s.s_store_sk) AS store_count,
+       COUNT(DISTINCT wr.wr_order_number) AS web_return_count,
+       COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count
+FROM customer c
+LEFT OUTER JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT OUTER JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN store_returns sr ON sr.sr_customer_sk = c.c_customer_sk OR sr.sr_customer_sk IS NULL
+LEFT JOIN web_returns wr ON wr.wr_returning_customer_sk = c.c_customer_sk AND 
+                           wr.wr_returned_amount IS NOT NULL
+JOIN customer_hierarchy ch ON ch.customer_sk = c.c_customer_sk
+WHERE (ch.rank IS NULL OR ch.rank < 5) AND 
+      (ws.ws_net_paid > 100 OR ss.ss_net_paid < 50) AND 
+      COALESCE(c.c_birth_month, 1) BETWEEN 1 AND 12
+GROUP BY c.c_customer_id
+HAVING total_profit > (SELECT AVG(ws_net_profit) FROM web_sales) OR 
+       COUNT(DISTINCT ss.ss_item_sk) > 10
+ORDER BY total_profit DESC, store_count ASC
+LIMIT 100;

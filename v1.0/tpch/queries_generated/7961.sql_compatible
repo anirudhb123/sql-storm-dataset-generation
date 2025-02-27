@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS SupplierRank
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        r.r_name AS Region, 
+        n.n_name AS Nation, 
+        rs.s_name AS SupplierName, 
+        rs.TotalCost 
+    FROM 
+        RankedSuppliers rs 
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey 
+    WHERE 
+        rs.SupplierRank <= 5
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Revenue 
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE 
+        l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    hs.Region,
+    hs.Nation,
+    hs.SupplierName,
+    SUM(os.Revenue) AS TotalRevenue
+FROM 
+    HighCostSuppliers hs 
+JOIN 
+    OrderSummary os ON hs.TotalCost > 10000 
+JOIN 
+    lineitem l ON os.o_orderkey = l.l_orderkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON hs.SupplierName = s.s_name
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    hs.Region, hs.Nation, hs.SupplierName
+ORDER BY 
+    TotalRevenue DESC, hs.Region, hs.Nation;

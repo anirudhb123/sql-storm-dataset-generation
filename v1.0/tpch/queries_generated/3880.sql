@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_name
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+HighCostSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+)
+SELECT 
+    r.o_orderkey,
+    r.c_name,
+    r.total_revenue,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(sc.total_supply_cost, 0) AS supplier_cost,
+    COUNT(l.l_orderkey) AS lineitem_count
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    lineitem l ON r.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierCost sc ON l.l_partkey = sc.ps_partkey
+LEFT JOIN 
+    HighCostSuppliers s ON sc.ps_suppkey = s.s_suppkey
+WHERE 
+    r.rank_order = 1
+GROUP BY 
+    r.o_orderkey, r.c_name, s.s_name, sc.total_supply_cost
+ORDER BY 
+    r.total_revenue DESC
+LIMIT 10;

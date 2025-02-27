@@ -1,0 +1,57 @@
+
+WITH AddressParts AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(
+            COALESCE(NULLIF(ca_street_number, ''), 'N/A'), ' ',
+            COALESCE(NULLIF(ca_street_name, ''), 'Unknown'), ' ',
+            COALESCE(NULLIF(ca_street_type, ''), 'St')
+        ) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        CASE
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_estimate_category,
+        a.full_address
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        AddressParts a ON c.c_current_addr_sk = a.ca_address_sk
+)
+SELECT 
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.purchase_estimate_category,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip
+FROM 
+    CustomerDetails c
+JOIN 
+    customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+WHERE 
+    a.ca_state = 'NY'
+    AND c.purchase_estimate_category = 'High'
+ORDER BY 
+    c.c_last_name, c.c_first_name;

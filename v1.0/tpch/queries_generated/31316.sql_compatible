@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.Level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.Level < 3
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS OrderCount, SUM(o.o_totalprice) AS TotalSpent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, SUM(ps.ps_availqty) AS TotalAvailable
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_supplycost
+),
+RankedOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS Rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+),
+ExtensiveReport AS (
+    SELECT ch.c_custkey, ch.c_name, si.s_nationkey, si.s_name, 
+           COALESCE(SUM(ps.TotalAvailable * si.s_acctbal), 0) AS TotalSupplierValue,
+           COALESCE(MAX(ro.TotalSpent), 0) AS MaxSpent,
+           COALESCE(AVG(ro.OrderCount), 0) AS AvgOrderCount
+    FROM CustomerOrders ro
+    JOIN nation n ON n.n_nationkey = ro.c_custkey
+    JOIN region r ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN SupplierHierarchy si ON si.s_nationkey = ro.c_custkey
+    LEFT JOIN PartSupplierInfo ps ON ps.p_partkey = ro.c_custkey
+    GROUP BY ch.c_custkey, ch.c_name, si.s_nationkey, si.s_name
+)
+SELECT r.r_name AS RegionName, COUNT(DISTINCT ex.c_custkey) AS NumberOfCustomers,
+       SUM(ex.TotalSupplierValue) AS OverallSupplierValue,
+       SUM(ex.MaxSpent) AS TotalMaxSpent,
+       AVG(ex.AvgOrderCount) AS AverageOrdersPerCustomer
+FROM ExtensiveReport ex
+JOIN region r ON r.r_regionkey = ex.s_nationkey
+WHERE ex.TotalSupplierValue IS NOT NULL
+GROUP BY r.r_name
+ORDER BY NumberOfCustomers DESC;

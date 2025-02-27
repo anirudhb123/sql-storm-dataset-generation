@@ -1,0 +1,82 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.OwnerUserId,
+        RP.Level + 1 AS Level
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy RP ON P.ParentId = RP.PostId
+),
+PostVoteStats AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(*) AS TotalVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+)
+SELECT 
+    PH.PostId,
+    PH.Title,
+    PH.Level,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.TotalVotes,
+    TG.TagName,
+    TG.PostCount,
+    COALESCE(U.Reputation, 0) AS UserReputation,
+    CASE 
+        WHEN PH.PostTypeId = 1 THEN 'Question'
+        WHEN PH.PostTypeId = 2 THEN 'Answer'
+        ELSE 'Other'
+    END AS PostType,
+    CASE 
+        WHEN Ph.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus
+FROM 
+    RecursivePostHierarchy PH
+LEFT JOIN 
+    PostVoteStats PS ON PH.PostId = PS.PostId
+LEFT JOIN 
+    Users U ON PH.OwnerUserId = U.Id
+LEFT JOIN 
+    TagStats TG ON TG.PostCount > 0
+WHERE 
+    PH.Level <= 2
+ORDER BY 
+    PS.Upvotes DESC, 
+    PH.Level;

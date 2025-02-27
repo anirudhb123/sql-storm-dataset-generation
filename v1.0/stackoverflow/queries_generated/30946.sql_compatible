@@ -1,0 +1,89 @@
+
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CreationDate,
+        DisplayName,
+        LastAccessDate,
+        WebsiteUrl,
+        Location,
+        AboutMe,
+        UpVotes, 
+        DownVotes,
+        CASE 
+            WHEN Reputation >= 10000 THEN 'Top Contributor'
+            WHEN Reputation >= 5000 THEN 'Expert'
+            WHEN Reputation >= 1000 THEN 'Enthusiast'
+            ELSE 'Novice'
+        END AS UserLevel
+    FROM Users
+    WHERE CreatedDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(Name, ', ') AS BadgeNames
+    FROM Badges
+    GROUP BY UserId
+),
+PostStats AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore
+    FROM Posts
+    WHERE CreationDate >= (CAST('2024-10-01' AS DATE) - INTERVAL '1 year')
+    GROUP BY OwnerUserId
+),
+PetitionedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        PH.Comment
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE PH.PostHistoryTypeId IN (10, 11) 
+    ORDER BY PH.CreationDate DESC
+),
+AggregateData AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        UReputation.Reputation,
+        UReputation.UserLevel,
+        COALESCE(PStats.PostCount, 0) AS PostCount,
+        COALESCE(PStats.TotalViews, 0) AS TotalViews,
+        COALESCE(BadgeData.BadgeCount, 0) AS BadgeCount,
+        COALESCE(BadgeData.BadgeNames, 'None') AS BadgeNames,
+        COUNT(DISTINCT PP.PostId) AS ClosedPosts,
+        COUNT(DISTINCT CASE WHEN PP.PostHistoryTypeId = 10 THEN PP.PostId END) AS TotalClosed,
+        COUNT(DISTINCT CASE WHEN PP.PostHistoryTypeId = 11 THEN PP.PostId END) AS TotalReopened
+    FROM Users U
+    LEFT JOIN UserReputation UReputation ON U.Id = UReputation.UserId
+    LEFT JOIN UserBadges BadgeData ON U.Id = BadgeData.UserId
+    LEFT JOIN PostStats PStats ON U.Id = PStats.OwnerUserId
+    LEFT JOIN PetitionedPosts PP ON U.Id = PP.OwnerUserId
+    GROUP BY U.Id, U.DisplayName, UReputation.Reputation, UReputation.UserLevel
+)
+SELECT 
+    UserId, 
+    DisplayName,
+    Reputation,
+    UserLevel,
+    PostCount,
+    TotalViews,
+    BadgeCount,
+    BadgeNames,
+    ClosedPosts,
+    TotalClosed,
+    TotalReopened
+FROM AggregateData
+WHERE Reputation > 0
+ORDER BY Reputation DESC, PostCount DESC
+LIMIT 100;

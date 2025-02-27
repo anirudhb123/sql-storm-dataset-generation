@@ -1,0 +1,40 @@
+
+WITH CustomerReturns AS (
+    SELECT cr_returning_customer_sk, 
+           SUM(cr_return_quantity) AS total_returned,
+           COUNT(DISTINCT cr_order_number) AS total_orders,
+           MAX(cr_return_amt_inc_tax) AS max_return_amt
+    FROM catalog_returns
+    GROUP BY cr_returning_customer_sk
+),
+ExcessiveReturners AS (
+    SELECT cr.returning_customer_sk
+    FROM CustomerReturns cr
+    WHERE cr.total_returned > (SELECT AVG(total_returned) FROM CustomerReturns)
+),
+SalesData AS (
+    SELECT ws.ws_ship_date_sk,
+           ws.ws_item_sk,
+           SUM(ws.ws_quantity) AS total_sales
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                                  AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws.ws_ship_date_sk, ws.ws_item_sk
+)
+SELECT c.c_customer_id,
+       c.c_first_name,
+       c.c_last_name,
+       COALESCE(s.total_sales, 0) AS total_sales,
+       COALESCE(cr.total_returned, 0) AS total_returned,
+       CASE 
+           WHEN cr.total_returned IS NULL THEN 'No Returns'
+           WHEN cr.total_returned > s.total_sales THEN 'Over Returner'
+           ELSE 'Normal Returner'
+       END AS return_status
+FROM customer c
+LEFT JOIN SalesData s ON c.c_customer_sk = s.ws_item_sk
+LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.returning_customer_sk
+WHERE c.c_birth_year IS NOT NULL
+  AND (EXISTS (SELECT 1 FROM ExcessiveReturners er WHERE er.returning_customer_sk = c.c_customer_sk)
+       OR c.c_preferred_cust_flag = 'Y')
+ORDER BY return_status DESC, total_sales DESC;

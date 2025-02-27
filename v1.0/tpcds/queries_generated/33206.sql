@@ -1,0 +1,83 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ws_sold_date_sk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= 20230101
+    GROUP BY 
+        ws_item_sk, ws_sold_date_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        total_sales + SUM(cs_sales_price) AS total_sales,
+        cs_sold_date_sk
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= 20230101 AND cs_item_sk IN (SELECT ws_item_sk FROM web_sales)
+    GROUP BY 
+        cs_item_sk, cs_sold_date_sk
+),
+AddressDetails AS (
+    SELECT 
+        ca_address_id,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        cd_dep_count
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 1000
+),
+FinalSales AS (
+    SELECT 
+        s.ws_item_sk,
+        SUM(s.ws_net_profit) AS total_net_profit,
+        p.p_discount_active
+    FROM 
+        web_sales s
+    LEFT JOIN 
+        promotion p ON s.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        s.ws_item_sk, p.p_discount_active
+)
+SELECT 
+    f.ws_item_sk,
+    f.total_net_profit,
+    a.ca_city,
+    a.ca_state,
+    c.cd_gender,
+    ROW_NUMBER() OVER (PARTITION BY a.ca_state ORDER BY f.total_net_profit DESC) AS rank_in_state,
+    CASE 
+        WHEN c.cd_marital_status = 'M' THEN 'Married'
+        WHEN c.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Unknown'
+    END AS marital_status,
+    NULLIF(a.ca_zip, '') AS safe_zip
+FROM 
+    FinalSales f
+JOIN 
+    AddressDetails a ON f.ws_item_sk = a.ca_address_id
+JOIN 
+    CustomerDemographics c ON c.cd_demo_sk = f.ws_item_sk
+WHERE 
+    f.total_net_profit > 500
+ORDER BY 
+    f.total_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,55 @@
+WITH UserVotes AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY UserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        MAX(ph.CreationDate) OVER (PARTITION BY ph.PostId) AS LatestClose
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11) 
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.Title AS PostTitle,
+    pd.UpVotesCount - pd.DownVotesCount AS NetVotes,
+    COUNT(DISTINCT cl.PostId) AS ClosedPostsCount,
+    MAX(pd.CreationDate) AS LatestPostDate,
+    COUNT(p.Id) FILTER (WHERE pd.PostRank <= 5) AS TopRecentPosts
+FROM Users u
+LEFT JOIN UserVotes uv ON u.Id = uv.UserId
+LEFT JOIN PostDetails pd ON u.Id = pd.OwnerUserId
+LEFT JOIN ClosedPosts cl ON pd.PostId = cl.PostId
+WHERE 
+    u.Reputation > 1000
+    AND (uv.TotalVotes > 0 OR cl.PostId IS NOT NULL)
+GROUP BY 
+    u.Id, 
+    u.DisplayName, 
+    u.Reputation
+ORDER BY 
+    NetVotes DESC, 
+    LatestPostDate DESC
+LIMIT 50;

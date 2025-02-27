@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id IN (SELECT UNNEST(string_to_array(p.Tags, '><'))::int)
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(v.BountyAmount) AS TotalBounties,
+        SUM(u.UpVotes) - SUM(u.DownVotes) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    ut.UserId,
+    ut.DisplayName,
+    ut.TotalBounties,
+    pt.TagName,
+    cp.CloseCount,
+    cp.LastClosedDate
+FROM 
+    RankedPosts rp
+JOIN 
+    UserReputation ut ON rp.ScoreRank <= 5
+LEFT JOIN 
+    PostLinks pl ON rp.PostId = pl.PostId
+LEFT JOIN 
+    PopularTags pt ON pl.RelatedPostId = pt.TagName
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.Score > 10
+    AND rp.ViewCount > 100
+ORDER BY 
+    rp.Score DESC, 
+    ut.TotalBounties DESC
+LIMIT 100;

@@ -1,0 +1,64 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(mt.season_nr, 0) AS season,
+        COALESCE(mt.episode_nr, 0) AS episode,
+        1 AS depth
+    FROM aka_title mt
+    WHERE mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(at.season_nr, 0),
+        COALESCE(at.episode_nr, 0),
+        mh.depth + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+movie_cast AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY ci.movie_id
+),
+detailed_info AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mc.total_cast, 0) AS total_cast,
+        mh.depth,
+        (SELECT COUNT(*) 
+         FROM movie_info mi 
+         WHERE mi.movie_id = mh.movie_id 
+         AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'trivia')) AS trivia_count
+    FROM movie_hierarchy mh
+    LEFT JOIN movie_cast mc ON mh.movie_id = mc.movie_id
+)
+SELECT 
+    di.title,
+    di.production_year,
+    di.total_cast,
+    di.depth,
+    di.trivia_count,
+    CASE 
+        WHEN di.trivia_count > 0 THEN 
+            'Has trivia'
+        ELSE 
+            COALESCE(NULLIF(di.total_cast::text, '0'), 'No actors')
+    END AS trivia_or_cast_status
+FROM detailed_info di
+WHERE di.depth = (SELECT MAX(depth) FROM detailed_info)
+ORDER BY di.production_year DESC
+FETCH FIRST 10 ROWS ONLY
+OFFSET 0;

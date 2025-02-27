@@ -1,0 +1,74 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title ASC) AS rank_by_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id, rt.role) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(SUM(CASE WHEN ar.role = 'lead' THEN ar.role_count ELSE 0 END), 0) AS lead_actor_count,
+        COALESCE(SUM(CASE WHEN ar.role = 'supporting' THEN ar.role_count ELSE 0 END), 0) AS supporting_actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+),
+TopMoviesByActors AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.lead_actor_count,
+        m.supporting_actor_count,
+        CASE 
+            WHEN m.lead_actor_count > m.supporting_actor_count THEN 'Dominated by Lead'
+            WHEN m.lead_actor_count < m.supporting_actor_count THEN 'Dominated by Supporting'
+            ELSE 'Balanced Cast'
+        END AS cast_dominance
+    FROM 
+        MoviesWithDetails m
+    WHERE 
+        m.lead_actor_count >= 1 OR m.supporting_actor_count >= 1
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.cast_dominance,
+    t.lead_actor_count,
+    t.supporting_actor_count,
+    COALESCE(
+        (SELECT STRING_AGG(k.keyword, ', ') 
+         FROM movie_keyword mk 
+         JOIN keyword k ON mk.keyword_id = k.id
+         WHERE mk.movie_id = t.movie_id), 
+        'No Keywords') AS keywords
+FROM 
+    TopMoviesByActors t
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND LOWER(t.cast_dominance) LIKE '%dominated%'
+ORDER BY 
+    t.production_year DESC, t.lead_actor_count DESC;

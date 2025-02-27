@@ -1,0 +1,56 @@
+
+WITH SalesData AS (
+    SELECT 
+        cs.cs_order_number,
+        cs.cs_item_sk,
+        cs.cs_quantity,
+        cs.cs_sales_price,
+        cs.cs_ext_sales_price,
+        cs.cs_ext_tax,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        cs.cs_sold_date_sk,
+        d.d_year,
+        d.d_month_seq,
+        d.d_qoy,
+        d.d_week_seq,
+        d.d_moy,
+        d.d_dow,
+        SUM(cs.cs_quantity) OVER(PARTITION BY d.d_year, d.d_month_seq ORDER BY cs.cs_sold_date_sk) AS cumulative_sales_qty,
+        SUM(cs.cs_net_profit) OVER(PARTITION BY d.d_year, d.d_month_seq ORDER BY cs.cs_sold_date_sk) AS cumulative_net_profit
+    FROM 
+        catalog_sales cs 
+    JOIN 
+        date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(sd.cs_quantity) AS total_quantity,
+        SUM(sd.cs_net_paid) AS total_sales,
+        SUM(sd.cs_net_profit) AS total_profit,
+        MAX(sd.cumulative_sales_qty) AS max_cumulative_sales,
+        AVG(sd.cumulative_net_profit) AS avg_cumulative_profit
+    FROM 
+        SalesData sd
+    JOIN 
+        customer c ON sd.cs_order_number = c.c_customer_id 
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cs.c_customer_id,
+    cs.total_quantity,
+    cs.total_sales,
+    cs.total_profit,
+    cs.max_cumulative_sales,
+    cs.avg_cumulative_profit
+FROM 
+    CustomerSales cs
+WHERE 
+    cs.total_sales > 1000
+ORDER BY 
+    cs.total_profit DESC
+FETCH FIRST 50 ROWS ONLY;

@@ -1,0 +1,41 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal <= sh.s_acctbal
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, ps.ps_supplycost, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+)
+SELECT
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    COALESCE(SUM(sd.s_acctbal), 0) AS total_supplier_acctbal,
+    MAX(ps.p_retailprice) AS highest_part_price,
+    AVG(CASE WHEN os.total_revenue IS NOT NULL THEN os.total_revenue ELSE 0 END) AS avg_order_revenue
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN SupplierHierarchy sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN PartDetails ps ON ps.p_partkey = sd.s_suppkey
+LEFT JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+WHERE n.n_name LIKE 'A%' AND (sd.s_acctbal IS NOT NULL OR c.c_acctbal > 500)
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY total_customers DESC, highest_part_price ASC;

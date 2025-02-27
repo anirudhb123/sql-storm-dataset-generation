@@ -1,0 +1,76 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        COUNT(DISTINCT Posts.OwnerUserId) AS UniquePostOwners
+    FROM 
+        Tags 
+    LEFT JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '>'))
+    GROUP BY 
+        Tags.TagName
+),
+UserActivity AS (
+    SELECT 
+        Users.Id AS UserId, 
+        Users.DisplayName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(CASE WHEN Votes.Id IS NOT NULL THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    WHERE 
+        Users.Reputation > 100
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        Posts.Id AS PostId,
+        Posts.Title,
+        Posts.CreationDate, 
+        Posts.Body,
+        Tags.TagName,
+        COALESCE(PostHistory.Text, 'No History') AS LastEdit,
+        COALESCE(PostHistory.CreationDate, DATE '1900-01-01') AS LastEditDate
+    FROM 
+        Posts 
+    LEFT JOIN 
+        PostHistory ON Posts.Id = PostHistory.PostId
+    LEFT JOIN 
+        Tags ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '>'))
+    WHERE 
+        Posts.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+        AND Posts.Score > 5
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.TotalViews,
+    tc.UniquePostOwners,
+    ua.DisplayName,
+    ua.PostCount AS UserPostCount,
+    ua.VoteCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    pm.Title,
+    pm.CreationDate,
+    pm.LastEdit,
+    pm.LastEditDate
+FROM 
+    TagCounts tc
+JOIN 
+    UserActivity ua ON ua.PostCount > 10
+LEFT JOIN 
+    PostMetrics pm ON pm.TagName = tc.TagName
+ORDER BY 
+    tc.TotalViews DESC, 
+    ua.VoteCount DESC
+LIMIT 50;

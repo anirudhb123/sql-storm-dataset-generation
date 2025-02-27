@@ -1,0 +1,95 @@
+WITH TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews,
+        SUM(CASE WHEN p.AnswerCount IS NOT NULL THEN p.AnswerCount ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.CommentCount IS NOT NULL THEN p.CommentCount ELSE 0 END) AS TotalComments,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    GROUP BY 
+        t.TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(v.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(r.Resources, '{}') AS RelatedResources
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount 
+        FROM Votes GROUP BY PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            STRING_AGG(DISTINCT p.Title, ', ') AS Resources 
+        FROM PostLinks pl 
+        JOIN Posts p ON pl.RelatedPostId = p.Id 
+        GROUP BY PostId) r ON p.Id = r.PostId
+)
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalAnswers,
+    ts.TotalComments,
+    ts.AverageScore,
+    ur.UserId,
+    ur.DisplayName,
+    ur.GoldBadges,
+    ur.SilverBadges,
+    ur.BronzeBadges,
+    ur.TotalUpVotes,
+    ur.TotalDownVotes,
+    ur.TotalPosts,
+    ur.TotalComments,
+    pe.PostId,
+    pe.Title,
+    pe.ViewCount,
+    pe.CommentCount,
+    pe.UpVoteCount,
+    pe.DownVoteCount,
+    pe.RelatedResources
+FROM 
+    TagStats ts
+JOIN 
+    UserReputation ur ON ts.PostCount > 0  -- Join to user statistics based on active posts
+JOIN 
+    PostEngagement pe ON ts.PostCount > 0  -- Join to post engagement statistics
+ORDER BY 
+    ts.TotalViews DESC, ts.AverageScore DESC, ur.TotalUpVotes DESC;

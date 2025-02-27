@@ -1,0 +1,46 @@
+WITH RECURSIVE PostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        0 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.Score >= 10
+    
+    UNION ALL
+    
+    
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate, 
+        p.OwnerUserId, 
+        ph.Depth + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.Reputation,
+    u.Views,
+    COUNT(DISTINCT p.PostId) AS QuestionCount,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+    MAX(p.CreationDate) AS LatestPostDate,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY COUNT(DISTINCT a.PostId) DESC) AS Ranking
+FROM Users u
+LEFT JOIN PostHierarchy ph ON u.Id = ph.OwnerUserId
+LEFT JOIN Posts a ON a.ParentId = ph.PostId AND a.PostTypeId = 2
+LEFT JOIN Badges b ON b.UserId = u.Id
+LEFT JOIN Posts p ON p.Id = ph.PostId 
+LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+WHERE u.Reputation > 100 AND u.Views IS NOT NULL
+GROUP BY u.Id, u.DisplayName, u.Reputation, u.Views
+ORDER BY Ranking
+LIMIT 100;

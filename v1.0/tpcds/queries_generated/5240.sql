@@ -1,0 +1,56 @@
+
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+HighSpenders AS (
+    SELECT 
+        c.customer_id,
+        c.gender,
+        cp.total_quantity,
+        cp.total_spent
+    FROM 
+        CustomerPurchases cp
+    JOIN 
+        (SELECT c_customer_id, cd_gender
+         FROM customer 
+         JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk 
+         WHERE cd_marital_status = 'M') AS c 
+    ON cp.c_customer_id = c.c_customer_id
+    WHERE cp.total_spent > 1000
+),
+TopItems AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        HighSpenders hs ON ws.ws_bill_customer_sk = hs.c_customer_id
+    GROUP BY 
+        ws.ws_item_sk
+    ORDER BY 
+        total_profit DESC
+    LIMIT 10
+)
+SELECT 
+    i.i_item_id,
+    i.i_product_name,
+    ti.total_sold,
+    ti.total_profit
+FROM 
+    item i
+JOIN 
+    TopItems ti ON i.i_item_sk = ti.ws_item_sk;

@@ -1,0 +1,80 @@
+WITH RecursivePosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        CreationDate, 
+        ROW_NUMBER() OVER (PARTITION BY OwnerUserId ORDER BY CreationDate DESC) AS rn
+    FROM 
+        Posts
+),
+FilteredPosts AS (
+    SELECT 
+        p.*, 
+        COALESCE(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 8), 0) AS TotalBounty, 
+        COUNT(DISTINCT u.Id) AS UserCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON u.Id = p.OwnerUserId
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        COUNT(*) AS EditCount,
+        MAX(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 ELSE 0 END) AS IsEdited,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS IsClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS IsReopened
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+AggregatedData AS (
+    SELECT 
+        fp.Id, 
+        fp.Title, 
+        fp.CreationDate, 
+        fp.TotalBounty,
+        phd.EditCount,
+        phd.IsEdited,
+        phd.IsClosed,
+        phd.IsReopened,
+        COALESCE(u.Reputation, 0) AS OwnerReputation,
+        (EXTRACT(EPOCH FROM cast('2024-10-01 12:34:56' as timestamp)) - EXTRACT(EPOCH FROM fp.CreationDate)) / 3600 AS AgeInHours
+    FROM 
+        FilteredPosts fp
+    LEFT JOIN 
+        PostHistoryDetails phd ON fp.Id = phd.PostId
+    LEFT JOIN 
+        Users u ON u.Id = fp.OwnerUserId
+)
+SELECT 
+    *,
+    CASE 
+        WHEN AgeInHours < 1 THEN 'New'
+        WHEN AgeInHours BETWEEN 1 AND 24 THEN 'Recent'
+        ELSE 'Old'
+    END AS AgeCategory,
+    CASE 
+        WHEN TotalBounty > 0 THEN CONCAT('This post has a bounty of ', TotalBounty, ' points!')
+        ELSE 'No bounty available for this post.'
+    END AS BountyMessage,
+    CASE 
+        WHEN IsClosed = 1 THEN 'This post is closed.'
+        WHEN IsReopened = 1 THEN 'This post has been reopened.'
+        ELSE 'Post status is normal.'
+    END AS PostStatus,
+    RANK() OVER (ORDER BY TotalBounty DESC) AS BountyRank
+FROM 
+    AggregatedData
+WHERE 
+    (UserCount > 0 OR IsEdited = 1)
+    AND (OwnerReputation >= 100 OR IsClosed = 1)
+ORDER BY 
+    AgeInHours DESC,
+    TotalBounty DESC;

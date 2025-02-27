@@ -1,0 +1,37 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk,
+           c_birth_year, c_birth_month, c_birth_day, 
+           CAST(c_first_name || ' ' || c_last_name AS VARCHAR(50)) AS full_name,
+           0 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT ch.c_customer_sk, ch.c_first_name, ch.c_last_name, ch.c_current_cdemo_sk,
+           ch.c_birth_year, ch.c_birth_month, ch.c_birth_day, 
+           CAST(ch.c_first_name || ' ' || ch.c_last_name AS VARCHAR(50)) AS full_name,
+           ch.level + 1
+    FROM customer ch
+    JOIN customer_hierarchy ch2 ON ch.c_current_cdemo_sk = ch2.c_current_cdemo_sk
+)
+SELECT ca.city AS address_city,
+       ca.state AS address_state,
+       cd.cd_marital_status AS customer_marital_status,
+       COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+       AVG(EXTRACT(YEAR FROM CURRENT_DATE) - c.c_birth_year) AS avg_customer_age,
+       SUM(ss_ext_sales_price) AS total_sales,
+       RANK() OVER (PARTITION BY ca.state ORDER BY SUM(ss_ext_sales_price) DESC) AS sales_rank,
+       STRING_AGG(DISTINCT ch.full_name || ' (Age: ' || (EXTRACT(YEAR FROM CURRENT_DATE) - ch.c_birth_year) || ')', ', ') AS customer_names
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+LEFT JOIN customer_hierarchy ch ON ch.c_customer_sk = c.c_customer_sk
+WHERE ca.state IS NOT NULL
+AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+AND ss.ss_sales_price > 0
+GROUP BY ca.city, ca.state, cd.cd_marital_status
+HAVING SUM(ss_ext_sales_price) > (SELECT AVG(ss_ext_sales_price) FROM store_sales)
+ORDER BY total_sales DESC;

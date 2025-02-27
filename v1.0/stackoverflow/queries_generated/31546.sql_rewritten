@@ -1,0 +1,114 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS Downvotes,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5
+),
+RecentPostHistory AS (
+    SELECT 
+        h.PostId,
+        h.UserId,
+        h.CreationDate,
+        p.Title,
+        ph.UserDisplayName,
+        h.PostHistoryTypeId
+    FROM 
+        PostHistory h
+    JOIN 
+        Posts p ON h.PostId = p.Id
+    LEFT JOIN 
+        Users ph ON h.UserId = ph.Id
+    WHERE 
+        h.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+        AND h.PostHistoryTypeId IN (10, 11, 12) 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(v.Upvotes, 0) AS Upvotes,
+        COALESCE(v.Downvotes, 0) AS Downvotes,
+        COALESCE(v.TotalBounty, 0) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserVotes v ON u.Id = v.UserId
+)
+SELECT 
+    p.Title AS PostTitle,
+    ph.Level,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    u.DisplayName AS Owner,
+    u.Reputation AS OwnerReputation,
+    u.Upvotes AS UserUpvotes,
+    u.Downvotes AS UserDownvotes,
+    t.TagName,
+    r.UserId AS RecentModifierId,
+    r.CreationDate AS RecentModificationDate,
+    CASE 
+        WHEN r.PostHistoryTypeId = 10 THEN 'Closed'
+        WHEN r.PostHistoryTypeId = 11 THEN 'Reopened'
+        WHEN r.PostHistoryTypeId = 12 THEN 'Deleted'
+        ELSE 'Other'
+    END AS RecentAction
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    PostHierarchy ph ON ph.Id = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    PopularTags t ON t.TagName = ANY(string_to_array(p.Tags, ','))
+LEFT JOIN 
+    RecentPostHistory r ON r.PostId = p.Id
+GROUP BY 
+    p.Id, ph.Level, u.Id, t.TagName, r.UserId, r.CreationDate
+ORDER BY 
+    p.ViewCount DESC, COUNT(DISTINCT c.Id) DESC
+LIMIT 100;

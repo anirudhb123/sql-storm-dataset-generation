@@ -1,0 +1,81 @@
+WITH RecursivePostCTE AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        1 AS Level,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        Level + 1,
+        COALESCE(p.AcceptedAnswerId, 0)
+    FROM
+        Posts p
+    INNER JOIN
+        RecursivePostCTE r ON r.PostId = p.ParentId 
+    WHERE
+        p.PostTypeId = 2 
+),
+PostStats AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY
+        p.OwnerUserId
+),
+UserRanks AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ps.TotalPosts,
+        ps.TotalQuestions,
+        ps.TotalAnswers,
+        ps.TotalBounty,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM
+        Users u
+    LEFT JOIN
+        PostStats ps ON u.Id = ps.OwnerUserId
+    WHERE
+        u.Reputation > 1000 
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.Reputation,
+    ur.TotalPosts,
+    ur.TotalQuestions,
+    ur.TotalAnswers,
+    ur.TotalBounty,
+    ur.ReputationRank,
+    p.Title AS AcceptedAnswerTitle,
+    p.Score AS AcceptedAnswerScore
+FROM 
+    UserRanks ur
+LEFT JOIN 
+    Posts p ON ur.UserId = p.OwnerUserId AND p.Id = (SELECT AcceptedAnswerId FROM Posts WHERE Id = ur.TotalPosts AND PostTypeId = 1) 
+WHERE 
+    ur.ReputationRank <= 10 
+ORDER BY 
+    ur.Reputation DESC;

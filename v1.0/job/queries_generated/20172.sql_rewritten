@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255))
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON m.id = ml.linked_movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    WHERE 
+        mh.level < 5  
+),
+
+KeywordStats AS (
+    SELECT 
+        keyword,
+        COUNT(*) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movie_titles
+    FROM 
+        MovieHierarchy
+    GROUP BY 
+        keyword
+)
+
+SELECT 
+    ks.keyword,
+    ks.movie_count,
+    ARRAY_AGG(DISTINCT CONCAT(movie_title, ' (', production_year, ')')) AS associated_movies,
+    MAX(m.production_year) AS latest_production_year,
+    MIN(m.production_year) AS earliest_production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    SUM(CASE WHEN m.title IS NULL THEN 1 ELSE 0 END) AS null_titles_count,
+    STRING_AGG(DISTINCT nc.name ORDER BY nc.name) AS associated_names,
+    ROW_NUMBER() OVER(ORDER BY ks.movie_count DESC) AS row_num
+FROM 
+    KeywordStats ks
+LEFT JOIN 
+    aka_title m ON ks.keyword = COALESCE(mk.keyword, 'No Keyword')
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    aka_name nc ON c.person_id = nc.person_id
+GROUP BY 
+    ks.keyword, ks.movie_count
+HAVING 
+    COUNT(DISTINCT c.person_id) > 0 OR MAX(m.production_year) IS NULL
+ORDER BY 
+    row_num;

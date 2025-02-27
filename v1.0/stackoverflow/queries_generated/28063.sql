@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        p.AnswerCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+),
+
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.Score
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1  -- Most recent post per user
+),
+
+DetailedPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.AnswerCount,
+        tp.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON tp.PostId = c.PostId
+    LEFT JOIN (
+        SELECT 
+            u.Id AS UserId, 
+            COUNT(b.Id) AS BadgeCount
+        FROM 
+            Users u
+        LEFT JOIN 
+            Badges b ON u.Id = b.UserId
+        GROUP BY 
+            u.Id
+    ) b ON tp.OwnerUserId = b.UserId
+)
+
+SELECT 
+    dp.Title,
+    dp.OwnerDisplayName,
+    dp.CreationDate,
+    dp.AnswerCount,
+    dp.Score,
+    dp.CommentCount,
+    dp.BadgeCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    DetailedPosts dp
+LEFT JOIN 
+    Posts p ON dp.PostId = p.Id
+LEFT JOIN 
+    LATERAL (
+        SELECT 
+            TRIM(UNNEST(string_to_array(SUBSTRING(dp.Tags FROM 2 FOR LENGTH(dp.Tags) - 2), '><')))::varchar AS TagName
+        ) t ON TRUE
+GROUP BY 
+    dp.Title, 
+    dp.OwnerDisplayName, 
+    dp.CreationDate, 
+    dp.AnswerCount, 
+    dp.Score, 
+    dp.CommentCount, 
+    dp.BadgeCount
+ORDER BY 
+    dp.CreationDate DESC;

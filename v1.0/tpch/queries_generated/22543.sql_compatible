@@ -1,0 +1,70 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_size,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rnk
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL AND p.p_size > 0
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        COUNT(ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+    HAVING 
+        COUNT(ps.ps_partkey) > 10
+),
+top_supp AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.avg_supplycost,
+        ss.total_parts
+    FROM 
+        supplier s
+    JOIN 
+        supplier_stats ss ON s.s_suppkey = ss.s_suppkey
+    ORDER BY 
+        ss.avg_supplycost ASC
+    LIMIT 5
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    o.o_orderkey,
+    o.o_totalprice,
+    COALESCE(lp.l_returnflag, 'N') AS l_returnflag,
+    COUNT(DISTINCT lp.l_orderkey) OVER (PARTITION BY c.c_custkey) AS order_count,
+    SUM(lp.l_extendedprice * (1 - lp.l_discount)) AS total_revenue,
+    tp.p_name,
+    tp.rnk
+FROM 
+    customer c
+JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem lp ON o.o_orderkey = lp.l_orderkey AND lp.l_shipdate <= DATE '1998-10-01'
+LEFT JOIN 
+    ranked_parts tp ON lp.l_partkey = tp.p_partkey AND tp.rnk <= 10
+JOIN 
+    top_supp ts ON lp.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderstatus IN ('O', 'F') 
+    AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_mktsegment = c.c_mktsegment)
+GROUP BY 
+    c.c_custkey, c.c_name, o.o_orderkey, o.o_totalprice, lp.l_returnflag, tp.p_name, tp.rnk
+HAVING 
+    SUM(lp.l_extendedprice * (1 - lp.l_discount)) > 100000
+ORDER BY 
+    total_revenue DESC, o.o_orderkey;

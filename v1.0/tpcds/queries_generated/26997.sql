@@ -1,0 +1,39 @@
+
+WITH StringBenchmarking AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        UPPER(c.c_last_name) AS upper_last_name,
+        LOWER(c.c_first_name) AS lower_first_name,
+        LENGTH(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS full_name_length,
+        SUBSTRING(c.c_email_address, POSITION('@' IN c.c_email_address) + 1) AS email_domain,
+        CASE
+            WHEN POSITION('a' IN c.c_last_name) > 0 THEN 'Contains A'
+            ELSE 'Does Not Contain A'
+        END AS last_name_a_check
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+),
+AggregatedResult AS (
+    SELECT 
+        COUNT(*) AS total_customers,
+        AVG(full_name_length) AS avg_full_name_length,
+        COUNT(DISTINCT email_domain) AS unique_email_domains,
+        COUNT(CASE WHEN last_name_a_check = 'Contains A' THEN 1 END) AS count_with_a
+    FROM 
+        StringBenchmarking
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_customers > 0 THEN (COUNT(*) * 100.0 / total_customers)
+        ELSE 0
+    END AS percentage_with_a
+FROM 
+    StringBenchmarking, AggregatedResult;

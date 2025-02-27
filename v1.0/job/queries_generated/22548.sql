@@ -1,0 +1,64 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        RANK() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(mi.info, ', ') AS movie_info,
+        STRING_AGG(kt.keyword, ', ') AS keywords
+    FROM 
+        movie_info m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    r.aka_id,
+    r.aka_name,
+    r.movie_title,
+    r.production_year,
+    CASE 
+        WHEN r.kind_id IS NULL THEN 'Unknown Kind'
+        ELSE k.kind
+    END AS kind_description,
+    m.movie_info,
+    m.keywords,
+    COALESCE(NULLIF(m.movie_info, ''), 'No info available') AS safe_info,
+    CASE 
+        WHEN r.rank_year <= 5 THEN 'Recent Work'
+        ELSE 'Older Work'
+    END AS work_recency,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY r.production_year) AS num_cast_members
+FROM 
+    RankedTitles r
+LEFT JOIN 
+    kind_type k ON r.kind_id = k.id
+LEFT JOIN 
+    MovieInfo m ON r.movie_title = m.movie_info
+LEFT JOIN 
+    cast_info c ON r.movie_title = (SELECT title FROM aka_title WHERE movie_id = c.movie_id)
+WHERE 
+    r.rank_year <= 10 
+    AND (m.keywords IS NOT NULL OR m.movie_info IS NOT NULL)
+ORDER BY 
+    r.production_year DESC,
+    r.aka_name ASC
+LIMIT 50;

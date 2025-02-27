@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        COALESCE(ps.ps_availqty, 0) AS available_qty,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'UNKNOWN'
+            ELSE CAST(p.p_size AS VARCHAR)
+        END AS part_size
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        (p.p_size > 0 OR p.p_size IS NULL) AND
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+),
+AggregatedOrders AS (
+    SELECT 
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MIN(o.o_orderdate) AS first_order_date
+    FROM 
+        orders o
+    INNER JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        c.c_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(f.total_spent, 0) AS total_spent,
+    COALESCE(SUM(ranks.rank), 0) AS supplier_rank_count,
+    MAX(f.part_size) AS max_part_size
+FROM 
+    region r
+LEFT JOIN 
+    AggregatedOrders f ON r.r_regionkey = f.c_nationkey
+LEFT JOIN 
+    RankedSuppliers ranks ON r.r_regionkey = ranks.s_nationkey
+FULL OUTER JOIN 
+    FilteredParts pf ON pf.available_qty > 0
+WHERE 
+    (f.total_spent IS NULL OR f.total_spent > 1000)
+GROUP BY 
+    r.r_name, f.total_spent
+HAVING 
+    SUM(f.total_spent) IS NOT NULL 
+    AND COUNT(DISTINCT pf.p_partkey) > (SELECT COUNT(*) FROM part) / 10
+ORDER BY 
+    r.r_name DESC;

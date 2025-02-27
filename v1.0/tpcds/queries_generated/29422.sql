@@ -1,0 +1,28 @@
+
+SELECT 
+    ca.city,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    AVG(cd.purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT CONCAT(cd.gender, ' ', cd.marital_status), ', ') AS demographics_summary,
+    DATE_TRUNC('year', d.date) AS year_truncated,
+    SUM(ws.ws_sales_price) AS total_web_sales,
+    SUM(ws.ws_net_profit) AS total_web_profit
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+WHERE 
+    ca.ca_state = 'CA'
+    AND d.d_year >= 2020
+GROUP BY 
+    ca.city, year_truncated
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY 
+    total_web_sales DESC;

@@ -1,0 +1,63 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.CloseDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPostCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        ClosedPostCount,
+        AvgReputation,
+        ROW_NUMBER() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        PostCount > 0
+),
+FrequentTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.TagName) AS TagCount
+    FROM 
+        Tags t
+        INNER JOIN (
+            SELECT unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+            FROM Posts
+        ) pt ON t.TagName = pt.TagName
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.ClosedPostCount,
+    u.AvgReputation,
+    COALESCE(f.TagName, 'No Tags') AS MostFrequentTag,
+    f.TagCount
+FROM 
+    TopUsers u
+    LEFT JOIN FrequentTags f ON u.UserId = f.TagCount
+WHERE 
+    u.Rank <= 10
+ORDER BY 
+    u.AvgReputation DESC;

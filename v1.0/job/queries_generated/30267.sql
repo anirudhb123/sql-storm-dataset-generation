@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 -- Assume 1 represents 'movie'
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    JOIN 
+        role_type rt ON rt.id = ci.role_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        mk.movie_id
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, '; ') AS companies,
+        MAX(ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    JOIN 
+        company_type ct ON ct.id = mc.company_type_id
+    GROUP BY 
+        mc.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ar.actor_name, 'No Actors') AS actor_name,
+    COALESCE(ar.role_name, 'N/A') AS role_name,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    COALESCE(mc.companies, 'No Companies') AS companies,
+    mc.company_types
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles ar ON ar.movie_id = mh.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    MovieCompanies mc ON mc.movie_id = mh.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND (ar.actor_name IS NOT NULL OR mh.movie_id IN (SELECT movie_id FROM MovieCompanies))
+ORDER BY 
+    mh.production_year DESC,
+    mh.title;

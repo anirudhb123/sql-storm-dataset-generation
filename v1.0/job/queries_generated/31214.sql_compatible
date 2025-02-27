@@ -1,0 +1,42 @@
+
+WITH RECURSIVE movie_network AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS depth
+    FROM title m
+    WHERE m.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mn.depth + 1
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_network mn ON ml.movie_id = mn.movie_id
+    WHERE mn.depth < 3
+),
+
+ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS rank
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+)
+
+SELECT 
+    mn.movie_title,
+    STRING_AGG(DISTINCT rc.actor_name, ', ') AS cast,
+    COUNT(DISTINCT ml.linked_movie_id) AS linked_movies,
+    COALESCE(SUM(mi.info_type_id), 0) AS total_info_types
+FROM movie_network mn
+LEFT JOIN movie_link ml ON mn.movie_id = ml.movie_id
+LEFT JOIN ranked_cast rc ON mn.movie_id = rc.movie_id
+LEFT JOIN (SELECT movie_id, info_type_id FROM movie_info) mi ON mn.movie_id = mi.movie_id
+GROUP BY mn.movie_title
+HAVING COUNT(DISTINCT rc.actor_name) > 2 AND COALESCE(total_info_types, 0) IS NOT NULL
+ORDER BY linked_movies DESC, mn.movie_title ASC;

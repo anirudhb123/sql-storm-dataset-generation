@@ -1,0 +1,79 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.id) DESC) AS rank_per_year
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id
+),
+TopRankedMovies AS (
+    SELECT 
+        *
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_per_year = 1
+),
+MovieWithMoreThanOneKeyword AS (
+    SELECT 
+        mw.movie_id
+    FROM 
+        movie_keyword mw
+    GROUP BY 
+        mw.movie_id
+    HAVING 
+        COUNT(mw.keyword_id) > 1
+),
+MoviesWithCharacters AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT ch.name, ', ') AS character_names
+    FROM 
+        cast_info c
+    INNER JOIN 
+        char_name ch ON c.person_id = ch.imdb_id
+    GROUP BY 
+        c.movie_id
+),
+MoviesWithSpecialRoles AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles
+    FROM 
+        cast_info c
+    INNER JOIN 
+        role_type r ON c.role_id = r.id
+    WHERE 
+        r.role ILIKE '%lead%'
+    GROUP BY 
+        c.movie_id
+)
+SELECT 
+    t.title,
+    t.production_year,
+    COALESCE(mc.company_id, 'N/A') AS company_id,
+    COALESCE(mwc.movie_id, 'N/A') AS multiple_keywords,
+    COALESCE(mwc.character_names, 'No Characters') AS character_names,
+    COALESCE(msr.roles, 'No Special Roles') AS special_roles
+FROM 
+    TopRankedMovies t
+LEFT JOIN 
+    movie_companies mc ON t.title_id = mc.movie_id
+LEFT JOIN 
+    MovieWithMoreThanOneKeyword mwc ON t.title_id = mwc.movie_id
+LEFT JOIN 
+    MoviesWithCharacters m ON t.title_id = m.movie_id
+LEFT JOIN 
+    MoviesWithSpecialRoles msr ON t.title_id = msr.movie_id
+WHERE 
+    t.production_year IS NOT NULL
+ORDER BY 
+    t.production_year DESC, t.title;

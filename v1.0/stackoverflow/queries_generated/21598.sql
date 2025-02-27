@@ -1,0 +1,53 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.PostTypeId IN (10, 11) THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        ROW_NUMBER() OVER (PARTITION BY UserId ORDER BY CreationDate DESC) AS rn,
+        CreationDate
+    FROM 
+        Comments
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.Questions,
+    ups.Answers,
+    ups.ClosedPosts,
+    COALESCE(ra.CreationDate, '1970-01-01'::timestamp) AS LastCommentDate,
+    ROUND((EXTRACT(EPOCH FROM COALESCE(ra.CreationDate, '1970-01-01'::timestamp)) - EXTRACT(EPOCH FROM u.CreationDate)) / 86400.0, 2) AS DaysSinceCreation,
+    (SELECT COUNT(DISTINCT p.Id) 
+     FROM Posts p 
+     WHERE p.Score > (SELECT AVG(Score) FROM Posts) AND p.OwnerUserId = ups.UserId) AS HighScorePosts,
+    CASE 
+        WHEN ups.ClosedPosts > 0 THEN 'Has Closed Posts' 
+        ELSE 'No Closed Posts' 
+    END AS PostClosureStatus
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    RecentActivity ra ON ups.UserId = ra.UserId AND ra.rn = 1
+JOIN 
+    Users u ON u.Id = ups.UserId
+WHERE 
+    ups.TotalPosts > 0
+ORDER BY 
+    DaysSinceCreation DESC, ups.TotalPosts DESC
+LIMIT 10;
+
+-- Note: A UNION example can be added here to merge results from another CTE or base query if needed.

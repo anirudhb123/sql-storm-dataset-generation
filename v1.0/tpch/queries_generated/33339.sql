@@ -1,0 +1,70 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        1 AS level
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        sc.level + 1
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        SalesCTE sc ON sc.s_suppkey = s.s_suppkey
+    WHERE 
+        sc.total_sales > 100000
+    GROUP BY 
+        s.s_suppkey, s.s_name, sc.level
+),
+RankedSales AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    r.sales_rank
+FROM 
+    (SELECT DISTINCT s_name FROM supplier) AS s
+LEFT JOIN 
+    SalesCTE ss ON s.s_name = ss.s_name
+FULL OUTER JOIN 
+    RankedSales r ON s.s_suppkey = r.s_suppkey
+WHERE 
+    r.sales_rank <= 10 
+ORDER BY 
+    r.sales_rank, supplier_name;

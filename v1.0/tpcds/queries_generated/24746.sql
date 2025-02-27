@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT ws_sold_date_sk, ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_sales_price) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT cs_sold_date_sk, cs_item_sk, SUM(cs_quantity) AS total_quantity, SUM(cs_sales_price) AS total_sales
+    FROM catalog_sales
+    GROUP BY cs_sold_date_sk, cs_item_sk
+
+    UNION ALL
+
+    SELECT ss_sold_date_sk, ss_item_sk, SUM(ss_quantity) AS total_quantity, SUM(ss_sales_price) AS total_sales
+    FROM store_sales
+    GROUP BY ss_sold_date_sk, ss_item_sk
+),
+item_sales AS (
+    SELECT isales.ws_item_sk, isales.total_quantity, isales.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY isales.ws_item_sk ORDER BY isales.total_sales DESC) AS rank
+    FROM sales_data isales
+    WHERE isales.total_quantity IS NOT NULL
+),
+item_details AS (
+    SELECT i.i_item_id, i.i_item_desc, i.i_current_price, i.i_brand, d.d_year, item_sales.total_quantity, item_sales.total_sales
+    FROM item i
+    JOIN item_sales ON i.i_item_sk = item_sales.ws_item_sk
+    JOIN date_dim d ON d.d_date_sk = (SELECT MAX(d2.d_date_sk) 
+                                        FROM date_dim d2 
+                                        WHERE d2.d_year = 2023 AND d2.d_moy BETWEEN 1 AND 6)
+    WHERE i.i_current_price > 0 AND item_sales.rank <= 5
+),
+address_info AS (
+    SELECT c.c_customer_id, ca.ca_city, ca.ca_state, 
+        CASE WHEN ca.ca_state IS NULL THEN 'Unknown' ELSE ca.ca_state END AS state_desc
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE c.c_birth_year IS NOT NULL
+),
+final_sales AS (
+    SELECT id.i_item_id, id.i_item_desc, id.i_current_price, id.total_quantity, id.total_sales,
+           ad.ca_city, ad.state_desc
+    FROM item_details id
+    LEFT JOIN address_info ad ON ad.c_customer_id IS NOT NULL
+)
+SELECT f.item_id, f.item_desc, f.current_price, f.total_quantity,
+       f.total_sales, COALESCE(f.ca_city, 'No City') AS city, 
+       COALESCE(f.state_desc, 'Unknown State') AS state
+FROM final_sales f
+WHERE f.total_sales > (SELECT AVG(total_sales) FROM final_sales) 
+      AND f.current_price < (SELECT MIN(i_current_price) FROM item)
+ORDER BY f.total_sales DESC, f.current_price ASC
+LIMIT 10;

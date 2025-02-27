@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TopBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+    HAVING 
+        COUNT(*) > 5
+),
+UserActivity AS (
+    SELECT 
+        au.UserId,
+        COALESCE(ba.BadgeCount, 0) AS BadgeCount,
+        au.PostCount,
+        au.TotalBounty,
+        RANK() OVER (ORDER BY au.TotalBounty DESC) AS TotalBountyRank
+    FROM 
+        ActiveUsers au
+    LEFT JOIN 
+        TopBadges ba ON au.UserId = ba.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    COALESCE(ua.BadgeCount, 0) AS UserBadgeCount,
+    ua.PostCount AS UserPostCount,
+    MAX(CASE WHEN rp.Rank = 1 THEN rp.Score ELSE NULL END) AS TopScore,
+    COUNT(DISTINCT p.CategoryId) AS DistinctCategories,
+    COUNT(c.Id) AS CommentCount,
+    MAX(STRING_AGG(DISTINCT t.TagName, ', ')) AS Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+LEFT JOIN 
+    PostLinks pl ON rp.PostId = pl.PostId 
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = rp.PostId
+LEFT JOIN 
+    UserActivity ua ON rp.OwnerDisplayName = ua.UserId
+WHERE 
+    rp.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.OwnerDisplayName, ua.BadgeCount, ua.PostCount
+HAVING 
+    COUNT(c.Id) > 3 OR COALESCE(ua.BadgeCount, 0) > 0
+ORDER BY 
+    TopScore DESC NULLS LAST, UserPostCount DESC;

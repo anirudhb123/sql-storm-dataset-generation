@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        cd.cd_gender,
+        ca.ca_state,
+        d.d_year
+    FROM 
+        web_sales ws
+        JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+        JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+),
+TopSales AS (
+    SELECT 
+        web_site_id,
+        ws_order_number,
+        ws_net_profit,
+        cd_gender,
+        ca_state,
+        d_year
+    FROM 
+        RankedSales
+    WHERE 
+        profit_rank <= 10
+),
+SalesSummary AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit,
+        AVG(ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws_order_number) AS unique_orders
+    FROM 
+        TopSales
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    ss.ca_state,
+    ss.total_sales,
+    ss.total_net_profit,
+    ss.avg_net_profit,
+    ss.unique_orders,
+    COALESCE((SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_gender = 'F' AND cd.cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IN (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_state = ss.ca_state))), 0) AS female_customers,
+    COALESCE((SELECT COUNT(*) FROM customer_demographics cd WHERE cd.cd_gender = 'M' AND cd.cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_addr_sk IN (SELECT ca.ca_address_sk FROM customer_address ca WHERE ca.ca_state = ss.ca_state))), 0) AS male_customers
+FROM 
+    SalesSummary ss
+ORDER BY 
+    ss.total_net_profit DESC;

@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerDisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS Downvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+LatestComments AS (
+    SELECT 
+        c.PostId,
+        c.Text,
+        c.CreationDate,
+        RANK() OVER (PARTITION BY c.PostId ORDER BY c.CreationDate DESC) AS CommentRank
+    FROM 
+        Comments c
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.ViewCount,
+    rp.Score,
+    rp.Rank,
+    COALESCE(cp.CloseCount, 0) AS NumberOfClosures,
+    COALESCE(cp.CloseReasons, 'No reasons provided') AS ClosureReasons,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(ub.BadgeNames, 'No badges') AS UserBadges,
+    lc.Text AS LatestComment,
+    lc.CreationDate AS LatestCommentDate
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN 
+    LatestComments lc ON rp.PostId = lc.PostId AND lc.CommentRank = 1
+WHERE 
+    rp.ViewCount > 100
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;
+
+-- This construction benchmarks performance by joining multiple tables,
+-- applying aggregate functions, using window functions for ranking,
+-- handling null scenarios, and applying complex predicates. 
+-- It also showcases unusual SQL semantics with the use of `STRING_AGG` and playing with type casting.

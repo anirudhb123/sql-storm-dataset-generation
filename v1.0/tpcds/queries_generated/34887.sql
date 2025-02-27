@@ -1,0 +1,65 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        0 AS level,
+        CAST(c.c_customer_id AS varchar(255)) AS path
+    FROM 
+        customer c
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        sh.level + 1,
+        CONCAT(sh.path, ' -> ', c.c_customer_id)
+    FROM 
+        customer c
+    JOIN 
+        sales_hierarchy sh ON c.c_current_cdemo_sk = sh.c_customer_sk
+    WHERE
+        sh.level < 5
+),
+aggregated_sales AS (
+    SELECT 
+        sh.c_customer_sk,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        sales_hierarchy sh
+    LEFT JOIN 
+        web_sales ws ON sh.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        sh.c_customer_sk
+),
+top_spenders AS (
+    SELECT 
+        a.c_customer_sk,
+        a.total_orders,
+        a.total_spent,
+        ROW_NUMBER() OVER (ORDER BY a.total_spent DESC) AS rank
+    FROM 
+        aggregated_sales a
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ts.total_orders, 0) AS total_orders,
+    COALESCE(ts.total_spent, 0) AS total_spent,
+    ts.rank
+FROM 
+    customer c
+LEFT JOIN 
+    top_spenders ts ON c.c_customer_sk = ts.c_customer_sk
+WHERE 
+    (c.c_birth_month = 12 OR c.c_birth_month IS NULL)
+    AND (c.c_pref_cust_flag = 'Y' OR ts.total_orders IS NOT NULL)
+ORDER BY 
+    ts.rank
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

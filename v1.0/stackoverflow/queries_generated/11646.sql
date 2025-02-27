@@ -1,0 +1,45 @@
+-- Performance benchmarking query to retrieve statistics on posts, users, and votes
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.OwnerUserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalPosts,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+Summary AS (
+    SELECT 
+        COUNT(DISTINCT u.UserId) AS TotalUsers,
+        COUNT(DISTINCT ps.PostId) AS TotalPosts,
+        SUM(ps.ViewCount) AS TotalViews,
+        SUM(ps.Score) AS TotalScore,
+        SUM(us.TotalUpvotes) AS TotalUpvotes,
+        SUM(us.TotalDownvotes) AS TotalDownvotes
+    FROM UserStats us
+    JOIN PostStats ps ON us.TotalPosts > 0
+)
+
+SELECT 
+    TotalUsers,
+    TotalPosts,
+    TotalViews,
+    TotalScore,
+    TotalUpvotes,
+    TotalDownvotes
+FROM Summary;

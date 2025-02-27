@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_ticket_number, ss_net_paid
+    FROM store_sales
+    WHERE ss_sold_date_sk = (SELECT max(ss_sold_date_sk) FROM store_sales)
+    
+    UNION ALL
+    
+    SELECT sh.s_store_sk, sh.s_store_name, sh.s_ticket_number, sh.ss_net_paid
+    FROM store_sales sh
+    INNER JOIN sales_hierarchy shier ON sh.s_store_sk = shier.s_store_sk
+    WHERE sh.ss_net_paid > shier.ss_net_paid
+),
+customer_summary AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, 
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+top_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           ROW_NUMBER() OVER (PARTITION BY cd_marital_status ORDER BY total_sales DESC) AS rn
+    FROM customer_summary cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+),
+total_revenue AS (
+    SELECT SUM(total_sales) AS total_revenue
+    FROM customer_summary
+),
+sales_analysis AS (
+    SELECT c.c_customer_sk, cs.total_sales, tr.total_revenue,
+           (cs.total_sales / tr.total_revenue) * 100 AS sales_percentage
+    FROM customer_summary cs
+    CROSS JOIN total_revenue tr
+    WHERE cs.total_sales > (SELECT AVG(total_sales) FROM customer_summary)
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    s_hierarchy.s_store_name,
+    sa.total_sales,
+    sa.sales_percentage,
+    CASE 
+        WHEN cd.cd_gender = 'M' THEN 'Male'
+        WHEN cd.cd_gender = 'F' THEN 'Female'
+        ELSE 'Other'
+    END AS gender_label
+FROM sales_analysis sa
+JOIN top_customers tc ON sa.c_customer_sk = tc.c_customer_sk
+JOIN customer c ON tc.c_customer_sk = c.c_customer_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN sales_hierarchy sh ON c.c_customer_sk = sh.s_ticket_number
+WHERE tc.rn <= 5
+ORDER BY sa.total_sales DESC, gender_label;

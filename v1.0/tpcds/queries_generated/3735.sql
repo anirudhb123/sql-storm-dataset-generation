@@ -1,0 +1,42 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_sk, ws.web_site_id
+),
+customer_return AS (
+    SELECT 
+        wr.wr_returned_date_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(DISTINCT wr.wr_order_number) AS total_returns
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_returned_date_sk
+)
+SELECT 
+    ws.web_site_id,
+    ws.total_sales,
+    cr.total_return_amt,
+    cr.total_returns,
+    COALESCE(cr.total_return_amt / ws.total_sales, 0) AS return_ratio
+FROM 
+    ranked_sales ws
+LEFT JOIN 
+    customer_return cr ON cr.wr_returned_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d)
+WHERE 
+    ws.rank_sales = 1
+ORDER BY 
+    return_ratio DESC
+LIMIT 10;

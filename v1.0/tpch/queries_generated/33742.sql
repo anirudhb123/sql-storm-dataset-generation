@@ -1,0 +1,51 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, 1 AS depth
+    FROM part
+    WHERE p_size < 20
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice, ph.depth + 1
+    FROM part p
+    JOIN PartHierarchy ph ON p.p_size = ph.p_size + 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderstatus, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) as order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS total_parts, 
+           SUM(ps.ps_supplycost) AS total_supplycost, s.s_acctbal
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopRegions AS (
+    SELECT n.n_regionkey, r.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_regionkey, r.r_name
+    ORDER BY customer_count DESC
+    LIMIT 5
+)
+SELECT ph.p_name, ph.p_retailprice, co.c_name, co.o_orderkey, 
+       ss.s_name AS supplier_name, ss.total_parts, ss.total_supplycost,
+       COALESCE(tr.customer_count, 0) AS region_customer_count
+FROM PartHierarchy ph
+JOIN CustomerOrders co ON ph.p_partkey IN (
+    SELECT l.l_partkey 
+    FROM lineitem l 
+    WHERE l.l_orderkey = co.o_orderkey
+)
+LEFT JOIN SupplierStats ss ON ss.total_parts > 5
+LEFT JOIN TopRegions tr ON ss.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal > 1000
+)
+WHERE ph.depth <= 3
+ORDER BY ph.p_retailprice DESC, co.o_orderkey ASC 
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

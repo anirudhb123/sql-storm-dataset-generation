@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankByViews,
+        RANK() OVER (PARTITION BY p.Tag AS TagName ORDER BY p.CreationDate) AS RankByCreation
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        NUMERIC(u.UpVotes) - NUMERIC(u.DownVotes) AS Score
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+FilteredTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE 
+        p.IsDeleted IS FALSE OR p IsDeleted IS NULL
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) >= 10
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    ch.CloseCount,
+    ch.CloseReasons,
+    u.UserId,
+    u.Reputation,
+    u.Score,
+    ft.TagName,
+    ft.PostCount AS TagPostCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostHistory ch ON rp.PostId = ch.PostId
+JOIN 
+    UserStats u ON u.UserId = rp.OwnerUserId
+JOIN 
+    FilteredTags ft ON ft.TagName = ANY(string_to_array(rp.Tags, ','))
+WHERE 
+    rp.RankByViews <= 5 
+    AND (ch.CloseCount IS NULL OR ch.CloseCount < 3)
+ORDER BY 
+    rp.ViewCount DESC, 
+    u.Reputation DESC;
+This query combines various constructs such as Common Table Expressions (CTEs), orderings with window functions, outer joins, aggregations, and filtering based on complex conditions, providing an elaborate insight into popular posts along with their closed status and user statistics. Through string manipulation and checking conditions for NULL logic or counts, it thoroughly benchmarks performance and delivers potentially useful analytics from the Stack Overflow schema.

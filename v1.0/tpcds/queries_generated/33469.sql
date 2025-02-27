@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_net_profit) + sd.total_profit,
+        COUNT(DISTINCT ws_order_number) + sd.order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        sales_data sd ON ws.web_site_sk = sd.web_site_sk AND ws_sold_date_sk > sd.ws_sold_date_sk
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_store_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, c.c_first_name, c.c_last_name, cd.cd_purchase_estimate
+),
+profit_ranking AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.cd_purchase_estimate,
+        ci.total_store_profit,
+        DENSE_RANK() OVER (PARTITION BY ci.cd_gender, ci.cd_marital_status ORDER BY ci.total_store_profit DESC) AS profit_rank
+    FROM 
+        customer_info ci
+    WHERE 
+        ci.total_store_profit IS NOT NULL
+)
+SELECT 
+    sr.returning_customer_sk,
+    sr.returning_cdemo_sk,
+    SUM(sr.return_quantity) AS total_returns,
+    SUM(sr.return_amt) AS total_return_amount,
+    COALESCE(pr.total_store_profit, 0) AS customer_profit,
+    pr.profit_rank
+FROM 
+    store_returns sr
+LEFT JOIN 
+    profit_ranking pr ON sr.returning_customer_sk = pr.c_customer_sk
+GROUP BY 
+    sr.returning_customer_sk, sr.returning_cdemo_sk, pr.profit_rank
+HAVING 
+    total_returns > 10 AND customer_profit > 1000
+ORDER BY 
+    customer_profit DESC, total_returns DESC;

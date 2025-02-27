@@ -1,0 +1,89 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.id) DESC) AS rank
+    FROM 
+        title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+PopularActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(m.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title m ON c.movie_id = m.id
+    WHERE 
+        m.production_year > 2000
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(m.movie_id) >= 5
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(k.keyword, 'Unknown') AS keyword,
+        COALESCE(c.company_name, 'Independent') AS production_company
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+),
+AggregateInfo AS (
+    SELECT 
+        d.movie_id,
+        d.title,
+        GROUP_CONCAT(DISTINCT a.name SEPARATOR ', ') AS actors,
+        COUNT(DISTINCT a.person_id) AS actor_count,
+        AVG(m.production_year) AS avg_production_year
+    FROM 
+        MovieDetails d
+    LEFT JOIN 
+        cast_info ci ON d.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        d.movie_id, d.title
+)
+SELECT 
+    m.title,
+    m.production_year,
+    COALESCE(pa.name, 'N/A') AS popular_actor,
+    ma.actor_count,
+    ma.avg_production_year
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    PopularActors pa ON pa.total_movies = (
+        SELECT 
+            MAX(total_movies) 
+        FROM 
+            PopularActors
+    )
+LEFT JOIN 
+    AggregateInfo ma ON m.movie_id = ma.movie_id
+WHERE 
+    m.rank <= 10
+ORDER BY 
+    m.production_year DESC, ma.actor_count DESC;

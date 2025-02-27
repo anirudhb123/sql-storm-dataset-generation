@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+TopOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice,
+           ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2022-01-01'
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE(SUM(ps.ps_availqty), 0) AS total_avail_qty,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    pd.p_name AS part_name,
+    po.o_orderkey,
+    po.o_totalprice,
+    pd.total_avail_qty,
+    pd.supplier_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    COUNT(DISTINCT l.l_linenumber) OVER (PARTITION BY s.s_suppkey) AS lineitem_count_by_supplier,
+    CASE WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Revenue' ELSE 'Regular Revenue' END AS revenue_category
+FROM lineitem l
+JOIN TopOrders po ON l.l_orderkey = po.o_orderkey
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN PartDetails pd ON l.l_partkey = pd.p_partkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY r.r_name, n.n_name, s.s_name, pd.p_name, po.o_orderkey, po.o_totalprice
+HAVING COUNT(DISTINCT l.l_orderkey) > 2
+ORDER BY total_revenue DESC, supplier_count ASC;

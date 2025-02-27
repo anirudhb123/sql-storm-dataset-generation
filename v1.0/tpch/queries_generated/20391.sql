@@ -1,0 +1,51 @@
+WITH RECURSIVE enhanced_orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS order_rank
+    FROM orders
+    WHERE o_orderstatus IN ('F', 'P')
+), 
+supplier_metrics AS (
+    SELECT s.s_suppkey, COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+           SUM(ps.ps_supplycost) AS total_supplycost, 
+           AVG(ps.ps_availqty) AS average_avail_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+), 
+customer_spending AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= (SELECT MIN(order_date) 
+                             FROM enhanced_orders)
+    GROUP BY c.c_custkey
+), 
+part_details AS (
+    SELECT p.p_partkey, p.p_name, COALESCE(NULLIF(p.p_container, ''), 'Unknown') as container_type,
+           CASE WHEN p.p_size > 20 THEN 'Large' ELSE 'Small' END as size_category,
+           MAX(ps.ps_supplycost) OVER (PARTITION BY p.p_partkey) AS max_supplycost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT coalesce(c.c_name, 'No Customer') AS customer_name, 
+       coalesce(cm.total_spent, 0) AS customer_total_spent,
+       p.p_name AS part_name,
+       p.container_type,
+       p.size_category,
+       SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+       COUNT(DISTINCT CASE WHEN l.l_shipdate <= CURRENT_DATE THEN l.l_orderkey END) AS total_delivered_orders,
+       s.s_name AS supplier_name,
+       sm.supplied_parts,
+       sm.total_supplycost
+FROM customer c
+FULL OUTER JOIN customer_spending cm ON c.c_custkey = cm.c_custkey
+JOIN lineitem l ON l.l_orderkey IN (SELECT o_orderkey FROM enhanced_orders WHERE order_rank = 1)
+JOIN part_details p ON p.p_partkey = l.l_partkey
+LEFT JOIN supplier s ON s.s_suppkey = l.l_suppkey
+JOIN supplier_metrics sm ON s.s_suppkey = sm.s_suppkey
+WHERE (cm.total_spent IS NOT NULL OR cm.total_orders IS NOT NULL)
+  AND p.max_supplycost > (SELECT AVG(max_supplycost) FROM part_details)
+GROUP BY c.c_name, cm.total_spent, p.p_name, p.container_type, p.size_category, s.s_name, sm.supplied_parts, sm.total_supplycost
+HAVING SUM(l.l_quantity) >= (SELECT AVG(l_quantity) FROM lineitem)
+ORDER BY customer_name, supplier_name, total_delivered_orders DESC;

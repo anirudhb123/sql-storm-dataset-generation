@@ -1,0 +1,52 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+), SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    r.r_name,
+    COALESCE(RC.total_spent, 0) AS total_spent,
+    COALESCE(S.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN COALESCE(RC.total_spent, 0) > COALESCE(S.total_revenue, 0) 
+        THEN 'Customer spends more' 
+        ELSE 'Supplier earns more' 
+    END AS comparison
+FROM 
+    region r
+LEFT JOIN 
+    (SELECT r_regionkey, total_spent FROM RankedCustomers RC WHERE rank = 1) AS RC ON r.r_regionkey IN (
+        SELECT n.n_regionkey 
+        FROM nation n
+        WHERE n.n_nationkey = RC.c_nationkey
+    )
+LEFT JOIN 
+    (SELECT s_name, total_revenue FROM SupplierSales) AS S ON S.s_name = 'Supplier A'
+WHERE 
+    r.r_name LIKE 'N%'
+ORDER BY 
+    r.r_name;

@@ -1,0 +1,60 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+high_value_orders AS (
+    SELECT * 
+    FROM ranked_orders 
+    WHERE total_revenue > (
+        SELECT AVG(total_revenue) 
+        FROM ranked_orders
+    )
+),
+supplier_contributions AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplier_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal > 10000
+    GROUP BY 
+        s.s_name
+)
+SELECT 
+    r.r_name,
+    SUM(hvo.total_revenue) AS total_order_value,
+    SUM(sc.total_supplier_cost) AS total_supplier_expenditure,
+    COUNT(DISTINCT hvo.o_orderkey) AS number_of_orders,
+    COUNT(DISTINCT s.s_suppkey) AS number_of_suppliers
+FROM 
+    high_value_orders hvo
+JOIN 
+    customer c ON hvo.o_custkey = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    supplier_contributions sc ON sc.part_count > 10
+WHERE 
+    hvo.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_order_value DESC;

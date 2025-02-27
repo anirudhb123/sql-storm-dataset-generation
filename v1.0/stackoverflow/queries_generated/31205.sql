@@ -1,0 +1,73 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        ParentId,
+        0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT ph.Id) AS TotalPostHistoryChanges,
+        COUNT(DISTINCT pl.RelatedPostId) AS TotalLinkedPosts
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(b.Class) AS TotalBadgePoints
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        TotalBadgePoints,
+        ROW_NUMBER() OVER (ORDER BY PostsCreated DESC) AS Rank
+    FROM UserEngagement
+    WHERE PostsCreated > 5
+)
+
+SELECT 
+    p.Title,
+    u.DisplayName AS PostOwner,
+    ps.TotalBounty,
+    ps.TotalComments,
+    ps.TotalPostHistoryChanges,
+    ps.TotalLinkedPosts,
+    th.Rank,
+    th.PostsCreated,
+    th.TotalBadgePoints
+FROM PostStats ps
+JOIN Posts p ON p.Id = ps.Id
+JOIN Users u ON u.Id = ps.OwnerUserId
+LEFT JOIN TopUsers th ON th.UserId = ps.OwnerUserId
+WHERE (p.CreationDate > NOW() - INTERVAL '1 year' OR ps.TotalComments > 10)
+AND ps.TotalBounty > 0
+ORDER BY ps.TotalBounty DESC, ps.TotalComments DESC
+LIMIT 50;

@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.depth AS movie_depth,
+    GROUP_CONCAT(DISTINCT c.kind) AS company_kinds,
+    COUNT(DISTINCT mi.info) AS total_movie_info,
+    SUM(CASE WHEN mi.note IS NULL THEN 1 ELSE 0 END) AS null_note_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.person_id ORDER BY mh.production_year DESC) AS row_num
+FROM
+    cast_info ci
+JOIN
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN
+    company_type c ON mc.company_type_id = c.id
+JOIN
+    movie_info mi ON ci.movie_id = mi.movie_id
+JOIN
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+JOIN
+    aka_title at ON ci.movie_id = at.id
+WHERE
+    ak.name IS NOT NULL
+    AND at.production_year >= 2000
+    AND (c.kind IS NOT NULL OR c.kind = 'Unknown')
+GROUP BY
+    ak.name, at.title, mh.depth
+HAVING
+    total_movie_info > 2
+ORDER BY
+    movie_depth DESC, COUNT(ci.movie_id) DESC
+LIMIT 1000;

@@ -1,0 +1,46 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.n_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > 1000
+),
+SalesData AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, ss.total_sales, RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank
+    FROM SupplierSales ss
+    JOIN supplier s ON ss.s_suppkey = s.s_suppkey
+),
+FinalReport AS (
+    SELECT c.c_name, COALESCE(r.s_name, 'N/A') AS supplier_name, sd.total_sales,
+           CASE 
+              WHEN sd.total_sales IS NULL THEN 'No Sales'
+              WHEN sd.total_sales > 5000 THEN 'High Value Customer'
+              ELSE 'Regular Customer'
+           END AS customer_type
+    FROM SalesData sd
+    LEFT JOIN RankedSuppliers r ON sd.c_custkey = r.s_suppkey
+    WHERE sd.total_sales IS NOT NULL
+)
+SELECT fr.c_name, fr.supplier_name, fr.total_sales, fr.customer_type
+FROM FinalReport fr
+WHERE fr.customer_type = 'High Value Customer'
+ORDER BY fr.total_sales DESC
+LIMIT 10;

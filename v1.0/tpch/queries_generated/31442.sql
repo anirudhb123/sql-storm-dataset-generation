@@ -1,0 +1,39 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_custkey, oh.o_orderdate, oh.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY oh.o_custkey ORDER BY oh.o_orderdate DESC)
+    FROM OrderHierarchy oh
+    JOIN orders o ON oh.o_custkey = o.o_custkey AND o.o_orderdate < oh.o_orderdate
+),
+CustomerSuppliers AS (
+    SELECT c.c_name, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM customer c
+    JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY c.c_name, s.s_name
+),
+PriceAnalysis AS (
+    SELECT p.p_partkey, p.p_name, MAX(ps.ps_supplycost) AS max_supply_cost,
+           MIN(ps.ps_supplycost) AS min_supply_cost,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT oh.o_orderkey, oh.o_totalprice, 
+       MAX(c.total_supply_cost) AS max_customer_supply_cost,
+       MIN(c.total_supply_cost) AS min_customer_supply_cost,
+       pa.p_name, pa.max_supply_cost, pa.min_supply_cost, pa.avg_supply_cost
+FROM OrderHierarchy oh
+LEFT JOIN CustomerSuppliers c ON oh.o_custkey = c.c_name
+LEFT JOIN PriceAnalysis pa ON pa.p_partkey IN (SELECT l.l_partkey 
+                                               FROM lineitem l 
+                                               WHERE l.l_orderkey = oh.o_orderkey)
+WHERE oh.rn <= 10
+GROUP BY oh.o_orderkey, oh.o_totalprice, pa.p_name, pa.max_supply_cost, pa.min_supply_cost, pa.avg_supply_cost
+ORDER BY oh.o_orderkey, oh.o_totalprice DESC
+LIMIT 100;

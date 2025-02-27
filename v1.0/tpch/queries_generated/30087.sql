@@ -1,0 +1,45 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           o.o_orderpriority, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           o.o_orderpriority, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (SELECT c.c_custkey 
+                                             FROM customer c 
+                                             WHERE c.c_custkey = oh.o_orderkey)
+    WHERE o.o_orderdate < '2023-12-31'
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000
+),
+RecentHighValueOrders AS (
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_orderstatus, 
+           CASE WHEN oho.level IS NULL THEN 'N/A' ELSE oho.level END AS order_level
+    FROM HighValueOrders hvo
+    LEFT JOIN OrderHierarchy oh ON hvo.o_orderkey = oh.o_orderkey
+)
+SELECT rh.o_orderkey, rh.o_orderdate, rh.o_orderstatus, 
+       COALESCE(sp.total_cost, 0) AS supplier_total_cost, 
+       rh.order_level
+FROM RecentHighValueOrders rh
+LEFT JOIN SupplierPerformance sp ON rh.o_orderkey = (SELECT l.l_orderkey 
+                                                      FROM lineitem l 
+                                                      WHERE l.l_orderkey = rh.o_orderkey
+                                                      LIMIT 1)
+WHERE rh.o_orderstatus IN ('O', 'F')
+ORDER BY rh.o_orderdate DESC, supplier_total_cost DESC;

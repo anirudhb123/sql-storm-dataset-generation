@@ -1,0 +1,53 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.net_paid) AS total_sales,
+        COUNT(*) AS sales_count,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY SUM(ws.net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY ws.bill_customer_sk
+), Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 1000 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_level
+    FROM customer_demographics cd
+), AddressCounts AS (
+    SELECT 
+        ca.county,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca.county
+), CombinedSales AS (
+    SELECT 
+        rs.bill_customer_sk,
+        COALESCE(dc.purchase_level, 'Not Specified') AS purchase_level,
+        ac.customer_count,
+        rs.total_sales
+    FROM RankedSales rs
+    LEFT JOIN Demographics dc ON rs.bill_customer_sk = dc.cd_demo_sk
+    LEFT JOIN AddressCounts ac ON dc.cd_demo_sk = ac.customer_count
+)
+SELECT 
+    cs.bill_customer_sk,
+    cs.purchase_level,
+    COUNT(CASE WHEN cs.total_sales > 100 THEN 1 END) AS high_value_customers,
+    SUM(CASE 
+            WHEN cs.total_sales IS NOT NULL THEN cs.total_sales 
+            ELSE 0 
+        END) AS total_high_value_sales,
+    STRING_AGG(CONCAT('Customer: ', cs.bill_customer_sk, ' | Sales: ', cs.total_sales), '; ') AS customer_sales_info
+FROM CombinedSales cs
+GROUP BY cs.bill_customer_sk, cs.purchase_level
+HAVING COUNT(cs.bill_customer_sk) > 1
+ORDER BY total_high_value_sales DESC
+LIMIT 50 OFFSET 0;

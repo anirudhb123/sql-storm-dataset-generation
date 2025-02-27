@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title, 
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') 
+        AND p.ViewCount IS NOT NULL
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, u.DisplayName
+), 
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+    AND 
+        ph.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+),
+
+EnhancedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        COALESCE(cp.ClosedDate, 'No Closure') AS ClosureDate,
+        COALESCE(cp.CloseReason, 'N/A') AS ReasonForClosure,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPosts cp ON rp.PostId = cp.PostId
+)
+
+SELECT 
+    ep.PostId,
+    ep.Title,
+    ep.CreationDate,
+    ep.ViewCount,
+    ep.OwnerDisplayName,
+    ep.CommentCount,
+    ep.ClosureDate,
+    ep.ReasonForClosure,
+    CASE 
+        WHEN ep.ViewCount > 1000 THEN 'High Traffic'
+        WHEN ep.ViewCount BETWEEN 500 AND 1000 THEN 'Moderate Traffic'
+        ELSE 'Low Traffic'
+    END AS TrafficLabel
+FROM 
+    EnhancedPosts ep
+WHERE 
+    ep.Rank <= 5 
+ORDER BY 
+    ep.ViewCount DESC;

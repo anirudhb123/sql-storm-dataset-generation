@@ -1,0 +1,86 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -1, '2024-10-01') AND
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON pht.Id = ph.PostHistoryTypeId
+    GROUP BY 
+        ph.PostId
+),
+PopularBadgedUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.Reputation,
+        UpVotes - DownVotes AS NetVotes
+    FROM 
+        UserReputation ur
+    JOIN 
+        Users u ON ur.UserId = u.Id
+    WHERE 
+        ur.BadgeCount > 0 AND 
+        (ur.Reputation > 500 OR ur.Reputation IS NULL)
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    COALESCE(uh.Reputation, 0) AS UserReputation,
+    COALESCE(pb.UserId, 0) AS PopularBadgedUserId,
+    pd.HistoryTypes,
+    pd.LastChangeDate,
+    CASE 
+        WHEN rp.Score >= 100 THEN 'Highly Rated'
+        WHEN rp.Score BETWEEN 50 AND 99 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users uh ON rp.OwnerUserId = uh.Id
+LEFT JOIN 
+    PopularBadgedUsers pb ON uh.Id = pb.UserId
+LEFT JOIN 
+    PostHistoryDetails pd ON rp.PostId = pd.PostId
+WHERE 
+    (rp.ViewCount IS NULL OR rp.ViewCount > 100) AND
+    (pd.HistoryTypes IS NOT NULL OR EXISTS (
+        SELECT 1 
+        FROM PostLinks pl 
+        WHERE pl.PostId = rp.PostId AND pl.LinkTypeId = 1
+    ))
+ORDER BY 
+    rp.Score DESC,
+    rp.CreationDate DESC,
+    UserReputation DESC;

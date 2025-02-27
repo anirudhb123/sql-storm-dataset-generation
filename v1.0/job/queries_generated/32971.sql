@@ -1,0 +1,89 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+ActorStatistics AS (
+    SELECT
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        COUNT(DISTINCT kc.keyword) AS total_keywords
+    FROM
+        cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN keyword kc ON mk.keyword_id = kc.id
+    GROUP BY
+        ak.name
+    HAVING
+        COUNT(DISTINCT ci.movie_id) > 10
+),
+
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.id) AS num_info
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+),
+
+TopMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        SUM(info.num_info) AS total_info
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN MovieInfo info ON mh.movie_id = info.movie_id
+    GROUP BY
+        mh.movie_id,
+        mh.title,
+        mh.production_year
+    ORDER BY
+        actor_count DESC
+    LIMIT 20
+)
+
+SELECT
+    tm.title AS movie_title,
+    tm.production_year,
+    COALESCE(as.actor_name, 'Unknown Actor') AS actor_name,
+    as.total_movies,
+    as.total_keywords,
+    tm.actor_count,
+    tm.total_info
+FROM
+    TopMovies tm
+LEFT JOIN ActorStatistics as ON EXISTS (
+    SELECT 1 FROM cast_info ci WHERE ci.movie_id = tm.movie_id AND ci.person_id = (SELECT person_id FROM aka_name WHERE name = as.actor_name LIMIT 1)
+)
+WHERE
+    tm.production_year IS NOT NULL
+ORDER BY
+    tm.production_year DESC, tm.actor_count DESC;

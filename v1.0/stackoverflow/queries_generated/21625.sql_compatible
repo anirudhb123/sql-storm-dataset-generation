@@ -1,0 +1,61 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        DisplayName, 
+        Reputation,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank,
+        CASE 
+            WHEN Reputation IS NULL THEN 'No Reputation'
+            WHEN Reputation < 100 THEN 'Newbie'
+            WHEN Reputation BETWEEN 100 AND 500 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationCategory
+    FROM Users
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(COUNT(ph.Id), 0) AS CloseCount
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Rank,
+    u.ReputationCategory,
+    pp.Title,
+    pp.UpVotes,
+    pp.DownVotes,
+    cp.CloseCount AS NumberOfClosures,
+    CASE 
+        WHEN cp.CloseCount > 0 THEN 'Closed'
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(b.Name, 'No Badge') AS BadgeName
+FROM UserReputation u
+LEFT JOIN PostVoteCounts pp ON u.UserId = pp.PostId
+LEFT JOIN ClosedPosts cp ON pp.PostId = cp.PostId
+LEFT JOIN Badges b ON u.UserId = b.UserId
+WHERE u.Reputation IS NOT NULL
+AND EXISTS (
+    SELECT 1 
+    FROM Posts p
+    WHERE p.OwnerUserId = u.UserId 
+    AND p.CreatedAt > CURRENT_DATE - INTERVAL '1 year'
+)
+ORDER BY u.Reputation DESC, pp.UpVotes DESC
+LIMIT 10 OFFSET 0;

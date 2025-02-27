@@ -1,0 +1,86 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        a.title AS movie_title,
+        mc.company_id,
+        c.name AS company_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY m.production_year DESC) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        movie_companies mc ON a.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    WHERE 
+        a.production_year >= 2000
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        COALESCE(NULLIF(pi.info, ''), 'Unknown') AS bio,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id AND pi.info_type_id = 1  
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.id, ak.name, pi.info
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+final_results AS (
+    SELECT 
+        rm.movie_title,
+        ai.actor_name,
+        ai.bio,
+        mk.keywords,
+        COUNT(DISTINCT mc.company_id) AS companies_count
+    FROM 
+        ranked_movies rm
+    JOIN 
+        actor_info ai ON rm.rank = 1 AND EXISTS (
+            SELECT 1 
+            FROM cast_info ci 
+            WHERE ci.movie_id = rm.id AND ci.person_id = ai.actor_id
+        )
+    LEFT JOIN 
+        movie_keywords mk ON rm.company_id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON rm.company_id = mc.movie_id
+    GROUP BY 
+        rm.movie_title, ai.actor_name, ai.bio, mk.keywords
+)
+SELECT 
+    movie_title,
+    actor_name,
+    bio,
+    keywords,
+    companies_count,
+    CASE 
+        WHEN companies_count > 5 THEN 'Diverse Production'
+        ELSE 'Limited Production'
+    END AS production_diversity
+FROM 
+    final_results
+WHERE 
+    NOT EXISTS (
+        SELECT 1
+        FROM complete_cast cc
+        WHERE cc.movie_id = final_results.movie_title
+    )
+ORDER BY 
+    production_diversity DESC, movie_title;

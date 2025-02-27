@@ -1,0 +1,42 @@
+
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey AS nation_key, n.n_name AS nation_name, 0 AS level
+    FROM nation n
+    WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'ASIA')
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.nation_key
+),
+SupplierSales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * l.l_quantity) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '1995-01-01' AND '1995-12-31'
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+NationSupplier AS (
+    SELECT nh.nation_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM NationHierarchy nh
+    LEFT JOIN supplier s ON s.s_nationkey = nh.nation_key
+    GROUP BY nh.nation_name
+)
+SELECT cs.c_name, cs.order_count, cs.total_spent, ns.supplier_count, 
+       CASE 
+           WHEN cs.order_count = 0 THEN 'N/A'
+           ELSE ROUND(cs.total_spent / NULLIF(cs.order_count, 0), 2)
+       END AS avg_order_value
+FROM CustomerOrders cs
+LEFT JOIN NationSupplier ns ON cs.c_name = ns.nation_name
+WHERE cs.rank <= 5
+ORDER BY cs.total_spent DESC
+LIMIT 10;

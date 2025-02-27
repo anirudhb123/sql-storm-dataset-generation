@@ -1,0 +1,74 @@
+WITH RankedMovies AS (
+    SELECT
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_within_year
+    FROM
+        aka_title a
+    WHERE
+        a.production_year IS NOT NULL
+        AND a.title IS NOT NULL
+),
+KeywordCount AS (
+    SELECT
+        m.movie_id,
+        COUNT(k.id) AS keyword_count
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON k.id = mk.keyword_id
+    JOIN
+        title m ON m.id = mk.movie_id
+    GROUP BY
+        m.movie_id
+),
+ActorParticipation AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+),
+MoviesCTE AS (
+    SELECT
+        m.title,
+        m.production_year,
+        COALESCE(kc.keyword_count, 0) AS keyword_count,
+        COALESCE(ac.actor_count, 0) AS actor_count,
+        RANK() OVER (ORDER BY COALESCE(kc.keyword_count, 0) DESC, COALESCE(ac.actor_count, 0) DESC) AS rank
+    FROM
+        RankedMovies m
+    LEFT JOIN
+        KeywordCount kc ON m.movie_id = kc.movie_id
+    LEFT JOIN
+        ActorParticipation ac ON m.movie_id = ac.movie_id
+    WHERE
+        m.rank_within_year <= 5 -- Get top 5 movies per year
+)
+SELECT
+    m.title,
+    m.production_year,
+    m.keyword_count,
+    m.actor_count,
+    (SELECT AVG(TIMESTAMPDIFF(YEAR, MIN(pi.info), MAX(pi.info))) 
+        FROM person_info pi 
+        WHERE pi.person_id IN (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = m.movie_id) 
+        AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'birthdate') 
+    ) AS average_age_of_actors
+FROM
+    MoviesCTE m
+WHERE
+    (m.keyword_count > 3 OR m.actor_count > 5)
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM aka_name ak 
+        WHERE ak.person_id IN (SELECT DISTINCT c.person_id FROM cast_info c WHERE c.movie_id = m.movie_id) 
+        AND ak.name LIKE '%John%'
+    )
+ORDER BY
+    m.production_year DESC,
+    m.keyword_count DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

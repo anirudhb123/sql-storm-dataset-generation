@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+PartAndSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, s.s_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice > 50.00 AND ps.ps_availqty > 0
+),
+OrderInfo AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_income
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+)
+SELECT DISTINCT p.p_name, ps.ps_supplycost, s.s_name AS supplier_name, 
+       ci.order_count, oi.total_income, 
+       r.r_name AS region 
+FROM PartAndSupplier ps
+JOIN SupplierHierarchy sh ON ps.s_suppkey = sh.s_suppkey
+JOIN CustomerOrders ci ON ci.order_count > 0
+LEFT JOIN nation n ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+JOIN OrderInfo oi ON oi.total_income > 1000.00
+WHERE r.r_name IS NOT NULL
+ORDER BY p.p_name, total_income DESC;

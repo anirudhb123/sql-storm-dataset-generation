@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        pt.Name AS PostType,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Id ORDER BY COUNT(v.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, pt.Id, u.DisplayName
+),
+
+TopPosts AS (
+    SELECT 
+        PostId, Title, Body, OwnerDisplayName, PostType, CommentCount, VoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.OwnerDisplayName,
+    tp.PostType,
+    tp.CommentCount,
+    tp.VoteCount,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><') AS tag
+     JOIN Tags t ON tag = t.TagName
+     WHERE p.Id = tp.PostId) AS TagsList,
+    (SELECT COUNT(DISTINCT b.Id)
+     FROM Badges b
+     WHERE b.UserId = (
+        SELECT p.OwnerUserId 
+        FROM Posts p 
+        WHERE p.Id = tp.PostId)) AS OwnerBadges
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.VoteCount DESC, 
+    tp.CommentCount DESC;

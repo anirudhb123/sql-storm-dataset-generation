@@ -1,0 +1,61 @@
+
+WITH RECURSIVE address_cte AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS rnk
+    FROM customer_address
+    WHERE ca_country = 'USA'
+), sales_data AS (
+    SELECT 
+        ss_store_sk, 
+        SUM(ss_net_paid) AS total_sales, 
+        COUNT(DISTINCT ss_ticket_number) AS order_count
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN 2459437 AND 2459447
+    GROUP BY ss_store_sk
+), ranked_sales AS (
+    SELECT 
+        sd.ss_store_sk,
+        sd.total_sales,
+        sd.order_count,
+        RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM sales_data sd
+), item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        AVG(ws_sales_price) AS avg_sales_price
+    FROM web_sales w
+    JOIN item i ON w.ws_item_sk = i.i_item_sk
+    GROUP BY i.i_item_sk
+), high_value_items AS (
+    SELECT 
+        item_summary.i_item_sk,
+        item_summary.order_count,
+        item_summary.avg_sales_price
+    FROM item_summary
+    WHERE avg_sales_price > (SELECT AVG(avg_sales_price) FROM item_summary) 
+    AND order_count > 10
+), ignored_items AS (
+    SELECT i.i_item_sk
+    FROM item i
+    WHERE i.i_current_price IS NULL
+), final_summary AS (
+    SELECT 
+        a.ca_city,
+        a.ca_state,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COUNT(DISTINCT hvi.i_item_sk) AS high_value_item_count,
+        SUM(DISTINCT hvi.avg_sales_price) AS total_avg_price
+    FROM address_cte a
+    LEFT JOIN ranked_sales s ON a.rnk = s.ss_store_sk
+    LEFT JOIN high_value_items hvi ON hvi.i_item_sk NOT IN (SELECT i.i_item_sk FROM ignored_items) 
+    GROUP BY a.ca_city, a.ca_state
+)
+SELECT 
+    fs.ca_city,
+    fs.ca_state,
+    fs.total_sales,
+    fs.high_value_item_count,
+    (fs.total_avg_price / NULLIF(fs.high_value_item_count, 0)) AS avg_price_per_high_value_item
+FROM final_summary fs
+WHERE fs.total_sales > (SELECT AVG(total_sales) FROM ranked_sales)
+ORDER BY fs.total_sales DESC, fs.ca_city ASC;

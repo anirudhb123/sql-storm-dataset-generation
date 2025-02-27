@@ -1,0 +1,61 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returned,
+        SUM(wr_return_amt) AS total_return_amt,
+        DENSE_RANK() OVER (PARTITION BY wr_returning_customer_sk ORDER BY wr_returned_date_sk DESC) AS rnk
+    FROM web_returns
+    WHERE wr_return_quantity > 0
+    GROUP BY wr_returning_customer_sk, wr_item_sk
+),
+ReturnedCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(CAST(cd.cd_income_band_sk AS VARCHAR), 'Unknown') AS income_band,
+        cc.cc_name AS call_center_name,
+        RANK() OVER (PARTITION BY c.c_customer_id ORDER BY sum(sr_return_quantity) DESC) AS return_rank
+    FROM customer c
+    INNER JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN CustomerReturns cr ON c.c_customer_sk = cr.wr_returning_customer_sk
+    LEFT JOIN store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN call_center cc ON cc.cc_call_center_sk = (SELECT cc_call_center_sk
+                                                         FROM call_center 
+                                                         WHERE cc_country = COALESCE(ca.ca_country, 'US') 
+                                                         LIMIT 1)
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state, cd.cd_income_band_sk, cc.cc_name
+    HAVING SUM(COALESCE(sr_return_quantity, 0)) > 0
+)
+SELECT 
+    rc.c_customer_id,
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.ca_city,
+    rc.ca_state,
+    rc.income_band,
+    rc.call_center_name,
+    COUNT(DISTINCT cr.wr_item_sk) AS unique_items_returned,
+    SUM(cr.total_returned) AS total_quantity_returned,
+    SUM(cr.total_return_amt) AS total_return_amount,
+    CASE 
+        WHEN SUM(cr.total_return_amt) < 100 THEN 'Low Value Returns'
+        WHEN SUM(cr.total_return_amt) BETWEEN 100 AND 500 THEN 'Medium Value Returns'
+        ELSE 'High Value Returns'
+    END AS return_value_category,
+    CASE 
+        WHEN MAX(cr.total_returned) IS NULL THEN 'No Returns Yet'
+        WHEN MAX(cr.total_returned) > 10 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_frequency
+FROM ReturnedCustomers rc
+LEFT JOIN CustomerReturns cr ON rc.c_customer_id = cr.wr_returning_customer_sk
+WHERE rc.return_rank = 1
+GROUP BY rc.c_customer_id, rc.c_first_name, rc.c_last_name, rc.ca_city, rc.ca_state, rc.income_band, rc.call_center_name
+ORDER BY total_quantity_returned DESC NULLS LAST
+LIMIT 100;

@@ -1,0 +1,74 @@
+
+WITH RankedSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_id ORDER BY ws.ws_net_profit DESC) AS rn,
+        SUM(ws.ws_quantity) OVER (PARTITION BY w.w_warehouse_id) AS total_quantity,
+        SUM(ws.ws_net_profit) OVER (PARTITION BY w.w_warehouse_id) AS total_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq = 6
+        )
+),
+TopSales AS (
+    SELECT 
+        r.w_warehouse_id,
+        r.ws_item_sk,
+        r.ws_quantity,
+        r.ws_net_profit,
+        r.total_quantity,
+        r.total_profit
+    FROM 
+        RankedSales r
+    WHERE 
+        r.rn <= 10
+),
+StoreInfo AS (
+    SELECT 
+        s_store_id,
+        s_city,
+        s_state,
+        s_number_employees,
+        COALESCE(s_tax_precentage, 0) AS tax_percentage
+    FROM 
+        store
+    WHERE 
+        s_closed_date_sk IS NULL
+    AND 
+        s_number_employees > 5
+)
+SELECT 
+    si.s_city,
+    si.s_state,
+    COUNT(DISTINCT ts.ws_item_sk) AS top_items_count,
+    AVG(ts.total_profit) AS avg_top_profit,
+    SUM(ts.total_quantity) AS total_quantity
+FROM 
+    StoreInfo si
+LEFT JOIN 
+    TopSales ts ON si.s_store_id = (
+        SELECT MAX(s_store_id)
+        FROM store_sales ss
+        WHERE ss.ss_item_sk = ts.ws_item_sk
+        AND ss.ss_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2023 AND d_month_seq = 6
+        )
+    )
+GROUP BY 
+    si.s_city, si.s_state
+HAVING 
+    AVG(ts.total_profit) IS NOT NULL
+    AND SUM(ts.total_quantity) > 100
+ORDER BY 
+    avg_top_profit DESC NULLS LAST;

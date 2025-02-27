@@ -1,0 +1,65 @@
+WITH RECURSIVE ActorMovies AS (
+    SELECT c.movie_id,
+           a.name AS actor_name,
+           ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_order
+    FROM cast_info c
+    INNER JOIN aka_name a ON c.person_id = a.person_id
+    WHERE a.name IS NOT NULL
+),
+MovieGenre AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           k.keyword AS genre,
+           ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY k.keyword) AS genre_order
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+),
+CompanyInfo AS (
+    SELECT mc.movie_id,
+           c.name AS company_name,
+           ct.kind AS company_type,
+           ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_order
+    FROM movie_companies mc
+    INNER JOIN company_name c ON mc.company_id = c.id
+    INNER JOIN company_type ct ON mc.company_type_id = ct.id
+),
+MovieDetails AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           COALESCE(mg.genre, 'Unknown') AS genre,
+           GROUP_CONCAT(DISTINCT a.actor_name) AS actor_list,
+           GROUP_CONCAT(DISTINCT ci.company_name || ' (' || ci.company_type || ')') AS companies
+    FROM aka_title m
+    LEFT JOIN MovieGenre mg ON m.id = mg.movie_id
+    LEFT JOIN ActorMovies a ON m.id = a.movie_id
+    LEFT JOIN CompanyInfo ci ON m.id = ci.movie_id
+    GROUP BY m.id, m.title
+),
+HistoricMovies AS (
+    SELECT md.title,
+           md.genre,
+           md.actor_list,
+           md.companies,
+           m.production_year,
+           LEAD(m.production_year) OVER (ORDER BY m.production_year) AS next_year
+    FROM MovieDetails md
+    INNER JOIN aka_title m ON md.movie_id = m.id
+    WHERE m.production_year IS NOT NULL
+),
+FinalOutput AS (
+    SELECT h.title,
+           h.genre,
+           h.actor_list,
+           h.companies,
+           h.production_year,
+           CASE 
+               WHEN h.next_year IS NOT NULL THEN (h.next_year - h.production_year)
+               ELSE NULL
+           END AS year_difference
+    FROM HistoricMovies h
+)
+SELECT *
+FROM FinalOutput
+WHERE year_difference IS NOT NULL
+ORDER BY production_year ASC;

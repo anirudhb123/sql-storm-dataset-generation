@@ -1,0 +1,64 @@
+WITH PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2
+        ), 0) AS UpvoteCount,
+        COALESCE((
+            SELECT COUNT(*)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3
+        ), 0) AS DownvoteCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_arr
+    LEFT JOIN 
+        Tags t ON t.TagName = TRIM(BOTH '<>' FROM tag_arr)
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, u.DisplayName, u.Reputation
+), RankedPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.Score DESC, ps.ViewCount DESC, ps.AnswerCount DESC) AS Rank
+    FROM 
+        PostStatistics ps
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.FavoriteCount,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.UpvoteCount,
+    rp.DownvoteCount,
+    rp.Rank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 10
+ORDER BY 
+    rp.Rank;

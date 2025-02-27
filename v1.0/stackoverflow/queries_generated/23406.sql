@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByCreationDate,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > COALESCE(
+            (SELECT MAX(CreationDate) FROM Posts WHERE PostTypeId = 1),
+            DATE '2000-01-01'
+        )
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.Comment END) AS LastTitleChange,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 8 THEN ph.Comment END) AS LastBodyChange
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.UserId
+),
+MostActiveUsers AS (
+    SELECT 
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 5
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.ViewCount,
+    pp.CreationDate,
+    pp.RankByCreationDate,
+    COALESCE(phd.LastEditDate, 'No edits yet') AS LastEdit,
+    COALESCE(phd.LastTitleChange, 'No title change') AS LastTitleChange,
+    COALESCE(phd.LastBodyChange, 'No body change') AS LastBodyChange,
+    mau.DisplayName AS MostActiveUser
+FROM 
+    RankedPosts pp
+LEFT JOIN 
+    PostHistoryDetails phd ON pp.PostId = phd.PostId
+LEFT JOIN 
+    MostActiveUsers mau ON pp.RankByCreationDate = 1
+WHERE 
+    pp.CommentCount > 5
+    AND pp.VoteCount > 2
+ORDER BY 
+    pp.ViewCount DESC, pp.CreationDate ASC
+FETCH FIRST 10 ROWS ONLY;
+
+This complex SQL query pulls data from several tables within the StackOverflow schema to analyze posts that meet specific criteria, including their edit history and user activity metrics. It integrates concepts like Common Table Expressions (CTEs), outer joins, aggregation, window functions, and conditional logic. The main goal is to find the most viewed recent posts (with a high number of comments and votes) along with details about their latest edits and associated active users.

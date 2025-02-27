@@ -1,0 +1,16 @@
+SELECT 
+    p.id AS person_id,
+    p.name AS person_name,
+    t.id AS title_id,
+    t.title AS movie_title,
+    c.note AS role_note
+FROM 
+    cast_info c
+JOIN 
+    aka_name p ON c.person_id = p.person_id
+JOIN 
+    aka_title t ON c.movie_id = t.movie_id
+WHERE 
+    t.production_year >= 2000
+ORDER BY 
+    t.production_year DESC;

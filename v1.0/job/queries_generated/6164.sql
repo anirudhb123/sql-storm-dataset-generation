@@ -1,0 +1,33 @@
+SELECT 
+    p.name AS actor_name, 
+    m.title AS movie_title, 
+    c.kind AS cast_type, 
+    ci.note AS character_note, 
+    GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords,
+    COUNT(DISTINCT ci2.movie_id) AS co_starring_count, 
+    AVG(mi.info) AS average_rating
+FROM 
+    aka_name an
+JOIN 
+    cast_info ci ON an.person_id = ci.person_id
+JOIN 
+    title m ON ci.movie_id = m.id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci2 ON cc.subject_id = ci2.id AND ci2.movie_id != m.id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = 1 -- Assuming 1 is for ratings
+WHERE 
+    an.name LIKE '%John%'
+    AND m.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    actor_name, movie_title, cast_type, character_note
+ORDER BY 
+    actor_name, movie_title;

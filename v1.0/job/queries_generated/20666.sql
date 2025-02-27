@@ -1,0 +1,89 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        co.id AS actor_id,
+        ak.name AS actor_name,
+        m.title AS movie_title,
+        m.production_year AS movie_year,
+        ROW_NUMBER() OVER (PARTITION BY co.id ORDER BY m.production_year DESC) AS movie_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.movie_id
+    JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    JOIN 
+        movie_info mi ON cc.movie_id = mi.movie_id
+    JOIN 
+        kind_type kt ON m.kind_id = kt.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    LEFT JOIN 
+        movie_keyword mk ON ci.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        (SELECT DISTINCT 
+            movie_id, 
+            COUNT(*) OVER(PARTITION BY movie_id) AS keyword_count 
+         FROM 
+            movie_keyword) AS kw_count ON kw_count.movie_id = ci.movie_id
+    WHERE 
+        rt.role LIKE '%actor%'
+        AND (m.production_year > 1980 OR k.keyword IS NOT NULL) -- Filtering corner case on production year or exists keyword
+),
+seasoned_actors AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        COUNT(DISTINCT movie_title) AS movie_count,
+        STRING_AGG(DISTINCT movie_title, ', ') AS movie_titles,
+        SUM(movie_year) AS total_years,
+        AVG(movie_rank) AS avg_movie_rank
+    FROM 
+        actor_hierarchy
+    WHERE 
+        movie_rank < 5
+    GROUP BY 
+        actor_id, actor_name
+),
+movie_statistics AS (
+    SELECT 
+        m.title AS movie_title,
+        kt.kind AS movie_kind,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        AVG(m.production_year) AS avg_year,
+        COUNT(DISTINCT kw.id) AS keyword_count
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info ci ON m.movie_id = ci.movie_id
+    JOIN 
+        kind_type kt ON m.kind_id = kt.id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        m.title, kt.kind
+    HAVING 
+        COUNT(DISTINCT ci.person_id) > 5 AND AVG(m.production_year) < 2000 -- Enforcing bizarre semantics: Movies with many casts and under 2000
+)
+SELECT 
+    a.actor_name,
+    a.movie_count,
+    a.movie_titles,
+    a.total_years,
+    ROUND(a.total_years / NULLIF(a.movie_count, 0), 2) AS avg_years_per_movie,
+    m.movie_title,
+    m.movie_kind,
+    m.cast_count,
+    m.avg_year,
+    m.keyword_count
+FROM 
+    seasoned_actors a
+FULL OUTER JOIN 
+    movie_statistics m ON a.movie_titles LIKE '%' || m.movie_title || '%'
+ORDER BY 
+    a.actor_name, m.movie_kind NULLS LAST;

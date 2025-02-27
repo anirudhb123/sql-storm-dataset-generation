@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpvoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownvoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id as UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+FlaggedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.Comment,
+        ph.CreationDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 12)  -- Closed or Deleted
+)
+SELECT 
+    rp.Title,
+    rp.Id AS PostId,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    us.DisplayName AS Owner,
+    us.PostCount AS OwnerPostCount,
+    us.TotalViews AS OwnerTotalViews,
+    us.TotalBadges AS OwnerTotalBadges,
+    COALESCE(fp.Comment, 'No flags') AS FlagComment,
+    fp.CreationDate AS FlagDate
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+LEFT JOIN 
+    FlaggedPosts fp ON rp.Id = fp.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;

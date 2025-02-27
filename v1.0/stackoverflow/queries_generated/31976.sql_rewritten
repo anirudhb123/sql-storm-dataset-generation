@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(u.DisplayName, 'Deleted User') AS AuthorName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year' 
+),
+TopAcceptedAnswers AS (
+    SELECT 
+        pa.Id AS AcceptedAnswerId,
+        pa.OwnerUserId,
+        COUNT(*) AS AnswerCount
+    FROM 
+        Posts pa
+    WHERE 
+        pa.PostTypeId = 2 
+        AND pa.Id IN (SELECT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+    GROUP BY 
+        pa.Id, pa.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.ViewCount,
+    r.AuthorName,
+    COALESCE(Top.AnswerCount, 0) AS AcceptedAnswerCount,
+    ub.BadgeCount,
+    CASE 
+        WHEN r.Rank = 1 THEN 'Most Recent Post'
+        ELSE 'Older Post'
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = r.PostId) AS CommentCount,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM 
+    RankedPosts r
+LEFT JOIN 
+    TopAcceptedAnswers Top ON r.AcceptedAnswerId = Top.AcceptedAnswerId
+LEFT JOIN 
+    UserBadges ub ON r.OwnerUserId = ub.UserId
+LEFT JOIN 
+    Posts p ON r.PostId = p.Id
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, ',')) AS t(TagName) ON t.TagName IS NOT NULL
+GROUP BY 
+    r.PostId, r.Title, r.CreationDate, r.Score, r.ViewCount, r.AuthorName, Top.AnswerCount, ub.BadgeCount, r.Rank
+ORDER BY 
+    r.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH customer_details AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+),
+combined_data AS (
+    SELECT 
+        cd.full_name,
+        cd.ca_city,
+        cd.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ss.total_quantity,
+        ss.total_sales,
+        ss.total_orders
+    FROM 
+        customer_details cd
+    LEFT JOIN 
+        sales_summary ss ON cd.c_customer_id = ss.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    cd_purchase_estimate,
+    COALESCE(total_quantity, 0) AS total_quantity,
+    COALESCE(total_sales, 0.00) AS total_sales,
+    COALESCE(total_orders, 0) AS total_orders,
+    CASE 
+        WHEN cd_purchase_estimate > 1000 THEN 'High Value'
+        WHEN cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM 
+    combined_data
+ORDER BY 
+    total_sales DESC, total_quantity DESC
+LIMIT 100;

@@ -1,0 +1,85 @@
+
+WITH RankedMovies AS (
+    SELECT
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM
+        aka_title at
+    WHERE
+        at.production_year IS NOT NULL
+),
+CastWithRole AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        rt.role,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_cast
+    FROM
+        cast_info ci
+    LEFT JOIN
+        role_type rt ON ci.role_id = rt.id
+),
+MovieCompanies AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_producers,
+        STRING_AGG(DISTINCT cn.name, ', ') AS producer_names
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY
+        mc.movie_id
+),
+MoviesWithDetails AS (
+    SELECT
+        rm.title_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(cc.total_cast, 0) AS cast_count,
+        COALESCE(mc.total_producers, 0) AS producer_count,
+        COALESCE(mc.producer_names, 'None') AS producer_names
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        CastWithRole cc ON rm.title_id = cc.movie_id
+    LEFT JOIN
+        MovieCompanies mc ON rm.title_id = mc.movie_id
+    WHERE
+        rm.year_rank <= 3
+),
+FilteredMovies AS (
+    SELECT
+        *,
+        CASE 
+            WHEN production_year IS NULL THEN 'Unknown Year'
+            ELSE CONCAT('Produced in ', CAST(production_year AS TEXT))
+        END AS production_info,
+        CASE 
+            WHEN cast_count > 10 THEN 'Blockbuster'
+            ELSE 'Indie/Festival Film'
+        END AS movie_type
+    FROM
+        MoviesWithDetails
+)
+SELECT
+    title,
+    production_info,
+    producer_count,
+    producer_names,
+    movie_type,
+    total_cast,
+    CASE 
+        WHEN producer_count = 0 THEN 'No Producers'
+        WHEN producer_count > 5 THEN 'Mighty Producers'
+        ELSE 'Moderate Producers'
+    END AS producer_category
+FROM
+    FilteredMovies
+WHERE
+    total_cast > 0
+ORDER BY
+    production_year DESC, title ASC;

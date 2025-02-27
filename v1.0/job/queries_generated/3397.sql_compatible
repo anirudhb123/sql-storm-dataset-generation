@@ -1,0 +1,65 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year
+),
+top_movies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        ranked_movies
+    WHERE 
+        rank <= 10
+),
+movie_details AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        top_movies tm
+    LEFT JOIN 
+        cast_info ci ON tm.title = ci.movie_id
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_keyword mk ON tm.title = mk.movie_id
+    GROUP BY 
+        tm.title, tm.production_year
+),
+summary AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        COALESCE(md.actors, 'No actors') AS actors,
+        md.keyword_count,
+        CASE 
+            WHEN md.keyword_count > 5 THEN 'Popular'
+            ELSE 'Less Popular'
+        END AS popularity
+    FROM 
+        movie_details md
+)
+SELECT 
+    s.title,
+    s.production_year,
+    s.actors,
+    s.keyword_count,
+    s.popularity
+FROM 
+    summary s
+ORDER BY 
+    s.production_year DESC, s.keyword_count DESC;

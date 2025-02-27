@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        c.c_name, 
+        c.c_mktsegment, 
+        ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS rnk
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey, 
+        ro.o_orderdate, 
+        ro.o_totalprice, 
+        ro.c_name, 
+        ro.c_mktsegment
+    FROM RankedOrders ro
+    WHERE ro.rnk <= 10
+),
+DetailedLineItems AS (
+    SELECT 
+        lo.l_orderkey, 
+        lo.l_partkey, 
+        lo.l_suppkey, 
+        lo.l_quantity, 
+        lo.l_extendedprice, 
+        lo.l_discount, 
+        lo.l_tax, 
+        p.p_name, 
+        s.s_name AS supplier_name
+    FROM lineitem lo
+    JOIN part p ON lo.l_partkey = p.p_partkey
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN TopOrders to ON lo.l_orderkey = to.o_orderkey
+)
+SELECT 
+    to.o_orderkey, 
+    to.o_orderdate, 
+    to.o_totalprice, 
+    to.c_name AS customer_name, 
+    to.c_mktsegment AS market_segment, 
+    dli.l_partkey, 
+    dli.p_name, 
+    SUM(dli.l_extendedprice * (1 - dli.l_discount)) AS total_revenue,
+    COUNT(DISTINCT dli.l_suppkey) AS unique_suppliers,
+    AVG(dli.l_quantity) AS avg_quantity,
+    SUM(dli.l_tax) AS total_tax
+FROM TopOrders to
+JOIN DetailedLineItems dli ON to.o_orderkey = dli.l_orderkey
+GROUP BY 
+    to.o_orderkey, 
+    to.o_orderdate, 
+    to.o_totalprice, 
+    to.c_name, 
+    to.c_mktsegment, 
+    dli.l_partkey, 
+    dli.p_name
+ORDER BY 
+    total_revenue DESC, 
+    to.o_orderdate ASC;

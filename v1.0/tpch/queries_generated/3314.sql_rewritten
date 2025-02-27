@@ -1,0 +1,75 @@
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LineItemDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' 
+        AND l.l_shipdate < '1997-12-31'
+    GROUP BY 
+        l.l_orderkey
+),
+CombinedData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_orders,
+        cs.total_spent,
+        ss.total_available_qty,
+        ss.avg_supply_cost,
+        ld.revenue
+    FROM 
+        CustomerOrders cs
+    LEFT JOIN 
+        Customer c ON cs.c_custkey = c.c_custkey
+    LEFT JOIN 
+        SupplierSummary ss ON ss.total_available_qty IS NOT NULL
+    LEFT JOIN 
+        LineItemDetails ld ON ld.l_orderkey = cs.total_orders
+)
+
+SELECT 
+    cd.c_custkey,
+    cd.c_name,
+    COALESCE(cd.total_orders, 0) AS order_count,
+    COALESCE(cd.total_spent, 0.00) AS total_spent,
+    COALESCE(cd.total_available_qty, 0) AS available_quantity,
+    COALESCE(cd.avg_supply_cost, 0.00) AS average_supply_cost,
+    COALESCE(cd.revenue, 0.00) AS total_revenue,
+    CASE 
+        WHEN cd.total_orders > 10 THEN 'High Value Customer'
+        WHEN cd.total_orders > 0 THEN 'Moderate Value Customer'
+        ELSE 'No Orders'
+    END AS customer_value_segment
+FROM 
+    CombinedData cd
+WHERE 
+    cd.total_spent > 1000.00
+ORDER BY 
+    cd.total_spent DESC;

@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        l.title,
+        l.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title l ON ml.linked_movie_id = l.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mt.production_year,
+    COUNT(DISTINCT cc.kind) AS character_types,
+    GROUP_CONCAT(DISTINCT mk.keyword ORDER BY mk.keyword) AS movie_keywords,
+    MAX(CASE WHEN (char.name IS NOT NULL OR char.id IS NOT NULL) THEN char.name ELSE 'Unknown Character' END) AS character_name,
+    SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notable_cast_count,
+    ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY ak.name) AS actor_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.id
+JOIN 
+    movie_info mi ON mi.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN 
+    char_name char ON char.imdb_id = ak.person_id
+JOIN 
+    movie_hierarchy mh ON mh.movie_id = at.id
+LEFT JOIN 
+    comp_cast_type cc ON cc.id = ci.role_id
+JOIN 
+    title mt ON at.id = mt.id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre') OR mi.info_type_id IS NULL)
+    AND mt.production_year BETWEEN 1940 AND 2023
+GROUP BY 
+    ak.name, at.title, mt.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) >= 2
+ORDER BY 
+    mt.production_year DESC, actor_rank;

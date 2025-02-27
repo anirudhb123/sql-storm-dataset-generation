@@ -1,0 +1,85 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PH.CreationDate, '1970-01-01'::timestamp) AS LastHistoryDate,
+        COALESCE(ACCEPTED.PostId, -1) AS AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT L.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Posts ACCEPTED ON P.AcceptedAnswerId = ACCEPTED.Id
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostLinks L ON P.Id IN (L.PostId, L.RelatedPostId)
+    WHERE 
+        P.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '30 days') 
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.CreationDate, P.Score, ACCEPTED.PostId
+),
+RankedPosts AS (
+    SELECT 
+        PD.*, 
+        RANK() OVER (ORDER BY PD.Score DESC, PD.ViewCount DESC) AS ScoreRank
+    FROM 
+        PostDetails PD
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(B.Id) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    R.Title,
+    R.ViewCount,
+    R.Score,
+    R.LastHistoryDate,
+    R.AcceptedAnswerId,
+    U.DisplayName AS OwnerDisplayName,
+    UVC.UpVotes,
+    UVC.DownVotes,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges
+FROM 
+    RankedPosts R
+JOIN 
+    Users U ON R.PostId IN (SELECT DISTINCT P.Id FROM Posts P WHERE P.OwnerUserId = U.Id)
+JOIN 
+    UserVoteCounts UVC ON U.Id = UVC.UserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+WHERE 
+    R.ScoreRank <= 10
+    AND (R.LastHistoryDate IS NULL OR R.LastHistoryDate >= '2023-01-01')
+ORDER BY 
+    R.Score DESC, UVC.UpVotes DESC;

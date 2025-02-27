@@ -1,0 +1,67 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.bill_customer_sk,
+        COALESCE(SUM(ws.net_paid), 0) AS total_sales,
+        COUNT(DISTINCT ws.order_number) AS order_count,
+        COUNT(DISTINCT ws.item_sk) AS unique_items_sold
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL 
+        AND (c.c_birth_month > 1 OR (c.c_birth_month = 1 AND c.c_birth_day = 1))
+    GROUP BY 
+        ws.bill_customer_sk
+), 
+demographic_summary AS (
+    SELECT 
+        cd.cd_demo_sk,
+        MAX(cd.education_status) AS education,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        cd.gender = 'F' 
+        AND cd.marital_status = 'M'
+    GROUP BY 
+        cd.cd_demo_sk
+),
+income_ranges AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        CASE 
+            WHEN ib.ib_lower_bound >= 0 AND ib.ib_upper_bound < 30000 THEN 'Low'
+            WHEN ib.ib_lower_bound >= 30000 AND ib.ib_upper_bound < 70000 THEN 'Middle'
+            ELSE 'High'
+        END AS income_category
+    FROM 
+        income_band ib
+)
+
+SELECT 
+    ds.bill_customer_sk,
+    ds.total_sales,
+    ds.order_count,
+    ds.unique_items_sold,
+    dem.education,
+    COALESCE(ir.income_category, 'Unknown') AS income_level
+FROM 
+    sales_summary ds
+LEFT JOIN 
+    demographic_summary dem ON ds.bill_customer_sk = dem.cd_demo_sk
+LEFT JOIN 
+    customer c ON ds.bill_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+LEFT JOIN 
+    income_ranges ir ON hd.hd_income_band_sk = ir.ib_income_band_sk
+WHERE 
+    (ds.total_sales > 1000 OR dem.customer_count > 10)
+    AND (ir.income_category IS NOT NULL OR dem.customer_count IS NULL)
+ORDER BY 
+    ds.total_sales DESC
+LIMIT 100;

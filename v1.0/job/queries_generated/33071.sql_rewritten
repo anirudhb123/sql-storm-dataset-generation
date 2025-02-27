@@ -1,0 +1,72 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        episode_of_id,
+        1 AS level
+    FROM aka_title
+    WHERE episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.episode_of_id,
+        mh.level + 1
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_details AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        COALESCE(c.name, 'Unknown') AS character_name
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN char_name c ON ci.role_id = c.id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+movie_scores AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.level,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        AVG(rating.rating_score) AS average_rating
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN movie_keywords mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            AVG(rating) AS rating_score
+        FROM movie_info
+        WHERE info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+        GROUP BY movie_id
+    ) AS rating ON mh.movie_id = rating.movie_id
+    GROUP BY mh.movie_id, mh.title, mh.level, mk.keywords
+)
+SELECT 
+    ms.movie_id,
+    ms.title,
+    ms.level,
+    ms.actor_count,
+    ms.keywords,
+    ms.average_rating
+FROM movie_scores ms
+ORDER BY 
+    ms.level,
+    ms.average_rating DESC NULLS LAST,
+    ms.actor_count DESC
+LIMIT 50;

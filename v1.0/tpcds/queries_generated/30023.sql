@@ -1,0 +1,77 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_order_number,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_quantity DESC) as rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+Customer_Summary AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    JOIN 
+        customer ON ws_bill_customer_sk = c_customer_sk
+    GROUP BY 
+        c_customer_sk
+),
+High_Value_Customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.order_count,
+        cs.total_quantity,
+        cs.total_sales,
+        DENSE_RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM 
+        Customer_Summary cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.total_sales > 10000
+),
+Inventory_Status AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(CASE WHEN inv_quantity_on_hand IS NULL THEN 0 ELSE inv_quantity_on_hand END) AS available_quantity
+    FROM 
+        inventory i
+    LEFT JOIN 
+        date_dim dd ON i.inv_date_sk = dd.d_date_sk
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    c.c_customer_sk,
+    CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+    hvc.order_count,
+    hvc.total_quantity,
+    hvc.total_sales,
+    iv.available_quantity,
+    CASE 
+        WHEN hvc.sales_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type
+FROM 
+    High_Value_Customers hvc
+JOIN 
+    customer c ON hvc.c_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    Inventory_Status iv ON iv.i_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = c.c_customer_sk)
+WHERE 
+    hvc.order_count > (SELECT AVG(order_count) FROM Customer_Summary) 
+ORDER BY 
+    hvc.total_sales DESC
+LIMIT 100;

@@ -1,0 +1,57 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title AS movie_title,
+        1 AS hierarchy_level,
+        CAST(t.title AS VARCHAR(255)) AS full_hierarchy
+    FROM 
+        aka_title t
+    JOIN 
+        title m ON m.id = t.movie_id
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+    
+    UNION ALL
+    
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.hierarchy_level + 1,
+        CAST(mh.full_hierarchy || ' -> ' || s.title AS VARCHAR(255)) AS full_hierarchy
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        title s ON s.id = ml.linked_movie_id
+)
+SELECT 
+    na.name AS actor_name,
+    mh.movie_title,
+    mh.hierarchy_level,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    SUM(COALESCE(mi.info ->> 'rating', '0')::NUMERIC) AS total_rating,
+    STRING_AGG(DISTINCT ci.note, ', ') AS role_notes
+FROM 
+    MovieHierarchy mh
+JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id AND ci.person_id = cc.subject_id
+JOIN 
+    aka_name na ON na.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+WHERE 
+    mh.hierarchy_level < 5
+GROUP BY 
+    na.name, mh.movie_title, mh.hierarchy_level
+ORDER BY 
+    production_companies DESC, mh.hierarchy_level ASC;

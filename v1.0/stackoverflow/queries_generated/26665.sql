@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+        AND p.Score > 0
+        AND p.ViewCount < 1000
+), 
+TagStats AS (
+    SELECT 
+        p.Tags,
+        COUNT(p.Id) AS PostCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Tags
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Body,
+    rp.Score,
+    rp.ViewCount,
+    rp.OwnerDisplayName,
+    ts.PostCount,
+    ts.AverageScore,
+    ub.BadgeCount,
+    CONCAT('Total Viewer Count: ', SUM(rp.ViewCount) OVER () ) AS TotalViewers
+FROM 
+    RankedPosts rp
+JOIN 
+    TagStats ts ON rp.Title ILIKE '%' || ts.Tags || '%'  -- Match by Tags
+JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    rp.PostRank = 1  -- Get only the most recent post for each user
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount ASC
+LIMIT 10;

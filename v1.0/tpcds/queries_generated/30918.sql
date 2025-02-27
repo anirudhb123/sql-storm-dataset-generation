@@ -1,0 +1,48 @@
+
+WITH RECURSIVE ItemSales AS (
+    SELECT ws_item_sk, SUM(ws_net_paid) AS total_sales, DENSE_RANK() OVER (ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_net_paid) > 100
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_net_paid) AS total_sales, DENSE_RANK() OVER (ORDER BY SUM(cs_net_paid) DESC) AS rank
+    FROM catalog_sales
+    WHERE cs_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY cs_item_sk
+    HAVING SUM(cs_net_paid) > 100
+),
+TopItems AS (
+    SELECT i_item_sk, i_item_desc, item_sales.total_sales, item_sales.rank
+    FROM ItemSales 
+    JOIN item ON item_sales.ws_item_sk = item.i_item_sk
+    WHERE item_sales.rank <= 10
+),
+CustomerReturns AS (
+    SELECT sr_customer_sk, COUNT(DISTINCT sr_ticket_number) AS total_returns
+    FROM store_returns
+    WHERE sr_returned_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY sr_customer_sk
+),
+ReturnImpact AS (
+    SELECT ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ti.total_sales, COALESCE(CR.total_returns, 0) AS total_returns
+    FROM customer ci
+    LEFT JOIN TopItems ti ON ci.c_customer_sk = ti.ws_bill_customer_sk
+    LEFT JOIN CustomerReturns CR ON ci.c_customer_sk = CR.sr_customer_sk
+)
+SELECT 
+    ci.c_customer_sk, 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    COALESCE(SUM(ti.total_sales), 0) AS total_sales, 
+    COALESCE(SUM(CR.total_returns), 0) AS total_returns,
+    (COALESCE(SUM(ti.total_sales), 0) - COALESCE(SUM(CR.total_returns), 0)) AS net_sales,
+    CASE 
+        WHEN COALESCE(SUM(CR.total_returns), 0) > 0 THEN 'Returns Impact Sales'
+        ELSE 'No Returns Impact'
+    END AS returns_impact_label
+FROM customer ci
+LEFT JOIN TopItems ti ON ci.c_customer_sk = ti.ws_bill_customer_sk
+LEFT JOIN CustomerReturns CR ON ci.c_customer_sk = CR.sr_customer_sk
+GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+ORDER BY net_sales DESC;

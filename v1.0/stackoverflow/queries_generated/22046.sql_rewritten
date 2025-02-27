@@ -1,0 +1,70 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        MAX(U.Reputation) AS MaxReputation,
+        MIN(U.Reputation) AS MinReputation,
+        AVG(U.Reputation) AS AvgReputation,
+        STDEV(U.Reputation) OVER() AS ReputationStdDev
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY SUM(P.Score) DESC) AS PostRank
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+BadgePosts AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        PS.TotalPosts,
+        PS.TotalViews,
+        PS.TotalScore,
+        CASE 
+            WHEN UB.GoldBadges > 0 THEN 'Gold' 
+            WHEN UB.SilverBadges > 0 THEN 'Silver' 
+            WHEN UB.BronzeBadges > 0 THEN 'Bronze' 
+            ELSE 'No Badge' 
+        END AS BadgeType
+    FROM 
+        (SELECT DISTINCT UserId, DisplayName FROM UserBadges) U
+    LEFT JOIN 
+        PostStats PS ON U.UserId = PS.OwnerUserId
+    LEFT JOIN 
+        UserBadges UB ON U.UserId = UB.UserId
+)
+SELECT 
+    BP.DisplayName,
+    BP.BadgeType,
+    COALESCE(BP.TotalPosts, 0) AS TotalPosts,
+    COALESCE(BP.TotalViews, 0) AS TotalViews,
+    COALESCE(BP.TotalScore, 0) AS TotalScore,
+    CASE 
+        WHEN BP.BadgeType = 'Gold' THEN 'Top User'
+        WHEN BP.BadgeType = 'Silver' AND BP.TotalScore > 100 THEN 'Featured User' 
+        WHEN BP.TotalScore IS NULL THEN 'Inactive User'
+        ELSE 'Regular User' 
+    END AS UserCategory
+FROM 
+    BadgePosts BP
+ORDER BY 
+    BP.TotalScore DESC NULLS LAST,
+    BP.DisplayName ASC;

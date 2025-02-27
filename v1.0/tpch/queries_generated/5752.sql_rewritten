@@ -1,0 +1,65 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_type
+),
+HighDemandParts AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        rp.total_available_quantity,
+        rp.total_supply_cost
+    FROM 
+        RankedParts rp
+    WHERE 
+        rp.rank <= 10
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice - l.l_discount) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+),
+FinalReport AS (
+    SELECT 
+        hd.p_partkey,
+        hd.p_name,
+        hd.total_available_quantity,
+        hd.total_supply_cost,
+        co.c_custkey,
+        co.total_order_value
+    FROM 
+        HighDemandParts hd
+    JOIN 
+        CustomerOrders co ON hd.total_supply_cost > co.total_order_value
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.total_available_quantity,
+    f.total_supply_cost,
+    f.c_custkey,
+    f.total_order_value
+FROM 
+    FinalReport f
+ORDER BY 
+    f.total_supply_cost DESC, f.total_order_value DESC;

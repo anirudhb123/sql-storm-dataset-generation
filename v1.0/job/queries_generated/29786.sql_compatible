@@ -1,0 +1,53 @@
+
+WITH AgentDetails AS (
+    SELECT 
+        a.id AS agent_id,
+        a.person_id,
+        a.name AS agent_name,
+        a.md5sum AS agent_md5,
+        JSON_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        movie_info mi ON a.person_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mi.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        a.id, a.person_id, a.name, a.md5sum
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.role, ', ') AS cast_roles,
+        STRING_AGG(DISTINCT CAST(c.person_id AS TEXT), ', ') AS cast_ids,
+        ARRAY_AGG(DISTINCT c.note) AS notes,
+        jsonb_build_object('Agent', ad.agent_name, 'Agent_MD5', ad.agent_md5) AS agent_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        AgentDetails ad ON c.person_id = ad.person_id
+    GROUP BY 
+        m.id, m.title, m.production_year, ad.agent_name, ad.agent_md5
+)
+SELECT 
+    mi.movie_id,
+    mi.movie_title,
+    mi.production_year,
+    mi.cast_roles,
+    mi.cast_ids,
+    mi.notes,
+    mi.agent_info
+FROM 
+    MovieInfo mi
+WHERE 
+    mi.production_year BETWEEN 1990 AND 2000
+ORDER BY 
+    mi.production_year DESC;

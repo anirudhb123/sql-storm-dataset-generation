@@ -1,0 +1,57 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_order
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+supplier_part_price AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_supplycost,
+        COALESCE((SELECT AVG(ps_inner.ps_supplycost) FROM partsupp ps_inner WHERE ps_inner.ps_partkey = ps.ps_partkey), 0) AS avg_supplycost
+    FROM 
+        partsupp ps
+),
+nation_region AS (
+    SELECT 
+        n.n_nationkey,
+        r.r_regionkey,
+        r.r_name,
+        COUNT(*) AS nation_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_nationkey, r.r_regionkey, r.r_name
+)
+SELECT 
+    n.r_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(r.total_revenue) AS total_revenues,
+    MAX(sp.avg_supplycost) AS highest_avg_supplycost,
+    MIN(sp.ps_supplycost) AS lowest_supplycost,
+    AVG(CASE WHEN sp.ps_supplycost IS NULL THEN NULL ELSE sp.ps_supplycost END) AS average_supplycost_nulls_handling
+FROM 
+    nation_region n
+LEFT JOIN 
+    ranked_orders r ON n.n_nationkey = r.o_orderkey
+LEFT JOIN 
+    supplier_part_price sp ON r.o_orderkey = sp.ps_partkey
+WHERE 
+    (n.nation_count > 0 OR r.o_orderstatus IS NOT NULL) AND
+    (sp.ps_supplycost IS NOT NULL AND sp.ps_supplycost < 1000.00)
+GROUP BY 
+    n.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_revenues DESC, n.r_name ASC;

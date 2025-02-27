@@ -1,0 +1,79 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COALESCE(SUM(V.Count), 0) AS TotalVotes,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1 
+    LEFT JOIN (
+        SELECT 
+            PostId, COUNT(*) AS Count
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.AnswerCount) AS TotalAnswers
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 10 
+),
+
+TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        T.TagName
+    FROM 
+        Posts P
+    JOIN 
+        Comments C ON P.Id = C.PostId
+    JOIN 
+        UNNEST(string_to_array(P.Tags, '><')) AS T(TagName) ON true
+    GROUP BY 
+        P.Id, T.TagName
+    ORDER BY 
+        P.Score DESC
+    LIMIT 10 
+)
+
+SELECT 
+    R.DisplayName AS TopUser,
+    R.Reputation,
+    R.QuestionCount,
+    R.TotalVotes,
+    T.TagName AS PopularTag,
+    COUNT(DISTINCT P.PostId) AS TagPostCount,
+    SUM(P.TotalAnswers) AS TagTotalAnswers
+FROM 
+    RankedUsers R
+JOIN 
+    PopularTags T ON R.QuestionCount > 0
+JOIN 
+    TopPosts P ON T.TagName = P.TagName
+GROUP BY 
+    R.DisplayName, R.Reputation, R.QuestionCount, R.TotalVotes, T.TagName
+ORDER BY 
+    R.Reputation DESC, TagPostCount DESC
+LIMIT 5;

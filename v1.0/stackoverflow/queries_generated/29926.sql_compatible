@@ -1,0 +1,71 @@
+
+WITH TagDetails AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.UserId IS NOT NULL, 0)) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ROUND(SUM(CASE WHEN bh.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(bh.Id), 0), 2) AS CloseRate,
+        ROUND(SUM(CASE WHEN bh.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(bh.Id), 0), 2) AS ReopenRate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory bh ON bh.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title
+)
+SELECT 
+    td.TagName,
+    td.PostCount,
+    td.QuestionCount,
+    td.AnswerCount,
+    td.LastPostDate,
+    ue.DisplayName AS UserName,
+    ue.TotalVotes,
+    ue.TotalComments,
+    ue.TotalBadges,
+    pa.Title,
+    pa.CloseRate,
+    pa.ReopenRate
+FROM 
+    TagDetails td
+JOIN 
+    Posts p ON p.Tags LIKE '%' || td.TagName || '%'
+JOIN 
+    UserEngagement ue ON ue.UserId = p.OwnerUserId
+JOIN 
+    PostActivity pa ON pa.PostId = p.Id
+WHERE 
+    td.PostCount > 10
+ORDER BY 
+    td.TagName, ue.TotalVotes DESC;

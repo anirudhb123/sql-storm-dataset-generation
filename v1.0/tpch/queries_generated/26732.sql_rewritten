@@ -1,0 +1,33 @@
+SELECT 
+    p.p_name AS part_name,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    o.o_orderkey AS order_number,
+    SUM(CASE 
+        WHEN LENGTH(p.p_comment) > 10 THEN 1 
+        ELSE 0 END) AS lengthy_comments,
+    AVG(CASE 
+        WHEN CHAR_LENGTH(s.s_address) > 20 THEN s.s_acctbal 
+        ELSE NULL END) AS avg_account_balance_long_address,
+    COUNT(DISTINCT p.p_partkey) AS distinct_parts,
+    GROUP_CONCAT(DISTINCT SUBSTRING_INDEX(p.p_comment, ' ', 3) SEPARATOR ', ') AS top_comments,
+    MAX(o.o_totalprice) AS max_order_price
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey 
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey 
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey 
+WHERE 
+    p.p_retailprice > 100.00 AND 
+    o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey
+ORDER BY 
+    max_order_price DESC;

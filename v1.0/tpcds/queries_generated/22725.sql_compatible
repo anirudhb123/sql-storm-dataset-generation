@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank,
+        DENSE_RANK() OVER (ORDER BY ws.ws_ship_date_sk) AS dense_date_rank
+    FROM web_sales ws
+    WHERE ws.ws_sales_price IS NOT NULL AND ws.ws_sales_price > 0
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_net_profit
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY c.c_customer_id
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_id,
+        cs.total_net_profit,
+        ROW_NUMBER() OVER (ORDER BY cs.total_net_profit DESC) AS customer_rank
+    FROM customer_sales cs
+),
+date_zeroed AS (
+    SELECT 
+        d.d_date_id,
+        d.d_date,
+        CASE 
+            WHEN d.d_current_day = 'Y' THEN 'Current Day' 
+            ELSE d.d_day_name 
+        END AS day_description
+    FROM date_dim d
+    WHERE d.d_date IS NOT NULL
+)
+SELECT 
+    tc.c_customer_id,
+    tc.total_net_profit,
+    ds.day_description,
+    COUNT(rs.ws_order_number) AS total_orders,
+    SUM(CASE 
+            WHEN rs.sales_rank <= 3 THEN rs.ws_sales_price 
+            ELSE 0 
+        END) AS top_sales_contribution,
+    COUNT(DISTINCT CASE 
+            WHEN rs.dense_date_rank = 1 THEN rs.ws_order_number 
+        END) AS first_sale_count
+FROM top_customers tc
+LEFT JOIN ranked_sales rs ON tc.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = rs.ws_bill_customer_sk)
+LEFT JOIN date_zeroed ds ON ds.d_date_id = (SELECT CAST(ws.ws_ship_date_sk AS CHAR(255)) FROM web_sales ws WHERE ws.ws_order_number = rs.ws_order_number)
+WHERE tc.customer_rank <= 50
+GROUP BY 
+    tc.c_customer_id, 
+    tc.total_net_profit, 
+    ds.day_description
+HAVING 
+    SUM(CASE 
+            WHEN rs.ws_sales_price > 20 OR rs.ws_sales_price IS NULL THEN 1 
+            ELSE 0 
+        END) > 10
+    AND COUNT(rs.ws_order_number) > 0
+ORDER BY 
+    tc.total_net_profit DESC,
+    tc.c_customer_id;

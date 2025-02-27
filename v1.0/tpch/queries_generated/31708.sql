@@ -1,0 +1,77 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        1 AS level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        sh.level + 1
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        supplier s ON s.s_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            WHERE n.n_name = 'USA'
+        )
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (sh.level * 5000)
+), RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01'
+), TotalLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales 
+    FROM 
+        lineitem l 
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    SUM(l.total_sales) AS total_revenue,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    (SELECT COUNT(*) FROM RankedOrders r WHERE r.o_orderkey = o.o_orderkey AND r.rank <= 10) AS top_order_count,
+    CASE 
+        WHEN s.s_acctbal IS NULL THEN 'Insufficient Data'
+        ELSE CONCAT('Supplier Balance:', CAST(s.s_acctbal AS CHAR))
+    END AS supplier_info
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    TotalLineItems t ON t.l_orderkey = l.l_orderkey
+JOIN 
+    orders o ON o.o_orderkey = l.l_orderkey
+WHERE 
+    p.p_size > 10 AND 
+    (s.s_nationkey IS NOT NULL OR s.s_comment NOT LIKE '%bad%')
+GROUP BY 
+    p.p_name, s.s_acctbal
+HAVING 
+    SUM(l.total_sales) > 10000
+ORDER BY 
+    total_revenue DESC
+LIMIT 100;

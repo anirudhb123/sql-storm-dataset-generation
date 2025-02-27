@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(CASE WHEN c.id IS NOT NULL THEN 1 END) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        aka_title ak
+    JOIN
+        title t ON ak.movie_id = t.id
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        aka_names,
+        keywords,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, production_year ASC) AS rank
+    FROM
+        RankedMovies
+)
+SELECT
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    fm.aka_names,
+    fm.keywords
+FROM
+    FilteredMovies fm
+WHERE
+    fm.cast_count > 0
+    AND fm.production_year >= 2000
+ORDER BY
+    fm.rank
+FETCH FIRST 10 ROWS ONLY;

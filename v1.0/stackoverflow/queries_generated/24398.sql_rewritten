@@ -1,0 +1,84 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        MAX(u.LastAccessDate) AS LastActive
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId AND c.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId AND v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        COALESCE(pa.Score, 0) AS AcceptedAnswerScore,
+        COALESCE(AVG(c.Score), 0) AS AvgCommentScore,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostOrder
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts pa ON p.AcceptedAnswerId = pa.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.AcceptedAnswerId
+),
+UserRanking AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalBounty,
+        ua.TotalPosts,
+        ua.TotalComments,
+        ua.TotalBadges,
+        ua.LastActive,
+        pd.PostId,
+        pd.Title,
+        pd.ViewCount,
+        pd.AcceptedAnswerScore,
+        pd.CommentCount,
+        DENSE_RANK() OVER (ORDER BY ua.TotalBounty DESC, ua.TotalPosts DESC) AS UserRank
+    FROM 
+        UserActivity ua
+    JOIN 
+        PostDetails pd ON ua.UserId = pd.PostId
+    WHERE 
+        ua.TotalPosts > 0
+)
+SELECT 
+    ur.UserId,
+    ur.DisplayName,
+    ur.TotalBounty,
+    ur.TotalPosts,
+    ur.TotalComments,
+    ur.TotalBadges,
+    ur.LastActive,
+    ur.Title,
+    ur.ViewCount,
+    ur.AcceptedAnswerScore,
+    ur.CommentCount,
+    ur.UserRank
+FROM 
+    UserRanking ur
+WHERE 
+    ur.UserRank <= 10
+ORDER BY 
+    ur.UserRank, ur.TotalBounty DESC;

@@ -1,0 +1,76 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        1 AS depth
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus <> 'C'  
+    UNION ALL
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        oh.depth + 1
+    FROM 
+        orders o
+    JOIN 
+        OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE 
+        oh.depth < 5
+), 
+SupplierAggregates AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        AVG(l.l_tax) AS avg_tax,
+        DENSE_RANK() OVER (PARTITION BY l.l_shipmode ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_orderpriority,
+    COALESCE(la.total_sales, 0) AS total_sales,
+    COALESCE(sa.total_supply_cost, 0) AS total_supply_cost,
+    CASE 
+        WHEN sa.part_count IS NULL THEN 'Unknown Supplier'
+        ELSE sa.s_name 
+    END AS supplier_name,
+    COALESCE(la.avg_tax, 0) AS avg_tax,
+    RANK() OVER (ORDER BY COALESCE(la.total_sales, 0) DESC) AS sales_rank,
+    CASE 
+        WHEN oh.o_orderstatus = 'F' THEN 'Finalized'
+        ELSE 'Pending'
+    END AS order_status
+FROM 
+    OrderHierarchy oh
+LEFT JOIN 
+    LineItemSummary la ON oh.o_orderkey = la.l_orderkey
+LEFT JOIN 
+    SupplierAggregates sa ON sa.total_supply_cost > 10000  
+ORDER BY 
+    oh.o_orderdate DESC, sa.total_supply_cost DESC;

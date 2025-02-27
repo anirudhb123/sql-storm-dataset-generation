@@ -1,0 +1,79 @@
+
+WITH TaggedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Tags,
+        (LENGTH(p.Tags) - LENGTH(REPLACE(p.Tags, '><', ''))) / LENGTH('><') + 1 AS TagCount, 
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COALESCE(pa.AnswerCount, 0) AS AnswerCount,
+        u.Reputation,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) pc ON p.Id = pc.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(*) AS AnswerCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2 
+        GROUP BY 
+            ParentId
+    ) pa ON p.Id = pa.ParentId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.TagCount,
+        tp.OwnerDisplayName,
+        tp.CommentCount,
+        tp.AnswerCount,
+        tp.Reputation,
+        tp.PostTypeName,
+        @rank := @rank + 1 AS Rank
+    FROM 
+        TaggedPosts tp,
+        (SELECT @rank := 0) r
+    WHERE 
+        tp.TagCount > 0
+    ORDER BY 
+        tp.Reputation DESC, tp.CreationDate DESC
+)
+
+SELECT 
+    t.Title,
+    t.OwnerDisplayName,
+    t.CreationDate,
+    t.TagCount,
+    t.CommentCount,
+    t.AnswerCount,
+    t.Reputation,
+    t.PostTypeName
+FROM 
+    TopPosts t
+WHERE 
+    t.Rank <= 10
+ORDER BY 
+    t.Rank;

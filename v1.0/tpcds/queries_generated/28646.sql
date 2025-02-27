@@ -1,0 +1,51 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        STRING_AGG(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type), ', ') AS all_addresses
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+DemographicsStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demo_count,
+        STRING_AGG(cd_marital_status, ', ') AS marital_statuses,
+        STRING_AGG(cd_education_status, ', ') AS education_statuses
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+DateStats AS (
+    SELECT
+        d_year,
+        STRING_AGG(d_day_name, ', ') AS days_of_week,
+        STRING_AGG(d_month_seq::text, ', ') AS month_sequences
+    FROM
+        date_dim
+    GROUP BY 
+        d_year
+)
+SELECT 
+    a.ca_state,
+    a.address_count,
+    a.all_addresses,
+    d.cd_gender,
+    d.demo_count,
+    d.marital_statuses,
+    d.education_statuses,
+    DATE_PART('year', CURRENT_DATE) AS current_year,
+    dt.days_of_week,
+    dt.month_sequences
+FROM 
+    AddressStats a
+JOIN 
+    DemographicsStats d ON d.demo_count > 10
+JOIN 
+    DateStats dt ON dt.d_year <= DATE_PART('year', CURRENT_DATE)
+ORDER BY 
+    a.address_count DESC, d.demo_count DESC;

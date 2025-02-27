@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        COALESCE(MAX(b.Date) OVER (PARTITION BY p.OwnerUserId), '1970-01-01'::timestamp) AS LastBadgeDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+        AND (p.Score > 10 OR p.ViewCount > 100)
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.Rank,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.LastBadgeDate,
+        (CASE 
+            WHEN rp.Score IS NULL THEN 'Unknown' 
+            WHEN rp.Score > 20 THEN 'High' 
+            ELSE 'Low' 
+        END) AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostDetails AS (
+    SELECT 
+        fp.*,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = fp.PostId) AS CommentCount,
+        (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+         FROM Tags t 
+         JOIN LATERAL STRING_TO_ARRAY(fp.Tags, ',') AS tag ON t.TagName = tag 
+         WHERE t.WikiPostId IS NOT NULL) AS TagList
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.CommentCount,
+    pd.LastBadgeDate,
+    pd.ScoreCategory,
+    CASE 
+        WHEN pd.UpVoteCount = 0 AND pd.DownVoteCount = 0 THEN NULL 
+        ELSE (pd.UpVoteCount - pd.DownVoteCount)::DECIMAL / NULLIF(pd.UpVoteCount + pd.DownVoteCount, 0) 
+    END AS VoteRatio
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 100;

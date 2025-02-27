@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        DENSE_RANK() OVER (ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges ub
+    JOIN 
+        Badge b ON ub.Id = b.Id
+    GROUP BY 
+        ub.UserId
+),
+
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosedDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        p.Title
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Posts that were closed
+),
+
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rb.BadgeCount,
+    rb.BadgeNames,
+    cp.ClosedDate,
+    cp.UserDisplayName AS ClosedBy,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.ViewCount,
+    CASE 
+        WHEN rp.rn = 1 THEN 'Latest Post by User'
+        ELSE 'Earlier Post'
+    END AS PostStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges rb ON rp.OwnerUserId = rb.UserId
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+WHERE 
+    rp.Score > 0
+    AND rp.ScoreRank <= 10
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 100;

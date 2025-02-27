@@ -1,0 +1,50 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, NULL AS parent_regionkey
+    FROM region
+    UNION ALL
+    SELECT r.r_regionkey, r.r_name, rh.r_regionkey
+    FROM region r
+    JOIN RegionHierarchy rh ON r.r_regionkey = rh.parent_regionkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+SupplierPart AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+PopularProducts AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY p.p_partkey, p.p_name
+    HAVING COUNT(l.l_orderkey) > 50
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    rh.r_name AS region_name,
+    c.c_name AS customer_name,
+    pp.p_name AS product_name,
+    COALESCE(os.total_order_value, 0) AS order_value,
+    COALESCE(sp.total_supply_value, 0) AS supplier_value,
+    ch.total_spent AS customer_spent
+FROM RegionHierarchy rh
+LEFT JOIN CustomerOrders ch ON rh.r_regionkey = ch.c_custkey 
+LEFT JOIN PopularProducts pp ON pp.order_count > 0
+LEFT JOIN SupplierPart sp ON sp.total_supply_value > 0
+LEFT JOIN OrderSummary os ON os.total_order_value > 0
+WHERE ch.total_spent IS NOT NULL OR os.total_order_value IS NOT NULL
+ORDER BY rh.r_name, ch.c_name;

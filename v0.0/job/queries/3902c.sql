@@ -1,0 +1,4 @@
+SELECT min(a1.name) AS writer_pseudo_name, min(t.title) AS movie_title
+FROM aka_name AS a1, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n1, role_type AS rt, title AS t
+WHERE a1.person_id = n1.id AND n1.id = ci.person_id AND ci.movie_id = t.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND a1.person_id = ci.person_id AND ci.movie_id = mc.movie_id
+AND ci.role_id < 9 AND a1.surname_pcode LIKE '%5%' AND n1.name < 'Mendoza, Benny' AND cn.name LIKE '%Ars%' AND a1.md5sum > 'c034c0a6e80fb235d31f63a7956678ef' AND n1.imdb_index < 'LXXVII' AND t.id < 2120341 AND a1.person_id < 480223;

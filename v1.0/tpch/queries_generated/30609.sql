@@ -1,0 +1,46 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s_suppkey, s_name, s_acctbal, 1 AS rank_level
+    FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, rs.rank_level + 1
+    FROM supplier s
+    JOIN RankedSuppliers rs ON s.s_acctbal > rs.s_acctbal
+    WHERE rs.rank_level < 5
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING SUM(ps.ps_supplycost) >= 100.00
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 500.00
+    GROUP BY c.c_custkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey
+),
+CostlyOrders AS (
+    SELECT DISTINCT o.o_orderkey, od.order_value
+    FROM OrderDetails od
+    JOIN orders o ON od.o_orderkey = o.o_orderkey
+    WHERE od.order_value > 1000.00
+)
+SELECT rs.s_name, COUNT(DISTINCT cp.c_custkey) AS customer_count, AVG(cp.total_orders) AS avg_orders,
+       SUM(po.total_cost) AS total_part_cost
+FROM RankedSuppliers rs
+LEFT JOIN CustomerOrders cp ON rs.s_suppkey = cp.c_custkey
+LEFT JOIN TopParts po ON po.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps JOIN supplier s ON ps.ps_suppkey = s.s_suppkey WHERE s.s_acctbal = rs.s_acctbal)
+LEFT JOIN CostlyOrders co ON co.o_orderkey = cp.total_orders
+GROUP BY rs.s_name
+HAVING AVG(cp.total_orders) IS NOT NULL AND SUM(po.total_cost) IS NOT NULL
+ORDER BY total_part_cost DESC;

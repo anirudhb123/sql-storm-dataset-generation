@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, ViewCount, 1 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score, p.ViewCount, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+VoteStatistics AS (
+    SELECT 
+        PostId, 
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(*) AS TotalVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        COALESCE(v.UpVotes, 0) AS UpVotes,
+        COALESCE(v.DownVotes, 0) AS DownVotes,
+        r.Level AS HierarchyLevel
+    FROM Posts p
+    LEFT JOIN VoteStatistics v ON p.Id = v.PostId
+    LEFT JOIN RecursivePostHierarchy r ON p.Id = r.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+FinalOutput AS (
+    SELECT 
+        pd.Title,
+        pd.CreationDate,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.HierarchyLevel,
+        u.DisplayName,
+        ub.BadgeCount,
+        ub.HighestBadgeClass,
+        CASE 
+            WHEN ub.BadgeCount IS NULL THEN 'No Badges'
+            ELSE CONCAT('Total Badges: ', ub.BadgeCount)
+        END AS BadgeDescription
+    FROM PostDetails pd
+    LEFT JOIN Users u ON pd.CreatedByUserId = u.Id
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+    WHERE pd.UpVotes - pd.DownVotes > 0  
+)
+SELECT 
+    Title,
+    CreationDate,
+    UpVotes,
+    DownVotes,
+    HierarchyLevel,
+    DisplayName,
+    BadgeDescription
+FROM FinalOutput
+ORDER BY UpVotes DESC, CreationDate DESC
+LIMIT 10;

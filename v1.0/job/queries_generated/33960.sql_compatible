@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    WHERE 
+        t.production_year > 2000
+    UNION ALL
+    SELECT 
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    WHERE 
+        t.production_year > 2000
+),
+actor_performance AS (
+    SELECT 
+        c.person_id,
+        ak.name,
+        COUNT(c.movie_id) AS movie_count,
+        AVG(CASE WHEN c.person_role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_role_presence
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.person_id, ak.name
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT cc.subject_id) AS total_actors,
+    AVG(ap.movie_count) AS avg_movies_per_actor,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    CASE WHEN AVG(ap.avg_role_presence) IS NULL THEN 'No Roles' ELSE 'Roles Present' END AS role_status
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    actor_performance ap ON cc.subject_id = ap.person_id
+LEFT JOIN 
+    aka_name ak ON ap.person_id = ak.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.subject_id) > 5
+ORDER BY 
+    mh.production_year DESC, total_actors DESC, mh.title;

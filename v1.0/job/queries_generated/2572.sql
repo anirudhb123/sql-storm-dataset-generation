@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT mc.company_id) DESC) AS rn
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_companies mc ON at.movie_id = mc.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 10
+),
+PersonRoles AS (
+    SELECT 
+        DISTINCT ci.person_id,
+        rt.role,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.person_id, rt.role
+),
+TotalPerformance AS (
+    SELECT 
+        at.title,
+        COUNT(DISTINCT pr.person_id) AS actor_count,
+        SUM(pr.movie_count) AS total_movies
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.title = ci.movie_id
+    LEFT JOIN 
+        PersonRoles pr ON ci.person_id = pr.person_id
+    JOIN 
+        aka_title at ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title
+)
+SELECT 
+    tp.title,
+    tp.production_year,
+    COALESCE(tp.actor_count, 0) AS actor_count,
+    COALESCE(tp.total_movies, 0) AS total_movies,
+    CASE 
+        WHEN tp.actor_count > 5 THEN 'Ensemble Cast' 
+        ELSE 'Limited Cast' 
+    END AS cast_size
+FROM 
+    TopMovies tp
+LEFT JOIN 
+    TotalPerformance tps ON tp.title = tps.title
+ORDER BY 
+    tp.production_year DESC, 
+    actor_count DESC;

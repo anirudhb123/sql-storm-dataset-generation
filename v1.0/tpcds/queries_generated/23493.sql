@@ -1,0 +1,51 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT c_customer_sk, SUM(ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c_customer_sk
+    HAVING SUM(ws_net_paid) IS NOT NULL
+),
+customer_rank AS (
+    SELECT c_customer_sk, total_spent,
+           RANK() OVER (ORDER BY total_spent DESC) AS rank
+    FROM top_customers
+),
+address_details AS (
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state,
+           COALESCE(ca.ca_street_name || ' ' || ca.ca_street_number, 'Unknown Address') AS full_address,
+           DENSE_RANK() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS city_rank
+    FROM customer_address ca
+)
+SELECT c.first_name, c.last_name, c.email_address, 
+       ad.full_address, ad.city_rank,
+       COALESCE(NULLIF(cr.return_reason, ''), 'No Reason Provided') AS return_reason,
+       SUM(CASE 
+               WHEN ws.ws_sales_price > 100 THEN ws.ws_quantity
+               WHEN ws.ws_sales_price BETWEEN 50 AND 100 THEN ws.ws_quantity * 0.5
+               ELSE 0 
+           END) AS adjusted_quantity,
+       AVG(ws.ws_net_paid) OVER (PARTITION BY c.c_customer_sk) AS avg_purchase,
+       CASE 
+           WHEN c.c_birth_month BETWEEN 1 AND 6 
+           THEN 'First Half' 
+           ELSE 'Second Half' 
+       END AS birth_half,
+       (SELECT COUNT(*) 
+        FROM catalog_sales cs 
+        WHERE cs.cs_bill_customer_sk = c.c_customer_sk 
+          AND cs.cs_sold_date_sk > 20220000) AS catalog_purchases_last_year
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN address_details ad ON c.c_current_addr_sk = ad.ca_address_sk
+LEFT JOIN (SELECT cr_refunded_customer_sk, 
+                  STRING_AGG(r.r_reason_desc, '; ') AS return_reason 
+           FROM catalog_returns cr
+           JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+           GROUP BY cr_refunded_customer_sk) cr ON c.c_customer_sk = cr.cr_refunded_customer_sk
+WHERE c.c_customer_sk IN (SELECT c_customer_sk 
+                          FROM customer_rank 
+                          WHERE rank <= 10)
+  AND ad.city_rank = 1
+GROUP BY c.first_name, c.last_name, c.email_address, ad.full_address, ad.city_rank, cr.return_reason
+ORDER BY adjusted_quantity DESC, avg_purchase DESC;

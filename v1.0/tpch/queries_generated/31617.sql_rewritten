@@ -1,0 +1,37 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal < (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+)
+, CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderstatus = 'O'
+)
+, LineItemsSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           MAX(l.l_shipdate) AS last_ship_date
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name, SUM(ls.total_revenue) AS total_revenue, MAX(co.o_orderdate) AS latest_order_date,
+       COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       CASE 
+           WHEN SUM(ls.total_revenue) IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Exists'
+       END AS revenue_status
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN CustomerOrders co ON sh.s_nationkey = co.c_custkey
+LEFT JOIN LineItemsSummary ls ON co.o_orderkey = ls.l_orderkey
+GROUP BY n.n_name
+HAVING SUM(ls.total_revenue) > 10000 OR COUNT(DISTINCT sh.s_suppkey) > 5
+ORDER BY total_revenue DESC, latest_order_date DESC;

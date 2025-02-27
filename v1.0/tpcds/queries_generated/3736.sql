@@ -1,0 +1,63 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(d.d_date) AS last_purchase_date
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_income_band_sk AS income_band
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesStats AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        cs.total_orders,
+        COALESCE(cd.cd_gender, 'Unknown') AS gender,
+        COALESCE(cd.cd_marital_status, 'Unknown') AS marital_status,
+        COALESCE(inb.ib_upper_bound, 0) AS income_upper_bound,
+        COALESCE(inb.ib_lower_bound, 0) AS income_lower_bound
+    FROM CustomerSales cs
+    LEFT JOIN CustomerDemographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    LEFT JOIN income_band inb ON cd.cd_income_band_sk = inb.ib_income_band_sk
+),
+RankedSales AS (
+    SELECT 
+        customer_sk,
+        total_sales,
+        total_orders,
+        gender,
+        marital_status,
+        income_upper_bound,
+        income_lower_bound,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM SalesStats
+)
+SELECT 
+    rs.customer_sk,
+    rs.total_sales,
+    rs.total_orders,
+    rs.gender,
+    rs.marital_status,
+    rs.income_upper_bound,
+    rs.income_lower_bound,
+    DATE_PART('year', AGE(rs.last_purchase_date)) AS years_since_last_purchase
+FROM RankedSales rs
+JOIN CustomerSales cs ON rs.customer_sk = cs.c_customer_sk
+WHERE (rs.total_sales > 1000 OR rs.income_upper_bound IS NULL)
+  AND rs.sales_rank <= 100
+ORDER BY rs.total_sales DESC;

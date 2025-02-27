@@ -1,0 +1,23 @@
+
+SELECT 
+    ca.city AS city, 
+    COUNT(DISTINCT c.c_customer_id) AS customer_count,
+    SUM(CASE WHEN cd.cd_gender = 'M' THEN 1 ELSE 0 END) AS male_count,
+    SUM(CASE WHEN cd.cd_gender = 'F' THEN 1 ELSE 0 END) AS female_count,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    STRING_AGG(DISTINCT CONCAT_WS(', ', cd.cd_marital_status, cd.cd_education_status), '; ') AS demographics_info,
+    STRING_AGG(DISTINCT CONCAT_WS(': ', c.c_first_name, c.c_last_name), '; ') AS customer_names
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.ca_city IS NOT NULL 
+GROUP BY 
+    ca.city
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY 
+    customer_count DESC;

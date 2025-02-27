@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        path || at.title
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 3
+)
+
+SELECT 
+    a.name AS actor_name,
+    ARRAY_AGG(DISTINCT mh.title) AS movies_linked,
+    COUNT(DISTINCT mh.movie_id) AS linked_movie_count,
+    AVG(mh.production_year) AS avg_prod_year,
+    STRING_AGG(DISTINCT ci.note, ', ') AS roles,
+    MAX(CASE 
+        WHEN ci.nr_order IS NULL THEN 'No Order'
+        ELSE CAST(ci.nr_order AS TEXT) 
+    END) AS highest_order,
+    COALESCE(cn.name, 'Unknown Company') AS company_name
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    a.name IS NOT NULL
+    AND mh.level = 2
+GROUP BY 
+    a.name, cn.name
+ORDER BY 
+    linked_movie_count DESC, avg_prod_year DESC
+LIMIT 10;

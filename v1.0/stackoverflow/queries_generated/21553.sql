@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.CreationDate,
+        P.ClosedDate,
+        P.LastActivityDate,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC, P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+ClosedPostDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        CASE 
+            WHEN PH.PostHistoryTypeId IN (10, 11) THEN 'Closed' 
+            ELSE 'Not Closed' 
+        END AS ClosureStatus,
+        COUNT(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        MAX(PH.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.CreationDate
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        STRING_AGG(B.Name, ', ') AS BadgeNames,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.Score,
+    RP.CreationDate,
+    RP.ClosedDate,
+    RP.LastActivityDate,
+    RP.Reputation,
+    CPD.ClosureStatus,
+    CPD.CloseCount,
+    CPD.LastCloseDate,
+    UB.BadgeNames,
+    UB.BadgeCount,
+    CASE 
+        WHEN RP.Score > 100 THEN 'High Score' 
+        WHEN RP.Score BETWEEN 51 AND 100 THEN 'Medium Score' 
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    COALESCE(NULLIF(RP.Title, ''), 'Untitled') AS SafeTitle,
+    ARRAY_LENGTH(STRING_TO_ARRAY(RP.Title, ' '), 1) AS TitleWordCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPostDetails CPD ON RP.PostId = CPD.PostId
+LEFT JOIN 
+    UserBadges UB ON RP.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = UB.UserId)
+WHERE 
+    (RP.ClosedDate IS NOT NULL OR RP.LastActivityDate >= CURRENT_DATE - INTERVAL '7 days')
+    AND (RP.Score IS NULL OR RP.Score > 10)
+ORDER BY 
+    RP.Rank, CPD.CloseCount DESC, RP.Reputation DESC;
+
+-- Additional Bizarre Logic
+SELECT 
+    DISTINCT 
+    CASE 
+        WHEN BP.PostId IS NOT NULL THEN 'Linked'
+        ELSE 'Unlinked'
+    END AS LinkStatus,
+    COUNT(DISTINCT P.Id) AS TotalPosts
+FROM 
+    Posts P
+LEFT JOIN 
+    PostLinks BP ON P.Id = BP.PostId
+GROUP BY 
+    P.OwnerUserId
+HAVING 
+    COUNT(P.Id) > 5
+ORDER BY 
+    TotalPosts DESC;

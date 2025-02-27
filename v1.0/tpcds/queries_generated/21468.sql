@@ -1,0 +1,98 @@
+
+WITH recursive SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) as total_qty,
+        SUM(ws_net_paid) as total_net_paid,
+        DENSE_RANK() OVER (ORDER BY ws_net_paid DESC) as rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= 2450000 -- arbitrary date for demo purposes
+    GROUP BY 
+        ws_item_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single'
+        END AS marital_status,
+        COALESCE(cd.cd_credit_rating, 'Unknown') AS credit_rating
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+WarehouseStats AS (
+    SELECT 
+        w.w_warehouse_sk,
+        COUNT(DISTINCT inv.inv_item_sk) as unique_items,
+        SUM(inv.inv_quantity_on_hand) as total_quantity_on_hand
+    FROM 
+        warehouse AS w
+    JOIN 
+        inventory AS inv ON w.w_warehouse_sk = inv.inv_warehouse_sk
+    GROUP BY 
+        w.w_warehouse_sk
+),
+SalesSummary AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        ss.total_qty,
+        ss.total_net_paid,
+        CASE 
+            WHEN ss.rnk <= 10 THEN 'Top Selling'
+            ELSE 'Regular'
+        END as sales_category
+    FROM 
+        SalesCTE AS ss 
+    JOIN 
+        item AS item ON ss.ws_item_sk = item.i_item_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.marital_status,
+    cd.credit_rating,
+    ss.total_qty,
+    ss.total_net_paid,
+    ws.unique_items,
+    ws.total_quantity_on_hand
+FROM 
+    CustomerDetails AS cd
+LEFT JOIN 
+    SalesSummary AS ss ON ss.i_item_id = (
+        SELECT 
+            ws_item_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_bill_customer_sk = cd.c_customer_sk 
+        ORDER BY 
+            ws_net_paid DESC 
+        LIMIT 1
+    )
+JOIN 
+    WarehouseStats AS ws ON ws.w_warehouse_sk IN (
+        SELECT 
+            inv.inv_warehouse_sk 
+        FROM 
+            inventory as inv 
+        JOIN 
+            web_sales as ws ON inv.inv_item_sk = ws.ws_item_sk 
+        WHERE 
+            ws.ws_bill_customer_sk = cd.c_customer_sk
+    )
+WHERE 
+    cd.c_birth_month BETWEEN 1 AND 6
+    AND (cd.cd_gender = 'F' OR cd.cd_credit_rating IS NULL)
+ORDER BY 
+    ss.total_net_paid DESC
+LIMIT 50;

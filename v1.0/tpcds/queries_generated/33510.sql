@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, 0 AS level
+    FROM customer c
+    WHERE c.c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_addr_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_addr_sk = ch.c_current_addr_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_quantity) AS total_sales_quantity,
+        SUM(ws.ws_net_sales) AS total_net_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_sales) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.ws_item_sk, ws.ws_order_number
+),
+DailyReturns AS (
+    SELECT 
+        dr.d_date,
+        COALESCE(SUM(sr.sr_return_qty), 0) AS total_returns,
+        COALESCE(SUM(cr.cr_return_quantity), 0) AS total_catalog_returns,
+        COUNT(DISTINCT wr.wr_returning_customer_sk) AS total_web_returns
+    FROM date_dim dr
+    LEFT JOIN store_returns sr ON sr.sr_returned_date_sk = dr.d_date_sk
+    LEFT JOIN catalog_returns cr ON cr.cr_returned_date_sk = dr.d_date_sk
+    LEFT JOIN web_returns wr ON wr.wr_returned_date_sk = dr.d_date_sk
+    GROUP BY dr.d_date
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    SUM(sd.total_net_sales) AS total_income,
+    d.total_returns,
+    d.total_catalog_returns,
+    d.total_web_returns
+FROM customer_address ca
+JOIN customer c ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+JOIN SalesData sd ON sd.ws_item_sk = c.c_customer_sk
+JOIN DailyReturns d ON d.d_date = CURRENT_DATE
+WHERE ca.ca_state = 'CA'
+AND (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+AND EXISTS (
+    SELECT 1
+    FROM CustomerHierarchy ch
+    WHERE ch.c_customer_sk = c.c_customer_sk
+    AND ch.level < 3
+)
+GROUP BY ca.ca_city
+HAVING SUM(sd.total_sales_quantity) > 100
+ORDER BY total_income DESC;

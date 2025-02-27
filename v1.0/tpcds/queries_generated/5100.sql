@@ -1,0 +1,59 @@
+
+WITH sales_summary AS (
+    SELECT 
+        d.d_year,
+        c.c_gender AS customer_gender,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_order_value,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 2020 AND 2023
+    GROUP BY 
+        d.d_year, c.c_gender
+),
+promotion_details AS (
+    SELECT 
+        p.p_promo_name,
+        SUM(ws.ws_net_paid_inc_tax) AS promo_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        p.p_discount_active = 'Y'
+    GROUP BY 
+        p.p_promo_name
+),
+warehouse_inventory AS (
+    SELECT 
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_warehouse_sk
+)
+SELECT 
+    ss.d_year,
+    ss.customer_gender,
+    ss.total_sales,
+    ss.total_orders,
+    ss.avg_order_value,
+    ss.unique_customers,
+    pd.promo_sales,
+    wi.total_inventory
+FROM 
+    sales_summary ss
+LEFT JOIN 
+    promotion_details pd ON ss.total_sales > pd.promo_sales
+JOIN 
+    warehouse_inventory wi ON TRUE
+ORDER BY 
+    ss.d_year, ss.customer_gender;

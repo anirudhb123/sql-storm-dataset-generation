@@ -1,0 +1,84 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId, 
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        MAX(v.CreationDate) AS LastVoteDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 9 -- BountyClose
+    GROUP BY 
+        p.Id, p.Title
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.CommentCount,
+    ps.TotalBounty,
+    u.DisplayName AS Owner,
+    u.TotalViews,
+    u.TotalScore,
+    ph.Level AS PostLevel,
+    CASE 
+        WHEN ph.Level > 0 THEN 'Child Post'
+        ELSE 'Root Post'
+    END AS PostType,
+    CASE 
+        WHEN ps.LastVoteDate IS NOT NULL THEN 'Has Bounty Activity'
+        ELSE 'No Bounty Activity'
+    END AS BountyStatus
+FROM 
+    PostStats ps
+LEFT JOIN 
+    Users u ON ps.CommentCount > 0 -- Join users with commented posts
+LEFT JOIN 
+    PostHierarchy ph ON ps.PostId = ph.Id
+WHERE 
+    ps.CommentCount > 0 
+ORDER BY 
+    ps.TotalBounty DESC, 
+    ps.CommentCount DESC
+FETCH FIRST 100 ROWS ONLY;

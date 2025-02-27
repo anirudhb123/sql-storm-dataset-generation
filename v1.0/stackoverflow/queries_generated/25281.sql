@@ -1,0 +1,75 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentsCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ARRAY_LENGTH(string_to_array(p.Tags, '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 -- We are interested in questions only
+    GROUP BY 
+        p.Id, u.DisplayName
+), HistoricalChanges AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS ChangeDate,
+        ph.UserDisplayName,
+        COUNT(ph.Id) AS ChangeCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- This includes title, body, and tags edits
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.UserDisplayName
+), CombinedStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Body,
+        ps.Tags,
+        ps.Author,
+        ps.CommentsCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.TagCount,
+        COALESCE(SUM(CASE WHEN hc.PostHistoryTypeId = 4 THEN hc.ChangeCount END), 0) AS TitleEdits,
+        COALESCE(SUM(CASE WHEN hc.PostHistoryTypeId = 5 THEN hc.ChangeCount END), 0) AS BodyEdits,
+        COALESCE(SUM(CASE WHEN hc.PostHistoryTypeId = 6 THEN hc.ChangeCount END), 0) AS TagEdits
+    FROM 
+        PostStats ps
+        LEFT JOIN HistoricalChanges hc ON ps.PostId = hc.PostId
+    GROUP BY 
+        ps.PostId, ps.Title, ps.CreationDate, ps.Body, ps.Tags, ps.Author, 
+        ps.CommentsCount, ps.UpVotes, ps.DownVotes, ps.TagCount
+)
+SELECT 
+    *,
+    (UpVotes - DownVotes) AS NetVotes,
+    CASE 
+        WHEN CommentsCount > 10 THEN 'Highly Discussed'
+        WHEN CommentsCount BETWEEN 5 AND 10 THEN 'Moderately Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel,
+    CASE 
+        WHEN TitleEdits > 0 THEN 'Edited Title'
+        ELSE 'No Title Edits'
+    END AS TitleEditStatus
+FROM 
+    CombinedStats
+WHERE 
+    CreationDate > NOW() - INTERVAL '1 year' -- Posts created within the last year
+ORDER BY 
+    NetVotes DESC, CreationDate DESC;

@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        P.PostTypeId,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+), 
+PopularUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(UP.VoteAmount, 0)) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN (
+        SELECT UserId, COUNT(*) AS VoteAmount FROM Votes GROUP BY UserId HAVING COUNT(*) > 10
+    ) UP ON U.Id = UP.UserId
+    GROUP BY 
+        U.Id
+), 
+PostHistoryWithVotes AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        PostHistory PH
+    LEFT JOIN 
+        Votes V ON PH.UserId = V.UserId AND PH.PostId = V.PostId
+    WHERE 
+        PH.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId, PH.UserId
+), 
+CombinedData AS (
+    SELECT 
+        RP.Title,
+        RP.CreationDate,
+        RP.PostRank,
+        PU.DisplayName AS TopUser,
+        PU.TotalVotes,
+        PHV.VoteCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PopularUsers PU ON PU.UserId = RP.PostId -- Example of an unusual join condition
+    LEFT JOIN 
+        PostHistoryWithVotes PHV ON PHV.PostId = RP.PostId
+    WHERE 
+        RP.PostRank <= 5
+          AND (PU.TotalVotes IS NOT NULL OR PHV.VoteCount > 0) -- Using compound predicates
+)
+SELECT 
+    CD.Title,
+    CD.CreationDate,
+    COALESCE(CD.TopUser, 'Community') AS TopUser, -- Using COALESCE for NULL logic
+    CD.TotalVotes,
+    CD.VoteCount
+FROM 
+    CombinedData CD
+ORDER BY 
+    CD.CreationDate DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Notable missing posts' AS Title,
+    NOW(),
+    'StackOverflowBot' AS TopUser,
+    NULL AS TotalVotes,
+    NULL AS VoteCount
+WHERE 
+    (SELECT COUNT(*) FROM Posts WHERE CreationDate >= NOW() - INTERVAL '1 month') < 1000 -- A bizar (and specific) edge case
+ORDER BY 1;

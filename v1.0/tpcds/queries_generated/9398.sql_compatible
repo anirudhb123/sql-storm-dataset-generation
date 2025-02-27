@@ -1,0 +1,73 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        d.d_year,
+        d.d_month_seq,
+        c.cd_gender,
+        ca.ca_state,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        d.d_year = 2023 
+        AND d.d_month_seq BETWEEN 1 AND 6
+    GROUP BY 
+        ws.ws_item_sk, 
+        d.d_year,
+        d.d_month_seq,
+        c.cd_gender,
+        ca.ca_state
+),
+TopSellingItems AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_revenue,
+        sd.d_year,
+        sd.d_month_seq,
+        ROW_NUMBER() OVER (PARTITION BY sd.d_year, sd.d_month_seq ORDER BY sd.total_revenue DESC) AS revenue_rank
+    FROM 
+        SalesData sd
+)
+SELECT 
+    ti.ws_item_sk,
+    ti.total_quantity,
+    ti.total_revenue,
+    ti.d_year,
+    ti.d_month_seq,
+    COUNT(DISTINCT sd.customer_count) AS unique_customers,
+    CD.cd_gender,
+    CA.ca_state
+FROM 
+    TopSellingItems ti
+JOIN 
+    SalesData sd ON ti.ws_item_sk = sd.ws_item_sk
+JOIN 
+    customer_demographics CD ON sd.cd_gender = CD.cd_demo_sk
+JOIN 
+    customer_address CA ON CD.cd_demo_sk = CA.ca_address_sk
+WHERE 
+    ti.revenue_rank <= 10
+GROUP BY 
+    ti.ws_item_sk, 
+    ti.total_quantity, 
+    ti.total_revenue, 
+    ti.d_year, 
+    ti.d_month_seq, 
+    CD.cd_gender, 
+    CA.ca_state
+ORDER BY 
+    ti.d_year, 
+    ti.d_month_seq, 
+    ti.total_revenue DESC;

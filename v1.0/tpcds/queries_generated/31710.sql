@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY SUM(sr_return_amt_inc_tax) DESC) AS rn
+    FROM store_returns
+    GROUP BY sr_customer_sk
+    HAVING SUM(sr_return_quantity) > 0
+),
+ReturnAnalysis AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_return_quantity,
+        cr.total_return_amount,
+        CASE
+            WHEN cr.total_return_amount IS NULL THEN 'No Returns'
+            ELSE 'Returned'
+        END AS return_status,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY cr.total_return_amount DESC) AS city_rank
+    FROM CustomerReturns cr
+    JOIN customer c ON c.c_customer_sk = cr.sr_customer_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT
+    ra.c_customer_id,
+    ra.c_first_name,
+    ra.c_last_name,
+    COALESCE(ra.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(ra.total_return_amount, 0) AS total_return_amount,
+    ra.return_status,
+    ra.ca_city,
+    ra.ca_state,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_net_profit) AS total_profit,
+    (SELECT AVG(ws_net_paid) FROM web_sales WHERE ws_bill_customer_sk = ra.c_customer_sk) AS avg_web_spend
+FROM ReturnAnalysis ra
+LEFT JOIN web_sales ws ON ws.ws_bill_customer_sk = ra.sr_customer_sk
+WHERE ra.city_rank <= 5
+GROUP BY ra.c_customer_id, ra.c_first_name, ra.c_last_name, ra.total_return_quantity, ra.total_return_amount, ra.return_status, ra.ca_city, ra.ca_state
+ORDER BY total_return_amount DESC;

@@ -1,0 +1,72 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), 
+
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_linenumber) AS item_count,
+        ROW_NUMBER() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2022-01-01'
+    GROUP BY 
+        o.o_orderkey
+), 
+
+SupplierDetails AS (
+    SELECT 
+        r.r_regionkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, n.n_name
+)
+
+SELECT 
+    o.order_rank,
+    os.total_revenue,
+    os.item_count,
+    ss.s_name AS top_supplier,
+    sd.n_name AS nation_name,
+    sd.supplier_count
+FROM 
+    OrderStats os
+LEFT JOIN 
+    RankedSuppliers ss ON os.order_rank = ss.rn
+LEFT JOIN 
+    SupplierDetails sd ON ss.s_suppkey IS NULL OR ss.s_suppkey IN (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            part p ON ps.ps_partkey = p.p_partkey 
+        WHERE 
+            p.p_brand = 'Brand#1'
+    )
+WHERE 
+    sd.nation_name IS NOT NULL
+ORDER BY 
+    os.total_revenue DESC, 
+    os.item_count DESC;

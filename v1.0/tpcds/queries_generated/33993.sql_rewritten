@@ -1,0 +1,50 @@
+WITH RECURSIVE CategorySales AS (
+    SELECT 
+        i_category_id, 
+        SUM(CASE WHEN cs_quantity > 0 THEN cs_quantity ELSE 0 END) AS total_sales,
+        SUM(CASE WHEN cs_quantity < 0 THEN cs_quantity ELSE 0 END) AS total_returns,
+        COUNT(DISTINCT cs_order_number) AS order_count
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk BETWEEN 2451002 AND 2451441 
+    GROUP BY 
+        i_category_id
+    UNION ALL
+    SELECT 
+        cs.i_category_id,
+        SUM(CASE WHEN cs.cs_quantity > 0 THEN cs.cs_quantity ELSE 0 END) + cs.total_sales, 
+        SUM(CASE WHEN cs.cs_quantity < 0 THEN cs.cs_quantity ELSE 0 END) + cs.total_returns, 
+        cs.order_count + COUNT(DISTINCT cs.cs_order_number)
+    FROM 
+        catalog_sales cs
+    INNER JOIN 
+        CategorySales c ON cs.i_category_id = c.i_category_id
+    GROUP BY 
+        cs.i_category_id
+), 
+TopCategories AS (
+    SELECT 
+        i_category_id, 
+        total_sales, 
+        total_returns, 
+        order_count,
+        RANK() OVER (ORDER BY total_sales DESC) AS rank
+    FROM 
+        CategorySales
+)
+SELECT 
+    c.i_category_id,
+    COALESCE(tc.total_sales, 0) AS total_sales,
+    COALESCE(tc.total_returns, 0) AS total_returns,
+    COALESCE(tc.order_count, 0) AS order_count,
+    CASE 
+        WHEN tc.rank <= 10 THEN 'Top 10 Categories'
+        ELSE 'Other Categories'
+    END AS category_ranking
+FROM 
+    (SELECT DISTINCT cs.i_category_id FROM catalog_sales cs) c
+LEFT JOIN 
+    TopCategories tc ON c.i_category_id = tc.i_category_id
+ORDER BY 
+    category_ranking, total_sales DESC;

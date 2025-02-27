@@ -1,0 +1,81 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        c.movie_id, k.keyword
+    HAVING 
+        COUNT(DISTINCT c.person_id) > 1
+),
+MoviesWithCompany AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT co.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieStats AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ar.actor_count, 0) AS actor_count,
+        COALESCE(mwc.companies, 'No companies') AS companies
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.movie_id = ar.movie_id
+    LEFT JOIN 
+        MoviesWithCompany mwc ON rm.movie_id = mwc.movie_id
+    WHERE 
+        rm.rank <= 5
+),
+FinalReport AS (
+    SELECT 
+        ms.title,
+        ms.production_year,
+        ms.actor_count,
+        ms.companies,
+        CASE 
+            WHEN ms.actor_count > 10 THEN 'High Actor Count'
+            WHEN ms.actor_count BETWEEN 5 AND 10 THEN 'Medium Actor Count'
+            ELSE 'Low Actor Count'
+        END AS actor_category,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MovieStats ms
+    LEFT JOIN 
+        movie_keyword mk ON ms.movie_id = mk.movie_id
+    GROUP BY 
+        ms.title, ms.production_year, ms.actor_count, ms.companies
+)
+SELECT 
+    * 
+FROM 
+    FinalReport
+WHERE 
+    actor_category != 'Low Actor Count'
+ORDER BY 
+    production_year DESC, actor_count DESC;

@@ -1,0 +1,78 @@
+
+WITH RECURSIVE Filmography AS (
+    SELECT 
+        a.person_id,
+        t.production_year,
+        t.title,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+DistinctRoles AS (
+    SELECT 
+        c.person_role_id,
+        COUNT(DISTINCT c.movie_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.person_role_id
+),
+FilmWithKeywords AS (
+    SELECT 
+        t.title,
+        k.keyword
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword IS NOT NULL
+),
+RoleAndCompany AS (
+    SELECT 
+        r.role,
+        cc.company_id,
+        COUNT(DISTINCT cc.movie_id) AS company_count
+    FROM 
+        comp_cast_type r
+    LEFT JOIN 
+        movie_companies cc ON r.id = cc.company_type_id
+    GROUP BY 
+        r.role, cc.company_id
+)
+SELECT 
+    f.person_id,
+    f.title,
+    f.production_year,
+    COALESCE(kw.keyword, 'No Keyword') AS keyword,
+    r.role,
+    rc.role_count,
+    cc.company_count AS companies_involved,
+    CASE 
+        WHEN f.rn = 1 THEN 'Latest Production'
+        ELSE 'Previous Production'
+    END AS production_status
+FROM 
+    Filmography f
+LEFT JOIN 
+    FilmWithKeywords kw ON f.title = kw.title
+LEFT JOIN 
+    DistinctRoles rc ON rc.person_role_id = (SELECT role_id FROM cast_info WHERE person_id = f.person_id LIMIT 1)
+LEFT JOIN 
+    RoleAndCompany cc ON cc.role = (SELECT role FROM role_type WHERE id = rc.person_role_id LIMIT 1)
+WHERE 
+    f.production_year >= 2000
+    AND f.production_year < 2024
+    AND f.rn <= 5
+GROUP BY 
+    f.person_id, f.title, f.production_year, kw.keyword, r.role, rc.role_count, cc.company_count
+ORDER BY 
+    f.person_id, f.production_year DESC;

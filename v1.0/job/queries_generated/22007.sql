@@ -1,0 +1,108 @@
+WITH RecursiveTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.imdb_index,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year = (SELECT MAX(production_year) FROM aka_title)
+        
+    UNION ALL
+    
+    SELECT 
+        t.id AS title_id,
+        CONCAT(rt.title, ' - Sequel') AS title,
+        t.production_year,
+        t.kind_id,
+        t.imdb_index,
+        rt.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        RecursiveTitles rt ON t.episode_of_id = rt.title_id
+    WHERE
+        rt.level < 5
+),
+ActorData AS (
+    SELECT 
+        a.name,
+        c.movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY count(c.movie_id) DESC) AS movie_rank,
+        COUNT(c.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name, c.movie_id
+),
+KeywordStats AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+TitleWithKeywords AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        k.keywords,
+        k.keyword_count
+    FROM 
+        RecursiveTitles t
+    LEFT JOIN 
+        KeywordStats k ON t.title_id = k.movie_id
+),
+CompanyInfo AS (
+    SELECT 
+        c.id AS company_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.company_id) AS company_movies_count
+    FROM 
+        company_name c
+    JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+    GROUP BY 
+        c.id, c.name, ct.kind
+)
+
+SELECT 
+    t.title, 
+    t.production_year,
+    t.kind_id,
+    COALESCE(k.keywords, 'No keywords') AS keywords,
+    COALESCE(ki.keyword_count, 0) AS keyword_count,
+    a.name AS actor_name,
+    a.total_movies,
+    COALESCE(ci.company_name, 'Independent') AS production_company,
+    ci.company_movies_count,
+    RANK() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, a.total_movies DESC) AS year_rank
+FROM 
+    TitleWithKeywords t
+LEFT JOIN 
+    ActorData a ON a.movie_id = t.title_id AND a.movie_rank <= 3 
+LEFT JOIN 
+    CompanyInfo ci ON ci.company_movies_count > 0
+WHERE 
+    (t.kind_id IS NULL OR t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Drama%'))
+    AND (t.production_year IS NOT NULL AND t.production_year > 2000)
+ORDER BY 
+    t.production_year DESC, a.total_movies DESC
+LIMIT 100;
+

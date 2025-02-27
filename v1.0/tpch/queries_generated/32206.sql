@@ -1,0 +1,64 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, s_comment, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey AND s.s_acctbal < sh.s_acctbal
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+           SUM(ps.ps_supplycost) AS total_supply_cost,
+           AVG(ps.ps_availqty) AS avg_avail_qty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_ordered,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+DiscountedLineItem AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           l.l_discount, l.l_tax, l.l_shipmode,
+           CASE 
+               WHEN l.l_discount > 0.1 THEN 'High Discount' 
+               ELSE 'Low Discount' 
+           END AS discount_category
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2022-01-01'
+),
+FinalReport AS (
+    SELECT p.p_name, p.p_brand, p.p_type, p.p_retailprice,
+           COALESCE(ps.supplier_count, 0) AS supplier_count,
+           COALESCE(ps.total_supply_cost, 0) AS total_supply_cost,
+           COALESCE(cus.total_ordered, 0) AS total_ordered,
+           COALESCE(cus.order_count, 0) AS order_count,
+           d.l_shipmode
+    FROM part p
+    LEFT JOIN PartSupplierStats ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN CustomerOrderSummary cus ON ps.supplier_count > 0
+    LEFT JOIN DiscountedLineItem d ON d.l_partkey = p.p_partkey
+    WHERE p.p_retailprice > 
+          (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size < p.p_size)
+    ORDER BY p.p_retailprice DESC, cus.total_ordered DESC
+)
+SELECT r.r_name, r.r_comment, fr.*
+FROM region r
+JOIN FinalReport fr ON r.r_regionkey = (
+    SELECT n.n_regionkey FROM nation n 
+    WHERE n.n_nationkey IN (
+        SELECT s.s_nationkey FROM supplier s 
+        WHERE s.s_suppkey IN (
+            SELECT ps.ps_suppkey FROM partsupp ps 
+            WHERE ps.ps_partkey IN (
+                SELECT p.p_partkey FROM part p
+            )
+        )
+    )
+)
+WHERE r.r_name IS NOT NULL
+ORDER BY fr.total_ordered DESC, fr.supplier_count DESC;

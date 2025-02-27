@@ -1,0 +1,84 @@
+
+WITH UsersStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotesCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotesCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostsMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        U.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    INNER JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.ViewCount IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReason,
+        COUNT(PH.Id) AS CloseHistoryCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON CAST(PH.Comment AS INT) = C.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        PH.PostId, PH.CreationDate, C.Name
+)
+
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation,
+    U.TotalBounty,
+    P.PostId,
+    P.Title,
+    P.ViewCount,
+    P.Score,
+    P.OwnerDisplayName,
+    COALESCE(CP.CloseReason, 'Not Closed') AS PostCloseReason,
+    COALESCE(CP.CloseHistoryCount, 0) AS TotalCloseHistory,
+    CASE 
+        WHEN P.RecentPostRank = 1 THEN 'Most Recent'
+        ELSE 'Older'
+    END AS PostRecency
+FROM 
+    UsersStats U
+JOIN 
+    PostsMetrics P ON U.UserId = P.OwnerUserId
+LEFT JOIN 
+    ClosedPosts CP ON P.PostId = CP.PostId
+WHERE 
+    U.Reputation > 1000
+    AND (
+        (P.Score > 0 AND U.UpVotesCount > U.DownVotesCount) OR 
+        (P.PostTypeId = 1 AND EXISTS (
+            SELECT 1 
+            FROM Posts A WHERE A.ParentId = P.PostId AND A.Score > 0
+        ))
+    )
+ORDER BY 
+    U.TotalBounty DESC, 
+    P.ViewCount DESC
+LIMIT 100;

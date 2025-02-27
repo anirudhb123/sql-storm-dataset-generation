@@ -1,0 +1,83 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS SalesRank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS TotalQuantitySold
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        DISTINCT sr.refunded_customer_sk AS customer_id,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr.refunded_customer_sk
+),
+RankedReturns AS (
+    SELECT 
+        cr.customer_id,
+        cr.return_count,
+        cr.total_return_amount,
+        RANK() OVER (ORDER BY cr.total_return_amount DESC) AS ReturnRank
+    FROM 
+        CustomerReturns cr
+),
+FilteredSales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_quantity,
+        rs.ws_sales_price,
+        cs.customer_id,
+        cs.return_count,
+        cs.total_return_amount
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        RankedReturns cs ON rs.ws_order_number = cs.customer_id
+    WHERE 
+        rs.SalesRank = 1
+        AND cs.return_count IS NULL
+),
+FinalMetrics AS (
+    SELECT 
+        fs.ws_item_sk,
+        SUM(fs.ws_sales_price * fs.ws_quantity) AS total_sales_value,
+        COUNT(DISTINCT fs.ws_order_number) AS distinct_orders,
+        AVG(fs.ws_sales_price) AS avg_sales_price,
+        MIN(fs.ws_quantity) AS min_quantity,
+        MAX(fs.ws_quantity) AS max_quantity
+    FROM 
+        FilteredSales fs
+    GROUP BY 
+        fs.ws_item_sk
+)
+SELECT 
+    fm.ws_item_sk,
+    fm.total_sales_value,
+    fm.distinct_orders,
+    fm.avg_sales_price,
+    fm.min_quantity,
+    fm.max_quantity,
+    CASE 
+        WHEN fm.total_sales_value IS NULL THEN 'No Sales' 
+        ELSE 'Sales Data Available' 
+    END AS sales_status
+FROM 
+    FinalMetrics fm
+WHERE 
+    EXISTS (SELECT 1 FROM item i WHERE i.i_item_sk = fm.ws_item_sk AND i.i_current_price IS NOT NULL)
+ORDER BY 
+    fm.total_sales_value DESC
+LIMIT 10;

@@ -1,0 +1,69 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM 
+        orders AS o
+    JOIN 
+        customer AS c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders AS ro
+    WHERE 
+        ro.rank_order = 1
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost
+    FROM 
+        partsupp AS ps
+    JOIN 
+        supplier AS s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        part AS p ON ps.ps_partkey = p.p_partkey
+),
+AggregatedCosts AS (
+    SELECT 
+        to.o_orderkey,
+        SUM(sd.ps_supplycost * li.l_quantity) AS total_supply_cost
+    FROM 
+        TopOrders AS to
+    JOIN 
+        lineitem AS li ON to.o_orderkey = li.l_orderkey
+    JOIN 
+        SupplierDetails AS sd ON li.l_partkey = sd.ps_partkey
+    GROUP BY 
+        to.o_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    calculated_sc.total_supply_cost,
+    (to.o_totalprice - calculated_sc.total_supply_cost) AS profit_loss
+FROM 
+    TopOrders AS to
+JOIN 
+    AggregatedCosts AS calculated_sc ON to.o_orderkey = calculated_sc.o_orderkey
+ORDER BY 
+    profit_loss DESC
+LIMIT 10;

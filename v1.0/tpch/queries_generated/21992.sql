@@ -1,0 +1,47 @@
+WITH RECURSIVE nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    UNION ALL
+    SELECT ns.n_nationkey, ns.n_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM nation_supplier ns
+    JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+    AND ns.s_suppkey <> s.s_suppkey
+),
+top_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 30
+    AND p.p_retailprice IS NOT NULL
+),
+order_summary AS (
+    SELECT o.o_custkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate <= CURRENT_DATE
+    GROUP BY o.o_custkey
+)
+SELECT ns.n_name, 
+       ns.s_name, 
+       tp.p_name, 
+       tp.p_retailprice,
+       os.total_spent,
+       os.order_count,
+       CASE 
+           WHEN os.total_spent IS NULL THEN 'No Orders'
+           WHEN os.total_spent > 10000 THEN 'High Roller'
+           ELSE 'Casual Shopper'
+       END AS customer_category,
+       COALESCE(AVG(s.s_acctbal), 0) AS avg_supplier_acctbal
+FROM nation_supplier ns
+LEFT JOIN top_parts tp ON ns.n_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name LIKE 'A%')
+FULL OUTER JOIN order_summary os ON ns.s_suppkey = os.o_custkey
+WHERE tp.price_rank <= 5
+GROUP BY ns.n_name, ns.s_name, tp.p_name, tp.p_retailprice, os.total_spent, os.order_count
+HAVING (COUNT(DISTINCT ns.s_suppkey) > 1 OR COUNT(DISTINCT os.o_custkey) IS NULL)
+ORDER BY tp.p_retailprice DESC, ns.n_name;

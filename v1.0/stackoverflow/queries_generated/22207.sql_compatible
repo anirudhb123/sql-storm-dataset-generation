@@ -1,0 +1,60 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CAST('2024-10-01' AS DATE))
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AcceptedAnswerId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.UserDisplayName,
+        ph.CreationDate AS HistoryDate,
+        ph.Comment,
+        ph.Text,
+        PHU1.UserDisplayName AS ReopenUser
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Users PHU1 ON PHU1.Id = ph.UserId 
+                   AND ph.PostHistoryTypeId IN (11, 10)  
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    CASE 
+        WHEN php.PostHistoryTypeId IS NOT NULL THEN 'Closed/Reopened'
+        ELSE 'Active'
+    END AS PostStatus,
+    STRING_AGG(DISTINCT CONCAT(ph.UserDisplayName, ' (', ph.Comment, ')'), '; ') AS HistoryComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails php ON rp.PostId = php.PostId
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.CommentCount, php.PostHistoryTypeId
+HAVING 
+    COUNT(DISTINCT php.PostHistoryTypeId) FILTER (WHERE php.PostHistoryTypeId IS NOT NULL) > 0
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC
+LIMIT 100
+OFFSET 0;

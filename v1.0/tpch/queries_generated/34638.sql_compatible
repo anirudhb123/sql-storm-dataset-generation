@@ -1,0 +1,56 @@
+
+WITH RECURSIVE CTE_Supplier AS (
+    SELECT s_suppkey, s_name, s_acctbal, s_comment, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_comment, cs.level + 1
+    FROM supplier s
+    INNER JOIN CTE_Supplier cs ON s.s_acctbal >= cs.s_acctbal
+    WHERE cs.level < 5
+),
+customer_order_stats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spending_rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+part_price_stats AS (
+    SELECT 
+        p.p_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        SUM(line.l_quantity) AS total_quantity,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem line ON line.l_partkey = p.p_partkey
+    GROUP BY p.p_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    c.c_name AS customer_name,
+    c.order_count,
+    c.total_spent,
+    p.p_name AS part_name,
+    p.avg_supplycost,
+    p.total_quantity,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    DENSE_RANK() OVER (ORDER BY c.total_spent DESC) AS rank_in_spending,
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey IN 
+        (SELECT p.p_partkey FROM part p WHERE p.p_type ILIKE 'soft%')) AS soft_part_count
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN customer_order_stats c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN part_price_stats p ON c.order_count > 0
+LEFT JOIN CTE_Supplier s ON c.order_count = s.level
+WHERE 
+    c.spending_rank <= 10 
+    AND p.avg_supplycost > 500.00 
+    AND COALESCE(c.total_spent, 0) IS NOT NULL
+ORDER BY region_name, nation_name, total_spent DESC;

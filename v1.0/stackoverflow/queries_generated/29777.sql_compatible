@@ -1,0 +1,36 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        Tags.TagName, 
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY (string_to_array(substring(Posts.Tags, 2, length(Posts.Tags) - 2), '><')::text[])
+    WHERE Posts.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+    GROUP BY Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount,
+        TotalViews,
+        TotalAnswers,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS Rank
+    FROM TagStatistics
+)
+
+SELECT 
+    t.TagName,
+    t.PostCount,
+    t.TotalViews,
+    t.TotalAnswers,
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    b.Name AS BadgeName
+FROM TopTags t
+JOIN Posts p ON t.TagName = ANY (string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')::text[])
+JOIN Users u ON p.OwnerUserId = u.Id
+LEFT JOIN Badges b ON u.Id = b.UserId AND b.Class = 1 
+WHERE t.Rank <= 10
+ORDER BY t.Rank;

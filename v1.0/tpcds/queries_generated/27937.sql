@@ -1,0 +1,61 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ' ', COALESCE(ca_suite_number, '')) AS full_address,
+        ca_city,
+        ca_state,
+        ca_country
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN AddressDetails ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT
+        ws.ws_ship_date_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    GROUP BY ws.ws_ship_date_sk, ws.ws_item_sk
+),
+DailySales AS (
+    SELECT
+        dd.d_date AS sale_date,
+        SUM(sd.total_sold) AS daily_sold_items,
+        SUM(sd.total_net_profit) AS daily_net_profit
+    FROM SalesData sd
+    JOIN date_dim dd ON sd.ws_ship_date_sk = dd.d_date_sk
+    GROUP BY dd.d_date
+)
+SELECT
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.cd_purchase_estimate,
+    ad.full_address,
+    ad.ca_city,
+    ad.ca_state,
+    ds.sale_date,
+    ds.daily_sold_items,
+    ds.daily_net_profit
+FROM CustomerInfo ci
+JOIN AddressDetails ad ON ci.c_customer_sk = ad.ca_address_sk
+JOIN DailySales ds ON ci.c_customer_sk = ds.ws_item_sk
+WHERE ci.cd_marital_status = 'M'
+ORDER BY ds.sale_date DESC, ds.daily_net_profit DESC
+LIMIT 100;

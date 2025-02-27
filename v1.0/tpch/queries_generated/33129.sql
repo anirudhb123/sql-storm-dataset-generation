@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.c_acctbal, s.n_nationkey, 
+           CAST(s.s_name AS VARCHAR(100)) AS full_name, 
+           1 AS level
+    FROM supplier s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.c_acctbal, s.n_nationkey, 
+           CONCAT(sh.full_name, ' -> ', s.s_name) AS full_name,
+           sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           CASE 
+               WHEN p.p_size IS NULL THEN 'UNKNOWN' 
+               ELSE CAST(p.p_size AS VARCHAR)
+           END AS size_description
+    FROM part p
+    WHERE p.p_retailprice >= (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL)
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    SUM(os.total_revenue) AS total_revenue,
+    AVG(os.part_count) AS average_parts_per_order,
+    STRING_AGG(DISTINCT fp.size_description, ', ') AS unique_sizes
+FROM SupplierHierarchy sh
+JOIN nation n ON sh.n_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN OrderSummary os ON sh.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = os.part_count)
+JOIN FilteredParts fp ON fp.p_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1)
+JOIN RankedOrders ro ON ro.o_orderkey = os.o_orderkey
+WHERE ro.order_rank <= 5
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 10
+ORDER BY total_revenue DESC;

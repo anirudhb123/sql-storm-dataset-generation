@@ -1,0 +1,54 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RegionSales AS (
+    SELECT 
+        n.n_name AS region_name,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY 
+        n.n_name
+),
+SalesRanked AS (
+    SELECT 
+        region_name,
+        total_sales,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        RegionSales
+)
+SELECT 
+    r.region_name,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(s.total_parts, 0) AS total_parts,
+    sr.total_sales,
+    sr.sales_rank
+FROM 
+    SalesRanked sr
+LEFT JOIN 
+    SupplierStats s ON sr.region_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o))) 
+FULL OUTER JOIN 
+    region r ON r.r_name = sr.region_name
+WHERE 
+    sr.sales_rank <= 10
+ORDER BY 
+    sr.sales_rank;

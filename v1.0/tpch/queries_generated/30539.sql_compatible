@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierPart AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, ps.ps_supplycost, 1 AS level
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice > 100.00
+    
+    UNION ALL
+    
+    SELECT sp.s_suppkey, sp.s_name, ps.ps_partkey, p.p_name, ps.ps_supplycost, sp.level + 1
+    FROM SupplierPart sp
+    JOIN partsupp ps ON sp.ps_partkey = ps.ps_partkey 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE sp.level < 5
+),
+OrderSummary AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+    HAVING SUM(o.o_totalprice) > 500.00
+),
+NationSupplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+    HAVING AVG(ps.ps_supplycost) < (SELECT AVG(ps_supplycost) FROM partsupp)
+)
+SELECT 
+    ns.n_name AS nation_name,
+    sp.s_name AS supplier_name,
+    fp.p_name AS part_name,
+    fp.avg_supply_cost,
+    os.total_spent
+FROM SupplierPart sp
+JOIN NationSupplier ns ON sp.s_suppkey IN (
+    SELECT s.s_suppkey 
+    FROM supplier s 
+    WHERE s.s_nationkey = ns.n_nationkey
+)
+JOIN FilteredParts fp ON sp.ps_partkey = fp.p_partkey
+JOIN OrderSummary os ON os.o_custkey = (
+    SELECT o.o_custkey 
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+    WHERE l.l_partkey = fp.p_partkey 
+    FETCH FIRST 1 ROW ONLY
+)
+WHERE fp.avg_supply_cost IS NOT NULL
+ORDER BY ns.n_name, sp.s_name;

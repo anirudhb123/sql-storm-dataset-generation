@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score
+),
+VoteCounts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT v.UserId) AS UniqueVoters
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.OwnerUserId
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.LastActivityDate,
+        DENSE_RANK() OVER (ORDER BY p.LastActivityDate DESC) AS ActivityRank
+    FROM 
+        Posts p
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    COUNT(p.PostId) AS TotalPosts,
+    SUM(RP.Upvotes - RP.Downvotes) AS TotalScore,
+    MAX(RA.LastActivityDate) AS LastActivePost,
+    CASE 
+        WHEN MAX(RA.LastActivityDate) <= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' 
+             THEN 'Inactive'
+        ELSE 'Active'
+    END AS ActivityStatus,
+    COALESCE(vc.UniqueVoters, 0) AS UniqueVoterCount
+FROM 
+    Users u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+JOIN 
+    RankedPosts RP ON p.Id = RP.PostId
+LEFT JOIN 
+    VoteCounts vc ON p.OwnerUserId = vc.OwnerUserId
+LEFT JOIN 
+    RecentActivity RA ON p.Id = RA.PostId
+WHERE 
+    p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+GROUP BY 
+    up.UserId, u.DisplayName
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC;

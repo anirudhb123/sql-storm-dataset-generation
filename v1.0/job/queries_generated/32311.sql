@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL 
+
+    SELECT 
+        mk.linked_movie_id AS movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        aka_title a ON mk.linked_movie_id = a.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mk.movie_id
+    WHERE 
+        mh.depth < 3
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(cc.id) AS role_count,
+    ROW_NUMBER() OVER(PARTITION BY ak.person_id ORDER BY COUNT(cc.id) DESC) AS role_rank,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    MAX(pi.info) FILTER (WHERE it.info = 'birth date') AS birth_date,
+    COALESCE(cn.name, 'Unknown') AS company_name,
+    CASE 
+        WHEN COUNT(cc.id) > 5 THEN 'Frequent Actor'
+        ELSE 'Occasional Actor'
+    END AS actor_frequency
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cc ON ak.person_id = cc.person_id
+JOIN 
+    aka_title at ON cc.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    person_info pi ON ak.person_id = pi.person_id
+LEFT JOIN 
+    info_type it ON pi.info_type_id = it.id
+WHERE 
+    at.production_year >= 2000
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.person_id, ak.name, at.title, at.production_year, cn.name
+HAVING 
+    COUNT(cc.id) > 3
+ORDER BY 
+    role_count DESC, ak.actor_name ASC;

@@ -1,0 +1,76 @@
+WITH MovieRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        rt.role AS person_role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+TopMovies AS (
+    SELECT 
+        at.title, 
+        at.production_year,
+        COUNT(cr.movie_id) AS cast_count
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        MovieRoles cr ON at.id = cr.movie_id
+    WHERE 
+        at.production_year IS NOT NULL
+    GROUP BY 
+        at.title, at.production_year
+    HAVING 
+        COUNT(cr.movie_id) > 3
+),
+DelayedMovies AS (
+    SELECT 
+        tm.title, 
+        tm.production_year,
+        ROW_NUMBER() OVER (ORDER BY tm.production_year DESC) AS delayed_rank
+    FROM 
+        TopMovies tm
+    WHERE 
+        tm.production_year < (EXTRACT(YEAR FROM cast('2024-10-01' as date)) - 10)
+),
+FullMovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        cc.name AS company_name,
+        co.kind AS company_type,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY tm.title ORDER BY cc.name) AS company_order
+    FROM 
+        DelayedMovies tm
+    LEFT JOIN 
+        movie_companies mc ON tm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+    LEFT JOIN 
+        company_name cc ON mc.company_id = cc.id
+    LEFT JOIN 
+        company_type co ON mc.company_type_id = co.id
+    LEFT JOIN 
+        MovieRoles mr ON mr.movie_id = mc.movie_id 
+    LEFT JOIN 
+        role_type rt ON mr.role_id = rt.id
+)
+SELECT 
+    fmd.title,
+    fmd.production_year,
+    fmd.company_name,
+    fmd.company_type,
+    fmd.role,
+    COALESCE(NULLIF(fmd.title, 'UNKNOWN'), 'Untitled') AS safe_title,
+    CASE 
+        WHEN fmd.role IS NULL THEN 'No Role Info'
+        ELSE fmd.role 
+    END AS role_info
+FROM 
+    FullMovieDetails fmd
+WHERE 
+    fmd.company_order <= 3
+ORDER BY 
+    fmd.production_year DESC, 
+    fmd.title;

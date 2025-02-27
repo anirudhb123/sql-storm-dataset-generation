@@ -1,0 +1,74 @@
+
+WITH RECURSIVE RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_quantity) DESC) AS site_rank
+    FROM web_sales ws
+    INNER JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk, ws_sold_date_sk
+), AvgSales AS (
+    SELECT 
+        web_site_sk, 
+        AVG(total_quantity) AS avg_quantity
+    FROM RankedSales
+    GROUP BY web_site_sk
+), SiteInfo AS (
+    SELECT 
+        w.warehouse_id,
+        w.warehouse_name,
+        CASE 
+            WHEN w.warehouse_sq_ft IS NULL THEN 'Unknown'
+            ELSE CAST(w.warehouse_sq_ft AS VARCHAR)
+        END AS warehouse_sq_ft,
+        NULLIF(w.warehouse_name, '') AS warehouse_name_valid
+    FROM warehouse w
+), UnusualCases AS (
+    SELECT 
+        DISTINCT w.warehouse_name, 
+        CASE 
+            WHEN w.warehouse_sq_ft IS NULL THEN 'Size Unknown'
+            WHEN w.warehouse_sq_ft < 1000 THEN 'Small'
+            WHEN w.warehouse_sq_ft BETWEEN 1000 AND 5000 THEN 'Medium'
+            ELSE 'Large'
+        END AS size_category,
+        SUM(ws_quantity) AS total_sales
+    FROM warehouse w
+    LEFT JOIN web_sales ws ON w.warehouse_sk = ws.ws_warehouse_sk
+    GROUP BY w.warehouse_name, w.warehouse_sq_ft
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    COALESCE(si.warehouse_name_valid, 'No Warehouse') AS warehouse_name,
+    AVG(si.total_sales) AS avg_sales,
+    COUNT(DISTINCT CASE WHEN rc.total_quantity IS NOT NULL THEN rc.ws_sold_date_sk END) AS active_sales_periods,
+    MAX(CASE 
+            WHEN rc.total_quantity IS NULL THEN 'No Sales'
+            ELSE CAST(rc.total_quantity AS VARCHAR)
+        END) AS max_sales_period_quantity
+FROM customer ci
+LEFT JOIN UnusualCases si ON ci.c_customer_sk = si.ws_ship_customer_sk
+LEFT JOIN RankedSales rc ON rc.web_site_sk = si.warehouse_name
+WHERE 
+    ci.c_birth_year IS NOT NULL
+    AND ci.c_preferred_cust_flag = 'Y'
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = ci.c_current_cdemo_sk AND cd.cd_credit_rating IS NULL
+    )
+GROUP BY 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    si.warehouse_name_valid
+HAVING 
+    avg_sales > (SELECT AVG(avg_quantity) FROM AvgSales) 
+ORDER BY 
+    max_sales_period_quantity DESC, 
+    avg_sales DESC
+LIMIT 10;

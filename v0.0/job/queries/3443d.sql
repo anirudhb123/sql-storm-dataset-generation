@@ -1,0 +1,4 @@
+SELECT min(cn.name) AS from_company, min(mc.note) AS production_note, min(t.title) AS movie_based_on_book
+FROM company_name AS cn, company_type AS ct, keyword AS k, link_type AS lt, movie_companies AS mc, movie_keyword AS mk, movie_link AS ml, title AS t
+WHERE lt.id = ml.link_type_id AND ml.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_type_id = ct.id AND mc.company_id = cn.id AND ml.movie_id = mk.movie_id AND ml.movie_id = mc.movie_id AND mk.movie_id = mc.movie_id
+AND lt.link IN ('alternate language version of', 'features', 'followed by', 'referenced in', 'references', 'remade as', 'spin off from', 'spin off', 'spoofs', 'version of') AND cn.id > 65149 AND cn.name_pcode_nf LIKE '%3%' AND t.production_year = 1985 AND t.kind_id > 4;

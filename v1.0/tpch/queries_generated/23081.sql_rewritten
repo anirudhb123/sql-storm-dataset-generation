@@ -1,0 +1,40 @@
+WITH RECURSIVE nation_parts AS (
+    SELECT n.n_nationkey, n.n_name, p.p_partkey, p.p_name, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) as rnk
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_retailprice IS NOT NULL
+),
+aggregated_sales AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+    GROUP BY o.o_orderkey
+),
+ranked_sales AS (
+    SELECT o.o_orderkey, total_sales,
+           RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM aggregated_sales o
+)
+SELECT np.n_name, np.p_name, 
+       COALESCE(r.total_sales, 0) AS sales_amount,
+       CASE 
+           WHEN r.sales_rank IS NOT NULL THEN 'Ranked'
+           ELSE 'Unranked'
+       END AS rank_status
+FROM nation_parts np
+LEFT JOIN ranked_sales r ON np.n_nationkey = (SELECT n.n_nationkey 
+                                               FROM nation n 
+                                               WHERE r.o_orderkey IN (SELECT o.o_orderkey 
+                                                                      FROM orders o 
+                                                                      JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+                                                                      WHERE l.l_partkey = np.p_partkey 
+                                                                        AND l.l_shipdate IS NOT NULL
+                                                                        AND l.l_tax NOT BETWEEN 0.07 AND 0.1)
+                                               LIMIT 1)
+WHERE np.rnk = 1
+ORDER BY np.n_name, sales_amount DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

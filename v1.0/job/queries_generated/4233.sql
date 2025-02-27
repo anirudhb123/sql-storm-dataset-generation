@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        DENSE_RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM aka_title at
+    JOIN cast_info ci ON at.id = ci.movie_id
+    GROUP BY at.id, at.title, at.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        CASE 
+            WHEN rm.cast_count > 5 THEN 'Ensemble'
+            ELSE 'Small Cast'
+        END AS cast_size_category
+    FROM RankedMovies rm
+    WHERE rm.rank <= 10
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM movie_companies mc
+    JOIN company_name co ON mc.company_id = co.id
+    JOIN company_type ct ON mc.company_type_id = ct.id
+    WHERE co.country_code IS NOT NULL
+),
+FinalOutput AS (
+    SELECT 
+        fm.title,
+        fm.production_year,
+        fm.cast_size_category,
+        STRING_AGG(DISTINCT cd.company_name, ', ') AS production_companies,
+        COALESCE(MIN(CASE WHEN mi.info_type_id = 1 THEN mi.info END), 'No Rating') AS rating,
+        COALESCE(MAX(CASE WHEN mi.info_type_id = 2 THEN mi.info END), 'No Description') AS description
+    FROM FilteredMovies fm
+    LEFT JOIN CompanyDetails cd ON fm.production_year = (SELECT MAX(production_year) FROM aka_title WHERE id IN (SELECT movie_id FROM movie_companies)) -- correlated subquery
+    LEFT JOIN movie_info mi ON fm.title = (SELECT title FROM aka_title WHERE id = mi.movie_id)
+    GROUP BY fm.title, fm.production_year, fm.cast_size_category
+)
+SELECT 
+    title,
+    production_year,
+    cast_size_category,
+    production_companies,
+    rating,
+    description
+FROM FinalOutput
+ORDER BY production_year DESC, cast_size_category ASC;

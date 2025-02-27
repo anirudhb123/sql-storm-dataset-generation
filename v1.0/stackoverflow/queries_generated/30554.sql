@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS HierarchyLevel
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.HierarchyLevel + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- Bounty votes
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        ph.Comment,
+        ph.CreationDate AS CloseDate,
+        ct.Name AS CloseReason
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    INNER JOIN 
+        CloseReasonTypes ct ON ph.Comment::int = ct.Id -- This assumes Comment contains the close reason ID
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- Post Closed event
+),
+TopCommentedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only Questions
+    GROUP BY 
+        p.Id, p.Title
+    HAVING 
+        COUNT(c.Id) >= 5  -- At least 5 comments
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.TotalBounty,
+    ps.PopularityRank,
+    cp.CloseDate,
+    cp.CloseReason,
+    RANK() OVER (PARTITION BY ps.PopularityRank ORDER BY ps.ViewCount DESC) AS RankInPopularity
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    ClosedPosts cp ON ps.Id = cp.Id
+INNER JOIN 
+    TopCommentedPosts tcp ON ps.Id = tcp.Id
+WHERE 
+    ps.ViewCount > 100  -- Only posts with more than 100 views
+ORDER BY 
+    ps.PopularityRank;

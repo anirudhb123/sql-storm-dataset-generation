@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(rph.Level, -1) AS PostLevel,
+        ua.TotalPosts AS UserTotalPosts,
+        ua.Questions AS UserQuestions,
+        ua.Answers AS UserAnswers,
+        ua.TotalCommentScore AS UserCommentScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.PostId
+    LEFT JOIN 
+        UserActivity ua ON p.OwnerUserId = ua.UserId
+    WHERE 
+        p.CreationDate >= '2023-01-01' AND
+        p.Score > 0
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.PostLevel,
+    ps.UserTotalPosts,
+    ps.UserQuestions,
+    ps.UserAnswers,
+    ps.UserCommentScore,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 2) AS UpVotes,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.PostId AND v.VoteTypeId = 3) AS DownVotes,
+    CASE 
+        WHEN ps.ViewCount > 100 THEN 'High Volume'
+        WHEN ps.ViewCount > 50 THEN 'Moderate Volume'
+        ELSE 'Low Volume'
+    END AS VolumeCategory
+FROM 
+    PostStatistics ps
+ORDER BY 
+    ps.Score DESC,
+    ps.ViewCount DESC;

@@ -1,0 +1,110 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM 
+        web_sales
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_sales_price DESC) AS rn
+    FROM 
+        catalog_sales
+), ranked_sales AS (
+    SELECT 
+        item_sk,
+        SUM(net_profit) AS total_net_profit,
+        SUM(quantity) AS total_quantity,
+        AVG(sales_price) AS avg_sales_price,
+        COUNT(*) AS sales_count,
+        MAX(rn) AS max_rank
+    FROM (
+        SELECT 
+            ws_item_sk AS item_sk,
+            ws_net_profit,
+            ws_quantity,
+            ws_sales_price,
+            rn
+        FROM 
+            sales_data
+        WHERE 
+            rn <= 5 
+        UNION ALL
+        SELECT 
+            cs_item_sk AS item_sk,
+            cs_net_profit,
+            cs_quantity,
+            cs_sales_price,
+            rn
+        FROM 
+            sales_data
+        WHERE 
+            rn <= 5 
+    ) AS combined_sales
+    GROUP BY 
+        item_sk
+), aggregate_income AS (
+    SELECT 
+        hd_income_band_sk,
+        SUM(hd_dep_count) AS total_dependencies,
+        COUNT(DISTINCT hd_demo_sk) AS unique_demographics
+    FROM 
+        household_demographics
+    WHERE 
+        hd_buy_potential IS NOT NULL
+    GROUP BY 
+        hd_income_band_sk
+), detailed_returns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(*) AS return_count,
+        MAX(wr_net_loss) AS max_loss
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity > 0
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    rs.total_net_profit,
+    rs.total_quantity,
+    a.total_dependencies,
+    dr.total_returns,
+    dr.max_loss,
+    CASE 
+        WHEN dr.total_returns IS NULL THEN 'No Returns'
+        WHEN dr.max_loss > 0 THEN 'Loss Occurred'
+        ELSE 'Profitable'
+    END AS return_status
+FROM 
+    item i
+LEFT JOIN 
+    ranked_sales rs ON i.i_item_sk = rs.item_sk
+LEFT JOIN 
+    aggregate_income a ON a.hd_income_band_sk = (
+        SELECT 
+            hd_income_band_sk 
+        FROM 
+            household_demographics hd 
+        WHERE 
+            hd_demo_sk = (SELECT c_current_hdemo_sk FROM customer WHERE c_customer_id = 'CUST0001')
+        LIMIT 1
+    )
+LEFT JOIN 
+    detailed_returns dr ON i.i_item_sk = dr.wr_item_sk
+WHERE 
+    rs.total_net_profit IS NOT NULL
+    AND (rs.total_quantity > 50 OR a.total_dependencies > 10)
+ORDER BY 
+    return_status DESC, 
+    total_net_profit DESC;

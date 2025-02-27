@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT
+        w.w_warehouse_name,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        web_sales AS ws
+    JOIN
+        warehouse AS w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 10000 AND 10010
+    GROUP BY
+        w.w_warehouse_name, ws.ws_sold_date_sk
+),
+CustomerReturns AS (
+    SELECT
+        sr.store_sk,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_amt,
+        COUNT(DISTINCT sr.ticket_number) AS return_count
+    FROM
+        store_returns AS sr
+    GROUP BY
+        sr.store_sk
+),
+FinalSales AS (
+    SELECT
+        s.warehouse_name,
+        sd.ws_sold_date_sk,
+        sd.total_sales,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        sd.order_count,
+        (sd.total_sales - COALESCE(cr.total_return_amt, 0)) AS net_sales
+    FROM
+        SalesData AS sd
+    LEFT JOIN
+        CustomerReturns AS cr ON sd.w_warehouse_name = cr.store_sk
+    LEFT JOIN
+        warehouse AS s ON s.w_warehouse_name = sd.warehouse_name
+)
+SELECT
+    fs.warehouse_name,
+    fs.ws_sold_date_sk,
+    fs.total_sales,
+    fs.total_return_amt,
+    fs.order_count,
+    fs.net_sales
+FROM
+    FinalSales AS fs
+WHERE
+    fs.net_sales > 0
+    AND fs.total_sales > (
+        SELECT AVG(total_sales)
+        FROM SalesData
+    )
+ORDER BY
+    fs.net_sales DESC;

@@ -1,0 +1,40 @@
+WITH RecursiveCTE AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank,
+           (SELECT COUNT(*) FROM part WHERE p_size = 10) AS ten_count
+    FROM part p
+    WHERE p.p_size IS NOT NULL
+),
+FilteredParts AS (
+    SELECT p.partkey, p.p_name, p.p_retailprice, r.r_name, n.n_name,
+           CASE WHEN p.p_retailprice > 100 THEN 'High' 
+                WHEN p.p_retailprice IS NULL THEN 'Unknown'
+                ELSE 'Low' END AS price_category
+    FROM RecursiveCTE p
+    JOIN supplier s ON p.p_partkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name LIKE 'Europe%' OR n.n_name IN (SELECT n.n_name FROM nation n WHERE n.n_nationkey <= 5)
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           DENSE_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 5000
+),
+FinalOutput AS (
+    SELECT fp.p_name, fp.price_category, ro.total_revenue,
+           CASE WHEN fp.ten_count > 0 THEN 'Available' ELSE 'Not Available' END AS availability           
+    FROM FilteredParts fp
+    LEFT JOIN RankedOrders ro ON fp.p_partkey = ro.o_orderkey
+    WHERE fp.price_category = 'High' AND ro.revenue_rank IS NULL
+)
+SELECT DISTINCT fo.p_name, fo.price_category, COALESCE(fo.total_revenue, 0) AS total_revenue,
+                CASE WHEN fo.availability IS NULL THEN 'Uncertain' ELSE fo.availability END AS availability
+FROM FinalOutput fo
+WHERE fo.p_name LIKE '%Part%' OR fo.total_revenue > 1000
+ORDER BY fo.price_category, fo.total_revenue DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM part) % 50;

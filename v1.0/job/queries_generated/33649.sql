@@ -1,0 +1,68 @@
+WITH RECURSIVE ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        b.production_year,
+        ROW_NUMBER() OVER (PARTITION BY b.production_year ORDER BY a.title) AS rank
+    FROM 
+        aka_title a
+    JOIN 
+        title b ON a.movie_id = b.id
+    WHERE 
+        b.production_year IS NOT NULL
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        movie_keyword k ON ci.movie_id = k.movie_id
+    GROUP BY 
+        c.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        m.movie_id,
+        MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS director,
+        MAX(CASE WHEN mi.info_type_id = 2 THEN mi.info END) AS writer
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_companies mc ON mi.movie_id = mc.movie_id
+    JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    GROUP BY 
+        m.movie_id
+),
+final_selection AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        mc.cast_count,
+        mid.director,
+        mid.writer,
+        r.rank
+    FROM 
+        ranked_movies r
+    LEFT JOIN 
+        movie_cast mc ON r.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_info_details mid ON r.movie_id = mid.movie_id
+)
+SELECT
+    movie_id,
+    title,
+    production_year,
+    COALESCE(cast_count, 0) AS total_cast,
+    director,
+    writer
+FROM 
+    final_selection
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year DESC, title;

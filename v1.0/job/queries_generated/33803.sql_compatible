@@ -1,0 +1,57 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        0 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        production_year BETWEEN 2000 AND 2020
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = m.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.title AS "Movie Title",
+    mh.level AS "Hierarchy Level",
+    COUNT(mk.keyword) AS "Keyword Count",
+    STRING_AGG(DISTINCT ak.name, ', ') AS "Actors",
+    MAX(CASE 
+            WHEN pi.info IS NULL THEN 'No info'
+            ELSE pi.info 
+        END) AS "Personal Info",
+    CASE 
+        WHEN mc.id IS NOT NULL THEN 'Has production company'
+        ELSE 'No production company'
+    END AS "Company Status"
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = ci.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.level, mc.id
+ORDER BY 
+    mh.level, COUNT(mk.keyword) DESC;

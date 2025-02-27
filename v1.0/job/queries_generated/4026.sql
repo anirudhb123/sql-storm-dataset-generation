@@ -1,0 +1,51 @@
+WITH MovieStats AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        AVG(ci.nr_order) AS avg_cast_order
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2022
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        ms.movie_id,
+        ms.title,
+        ms.total_cast,
+        ms.avg_cast_order,
+        RANK() OVER (ORDER BY ms.total_cast DESC) AS rank_by_cast
+    FROM 
+        MovieStats ms
+)
+SELECT 
+    tm.title,
+    tm.total_cast,
+    tm.avg_cast_order,
+    COALESCE(ki.keyword, 'No Keywords') AS keyword_info,
+    pi.info AS person_info
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON tm.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+LEFT JOIN 
+    movie_companies mc ON tm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    person_info pi ON co.imdb_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Director')
+WHERE 
+    tm.rank_by_cast <= 10
+ORDER BY 
+    tm.total_cast DESC, tm.avg_cast_order ASC;

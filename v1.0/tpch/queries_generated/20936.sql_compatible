@@ -1,0 +1,69 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_comment IS NOT NULL)
+), 
+
+CustomerOrderTotals AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+
+OrderLineItemDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(l.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l.l_extendedprice) FROM lineitem)
+) 
+
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(SUM(o.total_spent), 0) AS total_customer_spent,
+    COALESCE(SUM(ol.total_lineitem_value), 0) AS total_orders_value,
+    s.s_name AS top_supplier,
+    CASE 
+        WHEN c.c_acctbal IS NULL THEN 'No Account Balance'
+        ELSE CAST(c.c_acctbal AS VARCHAR) 
+    END AS account_balance_status
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderTotals o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    OrderLineItemDetails ol ON ol.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN 
+    RankedSuppliers s ON s.rn = 1 AND s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+GROUP BY 
+    c.c_custkey, c.c_name, s.s_name
+HAVING 
+    (SUM(o.total_spent) IS NULL OR SUM(o.total_spent) > 1000)
+    AND (COUNT(ol.item_count) > 5 OR (SELECT COUNT(*) FROM lineitem WHERE l_returnflag = 'R') > 10)
+ORDER BY 
+    total_customer_spent DESC, total_orders_value DESC;

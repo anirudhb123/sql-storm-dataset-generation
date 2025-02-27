@@ -1,0 +1,26 @@
+SELECT 
+    p.p_name, 
+    SUM(l.l_quantity) AS total_quantity, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUBSTRING_INDEX(p.p_comment, ' ', 5) AS sample_comment,
+    CONCAT(s.s_name, ' (', s.s_phone, ')') AS supplier_details
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+WHERE 
+    p.p_retailprice > 50.00 
+    AND o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_suppkey, s.s_name, s.s_phone
+HAVING 
+    total_quantity > 100
+ORDER BY 
+    total_orders DESC, total_quantity DESC
+LIMIT 10;

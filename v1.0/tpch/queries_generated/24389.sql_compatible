@@ -1,0 +1,46 @@
+
+WITH RECURSIVE Relevant_Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_partkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN Relevant_Suppliers rs ON ps.ps_partkey = rs.ps_partkey
+    WHERE rs.s_acctbal < 500 AND ps.ps_availqty > 1
+),
+Customer_Stats AS (
+    SELECT c.c_custkey, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+Part_Supplier_Aggregates AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS distinct_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+Final_Analysis AS (
+    SELECT c.c_name AS customer_name,
+           n.n_name AS nation_name,
+           COALESCE(ps.total_supply_cost, 0) AS total_supply_cost,
+           cs.order_count,
+           cs.total_spent,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN Customer_Stats cs ON c.c_custkey = cs.c_custkey
+    LEFT JOIN Part_Supplier_Aggregates ps ON ps.ps_partkey IN (SELECT ps_partkey FROM Relevant_Suppliers)
+)
+SELECT *
+FROM Final_Analysis
+WHERE (total_supply_cost + total_spent) > (SELECT AVG(total_supply_cost) FROM Part_Supplier_Aggregates)
+  OR (spending_rank IS NOT NULL AND spending_rank <= 5)
+ORDER BY total_spent DESC, customer_name;

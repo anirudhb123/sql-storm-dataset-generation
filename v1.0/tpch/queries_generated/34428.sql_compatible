@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS hierarchy_level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, (sh.s_acctbal + s.s_acctbal) AS combined_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey 
+    WHERE s.s_acctbal IS NOT NULL
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+CustomerRanks AS (
+    SELECT c.c_custkey, c.c_name, RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PriceAnalysis AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COUNT(ps.ps_supplycost) AS supply_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+)
+SELECT ra.c_name, 
+       ps.p_name AS product_name,
+       ra.rank,
+       AVG(ps.avg_supply_cost) AS avg_cost,
+       SUM(os.total_line_item_value) AS total_order_value
+FROM CustomerRanks ra
+JOIN OrderSummary os ON ra.c_custkey = os.o_orderkey
+JOIN PriceAnalysis ps ON ps.p_partkey IN (
+    SELECT ps_partkey 
+    FROM partsupp 
+    WHERE ps_availqty >= 100
+)
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey 
+                                   FROM nation n 
+                                   WHERE n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = ps.ps_suppkey))
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = ps.ps_suppkey
+WHERE r.r_name LIKE 'Asia%' 
+GROUP BY ra.c_name, ps.p_name, ra.rank 
+HAVING SUM(os.total_line_item_value) > 1000000
+ORDER BY ra.rank, avg_cost DESC;

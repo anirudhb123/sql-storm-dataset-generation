@@ -1,0 +1,60 @@
+
+WITH movie_cast AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_info_cte AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mi.info AS link_info,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        COALESCE(mc.total_cast, 0) AS cast_count,
+        mc.cast_names
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        movie_cast mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        movie_keywords mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+        AND (mi.info_type_id IS NULL OR mi.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%Award%'))
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    link_info,
+    keywords,
+    cast_count,
+    cast_names,
+    ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC, title) AS rank
+FROM 
+    movie_info_cte
+WHERE 
+    ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY cast_count DESC, title) <= 5
+ORDER BY 
+    production_year DESC, cast_count DESC;

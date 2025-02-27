@@ -1,0 +1,54 @@
+WITH RECURSIVE RecentOrders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice 
+    FROM orders 
+    WHERE o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice 
+    FROM orders o
+    JOIN RecentOrders ro ON o.o_orderkey > ro.o_orderkey
+    WHERE o.o_orderdate < ro.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT s.s_suppkey, 
+           SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s 
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spending
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+),
+LineitemAnalytics AS (
+    SELECT l.l_orderkey,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount,
+           COUNT(*) AS item_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT r.r_name,
+       COALESCE((SELECT SUM(lavg.avg_price_after_discount)
+                 FROM LineitemAnalytics lavg
+                 JOIN RecentOrders ro ON lavg.l_orderkey = ro.o_orderkey), 0) AS total_avg_price_after_discount,
+       COALESCE(SUM(sp.total_availqty), 0) AS total_supplier_availqty,
+       COALESCE(COUNT(DISTINCT hvc.c_custkey), 0) AS high_value_customers_count
+FROM region r
+LEFT JOIN nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN SupplierPerformance sp ON s.s_suppkey = sp.s_suppkey
+LEFT JOIN HighValueCustomers hvc ON hvc.c_custkey IN 
+    (SELECT DISTINCT c.c_custkey 
+     FROM customer c 
+     JOIN orders o ON c.c_custkey = o.o_custkey 
+     WHERE o.o_orderstatus = 'F')
+WHERE r.r_name IS NOT NULL
+GROUP BY r.r_name
+ORDER BY total_avg_price_after_discount DESC
+LIMIT 10;

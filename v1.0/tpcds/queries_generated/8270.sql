@@ -1,0 +1,65 @@
+
+WITH AggregateSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_sales_price) AS avg_sales_price,
+        AVG(ws_net_paid) AS avg_net_paid
+    FROM 
+        web_sales 
+        JOIN warehouse w ON ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        w.w_warehouse_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales 
+        JOIN customer ON ws_bill_customer_sk = c_customer_sk
+        JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        cd_demo_sk, cd_gender
+),
+PromotionAnalysis AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(cs_order_number) AS total_orders_promo,
+        SUM(cs_ext_sales_price) AS total_sales_promo
+    FROM 
+        catalog_sales 
+        JOIN promotion p ON cs_promo_sk = p.p_promo_sk
+    WHERE 
+        cs_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    AS.w_warehouse_id,
+    AS.total_sales,
+    AS.total_profit,
+    AS.total_orders,
+    AS.avg_sales_price,
+    AS.avg_net_paid,
+    CD.cd_gender,
+    CD.total_sales AS gender_sales,
+    PA.total_orders_promo,
+    PA.total_sales_promo
+FROM 
+    AggregateSales AS
+    LEFT JOIN CustomerDemographics CD ON AS.total_sales > 0 
+    LEFT JOIN PromotionAnalysis PA ON PA.total_orders_promo > 0 
+ORDER BY 
+    AS.total_sales DESC, 
+    CD.gender_sales DESC;

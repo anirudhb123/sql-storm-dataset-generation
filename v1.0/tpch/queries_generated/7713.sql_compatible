@@ -1,0 +1,67 @@
+
+WITH SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name
+),
+SalesOverview AS (
+    SELECT 
+        c.c_nationkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey, c.c_name
+),
+Combined AS (
+    SELECT 
+        sp.s_suppkey,
+        sp.s_name,
+        so.c_nationkey,
+        so.c_name,
+        so.total_sales,
+        so.total_orders,
+        sp.total_availqty,
+        sp.total_supplycost
+    FROM 
+        SupplierParts sp
+    JOIN 
+        SalesOverview so ON sp.ps_partkey IN (
+            SELECT ps.ps_partkey 
+            FROM partsupp ps 
+            WHERE ps.ps_availqty > 0
+        )
+)
+SELECT 
+    r.r_name AS Region,
+    COUNT(DISTINCT n.n_nationkey) AS Nation_Count,
+    AVG(co.total_sales) AS Average_Sales,
+    SUM(co.total_orders) AS Total_Orders,
+    SUM(co.total_availqty) AS Total_Available_Quantity,
+    SUM(co.total_supplycost) AS Total_Supply_Cost
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    Combined co ON n.n_nationkey = co.c_nationkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

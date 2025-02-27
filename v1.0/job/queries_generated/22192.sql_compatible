@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS movie_rank,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.title, t.production_year, t.kind_id
+),
+TopActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(m.title) AS movie_count,
+        AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - m.production_year) AS avg_year_difference
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title m ON ci.movie_id = m.id
+    WHERE 
+        m.production_year >= 2000 AND 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(m.title) > 5
+),
+NullCheck AS (
+    SELECT 
+        DISTINCT c.id AS cast_id,
+        ci.person_id,
+        m.title,
+        CASE 
+            WHEN c.note IS NULL THEN 'No Note'
+            ELSE c.note
+        END AS note_status
+    FROM 
+        cast_info c
+    JOIN 
+        aka_title m ON c.movie_id = m.id
+    WHERE 
+        c.nr_order IN (SELECT DISTINCT nr_order FROM cast_info) 
+        AND m.production_year = (SELECT MAX(production_year) FROM aka_title)
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    ta.actor_name,
+    ta.movie_count,
+    h.note_status,
+    RANK() OVER (PARTITION BY tm.production_year ORDER BY ta.avg_year_difference DESC) AS rank_of_actor
+FROM 
+    RankedMovies tm
+JOIN 
+    TopActors ta ON tm.actor_count = ta.movie_count
+LEFT JOIN 
+    NullCheck h ON ta.movie_count = h.cast_id
+WHERE 
+    tm.movie_rank = 1
+    AND ta.avg_year_difference IS NOT NULL
+ORDER BY 
+    tm.production_year DESC, rank_of_actor;

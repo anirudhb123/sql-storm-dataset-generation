@@ -1,0 +1,72 @@
+WITH ranked_posts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY CASE 
+                                        WHEN p.PostTypeId = 1 THEN 'Question' 
+                                        WHEN p.PostTypeId = 2 THEN 'Answer'
+                                        ELSE 'Other' END 
+                               ORDER BY p.Score DESC) AS RankByScore,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+
+closed_posts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    COALESCE(rp.CommentCount, 0) AS TotalComments,
+    COALESCE(MAX(cp.LastClosedDate), 'No Closures') AS LastClosedDate,
+    COALESCE(cp.CloseReasons, 'N/A') AS CloseReasons,
+    rp.TotalBounty,
+    CASE 
+        WHEN rp.RankByScore <= 5 THEN 'Top Posts'
+        WHEN rp.RankByScore BETWEEN 6 AND 15 THEN 'Moderately Scored Posts'
+        ELSE 'Low Scored Posts'
+    END AS PostRankCategory,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'Score Data Missing'
+        WHEN rp.Score < 0 THEN 'Negative Score'
+        ELSE 'Valid Score'
+    END AS ScoreAnalysis
+FROM 
+    ranked_posts rp
+LEFT JOIN 
+    closed_posts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.ViewCount > (SELECT AVG(ViewCount) FROM ranked_posts) 
+    OR rp.Score >= (SELECT AVG(Score) FROM ranked_posts)
+ORDER BY 
+    rp.RankByScore, rp.ViewCount DESC
+OFFSET 10 LIMIT 5;

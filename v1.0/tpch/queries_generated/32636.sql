@@ -1,0 +1,45 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_custkey IN (SELECT DISTINCT o_custkey FROM orders)
+    
+    UNION ALL
+    
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey
+    WHERE ch.level < 5
+),
+PartSupplierDetails AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierRegions AS (
+    SELECT n.n_name AS nation_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT ch.c_name, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+       CASE
+           WHEN h.total_value IS NOT NULL THEN 'High Value'
+           ELSE 'Standard'
+       END AS order_type,
+       sr.nation_name, sr.supplier_count
+FROM CustomerHierarchy ch
+LEFT JOIN HighValueOrders h ON ch.custkey = h.o_orderkey
+JOIN PartSupplierDetails ps ON ps.rank = 1
+JOIN part p ON p.p_partkey = ps.p_partkey
+LEFT JOIN SupplierRegions sr ON ch.c_nationkey = sr.nation_name
+WHERE (ps.ps_availqty IS NOT NULL OR ps.ps_availqty > 0)
+ORDER BY ch.level, sr.supplier_count DESC, h.total_value DESC;

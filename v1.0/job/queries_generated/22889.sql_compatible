@@ -1,0 +1,85 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.role_id) AS role_rank,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        aka_title AS a
+    LEFT JOIN 
+        cast_info AS c ON a.id = c.movie_id
+    LEFT JOIN 
+        role_type AS b ON c.role_id = b.id
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+MovieDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(mi.info, 'No Info') AS movie_info,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies AS rm
+    LEFT JOIN 
+        movie_info AS mi ON rm.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword AS mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    WHERE 
+        rm.cast_count > 5
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year, mi.info
+), 
+CharacterCount AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        movie_info,
+        keywords,
+        LENGTH(title) - LENGTH(REPLACE(title, 'a', '')) AS a_count,
+        LENGTH(title) - LENGTH(REPLACE(title, 'e', '')) AS e_count
+    FROM 
+        MovieDetails
+), 
+FilteredMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN a_count > e_count THEN 'More A\'s'
+            WHEN a_count < e_count THEN 'More E\'s'
+            ELSE 'Equal Count'
+        END AS vowel_comparison
+    FROM 
+        CharacterCount
+    WHERE
+        production_year >= 2000
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_count,
+    f.movie_info,
+    f.keywords,
+    f.vowel_comparison,
+    CASE 
+        WHEN f.cast_count % 2 = 0 THEN 'Even Cast'
+        ELSE 'Odd Cast'
+    END AS cast_parity,
+    NULLIF(f.movie_info, 'No Info') AS clean_info,
+    COALESCE(NULLIF(f.movie_info, 'No Info'), 'Looked Up Info') AS adjusted_info
+FROM 
+    FilteredMovies AS f
+WHERE 
+    EXISTS (SELECT 1 FROM title AS t WHERE t.id = f.movie_id AND t.kind_id = 1)
+ORDER BY 
+    f.production_year DESC, 
+    f.cast_count DESC;

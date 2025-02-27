@@ -1,0 +1,59 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.episode_of_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.episode_of_id,
+        mh.depth + 1
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+
+cast_count AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT person_id) AS total_cast
+    FROM 
+        cast_info
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    COALESCE(cc.total_cast, 0) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+    RANK() OVER (PARTITION BY mh.depth ORDER BY COALESCE(cc.total_cast, 0) DESC) AS rank_by_cast
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_count cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (
+        SELECT person_id 
+        FROM cast_info ci 
+        WHERE ci.movie_id = mh.movie_id
+    )
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth, cc.total_cast
+ORDER BY 
+    mh.depth, total_cast DESC;

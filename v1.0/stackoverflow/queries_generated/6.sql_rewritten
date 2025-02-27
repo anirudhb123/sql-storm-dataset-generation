@@ -1,0 +1,87 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate
+),
+LatestPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank = 1
+),
+PopularPosts AS (
+    SELECT 
+        lp.PostId,
+        lp.Title,
+        lp.CreationDate,
+        lp.OwnerUserId,
+        lp.CommentCount,
+        lp.UpVotes,
+        lp.DownVotes,
+        (lp.UpVotes - lp.DownVotes) AS NetScore,
+        CASE 
+            WHEN lp.CommentCount IS NULL THEN 'No comments'
+            WHEN lp.CommentCount = 0 THEN 'No comments'
+            ELSE 'Comments available'
+        END AS CommentStatus
+    FROM 
+        LatestPosts lp
+)
+SELECT 
+    u.DisplayName,
+    pp.Title,
+    pp.CreationDate,
+    pp.NetScore,
+    pp.CommentStatus
+FROM 
+    PopularPosts pp
+JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+WHERE 
+    pp.NetScore > 5
+    AND pp.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+ORDER BY 
+    pp.NetScore DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    u.DisplayName,
+    'No recent popular posts' AS Title,
+    NULL AS CreationDate,
+    NULL AS NetScore,
+    NULL AS CommentStatus
+FROM 
+    Users u
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM PopularPosts pp 
+        WHERE pp.OwnerUserId = u.Id
+    )
+AND u.Reputation < 100
+ORDER BY 
+    u.Reputation DESC;

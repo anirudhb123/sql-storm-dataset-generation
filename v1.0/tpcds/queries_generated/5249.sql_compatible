@@ -1,0 +1,60 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        ws_order_number,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_ship_customer_sk) AS customer_count,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_order_number
+),
+OrderDetails AS (
+    SELECT 
+        ro.ws_order_number,
+        ro.total_sales,
+        ro.customer_count,
+        ro.total_profit,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        hd.ib_income_band_sk
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.ws_order_number = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+FilteredOrders AS (
+    SELECT 
+        od.ws_order_number,
+        od.total_sales,
+        od.customer_count,
+        od.total_profit,
+        CASE 
+            WHEN od.total_sales > 1000 THEN 'High Value'
+            WHEN od.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS order_value_category
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.cd_gender = 'M'
+        AND od.cd_marital_status = 'S'
+        AND od.ib_income_band_sk IN (1, 2, 3)
+)
+SELECT 
+    order_value_category,
+    COUNT(*) AS order_count,
+    AVG(total_sales) AS avg_sales,
+    SUM(total_profit) AS total_profit
+FROM 
+    FilteredOrders
+GROUP BY 
+    order_value_category
+ORDER BY 
+    order_value_category DESC;

@@ -1,0 +1,84 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY a.ca_state ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address a ON c.c_current_addr_sk = a.ca_address_sk
+    GROUP BY 
+        ws_item_sk, a.ca_state
+),
+CustomerDemographics AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        COALESCE(cd_dep_count, 0) AS dep_count,
+        COALESCE(cd_dep_employed_count, 0) AS dep_employed,
+        COALESCE(cd_dep_college_count, 0) AS dep_college
+    FROM 
+        customer_demographics
+),
+IncomeData AS (
+    SELECT 
+        ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        CASE 
+            WHEN ib_lower_bound < 30000 THEN 'Low'
+            WHEN ib_lower_bound BETWEEN 30000 AND 70000 THEN 'Medium'
+            ELSE 'High'
+        END AS income_category
+    FROM 
+        income_band
+),
+ReturnedSales AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_returned_amount,
+        ROW_NUMBER() OVER (ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    r.ws_item_sk,
+    r.total_quantity_sold,
+    r.total_sales,
+    rd.total_returns,
+    rd.total_returned_amount,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.dep_count,
+    i.income_category,
+    CASE 
+        WHEN r.total_sales > 100000 AND rd.total_returned_amount IS NULL THEN 'High Value'
+        WHEN r.total_sales < 10000 OR rd.total_returns > 5 THEN 'Risky'
+        ELSE 'Moderate Value'
+    END AS sales_risk_category
+FROM 
+    RankedSales r
+LEFT JOIN 
+    ReturnedSales rd ON r.ws_item_sk = rd.sr_item_sk
+LEFT JOIN 
+    CustomerDemographics c ON r.sales_rank = 1 AND c.cd_demo_sk = (SELECT MAX(cd_demo_sk) FROM CustomerDemographics)
+LEFT JOIN 
+    IncomeData i ON i.ib_income_band_sk = c.cd_credit_rating
+WHERE 
+    r.sales_rank <= 3 OR (
+        r.total_quantity_sold IS NOT NULL AND 
+        r.total_sales IS NOT NULL AND 
+        r.total_sales - COALESCE(rd.total_returned_amount, 0) > 0
+    )
+ORDER BY 
+    r.total_sales DESC NULLS LAST;

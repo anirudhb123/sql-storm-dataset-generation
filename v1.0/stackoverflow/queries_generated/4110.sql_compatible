@@ -1,0 +1,64 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+HighReputationUsers AS (
+    SELECT 
+        ur.UserId, 
+        ur.DisplayName, 
+        ur.Reputation
+    FROM 
+        UserReputation ur
+    WHERE 
+        ur.Reputation > 1000
+    ORDER BY 
+        ur.Reputation DESC
+)
+SELECT 
+    hru.DisplayName,
+    hru.Reputation,
+    ps.TotalPosts,
+    ps.QuestionCount,
+    ps.AnswerCount,
+    COALESCE(pht.Name, 'No History') AS PostHistoryType,
+    NULLIF(SUM(v.BountyAmount) FILTER (WHERE v.VoteTypeId = 9), 0) AS TotalBountyAmount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    HighReputationUsers hru
+LEFT JOIN 
+    PostStats ps ON hru.UserId = ps.OwnerUserId
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = hru.UserId
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+LEFT JOIN 
+    PostLinks pl ON pl.PostId = p.Id
+LEFT JOIN 
+    Tags t ON t.Id = pl.RelatedPostId
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+GROUP BY 
+    hru.UserId, hru.DisplayName, hru.Reputation, pht.Name
+HAVING 
+    COUNT(ps.TotalPosts) > 10 OR hru.Reputation > 2000
+ORDER BY 
+    hru.Reputation DESC, ps.TotalPosts DESC;

@@ -1,0 +1,13 @@
+copy PostHistoryTypes from 'data/stackoverflow/PostHistoryTypes.csv' with (delimiter ',', format csv, null '');
+copy LinkTypes from 'data/stackoverflow/LinkTypes.csv' with (delimiter ',', format csv, null '');
+copy PostTypes from 'data/stackoverflow/PostTypes.csv' with (delimiter ',', format csv, null '');
+copy CloseReasonTypes from 'data/stackoverflow/CloseReasonTypes.csv' with (delimiter ',', format csv, null '');
+copy VoteTypes from 'data/stackoverflow/VoteTypes.csv' with (delimiter ',', format csv, null '');
+copy Users from 'data/stackoverflow/Users.csv' with (delimiter ',', format csv, null '');
+copy Badges from 'data/stackoverflow/Badges.csv' with (delimiter ',', format csv, null '');
+copy Posts from 'data/stackoverflow/Posts.csv' with (delimiter ',', format csv, null '');
+copy Comments from 'data/stackoverflow/Comments.csv' with (delimiter ',', format csv, null '');
+copy PostHistory from 'data/stackoverflow/PostHistory.csv' with (delimiter ',', format csv, null '');
+copy PostLinks from 'data/stackoverflow/PostLinks.csv' with (delimiter ',', format csv, null '');
+copy Tags from 'data/stackoverflow/Tags.csv' with (delimiter ',', format csv, null '');
+copy Votes from 'data/stackoverflow/Votes.csv' with (delimiter ',', format csv, null '');

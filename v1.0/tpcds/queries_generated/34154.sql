@@ -1,0 +1,52 @@
+
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_dep_count, ca.ca_city, ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_gender = 'F' AND cd.cd_marital_status = 'M'
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_dep_count, ca.ca_city, ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_dep_count > 2 AND ca.ca_state IN (SELECT DISTINCT ca_state FROM customer_address)
+),
+SalesSummary AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(ws_order_number) AS order_count,
+           AVG(ws_net_profit) AS avg_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+ReturnSummary AS (
+    SELECT sr_returning_customer_sk,
+           COUNT(sr_order_number) AS return_count,
+           SUM(sr_return_amt_inc_tax) AS total_returns
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+    GROUP BY sr_returning_customer_sk
+),
+FinalSummary AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, cs.total_sales, rs.total_returns,
+           cs.order_count, rs.return_count,
+           COALESCE(cs.total_sales, 0) - COALESCE(rs.total_returns, 0) AS net_revenue
+    FROM CustomerCTE c
+    LEFT JOIN SalesSummary cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+    LEFT JOIN ReturnSummary rs ON c.c_customer_sk = rs.sr_returning_customer_sk
+)
+
+SELECT f.c_customer_sk, f.c_first_name, f.c_last_name,
+       f.total_sales, f.order_count, f.return_count, f.net_revenue,
+       CASE 
+           WHEN f.net_revenue > 1000 THEN 'High Value'
+           WHEN f.net_revenue BETWEEN 500 AND 1000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_category
+FROM FinalSummary f
+WHERE f.total_sales IS NOT NULL
+ORDER BY f.total_sales DESC
+LIMIT 50;

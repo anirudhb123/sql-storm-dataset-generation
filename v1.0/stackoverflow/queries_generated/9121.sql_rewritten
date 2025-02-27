@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT bp.PostId) AS TotalBestPosts,
+        SUM(bp.Score) AS TotalScore,
+        SUM(bp.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        RankedPosts bp ON u.Id = bp.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT bp.PostId) > 0
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        TotalBestPosts, 
+        TotalScore, 
+        TotalViews, 
+        RANK() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM 
+        UserStats
+)
+SELECT 
+    t.DisplayName,
+    t.TotalBestPosts,
+    t.TotalScore,
+    t.TotalViews,
+    RANK() OVER (ORDER BY t.TotalScore DESC) AS OverallRank,
+    u.Reputation,
+    u.CreationDate
+FROM 
+    TopUsers t
+JOIN 
+    Users u ON t.UserId = u.Id
+WHERE 
+    t.UserRank <= 10
+ORDER BY 
+    OverallRank;

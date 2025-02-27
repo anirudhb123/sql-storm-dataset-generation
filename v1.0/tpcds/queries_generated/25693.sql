@@ -1,0 +1,65 @@
+
+WITH address_data AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_street_name,
+        ca.ca_city,
+        ca.ca_state,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        LENGTH(TRIM(ca.ca_city)) AS city_length,
+        LOWER(ca.ca_city) AS city_lower
+    FROM 
+        customer_address ca
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_paid,
+        ws.ws_net_profit,
+        ca.ca_city,
+        ca.ca_state,
+        ws.ws_sold_date_sk
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    cd.full_name,
+    ad.full_address,
+    sd.ca_city,
+    sd.ca_state,
+    SUM(sd.ws_net_profit) AS total_net_profit,
+    COUNT(sd.ws_order_number) AS total_orders,
+    AVG(ad.city_length) AS avg_city_name_length,
+    STRING_AGG(cd.cd_gender, ', ') AS genders,
+    STRING_AGG(cd.cd_marital_status, ', ') AS marital_statuses
+FROM 
+    customer_data cd
+JOIN 
+    address_data ad ON cd.c_customer_sk IN (SELECT c_customer_sk FROM customer WHERE c_current_addr_sk = ad.ca_address_sk)
+JOIN 
+    sales_data sd ON cd.c_customer_sk = sd.ws_bill_customer_sk
+GROUP BY 
+    cd.full_name, ad.full_address, sd.ca_city, sd.ca_state
+ORDER BY 
+    total_net_profit DESC
+LIMIT 100;

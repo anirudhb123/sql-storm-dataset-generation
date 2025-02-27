@@ -1,0 +1,65 @@
+WITH movie_data AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        STRING_AGG(a.name, ', ') AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+company_data AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+),
+final_data AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.cast_names,
+        cd.companies,
+        cd.company_types,
+        md.keywords
+    FROM 
+        movie_data md
+    LEFT JOIN 
+        company_data cd ON md.movie_id = cd.movie_id
+)
+SELECT 
+    DISTINCT movie_id,
+    title,
+    production_year,
+    cast_count,
+    cast_names,
+    COALESCE(companies, 'No Companies') AS companies,
+    COALESCE(company_types, 'No Company Types') AS company_types,
+    COALESCE(keywords, 'No Keywords') AS keywords
+FROM 
+    final_data
+WHERE 
+    production_year >= 2000
+ORDER BY 
+    production_year DESC, cast_count DESC;

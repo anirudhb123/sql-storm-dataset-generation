@@ -1,0 +1,65 @@
+WITH RankedMovies AS (
+    SELECT 
+        A.id AS movie_id,
+        A.title,
+        A.production_year,
+        ROW_NUMBER() OVER (PARTITION BY A.production_year ORDER BY A.title) AS rank_by_year,
+        COUNT(B.person_id) AS total_cast
+    FROM 
+        aka_title A
+    LEFT JOIN 
+        cast_info B ON A.movie_id = B.movie_id 
+    GROUP BY 
+        A.id, A.title, A.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_cast
+    FROM 
+        RankedMovies
+    WHERE 
+        total_cast > 5 AND rank_by_year <= 10
+),
+MovieDetails AS (
+    SELECT 
+        FM.movie_id,
+        FM.title,
+        FM.production_year,
+        STRING_AGG(DISTINCT AK.name, ', ') AS actor_names,
+        COALESCE(MAX(MI.info), 'N/A') AS additional_info
+    FROM 
+        FilteredMovies FM
+    LEFT JOIN 
+        cast_info CI ON FM.movie_id = CI.movie_id
+    LEFT JOIN 
+        aka_name AK ON CI.person_id = AK.person_id
+    LEFT JOIN 
+        movie_info MI ON FM.movie_id = MI.movie_id
+        AND MI.info_type_id IN (SELECT id FROM info_type WHERE info = 'Synopsis')
+    GROUP BY 
+        FM.movie_id, FM.title, FM.production_year
+),
+MovieRankings AS (
+    SELECT 
+        MD.*,
+        RANK() OVER (ORDER BY MD.production_year, MD.total_cast DESC) AS movie_rank
+    FROM 
+        MovieDetails MD
+)
+SELECT 
+    MR.title,
+    MR.production_year,
+    MR.actor_names,
+    MR.additional_info,
+    COALESCE(MR.movie_rank, 0) AS rank
+FROM 
+    MovieRankings MR
+WHERE 
+    MR.movie_rank IS NOT NULL
+    AND (MR.additional_info LIKE 'N/A' OR MR.additional_info IS NOT NULL)
+ORDER BY 
+    MR.production_year DESC,
+    MR.movie_rank ASC;

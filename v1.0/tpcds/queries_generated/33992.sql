@@ -1,0 +1,40 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, 0 as level
+    FROM customer
+    WHERE c_customer_sk IN (SELECT DISTINCT ss_customer_sk FROM store_sales)
+    
+    UNION ALL
+    
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, sh.level + 1
+    FROM customer c
+    JOIN sales_hierarchy sh ON c.c_current_cdemo_sk = sh.c_customer_sk
+)
+
+SELECT
+    a.ca_city,
+    d.d_year,
+    SUM(ss.ss_net_paid) AS total_sales,
+    COUNT(DISTINCT ss.ss_ticket_number) AS unique_sales,
+    AVG(ss.ss_net_paid) AS avg_net_paid,
+    STRING_AGG(DISTINCT CONCAT_WS(' ', c.c_first_name, c.c_last_name), ', ') AS customer_names
+FROM
+    store_sales ss
+LEFT JOIN
+    customer_address a ON a.ca_address_sk = ss.ss_addr_sk
+JOIN
+    sales_hierarchy sh ON sh.c_customer_sk = ss.ss_customer_sk
+JOIN
+    date_dim d ON d.d_date_sk = ss.ss_sold_date_sk
+WHERE
+    d.d_year >= 2022 AND
+    a.ca_state = 'CA' AND
+    ss.ss_net_paid IS NOT NULL
+GROUP BY
+    a.ca_city, d.d_year
+HAVING
+    total_sales > 1000 AND
+    COUNT(ss.ss_ticket_number) > 10
+ORDER BY
+    total_sales DESC
+LIMIT 100;

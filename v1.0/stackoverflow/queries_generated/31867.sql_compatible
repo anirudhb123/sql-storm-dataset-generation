@@ -1,0 +1,57 @@
+
+WITH RECURSIVE UserReputationCTE AS (
+    SELECT Id AS UserId, Reputation,
+           CAST(0 AS BIGINT) AS TotalVotes,
+           CAST(0 AS BIGINT) AS TotalPosts
+    FROM Users
+    WHERE Reputation IS NOT NULL
+    UNION ALL
+    SELECT u.Id, u.Reputation,
+           COALESCE(SUM(v.BountyAmount), 0) OVER (PARTITION BY u.Id) + ur.TotalVotes,
+           COUNT(p.Id) OVER (PARTITION BY u.Id) + ur.TotalPosts
+    FROM Users u
+    JOIN Votes v ON v.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    INNER JOIN UserReputationCTE ur ON ur.UserId = u.Id
+    WHERE u.Reputation IS NOT NULL 
+    GROUP BY u.Id, u.Reputation, ur.TotalVotes, ur.TotalPosts
+),
+PostAnalytics AS (
+    SELECT p.Id AS PostId, p.Title, p.CreationDate,
+           p.Score, p.ViewCount, COALESCE(SUM(c.Score), 0) AS TotalComments,
+           COUNT(DISTINCT v.UserId) AS UniqueVoteCount,
+           COUNT(p2.Id) FILTER (WHERE p2.PostTypeId = 2) AS AnswerCount,
+           ARRAY_AGG(DISTINCT t.TagName) AS TagsArray
+    FROM Posts p
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    LEFT JOIN PostLinks pl ON pl.PostId = p.Id
+    LEFT JOIN Posts p2 ON p2.ParentId = p.Id
+    LEFT JOIN Tags t ON t.Id = ANY(string_to_array(p.Tags, ',')::integer[])
+    WHERE p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month')
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+RecentPostsWithUserReputation AS (
+    SELECT pa.*, ur.Reputation AS UserReputation, ur.TotalVotes, ur.TotalPosts
+    FROM PostAnalytics pa
+    LEFT JOIN Users u ON u.Id = pa.OwnerUserId
+    LEFT JOIN UserReputationCTE ur ON ur.UserId = u.Id
+),
+FinalResults AS (
+    SELECT r.PostId, r.Title, r.ViewCount, r.Score, r.TotalComments,
+           r.UniqueVoteCount, r.UserReputation, r.TotalVotes,
+           r.TotalPosts, r.AnswerCount,
+           CASE 
+               WHEN r.UniqueVoteCount > 10 THEN 'High activity'
+               WHEN r.UniqueVoteCount BETWEEN 5 AND 10 THEN 'Moderate activity'
+               ELSE 'Low activity' 
+           END AS ActivityLevel
+    FROM RecentPostsWithUserReputation r
+    WHERE r.Score > 0
+)
+SELECT fr.*, 
+       CONCAT('Post "', fr.Title, '" has ', fr.TotalComments, ' comments and ',
+               fr.UniqueVoteCount, ' unique votes. Activity level: ', fr.ActivityLevel) AS Summary
+FROM FinalResults fr
+ORDER BY fr.ViewCount DESC
+LIMIT 10;

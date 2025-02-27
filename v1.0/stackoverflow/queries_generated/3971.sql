@@ -1,0 +1,54 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(u.Reputation) OVER () AS AverageReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetail AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COALESCE(SUM(p.ViewCount) OVER (PARTITION BY p.OwnerUserId), 0) AS TotalViews
+    FROM 
+        Posts p
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalUpVotes,
+    u.TotalDownVotes,
+    SUM(p.TotalPosts) AS UserPostCount,
+    AVG(u.AverageReputation) AS UserAverageReputation,
+    p.TotalViews,
+    CASE 
+        WHEN SUM(u.TotalUpVotes) > SUM(u.TotalDownVotes) THEN 'Positive'
+        WHEN SUM(u.TotalUpVotes) < SUM(u.TotalDownVotes) THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    UserVoteSummary u
+LEFT JOIN 
+    PostDetail p ON u.UserId = p.OwnerUserId
+WHERE 
+    p.PostRank = 1
+GROUP BY 
+    u.UserId, u.DisplayName, p.TotalViews
+HAVING 
+    SUM(u.TotalUpVotes) + SUM(u.TotalDownVotes) > 0
+ORDER BY 
+    UserAverageReputation DESC, UserPostCount DESC
+LIMIT 10;

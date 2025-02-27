@@ -1,0 +1,66 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' 
+        AND o.o_orderdate < DATE '1998-01-01'
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(ps.ps_availqty) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(s.s_acctbal) AS avg_account_balance
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+lineitem_summary AS (
+    SELECT 
+        l.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.o_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(ls.total_revenue, 0) AS total_revenue,
+    COALESCE(ls.distinct_parts, 0) AS distinct_parts,
+    COALESCE(ls.avg_quantity, 0) AS avg_quantity,
+    ss.total_parts,
+    ss.total_cost,
+    ss.avg_account_balance
+FROM 
+    ranked_orders r
+LEFT JOIN 
+    lineitem_summary ls ON r.o_orderkey = ls.o_orderkey
+LEFT JOIN 
+    supplier_stats ss ON EXISTS (
+        SELECT 1 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l 
+            WHERE l.o_orderkey = r.o_orderkey
+        ) AND ps.ps_suppkey = ss.s_suppkey
+    )
+WHERE 
+    (r.o_totalprice > 1000 OR r.o_orderdate <= DATE '1997-06-30')
+    AND r.order_rank <= 10
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice DESC;

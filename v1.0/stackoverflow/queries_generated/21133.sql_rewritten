@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        pt.Name AS PostTypeName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '30 days') 
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 10 THEN 1 END) AS Deletions
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(SUM(p.UpVotes), 0) AS TotalUpVotes,
+        COALESCE(SUM(p.DownVotes), 0) AS TotalDownVotes,
+        MAX(bc.BadgeCount) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN RecentVotes rv ON p.Id = rv.PostId
+    LEFT JOIN BadgeCounts bc ON u.Id = bc.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    up.UserId,
+    u.DisplayName,
+    up.TotalViews,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    up.TotalBadges,
+    pp.PostId,
+    pp.Title,
+    pp.PostTypeName,
+    pp.Score,
+    pp.Rank,
+    CASE 
+        WHEN pp.Rank <= 3 THEN 'Top'
+        WHEN pp.Rank <= 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS RankCategory
+FROM 
+    UserEngagement up
+JOIN 
+    Users u ON up.UserId = u.Id
+LEFT JOIN 
+    RankedPosts pp ON u.Id = pp.OwnerUserId
+WHERE 
+    up.TotalViews > 0 
+    AND (up.TotalUpVotes - up.TotalDownVotes) > 2
+ORDER BY 
+    up.TotalViews DESC, 
+    pp.Score DESC NULLS LAST;

@@ -1,0 +1,39 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyAmount,
+        SUM(v.Id IS NOT NULL) AS VoteCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation, u.CreationDate
+), TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        BadgeCount,
+        TotalBountyAmount,
+        VoteCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY PostCount DESC) AS PostCountRank
+    FROM UserStats
+)
+SELECT 
+    UserId,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    TotalBountyAmount,
+    VoteCount,
+    ReputationRank,
+    PostCountRank
+FROM TopUsers
+WHERE ReputationRank <= 10 OR PostCountRank <= 10
+ORDER BY Reputation DESC, PostCount DESC;

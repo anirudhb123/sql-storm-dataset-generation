@@ -1,0 +1,20 @@
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, 
+    SUM(l.l_quantity) AS total_quantity,
+    SUBSTRING(p.p_comment, 1, 10) AS short_comment,
+    CONCAT('Total Price: ', FORMAT(SUM(l.l_extendedprice * (1 - l.l_discount)), 2)) AS formatted_total_price
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey 
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    p.p_partkey, short_comment
+HAVING 
+    SUM(l.l_quantity) > 100
+ORDER BY 
+    supplier_count DESC, total_quantity DESC;

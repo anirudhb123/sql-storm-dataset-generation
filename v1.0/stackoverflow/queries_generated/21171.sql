@@ -1,0 +1,65 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS VoteCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        AVG(CASE WHEN p.Score IS NOT NULL THEN p.Score ELSE 0 END) AS AvgPostScore
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        pp.UserId AS AcceptedAnswerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    LEFT JOIN Posts pp ON p.AcceptedAnswerId = pp.Id
+    WHERE p.CreationDate >= date_trunc('month', CURRENT_DATE) - interval '1 month'
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Tags t ON t.WikiPostId = p.Id
+    GROUP BY p.Id
+),
+CombinedMetrics AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.VoteCount,
+        ua.QuestionCount,
+        ua.AvgPostScore,
+        rp.Title,
+        rp.CreationDate,
+        pt.Tags
+    FROM UserActivity ua
+    JOIN RecentPosts rp ON ua.UserId = rp.AcceptedAnswerUserId
+    LEFT JOIN PostTags pt ON rp.PostId = pt.PostId
+    WHERE pt.Tags IS NOT NULL
+)
+SELECT 
+    cm.UserId, 
+    cm.DisplayName, 
+    COALESCE(cm.QuestionCount, 0) AS TotalQuestions,
+    COALESCE(cm.VoteCount, 0) AS TotalVotes,
+    COALESCE(cm.AvgPostScore, 0) AS AverageScore,
+    cm.Title,
+    cm.CreationDate,
+    COALESCE(cm.Tags, 'No tags available') AS Tags
+FROM CombinedMetrics cm
+WHERE cm.VoteCount > ALL (SELECT CAST(AVG(VoteCount) AS int) FROM UserActivity)
+ORDER BY cm.AvgPostScore DESC 
+LIMIT 10
+OFFSET 0;
+
+-- Potential corner cases: 
+-- 1. Users without votes should still appear with zero totals.
+-- 2. Filtering users with null tag assignments but showing available details.
+-- 3. Using COALESCE to handle any NULL values encountered in the dataset.

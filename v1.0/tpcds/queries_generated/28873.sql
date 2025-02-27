@@ -1,0 +1,32 @@
+
+WITH StringProcessing AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUBSTRING(c.c_email_address, 1, POSITION('@' IN c.c_email_address) - 1) AS email_name,
+        LOWER(CONCAT(c.c_first_name, ' ', c.c_last_name)) AS lower_full_name,
+        REGEXP_REPLACE(c.c_email_address, '[^a-zA-Z0-9]', '') AS sanitized_email,
+        LENGTH(c.c_first_name) AS first_name_length,
+        LENGTH(c.c_last_name) AS last_name_length,
+        c.c_birth_country
+    FROM 
+        customer c
+    WHERE 
+        c.c_birth_country IS NOT NULL
+)
+SELECT 
+    ca.ca_city,
+    COUNT(*) AS customer_count,
+    AVG(first_name_length) AS avg_first_name_length,
+    AVG(last_name_length) AS avg_last_name_length,
+    MAX(LENGTH(full_name)) AS max_full_name_length,
+    MIN(LENGTH(email_name)) AS min_email_name_length,
+    STRING_AGG(DISTINCT sanitized_email ORDER BY sanitized_email) AS unique_emails
+FROM 
+    StringProcessing sp
+JOIN 
+    customer_address ca ON sp.c_customer_id = ca.ca_address_id
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    customer_count DESC;

@@ -1,0 +1,53 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        sr_return_quantity, 
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk) AS rn
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+), 
+ItemSales AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_sales_price) AS total_sales_value,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM web_sales
+    GROUP BY ws_item_sk
+), 
+WarehouseInventory AS (
+    SELECT 
+        inv_item_sk, 
+        SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM inventory
+    GROUP BY inv_item_sk
+)
+SELECT 
+    i.i_item_id, 
+    COALESCE(total_quantity_sold, 0) AS total_quantity_sold, 
+    COALESCE(total_sales_value, 0.00) AS total_sales_value,
+    COALESCE(total_on_hand, 0) AS total_on_hand,
+    COALESCE(AVG(CASE WHEN rr.rn = 1 THEN rr.sr_return_quantity END), 0) AS first_return_quantity,
+    SUM(CASE WHEN rr.rn > 1 THEN rr.sr_return_quantity ELSE 0 END) AS total_return_quantity,
+    COUNT(DISTINCT CASE WHEN rr.sr_returned_date_sk IS NOT NULL THEN rr.sr_returned_date_sk END) AS distinct_return_dates
+FROM item i
+LEFT JOIN ItemSales is ON i.i_item_sk = is.ws_item_sk
+LEFT JOIN WarehouseInventory wi ON i.i_item_sk = wi.inv_item_sk
+LEFT JOIN RankedReturns rr ON i.i_item_sk = rr.sr_item_sk
+WHERE (total_on_hand IS NULL OR total_on_hand > 10)
+  AND EXISTS (
+      SELECT 1 
+      FROM customer c
+      WHERE c.c_customer_sk IN (
+          SELECT sr_customer_sk 
+          FROM store_returns 
+          WHERE sr_return_quantity <= 5
+      ) 
+      AND c.c_birth_year BETWEEN 1980 AND 2000
+  )
+GROUP BY i.i_item_id
+HAVING SUM(COALESCE(total_quantity_sold, 0)) > 100
+ORDER BY total_sales_value DESC
+LIMIT 5;

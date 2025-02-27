@@ -1,0 +1,40 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, 0 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey > oh.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND oh.level < 10
+),
+CustomerAccount AS (
+    SELECT c_custkey, c_name, SUM(c_acctbal) AS total_acctbal
+    FROM customer
+    GROUP BY c_custkey, c_name
+    HAVING SUM(c_acctbal) IS NOT NULL
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING AVG(ps.ps_supplycost) > 1000.00
+)
+SELECT 
+    COALESCE(c.c_name, 'N/A') AS customer_name,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    MAX(oh.o_orderdate) AS last_order_date,
+    SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) END) AS total_discounted_sales,
+    s.s_name AS supplier_name,
+    ss.avg_supplycost 
+FROM OrderHierarchy oh
+LEFT JOIN customer c ON oh.o_custkey = c.c_custkey
+LEFT JOIN lineitem l ON oh.o_orderkey = l.l_orderkey
+FULL OUTER JOIN HighValueSuppliers ss ON l.l_suppkey = ss.s_suppkey
+WHERE oh.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31' 
+  AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY c.c_name, s.s_name, ss.avg_supplycost
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY total_orders DESC NULLS LAST
+LIMIT 50;

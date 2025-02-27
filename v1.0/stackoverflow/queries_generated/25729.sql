@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag,
+        COUNT(DISTINCT p.Id) AS QuestionCount,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpvotedCount,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        QuestionCount,
+        UpvotedCount,
+        AvgViewCount,
+        ROW_NUMBER() OVER (ORDER BY QuestionCount DESC) AS TagRank
+    FROM 
+        TagStatistics
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        t.Tag
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopTags t ON rp.TagRank = 1
+    WHERE 
+        rp.TagRank <= 3 -- Top 3 posts per tag
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.ViewCount,
+    tp.Score,
+    tt.Tag,
+    ts.QuestionCount,
+    ts.UpvotedCount,
+    ts.AvgViewCount
+FROM 
+    TopPosts tp
+JOIN 
+    TopTags tt ON tp.Tag = tt.Tag
+JOIN 
+    TagStatistics ts ON tt.Tag = ts.Tag
+ORDER BY 
+    ts.QuestionCount DESC, tp.CreationDate DESC;

@@ -1,0 +1,74 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate BETWEEN '1994-01-01' AND '1996-12-31'
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopRegions AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000000 
+    ORDER BY 
+        total_sales DESC
+    LIMIT 5
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price,
+    COALESCE(SUM(FS.total_avail_qty), 0) AS total_available_quantity,
+    CASE 
+        WHEN AVG(o.o_totalprice) > 500 THEN 'High Value Orders'
+        ELSE 'Regular Orders'
+    END AS order_value_category
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    TopRegions r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey))
+LEFT JOIN 
+    FilteredSuppliers FS ON FS.s_name LIKE '%' || SUBSTRING(o.o_comment FROM '^(.*?)(?=:)') || '%'
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    avg_discounted_price DESC;

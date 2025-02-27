@@ -1,0 +1,59 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+        AND mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year, 
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    AVG(pi.info->'rating') AS average_rating,
+    STRING_AGG(k.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.title ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS actor_rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    cast_info cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info pi ON cc.person_id = pi.person_id AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    mh.depth <= 3
+    AND (mh.production_year BETWEEN 2000 AND 2020 OR mh.title ILIKE '%Adventure%')
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 1
+ORDER BY 
+    average_rating DESC, 
+    total_cast DESC;

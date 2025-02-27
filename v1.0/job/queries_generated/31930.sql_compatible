@@ -1,0 +1,82 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY[t.id] AS movie_path
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_path || m.id
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        m.production_year >= 2000 AND 
+        NOT m.id = ANY(mh.movie_path)
+),
+
+title_stats AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        STRING_AGG(DISTINCT n.name, ', ') AS actor_names
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name n ON c.person_id = n.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title
+),
+
+movie_info_counts AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT info_type_id) AS info_count
+    FROM 
+        movie_info
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    mh.title,
+    mh.production_year,
+    ts.actor_count,
+    ts.actor_names,
+    COALESCE(mic.info_count, 0) AS additional_info_count,
+    CASE 
+        WHEN ts.actor_count > 0 THEN 'Has Actors'
+        ELSE 'No Actors'
+    END AS actor_presence,
+    CASE 
+        WHEN mh.movie_path @> ARRAY(SELECT id FROM aka_title WHERE title ILIKE '%Avengers%') THEN 'Part of Avengers'
+        ELSE 'Not part of Avengers'
+    END AS avengers_association
+FROM 
+    movie_hierarchy mh
+JOIN 
+    title_stats ts ON mh.movie_id = ts.title_id
+LEFT JOIN 
+    movie_info_counts mic ON mh.movie_id = mic.movie_id
+WHERE 
+    mh.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mh.production_year DESC, ts.actor_count DESC;

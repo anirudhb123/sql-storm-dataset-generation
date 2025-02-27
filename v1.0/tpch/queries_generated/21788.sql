@@ -1,0 +1,48 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'Unknown' 
+               WHEN p.p_retailprice > 1000 THEN 'Expensive' 
+               ELSE 'Affordable' 
+           END AS price_category
+    FROM part p
+),
+SupplierPartStats AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+CustomerOrderDetails AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > (
+        SELECT AVG(o2.o_totalprice) 
+        FROM orders o2 
+        WHERE o2.o_orderdate >= DATEADD(MONTH, -6, CURRENT_DATE)
+    )
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    AVG(sp.total_availqty) AS avg_avail_qty,
+    COUNT(DISTINCT co.c_custkey) AS high_spender_count,
+    SUM(CASE WHEN hp.price_category = 'Expensive' THEN hp.p_retailprice ELSE 0 END) AS total_expensive_parts
+FROM nation ns 
+LEFT JOIN ranked_suppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rn = 1
+LEFT JOIN supplierpartstats sp ON rs.s_suppkey = sp.ps_suppkey
+LEFT JOIN HighValueParts hp ON sp.ps_partkey = hp.p_partkey
+LEFT JOIN CustomerOrderDetails co ON rs.s_suppkey = co.c_custkey
+WHERE ns.n_name IS NOT NULL 
+  AND (rs.s_acctbal IS NOT NULL AND rs.s_acctbal > 500) 
+  OR (rs.s_acctbal IS NULL AND co.total_spent IS NOT NULL)
+GROUP BY ns.n_name
+ORDER BY total_expensive_parts DESC, supplier_count DESC;

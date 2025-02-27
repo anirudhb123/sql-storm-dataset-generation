@@ -1,0 +1,86 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_ext_sales_price,
+        1 AS Level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT 
+        cs_order_number,
+        cs_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        cs_ext_sales_price,
+        Level + 1
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesCTE s ON cs_item_sk = s.ws_item_sk 
+    WHERE 
+        cs.sold_date_sk = ws_sold_date_sk
+), 
+InventoryCTE AS (
+    SELECT
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM
+        inventory
+    WHERE
+        inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv_item_sk
+),
+CustomerStatistics AS (
+    SELECT 
+        cd_gender,
+        COUNT(c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase,
+        SUM(cd_dep_count) AS total_dependents
+    FROM 
+        customer 
+    LEFT JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+),
+RankedReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_returns,
+        RANK() OVER (ORDER BY SUM(wr_return_quantity) DESC) AS return_rank
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    inv.total_inventory,
+    s.ws_order_number AS Web_Order_Number,
+    r.total_returns,
+    c.cd_gender,
+    cs.customer_count,
+    cs.avg_purchase,
+    cs.total_dependents
+FROM 
+    item i
+LEFT JOIN 
+    InventoryCTE inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    SalesCTE s ON i.i_item_sk = s.ws_item_sk
+LEFT JOIN 
+    RankedReturns r ON i.i_item_sk = r.wr_item_sk
+LEFT JOIN 
+    CustomerStatistics cs ON cs.cd_gender IS NOT NULL
+WHERE 
+    r.return_rank <= 10 OR r.return_rank IS NULL
+ORDER BY 
+    total_inventory DESC, avg_purchase DESC;

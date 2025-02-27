@@ -1,0 +1,77 @@
+WITH TagUsage AS (
+    SELECT
+        TRIM(UNNEST(REGEXP_SPLIT_TO_ARRAY(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags)-2), '><')))::varchar) AS TagName,
+        COUNT(*) AS TagCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM
+        Posts
+    GROUP BY
+        TagName
+),
+PopularUsers AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN PT.Name = 'Question' THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN PT.Name = 'Answer' THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN
+        Votes V ON P.Id = V.PostId
+    WHERE
+        U.Reputation > 1000
+    GROUP BY
+        U.Id, U.DisplayName
+),
+HighActivityPostHistory AS (
+    SELECT
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) AS RevisionCount
+    FROM
+        PostHistory PH
+    GROUP BY
+        PH.PostId
+    HAVING
+        COUNT(*) > 5
+),
+JoinedData AS (
+    SELECT
+        PU.DisplayName AS PopularUserName,
+        PU.TotalPosts,
+        PU.TotalQuestions,
+        PU.TotalAnswers,
+        PU.TotalBounty,
+        TU.TagCount,
+        HU.RevisionCount
+    FROM
+        PopularUsers PU
+    JOIN
+        TagUsage TU ON PU.TotalPosts > 0
+    JOIN
+        HighActivityPostHistory HU ON TU.TagCount > 10
+)
+SELECT
+    PopularUserName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalBounty,
+    TagCount,
+    RevisionCount,
+    CASE
+        WHEN TotalBounty > 100 THEN 'High Bounty'
+        WHEN TotalBounty > 50 THEN 'Medium Bounty'
+        ELSE 'Low Bounty'
+    END AS BountyCategory
+FROM
+    JoinedData
+ORDER BY
+    TotalPosts DESC, TagCount DESC;

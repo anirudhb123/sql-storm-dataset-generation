@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT
+        ps_suppkey,
+        SUM(ps_supplycost) AS TotalSupplyCost,
+        DENSE_RANK() OVER (ORDER BY SUM(ps_supplycost) DESC) AS Rank
+    FROM
+        partsupp
+    GROUP BY
+        ps_suppkey
+),
+
+FilteredOrders AS (
+    SELECT
+        o_orderkey,
+        o_totalprice,
+        c_nationkey,
+        o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY c_nationkey ORDER BY o_orderdate DESC) AS OrderRank
+    FROM
+        orders
+    JOIN
+        customer ON o_custkey = c_custkey
+    WHERE
+        o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+
+SupplierRegion AS (
+    SELECT
+        s.s_suppkey,
+        n.n_regionkey,
+        r.r_name
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE
+        s.s_acctbal IS NOT NULL
+)
+
+SELECT
+    p.p_name,
+    p.p_brand,
+    COUNT(DISTINCT o.o_orderkey) AS OrderCount,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS Revenue,
+    MAX(s.TotalSupplyCost) AS MaxSupplyCost,
+    COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN o.o_orderkey END) AS ReturnedOrders
+FROM
+    part p
+LEFT JOIN
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN
+    RankedSuppliers s ON l.l_suppkey = s.ps_suppkey
+JOIN
+    FilteredOrders fo ON o.o_orderkey = fo.o_orderkey
+LEFT JOIN
+    SupplierRegion sr ON s.s_suppkey = sr.s_suppkey
+WHERE
+    p.p_size BETWEEN 1 AND 20
+    AND p.p_retailprice BETWEEN (SELECT MIN(p_retailprice) FROM part) AND (SELECT MAX(p_retailprice) FROM part WHERE p_container IS NULL)
+GROUP BY
+    p.p_partkey, p.p_name, p.p_brand
+HAVING
+    SUM(l.l_quantity) > 100
+    AND MAX(s.TotalSupplyCost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY
+    Revenue DESC, p.p_name
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

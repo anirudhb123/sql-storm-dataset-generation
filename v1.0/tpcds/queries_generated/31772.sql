@@ -1,0 +1,46 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk,
+           0 AS hierarchy_level
+    FROM customer
+    WHERE c_customer_sk < 1000 -- Starting point for hierarchy
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk,
+           ch.hierarchy_level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+    WHERE ch.hierarchy_level < 2 -- Limiting the hierarchy depth
+),
+SalesData AS (
+    SELECT ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_order_number, SUM(ws.ws_quantity) AS total_quantity,
+           SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_order_number
+),
+HighValueCustomers AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+    FROM customer_demographics cd
+    WHERE cd.cd_purchase_estimate > 5000
+),
+WarehouseInventory AS (
+    SELECT inv.inv_date_sk, inv.inv_item_sk, SUM(inv.inv_quantity_on_hand) AS total_on_hand
+    FROM inventory inv
+    GROUP BY inv.inv_date_sk, inv.inv_item_sk
+)
+SELECT 
+    ch.c_first_name || ' ' || ch.c_last_name AS customer_name,
+    s.ws_order_number,
+    COALESCE(sd.total_quantity, 0) AS total_ordered_quantity,
+    COALESCE(sd.total_sales, 0) AS total_ordered_sales,
+    wi.total_on_hand,
+    CASE 
+        WHEN hc.cd_demo_sk IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_segment
+FROM CustomerHierarchy ch
+LEFT JOIN SalesData sd ON ch.c_customer_sk = sd.ws_order_number
+LEFT JOIN WarehouseInventory wi ON sd.ws_item_sk = wi.inv_item_sk
+LEFT JOIN HighValueCustomers hc ON ch.c_current_cdemo_sk = hc.cd_demo_sk
+WHERE wi.total_on_hand IS NOT NULL
+ORDER BY customer_name, total_ordered_sales DESC
+LIMIT 100;

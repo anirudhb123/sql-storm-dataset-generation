@@ -1,0 +1,43 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk,
+           c_first_name,
+           c_last_name,
+           cd_marital_status,
+           cd_gender,
+           1 AS lvl
+    FROM customer
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE cd_marital_status = 'S'
+    
+    UNION ALL
+    
+    SELECT c.customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           cd.cd_marital_status,
+           cd.cd_gender,
+           ch.lvl + 1
+    FROM customer_hierarchy ch
+    JOIN customer c ON c.c_current_cdemo_sk = ch.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+)
+SELECT ca.ca_city,
+       COUNT(DISTINCT ch.c_customer_sk) AS single_customers,
+       SUM(ws.ws_quantity) AS total_quantity_sold,
+       AVG(ws.ws_sales_price) AS avg_sales_price,
+       STRING_AGG(DISTINCT i.i_product_name) AS popular_products,
+       COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit
+FROM customer_hierarchy ch
+JOIN web_sales ws ON ws.ws_bill_customer_sk = ch.c_customer_sk
+JOIN item i ON ws.ws_item_sk = i.i_item_sk
+JOIN customer_address ca ON ch.c_current_addr_sk = ca.ca_address_sk
+WHERE ca.ca_state = 'CA'
+  AND ws.ws_sold_date_sk IN (SELECT DISTINCT d_date_sk
+                              FROM date_dim
+                              WHERE d_year = 2023 AND d_moy IN (5, 6))
+GROUP BY ca.ca_city
+HAVING total_quantity_sold > 1000
+ORDER BY total_net_profit DESC
+LIMIT 10;

@@ -1,0 +1,85 @@
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(U.Reputation) AS Reputation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.LastEditorDisplayName, P.OwnerDisplayName) AS LastEditor,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.PostId IS NOT NULL THEN 1 END) AS HistoryCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.AcceptedAnswerId, P.CreationDate, P.ViewCount, P.Score, P.LastEditorDisplayName, P.OwnerDisplayName, P.OwnerUserId
+),
+TagPostCounts AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.Id, T.TagName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.TotalVotes,
+    U.UpVotes,
+    U.DownVotes,
+    U.Reputation,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.ViewCount,
+    P.Score,
+    P.CommentCount,
+    CASE 
+        WHEN P.AcceptedAnswerId != -1 THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     WHERE P.Tags LIKE '%' || T.TagName || '%') AS Tags,
+    (SELECT COUNT(*) 
+     FROM PostLinks PL 
+     WHERE PL.PostId = P.PostId 
+       AND PL.LinkTypeId = 3) AS DuplicateLinkCount,
+    TPC.PostCount AS TotalPostsWithTag
+FROM 
+    UserVoteStats U
+JOIN 
+    PostActivity P ON U.UserId = P.OwnerUserId 
+LEFT JOIN 
+    TagPostCounts TPC ON P.PostId = TPC.TagId
+WHERE 
+    U.TotalVotes > 0
+ORDER BY 
+    U.Reputation DESC, P.Score DESC
+FETCH FIRST 100 ROWS ONLY;

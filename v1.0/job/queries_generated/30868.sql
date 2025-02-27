@@ -1,0 +1,43 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 1 AS level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, mh.level + 1
+    FROM aka_title mt
+    JOIN movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN aka_title ma ON ma.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON mh.movie_id = mt.id
+    WHERE mh.level < 3
+)
+
+SELECT 
+    mk.keyword, 
+    COUNT(DISTINCT mk.movie_id) AS keyword_count,
+    COALESCE(SUM(CASE WHEN ci.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS cast_count,
+    AVG(CASE WHEN m.production_year IS NOT NULL THEN m.production_year else NULL END) AS avg_production_year,
+    GROUP_CONCAT(DISTINCT ak.name) AS associated_names
+FROM 
+    movie_keyword mk
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mk.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary')
+LEFT JOIN 
+    movie_hierarchy m ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = mk.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+WHERE 
+    mk.keyword IS NOT NULL AND 
+    mi.info IS NOT NULL AND 
+    (m.production_year IS NULL OR m.production_year > 2000)
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT mk.movie_id) > 5
+ORDER BY 
+    keyword_count DESC
+LIMIT 10;
+

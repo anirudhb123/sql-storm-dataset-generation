@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid_inc_tax) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        ws.web_site_sk
+),
+CustomerReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        SUM(cr.cr_return_quantity) AS total_returned,
+        SUM(cr.cr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_return_quantity > 0
+    GROUP BY 
+        cr.returning_customer_sk
+),
+StoreSalesDetails AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_quantity) AS total_store_quantity,
+        SUM(ss_net_profit) AS total_net_profit
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        s.s_store_id,
+        COALESCE(ss.total_store_quantity, 0) AS total_store_quantity,
+        COALESCE(rs.total_quantity, 0) AS total_web_quantity,
+        COALESCE(cr.total_returned, 0) AS total_returned,
+        (COALESCE(ss.total_net_profit, 0) - COALESCE(cr.total_return_amount, 0)) AS net_profit_after_returns,
+        CASE 
+            WHEN COALESCE(ss.total_net_profit, 0) > 0 THEN (COALESCE(bb.total_web_quantity, 0) / NULLIF(ss.total_net_profit, 0))
+            ELSE NULL 
+        END AS web_sales_per_profit
+    FROM 
+        store s
+    LEFT JOIN 
+        StoreSalesDetails ss ON s.s_store_sk = ss.ss_store_sk
+    LEFT JOIN 
+        RankedSales rs ON s.s_store_sk = rs.web_site_sk
+    LEFT JOIN 
+        CustomerReturns cr ON s.s_store_sk = cr.returning_customer_sk
+)
+SELECT 
+    f.s_store_id,
+    f.total_store_quantity,
+    f.total_web_quantity,
+    f.total_returned,
+    f.net_profit_after_returns,
+    f.web_sales_per_profit
+FROM 
+    FinalBenchmark f
+WHERE 
+    (f.net_profit_after_returns IS NOT NULL AND f.total_web_quantity > 1000) 
+    OR (f.total_returned = 0 AND f.total_store_quantity > 500)
+ORDER BY 
+    f.web_sales_per_profit DESC
+LIMIT 100;

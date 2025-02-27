@@ -1,0 +1,70 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_sales
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 10.00 AND 
+        i.i_rec_start_date <= CURRENT_DATE AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    GROUP BY 
+        ws.ws_item_sk
+),
+ReturningCustomers AS (
+    SELECT 
+        sr.sr_returning_customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returned_quantity,
+        COUNT(sr.sr_ticket_number) AS returns_count
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        COALESCE(r.total_quantity, 0) AS total_quantity_purchased,
+        COALESCE(s.total_sales, 0) AS total_sales_value,
+        COALESCE(rc.total_returned_quantity, 0) AS total_returned_quantity,
+        CASE 
+            WHEN COALESCE(s.total_sales, 0) = 0 THEN NULL 
+            ELSE ROUND((CAST(COALESCE(rc.total_returned_quantity, 0) AS DECIMAL) / NULLIF(s.total_sales, 0)), 4) 
+        END AS return_ratio
+    FROM 
+        customer cs
+    LEFT JOIN 
+        SalesSummary s ON cs.c_customer_sk = s.ws_item_sk
+    LEFT JOIN 
+        ReturningCustomers rc ON cs.c_customer_sk = rc.sr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(SUM(s.total_sales), 0) AS total_spent,
+    MAX(f.return_ratio) AS return_ratio
+FROM 
+    customer c
+FULL OUTER JOIN 
+    FinalReport f ON c.c_customer_sk = f.cs.c_customer_sk
+LEFT JOIN 
+    SalesSummary s ON f.ws_item_sk = s.ws_item_sk
+WHERE 
+    (c.c_current_cdemo_sk IS NULL OR c.c_current_cdemo_sk IN (SELECT hd_demo_sk FROM household_demographics WHERE hd_income_band_sk IS NOT NULL))
+    AND (f.return_ratio IS NULL OR f.return_ratio < 1)
+GROUP BY 
+    c.c_customer_id, c.c_first_name, c.c_last_name
+HAVING 
+    COUNT(DISTINCT f.ws_item_sk) >= 1
+ORDER BY 
+    total_spent DESC
+LIMIT 10;

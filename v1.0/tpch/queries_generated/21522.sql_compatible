@@ -1,0 +1,93 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+), 
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_retailprice,
+        ps.ps_availqty,
+        COALESCE(SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_quantity END), 0) AS total_fulfilled
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_type, p.p_retailprice, ps.ps_availqty
+), 
+HighDemandParts AS (
+    SELECT 
+        sp.ps_partkey,
+        sp.p_name,
+        sp.p_brand,
+        SUM(sp.total_fulfilled) AS total_fulfilled
+    FROM 
+        SupplierParts sp
+    JOIN 
+        RankedSuppliers rs ON sp.ps_suppkey = rs.s_suppkey
+    WHERE 
+        rs.rank <= 5
+    GROUP BY 
+        sp.ps_partkey, sp.p_name, sp.p_brand
+)
+
+SELECT 
+    n.n_name AS nation_name,
+    rp.p_name AS part_name,
+    SUM(hdp.total_fulfilled) AS total_demand,
+    AVG(sp.ps_retailprice * 0.9) AS avg_discounted_price,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    part rp ON ps.ps_partkey = rp.p_partkey
+LEFT JOIN 
+    HighDemandParts hdp ON rp.p_partkey = hdp.ps_partkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = n.n_nationkey
+WHERE 
+    n.n_name NOT IN (SELECT DISTINCT n_name FROM nation WHERE n_nationkey = 0)
+    AND (rp.p_retailprice IS NOT NULL OR rp.p_container IS NOT NULL)
+GROUP BY 
+    n.n_name, rp.p_name, rp.p_retailprice
+HAVING 
+    SUM(hdp.total_fulfilled) > (SELECT AVG(total_revenue) FROM HighValueOrders)
+ORDER BY 
+    total_demand DESC,
+    avg_discounted_price ASC;

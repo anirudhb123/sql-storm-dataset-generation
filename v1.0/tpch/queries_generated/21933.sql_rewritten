@@ -1,0 +1,42 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rnk,
+           CASE 
+               WHEN o.o_orderstatus = 'F' THEN 'Finished'
+               WHEN o.o_orderstatus = 'P' THEN 'Pending'
+               ELSE 'Unknown'
+           END AS order_status
+    FROM orders o
+),
+TotalSales AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_extended_price
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01' 
+      AND l.l_status = 'O'
+    GROUP BY l.l_orderkey
+),
+CustomerRegion AS (
+    SELECT c.c_custkey, n.n_name AS nation_name, r.r_name AS region_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT cr.region_name, 
+       COUNT(DISTINCT ro.o_orderkey) AS completed_orders,
+       SUM(ts.total_extended_price) AS total_revenue,
+       AVG(ro.o_totalprice) AS avg_order_value,
+       COUNT(DISTINCT CASE WHEN ro.order_status = 'Finished' THEN ro.o_orderkey END) AS finished_orders,
+       COUNT(DISTINCT CASE WHEN ro.order_status = 'Pending' THEN ro.o_orderkey END) AS pending_orders,
+       COALESCE(MAX(ps.ps_supplycost), 0) AS max_supply_cost
+FROM RankedOrders ro
+LEFT JOIN TotalSales ts ON ro.o_orderkey = ts.l_orderkey
+JOIN CustomerRegion cr ON ro.o_custkey = cr.c_custkey
+LEFT JOIN partsupp ps ON ps.ps_partkey IN (SELECT p.p_partkey 
+                                             FROM part p 
+                                             WHERE p.p_retailprice > 100.00 
+                                               AND p.p_size BETWEEN 10 AND 50)
+GROUP BY cr.region_name
+HAVING COUNT(DISTINCT ro.o_orderkey) > 5 
+   OR MAX(ro.o_totalprice) IS NOT NULL
+ORDER BY total_revenue DESC, cr.region_name ASC
+LIMIT 10 OFFSET 1;

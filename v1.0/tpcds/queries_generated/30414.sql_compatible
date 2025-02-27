@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity),
+        SUM(cs_net_paid)
+    FROM catalog_sales
+    WHERE cs_item_sk IN (SELECT ws_item_sk FROM web_sales)
+    GROUP BY cs_sold_date_sk, cs_item_sk
+),
+RankedSales AS (
+    SELECT
+        item.i_item_id,
+        SUM(SalesCTE.total_quantity) AS overall_quantity,
+        SUM(SalesCTE.total_sales) AS overall_sales,
+        ROW_NUMBER() OVER(PARTITION BY item.i_item_id ORDER BY SUM(SalesCTE.total_sales) DESC) AS sales_rank
+    FROM SalesCTE
+    JOIN item ON SalesCTE.ws_item_sk = item.i_item_sk
+    GROUP BY item.i_item_id
+)
+SELECT
+    r.i_item_id,
+    r.overall_quantity,
+    r.overall_sales,
+    CASE 
+        WHEN r.overall_sales IS NULL THEN 'No sales recorded'
+        WHEN r.sales_rank <= 10 THEN 'Top Seller'
+        ELSE 'Regular Item'
+    END AS sales_category
+FROM RankedSales r
+LEFT JOIN customer_demographics cd ON r.overall_sales > (SELECT AVG(r2.overall_sales) FROM RankedSales r2)
+WHERE (r.overall_quantity IS NOT NULL OR r.overall_sales IS NOT NULL)
+ORDER BY r.overall_sales DESC
+FETCH FIRST 100 ROWS ONLY;

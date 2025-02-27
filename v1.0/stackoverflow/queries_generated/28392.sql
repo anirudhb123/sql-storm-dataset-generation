@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) 
+         FROM Votes v 
+         WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownVoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation
+    FROM 
+        Users u
+    JOIN 
+        RankedPosts rp ON u.Id = rp.UserPostRank
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.*, 
+        b.Name AS BadgeName, 
+        b.Class AS BadgeClass
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges b ON rp.OwnerUserId = b.UserId 
+                    AND b.Date >= rp.CreationDate
+    ORDER BY 
+        rp.CreationDate DESC
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    STRING_AGG(DISTINCT pwb.Tags, ', ') AS TagsList,
+    pwb.CommentCount,
+    pwb.UpVoteCount,
+    pwb.DownVoteCount,
+    u.Reputation,
+    STRING_AGG(DISTINCT pwb.BadgeName, ', ') AS BadgeNames,
+    MAX(CASE WHEN pwb.BadgeClass = 1 THEN 1 ELSE 0 END) AS HasGoldBadge,
+    MAX(CASE WHEN pwb.BadgeClass = 2 THEN 1 ELSE 0 END) AS HasSilverBadge,
+    MAX(CASE WHEN pwb.BadgeClass = 3 THEN 1 ELSE 0 END) AS HasBronzeBadge
+FROM 
+    PostsWithBadges pwb
+JOIN 
+    UserReputation u ON pwb.OwnerUserId = u.UserId
+GROUP BY 
+    pwb.PostId, pwb.Title, pwb.CommentCount, pwb.UpVoteCount, pwb.DownVoteCount, u.Reputation
+ORDER BY 
+    pwb.CommentCount DESC, 
+    pwb.UpVoteCount DESC, 
+    pwb.PostId;

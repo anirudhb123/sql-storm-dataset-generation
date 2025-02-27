@@ -1,0 +1,33 @@
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    AVG(vote_count.VoteCount) AS AverageVotes,
+    STRING_AGG(DISTINCT ht.Name, ', ') AS HistoryTypes,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS HasAcceptedAnswer,
+    COALESCE((SELECT MIN(CreationDate) FROM PostHistory ph WHERE ph.PostId = p.Id), 'No History') AS FirstEditDate
+FROM 
+    Posts p
+JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Comments c ON c.PostId = p.Id
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = p.Id
+LEFT JOIN 
+    PostHistoryTypes ht ON ph.PostHistoryTypeId = ht.Id
+WHERE 
+    p.CreationDate >= '2022-01-01'
+GROUP BY 
+    p.Id, p.Title, p.CreationDate, u.DisplayName
+HAVING 
+    COUNT(DISTINCT c.Id) > 5
+ORDER BY 
+    TotalComments DESC, AverageVotes DESC;

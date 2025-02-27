@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    GROUP BY ws.ws_item_sk
+), CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+), DemographicSales AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ib.ib_income_band_sk,
+        COUNT(*) AS num_purchases
+    FROM RankedSales rs
+    JOIN web_sales ws ON rs.ws_item_sk = ws.ws_item_sk
+    JOIN CustomerDemographics cd ON ws.ws_bill_customer_sk = cd.c_customer_sk
+    JOIN income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY cs.c_customer_sk, cd.cd_gender, cd.cd_marital_status, ib.ib_income_band_sk
+)
+SELECT 
+    cd.cd_gender, 
+    cd.cd_marital_status,
+    ib.ib_lower_bound AS income_lower_bound,
+    ib.ib_upper_bound AS income_upper_bound,
+    AVG(ds.total_sales) AS avg_sales,
+    AVG(ds.num_purchases) AS avg_num_purchases
+FROM DemographicSales ds
+JOIN CustomerDemographics cd ON ds.c_customer_sk = cd.c_customer_sk
+JOIN income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+WHERE ds.num_purchases > 5
+GROUP BY cd.cd_gender, cd.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+ORDER BY avg_sales DESC;

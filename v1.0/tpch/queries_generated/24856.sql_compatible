@@ -1,0 +1,49 @@
+
+WITH RECURSIVE RegionalSupplier AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           r.r_regionkey, r.r_name, 
+           COALESCE(s.s_acctbal / NULLIF(s.s_acctbal - SUM(ps.ps_supplycost) OVER (PARTITION BY s.s_suppkey) + 0.01, 0), 0) , 0) AS adjusted_balance
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE r.r_name IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           r.r_regionkey, r.r_name,
+           adjusted_balance * (CASE WHEN s.s_acctbal > 0 THEN 1.1 ELSE 0.9 END)
+    FROM RegionalSupplier rs
+    JOIN supplier s ON s.s_nationkey = rs.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL
+      AND rs.adjusted_balance > 0
+),
+PartOrderSummary AS (
+    SELECT p.p_partkey, p.p_name, 
+           COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           PERCENT_RANK() OVER (ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount))) AS revenue_rank
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredPart AS (
+    SELECT pps.p_partkey, pps.order_count, pps.total_revenue
+    FROM PartOrderSummary pps
+    WHERE revenue_rank BETWEEN 0.2 AND 0.8
+),
+SupplierRegion AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT fs.p_partkey, fs.total_revenue, sr.total_supply_cost, 
+       RANK() OVER (PARTITION BY fs.order_count ORDER BY sr.total_supply_cost DESC) AS supply_cost_rank,
+       CASE 
+           WHEN sr.total_supply_cost IS NULL THEN 'No Supply'
+           ELSE 'Supply Exists'
+       END AS supply_status
+FROM FilteredPart fs
+LEFT JOIN SupplierRegion sr ON fs.p_partkey = sr.s_suppkey
+WHERE (fs.total_revenue > 5000 OR sr.total_supply_cost IS NOT NULL)
+ORDER BY fs.total_revenue DESC, sr.total_supply_cost ASC;

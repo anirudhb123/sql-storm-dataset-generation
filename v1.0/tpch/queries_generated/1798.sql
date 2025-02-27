@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F'
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL AND SUM(o.o_totalprice) > 5000
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COALESCE(c.c_name, 'No Customer') AS customer_name,
+    COALESCE(SI.total_available, 0) AS total_available_parts,
+    COUNT(DISTINCT R.o_orderkey) AS completed_order_count,
+    SUM(R.o_totalprice) AS total_sales,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returns
+FROM 
+    nation n
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrders c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    RankedOrders R ON c.order_count > 0 AND R.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+LEFT JOIN 
+    lineitem l ON R.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierInfo SI ON l.l_suppkey = SI.s_suppkey
+WHERE 
+    n.n_name NOT LIKE '%test%'
+GROUP BY 
+    n.n_name, r.r_name, c.c_name, SI.total_available
+ORDER BY 
+    total_sales DESC, nation_name, region_name;

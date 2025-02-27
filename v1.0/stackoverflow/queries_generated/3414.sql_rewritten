@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RN
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.Reputation, 
+        u.DisplayName, 
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id), 0) AS CommentCount,
+        COALESCE((SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.UserId = u.Id AND v.VoteTypeId IN (8, 9)), 0) AS TotalBounty
+    FROM 
+        Users u
+)
+SELECT 
+    ur.DisplayName,
+    ur.Reputation,
+    ur.CommentCount,
+    ur.TotalBounty,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate
+FROM 
+    UserReputation ur
+LEFT JOIN 
+    RankedPosts rp ON ur.UserId = rp.OwnerUserId AND rp.RN = 1
+ORDER BY 
+    ur.Reputation DESC, 
+    rp.ViewCount NULLS LAST
+UNION ALL
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    0 AS TotalBounty,
+    NULL AS Title,
+    NULL AS ViewCount,
+    NULL AS CreationDate
+FROM 
+    Users u
+LEFT JOIN 
+    Comments c ON u.Id = c.UserId
+WHERE 
+    u.Reputation < 100
+GROUP BY 
+    u.Id
+HAVING 
+    COUNT(c.Id) > 5
+ORDER BY 
+    Reputation DESC;

@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+), TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01' AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        l.l_partkey
+), CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        c.c_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+)
+SELECT 
+    p.p_name,
+    COALESCE(t.total_revenue, 0) AS total_revenue,
+    COALESCE(s1.s_name, 'No Supplier') AS lowest_cost_supplier,
+    c.c_name AS customer_name,
+    c.nation_name,
+    s1.s_acctbal AS supplier_account_balance
+FROM 
+    part p
+LEFT OUTER JOIN 
+    TotalSales t ON p.p_partkey = t.l_partkey
+LEFT JOIN 
+    RankedSuppliers s1 ON p.p_partkey = s1.s_partkey AND s1.rank = 1
+JOIN 
+    CustomerInfo c ON c.c_acctbal > 1000
+WHERE 
+    p.p_retailprice > 100.00
+ORDER BY 
+    total_revenue DESC, 
+    p.p_name;

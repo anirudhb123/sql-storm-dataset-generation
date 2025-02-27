@@ -1,0 +1,51 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_regionkey
+), TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_available_qty,
+        ss.total_supply_cost,
+        r.r_name
+    FROM SupplierStats ss
+    JOIN region r ON r.r_regionkey = (
+        SELECT n.n_regionkey 
+        FROM nation n 
+        WHERE n.n_nationkey = (SELECT DISTINCT s_nationkey FROM supplier WHERE s_suppkey = ss.s_suppkey)
+        LIMIT 1
+    )
+    WHERE ss.rn <= 3
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    COALESCE(ts.s_name, 'No Supplier') AS supplier_name,
+    COALESCE(co.c_name, 'No Customer') AS customer_name,
+    COALESCE(co.order_count, 0) AS total_orders,
+    COALESCE(co.avg_order_value, 0) AS avg_order_value,
+    CASE 
+        WHEN COALESCE(co.order_count, 0) > 0 THEN (SUM(ts.total_supply_cost) / NULLIF(co.order_count, 0)) 
+        ELSE 0 
+    END AS avg_supply_cost_per_order
+FROM TopSuppliers ts
+FULL OUTER JOIN CustomerOrders co ON ts.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)))
+GROUP BY ts.s_suppkey, ts.s_name, co.c_custkey, co.c_name, co.order_count, co.avg_order_value
+HAVING COALESCE(co.order_count, 0) > 0 OR COALESCE(ts.total_available_qty, 0) > 0
+ORDER BY avg_order_value DESC, total_orders DESC;

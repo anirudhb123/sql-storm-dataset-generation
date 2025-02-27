@@ -1,0 +1,34 @@
+WITH RankedAddresses AS (
+    SELECT 
+        ca_address_id,
+        TRIM(ca_street_name) AS street_name_cleaned,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_type)) AS full_street,
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_sk) AS rk
+    FROM 
+        customer_address
+    WHERE 
+        ca_city IS NOT NULL
+),
+AddressStatistics AS (
+    SELECT 
+        ca_city,
+        COUNT(*) AS total_addresses,
+        STRING_AGG(DISTINCT full_street, ', ') AS unique_streets,
+        STRING_AGG(DISTINCT street_name_cleaned, ', ') AS distinct_street_names
+    FROM 
+        RankedAddresses
+    GROUP BY 
+        ca_city
+)
+SELECT 
+    ca.city AS city,
+    ca.total_addresses,
+    ca.unique_streets,
+    ca.distinct_street_names,
+    DATE_FORMAT(cast('2002-10-01' as date)(), '%Y-%m-%d') AS report_date
+FROM 
+    AddressStatistics AS ca
+WHERE 
+    ca.total_addresses > 1
+ORDER BY 
+    ca.total_addresses DESC;

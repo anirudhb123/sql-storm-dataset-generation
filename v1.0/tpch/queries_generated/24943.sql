@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           o.o_orderstatus,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+      AND o.o_orderdate <= DATE '1996-12-31'
+),
+HeavyLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM lineitem l
+    WHERE l.l_shipdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY l.l_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           s.s_comment,
+           RANK() OVER (ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING COUNT(DISTINCT ps.ps_suppkey) >= 2
+)
+SELECT p.p_partkey,
+       p.p_name,
+       COALESCE(SD.s_name, 'No Supplier') AS supplier_name,
+       COALESCE(SD.s_acctbal, 0) AS supplier_acctbal,
+       COALESCE(SL.total_value, 0) AS heavy_lineitem_value,
+       R.order_rank,
+       CASE 
+           WHEN R.o_orderstatus = 'F' THEN 'Finalized'
+           WHEN R.o_orderstatus = 'P' THEN 'Pending'
+           ELSE 'Other'
+       END AS order_status_meaning
+FROM part p
+LEFT JOIN PartSuppliers PS ON p.p_partkey = PS.ps_partkey
+LEFT JOIN SupplierDetails SD ON PS.ps_partkey = SD.s_suppkey
+LEFT JOIN HeavyLineItems SL ON SL.l_orderkey = (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey
+    ORDER BY l.l_extendedprice DESC
+    LIMIT 1
+)
+JOIN RankedOrders R ON R.o_orderkey = (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderkey IN (
+        SELECT l.l_orderkey
+        FROM lineitem l
+        WHERE l.l_partkey = p.p_partkey
+    )
+    AND RANK() OVER (ORDER BY o.o_totalprice DESC) = 1
+) 
+WHERE p.p_retailprice IS NOT NULL
+  AND (p.p_comment IS NULL OR p.p_comment LIKE '%special%')
+ORDER BY p.p_partkey, supplier_name;

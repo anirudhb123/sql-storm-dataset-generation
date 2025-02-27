@@ -1,0 +1,80 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        n.n_regionkey,
+        n.n_name,
+        SUM(o.o_totalprice) AS customer_total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, n.n_regionkey, n.n_name
+), 
+PartSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(l.l_orderkey) AS total_orders
+    FROM 
+        lineitem l
+    JOIN 
+        RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(PartSales.total_sales, 0) AS total_sales,
+    COALESCE(PartSales.total_orders, 0) AS total_orders,
+    sr.s_name AS supplier_name,
+    cr.n_name AS region_name,
+    cr.customer_total_spent
+FROM 
+    part p
+LEFT JOIN 
+    SupplierParts sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN 
+    supplier sr ON sp.ps_suppkey = sr.s_suppkey
+JOIN 
+    CustomerRegions cr ON sr.s_nationkey = cr.n_regionkey
+LEFT JOIN 
+    PartSales ON p.p_partkey = PartSales.l_partkey
+WHERE 
+    (p.p_retailprice BETWEEN 50 AND 100 OR p.p_size > 25)
+    AND (p.p_comment IS NOT NULL AND LENGTH(p.p_comment) > 10)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM orders o
+        WHERE o.o_orderstatus = 'F'
+        AND o.o_orderkey = cr.c_custkey
+    )
+ORDER BY 
+    customer_total_spent DESC,
+    total_sales DESC;

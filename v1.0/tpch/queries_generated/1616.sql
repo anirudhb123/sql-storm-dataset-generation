@@ -1,0 +1,47 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.total_order_value
+    FROM CustomerOrders c
+    WHERE c.total_order_value > (SELECT AVG(total_order_value) FROM CustomerOrders)
+),
+NationRegion AS (
+    SELECT n.n_nationkey, n.n_name, r.r_regionkey
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(ls.total_order_value) AS max_order_value
+FROM
+    NationRegion ns
+LEFT JOIN RankedSuppliers s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+LEFT JOIN TopCustomers ls ON ls.c_custkey IN (
+    SELECT o.o_custkey
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+)
+WHERE l.l_shipdate >= '2022-01-01' AND l.l_shipdate <= '2022-12-31'
+GROUP BY ns.n_name
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_revenue) FROM (
+    SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+) AS revenues)
+ORDER BY supplier_count DESC;

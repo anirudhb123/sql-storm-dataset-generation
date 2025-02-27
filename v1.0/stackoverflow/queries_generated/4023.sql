@@ -1,0 +1,64 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalAnswers,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS TotalQuestions,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY U.Id
+),
+HighActivityUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC) AS ActivityRank
+    FROM UserActivity
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        P.OwnerUserId,
+        COUNT(PH.Id) AS CloseCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    JOIN Posts P ON PH.PostId = P.Id
+    WHERE PH.PostHistoryTypeId = 10
+    GROUP BY PH.PostId, P.OwnerUserId
+),
+TopClosedPosts AS (
+    SELECT 
+        C.OwnerUserId,
+        COUNT(C.PostId) AS TotalClosedPosts
+    FROM ClosedPosts C
+    GROUP BY C.OwnerUserId
+),
+RankedClosedPosts AS (
+    SELECT 
+        U.DisplayName,
+        COALESCE(TCP.TotalClosedPosts, 0) AS TotalClosedPosts,
+        RANK() OVER (ORDER BY COALESCE(TCP.TotalClosedPosts, 0) DESC) AS ClosedPostRank
+    FROM Users U
+    LEFT JOIN TopClosedPosts TCP ON U.Id = TCP.OwnerUserId
+)
+SELECT 
+    H.DisplayName AS ActiveUser,
+    H.TotalPosts,
+    H.TotalQuestions,
+    H.TotalAnswers,
+    H.TotalBounties,
+    R.DisplayName AS ClosedPostOwner,
+    R.TotalClosedPosts,
+    H.ActivityRank,
+    R.ClosedPostRank
+FROM HighActivityUsers H
+FULL OUTER JOIN RankedClosedPosts R ON H.UserId = R.DisplayName
+WHERE H.TotalPosts > 0 OR R.TotalClosedPosts > 0
+ORDER BY H.ActivityRank, R.ClosedPostRank;

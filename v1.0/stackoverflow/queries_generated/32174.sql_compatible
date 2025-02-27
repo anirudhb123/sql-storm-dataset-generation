@@ -1,0 +1,66 @@
+
+WITH RECURSIVE UserBadges AS (
+    SELECT b.UserId, b.Name, b.Class, b.Date, RANK() OVER (PARTITION BY b.UserId ORDER BY b.Date DESC) AS BadgeRank
+    FROM Badges b
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        SUM(p.Score) AS TotalScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT *, 
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM UserPostStats
+    WHERE TotalPosts > 5
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+),
+ClosedQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS ClosedBy
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.PostHistoryTypeId = 10  
+)
+SELECT 
+    u.DisplayName AS UserName,
+    u.UserId,
+    b.Name AS Badge,
+    b.Class AS BadgeClass,
+    b.Date AS BadgeDate,
+    SUM(pwc.ViewCount) AS TotalViews,
+    SUM(pwc.CommentCount) AS TotalComments,
+    COALESCE(cq.CloseDate, 'Not Closed') AS LastClosedDate,
+    COALESCE(cq.ClosedBy, 'N/A') AS ClosedByUser
+FROM TopUsers u
+LEFT JOIN UserBadges b ON u.UserId = b.UserId AND b.BadgeRank = 1  
+LEFT JOIN PostsWithComments pwc ON u.UserId = pwc.OwnerUserId
+LEFT JOIN ClosedQuestions cq ON u.UserId = cq.PostId
+WHERE u.ScoreRank <= 10
+GROUP BY u.DisplayName, u.UserId, b.Name, b.Class, b.Date, cq.CloseDate, cq.ClosedBy
+ORDER BY TotalViews DESC, TotalComments DESC;

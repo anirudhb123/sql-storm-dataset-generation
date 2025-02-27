@@ -1,0 +1,51 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        bt.Name AS BadgeName,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges bt ON rp.PostId = bt.UserId 
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    WHERE 
+        rp.RankScore <= 10 -- Top 10 Posts
+    GROUP BY 
+        rp.PostId, bt.Name
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.AnswerCount,
+    fp.CommentCount,
+    fp.OwnerDisplayName,
+    fp.BadgeName,
+    fp.TotalComments
+FROM 
+    FilteredPosts fp
+WHERE 
+    fp.TotalComments > 5
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

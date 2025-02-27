@@ -1,0 +1,73 @@
+
+WITH TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status
+),
+SalesStats AS (
+    SELECT 
+        c_customer_sk,
+        COUNT(ws_order_number) AS order_count,
+        AVG(ws_net_paid) AS avg_order_value,
+        MAX(ws_net_paid) AS max_order_value
+    FROM 
+        web_sales
+    GROUP BY 
+        c_customer_sk
+),
+FilteredCustomers AS (
+    SELECT 
+        tc.c_customer_sk,
+        tc.c_first_name,
+        tc.c_last_name,
+        tc.cd_gender,
+        tc.cd_marital_status,
+        ts.order_count,
+        ts.avg_order_value,
+        ts.max_order_value
+    FROM 
+        TopCustomers tc
+    JOIN 
+        SalesStats ts ON tc.c_customer_sk = ts.c_customer_sk
+    WHERE 
+        tc.total_spent > 1000 
+        AND (tc.cd_gender = 'F' OR tc.cd_marital_status = 'M')
+),
+AggregatedReturns AS (
+    SELECT 
+        sr.refunded_customer_sk,
+        SUM(sr_return_amt) AS total_refunds
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.refunded_customer_sk
+)
+SELECT 
+    fc.c_customer_sk,
+    fc.c_first_name,
+    fc.c_last_name,
+    fc.order_count,
+    fc.avg_order_value,
+    fc.max_order_value,
+    COALESCE(ar.total_refunds, 0) AS total_refunded_amount
+FROM 
+    FilteredCustomers fc
+LEFT JOIN 
+    AggregatedReturns ar ON fc.c_customer_sk = ar.refunded_customer_sk
+ORDER BY 
+    fc.total_spent DESC, 
+    fc.order_count ASC;

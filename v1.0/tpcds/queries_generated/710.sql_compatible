@@ -1,0 +1,46 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(COALESCE(ws.ws_ext_sales_price, 0)) AS total_web_sales,
+        SUM(COALESCE(cs.cs_ext_sales_price, 0)) AS total_catalog_sales,
+        SUM(COALESCE(ss.ss_ext_sales_price, 0)) AS total_store_sales
+    FROM customer c
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ib.ib_upper_bound
+    FROM customer_demographics cd
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+RankedSales AS (
+    SELECT 
+        s.c_customer_id,
+        s.total_web_sales,
+        s.total_catalog_sales,
+        s.total_store_sales,
+        RANK() OVER (ORDER BY (s.total_web_sales + s.total_catalog_sales + s.total_store_sales) DESC) AS sales_rank
+    FROM SalesSummary s
+)
+SELECT 
+    r.sales_rank,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.ib_upper_bound,
+    COALESCE(r.total_web_sales, 0) AS web_sales,
+    COALESCE(r.total_catalog_sales, 0) AS catalog_sales,
+    COALESCE(r.total_store_sales, 0) AS store_sales
+FROM RankedSales r
+JOIN CustomerDemographics d ON d.cd_demo_sk = r.c_customer_id
+WHERE d.ib_upper_bound > 50000
+ORDER BY r.sales_rank
+LIMIT 10;

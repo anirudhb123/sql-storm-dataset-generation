@@ -1,0 +1,63 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_info AS (
+    SELECT 
+        ws.ws_customer_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_customer_sk
+),
+item_info AS (
+    SELECT 
+        i.i_item_sk,
+        AVG(i.i_current_price) AS avg_price,
+        SUM(i.i_size IS NOT NULL) AS size_count
+    FROM 
+        item i
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    si.total_sales,
+    si.order_count,
+    ii.avg_price,
+    ci.cd_income_band_sk,
+    CASE 
+        WHEN si.total_sales IS NULL THEN 'No Purchases'
+        ELSE 'Active Customer'
+    END AS customer_status,
+    CASE 
+        WHEN ii.size_count > 0 THEN 'Variety Available'
+        ELSE 'No Sizes Available'
+    END AS item_availability
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_info si ON ci.c_customer_sk = si.ws_customer_sk
+LEFT JOIN 
+    item_info ii ON si.order_count > 0 -- Ensure that we only join if there are orders
+WHERE 
+    ci.cd_marital_status = 'M'
+    AND ci.cd_income_band_sk IN (SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound > 50000)
+ORDER BY 
+    ci.c_last_name ASC,
+    ci.c_first_name ASC;

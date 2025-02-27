@@ -1,0 +1,57 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, CreationDate, Score, ViewCount, 0 AS Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, p.Score, p.ViewCount, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+AggregatePostStats AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        AVG(ViewCount) AS AvgViewCount
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        UserId,
+        STRING_AGG(Name, ', ') AS BadgeNames,
+        COUNT(*) AS BadgeCount
+    FROM Badges
+    GROUP BY UserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+    COALESCE(ps.Questions, 0) AS Questions,
+    COALESCE(ps.Answers, 0) AS Answers,
+    COALESCE(ps.AvgViewCount, 0) AS AvgViewCount,
+    COALESCE(b.BadgeNames, 'None') AS Badges,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    ph.Title AS TopPostTitle,
+    ph.Score AS TopPostScore
+FROM Users u
+LEFT JOIN AggregatePostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN UserBadges b ON u.Id = b.UserId
+LEFT JOIN (
+    SELECT 
+        r.Id, 
+        r.Title, 
+        r.Score
+    FROM RecursivePostHierarchy r
+    WHERE r.Level = 0
+    ORDER BY r.Score DESC
+    LIMIT 1
+) ph ON u.Id = ph.Id
+WHERE u.Reputation > (
+    SELECT AVG(Reputation) 
+    FROM Users
+) 
+ORDER BY u.Reputation DESC
+LIMIT 10;

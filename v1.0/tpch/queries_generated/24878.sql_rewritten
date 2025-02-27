@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) as rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+
+ExpensiveParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        CASE 
+            WHEN p.p_retailprice > 100 THEN 'Expensive'
+            WHEN p.p_retailprice BETWEEN 50 AND 100 THEN 'Moderate'
+            ELSE 'Cheap'
+        END as price_category
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty IS NOT NULL
+),
+
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) as total_spent,
+        COUNT(o.o_orderkey) as order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+)
+
+SELECT 
+    r.s_suppkey,
+    r.s_name,
+    ep.price_category,
+    co.total_spent
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    ExpensiveParts ep ON r.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = (SELECT p.p_partkey FROM part p WHERE p.p_name LIKE '%widget%') LIMIT 1)
+LEFT JOIN 
+    CustomerOrders co ON r.s_suppkey = (SELECT FIRST_VALUE(o.o_custkey) OVER (PARTITION BY r.s_suppkey ORDER BY co.total_spent DESC) FROM orders o WHERE o.o_orderkey IS NOT NULL)
+WHERE 
+    rnk = 1 AND 
+    (co.total_spent > 1000 OR ep.price_category = 'Expensive')
+UNION ALL
+SELECT
+    NULL AS s_suppkey,
+    'N/A' AS s_name,
+    'None' AS price_category,
+    SUM(o.o_totalprice) as total_spent
+FROM 
+    orders o
+WHERE 
+    o.o_orderstatus = 'F' AND 
+    o.o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 year'
+GROUP BY 
+    o.o_orderstatus
+ORDER BY 
+    total_spent DESC;

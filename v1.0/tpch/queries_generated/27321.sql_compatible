@@ -1,0 +1,48 @@
+
+WITH supplier_details AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_phone, s.s_acctbal, 
+           CONCAT(s.s_name, ' (', s.s_address, ')') AS supplier_info,
+           SUM(ps.ps_availqty) AS total_available_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_address, s.s_phone, s.s_acctbal
+),
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_size
+),
+customer_info AS (
+    SELECT c.c_custkey, c.c_name, SUBSTRING(c.c_address FROM 1 FOR 20) AS address_excerpt,
+           c.c_phone, c.c_acctbal, c.c_mktsegment,
+           LOWER(c.c_name) AS lower_name
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+),
+order_details AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, 
+           TO_CHAR(o.o_orderdate, 'YYYY-MM-DD') AS formatted_order_date,
+           o.o_orderpriority, o.o_clerk, o.o_shippriority
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+)
+SELECT p.p_name, p.p_brand, ps.total_available_qty, cs.address_excerpt, 
+       cs.lower_name, od.formatted_order_date
+FROM part_summary p
+JOIN supplier_details ps ON p.p_partkey = ps.s_suppkey
+JOIN customer_info cs ON cs.c_custkey = (
+    SELECT c.c_custkey 
+    FROM customer c 
+    ORDER BY c.c_acctbal DESC 
+    LIMIT 1)
+JOIN order_details od ON od.o_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderpriority = '1-URGENT'
+    ORDER BY o.o_totalprice DESC 
+    LIMIT 1)
+WHERE p.supplier_count > 3
+ORDER BY p.p_name, ps.total_available_qty DESC;

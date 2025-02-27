@@ -1,0 +1,82 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rank,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year, a.kind_id
+),
+person_movie_details AS (
+    SELECT 
+        c.movie_id,
+        p.person_id,
+        p.md5sum,
+        COALESCE(p.name, 'Unknown') AS person_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY p.name) AS person_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        c.note IS NULL
+),
+cast_summary AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        pm.person_id,
+        pm.person_name,
+        pm.person_rank,
+        rm.keyword_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        person_movie_details pm ON rm.movie_id = pm.movie_id
+    WHERE 
+        rm.rank <= 5 OR rm.keyword_count > 2
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS all_info
+    FROM 
+        movie_info mi
+    GROUP BY 
+        mi.movie_id
+),
+final_result AS (
+    SELECT 
+        cs.movie_id,
+        cs.title,
+        cs.production_year,
+        cs.person_name,
+        cs.keyword_count,
+        COALESCE(mi.all_info, 'No Info') AS info_collection
+    FROM 
+        cast_summary cs
+    LEFT JOIN 
+        movie_info_details mi ON cs.movie_id = mi.movie_id
+    WHERE 
+        cs.person_rank = 1 
+)
+SELECT 
+    movie_id, 
+    title, 
+    production_year, 
+    person_name, 
+    keyword_count,
+    info_collection
+FROM 
+    final_result
+WHERE 
+    (keyword_count > 2 AND NOT person_name IS NULL) 
+ORDER BY 
+    production_year DESC, keyword_count DESC;

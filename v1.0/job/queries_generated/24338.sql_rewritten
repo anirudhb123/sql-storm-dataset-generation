@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.id) DESC) AS year_rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = at.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+), 
+TopMovies AS (
+    SELECT 
+        title, 
+        production_year, 
+        actor_count
+    FROM 
+        RankedMovies 
+    WHERE 
+        year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.actor_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = tm.id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = tm.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        tm.title, tm.actor_count
+)
+SELECT 
+    md.title,
+    md.actor_count,
+    COALESCE(NULLIF(SUBSTRING(md.title FROM 1 FOR 1), 'A'), 'N/A') AS title_initial,
+    LEAD(md.actor_count) OVER (ORDER BY md.actor_count DESC) AS next_actor_count,
+    CASE 
+        WHEN md.actor_count > (SELECT AVG(actor_count) FROM MovieDetails) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS performance_category
+FROM 
+    MovieDetails md
+ORDER BY 
+    md.actor_count DESC
+LIMIT 10;

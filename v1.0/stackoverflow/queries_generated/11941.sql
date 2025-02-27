@@ -1,0 +1,53 @@
+-- Performance benchmarking SQL query
+WITH UsersBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsInfo AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.OwnerUserId, 
+        p.PostTypeId, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.Title
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Selecting only Questions
+),
+UserPosts AS (
+    SELECT 
+        p.OwnerUserId, 
+        COUNT(p.Id) AS PostCount, 
+        SUM(p.Score) AS TotalScore, 
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        PostsInfo p
+    GROUP BY 
+        p.OwnerUserId
+)
+SELECT 
+    ub.UserId, 
+    ub.DisplayName, 
+    ub.BadgeCount, 
+    up.PostCount, 
+    up.TotalScore, 
+    up.TotalViews
+FROM 
+    UsersBadges ub
+LEFT JOIN 
+    UserPosts up ON ub.UserId = up.OwnerUserId
+ORDER BY 
+    ub.BadgeCount DESC, 
+    up.TotalScore DESC;

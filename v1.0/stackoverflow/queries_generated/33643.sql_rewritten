@@ -1,0 +1,74 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostVoteStats AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    U.BadgeCount,
+    U.BadgeNames,
+    R.PostId,
+    R.Title,
+    R.CreationDate,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.TotalVotes,
+    COALESCE(CP.LastCloseDate, 'Never Closed') AS LastCloseDate
+FROM 
+    UserBadges U
+JOIN 
+    RecentPosts R ON U.UserId = R.OwnerUserId
+LEFT JOIN 
+    PostVoteStats PS ON R.PostId = PS.PostId
+LEFT JOIN 
+    ClosedPosts CP ON R.PostId = CP.PostId
+WHERE 
+    R.RecentPostRank = 1
+ORDER BY 
+    U.BadgeCount DESC, PS.Upvotes DESC;

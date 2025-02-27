@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.nationkey = sh.nationkey
+    WHERE sh.level < 5
+),
+OrdersWithSuppliers AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, l.l_partkey, l.l_suppkey, l.l_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+),
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ow.total_sales) AS total_sales
+    FROM (
+        SELECT o.c_custkey, o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        GROUP BY o.c_custkey, o.o_orderkey
+    ) AS ow
+    JOIN customer c ON ow.c_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+RankedSales AS (
+    SELECT n.n_name, ns.total_sales,
+           RANK() OVER (ORDER BY ns.total_sales DESC) AS sales_rank
+    FROM NationSales ns
+    JOIN nation n ON ns.n_nationkey = n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(r.total_sales, 0) AS total_sales,
+    SACH.subquery_acctbal,
+    LAG(COALESCE(r.total_sales, 0), 1) OVER (ORDER BY r.sales_rank) AS previous_sales,
+    RANK() OVER (ORDER BY COALESCE(r.total_sales, 0) DESC) AS rank_within_taxed
+FROM part p
+LEFT JOIN RankedSales r ON (p.p_partkey = r.n_nationkey % 10) 
+LEFT JOIN (
+    SELECT s.s_suppkey, SUM(s.s_acctbal) AS subquery_acctbal
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey
+) AS SACH ON SACH.s_suppkey = p.p_partkey
+WHERE p.p_retailprice < (SELECT AVG(ps.ps_supplycost)
+                          FROM partsupp ps
+                          WHERE ps.ps_availqty > 100)
+ORDER BY r.total_sales DESC NULLS LAST;

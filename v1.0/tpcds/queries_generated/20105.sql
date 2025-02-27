@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND 
+        (ws.ws_ship_date_sk > 0 OR ws.ws_ship_date_sk IS NULL)
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        AVG(sr_return_amt) AS avg_return_amt
+    FROM 
+        store_returns sr
+    WHERE 
+        sr_return_quantity > 0
+    GROUP BY 
+        sr_customer_sk
+), 
+SalesWithReturns AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_net_profit,
+        cr.total_returned,
+        cr.avg_return_amt
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        CustomerReturns cr ON rs.ws_order_number = cr.sr_customer_sk
+    WHERE 
+        rs.rn = 1
+)
+SELECT 
+    i.i_item_desc,
+    COALESCE(SUM(swr.ws_net_profit), 0) AS total_net_profit,
+    COALESCE(SUM(CASE WHEN swr.total_returned IS NULL THEN 0 ELSE swr.total_returned END), 0) AS total_items_returned,
+    COUNT(DISTINCT swr.ws_order_number) AS unique_orders
+FROM 
+    SalesWithReturns swr
+JOIN 
+    item i ON swr.ws_item_sk = i.i_item_sk
+GROUP BY 
+    i.i_item_desc
+HAVING 
+    total_net_profit > (SELECT AVG(ws_net_profit) FROM web_sales) AND 
+    COUNT(CASE WHEN swr.avg_return_amt > 0 THEN 1 END) > (SELECT COUNT(*) / 2 FROM store_returns)
+ORDER BY 
+    total_net_profit DESC 
+LIMIT 10;
+

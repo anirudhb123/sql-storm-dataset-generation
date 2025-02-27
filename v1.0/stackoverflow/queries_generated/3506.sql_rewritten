@@ -1,0 +1,77 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(b.Class = 1)::int, 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2)::int, 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3)::int, 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        AVG(c.Score) AS AverageCommentScore
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalResults AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        ur.Reputation,
+        ur.GoldBadges,
+        ur.SilverBadges,
+        ur.BronzeBadges,
+        pc.CommentCount,
+        COALESCE(pc.AverageCommentScore, 0) AS AverageCommentScore
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        PostComments pc ON rp.Id = pc.PostId
+)
+SELECT 
+    fr.Id,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.ViewCount,
+    fr.Reputation,
+    fr.GoldBadges,
+    fr.SilverBadges,
+    fr.BronzeBadges,
+    fr.CommentCount,
+    fr.AverageCommentScore
+FROM 
+    FinalResults fr
+WHERE 
+    fr.PostRank = 1
+    AND fr.Reputation > 1000
+ORDER BY 
+    fr.Score DESC, fr.ViewCount DESC;

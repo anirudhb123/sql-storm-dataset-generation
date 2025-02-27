@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS RankPerType,
+        COUNT(*) OVER (PARTITION BY pt.Name) AS TotalPostsPerType
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+), 
+PostWithVotes AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Score
+), 
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts pt ON t.Id = ANY(string_to_array(pt.Tags, '><')::int[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.Id) > 10
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        h.PostId,
+        h.CreationDate,
+        ct.Name AS CloseReason
+    FROM 
+        PostHistory h
+    JOIN 
+        PostHistoryTypes ht ON h.PostHistoryTypeId = ht.Id
+    JOIN 
+        CloseReasonTypes ct ON h.Comment::int = ct.Id
+    WHERE 
+        ht.Name = 'Post Closed' AND h.CreationDate >= NOW() - INTERVAL '1 year'
+)
+
+SELECT 
+    wp.PostId,
+    wp.Title,
+    wp.Body,
+    wp.CreationDate,
+    wp.ViewCount,
+    wp.Score,
+    wp.UpVotes,
+    wp.DownVotes,
+    CASE 
+        WHEN wp.RankPerType <= 5 THEN 'Top Post'
+        ELSE 'Other Post'
+    END AS PostCategory,
+    COALESCE(cp.CloseReason, 'Not Closed') AS CloseReason,
+    pt.TagName AS PopularTag
+FROM 
+    PostWithVotes wp
+LEFT JOIN 
+    ClosedPosts cp ON wp.PostId = cp.PostId
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount = (SELECT MAX(PostCount) FROM PopularTags)
+WHERE 
+    wp.Score > 0 OR wp.UpVotes > 5
+ORDER BY 
+    wp.ViewCount DESC, wp.Score DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;
+

@@ -1,0 +1,67 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F' 
+      AND l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CriticalPart AS (
+    SELECT p.p_partkey, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS critical_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size IS NOT NULL 
+      AND p.p_retailprice > 100.00
+    GROUP BY p.p_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000.00
+),
+NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    nd.n_name,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+    SUM(os.total_revenue) AS total_order_revenue,
+    SUM(cp.critical_cost) AS total_critical_cost,
+    COALESCE(MAX(rs.rank), 0) AS max_supplier_rank,
+    CASE 
+        WHEN SUM(os.total_revenue) IS NULL THEN 'No Revenue'
+        WHEN SUM(os.total_revenue) > 50000 THEN 'High Revenue'
+        ELSE 'Moderate Revenue' 
+    END AS revenue_category
+FROM NationDetails nd
+LEFT JOIN RankedSuppliers rs ON nd.n_nationkey = rs.s_nationkey
+LEFT JOIN OrderSummary os 
+    ON os.o_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_custkey IN (
+            SELECT c.c_custkey 
+            FROM customer c 
+            WHERE c.c_nationkey = nd.n_nationkey
+        )
+    )
+LEFT JOIN CriticalPart cp 
+    ON rs.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT p.p_partkey 
+            FROM part p 
+            WHERE p.p_size = 3
+        )
+    )
+WHERE nd.n_name IS NOT NULL
+GROUP BY nd.n_name
+HAVING SUM(cp.critical_cost) IS NOT NULL OR MAX(rs.rank) > 0
+ORDER BY total_order_revenue DESC, nd.n_name;

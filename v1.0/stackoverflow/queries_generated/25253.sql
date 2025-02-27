@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ARRAY(SELECT UNNEST(string_to_array(p.Tags, '>')) ORDER BY p.CreationDate DESC) 
+        ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.Body,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.TagRank <= 5 -- Keep the top 5 recently created questions for each tag
+),
+PostDetail AS (
+    SELECT 
+        fp.*,
+        COALESCE((SELECT COUNT(*) FROM Answers a WHERE a.ParentId = fp.PostId), 0) AS AnswerCount,
+        COALESCE((SELECT COUNT(*) FROM Comments c WHERE c.PostId = fp.PostId), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = fp.PostId AND v.VoteTypeId = 2), 0) AS UpVoteCount
+    FROM 
+        FilteredPosts fp
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.UpVoteCount,
+    CASE 
+        WHEN pd.Score >= 10 THEN 'High Engagement'
+        WHEN pd.Score BETWEEN 1 AND 9 THEN 'Moderate Engagement'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel,
+    LENGTH(pd.Body) AS BodyLength,
+    SUBSTRING(pd.Body FROM 1 FOR 100) || '...' AS ShortBodyPreview
+FROM 
+    PostDetail pd
+ORDER BY 
+    pd.CreationDate DESC
+LIMIT 100;

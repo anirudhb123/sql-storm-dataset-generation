@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, s.s_acctbal, 
+           1 AS level,
+           CAST(s.s_name AS VARCHAR(100)) AS path
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, s.s_acctbal,
+           sh.level + 1,
+           CAST(sh.path || ' -> ' || s.s_name AS VARCHAR(100))
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           COALESCE(MAX(ps.total_supplycost), 0) AS max_supplycost
+    FROM part p
+    LEFT JOIN PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 500.00
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS customer_count,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS returns_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+RankedOrders AS (
+    SELECT os.o_orderkey, os.total_revenue, os.customer_count, os.returns_count,
+           RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM OrderStatistics os
+)
+SELECT p.p_name, p.p_retailprice, COALESCE(sh.level, 0) AS supplier_level,
+       ro.total_revenue, ro.customer_count, ro.returns_count
+FROM HighValueParts p
+LEFT JOIN SupplierHierarchy sh ON p.p_partkey = sh.s_suppkey
+LEFT JOIN RankedOrders ro ON p.p_partkey = ro.o_orderkey
+WHERE p.max_supplycost IS NOT NULL AND 
+      (ro.customer_count > 10 OR ro.returns_count = 0) 
+ORDER BY p.p_retailprice DESC, ro.total_revenue ASC;

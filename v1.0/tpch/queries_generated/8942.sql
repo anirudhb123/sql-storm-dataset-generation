@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT ps.ps_partkey, 
+           s.s_name, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, s.s_name
+),
+HighSupplyCost AS (
+    SELECT ps.ps_partkey, s.s_name, total_supply_cost 
+    FROM RankedSuppliers ps
+    WHERE rank = 1
+),
+PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_type, 
+           p.p_size, 
+           p.p_container, 
+           p.p_retailprice, 
+           hs.s_name AS top_supplier_name, 
+           hs.total_supply_cost
+    FROM part p
+    JOIN HighSupplyCost hs ON p.p_partkey = hs.ps_partkey
+)
+SELECT pd.p_partkey, 
+       pd.p_name, 
+       pd.p_brand, 
+       pd.p_type, 
+       pd.p_size, 
+       pd.p_container, 
+       pd.p_retailprice, 
+       pd.top_supplier_name, 
+       pd.total_supply_cost,
+       (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = pd.p_partkey) AS order_count
+FROM PartDetails pd
+WHERE pd.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+ORDER BY pd.total_supply_cost DESC, pd.p_retailprice ASC
+LIMIT 10;

@@ -1,0 +1,44 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN '2022-01-01' AND '2022-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(ro.total_revenue) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        RankedOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE 
+        ro.order_rank <= 5
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_spent,
+    COUNT(DISTINCT ro.o_orderkey) AS num_orders,
+    AVG(EXTRACT(EPOCH FROM (ro.o_orderdate - '2022-01-01'::date)) / 86400) AS avg_days_between_orders
+FROM 
+    TopCustomers tc
+JOIN 
+    RankedOrders ro ON tc.c_custkey = ro.o_custkey
+GROUP BY 
+    tc.c_custkey, tc.c_name, tc.total_spent
+ORDER BY 
+    tc.total_spent DESC
+LIMIT 10;

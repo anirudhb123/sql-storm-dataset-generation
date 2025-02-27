@@ -1,0 +1,72 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.Score,
+        a.ViewCount,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE r ON a.ParentId = r.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+    AVG(p.Score) AS AverageScore,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(DATE_PART('year', p.CreationDate)) AS MostRecentYear,
+    CASE 
+        WHEN MAX(v.CreationDate) IS NULL THEN 'No Votes'
+        ELSE 'Voted'
+    END AS VoteStatus
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    (SELECT 
+         pt.PostId, 
+         STRING_AGG(t.TagName, ', ') AS TagName
+     FROM 
+         PostsTags pt
+     JOIN 
+         Tags t ON pt.TagId = t.Id
+     GROUP BY 
+         pt.PostId
+    ) t ON p.Id = t.PostId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.DisplayName
+HAVING 
+    AVG(v.CreationDate) > NOW() - INTERVAL '1 year'
+ORDER BY 
+    TotalPosts DESC
+LIMIT 50;
+
+-- NOTE: The example assumes the existence of a `PostsTags` table to facilitate tag aggregation.
+-- This is merely an illustrative query that encompasses various SQL constructs while considering performance aspects.

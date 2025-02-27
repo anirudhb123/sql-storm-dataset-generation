@@ -1,0 +1,57 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk
+),
+Ranked_Sales AS (
+    SELECT 
+        ws_item_sk, 
+        COUNT(ws_sold_date_sk) AS sales_days,
+        AVG(total_sales) AS avg_sales,
+        MAX(total_sales) AS max_sales,
+        MIN(total_sales) AS min_sales
+    FROM 
+        Sales_CTE 
+    WHERE 
+        sales_rank <= 10
+    GROUP BY 
+        ws_item_sk
+),
+Top_Items AS (
+    SELECT 
+        i_item_id, 
+        i_item_desc,
+        r_reason_desc
+    FROM 
+        item i
+    LEFT JOIN 
+        (SELECT cr_item_sk, r_reason_desc FROM catalog_returns cr JOIN reason r ON cr_reason_sk = r.r_reason_sk) AS cr 
+    ON 
+        i.i_item_sk = cr.cr_item_sk
+)
+SELECT 
+    ti.i_item_id,
+    ti.i_item_desc,
+    rs.avg_sales,
+    rs.max_sales,
+    rs.min_sales,
+    CASE 
+        WHEN rs.sales_days > 5 THEN 'Frequent Sales' 
+        ELSE 'Infrequent Sales' 
+    END AS sales_frequency,
+    COALESCE(cr.r_reason_desc, 'No Returns') AS return_reason
+FROM 
+    Ranked_Sales rs
+JOIN 
+    Top_Items ti ON rs.ws_item_sk = ti.i_item_sk
+ORDER BY 
+    rs.avg_sales DESC
+LIMIT 100;

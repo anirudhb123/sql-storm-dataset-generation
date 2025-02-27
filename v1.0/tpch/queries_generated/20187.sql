@@ -1,0 +1,50 @@
+WITH OrderedCustomer AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey 
+                              ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+      AND c.c_mktsegment IN ('BUILDING', 'AUTOMOBILE')
+),
+
+SupplierPartStats AS (
+    SELECT s.s_suppkey, p.p_partkey, p.p_name, 
+           SUM(ps.ps_availqty) AS total_availqty,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY s.s_suppkey, p.p_partkey, p.p_name
+),
+
+NationSales AS (
+    SELECT n.n_nationkey, n.n_name,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_sales,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY n.n_nationkey, n.n_name
+)
+
+SELECT n.n_name AS nation_name,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS total_revenue,
+       AVG(p.p_retailprice) AS avg_part_price,
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       CASE WHEN SUM(ps.ps_availqty) > 1000 THEN 'High Availability' ELSE 'Low Availability' END AS availability_status
+FROM nation n
+LEFT JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'F')
+LEFT JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN SupplierPartStats sps ON sps.s_suppkey = s.s_suppkey
+WHERE n.n_nationkey IN (SELECT c.c_nationkey FROM OrderedCustomer c WHERE c.rank <= 10)
+GROUP BY n.n_name
+HAVING SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) > (SELECT AVG(total_sales) FROM NationSales)
+ORDER BY total_revenue DESC
+LIMIT 5;
+

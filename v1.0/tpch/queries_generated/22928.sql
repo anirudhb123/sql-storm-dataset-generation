@@ -1,0 +1,32 @@
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_custkey, c_name, c_nationkey, c_acctbal, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer)  -- Starting with high balance customers
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.n_nationkey = ch.c_nationkey AND ch.level < 3
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT ch.c_custkey) AS high_value_customers,
+    AVG(o.o_totalprice) AS avg_order_total,
+    SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_discounted_sales,
+    STRING_AGG(DISTINCT p.p_name, '; ') AS part_names,
+    MIN(l.l_shipdate) AS first_ship_date,
+    COALESCE(MAX(l.l_returnflag), 'N') AS last_return_flag,
+    SUM(CASE WHEN l.l_tax IS NULL THEN 0 ELSE l.l_tax END) AS total_tax
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN customer_hierarchy ch ON ch.c_nationkey = n.n_nationkey
+WHERE o.o_orderstatus IN ('F', 'O')
+GROUP BY n.n_name
+HAVING 
+    COUNT(DISTINCT ch.c_custkey) > 5 
+    AND AVG(o.o_totalprice) < (SELECT AVG(o_totalprice) FROM orders WHERE o_orderstatus = 'F') 
+    AND MIN(l.l_shipdate) BETWEEN '2023-01-01' AND CURRENT_DATE
+ORDER BY total_discounted_sales DESC NULLS LAST;

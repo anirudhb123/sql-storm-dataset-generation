@@ -1,0 +1,47 @@
+-- Performance benchmarking query to analyze post creation trends and user activity
+WITH PostStats AS (
+    SELECT
+        p.OwnerUserId,
+        COUNT(*) AS PostCount,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViewCount,
+        AVG(p.CreationDate) AS AvgCreationDate
+    FROM
+        Posts p
+    WHERE
+        p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Last 1 year
+    GROUP BY
+        p.OwnerUserId
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ps.PostCount,
+        ps.Questions,
+        ps.Answers,
+        ps.TotalScore,
+        ps.TotalViewCount,
+        ps.AvgCreationDate
+    FROM
+        Users u
+    LEFT JOIN
+        PostStats ps ON u.Id = ps.OwnerUserId
+)
+SELECT
+    ua.UserId,
+    ua.DisplayName,
+    ua.Reputation,
+    ISNULL(ua.PostCount, 0) AS PostCount,
+    ISNULL(ua.Questions, 0) AS Questions,
+    ISNULL(ua.Answers, 0) AS Answers,
+    ISNULL(ua.TotalScore, 0) AS TotalScore,
+    ISNULL(ua.TotalViewCount, 0) AS TotalViewCount,
+    ua.AvgCreationDate
+FROM
+    UserActivity ua
+ORDER BY
+    ua.Reputation DESC, ua.PostCount DESC;

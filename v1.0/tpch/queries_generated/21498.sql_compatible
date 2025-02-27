@@ -1,0 +1,51 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS supplier_rank
+    FROM supplier s
+),
+MaxPartPrice AS (
+    SELECT 
+        MAX(p.p_retailprice) AS max_price
+    FROM part p
+    WHERE p.p_size > 10 OR p.p_name LIKE '%special%'
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (
+        SELECT AVG(total_amount) FROM (
+            SELECT 
+                SUM(l_extendedprice * (1 - l_discount)) AS total_amount
+            FROM lineitem
+            GROUP BY l_orderkey
+        ) AS avg_subquery
+    )
+)
+SELECT 
+    n.n_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COUNT(DISTINCT fo.o_orderkey) AS fulfilled_orders,
+    COUNT(DISTINCT CASE WHEN fo.lineitem_count > 5 THEN fo.o_orderkey END) AS large_orders,
+    SUM(fo.total_amount) AS total_sales,
+    CASE 
+        WHEN SUM(fo.total_amount) >= (SELECT COALESCE(MAX(max_price), 0) FROM MaxPartPrice) THEN 'High Value'
+        ELSE 'Regular Value'
+    END AS order_value_category
+FROM FilteredOrders fo
+LEFT JOIN customer c ON fo.o_custkey = c.c_custkey
+LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN RankedSuppliers s ON s.s_nationkey = n.n_nationkey AND s.supplier_rank = 1
+GROUP BY n.n_name, s.s_name
+ORDER BY total_sales DESC, n.n_name
+LIMIT 100;

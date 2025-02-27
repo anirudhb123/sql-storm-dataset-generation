@@ -1,0 +1,71 @@
+
+WITH RECURSIVE sales_path AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_profit > (SELECT AVG(ws_net_profit) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_sales_price * 0.9 AS ws_sales_price, -- applying a discount
+        level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_net_profit < (SELECT AVG(cs_net_profit) FROM catalog_sales)
+        AND cs_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_order_number = sales_path.ws_order_number)
+),
+item_summary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(sp.ws_sales_price) AS total_sales,
+        COUNT(sp.ws_order_number) AS order_count,
+        MAX(sp.level) AS max_depth
+    FROM 
+        sales_path sp
+    JOIN 
+        item i ON sp.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id,
+        i.i_item_desc
+),
+top_items AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        item_summary
+    WHERE 
+        total_sales IS NOT NULL
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT ci.c_customer_id) AS customer_count,
+    SUM(ti.total_sales) AS total_revenue,
+    AVG(ti.order_count) AS avg_orders
+FROM 
+    top_items ti
+JOIN 
+    store_sales ss ON ti.i_item_id = ss.ss_item_sk
+JOIN 
+    customer ci ON ss.ss_customer_sk = ci.c_customer_sk
+LEFT JOIN 
+    customer_address ca ON ci.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    ca.ca_state IN ('CA', 'NY') AND
+    ti.sales_rank <= 10
+GROUP BY 
+    ca.ca_city
+HAVING 
+    COUNT(DISTINCT ci.c_customer_id) > 0
+ORDER BY 
+    total_revenue DESC;

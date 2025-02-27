@@ -1,0 +1,47 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_sales_price DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN 15000 AND 15030
+), 
+TopSales AS (
+    SELECT 
+        rs.ws_bill_customer_sk,
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        ca_city,
+        ca_state,
+        cd_gender,
+        cd_marital_status
+    FROM 
+        RankedSales rs
+    JOIN 
+        customer c ON rs.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        rs.rn <= 5
+)
+SELECT 
+    COUNT(DISTINCT t.ws_bill_customer_sk) AS unique_customers,
+    AVG(t.ws_sales_price) AS avg_sales_price,
+    SUM(t.ws_sales_price) AS total_sales_value,
+    STRING_AGG(DISTINCT CONCAT(ca_city, ', ', ca_state) ORDER BY ca_city) AS cities,
+    MAX(ws_sales_price) AS max_sales_price
+FROM 
+    TopSales t
+GROUP BY 
+    t.cd_gender,
+    t.cd_marital_status
+HAVING 
+    SUM(t.ws_sales_price) > 1000
+ORDER BY 
+    total_sales_value DESC;

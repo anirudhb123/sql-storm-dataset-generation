@@ -1,0 +1,82 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(m.season_nr, 0) AS season_number,
+        COALESCE(m.episode_nr, 0) AS episode_number,
+        m.production_year,
+        1 AS level
+    FROM 
+        title m
+    WHERE 
+        m.episode_of_id IS NULL  -- Starting point: root movies
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(m.season_nr, 0),
+        COALESCE(m.episode_nr, 0),
+        m.production_year,
+        mh.level + 1
+    FROM 
+        title m
+    JOIN 
+        movie_hierarchy mh ON m.episode_of_id = mh.movie_id -- Recursive join to find episodes
+),
+most_popular_keywords AS (
+    SELECT
+        mk.keyword_id,
+        COUNT(mk.movie_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.keyword_id
+    HAVING 
+        COUNT(mk.movie_id) > 5  -- Only keep keywords that are in more than 5 movies
+),
+movie_cast AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+directors AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS director_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id 
+    WHERE 
+        ct.kind = 'director'
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    mh.season_number,
+    mh.episode_number,
+    COALESCE(dc.director_count, 0) AS number_of_directors,
+    STRING_AGG(DISTINCT ac.actor_name, ', ') AS actor_names,
+    COUNT(DISTINCT mw.keyword_id) AS popular_keyword_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    directors dc ON mh.movie_id = dc.movie_id
+LEFT JOIN 
+    movie_cast ac ON mh.movie_id = ac.movie_id
+LEFT JOIN 
+    movie_keyword mw ON mh.movie_id = mw.movie_id AND mw.keyword_id IN (SELECT keyword_id FROM most_popular_keywords)
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year, mh.season_number, mh.episode_number, dc.director_count
+ORDER BY 
+    mh.production_year DESC, mh.movie_title ASC;

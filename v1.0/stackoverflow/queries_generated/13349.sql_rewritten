@@ -1,0 +1,50 @@
+WITH PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        SUM(COALESCE(P.AnswerCount, 0)) AS TotalAnswers,
+        SUM(COALESCE(P.CommentCount, 0)) AS TotalComments,
+        SUM(COALESCE(P.FavoriteCount, 0)) AS TotalFavorites,
+        SUM(COALESCE(P.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        PS.TotalPosts,
+        PS.TotalViews,
+        PS.AverageScore,
+        PS.TotalAnswers,
+        PS.TotalComments,
+        PS.TotalFavorites,
+        PS.TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats PS ON U.Id = PS.OwnerUserId
+)
+
+SELECT 
+    US.UserId,
+    US.Reputation,
+    US.CreationDate,
+    US.LastAccessDate,
+    COALESCE(US.TotalPosts, 0) AS TotalPosts,
+    COALESCE(US.TotalViews, 0) AS TotalViews,
+    COALESCE(US.AverageScore, 0) AS AverageScore,
+    COALESCE(US.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(US.TotalComments, 0) AS TotalComments,
+    COALESCE(US.TotalFavorites, 0) AS TotalFavorites,
+    COALESCE(US.TotalDownVotes, 0) AS TotalDownVotes
+FROM 
+    UserStats US
+ORDER BY 
+    US.Reputation DESC;

@@ -1,0 +1,73 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS depth
+    FROM aka_title m
+    WHERE m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, mh.depth + 1
+    FROM aka_title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), 
+
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT co.name, ', ') AS companies,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN company_name co ON co.id = mc.company_id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword kc ON kc.id = mk.keyword_id
+    WHERE m.production_year IS NOT NULL
+    GROUP BY m.id, m.title, m.production_year
+), 
+
+ActorDetails AS (
+    SELECT 
+        a.person_id AS person_id,
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT t.title, ', ') AS movies
+    FROM aka_name a
+    JOIN cast_info ci ON ci.person_id = a.person_id
+    JOIN aka_title t ON t.id = ci.movie_id
+    GROUP BY a.person_id, a.name
+), 
+
+MoviesWithActors AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        ad.actor_name,
+        ad.movie_count
+    FROM MovieDetails md
+    LEFT JOIN ActorDetails ad ON ad.movie_count > 0
+)
+
+SELECT 
+    mh.depth,
+    mw.movie_id,
+    mw.title,
+    mw.production_year,
+    mw.companies,
+    mw.keyword_count,
+    COALESCE(actors.actor_names, 'No Actors') AS actors
+FROM MovieHierarchy mh
+LEFT JOIN MoviesWithActors mw ON mw.movie_id = mh.movie_id
+LEFT JOIN (
+    SELECT 
+        movie_id,
+        STRING_AGG(actor_name, ', ') AS actor_names
+    FROM ActorDetails
+    GROUP BY movie_id
+) actors ON actors.movie_id = mw.movie_id
+WHERE mh.depth <= 2
+ORDER BY mh.depth, mw.production_year DESC;

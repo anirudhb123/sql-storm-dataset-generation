@@ -1,0 +1,60 @@
+WITH RECURSIVE prior_sales AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate < CURRENT_DATE - INTERVAL '30' DAY
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+region_sales AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(v.revenue) AS regional_revenue
+    FROM 
+        nation n
+    LEFT JOIN (
+        SELECT 
+            s.s_nationkey,
+            SUM(ps.ps_supplycost * ps.ps_availqty) AS revenue
+        FROM 
+            supplier s
+        JOIN 
+            partsupp ps ON s.s_suppkey = ps.ps_suppkey
+        GROUP BY 
+            s.s_nationkey
+    ) v ON n.n_nationkey = v.s_nationkey
+    GROUP BY 
+        n.n_regionkey
+)    
+SELECT 
+    r.r_name, 
+    COALESCE(REPLACE(SUBSTRING_INDEX(n.r_comment, ' ', 5), ' ', '...', LENGTH(n.r_comment) - LENGTH(REPLACE(n.r_comment, ' ', ''))), 'No comments available') AS summary_comment,
+    CASE 
+        WHEN rs.regional_revenue IS NULL THEN 0 
+        ELSE ROUND(rs.regional_revenue, 2) 
+    END AS total_sales,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(rs.regional_revenue, 0) DESC) AS rank,
+    CASE 
+        WHEN total_sales > 100000 THEN 'High Sales'
+        WHEN total_sales BETWEEN 50000 AND 100000 THEN 'Moderate Sales'
+        ELSE 'Low Sales'
+    END AS sales_category
+FROM 
+    region r
+LEFT JOIN 
+    region_sales rs ON r.r_regionkey = rs.n_regionkey
+JOIN 
+    (SELECT DISTINCT n.n_regionkey, n.n_comment 
+     FROM nation n 
+     WHERE n.n_comment IS NOT NULL) n ON r.r_regionkey = n.n_regionkey
+WHERE 
+    r.r_name LIKE 'N%'
+ORDER BY 
+    rank
+LIMIT 10;

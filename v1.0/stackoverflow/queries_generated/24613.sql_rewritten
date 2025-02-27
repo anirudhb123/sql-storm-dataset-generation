@@ -1,0 +1,103 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.AboutMe,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ActivePosts AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.OwnerUserId
+),
+UserDetails AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.Reputation,
+        COALESCE(ap.TotalPosts, 0) AS TotalPosts,
+        COALESCE(ap.Questions, 0) AS Questions,
+        COALESCE(ap.Answers, 0) AS Answers,
+        COALESCE(ap.PositiveScorePosts, 0) AS PositiveScorePosts,
+        ARRAY_TO_STRING(STRING_TO_ARRAY(us.AboutMe, ' '), ' ') AS AboutMeExcerpt
+    FROM 
+        UserStats us
+    LEFT JOIN 
+        ActivePosts ap ON us.UserId = ap.OwnerUserId
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')))
+                          WHERE p.PostTypeId = 1)
+    GROUP BY 
+        p.Id
+),
+ClosingHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ud.UserId,
+    ud.DisplayName,
+    ud.Reputation,
+    ud.TotalPosts,
+    ud.Questions,
+    ud.Answers,
+    ud.PositiveScorePosts,
+    COALESCE(ch.LastClosedDate, 'Never Closed') AS LastClosedDate,
+    COALESCE(pd.PostId, 0) AS SamplePostId,
+    COALESCE(pd.Title, 'No Posts Available') AS SamplePostTitle,
+    COALESCE(pd.ViewCount, 0) AS SamplePostViewCount,
+    COALESCE(pd.Score, 0) AS SamplePostScore,
+    ud.AboutMeExcerpt
+FROM 
+    UserDetails ud
+LEFT JOIN 
+    ClosingHistory ch ON ud.UserId = ch.PostId
+LEFT JOIN 
+    PostDetails pd ON ud.UserId = pd.OwnerUserId
+ORDER BY 
+    ud.Reputation DESC,
+    ud.TotalPosts DESC
+LIMIT 20 OFFSET 0;

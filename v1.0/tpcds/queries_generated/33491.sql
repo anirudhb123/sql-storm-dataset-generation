@@ -1,0 +1,53 @@
+
+WITH RECURSIVE SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE dd.d_year = 2023
+    GROUP BY ws.web_site_sk, ws.ws_sold_date_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr.refunded_customer_sk,
+        SUM(wr.return_amt) AS total_refunds
+    FROM web_returns wr
+    GROUP BY wr.refunded_customer_sk
+),
+TopStores AS (
+    SELECT 
+        ss.ss_store_sk,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        SUM(ss.ss_sales_price * ss.ss_quantity) AS total_sales_value
+    FROM store_sales ss
+    GROUP BY ss.ss_store_sk
+    HAVING total_sales_value > 10000
+),
+CombinedData AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_refunds,
+        ss.total_transactions,
+        ss.total_sales_value
+    FROM CustomerReturns cs
+    FULL OUTER JOIN TopStores ss ON cs.refunded_customer_sk = ss.ss_store_sk
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT cd.cd_demo_sk) AS total_customers,
+    AVG(COALESCE(cd.cd_purchase_estimate, 0)) AS average_purchase_estimate,
+    SUM(COALESCE(cd.cd_dep_count, 0)) OVER (PARTITION BY ca.ca_city) AS city_total_dependents,
+    SUM(cd.cd_purchase_estimate) AS total_city_estimated_spending,
+    MAX(cd.cd_credit_rating) AS highest_credit_rating
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN CombinedData comp ON c.c_customer_sk = comp.c_customer_sk
+WHERE cd.cd_gender = 'F' 
+    AND (comp.total_sales_value IS NULL OR comp.total_sales_value < 5000)
+GROUP BY ca.ca_city
+HAVING COUNT(DISTINCT c.c_customer_sk) > 10
+ORDER BY total_customers DESC;

@@ -1,0 +1,76 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+actor_roles AS (
+    SELECT 
+        ak.name AS actor_name,
+        ct.kind AS role_type,
+        cnt.title AS movie_title,
+        cnt.production_year,
+        COUNT(*) OVER (PARTITION BY ak.id ORDER BY cnt.production_year) AS total_movies
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        aka_title cnt ON ci.movie_id = cnt.id
+    JOIN 
+        role_type ct ON ci.role_id = ct.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+movie_info_summary AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT mt.company_id) AS total_companies,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords
+    FROM 
+        movie_companies mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.movie_id = mk.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(aim.actor_name, 'Unknown Actor') AS actor_name,
+    aim.role_type,
+    mis.total_companies,
+    mis.total_keywords,
+    mh.depth
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    actor_roles aim ON mh.movie_id = aim.movie_title 
+LEFT JOIN 
+    movie_info_summary mis ON mh.movie_id = mis.movie_id
+WHERE 
+    (mh.production_year IS NOT NULL AND mh.production_year BETWEEN 2000 AND 2023)
+    OR (aim.role_type IS NOT NULL AND aim.role_type LIKE '%lead%')
+ORDER BY 
+    mh.production_year DESC, 
+    mh.depth ASC;

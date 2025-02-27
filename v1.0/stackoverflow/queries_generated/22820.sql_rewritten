@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.AnswerCount,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS UserPostRank,
+        COUNT(CASE WHEN PV.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN PV.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        SUM(COALESCE(PH.PostHistoryTypeId IN (10, 11), 0)) AS CloseCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes PV ON P.Id = PV.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Tags T ON T.Id = ANY (string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Title, P.CreationDate, P.Score, P.AnswerCount, P.ViewCount
+), UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(RP.Score), 0) AS TotalScore,
+        COALESCE(SUM(RP.ViewCount), 0) AS TotalViews,
+        COUNT(RP.PostId) AS PostCount,
+        MAX(RP.UserPostRank) AS MaxPostRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        RankedPosts RP ON U.Id = RP.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), BadgeStats AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalScore,
+    U.TotalViews,
+    U.PostCount,
+    COALESCE(B.GoldBadges, 0) AS GoldBadges,
+    COALESCE(B.SilverBadges, 0) AS SilverBadges,
+    COALESCE(B.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN U.MaxPostRank IS NULL THEN 'No Posts'
+        WHEN U.MaxPostRank < 3 THEN 'Novice'
+        ELSE 'Experienced'
+    END AS UserExperience,
+    COUNT(PH.Id) FILTER (WHERE PH.PostHistoryTypeId IN (10, 11)) AS ClosePostCount
+FROM 
+    UserStats U
+LEFT JOIN 
+    BadgeStats B ON U.UserId = B.UserId
+LEFT JOIN 
+    PostHistory PH ON U.UserId = PH.UserId
+GROUP BY 
+    U.DisplayName, U.Reputation, U.TotalScore, U.TotalViews, U.PostCount, U.MaxPostRank, B.GoldBadges, B.SilverBadges, B.BronzeBadges
+ORDER BY 
+    U.Reputation DESC, U.TotalScore DESC
+LIMIT 100
+OFFSET 0;

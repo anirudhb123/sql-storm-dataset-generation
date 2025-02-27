@@ -1,0 +1,77 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_ext_sales_price) DESC) AS rn
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+combined_sales AS (
+    SELECT 
+        ss.ws_item_sk,
+        COALESCE(ws.total_quantity, 0) AS total_web_quantity,
+        COALESCE(cs.total_quantity, 0) AS total_catalog_quantity,
+        (COALESCE(ws.total_sales, 0) + COALESCE(cs.total_sales, 0)) AS overall_sales
+    FROM 
+        (SELECT DISTINCT ws_item_sk FROM web_sales) ss
+    LEFT JOIN (
+        SELECT 
+            ws_item_sk,
+            SUM(ws_quantity) AS total_quantity,
+            SUM(ws_ext_sales_price) AS total_sales
+        FROM 
+            web_sales
+        GROUP BY 
+            ws_item_sk
+    ) ws ON ss.ws_item_sk = ws.ws_item_sk
+    LEFT JOIN (
+        SELECT 
+            cs_item_sk,
+            SUM(cs_quantity) AS total_quantity,
+            SUM(cs_ext_sales_price) AS total_sales
+        FROM 
+            catalog_sales
+        GROUP BY 
+            cs_item_sk
+    ) cs ON ss.ws_item_sk = cs.cs_item_sk
+)
+SELECT 
+    item.i_item_id,
+    item.i_item_desc,
+    cs.total_catalog_quantity,
+    ws.total_web_quantity,
+    cs.total_catalog_quantity + ws.total_web_quantity AS total_combined_sales,
+    combined_sales.overall_sales,
+    COUNT(DISTINCT CASE WHEN wr_returned_date_sk IS NOT NULL THEN wr_item_sk END) AS total_web_returns,
+    COUNT(DISTINCT CASE WHEN cr_returned_date_sk IS NOT NULL THEN cr_item_sk END) AS total_catalog_returns
+FROM 
+    item
+LEFT JOIN 
+    combined_sales ON item.i_item_sk = combined_sales.ws_item_sk
+LEFT JOIN 
+    web_returns wr ON wr.wr_item_sk = item.i_item_sk
+LEFT JOIN 
+    catalog_returns cr ON cr.cr_item_sk = item.i_item_sk
+WHERE 
+    item.i_current_price > (
+        SELECT AVG(i_current_price) 
+        FROM item 
+        WHERE i_rec_start_date <= CURRENT_DATE
+    )
+ORDER BY 
+    total_combined_sales DESC
+LIMIT 100;

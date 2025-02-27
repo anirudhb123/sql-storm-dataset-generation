@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           COALESCE(SUM(ss.ss_net_profit), 0) AS total_net_profit
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+
+    UNION ALL
+
+    SELECT c.c_customer_sk,
+           c.c_first_name,
+           c.c_last_name,
+           COALESCE(SUM(CASE WHEN ss.ss_net_profit IS NOT NULL THEN ss.ss_net_profit ELSE 0 END), 0)
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN sales_hierarchy sh ON sh.c_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+customer_income AS (
+    SELECT DISTINCT cd.cd_demo_sk,
+           hd.hd_income_band_sk,
+           hd.hd_buy_potential,
+           (CASE 
+                WHEN total_net_profit >= ib.ib_lower_bound AND total_net_profit < ib.ib_upper_bound THEN ib.ib_income_band_sk 
+                ELSE NULL 
+            END) AS income_band
+    FROM household_demographics hd
+    JOIN customer_demographics cd ON hd.hd_demo_sk = cd.cd_demo_sk
+    LEFT JOIN sales_hierarchy s ON cd.cd_demo_sk = s.c_customer_sk
+    LEFT JOIN income_band ib ON s.total_net_profit BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+),
+final_results AS (
+    SELECT c.c_customer_id,
+           c.c_first_name,
+           c.c_last_name,
+           ci.hd_buy_potential,
+           ci.income_band,
+           SUM(ss.ss_net_profit) AS aggregate_profit
+    FROM customer c
+    LEFT JOIN sales_hierarchy s ON c.c_customer_sk = s.c_customer_sk
+    LEFT JOIN customer_income ci ON ci.cd_demo_sk = c.c_current_cdemo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, ci.hd_buy_potential, ci.income_band
+)
+SELECT f.c_customer_id,
+       f.c_first_name,
+       f.c_last_name,
+       f.hd_buy_potential,
+       f.income_band,
+       f.aggregate_profit,
+       ROW_NUMBER() OVER (PARTITION BY f.income_band ORDER BY f.aggregate_profit DESC) AS profit_rank
+FROM final_results f
+WHERE f.aggregate_profit > (
+    SELECT AVG(aggregate_profit)
+    FROM final_results
+)
+ORDER BY f.income_band, profit_rank;

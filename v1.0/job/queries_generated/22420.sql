@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS movie_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS rn,
+        COALESCE(mi.info, 'No Info') AS info,
+        CASE 
+            WHEN at.production_year IS NULL THEN 'Year Unknown'
+            WHEN at.production_year < 1900 THEN 'Classic Era'
+            ELSE 'Modern Era'
+        END AS era
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_info mi ON at.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget' LIMIT 1)
+),
+FilteredActors AS (
+    SELECT 
+        ak.name,
+        ak.person_id,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        MAX(CASE WHEN ct.kind = 'Lead' THEN ci.movie_id END) AS lead_movie_id
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY 
+        ak.id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    fa.name AS actor_name,
+    fa.total_movies,
+    rm.movie_count,
+    rm.era,
+    CASE 
+        WHEN fa.lead_movie_id IS NOT NULL THEN 'Has Lead Role'
+        ELSE 'No Lead Role'
+    END AS lead_role_status
+FROM 
+    RankedMovies rm
+JOIN 
+    FilteredActors fa ON rm.movie_count > 10 AND rm.rn <= 3
+WHERE 
+    rm.production_year >= (SELECT MIN(production_year) FROM aka_title WHERE production_year IS NOT NULL)
+    AND rm.info IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, 
+    fa.total_movies DESC,
+    rm.title;

@@ -1,0 +1,82 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount,
+        SUM(CASE WHEN v.VoteTypeId = 5 THEN 1 ELSE 0 END) AS FavoriteCount
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        UpVotesCount,
+        DownVotesCount,
+        FavoriteCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserActivity
+    WHERE 
+        Reputation > 1000
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS TagUsageCount
+    FROM 
+        Tags t
+    JOIN Posts p ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')::INTEGER[])
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 50
+    ORDER BY TagUsageCount DESC
+    LIMIT 5
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.Comment,
+        pt.Name AS PostHistoryType,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    t.TagName AS PopularTag,
+    COUNT(p.Id) AS RecentPostCount,
+    AVG(COALESCE(ph.HistoryRank, 0)) AS AvgRecentHistoryRank
+FROM 
+    TopUsers u
+JOIN 
+    PopularTags t ON t.TagName IN (
+        SELECT UNNEST(STRING_TO_ARRAY(SUBSTRING(u.Tags FROM 2 FOR LENGTH(u.Tags) - 2), '><'))
+    )
+LEFT JOIN 
+    Posts p ON p.OwnerUserId = u.UserId AND p.Tags LIKE '%' || t.TagName || '%'
+LEFT JOIN 
+    RecentPostHistory ph ON p.Id = ph.PostId
+GROUP BY 
+    u.DisplayName, u.Reputation, t.TagName
+HAVING 
+    COUNT(p.Id) > 10
+ORDER BY 
+    u.Reputation DESC, COUNT(p.Id) DESC;

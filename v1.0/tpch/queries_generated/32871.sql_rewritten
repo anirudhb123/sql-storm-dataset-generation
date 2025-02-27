@@ -1,0 +1,43 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority, 
+           1 AS level, CAST(o.o_comment AS VARCHAR(255)) AS order_comment
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_orderpriority, 
+           oh.level + 1, CONCAT(oh.order_comment, ' -> ', o.o_comment)
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = (
+        SELECT c.c_custkey FROM customer c
+        WHERE c.c_name LIKE 'C%' LIMIT 1
+    )
+    WHERE o.o_orderdate > '1997-01-01' AND oh.level < 5
+),
+SupplierRegions AS (
+    SELECT s.s_suppkey, n.n_name AS nation_name, r.r_name AS region_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_availqty > 0
+)
+SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, oh.o_orderpriority, 
+       sr.region_name, pd.p_name, pd.p_retailprice, pd.ps_availqty,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_price_after_discount
+FROM OrderHierarchy oh
+LEFT JOIN lineitem l ON l.l_orderkey = oh.o_orderkey
+LEFT JOIN SupplierRegions sr ON sr.s_suppkey = l.l_suppkey
+JOIN PartDetails pd ON pd.p_partkey = l.l_partkey
+WHERE oh.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, 
+         oh.o_orderpriority, sr.region_name, pd.p_name, pd.p_retailprice, pd.ps_availqty
+HAVING SUM(l.l_quantity) > 100 
+ORDER BY oh.o_orderdate DESC, total_price_after_discount DESC
+LIMIT 50;

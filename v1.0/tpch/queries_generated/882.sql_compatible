@@ -1,0 +1,76 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_quantity,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_nationkey,
+        STRING_AGG(s.s_name, ', ') AS supplier_names,
+        MAX(s.total_quantity) AS max_quantity
+    FROM 
+        SupplierStats s
+    WHERE 
+        s.rank <= 3
+    GROUP BY 
+        s.s_nationkey
+),
+OrderAnalysis AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers,
+        n.n_name
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, n.n_name
+),
+FinalBenchmark AS (
+    SELECT 
+        oa.o_orderkey,
+        oa.total_sales,
+        oa.unique_customers,
+        ts.supplier_names,
+        ts.max_quantity,
+        (oa.total_sales / NULLIF(oa.unique_customers, 0)) AS avg_sale_per_customer
+    FROM 
+        OrderAnalysis oa
+    LEFT JOIN 
+        TopSuppliers ts ON oa.n_name = ts.s_nationkey
+)
+SELECT 
+    f.o_orderkey,
+    f.total_sales,
+    f.unique_customers,
+    f.supplier_names,
+    f.max_quantity,
+    COALESCE(f.avg_sale_per_customer, 0) AS avg_sale_per_customer,
+    CASE 
+        WHEN f.total_sales > 1000 THEN 'High Volume'
+        WHEN f.total_sales BETWEEN 500 AND 1000 THEN 'Medium Volume'
+        ELSE 'Low Volume'
+    END AS volume_category
+FROM 
+    FinalBenchmark f
+WHERE 
+    f.total_sales IS NOT NULL 
+ORDER BY 
+    f.total_sales DESC;

@@ -1,0 +1,79 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+RankedSuppliers AS (
+    SELECT 
+        ts.s_suppkey,
+        ts.s_name,
+        ts.total_supplycost,
+        RANK() OVER (ORDER BY ts.total_supplycost DESC) AS supply_rank
+    FROM 
+        TopSuppliers ts
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c_custbal) FROM customer)
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_line_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_suppkey
+),
+CombinedMetrics AS (
+    SELECT 
+        c.c_name,
+        co.order_count,
+        SUM(sli.net_line_revenue) AS total_revenue,
+        COALESCE(MAX(ts.total_supplycost), 0) AS max_supplier_cost
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    LEFT JOIN 
+        SupplierLineItems sli ON co.order_count > 0
+    LEFT JOIN 
+        RankedSuppliers ts ON sli.l_suppkey = ts.s_suppkey
+    GROUP BY 
+        c.c_name, co.order_count
+)
+SELECT 
+    cm.c_name,
+    cm.order_count,
+    cm.total_revenue,
+    cm.max_supplier_cost,
+    CASE 
+        WHEN cm.total_revenue > 10000 THEN 'High Revenue'
+        WHEN cm.total_revenue BETWEEN 5000 AND 10000 THEN 'Medium Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category
+FROM 
+    CombinedMetrics cm
+WHERE 
+    cm.max_supplier_cost IS NOT NULL
+ORDER BY 
+    cm.total_revenue DESC, cm.order_count ASC
+LIMIT 10;

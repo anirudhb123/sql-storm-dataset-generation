@@ -1,0 +1,62 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViewCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate AS PostCreationDate,
+        P.Score AS PostScore,
+        P.ViewCount AS PostViewCount,
+        P.AnswerCount,
+        P.CommentCount AS PostCommentCount,
+        P.Tags,
+        U.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    US.UserId,
+    US.DisplayName,
+    US.Reputation,
+    US.CreationDate,
+    US.LastAccessDate,
+    US.PostCount,
+    US.CommentCount,
+    US.TotalViewCount,
+    US.TotalScore,
+    PD.PostId,
+    PD.Title,
+    PD.PostCreationDate,
+    PD.PostScore,
+    PD.PostViewCount,
+    PD.AnswerCount,
+    PD.PostCommentCount,
+    PD.Tags,
+    PD.OwnerDisplayName
+FROM 
+    UserStats US
+LEFT JOIN 
+    PostDetails PD ON US.UserId = PD.OwnerDisplayName
+ORDER BY 
+    US.Reputation DESC, 
+    PD.PostCreationDate DESC;

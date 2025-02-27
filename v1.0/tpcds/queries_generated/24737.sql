@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY ws.ws_sales_price DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+AggregateSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(CASE WHEN r.r_reason_sk IS NOT NULL THEN ws.ws_net_profit ELSE 0 END) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    LEFT JOIN 
+        web_returns wr ON ws.ws_order_number = wr.wr_order_number AND ws.ws_item_sk = wr.wr_item_sk
+    LEFT JOIN 
+        reason r ON wr.wr_reason_sk = r.r_reason_sk
+    WHERE 
+        ws.ws_sales_price BETWEEN 20 AND 200
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    a.c_customer_id,
+    a.total_profit,
+    a.total_orders,
+    COALESCE(b.ws_order_number, 'No Orders') AS max_order_number,
+    CASE 
+        WHEN a.total_orders = 0 THEN 'No Sales'
+        WHEN a.total_profit > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    AggregateSales a
+LEFT JOIN 
+    RankedSales b ON a.c_customer_id = b.c_customer_id AND b.rnk = 1
+WHERE 
+    a.total_profit IS NOT NULL
+ORDER BY 
+    a.total_profit DESC, a.c_customer_id
+LIMIT 10;

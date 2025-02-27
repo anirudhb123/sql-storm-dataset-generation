@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM movie_link ml
+    JOIN aka_title at ON ml.linked_movie_id = at.id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+    COALESCE(SUM(CASE WHEN cast.role_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS roles_count,
+    AVG(mv.production_year) OVER (PARTITION BY ak.id) AS avg_year_per_actor,
+    ROW_NUMBER() OVER (PARTITION BY ak.id ORDER BY at.production_year DESC) AS movie_rank,
+    NULLIF(COUNT(DISTINCT cast.movie_id), 0) AS total_movies,
+    rank() OVER (ORDER BY at.production_year DESC) AS production_rank
+FROM aka_name ak
+JOIN cast_info cast ON ak.person_id = cast.person_id
+JOIN aka_title at ON cast.movie_id = at.id
+LEFT JOIN movie_keyword mk ON mk.movie_id = at.id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_hierarchy mh ON mh.movie_id = at.id
+WHERE at.production_year IS NOT NULL
+GROUP BY ak.id, ak.name, at.title, at.production_year
+HAVING COUNT(DISTINCT cast.movie_id) > 5
+ORDER BY movie_rank, ak.name;
+
+This SQL query performs a comprehensive analysis of actors and their participation in movies produced since 2000. It includes:
+
+- A recursive common table expression (CTE) `movie_hierarchy` to establish a relationship of movies linked to each other, drawing from the `movie_link` table.
+- An aggregation of keywords related to each movie using `ARRAY_AGG` and joins with the `keyword` and `movie_keyword` tables.
+- Calculated fields, such as a count of distinct roles and the average production year using window functions.
+- Conditional logic to handle potential NULLs and filtering results based on certain criteria.
+- A HAVING clause to restrict actors to those who have appeared in more than five movies.
+- Results are ordered by the rank of their movies and the actor's name for better readability.

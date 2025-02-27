@@ -1,0 +1,80 @@
+WITH RECURSIVE SupplyCostCTE AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost,
+        1 AS TaxRank
+    FROM 
+        partsupp
+    WHERE 
+        ps_availqty > 0
+    
+    UNION ALL
+    
+    SELECT 
+        ps.partkey, 
+        ps.suppkey, 
+        ps.availqty, 
+        ps.supplycost, 
+        TaxRank + 1
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        SupplyCostCTE scte ON ps.suppkey = scte.ps_suppkey
+    WHERE 
+        ps_supplycost < scte.ps_supplycost
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+OrderTotals AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice) DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+SELECT 
+    cr.region_name,
+    ps.ps_partkey,
+    SUM(supply.ps_supplycost) AS total_supply_cost,
+    SUM(ot.total_price) AS total_order_value,
+    COUNT(DISTINCT cr.c_custkey) AS customer_count,
+    CASE 
+        WHEN COUNT(DISTINCT cr.c_custkey) = 0 THEN 'No Customers'
+        ELSE 'Customers Available'
+    END AS customer_status
+FROM 
+    SupplyCostCTE supply
+LEFT JOIN 
+    partsupp ps ON supply.ps_partkey = ps.ps_partkey
+JOIN 
+    OrderTotals ot ON ps.ps_suppkey = ot.o_custkey
+JOIN 
+    CustomerRegion cr ON ot.o_custkey = cr.c_custkey
+WHERE 
+    ps.ps_availqty > 0 AND
+    ot.price_rank = 1
+GROUP BY 
+    cr.region_name, ps.ps_partkey
+HAVING 
+    total_supply_cost > (SELECT AVG(ps_supplycost) FROM partsupp) 
+ORDER BY 
+    total_supply_cost DESC;

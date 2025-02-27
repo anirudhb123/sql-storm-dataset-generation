@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2024-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+ProductSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        AVG(p.p_retailprice) AS avg_price,
+        COUNT(DISTINCT li.l_orderkey) AS order_count
+    FROM 
+        part p
+    JOIN 
+        lineitem li ON p.p_partkey = li.l_partkey
+    WHERE 
+        li.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.c_name,
+    r.o_totalprice,
+    r.order_rank,
+    ps.part_count,
+    ps.total_supply_cost,
+    ps.s_name,
+    ps.s_suppkey,
+    ps.total_supply_cost * 0.9 AS discounted_supply_cost,
+    prod.total_revenue,
+    prod.avg_price,
+    prod.order_count
+FROM 
+    RankedOrders r
+JOIN 
+    SupplierStats ps ON ps.part_count > 5
+JOIN 
+    ProductSummary prod ON prod.order_count > 10
+ORDER BY 
+    r.o_orderdate DESC, r.order_rank;

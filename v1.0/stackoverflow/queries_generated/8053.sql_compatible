@@ -1,0 +1,65 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, u.DisplayName
+)
+SELECT 
+    ue.DisplayName AS UserName,
+    ue.TotalPosts,
+    ue.TotalComments,
+    ue.TotalBounty,
+    ue.TotalUpvotes,
+    ue.TotalDownvotes,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.CreationDate AS PostCreationDate,
+    ps.ViewCount AS PostViewCount,
+    ps.Score AS PostScore,
+    ps.AnswerCount AS PostAnswerCount,
+    ps.TotalUpvotes AS PostTotalUpvotes,
+    ps.TotalDownvotes AS PostTotalDownvotes
+FROM 
+    UserEngagement ue
+JOIN 
+    PostStatistics ps ON ue.UserId = ps.OwnerDisplayName
+WHERE 
+    ue.TotalPosts > 5
+ORDER BY 
+    ue.TotalPosts DESC, ps.ViewCount DESC
+FETCH FIRST 100 ROWS ONLY;

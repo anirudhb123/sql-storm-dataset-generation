@@ -1,0 +1,60 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast,
+        COUNT(DISTINCT c.person_id) AS total_cast, 
+        COUNT(DISTINCT k.keyword) AS total_keywords,
+        (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = t.id AND mi.info_type_id = 1) AS info_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        aka_name a ON a.person_id = t.id
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword k ON k.movie_id = t.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023 
+        AND (LOWER(t.title) LIKE '%the%' OR t.kind_id IN (1, 2, 3))
+    GROUP BY 
+        a.id, t.title, t.production_year
+),
+AssociativeMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        COUNT(DISTINCT m.linked_movie_id) AS related_movies_count
+    FROM 
+        title t 
+    LEFT JOIN 
+        movie_link m ON m.movie_id = t.id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.production_year > 2010 
+    GROUP BY 
+        t.title, t.production_year
+)
+
+SELECT 
+    R.title,
+    R.production_year,
+    R.total_cast,
+    R.total_keywords,
+    R.rank_by_cast,
+    COALESCE(A.related_movies_count, 0) AS related_movies_count,
+    CASE 
+        WHEN R.info_count > 0 THEN 'Info Available'
+        ELSE 'No Info' 
+    END AS info_status
+FROM 
+    RankedMovies R
+LEFT JOIN 
+    AssociativeMovies A ON R.title = A.title AND R.production_year = A.production_year
+WHERE 
+    R.rank_by_cast <= 5
+    AND (R.total_cast IS NOT NULL OR A.related_movies_count > 0)
+ORDER BY 
+    R.production_year DESC, R.rank_by_cast ASC;

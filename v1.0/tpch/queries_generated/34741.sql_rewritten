@@ -1,0 +1,36 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000  
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.suppkey <> sh.s_suppkey
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available,
+           AVG(l.l_extendedprice) AS avg_price,
+           COUNT(l.l_orderkey) AS order_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+NationSummary AS (
+    SELECT n.n_name, SUM(c.c_acctbal) AS total_acctbal, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY n.n_name
+)
+SELECT ns.n_name, ps.p_name, ps.total_available, ps.avg_price, ns.total_acctbal,
+       ROW_NUMBER() OVER (PARTITION BY ns.n_name ORDER BY ps.total_available DESC) AS rank,
+       CASE WHEN ps.order_count IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status
+FROM PartStats ps
+JOIN NationSummary ns ON ps.total_available > 100 
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = ns.n_nationkey
+WHERE (sh.level IS NULL OR ns.supplier_count > 5) 
+ORDER BY ns.n_name, ps.avg_price DESC;

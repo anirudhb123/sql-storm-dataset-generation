@@ -1,0 +1,47 @@
+WITH total_revenue AS (
+    SELECT 
+        s.n_nationkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY 
+        s.n_nationkey
+), nation_revenue AS (
+    SELECT 
+        n.n_name, 
+        SUM(tr.revenue) AS total_revenue
+    FROM 
+        total_revenue tr
+    JOIN 
+        nation n ON tr.n_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+), region_revenue AS (
+    SELECT 
+        r.r_name, 
+        SUM(nr.total_revenue) AS region_revenue
+    FROM 
+        nation_revenue nr
+    JOIN 
+        nation n ON nr.n_name = n.n_name
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    rr.r_name, 
+    rr.region_revenue
+FROM 
+    region_revenue rr
+ORDER BY 
+    rr.region_revenue DESC
+LIMIT 5;

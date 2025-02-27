@@ -1,0 +1,50 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+ActorMovieCounts AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+TopActors AS (
+    SELECT 
+        a.person_id,
+        ak.name,
+        ac.movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        ActorMovieCounts ac ON ak.person_id = ac.person_id
+    WHERE 
+        ac.movie_count > 5
+)
+SELECT 
+    r.movie_id, 
+    r.title, 
+    r.production_year, 
+    COALESCE(a.name, 'Unknown') AS actor_name, 
+    r.title_rank
+FROM 
+    RankedMovies r
+LEFT JOIN 
+    cast_info ci ON r.movie_id = ci.movie_id
+LEFT JOIN 
+    TopActors a ON ci.person_id = a.person_id
+WHERE 
+    r.production_year BETWEEN 2000 AND 2020
+    AND (a.movie_count IS NOT NULL OR r.title_rank <= 10)
+ORDER BY 
+    r.production_year DESC, 
+    r.title_rank;

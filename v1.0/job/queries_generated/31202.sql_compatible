@@ -1,0 +1,73 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        c.movie_id,
+        1 AS level
+    FROM 
+        cast_info c
+    WHERE 
+        c.role_id IS NOT NULL  
+
+    UNION ALL
+
+    SELECT 
+        c2.person_id,
+        c2.movie_id,
+        ah.level + 1
+    FROM 
+        cast_info c2
+    INNER JOIN 
+        ActorHierarchy ah ON c2.movie_id = ah.movie_id 
+    WHERE 
+        c2.person_id <> ah.person_id  
+),
+MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        cnt.person_id,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY cnt.level DESC) AS actor_rank
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        ActorHierarchy cnt ON cnt.movie_id = t.id
+),
+VerticalActors AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.keyword,
+        COUNT(*) AS actor_count
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.actor_rank <= 5  
+    GROUP BY 
+        md.title, 
+        md.production_year, 
+        md.keyword
+)
+
+SELECT 
+    mv.title,
+    mv.production_year,
+    COALESCE(v.actor_count, 0) AS actor_count,
+    STRING_AGG(DISTINCT v.keyword, ', ') AS keywords
+FROM 
+    title mv
+LEFT JOIN 
+    VerticalActors v ON mv.title = v.title AND mv.production_year = v.production_year
+WHERE 
+    mv.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mv.title, 
+    mv.production_year
+ORDER BY 
+    mv.production_year DESC, 
+    mv.title;

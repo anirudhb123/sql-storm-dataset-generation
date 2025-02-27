@@ -1,0 +1,81 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+), 
+PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        P.OwnerUserId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(year, -1, GETDATE())
+    GROUP BY 
+        P.Id, P.PostTypeId, P.OwnerUserId
+),
+PostWithReputation AS (
+    SELECT 
+        PS.PostId,
+        PS.PostTypeId,
+        PS.OwnerUserId,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        PS.TotalViews,
+        U.Reputation AS OwnerReputation,
+        U.ReputationRank
+    FROM 
+        PostSummary PS
+    JOIN 
+        UserReputation U ON PS.OwnerUserId = U.UserId
+),
+HighlyVotedPosts AS (
+    SELECT 
+        *,
+        (UpVotes - DownVotes) AS NetVotes,
+        CASE 
+            WHEN PostTypeId = 1 THEN 'Question'
+            WHEN PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostTypeName
+    FROM 
+        PostWithReputation
+    WHERE 
+        UpVotes > 10 AND CommentCount > 5
+),
+RankedPosts AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY PostTypeId ORDER BY NetVotes DESC) AS RankByNetVotes
+    FROM 
+        HighlyVotedPosts
+)
+
+SELECT 
+    RPP.PostId,
+    RPP.PostTypeName,
+    RPP.NetVotes,
+    RPP.CommentCount,
+    RPP.TotalViews,
+    RPP.OwnerUserId,
+    RPP.OwnerReputation,
+    RPP.ReputationRank
+FROM 
+    RankedPosts RPP
+WHERE 
+    RPP.RankByNetVotes <= 5
+ORDER BY 
+    RPP.PostTypeId, RPP.NetVotes DESC;

@@ -1,0 +1,56 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+NationAggregates AS (
+    SELECT 
+        n.n_name, 
+        COUNT(DISTINCT c.c_custkey) AS customer_count,
+        SUM(os.total_price) AS total_order_value
+    FROM 
+        nation n
+    JOIN 
+        customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN 
+        OrderSummary os ON os.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE c.c_custkey = o.o_custkey)
+    GROUP BY 
+        n.n_name
+)
+
+SELECT 
+    n.n_name,
+    n.customer_count,
+    n.total_order_value,
+    rs.total_supply_cost
+FROM 
+    NationAggregates n
+JOIN 
+    RankedSuppliers rs ON n.n_name = (SELECT r.r_name FROM region r WHERE r.r_regionkey = (SELECT n2.n_regionkey FROM nation n2 WHERE n2.n_name = n.n_name))
+WHERE 
+    rs.rank <= 5
+ORDER BY 
+    n.n_name, rs.total_supply_cost DESC;

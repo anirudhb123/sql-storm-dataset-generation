@@ -1,0 +1,74 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            WHEN c.c_acctbal > 10000 THEN 'High'
+            ELSE 'Low'
+        END AS account_status
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+), 
+OrdersWithSupplier AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+), 
+OrderAnalysis AS (
+    SELECT 
+        ow.o_orderkey,
+        ow.o_totalprice,
+        RANK() OVER (ORDER BY ow.total_revenue DESC) AS revenue_rank,
+        CASE 
+            WHEN ow.total_revenue > 1000 THEN 'Above Expected'
+            ELSE 'Below Expected'
+        END AS revenue_category
+    FROM 
+        OrdersWithSupplier ow
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_sales,
+    AVG(o.o_totalprice) AS avg_order_value,
+    MAX(o.o_orderkey) AS latest_order,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', COALESCE(CAST(s.s_acctbal AS TEXT), 'N/A')), '; ') AS supplier_details
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    HighValueCustomers c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    OrdersWithSupplier o ON c.c_custkey = o.o_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON s.rn = 1 AND s.s_nationkey = n.n_nationkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 
+    AND COALESCE(SUM(o.o_totalprice), 0) > 5000
+ORDER BY 
+    total_sales DESC NULLS LAST;

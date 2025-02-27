@@ -1,0 +1,52 @@
+-- Performance benchmarking query to analyze the relationships and counts of posts, users, and votes
+WITH UserPostCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score
+)
+SELECT 
+    UPC.UserId,
+    UPC.DisplayName,
+    UPC.PostCount,
+    UPC.VoteCount,
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.ViewCount,
+    PS.Score,
+    PS.CommentCount,
+    PS.VoteCount
+FROM 
+    UserPostCounts UPC
+JOIN 
+    PostStatistics PS ON UPC.UserId = PS.PostId  -- Assuming you may want statistics related to posts by users
+ORDER BY 
+    UPC.PostCount DESC, UPC.VoteCount DESC;

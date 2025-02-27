@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        cd.cd_gender,
+        cd.cd_age_group,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M' AND 
+        cd.cd_credit_rating IN ('A', 'B') AND 
+        ws.ws_sold_date_sk BETWEEN 1500 AND 1505
+),
+TopSellingItems AS (
+    SELECT 
+        rs.ws_item_sk, 
+        SUM(rs.ws_sales_price) AS total_sales
+    FROM 
+        RankedSales rs
+    WHERE 
+        rs.rank <= 3
+    GROUP BY 
+        rs.ws_item_sk
+)
+SELECT 
+    i.i_item_id, 
+    i.i_item_desc, 
+    tsi.total_sales, 
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    AVG(ws.ws_sales_price) AS avg_sales_price
+FROM 
+    TopSellingItems tsi
+JOIN 
+    item i ON tsi.ws_item_sk = i.i_item_sk
+JOIN 
+    web_sales ws ON tsi.ws_item_sk = ws.ws_item_sk
+GROUP BY 
+    i.i_item_id, 
+    i.i_item_desc, 
+    tsi.total_sales
+ORDER BY 
+    tsi.total_sales DESC
+LIMIT 10;

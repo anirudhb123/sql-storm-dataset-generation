@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+        AND p.CreationDate >= NOW() - INTERVAL '1 year'
+), RecentActivity AS (
+    SELECT 
+        u.DisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (6, 10) THEN 1 ELSE 0 END) AS CloseVotes
+    FROM 
+        Users u
+        LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+        LEFT JOIN Comments c ON p.Id = c.PostId
+        LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+        AND u.CreationDate >= NOW() - INTERVAL '2 year'
+    GROUP BY 
+        u.DisplayName
+), PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(ph.Comment, '; ') AS HistoryComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+        AND ph.PostHistoryTypeId IN (10, 11, 12, 13) -- Focus on closed, reopened, deleted, and undeleted posts
+    GROUP BY 
+        ph.PostId,
+        ph.PostHistoryTypeId
+)
+
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ra.DisplayName AS TopContributor,
+    ra.CommentCount,
+    ra.UpVotes,
+    ra.DownVotes,
+    pha.ChangeCount AS PostChangeFrequency,
+    pha.HistoryComments
+FROM 
+    RankedPosts rp
+    LEFT JOIN RecentActivity ra ON rp.OwnerUserId = ra.DisplayName
+    LEFT JOIN PostHistoryAnalysis pha ON rp.Id = pha.PostId
+WHERE 
+    rp.PostRank = 1 -- Get only the highest scores per user
+    AND (pha.ChangeCount > 0 OR pha.HistoryComments IS NOT NULL)
+ORDER BY 
+    rp.Score DESC,
+    rp.ViewCount DESC;

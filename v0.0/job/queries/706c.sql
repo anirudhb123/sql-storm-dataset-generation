@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS release_date, min(miidx.info) AS rating, min(t.title) AS german_movie
+FROM company_name AS cn, company_type AS ct, info_type AS it, info_type AS it2, kind_type AS kt, movie_companies AS mc, movie_info AS mi, movie_info_idx AS miidx, title AS t
+WHERE mi.movie_id = t.id AND it2.id = mi.info_type_id AND kt.id = t.kind_id AND mc.movie_id = t.id AND cn.id = mc.company_id AND ct.id = mc.company_type_id AND miidx.movie_id = t.id AND it.id = miidx.info_type_id AND mi.movie_id = miidx.movie_id AND mi.movie_id = mc.movie_id AND miidx.movie_id = mc.movie_id
+AND cn.md5sum IN ('1858c63125409d027f1b95d9bf796c15', '2d948918b428dd12415d07f976b50a67', '3445046044555f523615764595931db7', '80b9b1f8159171ff023251b31f912867', 'e2485ef524e935b391f046e188a0649e', 'fc07c2704add7a0ed481389fcb5ec838') AND mc.company_type_id IN (1, 2) AND mi.note > 'Ethan Sacchi' AND t.md5sum < '8b91673a3e479a0e2d6d5d7f01f802f2';

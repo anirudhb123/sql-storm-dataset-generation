@@ -1,0 +1,33 @@
+
+WITH CustomerSales AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE c.c_birth_year > 1980 
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+), Demographics AS (
+    SELECT cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, 
+           cd.cd_income_band_sk, cd.cd_purchase_estimate
+    FROM customer_demographics cd
+), CombinedData AS (
+    SELECT cs.c_customer_sk, cs.c_first_name, cs.c_last_name, cs.total_sales, cs.order_count,
+           d.cd_gender, d.cd_marital_status, d.cd_income_band_sk
+    FROM CustomerSales cs
+    JOIN Demographics d ON cs.c_customer_sk = d.cd_demo_sk
+), IncomeAnalysis AS (
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound,
+           COUNT(cd.c_customer_sk) AS customer_count,
+           SUM(cd.total_sales) AS total_sales
+    FROM CombinedData cd
+    JOIN income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+)
+SELECT ia.ib_income_band_sk, ia.ib_lower_bound, ia.ib_upper_bound,
+       ia.customer_count, ia.total_sales,
+       RANK() OVER (ORDER BY ia.total_sales DESC) AS sales_rank
+FROM IncomeAnalysis ia
+WHERE ia.customer_count > 10
+ORDER BY sales_rank
+LIMIT 10;

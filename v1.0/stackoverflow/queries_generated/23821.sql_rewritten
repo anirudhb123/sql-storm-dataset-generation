@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.CreationDate, p.LastActivityDate
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.Comment,
+        ph.CreationDate AS CloseDate,
+        ph.UserDisplayName AS Closer
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.PostId,
+    p.Title,
+    p.CreationDate AS PostCreatedDate,
+    p.LastActivityDate AS LastActivityDate,
+    p.CommentCount,
+    COALESCE(b.GoldBadges, 0) AS GoldBadges,
+    COALESCE(b.SilverBadges, 0) AS SilverBadges,
+    COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN cp.PostId IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN p.RankPerUser = 1 THEN 'Most Recent'
+        ELSE NULL
+    END AS SpecialRank
+FROM 
+    Users u
+JOIN 
+    RankedPosts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    UserBadges b ON u.Id = b.UserId
+LEFT JOIN 
+    ClosedPosts cp ON p.PostId = cp.PostId
+WHERE 
+    (b.GoldBadges + b.SilverBadges + b.BronzeBadges) > 0 
+ORDER BY 
+    u.Reputation DESC,
+    p.LastActivityDate DESC,
+    p.CommentCount DESC
+FETCH FIRST 100 ROWS ONLY
+;

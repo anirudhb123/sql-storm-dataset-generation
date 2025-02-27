@@ -1,0 +1,105 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(m.linked_movie_id, -1) AS linked_id,
+        1 AS chain_level
+    FROM
+        movie_link ml
+    JOIN
+        title m ON ml.movie_id = m.id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(ml.linked_movie_id, -1) AS linked_id,
+        mc.chain_level + 1
+    FROM 
+        movie_chain mc
+    JOIN
+        movie_link ml ON mc.linked_id = ml.movie_id
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+    WHERE
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+),
+actor_performance AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(t.production_year) AS avg_year,
+        MAX(t.production_year) AS latest_year
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN
+        title t ON ci.movie_id = t.id
+    WHERE
+        ak.name IS NOT NULL
+        AND 
+        t.production_year IS NOT NULL
+    GROUP BY
+        ak.name
+),
+top_actors AS (
+    SELECT 
+        actor_name,
+        movie_count,
+        avg_year,
+        latest_year,
+        ROW_NUMBER() OVER (ORDER BY movie_count DESC) AS rn
+    FROM 
+        actor_performance
+    WHERE 
+        movie_count > 5
+),
+movie_info_avg AS (
+    SELECT
+        mc.movie_id,
+        AVG(CASE WHEN t.kind_id IS NULL THEN 0 ELSE 1 END) AS average_info
+    FROM
+        complete_cast cc
+    LEFT JOIN
+        movie_companies mc ON cc.movie_id = mc.movie_id
+    LEFT JOIN
+        title t ON mc.movie_id = t.id
+    GROUP BY
+        mc.movie_id
+),
+final_summary AS (
+    SELECT 
+        t.title,
+        ap.actor_name,
+        ap.movie_count,
+        ma.average_info,
+        CASE 
+            WHEN ma.average_info IS NULL THEN 'Information Not Available' 
+            ELSE CAST(ma.average_info AS VARCHAR) 
+        END AS info_availability,
+        ROW_NUMBER() OVER (PARTITION BY ap.actor_name ORDER BY ma.average_info DESC) AS row_num
+    FROM 
+        top_actors ap
+    JOIN
+        title t ON t.id IN (SELECT DISTINCT movie_id FROM cast_info ci WHERE ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Actor'))
+    LEFT JOIN
+        movie_info_avg ma ON ma.movie_id IN (SELECT DISTINCT movie_id FROM cast_info ci WHERE ci.person_id = (SELECT id FROM aka_name WHERE name = ap.actor_name))
+)
+SELECT 
+    fs.actor_name,
+    fs.title,
+    fs.movie_count,
+    fs.info_availability
+FROM 
+    final_summary fs
+WHERE 
+    fs.info_availability IS NOT NULL
+    AND fs.row_num <= 3
+ORDER BY 
+    fs.movie_count DESC,
+    fs.title ASC;

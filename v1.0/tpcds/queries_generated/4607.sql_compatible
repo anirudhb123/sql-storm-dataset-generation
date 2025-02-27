@@ -1,0 +1,56 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_credit_rating
+),
+top_customers AS (
+    SELECT 
+        c.*,
+        ROW_NUMBER() OVER (ORDER BY total_spent DESC) AS rnk
+    FROM 
+        customer_summary c
+    WHERE 
+        total_spent > (SELECT AVG(total_spent) FROM customer_summary)
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    CASE 
+        WHEN tc.cd_gender = 'M' THEN 'Male'
+        WHEN tc.cd_gender = 'F' THEN 'Female'
+        ELSE 'Other'
+    END AS gender,
+    tc.total_quantity,
+    tc.total_spent,
+    tc.order_count,
+    CASE 
+        WHEN tc.total_spent IS NULL THEN 'No purchases'
+        ELSE CONCAT('Total spent: ', CAST(tc.total_spent AS VARCHAR))
+    END AS spending_info,
+    (SELECT COUNT(DISTINCT wr.wr_reason_sk) 
+     FROM web_returns wr 
+     WHERE wr.wr_returning_customer_sk = tc.c_customer_id) AS returns_count
+FROM 
+    top_customers tc
+WHERE 
+    rnk <= 10
+ORDER BY 
+    tc.total_spent DESC;

@@ -1,0 +1,82 @@
+WITH UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN v.VoteTypeId IN (1, 7) THEN 1 ELSE 0 END) AS AcceptedVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id 
+),
+
+PostActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(ph.TotalHistoryChanges, 0) AS TotalHistoryChanges,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(pv.ViewCount, 0) AS ViewCount,
+        COALESCE(ans.AnswerCount, 0) AS AnswerCount,
+        COALESCE(upVotes.UpVotes, 0) AS UpVotes,
+        COALESCE(downVotes.DownVotes, 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS TotalHistoryChanges
+        FROM PostHistory
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(Id) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, SUM(ViewCount) AS ViewCount 
+        FROM Posts 
+        GROUP BY PostId
+    ) pv ON p.Id = pv.PostId
+    LEFT JOIN (
+        SELECT ParentId AS PostId, COUNT(*) AS AnswerCount 
+        FROM Posts 
+        WHERE PostTypeId = 2 
+        GROUP BY ParentId
+    ) ans ON p.Id = ans.PostId
+    LEFT JOIN UserVoteStats upVotes ON p.OwnerUserId = upVotes.UserId
+    LEFT JOIN UserVoteStats downVotes ON p.OwnerUserId = downVotes.UserId
+),
+
+FinalStats AS (
+    SELECT 
+        pa.PostId,
+        pa.Title,
+        pa.CreationDate,
+        pa.TotalHistoryChanges,
+        pa.CommentCount,
+        pa.ViewCount,
+        pa.AnswerCount,
+        us.DisplayName AS OwnerDisplayName,
+        us.Reputation,
+        pa.UpVotes,
+        pa.DownVotes
+    FROM 
+        PostActivity pa
+    JOIN Users us ON pa.PostId = us.AccountId
+    WHERE 
+        pa.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+)
+
+SELECT 
+    fs.*, 
+    ROW_NUMBER() OVER (ORDER BY fs.ViewCount DESC) AS Rank
+FROM 
+    FinalStats fs
+ORDER BY 
+    fs.UpVotes DESC, fs.CommentCount DESC
+LIMIT 100;

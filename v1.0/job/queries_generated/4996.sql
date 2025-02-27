@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS role_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PopularActors AS (
+    SELECT 
+        ak.name, 
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.name
+    HAVING 
+        COUNT(ci.movie_id) > 10
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords 
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title, 
+    rm.production_year, 
+    pa.name AS popular_actor, 
+    mk.keywords,
+    CASE 
+        WHEN rm.role_rank <= 3 THEN 'Top Movie'
+        WHEN rm.role_rank <= 10 THEN 'Popular Movie'
+        ELSE 'Regular Movie'
+    END AS movie_category
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    PopularActors pa ON rm.movie_id = pa.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+WHERE 
+    rm.production_year >= 2000 
+    AND rm.title NOT LIKE '%remake%' 
+    AND (rm.production_year - (SELECT MAX(info_type_id) FROM movie_info WHERE movie_id = rm.movie_id AND info_type_id IS NOT NULL)) > 5
+ORDER BY 
+    rm.production_year DESC, rm.role_rank;

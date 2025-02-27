@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC, P.CreationDate ASC) AS PostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), 
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBountySpent,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT PH.Id) AS PostHistoryCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        PostHistory PH ON U.Id = PH.UserId
+    GROUP BY 
+        U.Id
+), 
+ClosedQuestionReasons AS (
+    SELECT 
+        PH.PostId,
+        STRING_AGG(CRT.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes CRT ON PH.Comment::int = CRT.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    RS.PostId,
+    RS.Title,
+    RS.CreationDate,
+    RS.Score,
+    RS.ViewCount,
+    U.UserId,
+    U.DisplayName,
+    U.TotalBountySpent,
+    U.BadgeCount,
+    U.CommentCount,
+    CQR.CloseReasonNames,
+    CASE 
+        WHEN U.BadgeCount > 5 THEN 'High Achiever'
+        WHEN U.BadgeCount BETWEEN 3 AND 5 THEN 'Moderate Achiever'
+        ELSE 'Novice'
+    END AS UserRank,
+    CASE 
+        WHEN RS.PostRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostClassification,
+    COALESCE(CQR.CloseReasonNames, 'Not Closed') AS CloseReason
+FROM 
+    RankedPosts RS
+JOIN 
+    Users U ON RS.PostId = U.Id
+LEFT JOIN 
+    ClosedQuestionReasons CQR ON RS.PostId = CQR.PostId
+WHERE 
+    RS.PostRank <= 3
+ORDER BY 
+    RS.ViewCount DESC, 
+    RS.Score DESC;

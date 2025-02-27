@@ -1,0 +1,87 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT ws_item_sk, SUM(ws_sales_price) AS total_sales, COUNT(*) AS num_sales
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_year = 2023
+    )
+    GROUP BY ws_item_sk
+    
+    UNION ALL
+    
+    SELECT cs_item_sk, SUM(cs_sales_price), COUNT(*)
+    FROM catalog_sales
+    WHERE cs_sold_date_sk IN (
+        SELECT d_date_sk
+        FROM date_dim
+        WHERE d_year = 2023
+    )
+    GROUP BY cs_item_sk
+),
+profit_data AS (
+    SELECT i_item_sk, i_product_name, 
+           SUM(total_sales) AS total_sales, 
+           ROUND(SUM(total_sales) - SUM(i_wholesale_cost * num_sales), 2) AS total_profit
+    FROM (
+        SELECT ws.ws_item_sk, i.i_product_name, 
+               ws.ws_ext_sales_price AS total_sales, 
+               i.i_wholesale_cost, 
+               1 AS num_sales
+        FROM web_sales ws 
+        JOIN item i ON ws.ws_item_sk = i.i_item_sk
+        WHERE ws.ws_sold_date_sk IN (
+            SELECT d_date_sk
+            FROM date_dim
+            WHERE d_year = 2023
+        )
+        
+        UNION ALL
+        
+        SELECT cs.cs_item_sk, i.i_product_name, 
+               cs.cs_ext_sales_price AS total_sales, 
+               i.i_wholesale_cost, 
+               1 AS num_sales
+        FROM catalog_sales cs 
+        JOIN item i ON cs.cs_item_sk = i.i_item_sk
+        WHERE cs.cs_sold_date_sk IN (
+            SELECT d_date_sk
+            FROM date_dim
+            WHERE d_year = 2023
+        )
+    ) sales
+    GROUP BY i_item_sk, i_product_name
+),
+customer_data AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, 
+           hd.hd_income_band_sk, 
+           hd.hd_buy_potential 
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    hd.hd_income_band_sk,
+    SUM(pd.total_profit) AS total_profit,
+    ROW_NUMBER() OVER (PARTITION BY cd.hd_income_band_sk ORDER BY SUM(pd.total_profit) DESC) AS income_rank
+FROM customer_data cd
+LEFT JOIN profit_data pd ON pd.i_item_sk IN (
+    SELECT ws_item_sk FROM web_sales WHERE ws_bill_customer_sk = cd.c_customer_sk
+    UNION
+    SELECT cs_item_sk FROM catalog_sales WHERE cs_bill_customer_sk = cd.c_customer_sk
+)
+GROUP BY cd.c_customer_sk,
+         cd.c_first_name,
+         cd.c_last_name,
+         cd.cd_gender,
+         cd.cd_marital_status,
+         hd.hd_income_band_sk
+HAVING SUM(pd.total_profit) > 0
+ORDER BY income_rank;

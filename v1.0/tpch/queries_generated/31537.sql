@@ -1,0 +1,39 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_size, p_retailprice, 1 AS level
+    FROM part
+    WHERE p_size IS NOT NULL AND p_retailprice > 0
+    UNION ALL
+    SELECT p.partkey, p.p_name, p.p_size, p.p_retailprice, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON p.p_size = ph.p_size AND p.p_retailprice < ph.p_retailprice
+),
+supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    p.p_name,
+    p.p_retailprice,
+    ph.level,
+    COALESCE(ss.total_supply_cost, 0) AS supplier_cost,
+    COALESCE(co.total_spent, 0) AS customer_spent,
+    ROW_NUMBER() OVER (PARTITION BY ph.level ORDER BY p.p_retailprice DESC) AS rank
+FROM part_hierarchy ph
+JOIN part p ON ph.p_partkey = p.p_partkey
+LEFT JOIN supplier_summary ss ON ss.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey 
+    ORDER BY ps.ps_supplycost * ps.ps_availqty DESC 
+    LIMIT 1
+)
+LEFT JOIN customer_orders co ON co.order_count > 5 AND co.total_spent > 1000
+ORDER BY ph.level, p.p_name;

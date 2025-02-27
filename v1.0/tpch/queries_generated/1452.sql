@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s_acctbal) 
+            FROM supplier
+        )
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        SUM(ps.ps_availqty) IS NULL OR COUNT(ps.ps_suppkey) > 1
+)
+SELECT 
+    R.s_name,
+    O.o_orderkey,
+    O.total_value,
+    P.p_name,
+    P.total_available
+FROM 
+    RankedSuppliers R
+FULL OUTER JOIN 
+    OrderDetails O ON R.rnk = 1
+LEFT JOIN 
+    FilteredParts P ON P.total_available > 0
+WHERE 
+    R.s_suppkey IS NOT NULL OR O.o_orderkey IS NOT NULL
+ORDER BY 
+    R.s_name, O.o_orderkey;

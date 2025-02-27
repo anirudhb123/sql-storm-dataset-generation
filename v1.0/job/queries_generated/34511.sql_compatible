@@ -1,0 +1,82 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        NULL AS parent_movie_id, 
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title AS movie_title, 
+        mh.movie_id AS parent_movie_id, 
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        MovieHierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+CastWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+
+MoviesWithInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(m.production_year, 0) AS production_year,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        MIN(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info END) AS budget,
+        MAX(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre') THEN mi.info END) AS genre
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.parent_movie_id,
+    cwr.actor_name,
+    cwr.role_name,
+    mw.production_year,
+    mw.keywords,
+    mw.budget,
+    mw.genre,
+    COUNT(DISTINCT cwr.actor_name) OVER (PARTITION BY mh.movie_id) AS total_cast
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastWithRoles cwr ON mh.movie_id = cwr.movie_id
+JOIN 
+    MoviesWithInfo mw ON mh.movie_id = mw.movie_id
+WHERE 
+    mw.budget IS NOT NULL
+ORDER BY 
+    mh.level DESC, 
+    mw.production_year ASC, 
+    total_cast DESC;

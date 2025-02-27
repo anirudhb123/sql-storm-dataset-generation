@@ -1,0 +1,57 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus IN ('O', 'P')
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+Supplier_Avg_Cost AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+Part_Supplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS total_available,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.total_available,
+    ps.supplier_count,
+    sac.total_sales,
+    sac.o_orderdate
+FROM 
+    Part_Supplier ps
+LEFT JOIN 
+    Sales_CTE sac ON ps.p_partkey = sac.o_orderkey
+WHERE 
+    ps.total_available > (SELECT AVG(total_available) FROM Part_Supplier)
+ORDER BY 
+    ps.total_available DESC, sac.total_sales DESC
+LIMIT 10
+OFFSET 5;

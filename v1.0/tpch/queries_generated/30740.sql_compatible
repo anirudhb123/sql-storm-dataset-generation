@@ -1,0 +1,45 @@
+
+WITH RECURSIVE total_sales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+), 
+ranked_sales AS (
+    SELECT 
+        ts.c_custkey,
+        ts.total,
+        RANK() OVER (ORDER BY ts.total DESC) AS sales_rank
+    FROM 
+        total_sales ts
+)
+SELECT 
+    n.n_name,
+    SUM(ps.ps_availqty) AS total_available_qty,
+    AVG(p.p_retailprice) AS avg_retail_price,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+    COALESCE(rk.sales_rank, 'Not Ranked') AS customer_sales_rank
+FROM 
+    nation n
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    ranked_sales rk ON rk.c_custkey = s.s_suppkey
+WHERE 
+    p.p_size > 10
+    AND p.p_retailprice IS NOT NULL
+GROUP BY 
+    n.n_name, rk.sales_rank
+ORDER BY 
+    total_available_qty DESC, avg_retail_price ASC;

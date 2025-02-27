@@ -1,0 +1,62 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS PostCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.AcceptedAnswerId, p.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate 
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+),
+FinalStats AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.UpVotes,
+        us.DownVotes,
+        us.GoldBadges + us.SilverBadges + us.BronzeBadges AS TotalBadges,
+        COUNT(pd.PostId) AS ActivePostCount,
+        SUM(CASE WHEN cp.ClosedDate IS NOT NULL AND (cp.ReopenedDate IS NULL OR cp.ReopenedDate > cp.ClosedDate) THEN 1 ELSE 0 END) AS ClosedPostCount
+    FROM UserStats us
+    LEFT JOIN PostDetails pd ON us.UserId = pd.OwnerUserId
+    LEFT JOIN ClosedPosts cp ON pd.PostId = cp.PostId
+    GROUP BY us.UserId, us.DisplayName, us.UpVotes, us.DownVotes
+)
+SELECT  
+    fs.*,
+    CASE 
+        WHEN fs.ClosedPostCount > 0 THEN 'Active Contributor'
+        ELSE 'Just Browsing'
+    END AS ContributorStatus
+FROM FinalStats fs
+WHERE fs.TotalBadges > 0
+ORDER BY fs.UpVotes DESC, fs.DownVotes ASC, fs.ActivePostCount DESC;

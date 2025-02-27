@@ -1,0 +1,54 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        k.keyword,
+        a.name AS actor_name,
+        c.kind AS character_role,
+        p.gender
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    LEFT JOIN 
+        name p ON a.person_id = p.imdb_id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+),
+actor_count AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT actor_name) AS actor_count
+    FROM 
+        movie_details
+    GROUP BY 
+        movie_id
+)
+
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keyword,
+    md.actor_name,
+    md.character_role,
+    md.gender,
+    ac.actor_count
+FROM 
+    movie_details md
+JOIN 
+    actor_count ac ON md.movie_id = ac.movie_id
+ORDER BY 
+    md.production_year DESC, 
+    ac.actor_count DESC, 
+    md.title;

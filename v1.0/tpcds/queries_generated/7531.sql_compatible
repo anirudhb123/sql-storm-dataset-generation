@@ -1,0 +1,52 @@
+
+WITH aggregated_sales AS (
+    SELECT
+        ws.ws_web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_quantity) AS avg_quantity_per_order
+    FROM
+        web_sales AS ws
+    JOIN
+        date_dim AS dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.ws_web_site_sk
+),
+customer_demographics AS (
+    SELECT
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_state
+    FROM
+        customer_demographics AS cd
+    JOIN
+        customer AS c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN
+        customer_address AS ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+demographic_sales AS (
+    SELECT
+        cd.ca_state,
+        SUM(as.total_sales) AS state_sales,
+        AVG(as.avg_quantity_per_order) AS avg_quantity
+    FROM
+        aggregated_sales AS as
+    JOIN
+        customer_demographics AS cd ON as.ws_web_site_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.ca_state
+)
+SELECT
+    ds.ca_state,
+    ds.state_sales,
+    ds.avg_quantity,
+    RANK() OVER (ORDER BY ds.state_sales DESC) AS sales_rank
+FROM
+    demographic_sales AS ds
+ORDER BY
+    ds.state_sales DESC
+LIMIT 10;

@@ -1,0 +1,90 @@
+
+WITH TagPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        t.TagName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY t.TagName ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON p.Tags LIKE CONCAT('%', t.TagName, '%')
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score > 0 
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        pt.Name AS PostHistoryType,
+        ph.CreationDate AS HistoryDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS RecentRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+),
+HighScoredUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(p.Score) > 100 
+),
+PopularTags AS (
+    SELECT 
+        TagName, 
+        COUNT(PostId) AS PostCount
+    FROM 
+        TagPosts
+    WHERE 
+        Rank <= 5 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+),
+TagHistoryAnalysis AS (
+    SELECT 
+        tg.TagName,
+        COUNT(DISTINCT p.PostId) AS TotalPosts,
+        COUNT(DISTINCT ph.UserId) AS HistoryCount,
+        AVG(EXTRACT(EPOCH FROM (rh.HistoryDate - tg.CreationDate)) / 86400) AS AvgDaysFromCreationToHistory
+    FROM 
+        Tags tg
+    LEFT JOIN 
+        TagPosts p ON tg.TagName = p.TagName
+    LEFT JOIN 
+        RecentPostHistory ph ON p.PostId = ph.PostId
+    GROUP BY 
+        tg.TagName, tg.CreationDate
+)
+SELECT 
+    th.TagName,
+    th.TotalPosts,
+    th.HistoryCount,
+    th.AvgDaysFromCreationToHistory,
+    u.DisplayName AS HighScoredUser,
+    u.TotalScore
+FROM 
+    TagHistoryAnalysis th
+LEFT JOIN 
+    HighScoredUsers u ON th.TotalPosts > 10 
+WHERE 
+    th.HistoryCount > 5 
+ORDER BY 
+    th.TotalPosts DESC, 
+    u.TotalScore DESC;

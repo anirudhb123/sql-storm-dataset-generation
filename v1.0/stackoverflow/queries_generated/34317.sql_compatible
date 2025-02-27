@@ -1,0 +1,102 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        0 AS Level,
+        p.OwnerUserId
+    FROM
+        Posts p
+    WHERE
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    
+    SELECT
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        r.Level + 1,
+        p.OwnerUserId
+    FROM
+        Posts p
+    INNER JOIN RecursivePostCTE r ON p.ParentId = r.PostId
+),
+UserPostStats AS (
+    
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyPoints
+    FROM
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY
+        u.Id, u.DisplayName
+),
+PopularPosts AS (
+    
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    WHERE
+        p.AcceptedAnswerId IS NOT NULL  
+),
+PostHistorySummary AS (
+    
+    SELECT
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosed,
+        MAX(ph.CreationDate) AS LastEdited
+    FROM
+        PostHistory ph
+    GROUP BY
+        ph.PostId
+)
+SELECT
+    p.PostId,
+    p.Title AS PostTitle,
+    u.DisplayName AS Author,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    phs.EditCount AS TotalEdits,
+    phs.FirstClosed,
+    phs.LastEdited,
+    pp.Score,
+    pp.ViewCount,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t
+     INNER JOIN Posts pt ON t.ExcerptPostId = pt.Id
+     WHERE pt.Id = p.PostId) AS PostTags
+FROM 
+    RecursivePostCTE p
+JOIN 
+    UserPostStats ups ON p.OwnerUserId = ups.UserId
+JOIN 
+    PostHistorySummary phs ON p.PostId = phs.PostId
+JOIN 
+    PopularPosts pp ON p.PostId = pp.PostId
+WHERE
+    p.Level = 0  
+    AND ups.TotalQuestions > 0  
+ORDER BY
+    ups.TotalPosts DESC
+LIMIT 20;

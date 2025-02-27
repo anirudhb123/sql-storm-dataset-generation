@@ -1,0 +1,55 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgesEarned,
+        AVG(u.Reputation) AS AvgReputation
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT
+        unnest(string_to_array(t.Tags, ',')) AS TagName,
+        COUNT(p.Id) AS TagCount
+    FROM Posts p
+    JOIN Tags t ON t.Id IN (SELECT unnest(string_to_array(p.Tags, ','))::text::int)
+    GROUP BY unnest(string_to_array(t.Tags, ',')) 
+    ORDER BY TagCount DESC
+    LIMIT 10
+),
+UserActivity AS (
+    SELECT
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.Questions,
+        us.Answers,
+        us.BadgesEarned,
+        us.AvgReputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvotesReceived,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvotesReceived
+    FROM UserStats us
+    LEFT JOIN Votes v ON us.UserId = v.UserId
+    GROUP BY us.UserId, us.DisplayName, us.PostCount, us.Questions, us.Answers, us.BadgesEarned, us.AvgReputation
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.PostCount,
+    ua.Questions,
+    ua.Answers,
+    ua.BadgesEarned,
+    ua.AvgReputation,
+    ua.UpvotesReceived,
+    ua.DownvotesReceived,
+    pt.TagName,
+    pt.TagCount
+FROM UserActivity ua
+CROSS JOIN PopularTags pt
+ORDER BY ua.AvgReputation DESC, ua.PostCount DESC;

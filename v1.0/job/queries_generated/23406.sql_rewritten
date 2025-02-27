@@ -1,0 +1,82 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COALESCE(m.parent_id, 0) AS parent_id  
+    FROM
+        aka_title m
+    WHERE
+        m.id IN (SELECT movie_id FROM complete_cast WHERE status_id = 1)
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        m.parent_id
+    FROM
+        aka_title m
+    JOIN RecursiveMovieHierarchy r
+        ON m.id = r.parent_id
+)
+
+, ActorMovieInfo AS (
+    SELECT
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.nr_order AS cast_order,
+        RANK() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS role_rank
+    FROM
+        aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    WHERE
+        a.name IS NOT NULL
+)
+
+, KeywordCounts AS (
+    SELECT
+        t.id AS title_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM
+        aka_title t
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY
+        t.id
+)
+
+SELECT
+    COALESCE(actor_movie.actor_name, 'Unknown Actor') AS actor_name,
+    actor_movie.movie_title,
+    actor_movie.production_year,
+    actor_movie.cast_order,
+    k.keyword_count,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    ARRAY_AGG(DISTINCT c.kind) FILTER (WHERE c.kind IS NOT NULL) AS company_kinds,
+    MAX(CASE WHEN keyword.keyword IS NULL THEN 'No Keyword' ELSE keyword.keyword END) AS first_keyword
+FROM
+    ActorMovieInfo actor_movie
+LEFT JOIN
+    KeywordCounts k ON actor_movie.movie_title = (SELECT title FROM aka_title WHERE id = k.title_id)
+LEFT JOIN 
+    movie_companies mc ON actor_movie.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id)
+LEFT JOIN 
+    company_type c ON mc.company_type_id = c.id
+LEFT JOIN 
+    movie_keyword keyword ON actor_movie.movie_title = (SELECT title FROM aka_title WHERE id = keyword.movie_id)
+LEFT JOIN 
+    RecursiveMovieHierarchy rm ON actor_movie.movie_title = rm.movie_title
+WHERE
+    actor_movie.cast_order IS NOT NULL OR actor_movie.cast_order IS DISTINCT FROM NULL
+GROUP BY
+    actor_movie.actor_name, actor_movie.movie_title, actor_movie.production_year, 
+    actor_movie.cast_order, k.keyword_count
+HAVING
+    COUNT(DISTINCT mc.company_id) > 0
+ORDER BY
+    actor_movie.production_year DESC,
+    actor_movie.cast_order ASC
+LIMIT 100;

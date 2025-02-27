@@ -1,0 +1,50 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, 
+           COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 'Unknown Price' 
+               WHEN p.p_retailprice > 1000 THEN 'High Price' 
+               ELSE 'Moderate Price' 
+           END AS price_category
+    FROM part p
+),
+SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT DISTINCT c.c_name, r.r_name, 
+       COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+       SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue,
+       MAX(p.p_size * NULLIF(NULLIF(l.l_quantity, 0), 0)) AS adjusted_quantity,
+       p.price_category,
+       COALESCE(s.rank, 0) AS supplier_rank,
+       CASE 
+           WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'Frequent Customer' 
+           ELSE 'Occasional Customer' 
+       END AS customer_type
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN HighValueParts p ON l.l_partkey = p.p_partkey
+LEFT JOIN RankedSuppliers s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN SupplierPartCounts sp ON p.p_partkey = sp.ps_partkey
+WHERE r.r_name LIKE 'S%' 
+AND (o.o_totalprice IS NULL OR o.o_totalprice > 500)
+GROUP BY c.c_name, r.r_name, p.price_category, s.rank
+HAVING total_revenue > 1000 OR COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC, c.c_name, r.r_name;

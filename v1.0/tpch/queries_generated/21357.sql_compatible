@@ -1,0 +1,83 @@
+
+WITH ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+available_parts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (ps.ps_supplycost * 1.1) AS adjusted_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+customer_preferences AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'Low Balance'
+            WHEN c.c_acctbal BETWEEN 0 AND 1000 THEN 'Medium Balance'
+            ELSE 'High Balance'
+        END AS balance_category
+    FROM 
+        customer c
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(COALESCE(os.total_revenue, 0)) AS total_revenue_collected,
+    SUM(COALESCE(ps.adjusted_cost * ps.ps_availqty, 0)) AS total_available_parts_cost,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS top_suppliers,
+    MAX(r.s_acctbal) AS top_supplier_acctbal
+FROM 
+    nation ns
+LEFT JOIN 
+    customer_preferences cs ON cs.c_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        WHERE c.c_nationkey = ns.n_nationkey AND c.c_acctbal > 0
+    )
+LEFT JOIN 
+    ranked_suppliers r ON r.s_nationkey = ns.n_nationkey AND r.rank <= 3
+LEFT JOIN 
+    available_parts ps ON ps.p_partkey IN (
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_size IS NOT NULL AND p.p_retailprice < 100
+    )
+LEFT JOIN 
+    order_summary os ON os.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'O'
+    )
+GROUP BY 
+    ns.n_name
+HAVING 
+    SUM(COALESCE(os.total_revenue, 0)) > 50000 OR COUNT(DISTINCT cs.c_custkey) > 10
+ORDER BY 
+    total_revenue_collected DESC;

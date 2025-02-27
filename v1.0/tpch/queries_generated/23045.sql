@@ -1,0 +1,39 @@
+WITH RECURSIVE PartHierarchy AS (
+    SELECT p_partkey, p_name, p_brand, p_size, p_retailprice, p_comment, 
+           0 AS depth
+    FROM part
+    WHERE p_size < 20  -- Base case: select parts with size less than 20
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_size, p.p_retailprice, p.p_comment,
+           ph.depth + 1
+    FROM part p
+    JOIN PartHierarchy ph ON ph.p_partkey = p.p_partkey -- Hypothetical join
+    WHERE ph.depth < 5   -- Limit the recursion to 5 levels
+),
+SupplierCost AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ns.n_name
+    FROM supplier s
+    JOIN nation ns ON s.s_nationkey = ns.n_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+
+SELECT 
+    ph.p_name, ph.p_brand, COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    COUNT(DISTINCT fs.s_suppkey) OVER (PARTITION BY ph.p_partkey) AS supplier_count,
+    CONCAT(ph.p_comment, ' | ', fs.n_name) AS extended_comment
+FROM PartHierarchy ph
+LEFT JOIN SupplierCost s ON ph.p_partkey = s.ps_partkey
+LEFT JOIN FilteredSuppliers fs ON fs.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = ph.p_partkey
+)
+WHERE (ph.p_retailprice > 100 OR ph.p_size < 10)  -- Complex predicate
+  AND ph.depth % 2 = 0  -- Include only even depth parts
+ORDER BY ph.p_size DESC, supplier_count DESC
+LIMIT 50 OFFSET 10;  -- Pagination effect

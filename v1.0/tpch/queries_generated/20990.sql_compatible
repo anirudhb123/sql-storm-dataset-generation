@@ -1,0 +1,79 @@
+
+WITH RankedProducts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.p_brand) AS brand_count
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL
+        AND p.p_size BETWEEN 1 AND (SELECT MAX(p_size) FROM part) / 2
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value,
+        o.o_orderstatus,
+        o.o_orderdate,
+        CASE 
+            WHEN o.o_orderstatus = 'F' THEN 'Completed'
+            WHEN o.o_orderstatus = 'P' THEN 'Pending'
+            ELSE 'Unknown' 
+        END AS order_state
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus, o.o_orderdate
+),
+ProductStats AS (
+    SELECT 
+        rp.p_partkey,
+        MIN(fo.o_totalprice) AS min_order_value,
+        MAX(fo.net_value) AS max_net_value,
+        AVG(fo.net_value) AS avg_net_value,
+        COUNT(DISTINCT fo.o_orderkey) AS order_count
+    FROM 
+        RankedProducts rp
+    LEFT JOIN 
+        FilteredOrders fo ON rp.p_partkey = (
+            SELECT ps.ps_partkey 
+            FROM partsupp ps 
+            WHERE ps.supkey = (
+                SELECT s.s_suppkey 
+                FROM supplier s 
+                WHERE s.nationkey IN (
+                    SELECT n.n_nationkey 
+                    FROM nation n 
+                    WHERE n.regionkey = 1)
+                LIMIT 1
+            )
+        )
+    GROUP BY 
+        rp.p_partkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.min_order_value,
+    ps.max_net_value,
+    ps.avg_net_value,
+    ps.order_count,
+    CASE 
+        WHEN ps.order_count > 10 THEN 'High Demand'
+        WHEN ps.order_count BETWEEN 5 AND 10 THEN 'Moderate Demand'
+        ELSE 'Low Demand' 
+    END AS demand_category
+FROM 
+    ProductStats ps
+WHERE 
+    ps.min_order_value IS NOT NULL
+    AND ps.avg_net_value IS NOT NULL
+ORDER BY 
+    ps.order_count DESC, ps.avg_net_value DESC
+LIMIT 50;

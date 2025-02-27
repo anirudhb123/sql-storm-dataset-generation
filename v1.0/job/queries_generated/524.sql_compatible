@@ -1,0 +1,62 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rn
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+), MovieStats AS (
+    SELECT 
+        m.title,
+        COUNT(DISTINCT cc.person_id) AS cast_count,
+        AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - m.production_year) AS avg_age
+    FROM 
+        title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE 'Drama%'
+    GROUP BY 
+        m.id, m.title, m.production_year
+), PopularityRank AS (
+    SELECT 
+        ms.title,
+        ms.cast_count,
+        ms.avg_age,
+        RANK() OVER (ORDER BY ms.cast_count DESC) AS popularity_rank
+    FROM 
+        MovieStats ms
+)
+
+SELECT 
+    p.person_id AS person_id,
+    p.name,
+    mr.title,
+    mr.production_year,
+    pr.popularity_rank,
+    COALESCE(mr.cast_count, 0) AS total_cast,
+    CASE 
+        WHEN pr.popularity_rank < 10 THEN 'Highly Popular'
+        WHEN pr.popularity_rank BETWEEN 10 AND 30 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS popularity_category
+FROM 
+    aka_name p
+LEFT JOIN 
+    cast_info c ON p.person_id = c.person_id
+LEFT JOIN 
+    PopularityRank pr ON c.movie_id = pr.title
+LEFT JOIN 
+    RankedMovies mr ON pr.title = mr.title
+WHERE 
+    pr.popularity_rank IS NOT NULL
+    AND p.name IS NOT NULL
+ORDER BY 
+    pr.popularity_rank, mr.production_year DESC;

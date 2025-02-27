@@ -1,0 +1,93 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts AS p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts AS p
+    INNER JOIN 
+        RecursivePostHierarchy AS ph 
+    ON 
+        p.ParentId = ph.PostId
+),
+PostStatistics AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        ph.Level AS PostLevel
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments AS c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges AS b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        RecursivePostHierarchy AS ph ON p.Id = ph.PostId
+    GROUP BY 
+        p.Id, ph.Level
+),
+UserReputation AS (
+    
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        u.AboutMe,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users AS u
+    WHERE 
+        u.Reputation > 1000
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ps.BadgeCount,
+    ur.DisplayName AS OwnerDisplayName,
+    ur.Reputation AS OwnerReputation,
+    ur.UserRank,
+    CASE 
+        WHEN ps.ViewCount > 1000 THEN 'Popular'
+        WHEN ps.ViewCount > 100 THEN 'Trending'
+        ELSE 'New'
+    END AS PostCategory,
+    (SELECT COUNT(*) FROM Posts WHERE CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')) AS RecentPostsCount
+FROM 
+    PostStatistics AS ps
+LEFT JOIN 
+    Users AS u ON ps.PostLevel = 1 AND u.Id = ps.BadgeCount 
+LEFT JOIN 
+    UserReputation AS ur ON u.Id = ur.UserId
+WHERE 
+    ps.CommentCount > 0
+ORDER BY 
+    ps.Score DESC, ps.Title
+LIMIT 50;

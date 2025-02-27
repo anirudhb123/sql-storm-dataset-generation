@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS RankPerUser,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS HasUpVote,
+        MAX(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS HasDownVote,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.AnswerCount, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.RankPerUser,
+        ur.UserId,
+        ur.Reputation,
+        ur.BadgeCount,
+        CASE 
+            WHEN rp.HasUpVote = 1 AND rp.HasDownVote = 1 THEN 'Mixed Votes'
+            WHEN rp.HasUpVote = 1 THEN 'Upvoted'
+            WHEN rp.HasDownVote = 1 THEN 'Downvoted'
+            ELSE 'No Votes'
+        END AS VoteStatus
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.AnswerCount,
+    pd.RankPerUser,
+    pd.Reputation,
+    pd.BadgeCount,
+    pd.VoteStatus,
+    COALESCE(STRING_AGG(t.TagName, ', '), 'No Tags') AS Tags
+FROM 
+    PostData pd
+LEFT JOIN 
+    (SELECT 
+         p.Id, 
+         TRIM(UNNEST(SPLIT(p.Tags, '>'))) AS TagName
+     FROM 
+         Posts p
+     WHERE 
+         p.Tags IS NOT NULL) t ON pd.PostId = t.Id
+WHERE 
+    pd.RankPerUser = 1 
+GROUP BY
+    pd.PostId, pd.Title, pd.CreationDate, pd.ViewCount, pd.AnswerCount, pd.RankPerUser, pd.UserId, pd.Reputation, pd.BadgeCount, pd.VoteStatus
+ORDER BY 
+    pd.Reputation DESC, pd.ViewCount DESC
+LIMIT 50;

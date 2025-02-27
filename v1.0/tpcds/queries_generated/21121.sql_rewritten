@@ -1,0 +1,64 @@
+WITH SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(ws.ws_order_number) AS order_count,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2001)
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2001)
+    GROUP BY
+        ws.ws_item_sk
+),
+
+CustomerData AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE
+            WHEN cd.cd_dep_count IS NULL THEN 'Unknown'
+            ELSE CAST(cd.cd_dep_count AS VARCHAR)
+        END AS dep_count_info
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_purchase_estimate >= (SELECT AVG(cd_purchase_estimate) FROM customer_demographics)
+)
+
+SELECT
+    ca.ca_city,
+    ca.ca_state,
+    SUM(sd.total_profit) AS total_profit,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+    COUNT(DISTINCT cd.c_customer_sk) AS unique_customers
+FROM
+    customer_address ca
+LEFT JOIN
+    SalesData sd ON sd.ws_item_sk IN (
+        SELECT ws_item_sk
+        FROM web_sales
+        WHERE ws_ship_customer_sk IN (
+            SELECT c.c_customer_sk
+            FROM customer c
+            WHERE c.c_current_addr_sk = ca.ca_address_sk
+        )
+    )
+LEFT JOIN
+    CustomerData cd ON cd.c_customer_sk IN (
+        SELECT ws_bill_customer_sk
+        FROM web_sales ws
+        WHERE ws.ws_item_sk = sd.ws_item_sk
+    )
+WHERE
+    ca.ca_state IS NOT NULL
+GROUP BY
+    ca.ca_city, ca.ca_state
+HAVING
+    COUNT(sd.ws_item_sk) > 5
+ORDER BY
+    total_profit DESC NULLS LAST;

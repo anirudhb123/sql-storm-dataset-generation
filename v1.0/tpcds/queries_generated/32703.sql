@@ -1,0 +1,53 @@
+
+WITH RECURSIVE DateHierarchy AS (
+    SELECT d_date_sk, d_year, d_month_seq, d_week_seq, d_day_name
+    FROM date_dim
+    WHERE d_year = 2023
+    UNION ALL
+    SELECT dh.d_date_sk + 1, dh.d_year, dh.d_month_seq, dh.d_week_seq, dh.d_day_name
+    FROM DateHierarchy dh
+    WHERE dh.d_date_sk + 1 <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+RankedSales AS (
+    SELECT 
+        ws_web_page_sk,
+        SUM(ws_net_profit) AS total_profit,
+        RANK() OVER (PARTITION BY ws_web_page_sk ORDER BY SUM(ws_net_profit) DESC) AS profit_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM DateHierarchy) AND (SELECT MAX(d_date_sk) FROM DateHierarchy)
+    GROUP BY ws_web_page_sk
+),
+CustomerAddress AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ', ', ca_city, ', ', ca_state, ' ', ca_zip) AS full_address
+    FROM customer_address
+),
+FilteredAccounts AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        ca.full_address,
+        cd.marital_status,
+        cd.education_status,
+        cd.dep_count
+    FROM customer c
+    INNER JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN CustomerAddress ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_dep_count > 0 AND cd.cd_marital_status = 'M'
+)
+SELECT 
+    fa.c_customer_sk,
+    fa.c_first_name,
+    fa.c_last_name,
+    fa.full_address,
+    ra.ws_web_page_sk,
+    ra.total_profit,
+    d.d_day_name,
+    COALESCE(ra.total_profit, 0) AS profit_or_zero
+FROM FilteredAccounts fa
+LEFT OUTER JOIN RankedSales ra ON fa.c_customer_sk = ra.ws_web_page_sk
+JOIN DateHierarchy d ON ra.ws_web_page_sk = d.d_week_seq
+WHERE ra.profit_rank = 1 OR ra.total_profit IS NULL
+ORDER BY fa.c_customer_sk, ra.total_profit DESC;

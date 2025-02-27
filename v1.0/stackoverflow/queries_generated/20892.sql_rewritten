@@ -1,0 +1,91 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(B.Id) AS BadgeCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        AVG(COALESCE(P.Score, 0)) AS AvgPostScore,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId OR U.Id = P.LastEditorUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(C.Id) AS TotalComments,
+        MAX(PH.CreationDate) AS LastEditDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5, 6) 
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id
+),
+TopPosts AS (
+    SELECT 
+        UserId,
+        COUNT(*) AS UserPostCount,
+        AVG(AvgPostScore) AS UserAvgScore
+    FROM 
+        UserStatistics
+    JOIN 
+        PostActivity ON UserStatistics.UserId = PostActivity.PostId
+    GROUP BY 
+        UserId
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        UserAvgScore,
+        RANK() OVER (ORDER BY UserAvgScore DESC) AS ScoreRank
+    FROM 
+        TopPosts
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.CreationDate,
+    U.Location,
+    U.AboutMe,
+    Us.Upvotes,
+    Us.Downvotes,
+    Us.BadgeCount,
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate AS PostCreationDate,
+    pa.TotalComments,
+    pa.LastEditDate,
+    R.ScoreRank
+FROM 
+    UserStatistics Us
+JOIN 
+    Users U ON Us.UserId = U.Id
+JOIN 
+    PostActivity pa ON pa.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+LEFT JOIN 
+    RankedUsers R ON R.UserId = U.Id
+WHERE 
+    R.ScoreRank <= 10 
+    AND U.Reputation > 100 
+    AND NOT EXISTS (SELECT 1 FROM Badges B WHERE B.UserId = U.Id AND B.Class = 1) 
+ORDER BY 
+    Us.Upvotes DESC, U.Reputation DESC;

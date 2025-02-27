@@ -1,0 +1,48 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_id ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws.web_site_id
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year) AS gender_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    rs.web_site_id,
+    rs.total_net_profit
+FROM 
+    customer_info ci
+JOIN 
+    ranked_sales rs ON ci.c_customer_sk IN (SELECT 
+                                                DISTINCT ws_bill_customer_sk 
+                                            FROM 
+                                                web_sales 
+                                            WHERE 
+                                                ws_bill_customer_sk IS NOT NULL)
+WHERE 
+    ci.gender_rank <= 10
+ORDER BY 
+    rs.total_net_profit DESC
+LIMIT 20;

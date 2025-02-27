@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank_by_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS total_cast,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL), NULL) AS keywords
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        t.production_year IS NOT NULL
+    GROUP BY
+        t.id, t.title, t.production_year, t.kind_id
+),
+MovieCompanyCounts AS (
+    SELECT
+        mc.movie_id,
+        COUNT(DISTINCT m.company_id) AS distinct_companies
+    FROM
+        movie_companies mc
+    LEFT JOIN
+        company_name m ON mc.company_id = m.id
+    WHERE
+        m.country_code IS NOT NULL
+    GROUP BY
+        mc.movie_id
+),
+CastInfoWithRoles AS (
+    SELECT
+        c.movie_id,
+        STRING_AGG(DISTINCT r.role, ', ') AS roles, 
+        COUNT(DISTINCT c.person_id) AS role_count
+    FROM
+        cast_info c
+    JOIN
+        role_type r ON c.role_id = r.id
+    GROUP BY
+        c.movie_id
+)
+SELECT
+    r.title,
+    r.production_year,
+    r.total_cast,
+    COALESCE(mcc.distinct_companies, 0) AS distinct_companies,
+    COALESCE(cwr.roles, 'No Roles Assigned') AS roles,
+    r.keywords,
+    CASE
+        WHEN r.rank_by_year IS NULL THEN 'Unranked'
+        WHEN r.rank_by_year = 1 THEN 'Top Movie of the Year'
+        ELSE 'Other'
+    END AS banner
+FROM
+    RankedMovies r
+LEFT JOIN
+    MovieCompanyCounts mcc ON r.movie_id = mcc.movie_id
+LEFT JOIN
+    CastInfoWithRoles cwr ON r.movie_id = cwr.movie_id
+WHERE
+    (r.production_year > 2000 AND r.total_cast > 5)
+    OR (r.production_year < 2000 AND COALESCE(mcc.distinct_companies, 0) > 3)
+ORDER BY
+    r.production_year DESC, r.total_cast DESC
+LIMIT 50;

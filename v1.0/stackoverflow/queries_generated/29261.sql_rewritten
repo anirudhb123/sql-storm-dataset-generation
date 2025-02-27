@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopPostPerUser AS (
+    SELECT 
+        PostId, 
+        Title, 
+        Body, 
+        CreationDate, 
+        ViewCount, 
+        OwnerDisplayName,
+        CommentCount,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank = 1
+),
+PostAnalytics AS (
+    SELECT 
+        t.OwnerDisplayName,
+        COUNT(tp.PostId) AS TotalPosts,
+        SUM(tp.ViewCount) AS TotalViews,
+        AVG(tp.CommentCount) AS AverageComments,
+        STRING_AGG(DISTINCT unnest(tp.Tags), ', ') AS AllTags
+    FROM 
+        TopPostPerUser tp
+    GROUP BY 
+        t.OwnerDisplayName
+)
+SELECT 
+    pa.OwnerDisplayName,
+    pa.TotalPosts,
+    pa.TotalViews,
+    pa.AverageComments,
+    pa.AllTags
+FROM 
+    PostAnalytics pa
+ORDER BY 
+    pa.TotalViews DESC, 
+    pa.TotalPosts DESC;

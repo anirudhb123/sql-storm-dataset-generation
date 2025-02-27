@@ -1,0 +1,58 @@
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.ClosedDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPosts
+    FROM Posts p
+    GROUP BY p.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(ps.TotalPosts, 0) AS TotalPosts,
+        COALESCE(bs.TotalBadges, 0) AS TotalBadges,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadges,
+        COALESCE(ps.TotalQuestions, 0) AS TotalQuestions,
+        COALESCE(ps.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(ps.ClosedPosts, 0) AS ClosedPosts
+    FROM Users u
+    LEFT JOIN UserBadges bs ON u.Id = bs.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+),
+RankedUsers AS (
+    SELECT 
+        ua.*,
+        ROW_NUMBER() OVER (PARTITION BY ua.TotalBadges ORDER BY ua.TotalPosts DESC, ua.Id DESC) AS BadgeRank
+    FROM UserActivity ua
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalBadges,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.ClosedPosts
+FROM RankedUsers u
+WHERE u.BadgeRank <= 5
+ORDER BY u.TotalBadges DESC, u.TotalPosts DESC;

@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        U.Reputation AS OwnerReputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount,
+        MAX(C.CreationDate) AS LastCommentDate
+    FROM Comments C
+    GROUP BY C.PostId
+),
+PopularPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score AS PostScore,
+        RP.ViewCount,
+        COALESCE(UC.CommentCount, 0) AS TotalComments,
+        UC.LastCommentDate,
+        RP.OwnerReputation,
+        RANK() OVER (ORDER BY RP.Score DESC, RP.ViewCount DESC) AS PopularityRank
+    FROM RankedPosts RP
+    LEFT JOIN PostComments UC ON RP.PostId = UC.PostId
+)
+SELECT 
+    PP.PostId,
+    PP.Title,
+    PP.PostScore,
+    PP.ViewCount,
+    PP.TotalComments,
+    PP.LastCommentDate,
+    CASE 
+        WHEN UB.GoldBadges > 0 THEN 'Gold'
+        WHEN UB.SilverBadges > 0 THEN 'Silver'
+        WHEN UB.BronzeBadges > 0 THEN 'Bronze'
+        ELSE 'No Badges'
+    END AS BadgeStatus
+FROM PopularPosts PP
+LEFT JOIN UserBadges UB ON PP.OwnerUserId = UB.UserId
+WHERE PP.PopularityRank <= 10 
+ORDER BY PP.PostScore DESC, PP.ViewCount DESC
+FETCH FIRST 10 ROWS ONLY;

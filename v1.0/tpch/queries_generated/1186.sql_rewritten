@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE
+        s.s_acctbal IS NOT NULL
+),
+TotalOrderValue AS (
+    SELECT
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_custkey
+),
+SupplierPartInfo AS (
+    SELECT
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey, ps.ps_suppkey
+)
+SELECT
+    c.c_name,
+    c.c_acctbal,
+    COALESCE(tv.total_value, 0) AS total_order_value,
+    COALESCE(r_supplier.total_value, 0) / NULLIF(RANK() OVER (ORDER BY COALESCE(tv.total_value, 0)), 0) AS adjusted_value,
+    sp.total_available_quantity,
+    sp.avg_supply_cost
+FROM
+    customer c
+LEFT JOIN
+    TotalOrderValue tv ON c.c_custkey = tv.o_custkey
+LEFT JOIN
+    RankedSuppliers r_supplier ON 1 = 1 
+JOIN
+    SupplierPartInfo sp ON sp.ps_suppkey = r_supplier.s_suppkey
+WHERE
+    c.c_acctbal > (SELECT AVG(c1.c_acctbal) FROM customer c1 WHERE c1.c_nationkey = c.c_nationkey)
+ORDER BY
+    total_order_value DESC,
+    adjusted_value ASC;

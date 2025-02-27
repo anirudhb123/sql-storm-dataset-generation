@@ -1,0 +1,105 @@
+WITH RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rnk,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies
+    FROM
+        aka_title t
+    WHERE t.production_year IS NOT NULL
+),
+PersonRoles AS (
+    SELECT
+        ci.movie_id,
+        p.name,
+        rt.role,
+        COUNT(*) AS role_count,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS noted_roles
+    FROM
+        cast_info ci
+    JOIN
+        aka_name p ON ci.person_id = p.person_id
+    JOIN
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY
+        ci.movie_id, p.name, rt.role
+),
+MoviesWithRoles AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        pr.name,
+        pr.role,
+        pr.role_count,
+        pr.noted_roles,
+        ROW_NUMBER() OVER (PARTITION BY rm.production_year ORDER BY pr.role_count DESC) AS role_rank
+    FROM
+        RankedMovies rm
+    LEFT JOIN
+        PersonRoles pr ON rm.movie_id = pr.movie_id
+),
+KeywordMovies AS (
+    SELECT
+        mt.movie_id,
+        k.keyword,
+        COUNT(*) AS keyword_count
+    FROM
+        movie_keyword mt
+    JOIN
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY
+        mt.movie_id, k.keyword
+),
+FinalOutput AS (
+    SELECT
+        mw.title,
+        mw.production_year,
+        mw.name,
+        mw.role,
+        mw.role_count,
+        mw.noted_roles,
+        km.keyword,
+        km.keyword_count,
+        CASE
+            WHEN mw.role_count IS NULL THEN 'No Role'
+            ELSE 'Has Role'
+        END AS role_status,
+        CASE 
+            WHEN mw.production_year IS NULL THEN 'Unknown Year'
+            WHEN mw.production_year > 2000 THEN 'Recent'
+            ELSE 'Classic'
+        END AS movie_age,
+        COALESCE(km.keyword_count, 0) AS keyword_freq
+    FROM
+        MoviesWithRoles mw
+    LEFT JOIN
+        KeywordMovies km ON mw.movie_id = km.movie_id
+    WHERE
+        (mw.role_count = (
+            SELECT MAX(role_count)
+            FROM PersonRoles pr2
+            WHERE pr2.movie_id = mw.movie_id
+        ) OR mw.noted_roles > 0)
+    ORDER BY
+        mw.production_year DESC, mw.role_count DESC
+)
+SELECT
+    title,
+    production_year,
+    name,
+    role,
+    role_count,
+    noted_roles,
+    keyword,
+    keyword_count,
+    role_status,
+    movie_age,
+    keyword_freq
+FROM
+    FinalOutput
+WHERE
+    (movie_age = 'Recent' AND noted_roles > 0)
+    OR (movie_age = 'Classic' AND keyword_freq > 2)
+ORDER BY
+    production_year DESC, role_rank ASC;

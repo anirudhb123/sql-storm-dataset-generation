@@ -1,0 +1,83 @@
+WITH RECURSIVE SupplyCostRanking AS (
+    SELECT
+        ps_partkey,
+        ps_suppkey,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS rank
+    FROM
+        partsupp
+),
+RegionNation AS (
+    SELECT
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name
+    FROM
+        nation n
+    JOIN
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= '1997-01-01'
+    GROUP BY
+        c.c_custkey, c.c_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(DISTINCT l.l_linenumber) AS line_count
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY
+        o.o_orderkey
+)
+SELECT
+    pn.p_name,
+    pn.p_brand,
+    rc.region_name,
+    SUM(od.total_lineitem_value) AS total_order_value,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    AVG(sc.ps_supplycost) AS avg_supply_cost
+FROM
+    part pn
+LEFT JOIN
+    SupplyCostRanking sc ON pn.p_partkey = sc.ps_partkey AND sc.rank = 1
+JOIN
+    OrderDetails od ON od.o_orderkey IN (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_orderstatus = 'F'
+    )
+JOIN
+    RegionNation rc ON rc.n_nationkey = (
+        SELECT c.c_nationkey
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        WHERE o.o_orderkey = od.o_orderkey
+        LIMIT 1
+    )
+JOIN
+    CustomerOrders co ON co.c_custkey IN (
+        SELECT c.c_custkey
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        WHERE o.o_orderdate >= '1997-01-01'
+    )
+GROUP BY
+    pn.p_name, pn.p_brand, rc.region_name
+HAVING
+    COUNT(DISTINCT co.c_custkey) > 10
+ORDER BY
+    total_order_value DESC;

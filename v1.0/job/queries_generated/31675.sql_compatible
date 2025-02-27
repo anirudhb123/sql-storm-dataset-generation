@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mc.company_id,
+        mc.company_type_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mc.company_id,
+        mc.company_type_id,
+        mh.level + 1
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    WHERE 
+        mh.level < 3  
+)
+
+SELECT 
+    ak.name AS actor_name,
+    ARRAY_AGG(DISTINCT mt.title) AS movies,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(mi.year) AS average_production_year,
+    STRING_AGG(DISTINCT cn.name, ', ') AS companies_involved,
+    SUM(CASE WHEN m.status_id IS NULL THEN 1 ELSE 0 END) AS unproduced_movies
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_info mi ON ci.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'production year')
+    AND ak.name IS NOT NULL
+GROUP BY 
+    ak.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 2
+ORDER BY 
+    total_movies DESC;

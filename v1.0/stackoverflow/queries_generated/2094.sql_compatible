@@ -1,0 +1,58 @@
+
+WITH PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) DESC) AS Rank
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN
+        (SELECT ParentId, COUNT(*) AS AnswerCount
+         FROM Posts
+         WHERE PostTypeId = 2
+         GROUP BY ParentId) a ON p.Id = a.ParentId
+    LEFT JOIN
+        (SELECT PostId, COUNT(*) AS CommentCount
+         FROM Comments
+         GROUP BY PostId) c ON p.Id = c.PostId
+    WHERE
+        p.PostTypeId = 1
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, a.AnswerCount, c.CommentCount
+),
+TopPosts AS (
+    SELECT *
+    FROM PostStats
+    WHERE Rank <= 10
+)
+SELECT
+    tp.Title,
+    tp.CreationDate,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.AnswerCount,
+    tp.CommentCount,
+    COALESCE((SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = tp.PostId AND ph.PostHistoryTypeId IN (10, 11)), 0) AS CloseReopenCount,
+    CASE 
+        WHEN tp.UpVotes > tp.DownVotes THEN 'Positive'
+        WHEN tp.UpVotes < tp.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS Sentiment,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM
+    TopPosts tp
+LEFT JOIN
+    (SELECT TRIM(tag) AS tag FROM unnest(string_to_array(tp.Tags, ',')) AS tag) AS tag ON true
+LEFT JOIN
+    Tags t ON tag.tag = t.TagName
+GROUP BY
+    tp.PostId, tp.Title, tp.CreationDate, tp.UpVotes, tp.DownVotes, tp.AnswerCount, tp.CommentCount
+ORDER BY
+    tp.UpVotes DESC, tp.CreationDate ASC;

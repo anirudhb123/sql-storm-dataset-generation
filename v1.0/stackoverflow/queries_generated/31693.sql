@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(DISTINCT v.UserId) OVER (PARTITION BY p.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 3) -- Only Upvotes and Downvotes
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+CommentStats AS (
+    SELECT 
+        PostId, 
+        COUNT(*) AS CommentCount,
+        MAX(CreationDate) AS LastCommentDate
+    FROM 
+        Comments
+    GROUP BY 
+        PostId
+),
+MergedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        cs.CommentCount,
+        cs.LastCommentDate,
+        rp.Rank,
+        COALESCE(b.Name, 'No Badge') AS BadgeName
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        CommentStats cs ON rp.PostId = cs.PostId
+    LEFT JOIN 
+        Badges b ON rp.PostId = b.UserId AND b.Class = 1 -- Only Gold badges
+)
+SELECT 
+    mp.PostId,
+    mp.Title,
+    mp.Score,
+    mp.CreationDate,
+    mp.CommentCount,
+    mp.LastCommentDate,
+    mp.Rank,
+    mp.BadgeName,
+    COALESCE(np.NewPostTitle, 'No Updates') AS NewPostTitle
+FROM 
+    MergedPosts mp
+LEFT JOIN 
+    (SELECT 
+        p.Id AS PostId, 
+        MAX(h.CreationDate) AS LastEditDate,
+        MAX(CASE WHEN h.PostHistoryTypeId = 4 THEN h.Text END) AS NewPostTitle
+    FROM 
+        PostHistory h
+    JOIN 
+        Posts p ON h.PostId = p.Id
+    WHERE 
+        h.PostHistoryTypeId IN (4, 6, 24) -- Edit Title, Edit Tags, Suggested Edit Applied
+    GROUP BY 
+        p.Id) np ON mp.PostId = np.PostId
+WHERE 
+    mp.Rank <= 5
+ORDER BY 
+    mp.Score DESC, 
+    mp.CommentCount DESC,
+    mp.CreationDate DESC;

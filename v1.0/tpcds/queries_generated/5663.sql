@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_return_quantity,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS number_of_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cr.total_return_quantity,
+        cr.total_return_amount,
+        cr.number_of_returns
+    FROM 
+        customer c
+    JOIN 
+        CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+    ORDER BY 
+        cr.total_return_amount DESC
+    LIMIT 10
+),
+ItemSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        is.total_sold_quantity,
+        is.total_sales_amount
+    FROM 
+        item i
+    JOIN 
+        ItemSales is ON i.i_item_sk = is.ws_item_sk
+    ORDER BY 
+        is.total_sales_amount DESC
+    LIMIT 10
+)
+SELECT
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    ti.i_item_id,
+    ti.i_product_name,
+    ti.total_sold_quantity,
+    ti.total_sales_amount
+FROM 
+    TopCustomers tc
+JOIN 
+    TopItems ti ON ti.total_sold_quantity > 100
+ORDER BY 
+    tc.total_return_amount DESC, ti.total_sales_amount DESC;

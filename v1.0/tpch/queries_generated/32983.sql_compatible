@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+RankedOrders AS (
+    SELECT o.*, 
+           ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_orderdate DESC) AS order_rank,
+           SUM(o_totalprice) OVER (PARTITION BY o_custkey ORDER BY o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_spending
+    FROM orders o
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_mktsegment
+    FROM customer c
+    JOIN RankedOrders ro ON c.c_custkey = ro.o_custkey
+    WHERE ro.cumulative_spending > 10000
+),
+SupplierPartCounts AS (
+    SELECT ps.ps_partkey, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_mfgr,
+    COALESCE(spc.supplier_count, 0) AS num_suppliers,
+    SUM(CASE WHEN lo.l_shipdate > DATE '1998-10-01' - INTERVAL '30 days' THEN lo.l_quantity ELSE 0 END) AS recent_shipments,
+    sh.level AS supplier_hierarchy_level,
+    hvc.c_name AS high_value_customer
+FROM part p
+LEFT JOIN SupplierPartCounts spc ON p.p_partkey = spc.ps_partkey
+LEFT JOIN lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = lo.l_suppkey
+LEFT JOIN HighValueCustomers hvc ON lo.l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_custkey = hvc.c_custkey)
+GROUP BY p.p_name, p.p_brand, p.p_mfgr, spc.supplier_count, sh.level, hvc.c_name
+HAVING COUNT(lo.l_orderkey) > 5
+ORDER BY recent_shipments DESC;

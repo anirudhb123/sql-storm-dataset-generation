@@ -1,0 +1,63 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired
+    FROM Tags
+    WHERE IsRequired = 1
+
+    UNION ALL
+
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired
+    FROM Tags t
+    INNER JOIN RecursiveTagHierarchy rth ON rth.ExcerptPostId = t.Id
+),
+
+PostsWithVotes AS (
+    SELECT p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(vt.VoteCount, 0) AS VoteCount,
+        COALESCE(vt.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(vt.DownVoteCount, 0) AS DownVoteCount,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId,
+            COUNT(*) AS VoteCount,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) vt ON p.Id = vt.PostId
+),
+
+AggregatedPostHistory AS (
+    SELECT p.Id AS PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdited,
+        MAX(ph.UserId) AS LastEditorId,
+        STRING_AGG(DISTINCT ph.Comment, '; ') AS EditComments
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+)
+
+SELECT u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+    COUNT(DISTINCT post.PostId) AS TotalPosts,
+    AVG(post.VoteCount) AS AverageVotes,
+    AVG(post.Score) AS AverageScore,
+    MAX(ph.LastEdited) AS LastPostEdit,
+    COUNT(DISTINCT th.TagName) AS RequiredTags
+FROM Users u
+LEFT JOIN Votes v ON u.Id = v.UserId
+LEFT JOIN PostsWithVotes post ON u.Id = post.OwnerUserId
+LEFT JOIN RecursiveTagHierarchy th ON th.Id IN (
+    SELECT unnest(string_to_array(post.Tags, ',')::text)
+) 
+LEFT JOIN AggregatedPostHistory ph ON post.PostId = ph.PostId
+WHERE u.Reputation > 1000 
+GROUP BY u.Id, u.DisplayName
+ORDER BY TotalBounty DESC, TotalPosts DESC;

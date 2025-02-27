@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) AS rank,
+        COUNT(*) OVER () AS total_movies
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+    AND 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Movie%')
+),
+CastStats AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        COALESCE(MAX(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 END), 0) AS has_roles
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT ki.keyword, ', ') AS keywords,
+        MAX(mii.info) AS comment
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_keyword mk ON mk.movie_id = mi.movie_id
+    LEFT JOIN 
+        keyword ki ON ki.id = mk.keyword_id
+    LEFT JOIN 
+        movie_info_idx mii ON mii.movie_id = mi.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'Comment')
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cs.cast_count,
+    cs.has_roles,
+    mi.keywords,
+    mi.comment,
+    CASE 
+        WHEN cs.has_roles = 1 THEN 'Has Roles'
+        ELSE 'No Roles'
+    END AS role_status,
+    COALESCE(CAST(rm.rank AS text) || '/' || CAST(rm.total_movies AS text), 'N/A') AS rank_info
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    CastStats cs ON cs.movie_id = rm.id
+LEFT JOIN 
+    MovieInfo mi ON mi.movie_id = rm.id
+WHERE 
+    rm.rank <= 5
+ORDER BY 
+    rm.production_year DESC, rm.rank;

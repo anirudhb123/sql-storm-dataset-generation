@@ -1,0 +1,59 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_tax) AS total_return_tax,
+        SUM(sr_return_amt_inc_tax) AS total_return_amt_inc_tax,
+        SUM(sr_fee) AS total_fee,
+        SUM(sr_return_ship_cost) AS total_return_ship_cost,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM store_returns
+    GROUP BY sr_returned_date_sk, sr_item_sk
+), 
+WeeklyReturns AS (
+    SELECT 
+        dr.d_date_sk,
+        SUM(COALESCE(cr.total_returns, 0)) AS total_weekly_returns,
+        SUM(COALESCE(cr.total_return_amt, 0)) AS total_weekly_return_amt
+    FROM date_dim dr
+    LEFT JOIN CustomerReturns cr ON dr.d_date_sk = cr.sr_returned_date_sk
+    WHERE dr.d_week_seq = (SELECT DISTINCT d_week_seq FROM date_dim WHERE d_date_sk = CURRENT_DATE_SK)
+    GROUP BY dr.d_date_sk
+),
+Insights AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE((SELECT SUM(ws_net_profit) 
+                  FROM web_sales 
+                  WHERE ws_bill_customer_sk = c.c_customer_sk 
+                    AND ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = (SELECT MAX(d_year) FROM date_dim)) - 365 
+                    AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = (SELECT MAX(d_year) FROM date_dim))), 
+                  '0'), 0) AS last_year_profit,
+        COUNT(DISTINCT csr.sr_item_sk) AS num_items_returned,
+        RANK() OVER (ORDER BY COUNT(DISTINCT csr.sr_item_sk) DESC) AS return_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_returns csr ON c.c_customer_sk = csr.sr_customer_sk
+    GROUP BY c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.last_year_profit,
+    wr.total_weekly_returns,
+    wr.total_weekly_return_amt,
+    CASE 
+        WHEN ci.return_rank IS NOT NULL THEN 'Frequent Returner' 
+        ELSE 'Infrequent Returner' 
+    END AS return_frequency
+FROM Insights ci
+LEFT JOIN WeeklyReturns wr ON ci.return_rank <= 10
+WHERE (ci.last_year_profit IS NULL OR ci.last_year_profit > 5000)
+  AND (ci.cd_marital_status = 'M' OR ci.cd_gender = 'F')
+ORDER BY ci.last_year_profit DESC, wr.total_weekly_returns DESC;

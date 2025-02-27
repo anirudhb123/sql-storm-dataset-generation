@@ -1,0 +1,28 @@
+SELECT 
+    t.title AS movie_title,
+    a.name AS actor_name,
+    c.kind AS character_role,
+    m.year AS production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count
+FROM 
+    title t
+JOIN 
+    aka_title at ON t.id = at.movie_id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+JOIN 
+    aka_name a ON ci.person_id = a.person_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+JOIN 
+    (SELECT movie_id, MIN(production_year) AS year FROM aka_title GROUP BY movie_id) m ON t.id = m.movie_id
+GROUP BY 
+    t.title, a.name, c.kind, m.year
+ORDER BY 
+    production_year, movie_title;

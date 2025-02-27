@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND p.Score > 10
+), RecentUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        DENSE_RANK() OVER (ORDER BY u.LastAccessDate DESC) AS RecentRank
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate > CURRENT_DATE - INTERVAL '1 year'
+), VotesSummary AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate > CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY 
+        v.PostId
+), PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        STRING_AGG(ph.Comment, '; ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  -- Edit Title, Body, Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.Title,
+    ru.DisplayName AS Owner,
+    ru.Reputation,
+    rs.CreationDate AS PostCreationDate,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(phd.EditCount, 0) AS TotalEdits,
+    COALESCE(phd.EditComments, 'No edits') AS EditComments
+FROM 
+    RankedPosts rp
+JOIN 
+    RecentUsers ru ON rp.OwnerUserId = ru.UserId
+LEFT JOIN 
+    VotesSummary ps ON rp.Id = ps.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.Id = phd.PostId
+WHERE 
+    ru.RecentRank <= 10
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC;

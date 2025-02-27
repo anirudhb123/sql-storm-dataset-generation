@@ -1,0 +1,58 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq
+    FROM 
+        customer AS c
+    JOIN 
+        date_dim AS d ON c.c_first_shipto_date_sk = d.d_date_sk
+),
+SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers
+    FROM 
+        web_sales AS ws
+    GROUP BY 
+        ws.web_site_id
+)
+SELECT 
+    a.full_address,
+    c.full_name,
+    s.web_site_id,
+    s.total_sales,
+    s.order_count,
+    s.unique_customers
+FROM 
+    AddressInfo AS a
+JOIN 
+    CustomerInfo AS c ON c.c_customer_sk = a.ca_address_sk
+JOIN 
+    SalesData AS s ON s.web_site_id IN (
+        SELECT DISTINCT ws.web_site_id 
+        FROM web_sales AS ws 
+        WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+    )
+WHERE 
+    a.ca_state = 'CA' AND 
+    (YEAR(CURDATE()) - c.d_year) <= 5
+ORDER BY 
+    s.total_sales DESC, 
+    c.full_name ASC
+LIMIT 100;

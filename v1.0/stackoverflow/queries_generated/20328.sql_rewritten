@@ -1,0 +1,43 @@
+WITH RecursiveVotes AS (
+    SELECT v.PostId, v.VoteTypeId, COUNT(*) OVER (PARTITION BY v.PostId ORDER BY v.VoteTypeId) AS VoteCount
+    FROM Votes v
+    WHERE v.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+PostScoreCTE AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 WHEN v.VoteTypeId = 3 THEN -1 END), 0) AS NetScore,
+           COALESCE(c.CommentCount, 0) AS TotalComments,
+           COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges
+    FROM Posts p
+    LEFT JOIN RecursiveVotes rv ON p.Id = rv.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Badges b ON p.OwnerUserId = b.UserId
+    GROUP BY p.Id, p.Title
+),
+RankedPosts AS (
+    SELECT ps.PostId,
+           ps.Title,
+           ps.NetScore,
+           ps.TotalComments,
+           ps.GoldBadges,
+           RANK() OVER (ORDER BY ps.NetScore DESC) AS ScoreRank
+    FROM PostScoreCTE ps
+    WHERE ps.NetScore > 0
+)
+SELECT r.PostId, 
+       r.Title,
+       r.NetScore,
+       r.TotalComments,
+       r.GoldBadges,
+       CASE 
+           WHEN r.ScoreRank <= 10 THEN 'Top 10 Post'
+           WHEN r.ScoreRank > 10 AND r.ScoreRank <= 50 THEN 'Popular Post'
+           ELSE 'Less Popular Post'
+       END AS Popularity,
+       (SELECT STRING_AGG(CONCAT(u.DisplayName, ' (', u.Reputation, ')'), ', ') 
+        FROM Users u 
+        WHERE u.Id IN (SELECT DISTINCT c.UserId FROM Comments c WHERE c.PostId = r.PostId)) AS Commenters
+FROM RankedPosts r
+WHERE r.TotalComments > 0
+ORDER BY r.NetScore DESC, r.Title;

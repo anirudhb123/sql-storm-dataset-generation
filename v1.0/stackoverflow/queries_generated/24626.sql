@@ -1,0 +1,81 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        MAX(B.Class) AS HighestBadgeClass 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.PostTypeId,
+        P.Score,
+        P.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RN
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+), VotesSummary AS (
+    SELECT 
+        V.PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownvoteCount,
+        COUNT(CASE WHEN V.VoteTypeId IN (6, 10) THEN 1 END) AS CloseVoteCount
+    FROM 
+        Votes V
+    GROUP BY 
+        V.PostId
+), ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate,
+        C.Name AS CloseReasonName
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+), Result AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        BP.BadgeCount,
+        BP.HighestBadgeClass,
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        COALESCE(VS.UpvoteCount, 0) AS UpvoteCount,
+        COALESCE(VS.DownvoteCount, 0) AS DownvoteCount,
+        CP.CloseReasonName
+    FROM 
+        UserBadges BP
+    LEFT JOIN 
+        RecentPosts RP ON RP.OwnerUserId = BP.UserId
+    LEFT JOIN 
+        VotesSummary VS ON VS.PostId = RP.PostId
+    LEFT JOIN 
+        ClosedPosts CP ON CP.PostId = RP.PostId
+    WHERE 
+        BP.BadgeCount > 0
+        AND RP.RN = 1
+)
+
+SELECT 
+    *
+FROM 
+    Result
+WHERE 
+    (CloseReasonName IS NOT NULL OR UpvoteCount > DownvoteCount)
+ORDER BY 
+    BadgeCount DESC, Score DESC, CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,48 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00  
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_nationkey  
+), 
+
+part_summary AS (
+    SELECT p.p_partkey, p.p_name, COUNT(DISTINCT ps.ps_suppkey) AS supplier_count, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), 
+
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+), 
+
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    p.p_partkey,
+    p.p_name,
+    ps.supplier_count,
+    ps.avg_supply_cost,
+    co.order_count,
+    co.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY r.r_name ORDER BY co.total_spent DESC) AS rank_within_region
+FROM part_summary ps
+JOIN nation n ON ps.supplier_count > 0  
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer_orders co ON co.total_spent IS NOT NULL
+WHERE ps.avg_supply_cost IS NOT NULL
+ORDER BY rank_within_region, r.r_name, n.n_name;

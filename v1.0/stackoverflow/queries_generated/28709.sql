@@ -1,0 +1,51 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8
+    LEFT JOIN 
+        (SELECT 
+            postId, 
+            unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName
+         FROM 
+            Posts) t ON p.Id = t.PostId
+    WHERE 
+        p.PostTypeId = 1 -- Considering only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PostRanked AS (
+    SELECT 
+        pp.*,
+        DENSE_RANK() OVER (ORDER BY pp.Score DESC, pp.ViewCount DESC) AS Rank
+    FROM 
+        ProcessedPosts pp
+)
+SELECT 
+    pr.*,
+    CASE 
+        WHEN pr.Rank <= 10 THEN 'Top 10 Questions'
+        WHEN pr.Rank <= 50 THEN 'Top 50 Questions'
+        ELSE 'Other Questions'
+    END AS RankingCategory
+FROM 
+    PostRanked pr
+WHERE 
+    pr.TotalBounty > 0 AND
+    pr.CommentCount > 5
+ORDER BY 
+    pr.Rank;

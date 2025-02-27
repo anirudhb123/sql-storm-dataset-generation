@@ -1,0 +1,77 @@
+WITH RecursiveMovieTitles AS (
+    SELECT 
+        t.id AS title_id, 
+        t.title, 
+        t.production_year,
+        1 AS recursion_depth
+    FROM title t
+    WHERE t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.linked_movie_id AS title_id, 
+        t.title, 
+        t.production_year,
+        rm.recursion_depth + 1
+    FROM movie_link m
+    JOIN title t ON m.linked_movie_id = t.id
+    JOIN RecursiveMovieTitles rm ON m.movie_id = rm.title_id
+    WHERE rm.recursion_depth < 3
+),
+MovieCast AS (
+    SELECT 
+        title.id AS movie_id, 
+        title.title, 
+        aka_name.name AS actor_name, 
+        rank() OVER (PARTITION BY title.id ORDER BY cast_info.nr_order) AS actor_rank,
+        COALESCE(count(DISTINCT cast_info.person_id), 0) AS cast_count
+    FROM title
+    LEFT JOIN cast_info ON title.id = cast_info.movie_id
+    LEFT JOIN aka_name ON cast_info.person_id = aka_name.person_id
+    WHERE title.production_year > 1999 AND title.kind_id IN (1, 2, 3) -- Assuming kinds for movies, series, etc.
+    GROUP BY title.id, aka_name.name
+),
+FilterMovies AS (
+    SELECT 
+        mt.title_id,
+        mt.title,
+        mt.production_year,
+        mc.actor_name,
+        mc.actor_rank,
+        mc.cast_count
+    FROM RecursiveMovieTitles mt
+    LEFT JOIN MovieCast mc ON mt.title_id = mc.movie_id
+)
+SELECT 
+    f.title_id, 
+    f.title,
+    f.production_year,
+    f.actor_name,
+    f.actor_rank
+FROM FilterMovies f
+WHERE f.cast_count IS NULL OR f.cast_count > 1
+AND EXISTS (
+    SELECT 1 
+    FROM movie_info mi 
+    WHERE mi.movie_id = f.title_id AND 
+          mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+          AND CAST(mi.info AS INT) > 1000000
+)
+ORDER BY 
+    f.production_year DESC,
+    f.cast_count DESC,
+    f.actor_rank DESC
+LIMIT 50;
+
+This query performs the following actions:
+
+1. **Recursive CTE (RecursiveMovieTitles)**: It retrieves movie titles from the year 2000 or later, recursively including linked movies up to a depth of 3.
+
+2. **CTE for movie casting (MovieCast)**: It joins the movie titles with cast information and aggregates actors, counting distinct individuals in each movie and ranking them by their order in the cast.
+
+3. **Another CTE to filter movies (FilterMovies)**: It filters the joined data from the previous steps.
+
+4. **Main SELECT statement**: It retrieves movies with more than one cast member or no cast member at all and checks for movies with a budget greater than one million (assuming an `info_type` of 'budget').
+
+5. It uses a mix of `LEFT JOIN`, `EXISTS`, `ORDER BY`, `COALESCE`, `rank()`, and nested queries to simulate an intricate performance benchmark scenario, making this query both elaborate and interesting for testing optimization strategies in SQL execution.

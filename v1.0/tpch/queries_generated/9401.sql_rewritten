@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        SUM(ps.ps_availqty) AS total_availqty
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name, s.s_suppkey, s.s_name, s.s_acctbal
+),
+FinalBenchmark AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal,
+        sp.p_name,
+        sp.total_availqty,
+        ROUND(ro.o_totalprice - (sp.total_availqty * 0.05), 2) AS adjusted_price
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        SupplierParts sp ON sp.total_availqty > 0
+    WHERE 
+        ro.order_rank <= 10
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    o.c_name,
+    o.c_acctbal,
+    o.p_name,
+    o.total_availqty,
+    o.adjusted_price
+FROM 
+    FinalBenchmark o
+ORDER BY 
+    o.o_orderdate DESC, 
+    o.o_totalprice DESC;

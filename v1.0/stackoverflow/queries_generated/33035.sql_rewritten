@@ -1,0 +1,75 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        rp.Level + 1
+    FROM Posts p
+    JOIN RecursivePosts rp ON p.ParentId = rp.PostId
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 
+                 WHEN v.VoteTypeId = 3 THEN -1 
+                 ELSE 0 END) AS Score
+    FROM Votes v
+    GROUP BY v.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeCount
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS ClosedCount
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerUserId,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(v.Score, 0) AS VoteScore,
+    COALESCE(b.BadgeCount, 0) AS UserBadgeCount,
+    COALESCE(b.GoldCount, 0) AS GoldBadgeCount,
+    COALESCE(b.SilverCount, 0) AS SilverBadgeCount,
+    COALESCE(b.BronzeCount, 0) AS BronzeBadgeCount,
+    phs.LastEditDate,
+    phs.ClosedCount,
+    CASE 
+        WHEN phs.ClosedCount > 0 THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM RecursivePosts rp
+LEFT JOIN Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN PostVotes v ON v.PostId = rp.PostId
+LEFT JOIN UserBadges b ON b.UserId = rp.OwnerUserId
+LEFT JOIN PostHistoryStats phs ON phs.PostId = rp.PostId
+WHERE rp.PostTypeId = 1 
+ORDER BY VoteScore DESC, rp.CreationDate DESC;

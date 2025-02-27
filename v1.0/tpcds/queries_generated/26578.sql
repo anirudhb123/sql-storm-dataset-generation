@@ -1,0 +1,48 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        wr_returning_customer_sk, 
+        SUM(wr_return_amt) AS total_return_amt,
+        COUNT(wr_order_number) AS return_count,
+        ROW_NUMBER() OVER (PARTITION BY wr_returning_customer_sk ORDER BY SUM(wr_return_amt) DESC) AS rank
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+),
+CustomerWithDemographics AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        rr.total_return_amt,
+        rr.return_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN RankedReturns rr ON c.c_customer_sk = rr.wr_returning_customer_sk
+    WHERE rr.rank <= 10 -- Top 10 returning customers
+),
+FormattedAddresses AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT_WS(' ', ca.ca_street_number, ca.ca_street_name, ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM customer_address ca
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    c.cd_gender,
+    c.cd_marital_status,
+    c.cd_education_status,
+    c.total_return_amt,
+    c.return_count,
+    f.full_address
+FROM CustomerWithDemographics c
+JOIN FormattedAddresses f ON c.c_customer_id = (SELECT c1.c_customer_id FROM customer c1 WHERE c1.c_current_addr_sk = c.c_current_addr_sk)
+ORDER BY c.total_return_amt DESC;

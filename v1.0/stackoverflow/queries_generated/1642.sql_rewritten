@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Authorized AS IsAuthorized,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.ViewCount IS NOT NULL
+),
+AggregateStats AS (
+    SELECT 
+        rp.OwnerUserId,
+        SUM(rp.UpVoteCount) AS TotalUpVotes,
+        SUM(rp.DownVoteCount) AS TotalDownVotes,
+        AVG(rp.ViewCount) AS AverageViewCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+    GROUP BY 
+        rp.OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ast.TotalUpVotes,
+    ast.TotalDownVotes,
+    ast.AverageViewCount,
+    COALESCE(b.Name, 'No Badge') AS TopBadge
+FROM 
+    Users u
+LEFT JOIN 
+    AggregateStats ast ON u.Id = ast.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Class = 1
+WHERE 
+    u.Reputation > 100
+ORDER BY 
+    ast.TotalUpVotes DESC NULLS LAST,
+    u.Reputation DESC;

@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_totalprice,
+           o.o_orderdate,
+           o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+TopCustomerOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+SupplierStats AS (
+    SELECT s.s_suppkey,
+           COUNT(ps.ps_partkey) AS part_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           SUM(CASE WHEN l.l_discount > 0.10 THEN 1 ELSE 0 END) AS discounted_lineitems
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY s.s_suppkey
+),
+FinalReport AS (
+    SELECT c.c_name,
+           o.o_orderkey,
+           o.o_totalprice,
+           r.r_name AS region,
+           COALESCE(s.avg_supply_cost, 0) AS avg_supply_cost,
+           CASE 
+               WHEN o.o_orderstatus = 'F' THEN 'Completed'
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               ELSE 'Unknown'
+           END AS order_status_description
+    FROM RankedOrders o
+    JOIN TopCustomerOrders tc ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_custkey = tc.c_custkey)
+    LEFT JOIN nation n ON tc.c_custkey = n.n_nationkey
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN SupplierStats s ON s.part_count = (SELECT MAX(part_count) FROM SupplierStats)
+)
+SELECT f.c_name,
+       f.o_orderkey,
+       f.o_totalprice,
+       f.region,
+       f.avg_supply_cost,
+       f.order_status_description,
+       CASE 
+           WHEN f.o_totalprice >= (SELECT AVG(o_totalprice) FROM RankedOrders) THEN 'Above Average'
+           ELSE 'Below Average'
+       END AS price_comparison,
+       STRING_AGG(DISTINCT CONCAT('Order ', f.o_orderkey, ' - ', f.o_totalprice)) AS orders_summary
+FROM FinalReport f
+GROUP BY f.c_name, f.o_orderkey, f.o_totalprice, f.region, f.avg_supply_cost, f.order_status_description
+ORDER BY f.region, f.o_totalprice DESC
+LIMIT 100;

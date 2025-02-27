@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) as Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserReputation AS (
+    SELECT 
+        u.Id as UserId,
+        u.Reputation,
+        u.DisplayName
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 2000
+),
+PostHistoryCounts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) as EditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ur.DisplayName as Author,
+    ur.Reputation as AuthorReputation,
+    COALESCE(phc.EditCount, 0) as EditHistoryCount,
+    CASE 
+        WHEN rp.Score > 10 THEN 'Hot'
+        WHEN rp.Score BETWEEN 1 AND 10 THEN 'Warm'
+        ELSE 'Cold' 
+    END as ScoreCategory
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserReputation ur ON rp.OwnerUserId = ur.UserId
+LEFT JOIN 
+    PostHistoryCounts phc ON rp.PostId = phc.PostId
+WHERE 
+    rp.Rank <= 3
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 10;

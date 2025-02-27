@@ -1,0 +1,50 @@
+WITH TotalSales AS (
+    SELECT 
+        p.p_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    WHERE 
+        l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate < DATE '2023-12-31'
+    GROUP BY 
+        p.p_partkey
+),
+RankedSales AS (
+    SELECT 
+        ts.p_partkey,
+        ts.total_revenue,
+        RANK() OVER (ORDER BY ts.total_revenue DESC) AS revenue_rank
+    FROM 
+        TotalSales ts
+),
+TopProducts AS (
+    SELECT 
+        r.n_name AS region_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS suppliers_count,
+        SUM(ts.total_revenue) AS region_revenue
+    FROM 
+        RankedSales ts
+    JOIN 
+        partsupp ps ON ts.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ts.revenue_rank <= 10
+    GROUP BY 
+        r.n_name
+)
+SELECT 
+    tp.region_name,
+    tp.suppliers_count,
+    tp.region_revenue,
+    (SELECT AVG(region_revenue) FROM TopProducts) AS avg_region_revenue
+FROM 
+    TopProducts tp
+ORDER BY 
+    tp.region_revenue DESC;

@@ -1,0 +1,84 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS nation_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CombinedResults AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        COALESCE(ps.total_available_qty, 0) AS total_available_qty,
+        ps.avg_supply_cost,
+        sd.nation_name,
+        sd.region_name
+    FROM 
+        RankedOrders o
+    LEFT JOIN 
+        PartSupplierDetails ps ON o.o_orderkey = ps.ps_partkey
+    LEFT JOIN 
+        SupplierDetails sd ON sd.s_suppkey = (SELECT ps1.ps_suppkey
+                                             FROM partsupp ps1 
+                                             WHERE ps1.ps_partkey = ps.ps_partkey
+                                             ORDER BY ps1.ps_supplycost ASC
+                                             LIMIT 1)
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    cr.total_revenue,
+    CASE 
+        WHEN cr.total_revenue > 5000 THEN 'High'
+        WHEN cr.total_revenue BETWEEN 1000 AND 5000 THEN 'Medium'
+        ELSE 'Low'
+    END AS revenue_category,
+    cr.*
+
+FROM 
+    customer c
+JOIN 
+    (SELECT 
+         o.o_orderkey,
+         SUM(o.o_totalprice) AS total_revenue
+     FROM 
+         CombinedResults cr
+     JOIN 
+         lineitem l ON cr.o_orderkey = l.l_orderkey
+     GROUP BY 
+         o.o_orderkey) cr ON c.c_custkey = cr.o_orderkey
+WHERE 
+    CR.nation_name IS NOT NULL
+ORDER BY 
+    c.c_custkey;

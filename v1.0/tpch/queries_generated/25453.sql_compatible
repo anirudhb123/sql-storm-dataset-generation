@@ -1,0 +1,23 @@
+
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count, 
+    SUM(ps.ps_availqty) AS total_available_quantity, 
+    MAX(p.p_retailprice) AS max_price, 
+    AVG(p.p_retailprice) AS avg_price, 
+    STRING_AGG(DISTINCT s.s_name, ', ') AS supplier_names
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+WHERE 
+    p.p_type LIKE '%brass%' 
+    AND s.s_acctbal > (SELECT AVG(s1.s_acctbal) FROM supplier s1) 
+GROUP BY 
+    p.p_name 
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) >= 5 
+ORDER BY 
+    avg_price DESC, total_available_quantity DESC;

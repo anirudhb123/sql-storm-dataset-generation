@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS rnk
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId, 
+        ph.Comment,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(u.Reputation) AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+RelevantTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '<>')) AS Tag 
+    FROM 
+        Posts 
+    WHERE 
+        Tags IS NOT NULL
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    COALESCE(cp.Comment, 'No close comment') AS CloseComment,
+    COALESCE(ub.BadgeCount, 0) AS UserBadgeCount,
+    rt.Tag,
+    CASE 
+        WHEN rp.ViewCount IS NULL THEN 'Unknown Views'
+        WHEN rp.ViewCount < 100 THEN 'Low Traffic'
+        ELSE 'High Traffic'
+    END AS TrafficStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+JOIN 
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN 
+    UsersWithBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    RelevantTags rt ON rt.Tag = ANY(ARRAY(SELECT UNNEST(string_to_array(rp.Tags, '<>'))))
+WHERE 
+    rp.rnk = 1
+    AND (CASE 
+            WHEN ub.AvgReputation IS NULL THEN 0 
+            ELSE ub.AvgReputation 
+          END) > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

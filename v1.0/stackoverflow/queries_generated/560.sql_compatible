@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE((SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        rp.rn,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users u ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+    WHERE 
+        rp.rn <= 5
+),
+PostScoreAnalysis AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.UpVotes + rp.DownVotes = 0 THEN 0
+            ELSE (CAST(rp.UpVotes AS FLOAT) / NULLIF(rp.UpVotes + rp.DownVotes, 0)) * 100
+        END AS VotePercentage
+    FROM 
+        RecentPosts rp
+)
+SELECT 
+    psa.OwnerDisplayName,
+    psa.Title, 
+    psa.ViewCount,
+    psa.UpVotes,
+    psa.DownVotes,
+    psa.VotePercentage,
+    CASE 
+        WHEN psa.VotePercentage IS NOT NULL THEN 
+            CASE 
+                WHEN psa.VotePercentage > 60 THEN 'Highly Voted' 
+                WHEN psa.VotePercentage BETWEEN 30 AND 60 THEN 'Moderately Voted' 
+                ELSE 'Low Votes' 
+            END 
+        ELSE 'No Votes' 
+    END AS VoteCategory
+FROM 
+    PostScoreAnalysis psa
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = psa.PostId)
+WHERE 
+    b.Class IN (1, 2) OR b.Class IS NULL
+ORDER BY 
+    psa.ViewCount DESC;

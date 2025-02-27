@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank,
+        kt.kind AS title_type,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year, kt.kind
+), 
+PersonMovieRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        rt.role AS role_name,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type rt ON c.role_id = rt.id
+    GROUP BY 
+        c.movie_id, a.name, rt.role
+),
+KeywordPopularTitles AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(mk.keyword_id) AS popular_keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        movie_info mi ON mk.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    rt.production_year,
+    rt.title,
+    rt.title_rank,
+    rt.keyword_count,
+    pmr.actor_name,
+    pmr.role_name,
+    pmr.role_count,
+    COALESCE(kpt.popular_keyword_count, 0) AS popular_keyword_count,
+    CASE 
+        WHEN rt.title_rank = 1 AND rt.keyword_count >= 5 THEN 'Top Title' 
+        WHEN pmr.role_count > 10 THEN 'Frequent Actor' 
+        ELSE 'Other' 
+    END AS classification
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    PersonMovieRoles pmr ON rt.title_id = pmr.movie_id
+LEFT JOIN 
+    KeywordPopularTitles kpt ON rt.title_id = kpt.movie_id
+WHERE 
+    rt.production_year IS NOT NULL
+  AND (
+        rt.title LIKE '%The%' 
+        OR rt.title ILIKE '%Mystery%' 
+        OR rt.title ILIKE '%Adventure%'
+      )
+ORDER BY 
+    rt.production_year DESC,
+    rt.title_rank ASC,
+    pmr.role_count DESC
+LIMIT 100;

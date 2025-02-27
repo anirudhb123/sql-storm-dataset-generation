@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        s.s_store_id,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM 
+        store s
+    JOIN 
+        web_sales ws ON s.s_store_sk = ws.ws_ship_addr_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023) - 30 AND 
+                                  (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2023)
+),
+CustomerReturns AS (
+    SELECT 
+        wr.returning_customer_sk,
+        SUM(wr.return_amount) AS total_returned
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.returning_customer_sk
+),
+HighestReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.total_returned,
+        ROW_NUMBER() OVER (ORDER BY cr.total_returned DESC) as return_rank
+    FROM 
+        CustomerReturns cr
+)
+SELECT 
+    r.s_store_id,
+    r.ws_order_number,
+    r.ws_sales_price,
+    COALESCE(hr.total_returned, 0) AS total_returned
+FROM 
+    RankedSales r
+LEFT JOIN 
+    HighestReturns hr ON r.ws_order_number = hr.returning_customer_sk
+WHERE 
+    r.price_rank <= 10
+ORDER BY 
+    r.s_store_id, r.ws_sales_price DESC;

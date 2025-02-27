@@ -1,0 +1,63 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.n_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS distinct_parts,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total,
+        COUNT(DISTINCT l.l_partkey) AS item_count,
+        o.o_orderdate
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_nationkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_nationkey
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    SUM(cs.total_spent) AS overall_spent,
+    SUM(ss.total_avail_qty) AS available_parts,
+    SUM(ss.total_supply_cost) AS total_supply_cost,
+    AVG(os.order_total) AS avg_order_value,
+    SUM(os.item_count) AS total_items_ordered
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer_summary cs ON n.n_nationkey = cs.c_nationkey
+JOIN 
+    supplier_stats ss ON n.n_nationkey = ss.n_nationkey
+JOIN 
+    order_stats os ON cs.c_custkey = os.o_orderkey
+GROUP BY 
+    r.r_name
+ORDER BY 
+    overall_spent DESC, total_customers DESC;

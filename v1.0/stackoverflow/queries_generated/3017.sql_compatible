@@ -1,0 +1,66 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounty,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        DENSE_RANK() OVER (ORDER BY TotalBounty DESC) AS RankByBounty,
+        RANK() OVER (ORDER BY TotalBadges DESC) AS RankByBadges
+    FROM 
+        UserActivity
+)
+
+SELECT 
+    U.Id,
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(TU.TotalPosts, 0) AS TotalPosts,
+    COALESCE(TU.TotalComments, 0) AS TotalComments,
+    COALESCE(TU.TotalBadges, 0) AS TotalBadges,
+    COALESCE(TU.TotalBounty, 0) AS TotalBounty,
+    CASE 
+        WHEN TU.RankByPosts IS NOT NULL THEN CONCAT('Ranked ', CAST(TU.RankByPosts AS VARCHAR), ' for Posts')
+        ELSE 'No Rank for Posts'
+    END AS PostsRank,
+    CASE 
+        WHEN TU.RankByBounty IS NOT NULL THEN CONCAT('Ranked ', CAST(TU.RankByBounty AS VARCHAR), ' for Bounty')
+        ELSE 'No Rank for Bounty'
+    END AS BountyRank,
+    CASE 
+        WHEN TU.RankByBadges IS NOT NULL THEN CONCAT('Ranked ', CAST(TU.RankByBadges AS VARCHAR), ' for Badges')
+        ELSE 'No Rank for Badges'
+    END AS BadgesRank
+FROM 
+    Users U
+LEFT JOIN 
+    TopUsers TU ON U.Id = TU.UserId
+WHERE 
+    U.Reputation > 1000
+ORDER BY 
+    U.Reputation DESC
+LIMIT 10;

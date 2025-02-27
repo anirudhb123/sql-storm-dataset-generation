@@ -1,0 +1,82 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting from questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- BountyStart
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days' -- Recent posts only
+    GROUP BY 
+        p.Id
+),
+BadgesSummary AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    u.Views,
+    pp.Title AS PostTitle,
+    pp.ViewCount,
+    pp.Score,
+    pp.CommentCount,
+    pp.TotalBounty,
+    bs.BadgeCount,
+    bs.HighestBadgeClass,
+    CASE 
+        WHEN pp.PostRank = 1 THEN 'Best Post'
+        WHEN pp.PostRank <= 3 THEN 'Top Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory
+FROM 
+    Users u
+JOIN 
+    RankedPosts pp ON u.Id = pp.OwnerUserId
+LEFT JOIN 
+    BadgesSummary bs ON u.Id = bs.UserId
+ORDER BY 
+    u.Reputation DESC,
+    pp.TotalBounty DESC,
+    pp.Score DESC
+LIMIT 100;
+
+

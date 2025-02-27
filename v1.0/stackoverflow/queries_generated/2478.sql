@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  -- BountyStart
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.ViewCount > 1000
+        AND p.Score IS NOT NULL
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        COALESCE(BadgesCount, 0) AS BadgesCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgesCount
+        FROM 
+            Badges
+        GROUP BY 
+            UserId
+    ) AS bd ON rp.OwnerUserId = bd.UserId
+    WHERE 
+        rp.RankByScore <= 3
+), PostHistories AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryCreationDate,
+        LEFT(ph.Comment, 50) AS ShortComment,
+        ph.UserDisplayName
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 12) -- Closed or Deleted posts
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.BadgesCount,
+    COUNT(DISTINCT ph.PostHistoryTypeId) AS CloseDeleteActions,
+    STRING_AGG(DISTINCT ph.ShortComment, '; ') AS CommentsSummary
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostHistories ph ON fp.PostId = ph.PostId
+WHERE 
+    fp.TotalBounty > 0
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.Score, fp.ViewCount, fp.CommentCount, fp.BadgesCount
+ORDER BY 
+    fp.Score DESC, fp.ViewCount DESC;

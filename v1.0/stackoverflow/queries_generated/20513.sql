@@ -1,0 +1,82 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostEngagement AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes,
+        COUNT(c.Id) FILTER (WHERE c.UserId IS NOT NULL) AS TotalComments,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.UserId END) AS TotalClosures,
+        DENSE_RANK() OVER (ORDER BY COALESCE(SUM(CASE WHEN v.VoteTypeId IN (2, 8) THEN 1 ELSE 0 END), 0) DESC) AS EngagementRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        PostHistory ph ON ph.PostId = p.Id
+    GROUP BY 
+        p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY (ua.TotalUpVotes - ua.TotalDownVotes) DESC) AS UserRank
+    FROM 
+        UserActivity ua
+)
+
+SELECT 
+    pu.UserId,
+    pu.DisplayName,
+    wu.PostId,
+    wu.Title AS PostTitle,
+    wu.TotalUpVotes AS PostUpVotes,
+    wu.TotalDownVotes AS PostDownVotes,
+    wu.TotalComments AS PostComments,
+    pu.TotalUpVotes AS UserUpVotes,
+    pu.TotalDownVotes AS UserDownVotes,
+    wu.EngagementRank,
+    pu.UserRank
+FROM 
+    PostEngagement wu
+INNER JOIN 
+    TopUsers pu ON wu.TotalUpVotes > 0
+WHERE 
+    pu.TotalPosts > (SELECT AVG(TotalPosts) FROM UserActivity) 
+    AND wu.EngagementRank <= 10
+ORDER BY 
+    wu.EngagementRank, pu.UserRank;
+
+-- A justification of using each SQL feature:
+-- CTEs: I've used Common Table Expressions to segment the data into manageable parts that aggregate user activities and post engagements.
+-- Aggregate Functions: COALESCE and SUM are used to handle NULL cases and aggregate data (like calculating votes and posts).
+-- Window Functions: DENSE_RANK and ROW_NUMBER help rank users and posts based on their performance metrics.
+-- Outer Joins: Used left joins to include all users/posts while allowing for those without any activity to be represented with zeros.
+-- Complex Filtering: Subqueries allow for dynamic comparison against average metrics—only users above average in activity are selected.
+-- Bizarre corner cases: The query can expose null votes and comments, making it possible to explore discrepancies in user engagement and post activity.

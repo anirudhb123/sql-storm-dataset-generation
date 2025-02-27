@@ -1,0 +1,91 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        U.Reputation > 100 OR P.CreationDate >= '2022-01-01'
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        CASE 
+            WHEN P.ClosedDate IS NOT NULL THEN 'Closed'
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Unanswered' 
+        END AS Status,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= DATEADD(YEAR, -1, CAST('2024-10-01' AS DATE))
+),
+UserBadges AS (
+    SELECT 
+        B.UserId,
+        COUNT(*) FILTER (WHERE B.Class = 1) AS GoldBadges,
+        COUNT(*) FILTER (WHERE B.Class = 2) AS SilverBadges,
+        COUNT(*) FILTER (WHERE B.Class = 3) AS BronzeBadges
+    FROM 
+        Badges B
+    GROUP BY 
+        B.UserId
+),
+TopUsersWithBadges AS (
+    SELECT 
+        UA.UserId,
+        UA.Reputation,
+        UA.TotalPosts,
+        COALESCE(UB.GoldBadges, 0) AS GoldBadges,
+        COALESCE(UB.SilverBadges, 0) AS SilverBadges,
+        COALESCE(UB.BronzeBadges, 0) AS BronzeBadges,
+        RANK() OVER (ORDER BY UA.TotalPosts DESC, UA.Reputation DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        UserBadges UB ON UA.UserId = UB.UserId
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.TotalPosts,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    P.Title,
+    P.Status,
+    B.Comment AS BadgeComment,
+    CASE 
+        WHEN U.UserRank <= 10 THEN 'Top Contributor'
+        ELSE 'Contributor' 
+    END AS ContributorType
+FROM 
+    TopUsersWithBadges U
+INNER JOIN 
+    PostStatistics P ON U.TotalPosts > 5 
+LEFT JOIN 
+    PostHistory H ON P.PostId = H.PostId AND H.PostHistoryTypeId IN (10, 11, 12) 
+LEFT JOIN 
+    CloseReasonTypes B ON CAST(H.Comment AS INTEGER) = B.Id
+WHERE 
+    U.Reputation BETWEEN 100 AND 5000
+    AND (U.GoldBadges > 1 OR U.SilverBadges >= 3)
+ORDER BY 
+    U.UserRank;

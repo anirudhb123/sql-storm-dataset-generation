@@ -1,0 +1,79 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(VoteTypeId = 2) AS UpVotes,
+        SUM(VoteTypeId = 3) AS DownVotes,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(V.Id) AS VoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount
+),
+TagStatistics AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count AS UsageCount,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' + T.TagName + '%'
+    GROUP BY 
+        T.Id, T.TagName, T.Count
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount AS UserPostCount,
+    U.BadgeCount,
+    U.UpVotes,
+    U.DownVotes,
+    U.QuestionsCount,
+    P.PostId,
+    P.Title AS PostTitle,
+    P.CreationDate AS PostCreationDate,
+    P.Score AS PostScore,
+    P.ViewCount AS PostViewCount,
+    P.CommentCount AS PostCommentCount,
+    P.VoteCount AS PostVoteCount,
+    T.TagId,
+    T.TagName,
+    T.UsageCount AS TagUsageCount,
+    T.PostCount AS TagPostCount
+FROM 
+    UserStatistics U
+JOIN 
+    PostStatistics P ON U.UserId = P.PostId  -- Adjust JOIN condition as necessary for benchmarking
+JOIN 
+    TagStatistics T ON P.PostId = T.PostCount  -- Adjust JOIN condition as necessary for benchmarking
+ORDER BY 
+    U.Reputation DESC, P.Score DESC;

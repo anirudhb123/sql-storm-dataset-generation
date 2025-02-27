@@ -1,0 +1,63 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes,
+        AVG(p.Score) AS AvgScore,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY SUM(COALESCE(v.VoteTypeId = 2, 0)) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId 
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '3 months'
+    GROUP BY 
+        p.OwnerUserId
+), ClosedPostStats AS (
+    SELECT 
+        ph.UserId,
+        COUNT(DISTINCT ph.PostId) AS ClosedPosts
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.UserId
+)
+SELECT 
+    u.DisplayName,
+    ub.BadgeCount,
+    ps.PostCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AvgScore,
+    COALESCE(cps.ClosedPosts, 0) AS ClosedPosts,
+    CASE 
+        WHEN ub.BadgeCount > 5 THEN 'Veteran'
+        WHEN ub.BadgeCount BETWEEN 1 AND 5 THEN 'Novice'
+        ELSE 'No Badges'
+    END AS ExperienceLevel
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    PostStats ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    ClosedPostStats cps ON u.Id = cps.UserId
+WHERE 
+    (ps.PostCount > 10 OR (ps.PostCount IS NULL AND ub.BadgeCount > 0))
+ORDER BY 
+    ExperienceLevel, ps.UpVotes DESC NULLS LAST;

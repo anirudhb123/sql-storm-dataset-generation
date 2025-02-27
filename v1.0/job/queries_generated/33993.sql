@@ -1,0 +1,50 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+SELECT 
+    mk.keyword,
+    COALESCE(cast(mem.id) FILTER (WHERE mem.id IS NOT NULL), 'N/A') AS cast_id,
+    COUNT(DISTINCT mh.movie_id) AS total_movies,
+    AVG(mh.level) AS average_link_level
+FROM 
+    movie_keyword mk
+LEFT JOIN 
+    movie_info mi ON mk.movie_id = mi.movie_id
+LEFT JOIN 
+    complete_cast cc ON mk.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info mem ON cc.subject_id = mem.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON mk.movie_id = mh.movie_id
+WHERE 
+    (mi.info LIKE '%award%' OR mk.keyword LIKE '%Oscar%')
+    AND (mi.note IS NULL OR mi.note NOT LIKE '%nominated%')
+GROUP BY 
+    mk.keyword, mem.id
+ORDER BY 
+    total_movies DESC, average_link_level ASC
+LIMIT 10;

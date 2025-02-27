@@ -1,0 +1,62 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        NULL::text AS parent_title
+    FROM title m
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        mh.title AS parent_title
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE mh.level < 5 -- Limit levels to prevent infinite recursion
+), MovieInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS tagline, -- Assuming 1 is the tag type
+        MAX(CASE WHEN mi.info_type_id = 2 THEN mi.info END) AS summary -- Assuming 2 is the summary type
+    FROM MovieHierarchy mh
+    LEFT JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id
+    WHERE mh.production_year > 1980
+    GROUP BY mh.movie_id, mh.title, mh.production_year
+), RankedMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY cast_count DESC, production_year ASC) AS rank
+    FROM MovieInfo
+    WHERE cast_count > 0
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.aka_names,
+    rm.tagline,
+    rm.summary,
+    CASE 
+        WHEN rm.rank <= 10 THEN 'Top 10 Cast'
+        WHEN rm.rank BETWEEN 11 AND 20 THEN 'Top 20 Cast'
+        ELSE 'Other'
+    END AS rank_category
+FROM RankedMovies rm
+WHERE rm.aka_names IS NOT NULL
+  AND rm.tagline IS NOT NULL
+  OR rm.summary IS NOT NULL
+ORDER BY rm.rank, rm.production_year DESC;

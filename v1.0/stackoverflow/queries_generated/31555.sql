@@ -1,0 +1,89 @@
+WITH RecursivePostStats AS (
+    -- CTE to recursively gather statistics about posts and their answers
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Only considering Questions
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, p.Score
+
+    UNION ALL
+
+    SELECT 
+        ans.ParentId AS PostId,
+        NULL AS Title,
+        ans.OwnerUserId,
+        ans.CreationDate,
+        ans.Score,
+        NULL AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts ans
+    LEFT JOIN 
+        Votes v ON ans.Id = v.PostId
+    WHERE 
+        ans.PostTypeId = 2  -- Only considering Answers
+    GROUP BY 
+        ans.ParentId, ans.OwnerUserId, ans.CreationDate, ans.Score
+),
+PostRanked AS (
+    SELECT 
+        ps.PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        ps.CreationDate,
+        ps.Score,
+        ps.AnswerCount,
+        ps.TotalBounty,
+        DENSE_RANK() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.Score DESC) AS ScoreRank
+    FROM 
+        RecursivePostStats ps
+    JOIN 
+        Posts p ON p.Id = ps.PostId
+    JOIN 
+        Users u ON u.Id = ps.OwnerUserId
+),
+PostWithBadges AS (
+    SELECT 
+        pr.*,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        PostRanked pr
+    LEFT JOIN 
+        Badges b ON b.UserId = pr.OwnerUserId
+    GROUP BY 
+        pr.PostId, pr.Title, pr.OwnerDisplayName, pr.CreationDate, pr.Score, 
+        pr.AnswerCount, pr.TotalBounty, pr.ScoreRank
+)
+SELECT 
+    pwb.PostId,
+    pwb.Title,
+    pwb.OwnerDisplayName,
+    pwb.CreationDate,
+    pwb.Score,
+    pwb.AnswerCount,
+    pwb.TotalBounty,
+    pwb.BadgeCount,
+    CASE 
+        WHEN pwb.ScoreRank = 1 THEN 'Top'
+        WHEN pwb.ScoreRank <= 3 THEN 'High'
+        WHEN pwb.ScoreRank <= 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS ScoreCategory
+FROM 
+    PostWithBadges pwb
+WHERE 
+    pwb.BadgeCount > 0 OR pwb.Score > 100  -- Filtering for notable entries
+ORDER BY 
+    pwb.Score DESC, pwb.CreationDate ASC
+LIMIT 50;  -- Limiting results for performance benchmarking

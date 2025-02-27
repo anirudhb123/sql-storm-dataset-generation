@@ -1,0 +1,74 @@
+WITH TagStatistics AS (
+    SELECT 
+        COUNT(DISTINCT p.Id) AS PostCount, 
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        t.TagName
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = p.Tags::jsonb->>'id'::int
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        t.TagName
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(v.Id) AS VoteCount, 
+        SUM(v.BountyAmount) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        VoteCount DESC
+    LIMIT 10
+),
+RecentPostEdits AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        ph.CreationDate, 
+        ph.UserDisplayName, 
+        pt.Name AS EditType,
+        ph.Comment AS EditComment
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24)  -- Edit Title, Edit Body, Edit Tags, Suggested Edit Applied
+    ORDER BY 
+        ph.CreationDate DESC
+    LIMIT 5
+)
+SELECT 
+    tg.TagName,
+    tg.PostCount,
+    tg.TotalViews,
+    tg.TotalScore,
+    au.UserId,
+    au.DisplayName AS ActiveUserName,
+    au.VoteCount,
+    au.TotalBounties,
+    pe.Title AS RecentEditPostTitle,
+    pe.CreationDate AS EditDate,
+    pe.UserDisplayName AS EditorName,
+    pe.EditType,
+    pe.EditComment
+FROM 
+    TagStatistics tg
+CROSS JOIN 
+    MostActiveUsers au
+LEFT JOIN
+    RecentPostEdits pe ON pe.Id = (SELECT p.Id FROM RecentPostEdits p ORDER BY p.CreationDate DESC LIMIT 1)
+ORDER BY 
+    tg.TotalScore DESC, 
+    au.VoteCount DESC;

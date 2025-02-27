@@ -1,0 +1,77 @@
+
+WITH RECURSIVE RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC, ws_sold_time_sk DESC) AS rn,
+        ws_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = EXTRACT(YEAR FROM CURRENT_DATE) - 1)
+),
+ProfitByCategory AS (
+    SELECT 
+        i_category,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        RecentSales r
+    JOIN 
+        item i ON r.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        i_category
+),
+HighProfitCategories AS (
+    SELECT 
+        i_category,
+        total_profit,
+        total_orders,
+        DENSE_RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        ProfitByCategory
+    WHERE 
+        total_profit > (SELECT AVG(total_profit) FROM ProfitByCategory)
+),
+CategoryIncome AS (
+    SELECT 
+        h.i_category,
+        h.total_profit,
+        CASE 
+            WHEN h.total_orders > 100 THEN 'High'
+            WHEN h.total_orders BETWEEN 50 AND 100 THEN 'Medium'
+            ELSE 'Low'
+        END AS order_volume,
+        COALESCE(ROUND(AVG(h.total_profit), 2), 0) AS avg_profit
+    FROM 
+        HighProfitCategories h
+    LEFT JOIN 
+        household_demographics hd ON h.total_orders > hd.hd_dep_count
+    GROUP BY 
+        h.i_category, h.total_profit
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(CASE WHEN cat.avg_profit IS NOT NULL THEN cat.avg_profit ELSE 0 END) AS avg_category_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    COUNT(DISTINCT CASE WHEN ws.ws_ship_date_sk IS NULL THEN ws.ws_order_number ELSE NULL END) AS pending_orders
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    CategoryIncome cat ON ws.ws_item_sk = cat.h.i_category
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+GROUP BY 
+    c.c_first_name, c.c_last_name, ca.ca_city, ca.ca_state
+HAVING 
+    SUM(ws.ws_net_profit) > 1000
+ORDER BY 
+    avg_category_profit DESC NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

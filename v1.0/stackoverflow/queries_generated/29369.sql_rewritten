@@ -1,0 +1,37 @@
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Users.Reputation) AS AvgUserReputation,
+        COUNT(DISTINCT CASE WHEN Users.Reputation > 1000 THEN Users.Id END) AS InfluentialUsersCount
+    FROM
+        Tags
+    LEFT JOIN
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    LEFT JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    GROUP BY
+        Tags.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        TotalViews,
+        AvgUserReputation,
+        InfluentialUsersCount,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC, PostCount DESC) AS TagRank
+    FROM
+        TagStatistics
+)
+SELECT
+    TagName,
+    PostCount,
+    TotalViews,
+    AvgUserReputation,
+    InfluentialUsersCount
+FROM
+    TopTags
+WHERE
+    TagRank <= 10;

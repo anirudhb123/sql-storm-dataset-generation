@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_tax,
+        ws_ext_sales_price,
+        1 AS level
+    FROM
+        web_sales
+    WHERE
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    UNION ALL
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price * 0.9 AS discounted_price,
+        ws.ws_ext_tax,
+        ws.ws_ext_sales_price * 0.9,
+        cte.level + 1
+    FROM
+        web_sales ws
+    JOIN SalesCTE cte ON ws.ws_order_number = cte.ws_order_number
+    WHERE
+        cte.level < 5
+),
+AggregatedSales AS (
+    SELECT
+        item.i_item_id,
+        SUM(scte.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT scte.ws_order_number) AS order_count
+    FROM
+        SalesCTE scte
+    JOIN item ON scte.ws_item_sk = item.i_item_sk
+    GROUP BY
+        item.i_item_id
+),
+CustomerDemographics AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(DISTINCT c.customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_gender
+)
+SELECT
+    ad.i_item_id AS item_id,
+    ad.total_sales,
+    cd.avg_purchase_estimate,
+    CASE
+        WHEN ad.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status,
+    RANK() OVER (ORDER BY ad.total_sales DESC) AS sales_rank
+FROM
+    AggregatedSales ad
+LEFT JOIN CustomerDemographics cd ON ad.i_item_id = cd.cd_gender
+ORDER BY
+    ad.total_sales DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

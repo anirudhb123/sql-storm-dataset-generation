@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    LEFT JOIN
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    LEFT JOIN
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2
+    WHERE
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY
+        p.Id
+),
+RankedComments AS (
+    SELECT
+        c.PostId,
+        COUNT(*) AS TotalComments,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM
+        Comments c
+    GROUP BY
+        c.PostId
+),
+UserBadges AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON b.UserId = u.Id
+    GROUP BY
+        u.Id
+)
+SELECT
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.Tags,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rcm.TotalComments AS TotalComments,
+    rcm.LastCommentDate,
+    ub.TotalBadges,
+    ub.HighestBadgeClass
+FROM
+    RankedPosts rp
+LEFT JOIN
+    RankedComments rcm ON rcm.PostId = rp.PostId
+LEFT JOIN
+    Users u ON u.Id = rp.OwnerUserId
+LEFT JOIN
+    UserBadges ub ON ub.UserId = u.Id
+WHERE
+    rp.Rank <= 10
+ORDER BY
+    rp.Rank;

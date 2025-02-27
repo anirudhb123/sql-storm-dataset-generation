@@ -1,0 +1,83 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank
+    FROM
+        aka_title at
+    WHERE
+        at.production_year IS NOT NULL
+),
+FilteredActors AS (
+    SELECT 
+        ak.name AS actor_name,
+        ci.movie_id,
+        DENSE_RANK() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL 
+        AND ak.md5sum IS NOT NULL
+),
+MoviesWithCompanies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        COUNT(mc.company_id) AS company_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies_joined
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        rm.movie_id, rm.title
+),
+ActorsCount AS (
+    SELECT 
+        fi.movie_id,
+        COUNT(fi.actor_name) AS num_actors
+    FROM 
+        FilteredActors fi
+    GROUP BY 
+        fi.movie_id
+)
+SELECT 
+    mwc.movie_id,
+    mwc.title,
+    mwc.company_count,
+    mwc.companies_joined,
+    COALESCE(ac.num_actors, 0) AS num_actors,
+    mwc.production_year,
+    CASE 
+        WHEN mwc.company_count IS NULL THEN 'No Companies' 
+        ELSE 'Companies Present' 
+    END AS company_presence,
+    COALESCE(ac.num_actors, 0) AS total_actors,
+    CASE 
+        WHEN mwc.company_count > 0 AND COALESCE(ac.num_actors, 0) > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS activity_status,
+    EXISTS (
+        SELECT 1
+        FROM movie_info mi 
+        WHERE mi.movie_id = mwc.movie_id
+          AND mi.note IS NOT NULL
+    ) AS has_movie_info
+FROM 
+    MoviesWithCompanies mwc
+LEFT JOIN 
+    ActorsCount ac ON mwc.movie_id = ac.movie_id
+WHERE 
+    ((mwc.company_count IS NULL AND COALESCE(ac.num_actors, 0) > 0) OR 
+     (mwc.company_count > 0 AND COALESCE(ac.num_actors, 0) IS NULL) OR 
+     (mwc.company_count > 0 AND COALESCE(ac.num_actors, 0) > 0 AND COALESCE(ac.num_actors, 0) < 3))
+ORDER BY 
+    mwc.production_year DESC, 
+    mwc.title ASC
+LIMIT 100;

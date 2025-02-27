@@ -1,0 +1,63 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        et.id,
+        et.title,
+        et.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        aka_title et 
+    JOIN 
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+CastRatings AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        AVG(mr.rating) AS avg_rating
+    FROM 
+        cast_info c
+    LEFT JOIN 
+        movie_ratings mr ON c.movie_id = mr.movie_id
+    GROUP BY 
+        c.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        cr.cast_count,
+        cr.avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY cr.avg_rating DESC) AS rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastRatings cr ON mh.movie_id = cr.movie_id
+)
+SELECT 
+    DISTINCT tm.title,
+    tm.production_year,
+    COALESCE(tm.cast_count, 0) AS num_cast,
+    COALESCE(tm.avg_rating, 'No Rating') AS average_rating
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank <= 5
+ORDER BY 
+    tm.production_year DESC, 
+    COALESCE(tm.avg_rating, 0) DESC;

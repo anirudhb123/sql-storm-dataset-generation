@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1920) (Sweden) (theatrical) (35 mm)', '(1935) (France) (theatrical) (as Radio Cinéma)', '(1978) (Italy) (TV) (RaiUno)', '(1994-1995) (UK) (TV) (BBC 2)', '(2006) (Germany) (theatrical) (subtitled)', '(2014) (Brazil) (all media)', '(????) (USA) (DVD) (as "Schoolteacher Goes to Boys School")', '(as ORF)', '(co-producer) (as Télévision Suisse Romande)') AND t.md5sum IS NOT NULL AND cn.name > 'Sunset Road Productions';

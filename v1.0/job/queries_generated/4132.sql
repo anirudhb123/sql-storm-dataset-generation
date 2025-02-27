@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT cc.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS rn
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorAwards AS (
+    SELECT 
+        ak.person_id,
+        COUNT(DISTINCT m.id) AS award_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        title m ON ci.movie_id = m.id
+    JOIN 
+        movie_info mi ON m.id = mi.movie_id 
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'award')
+    GROUP BY 
+        ak.person_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    COALESCE(aaw.award_count, 0) AS actor_award_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    ActorAwards aaw ON rm.title_id = aaw.person_id
+WHERE 
+    rm.rn <= 3
+ORDER BY 
+    rm.production_year DESC, rm.cast_count DESC
+LIMIT 10;

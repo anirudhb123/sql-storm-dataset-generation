@@ -1,0 +1,30 @@
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+TopNations AS (
+    SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS nation_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+    ORDER BY nation_revenue DESC
+    LIMIT 5
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, (SUM(ps.ps_supplycost) / COUNT(ps.ps_suppkey)) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+    HAVING COUNT(ps.ps_suppkey) > 1
+)
+SELECT p.p_name, p.p_brand, r.r_name, t.nation_revenue, avg_avg_supplycost
+FROM part p
+JOIN PartSuppliers ps ON p.p_partkey = ps.ps_partkey
+JOIN region r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey IN (SELECT o2.o_orderkey FROM RecentOrders o2))))
+JOIN TopNations t ON r.r_name = t.n_nationkey
+JOIN PartSuppliers avg ON ps.ps_partkey = avg.ps_partkey
+ORDER BY nation_revenue DESC, avg_supplycost DESC;

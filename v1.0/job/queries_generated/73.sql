@@ -1,0 +1,59 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) as rn,
+        (SELECT COUNT(*) FROM movie_keyword mk WHERE mk.movie_id = a.id) as keyword_count
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+cast_details AS (
+    SELECT 
+        c.movie_id,
+        GROUP_CONCAT(CONCAT(ka.name, ' (', r.role, ')')) AS cast_list
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ka ON ka.person_id = c.person_id
+    JOIN 
+        role_type r ON r.id = c.role_id
+    GROUP BY 
+        c.movie_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name ORDER BY cn.name) AS companies,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    cd.cast_list,
+    ci.companies,
+    ci.company_count,
+    rm.keyword_count,
+    COALESCE(cd.cast_list, 'No Cast') AS cast_info,
+    CASE 
+        WHEN ci.company_count > 0 THEN 'Produced'
+        ELSE 'Not Produced'
+    END AS production_status
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    cast_details cd ON cd.movie_id = rm.id
+LEFT JOIN 
+    company_info ci ON ci.movie_id = rm.id
+WHERE 
+    rm.rn <= 10
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title;

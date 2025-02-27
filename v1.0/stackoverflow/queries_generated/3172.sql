@@ -1,0 +1,62 @@
+WITH RankedTags AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS PostCount,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS Rnk
+    FROM Tags
+    JOIN Posts ON Tags.Id = Posts.Id
+    WHERE Posts.PostTypeId = 1
+    GROUP BY TagName
+), UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(SUM(VoteAmount), 0) AS TotalVotes,
+        RANK() OVER (ORDER BY COALESCE(SUM(VoteAmount), 0) DESC) AS Rnk
+    FROM Users U
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS VoteAmount
+        FROM Votes
+        GROUP BY PostId
+    ) V ON U.Id = V.UserId
+    GROUP BY U.Id
+), RecentPosts AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.CreationDate,
+        TagName,
+        ROW_NUMBER() OVER (PARTITION BY Tags.TagName ORDER BY Posts.CreationDate DESC) AS RecentRank
+    FROM Posts
+    JOIN Tags ON Posts.Tags LIKE '%' || Tags.TagName || '%'
+    WHERE Posts.CreationDate >= NOW() - INTERVAL '30 days'
+), CloseReasons AS (
+    SELECT 
+        P.Id AS PostId,
+        H.Comment AS ClosureReason,
+        H.CreationDate AS ClosureDate,
+        COUNT(*) AS ClosureCount
+    FROM PostHistory H
+    JOIN Posts P ON H.PostId = P.Id
+    WHERE H.PostHistoryTypeId = 10
+    GROUP BY P.Id, H.Comment, H.CreationDate
+    HAVING COUNT(*) >= 2
+)
+
+SELECT 
+    U.DisplayName AS User,
+    U.Reputation AS UserReputation,
+    R.TagName,
+    R.PostCount,
+    RP.Title AS RecentPostTitle,
+    RP.CreationDate AS RecentPostDate,
+    CR.ClosureReason,
+    CR.ClosureDate
+FROM Users U
+INNER JOIN UserReputation UR ON U.Id = UR.UserId
+LEFT JOIN RankedTags R ON R.Rnk <= 5
+LEFT JOIN RecentPosts RP ON RP.TagName = R.TagName AND RP.RecentRank = 1
+LEFT JOIN CloseReasons CR ON CR.PostId = RP.Id
+WHERE UR.Rnk <= 10
+ORDER BY U.Reputation DESC, R.PostCount DESC, RP.CreationDate DESC;

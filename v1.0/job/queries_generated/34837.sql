@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        1 AS depth,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.title] AS path
+    FROM 
+        aka_title mt 
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id, 
+        at.title,
+        mh.depth + 1,
+        at.production_year,
+        at.kind_id,
+        mh.path || at.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.depth,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    COUNT(DISTINCT c.company_id) AS production_company_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id 
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id 
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+WHERE 
+    mh.depth <= 3
+    AND a.name IS NOT NULL
+    AND c.country_code IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.depth
+ORDER BY 
+    mh.production_year DESC, mh.depth ASC;

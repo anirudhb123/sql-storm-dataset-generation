@@ -1,0 +1,64 @@
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk
+),
+TopCustomers AS (
+    SELECT
+        c.customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        cs.last_purchase_date,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        CustomerSales cs
+    JOIN
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE
+        cs.total_sales > 0
+),
+PromotionalEffect AS (
+    SELECT
+        p.p_promo_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales_with_promo,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders_with_promo
+    FROM
+        web_sales ws
+    JOIN
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE
+        ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY
+        p.p_promo_name
+)
+SELECT
+    tc.customer_id,
+    tc.total_sales,
+    tc.total_orders,
+    tc.last_purchase_date,
+    pe.promo_name,
+    pe.total_sales_with_promo,
+    pe.total_orders_with_promo
+FROM
+    TopCustomers tc
+LEFT JOIN
+    (SELECT
+        promo_name,
+        SUM(total_sales_with_promo) AS total_sales_with_promo,
+        SUM(total_orders_with_promo) AS total_orders_with_promo
+    FROM
+        PromotionalEffect
+    GROUP BY
+        promo_name) pe ON tc.total_sales > 1000 
+WHERE
+    tc.sales_rank <= 100
+ORDER BY
+    tc.total_sales DESC;

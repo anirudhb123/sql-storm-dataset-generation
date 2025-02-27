@@ -1,0 +1,53 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        1 AS depth
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.person_role_id IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        ah.depth + 1
+    FROM 
+        cast_info ci
+    JOIN 
+        ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE 
+        ci.person_id <> ah.person_id
+)
+SELECT 
+    a.name AS Actor_Name,
+    mt.title AS Movie_Title,
+    mt.production_year AS Production_Year,
+    GROUP_CONCAT(DISTINCT cn.name) AS Company_Names,
+    COUNT(DISTINCT mk.keyword) AS Number_Of_Keywords,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY mt.production_year DESC) AS Movie_Sequence,
+    MAX(depth) OVER (PARTITION BY a.id) AS Max_Depth
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND mt.production_year >= 2000
+    AND (cn.country_code IS NULL OR cn.country_code = 'USA')
+GROUP BY 
+    a.id, mt.id
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    Movie_Sequence;

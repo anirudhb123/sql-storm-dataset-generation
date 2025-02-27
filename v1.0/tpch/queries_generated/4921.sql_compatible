@@ -1,0 +1,71 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        AVG(o.o_totalprice) > 1000
+), SupplierPartInfo AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM
+        part p
+    JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) > 100
+), SignificantSuppliers AS (
+    SELECT 
+        r.r_name,
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(h.avg_order_value, 0) AS avg_order_value
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        HighValueCustomers h ON h.c_custkey = s.s_suppkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE
+        s.rn = 1
+)
+SELECT 
+    ss.r_name AS region_name,
+    ss.s_name AS supplier_name,
+    psi.p_name AS part_name,
+    psi.total_avail_qty,
+    ss.avg_order_value
+FROM 
+    SignificantSuppliers ss
+JOIN 
+    SupplierPartInfo psi ON ss.s_suppkey = psi.p_partkey 
+ORDER BY 
+    ss.r_name, ss.s_name, psi.total_avail_qty DESC;

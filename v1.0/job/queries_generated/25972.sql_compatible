@@ -1,0 +1,55 @@
+
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS title,
+        m.production_year,
+        STRING_AGG(DISTINCT c.name, ',' ORDER BY c.name) AS cast_names,
+        STRING_AGG(DISTINCT k.keyword, ',' ORDER BY k.keyword) AS keywords,
+        COUNT(DISTINCT mc.company_id) AS production_companies
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+final_output AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.cast_names,
+        md.keywords,
+        md.production_companies,
+        CASE 
+            WHEN md.production_year >= 2000 THEN 'Modern'
+            WHEN md.production_year >= 1980 THEN 'Classic'
+            ELSE 'Old'
+        END AS era_type
+    FROM 
+        movie_details md
+)
+SELECT 
+    f.movie_id,
+    f.title,
+    f.production_year,
+    f.cast_names,
+    f.keywords,
+    f.production_companies,
+    f.era_type
+FROM 
+    final_output f
+WHERE 
+    f.production_companies >= 3
+ORDER BY 
+    f.production_year DESC,
+    f.title ASC;

@@ -1,0 +1,85 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        Users
+), 
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) - SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS NetVotes,
+        COUNT(CASE WHEN c.UserId IS NOT NULL THEN c.Id END) AS CommentCount,
+        COUNT(DISTINCT l.RelatedPostId) AS RelatedPostsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id 
+    LEFT JOIN 
+        PostLinks l ON l.PostId = p.Id 
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.OwnerUserId
+),
+TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.ViewCount > 1000 THEN 1 ELSE 0 END) AS HighViewCountPosts
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    pm.PostId,
+    pm.NetVotes,
+    pm.CommentCount,
+    ph.EditCount,
+    ts.TagName,
+    ts.TotalPosts,
+    ts.HighViewCountPosts,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'Experienced'
+        WHEN u.Reputation BETWEEN 500 AND 999 THEN 'Intermediate'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    UserReputation u
+LEFT JOIN 
+    PostMetrics pm ON pm.OwnerUserId = u.UserId
+LEFT JOIN 
+    PostHistoryStats ph ON ph.PostId = pm.PostId
+LEFT JOIN 
+    Tags t ON t.Count > 100
+LEFT JOIN 
+    TagStatistics ts ON ts.TagName = t.TagName
+WHERE 
+    u.Reputation IS NOT NULL
+ORDER BY 
+    u.Reputation DESC, pm.NetVotes DESC, pm.CommentCount DESC
+LIMIT 
+    100;

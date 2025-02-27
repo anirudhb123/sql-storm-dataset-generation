@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        u.DisplayName AS Owner,
+        p.CreationDate,
+        DATEDIFF(NOW(), p.CreationDate) AS DaysOld,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+    GROUP BY p.Id, u.DisplayName
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN pht.Name = 'Edit Body' THEN ph.CreationDate END) AS LastEdited,
+        COUNT(*) AS EditCount,
+        STRING_AGG(DISTINCT pht.Name) AS ChangeTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+),
+FinalPostMetrics AS (
+    SELECT 
+        rp.Id AS PostId,
+        rp.Title,
+        rp.Owner,
+        rp.DaysOld,
+        rp.CommentCount,
+        COALESCE(ps.LastEdited, 'No edits') AS LastEdited,
+        COALESCE(ps.EditCount, 0) AS EditCount,
+        COALESCE(ps.ChangeTypes, 'None') AS ChangeTypes,
+        rp.UpVotes,
+        rp.DownVotes,
+        CASE 
+            WHEN rp.UpVotes > rp.DownVotes THEN 'Positive'
+            WHEN rp.UpVotes < rp.DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM RecentPosts rp
+    LEFT JOIN PostHistorySummary ps ON rp.Id = ps.PostId
+)
+SELECT 
+    fpm.PostId,
+    fpm.Title,
+    fpm.Owner,
+    fpm.DaysOld,
+    fpm.CommentCount,
+    fpm.LastEdited,
+    fpm.EditCount,
+    fpm.ChangeTypes,
+    fpm.UpVotes,
+    fpm.DownVotes,
+    fpm.VoteSentiment,
+    (SELECT COUNT(*) FROM Posts p WHERE p.ParentId = fpm.PostId) AS AnswerCount
+FROM FinalPostMetrics fpm
+ORDER BY fpm.DaysOld ASC, fpm.UpVotes - fpm.DownVotes DESC;

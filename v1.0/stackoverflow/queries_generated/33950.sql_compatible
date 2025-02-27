@@ -1,0 +1,88 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        1 AS Level,
+        p.CreationDate
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.AcceptedAnswerId,
+        Level + 1,
+        p2.CreationDate
+    FROM 
+        Posts p2
+    INNER JOIN 
+        Posts p1 ON p1.AcceptedAnswerId = p2.Id
+    WHERE 
+        p1.PostTypeId = 1  
+)
+, UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+)
+, PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(pc.AnswerCount, 0) AS AnswerCount,
+        COALESCE(cv.VoteCount, 0) AS VoteCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY PostId) pc ON p.Id = pc.PostId
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS VoteCount FROM Votes GROUP BY PostId) cv ON p.Id = cv.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, pc.AnswerCount, cv.VoteCount
+)
+SELECT 
+    r.Id AS QuestionId,
+    r.Title AS QuestionTitle,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    pm.AnswerCount,
+    pm.VoteCount,
+    pm.CommentCount,
+    CASE 
+        WHEN r.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+        ELSE 'Not Accepted'
+    END AS AnswerStatus,
+    CASE 
+        WHEN r.AcceptedAnswerId IS NOT NULL AND a.Title IS NOT NULL THEN a.Title
+        ELSE 'No accepted answer given'
+    END AS AcceptedAnswerTitle
+FROM 
+    RecursivePostCTE r
+JOIN 
+    UserReputation u ON r.OwnerUserId = u.UserId
+LEFT JOIN 
+    Posts a ON r.AcceptedAnswerId = a.Id
+JOIN 
+    PostMetrics pm ON r.Id = pm.PostId
+WHERE 
+    u.Reputation > 1000  
+ORDER BY 
+    pm.VoteCount DESC,
+    pm.AnswerCount DESC;

@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1996-01-01'
+),
+SupplierTotal AS (
+    SELECT 
+        ps.ps_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS adjusted_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN '1996-06-01' AND '1996-06-30'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    o.o_orderkey,
+    o.o_orderdate,
+    li.adjusted_price,
+    COALESCE(st.total_supply_cost, 0) AS total_supply_cost
+FROM 
+    HighValueCustomers c
+JOIN 
+    RankedOrders o ON c.c_custkey = o.o_orderkey
+LEFT JOIN 
+    FilteredLineItems li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierTotal st ON li.l_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+WHERE 
+    o.rn = 1
+ORDER BY 
+    c.c_name, 
+    o.o_orderdate DESC;

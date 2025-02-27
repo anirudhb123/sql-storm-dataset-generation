@@ -1,0 +1,47 @@
+
+WITH RECURSIVE income_bracket AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound, 1 AS level
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound, ibr.level + 1
+    FROM income_band ib
+    INNER JOIN income_bracket ibr ON ibr.level < 5
+    WHERE ib.ib_lower_bound IS NOT NULL
+), 
+demographic_summary AS (
+    SELECT 
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY cd.cd_gender, hd.hd_income_band_sk
+), 
+sales_stats AS (
+    SELECT
+        ds.d_year,
+        ds.d_month_seq,
+        d.cd_gender,
+        d.hd_income_band_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY d.cd_gender ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM date_dim ds
+    JOIN web_sales ws ON ws.ws_sold_date_sk = ds.d_date_sk
+    JOIN demographic_summary d ON ds.d_month_seq = d.hd_income_band_sk
+    GROUP BY ds.d_year, ds.d_month_seq, d.cd_gender, d.hd_income_band_sk
+)
+SELECT 
+    COALESCE(ss.year_month, CONCAT(ds.d_year, '-', ds.d_month_seq)) AS year_month,
+    ss.cd_gender AS gender, 
+    SUM(ss.total_net_profit) AS monthly_profit,
+    COUNT(CASE WHEN ss.profit_rank = 1 THEN 1 END) AS top_profit_count
+FROM sales_stats ss
+FULL OUTER JOIN date_dim ds ON ds.d_month_seq = ss.d_month_seq
+WHERE (ss.cd_gender IS NOT NULL OR ds.d_date IS NULL)
+GROUP BY year_month, ss.cd_gender
+ORDER BY year_month, ss.cd_gender;

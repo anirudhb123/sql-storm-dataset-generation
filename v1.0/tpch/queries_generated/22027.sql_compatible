@@ -1,0 +1,64 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'Unknown'
+            ELSE CAST(s.s_acctbal AS VARCHAR(255))
+        END AS formatted_account_balance,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+BulkOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+TopOrders AS (
+    SELECT 
+        bo.o_orderkey,
+        bo.total_order_value,
+        DENSE_RANK() OVER (ORDER BY bo.total_order_value DESC) AS rank
+    FROM 
+        BulkOrders bo
+)
+SELECT 
+    p.p_name,
+    s.s_name,
+    r.r_name,
+    COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+    STRING_AGG(DISTINCT CONCAT('OrderKey: ', CAST(o.o_orderkey AS VARCHAR), ', Value: ', CAST(TOP.total_order_value AS VARCHAR)), '; ') AS order_info
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    TopOrders TOP ON TOP.o_orderkey IN (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+WHERE 
+    (p.p_size BETWEEN 10 AND 30 OR p.p_comment IS NULL)
+    AND (s.s_name NOT LIKE 'A%' OR s.s_name IS NULL)
+GROUP BY 
+    p.p_name, s.s_name, r.r_name
+HAVING 
+    COUNT(DISTINCT TOP.o_orderkey) > 5 
+    OR SUM(ps.ps_availqty) < (SELECT AVG(ps_availqty) FROM partsupp WHERE ps_availqty > 0)
+ORDER BY 
+    total_supply_cost DESC, r.r_name ASC;

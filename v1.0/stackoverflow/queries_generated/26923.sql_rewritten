@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        RANK() OVER (PARTITION BY STRING_AGG(t.TagName, ', ') ORDER BY p.Score DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Tags, p.Score, p.ViewCount, p.CommentCount, u.DisplayName, u.Reputation
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 10 
+),
+
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TotalScore DESC
+    LIMIT 10 
+)
+
+SELECT 
+    rp.Title,
+    rp.Tags,
+    rp.Score,
+    rp.ViewCount,
+    rp.CommentCount,
+    rp.OwnerDisplayName,
+    (SELECT COUNT(*) FROM MostActiveUsers) AS ActiveUserCount,
+    tt.TagName,
+    tt.PostCount,
+    tt.TotalScore
+FROM 
+    RankedPosts rp
+JOIN 
+    TopTags tt ON rp.TagRank = 1 AND tt.TagName = ANY(string_to_array(substring(rp.Tags, 2, length(rp.Tags)-2), '><'))
+WHERE 
+    rp.TagRank <= 3
+ORDER BY 
+    rp.Score DESC, 
+    rp.ViewCount DESC;

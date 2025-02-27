@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Only questions
+        AND p.Score > 0 -- Only questions with non-zero score
+),
+TopQuestions AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.Rank <= 5 -- Top 5 questions per user
+),
+CommentsWithPostInfo AS (
+    SELECT
+        c.Id AS CommentId,
+        c.PostId,
+        c.Text,
+        c.CreationDate AS CommentDate,
+        tp.Title AS PostTitle,
+        tp.ViewCount AS PostViewCount
+    FROM
+        Comments c
+    JOIN 
+        TopQuestions tp ON c.PostId = tp.PostId
+)
+SELECT
+    tc.CommentId,
+    tc.Text AS CommentText,
+    tc.CommentDate,
+    tq.Title AS QuestionTitle,
+    tq.ViewCount AS QuestionViewCount,
+    COUNT(DISTINCT b.UserId) AS TotalBadges,
+    STRING_AGG(DISTINCT b.Name, ', ') AS BadgeNames
+FROM
+    CommentsWithPostInfo tc
+LEFT JOIN
+    Badges b ON tc.PostId = b.UserId
+JOIN
+    TopQuestions tq ON tc.PostId = tq.PostId
+GROUP BY
+    tc.CommentId, tc.CommentText, tc.CommentDate, tq.Title, tq.ViewCount
+ORDER BY
+    tq.ViewCount DESC;

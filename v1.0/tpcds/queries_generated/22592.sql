@@ -1,0 +1,91 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold,
+        SUM(ws_net_paid) AS total_revenue,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+customer_data AS (
+    SELECT 
+        c_customer_sk,
+        CA.ca_city,
+        CD.cd_gender,
+        COUNT(DISTINCT c_first_name) AS unique_first_names,
+        COUNT(DISTINCT c_last_name) AS unique_last_names
+    FROM 
+        customer C
+    LEFT JOIN 
+        customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    LEFT JOIN 
+        customer_address CA ON C.c_current_addr_sk = CA.ca_address_sk
+    GROUP BY 
+        C.c_customer_sk, CA.ca_city, CD.cd_gender
+),
+returns_data AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+),
+inventory_data AS (
+    SELECT 
+        inv_item_sk,
+        MAX(inv_quantity_on_hand) AS max_inventory
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+),
+final_report AS (
+    SELECT 
+        S.ws_item_sk,
+        COALESCE(S.total_sold, 0) AS total_sold,
+        COALESCE(S.total_revenue, 0) AS total_revenue,
+        COALESCE(R.total_returns, 0) AS total_returns,
+        COALESCE(R.total_return_amount, 0) AS total_return_amount,
+        COALESCE(I.max_inventory, 0) AS max_inventory,
+        C.ca_city,
+        C.cd_gender
+    FROM 
+        sales_data S
+    FULL OUTER JOIN 
+        returns_data R ON S.ws_item_sk = R.sr_item_sk 
+    FULL OUTER JOIN 
+        inventory_data I ON S.ws_item_sk = I.inv_item_sk
+    LEFT JOIN 
+        customer_data C ON S.ws_item_sk IN (
+            SELECT sr_item_sk FROM store_returns
+            WHERE sr_item_sk IS NOT NULL
+            GROUP BY sr_item_sk HAVING COUNT(sr_ticket_number) > 0
+        )
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN total_revenue > 10000 THEN 'High Revenue'
+        WHEN total_revenue BETWEEN 5000 AND 10000 THEN 'Moderate Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_category,
+    CASE 
+        WHEN max_inventory < 20 THEN 'Low Stock'
+        WHEN max_inventory BETWEEN 20 AND 100 THEN 'Moderate Stock'
+        ELSE 'High Stock'
+    END AS stock_level,
+    DENSE_RANK() OVER (ORDER BY total_revenue DESC) AS revenue_rank
+FROM 
+    final_report
+WHERE 
+    (total_returns IS NOT NULL AND total_returns > 0) OR
+    (total_sold IS NOT NULL AND total_sold > 30)
+ORDER BY 
+    revenue_rank NULLS LAST;

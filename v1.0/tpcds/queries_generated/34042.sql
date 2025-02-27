@@ -1,0 +1,46 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 0 AS level
+    FROM customer
+    WHERE c_customer_sk IS NOT NULL
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+),
+monthly_sales AS (
+    SELECT d.d_year, d.d_month_seq, SUM(ws.ws_net_profit) AS total_sales
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_year BETWEEN 2022 AND 2023
+    GROUP BY d.d_year, d.d_month_seq
+),
+customer_demographics AS (
+    SELECT cd.cd_gender, cd.cd_marital_status, COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+),
+customer_sales AS (
+    SELECT ch.c_customer_sk, 
+           ch.c_first_name, 
+           ch.c_last_name, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           ms.total_sales
+    FROM customer_hierarchy ch
+    LEFT JOIN customer_demographics cd ON ch.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN monthly_sales ms ON ms.d_year = 2023
+    WHERE ms.total_sales IS NOT NULL
+)
+SELECT cd.cc_gender,
+       cd.cc_marital_status,
+       COUNT(DISTINCT cs.c_customer_sk) AS number_of_customers,
+       COALESCE(SUM(cs.total_sales), 0) AS total_sales,
+       ROUND(AVG(cs.total_sales), 2) AS avg_sales_per_customer,
+       STRING_AGG(cs.c_first_name || ' ' || cs.c_last_name, ', ') AS customer_names
+FROM customer_sales cs
+JOIN customer_demographics cd ON cs.cd_gender = cd.cd_gender
+GROUP BY cd.cd_gender, cd.cd_marital_status
+ORDER BY total_sales DESC
+LIMIT 10;

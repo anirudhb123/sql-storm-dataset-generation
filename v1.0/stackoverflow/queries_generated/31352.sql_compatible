@@ -1,0 +1,93 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AcceptedAnswerId,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursiveCTE R ON P.ParentId = R.PostId
+),
+VotesWithTypes AS (
+    SELECT
+        V.PostId,
+        VT.Name AS VoteType,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes V
+    INNER JOIN 
+        VoteTypes VT ON V.VoteTypeId = VT.Id
+    GROUP BY 
+        V.PostId, VT.Name
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        SUM(COALESCE(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END, 0)) AS QuestionsAsked,
+        SUM(COALESCE(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END, 0)) AS AnswersGiven,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpvotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.Views
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    U.DisplayName AS PostOwner,
+    U.Reputation AS OwnerReputation,
+    V.VoteType,
+    V.VoteCount,
+    R.CreationDate,
+    R.LastActivityDate,
+    CASE 
+        WHEN R.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AnswerStatus,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = R.PostId) AS CommentCount,
+    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = R.OwnerUserId) AS BadgeCount,
+    US.QuestionsAsked,
+    US.AnswersGiven,
+    US.UpvotesReceived
+FROM 
+    RecursiveCTE R
+LEFT JOIN 
+    VotesWithTypes V ON R.PostId = V.PostId
+LEFT JOIN 
+    Users U ON R.OwnerUserId = U.Id
+LEFT JOIN 
+    UserStats US ON U.Id = US.UserId
+WHERE 
+    R.LastActivityDate > DATEADD(day, -30, '2024-10-01')
+ORDER BY 
+    R.LastActivityDate DESC, R.PostId
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

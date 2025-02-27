@@ -1,0 +1,28 @@
+
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    c.kind AS character_role
+FROM 
+    title t
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name cn ON mc.company_id = cn.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    role_type rt ON ci.role_id = rt.id
+JOIN 
+    character c ON ci.character_id = c.id  -- Assuming 'character' is the correct table to join for character_role
+WHERE 
+    t.production_year >= 2000
+GROUP BY 
+    t.title, ak.name, c.kind, t.production_year
+ORDER BY 
+    t.production_year DESC, 
+    ak.name;

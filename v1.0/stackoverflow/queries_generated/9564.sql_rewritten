@@ -1,0 +1,49 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS rn
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Posts a ON p.Id = a.ParentId
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.CommentCount,
+        rp.AnswerCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.rn <= 5 
+)
+SELECT
+    trp.*,
+    (SELECT STRING_AGG(tag.TagName, ', ')
+     FROM Tags tag
+     WHERE tag.Id IN (SELECT unnest(string_to_array(trp.Tags, '><'))::int)
+     ) AS AssociatedTags
+FROM
+    TopRankedPosts trp
+ORDER BY
+    trp.Score DESC, trp.CreationDate DESC;

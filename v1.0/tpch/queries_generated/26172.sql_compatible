@@ -1,0 +1,55 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CONCAT(p.p_name, ' - ', p.p_brand) AS part_full_desc
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        COUNT(DISTINCT l.l_orderkey) AS lineitem_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_totalprice > 10000
+    GROUP BY o.o_orderkey, o.o_totalprice
+)
+SELECT 
+    r.r_name AS region_name,
+    STRING_AGG(DISTINCT pd.part_full_desc, '; ') AS part_descriptions,
+    SUM(hvo.lineitem_count) AS total_lineitems,
+    AVG(s.s_acctbal) AS average_supplier_balance
+FROM RankedSuppliers s
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN PartDetails pd ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_brand LIKE 'Brand#%' 
+    )
+)
+JOIN HighValueOrders hvo ON hvo.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_suppkey = s.s_suppkey
+)
+GROUP BY r.r_name
+ORDER BY r.r_name;

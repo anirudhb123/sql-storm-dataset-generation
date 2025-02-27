@@ -1,0 +1,45 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        1 AS level,
+        NULL AS parent_movie_id
+    FROM aka_title mt
+    WHERE mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON ml.linked_movie_id = m.id
+)
+
+SELECT
+    akn.name AS actor_name,
+    COUNT(DISTINCT ch.movie_id) AS total_movies,
+    STRING_AGG(DISTINCT at.title, ', ') AS movie_titles,
+    AVG(m.production_year) AS avg_production_year,
+    MAX(m.production_year) OVER (PARTITION BY akn.id) AS latest_movie_year,
+    STRING_AGG(DISTINCT CASE WHEN m.production_year < 2000 THEN m.title END, ', ') AS movies_before_2000,
+    m.title AS linked_movie_title,
+    CASE 
+        WHEN COUNT(DISTINCT ch.movie_id) > 10 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent'
+    END AS actor_status
+FROM aka_name akn
+LEFT JOIN cast_info ch ON akn.person_id = ch.person_id
+LEFT JOIN aka_title at ON ch.movie_id = at.id
+LEFT JOIN movie_info mi ON ch.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre')
+LEFT JOIN movie_keyword mk ON ch.movie_id = mk.movie_id
+LEFT JOIN movie_hierarchy m ON ch.movie_id = m.movie_id
+WHERE akn.name IS NOT NULL AND akn.name <> ''
+GROUP BY akn.id, akn.name, m.title
+HAVING COUNT(DISTINCT ch.movie_id) > 5
+ORDER BY total_movies DESC, avg_production_year DESC
+LIMIT 50;

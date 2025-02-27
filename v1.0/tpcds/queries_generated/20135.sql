@@ -1,0 +1,63 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS total_returns,
+        SUM(cr_return_amt) AS total_return_amount,
+        CASE 
+            WHEN COUNT(DISTINCT cr_order_number) > 10 THEN 'Frequent Returner'
+            WHEN COUNT(DISTINCT cr_order_number) BETWEEN 5 AND 10 THEN 'Occasional Returner'
+            ELSE 'Rare Returner' 
+        END AS return_category
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_returning_customer_sk
+),
+WebReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        COUNT(DISTINCT wr_order_number) AS total_web_returns,
+        SUM(wr_return_amt) AS total_web_return_amount
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+CombinedReturns AS (
+    SELECT
+        COALESCE(cr.cr_returning_customer_sk, wr.wr_returning_customer_sk) AS customer_sk,
+        COALESCE(cr.total_returns, 0) AS total_catalog_returns,
+        COALESCE(cr.total_return_amount, 0) AS total_catalog_return_amount,
+        COALESCE(wr.total_web_returns, 0) AS total_web_returns,
+        COALESCE(wr.total_web_return_amount, 0) AS total_web_return_amount
+    FROM 
+        CustomerReturns cr
+    FULL OUTER JOIN 
+        WebReturns wr ON cr.returning_customer_sk = wr.wr_returning_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(cr.total_catalog_returns, 0) + COALESCE(wr.total_web_returns, 0) AS grand_total_returns,
+    CASE 
+        WHEN (COALESCE(cr.total_catalog_returns, 0) + COALESCE(wr.total_web_returns, 0)) = 0 THEN 'No Returns'
+        WHEN (COALESCE(cr.total_catalog_returns, 0) + COALESCE(wr.total_web_returns, 0)) > 0 AND (COALESCE(cr.total_catalog_returns, 0) + COALESCE(wr.total_web_returns, 0)) < 5 THEN 'Minimal Returns'
+        ELSE 'High Return Rate'
+    END AS return_status,
+    COALESCE(cr.return_category, 'No Returns') AS catalog_return_category
+FROM 
+    customer c
+LEFT JOIN 
+    CombinedReturns cr ON c.c_customer_sk = cr.customer_sk
+LEFT JOIN 
+    CombinedReturns wr ON c.c_customer_sk = wr.customer_sk
+WHERE 
+    (c.c_birth_month = EXTRACT(MONTH FROM CURRENT_DATE) OR c.c_birth_month IS NULL)
+    AND c.c_preferred_cust_flag = 'Y'
+ORDER BY 
+    grand_total_returns DESC, 
+    c.c_last_name ASC, 
+    c.c_first_name ASC
+LIMIT 100 OFFSET 0;

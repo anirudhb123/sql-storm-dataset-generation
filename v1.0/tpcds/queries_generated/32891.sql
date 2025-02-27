@@ -1,0 +1,45 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT ss_store_sk, 
+           SUM(ss_net_paid) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_paid) DESC) AS rnk
+    FROM store_sales
+    GROUP BY ss_store_sk
+),
+RecentReturns AS (
+    SELECT sr_store_sk, 
+           SUM(sr_return_amt_inc_tax) AS total_returns
+    FROM store_returns
+    WHERE sr_returned_date_sk > (SELECT MAX(d_date_sk) - 30 FROM date_dim)
+    GROUP BY sr_store_sk
+),
+SalesReturns AS (
+    SELECT s.s_store_sk,
+           COALESCE(s.total_sales, 0) AS total_sales,
+           COALESCE(r.total_returns, 0) AS total_returns,
+           (COALESCE(s.total_sales, 0) - COALESCE(r.total_returns, 0)) AS net_sales
+    FROM SalesCTE s
+    LEFT JOIN RecentReturns r ON s.ss_store_sk = r.sr_store_sk
+),
+CustomerCount AS (
+    SELECT c_current_addr_sk AS store_sk,
+           COUNT(DISTINCT c_customer_sk) AS total_customers
+    FROM customer
+    WHERE c_current_addr_sk IS NOT NULL
+    GROUP BY c_current_addr_sk
+)
+SELECT w.w_warehouse_name,
+       s.total_sales,
+       s.total_returns,
+       s.net_sales,
+       c.total_customers,
+       CASE 
+           WHEN s.net_sales > 100000 THEN 'High Sales'
+           WHEN s.net_sales BETWEEN 50000 AND 100000 THEN 'Medium Sales'
+           ELSE 'Low Sales'
+       END AS sales_category
+FROM SalesReturns s
+JOIN customer_address ca ON ca.ca_address_sk = CAST(s.s_store_sk AS INTEGER)
+JOIN warehouse w ON ca.ca_address_sk = w.w_warehouse_sk
+LEFT JOIN CustomerCount c ON s.s_store_sk = c.store_sk
+ORDER BY s.net_sales DESC;

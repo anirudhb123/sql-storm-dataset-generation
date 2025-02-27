@@ -1,0 +1,69 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(AVG(vote.Value), 0) AS AverageVoteValue,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        COUNT(pl.Id) AS TotalPostLinks
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vote ON p.Id = vote.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    GROUP BY 
+        p.Id
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalPostViews,
+        SUM(p.Score) AS TotalPostScore,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.ViewCount,
+    ps.Score,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.AverageVoteValue,
+    ps.TotalComments,
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalPostViews,
+    us.TotalPostScore,
+    us.TotalBadges
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON ps.UserId = u.Id
+JOIN 
+    UserStats us ON us.UserId = u.Id
+ORDER BY 
+    ps.ViewCount DESC, 
+    ps.Score DESC;

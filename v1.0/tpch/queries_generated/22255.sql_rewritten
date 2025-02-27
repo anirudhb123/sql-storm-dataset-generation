@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON p.p_partkey = ps.ps_partkey
+),
+TotalSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.l_partkey
+),
+HighPerformingSuppliers AS (
+    SELECT 
+        r.s_suppkey,
+        r.s_name,
+        HP.total_sales,
+        COALESCE(r.s_acctbal, 0) AS effective_acctbal 
+    FROM 
+        RankedSuppliers r 
+    JOIN 
+        TotalSales HP ON r.s_suppkey = HP.l_partkey
+    WHERE 
+        rnk = 1 AND effective_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    p.p_name,
+    ns.n_name AS supplier_nation,
+    SUM(l.l_quantity) AS total_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS returned_items,
+    MAX(o.o_totalprice) AS max_order_value
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation ns ON s.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    HighPerformingSuppliers hps ON hps.s_suppkey = s.s_suppkey
+WHERE 
+    p.p_size > 10 AND 
+    (l.l_discount BETWEEN 0.1 AND 0.25 OR l.l_discount IS NULL) AND 
+    o.o_orderstatus IN ('O', 'F')
+GROUP BY 
+    p.p_name, ns.n_name
+HAVING 
+    (SUM(l.l_quantity) > 1000 OR COUNT(DISTINCT o.o_orderkey) > 10)
+ORDER BY 
+    total_quantity DESC, max_order_value NULLS LAST
+OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY;

@@ -1,0 +1,73 @@
+WITH RecursiveUserVotes AS (
+    SELECT 
+        UserId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        UserId
+), RankedUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(RUV.TotalUpVotes, 0) AS UpVotes,
+        COALESCE(RUV.TotalDownVotes, 0) AS DownVotes,
+        RANK() OVER (ORDER BY COALESCE(RUV.TotalUpVotes, 0) DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        RecursiveUserVotes RUV ON U.Id = RUV.UserId
+), CommonTagUsage AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+), PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        COALESCE(CR.Name, 'Not Closed') AS CloseReason,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank,
+        T.TagName
+    FROM 
+        Posts P
+    LEFT JOIN 
+        CloseReasonTypes CR ON P.ClosedDate IS NOT NULL AND CR.Id = (SELECT DISTINCT CloseReasonId FROM PostHistory WHERE PostId = P.Id LIMIT 1)
+    LEFT JOIN 
+        Tags T ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    WHERE 
+        P.ParentId IS NULL 
+        AND P.CreationDate BETWEEN '2023-01-01' AND cast('2024-10-01' as date)
+)
+SELECT 
+    RU.DisplayName,
+    RU.UpVotes,
+    RU.DownVotes,
+    PT.PostId,
+    PT.Title,
+    PT.Score,
+    PT.ViewCount,
+    PT.CloseReason,
+    PT.ScoreRank,
+    CTU.TagName,
+    CTU.PostCount,
+    CTU.TotalViews
+FROM 
+    RankedUsers RU
+JOIN 
+    PostDetails PT ON RU.UserId = PT.OwnerUserId
+JOIN 
+    CommonTagUsage CTU ON PT.TagName = CTU.TagName
+WHERE 
+    PT.ScoreRank <= 10
+ORDER BY 
+    RU.UpVotes DESC, PT.Score DESC;

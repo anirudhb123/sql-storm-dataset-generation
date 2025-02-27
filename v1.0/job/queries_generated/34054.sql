@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000 -- Start from movies released after year 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title AS movie_title,
+        level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    km.keyword,
+    COUNT(DISTINCT cc.person_id) AS total_cast,
+    AVG(CASE WHEN cc.note IS NOT NULL THEN 1 ELSE 0 END) AS avg_note_presence,
+    STRING_AGG(DISTINCT CONCAT(ak.name, ' (', ak.imdb_index, ')'), '; ') AS actors
+FROM 
+    movie_keyword mk
+JOIN 
+    keyword km ON mk.keyword_id = km.id
+JOIN 
+    aka_title at ON mk.movie_id = at.id
+JOIN 
+    complete_cast cc ON at.id = cc.movie_id
+LEFT JOIN 
+    aka_name ak ON cc.person_id = ak.person_id AND ak.md5sum IS NOT NULL
+LEFT JOIN 
+    movie_hierarchy mh ON at.id = mh.movie_id
+WHERE 
+    mh.level = 1 -- Only direct children movies in the hierarchy
+    AND at.production_year IS NOT NULL 
+    AND at.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    km.keyword
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 5 -- Filter keywords with more than 5 distinct actors
+ORDER BY 
+    total_cast DESC
+LIMIT 10;

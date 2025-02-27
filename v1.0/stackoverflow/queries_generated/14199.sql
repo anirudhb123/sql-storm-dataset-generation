@@ -1,0 +1,51 @@
+-- Performance Benchmarking Query
+WITH UserStats AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(V.CreationDate IS NOT NULL) AS VoteCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    LEFT JOIN Tags T ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.AnswerCount,
+    U.QuestionCount,
+    U.VoteCount,
+    U.BadgeCount,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.Score,
+    P.AnswerCount AS PostAnswerCount,
+    P.CommentCount,
+    P.FavoriteCount,
+    P.Tags
+FROM UserStats U
+JOIN PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY U.PostCount DESC, U.VoteCount DESC;

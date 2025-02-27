@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderstatus,
+           o.o_totalprice,
+           o.o_orderdate,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE) 
+      AND o.o_orderstatus IN ('O', 'F')
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           MAX(ps.ps_supplycost) AS max_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+),
+CompositeData AS (
+    SELECT r.r_name AS region_name,
+           n.n_name AS nation_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT c.c_custkey) AS total_customers,
+           AVG(ld.total_supply_cost) AS avg_supply_cost
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN SupplierDetails ld ON ld.s_acctbal < 500 OR ld.total_supply_cost IS NULL
+    GROUP BY r.r_name, n.n_name
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+FinalResult AS (
+    SELECT cd.region_name,
+           cd.nation_name,
+           cd.total_sales,
+           cd.total_customers,
+           cd.avg_supply_cost,
+           CASE 
+               WHEN cd.avg_supply_cost IS NULL THEN 'No Data'
+               WHEN cd.avg_supply_cost < 50 THEN 'Low'
+               WHEN cd.avg_supply_cost BETWEEN 50 AND 100 THEN 'Medium'
+               ELSE 'High'
+           END AS supply_cost_category
+    FROM CompositeData cd
+    WHERE cd.total_customers > 1
+)
+SELECT fr.region_name,
+       fr.nation_name,
+       fr.total_sales,
+       fr.total_customers,
+       fr.avg_supply_cost,
+       fr.supply_cost_category,
+       ro.o_orderkey,
+       ro.o_orderstatus
+FROM FinalResult fr
+LEFT JOIN RankedOrders ro ON ro.o_orderkey IN (
+    SELECT DISTINCT o.o_orderkey FROM orders o WHERE o.o_orderkey IS NOT NULL 
+    AND o.o_orderstatus = 'F'
+)
+WHERE fr.total_sales IS NOT NULL
+ORDER BY fr.total_sales DESC, fr.region_name, fr.nation_name;

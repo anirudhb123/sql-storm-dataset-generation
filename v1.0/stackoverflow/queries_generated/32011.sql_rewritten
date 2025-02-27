@@ -1,0 +1,74 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AnswerCount,
+        P.Score,
+        0 AS Level
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.AnswerCount,
+        P.Score,
+        Level + 1
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursiveCTE R ON P.ParentId = R.PostId
+)
+
+SELECT
+    U.Id AS UserId,
+    U.DisplayName,
+    U.Reputation,
+    COUNT(DISTINCT PH.Id) AS EditCount,
+    COUNT(DISTINCT C.Id) AS CommentCount,
+    SUM(P.Score) AS TotalScore,
+    SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+    AVG(P.Score) AS AverageScore,
+    MAX(P.LastActivityDate) AS LastActiveDate,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS TagsUsed,
+    CASE 
+        WHEN U.Reputation > 500 THEN 'High Reputation' 
+        ELSE 'Low Reputation' 
+    END AS ReputationCategory,
+    COALESCE(MAX(B.Date), '1970-01-01') AS LastBadgeDate,
+    COUNT(DISTINCT PL.RelatedPostId) AS RelatedPostLinks
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    PostHistory PH ON PH.UserId = U.Id
+LEFT JOIN 
+    Comments C ON C.UserId = U.Id
+LEFT JOIN 
+    Tags T ON POSITION(T.TagName IN P.Tags) > 0
+LEFT JOIN 
+    PostLinks PL ON PL.PostId = P.Id
+LEFT JOIN 
+    Badges B ON B.UserId = U.Id
+WHERE 
+    P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+    AND P.AcceptedAnswerId IS NULL
+GROUP BY 
+    U.Id, U.DisplayName, U.Reputation
+HAVING 
+    COUNT(DISTINCT P.Id) > 10
+    AND SUM(P.Score) > 0
+ORDER BY 
+    TotalScore DESC, 
+    UserId ASC;

@@ -1,0 +1,70 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.total_sales,
+        i.i_item_desc,
+        ROW_NUMBER() OVER (ORDER BY rs.total_sales DESC) AS item_rank
+    FROM 
+        ranked_sales rs
+    JOIN 
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE 
+        rs.sales_rank <= 10
+),
+customers AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        SUM(COALESCE(ws.ws_net_profit, 0)) AS total_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+),
+customer_ranked AS (
+    SELECT 
+        cu.c_customer_sk,
+        cu.cd_gender,
+        cu.cd_income_band_sk,
+        cu.total_profit,
+        RANK() OVER (PARTITION BY cu.cd_income_band_sk ORDER BY cu.total_profit DESC) AS profit_rank
+    FROM 
+        customers cu
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.cd_income_band_sk,
+    cs.total_profit,
+    ts.total_sales,
+    i.i_item_desc
+FROM 
+    customer_ranked cs
+JOIN 
+    top_sales ts ON cs.c_customer_sk IN 
+        (SELECT ws_bill_customer_sk 
+         FROM web_sales 
+         WHERE ws_item_sk = ts.ws_item_sk)
+JOIN 
+    item i ON ts.ws_item_sk = i.i_item_sk
+WHERE 
+    cs.profit_rank <= 5 AND 
+    cs.cd_income_band_sk IS NOT NULL
+ORDER BY 
+    cs.total_profit DESC, ts.total_sales DESC;

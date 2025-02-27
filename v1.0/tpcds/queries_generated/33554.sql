@@ -1,0 +1,45 @@
+
+WITH RECURSIVE ItemHierarchy AS (
+    SELECT i_item_sk, i_item_id, i_rec_start_date, i_rec_end_date, i_product_name, i_current_price, 
+           1 AS depth
+    FROM item 
+    WHERE i_rec_start_date <= CURRENT_DATE AND (i_rec_end_date IS NULL OR i_rec_end_date > CURRENT_DATE)
+    UNION ALL
+    SELECT ih.i_item_sk, ih.i_item_id, ih.i_rec_start_date, ih.i_rec_end_date, ih.i_product_name, 
+           ih.i_current_price, depth + 1
+    FROM item ih
+    INNER JOIN ItemHierarchy ih_parent ON ih.i_item_sk = ih_parent.i_item_sk
+    WHERE ih.i_rec_start_date <= CURRENT_DATE AND (ih.i_rec_end_date IS NULL OR ih.i_rec_end_date > CURRENT_DATE)
+),
+SalesData AS (
+    SELECT ws.ws_item_sk, 
+           SUM(ws.ws_sales_price) AS total_sales, 
+           COUNT(ws.ws_order_number) AS total_orders,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk 
+                                 FROM date_dim 
+                                 WHERE d_date BETWEEN DATE_ADD(CURRENT_DATE, INTERVAL -30 DAY) AND CURRENT_DATE)
+    GROUP BY ws.ws_item_sk
+),
+HighSellingItems AS (
+    SELECT ih.i_item_sk, 
+           ih.i_product_name, 
+           COALESCE(sd.total_sales, 0) AS total_sales, 
+           COALESCE(sd.total_orders, 0) AS total_orders
+    FROM ItemHierarchy ih
+    LEFT JOIN SalesData sd ON ih.i_item_sk = sd.ws_item_sk
+)
+SELECT hi.i_product_name, 
+       hi.total_sales, 
+       hi.total_orders,
+       CASE 
+           WHEN hi.total_sales IS NULL THEN 'No Sales'
+           WHEN hi.total_sales > 1000 THEN 'High'
+           WHEN hi.total_sales BETWEEN 500 AND 1000 THEN 'Medium'
+           ELSE 'Low'
+       END AS sales_category
+FROM HighSellingItems hi
+WHERE hi.total_orders > 10 OR hi.total_sales > 500
+ORDER BY hi.total_sales DESC
+LIMIT 100;

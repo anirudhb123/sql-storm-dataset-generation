@@ -1,0 +1,76 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amount,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY COUNT(*) DESC) AS rnk
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        r.*,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city
+    FROM 
+        RankedReturns r
+    JOIN 
+        customer c ON r.sr_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        r.total_returns > (SELECT AVG(total_returns) FROM RankedReturns)
+),
+ItemSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > (
+            SELECT 
+                AVG(ws_sales_price) 
+            FROM 
+                web_sales 
+            WHERE 
+                ws_ship_date_sk IS NOT NULL
+        )
+    GROUP BY 
+        ws.ws_item_sk
+),
+FinalSales AS (
+    SELECT 
+        i.i_item_id,
+        is.total_quantity_sold,
+        CASE 
+            WHEN is.total_quantity_sold IS NULL THEN 'No Sales'
+            WHEN is.total_quantity_sold > 100 THEN 'High Demand'
+            ELSE 'Low Demand'
+        END AS demand_category
+    FROM 
+        item i
+    LEFT JOIN 
+        ItemSales is ON i.i_item_sk = is.ws_item_sk
+)
+SELECT 
+    h.c_first_name, 
+    h.c_last_name, 
+    h.ca_city, 
+    f.i_item_id, 
+    f.total_quantity_sold, 
+    f.demand_category 
+FROM 
+    HighReturnCustomers h
+FULL OUTER JOIN 
+    FinalSales f ON h.sr_customer_sk = f.i_item_id
+WHERE 
+    (h.total_return_amount IS NOT NULL OR f.total_quantity_sold IS NOT NULL)
+    AND (h.total_returns > 1 OR f.demand_category = 'High Demand')
+ORDER BY 
+    COALESCE(h.total_returns, 0) DESC, 
+    COALESCE(f.total_quantity_sold, 0) DESC;

@@ -1,0 +1,37 @@
+
+WITH FilteredCustomers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_email_address,
+           cd.cd_gender, cd.cd_marital_status, cd.cd_education_status,
+           ca.ca_city, ca.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_gender = 'F' AND cd.cd_marital_status = 'S' 
+      AND ca.ca_state IN ('CA', 'NY') 
+      AND c.c_birth_year BETWEEN 1980 AND 1995
+),
+HomeAddresses AS (
+    SELECT ca.ca_address_sk, 
+           TRIM(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type)) AS full_address
+    FROM customer_address ca
+    WHERE ca.ca_city IS NOT NULL
+),
+AggregateSales AS (
+    SELECT ws_bill_customer_sk,
+           SUM(ws_ext_sales_price) AS total_sales,
+           COUNT(DISTINCT ws_order_number) AS order_count
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+)
+SELECT fc.c_customer_sk, 
+       fc.c_first_name, 
+       fc.c_last_name, 
+       fc.c_email_address,
+       ha.full_address,
+       as.total_sales,
+       as.order_count
+FROM FilteredCustomers fc
+LEFT JOIN HomeAddresses ha ON fc.c_current_addr_sk = ha.ca_address_sk
+LEFT JOIN AggregateSales as ON fc.c_customer_sk = as.ws_bill_customer_sk
+ORDER BY total_sales DESC, fc.c_last_name ASC
+LIMIT 100;

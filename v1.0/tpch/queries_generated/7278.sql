@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) as supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.supplier_rank <= 3
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COUNT(DISTINCT TOP.s_suppkey) AS unique_suppliers,
+    SUM(CO.total_spent) AS total_spent_by_customers
+FROM 
+    partsupp ps
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    TopSuppliers TOP ON ps.ps_suppkey = TOP.s_suppkey
+LEFT JOIN 
+    CustomerOrderStats CO ON CO.c_custkey IN (
+        SELECT DISTINCT c.c_custkey 
+        FROM customer c 
+        JOIN orders o ON c.c_custkey = o.o_custkey 
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey 
+        WHERE l.l_partkey = ps.ps_partkey
+    )
+GROUP BY 
+    ps.ps_partkey, p.p_name
+ORDER BY 
+    unique_suppliers DESC, total_spent_by_customers DESC;

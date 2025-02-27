@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND mi.movie_id > 73795 AND t.production_year = 1959 AND mc.id < 2474810 AND mi.info > 'The title is based on the book How to Succeed in Business Without Really Trying. The original Broadway production of "How to Succeed in Business Without Really Trying" opened at the Forty-sixth Street Theater in New York on October 14, 1961, ran for 1417 performances and won the 1962 Tony Awards for the Best Musical and Book and was nominated for Best Score.' AND t.episode_nr IS NOT NULL AND mi.note < 'Michael Ray Bower';

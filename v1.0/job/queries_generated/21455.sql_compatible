@@ -1,0 +1,67 @@
+
+WITH RECURSIVE MovieRankings AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(MAX(ci.nr_order), 0) AS max_order,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY COALESCE(MAX(ci.nr_order), 0) DESC) AS rank_within_kind
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info ci ON m.movie_id = ci.movie_id
+    GROUP BY
+        m.id, m.title, m.kind_id
+),
+TopRatedMovies AS (
+    SELECT
+        movie_id,
+        title,
+        max_order,
+        cast_count,
+        ROW_NUMBER() OVER (ORDER BY max_order DESC, cast_count DESC) AS top_rank
+    FROM
+        MovieRankings
+    WHERE
+        cast_count > 0
+),
+MovieCompanies AS (
+    SELECT
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS company_rank
+    FROM
+        movie_companies mc
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+)
+SELECT
+    m.movie_id,
+    m.title,
+    m.max_order,
+    m.cast_count,
+    ARRAY_AGG(DISTINCT c.company_name) AS companies,
+    ARRAY_AGG(DISTINCT c.company_type) AS company_types,
+    CASE 
+        WHEN m.top_rank <= 10 THEN 'Top 10'
+        WHEN m.top_rank <= 50 THEN 'Top 50'
+        ELSE 'Other'
+    END AS ranking_category,
+    COALESCE(NULLIF(o.note, ''), 'No additional notes') AS note
+FROM
+    TopRatedMovies m
+LEFT JOIN 
+    MovieCompanies c ON m.movie_id = c.movie_id AND c.company_rank = 1
+LEFT JOIN 
+    movie_info mi ON m.movie_id = mi.movie_id AND mi.note IS NULL
+LEFT JOIN 
+    aka_title o ON o.movie_id = m.movie_id
+WHERE
+    m.rank_within_kind < 5
+GROUP BY
+    m.movie_id, m.title, m.max_order, m.cast_count, m.top_rank, o.note
+ORDER BY
+    m.max_order DESC, m.cast_count DESC;

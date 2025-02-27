@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey
+), 
+PartAvailability AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey 
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    c.c_name,
+    na.r_name AS nation_name,
+    COALESCE(o.total_orders, 0) AS total_orders,
+    COALESCE(o.total_spent, 0) AS total_spent,
+    COALESCE(p.total_available, 0) AS total_available,
+    CASE 
+        WHEN COALESCE(o.total_spent, 0) > 1000 THEN 'High Roller' 
+        WHEN COALESCE(o.total_orders, 0) > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Shopper'
+    END AS buyer_category,
+    (
+        SELECT COUNT(*)
+        FROM RankedSuppliers rs
+        WHERE rs.rank = 1 AND rs.s_acctbal > c.c_acctbal 
+    ) AS higher_accounts_count
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderStats o ON c.c_custkey = o.c_custkey
+LEFT JOIN 
+    nation na ON c.c_nationkey = na.n_nationkey
+LEFT JOIN 
+    PartAvailability p ON p.p_partkey IN (
+        SELECT ps.ps_partkey
+        FROM partsupp ps
+        WHERE ps.ps_availqty > 0
+        UNION 
+        SELECT p.p_partkey
+        FROM part p
+        WHERE p.p_size IS NULL OR p.p_size = 0
+    )
+WHERE 
+    na.r_name IS NOT NULL
+ORDER BY 
+    buyer_category DESC, 
+    total_spent DESC
+LIMIT 100;

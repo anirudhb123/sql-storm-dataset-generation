@@ -1,0 +1,52 @@
+WITH RECURSIVE order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS status_rank,
+           SUM(l.l_extendedprice) OVER (PARTITION BY o.o_orderkey) AS order_total_extended,
+           COUNT(l.l_linenumber) OVER (PARTITION BY o.o_orderkey) AS line_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_part AS (
+    SELECT p.p_partkey, p.p_name, s.s_suppkey, s.s_name, p.p_retailprice,
+           CASE WHEN p.p_size IS NULL THEN 'Unknown Size' ELSE CONCAT(p.p_size, ' units') END AS size_info
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE p.p_retailprice IS NOT NULL
+),
+region_nation AS (
+    SELECT r.r_regionkey, r.r_name, n.n_nationkey, n.n_name
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+),
+summary AS (
+    SELECT cs.c_custkey, cs.c_name, os.o_orderkey, os.o_totalprice, 
+           np.n_name AS nation_name, rp.r_name AS region_name, 
+           np.n_nationkey, rp.r_regionkey
+    FROM customer_summary cs
+    LEFT JOIN order_summary os ON cs.c_custkey = os.o_orderkey
+    LEFT JOIN region_nation rp ON cs.c_custkey = rp.n_nationkey
+)
+SELECT DISTINCT 
+    ss.p_partkey,
+    ss.p_name,
+    CONCAT('Total Spent: $', ROUND(cs.total_spent, 2)) AS customer_spending,
+    CONCAT('Order Count: ', os.line_count) AS order_summary,
+    pp.size_info AS part_size,
+    np.n_name AS nation_name,
+    CASE WHEN os.status_rank = 1 THEN 'Most Recent Order' ELSE 'Older Order' END AS order_recency
+FROM supplier_part pp
+JOIN summary cs ON pp.p_partkey = cs.c_custkey
+LEFT JOIN customer_summary cs ON cs.c_custkey = cs.c_custkey
+LEFT JOIN order_summary os ON os.o_orderkey = cs.o_orderkey
+WHERE pp.p_retailprice > 50.00
+ORDER BY customer_spending DESC, pp.p_partkey ASC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

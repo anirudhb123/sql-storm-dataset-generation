@@ -1,0 +1,95 @@
+
+WITH RECURSIVE actor_movies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        t.title,
+        c.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY c.nr_order) AS role_order
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+top_actors AS (
+    SELECT 
+        person_id,
+        name,
+        COUNT(DISTINCT title) AS movie_count
+    FROM 
+        actor_movies
+    GROUP BY 
+        person_id, name
+    HAVING 
+        COUNT(DISTINCT title) > 5
+),
+movie_keywords AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword m
+    JOIN 
+        keyword k ON m.keyword_id = k.id
+    GROUP BY 
+        m.movie_id
+),
+movies_with_info AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(k.keywords, 'No Keywords') AS keywords,
+        COALESCE(MIN(mi.info), 'No Info') AS info,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keywords k ON t.id = k.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.id, t.title
+),
+ranked_movies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.keywords,
+        m.info,
+        m.cast_count,
+        DENSE_RANK() OVER (ORDER BY m.cast_count DESC) AS movie_rank
+    FROM 
+        movies_with_info m
+    WHERE 
+        m.cast_count IS NOT NULL
+)
+SELECT 
+    a.name,
+    r.title,
+    r.keywords,
+    r.info,
+    r.cast_count,
+    r.movie_rank
+FROM 
+    top_actors a
+JOIN 
+    ranked_movies r ON a.person_id IN (
+        SELECT DISTINCT c.person_id 
+        FROM cast_info c 
+        WHERE c.movie_id IN (
+            SELECT movie_id FROM movies_with_info
+        )
+    )
+WHERE 
+    r.movie_rank <= 10
+ORDER BY 
+    a.name, r.movie_rank;

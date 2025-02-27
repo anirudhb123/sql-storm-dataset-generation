@@ -1,0 +1,54 @@
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(AVG(vt.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(AVG(vt.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+TopPosts AS (
+    SELECT 
+        ps.*,
+        RANK() OVER (ORDER BY ps.ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY ps.Score DESC) AS ScoreRank
+    FROM 
+        PostStats ps
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.AnswerCount,
+    tp.CommentCount,
+    tp.UpVoteCount,
+    tp.DownVoteCount,
+    tp.BadgeCount,
+    CASE 
+        WHEN tp.ViewRank <= 10 THEN 'Top Viewed'
+        WHEN tp.ScoreRank <= 10 THEN 'Top Scored'
+        ELSE 'Regular Post'
+    END AS PostCategory
+FROM 
+    TopPosts tp
+WHERE 
+    tp.BadgeCount > 0
+ORDER BY 
+    tp.ViewCount DESC, tp.Score DESC;

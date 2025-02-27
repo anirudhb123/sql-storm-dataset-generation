@@ -1,0 +1,78 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM 
+        MovieHierarchy mh
+),
+CharacterCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(*) AS cast_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.level,
+        cc.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CharacterCount cc ON rm.movie_id = cc.movie_id
+    WHERE 
+        rm.rn <= 5
+        AND (cc.cast_count IS NULL OR cc.cast_count < 10)
+)
+SELECT 
+    f.title,
+    f.production_year,
+    COALESCE(cc.cast_count, 0) AS cast_members,
+    KN.keywords
+FROM 
+    FilteredMovies f
+LEFT JOIN 
+    (SELECT 
+         mk.movie_id, 
+         STRING_AGG(k.keyword, ', ') AS keywords
+     FROM 
+         movie_keyword mk
+     JOIN 
+         keyword k ON mk.keyword_id = k.id
+     GROUP BY 
+         mk.movie_id) AS KN ON f.movie_id = KN.movie_id
+ORDER BY 
+    f.production_year DESC, 
+    f.title;

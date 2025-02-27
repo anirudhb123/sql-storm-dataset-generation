@@ -1,0 +1,52 @@
+
+WITH sales_summary AS (
+    SELECT 
+        d.d_year,
+        c.c_birth_year,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_ship_mode_sk) AS unique_ship_modes,
+        c.c_customer_sk AS customer_sk
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store s ON ws.ws_store_sk = s.s_store_sk
+    WHERE 
+        d.d_year BETWEEN 2010 AND 2023
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        d.d_year, c.c_birth_year, c.c_customer_sk
+),
+income_analysis AS (
+    SELECT 
+        h.hd_income_band_sk,
+        AVG(ss.total_net_profit) AS avg_net_profit,
+        MAX(ss.total_orders) AS max_orders,
+        MIN(ss.total_quantity) AS min_quantity
+    FROM 
+        household_demographics h
+    JOIN 
+        sales_summary ss ON h.hd_demo_sk = ss.customer_sk
+    GROUP BY 
+        h.hd_income_band_sk
+)
+SELECT 
+    h.ib_lower_bound,
+    h.ib_upper_bound,
+    ia.avg_net_profit,
+    ia.max_orders,
+    ia.min_quantity
+FROM 
+    income_band h
+JOIN 
+    income_analysis ia ON h.ib_income_band_sk = ia.hd_income_band_sk
+ORDER BY 
+    h.ib_lower_bound;

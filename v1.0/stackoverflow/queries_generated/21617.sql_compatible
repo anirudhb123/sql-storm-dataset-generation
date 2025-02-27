@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class = 1, 0)::integer) AS GoldBadges,
+        SUM(COALESCE(b.Class = 2, 0)::integer) AS SilverBadges,
+        SUM(COALESCE(b.Class = 3, 0)::integer) AS BronzeBadges,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        AVG(CASE WHEN UpVotes + DownVotes > 0 THEN UpVotes * 1.0 / (UpVotes + DownVotes) ELSE NULL END) AS AvgVoteRatio
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPostReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT crt.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON ph.Comment = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalViews,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    pp.PostId,
+    pp.Title,
+    pp.ViewCount,
+    pp.CommentCount,
+    pp.Score,
+    pp.UpVotes,
+    pp.DownVotes,
+    cr.CloseReasons AS ClosedReasons
+FROM 
+    UserMetrics up
+LEFT JOIN 
+    RankedPosts pp ON up.UserId = pp.OwnerUserId AND pp.RowNum = 1  
+LEFT JOIN 
+    ClosedPostReasons cr ON pp.PostId = cr.PostId
+WHERE 
+    up.TotalPosts > 5  
+ORDER BY 
+    up.TotalViews DESC, pp.Score DESC 
+LIMIT 
+    10;

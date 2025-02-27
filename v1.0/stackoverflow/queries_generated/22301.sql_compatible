@@ -1,0 +1,83 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank,
+        MAX(pc.CommentCount) OVER (PARTITION BY p.Id) AS MaxComments
+    FROM Posts p
+    LEFT JOIN (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) pc ON p.Id = pc.PostId
+    WHERE p.CreationDate IS NOT NULL
+),
+FilteredPosts AS (
+    SELECT
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.UserPostRank,
+        rp.MaxComments
+    FROM RankedPosts rp
+    WHERE rp.Score > 0 AND (rp.ViewCount IS NULL OR rp.ViewCount < (SELECT AVG(ViewCount) FROM Posts))
+),
+RecentVoting AS (
+    SELECT
+        v.PostId,
+        COUNT(v.Id) AS VoteCount
+    FROM Votes v
+    WHERE v.CreationDate >= (TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days')
+    GROUP BY v.PostId
+),
+PostWithVotes AS (
+    SELECT
+        fp.*,
+        COALESCE(rv.VoteCount, 0) AS RecentVoteCount
+    FROM FilteredPosts fp
+    LEFT JOIN RecentVoting rv ON fp.Id = rv.PostId
+),
+AggregatePostData AS (
+    SELECT
+        pwv.Title,
+        SUM(pwv.Score) AS TotalScore,
+        SUM(pwv.ViewCount) AS TotalViews,
+        MAX(pwv.MaxComments) AS HighestComments,
+        AVG(pwv.RecentVoteCount) AS AverageRecentVotes
+    FROM PostWithVotes pwv
+    GROUP BY pwv.Title
+),
+PostHistoryDetails AS (
+    SELECT
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserId,
+        p.Title AS PostTitle,
+        u.DisplayName AS UserName
+    FROM PostHistory ph
+    JOIN Posts p ON ph.PostId = p.Id
+    JOIN Users u ON ph.UserId = u.Id
+    WHERE ph.CreationDate IS NOT NULL
+    AND ph.PostHistoryTypeId IN (1, 4, 10, 12)
+),
+PostHistorySummary AS (
+    SELECT
+        phd.PostId,
+        STRING_AGG(DISTINCT phd.UserName || ': ' || phd.PostHistoryTypeId, '; ') AS HistoryDetails
+    FROM PostHistoryDetails phd
+    GROUP BY phd.PostId
+)
+SELECT
+    apd.Title,
+    apd.TotalScore,
+    apd.TotalViews,
+    apd.HighestComments,
+    apd.AverageRecentVotes,
+    COALESCE(phs.HistoryDetails, 'No history') AS PostHistory
+FROM AggregatePostData apd
+LEFT JOIN PostHistorySummary phs ON apd.Title = phs.PostId
+ORDER BY apd.TotalScore DESC, apd.TotalViews DESC
+LIMIT 10;

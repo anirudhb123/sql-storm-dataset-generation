@@ -1,0 +1,70 @@
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(P.Score) AS AverageScore,
+        STRING_AGG(DISTINCT TH.Name, ', ') AS HistoryTypes
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        PostHistoryTypes TH ON PH.PostHistoryTypeId = TH.Id
+    GROUP BY 
+        T.TagName
+),
+UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostsCreated,
+        COUNT(DISTINCT C.Id) AS CommentsMade,
+        SUM(B.Class) AS TotalBadges,
+        AVG(P.Score) AS AveragePostScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostsCreated,
+        CommentsMade,
+        TotalBadges,
+        AveragePostScore,
+        RANK() OVER (ORDER BY PostsCreated DESC) AS RankByPosts
+    FROM 
+        UserActivity
+)
+
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    TU.DisplayName AS TopUser,
+    TU.PostsCreated,
+    TU.CommentsMade,
+    TU.TotalBadges,
+    TU.AveragePostScore,
+    TS.HistoryTypes
+FROM 
+    TagStatistics TS
+JOIN 
+    TopUsers TU ON TS.PostCount > 10  -- Filter for tags with a high number of posts
+WHERE
+    TU.RankByPosts <= 5  -- Top 5 users by post creation
+ORDER BY 
+    TS.TotalViews DESC,
+    TS.AverageScore DESC;

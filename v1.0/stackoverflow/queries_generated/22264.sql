@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        P.CreationDate,
+        P.Score,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS PostRank,
+        DENSE_RANK() OVER (ORDER BY P.CreationDate) AS CreationRank,
+        COALESCE(NULLIF(P.Title, ''), 'Untitled') AS ProcessedTitle
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        string_agg(T.TagName, ', ') AS TagList
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON T.WikiPostId = P.Id
+    GROUP BY 
+        P.Id
+),
+RecentVotes AS (
+    SELECT 
+        V.PostId,
+        V.VoteTypeId,
+        COUNT(*) AS VoteCount
+    FROM 
+        Votes V
+    WHERE 
+        V.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '6 months'
+    GROUP BY 
+        V.PostId, V.VoteTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS ClosedDate,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes C ON PH.Comment::int = C.Id
+    WHERE 
+        PH.PostHistoryTypeId = 10
+),
+PostStatistics AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.Reputation,
+        RP.CreationDate,
+        PT.TagList,
+        COALESCE(RV.VoteCount, 0) AS RecentVoteCount,
+        COALESCE(CP.ClosedDate, 'Never') AS ClosedDate,
+        COALESCE(CP.CloseReason, 'Not Applicable') AS CloseReason,
+        RP.PostRank,
+        RP.CreationRank
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        PostTags PT ON RP.PostId = PT.PostId
+    LEFT JOIN 
+        RecentVotes RV ON RP.PostId = RV.PostId AND RV.VoteTypeId = 2  -- UpMod votes
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.TagList,
+    PS.OwnerDisplayName,
+    PS.Reputation,
+    PS.CreationDate,
+    PS.RecentVoteCount,
+    PS.ClosedDate,
+    PS.CloseReason,
+    ARRAY_TO_STRING(ARRAY(SELECT DISTINCT CASE 
+                                          WHEN PS.PostRank < 3 THEN 'High Value'
+                                          WHEN PS.CreationRank < 5 THEN 'Newbie' 
+                                          ELSE 'Regular' 
+                                          END), ', ') AS PostClassification
+FROM 
+    PostStatistics PS
+WHERE 
+    PS.Reputation > 100 AND 
+    PS.RecentVoteCount > 5
+ORDER BY 
+    PS.Score DESC NULLS LAST,
+    PS.CreationDate ASC;

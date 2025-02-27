@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+), SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+), CustomerSpending AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, 
+        c.c_name
+), Summary AS (
+    SELECT 
+        n.n_name as nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT c.c_custkey) AS num_customers,
+        AVG(c.c_acctbal) AS avg_account_balance
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        supplier s ON s.s_suppkey = l.l_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        l.l_shipdate >= DATE '2022-01-01' 
+        AND l.l_shipdate < DATE '2023-01-01'
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    so.nation_name,
+    so.total_revenue,
+    so.num_customers,
+    so.avg_account_balance,
+    CASE 
+        WHEN so.avg_account_balance IS NULL THEN 'No Data'
+        WHEN so.avg_account_balance < 1000 THEN 'Low Balance'
+        ELSE 'Healthy Balance'
+    END AS account_status,
+    R.order_rank
+FROM 
+    Summary so
+LEFT JOIN 
+    RankedOrders R ON R.o_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'O') 
+ORDER BY 
+    so.total_revenue DESC, 
+    so.nation_name;

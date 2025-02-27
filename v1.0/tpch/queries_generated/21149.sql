@@ -1,0 +1,71 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+), 
+
+PartsWithComments AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_comment,
+        CASE 
+            WHEN p.p_comment IS NULL THEN 'No comment available'
+            ELSE p.p_comment
+        END AS normalized_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+), 
+
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > 1000 
+        AND o.o_orderstatus IN ('O', 'P')
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    R.s_name AS supplier_name,
+    R.acctbal_rank,
+    L.l_discount,
+    L.l_quantity,
+    COALESCE(C.c_mktsegment, 'Unknown') AS market_segment,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY L.l_extendedprice DESC) AS price_rank,
+    CASE 
+        WHEN L.l_returnflag = 'R' THEN 'Returned'
+        ELSE 'Not Returned'
+    END AS return_status,
+    SUM(L.l_extendedprice * (1 - L.l_discount)) AS total_value
+FROM 
+    PartsWithComments p 
+JOIN 
+    lineitem L ON p.p_partkey = L.l_partkey 
+LEFT JOIN 
+    RankedSuppliers R ON L.l_suppkey = R.s_suppkey AND R.acctbal_rank <= 5  
+LEFT JOIN 
+    customer C ON C.c_custkey = (SELECT o.o_custkey 
+                                   FROM HighValueOrders o 
+                                   WHERE o.o_orderkey = L.l_orderkey)
+WHERE 
+    L.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31' 
+GROUP BY 
+    p.p_partkey, p.p_name, R.s_name, R.acctbal_rank, L.l_discount, L.l_quantity, C.c_mktsegment, L.l_returnflag
+HAVING 
+    SUM(L.l_extendedprice * (1 - L.l_discount)) > 5000
+ORDER BY 
+    total_value DESC, p.p_name ASC;

@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVotes,
+        SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+FilteredPosts AS (
+    SELECT
+        rp.Id,
+        rp.Title,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        (rp.UpVotes - rp.DownVotes) AS NetVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.rn = 1 AND
+        rp.CommentCount > 5 AND
+        (rp.UpVotes - rp.DownVotes) > 0
+)
+SELECT 
+    fp.Id,
+    fp.Title,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    fp.NetVotes,
+    CASE 
+        WHEN fp.Score > 100 THEN 'High Score'
+        WHEN fp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    COALESCE((SELECT STRING_AGG(t.TagName, ', ') 
+              FROM Tags t 
+              WHERE t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'))::int[]))
+              ), 'No Tags') AS Tags
+FROM 
+    FilteredPosts fp
+LEFT OUTER JOIN 
+    Posts p ON fp.Id = p.Id
+ORDER BY 
+    fp.NetVotes DESC, 
+    fp.CommentCount DESC;

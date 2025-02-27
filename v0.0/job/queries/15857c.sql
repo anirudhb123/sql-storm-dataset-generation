@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note < '(2010) (Turkey) (DVD)' AND n.imdb_index IS NOT NULL AND ci.role_id IN (1, 10, 11, 2, 3, 4, 5, 6, 7, 8) AND cn.name_pcode_sf IN ('A6214', 'H1631', 'J3614', 'K1632', 'N2526', 'N2532', 'N3616', 'Y6323', 'Z2316') AND mk.keyword_id > 133223 AND cn.md5sum > '95d00174df02446debbef7244353d583' AND ci.id < 21655145;

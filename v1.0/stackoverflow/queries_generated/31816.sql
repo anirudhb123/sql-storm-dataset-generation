@@ -1,0 +1,93 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rnk
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        a.OwnerDisplayName AS AcceptedBy,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVotes, -- Count of Upvotes
+        SUM(v.VoteTypeId = 3) AS DownVotes, -- Count of Downvotes
+        COALESCE(ph.ClosedDate, 'No Closure') AS ClosureStatus,
+        CASE 
+            WHEN (ph.Id IS NOT NULL AND rp.Rnk = 1) THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Posts a ON rp.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    LEFT JOIN 
+        (SELECT Id, ClosedDate FROM Posts WHERE ClosedDate IS NOT NULL) ph ON rp.PostId = ph.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, a.OwnerDisplayName, ph.ClosedDate, rp.Rnk
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS AnswersReceived,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.ViewCount,
+    pd.AcceptedBy,
+    pd.CommentCount,
+    pd.UpVotes,
+    pd.DownVotes,
+    pd.ClosureStatus,
+    pd.PostStatus,
+    us.UserId,
+    us.DisplayName,
+    us.QuestionsAsked,
+    us.AnswersReceived,
+    us.GoldBadges,
+    us.SilverBadges,
+    us.BronzeBadges
+FROM 
+    PostDetails pd
+JOIN 
+    Users u ON pd.PostId = u.Id 
+LEFT JOIN 
+    UserStats us ON us.UserId = u.Id
+WHERE 
+    pd.Score > 10 AND 
+    pd.CommentCount > 5 AND 
+    pd.ViewCount > 100
+ORDER BY 
+    pd.Score DESC, 
+    pd.ViewCount DESC;

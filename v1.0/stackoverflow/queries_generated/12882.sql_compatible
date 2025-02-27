@@ -1,0 +1,72 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(C.DistinctId) AS TotalComments
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TagStats AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS TotalPostsTagged,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Tags T
+    INNER JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ','))
+    GROUP BY 
+        T.Id, T.TagName
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId, PH.PostHistoryTypeId
+)
+
+SELECT 
+    U.DisplayName AS UserDisplayName,
+    U.Reputation AS UserReputation,
+    U.TotalPosts AS TotalPostsByUser,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalViews AS UserTotalViews,
+    U.TotalScore AS UserTotalScore,
+    T.TagName,
+    T.TotalPostsTagged,
+    T.TotalViews AS TagTotalViews,
+    T.TotalScore AS TagTotalScore,
+    PH.PostId,
+    SUM(PH.ChangeCount) AS TotalPostHistories
+FROM 
+    UserStats U
+JOIN 
+    TagStats T ON T.TotalPostsTagged > 0
+JOIN 
+    PostHistories PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+GROUP BY 
+    U.DisplayName, U.Reputation, U.TotalPosts, U.TotalQuestions, U.TotalAnswers, U.TotalViews, U.TotalScore, 
+    T.TagName, T.TotalPostsTagged, T.TotalViews, T.TotalScore, PH.PostId
+ORDER BY 
+    UserTotalViews DESC, T.TotalPostsTagged DESC
+LIMIT 100;

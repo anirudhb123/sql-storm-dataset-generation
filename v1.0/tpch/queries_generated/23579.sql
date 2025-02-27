@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS rank_per_year
+    FROM 
+        orders o
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+), 
+HighValueSuppliers AS (
+    SELECT 
+        si.s_suppkey,
+        si.s_name
+    FROM 
+        SupplierInfo si
+    WHERE 
+        si.total_supply_cost = (
+            SELECT MAX(total_supply_cost) 
+            FROM SupplierInfo
+        )
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(co.order_count, 0) AS customer_orders,
+    COALESCE(sic.s_name, 'N/A') AS supplier_name,
+    d.l_total,
+    CASE 
+        WHEN d.l_total IS NULL THEN 'NO LINES'
+        ELSE 'HAS LINES'
+    END AS line_status
+FROM 
+    part p
+LEFT JOIN 
+    lineitem d ON p.p_partkey = d.l_partkey
+LEFT JOIN 
+    CustomerOrderCounts co ON co.order_count > 10
+LEFT JOIN 
+    HighValueSuppliers sic ON sic.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = p.p_partkey 
+        ORDER BY ps.ps_supplycost * ps.ps_availqty DESC 
+        LIMIT 1
+    )
+WHERE 
+    p.p_retailprice < (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.o_orderdate < CURRENT_DATE - INTERVAL '1 YEAR' AND o.o_orderstatus = 'F')
+ORDER BY 
+    p.p_partkey;

@@ -1,0 +1,61 @@
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        t.title AS movie_title
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        GROUP_CONCAT(DISTINCT i.info ORDER BY i.info_type_id) AS movie_info,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.id) AS keywords
+    FROM 
+        movie_info m_i
+    JOIN 
+        movie_info i ON m_i.movie_id = i.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m_i.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        i.note IS NOT NULL
+    GROUP BY 
+        m_i.movie_id
+),
+TopMovies AS (
+    SELECT 
+        mr.movie_id,
+        mr.actor_name,
+        mr.role_name,
+        mr.movie_title,
+        mi.movie_info,
+        mi.keywords,
+        ROW_NUMBER() OVER (PARTITION BY mr.movie_id ORDER BY mr.actor_name) AS actor_rank
+    FROM 
+        MovieRoles mr
+    JOIN 
+        MovieInfo mi ON mr.movie_id = mi.movie_id
+    WHERE 
+        mr.role_name LIKE '%Lead%'
+)
+SELECT 
+    tm.movie_title,
+    tm.actor_name,
+    tm.role_name,
+    tm.movie_info,
+    tm.keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.actor_rank = 1
+ORDER BY 
+    tm.movie_title;

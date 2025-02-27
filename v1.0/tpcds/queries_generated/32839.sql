@@ -1,0 +1,47 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ws.bill_customer_sk AS customer_id,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+    HAVING 
+        COUNT(ws.ws_order_number) > 5
+    UNION ALL
+    SELECT 
+        ph.customer_id,
+        ph.total_orders + sh.total_orders,
+        ph.total_spent + sh.total_spent
+    FROM 
+        sales_hierarchy ph
+    JOIN 
+        web_sales sh ON ph.customer_id = sh.ws_ship_customer_sk
+    WHERE 
+        sh.ws_net_paid_inc_tax > 100
+)
+SELECT 
+    ca.ca_city,
+    COUNT(DISTINCT c.c_customer_id) AS total_customers,
+    AVG(sh.total_spent) AS avg_spent,
+    SUM(CASE WHEN cd.cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_customers_count,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', ') AS top_customers
+FROM 
+    sales_hierarchy sh
+JOIN 
+    customer c ON sh.customer_id = c.c_customer_sk
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.ca_state = 'NY'
+GROUP BY 
+    ca.ca_city
+HAVING 
+    AVG(sh.total_spent) > 1000
+ORDER BY 
+    avg_spent DESC
+LIMIT 10;

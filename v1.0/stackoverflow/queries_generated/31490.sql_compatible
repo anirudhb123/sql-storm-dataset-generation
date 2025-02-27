@@ -1,0 +1,72 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Depth
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        ph.Depth + 1
+    FROM Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostVotes AS (
+    SELECT 
+        v.PostId,
+        vt.Name AS VoteType,
+        COUNT(v.Id) AS VoteCount
+    FROM Votes v
+    INNER JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId, vt.Name
+),
+PostWithVoteCounts AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.Depth,
+        COALESCE(SUM(CASE WHEN pv.VoteType = 'UpMod' THEN pv.VoteCount ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN pv.VoteType = 'DownMod' THEN pv.VoteCount ELSE 0 END), 0) AS DownVotes
+    FROM PostHierarchy ph
+    LEFT JOIN PostVotes pv ON ph.PostId = pv.PostId
+    GROUP BY ph.PostId, ph.Title, ph.Depth
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(pvc.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(pvc.DownVotes, 0)) AS TotalDownVotes,
+        COUNT(DISTINCT pvc.PostId) AS PostCount
+    FROM Users u
+    LEFT JOIN PostWithVoteCounts pvc ON u.Id = pvc.OwnerUserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalUpVotes,
+    ups.TotalDownVotes,
+    ups.PostCount,
+    CASE 
+        WHEN ups.PostCount > 0 THEN 
+            (CAST(ups.TotalUpVotes AS NUMERIC) / (ups.PostCount * 5)) * 100 
+        ELSE 0 
+    END AS UpvotePercentage,
+    CASE 
+        WHEN ups.PostCount > 0 THEN 
+            (CAST(ups.TotalDownVotes AS NUMERIC) / (ups.PostCount * 5)) * 100 
+        ELSE 0 
+    END AS DownvotePercentage
+FROM UserPostStats ups
+ORDER BY ups.TotalUpVotes DESC, ups.TotalDownVotes ASC
+LIMIT 10;

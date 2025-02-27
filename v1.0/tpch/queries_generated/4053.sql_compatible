@@ -1,0 +1,78 @@
+
+WITH SupplierTotals AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_item_price,
+        SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS return_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+CombinedData AS (
+    SELECT 
+        ct.c_custkey,
+        st.s_suppkey,
+        st.s_name,
+        ct.order_count,
+        ct.total_spent,
+        lt.avg_item_price,
+        lt.return_count,
+        ROW_NUMBER() OVER (PARTITION BY ct.c_custkey ORDER BY ct.total_spent DESC) AS rn
+    FROM 
+        CustomerOrders ct
+    LEFT JOIN 
+        SupplierTotals st ON ct.order_count > 0
+    LEFT JOIN 
+        LineItemStats lt ON ct.order_count > 0
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(s.s_name, 'No Supplier') AS s_name,
+    COALESCE(o.order_count, 0) AS order_count,
+    COALESCE(o.total_spent, 0) AS total_spent,
+    COALESCE(l.avg_item_price, 0) AS avg_item_price,
+    COALESCE(l.return_count, 0) AS return_count
+FROM 
+    CombinedData cd
+LEFT JOIN 
+    customer c ON cd.c_custkey = c.c_custkey
+LEFT JOIN 
+    SupplierTotals s ON cd.s_suppkey = s.s_suppkey
+LEFT JOIN 
+    CustomerOrders o ON cd.c_custkey = o.c_custkey
+LEFT JOIN 
+    LineItemStats l ON cd.l_orderkey = l.l_orderkey
+WHERE 
+    o.order_count IS NOT NULL OR l.return_count IS NOT NULL
+ORDER BY 
+    COALESCE(o.total_spent, 0) DESC, COALESCE(l.avg_item_price, 0) DESC;

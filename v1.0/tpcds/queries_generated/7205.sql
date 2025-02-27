@@ -1,0 +1,50 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        DATE_FORMAT(dd.d_date, '%Y-%m') AS sale_month,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        c.cd_gender,
+        ca.ca_state
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        dd.d_year = 2023
+    GROUP BY 
+        ws.ws_sold_date_sk, 
+        sale_month, 
+        c.cd_gender, 
+        ca.ca_state
+), 
+aggregated_sales AS (
+    SELECT 
+        sale_month,
+        cd_gender,
+        ca_state,
+        AVG(total_quantity) AS avg_quantity,
+        SUM(total_sales) AS total_sales
+    FROM 
+        sales_data
+    GROUP BY 
+        sale_month, cd_gender, ca_state
+)
+SELECT 
+    sale_month,
+    cd_gender,
+    ca_state,
+    avg_quantity,
+    total_sales,
+    RANK() OVER (PARTITION BY sale_month ORDER BY total_sales DESC) AS sales_rank
+FROM 
+    aggregated_sales
+WHERE 
+    total_sales > 10000
+ORDER BY 
+    sale_month, sales_rank;

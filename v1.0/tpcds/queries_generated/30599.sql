@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        1 as Level,
+        NULL as ParentItem
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(ws_sold_date_sk) FROM web_sales)
+    
+    UNION ALL
+    
+    SELECT 
+        ws.sold_date_sk,
+        ws.item_sk,
+        ws.sales_price,
+        ws.quantity,
+        ws.net_paid,
+        sh.Level + 1,
+        sh.ws_item_sk
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        SalesHierarchy sh ON ws.ws_item_sk = sh.Item_sk AND sh.Level < 5
+)
+SELECT 
+    ca_state,
+    COUNT(DISTINCT c_customer_id) AS num_customers,
+    SUM(CASE WHEN cd_gender = 'F' THEN ws_net_paid ELSE 0 END) AS total_female_sales,
+    AVG(ws_sales_price) AS avg_sales_price,
+    MAX(ws_quantity) AS max_quantity,
+    STRING_AGG(DISTINCT i_item_desc, '; ') AS item_descriptions
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    (SELECT 
+         ws_item_sk,
+         SUM(ws_net_paid) as total_sales
+     FROM 
+         web_sales
+     GROUP BY 
+         ws_item_sk
+     HAVING 
+         SUM(ws_net_paid) < 100
+    ) low_sales ON low_sales.ws_item_sk = i.i_item_sk
+WHERE 
+    ca_state IS NOT NULL
+    AND (cd_marital_status = 'M' OR cd_marital_status IS NULL)
+    AND (ws_sold_date_sk BETWEEN 24706 AND 24870) -- Specific date range
+GROUP BY 
+    ca_state
+HAVING 
+    COUNT(DISTINCT c_customer_id) > 50
+ORDER BY 
+    num_customers DESC;

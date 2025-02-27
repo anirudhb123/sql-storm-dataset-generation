@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+), 
+HighValueSuppliers AS (
+    SELECT 
+        s.s_supkey,
+        ss.total_parts,
+        ss.total_supply_value
+    FROM 
+        SupplierStats ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_supply_value > (SELECT AVG(total_supply_value) FROM SupplierStats)
+), 
+OrderLines AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_item_value,
+        COUNT(l.l_orderkey) AS line_item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    hs.total_parts,
+    ol.total_line_item_value,
+    ol.line_item_count,
+    RANK() OVER (PARTITION BY r.r_name ORDER BY ol.total_line_item_value DESC) AS region_rank
+FROM 
+    HighValueSuppliers hs
+JOIN 
+    supplier s ON hs.s_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    OrderLines ol ON ol.total_line_item_value > (
+        SELECT AVG(total_line_item_value) 
+        FROM OrderLines
+    )
+WHERE 
+    COALESCE(n.n_comment, '') <> '' 
+AND 
+    r.r_name IS NOT NULL
+ORDER BY 
+    r.r_name, hs.total_parts DESC, ol.total_line_item_value DESC;

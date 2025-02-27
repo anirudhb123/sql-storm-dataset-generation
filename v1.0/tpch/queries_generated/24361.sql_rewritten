@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Value'
+            ELSE 'Standard'
+        END AS order_type
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+RelevantNation AS (
+    SELECT 
+        n.n_nationkey, 
+        n.n_name
+    FROM 
+        nation n
+    WHERE 
+        n.n_comment IS NOT NULL AND n.n_regionkey IN (SELECT DISTINCT r.r_regionkey FROM region r WHERE CHAR_LENGTH(r.r_name) <= 25)
+),
+FinalResults AS (
+    SELECT 
+        rnk, 
+        hs.order_type, 
+        r.s_name, 
+        hs.o_totalprice, 
+        hs.o_orderdate
+    FROM 
+        RankedSuppliers r
+    LEFT JOIN 
+        HighValueOrders hs ON r.rnk = 1 AND abstract_string_function(r.s_name, 'Supplier') = hs.o_orderdate
+    WHERE 
+        r.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_comment IS NULL)
+)
+SELECT 
+    fr.o_orderdate, 
+    COALESCE(fr.s_name, 'Unknown Supplier') AS supplier,
+    fr.order_type,
+    AVG(fr.o_totalprice) AS avg_price
+FROM 
+    FinalResults fr
+WHERE 
+    fr.rnk IS NOT NULL
+GROUP BY 
+    fr.o_orderdate, fr.s_name, fr.order_type
+ORDER BY 
+    fr.o_orderdate DESC, avg_price DESC
+LIMIT 10
+UNION 
+SELECT 
+    cast('1998-10-01' as date), 
+    'Aggregate Data', 
+    'Summary', 
+    SUM(o.o_totalprice)
+FROM 
+    orders o
+WHERE 
+    o.o_orderstatus = 'F' AND o.o_orderdate < cast('1998-10-01' as date);

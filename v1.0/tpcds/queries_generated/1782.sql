@@ -1,0 +1,74 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cs.total_sales,
+        cs.total_orders
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        cs.sales_rank <= 10
+),
+SaleDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        ws.ws_item_sk,
+        i.i_product_name,
+        ws.ws_ext_sales_price,
+        ws.ws_sold_date_sk
+    FROM 
+        TopCustomers c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        sd.c_customer_sk,
+        sd.c_first_name,
+        sd.c_last_name,
+        COUNT(DISTINCT sd.ws_item_sk) AS unique_items_sold,
+        SUM(sd.ws_ext_sales_price) AS total_spent,
+        AVG(sd.ws_ext_sales_price) AS avg_spent_per_item,
+        MIN(sd.ws_sold_date_sk) AS first_purchase_date,
+        MAX(sd.ws_sold_date_sk) AS last_purchase_date,
+        CASE 
+            WHEN MAX(sd.ws_sold_date_sk) IS NULL THEN 'No Purchases'
+            WHEN MAX(sd.ws_sold_date_sk) < DATEADD(MONTH, -6, CURRENT_DATE) THEN 'Inactive'
+            ELSE 'Active'
+        END AS customer_status
+    FROM 
+        SaleDetails sd
+    GROUP BY 
+        sd.c_customer_sk, sd.c_first_name, sd.c_last_name
+)
+SELECT 
+    s.*
+FROM 
+    SalesSummary s
+WHERE 
+    s.total_spent > 1000
+ORDER BY 
+    s.total_spent DESC;

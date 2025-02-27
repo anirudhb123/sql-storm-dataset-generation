@@ -1,0 +1,48 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_mktsegment,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= '2023-12-31'
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_mktsegment
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+order_lineitems AS (
+    SELECT 
+        lo.l_orderkey,
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+    FROM 
+        lineitem lo
+    JOIN 
+        top_orders to ON lo.l_orderkey = to.o_orderkey
+    GROUP BY 
+        lo.l_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    to.c_mktsegment,
+    ol.total_revenue
+FROM 
+    top_orders to
+JOIN 
+    order_lineitems ol ON to.o_orderkey = ol.l_orderkey
+ORDER BY 
+    total_revenue DESC;

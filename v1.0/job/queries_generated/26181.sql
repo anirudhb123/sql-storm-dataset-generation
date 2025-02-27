@@ -1,0 +1,58 @@
+WITH actor_movie_info AS (
+    SELECT 
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        COALESCE(ci.kind_id, 0) AS role_type
+    FROM 
+        aka_name a
+    INNER JOIN 
+        cast_info c ON a.person_id = c.person_id
+    INNER JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        role_type ci ON c.role_id = ci.id
+    WHERE 
+        a.name IS NOT NULL 
+        AND t.title IS NOT NULL
+    GROUP BY 
+        a.name, t.title, t.production_year, ci.kind_id
+),
+
+company_movie_info AS (
+    SELECT 
+        c.name AS company_name,
+        t.title AS movie_title,
+        t.production_year,
+        ct.kind AS company_type
+    FROM 
+        company_name c
+    INNER JOIN 
+        movie_companies mc ON c.id = mc.company_id
+    INNER JOIN 
+        aka_title t ON mc.movie_id = t.movie_id
+    INNER JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.name IS NOT NULL 
+        AND t.title IS NOT NULL
+)
+
+SELECT 
+    ami.actor_name,
+    ami.movie_title,
+    ami.production_year,
+    ami.keywords,
+    cmi.company_name,
+    cmi.company_type
+FROM 
+    actor_movie_info ami
+LEFT JOIN 
+    company_movie_info cmi ON ami.movie_title = cmi.movie_title AND ami.production_year = cmi.production_year
+ORDER BY 
+    ami.production_year DESC, ami.actor_name;

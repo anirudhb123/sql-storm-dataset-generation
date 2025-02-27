@@ -1,0 +1,72 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.PostTypeId = 1 -- Filtering to questions only
+),
+TopPromotedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.Score,
+        rp.ViewCount,
+        rp.Tags,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostLinks pl ON rp.PostId = pl.PostId
+    WHERE 
+        rp.RankByScore <= 5
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.OwnerUserId,
+        rp.Score, rp.ViewCount, rp.Tags, rp.CommentCount,
+        rp.UpVotes, rp.DownVotes
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.RelatedPostCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    TopPromotedPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    (SELECT DISTINCT unnest(string_to_array(substring(Tags, 2, length(Tags)-2), '><')) AS TagName, Id
+     FROM Posts) t ON tp.PostId = t.Id
+GROUP BY 
+    tp.PostId, tp.Title, tp.CreationDate, u.DisplayName,
+    tp.Score, tp.ViewCount, tp.CommentCount,
+    tp.UpVotes, tp.DownVotes, tp.RelatedPostCount
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

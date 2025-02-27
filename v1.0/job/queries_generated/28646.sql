@@ -1,0 +1,56 @@
+WITH movie_ratings AS (
+    SELECT 
+        m.id AS movie_id, 
+        AVG(r.rating) AS avg_rating
+    FROM 
+        movie m
+    JOIN 
+        ratings r ON m.id = r.movie_id
+    GROUP BY 
+        m.id
+),
+cast_info_with_titles AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        a.title AS movie_title, 
+        a.production_year,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS cast_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_title a ON ci.movie_id = a.movie_id
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name, 
+        ak.person_id,
+        STRING_AGG(DISTINCT c.movie_id::text, ', ') AS movie_ids,
+        STRING_AGG(DISTINCT ci.movie_title, ', ') AS movie_titles,
+        max(cast_count) AS max_cast_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info_with_titles ci ON ak.person_id = ci.person_id
+    JOIN 
+        cast_info c ON ci.movie_id = c.movie_id
+    GROUP BY 
+        ak.name, ak.person_id
+)
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ci.movie_id) AS movie_count,
+    a.movie_ids,
+    a.movie_titles,
+    mr.avg_rating,
+    a.max_cast_count
+FROM 
+    actor_info a
+LEFT JOIN 
+    movie_ratings mr ON mr.movie_id = ANY(STRING_TO_ARRAY(a.movie_ids, ', ')::INTEGER[])
+WHERE 
+    a.max_cast_count > 1
+GROUP BY 
+    a.actor_name, a.movie_ids, a.movie_titles, mr.avg_rating, a.max_cast_count
+ORDER BY 
+    movie_count DESC, mr.avg_rating DESC;

@@ -1,0 +1,57 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address,
+        ca_city || ', ' || ca_state || ' ' || ca_zip AS city_state_zip,
+        ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY ca_city) AS city_rank
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name || ' ' || c.c_last_name AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ai.full_address,
+    ai.city_state_zip,
+    ss.total_sales_quantity,
+    ss.total_net_profit,
+    ss.total_orders,
+    ai.city_rank
+FROM 
+    CustomerInfo ci
+JOIN 
+    AddressInfo ai ON ci.c_customer_id = (SELECT c.c_customer_id FROM customer c WHERE c.c_customer_sk = ai.ca_address_sk)
+LEFT JOIN 
+    SalesSummary ss ON ci.c_customer_id = ss.ws_bill_customer_sk
+ORDER BY 
+    ai.city_rank, ci.full_name;

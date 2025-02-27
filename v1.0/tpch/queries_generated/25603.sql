@@ -1,0 +1,62 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    c.c_name,
+    c.c_address,
+    c.c_phone,
+    c.c_acctbal,
+    COALESCE(vc.total_value, 0) AS value_of_high_parts,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    SUM(os.total_spent) AS total_spent,
+    STRING_AGG(DISTINCT r.r_name, ', ') AS regions_supplied
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerOrderStats os ON c.c_custkey = os.c_custkey
+LEFT JOIN 
+    HighValueParts vc ON EXISTS (
+        SELECT 1 
+        FROM lineitem l
+        JOIN RankedSuppliers rs ON l.l_suppkey = rs.s_suppkey
+        WHERE l.l_partkey = vc.ps_partkey AND rs.rank <= 5
+    )
+LEFT JOIN 
+    supplier s ON c.c_nationkey = s.s_nationkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    c.c_custkey, c.c_name, c.c_address, c.c_phone, c.c_acctbal, vc.total_value
+ORDER BY 
+    total_spent DESC, c.c_name;

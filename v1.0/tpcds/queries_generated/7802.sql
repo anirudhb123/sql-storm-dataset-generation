@@ -1,0 +1,75 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.web_name,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_sk, ws.web_name
+),
+HighestSales AS (
+    SELECT 
+        web_site_sk,
+        web_name,
+        total_sales,
+        order_count
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+),
+Customers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+
+SELECT 
+    hs.web_name,
+    hs.total_sales,
+    hs.order_count,
+    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+    AVG(CASE 
+            WHEN cd.cd_gender = 'M' THEN 1 
+            ELSE 0 END) * 100 AS male_percentage,
+    AVG(CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 1 
+            ELSE 0 END) * 100 AS married_percentage,
+    AVG(CASE 
+            WHEN cd.cd_credit_rating = 'Excellent' THEN 1 
+            ELSE 0 END) * 100 AS excellent_credit_percentage
+FROM 
+    HighestSales hs
+LEFT JOIN 
+    Customers c ON c.c_customer_sk IN (
+        SELECT 
+            ws.ws_bill_customer_sk
+        FROM 
+            web_sales ws
+        WHERE 
+            ws.ws_web_site_sk = hs.web_site_sk
+    )
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+GROUP BY 
+    hs.web_name, hs.total_sales, hs.order_count
+ORDER BY 
+    hs.total_sales DESC;

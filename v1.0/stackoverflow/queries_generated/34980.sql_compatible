@@ -1,0 +1,66 @@
+
+WITH RecursiveCTE AS (
+    SELECT p.Id,
+           p.Title,
+           p.CreationDate,
+           p.OwnerUserId,
+           1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT a.Id,
+           a.Title,
+           a.CreationDate,
+           a.OwnerUserId,
+           r.Level + 1
+    FROM Posts a
+    INNER JOIN RecursiveCTE r ON a.ParentId = r.Id
+    WHERE a.PostTypeId = 2  
+),
+
+UserStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           COUNT(DISTINCT p.Id) AS TotalPosts,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+           COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+           SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id, u.DisplayName
+),
+
+PostHistoryCTE AS (
+    SELECT ph.PostId,
+           ph.UserId,
+           ph.CreationDate,
+           p.Title,
+           DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    INNER JOIN Posts p ON ph.PostId = p.Id
+    WHERE ph.PostHistoryTypeId IN (10, 11)  
+)
+
+SELECT u.DisplayName,
+       u.Reputation,
+       u.TotalPosts,
+       u.TotalQuestions,
+       u.TotalAnswers,
+       u.TotalBounties,
+       ph.PostId,
+       ph.Title,
+       ph.CreationDate AS LastHistoryUpdate,
+       CASE 
+           WHEN ph.HistoryRank = 1 THEN 'Recently Closed/Reopened'
+           ELSE 'Other History'
+       END AS HistoryStatus,
+       r.Level AS AnswerLevel
+FROM UserStats u
+LEFT JOIN PostHistoryCTE ph ON u.UserId = ph.UserId
+LEFT JOIN RecursiveCTE r ON ph.PostId = r.Id
+WHERE u.TotalPosts > 10
+ORDER BY u.Reputation DESC, u.TotalPosts DESC, ph.CreationDate DESC
+LIMIT 100;

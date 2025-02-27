@@ -1,0 +1,65 @@
+WITH ranked_movies AS (
+    SELECT
+        a.title,
+        a.production_year,
+        a.kind_id,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS rnk
+    FROM
+        aka_title a
+    JOIN
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    WHERE
+        a.production_year >= 2000
+        AND k.keyword LIKE '%action%'
+),
+
+actor_details AS (
+    SELECT
+        ak.name AS actor_name,
+        a.id AS actor_id,
+        a.md5sum AS actor_md5sum,
+        ca.movie_id AS movie_id,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ca.nr_order) AS role_rnk
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ca ON ak.person_id = ca.person_id
+    JOIN
+        name a ON ak.person_id = a.imdb_id
+    WHERE
+        ak.name IS NOT NULL
+        AND a.gender = 'M'
+),
+
+detailed_info AS (
+    SELECT
+        rm.title,
+        rm.production_year,
+        ad.actor_name,
+        ad.actor_md5sum,
+        ROW_NUMBER() OVER (PARTITION BY rm.id ORDER BY ad.role_rnk) AS actor_rank
+    FROM
+        ranked_movies rm
+    JOIN
+        actor_details ad ON rm.id = ad.movie_id
+)
+
+SELECT
+    di.title,
+    di.production_year,
+    STRING_AGG(di.actor_name, ', ') AS actor_names,
+    COUNT(di.actor_name) AS total_actors,
+    MAX(di.actor_rank) AS highest_role_rank
+FROM
+    detailed_info di
+GROUP BY
+    di.title, di.production_year
+ORDER BY
+    di.production_year DESC,
+    total_actors DESC
+LIMIT 10;
+
+This SQL query performs a robust data retrieval process that benchmarks string processing by combining multiple tables while focusing on movies from the 2000s with a specific keyword ("action"). It ranks both movies and actors, aggregates actor names for each movie, and ultimately outputs a concise list of the top 10 movies along with their actors.

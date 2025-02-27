@@ -1,0 +1,58 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) as order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ps.ps_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        COALESCE(NULLIF(MAX(l.l_extendedprice * (1 - l.l_discount)), 0), 0) AS max_extendedprice 
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey AND l.l_suppkey = s.s_suppkey
+    GROUP BY s.s_suppkey, ps.ps_partkey, s.s_name, p.p_name, ps.ps_availqty, ps.ps_supplycost
+),
+OrderDetails AS (
+    SELECT 
+        lo.l_orderkey,
+        COUNT(lo.l_linenumber) AS line_count,
+        SUM(lo.l_extendedprice) AS total_line_price,
+        SUM(lo.l_tax) AS total_tax,
+        AVG(lo.l_discount) AS avg_discount
+    FROM lineitem lo
+    WHERE lo.l_shipdate >= DATE '2023-05-01'
+    GROUP BY lo.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    sp.s_name AS supplier_name,
+    sp.p_name AS part_name,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(od.line_count, 0) AS total_lines,
+    COALESCE(od.total_line_price, 0) AS total_price,
+    sp.max_extendedprice,
+    CASE 
+        WHEN r.o_totalprice IS NULL THEN 'Unknown'
+        ELSE CAST(ROUND((sp.max_extendedprice / r.o_totalprice) * 100, 2) AS VARCHAR(20)) || '%' 
+    END AS price_percentage
+FROM RankedOrders r
+LEFT JOIN SupplierPartInfo sp ON sp.ps_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 100
+)
+LEFT JOIN OrderDetails od ON r.o_orderkey = od.l_orderkey
+WHERE r.order_rank <= 10
+ORDER BY r.o_orderdate DESC, sp.s_name;

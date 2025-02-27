@@ -1,0 +1,65 @@
+
+WITH customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        wd.wd_total_sales,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY wd.wd_total_sales DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN (
+        SELECT 
+            ws_bill_customer_sk,
+            SUM(ws_ext_sales_price) AS wd_total_sales
+        FROM 
+            web_sales
+        GROUP BY 
+            ws_bill_customer_sk
+    ) wd ON c.c_customer_sk = wd.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+),
+top_customers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.cd_gender,
+        cs.cd_purchase_estimate,
+        cs.wd_total_sales
+    FROM 
+        customer_stats cs
+    WHERE 
+        cs.sales_rank <= 5
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    COALESCE(NULLIF(tc.cd_purchase_estimate, 0), 'N/A') AS cd_purchase_estimate,
+    tc.wd_total_sales,
+    COALESCE(w.w_warehouse_name, 'Unknown') AS warehouse_name
+FROM 
+    top_customers tc
+LEFT JOIN 
+    (
+        SELECT 
+            ws_bill_customer_sk,
+            w.w_warehouse_name
+        FROM 
+            web_sales ws
+        JOIN 
+            warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+        GROUP BY 
+            ws_bill_customer_sk, w.w_warehouse_name
+    ) w ON tc.c_customer_sk = w.ws_bill_customer_sk
+ORDER BY 
+    tc.wd_total_sales DESC
+LIMIT 10;

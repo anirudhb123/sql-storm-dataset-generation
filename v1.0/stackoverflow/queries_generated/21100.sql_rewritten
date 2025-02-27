@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS rn,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') OVER (PARTITION BY p.Id) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL (SELECT unnest(string_to_array(p.Tags, '<>')) AS TagName) t ON TRUE
+)
+SELECT 
+    up.Id AS UserId,
+    up.DisplayName,
+    up.Reputation,
+    pp.PostId,
+    pp.Title,
+    pp.CreationDate,
+    pp.TotalBounty,
+    pp.CommentCount,
+    pp.Tags,
+    ph.PostHistoryTypeId,
+    ph.CreationDate AS HistoryDate,
+    ph.UserDisplayName AS EditorName,
+    ph.Comment AS EditComment
+FROM 
+    Users up
+JOIN 
+    RankedPosts pp ON up.Id = pp.PostId
+LEFT JOIN 
+    PostHistory ph ON pp.PostId = ph.PostId AND ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory
+        WHERE PostId = pp.PostId
+        AND PostHistoryTypeId IN (4, 5, 6)  
+    )
+WHERE 
+    pp.rn <= 10  
+AND 
+    pp.TotalBounty > (SELECT AVG(TotalBounty) FROM RankedPosts)  
+OR 
+    pp.CommentCount IS NULL  
+ORDER BY 
+    pp.TotalBounty DESC, pp.CommentCount ASC
+LIMIT 50;

@@ -1,0 +1,62 @@
+
+WITH SalesData AS (
+    SELECT
+        ws.web_site_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        ws.web_site_id, ws.ws_sold_date_sk
+),
+CustomerInsights AS (
+    SELECT
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT cs.cs_order_number) AS orders_count,
+        SUM(cs.cs_net_paid) AS total_spent
+    FROM
+        customer_demographics cd
+    JOIN
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY
+        cd_demo_sk, cd_gender, cd_marital_status
+),
+InventoryStatus AS (
+    SELECT
+        i.i_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_inventory
+    FROM
+        item i
+    JOIN
+        inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY
+        i.i_item_sk
+)
+SELECT
+    sd.web_site_id,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    sd.total_quantity,
+    sd.total_sales,
+    ci.orders_count,
+    ci.total_spent,
+    inv.total_inventory
+FROM
+    SalesData sd
+JOIN
+    CustomerInsights ci ON sd.total_sales > 10000
+JOIN
+    InventoryStatus inv ON inv.total_inventory < 50
+ORDER BY
+    sd.total_sales DESC, ci.total_spent DESC
+LIMIT 100;

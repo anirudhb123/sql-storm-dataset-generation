@@ -1,0 +1,36 @@
+
+WITH RECURSIVE promo_hierarchy AS (
+    SELECT p_promo_sk, p_promo_id, p_promo_name, p_start_date_sk, 
+           p_end_date_sk, 0 AS level
+    FROM promotion
+    WHERE p_start_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    UNION ALL
+    SELECT p.p_promo_sk, p.p_promo_id, p.p_promo_name, p.p_start_date_sk, 
+           p.p_end_date_sk, ph.level + 1
+    FROM promotion p
+    JOIN promo_hierarchy ph ON p.p_start_date_sk > ph.p_start_date_sk
+    WHERE ph.level < 3
+), customer_sales AS (
+    SELECT c.c_customer_sk, c.c_customer_id, SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2022)
+                                  AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY c.c_customer_sk, c.c_customer_id
+), sales_by_demo AS (
+    SELECT cd.cd_gender, cd.cd_marital_status, SUM(cs.total_sales) AS demo_sales
+    FROM customer_sales cs
+    JOIN customer c ON cs.c_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status
+), sales_with_rank AS (
+    SELECT sd.cd_gender, sd.cd_marital_status, sd.demo_sales,
+           RANK() OVER (PARTITION BY sd.cd_gender ORDER BY sd.demo_sales DESC) AS sales_rank
+    FROM sales_by_demo sd
+)
+SELECT ph.p_promo_name, sd.cd_gender, sd.cd_marital_status, 
+       COALESCE(swr.demo_sales, 0) AS sales_amount, 
+       swr.sales_rank
+FROM promo_hierarchy ph
+LEFT JOIN sales_with_rank swr ON swr.sales_rank = 1
+ORDER BY ph.p_promo_name, swr.cd_gender, swr.cd_marital_status;

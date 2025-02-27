@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_chain AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_link ml ON t.id = ml.movie_id
+    JOIN 
+        title m ON m.id = ml.linked_movie_id
+    WHERE 
+        t.production_year = 2020
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        mc.level + 1
+    FROM 
+        movie_chain mc
+    JOIN 
+        movie_link ml ON mc.movie_id = ml.movie_id
+    JOIN 
+        title m ON m.id = ml.linked_movie_id
+    JOIN 
+        aka_title t ON t.id = m.id 
+    WHERE 
+        mc.level < 5
+)
+
+SELECT 
+    t.title AS main_title,
+    STRING_AGG(t.title, ' -> ') AS linked_titles,
+    COUNT(DISTINCT a.id) AS actor_count,
+    AVG(CASE WHEN c.nr_order IS NOT NULL THEN c.nr_order ELSE 0 END) AS avg_order_nonnull,
+    MIN(p.info) AS first_actor_note,
+    MAX(CASE WHEN m.production_year IS NULL THEN 'No Release Year' ELSE m.production_year END) AS max_year,
+    CASE 
+        WHEN COUNT(DISTINCT c.id) > 5 THEN 'High'
+        WHEN COUNT(DISTINCT c.id) BETWEEN 3 AND 5 THEN 'Medium'
+        ELSE 'Low'
+    END AS actor_variation
+FROM 
+    movie_chain mc
+JOIN 
+    complete_cast cc ON mc.movie_id = cc.movie_id
+JOIN 
+    cast_info c ON cc.subject_id = c.id
+JOIN 
+    aka_name a ON c.person_id = a.person_id
+JOIN 
+    title t ON mc.movie_id = t.id
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+LEFT JOIN 
+    person_info p ON a.person_id = p.person_id AND p.info_type_id = 1
+LEFT JOIN 
+    aka_title m ON mc.movie_id = m.id
+GROUP BY 
+    mc.movie_id, t.title
+ORDER BY 
+    linked_titles DESC;

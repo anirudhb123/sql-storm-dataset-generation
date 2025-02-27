@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND t.md5sum IN ('25a7a75d90ffca954113f1cd12edfc8c', '2e1b115f7a964399d6f0ae47c5a3b3cd', '7be5c54df3a232a99ea79392c0d1e1cd', '80dd9f9e9c7c1299ad68a0d91e3c5f76', 'bb71306c38dfd982c9d6080d62479432', 'dd1c87e117ba81e8ad40c852ddae5d0f', 'f3bd59850c9cae7f903e869ee76b1956', 'f6905c698e439d52b8a22d33082f0a98') AND chn.id > 1912086 AND cn.md5sum < '604d98e2fd57c748cc7cac3bf6758b42';

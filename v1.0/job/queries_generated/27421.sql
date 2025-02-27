@@ -1,0 +1,55 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        tk.keyword as keyword,
+        COUNT(DISTINCT mk.movie_id) AS keyword_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword tk ON mk.keyword_id = tk.id
+    WHERE 
+        t.production_year >= 2000 
+        AND t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Movie%')
+    GROUP BY 
+        t.id, t.title, t.production_year, tk.keyword
+),
+TopKeywords AS (
+    SELECT 
+        keyword,
+        SUM(keyword_count) AS total_count
+    FROM 
+        RankedTitles
+    GROUP BY 
+        keyword
+    ORDER BY 
+        total_count DESC
+    LIMIT 10
+),
+DirectorInfo AS (
+    SELECT 
+        c.movie_id,
+        COALESCE(a.name, 'Unknown') AS director_name
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+)
+SELECT 
+    t.movie_title,
+    t.production_year,
+    dk.director_name,
+    tk.keyword AS top_keyword,
+    tk.total_count
+FROM 
+    RankedTitles t
+JOIN 
+    TopKeywords tk ON t.keyword = tk.keyword
+LEFT JOIN 
+    DirectorInfo dk ON t.movie_id = dk.movie_id
+ORDER BY 
+    t.production_year DESC, tk.total_count DESC;

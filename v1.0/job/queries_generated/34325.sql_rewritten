@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mk.movie_id,
+        mk.linked_movie_id,
+        1 as level
+    FROM 
+        movie_link mk
+    WHERE 
+        mk.link_type_id = (SELECT id FROM link_type WHERE link = 'Sequel')  
+
+    UNION ALL
+
+    SELECT 
+        mk.movie_id,
+        mk.linked_movie_id,
+        mh.level + 1
+    FROM 
+        movie_link mk
+    JOIN 
+        movie_hierarchy mh ON mk.movie_id = mh.linked_movie_id
+)
+
+SELECT 
+    t.title AS Movie_Title,
+    a.name AS Actor_Name,
+    COUNT(DISTINCT mk.keyword_id) AS Total_Keywords,
+    AVG(CASE WHEN mi.info ILIKE '%award%' THEN 1 ELSE 0 END) AS Award_Win_Rate,
+    COALESCE(c.name, 'Unknown Company') AS Company_Name,
+    ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY COUNT(DISTINCT mk.keyword_id) DESC) AS Keyword_Rank,
+    mh.level AS Hierarchy_Level
+
+FROM 
+    title t
+JOIN 
+    cast_info ci ON ci.movie_id = t.id
+JOIN 
+    aka_name a ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+LEFT JOIN 
+    company_name c ON c.id = mc.company_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = t.id
+
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = t.id  
+
+WHERE 
+    t.production_year >= 2000
+    AND a.name IS NOT NULL
+    AND (c.country_code IS NULL OR c.country_code != 'USA')  
+
+GROUP BY 
+    t.id, a.name, c.name, mh.level
+HAVING 
+    COUNT(DISTINCT mk.keyword_id) > 0  
+
+ORDER BY 
+    t.production_year DESC, Total_Keywords DESC;

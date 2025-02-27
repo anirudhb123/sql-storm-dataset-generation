@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) as profit_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        SUM(rs.ws_net_profit) AS total_profit
+    FROM 
+        RankedSales rs
+    JOIN 
+        item item ON rs.ws_item_sk = item.i_item_sk
+    WHERE 
+        rs.profit_rank = 1
+    GROUP BY 
+        item.i_item_id, item.i_item_desc
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            WHEN cd.cd_purchase_estimate < 500 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 500 AND 1500 THEN 'Medium'
+            ELSE 'High'
+        END AS purchase_category
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_credit_rating NOT LIKE '%Poor%'
+),
+SalesWithDemographics AS (
+    SELECT 
+        c.c_customer_id,
+        cd.purchase_category,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_id, cd.purchase_category
+)
+SELECT 
+    d.d_year,
+    swi.c_customer_id,
+    swi.purchase_category,
+    swi.order_count,
+    swi.total_net_profit,
+    CASE 
+        WHEN swi.total_net_profit IS NULL THEN 'No Profit Recorded'
+        ELSE CONCAT('Profit is ', CAST(swi.total_net_profit AS VARCHAR), ' units')
+    END AS profit_statement,
+    ROW_NUMBER() OVER (PARTITION BY swi.purchase_category ORDER BY swi.total_net_profit DESC) AS category_rank
+FROM 
+    SalesWithDemographics swi
+JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(ws.ws_ship_date_sk) FROM web_sales ws WHERE ws.ws_bill_customer_sk = swi.c_customer_id)
+WHERE 
+    d.d_year IS NOT NULL
+    AND (swi.order_count IS NOT NULL OR swi.purchase_category = 'Low')
+    AND (swi.total_net_profit > 1000 OR swi.purchase_category IS NULL)
+ORDER BY 
+    d.d_year, swi.purchase_category, swi.total_net_profit DESC
+LIMIT 50;

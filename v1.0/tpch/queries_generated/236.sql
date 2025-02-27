@@ -1,0 +1,68 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate,
+        COUNT(l.l_orderkey) AS lineitem_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate >= '2023-01-01'
+        )
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+SupplierOrders AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice) AS total_sales
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_name
+    HAVING 
+        SUM(l.l_extendedprice) > 10000
+)
+
+SELECT 
+    r.r_name,
+    n.n_name,
+    COALESCE(SUM(SU.total_sales), 0) AS total_sales,
+    COALESCE(SUM(HO.o_totalprice), 0) AS total_high_value_orders,
+    AVG(CASE WHEN RANK = 1 THEN s.s_acctbal END) AS avg_top_supplier_balance,
+    COUNT(DISTINCT HO.o_orderkey) AS total_high_value_order_count
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rank <= 5
+LEFT JOIN 
+    SupplierOrders SU ON s.s_suppkey = SU.ps_suppkey
+LEFT JOIN 
+    HighValueOrders HO ON SU.ps_partkey IN (SELECT ps_partkey FROM partsupp WHERE ps_suppkey = s.s_suppkey)
+GROUP BY 
+    r.r_name, n.n_name
+ORDER BY 
+    total_sales DESC, avg_top_supplier_balance DESC;

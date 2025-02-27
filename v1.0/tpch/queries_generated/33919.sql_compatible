@@ -1,0 +1,47 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_supplycost, p.p_name, 1 AS level
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, ps.ps_supplycost, p.p_name, sc.level + 1
+    FROM SupplyChain sc
+    JOIN partsupp ps ON sc.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 5 AND sc.level < 5
+),
+AggregatedData AS (
+    SELECT 
+        s.n_nationkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey 
+    JOIN supplier s ON l.l_suppkey = s.s_suppkey
+    WHERE o.o_orderdate >= '1997-01-01' 
+    GROUP BY s.n_nationkey
+),
+ranked_sales AS (
+    SELECT 
+        n.n_name,
+        ad.total_sales,
+        ROW_NUMBER() OVER (ORDER BY ad.total_sales DESC) AS rank
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN AggregatedData ad ON n.n_nationkey = ad.n_nationkey
+)
+SELECT 
+    rs.n_name,
+    COALESCE(rs.total_sales, 0) AS total_sales,
+    CASE WHEN rs.rank = 1 THEN 'Top Nation' ELSE 'Other Nation' END AS nation_rank,
+    s.s_name AS supplier_name,
+    s.s_acctbal AS supplier_balance,
+    sc.level AS supply_chain_level
+FROM ranked_sales rs
+LEFT JOIN SupplyChain sc ON sc.s_suppkey = (SELECT MIN(s.s_suppkey) FROM supplier s WHERE s.s_acctbal > 5000)
+LEFT JOIN supplier s ON s.s_suppkey = sc.s_suppkey
+WHERE rs.total_sales IS NOT NULL
+ORDER BY rs.rank, total_sales DESC;

@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availability,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        sa.ps_partkey,
+        sa.ps_suppkey
+    FROM 
+        SupplierAvailability sa
+    WHERE 
+        sa.total_availability > (
+            SELECT 
+                AVG(total_availability) 
+            FROM 
+                SupplierAvailability
+        )
+),
+OrderLineDetails AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_extendedprice,
+        CASE 
+            WHEN li.l_returnflag = 'R' THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status,
+        COALESCE(SUM(li.l_discount), 0) AS total_discount
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey, li.l_partkey, li.l_returnflag
+),
+ComputedTotals AS (
+    SELECT 
+        oo.o_orderkey,
+        SUM(ol.l_extendedprice) AS total_price,
+        SUM(ol.total_discount) AS total_discounted_price
+    FROM 
+        RankedOrders oo
+    LEFT JOIN 
+        OrderLineDetails ol ON oo.o_orderkey = ol.l_orderkey
+    GROUP BY 
+        oo.o_orderkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(ct.total_price, 0) AS total_receivable,
+    COALESCE(ct.total_discounted_price, 0) AS total_discounted,
+    (SELECT COUNT(DISTINCT s.s_suppkey)
+     FROM supplier s
+     JOIN TopSuppliers ts ON s.s_suppkey = ts.ps_suppkey
+     WHERE ts.ps_partkey = p.p_partkey) AS supplier_count
+FROM 
+    part p
+LEFT JOIN 
+    ComputedTotals ct ON p.p_partkey = ct.o_orderkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+    AND EXISTS (SELECT 1 FROM supplier s WHERE s.s_nationkey IN 
+                 (SELECT n.n_nationkey FROM nation n WHERE n.n_name IS NOT NULL))
+ORDER BY 
+    total_receivable DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

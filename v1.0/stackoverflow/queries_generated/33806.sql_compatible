@@ -1,0 +1,99 @@
+
+WITH RecursivePosts AS (
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.ParentId = rp.Id
+),
+PostDetails AS (
+    
+    SELECT 
+        r.Id AS PostId,
+        r.Title,
+        r.AcceptedAnswerId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        MAX(u.Reputation) AS MaxReputation
+    FROM 
+        RecursivePosts r
+    LEFT JOIN 
+        Comments c ON r.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON r.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = r.OwnerUserId
+    LEFT JOIN 
+        Users u ON r.OwnerUserId = u.Id
+    GROUP BY 
+        r.Id, r.Title, r.AcceptedAnswerId
+),
+AggregatedResults AS (
+    
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.AcceptedAnswerId,
+        pd.CommentCount,
+        pd.VoteCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.BadgeCount,
+        CASE 
+            WHEN pd.MaxReputation IS NULL THEN 'No Reputation'
+            ELSE CONCAT('Max Reputation: ', pd.MaxReputation)
+        END AS ReputationInfo
+    FROM 
+        PostDetails pd
+)
+
+
+SELECT 
+    ar.PostId,
+    ar.Title,
+    ar.CommentCount,
+    ar.VoteCount,
+    ar.UpVotes,
+    ar.DownVotes,
+    ar.BadgeCount,
+    ar.ReputationInfo,
+    CASE 
+        WHEN ar.CommentCount > 10 THEN 'High'
+        WHEN ar.CommentCount BETWEEN 5 AND 10 THEN 'Medium'
+        ELSE 'Low'
+    END AS CommentLevel,
+    CASE 
+        WHEN ar.VoteCount > 20 THEN 'Highly Voted'
+        WHEN ar.VoteCount BETWEEN 10 AND 20 THEN 'Moderately Voted'
+        ELSE 'Low Votes'
+    END AS VoteLevel
+FROM 
+    AggregatedResults ar
+
+WHERE 
+    ar.CommentCount > 5 OR ar.VoteCount > 10
+ORDER BY 
+    ar.VoteCount DESC, 
+    ar.CommentCount DESC;

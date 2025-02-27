@@ -1,0 +1,72 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_spent,
+        DENSE_RANK() OVER (PARTITION BY cd.cd_gender ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 1000 -- dummy date range for the example
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender
+),
+HighSpendingCustomers AS (
+    SELECT 
+        c_customer_id,
+        cd_gender,
+        total_sales,
+        total_orders,
+        avg_spent
+    FROM 
+        CustomerSales
+    WHERE 
+        sales_rank <= 10
+),
+ProductsWithReturns AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sales_qty,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns_qty,
+        (SUM(ws.ws_quantity) - COALESCE(SUM(sr_return_quantity), 0)) AS net_sales_qty,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amt
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        web_returns wr ON ws.ws_item_sk = wr.wr_item_sk
+    LEFT JOIN 
+        store_returns sr ON ws.ws_item_sk = sr.sr_item_sk
+    GROUP BY 
+        ws.ws_item_sk
+)
+SELECT 
+    customer.c_customer_id,
+    customer.cd_gender,
+    high_total.total_sales,
+    high_total.total_orders,
+    product.ws_item_sk,
+    product.total_sales_qty,
+    product.total_returns_qty,
+    product.net_sales_qty,
+    product.total_sales_amt,
+    CASE 
+        WHEN product.net_sales_qty > 0 THEN 
+            ROUND((product.total_sales_amt / product.net_sales_qty), 2)
+        ELSE 
+            NULL 
+    END AS average_sale_price
+FROM 
+    HighSpendingCustomers customer
+JOIN 
+    ProductsWithReturns product ON customer.c_customer_id = product.ws_item_sk
+WHERE 
+    customer.total_sales > 10000
+ORDER BY 
+    customer.cd_gender, customer.total_sales DESC;

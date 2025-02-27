@@ -1,0 +1,55 @@
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT c.first_name || ' ' || c.last_name ORDER BY c.nr_order) AS cast_list, 
+        GROUP_CONCAT(DISTINCT k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    JOIN 
+        aka_name c ON c.person_id = ci.person_id
+    JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    JOIN 
+        company_name cn ON cn.id = mc.company_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+keyword_count AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT keyword) AS total_keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_list,
+    md.keywords,
+    kc.total_keywords,
+    md.companies
+FROM 
+    movie_details md
+JOIN 
+    keyword_count kc ON md.movie_id = kc.movie_id
+ORDER BY 
+    md.production_year DESC, total_keywords DESC
+LIMIT 50;

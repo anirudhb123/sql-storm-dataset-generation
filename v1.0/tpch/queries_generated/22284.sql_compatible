@@ -1,0 +1,85 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_retailprice IS NOT NULL AND p.p_retailprice > 0
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 50000
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(*) AS line_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+),
+OrderSupplierDetails AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        COUNT(DISTINCT CASE WHEN o.o_orderstatus = 'O' THEN o.o_orderkey END) AS open_orders
+    FROM 
+        orders o
+    LEFT JOIN 
+        partsupp ps ON o.o_orderkey = ps.ps_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    r.r_name,
+    rp.p_name,
+    SUM(il.total_sales) AS sales_total,
+    AVG(oc.total_supplycost) AS avg_supplycost,
+    MAX(oc.open_orders) AS max_open_orders,
+    CASE 
+        WHEN SUM(il.total_sales) > 100000 THEN 'High Sales'
+        WHEN SUM(il.total_sales) IS NULL THEN 'No Sales'
+        ELSE 'Moderate Sales'
+    END AS sales_category,
+    NTILE(4) OVER (ORDER BY SUM(il.total_sales) DESC) AS sales_quartile
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN 
+    AggregatedLineItems il ON c.c_custkey = il.l_orderkey
+JOIN 
+    HighValueSuppliers s ON s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = il.l_orderkey)
+JOIN 
+    OrderSupplierDetails oc ON il.l_orderkey = oc.o_orderkey
+JOIN 
+    RankedParts rp ON rp.p_partkey = il.l_partkey
+WHERE 
+    (r.r_name LIKE '%Americas%' OR r.r_name LIKE '%Europe%')
+    AND rp.rn <= 5
+GROUP BY 
+    r.r_name, rp.p_name
+HAVING 
+    SUM(il.total_sales) IS NOT NULL OR COUNT(c.c_custkey) > 0
+ORDER BY 
+    sales_total DESC NULLS LAST;

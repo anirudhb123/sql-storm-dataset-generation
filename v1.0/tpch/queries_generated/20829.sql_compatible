@@ -1,0 +1,48 @@
+
+WITH RECURSIVE nation_cte AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation
+    WHERE n_name LIKE 'A%'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, c.level + 1
+    FROM nation n
+    JOIN nation_cte c ON n.n_regionkey = c.n_regionkey
+    WHERE c.level < 5
+), order_summary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_partkey) AS distinct_parts_count,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), supplier_details AS (
+    SELECT
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) < (SELECT AVG(ps.ps_supplycost * ps.ps_availqty) FROM partsupp)
+)
+SELECT
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(os.total_revenue) AS max_revenue,
+    AVG(sd.total_supply_cost) AS avg_supply_cost,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 10 THEN 'High Volume'
+        ELSE 'Low Volume'
+    END AS volume_category
+FROM nation_cte n
+LEFT JOIN orders o ON o.o_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN order_summary os ON os.o_orderkey = o.o_orderkey
+LEFT JOIN supplier_details sd ON n.n_nationkey = sd.s_suppkey
+GROUP BY n.n_nationkey, n.n_name
+HAVING MAX(os.total_revenue) IS NOT NULL
+AND COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY n.n_name DESC
+LIMIT 50 OFFSET 5;

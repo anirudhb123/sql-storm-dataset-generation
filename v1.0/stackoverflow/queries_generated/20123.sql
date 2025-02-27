@@ -1,0 +1,101 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(V.BountyAmount) FILTER (WHERE V.BountyAmount IS NOT NULL) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) -- Bounty Start or Close
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostEnhancements AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        PH.UserId AS CloserId,
+        PH.CreationDate AS ClosedDate,
+        CT.Name AS CloseReason
+    FROM 
+        Posts P
+    INNER JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10 -- Post Closed
+    LEFT JOIN 
+        CloseReasonTypes CT ON PH.Comment::int = CT.Id
+),
+ActiveUsers AS (
+    SELECT DISTINCT 
+        UA.UserId, UA.DisplayName, UA.Reputation
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.TotalPosts > 0 AND UA.Reputation > 1000
+),
+UserPosts AS (
+    SELECT 
+        UA.UserId, 
+        PA.PostId, 
+        PA.Title, 
+        PA.CreationDate, 
+        PA.Score, 
+        CASE 
+            WHEN C.CloseReason IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS PostStatus
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostEnhancements PA ON UA.UserId = PA.OwnerUserId
+    LEFT JOIN 
+        ClosedPosts C ON PA.PostId = C.PostId
+)
+SELECT 
+    AP.DisplayName,
+    UP.Title,
+    UP.CreationDate,
+    UP.Score,
+    COUNT(DISTINCT C.Id) AS TotalComments,
+    (SELECT COUNT(*) FROM PostLinks PL WHERE PL.PostId = UP.PostId) AS TotalLinks,
+    U.Footer AS UserFooter,
+    U.Reputation * ((SELECT COUNT(*) FROM Badges B WHERE B.UserId = AP.UserId AND B.Class = 1) + /* Gold Badges */
+                    (SELECT COUNT(*) FROM Badges B WHERE B.UserId = AP.UserId AND B.Class = 2)) AS WeightedReputation  /* Silver Badges */
+FROM 
+    ActiveUsers AP
+JOIN 
+    UserPosts UP ON AP.UserId = UP.UserId
+LEFT JOIN 
+    Comments C ON UP.PostId = C.PostId 
+LEFT JOIN 
+    Users U ON AP.UserId = U.Id
+WHERE 
+    UP.PostStatus = 'Open' AND 
+    UP.CreationDate BETWEEN NOW() - INTERVAL '1 month' AND NOW()
+GROUP BY 
+    AP.DisplayName, UP.Title, UP.CreationDate, UP.Score, U.Footer, AP.UserId
+HAVING 
+    (COUNT(*) FILTER (WHERE C.UserId IS NOT NULL) > 0) OR 
+    (UP.Score > 5 AND EXISTS (SELECT 1 FROM Votes V WHERE V.PostId = UP.PostId AND V.VoteTypeId = 2))  -- Upvoted
+ORDER BY 
+    WeightedReputation DESC, 
+    UP.CreationDate DESC;

@@ -1,0 +1,71 @@
+WITH MovieCounts AS (
+    SELECT 
+        a.title AS movie_title,
+        COUNT(DISTINCT ca.person_id) AS actor_count,
+        SUM(CASE WHEN ca.note IS NULL THEN 0 ELSE 1 END) AS noted_actors
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ca ON a.movie_id = ca.movie_id
+    GROUP BY 
+        a.title
+),
+RichMovieData AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(k.keyword, 'No Keywords') AS keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        COUNT(DISTINCT ki.id) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON m.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Genre' LIMIT 1)
+    LEFT JOIN 
+        movie_info_idx mi_idx ON m.movie_id = mi_idx.movie_id
+    GROUP BY 
+        m.id, m.title, m.production_year, k.keyword, cn.name
+),
+ActorDetails AS (
+    SELECT 
+        p.name,
+        COUNT(DISTINCT ca.movie_id) AS movies_appeared,
+        SUM(CASE WHEN p.gender = 'F' THEN 1 ELSE 0 END) AS female_roles
+    FROM 
+        name p
+    LEFT JOIN 
+        cast_info ca ON p.id = ca.person_id
+    GROUP BY 
+        p.name
+)
+SELECT 
+    r.title,
+    r.production_year,
+    r.keyword,
+    r.company_name,
+    mc.actor_count,
+    ad.movies_appeared,
+    ad.female_roles
+FROM 
+    RichMovieData r
+JOIN 
+    MovieCounts mc ON r.title = mc.movie_title
+LEFT JOIN 
+    ActorDetails ad ON ad.name = r.title
+WHERE 
+    r.keyword_count > 1 
+    AND r.production_year >= 2000 
+    AND mc.noted_actors > 5
+ORDER BY 
+    r.production_year DESC, mc.actor_count DESC
+LIMIT 10;

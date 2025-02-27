@@ -1,0 +1,72 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        CONCAT(s.s_address, ', ', n.n_name, ', ', r.r_name) AS full_address,
+        s.s_phone,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS comment_length
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        LENGTH(ps.ps_comment) AS part_comment_length
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CombinedDetails AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.full_address,
+        sd.s_phone,
+        sd.s_acctbal,
+        sd.comment_length,
+        ps.p_name,
+        ps.p_brand,
+        ps.p_type,
+        ps.p_size,
+        ps.p_container,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.part_comment_length
+    FROM 
+        SupplierDetails sd
+    JOIN 
+        PartSupplierDetails ps ON sd.s_suppkey = ps.ps_suppkey
+)
+SELECT 
+    s.s_name,
+    COUNT(DISTINCT p.p_name) AS part_count,
+    SUM(ps.ps_supplycost) AS total_supply_cost,
+    AVG(sd.comment_length) AS avg_supplier_comment_length,
+    AVG(ps.part_comment_length) AS avg_part_comment_length,
+    MAX(cd.s_acctbal) AS max_account_balance
+FROM 
+    CombinedDetails cd
+JOIN 
+    supplier s ON cd.s_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON cd.ps_partkey = ps.ps_partkey
+GROUP BY 
+    s.s_name
+HAVING 
+    COUNT(DISTINCT p.p_name) > 5
+ORDER BY 
+    total_supply_cost DESC;

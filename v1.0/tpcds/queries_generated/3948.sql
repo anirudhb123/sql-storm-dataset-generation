@@ -1,0 +1,62 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        customer AS c
+    JOIN web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY
+        c.c_customer_sk, c.c_customer_id
+),
+TopCustomers AS (
+    SELECT
+        c.c_customer_id,
+        cs.total_sales,
+        cs.total_orders,
+        RANK() OVER (ORDER BY cs.total_sales DESC) AS sales_rank
+    FROM
+        CustomerSales cs
+    JOIN customer AS c ON cs.c_customer_sk = c.c_customer_sk
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_income_band_sk,
+        COALESCE(hd.hd_buy_potential, 'Unknown') AS buy_potential
+    FROM
+        customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics AS hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT
+    tc.c_customer_id,
+    ci.cd_gender,
+    ci.ib_income_band_sk,
+    ci.buy_potential,
+    tc.total_sales,
+    tc.total_orders
+FROM
+    TopCustomers tc
+JOIN CustomerInfo ci ON tc.c_customer_id = ci.c_customer_id
+WHERE
+    tc.sales_rank <= 10
+    AND (ci.ib_income_band_sk IS NOT NULL OR ci.buy_potential != 'Low')
+UNION
+SELECT
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.ib_income_band_sk,
+    ci.buy_potential,
+    0 AS total_sales,
+    0 AS total_orders
+FROM
+    CustomerInfo ci
+WHERE
+    ci.buy_potential = 'Low'
+    AND ci.c_customer_id NOT IN (SELECT c_customer_id FROM TopCustomers);

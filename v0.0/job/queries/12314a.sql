@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND t.season_nr < 102 AND it.info IN ('LD catalog number', 'LD close captions-teletext-ld-g', 'LD review', 'LD sound encoding', 'LD spaciality', 'certificates', 'countries', 'production dates', 'rentals', 'where now') AND mi.info < 'The 12 oz. Mouse Volume One DVD presents the entire series (excluding episode 13, which is featured separately) as a single, continuous movie, with newly produced footage to bridge the gaps between episodes.';

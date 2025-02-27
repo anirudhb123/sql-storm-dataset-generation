@@ -1,0 +1,78 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY a.movie_id ORDER BY a.production_year DESC NULLS LAST) AS rn,
+        COUNT(*) OVER (PARTITION BY a.production_year) AS year_count,
+        COALESCE(NULLIF(a.production_year, 0), 'Unknown') AS effective_year,
+        a.movie_id  -- Added movie_id to GROUP BY
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.production_year IS NOT NULL
+),
+
+FilteredNames AS (
+    SELECT 
+        c.name,
+        CASE 
+            WHEN ch.name IS NULL THEN 'Unspecified'
+            ELSE ch.name
+        END AS character_name,
+        ch.imdb_id  -- Added imdb_id to GROUP BY
+    FROM 
+        char_name ch
+    LEFT JOIN 
+        aka_name c ON ch.imdb_id = c.person_id
+    WHERE 
+        c.name IS NOT NULL OR ch.name IS NOT NULL
+),
+
+CompletedCast AS (
+    SELECT 
+        cc.movie_id,
+        STRING_AGG(DISTINCT n.name, ', ' ORDER BY n.name) AS cast_names,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS note_count,
+        COUNT(DISTINCT ci.person_id) AS unique_cast_count
+    FROM 
+        complete_cast cc
+    JOIN 
+        cast_info ci ON cc.movie_id = ci.movie_id 
+    LEFT JOIN 
+        name n ON ci.person_id = n.id
+    GROUP BY 
+        cc.movie_id
+)
+
+SELECT 
+    rt.title,
+    rt.effective_year,
+    fn.character_name,
+    cc.cast_names,
+    cc.unique_cast_count,
+    rt.year_count,
+    CONCAT('Year: ', rt.effective_year, ', Title: ', rt.title) AS title_year_string,  -- Changed || to CONCAT for compatibility
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = rt.movie_id AND mi.info_type_id = 1) AS info_type_count,
+    (SELECT MAX(movie_id) FROM movie_companies mc WHERE mc.company_id IN (
+        SELECT id FROM company_name WHERE country_code = 'USA'
+    )) AS max_company_movie_id
+FROM 
+    RankedTitles rt
+JOIN 
+    FilteredNames fn ON rt.keyword = 'Action'
+LEFT JOIN 
+    CompletedCast cc ON rt.movie_id = cc.movie_id
+WHERE 
+    rt.rn = 1 AND 
+    (rt.year_count > 1 OR cc.note_count > 0) AND 
+    (rt.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'Feature%') OR 
+    rt.kind_id = (SELECT id FROM kind_type WHERE kind = 'Short'))
+ORDER BY 
+    COALESCE(rt.effective_year, 'Unknown') DESC,
+    cc.unique_cast_count DESC,
+    rt.title ASC;

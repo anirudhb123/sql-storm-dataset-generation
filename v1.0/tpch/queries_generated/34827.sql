@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS line_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+), FilteredCustomer AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+), SupplierPerformance AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 5000
+)
+SELECT 
+    c.c_name, 
+    od.o_orderdate,
+    od.line_total,
+    sh.level AS supplier_level,
+    sp.total_supply_cost,
+    RANK() OVER (PARTITION BY od.o_orderdate ORDER BY od.line_total DESC) AS order_rank,
+    CASE 
+        WHEN sp.total_supply_cost IS NULL THEN 'No High Supply'
+        ELSE 'High Supply'
+    END AS supply_status
+FROM OrderDetails od
+JOIN FilteredCustomer c ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+LEFT JOIN SupplierPerformance sp ON sp.s_name = sh.s_name
+WHERE od.o_totalprice > 1000
+ORDER BY od.o_orderdate, order_rank;

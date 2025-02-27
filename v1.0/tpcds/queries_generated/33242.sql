@@ -1,0 +1,54 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_name, ca_city, ca_state, 1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+    UNION ALL
+    SELECT a.ca_address_sk, a.ca_address_id, a.ca_street_name, a.ca_city, a.ca_state, ah.level + 1
+    FROM customer_address a
+    JOIN AddressHierarchy ah ON a.ca_address_sk = ah.ca_address_sk
+),
+SalesAggregates AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ss.ss_net_profit) DESC) AS sales_rank
+    FROM customer c
+    JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+Demographics AS (
+    SELECT
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    ah.ca_address_id,
+    ah.ca_street_name,
+    ah.ca_city,
+    ah.ca_state,
+    sa.c_first_name,
+    sa.c_last_name,
+    sa.total_net_profit,
+    sa.total_sales,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.cd_education_status,
+    d.customer_count
+FROM AddressHierarchy ah
+FULL OUTER JOIN SalesAggregates sa ON sa.c_customer_sk = (SELECT c.c_customer_sk 
+                                                             FROM customer c 
+                                                             WHERE c.c_current_addr_sk = ah.ca_address_sk
+                                                             FETCH FIRST 1 ROWS ONLY)
+LEFT JOIN Demographics d ON d.customer_count > 0
+WHERE (sa.total_net_profit > 500 OR d.cd_marital_status = 'M')
+ORDER BY ah.ca_city, sa.total_net_profit DESC, d.customer_count DESC
+LIMIT 100;

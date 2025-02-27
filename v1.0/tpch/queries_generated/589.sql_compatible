@@ -1,0 +1,61 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS national_supplier,
+    ps.p_name AS part_name,
+    ps.total_available,
+    ps.total_cost,
+    cus.total_spent,
+    cus.order_count
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    RankedSuppliers rs ON ns.n_nationkey = rs.s_nationkey AND rs.rank <= 3
+LEFT JOIN 
+    PartSupplierDetails ps ON ps.total_available > 100
+LEFT JOIN 
+    CustomerOrderSummary cus ON cus.total_spent IS NOT NULL
+WHERE 
+    ns.n_name IS NOT NULL 
+    AND ps.total_cost IS NOT NULL
+ORDER BY 
+    r.r_name, ns.n_name, ps.p_name;

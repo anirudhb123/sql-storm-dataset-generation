@@ -1,0 +1,41 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN B.UserId IS NOT NULL THEN 1 ELSE 0 END) AS TotalBadges,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+AggregateData AS (
+    SELECT 
+        TotalPosts,
+        TotalComments,
+        TotalUpVotes,
+        TotalDownVotes,
+        TotalBadges,
+        TotalViews,
+        ROW_NUMBER() OVER (ORDER BY TotalViews DESC) AS UserRank
+    FROM UserActivity
+)
+SELECT 
+    U.DisplayName,
+    A.TotalPosts,
+    A.TotalComments,
+    A.TotalUpVotes,
+    A.TotalDownVotes,
+    A.TotalBadges,
+    A.TotalViews,
+    A.UserRank
+FROM AggregateData A
+JOIN Users U ON A.UserId = U.Id
+WHERE A.UserRank <= 10
+ORDER BY A.UserRank;

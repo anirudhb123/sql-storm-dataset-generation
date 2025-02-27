@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        (SELECT 
+            Id, 
+            UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><')) AS TagName 
+         FROM 
+            Posts) t ON p.Id = t.Id
+    WHERE 
+        p.CreationDate >= DATE('2024-10-01') - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.AcceptedAnswerId, p.PostTypeId
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(bp.BadgeCount, 0) AS BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.Rank,
+    CASE 
+        WHEN rp.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer' 
+        ELSE 'No Accepted Answer' 
+    END AS AnswerStatus,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AssociatedTags
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.PostId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS BadgeCount 
+     FROM Badges 
+     GROUP BY UserId) bp ON u.Id = bp.UserId
+LEFT JOIN 
+    LATERAL (SELECT UNNEST(rp.Tags) AS TagName) t ON TRUE
+WHERE 
+    u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    AND rp.Rank <= 5
+GROUP BY 
+    u.DisplayName, u.Reputation, rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.Rank
+ORDER BY 
+    rp.Score DESC, u.Reputation DESC;

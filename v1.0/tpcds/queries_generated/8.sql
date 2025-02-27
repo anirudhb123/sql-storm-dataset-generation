@@ -1,0 +1,61 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_ship_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458186 AND 2458186 + 30 -- Example date filter
+    GROUP BY 
+        ws_ship_date_sk, 
+        ws_item_sk
+), StoreSalesData AS (
+    SELECT 
+        ss_sold_date_sk, 
+        ss_item_sk,
+        SUM(ss_quantity) AS store_total_quantity,
+        SUM(ss_net_profit) AS store_total_net_profit
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2458186 AND 2458186 + 30 -- Match with the web sales period
+    GROUP BY 
+        ss_sold_date_sk, 
+        ss_item_sk
+), CombinedSales AS (
+    SELECT 
+        COALESCE(sd.ws_item_sk, ssd.ss_item_sk) AS item_sk,
+        COALESCE(total_quantity, 0) AS total_web_quantity,
+        COALESCE(store_total_quantity, 0) AS total_store_quantity,
+        total_net_profit,
+        store_total_net_profit
+    FROM 
+        SalesData sd
+    FULL OUTER JOIN 
+        StoreSalesData ssd ON sd.ws_item_sk = ssd.ss_item_sk
+)
+SELECT 
+    item_sk,
+    total_web_quantity, 
+    total_store_quantity,
+    (total_web_quantity + total_store_quantity) AS combined_quantity,
+    total_net_profit,
+    store_total_net_profit,
+    (COALESCE(total_net_profit, 0) + COALESCE(store_total_net_profit, 0)) AS combined_net_profit,
+    CASE 
+        WHEN total_web_quantity > total_store_quantity THEN 'Web is better'
+        WHEN total_web_quantity < total_store_quantity THEN 'Store is better'
+        ELSE 'Equal performance'
+    END AS performance_comparison,
+    ROW_NUMBER() OVER (ORDER BY combined_net_profit DESC) as rank
+FROM 
+    CombinedSales
+WHERE 
+    (total_web_quantity > 0 OR total_store_quantity > 0)
+ORDER BY 
+    combined_net_profit DESC
+LIMIT 10;

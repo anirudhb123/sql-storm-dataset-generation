@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_chain AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal * 1.1, sc.level + 1
+    FROM supplier_chain sc
+    JOIN supplier s ON sc.s_nationkey = s.s_nationkey AND sc.level < 3
+),
+part_summary AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_available, 
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_non_discounted
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY p.p_partkey
+),
+customer_preferences AS (
+    SELECT c.c_custkey, c.c_name, MAX(o.o_totalprice) AS max_order_price, 
+           MIN(o.o_totalprice) AS min_order_price,
+           SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS completed_orders_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    ps.p_partkey,
+    ps.total_available,
+    cp.c_custkey,
+    cp.c_name,
+    cp.max_order_price,
+    cp.min_order_price,
+    CASE 
+        WHEN ps.unique_suppliers > 5 THEN 'Diverse Supplier Network'
+        ELSE 'Limited Supplier Options'
+    END AS supplier_network_status,
+    RANK() OVER (PARTITION BY ps.p_partkey ORDER BY cp.completed_orders_value DESC) AS customer_rank
+FROM part_summary ps
+JOIN customer_preferences cp ON ps.total_available > 100
+FULL OUTER JOIN supplier_chain sc ON cp.c_nationkey = sc.s_nationkey
+WHERE sc.level IS NOT NULL
+ORDER BY ps.p_partkey, cp.max_order_price DESC, ps.total_available;

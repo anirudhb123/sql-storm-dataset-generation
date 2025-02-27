@@ -1,0 +1,69 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    HAVING COUNT(p.Id) > 10
+    ORDER BY TotalViews DESC
+    LIMIT 10
+),
+PostStat AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= DATEADD(YEAR, -1, cast('2024-10-01 12:34:56' as timestamp))
+    GROUP BY p.Id
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        COUNT(ps.PostId) AS PostCount,
+        SUM(ps.Upvotes) AS TotalUpvotes,
+        SUM(ps.Downvotes) AS TotalDownvotes,
+        AVG(ps.ViewCount) AS AvgViewCount
+    FROM UserReputation ur
+    JOIN PostStat ps ON ur.UserId = ps.PostId
+    GROUP BY ur.UserId
+    ORDER BY ur.Reputation DESC
+    LIMIT 5
+)
+SELECT 
+    u.DisplayName AS TopUser,
+    u.Reputation,
+    u.PostCount,
+    u.TotalUpvotes,
+    u.TotalDownvotes,
+    u.AvgViewCount,
+    pt.TagName,
+    pt.PostCount AS PopularTagPostCount,
+    pt.TotalViews AS PopularTagTotalViews
+FROM TopUsers u
+JOIN PopularTags pt ON ARRAY_CONTAINS(string_to_array(u.Tags, ','), pt.TagName)
+ORDER BY u.Reputation DESC, pt.TotalViews DESC;

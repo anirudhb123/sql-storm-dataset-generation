@@ -1,0 +1,52 @@
+WITH movie_person_roles AS (
+    SELECT 
+        ci.movie_id,
+        k.keyword AS movie_keyword,
+        pt.role AS person_role,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        co.name AS company_name,
+        m.production_year
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name co ON mc.company_id = co.id
+    WHERE 
+        co.country_code = 'USA'
+),
+grouped_roles AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT actor_name) AS distinct_actors,
+        STRING_AGG(DISTINCT person_role, ', ') AS roles,
+        STRING_AGG(DISTINCT movie_keyword, ', ') AS keywords
+    FROM 
+        movie_person_roles
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    gr.movie_id,
+    t.title,
+    gr.distinct_actors,
+    gr.roles,
+    gr.keywords,
+    t.production_year
+FROM 
+    grouped_roles gr
+JOIN 
+    title t ON gr.movie_id = t.id
+WHERE 
+    gr.distinct_actors > 5
+ORDER BY 
+    t.production_year DESC;

@@ -1,0 +1,69 @@
+
+WITH RecPostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(UP.VoteCount, 0) AS UpVoteCount,
+        COALESCE(DW.VoteCount, 0) AS DownVoteCount,
+        (P.ViewCount + COALESCE(UP.VoteCount, 0) - COALESCE(DW.VoteCount, 0)) AS EngagementScore,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY 
+            (P.ViewCount + COALESCE(UP.VoteCount, 0) - COALESCE(DW.VoteCount, 0)) DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        WHERE VoteTypeId = 2 
+        GROUP BY PostId
+    ) UP ON P.Id = UP.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        WHERE VoteTypeId = 3 
+        GROUP BY PostId
+    ) DW ON P.Id = DW.PostId
+),
+PostBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        R.*,
+        (SELECT COUNT(*) 
+         FROM Comments C 
+         WHERE C.PostId = R.PostId) AS CommentCount,
+        (SELECT STRING_AGG(Tag.TagName, ', ') 
+         FROM Tags Tag 
+         WHERE Tag.Id IN (SELECT UNNEST(string_to_array(P.Tags, '<>'))) ) AS Tags
+    FROM 
+        RecPostStats R
+    WHERE 
+        R.Rank <= 10
+)
+SELECT 
+    PP.PostId,
+    PP.Title,
+    PP.ViewCount,
+    PP.UpVoteCount,
+    PP.DownVoteCount,
+    PP.EngagementScore,
+    PP.CommentCount,
+    PP.Tags,
+    B.BadgeCount
+FROM 
+    PopularPosts PP
+LEFT JOIN PostBadges B ON PP.PostId = B.UserId 
+WHERE 
+    PP.EngagementScore > 5 
+ORDER BY 
+    PP.EngagementScore DESC;

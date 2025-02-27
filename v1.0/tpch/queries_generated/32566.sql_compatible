@@ -1,0 +1,37 @@
+
+WITH RECURSIVE nation_supply AS (
+    SELECT n.n_nationkey, n.n_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(p.p_retailprice) + ns.total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation_supply ns ON ns.n_nationkey = s.s_nationkey
+    WHERE p.p_size > 10
+    GROUP BY n.n_nationkey, n.n_name, ns.total_supply_cost
+),
+customer_order_totals AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_orders AS (
+    SELECT c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           RANK() OVER (PARTITION BY c.c_custkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+SELECT ns.n_name, c.c_name, cot.order_count, cot.total_spent, COUNT(ro.o_orderkey) AS high_value_order_count,
+       COALESCE(NULLIF(ns.total_supply_cost, 0), 1) AS adjusted_supply_cost,
+       CONCAT('Total Spending: $', ROUND(cot.total_spent, 2)) AS spending_statement
+FROM nation_supply ns
+JOIN customer_order_totals cot ON ns.n_nationkey = cot.c_custkey
+LEFT JOIN ranked_orders ro ON cot.c_custkey = ro.o_orderkey AND ro.order_rank = 1
+WHERE cot.total_spent > 5000 AND ns.total_supply_cost IS NOT NULL
+GROUP BY ns.n_name, cot.c_name, cot.order_count, cot.total_spent
+ORDER BY ns.n_name, cot.total_spent DESC;

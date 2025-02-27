@@ -1,0 +1,82 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.CreationDate AS PostCreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.Score AS PostScore,
+        P.AnswerCount AS TotalAnswers,
+        P.CommentCount AS TotalComments,
+        HOT.PostHotRank,
+        STRING_AGG(T.TagName, ', ') AS ConcatenatedTags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS PostHotRank
+        FROM 
+            Votes
+        WHERE 
+            CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+        GROUP BY 
+            PostId
+    ) AS HOT ON P.Id = HOT.PostId
+    LEFT JOIN 
+        Tags T ON T.Id IN (SELECT tag_id FROM unnest(string_to_array(P.Tags, '>')) AS tag_id)
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, U.DisplayName, P.Score, P.AnswerCount, P.CommentCount, HOT.PostHotRank
+),
+CommentedPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.PostTitle,
+        RP.OwnerDisplayName,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    WHERE 
+        C.CreationDate < TIMESTAMP '2024-10-01 12:34:56' 
+    GROUP BY 
+        RP.PostId, RP.PostTitle, RP.OwnerDisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        RP.PostId,
+        RP.PostTitle,
+        RP.OwnerDisplayName,
+        RP.PostHotRank AS HotRank,
+        COALESCE(CP.CommentCount, 0) AS CommentCount
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        CommentedPosts CP ON RP.PostId = CP.PostId
+)
+
+SELECT 
+    FP.PostId,
+    FP.PostTitle,
+    FP.OwnerDisplayName,
+    FP.HotRank,
+    FP.CommentCount,
+    CASE 
+        WHEN FP.HotRank <= 10 THEN 'Hot'
+        WHEN FP.CommentCount > 5 THEN 'Active'
+        ELSE 'Quiet' 
+    END AS ActivityLevel,
+    FP.Tags AS Tags,
+    DATE_PART('year', CURRENT_DATE) - DATE_PART('year', FP.PostCreationDate) AS AgeOfPost
+FROM 
+    FilteredPosts FP
+WHERE 
+    FP.HotRank IS NOT NULL
+ORDER BY 
+    FP.HotRank, FP.CommentCount DESC
+FETCH FIRST 100 ROWS ONLY;

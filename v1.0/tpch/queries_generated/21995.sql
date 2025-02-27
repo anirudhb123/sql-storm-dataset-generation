@@ -1,0 +1,67 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+), 
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_supplycost > 0
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+), 
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(NULLIF(c.c_comment, ''), 'No comment') AS customer_comment,
+        c.c_acctbal
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+), 
+LineItemAggregation AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_sales,
+        COUNT(*) AS line_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.n_name AS nation_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.total_lineitem_sales) AS total_sales,
+    AVG(s.avg_supply_cost) AS avg_supply_cost_per_part,
+    MAX(CASE WHEN c.customer_comment LIKE '%VIP%' THEN 'Yes' ELSE 'No' END) AS has_vip,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    RankedOrders o 
+    LEFT JOIN CustomerInfo c ON o.o_custkey = c.c_custkey
+    LEFT JOIN LineItemAggregation l ON o.o_orderkey = l.l_orderkey
+    LEFT JOIN SupplierParts s ON s.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 10)
+    JOIN nation r ON c.c_nationkey = r.n_nationkey
+GROUP BY 
+    r.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5 AND SUM(l.total_lineitem_sales) > 10000
+ORDER BY 
+    total_sales DESC, nation_name ASC;

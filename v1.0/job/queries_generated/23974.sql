@@ -1,0 +1,66 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title, 
+        m.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS cast_count,
+        COALESCE(SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END), 0) AS has_notes,
+        AVG(ci.nr_order) OVER (PARTITION BY m.id) AS avg_order
+    FROM 
+        aka_title m
+        LEFT JOIN cast_info ci ON m.movie_id = ci.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+        AND (m.note IS NULL OR m.note <> '')
+),
+GenreCount AS (
+    SELECT 
+        mt.movie_id,
+        COUNT(DISTINCT mt.keyword_id) AS genre_count
+    FROM 
+        movie_keyword mt
+    GROUP BY 
+        mt.movie_id
+),
+CompanyStatistics AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mn.id) AS company_count,
+        STRING_AGG(DISTINCT mn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+        JOIN company_name mn ON mc.company_id = mn.id
+    WHERE 
+        mn.country_code IS NOT null
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.has_notes,
+    rm.avg_order,
+    COALESCE(gc.genre_count, 0) AS genre_count,
+    COALESCE(cs.company_count, 0) AS company_count,
+    COALESCE(cs.company_names, 'N/A') AS company_names,
+    CASE 
+        WHEN rm.production_year < 2000 THEN 'Classic'
+        WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS movie_age_category
+FROM 
+    RankedMovies rm
+    LEFT JOIN GenreCount gc ON rm.movie_id = gc.movie_id
+    LEFT JOIN CompanyStatistics cs ON rm.movie_id = cs.movie_id
+WHERE 
+    rm.cast_count > 0
+ORDER BY 
+    rm.production_year ASC,
+    rm.cast_count DESC,
+    rm.title ASC
+LIMIT 50 OFFSET 0;
+
+-- This query benchmarks movie data with complex joins, CTEs, aggregates, and categorization,
+-- focusing on various movie features like cast count, associated genres, and companies involved.

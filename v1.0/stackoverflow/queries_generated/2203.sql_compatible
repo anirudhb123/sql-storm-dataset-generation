@@ -1,0 +1,103 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.Score IS NOT NULL
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        SUM(p.Score) > 100
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        pht.Name AS HistoryType,
+        ph.UserDisplayName,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+RecentComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(*) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(rc.CommentCount, 0) AS CommentCount,
+        rc.LastCommentDate,
+        pu.UserId,
+        pu.DisplayName,
+        pu.TotalScore,
+        pu.PostCount,
+        CASE 
+            WHEN rp.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days' THEN 'Old'
+            ELSE 'Recent'
+        END AS PostAge,
+        phd.HistoryType,
+        phd.UserDisplayName AS HistoryUser,
+        phd.Comment AS HistoryComment
+    FROM 
+        RankedPosts rp
+    JOIN 
+        TopUsers pu ON rp.UserRank = 1 AND rp.OwnerUserId = pu.UserId
+    LEFT JOIN 
+        RecentComments rc ON rp.PostId = rc.PostId
+    LEFT JOIN 
+        PostHistoryDetails phd ON rp.PostId = phd.PostId AND phd.HistoryRank = 1
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    fp.LastCommentDate,
+    fp.DisplayName AS TopUser,
+    fp.TotalScore,
+    fp.PostCount,
+    fp.PostAge,
+    COALESCE(fp.HistoryType, 'No History') AS MostRecentHistoryType,
+    COALESCE(fp.HistoryUser, 'N/A') AS LastEditor,
+    COALESCE(fp.HistoryComment, 'No comments') AS LastEditComment
+FROM 
+    FinalPosts fp
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC
+LIMIT 50;

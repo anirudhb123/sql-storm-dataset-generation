@@ -1,0 +1,42 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COALESCE(b.Name, 'No Badge') AS UserBadge,
+        u.Reputation,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS TotalComments,
+        CASE 
+            WHEN p.LastEditDate IS NULL THEN 'Never Edited' 
+            ELSE FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', p.LastEditDate)  -- Updated for standard compatibility
+        END AS LastEdited
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId AND b.Class = 1  
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'  -- Updated for standard compatibility
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.UserBadge,
+    rp.Reputation,
+    rp.TotalComments,
+    rp.LastEdited
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC, 
+    rp.Reputation DESC;

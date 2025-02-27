@@ -1,0 +1,69 @@
+WITH PostTagDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagNames,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON POSITION(',' || t.TagName || ',' IN ',' || p.Tags || ',') > 0
+    WHERE 
+        p.PostTypeId = 1  -- Only consider Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId, p.Tags
+),
+
+UserDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.EmailHash,
+        b.Name AS BadgeName,
+        b.Class AS BadgeClass,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.EmailHash, b.Name, b.Class
+)
+
+SELECT 
+    p.Title,
+    p.Body,
+    p.CreationDate,
+    p.TagNames,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    u.BadgeName,
+    u.BadgeClass,
+    p.CommentCount,
+    p.VoteCount,
+    COUNT(DISTINCT CASE WHEN p.CommentCount > 0 THEN c.Id END) AS ActiveCommentPosts,
+    AVG(CASE WHEN u.BadgeCount > 0 THEN u.BadgeCount ELSE 0 END) AS AvgBadges,
+    DENSE_RANK() OVER(ORDER BY p.CreationDate DESC) AS RecentPostRanking
+FROM 
+    PostTagDetails p
+JOIN 
+    UserDetails u ON p.OwnerUserId = u.UserId
+LEFT JOIN 
+    Comments c ON p.PostId = c.PostId
+WHERE 
+    p.CommentCount > 0 OR p.VoteCount > 5
+GROUP BY 
+    p.Title, p.Body, p.CreationDate, p.TagNames, u.DisplayName, u.Reputation, u.BadgeName, u.BadgeClass
+ORDER BY 
+    p.CreationDate DESC;

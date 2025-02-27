@@ -1,0 +1,73 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_item_sk,
+        sr_customer_sk,
+        sr_return_quantity,
+        SUM(sr_return_amt) AS total_return_amt,
+        COUNT(sr_ticket_number) AS num_returns
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returned_date_sk, 
+        sr_item_sk, 
+        sr_customer_sk
+), 
+RecentSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_bill_customer_sk,
+        SUM(ws_sales_price) AS total_sales_amt,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_bill_customer_sk
+), 
+RankedSales AS (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY total_sales_amt DESC) AS sales_rank
+    FROM 
+        RecentSales
+)
+
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(COALESCE(cr.total_return_amt, 0)) AS total_returns,
+    SUM(COALESCE(rs.total_sales_amt, 0)) AS total_sales,
+    COUNT(DISTINCT rs.ws_order_number) AS unique_orders,
+    (SUM(COALESCE(rs.total_sales_amt, 0)) - SUM(COALESCE(cr.total_return_amt, 0))) AS net_sales,
+    CASE 
+        WHEN SUM(COALESCE(cr.total_return_amt, 0)) = 0 THEN 'No Returns'
+        ELSE 'Returns Exist'
+    END AS return_status
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    CustomerReturns cr ON c.c_customer_sk = cr.sr_customer_sk
+LEFT JOIN 
+    RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+WHERE 
+    c.c_preferred_cust_flag = 'Y'
+GROUP BY 
+    c.c_first_name, 
+    c.c_last_name, 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    net_sales > 1000
+ORDER BY 
+    net_sales DESC;

@@ -1,0 +1,67 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.PostTypeId,
+        P.AcceptedAnswerId,
+        P.CreationDate,
+        P.LastActivityDate,
+        P.Score,
+        P.ViewCount,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(MAX)) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 -- Start with questions
+
+    UNION ALL
+
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.PostTypeId,
+        P2.AcceptedAnswerId,
+        P2.CreationDate,
+        P2.LastActivityDate,
+        P2.Score,
+        P2.ViewCount,
+        Level + 1,
+        CAST(Path + ' -> ' + P2.Title AS VARCHAR(MAX))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostCTE CTE ON P2.ParentId = CTE.Id
+)
+
+SELECT 
+    U.DisplayName AS Author,
+    P.Title AS Question_Title,
+    COALESCE(A.Title, 'No Accepted Answer') AS Accepted_Answer_Title,
+    P.CreationDate AS Question_Creation_Date,
+    P.Score AS Question_Score,
+    P.ViewCount AS Question_View_Count,
+    COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+    COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+    (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS Comment_Count,
+    ROW_NUMBER() OVER(PARTITION BY P.Id ORDER BY P.Score DESC) AS Ranking,
+    (SELECT STRING_AGG(T.TagName, ', ') FROM Tags T WHERE P.Tags LIKE '%' + T.TagName + '%') AS Tags
+FROM 
+    Posts P
+LEFT JOIN 
+    Users U ON P.OwnerUserId = U.Id
+LEFT JOIN 
+    Posts A ON P.AcceptedAnswerId = A.Id
+LEFT JOIN 
+    Votes V ON P.Id = V.PostId
+WHERE 
+    P.LastActivityDate >= DATEADD(month, -6, GETDATE()) AND 
+    P.Score > 10
+GROUP BY 
+    U.DisplayName, P.Id, P.Title, A.Title, P.CreationDate, P.Score, P.ViewCount
+ORDER BY 
+    ExampleColumn DESC, Question_Score DESC
+OPTION (MAXRECURSION 100); -- Avoid infinite recursion
+

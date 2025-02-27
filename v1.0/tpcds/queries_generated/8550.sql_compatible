@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_id,
+        d.d_year,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ws.ws_sales_price * ws.ws_quantity) DESC) AS sales_rank
+    FROM 
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year BETWEEN 1998 AND 2001
+    GROUP BY 
+        ws.web_site_id, d.d_year
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate
+    FROM 
+        customer_demographics AS cd
+    WHERE 
+        cd.cd_purchase_estimate >= 1000
+),
+HighValueCustomers AS (
+    SELECT DISTINCT
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer AS c
+    JOIN 
+        CustomerDemographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_first_shipto_date_sk IS NOT NULL
+),
+SeasonalSales AS (
+    SELECT
+        d.d_month_seq,
+        SUM(ws.ws_sales_price * ws.ws_quantity) AS total_seasonal_sales
+    FROM
+        web_sales AS ws
+    JOIN 
+        date_dim AS d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 AND d.d_month_seq IN (1, 2, 3)
+    GROUP BY 
+        d.d_month_seq
+)
+SELECT 
+    r.web_site_id,
+    r.d_year,
+    r.total_sales,
+    hvc.c_customer_id,
+    hvc.cd_gender,
+    hvc.cd_marital_status,
+    ss.total_seasonal_sales
+FROM 
+    RankedSales AS r
+LEFT JOIN 
+    HighValueCustomers AS hvc ON r.total_sales > 50000 
+LEFT JOIN 
+    SeasonalSales AS ss ON r.d_year = 2001
+WHERE 
+    r.sales_rank <= 5
+ORDER BY 
+    r.d_year, r.total_sales DESC;

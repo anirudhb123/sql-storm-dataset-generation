@@ -1,0 +1,86 @@
+WITH RECURSIVE movie_graph AS (
+    SELECT 
+        mt.movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000  -- filter for newer movies
+    
+    UNION ALL 
+    
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mg.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.movie_id
+    JOIN 
+        movie_graph mg ON ml.movie_id = mg.movie_id
+    WHERE 
+        m.production_year >= 2000 
+        AND mg.depth < 3  -- limit depth to avoid deep recursion
+),
+
+cast_info_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        rt.role IS NOT NULL  -- filter out entries with NULL roles
+),
+
+movie_details AS (
+    SELECT 
+        m.title,
+        mg.production_year,
+        ci.person_id,
+        ak.name,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY ci.nr_order) AS acting_order
+    FROM 
+        movie_graph mg
+    JOIN 
+        aka_title m ON mg.movie_id = m.id
+    LEFT JOIN 
+        cast_info_with_roles ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id 
+    WHERE 
+        ak.name IS NOT NULL 
+        AND ci.nr_order < 5  -- consider only top 5 roles
+)
+
+SELECT 
+    md.production_year,
+    md.title,
+    COUNT(DISTINCT md.person_id) AS actor_count,
+    STRING_AGG(DISTINCT md.name, ', ') AS actors,
+    MIN(CASE WHEN md.acting_order = 1 THEN md.name END) AS lead_actor,
+    MAX(CASE WHEN md.acting_order = 1 THEN md.name END) AS lead_actor_lastname
+FROM 
+    movie_details md
+LEFT JOIN 
+    movie_keyword mk ON md.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    k.keyword IS NOT NULL OR 
+    (k.keyword IS NULL AND md.production_year IS NOT NULL)
+GROUP BY 
+    md.production_year, md.title
+HAVING 
+    COUNT(DISTINCT md.person_id) > 2  -- only movies with more than 2 actors
+ORDER BY 
+    md.production_year DESC, actor_count DESC 
+LIMIT 10;

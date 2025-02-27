@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId AS UserId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.OwnerUserId AS UserId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN Posts a ON p.Id = a.ParentId 
+    WHERE a.PostTypeId = 2
+),
+
+RecentPostHistory AS (
+    
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn 
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days' 
+),
+
+UserVotes AS (
+    
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Votes v
+    GROUP BY v.PostId
+),
+
+FinalReport AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(up.UpVotes, 0) AS UpVotes,
+        COALESCE(dn.DownVotes, 0) AS DownVotes,
+        ph.UserDisplayName AS RecentEditor,
+        ph.CreationDate AS RecentEditDate,
+        ph.PostHistoryTypeId
+    FROM Posts p
+    LEFT JOIN UserVotes up ON p.Id = up.PostId
+    LEFT JOIN UserVotes dn ON p.Id = dn.PostId
+    LEFT JOIN RecentPostHistory ph ON p.Id = ph.PostId AND ph.rn = 1 
+    WHERE p.PostTypeId = 1 
+)
+
+SELECT 
+    rh.PostId,
+    rh.PostTitle,
+    rh.UpVotes,
+    rh.DownVotes,
+    COUNT(DISTINCT a.PostId) AS AnswerCount,
+    MAX(ph.RecentEditor) AS RecentEditor,
+    MAX(ph.RecentEditDate) AS RecentEditDate
+FROM FinalReport rh
+LEFT JOIN RecursivePostHierarchy a ON rh.PostId = a.PostId
+GROUP BY rh.PostId, rh.PostTitle, rh.UpVotes, rh.DownVotes
+ORDER BY rh.UpVotes DESC, AnswerCount DESC
+LIMIT 10;

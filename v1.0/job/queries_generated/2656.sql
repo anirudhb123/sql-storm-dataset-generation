@@ -1,0 +1,57 @@
+WITH RankedFilms AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+TopFilms AS (
+    SELECT 
+        title,
+        production_year
+    FROM 
+        RankedFilms
+    WHERE 
+        rank_by_cast <= 5
+),
+FilmInfo AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        STRING_AGG(DISTINCT p.info, '; ') AS person_info
+    FROM 
+        TopFilms f
+    LEFT JOIN 
+        movie_keyword mk ON f.title = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON f.title = cc.movie_id
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id
+    GROUP BY 
+        f.title, f.production_year
+)
+SELECT 
+    fi.title,
+    fi.production_year,
+    COALESCE(fi.keywords, 'No keywords') AS keywords,
+    COALESCE(fi.person_info, 'No info available') AS person_info,
+    CASE 
+        WHEN fi.production_year < 2000 THEN 'Classic'
+        WHEN fi.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS film_era
+FROM 
+    FilmInfo fi
+ORDER BY 
+    fi.production_year DESC, fi.title;

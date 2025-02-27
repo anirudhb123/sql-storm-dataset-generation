@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+),
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_totalprice,
+        r.o_orderdate,
+        r.c_name
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.OrderRank <= 10
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal > 5000
+),
+TopSupplierParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        sd.s_name,
+        sd.ps_supplycost
+    FROM 
+        part p
+    JOIN 
+        SupplierDetails sd ON p.p_partkey = sd.ps_partkey
+)
+SELECT 
+    h.o_orderkey,
+    h.o_orderdate,
+    h.o_totalprice,
+    t.p_name,
+    t.s_name,
+    t.ps_supplycost
+FROM 
+    HighValueOrders h
+JOIN 
+    TopSupplierParts t ON h.o_orderkey = (SELECT DISTINCT l.l_orderkey FROM lineitem l WHERE l.l_partkey IN (SELECT p.p_partkey FROM part p JOIN TopSupplierParts tp ON p.p_partkey = tp.p_partkey))
+ORDER BY 
+    h.o_orderdate DESC, h.o_totalprice DESC;

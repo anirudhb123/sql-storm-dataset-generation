@@ -1,0 +1,91 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY RANDOM()) AS rn,
+        kt.keyword AS movie_keyword,
+        k.kind AS movie_kind
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kt ON mk.keyword_id = kt.id
+    LEFT JOIN 
+        kind_type k ON t.kind_id = k.id
+),
+TopMovies AS (
+    SELECT 
+        movie_title, 
+        production_year,
+        movie_keyword,
+        movie_kind
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+ActorCounts AS (
+    SELECT 
+        ca.movie_id,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM 
+        cast_info ca
+    GROUP BY 
+        ca.movie_id
+),
+MoviesWithActorCount AS (
+    SELECT 
+        tm.movie_title,
+        tm.production_year,
+        tm.movie_keyword,
+        tm.movie_kind,
+        COALESCE(ac.actor_count, 0) AS actor_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        ActorCounts ac ON tm.movie_title = ac.movie_id
+),
+FinalOutput AS (
+    SELECT 
+        mwac.movie_title,
+        mwac.production_year,
+        mwac.movie_keyword,
+        mwac.movie_kind,
+        mwac.actor_count,
+        CASE 
+            WHEN mwac.actor_count > 10 THEN 'Ensemble Cast'
+            WHEN mwac.actor_count > 5 THEN 'Moderate Cast'
+            ELSE 'Small Cast'
+        END AS cast_size
+    FROM 
+        MoviesWithActorCount mwac
+    WHERE 
+         mwac.movie_keyword IS NOT NULL 
+         OR mwac.movie_kind LIKE 'F%' -- Only include movies of kind starting with 'F'
+         OR mwac.actor_count IS NULL
+)
+SELECT 
+    fo.*,
+    COALESCE(cname.name, 'Unknown') AS company_name,
+    COALESCE(ci.note, 'No notes') AS cast_notes
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    movie_companies mc ON fo.movie_title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1) -- ambiguous join using subquery
+LEFT JOIN 
+    company_name cname ON mc.company_id = cname.id
+LEFT JOIN 
+    complete_cast cc ON fo.movie_title = (SELECT movie_id FROM complete_cast WHERE id = cc.id LIMIT 1) -- another ambiguous join
+LEFT JOIN 
+    cast_info ci ON fo.movie_title = (SELECT movie_id FROM cast_info WHERE id = ci.id LIMIT 1)
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_info mi 
+        WHERE mi.movie_id = (SELECT id FROM aka_title WHERE title = fo.movie_title LIMIT 1) 
+        AND mi.info_type_id IS NULL
+    )
+ORDER BY 
+    fo.production_year DESC, 
+    fo.movie_title;

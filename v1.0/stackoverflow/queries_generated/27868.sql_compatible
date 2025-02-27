@@ -1,0 +1,62 @@
+
+WITH TagCounts AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        Tag
+), UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(*) AS AnswerCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 2 
+    GROUP BY 
+        U.Id, U.Reputation
+), TagPopularity AS (
+    SELECT 
+        TC.Tag,
+        SUM(UC.AnswerCount) AS TotalAnswerCount,
+        SUM(UC.Reputation) AS TotalReputation
+    FROM 
+        TagCounts TC
+    LEFT JOIN 
+        Posts P ON TC.Tag = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><'))
+    LEFT JOIN 
+        UserReputation UC ON P.OwnerUserId = UC.UserId
+    GROUP BY 
+        TC.Tag
+), TopTags AS (
+    SELECT 
+        Tag, 
+        TotalAnswerCount,
+        TotalReputation,
+        RANK() OVER (ORDER BY TotalAnswerCount DESC) AS PopularityRank
+    FROM 
+        TagPopularity
+)
+
+SELECT 
+    T.Tag,
+    T.TotalAnswerCount,
+    T.TotalReputation,
+    CASE 
+        WHEN T.PopularityRank <= 5 THEN 'Top Tag'
+        WHEN T.PopularityRank <= 10 THEN 'Moderately Popular Tag'
+        ELSE 'Less Popular Tag'
+    END AS TagPopularityCategory
+FROM 
+    TopTags T
+WHERE 
+    T.TotalAnswerCount > 0
+ORDER BY 
+    T.PopularityRank;

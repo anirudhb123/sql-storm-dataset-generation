@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AuthorUserId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR')
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        u.DisplayName AS AuthorDisplayName,
+        rp.CreationDate,
+        coalesce(pc.CommentCount, 0) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SELECT COUNT(*) FROM Votes v2 WHERE v2.PostId = rp.PostId AND v2.VoteTypeId IN (2, 3)) AS TotalVotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.AuthorUserId = u.Id
+    LEFT JOIN 
+        (SELECT 
+             PostId,
+             COUNT(*) AS CommentCount
+         FROM 
+             Comments
+         GROUP BY 
+             PostId) pc ON rp.PostId = pc.PostId
+    LEFT JOIN 
+        Votes v ON rp.PostId = v.PostId
+    WHERE 
+        rp.Rank <= 10
+    GROUP BY 
+        rp.PostId, rp.Title, u.DisplayName, rp.CreationDate, pc.CommentCount
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        ph.CreationDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+),
+FinalResults AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        pd.AuthorDisplayName,
+        pd.CreationDate,
+        pd.CommentCount,
+        pd.UpVotes,
+        pd.DownVotes,
+        pd.TotalVotes,
+        cp.CloseReason
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        ClosedPosts cp ON pd.PostId = cp.Id
+)
+SELECT 
+    fr.*,
+    CASE 
+        WHEN fr.CloseReason IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus,
+    (SELECT COUNT(*) FROM Badges b WHERE b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fr.PostId)) AS UserBadgeCount
+FROM 
+    FinalResults fr
+ORDER BY 
+    fr.UpVotes DESC, fr.TotalVotes DESC NULLS LAST;

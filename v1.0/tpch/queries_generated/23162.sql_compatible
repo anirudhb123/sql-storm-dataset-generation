@@ -1,0 +1,50 @@
+
+WITH RECURSIVE nation_city AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY n.n_name) AS rank
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+customer_agg AS (
+    SELECT c.c_nationkey,
+           COUNT(DISTINCT o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent,
+           AVG(COALESCE(o.o_totalprice, 0)) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+part_supplier_value AS (
+    SELECT ps.ps_partkey,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplier_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+ranked_parts AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           DENSE_RANK() OVER (ORDER BY ps.total_supplier_value DESC) AS part_rank
+    FROM part p
+    JOIN part_supplier_value ps ON p.p_partkey = ps.ps_partkey
+),
+high_value_geo AS (
+    SELECT n.n_name, 
+           nc.order_count, 
+           nc.total_spent,
+           np.p_name,
+           CASE 
+               WHEN nc.total_spent IS NULL OR np.part_rank IS NULL THEN 'unknown' 
+               ELSE 'known' 
+           END AS identifier
+    FROM nation_city nc
+    FULL OUTER JOIN ranked_parts np ON nc.n_nationkey = np.p_partkey
+    WHERE (nc.order_count > 10 OR np.part_rank IS NULL) AND nc.r_name LIKE '%East%'
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT h.part_rank) AS number_of_parts,
+       SUM(COALESCE(h.total_spent, 0)) AS total_revenue,
+       STRING_AGG(DISTINCT h.p_name, ', ') AS part_names
+FROM high_value_geo h
+JOIN nation n ON h.n_name = n.n_name
+GROUP BY n.n_name
+HAVING SUM(COALESCE(h.total_spent, 0)) > 100000
+ORDER BY total_revenue DESC;

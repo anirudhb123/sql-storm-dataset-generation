@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_nationkey = s.s_nationkey
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, 
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY l.l_partkey
+),
+RankedSuppliers AS (
+    SELECT sh.s_suppkey, sh.s_name, sh.s_nationkey, 
+           RANK() OVER (PARTITION BY sh.s_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM SupplierHierarchy sh
+    JOIN PartSupplier ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name, sh.s_nationkey
+)
+SELECT r.r_name, 
+       SUM(COALESCE(ts.total_revenue, 0)) AS total_revenue,
+       COUNT(DISTINCT rs.s_suppkey) AS supplier_count,
+       SUM(COALESCE(ps.total_cost, 0)) AS total_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN TotalSales ts ON l.l_partkey = ts.l_partkey
+LEFT JOIN RankedSuppliers rs ON rs.s_nationkey = n.n_nationkey
+LEFT JOIN PartSupplier ps ON ps.ps_suppkey = rs.s_suppkey
+WHERE r.r_name LIKE 'S%'
+GROUP BY r.r_name
+HAVING SUM(COALESCE(ts.total_revenue, 0)) > 1000000
+ORDER BY total_revenue DESC;

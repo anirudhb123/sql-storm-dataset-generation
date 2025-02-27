@@ -1,0 +1,98 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rankings,
+        JSON_AGG(t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AcceptedAnswerId, p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        DISTINCT p.Id AS ClosedPostId,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Considering closed and reopened history types
+),
+PostVoteStatistics AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    ub.BadgeCount,
+    ub.BadgeNames,
+    cps.CloseReason,
+    cps.CloseDate,
+    COALESCE(pvs.Upvotes, 0) AS Upvotes,
+    COALESCE(pvs.Downvotes, 0) AS Downvotes,
+    rpm.Rankings
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON ub.UserId = rp.AcceptedAnswerId
+LEFT JOIN 
+    ClosedPosts cps ON cps.ClosedPostId = rp.PostId
+LEFT JOIN 
+    PostVoteStatistics pvs ON pvs.PostId = rp.PostId
+WHERE 
+    rp.Rankings <= 10 AND 
+    (rp.Score > 0 OR ri.ViewCount > 100) -- At least some activity
+ORDER BY 
+    rp.CreationDate DESC;
+
+WITH RecursiveTagDetails AS (
+    SELECT 
+        TagName,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        TagName LIKE '%SQL%'
+    UNION ALL
+    SELECT 
+        CONCAT('Sub-', td.TagName),
+        td.Level + 1
+    FROM 
+        RecursiveTagDetails td
+    WHERE 
+        td.Level < 3
+)
+SELECT * FROM RecursiveTagDetails;

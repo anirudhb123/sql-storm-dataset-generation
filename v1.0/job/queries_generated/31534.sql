@@ -1,0 +1,74 @@
+WITH RECURSIVE RankedMovies AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(t.production_year) ORDER BY t.title) AS rank_within_year
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT
+        c.movie_id,
+        COUNT(c.person_id) AS actor_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.movie_id
+),
+MovieInfo AS (
+    SELECT
+        m.movie_id,
+        MAX(m.info) AS movie_info
+    FROM
+        movie_info m
+    WHERE
+        m.info_type_id IN (SELECT id FROM info_type WHERE info LIKE '%review%')
+    GROUP BY
+        m.movie_id
+)
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.rank_within_year,
+    COALESCE(ac.actor_count, 0) AS total_actors,
+    COALESCE(mi.movie_info, 'No Information Available') AS review,
+    CASE 
+        WHEN mi.movie_info IS NOT NULL THEN 'Reviewed' 
+        ELSE 'Not Reviewed' 
+    END AS review_status
+FROM
+    RankedMovies r
+LEFT JOIN
+    ActorCounts ac ON r.movie_id = ac.movie_id
+LEFT JOIN
+    MovieInfo mi ON r.movie_id = mi.movie_id
+WHERE
+    r.rank_within_year <= 5
+ORDER BY
+    r.production_year DESC,
+    r.rank_within_year ASC;
+
+This complex SQL query showcases the following elements:
+
+1. **Common Table Expressions (CTEs)**: 
+   - `RankedMovies`: Uses a recursive CTE to assign ranks to movies based on their production years and titles.
+   - `ActorCounts`: Calculates the total number of actors for each movie.
+   - `MovieInfo`: Retrieves movie information that contains reviews.
+
+2. **Window Function**: The `ROW_NUMBER()` function is used to rank movies within each production year.
+
+3. **Outer Joins**: The query uses `LEFT JOIN` to include all movies even if they have no corresponding actors or reviews.
+
+4. **NULL Logic**: `COALESCE` is used to handle potential NULL values, providing sensible defaults for both actor counts and movie reviews.
+
+5. **Complicated Predicates/Expressions**: A CASE statement determines the review status of each movie.
+
+6. **String Expressions**: The `LIKE` clause is utilized to fetch specific information types that include 'review'.
+
+7. **Ordering**: Final output is ordered by production year in descending order and by rank within each year in ascending order. 
+
+This query can be used for performance benchmarking while retrieving rich metadata about movies and their ratings within certain constraints.

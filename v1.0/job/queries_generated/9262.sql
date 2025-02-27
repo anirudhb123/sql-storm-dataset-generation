@@ -1,0 +1,45 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title,
+        t.production_year,
+        ARRAY[t.title] AS title_path
+    FROM 
+        title t
+    WHERE 
+        t.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        rh.title_path || t.title
+    FROM 
+        movie_link ml
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+    JOIN 
+        RecursiveMovieHierarchy rh ON ml.movie_id = rh.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+FROM 
+    RecursiveMovieHierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year
+ORDER BY 
+    total_cast DESC, mh.production_year DESC;

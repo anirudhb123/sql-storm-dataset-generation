@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(p.Tags, '><')::int[])
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY 
+        p.Id, u.DisplayName, pt.Name
+), 
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.ViewCount,
+    tp.Score,
+    tp.Tags,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    Comments c ON tp.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT Id FROM Users WHERE DisplayName = tp.OwnerDisplayName)
+GROUP BY 
+    tp.PostId, tp.Title, tp.OwnerDisplayName, tp.ViewCount, tp.Score, tp.Tags
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC;

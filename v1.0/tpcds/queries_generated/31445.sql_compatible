@@ -1,0 +1,51 @@
+
+WITH RECURSIVE date_ranges AS (
+    SELECT MIN(d_date_sk) AS start_date, MAX(d_date_sk) AS end_date
+    FROM date_dim
+    UNION ALL
+    SELECT start_date + INTERVAL '1 DAY', end_date
+    FROM date_ranges
+    WHERE start_date < end_date
+),
+customer_income AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        COUNT(c.c_customer_sk) AS customer_count
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, hd.hd_income_band_sk
+),
+sales_summary AS (
+    SELECT 
+        dd.d_year,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY dd.d_year
+),
+returns_summary AS (
+    SELECT 
+        dd.d_year,
+        SUM(sr.sr_return_amt) AS total_returns,
+        COUNT(DISTINCT sr.sr_ticket_number) AS total_return_orders
+    FROM store_returns sr
+    JOIN date_dim dd ON sr.sr_returned_date_sk = dd.d_date_sk
+    GROUP BY dd.d_year
+)
+SELECT 
+    ci.cd_gender,
+    ci.hd_income_band_sk,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    COALESCE(rs.total_returns, 0) AS total_returns,
+    (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_returns, 0)) AS net_sales,
+    RANK() OVER (PARTITION BY ci.hd_income_band_sk ORDER BY (COALESCE(ss.total_sales, 0) - COALESCE(rs.total_returns, 0)) DESC) AS sales_rank
+FROM customer_income ci
+LEFT JOIN sales_summary ss ON ci.hd_income_band_sk IS NOT NULL
+LEFT JOIN returns_summary rs ON ss.d_year IS NOT NULL
+WHERE ci.customer_count > 0
+ORDER BY ci.hd_income_band_sk, sales_rank
+LIMIT 100;

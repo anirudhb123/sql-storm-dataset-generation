@@ -1,0 +1,60 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        SUM(Posts.AnswerCount) AS TotalAnswers,
+        SUM(Posts.CommentCount) AS TotalComments
+    FROM 
+        Posts
+    JOIN 
+        UNNEST(SPLIT(TRIM(BOTH '<>' FROM Tags), '><')) AS Tags ON 
+        Posts.Id IS NOT NULL
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        TotalAnswers,
+        TotalComments,
+        RANK() OVER (ORDER BY TotalViews DESC, PostCount DESC) AS Rank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 20  
+)
+
+SELECT 
+    TopTags.TagName,
+    TopTags.PostCount,
+    TopTags.TotalViews,
+    TopTags.TotalAnswers,
+    TopTags.TotalComments,
+    COALESCE(Users.Reputation, 0) AS TopUserReputation,
+    COUNT(DISTINCT Votes.UserId) AS VoteCount,
+    SUM(CASE WHEN Votes.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN Votes.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+FROM 
+    TopTags
+LEFT JOIN 
+    Posts ON TopTags.TagName = ANY(SPLIT(TRIM(BOTH '<>' FROM Posts.Tags), '><'))
+LEFT JOIN 
+    Users ON Posts.OwnerUserId = Users.Id
+LEFT JOIN 
+    Votes ON Posts.Id = Votes.PostId
+WHERE 
+    TopTags.Rank <= 10  
+GROUP BY 
+    TopTags.TagName, 
+    TopTags.PostCount, 
+    TopTags.TotalViews, 
+    TopTags.TotalAnswers, 
+    TopTags.TotalComments, 
+    Users.Reputation
+ORDER BY 
+    TopTags.TotalViews DESC, 
+    TopTags.PostCount DESC;

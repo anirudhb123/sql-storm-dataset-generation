@@ -1,0 +1,48 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+
+    UNION ALL
+
+    SELECT ch.c_custkey, ch.c_name, ch.c_nationkey, chier.level + 1
+    FROM customer ch
+    JOIN CustomerHierarchy chier ON ch.c_nationkey = chier.c_nationkey
+    WHERE ch.c_acctbal > 5000 AND ch.c_custkey <> chier.c_custkey
+),
+TopSuppliers AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+    HAVING SUM(ps.ps_supplycost) > (
+        SELECT AVG(ps2.ps_supplycost)
+        FROM partsupp ps2
+    )
+),
+LineItemStats AS (
+    SELECT l.l_orderkey, COUNT(*) AS line_count, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' 
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    n.n_name AS nation_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    li.line_count,
+    li.total_sales,
+    SUM(p.p_retailprice) AS total_price,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY li.total_sales DESC) AS sales_rank
+FROM CustomerHierarchy ch
+JOIN customer c ON ch.c_custkey = c.c_custkey
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN lineitem li ON c.c_custkey = li.l_orderkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN TopSuppliers ts ON li.l_suppkey = ts.ps_suppkey
+LEFT JOIN part p ON li.l_partkey = p.p_partkey
+WHERE c.c_acctbal IS NOT NULL AND n.n_name IS NOT NULL
+GROUP BY c.c_name, n.n_name, s.s_name, li.line_count, li.total_sales
+HAVING SUM(p.p_retailprice) > 1000
+ORDER BY sales_rank
+LIMIT 50;

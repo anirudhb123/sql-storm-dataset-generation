@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank,
+        u.Reputation
+    FROM
+        Posts p
+    JOIN
+        Users u ON p.OwnerUserId = u.Id
+    WHERE
+        p.PostTypeId = 1 -- Only Questions
+),
+TopUsers AS (
+    SELECT 
+        OwnerUserId,
+        COUNT(*) AS TotalPosts,
+        SUM(Score) AS TotalScore,
+        AVG(Reputation) AS AvgReputation
+    FROM 
+        RankedPosts
+    WHERE 
+        PostRank <= 5 -- Top 5 posts per user
+    GROUP BY 
+        OwnerUserId
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.CreationDate,
+        u.LastAccessDate,
+        u.Views,
+        tu.TotalPosts,
+        tu.TotalScore,
+        tu.AvgReputation
+    FROM 
+        Users u
+    JOIN 
+        TopUsers tu ON u.Id = tu.OwnerUserId
+    WHERE 
+        u.LastAccessDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    au.DisplayName,
+    au.TotalPosts,
+    au.TotalScore,
+    au.AvgReputation,
+    COUNT(DISTINCT ph.Id) AS PostHistoryCount,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    ActiveUsers au
+LEFT JOIN 
+    PostHistory ph ON ph.UserId = au.UserId
+LEFT JOIN 
+    Comments c ON c.UserId = au.UserId
+GROUP BY 
+    au.DisplayName, au.TotalPosts, au.TotalScore, au.AvgReputation
+ORDER BY 
+    au.TotalScore DESC
+LIMIT 10;

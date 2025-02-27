@@ -1,0 +1,64 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, 0 AS depth 
+    FROM nation n 
+    WHERE n.n_regionkey = (SELECT r.r_regionkey FROM region r WHERE r.r_name = 'AFRICA')
+    
+    UNION ALL
+    
+    SELECT nh.n_nationkey, n.n_name, n.n_regionkey, nh.depth + 1
+    FROM nation n 
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_nationkey
+)
+
+SELECT 
+    c.c_name AS customer_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    CASE 
+        WHEN COUNT(DISTINCT o.o_orderkey) > 0 THEN 
+            SUM(l.l_extendedprice * (1 - l.l_discount)) / COUNT(DISTINCT o.o_orderkey) 
+        ELSE NULL 
+    END AS avg_order_value,
+    RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank,
+    ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) ASC) AS position_in_nation
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+WHERE 
+    o.o_orderstatus = 'O' 
+    AND (l.l_shipmode = 'AIR' OR l.l_shipmode IS NULL)
+    AND EXISTS (
+        SELECT 1
+        FROM NationHierarchy nh 
+        WHERE nh.n_nationkey = c.c_nationkey AND nh.depth = 0
+    )
+    AND (c.c_acctbal + COALESCE(c.c_acctbal, 0)) < 10000.00
+GROUP BY 
+    c.c_name, c.c_nationkey
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    revenue_rank, total_revenue DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Total Revenue' AS customer_name, 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    NULL AS order_count,
+    NULL AS avg_order_value,
+    NULL AS revenue_rank,
+    NULL AS position_in_nation
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    o.o_orderstatus = 'O';
+
+SELECT * FROM customer WHERE c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_comment LIKE '%cattle%')
+  AND c_suppkey IS NULL;

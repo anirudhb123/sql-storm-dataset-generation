@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000 -- Starting point for newer movies
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year AS movie_year,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    COUNT(DISTINCT ph.info) AS personal_info_count,
+    MAX(CASE WHEN cm.kind = 'Distributor' THEN cn.name END) AS distributor_name,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY movie_year DESC) AS movie_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON mh.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_companies mc ON at.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN 
+    person_info ph ON ak.person_id = ph.person_id
+WHERE 
+    ak.name IS NOT NULL AND ph.info IS NOT NULL -- Filtering out NULL values
+GROUP BY 
+    ak.name, at.title, at.production_year
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 5 -- Ensuring that the actor has more than 5 roles
+ORDER BY 
+    actor_name, movie_year DESC;

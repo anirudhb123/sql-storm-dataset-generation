@@ -1,0 +1,72 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS Nation,
+        r.r_name AS Region,
+        CONCAT(s.s_name, ' (', n.n_name, ', ', r.r_name, ')') AS Supplier_Info,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS Comment_Length,
+        SUBSTRING(s.s_comment, 1, 50) AS Short_Comment
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        REPLACE(p.p_name, ' ', '_') AS Part_Name,
+        p.p_mfgr,
+        p.p_container,
+        TRIM(p.p_comment) AS Trimmed_Comment,
+        p.p_retailprice,
+        LENGTH(p.p_comment) AS Comment_Length,
+        CASE 
+            WHEN p.p_size < 10 THEN 'Small'
+            WHEN p.p_size BETWEEN 10 AND 20 THEN 'Medium'
+            ELSE 'Large'
+        END AS Size_Category
+    FROM 
+        part p
+),
+OrderSummaries AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(DISTINCT l.l_orderkey) AS Total_Lineitems,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS Total_Revenue,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_comment,
+        LENGTH(o.o_comment) AS Order_Comment_Length
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus, o.o_comment
+)
+SELECT 
+    sd.Supplier_Info,
+    pd.Part_Name,
+    pd.Size_Category,
+    os.Total_Lineitems,
+    os.Total_Revenue,
+    os.Order_Comment_Length,
+    sd.Comment_Length AS Supplier_Comment_Length,
+    sd.Short_Comment
+FROM 
+    SupplierDetails sd
+JOIN 
+    Partsupp ps ON sd.s_suppkey = ps.ps_suppkey
+JOIN 
+    PartDetails pd ON ps.ps_partkey = pd.p_partkey
+JOIN 
+    OrderSummaries os ON os.o_orderkey = l.l_orderkey
+WHERE 
+    os.Total_Lineitems > 5
+ORDER BY 
+    os.Total_Revenue DESC, sd.Supplier_Info;

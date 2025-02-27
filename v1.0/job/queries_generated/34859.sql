@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM
+        title t
+    LEFT JOIN movie_link ml ON t.id = ml.movie_id
+    WHERE
+        t.production_year > 2000
+
+    UNION ALL
+
+    SELECT
+        mh.movie_id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        mh.depth + 1
+    FROM
+        movie_hierarchy mh
+    JOIN movie_link ml ON mh.linked_movie_id = ml.movie_id
+    JOIN title t ON ml.linked_movie_id = t.id
+    WHERE
+        mh.depth < 5
+),
+
+actor_movie_counts AS (
+    SELECT
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM
+        cast_info c
+    GROUP BY
+        c.person_id
+),
+
+missing_roles AS (
+    SELECT
+        a.id AS actor_id,
+        a.name,
+        COALESCE(ac.movie_count, 0) AS movie_count
+    FROM
+        aka_name a
+    LEFT JOIN actor_movie_counts ac ON a.person_id = ac.person_id
+    WHERE
+        ac.movie_count IS NULL OR ac.movie_count < 3
+),
+
+movie_info_summary AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        ARRAY_AGG(DISTINCT comp.name) AS companies,
+        COUNT(DISTINCT c.person_id) AS num_actors,
+        AVG(mi.info::float) AS avg_rating
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN company_name comp ON mc.company_id = comp.id
+    LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN movie_info mi ON mh.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY
+        mh.movie_id, mh.title
+)
+
+SELECT
+    m.title,
+    m.production_year,
+    ms.actor_id,
+    ms.name AS actor_name,
+    ms.movie_count,
+    m.keywords,
+    m.companies,
+    m.num_actors,
+    m.avg_rating
+FROM
+    missing_roles ms
+LEFT JOIN movie_info_summary m ON ms.actor_id IN (SELECT person_id FROM cast_info WHERE movie_id = m.movie_id)
+ORDER BY
+    m.avg_rating DESC NULLS LAST,
+    m.num_actors DESC,
+    m.title;

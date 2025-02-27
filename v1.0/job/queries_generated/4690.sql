@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_actor_count
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+), 
+TopMovies AS (
+    SELECT 
+        title,
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_by_actor_count <= 3
+)
+SELECT 
+    tm.title,
+    COALESCE(cc.kind, 'Unknown') AS company_type,
+    tm.production_year,
+    STRING_AGG(DISTINCT ak.name, ', ') AS cast_names,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS awards_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.title = (SELECT title FROM aka_title WHERE id = mc.movie_id LIMIT 1)
+LEFT JOIN 
+    company_type cc ON mc.company_type_id = cc.id
+LEFT JOIN 
+    cast_info c ON (SELECT movie_id FROM movie_companies WHERE company_id IN (SELECT id FROM company_name WHERE name = COALESCE(cc.kind, 'Unknown')) LIMIT 1) = c.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = (SELECT id FROM aka_title WHERE title = tm.title LIMIT 1)
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = (SELECT id FROM aka_title WHERE title = tm.title LIMIT 1)
+WHERE 
+    tm.production_year BETWEEN 2000 AND 2020
+GROUP BY 
+    tm.title, tm.production_year, cc.kind
+HAVING 
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    tm.production_year DESC, keyword_count DESC;

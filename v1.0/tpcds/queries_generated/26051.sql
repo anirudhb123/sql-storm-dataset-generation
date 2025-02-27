@@ -1,0 +1,64 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COALESCE(cd.cd_dep_count, 0) AS num_dependents,
+        COALESCE(cd.cd_dep_employed_count, 0) AS employed_dependents,
+        COALESCE(cd.cd_dep_college_count, 0) AS college_dependents,
+        date_format(c.c_birth_day, '%d') AS birth_day,
+        date_format(c.c_birth_month, '%m') AS birth_month,
+        date_format(c.c_birth_year, '%Y') AS birth_year
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesSummary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        COUNT(DISTINCT ws.ws_web_page_sk) AS distinct_web_pages
+    FROM 
+        web_sales ws
+    JOIN 
+        CustomerDetails c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cd.c_customer_id,
+    cd.c_first_name,
+    cd.c_last_name,
+    cd.ca_city,
+    cd.ca_state,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ss.total_quantity_sold,
+    ss.total_sales,
+    ss.total_orders,
+    ss.distinct_web_pages,
+    CONCAT(cd.birth_day, '/', cd.birth_month, '/', cd.birth_year) AS birth_date,
+    CASE 
+        WHEN ss.total_sales > 1000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    CustomerDetails cd
+LEFT JOIN 
+    SalesSummary ss ON cd.c_customer_id = ss.c_customer_id
+ORDER BY 
+    ss.total_sales DESC, 
+    cd.c_last_name, 
+    cd.c_first_name;

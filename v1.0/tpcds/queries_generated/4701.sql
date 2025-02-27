@@ -1,0 +1,67 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+                             AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.c_first_name,
+        cs.c_last_name,
+        cs.total_sales,
+        cs.total_orders
+    FROM 
+        CustomerSales cs
+    WHERE 
+        cs.order_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM 
+        customer_demographics cd
+    WHERE 
+        cd.cd_credit_rating = 'Good'
+)
+
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_sales,
+    tc.total_orders,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    CASE 
+        WHEN cd.cd_income_band_sk IS NULL THEN 'Unknown'
+        ELSE CAST(cd.cd_income_band_sk AS VARCHAR)
+    END AS income_band
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    CustomerDemographics cd ON tc.c_customer_sk = cd.cd_demo_sk
+WHERE 
+    EXISTS (SELECT 1 
+            FROM store_sales ss 
+            WHERE ss.ss_customer_sk = tc.c_customer_sk 
+              AND ss.ss_sold_date_sk = (SELECT MAX(ss2.ss_sold_date_sk) FROM store_sales ss2 WHERE ss2.ss_customer_sk = tc.c_customer_sk))
+    )
+ORDER BY 
+    tc.total_sales DESC
+LIMIT 20;

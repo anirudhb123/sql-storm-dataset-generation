@@ -1,0 +1,91 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COALESCE(v.UpVotesCount, 0) AS UpVotesCount,
+        COALESCE(v.DownVotesCount, 0) AS DownVotesCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        r.Level AS HierarchyLevel
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(Id) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy r ON p.Id = r.PostId
+),
+PopularPosts AS (
+    SELECT 
+        Title,
+        (UpVotesCount - DownVotesCount) AS NetVotes,
+        CommentCount,
+        HierarchyLevel
+    FROM 
+        PostStats
+    WHERE 
+        HierarchyLevel = 1  
+)
+SELECT 
+    pp.Title,
+    pp.NetVotes,
+    pp.CommentCount,
+    CASE 
+        WHEN pp.NetVotes > 100 THEN 'Hot Post'
+        WHEN pp.NetVotes BETWEEN 50 AND 100 THEN 'Trending Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    pht.Name AS PostHistoryType,
+    COUNT(ph.Id) AS HistoryCount
+FROM 
+    PopularPosts pp
+LEFT JOIN 
+    PostHistory ph ON ph.PostId = pp.Title
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+GROUP BY 
+    pp.Title, pp.NetVotes, pp.CommentCount, pht.Name
+HAVING 
+    pp.CommentCount > 5  
+ORDER BY 
+    pp.NetVotes DESC
+LIMIT 10;

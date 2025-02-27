@@ -1,0 +1,70 @@
+
+WITH RankedCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rn
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_purchase_estimate IS NOT NULL
+),
+AddressInfo AS (
+    SELECT
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ca.ca_city) AS city_rank
+    FROM
+        customer_address ca
+    WHERE
+        ca.ca_state IS NOT NULL
+),
+SalesData AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ws.ws_ship_date_sk,
+        d.d_date,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_date >= '2023-01-01' AND d.d_date < '2023-12-31'
+)
+SELECT
+    rc.c_customer_id,
+    rc.cd_gender,
+    ai.ca_city,
+    ai.ca_state,
+    SUM(sd.ws_net_profit) AS total_net_profit,
+    COUNT(DISTINCT sd.ws_item_sk) AS item_count,
+    MAX(sd.ws_net_profit) AS max_net_profit,
+    MIN(sd.ws_net_profit) AS min_net_profit,
+    CASE 
+        WHEN COUNT(DISTINCT sd.ws_item_sk) = 0 THEN 'No Sales'
+        ELSE 'Sales Exist'
+    END AS sales_status
+FROM
+    RankedCustomers rc
+LEFT JOIN
+    SalesData sd ON rc.c_customer_sk = sd.ws_item_sk
+LEFT JOIN
+    AddressInfo ai ON rc.c_current_addr_sk = ai.ca_address_sk
+WHERE
+    rc.rn <= 10
+AND (ai.ca_city IS NOT NULL AND ai.ca_state IS NOT NULL)
+GROUP BY
+    rc.c_customer_id, rc.cd_gender, ai.ca_city, ai.ca_state
+ORDER BY
+    total_net_profit DESC
+FETCH FIRST 20 ROWS ONLY;

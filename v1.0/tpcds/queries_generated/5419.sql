@@ -1,0 +1,63 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity_sold,
+        SUM(ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+),
+CustomerStats AS (
+    SELECT 
+        cd_demo_sk, 
+        COUNT(DISTINCT c_customer_sk) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer_demographics AS cd
+    JOIN 
+        customer AS c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    WHERE 
+        cd.gender = 'F' AND cd_marital_status = 'M'
+    GROUP BY 
+        cd_demo_sk
+),
+ItemPromotions AS (
+    SELECT 
+        i.i_item_sk, 
+        p.p_promo_sk, 
+        COUNT(DISTINCT p.p_promo_id) AS total_promotions
+    FROM 
+        item AS i
+    LEFT JOIN 
+        promotion AS p ON i.i_item_sk = p.p_item_sk
+    GROUP BY 
+        i.i_item_sk, p.p_promo_sk
+)
+SELECT 
+    ca.ca_city,
+    SUM(sd.total_quantity_sold) AS city_total_quantity_sold,
+    SUM(sd.total_sales_amount) AS city_total_sales_amount,
+    COUNT(cs.total_customers) AS total_customers_in_city,
+    AVG(cs.avg_purchase_estimate) AS avg_purchase_estimate_in_city,
+    COALESCE(SUM(ip.total_promotions), 0) AS total_promotions_for_items
+FROM 
+    customer_address AS ca
+JOIN 
+    customer AS c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    SalesData AS sd ON c.c_customer_sk = sd.ws_item_sk
+JOIN 
+    CustomerStats AS cs ON c.c_current_cdemo_sk = cs.cd_demo_sk
+LEFT JOIN 
+    ItemPromotions AS ip ON sd.ws_item_sk = ip.i_item_sk
+WHERE 
+    ca.ca_state = 'CA'
+GROUP BY 
+    ca.ca_city
+ORDER BY 
+    city_total_sales_amount DESC
+LIMIT 10;

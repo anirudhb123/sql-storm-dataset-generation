@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS sales_rank
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.web_site_sk
+),
+CustomerStats AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count,
+        COUNT(DISTINCT ws.ws_web_page_sk) AS unique_web_pages
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+TopCustomers AS (
+    SELECT
+        cs.c_customer_sk,
+        cs.total_spent,
+        cs.order_count,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS customer_rank
+    FROM
+        CustomerStats cs
+    WHERE
+        cs.total_spent IS NOT NULL
+)
+SELECT
+    ws.web_site_id,
+    COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+    AVG(COALESCE(cs.total_spent, 0)) AS avg_spent_per_customer,
+    MAX(RS.total_sales) AS max_sales_per_site,
+    (SELECT COUNT(*) FROM TopCustomers WHERE customer_rank <= 10) AS top_customers_count
+FROM
+    web_site ws
+LEFT JOIN
+    web_sales ws ON ws.ws_web_site_sk = ws.web_site_sk
+LEFT JOIN
+    TopCustomers cs ON cs.c_customer_sk = ws.ws_bill_customer_sk
+JOIN
+    RankedSales RS ON rs.web_site_sk = ws.web_site_sk
+GROUP BY
+    ws.web_site_id
+ORDER BY
+    orders_count DESC
+LIMIT 10;

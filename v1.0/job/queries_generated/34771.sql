@@ -1,0 +1,88 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.movie_id,
+        t.title,
+        t.production_year,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title t ON ml.linked_movie_id = t.id
+    WHERE 
+        mh.depth < 5
+),
+
+ActorRoles AS (
+    SELECT
+        a.person_id,
+        a.movie_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY a.nr_order) AS role_order
+    FROM 
+        cast_info a
+    JOIN 
+        role_type r ON a.role_id = r.id
+),
+
+FullMovieInfo AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ar.person_id) AS actor_count,
+        STRING_AGG(ar.role, ', ') AS roles,
+        COALESCE(mk.keyword, 'No Keywords') AS movie_keywords
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorRoles ar ON mh.movie_id = ar.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+),
+
+FinalResults AS (
+    SELECT
+        f.movie_id,
+        f.title,
+        f.production_year,
+        f.actor_count,
+        f.roles,
+        f.movie_keywords,
+        RANK() OVER (ORDER BY f.actor_count DESC) AS actor_rank
+    FROM 
+        FullMovieInfo f
+)
+
+SELECT
+    fr.movie_id,
+    fr.title,
+    fr.production_year,
+    fr.actor_count,
+    fr.roles,
+    fr.movie_keywords
+FROM 
+    FinalResults fr
+WHERE 
+    fr.actor_count IS NOT NULL AND 
+    fr.actor_count > 0 AND 
+    fr.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    fr.actor_rank,
+    fr.production_year DESC
+LIMIT 100;

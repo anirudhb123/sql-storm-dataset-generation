@@ -1,0 +1,35 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY sp.type ORDER BY s.s_acctbal DESC) AS rank_by_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    CROSS JOIN (SELECT DISTINCT p_type AS type FROM part) sp
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderstatus IN ('O', 'F')
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderstatus
+),
+SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+    FROM supplier s
+    LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE n.n_name IS NOT NULL
+)
+SELECT DISTINCT rs.s_name, rs.rank_by_balance, hvo.total_value,
+                CASE
+                    WHEN hvo.total_value IS NULL THEN 'No Orders'
+                    WHEN hvo.total_value > 5000 THEN 'High Value'
+                    ELSE 'Low Value'
+                END AS order_value_category,
+                COALESCE(sd.n_name, 'Unknown') AS nation_name
+FROM RankedSuppliers rs
+FULL OUTER JOIN HighValueOrders hvo ON rs.rank_by_balance <= 5
+LEFT JOIN SupplierDetails sd ON rs.s_suppkey = sd.s_suppkey
+WHERE rs.s_name IS NOT NULL AND (sd.n_regionkey IS NULL OR sd.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'N%'))
+ORDER BY rs.rank_by_balance DESC, hvo.total_value DESC NULLS LAST;

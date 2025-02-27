@@ -1,0 +1,88 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+), TagStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+),
+UserVoteStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes,
+        (COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) - COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3)) AS NetVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+ClosedPostDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        ph.Comment,
+        p.Title,
+        p.ViewCount,
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), ph.CreationDate) AS AgeInDays
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+)
+SELECT 
+    ph.PostId,
+    ph.Title,
+    ph.Level,
+    ts.TagName,
+    us.UserId, 
+    us.DisplayName,
+    us.Upvotes,
+    us.Downvotes,
+    ts.PostCount,
+    ts.TotalViews,
+    cp.CreationDate AS ClosedDate,
+    cp.AgeInDays
+FROM 
+    PostHierarchy ph
+LEFT JOIN 
+    TagStats ts ON ph.PostId IN (SELECT unnest(string_to_array(Posts.Tags, ', '))::text)
+LEFT JOIN 
+    UserVoteStats us ON ph.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = us.UserId)
+LEFT JOIN 
+    ClosedPostDetails cp ON ph.PostId = cp.PostId
+WHERE 
+    ph.Level < 2 
+ORDER BY 
+    cp.AgeInDays DESC NULLS LAST,
+    ts.TotalViews DESC;

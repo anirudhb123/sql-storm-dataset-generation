@@ -1,0 +1,63 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.item_sk,
+        ws.order_number,
+        ws.ext_sales_price,
+        RANK() OVER (PARTITION BY ws.item_sk ORDER BY ws_sold_date_sk DESC) as sale_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+HighValueCustomers AS (
+    SELECT
+        cd.cd_demo_sk, 
+        SUM(ws.net_paid_inc_tax) AS total_spent
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk
+    HAVING 
+        SUM(ws.net_paid_inc_tax) > 1000
+),
+InventorySnapshot AS (
+    SELECT
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity
+    FROM 
+        inventory inv
+    WHERE 
+        inv_date_sk = (SELECT MAX(inv_date_sk) FROM inventory)
+    GROUP BY 
+        inv.inv_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(ih.total_quantity, 0) AS inventory,
+    hs.total_spent AS customer_spending
+FROM 
+    item i
+LEFT JOIN 
+    InventorySnapshot ih ON i.i_item_sk = ih.inv_item_sk
+LEFT JOIN 
+    (SELECT 
+         DISTINCT ws.item_sk, 
+         SUM(ws.ext_sales_price) AS total_spent
+     FROM 
+         web_sales ws
+     JOIN 
+         HighValueCustomers hvc ON ws.bill_customer_sk = hvc.cd_demo_sk
+     GROUP BY 
+         ws.item_sk) hs ON i.i_item_sk = hs.item_sk
+WHERE 
+    i.i_current_price > (SELECT AVG(i_current_price) FROM item)
+ORDER BY 
+    inventory DESC, 
+    customer_spending DESC
+LIMIT 10;

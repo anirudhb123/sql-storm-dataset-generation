@@ -1,0 +1,42 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS title_rank,
+        COUNT(DISTINCT c.person_id) AS cast_count
+    FROM 
+        aka_title a
+        LEFT JOIN complete_cast cc ON a.id = cc.movie_id
+        LEFT JOIN cast_info c ON cc.subject_id = c.id
+    WHERE 
+        a.production_year IS NOT NULL
+    GROUP BY 
+        a.title, a.production_year
+),
+DistinctGenres AS (
+    SELECT 
+        k.keyword,
+        mt.movie_id
+    FROM 
+        movie_keyword mt
+        INNER JOIN keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        k.keyword, mt.movie_id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    rt.cast_count,
+    dg.keyword,
+    COUNT(DISTINCT mt.company_id) AS production_companies
+FROM 
+    RankedTitles rt
+    LEFT JOIN movie_companies mt ON rt.title = mt.movie_id
+    LEFT JOIN DistinctGenres dg ON mt.movie_id = dg.movie_id
+WHERE 
+    rt.title_rank <= 5
+GROUP BY 
+    rt.title, rt.production_year, rt.cast_count, dg.keyword
+ORDER BY 
+    rt.production_year DESC, rt.cast_count DESC, rt.title;

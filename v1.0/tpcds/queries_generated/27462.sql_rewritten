@@ -1,0 +1,21 @@
+SELECT 
+    ca.city AS Address_City,
+    COUNT(DISTINCT c.c_customer_id) AS Customer_Count,
+    SUM(ws.ws_ext_sales_price) AS Total_Sales_Amount,
+    AVG(LENGTH(c.c_first_name) + LENGTH(c.c_last_name)) AS Avg_Name_Length,
+    SUM(CASE WHEN c.c_birth_year < 1970 THEN 1 ELSE 0 END) AS Senior_Customers,
+    STRING_AGG(DISTINCT CONCAT(c.c_first_name, ' ', c.c_last_name), ', ') AS Customer_Names
+FROM 
+    customer_address AS ca
+JOIN 
+    customer AS c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    ca.ca_state IN ('CA', 'TX') 
+    AND ws.ws_sold_date_sk BETWEEN 2458849 AND 2459200 
+GROUP BY 
+    ca.city
+ORDER BY 
+    Total_Sales_Amount DESC
+LIMIT 10;

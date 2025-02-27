@@ -1,0 +1,80 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey AND o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+PartsWithComments AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_comment,
+        CASE 
+            WHEN p.p_comment IS NULL THEN 'No Comment' 
+            ELSE p.p_comment 
+        END AS adjusted_comment
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 0 AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+),
+FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'F' 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate >= DATE '1997-01-01')
+)
+SELECT 
+    r.r_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue,
+    COALESCE(SUM(co.total_spent), 0) AS total_customer_spending,
+    SUM(CASE WHEN lo.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+    STRING_AGG(DISTINCT p.adjusted_comment, '; ') AS combined_comments
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem lo ON ps.ps_partkey = lo.l_partkey
+LEFT JOIN 
+    CustomerOrders co ON s.s_suppkey = co.c_custkey
+WHERE 
+    s.s_acctbal IS NOT NULL
+    AND EXISTS (SELECT 1 FROM RankedSuppliers rs WHERE rs.s_suppkey = s.s_suppkey AND rs.rn <= 5)
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_revenue DESC, total_customer_spending DESC NULLS LAST;

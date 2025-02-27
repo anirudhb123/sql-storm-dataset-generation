@@ -1,0 +1,78 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        p.CreationDate,
+        p.LastActivityDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.LastAccessDate >= DATE('2024-10-01') - INTERVAL '30 days' 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation, u.CreationDate
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(DISTINCT ph.Comment) AS CloseReasonCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    u.DisplayName AS OwnerName,
+    u.Reputation AS OwnerReputation,
+    CASE 
+        WHEN rp.ScoreRank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    COALESCE(cl.CloseReasonCount, 0) AS CloseReasons,
+    CASE 
+        WHEN u.BadgeCount > 5 THEN 'Elite Badger'
+        ELSE 'Regular User'
+    END AS UserBadgeLevel,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cl ON rp.PostId = cl.PostId
+LEFT JOIN 
+    Comments c ON rp.PostId = c.PostId
+WHERE 
+    u.Reputation > 1000 
+    AND rp.CreationDate >= DATE('2024-10-01') - INTERVAL '1 year'
+    AND NOT EXISTS (
+        SELECT 1 FROM Votes v
+        WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3 
+    )
+GROUP BY 
+    rp.PostId, rp.Title, u.DisplayName, u.Reputation, rp.ScoreRank, cl.CloseReasonCount, u.BadgeCount
+ORDER BY 
+    rp.Score DESC, rp.CreationDate DESC
+LIMIT 50;

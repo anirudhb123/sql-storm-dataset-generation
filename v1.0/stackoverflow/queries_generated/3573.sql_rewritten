@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation, 
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS ActivityRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE U.Reputation > 100
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+ClosedPosts AS (
+    SELECT 
+        P.Id AS ClosedPostId,
+        P.Title,
+        P.CreationDate,
+        PH.CreationDate AS ClosedDate,
+        U.DisplayName AS ClosedBy
+    FROM Posts P
+    JOIN PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId = 10
+    JOIN Users U ON PH.UserId = U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.Comments), 0) AS CommentCount,
+        COALESCE(SUM(V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(V.VoteTypeId = 3), 0) AS DownVoteCount,
+        COALESCE(AVG(P.Score), 0) AS AverageScore
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01' as date) - INTERVAL '30 days'
+    GROUP BY P.Id, P.Title, P.CreationDate
+)
+SELECT 
+    UA.DisplayName,
+    UA.PostCount,
+    UA.TotalViews,
+    UA.TotalUpVotes,
+    UA.TotalDownVotes,
+    CA.ClosedPostId,
+    CA.Title AS ClosedPostTitle,
+    CA.ClosedDate,
+    CA.ClosedBy,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    PS.AverageScore
+FROM UserActivity UA
+LEFT JOIN ClosedPosts CA ON UA.UserId = CA.ClosedBy
+LEFT JOIN PostStatistics PS ON CA.ClosedPostId = PS.Id
+WHERE UA.ActivityRank <= 10
+ORDER BY UA.TotalViews DESC NULLS LAST, UA.PostCount DESC;

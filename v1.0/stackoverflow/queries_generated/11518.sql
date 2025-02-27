@@ -1,0 +1,77 @@
+-- Performance Benchmarking Query: Retrieve statistics and counts of various entities in the StackOverflow schema
+
+WITH UserStatistics AS (
+    SELECT 
+        Id AS UserId, 
+        DisplayName,
+        Reputation,
+        UpVotes,
+        DownVotes,
+        (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = Users.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Badges WHERE UserId = Users.Id) AS BadgeCount
+    FROM 
+        Users
+),
+PostStatistics AS (
+    SELECT 
+        Id AS PostId,
+        OwnerUserId,
+        CreationDate,
+        PostTypeId,
+        Score,
+        ViewCount,
+        AnswerCount,
+        CommentCount,
+        FavoriteCount
+    FROM 
+        Posts
+),
+VoteStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+AggregatedStats AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.PostCount,
+        U.BadgeCount,
+        P.PostId,
+        COUNT(PS.PostId) AS RelatedPostCount,
+        COALESCE(V.VoteCount, 0) AS VoteCount,
+        COALESCE(V.Upvotes, 0) AS Upvotes,
+        COALESCE(V.Downvotes, 0) AS Downvotes
+    FROM 
+        UserStatistics U
+    LEFT JOIN 
+        PostStatistics P ON U.UserId = P.OwnerUserId
+    LEFT JOIN 
+        PostLinks PL ON P.PostId = PL.PostId
+    LEFT JOIN 
+        VoteStatistics V ON P.PostId = V.PostId
+    GROUP BY 
+        U.UserId, U.DisplayName, U.Reputation, U.PostCount, U.BadgeCount, P.PostId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    PostCount,
+    BadgeCount,
+    PostId,
+    RelatedPostCount,
+    VoteCount,
+    Upvotes,
+    Downvotes
+FROM 
+    AggregatedStats
+ORDER BY 
+    Reputation DESC;

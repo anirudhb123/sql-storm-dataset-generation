@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT a.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Tags,
+        rp.CreationDate,
+        rp.OwnerUserId,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.UpVotes,
+        rp.DownVotes
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 3
+),
+TagStats AS (
+    SELECT 
+        SUBSTRING_INDEX(tag.tagName, ',', 1) AS MainTag,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month' THEN 1 ELSE 0 END) AS RecentPosts
+    FROM 
+        Tags tag
+    JOIN 
+        Posts p ON FIND_IN_SET(tag.TagName, p.Tags) > 0
+    GROUP BY 
+        MainTag
+)
+SELECT 
+    trp.PostId,
+    trp.Title,
+    trp.Body,
+    trp.Tags,
+    trp.OwnerDisplayName,
+    ts.MainTag,
+    ts.PostCount,
+    ts.RecentPosts,
+    trp.UpVotes - trp.DownVotes AS NetScore
+FROM 
+    TopRankedPosts trp
+JOIN 
+    TagStats ts ON FIND_IN_SET(ts.MainTag, trp.Tags) > 0
+ORDER BY 
+    NetScore DESC, 
+    trp.CreationDate DESC;

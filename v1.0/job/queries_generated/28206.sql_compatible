@@ -1,0 +1,66 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS title,
+        a.name AS actor_name,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY a.name) AS rank_by_actor
+    FROM
+        aka_title at
+    JOIN
+        cast_info ci ON at.id = ci.movie_id
+    JOIN
+        aka_name a ON ci.person_id = a.person_id
+    WHERE
+        a.name IS NOT NULL
+        AND at.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        actor_name,
+        COUNT(DISTINCT title) AS total_movies
+    FROM 
+        RankedTitles
+    WHERE 
+        rank_by_actor <= 3  
+    GROUP BY 
+        actor_name
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        total_movies,
+        RANK() OVER (ORDER BY total_movies DESC) AS actor_rank
+    FROM 
+        ActorCounts
+),
+FilteredTitles AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        ta.actor_name
+    FROM 
+        RankedTitles rt
+    JOIN 
+        TopActors ta ON rt.actor_name = ta.actor_name
+    WHERE 
+        ta.actor_rank <= 10  
+)
+SELECT 
+    ft.title,
+    ft.production_year,
+    ft.actor_name,
+    COUNT(DISTINCT ft.title) OVER (PARTITION BY ft.actor_name) AS movie_count,
+    STRING_AGG(DISTINCT ct.kind || ': ' || cn.name, '; ') AS companies
+FROM 
+    FilteredTitles ft
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = (SELECT id FROM aka_title WHERE title = ft.title LIMIT 1)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+GROUP BY 
+    ft.title, ft.production_year, ft.actor_name
+ORDER BY 
+    ft.production_year DESC, movie_count DESC, ft.actor_name;

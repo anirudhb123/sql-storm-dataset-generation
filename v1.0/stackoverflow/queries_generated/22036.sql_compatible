@@ -1,0 +1,96 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty,
+        COALESCE((SELECT COUNT(DISTINCT pl.RelatedPostId) 
+                  FROM PostLinks pl 
+                  WHERE pl.PostId = p.Id AND pl.LinkTypeId = 3), 0) AS DuplicateLinkCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        p.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+ActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.LastAccessDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months')
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.TotalBounty,
+        rp.DuplicateLinkCount,
+        au.UserId AS AuthorUserId,
+        au.DisplayName AS AuthorName,
+        au.Reputation AS AuthorReputation,
+        au.PostsCount AS AuthorPostsCount,
+        au.GoldBadges,
+        au.SilverBadges,
+        au.BronzeBadges,
+        CASE 
+            WHEN rp.RankByScore < 3 THEN 'Top'
+            WHEN rp.RankByScore BETWEEN 3 AND 5 THEN 'Medium'
+            ELSE 'Low' 
+        END AS RankCategory
+    FROM 
+        RankedPosts rp
+    JOIN 
+        ActiveUsers au ON rp.OwnerUserId = au.UserId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    CASE 
+        WHEN ps.TotalBounty > 0 THEN 'Has Bounty'
+        ELSE 'No Bounty' 
+    END AS BountyStatus,
+    ps.DuplicateLinkCount,
+    ps.AuthorName,
+    ps.AuthorReputation,
+    ps.AuthorPostsCount,
+    STRING_AGG(DISTINCT CONCAT('Gold: ', ps.GoldBadges, ', Silver: ', ps.SilverBadges, ', Bronze: ', ps.BronzeBadges), '; ') AS BadgeSummary,
+    ps.RankCategory
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.Score IS NOT NULL AND ps.CommentCount IS NOT NULL AND ps.TotalBounty BETWEEN 0 AND 100
+GROUP BY 
+    ps.PostId, ps.Title, ps.Score, ps.ViewCount, ps.CommentCount, ps.TotalBounty, ps.DuplicateLinkCount, 
+    ps.AuthorName, ps.AuthorReputation, ps.AuthorPostsCount, ps.GoldBadges, ps.SilverBadges, ps.BronzeBadges, ps.RankCategory
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC;

@@ -1,0 +1,86 @@
+WITH UserBadgeStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS TotalBadges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(CASE WHEN P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN P.ViewCount ELSE NULL END) AS AvgViewsLast30Days
+    FROM 
+        Posts P
+    GROUP BY 
+        P.OwnerUserId
+),
+UserActivity AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        COALESCE(ABS(US.Reputation), 0) AS Reputation,
+        COALESCE(US.TotalPosts, 0) AS TotalPosts,
+        COALESCE(US.PositivePosts, 0) AS PositivePosts,
+        COALESCE(US.NegativePosts, 0) AS NegativePosts,
+        COALESCE(BS.TotalBadges, 0) AS TotalBadges,
+        COALESCE(BS.GoldBadges, 0) AS GoldBadges,
+        COALESCE(BS.SilverBadges, 0) AS SilverBadges,
+        COALESCE(BS.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        PostStats US ON U.Id = US.OwnerUserId
+    LEFT JOIN 
+        UserBadgeStats BS ON U.Id = BS.UserId
+),
+UserRanks AS (
+    SELECT 
+        U.*,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY TotalBadges DESC) AS BadgeRank
+    FROM 
+        UserActivity U
+)
+SELECT 
+    UserId,
+    DisplayName,
+    Reputation,
+    TotalPosts,
+    PositivePosts,
+    NegativePosts,
+    TotalBadges,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    CASE 
+        WHEN ReputationRank <= 10 THEN 'Top 10 Users by Reputation'
+        WHEN PostRank <= 10 THEN 'Top 10 Users by Posts'
+        WHEN BadgeRank <= 10 THEN 'Top 10 Users by Badges'
+        ELSE 'Regular User'
+    END AS UserCategory,
+    CASE 
+        WHEN TotalPosts = 0 THEN NULL
+        ELSE ROUND(COALESCE((PositivePosts::decimal / NULLIF(TotalPosts, 0)), 0) * 100, 2) 
+    END AS PositivePostPercentage,
+    cast('2024-10-01 12:34:56' as timestamp) - MAX(COALESCE(LastAccessDate, CreationDate)) AS LastActiveDuration
+FROM 
+    UserRanks UR
+LEFT JOIN 
+    Users U ON UR.UserId = U.Id
+GROUP BY 
+    UserId, DisplayName, Reputation, TotalPosts, PositivePosts, NegativePosts, TotalBadges, GoldBadges, SilverBadges, BronzeBadges, ReputationRank, PostRank, BadgeRank
+ORDER BY 
+    Reputation DESC, TotalPosts DESC, TotalBadges DESC;

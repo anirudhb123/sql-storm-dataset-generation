@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal * 0.9
+    AND sh.level < 5
+),
+AvgPartPrice AS (
+    SELECT AVG(p_retailprice) AS avg_price
+    FROM part
+    WHERE p_size BETWEEN 5 AND 20
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, l.l_extendedprice * (1 - l.l_discount) AS adjusted_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'N'
+      AND l.l_linestatus IN ('O', 'F')
+),
+RankedSuppliers AS (
+    SELECT s.*, 
+           ROW_NUMBER() OVER (PARTITION BY s_nationkey ORDER BY s_acctbal DESC) AS rn
+    FROM supplier s
+)
+SELECT s.s_name, r.r_name, SUM(lo.adjusted_price) AS total_sales, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+       COALESCE(SUM(CASE WHEN ns.n_nationkey IS NULL THEN 1 ELSE 0 END), 0) AS missing_nation_count
+FROM SupplierHierarchy s
+LEFT JOIN nation ns ON s.s_nationkey = ns.n_nationkey
+JOIN region r ON ns.n_regionkey = r.r_regionkey
+JOIN FilteredOrders lo ON s.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_retailprice > (SELECT AVG(avg_price) FROM AvgPartPrice)
+    )
+)
+LEFT JOIN RankedSuppliers rs ON s.s_suppkey = rs.s_suppkey
+WHERE rs.rn = 1
+GROUP BY s.s_name, r.r_name
+HAVING SUM(lo.adjusted_price) > (SELECT SUM(adjusted_price) FROM FilteredOrders) * 0.05
+ORDER BY total_sales DESC
+LIMIT 10;

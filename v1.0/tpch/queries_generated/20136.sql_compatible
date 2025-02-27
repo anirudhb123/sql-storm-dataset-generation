@@ -1,0 +1,59 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name, 
+        s.s_suppkey,
+        s.s_name
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        RankedSuppliers s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.rn <= 3
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus IN ('F', 'P')
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    t.r_name AS Region, 
+    s.s_name AS Supplier, 
+    COALESCE(co.c_custkey, -1) AS CustomerID,
+    COALESCE(co.total_orders, 0) AS TotalOrders,
+    ROUND(COALESCE(co.total_spent, 0.00), 2) AS TotalSpent,
+    CONCAT(COALESCE(co.total_orders, 0), ' orders from ', s.s_name) AS CustomerOrderSummary
+FROM 
+    TopSuppliers t
+JOIN 
+    supplier s ON t.s_suppkey = s.s_suppkey
+FULL OUTER JOIN 
+    CustomerOrders co ON co.total_orders > 1 OR co.c_custkey IS NULL
+WHERE 
+    (t.r_name IS NOT NULL OR s.s_name IS NOT NULL)
+AND 
+    (COALESCE(co.total_orders, 0) BETWEEN 1 AND 10 OR co.c_custkey IS NULL)
+ORDER BY 
+    t.r_name, 
+    s.s_name, 
+    CustomerID DESC;

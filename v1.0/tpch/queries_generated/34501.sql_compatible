@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+AggregatedSales AS (
+    SELECT c.c_nationkey, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_nationkey
+),
+TopSuppliers AS (
+    SELECT s.s_name, s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+)
+SELECT p.p_name, 
+       COALESCE(sh.s_name, 'No Supplier') AS supplier_name, 
+       COALESCE(as.total_sales, 0) AS total_sales,
+       ROUND(p.p_retailprice * (1 - AVG(l.l_discount)) OVER (PARTITION BY p.p_partkey), 2) AS avg_discounted_price
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN AggregatedSales as ON sh.s_nationkey = as.c_nationkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+WHERE p.p_size BETWEEN 10 AND 20 
+  AND (sh.s_acctbal IS NULL OR sh.s_acctbal < 10000) 
+  AND NOT EXISTS (
+    SELECT 1 
+    FROM orders o 
+    WHERE o.o_orderkey = l.l_orderkey AND o.o_orderstatus = 'F'
+)
+UNION
+SELECT p.p_name, 
+       ts.s_name, 
+       as.total_sales,
+       NULL AS avg_discounted_price
+FROM part p
+JOIN TopSuppliers ts ON p.p_partkey = ps.ps_partkey
+LEFT JOIN AggregatedSales as ON ts.s_nationkey = as.c_nationkey
+WHERE ts.rn <= 3
+ORDER BY total_sales DESC, p.p_name;

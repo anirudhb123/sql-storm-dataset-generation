@@ -1,0 +1,40 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_suppkey = sh.s_nationkey -- Recursive Join
+)
+, qualified_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_availqty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > (SELECT AVG(p_retailprice) FROM part)
+)
+, order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    SUM(qp.p_retailprice * qp.ps_availqty) AS total_inventory_value,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    AVG(os.total_revenue) AS avg_order_value,
+    ARRAY_AGG(DISTINCT sh.s_name) AS suppliers,
+    MAX(qp.p_retailprice) AS max_price,
+    MIN(qp.p_retailprice) AS min_price
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN qualified_parts qp ON TRUE 
+LEFT JOIN order_summary os ON os.o_orderkey IS NOT NULL
+LEFT JOIN supplier_hierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE r.r_comment IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING COUNT(DISTINCT os.o_orderkey) > 0
+ORDER BY total_inventory_value DESC
+LIMIT 10;

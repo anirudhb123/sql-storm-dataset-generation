@@ -1,0 +1,89 @@
+WITH RecursivePostChain AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Depth
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    UNION ALL
+    SELECT 
+        a.Id,
+        a.Title,
+        a.OwnerUserId,
+        rpc.Depth + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        Posts q ON a.ParentId = q.Id
+    INNER JOIN 
+        RecursivePostChain rpc ON q.Id = rpc.PostId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostScores AS (
+    SELECT 
+        p.Id,
+        p.Score,
+        COALESCE(ph.UserId, 0) AS UserId,
+        COALESCE(u.DisplayName, 'Unknown User') AS UserName,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RecentEditRank,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5) -- Only Track Title and Body Edits
+    LEFT JOIN 
+        Users u ON ph.UserId = u.Id
+    GROUP BY 
+        p.Id, p.Score, ph.UserId, u.DisplayName
+)
+SELECT 
+    rpc.PostId,
+    rpc.Title,
+    ua.DisplayName AS OwnerName,
+    ua.PostCount,
+    ua.UpVotes,
+    ua.DownVotes,
+    ps.Score,
+    ps.RecentEditRank,
+    ps.CommentCount,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    CASE 
+        WHEN ps.UserId IS NOT NULL THEN 'Edited by ' || ps.UserName 
+        ELSE 'No recent edits' 
+    END AS EditInfo,
+    (SELECT COUNT(*) FROM Posts p WHERE p.ParentId = rpc.PostId) AS ChildPostCount
+FROM 
+    RecursivePostChain rpc
+LEFT JOIN 
+    UserActivity ua ON rpc.OwnerUserId = ua.UserId
+LEFT JOIN 
+    PostScores ps ON rpc.PostId = ps.PostId
+WHERE 
+    rpc.Depth < 5 -- Limit depth of recursion
+ORDER BY 
+    rpc.PostId, ps.RecentEditRank DESC;

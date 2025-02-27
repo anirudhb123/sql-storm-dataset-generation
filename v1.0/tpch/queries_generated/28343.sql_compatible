@@ -1,0 +1,25 @@
+
+SELECT 
+    s.s_name AS Supplier_Name,
+    p.p_name AS Part_Name,
+    CONCAT('Supplier: ', s.s_name, ', Part: ', p.p_name, ', Available Quantity: ', CAST(ps.ps_availqty AS VARCHAR), ', Supply Cost: $', FORMAT(ps.ps_supplycost, 2)) AS Supply_Info,
+    TRIM(CONCAT(n.n_name, ' - ', r.r_name)) AS Location_Info
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    LENGTH(s.s_name) BETWEEN 5 AND 15
+  AND 
+    p.p_type LIKE '%soft%'
+GROUP BY 
+    s.s_name, p.p_name, ps.ps_availqty, ps.ps_supplycost, n.n_name, r.r_name
+ORDER BY 
+    p.p_retailprice DESC
+LIMIT 20;

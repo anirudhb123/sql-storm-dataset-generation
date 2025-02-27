@@ -1,0 +1,79 @@
+
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.TagName) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.WikiPostId = p.Id OR t.ExcerptPostId = p.Id
+    GROUP BY 
+        p.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    ORDER BY 
+        TotalUpVotes DESC
+    LIMIT 10
+),
+PostAnalytics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(pt.TagCount, 0) AS TagCount,
+        COALESCE(re.EditCount, 0) AS EditCount,
+        COALESCE(re.LastEditDate, 'No edits') AS LastEditDate,
+        COALESCE(u.TotalUpVotes, 0) AS UserUpVotes,
+        COALESCE(u.TotalDownVotes, 0) AS UserDownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostTagCounts pt ON p.Id = pt.PostId
+    LEFT JOIN 
+        RecentEdits re ON p.Id = re.PostId
+    LEFT JOIN 
+        TopUsers u ON p.OwnerUserId = u.UserId
+)
+SELECT 
+    pa.Title,
+    pa.CreationDate AS PostCreated,
+    pa.TagCount,
+    pa.EditCount,
+    pa.LastEditDate,
+    pa.UserUpVotes,
+    pa.UserDownVotes,
+    CASE 
+        WHEN pa.UserUpVotes > pa.UserDownVotes THEN 'Positive Engagement' 
+        WHEN pa.UserUpVotes < pa.UserDownVotes THEN 'Negative Engagement'
+        ELSE 'Neutral Engagement'
+    END AS EngagementStatus
+FROM 
+    PostAnalytics pa
+WHERE 
+    pa.TagCount > 0
+ORDER BY 
+    pa.TagCount DESC, 
+    pa.EditCount DESC;

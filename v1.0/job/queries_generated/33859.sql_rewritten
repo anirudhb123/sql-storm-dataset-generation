@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(t.season_nr, 0) AS season,
+        COALESCE(t.episode_nr, 0) AS episode,
+        1 AS depth
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        aka_title t ON m.id = t.episode_of_id
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%movie%')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(t.season_nr, 0),
+        COALESCE(t.episode_nr, 0),
+        depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        movie_hierarchy t ON m.episode_of_id = t.movie_id
+),
+cast_with_roles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY r.role) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        string_agg(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.season,
+    mh.episode,
+    COUNT(DISTINCT cwr.actor_name) AS actor_count,
+    MAX(cwr.role_rank) AS max_role_rank,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_with_roles cwr ON mh.movie_id = cwr.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.depth <= 2  
+GROUP BY 
+    mh.movie_id, mh.title, mh.season, mh.episode, mk.keywords
+ORDER BY 
+    actor_count DESC, mh.title;

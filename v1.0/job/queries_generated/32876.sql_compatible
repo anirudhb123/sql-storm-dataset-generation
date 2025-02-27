@@ -1,0 +1,61 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    COUNT(cc.movie_id) AS total_movies,
+    AVG(EXTRACT(YEAR FROM DATE '2024-10-01') - mh.production_year) AS avg_years_since_release,
+    STRING_AGG(DISTINCT at.title, ', ') AS movie_titles,
+    MAX(CASE 
+        WHEN pg_roles.rolname IS NULL THEN 'Role Not Assigned' 
+        ELSE pg_roles.rolname 
+    END) AS role_assigned,
+    CASE 
+        WHEN SUM(CASE WHEN cc.id IS NOT NULL THEN 1 ELSE 0 END) = 0 THEN 'No Roles'
+        ELSE 'Acted'
+    END AS acting_status
+FROM 
+    aka_name ak
+LEFT JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    role_type rt ON ci.person_role_id = rt.id
+LEFT JOIN 
+    pg_roles ON rt.role = pg_roles.rolname
+LEFT JOIN 
+    aka_title at ON cc.movie_id = at.id 
+GROUP BY 
+    ak.name, mh.production_year
+HAVING 
+    COUNT(cc.movie_id) > 2
+ORDER BY 
+    total_movies DESC
+LIMIT 10;

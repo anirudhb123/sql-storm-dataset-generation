@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId,
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'No Reputation'
+            WHEN Reputation < 100 THEN 'Novice'
+            WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationTier
+    FROM Users
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COALESCE(SUM(v.VoteTypeId = 2) - SUM(v.VoteTypeId = 3), 0) AS Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY COUNT(DISTINCT ph.Id) DESC) AS EditRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, p.OwnerUserId, p.PostTypeId
+),
+TopUsers AS (
+    SELECT
+        ur.UserId,
+        ur.ReputationTier,
+        COUNT(DISTINCT ps.PostId) AS TotalPosts,
+        SUM(CASE WHEN ps.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM UserReputation ur
+    JOIN PostStatistics ps ON ur.UserId = ps.OwnerUserId
+    GROUP BY ur.UserId, ur.ReputationTier
+),
+PostLinksWithTypeCounts AS (
+    SELECT 
+        pl.PostId,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount,
+        MAX(CASE WHEN lt.Name = 'Duplicate' THEN 1 ELSE 0 END) AS HasDuplicateLink
+    FROM PostLinks pl
+    JOIN LinkTypes lt ON pl.LinkTypeId = lt.Id
+    GROUP BY pl.PostId
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    ut.ReputationTier,
+    ps.TotalPosts,
+    ps.PositiveScoreCount,
+    COALESCE(pl.RelatedPostCount, 0) AS RelatedPostCount,
+    CASE 
+        WHEN pl.HasDuplicateLink = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS HasDuplicates,
+    p.Title,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS TotalComments,
+    (SELECT STRING_AGG(ut.TagName, ', ') FROM STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag) WHERE EXISTS (SELECT 1 FROM Tags t WHERE t.TagName = tag)) AS ValidTags
+FROM Posts p
+JOIN Users u ON p.OwnerUserId = u.Id
+JOIN UserReputation ur ON u.Id = ur.UserId
+JOIN TopUsers ps ON ur.UserId = ps.UserId
+LEFT JOIN PostLinksWithTypeCounts pl ON p.Id = pl.PostId
+LEFT JOIN Tags ut ON ut.WikiPostId = p.Id OR ut.ExcerptPostId = p.Id
+WHERE 
+    p.CreationDate > NOW() - INTERVAL '1 year'
+    AND (p.PostTypeId IN (1, 2) OR p.ViewCount > 100)
+    AND (p.Title IS NOT NULL AND LENGTH(p.Title) > 10)
+ORDER BY ur.Reputation DESC, RelatedPostCount DESC
+LIMIT 100;

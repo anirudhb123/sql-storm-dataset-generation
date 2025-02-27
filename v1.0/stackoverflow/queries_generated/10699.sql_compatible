@@ -1,0 +1,62 @@
+
+WITH UserPostCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+MostActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        PostCount,
+        TotalScore,
+        QuestionCount,
+        AnswerCount,
+        RANK() OVER (ORDER BY PostCount DESC) AS UserRank
+    FROM 
+        UserPostCounts
+),
+
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ','))
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+
+SELECT 
+    mu.UserId,
+    mu.DisplayName,
+    mu.PostCount,
+    mu.TotalScore,
+    mu.QuestionCount,
+    mu.AnswerCount,
+    tt.TagName,
+    tt.PostCount AS TagPostCount,
+    tt.TotalScore AS TagTotalScore
+FROM 
+    MostActiveUsers mu
+CROSS JOIN 
+    TopTags tt
+ORDER BY 
+    mu.UserRank, tt.PostCount DESC;

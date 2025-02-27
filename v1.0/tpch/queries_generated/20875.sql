@@ -1,0 +1,88 @@
+WITH RECURSIVE TotalSales AS (
+    SELECT 
+        c.c_custkey AS customer_id,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        total_sales
+    FROM 
+        TotalSales
+    WHERE 
+        rn = 1
+    ORDER BY 
+        total_sales DESC
+    LIMIT 5
+),
+SupplierInfo AS (
+    SELECT 
+        ps.ps_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+)
+SELECT 
+    c.c_name,
+    r.r_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS net_revenue,
+    si.part_count,
+    si.avg_supply_cost,
+    CASE 
+        WHEN COALESCE(SUM(l.l_tax), 0) > 100 THEN 'High Tax'
+        ELSE 'Low Tax'
+    END AS tax_category
+FROM 
+    TopCustomers tc
+JOIN 
+    customer c ON tc.customer_id = c.c_custkey
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    lineitem l ON c.c_custkey = l.l_orderkey
+LEFT JOIN 
+    SupplierInfo si ON c.c_custkey = si.ps_suppkey
+WHERE 
+    r.r_name LIKE 'Asia%'
+GROUP BY 
+    c.c_name, r.r_name, si.part_count, si.avg_supply_cost
+HAVING 
+    COUNT(DISTINCT n.n_nationkey) > 1
+ORDER BY 
+    net_revenue DESC
+UNION ALL
+SELECT 
+    'All Other Customers' AS c_name,
+    r.r_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS net_revenue,
+    NULL AS part_count,
+    NULL AS avg_supply_cost,
+    'N/A' AS tax_category
+FROM 
+    region r
+LEFT JOIN 
+    lineitem l ON r.r_regionkey = l.l_orderkey % 5
+WHERE 
+    r.r_name NOT LIKE 'Asia%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 10
+ORDER BY 
+    net_revenue DESC;

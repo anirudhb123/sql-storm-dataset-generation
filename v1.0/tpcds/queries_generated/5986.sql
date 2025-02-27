@@ -1,0 +1,45 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' 
+        AND cd.cd_marital_status = 'M'
+        AND w.web_open_date_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_sk
+),
+popular_sites AS (
+    SELECT 
+        skewed_w.web_site_id,
+        skewed_w.web_name,
+        sales.total_sales,
+        sales.order_count
+    FROM 
+        ranked_sales sales
+    JOIN 
+        web_site skewed_w ON sales.web_site_sk = skewed_w.web_site_sk
+    WHERE 
+        sales.sales_rank <= 10
+)
+SELECT 
+    p.web_site_id,
+    p.web_name,
+    p.total_sales,
+    p.order_count,
+    ROUND(p.total_sales / p.order_count, 2) AS avg_order_value
+FROM 
+    popular_sites p
+ORDER BY 
+    p.total_sales DESC;

@@ -1,0 +1,52 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), 
+order_summary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus IN ('O', 'F') 
+    GROUP BY o.o_orderkey, o.o_custkey
+), 
+nation_customer AS (
+    SELECT c.c_custkey, n.n_name AS nation, SUM(o.total_sales) AS nation_sales
+    FROM customer c
+    LEFT JOIN nation n ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN order_summary o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, n.n_name
+), 
+part_analysis AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT p.p_name, p.total_available,
+       COALESCE(ns.nation_sales, 0) AS total_nation_sales,
+       CASE 
+           WHEN p.total_available > 100 THEN 'Sufficient stock' 
+           ELSE 'Low stock' 
+       END AS stock_status,
+       JSON_AGG(DISTINCT CONCAT(n.n_name, ': ', n.nation_sales) ORDER BY n.nation_sales DESC) AS nation_sales_summary
+FROM part_analysis p
+LEFT JOIN nation_customer ns ON p.p_partkey IN (
+    SELECT DISTINCT l.l_partkey 
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderdate BETWEEN CURRENT_DATE - INTERVAL '1 year' AND CURRENT_DATE
+)
+LEFT JOIN nation n ON n.n_nationkey IN (
+    SELECT DISTINCT c.c_nationkey 
+    FROM customer c 
+    JOIN orders o ON c.c_custkey = o.o_custkey
+)
+WHERE p.avg_supply_cost IS NOT NULL AND p.supplier_count > 0
+GROUP BY p.p_partkey, p.total_available
+HAVING SUM(COALESCE(ns.nation_sales, 0)) > 10000
+ORDER BY p.total_available DESC NULLS LAST;

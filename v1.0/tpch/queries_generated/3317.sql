@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (
+            SELECT AVG(s2.s_acctbal)
+            FROM supplier s2
+            WHERE s2.s_nationkey = s.s_nationkey
+        )
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+TopPartSuppliers AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        (SELECT SUM(l.l_quantity)
+         FROM lineitem l
+         JOIN orders o ON l.l_orderkey = o.o_orderkey
+         WHERE l.l_suppkey = ps.ps_suppkey) AS total_quantity
+    FROM 
+        partsupp ps
+    JOIN 
+        RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    WHERE 
+        rs.rank <= 3
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(SUM(tps.total_quantity), 0) AS total_supplied_qty,
+    AVG(tps.ps_supplycost) AS avg_supply_cost,
+    STRING_AGG(CONCAT('Supplier ', rs.s_name, ' from nation ', n.n_name), '; ') AS supplier_details
+FROM 
+    part p
+LEFT JOIN 
+    TopPartSuppliers tps ON p.p_partkey = tps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON tps.ps_suppkey = rs.s_suppkey
+LEFT JOIN 
+    nation n ON rs.s_nationkey = n.n_nationkey
+GROUP BY 
+    p.p_partkey, p.p_name
+HAVING 
+    COUNT(DISTINCT rs.s_suppkey) > 1
+ORDER BY 
+    p.p_real_price DESC, p.p_name;

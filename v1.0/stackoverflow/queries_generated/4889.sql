@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.Score > 0
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        COUNT(*) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 -- Post Closed
+    GROUP BY 
+        ph.PostId, ph.CreationDate
+),
+UserRank AS (
+    SELECT 
+        us.UserId, 
+        us.DisplayName,
+        RANK() OVER (ORDER BY us.UpVotes - us.DownVotes DESC) AS UserRank
+    FROM 
+        UserStats us
+    WHERE 
+        us.BadgeCount > 0
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    cp.CloseCount,
+    ur.UserRank
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.PostId
+JOIN 
+    UserRank ur ON u.Id = ur.UserId
+WHERE 
+    rp.PostRank = 1
+    AND ur.UserRank <= 10
+ORDER BY 
+    ur.UserRank, rp.Score DESC
+LIMIT 50;

@@ -1,0 +1,91 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS rank,
+        SUM(ws_sales_price) OVER (PARTITION BY ws_item_sk) AS total_sales,
+        COUNT(DISTINCT ws_bill_customer_sk) OVER (PARTITION BY ws_item_sk) AS distinct_customers,
+        MAX(ws_ship_date_sk) OVER (PARTITION BY ws_item_sk) AS last_ship_date
+    FROM 
+        web_sales
+    WHERE 
+        ws_sales_price IS NOT NULL
+        AND ws_sales_price > 0
+),
+
+ReturnedSales AS (
+    SELECT 
+        wr_item_sk, 
+        wr_order_number, 
+        SUM(wr_return_amt) AS total_return_amount, 
+        COUNT(wr_return_quantity) AS total_return_quantity
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_amt IS NOT NULL
+    GROUP BY 
+        wr_item_sk, 
+        wr_order_number
+),
+
+FinalSalesData AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_order_number,
+        rs.ws_sales_price,
+        rs.total_sales,
+        CASE 
+            WHEN rs.rank = 1 THEN 'Top Selling'
+            ELSE 'Regular'
+        END AS sales_category,
+        COALESCE(rs.distinct_customers, 0) AS num_customers,
+        COALESCE(rs.last_ship_date, '1970-01-01') AS last_ship_date,
+        COALESCE(rs.ws_item_sk in (SELECT cr_item_sk FROM catalog_returns) * 1, 0) AS returned_flag,
+        COALESCE(rs.total_return_quantity, 0) AS total_returns
+    FROM 
+        RankedSales rs
+    LEFT JOIN 
+        ReturnedSales res ON rs.ws_item_sk = res.wr_item_sk AND rs.ws_order_number = res.wr_order_number
+    WHERE 
+        rs.total_sales > 1000
+),
+
+FinalReport AS (
+    SELECT 
+        fsd.ws_item_sk,
+        fsd.ws_order_number,
+        fsd.ws_sales_price,
+        fsd.total_sales,
+        fsd.sales_category,
+        fsd.num_customers,
+        fsd.last_ship_date,
+        CASE 
+            WHEN fsd.returned_flag = 1 THEN 'Returned'
+            ELSE 'Not Returned'
+        END AS return_status,
+        fsd.total_returns
+    FROM 
+        FinalSalesData fsd
+    WHERE 
+        fsd.total_returns < fsd.num_customers OR fsd.num_customers = 0
+)
+
+SELECT 
+    f.ws_item_sk, 
+    f.ws_order_number, 
+    f.ws_sales_price,
+    f.total_sales,
+    f.sales_category,
+    f.num_customers,
+    f.last_ship_date,
+    f.return_status,
+    f.total_returns
+FROM 
+    FinalReport f
+WHERE 
+    f.ws_sales_price >= (SELECT AVG(ws_sales_price) FROM web_sales)
+ORDER BY 
+    f.total_sales DESC, f.num_customers ASC
+LIMIT 100 OFFSET ((SELECT COUNT(*) FROM FinalReport) / 4);

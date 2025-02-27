@@ -1,0 +1,56 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(MAX)) AS Path,
+        1 AS Level
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        CAST(rph.Path + ' -> ' + p.Title AS VARCHAR(MAX)),
+        rph.Level + 1
+    FROM
+        Posts p
+    JOIN
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+)
+
+SELECT
+    p.Title AS QuestionTitle,
+    p.CreationDate,
+    p.ViewCount,
+    p.Score,
+    u.DisplayName AS UserName,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    (SELECT SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) FROM Votes v WHERE v.PostId = p.Id) AS UpvoteCount,
+    (SELECT SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) FROM Votes v WHERE v.PostId = p.Id) AS DownvoteCount,
+    CASE 
+        WHEN p.AcceptedAnswerId IS NOT NULL THEN (SELECT Title FROM Posts WHERE Id = p.AcceptedAnswerId) 
+        ELSE 'No accepted answer' 
+    END AS AcceptedAnswerTitle,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    'Path: ' + rph.Path AS PostHierarchy
+FROM
+    Posts p
+LEFT JOIN
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    RecursivePostHierarchy rph ON rph.PostId = p.Id
+LEFT JOIN 
+    STRING_SPLIT(p.Tags, ',') AS t ON t.value IS NOT NULL
+WHERE
+    p.PostTypeId = 1  -- Only questions
+    AND p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Questions created within the last year
+GROUP BY
+    p.Title, p.CreationDate, p.ViewCount, p.Score, u.DisplayName, p.AcceptedAnswerId, rph.Path
+ORDER BY
+    p.Score DESC, p.ViewCount DESC;

@@ -1,0 +1,66 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        CAST(mt.title AS VARCHAR(MAX)) AS movie_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    UNION ALL
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        rm.level + 1,
+        CAST(rm.movie_path + ' -> ' + mt.title AS VARCHAR(MAX)) AS movie_path
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        RecursiveMovieHierarchy rm ON mt.episode_of_id = rm.movie_id
+),
+RankedMovies AS (
+    SELECT 
+        m.*,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.title) AS rn,
+        COUNT(*) OVER (PARTITION BY m.production_year) AS total_movies
+    FROM 
+        RecursiveMovieHierarchy m
+),
+MovieDetails AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        r.rn,
+        r.total_movies,
+        COALESCE(GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', '), 'No Actors') AS cast_names
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = r.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    GROUP BY 
+        r.movie_id, r.title, r.production_year, r.rn, r.total_movies
+)
+SELECT 
+    md.*,
+    CASE 
+        WHEN md.rn = 1 THEN 'First'
+        WHEN md.rn = md.total_movies THEN 'Last'
+        ELSE 'Middle'
+    END AS position_info,
+    CASE 
+        WHEN md.cast_names = 'No Actors' THEN NULL
+        ELSE md.cast_names
+    END AS formatted_cast
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year IS NOT NULL 
+    AND md.total_movies > 1
+ORDER BY 
+    md.production_year, md.rn DESC;

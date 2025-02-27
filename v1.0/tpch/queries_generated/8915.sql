@@ -1,0 +1,63 @@
+WITH SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        o.o_orderkey, 
+        o.o_totalprice, 
+        o.o_orderdate
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= '2023-12-31'
+),
+LineItemDetails AS (
+    SELECT 
+        lo.l_orderkey, 
+        lo.l_partkey, 
+        lo.l_suppkey, 
+        SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS revenue
+    FROM 
+        lineitem lo
+    WHERE 
+        lo.l_shipdate >= '2023-01-01' AND lo.l_shipdate <= '2023-12-31'
+    GROUP BY 
+        lo.l_orderkey, lo.l_partkey, lo.l_suppkey
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(l.revenue) AS total_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    COUNT(DISTINCT s.s_suppkey) AS unique_suppliers,
+    MAX(si.total_supply_cost) AS max_supply_cost
+FROM 
+    nation n
+JOIN 
+    customerOrders co ON n.n_nationkey = co.c_custkey
+JOIN 
+    lineItemDetails l ON co.o_orderkey = l.l_orderkey
+JOIN 
+    SupplierInfo si ON l.l_suppkey = si.s_suppkey
+JOIN 
+    supplier s ON si.s_suppkey = s.s_suppkey
+WHERE 
+    n.n_regionkey IN (SELECT r_regionkey FROM region WHERE r_name LIKE 'Asia%')
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

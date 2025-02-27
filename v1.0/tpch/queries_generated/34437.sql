@@ -1,0 +1,76 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        1 AS order_level
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    UNION ALL
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        co.order_level + 1
+    FROM 
+        CustomerOrders co
+    JOIN 
+        orders o ON co.o_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND co.order_level < 5
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+PriceRankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM 
+        orders o
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT co.o_orderkey) AS total_orders,
+    SUM(ps.total_available * ps.avg_supply_cost) AS total_supply_value,
+    AVG(cco.o_totalprice) AS avg_order_value,
+    MAX(pso.price_rank) AS highest_order_value_rank
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey)
+INNER JOIN 
+    PartStats ps ON co.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = ps.p_partkey)
+JOIN 
+    PriceRankedOrders pso ON co.o_orderkey = pso.o_orderkey
+WHERE 
+    ps.supplier_count > 1 AND ps.total_available > 0
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT co.o_orderkey) > 5
+ORDER BY 
+    total_orders DESC, avg_order_value DESC;

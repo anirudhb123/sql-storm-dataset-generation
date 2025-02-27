@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND cn.country_code > '[gu]' AND t.md5sum > 'f4e1faa4f9b5b075eaca236b9938d551' AND t.production_year IN (1898, 1940, 1958, 1959, 1960, 1983, 1985, 1991, 1996, 2017) AND cn.md5sum > '509694b27a907bddc296ac46706a3694' AND ci.person_role_id > 1321786;

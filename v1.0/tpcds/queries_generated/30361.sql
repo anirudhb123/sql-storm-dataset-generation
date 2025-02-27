@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_recursive AS (
+    SELECT 
+        s_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        CAST(EXTRACT(YEAR FROM CURRENT_DATE) AS INTEGER) AS year,
+        CAST(EXTRACT(MONTH FROM CURRENT_DATE) AS INTEGER) AS month
+    FROM 
+        store_sales ss
+    WHERE 
+        ss_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+    GROUP BY 
+        s_store_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sr.s_store_sk,
+        sr.total_sales + ss2.ss_net_paid,
+        year,
+        month
+    FROM 
+        sales_recursive sr
+    JOIN store_sales ss2 ON sr.s_store_sk = ss2.ss_store_sk
+    WHERE 
+        sr.year = CAST(EXTRACT(YEAR FROM CURRENT_DATE) AS INTEGER) - 1
+        AND sr.month = CAST(EXTRACT(MONTH FROM CURRENT_DATE) AS INTEGER)
+        AND ss2.ss_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = (CURRENT_DATE - INTERVAL '1 year'))
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_net_paid) AS total_spent
+    FROM 
+        web_sales ws 
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk 
+    GROUP BY 
+        c.c_customer_sk
+),
+high_value_customers AS (
+    SELECT 
+        cd.cd_demo_sk,
+        SUM(cs.cs_net_paid) AS total_spent
+    FROM 
+        catalog_sales cs
+    JOIN 
+        customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_credit_rating = 'Good'
+    GROUP BY 
+        cd.cd_demo_sk
+    HAVING 
+        SUM(cs.cs_net_paid) > 1000
+)
+SELECT 
+    sr.s_store_sk,
+    sr.total_sales,
+    csc.c_customer_sk,
+    csc.total_orders,
+    csc.total_spent,
+    hvc.total_spent AS high_value_spending
+FROM 
+    sales_recursive sr
+FULL OUTER JOIN 
+    customer_sales csc ON sr.s_store_sk = csc.c_customer_sk
+LEFT JOIN 
+    high_value_customers hvc ON csc.total_spent > 1000;

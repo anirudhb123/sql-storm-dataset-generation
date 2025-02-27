@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS voiced_char_name, min(n.name) AS voicing_actress_name, min(t.title) AS kung_fu_panda
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, keyword AS k, movie_companies AS mc, movie_info AS mi, movie_keyword AS mk, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND t.id = mk.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mc.movie_id = mk.movie_id AND mi.movie_id = ci.movie_id AND mi.movie_id = mk.movie_id AND ci.movie_id = mk.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id AND k.id = mk.keyword_id
+AND cn.md5sum IN ('3acfe78a31e78671db0d8d46bf3e0bfa', '5a3bc9bfb3c2cd815ce23032c5c189b9', 'e290d597a9162ee8cd95539fdb79f800');

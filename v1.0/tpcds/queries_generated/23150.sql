@@ -1,0 +1,68 @@
+
+WITH RECURSIVE revenue_calculation AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+    GROUP BY 
+        ws_item_sk
+),
+high_revenue_items AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rc.total_sales,
+        rc.order_count
+    FROM 
+        revenue_calculation rc
+    JOIN 
+        item i ON rc.ws_item_sk = i.i_item_sk
+    WHERE 
+        rc.rank <= 10
+),
+return_info AS (
+    SELECT 
+        wr.wr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(wr_return_amt) AS total_return_amount,
+        SUM(wr_return_tax) AS total_return_tax,
+        CASE 
+            WHEN COUNT(*) > 0 THEN 'Returned' 
+            ELSE 'Not Returned' 
+        END AS return_status
+    FROM 
+        web_returns wr
+    GROUP BY 
+        wr.wr_item_sk
+)
+SELECT 
+    hri.i_item_id,
+    hri.i_item_desc,
+    hri.total_sales,
+    hri.order_count,
+    COALESCE(ri.return_count, 0) AS return_count,
+    COALESCE(ri.total_return_amount, 0.00) AS total_return_amount,
+    COALESCE(ri.total_return_tax, 0.00) AS total_return_tax,
+    CASE 
+        WHEN ri.return_count IS NOT NULL AND ri.return_count > 0 THEN 'Returned'
+        ELSE 'Safe'
+    END AS item_status,
+    STRING_AGG(DISTINCT hcd.cd_marital_status) AS marital_statuses,
+    COUNT(DISTINCT c.c_customer_id) FILTER (WHERE c.c_birth_year < 1990) AS vintage_customers
+FROM 
+    high_revenue_items hri
+LEFT JOIN 
+    return_info ri ON hri.i_item_id = ri.wr_item_sk
+LEFT JOIN 
+    customer c ON c.c_current_cdemo_sk IN (SELECT cd_demo_sk FROM customer_demographics cd WHERE cd_purchase_estimate > 1000)
+LEFT JOIN 
+    household_demographics hhd ON c.c_current_hdemo_sk = hhd.hd_demo_sk
+LEFT JOIN 
+    customer_demographics hcd ON c.c_current_cdemo_sk = hcd.cd_demo_sk
+GROUP BY 
+    hri.i_item_id, hri.i_item_desc, hri.total_sales, hri.order_count, ri.return_count;

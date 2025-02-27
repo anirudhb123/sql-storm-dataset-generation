@@ -1,0 +1,65 @@
+
+WITH processed_customer_data AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        (CASE 
+            WHEN cd.cd_purchase_estimate BETWEEN 0 AND 500 THEN 'Low'
+            WHEN cd.cd_purchase_estimate BETWEEN 501 AND 1500 THEN 'Medium'
+            WHEN cd.cd_purchase_estimate > 1500 THEN 'High'
+            ELSE 'Unknown'
+         END) AS purchase_estimate_category
+    FROM
+        customer c
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+formatted_dates AS (
+    SELECT
+        d.d_date_sk,
+        DATE_FORMAT(d.d_date, '%Y-%m-%d') AS formatted_date,
+        d.d_day_name
+    FROM
+        date_dim d
+),
+sales_summary AS (
+    SELECT
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue
+    FROM
+        web_sales ws
+    GROUP BY
+        ws.ws_bill_customer_sk
+)
+SELECT
+    p.full_name,
+    p.ca_city,
+    p.ca_state,
+    p.cd_gender,
+    p.cd_marital_status,
+    p.cd_education_status,
+    f.formatted_date,
+    f.d_day_name,
+    s.total_quantity_sold,
+    s.total_revenue,
+    p.purchase_estimate_category
+FROM
+    processed_customer_data p
+LEFT JOIN
+    sales_summary s ON p.c_customer_sk = s.ws_bill_customer_sk
+LEFT JOIN
+    formatted_dates f ON f.d_date_sk = s.ws_sold_date_sk
+WHERE
+    p.cd_gender = 'M' AND
+    f.d_day_name IN ('Monday', 'Tuesday', 'Wednesday')
+ORDER BY
+    total_revenue DESC
+LIMIT 100;

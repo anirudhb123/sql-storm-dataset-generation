@@ -1,0 +1,117 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostHistoryTypeId,
+        ph.PostId,
+        ph.RevisionGUID,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) -- Considering only relevant history types
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostHistoryTypeId,
+        ph.PostId,
+        ph.RevisionGUID,
+        ph.CreationDate,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text,
+        Level + 1
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON rph.PostId = ph.PostId
+    WHERE 
+        ph.CreationDate < rph.CreationDate -- Ensuring we go back in history
+),
+
+AggregatedVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT p.Id) AS ActivePosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(DISTINCT p.Id) > 5 -- At least 5 posts for consideration
+),
+
+FilteredPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        AP.UpVotes,
+        AP.DownVotes,
+        RPH.UserDisplayName AS LastEditor,
+        RPH.CreationDate AS LastEdit
+    FROM 
+        Posts p
+    JOIN 
+        AggregatedVotes AP ON p.Id = AP.PostId
+    JOIN 
+        RecursivePostHistory RPH ON p.Id = RPH.PostId
+    WHERE 
+        RPH.Level = 1 -- Most recent history
+        AND p.CreationDate >= NOW() - INTERVAL '1 YEAR' -- Posts within last year
+),
+
+PostRankings AS (
+    SELECT 
+        fp.*,
+        ROW_NUMBER() OVER (ORDER BY fp.ViewCount DESC, fp.AnswerCount DESC) AS Rank
+    FROM 
+        FilteredPosts fp
+)
+
+SELECT 
+    p.Id,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    p.AnswerCount,
+    p.UpVotes,
+    p.DownVotes,
+    p.LastEditor,
+    p.LastEdit,
+    r.ActivePosts,
+    r.TotalViews
+FROM 
+    PostRankings p
+LEFT JOIN 
+    MostActiveUsers r ON p.LastEditor = r.UserId
+WHERE 
+    p.Rank <= 10 -- Get top 10 posts
+ORDER BY 
+    p.Rank;

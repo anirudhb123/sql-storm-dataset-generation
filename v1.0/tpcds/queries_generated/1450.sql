@@ -1,0 +1,48 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        cs_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY cs_item_sk ORDER BY cs_sold_date_sk DESC) as rn
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+), 
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        SUM(COALESCE(rs.cs_sales_price, 0)) AS total_sales,
+        COUNT(DISTINCT rs.cs_order_number) AS order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales rs ON i.i_item_sk = rs.cs_item_sk AND rs.rn = 1
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+), 
+CustomerCounts AS (
+    SELECT 
+        c.c_customer_id,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ss.i_item_id,
+    ss.i_item_desc,
+    ss.total_sales,
+    cc.total_web_orders,
+    COALESCE(ss.total_sales / NULLIF(cc.total_web_orders,0), 0) AS sales_per_order
+FROM 
+    SalesSummary ss
+INNER JOIN 
+    CustomerCounts cc ON ss.total_sales > 0
+ORDER BY 
+    sales_per_order DESC
+LIMIT 10;

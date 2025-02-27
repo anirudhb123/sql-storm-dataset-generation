@@ -1,0 +1,64 @@
+
+WITH RECURSIVE income_bracket AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_lower_bound IS NOT NULL
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    JOIN income_bracket ib_prev ON ib.ib_income_band_sk = ib_prev.ib_income_band_sk + 1
+),
+customer_data AS (
+    SELECT c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_dep_count, cd.cd_credit_rating, 
+           SUM(ws.ws_quantity) AS total_quantity, SUM(ws.ws_net_profit) AS total_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE c.c_birth_year BETWEEN 1970 AND 2000 AND cd.cd_dep_count IS NOT NULL
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_dep_count, cd.cd_credit_rating
+),
+profit_summary AS (
+    SELECT cd.c_customer_sk, 
+           (CASE 
+               WHEN cd.cd_gender = 'M' THEN 'Male' 
+               WHEN cd.cd_gender = 'F' THEN 'Female' 
+               ELSE 'Other' 
+           END) AS gender_description,
+           total_quantity, total_profit, 
+           RANK() OVER (PARTITION BY (CASE 
+                                         WHEN cd.cd_gender = 'M' THEN 'Male' 
+                                         WHEN cd.cd_gender = 'F' THEN 'Female' 
+                                         ELSE 'Other' 
+                                     END) ORDER BY total_profit DESC) AS rank_per_gender
+    FROM customer_data cd
+    WHERE total_profit IS NOT NULL
+),
+top_customers AS (
+    SELECT * FROM profit_summary
+    WHERE rank_per_gender <= 5
+),
+warehouse_data AS (
+    SELECT w.w_warehouse_id, COUNT(sr.sr_item_sk) AS return_quantity 
+    FROM warehouse w
+    LEFT JOIN store_returns sr ON w.w_warehouse_sk = sr.sr_store_sk
+    GROUP BY w.w_warehouse_id
+)
+SELECT 
+    gender_description, 
+    COUNT(DISTINCT tc.c_customer_sk) AS top_customers_count,
+    SUM(wd.return_quantity) AS total_returns,
+    AVG(total_profit) AS average_profit,
+    (SUM(total_profit) / NULLIF(COUNT(DISTINCT tc.c_customer_sk), 0)) AS avg_profit_per_top_customer,
+    COALESCE(MAX(cd.cd_credit_rating), 'unknown') AS max_credit_rating
+FROM top_customers tc
+JOIN customer_data cd ON tc.c_customer_sk = cd.c_customer_sk
+LEFT JOIN warehouse_data wd ON wd.w_warehouse_id = (
+    SELECT w.w_warehouse_id
+    FROM warehouse w
+    ORDER BY w.w_warehouse_sq_ft DESC
+    LIMIT 1
+)
+GROUP BY gender_description
+HAVING SUM(total_profit) > 10000 
+   AND COUNT(DISTINCT tc.c_customer_sk) > 2
+ORDER BY gender_description;

@@ -1,0 +1,65 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O')
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+),
+OrderLineDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS line_count,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    COALESCE(SUM(sp.total_avail_qty), 0) AS total_available_quantity,
+    COALESCE(AVG(sp.avg_supply_cost), 0) AS avg_supply_cost,
+    CASE 
+        WHEN r.o_orderkey IS NOT NULL AND od.line_count > 0 THEN 'Order Has Lines'
+        ELSE 'No Lines'
+    END AS line_status
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierPartDetails sp ON sp.p_partkey IN (
+        SELECT ps.p_partkey 
+        FROM partsupp ps 
+        WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp)
+    )
+LEFT JOIN 
+    OrderLineDetails od ON od.l_orderkey = r.o_orderkey
+WHERE 
+    r.rnk <= 5 OR r.o_orderdate < DATEADD(YEAR, -1, '1998-10-01')
+GROUP BY 
+    r.o_orderkey, r.o_orderdate, r.o_totalprice, od.line_count
+ORDER BY 
+    r.o_orderdate DESC, r.o_totalprice DESC
+FETCH FIRST 10 ROWS ONLY;

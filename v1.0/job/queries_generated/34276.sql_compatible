@@ -1,0 +1,63 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mv.linked_movie_id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link mv
+    JOIN 
+        aka_title m ON mv.linked_movie_id = m.movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = mv.movie_id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(c.name, 'Unknown Company') AS production_company,
+    COUNT(DISTINCT ca.person_id) AS total_cast_members,
+    MAX(mr.note) AS highest_role_note,
+    SUM(CASE WHEN mi.info_type_id = 1 THEN 1 ELSE 0 END) AS total_budget_entries,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ca.person_id) DESC) AS rank
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_companies mc ON mh.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name c ON mc.company_id = c.id
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ca ON cc.subject_id = ca.person_id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    role_type mr ON ca.role_id = mr.id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, c.name
+HAVING 
+    COUNT(DISTINCT ca.person_id) > 5 
+    AND SUM(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    mh.production_year DESC, total_cast_members DESC
+LIMIT 100;

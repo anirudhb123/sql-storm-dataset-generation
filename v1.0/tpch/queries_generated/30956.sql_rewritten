@@ -1,0 +1,54 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS hierarchy_level
+    FROM orders
+    WHERE o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    
+    UNION ALL
+
+    SELECT o.orderkey, o.custkey, o.orderdate, o.totalprice, oh.hierarchy_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+CustomerTotal AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY c.c_custkey, c.c_name
+),
+SupplierParts AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+RankedSuppliers AS (
+    SELECT s.s_name, sp.total_supply_cost, 
+           RANK() OVER (ORDER BY sp.total_supply_cost DESC) as rank
+    FROM supplier s
+    JOIN SupplierParts sp ON s.s_suppkey = sp.s_suppkey
+),
+FilteredOrders AS (
+    SELECT DISTINCT oh.o_orderkey, oh.o_orderdate, c.c_name, c.c_mktsegment
+    FROM OrderHierarchy oh
+    JOIN customer c ON oh.o_custkey = c.c_custkey
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > 5000
+)
+SELECT 
+    fo.o_orderkey,
+    fo.o_orderdate,
+    fo.c_name,
+    fo.c_mktsegment,
+    cs.total_spent,
+    rs.s_name,
+    rs.total_supply_cost,
+    (CASE 
+        WHEN rs.total_supply_cost IS NULL THEN 'No Supplier'
+        ELSE 'Supplied'
+    END) AS supply_status,
+    COUNT(*) OVER (PARTITION BY fo.c_mktsegment) AS market_segment_count
+FROM FilteredOrders fo
+LEFT JOIN CustomerTotal cs ON fo.c_custkey = cs.c_custkey
+LEFT JOIN RankedSuppliers rs ON rs.total_supply_cost > 10000
+ORDER BY fo.o_orderdate DESC, cs.total_spent DESC;

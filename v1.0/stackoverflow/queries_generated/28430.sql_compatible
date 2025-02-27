@@ -1,0 +1,67 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+),
+TagFrequency AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) ) AS Tag,
+        COUNT(*) AS Frequency
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+    GROUP BY 
+        Tag
+),
+MostFrequentTags AS (
+    SELECT 
+        Tag,
+        Frequency,
+        ROW_NUMBER() OVER (ORDER BY Frequency DESC) AS TagRank
+    FROM 
+        TagFrequency
+    WHERE 
+        Frequency > 5 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.ViewCount,
+        rp.Score,
+        mf.Tag
+    FROM 
+        RankedPosts rp
+    JOIN 
+        MostFrequentTags mf ON rp.Tags LIKE CONCAT('%', mf.Tag, '%')
+    WHERE 
+        rp.Rank = 1 
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.ViewCount,
+    tp.Score,
+    tp.Tag
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.ViewCount DESC
+LIMIT 10;

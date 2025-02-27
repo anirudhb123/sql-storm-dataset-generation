@@ -1,0 +1,59 @@
+WITH RECURSIVE nation_sales AS (
+    SELECT 
+        n.n_name AS nation,
+        SUM(o.o_totalprice) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(o.o_totalprice) DESC) AS rn
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        n.n_name
+),
+distinct_nations AS (
+    SELECT 
+        DISTINCT n.n_name AS nation_name,
+        COALESCE(n.r_comment, 'No comment') AS nation_comment
+    FROM 
+        nation n
+    WHERE 
+        n.n_regionkey IS NOT NULL
+    UNION ALL
+    SELECT 
+        'Unknown' AS nation_name,
+        'No specific nation' AS nation_comment
+    WHERE NOT EXISTS (SELECT 1 FROM nation)
+),
+average_sales AS (
+    SELECT 
+        AVG(total_sales) AS avg_sales 
+    FROM 
+        nation_sales 
+    WHERE 
+        total_sales IS NOT NULL
+)
+SELECT 
+    ns.nation,
+    ns.total_sales,
+    CASE 
+        WHEN ns.total_sales IS NULL THEN 'No sales'
+        WHEN ns.total_sales > (SELECT avg_sales FROM average_sales) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS sales_category,
+    dn.nation_comment
+FROM 
+    nation_sales ns
+FULL OUTER JOIN 
+    distinct_nations dn ON ns.nation = dn.nation_name
+WHERE 
+    ns.rn <= 10 OR dn.nation_name = 'Unknown'
+ORDER BY 
+    ns.total_sales DESC NULLS LAST, dn.nation_name;

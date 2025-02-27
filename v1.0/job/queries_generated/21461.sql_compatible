@@ -1,0 +1,51 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY b.nr_order DESC) AS role_rank,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS actor_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info b ON a.id = b.movie_id
+    GROUP BY 
+        a.title, a.production_year, a.id
+),
+ActorDetails AS (
+    SELECT 
+        aka.name AS actor_name,
+        a.id AS movie_id,
+        a.title AS movie_title,
+        r.role_rank,
+        r.actor_count,
+        CASE 
+            WHEN a.production_year IS NULL THEN 'Unknown Year' 
+            ELSE CAST(a.production_year AS CHAR)
+        END AS movie_year
+    FROM 
+        RankedMovies r
+    JOIN 
+        cast_info c ON r.id = c.movie_id
+    JOIN 
+        aka_name aka ON c.person_id = aka.person_id
+)
+SELECT 
+    ad.actor_name,
+    ad.movie_title,
+    ad.movie_year,
+    ad.role_rank,
+    ad.actor_count,
+    CASE 
+        WHEN ad.actor_count > 10 THEN 'Ensemble Cast' 
+        WHEN ad.role_rank = 1 THEN 'Lead' 
+        ELSE 'Supporting' 
+    END AS role_description
+FROM 
+    ActorDetails ad
+WHERE 
+    ad.movie_year <> 'Unknown Year'
+AND 
+    ad.actor_name IS NOT NULL
+ORDER BY 
+    ad.actor_count DESC, ad.role_rank ASC;

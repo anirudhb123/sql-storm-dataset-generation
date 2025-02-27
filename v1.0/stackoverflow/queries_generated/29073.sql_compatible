@@ -1,0 +1,90 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::text[])
+    GROUP BY 
+        T.TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS AnswersCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS AcceptedAnswersCount
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        P.PostTypeId = 2 
+    GROUP BY 
+        U.Id, U.DisplayName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 5
+),
+RecentActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS LastEditor,
+        P.LastEditDate,
+        P.Tags,
+        P.Body
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.LastEditorUserId = U.Id
+    WHERE 
+        P.LastEditDate >= CURRENT_TIMESTAMP - INTERVAL '30 days'
+),
+PostHistorySummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        PH.PostHistoryTypeId,
+        COUNT(*) AS ChangeCount
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12) 
+    GROUP BY 
+        P.Id, P.Title, PH.PostHistoryTypeId
+)
+SELECT 
+    TS.TagName,
+    TS.PostCount,
+    TS.TotalViews,
+    TS.AverageScore,
+    TU.DisplayName AS TopUser,
+    TU.AnswersCount AS UserAnswerCount,
+    TU.AcceptedAnswersCount AS UserAcceptedCount,
+    RA.PostId,
+    RA.Title AS RecentPostTitle,
+    RA.CreationDate AS PostCreationDate,
+    RA.LastEditor,
+    RA.LastEditDate,
+    PH.PostHistoryTypeId,
+    PH.ChangeCount AS HistoryChangeCount
+FROM 
+    TagStatistics TS
+LEFT JOIN 
+    TopUsers TU ON TU.AnswersCount = (
+        SELECT MAX(AnswersCount) FROM TopUsers
+    )
+LEFT JOIN 
+    RecentActivity RA ON RA.Tags ILIKE '%' || TS.TagName || '%'
+LEFT JOIN 
+    PostHistorySummary PH ON PH.PostId = RA.PostId
+ORDER BY 
+    TS.TotalViews DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,80 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.Id = r.ParentId
+),
+UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(P.Id) DESC) AS TagRank
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE CONCAT('%', T.TagName, '%')
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 0
+)
+SELECT 
+    U.DisplayName,
+    COALESCE(UP.VoteCount, 0) AS TotalVotes,
+    UP.UpVotes,
+    UP.DownVotes,
+    PH.PostId AS AnswerId,
+    PH.Title AS AnswerTitle,
+    PH.CreationDate AS AnswerCreationDate,
+    T.TagName AS PopularTag,
+    T.PostCount AS TagPostCount,
+    PH.Level
+FROM 
+    Users U
+LEFT JOIN 
+    UserVoteCounts UP ON U.Id = UP.UserId
+LEFT JOIN 
+    RecursivePostHierarchy PH ON PH.PostId IN (SELECT DISTINCT AcceptedAnswerId FROM Posts WHERE AcceptedAnswerId IS NOT NULL)
+LEFT JOIN 
+    TopTags T ON T.TagRank <= 5
+LEFT JOIN 
+    Posts P ON P.Id = PH.PostId
+WHERE 
+    U.Reputation > 100
+ORDER BY 
+    U.Reputation DESC, 
+    TotalVotes DESC, 
+    PH.CreationDate DESC;

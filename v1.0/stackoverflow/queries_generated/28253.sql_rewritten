@@ -1,0 +1,63 @@
+WITH TagFrequency AS (
+    SELECT
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, length(Tags) - 2), '><'))) AS Tag,
+        COUNT(*) AS Frequency
+    FROM Posts
+    WHERE PostTypeId = 1 
+    GROUP BY Tag
+),
+TopTags AS (
+    SELECT
+        Tag,
+        Frequency,
+        ROW_NUMBER() OVER (ORDER BY Frequency DESC) AS Rank
+    FROM TagFrequency
+    WHERE Frequency > 1
+),
+PostWithTopTags AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        tt.Tag,
+        tt.Frequency
+    FROM Posts p
+    JOIN TopTags tt ON tt.Tag = TRIM(UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')))
+)
+),
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT c.Id) AS CommentsMade,
+        SUM(V.CreationDate IS NOT NULL) AS VotesReceived
+    FROM Users u
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON c.UserId = u.Id
+    LEFT JOIN Votes v ON v.UserId = u.Id
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT
+        ue.UserId,
+        ue.DisplayName,
+        ue.QuestionsAsked,
+        ue.CommentsMade,
+        ue.VotesReceived,
+        RANK() OVER (ORDER BY ue.QuestionsAsked DESC) AS QuestionRank
+    FROM UserEngagement ue
+    WHERE ue.QuestionsAsked > 0
+)
+SELECT
+    pwt.PostId,
+    pwt.Title,
+    pwt.CreationDate,
+    tt.Tag AS MostFrequentTag,
+    tu.DisplayName AS TopUser,
+    tu.QuestionsAsked,
+    tu.CommentsMade
+FROM PostWithTopTags pwt
+JOIN TopUsers tu ON pwt.OwnerUserId = tu.UserId
+WHERE tu.QuestionRank <= 10 
+ORDER BY pwt.CreationDate DESC, tu.VotesReceived DESC;

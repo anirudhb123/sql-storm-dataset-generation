@@ -1,0 +1,52 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_sales_price) AS total_sales, 
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+MaxSales AS (
+    SELECT 
+        ws_item_sk, 
+        MAX(total_sales) AS max_sales
+    FROM RankedSales
+    WHERE sales_rank = 1
+    GROUP BY ws_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        COALESCE(sr_returned_date_sk, wr_returned_date_sk) AS return_date,
+        COALESCE(CAST(sr_item_sk AS CHAR), CAST(wr_item_sk AS CHAR)) AS item_sk,
+        SUM(COALESCE(sr_return_quantity, wr_return_quantity, 0)) AS total_returns
+    FROM store_returns sr
+    FULL OUTER JOIN web_returns wr ON sr_item_sk = wr_item_sk
+    GROUP BY return_date, item_sk
+),
+SalesAnalysis AS (
+    SELECT 
+        ws.item_sk,
+        COALESCE(r.total_sales, 0) AS total_sales,
+        COALESCE(c.total_returns, 0) AS total_returns,
+        CASE 
+            WHEN COALESCE(c.total_returns, 0) = 0 THEN NULL
+            ELSE (COALESCE(r.total_sales, 0) / COALESCE(c.total_returns, 1)) 
+        END AS sales_to_return_ratio
+    FROM MaxSales m
+    LEFT JOIN RankedSales r ON m.ws_item_sk = r.ws_item_sk
+    LEFT JOIN CustomerReturns c ON r.ws_item_sk = c.item_sk
+)
+SELECT 
+    sa.*,
+    CASE 
+        WHEN sa.sales_to_return_ratio IS NULL THEN 'No Returns'
+        WHEN sa.sales_to_return_ratio > 10 THEN 'High Sales Efficiency'
+        WHEN sa.sales_to_return_ratio BETWEEN 5 AND 10 THEN 'Moderate Sales Efficiency'
+        ELSE 'Low Sales Efficiency'
+    END AS efficiency_category
+FROM SalesAnalysis sa
+WHERE sa.total_sales > (SELECT AVG(total_sales) FROM RankedSales)
+ORDER BY sa.total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

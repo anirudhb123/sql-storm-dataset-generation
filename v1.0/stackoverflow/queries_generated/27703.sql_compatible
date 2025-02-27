@@ -1,0 +1,60 @@
+
+WITH PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS Tag
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+TaggedPosts AS (
+    SELECT 
+        t.Tag,
+        COUNT(DISTINCT pt.PostId) AS PostCount,
+        AVG(ur.Reputation) AS AvgReputation,
+        SUM(ur.TotalPosts) AS TotalPostCount,
+        SUM(ur.TotalBadges) AS TotalBadgeCount,
+        SUM(ur.GoldBadges) AS TotalGoldBadges,
+        SUM(ur.SilverBadges) AS TotalSilverBadges,
+        SUM(ur.BronzeBadges) AS TotalBronzeBadges
+    FROM 
+        PostTags t
+    JOIN 
+        UserReputation ur ON t.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = ur.UserId)
+    GROUP BY 
+        t.Tag
+)
+SELECT 
+    Tag,
+    PostCount,
+    AvgReputation,
+    TotalPostCount,
+    TotalBadgeCount,
+    TotalGoldBadges,
+    TotalSilverBadges,
+    TotalBronzeBadges,
+    CAST(PostCount AS FLOAT) / NULLIF(TotalPostCount, 0) * 100 AS PostCoveragePercentage
+FROM 
+    TaggedPosts
+ORDER BY 
+    PostCount DESC
+LIMIT 10;

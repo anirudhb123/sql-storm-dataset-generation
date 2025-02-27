@@ -1,0 +1,88 @@
+WITH RecursivePostHistory AS (
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.Comment,
+        1 AS Depth
+    FROM
+        PostHistory ph
+    WHERE
+        ph.PostHistoryTypeId IN (10, 11)  
+
+    UNION ALL
+
+    SELECT
+        ph.PostId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.Comment,
+        r.Depth + 1
+    FROM
+        PostHistory ph
+    INNER JOIN
+        RecursivePostHistory r ON ph.PostId = r.PostId
+    WHERE
+        r.Depth < 5  
+),
+
+UserVoteSummary AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM
+        Users u
+    LEFT JOIN
+        Votes v ON u.Id = v.UserId
+    GROUP BY
+        u.Id, u.DisplayName
+),
+
+PostStats AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY
+        p.Id, p.Title, p.ViewCount, p.AnswerCount
+)
+
+SELECT
+    p.Title,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.TotalBounty,
+    u.DisplayName AS TopVoterName,
+    us.UpVotes,
+    us.DownVotes,
+    us.TotalVotes,
+    r.Depth AS CloseEventDepth
+FROM
+    Posts p
+JOIN
+    PostStats ps ON p.Id = ps.Id
+LEFT JOIN
+    UserVoteSummary us ON us.UserId = (SELECT TOP 1 v.UserId
+                                        FROM Votes v
+                                        WHERE v.PostId = p.Id
+                                        ORDER BY v.CreationDate DESC)
+LEFT JOIN
+    RecursivePostHistory r ON r.PostId = p.Id
+WHERE
+    ps.PopularityRank <= 10  
+ORDER BY
+    ps.ViewCount DESC;

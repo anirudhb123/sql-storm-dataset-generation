@@ -1,0 +1,35 @@
+
+WITH RECURSIVE SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE ps.ps_availqty > 0
+),
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_custkey, c.c_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATEADD(month, -3, '1998-10-01')
+)
+SELECT rp.s_name AS Supplier_Name, p.p_name AS Part_Name, SUM(rp.ps_availqty) AS Total_Avail_Qty,
+       r.total_spent AS Customer_Spending, 
+       ro.o_orderdate AS Recent_Order_Date, ro.c_name AS Recent_Customer_Name
+FROM SupplierParts rp
+JOIN HighValueCustomers r ON r.c_custkey = (SELECT c.c_custkey
+                                             FROM customer c
+                                             ORDER BY c.c_acctbal DESC
+                                             LIMIT 1)
+JOIN RecentOrders ro ON ro.o_custkey = rp.s_suppkey
+JOIN part p ON rp.ps_partkey = p.p_partkey
+WHERE rp.ps_supplycost < 100.00
+GROUP BY rp.s_name, p.p_name, r.total_spent, ro.o_orderdate, ro.c_name
+ORDER BY Total_Avail_Qty DESC, r.total_spent DESC;

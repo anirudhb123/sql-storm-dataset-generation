@@ -1,0 +1,92 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, GETDATE())  
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.Score
+),
+FilterPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerUserId,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank = 1 
+        AND rp.CommentCount > 5
+),
+PostHistoryWithVoteCounts AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(v.Id) AS VoteCount,
+        ph.CreationDate AS HistoryCreationDate
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId AND v.CreationDate > ph.CreationDate
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 35, 36)  
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate
+),
+FinalResults AS (
+    SELECT 
+        fp.PostId AS FilteredPostId,
+        fp.Title AS FilteredTitle,
+        fp.OwnerUserId AS FilteredOwnerUserId,
+        fp.CreationDate AS FilteredCreationDate,
+        fp.Score AS FilteredScore,
+        p.VoteCount AS AssociatedVoteCount,
+        CASE 
+            WHEN p.VoteCount IS NULL THEN 'No Votes'
+            ELSE CAST(p.VoteCount AS VARCHAR)
+        END AS VotesReport,
+        ph.CloseReason 
+    FROM 
+        FilterPosts fp
+    LEFT JOIN 
+        PostHistoryWithVoteCounts p ON fp.PostId = p.PostId
+    LEFT JOIN 
+        PostHistory ph ON fp.PostId = ph.PostId AND ph.PostHistoryTypeId = 10  
+)
+
+SELECT 
+    fr.FilteredPostId,
+    fr.FilteredTitle,
+    fr.FilteredOwnerUserId,
+    fr.FilteredCreationDate,
+    fr.FilteredScore,
+    COALESCE(fr.VotesReport, 'No Votes') AS TotalVotes,
+    CASE 
+        WHEN fr.CloseReason IS NOT NULL THEN 'Closed due to: ' || COALESCE((SELECT Name FROM CloseReasonTypes WHERE Id = fr.CloseReason), 'Unknown Reason')
+        ELSE 'Not Closed'
+    END AS ClosureStatus
+FROM 
+    FinalResults fr
+WHERE
+    fr.FilteredScore >= (
+        SELECT 
+            AVG(Score) 
+        FROM 
+            Posts 
+        WHERE 
+            CreationDate >= DATEADD(month, -6, GETDATE())
+    )
+ORDER BY 
+    fr.FilteredCreationDate DESC;

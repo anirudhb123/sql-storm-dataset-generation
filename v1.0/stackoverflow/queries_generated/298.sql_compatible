@@ -1,0 +1,85 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(v.VoteCount, 0)) AS TotalVotes,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM 
+            Votes
+        GROUP BY 
+            PostId
+    ) v ON EXISTS (
+        SELECT 1 FROM Posts p WHERE p.OwnerUserId = u.Id AND p.Id = v.PostId
+    )
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(p.Id) > 10
+),
+TagPostStats AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        AVG(p.Score) AS AverageScore,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(p.Id) AS TotalPosts
+    FROM 
+        Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.Id, t.TagName
+),
+UserStats AS (
+    SELECT 
+        ur.UserId, 
+        ur.DisplayName, 
+        ur.Reputation, 
+        ur.PostCount, 
+        ur.TotalVotes,
+        pt.TagName,
+        pt.TotalPosts,
+        pt.AverageScore,
+        pt.TotalViews
+    FROM 
+        UserReputation ur
+    LEFT JOIN PopularTags pt ON ur.PostCount > 0
+    LEFT JOIN TagPostStats ts ON pt.TagName = ts.TagName
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.TotalVotes,
+    us.TagName,
+    us.TotalPosts,
+    us.AverageScore,
+    us.TotalViews
+FROM 
+    UserStats us
+WHERE 
+    us.ReputationRank <= 50
+ORDER BY 
+    us.Reputation DESC, 
+    us.PostCount DESC;

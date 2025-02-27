@@ -1,0 +1,49 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id
+),
+TopUsers AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY Reputation DESC, TotalScore DESC) AS ReputationRank,
+        DENSE_RANK() OVER (ORDER BY TotalViews DESC, TotalScore DESC) AS ViewsRank
+    FROM UserReputation
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS OwnerDisplayName,
+        P.ViewCount,
+        P.Score,
+        P.Tags
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+)
+SELECT 
+    TU.ReputationRank,
+    TU.DisplayName,
+    TU.Reputation,
+    TU.PostCount,
+    TU.TotalScore,
+    TU.TotalViews,
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    RP.Score,
+    RP.Tags
+FROM TopUsers TU
+JOIN RecentPosts RP ON TU.UserId = RP.OwnerUserId
+WHERE TU.ReputationRank <= 10 OR TU.ViewsRank <= 10
+ORDER BY TU.ReputationRank, RP.CreationDate DESC;

@@ -1,0 +1,63 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(P.ViewCount) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE U.Reputation > 0
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        BadgeCount,
+        Upvotes,
+        Downvotes,
+        TotalViews,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+        ROW_NUMBER() OVER (PARTITION BY (CASE WHEN Reputation < 100 THEN 'Low' WHEN Reputation < 1000 THEN 'Medium' ELSE 'High' END) ORDER BY TotalViews DESC) AS ViewRank
+    FROM UserStats
+),
+UserRankings AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN ReputationRank <= 10 THEN 'Top Contributors'
+            WHEN ReputationRank <= 50 THEN 'Moderate Contributors'
+            ELSE 'New Contributors'
+        END AS ContributorLevel
+    FROM TopUsers
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    COALESCE(U.CommentCount, 0) AS TotalComments,
+    U.BadgeCount,
+    U.Upvotes - U.Downvotes AS NetVotes,
+    U.TotalViews,
+    U.ContributorLevel,
+    P.Title,
+    P.Score,
+    P.ViewCount
+FROM UserRankings U
+LEFT JOIN Posts P ON U.UserId = P.OwnerUserId AND P.PostTypeId = 1
+WHERE U.ContributorLevel = 'Top Contributors'
+ORDER BY U.TotalViews DESC, U.Reputation DESC
+LIMIT 10;
+
+-- Fetching the most viewed questions made by top contributors

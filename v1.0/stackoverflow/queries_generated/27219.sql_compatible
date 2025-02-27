@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS RankByViewCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.AnswerCount DESC) AS RankByAnswerCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= DATEADD(YEAR, -5, CURRENT_TIMESTAMP) 
+),
+FrequentTags AS (
+    SELECT 
+        unnest(string_to_array(tags, '|')) AS TagName,
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts
+    GROUP BY 
+        unnest(string_to_array(tags, '|'))
+    ORDER BY 
+        UsageCount DESC
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN b.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.AnswerCount,
+    ft.TagName,
+    ft.UsageCount,
+    ue.UserId,
+    ue.CommentCount,
+    ue.VoteCount,
+    ue.BadgeCount,
+    CASE 
+        WHEN rp.RankByViewCount = 1 THEN 'Top Viewed'
+        WHEN rp.RankByAnswerCount = 1 THEN 'Top Answered'
+        ELSE 'Regular Post' 
+    END AS PostRating
+FROM 
+    RankedPosts rp
+JOIN 
+    FrequentTags ft ON POSITION(ft.TagName IN rp.Body) > 0
+JOIN 
+    UserEngagement ue ON ue.UserId = rp.OwnerUserId
+WHERE 
+    ue.CommentCount > 10 
+ORDER BY 
+    rp.ViewCount DESC, 
+    rp.AnswerCount DESC;

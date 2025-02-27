@@ -1,0 +1,30 @@
+
+WITH RepeatedWords AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_comment,
+        REGEXP_REPLACE(p.p_comment, '[^A-Za-z]+', ' ') AS CleanedComment,
+        ARRAY_AGG(LOWER(SUBSTRING(CleanedComment FROM '[A-Za-z]+')) ORDER BY LOWER(SUBSTRING(CleanedComment FROM '[A-Za-z]+')) DESC) AS WordList
+    FROM part p
+    GROUP BY p.p_partkey, p.p_name, p.p_comment
+    HAVING COUNT(DISTINCT LOWER(SUBSTRING(ARRAY_TO_STRING(WordList, ' '), '[A-Za-z]+'))) > 1
+),
+WordCount AS (
+    SELECT 
+        p_partkey, 
+        COUNT(DISTINCT LOWER(word)) AS UniqueWordCount
+    FROM RepeatedWords, UNNEST(STRING_TO_ARRAY(CleanedComment, ' ')) AS word
+    GROUP BY p_partkey
+)
+SELECT 
+    r.r_name,
+    SUM(wc.UniqueWordCount) AS TotalUniqueWords
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN WordCount wc ON wc.p_partkey = l.l_partkey
+GROUP BY r.r_name
+ORDER BY TotalUniqueWords DESC;

@@ -1,0 +1,72 @@
+WITH RecursiveQuestionCTE AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.AcceptedAnswerId,
+        COALESCE((SELECT COUNT(*) FROM Posts a WHERE a.ParentId = p.Id), 0) AS AnswerCount
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        a.Id AS QuestionId,
+        a.Title,
+        a.CreationDate,
+        a.ViewCount,
+        a.Score,
+        a.OwnerUserId,
+        a.AcceptedAnswerId,
+        COALESCE((SELECT COUNT(*) FROM Posts b WHERE b.ParentId = a.Id), 0) AS AnswerCount
+    FROM Posts a
+    JOIN RecursiveQuestionCTE rq ON rq.QuestionId = a.ParentId
+    WHERE a.PostTypeId = 2 
+),
+RecentUsers AS (
+    SELECT 
+        Id,
+        DisplayName,
+        Reputation,
+        CreationDate,
+        RANK() OVER (ORDER BY CreationDate DESC) AS UserRank
+    FROM Users
+    WHERE LastAccessDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS PostCount
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    rqc.QuestionId,
+    rqc.Title AS QuestionTitle,
+    rqc.CreationDate AS QuestionCreationDate,
+    rqc.ViewCount AS QuestionViewCount,
+    rqc.Score AS QuestionScore,
+    CASE 
+        WHEN rqc.AcceptedAnswerId IS NOT NULL THEN 
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rqc.AcceptedAnswerId AND v.VoteTypeId = 2) 
+        ELSE 
+            0 
+    END AS AcceptedAnswerUpvotes,
+    u.DisplayName AS QuestionOwner,
+    u.Reputation AS OwnerReputation,
+    tt.TagName AS TopTag
+FROM RecursiveQuestionCTE rqc
+LEFT JOIN Users u ON rqc.OwnerUserId = u.Id
+CROSS JOIN TopTags tt
+WHERE rqc.AnswerCount > 0
+AND rqc.ViewCount > 100
+AND u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+AND tt.TagName IN (
+    SELECT unnest(string_to_array(rqc.Tags, '><')) 
+) 
+ORDER BY rqc.ViewCount DESC, rqc.Score DESC
+LIMIT 10;

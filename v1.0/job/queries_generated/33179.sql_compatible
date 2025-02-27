@@ -1,0 +1,86 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_movie_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        me.id AS movie_id,
+        me.title,
+        me.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM
+        aka_title me
+    JOIN
+        movie_hierarchy mh ON me.episode_of_id = mh.movie_id
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        COUNT(CASE WHEN ci.person_role_id IS NOT NULL THEN 1 END) AS roles_assigned
+    FROM
+        cast_info ci
+    GROUP BY
+        ci.movie_id
+),
+title_names AS (
+    SELECT 
+        ak.name AS aka_name,
+        ak.movie_id,
+        COUNT(DISTINCT ak.person_id) AS name_count
+    FROM
+        aka_name ak
+    JOIN
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY
+        ak.name, ak.movie_id
+),
+highlight_movies AS (
+    SELECT 
+        th.movie_id,
+        th.title,
+        th.production_year,
+        COALESCE(cs.total_cast, 0) AS total_cast,
+        COALESCE(cs.roles_assigned, 0) AS roles_assigned,
+        tn.aka_name,
+        tn.name_count
+    FROM 
+        movie_hierarchy th
+    LEFT JOIN 
+        cast_summary cs ON th.movie_id = cs.movie_id
+    LEFT JOIN 
+        title_names tn ON th.movie_id = tn.movie_id
+    WHERE 
+        th.level = 1 
+)
+SELECT 
+    hm.title AS movie_title,
+    hm.production_year,
+    hm.total_cast,
+    hm.roles_assigned,
+    hm.aka_name,
+    hm.name_count,
+    COUNT(DISTINCT mc.company_id) AS production_companies,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names
+FROM 
+    highlight_movies hm
+LEFT JOIN 
+    movie_companies mc ON hm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+GROUP BY 
+    hm.title, hm.production_year, hm.total_cast, hm.roles_assigned, hm.aka_name, hm.name_count
+ORDER BY 
+    hm.production_year DESC, hm.total_cast DESC
+LIMIT 10;

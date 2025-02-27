@@ -1,0 +1,62 @@
+WITH UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS TotalUpvotedPosts,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY p.OwnerUserId
+),
+RecentlyActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        RANK() OVER (ORDER BY u.LastAccessDate DESC) AS ActivityRank
+    FROM Users u
+    WHERE u.LastAccessDate > NOW() - INTERVAL '30 days'
+),
+Combined AS (
+    SELECT 
+        u.DisplayName AS UserName,
+        COALESCE(ps.TotalPosts, 0) AS PostCount,
+        COALESCE(ps.TotalUpvotedPosts, 0) AS UpvotedPostCount,
+        COALESCE(bs.TotalBadges, 0) AS BadgeCount,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadges,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadges,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadges,
+        ps.AvgViewCount,
+        ra.ActivityRank
+    FROM Users u
+    LEFT JOIN UserBadgeSummary bs ON u.Id = bs.UserId
+    LEFT JOIN PostStats ps ON u.Id = ps.OwnerUserId
+    LEFT JOIN RecentlyActiveUsers ra ON u.Id = ra.UserId
+    WHERE bs.TotalBadges IS NOT NULL OR ra.ActivityRank IS NOT NULL
+)
+SELECT 
+    c.UserName,
+    c.PostCount,
+    c.UpvotedPostCount,
+    c.BadgeCount,
+    c.GoldBadges,
+    c.SilverBadges,
+    c.BronzeBadges,
+    ROUND(c.AvgViewCount, 2) AS AverageViews,
+    COALESCE(r.ActivityRank, 'N/A') AS RecentActivityRank
+FROM Combined c
+LEFT JOIN RecentlyActiveUsers r ON c.UserName = r.DisplayName
+ORDER BY c.DayCreated DESC NULLS LAST, c.BadgeCount DESC, c.PostCount DESC
+FETCH FIRST 10 ROWS ONLY;

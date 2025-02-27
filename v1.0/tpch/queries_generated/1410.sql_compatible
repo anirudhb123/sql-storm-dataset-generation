@@ -1,0 +1,55 @@
+
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS rank
+    FROM
+        supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name, s.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM
+        customer c
+    WHERE
+        c.c_acctbal > 50000
+),
+CompletedOrders AS (
+    SELECT
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        o.o_orderstatus
+    FROM
+        orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderstatus = 'F'
+    GROUP BY
+        o.o_orderkey, o.o_orderstatus
+)
+SELECT
+    r.s_name AS supplier_name,
+    r.rank AS supplier_rank,
+    c.c_name AS customer_name,
+    c.c_acctbal AS customer_balance,
+    COALESCE(o.total_line_value, 0) AS total_order_value,
+    o.line_count AS number_of_items,
+    CASE WHEN o.total_line_value IS NULL THEN 'No Orders' ELSE 'Has Orders' END AS order_status
+FROM
+    RankedSuppliers r
+FULL OUTER JOIN HighValueCustomers c ON r.s_suppkey = c.c_custkey
+LEFT JOIN CompletedOrders o ON c.c_custkey = o.o_orderkey
+WHERE
+    r.rank <= 3 OR c.cust_rank <= 5
+ORDER BY
+    r.rank ASC NULLS LAST,
+    c.cust_rank ASC NULLS LAST;

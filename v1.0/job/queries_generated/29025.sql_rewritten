@@ -1,0 +1,50 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name, ', ') AS aka_names,
+        STRING_AGG(DISTINCT c.nm.name, ', ') AS character_names,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    LEFT JOIN 
+        cast_info cc ON cc.movie_id = t.id
+    LEFT JOIN 
+        char_name c ON cc.person_id = c.imdb_id
+    WHERE 
+        t.production_year > 2000
+    GROUP BY 
+        t.title, t.production_year
+),
+CompanyDetails AS (
+    SELECT 
+        m.movie_id, 
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_type_id) AS company_types_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name cn ON m.company_id = cn.id
+    JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.aka_names,
+    md.character_names,
+    md.cast_count,
+    cd.company_names,
+    cd.company_types_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyDetails cd ON md.movie_title = cd.movie_id
+WHERE 
+    md.cast_count > 5
+ORDER BY 
+    md.production_year DESC, md.cast_count DESC;

@@ -1,0 +1,56 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT BA.Id) AS TotalBadges,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId 
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId 
+    LEFT JOIN 
+        Badges BA ON U.Id = BA.UserId 
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId 
+    WHERE 
+        U.Reputation >= 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UA.*, 
+        RANK() OVER (ORDER BY UA.TotalPosts DESC, UA.Reputation DESC) AS PostRank,
+        ROW_NUMBER() OVER (PARTITION BY CASE WHEN UA.Reputation >= 10000 THEN 'Expert' ELSE 'Novice' END ORDER BY UA.TotalPosts DESC) AS ReputationCategoryRank
+    FROM 
+        UserActivity UA
+)
+SELECT 
+    RU.DisplayName,
+    RU.Reputation,
+    RU.TotalPosts,
+    RU.TotalComments,
+    RU.TotalBadges,
+    RU.TotalBounty,
+    RU.PostRank,
+    RU.ReputationCategoryRank,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS UserTags
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    Posts P ON RU.UserId = P.OwnerUserId
+LEFT JOIN 
+    UNNEST(string_to_array(P.Tags, ',')) AS TagName ON TRUE
+LEFT JOIN 
+    Tags T ON TRIM(TagName) = T.TagName
+WHERE 
+    RU.PostRank <= 10
+GROUP BY 
+    RU.DisplayName, RU.Reputation, RU.TotalPosts, RU.TotalComments, RU.TotalBadges, RU.TotalBounty, RU.PostRank, RU.ReputationCategoryRank
+ORDER BY 
+    RU.PostRank;

@@ -1,0 +1,102 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalBounty,
+        BadgeCount,
+        UserRank
+    FROM 
+        UserActivity
+    WHERE 
+        UserRank <= 10
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS UsageCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 5
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS Owner,
+        P.CreationDate,
+        P.Score,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(CM.Id) AS CommentsCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.Score DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    WHERE 
+        P.CreationDate > NOW() - INTERVAL '30 days'
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName AS Contributor,
+    U.Reputation,
+    T.TagName,
+    P.PostId,
+    P.Title,
+    P.Score,
+    P.UpVotes,
+    P.DownVotes,
+    P.CommentsCount
+FROM 
+    TopUsers U
+CROSS JOIN 
+    PopularTags T
+JOIN 
+    PostStats P ON U.UserId = P.Owner
+WHERE 
+    (P.Score > 10 OR P.CommentsCount > 5)
+    AND P.PostRank <= 3
+ORDER BY 
+    U.Reputation DESC, 
+    T.UsageCount DESC;
+  
+-- This query explores user activity over the past year, finding the top contributors
+-- with the most posts, accumulated bounties, and badges. Then, it identifies the most popular
+-- tags used within posts created in the last 30 days, ultimately reporting on the top posts
+-- associated with these contributors, filtered by score and comment counts.

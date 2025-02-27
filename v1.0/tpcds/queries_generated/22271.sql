@@ -1,0 +1,70 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_customer_sk) AS rn,
+        SUM(COALESCE(ss.ss_net_profit, 0) + COALESCE(ws.ws_net_profit, 0)) OVER (PARTITION BY c.c_customer_sk) AS total_profit
+    FROM 
+        customer c 
+        LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+        LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender
+),
+CustomerRewards AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN total_profit > 1000 THEN 'Gold'
+            WHEN total_profit BETWEEN 500 AND 1000 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS reward_level
+    FROM 
+        RankedCustomers c
+    WHERE 
+        rn = 1
+),
+ExcessReturns AS (
+    SELECT 
+        sr.returning_customer_sk,
+        SUM(cr_return_quantity) AS total_returned
+    FROM 
+        store_returns sr 
+        LEFT JOIN catalog_returns cr ON sr.sr_item_sk = cr.cr_item_sk
+    WHERE 
+        sr_returned_date_sk > 1000
+    GROUP BY 
+        sr.returning_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cr.reward_level,
+        COALESCE(er.total_returned, 0) AS excess_returns
+    FROM 
+        CustomerRewards cr 
+        JOIN customer c ON c.c_customer_sk = cr.c_customer_sk
+        LEFT JOIN ExcessReturns er ON c.c_customer_sk = er.returning_customer_sk
+)
+SELECT 
+    fr.c_customer_sk,
+    fr.c_first_name,
+    fr.c_last_name,
+    fr.reward_level,
+    CASE 
+        WHEN fr.excess_returns IS NULL THEN 'No Returns'
+        WHEN fr.excess_returns > 10 THEN 'High Return'
+        ELSE 'Normal Return'
+    END AS return_category
+FROM 
+    FinalReport fr
+WHERE 
+    fr.reward_level IN ('Gold', 'Silver')
+ORDER BY 
+    fr.reward_level DESC, fr.c_last_name, fr.c_first_name;

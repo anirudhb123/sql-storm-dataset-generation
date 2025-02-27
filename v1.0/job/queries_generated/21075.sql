@@ -1,0 +1,75 @@
+WITH RankedTitles AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.title) as title_rank,
+        COUNT(*) OVER (PARTITION BY a.production_year) as title_count
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(DISTINCT rt.role, ', ') AS roles,
+        COUNT(ci.person_id) AS num_cast_members
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id
+),
+
+MoviesWithCompData AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        CASE 
+            WHEN mc.company_type_id IS NOT NULL THEN
+                COALESCE(CAST(mc.note AS text), 'No Note Available')
+            ELSE 
+                'Independent'
+        END AS company_style
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+),
+
+FinalResults AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        cr.roles,
+        cr.num_cast_members,
+        mwcd.company_style,
+        CASE 
+            WHEN rt.title_count > 10
+            THEN 'Extensively Produced'
+            ELSE 'Limited Production'
+        END AS production_scope
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastRoles cr ON rt.title = cr.movie_id
+    LEFT JOIN 
+        MoviesWithCompData mwcd ON rt.title = mwcd.title
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN num_cast_members IS NULL THEN 'Unknown Cast'
+        ELSE 'Known Cast'
+    END AS cast_info,
+    CONCAT(title, ' (', production_year::text, ') - ', production_scope) AS movie_summary
+FROM 
+    FinalResults
+WHERE 
+    title_rank = 1 
+    AND (company_style IS NOT NULL OR production_year < 2000)
+ORDER BY 
+    production_year DESC, title ASC;

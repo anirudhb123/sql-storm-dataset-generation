@@ -1,0 +1,98 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        title.id AS movie_id, 
+        title.title, 
+        title.production_year, 
+        1 AS hierarchy_level
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id, 
+        m.title, 
+        m.production_year, 
+        mh.hierarchy_level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title m ON ml.linked_movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+name_aggregates AS (
+    SELECT 
+        aka.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        STRING_AGG(DISTINCT c.role_id::text, ', ') AS roles,
+        ROW_NUMBER() OVER (PARTITION BY aka.person_id ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS role_rank
+    FROM 
+        aka_name aka
+    JOIN 
+        cast_info ci ON aka.person_id = ci.person_id
+    JOIN 
+        role_type c ON ci.role_id = c.id
+    GROUP BY 
+        aka.id
+),
+keyword_exclusion AS (
+    SELECT 
+        mw.movie_id
+    FROM 
+        movie_keyword mw
+    JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    WHERE 
+        kw.keyword LIKE '%Action%'
+),
+full_movie_cast AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        na.name,
+        COUNT(ci.id) AS total_cast
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    JOIN 
+        name_aggregates na ON ci.person_id = na.aka_person_id
+    WHERE 
+        mh.movie_id NOT IN (SELECT movie_id FROM keyword_exclusion)
+    GROUP BY 
+        mh.movie_id, na.name
+)
+
+SELECT 
+    fmc.movie_id,
+    fmc.title,
+    fmc.production_year,
+    fmc.name,
+    fmc.total_cast,
+    CASE 
+        WHEN fmc.total_cast > 10 THEN 'Large Cast'
+        WHEN fmc.total_cast BETWEEN 5 AND 10 THEN 'Medium Cast'
+        WHEN fmc.total_cast < 5 THEN 'Small Cast'
+        ELSE 'No Cast'
+    END AS cast_size_category,
+    COALESCE(na.roles, 'No roles assigned') AS roles,
+    DENSE_RANK() OVER (PARTITION BY fmc.movie_id ORDER BY fmc.total_cast DESC) AS cast_ranking
+FROM 
+    full_movie_cast fmc
+LEFT JOIN 
+    name_aggregates na ON fmc.name = na.name
+ORDER BY 
+    fmc.production_year DESC, 
+    fmc.total_cast DESC;
+
+### Explanation:
+- The query begins with a recursive CTE (`movie_hierarchy`) to build a hierarchy of movies linked through the `movie_link` table.
+- A second CTE (`name_aggregates`) computes the count of distinct movies for each name and aggregates their roles.
+- A `keyword_exclusion` CTE selects movie IDs with the keyword 'Action' to filter them out later.
+- The main query (`full_movie_cast`) gathers movie information and associates cast members, avoiding movies with the excluded keyword.
+- It categorizes the casts based on their size using a `CASE` statement and ranks the results.
+- It returns a list of movies along with their details, cast size categorization, and roles or a default message.

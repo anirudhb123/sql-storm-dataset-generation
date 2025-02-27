@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        s_store_sk, 
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(ss_ticket_number) AS total_sales,
+        ROW_NUMBER() OVER (ORDER BY SUM(ss_net_profit) DESC) AS rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        s_store_sk
+), 
+AdjustedDemographics AS (
+    SELECT 
+        hd.hd_demo_sk, 
+        cb.ib_income_band_sk, 
+        cb.hd_buy_potential,
+        cb.hd_dep_count,
+        COALESCE(cb.hd_dep_count, 0) AS adjusted_dep_count
+    FROM 
+        household_demographics cb
+    LEFT JOIN 
+        income_band hd ON cb.hd_income_band_sk = hd.ib_income_band_sk
+), 
+CustomerReturns AS (
+    SELECT 
+        sr_store_sk, 
+        COUNT(DISTINCT sr_ticket_number) AS total_returns, 
+        SUM(sr_return_amt_inc_tax) AS total_returned
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_store_sk
+)
+SELECT 
+    sh.s_store_sk,
+    sh.total_profit,
+    ad.hd_demo_sk,
+    ad.hd_buy_potential,
+    cr.total_returns,
+    cr.total_returned,
+    CASE 
+        WHEN cr.total_returns = 0 THEN 0 
+        ELSE cr.total_returned / cr.total_returns 
+    END AS average_return_value
+FROM 
+    SalesHierarchy sh
+FULL OUTER JOIN 
+    CustomerReturns cr ON sh.s_store_sk = cr.sr_store_sk
+LEFT JOIN 
+    AdjustedDemographics ad ON ad.hd_demo_sk = sh.s_store_sk 
+WHERE 
+    sh.rank <= 5 OR cr.total_returns > 10 
+ORDER BY 
+    sh.total_profit DESC, 
+    average_return_value ASC
+LIMIT 10;

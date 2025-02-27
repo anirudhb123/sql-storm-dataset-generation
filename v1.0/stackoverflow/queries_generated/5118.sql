@@ -1,0 +1,75 @@
+WITH TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(C.Id) AS CommentCount,
+        COUNT(H.Id) AS EditCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        PostHistory H ON P.Id = H.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName AS TopUser,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    T.TagName AS PopularTag,
+    PS.Title AS PostTitle,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.EditCount
+FROM 
+    TopUsers U
+CROSS JOIN 
+    PopularTags T
+JOIN 
+    PostStats PS ON PS.PostId = (
+        SELECT Id FROM Posts WHERE OwnerUserId = U.UserId ORDER BY CreationDate DESC LIMIT 1
+    )
+ORDER BY 
+    U.Reputation DESC, T.PostCount DESC
+LIMIT 20;

@@ -1,0 +1,56 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_sales
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.sales_rank <= 10
+),
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_total_sales
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        TopOrders to ON l.l_orderkey = to.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    ss.s_suppkey,
+    ss.s_name,
+    ss.supplier_total_sales,
+    rn.r_name
+FROM 
+    SupplierSales ss
+JOIN 
+    nation n ON ss.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+JOIN 
+    region rn ON n.n_regionkey = rn.r_regionkey
+WHERE 
+    ss.supplier_total_sales > (SELECT AVG(supplier_total_sales) FROM SupplierSales)
+ORDER BY 
+    ss.supplier_total_sales DESC;

@@ -1,0 +1,84 @@
+
+WITH ranked_sales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) as rank
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk >= 20200101
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate,
+        cd.cd_dep_count,
+        ca.ca_city
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+top_items AS (
+    SELECT
+        item.i_item_sk,
+        item.i_item_id,
+        COALESCE(SUM(ws.ws_quantity), 0) AS total_sales_quantity,
+        COALESCE(AVG(ws.ws_sales_price), 0) AS avg_sales_price
+    FROM item
+    LEFT JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    GROUP BY item.i_item_sk, item.i_item_id
+    HAVING SUM(ws.ws_quantity) IS NOT NULL OR AVG(ws.ws_sales_price) > 0
+),
+sales_summary AS (
+    SELECT
+        ti.i_item_sk,
+        ti.i_item_id,
+        ti.total_sales_quantity,
+        ti.avg_sales_price,
+        CASE 
+            WHEN ti.total_sales_quantity > 100 THEN 'High Sales'
+            WHEN ti.total_sales_quantity BETWEEN 50 AND 100 THEN 'Moderate Sales'
+            ELSE 'Low Sales'
+        END AS sales_category
+    FROM top_items ti
+    WHERE EXISTS (
+        SELECT 1 FROM ranked_sales rs
+        WHERE ti.i_item_sk = rs.ws_item_sk AND rs.rank <= 5
+    )
+),
+result AS (
+    SELECT
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        ci.ca_city,
+        ss.i_item_id,
+        ss.total_sales_quantity,
+        ss.avg_sales_price,
+        ss.sales_category
+    FROM customer_info ci
+    JOIN sales_summary ss ON ci.c_customer_sk IN (
+        SELECT DISTINCT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_item_sk IN (
+            SELECT i.i_item_sk FROM item i WHERE i.i_item_sk = ss.i_item_id
+        )
+    )
+    WHERE ci.cd_gender = 'M' AND ci.cd_credit_rating IN ('Good', 'Excellent')
+)
+SELECT
+    r.c_customer_sk,
+    r.c_first_name,
+    r.c_last_name,
+    r.ca_city,
+    r.i_item_id,
+    r.total_sales_quantity,
+    r.avg_sales_price,
+    r.sales_category
+FROM result r
+ORDER BY r.total_sales_quantity DESC, r.avg_sales_price DESC
+LIMIT 50;
+

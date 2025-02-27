@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, CAST(NULL AS integer) AS parent_suppkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 3000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.s_suppkey AS parent_suppkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_acctbal BETWEEN sh.s_acctbal * 0.5 AND sh.s_acctbal * 1.5
+    WHERE s.s_suppkey <> sh.s_suppkey
+),
+filtered_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 150.00
+      AND ps.ps_availqty < 100
+),
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey, c.c_name
+),
+ranked_customers AS (
+    SELECT c.c_custkey, c.c_name, c.total_spent,
+           RANK() OVER (ORDER BY c.total_spent DESC) AS spend_rank
+    FROM customer_orders c
+)
+SELECT r.r_name, ns.n_name, sp.p_name, sp.p_retailprice, 
+       COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END), 0) AS returned_quantity,
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales
+FROM region r
+LEFT JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN supplier_hierarchy sh ON ns.n_nationkey = sh.n_nationkey
+LEFT JOIN filtered_parts sp ON sp.ps_supplycost = 
+    (SELECT MAX(ps2.ps_supplycost)
+     FROM partsupp ps2
+     WHERE ps2.ps_partkey = sp.p_partkey)
+LEFT JOIN lineitem l ON l.l_suppkey = sh.s_suppkey
+GROUP BY r.r_name, ns.n_name, sp.p_name, sp.p_retailprice
+HAVING COUNT(DISTINCT sh.s_suppkey) > 1
+ORDER BY total_sales DESC, returned_quantity ASC
+LIMIT 10;

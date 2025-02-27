@@ -1,0 +1,73 @@
+
+WITH RecursiveTagCTE AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        T.Count,
+        1 AS Level
+    FROM Tags T
+    WHERE T.Count > 1000  
+
+    UNION ALL
+
+    SELECT 
+        T.Id,
+        T.TagName,
+        T.Count,
+        R.Level + 1
+    FROM Tags T
+    INNER JOIN RecursiveTagCTE R ON T.Id = R.TagId
+    WHERE R.Level < 5  
+),
+UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        MIN(P.CreationDate) AS FirstPostDate,
+        MAX(P.CreationDate) AS LastPostDate,
+        DATEDIFF(CURRENT_DATE, MIN(P.CreationDate), MAX(P.CreationDate)) AS ActiveDays
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+PopularQuestions AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        P.OwnerUserId,
+        ROW_NUMBER() OVER (ORDER BY P.ViewCount DESC) AS Rank
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+),
+PostHistoryAggregates AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        COUNT(PH.Id) AS ChangeCount,
+        MAX(PH.CreationDate) AS LastChangeDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId, PH.PostHistoryTypeId
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    PT.Title AS PopularPostTitle,
+    PT.ViewCount AS PopularPostViewCount,
+    COALESCE(PH.LastChangeDate, 'No Changes') AS LastPostChange,
+    DATE_FORMAT(U.FirstPostDate, '%Y-%m-%d') AS FirstPost,
+    DATE_FORMAT(U.LastPostDate, '%Y-%m-%d') AS LastPost,
+    (SELECT COUNT(DISTINCT PostId) FROM PostLinks PL WHERE PL.RelatedPostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)) AS RelatedPostsCount,
+    T.TagName AS PopularTag
+FROM UserPostStats U
+JOIN PopularQuestions PT ON U.UserId = PT.OwnerUserId AND PT.Rank <= 10
+LEFT JOIN PostHistoryAggregates PH ON U.UserId = PH.PostId
+LEFT JOIN RecursiveTagCTE T ON T.TagId IN (SELECT CAST(unnest(string_to_array(P.Tags, ',')) AS INTEGER) FROM Posts P WHERE P.OwnerUserId = U.UserId)
+WHERE U.TotalPosts > 50  
+ORDER BY U.TotalPosts DESC, PT.ViewCount DESC;

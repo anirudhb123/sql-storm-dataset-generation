@@ -1,0 +1,70 @@
+WITH movie_data AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ak.imdb_index AS actor_index,
+        COUNT(DISTINCT mc.company_id) AS num_companies,
+        STRING_AGG(DISTINCT c.kind, ', ') AS company_types,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title mt
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        mt.production_year > 2000
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, ak.name, ak.imdb_index
+),
+
+movie_info AS (
+    SELECT 
+        md.movie_id,
+        md.title,
+        md.production_year,
+        md.actor_name,
+        md.actor_index,
+        mi.info AS movie_note
+    FROM 
+        movie_data md
+    LEFT JOIN 
+        movie_info mi ON md.movie_id = mi.movie_id
+    WHERE 
+        mi.note IS NOT NULL
+)
+
+SELECT 
+    mi.title,
+    mi.production_year,
+    mi.actor_name,
+    mi.actor_index,
+    COALESCE(si.num_companies, 0) AS num_companies,
+    COALESCE(si.company_types, 'None') AS company_types,
+    COALESCE(si.keywords, 'None') AS keywords,
+    mi.movie_note
+FROM 
+    movie_info mi
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        COUNT(DISTINCT company_id) AS num_companies,
+        STRING_AGG(DISTINCT company_types, ', ') AS company_types,
+        STRING_AGG(DISTINCT keywords, ', ') AS keywords
+    FROM 
+        movie_data
+    GROUP BY 
+        movie_id) si ON mi.movie_id = si.movie_id
+ORDER BY 
+    mi.production_year DESC, 
+    mi.title;

@@ -1,0 +1,62 @@
+
+WITH EffectiveIncome AS (
+    SELECT 
+        hd_demo_sk,
+        ib_income_band_sk,
+        CASE 
+            WHEN ib_lower_bound IS NOT NULL AND ib_upper_bound IS NOT NULL 
+            THEN (ib_lower_bound + ib_upper_bound) / 2 
+            ELSE NULL 
+        END AS avg_income
+    FROM household_demographics
+    LEFT JOIN income_band ON household_demographics.hd_income_band_sk = income_band.ib_income_band_sk
+),
+SalesData AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+    HAVING SUM(ws_quantity) > 0
+),
+StoreSalesData AS (
+    SELECT 
+        ss_item_sk,
+        AVG(ss_sales_price) AS avg_store_price,
+        SUM(ss_quantity) AS total_store_qty
+    FROM store_sales
+    GROUP BY ss_item_sk
+)
+SELECT 
+    sd.ws_item_sk,
+    sd.total_sales,
+    sd.total_net_paid,
+    COALESCE(sds.avg_store_price, 0) AS avg_store_price,
+    COALESCE(sds.total_store_qty, 0) AS total_store_qty,
+    ei.avg_income,
+    CASE 
+        WHEN sd.total_net_paid > 1000 THEN 'High Value'
+        WHEN sd.total_net_paid IS NULL THEN 'No Sales'
+        ELSE 'Regular Sales'
+    END AS sales_category
+FROM SalesData sd
+LEFT JOIN StoreSalesData sds ON sd.ws_item_sk = sds.ss_item_sk
+LEFT JOIN EffectiveIncome ei ON ei.hd_demo_sk = (
+    SELECT hd_demo_sk 
+    FROM customer 
+    WHERE c_customer_id = (
+        SELECT c_customer_id 
+        FROM customer 
+        WHERE c_customer_sk = (
+            SELECT ss_customer_sk 
+            FROM store_sales 
+            WHERE ss_item_sk = sd.ws_item_sk 
+            ORDER BY ss_net_paid DESC 
+            LIMIT 1
+        )
+    )
+)
+WHERE sd.sales_rank = 1
+ORDER BY sd.total_net_paid DESC, sd.total_sales DESC;

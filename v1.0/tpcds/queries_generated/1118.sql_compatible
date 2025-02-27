@@ -1,0 +1,67 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rn,
+        COALESCE(cd.cd_gender, 'Unknown') AS customer_gender,
+        COALESCE(c.c_first_name, 'Anonymous') AS customer_first_name
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+high_value_orders AS (
+    SELECT 
+        s.ws_order_number,
+        SUM(s.ws_net_paid) AS total_net_paid
+    FROM 
+        sales_summary s
+    WHERE 
+        s.rn = 1
+    GROUP BY 
+        s.ws_order_number
+    HAVING 
+        SUM(s.ws_net_paid) > 1000
+),
+item_summary AS (
+    SELECT 
+        i.i_item_sk,
+        COUNT(ws.ws_order_number) AS order_count,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        AVG(ws.ws_sales_price) AS avg_sales_price
+    FROM 
+        item i
+    JOIN 
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY 
+        i.i_item_sk
+),
+top_items AS (
+    SELECT 
+        is.i_item_sk,
+        is.total_quantity_sold,
+        is.avg_sales_price,
+        ROW_NUMBER() OVER (ORDER BY is.total_quantity_sold DESC) AS rn
+    FROM 
+        item_summary is
+)
+SELECT 
+    wo.ws_order_number,
+    wo.total_net_paid,
+    ti.total_quantity_sold,
+    ti.avg_sales_price,
+    CONCAT('Order ID: ', wo.ws_order_number, ' | Total: $', ROUND(wo.total_net_paid, 2)) AS order_details
+FROM 
+    high_value_orders wo
+JOIN 
+    top_items ti ON ti.i_item_sk IN (SELECT ws.ws_item_sk FROM web_sales ws WHERE ws.ws_order_number = wo.ws_order_number)
+WHERE 
+    ti.rn <= 10
+ORDER BY 
+    wo.total_net_paid DESC, ti.total_quantity_sold DESC;

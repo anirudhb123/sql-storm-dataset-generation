@@ -1,0 +1,64 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+top_orders AS (
+    SELECT * 
+    FROM ranked_orders 
+    WHERE price_rank <= 10
+),
+supplier_stats AS (
+    SELECT 
+        ps.ps_suppkey, 
+        SUM(l.l_quantity) AS total_quantity, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE ps.ps_availqty > 0 
+    GROUP BY ps.ps_suppkey
+),
+filtered_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ss.total_quantity, 
+        ss.total_revenue, 
+        ss.order_count
+    FROM supplier s
+    LEFT JOIN supplier_stats ss ON s.s_suppkey = ss.ps_suppkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2 
+        WHERE s2.s_comment IS NOT NULL AND s2.s_comment <> ''
+    )
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice, 
+    fs.s_name, 
+    fs.order_count,
+    COALESCE(fs.total_revenue, 0) AS adjusted_revenue,
+    COALESCE(fs.total_quantity, 'No Supply') AS supply_status
+FROM part p
+JOIN filtered_suppliers fs ON fs.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey = p.p_partkey
+)
+LEFT JOIN top_orders to ON EXISTS (
+    SELECT 1 FROM lineitem l WHERE l.l_orderkey = to.o_orderkey
+    AND l.l_partkey = p.p_partkey
+)
+WHERE p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100) 
+AND (p.p_comment LIKE '%fragile%' OR p.p_comment IS NULL)
+ORDER BY adjusted_revenue DESC, p.p_retailprice ASC;

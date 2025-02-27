@@ -1,0 +1,56 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation, CreationDate, DisplayName
+    FROM Users
+    WHERE Reputation > 1000
+    UNION ALL
+    SELECT u.Id, u.Reputation, u.CreationDate, u.DisplayName
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Reputation > ur.Reputation
+    WHERE u.Id <> ur.Id
+),
+TopPosts AS (
+    SELECT p.Id, p.Title, p.ViewCount,
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+),
+PostHistoryDetails AS (
+    SELECT ph.PostId, ph.CreationDate, p.Title, p.OwnerDisplayName, p.AcceptedAnswerId, 
+           ph.Comment, p.Score, 
+           COALESCE((
+               SELECT COUNT(*)
+               FROM Votes v
+               WHERE v.PostId = p.Id AND v.VoteTypeId = 2
+           ), 0) AS UpVoteCount
+    FROM PostHistory ph
+    JOIN Posts p ON p.Id = ph.PostId
+    WHERE ph.CreationDate BETWEEN (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 month') AND cast('2024-10-01 12:34:56' as timestamp)
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    T.PostCount,
+    COALESCE(PH.TotalEditCount, 0) AS TotalEditCount,
+    COALESCE(PH.TotalCloseCount, 0) AS TotalCloseCount,
+    T.ViewCount,
+    T.Title,
+    T.AcceptedAnswerId,
+    PH.Comment
+FROM UserReputation u
+LEFT JOIN (
+    SELECT p.OwnerUserId, COUNT(*) AS PostCount, MAX(p.ViewCount) AS ViewCount,
+           MAX(T.Title) AS Title, MAX(T.AcceptedAnswerId) AS AcceptedAnswerId
+    FROM TopPosts p
+    JOIN Posts T ON p.Id = T.Id 
+    GROUP BY p.OwnerUserId
+) T ON u.Id = T.OwnerUserId
+LEFT JOIN (
+    SELECT ph.UserId, COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS TotalCloseCount,
+           COUNT(CASE WHEN ph.PostHistoryTypeId NOT IN (10, 11) THEN 1 END) AS TotalEditCount
+    FROM PostHistory ph
+    GROUP BY ph.UserId
+) PH ON u.Id = PH.UserId
+WHERE u.Reputation > 1000
+ORDER BY u.Reputation DESC, TotalEditCount DESC
+LIMIT 100;

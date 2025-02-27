@@ -1,0 +1,60 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierDetails AS (
+    SELECT 
+        ns.n_name AS supplier_nation,
+        p.p_name AS part_name,
+        rs.s_name AS supplier_name,
+        hvo.o_orderkey,
+        hvo.order_value
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        part p ON rs.s_suppkey = p.p_partkey
+    LEFT JOIN 
+        HighValueOrders hvo ON rs.s_suppkey = hvo.o_orderkey
+    JOIN 
+        nation ns ON s_n_nationkey = ns.n_nationkey
+    WHERE 
+        rs.rank = 1
+)
+
+SELECT 
+    sd.part_name,
+    sd.supplier_name,
+    sd.supplier_nation,
+    COALESCE(sd.order_value, 0) AS order_value,
+    CASE 
+        WHEN sd.order_value IS NULL THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM 
+    SupplierDetails sd
+ORDER BY 
+    sd.part_name, 
+    sd.supplier_name;

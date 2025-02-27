@@ -1,0 +1,70 @@
+WITH RECURSIVE region_hierarchy AS (
+    SELECT r_regionkey, r_name, NULL::integer AS parent_regionkey
+    FROM region
+    WHERE r_name = 'AFRICA'
+    UNION ALL
+    SELECT r.regionkey, r.r_name, rh.r_regionkey
+    FROM region r
+    JOIN region_hierarchy rh ON r.r_regionkey = rh.parent_regionkey
+),
+ranked_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.n_nationkey
+),
+order_metrics AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_orderkey) AS line_item_count,
+        AVG(l.l_discount) AS avg_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+filtered_orders AS (
+    SELECT 
+        om.o_orderkey,
+        om.o_orderdate,
+        om.net_revenue,
+        om.line_item_count,
+        om.avg_discount,
+        CASE 
+            WHEN om.line_item_count > 10 THEN 'High Volume'
+            ELSE 'Regular Volume' 
+        END AS volume_category
+    FROM order_metrics om
+    WHERE om.net_revenue > 10000
+),
+final_selection AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        fo.o_orderkey,
+        fo.o_orderdate,
+        fo.net_revenue,
+        fo.line_item_count,
+        fo.avg_discount,
+        rs.s_name,
+        rs.total_supply_cost
+    FROM customer c
+    LEFT JOIN filtered_orders fo ON c.c_custkey = fo.o_orderkey
+    LEFT JOIN ranked_suppliers rs ON c.c_nationkey = rs.s_suppkey AND rs.rn = 1
+    WHERE c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT fs.c_custkey) AS customer_count,
+    AVG(fs.net_revenue) AS average_revenue,
+    SUM(fs.total_supply_cost) AS total_supply_cost
+FROM final_selection fs
+JOIN region_hierarchy r ON fs.c_nationkey = r.r_regionkey
+GROUP BY r.r_name
+ORDER BY total_supply_cost DESC;

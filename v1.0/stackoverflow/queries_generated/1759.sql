@@ -1,0 +1,73 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(VoteTypeId = 2) AS TotalUpVotes,
+        SUM(VoteTypeId = 3) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+RankedUsers AS (
+    SELECT 
+        UA.*,
+        DENSE_RANK() OVER (ORDER BY UA.TotalPosts DESC, UA.TotalUpVotes DESC) AS UserRank
+    FROM 
+        UserActivity UA
+    WHERE 
+        UA.Reputation > 1000
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(PH.Comment, 'No history available') AS PostHistoryComment,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 6)  -- Edit Title, Edit Tags
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, PH.Comment
+)
+SELECT 
+    RU.UserId,
+    RU.DisplayName,
+    RU.TotalPosts,
+    RU.TotalComments,
+    RU.TotalUpVotes,
+    RU.TotalDownVotes,
+    RU.UserRank,
+    PS.Title AS RecentPostTitle,
+    PS.CreationDate AS PostCreationDate,
+    PS.PostHistoryComment,
+    PS.CommentCount
+FROM 
+    RankedUsers RU
+LEFT JOIN 
+    PostStats PS ON PS.CommentCount = (
+        SELECT 
+            MAX(CommentCount) 
+        FROM 
+            PostStats 
+        WHERE 
+            PostCreationDate <= CURRENT_DATE - INTERVAL '30 days'
+    )
+ORDER BY 
+    RU.UserRank;

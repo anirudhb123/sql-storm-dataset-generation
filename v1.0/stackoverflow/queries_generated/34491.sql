@@ -1,0 +1,69 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+
+    SELECT 
+        p1.Id AS PostId,
+        p1.ParentId,
+        p1.Title,
+        ph.Level + 1
+    FROM 
+        Posts p1
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p1.ParentId = ph.PostId
+),
+AggregatedPostData AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpVotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN ph.Level = 1 THEN 1 ELSE 0 END) AS IsTopLevel
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON c.PostId = ph.PostId
+    LEFT JOIN 
+        Votes v ON v.PostId = ph.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ph.PostId)
+    GROUP BY 
+        ph.PostId, ph.Title
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(pa.CommentCount, 0) AS TotalComments,
+    COALESCE(pa.UpVotes, 0) AS UpVoteTotal,
+    COALESCE(pa.DownVotes, 0) AS DownVoteTotal,
+    COALESCE(pa.BadgeCount, 0) AS UserBadges,
+    CASE 
+        WHEN COALESCE(pa.IsTopLevel, 0) = 1 THEN 'Top Level Post' 
+        ELSE 'Child Post' 
+    END AS PostLevel,
+    p.CreationDate,
+    p.LastActivityDate,
+    CASE 
+        WHEN p.ClosedDate IS NOT NULL THEN 'Closed' 
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    Posts p
+LEFT JOIN 
+    AggregatedPostData pa ON p.Id = pa.PostId
+WHERE 
+    (p.ViewCount > 100 OR p.Score > 10)
+    AND (p.OwnerUserId IS NOT NULL OR p.OwnerUserId <> -1)
+ORDER BY 
+    UpVoteTotal DESC, TotalComments DESC;

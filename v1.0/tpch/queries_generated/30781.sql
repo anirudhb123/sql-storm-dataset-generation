@@ -1,0 +1,51 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT p.s_suppkey, p.s_name, p.s_nationkey, sh.level + 1
+    FROM supplier p
+    JOIN SupplierHierarchy sh ON p.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderStats AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+           MAX(li.l_shipdate) AS last_ship_date,
+           MIN(li.l_shipdate) AS first_ship_date,
+           COUNT(li.l_partkey) AS total_items
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS customer_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN OrderStats os ON o.o_orderkey = os.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING customer_revenue > 10000
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FinalReport AS (
+    SELECT th.c_name as customer_name, COUNT(DISTINCT li.l_orderkey) AS total_orders,
+           SUM(li.l_extendedprice) AS total_value,
+           MAX(th.last_ship_date) AS last_order_date,
+           COUNT(DISTINCT sh.s_suppkey) AS suppliers_involved
+    FROM TopCustomers th
+    LEFT JOIN lineitem li ON th.c_custkey = li.l_orderkey
+    LEFT JOIN SupplierHierarchy sh ON li.l_suppkey = sh.s_suppkey
+    GROUP BY th.c_name
+)
+SELECT fr.customer_name, fr.total_orders, fr.total_value, fr.last_order_date, 
+       CASE 
+           WHEN fr.suppliers_involved IS NULL THEN 'No Suppliers'
+           ELSE CAST(fr.suppliers_involved AS VARCHAR)
+       END AS suppliers_involved
+FROM FinalReport fr
+WHERE fr.total_value > (SELECT AVG(total_value) FROM FinalReport)
+ORDER BY fr.total_value DESC;

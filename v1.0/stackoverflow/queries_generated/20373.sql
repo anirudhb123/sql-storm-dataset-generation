@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RecentRank,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+, PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    JOIN 
+        PostLinks pl ON pl.PostId = p.Id
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(rp.Score, 0) AS Score,
+    COALESCE(rp.ViewCount, 0) AS ViewCount,
+    pt.TagName,
+    CASE 
+        WHEN rp.RecentRank = 1 THEN 'Latest'
+        WHEN rp.RecentRank <= 3 THEN 'Top Recent'
+        ELSE 'Older Posts'
+    END AS PostRank,
+    (SELECT 
+         COUNT(c.Id) 
+     FROM 
+         Comments c 
+     WHERE 
+         c.PostId = rp.PostId) AS CommentCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PopularTags pt ON pt.PostCount > 5
+WHERE 
+    rp.RecentRank <= 10
+ORDER BY 
+    rp.CreationDate DESC, 
+    rp.Score DESC, 
+    pt.TagName
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;
+
+-- This query fetches the top 10 recent posts (after offsetting 5), their ranks, related tag names, 
+-- and gives a score for the ranking, demonstrating complex logic with CTEs, window functions,
+-- correlated subqueries, and string filtering in `WHERE` clauses.

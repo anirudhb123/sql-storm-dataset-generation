@@ -1,0 +1,91 @@
+WITH TagStats AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.ViewCount) AS AverageViews,
+        STRING_AGG(DISTINCT U.DisplayName, ', ') AS UsersContributed
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    GROUP BY 
+        T.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalScore,
+        AverageViews,
+        UsersContributed,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+),
+InactiveUsers AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        COUNT(P.Id) AS PostsCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.LastAccessDate < NOW() - INTERVAL '1 year'
+    GROUP BY 
+        U.DisplayName, U.Reputation
+    HAVING 
+        COUNT(P.Id) = 0
+),
+VoteStats AS (
+    SELECT 
+        P.Title,
+        COUNT(V.Id) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Title
+),
+FinalResults AS (
+    SELECT 
+        T.TagName,
+        T.PostCount,
+        T.TotalScore,
+        T.AverageViews,
+        T.UsersContributed,
+        U.DisplayName AS InactiveUser,
+        UV.TotalVotes,
+        UV.UpVotes,
+        UV.DownVotes
+    FROM 
+        TopTags T
+    CROSS JOIN 
+        InactiveUsers U
+    LEFT JOIN 
+        VoteStats UV ON UV.Title LIKE '%' || T.TagName || '%'
+)
+
+SELECT 
+    TagName,
+    PostCount,
+    TotalScore,
+    AverageViews,
+    UsersContributed,
+    InactiveUser,
+    TotalVotes,
+    UpVotes,
+    DownVotes
+FROM 
+    FinalResults
+WHERE 
+    TagRank <= 10
+ORDER BY 
+    PostCount DESC, TotalScore DESC;

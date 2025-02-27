@@ -1,0 +1,67 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        cr.returning_customer_sk,
+        cr.return_quantity,
+        cr.return_amount,
+        ROW_NUMBER() OVER (PARTITION BY cr.returning_customer_sk ORDER BY cr.returned_date_sk DESC) AS rn
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.returned_date_sk > 1000
+),
+RecentSales AS (
+    SELECT 
+        ws.ws_ship_customer_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 2000 AND 3000
+    GROUP BY 
+        ws.ws_ship_customer_sk
+    HAVING 
+        SUM(ws.ws_quantity) > 5
+)
+SELECT 
+    ca.ca_address_id,
+    cd.cd_gender,
+    COALESCE(r.total_quantity, 0) AS total_quantity,
+    COALESCE(r.total_profit, 0) AS total_profit,
+    COALESCE(rt.return_quantity, 0) AS most_recent_return_quantity,
+    COALESCE(rt.return_amount, 0) AS most_recent_return_amount,
+    CASE 
+        WHEN cd.cd_marital_status = 'M' THEN 'Married'
+        WHEN cd.cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Unknown' 
+    END AS marital_status,
+    MAX(d.d_year) AS last_year_active,
+    COUNT(DISTINCT s.s_store_id) AS store_count,
+    CASE 
+        WHEN COUNT(s.s_store_id) > 0 THEN 'Active'
+        ELSE 'Inactive' 
+    END AS customer_status
+FROM 
+    customer_address ca
+JOIN 
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    RecentSales r ON c.c_customer_sk = r.ws_ship_customer_sk
+LEFT JOIN 
+    (SELECT * FROM RankedReturns WHERE rn = 1) rt ON c.c_customer_sk = rt.returning_customer_sk
+LEFT JOIN 
+    store s ON c.c_customer_sk = s.s_store_sk
+LEFT JOIN 
+    date_dim d ON d.d_date_sk = c.c_first_sales_date_sk
+WHERE 
+    cd.cd_credit_rating = 'Excellent'
+    AND (cd.cd_dep_count IS NULL OR cd.cd_dep_count > 2)
+GROUP BY 
+    ca.ca_address_id, cd.cd_gender, rt.return_quantity, rt.return_amount, cd.cd_marital_status
+HAVING 
+    (COALESCE(r.total_profit, 0) > 2000 OR COUNT(s.s_store_id) > 2)
+ORDER BY 
+    total_profit DESC, marital_status;

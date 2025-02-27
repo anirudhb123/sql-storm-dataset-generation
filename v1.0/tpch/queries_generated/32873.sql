@@ -1,0 +1,31 @@
+WITH RECURSIVE SupplyChain(s_suppkey, c_custkey, total_supplycost) AS (
+    SELECT ps.s_suppkey, o.o_custkey, SUM(ps.ps_supplycost)
+    FROM partsupp ps
+    JOIN lineitem li ON ps.ps_partkey = li.l_partkey
+    JOIN orders o ON li.l_orderkey = o.o_orderkey
+    GROUP BY ps.s_suppkey, o.o_custkey
+    HAVING SUM(ps.ps_supplycost) > 10000
+    UNION ALL
+    SELECT sc.s_suppkey, c.c_custkey, sc.total_supplycost + SUM(ps.ps_supplycost)
+    FROM SupplyChain sc
+    JOIN customer c ON c.c_custkey = sc.c_custkey
+    JOIN partsupp ps ON ps.ps_suppkey = sc.s_suppkey
+    GROUP BY sc.s_suppkey, c.c_custkey
+)
+SELECT n.n_name, r.r_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue, 
+       COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+       STRING_AGG(DISTINCT p.p_name, ', ') AS part_names,
+       ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+FROM lineitem l 
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplyChain sc ON s.s_suppkey = sc.s_suppkey
+WHERE l.l_shipdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+  AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+  AND AVG(sc.total_supplycost) IS NOT NULL
+ORDER BY total_revenue DESC;

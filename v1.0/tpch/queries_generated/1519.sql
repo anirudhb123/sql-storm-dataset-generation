@@ -1,0 +1,62 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts,
+        AVG(s.s_acctbal) AS average_balance
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+TopSuppliers AS (
+    SELECT 
+        s.*, 
+        RANK() OVER (ORDER BY total_supply_cost DESC) AS rank_cost,
+        RANK() OVER (ORDER BY average_balance DESC) AS rank_balance
+    FROM 
+        SupplierStats s
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_nationkey,
+        COUNT(l.l_linenumber) AS total_items,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderdate, c.c_nationkey
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    CASE 
+        WHEN ts.rank_cost = 1 THEN 'Top Supplier' 
+        ELSE 'Other Supplier' 
+    END AS supplier_category,
+    os.total_items,
+    os.total_revenue,
+    os.o_orderdate
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+LEFT JOIN 
+    OrderSummary os ON os.c_nationkey = n.n_nationkey
+WHERE 
+    os.total_revenue IS NOT NULL OR ts.total_supply_cost IS NOT NULL 
+ORDER BY 
+    r.r_name, total_revenue DESC
+LIMIT 100;

@@ -1,0 +1,54 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT Id, Reputation
+    FROM Users
+    WHERE Reputation > 1000
+
+    UNION ALL
+
+    SELECT u.Id, u.Reputation
+    FROM Users u
+    INNER JOIN UserReputation ur ON u.Id = ur.Id
+    WHERE u.Reputation > ur.Reputation - 500
+),
+PostScores AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Score,
+        COALESCE(vt.Name, 'No Votes') AS VoteType,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id, vt.Name, u.DisplayName
+),
+HighScoringPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Score,
+        ps.VoteType,
+        ps.Author,
+        ps.CommentCount,
+        RANK() OVER (ORDER BY ps.Score DESC) AS Rank
+    FROM PostScores ps
+    WHERE ps.Score > 10
+)
+SELECT 
+    hp.PostId,
+    hp.Score,
+    hp.VoteType,
+    hp.Author,
+    hp.CommentCount,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = hp.PostId) AS TotalComments,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t 
+     INNER JOIN Posts p ON t.WikiPostId = p.Id
+     WHERE p.Id = hp.PostId) AS TagsUsed
+FROM HighScoringPosts hp
+LEFT JOIN UserReputation ur ON ur.Id = (SELECT OwnerUserId FROM Posts WHERE Id = hp.PostId)
+WHERE ur.Reputation IS NOT NULL
+ORDER BY hp.Rank;

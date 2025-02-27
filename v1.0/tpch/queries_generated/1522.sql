@@ -1,0 +1,58 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > 1000.00
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_custkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    r.r_name, 
+    ps.ps_partkey, 
+    p.p_name,
+    COALESCE(SUM(l.l_extendedprice), 0) AS total_revenue,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers,
+    ARRAY_AGG(DISTINCT s.s_name) AS supplier_names
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    AND s.s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name LIKE 'A%')
+GROUP BY 
+    r.r_name, ps.ps_partkey, p.p_name
+HAVING 
+    total_revenue > (SELECT AVG(total_value) FROM TotalOrderValue) 
+    AND COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    total_revenue DESC, r.r_name;

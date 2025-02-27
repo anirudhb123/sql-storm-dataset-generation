@@ -1,0 +1,73 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+
+    UNION ALL
+
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_net_paid) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_quantity) AS total_returned_quantity
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_returning_customer_sk
+),
+SalesAndReturns AS (
+    SELECT 
+        C.c_customer_sk,
+        COALESCE(S.total_quantity, 0) AS total_sold,
+        COALESCE(R.total_returned_quantity, 0) AS total_returned,
+        COALESCE(S.total_sales, 0) AS net_sales
+    FROM 
+        customer C
+    LEFT JOIN 
+        (SELECT 
+            ws_bill_customer_sk,
+            SUM(total_quantity) AS total_quantity,
+            SUM(total_sales) AS total_sales
+        FROM 
+            SalesCTE 
+        GROUP BY 
+            ws_bill_customer_sk) S ON C.c_customer_sk = S.ws_bill_customer_sk
+    LEFT JOIN 
+        CustomerReturns R ON C.c_customer_sk = R.wr_returning_customer_sk
+)
+SELECT 
+    SA.c_customer_sk,
+    SA.total_sold,
+    SA.total_returned,
+    SA.net_sales,
+    D.d_year,
+    D.d_month_seq,
+    CASE 
+        WHEN SA.net_sales - SA.total_returned < 0 THEN 'Negative Sales'
+        WHEN SA.net_sales < 100 THEN 'Low Sales'
+        ELSE 'Normal Sales'
+    END AS sales_status
+FROM 
+    SalesAndReturns SA
+JOIN 
+    date_dim D ON D.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+WHERE 
+    TRUE
+ORDER BY 
+    SA.net_sales DESC;

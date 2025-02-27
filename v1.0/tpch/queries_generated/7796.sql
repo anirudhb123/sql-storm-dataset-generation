@@ -1,0 +1,52 @@
+WITH SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        supplier AS s
+    JOIN 
+        partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part AS p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem AS l ON l.l_partkey = p.p_partkey
+    JOIN 
+        orders AS o ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        nation AS n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01' AND o.o_orderdate < DATE '2021-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_nationkey
+),
+TopSupplierSales AS (
+    SELECT 
+        n.n_name,
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_sales
+    FROM 
+        SupplierSales AS ss
+    JOIN 
+        nation AS n ON ss.s_suppkey = n.n_nationkey
+    WHERE 
+        ss.sales_rank <= 5
+)
+SELECT 
+    n.r_name AS region,
+    COUNT(DISTINCT t.s_suppkey) AS supplier_count,
+    SUM(t.total_sales) AS total_sales
+FROM 
+    TopSupplierSales AS t
+JOIN 
+    supplier AS s ON t.s_suppkey = s.s_suppkey
+JOIN 
+    nation AS n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region AS r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    n.r_name
+ORDER BY 
+    total_sales DESC;

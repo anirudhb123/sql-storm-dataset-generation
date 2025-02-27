@@ -1,0 +1,43 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY k.keyword) AS rank_by_keyword,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY a.id) AS total_cast
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    WHERE 
+        a.production_year > 2000
+        AND k.keyword IS NOT NULL
+),
+AggregatedTitles AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS movie_count,
+        AVG(total_cast) AS avg_cast_size
+    FROM 
+        RankedMovies
+    GROUP BY 
+        production_year
+)
+SELECT 
+    year,
+    movie_count,
+    avg_cast_size,
+    CASE 
+        WHEN avg_cast_size > 5 THEN 'Large Ensemble'
+        WHEN avg_cast_size IS NULL THEN 'No Data'
+        ELSE 'Standard Cast'
+    END AS cast_size_category
+FROM 
+    AggregatedTitles
+WHERE 
+    movie_count > 10
+ORDER BY 
+    year DESC;

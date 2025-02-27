@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND p.Score > 0
+),
+TopPostDetails AS (
+    SELECT 
+        rp.Id,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Comments c ON rp.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON rp.Id = v.PostId
+    WHERE 
+        rp.PostRank <= 5
+    GROUP BY 
+        rp.Id, rp.Title, rp.CreationDate, rp.Score, rp.OwnerDisplayName
+)
+SELECT 
+    tpd.Id,
+    tpd.Title,
+    tpd.CreationDate,
+    tpd.Score,
+    tpd.OwnerDisplayName,
+    tpd.CommentCount,
+    tpd.TotalUpvotes,
+    tpd.TotalDownvotes,
+    pt.Name AS PostTypeName,
+    COALESCE(cl.Name, 'No Close Reason') AS CloseReason
+FROM 
+    TopPostDetails tpd
+LEFT JOIN 
+    PostTypes pt ON EXISTS (SELECT 1 FROM Posts p WHERE p.Id = tpd.Id AND p.PostTypeId = pt.Id)
+LEFT JOIN 
+    PostHistory ph ON tpd.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+LEFT JOIN 
+    CloseReasonTypes cl ON ph.Comment::int = cl.Id
+ORDER BY 
+    tpd.Score DESC, tpd.CommentCount DESC;

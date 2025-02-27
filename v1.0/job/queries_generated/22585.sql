@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        COALESCE(mt.production_year, 0) AS production_year,
+        0 AS level,
+        NULL AS parent_movie_id
+    FROM
+        aka_title mt
+    WHERE
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        et.id AS movie_id,
+        et.title,
+        COALESCE(et.production_year, 0) AS production_year,
+        mh.level + 1 AS level,
+        mh.movie_id AS parent_movie_id
+    FROM
+        aka_title et
+    INNER JOIN
+        MovieHierarchy mh ON et.episode_of_id = mh.movie_id
+),
+CastDetails AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS num_actors,
+        STRING_AGG(DISTINCT ak.name, ', ') AS actor_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE
+        ak.name IS NOT NULL
+    GROUP BY
+        ci.movie_id
+),
+MovieStats AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        md.num_actors,
+        md.actor_names,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(md.movie_id) DESC) AS rank_within_year
+    FROM
+        MovieHierarchy mh
+    LEFT JOIN
+        CastDetails md ON mh.movie_id = md.movie_id
+    WHERE
+        mh.production_year > 2000
+)
+SELECT
+    ms.title,
+    ms.production_year,
+    COALESCE(ms.num_actors, 0) AS actor_count,
+    CASE 
+        WHEN ms.actor_names IS NOT NULL THEN ms.actor_names
+        ELSE 'No Actors'
+    END AS actors,
+    CASE 
+        WHEN ms.rank_within_year IS NULL THEN 9999
+        ELSE ms.rank_within_year
+    END AS rank_within_year
+FROM
+    MovieStats ms
+LEFT JOIN
+    movie_info mi ON ms.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'box office' LIMIT 1)
+WHERE 
+    ms.rank_within_year <= 10
+ORDER BY 
+    ms.production_year DESC,
+    rank_within_year ASC;

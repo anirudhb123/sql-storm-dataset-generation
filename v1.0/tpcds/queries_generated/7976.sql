@@ -1,0 +1,44 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN 2451545 AND 2451570 -- A specific date range (Jul 1, 2020 - Jul 26, 2020)
+    GROUP BY ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        rs.total_quantity,
+        rs.total_sales
+    FROM RankedSales rs
+    JOIN item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE rs.sales_rank <= 10
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential
+    FROM customer_demographics cd
+    JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_item_desc,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(*) AS customer_count,
+    SUM(ci.total_sales) AS total_revenue
+FROM TopItems ci
+JOIN CustomerDemographics cd ON ci.total_quantity > 100
+JOIN web_sales ws ON ci.ws_item_sk = ws.ws_item_sk
+WHERE ws.ws_sold_date_sk BETWEEN 2451545 AND 2451570
+GROUP BY ci.i_item_id, ci.i_item_desc, cd.cd_gender, cd.cd_marital_status
+ORDER BY total_revenue DESC;

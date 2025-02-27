@@ -1,0 +1,58 @@
+WITH RankedMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        ROW_NUMBER() OVER (PARTITION BY title.production_year ORDER BY title.id) AS rank_by_year
+    FROM 
+        title
+    WHERE 
+        title.production_year IS NOT NULL
+),
+ActorCounts AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+AkaNames AS (
+    SELECT 
+        ak.person_id,
+        STRING_AGG(ak.name, ', ') AS all_names
+    FROM 
+        aka_name ak
+    GROUP BY 
+        ak.person_id
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(ac.actor_count, 0) AS total_actors,
+    rk.rank_by_year,
+    ak.all_names,
+    mii.info AS additional_info
+FROM 
+    RankedMovies m
+LEFT JOIN 
+    ActorCounts ac ON m.movie_id = ac.movie_id
+LEFT JOIN 
+    AkaNames ak ON ak.person_id IN (
+        SELECT 
+            c.person_id 
+        FROM 
+            cast_info c
+        WHERE 
+            c.movie_id = m.movie_id
+    )
+LEFT JOIN 
+    movie_info_idx mii ON m.movie_id = mii.movie_id AND mii.info_type_id = (SELECT id FROM info_type WHERE info = 'synopsis')
+WHERE 
+    m.production_year >= 2000
+    AND m.production_year <= (SELECT MAX(production_year) FROM title) 
+ORDER BY 
+    m.production_year DESC, m.title
+FETCH FIRST 10 ROWS ONLY;

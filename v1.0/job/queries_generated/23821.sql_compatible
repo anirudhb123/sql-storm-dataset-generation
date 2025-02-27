@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        c.person_id, 
+        ka.name AS actor_name, 
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS movie_rank,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        COUNT(ck.id) OVER (PARTITION BY a.id) AS cast_count
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ck ON a.id = ck.movie_id
+    LEFT JOIN 
+        aka_name ka ON ck.person_id = ka.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year IS NOT NULL 
+        AND a.production_year >= 2000
+),
+FilteredMovies AS (
+    SELECT 
+        title, 
+        production_year,
+        actor_name,
+        keyword,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        movie_rank = 1 
+        AND cast_count > 1
+        AND (keyword IS NOT NULL OR keyword LIKE '%Drama%')
+),
+FinalResults AS (
+    SELECT 
+        f.title, 
+        f.production_year, 
+        f.actor_name,
+        f.keyword,
+        f.cast_count,
+        COUNT(f.actor_name) OVER (PARTITION BY f.production_year ORDER BY f.actor_name) AS same_year_actor_count
+    FROM 
+        FilteredMovies f
+)
+SELECT 
+    fr.title, 
+    fr.production_year, 
+    fr.actor_name, 
+    fr.keyword,
+    fr.cast_count,
+    fr.same_year_actor_count,
+    CASE 
+        WHEN fr.cast_count > 3 THEN 'Ensemble Cast'
+        WHEN fr.cast_count = 3 THEN 'Trio Cast'
+        ELSE 'Small Cast' 
+    END AS cast_category
+FROM 
+    FinalResults fr
+WHERE 
+    fr.production_year IN (SELECT DISTINCT production_year FROM FinalResults WHERE cast_count >= 2)
+ORDER BY 
+    fr.production_year DESC, 
+    fr.cast_count DESC, 
+    fr.actor_name;

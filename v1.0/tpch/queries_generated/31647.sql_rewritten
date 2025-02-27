@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > 1000 AND sh.level < 5
+),
+OrderTotals AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1997-10-01'
+    GROUP BY o.o_orderkey
+),
+NationSummary AS (
+    SELECT n.n_name, COUNT(DISTINCT c.c_custkey) AS customer_count, SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+    LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    p.p_name,
+    SUM(ps.ps_availqty) AS total_available,
+    COALESCE(nt.customer_count, 0) AS customer_count,
+    COALESCE(nt.total_account_balance, 0.00) AS total_account_balance,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice ELSE 0 END) AS max_return_price,
+    AVG(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) END) AS avg_discounted_price
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN OrderTotals ot ON l.l_orderkey = ot.o_orderkey
+LEFT JOIN NationSummary nt ON nt.n_name = (
+    SELECT n.n_name FROM nation n WHERE n.n_nationkey = (
+        SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = l.l_suppkey
+    )
+)
+GROUP BY p.p_name
+HAVING SUM(ps.ps_availqty) > 100
+ORDER BY total_available DESC
+LIMIT 50;

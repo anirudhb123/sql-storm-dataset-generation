@@ -1,0 +1,32 @@
+SELECT 
+    CONCAT(s.s_name, ' (', s.s_phone, ')') AS supplier_info,
+    CONCAT(c.c_name, ', ', c.c_address) AS customer_info,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    REPLACE(SUBSTRING_INDEX(p.p_name, ' ', 1), 'Part-', '') AS part_name_short,
+    TRIM(BOTH ' ' FROM p.p_comment) AS clean_part_comment,
+    COUNT(DISTINCT n.n_nationkey) AS distinct_nations_served,
+    MAX(r.r_name) AS region_name
+FROM 
+    supplier s
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    supplier_info, customer_info, part_name_short, clean_part_comment
+ORDER BY 
+    total_revenue DESC, total_orders DESC
+LIMIT 10;

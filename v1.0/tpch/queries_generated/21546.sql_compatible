@@ -1,0 +1,67 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS AccountRank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalOrderValue,
+        COUNT(l.l_linenumber) AS LineCount
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATEADD(DAY, -30, CAST('1998-10-01' AS DATE))
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+),
+HighValueLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        LAG(l.l_extendedprice) OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS PrevExtendedPrice,
+        (l.l_extendedprice - LAG(l.l_extendedprice) OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber)) / NULLIF(LAG(l.l_extendedprice) OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber), 0) AS PriceChangeRatio
+    FROM 
+        lineitem l
+)
+SELECT 
+    r.r_name AS Region,
+    COUNT(DISTINCT c.c_custkey) AS CustomerCount,
+    SUM(o.TotalOrderValue) AS TotalSalesValue,
+    AVG(hl.PriceChangeRatio) AS AvgPriceChangeRatio
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    part p ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RecentOrders o ON o.o_custkey IN (SELECT c.c_custkey FROM RankedCustomers c WHERE c.AccountRank <= 5)
+LEFT JOIN 
+    HighValueLineItems hl ON hl.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 10 AND
+    SUM(o.TotalOrderValue) > 10000
+ORDER BY 
+    TotalSalesValue DESC, AvgPriceChangeRatio ASC;

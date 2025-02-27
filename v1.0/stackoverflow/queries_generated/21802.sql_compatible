@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS ScoreRank,
+        COUNT(v.PostId) FILTER (WHERE v.VoteTypeId = 2) OVER (PARTITION BY p.Id) AS UpVoteCount,
+        COUNT(v.PostId) FILTER (WHERE v.VoteTypeId = 3) OVER (PARTITION BY p.Id) AS DownVoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+BestPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount,
+        UpVoteCount, 
+        DownVoteCount
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank <= 3
+),
+PostWithHistories AS (
+    SELECT 
+        p.PostId,
+        COALESCE(ph.CreationDate, p.CreationDate) AS PostCreationDate,
+        ph.PostHistoryTypeId,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.Comment,
+        ph.Text AS HistoryText,
+        CASE 
+            WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN 'Closed Operation'
+            ELSE 'Normal Operation'
+        END AS OperationType
+    FROM 
+        BestPosts p
+    LEFT JOIN 
+        PostHistory ph ON p.PostId = ph.PostId
+)
+SELECT 
+    p.Title,
+    p.ViewCount,
+    COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END), 0) AS CloseActionCount,
+    MAX(CASE WHEN ph.UserId IS NOT NULL AND ph.OperationType = 'Closed Operation' THEN ph.UserDisplayName END) AS LastCloser,
+    COUNT(DISTINCT ph.UserId) FILTER (WHERE ph.OperationType = 'Normal Operation') AS DistinctEditors,
+    STRING_AGG(DISTINCT ph.Comment, '; ') AS Comments,
+    STRING_AGG(DISTINCT ph.HistoryText, '; ') AS HistoryDetails
+FROM 
+    PostWithHistories p
+LEFT JOIN 
+    PostHistory ph ON p.PostId = ph.PostId
+GROUP BY 
+    p.Title, p.ViewCount
+HAVING 
+    COUNT(DISTINCT ph.UserId) > 0 
+ORDER BY 
+    p.ViewCount DESC, CloseActionCount DESC;

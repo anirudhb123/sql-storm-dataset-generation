@@ -1,0 +1,45 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT ak.name ORDER BY ak.name) AS actor_names,
+        STRING_AGG(DISTINCT k.keyword ORDER BY k.keyword) AS keywords
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_keyword AS mk ON t.id = mk.movie_id
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    JOIN 
+        cast_info AS ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name AS ak ON ci.person_id = ak.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_names,
+        md.keywords,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.title) AS row_num
+    FROM 
+        MovieDetails md
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_names,
+    tm.keywords
+FROM 
+    TopMovies tm
+WHERE 
+    tm.row_num <= 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC;

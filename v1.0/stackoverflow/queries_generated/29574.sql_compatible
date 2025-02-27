@@ -1,0 +1,68 @@
+
+WITH UserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate AS PostCreationDate,
+        p.Score,
+        p.Tags
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+PostBadges AS (
+    SELECT 
+        p.PostId,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Badges b
+    JOIN 
+        UserPosts p ON b.UserId = p.UserId
+    GROUP BY 
+        p.PostId
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(p.Tags, ',')) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        TagName
+),
+TopUsers AS (
+    SELECT 
+        up.UserId,
+        up.UserName,
+        COALESCE(SUM(b.BadgeCount), 0) AS TotalBadges,
+        COUNT(DISTINCT p.PostId) AS TotalPosts
+    FROM 
+        UserPosts up
+    LEFT JOIN 
+        PostBadges b ON up.PostId = b.PostId
+    LEFT JOIN 
+        Posts p ON up.PostId = p.Id
+    GROUP BY 
+        up.UserId, up.UserName
+    ORDER BY 
+        TotalPosts DESC, TotalBadges DESC
+    LIMIT 10
+)
+SELECT 
+    tu.UserId,
+    tu.UserName,
+    tu.TotalPosts,
+    tu.TotalBadges,
+    ts.TagName,
+    ts.PostCount
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    TagStatistics ts ON ts.PostCount > 0;

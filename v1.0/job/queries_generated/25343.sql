@@ -1,0 +1,61 @@
+WITH movie_summary AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT c.kind) AS company_types,
+        COUNT(cast.id) AS total_cast
+    FROM
+        aka_title t
+    LEFT JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN
+        cast_info cast ON cc.subject_id = cast.person_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+person_summary AS (
+    SELECT
+        p.id AS person_id,
+        a.name AS aka_name,
+        ARRAY_AGG(DISTINCT c.role_id) AS roles,
+        COUNT(ci.movie_id) AS movie_count
+    FROM
+        aka_name a
+    LEFT JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN
+        name p ON a.person_id = p.imdb_id
+    GROUP BY
+        p.id, a.name
+)
+SELECT
+    ms.movie_id,
+    ms.title,
+    ms.production_year,
+    ms.keywords,
+    ms.company_types,
+    ms.total_cast,
+    ps.person_id,
+    ps.aka_name,
+    ps.roles,
+    ps.movie_count
+FROM
+    movie_summary ms
+JOIN
+    cast_info ci ON ms.movie_id = ci.movie_id
+JOIN
+    person_summary ps ON ci.person_id = ps.person_id
+WHERE
+    ms.production_year > 2000
+ORDER BY
+    ms.production_year DESC, ms.title;

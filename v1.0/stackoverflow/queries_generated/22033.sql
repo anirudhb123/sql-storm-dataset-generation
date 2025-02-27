@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Include only bounty start/close votes
+    WHERE 
+        p.DeletedAt IS NULL
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AcceptedAnswerId,
+        rp.CommentCount,
+        rp.TotalBounties
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank = 1
+),
+PostInteractions AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(v.UserId IS NOT NULL AND v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.UserId IS NOT NULL AND v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(STRING_AGG(DISTINCT t.TagName, ', '), 'No Tags') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY((SELECT Tags FROM Posts WHERE Id = p.Id), ', ')) as t(TagName) ON true
+    WHERE 
+        p.Id IN (SELECT PostId FROM TopPosts)
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.CreationDate,
+    tp.Score,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.TotalBounties,
+    pi.UpVotes,
+    pi.DownVotes,
+    pi.Tags,
+    CASE
+        WHEN tp.Score > 100 THEN 'Highly Rated'
+        WHEN tp.Score BETWEEN 50 AND 100 THEN 'Moderately Rated'
+        ELSE 'Low Rated'
+    END AS RatingCategory,
+    IFNULL(cl.Name, 'No Reason') AS ClosureReason
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId AND ph.PostHistoryTypeId = 10 -- Post Closed
+LEFT JOIN 
+    CloseReasonTypes cl ON CAST(ph.Comment AS INTEGER) = cl.Id -- Linking to close reasons
+JOIN 
+    PostInteractions pi ON tp.PostId = pi.PostId
+ORDER BY 
+    tp.Score DESC, 
+    tp.ViewCount DESC
+LIMIT 100;

@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o_orderkey,
+        o_custkey,
+        o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS price_rank
+    FROM 
+        orders
+), 
+HighValueOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.o_custkey,
+        r.o_totalprice,
+        c.c_name,
+        c.c_mktsegment,
+        r.price_rank
+    FROM 
+        RankedOrders r
+    JOIN 
+        customer c ON r.o_custkey = c.c_custkey
+    WHERE 
+        r.price_rank <= 3
+), 
+SupplierStats AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.s_suppkey
+), 
+OrderDetails AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    ho.o_orderkey,
+    ho.c_name,
+    ho.o_totalprice,
+    COALESCE(od.total_revenue, 0) AS total_revenue,
+    ss.total_available,
+    ss.avg_supply_cost,
+    CASE 
+        WHEN ho.o_totalprice IS NULL THEN 'No Order'
+        ELSE 'Order Exists'
+    END AS order_status
+FROM 
+    HighValueOrders ho
+LEFT JOIN 
+    OrderDetails od ON ho.o_orderkey = od.l_orderkey
+LEFT JOIN 
+    SupplierStats ss ON ho.o_custkey = ss.s_suppkey
+WHERE 
+    ho.c_mktsegment IN ('BUILDING', 'FURNITURE')
+ORDER BY 
+    ho.o_totalprice DESC, ho.c_name;

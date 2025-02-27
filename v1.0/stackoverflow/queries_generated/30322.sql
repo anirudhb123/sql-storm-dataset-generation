@@ -1,0 +1,96 @@
+WITH RecursiveUserActivity AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        COALESCE(SUM(CASE WHEN p.OwnerUserId = u.Id THEN 1 ELSE 0 END), 0) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN c.UserId = u.Id THEN 1 ELSE 0 END), 0) AS TotalComments,
+        COALESCE(SUM(CASE WHEN v.UserId = u.Id THEN 1 ELSE 0 END), 0) AS TotalVotes,
+        0 AS Level
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+    UNION ALL
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        u.LastAccessDate,
+        ra.TotalPosts,
+        ra.TotalComments,
+        ra.TotalVotes,
+        Level + 1
+    FROM 
+        Users u
+    JOIN 
+        RecursiveUserActivity ra ON ra.Id <> u.Id AND ra.TotalPosts > 0
+),
+PostScoreWithRank AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' AND 
+        p.Score >= 10
+),
+ClosedPostsInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(ph.Id) AS CloseVotes,
+        MAX(ph.CreationDate) AS LastCloseDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+FinalPostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(cp.CloseVotes, 0) AS CloseVotes,
+        cp.LastCloseDate,
+        ps.PostRank,
+        ROW_NUMBER() OVER (PARTITION BY ps.PostRank ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPostsInfo cp ON p.Id = cp.PostId
+    JOIN 
+        PostScoreWithRank ps ON p.Id = ps.Id
+)
+SELECT 
+    ufa.DisplayName,
+    ufa.Reputation,
+    COUNT(DISTINCT fp.PostId) AS TotalPosts,
+    SUM(fp.ViewCount) AS TotalViews,
+    AVG(fp.CloseVotes) AS AvgCloseVotes,
+    MAX(fp.LastCloseDate) AS MostRecentCloseDate
+FROM 
+    RecursiveUserActivity ufa
+JOIN 
+    FinalPostDetails fp ON ufa.Id = fp.PostId
+GROUP BY 
+    ufa.Id, ufa.DisplayName, ufa.Reputation
+HAVING 
+    COUNT(DISTINCT fp.PostId) > 1
+ORDER BY 
+    TotalViews DESC, AvgCloseVotes DESC
+LIMIT 10;

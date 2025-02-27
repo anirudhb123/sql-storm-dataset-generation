@@ -1,0 +1,49 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_name, ca_state, 0 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT a.ca_address_sk, a.ca_address_id, a.ca_street_name, a.ca_state, ah.level + 1
+    FROM customer_address a
+    JOIN AddressHierarchy ah ON a.ca_address_sk = ah.ca_address_sk
+    WHERE a.ca_state IS NOT NULL
+),
+SalesAggregates AS (
+    SELECT 
+        COALESCE(ws.web_site_sk, cs.cs_call_center_sk) AS site_or_center_sk,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS web_order_count,
+        COUNT(DISTINCT cs.cs_order_number) AS catalog_order_count
+    FROM web_sales ws
+    FULL OUTER JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk
+    GROUP BY COALESCE(ws.web_site_sk, cs.cs_call_center_sk)
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate, 
+        COUNT(DISTINCT COALESCE(c.cc_customer_sk, 0)) AS customer_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_purchase_estimate
+)
+
+SELECT 
+    a.ca_address_id,
+    a.ca_street_name,
+    sd.customer_count,
+    sa.total_web_sales,
+    sa.total_catalog_sales,
+    (sa.total_web_sales - sa.total_catalog_sales) AS sales_difference,
+    REGEXP_REPLACE(a.ca_address_id, '[^0-9]', '') AS address_numeric,
+    RANK() OVER (PARTITION BY sd.cd_gender ORDER BY sd.customer_count DESC) AS gender_rank
+FROM AddressHierarchy a
+LEFT JOIN SalesAggregates sa ON a.ca_address_sk = sa.site_or_center_sk
+LEFT JOIN CustomerDemographics sd ON a.ca_address_sk = sd.cd_demo_sk
+WHERE a.ca_state = 'CA' AND (sd.customer_count > 100 OR sa.total_web_sales > 10000)
+ORDER BY a.ca_street_name, gender_rank DESC
+LIMIT 100;

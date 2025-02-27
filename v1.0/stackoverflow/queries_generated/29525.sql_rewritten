@@ -1,0 +1,83 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(t.Id) AS TagCount,
+        STRING_AGG(t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>') AS tag ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+UsersWithHighVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS UpvoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+        SUM(v.BountyAmount)
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+    WHERE 
+        v.VoteTypeId IN (2, 3) 
+    GROUP BY 
+        u.Id
+    HAVING 
+        COUNT(v.Id) > 10 
+),
+PostsWithTopCommenters AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.UserDisplayName, ', ') AS Commenters
+    FROM 
+        Posts p
+    JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+TopQuestions AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.TagCount,
+        ph.TagList,
+        uh.UpvoteCount,
+        uh.DownvoteCount,
+        ph.CommentCount,
+        ph.Commenters
+    FROM 
+        Posts p
+    JOIN 
+        PostTagCounts ph ON p.Id = ph.PostId
+    JOIN 
+        UsersWithHighVotes uh ON p.OwnerUserId = uh.UserId
+    JOIN 
+        PostsWithTopCommenters pc ON p.Id = pc.PostId
+    WHERE 
+        p.Score > 10 
+    ORDER BY 
+        p.Score DESC
+    LIMIT 10 
+)
+SELECT 
+    tq.Id AS PostId,
+    tq.Title,
+    tq.CreationDate,
+    tq.TagCount,
+    tq.TagList,
+    tq.UpvoteCount,
+    tq.DownvoteCount,
+    tq.CommentCount,
+    tq.Commenters
+FROM 
+    TopQuestions tq;

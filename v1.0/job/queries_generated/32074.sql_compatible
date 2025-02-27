@@ -1,0 +1,82 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+), 
+ActorRoles AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        ra.role AS role_name,
+        COUNT(ca.person_id) AS total_actors
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    JOIN 
+        role_type ra ON ca.role_id = ra.id
+    GROUP BY 
+        ca.movie_id, ak.name, ra.role
+), 
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(ar.actor_name, 'No actors') AS primary_actor,
+    COALESCE(ar.role_name, 'N/A') AS role_type,
+    COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+    mh.level,
+    CASE 
+        WHEN mh.production_year < 2000 THEN 'Classic'
+        WHEN mh.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Contemporary'
+    END AS era,
+    COUNT(DISTINCT ar.actor_name) OVER (PARTITION BY mh.movie_id) AS unique_actor_count,
+    COUNT(*) FILTER (WHERE ar.role_name IS NOT NULL) OVER (PARTITION BY mh.movie_id) AS actor_roles_count
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    ActorRoles ar ON mh.movie_id = ar.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON mh.movie_id = mk.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, 
+    COALESCE(ar.actor_name, 'No actors'), 
+    COALESCE(ar.role_name, 'N/A'), 
+    COALESCE(mk.keywords, 'No keywords'), 
+    mh.level
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

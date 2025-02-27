@@ -1,0 +1,50 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts P ON Tags.Id = P.Tags
+    GROUP BY 
+        Tags.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.BadgeCount,
+    U.UpVotes,
+    U.DownVotes,
+    T.TagName,
+    T.PostCount AS TagPostCount
+FROM 
+    UserStats U
+CROSS JOIN 
+    PopularTags T
+ORDER BY 
+    U.Reputation DESC, U.PostCount DESC;

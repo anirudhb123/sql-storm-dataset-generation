@@ -1,0 +1,73 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        c.c_custkey,
+        c.c_mktsegment,
+        COUNT(DISTINCT l.l_orderkey) OVER (PARTITION BY o.o_orderkey) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2) 
+        AND o.o_orderdate >= DATE '1996-01-01'
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        CASE 
+            WHEN p.p_retailprice IS NULL THEN 0
+            ELSE p.p_retailprice * 0.9
+        END AS discounted_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 20 
+        AND EXISTS (
+            SELECT 1 
+            FROM partsupp ps 
+            WHERE ps.ps_partkey = p.p_partkey 
+            AND ps.ps_availqty > 100
+        )
+)
+SELECT 
+    fs.p_partkey,
+    fs.p_name,
+    fs.discounted_price,
+    r.total_supplycost,
+    ho.line_count,
+    ho.o_orderdate
+FROM 
+    FilteredParts fs
+JOIN 
+    RankedSuppliers r ON r.rank <= 5
+LEFT JOIN 
+    HighValueOrders ho ON fs.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 100 ORDER BY ps.ps_supplycost DESC LIMIT 1)
+WHERE 
+    fs.discounted_price IS NOT NULL 
+    OR ho.o_orderkey IS NOT NULL
+ORDER BY 
+    r.total_supplycost DESC, fs.discounted_price ASC;

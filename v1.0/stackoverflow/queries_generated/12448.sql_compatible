@@ -1,0 +1,26 @@
+
+WITH PostMetrics AS (
+    SELECT 
+        DATE_TRUNC('month', CreationDate) AS Month,
+        COUNT(*) AS PostCount,
+        AVG(Score) AS AvgPostScore,
+        AVG(u.Reputation) AS AvgUserReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate IS NOT NULL
+    GROUP BY 
+        DATE_TRUNC('month', CreationDate), u.Reputation
+)
+
+SELECT 
+    Month,
+    PostCount,
+    AvgPostScore,
+    AvgUserReputation
+FROM 
+    PostMetrics
+ORDER BY 
+    Month;

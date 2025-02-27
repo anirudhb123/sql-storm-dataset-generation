@@ -1,0 +1,69 @@
+
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderstatus,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+        COUNT(li.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice, o.o_orderstatus
+),
+RankedOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.total_sales,
+        od.o_orderstatus,
+        RANK() OVER (PARTITION BY od.o_orderstatus ORDER BY od.total_sales DESC) AS sales_rank
+    FROM 
+        OrderDetails od
+    WHERE 
+        od.o_orderstatus = 'F'
+),
+FinalSummary AS (
+    SELECT 
+        sd.nation_name,
+        COUNT(DISTINCT so.s_suppkey) AS supplier_count,
+        SUM(so.total_cost) AS total_supplier_cost,
+        SUM(COALESCE(ro.total_sales, 0)) AS total_sales
+    FROM 
+        SupplierDetails sd
+    LEFT JOIN 
+        RankedOrders ro ON sd.s_suppkey = ro.o_orderkey
+    LEFT JOIN 
+        supplier so ON sd.s_suppkey = so.s_suppkey
+    GROUP BY 
+        sd.nation_name
+)
+SELECT 
+    fs.nation_name,
+    fs.supplier_count,
+    fs.total_supplier_cost,
+    fs.total_sales
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.total_supplier_cost > (SELECT AVG(total_supplier_cost) FROM FinalSummary)
+ORDER BY 
+    fs.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

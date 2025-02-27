@@ -1,0 +1,48 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(COALESCE(mi.info, 0)) AS avg_movie_info,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office')
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.title, t.production_year
+), TopActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ca.movie_id) AS movies_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT ca.movie_id) > 5
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_count,
+    rm.avg_movie_info,
+    ta.name AS top_actor,
+    ta.movies_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    TopActors ta ON rm.actor_count >= 5
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC;

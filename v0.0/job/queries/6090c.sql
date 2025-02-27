@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND mi_idx.info_type_id = 100 AND ci.note IN ('(4th Evicted 2004/1)', '(as Cecille Paz)', '(as Gerard Lynch)', '(as William M. Morgan)', '(assistant location manager: summer unit)', '(books "Iris: A Memoir" and "Elegy for Iris")', '(executive producer) (as J.L. Bermudez de Castro)', '(senior blue sketch artist)', '(story) (segment "Baby of a Different Stripe") (as Peter Hirsch)');

@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        SUM(v.BountyAmount) OVER (PARTITION BY p.Id) AS TotalBounty
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.ViewCount IS NOT NULL THEN p.ViewCount ELSE 0 END) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+CommentsAgg AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    r.PostId,
+    r.Title,
+    r.Score,
+    r.ViewCount,
+    r.RankScore,
+    r.TotalBounty,
+    u.DisplayName AS AuthorDisplayName,
+    u.Reputation,
+    us.TotalPosts,
+    us.TotalViews,
+    COALESCE(c.CommentCount, 0) AS CommentCount,
+    COALESCE(c.LastCommentDate, 'No Comments') AS LastCommentDate,
+    CASE 
+        WHEN r.TotalBounty > 0 THEN 'Popular' 
+        WHEN r.ViewCount > 1000 THEN 'Trending'
+        ELSE 'Regular'
+    END AS PostCategory,
+    CASE 
+        WHEN r.Score IS NULL OR r.ViewCount IS NULL THEN 'Insufficient Data' 
+        WHEN r.Score < 0 THEN 'Negative Feedback' 
+        ELSE 'Well Received' 
+    END AS PostFeedback
+FROM 
+    RankedPosts r
+JOIN 
+    Users u ON r.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id)
+JOIN 
+    UserPostStats us ON us.UserId = u.Id
+LEFT JOIN 
+    CommentsAgg c ON c.PostId = r.PostId
+WHERE 
+    r.RankScore <= 5 
+    AND r.TotalBounty IS NOT NULL
+ORDER BY 
+    r.RankScore, r.TotalBounty DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

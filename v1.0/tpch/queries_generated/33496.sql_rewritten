@@ -1,0 +1,54 @@
+WITH RECURSIVE OrdersHierarchy AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+AverageLineItem AS (
+    SELECT 
+        l.l_orderkey, 
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+NationSupplier AS (
+    SELECT 
+        n.n_name,
+        s.s_name,
+        COUNT(*) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, s.s_name
+)
+SELECT 
+    r.r_name, 
+    n.n_name,
+    ns.supplier_count,
+    COUNT(DISTINCT oh.o_orderkey) AS total_orders,
+    COALESCE(AVG(als.avg_discounted_price), 0) AS average_discounted_price,
+    MAX(ss.total_supply_cost) AS max_supply_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN NationSupplier ns ON n.n_name = ns.n_name
+LEFT JOIN OrdersHierarchy oh ON oh.o_orderdate >= '1996-01-01' 
+LEFT JOIN AverageLineItem als ON oh.o_orderkey = als.l_orderkey
+LEFT JOIN SupplierStats ss ON ns.s_name = ss.supp_count
+WHERE  
+    r.r_name IS NOT NULL AND
+    (n.n_name IS NOT NULL OR ns.supplier_count > 0) AND 
+    (oh.o_orderkey IS NULL OR ns.supplier_count < 5)
+GROUP BY r.r_name, n.n_name, ns.supplier_count
+HAVING 
+    COUNT(DISTINCT oh.o_orderkey) > 10
+ORDER BY r.r_name, n.n_name;

@@ -1,0 +1,75 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        1 AS depth
+    FROM 
+        aka_title 
+    WHERE 
+        production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+, CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_description,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS rn
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+)
+, MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(i.info, 'No info available') AS additional_info,
+        COUNT(DISTINCT cm.company_id) AS total_companies,
+        MAX(mh.depth) AS max_depth
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info i ON m.movie_id = i.movie_id
+    LEFT JOIN 
+        movie_companies cm ON m.movie_id = cm.movie_id
+    LEFT JOIN 
+        MovieHierarchy mh ON m.movie_id = mh.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.movie_id, m.title, m.production_year
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    m.additional_info,
+    m.total_companies,
+    c.actor_name,
+    c.role_description
+FROM 
+    MovieInfo m
+LEFT JOIN 
+    CastDetails c ON m.movie_id = c.movie_id AND c.rn <= 3
+WHERE 
+    m.total_companies > 0
+ORDER BY 
+    m.production_year DESC, m.title ASC;

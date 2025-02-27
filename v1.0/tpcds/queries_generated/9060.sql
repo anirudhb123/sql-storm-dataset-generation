@@ -1,0 +1,68 @@
+
+WITH RecentSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.web_site_sk,
+        ws.sold_date_sk,
+        SUM(ws.ext_sales_price) AS TotalSales,
+        COUNT(DISTINCT ws.order_number) AS OrderCount
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2023 
+        AND dd.d_moy BETWEEN 1 AND 6
+    GROUP BY 
+        ws.bill_customer_sk, 
+        ws.web_site_sk, 
+        ws.sold_date_sk
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesWithDetails AS (
+    SELECT 
+        cs.bill_customer_sk,
+        rd.TotalSales,
+        rd.OrderCount,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        RecentSales rd
+    JOIN 
+        CustomerDetails cd ON rd.bill_customer_sk = cd.c_customer_sk
+)
+SELECT 
+    swd.c_first_name,
+    swd.c_last_name,
+    swd.cd_gender,
+    swd.cd_marital_status,
+    swd.cd_education_status,
+    SUM(swd.TotalSales) AS TotalSalesAmount,
+    SUM(swd.OrderCount) AS TotalOrders,
+    AVG(swd.TotalSales) AS AvgSalesPerOrder
+FROM 
+    SalesWithDetails swd
+GROUP BY 
+    swd.c_first_name, 
+    swd.c_last_name, 
+    swd.cd_gender, 
+    swd.cd_marital_status, 
+    swd.cd_education_status
+ORDER BY 
+    TotalSalesAmount DESC
+LIMIT 10;

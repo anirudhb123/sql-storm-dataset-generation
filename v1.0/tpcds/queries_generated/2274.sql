@@ -1,0 +1,65 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS item_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price > 10 -- Filtering items with current price greater than 10
+    GROUP BY 
+        ws.ws_item_sk
+),
+TopSales AS (
+    SELECT
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_profit,
+        RANK() OVER (ORDER BY sd.total_profit DESC) AS profit_rank
+    FROM 
+        SalesData sd
+    WHERE 
+        sd.item_rank <= 5
+)
+SELECT 
+    t.item_rank,
+    t.total_quantity,
+    t.total_profit,
+    i.i_item_desc,
+    i.i_brand,
+    COALESCE(i.i_color, 'Unknown') AS item_color,
+    (SELECT AVG(ws_net_profit) FROM web_sales WHERE ws_item_sk = t.ws_item_sk) AS avg_profit_per_item,
+    CASE 
+        WHEN t.total_quantity > 100 THEN 'High Demand'
+        WHEN t.total_quantity BETWEEN 50 AND 100 THEN 'Moderate Demand'
+        ELSE 'Low Demand'
+    END AS demand_category
+FROM 
+    TopSales t
+JOIN 
+    item i ON t.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    customer_demographics c ON c.cd_demo_sk = (
+        SELECT 
+            c_current_cdemo_sk 
+        FROM 
+            customer 
+        WHERE 
+            c_customer_sk IN (
+                SELECT 
+                    ws_bill_customer_sk 
+                FROM 
+                    web_sales 
+                WHERE 
+                    ws_item_sk = t.ws_item_sk
+                LIMIT 1
+            )
+    )
+WHERE 
+    i.i_current_price < 50
+ORDER BY 
+    t.total_profit DESC;

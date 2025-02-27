@@ -1,0 +1,55 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, 1 AS order_level
+    FROM orders o
+    WHERE o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderstatus = 'O' AND oh.order_level < 5
+),
+SupplierStats AS (
+    SELECT ps.s_suppkey, SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.s_suppkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_sales,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_shipdate DESC) AS rn
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N' AND l.l_shipdate >= '2023-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_custkey, 
+    c.c_name, 
+    co.order_count, 
+    co.total_spent, 
+    ss.total_avail_qty,
+    ss.avg_supply_cost,
+    la.net_sales
+FROM CustomerOrders co
+JOIN CustomerOrders c ON co.c_custkey = c.c_custkey
+LEFT JOIN SupplierStats ss ON ss.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN part p ON ps.ps_partkey = p.p_partkey 
+    WHERE p.p_retailprice > 100.00
+)
+LEFT JOIN LineItemAnalysis la ON la.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_orderkey IN (SELECT oh.o_orderkey FROM OrderHierarchy oh)
+)
+WHERE co.order_count > 0
+ORDER BY co.total_spent DESC, c.c_name;

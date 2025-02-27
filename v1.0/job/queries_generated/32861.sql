@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+),
+AggregatedMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        COUNT(mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        movie_companies mc ON mh.movie_id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON mh.movie_id = mk.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, mh.kind_id
+),
+RankedMovies AS (
+    SELECT 
+        am.*,
+        RANK() OVER (PARTITION BY am.production_year ORDER BY am.company_count DESC) AS rank_by_company_count,
+        ROW_NUMBER() OVER (ORDER BY am.keyword_count DESC) AS rownum_by_keyword_count
+    FROM 
+        AggregatedMovies am
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.company_count,
+    rm.keyword_count,
+    COALESCE(cn.name, 'Unknown') AS company_name,
+    (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = rm.movie_id) AS cast_count
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    movie_companies mc ON rm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.imdb_id AND cn.country_code IS NOT NULL
+WHERE 
+    rm.rank_by_company_count <= 5
+    AND rm.production_year IS NOT NULL
+    AND rownum_by_keyword_count BETWEEN 1 AND 10
+ORDER BY 
+    rm.production_year, rm.rank_by_company_count;
+
+This query begins with a recursive Common Table Expression (CTE) to create a hierarchy of movies linked to other movies. It then aggregates movie metadata with counts of associated companies and keywords, integrating multiple joins, filtering, and ranking operations. Finally, it selects the top-ranked movies based on company counts with additional details about the companies, ensuring it retrieves useful benchmarks for performance evaluation while including various SQL features such as outer joins, subqueries, and window functions.

@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+TotalOrders AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_spent
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+QualifiedCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal,
+           COALESCE(t.total_spent, 0) AS total_spent
+    FROM customer c
+    LEFT JOIN TotalOrders t ON c.c_custkey = t.o_custkey
+    WHERE c.c_acctbal > 5000
+),
+AvgOrderPrice AS (
+    SELECT AVG(total_spent) AS avg_spent
+    FROM QualifiedCustomers
+)
+SELECT n.n_name, 
+       COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+       AVG(q.total_spent) AS avg_spent_per_customer,
+       CASE 
+           WHEN COUNT(DISTINCT s.s_suppkey) > 10 THEN 'High'
+           WHEN COUNT(DISTINCT s.s_suppkey) BETWEEN 5 AND 10 THEN 'Medium'
+           ELSE 'Low'
+       END AS supplier_ranking
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN QualifiedCustomers q ON s.s_nationkey = q.c_nationkey
+GROUP BY n.n_name
+HAVING AVG(q.total_spent) > (SELECT avg_spent FROM AvgOrderPrice)
+ORDER BY n.n_name;

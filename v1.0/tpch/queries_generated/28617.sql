@@ -1,0 +1,58 @@
+WITH SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation,
+        s.s_phone,
+        s.s_acctbal,
+        LENGTH(s.s_comment) AS comment_length,
+        CASE 
+            WHEN s.s_acctbal < 5000 THEN 'Low'
+            WHEN s.s_acctbal BETWEEN 5000 AND 10000 THEN 'Medium'
+            ELSE 'High'
+        END AS acctbal_category
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        COUNT(ps.ps_suppkey) AS supply_count,
+        SUM(ps.ps_availqty) AS total_avail_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+StringBenchmark AS (
+    SELECT 
+        pd.s_suppkey,
+        pd.s_name,
+        pd.nation,
+        ps.total_avail_qty,
+        CONCAT(pd.s_name, ' - ', pd.nation) AS supplier_info,
+        REPLACE(pd.s_address, 'Street', 'St.') AS address_shortened,
+        SUBSTRING(pd.s_comment, 1, 50) AS short_comment
+    FROM
+        SupplierDetails pd
+    JOIN 
+        PartSupplierDetails ps ON pd.s_suppkey = ps.ps_suppkey
+    WHERE 
+        pd.comment_length > 30
+)
+SELECT 
+    supplier_info,
+    address_shortened,
+    short_comment,
+    SUM(total_avail_qty) AS total_avail_qty
+FROM 
+    StringBenchmark
+GROUP BY 
+    supplier_info, address_shortened, short_comment
+ORDER BY 
+    total_avail_qty DESC
+LIMIT 10;

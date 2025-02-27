@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name 
+    HAVING 
+        SUM(o.o_totalprice) > 5000
+),
+PartSupplierInfo AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 100
+),
+CustomerRanking AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count, 
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    pr.p_name,
+    ps.s_name,
+    r.r_name,
+    c.c_name,
+    cu.total_spent,
+    cn.order_count,
+    cn.avg_order_value,
+    ppsi.total_value
+FROM 
+    PartSupplierInfo ppsi
+JOIN 
+    RankedSuppliers ps ON ppsi.ps_availqty > 50 AND ppsi.ps_supplycost < 20
+JOIN 
+    nation r ON ps.s_nationkey = r.r_regionkey
+JOIN 
+    HighValueCustomers cu ON ps.s_suppkey = cu.c_custkey
+LEFT JOIN 
+    CustomerRanking cn ON cu.c_custkey = cn.c_custkey
+WHERE 
+    ppsi.total_value IS NOT NULL
+ORDER BY 
+    cu.total_spent DESC, 
+    cn.order_count DESC, 
+    ppsi.total_value ASC;

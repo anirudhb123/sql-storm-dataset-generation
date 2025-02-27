@@ -1,0 +1,61 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        1 AS Level,
+        CAST(ph.UserDisplayName AS VARCHAR(MAX)) AS UserChain
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed and Reopened Posts
+
+    UNION ALL
+
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        Level + 1,
+        CAST(rph.UserChain + ' -> ' + ph.UserDisplayName AS VARCHAR(MAX))
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        RecursivePostHistory rph ON ph.PostId = rph.PostId
+    WHERE 
+        ph.CreationDate < rph.CreationDate
+)
+
+SELECT 
+    p.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    p.Score,
+    p.ViewCount,
+    MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS ClosedDate,
+    MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS ReopenedDate,
+    STRING_AGG(DISTINCT CONVERT(varchar, b.Name), ', ') AS BadgeNames,
+    STRING_AGG(DISTINCT ph.UserChain, '; ') AS UserChains,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+FROM 
+    Posts p
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    PostHistory ph ON p.Id = ph.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = p.OwnerUserId
+LEFT JOIN 
+    Votes v ON v.PostId = p.Id
+WHERE 
+    p.PostTypeId = 1  -- Only Questions
+AND 
+    p.CreationDate >= DATEADD(YEAR, -1, GETDATE())  -- Posts from the last year
+GROUP BY 
+    p.Id, p.Title, p.Score, p.ViewCount
+HAVING 
+    COUNT(DISTINCT c.Id) > 5  -- Only include questions with more than 5 comments
+ORDER BY 
+    p.Score DESC, ClosedDate DESC;

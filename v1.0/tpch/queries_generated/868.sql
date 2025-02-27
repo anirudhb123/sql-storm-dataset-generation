@@ -1,0 +1,54 @@
+WITH RegionalSales AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01' 
+    GROUP BY 
+        r.r_regionkey, r.r_name
+), TopRegions AS (
+    SELECT * 
+    FROM RegionalSales 
+    WHERE sales_rank <= 3
+), SupplierPartInfo AS (
+    SELECT 
+        s.s_suppkey,
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, p.p_partkey
+)
+SELECT 
+    tr.region_name,
+    GROUP_CONCAT(DISTINCT CONCAT(spi.s_suppkey, ':', p.p_name) ORDER BY spi.total_supply_cost DESC) AS supplier_parts,
+    SUM(spi.total_supply_cost) AS total_cost,
+    COUNT(spi.p_partkey) AS part_count
+FROM 
+    TopRegions tr
+LEFT JOIN 
+    SupplierPartInfo spi ON tr.region_name = (SELECT r.r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey JOIN customer c ON n.n_nationkey = c.c_nationkey WHERE c.c_custkey = spi.s_suppkey)
+LEFT JOIN 
+    part p ON spi.p_partkey = p.p_partkey
+GROUP BY 
+    tr.region_name
+HAVING 
+    total_cost IS NOT NULL 
+ORDER BY 
+    total_cost DESC;

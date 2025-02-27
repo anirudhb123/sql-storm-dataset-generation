@@ -1,0 +1,54 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        dd.d_year,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        ws.web_site_id, dd.d_year
+),
+TopSites AS (
+    SELECT 
+        web_site_id,
+        total_quantity,
+        total_profit,
+        RANK() OVER (PARTITION BY d_year ORDER BY total_profit DESC) AS profit_rank
+    FROM 
+        SalesData
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    ts.web_site_id,
+    ts.total_quantity,
+    ts.total_profit,
+    cp.c_customer_id,
+    cp.total_spent,
+    cp.total_orders,
+    COALESCE(ts.total_profit / NULLIF(cp.total_spent, 0), 0) AS profit_to_spending_ratio
+FROM 
+    TopSites ts
+LEFT JOIN 
+    CustomerPurchases cp ON ts.web_site_id = (SELECT ws.web_site_id FROM web_sales ws WHERE ws.ws_order_number IN (SELECT DISTINCT cs_order_number FROM catalog_sales) LIMIT 1)
+WHERE 
+    ts.profit_rank <= 10
+ORDER BY 
+    ts.d_year, ts.total_profit DESC;

@@ -1,0 +1,50 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, ca_address_id, ca_street_number, ca_street_name, ca_city, ca_state, ca_country, 1 AS level
+    FROM customer_address
+    WHERE ca_state IS NOT NULL
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_address_id, ca.ca_street_number, ca.ca_street_name, ca.ca_city, ca.ca_state, ca.ca_country, ah.level + 1
+    FROM customer_address ca
+    JOIN AddressHierarchy ah ON ca.ca_address_sk <> ah.ca_address_sk
+    WHERE ca.ca_city = ah.ca_city AND ca.ca_state = ah.ca_state
+),
+SalesDetails AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_sales_price) AS total_sales,
+           AVG(ws_ext_discount_amt) AS avg_discount
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CustomerStatistics AS (
+    SELECT c.c_customer_sk,
+           d.cd_gender,
+           SUM(s.total_sales) AS total_customer_sales,
+           CASE
+               WHEN COUNT(*) = 0 THEN 'Unknown'
+               ELSE MIN(d.cd_marital_status)
+           END AS marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+    LEFT JOIN SalesDetails s ON s.ws_item_sk IN (SELECT i_item_sk FROM item WHERE i_manager_id IS NULL)
+    GROUP BY c.c_customer_sk, d.cd_gender
+)
+SELECT ah.ca_country,
+       cs.cd_gender,
+       ROUND(AVG(cs.total_customer_sales), 2) AS avg_sales,
+       ARRAY_AGG(DISTINCT cs.marital_status) AS marital_statuses,
+       COUNT(*) FILTER (WHERE cs.total_customer_sales > 1000) AS high_value_customers,
+       SUM(CASE WHEN cs.total_customer_sales IS NULL THEN 0 ELSE cs.total_customer_sales END) AS total_sales_count,
+       COUNT(DISTINCT s.sm_ship_mode_id) AS distinct_shipping_modes
+FROM AddressHierarchy ah
+JOIN CustomerStatistics cs ON cs.total_customer_sales IS NOT NULL
+LEFT JOIN ship_mode s ON s.sm_ship_mode_sk IN (
+    SELECT ws_ship_mode_sk
+    FROM web_sales
+    WHERE ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE)
+)
+WHERE ah.level < 5 AND ah.ca_country LIKE 'A%'
+GROUP BY ah.ca_country, cs.cd_gender
+HAVING COUNT(DISTINCT cs.c_customer_sk) > 10
+ORDER BY avg_sales DESC;

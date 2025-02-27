@@ -1,0 +1,76 @@
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS TotalBadges,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only consider questions
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.Title, p.Body, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+SelectedPostMetrics AS (
+    SELECT 
+        pd.PostId,
+        pd.Title,
+        u.DisplayName AS OwnerDisplayName,
+        pd.Score,
+        pd.ViewCount,
+        pd.AnswerCount,
+        pd.CommentCount,
+        ub.TotalBadges,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        pd.Tags
+    FROM 
+        PostDetails pd
+    LEFT JOIN 
+        Users u ON pd.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserBadges ub ON u.Id = ub.UserId
+)
+
+SELECT 
+    spm.PostId,
+    spm.Title,
+    spm.OwnerDisplayName,
+    spm.Score,
+    spm.ViewCount,
+    spm.AnswerCount,
+    spm.CommentCount,
+    spm.TotalBadges,
+    spm.GoldBadges,
+    spm.SilverBadges,
+    spm.BronzeBadges,
+    spm.Tags,
+    ROW_NUMBER() OVER (ORDER BY spm.Score DESC, spm.ViewCount DESC) AS Rank
+FROM 
+    SelectedPostMetrics spm
+ORDER BY 
+    spm.Score DESC, spm.ViewCount DESC
+LIMIT 50;

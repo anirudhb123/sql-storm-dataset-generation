@@ -1,0 +1,66 @@
+-- Performance Benchmarking Query
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(P.Views, 0)) AS TotalViews,
+        AVG(P.Score) AS AverageScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TagStatistics AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+),
+PostHistoryStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(H.Id) AS HistoryCount,
+        MAX(H.CreationDate) AS LastModified
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory H ON P.Id = H.PostId
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalViews,
+    U.AverageScore,
+    T.TagName,
+    T.PostCount AS TagPostCount,
+    T.TotalViews AS TagTotalViews,
+    PH.PostId,
+    PH.HistoryCount,
+    PH.LastModified
+FROM 
+    UserStatistics U
+LEFT JOIN 
+    TagStatistics T ON U.PostCount > 0
+LEFT JOIN 
+    PostHistoryStatistics PH ON PH.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+ORDER BY 
+    U.Reputation DESC, 
+    U.TotalViews DESC;

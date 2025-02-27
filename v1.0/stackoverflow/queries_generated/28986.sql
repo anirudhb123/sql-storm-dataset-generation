@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.AnswerCount,
+        p.CommentCount,
+        p.Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>')::int[])
+    WHERE 
+        p.PostTypeId = 1  -- Filter for Questions only
+    GROUP BY 
+        p.Id
+),
+TopUserPosts AS (
+    SELECT 
+        rp.OwnerUserId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.AnswerCount,
+        rp.CommentCount,
+        rp.Score,
+        rp.Tags,
+        rp.UserPostRank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.UserPostRank <= 3  -- Top 3 most recent questions per user
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN 1 END) AS DeleteUndeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    tup.OwnerUserId,
+    tup.Title,
+    tup.ViewCount,
+    tup.CreationDate,
+    tup.AnswerCount,
+    tup.CommentCount,
+    tup.Score,
+    tup.Tags,
+    pha.CloseReopenCount,
+    pha.DeleteUndeleteCount,
+    pha.SuggestedEditCount
+FROM 
+    TopUserPosts tup
+LEFT JOIN 
+    PostHistoryAggregated pha ON tup.PostId = pha.PostId
+ORDER BY 
+    tup.Score DESC, tup.ViewCount DESC;
+
+This SQL query benchmarks string processing by aggregating posts, along with their associated tags, and exposing metrics related to their closure/reopening and edit suggestions.

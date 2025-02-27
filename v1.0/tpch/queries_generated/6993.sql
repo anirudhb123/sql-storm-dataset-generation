@@ -1,0 +1,31 @@
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+lineitem_stats AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity, MAX(l.l_discount) AS max_discount
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+nation_summary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+           SUM(s.s_acctbal) AS total_account_balance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, ls.total_revenue,
+       ls.avg_quantity, ls.max_discount, ps.p_name, ps.p_brand, ns.total_suppliers, ns.total_account_balance
+FROM cust_orders co
+JOIN lineitem_stats ls ON co.o_orderkey = ls.l_orderkey
+JOIN part_supplier ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = co.o_orderkey)
+JOIN nation_summary ns ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = ns.n_nationkey))
+ORDER BY co.o_orderdate DESC, ls.total_revenue DESC;

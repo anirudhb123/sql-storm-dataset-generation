@@ -1,0 +1,76 @@
+
+WITH RECURSIVE sales_trend AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        COALESCE(SUM(ws_quantity), 0) AS total_quantity,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY COALESCE(SUM(ws_net_profit), 0) DESC) AS profit_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk 
+                            FROM date_dim 
+                            WHERE d_date BETWEEN '2023-01-01' AND '2023-12-31')
+    GROUP BY 
+        ws_bill_customer_sk, 
+        ws_item_sk
+),
+detailed_sales AS (
+    SELECT 
+        ss_store_sk,
+        DISTINCTION(ws_item_sk) AS item_count,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ws_net_profit) DESC) AS store_rank
+    FROM 
+        web_sales 
+    RIGHT JOIN 
+        store ON ws_store_sk = s_store_sk 
+    GROUP BY 
+        ss_store_sk
+),
+max_sales AS (
+    SELECT 
+        ss_store_sk,
+        MAX(total_quantity) AS max_quantity,
+        MAX(total_profit) AS max_profit
+    FROM 
+        detailed_sales
+    WHERE 
+        item_count > 1
+    GROUP BY 
+        ss_store_sk
+)
+SELECT
+    c.c_customer_id,
+    SUM(st.total_quantity) AS grand_total_quantity,
+    FIRST_VALUE(st.total_profit) OVER (PARTITION BY c.c_customer_sk ORDER BY st.total_quantity DESC) AS top_profit,
+    CASE 
+        WHEN c.c_birth_year IS NULL THEN 'Unknown'
+        ELSE CONCAT(c.c_first_name, ' ', c.c_last_name)
+    END AS customer_name,
+    COALESCE(ws.net_profit, 0) AS web_profit,
+    CASE 
+        WHEN DATEDIFF(CURRENT_DATE, DATE(CONCAT(c.c_birth_year, '-', c.c_birth_month, '-', c.c_birth_day))) < 0 
+        THEN 'Future Birth'
+        ELSE 'Valid'
+    END AS birth_status
+FROM 
+    customer AS c
+LEFT JOIN 
+    sales_trend AS st ON c.c_customer_sk = st.ws_bill_customer_sk
+LEFT JOIN 
+    max_sales AS ms ON ms.ss_store_sk = st.ws_item_sk
+LEFT JOIN 
+    web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE 
+    COALESCE(c.c_preferred_cust_flag, 'N') = 'Y'
+    AND (birth_status = 'Valid' OR birth_status IS NULL)
+GROUP BY 
+    c.c_customer_id, c.c_birth_year, c.c_birth_month, c.c_birth_day
+HAVING 
+    grand_total_quantity > 10
+ORDER BY 
+    grand_total_quantity DESC
+LIMIT 100 OFFSET 10;

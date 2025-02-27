@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level 
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id, 
+        at.title, 
+        at.production_year, 
+        mh.level + 1 
+    FROM 
+        movie_link ml 
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id 
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+CastRoleCounts AS (
+    SELECT 
+        ci.movie_id, 
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        SUM(CASE WHEN cr.role = 'lead' THEN 1 ELSE 0 END) AS lead_actors
+    FROM 
+        cast_info ci 
+    JOIN 
+        role_type cr ON ci.role_id = cr.id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year,
+    COALESCE(crc.total_actors, 0) AS total_actors,
+    COALESCE(crc.lead_actors, 0) AS lead_actors,
+    CASE 
+        WHEN mh.level > 1 THEN 'Sequel'
+        ELSE 'Original'
+    END AS movie_type,
+    string_agg(DISTINCT an.name, ', ') AS actor_names,
+    CASE 
+        WHEN ARRAY_LENGTH(ARRAY(SELECT 1 FROM movie_info mi WHERE mi.movie_id = mh.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Box Office')), 1) > 0 
+        THEN 'Box Office Data Available' 
+        ELSE 'No Box Office Data' 
+    END AS box_office_info
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastRoleCounts crc ON mh.movie_id = crc.movie_id
+LEFT JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.production_year DESC, total_actors DESC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        SUM(COALESCE(v.BountyAmount, 0)) OVER (PARTITION BY p.OwnerUserId) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 -- Considering Bounty starts for points
+    WHERE 
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year')
+    AND 
+        p.Score IS NOT NULL
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph 
+    JOIN 
+        CloseReasonTypes cr ON ph.Comment::int = cr.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) -- Closed or Reopened
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName,
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.Score,
+    bp.CloseReasons,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COALESCE(up.TotalBounty, 0) AS TotalBounty,
+    CASE 
+        WHEN up.PostRank = 1 THEN 'Most Recent'
+        ELSE 'Other'
+    END AS PostCategory
+FROM 
+    Users u
+JOIN 
+    RankedPosts up ON u.Id = up.OwnerUserId
+LEFT JOIN 
+    ClosedPosts bp ON up.PostId = bp.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    (up.PostRank <= 3 OR up.TotalBounty > 0)
+AND 
+    (bp.LastClosedDate IS NULL OR bp.LastClosedDate >= CURRENT_DATE - INTERVAL '30 days')
+ORDER BY 
+    up.Score DESC, up.CreationDate DESC
+LIMIT 50;

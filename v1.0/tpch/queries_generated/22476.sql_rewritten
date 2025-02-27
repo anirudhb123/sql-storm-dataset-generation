@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        1 AS Level
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        sh.Level + 1
+    FROM 
+        partsupp ps
+    JOIN 
+        SupplierHierarchy sh ON ps.ps_partkey = sh.s_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 50
+)
+
+SELECT 
+    n.n_name AS Nation,
+    COUNT(DISTINCT c.c_custkey) AS Total_Customers,
+    SUM(CASE WHEN o.o_orderstatus = 'F' THEN o.o_totalprice ELSE 0 END) AS Total_Finished_Orders,
+    AVG(CASE 
+        WHEN l.l_discount > 0 AND l.l_discount < 0.2 THEN l.l_extendedprice * (1 - l.l_discount)
+        ELSE NULL END) AS Avg_Discounted_Price,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS Part_Names
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    part p ON l.l_partkey = p.p_partkey
+LEFT JOIN 
+    SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE 
+    n.r_name IS NOT NULL
+    AND (o.o_orderdate >= '1997-01-01' OR o.o_orderdate IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    Total_Customers DESC, Avg_Discounted_Price DESC;

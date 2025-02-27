@@ -1,0 +1,81 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mh.depth + 1
+    FROM
+        aka_title AS mt
+    INNER JOIN
+        MovieHierarchy AS mh ON mt.episode_of_id = mh.movie_id
+),
+ActorsInfo AS (
+    SELECT
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ci.movie_id,
+        ci.nr_order,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank,
+        COUNT(*) OVER (PARTITION BY ci.movie_id) AS total_roles
+    FROM
+        aka_name AS ak
+    JOIN
+        cast_info AS ci ON ak.person_id = ci.person_id
+),
+RankedMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ai.actor_name,
+        ai.role_rank,
+        mh.depth,
+        (SELECT COUNT(DISTINCT movie_id) FROM cast_info) AS total_movies
+    FROM
+        MovieHierarchy AS mh
+    LEFT JOIN
+        ActorsInfo AS ai ON mh.movie_id = ai.movie_id
+    WHERE
+        mh.depth <= 3
+)
+SELECT
+    rm.title,
+    rm.production_year,
+    COALESCE(rm.actor_name, 'Unknown Actor') AS actor_name,
+    rm.role_rank,
+    rm.depth,
+    CASE
+        WHEN rm.depth = 1 THEN 'Main Movie'
+        WHEN rm.depth = 2 THEN 'Episode'
+        ELSE 'Subsequent Episode'
+    END AS movie_type,
+    (SELECT COUNT(*) FROM ActorsInfo ai WHERE ai.movie_id = rm.movie_id) AS actor_count,
+    (SELECT AVG(total_roles) FROM ActorsInfo WHERE movie_id = rm.movie_id) AS avg_roles_per_movie,
+    NULLIF((
+        SELECT COUNT(*) 
+        FROM movie_keyword mk
+        JOIN keyword k ON mk.keyword_id = k.id
+        WHERE mk.movie_id = rm.movie_id AND k.keyword LIKE '%Action%'
+    ), 0) AS action_keywords
+FROM
+    RankedMovies AS rm
+WHERE
+    rm.role_rank <= (rm.total_roles * 0.5) OR rm.actor_name IS NULL
+ORDER BY
+    rm.production_year DESC,
+    rm.depth ASC,
+    rm.title;

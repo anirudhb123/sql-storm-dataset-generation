@@ -1,0 +1,67 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM 
+        customer_address
+),
+DemographicInfo AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        CONCAT(cd_gender, ' ', cd_marital_status) AS gender_marital_status
+    FROM 
+        customer_demographics
+),
+StoreInfo AS (
+    SELECT 
+        s_store_id,
+        s_store_name,
+        s_city,
+        s_state,
+        s_zip,
+        s_country,
+        CONCAT(s_store_name, ' ', s_city, ', ', s_state, ' ', s_zip) AS store_location
+    FROM 
+        store
+),
+SalesDetails AS (
+    SELECT 
+        ws_order_number,
+        ws_quantity,
+        ws_net_paid,
+        ws_ship_date_sk,
+        CONCAT('Order #', ws_order_number, ': ', ws_quantity, ' units, Total: $', ws_net_paid) AS sales_info,
+        ws_bill_customer_sk
+    FROM 
+        web_sales
+)
+SELECT 
+    ai.full_address,
+    di.gender_marital_status,
+    si.store_location,
+    sd.sales_info
+FROM 
+    AddressInfo ai
+JOIN 
+    customer c ON c.c_current_addr_sk = ai.ca_address_id
+JOIN 
+    DemographicInfo di ON di.cd_demo_sk = c.c_current_cdemo_sk
+JOIN 
+    SalesDetails sd ON sd.ws_bill_customer_sk = c.c_customer_sk
+JOIN 
+    StoreInfo si ON si.s_store_id = sd.ws_ship_addr_sk
+WHERE 
+    ai.ca_state = 'CA'
+AND 
+    sd.ws_net_paid > 100.00
+ORDER BY 
+    ai.ca_city, sd.ws_order_number DESC
+LIMIT 100;

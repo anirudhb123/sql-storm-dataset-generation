@@ -1,0 +1,79 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+PartSupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+    GROUP BY 
+        ps.ps_partkey
+), 
+CustomerOrderDetails AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS unique_orders,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity_per_order
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT cs.c_custkey) AS total_customers,
+    SUM(cos.total_spent) AS overall_spending,
+    (SELECT AVG(total_revenue) FROM CustomerOrderDetails) AS avg_revenue_per_customer,
+    MAX(psa.total_available) AS max_part_availability,
+    STRING_AGG(s.s_name, ', ') AS top_suppliers
+FROM 
+    nation ns
+LEFT JOIN 
+    customer cs ON cs.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    CustomerOrderSummary cos ON cos.c_custkey = cs.c_custkey
+LEFT JOIN 
+    PartSupplierAvailability psa ON psa.ps_partkey IN 
+    (SELECT p.p_partkey FROM part p WHERE p.p_size < 100)
+LEFT JOIN 
+    RankedSuppliers s ON s.rn <= 3 AND s.s_suppkey IN 
+    (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = psa.ps_partkey)
+WHERE 
+    ns.r_name LIKE 'A%' AND
+    (cos.order_count IS NULL OR cos.order_count > 5)
+GROUP BY 
+    ns.n_name
+HAVING 
+    SUM(cos.total_spent) > (SELECT AVG(total_spent) FROM CustomerOrderSummary)
+ORDER BY 
+    total_customers DESC, overall_spending DESC;

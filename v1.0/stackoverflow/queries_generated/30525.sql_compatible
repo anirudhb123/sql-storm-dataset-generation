@@ -1,0 +1,100 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        p.Score,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostWithVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes,
+        p.Score,
+        p.CreationDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        MAX(ph.CreationDate) AS LastActivity,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    u.DisplayName,
+    u.Reputation,
+    COALESCE(pwv.Upvotes, 0) AS Upvotes,
+    COALESCE(pwv.Downvotes, 0) AS Downvotes,
+    r.LastActivity,
+    r.CommentCount,
+    ph.Score + COALESCE(pwv.Upvotes, 0) - COALESCE(pwv.Downvotes, 0) AS NetScore,
+    CASE 
+        WHEN ph.Score > 0 THEN 'Positive' 
+        WHEN ph.Score < 0 THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS ScoreType
+FROM 
+    RecursivePostHierarchy pp
+JOIN 
+    Users u ON pp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostWithVotes pwv ON pp.PostId = pwv.PostId
+JOIN 
+    RecentActivity r ON pp.PostId = r.PostId
+JOIN 
+    Posts ph ON pp.PostId = ph.Id
+WHERE 
+    pp.Level = 0 
+    AND u.Reputation > 1000
+ORDER BY 
+    NetScore DESC
+LIMIT 10 OFFSET 0;

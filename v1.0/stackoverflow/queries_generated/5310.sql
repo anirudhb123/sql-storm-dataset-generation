@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS TotalAnswers,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes,
+        SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END) AS AcceptedByOwner,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(a.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate > '2022-01-01' AND p.PostTypeId = 1
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+PopularPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.TotalAnswers,
+        rp.TotalUpvotes,
+        rp.TotalDownvotes,
+        rp.AcceptedByOwner,
+        RANK() OVER (ORDER BY rp.TotalUpvotes DESC, rp.TotalAnswers DESC) AS PopularityRank
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    pp.PostId,
+    pp.Title,
+    pp.OwnerDisplayName,
+    pp.TotalAnswers,
+    pp.TotalUpvotes,
+    pp.TotalDownvotes,
+    pp.AcceptedByOwner,
+    pp.PopularityRank,
+    p.Body,
+    ARRAY_AGG(t.TagName) AS Tags
+FROM 
+    PopularPosts pp
+JOIN 
+    Posts p ON pp.PostId = p.Id
+LEFT JOIN 
+    UNNEST(string_to_array(p.Tags, '<>')) AS tags ON true
+LEFT JOIN 
+    Tags t ON t.TagName = tags
+GROUP BY 
+    pp.PostId, pp.Title, pp.OwnerDisplayName, pp.TotalAnswers, pp.TotalUpvotes, pp.TotalDownvotes, pp.AcceptedByOwner, pp.PopularityRank, p.Body
+ORDER BY 
+    pp.PopularityRank
+LIMIT 10;

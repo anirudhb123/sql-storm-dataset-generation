@@ -1,0 +1,70 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, LENGTH(at.title) DESC) AS rank_by_length,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.id, at.title, at.production_year
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+FullMovieInfo AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.rank_by_length,
+        COALESCE(cr.role, 'Not Specified') AS role,
+        COALESCE(cr.role_count, 0) AS role_count,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastRoles cr ON rm.movie_id = cr.movie_id
+)
+SELECT 
+    fmi.title,
+    fmi.production_year,
+    fmi.rank_by_length,
+    fmi.role,
+    SUM(fmi.role_count) OVER (PARTITION BY fmi.title ORDER BY fmi.production_year DESC) AS cumulative_roles,
+    COUNT(DISTINCT ci.person_id) AS distinct_cast_members,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aka_names
+FROM 
+    FullMovieInfo fmi
+LEFT JOIN 
+    aka_name ak ON ak.person_id IN (
+        SELECT 
+            DISTINCT ci.person_id 
+        FROM 
+            cast_info ci 
+        WHERE 
+            ci.movie_id = fmi.movie_id AND 
+            ci.nr_order IS NOT NULL
+    )
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = fmi.movie_id
+WHERE 
+    fmi.production_year > 2000 AND 
+    (fmi.cast_count > 5 OR fmi.rank_by_length IS NULL)
+GROUP BY 
+    fmi.title, fmi.production_year, fmi.rank_by_length, fmi.role
+ORDER BY 
+    fmi.production_year DESC, fmi.rank_by_length DESC;

@@ -1,0 +1,54 @@
+WITH RECURSIVE 
+    RankedTitles AS (
+        SELECT 
+            t.id AS title_id,
+            t.title,
+            t.production_year,
+            ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+        FROM 
+            aka_title t
+    ),
+    MovieScores AS (
+        SELECT 
+            t.title,
+            t.production_year,
+            COUNT(mk.keyword) AS keyword_count,
+            COUNT(DISTINCT c.person_id) AS cast_count,
+            (EXTRACT(YEAR FROM cast('2024-10-01' as date)) - t.production_year) AS age
+        FROM 
+            RankedTitles t
+        JOIN 
+            movie_keyword mk ON t.id = mk.movie_id
+        JOIN 
+            cast_info c ON t.id = c.movie_id
+        GROUP BY 
+            t.title, t.production_year
+    ),
+    HighScoreMovies AS (
+        SELECT 
+            title, 
+            production_year, 
+            keyword_count, 
+            cast_count, 
+            age,
+            RANK() OVER (ORDER BY keyword_count DESC, cast_count DESC) AS rank
+        FROM 
+            MovieScores
+        WHERE 
+            age < 5
+    )
+SELECT 
+    m.title,
+    m.production_year,
+    m.keyword_count,
+    m.cast_count,
+    m.age
+FROM 
+    HighScoreMovies m
+WHERE 
+    rank <= 10
+    OR 
+    (m.keyword_count > 15 AND m.cast_count > 5)
+ORDER BY 
+    m.production_year DESC, 
+    m.keyword_count DESC;

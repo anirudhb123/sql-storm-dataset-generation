@@ -1,0 +1,50 @@
+
+WITH UserVoteDetails AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(P.AnswerCount, 0) AS AnswerCount,
+        U.DisplayName AS OwnerDisplayName,
+        DENSE_RANK() OVER (ORDER BY P.Score DESC) AS ScoreRank
+    FROM Posts P
+    LEFT JOIN Users U ON P.OwnerUserId = U.Id
+)
+SELECT 
+    UVD.UserId,
+    UVD.DisplayName,
+    UVD.Reputation,
+    UVD.TotalVotes,
+    UVD.UpVotes,
+    UVD.DownVotes,
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.Score,
+    CASE 
+        WHEN PD.AnswerCount > 0 THEN 
+            CONCAT('This post has ', PD.AnswerCount, ' answers.')
+        ELSE 
+            'This post has no answers yet.'
+    END AS AnswerStatus,
+    PD.ScoreRank,
+    DATE_PART('year', '2024-10-01 12:34:56'::timestamp) - DATE_PART('year', UVD.CreationDate) AS AccountAge
+FROM UserVoteDetails UVD
+INNER JOIN Posts P ON UVD.UserId = P.OwnerUserId
+LEFT JOIN PostDetails PD ON P.Id = PD.PostId
+WHERE UVD.Reputation >= 1000
+ORDER BY UVD.Reputation DESC, PD.ScoreRank 
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

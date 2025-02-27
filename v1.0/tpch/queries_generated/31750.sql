@@ -1,0 +1,38 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 0
+),
+SupplierRanked AS (
+    SELECT s.*, RANK() OVER (ORDER BY total_cost DESC) AS rank
+    FROM TopSuppliers s
+),
+NationOrders AS (
+    SELECT n.n_name, SUM(o.o_totalprice) AS total_orders
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN customer c ON s.s_suppkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_name
+),
+MaxOrders AS (
+    SELECT MAX(total_orders) AS max_orders FROM NationOrders
+)
+SELECT
+    p.p_name,
+    p.p_brand,
+    COUNT(DISTINCT l.l_orderkey) AS order_count,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price,
+    ns.n_name,
+    COALESCE(sr.rank, 'Not Ranked') AS supplier_rank
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN SupplierRanked sr ON sr.s_suppkey = l.l_suppkey
+LEFT JOIN NationOrders ns ON ns.total_orders = (SELECT total_orders FROM MaxOrders)
+WHERE p.p_size > 10
+AND l.l_shipdate >= '2023-01-01'
+GROUP BY p.p_partkey, p.p_name, p.p_brand, ns.n_name, sr.rank
+HAVING COUNT(DISTINCT l.l_orderkey) > 5
+ORDER BY avg_price DESC, order_count DESC;

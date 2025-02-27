@@ -1,0 +1,108 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        t.kind_id,
+        RANK() OVER (PARTITION BY t.kind_id ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+TopRankedMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        k.keyword AS movie_keyword,
+        k.id AS keyword_id
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = rm.movie_title LIMIT 1)
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        rm.rank <= 5
+),
+
+MovieInfo AS (
+    SELECT 
+        tt.movie_title,
+        c.name AS company_name,
+        cc.kind AS company_type,
+        m.info AS movie_info
+    FROM 
+        TopRankedMovies tt
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = tt.movie_title LIMIT 1)
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    LEFT JOIN 
+        company_type cc ON mc.company_type_id = cc.id
+    LEFT JOIN 
+        movie_info m ON m.movie_id = (SELECT mt.id FROM aka_title mt WHERE mt.title = tt.movie_title LIMIT 1)
+    WHERE 
+        cc.kind IS NOT NULL
+),
+
+FinalResults AS (
+    SELECT 
+        mi.movie_title,
+        mi.production_year,
+        mi.company_name,
+        mi.company_type,
+        COUNT(mi.movie_info) AS info_count,
+        STRING_AGG(mi.movie_info, ', ') AS all_movie_info
+    FROM 
+        MovieInfo mi
+    GROUP BY 
+        mi.movie_title, mi.production_year, mi.company_name, mi.company_type
+)
+
+SELECT 
+    fr.movie_title,
+    fr.production_year,
+    fr.company_name,
+    fr.company_type,
+    COALESCE(fr.info_count, 0) AS info_count,
+    CASE 
+        WHEN fr.all_movie_info IS NULL THEN 'No information available'
+        ELSE fr.all_movie_info 
+    END AS all_movie_info
+FROM 
+    FinalResults fr
+WHERE 
+    fr.company_name IS NOT NULL
+ORDER BY 
+    fr.production_year DESC, 
+    fr.movie_title;
+
+### Explanation of Constructs Used:
+1. **Common Table Expressions (CTEs)**:
+   - `RankedMovies`: Calculates rankings per movie kind by production year.
+   - `TopRankedMovies`: Filters to get the top 5 ranked movies along with their keywords.
+   - `MovieInfo`: Gathers detailed movie and company info.
+
+2. **Window Functions**: 
+   - `RANK()` is used to rank movies based on their production year within each kind.
+
+3. **Outer Joins**:
+   - Multiple LEFT JOINs ensure that even when no related entries exist (e.g., no companies or info), the query still returns results from the `aka_title` table.
+
+4. **Subqueries**:
+   - Subqueries are used to get the movie IDs based on titles, ensuring only one result per movie.
+
+5. **Aggregations**:
+   - `COUNT` and `STRING_AGG` provide a count of movie info entries and concatenate the info into a single string.
+
+6. **NULL Logic**:
+   - Uses `COALESCE` to handle potential NULL counts and a CASE statement to provide a user-friendly message if no movie info is available.
+
+7. **Complicated Predicate**: 
+   - The query includes conditions to ensure meaningful results while disregarding NULL values for companies and info.
+
+8. **ORDER BY Clause**: 
+   - Orders results primarily by `production_year` and secondarily by `movie_title`, giving a clear view of recent top movies first.
+
+This query is designed to not only benchmark performance through its complexity but also to demonstrate advanced SQL usage.

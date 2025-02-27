@@ -1,0 +1,84 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        title.kind_id,
+        title.imdb_id,
+        ARRAY[title.title] AS title_path
+    FROM 
+        title
+    WHERE 
+        title.id IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt.linked_movie_id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        t.imdb_id,
+        mh.title_path || t.title
+    FROM 
+        movie_link mt
+    JOIN 
+        title t ON mt.linked_movie_id = t.id
+    JOIN 
+        MovieHierarchy mh ON mt.movie_id = mh.movie_id
+),
+MovieInfo AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(mi.info, ', ') AS info
+    FROM 
+        movie_info mi
+    JOIN 
+        MovieHierarchy m ON mi.movie_id = m.movie_id
+    GROUP BY 
+        m.movie_id
+),
+ActorDetails AS (
+    SELECT 
+        a.name,
+        c.movie_id,
+        COUNT(c.person_role_id) AS role_count,
+        array_agg(DISTINCT ct.kind) AS roles
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        comp_cast_type ct ON c.person_role_id = ct.id
+    GROUP BY 
+        a.name, c.movie_id
+),
+CombinedData AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        mi.info AS movie_info,
+        ad.name AS actor_name,
+        ad.role_count,
+        ad.roles
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieInfo mi ON mh.movie_id = mi.movie_id
+    LEFT JOIN 
+        ActorDetails ad ON mh.movie_id = ad.movie_id
+)
+SELECT 
+    cd.title,
+    cd.production_year,
+    COALESCE(cd.movie_info, 'No Info') AS movie_info,
+    cd.actor_name,
+    cd.role_count,
+    cd.roles
+FROM 
+    CombinedData cd
+WHERE 
+    cd.production_year BETWEEN 2000 AND 2020
+ORDER BY 
+    cd.production_year DESC,
+    cd.title;

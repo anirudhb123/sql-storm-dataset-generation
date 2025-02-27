@@ -1,0 +1,77 @@
+WITH RecursivePostRank AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS RankScore,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS RankView
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId IN (1, 2)  -- Considering only Questions and Answers
+),
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        SUM(C.Score) AS TotalCommentScore
+    FROM 
+        Comments C
+    GROUP BY 
+        C.PostId
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS TotalPosts,
+        (SELECT COUNT(*) FROM Votes V WHERE V.UserId = U.Id) AS TotalVotes
+    FROM 
+        Users U
+    WHERE 
+        U.LastAccessDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    P.Id AS PostId,
+    P.Title AS PostTitle,
+    U.DisplayName AS Author,
+    COALESCE(PH.TotalCommentScore, 0) AS TotalCommentScore,
+    COALESCE(RP.RankScore, 0) AS RankScore,
+    COALESCE(RP.RankView, 0) AS RankView,
+    UB.BadgeCount,
+    UB.GoldBadges,
+    UB.SilverBadges,
+    UB.BronzeBadges,
+    AU.Reputation,
+    AU.TotalPosts,
+    AU.TotalVotes
+FROM 
+    Posts P
+LEFT JOIN 
+    RecursivePostRank RP ON P.Id = RP.Id
+LEFT JOIN 
+    UserBadges UB ON P.OwnerUserId = UB.UserId
+LEFT JOIN 
+    PostComments PH ON P.Id = PH.PostId
+LEFT JOIN 
+    ActiveUsers AU ON P.OwnerUserId = AU.Id
+WHERE 
+    P.CreationDate >= NOW() - INTERVAL '1 month'
+    AND (P.ViewCount IS NOT NULL OR P.Score IS NOT NULL)  -- posts with activity
+ORDER BY 
+    P.Score DESC, P.ViewCount DESC;

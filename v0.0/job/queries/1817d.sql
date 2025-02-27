@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t
+WHERE cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id
+AND cn.md5sum LIKE '%2%' AND cn.name_pcode_sf > 'V1361' AND t.md5sum < '7b7b3cca09eedc09c84f81965f3ad3ea' AND k.keyword < 'worried-about-daughter' AND t.imdb_index < 'XVIII';

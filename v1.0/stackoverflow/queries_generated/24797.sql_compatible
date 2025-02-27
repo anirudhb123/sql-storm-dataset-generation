@@ -1,0 +1,65 @@
+
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserId, 
+        Reputation, 
+        CASE 
+            WHEN Reputation > 1000 THEN 'High'
+            WHEN Reputation BETWEEN 500 AND 1000 THEN 'Medium'
+            ELSE 'Low'
+        END AS ReputationLevel
+    FROM Users
+), 
+QuestionActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COALESCE(ph.Comment, 'No Comments') AS LastEditComment,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(c.Id) AS TotalComments,
+        AVG(c.Score) AS AverageCommentScore
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (4, 5, 6)
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+VotingSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) - 
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS NetVotes
+    FROM Votes
+    GROUP BY PostId
+),
+TopUsers AS (
+    SELECT 
+        ur.UserId,
+        ur.ReputationLevel,
+        u.DisplayName,
+        ROW_NUMBER() OVER (PARTITION BY ur.ReputationLevel ORDER BY ur.Reputation DESC) AS RN
+    FROM UserReputation ur
+    JOIN Users u ON ur.UserId = u.Id
+    WHERE ur.ReputationLevel <> 'Low'
+)
+SELECT 
+    q.PostId,
+    q.Title,
+    u.DisplayName AS OwnerDisplayName,
+    q.LastEditComment,
+    q.LastEditDate,
+    q.TotalComments,
+    q.AverageCommentScore,
+    COALESCE(v.Upvotes, 0) AS Upvotes,
+    COALESCE(v.Downvotes, 0) AS Downvotes,
+    COALESCE(v.NetVotes, 0) AS NetVotes,
+    u.ReputationLevel
+FROM QuestionActivity q
+JOIN Users u ON q.OwnerUserId = u.Id
+LEFT JOIN VotingSummary v ON q.PostId = v.PostId
+WHERE (SELECT COUNT(*) FROM TopUsers tu WHERE tu.RN <= 5 AND u.Id = tu.UserId) > 0
+ORDER BY q.TotalComments DESC, q.AverageCommentScore DESC, q.PostId
+LIMIT 10;

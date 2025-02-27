@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sales_price DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_sales_price > 0
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        SUM(ws.ws_sales_price) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+), 
+IncomeAnalysis AS (
+    SELECT 
+        d.ib_income_band_sk,
+        COUNT(*) AS customer_count,
+        AVG(CASE WHEN cd.cd_gender = 'M' THEN total_spent END) AS avg_spent_male,
+        AVG(CASE WHEN cd.cd_gender = 'F' THEN total_spent END) AS avg_spent_female
+    FROM 
+        CustomerDemographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    JOIN 
+        income_band d ON hd.hd_income_band_sk = d.ib_income_band_sk
+    GROUP BY 
+        d.ib_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ia.customer_count,
+    ia.avg_spent_male,
+    ia.avg_spent_female,
+    COALESCE(ia.avg_spent_male, 0) - COALESCE(ia.avg_spent_female, 0) AS gender_spend_difference,
+    (SELECT COUNT(*) FROM RankedSales WHERE rank <= 10) AS top_sales_count
+FROM 
+    income_band ib
+LEFT JOIN 
+    IncomeAnalysis ia ON ib.ib_income_band_sk = ia.ib_income_band_sk
+ORDER BY 
+    ib.ib_income_band_sk;

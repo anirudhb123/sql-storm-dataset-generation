@@ -1,0 +1,64 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN C.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalComments,
+        COALESCE(SUM(P.AnswerCount), 0) AS TotalAnswers,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        AVG(P.ViewCount) AS AvgPostViews
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+), 
+PopularTags AS (
+    SELECT 
+        unnest(string_to_array(T.Tags, ',')) AS TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Posts P
+    JOIN 
+        Tags T ON T.Id = ANY (SELECT UNNEST(string_to_array(P.Tags, ','))::int)
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        T.Tags
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+UserRanking AS (
+    SELECT 
+        UserId,
+        RANK() OVER (ORDER BY TotalUpvotes DESC, TotalComments DESC) AS EngagementRank
+    FROM 
+        UserEngagement
+)
+SELECT 
+    U.DisplayName,
+    U.TotalPosts,
+    U.TotalUpvotes,
+    U.TotalDownvotes,
+    U.TotalComments,
+    U.TotalAnswers,
+    U.AvgPostViews,
+    UR.EngagementRank,
+    PT.TagName
+FROM 
+    UserEngagement U
+LEFT JOIN 
+    UserRanking UR ON U.UserId = UR.UserId
+CROSS JOIN 
+    PopularTags PT
+WHERE 
+    U.TotalPosts > 0
+ORDER BY 
+    U.TotalUpvotes DESC, U.TotalComments DESC;

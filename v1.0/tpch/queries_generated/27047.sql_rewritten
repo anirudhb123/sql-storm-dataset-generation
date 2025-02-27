@@ -1,0 +1,5 @@
+SELECT 
+    CONCAT_WS(' ', 
+        LEFT(p.p_name, 15), 
+        SUBSTRING(p.p_comment FROM 1 FOR 10), 
+        REPLACE(s.s_name, 'Supplier', 'Sup')));

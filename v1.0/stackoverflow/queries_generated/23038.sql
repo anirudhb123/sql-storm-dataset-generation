@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND -- Only questions
+        p.CreationDate >= (CURRENT_DATE - INTERVAL '1 year') -- Within the last year
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= (CURRENT_DATE - INTERVAL '30 days') -- Votes in the last 30 days
+    GROUP BY 
+        v.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        STRING_AGG(DISTINCT COALESCE(c.Comment, 'No Comment') ORDER BY c.CreationDate) AS Comments
+    FROM 
+        PostHistory ph
+    LEFT JOIN Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.CreationDate >= (CURRENT_DATE - INTERVAL '90 days') -- Changes in the last 90 days
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    PHD.HistoryCount AS PostHistoryCount,
+    PHD.Comments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    (SELECT PostId, COUNT(*) AS HistoryCount, STRING_AGG(DISTINCT Comments ORDER BY CreationDate) AS Comments
+     FROM PostHistoryDetails
+     GROUP BY PostId) PHD ON rp.PostId = PHD.PostId
+WHERE 
+    rp.UserRank <= 5 -- Top 5 ranked posts per user
+ORDER BY 
+    rp.Score DESC, rp.CreationDate ASC
+FETCH FIRST 50 ROWS ONLY; -- Limit the result to 50 rows

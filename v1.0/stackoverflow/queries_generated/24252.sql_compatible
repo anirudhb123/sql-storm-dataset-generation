@@ -1,0 +1,87 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.OwnerUserId IS NULL THEN 1 ELSE 0 END) AS CommunityOwnedPosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.UserId,
+        COUNT(*) AS EditsCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (4, 5, 6) THEN 1 END) AS TitleBodyTagEdits,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS PostClosedCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS PostReopenedCount,
+        SUM(CASE WHEN ph.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '7 days') THEN 1 ELSE 0 END) AS RecentEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.UserId
+),
+CombinedStats AS (
+    SELECT 
+        ups.UserId,
+        ups.DisplayName,
+        ups.TotalPosts,
+        ups.TotalQuestions,
+        ups.TotalAnswers,
+        ups.CommunityOwnedPosts,
+        ups.TotalViews,
+        phs.EditsCount,
+        phs.TitleBodyTagEdits,
+        phs.PostClosedCount,
+        phs.PostReopenedCount,
+        phs.RecentEdits
+    FROM 
+        UserPostStats ups
+    LEFT JOIN 
+        PostHistoryStats phs ON ups.UserId = phs.UserId
+),
+TopContributors AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalViews DESC, TotalPosts DESC) AS Rank
+    FROM 
+        CombinedStats
+    WHERE 
+        TotalPosts > 10
+)
+SELECT 
+    c.UserId,
+    c.DisplayName,
+    c.TotalPosts,
+    c.TotalQuestions,
+    c.TotalAnswers,
+    c.CommunityOwnedPosts,
+    c.TotalViews,
+    COALESCE(c.EditsCount, 0) AS EditsCount,
+    COALESCE(c.TitleBodyTagEdits, 0) AS TitleBodyTagEdits,
+    COALESCE(c.PostClosedCount, 0) AS PostClosedCount,
+    COALESCE(c.PostReopenedCount, 0) AS PostReopenedCount,
+    c.RecentEdits,
+    CASE
+        WHEN c.RecentEdits > 5 
+        THEN 'Active Editor'
+        ELSE 'Regular Contributor'
+    END AS ContributorType
+FROM 
+    CombinedStats c
+WHERE 
+    EXISTS (
+        SELECT 1
+        FROM Badges b
+        WHERE b.UserId = c.UserId AND b.Class = 1 /* Gold */
+    )
+ORDER BY 
+    Rank
+FETCH FIRST 10 ROWS ONLY;

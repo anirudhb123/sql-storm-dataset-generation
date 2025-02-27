@@ -1,0 +1,59 @@
+
+WITH processed_addresses AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        LOWER(ca_country) AS lowercase_country,
+        UPPER(ca_city) AS uppercase_city,
+        CHAR_LENGTH(ca_street_name) AS street_name_length
+    FROM customer_address
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT_WS(' ', c.c_salutation, c.c_first_name, c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        rendered_greeting,
+        a.full_address,
+        a.ca_city,
+        a.ca_state
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN processed_addresses a ON c.c_current_addr_sk = a.ca_address_sk
+    CROSS JOIN (
+        SELECT
+            CASE 
+                WHEN cd_gender = 'M' THEN 'Mr. ' 
+                WHEN cd_gender = 'F' THEN 'Ms. ' 
+                ELSE 'Dear ' 
+            END AS rendered_greeting
+        FROM customer_demographics
+    ) greetings
+),
+address_summary AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        SUM(street_name_length) AS total_street_name_length,
+        GROUP_CONCAT(full_address ORDER BY full_address SEPARATOR '; ') AS addresses_sample
+    FROM processed_addresses
+    GROUP BY ca_state
+)
+SELECT 
+    ci.full_name,
+    ci.ca_city,
+    ci.ca_state,
+    ci.lowercase_country,
+    asu.address_count,
+    asu.total_street_name_length,
+    asu.addresses_sample
+FROM customer_info ci
+JOIN address_summary asu ON ci.ca_state = asu.ca_state
+WHERE ci.uprcase_city LIKE 'A%'
+ORDER BY asu.address_count DESC;

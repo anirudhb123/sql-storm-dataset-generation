@@ -1,0 +1,74 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        COUNT(ss_ticket_number) AS transaction_count,
+        1 AS level
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_store_sk
+    
+    UNION ALL
+    
+    SELECT 
+        sh.ss_store_sk,
+        sh.total_sales * 1.10,  -- hypothetical sales increase for benchmarking
+        sh.transaction_count + 5, -- hypothetical increase in transactions
+        level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store s ON sh.ss_store_sk = s.s_store_sk 
+    WHERE 
+        sh.level < 5  -- simulate 5 levels deep
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        MAX(ws.ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+),
+order_summary AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        AVG(ws.ws_net_profit) AS avg_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        RANK() OVER (PARTITION BY ws.ws_bill_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM
+        web_sales ws
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_orders,
+    cs.total_spent,
+    os.avg_profit,
+    os.total_quantity,
+    COALESCE(sh.total_sales, 0) AS simulated_sales
+FROM 
+    customer_summary cs
+LEFT JOIN 
+    order_summary os ON cs.c_customer_sk = os.ws_bill_customer_sk
+LEFT JOIN 
+    sales_hierarchy sh ON sh.ss_store_sk = cs.c_customer_sk 
+WHERE 
+    cs.last_purchase_date >= (SELECT MAX(d_date) FROM date_dim WHERE d_dow = 1) -- filter for last purchase made on a Sunday
+    AND os.profit_rank <= 5  -- limit to top 5 customers by profit
+ORDER BY 
+    cs.total_spent DESC;

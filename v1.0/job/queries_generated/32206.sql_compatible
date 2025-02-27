@@ -1,0 +1,67 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        0 AS level,
+        NULL AS manager_id
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+
+    UNION ALL
+
+    
+    SELECT
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ah.level + 1,
+        c.person_id AS manager_id
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN ActorHierarchy ah ON ah.actor_id = c.person_id
+    WHERE c.nr_order = 1  
+),
+MovieData AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.id) AS actor_count,
+        AVG(CONCAT(ak.name, ' was a star in this film')) AS actor_description
+    FROM title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    LEFT JOIN aka_name ak ON c.person_id = ak.person_id
+    WHERE t.production_year BETWEEN 2000 AND 2023
+    GROUP BY t.id, t.title, t.production_year
+),
+MovieKeywords AS (
+    SELECT
+        m.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword m
+    JOIN keyword k ON m.keyword_id = k.id
+    GROUP BY m.movie_id
+),
+CompleteMovieInfo AS (
+    SELECT
+        md.title,
+        md.production_year,
+        md.actor_count,
+        mk.keywords,
+        md.actor_description
+    FROM MovieData md
+    LEFT JOIN MovieKeywords mk ON md.id = mk.movie_id
+)
+SELECT
+    cm.title,
+    cm.production_year,
+    COALESCE(cm.actor_count, 0) AS actor_count,
+    COALESCE(cm.keywords, 'No keywords available') AS keywords,
+    ROW_NUMBER() OVER (PARTITION BY cm.production_year ORDER BY cm.actor_count DESC) AS rank,
+    CASE 
+        WHEN cm.actor_count IS NULL OR cm.actor_count = 0 THEN 'No Cast'
+        ELSE 'Has Cast'
+    END AS cast_status
+FROM CompleteMovieInfo cm
+WHERE cm.actor_count > 1
+ORDER BY cm.production_year, cm.actor_count DESC;

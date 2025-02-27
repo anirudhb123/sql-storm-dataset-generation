@@ -1,0 +1,66 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+),
+inventory_summary AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+customer_info AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_purchase_estimate DESC) AS rn
+    FROM customer 
+    JOIN customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    WHERE cd_purchase_estimate IS NOT NULL
+),
+address_info AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN CONCAT(' Suite ', ca_suite_number) ELSE '' END) AS full_address
+    FROM customer_address
+    WHERE ca_country IS NOT NULL AND ca_zip IS NOT NULL
+),
+promotion_info AS (
+    SELECT 
+        p_item_sk,
+        COUNT(*) AS promo_count,
+        MAX(p_response_target) AS max_response_target
+    FROM promotion
+    GROUP BY p_item_sk
+)
+
+SELECT
+    si.ws_item_sk,
+    si.total_quantity,
+    si.total_sales,
+    ir.total_inventory,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    ai.full_address,
+    pi.promo_count,
+    pi.max_response_target
+FROM sales_summary si
+JOIN inventory_summary ir ON si.ws_item_sk = ir.inv_item_sk
+LEFT JOIN customer_info ci ON ci.rn <= 5
+LEFT JOIN address_info ai ON ai.ca_address_sk IN (SELECT c_current_addr_sk FROM customer WHERE c_customer_sk = ci.c_customer_sk)
+LEFT JOIN promotion_info pi ON pi.p_item_sk = si.ws_item_sk
+WHERE (si.total_sales IS NOT NULL OR ir.total_inventory IS NULL)
+AND (ci.cd_gender = 'F' OR ci.cd_marital_status IS NULL)
+ORDER BY si.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

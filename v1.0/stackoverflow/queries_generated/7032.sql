@@ -1,0 +1,59 @@
+WITH PostInfo AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        SUM(v.CreationDate IS NOT NULL) AS VoteCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        (SELECT PostId, COUNT(*) AS CommentCount FROM Comments GROUP BY PostId) c ON p.Id = c.PostId
+    LEFT JOIN 
+        (SELECT ParentId, COUNT(*) AS AnswerCount FROM Posts WHERE PostTypeId = 2 GROUP BY ParentId) a ON p.Id = a.ParentId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(p.Tags, ',') AS tag_array ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_array
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName, c.CommentCount, a.AnswerCount
+),
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    pi.PostId,
+    pi.Title,
+    pi.OwnerName,
+    pi.CommentCount,
+    pi.AnswerCount,
+    pi.VoteCount,
+    pi.Tags,
+    ph.EditCount,
+    ph.LastEditDate
+FROM 
+    PostInfo pi
+LEFT JOIN 
+    PostHistoryInfo ph ON pi.PostId = ph.PostId
+ORDER BY 
+    pi.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,74 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId, 
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+), RecentPostEdits AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate
+    FROM 
+        Posts P
+    JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        P.Id
+), PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(P.Id) > 100
+), UserReputation AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM 
+        Users U
+)
+
+SELECT 
+    URC.Id AS UserId,
+    URC.DisplayName,
+    URC.Reputation,
+    UPC.TotalVotes,
+    RPE.EditCount,
+    RPE.LastEditDate,
+    PT.TagName,
+    PT.PostCount
+FROM 
+    UserReputation URC
+LEFT JOIN 
+    UserVoteCounts UPC ON URC.Id = UPC.UserId
+LEFT JOIN 
+    RecentPostEdits RPE ON RPE.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = URC.Id)
+LEFT JOIN 
+    PopularTags PT ON PT.TagName IN (
+        SELECT DISTINCT 
+            unnest(string_to_array(P.Tags, '><')) 
+        FROM 
+            Posts P 
+        WHERE 
+            P.OwnerUserId = URC.Id
+    )
+WHERE 
+    URC.Reputation > 500
+ORDER BY 
+    URC.Reputation DESC, 
+    UPC.TotalVotes DESC;

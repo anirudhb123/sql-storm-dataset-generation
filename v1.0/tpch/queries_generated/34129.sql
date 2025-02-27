@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, sh.s_name, level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > 2000
+),
+TotalSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey
+),
+PartSupplierSummary AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CombinedSales AS (
+    SELECT 
+        ns.n_name,
+        ts.total_sales,
+        pss.total_available,
+        pss.avg_supplycost
+    FROM nation ns
+    LEFT JOIN TotalSales ts ON ts.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)
+    LEFT JOIN PartSupplierSummary pss ON pss.total_available > 0
+    WHERE ns.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+)
+SELECT 
+    RANK() OVER (ORDER BY SUM(total_sales) DESC) AS sales_rank,
+    n_name,
+    SUM(total_sales) AS total_sales_amount,
+    COUNT(*) AS num_products
+FROM CombinedSales
+WHERE total_sales_amount IS NOT NULL
+GROUP BY n_name
+HAVING COUNT(*) > 5
+ORDER BY sales_rank
+FETCH FIRST 10 ROWS ONLY;

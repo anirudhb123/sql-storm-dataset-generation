@@ -1,0 +1,71 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COALESCE(ARRAY[NULL::text], ARRAY[NULL::text]) AS titles_list,
+        0 AS depth
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.movie_id,
+        tt.title,
+        tt.production_year,
+        mh.titles_list || tt.title,
+        mh.depth + 1
+    FROM movie_link m
+    JOIN title tt ON m.linked_movie_id = tt.id
+    JOIN MovieHierarchy mh ON m.movie_id = mh.movie_id
+    WHERE mh.depth < 3
+),
+
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.titles_list,
+        COUNT(*) OVER (PARTITION BY mh.movie_id) AS relation_count
+    FROM MovieHierarchy mh
+    WHERE mh.production_year < 2000
+),
+
+DistinctCast AS (
+    SELECT DISTINCT 
+        c.person_id,
+        a.name,
+        f.titles_list,
+        ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY a.name) AS rn
+    FROM cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    JOIN FilteredMovies f ON c.movie_id = f.movie_id
+    WHERE f.relation_count > 1
+),
+
+AggregatedData AS (
+    SELECT 
+        dc.person_id,
+        STRING_AGG(dc.name, ', ') AS actor_names,
+        COUNT(*) AS movie_count
+    FROM DistinctCast dc
+    GROUP BY dc.person_id
+)
+
+SELECT 
+    ad.person_id,
+    ad.actor_names,
+    ad.movie_count,
+    COALESCE(mk.keyword, 'No Keywords') AS related_keyword
+FROM AggregatedData ad
+LEFT JOIN movie_keyword mk ON ad.person_id = mk.movie_id
+WHERE ad.movie_count > 3
+ORDER BY ad.movie_count DESC, ad.person_id
+LIMIT 100;
+
+-- In this query we explore the relationships between movies and people in the context of a structured hierarchy, 
+-- filtering down to actors connected to movies before the year 2000, while also aggregating their associated 
+-- names and counting movie appearances. The complexity arises from the outer joins, recursive CTEs, 
+-- window functions, and the complicated relationships among the various tables.

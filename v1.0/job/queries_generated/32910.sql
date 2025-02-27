@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        title m ON ml.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    mk.keyword,
+    COUNT(DISTINCT mk.movie_id) AS movie_count,
+    MAX(t.production_year) AS latest_year,
+    AVG(COALESCE(info.word_count, 0)) AS avg_word_count,
+    STRING_AGG(DISTINCT n.name, ', ') AS people_involved
+FROM
+    movie_keyword mk
+JOIN
+    title t ON mk.movie_id = t.id
+LEFT JOIN (
+    SELECT 
+        mi.movie_id, 
+        LENGTH(mi.info) - LENGTH(REPLACE(mi.info, ' ', '')) + 1 AS word_count
+    FROM
+        movie_info mi
+    WHERE
+        mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'description')
+) info ON info.movie_id = mk.movie_id
+LEFT JOIN
+    cast_info c ON c.movie_id = mk.movie_id
+LEFT JOIN
+    aka_name n ON n.person_id = c.person_id
+WHERE
+    mk.keyword IS NOT NULL
+    AND t.production_year >= 2000
+GROUP BY
+    mk.keyword
+ORDER BY
+    movie_count DESC,
+    latest_year DESC
+LIMIT 10;
+
+-- Additional segment for handling NULL logic across different joins
+SELECT
+    ct.kind,
+    COUNT(DISTINCT mc.movie_id) AS movie_count,
+    COALESCE(NULLIF(SUM(mc.company_type_id), 0), 'N/A') AS company_type_sum,
+    AVG(t.production_year) AS avg_production_year
+FROM
+    movie_companies mc
+JOIN
+    company_type ct ON mc.company_type_id = ct.id
+LEFT JOIN
+    title t ON mc.movie_id = t.id
+WHERE
+    mc.note IS NULL OR mc.note NOT LIKE '%uncredited%'
+GROUP BY
+    ct.kind
+HAVING
+    COUNT(mc.movie_id) > 0
+ORDER BY
+    movie_count DESC, avg_production_year DESC;
+

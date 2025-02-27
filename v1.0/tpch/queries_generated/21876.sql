@@ -1,0 +1,58 @@
+WITH RECURSIVE sale_data AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' AND
+        l.l_discount BETWEEN 0.05 AND 0.2
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+ranked_sales AS (
+    SELECT 
+        sd.c_custkey,
+        sd.c_name,
+        sd.total_sales,
+        sd.last_order_date,
+        DENSE_RANK() OVER (ORDER BY sd.total_sales DESC) as sales_rank
+    FROM 
+        sale_data sd
+)
+SELECT 
+    rs.c_name,
+    COALESCE(CAST(SUBSTRING(r.n_name, 1, 3) AS VARCHAR(3)), 'N/A') AS nation_short,
+    CASE WHEN rs.total_sales IS NULL THEN 'No Sales' ELSE FORMAT(rs.total_sales, '$#,##0.00') END AS formatted_sales,
+    (SELECT COUNT(*) 
+     FROM (
+         SELECT 
+             DISTINCT ps.s_suppkey, 
+             p.p_partkey, 
+             p.p_name
+         FROM 
+             partsupp ps
+         JOIN 
+             part p ON ps.ps_partkey = p.p_partkey
+         LEFT JOIN 
+             supplier s ON ps.ps_suppkey = s.s_suppkey
+         WHERE 
+             p.p_mfgr LIKE 'B%' OR s.s_comment IS NULL
+     ) AS supplier_part) AS unique_supplier_part_count
+FROM 
+    ranked_sales rs
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = rs.c_custkey)
+WHERE 
+    rs.sales_rank <= 10 AND
+    (DATE_PART('year', rs.last_order_date) = DATE_PART('year', CURRENT_DATE) - 1 OR 
+     rs.total_sales IS NULL)
+ORDER BY 
+    rs.total_sales DESC 
+LIMIT 20;

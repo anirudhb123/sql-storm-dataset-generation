@@ -1,0 +1,112 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            COUNT(*) AS CommentCount
+        FROM 
+            Comments
+        GROUP BY 
+            PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, CURRENT_TIMESTAMP) 
+),
+PostComments AS (
+    SELECT 
+        co.PostId,
+        STRING_AGG(co.Text, ' | ') AS Comments
+    FROM 
+        Comments co
+    WHERE 
+        co.CreationDate >= DATEADD(month, -6, CURRENT_TIMESTAMP) 
+    GROUP BY 
+        co.PostId
+),
+FinalResults AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.Reputation,
+        ua.TotalPosts,
+        ua.UpVotes,
+        ua.DownVotes,
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.ViewCount,
+        ps.CommentCount,
+        pc.Comments
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        PostStatistics ps ON ua.UserId = ps.OwnerUserId
+    LEFT JOIN 
+        PostComments pc ON ps.PostId = pc.PostId
+)
+
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.Reputation,
+    fr.TotalPosts,
+    fr.UpVotes,
+    fr.DownVotes,
+    fr.PostId,
+    fr.Title,
+    fr.CreationDate,
+    fr.Score,
+    fr.ViewCount,
+    fr.CommentCount,
+    COALESCE(fr.Comments, 'No comments available') AS Comments,
+    CASE 
+        WHEN fr.CommentCount > 5 THEN 'Highly Discussed'
+        WHEN fr.CommentCount BETWEEN 1 AND 5 THEN 'Moderately Discussed'
+        ELSE 'No Discussion'
+    END AS DiscussionLevel
+FROM 
+    FinalResults fr
+WHERE 
+    fr.Reputation > 100 
+ORDER BY 
+    fr.Reputation DESC, 
+    fr.CreationDate DESC;

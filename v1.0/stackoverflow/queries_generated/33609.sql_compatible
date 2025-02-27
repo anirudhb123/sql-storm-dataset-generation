@@ -1,0 +1,81 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+PostScoreSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpvoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownvoteCount,
+        AVG(p.Score) AS AverageScore
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(month, -6, CURRENT_TIMESTAMP) 
+    GROUP BY 
+        p.Id
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    p.AnswerCount,
+    ps.CommentCount,
+    p.AcceptedAnswerId,
+    ps.CommentCount AS TotalComments,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.AverageScore,
+    COALESCE(phd.EditorCount, 0) AS EditorCount,
+    phd.LastEditDate,
+    rh.Level AS PostLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    PostScoreSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    PostHistoryDetails phd ON p.Id = phd.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rh ON p.Id = rh.Id
+WHERE 
+    p.PostTypeId = 1 
+    AND p.Score > 0 
+ORDER BY 
+    ps.UpvoteCount DESC, 
+    p.CreationDate DESC 
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

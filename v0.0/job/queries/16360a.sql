@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(n.name) AS male_writer, min(t.title) AS violent_movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, keyword AS k, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND t.id = mk.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND ci.movie_id = mk.movie_id AND mi.movie_id = mi_idx.movie_id AND mi.movie_id = mk.movie_id AND mi_idx.movie_id = mk.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id AND k.id = mk.keyword_id
+AND ci.id < 1784287 AND ci.note > '(archive footage) (as Rev. C.L. Franklin)' AND mi.info = '$19,474,589 (USA)' AND mi_idx.id < 624458 AND mi.info_type_id IN (106, 12, 17, 18, 2, 43, 7, 81, 92, 94) AND t.season_nr < 50;

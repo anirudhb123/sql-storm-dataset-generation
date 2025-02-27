@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_totalprice,
+        ro.o_orderdate,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_discount,
+        l.l_tax,
+        l.l_extendedprice
+    FROM 
+        RankedOrders ro
+    JOIN 
+        lineitem l ON ro.o_orderkey = l.l_orderkey
+    WHERE 
+        ro.rn <= 10
+),
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(to.l_extendedprice) AS total_spent,
+        COUNT(DISTINCT to.o_orderkey) AS orders_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        TopOrders to ON o.o_orderkey = to.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    cs.c_custkey,
+    cs.c_name,
+    cs.total_spent,
+    cs.orders_count,
+    r.r_name AS region
+FROM 
+    CustomerStats cs
+JOIN 
+    nation n ON cs.c_custkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    cs.total_spent > 1000
+ORDER BY 
+    cs.total_spent DESC;

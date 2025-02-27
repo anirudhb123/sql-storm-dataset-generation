@@ -1,0 +1,26 @@
+SELECT 
+    CONCAT('Part: ', p_name, ' | Type: ', p_type, ' | Brand: ', p_brand) AS part_info,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    MAX(p_retailprice) AS max_price,
+    MIN(p_retailprice) AS min_price,
+    AVG(p_retailprice) AS avg_price,
+    STRING_AGG(DISTINCT s_name, ', ') AS suppliers_list,
+    (SELECT GROUP_CONCAT(DISTINCT n_name ORDER BY n_name) 
+     FROM nation 
+     WHERE n_nationkey IN (SELECT s_nationkey 
+                           FROM supplier 
+                           WHERE s_suppkey IN (SELECT DISTINCT ps_suppkey 
+                                               FROM partsupp ps 
+                                               WHERE ps.ps_partkey = p.p_partkey))) AS supplier_nations
+FROM 
+    part p 
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey 
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey 
+GROUP BY 
+    p.p_partkey, p_name, p_type, p_brand
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 5 
+ORDER BY 
+    avg_price DESC, supplier_count DESC;

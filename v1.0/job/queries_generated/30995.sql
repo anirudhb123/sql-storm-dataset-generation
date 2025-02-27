@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_link l
+    JOIN 
+        movie_hierarchy h ON l.linked_movie_id = h.movie_id
+    JOIN 
+        aka_title m ON l.movie_id = m.id
+    WHERE 
+        h.level < 5  -- Limit recursion to 5 levels
+),
+cast_aggregated AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        STRING_AGG(DISTINCT a.name, ', ') AS cast_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+),
+keyword_aggregated AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(c.total_cast_members, 0) AS total_cast_members,
+    COALESCE(c.cast_names, 'No Cast') AS cast_names,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COUNT(DISTINCT c.id) OVER() AS total_movies_in_hierarchy
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    cast_aggregated c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    keyword_aggregated k ON mh.movie_id = k.movie_id
+WHERE 
+    mh.production_year >= 2000
+    AND mh.title IS NOT NULL
+    AND (c.total_cast_members > 5 OR k.keywords IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC, 
+    mh.title;

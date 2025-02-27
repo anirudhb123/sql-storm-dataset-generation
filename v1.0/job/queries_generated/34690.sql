@@ -1,0 +1,84 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    WHERE 
+        c.movie_id = (SELECT id FROM aka_title WHERE title LIKE 'Inception%')
+    
+    UNION ALL
+    
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON a.person_id = c.person_id
+    JOIN 
+        ActorHierarchy ah ON ah.person_id = c.person_id
+    WHERE 
+        c.movie_id IN (
+            SELECT linked_movie_id 
+            FROM movie_link 
+            WHERE movie_id = ah.movie_id
+        )
+),
+
+MovieStats AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.actor_name,
+        COUNT(DISTINCT mc.company_id) AS production_company_count,
+        SUM(CASE WHEN p.info_type_id = 1 THEN 1 ELSE 0 END) AS awards_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN 
+        aka_name a ON a.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    LEFT JOIN 
+        movie_info p ON p.movie_id = t.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year, a.actor_name
+),
+
+RankedMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_name,
+        production_company_count,
+        awards_count,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY production_company_count DESC, awards_count DESC) AS rank
+    FROM 
+        MovieStats
+)
+
+SELECT 
+    rm.production_year,
+    rm.title,
+    rm.actor_name,
+    rm.production_company_count,
+    rm.awards_count,
+    CASE 
+        WHEN rm.rank <= 3 THEN 'Top'
+        WHEN rm.rank > 3 AND rm.rank <= 10 THEN 'Mid'
+        ELSE 'Low'
+    END AS rank_category
+FROM 
+    RankedMovies rm
+WHERE 
+    rm.production_company_count > 0
+ORDER BY 
+    rm.production_year, rm.rank;

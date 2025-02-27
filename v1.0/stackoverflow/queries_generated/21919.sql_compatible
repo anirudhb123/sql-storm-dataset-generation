@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(V.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, P.AcceptedAnswerId, U.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate AS ClosedDate,
+        CR.Name AS CloseReason
+    FROM 
+        PostHistory PH
+    JOIN 
+        CloseReasonTypes CR ON CAST(PH.Comment AS INTEGER) = CR.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11) 
+),
+PostTags AS (
+    SELECT 
+        P.Id AS PostId,
+        STRING_AGG(T.TagName, ', ') AS TagList
+    FROM 
+        Posts P
+    LEFT JOIN 
+        UNNEST(string_to_array(P.Tags, '>')) AS Tag ON TRUE
+    JOIN 
+        Tags T ON T.TagName = Tag
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.ViewCount,
+    COALESCE(Closed.ClosedDate, 'No Closure') AS ClosureInfo,
+    COALESCE(Closed.CloseReason, 'N/A') AS CloseReasonInfo,
+    PT.TagList,
+    RP.Rank,
+    CASE 
+        WHEN RP.VoteCount IS NULL OR RP.VoteCount = 0 THEN 'No Votes'
+        WHEN RP.VoteCount > 0 AND RP.VoteCount <= 5 THEN 'Low Engagement'
+        ELSE 'High Engagement' 
+    END AS EngagementLevel
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    ClosedPosts Closed ON RP.PostId = Closed.PostId
+LEFT JOIN 
+    PostTags PT ON RP.PostId = PT.PostId
+WHERE 
+    RP.Rank <= 10
+ORDER BY 
+    RP.ViewCount DESC, RP.CreationDate DESC;

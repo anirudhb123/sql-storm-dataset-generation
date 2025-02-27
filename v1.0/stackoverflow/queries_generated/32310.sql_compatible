@@ -1,0 +1,113 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        Id AS PostId,
+        Title,
+        Score,
+        ViewCount,
+        OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(*) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    WHERE 
+        v.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days'  
+    GROUP BY 
+        v.PostId
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(rv.VoteCount, 0) AS TotalVotes,
+        COALESCE(rv.UpVotes, 0) AS UpVotes,
+        COALESCE(rv.DownVotes, 0) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS OwnerRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecentVotes rv ON p.Id = rv.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = p.OwnerUserId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'  
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, rv.VoteCount, rv.UpVotes, rv.DownVotes
+),
+
+FinalSelect AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.ViewCount,
+        ps.TotalVotes,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        ps.BadgeNames,
+        r.Level AS AnswerLevel
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        RecursiveCTE r ON r.PostId = ps.PostId
+)
+
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.Score,
+    fs.ViewCount,
+    fs.TotalVotes,
+    fs.UpVotes,
+    fs.DownVotes,
+    fs.CommentCount,
+    fs.BadgeNames,
+    COALESCE(fs.AnswerLevel, 0) AS AnswerLevel,
+    CASE 
+        WHEN fs.UpVotes > fs.DownVotes THEN 'Positive'
+        WHEN fs.UpVotes < fs.DownVotes THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    FinalSelect fs
+WHERE 
+    fs.Score > 10  
+ORDER BY 
+    fs.TotalVotes DESC, fs.Score DESC;

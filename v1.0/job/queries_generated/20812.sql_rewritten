@@ -1,0 +1,91 @@
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        1 AS depth
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        e.season_nr,
+        e.episode_nr,
+        mh.depth + 1
+    FROM 
+        aka_title e
+    JOIN 
+        MovieHierarchy mh ON e.episode_of_id = mh.movie_id
+),
+AggregatedKeywords AS (
+    
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ' ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+HighRatedMovies AS (
+    
+    SELECT 
+        m.id,
+        m.title,
+        COALESCE(mr.rating, 0) AS rating
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        (SELECT 
+            movie_id, AVG(rating) AS rating
+         FROM 
+            movie_info 
+         WHERE 
+            info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+         GROUP BY 
+            movie_id
+        ) mr ON m.id = mr.movie_id
+    WHERE
+        COALESCE(mr.rating, -1) > 7.0
+)
+SELECT 
+    mh.title AS Episode_Title,
+    mh.production_year AS Production_Year,
+    ak.name AS Actor_Name,
+    ak.id AS Actor_ID,
+    COALESCE(ak.surname_pcode, 'Unknown') AS Surname_PCode,
+    COALESCE(ag.keywords, 'No Keywords') AS Aggregated_Keywords,
+    CASE 
+        WHEN mh.depth > 1 THEN 'Episode'
+        ELSE 'Movie'
+    END AS Entertainment_Type,
+    ROW_NUMBER() OVER (PARTITION BY mh.movie_id ORDER BY ak.name) AS Actor_Order
+FROM 
+    MovieHierarchy mh
+JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    AggregatedKeywords ag ON mh.movie_id = ag.movie_id
+JOIN 
+    HighRatedMovies hr ON mh.movie_id = hr.id
+WHERE 
+    mh.production_year > 2000
+    AND ak.name NOT LIKE '%Unknown%'
+    AND (mh.season_nr IS NOT NULL OR mh.episode_nr IS NOT NULL)
+ORDER BY 
+    mh.production_year DESC,
+    mh.title,
+    Actor_Order;

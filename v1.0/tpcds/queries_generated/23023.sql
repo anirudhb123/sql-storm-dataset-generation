@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss.sold_date_sk,
+        ss.item_sk,
+        ss_ticket_number,
+        RANK() OVER (PARTITION BY ss.item_sk ORDER BY ss.net_profit DESC) AS sales_rank,
+        ss.net_profit,
+        ss.quantity,
+        c.c_customer_id,
+        ca.ca_city,
+        wd.warehouse_name
+    FROM 
+        store_sales ss
+    LEFT JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        warehouse wd ON ss.ss_store_sk = wd.w_warehouse_sk
+    WHERE 
+        ca.ca_state IS NOT NULL AND
+        ss.sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+FilteredSales AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN sales_rank = 1 THEN 'Top Seller'
+            ELSE 'Regular Seller'
+        END AS seller_type
+    FROM 
+        RankedSales
+    WHERE 
+        net_profit > (SELECT AVG(net_profit) FROM RankedSales) 
+        OR (quantity IS NULL AND seller_type = 'Top Seller')
+),
+AggregatedResults AS (
+    SELECT 
+        city,
+        COUNT(*) AS total_sales,
+        SUM(net_profit) AS total_profit,
+        AVG(quantity) AS avg_quantity,
+        CASE 
+            WHEN SUM(net_profit) < 0 THEN 'Loss'
+            WHEN SUM(net_profit) > 10000 THEN 'High Profit'
+            ELSE 'Moderate Profit'
+        END AS profitability
+    FROM 
+        FilteredSales
+    GROUP BY 
+        city
+)
+SELECT 
+    city,
+    total_sales,
+    total_profit,
+    avg_quantity,
+    profitability
+FROM 
+    AggregatedResults
+WHERE 
+    profitability IN ('High Profit', 'Moderate Profit')
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 10 ROWS ONLY
+UNION ALL
+SELECT 
+    'Total' AS city,
+    COUNT(*) AS total_sales,
+    SUM(total_profit) AS total_profit,
+    AVG(avg_quantity) AS avg_quantity,
+    NULL AS profitability
+FROM 
+    AggregatedResults
+HAVING 
+    SUM(total_profit) > 50000;

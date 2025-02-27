@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.Score IS NOT NULL AND 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    us.DisplayName AS Owner,
+    us.TotalBounties,
+    us.BadgeCount,
+    us.CommentCount,
+    (SELECT COUNT(*)
+     FROM Comments c
+     WHERE c.PostId = rp.PostId) AS TotalComments,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Tags t
+     WHERE t.Id IN (
+         SELECT DISTINCT CAST(TRIM(BOTH '>' FROM TRIM(BOTH '<' FROM unnest(string_to_array(rp.Tags, '>')))) AS INT)
+         )) 
+    ) AS RelatedTags,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.Score < 0 THEN 'Negative Score'
+        WHEN rp.Score >= 0 AND rp.Score < 5 THEN 'Low Score'
+        ELSE 'High Score'
+    END AS ScoreCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    UserStats us ON rp.PostId = us.UserId
+WHERE 
+    rp.rn <= 5  
+    AND EXISTS (
+         SELECT 1 
+         FROM Votes v 
+         WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2
+         GROUP BY v.PostId
+         HAVING COUNT(*) > 10
+    )
+ORDER BY 
+    rp.Score DESC,
+    rp.CreationDate ASC
+FETCH FIRST 10 ROWS ONLY;

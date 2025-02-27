@@ -1,0 +1,86 @@
+WITH UserReputation AS (
+    SELECT 
+        Id AS UserID, 
+        Reputation, 
+        CASE 
+            WHEN Reputation < 100 THEN 'Novice'
+            WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationCategory
+    FROM 
+        Users
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title, 
+        p.OwnerUserId, 
+        p.PostTypeId,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AcceptedAnswerId, 0) AS HasAcceptedAnswer,
+        COUNT(DISTINCT v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    LEFT JOIN 
+        Posts a ON a.Id = p.AcceptedAnswerId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, a.AcceptedAnswerId, c.CommentCount
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '3 MONTHS'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+PostDetails AS (
+    SELECT 
+        ps.PostID, 
+        us.ReputationCategory,
+        ps.Title, 
+        ps.CommentCount,
+        ps.HasAcceptedAnswer,
+        ps.VoteCount,
+        pht.HistoryCount
+    FROM 
+        PostSummary ps
+    LEFT JOIN 
+        UserReputation us ON ps.OwnerUserId = us.UserID
+    LEFT JOIN 
+        PostHistorySummary pht ON ps.PostID = pht.PostId
+)
+SELECT 
+    pd.Title,
+    pd.ReputationCategory,
+    pd.CommentCount,
+    pd.HasAcceptedAnswer,
+    pd.VoteCount,
+    COALESCE(pd.HistoryCount, 0) AS HistoryCount,
+    CASE 
+        WHEN pd.VoteCount > 10 THEN 'Highly Voted'
+        WHEN pd.VoteCount BETWEEN 1 AND 10 THEN 'Moderately Voted'
+        ELSE 'Not Voted'
+    END AS VoteStatus,
+    CASE 
+        WHEN pd.HasAcceptedAnswer > 0 THEN 'Has Accepted Answer'
+        ELSE 'No Accepted Answer'
+    END AS AcceptanceStatus
+FROM 
+    PostDetails pd
+WHERE 
+    pd.ReputationCategory IS NOT NULL
+ORDER BY 
+    pd.VoteCount DESC, 
+    pd.CommentCount DESC
+FETCH FIRST 50 ROWS ONLY;

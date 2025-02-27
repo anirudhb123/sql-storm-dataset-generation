@@ -1,0 +1,44 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c_customer_sk, c_first_name, c_last_name, c_current_cdemo_sk, 1 AS level
+    FROM customer
+    WHERE c_current_cdemo_sk IS NOT NULL
+
+    UNION ALL
+
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_current_cdemo_sk, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_current_cdemo_sk = ch.c_current_cdemo_sk
+), SalesData AS (
+    SELECT ws.ws_ship_date_sk,
+           COUNT(DISTINCT CASE WHEN ws.ws_ship_mode_sk = sm.sm_ship_mode_sk THEN ws.ws_order_number END) AS total_orders,
+           SUM(ws.ws_ext_sales_price) AS total_sales,
+           RANK() OVER (PARTITION BY ws.ws_ship_mode_sk ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY ws.ws_ship_date_sk, sm.sm_ship_mode_sk
+), TopDailySales AS (
+    SELECT sd.ws_ship_date_sk, 
+           MAX(sd.total_sales) AS max_sales,
+           SUM(sd.total_sales) AS total_sales_per_day
+    FROM SalesData sd
+    GROUP BY sd.ws_ship_date_sk
+)
+SELECT ca.ca_city,
+       cd.cd_gender,
+       COALESCE(ch.level, 0) AS customer_level,
+       COALESCE(tds.max_sales, 0) AS max_daily_sales,
+       COALESCE(tds.total_sales_per_day, 0) AS total_sales_day
+FROM customer c
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN CustomerHierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+LEFT JOIN TopDailySales tds ON tds.ws_ship_date_sk = (
+    SELECT MAX(ws_ship_date_sk)
+    FROM web_sales ws
+    WHERE ws.ws_bill_customer_sk = c.c_customer_sk
+)
+WHERE (cd.cd_gender = 'F' OR cd.cd_gender IS NULL)
+AND (ca.ca_city IS NOT NULL)
+AND tds.total_sales_per_day > 0
+ORDER BY ca.ca_city, cd.cd_gender, customer_level DESC;

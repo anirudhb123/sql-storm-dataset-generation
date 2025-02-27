@@ -1,0 +1,41 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        DENSE_RANK() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        nation_name,
+        s_suppkey,
+        s_name,
+        total_cost
+    FROM RankedSuppliers
+    WHERE rank <= 5
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, c.c_custkey
+)
+SELECT 
+    ts.nation_name,
+    ts.s_name,
+    od.c_custkey,
+    SUM(od.revenue) AS total_revenue
+FROM TopSuppliers ts
+JOIN OrderDetails od ON od.c_custkey IN (SELECT c.c_custkey FROM customer c JOIN supplier s ON c.c_nationkey = s.s_nationkey WHERE s.s_name = ts.s_name)
+GROUP BY ts.nation_name, ts.s_name, od.c_custkey
+ORDER BY ts.nation_name, total_revenue DESC;

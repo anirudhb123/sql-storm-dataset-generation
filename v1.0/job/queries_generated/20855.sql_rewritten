@@ -1,0 +1,56 @@
+WITH RecursiveActors AS (
+    SELECT a.id AS actor_id,
+           a.name AS actor_name,
+           COUNT(DISTINCT c.movie_id) AS movie_count,
+           ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY COUNT(DISTINCT c.movie_id) DESC) AS rank
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    GROUP BY a.id
+),
+MovieDetails AS (
+    SELECT t.id AS title_id,
+           t.title,
+           t.production_year,
+           COUNT(DISTINCT mc.company_id) AS company_count,
+           COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM aka_title t
+    LEFT JOIN movie_companies mc ON t.movie_id = mc.movie_id
+    LEFT JOIN movie_keyword mk ON t.movie_id = mk.movie_id
+    GROUP BY t.id
+),
+BizarrePredicates AS (
+    SELECT actor_name, 
+           movie_title, 
+           production_year,
+           keyword_count
+    FROM RecursiveActors ra
+    JOIN (
+        SELECT title_id, 
+               title AS movie_title, 
+               production_year
+        FROM MovieDetails
+        WHERE production_year BETWEEN 1990 AND 2020
+    ) AS md ON ra.movie_count > 5
+    LEFT JOIN (
+        SELECT DISTINCT tk.id AS title_id,
+                        k.keyword
+        FROM movie_keyword tk
+        JOIN keyword k ON tk.keyword_id = k.id
+        WHERE LENGTH(k.keyword) > 5
+    ) AS keywords ON md.title_id = keywords.title_id
+    WHERE actor_name IS NOT NULL
+)
+SELECT b.actor_name,
+       b.movie_title,
+       b.production_year,
+       b.keyword_count,
+       (CASE 
+            WHEN b.keyword_count IS NULL THEN 'No Keywords' 
+            WHEN b.keyword_count > 5 THEN 'Multiple Keywords' 
+            ELSE 'Few Keywords' 
+        END) AS keyword_status
+FROM BizarrePredicates b
+LEFT JOIN company_name c ON b.production_year % 2 = 0 
+WHERE b.actor_name NOT IN (SELECT name FROM char_name WHERE imdb_index IS NULL)
+ORDER BY b.keyword_count DESC, b.actor_name ASC
+LIMIT 10;

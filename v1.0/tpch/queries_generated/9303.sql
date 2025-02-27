@@ -1,0 +1,46 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost,
+        RANK() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS CostRank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, n.n_regionkey
+), FilteredOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_customerkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS TotalRevenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' AND o.o_orderdate < DATE '2023-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_customerkey
+)
+SELECT 
+    r.r_name AS Region,
+    fs.s_name AS SupplierName,
+    fs.TotalCost AS SupplierTotalCost,
+    fo.TotalRevenue AS OrderTotalRevenue
+FROM 
+    RankedSuppliers fs
+JOIN 
+    nation n ON fs.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    FilteredOrders fo ON fs.s_suppkey = fo.o_customerkey
+WHERE 
+    fs.CostRank <= 5
+ORDER BY 
+    r.r_name, fs.TotalCost DESC;

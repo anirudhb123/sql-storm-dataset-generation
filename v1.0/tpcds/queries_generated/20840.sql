@@ -1,0 +1,60 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk,
+           c.c_customer_id,
+           c.c_first_name,
+           c.c_last_name,
+           c.c_birth_year,
+           cd.cd_demo_sk,
+           cd.cd_gender,
+           cd.cd_marital_status
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year IS NOT NULL
+
+    UNION ALL
+    
+    SELECT ch.c_customer_sk,
+           ch.c_customer_id,
+           ch.c_first_name,
+           ch.c_last_name,
+           ch.c_birth_year,
+           cd.cd_demo_sk,
+           cd.cd_gender,
+           cd.cd_marital_status
+    FROM CustomerHierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_cdemo_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE c.c_birth_year IS NOT NULL
+),
+SalesData AS (
+    SELECT ws_item_sk,
+           SUM(ws_quantity) AS total_quantity,
+           SUM(ws_net_paid) AS total_paid,
+           DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+CombinedSales AS (
+    SELECT CASE 
+               WHEN sd.total_quantity > 100 THEN 'High Volume'
+               WHEN sd.total_quantity BETWEEN 50 AND 100 THEN 'Medium Volume'
+               ELSE 'Low Volume'
+           END AS sales_category,
+           sd.total_quantity,
+           sd.total_paid
+    FROM SalesData sd
+    WHERE sd.sales_rank <= 10
+)
+SELECT ca.ca_state,
+       ca.ca_city,
+       COUNT(DISTINCT ch.c_customer_sk) AS customer_count,
+       AVG(cs.total_paid) AS avg_sales,
+       MAX(cs.total_quantity) AS max_quantity_sold,
+       STRING_AGG(DISTINCT ch.c_first_name || ' ' || ch.c_last_name) AS customer_names
+FROM customer_address ca
+LEFT JOIN CustomerHierarchy ch ON ca.ca_address_sk = ch.c_customer_sk
+LEFT JOIN CombinedSales cs ON ch.c_customer_id = cs.sales_category
+GROUP BY ROLLUP(ca.ca_state, ca.ca_city)
+HAVING ca.ca_state IS NOT NULL OR AVG(cs.total_paid) > 100
+ORDER BY ca.ca_state DESC, ca.ca_city ASC;

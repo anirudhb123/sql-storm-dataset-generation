@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate AS PostCreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment AS EditComment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title, Edit Body
+    ORDER BY 
+        ph.CreationDate DESC
+),
+TopPostsWithEdits AS (
+    SELECT 
+        rp.PostId,
+        rp.PostTitle,
+        rp.OwnerDisplayName,
+        rp.PostCreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpVotes,
+        rp.DownVotes,
+        re.EditDate,
+        re.UserDisplayName AS EditorDisplayName,
+        re.EditComment
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId
+    WHERE 
+        rp.Rank = 1
+)
+SELECT 
+    pp.PostId,
+    pp.PostTitle,
+    pp.OwnerDisplayName,
+    pp.PostCreationDate,
+    pp.Score,
+    pp.CommentCount,
+    pp.UpVotes,
+    pp.DownVotes,
+    COALESCE(pp.EditDate, 'No Edits') AS LastEditDate,
+    COALESCE(pp.EditorDisplayName, 'N/A') AS LastEditor,
+    COALESCE(pp.EditComment, 'N/A') AS EditComment
+FROM 
+    TopPostsWithEdits pp
+ORDER BY 
+    pp.Score DESC, pp.PostCreationDate DESC
+LIMIT 10;

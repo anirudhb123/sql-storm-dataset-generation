@@ -1,0 +1,48 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, 
+           oh.order_rank + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderdate > oh.o_orderdate
+), SupplierStats AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+), RegionNation AS (
+    SELECT r.r_name AS region_name, n.n_name, COUNT(s.s_suppkey) AS supplier_count
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_name, n.n_name
+), LineItemSummary AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(*) AS line_count,
+           MAX(l.l_shipdate) AS last_ship_date
+    FROM lineitem l
+    WHERE l.l_shipdate >= '1997-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT rh.o_orderkey, 
+       rh.o_orderdate, 
+       ls.total_revenue, 
+       s.total_supply_cost,
+       rn.supplier_count,
+       CASE 
+           WHEN ls.total_revenue IS NULL THEN 'No Revenue' 
+           ELSE 'Revenue Generated' 
+       END AS revenue_status
+FROM OrderHierarchy rh
+LEFT JOIN LineItemSummary ls ON rh.o_orderkey = ls.l_orderkey
+LEFT JOIN SupplierStats s ON ls.line_count > s.unique_parts
+JOIN RegionNation rn ON rn.region_name = 'North America'
+WHERE s.total_supply_cost IS NOT NULL
+ORDER BY rh.o_orderdate DESC;

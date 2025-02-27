@@ -1,0 +1,91 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT B.Id), 0) AS BadgeCount,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS CommentCount
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostInfo AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        COALESCE(SUM(CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 ELSE 0 END), 0) AS ClosedCount,
+        COALESCE(COUNT(DISTINCT C.Id), 0) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RowNum
+    FROM 
+        Posts P
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount
+)
+SELECT 
+    US.UserId, 
+    US.DisplayName, 
+    US.Reputation,
+    PS.PostId,
+    PS.Title AS PostTitle,
+    PS.CreationDate AS PostCreationDate,
+    PS.Score AS PostScore,
+    PS.ViewCount AS PostViews,
+    PS.AnswerCount AS PostAnswers,
+    PS.ClosedCount,
+    PS.TotalComments,
+    CASE 
+        WHEN PS.RowNum = 1 AND PS.ClosedCount > 0 THEN 'Closed'
+        ELSE 'Open' 
+    END AS PostStatus
+FROM 
+    UserStats US
+JOIN 
+    Posts P ON US.UserId = P.OwnerUserId
+JOIN 
+    PostInfo PS ON P.Id = PS.PostId
+WHERE 
+    US.Reputation > 1000
+ORDER BY 
+    US.Reputation DESC, 
+    PS.CreationDate ASC
+LIMIT 50
+UNION ALL
+SELECT 
+    US.UserId, 
+    US.DisplayName, 
+    US.Reputation,
+    NULL AS PostId,
+    NULL AS PostTitle,
+    NULL AS PostCreationDate,
+    NULL AS PostScore,
+    NULL AS PostViews,
+    NULL AS PostAnswers,
+    NULL AS ClosedCount,
+    NULL AS TotalComments,
+    'User No Posts' AS PostStatus
+FROM 
+    UserStats US
+WHERE 
+    US.UserId NOT IN (SELECT DISTINCT OwnerUserId FROM Posts)
+ORDER BY 
+    US.Reputation DESC 
+LIMIT 10;

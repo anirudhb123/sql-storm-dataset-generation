@@ -1,0 +1,79 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        SUM(COALESCE(P.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalViews,
+        TotalScore,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserStatistics
+    WHERE 
+        TotalPosts > 10
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(COUNT(CM.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments CM ON P.Id = CM.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 -- BountyStart
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalViews,
+    U.TotalScore,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.CommentCount,
+    P.TotalBounty,
+    COALESCE(
+        (SELECT Comment FROM PostHistory PH 
+         WHERE PH.PostId = P.PostId 
+         AND PH.PostHistoryTypeId = 10 
+         ORDER BY PH.CreationDate DESC LIMIT 1), 
+    'No Close Reason') AS LastCloseReason
+FROM 
+    TopUsers U
+JOIN 
+    PostMetrics P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.ReputationRank, P.Score DESC
+LIMIT 50;

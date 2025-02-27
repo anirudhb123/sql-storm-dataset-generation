@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    HAVING total_supply_cost > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+OrderMetrics AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           DENSE_RANK() OVER (PARTITION BY EXTRACT(YEAR FROM o.o_orderdate) ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '2023-01-01'
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    STRING_AGG(DISTINCT s.s_name, ', ') AS suppliers,
+    SUM(COALESCE(l.l_discount, 0)) AS total_discount,
+    COUNT(om.o_orderkey) AS high_value_orders
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders om ON c.c_custkey = om.o_custkey
+LEFT JOIN lineitem l ON om.o_orderkey = l.l_orderkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE r.r_name LIKE 'N%'
+GROUP BY r.r_name
+HAVING COUNT(sh.s_suppkey) > 5 AND AVG(sh.s_acctbal) > 20000
+ORDER BY customer_count DESC, region_name
+LIMIT 10;

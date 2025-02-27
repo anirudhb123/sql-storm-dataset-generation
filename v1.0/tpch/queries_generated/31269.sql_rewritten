@@ -1,0 +1,85 @@
+WITH RECURSIVE price_history AS (
+    SELECT
+        ps_partkey,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn
+    FROM
+        partsupp
+    WHERE
+        ps_supplycost IS NOT NULL
+),
+filtered_orders AS (
+    SELECT
+        o.o_orderkey,
+        c.c_nationkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate > '1997-01-01' AND
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY
+        o.o_orderkey, c.c_nationkey
+),
+region_totals AS (
+    SELECT
+        r.r_regionkey,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM
+        region r
+    LEFT JOIN
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN
+        customer c ON n.n_nationkey = c.c_nationkey
+    GROUP BY
+        r.r_regionkey
+)
+SELECT
+    r.r_name,
+    COALESCE(rt.total_acctbal, 0) AS total_balance,
+    COUNT(DISTINCT fo.o_orderkey) AS order_count,
+    AVG(ph.ps_supplycost) AS avg_supply_cost,
+    MAX(ph.ps_supplycost) AS max_supply_cost
+FROM
+    region r
+LEFT JOIN
+    region_totals rt ON r.r_regionkey = rt.r_regionkey
+LEFT JOIN
+    filtered_orders fo ON r.r_regionkey IN (
+        SELECT
+            n.n_regionkey
+        FROM
+            nation n
+        JOIN
+            customer c ON n.n_nationkey = c.c_nationkey
+        WHERE
+            c.c_nationkey IS NOT NULL
+    )
+LEFT JOIN
+    price_history ph ON r.r_regionkey = (
+        SELECT
+            n.n_regionkey
+        FROM
+            nation n
+        JOIN
+            supplier s ON n.n_nationkey = s.s_nationkey
+        WHERE
+            s.s_suppkey IN (
+                SELECT
+                    ps.ps_suppkey
+                FROM
+                    partsupp ps
+                WHERE
+                    ps.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size < 20)
+            )
+    )
+GROUP BY
+    r.r_name
+HAVING
+    AVG(ph.ps_supplycost) > (SELECT AVG(ps_supplycost) FROM partsupp)
+ORDER BY
+    total_balance DESC, order_count ASC;

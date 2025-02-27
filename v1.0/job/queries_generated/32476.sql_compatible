@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT c.person_id) AS cast_ids
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+), 
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS num_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, co.name, ct.kind
+), 
+AddingQuality AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ci.company_name,
+        ci.company_type,
+        COALESCE(ARRAY_AGG(DISTINCT c.name ORDER BY c.name), ARRAY[]::TEXT[]) AS actors,
+        ROW_NUMBER() OVER(PARTITION BY m.movie_id ORDER BY ci.num_movies DESC) AS rn
+    FROM 
+        MovieCTE m
+    LEFT JOIN 
+        CompanyInfo ci ON m.movie_id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON c.person_id = ANY(m.cast_ids)
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, ci.company_name, ci.company_type
+), 
+RankedMovies AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN rn = 1 THEN 'Primary Company'
+            ELSE 'Other Company' 
+        END AS company_rank,
+        COUNT(*) OVER(PARTITION BY production_year) AS total_movies
+    FROM 
+        AddingQuality
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    ARRAY_TO_STRING(actors, ', ') AS actor_list,
+    company_name,
+    company_type,
+    company_rank,
+    total_movies,
+    (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = rm.movie_id) AS total_cast
+FROM 
+    RankedMovies rm
+WHERE 
+    company_rank = 'Primary Company' 
+    AND total_movies > 5
+ORDER BY 
+    production_year DESC, title ASC;

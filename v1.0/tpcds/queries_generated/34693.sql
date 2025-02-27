@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk, 
+        s_store_id, 
+        s_store_name, 
+        s_number_employees, 
+        s_floor_space, 
+        s_city,
+        1 AS level
+    FROM 
+        store
+    WHERE 
+        s_number_employees > 100
+    
+    UNION ALL
+
+    SELECT 
+        s.store_sk, 
+        s.s_store_id, 
+        s.s_store_name, 
+        s.s_number_employees, 
+        s.s_floor_space, 
+        s.s_city,
+        sh.level + 1
+    FROM 
+        store s
+    INNER JOIN 
+        sales_hierarchy sh ON s.s_division_id = sh.s_store_sk
+)
+SELECT 
+    c.c_customer_id,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    AVG(cd.cd_purchase_estimate) AS average_purchase_estimate,
+    COUNT(DISTINCT sr_ticket_number) AS total_returns,
+    CASE 
+        WHEN AVG(cd.cd_dep_count) IS NULL THEN 'NOT AVAILABLE'
+        WHEN AVG(cd.cd_dep_count) > 2 THEN 'LARGE FAMILY'
+        ELSE 'SMALL FAMILY' 
+    END AS family_size_category,
+    ROW_NUMBER() OVER (PARTITION BY c.c_city ORDER BY total_net_profit DESC) AS city_profit_rank,
+    STRING_AGG(DISTINCT i.i_product_name, ', ') AS products_bought,
+    COALESCE(sm.sm_type, 'DEFAULT') AS shipment_mode
+FROM 
+    customer c
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN 
+    store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+LEFT JOIN 
+    customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+LEFT JOIN 
+    ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+GROUP BY 
+    c.c_customer_id, c.c_city
+HAVING 
+    SUM(ws.ws_net_profit) > 0
+    AND COUNT(DISTINCT sr_ticket_number) < 5
+ORDER BY 
+    total_net_profit DESC
+LIMIT 50;

@@ -1,0 +1,87 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Top-level posts (without parents)
+    
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.CreationDate,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostHierarchy ph ON p.ParentId = ph.PostId
+),
+PostStats AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        COUNT(c.Id) AS CommentCount,
+        SUM(vote.VoteTypeId = 2) AS UpVotes,
+        SUM(vote.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT ph2.PostId) AS RelatedPosts
+    FROM 
+        PostHierarchy ph
+    LEFT JOIN 
+        Comments c ON c.PostId = ph.PostId
+    LEFT JOIN 
+        Votes vote ON vote.PostId = ph.PostId
+    LEFT JOIN 
+        PostLinks pl ON pl.PostId = ph.PostId
+    LEFT JOIN 
+        Posts ph2 ON pl.RelatedPostId = ph2.Id
+    GROUP BY 
+        ph.PostId, ph.Title
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.DisplayName AS User,
+    ps.Title AS PostTitle,
+    ps.CommentCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    COALESCE(ub.BadgeCount, 0) AS TotalBadges,
+    COALESCE(ub.GoldBadges, 0) AS GoldBadges,
+    COALESCE(ub.SilverBadges, 0) AS SilverBadges,
+    COALESCE(ub.BronzeBadges, 0) AS BronzeBadges,
+    CASE
+        WHEN ps.RelatedPosts > 0 THEN 'Yes'
+        ELSE 'No'
+    END AS HasRelatedPosts
+FROM 
+    PostStats ps
+JOIN 
+    Users u ON u.Id = ps.PostId  -- Assuming UserId in Posts is the owner
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    ps.CommentCount > 5
+    AND ps.UpVotes > ps.DownVotes
+ORDER BY 
+    TotalBadges DESC, 
+    ps.CommentCount DESC
+LIMIT 100;

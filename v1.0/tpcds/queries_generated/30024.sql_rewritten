@@ -1,0 +1,36 @@
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_current_price, i_size, i_category
+    FROM item
+    WHERE i_category = 'Electronics'
+    UNION ALL
+    SELECT i.item_sk, i.i_item_desc, i.i_current_price, i.i_size, i.i_category
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE i.i_rec_start_date < cast('2002-10-01' as date)
+),
+customer_preferences AS (
+    SELECT c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk, 
+           COUNT(DISTINCT ws.ws Order_number) AS number_of_orders, 
+           SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, cd.cd_income_band_sk
+),
+average_purchases AS (
+    SELECT c.c_customer_sk, AVG(total_spent) AS avg_purchase
+    FROM customer_preferences c
+    GROUP BY c.c_customer_sk
+),
+top_customers AS (
+    SELECT c.c_customer_sk, c.gender, c.income_band_sk, c.avg_purchase
+    FROM average_purchases c
+    WHERE c.avg_purchase > (SELECT AVG(avg_purchase) FROM average_purchases)
+)
+SELECT t.*, 
+       ROW_NUMBER() OVER(PARTITION BY t.gender ORDER BY t.avg_purchase DESC) AS rank,
+       COALESCE(ih.i_item_desc, 'Other') AS recommended_item
+FROM top_customers t
+LEFT JOIN item_hierarchy ih ON t.c_customer_sk = ih.i_item_sk
+ORDER BY rank
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,27 @@
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate ASC) AS Rank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+    AND p.Score > 0
+),
+UserStats AS (
+    SELECT u.Id AS UserId, 
+           COUNT(DISTINCT p.Id) AS QuestionsCount,
+           SUM(COALESCE(b.Class, 0)) AS TotalBadgeClass,
+           SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT UserId, QuestionsCount, TotalBadgeClass, TotalViews,
+           RANK() OVER (ORDER BY TotalViews DESC, QuestionsCount DESC) AS UserRank
+    FROM UserStats
+)
+SELECT ru.UserId, u.DisplayName, ru.QuestionsCount, ru.TotalBadgeClass, ru.TotalViews, rp.Title AS TopQuestionTitle, rp.Score AS TopQuestionScore
+FROM TopUsers ru
+JOIN Users u ON ru.UserId = u.Id
+LEFT JOIN RankedPosts rp ON ru.UserId = rp.OwnerUserId AND rp.Rank = 1
+WHERE ru.UserRank <= 10;

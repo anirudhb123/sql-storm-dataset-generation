@@ -1,0 +1,66 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND a.name IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        actor_id,
+        COUNT(DISTINCT movie_id) AS movie_count
+    FROM 
+        ranked_movies
+    GROUP BY 
+        actor_id
+),
+most_active_actors AS (
+    SELECT 
+        am.actor_id,
+        ak.name,
+        am.movie_count
+    FROM 
+        actor_movie_counts am
+    JOIN 
+        aka_name ak ON am.actor_id = ak.person_id
+    WHERE 
+        am.movie_count > 5
+),
+top_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        COUNT(DISTINCT actor_id) AS actor_count
+    FROM 
+        ranked_movies
+    GROUP BY 
+        movie_id, title
+    ORDER BY 
+        actor_count DESC
+    LIMIT 10
+)
+SELECT 
+    t.title AS movie_title,
+    t.production_year,
+    r.actor_name,
+    ma.movie_count
+FROM 
+    top_movies t
+JOIN 
+    ranked_movies r ON t.movie_id = r.movie_id
+JOIN 
+    most_active_actors ma ON r.actor_id = ma.actor_id
+ORDER BY 
+    t.actor_count DESC, t.production_year DESC;

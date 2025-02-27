@@ -1,0 +1,45 @@
+
+WITH RECURSIVE customer_return_stats AS (
+    SELECT 
+        ca.ca_address_id, 
+        c.c_customer_id, 
+        COUNT(sr.ticket_number) AS total_returns,
+        SUM(sr.return_quantity) AS total_returned_quantity,
+        SUM(sr.return_amt) AS total_returned_amount
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.customer_sk
+    GROUP BY ca.ca_address_id, c.c_customer_id
+    
+    UNION ALL
+
+    SELECT 
+        ca.ca_address_id,
+        c.c_customer_id,
+        cr.total_returns + 1,
+        cr.total_returned_quantity + sr.return_quantity,
+        cr.total_returned_amount + sr.return_amt
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN store_returns sr ON c.c_customer_sk = sr.customer_sk
+    JOIN customer_return_stats cr ON cr.ca_address_id = ca.ca_address_id
+    WHERE sr.returned_date_sk = cr.total_returns + 1
+)
+
+SELECT 
+    address.ca_address_id,
+    address.ca_city,
+    demo.cd_gender,
+    demo.cd_marital_status,
+    MAX(rs.total_returns) AS max_total_returns,
+    AVG(rs.total_returned_quantity) AS avg_returned_quantity,
+    CASE 
+        WHEN MAX(rs.total_returned_amount) IS NULL THEN 'No Returns'
+        ELSE CONCAT('Total Amount Returned: $', MAX(rs.total_returned_amount))
+    END AS return_summary
+FROM customer_return_stats rs
+JOIN customer_demographics demo ON rs.c_customer_id = demo.cd_demo_sk
+JOIN customer_address address ON address.ca_address_id = rs.ca_address_id
+GROUP BY address.ca_address_id, address.ca_city, demo.cd_gender, demo.cd_marital_status
+ORDER BY max_total_returns DESC
+LIMIT 10;

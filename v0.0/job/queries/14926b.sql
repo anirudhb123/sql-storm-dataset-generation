@@ -1,0 +1,4 @@
+SELECT min(chn.name) AS character, min(t.title) AS russian_mov_with_actor_producer
+FROM char_name AS chn, cast_info AS ci, company_name AS cn, company_type AS ct, movie_companies AS mc, role_type AS rt, title AS t
+WHERE t.id = mc.movie_id AND t.id = ci.movie_id AND ci.movie_id = mc.movie_id AND chn.id = ci.person_role_id AND rt.id = ci.role_id AND cn.id = mc.company_id AND ct.id = mc.company_type_id
+AND chn.md5sum < '53c130da95824e6c08a3a6af3ca0d7d9' AND chn.surname_pcode IN ('A1635', 'B135', 'B6126', 'E3216', 'G4362', 'J2516', 'K2623', 'K4325', 'R3136', 'U4251') AND ci.person_role_id IS NOT NULL AND mc.company_type_id < 2 AND t.episode_of_id > 1279010;

@@ -1,0 +1,62 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_profit,
+        SUM(ws_quantity) AS total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+), customer_stats AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        AVG(cd_dep_count) AS avg_dep_count,
+        MAX(cd_credit_rating) AS highest_credit_rating
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+    GROUP BY 
+        cd_gender
+), inventory_status AS (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory,
+        ROW_NUMBER() OVER (ORDER BY SUM(inv_quantity_on_hand) DESC) AS inventory_rank
+    FROM 
+        inventory
+    GROUP BY 
+        inv_item_sk
+)
+SELECT 
+    s.ss_customer_sk,
+    SUM(s.ss_net_profit) AS total_net_profit,
+    c.cd_gender,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    cs.avg_dep_count,
+    i.total_inventory,
+    i.inventory_rank
+FROM 
+    store_sales s
+LEFT JOIN 
+    customer c ON s.ss_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    customer_stats cs ON c.c_current_cdemo_sk = cs.cd_demo_sk
+LEFT JOIN 
+    inventory_status i ON s.ss_item_sk = i.inv_item_sk
+WHERE 
+    cs.customer_count > 50
+    AND (i.total_inventory IS NULL OR i.total_inventory > 1000)
+GROUP BY 
+    s.ss_customer_sk, c.cd_gender, cs.customer_count, cs.avg_purchase_estimate, cs.avg_dep_count, i.total_inventory, i.inventory_rank
+HAVING 
+    SUM(s.ss_net_profit) > 5000
+ORDER BY 
+    total_net_profit DESC
+LIMIT 10;

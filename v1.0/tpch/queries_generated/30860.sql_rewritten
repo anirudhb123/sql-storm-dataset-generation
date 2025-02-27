@@ -1,0 +1,50 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON sh.s_nationkey = s.s_nationkey AND s.s_acctbal > 1000
+),
+PartStats AS (
+    SELECT p.p_partkey, 
+           p.p_name,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           MAX(ps.ps_availqty) AS max_avail_qty
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+CustomerTotalOrders AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT sh.s_suppkey,
+           sh.s_name,
+           RANK() OVER (PARTITION BY sh.level ORDER BY SUM(ps.ps_supplycost) DESC) AS supply_rank
+    FROM SupplierHierarchy sh
+    LEFT JOIN partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    GROUP BY sh.s_suppkey, sh.s_name, sh.level
+)
+SELECT p.p_name,
+       ps.supplier_count,
+       ps.avg_supply_cost,
+       ps.max_avail_qty,
+       c.total_spent,
+       c.order_count,
+       rs.s_name AS top_supplier,
+       rs.supply_rank
+FROM PartStats ps
+JOIN CustomerTotalOrders c ON ps.supplier_count > 1 
+LEFT JOIN RankedSuppliers rs ON rs.supply_rank = 1 
+WHERE ps.avg_supply_cost > 20.00 
+ORDER BY p.p_name, c.total_spent DESC
+LIMIT 10;

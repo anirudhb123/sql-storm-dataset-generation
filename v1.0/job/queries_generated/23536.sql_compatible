@@ -1,0 +1,81 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id, 
+        mt.title, 
+        mt.production_year, 
+        1 AS level,
+        NULL AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.movie_id
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+RankedMovies AS (
+    SELECT 
+        mh.movie_id, 
+        mh.title, 
+        mh.production_year,
+        mh.level,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level) AS rn
+    FROM 
+        MovieHierarchy mh
+)
+
+SELECT 
+    mv.title AS Movie_Title,
+    mv.production_year AS Release_Year,
+    COALESCE(cn.name, 'Unknown Production Company') AS Production_Company,
+    COUNT(DISTINCT ci.person_id) AS Total_Cast,
+    SUM(CASE WHEN ci.nr_order IS NULL THEN 1 ELSE 0 END) AS Null_Order_Count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS Aliases,
+    STRING_AGG(DISTINCT ki.keyword, ', ') AS Keywords,
+    CASE 
+        WHEN COUNT(DISTINCT ci.person_id) > 10 THEN 'Star-Studded'
+        ELSE 'Indie Production'
+    END AS Production_Classification,
+    MAX(CASE WHEN ki.keyword LIKE '%action%' THEN 1 ELSE 0 END) AS has_action_keyword
+FROM 
+    RankedMovies mv
+LEFT JOIN 
+    complete_cast cc ON mv.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_companies mc ON mv.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    movie_keyword mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword ki ON mk.keyword_id = ki.id
+WHERE 
+    mv.production_year IS NOT NULL AND
+    mv.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    mv.movie_id, mv.title, mv.production_year, cn.name
+HAVING 
+    COUNT(DISTINCT ak.name) > 1 AND
+    SUM(CASE WHEN ci.nr_order IS NULL THEN 1 ELSE 0 END) < 5
+ORDER BY 
+    mv.production_year DESC, 
+    Total_Cast DESC;

@@ -1,0 +1,55 @@
+WITH actor_movie_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ti.title AS movie_title,
+        ti.production_year,
+        p.role AS role_name,
+        GROUP_CONCAT(DISTINCT kw.keyword ORDER BY kw.keyword) AS keywords
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info p ON ak.person_id = p.person_id
+    JOIN 
+        aka_title ti ON p.movie_id = ti.movie_id
+    JOIN 
+        movie_keyword mk ON ti.movie_id = mk.movie_id
+    JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    WHERE 
+        ak.name LIKE '%Smith%' 
+    GROUP BY 
+        ak.name, ti.title, ti.production_year, p.role
+),
+company_movie_details AS (
+    SELECT 
+        cmp.name AS company_name,
+        ti.title AS movie_title,
+        ti.production_year,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cmp ON mc.company_id = cmp.id
+    JOIN 
+        title ti ON mc.movie_id = ti.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        cmp.country_code = 'USA' 
+)
+SELECT 
+    ami.actor_name,
+    ami.movie_title,
+    ami.production_year AS actor_movie_year,
+    ami.role_name,
+    ami.keywords,
+    cmd.company_name,
+    cmd.company_type,
+    cmd.movie_title AS company_movie_title,
+    cmd.production_year AS company_movie_year
+FROM 
+    actor_movie_info ami
+JOIN 
+    company_movie_details cmd ON ami.movie_title = cmd.movie_title AND ami.production_year = cmd.production_year
+ORDER BY 
+    ami.actor_name, cmd.company_name;

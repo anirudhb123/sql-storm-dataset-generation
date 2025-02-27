@@ -1,0 +1,49 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+),
+EligibleParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COUNT(DISTINCT ps.ps_suppkey) AS available_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 5
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= CAST('1997-01-01' AS DATE) 
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+)
+SELECT DISTINCT e.p_partkey, e.p_name, 
+       COALESCE(rs.s_name, 'NO SUPPLIER') AS supplier_name, 
+       e.p_retailprice, ho.total_value,
+       CASE 
+           WHEN ho.total_value IS NULL THEN 'No Orders'
+           ELSE 'Orders Available' 
+       END AS order_status,
+       (SELECT COUNT(*) 
+        FROM lineitem li 
+        WHERE li.l_partkey = e.p_partkey 
+          AND li.l_returnflag = 'R') AS return_count
+FROM EligibleParts e
+LEFT JOIN RankedSuppliers rs ON rs.rnk = 1 
+LEFT JOIN HighValueOrders ho ON ho.o_orderkey IN (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_partkey = e.p_partkey
+)
+WHERE e.p_retailprice BETWEEN (SELECT AVG(p_retailprice) FROM part) 
+                          AND (SELECT MAX(p_retailprice) FROM part)
+  AND (EXISTS (SELECT 1 
+                FROM lineitem l 
+                WHERE l.l_partkey = e.p_partkey 
+                  AND l.l_discount > 0.1)
+       OR e.available_suppliers < 10)
+ORDER BY e.p_partkey, supplier_name;

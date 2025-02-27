@@ -1,0 +1,47 @@
+WITH sales_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        c.c_city,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2001 AND 
+        d.d_moy BETWEEN 1 AND 6 
+    GROUP BY 
+        w.w_warehouse_id, c.c_city
+),
+top_sales AS (
+    SELECT 
+        w_warehouse_id,
+        c_city,
+        total_net_profit,
+        unique_customers,
+        total_orders,
+        RANK() OVER (ORDER BY total_net_profit DESC) AS rank
+    FROM 
+        sales_summary
+)
+
+SELECT 
+    wh.w_warehouse_name,
+    ts.c_city,
+    ts.total_net_profit,
+    ts.unique_customers,
+    ts.total_orders
+FROM 
+    top_sales ts
+JOIN 
+    warehouse wh ON ts.w_warehouse_id = wh.w_warehouse_id
+WHERE 
+    ts.rank <= 5
+ORDER BY 
+    ts.total_net_profit DESC;

@@ -1,0 +1,64 @@
+
+WITH RECURSIVE address_hierarchy AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, NULL AS parent_address_sk
+    FROM customer_address
+    WHERE ca_state = 'CA'
+    UNION ALL
+    SELECT ca.ca_address_sk, ca.ca_city, ca.ca_state, ca.ca_country, ah.ca_address_sk
+    FROM customer_address ca
+    JOIN address_hierarchy ah ON ca.ca_address_sk = ah.parent_address_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+sales_summary AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        ws.ws_item_sk,
+        ws.ws_ship_mode_sk
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk, ws.ws_item_sk, ws.ws_ship_mode_sk
+),
+return_statistics AS (
+    SELECT 
+        wr_item_sk, 
+        SUM(wr_return_quantity) AS total_returns, 
+        SUM(wr_net_loss) AS total_loss
+    FROM web_returns
+    GROUP BY wr_item_sk
+)
+
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    COALESCE(SUM(ss.total_profit), 0) AS total_sales_profit,
+    COALESCE(SUM(rs.total_returns), 0) AS total_returns,
+    COALESCE(SUM(rs.total_loss), 0) AS total_loss,
+    ah.ca_city,
+    ah.ca_state,
+    COUNT(DISTINCT ci.c_customer_sk) OVER (PARTITION BY ci.cd_gender) AS gender_count
+FROM customer_info ci
+LEFT JOIN sales_summary ss ON ci.c_customer_sk = ss.ws_ship_customer_sk
+LEFT JOIN return_statistics rs ON ss.ws_item_sk = rs.wr_item_sk
+LEFT JOIN address_hierarchy ah ON ci.c_current_addr_sk = ah.ca_address_sk
+WHERE (ci.cd_marital_status = 'S' OR ci.cd_purchase_estimate > 5000)
+GROUP BY 
+    ci.c_first_name, 
+    ci.c_last_name, 
+    ci.cd_gender,
+    ah.ca_city,
+    ah.ca_state
+HAVING SUM(ss.total_profit) > 1000
+ORDER BY ah.ca_state, total_sales_profit DESC;

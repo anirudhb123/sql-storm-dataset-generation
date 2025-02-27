@@ -1,0 +1,73 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        CONCAT('Sequel to: ', mh.title) AS title,
+        mh.production_year + 1 AS production_year,
+        mh.level + 1 AS level
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        m.production_year IS NOT NULL
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(cc.id) OVER (PARTITION BY ak.person_id ORDER BY mt.production_year DESC) AS movie_count,
+    SUM(CASE 
+        WHEN mt.production_year < 2000 THEN 1 
+        ELSE 0 
+    END) AS pre_2000_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords,
+    MAX(CASE 
+        WHEN p.info_type_id IS NULL THEN 'No info available' 
+        ELSE p.info 
+    END) AS latest_info,
+    CASE 
+        WHEN p.note IS NULL OR p.note = '' THEN 'No notes' 
+        ELSE p.note 
+    END AS person_notes
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    person_info p ON ak.person_id = p.person_id
+LEFT JOIN 
+    complete_cast cc ON mt.id = cc.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL 
+    AND ak.name <> ''
+    AND (mt.production_year >= 1970 AND mt.production_year <= 2023)
+GROUP BY 
+    ak.name, mt.title, mt.production_year, p.note
+ORDER BY 
+    movie_count DESC,
+    mt.production_year ASC, 
+    ak.name ASC
+LIMIT 100 OFFSET 0;

@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        aka_title at ON t.id = at.movie_id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        cast_count,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year >= 2000
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    c.name AS company_name
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = (SELECT id FROM title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+LEFT JOIN 
+    movie_companies mco ON mco.movie_id = (SELECT id FROM title WHERE title = tm.title AND production_year = tm.production_year LIMIT 1)
+LEFT JOIN 
+    company_name c ON mco.company_id = c.id
+WHERE 
+    tm.rank <= 10
+GROUP BY 
+    tm.title, tm.production_year, tm.cast_count, c.name
+ORDER BY 
+    tm.cast_count DESC;

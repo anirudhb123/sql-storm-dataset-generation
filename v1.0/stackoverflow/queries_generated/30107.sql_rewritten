@@ -1,0 +1,84 @@
+WITH RecursivePostHierarchy AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.ParentId,
+        P.Score,
+        1 AS Level
+    FROM
+        Posts P
+    WHERE
+        P.PostTypeId = 1  
+    UNION ALL
+    SELECT
+        P.Id AS PostId,
+        P.Title AS PostTitle,
+        P.ParentId,
+        P.Score,
+        Level + 1
+    FROM
+        Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+UserPostSummary AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore
+    FROM
+        Users U
+    LEFT JOIN
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY
+        U.Id, U.DisplayName
+),
+TopUsers AS (
+    SELECT
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        ROW_NUMBER() OVER (ORDER BY TotalScore DESC) AS UserRank
+    FROM
+        UserPostSummary
+    WHERE
+        TotalPosts > 0  
+),
+ClosedPostReasons AS (
+    SELECT
+        PH.PostId,
+        JSON_AGG(DISTINCT C.Name) AS CloseReasons
+    FROM
+        PostHistory PH
+    INNER JOIN
+        CloseReasonTypes C ON PH.Comment::integer = C.Id
+    WHERE
+        PH.PostHistoryTypeId = 10  
+    GROUP BY
+        PH.PostId
+)
+SELECT
+    U.DisplayName AS TopUser,
+    U.TotalPosts,
+    U.TotalQuestions,
+    U.TotalAnswers,
+    U.TotalScore,
+    COALESCE(CPR.CloseReasons, '[]') AS CloseReasons,
+    COUNT(DISTINCT RPH.PostId) AS AnswerDepth
+FROM
+    TopUsers U
+LEFT JOIN
+    ClosedPostReasons CPR ON U.UserId = CPR.PostId
+LEFT JOIN
+    RecursivePostHierarchy RPH ON RPH.Level > 1  
+WHERE
+    U.UserRank <= 10  
+GROUP BY
+    U.UserId, U.DisplayName, U.TotalPosts, U.TotalQuestions, U.TotalAnswers, U.TotalScore, CPR.CloseReasons
+ORDER BY
+    U.TotalScore DESC, U.DisplayName;

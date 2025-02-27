@@ -1,0 +1,59 @@
+-- Performance benchmarking query to analyze user activity and post statistics
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT a.Id) AS TotalAcceptedAnswers,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes,
+        SUM(c.Id IS NOT NULL) AS TotalComments
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Posts a ON p.Id = a.AcceptedAnswerId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostStatistics AS (
+    SELECT 
+        pt.Name AS PostType,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.CreationDate >= NOW() - INTERVAL '1 year' THEN 1 ELSE 0 END) AS PostsLastYear,
+        AVG(p.Score) AS AvgScore,
+        AVG(p.ViewCount) AS AvgViewCount
+    FROM 
+        Posts p
+    INNER JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    GROUP BY 
+        pt.Name
+)
+
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalAcceptedAnswers,
+    ua.TotalUpVotes,
+    ua.TotalDownVotes,
+    ua.TotalComments,
+    ps.PostType,
+    ps.TotalPosts AS PostTypeTotalPosts,
+    ps.PostsLastYear,
+    ps.AvgScore,
+    ps.AvgViewCount
+FROM 
+    UserActivity ua
+CROSS JOIN 
+    PostStatistics ps
+ORDER BY 
+    ua.TotalPosts DESC, ps.TotalPosts DESC;

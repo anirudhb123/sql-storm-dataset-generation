@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Score, 
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes, 
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId, 
+        ph.PostHistoryTypeId
+)
+
+SELECT 
+    up.DisplayName AS UserName,
+    up.Reputation, 
+    rp.Title, 
+    rp.Score, 
+    rp.ViewCount, 
+    rp.UpVotes, 
+    rp.DownVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    phs.HistoryCount
+FROM 
+    Users up
+JOIN 
+    RankedPosts rp ON up.Id = rp.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON up.Id = ub.UserId
+LEFT JOIN 
+    PostHistoryStats phs ON rp.PostId = phs.PostId AND phs.PostHistoryTypeId IN (10, 11, 12)  
+WHERE 
+    rp.Rank <= 5
+    AND (ub.GoldBadges IS NOT NULL OR ub.SilverBadges IS NOT NULL OR ub.BronzeBadges IS NOT NULL)
+ORDER BY 
+    rp.Score DESC, up.Reputation DESC;

@@ -1,0 +1,82 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    AND 
+        p.AnswerCount > 0
+),
+
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS MaxBadgeClass
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ubc.BadgeCount,
+        ubc.MaxBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ubc ON u.Id = ubc.UserId
+    WHERE 
+        u.CreationDate >= NOW() - INTERVAL '1 year'
+    AND 
+        u.Reputation > (
+            SELECT AVG(Reputation) FROM Users WHERE CreationDate >= NOW() - INTERVAL '1 year'
+        )
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.AnswerCount,
+    COALESCE(ut.UserId, -1) AS TopUserId,
+    COALESCE(ut.Reputation, 0) AS TopUserReputation,
+    TAGS.Tags,
+    SUM(v.VoteTypeId IN (2, 3)) AS VoteCount,
+    PH.Comment AS PostHistoryComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Posts p ON rp.PostId = p.Id
+LEFT JOIN 
+    PostHistory PH ON PH.PostId = rp.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = rp.PostId
+LEFT JOIN 
+    TopUsers ut ON p.OwnerUserId = ut.UserId
+LEFT JOIN 
+    (SELECT Tags, PostId FROM Posts WHERE Tags IS NOT NULL) AS TAGS ON TAGS.PostId = rp.PostId
+WHERE 
+    (PH.PostHistoryTypeId IN (10, 20) AND PH.CreationDate >= NOW() - INTERVAL '1 month') 
+    OR (PH.PostHistoryTypeId IS NULL)
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.AnswerCount, ut.UserId, ut.Reputation, TAGS.Tags, PH.Comment
+HAVING 
+    COUNT(DISTINCT v.Id) > 3
+ORDER BY 
+    rp.ViewCount DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

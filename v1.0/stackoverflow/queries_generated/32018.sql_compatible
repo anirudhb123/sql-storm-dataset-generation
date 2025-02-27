@@ -1,0 +1,71 @@
+
+WITH RecursiveCTE AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        1 AS Level,
+        CAST(P.Title AS VARCHAR(8000)) AS FullTitle,
+        P.ViewCount
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        P.AcceptedAnswerId,
+        R.Level + 1,
+        CONCAT(RCTE.FullTitle, ' > ', P.Title) AS FullTitle,
+        (P.ViewCount + RCTE.ViewCount) 
+    FROM Posts P
+    JOIN RecursiveCTE RCTE ON P.ParentId = RCTE.PostId
+    WHERE P.PostTypeId = 2  
+),
+UserScore AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.Id AS UserId,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.DisplayName, U.Reputation, U.Id
+),
+PostStats AS (
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.ViewCount,
+        R.Level,
+        U.DisplayName AS OwnerName,
+        U.Reputation,
+        U.UpVotes,
+        U.DownVotes,
+        R.FullTitle,
+        COUNT(CASE WHEN C.PostId IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(CASE WHEN PH.Id IS NOT NULL THEN 1 END) AS HistoryCount
+    FROM RecursiveCTE R
+    LEFT JOIN Users U ON R.OwnerUserId = U.Id
+    LEFT JOIN Comments C ON R.PostId = C.PostId
+    LEFT JOIN PostHistory PH ON R.PostId = PH.PostId
+    GROUP BY R.PostId, R.Title, R.ViewCount, R.Level, U.DisplayName, U.Reputation, U.UpVotes, U.DownVotes, R.FullTitle
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.OwnerName,
+    PS.Reputation,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.HistoryCount,
+    PS.FullTitle,
+    (PS.UpVotes - PS.DownVotes) AS NetVotes, 
+    RANK() OVER (ORDER BY PS.ViewCount DESC) AS RankByViews
+FROM PostStats PS
+WHERE PS.ViewCount > 100 
+ORDER BY NetVotes DESC, PS.Reputation DESC;

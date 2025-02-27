@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(t.TagName, 'Uncategorized') ORDER BY p.CreationDate DESC) AS rn,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN LATERAL (
+        SELECT unnest(string_to_array(p.Tags, '>')) AS TagName
+    ) t ON TRUE
+    WHERE p.PostTypeId = 1 -- Questions
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS ClosureCount,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT c.Comment, ', ') AS ClosureReasons
+    FROM PostHistory ph
+    JOIN CloseReasonTypes crt ON ph.Comment::INT = crt.Id
+    GROUP BY ph.PostId
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        COALESCE(cp.ClosureCount, 0) AS ClosureCount,
+        COALESCE(cp.LastClosedDate, NULL) AS LastClosedDate,
+        COALESCE(cp.ClosureReasons, 'No Closure') AS ClosureReasons,
+        CASE 
+            WHEN rp.Score = 0 THEN 'Neutral'
+            WHEN rp.Score > 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreCategory
+    FROM RankedPosts rp
+    LEFT JOIN ClosedPosts cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.CommentCount,
+    ps.ClosureCount,
+    ps.LastClosedDate,
+    ps.ClosureReasons,
+    ps.ScoreCategory,
+    CASE 
+        WHEN ps.LastClosedDate IS NOT NULL THEN 'Closed'
+        ELSE 'Active'
+    END AS PostStatus,
+    CASE 
+        WHEN ps.ClosureCount = 0 THEN 'Stable Post'
+        ELSE 'Potentially Problematic Post'
+    END AS StabilityMetric
+FROM PostStats ps
+WHERE ps.CommentCount > 5 -- Posts with more than 5 comments
+AND ps.ScoreCategory = 'Positive'
+ORDER BY ps.Score DESC, ps.CommentCount DESC 
+LIMIT 50;
+
+This SQL query retrieves a detailed analysis of posts that can be used for performance benchmarking. It incorporates common SQL constructs like CTEs (Common Table Expressions), outer joins, conditional logic, aggregation, and ranking functions, while also making use of string manipulations, data categorization, and potential NULL values. The query effectively delineates posts based on their comment counts and scores, highlighting active and stable posts, as well as those that had closure actions taken against them.

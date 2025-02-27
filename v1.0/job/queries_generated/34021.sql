@@ -1,0 +1,48 @@
+WITH RECURSIVE ParentChild AS (
+    SELECT c.id AS movie_id, c.subject_id
+    FROM complete_cast c
+    WHERE c.status_id = 1  -- Only considering completed movies
+
+    UNION ALL
+
+    SELECT ca.movie_id, ca.subject_id
+    FROM complete_cast ca
+    INNER JOIN ParentChild pc ON ca.movie_id = pc.movie_id
+),
+
+RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        a.name AS actor_name,
+        COUNT(DISTINCT m.movie_id) AS actor_movie_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT m.movie_id) DESC) AS rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title t ON ci.movie_id = t.id
+    JOIN ParentChild pc ON pc.movie_id = t.id
+    LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    WHERE t.production_year IS NOT NULL
+    AND a.name IS NOT NULL
+    AND mk.keyword_id IS NULL  -- Exclude movies with specific keywords
+    GROUP BY t.title, t.production_year, a.name
+)
+
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.actor_name,
+    rm.actor_movie_count,
+    COALESCE(mkp.keyword, 'No Keyword') AS movie_keyword,
+    CASE 
+        WHEN rm.actor_movie_count >= 5 THEN 'Veteran Actor'
+        WHEN rm.actor_movie_count <= 2 THEN 'Newcomer Actor'
+        ELSE 'Intermediate Actor' 
+    END AS actor_experience_level
+FROM RankedMovies rm
+LEFT JOIN movie_keyword mk ON rm.movie_id = mk.movie_id
+LEFT JOIN keyword mkp ON mk.keyword_id = mkp.id
+WHERE rm.rank <= 10  -- Select top 10 actors per production year
+ORDER BY rm.production_year, rm.actor_movie_count DESC;
+

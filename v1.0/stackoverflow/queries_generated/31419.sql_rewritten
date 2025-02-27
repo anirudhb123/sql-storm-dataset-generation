@@ -1,0 +1,65 @@
+WITH RECURSIVE UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        B.Name AS BadgeName,
+        B.Class,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY B.Date DESC) AS BadgeRank
+    FROM Users U
+    JOIN Badges B ON U.Id = B.UserId
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.OwnerDisplayName,
+        P.ViewCount,
+        P.Score,
+        COALESCE(SUM(V.VoteTypeId = 2) - SUM(V.VoteTypeId = 3), 0) AS NetScore,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY COALESCE(SUM(V.VoteTypeId = 2) - SUM(V.VoteTypeId = 3), 0) DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate > cast('2024-10-01' as date) - INTERVAL '30 days'
+    AND P.PostTypeId = 1 
+    GROUP BY P.Id
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(PH.Id) AS EditCount,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+),
+BadgeSummary AS (
+    SELECT 
+        UserId,
+        STRING_AGG(BadgeName, ', ') AS Badges,
+        COUNT(*) AS TotalBadges
+    FROM UserBadges
+    WHERE BadgeRank <= 3
+    GROUP BY UserId
+)
+SELECT 
+    PD.PostId,
+    PD.Title,
+    PD.CreationDate,
+    PD.OwnerDisplayName,
+    PD.ViewCount,
+    PD.Score,
+    PD.NetScore,
+    PD.CommentCount,
+    COALESCE(PHS.LastEditDate, 'Never') AS LastEditDate,
+    PHS.EditCount,
+    COALESCE(PHS.ClosedDate, 'Not Closed') AS ClosedDate,
+    BS.Badges,
+    BS.TotalBadges
+FROM PostDetails PD
+LEFT JOIN PostHistorySummary PHS ON PD.PostId = PHS.PostId
+LEFT JOIN BadgeSummary BS ON PD.OwnerDisplayName = BS.UserId
+WHERE PD.PostRank <= 10
+ORDER BY PD.NetScore DESC, PD.ViewCount DESC;

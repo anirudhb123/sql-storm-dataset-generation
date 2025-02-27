@@ -1,0 +1,47 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1 AS level
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+)
+SELECT 
+    mk.keyword,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') THEN CAST(mi.info AS FLOAT) ELSE NULL END) AS avg_box_office,
+    MAX(m.production_year) AS max_year,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    SUM(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS roles_filled
+FROM 
+    movie_keyword mk
+LEFT JOIN 
+    aka_title m ON mk.movie_id = m.id
+LEFT JOIN 
+    cast_info c ON m.id = c.movie_id
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id
+LEFT JOIN 
+    aka_name ak ON c.person_id = ak.person_id
+WHERE 
+    m.production_year BETWEEN 2000 AND 2023
+    AND mk.keyword IS NOT NULL
+GROUP BY 
+    mk.keyword
+HAVING 
+    COUNT(DISTINCT c.person_id) > 0
+ORDER BY 
+    cast_count DESC
+LIMIT 10;

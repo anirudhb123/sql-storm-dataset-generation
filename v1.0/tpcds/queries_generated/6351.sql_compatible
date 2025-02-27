@@ -1,0 +1,59 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS average_profit,
+        d.d_date AS sales_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023 AND d.d_moy IN (11, 12)
+    GROUP BY 
+        d.d_date
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_gender, cd.cd_marital_status, cd.cd_education_status
+),
+TopCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(cd.order_count) AS total_orders
+    FROM 
+        CustomerDetails cd
+    JOIN 
+        customer c ON cd.c_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    ORDER BY 
+        total_orders DESC
+    LIMIT 10
+)
+SELECT 
+    ss.sales_date,
+    ss.total_sales,
+    ss.total_orders,
+    ss.average_profit,
+    tc.c_customer_sk,
+    tc.total_orders AS top_customer_orders
+FROM 
+    SalesSummary ss
+JOIN 
+    TopCustomers tc ON ss.total_orders = tc.total_orders
+ORDER BY 
+    ss.sales_date DESC;

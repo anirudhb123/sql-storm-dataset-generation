@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND ci.id < 15699171 AND n.md5sum IN ('21fd61939a1e81abf05a0c2687992063', '866aaa27e3ce1841d11f3710fe3a8ca3', 'c4cc034b20a65849c347d64f4aafefc8', 'd7f233ee70867f28db690a0039ece78e') AND n.name > 'Baisakhiya, Sudhir' AND ci.person_role_id < 1309108;

@@ -1,0 +1,73 @@
+WITH RECURSIVE sales_trends AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) as rn
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+top_profit_items AS (
+    SELECT 
+        ws_item_sk,
+        total_net_profit
+    FROM 
+        sales_trends
+    WHERE 
+        rn <= 10
+),
+customer_profiles AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_current_cdemo_sk,
+        cd.cd_gender,
+        CASE 
+            WHEN hd.hd_income_band_sk IS NOT NULL THEN hd.hd_income_band_sk 
+            ELSE (SELECT ib_income_band_sk FROM household_demographics WHERE hd_dep_count > 2 LIMIT 1)
+        END AS income_band
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+sales_data AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_quantity) AS total_sold,
+        SUM(s.ss_net_profit) AS total_profit
+    FROM 
+        store_sales s
+    GROUP BY 
+        s.ss_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(SUM(web.ws_net_profit), 0) AS total_web_profit,
+    COALESCE(SUM(store.total_profit), 0) AS total_store_profit,
+    cp.cd_gender,
+    CASE 
+        WHEN cp.income_band IS NOT NULL THEN cp.income_band 
+        ELSE 'Unknown'
+    END AS income_band
+FROM 
+    item i
+LEFT JOIN 
+    web_sales web ON i.i_item_sk = web.ws_item_sk
+LEFT JOIN 
+    sales_data store ON i.i_item_sk = store.ss_item_sk
+LEFT JOIN 
+    customer_profiles cp ON cp.c_current_cdemo_sk = web.ws_bill_cdemo_sk
+WHERE 
+    i.i_rec_start_date <= cast('2002-10-01' as date) 
+    AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > cast('2002-10-01' as date))
+GROUP BY 
+    i.i_item_id, i.i_item_desc, cp.cd_gender, cp.income_band
+HAVING 
+    SUM(web.ws_net_profit) + COALESCE(SUM(store.total_profit), 0) > 1000
+ORDER BY 
+    total_web_profit DESC, total_store_profit DESC;

@@ -1,0 +1,50 @@
+WITH PostTagCounts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '> <')))) ) AS TagCount,
+        COUNT(DISTINCT CASE WHEN v.VoteTypeId = 2 THEN v.Id END) AS UpvoteCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) AS CloseCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 ELSE 0 END) AS ReopenCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+PostsWithTags AS (
+    SELECT 
+        pt.PostId,
+        pt.TagCount,
+        CASE 
+            WHEN pt.TagCount > 5 THEN 'Popular Tags'
+            WHEN pt.TagCount BETWEEN 3 AND 5 THEN 'Moderate Tags'
+            ELSE 'Less Tags'
+        END AS TagPopularity,
+        pt.UpvoteCount,
+        pt.CloseCount,
+        pt.ReopenCount
+    FROM 
+        PostTagCounts pt
+)
+SELECT 
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    pt.TagCount,
+    pt.TagPopularity,
+    pt.UpvoteCount,
+    pt.CloseCount,
+    pt.ReopenCount
+FROM 
+    Posts p
+JOIN 
+    PostsWithTags pt ON p.Id = pt.PostId
+WHERE 
+    pt.UpvoteCount > 10
+ORDER BY 
+    pt.TagCount DESC, pt.UpvoteCount DESC;

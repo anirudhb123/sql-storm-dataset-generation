@@ -1,0 +1,104 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p 
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBountyReceived,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostHistoryInfo AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        COUNT(ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+
+AggregatedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 4 THEN ph.EditCount ELSE 0 END) AS TitleEditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 5 THEN ph.EditCount ELSE 0 END) AS BodyEditCount,
+        SUM(CASE WHEN ph.PostHistoryTypeId = 6 THEN ph.EditCount ELSE 0 END) AS TagEditCount
+    FROM 
+        PostHistoryInfo ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.DisplayName,
+    u.TotalPosts,
+    u.TotalComments,
+    u.TotalBountyReceived,
+    u.TotalUpvotes,
+    p.Title,
+    p.Score,
+    COALESCE(aph.TitleEditCount, 0) AS TitleEditCount,
+    COALESCE(aph.BodyEditCount, 0) AS BodyEditCount,
+    COALESCE(aph.TagEditCount, 0) AS TagEditCount,
+    ph.LastEditDate,
+    rph.Level AS PostLevel
+FROM 
+    UserActivity u
+JOIN 
+    Posts p ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    AggregatedPostHistory aph ON p.Id = aph.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+LEFT JOIN 
+    PostHistoryInfo ph ON p.Id = ph.PostId
+WHERE 
+    u.TotalPosts > 0 AND 
+    p.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'  
+ORDER BY 
+    u.TotalPosts DESC, 
+    u.TotalUpvotes DESC
+LIMIT 100;

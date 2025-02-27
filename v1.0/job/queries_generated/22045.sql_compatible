@@ -1,0 +1,75 @@
+
+WITH RecursiveCasts AS (
+    SELECT 
+        ci.movie_id, 
+        ci.person_id, 
+        ci.role_id, 
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS cast_order
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        an.name IS NOT NULL
+), 
+TitleInfo AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        t.imdb_index, 
+        COUNT(mc.movie_id) AS company_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    GROUP BY 
+        t.title, t.production_year, t.imdb_index
+), 
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id, 
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+PersonRoles AS (
+    SELECT 
+        p.id AS person_id, 
+        p.name AS person_name, 
+        r.role AS person_role
+    FROM 
+        name p
+    JOIN 
+        role_type r ON r.id = (SELECT ci.role_id FROM cast_info ci WHERE ci.person_id = p.imdb_id LIMIT 1)
+)
+SELECT 
+    ti.title, 
+    ti.production_year, 
+    ti.imdb_index,
+    COALESCE(kc.keyword_count, 0) AS keyword_count,
+    COUNT(DISTINCT rc.cast_order) AS total_cast,
+    CASE 
+        WHEN ti.company_count > 0 THEN 'Contains Companies'
+        ELSE 'No Companies'
+    END AS company_presence,
+    STRING_AGG(DISTINCT pr.person_name || ' as ' || pr.person_role, ', ') AS cast_details
+FROM 
+    TitleInfo ti
+LEFT JOIN 
+    KeywordCounts kc ON ti.id = kc.movie_id
+LEFT JOIN 
+    RecursiveCasts rc ON ti.id = rc.movie_id
+LEFT JOIN 
+    PersonRoles pr ON rc.person_id = pr.person_id
+WHERE 
+    ti.production_year >= 2000 AND 
+    ti.company_count IS NOT NULL
+GROUP BY 
+    ti.title, ti.production_year, ti.imdb_index, ti.company_count
+HAVING 
+    COUNT(DISTINCT pr.person_name) > 1 
+ORDER BY 
+    ti.production_year DESC, 
+    total_cast DESC;

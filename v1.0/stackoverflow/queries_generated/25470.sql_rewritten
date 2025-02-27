@@ -1,0 +1,56 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRanking
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.Reputation
+),
+
+ConcatenatedTags AS (
+    SELECT 
+        PostId,
+        STRING_AGG(TagName, ', ') AS AllTags
+    FROM 
+        Posts p
+    JOIN 
+        LATERAL string_to_array(p.Tags, ',') AS t(TagName) ON TRUE
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    ct.AllTags,
+    rp.OwnerReputation,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rp.CreationDate,
+    rp.TagRanking
+FROM 
+    RankedPosts rp
+JOIN 
+    ConcatenatedTags ct ON rp.PostId = ct.PostId
+WHERE 
+    rp.TagRanking = 1
+ORDER BY 
+    rp.CreationDate DESC
+LIMIT 10;

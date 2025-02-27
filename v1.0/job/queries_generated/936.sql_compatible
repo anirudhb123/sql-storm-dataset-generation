@@ -1,0 +1,50 @@
+
+WITH MovieRankings AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(CAST(mr.info AS FLOAT)) AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_info_idx mr ON mi.id = mr.id AND mr.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title,
+        production_year,
+        actor_count,
+        avg_rating,
+        RANK() OVER (PARTITION BY production_year ORDER BY avg_rating DESC) AS rank
+    FROM 
+        MovieRankings
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.actor_count,
+    COALESCE(tm.avg_rating, 'N/A') AS avg_rating,
+    CASE 
+        WHEN tm.actor_count > 10 THEN 'Ensemble Cast'
+        WHEN tm.actor_count BETWEEN 5 AND 10 THEN 'Moderate Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    TopMovies tm
+WHERE 
+    tm.rank = 1
+ORDER BY 
+    tm.production_year DESC, 
+    tm.avg_rating DESC
+LIMIT 10;

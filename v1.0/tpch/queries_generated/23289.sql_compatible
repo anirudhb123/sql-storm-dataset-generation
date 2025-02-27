@@ -1,0 +1,78 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderdate < '1995-01-01')
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+QualifiedNations AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        n.n_comment NOT LIKE '%excellent%'
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+FinalProductStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(CASE 
+                WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) 
+                ELSE 0 
+            END) AS total_returns,
+        SUM(l.l_quantity) AS total_quantity_sold,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    o.o_orderkey,
+    fo.total_returns,
+    s.s_name,
+    np.supplier_count,
+    fo.total_quantity_sold, 
+    fo.avg_supply_cost
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    FinalProductStats fo ON fo.total_quantity_sold > 100
+LEFT JOIN 
+    SupplierInfo s ON o.o_orderkey % (SELECT COUNT(*) FROM SupplierInfo) = s.s_suppkey
+JOIN 
+    QualifiedNations np ON np.supplier_count > 5
+WHERE 
+    o.o_orderdate BETWEEN '1995-01-01' AND '1996-01-01'
+ORDER BY 
+    o.o_orderkey ASC, np.supplier_count DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

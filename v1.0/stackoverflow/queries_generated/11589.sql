@@ -1,0 +1,58 @@
+-- Performance benchmarking SQL query to analyze Posts and their associated Votes, Comments, and Users
+
+WITH PostAnalytics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= '2022-01-01'  -- Filter for posts created in 2022 and later
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+AverageMetrics AS (
+    SELECT 
+        AVG(Score) AS AvgScore,
+        AVG(ViewCount) AS AvgViewCount,
+        AVG(CommentCount) AS AvgCommentsPerPost,
+        AVG(VoteCount) AS AvgVotesPerPost,
+        COUNT(PostId) AS TotalPosts
+    FROM 
+        PostAnalytics
+)
+
+SELECT 
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.ViewCount,
+    pa.CommentCount,
+    pa.VoteCount,
+    pa.OwnerReputation,
+    pa.OwnerDisplayName,
+    am.AvgScore,
+    am.AvgViewCount,
+    am.AvgCommentsPerPost,
+    am.AvgVotesPerPost,
+    am.TotalPosts
+FROM 
+    PostAnalytics pa,
+    AverageMetrics am
+ORDER BY 
+    pa.Score DESC  -- Order posts by score for better visibility
+LIMIT 100;  -- Limit to top 100 posts for performance

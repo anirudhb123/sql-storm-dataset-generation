@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000 -- Starting point for high-value suppliers
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey -- Hierarchical relation
+    WHERE sh.level < 3 -- Limit the levels to avoid excessive recursion
+),
+SalesData AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_partkey, l.l_quantity, l.l_extendedprice * (1 - l.l_discount) AS sale_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(sd.sale_value) AS total_sold
+    FROM SalesData sd
+    JOIN partsupp ps ON sd.l_partkey = ps.ps_partkey
+    GROUP BY l.l_partkey
+),
+RankedSales AS (
+    SELECT ts.l_partkey, ts.total_sold,
+           RANK() OVER (ORDER BY ts.total_sold DESC) AS sales_rank
+    FROM TotalSales ts
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, CASE WHEN p.p_size > 20 THEN 'Large' ELSE 'Small' END AS part_size
+    FROM part p
+    WHERE p.p_retailprice < 100 -- Filtered on retail price
+)
+SELECT rp.p_partkey, rp.p_name, rp.part_size, COALESCE(rs.total_sold, 0) AS total_sold, rh.level AS supplier_level
+FROM FilteredParts rp
+LEFT JOIN RankedSales rs ON rp.p_partkey = rs.l_partkey
+LEFT JOIN SupplierHierarchy rh ON rh.s_nationkey = (
+    SELECT n.n_nationkey 
+    FROM nation n 
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+    WHERE s.s_suppkey = (SELECT MIN(s2.s_suppkey) FROM supplier s2 WHERE s2.s_acctbal > 10000)
+)
+WHERE (rs.sales_rank <= 10 OR rs.sales_rank IS NULL) -- Include top 10 or NULL
+ORDER BY rp.p_partkey, rh.level DESC;

@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_supply_cost,
+        ss.part_count,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.part_count > 5
+),
+FinalReport AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ts.s_name,
+        ts.total_supply_cost
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        TopSuppliers ts ON ts.rank <= 10
+    WHERE 
+        ro.rn = 1 AND 
+        ro.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) 
+    ORDER BY 
+        ro.o_orderdate DESC
+)
+SELECT 
+    f.o_orderkey,
+    f.o_orderdate,
+    f.o_totalprice,
+    f.c_name,
+    COALESCE(f.s_name, 'No supplier') AS supplier_name,
+    CASE 
+        WHEN f.total_supply_cost IS NULL THEN 'Cost not available'
+        ELSE FORMAT(f.total_supply_cost, 'C', 'en-US')
+    END AS formatted_supply_cost
+FROM 
+    FinalReport f
+WHERE 
+    f.o_orderdate >= DATEADD(MONTH, -3, GETDATE())
+ORDER BY 
+    f.o_orderdate DESC, f.o_totalprice DESC;

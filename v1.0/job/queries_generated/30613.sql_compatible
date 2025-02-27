@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS CHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000  
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1 AS level,
+        CAST(mh.path || ' -> ' || m.title AS CHAR(255)) AS path
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title related ON related.id = ml.linked_movie_id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = related.id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title AS movie_title,
+    m.production_year,
+    CASE 
+        WHEN c.role IS NULL THEN 'Unknown Role' 
+        ELSE c.role 
+    END AS role,
+    COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast,
+    STRING_AGG(DISTINCT ak.name, ', ') AS aliases,
+    MAX(ci.status_id) AS highest_status
+FROM 
+    aka_title m
+LEFT JOIN 
+    cast_info c ON c.movie_id = m.id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+JOIN 
+    MovieHierarchy mh ON mh.movie_id = m.id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.id
+WHERE 
+    m.production_year IS NOT NULL
+    AND m.title IS NOT NULL
+    AND mh.level <= 3  
+GROUP BY 
+    m.id, m.title, m.production_year, c.role
+ORDER BY 
+    m.production_year DESC,
+    total_cast DESC;

@@ -1,0 +1,68 @@
+WITH TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(substring(Tags, 2, length(Tags)-2), '>><<'))) ) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only consider Questions
+    GROUP BY 
+        TagName
+), UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        U.Id
+), UserReputation AS (
+    SELECT 
+        UserId,
+        SUM(CASE 
+            WHEN B.Class = 1 THEN 100 
+            WHEN B.Class = 2 THEN 50 
+            WHEN B.Class = 3 THEN 10 
+            ELSE 0 
+        END) AS BadgeScore
+    FROM 
+        Badges B
+    GROUP BY 
+        UserId
+), UserEngagement AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        COALESCE(UC.BadgeScore, 0) AS BadgeScore,
+        UA.AnswerCount,
+        UA.QuestionCount,
+        UA.CommentCount,
+        (UA.AnswerCount * 10 + UA.CommentCount * 2 + COALESCE(UC.BadgeScore, 0)) AS EngagementScore
+    FROM 
+        UserActivity UA
+    LEFT JOIN 
+        UserReputation UC ON UA.UserId = UC.UserId
+)
+SELECT 
+    TG.TagName,
+    COUNT(DISTINCT UG.UserId) AS ActiveUsers,
+    AVG(UG.EngagementScore) AS AverageEngagementScore,
+    SUM(UG.QuestionCount) AS TotalQuestions,
+    SUM(UG.AnswerCount) AS TotalAnswers
+FROM 
+    TagCounts TG
+JOIN 
+    Posts P ON TG.TagName = ANY(string_to_array(substring(P.Tags, 2, length(P.Tags)-2), '>><<'))
+JOIN 
+    UserEngagement UG ON P.OwnerUserId = UG.UserId
+GROUP BY 
+    TG.TagName
+ORDER BY 
+    AverageEngagementScore DESC;

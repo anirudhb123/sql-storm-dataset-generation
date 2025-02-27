@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_sales_price, 
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) as rank
+    FROM web_sales ws
+    WHERE ws.ws_net_paid > 0 
+      AND ws.ws_sales_price IS NOT NULL 
+      AND ws.ws_item_sk IN (
+          SELECT 
+              cs.cs_item_sk
+          FROM catalog_sales cs
+          WHERE cs.cs_net_paid < cs.cs_net_paid_inc_tax
+            AND cs.cs_quantity > 0
+      )
+),
+TotalReturns AS (
+    SELECT 
+        sr_item_sk, 
+        SUM(sr_return_quantity) AS total_return_quantity
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+CombinedSales AS (
+    SELECT 
+        r.ws_item_sk, 
+        r.ws_sales_price, 
+        r.ws_net_profit, 
+        COALESCE(tr.total_return_quantity, 0) AS return_quantity,
+        CASE 
+            WHEN r.ws_sales_price > 100 THEN 'High Value'
+            WHEN r.ws_sales_price BETWEEN 50 AND 100 THEN 'Mid Value'
+            ELSE 'Low Value'
+        END AS price_category
+    FROM RankedSales r
+    LEFT JOIN TotalReturns tr ON r.ws_item_sk = tr.sr_item_sk
+    WHERE r.rank = 1
+)
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    cs.price_category,
+    COUNT(cs.ws_item_sk) AS items_sold,
+    SUM(cs.ws_net_profit) AS total_profit,
+    AVG(cs.ws_sales_price) AS avg_sales_price
+FROM CombinedSales cs
+JOIN customer c ON cs.ws_item_sk IN (
+      SELECT sr_item_sk 
+      FROM store_sales 
+      WHERE ss_sold_date_sk < (
+            SELECT MAX(d.d_date_sk) 
+            FROM date_dim d 
+            WHERE d.d_year = 2023
+      )
+)
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY c.c_customer_id, ca.ca_city, cs.price_category
+HAVING SUM(cs.return_quantity) < 10
+ORDER BY total_profit DESC, c.c_customer_id;

@@ -1,0 +1,76 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+HighestValueOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank = 1
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal
+),
+TopSuppliers AS (
+    SELECT 
+        sd.s_suppkey,
+        sd.s_name,
+        sd.s_acctbal
+    FROM 
+        SupplierDetails sd
+    WHERE 
+        sd.part_count > 2
+),
+OrderLineItems AS (
+    SELECT 
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_price_after_discount
+    FROM 
+        lineitem li
+    GROUP BY 
+        li.l_orderkey
+)
+
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COALESCE(t.total_price_after_discount, 0) AS total_after_discount,
+    ts.s_name AS top_supplier,
+    ts.s_acctbal
+FROM 
+    HighestValueOrders o
+LEFT JOIN 
+    OrderLineItems t ON o.o_orderkey = t.l_orderkey
+LEFT JOIN 
+    lineitem li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON li.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderstatus IN ('O', 'F') 
+    AND (ts.s_acctbal IS NULL OR ts.s_acctbal > 1000)
+ORDER BY 
+    o.o_orderdate DESC, 
+    o.o_orderkey;

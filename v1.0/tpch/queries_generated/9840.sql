@@ -1,0 +1,47 @@
+WITH RegionalSales AS (
+    SELECT 
+        r_name,
+        SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM 
+        lineitem
+    JOIN 
+        orders ON lineitem.l_orderkey = orders.o_orderkey
+    JOIN 
+        customer ON orders.o_custkey = customer.c_custkey
+    JOIN 
+        nation ON customer.c_nationkey = nation.n_nationkey
+    JOIN 
+        region ON nation.n_regionkey = region.r_regionkey
+    WHERE 
+        l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        r_name
+), PartSupplier AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    r.r_name,
+    r.total_revenue,
+    ps.p_name,
+    ps.s_name,
+    ps.ps_supplycost,
+    ps.ps_availqty
+FROM 
+    RegionalSales r
+JOIN 
+    PartSupplier ps ON r.r_name = ps.r_name
+ORDER BY 
+    r.total_revenue DESC, ps.ps_supplycost ASC
+LIMIT 10;

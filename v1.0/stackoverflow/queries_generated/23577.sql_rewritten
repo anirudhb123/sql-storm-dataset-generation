@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserVoteSummary AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+PostsWithComments AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN c.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END), 0) AS RecentComments
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(uvs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(uvs.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(pr.CommentCount, 0) AS TotalComments,
+    COALESCE(pr.RecentComments, 0) AS RecentCommentsCount,
+    COALESCE(rp.PostId, -1) AS LatestPostId,
+    COALESCE(rp.Title, 'No Posts') AS LatestPostTitle,
+    COALESCE(rp.CreationDate, 'No Date') AS LatestPostDate,
+    COALESCE(rp.Score, 0) AS LatestPostScore,
+    COALESCE(rp.ViewCount, 0) AS LatestPostViewCount
+FROM 
+    Users u
+    LEFT JOIN UserVoteSummary uvs ON u.Id = uvs.UserId
+    LEFT JOIN PostsWithComments pr ON u.Id = pr.PostId
+    LEFT JOIN RankedPosts rp ON u.Id = rp.PostId AND rp.RowNum = 1
+WHERE 
+    COALESCE(uvs.UpVotes, 0) - COALESCE(uvs.DownVotes, 0) >= 0
+ORDER BY 
+    COALESCE(rp.Score, 0) DESC, 
+    u.Reputation DESC
+LIMIT 100;

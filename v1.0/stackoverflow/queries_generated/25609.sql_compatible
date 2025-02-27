@@ -1,0 +1,80 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ARRAY_AGG(t.TagName) AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RankByScore
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><')) AS t(TagName)
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+CloseReasons AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(crt.Name, ', ') AS CloseReasonNames
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes crt ON CAST(ph.Comment AS INT) = crt.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1  
+    GROUP BY 
+        b.UserId
+),
+PostsWithBadges AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Tags,
+        COALESCE(ub.BadgeCount, 0) AS GoldBadgeCount,
+        cr.CloseReasonNames
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerDisplayName = ub.UserId
+    LEFT JOIN 
+        CloseReasons cr ON rp.PostId = cr.PostId
+    WHERE 
+        rp.RankByScore <= 5  
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.OwnerDisplayName,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.Tags,
+    p.GoldBadgeCount,
+    COALESCE(p.CloseReasonNames, 'No close reasons') AS CloseReasonStatus
+FROM 
+    PostsWithBadges p
+ORDER BY 
+    p.Score DESC, p.CreationDate DESC;

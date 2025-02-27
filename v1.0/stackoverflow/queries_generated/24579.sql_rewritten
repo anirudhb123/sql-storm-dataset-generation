@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        p.AnswerCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 
+            ELSE 0 
+        END AS HasAcceptedAnswer
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId,
+        ph.CreationDate AS HistoryDate,
+        u.DisplayName AS EditorName,
+        pht.Name AS HistoryTypeName,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM 
+        PostHistory ph
+    JOIN 
+        Users u ON ph.UserId = u.Id
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.AnswerCount,
+    rp.HasAcceptedAnswer,
+    COALESCE(ph.EditorName, 'No edits') AS LastEditor,
+    COALESCE(ph.HistoryTypeName, 'No history') AS LastAction,
+    COALESCE(ph.HistoryDate, 'Never') AS LastActionDate,
+    CASE 
+        WHEN rp.CommentCount > 0 THEN 
+            (SELECT 
+                STRING_AGG(c.Text, '; ') 
+             FROM 
+                Comments c 
+             WHERE 
+                c.PostId = rp.PostId
+             ) 
+        ELSE NULL 
+    END AS CommentsSummary
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId AND ph.HistoryRank = 1
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.Score DESC
+FETCH FIRST 10 ROWS ONLY;

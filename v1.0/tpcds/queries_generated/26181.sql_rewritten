@@ -1,0 +1,50 @@
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_id, 
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_within_gender
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+Addresses AS (
+    SELECT 
+        ca.ca_address_id,
+        TRIM(UPPER(CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type))) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip
+    FROM 
+        customer_address ca
+),
+PopularAddresses AS (
+    SELECT 
+        a.full_address,
+        COUNT(*) AS address_count
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        Addresses a ON rc.c_customer_id = a.ca_address_id  
+    GROUP BY 
+        a.full_address
+    HAVING 
+        COUNT(*) > 10
+)
+SELECT 
+    addr.full_address, 
+    addr.address_count, 
+    rc.full_name, 
+    rc.cd_gender, 
+    rc.cd_marital_status
+FROM 
+    PopularAddresses addr
+JOIN 
+    RankedCustomers rc ON addr.full_address = rc.full_address
+ORDER BY 
+    addr.address_count DESC, 
+    rc.rank_within_gender;

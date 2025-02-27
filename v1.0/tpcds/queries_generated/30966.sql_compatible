@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_sold_date_sk) AS rn
+    FROM store_sales
+    GROUP BY ss_item_sk
+),
+customer_info AS (
+    SELECT
+        c.c_customer_sk,
+        CASE
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        COUNT(DISTINCT c.c_current_addr_sk) AS address_count,
+        COALESCE(SUM(hd.vehicle_count), 0) AS total_vehicles
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY c.c_customer_sk, cd_gender
+),
+high_performers AS (
+    SELECT
+        s.ss_item_sk,
+        s.total_quantity,
+        s.total_profit,
+        ROW_NUMBER() OVER (ORDER BY s.total_profit DESC) AS profit_rank
+    FROM sales_cte s
+    WHERE s.total_quantity > 1000
+)
+SELECT
+    ci.c_customer_sk,
+    ci.gender,
+    ci.address_count,
+    ci.total_vehicles,
+    hp.ss_item_sk,
+    hp.total_quantity,
+    hp.total_profit
+FROM customer_info ci
+JOIN high_performers hp ON hp.ss_item_sk IN (
+    SELECT DISTINCT ss_item_sk
+    FROM store_sales
+    WHERE ss_item_sk = hp.ss_item_sk
+)
+WHERE hp.profit_rank <= 10
+ORDER BY ci.gender, hp.total_profit DESC;

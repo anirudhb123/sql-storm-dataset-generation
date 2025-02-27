@@ -1,0 +1,48 @@
+
+WITH RECURSIVE recent_orders AS (
+    SELECT o_orderkey, o_orderdate, o_totalprice, o_custkey
+    FROM orders
+    WHERE o_orderdate >= DATE('1998-10-01') - INTERVAL '1 year'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    JOIN recent_orders ro ON o.o_orderkey = ro.o_orderkey + 1
+),
+supplier_stats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+           COUNT(DISTINCT ps.ps_partkey) AS distinct_parts_supplied
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders,
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+high_spenders AS (
+    SELECT c.custkey, c.c_name, total_spent
+    FROM customer_order_summary c
+    WHERE total_spent > (SELECT AVG(total_spent) FROM customer_order_summary)
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           AVG(l.l_quantity) AS avg_quantity
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT r.r_name, COUNT(DISTINCT c.c_custkey) AS cust_count,
+       COALESCE(SUM(ps.total_supplycost), 0) AS total_supplycost,
+       COUNT(DISTINCT ps.s_suppkey) AS total_suppliers,
+       MAX(pd.avg_quantity) AS highest_avg_quantity
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier_stats ps ON ps.s_suppkey IN (SELECT ps_suppkey FROM partsupp)
+LEFT JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN recent_orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN part_details pd ON pd.p_partkey IN (SELECT DISTINCT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+GROUP BY r.r_name
+ORDER BY r.r_name;

@@ -1,0 +1,75 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        ws_quantity, 
+        ws_net_profit,
+        1 AS level
+    FROM 
+        web_sales 
+    WHERE 
+        ws_net_profit > 100
+    UNION ALL
+    SELECT 
+        s.ws_sold_date_sk, 
+        s.ws_item_sk, 
+        s.ws_quantity, 
+        s.ws_net_profit + c.ws_net_profit AS net_profit,
+        c.level + 1
+    FROM 
+        web_sales s
+    JOIN 
+        Sales_CTE c ON s.ws_item_sk = c.ws_item_sk 
+    WHERE 
+        c.level < 5
+), 
+Customer_Summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'M') AS gender, 
+        SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender
+),
+Warehouse_Ship_Mode AS (
+    SELECT 
+        w.w_warehouse_sk,
+        sm.sm_type,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        w.w_warehouse_sk, sm.sm_type
+)
+SELECT 
+    cs.c_customer_sk, 
+    cs.gender,
+    cs.total_spent,
+    ws_ship.avg_net_profit,
+    SUM(s.level) AS total_levels
+FROM 
+    Customer_Summary cs
+LEFT JOIN 
+    Warehouse_Ship_Mode ws_ship ON cs.order_count > 10
+LEFT JOIN 
+    Sales_CTE s ON cs.c_customer_sk = s.ws_item_sk
+WHERE 
+    cs.total_spent IS NOT NULL 
+    AND (ws_ship.avg_net_profit IS NULL OR ws_ship.avg_net_profit > 500)
+GROUP BY 
+    cs.c_customer_sk, cs.gender, cs.total_spent, ws_ship.avg_net_profit
+ORDER BY 
+    cs.total_spent DESC
+LIMIT 100;

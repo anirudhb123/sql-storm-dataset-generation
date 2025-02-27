@@ -1,0 +1,58 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title AS mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS at ON ml.linked_movie_id = at.id
+)
+
+SELECT 
+    p.name AS person_name,
+    p.gender,
+    COUNT(DISTINCT cc.movie_id) AS num_movies,
+    AVG(a.production_year) AS avg_production_year,
+    STRING_AGG(DISTINCT a.title, ', ') AS linked_titles,
+    CASE 
+        WHEN COUNT(DISTINCT cc.movie_id) > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS status
+FROM 
+    aka_name AS p
+LEFT JOIN 
+    cast_info AS ci ON p.person_id = ci.person_id
+LEFT JOIN 
+    complete_cast AS cc ON ci.movie_id = cc.movie_id
+LEFT JOIN 
+    MovieHierarchy AS mh ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title AS a ON mh.movie_id = a.id
+WHERE 
+    p.gender IS NOT NULL
+GROUP BY 
+    p.name, p.gender
+HAVING 
+    COUNT(DISTINCT cc.movie_id) > 2
+ORDER BY 
+    num_movies DESC
+LIMIT 10;

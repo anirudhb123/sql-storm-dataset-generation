@@ -1,0 +1,51 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, m.production_year, 0 AS depth
+    FROM aka_title m
+    WHERE m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id, m.title, m.production_year, mh.depth + 1
+    FROM aka_title m 
+    JOIN movie_link ml ON ml.movie_id = m.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.linked_movie_id
+),
+
+actor_role_summary AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        SUM(CASE WHEN r.role = 'lead' THEN 1 ELSE 0 END) AS lead_roles
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id
+),
+
+movie_company_info AS (
+    SELECT 
+        m.id AS movie_id,
+        COALESCE(c.name, 'Unknown') AS company_name, 
+        COUNT(mc.company_type_id) AS company_count
+    FROM movie_companies mc
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    JOIN aka_title m ON m.id = mc.movie_id
+    GROUP BY m.id, c.name
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT c.movie_id) AS movie_count,
+    SUM(CASE WHEN r.role IS NOT NULL THEN 1 ELSE 0 END) AS roles_count,
+    MAX(CASE WHEN m.production_year > 2000 THEN m.title END) AS latest_movie,
+    STRING_AGG(DISTINCT co.company_name, ', ' ORDER BY co.company_name) AS companies_involved,
+    mh.depth AS movie_depth
+FROM aka_name a
+JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN role_type r ON c.role_id = r.id
+JOIN movie_hierarchy mh ON c.movie_id = mh.movie_id
+LEFT JOIN movie_company_info co ON mh.movie_id = co.movie_id
+GROUP BY a.name, mh.depth
+HAVING COUNT(DISTINCT c.movie_id) > 5
+ORDER BY movie_count DESC, latest_movie DESC
+LIMIT 10;

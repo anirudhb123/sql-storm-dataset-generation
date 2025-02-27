@@ -1,0 +1,49 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.UpVotes, 0)) AS TotalUpvotes,
+        SUM(COALESCE(v.DownVotes, 0)) AS TotalDownvotes,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        RANK() OVER (ORDER BY SUM(COALESCE(v.UpVotes, 0)) DESC) AS RankByUpvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        (SELECT PostId, SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes, 
+                SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes 
+         FROM Votes 
+         GROUP BY PostId) v ON p.Id = v.PostId
+    WHERE 
+        u.CreationDate < (CURRENT_TIMESTAMP - INTERVAL '1 year')
+    GROUP BY 
+        u.Id, u.DisplayName
+), HighActivityUsers AS (
+    SELECT UserId, DisplayName, TotalPosts, TotalUpvotes, TotalDownvotes, TotalQuestions, TotalAnswers
+    FROM UserActivity
+    WHERE TotalPosts > 10
+)
+SELECT 
+    h.DisplayName, 
+    h.TotalPosts, 
+    h.TotalUpvotes, 
+    h.TotalDownvotes, 
+    h.TotalQuestions, 
+    h.TotalAnswers,
+    COALESCE(ROUND(100.0 * h.TotalUpvotes / NULLIF(h.TotalPosts, 0), 2), 0) AS UpvoteRatio,
+    CASE 
+        WHEN h.TotalQuestions > 0 THEN 
+            ROUND((1.0 * h.TotalAnswers / h.TotalQuestions), 2) 
+        ELSE 0 
+    END AS AnswerToQuestionRatio
+FROM 
+    HighActivityUsers h
+LEFT JOIN 
+    (SELECT DISTINCT PostId, COUNT(*) AS CommentCount 
+     FROM Comments 
+     GROUP BY PostId) c ON c.PostId IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = h.UserId)
+ORDER BY 
+    h.TotalUpvotes DESC, h.DisplayName ASC;

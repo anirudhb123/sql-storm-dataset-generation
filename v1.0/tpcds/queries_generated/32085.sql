@@ -1,0 +1,63 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk, ws_sold_date_sk
+    UNION ALL
+    SELECT
+        sd.ws_sold_date_sk + 1,
+        sd.ws_item_sk,
+        SUM(sd.total_quantity) + COALESCE(sd.next_quantity, 0),
+        SUM(sd.total_net_profit) + COALESCE(sd.next_net_profit, 0)
+    FROM sales_data sd
+    LEFT JOIN (
+        SELECT
+            ws_sold_date_sk,
+            ws_item_sk,
+            SUM(ws_quantity) AS next_quantity,
+            SUM(ws_net_profit) AS next_net_profit
+        FROM web_sales
+        WHERE ws_sold_date_sk + 1 = sd.ws_sold_date_sk
+        GROUP BY ws_item_sk, ws_sold_date_sk
+    ) next_sales ON next_sales.ws_item_sk = sd.ws_item_sk
+    GROUP BY sd.ws_item_sk, sd.ws_sold_date_sk
+),
+filtered_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(total_net_profit) AS cumulative_profit
+    FROM sales_data
+    GROUP BY ws_item_sk
+    ORDER BY cumulative_profit DESC
+    LIMIT 10
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        CASE 
+            WHEN cd.cd_purchase_estimate IS NULL THEN 'Unknown'
+            ELSE CAST(cd.cd_purchase_estimate AS VARCHAR)
+        END AS purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_last_name) AS row_num
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT 
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.purchase_estimate,
+    fs.cumulative_profit,
+    COUNT(ci.c_customer_sk) OVER () AS total_customers
+FROM filtered_sales fs
+JOIN customer_info ci ON ci.c_customer_sk = fs.ws_item_sk
+WHERE ci.row_num <= 5
+ORDER BY fs.cumulative_profit DESC;

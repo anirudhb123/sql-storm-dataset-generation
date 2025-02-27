@@ -1,0 +1,31 @@
+-- Performance benchmarking query for StackOverflow schema
+
+-- This query evaluates the performance of retrieving posts along with their owners and associated badges
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate AS PostCreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    u.Reputation AS OwnerReputation,
+    b.Name AS BadgeName,
+    b.Class AS BadgeClass,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) AS VoteCount,
+    p.ViewCount
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+WHERE 
+    p.CreationDate > '2020-01-01' -- Filter for posts created after a specific date
+GROUP BY 
+    p.Id, u.Id, b.Id
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100; -- Limit to the most recent 100 posts for benchmarking

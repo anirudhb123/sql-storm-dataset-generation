@@ -1,0 +1,7 @@
+SELECT p.p_designation, SUM(l.l_extendedprice) AS total_revenue
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+GROUP BY p.p_designation
+ORDER BY total_revenue DESC
+LIMIT 10;

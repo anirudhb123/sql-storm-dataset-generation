@@ -1,0 +1,46 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_id,
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        w.w_warehouse_id, c.c_customer_id
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(sd.total_sales) AS total_sales_by_demographics
+    FROM 
+        customer_demographics cd
+    JOIN 
+        SalesData sd ON cd.cd_demo_sk = sd.c_customer_id
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COUNT(*) AS customer_count,
+    SUM(cd.total_sales_by_demographics) AS total_sales,
+    AVG(cd.total_sales_by_demographics) AS avg_sales
+FROM 
+    CustomerDemographics cd
+GROUP BY 
+    cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+ORDER BY 
+    total_sales DESC, customer_count DESC;

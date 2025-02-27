@@ -1,0 +1,63 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS total_parts,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_nationkey, s.s_suppkey, s.s_name
+),
+OrderSummary AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_nationkey
+),
+RankedSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_supply_cost,
+        ss.total_parts,
+        os.total_orders,
+        os.total_revenue,
+        RANK() OVER (ORDER BY ss.total_supply_cost DESC) AS supplier_rank
+    FROM 
+        SupplierStats ss
+    LEFT JOIN 
+        OrderSummary os ON ss.s_nationkey = os.c_nationkey
+)
+SELECT 
+    r.r_name,
+    rs.s_name,
+    rs.total_supply_cost,
+    rs.total_parts,
+    COALESCE(rs.total_orders, 0) AS total_orders,
+    COALESCE(rs.total_revenue, 0) AS total_revenue,
+    CASE 
+        WHEN rs.total_orders > 100 THEN 'High'
+        WHEN rs.total_orders BETWEEN 50 AND 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS order_category
+FROM 
+    region r
+LEFT JOIN 
+    RankedSuppliers rs ON r.r_regionkey = rs.s_nationkey
+WHERE 
+    r.r_name LIKE '%AMERICA%' 
+    OR (rs.total_supply_cost IS NOT NULL AND rs.supplier_rank <= 5)
+ORDER BY 
+    r.r_name, rs.total_supply_cost DESC;

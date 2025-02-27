@@ -1,0 +1,66 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) as order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+TopCustomers AS (
+    SELECT 
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        c.c_name AS customer_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        RankedOrders ro
+    JOIN 
+        customer c ON ro.o_orderkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ro.order_rank <= 5
+    GROUP BY 
+        r.r_name, n.n_name, c.c_name
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_name,
+        s.s_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        SUM(l.l_quantity) AS total_quantity_sold
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        p.p_name, s.s_name, ps.ps_supplycost, ps.ps_availqty
+)
+SELECT 
+    tc.region_name,
+    tc.nation_name,
+    tc.customer_name,
+    ps.p_name,
+    ps.s_name,
+    ps.ps_supplycost,
+    ps.ps_availqty,
+    ps.total_quantity_sold
+FROM 
+    TopCustomers tc
+JOIN 
+    PartSupplierDetails ps ON tc.nation_name = ps.s_supname
+ORDER BY 
+    tc.total_spent DESC, tc.region_name ASC;

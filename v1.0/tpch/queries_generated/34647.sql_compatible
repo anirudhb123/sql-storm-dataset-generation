@@ -1,0 +1,57 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        DENSE_RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    sh.s_suppkey,
+    sh.s_name,
+    COALESCE(ss.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(ss.num_parts, 0) AS num_parts,
+    COALESCE(hvo.total_value, 0) AS order_total,
+    COALESCE(hvo.customer_count, 0) AS customer_count,
+    SUM(CASE WHEN p.price_rank <= 5 THEN p.p_retailprice ELSE 0 END) AS top_part_price_sum
+FROM SupplierHierarchy sh
+LEFT JOIN SupplierSummary ss ON sh.s_suppkey = ss.s_suppkey
+LEFT JOIN HighValueOrders hvo ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = sh.s_nationkey)
+LEFT JOIN RankedParts p ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sh.s_suppkey)
+GROUP BY sh.s_suppkey, sh.s_name, ss.total_supply_cost, ss.num_parts, hvo.total_value, hvo.customer_count
+ORDER BY sh.level, sh.s_name;

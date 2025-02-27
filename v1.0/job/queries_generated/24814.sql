@@ -1,0 +1,76 @@
+WITH ranked_movies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        AVG(CASE WHEN ci.note IS NULL THEN 0 ELSE 1 END) AS avg_actor_note,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_per_year
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    LEFT JOIN 
+        complete_cast cc ON a.id = cc.movie_id
+    LEFT JOIN 
+        role_type rt ON c.role_id = rt.id
+    GROUP BY 
+        a.id, a.title, a.production_year
+),
+filtered_movies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_actors,
+        avg_actor_note
+    FROM 
+        ranked_movies
+    WHERE 
+        avg_actor_note > 0 
+        AND total_actors > 3 
+        AND rank_per_year < 5
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(cn.name, 'Unknown') AS company_name,
+    ARRAY_AGG(DISTINCT r.role) AS roles,
+    SUM(mi.info IS NOT NULL) as info_presence
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Rating')
+WHERE 
+    fm.production_year > 2000
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, cn.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) >= 5 
+    AND COUNT(DISTINCT mi.id) > 0
+ORDER BY 
+    fm.production_year DESC, fm.title;
+
+-- Additional final output for benchmarking
+UNION ALL
+
+SELECT 
+    'Total Count' AS title,
+    NULL AS production_year,
+    NULL AS company_name,
+    NULL AS roles,
+    COUNT(*)
+FROM 
+    filtered_movies
+WHERE 
+    EXISTS (SELECT 1 FROM cast_info c WHERE c.movie_id = filtered_movies.movie_id AND c.note IS NULL)
+;

@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, m.title, 1 AS depth
+    FROM aka_title m
+    WHERE m.production_year = (SELECT MAX(production_year) FROM aka_title)
+    
+    UNION ALL
+    
+    SELECT m.id AS movie_id, m.title, mh.depth + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title m ON m.id = ml.linked_movie_id
+    WHERE mh.depth < 5
+),
+top_cast AS (
+    SELECT ci.movie_id, a.name AS actor_name, 
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank
+    FROM cast_info ci
+    JOIN aka_name a ON ci.person_id = a.person_id
+    WHERE ci.nr_order IS NOT NULL
+),
+movie_company_info AS (
+    SELECT m.id AS movie_id, c.name AS company_name, 
+           ct.kind AS company_type, 
+           COALESCE(COUNT(mc.id), 0) AS company_count
+    FROM aka_title m
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN company_name c ON mc.company_id = c.id
+    LEFT JOIN company_type ct ON mc.company_type_id = ct.id
+    GROUP BY m.id, c.name, ct.kind
+),
+keyword_summary AS (
+    SELECT mk.movie_id, STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT mh.movie_id, mh.title, 
+       COALESCE(tc.actor_name, 'Unknown Actor') AS actor_name,
+       COALESCE(tc.actor_rank, 'N/A') AS actor_rank, 
+       mci.company_name, 
+       mci.company_type,
+       mci.company_count,
+       k.keyword AS movie_keywords,
+       CASE 
+           WHEN mci.company_count = 0 THEN 'Independent Movie'
+           WHEN mci.company_count > 0 THEN 'Studio Movie'
+           ELSE 'No Data'
+       END AS movie_category
+FROM movie_hierarchy mh
+LEFT JOIN top_cast tc ON mh.movie_id = tc.movie_id AND tc.actor_rank <= 3
+LEFT JOIN movie_company_info mci ON mh.movie_id = mci.movie_id
+LEFT JOIN keyword_summary k ON mh.movie_id = k.movie_id
+ORDER BY mh.depth, mh.title, tc.actor_rank NULLS LAST;

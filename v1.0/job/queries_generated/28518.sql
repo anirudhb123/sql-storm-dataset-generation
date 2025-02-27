@@ -1,0 +1,40 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM title m
+    JOIN cast_info ci ON m.id = ci.movie_id
+    GROUP BY m.id, m.title, m.production_year
+),
+TopRatedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        COALESCE(mi.info, 'No Info') AS movie_info
+    FROM RankedMovies rm
+    LEFT JOIN movie_info mi ON rm.movie_id = mi.movie_id AND mi.info_type_id = (
+        SELECT id FROM info_type WHERE info = 'Rating' LIMIT 1
+    )
+    WHERE rm.cast_count > 5
+),
+MovieKeywords AS (
+    SELECT 
+        tm.movie_id,
+        ARRAY_AGG(mk.keyword) AS keywords
+    FROM TopRatedMovies tm
+    JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+    GROUP BY tm.movie_id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.movie_info,
+    COALESCE(mk.keywords, '{}') AS keywords
+FROM TopRatedMovies tm
+LEFT JOIN MovieKeywords mk ON tm.movie_id = mk.movie_id
+ORDER BY tm.production_year DESC, tm.cast_count DESC;

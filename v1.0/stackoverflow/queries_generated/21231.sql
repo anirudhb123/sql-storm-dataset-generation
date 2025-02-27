@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE((SELECT MAX(b.Reputation) 
+                  FROM Users b 
+                  WHERE b.Id = p.OwnerUserId 
+                  AND b.Reputation IS NOT NULL), 0) AS OwnerReputation
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+EligiblePosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.Score, 
+        rp.ViewCount, 
+        rp.CreationDate,
+        rp.RankByScore,
+        rp.CommentCount,
+        rp.OwnerReputation
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 10 
+        AND rp.CommentCount > 5 
+        AND rp.OwnerReputation IS NOT NULL
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT CONCAT(ph.Comment, ' - ', ph.CreationDate::text), '; ' ORDER BY ph.CreationDate) AS HistoryComments
+    FROM 
+        PostHistory ph
+    JOIN 
+        EligiblePosts ep ON ep.PostId = ph.PostId
+    WHERE 
+        ph.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ep.PostId, 
+    ep.Title,
+    ep.Score,
+    ep.ViewCount,
+    ep.CreationDate,
+    COALESCE(pd.HistoryComments, 'No history available') AS HistoryComments,
+    CASE 
+        WHEN ep.ViewCount > 1000 THEN 'Highly Viewed'
+        WHEN ep.ViewCount BETWEEN 500 AND 1000 THEN 'Moderately Viewed'
+        ELSE 'Less Viewed' 
+    END AS ViewCategory,
+    CASE 
+        WHEN pd.HistoryComments IS NULL AND ep.RankByScore = 1 THEN 'Top Post with No History'
+        ELSE 'Other'
+    END AS SpecialFlag
+FROM 
+    EligiblePosts ep
+LEFT JOIN 
+    PostHistoryData pd ON ep.PostId = pd.PostId
+WHERE 
+    ep.ViewCount > 50
+ORDER BY 
+    ep.Score DESC, 
+    ep.CreationDate DESC
+LIMIT 100;

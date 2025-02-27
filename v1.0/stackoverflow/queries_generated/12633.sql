@@ -1,0 +1,49 @@
+-- Performance benchmarking query for stackoverflow schema
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(P.Id) AS NumberOfPosts,
+        COUNT(DISTINCT B.Id) AS NumberOfBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.PostTypeId,
+        COUNT(C.Id) AS NumberOfComments,
+        COUNT(V.Id) AS NumberOfVotes,
+        AVG(V.BountyAmount) AS AverageBountyAmount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id, P.PostTypeId
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.NumberOfPosts,
+    U.NumberOfBadges,
+    P.PostId,
+    P.PostTypeId,
+    P.NumberOfComments,
+    P.NumberOfVotes,
+    P.AverageBountyAmount
+FROM 
+    UserStats U
+JOIN 
+    PostStats P ON U.UserId = P.OwnerUserId
+ORDER BY 
+    U.Reputation DESC, 
+    P.NumberOfVotes DESC;

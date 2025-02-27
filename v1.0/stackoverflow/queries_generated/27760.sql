@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        ARRAY_AGG(DISTINCT t.TagName) AS AllTags
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '>')::int[])
+    WHERE 
+        p.PostTypeId = 1 -- Only include questions
+    GROUP BY 
+        p.Id
+),
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE 
+            WHEN b.Class = 1 THEN 3 
+            WHEN b.Class = 2 THEN 2 
+            WHEN b.Class = 3 THEN 1 
+            ELSE 0 END) AS TotalBadgeScore,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    WHERE 
+        u.Reputation > 1000 -- Filter for users with significant reputation
+    GROUP BY 
+        u.Id
+),
+FinalOutput AS (
+    SELECT 
+        up.UserId,
+        up.Title,
+        up.Body,
+        up.ViewCount,
+        up.Score,
+        us.TotalBadgeScore,
+        us.TotalPosts,
+        STRING_AGG(DISTINCT un.UserDisplayName, ', ') AS ContributorNames
+    FROM 
+        RankedPosts up
+    JOIN 
+        Users un ON un.Id = up.OwnerUserId
+    JOIN 
+        UserScores us ON us.UserId = un.Id
+    WHERE 
+        up.Rank <= 3 -- Top 3 questions per user
+    GROUP BY 
+        up.UserId, up.Title, up.Body, up.ViewCount, up.Score, us.TotalBadgeScore, us.TotalPosts
+)
+SELECT 
+    *
+FROM 
+    FinalOutput
+ORDER BY 
+    TotalBadgeScore DESC, ViewCount DESC;

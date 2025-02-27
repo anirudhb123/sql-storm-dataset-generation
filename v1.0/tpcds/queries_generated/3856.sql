@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS sales_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_item_sk) AS total_quantity_sold
+    FROM 
+        web_sales AS ws
+    WHERE 
+        ws.ws_ship_date_sk BETWEEN 2451011 AND 2451500
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_item_sk,
+        SUM(sr.sr_return_quantity) AS total_returned,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM 
+        store_returns AS sr
+    GROUP BY 
+        sr.sr_item_sk
+),
+HighReturnItems AS (
+    SELECT 
+        cr.sr_item_sk,
+        cr.total_returned,
+        cr.return_count
+    FROM 
+        CustomerReturns AS cr
+    WHERE 
+        cr.total_returned > 5
+),
+JoinResults AS (
+    SELECT 
+        rs.ws_item_sk,
+        rs.ws_sales_price,
+        rs.total_quantity_sold,
+        COALESCE(hri.total_returned, 0) AS total_returned,
+        COALESCE(hri.return_count, 0) AS return_count
+    FROM 
+        RankedSales AS rs
+    LEFT JOIN 
+        HighReturnItems AS hri ON rs.ws_item_sk = hri.sr_item_sk
+)
+SELECT 
+    j.ws_item_sk,
+    j.ws_sales_price,
+    j.total_quantity_sold,
+    j.total_returned,
+    j.return_count,
+    CASE 
+        WHEN j.return_count > 0 THEN 'High Risk'
+        ELSE 'Low Risk'
+    END AS risk_level
+FROM 
+    JoinResults AS j
+WHERE 
+    j.sales_rank = 1
+ORDER BY 
+    j.ws_sales_price DESC
+LIMIT 10;

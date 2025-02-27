@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.CommentCount,
+        CASE 
+            WHEN rp.Score > 100 THEN 'High Score'
+            WHEN rp.Score BETWEEN 50 AND 100 THEN 'Medium Score'
+            ELSE 'Low Score' 
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 10
+)
+SELECT 
+    fp.Title,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Score,
+    fp.CommentCount,
+    fp.ScoreCategory,
+    COALESCE(b.BadgeCount, 0) AS BadgeCount,
+    ARRAY_AGG(t.TagName) AS Tags
+FROM 
+    FilteredPosts fp
+LEFT JOIN (
+    SELECT 
+        UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+LEFT JOIN 
+    UNNEST(string_to_array((SELECT Tags FROM Posts WHERE Id = fp.PostId), ',')) AS t(TagName)
+GROUP BY 
+    fp.PostId, fp.Title, fp.CreationDate, fp.ViewCount, fp.Score, fp.CommentCount, fp.ScoreCategory
+ORDER BY 
+    fp.Score DESC;

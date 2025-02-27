@@ -1,0 +1,69 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ak.name AS aka_name,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    WHERE 
+        ak.title IS NOT NULL
+),
+actor_movie_counts AS (
+    SELECT 
+        ai.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ai ON ci.person_id = ai.person_id
+    GROUP BY 
+        ai.person_id
+),
+high_profile_actors AS (
+    SELECT 
+        ai.person_id,
+        ai.name,
+        ac.movie_count
+    FROM 
+        aka_name ai
+    JOIN 
+        actor_movie_counts ac ON ai.person_id = ac.person_id
+    WHERE 
+        ac.movie_count > 5
+),
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COUNT(cm.company_id) AS company_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_companies cm ON rm.movie_id = cm.movie_id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+    HAVING 
+        COUNT(cm.company_id) > 2
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    a.name AS actor_name,
+    tm.company_count
+FROM 
+    top_movies tm
+JOIN 
+    cast_info ci ON tm.movie_id = ci.movie_id
+JOIN 
+    high_profile_actors a ON ci.person_id = a.person_id
+WHERE 
+    tm.year_rank <= 10
+ORDER BY 
+    tm.production_year DESC, a.movie_count DESC;

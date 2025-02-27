@@ -1,0 +1,65 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_profit) AS Total_Profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS Profit_Rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 20210101 AND 20211231
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+Income_Bands AS (
+    SELECT 
+        hd_income_band_sk,
+        (ib_lower_bound + ib_upper_bound) / 2 AS Average_Income
+    FROM 
+        household_demographics 
+    JOIN income_band ON hd_income_band_sk = ib_income_band_sk
+),
+Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT s_ss.ticket_number) AS Total_Store_Sales,
+        SUM(s_ss.ss_net_profit) AS Store_Profit,
+        SUM(ws.ws_net_profit) AS Web_Profit,
+        COALESCE(SUM(s_ss.ss_net_profit), 0) + COALESCE(SUM(ws.ws_net_profit), 0) AS Total_Profit_All,
+        CASE 
+            WHEN COUNT(s_ss.ticket_number) IS NULL THEN 'No Sales'
+            ELSE 'Sales Made'
+        END AS Sales_Status
+    FROM 
+        customer c
+    LEFT JOIN store_sales s_ss ON c.c_customer_sk = s_ss.ss_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    COALESCE(cs.Total_Store_Sales, 0) AS Total_Store_Sales,
+    cs.Store_Profit,
+    cs.Web_Profit,
+    cs.Total_Profit_All,
+    CASE 
+        WHEN ib.Average_Income > 50000 THEN 'High Income'
+        WHEN ib.Average_Income BETWEEN 20000 AND 50000 THEN 'Middle Income'
+        ELSE 'Low Income'
+    END AS Income_Category,
+    CASE
+        WHEN cs.Sales_Status = 'No Sales' THEN 'Not Engaged'
+        ELSE 'Engaged Customer'
+    END AS Engagement_Level
+FROM 
+    Customer_Stats cs
+LEFT JOIN 
+    Income_Bands ib ON cs.c_customer_sk = ib.hd_income_band_sk
+WHERE 
+    cs.Total_Profit_All > 100
+    OR cs.Sales_Status = 'No Sales'
+ORDER BY 
+    Total_Store_Sales DESC NULLS LAST
+LIMIT 100;

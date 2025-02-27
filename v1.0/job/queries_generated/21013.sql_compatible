@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.id) DESC) AS rank_per_year,
+        COUNT(ci.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopYears AS (
+    SELECT 
+        production_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        rank_per_year = 1
+),
+MovieDetails AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        k.keyword,
+        p.info
+    FROM 
+        RankedMovies m
+    JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    LEFT JOIN 
+        person_info p ON m.movie_id = p.person_id
+    WHERE 
+        m.production_year IN (SELECT production_year FROM TopYears)
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.keyword, 'No Keywords') AS keyword,
+    COALESCE(p.info, 'No Additional Info') AS additional_info,
+    CASE 
+        WHEN p.info IS NULL THEN 'No Person Info'
+        ELSE 'Has Person Info'
+    END AS info_status,
+    (SELECT COUNT(*) FROM aka_name a WHERE a.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = md.movie_id)) AS unique_actors_count,
+    (SELECT STRING_AGG(DISTINCT cn.name, ', ') 
+        FROM company_name cn 
+        JOIN movie_companies mc ON cn.id = mc.company_id 
+        WHERE mc.movie_id = md.movie_id) AS associated_companies
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON md.movie_id = ci.movie_id
+ORDER BY 
+    md.production_year DESC, md.title;

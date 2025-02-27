@@ -1,0 +1,87 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS num_parts,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY SUM(ps.ps_supplycost) DESC) AS row_num
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.n_nationkey
+    HAVING 
+        SUM(ps.ps_availqty) > 0
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS num_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+),
+PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers,
+        AVG(ps.ps_supplycost) AS avg_cost
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 0 AND 
+        (p.p_size = ANY(SELECT DISTINCT p2.p_size FROM part p2 WHERE p2.p_retailprice < 100) OR 
+        p.p_type LIKE '%metal%')
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+OrdersWithReturns AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_returnflag,
+        SUM(l.l_quantity) AS total_returned_qty
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'R'
+    GROUP BY 
+        l.l_orderkey, l.l_returnflag
+)
+SELECT 
+    ss.s_name,
+    cs.c_name,
+    ps.p_name,
+    COALESCE(rs.total_returned_qty, 0) AS total_returned_qty,
+    ss.total_available_qty,
+    cs.total_spent,
+    CASE 
+        WHEN cs.total_spent > 1000 THEN 'High Value Customer'
+        WHEN cs.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_category
+FROM 
+    SupplierStats ss
+FULL OUTER JOIN 
+    CustomerOrderStats cs ON ss.row_num = cs.order_rank
+FULL OUTER JOIN 
+    PartSupplierDetails ps ON ps.num_suppliers = ss.num_parts
+LEFT JOIN 
+    OrdersWithReturns rs ON rs.l_orderkey = cs.num_orders
+WHERE 
+    (ss.num_parts IS NOT NULL OR cs.num_orders IS NOT NULL OR ps.num_suppliers IS NOT NULL)
+    AND (ss.total_available_qty <> 0 OR cs.total_spent IS NULL OR ps.avg_cost IS NOT NULL)
+ORDER BY 
+    ss.s_name, cs.c_name, ps.p_name;

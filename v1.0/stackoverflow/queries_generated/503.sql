@@ -1,0 +1,70 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(u.UpVotes, 0) AS UpVotes,
+        COALESCE(u.DownVotes, 0) AS DownVotes,
+        (SELECT COUNT(*) FROM Posts p WHERE p.OwnerUserId = u.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.UserId = u.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+),
+PostAggregates AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(DATEDIFF(second, p.CreationDate, GETDATE())) AS AvgPostAgeInSeconds
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id,
+        DATEDIFF(day, p.CreationDate, ph.CreationDate) AS DaysToClose,
+        c.Name AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 -- Closed
+    LEFT JOIN 
+        CloseReasonTypes c ON ph.Comment = c.Id::text
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    COALESCE(pa.TotalPosts, 0) AS TotalPosts,
+    COALESCE(pa.TotalScore, 0) AS TotalScore,
+    COALESCE(pa.TotalViews, 0) AS TotalViews,
+    COALESCE(recent.EditRank, 0) AS RecentEditCount,
+    COALESCE(cp.DaysToClose, NULL) AS DaysClosed,
+    cp.CloseReason
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostAggregates pa ON us.UserId = pa.OwnerUserId
+LEFT JOIN 
+    RecentEdits recent ON us.UserId = recent.UserId
+LEFT JOIN 
+    ClosedPosts cp ON us.UserId = cp.OwnerUserId
+WHERE 
+    us.Reputation > 1000
+ORDER BY 
+    us.Rank, us.Reputation DESC
+OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY;

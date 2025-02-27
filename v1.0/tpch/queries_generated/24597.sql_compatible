@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier 
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'FRANCE')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_nationkey
+),
+RegionStats AS (
+    SELECT r.r_regionkey, r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r 
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+PartSupplierStats AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_supply, 
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM partsupp ps
+    WHERE ps.ps_supplycost > (SELECT AVG(ps_supplycost) FROM partsupp)
+    GROUP BY ps.ps_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate) AS order_rank
+    FROM orders o 
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate <= DATE '1998-10-01' - INTERVAL '30 days'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+CustomerOrderCounts AS (
+    SELECT c.c_custkey, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    r.r_name,
+    p.p_name,
+    COUNT(DISTINCT cs.c_custkey) AS loyal_customers,
+    AVG(od.total_price) AS average_order_value,
+    SUM(ps.total_supply) AS total_part_supply,
+    MAX(NULLIF(cs.order_count, 0)) AS max_order_count 
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN RegionStats r ON r.nation_count > 3 
+LEFT JOIN CustomerOrderCounts cs ON cs.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_acctbal > 1000)
+LEFT JOIN OrderDetails od ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY r.r_name, p.p_name
+HAVING COUNT(DISTINCT cs.c_custkey) > 5 AND SUM(ps.total_supply) IS NOT NULL
+ORDER BY r.r_name, average_order_value DESC;

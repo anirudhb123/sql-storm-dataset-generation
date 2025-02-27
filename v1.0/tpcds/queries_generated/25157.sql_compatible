@@ -1,0 +1,70 @@
+
+WITH address_agg AS (
+    SELECT
+        ca_state,
+        COUNT(DISTINCT ca_address_id) AS unique_addresses,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        COUNT(DISTINCT ca_city) AS unique_cities
+    FROM
+        customer_address
+    GROUP BY
+        ca_state
+),
+gender_agg AS (
+    SELECT
+        cd_gender,
+        COUNT(c_demo_sk) AS customer_count,
+        AVG(cd_dep_count) AS avg_dependents
+    FROM
+        customer_demographics
+    GROUP BY
+        cd_gender
+),
+date_agg AS (
+    SELECT
+        d_year,
+        COUNT(DISTINCT d_date_id) AS unique_days,
+        COUNT(*) AS total_days
+    FROM
+        date_dim
+    GROUP BY
+        d_year
+),
+item_agg AS (
+    SELECT
+        i_category,
+        COUNT(i_item_sk) AS total_items,
+        AVG(i_current_price) AS avg_price
+    FROM
+        item
+    GROUP BY
+        i_category
+)
+SELECT
+    aa.ca_state,
+    aa.unique_addresses,
+    aa.avg_street_name_length,
+    aa.unique_cities,
+    ga.cd_gender,
+    ga.customer_count,
+    ga.avg_dependents,
+    da.d_year,
+    da.unique_days,
+    da.total_days,
+    ia.i_category,
+    ia.total_items,
+    ia.avg_price
+FROM
+    address_agg aa
+CROSS JOIN
+    gender_agg ga
+CROSS JOIN
+    date_agg da
+CROSS JOIN
+    item_agg ia
+ORDER BY
+    aa.ca_state,
+    ga.cd_gender,
+    da.d_year,
+    ia.i_category
+LIMIT 100;

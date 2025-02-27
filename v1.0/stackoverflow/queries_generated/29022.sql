@@ -1,0 +1,63 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        B.Name AS BadgeName, 
+        B.Date AS BadgeDate, 
+        B.Class,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounty,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownvotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, B.Name, B.Date, B.Class
+),
+BadgeSummary AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        STRING_AGG(BadgeName, ', ') AS Badges,
+        COUNT(DISTINCT Bag.Class) AS TotalBadgeClasses
+    FROM 
+        UserBadges
+    GROUP BY 
+        UserId, DisplayName
+),
+FinalSummary AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.Badges,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        U.TotalUpvotes,
+        U.TotalDownvotes,
+        U.TotalBounty,
+        U.PostCount,
+        RANK() OVER (ORDER BY U.TotalUpvotes DESC) AS UpvoteRank
+    FROM 
+        BadgeSummary U
+    LEFT JOIN 
+        UserBadges B ON U.UserId = B.UserId
+    GROUP BY 
+        U.UserId, U.DisplayName, U.Badges, U.TotalUpvotes, U.TotalDownvotes, U.TotalBounty, U.PostCount
+)
+SELECT 
+    *,
+    (GoldBadges + SilverBadges + BronzeBadges) AS TotalBadges
+FROM 
+    FinalSummary
+WHERE 
+    TotalBadges > 0
+ORDER BY 
+    UpvoteRank, TotalBounty DESC
+LIMIT 10;

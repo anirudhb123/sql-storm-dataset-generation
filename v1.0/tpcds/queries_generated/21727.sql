@@ -1,0 +1,64 @@
+
+WITH RECURSIVE monthly_sales AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_sales,
+        RANK() OVER (PARTITION BY d.d_year ORDER BY COALESCE(SUM(ws.ws_net_profit), 0) DESC) AS sales_rank
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq
+), high_income_customers AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_demo_sk,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        ROW_NUMBER() OVER (PARTITION BY hd.hd_income_band_sk ORDER BY c.c_customer_sk) AS customer_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate > 1000
+), item_sales AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        COALESCE(SUM(ss.ss_sales_price), 0) AS total_item_sales
+    FROM 
+        item i
+    LEFT JOIN 
+        store_sales ss ON i.i_item_sk = ss.ss_item_sk
+    GROUP BY 
+        i.i_item_sk, i.i_item_id
+)
+SELECT 
+    h.income_band,
+    m.d_year,
+    m.d_month_seq,
+    m.total_sales,
+    h.c_customer_sk,
+    COUNT(DISTINCT i.total_item_sales) AS distinct_item_sales,
+    CASE 
+        WHEN m.total_sales IS NOT NULL THEN m.total_sales + SUM(i.total_item_sales) 
+        ELSE NULL 
+    END AS adjusted_sales
+FROM 
+    high_income_customers h
+JOIN 
+    monthly_sales m ON h.customer_rank <= 10
+LEFT JOIN 
+    item_sales i ON h.c_customer_sk IN (
+        SELECT DISTINCT ss.ss_customer_sk 
+        FROM store_sales ss 
+        WHERE ss.ss_net_paid >= 100
+    )
+GROUP BY 
+    h.income_band, m.d_year, m.d_month_seq, h.c_customer_sk
+ORDER BY 
+    h.income_band, m.d_year, m.d_month_seq;

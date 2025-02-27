@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.web_site_sk) AS total_sales_quantity,
+        SUM(ws.ws_net_paid) OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_net_profit
+    FROM web_sales ws
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE w.web_open_date_sk IS NOT NULL
+    AND ws.ws_ship_date_sk IS NOT NULL
+),
+ReturnStats AS (
+    SELECT 
+        wr.wr_web_page_sk,
+        SUM(wr.wr_return_quantity) AS total_return_quantity,
+        COUNT(DISTINCT wr.wr_order_number) AS return_order_count
+    FROM web_returns wr
+    GROUP BY wr.wr_web_page_sk
+),
+SalesWithReturns AS (
+    SELECT 
+        rs.web_site_sk,
+        rs.ws_order_number,
+        COALESCE(rs.total_sales_quantity - r.total_return_quantity, rs.total_sales_quantity) AS net_sales_quantity,
+        rs.cumulative_net_profit,
+        rs.profit_rank
+    FROM RankedSales rs
+    LEFT JOIN ReturnStats r ON rs.web_site_sk = r.wr_web_page_sk
+)
+SELECT 
+    s.ws_order_number,
+    s.web_site_sk,
+    s.net_sales_quantity,
+    CASE 
+        WHEN s.net_sales_quantity > 1000 THEN 'High Sales'
+        WHEN s.net_sales_quantity BETWEEN 500 AND 1000 THEN 'Medium Sales'
+        ELSE 'Low Sales'
+    END AS sales_category,
+    s.cumulative_net_profit,
+    CASE 
+        WHEN ROUND(s.cumulative_net_profit, 2) IS NULL THEN 'Profit Not Available'
+        ELSE FORMAT(s.cumulative_net_profit, 'C', 'en-US') -- Using FORMAT for currency representation
+    END AS formatted_profit
+FROM SalesWithReturns s
+WHERE s.profit_rank <= 10
+ORDER BY s.web_site_sk, s.cumulative_net_profit DESC
+LIMIT 100;

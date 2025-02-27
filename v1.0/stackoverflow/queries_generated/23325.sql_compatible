@@ -1,0 +1,89 @@
+
+WITH UserVotes AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AcceptedAnswerId,
+        COALESCE(
+            (SELECT COUNT(*) 
+             FROM Comments C 
+             WHERE C.PostId = P.Id), 0) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPost
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate > DATE '2024-10-01' - INTERVAL '1 year'
+),
+PopularTags AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(P.Id) AS TagUsage
+    FROM 
+        Tags
+    LEFT JOIN 
+        Posts P ON P.Tags LIKE '%' || Tags.TagName || '%'
+    GROUP BY 
+        Tags.TagName
+    HAVING 
+        COUNT(P.Id) > 10
+),
+AggregatedData AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        U.CreatedDate,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CommentCount,
+        COALESCE(TG.TagUsage, 0) AS PopularityMetric
+    FROM 
+        Users U
+    JOIN 
+        UserVotes UV ON U.Id = UV.UserId
+    JOIN 
+        PostMetrics P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        PopularTags TG ON P.Title LIKE '%' || TG.TagName || '%'
+    WHERE 
+        (U.Reputation > 1000 OR U.LastAccessDate < DATE '2024-10-01' - INTERVAL '30 days')
+        AND P.RecentPost = 1
+        AND P.ViewCount IS NOT NULL
+)
+SELECT 
+    DisplayName,
+    Reputation,
+    Title,
+    COALESCE(NULLIF(ViewCount - CommentCount, 0), 1) AS NonZeroMetrics, 
+    CASE
+        WHEN PopularityMetric > 5 THEN 'High'
+        WHEN PopularityMetric BETWEEN 1 AND 5 THEN 'Medium'
+        ELSE 'Low' 
+    END AS PopularityCategory,
+    JSON_AGG(DISTINCT JSON_BUILD_OBJECT('PostTitle', Title)) AS RelatedPosts
+FROM 
+    AggregatedData
+GROUP BY 
+    DisplayName, Reputation, Title, ViewCount, CommentCount, PopularityMetric
+HAVING 
+    COUNT(DISTINCT Title) > 1
+ORDER BY 
+    Reputation DESC, NonZeroMetrics DESC, PopularityCategory;

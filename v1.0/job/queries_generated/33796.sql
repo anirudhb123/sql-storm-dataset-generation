@@ -1,0 +1,54 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 5
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT ci.person_id) AS total_actors,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    AVG(mo.info) FILTER (WHERE mo.info IS NOT NULL) AS avg_info_length,
+    SUM(CASE WHEN mo.info IS NULL THEN 1 ELSE 0 END) AS null_info_count
+FROM 
+    MovieHierarchy mh
+JOIN 
+    cast_info ci ON mh.movie_id = ci.movie_id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mo ON mh.movie_id = mo.movie_id AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'duration') 
+GROUP BY 
+    ak.name, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, total_actors DESC;

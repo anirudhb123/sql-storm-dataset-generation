@@ -1,0 +1,64 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        mv.id AS movie_id,
+        mv.title,
+        mv.production_year,
+        mv.kind_id,
+        mh.level + 1
+    FROM
+        movie_link ml
+    INNER JOIN aka_title mv ON ml.linked_movie_id = mv.id
+    INNER JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+    COUNT(DISTINCT cc.person_id) AS co_stars_count,
+    AVG(CASE
+        WHEN ci.note IS NULL OR ci.note LIKE '%cameo%' THEN 0
+        ELSE ci.nr_order
+    END) AS avg_cast_order,
+    SUM(CASE
+        WHEN mi.info ILIKE '%blockbuster%' THEN 1
+        ELSE 0
+    END) AS blockbuster_count,
+    SUM(CASE
+        WHEN cc.role_id IN (SELECT id FROM role_type WHERE role ILIKE '%lead%') THEN 1
+        ELSE 0
+    END) AS lead_roles_count
+FROM
+    aka_name ak
+INNER JOIN cast_info cc ON ak.person_id = cc.person_id
+INNER JOIN aka_title at ON cc.movie_id = at.id
+LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_info mi ON at.id = mi.movie_id AND mi.info_type_id IN (SELECT id FROM info_type WHERE info ILIKE '%box office%')
+LEFT JOIN MovieHierarchy mh ON at.id = mh.movie_id
+WHERE
+    ak.name IS NOT NULL
+    AND ak.name <> ''
+    AND ak.md5sum IS NOT NULL AND ak.md5sum <> ''
+    AND (mh.level <= 3 OR mh.level IS NULL) 
+GROUP BY
+    ak.name, at.title, at.production_year
+HAVING
+    COUNT(DISTINCT cc.role_id) > 0
+ORDER BY
+    at.title, co_stars_count DESC NULLS LAST;

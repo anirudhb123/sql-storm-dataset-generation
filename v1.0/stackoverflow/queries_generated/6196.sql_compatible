@@ -1,0 +1,74 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN P.Score < 0 THEN 1 ELSE 0 END) AS NegativePosts,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        AVG(P.ViewCount) AS AvgViewCount,
+        AVG(P.AnswerCount) AS AvgAnswerCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostInteraction AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        PT.Name AS PostType,
+        PH.UserId AS UserId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT V.Id) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Posts P
+    JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.ViewCount, PT.Name
+)
+SELECT 
+    UA.DisplayName,
+    UA.PostCount,
+    UA.PositivePosts,
+    UA.NegativePosts,
+    UA.BadgeCount,
+    UA.CommentCount,
+    UA.AvgViewCount,
+    UA.AvgAnswerCount,
+    PI.PostId,
+    PI.Title,
+    PI.CreationDate,
+    PI.ViewCount,
+    PI.PostType,
+    PI.LastEditDate,
+    PI.VoteCount,
+    PI.Upvotes,
+    PI.Downvotes
+FROM 
+    UserActivity UA
+JOIN 
+    PostInteraction PI ON UA.UserId = PI.UserId
+ORDER BY 
+    UA.PostCount DESC, UA.BadgeCount DESC, PI.ViewCount DESC;

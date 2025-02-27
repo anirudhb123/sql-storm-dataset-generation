@@ -1,0 +1,48 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           NULL AS Parent_Supplier
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           sh.s_suppkey AS Parent_Supplier
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+), RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS Rank
+    FROM orders o
+), HighValueLineItems AS (
+    SELECT li.l_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS Total_Value
+    FROM lineitem li
+    GROUP BY li.l_orderkey
+), CustomerValues AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS Total_Orders,
+           COUNT(DISTINCT o.o_orderkey) AS Order_Count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    p.p_name, 
+    p.p_mfgr, 
+    r.r_name AS Supplier_Region, 
+    sh.s_name AS Supplier_Name,
+    c.c_name AS Customer_Name,
+    cv.Total_Orders,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY cv.Total_Orders DESC) AS Cust_Rank,
+    COALESCE(hv.Total_Value, 0) AS High_Value
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN supplier sh ON ps.ps_suppkey = sh.s_suppkey
+JOIN region r ON sh.s_nationkey = r.r_regionkey
+LEFT JOIN CustomerValues cv ON sh.s_nationkey = cv.c_custkey 
+LEFT JOIN HighValueLineItems hv ON cv.Order_Count > 5
+WHERE p.p_size BETWEEN 10 AND 20
+  AND (sh.s_acctbal IS NOT NULL AND sh.s_acctbal > 500)
+  AND EXISTS (SELECT 1 FROM SupplierHierarchy WHERE s_nationkey = sh.s_nationkey)
+GROUP BY p.p_name, p.p_mfgr, r.r_name, sh.s_name, c.c_name, cv.Total_Orders
+ORDER BY p.p_partkey, cv.Total_Orders DESC;

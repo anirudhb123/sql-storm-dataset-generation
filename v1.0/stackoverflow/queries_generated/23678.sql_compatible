@@ -1,0 +1,91 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+), 
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(pc.AnswerCount, 0) AS AnswerCount,
+        COALESCE(pc.CommentCount, 0) AS CommentCount,
+        COUNT(pl.RelatedPostId) AS RelatedPostCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank 
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS AnswerCount,
+            SUM(CommentCount) AS CommentCount
+        FROM (
+            SELECT 
+                p.Id AS PostId,
+                CASE 
+                    WHEN p.PostTypeId = 2 THEN NULL 
+                    ELSE (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) 
+                END AS CommentCount
+            FROM Posts p
+            WHERE p.PostTypeId IN (1, 2) 
+        ) AS InnerCount 
+        GROUP BY PostId
+    ) pc ON p.Id = pc.PostId
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, pc.AnswerCount, pc.CommentCount
+),
+UserPostInfo AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.Score,
+        ps.AnswerCount,
+        ps.CommentCount,
+        ps.RelatedPostCount
+    FROM UserReputation ur
+    JOIN PostStatistics ps ON ps.PostId IN (
+        SELECT Id FROM Posts 
+        WHERE OwnerUserId = ur.UserId 
+        AND CreationDate >= (CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year') 
+    )
+    WHERE ur.UpVotes IS NOT NULL AND ur.DownVotes IS NOT NULL
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.Reputation,
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    (COALESCE(p.AnswerCount, 0) + COALESCE(p.CommentCount, 0)) AS EngagementScore,
+    CASE 
+        WHEN p.Score = 0 THEN 'No votes'
+        WHEN p.Score < 5 THEN 'Low score'
+        ELSE 'High score'
+    END AS PostScoreCategory,
+    p.RelatedPostCount,
+    (SELECT STRING_AGG(T.TagName, ', ') 
+     FROM Tags T 
+     JOIN LATERAL (
+        SELECT unnest(string_to_array(p.Tags, ',')) AS t
+     ) AS temp ON t = CAST(T.Id AS varchar)
+    ) AS Tags
+FROM UserPostInfo u
+JOIN PostStatistics p ON u.PostId = p.PostId
+ORDER BY u.Reputation DESC, p.CreationDate ASC
+LIMIT 50
+OFFSET 0;

@@ -1,0 +1,15 @@
+SELECT
+    p.p_name,
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+    AVG(ps.ps_supplycost) AS avg_supply_cost
+FROM
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+GROUP BY
+    p.p_name
+ORDER BY
+    supplier_count DESC
+LIMIT 10;

@@ -1,0 +1,50 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN P.AnswerCount ELSE 0 END), 0) AS QuestionsAnswered,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END), 0) AS AcceptedAnswers
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        Upvotes - Downvotes AS NetVotes,
+        QuestionsAnswered,
+        AcceptedAnswers,
+        RANK() OVER (ORDER BY Reputation DESC, NetVotes DESC) AS Rank
+    FROM 
+        UserStats
+)
+SELECT 
+    TU.Rank,
+    TU.DisplayName,
+    TU.Reputation,
+    TU.NetVotes,
+    TU.QuestionsAnswered,
+    TU.AcceptedAnswers,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    (SELECT COUNT(*) FROM Posts WHERE OwnerUserId = TU.UserId) AS TotalPosts
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    Badges B ON TU.UserId = B.UserId
+WHERE 
+    TU.Rank <= 10
+GROUP BY 
+    TU.Rank, TU.DisplayName, TU.Reputation, TU.NetVotes, TU.QuestionsAnswered, TU.AcceptedAnswers
+ORDER BY 
+    TU.Rank;

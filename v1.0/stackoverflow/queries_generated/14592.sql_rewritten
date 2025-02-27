@@ -1,0 +1,26 @@
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    p.Title AS PostTitle,
+    p.CreationDate AS PostCreationDate,
+    p.Score AS PostScore,
+    COUNT(c.Id) AS CommentCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+    t.TagName AS PostTag
+FROM 
+    Users u
+JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId
+LEFT JOIN 
+    LATERAL string_to_array(p.Tags, ',') AS arr(tag) ON TRUE
+LEFT JOIN 
+    Tags t ON t.TagName = trim(both ' ' from arr.tag)
+GROUP BY 
+    u.DisplayName, p.Title, p.CreationDate, p.Score, t.TagName
+ORDER BY 
+    p.CreationDate DESC
+LIMIT 100;

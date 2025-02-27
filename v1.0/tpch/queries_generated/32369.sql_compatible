@@ -1,0 +1,51 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS level
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey > oh.o_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+CustomerSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_custkey, c.c_name
+),
+HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost) > 100000
+)
+SELECT 
+    c.c_name AS customer_name,
+    cs.total_spent,
+    cs.order_count,
+    s.s_name AS supplier_name,
+    hv.total_supply_cost,
+    o.o_orderdate,
+    COUNT(DISTINCT l.l_linenumber) OVER (PARTITION BY o.o_orderkey) AS line_count,
+    SUM(CASE 
+            WHEN l.l_discount > 0 THEN l.l_extendedprice * l.l_discount 
+            ELSE 0 
+        END) AS total_discounted_price,
+    COALESCE(r.r_name, 'Unknown') AS region_name
+FROM CustomerSummary cs
+JOIN lineitem l ON l.l_orderkey IN (SELECT oh.o_orderkey FROM OrderHierarchy oh WHERE oh.level <= 3)
+JOIN orders o ON cs.c_custkey = o.o_custkey
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN HighValueSuppliers hv ON s.s_suppkey = hv.s_suppkey
+WHERE cs.total_spent > 1000
+AND o.o_orderstatus = 'O'
+GROUP BY c.c_name, cs.total_spent, cs.order_count, s.s_name, hv.total_supply_cost, o.o_orderdate, r.r_name
+ORDER BY cs.total_spent DESC, s.s_name, o.o_orderdate;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT a.id, a.person_id, ak.name AS actor_name, c.movie_id, RANK() OVER (PARTITION BY a.id ORDER BY c.nr_order) AS movie_rank
+    FROM aka_name ak
+    JOIN cast_info c ON ak.person_id = c.person_id
+    JOIN aka_title a ON c.movie_id = a.movie_id
+    WHERE ak.name IS NOT NULL
+),
+movie_statistics AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(COALESCE(LENGTH(mi.info), 0)) AS avg_info_length
+    FROM title
+    LEFT JOIN cast_info ci ON title.id = ci.movie_id
+    LEFT JOIN movie_info mi ON title.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'summary') 
+    GROUP BY title.id, title.title
+),
+complex_titles AS (
+    SELECT 
+        mt.title,
+        COALESCE(
+            (SELECT STRING_AGG(DISTINCT kw.keyword, ', ') FROM movie_keyword mk JOIN keyword kw ON mk.keyword_id = kw.id WHERE mk.movie_id = mt.movie_id),
+            'No Keywords'
+        ) AS keywords,
+        EXTRACT(YEAR FROM DATE '2024-10-01') - mt.production_year AS age,
+        mt.actor_count, 
+        mt.avg_info_length
+    FROM movie_statistics mt
+    WHERE mt.actor_count > 0
+),
+final_selection AS (
+    SELECT 
+        ct.title,
+        ct.keywords,
+        ct.age,
+        CASE 
+            WHEN ct.avg_info_length < 50 THEN 'Short Summary'
+            WHEN ct.avg_info_length BETWEEN 50 AND 200 THEN 'Moderate Summary'
+            ELSE 'Detailed Summary'
+        END AS summary_length_category
+    FROM complex_titles ct
+    WHERE ct.age IS NOT NULL AND ct.age < 50
+)
+
+SELECT 
+    COALESCE(fs.summary_length_category, 'Undefined') AS summary_category, 
+    COUNT(*) AS movie_count, 
+    STRING_AGG(DISTINCT fs.title, '; ') AS titles
+FROM final_selection fs
+GROUP BY fs.summary_length_category
+HAVING COUNT(*) > 1
+ORDER BY movie_count DESC;

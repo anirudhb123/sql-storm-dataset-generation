@@ -1,0 +1,32 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s 
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_name
+),
+TopSuppliers AS (
+    SELECT nation, s_suppkey, s_name, total_cost 
+    FROM RankedSuppliers 
+    WHERE rank <= 3
+),
+OrderSummaries AS (
+    SELECT o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_name, 
+           SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT ts.nation, ts.s_name, os.o_orderdate, os.total_revenue
+    FROM TopSuppliers ts
+    JOIN OrderSummaries os ON ts.s_suppkey = os.o_custkey
+    WHERE os.total_revenue > 10000
+)
+SELECT nation, s_name, COUNT(*) AS orders_count, AVG(total_revenue) AS avg_revenue
+FROM FinalReport
+GROUP BY nation, s_name
+ORDER BY nation, orders_count DESC, avg_revenue DESC;

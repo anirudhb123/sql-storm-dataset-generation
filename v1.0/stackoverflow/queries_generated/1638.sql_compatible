@@ -1,0 +1,71 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(COUNT(v.Id), 0) AS VoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.PostTypeId = 1 
+      AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.OwnerUserId
+), 
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges b
+    GROUP BY b.UserId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.UserPostRank
+FROM PostStats ps
+LEFT JOIN Users u ON ps.UserPostRank = (SELECT MIN(UserPostRank) FROM PostStats WHERE OwnerUserId = u.Id)
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE ub.GoldBadges > 0
+ORDER BY ps.Score DESC, ps.VoteCount DESC
+LIMIT 100
+
+UNION ALL
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.VoteCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    ps.UserPostRank
+FROM PostStats ps
+LEFT JOIN Users u ON ps.UserPostRank = (SELECT MIN(UserPostRank) FROM PostStats WHERE OwnerUserId = u.Id)
+LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+WHERE u.Reputation IS NULL
+ORDER BY ps.Score DESC
+LIMIT 50;

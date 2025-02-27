@@ -1,0 +1,56 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(sr_return_quantity) AS return_count,
+        DENSE_RANK() OVER (PARTITION BY sr_item_sk ORDER BY SUM(sr_return_amt) DESC) AS return_rank
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        SUM(cd_dep_count) AS total_dependents,
+        COUNT(*) FILTER (WHERE cd_marital_status = 'M') AS married_count
+    FROM customer_demographics
+    GROUP BY cd_demo_sk, cd_gender
+),
+ItemSales AS (
+    SELECT
+        ws.ws_item_sk,
+        COALESCE(SUM(ws.ws_sales_price), 0) AS total_sales_price,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    LEFT JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.ws_item_sk
+)
+SELECT 
+    ca.ca_address_id,
+    ca.ca_city,
+    ca.ca_state,
+    SUM(is.total_sales_price) AS total_sales,
+    MAX(cd.total_dependents) AS max_dependents,
+    AVG(is.avg_net_profit) AS avg_net_profit,
+    SUM(CASE WHEN rr.return_rank = 1 THEN rr.return_count ELSE 0 END) AS highest_return_count,
+    COUNT(DISTINCT ws.ws_order_number) FILTER (WHERE ws.ws_ship_date_sk IS NOT NULL) AS shipped_orders
+FROM 
+    customer_address ca
+LEFT JOIN 
+    (SELECT * FROM ItemSales) is ON is.ws_item_sk IN (SELECT DISTINCT sr_item_sk FROM RankedReturns WHERE return_rank < 3)
+JOIN
+    (SELECT * FROM CustomerDemographics) cd ON cd.cd_demo_sk IN (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_cdemo_sk IS NOT NULL)
+LEFT JOIN web_sales ws ON ws.ws_item_sk = is.ws_item_sk
+LEFT JOIN RankedReturns rr ON rr.sr_item_sk = is.ws_item_sk
+WHERE 
+    ca.ca_state IS NOT NULL 
+    AND LENGTH(ca.ca_zip) > 5 
+    AND ca.ca_country <> 'Unknown'
+GROUP BY 
+    ca.ca_address_id, ca.ca_city, ca.ca_state
+HAVING 
+    COUNT(DISTINCT ws.ws_order_number) > 5
+ORDER BY 
+    total_sales DESC, max_dependents ASC
+LIMIT 100 OFFSET (SELECT COUNT(*) FROM customer) / 4;

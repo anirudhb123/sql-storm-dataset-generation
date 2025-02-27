@@ -1,0 +1,44 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        COUNT(DISTINCT ca.person_id) AS cast_count,
+        AVG(mo.info_score) AS average_rating
+    FROM aka_title a
+    LEFT JOIN complete_cast c ON a.id = c.movie_id
+    LEFT JOIN cast_info ca ON c.subject_id = ca.id
+    LEFT JOIN movie_info mo ON a.id = mo.movie_id 
+        AND mo.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    WHERE a.production_year BETWEEN 1990 AND 2023
+    GROUP BY a.id, a.title, a.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        average_rating,
+        RANK() OVER (ORDER BY average_rating DESC, cast_count DESC) AS rank
+    FROM RankedMovies
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    tm.average_rating,
+    ak.name AS main_actor,
+    co.name AS company_name,
+    kt.keyword AS movie_keyword
+FROM TopMovies tm
+JOIN cast_info ci ON tm.movie_id = ci.movie_id
+JOIN aka_name ak ON ci.person_id = ak.person_id
+JOIN movie_companies mc ON tm.movie_id = mc.movie_id
+JOIN company_name co ON mc.company_id = co.id
+JOIN movie_keyword mk ON tm.movie_id = mk.movie_id
+JOIN keyword kt ON mk.keyword_id = kt.id
+WHERE tm.rank <= 10
+AND ak.name IS NOT NULL
+ORDER BY tm.average_rating DESC, tm.cast_count DESC;

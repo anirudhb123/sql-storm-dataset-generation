@@ -1,0 +1,86 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COALESCE(p.ClosedDate, '9999-12-31') AS ClosedDate,  -- handle open posts
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'  -- filtering recent posts
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+ClosedPostReasons AS (
+    SELECT 
+        p.Id,
+        ph.Comment AS CloseReason,
+        ph.CreationDate AS CloseDate
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId = 10  -- fetching closed posts
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rb.BadgeCount,
+        rb.BadgeNames,
+        COALESCE(cpr.CloseReason, 'Not Closed') AS CloseReason,
+        COALESCE(cpr.CloseDate, 'Open') AS CloseDate
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        UserBadges rb ON rp.PostId IN (
+            SELECT 
+                p.Id 
+            FROM 
+                Posts p 
+            WHERE 
+                p.OwnerUserId = rb.UserId
+        )
+    LEFT JOIN 
+        ClosedPostReasons cpr ON rp.PostId = cpr.Id
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.BadgeCount,
+    pd.BadgeNames,
+    pd.CloseReason,
+    CASE 
+        WHEN pd.CloseDate = 'Open' THEN 'This post is still open' 
+        ELSE 'Closed on ' || to_char(pd.CloseDate, 'YYYY-MM-DD HH24:MI:SS') 
+    END AS ClosureStatus,
+    DENSE_RANK() OVER (ORDER BY pd.Score DESC) AS ScoreRank,
+    CASE 
+        WHEN pd.Score IS NULL THEN 'No Score Available' 
+        WHEN pd.Score > 100 THEN 'Highly Upvoted' 
+        WHEN pd.Score BETWEEN 51 AND 100 THEN 'Moderately Upvoted' 
+        ELSE 'Low Score' 
+    END AS ScoreDescription
+FROM 
+    PostDetails pd
+WHERE 
+    pd.BadgeCount > 0 -- Only include users with badges
+ORDER BY 
+    pd.CloseDate DESC, 
+    pd.Score DESC;

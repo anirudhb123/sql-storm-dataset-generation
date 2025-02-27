@@ -1,0 +1,54 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_title,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+TopRankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        rank_title,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_title <= 5
+), 
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS company_names
+    FROM 
+        movie_companies mc
+    INNER JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    trm.title,
+    trm.production_year,
+    trm.cast_count,
+    cd.company_names,
+    COALESCE(NULLIF(trm.production_year, 2020), 'Not in 2020') AS year_evaluation,
+    CASE 
+        WHEN trm.cast_count > 5 THEN 'Popular'
+        ELSE 'Less Known'
+    END AS movie_popularity
+FROM 
+    TopRankedMovies trm
+LEFT JOIN 
+    CompanyDetails cd ON trm.movie_id = cd.movie_id
+ORDER BY 
+    trm.production_year DESC, 
+    trm.title;

@@ -1,0 +1,85 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.id AS title_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.title) AS title_rank
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ak.person_id,
+        COUNT(ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    WHERE 
+        ak.name IS NOT NULL
+    GROUP BY 
+        ak.id, ak.name, ak.person_id
+),
+MovieCharacterInfo AS (
+    SELECT 
+        ct.id AS char_id,
+        ct.name AS character_name,
+        ct.imdb_index AS character_imdb_index,
+        COUNT(DISTINCT ci.movie_id) AS character_movie_count
+    FROM 
+        char_name ct
+    LEFT JOIN 
+        cast_info ci ON ct.id = ci.role_id
+    GROUP BY 
+        ct.id, ct.name, ct.imdb_index
+),
+FilmInfo AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        STRING_AGG(mk.keyword, ', ') AS keywords,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN ci.note ELSE 'No note' END) AS casting_note,
+        COALESCE(SUM(CASE WHEN ci.nr_order IS NULL THEN 1 ELSE 0 END), 0) AS missing_order
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.title, t.production_year
+)
+SELECT 
+    ft.title AS Movie_Title,
+    ft.production_year AS Release_Year,
+    ft.keyword_count AS Total_Keywords,
+    ft.keywords AS Keyword_List,
+    ft.casting_note AS Casting_Note,
+    ft.missing_order AS Missing_Order_Entries,
+    ad.actor_name AS Actor_Name,
+    ad.movie_count AS Movies_Played_In,
+    mc.character_name AS Character_Name,
+    mc.character_movie_count AS Character_Movie_Count,
+    rt.title_rank AS Title_Rank_Per_Year,
+    (SELECT COUNT(*) 
+     FROM movie_info mi 
+     WHERE mi.movie_id = ft.movie_id 
+       AND mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'Budget')) AS Budget_Info_Count
+FROM 
+    FilmInfo ft
+LEFT JOIN 
+    RankedTitles rt ON ft.title = rt.title AND ft.production_year = rt.production_year
+JOIN 
+    ActorDetails ad ON ad.movie_count > 5
+LEFT JOIN 
+    MovieCharacterInfo mc ON mc.character_movie_count > 2
+WHERE 
+    ft.keyword_count > 3
+ORDER BY 
+    ft.production_year DESC, ft.title ASC; 

@@ -1,0 +1,71 @@
+
+WITH RecursiveActorMovies AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.name AS actor_name, 
+        t.title AS movie_title, 
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorsWithMultipleRoles AS (
+    SELECT 
+        c.actor_id, 
+        COUNT(DISTINCT c.role_id) AS role_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.actor_id
+    HAVING 
+        COUNT(DISTINCT c.role_id) > 1
+),
+ProjectedMovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mi.info,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY mt.info_type_id) AS info_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type mt ON mi.info_type_id = mt.id
+    WHERE 
+        m.production_year > 2000
+),
+FinalResults AS (
+    SELECT 
+        ram.actor_name, 
+        ram.movie_title,
+        ram.production_year,
+        pmi.info AS additional_info,
+        COALESCE(a.role_count, 0) AS roles_played
+    FROM 
+        RecursiveActorMovies ram
+    LEFT JOIN 
+        ActorsWithMultipleRoles a ON ram.actor_id = a.actor_id
+    LEFT JOIN 
+        ProjectedMovieInfo pmi ON ram.movie_title = pmi.title AND ram.production_year = pmi.production_year
+    WHERE 
+        ram.movie_rank <= 5
+        AND (pmi.info IS NOT NULL OR ram.movie_title IS NULL)
+)
+SELECT 
+    actor_name,
+    movie_title,
+    production_year,
+    additional_info,
+    roles_played
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, roles_played DESC
+FETCH FIRST 100 ROWS ONLY;

@@ -1,0 +1,57 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.title, 
+        m.production_year,
+        COALESCE(m2.title, 'N/A') AS linked_movie_title,
+        COALESCE(m2.production_year, 'N/A') AS linked_movie_year,
+        1 AS level
+    FROM title m
+    LEFT JOIN movie_link ml ON m.id = ml.movie_id
+    LEFT JOIN title m2 ON ml.linked_movie_id = m2.id
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        m.title, 
+        m.production_year,
+        COALESCE(m2.title, 'N/A') AS linked_movie_title,
+        COALESCE(m2.production_year, 'N/A') AS linked_movie_year,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.title = ml.movie_id
+    JOIN title m2 ON ml.linked_movie_id = m2.id
+),
+
+cast_with_roles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_order
+    FROM cast_info ci
+    JOIN aka_name ak ON ci.person_id = ak.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+), 
+
+keyword_stats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.production_year AS release_year,
+    COALESCE(k.keyword_count, 0) AS total_keywords,
+    STRING_AGG(DISTINCT cw.actor_name || ' (' || cw.role || ')', ', ') AS cast_list
+FROM movie_hierarchy mh
+LEFT JOIN cast_with_roles cw ON mh.title = cw.movie_id
+LEFT JOIN keyword_stats k ON mh.title = k.movie_id
+WHERE mh.level <= 2  
+GROUP BY mh.title, mh.production_year
+ORDER BY mh.production_year DESC, mh.title;

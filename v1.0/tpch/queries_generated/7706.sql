@@ -1,0 +1,39 @@
+WITH SupplierCosts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+PartStats AS (
+    SELECT p.p_partkey, p.p_name, COUNT(l.l_orderkey) AS total_sales, SUM(l.l_extendedprice) AS revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+FinalReport AS (
+    SELECT c.c_name, c.total_orders, c.total_spent, 
+           s.s_name, sc.total_supply_cost, 
+           p.p_name, p.total_sales, p.revenue,
+           hv.order_value
+    FROM CustomerOrders c
+    LEFT JOIN SupplierCosts sc ON sc.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierCosts)
+    LEFT JOIN PartStats p ON p.total_sales > 5
+    LEFT JOIN HighValueOrders hv ON hv.order_value > 10000
+)
+SELECT *
+FROM FinalReport
+WHERE total_spent > 5000
+ORDER BY total_spent DESC, total_supply_cost DESC, revenue DESC;

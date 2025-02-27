@@ -1,0 +1,71 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 1 AND 365
+),
+AggregatedReturns AS (
+    SELECT 
+        cr.cr_item_sk,
+        COUNT(cr.cr_return_quantity) AS total_returns,
+        SUM(cr.cr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        catalog_returns cr
+    GROUP BY 
+        cr.cr_item_sk
+),
+ItemInventory AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+CustomerPurchase AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_spent,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1970 AND 1990
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount,
+    COALESCE(inv.total_quantity_on_hand, 0) AS total_quantity_on_hand,
+    COALESCE(cust.total_spent, 0) AS total_spent_by_customers,
+    cs.cs_net_profit
+FROM 
+    item i
+LEFT JOIN 
+    AggregatedReturns r ON i.i_item_sk = r.cr_item_sk
+LEFT JOIN 
+    ItemInventory inv ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    CustomerPurchase cust ON i.i_item_sk IN (SELECT cs.cs_item_sk FROM catalog_sales cs WHERE cs.cs_order_number IN (SELECT ws.ws_order_number FROM web_sales ws WHERE ws.ws_item_sk = i.i_item_sk))
+LEFT JOIN 
+    catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+WHERE 
+    (COALESCE(r.total_returns, 0) > 5 OR COALESCE(cust.total_orders, 0) > 10)
+    AND i.i_current_price > 20.00
+ORDER BY 
+    total_spent_by_customers DESC, 
+    total_return_amount DESC;

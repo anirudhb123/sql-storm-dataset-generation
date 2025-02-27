@@ -1,0 +1,37 @@
+SELECT 
+    a.id AS aka_id,
+    a.name AS aka_name,
+    t.title AS movie_title,
+    t.production_year,
+    p.name AS person_name,
+    r.role AS person_role,
+    c.note AS cast_note,
+    GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword ASC) AS keywords,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    AVG(CASE WHEN mi.info IS NOT NULL THEN 1 ELSE 0 END) AS avg_movie_info_present
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    name p ON a.person_id = p.imdb_id
+JOIN 
+    role_type r ON c.role_id = r.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+WHERE 
+    a.name LIKE 'A%' 
+    AND t.production_year >= 2000 
+    AND r.role IN (SELECT kind FROM comp_cast_type WHERE kind LIKE '%Actor%')
+GROUP BY 
+    a.id, a.name, t.title, t.production_year, p.name, r.role, c.note
+ORDER BY 
+    t.production_year DESC, aka_name ASC;

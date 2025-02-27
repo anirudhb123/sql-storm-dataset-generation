@@ -1,0 +1,40 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT ci.person_id, ci.movie_id, 1 AS depth
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    WHERE an.name LIKE 'A%'  
+
+    UNION ALL
+
+    SELECT ci.person_id, ci.movie_id, ah.depth + 1
+    FROM cast_info ci
+    JOIN actor_hierarchy ah ON ci.movie_id = ah.movie_id
+    JOIN aka_name an ON ci.person_id = an.person_id
+    WHERE an.name LIKE 'B%'  
+)
+
+SELECT 
+    an.name AS actor_name,
+    COUNT(DISTINCT ci.movie_id) AS movie_count,
+    ARRAY_AGG(DISTINCT at.title) AS movies,
+    SUM(CASE 
+            WHEN at.production_year IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS produced_movies,
+    AVG(COALESCE(at.production_year, 0)) AS avg_production_year,
+    RANK() OVER (ORDER BY COUNT(DISTINCT ci.movie_id) DESC) AS rank
+FROM 
+    actor_hierarchy ah
+JOIN 
+    cast_info ci ON ah.person_id = ci.person_id
+JOIN 
+    aka_name an ON ci.person_id = an.person_id
+JOIN 
+    aka_title at ON ci.movie_id = at.movie_id
+GROUP BY 
+    an.name
+HAVING 
+    COUNT(DISTINCT ci.movie_id) > 1  
+ORDER BY 
+    movie_count DESC,
+    actor_name ASC;

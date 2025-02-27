@@ -1,0 +1,55 @@
+
+WITH RECURSIVE Customer_CTE AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey 
+    FROM customer
+    WHERE c_acctbal > 0
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey
+    FROM customer c
+    JOIN Customer_CTE cc ON c.c_nationkey = cc.c_nationkey 
+    WHERE c.c_acctbal > 0 AND c.c_custkey <> cc.c_custkey
+),
+Supplier_CTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_nationkey 
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal BETWEEN 500 AND 5000
+),
+LineItem_Summary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price 
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+Region_Nation AS (
+    SELECT r.r_regionkey, n.n_nationkey 
+    FROM region r 
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+)
+SELECT 
+    cc.c_name AS customer_name,
+    s.s_name AS supplier_name,
+    ls.total_price,
+    rn.r_regionkey,
+    COALESCE(SUM(ps.ps_supplycost), 0) AS total_supply_cost,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    Customer_CTE cc
+INNER JOIN 
+    orders o ON cc.c_custkey = o.o_custkey
+LEFT JOIN 
+    LineItem_Summary ls ON o.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    partsupp ps ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM Supplier_CTE s)
+LEFT JOIN 
+    Supplier_CTE s ON s.s_suppkey = ps.ps_suppkey
+INNER JOIN 
+    Region_Nation rn ON cc.c_nationkey = rn.n_nationkey
+WHERE 
+    o.o_orderdate >= DATEADD(month, -6, '1998-10-01') 
+    AND o.o_orderstatus IN ('O', 'F') 
+GROUP BY 
+    cc.c_name, s.s_name, ls.total_price, rn.r_regionkey
+HAVING 
+    COALESCE(SUM(ps.ps_supplycost), 0) > 1000 AND COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_price DESC, cc.c_name ASC;

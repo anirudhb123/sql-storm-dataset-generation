@@ -1,0 +1,49 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        c.c_acctbal,
+        RANK() OVER (ORDER BY c.c_acctbal DESC) AS rank
+    FROM customer c
+    WHERE c.c_acctbal > 1000.00
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_custkey,
+        COUNT(l.l_orderkey) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS recent_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT 
+    c.c_name AS customer_name, 
+    c.c_acctbal AS customer_balance,
+    s.s_name AS supplier_name, 
+    r.total_cost AS supplier_total_cost,
+    o.total_revenue AS order_total_revenue
+FROM HighValueCustomers c
+LEFT JOIN RecentOrders o ON c.c_custkey = o.o_custkey AND o.recent_rank = 1
+JOIN RankedSuppliers r ON r.s_suppkey IN (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    JOIN part p ON ps.ps_partkey = p.p_partkey 
+    WHERE p.p_size > 20 AND p.p_retailprice < 100.00
+) 
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+WHERE r.rn <= 10 AND o.line_count > 5
+ORDER BY c.c_acctbal DESC, r.total_cost DESC
+OPTION (MAXRECURSION 100);

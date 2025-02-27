@@ -1,0 +1,71 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(c.person_id) DESC) AS rnk
+    FROM 
+        aka_title AS m
+    LEFT JOIN 
+        cast_info AS c ON m.id = c.movie_id
+    GROUP BY 
+        m.title, m.production_year
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords_combined
+    FROM 
+        movie_keyword AS mk
+    JOIN 
+        keyword AS k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        mk.keywords_combined
+    FROM 
+        ranked_movies AS rm
+    LEFT JOIN 
+        movie_keywords AS mk ON mk.movie_id = rm.id
+    WHERE 
+        rm.cast_count > 0
+),
+final_selection AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.cast_count,
+        f.keywords_combined,
+        CASE 
+            WHEN f.production_year < 2000 THEN 'Classic'
+            WHEN f.production_year BETWEEN 2000 AND 2015 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era,
+        COALESCE(l.linked_movie_id, -1) AS linked_movie_id
+    FROM 
+        filtered_movies AS f
+    LEFT JOIN 
+        movie_link AS l ON l.movie_id = f.movie_id
+)
+SELECT 
+    fs.title,
+    fs.production_year,
+    fs.cast_count,
+    fs.keywords_combined,
+    fs.era,
+    (SELECT AVG(cast_count) FROM filtered_movies) AS average_cast_count,
+    (SELECT COUNT(DISTINCT fs2.title) 
+     FROM final_selection fs2 
+     WHERE fs2.keywords_combined ILIKE '%' || COALESCE(NULLIF(fs.keywords_combined, ''), '-') || '%') 
+     AND fs2.production_year > fs.production_year) AS future_references_count
+FROM 
+    final_selection AS fs
+WHERE 
+    fs.linked_movie_id IS NULL OR fs.linked_movie_id = -1
+ORDER BY 
+    fs.production_year DESC, fs.cast_count DESC;

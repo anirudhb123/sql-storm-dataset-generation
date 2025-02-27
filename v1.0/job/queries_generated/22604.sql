@@ -1,0 +1,79 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        mt.imdb_index,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+        
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        at.imdb_index,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+)
+, CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY ci.movie_id) AS actor_count,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ak.name) AS rnk
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+)
+, MovieInfoWithKeywords AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        mt.id, mt.title
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    m.kind_id,
+    mw.keywords,
+    cd.actor_name,
+    cd.actor_count,
+    CASE 
+        WHEN cd.actor_count IS NULL THEN 'No Actors'
+        ELSE 'Actors Present'
+    END AS actor_status
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    MovieInfoWithKeywords mw ON m.movie_id = mw.movie_id
+LEFT JOIN 
+    CastDetails cd ON m.movie_id = cd.movie_id AND cd.rnk <= 5
+WHERE 
+    m.level <= 3 
+    AND (m.production_year IS NULL OR m.production_year >= 1990) 
+    AND COALESCE(cd.actor_count, 0) > 0
+ORDER BY 
+    m.production_year DESC,
+    m.title ASC;

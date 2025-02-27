@@ -1,0 +1,85 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+HighSpenders AS (
+    SELECT 
+        c.cust_name,
+        co.total_spent,
+        NTILE(4) OVER (ORDER BY co.total_spent DESC) AS spending_quartile
+    FROM 
+        CustomerOrders co
+    JOIN 
+        customer c ON co.c_custkey = c.c_custkey
+    WHERE 
+        co.total_orders > 0
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineItems AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(l.l_linestatus) AS line_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    p.p_name,
+    n.n_name AS nation,
+    r.r_name AS region,
+    ps.s_supplycost AS supplier_cost,
+    COALESCE(co.total_orders, 0) AS total_orders_for_customer,
+    COALESCE(co.total_spent, 0) AS total_spent_by_customer,
+    CASE 
+        WHEN co.total_orders IS NULL THEN 'No Orders'
+        WHEN co.total_orders < 5 THEN 'Few Orders'
+        ELSE 'Regular Customer'
+    END AS customer_status,
+    pp.supp_avg_cost,
+    lp.line_count,
+    MAX(lp.net_revenue) OVER (PARTITION BY n.n_name) AS max_revenue_per_nation
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    HighSpenders hsp ON hsp.cust_name = 'Unknown Customer'  
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = s.s_suppkey 
+JOIN 
+    OrderLineItems lp ON lp.o_orderkey = co.c_custkey
+WHERE 
+    (ps.ps_availqty IS NULL OR ps.ps_availqty > 0) 
+    OR NOT EXISTS (
+        SELECT 1 FROM supplier s2 WHERE s2.s_nationkey = s.s_nationkey AND s2.s_acctbal < 0
+    )
+ORDER BY 
+    p.p_name, n.n_name
+LIMIT 100;

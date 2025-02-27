@@ -1,0 +1,42 @@
+WITH RECURSIVE sup_part AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, 1 AS level
+    FROM partsupp ps
+    WHERE ps.ps_availqty > 0
+    UNION ALL
+    SELECT ps.ps_partkey, ps.ps_suppkey, ps.ps_availqty, sp.level + 1
+    FROM partsupp ps
+    JOIN sup_part sp ON ps.ps_suppkey = sp.ps_suppkey
+    WHERE ps.ps_availqty > sp.ps_availqty
+),
+ranked_orders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+),
+active_customers AS (
+    SELECT DISTINCT c.c_custkey, c.c_name, c.c_mktsegment
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+nation_stats AS (
+    SELECT n.n_nationkey, n.n_name, SUM(s.s_acctbal) AS total_balance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT p.p_partkey, p.p_name, 
+       COALESCE(r.total_balance, 0) AS total_balance, 
+       SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+       AVG(l.l_quantity) AS avg_quantity,
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       MAX(rank.o_orderdate) AS latest_order_date
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN ranked_orders rank ON rank.o_orderkey = l.l_orderkey
+LEFT JOIN active_customers ac ON ac.c_custkey = l.l_orderkey
+LEFT JOIN nation_stats r ON r.n_nationkey = (SELECT n.n_nationkey FROM supplier s JOIN nation n ON s.s_nationkey = n.n_nationkey WHERE s.s_suppkey = l.l_suppkey LIMIT 1)
+WHERE p.p_retailprice > 100.00
+GROUP BY p.p_partkey, p.p_name, r.total_balance
+HAVING SUM(l.l_extendedprice * l.l_discount) > 500
+ORDER BY revenue DESC, p.p_name ASC;

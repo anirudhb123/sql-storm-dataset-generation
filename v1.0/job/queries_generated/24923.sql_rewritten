@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS title,
+        mt.production_year,
+        1 AS level,
+        CAST(mt.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        CONCAT(mh.path, ' -> ', at.title)
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    mh.id AS movie_id,
+    mh.title AS title,
+    mh.production_year,
+    COUNT(c.id) AS actor_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actors,
+    NULLIF(MIN(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget') THEN mi.info END), '') AS budget,
+    AVG(COALESCE(mt.production_year, 0)) OVER (PARTITION BY mh.production_year) AS avg_production_year
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = mh.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+WHERE 
+    (mh.production_year BETWEEN 2000 AND 2023 OR mh.production_year IS NULL)
+    AND (mh.title IS NOT NULL AND mh.title != '')
+GROUP BY 
+    mh.id, mh.title, mh.production_year
+HAVING 
+    COUNT(DISTINCT ak.id) >= 5
+ORDER BY 
+    actor_count DESC,
+    mh.production_year DESC
+LIMIT 10;

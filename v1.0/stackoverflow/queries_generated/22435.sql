@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+
+FilteredUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        CASE 
+            WHEN u.Views IS NULL THEN 0
+            ELSE u.Views
+        END AS ViewCount,
+        ROUND(
+            COALESCE(u.UpVotes, 0) * 1.0 / NULLIF(u.DownVotes, 0), 
+            3
+        ) AS UpvoteRatio
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 1000
+),
+
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        ph.CreationDate,
+        ph.UserDisplayName,
+        STRING_AGG(DISTINCT CAST(ph.Comment AS text), '; ') AS Comments,
+        COUNT(*) OVER (PARTITION BY ph.PostId) AS HistoryCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.CreationDate < NOW() - INTERVAL '3 months'
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId, ph.CreationDate, ph.UserDisplayName
+)
+
+SELECT 
+    pu.DisplayName AS UserDisplayName,
+    pu.Reputation,
+    fp.Title AS PostTitle,
+    fp.Score,
+    fp.ViewCount,
+    fp.CommentCount,
+    ph.PostHistoryTypeId,
+    ph.Comments,
+    ph.HistoryCount,
+    CASE 
+        WHEN fp.ScoreRank <= 10 THEN 'Top Posts'
+        WHEN fp.Score > 50 THEN 'High Score'
+        ELSE 'Moderate Score'
+    END AS PostCategory
+FROM 
+    RankedPosts fp
+JOIN 
+    FilteredUsers pu ON pu.Id = fp.Id
+LEFT JOIN 
+    PostHistoryDetails ph ON ph.PostId = fp.PostId
+WHERE 
+    (fp.ScoreRank <= 10 OR fp.CommentCount > 5)
+    AND ( 
+        ph.PostHistoryTypeId IS NULL 
+        OR ph.UserDisplayName IS NOT NULL
+    )
+ORDER BY 
+    pu.Reputation DESC, fp.Score DESC;
+
+This elaborate SQL query utilizes CTEs to rank posts, filter users based on their reputation, and gather post history details, allowing for intricate and efficient benchmarking of performance. Various SQL constructs such as window functions, string aggregation, NULL handling, and filtered joins enrich the complexity of the query, showcasing various SQL capabilities while addressing the peculiarities of NULL logic and performance.

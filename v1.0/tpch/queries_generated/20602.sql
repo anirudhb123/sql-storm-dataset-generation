@@ -1,0 +1,47 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost DESC) AS rn,
+        DENSE_RANK() OVER (PARTITION BY ps_partkey ORDER BY ps_availqty DESC) AS dr
+    FROM partsupp
+    WHERE ps_availqty IS NOT NULL
+),
+BestSuppliers AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        s.s_suppkey,
+        s.s_name,
+        r.r_name as supplier_region,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) as rank
+    FROM part p
+    JOIN RecursiveCTE ps ON p.p_partkey = ps.ps_partkey 
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE ps.rn = 1
+)
+SELECT 
+    o.o_orderkey,
+    COUNT(DISTINCT li.l_orderkey) AS lineitem_count,
+    AVG(CASE 
+        WHEN p.p_size IS NULL THEN NULL
+        WHEN p.p_size < 10 THEN p.p_retailprice * 0.9
+        ELSE p.p_retailprice END) AS avg_discounted_price,
+    r.r_name AS region,
+    SUM(ps.ps_supplycost) AS total_supplycost
+FROM BestSuppliers bs
+JOIN lineitem li ON li.l_partkey = bs.p_partkey
+JOIN orders o ON li.l_orderkey = o.o_orderkey
+LEFT JOIN nation n ON bs.s_suppkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE o.o_orderdate >= '2023-01-01'
+AND (o.o_totalprice IS NOT NULL OR o.o_orderstatus <> 'O')
+GROUP BY o.o_orderkey, r.r_name
+HAVING COUNT(li.l_orderkey) > (SELECT AVG(line_count) FROM (SELECT COUNT(*) AS line_count FROM lineitem GROUP BY l_orderkey) as lm)
+ORDER BY region, o.o_orderkey DESC
+LIMIT 100
+OFFSET (SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'O') % 10;

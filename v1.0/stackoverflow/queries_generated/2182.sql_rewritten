@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '2 years'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+        SUM(COALESCE(p.UpVotes, 0)) AS TotalUpVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    WHERE 
+        u.Reputation > 1000 
+    GROUP BY 
+        u.Id
+),
+RecentActivity AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount,
+        MAX(c.CreationDate) AS LastCommentDate
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    tu.DisplayName,
+    tu.TotalBounty,
+    tu.TotalUpVotes,
+    ra.CommentCount,
+    ra.LastCommentDate
+FROM 
+    RankedPosts rp
+JOIN 
+    TopUsers tu ON rp.OwnerUserId = tu.UserId
+LEFT JOIN 
+    RecentActivity ra ON rp.PostId = ra.PostId
+WHERE 
+    rp.RowNum = 1 
+    AND (ra.CommentCount IS NULL OR ra.CommentCount > 5)
+ORDER BY 
+    rp.Score DESC, 
+    tu.TotalBounty DESC;

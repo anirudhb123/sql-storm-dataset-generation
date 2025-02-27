@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        a.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY a.kind_id ORDER BY a.production_year DESC) AS rank,
+        a.id
+    FROM 
+        aka_title a
+    WHERE 
+        a.production_year IS NOT NULL
+),
+TopMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        k.keyword,
+        COUNT(DISTINCT c.person_id) AS total_cast_members
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_keyword mk ON rm.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        complete_cast cc ON rm.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    WHERE 
+        rm.rank <= 5
+    GROUP BY 
+        rm.title, rm.production_year, k.keyword
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(cn.name, ', ') AS company_names,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, ct.kind
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.keyword,
+    tm.total_cast_members,
+    ci.company_names,
+    ci.company_type
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyInfo ci ON tm.movie_id = ci.movie_id
+WHERE 
+    ci.company_type IS NOT NULL
+ORDER BY 
+    tm.production_year DESC,
+    tm.total_cast_members DESC;

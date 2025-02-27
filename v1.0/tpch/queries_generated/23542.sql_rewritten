@@ -1,0 +1,57 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS depth
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.depth + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NULL AND sh.depth < 5
+),
+part_stats AS (
+    SELECT p.p_partkey, SUM(ps.ps_availqty) AS total_availqty,
+           COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_orderstatus, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(l.l_orderkey) AS line_item_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY o.o_orderkey, o.o_orderstatus
+)
+SELECT r.r_name,
+       COALESCE(p.part_details, 'No parts available') AS part_details,
+       os.order_count,
+       AVG(ps.avg_supply_cost) AS avg_cost,
+       SUM(CASE WHEN s.depth > 1 THEN 1 ELSE 0 END) AS higher_depth_suppliers
+FROM region r
+LEFT JOIN (
+    SELECT n.n_regionkey,
+           STRING_AGG(DISTINCT CONCAT(p.p_name, ' (', p.p_partkey, ')')) AS part_details
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY n.n_regionkey
+) p ON r.r_regionkey = p.n_regionkey
+LEFT JOIN (
+    SELECT n.n_regionkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM nation n
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_regionkey
+) os ON r.r_regionkey = os.n_regionkey
+LEFT JOIN supplier_hierarchy s ON s.s_nationkey = r.r_regionkey
+LEFT JOIN part_stats ps ON EXISTS (
+    SELECT 1
+    FROM part_stats p
+    WHERE p.p_partkey = ps.p_partkey AND ps.unique_suppliers > 3
+)
+GROUP BY r.r_name, p.part_details, os.order_count
+HAVING SUM(COALESCE(ps.total_availqty, 0)) > 0
+ORDER BY r.r_name ASC NULLS LAST;

@@ -1,0 +1,31 @@
+SELECT 
+    a.name AS actor_name,
+    m.title AS movie_title,
+    c.kind AS cast_type,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    MIN(t.production_year) AS first_movie_year,
+    MAX(t.production_year) AS last_movie_year
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    aka_title m ON ci.movie_id = m.movie_id
+JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+JOIN 
+    role_type c ON ci.role_id = c.id
+JOIN 
+    title t ON m.id = t.id
+WHERE 
+    a.name IS NOT NULL
+    AND t.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    a.name, m.title, c.kind
+HAVING 
+    COUNT(DISTINCT mk.keyword) > 0
+ORDER BY 
+    first_movie_year ASC, actor_name ASC;

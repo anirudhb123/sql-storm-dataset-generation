@@ -1,0 +1,52 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           1 AS order_level
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+AggregatedLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_price
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+CustomerStats AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spent, 
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+TopNations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    ORDER BY supplier_count DESC
+    LIMIT 5
+)
+SELECT ch.o_orderkey, ch.o_custkey, cs.total_spent, cs.order_count,
+       ah.total_line_price,
+       CASE 
+           WHEN cs.last_order_date IS NULL THEN 'No Orders'
+           ELSE 'Orders Present'
+       END AS order_status,
+       tn.supplier_count
+FROM OrderHierarchy ch
+JOIN AggregatedLineItems ah ON ch.o_orderkey = ah.l_orderkey
+JOIN CustomerStats cs ON ch.o_custkey = cs.c_custkey
+LEFT JOIN TopNations tn ON cs.c_custkey IN (
+    SELECT s.c_nationkey 
+    FROM supplier s 
+    WHERE s.s_suppkey IN (SELECT s2.s_suppkey FROM supplier s2 WHERE s2.c_nationkey = tn.n_nationkey)
+)
+WHERE cs.total_spent IS NOT NULL AND cs.total_spent > 1000
+ORDER BY ch.o_orderdate DESC, cs.total_spent DESC
+LIMIT 100;

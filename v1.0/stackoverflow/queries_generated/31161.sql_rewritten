@@ -1,0 +1,79 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id AS PostId, 
+        ParentId,
+        0 AS HierarchyLevel
+    FROM Posts 
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id, 
+        p.ParentId,
+        r.HierarchyLevel + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+), 
+PostStats AS (
+    SELECT
+        p.Id,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.CreationDate,
+        COALESCE(NULLIF(pf.Title, ''), 'No Title') AS FinalTitle,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.CreationDate DESC) AS RowNum
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts pf ON p.AcceptedAnswerId = pf.Id
+    GROUP BY p.Id
+), 
+RecentPosts AS (
+    SELECT
+        ps.PostId,
+        ps.FinalTitle,
+        ps.Score,
+        ps.ViewCount,
+        ps.AnswerCount,
+        ps.CommentCount
+    FROM PostStats ps
+    WHERE ps.CreationDate > (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days')
+    ORDER BY ps.ViewCount DESC
+    LIMIT 10
+), 
+PostHistoryCTE AS (
+    SELECT
+        ph.PostId,
+        COUNT(ph.Id) AS HistoryChangeCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS ChangeTypes
+    FROM PostHistory ph
+    INNER JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+), 
+CombinedStats AS (
+    SELECT
+        r.PostId,
+        r.FinalTitle,
+        r.Score,
+        r.ViewCount,
+        r.AnswerCount,
+        r.CommentCount,
+        ph.HistoryChangeCount,
+        ph.ChangeTypes
+    FROM RecentPosts r
+    LEFT JOIN PostHistoryCTE ph ON r.PostId = ph.PostId
+)
+
+SELECT 
+    c.HierarchyLevel,
+    ps.*
+FROM CombinedStats ps
+LEFT JOIN RecursivePostHierarchy c ON ps.PostId = c.PostId
+ORDER BY c.HierarchyLevel, ps.Score DESC;

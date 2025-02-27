@@ -1,0 +1,58 @@
+WITH RecursiveCust AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, rc.level + 1
+    FROM customer c
+    JOIN RecursiveCust rc ON c.c_nationkey = rc.c_nationkey
+    WHERE rc.level < 5 
+),
+MaxOrder AS (
+    SELECT o_custkey, MAX(o_totalprice) AS max_order
+    FROM orders
+    GROUP BY o_custkey
+),
+SelectedParts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_supplycost < (SELECT AVG(ps_supplycost) FROM partsupp) 
+),
+CustomerOrders AS (
+    SELECT c.c_custkey,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+    HAVING COUNT(o.o_orderkey) > 2 
+),
+FinalCTE AS (
+    SELECT rc.c_custkey,
+           rc.c_name,
+           co.total_spent,
+           co.order_count,
+           ROW_NUMBER() OVER (PARTITION BY rc.c_nationkey ORDER BY co.total_spent DESC) AS rank
+    FROM RecursiveCust rc
+    JOIN CustomerOrders co ON rc.c_custkey = co.c_custkey
+)
+SELECT f.c_custkey,
+       f.c_name,
+       f.total_spent,
+       f.order_count,
+       pp.p_name,
+       pp.ps_supplycost,
+       (CASE 
+            WHEN f.total_spent IS NULL THEN 'No Orders' 
+            ELSE CONCAT('Spent: ', CAST(f.total_spent AS VARCHAR), ' | Orders: ', CAST(f.order_count AS VARCHAR)) 
+        END) AS spending_summary
+FROM FinalCTE f
+LEFT JOIN (SELECT DISTINCT p.p_partkey, p.p_name, LOWER(p.p_comment) AS p_comment
+            FROM part p 
+            WHERE p.p_name LIKE '%' || (SELECT MAX(n.n_name) FROM nation n) || '%' 
+          ) pp ON pp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty >= 10)
+WHERE f.rank <= 3 
+ORDER BY f.rank;

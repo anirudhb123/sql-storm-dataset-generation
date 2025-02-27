@@ -1,0 +1,32 @@
+
+SELECT 
+    a.name AS Actor_Name,
+    t.title AS Movie_Title,
+    m.production_year AS Production_Year,
+    r.role AS Role,
+    k.keyword AS Keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+JOIN 
+    movie_info m ON t.id = m.movie_id
+JOIN 
+    role_type r ON c.role_id = r.id
+WHERE 
+    m.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+GROUP BY 
+    a.name, 
+    t.title, 
+    m.production_year, 
+    r.role, 
+    k.keyword
+ORDER BY 
+    m.production_year DESC, 
+    a.name ASC;

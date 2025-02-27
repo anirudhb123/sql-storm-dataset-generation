@@ -1,0 +1,76 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        aka_title t
+),
+NameStats AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT a.name) AS unique_names,
+        STRING_AGG(DISTINCT a.name, ', ') AS all_names
+    FROM 
+        aka_name a
+    WHERE 
+        a.name IS NOT NULL 
+        AND a.name <> ''
+    GROUP BY 
+        a.person_id
+),
+MovieCompanyStats AS (
+    SELECT 
+        mc.movie_id, 
+        COUNT(DISTINCT c.id) AS company_count,
+        STRING_AGG(DISTINCT co.name, '; ') AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+CorrelatedSubquery AS (
+    SELECT 
+        ci.id AS cast_info_id,
+        (SELECT COUNT(*) FROM cast_info ci2 WHERE ci2.movie_id = ci.movie_id) AS total_cast,
+        ci.movie_id,
+        ci.person_id
+    FROM 
+        cast_info ci
+)
+SELECT 
+    nt.title,
+    nt.production_year,
+    ns.unique_names,
+    ns.all_names,
+    mcs.company_count,
+    mcs.companies,
+    ccs.total_cast,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = nt.title_id AND mi.info_type_id IN (1, 2)) AS relevant_info_count
+FROM 
+    RankedTitles nt
+LEFT JOIN 
+    NameStats ns ON ns.person_id IN (SELECT DISTINCT ci.person_id FROM cast_info ci WHERE ci.movie_id = nt.title_id)
+LEFT JOIN 
+    MovieCompanyStats mcs ON mcs.movie_id = nt.title_id
+LEFT JOIN 
+    CorrelatedSubquery ccs ON ccs.movie_id = nt.title_id
+WHERE 
+    nt.rn = 1
+    AND (mcs.company_count IS NULL OR mcs.company_count > 0)
+GROUP BY 
+    nt.title,
+    nt.production_year,
+    ns.unique_names,
+    ns.all_names,
+    mcs.company_count,
+    mcs.companies,
+    ccs.total_cast
+ORDER BY 
+    nt.production_year ASC, 
+    mcs.company_count DESC 
+LIMIT 10;

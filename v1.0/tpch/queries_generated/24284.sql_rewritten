@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > 5000
+
+    UNION ALL
+
+    SELECT p.ps_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM partsupp p
+    JOIN SupplierHierarchy sh ON p.ps_supkey = sh.s_suppkey
+    JOIN supplier s ON s.s_suppkey = p.ps_suppkey
+    WHERE p.ps_availqty > 1000
+)
+
+SELECT 
+    n.n_name,
+    SUM(CASE 
+            WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount)
+            ELSE 0 
+        END) AS total_returned_value,
+    AVG(o.o_totalprice) AS avg_order_price,
+    COUNT(DISTINCT l.l_orderkey) AS distinct_orders,
+
+    ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY SUM(l.l_extendedprice) DESC) AS rn,
+    COUNT(CASE 
+            WHEN c.c_acctbal IS NULL THEN 1 
+            WHEN c.c_acctbal BETWEEN 0 AND 10000 THEN NULL 
+            ELSE 0 
+        END) AS null_logic_count,
+    
+    STRING_AGG(DISTINCT p.p_name, ', ') WITHIN GROUP (ORDER BY p.p_name) AS distinct_part_names
+
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN partsupp p ON s.s_suppkey = p.ps_suppkey
+LEFT JOIN lineitem l ON p.ps_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate <= DATE '1997-01-01'
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+AND SUM(l.l_extendedprice) IS NOT NULL
+ORDER BY total_returned_value DESC, avg_order_price ASC
+LIMIT 50 OFFSET 0;

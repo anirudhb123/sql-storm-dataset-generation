@@ -1,0 +1,55 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+TotalSales AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_orderkey) AS total_lines
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+),
+SalesRanked AS (
+    SELECT 
+        ts.o_orderkey,
+        ts.total_price,
+        RANK() OVER (ORDER BY ts.total_price DESC) AS sales_rank
+    FROM TotalSales ts
+)
+SELECT 
+    sh.s_name, 
+    r.r_name, 
+    COUNT(DISTINCT o.o_orderkey) AS total_orders, 
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns,
+    SUM(l.l_extendedprice) AS total_revenue,
+    COALESCE(NULLIF(ROUND(AVG(ts.total_price), 2), 0), 0) AS average_order_value,
+    CASE 
+        WHEN AVG(l.l_discount) > 0.1 THEN 'High Discount'
+        ELSE 'Regular Discount'
+    END AS discount_category
+FROM supplier s
+JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN part p ON ps.ps_partkey = p.p_partkey
+JOIN lineitem l ON l.l_partkey = p.p_partkey
+JOIN orders o ON o.o_orderkey = l.l_orderkey
+JOIN nation n ON n.n_nationkey = s.s_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SalesRanked ts ON o.o_orderkey = ts.o_orderkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE s.s_acctbal IS NOT NULL
+AND (s.s_comment IS NULL OR s.s_comment NOT LIKE '%trusted%')
+GROUP BY sh.s_name, r.r_name
+HAVING COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY total_revenue DESC
+OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY;

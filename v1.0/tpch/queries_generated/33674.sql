@@ -1,0 +1,45 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, 0 AS Level
+    FROM customer c
+    WHERE c.c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_nationkey IS NOT NULL)
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, ch.Level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = ch.c_nationkey AND c.c_custkey <> ch.c_custkey
+    WHERE ch.Level < 3
+),
+SuppliersWithParts AS (
+    SELECT s.s_name, p.p_name, SUM(ps.ps_availqty) AS Total_AvailQty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 20 AND 50
+    GROUP BY s.s_name, p.p_name
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate > '2023-01-01'
+),
+OrderDetails AS (
+    SELECT lo.l_orderkey, SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS TotalPrice
+    FROM lineitem lo
+    GROUP BY lo.l_orderkey
+),
+FilteredOrders AS (
+    SELECT od.l_orderkey, od.TotalPrice, o.o_orderstatus
+    FROM OrderDetails od
+    JOIN RankedOrders o ON od.l_orderkey = o.o_orderkey
+    WHERE o.OrderRank <= 5 AND o.o_orderstatus = 'F'
+)
+SELECT 
+    ch.c_name AS CustomerName,
+    ch.Level AS CustomerLevel,
+    swnp.s_name AS SupplierName,
+    swnp.p_name AS PartName,
+    sw.Total_AvailQty AS TotalAvailableQuantity,
+    fo.TotalPrice AS OrderTotalPrice
+FROM CustomerHierarchy ch
+LEFT JOIN SuppliersWithParts swnp ON ch.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN FilteredOrders fo ON ch.c_custkey = fo.l_orderkey
+ORDER BY ch.Level, swnp.s_name, fo.TotalPrice DESC, ch.CustomerName;

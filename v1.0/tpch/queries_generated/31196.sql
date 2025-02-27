@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.n_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.n_nationkey = sh.n_nationkey
+    WHERE sh.level < 2
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_value,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(month, -6, CURRENT_DATE)
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+),
+OrderStatusCounts AS (
+    SELECT o.o_orderstatus, COUNT(*) AS order_count
+    FROM orders o
+    GROUP BY o.o_orderstatus
+)
+SELECT p.p_name, 
+       s.s_name AS supplier_name, 
+       c.c_name AS customer_name, 
+       ro.order_value, 
+       osc.o_orderstatus, 
+       CASE 
+           WHEN ro.order_value IS NULL THEN 'No Recent Orders' 
+           ELSE 'Recent Order Exists' 
+       END AS order_status,
+       ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY ro.o_orderdate DESC) AS customer_order_rank
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN customer c ON ro.o_custkey = c.c_custkey
+LEFT JOIN RecentOrders ro ON c.c_custkey = ro.o_custkey
+LEFT JOIN OrderStatusCounts osc ON ro.o_orderkey = osc.o_orderstatus
+INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.n_nationkey
+WHERE p.p_retailprice > 100 AND sh.level < 2
+ORDER BY p.p_name, customer_order_rank;

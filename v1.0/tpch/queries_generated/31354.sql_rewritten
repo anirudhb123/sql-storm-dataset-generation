@@ -1,0 +1,42 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT sp.s_suppkey, sp.s_name, sp.s_nationkey, sh.level + 1
+    FROM supplier_hierarchy sh
+    JOIN supplier sp ON sh.s_nationkey = sp.s_nationkey
+    WHERE sh.level < 3
+),
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+part_availability AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost DESC) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT c.c_name AS customer_name, p.p_name AS part_name,
+       CASE
+           WHEN ps.ps_availqty IS NOT NULL THEN 'Available'
+           ELSE 'Not Available'
+       END AS availability,
+       SUM(o.o_totalprice) AS total_order_value,
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       COALESCE(CONCAT('Purchase made by ', c.c_name), 'No purchases found') AS purchase_info
+FROM top_customers c
+LEFT JOIN lineitem l ON c.c_custkey = l.l_orderkey
+LEFT JOIN part_availability ps ON l.l_partkey = ps.p_partkey AND ps.rn = 1
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN supplier_hierarchy sh ON c.c_nationkey = sh.s_nationkey
+WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY c.c_name, p.p_name, availability
+HAVING total_order_value > 500
+ORDER BY total_order_value DESC, customer_name;

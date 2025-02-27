@@ -1,0 +1,50 @@
+WITH ranked_orders AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM
+        orders o
+    JOIN
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY
+        o.o_orderkey, c.c_mktsegment
+),
+top_revenue AS (
+    SELECT
+        c.c_mktsegment,
+        r.o_orderkey,
+        r.revenue
+    FROM
+        ranked_orders r
+    JOIN
+        customer c ON r.o_orderkey = o.o_orderkey
+    WHERE
+        r.rank <= 10
+),
+part_supplier AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM
+        partsupp ps
+    GROUP BY
+        ps.ps_partkey
+)
+SELECT
+    t.c_mktsegment,
+    COUNT(t.o_orderkey) AS top_order_count,
+    SUM(t.revenue) AS total_revenue,
+    MAX(p.total_cost) AS max_supply_cost
+FROM
+    top_revenue t
+JOIN
+    part_supplier p ON t.o_orderkey = p.ps_partkey
+GROUP BY
+    t.c_mktsegment
+ORDER BY
+    total_revenue DESC, top_order_count DESC;

@@ -1,0 +1,30 @@
+SELECT 
+    DISTINCT ak.name AS actor_name,
+    ak.imdb_index AS actor_imdb_index,
+    mt.title AS movie_title,
+    mt.production_year AS movie_year,
+    mc.note AS company_note,
+    k.keyword AS movie_keyword,
+    COUNT(cast.id) AS total_cast,
+    ARRAY_AGG(DISTINCT ct.kind) AS company_types
+FROM 
+    aka_name ak
+JOIN 
+    cast_info cast ON ak.person_id = cast.person_id
+JOIN 
+    title mt ON cast.movie_id = mt.id
+JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+JOIN 
+    company_type ct ON mc.company_type_id = ct.id
+JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    ak.name IS NOT NULL 
+    AND mt.production_year BETWEEN 2000 AND 2023
+GROUP BY 
+    ak.name, ak.imdb_index, mt.title, mt.production_year, mc.note
+ORDER BY 
+    movie_year DESC, actor_name ASC;

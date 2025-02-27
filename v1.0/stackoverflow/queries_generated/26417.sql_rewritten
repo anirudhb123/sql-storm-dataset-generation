@@ -1,0 +1,59 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        COALESCE(c.Comment, 'No Comments') AS LatestComment,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS RecentActivity,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '>')::int[])  
+    WHERE 
+        p.PostTypeId IN (1, 2)  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.Tags, c.Comment, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        AllTags,
+        CommentCount,
+        UpVotes,
+        DownVotes,
+        Rank() OVER (ORDER BY UpVotes - DownVotes DESC) AS ScoreRank
+    FROM 
+        ProcessedPosts
+)
+SELECT 
+    t.PostId,
+    t.Title,
+    t.Body,
+    t.AllTags,
+    t.CommentCount,
+    t.UpVotes,
+    t.DownVotes,
+    t.ScoreRank,
+    CASE 
+        WHEN t.ScoreRank <= 10 THEN 'Top Performing'
+        WHEN t.ScoreRank > 10 AND t.ScoreRank <= 50 THEN 'Moderately Performing'
+        ELSE 'Needs Improvement'
+    END AS PerformanceCategory
+FROM 
+    TopPosts t
+WHERE 
+    t.CommentCount > 0  
+ORDER BY 
+    t.ScoreRank;

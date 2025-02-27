@@ -1,0 +1,57 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 
+        (SELECT n.n_name FROM nation WHERE n.n_nationkey = sh.s_nationkey) 
+        LIMIT 1)
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 5
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+),
+PartSupplierInfo AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS row_num
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT DISTINCT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name, 
+    s.s_name AS supplier_name,
+    p.p_name AS part_name,
+    ci.c_name AS customer_name,
+    oi.o_orderkey,
+    li.l_shipdate,
+    li.l_quantity * (1 - li.l_discount) AS net_price,
+    COALESCE(MAX(sub.total_spent), 0) AS total_spent_by_customer,
+    CASE 
+        WHEN SUM(li.l_quantity) > 100 THEN 'High Volume'
+        ELSE 'Standard Volume'
+    END AS volume_category
+FROM lineitem li
+JOIN orders oi ON li.l_orderkey = oi.o_orderkey
+JOIN customer ci ON oi.o_custkey = ci.c_custkey
+JOIN supplier s ON li.l_suppkey = s.s_suppkey
+JOIN partsupp ps ON li.l_partkey = ps.ps_partkey
+JOIN part p ON li.l_partkey = p.p_partkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN TopCustomers tc ON ci.c_custkey = tc.c_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE li.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+AND EXISTS (SELECT 1 FROM PartSupplierInfo psi WHERE psi.p_partkey = p.p_partkey AND psi.row_num = 1)
+GROUP BY r.r_name, n.n_name, s.s_name, p.p_name, ci.c_name, oi.o_orderkey, li.l_shipdate
+HAVING COALESCE(SUM(li.l_quantity), 0) > 0
+ORDER BY region_name, nation_name, supplier_name;

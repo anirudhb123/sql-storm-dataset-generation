@@ -1,0 +1,55 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        title t
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role AS role_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+),
+MovieDetails AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        STRING_AGG(DISTINCT ar.actor_name, ', ') AS actors,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorRoles ar ON rm.title_id = ar.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.title_id = mk.movie_id
+    GROUP BY 
+        rm.title, rm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.actors, 'No Actors') AS actors,
+    md.keyword_count,
+    CASE 
+        WHEN md.keyword_count = 0 THEN 'No Keywords'
+        WHEN md.keyword_count > 5 THEN 'Many Keywords'
+        ELSE 'Few Keywords'
+    END AS keyword_analysis
+FROM 
+    MovieDetails md
+WHERE 
+    md.keyword_count >= (SELECT MAX(keyword_count) FROM MovieDetails)
+ORDER BY 
+    md.production_year DESC, md.title;

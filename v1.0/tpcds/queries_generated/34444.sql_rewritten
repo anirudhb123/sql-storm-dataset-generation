@@ -1,0 +1,72 @@
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk, 
+        ws_sold_date_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk, 
+        ws_sold_date_sk
+
+    UNION ALL
+
+    SELECT 
+        cs_item_sk, 
+        cs_sold_date_sk, 
+        SUM(cs_quantity) AS total_quantity, 
+        SUM(cs_net_paid_inc_tax) AS total_sales
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk, 
+        cs_sold_date_sk
+),
+customer_summary AS (
+    SELECT 
+        c_customer_sk,
+        cd_gender,
+        cd_marital_status,
+        COUNT(DISTINCT ws_order_number) AS order_count,
+        SUM(ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c_customer_sk, 
+        cd_gender, 
+        cd_marital_status
+),
+address_summary AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT c_customer_sk) AS customer_count,
+        AVG(total_spent) AS avg_spent,
+        MAX(order_count) AS max_orders
+    FROM 
+        customer_address ca
+    JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    JOIN customer_summary cs ON c.c_customer_sk = cs.c_customer_sk
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    as.ca_state, 
+    as.customer_count, 
+    as.avg_spent, 
+    as.max_orders,
+    ss.total_quantity,
+    ss.total_sales
+FROM 
+    address_summary as
+JOIN sales_summary ss ON ss.ws_sold_date_sk = (
+    SELECT MAX(d_date_sk)
+    FROM date_dim 
+    WHERE d_date <= cast('2002-10-01' as date)
+)
+ORDER BY 
+    as.customer_count DESC, 
+    as.avg_spent DESC
+LIMIT 10;

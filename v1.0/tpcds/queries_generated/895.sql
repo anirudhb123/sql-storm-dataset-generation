@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_ws.net_profit,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.net_profit DESC) AS rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.net_profit > 0
+),
+SalesSummary AS (
+    SELECT
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid_inc_tax) AS total_sales,
+        AVG(ws_ext_discount_amt) AS avg_discount
+    FROM
+        web_sales
+    GROUP BY
+        ws_sold_date_sk
+),
+ReturnSummary AS (
+    SELECT
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returns
+    FROM
+        catalog_returns
+    GROUP BY
+        cr_item_sk
+    HAVING
+        SUM(cr_return_quantity) > 0
+)
+SELECT
+    ca.ca_city,
+    SUM(COALESCE(ss.total_sales, 0)) AS total_sales,
+    SUM(COALESCE(rs.total_returns, 0)) AS total_returns,
+    AVG(COALESCE(ss.avg_discount, 0)) AS average_discount,
+    COUNT(DISTINCT web.web_site_id) AS unique_websites,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM
+    customer_address ca
+LEFT JOIN
+    customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN
+    web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN
+    SalesSummary ss ON ws.ws_sold_date_sk = ss.ws_sold_date_sk
+LEFT JOIN
+    ReturnSummary rs ON ws.ws_item_sk = rs.cr_item_sk
+LEFT JOIN
+    web_site web ON ws.ws_web_site_sk = web.web_site_sk
+WHERE
+    ca.ca_city IS NOT NULL
+GROUP BY
+    ca.ca_city
+HAVING
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY
+    total_sales DESC
+LIMIT 50;

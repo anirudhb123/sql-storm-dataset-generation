@@ -1,0 +1,73 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS UpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS DownVotes 
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 year'
+),
+ClosedPostReasons AS (
+    SELECT
+        ph.PostId,
+        STRING_AGG(DISTINCT cr.Name, ', ') AS CloseReasons
+    FROM
+        PostHistory ph
+    JOIN CloseReasonTypes cr ON CAST(ph.Comment AS integer) = cr.Id
+    WHERE
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        ph.PostId
+),
+AnswerStatistics AS (
+    SELECT 
+        p.ParentId AS QuestionId,
+        COUNT(*) AS AnswerCount,
+        COALESCE(AVG(p.Score), 0) AS AverageScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2 
+    GROUP BY 
+        p.ParentId
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(cpr.CloseReasons, 'Not Closed') AS CloseReasons,
+    COALESCE(a.AverageScore, 0) AS AverageAnswerScore,
+    CASE 
+        WHEN rp.Score IS NULL THEN 'No Score'
+        WHEN rp.Score > 0 THEN 'Positive'
+        WHEN rp.Score < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS ScoreDescription,
+    CASE WHEN rg.Id IS NOT NULL THEN 'Has a Reputation' ELSE 'Reputation Unknown' END AS UserReputationStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ClosedPostReasons cpr ON cpr.PostId = rp.PostId
+LEFT JOIN 
+    AnswerStatistics a ON a.QuestionId = rp.PostId
+LEFT JOIN 
+    Users rg ON rg.Id = rp.OwnerUserId
+WHERE 
+    rp.Rank <= 5 
+ORDER BY 
+    rp.CreationDate DESC
+OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;

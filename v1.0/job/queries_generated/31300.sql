@@ -1,0 +1,63 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year > 2000  -- Starting point for movies after 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 3  -- Limit to depth of 2 for hierarchy
+)
+
+SELECT 
+    ak.name AS actor_name,
+    at.title AS movie_title,
+    at.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    AVG(mi.info_length) AS avg_info_length,
+    MAX(level) AS max_link_level
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+JOIN 
+    aka_title at ON mh.movie_id = at.id
+LEFT JOIN 
+    movie_keyword mk ON at.id = mk.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN (
+    SELECT 
+        movie_id, 
+        LENGTH(info) AS info_length 
+    FROM 
+        movie_info
+) mi ON at.id = mi.movie_id
+GROUP BY 
+    ak.name, 
+    at.title, 
+    at.production_year
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 3  -- Only movies with more than 3 keywords
+ORDER BY 
+    avg_info_length DESC, 
+    max_link_level DESC;

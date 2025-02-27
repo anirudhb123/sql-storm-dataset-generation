@@ -1,0 +1,68 @@
+WITH UserRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        RANK() OVER (ORDER BY U.Reputation DESC) AS ReputationRank
+    FROM Users U
+), 
+PostAnalysis AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COALESCE(UPV.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(DOWNV.DownVotes, 0) AS TotalDownVotes,
+        P.ViewCount,
+        PH.Comment, 
+        PH.CreationDate AS HistoryDate,
+        PH.PostHistoryTypeId,
+        PH.UserId AS EditorId,
+        CASE WHEN COALESCE(P.AcceptedAnswerId, -1) <> -1 THEN 1 ELSE 0 END AS IsAccepted
+    FROM Posts P
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM Votes
+        GROUP BY PostId
+    ) UPV ON P.Id = UPV.PostId
+    LEFT JOIN PostHistory PH ON PH.PostId = P.Id
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+FilteredPostHistory AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount,
+        MAX(CreationDate) AS LastEditDate,
+        STRING_AGG(CASE WHEN PostHistoryTypeId IN (4, 5, 6) THEN 'Edited' ELSE NULL END, ', ') AS EditTypes
+    FROM PostAnalysis
+    GROUP BY PostId
+),
+AggregatedPosts AS (
+    SELECT 
+        A.PostId,
+        A.Title,
+        A.ViewCount,
+        B.EditCount,
+        B.LastEditDate,
+        B.EditTypes,
+        CASE WHEN A.TotalUpVotes - A.TotalDownVotes > 0 THEN 'Positive' ELSE 'Negative' END AS VoteSentiment,
+        R.DisplayName AS TopUserEdited,
+        R.ReputationRank
+    FROM PostAnalysis A
+    JOIN FilteredPostHistory B ON A.PostId = B.PostId
+    LEFT JOIN UserRankings R ON A.EditorId = R.UserId
+    WHERE B.EditCount > 1
+),
+FinalResults AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY VoteSentiment ORDER BY ViewCount DESC) AS RowNum
+    FROM AggregatedPosts
+)
+SELECT *
+FROM FinalResults
+WHERE RowNum <= 10
+ORDER BY VoteSentiment, ViewCount DESC;

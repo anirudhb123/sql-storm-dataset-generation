@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankByScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.PostTypeId
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.RankByScore,
+        rp.CommentCount,
+        COALESCE(rp.TotalBounty, 0) AS TotalBounty
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankByScore <= 10 AND rp.Score > 0
+),
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastUpdated
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Score,
+    fp.CreationDate,
+    fp.CommentCount,
+    fp.TotalBounty,
+    COALESCE(pha.HistoryTypes, 'No History') AS ChangeHistory,
+    pa.Id AS RelatedPostId,
+    pa.Title AS RelatedPostTitle,
+    phagg.LastUpdated
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    PostLinks pl ON fp.PostId = pl.PostId
+LEFT JOIN 
+    Posts pa ON pl.RelatedPostId = pa.Id AND pl.LinkTypeId = 3 
+LEFT JOIN 
+    PostHistoryAggregated pha ON fp.PostId = pha.PostId
+LEFT JOIN 
+    (SELECT * FROM PostHistory WHERE PostHistoryTypeId IN (10, 11)) phagg ON fp.PostId = phagg.PostId
+WHERE 
+    fp.CommentCount > 5 OR fp.TotalBounty > 0
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC;

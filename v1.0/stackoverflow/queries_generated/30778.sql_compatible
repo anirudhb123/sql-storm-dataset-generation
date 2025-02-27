@@ -1,0 +1,72 @@
+
+WITH RankedUsers AS (
+    SELECT
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        COALESCE(PV.ViewCount, 0) AS ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM Posts P
+    LEFT JOIN PostLinks PL ON P.Id = PL.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 2  
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN (
+        SELECT PostId, SUM(ViewCount) AS ViewCount
+        FROM Posts
+        GROUP BY PostId
+    ) PV ON P.Id = PV.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    WHERE P.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY P.Id, P.OwnerUserId, P.Title, P.CreationDate, P.Score, PV.ViewCount
+),
+UserPostStatistics AS (
+    SELECT
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(P.Score) AS TotalScore,
+        AVG(P.Score) AS AverageScore,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    R.DisplayName,
+    R.Reputation,
+    R.CreationDate,
+    COALESCE(S.TotalPosts, 0) AS TotalPosts,
+    COALESCE(S.TotalScore, 0) AS TotalScore,
+    COALESCE(S.AverageScore, 0) AS AverageScore,
+    COALESCE(C.TotalComments, 0) AS TotalComments,
+    (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = R.Id AND P.Score < 0) AS NegativePosts,
+    (SELECT COUNT(*) FROM RecentPosts RP WHERE RP.OwnerUserId = R.Id AND RP.CloseCount > 0) AS ClosedPosts,
+    (SELECT STRING_AGG(DISTINCT T.TagName, ', ') 
+     FROM Posts P 
+     JOIN Tags T ON P.Tags LIKE '%' || T.TagName || '%' 
+     WHERE P.OwnerUserId = R.Id) AS AssociatedTags
+FROM RankedUsers R
+LEFT JOIN UserPostStatistics S ON R.Id = S.UserId
+LEFT JOIN (
+    SELECT
+        U.Id AS UserId,
+        COUNT(DISTINCT C.Id) AS TotalComments
+    FROM Users U
+    JOIN Comments C ON U.Id = C.UserId
+    GROUP BY U.Id
+) C ON R.Id = C.UserId
+WHERE R.Rank <= 10  
+ORDER BY R.Reputation DESC;

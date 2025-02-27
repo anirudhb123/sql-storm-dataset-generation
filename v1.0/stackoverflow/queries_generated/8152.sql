@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        u.DisplayName AS Owner,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Owner,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5
+),
+PostDetails AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.Owner,
+        tp.Score,
+        tp.ViewCount,
+        tp.AnswerCount,
+        tp.CommentCount,
+        ph.CreationDate AS HistoryDate,
+        pht.Name AS HistoryType,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 2), 0
+        ) AS UpVotes,
+        COALESCE(
+            (SELECT COUNT(*) FROM Votes v WHERE v.PostId = tp.PostId AND v.VoteTypeId = 3), 0
+        ) AS DownVotes
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostHistory ph ON tp.PostId = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+)
+SELECT 
+    pd.*,
+    (SELECT STRING_AGG(DISTINCT c.UserDisplayName ORDER BY c.CreationDate) 
+     FROM Comments c 
+     WHERE c.PostId = pd.PostId) AS Commenters
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

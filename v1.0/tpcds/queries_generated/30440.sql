@@ -1,0 +1,54 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sale_rank
+    FROM web_sales
+    GROUP BY ws_item_sk
+),
+
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd_gender = 'M' THEN 'Male'
+            WHEN cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        cd_income_band_sk,
+        cd_purchase_estimate,
+        cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd_income_band_sk ORDER BY cd_purchase_estimate DESC) AS income_rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+
+item_inventory AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        COALESCE(SUM(inv.inv_quantity_on_hand), 0) AS quantity_on_hand
+    FROM item i
+    LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    GROUP BY i.i_item_sk, i.i_item_desc
+)
+
+SELECT 
+    cust.gender,
+    item.i_item_desc,
+    COALESCE(sales.total_quantity, 0) AS total_sales_quantity,
+    COALESCE(sales.total_sales, 0) AS total_sales_value,
+    COALESCE(inventory.quantity_on_hand, 0) AS inventory,
+    CASE 
+        WHEN cust.cd_purchase_estimate > 1000 THEN 'High Spend'
+        WHEN cust.cd_purchase_estimate BETWEEN 500 AND 1000 THEN 'Medium Spend'
+        ELSE 'Low Spend'
+    END AS spending_category
+FROM customer_details cust
+LEFT JOIN sales_summary sales ON cust.c_customer_sk = sales.ws_item_sk
+JOIN item_inventory inventory ON inventory.i_item_sk = sales.ws_item_sk
+WHERE cust.income_rank <= 10 AND sales.sale_rank <= 5
+ORDER BY total_sales_value DESC
+LIMIT 20;

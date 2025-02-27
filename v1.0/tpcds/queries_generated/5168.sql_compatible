@@ -1,0 +1,64 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.web_site_id, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_sales_price) AS total_sales, 
+        SUM(ws_coupon_amt) AS total_coupons,
+        d.d_year,
+        d.d_month_seq
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, ws_item_sk, d.d_year, d.d_month_seq
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_id, 
+        CASE WHEN cd.cd_gender = 'F' THEN 'Female' ELSE 'Male' END AS gender, 
+        cd.cd_marital_status, 
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+),
+performance_benchmark AS (
+    SELECT 
+        sd.web_site_id,
+        cd.gender,
+        cd.cd_marital_status,
+        SUM(sd.total_sales) AS total_sales,
+        AVG(sd.total_quantity) AS avg_quantity,
+        COUNT(DISTINCT cd.c_customer_id) AS unique_customers,
+        COUNT(sd.ws_item_sk) AS total_items_sold
+    FROM 
+        sales_data sd
+    JOIN 
+        customer_data cd ON sd.web_site_id = cd.web_site_id
+    GROUP BY 
+        sd.web_site_id, cd.gender, cd.cd_marital_status
+)
+SELECT 
+    web_site_id, 
+    gender,
+    cd_marital_status,
+    total_sales, 
+    avg_quantity, 
+    unique_customers, 
+    total_items_sold
+FROM 
+    performance_benchmark 
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 100 ROWS ONLY;

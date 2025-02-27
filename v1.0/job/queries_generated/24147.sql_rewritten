@@ -1,0 +1,90 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FullCast AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role AS role_name,
+        CASE 
+            WHEN p.gender = 'F' THEN 'Female'
+            WHEN p.gender = 'M' THEN 'Male'
+            ELSE 'Unknown'
+        END AS gender_category
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    JOIN 
+        name p ON c.person_id = p.id
+),
+KeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(kc.keyword_count, 0) AS total_keywords,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+        MAX(rc.year_rank) AS most_recent_rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        KeywordCounts kc ON m.id = kc.movie_id
+    LEFT JOIN 
+        RankedTitles rc ON m.id = rc.title_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id
+),
+AggregatedResults AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        COUNT(DISTINCT fc.person_id) AS cast_member_count,
+        md.total_keywords,
+        md.keywords
+    FROM 
+        MovieDetails md
+    LEFT JOIN 
+        FullCast fc ON md.movie_id = fc.movie_id
+    WHERE 
+        md.total_keywords > 5 
+    GROUP BY 
+        md.title, md.production_year, md.total_keywords, md.keywords
+)
+
+SELECT 
+    ar.title,
+    ar.production_year,
+    ar.cast_member_count,
+    ar.total_keywords,
+    ar.keywords,
+    CASE 
+        WHEN ar.total_keywords >= 10 THEN 'High'
+        WHEN ar.total_keywords BETWEEN 5 AND 9 THEN 'Medium'
+        ELSE 'Low'
+    END AS keyword_quality
+FROM 
+    AggregatedResults ar
+WHERE 
+    ar.cast_member_count > 0
+ORDER BY 
+    ar.production_year DESC, 
+    ar.cast_member_count DESC;

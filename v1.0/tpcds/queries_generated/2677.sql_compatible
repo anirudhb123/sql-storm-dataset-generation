@@ -1,0 +1,37 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        SUM(COALESCE(ss.ss_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ws.ws_net_paid, 0)) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY c.c_gender ORDER BY SUM(COALESCE(ss.ss_net_paid, 0) + COALESCE(cs.cs_net_paid, 0) + COALESCE(ws.ws_net_paid, 0)) DESC) AS gender_rank
+    FROM customer c
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_ship_customer_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, c.c_gender
+),
+RankedCustomers AS (
+    SELECT rc.*, 
+           DENSE_RANK() OVER (ORDER BY total_sales DESC) AS overall_rank
+    FROM CustomerSales rc
+),
+PreferredCustomers AS (
+    SELECT rc.* 
+    FROM RankedCustomers rc
+    JOIN customer_demographics cd ON rc.c_customer_sk = cd.cd_demo_sk
+    WHERE cd.cd_credit_rating = 'Good'
+      AND cd.cd_marital_status = 'M'
+      AND rc.gender_rank <= 5
+)
+SELECT 
+    pc.c_first_name, 
+    pc.c_last_name, 
+    pc.total_sales, 
+    pc.order_count, 
+    'Preferred Customer' AS customer_type
+FROM PreferredCustomers pc
+ORDER BY pc.total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

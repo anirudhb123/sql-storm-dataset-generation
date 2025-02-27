@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+TopSuppliers AS (
+    SELECT 
+        sp.s_suppkey,
+        RANK() OVER (ORDER BY sp.total_supply_value DESC) AS supplier_rank
+    FROM 
+        SupplierParts sp
+),
+LineItemStats AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(*) AS total_line_items,
+        AVG(l.l_discount) AS avg_discount,
+        SUM(l.l_extendedprice) AS total_extended_price
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-06-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(lt.total_line_items, 0) AS total_line_items,
+    COALESCE(lt.avg_discount, 0) AS avg_discount,
+    COALESCE(lt.total_extended_price, 0) AS total_extended_price,
+    CASE 
+        WHEN so.supplier_rank IS NOT NULL THEN 'Top Supplier'
+        ELSE 'Other Supplier'
+    END AS supplier_status,
+    r.r_name AS region_name,
+    CONCAT('Part ', p.p_partkey, ' in ', p.p_type) AS description
+FROM 
+    part p
+LEFT JOIN 
+    lineitem_stats lt ON p.p_partkey = lt.l_partkey
+LEFT JOIN 
+    (SELECT 
+        ps.ps_partkey, 
+        ts.s_suppkey, 
+        ts.supplier_rank
+     FROM 
+         partsupp ps
+     JOIN 
+         TopSuppliers ts ON ps.ps_suppkey = ts.s_suppkey
+    ) AS so ON p.p_partkey = so.ps_partkey
+JOIN 
+    nation n ON n.n_nationkey = (SELECT MIN(c.c_nationkey) FROM customer c WHERE c.c_custkey = (SELECT MIN(o.o_custkey) FROM RankedOrders o WHERE o.o_orderkey = 1)) 
+    LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    p.p_retailprice BETWEEN 10.00 AND 100.00
+    AND (p.p_comment IS NULL OR p.p_comment LIKE '%quality%')
+ORDER BY 
+    p.p_retailprice DESC;

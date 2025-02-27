@@ -1,0 +1,58 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopPostPerType AS (
+    SELECT 
+        PostId,
+        Title,
+        CreationDate,
+        Score,
+        ViewCount,
+        OwnerDisplayName,
+        Rank
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank = 1
+),
+PostDetails AS (
+    SELECT 
+        t.TagName,
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.OwnerDisplayName
+    FROM 
+        TopPostPerType tp
+    LEFT JOIN 
+        UNNEST(string_to_array(tp.Tags, '><')) AS t(TagName) 
+    ON 
+        tp.PostId = p.Id
+)
+SELECT 
+    pd.TagName,
+    COUNT(pd.PostId) AS PostCount,
+    AVG(pd.Score) AS AverageScore,
+    SUM(pd.ViewCount) AS TotalViews
+FROM 
+    PostDetails pd
+GROUP BY 
+    pd.TagName
+ORDER BY 
+    TotalViews DESC
+LIMIT 10;

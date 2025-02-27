@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, p.p_partkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), TopCustomers AS (
+    SELECT 
+        c_custkey,
+        c_name,
+        order_count,
+        total_spent,
+        RANK() OVER (ORDER BY total_spent DESC) AS customer_rank
+    FROM 
+        CustomerOrders
+)
+SELECT 
+    rs.s_suppkey,
+    rs.s_name,
+    tc.c_custkey,
+    tc.c_name,
+    tc.order_count,
+    tc.total_spent,
+    rs.total_cost
+FROM 
+    RankedSuppliers rs
+JOIN 
+    part p ON p.p_partkey = rs.p_partkey
+JOIN 
+    lineitem li ON li.l_partkey = p.p_partkey
+JOIN 
+    orders o ON o.o_orderkey = li.l_orderkey
+JOIN 
+    customer c ON c.c_custkey = o.o_custkey
+JOIN 
+    TopCustomers tc ON tc.c_custkey = c.c_custkey
+WHERE 
+    rs.rank = 1
+    AND tc.customer_rank <= 10
+ORDER BY 
+    rs.total_cost DESC, tc.total_spent DESC
+LIMIT 10;

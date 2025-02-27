@@ -1,0 +1,49 @@
+WITH MovieDetails AS (
+    SELECT 
+        avg(m.production_year) AS avg_production_year, 
+        t.title, 
+        COUNT(DISTINCT c.person_id) AS total_cast_members,
+        COUNT(DISTINCT k.keyword) AS total_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id AND cn.country_code = 'USA'
+    LEFT JOIN 
+        complete_cast cc ON cc.movie_id = t.id
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id
+),
+TopMovies AS (
+    SELECT 
+        md.title, 
+        md.avg_production_year, 
+        md.total_cast_members, 
+        ROW_NUMBER() OVER (ORDER BY md.total_cast_members DESC) AS rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.total_cast_members > 1
+)
+SELECT 
+    tm.title, 
+    tm.avg_production_year, 
+    COALESCE(cn.name, 'Unknown Company') AS company_name, 
+    tm.total_cast_members
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    movie_companies mc ON tm.title = (SELECT t.title FROM aka_title t WHERE t.id = mc.movie_id)
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    tm.rank <= 10
+ORDER BY 
+    tm.rank;

@@ -1,0 +1,61 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COALESCE(pt.title, 'N/A') AS parent_title,
+        REPLACE(t.title, ' ', '_') AS title_slug,
+        LENGTH(t.title) AS title_length,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_order,
+        COUNT(c.id) OVER (PARTITION BY t.id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        aka_title pt ON pt.id = t.episode_of_id -- Fetching the parent title for episodes
+    LEFT JOIN 
+        cast_info c ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    UNION ALL
+    SELECT 
+        h.title_id,
+        h.title,
+        h.production_year,
+        h.parent_title,
+        h.title_slug,
+        h.title_length,
+        h.year_order,
+        h.cast_count
+    FROM 
+        movie_hierarchy h
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = h.title_id
+)
+
+SELECT 
+    h.title,
+    h.production_year,
+    h.parent_title,
+    h.title_length,
+    h.cast_count,
+    STRING_AGG(DISTINCT CONCAT_WS(' - ', ak.name, co.name), '; ') AS cast_info,
+    CASE 
+        WHEN h.year_order = 1 THEN 'Latest in Year'
+        WHEN h.cast_count > 5 THEN 'Popular Cast'
+        ELSE 'Regular Title'
+    END AS title_category
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = h.title_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    company_name co ON co.imdb_id = h.title_id AND co.country_code IS NOT NULL
+WHERE 
+    h.production_year > 2000 
+    AND h.cast_count IS NOT NULL
+GROUP BY 
+    h.title, h.production_year, h.parent_title, h.title_length, h.cast_count, h.year_order
+ORDER BY 
+    h.production_year DESC, h.cast_count DESC;

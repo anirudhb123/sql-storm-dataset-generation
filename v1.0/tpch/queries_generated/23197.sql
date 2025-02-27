@@ -1,0 +1,65 @@
+WITH RECURSIVE price_ranks AS (
+    SELECT 
+        p_partkey,
+        ROW_NUMBER() OVER (PARTITION BY p_brand ORDER BY p_retailprice DESC) as price_rank
+    FROM 
+        part
+),
+supplier_avg AS (
+    SELECT 
+        s_nationkey,
+        AVG(s_acctbal) AS avg_acctbal
+    FROM 
+        supplier
+    GROUP BY 
+        s_nationkey
+),
+nation_exceeding_avg AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        sa.avg_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier_avg sa ON n.n_nationkey = sa.s_nationkey
+    WHERE 
+        n.n_comment IS NOT NULL
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns,
+    MAX(pr.price_rank) AS max_price_rank,
+    COALESCE(MAX(n.avg_acctbal), 0) AS max_avg_acctbal,
+    CASE 
+        WHEN r.r_name IS NULL THEN 'Unknown Region'
+        ELSE r.r_name 
+    END AS region_title
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    nation_exceeding_avg ne ON n.n_nationkey = ne.n_nationkey
+WHERE 
+    (o.o_orderstatus = 'O' AND o.o_totalprice > 10000) 
+    OR (l.l_shipdate > CURRENT_DATE - INTERVAL '1 YEAR' AND l.l_discount BETWEEN 0 AND 0.1)
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    total_revenue DESC NULLS LAST;

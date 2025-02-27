@@ -1,0 +1,61 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorMovieCounts AS (
+    SELECT 
+        c.person_id, 
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM cast_info c
+    JOIN (
+        SELECT DISTINCT 
+            movie_id 
+        FROM aka_title 
+        WHERE production_year >= 2000
+    ) AT ON c.movie_id = AT.movie_id
+    GROUP BY c.person_id
+),
+FilteredActors AS (
+    SELECT 
+        a.name,
+        ac.movie_count
+    FROM aka_name a
+    JOIN ActorMovieCounts ac ON a.person_id = ac.person_id
+    WHERE ac.movie_count > 5
+),
+TopMovies AS (
+    SELECT 
+        r.title_id, 
+        r.title,
+        r.production_year,
+        f.name
+    FROM RankedTitles r
+    LEFT JOIN FilteredActors f ON r.rank <= 3
+),
+FinalResults AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        COALESCE(tm.name, 'Unknown Actor') AS actor_name,
+        tm.title_id
+    FROM TopMovies tm
+)
+
+SELECT
+    fr.title,
+    fr.production_year,
+    fr.actor_name,
+    COUNT(DISTINCT mk.keyword) AS keyword_count,
+    MAX(CASE WHEN mi.info_type_id = 1 THEN mi.info END) AS description
+FROM FinalResults fr
+LEFT JOIN movie_keyword mk ON fr.title_id = mk.movie_id
+LEFT JOIN movie_info mi ON fr.title_id = mi.movie_id
+GROUP BY fr.title, fr.production_year, fr.actor_name
+HAVING COUNT(DISTINCT mk.keyword) > 2
+ORDER BY fr.production_year DESC, fr.title;

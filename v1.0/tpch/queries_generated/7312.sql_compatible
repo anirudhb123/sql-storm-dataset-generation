@@ -1,0 +1,38 @@
+
+WITH supplier_summary AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost, COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent, COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+part_region_summary AS (
+    SELECT p.p_partkey, p.p_name, r.r_name AS region_name
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.total_spent AS total_spent,
+    ss.s_name AS supplier_name,
+    ss.total_cost AS supplier_cost,
+    ps.region_name AS supplied_region,
+    ps.p_name AS part_name,
+    SUM(l.l_quantity) AS total_quantity,
+    AVG(l.l_extendedprice) AS average_price
+FROM customer_order_summary cs
+JOIN lineitem l ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cs.c_custkey)
+JOIN part_region_summary ps ON l.l_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_name = ps.p_name)
+JOIN supplier_summary ss ON ss.s_suppkey IN (SELECT ps0.ps_suppkey FROM partsupp ps0 WHERE ps0.ps_partkey = ps.p_partkey)
+GROUP BY cs.c_name, cs.total_spent, ss.s_name, ss.total_cost, ps.region_name, ps.p_name
+HAVING SUM(l.l_quantity) > 100
+ORDER BY cs.total_spent DESC, ss.total_cost ASC;

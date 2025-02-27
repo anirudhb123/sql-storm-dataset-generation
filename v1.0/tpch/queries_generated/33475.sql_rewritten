@@ -1,0 +1,58 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate > (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_availqty, 
+           p.p_retailprice * ps.ps_availqty AS total_value
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_retailprice > 100.00
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+),
+RegionNation AS (
+    SELECT n.n_name, r.r_name, COUNT(*) AS supplier_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+)
+
+SELECT 
+    s.s_name AS Supplier_Name,
+    r.r_name AS Region_Name,
+    n.n_name AS Nation_Name,
+    COALESCE(sh.level, -1) AS Supplier_Level,
+    COUNT(DISTINCT o.o_orderkey) AS Order_Count,
+    SUM(COALESCE(l.l_extendedprice, 0) - (l.l_extendedprice * l.l_discount)) AS Total_Sales,
+    AVG(hp.total_value) AS Avg_Part_Value,
+    nt.total_spent AS Customer_Spent
+FROM supplier s
+LEFT JOIN RegionNation r ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = r.r_name)
+LEFT JOIN orders o ON s.s_suppkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN HighValueParts hp ON l.l_partkey = hp.p_partkey
+LEFT JOIN TopCustomers nt ON nt.c_custkey = o.o_custkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE (s.s_acctbal IS NOT NULL AND s.s_acctbal > 3000)
+  AND (l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31' OR l.l_shipdate IS NULL)
+GROUP BY s.s_name, r.r_name, n.n_name, sh.level, nt.total_spent
+ORDER BY Total_Sales DESC, s.s_name;

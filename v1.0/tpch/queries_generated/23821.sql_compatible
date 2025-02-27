@@ -1,0 +1,73 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_custkey, c.c_name, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, ch.level + 1
+    FROM customer c
+    JOIN CustomerHierarchy ch ON c.c_nationkey = 
+        (SELECT n.n_nationkey 
+         FROM nation n 
+         WHERE n.n_name LIKE 'C%')
+    WHERE ch.level < 5
+),
+PartSupplierDetails AS (
+    SELECT ps.ps_partkey, 
+           ps.ps_suppkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 
+           COUNT(DISTINCT l.l_partkey) AS unique_parts
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey
+),
+FilteredOrders AS (
+    SELECT os.o_orderkey, 
+           os.total_sales, 
+           ch.c_name AS customer_name
+    FROM OrderStatistics os
+    JOIN CustomerHierarchy ch ON os.o_orderkey % 10 = ch.c_custkey % 10
+)
+
+SELECT DISTINCT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(s.s_name, 'UNKNOWN SUPPLIER') AS supplier_name,
+    CASE 
+        WHEN p.p_size IS NULL THEN 'SIZE NOT SPECIFIED'
+        ELSE CAST(p.p_size AS VARCHAR)
+    END AS part_size,
+    fo.customer_name,
+    f.total_avail_qty,
+    f.avg_supply_cost
+FROM part p
+LEFT JOIN PartSupplierDetails f ON p.p_partkey = f.ps_partkey
+LEFT JOIN TopSuppliers s ON f.ps_suppkey = s.s_suppkey AND s.rn = 1
+INNER JOIN FilteredOrders fo ON fo.o_orderkey = (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = (SELECT c.c_custkey FROM customer c LIMIT 1)
+    ORDER BY o.o_orderdate DESC 
+    LIMIT 1
+)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_type = p.p_type
+)
+ORDER BY p.p_partkey DESC
+LIMIT 100;

@@ -1,0 +1,63 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        COUNT(ws.order_number) AS total_orders,
+        SUM(ws.net_paid) AS total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.net_paid) DESC) AS revenue_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk BETWEEN 1 AND 365
+    GROUP BY 
+        ws.web_site_sk
+),
+null_handling AS (
+    SELECT 
+        ca.city,
+        COUNT(DISTINCT c.customer_sk) AS customer_count,
+        COALESCE(SUM(c.current_cdemo_sk), 0) AS demo_sk_sum,
+        CASE 
+            WHEN ca.county IS NULL THEN 'Unknown County' 
+            ELSE ca.county 
+        END AS adjusted_county
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    GROUP BY 
+        ca.city, ca.county
+),
+subquery_example AS (
+    SELECT 
+        s.store_sk,
+        AVG(ss.net_profit) AS avg_net_profit
+    FROM 
+        store s
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY 
+        s.store_sk
+    HAVING 
+        AVG(ss.net_profit) > (SELECT AVG(ss.net_profit) FROM store_sales ss)
+)
+SELECT 
+    r.web_site_sk,
+    r.total_orders,
+    r.total_revenue,
+    n.customer_count,
+    n.adjusted_county,
+    s.avg_net_profit
+FROM 
+    ranked_sales r
+JOIN 
+    null_handling n ON r.web_site_sk = n.customer_count
+FULL OUTER JOIN 
+    subquery_example s ON s.store_sk = n.customer_count
+WHERE 
+    (n.customer_count IS NOT NULL OR r.total_orders > 10)
+    AND (r.total_revenue BETWEEN 1000 AND 10000 OR s.avg_net_profit < 500)
+ORDER BY 
+    r.total_revenue DESC, 
+    n.customer_count
+LIMIT 100 OFFSET 50;

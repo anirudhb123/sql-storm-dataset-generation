@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserBadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserBadgeCounts ub ON u.Id = ub.UserId
+    WHERE 
+        u.Reputation > 0 
+    ORDER BY 
+        u.Reputation DESC
+    LIMIT 10
+)
+SELECT 
+    tp.UserId,
+    tp.DisplayName,
+    tp.Reputation,
+    tp.BadgeCount,
+    tp.GoldBadges,
+    tp.SilverBadges,
+    tp.BronzeBadges,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    CASE 
+        WHEN rp.Score >= 100 THEN 'High Score'
+        WHEN rp.Score BETWEEN 50 AND 99 THEN 'Medium Score'
+        ELSE 'Low Score'
+    END AS ScoreCategory
+FROM 
+    TopUsers tp
+LEFT JOIN 
+    RankedPosts rp ON tp.UserId = p.OwnerUserId
+WHERE 
+    rp.Rank <= 5 OR rp.PostId IS NULL
+ORDER BY 
+    tp.UserRank, rp.Score DESC;

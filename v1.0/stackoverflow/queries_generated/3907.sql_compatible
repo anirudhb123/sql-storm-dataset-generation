@@ -1,0 +1,57 @@
+
+WITH UserStats AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           u.Reputation,
+           u.CreationDate,
+           u.Views,
+           ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.CreationDate, u.Views
+),
+PostDetails AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate AS PostDate,
+           p.Score,
+           COALESCE(NULLIF(p.AcceptedAnswerId, -1), 0) AS AcceptedAnswerId,
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.ViewCount > 0
+    GROUP BY p.Id, p.Title, p.CreationDate, p.Score, p.AcceptedAnswerId
+),
+ClosedPosts AS (
+    SELECT p.Id,
+           ph.PostHistoryTypeId,
+           ph.CreationDate AS CloseDate,
+           ph.UserDisplayName,
+           r.Name AS CloseReason
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    JOIN CloseReasonTypes r ON CAST(ph.Comment AS INTEGER) = r.Id
+    WHERE ph.PostHistoryTypeId = 10 
+)
+SELECT u.DisplayName AS UserName,
+       us.Reputation,
+       pd.PostId,
+       pd.Title,
+       pd.PostDate,
+       pd.Score,
+       pd.CommentCount,
+       COALESCE(cp.CloseDate, NULL) AS CloseDate,
+       COALESCE(cp.CloseReason, 'Not Closed') AS CloseReason,
+       COALESCE(pd.UpVotes - pd.DownVotes, 0) AS NetVotes,
+       CASE WHEN cp.UserDisplayName IS NOT NULL THEN 'Closed by: ' || cp.UserDisplayName
+            ELSE 'Open' END AS Status
+FROM UserStats us
+JOIN PostDetails pd ON us.UserId = pd.PostId
+LEFT JOIN ClosedPosts cp ON pd.PostId = cp.Id
+WHERE us.Rank <= 50
+ORDER BY us.Reputation DESC, pd.Score DESC;

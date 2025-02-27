@@ -1,0 +1,64 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk BETWEEN 20220101 AND 20221231
+),
+customer_addresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY ca.ca_city, ca.ca_state ORDER BY ca.ca_address_sk) AS addr_rank
+    FROM 
+        customer_address ca
+    WHERE 
+        ca.ca_state IN ('CA', 'NY')
+),
+customer_details AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        hd.hd_income_band_sk
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT 
+    cd.c_first_name,
+    cd.c_last_name,
+    SUM(rs.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT rs.ws_order_number) AS order_count,
+    COALESCE(MAX(ca.ca_city), 'Unknown') AS city,
+    COALESCE(MAX(ca.ca_state), 'Unknown') AS state
+FROM 
+    customer_details cd
+LEFT JOIN 
+    ranked_sales rs ON cd.c_customer_sk = rs.ws_item_sk
+LEFT JOIN 
+    customer_addresses ca ON cd.c_current_addr_sk = ca.ca_address_sk
+WHERE 
+    cd.cd_marital_status = 'M'
+    AND cd.cd_purchase_estimate > 5000
+GROUP BY 
+    cd.c_first_name, cd.c_last_name
+HAVING 
+    total_profit > 2000
+ORDER BY 
+    total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

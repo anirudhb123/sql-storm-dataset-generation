@@ -1,0 +1,37 @@
+
+WITH RecentOrders AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_acctbal, n.n_name
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    WHERE o.o_orderdate >= DATEADD(MONTH, -3, CURRENT_DATE)
+),
+SupplierCosts AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= DATEADD(YEAR, -1, CURRENT_DATE)
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice,
+    ro.c_name,
+    ro.c_acctbal,
+    ro.n_name,
+    pd.p_name,
+    pd.total_quantity,
+    pd.net_revenue,
+    sc.total_supplycost
+FROM RecentOrders ro
+JOIN PartDetails pd ON ro.o_orderkey = pd.p_partkey
+JOIN SupplierCosts sc ON pd.p_partkey = sc.ps_partkey
+WHERE ro.o_totalprice > (SELECT AVG(o.o_totalprice) FROM RecentOrders o)
+ORDER BY ro.o_orderdate DESC, pd.net_revenue DESC
+LIMIT 100;

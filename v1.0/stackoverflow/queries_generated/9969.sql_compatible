@@ -1,0 +1,72 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.Reputation
+),
+RankedUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        Reputation,
+        PostCount,
+        AnswerCount,
+        QuestionCount
+    FROM 
+        RankedUsers
+    WHERE 
+        ReputationRank <= 10
+),
+PostsWithBadges AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        B.Name AS BadgeName,
+        U.DisplayName AS UserDisplayName
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        P.CreationDate >= DATE '2023-01-01' AND P.CreationDate < DATE '2024-01-01'
+)
+SELECT 
+    TU.UserId,
+    TU.Reputation,
+    TU.PostCount AS TotalPosts,
+    TU.AnswerCount,
+    TU.QuestionCount,
+    COUNT(DISTINCT PB.PostId) AS PostsWithBadges,
+    AVG(PB.ViewCount) AS AvgPostViewCount,
+    STRING_AGG(DISTINCT PB.BadgeName, ', ') AS BadgeNames
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostsWithBadges PB ON TU.UserId = PB.UserDisplayName
+GROUP BY 
+    TU.UserId, TU.Reputation, TU.PostCount, TU.AnswerCount, TU.QuestionCount
+ORDER BY 
+    TU.Reputation DESC;

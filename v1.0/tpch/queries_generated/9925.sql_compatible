@@ -1,0 +1,39 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           o.o_totalprice, 
+           o.o_orderstatus, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+), TotalLineItems AS (
+    SELECT l.l_orderkey, 
+           COUNT(*) AS total_items
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+), SupplierParts AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+)
+SELECT ro.o_orderkey, 
+       ro.o_orderdate, 
+       ro.o_totalprice, 
+       ro.o_orderstatus, 
+       tli.total_items, 
+       sp.total_avail_qty, 
+       sp.total_supply_cost
+FROM RankedOrders ro
+LEFT JOIN TotalLineItems tli ON ro.o_orderkey = tli.l_orderkey
+LEFT JOIN SupplierParts sp ON EXISTS (
+    SELECT 1 
+    FROM lineitem l 
+    WHERE l.l_orderkey = ro.o_orderkey AND l.l_partkey = sp.ps_partkey
+)
+WHERE ro.rn <= 5 
+ORDER BY ro.o_orderdate DESC, ro.o_orderkey;

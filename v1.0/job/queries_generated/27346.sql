@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY a.name) AS actor_rank
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        c.country_code = 'USA' AND
+        t.production_year >= 2000
+),
+MoviesWithKeywords AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        RankedMovies rm
+    JOIN 
+        movie_keyword mk ON rm.movie_title = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        rm.movie_title, rm.production_year
+),
+FinalResults AS (
+    SELECT 
+        mwk.movie_title,
+        mwk.production_year,
+        COUNT(mwk.keywords) AS keyword_count,
+        STRING_AGG(DISTINCT mwk.keywords, ', ') AS unique_keywords
+    FROM 
+        MoviesWithKeywords mwk
+    GROUP BY 
+        mwk.movie_title, mwk.production_year
+    ORDER BY 
+        mwk.production_year DESC
+)
+SELECT 
+    movie_title,
+    production_year,
+    keyword_count,
+    unique_keywords
+FROM 
+    FinalResults
+WHERE 
+    keyword_count > 3
+LIMIT 50 OFFSET 0;

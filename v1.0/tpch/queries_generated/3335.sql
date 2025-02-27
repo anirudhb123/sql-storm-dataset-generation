@@ -1,0 +1,42 @@
+WITH NationwideSupplierStats AS (
+    SELECT 
+        s.n_nationkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+),
+OrderStats AS (
+    SELECT 
+        c.c_nationkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2023-12-31'
+    GROUP BY c.c_nationkey
+),
+ComplicatedQuery AS (
+    SELECT 
+        r.r_name,
+        ns.avg_supply_cost,
+        os.total_orders,
+        os.total_revenue,
+        COALESCE(os.total_orders, 0) * ns.avg_supply_cost AS projected_value
+    FROM region r
+    LEFT JOIN NationwideSupplierStats ns ON r.r_regionkey = ns.n_nationkey
+    LEFT JOIN OrderStats os ON r.r_regionkey = os.c_nationkey
+)
+
+SELECT 
+    r_name,
+    avg_supply_cost,
+    total_orders,
+    total_revenue,
+    projected_value
+FROM ComplicatedQuery
+WHERE (avg_supply_cost IS NOT NULL AND total_orders > 10) 
+   OR (total_revenue IS NULL AND projected_value > 50000)
+ORDER BY projected_value DESC
+LIMIT 50;

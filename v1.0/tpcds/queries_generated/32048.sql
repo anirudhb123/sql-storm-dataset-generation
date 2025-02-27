@@ -1,0 +1,71 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_quantity) AS total_quantity, 
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk, 
+        cs_item_sk, 
+        SUM(cs_quantity + ws.total_quantity) AS total_quantity, 
+        SUM(cs_net_profit + ws.total_profit) AS total_profit
+    FROM 
+        catalog_sales cs
+    JOIN 
+        SalesCTE ws ON cs.cs_sold_date_sk = ws.ws_sold_date_sk AND cs.cs_item_sk = ws.ws_item_sk
+    WHERE 
+        cs.cs_order_number IS NOT NULL
+    GROUP BY 
+        cs_sold_date_sk, cs_item_sk
+),
+CustomerReturns AS (
+    SELECT 
+        COALESCE(SUM(sr_return_quantity), 0) AS total_returns,
+        sr_item_sk
+    FROM 
+        store_returns sr
+    LEFT JOIN 
+        web_returns wr ON sr.sr_item_sk = wr.wr_item_sk
+    GROUP BY 
+        sr_item_sk
+),
+ItemAnalysis AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(s.total_quantity, 0) AS total_quantity_sold,
+        COALESCE(s.total_profit, 0) AS total_profit_generated,
+        COALESCE(r.total_returns, 0) AS total_returns
+    FROM 
+        item i
+    LEFT JOIN 
+        SalesCTE s ON i.i_item_sk = s.ws_item_sk
+    LEFT JOIN 
+        CustomerReturns r ON i.i_item_sk = r.sr_item_sk
+)
+SELECT 
+    ia.i_item_sk, 
+    ia.i_item_desc, 
+    ia.i_current_price, 
+    ia.total_quantity_sold, 
+    ia.total_profit_generated, 
+    ia.total_returns,
+    ROUND(COALESCE(ia.total_profit_generated / NullIf(ia.total_quantity_sold, 0), 0), 2) AS profit_per_unit,
+    CASE 
+        WHEN ia.total_returns > 0 THEN 'Returns Present'
+        ELSE 'No Returns'
+    END AS return_status
+FROM 
+    ItemAnalysis ia
+WHERE 
+    ia.total_quantity_sold > 0 
+ORDER BY 
+    ia.total_profit_generated DESC
+LIMIT 100;

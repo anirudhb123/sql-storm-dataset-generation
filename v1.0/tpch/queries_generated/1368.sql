@@ -1,0 +1,55 @@
+WITH SupplierCost AS (
+    SELECT ps_partkey, 
+           SUM(ps_supplycost * ps_availqty) AS total_supply_cost
+    FROM partsupp
+    GROUP BY ps_partkey
+),
+PartDetails AS (
+    SELECT p.p_partkey, 
+           p.p_name, 
+           p.p_brand, 
+           p.p_type, 
+           p.p_size, 
+           p.p_retailprice,
+           COALESCE(SC.total_supply_cost, 0) AS total_supply_cost
+    FROM part p
+    LEFT JOIN SupplierCost SC ON p.p_partkey = SC.ps_partkey
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT P.p_partkey, 
+       P.p_name,
+       P.p_brand, 
+       P.p_type, 
+       P.p_size, 
+       P.p_retailprice, 
+       P.total_supply_cost,
+       COALESCE(CT.total_order_value, 0) AS total_order_value,
+       CASE 
+           WHEN CT.total_order_value > 0 THEN 'Active' 
+           ELSE 'Inactive' 
+       END AS status
+FROM PartDetails P
+LEFT JOIN (
+    SELECT c.c_nationkey, 
+           AVG(total_order_value) AS avg_order_value 
+    FROM CustomerOrders 
+    GROUP BY c_nationkey
+) AS AvgOrders ON P.p_partkey = AvgOrders.c_nationkey
+LEFT JOIN CustomerOrders CT ON P.p_partkey = CT.o_orderkey
+WHERE P.p_size BETWEEN 20 AND 50
+  AND P.p_retailprice > (
+      SELECT AVG(p_retailprice) 
+      FROM part
+  )
+ORDER BY P.p_retailprice DESC, CT.total_order_value DESC
+FETCH FIRST 100 ROWS ONLY;

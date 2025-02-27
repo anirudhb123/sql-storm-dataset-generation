@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate AS AccountCreated,
+        SUM(b.Class = 1) AS GoldBadges,
+        SUM(b.Class = 2) AS SilverBadges,
+        SUM(b.Class = 3) AS BronzeBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        um.DisplayName AS OwnerDisplayName,
+        um.Reputation AS OwnerReputation,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        rp.CommentCount,
+        um.TotalPosts,
+        um.TotalComments,
+        um.TotalVotes
+    FROM 
+        RankedPosts rp
+    INNER JOIN 
+        UserMetrics um ON rp.OwnerUserId = um.UserId
+)
+SELECT 
+    pd.Title,
+    pd.OwnerDisplayName,
+    pd.OwnerReputation,
+    pd.ViewCount,
+    pd.Score,
+    pd.AnswerCount,
+    pd.CommentCount,
+    pd.TotalPosts,
+    pd.TotalComments,
+    pd.TotalVotes
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Rank <= 5
+ORDER BY 
+    pd.ViewCount DESC, pd.Score DESC;

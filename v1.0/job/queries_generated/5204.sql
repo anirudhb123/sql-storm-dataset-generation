@@ -1,0 +1,32 @@
+SELECT 
+    t.title AS movie_title,
+    ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+    COUNT(DISTINCT mc.company_id) AS company_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    MIN(m.production_year) AS earliest_year,
+    MAX(m.production_year) AS latest_year
+FROM 
+    title t
+JOIN 
+    aka_title ak_t ON t.id = ak_t.movie_id
+JOIN 
+    cast_info c ON c.movie_id = ak_t.movie_id
+JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+JOIN 
+    movie_companies mc ON mc.movie_id = t.id
+JOIN 
+    movie_keyword mk ON mk.movie_id = t.id
+JOIN 
+    keyword k ON k.id = mk.keyword_id
+JOIN 
+    movie_info mi ON mi.movie_id = t.id
+WHERE 
+    t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+    AND ak.name IS NOT NULL
+GROUP BY 
+    t.id
+HAVING 
+    COUNT(DISTINCT ak.person_id) > 5
+ORDER BY 
+    latest_year DESC;

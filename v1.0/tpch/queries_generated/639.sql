@@ -1,0 +1,59 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_acctbal IS NOT NULL)
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+SuppliersWithOrders AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        RankedSuppliers s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        HighValueOrders ho ON l.l_orderkey = ho.o_orderkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        COUNT(DISTINCT ho.o_orderkey) > 0
+)
+SELECT 
+    r.n_name AS nation,
+    s.s_name AS supplier_name,
+    s.order_count,
+    COALESCE(ranked.rn, 0) AS rank
+FROM 
+    SuppliersWithOrders s
+FULL OUTER JOIN 
+    RankedSuppliers ranked ON s.s_suppkey = ranked.s_suppkey
+JOIN 
+    nation r ON ranked.n_nationkey = r.n_nationkey
+WHERE 
+    r.r_name LIKE '%North%' OR s.order_count > 5
+ORDER BY 
+    r.n_name, s.order_count DESC;

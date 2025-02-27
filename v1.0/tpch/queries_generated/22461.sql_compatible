@@ -1,0 +1,51 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND sh.level < 3
+),
+PartPriceStats AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(ps.ps_supplycost) AS avg_supplycost,
+        MAX(ps.ps_availqty) AS max_availqty
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+NationSupplierCount AS (
+    SELECT 
+        n.n_nationkey,
+        COUNT(s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+)
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(NATION.supplier_count, 0) AS total_suppliers,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS sales_rank,
+    CASE 
+        WHEN SUM(l.l_quantity) > 100 THEN 'High Quantity'
+        WHEN SUM(l.l_quantity) IS NULL THEN 'Unknown'
+        ELSE 'Regular' 
+    END AS quantity_category,
+    MAX(CASE WHEN l.l_returnflag = 'R' THEN 'Returned' ELSE 'Not Returned' END) AS return_status,
+    COUNT(DISTINCT sh.s_suppkey) AS distinct_suppliers_in_hierarchy
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN NationSupplierCount NATION ON p.p_partkey = NATION.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_nationkey = l.l_suppkey)
+WHERE l.l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31' 
+  AND l.l_discount BETWEEN 0.05 AND 0.20
+GROUP BY p.p_partkey, p.p_name, p.p_mfgr, NATION.supplier_count
+HAVING SUM(l.l_extendedprice) > 50000 
+   OR COUNT(COALESCE(l.l_linenumber, 0)) > 10
+ORDER BY total_sales DESC, sales_rank DESC
+FETCH FIRST 100 ROWS ONLY;

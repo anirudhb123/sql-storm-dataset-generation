@@ -1,0 +1,53 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN vt.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes vt ON p.Id = vt.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.Body, p.Tags, p.CreationDate, u.DisplayName, u.Reputation
+    ORDER BY p.CreationDate DESC
+    LIMIT 100
+), TagStats AS (
+    SELECT 
+        TRIM(UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '><'))) ) AS Tag, 
+        COUNT(*) AS TagCount
+    FROM RecentPosts
+    GROUP BY Tag
+), TopTags AS (
+    SELECT 
+        Tag, 
+        TagCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount DESC) AS Rank
+    FROM TagStats
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.OwnerName,
+    rp.OwnerReputation,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    t.Tag AS MostPopularTag
+FROM RecentPosts rp
+JOIN (
+    SELECT 
+        Tag,
+        Rank
+    FROM TopTags
+    WHERE Rank <= 3 
+) t ON rp.Tags LIKE '%' || t.Tag || '%'
+ORDER BY rp.CreationDate DESC, rp.UpVotes DESC;

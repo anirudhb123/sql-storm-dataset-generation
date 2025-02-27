@@ -1,0 +1,70 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        o.o_custkey
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+),
+SupplierCosts AS (
+    SELECT 
+        ps.ps_supplkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_supplkey
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation,
+        c.c_acctbal,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance' 
+            ELSE CONCAT('Balance: ', CAST(c.c_acctbal AS VARCHAR(30))) 
+        END AS balance_info
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > 0
+)
+
+SELECT 
+    p.p_name,
+    p.p_mfgr,
+    COALESCE(sc.total_cost, 0) AS supplier_cost,
+    ci.nation,
+    ci.balance_info,
+    COUNT(lo.l_orderkey) AS order_count,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_revenue
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    SupplierCosts sc ON ps.ps_suppkey = sc.ps_supplkey
+LEFT JOIN 
+    lineitem lo ON p.p_partkey = lo.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON lo.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    CustomerInfo ci ON ro.o_custkey = ci.c_custkey
+WHERE 
+    p.p_retailprice > 50 AND 
+    (ci.nation IS NULL OR ci.nation NOT IN ('CANADA', 'USA'))
+GROUP BY 
+    p.p_name, p.p_mfgr, sc.total_cost, ci.nation, ci.balance_info
+HAVING 
+    COUNT(lo.l_orderkey) > 0
+ORDER BY 
+    total_revenue DESC, supplier_cost ASC
+LIMIT 100;

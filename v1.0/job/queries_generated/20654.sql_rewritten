@@ -1,0 +1,80 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS level
+    FROM
+        aka_title t
+    WHERE
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT
+        m.movie_id,
+        m.title,
+        m.production_year,
+        level + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy m ON ml.movie_id = m.movie_id
+    WHERE
+        ml.linked_movie_id IS NOT NULL
+),
+
+
+company_aggregation AS (
+    SELECT
+        mc.movie_id,
+        ct.kind AS company_type,
+        COUNT(DISTINCT cm.name) AS company_count
+    FROM
+        movie_companies mc
+    JOIN
+        company_name cm ON mc.company_id = cm.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY
+        mc.movie_id, ct.kind
+),
+
+
+ranked_movies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(ca.company_type, 'Unknown') AS company_type,
+        COALESCE(ca.company_count, 0) AS company_count,
+        RANK() OVER (PARTITION BY mh.production_year ORDER BY COALESCE(ca.company_count, 0) DESC) AS rank_within_year
+    FROM
+        movie_hierarchy mh
+    LEFT JOIN
+        company_aggregation ca ON mh.movie_id = ca.movie_id
+)
+
+SELECT
+    rm.title,
+    rm.production_year,
+    rm.company_type,
+    rm.company_count,
+    rm.rank_within_year,
+    COUNT(DISTINCT ci.role_id) AS total_roles,
+    STRING_AGG(DISTINCT an.name, ', ') FILTER (WHERE an.name IS NOT NULL) AS actor_names
+FROM
+    ranked_movies rm
+LEFT JOIN
+    cast_info ci ON rm.movie_id = ci.movie_id
+LEFT JOIN
+    aka_name an ON ci.person_id = an.person_id
+GROUP BY
+    rm.movie_id, rm.title, rm.production_year, rm.company_type, rm.company_count, rm.rank_within_year
+HAVING
+    SUM(CASE WHEN ci.note IS NULL THEN 1 ELSE 0 END) = 0  
+ORDER BY
+    rm.production_year DESC,
+    rank_within_year,
+    total_roles DESC
+LIMIT 100;

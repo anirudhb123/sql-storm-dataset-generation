@@ -1,0 +1,47 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM Posts p
+    WHERE p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN Posts pa ON p.ParentId = pa.Id
+    WHERE pa.PostTypeId = 1 
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    COUNT(DISTINCT ph.PostId) AS TotalPosts,
+    SUM(CASE WHEN ph.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN ph.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(COALESCE(v.Score, 0)) AS AverageVoteScore,
+    ARRAY_AGG(DISTINCT t.TagName) AS AssociatedTags,
+    MAX(p.LastEditDate) AS LastEdited,
+    COUNT(DISTINCT CASE WHEN b.Id IS NOT NULL THEN b.Id END) AS TotalBadges,
+    ROW_NUMBER() OVER (ORDER BY COUNT(ph.PostId) DESC) AS Rank
+FROM Users u
+LEFT JOIN Posts ph ON u.Id = ph.OwnerUserId
+LEFT JOIN Votes v ON ph.Id = v.PostId
+LEFT JOIN PostLinks pl ON ph.Id = pl.PostId
+LEFT JOIN Tags t ON position(t.TagName IN ph.Tags) > 0
+LEFT JOIN Badges b ON u.Id = b.UserId
+LEFT JOIN RecursivePostHierarchy rph ON ph.Id = rph.PostId
+WHERE u.Reputation > 1000 
+GROUP BY u.Id, u.DisplayName
+HAVING COUNT(ph.PostId) > 5 AND AVG(v.Score) > 2 
+ORDER BY Rank
+LIMIT 10;

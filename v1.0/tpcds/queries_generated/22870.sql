@@ -1,0 +1,81 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price > 0
+),
+InventoryStats AS (
+    SELECT 
+        inv.inv_item_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_quantity,
+        COUNT(DISTINCT inv.inv_warehouse_sk) AS warehouse_count
+    FROM 
+        inventory inv
+    GROUP BY 
+        inv.inv_item_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single/Other'
+        END AS marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band_sk
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+),
+SalesAggregates AS (
+    SELECT 
+        s.ss_item_sk,
+        SUM(s.ss_net_profit) AS total_net_profit,
+        AVG(s.ss_sales_price) AS avg_sales_price,
+        COUNT(s.ss_ticket_number) AS sales_count
+    FROM 
+        store_sales s
+    WHERE 
+        s.ss_sales_price < (SELECT MAX(ws.ws_sales_price) FROM web_sales ws)
+    GROUP BY 
+        s.ss_item_sk
+)
+
+SELECT 
+    CASE 
+        WHEN cs.ws_item_sk IS NOT NULL THEN 'Web'
+        ELSE 'Store'
+    END AS sales_channel,
+    COALESCE(cs.ws_item_sk, ss.ss_item_sk) AS item_sk,
+    COALESCE(cs.total_net_profit, ss.total_net_profit) AS total_net_profit,
+    COALESCE(cs.avg_sales_price, ss.avg_sales_price) AS avg_sales_price,
+    COALESCE(is.total_quantity, 0) AS total_quantity,
+    cd.marital_status,
+    cd.income_band_sk
+FROM 
+    RankedSales cs
+FULL OUTER JOIN 
+    SalesAggregates ss ON cs.ws_item_sk = ss.ss_item_sk
+LEFT JOIN 
+    InventoryStats is ON COALESCE(cs.ws_item_sk, ss.ss_item_sk) = is.inv_item_sk
+JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk IN (
+        SELECT DISTINCT c.c_current_cdemo_sk
+        FROM customer c
+        WHERE c.c_customer_sk IN (
+            SELECT DISTINCT ws.ws_bill_customer_sk FROM web_sales ws WHERE ws.ws_item_sk = COALESCE(cs.ws_item_sk, ss.ss_item_sk)
+        )
+    )
+WHERE 
+    (cd.cd_gender IS NOT NULL OR total_net_profit IS NULL)
+ORDER BY 
+    total_net_profit DESC, avg_sales_price ASC
+LIMIT 100;

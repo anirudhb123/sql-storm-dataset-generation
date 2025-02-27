@@ -1,0 +1,53 @@
+WITH RankedTitles AS (
+    SELECT 
+        at.title AS title,
+        at.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY ak.name) AS title_rank
+    FROM 
+        aka_title at
+    JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        at.production_year IS NOT NULL
+),
+KeywordEnhanced AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        ARRAY_AGG(mk.keyword) AS keywords,
+        mt.production_year,
+        rt.role AS actor_role
+    FROM 
+        movie_keyword mk
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.id
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        role_type rt ON ci.person_role_id = rt.id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year, rt.role
+)
+SELECT 
+    rt.production_year,
+    rt.title AS movie_title,
+    rt.actor_name,
+    SUM(CASE 
+            WHEN kw.keywords IS NOT NULL THEN 1 
+            ELSE 0 
+        END) AS keyword_count,
+    COUNT(DISTINCT rt.actor_id) AS unique_actor_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    KeywordEnhanced kw ON rt.title = kw.movie_title AND rt.production_year = kw.production_year
+WHERE 
+    rt.title_rank <= 3  
+GROUP BY 
+    rt.production_year, rt.title, rt.actor_name
+ORDER BY 
+    rt.production_year DESC, keyword_count DESC;

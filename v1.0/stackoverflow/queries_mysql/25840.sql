@@ -1,0 +1,90 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE((
+            SELECT COUNT(v.Id)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2 
+        ), 0) AS UpVotes,
+        COALESCE((
+            SELECT COUNT(v.Id)
+            FROM Votes v
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3 
+        ), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Title ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.Score, p.ViewCount, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Score,
+        ViewCount,
+        Author,
+        CommentCount,
+        UpVotes,
+        DownVotes
+    FROM 
+        RankedPosts
+    WHERE 
+        RowNum = 1 
+),
+PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        GROUP_CONCAT(DISTINCT t.TagName) AS Tags,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    JOIN 
+        (SELECT  
+            Id, 
+            SUBSTRING_INDEX(SUBSTRING_INDEX(Tags, '><', n.n), '><', -1) AS TagName 
+         FROM 
+            Posts CROSS JOIN 
+            (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5) n
+         WHERE 
+            CHAR_LENGTH(Tags) - CHAR_LENGTH(REPLACE(Tags, '><', '')) >= n.n - 1) t ON p.Id = t.Id 
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.Author,
+    fp.CommentCount,
+    fp.UpVotes,
+    fp.DownVotes,
+    pts.Tags,
+    pts.RelatedPostCount
+FROM 
+    FilteredPosts fp
+JOIN 
+    PostTagStats pts ON fp.PostId = pts.PostId
+ORDER BY 
+    fp.CreationDate DESC, fp.Score DESC;

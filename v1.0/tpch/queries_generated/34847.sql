@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+RegionStats AS (
+    SELECT r.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY r.r_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    ORDER BY total_spent DESC
+    LIMIT 10
+)
+
+SELECT 
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    AVG(l.l_quantity) AS avg_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    rs.nation_count,
+    tc.c_name AS top_customer,
+    CASE 
+        WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000 THEN 'High Revenue'
+        ELSE 'Low Revenue'
+    END AS revenue_status
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN RegionStats rs ON rs.nation_count > 0
+JOIN TopCustomers tc ON tc.total_spent > 5000
+WHERE 
+    l.l_shipdate >= DATE '2023-01-01' 
+    AND l.l_shipdate < DATE '2023-12-31'
+    AND p.p_size BETWEEN 10 AND 20
+GROUP BY p.p_name, rs.nation_count, tc.c_name
+HAVING revenue_status = 'High Revenue'
+ORDER BY revenue DESC;

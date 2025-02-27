@@ -1,0 +1,110 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.id DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+CastInfoAggregated AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS unique_cast_count,
+        STRING_AGG(DISTINCT cn.name, ', ') AS cast_names
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name cn ON ci.person_id = cn.person_id
+    GROUP BY 
+        ci.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT co.name, '; ') AS company_names,
+        COUNT(DISTINCT co.country_code) AS country_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+FinalMoviesBenchmark AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ca.unique_cast_count, 0) AS total_unique_cast,
+        COALESCE(ca.cast_names, 'No Cast') AS cast_details,
+        COALESCE(cd.company_names, 'No Companies') AS production_companies,
+        COALESCE(cd.country_count, 0) AS production_country_count,
+        COALESCE(mk.keyword_count, 0) AS total_keywords,
+        CASE 
+            WHEN mk.keyword_count > 0 THEN 'Keyword Present'
+            ELSE 'No Keywords'
+        END AS keyword_status
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CastInfoAggregated ca ON rm.movie_id = ca.movie_id
+    LEFT JOIN 
+        CompanyDetails cd ON rm.movie_id = cd.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_id = mk.movie_id
+    WHERE 
+        rm.year_rank <= 5  -- get top 5 movies per year
+),
+BizarreComparisons AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        total_unique_cast,
+        ARRAY_LENGTH(STRING_TO_ARRAY(cast_details, ', '), 1) AS cast_name_count,
+        production_country_count,
+        CASE 
+            WHEN total_unique_cast BETWEEN 1 AND 5 THEN 'Small Cast'
+            WHEN total_unique_cast BETWEEN 6 AND 20 THEN 'Moderate Cast'
+            ELSE 'Large Cast'
+        END AS cast_size,
+        (SELECT 
+            AVG(total_keywords) 
+         FROM 
+            FinalMoviesBenchmark 
+         WHERE 
+            production_year = f.production_year) AS average_keywords_per_year
+    FROM 
+        FinalMoviesBenchmark f
+)
+SELECT 
+    movie_id,
+    title,
+    production_year,
+    total_unique_cast,
+    cast_details,
+    production_country_count,
+    cast_size,
+    average_keywords_per_year,
+    CASE 
+        WHEN cast_name_count IS NULL THEN 'Zebra'  -- "Bizarre" condition if count is NULL
+        ELSE 'Analysis' 
+    END AS analysis_status
+FROM 
+    BizarreComparisons
+WHERE 
+    total_unique_cast > 0 
+ORDER BY 
+    production_year DESC, total_unique_cast DESC;

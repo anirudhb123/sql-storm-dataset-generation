@@ -1,0 +1,88 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        Title, 
+        ParentId,
+        CreationDate, 
+        OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.Title,
+        p.ParentId,
+        p.CreationDate, 
+        p.OwnerUserId,
+        ph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy ph ON p.ParentId = ph.Id
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT p.Id) AS PostsCount,
+        COUNT(DISTINCT c.Id) AS CommentsCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    LEFT JOIN 
+        Comments c ON c.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        ph.Level,
+        COALESCE(ph.Title, 'N/A') AS ParentTitle,
+        COALESCE(u.DisplayName, 'Deleted User') AS OwnerName,
+        ur.UpVotes,
+        ur.DownVotes,
+        ur.PostsCount,
+        ur.CommentsCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON ph.Id = p.ParentId
+    LEFT JOIN 
+        UserActivity ur ON ur.UserId = p.OwnerUserId
+)
+
+SELECT 
+    ps.Id AS PostId,
+    ps.Title AS PostTitle,
+    ps.CreationDate,
+    ps.Level,
+    ps.ParentTitle,
+    ps.OwnerName,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.PostsCount,
+    ps.CommentsCount,
+    CASE 
+        WHEN ps.Level = 0 THEN 'Top-Level Post'
+        ELSE 'Child Post'
+    END AS PostType,
+    (SELECT COUNT(*) FROM Votes v WHERE v.PostId = ps.Id AND v.VoteTypeId = 10) AS DeletionVotes
+FROM 
+    PostStats ps
+ORDER BY 
+    ps.Level, ps.CreationDate DESC
+LIMIT 100;

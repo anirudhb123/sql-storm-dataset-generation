@@ -1,0 +1,42 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswer,
+        COUNT(c.Id) AS CommentCount,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RankPerUser
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        LATERAL string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tagName ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = tagName
+    WHERE 
+        p.PostTypeId = 1 -- Only Questions
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.AcceptedAnswerId, p.OwnerUserId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    COUNT(rp.PostId) AS TotalPosts,
+    COALESCE(SUM(CASE WHEN rp.AcceptedAnswer > 0 THEN 1 ELSE 0 END), 0) AS AcceptedAnswers,
+    STRING_AGG(DISTINCT unnest(rp.Tags), ', ') AS UniqueTags,
+    MAX(rp.RankPerUser) AS HighestRank
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(rp.PostId) > 5 -- Filter for users with more than 5 posts
+ORDER BY 
+    u.Reputation DESC, TotalPosts DESC;

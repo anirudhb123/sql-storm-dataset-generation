@@ -1,0 +1,49 @@
+
+WITH RankedReturns AS (
+    SELECT
+        wr.returning_customer_sk,
+        wr.returned_date_sk,
+        wr.return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY wr.returning_customer_sk ORDER BY wr.returned_date_sk DESC) AS rn
+    FROM web_returns wr
+    WHERE wr.return_quantity IS NOT NULL AND wr.return_quantity > 0
+),
+CustomerInfo AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+)
+SELECT
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate,
+    MAX(rr.return_quantity) AS max_return_quantity,
+    COUNT(rr.returning_customer_sk) AS total_returns,
+    SUM(CASE WHEN rr.return_quantity > 5 THEN rr.return_quantity ELSE 0 END) AS high_return_count
+FROM CustomerInfo ci
+LEFT JOIN RankedReturns rr ON ci.c_customer_sk = rr.returning_customer_sk AND rr.rn <= 5
+GROUP BY
+    ci.c_customer_sk,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_purchase_estimate
+HAVING 
+    (COUNT(rr.returning_customer_sk) > 0 AND MAX(rr.return_quantity) IS NOT NULL)
+    OR (MAX(rr.return_quantity) IS NULL AND ci.cd_purchase_estimate > 2000)
+ORDER BY 
+    total_returns DESC, 
+    ci.c_last_name NULLS FIRST, 
+    ci.c_first_name;

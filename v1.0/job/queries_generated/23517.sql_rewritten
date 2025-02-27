@@ -1,0 +1,73 @@
+WITH recursive movie_hierarchy AS (
+    SELECT 
+        mt1.id AS movie_id,
+        mt1.title AS movie_title,
+        mt1.production_year,
+        mt1.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt1
+    WHERE 
+        mt1.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mt2.id AS movie_id,
+        mt2.title AS movie_title,
+        mt2.production_year,
+        mt2.kind_id,
+        mh.level + 1
+    FROM 
+        aka_title mt2
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt2.id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+    WHERE 
+        mh.level < 5
+)
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COUNT(DISTINCT c.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS all_aka_names,
+    MAX(CASE WHEN ak.name LIKE '%Star%' THEN ak.name ELSE NULL END) AS star_name,
+    SUM(CASE WHEN ak.name IS NULL THEN 1 ELSE 0 END) AS null_name_count,
+    RANK() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_count,
+    COUNT(DISTINCT k.keyword) FILTER (WHERE k.keyword IS NOT NULL) AS keyword_count,
+    COALESCE(min(ci.note), 'No note available') AS first_cast_note
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON k.id = mk.keyword_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = mh.movie_id
+LEFT JOIN 
+    person_info pi ON pi.person_id = c.person_id
+LEFT JOIN 
+    info_type it ON it.id = pi.info_type_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+WHERE 
+    mh.production_year BETWEEN 1990 AND 2020 
+    AND (mh.kind_id IS NOT NULL OR mh.kind_id <> 0)
+GROUP BY 
+    mh.movie_id, mh.movie_title, mh.production_year
+HAVING 
+    COUNT(DISTINCT c.person_id) > 5
+ORDER BY 
+    mh.production_year DESC, cast_count DESC
+LIMIT 10;

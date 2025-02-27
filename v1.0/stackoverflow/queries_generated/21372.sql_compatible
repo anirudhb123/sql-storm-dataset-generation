@@ -1,0 +1,80 @@
+
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        SUM(COALESCE(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END, 0)) AS AnswerCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    WHERE 
+        U.Reputation > 1000 AND 
+        U.CreationDate < CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        COUNT(C.Id) AS CommentCount,
+        ROW_NUMBER() OVER(PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '6 months'
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount, P.Score, P.AcceptedAnswerId
+),
+UserPostSummary AS (
+    SELECT 
+        UA.UserId,
+        UA.DisplayName,
+        UA.Reputation,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.CommentCount,
+        COALESCE(P.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        CASE 
+            WHEN P.Score IS NULL THEN 'undefined'
+            WHEN P.Score > 0 THEN 'positive'
+            ELSE 'negative'
+        END AS ScoreCategory
+    FROM 
+        UserActivity UA
+    JOIN 
+        PostMetrics P ON UA.UserId = P.OwnerUserId
+    WHERE 
+        UA.PostCount > 5
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    SUM(UP.PostCount) AS TotalPosts,
+    SUM(UP.CommentCount) AS TotalComments,
+    STRING_AGG(UP.Title, ', ') AS RecentPostTitles,
+    MAX(CASE WHEN UP.ScoreCategory = 'positive' THEN 1 ELSE 0 END) AS HasPositiveScore,
+    COUNT(DISTINCT UP.AcceptedAnswerId) AS TotalAcceptedAnswers
+FROM 
+    UserPostSummary UP
+JOIN 
+    Users U ON UP.UserId = U.Id
+GROUP BY 
+    U.DisplayName, U.Reputation
+HAVING 
+    SUM(UP.CommentCount) > 10 OR COUNT(DISTINCT UP.Title) > 3
+ORDER BY 
+    U.Reputation DESC;

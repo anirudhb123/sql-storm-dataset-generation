@@ -1,0 +1,71 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.id AS actor_id, 
+        a.person_id,
+        a.name,
+        0 AS level
+    FROM 
+        aka_name a
+    WHERE 
+        a.name LIKE '%Smith%' -- starting with actors containing 'Smith'
+
+    UNION ALL
+
+    SELECT 
+        a.id AS actor_id, 
+        a.person_id,
+        a.name,
+        ah.level + 1
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        complete_cast cc ON c.movie_id = cc.movie_id
+    JOIN 
+        ActorHierarchy ah ON c.movie_id = cc.movie_id
+    WHERE 
+        ah.level < 3 -- limit to 3 levels deep
+)
+
+SELECT 
+    ah.actor_id,
+    ah.name,
+    t.title,
+    CASE 
+        WHEN ac.nr_order IS NULL THEN 'No Role'
+        ELSE rt.role
+    END AS role_description,
+    COALESCE(m.production_year, 'Unknown') AS production_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    AVG(CASE 
+            WHEN mi.info IS NULL THEN 0 
+            ELSE LENGTH(mi.info) 
+        END) AS avg_info_length
+FROM 
+    ActorHierarchy ah
+LEFT JOIN 
+    cast_info c ON ah.person_id = c.person_id
+LEFT JOIN 
+    complete_cast cc ON c.movie_id = cc.movie_id
+LEFT JOIN 
+    title t ON cc.movie_id = t.id
+LEFT JOIN 
+    role_type rt ON c.role_id = rt.id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis' LIMIT 1)
+LEFT JOIN 
+    movie_info_idx mii ON mii.movie_id = t.id
+LEFT JOIN 
+    movie_info m ON t.id = m.movie_id AND m.info_type_id IN (SELECT id FROM info_type WHERE info IN ('Box Office', 'Budget')) 
+GROUP BY 
+    ah.actor_id, ah.name, t.title, ac.nr_order, rt.role, m.production_year
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 1 
+ORDER BY 
+    production_year DESC, 
+    keyword_count DESC;

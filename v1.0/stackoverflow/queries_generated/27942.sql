@@ -1,0 +1,53 @@
+WITH TagStats AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore,
+        ARRAY_AGG(DISTINCT Users.DisplayName) AS ActiveUsers
+    FROM
+        Tags
+    JOIN
+        Posts ON Posts.Tags LIKE CONCAT('%<', Tags.TagName, '>%')
+    JOIN
+        Users ON Posts.OwnerUserId = Users.Id
+    WHERE
+        Posts.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY
+        Tags.TagName
+),
+HighScoreTags AS (
+    SELECT
+        TagStats.TagName,
+        TagStats.PostCount,
+        TagStats.TotalViews,
+        TagStats.AverageScore,
+        TagStats.ActiveUsers,
+        RANK() OVER (ORDER BY TagStats.AverageScore DESC) AS ScoreRank
+    FROM
+        TagStats
+    WHERE
+        TagStats.PostCount > 5 AND TagStats.AverageScore > 10
+)
+SELECT
+    HT.TagName,
+    HT.PostCount,
+    HT.TotalViews,
+    HT.AverageScore,
+    HT.ActiveUsers,
+    PH.Comment AS LatestComment,
+    PH.CreationDate AS LatestActivity,
+    (SELECT COUNT(*) FROM Comments WHERE PostId IN (SELECT Id FROM Posts WHERE Tags LIKE CONCAT('%<', HT.TagName, '>%'))) AS TotalComments
+FROM
+    HighScoreTags HT
+LEFT JOIN
+    PostHistory PH ON HT.TagName = (
+        SELECT Tags.TagName 
+        FROM Posts 
+        WHERE Posts.Id = PH.PostId 
+        AND Posts.Tags LIKE CONCAT('%<', HT.TagName, '>%')
+        LIMIT 1
+    )
+ORDER BY
+    HT.AverageScore DESC
+LIMIT 10;

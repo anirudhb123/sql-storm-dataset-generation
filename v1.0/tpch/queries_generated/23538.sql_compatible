@@ -1,0 +1,59 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS acct_rank,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS supply_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+NationRank AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_regionkey,
+        DENSE_RANK() OVER (ORDER BY COUNT(DISTINCT s.s_suppkey) DESC) AS nation_rank
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name, n.n_regionkey
+),
+FinalStats AS (
+    SELECT 
+        cs.c_name,
+        cs.total_spent,
+        cs.order_count,
+        ps.p_name,
+        ps.ps_supplycost,
+        nr.nation_rank,
+        CASE 
+            WHEN cs.acct_rank = 1 THEN 'Top' 
+            WHEN cs.acct_rank BETWEEN 2 AND 5 THEN 'Mid'
+            ELSE 'Low' 
+        END AS acct_category
+    FROM CustomerStats cs
+    INNER JOIN PartSupplier ps ON ps.supply_rank <= 5 
+    LEFT JOIN NationRank nr ON cs.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = nr.n_regionkey)
+    WHERE cs.order_count > 0
+)
+SELECT 
+    fs.*,
+    COALESCE(NULLIF(fs.order_count, 0), 1) AS safe_order_count,
+    CONCAT(fs.c_name, ' has spent a total of ', ROUND(fs.total_spent, 2), ' USD in ', fs.acct_category, ' category.') AS summary
+FROM FinalStats fs
+WHERE fs.nation_rank IS NOT NULL
+ORDER BY fs.total_spent DESC, fs.c_name;

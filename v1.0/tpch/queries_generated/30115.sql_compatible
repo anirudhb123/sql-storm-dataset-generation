@@ -1,0 +1,47 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_suppkey IN (SELECT DISTINCT ps_suppkey FROM partsupp WHERE ps_availqty > 100)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_custkey) AS customer_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1998-10-01' - INTERVAL '1 year'
+    GROUP BY o.o_orderkey
+),
+part_supplier_info AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(o_revenue.revenue) AS avg_revenue_per_order,
+    BOOL_OR(sh.level < 2) AS has_multiple_levels,
+    STRING_AGG(DISTINCT CONCAT(p.p_name, ' (Available: ', psi.total_available, ')'), ', ') AS part_details
+FROM customer c
+JOIN nation ns ON c.c_nationkey = ns.n_nationkey
+JOIN order_summary o_revenue ON o_revenue.customer_count = c.c_custkey
+LEFT JOIN supplier_hierarchy sh ON c.c_nationkey = sh.s_nationkey
+JOIN part_supplier_info psi ON psi.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sh.s_suppkey)
+GROUP BY ns.n_name
+HAVING AVG(o_revenue.revenue) > 10000;

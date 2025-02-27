@@ -1,0 +1,60 @@
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rn
+    FROM part p
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM partsupp ps
+        WHERE ps.ps_partkey = p.p_partkey AND ps.ps_availqty < 100
+    )
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           DENSE_RANK() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2)
+      AND o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+SupplierInfo AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) FROM supplier s2 
+        WHERE s2.s_nationkey = n.n_nationkey
+    )
+),
+LineItemStats AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS returns_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND cast('1998-10-01' as date)
+    GROUP BY l.l_orderkey
+)
+SELECT
+    r.p_partkey,
+    r.p_name,
+    r.p_brand,
+    o.o_orderkey,
+    o.o_totalprice,
+    s.s_name AS supplier_name,
+    ss.nation_name,
+    l.total_revenue,
+    l.returns_count
+FROM RankedParts r
+LEFT JOIN HighValueOrders o ON r.rn <= 5
+LEFT JOIN SupplierInfo s ON r.p_partkey IN (
+    SELECT ps.ps_partkey
+    FROM partsupp ps
+    WHERE ps.ps_suppkey = s.s_suppkey
+)
+LEFT JOIN LineItemStats l ON o.o_orderkey = l.l_orderkey
+JOIN region ss ON ss.r_regionkey = (
+    SELECT n.n_regionkey 
+    FROM nation n 
+    WHERE n.n_nationkey = s.s_nationkey
+)
+WHERE r.p_retailprice > 100
+  AND (l.returns_count IS NULL OR l.returns_count < 10)
+ORDER BY o.o_totalprice DESC NULLS LAST;

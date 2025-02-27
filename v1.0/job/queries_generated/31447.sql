@@ -1,0 +1,66 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1 -- Assuming kind_id 1 represents movies
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        mh.level < 5 -- Limit levels to avoid infinite recursion
+),
+
+role_stats AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    mh.title AS movie_title,
+    mh.level,
+    COALESCE(rs.role_count, 0) AS total_roles,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    role_stats rs ON mh.movie_id = rs.movie_id
+LEFT JOIN 
+    movie_keywords mk ON mh.movie_id = mk.movie_id
+WHERE 
+    mh.title IS NOT NULL
+ORDER BY 
+    mh.level, mh.title; -- Order by the hierarchy level and title for clarity

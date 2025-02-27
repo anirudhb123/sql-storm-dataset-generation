@@ -1,0 +1,47 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalAnswers,
+        TotalQuestions,
+        TotalUpVotes,
+        TotalDownVotes,
+        ROW_NUMBER() OVER (ORDER BY TotalPosts DESC, Reputation DESC) AS UserRank
+    FROM UserActivity
+)
+SELECT 
+    au.DisplayName,
+    au.Reputation,
+    au.TotalPosts,
+    au.TotalComments,
+    au.TotalBadges,
+    au.TotalAnswers,
+    au.TotalQuestions,
+    au.TotalUpVotes,
+    au.TotalDownVotes
+FROM ActiveUsers au
+WHERE au.UserRank <= 10
+ORDER BY au.TotalPosts DESC, au.Reputation DESC;

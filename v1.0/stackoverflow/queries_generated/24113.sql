@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        RANK() OVER (ORDER BY COALESCE(SUM(V.BountyAmount), 0) DESC) AS BountyRank
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Questions only
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+
+ClosedPostStats AS (
+    SELECT 
+        P.Id AS PostID,
+        P.Title,
+        MAX(CASE WHEN PH.PostHistoryTypeId = 10 THEN PH.CreationDate END) AS ClosedOn,
+        COUNT(DISTINCT V.UserId) AS CloseVoteCount,
+        COUNT(DISTINCT PH.UserId) FILTER(WHERE PH.PostHistoryTypeId = 12) AS DeletedCount
+    FROM Posts P
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId AND V.VoteTypeId = 6 -- close votes only
+    WHERE P.PostTypeId = 1  -- only questions
+    GROUP BY P.Id, P.Title
+),
+
+TopUsers AS (
+    SELECT 
+        US.UserId,
+        US.DisplayName,
+        US.TotalBounty,
+        US.QuestionCount,
+        US.CommentCount,
+        RANK() OVER (ORDER BY US.TotalBounty DESC) AS UserBountyRank
+    FROM UserStats US
+    WHERE US.QuestionCount > 10
+),
+
+FinalReport AS (
+    SELECT 
+        U.DisplayName AS UserName,
+        COALESCE(CPS.ClosedOn, 'No closures') AS LastClosed,
+        CPS.CloseVoteCount,
+        CPS.DeletedCount,
+        TS.TotalBounty,
+        TS.CommentCount,
+        TS.QuestionCount,
+        TS.UserBountyRank
+    FROM ClosedPostStats CPS
+    FULL OUTER JOIN TopUsers TS ON CPS.PostID IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = TS.UserId)
+    FULL OUTER JOIN Users U ON TS.UserId = U.Id
+    WHERE U.Reputation > 1000
+)
+
+SELECT 
+    UserName,
+    LastClosed,
+    CloseVoteCount,
+    DeletedCount,
+    TotalBounty,
+    QuestionCount,
+    CommentCount,
+    UserBountyRank,
+    CASE 
+        WHEN UserBountyRank IS NOT NULL AND UserBountyRank <= 5 THEN 'Top contributor'
+        ELSE 'Contributor'
+    END AS ContributionLevel
+FROM FinalReport
+ORDER BY UserBountyRank IS NULL, UserBountyRank;
+

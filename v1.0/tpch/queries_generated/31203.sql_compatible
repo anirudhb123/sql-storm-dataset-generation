@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) AS total_revenue,
+    AVG(s.s_acctbal) AS avg_supplier_balance,
+    ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    l.l_shipdate >= DATE '1997-01-01' 
+    AND (l.l_returnflag IS NULL OR l.l_returnflag = 'N')
+GROUP BY 
+    p.p_partkey, p.p_name, r.r_regionkey
+HAVING 
+    SUM(COALESCE(l.l_extendedprice, 0) * (1 - l.l_discount)) > (SELECT AVG(total_revenue) FROM (
+                          SELECT SUM(COALESCE(l_extendedprice, 0) * (1 - l_discount)) AS total_revenue
+                          FROM lineitem
+                          GROUP BY l_orderkey
+                      ) AS avg_revenue)
+ORDER BY 
+    revenue_rank;

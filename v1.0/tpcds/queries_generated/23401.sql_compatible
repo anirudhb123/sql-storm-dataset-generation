@@ -1,0 +1,88 @@
+
+WITH ranked_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_birth_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd
+    ON 
+        c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        c.c_birth_year IS NOT NULL
+        AND cd.cd_purchase_estimate >= (
+            SELECT 
+                AVG(cd1.cd_purchase_estimate) 
+            FROM 
+                customer_demographics cd1 
+            WHERE 
+                cd1.cd_gender = cd.cd_gender
+        )
+),
+warehouse_inventory AS (
+    SELECT 
+        i.i_item_id,
+        SUM(i.i_current_price * inv.inv_quantity_on_hand) AS total_stock_value
+    FROM 
+        inventory inv
+    JOIN 
+        item i
+    ON 
+        inv.inv_item_sk = i.i_item_sk
+    GROUP BY 
+        i.i_item_id
+),
+customer_average_returns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        AVG(sr.sr_return_qty) AS avg_return_qty,
+        CASE 
+            WHEN AVG(sr.sr_return_qty) IS NULL THEN 'NULL'
+            ELSE 
+                CASE
+                    WHEN AVG(sr.sr_return_qty) > 5 THEN 'High Returner'
+                    WHEN AVG(sr.sr_return_qty) BETWEEN 1 AND 5 THEN 'Moderate Returner'
+                    ELSE 'Low Returner'
+                END
+        END AS returner_category
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+)
+SELECT 
+    rc.c_customer_id,
+    rc.c_birth_year,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    wi.total_stock_value,
+    car.avg_return_qty,
+    car.returner_category
+FROM 
+    ranked_customers rc
+LEFT JOIN 
+    warehouse_inventory wi 
+ON 
+    rc.c_customer_id = (
+        SELECT 
+            ws_bill_customer_sk 
+        FROM 
+            web_sales 
+        WHERE 
+            ws_bill_customer_sk = rc.c_customer_id
+        FETCH FIRST 1 ROWS ONLY
+    )
+LEFT JOIN 
+    customer_average_returns car 
+ON 
+    car.sr_customer_sk = rc.c_customer_id
+WHERE 
+    (rc.rank_estimate <= 10 AND wi.total_stock_value > 10000)
+    OR 
+    (rc.cd_marital_status = 'M' AND car.returner_category = 'High Returner')
+ORDER BY 
+    rc.cd_gender, rc.c_birth_year DESC, wi.total_stock_value DESC;

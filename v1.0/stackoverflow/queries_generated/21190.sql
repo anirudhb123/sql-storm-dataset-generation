@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        ARRAY(SELECT t.TagName FROM Tags t WHERE t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])) AS AssociatedTags
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+),
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT
+    up.UserId,
+    up.DisplayName,
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    up.VoteCount,
+    up.UpVotes,
+    up.DownVotes,
+    up.GoldBadges,
+    CASE 
+        WHEN rp.Rank <= 5 THEN 'Top Post'
+        WHEN rp.Score IS NULL THEN 'No Score'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount
+FROM 
+    UserEngagement up
+JOIN 
+    RankedPosts rp ON rp.PostId = (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        WHERE 
+            p.OwnerUserId = up.UserId 
+        ORDER BY 
+            p.Score DESC 
+        LIMIT 1
+    )
+WHERE 
+    up.VoteCount > 10
+ORDER BY 
+    up.GoldBadges DESC, rp.Score DESC
+LIMIT 50;

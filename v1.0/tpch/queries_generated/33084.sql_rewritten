@@ -1,0 +1,54 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+RecentOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate
+    FROM orders o
+    WHERE o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+),
+TopLineItems AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rn
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    p.p_name,
+    SUM(ps.ps_availqty) AS total_available,
+    MAX(s.s_name) AS supplier_name,
+    AVG(c.c_acctbal) FILTER (WHERE c.c_acctbal IS NOT NULL) AS avg_customer_balance,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    (SELECT COUNT(*) FROM RecentOrders) AS total_recent_orders,
+    CASE WHEN SUM(l.l_quantity) IS NULL THEN 'No Orders' ELSE 'Orders Exist' END AS order_status,
+    COALESCE(n.n_name, 'Unknown Nation') AS nation_name
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    customer c ON c.c_nationkey = s.s_nationkey
+LEFT JOIN 
+    orders o ON o.o_custkey = c.c_custkey
+LEFT JOIN 
+    lineitem l ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 50.00 AND 
+    EXISTS (SELECT 1 FROM SupplierHierarchy sh WHERE sh.s_suppkey = s.s_suppkey)
+GROUP BY 
+    p.p_name, n.n_name
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 0 OR 
+    SUM(ps.ps_availqty) IS NULL
+ORDER BY 
+    total_available DESC;

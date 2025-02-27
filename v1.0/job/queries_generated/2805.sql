@@ -1,0 +1,53 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        AVG(COALESCE(mi.year, 0)) AS average_year,
+        ROW_NUMBER() OVER (PARTITION BY at.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info c ON at.movie_id = c.movie_id
+    LEFT JOIN 
+        movie_info mi ON at.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'year')
+    GROUP BY 
+        at.id, at.title
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        actor_count, 
+        average_year 
+    FROM 
+        RankedMovies 
+    WHERE 
+        actor_count > 3 AND average_year > 2000
+),
+TopMovies AS (
+    SELECT 
+        f.title, 
+        f.actor_count, 
+        f.average_year,
+        k.keyword
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        movie_keyword mk ON f.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    tm.title,
+    COALESCE(tm.actor_count, 0) AS actor_count,
+    tm.average_year,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    aka_name an ON an.id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = tm.movie_id) 
+GROUP BY 
+    tm.title, tm.actor_count, tm.average_year
+ORDER BY 
+    tm.average_year DESC, tm.actor_count DESC;

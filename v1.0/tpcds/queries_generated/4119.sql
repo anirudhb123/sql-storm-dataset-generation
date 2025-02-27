@@ -1,0 +1,68 @@
+
+WITH customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_web_sales,
+        SUM(cs.cs_net_paid) AS total_catalog_sales,
+        SUM(ss.ss_net_paid) AS total_store_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_orders,
+        COUNT(DISTINCT cs.cs_order_number) AS total_catalog_orders,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_store_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    WHERE 
+        c.c_birth_year >= 1980
+    GROUP BY 
+        c.c_customer_id
+),
+ranked_sales AS (
+    SELECT 
+        c_customer_id,
+        total_web_sales,
+        total_catalog_sales,
+        total_store_sales,
+        RANK() OVER (ORDER BY total_web_sales DESC) AS web_sales_rank,
+        RANK() OVER (ORDER BY total_catalog_sales DESC) AS catalog_sales_rank,
+        RANK() OVER (ORDER BY total_store_sales DESC) AS store_sales_rank
+    FROM 
+        customer_sales
+),
+customer_details AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cs.*
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer_sales cs ON cd.cd_demo_sk = cs.c_customer_id
+)
+SELECT 
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COALESCE(cs.total_web_sales, 0) AS web_sales,
+    COALESCE(cs.total_catalog_sales, 0) AS catalog_sales,
+    COALESCE(cs.total_store_sales, 0) AS store_sales,
+    CASE 
+        WHEN cs.total_web_sales > cs.total_catalog_sales AND cs.total_web_sales > cs.total_store_sales THEN 'Web Dominant'
+        WHEN cs.total_catalog_sales > cs.total_web_sales AND cs.total_catalog_sales > cs.total_store_sales THEN 'Catalog Dominant'
+        WHEN cs.total_store_sales > cs.total_web_sales AND cs.total_store_sales > cs.total_catalog_sales THEN 'Store Dominant'
+        ELSE 'Equal Distribution'
+    END AS sales_dominance,
+    RANK() OVER (ORDER BY total_web_sales DESC) AS overall_sales_rank
+FROM 
+    customer_details cd
+LEFT JOIN 
+    ranked_sales cs ON cd.c_customer_id = cs.c_customer_id
+WHERE 
+    (cs.total_web_sales IS NOT NULL OR cs.total_catalog_sales IS NOT NULL OR cs.total_store_sales IS NOT NULL)
+ORDER BY 
+    overall_sales_rank
+LIMIT 100;

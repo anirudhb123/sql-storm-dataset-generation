@@ -1,0 +1,43 @@
+WITH RecursiveSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as Rank
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_container,
+           CASE 
+               WHEN p.p_retailprice IS NULL THEN 0
+               ELSE p.p_retailprice
+           END AS AdjustedPrice,
+           p.p_comment
+    FROM part p
+    WHERE p.p_size BETWEEN 10 AND 50
+      AND p.p_type IN (SELECT DISTINCT p_type FROM part WHERE p_size IS NOT NULL)
+      AND (p.p_comment IS NOT NULL OR p.p_comment LIKE '%special%')
+),
+OrderAnalytics AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           LAG(o.o_totalprice) OVER (ORDER BY o.o_orderdate) AS PrevTotalPrice,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS TotalLineItemPrice
+    FROM orders o
+    JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+      AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = o.o_custkey AND c.c_acctbal IS NOT NULL)
+)
+SELECT ns.n_name, COUNT(DISTINCT ns.n_nationkey) AS TotalNations,
+       SUM(f.AdjustedPrice) AS TotalAdjustedPrice,
+       AVG(oa.TotalLineItemPrice) AS AverageLineItemPrice,
+       MAX(oa.PrevTotalPrice) AS MaxPrevTotalPrice,
+       CASE 
+           WHEN COUNT(DISTINCT rs.s_suppkey) > 5 THEN 'Diverse Supplier Base' 
+           ELSE 'Limited Supplier Base'
+       END AS SupplierDiversity
+FROM nation ns
+LEFT JOIN RecursiveSuppliers rs ON ns.n_nationkey = rs.s_nationkey
+JOIN FilteredParts f ON f.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 0)
+JOIN OrderAnalytics oa ON oa.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_returnflag = 'R')
+WHERE ns.n_comment IS NOT NULL
+GROUP BY ns.n_name
+HAVING SUM(f.AdjustedPrice) > 10000
+ORDER BY TotalAdjustedPrice DESC, TotalNations ASC;

@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p_type ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_name LIKE '%widget%'
+),
+TopSuppliers AS (
+    SELECT 
+        p.p_type,
+        ARRAY_AGG(s.s_name ORDER BY s.s_acctbal DESC) AS top_supplier_names,
+        ARRAY_AGG(s.s_acctbal ORDER BY s.s_acctbal DESC) AS top_supplier_balances
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        part p ON s.s_suppkey = p.p_partkey
+    WHERE 
+        s.rn <= 5
+    GROUP BY 
+        p.p_type
+)
+SELECT 
+    p.p_type,
+    CONCAT('Top Suppliers: ', STRING_AGG(s.top_supplier_names, ', ')) AS suppliers,
+    CONCAT('Top Balances: ', STRING_AGG(s.top_supplier_balances::TEXT, ', ')) AS balances
+FROM 
+    part p
+JOIN 
+    TopSuppliers s ON p.p_type = s.p_type
+WHERE 
+    p.p_size > 10 
+GROUP BY 
+    p.p_type
+ORDER BY 
+    p.p_type;

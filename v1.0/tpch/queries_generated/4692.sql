@@ -1,0 +1,42 @@
+WITH SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COALESCE(ss.total_available_qty, 0) AS total_available_qty,
+           COALESCE(ss.avg_supply_cost, 0) AS avg_supply_cost,
+           RANK() OVER (ORDER BY COALESCE(ss.total_available_qty, 0) DESC) AS supplier_rank
+    FROM supplier s
+    LEFT JOIN SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate
+),
+HighValueOrders AS (
+    SELECT od.o_orderkey, od.o_totalprice, od.total_lineitem_revenue
+    FROM OrderDetails od
+    WHERE od.total_lineitem_revenue > 10000
+)
+SELECT ts.s_suppkey, ts.s_name, ts.total_available_qty, ts.avg_supply_cost,
+       hvo.o_orderkey, hvo.o_totalprice, hvo.total_lineitem_revenue
+FROM TopSuppliers ts
+FULL OUTER JOIN HighValueOrders hvo ON ts.s_suppkey = (
+    SELECT ps.ps_suppkey 
+    FROM partsupp ps 
+    WHERE ps.ps_partkey IN (
+        SELECT p.p_partkey 
+        FROM part p 
+        WHERE p.p_retialprice > 200
+    ) 
+    LIMIT 1
+)
+WHERE ts.supplier_rank <= 5 OR hvo.total_lineitem_revenue IS NOT NULL
+ORDER BY ts.total_available_qty DESC, hvo.o_totalprice DESC;

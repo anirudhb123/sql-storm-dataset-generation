@@ -1,0 +1,58 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws_item_sk, 
+        ws_order_number, 
+        ws_net_profit, 
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_net_profit DESC) AS rank_profit,
+        SUM(ws_net_profit) OVER (PARTITION BY ws_item_sk) AS total_profit
+    FROM 
+        web_sales
+), 
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd_cd_gender,
+        cd_purchase_estimate,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        COUNT(DISTINCT CASE WHEN cr_return_quantity > 0 THEN cr_order_number END) AS positive_returns
+    FROM 
+        customer c 
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        catalog_returns cr ON c.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_purchase_estimate
+)
+SELECT 
+    ci.c_customer_sk,
+    ci.cd_gender,
+    ci.cd_purchase_estimate,
+    COALESCE(rp.ws_item_sk, 'N/A') AS item_sk,
+    COALESCE(rp.ws_order_number, -1) AS order_number,
+    ci.return_count,
+    ci.positive_returns,
+    CASE 
+        WHEN ci.return_count > 0 THEN 'Frequent Returner' 
+        ELSE 'Occasional Buyer' 
+    END AS customer_type,
+    (SELECT COUNT(*) FROM date_dim dd WHERE dd.d_year = 2023 AND dd.d_weekend = 'Y') AS weekend_days,
+    CASE 
+        WHEN ci.cd_purchase_estimate IS NULL THEN 'Unknown Estimate' 
+        ELSE 'Known Estimate' 
+    END AS estimate_status,
+    CAST(MAX(COALESCE(rp.ws_net_profit, -1.00)) AS decimal(10,2)) AS max_profit_per_item
+FROM 
+    customer_info ci
+FULL OUTER JOIN 
+    ranked_sales rp ON ci.c_customer_sk = rp.ws_item_sk
+WHERE 
+    (ci.return_count > 0 OR rp.rank_profit = 1 OR rp.ws_order_number IS NULL)
+    AND (ci.cd_purchase_estimate BETWEEN 100 AND 500 OR ci.cd_purchase_estimate IS NULL)
+GROUP BY 
+    ci.c_customer_sk, ci.cd_gender, ci.cd_purchase_estimate, rp.ws_item_sk, rp.ws_order_number
+ORDER BY 
+    MAX(COALESCE(rp.ws_net_profit, -1.00)) DESC, 
+    ci.return_count DESC NULLS LAST
+LIMIT 100 OFFSET 50;

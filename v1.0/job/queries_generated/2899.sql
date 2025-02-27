@@ -1,0 +1,62 @@
+WITH ranked_titles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.movie_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        aka_name an ON cc.subject_id = an.person_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+recent_titles AS (
+    SELECT 
+        title, 
+        production_year
+    FROM 
+        ranked_titles 
+    WHERE 
+        rank <= 5
+),
+actor_info AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    ai.name AS actor_name,
+    ai.movie_count,
+    COALESCE(SUM(mi.info_type_id), 0) AS info_count
+FROM 
+    recent_titles rt
+JOIN 
+    complete_cast cc ON rt.title = (SELECT title FROM aka_title WHERE id = cc.movie_id)
+LEFT JOIN 
+    actor_info ai ON cc.subject_id = (SELECT person_id FROM aka_name WHERE name = ai.name LIMIT 1)
+LEFT JOIN 
+    movie_info mi ON rt.production_year = mi.movie_id
+WHERE 
+    rt.production_year IS NOT NULL
+GROUP BY 
+    rt.title, rt.production_year, ai.name, ai.movie_count
+HAVING 
+    COUNT(ai.name) > 1
+ORDER BY 
+    rt.production_year DESC, ai.movie_count DESC;

@@ -1,0 +1,31 @@
+WITH SupplierNation AS (
+    SELECT s.s_suppkey, s.s_name, n.n_name AS nation_name, s.s_acctbal
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, p.p_name, ps.ps_supplycost, p.p_retailprice
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, l.l_orderkey, l.l_quantity, l.l_extendedprice, l.l_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+),
+AggregatedData AS (
+    SELECT 
+        s.nation_name,
+        pd.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        COUNT(DISTINCT o.o_orderkey) AS orders_count
+    FROM OrderDetails o
+    JOIN PartSuppliers pd ON o.l_orderkey = pd.ps_partkey
+    JOIN SupplierNation s ON pd.ps_suppkey = s.s_suppkey
+    GROUP BY s.nation_name, pd.p_name
+)
+SELECT nation_name, p_name, revenue, orders_count
+FROM AggregatedData
+WHERE revenue > 1000000
+ORDER BY revenue DESC, nation_name ASC;

@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000  -- Starting from the year 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        a.title AS movie_title,
+        a.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON ml.linked_movie_id = a.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE 
+        a.production_year >= 2000
+),
+movie_cast AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        MAX(CASE WHEN ci.role_id = 1 THEN 1 ELSE 0 END) AS has_lead_role
+    FROM 
+        complete_cast mc
+    JOIN 
+        cast_info ci ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        mc.movie_id
+),
+top_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        mc.actor_count,
+        mc.has_lead_role,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mc.actor_count DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    JOIN 
+        movie_cast mc ON mh.movie_id = mc.movie_id
+)
+SELECT 
+    tm.movie_title,
+    tm.production_year,
+    tm.actor_count,
+    CASE 
+        WHEN tm.has_lead_role = 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS has_lead_role,
+    CASE 
+        WHEN tm.rank <= 5 THEN 'Top 5' 
+        ELSE 'Below Top 5' 
+    END AS performance_category
+FROM 
+    top_movies tm
+WHERE 
+    tm.rank <= 5  -- Get only the top 5 movies per year
+ORDER BY 
+    tm.production_year, 
+    tm.actor_count DESC;

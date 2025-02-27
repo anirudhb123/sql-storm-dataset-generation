@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+        c.c_name,
+        c.c_acctbal,
+        r.r_name AS region_name
+    FROM 
+        orders o 
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        c.c_acctbal > 0 AND 
+        o.o_orderdate >= DATE '2023-01-01'
+), HighValueParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        p.p_retailprice > 50.00
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000
+), AggregateLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        COUNT(*) AS line_count,
+        AVG(l.l_extendedprice) AS avg_extended_price,
+        SUM(l.l_discount) AS total_discount,
+        SUM(CASE 
+            WHEN l.l_returnflag = 'Y' THEN l.l_quantity 
+            ELSE 0 
+         END) AS total_returned_quantity
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    r.o_orderkey,
+    r.c_name,
+    r.region_name,
+    p.p_name,
+    a.line_count,
+    a.avg_extended_price,
+    a.total_discount,
+    CASE 
+        WHEN a.total_returned_quantity IS NULL THEN 'No Returns'
+        ELSE 'Returned Items'
+    END AS return_status,
+    CASE 
+        WHEN r.order_rank <= 5 THEN 'Top Order' 
+        ELSE 'Regular Order' 
+    END AS order_status
+FROM 
+    RankedOrders r
+JOIN 
+    AggregateLineItems a ON r.o_orderkey = a.l_orderkey
+JOIN 
+    HighValueParts p ON a.l_partkey = p.ps_partkey
+LEFT JOIN 
+    supplier s ON p.ps_partkey = s.s_suppkey
+WHERE 
+    s.s_acctbal IS NULL OR s.s_acctbal > 100 OR 
+    (s.s_acctbal IS NOT NULL AND s.s_acctbal < 0)
+ORDER BY 
+    r.o_orderkey, a.line_count DESC;

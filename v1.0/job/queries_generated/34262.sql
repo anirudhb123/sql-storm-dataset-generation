@@ -1,0 +1,71 @@
+WITH RECURSIVE movie_hierarchy AS (
+    -- Base case: Select all movies with details from title
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        m.movie_id AS parent_movie_id,
+        1 AS level
+    FROM 
+        movie_link m
+    JOIN 
+        title t ON m.movie_id = t.id
+    WHERE 
+        m.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel') -- Example linkage type for sequels
+
+    UNION ALL
+    
+    -- Recursive case: Get sequels and their details
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        t.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1 AS level
+    FROM 
+        movie_link m
+    JOIN 
+        title t ON m.movie_id = t.id
+    JOIN 
+        movie_hierarchy mh ON m.linked_movie_id = mh.movie_id
+    WHERE 
+        m.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel') 
+)
+
+-- Main query to benchmark performance
+SELECT 
+    mh.movie_id, 
+    mh.title, 
+    mh.production_year, 
+    mh.level, 
+    array_agg(DISTINCT c.name) AS cast_names,
+    CASE 
+        WHEN mh.level > 1 THEN 'Yes' 
+        ELSE 'No' 
+    END AS is_sequel,
+    COUNT(DISTINCT kw.keyword) AS num_keywords,
+    AVG(COALESCE(CONVERT(numeric, mi.info), 0)) AS avg_rating
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    complete_cast cc ON mh.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    movie_info mi ON mh.movie_id = mi.movie_id 
+AND 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating') -- Assuming there's a rating info type
+WHERE 
+    mh.production_year IS NOT NULL
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, mh.level
+ORDER BY 
+    mh.level ASC, 
+    avg_rating DESC NULLS LAST
+LIMIT 100;

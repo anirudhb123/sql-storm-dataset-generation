@@ -1,0 +1,46 @@
+
+WITH ParsedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country,
+        LENGTH(TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type))) AS address_length
+    FROM 
+        customer_address
+),
+GroupedAddresses AS (
+    SELECT 
+        SUBSTRING(full_address, 1, 30) AS address_snippet,
+        COUNT(*) AS address_count,
+        AVG(address_length) AS avg_length
+    FROM 
+        ParsedAddresses
+    GROUP BY 
+        address_snippet
+),
+TopAddresses AS (
+    SELECT 
+        address_snippet,
+        address_count,
+        avg_length,
+        RANK() OVER (ORDER BY address_count DESC) AS rank
+    FROM 
+        GroupedAddresses
+)
+SELECT 
+    t.address_snippet,
+    t.address_count,
+    t.avg_length,
+    c.cd_gender,
+    c.cd_marital_status
+FROM 
+    TopAddresses t
+JOIN 
+    customer c ON c.c_current_addr_sk = (SELECT ca_address_sk FROM customer_address WHERE CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) = t.address_snippet LIMIT 1)
+WHERE 
+    t.rank <= 10
+ORDER BY 
+    t.address_count DESC;

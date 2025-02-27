@@ -1,0 +1,44 @@
+WITH TopUsers AS (
+    SELECT U.Id, U.DisplayName, U.Reputation, COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    WHERE U.Reputation > 1000
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+    HAVING COUNT(B.Id) > 5
+),
+PopularPosts AS (
+    SELECT P.Id, P.Title, P.Score, P.ViewCount, P.AnswerCount, P.CreationDate, U.DisplayName AS OwnerName
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId = 1 AND P.Score > 10
+),
+PostLinksCount AS (
+    SELECT PL.PostId, COUNT(PL.RelatedPostId) AS LinkCount
+    FROM PostLinks PL
+    GROUP BY PL.PostId
+),
+UserActivity AS (
+    SELECT U.Id AS UserId, COUNT(C.Id) AS CommentCount, SUM(V.VoteTypeId = 2) AS UpVotes, SUM(V.VoteTypeId = 3) AS DownVotes
+    FROM Users U
+    LEFT JOIN Comments C ON U.Id = C.UserId
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation AS UserReputation,
+    TU.BadgeCount AS UserBadges,
+    PP.Title AS PopularPost,
+    PP.Score AS PostScore,
+    PP.ViewCount AS PostViewCount,
+    PP.AnswerCount AS NumberOfAnswers,
+    PLC.LinkCount AS NumberOfLinks,
+    UA.CommentCount AS UserCommentCount,
+    UA.UpVotes AS UserUpVotes,
+    UA.DownVotes AS UserDownVotes
+FROM TopUsers TU
+INNER JOIN PopularPosts PP ON TU.Id = PP.OwnerUserId
+LEFT JOIN PostLinksCount PLC ON PP.Id = PLC.PostId
+LEFT JOIN UserActivity UA ON TU.Id = UA.UserId
+ORDER BY TU.Reputation DESC, PP.Score DESC
+LIMIT 50;

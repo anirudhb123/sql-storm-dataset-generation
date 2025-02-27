@@ -1,0 +1,74 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND 
+        o.o_orderdate < DATE '1997-12-31'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        RankedOrders ro
+    WHERE 
+        ro.order_rank <= 5
+),
+SupplierDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        s.s_name,
+        s.s_acctbal,
+        ps.ps_supplycost
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+OrderItemDetails AS (
+    SELECT 
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount,
+        p.p_name
+    FROM 
+        lineitem li
+    JOIN 
+        part p ON li.l_partkey = p.p_partkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.c_name,
+    SUM(oid.l_extendedprice * (1 - oid.l_discount)) AS total_revenue,
+    COUNT(DISTINCT oid.l_partkey) AS unique_parts,
+    SUM(sd.ps_supplycost) AS total_supply_cost
+FROM 
+    TopOrders to
+JOIN 
+    OrderItemDetails oid ON to.o_orderkey = oid.l_orderkey
+JOIN 
+    SupplierDetails sd ON oid.l_partkey = sd.ps_partkey
+GROUP BY 
+    to.o_orderkey, to.o_orderdate, to.c_name
+ORDER BY 
+    total_revenue DESC, to.o_orderdate DESC
+LIMIT 10;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE customer_hierarchy AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 1 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal * 1.1, ch.level + 1 
+    FROM customer c
+    JOIN customer_hierarchy ch ON c.c_nationkey = ch.c_nationkey AND ch.level < 5
+), 
+supplier_info AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_partkey) AS total_parts
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 5000
+    GROUP BY s.s_suppkey, s.s_name
+),
+order_summary AS (
+    SELECT o.o_orderkey, 
+           o.o_custkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+           COUNT(l.l_orderkey) AS line_count,
+           RANK() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+filtered_orders AS (
+    SELECT o.*, 
+           COALESCE(l.l_shipmode, 'UNKNOWN') AS l_shipmode, 
+           CASE 
+               WHEN o.o_orderstatus = 'F' THEN 'Completed'
+               WHEN o.o_orderstatus = 'O' THEN 'Open'
+               ELSE 'Pending' 
+           END AS order_status_desc
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+SELECT DISTINCT 
+    c.c_name,
+    r.r_name,
+    s.s_name,
+    o.total_value,
+    o.line_count,
+    COALESCE(customer_hierarchy.level, 'N/A') AS cust_level,
+    STRING_AGG(o.l_shipmode, ', ') AS ship_modes
+FROM customer c
+JOIN nation n ON c.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN supplier_info s ON s.total_supply_cost > 10000
+JOIN order_summary o ON o.o_custkey = c.c_custkey
+LEFT JOIN customer_hierarchy ON c.c_custkey = customer_hierarchy.c_custkey
+WHERE o.total_value IS NOT NULL 
+  AND r.r_name NOT LIKE 'S%'
+GROUP BY c.c_name, r.r_name, s.s_name, o.total_value, o.line_count, customer_hierarchy.level
+HAVING COUNT(o.o_orderkey) > 2
+ORDER BY r.r_name, o.total_value DESC;

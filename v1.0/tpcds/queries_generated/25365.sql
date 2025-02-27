@@ -1,0 +1,60 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerDetails AS (
+    SELECT 
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_marital_status,
+        cd_education_status
+    FROM 
+        customer 
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+DateInfo AS (
+    SELECT 
+        d_date,
+        d_year,
+        d_month_seq
+    FROM 
+        date_dim
+),
+SalesSummary AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk
+)
+SELECT 
+    CONCAT(cd.full_name, ' from ', ad.full_address) AS customer_info,
+    di.d_year,
+    di.d_month_seq,
+    SUM(ss.total_quantity) AS total_quantity,
+    SUM(ss.total_profit) AS total_profit
+FROM 
+    SalesSummary ss
+JOIN 
+    DateInfo di ON ss.ws_sold_date_sk = di.d_date_sk
+JOIN 
+    CustomerDetails cd ON cd.c_first_name IS NOT NULL
+JOIN 
+    AddressDetails ad ON cd.c_last_name IS NOT NULL
+GROUP BY 
+    cd.full_name, ad.full_address, di.d_year, di.d_month_seq
+ORDER BY 
+    di.d_year, di.d_month_seq, total_profit DESC
+LIMIT 100;

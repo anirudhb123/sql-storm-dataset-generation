@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY c.c_custkey
+),
+FilteredItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value,
+        COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM lineitem l
+    WHERE l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(co.total_orders, 0) AS total_orders,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    fs.l_orderkey,
+    fs.total_line_value,
+    fs.part_count,
+    rs.s_name AS highest_account_supplier
+FROM CustomerOrders co
+FULL OUTER JOIN FilteredItems fs ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_name = 'John Doe') 
+LEFT JOIN RankedSuppliers rs ON rs.rank = 1 AND fs.l_orderkey = rs.s_suppkey
+WHERE fs.part_count > 5 AND (co.total_spent > 5000 OR co.c_custkey IS NULL)
+ORDER BY total_spent DESC, total_orders ASC;

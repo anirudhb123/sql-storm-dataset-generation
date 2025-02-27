@@ -1,0 +1,75 @@
+-- Performance benchmarking query to analyze post activity and user engagement on Stack Overflow
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        u.Reputation AS OwnerReputation,
+        COUNT(c.Id) AS TotalComments,
+        COUNT(v.Id) AS TotalVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= '2023-01-01' -- Considering posts created in the current year
+    GROUP BY 
+        p.Id, u.Reputation
+),
+
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(ps.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(ps.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        PostStats ps ON p.Id = ps.PostId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    us.UserId,
+    us.DisplayName,
+    us.Reputation,
+    us.TotalBadges,
+    us.TotalPosts,
+    us.TotalViews,
+    us.TotalScore,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.OwnerReputation,
+    ps.TotalComments,
+    ps.TotalVotes
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostStats ps ON us.TotalPosts > 0 AND ps.OwnerReputation > 0
+ORDER BY 
+    us.Reputation DESC, ps.Score DESC;

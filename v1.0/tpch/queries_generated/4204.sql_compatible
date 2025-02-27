@@ -1,0 +1,58 @@
+
+WITH SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_totalprice,
+        COUNT(l.l_orderkey) AS line_item_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_totalprice
+),
+NationRegion AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    n.n_name,
+    sm.s_name,
+    COUNT(DISTINCT os.o_orderkey) AS total_orders,
+    SUM(os.revenue) AS total_revenue,
+    COALESCE(SUM(sm.total_available), 0) AS total_available_items,
+    SUM(CASE WHEN os.line_item_count > 5 THEN 1 ELSE 0 END) AS high_volume_orders
+FROM SupplierMetrics sm
+FULL OUTER JOIN partsupp ps ON sm.s_suppkey = ps.ps_suppkey
+JOIN OrderStats os ON ps.ps_partkey IN (
+    SELECT p.p_partkey 
+    FROM part p 
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice) 
+        FROM part p2 
+        WHERE p2.p_size < 10
+    )
+)
+JOIN NationRegion n ON sm.s_suppkey IN (
+    SELECT DISTINCT s.s_suppkey 
+    FROM supplier s 
+    WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = n.n_name)
+)
+WHERE n.r_name IS NOT NULL
+GROUP BY n.n_name, sm.s_name
+HAVING SUM(os.revenue) > 10000
+ORDER BY total_revenue DESC;

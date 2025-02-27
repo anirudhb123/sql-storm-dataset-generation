@@ -1,0 +1,43 @@
+
+WITH UserActivityStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        COALESCE(SUM(v.VoteCount), 0) AS TotalVotes,
+        COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+        COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        (SELECT 
+            PostId, COUNT(*) as VoteCount
+         FROM 
+            Votes
+         GROUP BY 
+            PostId) v ON p.Id = v.PostId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalComments,
+    TotalVotes,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    (TotalPosts + TotalComments + TotalVotes + GoldBadges + SilverBadges + BronzeBadges) AS TotalActivity
+FROM 
+    UserActivityStats
+ORDER BY 
+    TotalActivity DESC;

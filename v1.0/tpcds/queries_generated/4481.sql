@@ -1,0 +1,53 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_birth_year > 1980
+    GROUP BY 
+        c.c_customer_id
+), 
+SalesRank AS (
+    SELECT 
+        c.customer_id,
+        c.total_spent,
+        c.order_count,
+        RANK() OVER (ORDER BY c.total_spent DESC) AS sales_rank
+    FROM 
+        CustomerSales c
+), 
+TopCustomers AS (
+    SELECT 
+        customer_id,
+        total_spent,
+        order_count
+    FROM 
+        SalesRank
+    WHERE 
+        sales_rank <= 10
+)
+SELECT 
+    tc.customer_id,
+    tc.total_spent,
+    tc.order_count,
+    COALESCE(ca.ca_city, 'Unknown') AS city,
+    STRING_AGG(DISTINCT i.i_item_desc, ', ') AS purchased_items
+FROM 
+    TopCustomers tc
+LEFT JOIN 
+    customer_address ca ON tc.customer_id = ca.ca_address_id
+LEFT JOIN 
+    web_sales ws ON ws.ws_bill_customer_sk = tc.customer_id
+LEFT JOIN 
+    item i ON ws.ws_item_sk = i.i_item_sk
+GROUP BY 
+    tc.customer_id, tc.total_spent, tc.order_count, ca.ca_city
+ORDER BY 
+    tc.total_spent DESC
+LIMIT 10;

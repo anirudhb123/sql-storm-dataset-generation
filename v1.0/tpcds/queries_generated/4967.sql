@@ -1,0 +1,64 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        cs_item_sk, 
+        SUM(cs_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY cs_item_sk ORDER BY SUM(cs_net_profit) DESC) AS rank_profit
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+average_income AS (
+    SELECT 
+        hd_income_band_sk,
+        AVG(hd_dep_count) AS avg_dep_count
+    FROM 
+        household_demographics
+    GROUP BY 
+        hd_income_band_sk
+),
+customer_country AS (
+    SELECT 
+        ca_country, 
+        COUNT(DISTINCT c_customer_sk) AS customer_count
+    FROM 
+        customer_address
+    JOIN 
+        customer ON ca_address_sk = c_current_addr_sk
+    GROUP BY 
+        ca_country
+)
+SELECT 
+    c_first_name,
+    c_last_name,
+    ca_city,
+    ca_state,
+    AVG(a.avg_dep_count) AS avg_dependency,
+    cs.total_net_profit,
+    c.country,
+    COALESCE(cs.total_net_profit, 0) AS net_profit_or_zero
+FROM 
+    customer c
+LEFT JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    ranked_sales cs ON c.c_customer_sk = cs.cs_item_sk 
+LEFT JOIN 
+    average_income a ON c.c_current_cdemo_sk = a.hd_income_band_sk
+LEFT JOIN 
+    customer_country cc ON cc.customer_count > 100
+WHERE 
+    c.c_birth_year BETWEEN 1980 AND 1990
+GROUP BY 
+    c.c_customer_sk, 
+    c_first_name, 
+    c_last_name, 
+    ca_city, 
+    ca_state,
+    cs.total_net_profit,
+    c.country
+HAVING 
+    AVG(a.avg_dep_count) > 2
+ORDER BY 
+    net_profit_or_zero DESC;

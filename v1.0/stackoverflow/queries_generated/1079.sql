@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS OwnerPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ActiveBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Date >= NOW() - INTERVAL '6 months' AND b.Class = 1
+    GROUP BY 
+        b.UserId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(ph.Comment, ', ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 24)
+    GROUP BY 
+        ph.PostId, ph.UserId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.CreationDate,
+    rp.OwnerDisplayName,
+    rp.CommentCount,
+    ab.BadgeCount,
+    phd.LastEditDate,
+    phd.EditComments
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    ActiveBadges ab ON rp.OwnerUserId = ab.UserId
+LEFT JOIN 
+    PostHistoryDetails phd ON rp.PostId = phd.PostId
+WHERE 
+    rp.OwnerPostRank <= 5
+ORDER BY 
+    rp.ViewCount DESC, rp.CreationDate DESC
+LIMIT 10;

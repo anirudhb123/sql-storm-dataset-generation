@@ -1,0 +1,60 @@
+
+WITH customer_info AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        COUNT(DISTINCT r.r_reason_desc) AS total_return_reasons
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN (
+        SELECT sr_returning_customer_sk, r.r_reason_desc
+        FROM store_returns sr
+        JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    ) r ON c.c_customer_sk = r.sr_returning_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 2000
+    GROUP BY 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        cd.cd_marital_status, 
+        cd.cd_education_status, 
+        ca.ca_city, 
+        ca.ca_state, 
+        ca.ca_country
+),
+purchase_summary AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_quantity) AS total_quantity_purchased,
+        SUM(ws.ws_ext_sales_price) AS total_spent
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    ci.ca_city,
+    ci.ca_state,
+    ci.ca_country,
+    ps.total_quantity_purchased,
+    ps.total_spent,
+    CASE 
+        WHEN ps.total_spent IS NULL THEN 'No Purchases'
+        WHEN ps.total_spent < 100 THEN 'Low Spender'
+        WHEN ps.total_spent BETWEEN 100 AND 500 THEN 'Medium Spender'
+        ELSE 'High Spender'
+    END AS spending_category
+FROM customer_info ci
+LEFT JOIN purchase_summary ps ON ci.c_customer_id = ps.c_customer_id
+ORDER BY ci.ca_city, ci.ca_state, total_spent DESC;

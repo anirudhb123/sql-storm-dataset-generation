@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid) DESC) AS rank
+    FROM 
+        web_sales ws
+    JOIN 
+        web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE 
+        w.web_open_date_sk IS NOT NULL
+    GROUP BY 
+        ws.web_site_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+    HAVING 
+        SUM(ws.ws_net_paid) > 1000
+),
+RecentReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.return_amt) AS total_return_amount,
+        AVG(sr.return_quantity) AS avg_return_quantity
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_date_sk > (SELECT MAX(d.d_date_sk) - 30 FROM date_dim d)
+    GROUP BY 
+        sr.returned_date_sk
+)
+SELECT 
+    w.web_name,
+    COALESCE(R.total_net_paid, 0) AS total_net_paid,
+    H.total_spent AS customer_total_spent,
+    RR.total_returns,
+    RR.total_return_amount,
+    RR.avg_return_quantity
+FROM 
+    web_site w
+LEFT JOIN 
+    RankedSales R ON w.web_site_sk = R.web_site_sk AND R.rank = 1
+LEFT JOIN 
+    HighValueCustomers H ON H.c_customer_sk = (
+        SELECT c.c_customer_sk
+        FROM customer c
+        WHERE c.c_first_name = 'John' AND c.c_last_name = 'Doe'
+        LIMIT 1
+    )
+LEFT JOIN 
+    RecentReturns RR ON RR.returned_date_sk = (SELECT MAX(returned_date_sk) FROM RecentReturns)
+WHERE 
+    w.web_class = 'B2C'
+ORDER BY 
+    total_net_paid DESC;

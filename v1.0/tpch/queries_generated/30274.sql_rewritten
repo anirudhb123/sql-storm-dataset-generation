@@ -1,0 +1,48 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal
+),
+PriceDetails AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p.p_partkey, p.p_name
+),
+OrderStats AS (
+    SELECT o.o_orderkey, o.o_orderstatus,
+           DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1996-01-01'
+    AND o.o_orderdate <= '1996-12-31'
+)
+SELECT p.p_name, pd.total_cost, o.order_count,
+       sh.level,
+       CASE WHEN o.price_rank <= 10 THEN 'High Priority'
+            ELSE 'Regular'
+       END AS order_priority
+FROM PriceDetails pd
+JOIN (
+    SELECT o.o_orderkey, COUNT(DISTINCT o.o_orderkey) as order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_returnflag = 'R'
+    GROUP BY o.o_orderkey
+) o ON o.o_orderkey = pd.p_partkey
+JOIN SupplierHierarchy sh ON sh.s_nationkey = (
+    SELECT DISTINCT s.s_nationkey
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_partkey = pd.p_partkey
+)
+WHERE pd.total_cost IS NOT NULL
+ORDER BY pd.total_cost DESC, o.order_count DESC;

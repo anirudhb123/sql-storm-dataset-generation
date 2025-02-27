@@ -1,0 +1,56 @@
+
+WITH UserVoteStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownvotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId IN (8, 9) THEN V.BountyAmount ELSE 0 END), 0) AS TotalBounty
+    FROM Users U
+    LEFT JOIN Votes V ON U.Id = V.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        COUNT(CASE WHEN PH.PostId IS NOT NULL THEN 1 END) AS TotalPostHistory,
+        COALESCE(MAX(P.ActualAnswerDate), DATE '1970-01-01') AS LastAnswerDate
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN PostHistory PH ON P.Id = PH.PostId
+    GROUP BY P.Id, P.Title
+),
+RankedPosts AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.TotalComments,
+        PS.TotalPostHistory,
+        PS.LastAnswerDate,
+        ROW_NUMBER() OVER (ORDER BY PS.TotalComments DESC, PS.TotalPostHistory DESC) AS PostRank
+    FROM PostStats PS
+    WHERE PS.TotalComments > 0
+),
+TopUsers AS (
+    SELECT 
+        UVS.UserId,
+        UVS.DisplayName,
+        UVS.TotalUpvotes - UVS.TotalDownvotes AS NetVotes,
+        COUNT(DISTINCT R.PostId) AS ContributionCount
+    FROM UserVoteStats UVS
+    JOIN RankedPosts R ON UVS.UserId IN (
+        SELECT P.OwnerUserId FROM Posts P WHERE P.Id = R.PostId
+    )
+    GROUP BY UVS.UserId, UVS.DisplayName
+    HAVING COUNT(DISTINCT R.PostId) > 0
+)
+SELECT 
+    TU.DisplayName,
+    TU.ContributionCount,
+    TU.NetVotes,
+    RANK() OVER (ORDER BY TU.NetVotes DESC) AS VoteRank
+FROM TopUsers TU
+ORDER BY VoteRank, ContributionCount DESC 
+LIMIT 10;

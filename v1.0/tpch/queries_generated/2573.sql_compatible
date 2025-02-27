@@ -1,0 +1,71 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal IS NOT NULL 
+)
+SELECT 
+    nc.n_name,
+    SUM(COALESCE(lp.l_extendedprice * (1 - lp.l_discount), 0)) AS total_revenue,
+    COUNT(DISTINCT to.c_custkey) AS total_customers,
+    ROUND(AVG(sp.ps_supplycost), 2) AS avg_supply_cost,
+    COUNT(DISTINCT so.o_orderkey) AS total_orders
+FROM 
+    lineitem lp
+JOIN 
+    orders so ON lp.l_orderkey = so.o_orderkey
+JOIN 
+    customer to ON so.o_custkey = to.c_custkey
+JOIN 
+    supplier s ON lp.l_suppkey = s.s_suppkey
+JOIN 
+    partsupp ps ON ps.ps_partkey = lp.l_partkey AND ps.ps_suppkey = lp.l_suppkey
+LEFT JOIN 
+    nation nc ON s.s_nationkey = nc.n_nationkey
+LEFT JOIN 
+    RankedOrders ro ON so.o_orderkey = ro.o_orderkey
+WHERE 
+    nc.n_name IS NOT NULL
+    AND lp.l_shipdate >= DATE '1996-01-01'
+    AND ro.rn <= 10
+GROUP BY 
+    nc.n_name
+ORDER BY 
+    total_revenue DESC, total_customers ASC;

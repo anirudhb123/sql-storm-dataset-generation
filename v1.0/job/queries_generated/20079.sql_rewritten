@@ -1,0 +1,70 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(SUM(CASE WHEN c.nr_order IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    GROUP BY 
+        m.id
+),
+filtered_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.total_cast
+    FROM 
+        ranked_movies rm
+    WHERE 
+        rm.total_cast > 3 AND rm.rank <= 10
+),
+person_roles AS (
+    SELECT 
+        p.id AS person_id,
+        a.name,
+        COALESCE(cr.role_id, 9999) AS role_id,  
+        COALESCE(cr.note, 'No Note') AS role_note
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info cr ON a.person_id = cr.person_id
+),
+distinct_role_counts AS (
+    SELECT 
+        movie_id,
+        COUNT(DISTINCT role_id) AS distinct_roles
+    FROM 
+        person_roles
+    GROUP BY 
+        movie_id
+)
+SELECT 
+    fm.movie_id,
+    fm.title,
+    fm.production_year,
+    fm.total_cast,
+    drc.distinct_roles,
+    (CASE 
+        WHEN drc.distinct_roles IS NULL THEN 'No Roles' 
+        ELSE 'Has Roles' 
+    END) AS role_presence,
+    (SELECT STRING_AGG(name, ', ') 
+     FROM person_roles pr 
+     WHERE pr.role_id IN (1, 2, 3) AND pr.note IS NOT NULL AND pr.person_id IN (
+        SELECT DISTINCT person_id 
+        FROM cast_info cc WHERE cc.movie_id = fm.movie_id
+    )) AS prominent_cast
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    distinct_role_counts drc ON fm.movie_id = drc.movie_id
+WHERE 
+    drc.distinct_roles IS NOT NULL OR 
+    (fm.total_cast = 0 AND drc.distinct_roles IS NULL)  
+ORDER BY 
+    fm.production_year DESC, fm.total_cast DESC;

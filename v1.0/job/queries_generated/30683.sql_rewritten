@@ -1,0 +1,51 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ai.title AS movie_title,
+        ai.production_year,
+        1 AS level
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title ai ON c.movie_id = ai.movie_id
+    WHERE 
+        ai.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ai.title AS movie_title,
+        ai.production_year,
+        ah.level + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.actor_id = c.person_id
+    JOIN 
+        aka_title ai ON c.movie_id = ai.movie_id
+    WHERE 
+        ai.production_year = ah.production_year + 1
+)
+
+SELECT 
+    a.actor_name,
+    COUNT(DISTINCT ah.movie_title) AS movie_count,
+    STRING_AGG(DISTINCT ah.movie_title, ', ') AS movie_titles,
+    MAX(ah.production_year) AS last_year_active,
+    AVG(ah.level) AS average_level
+FROM 
+    actor_hierarchy ah
+JOIN 
+    aka_name a ON ah.actor_id = a.id
+GROUP BY 
+    a.actor_name
+HAVING 
+    COUNT(DISTINCT ah.movie_title) > 5 
+ORDER BY 
+    average_level DESC
+LIMIT 10;

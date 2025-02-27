@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        m.id,
+        CONCAT(m.title, ' (associated with series)') AS movie_title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+ActorMovieStats AS (
+    SELECT
+        a.person_id,
+        a.movie_id,
+        COUNT(c.nm_order) AS total_roles,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords  
+    FROM
+        cast_info a
+    LEFT JOIN
+        movie_keyword k ON a.movie_id = k.movie_id
+    GROUP BY
+        a.person_id, a.movie_id
+),
+RankedActors AS (
+    SELECT
+        p.name,
+        a.total_roles,
+        RANK() OVER (ORDER BY a.total_roles DESC) AS role_rank
+    FROM
+        ActorMovieStats a
+    JOIN
+        aka_name p ON a.person_id = p.person_id
+)
+SELECT
+    mh.movie_title,
+    mh.production_year,
+    ra.name AS actor_name,
+    ra.total_roles,
+    ra.role_rank
+FROM
+    MovieHierarchy mh
+LEFT JOIN
+    RankedActors ra ON ra.total_roles > 0
+WHERE
+    mh.production_year BETWEEN 2000 AND 2023
+    AND (ra.role_rank IS NULL OR ra.role_rank <= 10)
+ORDER BY
+    mh.production_year DESC, ra.role_rank;

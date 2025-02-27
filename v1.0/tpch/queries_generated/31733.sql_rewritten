@@ -1,0 +1,50 @@
+WITH RECURSIVE region_sales AS (
+    SELECT r.r_regionkey,
+           r.r_name,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY r.r_regionkey, r.r_name
+    UNION ALL
+    SELECT rs.r_regionkey,
+           rs.r_name,
+           AVG(rs.total_sales) AS total_sales
+    FROM region_sales rs
+    WHERE rs.total_sales IS NOT NULL
+    GROUP BY rs.r_regionkey, rs.r_name
+),
+filtered_orders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_totalprice
+    HAVING AVG(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(l_extendedprice) 
+                                                            FROM lineitem 
+                                                            WHERE l_returnflag = 'R')
+)
+SELECT r.r_name,
+       rs.total_sales,
+       fo.o_orderdate,
+       fo.o_totalprice,
+       fo.part_count
+FROM region_sales rs
+FULL OUTER JOIN filtered_orders fo ON rs.r_regionkey = 
+    (SELECT n.n_regionkey 
+     FROM nation n 
+     JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+     WHERE s.s_suppkey = (SELECT ps.ps_suppkey 
+                          FROM partsupp ps 
+                          WHERE ps.ps_availqty > 0 
+                          ORDER BY ps.ps_supplycost LIMIT 1))
+JOIN region r ON r.r_regionkey = rs.r_regionkey
+WHERE rs.total_sales IS NOT NULL OR fo.o_totalprice IS NOT NULL
+ORDER BY r.r_name, fo.o_orderdate DESC;

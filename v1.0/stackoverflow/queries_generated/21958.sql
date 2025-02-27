@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.*,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank,
+        COUNT(c.id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+        LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UsersWithBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+        LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(ct.Name, ', ') as CloseReasons
+    FROM 
+        PostHistory ph
+        JOIN CloseReasonTypes ct ON ph.Comment::int = ct.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  -- Closed and Reopened
+    GROUP BY 
+        ph.PostId
+),
+PostAnalysis AS (
+    SELECT 
+        rp.*,
+        COALESCE(up.GoldBadges, 0) AS GoldBadges,
+        COALESCE(up.SilverBadges, 0) AS SilverBadges,
+        COALESCE(up.BronzeBadges, 0) AS BronzeBadges,
+        tcp.LastClosedDate,
+        tcp.CloseReasons
+    FROM 
+        RankedPosts rp
+        LEFT JOIN UsersWithBadges up ON rp.OwnerUserId = up.UserId
+        LEFT JOIN TopClosedPosts tcp ON rp.Id = tcp.PostId
+)
+SELECT 
+    pa.Title,
+    pa.Score,
+    pa.CommentCount,
+    pa.GoldBadges,
+    pa.SilverBadges,
+    pa.BronzeBadges,
+    pa.LastClosedDate,
+    pa.CloseReasons
+FROM 
+    PostAnalysis pa
+WHERE 
+    pa.ScoreRank = 1
+    AND pa.CommentCount > 10
+    AND (pa.CloseReasons IS NOT NULL OR pa.GoldBadges > 0)
+ORDER BY 
+    pa.Score DESC,
+    pa.LastClosedDate DESC
+LIMIT 50;
+

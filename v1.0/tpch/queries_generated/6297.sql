@@ -1,0 +1,55 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 10
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM RankedSuppliers s
+    WHERE s.supplier_rank <= 10
+)
+SELECT 
+    c.c_name AS customer_name,
+    c.total_orders AS order_count,
+    c.total_spent AS total_spending,
+    s.s_name AS supplier_name,
+    r.r_name AS region_name,
+    SUM(l.l_quantity) AS total_quantity_ordered
+FROM 
+    CustomerOrders c
+JOIN 
+    lineitem l ON c.c_custkey = l.l_orderkey
+JOIN 
+    TopSuppliers s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+GROUP BY 
+    c.c_name, c.total_orders, c.total_spent, s.s_name, r.r_name
+ORDER BY 
+    total_spending DESC, order_count DESC
+LIMIT 50;

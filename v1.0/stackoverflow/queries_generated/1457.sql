@@ -1,0 +1,65 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers,
+        AVG(p.ViewCount) AS AvgViewCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        Questions,
+        Answers,
+        AcceptedAnswers,
+        AvgViewCount,
+        LastPostDate,
+        RANK() OVER (ORDER BY TotalPosts DESC, AcceptedAnswers DESC) AS Rank
+    FROM 
+        UserPostStats
+),
+PostHistoryDetail AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId AS EditorUserId,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        p.Title,
+        p.Body
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) -- Edit Title and Edit Body
+)
+SELECT 
+    tu.DisplayName,
+    tu.TotalPosts,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    COALESCE(SUM(CASE WHEN phd.EditorUserId IS NOT NULL THEN 1 ELSE 0 END), 0) AS TotalEdits,
+    JSON_AGG(DISTINCT phd.Comment) AS EditComments,
+    COUNT(DISTINCT phd.PostId) AS EditedPosts,
+    MAX(tu.LastPostDate) AS LastActiveDate
+FROM 
+    TopUsers tu
+LEFT JOIN 
+    PostHistoryDetail phd ON tu.UserId = phd.EditorUserId
+WHERE 
+    tu.Rank <= 10
+GROUP BY 
+    tu.DisplayName, tu.TotalPosts, tu.QuestionCount, tu.AnswerCount
+ORDER BY 
+    tu.Rank;

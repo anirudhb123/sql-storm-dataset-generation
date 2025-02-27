@@ -1,0 +1,61 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.BountyAmount) AS TotalBountyAwarded,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON u.Id = c.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COALESCE(pl.RelatedPostId, 0) AS RelatedPostId,
+        COALESCE(pt.Name, 'Uncategorized') AS PostTypeName,
+        COALESCE(gh.UserId, -1) AS MostActiveUserId,
+        COALESCE(gh.TotalComments, 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            UserId,
+            COUNT(*) AS TotalComments
+        FROM Comments
+        GROUP BY PostId, UserId
+    ) gh ON p.Id = gh.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsersPosts AS (
+    SELECT 
+        ua.UserId,
+        u.DisplayName,
+        SUM(pm.Score) AS TotalPostScore,
+        COUNT(pm.PostId) AS TotalPostsLinked
+    FROM UserActivity ua
+    JOIN PostMetrics pm ON ua.UserId = pm.MostActiveUserId
+    JOIN Users u ON ua.UserId = u.Id
+    GROUP BY ua.UserId, u.DisplayName
+)
+SELECT 
+    u.DisplayName,
+    ua.TotalPosts,
+    ua.TotalComments,
+    ua.TotalBountyAwarded,
+    tp.TotalPostScore,
+    tp.TotalPostsLinked
+FROM UserActivity ua
+JOIN TopUsersPosts tp ON ua.UserId = tp.UserId
+ORDER BY ua.TotalPosts DESC, TotalPostScore DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueSuppliers AS (
+    SELECT 
+        supp.s_suppkey,
+        supp.s_name,
+        supp.total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY supp.total_supply_cost DESC) AS rnk
+    FROM 
+        SupplierSummary supp
+    WHERE 
+        supp.total_supply_cost > (SELECT AVG(total_supply_cost) FROM SupplierSummary)
+),
+CustomerOrderHistory AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_orders,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    hs.s_name AS supplier_name,
+    COALESCE(cuh.c_name, 'No Customer') AS customer_name,
+    COALESCE(cuh.total_orders, 0) AS total_orders,
+    hs.total_supply_cost,
+    COALESCE(hs.part_count, 0) AS part_count,
+    CASE 
+        WHEN hs.rnk <= 10 THEN 'Top Supplier'
+        ELSE 'Regular Supplier'
+    END AS supplier_rank,
+    DATEDIFF(CURRENT_TIMESTAMP, o.o_orderdate) AS days_since_order
+FROM 
+    HighValueSuppliers hs
+LEFT JOIN 
+    CustomerOrderHistory cuh ON hs.s_suppkey = (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey = (SELECT MIN(ps_partkey) FROM partsupp)
+        LIMIT 1
+    )
+LEFT JOIN orders o ON o.o_custkey = cuh.c_custkey
+WHERE 
+    hs.total_supply_cost BETWEEN 10000 AND 50000
+  AND  
+    COALESCE(cuh.order_count, 0) > 5
+ORDER BY 
+    hs.total_supply_cost DESC, 
+    cuh.total_orders DESC;

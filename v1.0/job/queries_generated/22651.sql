@@ -1,0 +1,88 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IS NOT NULL AND 
+        t.production_year IS NOT NULL
+),
+
+CompanyRoles AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS role_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+
+ActorTitles AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name AS actor_name,
+        ai.movie_id,
+        ti.title,
+        ti.production_year
+    FROM 
+        cast_info ai
+    JOIN 
+        aka_name ak ON ai.person_id = ak.person_id
+    JOIN 
+        aka_title ti ON ai.movie_id = ti.id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+FilteredMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cr.company_name,
+        cr.company_type,
+        at.actor_name,
+        COUNT(at.actor_name) OVER (PARTITION BY rm.movie_id) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CompanyRoles cr ON rm.movie_id = cr.movie_id
+    LEFT JOIN 
+        ActorTitles at ON rm.movie_id = at.movie_id
+    WHERE 
+        cr.role_count > 1 OR 
+        (cr.role_count IS NULL AND at.actor_name IS NOT NULL)
+)
+
+SELECT 
+    f.movie_id, 
+    f.title, 
+    f.production_year,
+    f.company_name,
+    f.company_type,
+    f.actor_name,
+    f.actor_count, 
+    COALESCE(f.company_name, 'Unknown Company') AS display_company,
+    CASE 
+        WHEN f.actor_count IS NULL THEN 'No Actors'
+        WHEN f.actor_count > 5 THEN 'Many Actors'
+        ELSE 'Few Actors'
+    END AS actor_status
+FROM 
+    FilteredMovies f
+WHERE 
+    f.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    f.production_year DESC, 
+    f.title ASC
+LIMIT 50;

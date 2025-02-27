@@ -1,0 +1,86 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+TopCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales,
+        cs.total_orders,
+        cs.avg_net_profit,
+        cs.sales_rank,
+        cd.cd_gender,
+        cd.cd_marital_status
+    FROM 
+        CustomerSales cs
+    INNER JOIN 
+        customer_demographics cd ON cs.c_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cs.sales_rank <= 100
+),
+SalesWithReturns AS (
+    SELECT 
+        t.c_customer_sk,
+        t.total_sales,
+        t.total_orders,
+        t.avg_net_profit,
+        COALESCE(SUM(sr.sr_return_amt), 0) AS total_returns,
+        COALESCE(SUM(cr.cr_return_amt), 0) AS total_catalog_returns
+    FROM 
+        TopCustomers t
+    LEFT JOIN 
+        store_returns sr ON t.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        catalog_returns cr ON t.c_customer_sk = cr.cr_returning_customer_sk
+    GROUP BY 
+        t.c_customer_sk, t.total_sales, t.total_orders, t.avg_net_profit
+)
+SELECT 
+    w.w_warehouse_name,
+    s.s_store_name,
+    COALESCE(SUM(ws.ws_ext_sales_price), 0) AS web_sales_total,
+    COALESCE(SUM(ss.ss_ext_sales_price), 0) AS store_sales_total,
+    COALESCE(SUM(cs.total_sales), 0) AS customer_sales_total,
+    SUM(SR.total_returns) AS total_web_returns,
+    SUM(CR.total_catalog_returns) AS total_catalog_returns
+FROM 
+    warehouse w
+LEFT JOIN 
+    web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+LEFT JOIN 
+    store_sales ss ON w.w_warehouse_sk = ss.ss_store_sk
+LEFT JOIN 
+    SalesWithReturns SR ON SR.c_customer_sk IN (
+        SELECT 
+            c.c_customer_sk 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_current_addr_sk IS NOT NULL
+    )
+LEFT JOIN 
+    SalesWithReturns CR ON CR.c_customer_sk IN (
+        SELECT 
+            c.c_customer_sk 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_birth_year IS NOT NULL
+    )
+GROUP BY 
+    w.w_warehouse_name, s.s_store_name
+ORDER BY 
+    web_sales_total DESC, store_sales_total DESC;

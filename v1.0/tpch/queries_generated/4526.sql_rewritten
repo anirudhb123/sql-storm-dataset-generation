@@ -1,0 +1,41 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '1996-01-01' AND o.o_orderdate < '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), SuppliersInfo AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), CustomersCTE AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS account_rank
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+
+SELECT COALESCE(c.c_name, 'Unknown Customer') AS customer_name,
+       COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+       ro.total_revenue,
+       si.total_cost,
+       ro.o_orderdate,
+       CASE 
+           WHEN ro.revenue_rank <= 5 THEN 'High Revenue'
+           ELSE 'Standard Revenue'
+       END AS revenue_category
+FROM RankedOrders ro
+FULL OUTER JOIN SuppliersInfo si ON ro.o_orderkey = si.s_suppkey
+LEFT JOIN CustomersCTE c ON ro.o_orderkey = c.c_custkey
+WHERE si.total_cost IS NOT NULL AND ro.total_revenue > 1000
+ORDER BY ro.o_orderdate DESC, total_revenue DESC
+LIMIT 50;

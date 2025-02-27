@@ -1,0 +1,71 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostsCount,
+        AVG(U.Reputation) OVER (PARTITION BY U.Location) AS AvgReputationByLocation
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AcceptedAnswerId,
+        COALESCE(A.OwnerDisplayName, 'No Accepted Answer') AS AcceptedAnswerOwner,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(CASE WHEN V.VoteTypeId = 4 THEN 1 ELSE 0 END) AS FavoriteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Posts A ON A.Id = P.AcceptedAnswerId
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id AND V.VoteTypeId = 5
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, A.OwnerDisplayName
+),
+TopUsers AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        U.UpVotes - U.DownVotes AS NetVotes,
+        U.PostsCount,
+        U.AvgReputationByLocation
+    FROM 
+        UserVoteSummary U
+    WHERE 
+        U.PostsCount > 5
+    ORDER BY 
+        NetVotes DESC
+    LIMIT 10
+)
+SELECT 
+    T.DisplayName AS TopUser,
+    T.NetVotes,
+    P.Title AS PostTitle,
+    P.AcceptedAnswerOwner,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.FavoriteCount
+FROM 
+    PostMetrics P
+JOIN 
+    TopUsers T ON T.UserId = P.OwnerUserId
+ORDER BY 
+    T.NetVotes DESC, P.Score DESC;

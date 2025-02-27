@@ -1,0 +1,64 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.OwnerUserId,
+        p.Title,
+        p.CreationDate,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersGiven,
+    AVG(DATEDIFF(COALESCE(p.LastActivityDate, cast('2024-10-01 12:34:56' as timestamp)), p.CreationDate)) AS AvgResponseTime,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    (SELECT COUNT(*) FROM Votes v WHERE v.UserId = u.Id AND v.VoteTypeId = 2) AS UpVotesGiven,
+    CASE 
+        WHEN b.Class = 1 THEN 'Gold'
+        WHEN b.Class = 2 THEN 'Silver'
+        WHEN b.Class = 3 THEN 'Bronze'
+        ELSE 'No Badge'
+    END AS BadgeStatus,
+    COUNT(DISTINCT ph.PostId) AS TotalPostHierarchy
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId AND b.Date = (SELECT MAX(b2.Date) FROM Badges b2 WHERE b2.UserId = u.Id)
+LEFT JOIN 
+    RecursivePostHierarchy ph ON ph.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName, b.Class
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    TotalPosts DESC, AvgResponseTime ASC;

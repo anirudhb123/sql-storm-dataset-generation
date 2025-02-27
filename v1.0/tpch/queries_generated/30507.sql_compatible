@@ -1,0 +1,58 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+CustomerSummary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           cnt_orders,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+AggregateParts AS (
+    SELECT ps.ps_partkey,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    p.p_type,
+    COALESCE(ap.supplier_count, 0) AS total_suppliers,
+    COALESCE(ap.total_supply_value, 0) AS supply_value,
+    c.c_name,
+    cs.total_spent,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY cs.total_spent DESC) AS rank,
+    r.r_name AS region_name
+FROM part p
+LEFT JOIN AggregateParts ap ON p.p_partkey = ap.ps_partkey
+LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey
+LEFT JOIN orders o ON o.o_orderkey = l.l_orderkey
+LEFT JOIN CustomerSummary cs ON cs.c_custkey = o.o_custkey
+LEFT JOIN nation n ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN region r ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE 
+    (p.p_retailprice > 100 OR p.p_size < 20)
+    AND (sh.level IS NULL OR sh.level <= 3)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+    ap.supplier_count, ap.total_supply_value, 
+    c.c_name, cs.total_spent, r.r_name
+ORDER BY total_suppliers DESC, supply_value DESC;

@@ -1,0 +1,97 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        1 AS depth
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id IS NOT NULL
+    UNION ALL
+    SELECT 
+        c.person_id,
+        a.name AS actor_name,
+        ah.depth + 1
+    FROM 
+        actor_hierarchy ah
+    JOIN 
+        cast_info c ON ah.person_id = c.person_id
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    WHERE 
+        c.movie_id IS NOT NULL AND ah.depth < 5 
+),
+movies_with_keywords AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+most_active_actors AS (
+    SELECT 
+        a.actor_name,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        actor_hierarchy a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.actor_name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 3
+),
+top_movies AS (
+    SELECT 
+        mwk.movie_id,
+        mwk.title,
+        mwk.production_year,
+        mwk.keywords,
+        ra.actor_name,
+        ra.movie_count
+    FROM 
+        movies_with_keywords mwk
+    JOIN 
+        most_active_actors ra ON ra.movie_count = (
+            SELECT MAX(movie_count) FROM most_active_actors
+        )
+    WHERE 
+        mwk.movie_id IN (
+            SELECT movie_id
+            FROM complete_cast
+            WHERE subject_id IN (
+                SELECT person_id FROM actor_hierarchy
+            )
+        )
+    ORDER BY 
+        mwk.production_year DESC
+    LIMIT 10
+)
+SELECT 
+    t.title,
+    t.production_year,
+    t.keywords,
+    CASE 
+        WHEN t.keywords IS NULL THEN 'No Keywords Available'
+        ELSE t.keywords
+    END AS keywords_display,
+    COALESCE(a.actor_name, 'Unknown Actor') AS lead_actor
+FROM 
+    top_movies t
+LEFT JOIN 
+    most_active_actors a ON t.movie_id IN (
+        SELECT movie_id FROM cast_info WHERE person_id = a.person_id
+    )
+ORDER BY 
+    t.production_year DESC, lead_actor;

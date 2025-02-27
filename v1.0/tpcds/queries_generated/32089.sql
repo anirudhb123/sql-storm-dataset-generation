@@ -1,0 +1,48 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS rank
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+top_customers AS (
+    SELECT
+        sd.customer_sk,
+        sd.total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        DENSE_RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM sales_data sd
+    JOIN customer_demographics cd ON sd.customer_sk = cd.cd_demo_sk
+    WHERE sd.total_sales > (SELECT AVG(total_sales) FROM sales_data)
+),
+inactive_customers AS (
+    SELECT
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        ca.ca_state,
+        COALESCE(sd.total_sales, 0) AS last_sales
+    FROM customer c
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN sales_data sd ON c.c_customer_sk = sd.customer_sk
+    WHERE sd.total_sales IS NULL
+)
+SELECT
+    tc.customer_sk,
+    tc.total_sales,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    COALESCE(ic.c_customer_id, 'N/A') AS inactive_customer_id,
+    COALESCE(ic.c_first_name, 'N/A') AS inactive_customer_first_name,
+    COALESCE(ic.c_last_name, 'N/A') AS inactive_customer_last_name,
+    COALESCE(ic.ca_city, 'N/A') AS inactive_customer_city,
+    COALESCE(ic.ca_state, 'N/A') AS inactive_customer_state
+FROM top_customers tc
+FULL OUTER JOIN inactive_customers ic ON tc.customer_sk = ic.c_customer_sk
+WHERE tc.sales_rank <= 10 OR ic.c_customer_id IS NOT NULL
+ORDER BY total_sales DESC NULLS LAST;
